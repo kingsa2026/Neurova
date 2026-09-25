@@ -24,6 +24,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+#: 跨文件 AST 判据的唯一入口（Issue #148）：不自己 `rglob` + `ast.parse`。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from tests import ast_scan
 
 _TESTS_DIR = Path(__file__).resolve().parents[2]
@@ -31,24 +36,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _CASE_PREFIX = "test"
 _CLASS_PREFIX = "Test"
 _GUARD_SELF_PATTERN = "test_"
-
-
-def _treeOf(path: Path):
-    """按文件取语法树（走本仓唯一 AST 入口 `tests/ast_scan` 的共享解析预算）。
-
-    Issue #197：本文件原先自己 `read_text` + `ast.parse` 逐文件解析 1783 个
-    测试文件，与其余跨文件判据**互不共享**。解析收口到共享入口后，同一份源码
-    在整进程里只编译一次；扫描面由 `ast_scan.RETIRE_STEP` 的退役策略限定为有界窗口。
-
-    实测（本机，1903 个测试文件）：本文件单跑 私有解析 1.13s vs 共享 1.44s ——
-    单文件冷跑本文件略慢，但受保护子集里其余判据（`test_ci_wallclock_assertion_ledger`
-    等）扫的是同一棵树，整会话只付一次编译；且退役后共享缓存的 gen2 账单
-    （实测整会话 7.4s → 1.4s）远小于私有解析省下的那点。
-    """
-    try:
-        return ast_scan._cachedParse(ast_scan._cacheKey(path), ast_scan.sourceCode(path))
-    except (SyntaxError, OSError):
-        return None
 
 
 def _matchesCollectionPattern(patterns: list, name: str) -> bool:
@@ -92,15 +79,32 @@ def _classMembers(node: ast.ClassDef, classPatterns: list) -> list:
     return declared
 
 
+def _testFilesUnder(root: Path) -> list:
+    """`root` 下的测试文件清单（枚举走共享源 `ast_scan.filesUnder`，排序稳定）。
+
+    与旧口径 `root.rglob("test_*.py")` 等价：`rglob("test_*.py")` 匹配的就是
+    名字以 `test_` 开头、以 `.py` 结尾的文件。
+    """
+    return sorted(p for p in ast_scan.filesUnder(root)
+                  if p.name.startswith("test_") and p.suffix == ".py")
+
+
 def _declaredCases(path: Path, classPatterns: list) -> list:
     """列出 pytest **真的会走到名字判定**的用例名。
 
     pytest 不下潜函数体内定义的函数与类，故只走模块级 + 被收集类（含其嵌套类）；
     把不可达的定义算进来只会制造假阳。模块级与类方法共用同一份
     `python_functions`（pytest 侧本就如此），容器标记只影响报错措辞。
+
+    解析走共享源的一次性入口 `ast_scan.transientTree`：本判据对每个测试文件
+    **只解析一次**（不存在第二次命中），保留常驻语法树没有收益、成本却照付 ——
+    实测保留型入口下 12 个消费方同进程跑，gen2 GC 合计 8.5s、单次峰值 1.26s，
+    进程末存活 143 万 ast 节点（见 `tests/unit/test_ci_ast_scan_budget_guard.py`
+    的 `TestOneShotScanDoesNotRetainTrees`）。
     """
-    tree = _treeOf(path)
-    if tree is None:
+    try:
+        tree = ast_scan.transientTree(path)
+    except SyntaxError:
         return []
     declared = []
     for node in tree.body:
@@ -116,7 +120,7 @@ def _declaredCases(path: Path, classPatterns: list) -> list:
 def _uncollectableIn(root: Path, functionPatterns: list, classPatterns: list) -> list:
     """`root` 下名字以 test / Test 开头、但按给定模式收不到的落点（逐条点名）。"""
     found = []
-    for path in sorted(root.rglob("test_*.py")):
+    for path in _testFilesUnder(root):
         rel = path.relative_to(root)
         for kind, name in _declaredCases(path, classPatterns):
             if kind == "类":

@@ -989,8 +989,13 @@ class ContextPool:
         返回值每条 = `{content, level, fold_seq, covers, session_id, hash}`，
         按档号升序（最细分辨率档在前）。
 
-        三件事刻意放在这里而不是散到调用方：
+        四件事刻意放在这里而不是散到调用方：
 
+        0. **档号按会话分组派生**：层序是**会话内**的事实（每会话各从 1 起算），
+           而台账库按 `(user, agent)` 分库、内含该 agent 全部会话的层行。故档号
+           只能在**本会话内**派生 —— 拿全局最大层序当基准会把新会话的档号推到
+           别的会话的高度（T-11c 的 A/B 实测：导致跨会话摘要被装进视图）。
+           消费方按 `session_id` 选本会话的档。
         1. **档号派生**：档号随新代产生而整体下移，而归档实体不可就地改写
            （T-04 的纪律）——故 metadata 存**层序**（不可变事实），档号在此按
            `fold_index.layerLevel` 派生。派生只此一份。
@@ -1023,7 +1028,18 @@ class ContextPool:
             return self._projectLayers(lanes)
 
     def _projectLayers(self, lanes: List[Any]) -> List[Dict[str, Any]]:
-        """把层节点候选投影成档号有序的索引（调用方须持 `_lock`）。"""
+        """把层节点候选投影成档号有序的索引（调用方须持 `_lock`）。
+
+        **档号按会话分组派生**（T-11c 的 A/B 咬出的根因）：层序（`fold_seq`）是
+        **会话内**的事实 —— 每个会话各从 1 起算。而台账库按 `(user, agent)` 分库，
+        同一个库文件里躺着该 agent **全部会话**的 SUMMARY 行。若拿全局最大层序当
+        派生基准，新会话的第一代会被别的会话推到档号 21，而档号 1 落到**别的会话**
+        那一行上 —— 于是"档号"这个键同时指两件事。
+
+        改前该缺陷是潜伏的（索引写进去没人按档号取用）；T-11c 的装配器一按档号
+        装配，它当场变成**跨会话摘要注入视图**（P1-1/T-03 同族的泄漏）。故在根因处
+        修：档号在本会话内派生，跨会话比较无意义（消费方按 `session_id` 选档）。
+        """
         from neurova.context.fold_index import parseCovers, foldSeqOf, layerLevel, newestFoldSeq
 
         seen: set = set()
@@ -1037,26 +1053,32 @@ class ContextPool:
             rows.append(item)
 
         seqs = [(foldSeqOf(getattr(r, "metadata", None)), r) for r in rows]
-        newest = newestFoldSeq(seqs)
+        seqsBySession: Dict[Any, List[Any]] = {}
+        for seq, item in seqs:
+            session = (getattr(item, "metadata", None) or {}).get("session_id")
+            seqsBySession.setdefault(session, []).append((seq, item))
+
         layers: List[Dict[str, Any]] = []
         unparsable: List[str] = []
-        for seq, item in seqs:
-            covers = parseCovers(getattr(item, "metadata", None))
-            level = layerLevel(seq, newest)
-            if covers is None or level is None:
-                # 缺 covers / 缺层序 = 解析不出来。给空 covers 兜底会把"索引没写"
-                # 伪装成"索引为空"，故如实计数（`unparsable`）而不是当成空格。
-                unparsable.append(str(getattr(item, "hash", "") or ""))
-                continue
-            layers.append({
-                "content": str(getattr(item, "content", "")),
-                "level": level,
-                "fold_seq": seq,
-                "covers": covers,
-                "session_id": (getattr(item, "metadata", None) or {}).get("session_id"),
-                "hash": getattr(item, "hash", None),
-            })
-        layers.sort(key=lambda layer: layer["level"])
+        for session, sessionSeqs in seqsBySession.items():
+            newest = newestFoldSeq(sessionSeqs)
+            for seq, item in sessionSeqs:
+                covers = parseCovers(getattr(item, "metadata", None))
+                level = layerLevel(seq, newest)
+                if covers is None or level is None:
+                    # 缺 covers / 缺层序 = 解析不出来。给空 covers 兜底会把"索引没写"
+                    # 伪装成"索引为空"，故如实计数（`unparsable`）而不是当成空格。
+                    unparsable.append(str(getattr(item, "hash", "") or ""))
+                    continue
+                layers.append({
+                    "content": str(getattr(item, "content", "")),
+                    "level": level,
+                    "fold_seq": seq,
+                    "covers": covers,
+                    "session_id": session,
+                    "hash": getattr(item, "hash", None),
+                })
+        layers.sort(key=lambda layer: (str(layer.get("session_id")), layer["level"]))
         self._unparsable_layers = unparsable
         return layers
 
@@ -1093,10 +1115,19 @@ class ContextPool:
             return self._drilldownResult(
                 False, REASON_REF_UNPARSABLE, None, [], [], 0
             )
-        foldSeq, _sessionId = parsed
+        foldSeq, refSession = parsed
 
+        # 层序是**会话内**的事实，而索引含该 agent 其它会话的档（见 `_projectLayers`）。
+        # 故引用里的会话必须与档的会话一致 —— 只按层序取，两个会话都从 1 起算时
+        # 会命中外会话的档（P1-1/T-03 同族）。
         layer = next(
-            (item for item in self.summaryLayers() if item["fold_seq"] == foldSeq), None
+            (
+                item
+                for item in self.summaryLayers()
+                if item["fold_seq"] == foldSeq
+                and str(item.get("session_id") or "") == str(refSession or "")
+            ),
+            None,
         )
         if layer is None:
             return self._drilldownResult(False, REASON_LAYER_ABSENT, foldSeq, [], [], 0)

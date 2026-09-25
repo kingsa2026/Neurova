@@ -271,6 +271,9 @@ tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py
 tests/unit/core/test_chain_integrity_observability.py
 tests/unit/agent/test_tool_experience_loop_offline_probe.py
 tests/unit/skills/test_skill_name_collision_recount.py
+# Issue #189 残留：存量库名字域迁移（同 name 不同身份 ⇒ 派生名携带身份；
+#   迁移幂等 + 装配后工具面条目数 = 库内条目数 + 新写入按构造成立）
+tests/unit/skills/test_skill_name_domain_migration.py
 tests/unit/test_script_index_registration.py
 
 # Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
@@ -302,6 +305,11 @@ tests/unit/migration/test_kai_import.py
 # 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
 # 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
 tests/unit/test_docs_name_collision_guard.py
+# Issue #189 续：导航/纪律事实源不得手抄「仓库条目数」（第二份定义）。
+# 根因与 `.cnb.yml` 头部手抄流水线条数同形：索引里的数字与目录实况之间没有
+# 任何机器判据，已实测漂移三处（修复记录 47→37、模块设计 19→21、代码评审 3→4）；
+# `AGENTS.md` 的 `90+` 与总索引的 `97` 更是同一事实的两份手抄、同一时刻两个数。
+tests/unit/test_docs_index_hand_copied_counts.py
 
 # Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
 tests/unit/knowledge/test_projection_derived_from_authority.py
@@ -500,6 +508,10 @@ tests/unit/core/test_runtime_landing_root.py
 # NPC 流水线时间预算：禁止 sleep 轮询 / 禁宽匹配 pkill / 预算字面量上界
 #（事故：cnb-1q8-1k33cb2v9 在一次无产出的等待上烧光 2h 墙钟）
 tests/unit/ci/test_npc_pipeline_time_budget.py
+# NPC 轮数触顶接力的**判据来源**：只能取平台收尾事实，不得读预写变量
+#（事故：cnb-158 批把判据交给 Agent 开工前的门禁无条件写 1，四条父构建在
+#  76~164 轮即接力；接力落点 32 次构建 / 22.2h 墙钟，其中 17 次又跑满 200 轮）
+tests/unit/ci/test_npc_turn_handoff_predicate.py
 # NPC 轮数触顶接力的**执行面**：标记落点写作纪律 + 落点由真实构建自证
 #（事故：cnb-2e8-1k341d9s1 撞满 200 轮，接力 Stage 因读不到标记被 skipped，成果全丢）
 tests/unit/ci/test_npc_turn_handoff_execution.py
@@ -845,6 +857,23 @@ tests/unit/context/test_fold_layer_index_t11b.py
 #   （content_digest）——两个域不相等，按 covers hash 查台账必然落空，故加
 #   台账 v3 迁移落 `pool_hash` 列作寻址键（不回填就等于只对新数据成立）。
 tests/unit/context/test_fold_span_drilldown_t11d.py
+# T-11e 折叠 rollup 后台化（Issue #90 工单 §12.4/§12.7 判据 6）：关键路径每轮
+#   至多 1 次摘要 LLM 调用。根因：压缩器的「失败丢最旧一条重试（上限 3）」与
+#   「递进扩折叠重摘要」整段跑在热路径上，摘要器恒失败时单轮实测发起 4 次调用；
+#   失败批次改交 `ContextRollupWorker` 后台补做 —— worker **持有并 await** 自己的
+#   任务（工单 §12.5 第 4 条把 `ensure_future` 发后不管列为假实现），失败不推进
+#   覆盖账（与 T-05 同族），读数落 `get_context_health()["fold_rollup"]`。
+#   回退开关 NEUROVA_CONTEXT_ROLLUP=0 时行为等价于本票之前。
+tests/unit/context/test_fold_rollup_t11e.py
+# 上下文三链路批（Issue #90）T-11c：分辨率装配器（视图按距离 1:4:16 几何退避装多档概览）。
+#   改前视图只装配代际栈顶一代（实测池内 6 档 / 视图 1 行），§12.1 C2 梯度不成立。
+#   本票让视图从池层索引按档号装多档（近细远粗、位置由远及近），档间预算比由
+#   `context/fold_resolution.py` 单点定义；读数落 `get_context_health()["fold_resolution"]`
+#   （生产读者 = /metrics），截断与未装档数均可见。
+#   回退开关 NEUROVA_CONTEXT_FOLD_RESOLUTION=0 时视图等价于本票之前。
+#   同批在根因处修了索引读面按全局层序派生档号导致跨会话串档（见本文件用例
+#   TestIndexIsSessionScoped）—— 层序是会话内事实，档号只在本会话内派生。
+tests/unit/context/test_fold_resolution_t11c.py
 # 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
 # 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
 # 合并解冲突时更容易整段带走（实测 `88901c00` 想删重复条目，结果两份都删了；
@@ -892,3 +921,18 @@ tests/unit/ci/test_npc_branch_cleanup.py
 #    关联：tests/unit/frontContractBaseline.txt 该条已由「待接线」改判「已修」，
 #    docs/09-dev-progress/api_inventory.md 第四节差集归零。）
 tests/unit/sandbox/test_code_execution_sandbox_contract.py
+
+# Issue #223 CI 流水线耗时收口：四条结论（离线库跨构建复用 / 静态门禁合并 /
+#   重复依赖走同一份锁 / 不自举 pip）逐条钉住，回退即红。
+#   （根因：`.cnb.yml` 的 11 条流水线各装各的依赖、各扫各的全仓 AST，耗时构成
+#    此前无任何机器判据——改完就没人守，下一个人回填一处 `--upgrade pip` 不会有红。
+#    处置与刻意不动的三件事见 docs/04-plans/2026-09-25-ci-pipeline-cost-convergence.md）
+tests/unit/test_ci_pipeline_speed_guard.py
+
+# .cnb.yml 头部不得再手抄流水线条数（Issue #229 配置卫生）。
+#   （根因：条数与 `main.push` 实际长度之间没有任何机器判据，历史已漂移成
+#    同文件内互相矛盾的两个数——工单 009 写成 11、Issue #223 合回 10，
+#    而相邻那段「不计入上面 10 条 push 流水线」一直是 10。
+#    修法按 AGENTS.md 第 6 条收口到一份：单一事实源是 `main.push` 的长度，
+#    头部只描述结构与口径，不再保留第二份手抄定义。）
+tests/unit/ci/test_cnb_header_pipeline_count.py

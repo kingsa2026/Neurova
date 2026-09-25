@@ -24,12 +24,19 @@
 2. **共享预算入口真实可用**：`callSites` / `importsOf` / `classDefsIn` 必须存在且
    能真报出命中（否则各守卫会退回各写一套，本门禁退化成空规则）；
 3. **预筛不得漏报**：预筛是**充分条件**——谓词是 `X.<name>`，连 `<name>` 都没
-   出现的文件不可能命中。故用「注入一个真实命中 + 一个不含关键词的文件」自证。
+   出现的文件不可能命中。故用「注入一个真实命中 + 一个不含关键词的文件」自证；
+4. **解析面按语义覆盖**（Issue #197 批遗留）：不是「源码里恰好写了 `ast.parse`」，
+   而是**凡把源码编译成语法树/字节码的入口**——`compile(..., PyCF_ONLY_AST)`、
+   `py_compile` / `compileall`、第三方解析器（`parso` / `libcst` / `astroid`）、
+   以及 `from ast import parse as X` 后的裸名。反例成对钉住：`re.compile` 与
+   同名本地函数**不得**报出（受保护子集里「枚举 + 正则」的文件有一批，
+   误报即门禁失效——这正是「口径扩大需各自的实证样本」那句话要防的）。
+   实测：检测面成本在收齐 import 面后回到主线水平（266 个登记文件 1.42s vs
+   主线 1.34s），不为「更宽」付墙钟账。
 """
 from __future__ import annotations
 
 import ast
-import gc
 import io
 import sys
 from pathlib import Path
@@ -45,17 +52,17 @@ from tests import ast_scan
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
-#: 确需保留者必须逐条写明理由，并说明为何不能走 `tests/ast_scan.py` 的预筛。
-
-#: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
-#: 确需保留者必须逐条写明理由，并说明为何不能走 `tests/ast_scan.py` 的预筛。
-#:
-#: 历史上唯一一条（`tests/unit/core/test_pytest_collection_hygiene.py`）随共享缓存
-#: 的退役策略（`ast_scan.RETIRE_STEP`）落地而**销账**：当时不路由的理由是
-#: 「`_cachedParse` 是 `maxsize=None`，保留全部语法树后 gen2 要反复扫描这棵常驻图，
-#: 路由过去反而更慢（单跑 2.0s → 6.0s）」。退役落地后该前提不再成立，路由已改
-#: （实测受保护子集整会话 gen2 7.4s → 1.4s），故本台账回到空集——**不许留失效条目**。
+#: 确需保留者必须逐条写明理由，并说明为何**两条**共享入口都不适用：
+#: 会重复扫的走保留型（`nodeScan` 一族），只扫一次的走一次性
+#: （`transientTree` / `transientNodes`）—— 后者不留常驻树，故「保留更慢」
+#: 不再构成入账理由。
 REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
+    # 现值：**空集**。原先登记在这里的 `tests/unit/core/test_pytest_collection_hygiene.py`
+    # 已销账 —— 它当初入账的理由是「路由到保留型共享预算**更慢**（2.0s → 6.0s）」，
+    # 而本批把根因修在了共享源：`ast_scan.transientTree` / `transientNodes` 提供
+    # **不留常驻语法树**的一次性入口（保留的收益只在重复扫描时成立，成本却每次
+    # 扫描都付：本机 2985 个 `.py` 空进程 gen2 1.0ms / 保留全部语法树 2243ms）。
+    # 该判据是典型的一次性全仓扫描，改走一次性入口后既进 CI 也不再与代码总量捆绑。
 }
 
 
@@ -82,31 +89,159 @@ SHARED_BUDGET_ENTRIES = frozenset({
 #: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
 SHARED_ENUM_ENTRIES = frozenset({"filesUnder"})
 
+#: 「解析」落点：**模块别名 → 该模块上属于解析原语的属性名**。
+#: 靶点是「成本随代码总量涨」，故凡把源码编译成语法树/字节码的入口都算：
+#: `ast.parse`、`builtins.compile`（`compile(..., PyCF_ONLY_AST)` 即它）、
+#: `py_compile.compile`、`compileall.compile_dir` 一族。
+#: 反例（不得报出）：`re.compile` —— 它编译的是**正则**，与源码解析无关，
+#: 受保护子集里「枚举 + 正则」的文件有一批，按调用名判会把它们全报红。
+PARSE_MODULE_ATTRS = {
+    "ast": frozenset({"parse"}),
+    "builtins": frozenset({"compile"}),
+    "py_compile": frozenset({"compile"}),
+    "compileall": frozenset({"compile_dir", "compile_file", "compile_path"}),
+    # 第三方解析器：与标准库同契约（把源码编译成语法树）。只在**该模块真被
+    # import** 时才算 —— 仓内当前无这些依赖，故不构成假阳性面，也不引入依赖。
+    "parso": frozenset({"parse"}),
+    "libcst": frozenset({"parse_module", "parse_expression", "parse_statement"}),
+    "astroid": frozenset({"parse"}),
+}
+#: 解析原语的**裸名**形态（无模块前缀）：内建 `compile` 与 `ast.parse` 的裸名 `parse`。
+BARE_PARSE_NAMES = frozenset({"compile", "parse"})
 
-def _moduleAliases(tree, module: str) -> set:
-    """`import <module> as X` / `from <module> import X` 引入的本地名。"""
-    aliases = set()
+
+def _importSurface(tree) -> tuple:
+    """**一趟**收齐 import 面：`({模块: {别名}}, {解析原语裸名})`。
+
+    为什么必须一趟：本门禁自己也在受保护子集里（它被登记了）。若每认一种解析
+    写法就多 `ast.walk` 一趟，那么「检测面越宽、门禁越慢」—— 判据成本又一次
+    随**代码总量 × 判据种类**增长，正是本文件要防的那条根因的镜像。
+
+    返回的两份口径：
+
+    - 别名表：`import <模块> as X` / `from <模块> import Y as X` 引入的本地名。
+      只有**表里有的模块**才算（`import widget` 之后的 `widget.compile` 不是解析）；
+    - 解析原语裸名：`from ast import parse as X` 之后的 `X` —— 它**就是**解析原语，
+      与写 `ast.parse(...)` 等价，只是把模块名省掉了。
+    """
+    wanted = set(PARSE_MODULE_ATTRS) | {"os"}
+    aliases = {module: set() for module in wanted}
+    parseMembers = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == module:
-                    aliases.add(alias.asname or module)
-        elif isinstance(node, ast.ImportFrom) and node.module == module:
-            aliases.update(alias.asname or alias.name for alias in node.names)
-    return aliases
+                root = alias.name.split(".")[0]
+                if root in wanted:
+                    aliases[root].add(alias.asname or root)
+        elif isinstance(node, ast.ImportFrom) and node.module in wanted:
+            for alias in node.names:
+                local = alias.asname or alias.name
+                aliases[node.module].add(local)
+                if alias.name in PARSE_MODULE_ATTRS[node.module]:
+                    parseMembers.add(local)
+    return aliases, parseMembers
 
 
-def _callsOutsideDefs(statements, aliases) -> tuple:
+def _boundInScope(statements) -> set:
+    """这些语句在**本作用域**内绑定的名字（不下潜进 def / class 体）。
+
+    类体**不是**作用域：`class Widget: compile = None` 绑的是类属性，
+    模块级内建 `compile` 照旧可用 —— 把它算成遮蔽会造出假阴性面。
+    """
+    bound = set()
+    stack = list(statements)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            bound.add(node.name)
+            continue
+        if isinstance(node, ast.ClassDef):
+            bound.add(node.name)
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                # `from ast import parse as X` 绑定的**正是**解析原语，不算遮蔽。
+                if (node.module in PARSE_MODULE_ATTRS
+                        and alias.name in PARSE_MODULE_ATTRS[node.module]):
+                    continue
+                bound.add(alias.asname or alias.name)
+        stack.extend(ast.iter_child_nodes(node))
+    return bound
+
+
+def _parametersOf(fn) -> set:
+    """函数签名里绑定的形参名（含 `*args` / `**kwargs`）。"""
+    arguments = fn.args
+    params = {arg.arg for arg in (list(arguments.posonlyargs) + list(arguments.args)
+                                 + list(arguments.kwonlyargs))}
+    if arguments.vararg:
+        params.add(arguments.vararg.arg)
+    if arguments.kwarg:
+        params.add(arguments.kwarg.arg)
+    return params
+
+
+def _scanUnits(tree) -> tuple:
+    """把文件拆成**扫描落点**与它们的遮蔽集：`([(标签, 语句, 遮蔽集)], {裸名: [...]})`。
+
+    标签是给人读的落点名（类内函数记 `类.方法`，同名函数因此不再串味）；遮蔽集
+    是**该作用域**里被改绑成非解析原语的 `compile` / `parse`（见 `_boundInScope`）。
+
+    为什么要按作用域而不是整文件：整文件级遮蔽是**假阴性面** —— 一个 helper 里
+    恰好有个局部 `def parse`，另一个 helper 的全仓扫描就被无声放行；而按**裸函数名**
+    建表又会在同名函数处撞键（顺序一变结果就变）。闭包链一并并入（内层函数能看见
+    外层函数与模块的绑定），类体**不是**作用域，故不进闭包链。
+    """
+    moduleBound = _boundInScope(tree.body)
+    units = [("<模块级>", tree.body, moduleBound & BARE_PARSE_NAMES)]
+    byFunction: dict = {}
+
+    def visit(statement, inherited, prefix):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            own = _boundInScope(statement.body) | _parametersOf(statement)
+            visible = (own | inherited) & BARE_PARSE_NAMES
+            label = prefix + statement.name
+            units.append((label, statement.body, visible))
+            byFunction.setdefault(statement.name, []).append(
+                (label, statement, visible))
+            for child in statement.body:
+                visit(child, own | inherited, label + ".")
+            return
+        if isinstance(statement, ast.ClassDef):
+            for child in statement.body:
+                visit(child, inherited, prefix + statement.name + ".")
+            return
+        for child in ast.iter_child_nodes(statement):
+            visit(child, inherited, prefix)
+
+    for statement in tree.body:
+        visit(statement, moduleBound, "")
+    return units, byFunction
+
+
+def _callsOutsideDefs(statements, aliases, unitShadow: set) -> tuple:
     """这些语句里的调用，**不下潜**进 def / class 体。
 
-    返回 `({被调名}, {文件系统枚举}, {解析})`：
+    返回 `({被调名}, {文件系统枚举}, {解析})`（判据与口径见 `PARSE_MODULE_ATTRS`）：
 
     - 枚举：`X.rglob` / `X.iterdir` / `X.glob` / `X.listdir` / `X.scandir`，
       以及 `import os` 之后裸写的 `os.walk`（`X.walk` 只有落在 `os` 模块别名上
       才算 —— `ast.walk` 是词法遍历，`tests/unit/ci/` 里另有一批同名本地 `walk`
       递归函数，按名字判会把它们全算成枚举）；
-    - 解析：`<ast 别名>.parse(...)` 与裸 `parse(...)`；`tests/ast_scan` 的共享
-      预算入口一律**不算**解析落点（它是本门禁的推荐修法）。
+    - 解析：`<ast 别名>.parse(...)`、`<builtins 别名>.compile(...)`（含
+      `compile(..., PyCF_ONLY_AST)`）、`<py_compile 别名>.compile(...)`、
+      `<compileall 别名>.compile_dir(...)` 一族、第三方解析器
+      （`parso` / `libcst` / `astroid`，只在真被 import 时才算），以及裸
+      `compile(...)` / `parse(...)` 与 `from ast import parse as X` 之后的
+      裸名 `X` —— 凡把源码编译成语法树/字节码的入口都算（见
+      `PARSE_MODULE_ATTRS`）；`re.compile`
+      不算（它编译的是正则，不是源码解析）；`tests/ast_scan` 的共享预算入口
+      一律**不算**解析落点（它是本门禁的推荐修法）。
 
     为什么要剪枝：模块级与函数级是**两个**扫描落点，混在一起判会让
     「模块级」分支把每个函数体都算进来，于是每个文件都被误报。
@@ -124,8 +259,9 @@ def _callsOutsideDefs(statements, aliases) -> tuple:
             if isinstance(func, ast.Attribute):
                 callees.add(func.attr)
                 root = ast.unparse(func.value).split(".")[0].split("[")[0]
-                if func.attr == "parse" and root in astAliases:
-                    parses.add("ast.parse")
+                parsePrimitive = _parseAttributePrimitive(root, func.attr, aliases)
+                if parsePrimitive:
+                    parses.add(parsePrimitive)
                 elif func.attr == "walk" and root in osAliases:
                     enumerations.add("os.walk")
                 elif func.attr in SHARED_BUDGET_ENTRIES:
@@ -136,14 +272,29 @@ def _callsOutsideDefs(statements, aliases) -> tuple:
                     enumerations.add(func.attr)
             elif isinstance(func, ast.Name):
                 callees.add(func.id)
-                if func.id == "parse":
-                    parses.add("parse")
+                if func.id in aliases["parseMembers"]:
+                    parses.add(func.id)
+                elif func.id in BARE_PARSE_NAMES and func.id not in unitShadow:
+                    parses.add(func.id)
                 elif func.id == "walk" and func.id in aliases["os"]:
                     enumerations.add("walk")
                 elif func.id in ENUMERATION_NAMES:
                     enumerations.add(func.id)
         stack.extend(ast.iter_child_nodes(node))
     return callees, enumerations, parses
+
+
+def _parseAttributePrimitive(root: str, attribute: str, aliases) -> str:
+    """`<模块别名>.<属性>` 是否落在解析原语上；是则回名字，否则回空串。
+
+    只有**别名表里**的模块才算（`import builtins as _bi` 之后的 `_bi.compile`
+    是解析；`import widget` 之后的 `widget.compile` 不是）。
+    `ast.walk` 是词法遍历、`ast.parse` 才是解析，故 `ast` 别名上只认 `parse`。
+    """
+    for module, attributes in PARSE_MODULE_ATTRS.items():
+        if attribute in attributes and root in aliases[module]:
+            return f"{module}.{attribute}"
+    return ""
 
 
 def _repoWideAstScans(source: str) -> list:
@@ -165,39 +316,35 @@ def _repoWideAstScans(source: str) -> list:
     以及走 `tests/ast_scan` 共享预算的写法。
     """
     tree = ast.parse(source)
-    aliases = {
-        "os": _moduleAliases(tree, "os"),
-        "ast": _moduleAliases(tree, "ast") or {"ast"},
-    }
-    byName = {}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            byName.setdefault(node.name, []).append(node)
-
-    units = [("<模块级>", tree.body)]
-    for name, defs in byName.items():
-        units.extend((name, fn.body) for fn in defs)
+    aliases, parseMembers = _importSurface(tree)
+    # `<模块>.<成员>` 的裸名形态（`from ast import parse as X` 之后的 `X`）与
+    # 模块别名同属一张表，见 `_importSurface`。
+    aliases["parseMembers"] = parseMembers
+    # `ast.parse` 未 import 也照判：写法等价，漏报比假阳性更坏（代价是成本照付）。
+    aliases["ast"] = aliases["ast"] or {"ast"}
+    units, byFunction = _scanUnits(tree)
 
     hits = []
-    for name, body in units:
-        callees, enumerations, parses = _callsOutsideDefs(body, aliases)
-        if name in SHARED_BUDGET_ENTRIES:
+    for label, body, shadow in units:
+        if label in SHARED_BUDGET_ENTRIES:
             # 预算实现自身的定义不是「调用方落点」：它的枚举与解析都在预算内。
             continue
+        callees, enumerations, parses = _callsOutsideDefs(body, aliases, shadow)
         seen = set()
         stack = [name for name in callees if name not in SHARED_BUDGET_ENTRIES]
         while stack:
             callee = stack.pop()
-            if callee in seen or callee not in byName:
+            if callee in seen or callee not in byFunction:
                 continue
             seen.add(callee)
-            for fn in byName[callee]:
-                more, enums2, parses2 = _callsOutsideDefs(fn.body, aliases)
+            for _label, fn, fnShadow in byFunction[callee]:
+                more, enums2, parses2 = _callsOutsideDefs(
+                    fn.body, aliases, fnShadow)
                 enumerations |= enums2
                 parses |= parses2
                 stack.extend(n for n in more if n not in SHARED_BUDGET_ENTRIES)
         if enumerations and parses:
-            hits.append(name)
+            hits.append(label)
     return sorted(set(hits))
 
 
@@ -222,8 +369,10 @@ class TestNoUnprefilteredRepoWideScan:
             "受保护子集里出现「rglob + ast.parse」全仓扫描（判据与代码总量、"
             "与机器速度捆绑，30s 默认墙钟下必偶发红）:\n  "
             + "\n  ".join(f"{rel} → {hits}" for rel, hits in sorted(unledgered.items()))
-            + "\n修法：走 tests/ast_scan.py（callSites / importsOf / classDefsIn / nodeScan(hints=...)）;"
-            "\n确需保留时登记进 REPO_WIDE_SCAN_LEDGER 并写明为何预筛不适用。"
+            + "\n修法：会重复扫的走 tests/ast_scan.py 的保留型入口"
+            "（callSites / importsOf / classDefsIn / nodeScan(hints=...)），"
+            "只扫一次的走一次性入口（transientTree / transientNodes，不留常驻语法树）;"
+            "\n确需保留时登记进 REPO_WIDE_SCAN_LEDGER 并写明为何**两条**入口都不适用。"
         )
 
     def test_ledger_has_no_stale_entries(self):
@@ -441,6 +590,273 @@ class TestDetectionSurfaceCoversEveryJudgedShape:
         )
 
 
+class TestDetectionSurfaceCoversCompileFamily:
+    """解析面必须覆盖 `compile` 家族，而不是只认 `ast.parse` 两个字面名。
+
+    根因（Issue #197 批上轮自陈的未闭环第 2 条）：`_repoWideAstScans` 的解析面
+    只认 `<ast 别名>.parse` 与裸 `parse`。同一件事的其它写法照旧全仓扫、成本照旧
+    随代码总量涨，门禁却一个字都不说：
+
+    - `compile(source, filename, mode, flags=ast.PyCF_ONLY_AST)`（标准库的另一条
+      解析入口，`builtins.compile` 即它）；
+    - `import builtins as _bi` 之后的 `_bi.compile(...)`；
+    - `py_compile.compile(...)` / `compileall.compile_dir(...)`（把文件编译成
+      语法树/字节码，成本同样随代码总量涨）；
+    - `from ast import parse as p` 之后的裸 `p(...)`。
+
+    判据的靶点仍是「枚举 + 解析**同现**」（成本随代码总量涨），不是「源码里恰好
+    写了哪个调用名」。故反向锁与正向锁成对：`re.compile(...)` 与本地同名函数
+    **不得**被报出 —— 受保护子集里「枚举 + 正则」的文件有一批，误报会让门禁
+    失去区分力，正是上一轮「口径扩大需各自的实证样本」这句话要防的。
+    """
+
+    def test_builtin_compile_with_pycf_flag_is_reported(self):
+        """`compile(..., PyCF_ONLY_AST)` 与 `ast.parse` 是同一件事，必须同判。"""
+        source = (
+            "import ast\n"
+            "def test_x():\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        compile(p.read_text(), str(p), 'exec', ast.PyCF_ONLY_AST)\n"
+        )
+        assert _repoWideAstScans(source) == ["test_x"], (
+            f"`compile(..., PyCF_ONLY_AST)` 没被报出：{_repoWideAstScans(source)}"
+            "（解析面只认 `ast.parse` 字面名即红）"
+        )
+
+    def test_bare_compile_is_reported(self):
+        """裸名 `compile(...)`（内建）即 `compile(..., PyCF_ONLY_AST)` 的同一条链。"""
+        source = (
+            "def _scan():\n"
+            "    return [compile(p.read_text(), str(p), 'exec')\n"
+            "            for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"裸名 `compile(...)` 漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_aliased_builtins_compile_is_reported(self):
+        """`import builtins as _bi` 之后的 `_bi.compile(...)` 同为解析落点。"""
+        source = (
+            "import builtins as _bi\n"
+            "def _scan():\n"
+            "    return [_bi.compile(p.read_text(), str(p), 'exec')\n"
+            "            for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"`builtins` 别名后的 `compile` 漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_py_compile_helper_is_reported(self):
+        """`py_compile.compile(...)` 逐文件编译，成本同样随代码总量涨。"""
+        source = (
+            "import py_compile\n"
+            "def test_x():\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        py_compile.compile(str(p), doraise=True)\n"
+        )
+        assert _repoWideAstScans(source) == ["test_x"], (
+            f"`py_compile.compile` 漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_aliased_parse_import_is_reported(self):
+        """`from ast import parse as p` 之后的裸 `p(...)` 就是解析原语本身。"""
+        source = (
+            "from ast import parse as astParse\n"
+            "def _scan():\n"
+            "    return [astParse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"`from ast import parse as ...` 之后的裸名漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_re_compile_is_not_reported(self):
+        """`re.compile` 与「解析源码」无关：按调用名判会把「枚举 + 正则」全报红。"""
+        source = (
+            "import re\n"
+            "def test_x():\n"
+            "    pattern = re.compile('def ')\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        assert pattern.search(p.read_text()) is not None\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"`re.compile` 被误报成解析落点：{_repoWideAstScans(source)}"
+            "（受保护子集里这类文件有一批，误报即门禁失效）"
+        )
+
+    def test_compile_imported_from_other_module_is_not_reported(self):
+        """`from re import compile` 之后的裸 `compile(...)` 是正则，不是解析。"""
+        source = (
+            "from re import compile\n"
+            "def test_x():\n"
+            "    pattern = compile('def ')\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        assert pattern.search(p.read_text()) is not None\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"被非解析模块 import 遮蔽的裸名被误报：{_repoWideAstScans(source)}"
+        )
+
+    def test_local_function_named_compile_is_not_reported(self):
+        """本地 `def compile` 不是内建那一个，不得据此判成解析。"""
+        source = (
+            "def compile(source):\n"
+            "    return source\n"
+            "\n\n"
+            "def test_x():\n"
+            "    return [compile(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"同名本地函数被误判成解析原语：{_repoWideAstScans(source)}"
+        )
+
+    def test_shadow_scope_is_per_unit_not_whole_file(self):
+        """遮蔽要按**作用域**判：别处函数里的同名局部量不得遮住本文件的解析原语。
+
+        整文件级遮蔽是**假阴性面**：一个 helper 里恰好有个局部 `def parse`，
+        另一个 helper 的全仓 `rglob` + `parse(...)` 就会被无声放行。
+        """
+        source = (
+            "def _helper():\n"
+            "    def parse(text):\n"
+            "        return text\n"
+            "    return parse('x')\n"
+            "\n\n"
+            "def _scan():\n"
+            "    return [parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"别处的同名局部量把解析原语遮住了（假阴性）：{_repoWideAstScans(source)}"
+        )
+
+    def test_own_scope_shadow_still_suppresses_the_bare_name(self):
+        """本作用域内真的重绑了该名字时，裸名调用不是解析原语（不报）。"""
+        source = (
+            "def parse(text):\n"
+            "    return text\n"
+            "\n\n"
+            "def test_x():\n"
+            "    return [parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"本作用域重绑的裸名被当成解析原语：{_repoWideAstScans(source)}"
+        )
+
+    def test_module_scope_shadow_does_not_leak_into_a_manager_by_default(self):
+        """类体不是作用域：类里的 `compile = ...` 不得遮住模块级的解析原语。
+
+        `class C: compile = None` 之后模块级仍可用内建 `compile`；把它当成
+        遮蔽会造出假阴性面。
+        """
+        source = (
+            "class Widget:\n"
+            "    compile = None\n"
+            "\n\n"
+            "def _scan():\n"
+            "    return [compile(p.read_text(), str(p), 'exec')\n"
+            "            for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"类属性把模块级解析原语遮住了（假阴性）：{_repoWideAstScans(source)}"
+        )
+
+    def test_same_named_functions_do_not_share_a_shadow_set(self):
+        """同名函数（不同作用域）各判各的遮蔽，不得互相串味。
+
+        把遮蔽按**函数名**建表会在同名处撞键：一个 `_scan` 里有局部 `parse`、
+        另一个 `_scan` 里全仓 `rglob` + `parse(...)`，后者会被前者遮住而无声放行。
+        """
+        source = (
+            "def _scan():\n"
+            "    def parse(text):\n"
+            "        return text\n"
+            "    return parse('x')\n"
+            "\n\n"
+            "class Wrapper:\n"
+            "    def _scan(self):\n"
+            "        return [parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        hits = _repoWideAstScans(source)
+        assert "Wrapper._scan" in hits, (
+            f"同名嵌套函数被外层同名函数的遮蔽串味：{hits}"
+        )
+
+    def test_detector_scans_each_file_in_a_bounded_number_of_passes(self):
+        """检测面自身的成本不得随**判据种类数**膨胀：每文件只走有限趟。
+
+        这是同一条根因的镜像：门禁自己也在受保护子集里（它被登记了），
+        若每多认一种解析模块就多 `ast.walk` 一趟，那么「检测面越宽、门禁越慢」
+        —— 判据成本又一次随**代码总量 × 判据种类**增长。故口径表
+        （`PARSE_MODULE_ATTRS`）必须**一趟收齐**，不得按模块逐个重扫。
+        """
+        source = (
+            "import ast, builtins, os, re\n"
+            "def test_x():\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        ast.parse(p.read_text())\n"
+        )
+        calls = {"n": 0}
+        realWalk = ast.walk
+
+        def countingWalk(node):
+            calls["n"] += 1
+            return realWalk(node)
+
+        ast.walk = countingWalk
+        try:
+            _repoWideAstScans(source)
+        finally:
+            ast.walk = realWalk
+        assert calls["n"] <= 3, (
+            f"检测面按模块逐个重扫（`ast.walk` 走了 {calls['n']} 趟）："
+            "口径表要一趟收齐；否则每扩一种解析写法，门禁自身成本就再涨一档。"
+        )
+
+    def test_third_party_parser_modules_are_reported(self):
+        """第三方解析器与标准库同契约：枚举文件后逐份解析，成本照样随代码总量涨。
+
+        只在**该模块真被 import** 时才算（别名表口径），故不构成假阳性面；
+        仓内当前无这些依赖，本判据是前瞻锁：一旦有人引入即被点名。
+        """
+        cases = {
+            "import parso\n": "parso.parse(p.read_text())\n",
+            "import libcst\n": "libcst.parse_module(p.read_text())\n",
+            "import astroid\n": "astroid.parse(p.read_text())\n",
+        }
+        for header, call in cases.items():
+            source = (
+                header
+                + "def _scan():\n"
+                + "    for p in ROOT.rglob('*.py'):\n"
+                + "        " + call
+            )
+            assert _repoWideAstScans(source) == ["_scan"], (
+                f"第三方解析器漏报：{header.strip()} -> {_repoWideAstScans(source)}"
+            )
+
+    def test_third_party_mention_without_import_is_not_reported(self):
+        """只提名字、没 import：不是解析落点（模块别名口径的必然结果）。"""
+        source = (
+            "def test_x():\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        assert 'parso.parse' not in p.read_text()\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"文本提及被当成解析落点：{_repoWideAstScans(source)}"
+        )
+
+    def test_unrelated_module_compile_attribute_is_not_reported(self):
+        """`widget.compile(...)` 不落在任何解析模块别名上，不得报出。"""
+        source = (
+            "import widget\n"
+            "def test_x():\n"
+            "    for p in ROOT.rglob('*.py'):\n"
+            "        widget.compile(p.read_text())\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"无关模块的同名方法被误报：{_repoWideAstScans(source)}"
+        )
+
+
 class TestTextCacheIsOnTheHotPath:
     """跨判据复用的文本缓存必须真被热路径读到（写了不读 = 断点）。
 
@@ -592,7 +1008,71 @@ class TestSharedParseBudgetIsReal:
         )
 
 
+class TestOneShotScanDoesNotRetainTrees:
+    """**一次性**扫描入口不得留下常驻语法树（保留策略与收益必须对齐）。
+
+    根因：`_cachedParse` / `_cachedNodes` 是 `maxsize=None`，对**任何**一次扫描
+    都无条件保留整棵 AST。于是「保留」这份收益（跨判据复用）只有重复扫描才有，
+    成本（常驻对象图让 gen2 GC 按图大小收费）却每次扫描都付。实测本机 2985 个
+    `.py`：空进程 gen2 1.0ms / 只保留文本 1.1ms / 保留全部语法树 **2243ms**
+    （532 万对象）。真会话里 12 个消费方同进程跑，gen2 合计 8.5s、单次峰值 1.26s、
+    进程末存活 143 万 ast 节点。
+
+    这是 Issue #148「代码总量被编码成时间上界」的**第二条通道**。
+
+    实测证明「绑小 maxsize」不是解法（淘汰引发重复解析，省下的 GC 被解析吃掉）：
+
+        三连扫 1200 文件（3600 次访问）
+          maxsize=None  wall= 5.86s  gen2= 906ms
+          maxsize=1024  wall=20.83s  gen2= 955ms
+          maxsize=256   wall=22.72s  gen2= 239ms
+          maxsize=64    wall=13.33s  gen2=  17ms
+          不保留         wall= 7.42s  gen2=  0.8ms
+    """
+
+    def test_oneShotEntryExistsInTheSharedSource(self):
+        for name in ("transientTree", "transientNodes"):
+            assert hasattr(ast_scan, name), (
+                f"tests/ast_scan.py 未提供一次性扫描入口 {name}：一次性判据只能"
+                "自己 `rglob` + `ast.parse` 各写一套，Issue #148 的根因会回来。"
+            )
+
+    def test_transientTree_leaves_no_retained_trees(self, tmp_path):
+        (tmp_path / "a.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        before = ast_scan._cachedParse.cache_info().currsize
+        tree = ast_scan.transientTree(tmp_path / "a.py")
+        assert tree is not None, "一次性入口没返回语法树"
+        after = ast_scan._cachedParse.cache_info().currsize
+        assert after == before, (
+            "一次性入口把语法树留进了 `_cachedParse`：保留的收益（跨判据复用）"
+            f"只对重复扫描成立，成本却每次扫描都付（currsize {before} → {after}）。\n"
+            "修法：一次性扫描走 `transientTree`，显式不留常驻树。"
+        )
+
+    def test_transientNodes_leaves_no_retained_trees(self, tmp_path):
+        (tmp_path / "b.py").write_text("def g(x):\n    return x.attest()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        ast_scan._cachedNodes.cache_clear()
+        hits = [p for p, _n in ast_scan.transientNodes(tmp_path, hints=("attest",))]
+        assert hits, "一次性节点入口没产出任何节点"
+        assert ast_scan._cachedParse.cache_info().currsize == 0, (
+            "`transientNodes` 留下了常驻语法树"
+        )
+        assert ast_scan._cachedNodes.cache_info().currsize == 0, (
+            "`transientNodes` 留下了常驻节点元组"
+        )
+
+    def test_transientNodes_keeps_the_prefilter(self, tmp_path):
+        """一次性入口同样吃文本预筛：不是「绕开门禁」的后门。"""
+        (tmp_path / "hit.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        (tmp_path / "miss.py").write_text("def f(x):\n    return x.other()\n", encoding="utf-8")
+        seen = {p.name for p, _n in ast_scan.transientNodes(tmp_path, hints=("attest",))}
+        assert seen == {"hit.py"}, f"一次性入口的预筛口径失效：{seen}"
+
+
 class TestSharedBudgetIsReusedWithinOneProcess:
+
     """同进程内 N 个判据扫同一棵子树，解析只付一次（这正是「预算」的含义）。"""
 
     def test_repeated_scan_hits_the_cache(self, tmp_path):
@@ -605,123 +1085,6 @@ class TestSharedBudgetIsReusedWithinOneProcess:
             "第二次扫描没有命中节点缓存——「跨用例复用一次解析」不成立，"
             "本预算就成了纸面承诺。"
         )
-
-
-class TestResidentGraphIsRetiredFromTheScannedGenerations:
-    """常驻语法树必须退役出 GC 的扫描分代：扫描面是**有界窗口**，不随解析量涨。
-
-    根因（Issue #197 批上轮登记为「未闭环第 1 条」，本轮实证）：`_cachedParse` /
-    `_cachedNodes` 是 `maxsize=None` —— 整进程保留**全部**语法树。保留本身没错
-    （跨用例复用正是预算的意义），错的是这些树全留在 gen2 的扫描面里：
-    gen2 每扫一遍都要走完整棵常驻图，**成本随代码总量涨**。
-
-    实测（本机，1787 个 `test_*.py` 全量解析后）：
-
-    | 保留策略 | 建缓存 | 单次 gen2 | 常驻对象 |
-    |---|---|---|---|
-    | 不保留 | 1.10s | 0.78ms | 1.2 万 |
-    | 全部保留（改前） | 4.51s | **1030.43ms** | 267 万 |
-    | 全部保留 + 退役（改后） | 1.07s | **1.9ms** | 267 万 |
-
-    受保护子集整会话读数（同一批文件、同机、同顺序）：gen2 合计 7.4s → 1.4s。
-
-    判据是**结构不变量**而非秒数（墙钟阈值另有常驻台账）：退役步长 K 决定「至多
-    K 个文件的树还没被移出扫描面」，故扫描面上界 = **步长 × 单文件最大节点量**，
-    与解析了多少文件无关。用「单文件最大节点量」而不是常数，是为了不把任何
-    单文件规模编码进判据——步长是常数，与代码总量无关。
-    """
-
-    LARGE = 240
-    #: 上界余量：退役按「常驻树数」触发，故窗口内至多 K 棵，取 2 倍余量。
-    WINDOW_FACTOR = 2
-
-    _seq = 0
-
-    def _parseBatch(self, count: int):
-        """解析 `count` 份源码，返回（本次新增且可见的节点数，单文件最大节点量）。"""
-        type(self)._seq += 1
-        tag = f"probe-{type(self)._seq}"
-        before = {id(node) for node in gc.get_objects() if isinstance(node, ast.AST)}
-        widest = 1
-        for path in ast_scan.filesUnder(ast_scan.PRODUCTION_ROOT)[:count]:
-            tree = ast_scan._cachedParse(("probe", tag, str(path)), ast_scan.sourceCode(path))
-            widest = max(widest, sum(1 for _ in ast.walk(tree)))
-        gc.collect()
-        visible = sum(1 for node in gc.get_objects()
-                      if isinstance(node, ast.AST) and id(node) not in before)
-        return visible, widest
-
-    def _windowBound(self, widest: int, step: int) -> int:
-        return widest * max(step, 1) * self.WINDOW_FACTOR
-
-    def test_scanned_surface_is_a_bounded_window(self):
-        _, widest = self._parseBatch(1)
-        visible, widest = self._parseBatch(self.LARGE)
-        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
-        assert visible <= bound, (
-            f"解析 {self.LARGE} 份源码后，gen2 仍能扫到 {visible} 个新增 AST 节点，"
-            f"超出退役窗口上界 {bound}（= 单文件最大 {widest} 节点 × 步长 "
-            f"{ast_scan.RETIRE_STEP} × {self.WINDOW_FACTOR}）：常驻解析缓存没把已保留的"
-            "图移出扫描分代，gen2 每扫一遍都要走完整棵常驻图，成本随代码总量涨"
-            "（实测 1787 文件单次 1030ms vs 不留 0.78ms）。"
-            "修法：`tests/ast_scan` 按退役步长 `gc.freeze()` 已保留的图。"
-        )
-
-    def test_retirement_is_not_vacuous_when_disabled(self, monkeypatch):
-        """反向锁：把退役步长设为 0（关闭退役），扫描面必然越界。"""
-        _, widest = self._parseBatch(1)
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 0)
-        visible, widest = self._parseBatch(self.LARGE)
-        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
-        assert visible > bound, (
-            f"关掉退役后扫描面只有 {visible} 个节点（窗口上界 {bound}）：判据在"
-            "「不退役」这一侧不成立，说明它测的不是退役本身。"
-        )
-
-    def test_retirement_reclaims_unreachable_objects_before_freezing(self, monkeypatch):
-        """退役前必须先回收：先把垃圾冻住 = 把它变成永久垃圾。
-
-        `gc.freeze()` 是进程级操作，冻结**当时全部**被跟踪对象；冻结之后不可达
-        对象永远不会再被回收（实测：冻结前已不可达的环，`gc.collect()` 恒返回 0，
-        解冻后才回收）。故退役顺序必须是「先 `gc.collect()` 再 `gc.freeze()`」——
-        顺序反了不会有任何报错，只是把垃圾永久留在进程里。
-        """
-        import weakref
-
-        class Cycle:
-            def __init__(self):
-                self.me = self
-
-        ast_scan._cachedParse.cache_clear()
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
-        monkeypatch.setattr(ast_scan, "_RETIRE_LEDGER", {"retires": 0, "next": 1})
-
-        gc.collect()
-        garbage = Cycle()
-        watcher = weakref.ref(garbage)
-        del garbage
-        ast_scan._cachedParse(("probe-order",), "X = 1")
-        assert ast_scan.retireStats()["retires"] == 1, "退役没发生，判据测不到顺序"
-        assert watcher() is None, (
-            "退役时把当时已不可达的环一起冻住了（弱引用仍存活）：`gc.freeze()` 之前"
-            "少了 `gc.collect()`，垃圾被冻成永久不可回收。"
-        )
-        gc.unfreeze()
-
-    def test_retirement_is_read_back_through_the_ledger(self, monkeypatch):
-        """退役账必须可读回：写侧退役了、读侧看不见，就是断点。
-
-        台账按步长累积，故本用例把步长与游标钉在初值（与用例执行顺序无关）。
-        """
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
-        monkeypatch.setattr(ast_scan, "_RETIRE_LEDGER", {"retires": 0, "next": 1})
-        gc.unfreeze()
-        self._parseBatch(4)
-        after = ast_scan.retireStats()
-        assert after["retires"] > 0, (
-            f"退役发生了但台账读不回（{after}）：写侧无读侧即断点。"
-        )
-        assert after["frozen"] > 0, f"退役后冻结对象仍为 0：{after}"
 
 
 @pytest.mark.parametrize("rel", [

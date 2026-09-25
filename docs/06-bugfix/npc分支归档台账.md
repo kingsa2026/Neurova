@@ -17,15 +17,26 @@
 
 ## 一、判定口径（唯一事实源：`scripts/ci/npc_branch_cleanup.py`）
 
-两个条件**同时**成立才算"应当删除"（`stale`）：
+两个 **git 事实**同时成立才算"应当删除"（`stale`）：
 
-1. 分支名以 `auto/` 开头 —— NPC 自动分支的命名空间。
-   长期分支（`main`、`docs/*` 等）由人管理，**不由本判据裁决**；
-2. 该分支的提交已经是`origin/main` 的**祖先**（`git merge-base --is-ancestor`），
-   即已被合并进主线。
+1. 该分支头出现在主线某个 merge commit 的**第二父位**（`mergedSourceTips()`）
+   —— 即它正是某个已合并请求的源分支头，这就是"经 PR 合并进主线"这件事本身；
+2. 该分支头已经是`origin/main` 的**祖先**（`git merge-base --is-ancestor`），
+   即提交已在主线里，删掉不丢成果。
 
-只有其中一个成立时判 `keep`：未合并的 `auto/*` 分支可能还有在途工作，
-删掉就是丢成果。
+只有其中一个成立时判 `keep`：在途的分支可能还有可用的工作，删掉就是丢成果。
+
+**为什么第 1 条不看分支名（2026-09-25 修正，本轮实测）**：
+早先口径把「是不是 NPC 工作分支」等同于「名字是否以 `auto/` 开头」。而名字是
+平台的产物、不是事实 —— 平台按合并请求的 `head.ref` 决定分支名，NPC 会话既可以建
+`auto/*`，也可以建 `fix/*` / `fix-*`。于是同一形态（一个已合并的归档分支仍留在
+远端）在一种命名下被拦、在另一种命名下被放行：实测
+`fix-caliber-generated`（#217 的 head，作者是 NPC）已是 `origin/main` 的祖先，
+而名字前缀口径给它 `keep`；同形态的 `auto/code-exec-sandbox-555c`（#212）
+则被正确判为 `stale`。修法是把成员资格改挂在**合并事实上**，不是给名字加白名单。
+
+第 1 条还天然排除仓库默认分支：`main` 的头是那些 merge commit 的**后代**，
+永远不会成为其中任何一个的第二父。
 
 **为什么用"是否为祖先"而不是"squash 后 sha 是否对得上"**：本仓的合并请求全部走
 merge commit（`git log --merges` 可复核），原提交保留在主线历史里，`--is-ancestor`
@@ -58,13 +69,32 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 
 删除后复算读数：`应当删除 0 条：[]`。
 
-### 2026-09-25（Issue #197 批收口，本轮）
+### 2026-09-25（Issue #197 批收口）
 
 | 分支 | 对应合并请求 | 处置 |
 |------|------|------|
 | `auto/ast-scan-text-cache-and-relpath-memo` | #215 | 已删（已合入主线，删除前为 `main` 的祖先） |
 
+### 2026-09-25（判据改由合并事实给出，本轮）
+
+本轮修了判定口径本身（原因见第一节）：成员资格不再看分支名，改看
+"分支头是否是主线某个 merge commit 的第二父"。改完立刻多暴露出两条此前
+被名字前缀口径放行的归档分支，连同旧口径已报出的一条一并删除：
+
+| 分支 | 对应合并请求 | 删除前 sha（远端头） | 处置 |
+|------|------|------|------|
+| `auto/code-exec-sandbox-555c` | #212 | `b1d2057e` | 已删 |
+| `auto/relay-not-a-gate-217` | #226 | `0fbb5068` | 已删 |
+| `auto/skill-name-domain-migration-189` | #225 | `7c129eea` | 已删 |
+
+三条在删除前均由判据给出双事实读数（第二父命中 = 真；是 `main` 的祖先 = 真）。
 删除后复算读数：`应当删除 0 条：[]`。
+
+另有一处**漏判**在本轮被记录、不当作已消解：`fix-caliber-generated`（#217 的 head，
+作者是 NPC）是旧口径下典型的漏判形态（不叫 `auto/*` 却被合并）。它在本轮开始前
+已被另一会话删除，故不再出现在远端；它的合并提交 `0cc0719a` 仍在主线历史里，
+作为该形态的**常驻反证样本**留在守卫
+`tests/unit/ci/test_npc_branch_cleanup.py::TestCriterionIsMergeFactNotBranchName::testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch` 中。
 
 **本台账不登记「当前保留哪些分支」**（此前 §3 有一张这样的表，已删）。原因是
 **它自己会过期且无人刷新**：那条表里的 4 行到本轮实测已有 3 行失效
@@ -82,6 +112,26 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 python scripts/ci/npc_branch_cleanup.py            # 人读
 python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
 ```
+
+### 2026-09-25（#218 后续复核，本轮）
+
+复算入口（先 `git fetch origin --prune`）：`应当删除 5 条`。五条均为 `main` 的祖先，
+处置如下：
+
+| 分支 | 处置 |
+|------|------|
+| `auto/ast-scan-one-shot-retention` | 已删（已合入主线） |
+| `auto/branch-archive-fact-criterion` | 已删（已合入主线） |
+| `auto/cnb-header-count-single-source-9c14` | 已删（已合入主线） |
+| `auto/npc-handoff-predicate-158` | 已删（已合入主线） |
+| `auto/t11e-rollup-90` | 已删（已合入主线） |
+
+同轮另删一条**未合并**的并行分支：`auto/relay-criterion-from-pipeline-status`
+（其 PR #234 已关闭）。删它的理由不是「已合并」，而是**同一根因只能有一份实现**：
+#233 已就「接力判据改读平台在收尾期给出的事实」做了更完整的实现（含 ADR 0022），
+两份并存会让 `.cnb.yml` 同一段互相冲突，也无人能判断哪份是事实源（教义第 6 条）。
+
+删除后复算读数：`应当删除 0 条：[]`（`keep` 的未合并分支照旧保留）。
 
 ## 四、与既有纪律的关系（不新造平行体系）
 
