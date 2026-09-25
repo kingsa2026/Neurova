@@ -847,11 +847,6 @@ describe('models API', () => {
     expect(mockGet).toHaveBeenCalledWith('/models')
   })
 
-  it('getModel calls GET /models/{id}', async () => {
-    await models.getModel('gpt-4o')
-    expect(mockGet).toHaveBeenCalledWith('/models/gpt-4o')
-  })
-
   it('deleteModel calls DELETE /models/{id}', async () => {
     await models.deleteModel('gpt-4o')
     expect(mockDelete).toHaveBeenCalledWith('/models/gpt-4o')

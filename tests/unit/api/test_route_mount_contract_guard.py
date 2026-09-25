@@ -486,3 +486,99 @@ class TestUnmountedScanCoversTheWholeRepository:
         assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
             "注入的孤儿端点模块未被检出——名单归零这条断言会白通过。"
         )
+
+
+class TestFrontContractBreaksAreAdjudicatedAndSettled:
+    """前端调用 ↔ 后端注册的每一处差异都必须有裁决，且裁决要落到可复算的事实。
+
+    根因（把报错恢复原状就会复现）：清单第四节把 28 处差异写成「由人去核」——
+    于是同一张表可以被反复登记、永不收敛。「登记」回答了「有哪些差异」，
+    没回答「每条的结论是什么、办了没有」；与上一单的「未挂载名单只列名字」同型。
+
+    判据单源在 `scripts/generate_api_inventory.py` 的 `frontCallAdjudications()`，
+    台账与守卫同源取数（教义第 6 条）。
+    """
+
+    ADJUDICATION_FILE = "tests/unit/frontContractBaseline.txt"
+
+    def _rows(self):
+        generator = _generator()
+        return generator.unmatchedFrontCallRows()
+
+    def test_every_break_has_an_adjudication_row(self):
+        generator = _generator()
+        rows = self._rows()
+        adjudicated = generator.readFrontCallAdjudications()
+        missing = [(row["module"], row["method"], row["path"])
+                   for row in rows
+                   if (row["module"], row["method"], row["path"]) not in adjudicated]
+        assert not missing, (
+            "有前端契约差异没有裁决行（清单只登记「有差异」，没写「结论」）：\n  "
+            + "\n  ".join(f"{m} {me} {p}" for m, me, p in missing[:8])
+        )
+
+    def test_adjudication_verdict_is_a_closed_enum(self):
+        generator = _generator()
+        verdicts = generator.readFrontCallAdjudications()
+        allowed = generator.FRONT_CONTRACT_VERDICTS
+        bad = {key: value["verdict"] for key, value in verdicts.items()
+               if value["verdict"] not in allowed}
+        assert not bad, (
+            f"裁决不在有限枚举内 {allowed}：{bad}\n"
+            "「已修」「已退役」「待接线」可机器判定办没办；自由文本则不能。"
+        )
+
+    def test_settled_breaks_no_longer_appear_as_gaps(self):
+        """判「已修」的条目必须真的不再出现在差异表里——「改了指」不等于「指对了」。"""
+        generator = _generator()
+        rows = self._rows()
+        live = {(row["module"], row["method"], row["path"]) for row in rows}
+        adjudicated = generator.readFrontCallAdjudications()
+        lying = [key for key, value in adjudicated.items()
+                 if value["verdict"] == "已修" and key in live]
+        assert not lying, (
+            "以下条目裁决为「已修」，但实测仍在差异表里（处置与事实不符）：\n  "
+            + "\n  ".join(f"{m} {me} {p}" for m, me, p in lying)
+        )
+
+    def test_retired_contracts_have_no_live_consumer(self):
+        """判「已退役」的条目，其前端导出函数不得还有非测试消费点。"""
+        generator = _generator()
+        phantom = generator.phantomFrontCalls()
+        assert not phantom, (
+            "以下前端调用无后端路由、也无任何非测试消费点，属幻影契约，应删净：\n  "
+            + "\n  ".join(f"{row['module']} {row['method']} {row['path']}"
+                         f"（{row['exported'] or '?'}）" for row in phantom[:8])
+        )
+
+    def test_live_consumer_breaks_are_resolved_or_explicitly_deferred(self):
+        """有活跃消费者的断链，必须在真实路由表里命中，或被显式裁决为「待接线」。
+
+        「待接线」不是免红牌：它要求写明依据与承接方（由
+        `test_adjudication_verdict_is_a_closed_enum` 与台账行数断言共同保证），
+        故「登记了事」的静默遗留仍会被抓住——不允许既不修也不表态。
+        """
+        generator = _generator()
+        adjudicated = generator.readFrontCallAdjudications()
+        unresolved = []
+        for row in generator.liveConsumerContractBreaks():
+            key = (row["module"], row["method"], row["path"])
+            verdict = (adjudicated.get(key) or {}).get("verdict")
+            if verdict != "待接线":
+                unresolved.append(row)
+        assert not unresolved, (
+            "以下断链有活跃前端消费者，却既无真实后端路由、也未裁决为「待接线」：\n  "
+            + "\n  ".join(f"{row['module']} {row['method']} {row['path']}"
+                         f" → {row['consumers']} 处消费" for row in unresolved[:8])
+        )
+
+    def test_deferred_breaks_carry_a_reason_and_owner(self):
+        """裁决为「待接线」的条目必须写明依据与承接方——不许留空。"""
+        generator = _generator()
+        thin = {key: value for key, value in generator.readFrontCallAdjudications().items()
+                if value["verdict"] == "待接线"
+                and (len(value["reason"].strip()) < 20 or "承接方" not in value["reason"])}
+        assert not thin, (
+            "以下「待接线」条目缺依据或承接方（不得留空）：\n  "
+            + "\n  ".join(f"{m} {me} {p}" for m, me, p in thin)
+        )

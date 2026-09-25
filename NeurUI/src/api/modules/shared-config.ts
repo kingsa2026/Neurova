@@ -82,11 +82,6 @@ export function deleteProvider(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/llm-providers/${id}`)
 }
 
-/** Test a provider connection. */
-export function testProvider(id: string) {
-  return api.post<ApiResponse<{ success: boolean; latency_ms: number; error?: string }>>(`${BASE}/llm-providers/${id}/test`)
-}
-
 // ---------------------------------------------------------------------------
 // API – MCP Servers
 // ---------------------------------------------------------------------------
@@ -114,11 +109,6 @@ export function updateMCPServer(id: string, data: Partial<MCPServerCreatePayload
 /** Delete an MCP server. */
 export function deleteMCPServer(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/mcp-servers/${id}`)
-}
-
-/** Test an MCP server connection. */
-export function testMCPServer(id: string) {
-  return api.post<ApiResponse<{ success: boolean; tools_count: number; error?: string }>>(`${BASE}/mcp-servers/${id}/test`)
 }
 
 // ---------------------------------------------------------------------------

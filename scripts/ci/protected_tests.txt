@@ -211,6 +211,10 @@ tests/unit/api/test_skill_rollback_governance.py
 # Issue #80 续：ToolOrchestrator 接线（工具面 orchestrate_tools + 幻影工具名收口
 #   + 步进成败单源 + 依赖分层/并发上限 + 自嵌套拒绝）
 tests/unit/tools/test_tool_orchestrator_wiring.py
+# Issue #80 续（第八轮）：轮级耗时在**并行轮**也要回得到父轮次上下文（单源累加器）
+#   + 三态的第五个面（进 prompt 的那一段：池提取口 / 渲染口 / 传动轴）
+tests/unit/evolution/experience/test_turn_elapsed_accumulation.py
+tests/unit/context/test_experience_prompt_face_three_state.py
 
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
@@ -786,3 +790,15 @@ tests/unit/evolution/test_reward_does_not_gamble_on_retrieval.py
 # Issue #197 批的登记纪律守卫本身：本批任一判据条目被摘掉即红
 #   （根因：同批后一票曾把一个不相关条目的登记静默删走）。
 tests/unit/ci/test_issue197_judgement_registration.py
+
+# Issue #68 收口：前端调用 ↔ 后端注册差异的裁决与补齐。
+#   （根因：清单第四节把 28 处差异写成「由人去核」——只登记、不裁决，
+#    于是同一张表可被反复登记、永不收敛。有活跃消费者的一类实测全是
+#    404/405：PUT /memory/{id}、GET /files/{id}/content、
+#    POST /settings/clear-cache 等。裁决台账 tests/unit/frontContractBaseline.txt
+#    与守卫同源咬合，三态可机器判定办没办。）
+tests/unit/api/test_front_contract_endpoints.py
+# Issue #68 收口：精准回复命中表（/annotations*）由 console 域迁入知识域。
+#   （唯一消费者是 KnowledgePage 的 AnnotationDrawer，前端按
+#    /api/v1/knowledge/annotations* 请求；此前挂在 /v1/console 下，实测恒 404。）
+tests/unit/api/test_knowledge_annotations_contract.py

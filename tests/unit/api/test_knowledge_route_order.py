@@ -50,6 +50,14 @@ _KB_ROUTES = [
     ("/{knowledge_id}", "GET"), ("/{knowledge_id}", "PUT"), ("/{knowledge_id}", "DELETE"),
     ("/import", "POST"),
     ("/import-url", "POST"),
+    # Issue #68 收口：精准回复命中表（/annotations*）由 console 域迁入知识域
+    # ——唯一消费者是 KnowledgePage 的 AnnotationDrawer，标注是知识资产。
+    # 注册顺序位于 GET /{knowledge_id} 之前（见下一测试的遮蔽守护）。
+    ("/annotations", "GET"),
+    ("/annotations", "POST"),
+    ("/annotations/{annotation_id}", "PUT"),
+    ("/annotations/{annotation_id}", "DELETE"),
+    ("/annotations/export", "GET"),
 ]
 
 

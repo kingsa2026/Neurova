@@ -99,6 +99,17 @@ router.include_router(_core_router)
 router.include_router(_sharing_router)
 router.include_router(_remote_router)
 router.include_router(_ingestion_router)
+
+# 精准回复命中表（`/annotations*`）：此前挂在 `/v1/console` 下，而它的唯一消费者
+# 是知识域的 `KnowledgePage` → `AnnotationDrawer`，前端按 `/v1/knowledge/annotations`
+# 请求，实测恒 404。标注是知识资产（重训练化集的语料来源），其归属就是知识域；
+# 故挂载点从 console 移到本聚合器，不另开第二份路由。
+from neurova.api.endpoints.console_annotations import (  # noqa: E402
+    router as _annotations_router,
+)
+
+router.include_router(_annotations_router)
+
 router.include_router(_core_detail_router)
 
 # ---------------------------------------------------------------------------

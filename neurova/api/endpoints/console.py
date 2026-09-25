@@ -1982,19 +1982,6 @@ async def post_push_message(
     return {"code": 0, "message": "Push sent"}
 
 
-# ══════════════════════════════════════════════════════════════
-# P2 标注闭环 — 精准回复命中表管理 API
-# ══════════════════════════════════════════════════════════════
-
-
-from .console_annotations import (
-    router as _annotations_router, AnnotationCreateRequest, AnnotationUpdateRequest,
-    list_annotations, create_annotation, update_annotation, delete_annotation, export_training_set,
-)
-
-router.include_router(_annotations_router)
-
-
 @router.get("/tasks")
 async def list_console_running_tasks(
     request: Request,

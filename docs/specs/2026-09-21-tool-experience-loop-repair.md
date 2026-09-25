@@ -666,3 +666,121 @@ orchestrate_tools visible to LLM = True | tool count = 71
 新工具 schema，无它 LLM 看不见该工具）；`tool_executor.py` **+67**（工具面执行体 + 分派
 登记，含自嵌套与参数校验）。另两处 `+2/+5` 为既有用例随契约变更同步（断言弃权语义、
 改指新 API）。
+
+
+## 12. 第八轮：进 prompt 的那一面（三态第五面）+ 并行轮的耗时聚合
+
+来源：Issue #80 后续派发，点名两格真问题——`chat_pipeline.py` 的
+`mark = "✓" if hit.get("success") else "✗"`（票 004 交付的「四面对照表」不含这第五个面），
+以及 `execution_time` 判据的红绿"取决于收集顺序"。派发方给了两个候选根因并明确要求
+**任何修法都必须解释"为何合跑会绿"**。
+
+### 12.1 第五个面：三态在"唯一真正改变下一次调用"的那面仍是二值
+
+票 004 的四个面（EKB 行 / 权重表 / 结晶器 / API 展示）都已三态，但**进 prompt 的那一段**
+是第五个消费方，且它是唯一会改变模型下一次调用的一面。本轮实测复现三处折叠：
+
+| 命中点 | 旧写法 | 实测后果 |
+|---|---|---|
+| `agent/chat_pipeline.py` 传动轴 | `mark = "✓" if hit.get("success") else "✗"` + `"success": bool(hit.get("success"))` | 未测量（NULL）既被渲染成 `✗`，又被折成 `False` 传给下游（池归档 / 去重优先级 / 最终 prompt 行） |
+| `context/injector.py::_format_experience_from_list` | `success_mark = "✓" if exp.get("success") else "✗"` | 未测量渲染成 `✗` |
+| `context/builder.py` 池提取口 | `item.metadata.get("success", True)` | 归档口（`orchestrator.py` 构造 `ContextInput` 时**不传 metadata**）正是缺键形态 ⇒ 默认值在生产路径上必然生效，"没测到"演成"测到成功" |
+
+另有一处**静默消失**（本轮一并收口）：`injector` 两处各自写
+`str(exp.get("context", ""))[:50]`，而工单 009 之后 EKB 的 `context` / `result` 都是 dict
+⇒ 直接切片抛 `TypeError: unhashable type: 'slice'`，被外层 `except` 吞掉后**返回空串**，
+整段经验从 prompt 里消失（实测 `_format_experience_from_list` 对 dict 形状返回 `''`）。
+
+**收口方式（单一事实源，教义第 6 条）**：三态的词与记号此前有五六份各自实现。本轮把
+`OUTCOME_SUCCESS/FAILURE/UNEVIDENCED`、`OUTCOME_MARKS`、`outcomeWord()`、`outcomeMark()`、
+`experienceSummary()` 收口到 `neurova/skills/models.py`（唯一的经验数据模型模块），
+各消费方改为取用：`chat_pipeline` 的传动轴、`injector` 的渲染口（抽
+`_render_experience_line`，两处渲染共用）、`api/endpoints/experience_knowledge_api._outcome_word`
+（保留名字与调用点，实现委托 `outcomeWord`）。未测量取 `○`，**刻意不复用 `✗`**——
+`✗` 对模型说的是"上次这条做砸了"。
+
+对照表补第五列（实测）：
+
+| 输入 | ① EKB `success` | ② 权重表 | ③ 结晶器 | ④ API `outcome` | ⑤ 进 prompt 记号 |
+|---|---|---|---|---|---|
+| 真成功 | `1` | `success_count+1` | 计入分子分母 | `success` | `✓` |
+| 真失败 | `0` | `failure_count+1` | 计入分子分母 | `failure` | `✗` |
+| 未测量 | `NULL` | 不投票 | 不进分子分母 | `unevidenced` | `○` |
+
+### 12.2 并行轮的耗时聚合：H1 成立，H2 是另一个独立命中点
+
+**先答"为何合跑会绿"——它跟收集顺序无关，被同名判据的两个不同形态混在一起了。**
+
+实测（真 `Agent` + 真 `ToolExecutor`，`ToolCoordinator.run_with_timeout` 内的
+`ensure_future` 是子任务边界）：
+
+```
+单工具轮（串行路径）
+  [INNER] task=Task-1   ← 与 chat 同任务
+  [ADD]   task=Task-1   ← 写进正确上下文 ⇒ 父轮次读得到（判据绿）
+双工具轮（同轮均声明并行安全 ⇒ loops/base.py 走 asyncio.gather）
+  [INNER] task=Task-8 / Task-9   ← 子任务
+  [ADD]   task=Task-8 / Task-9   ← 各自写进**子任务副本**
+  [POST]  elapsed=0.0            ⇒ `or None` 折成 NULL 落库（判据红）
+```
+
+**H1 成立**：`ContextVar.set()` 只改当前任务的上下文副本；父任务读不到子任务的写入。
+兄弟变量 `_tool_messages_var` 之所以没这个问题，是因为它的既有契约就是"跨 task 边界共享
+同一**列表对象**"（`turn_context.py` 原注释）——存对象则引用即共享，存不可变 float 则
+赋值不等于共享。这解释了红绿与"单/双工具"的相关性。
+
+**"合跑会绿"的机制**：旧实现对父上下文的读数没有判据，它只断言"落库列非空"。
+同一事件循环里若此前跑过任意一个写进**父任务**上下文的轮次（例如同批的离线探针脚本
+在其 `asyncio.run` 内跑单工具轮），父上下文就有残留的非零读数，被 `or None` 放过 ⇒ 绿。
+本文件不依赖顺序：判据直接构造父上下文读数与轮首复位语义（结构等式，不含墙钟阈值）。
+
+**H2 是另一个独立命中点**（同一禁区、不同位置，教义第 5 条一并修）：
+`post_chat_pipeline.py` 的 `execution_time=get_turn_tool_elapsed() or None` 用**读数真假值**
+回答"测没测到"，把"测到 0.0 秒"折成 NULL——与票 004 禁区同形。根修：新增
+`has_turn_tool_measurement()`（按**累加被调用过几次**回答"测没测到"），落库改问测量计数。
+
+**根修落点**：`turn_context` 的轮级耗时由不可变 float 改为**轮首绑定的累加器对象**
+（`TurnElapsedAccumulator`），子任务与父轮次持同一引用、就地累加；轮首复位改为
+**换绑新对象**（沿用同一对象会让上一轮读数被续累，本仓 `_tool_messages_var` 同款纪律）。
+写入侧唯一写入方仍是执行咽喉（`tool_executor.py` 的 finally），未动消费方语义。
+
+### 12.3 判据与实测
+
+- **新建** `tests/unit/evolution/experience/test_turn_elapsed_accumulation.py`（6 条）与
+  `tests/unit/context/test_experience_prompt_face_three_state.py`（11 条）。
+- 红灯 → 绿灯：
+  ```
+  红  test_turn_elapsed_accumulation.py            -> 3 failed, 1 passed（并行轮 elapsed=0.0）
+  绿                                               -> 6 passed
+  红  test_experience_prompt_face_three_state.py   -> 5 failed, 4 passed（未测量渲染成 ✗ / dict 形状返回 ''）
+  ...续加传动轴两条判据后                            -> 6 failed, 5 passed
+  绿                                               -> 11 passed
+  ```
+- **A/B 自证**：`tests/unit/{context,evolution/experience}` + 两个探针 + 经验端点
+  改前 `1005 passed` → 改后 `1022 passed`，两侧 **0 failed**（新增 17 条即本轮用例）。
+- **守卫碰撞已处理**：新用例首版含 `assert elapsed < 100.0`，被既有
+  `test_ci_wallclock_assertion_ledger.py::test_outside_subset_counts_match` 当场点名
+  （"子集外墙钟上界的分布变了"）。按该守卫的纪律改为**结构等式**
+  （轮首复位后读 0.0 且 `has_turn_tool_measurement() is False`），不登记墙钟台账。
+- **live-verify**（真 `Agent` + 真 `ToolExecutor` + 真 EKB，双工具并行轮）：
+  ```
+  落库行 {'skill_name': 'calculator', 'success': 1, 'execution_time': 0.04631829261779785, 'evidence_state': 'evidenced'}
+  LIVE elapsed 非空: [True]
+  库里三态: [('真成功', 1), ('未测量', None), ('真失败', 0)]
+  进 prompt 的那段:
+     ✓ 真成功 查天气 → 晴
+     ○ 未测量 查天气 → 晴
+     ✗ 真失败 查天气 → 晴
+  池提取口三态: [True, None, None]（第三条是归档口现状＝缺键 ⇒ 未测量，不再默认成成功）
+  ```
+- 保护清单：两条新文件已登记 `scripts/ci/protected_tests.txt`（登记前逐文件单跑确定全绿，
+  无重复行）。
+
+### 12.4 净 LOC
+
+生产代码 `neurova/` 净约 **+40**（为正的去向）：`skills/models.py` **+49**（三态词汇与
+两个取数原语的唯一落点；不新增模块，收口在既有的经验数据模型处）、`context/injector.py`
+**-6**（两处渲染合并为一个 `_render_experience_line`）、`core/turn_context.py` **+18**
+（累加器类 + 测量计数）、`agent/chat_pipeline.py` **-2**、`context/builder.py` **+9**（注释说明
+缺键语义）、`api/endpoints/experience_knowledge_api.py` **-2**（实现委托单源）、
+`post_chat_pipeline.py` **+3**（测量计数判据）。测试另计。
