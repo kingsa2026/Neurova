@@ -129,9 +129,23 @@ class TestJudgingIgnoresMachineLoad:
     `get_thread_pool` 每次多等 0.1ms × 1000 次 ≈ 100ms > 预算 20ms。
     同一份代码在负载下就这么被判红，与是否有真实退化无关。
 
+    **注入方式本身不得再引入负载耦合**（2026-09-25 py3.12 实测红）：
+    逐次注入小睡（2000 × 0.3ms）会把 2000 次 `sleep` 系统调用铺进被测链路，
+    而 `time.thread_time()` 读的是 `CLOCK_THREAD_CPUTIME_ID` —— **含内核态时间**。
+    调度拥挤时每次 `sleep` 的内核开销随同机负载一起涨，于是"等待"经系统调用
+    换算成了 CPU 读数：实测空载 9.4ms、满负载 280ms（> 预算 50ms），
+    判据因此**自己**变成负载相关。修复前 py3.11 绿 / py3.12 红的同码分歧即此因。
+
+    改法：同量墙钟等待改为**粗粒度**注入（每 N 次一次、时长 ×N），
+    系统调用数降 N 倍，读数在满负载下仍有界（实测 0.45ms → 6.25ms）。
+
     例外且必须留墙钟的是冷 import 检查：它量"用户为首轮对话实际等了多久"，
     见本类末节 `TestImportBudgetKeepsWallClock`。
     """
+
+    #: 粗粒度注入：每 `EVERY` 次调用注入一次 `per_call_ms × EVERY` 的等待。
+    #: 注入的**墙钟总量**与逐次注入等价，系统调用数降 `EVERY` 倍。
+    INJECT_EVERY = 100
 
     def test_gate_exposes_a_load_independent_scoring_primitive(self):
         gate = importlib.import_module("scripts.ci.perf_gate")
@@ -151,9 +165,14 @@ class TestJudgingIgnoresMachineLoad:
 
         collector = type(get_metrics())
         original = collector.record_pipeline_step
+        every = self.INJECT_EVERY
+        calls = {"n": 0}
 
         def slowed(self, step_name, status, duration_ms):
-            time.sleep(0.0003)
+            calls["n"] += 1
+            if calls["n"] % every == 0:
+                # 每 100 次注入 30ms（等价逐次 0.3ms 的总墙钟），系统调用数降 100 倍。
+                time.sleep(0.03)
             return original(self, step_name, status, duration_ms)
 
         monkeypatch.setattr(collector, "record_pipeline_step", slowed)
@@ -192,9 +211,14 @@ class TestJudgingIgnoresMachineLoad:
         gate = importlib.import_module("scripts.ci.perf_gate")
         pool_mod = _importlib.import_module("neurova.core.thread_pool")
         original = pool_mod.get_thread_pool
+        every = self.INJECT_EVERY
+        calls = {"n": 0}
 
         def slowed(*args, **kwargs):
-            time.sleep(0.0001)
+            calls["n"] += 1
+            if calls["n"] % every == 0:
+                # 每 100 次注入 10ms（等价逐次 0.1ms 的总墙钟）。
+                time.sleep(0.01)
             return original(*args, **kwargs)
 
         monkeypatch.setattr(pool_mod, "get_thread_pool", slowed)
