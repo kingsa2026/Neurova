@@ -176,15 +176,24 @@ def _to_contracts(kb, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 @router.post("/records")
 async def add_experience_record(body: AddExperienceRecordRequest):
     """添加经验记录（手动结晶：写入真实 SQLite 库，供后续检索/统计）"""
-    from neurova.skills.models import ExperienceRecord
+    from neurova.skills.models import ExperienceRecord, outcomeStateFromWord
+
+    # 词 → 三态的反向映射取单源 `skills.models.outcomeStateFromWord`（教义第 6 条）。
+    # 此前这里是补集表达式 `None if outcome == "unevidenced" else (outcome != "failure")`：
+    # 只认两个半词，**其余任何词都落 True** —— 前端旧词 `partial`、"没听懂"的空串、
+    # 任何拼错的词，一律静默记成"做成了"。它不是读侧折叠的镜像，是同一条三态契约
+    # 在**写入面**的折叠。无法解释的词显式 422 并点名合法词域（教义第 2 条）。
+    try:
+        successState = outcomeStateFromWord(body.outcome)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     exp = ExperienceRecord(
         skill_name=body.task_type,
         context={"user_input": body.context, "task_type": body.task_type},
         result=body.metadata or {},
-        # 工单 004：`outcome == "failure"` 的补集把 `unevidenced` 洗成成功。
-        # 三态各自成值，未测量不冒充成功（同列 106-110 注释的禁则）。
-        success=None if body.outcome == "unevidenced" else (body.outcome != "failure"),
+        # 工单 004：三态各自成值，未测量（NULL）不冒充成功、未知词不冒充任何态。
+        success=successState,
         timestamp="",
         feedback="\n".join(body.lessons or []),
     )

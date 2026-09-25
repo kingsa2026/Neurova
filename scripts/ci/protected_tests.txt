@@ -137,6 +137,9 @@ tests/unit/evolution/test_skill_auto_retire_governance.py
 # 015 经验条目人工处置通路（降权/隐藏真的改检索排序与注入优先级；审核不洗证据）
 tests/unit/skills/test_ekb_operator_disposition.py
 tests/unit/api/test_experience_disposition_api.py
+# 004 同契约在**写入面**的命中点：outcome 词域单源（词→态映射与词→记号同处一份），
+#   未知词显式 422 并点名合法词域，不得静默折成成功票（前端 partial 就是这么洗成 success 的）。
+tests/unit/api/test_experience_outcome_word_domain.py
 # 016 经验质量读数进 RSI 阶段晋升判据（无据⇒unevidenced 不推进不否决、质差硬否决、阈值活旋钮）
 tests/unit/evolution/rsi/test_experience_quality_promotion.py
 # 005 单一控制器与阶段回写（proposer 不得自建第二个控制器、自动晋升必须回写 rsi_phase 且落盘失败可读）
