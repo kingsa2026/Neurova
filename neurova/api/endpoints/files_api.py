@@ -424,6 +424,30 @@ async def preview_file(
     return FileResponse(str(file_path), media_type=info.get("mime_type", "application/octet-stream"))
 
 
+@router.get("/{file_id}/content")
+async def get_file_content(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """以 UTF-8 文本返回文件内容（前端「预览文本文件」入口）。
+
+    此前只有 `/preview` 与 `/download`，两者都以 `FileResponse` 回**原始字节**；
+    前端 `files.getFileContent` 发 `GET /api/v1/files/{id}/content`，该路由从未注册
+    —— FilePage / AgentFilePage 的文本预览实测恒 404，被 catch 吞成「加载失败」。
+    文本读取失败（二进制/编码不符）显式 415，不悄悄回空串。
+    """
+    info = _get_owned_file(file_id, current_user)
+    file_path = Path(info["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=415, detail="文件不是 UTF-8 文本，无法按文本预览")
+    return {"file_id": file_id, "filename": info.get("filename", ""),
+            "mime_type": info.get("mime_type", ""), "content": text}
+
+
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: str,

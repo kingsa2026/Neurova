@@ -14,14 +14,6 @@ export interface ConsoleSession {
   updated_at?: string
 }
 
-export interface DebugResult {
-  success: boolean
-  output: string
-  error?: string
-  duration_ms: number
-  tool_calls?: { name: string; result: string }[]
-}
-
 export interface UploadResult {
   filename: string
   path: string
@@ -89,16 +81,6 @@ export function uploadConsoleFile(file: File, agentId?: string) {
   formData.append('file', file)
   if (agentId) formData.append('agent_id', agentId)
   return api.upload<ApiResponse<UploadResult>>(`${BASE}/upload`, file, 'file', agentId ? { agent_id: agentId } : undefined)
-}
-
-/** Run a debug test for an agent. */
-export function debugAgent(agentId: string, prompt: string) {
-  return api.post<ApiResponse<DebugResult>>(`${BASE}/debug`, { agent_id: agentId, prompt })
-}
-
-/** Push a system message to an agent's conversation. */
-export function pushSystemMessage(agentId: string, message: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/push`, { agent_id: agentId, message })
 }
 
 /**

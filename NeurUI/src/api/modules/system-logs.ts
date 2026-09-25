@@ -35,5 +35,7 @@ export function listLogs(params?: LogListParams) {
 
 /** Clear all logs. */
 export function clearLogs() {
-  return api.post<ApiResponse<null>>(`${BASE}/clear`)
+  // 后端契约是 `DELETE /api/v1/logs`（`endpoints/logs.py` 的 `@router.delete("")`）；
+  // 原写 `POST /logs/clear` 从未注册过路由，LogPage 的「清空日志」实测恒 404。
+  return api.delete<ApiResponse<null>>(BASE)
 }

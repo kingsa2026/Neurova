@@ -404,6 +404,38 @@ async def update_cors_config(
     )
 
 
+@router.post("/clear-cache")
+async def clear_cache(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """清空已注册的内存缓存（存储设置页的「清缓存」入口）。
+
+    此前前端 `settings.clearCache` 发 `POST /api/v1/settings/clear-cache`，
+    本文件从未注册过该路由 —— 实测 405，按钮点下去必报错。
+    缓存侧能力早已存在：`neurova/memory/core/cache.py` 的注册表持有全部
+    `MemoryCache` 实例（此前只被 `/metrics` 读取）。这里给它接上写消费者，
+    让「清缓存」作用在真实对象上，而不是造一个恒真的空转端点。
+    """
+    from neurova.memory.core.cache import iter_caches, _cache_registry
+
+    cleared: Dict[str, int] = {}
+    for name in list(_cache_registry.keys()):
+        cache = _cache_registry.get(name)
+        if cache is None:
+            continue
+        try:
+            cleared[name] = cache.clear()
+        except Exception as e:  # noqa: BLE001 - 单个缓存失败不阻断其余
+            logger.warning("清缓存失败 name=%s: %s", name, e)
+    return {
+        "code": 0,
+        "message": "缓存已刷新",
+        "data": {"caches": cleared, "total_cleared": sum(cleared.values())},
+        "request_id": _get_request_id(request),
+    }
+
+
 # ─── 单个设置（/{key} 必须放在 /cors 之后）───
 
 
