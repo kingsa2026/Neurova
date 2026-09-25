@@ -25,6 +25,7 @@
 | [0017](./0017-skill-registry-key-domain.md) | 技能注册表键值域统一（name 与身份域归一为一次查找） | Accepted | 2026-09-20 |
 | [0018](./0018-memory-classification-vocabulary.md) | 记忆分类词汇表唯一事实源（分类引擎只有一套枚举） | Accepted | 2026-09-21 |
 | [0019](./0019-skill-view-key-domain.md) | 技能视图键域收口（查询键 = name，记账键 = identity） | Accepted | 2026-09-21 |
+| [0020](./0020-sandbox-single-value-domain.md) | 沙箱值域唯一事实源（一套形态，两种承载能力） | Accepted | 2026-09-25 |
 
 ## 主题分类
 
@@ -51,6 +52,9 @@
 - [ADR 0010: 统一 ToolExecutionContext](./0010-unify-tool-execution-context.md) — 2 个不兼容 dataclass 收敛 + 删除死代码
 - [ADR 0011: 统一 SkillRegistry](./0011-unify-skill-registry.md) — class A 为规范，class B re-export
 - [ADR 0017: 技能注册表键值域统一](./0017-skill-registry-key-domain.md) — name 与身份域归一为注册表内一次查找，取键口进 Protocol
+
+### 执行与隔离
+- [ADR 0020: 沙箱值域唯一事实源](./0020-sandbox-single-value-domain.md) — 代码执行与思维沙箱共用一套形态；后端选择与隔离强度随每次执行自报
 
 ### 存储层
 - [ADR 0014: 连接池只管短连接](./0014-connection-pool-short-lived-only.md) — 常驻连接（写放大优化）不进池

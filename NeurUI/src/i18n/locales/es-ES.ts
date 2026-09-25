@@ -2092,6 +2092,11 @@ export default {
     python: 'Python',
     shell: 'Shell',
     javascript: 'JavaScript',
+    language: 'Idioma: ',
+    backend: 'Backend: ',
+    isolated: 'Aislamiento activo',
+    notIsolated: 'Sin aislamiento (sin aislamiento del kernel)',
+    exitCode: 'Código de salida: ',
   },
   firewall: {
     title: 'Cortafuegos',

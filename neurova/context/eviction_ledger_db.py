@@ -545,6 +545,27 @@ class EvictionLedgerDB:
                 {"user_id": self.user_id, "agent_id": self.agent_id, "limit": int(limit)},
             ).fetchall()
 
+    def rowsBySource(self, source: str, limit: int = CANDIDATE_LIMIT) -> List[sqlite3.Row]:
+        """按来源域取行（T-11b 层索引的持久读面）。
+
+        层索引（SUMMARY 节点）必须跨重启可读回：`covers` 只留在进程内折叠缓存里
+        等于把"轨迹可寻址"建在一次重启就消失的事实上。本条与其它读路径同纪律：
+        隔离条件静态写死在 SQL 里（user_id / agent_id），上限沿用 `CANDIDATE_LIMIT`
+        （不另写一个数——两处上限各写一份必然漂移）。
+        """
+        with self._lock:
+            return self._requireConn().execute(
+                "SELECT *, id AS _row FROM evicted_chunks"
+                " WHERE user_id = :user_id AND agent_id = :agent_id AND source = :source"
+                " ORDER BY id DESC LIMIT :limit",
+                {
+                    "user_id": self.user_id,
+                    "agent_id": self.agent_id,
+                    "source": source,
+                    "limit": int(limit),
+                },
+            ).fetchall()
+
     def search(
         self,
         query: Optional[str] = None,
