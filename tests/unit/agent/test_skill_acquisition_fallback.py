@@ -12,6 +12,7 @@
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
@@ -166,3 +167,87 @@ class TestSkillAcquisitionFallback:
             await pipeline._check_skill_acquisition(ctx)
 
         mock_nl.assert_not_awaited()
+
+
+class TestMarketMissReachesRealEntry:
+    """**不走 mock**：市场未命中必须真能走到合成入口。
+
+    上面六条用例都把 `_check_nl_synthesis` 换成 `AsyncMock`，于是只证明了
+    "回退调用发出去了"，没证明"调用进去还有事发生"。T-03 把入口判据从
+    **用户措辞关键词**改成**能力缺口**后，这条回退就成了死路：市场未命中
+    只记一条日志，没人投缺口信号，入口 `detectCapabilityGap()` 读到空即 return
+    —— agent 查到了缺什么、市场也确实没有，却依然什么都不会造
+    （`force=True` 只绕开 auto_acquire 互斥，绕不开缺口判据）。
+
+    根因在上游：`_check_skill_acquisition` 的「市场未命中」分支才是**真正知道**
+    "这条能力取不到"的生产点，缺口信号应当由它在原地投递，而不是让入口去猜。
+    判据：把该分支的投递摘掉 ⇒ 本用例必红。
+    """
+
+    @staticmethod
+    def _agent():
+        from neurova.skill_system import SkillRegistry
+
+        agent = SimpleNamespace(
+            config=SimpleNamespace(agent_id="agent-market-miss"),
+            skill_manager=SimpleNamespace(auto_acquire=True),
+            tool_synthesizer=SimpleNamespace(calls=[]),
+            _skill_registry=SkillRegistry(),
+            tab_name="",
+            _tool_messages_list=[],
+        )
+        agent.tool_synthesizer.synthesize = lambda **kwargs: (
+            agent.tool_synthesizer.calls.append(kwargs)
+            or SimpleNamespace(success=False, synthesized_tool=None)
+        )
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_market_miss_reallyCallsSynthesizer(self):
+        from neurova.agent.capability_gap import clearCapabilityGap
+        from neurova.agent.chat_pipeline import ChatPipeline
+
+        clearCapabilityGap("market-miss")
+        agent = self._agent()
+
+        async def _analyze_task(user_input):
+            return {
+                "skills_needed": [
+                    {"skill_name": "sqlite_inspect_v1", "success": False,
+                     "reason": "not in market"},
+                ],
+                "auto_acquire": True,
+            }
+
+        agent.skill_manager.analyze_task = _analyze_task
+        pipeline = ChatPipeline(agent)
+        ctx = ChatContext(user_input="帮我看看这个库", session_id="market-miss")
+
+        await pipeline._check_skill_acquisition(ctx)
+
+        assert agent.tool_synthesizer.calls, (
+            "市场未命中却根本没走到合成入口——回退是死路（T-03 后入口改为缺口驱动）"
+        )
+
+    @pytest.mark.asyncio
+    async def test_marketHit_doesNotGoToSynthesizer(self):
+        """反向不扩面：市场命中时不得投缺口、不得触发合成。"""
+        from neurova.agent.capability_gap import clearCapabilityGap
+        from neurova.agent.chat_pipeline import ChatPipeline
+
+        clearCapabilityGap("market-hit")
+        agent = self._agent()
+
+        async def _hit(user_input):
+            return {
+                "skills_needed": [{"skill_name": "sqlite_inspect_v1", "success": True}],
+                "auto_acquire": True,
+            }
+
+        agent.skill_manager.analyze_task = _hit
+        pipeline = ChatPipeline(agent)
+        ctx = ChatContext(user_input="帮我看看这个库", session_id="market-hit")
+
+        await pipeline._check_skill_acquisition(ctx)
+
+        assert not agent.tool_synthesizer.calls, "市场已命中却仍触发自主合成"
