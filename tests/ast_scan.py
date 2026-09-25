@@ -72,6 +72,12 @@ class SourceRef(NamedTuple):
     code: str
 
 
+@functools.lru_cache(maxsize=None)
+def _cachedCode(stamp: Tuple[str, int, int]) -> str:
+    """按内容戳缓存文件文本：同进程里 N 个跨文件判据只读盘一次。"""
+    return Path(stamp[0]).read_text(encoding="utf-8", errors="replace")
+
+
 def sourceRefsUnder(root: Path, suffix: str = ".py",
                     hints: Tuple[str, ...] = ()) -> List[SourceRef]:
     """`root` 子树下的源码引用清单：文件系统只读一遍，交给解析/遍历缓存。
@@ -81,19 +87,17 @@ def sourceRefsUnder(root: Path, suffix: str = ".py",
     谓词是 `X.<name>(...)`，连 `<name>` 三个字都没出现的文件不可能命中。
     实测 `neurova/` 1014 文件里含 `attest` 的只有 4 个——预筛把「解析量」从
     **代码总量**变成**命中面**，判据与文件数彻底脱钩（0.06s vs 6.5s）。
+
+    文本读取也走 `_cachedCode()`：预筛**必须先有文本**，而此前本函数对生产根下
+    每个文件（实测 1007 个）都裸读一遍，调用方每符号各来一次 —— 实测 20140 次
+    读盘 / 2.6s 里读盘占 0.67s（`cnb-2p6-1k347lfg1` 的同形账：判据与文件数挂钩）。
+    改后同一进程里同一文件只读一次，口径不变（仍是全量清单 + hints 过滤）。
     """
-    refs = [SourceRef(path, _cacheKey(path),
-                      path.read_text(encoding="utf-8", errors="replace"))
+    refs = [SourceRef(path, _cacheKey(path), _cachedCode(_cacheKey(path)))
             for path in filesUnder(root, suffix)]
     if not hints:
         return refs
     return [ref for ref in refs if any(hint in ref.code for hint in hints)]
-
-
-@functools.lru_cache(maxsize=None)
-def _cachedCode(stamp: Tuple[str, int, int]) -> str:
-    """按内容戳缓存文件文本：同进程里 N 个跨文件判据只读盘一次。"""
-    return Path(stamp[0]).read_text(encoding="utf-8", errors="replace")
 
 
 def sourceCode(path: Path) -> str:
