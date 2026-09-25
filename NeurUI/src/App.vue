@@ -1,5 +1,5 @@
 <template>
-  <a-config-provider :get-popup-container="getPopupContainer" :theme="antdTheme" :locale="antdLocale">
+  <a-config-provider :get-popup-container="overlayContainerToBody" :theme="antdTheme" :locale="antdLocale">
     <div :data-theme="appStore.theme" :data-skin="appStore.skin" class="nr-app">
       <!-- 氛围壁纸（登录页与受保护页面共用，随主题明暗变化） -->
       <div class="star-bg" />
@@ -30,6 +30,7 @@ import { useAgentStore } from '@/stores/agents'
 import { initErrorReporter, setErrorReporterInstance } from '@/utils/errorReporter'
 import ModelDownloadDialog from '@/components/ModelDownloadDialog.vue'
 import { listPendingDownloads } from '@/api/modules/models'
+import { overlayContainerToBody } from '@/utils/overlay'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -55,11 +56,6 @@ const antdLocale = computed<ConfigProviderProps['locale']>(() => {
   }
   return map[locale.value] ?? localeEnUS
 })
-
-// 弹层必须挂 body：玻璃容器（GlassPanel 等）overflow:hidden 会截断挂在
-// triggerNode.parentNode 里的弹层（默认 LLM 下拉被裁剪事故 2026-09-09）。
-// 需要弹层跟随滚动容器的个别组件已显式传自己的 get-popup-container（组件级优先）。
-const getPopupContainer = () => document.body
 
 /** Ant Design 主题联动：双皮肤（cosmic 原版 / ios Liquid Glass）× 深浅色。
  *  与 variables.css 四组令牌 + tokens.ts 保持一致。 */

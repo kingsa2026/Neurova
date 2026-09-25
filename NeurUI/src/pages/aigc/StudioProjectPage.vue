@@ -29,6 +29,7 @@ import type { SlideshowItem } from '@/components/aigc/types'
 import { mergeEpisode, type MergeResult } from '@/api/modules/studio'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { basenameOf } from '@/utils/pathText'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -169,11 +170,8 @@ async function addManualShot() {
 }
 
 /** A1：镜头尾帧（先画后动）——上传落盘后写入 end_frame_path */
-function fileNameOf(p?: string): string {
-  return (p || '').split(/[\\/]/).pop() || ''
-}
 function fileUrlOf(p?: string): string {
-  return p ? withFileToken(`/api/v1/generation/files/${fileNameOf(p)}`) : ''
+  return p ? withFileToken(`/api/v1/generation/files/${basenameOf(p)}`) : ''
 }
 
 async function applyShotEndFrame(sb: StudioStoryboard, path: string) {
@@ -407,7 +405,7 @@ defineExpose({
           <div class="studio-asset-grid">
             <div v-for="c in characters" :key="c.id" class="studio-asset-card">
               <div class="studio-asset-img">
-                <img v-if="c.image_path" :src="withFileToken('/api/v1/generation/files/' + c.image_path.split(/[\\/]/).pop())" :alt="c.name" />
+                <img v-if="c.image_path" :src="withFileToken('/api/v1/generation/files/' + basenameOf(c.image_path))" :alt="c.name" />
                 <div v-else class="studio-asset-placeholder">{{ c.status }}</div>
               </div>
               <div class="studio-asset-name">@{{ c.name }} <a-tag v-if="c.role">{{ c.role }}</a-tag></div>
@@ -502,7 +500,7 @@ defineExpose({
             <GlassButton size="sm" @click="uploadBgm">
               {{ bgmPath ? t('studio.replaceBgm') : t('studio.uploadBgm') }}
             </GlassButton>
-            <span v-if="bgmPath" class="studio-merge-mode">{{ fileNameOf(bgmPath) }}</span>
+            <span v-if="bgmPath" class="studio-merge-mode">{{ basenameOf(bgmPath) }}</span>
             <span v-if="mergeResult" class="studio-merge-mode">
               {{ mergeResult.composed ? t('studio.mergedMp4') : t('studio.mergedManifest') }}
             </span>

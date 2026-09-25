@@ -34,7 +34,7 @@
           <span class="nr-session-icon"><UiIcon name="chat" :size="14" /></span>
           <span class="nr-session-name">{{ session.title }}</span>
           <span v-if="session.sourceChannel" class="nr-session-channel" :title="session.channelName || session.sourceChannel">{{ session.sourceChannel }}</span>
-          <a-dropdown :trigger="['click']" :get-popup-container="getPopupContainer" @click.stop>
+          <a-dropdown :trigger="['click']" :get-popup-container="overlayContainerToBody" @click.stop>
             <span class="nr-session-menu-btn" @click.stop>⋯</span>
             <template #overlay>
               <a-menu>
@@ -61,7 +61,6 @@
 
 <script setup lang="ts">
 // 菜单弹层挂 body：dock/侧栏容器 overflow:hidden 会挤压弹层宽度（文字竖排）
-const getPopupContainer = (trigger: HTMLElement) => document.body
 /**
  * 左侧会话侧栏（chat 布局模式）：模板原样迁自 ChatPage（2026-09-08 拆分）。
  * 会话分组/拖拽重排/置顶/存档走 useSessionOps；switchSession 与流式状态机
@@ -76,6 +75,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 import { useSessionOps } from '@/composables/useSessionOps'
 import UiIcon from '@/components/UiIcon.vue'
+import { overlayContainerToBody } from '@/utils/overlay'
 
 defineEmits<{
   switch: [sessionId: string]
