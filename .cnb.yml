@@ -447,39 +447,33 @@ main:
   fi
 
 $:
-  # ── 轮数触顶接力（回答 Issue #131；根因修复见 Issue #158）─────────────────
-  # 事实（两次真实构建实测，不是推测）：
+  # ── 轮数触顶接力（回答 Issue #131；判据两次收口见 Issue #158 / #189）─────
+  # 事实（真实构建实测，不是推测）：
   #   cnb-2e8-1k341d9s1：201 轮 / 3191326ms，Stage 报 `Agent aborted: reached
   #                      maxTurns limit (200)`
   #   cnb-2v8-1k34htd2p：200 轮 / 2362852ms，同上
   #
-  # 落点（单一事实源）：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff` ——
-  #   收尾 Stage 读的就是它，写它的只有 scripts/ci/npc_turn_handoff_gate.py 一处。
-  # 两次的收尾 Stage「轮数触顶接力」都是 `skipped`，Issue 上没有任何回音。
+  # 三轮修法的历史（每轮都被下一个真实构建推翻，记在这里免得再犯）：
+  #   1) 燃料由 Agent 在最后一轮自己写 → 撞 maxTurns 时平台**不执行任何收尾
+  #      指令/工具调用**，Agent 没有机会写；`if` 恒假，接力是一条死配置。
+  #   2) 燃料改由构建侧在 Agent 开工前**无条件**写出（`CNB` 非空即写，
+  #      真实构建里恒真）→ `if` 恒**真**。这不是判据写松了，而是判据的输入端
+  #      被自己填成了真值：该变量回答「上一轮是否用满配额」，而得知这件事的
+  #      唯一时点是收尾期。后果是空轮防护全失效 —— 任一正常收官也照拉下一轮：
+  #        cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
+  #        cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
+  #   3) 现形态：判据改读**平台在收尾期注入的事实**，不再有任何自造标记。
   #
-  # 根因不是"没人写标记"，而是**标记永远写不出**：
-  #   撞 maxTurns 时平台只是把 Agent 中止，**不执行任何收尾指令/工具调用** ——
-  #   Agent 没有机会在触顶那一轮执行「把 1 写进
-  #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff`」。
-  #   读端（`endStages` 的 `if`）因此恒假，接力是一条死配置，
-  #   而"看着配了、其实永不触发"平台不会报任何错。
-  #
-  # 修法（教义第 1 条：修在上游生产该状态的地方）：
-  #   燃料改由**本流水线自己在 Agent 开工前写**（Stage 1 调用
-  #   scripts/ci/npc_turn_handoff_gate.py，它把标记写到
-  #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 并读回自证），
-  #   不再依赖 Agent 的记忆与触顶那一轮的执行机会。
-  #   判据仍是 env 传入的那一个变量，不新增第二种判据（教义第 6 条）。
-  #
-  # 空轮防护（为什么不是"每次都接力"）：
-  #   `if` 恒真会使用户只说一句「你好」也无限接力烧配额。故 Stage 1 在写入燃料时
-  #   **同时经平台声明的导出通道回写接力变量**：stdout 的 `##[set-output]` 标记
-  #   ＋ 同一 Stage 上的 `exports` 映射（生命周期覆盖整个 Pipeline，含 endStages）。
-  #   上一批曾用 `$GITHUB_ENV` 同源的 `$CNB_ENV` 文件通道 —— 那是一条**不存在的
-  #   路径**（官方文档零命中，真实构建里也未注入），已被证伪并换掉。于是：
-  #     用户新发的 @   → 变量为空 → 不接力（空轮不烧配额）
-  #     碰完 maxTurns 的构建 → 变量为 1 → 自动接力下一轮
-  #   链路上没有任何一处需要 Agent 配合，也没有第二套状态文件。
+  # 判据（平台「环境变量」篇，收尾期可读；构建 cnb-s4f-1k3c46us9 与
+  # cnb-p2q-1k3c2g7u3 以真 npc:go 撞 maxTurns 实测）：
+  #   $CNB_PIPELINE_STATUS   收尾期的流水线状态（`error` 表示 stages 失败）
+  #   $CNB_BUILD_FAILED_MSG  失败原文，撞顶时为
+  #                          `Agent aborted: reached maxTurns limit (N)`
+  #   ⇒ 两者同时成立才接力。用户只说一句「你好」的正常收官是 `success`，
+  #     第一条即为假，不接力（空轮不烧配额）。
+  #   为什么按原文片段判而不是只看 status：`stages` 失败的原因有很多种
+  #   （门禁红、依赖装不上、脚本报错），只有"用满轮数"才该续跑；
+  #   把任何失败都接成新一轮，等于把真故障转写成烧配额。
   #
   # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
   #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
@@ -488,8 +482,6 @@ $:
   #   里没有 `@npc` 一族，也没有其宿主 `issue.comment` / `pull_request.comment`。
   #   平台校验的是**宿主事件**，不是 `options.event` 的取值 ——
   #   改 event 绕不开，那笔接力在写下那一刻就注定执行不了。
-  #   前两批把它当成"event 取值问题"修（同名事件 → api_trigger_*），
-  #   于是每次都在真被执行时以同一句 error 收场。
   #   改用 `cnb:trigger`（适用**所有事件**，官方 trigger.md）：
   #   slug 必填（不默认当前仓库）、branch 显式点名（它默认主分支，
   #   而 PR 评论事件跑在 PR 目标分支，不传会接力到主分支上落空）。
@@ -518,33 +510,18 @@ $:
   .npc-dscoder-job: &npc-dscoder-job
     - docker:
         image: cnbcool/default-npc:latest
-      env:
-        turnLimitReached: $turnLimitReached
       envScript: *npc-script-interpreter
       stages:
-        - name: "轮数触顶接力：写入并自证燃料（触顶轮也跑得到，不碰 Agent）"
-          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
-          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
-          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
-          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
-          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
-          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+        - name: "构建环境自证：工作区落点可达且与 $PWD 同址"
+          # 本步是**诊断自证**，不是接力的燃料来源：
+          #   接力判据自 Issue #189 起直接读平台在收尾期注入的
+          #   $CNB_PIPELINE_STATUS / $CNB_BUILD_FAILED_MSG（见上方注释块"判据"），
+          #   构建侧不再产出任何被 `if` 消费的真值 —— 那正是上一轮恒真的根因。
+          # 保留本步的理由：它回答"接力发生在哪个工作区、$PWD 是不是同一处"，
+          #   并把读数（`marker_check` / `working_directory_check`）留在日志里。
+          #   判据在 Agent 开工**之前**跑：环境前提有问题要在烧掉整轮预算前响亮。
           script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
-          # 把门禁写出的 `##[set-output]` 标记映射成环境变量（键名见下方映射）。
-          # 平台依据（docs.cnb.cool 的「环境变量」篇）：CI 按行识别 stdout 的
-          #   `##[set-output key=value]` 放进本 Job 的 `result`；再由 `exports`
-          #   映射为环境变量，**生命周期为当前 Pipeline** —— 因此收尾 `endStages`
-          #   的 `if` 读得到，这正是接力判据需要的可见性。
-          # 为什么不是文件通道（上一批写法，已被证伪）：
-          #   平台**不提供** `$CNB_ENV` / `$GITHUB_ENV`（官方文档全文零命中，
-          #   本次真实构建里也未注入）。往不存在的路径追加内容既不生效、
-          #   也不报错 —— 接力会在绿灯下静默失效。`GITHUB_ENV` 同源的写法
-          #   只在 GitHub Actions 成立，照搬到 CNB 是一条不存在的路径。
-          # 键名与门禁脚本的 SET_OUTPUT_KEY 同源，漂移由
-          #   tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
-          exports:
-            turnLimitReached: turnLimitReached
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # npc:go 的 `timeout` 作用于 Agent 的**每一次工具执行**（bash 命令），
           # 不是整个 Agent 会话；会话整体只受流水线 20h 上限约束。
@@ -566,17 +543,18 @@ $:
             #  枚举里确有 max。要不要提到 max 是耗时/质量权衡，属功能决策，
             #  与本次流水线失败无关，故只纠正说法、不动取值。）
             thinkingLevel: xhigh
-      # 轮数触顶后自动开启下一轮。`if` 的判据只有一处（本文件 env 传入的那一个
-      # 变量），由 Stage 1 经 `##[set-output]` + `exports` 回写；
-      # 不新增第二套状态文件或计数器。
+      # 轮数触顶后自动开启下一轮。判据读平台在收尾期注入的两个事实
+      # （$CNB_PIPELINE_STATUS=error 且失败原文含 `reached maxTurns limit`），
+      # 全仓只有这一处判据，不新增状态文件或计数器。
       # `env` 里的对话载体由外层两条事件各自补（见下方 `<<:` 覆写）——
       # 评论触发时平台注入的 `CNB_ISSUE_IID` / `CNB_PULL_REQUEST_IID`
       # 在 `api_trigger` 流水线里不会再出现，不传下去下一轮读不到 Issue/PR。
       endStages:
-        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+        - name: "轮数触顶接力：自动开启下一轮（正常收官不接力）"
           type: cnb:trigger
           if:
-            - '[ "$turnLimitReached" = "1" ]'
+            - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -584,10 +562,11 @@ $:
   issue.comment@npc:
     - <<: *npc-dscoder-job
       endStages:
-        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+        - name: "轮数触顶接力：自动开启下一轮（正常收官不接力）"
           type: cnb:trigger
           if:
-            - '[ "$turnLimitReached" = "1" ]'
+            - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -597,21 +576,21 @@ $:
             # api_trigger_npc_handoff 在那边可能根本不存在（接力静默落空）。
             branch: $CNB_BRANCH
             env:
-              turnLimitReached: $turnLimitReached
               handoffIssueIid: $CNB_ISSUE_IID
   pull_request.comment@npc:
     - <<: *npc-dscoder-job
       endStages:
-        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+        - name: "轮数触顶接力：自动开启下一轮（正常收官不接力）"
           type: cnb:trigger
           if:
-            - '[ "$turnLimitReached" = "1" ]'
+            - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
             branch: $CNB_BRANCH
             env:
-              turnLimitReached: $turnLimitReached
+              handoffIssueIid: $CNB_ISSUE_IID
               handoffPrIid: $CNB_PULL_REQUEST_IID
 
   # ── 接力落点：轮数触顶后「下一轮」的真正入口 ──────────────────────────
@@ -661,6 +640,26 @@ $:
             contextWindow: 1m
             maxTokens: 48k
             thinkingLevel: xhigh
+      # 接力载体自己也要有心跳：否则接力只有一跳 —— 第一轮撞顶拉起的第二轮
+      # 若再撞顶，链条即断，用户仍收不到回音（与 Issue #131 最初的断点同形，
+      # 只是往后挪了一跳）。判据与 `@npc` 两条同源：读平台在收尾期注入的
+      # $CNB_PIPELINE_STATUS + $CNB_BUILD_FAILED_MSG。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（正常收官不接力）"
+          type: cnb:trigger
+          if:
+            - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
+          options:
+            slug: $CNB_REPO_SLUG
+            event: api_trigger_npc_handoff
+            # 本流水线跑在主分支（`cnb:trigger` 默认主分支，此处不传 branch 即主分支），
+            # 与 `@npc` 两条显式传 `$CNB_BRANCH` 是同一件事，只是取值不同。
+            env:
+              # 对话载体继续往下传：`api_trigger` 流水线里没有 CNB_ISSUE_IID /
+              # CNB_PULL_REQUEST_IID，只有上一轮经 env 递过来的这两个变量。
+              handoffIssueIid: $handoffIssueIid
+              handoffPrIid: $handoffPrIid
 
 # 两个角色名都不挂顶层 key：`DSCoder` 与 `DSCoder-max` 一律落到 `$` 兜底。
 #

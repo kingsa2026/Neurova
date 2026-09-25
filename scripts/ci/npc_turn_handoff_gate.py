@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""NPC 轮数触顶接力门禁（Issue #145）。
+"""NPC 接力构建环境自证（Issue #145；判据两轮收口见 Issue #189）。
 
-## 为什么需要这道门禁
+## 这道自证回答什么
 
-`npc:go` 撞到 `maxTurns` 时，平台只是把 Agent 中止、把流水线判为失败，
-**不会**读这个中止事件、更不会重开一轮预算（构建 cnb-2e8-1k341d9s1 实测：
-3191326ms 后 Stage 以 `Agent aborted: reached maxTurns limit (200)` 收场，
-而同一份配置里的接力 Stage 被 skipper 跳过，Issue 上没有任何回音）。
-所以「撞顶之后把活交给下一轮」必须在配置里显式写出来。
+`npc:go` 撞到 `maxTurns` 时，平台把 Agent 中止、不执行任何收尾指令或工具调用
+（构建 cnb-2e8-1k341d9s1 / cnb-2v8-1k34htd2p 实测：3191326ms / 2362852ms 后被
+`Agent aborted: reached maxTurns limit (200)` 收场）。故"撞顶后把活交给下一轮"
+只能由**配置侧**在收尾阶段显式判出来。
 
-配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:trigger`）。
-**根因（Issue #158，构建 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 实测）**：
-接力的燃料曾指定由 Agent 在最后一轮自己写出标记文件 —— 而撞 maxTurns 时平台
-只是把 Agent 中止、**不执行任何收尾指令或工具调用**，Agent 根本没有机会写。
-于是接力的 `if` 恒假、收尾 Stage 每次都是 `skipped`，
-接力是一条"看着配了、其实永不触发"的死配置（平台不会为此报任何错）。
+判据经历三轮，每轮都被下一个真实构建推翻：
 
-故燃料改由**本门禁在 Agent 开工前写入**（它就是那个写点，也是自证点）：
-触顶那一轮跑不到任何指令，燃料就不可能来自 Agent。同时把
-`turnLimitReached=1` 经**平台声明的导出通道**（stdout 的 `##[set-output]` 标记 +
-`.cnb.yml` 同一 Stage 上的 `exports` 映射）交给收尾的 `cnb:trigger`，
-让"这一轮是接力轮"这件事在配置期就成立，不依赖 Agent 的记忆。
+1. 燃料由 Agent 在最后一轮自己写标记文件 → 触顶那一轮跑不到任何指令，
+   `if` 恒假、收尾 Stage 每次 `skipped`，Issue 上没有任何回音。
+2. 燃料改由本门禁在 Agent 开工前**无条件**写出（`CNB` 非空即写，真实构建里恒真），
+   再经 stdout 的 `##[set-output]` + `exports` 变成 Pipeline 级环境变量 →
+   `if` 恒**真**。这不是判据写松了，而是**判据的输入端被自己填成了真值**：
+   该变量回答「上一轮是否用满配额」，而得知这件事的唯一时点是收尾期。
+   后果是空轮防护全失效，正常收官也照拉下一轮：
+     cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
+     cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
+3. 现形态（Issue #189）：收尾 `if` 直接读**平台在收尾期注入的事实** ——
+   `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（平台「环境变量」篇；
+   真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）。
+   构建侧不再产出任何被 `if` 消费的真值，故**本门禁不再写任何接力标记**。
 
-通道本身还有一条平台约束（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
-  `cnb:apply` 的适用事件白名单里**没有** `@npc` 一族（也没有其宿主
-  `issue.comment` / `pull_request.comment`），校验看的是**宿主事件**，
-  改 `options.event` 绕不开。故收尾接力改用 `cnb:trigger`
-  （适用「所有事件」），并显式传 `slug` 与 `branch`。
+## 本门禁现在做什么
 
-本门禁回答一个只有真实构建能回答的问题：**在有改动的真实构建里，
-`$CNB_BUILD_WORKSPACE` 到底等不等于构建容器的工作目录**。
+只做一件事：把接力的**环境前提**在 Agent 开工前证一遍 ——
 
-## 判据与自证
+- 断言 `$CNB_BUILD_WORKSPACE` 存在、可写、写后读得回（探针文件即用即删）；
+- 反向自证 `$PWD` 是否等于 `$CNB_BUILD_WORKSPACE`：两者不同即说明"Agent 按字面
+  理解写文件"会写错地方，这本身就是一份可读读数（打印出来，不判红 ——
+  它不是本门禁要裁的非法状态）。
 
-- 断言 `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可达（能写、能读回、值相符）。
-- 反向自证：在同一构建里写 `$PWD/.npc-turn-handoff`，比对 `$PWD` 是否等于
-  `$CNB_BUILD_WORKSPACE`。两者不同即说明"Agent 按字面理解写文件"会写错地方，
-  这本身就是一份可读的读数（打印出来，不判红——它不是本门禁要裁的非法状态）。
-- 缺 `$CNB_BUILD_WORKSPACE`：判红。它不是"环境没配好"，而是接力判据没有落点，
-  必须点名而不是静默跳过。
+缺 `$CNB_BUILD_WORKSPACE`：判红。它不是"环境没配好"，而是环境前提没有落点，
+必须点名而不是静默跳过。
 
 用法：
     python scripts/ci/npc_turn_handoff_gate.py          # 人类可读
@@ -53,7 +49,7 @@ Agent 那一步被 skipper 跳过，用户在 Issue 上只看到「构建失败�
 故本脚本自带**逐字等价**的 node 分支：解释器由 `.cnb.yml` 的探测结果给出
 （python3 → python → node），判据、读数键名、退出码三处都不因解释器而漂移。
 两份实现的等价性由
-tests/unit/test_ci_npc_config_guard.py::TestNpcScriptInterpreterReachability 常驻校验。
+tests/unit/ci/test_ci_npc_config_guard.py::TestNpcScriptInterpreterReachability 常驻校验。
 """
 
 from __future__ import annotations
@@ -64,27 +60,10 @@ import os
 import sys
 from pathlib import Path
 
-#: 接力标记的文件名。这是 `.cnb.yml` 收尾阶段唯一的读点，
-#: 也是 `.cnb/settings.yml` 人设里唯一的写法约定。
-HANDOFF_MARKER_FILE = ".npc-turn-handoff"
-
-#: 「本轮是接力轮」的变量名。与 `.cnb.yml` 的 `env.turnLimitReached`、
-#: `endStages.if` 逐字一致 —— 该判据全仓只有一处事实源（git grep 可见）。
-TURN_FLAG_VAR = "turnLimitReached"
-
-#: 把 `TURN_FLAG_VAR` 导出给收尾阶段所用的一对名字，逐字对应 `.cnb.yml` 里
-#: 调用本脚本那个 Stage 的 `exports` 映射：
-#:
-#:     script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
-#:     exports:
-#:       <SET_OUTPUT_KEY>: <TURN_FLAG_VAR>
-#:
-#: 平台**没有** `$CNB_ENV` / `$GITHUB_ENV` 这类文件通道（官方文档
-#: 「环境变量」「默认环境变量」两篇全文零命中；本次真实构建里该变量也未注入）。
-#: 文本输出与 `exports` 的映射关系写在两处，故这三处名字必须同源，由
-#: tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
-SET_OUTPUT_DIRECTIVE = "##[set-output"
-SET_OUTPUT_KEY = TURN_FLAG_VAR
+#: 探针文件名。本门禁写它、读回、再删掉 —— 只为证明工作区**可写**，
+#: 与接力判据无关（判据读平台在收尾期注入的两个变量，见模块 docstring 第 3 轮）。
+#: 名字带 `probe` 就是为了一眼看出它没有下游消费者，避免被当成"燃料"再次接线。
+WORKSPACE_PROBE_FILE = ".npc-workspace-probe"
 
 
 def resolveWorkspaceRoot(env: dict) -> str:
@@ -93,41 +72,14 @@ def resolveWorkspaceRoot(env: dict) -> str:
 
 
 def checkWorkspaceWritable(root: str) -> dict:
-    """在给定根下写标记文件并读回，证明收尾阶段确实能读到它。"""
-    marker = Path(root) / HANDOFF_MARKER_FILE
+    """在给定根下写探针文件并读回，证明工作区确实可写（探针即用即删）。"""
+    marker = Path(root) / WORKSPACE_PROBE_FILE
     marker.write_text("1", encoding="utf-8")
     try:
         readback = marker.read_text(encoding="utf-8").strip()
     finally:
         marker.unlink(missing_ok=True)
-    return {"marker": str(marker), "readback": readback, "ok": readback == "1"}
-
-
-def markTurnAsHandoff(env: dict) -> dict:
-    """把「本轮是接力轮」交给后续 Stage 与收尾的 `cnb:trigger`。
-
-    通道：平台声明的 **stdout 标记协议** —— 本函数向标准输出写一行
-
-        ##[set-output turnLimitReached=1]
-
-    CI 按行识别该标记，把它放进本 Job 的 `result`；再由 `.cnb.yml` 同一 Stage 上的
-    `exports` 把它映射成环境变量。平台文档明确：`exports` 导出的变量**生命周期为
-    当前 Pipeline**，因此 `endStages` 的 `if` 读得到 —— 这正是接力判据需要的可见性。
-
-    为什么不用文件通道（上一批的写法，已被证伪）：
-      平台不提供 `$CNB_ENV` / `$GITHUB_ENV`（官方文档零命中，真实构建里也未注入）。
-      往一个不存在的路径追加内容既写不出、也不报错，接力会在绿灯下静默失效。
-
-    返回值保留为一份可复算的读数：真实构建日志里能看见它到底走没走通。
-    只写一个变量、一种写法：接力判据全仓单点，不许出现第二种状态文件。
-    """
-    if not (env.get("CNB") or "").strip() and not (env.get("CI") or "").strip():
-        # 本地直跑（无 CI 标记）时不往 stdout 注入协议行，避免污染人类可读输出；
-        # 仍然如实报告"未发出"，让读数与 CI 里一致可解释。
-        return {"written": False, "channel": None, "reason": "非 CI 环境，未发出 set-output 标记"}
-    sys.stdout.write(f"{SET_OUTPUT_DIRECTIVE} {SET_OUTPUT_KEY}=1]\n")
-    sys.stdout.flush()
-    return {"written": True, "channel": SET_OUTPUT_DIRECTIVE, "key": SET_OUTPUT_KEY}
+    return {"probe": str(marker), "readback": readback, "ok": readback == "1"}
 
 
 def checkWorkingDirectory(env: dict, cwd: str) -> dict:
@@ -151,30 +103,27 @@ def main() -> int:
 
     if not root:
         failures.append(
-            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，"
-            "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
+            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，"
+            "本步无法自证工作区可写与 $PWD 同址"
         )
     elif not Path(root).is_dir():
         failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
     else:
         try:
-            result["marker_check"] = checkWorkspaceWritable(root)
-            if not result["marker_check"]["ok"]:
+            result["probe_check"] = checkWorkspaceWritable(root)
+            if not result["probe_check"]["ok"]:
                 failures.append(
-                    f"{HANDOFF_MARKER_FILE} 写入后读不回原值 —— 收尾阶段会判定「未触顶」"
+                    f"{WORKSPACE_PROBE_FILE} 写入后读不回原值 —— 工作区不可信，接力环境前提不成立"
                 )
         except OSError as exc:
-            failures.append(f"{HANDOFF_MARKER_FILE} 写入失败: {type(exc).__name__}: {exc}")
+            failures.append(f"{WORKSPACE_PROBE_FILE} 写入失败: {type(exc).__name__}: {exc}")
 
     result["working_directory_check"] = checkWorkingDirectory(os.environ, os.getcwd())
     if root and not result["working_directory_check"]["identical"]:
         result["working_directory_divergence"] = (
-            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到"
-            "「工作区工作目录」，收尾阶段读不到，接力整条失效"
+            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到"
+            "「工作区工作目录」，与门禁自证的位置不是一处"
         )
-
-    if not failures:
-        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
 
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
@@ -187,7 +136,7 @@ def main() -> int:
         lines += [f"  - {item}" for item in failures]
         sys.stdout.write("\n".join(lines) + "\n")
         return 1
-    lines += ["", "✅ 接力判据可达：收尾阶段能读到标记文件"]
+    lines += ["", "✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址"]
     sys.stdout.write("\n".join(lines) + "\n")
     return 0
 
@@ -200,10 +149,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const HANDOFF_MARKER_FILE = ".npc-turn-handoff";
-const TURN_FLAG_VAR = "turnLimitReached";
-const SET_OUTPUT_DIRECTIVE = "##[set-output";
-const SET_OUTPUT_KEY = TURN_FLAG_VAR;
+const WORKSPACE_PROBE_FILE = ".npc-workspace-probe";
 
 // 与 Python 的 json.dumps 对齐：缩进 2 空格、**不**转义非 ASCII、
 // 字符串外的空格与 Python 的 separators 一致（", " / ": "）。
@@ -255,7 +201,7 @@ function resolveWorkspaceRoot(env) {
 }
 
 function checkWorkspaceWritable(root) {
-  const marker = path.join(root, HANDOFF_MARKER_FILE);
+  const marker = path.join(root, WORKSPACE_PROBE_FILE);
   let readback = null;
   let failReason = null;
   try {
@@ -275,14 +221,6 @@ function realpathOrSelf(target) {
   try { return fs.realpathSync(target); } catch (e) { return path.resolve(target); }
 }
 
-function markTurnAsHandoff(env) {
-  if (!String(env.CNB || "").trim() && !String(env.CI || "").trim()) {
-    return { written: false, channel: null, reason: "非 CI 环境，未发出 set-output 标记" };
-  }
-  process.stdout.write(SET_OUTPUT_DIRECTIVE + " " + SET_OUTPUT_KEY + "=1]\n");
-  return { written: true, channel: SET_OUTPUT_DIRECTIVE, key: SET_OUTPUT_KEY };
-}
-
 function checkWorkingDirectory(env, cwd) {
   const root = resolveWorkspaceRoot(env);
   return {
@@ -300,29 +238,25 @@ function main(argv) {
 
   if (!root) {
     failures.push(
-      "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，" +
-      "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）");
+      "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，" +
+      "本步无法自证工作区可写与 $PWD 同址");
   } else if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     failures.push("CNB_BUILD_WORKSPACE 指向的目录不存在: " + root);
   } else {
     const check = checkWorkspaceWritable(root);
-    result.marker_check = { marker: check.marker, readback: check.readback, ok: check.ok };
+    result.probe_check = { probe: check.marker, readback: check.readback, ok: check.ok };
     if (check.failReason) {
-      failures.push(HANDOFF_MARKER_FILE + " 写入失败: " + check.failReason);
+      failures.push(WORKSPACE_PROBE_FILE + " 写入失败: " + check.failReason);
     } else if (!check.ok) {
-      failures.push(HANDOFF_MARKER_FILE + " 写入后读不回原值 —— 收尾阶段会判定「未触顶」");
+      failures.push(WORKSPACE_PROBE_FILE + " 写入后读不回原值 —— 工作区不可信，接力环境前提不成立");
     }
   }
 
   result.working_directory_check = checkWorkingDirectory(process.env, process.cwd());
   if (root && !result.working_directory_check.identical) {
     result.working_directory_divergence =
-      "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到" +
-      "「工作区工作目录」，收尾阶段读不到，接力整条失效";
-  }
-
-  if (!failures.length) {
-    result.turn_flag_handoff = markTurnAsHandoff(process.env);
+      "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到" +
+      "「工作区工作目录」，与门禁自证的位置不是一处";
   }
 
   if (asJson) {
@@ -345,7 +279,7 @@ function main(argv) {
     return 1;
   }
   lines.push("");
-  lines.push("✅ 接力判据可达：收尾阶段能读到标记文件");
+  lines.push("✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址");
   process.stdout.write(lines.join("\n") + "\n");
   return 0;
 }
@@ -365,30 +299,27 @@ def main() -> int:
 
     if not root:
         failures.append(
-            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，"
-            "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
+            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，"
+            "本步无法自证工作区可写与 $PWD 同址"
         )
     elif not Path(root).is_dir():
         failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
     else:
         try:
-            result["marker_check"] = checkWorkspaceWritable(root)
-            if not result["marker_check"]["ok"]:
+            result["probe_check"] = checkWorkspaceWritable(root)
+            if not result["probe_check"]["ok"]:
                 failures.append(
-                    f"{HANDOFF_MARKER_FILE} 写入后读不回原值 —— 收尾阶段会判定「未触顶」"
+                    f"{WORKSPACE_PROBE_FILE} 写入后读不回原值 —— 工作区不可信，接力环境前提不成立"
                 )
         except OSError as exc:
-            failures.append(f"{HANDOFF_MARKER_FILE} 写入失败: {type(exc).__name__}: {exc}")
+            failures.append(f"{WORKSPACE_PROBE_FILE} 写入失败: {type(exc).__name__}: {exc}")
 
     result["working_directory_check"] = checkWorkingDirectory(os.environ, os.getcwd())
     if root and not result["working_directory_check"]["identical"]:
         result["working_directory_divergence"] = (
-            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到"
-            "「工作区工作目录」，收尾阶段读不到，接力整条失效"
+            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到"
+            "「工作区工作目录」，与门禁自证的位置不是一处"
         )
-
-    if not failures:
-        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
 
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
@@ -401,7 +332,7 @@ def main() -> int:
         lines += [f"  - {item}" for item in failures]
         sys.stdout.write("\n".join(lines) + "\n")
         return 1
-    lines += ["", "✅ 接力判据可达：收尾阶段能读到标记文件"]
+    lines += ["", "✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址"]
     sys.stdout.write("\n".join(lines) + "\n")
     return 0
 
