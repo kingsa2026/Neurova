@@ -94,7 +94,7 @@
                   <a-rate :value="record.proficiency || 0" disabled :count="5" style="font-size: 12px" />
                 </template>
                 <template v-else-if="column.key === 'outcome'">
-                  <a-tag :color="record.outcome === 'success' ? 'green' : record.outcome === 'failure' ? 'red' : 'default'">
+                  <a-tag :color="outcomeColor(record.outcome)">
                     {{ record.outcome || 'unknown' }}
                   </a-tag>
                 </template>
@@ -144,7 +144,7 @@
                   <a-tag color="purple">{{ record.task_type }}</a-tag>
                 </template>
                 <template v-else-if="column.key === 'outcome'">
-                  <a-tag :color="record.outcome === 'success' ? 'green' : record.outcome === 'failure' ? 'red' : record.outcome === 'partial' ? 'orange' : 'default'">
+                  <a-tag :color="outcomeColor(record.outcome)">
                     {{ record.outcome || 'unknown' }}
                   </a-tag>
                 </template>
@@ -223,7 +223,7 @@
             <GlassCard v-for="rec in recommendations" :key="rec.id" variant="subtle">
               <div class="rec-item">
                 <div class="rec-header">
-                  <a-tag :color="rec.outcome === 'success' ? 'green' : rec.outcome === 'failure' ? 'red' : 'blue'">
+                  <a-tag :color="outcomeColor(rec.outcome)">
                     {{ rec.outcome || 'info' }}
                   </a-tag>
                   <span class="rec-skill">{{ rec.task_type || rec.skill_name }}</span>
@@ -258,7 +258,7 @@
           <div v-for="sim in similarExperiences" :key="sim.id" class="similar-item">
             <div class="similar-header">
               <span class="similar-skill">{{ sim.task_type || sim.skill_name }}</span>
-              <a-tag :color="sim.outcome === 'success' ? 'green' : sim.outcome === 'failure' ? 'red' : 'default'">{{ sim.outcome }}</a-tag>
+              <a-tag :color="outcomeColor(sim.outcome)">{{ sim.outcome }}</a-tag>
             </div>
             <div class="similar-content">{{ sim.context }}</div>
             <div v-if="sim.lessons?.length" class="similar-lessons">
@@ -293,7 +293,7 @@
           <a-select v-model:value="createForm.outcome" style="width: 100%">
             <a-select-option value="success">{{ t('experience.outcomeSuccess') }}</a-select-option>
             <a-select-option value="failure">{{ t('experience.outcomeFailure') }}</a-select-option>
-            <a-select-option value="partial">{{ t('experience.outcomePartial') }}</a-select-option>
+            <a-select-option value="unevidenced">{{ t('experience.outcomeUnevidenced') }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('growth.lesson') + 's'">
@@ -313,7 +313,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as experienceApi from '@/api/modules/experience'
-import type { ExperienceDisposition, ExperienceRecord, ExperienceStats } from '@/api/modules/experience'
+import type { ExperienceDisposition, ExperienceOutcome, ExperienceRecord, ExperienceStats } from '@/api/modules/experience'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -356,7 +356,13 @@ const showSimilarModal = ref(false)
 
 // Create form
 const showCreateModal = ref(false)
-const createForm = ref({
+const createForm = ref<{
+  task_type: string
+  context: string
+  /** 契约词域与后端同一份（`ExperienceOutcome`）；此前这里是裸 string 且表单给 partial，后端不认 */
+  outcome: ExperienceOutcome
+  lessons: string[]
+}>({
   task_type: '',
   context: '',
   outcome: 'success',
@@ -396,6 +402,10 @@ const recordColumns = computed(() => [
 
 const adoptionColor = (outcome: string) =>
   outcome === 'success' ? 'green' : outcome === 'failure' ? 'red' : 'orange'
+
+/** 成败三态色标（一处定义，四张表共用）：未测量不得借用失败色或成功色 */
+const outcomeColor = (outcome: string) =>
+  outcome === 'success' ? 'green' : outcome === 'failure' ? 'red' : 'default'
 
 const dispositionColor = (state: ExperienceDisposition) =>
   state === 'endorsed' ? 'blue' : state === 'demoted' ? 'orange' : 'volcano'

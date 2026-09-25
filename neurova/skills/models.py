@@ -39,10 +39,39 @@ OUTCOME_MARKS: Dict[Optional[bool], str] = {
 }
 
 
+#: 契约词 → 三态的反向映射（与 `OUTCOME_MARKS` / `outcomeWord` 同一份词域）。
+OUTCOME_STATES: Dict[str, Optional[bool]] = {
+    OUTCOME_SUCCESS: True,
+    OUTCOME_FAILURE: False,
+    OUTCOME_UNEVIDENCED: None,
+}
+
+
 def outcomeWord(success: Optional[bool]) -> str:
     """三态 → 契约词汇（与 `knowledge_facts.EVIDENCE_STATES` 同一词汇表）。"""
     return {True: OUTCOME_SUCCESS, False: OUTCOME_FAILURE}.get(
         outcomeState(success), OUTCOME_UNEVIDENCED
+    )
+
+
+def outcomeStateFromWord(word: Any) -> Optional[bool]:
+    """契约词 → 三态；**非契约词抛 `ValueError`，不猜、不兜底**。
+
+    这是写入面的入口：外部（HTTP 请求 / 表单 / 导入脚本）给的是**词**，库里存的是
+    **三态**。此前这一步在端点里写成一句补集表达式
+    （`None if word == "unevidenced" else (word != "failure")`），于是只认两个半词，
+    其余任何词都落 `True`——"没听懂"被静默记成"做成了"，与"未测量被渲染成 `✗`"
+    是同一条三态契约上的两个方向。
+
+    单源的理由与正向映射一致：同一件事的定义只允许有一处。反向映射若各自成文，
+    前端加一个词、后端不改，两边就此错开（`partial` 就是这么进来的）。
+    无法解释的词必须**显式失败**（教义第 2 条：诚实形态暴露，不得折叠）。
+    """
+    if isinstance(word, str) and word in OUTCOME_STATES:
+        return OUTCOME_STATES[word]
+    raise ValueError(
+        "非法的 outcome 词 %r：契约词只有 %s"
+        % (word, " / ".join(OUTCOME_STATES))
     )
 
 

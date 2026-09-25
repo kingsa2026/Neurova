@@ -2722,7 +2722,7 @@ export default {
     taskType: '任务类型',
     outcomeSuccess: '成功',
     outcomeFailure: '失败',
-    outcomePartial: '部分成功',
+    outcomeUnevidenced: '未测量',
     addLessons: '添加经验教训',
     title: '经验知识',
     successRate: '成功率',
