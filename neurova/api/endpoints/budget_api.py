@@ -130,7 +130,7 @@ async def record_cost(
             agent_id=agent_id,
             provider=provider,
             model=model,
-            cost=Decimal(str(cost)),
+            cost=cost,
             turn_id=turn_id
         )
         

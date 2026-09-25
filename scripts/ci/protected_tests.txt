@@ -6,6 +6,8 @@ tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
 # 受保护子集里的墙钟上界断言逐条有结论（CI 偶发红的根因：结构契约被编码成墙钟阈值）
 tests/unit/test_ci_wallclock_assertion_ledger.py
+# 受保护子集里的进程内计时口径逐条有结论（同根的另一半：判分时钟被换回墙钟）
+tests/unit/ci/test_clock_caliber_ledger.py
 tests/unit/test_ci_thin_env_guards.py
 # Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
 tests/unit/api/test_coordination_router_reachability.py
@@ -211,6 +213,10 @@ tests/unit/api/test_skill_rollback_governance.py
 # Issue #80 续：ToolOrchestrator 接线（工具面 orchestrate_tools + 幻影工具名收口
 #   + 步进成败单源 + 依赖分层/并发上限 + 自嵌套拒绝）
 tests/unit/tools/test_tool_orchestrator_wiring.py
+# Issue #80 续（第八轮）：轮级耗时在**并行轮**也要回得到父轮次上下文（单源累加器）
+#   + 三态的第五个面（进 prompt 的那一段：池提取口 / 渲染口 / 传动轴）
+tests/unit/evolution/experience/test_turn_elapsed_accumulation.py
+tests/unit/context/test_experience_prompt_face_three_state.py
 
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
@@ -743,6 +749,14 @@ tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
 
+# Issue #197 §7 台账 N4（预算账本边界）：
+#   金额域（成本侧 float，价格表与 cost_store 的 REAL 列）与账本域（Decimal 算术）
+#   的交界上两处都缺归一 —— float 进 Decimal 账本即 TypeError，被 fail-open
+#   兜住后记账整体静默失效（用量恒 0.00、超支闸恒 False）；
+#   告警阈值又写成 0~1 制，与用量读数（0~100 制）不同尺度，1% 用量即全档触发。
+#   RECOVERED 档同函数内被当成越线档，超支时反报"已恢复到 125000%"。
+#   三处判据同文件，全部经真实记账入口（record_llm_cost）驱动。
+tests/unit/models/test_cost_budget_ledger_boundary.py
 # 能力缺口自主闭环批（Issue #197）四票的判据落点（全部逐文件单跑确定全绿）：
 #   T-01 诊断回环：工具失败正文必须携带 stderr/exit_code，禁止只剩兜底串；
 #   T-02 句柄可见：附件抽取失败必须携带 file_id/status 且留痕（截图类断言防路径泄露）；
@@ -770,3 +784,34 @@ tests/unit/agent/test_skill_acquisition_fallback.py
 # 轮级账本跨任务可见 + 耗时列「测到 0.0」不折叠（工单 016）：四个命中点实测转绿，
 #   反向锁证明标量 ContextVar.set 的子任务写入确实对父不可见（判据有区分力）。
 tests/unit/evolution/experience/test_turn_ledger_cross_task_and_measurement.py
+# T-01 同契约（Issue #197）：失败结果不得被 OutputRef 折叠成无诊断信息的引用
+#   ——失败正文（error/stderr/exit_code）就是诊断载体，体量折叠的单源是回环处
+#   既有的 apply_offload_policy，本层只管成功结果。
+tests/unit/agent/test_tool_output_ref.py
+
+# T-04 同契约（Issue #197）：`general` 分类无已注册候选 ⇒ 空序列，
+#   不再落兜底幻名 general_tool（该名全仓注册处为 0）。
+tests/unit/evolution/test_nl_synthesizer.py
+
+# T-06 强化口径（Issue #197）：纯检索基因型不得被遗传反哺顶到权重上限；
+#   内置元工具不得零信息增量重复发布到市场。
+#   本条曾登记过、又被同批后一票（df0f1f15 编辑本文件时）静默删掉——
+#   删一行就让整票判据从 CI 上消失，「登记被删」这一向由
+#   tests/unit/ci/test_issue197_judgement_registration.py 常驻反锁。
+tests/unit/evolution/test_reward_does_not_gamble_on_retrieval.py
+
+# Issue #197 批的登记纪律守卫本身：本批任一判据条目被摘掉即红
+#   （根因：同批后一票曾把一个不相关条目的登记静默删走）。
+tests/unit/ci/test_issue197_judgement_registration.py
+
+# Issue #68 收口：前端调用 ↔ 后端注册差异的裁决与补齐。
+#   （根因：清单第四节把 28 处差异写成「由人去核」——只登记、不裁决，
+#    于是同一张表可被反复登记、永不收敛。有活跃消费者的一类实测全是
+#    404/405：PUT /memory/{id}、GET /files/{id}/content、
+#    POST /settings/clear-cache 等。裁决台账 tests/unit/frontContractBaseline.txt
+#    与守卫同源咬合，三态可机器判定办没办。）
+tests/unit/api/test_front_contract_endpoints.py
+# Issue #68 收口：精准回复命中表（/annotations*）由 console 域迁入知识域。
+#   （唯一消费者是 KnowledgePage 的 AnnotationDrawer，前端按
+#    /api/v1/knowledge/annotations* 请求；此前挂在 /v1/console 下，实测恒 404。）
+tests/unit/api/test_knowledge_annotations_contract.py
