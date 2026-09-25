@@ -9,14 +9,22 @@ export interface Sandbox {
   name?: string
   status?: string
   image?: string
+  language?: string
+  timeout?: number
   steps_count?: number
   created_at?: string
+  updated_at?: string
+  agent_id?: string | null
+  topic?: string | null
 }
 
 export interface CreateSandboxPayload {
   name?: string
   image?: string
   timeout?: number
+  language?: string
+  // 'auto'：Docker 可用则容器、否则平台后端；'docker'：强制容器（不可用即报错，不静默降级）
+  backend?: 'auto' | 'docker'
 }
 
 export interface ExecutePayload {
@@ -26,6 +34,16 @@ export interface ExecutePayload {
 
 export interface ExecuteResponse {
   output?: string
+  stdout?: string
+  stderr?: string
+  exit_code?: number
+  /** 实际执行后端（'docker' / 'bubblewrap' / 'seatbelt' / 'process' …） */
+  backend?: string
+  /** 是否真隔离：false = 平台无内核隔离，已如实降级执行 */
+  enforced?: boolean
+  timed_out?: boolean
+  duration_ms?: number
+  steps_count?: number
   result?: string
   [k: string]: unknown
 }

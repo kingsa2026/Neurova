@@ -2104,6 +2104,11 @@ export default {
     python: 'Python',
     shell: 'Shell',
     javascript: 'JavaScript',
+    language: '语言: ',
+    backend: '后端: ',
+    isolated: '隔离已生效',
+    notIsolated: '未隔离(平台无内核隔离)',
+    exitCode: '退出码: ',
   },
   firewall: {
     title: '防火墙',
