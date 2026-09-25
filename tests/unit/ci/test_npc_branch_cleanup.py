@@ -39,6 +39,40 @@ cleanup = pytest.importorskip("scripts.ci.npc_branch_cleanup")
 LEDGER = PROJECT_ROOT / "docs" / "06-bugfix" / "npc分支归档台账.md"
 
 
+def _criterion_section(text: str) -> str:
+    """从台账正文里切出「判定口径」那一节（到下一个同级标题为止）。
+
+    只在这一节里断言口径，是为了让判据有**区分力**：散在处置记录里的同名词
+    不该让口径节的断言变绿（见 `test_ledger_declares_the_rule_and_the_probe`）。
+    """
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and "判定口径" in line:
+            start = i + 1
+            break
+    assert start is not None, "台账缺「判定口径」节（## 级标题）"
+    end = len(lines)
+    for j in range(start, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+
+def _criterion_items(section: str) -> str:
+    """从「判定口径」节里只取**编号条目**（`1. ` / `2. ` …）的正文。
+
+    **为什么必须只取条目**：整节里"第二父"这个词在解释段与反例段也会出现，
+    对整节搜关键词没有区分力 —— 本轮实测：把编号条目 1 整条替换回旧的
+    「分支名以 `auto/` 开头」，整节仍含"第二父"，断言照样绿。口径的**判据**
+    就是这两个条目，故断言只钉在这两条上。
+    """
+    items = [ln for ln in section.splitlines() if re.match(r"^\d+\.\s", ln.strip())]
+    assert items, "「判定口径」节没有编号条目（口径没有写成可复核的条件）"
+    return "\n".join(items)
+
+
 class TestBranchVerdictLogic:
     """判定口径：两个 git 事实同时成立才算已归档（见 `classifyBranches`）。
 
@@ -324,9 +358,28 @@ class TestLedgerIsReadableInRepo:
             .test_ledger_records_dispositions_not_live_branch_state()
 
     def test_ledger_declares_the_rule_and_the_probe(self):
-        """台账须同时给出：纪律出处、复算入口、以及判定口径的两个条件。"""
+        """台账须同时给出：纪律出处、复算入口、以及判定口径的两个事实。
+
+        断言的是**判定口径本身**，不是分支命名空间 —— 命名空间已不再参与判定
+        （见 `TestCriterionIsMergeFactNotBranchName`），拿它当"口径"会把
+        已经退役的判据重新钉进文档。
+        """
         text = io.open(LEDGER, encoding="utf-8").read()
         assert "AGENTS.md" in text, "台账没有指向纪律出处"
         assert "npc_branch_cleanup.py" in text, "台账没有给出复算入口"
-        assert cleanup.NPC_BRANCH_PREFIX in text, "台账没有写明裁决的命名空间"
-        assert re.search(r"祖先|已合并进主线", text), "台账没有写明「已合并」的判定口径"
+        #: 判定口径必须在**「一、判定口径」那一节里**写明，不能散落在处置记录中 ——
+        #: 全文搜"第二父"不够：处置表与修正说明里也会出现这个词，断言会在
+        #: 口径节被改回旧措辞时照样绿（本轮实测：整节替换成旧的"名字以 auto/ 开头"
+        #: 后仍 18 passed）。故先切出该节，再在节内断言两条事实。
+        items = _criterion_items(_criterion_section(text))
+        assert "第二父" in items, (
+            "判定口径的编号条目没有写明「经合并请求并入主线」这条事实（第二父位）——"
+            "成员资格若退回按分支名判定，同一形态的归档分支会被放行"
+        )
+        assert re.search(r"祖先|已合并进主线", items), (
+            "判定口径的编号条目没有写明「已合并」的祖先条件"
+        )
+        assert "分支名以" not in items, (
+            "判定口径的编号条目把成员资格写回了分支名 —— 名字是平台的产物、"
+            "不是事实（实测：fix-caliber-generated 是 #217 的 head 却被名字前缀口径放行）"
+        )
