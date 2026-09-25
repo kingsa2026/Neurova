@@ -733,6 +733,17 @@ tests/unit/context/test_microcompact_threshold_decoupling.py
 #    多模态分段 / `tool_calls` 原文串，判据侧与展示侧共用。）
 tests/unit/context/test_tool_payload_budget_accounting.py
 
+# 上下文三链路批（Issue #90）T-10d：工具轮视图的可观测计数 + 配对不匹配告警 +
+#   灰度期 provider 400 归零判据 + 回退开关等式（工单 §11.5 / §11.7 第 3 条）。
+#   （根因：这三件事此前**完全不可见**——视图内 `assistant.tool_calls` 数 / `tool`
+#    行数 / 旧数据降级次数没有任何读数，`declared_ids` 与实际 `tool_call_id`
+#    不匹配只能靠日志猜，而"灰度期 provider 400 必须归零"这条唯一硬失败信号连
+#    计数都没有，判据因此无从成立。
+#    另附 §21.4.1 的断点接线：`get_context_health()` 在生产代码里零读者，
+#    本批接到既有观测面 `/metrics`（不新开端点）。
+#    回退开关 `NEUROVA_TOOL_TURN_VIEW=0` 关闭时的视图形状等式写成测试而非注释。）
+tests/unit/context/test_tool_turn_observability_t10d.py
+
 # Issue #189 启动器一致性批：
 #   ① 端口判据收口到 neurova/core/port_guard.py（唯一实现），start_server.py 的
 #      预检必须在 create_app 之前 —— 判据是 AST 行号（结构性），不用墙钟上界；

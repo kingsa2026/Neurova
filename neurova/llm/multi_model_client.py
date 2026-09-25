@@ -467,6 +467,26 @@ class MultiModelLLMClient:
     _RECONNECT_DEBOUNCE_SECONDS = 300.0
 
     @staticmethod
+    def _notePairingReject(error: Exception) -> None:
+        """工具轮配对非法导致的 provider 400 计数（工单 §11.5 唯一硬失败信号）。
+
+        归零判据（灰度期该计数必须为 0）此前无从成立 —— 它连读数都没有。
+        chat() 与 chat_stream() 两条失败路径共用本判定（同一份 `model_error_policy`
+        分类，不在这里另写一套特征词）。
+        """
+        try:
+            from neurova.llm.model_error_policy import toolPairingRejectReason
+
+            reason = toolPairingRejectReason(error)
+            if not reason:
+                return
+            from neurova.core.metrics import record_tool_turn_provider_reject
+
+            record_tool_turn_provider_reject(reason)
+        except Exception:  # noqa: BLE001 - 观测失败不得影响错误上抛
+            pass
+
+    @staticmethod
     def _classify_error(error: Exception) -> str:
         """B1-2 错误分类单源委托（neurova.llm.model_error_policy）。
 
@@ -869,6 +889,7 @@ class MultiModelLLMClient:
                 limiter.report_429(model_key, pause_seconds=pause)
             elif error_kind == "model_not_found":
                 self._note_404_reconnect(client.provider.id, client.model)
+            self._notePairingReject(e)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -1105,6 +1126,7 @@ class MultiModelLLMClient:
                     limiter.report_429(model_key, pause_seconds=retry_after or 30.0)
                 elif error_kind == "model_not_found":
                     self._note_404_reconnect(client.provider.id, client.model)
+                self._notePairingReject(e)
                 try:
                     from neurova.core.metrics import get_metrics
 

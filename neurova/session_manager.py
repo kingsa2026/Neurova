@@ -28,6 +28,15 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+#: 工具轮进模型上下文的回退开关（工单 §11.7 第 3 条）。默认开；`=0` 关闭时
+#: 视图回到 T-10b 之前的形状（只含 user/assistant），等式由判据钉住。
+_TOOL_TURN_VIEW_ENV = "NEUROVA_TOOL_TURN_VIEW"
+
+
+def toolTurnViewEnabled() -> bool:
+    """工具轮进模型上下文是否启用（默认启用，关闭是逃生动作）。"""
+    return (os.environ.get(_TOOL_TURN_VIEW_ENV, "1") or "1").strip() != "0"
+
 # 净化时标记"应丢弃"的哨兵值（与 None 区分——None 是合法 JSON 值）
 _JSON_DROP = object()
 
@@ -1082,10 +1091,16 @@ class SessionManager(SessionRepository):
         id 与 arguments 的对应关系不在库里，整条降级为 `user` 注记并计数，
         **绝不伪造配对**。降级读数经 `get_model_context_stats()` 取回。
         """
-        self._model_context_stats = {"rebuilt_pairs": 0, "degraded_turns": 0}
+        self._model_context_stats = {"rebuilt_pairs": 0, "degraded_turns": 0, "killswitch_off": 0}
         sessions = self._get_session_data_list(agent_id, session_id)
         if not sessions:
             return []
+        if not toolTurnViewEnabled():
+            # 回退开关（工单 §11.7 第 3 条）：关闭时视图必须与今天的形状**逐条相等**
+            # ——只含 user/assistant、每条只有 {role, content}。等式由判据钉住，
+            # 不写进注释；这里只保证关闭即走旧投影，不留半开的中间态。
+            self._model_context_stats["killswitch_off"] = 1
+            return self._legacyModelContext(sessions, max_messages)
         # 模型上下文按时间升序（旧→新）；`get_recent_context` 的降序口径属展示面，
         # 不由本方法继承——顺序即"谁是最近的"这一语义。
         sessions.sort(key=lambda x: x.get("session_date", ""))
@@ -1117,6 +1132,27 @@ class SessionManager(SessionRepository):
             while messages and messages[0].get("role") == "tool":
                 messages.pop(0)
         return messages
+
+    def _legacyModelContext(
+        self, sessions: List[Dict[str, Any]], max_messages: Optional[int]
+    ) -> List[Dict[str, Any]]:
+        """回退形状：T-10b 之前的模型上下文（只含 user/assistant，仅 {role, content}）。
+
+        与 `get_recent_context` 同形状但**顺序相反**（那里是展示面降序，模型面必须
+        升序：顺序本身表达"谁是最近的"）。两者是不同消费面，故不互相复用——
+        复用会把展示面的排序口径带进模型面。
+        """
+        ordered = sorted(sessions, key=lambda x: x.get("session_date", ""))
+        rows: List[Dict[str, Any]] = []
+        for session in ordered:
+            for msg in session.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") in ("user", "assistant"):
+                    rows.append({"role": msg["role"], "content": msg.get("content", "")})
+        if max_messages is not None and len(rows) > max_messages:
+            rows = rows[-max_messages:]
+        return rows
 
     @staticmethod
     def _rebuildToolTurn(content: str, entries: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -1191,6 +1227,7 @@ class SessionManager(SessionRepository):
         return {
             "rebuilt_pairs": int(stats.get("rebuilt_pairs", 0)),
             "degraded_turns": int(stats.get("degraded_turns", 0)),
+            "killswitch_off": int(stats.get("killswitch_off", 0)),
         }
 
     def get_recent_origins(self, agent_id: str, session_id: str, max_messages: Optional[int] = 20) -> List[Optional[str]]:
