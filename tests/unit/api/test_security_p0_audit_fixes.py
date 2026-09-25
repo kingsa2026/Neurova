@@ -83,13 +83,13 @@ def settings_admin_client(settings_client):
 
 @pytest.fixture
 def sandbox_client():
-    saved = dict(sandbox._SANDBOXES)
-    sandbox._SANDBOXES.clear()
+    # 本组只断言「未认证必 401」，故用模块自带的隔离出口清态，不另持第二份存储引用
+    # （直接摸 `_SANDBOXES` 会与端点层内部的 store 细节绑定，改名即碎）。
+    sandbox.reset_execution_sandboxes()
     app = FastAPI()
     app.include_router(sandbox.router, prefix="/v1/sandbox")
     yield TestClient(app, raise_server_exceptions=False)
-    sandbox._SANDBOXES.clear()
-    sandbox._SANDBOXES.update(saved)
+    sandbox.reset_execution_sandboxes()
 
 
 @pytest.fixture
