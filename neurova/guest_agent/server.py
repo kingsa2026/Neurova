@@ -130,6 +130,10 @@ def main(argv: Optional[list] = None) -> None:
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--token", default=None)
     args = ap.parse_args(argv)
+    # 同主入口：端口不可用必须在建 app 之前报出（同源判据，见 neurova/core/port_guard.py）。
+    from neurova.core.port_guard import preflightPortAvailable
+
+    preflightPortAvailable(args.host, args.port)
     uvicorn.run(create_app(token=args.token), host=args.host, port=args.port)
 
 
