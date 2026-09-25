@@ -192,6 +192,20 @@ def _writeLines(symbol: str) -> Dict[str, set]:
 
 
 @functools.lru_cache(maxsize=None)
+def _repoRelative(stamp: Tuple[str, int, int]) -> str:
+    """生产根相对路径：`ast_scan.relativeToRepo()` 的**按文件内容戳**缓存。
+
+    相对路径按文件是常量，但 `_rawNodes` 此前对每个节点都算一次：实测 20 个
+    登记符号合计 **249205** 次 `Path.relative_to`（剖析里占 0.5s 自耗时 + 1.75s
+    累计），是排在 AST 解析之后的第二大开销 —— 纯粹是重复计算。
+    缓存键取自 `ast_scan` 的同一份内容戳（`SourceRef.stamp`：路径 + mtime + size），
+    故**与解析缓存同源、改文件即失效**，不引入会漏报的陈旧缓存
+    （`AGENTS.md` 修复教义第 6 条：不新造第二份口径）。
+    """
+    return ast_scan.relativeToRepo(Path(stamp[0]))
+
+
+@functools.lru_cache(maxsize=None)
 def _rawNodes(symbol: str) -> Tuple[SourceKey, ...]:
     """该符号的全部节点取数（按符号整进程缓存）。
 
@@ -202,8 +216,60 @@ def _rawNodes(symbol: str) -> Tuple[SourceKey, ...]:
     缓存键是符号名，值是**已解析的节点**（`_cachedNodes` 已按内容戳缓存，
     这里只是避免重复的文本预筛遍历）。
     """
-    return tuple((ast_scan.relativeToRepo(path), node)
-                 for path, node in ast_scan.nodeScan(PRODUCTION_ROOT, hints=(symbol,)))
+    return tuple(
+        (_repoRelative(_stampOf(path)), node)
+        for path, node in ast_scan.nodeScan(PRODUCTION_ROOT, hints=(symbol,))
+        if _mentionsSymbol(node, symbol)
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _stampOf(path: Path) -> Tuple[str, int, int]:
+    """`ast_scan.SourceRef.stamp` 形态的内容戳（与解析缓存同键）。"""
+    return ast_scan._cacheKey(path)
+
+
+def _mentionsSymbol(node: ast.AST, symbol: str) -> bool:
+    """该节点是否是 `symbol` 的**候选**引用点（`_rawNodes` 的**唯一**预筛谓词）。
+
+    谓词必须覆盖 `_rawNodes` 的**全部**消费方所认的形态，不只是 `_classifyNode`
+    那一组：`_writeLines()`（赋值左侧归属）认的是 `ast.Assign`，故 `Assign` 一并
+    保留 —— 预筛漏一类形态不会报错，只会让「只写不读」类死线**静默变成「无定义、
+    无赋值」（`absent`）**，即把活线伪装成死线（本谓词第一版实测即漏了 `Assign`，
+    由 `_last_archived_window_hashes` 的对账当场咬出：台账 `consumed` / 实测 `absent`）。
+
+    根因（2026-09-25 实测，性能剖析 1187 万次函数调用 / 5.6s）：`_rawNodes` 此前
+    **物化该符号命中文件里的全部节点**（实测 `dedup` 一个符号 55447 个节点，
+    20 个登记符号合计 **249225** 个），而下游 `referenceSites` 对其中绝大多数
+    直接 `continue`（`form is None`）。更贵的是：`ast_scan.relativeToRepo()` 对每个
+    节点都要做一次 `Path.relative_to`（实测占掉其中 1.75s，是排在解析之后的第二大
+    开销）—— 而相对路径**按文件是常量**。
+
+    本谓词与 `_classifyNode` 同一判据、不新造第二份规则（`AGENTS.md` 修复教义第 6 条）：
+    只保留「定义名相同 / 调用名相同 / 导入名相同 / 属性名相同」四种形态，其余节点在
+    构造相对路径**之前**就被滤掉。改前改后 `referenceSites()` 的结论必须逐点相同
+    （由 `tests/unit/context/test_context_deadline_ledger.py` 的判据与台账逐条钉住）。
+    """
+    if isinstance(node, ast.Assign):
+        # `_writeLines` 的落点：赋值左侧可能含 `X.<symbol>`（再深一层由它自己
+        # `ast.walk` 展开），故赋值语句整体保留，不在此提前判定。
+        return True
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == symbol
+    if isinstance(node, ast.Call):
+        func = node.func
+        return (isinstance(func, ast.Attribute) and func.attr == symbol) or (
+            isinstance(func, ast.Name) and func.id == symbol
+        )
+    if isinstance(node, ast.ImportFrom):
+        return any(alias.name == symbol for alias in node.names)
+    if isinstance(node, ast.Import):
+        # 与 `_classifyNode` 同口径：`from x import y` 与 `import x.y` 都算命中
+        return any(
+            alias.name == symbol or alias.name.endswith("." + symbol)
+            for alias in node.names
+        )
+    return isinstance(node, ast.Attribute) and node.attr == symbol
 
 
 @functools.lru_cache(maxsize=None)
@@ -288,6 +354,8 @@ def facts() -> Tuple[Dict[str, object], ...]:
     for symbol, origin in AUDIT_SYMBOLS:
         sites = referenceSites(symbol)
         consumers = [s for s in sites if s.form not in ("def", "write")]
+        # `classify()` 仍是判据类单源；`computedJudge` 只是它的按符号缓存，
+        # 让只比判据类的调用方不必再走一遍完整对账取数（见 `computedJudge`）。
         judge, detail = classify(symbol)
         rows.append({
             "symbol": symbol,
@@ -317,6 +385,37 @@ def readLedger() -> Dict[str, Dict[str, str]]:
         basis = "|".join(parts[3:]).strip()
         entries[symbol] = {"judge": judge, "disposal": disposal, "basis": basis}
     return entries
+
+
+@functools.lru_cache(maxsize=None)
+def computedJudge(symbol: str) -> str:
+    """`symbol` 的机器判据类（单源 = `classify()`），按符号整进程缓存。
+
+    为什么需要它（根因，2026-09-25 实测）：`reconcile()` 会为每个登记符号构造
+    完整对账行（`facts()` 的 `classify` 明细 + 引用点数核对），而**只比判据类**
+    的调用方（`tests/unit/context/test_context_deadline_ledger.py` 的
+    `test_ledger_matches_computed_judge_classes`）跟着付全价：实测该用例
+    **2.64s**，占受保护子集整跑（556s）里的可测尖峰，叠加并发负载即撞 30s 的
+    `pytest-timeout` 墙钟 —— py3.12 那条流水线 2026-09-25 即因此判红
+    （`Failed: Timeout (>30.0s)`，PR #209；同一提交 py3.11 全绿）。
+
+    这不是"把判据改松"：判据类仍由 `classify()` 单源算出（不新造平行体系，
+    `AGENTS.md` 修复教义第 6 条），台账与实测不一致照样报红；省掉的是**同一
+    事实的重复取数**。引用点数核对只有在登记符号集变化时才可能变，缓存键是
+    符号名 —— 与 `referenceSites()` / `_rawNodes()` 既有缓存同一形态。
+    """
+    return classify(symbol)[0]
+
+
+def computeJudgeClasses() -> Dict[str, str]:
+    """`{符号: 机器判据类}` —— **只比判据类**的调用方的唯一取数入口。
+
+    与 `reconcile()["judge_conflict"]` 同一判据（都是 `classify()` 单源的
+    `computedJudge()`），故两条路径不可能给出不同结论；差别只在取数范围：
+    本函数不构造引用点清单与点数核对，成本从「20 符号全量对账」降到「20 次按符号
+    缓存的判据分类」。
+    """
+    return {symbol: computedJudge(symbol) for symbol, _origin in AUDIT_SYMBOLS}
 
 
 def reconcile() -> Dict[str, List[Dict[str, object]]]:
