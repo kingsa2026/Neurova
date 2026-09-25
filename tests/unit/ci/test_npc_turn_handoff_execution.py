@@ -1,37 +1,30 @@
 # -*- coding: utf-8 -*-
-"""NPC 轮数触顶接力的**执行面**守卫（Issue #145）。
+"""NPC 流水线的**执行面**守卫（Issue #145；判据来源已于 Issue #158 收口）。
 
 ## 为什么需要这份守卫
 
 配置面已经有一份守卫（`tests/unit/test_ci_npc_config_guard.py` 的
-`TestTurnHandoffCeiling`）：它钉住「`.cnb.yml` 里有这笔接力」——
-`endStages` 里存在 `cnb:apply`、`event` 与触发事件同名、标记经 `env` 传下来。
+`TestTurnHandoffCeiling`）：它钉住「`.cnb.yml` 里有这笔接力」以及判据取自
+平台收尾事实。但"接力被声明过"与"这条流水线真的跑得起来"是两件事：
 
-但那份配置**从来没有被执行过**：接力 Stage 的 `if` 读的标记是 Agent 自己
-在最后一轮写出的文件，而写在哪里由人设文本约定。构建 cnb-2e8-1k341d9s1 的
-实测形态正是这样：
-
-    Master[agent][201] stop with error: Agent aborted: reached maxTurns limit (200)
-    ✅ DebugDetection / End 通过
-    ⏳ 轮数触顶接力：自动开启下一轮 → skipped
-
-Agent 从未写出标记，于是 `if` 恒假、接力被跳过、成果随容器一起丢，
-用户在 Issue 上只看到「流水线构建失败」。配置面守卫对此是完全绿的 ——
-它只能证明"接力被声明过"，证明不了"接力会真的发生"。
+- 开工前的自证脚本若在镜像里拉不起来（构建 cnb-du8-1k34cfhg1 的
+  `sh: 1: python: not found`，rc=127），Agent 那一步会被 skipper 跳过，
+  用户看到的是「流水线构建失败」，与任务内容无关；
+- 落点若只写在仓库里、没有被任何 Stage 执行，判据就是空转。
 
 ## 本文件钉三件事（都可证伪）
 
-- **A 落点词汇统一**：`$CNB_BUILD_WORKSPACE` 是接力判据的唯一落点，
-  凡提到"标记写在哪"的人设文本必须用这个变量，不得退化成
-  「工作区工作目录 / 构建目录 / workspace 目录」这类字面表述 ——
-  后者会让 Agent 把它理解成 `$PWD`，在两者不同的构建里写错位置。
+- **A 人设不得再写接力标记**：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 这套
+  「Agent 自己写状态文件」的协议已被证伪并删净（Issue #158）——
+  撞顶那一刻平台不给 Agent 任何执行机会。人设必须写清「判据由平台判定、
+  Agent 不需要写任何标记文件」，且不得留下旧协议的字面残留。
 - **B 落点在构建里可达**：`scripts/ci/npc_turn_handoff_gate.py` 存在，
   且被 `.cnb.yml` 的 NPC 流水线真实执行（不是躺在仓库里当摆设）。
-- **C 门禁留在受保护子集**：门禁脚本的判据要在 CI 上真的跑，否则 A/B 无人执行。
+- **C 守卫留在受保护子集**：本文件的判据要在 CI 上真的跑，否则 A/B 无人执行。
 
 可证伪路径：
+- 把人设改回「把 1 写进 `.npc-turn-handoff`」→ A 红；
 - 把 `.cnb.yml` 里跑门禁的那一步删掉 → B 红；
-- 把人设里 `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 改写成「工作区工作目录」→ A 红；
 - 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → C 红。
 """
 import ast
@@ -49,20 +42,13 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
-#: 接力标记的文件名（与 `.cnb/settings.yml` 人设、`.cnb.yml` 收尾阶段同一事实源）
-HANDOFF_MARKER_FILE = ".npc-turn-handoff"
+#: 已被证伪并删净的旧协议标记（Issue #158）：靠 Agent 自己写状态文件来判定
+#: "本轮是接力轮"。撞顶那一刻平台中止 Agent、不执行任何收尾指令，
+#: 故这条协议从未产出过真值；它必须从人设与配置里彻底消失。
+RETIRED_HANDOFF_MARKER = ".npc-turn-handoff"
 
-#: 落点变量：标记必须写在 `$CNB_BUILD_WORKSPACE` 下，而不是「工作目录」这类字面表述。
-HANDOFF_ROOT_VAR = "$CNB_BUILD_WORKSPACE"
-
-#: 门的脚本（接力判据可达性自证）
+#: 开工前自证脚本（可达性落点）。
 GATE_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
-
-#: 人设提到标记落点时的**正确**写法（逐字）
-MARKER_PATH_IN_PERSONA = f"{HANDOFF_ROOT_VAR}/{HANDOFF_MARKER_FILE}"
-
-#: 同一句话里绝不允许出现的模糊说法：它们会被读成 `$PWD`，而非工作区根。
-VAGUE_ROOT_PHRASES = ("工作区工作目录", "构建目录", "workspace 目录", "工作目录下")
 
 
 @pytest.fixture(scope="module")
@@ -80,44 +66,55 @@ def npc_personas():
     return {r.get("name"): (r.get("prompt") or "") for r in roles}
 
 
-class TestHandoffRootIsTheWorkspaceVariable:
-    """A. 标记落点必须用 `$CNB_BUILD_WORKSPACE` 表达，不得退化成字面目录名。"""
+class TestPersonasNoLongerAskTheAgentToWriteStateFiles:
+    """A. 旧协议（Agent 自己写接力标记）必须从人设与配置里彻底删净。
 
-    def test_personas_state_the_marker_path_with_the_workspace_variable(self, npc_personas):
-        missing = [name for name, prompt in npc_personas.items() if MARKER_PATH_IN_PERSONA not in prompt]
-        assert not missing, (
-            f"NPC 人设未把标记落点写成 {MARKER_PATH_IN_PERSONA}: {missing}\n"
-            "收尾阶段读的是 `$CNB_BUILD_WORKSPACE/"
-            f"{HANDOFF_MARKER_FILE}`；写法一旦含糊（如「工作区工作目录」），"
-            "Agent 会把它当成 $PWD，在两者不同的构建里写到收尾读不到的位置，"
-            "接力整条失效（构建 cnb-2e8-1k341d9s1 的跳过形态）。"
-        )
+    根因（Issue #158）：`npc:go` 撞 `maxTurns` 时平台只把 Agent 中止、
+    **不执行任何收尾指令或工具调用** —— 写标记那句话永远没有机会执行。
+    构建 cnb-2e8-1k341d9s1 的实测形态正是这样：
 
-    def test_personas_do_not_use_vague_directory_phrases(self, npc_personas):
-        offenders = []
-        for name, prompt in npc_personas.items():
-            for line in prompt.splitlines():
-                if HANDOFF_MARKER_FILE not in line:
-                    continue
-                for phrase in VAGUE_ROOT_PHRASES:
-                    if phrase in line:
-                        offenders.append(f"{name}: 「{phrase}」出现在 {line.strip()}")
+        Master[agent][201] stop with error: Agent aborted: reached maxTurns limit (200)
+        ⏳ 轮数触顶接力：自动开启下一轮 → skipped
+
+    随后把它改成"由开工前的步骤预写"，又得到一条与"是否撞顶"无关的恒真判据
+    （四条父构建在 76~164 轮即被接力）。现协议是：**判据由平台在收尾时刻自己
+    判定，Agent 什么都不用写**。人设必须把这一点讲明白，否则下一轮 Agent
+    会照着旧文本再去新建第二套状态文件。
+    """
+
+    def test_personas_do_not_ask_for_a_state_file(self, npc_personas):
+        offenders = [
+            name for name, prompt in npc_personas.items()
+            if RETIRED_HANDOFF_MARKER in prompt
+        ]
         assert not offenders, (
-            "标记落点用了会被读成 $PWD 的模糊表述:\n  " + "\n  ".join(offenders) +
-            f"\n统一写成 {MARKER_PATH_IN_PERSONA}（单一事实源）。"
+            f"NPC 人设仍保留旧接力协议（{RETIRED_HANDOFF_MARKER}）: {offenders}\n"
+            "撞顶那一刻平台不执行任何收尾指令，Agent 写不出这个标记；"
+            "人设应写明「判据由平台在收尾时刻判定，Agent 不需要写任何标记文件」。"
         )
 
-    def test_cnb_comment_only_cites_the_variable_form(self, cnb_doc):
-        """`.cnb.yml` 里提到标记落点时，同样只准用变量形态。"""
-        text = io.open(CNB, encoding="utf-8").read()
+    def test_personas_forbid_a_second_judgement_source(self, npc_personas):
+        """人设必须**显式**告诉 Agent：别写状态文件，那只是新造的平行判据。"""
+        missing = [
+            name for name, prompt in npc_personas.items()
+            if "不需要你做任何事" not in prompt
+        ]
+        assert not missing, (
+            f"NPC 人设未点明「跑数触顶的判定不需要 Agent 参与」: {missing}\n"
+            "少了这句，Agent 会照旧去写状态文件（教义第 6 条：不得新造平行体系）。"
+        )
+
+    def test_config_no_longer_cites_the_retired_marker(self):
+        """`.cnb.yml` 不得再引用旧标记（注释里的理由记录除外）。"""
         bad = [
             f"{lineno}: {line.strip()}"
-            for lineno, line in enumerate(text.splitlines(), 1)
-            if HANDOFF_MARKER_FILE in line and HANDOFF_ROOT_VAR not in line
+            for lineno, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
+            if RETIRED_HANDOFF_MARKER in line and not line.strip().startswith("#")
         ]
         assert not bad, (
-            "`.cnb.yml` 提到接力标记时未点明落点变量:\n  " + "\n  ".join(bad) +
-            f"\n落点只有一处：{MARKER_PATH_IN_PERSONA}。"
+            "`.cnb.yml` 仍把旧标记当落点用:\n  " + "\n  ".join(bad) +
+            "\n判据已搬到平台收尾事实变量（见 "
+            "tests/unit/ci/test_npc_turn_handoff_predicate.py）。"
         )
 
 
@@ -163,9 +160,9 @@ class TestGateScriptIsExecutedByTheBuild:
         ]
         assert not missing, (
             f"{len(missing)} 条 npc:go 流水线未执行 scripts/ci/npc_turn_handoff_gate.py\n"
-            "该步在真实构建里断言 `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，"
+            "该步在真实构建里断言 `$CNB_BUILD_WORKSPACE` 可写可读，"
             "并反向自证 $PWD 是否等于 $CNB_BUILD_WORKSPACE——"
-            "这是接手时唯一能回答「标记到底写在哪」的读数。"
+            "这是接手时唯一能回答「工作区到底在哪」的读数。"
         )
 
     def test_gate_is_registered_in_the_import_sweep_or_directly_runnable(self):
