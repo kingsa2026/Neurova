@@ -743,16 +743,25 @@ class TestTurnHandoffCeiling:
     平台没有「Agent 用满轮数后自动重跑同一条流水线」的原生开关
     （`retry` / `allowFailure` / `endStages` 都只管当前这条流水线，不产生新的
     轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:trigger`
-    再拉一次自定义事件，并由**平台在收尾时刻注入的事实变量**把「本轮真撞顶」
-    与用户新发的 `@` 区分开，防止同一条评论被无限重跑。
-    （`turnLimitReached` 那条预写判据已由 Issue #158 证伪并删净：
-    它由 Agent 开工前的步骤无条件写成 1，跟"是否撞顶"无关。）
+    再拉一次自定义事件（`api_trigger_npc_handoff`），并由**平台在收尾时刻注入的
+    事实变量**把「本轮真撞顶」与「用户新发的 `@`」区分开，防止同一条评论被无限
+    重跑。`turnLimitReached` 那条预写判据已由 Issue #158 证伪并删净（它由 Agent
+    开工前的步骤无条件写成 1，跟"是否撞顶"无关）。
 
-    判据落在**是否有这笔接力**，不落在 `$变量` 替换后的形态上：
-    `api_trigger_pipeline` 的 options 在配置期做 Schema 校验，事件名写成
-    `$VAR` 会被平台拒掉；且 `type: cnb:apply` 的 `env` 值只接受 `$变量`
+    判据落在**是否有这笔接力 + 判据读的是不是平台事实**上，不落在
+    `$变量` 替换后的形态上：`api_trigger_pipeline` 的 options 在配置期做
+    Schema 校验，事件名写成 `$VAR` 会被平台拒掉；且内置任务的 `env` 值只接受 `$变量`
     （见 tests/unit/test_ci_thin_env_guards.py 同型的薄环境事故）。
     """
+
+    #: 上一代用于判定接力轮的标记名。现已作废 —— 保留常量只为**反向钉住**
+    #: "它不得再出现"，见 `test_no_self_fabricated_relay_flag_survives_in_the_config`。
+    HANDOFF_FLAG = "turnLimitReached"
+
+    #: 平台在收尾期注入的事实（平台「环境变量」篇，`endStages` 内可读）。
+    #: 真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9。
+    STATUS_VAR = "CNB_PIPELINE_STATUS"
+    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
 
     @staticmethod
     def _npc_pipelines(cnb_doc):
@@ -824,30 +833,43 @@ class TestTurnHandoffCeiling:
                         f"{where}: 接力未给 slug —— `cnb:trigger` 的 slug 是必填项"
                         "（目标仓库完整路径），缺它触发不了"
                     )
-            # 判据必须取自**平台在收尾时刻注入的事实**，不得读任何预写变量。
-            # 预写变量的根因（Issue #158，2026-09-25 实测）：它由 Agent 开工**之前**
-            # 的门禁无条件写成 1，与"本轮是否撞顶"无关 —— 四条评论触发的父构建
-            # （maxTurns=200）分别只跑了 97 / 135 / 164 / 76 轮，收尾接力却一律
-            # success；接力落点 32 次构建 / 22.2h 墙钟，其中 17 次又跑满 200 轮。
-            # 平台事实的实测读数见本文件
-            # tests/unit/ci/test_npc_turn_handoff_predicate.py 的模块 docstring。
-            for stage in triggers:
-                conditions = " ".join(str(c) for c in (stage.get("if") or []))
-                if PLATFORM_STATUS_VAR not in conditions:
+            # 无限接力的拦阻改由**平台事实**承担（Issue #189 / #158）：
+            # 收尾 `if` 读 `$CNB_PIPELINE_STATUS` + `$CNB_BUILD_FAILED_MSG`，
+            # 正常收官（status=success）第一条即为假 ⇒ 不接力。
+            # 上一代用 env 传一个自造标记，那条链路已被证伪为**恒真**：
+            #   cnb-2q8-1k3buskao / cnb-kdg-1k3bv22ct 均 Agent stage success
+            #   （未撞顶）却照拉下一轮（cnb-lga-1k3c0itrj / cnb-fln-1k3c2rjk7）；
+            # 实测四条父构建在 76~164 轮即被接力，接力落点 32 次构建 / 22.2h 墙钟。
+            # 故判据从"标记传下来了吗"改成"判据读的是平台事实吗"，
+            # 并反向钉住"不许再有自造标记"。
+            conditions = stage.get("if") or []
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            blob = "\n".join(str(item) for item in conditions)
+            for needed in (self.STATUS_VAR, self.FAILED_MSG_VAR):
+                if needed not in blob:
                     problems.append(
-                        f"{where}: 接力 `if` 未读 ${PLATFORM_STATUS_VAR}"
-                        "（收尾状态由平台给出，不是上一轮预写的）"
+                        f"{where}: 收尾接力未读 ${needed} —— "
+                        "无限接力的拦阻必须落在平台事实上，不是上一轮预写的值"
                     )
-                if ABORT_MARKER not in conditions:
-                    problems.append(
-                        f"{where}: 接力 `if` 未认平台的中止措辞 {ABORT_MARKER!r}"
-                    )
+            if ABORT_MARKER not in blob:
+                problems.append(
+                    f"{where}: 收尾接力未认平台的中止措辞 {ABORT_MARKER!r}"
+                )
+            if self.HANDOFF_FLAG in (job.get("env") or {}):
+                problems.append(
+                    f"{where}: job.env 仍在传自造的 {self.HANDOFF_FLAG} "
+                    "（该标记恒真，等于没有空轮防护）"
+                )
         assert seen, "未在 .cnb.yml 找到任何 npc:go 流水线——守卫失效（判据空转）"
         assert not problems, (
             "NPC 轮数触顶后没有接力（构建 cnb-m48-1k33grbms 的丢成果形态）:\n  "
             + "\n  ".join(problems) +
-            "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages，"
-            f"且判据取自平台收尾事实（${PLATFORM_STATUS_VAR} + {ABORT_MARKER!r}）——"
+            "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
+            "`type: cnb:trigger` + `event: <api_trigger_* 事件>` + "
+            f"`if: [ $${self.STATUS_VAR} = error 且 $${self.FAILED_MSG_VAR} 含 "
+            "reached maxTurns limit ]`，"
+            "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go ——"
             "由开工前的步骤预写标记只会让接力变成'每次都接力'（Issue #158）。"
             "改完请同步 .cnb.yml 注释里的轮次上界推演。"
         )
@@ -883,12 +905,12 @@ class TestTurnHandoffCeiling:
         （这里是 `issue.comment@npc` / `pull_request.comment@npc`），
         它不在白名单里，于是这笔接力**在写下的那一刻就注定执行不了**。
         此前一直被 `if` 恒假的 `skipped` 掩盖 —— 判据不真就走不到准入检查；
-        本轮燃料改成真的为真（`##[set-output]` + `exports` 通道生效）之后，
+        一轮让 `if` 真的为真的改动（自造燃料，见 Issue #189 的作废记录）之后，
         平台的准入检查终于被执行到，问题才第一次响亮。
 
         `@npc` 事件不在白名单内，故**收尾阶段不能放 `cnb:apply`** ——
         这是平台约束，不是配置写法问题；接力必须换一条真正可用的通道
-        （见下方 `TestHandoffRidesAnAllowedChannel`）。
+        （现形态为 `cnb:trigger`，见 `TestHandoffRidesAnAllowedChannel`）。
 
         可证伪路径：把 `@npc` 事件的 `endStages` 里再放一个 `cnb:apply` → 立刻转红。
         """
@@ -913,46 +935,11 @@ class TestTurnHandoffCeiling:
         )
 
 
-    #: 已被证伪的预写判据变量名（Issue #158）。它由 Agent 开工**之前**的门禁
-    #: 无条件写成 1，与"本轮是否撞顶"无关，故在配置里必须删净 —— 注释里
-    #: 保留旧形态作理由记录不算违规，真去读它才算。
-    RETIRED_PREWRITTEN_FLAG = "turnLimitReached"
-
-    def test_the_prewritten_flag_is_gone_from_the_relay_chain(self, cnb_doc):
-        """接力链上不得再有预写判据：判据只有一处，就是平台收尾事实。
-
-        根因（Issue #158 收口，2026-09-25 实测）：预写变量由 Agent 开工**之前**
-        跑的门禁无条件写成 1，于是「用户新发的 @ → 不接力」这条空轮防护从未
-        成立过。四条评论触发的父构建（maxTurns=200）分别只跑了
-        97 / 135 / 164 / 76 轮，收尾接力却一律 success；接力落点 32 次构建 /
-        22.2 小时墙钟，其中 17 次又跑满 200 轮。
-        """
-        offenders = []
-        for where, event, job in self._npc_pipelines(cnb_doc):
-            for stage in (job.get("endStages") or []):
-                if not isinstance(stage, dict):
-                    continue
-                conditions = " ".join(str(c) for c in (stage.get("if") or []))
-                if self.RETIRED_PREWRITTEN_FLAG in conditions:
-                    offenders.append(f"{where}: if 仍读 ${self.RETIRED_PREWRITTEN_FLAG}")
-                env = (stage.get("options") or {}).get("env") or {}
-                if self.RETIRED_PREWRITTEN_FLAG in env:
-                    offenders.append(f"{where}: env 仍传出 ${self.RETIRED_PREWRITTEN_FLAG}")
-        for lineno, raw in enumerate(io.open(CNB, encoding="utf-8"), 1):
-            stripped = raw.strip()
-            if self.RETIRED_PREWRITTEN_FLAG in stripped and not stripped.startswith("#"):
-                offenders.append(f"{CNB.name}:{lineno}: {stripped}")
-        assert not offenders, (
-            "已被证伪的预写判据仍在接力链上:\n  " + "\n  ".join(offenders) +
-            "\n它由开工前的门禁无条件写成 1，不构成「本轮撞顶」的证据；"
-            "判据只有一处：平台收尾事实变量。"
-        )
-
     def test_npc_personas_declare_handoff_protocol(self, settings_doc):
         """每个 NPC 角色的人设都要写清接力协议，并**禁止**自己写状态标记。
 
-        判据随根因一起改了（Issue #158）：旧协议要求 Agent 在触顶那一轮写标记，
-        而那件事平台根本不给它机会做（撞顶即中止、不执行任何收尾指令）；
+        判据随根因一起改了（Issue #158 / #189）：旧协议要求 Agent 在触顶那一轮
+        写标记，而那件事平台根本不给它机会做（撞顶即中止、不执行任何收尾指令）；
         随后改成"由开工前的门禁预写"，又变成与"是否撞顶"无关的恒真判据。
         现协议是：**判据由平台在收尾时刻自己判定，Agent 什么都不用写** ——
         人设必须把这一点讲明白，否则下一轮 Agent 会去新建第二套状态文件。
@@ -962,14 +949,17 @@ class TestTurnHandoffCeiling:
         missing = []
         for role in roles:
             prompt = role.get("prompt") or ""
+            if self.STATUS_VAR not in prompt or self.FAILED_MSG_VAR not in prompt:
+                missing.append(f"{role.get('name')}: 未点明接力判据读的平台事实")
+            if "别去写任何状态文件或标记" not in prompt:
+                missing.append(f"{role.get('name')}: 未显式禁止写状态文件/标记")
             if "不需要你做任何事" not in prompt or "分段" not in prompt:
-                missing.append(role.get("name"))
+                missing.append(f"{role.get('name')}: 未写清「判据由平台判定 + 分段落评论」")
         assert not missing, (
-            f"NPC 角色未写明轮数触顶接力协议: {missing}\n"
-            "人设里必须写清两件事："
-            "（1）「这一轮撞没撞顶」由平台在收尾时刻判定，Agent 不需要写任何标记文件"
-            "（写标记=新造平行判据）；"
-            "（2）用**分段落评论**落进度（工作树不跨轮保存）。"
+            "NPC 角色人设未写明轮数触顶接力协议:\n  " + "\n  ".join(missing) +
+            f"\n`.cnb.yml` 的收尾 `if` 读 ${self.STATUS_VAR} 与 "
+            f"${self.FAILED_MSG_VAR}（撞顶时后者含 `reached maxTurns limit`）；"
+            "人设里不写清楚，Agent 会以为接力还需要它配合，或另造一套平行判据。"
         )
 
 

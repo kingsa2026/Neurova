@@ -454,36 +454,46 @@ main:
   fi
 
 $:
-  # ── 轮数触顶接力（回答 Issue #131；判据来源修复见 Issue #158）─────────────
-  # 事实（三次真实构建实测，不是推测）：
+  # ── 轮数触顶接力（回答 Issue #131；判据三次收口见 Issue #158 / #170 / #189）───
+  # 事实（真实构建实测，不是推测）：
   #   cnb-2e8-1k341d9s1：201 轮 / 3191326ms，Stage 报 `Agent aborted: reached
   #                      maxTurns limit (200)`
   #   cnb-2v8-1k34htd2p：200 轮 / 2362852ms，同上
   #   cnb-2q8-1k3buskao：**97 轮**却照样拉起了接力（见下方根因）
   #
-  # 根因（Issue #158 收口，2026-09-25 实测）：判据的生产方把「本轮会不会撞顶」
-  #   这个**未来事实**，交给 Agent 开工**之前**跑的门禁无条件写成 1：
-  #     $NPX_CALL scripts/ci/npc_turn_handoff_gate.py   # Stage 1，Agent 开工前
-  #     ##[set-output turnLimitReached=1]               # ← 与是否撞顶无关
-  #   于是「用户新发的 @ → 变量为空 → 不接力」这条空轮防护**从未成立过**。
-  #   实测四条评论触发的父构建（maxTurns=200），收尾接力一律 success：
-  #     cnb-2q8-1k3buskao 97 轮 / cnb-tr2-1k3bm5ssd 135 轮
-  #     cnb-cou-1k3bmaal8 164 轮 / cnb-ofm-1k3bq16ij 76 轮
-  #   代价可复算：接力落点 `api_trigger_npc_handoff` 共 32 次构建 / 22.2 小时
-  #   墙钟，其中 17 次又跑满 200 轮 —— 一次普通提问被放大成自动续跑的链条。
-  #   前几批修的是"燃料写不出来"，那一层确实修好了；但写出来的燃料与
-  #   "是否真撞顶"无关，等于把 `if` 从"恒假"改成了"恒真"。
+  # 三轮修法的历史（每轮都被下一个真实构建推翻，记在这里免得再犯）：
+  #   1) 燃料由 Agent 在最后一轮自己写 → 撞 maxTurns 时平台**不执行任何收尾
+  #      指令/工具调用**，Agent 没有机会写；`if` 恒假，接力是一条死配置。
+  #   2) 燃料改由构建侧在 Agent 开工前**无条件**写出（`CNB` 非空即写，
+  #      真实构建里恒真）→ `if` 恒**真**。这不是判据写松了，而是判据的输入端
+  #      被自己填成了真值：该变量回答「上一轮是否用满配额」，而得知这件事的
+  #      唯一时点是收尾期。后果是空轮防护全失效 —— 任一正常收官也照拉下一轮：
+  #        cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
+  #        cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
+  #      代价可复算：接力落点 `api_trigger_npc_handoff` 共 32 次构建 / 22.2 小时
+  #      墙钟，其中 17 次又跑满 200 轮 —— 一次普通提问被放大成自动续跑的链条。
+  #      实测四条评论触发的父构建（maxTurns=200），收尾接力一律 success：
+  #        cnb-2q8-1k3buskao 97 轮 / cnb-tr2-1k3bm5ssd 135 轮
+  #        cnb-cou-1k3bmaal8 164 轮 / cnb-ofm-1k3bq16ij 76 轮
+  #   3) 现形态：判据改读**平台在收尾期注入的事实**，不再有任何自造标记。
+  #      （通道另修过两次：`cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，
+  #        详见下方"通道选型"。）
   #
-  # 修法（教义第 1 条）：判据改用**平台在收尾时刻注入的事实变量**，不再预写。
-  #   实测（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3 / cnb-o8q-1k3c25fpt，
-  #   2026-09-25）：同一 Job 的 `endStages` 里
-  #     CNB_PIPELINE_STATUS=error
-  #     CNB_BUILD_FAILED_MSG=Agent aborted: reached maxTurns limit (N)
-  #   而 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串 —— 故判据只能落在
+  # 判据（平台「环境变量」篇，收尾期可读；构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3
+  # 以真 npc:go 撞 maxTurns 实测，探针 cnb-c9g-1k3c3dqg7 / cnb-o8q-1k3c25fpt 复核）：
+  #   $CNB_PIPELINE_STATUS   收尾期的流水线状态（`error` 表示 stages 失败）
+  #   $CNB_BUILD_FAILED_MSG  失败原文，撞顶时为
+  #                          `Agent aborted: reached maxTurns limit (N)`
+  #   同一 Job 的 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串 —— 故判据只能落在
   #   `endStages` 的 `if` 上（`.cnb.yml` 的 `stages` 块不得出现这两个变量）。
-  #   判据仍是**一处**：收尾 `if`。既没有第二份状态文件，也没有预写变量。
+  #   ⇒ 两者同时成立才接力。用户只说一句「你好」的正常收官是 `success`，
+  #     第一条即为假，不接力（空轮不烧配额）。
+  #   为什么按原文片段判而不是只看 status：`stages` 失败的原因有很多种
+  #   （门禁红、依赖装不上、脚本报错），只有"用满轮数"才该续跑；
+  #   把任何失败都接成新一轮，等于把真故障转写成烧配额。
+  #   判据仍是**一处**：收尾 `if`。既没有第二份状态文件，也没有计数器/预写变量。
   #
-  # 接力落点自身也要接力（本轮一并修）：`api_trigger_npc_handoff` 原先没有
+  # 接力落点自身也要接力：`api_trigger_npc_handoff` 原先没有
   #   `endStages`，接力轮一旦再撞顶就断链 —— 实测 17 次接力轮以 error 收场
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   现补同一份收尾接力，判据同源，对话载体继续经 env 传下去。
@@ -495,7 +505,7 @@ $:
   #   里没有 `@npc` 一族，也没有其宿主 `issue.comment` / `pull_request.comment`。
   #   平台校验的是**宿主事件**，不是 `options.event` 的取值 ——
   #   改 event 绕不开，那笔接力在写下那一刻就注定执行不了。
-  #   故用 `cnb:trigger`（适用**所有事件**，官方 trigger.md）：
+  #   故改用 `cnb:trigger`（适用**所有事件**，官方 trigger.md）：
   #   slug 必填（不默认当前仓库）、branch 显式点名（它默认主分支，
   #   而 PR 评论事件跑在 PR 目标分支，不传会接力到主分支上落空）。
   #
@@ -525,13 +535,18 @@ $:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       stages:
-        - name: "开工前自证：工作区可写 + 解释器可用"
+        - name: "构建环境自证：工作区落点可达且与 $PWD 同址"
           # 为何必须由真实构建自证（Issue #151，构建 cnb-du8-1k34cfhg1）：
           #   镜像里没有 python 时，前置步骤会以 `sh: 1: python: not found`
           #   （rc=127）收场，Agent 那一步被 skipper 跳过 —— 用户看到「构建失败」，
           #   而真实死因与任务内容无关。故解释器先探后用，且本步在 Agent 开工前跑。
-          # 本步**不再**写接力判据（Issue #158）：它跑在 Agent 开工之前，
-          #   那一刻无从知道本轮会不会撞满轮数，写出来的标记必然是拍脑袋的。
+          # 本步是**环境前提自证**，不是接力的燃料来源：
+          #   接力判据自 Issue #189 起直接读平台在收尾期注入的
+          #   $CNB_PIPELINE_STATUS / $CNB_BUILD_FAILED_MSG（见上方注释块"判据"），
+          #   构建侧不再产出任何被 `if` 消费的真值 —— 那正是上一轮恒真的根因。
+          # 保留本步的理由：它回答"接力发生在哪个工作区、$PWD 是不是同一处"，
+          #   并把读数（`probe_check` / `working_directory_check`）留在日志里；
+          #   且它跑在 Agent 开工**之前**：环境前提有问题要在烧掉整轮预算前响亮。
           script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
@@ -557,8 +572,8 @@ $:
             thinkingLevel: xhigh
       # 轮数触顶后自动开启下一轮。判据取自**平台在收尾时刻注入的事实变量**
       # （`CNB_PIPELINE_STATUS` / `CNB_BUILD_FAILED_MSG`，实测读数见 `$` 段注释），
-      # 不再读任何预写标记 —— 预写值与"本轮是否撞顶"无关（Issue #158 的根因）。
-      # 判据只有一处：本 `if`。既没有第二套状态文件，也没有计数器。
+      # 不再读任何预写标记或自造状态文件 —— 预写值与"本轮是否撞顶"无关
+      # （Issue #158 的根因）。全仓只有这一处判据。
       # `env` 里的对话载体由外层三条事件各自补（见下方 `<<:` 覆写）——
       # 评论触发时平台注入的 `CNB_ISSUE_IID` / `CNB_PULL_REQUEST_IID`
       # 在 `api_trigger` 流水线里不会再出现，不传下去下一轮读不到 Issue/PR。
@@ -567,7 +582,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) exit 0;; *) exit 1;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -576,6 +591,8 @@ $:
             # 跑在 PR 目标分支 —— 不传 branch，接力会跑到主分支上，
             # api_trigger_npc_handoff 在那边可能根本不存在（接力静默落空）。
             branch: $CNB_BRANCH
+            env:
+              handoffIssueIid: $CNB_ISSUE_IID
 
   issue.comment@npc:
     - <<: *npc-dscoder-job
@@ -584,7 +601,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) exit 0;; *) exit 1;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -598,7 +615,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) exit 0;; *) exit 1;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -683,7 +700,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) exit 0;; *) exit 1;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
