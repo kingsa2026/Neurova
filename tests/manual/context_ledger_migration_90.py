@@ -162,8 +162,13 @@ def main():
     pureElapsed = (time.perf_counter() - started) * 1000
     print(f"[2b 纯迁移（4 行前像库）] {pureElapsed:.1f} ms")
 
-    assert after["user_version"] == 1, "生产构造面未把旧库迁到 v1"
-    assert {"content_digest", "created_at", "chat_scope"} <= set(after["columns"]), after["columns"]
+    from neurova.context.eviction_ledger_db import LEDGER_DOMAIN
+    from neurova.core.db_migration import latest_version
+
+    assert after["user_version"] == latest_version(LEDGER_DOMAIN), (
+        "生产构造面未把旧库迁到当前最新版本"
+    )
+    assert {"content_digest", "created_at", "chat_scope", "pool_hash"} <= set(after["columns"]), after["columns"]
     assert {"uniq_digest", "idx_scope_id"} <= set(after["indexes"]), after["indexes"]
     assert after["rows_without_digest"] == 0, "旧行 content_digest 未回填"
     assert after["rows"] == 3, f"同内容重复行未合并：{after['rows']} 行"

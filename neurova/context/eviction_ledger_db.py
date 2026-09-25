@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS evicted_chunks (
     evicted_at TEXT NOT NULL,
     content_digest TEXT,
     created_at TEXT,
-    chat_scope TEXT
+    chat_scope TEXT,
+    pool_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_evicted_user ON evicted_chunks(user_id, agent_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS evicted_fts USING fts5(
@@ -78,6 +79,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS evicted_fts USING fts5(
 
 # v1 之前的历史表结构（列是后加的）；用于迁移期加列判断，不参与新建库
 _V1_COLUMNS = ("content_digest", "created_at", "chat_scope")
+
+# v3：池内容指纹列（T-11d 下钻的寻址键）。为什么不能复用 `content_digest`：
+# 它是**纯内容**指纹（`contentDigest`），而层节点 `covers` 里存的是**池内容指纹**
+# （`ContextInput.compute_hash(source, content)`，带来源域）——两个域的值不相等，
+# 按 covers hash 去 `content_digest` 上查必然全员落空。索引与原文因此从来对不上，
+# 重启后下钻更无从谈起。故把池指纹**原样**落一列（写入侧一处派生，不做二次哈希）。
+_V3_COLUMNS = ("pool_hash",)
 
 # `(user_id, agent_id, id)`：热集查询实测 0.9 ms；按 `session` 收尾是负优化
 # （33.9–35.5 ms），故索引以 `id` 收尾（规格 U4 定案）。
@@ -96,6 +104,12 @@ _FTS_ALIGN_BATCH = 5000
 # D9 候选集上限（规格 U2 定案初值）：MATCH 命中超过它时降级为"最近 N 条候选 +
 # 候选内子串过滤"。用于避免一次查询把整库拉回内存再逐条过滤。
 CANDIDATE_LIMIT = 2000
+
+# 按池指纹直取的批大小（T-11d）：仅是 SQL 变量数上限的切分，不是业务上限。
+_ROW_LOOKUP_BATCH = 500
+
+# v3 回填批大小：与 FTS 重建同形（分批短事务，见 `_backfillPoolHash`）。
+_POOL_HASH_BACKFILL_BATCH = 5000
 
 # D12 v2：FTS 重建为 trigram 的回填批大小（规格实测值）。分批短事务——
 # 一次性 `INSERT … SELECT` 会把并发写整段阻塞（基线脚本 §6 实测 0.84 s 全程持写锁）。
@@ -156,6 +170,29 @@ def resolveArchivedCreatedAt(row: sqlite3.Row) -> datetime.datetime:
             except ValueError:
                 logger.warning("归档行的 %s 不是 ISO 时间，继续回退", key)
     return datetime.datetime.now()
+
+
+def poolHash(source: Optional[str], content: str) -> str:
+    """归档行的**池内容指纹**（covers 里存的那一份，T-11d 下钻的寻址键）。
+
+    与 `contentDigest` 是**两个域**，不是同一件事的两种写法：
+    `contentDigest` 只哈希内容，用于"同内容只出一条"的去重；池指纹还带**来源域**
+    （对话 / 工具结果 / 摘要）。层节点的 `covers` 存的是后者，故直取面必须按后者
+    建索引。派生委托 `ContextInput.compute_hash`（池侧唯一派生处）——在这里重写
+    一遍"source + content"的拼法就是第二份指纹口径，漂移后索引静默失效。
+
+    行内 `source` 为空（v3 之前未标来源的旧行）时按对话域处理：与
+    `_windowChunkIdentity` 的"非 tool 即对话"是同一份判定。
+    """
+    from neurova.context.pool_models import ContextInput, ContextSource
+
+    raw = str(source or "").strip()
+    try:
+        domain = ContextSource(raw) if raw else ContextSource.CONVERSATION
+    except ValueError:
+        logger.warning("归档行的 source=%r 不是已知来源域，按对话域派生池指纹", raw)
+        domain = ContextSource.CONVERSATION
+    return ContextInput.compute_hash(domain, content)
 
 
 def _rowValue(row, key: str) -> Any:
@@ -326,8 +363,62 @@ def _openSideConnection(dbPath: str) -> sqlite3.Connection:
     return side
 
 
+def _migrateToV3(conn: sqlite3.Connection) -> None:
+    """v3：加 `pool_hash` 列与它的索引（T-11d 下钻的直取面）。
+
+    为什么必须**回填**而不是只加空列：v3 之前的行是真实归档，它们的池指纹可由
+    `metadata` 里的来源域 + 内容**确定性重算**（与写入侧同一份派生）——不回填等于
+    把历史归档排除在下钻之外，"任取一档摘要都能取回原文"（工单 §12.7 判据 5）
+    就只对新数据成立。
+
+    与 `content_digest` 不同，本列**允许重复**：同一段文本在两个来源域下是两条
+    不同的归档，各自要有自己的池指纹；不建唯一索引，否则会像 content_digest 那样
+    把跨域条目误当重复行合并掉。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(evicted_chunks)")}
+    for name in _V3_COLUMNS:
+        if name not in columns:
+            conn.execute("ALTER TABLE evicted_chunks ADD COLUMN %s TEXT" % name)
+    _backfillPoolHash(conn)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pool_hash ON evicted_chunks(user_id, agent_id, pool_hash)"
+    )
+
+
+def _backfillPoolHash(conn: sqlite3.Connection) -> int:
+    """按 metadata 的来源域 + 内容回填池指纹（与写入侧同一份派生）。
+
+    读取**分批且带 `LIMIT`**：一次拉全表在 10 万行存量库上会把整表读进内存，
+    与"分批短事务"的既定纪律相悖（v2 的 FTS 重建已因同类理由那样做）。
+
+    **事务边界由 `db_migration` 持有**，本函数不自开事务（`BEGIN` 在已有事务里
+    直接 `OperationalError`）。这与 v1 的 `_migrateToV1` 是同一形态：v2 之所以
+    另开侧连接，是因为 FTS 虚表的 `DROP`/`RENAME` **结构上无法**在持事务的连接上
+    执行，而普通 `ALTER`/`UPDATE` 没有这个限制 —— 不是"v2 更严格"，是 DDL 类型
+    不同。故本步的写锁持有窗口与 v1 同级，不引入新的长事务形态。
+    """
+    total = 0
+    while True:
+        batch = conn.execute(
+            "SELECT id, content, source, metadata FROM evicted_chunks"
+            " WHERE pool_hash IS NULL LIMIT ?",
+            (_POOL_HASH_BACKFILL_BATCH,),
+        ).fetchall()
+        if not batch:
+            break
+        conn.executemany(
+            "UPDATE evicted_chunks SET pool_hash = ? WHERE id = ?",
+            [(poolHash(row["source"], row["content"]), row["id"]) for row in batch],
+        )
+        total += len(batch)
+    if total:
+        logger.info("归档库迁移：回填 pool_hash %d 行", total)
+    return total
+
+
 register_migration(1, _migrateToV1, domain=LEDGER_DOMAIN)
 register_migration(2, _rebuildFtsAsTrigram, domain=LEDGER_DOMAIN)
+register_migration(3, _migrateToV3, domain=LEDGER_DOMAIN)
 
 
 class EvictionLedgerDB:
@@ -454,6 +545,7 @@ class EvictionLedgerDB:
         metadata: Optional[Dict[str, Any]] = None,
         chat_scope: Optional[str] = None,
         created_at: Optional[str] = None,
+        item_hash: Optional[str] = None,
     ) -> bool:
         """记录一次归档；content 同时写入 FTS 表。
 
@@ -483,7 +575,8 @@ class EvictionLedgerDB:
                 try:
                     return self._insert(conn, content=content, turn_id=turn_id,
                                         session_id=session_id, source=source, metadata=metadata,
-                                        evicted_at=now, scope=scope, created_at=created_at or now)
+                                        evicted_at=now, scope=scope, created_at=created_at or now,
+                                        item_hash=item_hash)
                 except Exception as exc:
                     if self._batchError is None:
                         self._batchError = exc
@@ -492,7 +585,8 @@ class EvictionLedgerDB:
             try:
                 inserted = self._insert(conn, content=content, turn_id=turn_id,
                                         session_id=session_id, source=source, metadata=metadata,
-                                        evicted_at=now, scope=scope, created_at=created_at or now)
+                                        evicted_at=now, scope=scope, created_at=created_at or now,
+                                        item_hash=item_hash)
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")
@@ -500,14 +594,19 @@ class EvictionLedgerDB:
             return inserted
 
     def _insert(self, conn, *, content, turn_id, session_id, source, metadata,
-                evicted_at, scope, created_at) -> bool:
-        """单条落库（内容表 + FTS 影子表）；事务边界由调用方决定。"""
+                evicted_at, scope, created_at, item_hash=None) -> bool:
+        """单条落库（内容表 + FTS 影子表）；事务边界由调用方决定。
+
+        `item_hash` 是写入侧已算好的**池指纹**（`ContextInput.hash`）；缺省时按
+        `source + content` 用同一份派生补算 —— 直取面（T-11d）要的是池指纹，
+        这里绝不能退回纯内容哈希（两个域不相等，索引会静默指空）。
+        """
         cur = conn.execute(
             "INSERT INTO evicted_chunks"
             " (user_id, agent_id, session_id, turn_id, source, content, metadata,"
-            "  evicted_at, content_digest, created_at, chat_scope)"
+            "  evicted_at, content_digest, created_at, chat_scope, pool_hash)"
             " VALUES (:user_id, :agent_id, :session_id, :turn_id, :source, :content, :metadata,"
-            "  :evicted_at, :content_digest, :created_at, :chat_scope)"
+            "  :evicted_at, :content_digest, :created_at, :chat_scope, :pool_hash)"
             " ON CONFLICT (user_id, agent_id, content_digest) DO NOTHING",
             {
                 "user_id": self.user_id,
@@ -521,6 +620,7 @@ class EvictionLedgerDB:
                 "content_digest": contentDigest(content),
                 "created_at": created_at,
                 "chat_scope": scope,
+                "pool_hash": item_hash or poolHash(source, content),
             },
         )
         if cur.rowcount == 0:
@@ -565,6 +665,40 @@ class EvictionLedgerDB:
                     "limit": int(limit),
                 },
             ).fetchall()
+
+    def rowsByPoolHashes(self, hashes: List[str]) -> List[sqlite3.Row]:
+        """按**池指纹**批量直取行（T-11d 下钻的唯一持久读面）。
+
+        与 `search()` 的分工是本票的核心：`search()` 是**模糊**召回（FTS/LIKE，
+        用于"用户说之前讨论过"，允许召回不到）；本方法是**确定性直取**（hash 相等
+        即命中，不设门槛、不做相关性打分）——工单 §12.7 判据 5 要的"确定性回取"
+        只能是后者。
+
+        隔离条件静态写死在 SQL 里（user_id / agent_id），与其余读路径同纪律。
+        找不到的 hash **不进结果**：调用方据此把"索引指向不存在的原文"如实计成
+        `SourceMissing`，而不是让这里替它补一条空行（那会把断链伪装成命中）。
+        """
+        wanted = [h for h in (hashes or []) if h]
+        if not wanted:
+            return []
+        with self._lock:
+            conn = self._requireConn()
+            found: List[sqlite3.Row] = []
+            # 分批占位符：单条 SQL 的变量上限（SQLITE_MAX_VARIABLE_NUMBER）在
+            # covers 上万条时会撞上，且层节点条数不设上限（T-11a 裁定），
+            # 故按固定批大小切——批大小只是 SQL 参数上限，不是业务上限。
+            for start in range(0, len(wanted), _ROW_LOOKUP_BATCH):
+                chunk = wanted[start:start + _ROW_LOOKUP_BATCH]
+                placeholders = ",".join("?" * len(chunk))
+                found.extend(
+                    conn.execute(
+                        "SELECT *, id AS _row FROM evicted_chunks"
+                        " WHERE user_id = ? AND agent_id = ?"
+                        f" AND pool_hash IN ({placeholders})",
+                        (self.user_id, self.agent_id, *chunk),
+                    ).fetchall()
+                )
+            return found
 
     def search(
         self,
