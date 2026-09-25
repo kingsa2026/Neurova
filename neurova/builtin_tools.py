@@ -15,6 +15,16 @@ from typing import Any, Callable, Dict, List, Optional
 logger = get_logger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
+# 有界口径的**单源**：`query_database` 的 row_limit 默认值与上界取自
+# `attachment_dataset`（与工具执行体同一份常量），schema 文案不另写一份。
+# ═══════════════════════════════════════════════════════════════
+from neurova.attachment_dataset import (
+    MAX_ROWS_DEFAULT as MAX_DATASET_ROWS_DEFAULT,
+    MAX_ROWS_LIMIT as MAX_DATASET_ROWS_LIMIT,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
 # 内置工具参数 Schema（单一事实源）
 # ═══════════════════════════════════════════════════════════════
 
@@ -64,6 +74,34 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "max_chars": {"type": "integer", "description": "返回文本上限（默认 50000，超出截断并标 truncated）", "default": 50000},
             },
             "required": ["file_path"],
+        },
+    },
+    "query_database": {
+        "description": (
+            "【数据集查询】按附件句柄只读查询用户上传的 SQLite 数据集（.db/.sqlite）："
+            "缺省列全部表、每表列定义、行数与样例行；给了 sql 则执行该只读查询。"
+            "当附件抽取通道报「未能抽取文本内容」而扩展名是 .db/.sqlite 时用本工具——"
+            "那是原始二进制容器，只有它读得出。"
+            "【何时不用】纯文本/代码用 file_read；PDF/Office 文档用 file_parse；"
+            "平台自有库（users.db 等）与任意路径都不在本工具范围内，它只认附件句柄。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": "附件句柄（注入文案里的 file_id；服务端路径不对外，取用一律凭该句柄）",
+                },
+                "sql": {
+                    "type": "string",
+                    "description": "只读 SQL（可选，缺省=列 schema 与样例）。只允许 SELECT / WITH … SELECT / 只读 PRAGMA；写型语句、ATTACH、多语句一律拒绝。",
+                },
+                "row_limit": {
+                    "type": "integer",
+                    "description": f"最多返回行数（可选，默认 {MAX_DATASET_ROWS_DEFAULT}，上界 {MAX_DATASET_ROWS_LIMIT}；超限截断并在结果里标 truncated）",
+                },
+            },
+            "required": ["file_id"],
         },
     },
     "file_write": {
@@ -1046,6 +1084,15 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
 })
+
+
+def get_registered_tool_names() -> List[str]:
+    """内置工具注册名清单（**单源**读侧）。
+
+    字母表类校验（合成器序列、附件提示文案）一律读这一处，不得各自持有
+    一份名字表——第二份表就是幻名的温床（教义第 6 条）。
+    """
+    return sorted(_BUILTIN_SCHEMAS)
 
 
 def is_builtin_tool_reproducible(tool_name: str) -> bool:

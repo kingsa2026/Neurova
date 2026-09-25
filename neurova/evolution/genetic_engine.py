@@ -132,29 +132,20 @@ class ToolGeneticEngine:
         # 验证统计
         self._validated_count: int = 0
 
-        # 可用工具池（用于变异）
+        # 可用工具池（用于变异）。此前是一份**手工维护的名字表**，其中
+        # `browser_scroll` / `memory_store` / `code_execute` / `api_call` /
+        # `data_transform` 等 13 个名字全仓注册处为 0 —— 变异出来的基因型带着
+        # 模型读不到的路标，且与合成器的字母表构成第二、三份平行的名字表。
+        # 现在改为从**唯一读侧**派生：注册清单中"可重现"（无副作用）的那一子集。
+        # 可重现性是既有的单源判据（`builtin_tools.is_builtin_tool_reproducible`），
+        # 拿它当过滤条件就得到"能安全组合进基因型的只读原语"，不需要第四张表。
+        from neurova.builtin_tools import (
+            get_registered_tool_names,
+            is_builtin_tool_reproducible,
+        )
+
         self._available_tools: List[str] = [
-            "browser_navigate",
-            "browser_screenshot",
-            "browser_click",
-            "browser_type",
-            "browser_scroll",
-            "browser_wait",
-            "file_read",
-            "file_write",
-            "file_list",
-            "memory_search",
-            "memory_store",
-            "memory_delete",
-            "code_execute",
-            "code_analyze",
-            "code_format",
-            "screenshot",
-            "visual_parse",
-            "smart_click",
-            "api_call",
-            "data_transform",
-            "log_analysis",
+            name for name in get_registered_tool_names() if is_builtin_tool_reproducible(name)
         ]
 
     @property

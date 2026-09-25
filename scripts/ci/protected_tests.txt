@@ -710,6 +710,25 @@ tests/unit/agent/test_tool_call_recall_owner.py
 #    判据同时反锁旧 API 形态逐字节不变，避免把展示/统计面一起拖进新语义。）
 tests/unit/agent/test_model_context_tool_rebuild.py
 
+# 上下文三链路批（Issue #90）T-10c 前置裁定：microcompact 的触发轴与保留窗与窗口
+#   折叠各自声明（裁掉共线），并整合「未触发折叠但工具输出已撑满窗口」那一段。
+#   （根因：触发曾看整窗 token、保留曾看条数"最近 3 条"，而 3 恰是折叠留下的
+#    工具行数 —— 真序列先折叠后 microcompact，两处稳态互相抵消，占位指针恒不触发。
+#    现两根轴都按工具结果载荷 token 声明：触发=`min(8000, 窗口实占半数)` 再抬到
+#    收益门槛，保留=载荷的一半（至少 1 条）。触发事实记进
+#    `get_context_health()["microcompact"]`，供下游按读数判断而非解析日志。）
+tests/unit/context/test_microcompact_threshold_decoupling.py
+
+# 上下文三链路批（Issue #90）T-10c 收口：工具轮载荷必须进窗口预算判据。
+#   （根因：窗口计量只读 `content` 字符串，而 T-10b 之后 `assistant.tool_calls`
+#    会进视图真发给模型，`arguments` 原文串常是调用参数本体 —— 却不在任何窗口
+#    判据里。同一批消息因此有两个计量结果：判据读到 85 token、展示侧读到 10321
+#    （270× 低估），折叠/清占位/召回额度全按假读数判，工单 §11.4 第 2 条
+#    「含工具轮的窗口 ≤ 预算」在这形状上恒真。
+#    现收口为单源派生 `window_compactor.messagePayloadTokens()`：文本内容 /
+#    多模态分段 / `tool_calls` 原文串，判据侧与展示侧共用。）
+tests/unit/context/test_tool_payload_budget_accounting.py
+
 # Issue #189 启动器一致性批：
 #   ① 端口判据收口到 neurova/core/port_guard.py（唯一实现），start_server.py 的
 #      预检必须在 create_app 之前 —— 判据是 AST 行号（结构性），不用墙钟上界；
@@ -723,6 +742,30 @@ tests/unit/evolution/test_synth_tool_name_carries_identity.py
 tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
+
+# 能力缺口自主闭环批（Issue #197）四票的判据落点（全部逐文件单跑确定全绿）：
+#   T-01 诊断回环：工具失败正文必须携带 stderr/exit_code，禁止只剩兜底串；
+#   T-02 句柄可见：附件抽取失败必须携带 file_id/status 且留痕（截图类断言防路径泄露）；
+#   T-03 缺口驱动：自主造能力的入口改挂能力缺口，不再看用户措辞关键词；
+#   T-04 字母表去幻：合成序列 ⊆ 真实注册名，未知分类转人工复核，名字唯一性。
+tests/unit/agent/test_tool_failure_diagnostics.py
+tests/unit/agent/test_attachment_handle_injection.py
+tests/unit/agent/test_capability_gap_trigger.py
+tests/unit/evolution/test_synthesis_alphabet_registered.py
+
+# 技能注入扫描守卫（P1-6）：NL 合成产物注册前必须过扫描，且正例要真走到注册出口。
+#   T-03 把 `_check_nl_synthesis` 的入口判据换成能力缺口后，本文件两例都在入口早退
+#   （正例看起来红、反例看起来绿，判据从未咬合）——它此前不在子集里，CI 看不见。
+tests/unit/security/test_p1_6_skill_guard.py
+
+# T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
+#   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
+tests/unit/tools/test_query_database.py
+
+# 市场未命中 → 自主合成的回退必须真能走到入口（T-03 改判据后一度成死路）：
+# 既有六例都打方法替身，只证明"调用发出去了"；本文件不走 mock 驱动真入口，
+# 缺口信号须由"市场未命中"这个生产点就地投递。
+tests/unit/agent/test_skill_acquisition_fallback.py
 
 # Issue #68 收口：前端调用 ↔ 后端注册差异的裁决与补齐。
 #   （根因：清单第四节把 28 处差异写成「由人去核」——只登记、不裁决，

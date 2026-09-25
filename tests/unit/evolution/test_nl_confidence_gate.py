@@ -16,6 +16,13 @@
 - 旋钮微分（对齐 004 的"事实源必须可达"）：把阈值调到实测置信度之下 ⇒ 同一描述
   必须照常通过，证明门读的是参数而不是硬编码常量。
 
+消费方用例的**入口前置条件**（T-03 契约变更，CI 实测）：
+调用方的入口判据已由"用户措辞关键词"改为"能力缺口"（`agent/capability_gap.py`）。
+故驱动 `_check_nl_synthesis` 的用例必须**先在生产点投出缺口**，否则入口在到达
+置信闸之前就早退了 —— 那样两条用例都会"通过"，但负例是因为入口关了才看起来
+像拦住了，判据其实没咬合。故本类显式投一条缺口信号，两条用例都真跑到置信闸：
+负例仍须被闸拦下，正例仍须进注册。
+
 测试一律走 `NLToolSynthesizer()` 的**生产默认装配**（agent_core.py 构造时不传
 min_confidence），断言里先钉住实测置信度，估器漂移时测试会自己报出来。
 """
@@ -117,8 +124,27 @@ class TestConsumerDoesNotRegisterPendingReview:
         return pipeline, registrar
 
     def _run(self, pipeline, user_input: str):
+        """走生产入口：先在生产点投出一条能力缺口，再驱动入口。
+
+        不投缺口时入口早退（T-03 的缺口判据），本类就测不到置信闸 —— 判据会
+        退化成"入口关着"这一件事。缺口信号走 `recordCapabilityGap` 单源投递口。
+        """
+        from neurova.agent.capability_gap import (
+            GAP_ATTACHMENT_UNREADABLE,
+            clearCapabilityGap,
+            recordCapabilityGap,
+        )
+
+        clearCapabilityGap("session-nl-gate")
+        recordCapabilityGap(
+            GAP_ATTACHMENT_UNREADABLE,
+            {"filename": "memory.db", "file_type": "file", "file_id": "f-1",
+             "status": "unsupported_format"},
+            "session-nl-gate",
+        )
         ctx = SimpleNamespace(user_input=user_input)
         asyncio.run(pipeline._check_nl_synthesis(ctx, force=True))
+        clearCapabilityGap("session-nl-gate")
 
     def test_low_confidence_product_never_reaches_registry(self, synth):
         pipeline, registrar = self._pipeline(synth)
