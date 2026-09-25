@@ -12,6 +12,14 @@ ToolResult{Success, Output, OutputRef, Data, Error}——大输出
 语义边界（防呆）：
 - **默认不安装**：install_tool_output_ref() 显式装配（幂等）；未安装时
   maybe_output_ref 恒透传原结果对象（零行为变化）。
+- **只折叠成功结果**：失败结果的正文就是诊断载体（`error` / `stderr` /
+  `exit_code`），引用结构里没有它们 —— 在咽喉处先折叠，等于把"诊断蒸发"
+  原样放回来。体量折叠的**单源**是回环处的 `apply_offload_policy`
+  （head+tail 预览 + 可回读指针），它保住诊断；本层只负责成功结果的引用化。
+- **成败判据不自持**：`success` 由调用方传入（咽喉的
+  `ToolExecutor._result_is_success`，全仓唯一判据），本模块不再按
+  `result.get("success", "error" not in result)` 自己推一遍 —— 那是同一件事的
+  第二份定义，两份迟早对不上。
 - **诚实降级**：无工作区/写盘失败时原样返回大结果——宁可膨胀也不丢输出。
 - 与 context_pool 溢出摘要互补：一个管工具输出（本模块），一个管对话历史。
 """
@@ -86,22 +94,29 @@ def ensure_output_ref_installed_from_env() -> None:
     install_tool_output_ref()
 
 
-def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any) -> Any:
+def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
+                     success: bool) -> Any:
     """结果出流咽喉点调用：大输出落盘为引用。
 
     Args:
         tool_name: 工具名（落盘文件名成分）
         result: 工具结果（仅 dict 结果处理；其余原样返回）
         workspace_dir: agent 工作区目录（Path/str；None=诚实降级透传）
+        success: 成败判据由调用方给定（咽喉的 `_result_is_success` 是唯一判据，
+            本模块不自持第二份）。**失败结果一律不折叠**：它的正文是模型自我
+            纠正所需的诊断，折叠成引用即诊断蒸发。
 
     Returns:
-        原结果（未安装/小结果/降级）或引用 dict：
-        {"success": ..., "output_ref": {path, size_bytes, truncated, preview}, "note": ...}
+        原结果（未安装/失败结果/小结果/降级）或引用 dict：
+        {"success": True, "output_ref": {path, size_bytes, truncated, preview}, "note": ...}
     """
     handle = get_installed_output_ref()
     if handle is None:
         return result
     if not isinstance(result, dict):
+        return result
+    if not success:
+        # 失败正文即诊断本体，交回环处的 apply_offload_policy 折叠（它保留预览）。
         return result
     if workspace_dir is None:
         return result
@@ -123,14 +138,13 @@ def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any) -> Any:
         logger.warning("OutputRef 落盘失败（透传原结果）: %s", e)
         return result
 
-    success = result.get("success", "error" not in result)
     size_bytes = path.stat().st_size
     logger.info(
         "工具 %s 输出 %d 字符超阈值 %d → 落盘 %s（%d 字节）",
         tool_name, len(serialized), handle.max_chars, path, size_bytes,
     )
     return {
-        "success": bool(success),
+        "success": True,
         "output_ref": {
             "path": str(path.resolve()),
             "size_bytes": size_bytes,
