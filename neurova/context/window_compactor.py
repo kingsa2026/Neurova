@@ -83,6 +83,10 @@ def _payloadSegments(message: typing.Any) -> typing.Tuple[typing.List[str], int]
 # 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
 # 静态桩（编排层既有语义）。压缩自身必须收敛，不允许摘要失败拖垮整轮压缩。
+#: 折叠摘要行的展示前缀。**单源**：压缩器的默认入参、编排器的静态折叠桩、
+#: 分辨率装配器的行前缀都取这一处 —— 三处各写一遍字面串时，改一处必漏两处。
+SUMMARY_PREFIX = "[早期对话摘要] "
+
 _SUMMARY_MAX_RETRIES = 3
 
 
@@ -238,7 +242,7 @@ async def compact_window(
     previous_summary: str = "",
     keep_min_messages: int = 6,
     target_ratio: float = 0.5,
-    summary_prefix: str = "[早期对话摘要] ",
+    summary_prefix: str = SUMMARY_PREFIX,
     meter: typing.Optional["WindowTokenMeter"] = None,
     summary_max_retries: typing.Optional[int] = None,
     summary_call_budget: typing.Optional[int] = None,
