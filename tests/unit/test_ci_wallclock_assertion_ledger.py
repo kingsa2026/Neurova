@@ -82,11 +82,12 @@ def _outsideSubsetRefs() -> List:
     不抄第二份），故预筛口径与本地判定逐字一致；文本读取走 `_cachedCode`，
     与其余跨文件判据复用同一份缓存（Issue #148 / #197）。
 
-    解析**不**并入共享缓存：实测 224 个候选文件私有 `ast.parse` 0.22s、
-    走 `_cachedParse` 0.82s —— 共享缓存的 `maxsize=None` 会把语法树全部留下，
-    gen2 GC 随即反复扫描这棵常驻图，成本反随命中面增长（见门禁台账里
-    `test_pytest_collection_hygiene.py` 那条同因读数）。故本处保留私有解析，
-    范围已由预筛限定在命中面之内。
+    解析也并入共享缓存：本处原先私有 `ast.parse`，理由是「共享缓存的
+    `maxsize=None` 会把语法树全部留下，gen2 GC 随即反复扫描这棵常驻图，成本反
+    随命中面增长（实测私有 0.22s vs 共享 0.82s）」。该前提随共享缓存的**退役
+    策略**（`ast_scan.RETIRE_STEP`）落地而不再成立：常驻图会按步长移出 GC 的
+    扫描分代，实测整会话 gen2 从 7.4s 降到 1.4s。故收回这处 consumer 侧的规避，
+    解析回到唯一入口（教义第 1、6 条：不在消费方绕开共享源）。
     """
     return ast_scan.sourceRefsUnder(
         REPO_ROOT / "tests", ".py", hints=PARSE_HINTS)
@@ -303,7 +304,7 @@ def _isWallclockMeasure(node: ast.AST, clockNames: frozenset) -> bool:
     return name in clockNames or bool(TIME_WORD.search(name))
 
 
-def wallclockBounds(source: str) -> List[Tuple[int, str, str]]:
+def wallclockBounds(source) -> List[Tuple[int, str, str]]:
     """文件里所有"耗时量 < 常量"断言：[(行号, 所属用例名, 表达式)]。
 
     只收**上界**（`<` / `<=`）：下界断言（`elapsed >= 11 * delay`）在负载下只会
@@ -318,8 +319,11 @@ def wallclockBounds(source: str) -> List[Tuple[int, str, str]]:
     - **拿读数给上界垫高**（`assert elapsed < elapsed_limit` 而
       `elapsed_limit = elapsed * 2`）一律不受理：那是把契约交给机器速度，
       正是本守卫的靶心（教义第 2 条）。
+
+    `source` 可以是源码文本（单用例自证时用），也可以已是语法树 —— 跨文件扫描
+    走 `ast_scan._cachedParse` 取树，判定逻辑仍只有这一处（不新造平行入口）。
     """
-    tree = ast.parse(source)
+    tree = source if isinstance(source, ast.AST) else ast.parse(source)
     clock = _clockNames(tree)
     constantNames = _constantBoundNames(tree)
     found: List[Tuple[int, str, str]] = []
@@ -535,7 +539,8 @@ def _scan() -> Dict[str, List[Tuple[int, str]]]:
         if not path.is_file() or not rel.endswith(".py"):
             continue
         try:
-            source = io.open(path, encoding="utf-8", errors="ignore").read()
+            source = ast_scan._cachedParse(
+                ast_scan._cacheKey(path), ast_scan.sourceCode(path))
             bounds = wallclockBounds(source)
         except SyntaxError:
             continue
@@ -643,7 +648,7 @@ class TestOutsideSubsetHitsAreCounted:
             if rel in subset or not _maybeContainsWallclock(ref.code):
                 continue
             try:
-                count = len(wallclockBounds(ref.code))
+                count = len(wallclockBounds(ast_scan._cachedParse(ref.stamp, ref.code)))
             except SyntaxError:
                 continue
             if count:
