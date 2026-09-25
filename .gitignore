@@ -20,6 +20,8 @@ develop-eggs/
 .pytest_cache/
 .coverage
 htmlcov/
+# 前端 vitest --coverage 产物（HTML 报告，勿入库）
+NeurUI/coverage/
 
 # 调试和临时文件
 # 注意：勿用 *_check*.py 这类通配——会吞掉合法测试文件（如 test_health_checks_contract.py，
@@ -76,6 +78,13 @@ node_modules/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+
+# 例外：依赖审计覆盖面所需的锁文件必须入库（Issue #56）
+#   全局忽略 package-lock.json 是为了不把"本地随手 npm i"的产物带进仓库；
+#   但下面这份是**门禁的输入**（scripts/ci/osv_audit.py 扫它），
+#   不入库则运行时 npx 包的漏洞永远无人可见——这正是 #56 要收的口。
+!NeurUI/package-lock.json
+!tools/npx-runtime/package-lock.json
 
 # IDE 和编辑器
 .vscode/
@@ -205,11 +214,15 @@ logs/
 /*_AUDIT*.md
 /*_SUMMARY*.md
 
-# 根目录临时md文件（排除README.md）
+# 根目录临时md文件（排除项目入口文档）
 /*.md
 !README.md
 !CONTRIBUTING.md
 !SECURITY.md
+# AGENTS.md：AI 指令文件 + 修复教义事实源，被全仓 90+ 处编号引用，
+# 曾被本规则吞掉导致"引用遍地、文件不在库"（克隆/CI 上纪律凭空消失）。
+# 守卫：tests/unit/test_repair_discipline_guard.py
+!AGENTS.md
 
 # 敏感信息
 .neurova_token.json
@@ -349,6 +362,10 @@ desktop/*.pfx
 # 后端全量打包 stage（1.6GB，构建脚本 scripts/desktop/bundle_backend.py 生成）
 NeurUI/src-tauri/resources/backend/
 NeurUI/src-tauri/resources/_python-*
+# 路线 B 首启下载在开发态的后端根即仓库根：runtime/ 是 Python/Node 下载目标，
+# 下载状态文件是每次启动改写的运行态，都不入库
+/runtime/
+/.download_status.json
 
 # ==================== 根目录杂物防再生（2026-09-02 二次清理） ====================
 # stash 事故复活过的根级临时测试脚本/产物，统一规范到 tests/ 分类目录
@@ -381,9 +398,17 @@ NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
 .jwt_secret
 .agents/
 
-/scripts/import_kai_to_neurova.py
-/tests/unit/migration/
-# 记忆迁移操作产物（本地工具，不入库）
+# 污染清空 / 断言归正的一次性归档（`.pre-purge-*` / `.pre-regrade-*`）：
+# 库本体被 *.db 挡住，归档副本名挂库名之后就不在规则里了——单独补一条，
+# 否则每次运维动作都会在 git status 里留下一堆 68MB 的归档。
+*.db.pre-purge-*
+*.db.pre-regrade-*
+*.db-wal.pre-purge-*
+*.db-shm.pre-purge-*
+
+# 一次性迁移工具的操作产物（渲染核对截图，可再生，不入库）
+# 工具本体 scripts/import_kai_to_neurova.py 与它的回归 tests/unit/migration/ 已入库：
+# 私有方言来源（记忆库/快照/笔记）只有它管，产品入口是 scripts/ingest_memory.py。
 /docs/05-reports/kai-import-render-verify-*.png
 agent_workspaces/kai/
 
@@ -402,3 +427,61 @@ agent_workspaces/kai/
 
 # 研究参考仓库克隆（ulab-uiuc/Thought-Retriever，本地留档）：gitlink 无 .gitmodules 系误提交，干净检出即坏；目录整体不跟踪
 thought-retriever-src/
+
+# 第三方产品参考克隆（本地留档）：与 thought-retriever-src 同策略，目录整体不入库
+cumora/
+
+# ==================== 唯一测试根豁免（2026-09-22） ====================
+# 上方「调试和临时文件」「临时脚本」两节是**未锚定**的通配（check*.py /
+# verify*.py / *_patch*.py / debug*.py / run_*.py / fix_*.py …）。它们本意是排除
+# 开发机随手丢的临时脚本，却会连 `tests/` 下的合法测试文件一起吞掉。
+#
+# 2026-09-22 实锤：新增守卫 tests/unit/desktop/test_rust_vendor_patch_guard.py
+# 命中 `*_patch*.py`，提交后仓库里根本没有该文件，而 scripts/ci/protected_tests.txt
+# 已收录它——CI 的 unit-tests 以 `ERROR: file or directory not found` 退出 4
+# （收集 0 项）。本机单跑全绿、CI 全红，是最难察觉的一类断链。
+#
+# 故为唯一测试根加豁免：tests/ 下的一切视为候选入库内容。
+# 随后只把**跑测产物**与**敏感件**重新挡在门外——这几行是该清单的唯一出处，
+# 行为由 tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+# TestProtectedSubsetEntriesAreTracked 双向钉住（正当名不得被吞 / 产物不得放行）。
+!tests/**
+# 跑测缓存与覆盖产物
+tests/**/__pycache__/
+tests/**/*.py[cod]
+tests/**/.pytest_cache/
+tests/**/htmlcov/
+tests/**/.coverage
+# 隐藏目录（补齐上方 `.*/` 在测试根内的语义）
+tests/**/.*/
+# 构建产物
+tests/**/dist/
+tests/**/build/
+tests/**/*.egg-info/
+tests/**/*.so
+tests/**/*.whl
+tests/**/*.tar.gz
+# 跑测落库/日志（运行期数据不入库；测试夹具应写 tmp_path）
+tests/**/*.db
+tests/**/*.db-shm
+tests/**/*.db-wal
+tests/**/*.log
+tests/**/logs/
+# 编辑器临时件
+tests/**/*.bak
+tests/**/*.tmp
+tests/**/*.backup
+# 敏感件：豁免不能给密钥开出通道
+tests/**/*.pem
+tests/**/*.pfx
+tests/**/*.token.json
+tests/**/credentials*
+tests/**/*_secret*
+tests/**/secret_*.json
+tests/**/api_keys*
+tests/**/llm_config*
+tests/**/provider_config*
+tests/**/*.llm.json
+tests/**/*.env
+tests/**/.env
+tests/**/.env.*

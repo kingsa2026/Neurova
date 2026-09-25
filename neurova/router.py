@@ -11,6 +11,7 @@ D1 任务重构版本：
 
 import inspect
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -258,13 +259,26 @@ class MessageRouter:
         except json.JSONDecodeError:
             params = {"raw": params_str}
 
-        # 执行 Skill
-        # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
-        # 相对路径锚定 agent 工作区（router 持有 agent 引用；无 agent 时
-        # 回落 "."，技能面按 CWD 解析保持旧语义）
-        if skill_name == "file_operation":
-            _ws = getattr(self._agent, "workspace_path", "")
-            params = {**(params or {}), "_base_dir": str(_ws) if _ws else "."}
+        # 执行 Skill：沙箱根注入收口到单源 helper（`skills/sandbox_root.py`），
+        # 此前与 `agent/loops/base.py` 各写一份同形实现，改一处漏一处。
+        # 执行一律委托执行咽喉（`tool_executor.execute_skill_tool`）——这条路才
+        # 同时拿到票据、`on_tool_executed`、治理预检与 hooks；直调 registry 是
+        # 002 已判死的旁路。
+        from neurova.skills.sandbox_root import inject_sandbox_root
+
+        params = inject_sandbox_root(self._agent, skill_name, params)
+        executor = getattr(self._agent, "tool_executor", None)
+        if executor is not None:
+            started = time.time()
+            payload = await executor.execute_skill_tool(skill_name, params, message.metadata)
+            ok = executor._result_is_success(payload)
+            return RouteResult(
+                success=ok,
+                response=str(payload) if ok else str((payload or {}).get("error") or "技能执行失败"),
+                handler="skill",
+                metadata={"skill_name": skill_name, "execution_time": time.time() - started},
+            )
+
         result = await self._skill_registry.execute_skill(skill_name, params, message.metadata)
 
         return RouteResult(

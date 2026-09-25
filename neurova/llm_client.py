@@ -7,9 +7,35 @@ LLM Client - 语言模型客户端
 import asyncio
 from neurova.core.logger import get_logger
 import logging
+
+_logger = get_logger(__name__)
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, List, Optional
+
+# Cost tracking imports
+try:
+    from neurova.models.cost_tracking import (
+        track_llm_call,
+        record_llm_cost,
+        LLMProvider,
+        LLMDirection,
+    )
+except ImportError:
+    # Fallback if cost tracking not available
+    def track_llm_call(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    def record_llm_cost(**kwargs):
+        return None
+
+    class LLMDirection:  # noqa: N801 - 兼容占位
+        INPUT = "input"
+        OUTPUT = "output"
+
+    LLMProvider = None
 
 # 声明式 provider 兼容开关（P0-2）：懒加载防循环导入（provider_compat 只依赖
 # 标准库，但 llm/ 包 __init__ 有重初始化链，保守走函数内导入）
@@ -213,8 +239,25 @@ class LLMClient:
         if stream:
             params["stream"] = True
 
+        # 工具面（Issue #177）：能力声明单源在 cfg.compat，逐键挑选不再漏键。
+        # 原实现只转发了 tools —— tool_choice 全链路空转（openai_loop:281 写了它，
+        # 降级路径还 pop 它，却从未到过网关），模型因此从未被告知 auto/required/none。
+        # 声明位说承载不了就不发：supports_tools=False 时两者一并剔除，
+        # supports_tool_choice=False 时只发 tools（低容忍网关收到不认识的键会 400）。
+        compat = getattr(self.config, "compat", None)
+        if compat is not None:
+            from neurova.llm.provider_compat import dropUnsupportedToolKeys
+
+            dropUnsupportedToolKeys(
+                compat,
+                kwargs,
+                getattr(self, "logger", None) or _logger,
+                where="LLMClient._build_request_params",
+            )
         if "tools" in kwargs:
             params["tools"] = kwargs["tools"]
+        if "tools" in params and "tool_choice" in kwargs:
+            params["tool_choice"] = kwargs["tool_choice"]
 
         # 显式透传的 reasoning_effort 优先；否则按 thinking_effort 档位映射
         reasoning_effort = kwargs.get("reasoning_effort")
@@ -288,6 +331,11 @@ class LLMClient:
             self.client = None
             self.async_client = None
 
+    @track_llm_call(
+        provider=LLMProvider.OPENAI if LLMProvider else None,
+        model="openai-compatible",
+        agent_id=None,  # 归属交由 ChatPipeline 每轮设置的 llm_cost_context
+    )
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
         """
         发送聊天请求
@@ -415,6 +463,20 @@ class LLMClient:
             # 调用流式 API
             stream = self.client.chat.completions.create(**params)
 
+            # 流式计费累加器：OpenAI 兼容协议 usage 多在末 chunk（choices 为空）到达，
+            # 部分网关放在带 choices 的 chunk；两处都捕获，循环结束后一次性记账。
+            billed_usage: Dict[str, int] = {}
+            stream_model = getattr(self.config, "model", "") or "openai-compatible"
+
+            def _capture(u):
+                if u:
+                    nonlocal billed_usage
+                    billed_usage = {
+                        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                    }
+
             # 处理流式响应
             for chunk in stream:
                 if not chunk.choices:
@@ -422,11 +484,13 @@ class LLMClient:
                     # 原样 yield 给消费方（multi_model/openai_loop 按 chunk.usage 读取），
                     # 再 continue（2026-09-07 根因修复：原实现直接丢弃）
                     if getattr(chunk, "usage", None) is not None:
+                        _capture(chunk.usage)
                         yield chunk
                     continue
 
                 choice = chunk.choices[0]
                 content = choice.delta.content or ""
+                stream_model = getattr(chunk, "model", None) or stream_model
 
                 # 提取 usage（可能在最后一个 chunk）
                 usage = {}
@@ -436,6 +500,7 @@ class LLMClient:
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
                     }
+                    _capture(chunk.usage)
 
                 # 提取 tool_calls
                 tool_calls = None
@@ -475,6 +540,14 @@ class LLMClient:
             self._stats["total_calls"] += 1
             self._stats["successful_calls"] += 1
             self._stats["total_time"] += time.time() - start_time
+
+            # 流式成本记账（末 chunk 一次性落盘，fail-open 副路径）
+            record_llm_cost(
+                provider=LLMProvider.OPENAI if LLMProvider else None,
+                model=stream_model,
+                usage=billed_usage,
+                direction=LLMDirection.OUTPUT,
+            )
 
         except Exception as e:
             self._stats["total_calls"] += 1
@@ -521,16 +594,31 @@ class LLMClient:
             # 导致每次异步流式调用都 TypeError；必须用 async_client 并 await。
             stream = await self.async_client.chat.completions.create(**params)
 
+            # 流式计费累加器（与同步流式同策略：末 chunk 一次性记账）
+            billed_usage: Dict[str, int] = {}
+            stream_model = getattr(self.config, "model", "") or "openai-compatible"
+
+            def _capture(u):
+                if u:
+                    nonlocal billed_usage
+                    billed_usage = {
+                        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                    }
+
             # 处理流式响应
             async for chunk in stream:
                 if not chunk.choices:
                     # async 版同因修复：yield usage chunk 给消费方
                     if getattr(chunk, "usage", None) is not None:
+                        _capture(chunk.usage)
                         yield chunk
                     continue
 
                 choice = chunk.choices[0]
                 content = choice.delta.content or ""
+                stream_model = getattr(chunk, "model", None) or stream_model
 
                 # 提取 usage（可能在最后一个 chunk）
                 usage = {}
@@ -540,6 +628,7 @@ class LLMClient:
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
                     }
+                    _capture(chunk.usage)
 
                 # 提取 tool_calls
                 tool_calls = None
@@ -580,6 +669,14 @@ class LLMClient:
             self._stats["successful_calls"] += 1
             self._stats["total_time"] += time.time() - start_time
 
+            # 流式成本记账（末 chunk 一次性落盘，fail-open 副路径）
+            record_llm_cost(
+                provider=LLMProvider.OPENAI if LLMProvider else None,
+                model=stream_model,
+                usage=billed_usage,
+                direction=LLMDirection.OUTPUT,
+            )
+
         except Exception as e:
             self._stats["total_calls"] += 1
             self._stats["failed_calls"] += 1
@@ -590,6 +687,11 @@ class LLMClient:
             # 分类异常包装：限流/认证/连接/token 各自成类，供上层区分处理
             raise LLMClient._wrap_llm_error(e) from e
 
+    @track_llm_call(
+        provider=LLMProvider.OPENAI if LLMProvider else None,
+        model="openai-compatible-health",
+        agent_id=None
+    )
     def _call_api(self, config: Optional[LLMConfig] = None) -> LLMResponse:
         """
         使用指定配置调用 API（内部方法）
@@ -784,8 +886,11 @@ class LLMClient:
                 return len(tokenizer.encode(text))
             except Exception:  # noqa: BLE001 - 单条编码失败回退估算
                 pass
-        # 回退估算：每个字符约 1.5 tokens
-        return int(len(text) * 1.5)
+        # 回退估算：走全仓唯一尺子（上界口径），不再就地 len*1.5——
+        # 该近似对 ASCII 密集内容低估 5 倍量级，会让输入预算闸门漏放。
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
 
     # 每条消息的固定结构开销（role/name 等字段，OpenAI 经验值近似）
     _PER_MESSAGE_OVERHEAD = 4

@@ -91,12 +91,39 @@ def param_to_sub_block(param: Dict[str, Any]) -> Dict[str, Any]:
 # ==================== 组件转换 ====================
 
 
-def tool_to_node(tool_def: Dict[str, Any]) -> NodeDefinition:
+def _tool_fields(tool_def: Any) -> Dict[str, Any]:
+    """工具定义 → 统一 dict 形态。
+
+    `ToolEngine.list_tools()` 返回 `ToolDefinition` 数据类，而早期调用方
+    （测试替身、外部注入）传的是 dict。两种形态都必须可读，否则
+    `tool['name']` 在数据类上抛 TypeError，同步整批失败。
+    """
+    if isinstance(tool_def, dict):
+        return tool_def
+    to_dict = getattr(tool_def, "to_dict", None)
+    if callable(to_dict):
+        try:
+            payload = to_dict()
+            if isinstance(payload, dict):
+                return payload
+        except Exception:  # noqa: BLE001 - 畸形定义按字段直读兜底
+            logger.debug("工具定义 to_dict 失败，改用字段直读", exc_info=True)
+    return {
+        "name": getattr(tool_def, "name", "unknown"),
+        "description": getattr(tool_def, "description", "") or "",
+        "parameters": [p.to_dict() if callable(getattr(p, "to_dict", None)) else p
+                       for p in (getattr(tool_def, "parameters", None) or [])],
+        "version": getattr(tool_def, "version", "1.0.0"),
+        "tags": list(getattr(tool_def, "tags", None) or []),
+    }
+
+
+def tool_to_node(tool_def: Any) -> NodeDefinition:
     """
     ToolEngine 工具 → 工作流节点定义
 
     Args:
-        tool_def: 工具定义字典
+        tool_def: 工具定义（`ToolDefinition` 数据类或等价 dict）
             - name: 工具名称
             - description: 工具描述
             - parameters: 参数列表
@@ -106,22 +133,23 @@ def tool_to_node(tool_def: Dict[str, Any]) -> NodeDefinition:
     Returns:
         NodeDefinition 节点定义
     """
-    name = tool_def.get("name", "unknown")
-    parameters = tool_def.get("parameters", [])
+    fields = _tool_fields(tool_def)
+    name = fields.get("name", "unknown")
+    parameters = fields.get("parameters", []) or []
 
     return NodeDefinition(
         type=f"tool:{name}",
         label=name,
         icon="🔧",
         category="tools",
-        description=tool_def.get("description", f"工具: {name}"),
+        description=fields.get("description", f"工具: {name}"),
         sub_blocks=[param_to_sub_block(p) for p in parameters],
         inputs=[{"id": "input", "label": "输入"}],
         outputs=[{"id": "output", "label": "输出"}, {"id": "error", "label": "错误"}],
         source="tool",
         source_id=name,
-        version=tool_def.get("version", "1.0.0"),
-        tags=tool_def.get("tags", []),
+        version=fields.get("version", "1.0.0"),
+        tags=fields.get("tags", []),
     )
 
 
@@ -208,9 +236,15 @@ def mcp_tool_to_node(server: str, tool_info: Dict[str, Any]) -> NodeDefinition:
 
 
 def _get_tool_engine():
-    """延迟加载 ToolEngine"""
+    """取工具引擎单例。
+
+    单源在 `api/endpoints/tool_layers.get_tool_engine()`：MCP 工具注册落的就是
+    这个实例。此前这里 `from neurova.execution_engine.tool_engine import
+    get_tool_engine` —— 该模块**没有**这个函数，ImportError 被吞成 None ⇒
+    `sync_tools` 恒 0，节点目录永远空着，而 0 与"真的没有工具"分不开。
+    """
     try:
-        from neurova.execution_engine.tool_engine import get_tool_engine
+        from neurova.api.endpoints.tool_layers import get_tool_engine
 
         return get_tool_engine()
     except ImportError:

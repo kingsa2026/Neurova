@@ -20,6 +20,9 @@
           <GlassButton variant="secondary" size="sm" @click="openProposals">
             {{ t('skillEvo.proposals') }}
           </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="openConsolidation">
+            {{ t('skillEvo.consolidation') }}
+          </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="openSettings">
             {{ t('skillEvo.settings') }}
           </GlassButton>
@@ -100,6 +103,13 @@
                   @click="openExecuteModal(skill)"
                 >
                   {{ t('skill.execute') }}
+                </GlassButton>
+                <GlassButton
+                  variant="ghost"
+                  size="sm"
+                  @click="openArchive(skill.id)"
+                >
+                  {{ t('skillEvo.archive') }}
                 </GlassButton>
                 <GlassButton
                   variant="ghost"
@@ -259,6 +269,98 @@
       </a-spin>
     </a-modal>
 
+    <!-- 待审技能合并计划 Modal（P1-2：重复技能收敛为类级 umbrella） -->
+    <a-modal
+      v-model:open="consolidationVisible"
+      :title="t('skillEvo.consolidation')"
+      :footer="null"
+      width="720px"
+    >
+      <p class="evo-hint">{{ t('skillEvo.consolidationHint') }}</p>
+      <a-spin :spinning="consolidationLoading">
+        <div v-if="consolidationPlans.length" class="proposal-list">
+          <div v-for="p in consolidationPlans" :key="p.umbrella" class="proposal-row">
+            <div class="consolidation-info">
+              <div class="proposal-skill">{{ p.umbrella }}</div>
+              <div class="skill-tags">
+                <a-tag :color="basisColor(p.basis)">{{ basisLabel(p.basis) }}</a-tag>
+                <a-tag color="purple">
+                  {{ t('skillEvo.consolidationAbsorbed') }}: {{ (p.absorbed ?? []).length }}
+                </a-tag>
+              </div>
+              <div class="proposal-metric">{{ p.reason }}</div>
+              <div class="proposal-metric consolidation-members">
+                {{ (p.absorbed ?? []).join('、') }}
+              </div>
+            </div>
+            <div class="proposal-actions">
+              <GlassButton
+                variant="primary"
+                size="sm"
+                :loading="consolidationBusy === p.umbrella"
+                @click="decideConsolidation(p, true)"
+              >
+                {{ t('skillEvo.consolidationApprove') }}
+              </GlassButton>
+              <GlassButton
+                variant="secondary"
+                size="sm"
+                :disabled="consolidationBusy === p.umbrella"
+                @click="decideConsolidation(p, false)"
+              >
+                {{ t('skillEvo.reject') }}
+              </GlassButton>
+            </div>
+          </div>
+        </div>
+        <a-empty v-else :description="t('skillEvo.consolidationEmpty')" />
+      </a-spin>
+    </a-modal>
+
+    <!-- 归档与回滚 Modal（工单 011：归档读面 + 回滚写面） -->
+    <a-modal
+      v-model:open="archiveVisible"
+      :title="`${t('skillEvo.archiveTitle')}: ${archiveSkillId}`"
+      :footer="null"
+      width="640px"
+    >
+      <a-spin :spinning="archiveLoading">
+        <div v-if="archiveEntries.length" class="proposal-list">
+          <div v-for="entry in archiveEntries" :key="entry.version" class="proposal-row">
+            <div class="consolidation-info">
+              <div class="proposal-skill">
+                {{ t('skillEvo.archiveVersion') }} {{ entry.version }}
+              </div>
+              <div class="proposal-metric">{{ entry.description }}</div>
+              <div class="proposal-metric">
+                {{ t('skillEvo.archiveArchivedAt') }}: {{ formatArchivedAt(entry.archived_at) }}
+              </div>
+            </div>
+            <div class="proposal-actions">
+              <a-popconfirm
+                :title="t('skillEvo.rollbackConfirm')"
+                :ok-text="t('skillEvo.rollback')"
+                :cancel-text="t('common.cancel')"
+                :disabled="rollingBack"
+                @confirm="confirmRollback"
+              >
+                <GlassButton
+                  variant="secondary"
+                  size="sm"
+                  :loading="rollingBack"
+                  :disabled="rollingBack"
+                >
+                  {{ t('skillEvo.rollback') }}
+                </GlassButton>
+              </a-popconfirm>
+            </div>
+          </div>
+        </div>
+        <a-empty v-else :description="t('skillEvo.archiveEmpty')" />
+      </a-spin>
+      <a-alert v-if="archiveResult" type="success" :message="archiveResult" show-icon />
+    </a-modal>
+
     <!-- 提案详情 Modal（改进前后对照） -->
     <a-modal
       v-model:open="detailVisible"
@@ -300,6 +402,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import * as skillPoolApi from '@/api/modules/skill-pool'
 import * as evolutionApi from '@/api/modules/text-evolution'
+import * as governanceApi from '@/api/modules/governance'
 import type { EvolutionSettings, ProposalSummary, EvolutionProposal } from '@/api/modules/text-evolution'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -676,6 +779,142 @@ async function decideProposal(proposalId: string, approve: boolean) {
   }
 }
 
+// ── 技能合并审批面（P1-2：RSI 产计划、本处批准/拒绝执行）──
+
+const consolidationVisible = ref(false)
+const consolidationLoading = ref(false)
+const consolidationBusy = ref('')
+const consolidationPlans = ref<skillPoolApi.ConsolidationPlan[]>([])
+
+function basisLabel(basis?: string): string {
+  const map: Record<string, string> = {
+    identity: t('skillEvo.consolidationBasisIdentity'),
+    structure: t('skillEvo.consolidationBasisStructure'),
+    name_prefix: t('skillEvo.consolidationBasisNamePrefix'),
+  }
+  return (basis && map[basis]) || basis || ''
+}
+
+function basisColor(basis?: string): string {
+  return basis === 'identity' ? 'green' : basis === 'structure' ? 'orange' : 'default'
+}
+
+async function openConsolidation() {
+  consolidationVisible.value = true
+  await refreshConsolidation()
+}
+
+async function refreshConsolidation() {
+  consolidationLoading.value = true
+  try {
+    const res = await skillPoolApi.listConsolidationPlans(props.agentId)
+    const data: any = (res as any)?.data ?? res
+    // 只展示待审件（后端落盘仓含已批/已拒的历史条目）
+    consolidationPlans.value = (Array.isArray(data) ? data : []).filter(
+      (p: any) => !p?.status || p.status === 'pending',
+    )
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.consolidationError')
+    message.error(msg)
+  } finally {
+    consolidationLoading.value = false
+  }
+}
+
+async function decideConsolidation(p: skillPoolApi.ConsolidationPlan, approve: boolean) {
+  consolidationBusy.value = p.umbrella
+  try {
+    if (approve) await skillPoolApi.approveConsolidation(props.agentId, p.umbrella)
+    else await skillPoolApi.rejectConsolidation(props.agentId, p.umbrella)
+    message.success(
+      approve ? t('skillEvo.consolidationApproved') : t('skillEvo.consolidationRejected'),
+    )
+    await refreshConsolidation()
+    await refreshSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.consolidationError')
+    message.error(msg)
+  } finally {
+    consolidationBusy.value = ''
+  }
+}
+
+// ── 归档与回滚（工单 011：读面在 governance，写面同样）──
+
+const archiveVisible = ref(false)
+const archiveLoading = ref(false)
+const rollingBack = ref(false)
+const archiveSkillId = ref('')
+const archiveEntries = ref<governanceApi.SkillArchiveEntry[]>([])
+const archiveResult = ref('')
+
+function formatArchivedAt(stamp?: number): string {
+  if (!stamp) return '-'
+  return new Date(stamp * 1000).toLocaleString()
+}
+
+async function openArchive(skillId: string) {
+  archiveSkillId.value = skillId
+  archiveVisible.value = true
+  archiveResult.value = ''
+  await refreshArchives()
+}
+
+async function refreshArchives() {
+  archiveLoading.value = true
+  try {
+    const res = await governanceApi.getSkillArchives(archiveSkillId.value, props.agentId)
+    const payload: any = (res as any)?.data ?? res
+    const entries = payload?.archives ?? payload?.data?.archives ?? []
+    archiveEntries.value = Array.isArray(entries) ? entries : []
+  } catch (err: any) {
+    archiveEntries.value = []
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.archiveLoadError')
+    message.error(msg)
+  } finally {
+    archiveLoading.value = false
+  }
+}
+
+async function confirmRollback() {
+  rollingBack.value = true
+  try {
+    const res = await governanceApi.rollbackSkill(
+      archiveSkillId.value, currentOperator(), props.agentId,
+    )
+    const payload: any = (res as any)?.data ?? res
+    const left = payload?.archives_left ?? 0
+    archiveResult.value = t('skillEvo.rollbackDone', { left })
+    message.success(archiveResult.value)
+    await refreshArchives()
+    await refreshSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.rollbackError')
+    message.error(msg)
+  } finally {
+    rollingBack.value = false
+  }
+}
+
+/** 回滚留痕要记"谁按的"：取当前登录身份，取不到给稳定占位而不是空串。 */
+function currentOperator(): string {
+  try {
+    const raw = localStorage.getItem('auth_user') || localStorage.getItem('user')
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const name = parsed?.username || parsed?.user_id || parsed?.id
+      if (name) return String(name)
+    }
+  } catch {
+    // 非浏览器/脏值：落到占位
+  }
+  return 'operator'
+}
+
 onMounted(refreshSkills)
 
 async function openMarketImportModal() {
@@ -806,6 +1045,18 @@ async function installFromMarket(skill: MarketSkill) {
 .proposal-metric {
   font-size: 12px;
   color: var(--nr-text-secondary);
+}
+
+.consolidation-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.consolidation-members {
+  word-break: break-all;
 }
 
 .proposal-actions {

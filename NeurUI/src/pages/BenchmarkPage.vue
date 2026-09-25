@@ -30,7 +30,7 @@
             <p class="suite-desc">{{ suiteDesc(suite) }}</p>
             <div class="suite-meta">
               <span>{{ suite.tests_count || 0 }} {{ t('benchmark.tests') }}</span>
-              <span v-if="suite.last_run">{{ t('benchmark.lastRun') }}{{ formatTime(suite.last_run) }}</span>
+              <span v-if="suite.last_run">{{ t('benchmark.lastRun') }}{{ formatTimestampText(suite.last_run) }}</span>
             </div>
           </div>
           <template #footer>
@@ -93,6 +93,7 @@ import { useAgentStore } from '@/stores/agents'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t, te } = useI18n()
 const agentStore = useAgentStore()
@@ -131,7 +132,6 @@ const onAgentChange = (value: string) => {
 const agentName = (agentId?: string) =>
   agentId ? (agentStore.agents.find((a) => a.id === agentId)?.name ?? agentId) : ''
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const resultColumns = computed(() => [
   { title: t('benchmark.agent'), key: 'agent' },

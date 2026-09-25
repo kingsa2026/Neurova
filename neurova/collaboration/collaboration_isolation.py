@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -500,7 +501,7 @@ class CollaborationIsolationManager:
         Args:
             data_dir: 数据目录路径
         """
-        self.data_dir = Path(data_dir) if data_dir else Path("data/collaboration")
+        self.data_dir = callerPath(data_dir, "collaboration")
 
         # 线程锁
         self._lock = threading.RLock()

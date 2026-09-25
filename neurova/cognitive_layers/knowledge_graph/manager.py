@@ -16,12 +16,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from neurova.core.data_root import callerPath, get_data_root
 
 logger = get_logger(__name__)
 
 
 class NodeType(str, Enum):
-    """节点类型"""
+    """节点类型（工单 018 起为**读兼容层**：合法集合的权威在 `ontology_terms`）。
+
+    值仍在这里列着，是因为旧库里的行、旧调用方传进来的成员都要能认得；但存储与索引
+    一律走 `_typeValue` 的字符串口径，所以注册表里新增一种类型不需要改这个文件。
+    """
 
     CONCEPT = "concept"  # 概念
     ENTITY = "entity"  # 实体
@@ -54,13 +59,22 @@ class RelationType(str, Enum):
     CUSTOM = "custom"  # 自定义
 
 
+def _typeValue(value: Any) -> str:
+    """类型一律收成字符串口径。
+
+    枚举成员本身是 str 子类，`==` 认得字符串，但 `hash` 不认——索引/字典键走枚举成员
+    与走字符串是两个桶，重载后就出现"同一个类型两套索引"。所以在每个边界上一次收齐。
+    """
+    return value.value if isinstance(value, Enum) else str(value or "")
+
+
 @dataclass
 class GraphNode:
     """图谱节点"""
 
     node_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     label: str = ""
-    node_type: NodeType = NodeType.CONCEPT
+    node_type: Any = NodeType.CONCEPT.value  # NodeType 成员，或注册表里新增的类型字符串
     properties: Dict[str, Any] = field(default_factory=dict)
     aliases: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
@@ -69,12 +83,17 @@ class GraphNode:
     updated_at: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def nodeTypeValue(self) -> str:
+        """节点类型的字符串读法——消费方不再假设它一定是枚举成员。"""
+        return _typeValue(self.node_type)
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
             "node_id": self.node_id,
             "label": self.label,
-            "node_type": self.node_type.value,
+            "node_type": self.nodeTypeValue,
             "properties": self.properties,
             "aliases": self.aliases,
             "tags": self.tags,
@@ -91,7 +110,7 @@ class GraphNode:
         return cls(
             node_id=data.get("node_id", str(uuid.uuid4())),
             label=data.get("label", ""),
-            node_type=NodeType(data.get("node_type", "concept")),
+            node_type=str(data.get("node_type") or NodeType.CONCEPT.value),
             properties=data.get("properties", {}),
             aliases=aliases if isinstance(aliases, list) else [],
             tags=data.get("tags", []),
@@ -109,12 +128,16 @@ class GraphEdge:
     edge_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_id: str = ""
     target_id: str = ""
-    relation_type: RelationType = RelationType.RELATED_TO
+    relation_type: Any = RelationType.RELATED_TO.value  # 同 node_type：枚举成员或注册表新值
     label: str = ""
     weight: float = 1.0
     properties: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def relationTypeValue(self) -> str:
+        return _typeValue(self.relation_type)
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -122,7 +145,7 @@ class GraphEdge:
             "edge_id": self.edge_id,
             "source_id": self.source_id,
             "target_id": self.target_id,
-            "relation_type": self.relation_type.value,
+            "relation_type": self.relationTypeValue,
             "label": self.label,
             "weight": self.weight,
             "properties": self.properties,
@@ -137,7 +160,7 @@ class GraphEdge:
             edge_id=data.get("edge_id", str(uuid.uuid4())),
             source_id=data.get("source_id", ""),
             target_id=data.get("target_id", ""),
-            relation_type=RelationType(data.get("relation_type", "related_to")),
+            relation_type=str(data.get("relation_type") or RelationType.RELATED_TO.value),
             label=data.get("label", ""),
             weight=data.get("weight", 1.0),
             properties=data.get("properties", {}),
@@ -271,7 +294,7 @@ class KnowledgeGraphManager:
                 for node_data in data:
                     node = GraphNode.from_dict(node_data)
                     self._nodes[node.node_id] = node
-                    self._node_type_index[node.node_type.value].add(node.node_id)
+                    self._node_type_index[node.nodeTypeValue].add(node.node_id)
                     self._label_index[node.label.lower()].add(node.node_id)
                     for tag in node.tags:
                         self._tag_index[tag.lower()].add(node.node_id)
@@ -341,7 +364,7 @@ class KnowledgeGraphManager:
         self._target_index.clear()
 
         for node in self._nodes.values():
-            self._node_type_index[node.node_type.value].add(node.node_id)
+            self._node_type_index[node.nodeTypeValue].add(node.node_id)
             self._label_index[node.label.lower()].add(node.node_id)
             for tag in node.tags:
                 self._tag_index[tag.lower()].add(node.node_id)
@@ -359,7 +382,7 @@ class KnowledgeGraphManager:
     def add_node(
         self,
         label: str,
-        node_type: NodeType = NodeType.CONCEPT,
+        node_type: Any = NodeType.CONCEPT.value,
         properties: Optional[Dict[str, Any]] = None,
         tags: Optional[List[str]] = None,
         weight: float = 1.0,
@@ -391,7 +414,7 @@ class KnowledgeGraphManager:
             self._nodes[node.node_id] = node
 
             # 更新索引
-            self._node_type_index[node_type.value].add(node.node_id)
+            self._node_type_index[_typeValue(node_type)].add(node.node_id)
             self._label_index[label.lower()].add(node.node_id)
             for tag in node.tags:
                 self._tag_index[tag.lower()].add(node.node_id)
@@ -486,7 +509,7 @@ class KnowledgeGraphManager:
                 self._edges.pop(edge_id, None)
 
             # 更新索引
-            self._node_type_index[node.node_type.value].discard(node_id)
+            self._node_type_index[node.nodeTypeValue].discard(node_id)
             self._label_index[node.label.lower()].discard(node_id)
             for tag in node.tags:
                 self._tag_index[tag.lower()].discard(node_id)
@@ -538,7 +561,7 @@ class KnowledgeGraphManager:
                 edge.target_id = new_target
 
             # source 出图（索引清理与 delete_node 同法）
-            self._node_type_index[src.node_type.value].discard(source_id)
+            self._node_type_index[src.nodeTypeValue].discard(source_id)
             self._label_index[src.label.lower()].discard(source_id)
             for tag in src.tags:
                 self._tag_index[tag.lower()].discard(source_id)
@@ -570,7 +593,7 @@ class KnowledgeGraphManager:
 
             node = GraphNode.from_dict(rec.get("source_snapshot") or {})
             self._nodes[node.node_id] = node
-            self._node_type_index[node.node_type.value].add(node.node_id)
+            self._node_type_index[node.nodeTypeValue].add(node.node_id)
             self._label_index[node.label.lower()].add(node.node_id)
             for tag in node.tags:
                 self._tag_index[tag.lower()].add(node.node_id)
@@ -598,7 +621,7 @@ class KnowledgeGraphManager:
     def search_nodes(
         self,
         query: str,
-        node_type: Optional[NodeType] = None,
+        node_type: Optional[Any] = None,
         tags: Optional[List[str]] = None,
         limit: int = 20,
     ) -> List[GraphNode]:
@@ -625,7 +648,7 @@ class KnowledgeGraphManager:
 
             # 按类型过滤
             if node_type:
-                type_ids = self._node_type_index.get(node_type.value, set())
+                type_ids = self._node_type_index.get(_typeValue(node_type), set())
                 candidates &= type_ids
 
             # 按标签过滤
@@ -644,21 +667,21 @@ class KnowledgeGraphManager:
 
     def get_nodes_by_type(
         self,
-        node_type: NodeType,
+        node_type: Any,
         limit: int = 100,
     ) -> List[GraphNode]:
         """
         按类型获取节点
 
         Args:
-            node_type: 节点类型
+            node_type: 节点类型（`NodeType` 成员或注册表里的类型字符串）
             limit: 返回数量限制
 
         Returns:
             节点列表
         """
         with self._lock:
-            node_ids = self._node_type_index.get(node_type.value, set())
+            node_ids = self._node_type_index.get(_typeValue(node_type), set())
             nodes = [self._nodes[nid] for nid in node_ids if nid in self._nodes]
             return nodes[:limit]
 
@@ -724,7 +747,7 @@ class KnowledgeGraphManager:
         self,
         source_id: str,
         target_id: str,
-        relation_type: RelationType = RelationType.RELATED_TO,
+        relation_type: Any = RelationType.RELATED_TO.value,
         label: str = "",
         weight: float = 1.0,
         properties: Optional[Dict[str, Any]] = None,
@@ -810,7 +833,7 @@ class KnowledgeGraphManager:
         self,
         node_id: str,
         direction: str = "both",
-        relation_type: Optional[RelationType] = None,
+        relation_type: Optional[Any] = None,
     ) -> List[GraphNode]:
         """
         获取邻居节点
@@ -832,7 +855,7 @@ class KnowledgeGraphManager:
                 if not edge:
                     continue
 
-                if relation_type and edge.relation_type != relation_type:
+                if relation_type and edge.relationTypeValue != _typeValue(relation_type):
                     continue
 
                 if direction in ("out", "both") and edge.source_id == node_id:
@@ -850,7 +873,7 @@ class KnowledgeGraphManager:
         self,
         start_id: str,
         max_depth: int = 3,
-        relation_type: Optional[RelationType] = None,
+        relation_type: Optional[Any] = None,
     ) -> List[GraphNode]:
         """
         广度优先遍历
@@ -882,7 +905,7 @@ class KnowledgeGraphManager:
                     edge = self._edges.get(eid)
                     if not edge:
                         continue
-                    if relation_type and edge.relation_type != relation_type:
+                    if relation_type and edge.relationTypeValue != _typeValue(relation_type):
                         continue
 
                     neighbor_id = edge.target_id if edge.source_id == node_id else edge.source_id
@@ -958,7 +981,7 @@ class KnowledgeGraphManager:
 
     def get_graph(
         self,
-        node_type: Optional[NodeType] = None,
+        node_type: Optional[Any] = None,
         tags: Optional[List[str]] = None,
         limit: int = 100,
     ) -> Dict[str, Any]:
@@ -976,7 +999,7 @@ class KnowledgeGraphManager:
         with self._lock:
             # 过滤节点
             if node_type:
-                node_ids = self._node_type_index.get(node_type.value, set())
+                node_ids = self._node_type_index.get(_typeValue(node_type), set())
                 nodes = [self._nodes[nid] for nid in node_ids if nid in self._nodes]
             elif tags:
                 node_ids = set()
@@ -1011,7 +1034,7 @@ class KnowledgeGraphManager:
             degrees = defaultdict(int)
 
             for edge in self._edges.values():
-                rt = edge.relation_type.value
+                rt = edge.relationTypeValue
                 relation_type_counts[rt] = relation_type_counts.get(rt, 0) + 1
                 degrees[edge.source_id] += 1
                 degrees[edge.target_id] += 1
@@ -1106,7 +1129,7 @@ def get_knowledge_graph_manager(
     with _manager_lock:
         if _global_manager is None:
             _global_manager = KnowledgeGraphManager(
-                storage_dir=storage_dir or "./data/knowledge_graph",
+                storage_dir=callerPath(storage_dir, "knowledge_graph"),
             )
         return _global_manager
 
@@ -1129,8 +1152,10 @@ _LEGACY_LAYOUT_FILES = ("nodes.json", "edges.json", "merges.json")
 
 
 def _agent_graph_root() -> str:
-    """per-agent 图谱根目录（agent_workspaces，与 memory.db 同基座）。"""
-    return str(Path(__file__).resolve().parents[3] / "agent_workspaces")
+    """per-agent 图谱根目录（agent 工作区根，与 memory.db 同源）。"""
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    return str(get_agent_workspaces_root())
 
 
 def _migrate_legacy_graph_layout(legacy_dir: str, target_dir: Path) -> bool:
@@ -1177,7 +1202,7 @@ def get_agent_knowledge_graph_manager(
         # 旧全局布局只有 default 的历史数据，一次性认领迁移
         if agent_id == "default":
             legacy = legacy_dir or str(
-                Path(__file__).resolve().parents[3] / "data" / "knowledge_graph"
+                get_data_root() / "knowledge_graph"
             )
             if (Path(legacy) / "nodes.json").exists():
                 _migrate_legacy_graph_layout(legacy, storage_dir)

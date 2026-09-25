@@ -28,7 +28,7 @@ helm install neurova ./helm/neurova --namespace neurova --create-namespace
 | 参数 | 描述 | 默认值 |
 |------|------|--------|
 | `backend.image.repository` | 后端镜像仓库 | `neurova/backend` |
-| `backend.image.tag` | 后端镜像标签 | `latest` |
+| `backend.image.tag` | 后端镜像标签 | 空（跟随 `Chart.appVersion`） |
 | `backend.replicaCount` | 后端副本数 | `1` |
 | `backend.service.type` | 后端服务类型 | `ClusterIP` |
 | `backend.service.port` | 后端服务端口 | `9527` |
@@ -38,6 +38,10 @@ helm install neurova ./helm/neurova --namespace neurova --create-namespace
 | `backend.resources.limits.memory` | 内存限制 | `4Gi` |
 | `database.persistence.enabled` | 启用持久化存储 | `true` |
 | `database.persistence.size` | 存储大小 | `10Gi` |
+| `auth.jwtSecret` | JWT 签名密钥（生产必须显式提供） | `""` |
+| `auth.requireJwtSecret` | 多副本时强制要求 jwtSecret（渲染期 fail-fast） | `false` |
+| `logging.json` | 结构化 JSON 日志 | `true` |
+| `cors.origins` | 跨域来源列表（留空走应用内默认） | `[]` |
 | `llm.apiKeySecret` | LLM API 密钥 Secret 名称 | `neurova-llm-secret` |
 | `ingress.enabled` | 启用 Ingress | `false` |
 | `hpa.enabled` | 启用自动扩缩容 | `false` |
@@ -172,7 +176,8 @@ kubectl get ingress -l app.kubernetes.io/name=neurova
 
 - `/app/data`: SQLite 数据库存储
 - `/app/logs`: 应用日志
-- `/app/config`: 配置文件挂载点
+- `/app/config`: 运行时配置资产（`config/cors.json` / `config/llm_presets/`），**由镜像自带**；
+  Chart 不挂 ConfigMap 到此路径（会遮蔽镜像内资产，见门禁 R12）
 
 ## 生产环境建议
 
@@ -187,3 +192,19 @@ kubectl get ingress -l app.kubernetes.io/name=neurova
 ## 许可证
 
 MIT License
+## 与 Docker Compose 的一致性
+
+本 Chart 与 `docker-compose.yml` 共享同一套接线契约，由
+`scripts/ci/deploy_config_consistency_check.py` 常驻校验（CI 双侧 + 每周一 crontab 巡检）：
+
+- 端口：`9527`（后端）/ `8100`（前端）
+- 健康检查：`/health`，周期 30s、超时 5s、启动宽限 30s、失败阈值 3
+- 后端资源：requests `500m`/`1Gi`，limits `2000m`/`4Gi`
+- 镜像：后端 Python 3.12（与 CI 矩阵一致）；appVersion 跟随 `neurova.__version__`
+- 持久化：`database.persistence.enabled=true` 时数据卷必须是 PVC（`<fullname>-data`）
+
+改任一侧前先跑：
+
+```bash
+python scripts/ci/deploy_config_consistency_check.py
+```

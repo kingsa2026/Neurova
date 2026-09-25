@@ -9,6 +9,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from neurova.core.sql_like import likePattern, likePredicate
+
 from .models import (
     AgentInfo,
     ExecutionInstance,
@@ -30,14 +32,18 @@ from .models import (
 class NeurflowStorage:
     """Neurflow SQLite 存储管理器"""
 
-    def __init__(self, db_path: str = "neurflow.db"):
+    def __init__(self, db_path: str = ""):
         """
         初始化存储管理器
 
         Args:
             db_path: SQLite 数据库文件路径
         """
-        self.db_path = db_path
+        # 落点：显式入参 > 数据根下的 `neurflow.db`。原默认值是裸文件名，
+        # sqlite 会在**当前工作目录**建库（实测任意 CWD 都会造出 neurflow.db）。
+        from neurova.core.data_root import dataLanding
+
+        self.db_path = str(db_path or dataLanding("neurflow.db"))
         self._lock = threading.RLock()
         self._conn = None
         self._init_db()
@@ -691,8 +697,9 @@ class NeurflowStorage:
         refs: List[str] = []
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, nodes_json FROM workflows WHERE id != ? AND nodes_json LIKE ?",
-                (workflow_id, f'%"{workflow_id}"%'),
+                "SELECT id, nodes_json FROM workflows"
+                " WHERE id != ? AND " + likePredicate("nodes_json"),
+                (workflow_id, likePattern('"%s"' % workflow_id)),
             ).fetchall()
         for row in rows:
             try:
@@ -830,7 +837,7 @@ class NeurflowStorage:
             匹配的工作流定义列表
         """
         with self._lock:
-            search_pattern = f"%{query}%"
+            search_pattern = likePattern(query)
             scope = ""
             params: list = []
             if requester_id is not None and not is_admin:
@@ -842,12 +849,13 @@ class NeurflowStorage:
                     vis_params.extend(sorted(project_ids))
                 scope = f" AND ({' OR '.join(vis)})"
                 params.extend(vis_params)
+            where = likePredicate(("name", "description", "tags_json"))
             cursor = self._conn.execute(
                 f"""
                 SELECT * FROM workflows
-                WHERE (name LIKE ? OR description LIKE ? OR tags_json LIKE ?){scope}
+                WHERE ({where}){scope}
                 ORDER BY updated_at DESC
-            """,
+                """,
                 (search_pattern, search_pattern, search_pattern, *params),
             )
 
@@ -1238,11 +1246,11 @@ class NeurflowStorage:
             匹配的节点定义列表
         """
         with self._lock:
-            search_pattern = f"%{query}%"
+            search_pattern = likePattern(query)
             cursor = self._conn.execute(
                 """
-                SELECT * FROM node_definitions 
-                WHERE label LIKE ? OR description LIKE ? OR tags_json LIKE ?
+                SELECT * FROM node_definitions
+                WHERE (""" + likePredicate(("label", "description", "tags_json")) + """)
                 ORDER BY type
             """,
                 (search_pattern, search_pattern, search_pattern),

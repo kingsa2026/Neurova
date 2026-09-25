@@ -1,8 +1,11 @@
 """Quick smoke test for memory closure"""
 import sys
-sys.path.insert(0, r'e:\项目\neurova')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationMemoryBuffer
+
 
 buffer = ConversationMemoryBuffer(turn_limit=10)
 r1 = buffer.add_user_message("hello")

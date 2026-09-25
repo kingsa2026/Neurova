@@ -106,7 +106,7 @@ class GraphChannel(BaseChannel):
                     score=score,
                     channel="graph",
                     metadata={
-                        "node_type": node.node_type.value,
+                        "node_type": node.nodeTypeValue,
                         "tags": node.tags,
                         "properties": node.properties,
                     },
@@ -213,7 +213,7 @@ class GraphChannel(BaseChannel):
                     score=node.weight,
                     channel="graph",
                     metadata={
-                        "node_type": node.node_type.value,
+                        "node_type": node.nodeTypeValue,
                         "depth": max_depth,
                     },
                 ))

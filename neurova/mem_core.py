@@ -24,9 +24,9 @@ MemCore — 神经感知记忆核心模块
 """
 
 import asyncio
-import concurrent.futures
 import hashlib
 import json
+import os
 import time
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
@@ -34,7 +34,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 import threading
 from threading import RLock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -197,7 +198,12 @@ def run_async_safely(coro):
     def _run_in_new_loop():
         return asyncio.run(coro)
 
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # P1 性能修复：原每次调用新建 ThreadPoolExecutor(max_workers=1)（创建/销毁
+    # 线程是纯开销，且同步桥接会被高频调用）。改用共享具名池 "mem-async-bridge"
+    # ——1 worker 保证"专用事件循环不与他人混用"，但线程与池本身进程内复用。
+    from neurova.core.thread_pool import get_thread_pool
+
+    executor = get_thread_pool(max_workers=1, name="mem-async-bridge")
     try:
         return executor.submit(_run_in_new_loop).result()
     except BaseException:
@@ -205,7 +211,8 @@ def run_async_safely(coro):
         coro.close()
         raise
     finally:
-        executor.shutdown(wait=False)
+        # 共享池属进程，不在此 shutdown（原 per-call 池在此销毁）
+        pass
 
 
 # 注：mem_core.Memory dataclass 已删除（Tier 4A.2 统一 dataclass）。
@@ -319,31 +326,60 @@ def _init_encoder_sync(engine) -> None:
 
 
 def _moe_index_state_path(scope_key: str) -> Path:
-    """MoE 索引完成状态文件（按持久库路径哈希分文件，多 agent 各管各的）"""
+    """MoE 索引完成状态文件（按持久库路径哈希分文件，多 agent 各管各的）
+
+    目录可经 NEUROVA_MOE_INDEX_STATE_DIR 注入：默认仓库 data/，测试期由
+    conftest autouse 指向 tmp_path——状态文件名含 agent_id+持久库路径哈希，
+    测试的每用例独立工作区会产生互不重复的键，落进真实 data/ 即永久残留。
+    """
     hashed = hashlib.md5(scope_key.encode("utf-8")).hexdigest()[:16]
-    return Path(__file__).resolve().parent.parent / "data" / f"moe_index_state_{hashed}.json"
+    state_dir = os.environ.get("NEUROVA_MOE_INDEX_STATE_DIR") or str(
+        get_data_root()
+    )
+    return Path(state_dir) / f"moe_index_state_{hashed}.json"
 
 
-def _moe_index_completed(index_limit: int, scope_key: str) -> bool:
-    """上次索引已达上限时返回 True（新增记忆由 recall 增量路径兜底）"""
+def _moe_index_completed(index_limit: int, scope_key: str, source_rows: int) -> bool:
+    """上次索引已达上限，或"扫尽且源库行数未变"时返回 True。
+
+    source_rows < 0 表示行数未知（COUNT 查询失败），此时不跳过。
+    扫尽分支必须配行数指纹：MoE 向量库是 init_moe_router 自建的独立实例
+    （非 MemoryManager 的召回 store），运行期新增记忆没有增量入口
+    （refresh_moe_index 无调用方），库一旦增长就得重扫。
+    """
     try:
         path = _moe_index_state_path(scope_key)
         if not path.exists():
             return False
         prev = json.loads(path.read_text(encoding="utf-8"))
-        return prev.get("limit") == index_limit and int(prev.get("indexed_count", 0)) >= index_limit
+        if prev.get("limit") != index_limit:
+            return False
+        if int(prev.get("indexed_count", 0)) >= index_limit:
+            return True
+        return (
+            source_rows >= 0
+            and bool(prev.get("scan_exhausted"))
+            and int(prev.get("source_rows", -1)) == source_rows
+        )
     except Exception:
         return False
 
 
-def _save_moe_index_state(index_limit: int, vector_store, scope_key: str) -> None:
-    """索引线程收尾时落盘状态（成功/失败/部分完成均记录，已记录条数）"""
+def _save_moe_index_state(
+    index_limit: int, vector_store, scope_key: str, source_rows: int, scan_exhausted: bool
+) -> None:
+    """索引线程收尾时落盘状态（成功/失败/部分完成均记录，已记录条数）
+
+    scan_exhausted=False 时行数指纹不参与跳过判据（预算截断不代表扫尽）。
+    """
     try:
         path = _moe_index_state_path(scope_key)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "limit": index_limit,
             "indexed_count": len(vector_store.memory_ids),
+            "source_rows": source_rows,
+            "scan_exhausted": scan_exhausted,
             "finished_at": datetime.now(UTC).isoformat(),
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -358,7 +394,7 @@ def _background_index_memories(
     index_limit: int,
     batch_size: int = 500,
     batch_delay: float = 0.05,
-) -> int:
+) -> Tuple[int, bool]:
     """后台渐进语义索引（daemon 线程目标函数）
 
     通过 fetch_page(offset, size) 按温度降序分页读取全库记忆，灌入 MoE
@@ -373,20 +409,22 @@ def _background_index_memories(
         batch_delay: 批间休眠秒数（让出 CPU）
 
     Returns:
-        实际新增索引条数
+        (实际新增索引条数, 源库是否扫尽)——扫尽=False 时不得据行数指纹跳过重扫
     """
     indexed_before = len(vector_store.memory_ids)
     budget = max(0, index_limit - indexed_before)
     if budget == 0:
         logger.info("MoE 后台索引: 已达上限 %s 条，跳过", index_limit)
-        return 0
+        return 0, False
 
     offset = 0
     last_first_id = None
     total_added = 0
+    exhausted = False
     while budget > 0:
         rows = fetch_page(offset, batch_size)
         if not rows:
+            exhausted = True
             logger.info(
                 "MoE 后台索引: 全库扫描完成，新增 %s 条，总索引 %s 条",
                 total_added,
@@ -432,7 +470,7 @@ def _background_index_memories(
         len(vector_store.memory_ids),
         index_limit,
     )
-    return total_added
+    return total_added, exhausted
 
 
 class MemCore:
@@ -825,6 +863,10 @@ class MemCore:
                     get_memory_settings().get("threshold.default", 0.3)
                 ),
             )
+            # 把 MoE 自建向量库登记进记忆写入链路：否则运行期新增/遗忘的记忆
+            # 只在下次启动重扫时才进 MoE（refresh_moe_index 无调用方）。
+            if self.memory_manager:
+                self.memory_manager.register_runtime_vector_store(vector_store)
 
             # 后台渐进语义索引：突破初始 500 条覆盖局限，按温度降序
             # 分批把全库记忆灌入 MoE 向量索引，直到 moe_index_limit 或全库完成。
@@ -847,23 +889,47 @@ class MemCore:
                             {"limit": size, "offset": offset},
                         ).fetchall()
 
-                    if _moe_index_completed(index_limit, _moe_scope_key(self)):
-                        logger.info("MoE 后台语义索引已完成（上限 %s 条），跳过本次重扫", index_limit)
-                    else:
+                    def _source_row_count() -> int:
+                        # 与扫描同一谓词（_PersistDbStore 注入三级隔离）；SQL 失败
+                        # 时适配器返回空行集 → -1 表示行数未知，此时不跳过重扫。
+                        rows = store.execute(
+                            "SELECT COUNT(*) AS row_count FROM memories "
+                            "WHERE lifecycle_stage != 'forgotten'"
+                        ).fetchall()
+                        return int(rows[0]["row_count"]) if rows else -1
 
-                        def _index_and_save_state():
-                            try:
-                                _background_index_memories(vector_store, _fetch_page, index_limit)
-                            finally:
-                                _save_moe_index_state(index_limit, vector_store, _moe_scope_key(self))
+                    def _index_and_save_state():
+                        # 判据落在后台线程内：大库 COUNT 不占启动路径。
+                        scope_key = _moe_scope_key(self)
+                        source_rows = _source_row_count()
+                        if _moe_index_completed(index_limit, scope_key, source_rows):
+                            logger.info(
+                                "MoE 后台语义索引已完成（上限 %s 条，源库 %s 行未变），跳过本次重扫",
+                                index_limit,
+                                source_rows,
+                            )
+                            return
+                        exhausted = False
+                        try:
+                            _, exhausted = _background_index_memories(
+                                vector_store, _fetch_page, index_limit
+                            )
+                        finally:
+                            _save_moe_index_state(
+                                index_limit,
+                                vector_store,
+                                scope_key,
+                                source_rows,
+                                exhausted,
+                            )
 
-                        indexer = threading.Thread(
-                            target=_index_and_save_state,
-                            daemon=True,
-                            name="moe-semantic-indexer",
-                        )
-                        indexer.start()
-                        logger.info("MoE 后台语义索引线程已启动（上限 %s 条）", index_limit)
+                    indexer = threading.Thread(
+                        target=_index_and_save_state,
+                        daemon=True,
+                        name="moe-semantic-indexer",
+                    )
+                    indexer.start()
+                    logger.info("MoE 后台语义索引线程已启动（上限 %s 条）", index_limit)
             except Exception as e:
                 logger.warning("MoE 后台索引线程启动失败: %s", e)
 
@@ -940,15 +1006,6 @@ class MemCore:
         except Exception as e:
             logger.warning("记忆检索失败: %s", e)
             return []
-
-    def unified_experience_recall(self, query: str, limit: int = 5) -> List[Dict]:
-        """统一经验召回
-
-        检索与用户输入相关的历史经验记忆。经验以记忆形式统一存储，
-        因此复用 MemCore.recall 的检索通道（自动刷新缓冲区并优先使用
-        recall_engine / MoE 路由器）。
-        """
-        return self.recall(query, limit)
 
     def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """获取记忆列表（用于 API 端点）

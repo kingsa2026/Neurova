@@ -28,6 +28,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
+    # 多步编排：内层步进可能含任意写操作，重放制造新变更
+    "orchestrate_tools",
 }
 
 
@@ -76,42 +78,59 @@ def test_builtin_tool_dataclass_field_declared():
 
 class TestSynthesizedSkillInheritsStandard:
     """create_skill 序列技能的可重现性=步骤推导（声明与实际行为一致，
-    同 P0-4 permissions 能力面先例），并被消费链 resolve 读取。"""
+    同 P0-4 permissions 能力面先例），并被消费链 resolve 读取。
 
-    @pytest.mark.asyncio
-    async def test_all_reproducible_steps_declare_true(self):
+    Issue #62：本组用例原以裸 MagicMock agent 直调 create_skill，自动落盘臂
+    的证据闸（creation_governance，自动技能需 ≥3 次独立成功证据）落地后，
+    MagicMock 的 `config.agent_id` 被当成真值写进 sqlite → `ProgrammingError:
+    type 'MagicMock' is not supported`。断言意图（reproducible 推导）没变，
+    契约变了——fixture 补齐"真实 SkillService + 已留存证据"（与
+    tests/unit/evolution/test_skill_creation_canonical.py 同法）。
+    """
+
+    @staticmethod
+    def _executor(tmp_path, monkeypatch, agent_id, steps, description):
+        """构造已满足证据闸的 create_skill 执行器，返回 (exe, registry)。"""
         from unittest.mock import MagicMock
 
+        from neurova.skills.skill_service import SkillService
         from neurova.tool_executor import ToolExecutor
+
+        monkeypatch.setenv("NEUROVA_SKILL_REVIEW_GATE", "0")
+        service = SkillService(agent_id=agent_id, skills_dir=str(tmp_path))
+        monkeypatch.setattr("neurova.skills.skill_service.SkillService", lambda **kw: service)
+        # 证据按**结构身份**计量：序列必须与 proposal 归一后一致（tool/params）
+        sequence = [{"tool": s["name"], "params": s["params"]} for s in steps]
+        for index in range(3):
+            service.creation_evidence.record(f"proven-{index}", sequence, description, True)
 
         registry = MagicMock()
         registry.register_skill = MagicMock(return_value=True)
         agent = MagicMock()
+        agent.config.agent_id = agent_id
         agent._skill_registry = registry
-        exe = ToolExecutor(agent)
+        return ToolExecutor(agent), registry
+
+    @pytest.mark.asyncio
+    async def test_all_reproducible_steps_declare_true(self, tmp_path, monkeypatch):
+        steps = [{"name": "weather", "params": {"city": "北京"}},
+                 {"name": "web_search", "params": {"query": "AI"}}]
+        exe, registry = self._executor(
+            tmp_path, monkeypatch, "repro-all", steps, "查天气并搜索资讯")
         await exe._execute_builtin_tool("create_skill", {
-            "name": "lookup", "description": "查天气并搜索资讯",
-            "steps": [{"name": "weather", "params": {"city": "北京"}},
-                      {"name": "web_search", "params": {"query": "AI"}}],
+            "name": "lookup", "description": "查天气并搜索资讯", "steps": steps,
         })
         manifest = registry.register_skill.call_args[0][0]
         assert manifest.config["reproducible"] is True
 
     @pytest.mark.asyncio
-    async def test_any_mutation_step_declares_false(self):
-        from unittest.mock import MagicMock
-
-        from neurova.tool_executor import ToolExecutor
-
-        registry = MagicMock()
-        registry.register_skill = MagicMock(return_value=True)
-        agent = MagicMock()
-        agent._skill_registry = registry
-        exe = ToolExecutor(agent)
+    async def test_any_mutation_step_declares_false(self, tmp_path, monkeypatch):
+        steps = [{"name": "run_code", "params": {"code": "1"}},
+                 {"name": "file_write", "params": {"file_path": "a", "content": "b"}}]
+        exe, registry = self._executor(
+            tmp_path, monkeypatch, "repro-mutation", steps, "跑代码再存文件")
         await exe._execute_builtin_tool("create_skill", {
-            "name": "danger", "description": "跑代码再存文件",
-            "steps": [{"name": "run_code", "params": {"code": "1"}},
-                      {"name": "file_write", "params": {"file_path": "a", "content": "b"}}],
+            "name": "danger", "description": "跑代码再存文件", "steps": steps,
         })
         manifest = registry.register_skill.call_args[0][0]
         assert manifest.config["reproducible"] is False

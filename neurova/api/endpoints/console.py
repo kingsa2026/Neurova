@@ -80,7 +80,19 @@ class ConnectionManager:
 
 
 _manager = ConnectionManager()
-_CONSOLE_UPLOAD_DIR = Path(config.get("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
+def _resolveConsoleUploadDir() -> Path:
+    """console 上传落点：显式配置 > 数据根下的 `uploads/console`。
+
+    原兜底 `"uploads/console"` 是 CWD 相对——模块导入期就建目录，
+    换个启动目录就把用户上传件散到别处（真后端冒烟实测 CWD 多出 `uploads/`）。
+    """
+    from neurova.core.data_root import get_data_root
+
+    configured = config.get("NEUROVA_CONSOLE_UPLOADS")
+    return Path(configured) if configured else get_data_root() / "uploads" / "console"
+
+
+_CONSOLE_UPLOAD_DIR = _resolveConsoleUploadDir()
 _CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -609,13 +621,6 @@ def _build_tool_events(
     if not isinstance(tm, dict):
         return events
     tm_type = tm.get("type", "")
-    # _tool_messages_list 同时存在两种形状：
-    # - 文本模式条目（handle_tool_calls 写入）：{type, tool_name, params/result, ...}
-    # - 原生事件包装（_call_loop_stream C1 写入）：{type, data: {...}}
-    # 包装条目没有 tool_name，且语义与文本模式条目重复（同一次工具调用），
-    # 直接跳过，避免产出空 name 的 SSE 事件
-    if not tm.get("tool_name"):
-        return events
     if tm_type == "tool_call":
         _call_event = {
             "type": "tool_call",
@@ -1219,6 +1224,12 @@ async def get_chat_sessions(
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)
+    # 区分群聊与单聊：过滤掉协作房间会话（session_id 以 project_ 前缀），
+    # 群记录只在协作房间页按 room_id 读取，不混入单聊侧栏。
+    sessions = [
+        s for s in sessions
+        if not str(s.get("session_id") or s.get("id", "")).startswith("project_")
+    ]
     # 只返回摘要信息，不返回完整消息列表
     summaries = [
         {
@@ -1969,19 +1980,6 @@ async def post_push_message(
     await _manager.broadcast(message)
     _manager.store_message(_get_user_id(request, current_user), message)
     return {"code": 0, "message": "Push sent"}
-
-
-# ══════════════════════════════════════════════════════════════
-# P2 标注闭环 — 精准回复命中表管理 API
-# ══════════════════════════════════════════════════════════════
-
-
-from .console_annotations import (
-    router as _annotations_router, AnnotationCreateRequest, AnnotationUpdateRequest,
-    list_annotations, create_annotation, update_annotation, delete_annotation, export_training_set,
-)
-
-router.include_router(_annotations_router)
 
 
 @router.get("/tasks")

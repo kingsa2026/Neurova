@@ -7,7 +7,8 @@ ContextPool 视图层预算测试
 """
 
 import pytest
-from neurova.context_pool import ContextInput, ContextSource, ContextPool, ContextPoolUtils, SemanticMatchDrawer
+from neurova.context.token_estimator import estimate_tokens
+from neurova.context_pool import ContextInput, ContextSource, ContextPool, SemanticMatchDrawer
 
 
 class TestWholeItemSelection:
@@ -109,7 +110,7 @@ class TestDrawTokenBudgetOverflow:
         result = drawer.draw(drops, "helpful")
         assert isinstance(result, list)
         total = sum(
-            drop.tokens if drop.tokens > 0 else ContextPoolUtils.estimate_tokens(drop.content)
+            drop.tokens if drop.tokens > 0 else estimate_tokens(drop.content)
             for drop in result
         )
         assert total <= 100
@@ -186,7 +187,7 @@ class TestContextInputConstructor:
         assert len(drop.hash) == 64  # SHA-256 hex digest
 
     def test_auto_timestamp(self):
-        """未指定时间时自动生成"""
+        """未指定时间时自动生成归档时刻（唯一时间字段，B6-7）"""
         drop = ContextInput(source=ContextSource.MEMORY, content="hello")
         assert drop.created_at is not None
-        assert drop.updated_at is not None
+        assert not hasattr(drop, "updated_at")

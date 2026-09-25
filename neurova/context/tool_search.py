@@ -143,10 +143,11 @@ def _bm25_scores(query: str, entries: List[Dict[str, Any]]) -> Dict[str, float]:
 import hashlib
 import json
 import threading
+from neurova.core.data_root import dataPath
 
 _EMB_WEIGHT = 0.6
 _BM25_WEIGHT = 0.4
-_INDEX_PATH = os.path.join("data", "tool_search_index.json")
+_INDEX_PATH = dataPath("tool_search_index.json")
 _index_lock = threading.RLock()
 
 
@@ -367,11 +368,23 @@ def handle_control_tool(name: str, params: Dict) -> Dict:
     """tool_search / tool_describe 的执行体（ToolExecutor 拦截后调用）。"""
     params = params or {}
     if name == "tool_search":
+        query = str(params.get("query", ""))
         hits = search_catalog(
-            str(params.get("query", "")),
+            query,
             get_active_catalog(),
             limit=int(params.get("limit") or 8),
         )
+        # S3 生产点（T-03）：零命中是**能力缺口的客观读数** —— 检索空间只有
+        # 已注册工具，命中 0 条说明"已注册集里没有能解决眼前这事的原语"。
+        # 事故取证即此形态：`tool_search success=True ×2`（成功但必然空手），
+        # 而它从不构成任何后续动作的输入。
+        if not hits:
+            try:
+                from neurova.agent.capability_gap import GAP_CATALOG_MISS, recordCapabilityGap
+
+                recordCapabilityGap(GAP_CATALOG_MISS, {"query": query})
+            except Exception:  # noqa: BLE001 - 观测面故障不得改变检索返回
+                logger.debug("能力缺口 S3 投递跳过", exc_info=True)
         return {
             "results": [
                 {"name": h["name"], "description": h["description"]} for h in hits

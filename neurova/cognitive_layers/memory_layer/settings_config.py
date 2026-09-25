@@ -11,8 +11,8 @@ import os
 import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -183,8 +183,9 @@ class MemorySettingsConfig:
     _instance: Optional["MemorySettingsConfig"] = None
     _lock = threading.Lock()
 
-    def __init__(self, data_dir: str = "data"):
-        self._data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = ""):
+
+        self._data_dir = callerPath(data_dir)
         self._file_path = self._data_dir / "memory_settings.json"
         self._values: Dict[str, Any] = {}
         self._write_lock = threading.Lock()
@@ -193,7 +194,7 @@ class MemorySettingsConfig:
     # -- 单例 --
 
     @classmethod
-    def get_instance(cls, data_dir: str = "data") -> "MemorySettingsConfig":
+    def get_instance(cls, data_dir: str = "") -> "MemorySettingsConfig":
         with cls._lock:
             if cls._instance is None:
                 cls._instance = cls(data_dir)
@@ -336,7 +337,7 @@ class MemorySettingsConfig:
 # 便捷函数
 # ---------------------------------------------------------------------------
 
-def get_memory_settings(data_dir: str = "data") -> MemorySettingsConfig:
+def get_memory_settings(data_dir: str = "") -> MemorySettingsConfig:
     """获取记忆系统配置单例"""
     return MemorySettingsConfig.get_instance(data_dir)
 

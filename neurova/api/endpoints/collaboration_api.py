@@ -30,7 +30,11 @@ _background_tasks: set = set()
 
 # 导入协作服务
 try:
-    from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager, get_collaboration_manager
+    from neurova.collaboration.collaboration_isolation import (
+        CollaborationIsolationManager,
+        MemberRole,
+        get_collaboration_manager,
+    )
 except ImportError:
     logger.warning("Collaboration service not available")
     get_collaboration_manager = None
@@ -129,9 +133,9 @@ async def create_collaboration_template(
         if project is None:
             raise HTTPException(status_code=500, detail="Failed to create collaboration template")
 
-        # 添加参与者
+        # 添加参与者（manager 真实接口为 add_project_member，需邀请者具备编辑权）
         for participant_id in body.participants:
-            manager.add_member(project.project_id, participant_id)
+            manager.add_project_member(project.project_id, project.owner_id, participant_id, MemberRole.EDITOR)
 
         return CollaborationTemplate(
             template_id=project.project_id,
@@ -216,12 +220,12 @@ async def update_collaboration_template(
             current_members = list(project.members.keys())
             for member_id in current_members:
                 if member_id != project.owner_id and member_id not in body.participants:
-                    manager.remove_member(template_id, member_id)
+                    manager.remove_project_member(template_id, project.owner_id, member_id)
 
             # 添加新成员
             for participant_id in body.participants:
                 if participant_id not in project.members:
-                    manager.add_member(template_id, participant_id)
+                    manager.add_project_member(template_id, project.owner_id, participant_id, MemberRole.EDITOR)
 
         # 保存更新
         manager._save_project(project)
@@ -277,9 +281,17 @@ async def delete_collaboration_template(
 async def start_collaboration(
     request: Request,
     body: CollaborationStart,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """启动协作"""
     request_id = _get_request_id(request)
+    # 根因修复：owner_id 必须来自登录用户，否则 create_project 会以空串为键写入
+    # members（add_member("", OWNER)），导致房间成员为空、且 resolve_targets 回落空 id。
+    owner_id = str(current_user.get("user_id") or current_user.get("id") or "")
+    # 名称/描述优先取用户在向导提交的（经 context 传入），否则回落默认命名（修复名称字段断点）。
+    ctx = body.context or {}
+    ctx_name = str(ctx.get("name") or "").strip()
+    ctx_desc = str(ctx.get("description") or "").strip()
 
     if get_collaboration_manager is None:
         raise HTTPException(status_code=503, detail="Collaboration service not available")
@@ -295,8 +307,9 @@ async def start_collaboration(
 
             # 基于模板创建新项目
             new_project = manager.create_project(
-                name=f"Collaboration from {template_project.name}",
-                description=template_project.description,
+                name=ctx_name or f"Collaboration from {template_project.name}",
+                description=ctx_desc or template_project.description,
+                owner_id=owner_id,
                 metadata={
                     "workflow": template_project.metadata.get("workflow", {}),
                     "context": body.context,
@@ -306,15 +319,16 @@ async def start_collaboration(
         else:
             # 创建新项目
             new_project = manager.create_project(
-                name="New Collaboration", description="Started from API", metadata={"context": body.context}
+                name=ctx_name or "New Collaboration", description=ctx_desc or "Started from API",
+                owner_id=owner_id, metadata={"context": body.context}
             )
 
         if new_project is None:
             raise HTTPException(status_code=500, detail="Failed to create collaboration")
 
-        # 添加参与者
+        # 添加参与者（真实接口 add_project_member；邀请者=owner_id，已具 OWNER 编辑权）
         for participant_id in body.participants:
-            manager.add_member(new_project.project_id, participant_id)
+            manager.add_project_member(new_project.project_id, owner_id, participant_id, MemberRole.EDITOR)
 
         return {
             "code": 0,

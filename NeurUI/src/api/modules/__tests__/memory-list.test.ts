@@ -10,7 +10,11 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import { extractMemoryList, MEMORY_TYPE_BY_TAB } from '@/api/modules/memory'
+import {
+  extractMemoryList,
+  MEMORY_CATEGORY_VALUES,
+  MEMORY_TYPE_BY_TAB,
+} from '@/api/modules/memory'
 
 const m = { id: 'm1', content: 'hi' }
 
@@ -62,5 +66,29 @@ describe('MEMORY_TYPE_BY_TAB（页签 → memory_type 契约）', () => {
     expect(MEMORY_TYPE_BY_TAB.all).toBeUndefined()
     expect(MEMORY_TYPE_BY_TAB.hot).toBeUndefined()
     expect(MEMORY_TYPE_BY_TAB.crystallized).toBeUndefined()
+  })
+})
+
+describe('MEMORY_CATEGORY_VALUES（分类词表唯一事实源，Issue #68）', () => {
+  it('与后端 MemoryCategory 枚举 7 值逐字一致', () => {
+    expect(MEMORY_CATEGORY_VALUES).toEqual([
+      'general',
+      'conversation',
+      'knowledge',
+      'experience',
+      'tool_usage',
+      'reflection',
+      'user_preference',
+    ])
+  })
+
+  it('不含后端没有的伪分类（历史 4 个本地值会导致筛选永远为空）', () => {
+    for (const bogus of ['fact', 'preference', 'skill', 'emotion', 'personal', 'work', 'technical']) {
+      expect(MEMORY_CATEGORY_VALUES).not.toContain(bogus)
+    }
+  })
+
+  it('无重复值', () => {
+    expect(new Set(MEMORY_CATEGORY_VALUES).size).toBe(MEMORY_CATEGORY_VALUES.length)
   })
 })

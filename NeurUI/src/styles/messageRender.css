@@ -1,0 +1,524 @@
+/**
+ * messageRender.css — 聊天/协作房间消息渲染的共享样式（单一来源）。
+ *
+ * 由 MessageContent.vue（富文本正文）与 MessageSteps.vue（步骤时间轴）各自引入。
+ * 之所以用全局样式而非 scoped：v-html 注入的子节点、以及子组件根元素无法被
+ * 任一消费方的 scoped 规则稳定命中；集中于此，ChatPage 与协作房间渲染观感一致，
+ * 样式不再两处重复。类名统一 nr- 前缀，命名空间隔离，避免外溢。
+ */
+
+/* ── 正文气泡（基础排版；底色由宿主 .nr-msg--user/.assistant 或房间气泡提供）── */
+.nr-msg-content {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.nr-msg--user .nr-msg-content {
+  background: var(--nr-bubble-user);
+  border: 1px solid var(--nr-bubble-user-border);
+  color: var(--nr-text-primary);
+}
+
+.nr-msg--assistant .nr-msg-content {
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  color: var(--nr-text-primary);
+}
+
+/* bare：宿主（如协作房间气泡）自带框时，正文只留排版、不再叠一层气泡。 */
+.nr-msg-content--bare {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+}
+
+/* ── 正文 Markdown 块级元素（标题/列表/引用/表格/段落/行内码/hr）── */
+.nr-msg-content h1,
+.nr-msg-content h2,
+.nr-msg-content h3,
+.nr-msg-content h4,
+.nr-msg-content h5,
+.nr-msg-content h6 {
+  margin: 0.9em 0 0.45em;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  line-height: 1.35;
+}
+
+.nr-msg-content h1 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--nr-glass-border);
+  padding-bottom: 0.25em;
+}
+
+.nr-msg-content h2 { font-size: 1.2em; }
+.nr-msg-content h3 { font-size: 1.1em; }
+.nr-msg-content h4,
+.nr-msg-content h5,
+.nr-msg-content h6 { font-size: 1em; }
+
+.nr-msg-content ul,
+.nr-msg-content ol {
+  margin: 0.4em 0 0.8em;
+  padding-left: 1.5em;
+}
+
+.nr-msg-content ul { list-style: disc; }
+.nr-msg-content ol { list-style: decimal; }
+.nr-msg-content li { margin: 0.2em 0; }
+
+.nr-msg-content blockquote {
+  margin: 0.6em 0;
+  padding: 0.3em 0.9em;
+  border-left: 3px solid var(--nr-primary);
+  background: var(--nr-bg-inset);
+  border-radius: 0 6px 6px 0;
+  color: var(--nr-text-secondary);
+}
+
+.nr-msg-content table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.92em;
+}
+
+.nr-msg-content th,
+.nr-msg-content td {
+  border: 1px solid var(--nr-glass-border);
+  padding: 5px 10px;
+}
+
+.nr-msg-content th {
+  background: var(--nr-glass-bg);
+  font-weight: 600;
+}
+
+.nr-msg-content p { margin: 0.35em 0; }
+
+.nr-msg-content :not(pre) > code {
+  background: var(--nr-bg-inset);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--nr-font-mono);
+  font-size: 0.9em;
+  color: var(--nr-accent-secondary);
+}
+
+.nr-msg-content hr {
+  border: none;
+  border-top: 1px solid var(--nr-glass-border);
+  margin: 0.9em 0;
+}
+
+/* ── 代码块 ── */
+.nr-code-wrap {
+  margin: 10px 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--nr-bg-inset-deep);
+  border: 1px solid var(--nr-glass-border);
+}
+
+.nr-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: var(--nr-glass-bg);
+  border-bottom: 1px solid var(--nr-glass-border);
+}
+
+.nr-code-lang {
+  font-size: 11px;
+  color: var(--nr-primary-light);
+  font-family: var(--nr-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.nr-code-copy-btn {
+  background: var(--nr-glass-bg-hover);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.nr-code-copy-btn:hover {
+  background: var(--nr-glass-bg-active);
+  color: var(--nr-text-primary);
+}
+
+.nr-code-block {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 10px 14px;
+  overflow-x: auto;
+  font-family: var(--nr-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.nr-code-inline {
+  background: var(--nr-bg-inset);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--nr-font-mono);
+  font-size: 0.9em;
+  color: var(--nr-accent-secondary);
+}
+
+/* ── 内联图片 / 链接 ── */
+.nr-inline-image {
+  margin: 10px 0;
+  display: inline-block;
+  max-width: 100%;
+  cursor: pointer;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--nr-glass-border);
+  transition: border-color 0.2s;
+}
+
+.nr-inline-image:hover {
+  border-color: color-mix(in srgb, var(--nr-primary) 30%, transparent);
+}
+
+.nr-inline-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+}
+
+.nr-img-caption {
+  display: block;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  background: var(--nr-bg-inset);
+  text-align: center;
+}
+
+.nr-msg-link {
+  color: var(--nr-primary-light);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.nr-msg-link:hover {
+  color: var(--nr-accent);
+}
+
+/* ── highlight.js token 配色（玻璃暗色系）── */
+.nr-code-block .hljs-comment,
+.nr-code-block .hljs-quote { color: #6b7280; font-style: italic; }
+.nr-code-block .hljs-keyword,
+.nr-code-block .hljs-selector-tag,
+.nr-code-block .hljs-meta { color: #c792ea; }
+.nr-code-block .hljs-string,
+.nr-code-block .hljs-regexp,
+.nr-code-block .hljs-symbol { color: #7ec699; }
+.nr-code-block .hljs-number,
+.nr-code-block .hljs-literal { color: #f78c6c; }
+.nr-code-block .hljs-title,
+.nr-code-block .hljs-title.class_,
+.nr-code-block .hljs-title.function_,
+.nr-code-block .hljs-section { color: #82aaff; }
+.nr-code-block .hljs-built_in,
+.nr-code-block .hljs-attr,
+.nr-code-block .hljs-attribute,
+.nr-code-block .hljs-variable,
+.nr-code-block .hljs-template-variable { color: #ffcb6b; }
+.nr-code-block .hljs-tag,
+.nr-code-block .hljs-name,
+.nr-code-block .hljs-selector-tag { color: #f07178; }
+.nr-code-block .hljs-params,
+.nr-code-block .hljs-type { color: #eeffff; }
+.nr-code-block .hljs-function { color: #82aaff; }
+.nr-code-block .hljs-punctuation,
+.nr-code-block .hljs-operator { color: #89ddff; }
+
+/* ── 步骤化时间轴 ── */
+.nr-steps-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px;
+  position: relative;
+}
+
+.nr-step-item {
+  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+  border-radius: 10px;
+  background: var(--nr-bg-tertiary, rgba(120, 120, 140, 0.06));
+  overflow: hidden;
+}
+
+.nr-step-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+  /* 窄容器（分屏/协作房间/移动端）下子项换行，避免徽标与耗时被挤成竖排 */
+  flex-wrap: wrap;
+}
+
+.nr-step-header:hover {
+  background: rgba(120, 170, 255, 0.07);
+}
+
+.nr-step-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.nr-step-title {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #9aa0ac);
+  /* 长任务名/长工具名折行显示：原先 nowrap+ellipsis 把内容裁成省略号，
+     用户看不到工具到底在做什么（报障 2026-09-24） */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nr-step-item.is-active .nr-step-title {
+  background: linear-gradient(90deg, var(--nr-text-secondary, #9aa0ac) 35%, #cfe1ff 50%, var(--nr-text-secondary, #9aa0ac) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: nr-step-shimmer 1.6s linear infinite;
+}
+
+@keyframes nr-step-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.nr-step-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  color: var(--nr-text-tertiary, #8a8f99);
+  background: rgba(128, 128, 140, 0.14);
+}
+
+.nr-step-badge.is-running {
+  color: #6aa5ff;
+  background: rgba(106, 165, 255, 0.14);
+}
+
+.nr-step-badge.is-done {
+  color: #67c23a;
+  background: rgba(103, 194, 58, 0.13);
+}
+
+.nr-step-badge.is-error {
+  color: #e6a23c;
+  background: rgba(230, 162, 60, 0.13);
+}
+
+.nr-step-duration {
+  font-size: 10px;
+  color: var(--nr-text-tertiary, #7a7f8a);
+  flex-shrink: 0;
+}
+
+.nr-step-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--nr-text-tertiary, #7a7f8a);
+  flex-shrink: 0;
+}
+
+.nr-step-body {
+  padding: 4px 10px 8px;
+  border-top: 1px dashed var(--nr-border, rgba(128, 128, 128, 0.15));
+}
+
+.nr-step-reasoning {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--nr-text-secondary, #9aa0ac);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* ── 工具参数 / 结果（steps 与 legacy 兜底共用）── */
+.nr-tool-args {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: var(--nr-bg-inset);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+  /* 折行优先：JSON 里的长路径/token 原先只能横向拖动（pre + overflow-x: auto），
+     改 pre-wrap + anywhere 后按容器宽折行，超长内容仍靠纵向滚动兜底 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
+  font-family: var(--nr-font-mono);
+  max-height: 120px;
+}
+
+.nr-tool-result {
+  margin-top: 8px;
+  border-top: 1px solid var(--nr-glass-border);
+  padding-top: 8px;
+}
+
+.nr-tool-result-header {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nr-tool-result-preview-btn {
+  border: none;
+  background: transparent;
+  color: var(--nr-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.nr-tool-result-preview-btn:hover {
+  color: var(--nr-text-primary);
+  background: var(--nr-bg-secondary);
+}
+
+.nr-tool-result-content {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: var(--nr-bg-inset);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+  /* 与 .nr-tool-args 同契约（同一次报障的两块都改了） */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
+  font-family: var(--nr-font-mono);
+  max-height: 120px;
+}
+
+.nr-tool-background {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+  font-size: 12px;
+  /* 同"卡内换行"契约：提示条里的长路径/句柄也要折行 */
+  overflow-wrap: anywhere;
+}
+
+/* ── Legacy 推理块（旧消息无 steps 时兜底）── */
+.nr-msg-reasoning {
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.nr-reasoning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.nr-reasoning-header:hover {
+  background: var(--nr-glass-bg-hover);
+}
+
+.nr-reasoning-toggle {
+  font-size: 14px;
+  color: var(--nr-text-muted);
+}
+
+.nr-reasoning-content {
+  padding: 8px 12px 12px;
+  font-size: 13px;
+  color: var(--nr-text-tertiary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  /* 同"卡内换行"契约：无空格长 token（句柄/路径）按容器宽折断 */
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--nr-border-light);
+}
+
+/* ── Legacy 工具调用块（旧消息无 steps 时兜底）── */
+.nr-msg-tool-call {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.nr-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.nr-tool-header:hover {
+  opacity: 0.8;
+}
+
+.nr-tool-toggle {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--nr-text-muted);
+}
+
+.nr-tool-icon {
+  font-size: 16px;
+}
+
+.nr-tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

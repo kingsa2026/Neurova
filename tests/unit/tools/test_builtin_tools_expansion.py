@@ -207,6 +207,31 @@ class TestFileListTool:
         result = await _make_executor()._execute_file_list({"path": "."})
         assert "error" in result
 
+    # ── 翻页：500 条硬顶此前只能看见前 500 条，截断即失联 ──
+
+    @pytest.fixture
+    def many_py(self, tmp_path):
+        for i in range(7):
+            (tmp_path / f"m{i}.py").write_text("x = 1\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.asyncio
+    async def test_offset_pages_the_listing(self, many_py):
+        result = await _make_executor()._execute_file_list(
+            {"pattern": "*.py", "path": str(many_py), "max_results": 3, "offset": 3}
+        )
+        assert [os.path.basename(f) for f in result["files"]] == ["m3.py", "m4.py", "m5.py"]
+        assert result["next_offset"] == 6
+
+    @pytest.mark.asyncio
+    async def test_last_page_has_no_further_cursor(self, many_py):
+        result = await _make_executor()._execute_file_list(
+            {"pattern": "*.py", "path": str(many_py), "max_results": 3, "offset": 6}
+        )
+        assert [os.path.basename(f) for f in result["files"]] == ["m6.py"]
+        assert result["truncated"] is False
+        assert "next_offset" not in result
+
 
 # ═══════════════════════════════════════════════════════════════
 # 4. file_search — 内容搜索（对标 Grep）
@@ -292,6 +317,74 @@ class TestFileSearchTool:
             {"pattern": "x", "path": "no/such/path/anywhere"}
         )
         assert "error" in result
+
+    # ── 翻页（offset/next_offset）：对齐分页式深搜，让 max_results 之外的匹配可取 ──
+
+    @pytest.fixture
+    def paginated(self, tmp_path):
+        """单文件 7 行匹配，按行号定序，翻页断言不依赖目录遍历顺序。"""
+        f = tmp_path / "seven.txt"
+        f.write_text("".join(f"hit {i}\nmiss\n" for i in range(1, 8)), encoding="utf-8")
+        return f
+
+    @pytest.mark.asyncio
+    async def test_offset_returns_next_page(self, paginated):
+        """offset=3 跳过前 3 条，返回第 4-6 条。"""
+        result = await _make_executor()._execute_file_search(
+            {"pattern": "hit", "path": str(paginated), "max_results": 3, "offset": 3}
+        )
+        assert [m["text"] for m in result["matches"]] == ["hit 4", "hit 5", "hit 6"]
+
+    @pytest.mark.asyncio
+    async def test_pages_do_not_overlap_and_reach_the_tail(self, paginated):
+        """逐页续拉必须拼出全部 7 条，不重不漏。"""
+        exe = _make_executor()
+        collected, offset = [], 0
+        while True:
+            page = await exe._execute_file_search(
+                {"pattern": "hit", "path": str(paginated), "max_results": 3, "offset": offset}
+            )
+            collected += [m["text"] for m in page["matches"]]
+            if "next_offset" not in page:
+                break
+            offset = page["next_offset"]
+        assert collected == [f"hit {i}" for i in range(1, 8)]
+
+    @pytest.mark.asyncio
+    async def test_last_page_reports_no_further_offset(self, paginated):
+        """末页 truncated 为 False 且不得给出 next_offset（否则调用方死循环翻页）。"""
+        result = await _make_executor()._execute_file_search(
+            {"pattern": "hit", "path": str(paginated), "max_results": 3, "offset": 6}
+        )
+        assert [m["text"] for m in result["matches"]] == ["hit 7"]
+        assert result["truncated"] is False
+        assert "next_offset" not in result
+
+    @pytest.mark.asyncio
+    async def test_offset_beyond_the_end_is_empty_not_error(self, paginated):
+        result = await _make_executor()._execute_file_search(
+            {"pattern": "hit", "path": str(paginated), "offset": 99}
+        )
+        assert result["matches"] == []
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_zero_max_results_still_advances_the_cursor(self, paginated):
+        """max_results=0 不得让游标原地不动（钳到 1 才能继续翻页）。"""
+        result = await _make_executor()._execute_file_search(
+            {"pattern": "hit", "path": str(paginated), "max_results": 0, "offset": 0}
+        )
+        assert result["count"] == 1
+        assert result["next_offset"] == 1
+
+    def test_schema_lets_the_model_page(self):
+        """翻页必须对 LLM 可见：offset 入 schema，description 说明续拉口径。"""
+        from neurova.builtin_tools import get_builtin_tool_params
+
+        schema = get_builtin_tool_params("file_search")["parameters"]
+        assert "offset" in schema["properties"], "offset 未注册 → 模型看不到，翻页能力等于不存在"
+        assert "next_offset" in schema["properties"]["offset"]["description"]
+        assert "offset" not in schema.get("required", []), "offset 可选，缺省即第一页"
 
 
 # ═══════════════════════════════════════════════════════════════

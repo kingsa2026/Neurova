@@ -5,6 +5,7 @@ import json
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.route_table import registeredPaths
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import text_evolution_api as api
@@ -171,6 +172,6 @@ class TestEvolveEndpointGuards:
 
 class TestRouteWiring:
     def test_registered_under_evolution_prefix(self, client):
-        routes = {r.path for r in client.app.routes}
+        routes = set(registeredPaths(client.app))
         assert f"{BASE}/settings" in routes
         assert f"{BASE}/skills/{{agent_id}}/evolve" in routes

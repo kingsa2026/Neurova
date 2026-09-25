@@ -3,8 +3,9 @@
 
 Top1 摘要提示词时间保留修正（The Sleeping Agent, arXiv 2608.11775）：
     提示词必须显式要求保留时间/计量表达。
-Top2 工具结果占位清除（Anthropic context editing 对齐）：
-    老工具结果替换为占位指针，最近 3 个保留原文；仅 8k+ 窗口启用。
+Top2 工具结果占位清除：
+    老工具结果替换为占位指针；触发与保留都按**工具结果载荷**判定
+    （Issue #90 · T-10c 前置裁定，见 test_microcompact_threshold_decoupling.py）。
 Top3 递进折叠比例（Letta compaction 对齐）：
     折叠比例从 target_ratio 起步，折叠后仍超预算按 +0.1 步进重试。
 """
@@ -92,7 +93,8 @@ class TestTop2ToolResultClearing:
     def _tool_window(self, n_results=6, big=False):
         """构造含 n 个工具结果的窗口（role=tool 与 assistant(tool_calls) 配对）。"""
         msgs = [{"role": "system", "content": "sys"}]
-        filler = "结果数据" * (600 if big else 5)  # big: 每条约 2400 字 ≈ 1600 token
+        # big: 每条约 1400 token（o200k 精确计数）；6 条 = 8400 + 协议开销 > 8k 门槛
+        filler = "结果数据" * (700 if big else 5)
         for i in range(n_results):
             msgs.append({
                 "role": "assistant",
@@ -104,7 +106,7 @@ class TestTop2ToolResultClearing:
         return msgs
 
     def test_old_tool_results_cleared_when_large(self):
-        """大窗口：最近 3 个保留原文，更早的占位替换。"""
+        """大载荷：更早的占位替换，最新若干条（载荷份额内）保留原文。"""
         orch = _mk_orchestrator()
         msgs = self._tool_window(6, big=True)
         cleared = orch._clear_old_tool_results(msgs)
@@ -112,8 +114,9 @@ class TestTop2ToolResultClearing:
         tool_contents = [m["content"] for m in cleared if m.get("role") == "tool"]
         assert tool_contents[0].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
         assert tool_contents[1].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
-        assert tool_contents[-1].startswith("工具结果5")  # 最近 3 个保留
+        assert tool_contents[-1].startswith("工具结果5")  # 最新一条恒保留
         assert tool_contents[-3].startswith("工具结果3")
+        assert orch._TOOL_RESULT_KEEP_SHARE > 0, "保留窗按载荷份额声明（非与折叠共用的条数）"
 
     def test_small_window_untouched(self):
         """小窗口（≤8k token）：零替换。"""
@@ -158,13 +161,15 @@ class TestTop3ProgressiveFold:
             return f"摘要v{calls['n']}"
 
         # 尾部巨消息 + 头部小消息：ratio=0.5 时 keep_min 保底窗口超预算，
-        # 递进扩大比例后把巨消息也折进去，最终装下
+        # 递进扩大比例后把巨消息也折进去，最终装下。
+        # 预算按新尺实算：8×20 + 2×400 + 10×4 开销 ≈ 1080 token 真值，
+        # 取 900 保证首折装不下、递进后能装下。
         msgs = [
             {"role": "user", "content": f"小消息{i}: " + "测" * 20} for i in range(8)
         ] + [
             {"role": "user", "content": f"巨消息{i}: " + "测" * 400} for i in range(2)
         ]
-        budget = 1200
+        budget = 900
         result = await compact_window(msgs, budget, summarize=summarize, target_ratio=0.5)
         assert result is not None
         assert result.tokens_after < result.tokens_before, "折叠必须净减"
@@ -179,7 +184,7 @@ class TestTop3ProgressiveFold:
             calls["n"] += 1
             return "摘要"
 
-        # 6 条消息每条 ~670 token = keep_min 下限 4000+ > 预算 2000 → 物理无解
+        # 6 条消息每条 ~500 token = keep_min 下限 3000 > 预算 2000 → 物理无解
         msgs = [{"role": "user", "content": f"巨消息{i}: " + "测" * 500} for i in range(6)]
         result = await compact_window(msgs, 2000, summarize=summarize, target_ratio=0.5)
         assert result is not None, "无解时也应返回尽力结果"

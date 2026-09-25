@@ -24,7 +24,9 @@ class TestExtractArtifacts(unittest.TestCase):
         artifacts_api._artifacts_store.clear()
         self.tmp = tempfile.mkdtemp(prefix="nr_art_")
         # 挂到 agent_workspaces 布局下以满足白名单
-        self._root_patch = mock.patch.object(artifacts_api, "_WORKSPACE_ROOT", Path(self.tmp))
+        self._root_patch = mock.patch.dict(
+            os.environ, {"NEUROVA_AGENT_WORKSPACES_DIR": self.tmp}
+        )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
         self.ws = Path(self.tmp) / "ag1"
@@ -94,7 +96,9 @@ class TestReadResultsAreNotArtifacts(unittest.TestCase):
     def setUp(self):
         artifacts_api._artifacts_store.clear()
         self.tmp = tempfile.mkdtemp(prefix="nr_art_")
-        self._root_patch = mock.patch.object(artifacts_api, "_WORKSPACE_ROOT", Path(self.tmp))
+        self._root_patch = mock.patch.dict(
+            os.environ, {"NEUROVA_AGENT_WORKSPACES_DIR": self.tmp}
+        )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
         self.ws = Path(self.tmp) / "ag1"

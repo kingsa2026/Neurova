@@ -12,11 +12,37 @@ import re
 import typing
 import uuid
 from pathlib import Path
+from neurova.core.data_root import get_data_root
+
 
 # 配置常量
-STORAGE_ROOT = Path("storage")
-DATA_DIR = Path("data")
-FILES_DB = DATA_DIR / "files.json"
+# 上传件根与元数据库：`None` 表示"按数据根解析"（默认），显式赋值表示调用方指定
+#（测试隔离 / 部署指定）。原值 `Path("storage")` 是 CWD 相对——换个启动目录，
+# 用户上传的文件就"消失"，实测任意 CWD 都会就地造出 storage/。
+STORAGE_ROOT: typing.Optional[Path] = None
+FILES_DB: typing.Optional[Path] = None
+DATA_DIR = get_data_root()
+
+
+def storageRoot() -> Path:
+    """上传件根（调用时解析——注入 `NEUROVA_DATA_DIR` 才对延迟调用生效）。
+
+    仓库根残留的旧 `storage/` 只在数据根尚无该目录时搬进来一次：
+    老部署的上传件不因落点收口而失联。
+    """
+    if STORAGE_ROOT is not None:
+        return STORAGE_ROOT
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("storage")
+
+
+def filesDbPath() -> Path:
+    """文件元数据库落点：显式注入 > 数据根下的 `files.json`。"""
+    if FILES_DB is not None:
+        return FILES_DB
+    return get_data_root() / "files.json"
+
 
 logger = get_logger(__name__)
 
@@ -78,7 +104,7 @@ def get_isolated_path(
     file_type = sanitize_name(file_type) if file_type else "default"
 
     # 构建路径
-    path = STORAGE_ROOT / "users" / user_id / "agents" / agent_id / "sessions" / session_id / file_type
+    path = storageRoot() / "users" / user_id / "agents" / agent_id / "sessions" / session_id / file_type
 
     # 创建目录
     path.mkdir(parents=True, exist_ok=True)
@@ -168,8 +194,9 @@ def load_files_db() -> dict:
         文件数据库字典
     """
     try:
-        if FILES_DB.exists():
-            with open(FILES_DB, "r", encoding="utf-8") as f:
+        target = filesDbPath()
+        if target.exists():
+            with open(target, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
     except Exception as e:
@@ -189,9 +216,10 @@ def save_files_db(data: dict) -> bool:
     """
     try:
         # 确保目录存在
-        FILES_DB.parent.mkdir(parents=True, exist_ok=True)
+        target = filesDbPath()
+        target.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(FILES_DB, "w", encoding="utf-8") as f:
+        with open(target, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:

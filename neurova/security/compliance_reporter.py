@@ -156,14 +156,19 @@ class ComplianceReporter:
         """确保报告目录存在"""
         self._reports_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self):
+        """借出池化短连接句柄（P1-4 / ADR 0014）。
 
-    def _close_conn(self, conn: sqlite3.Connection):
-        """关闭数据库连接"""
+        返回 `PooledConnection` 委托句柄：`conn.close()`（见 `_close_conn`）
+        被重定向为"归还池"。本文件有 9 处 `_close_conn` 调用 + 未覆盖的
+        早退分支，收敛到句柄层后这些点全部变成正确归还。
+        """
+        from neurova.core.pooled_connection import PooledConnection
+
+        return PooledConnection(self._db_path)
+
+    def _close_conn(self, conn):
+        """归还池化短连接（名称保留以兼容既有调用点）。"""
         try:
             conn.close()
         except Exception:

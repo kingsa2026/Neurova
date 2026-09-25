@@ -12,6 +12,7 @@ import json
 from neurova.core.logger import get_logger
 import os
 import sqlite3
+from neurova.core.data_root import callerPath
 
 # 可选依赖处理
 try:
@@ -65,7 +66,7 @@ class QClawBindingModel:
     管理QClaw绑定数据的增删改查操作
     """
 
-    def __init__(self, db_path: str = "data/qclaw_bindings.db", encryption_key: str = None):
+    def __init__(self, db_path: str = "", encryption_key: str = None):
         """
         初始化QClaw绑定模型管理器
 
@@ -73,7 +74,7 @@ class QClawBindingModel:
             db_path: 数据库文件路径
             encryption_key: 用于加密app_secret的密钥（可选）
         """
-        self.db_path = db_path
+        self.db_path = str(callerPath(db_path, "qclaw_bindings.db"))
         self.encryption_key = encryption_key
         self._ensure_db_dir()
         self._init_db()
@@ -86,11 +87,16 @@ class QClawBindingModel:
             os.makedirs(db_dir, exist_ok=True)
             logger.debug("Created database directory: %s", db_dir)
 
-    def _get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self):
+        """借出池化短连接句柄（P1-4 / ADR 0014）。
+
+        返回 `PooledConnection` 委托句柄：`conn.close()` 被重定向为"归还池"
+        （不是真关闭）。这样本文件散落的 13 处 close 与数十个早退/异常分支
+        全部自动变成正确归还 —— 池化只改这一行，不改各方法的控制流。
+        """
+        from neurova.core.pooled_connection import PooledConnection
+
+        return PooledConnection(self.db_path)
 
     def _init_db(self) -> None:
         """初始化数据库表"""

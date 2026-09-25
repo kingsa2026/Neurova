@@ -224,7 +224,7 @@ class MemoryModelMonitor:
 3. **[记忆检索器详细设计](./memo-memory-retriever.md)** - MemoryRetriever 详细设计
 4. **[融合网络详细设计](./memo-fusion-network.md)** - FusionNetwork 详细设计
 5. **[训练策略详细设计](./memo-training-strategy.md)** - 训练策略详细设计
-6. **[集成方案详细设计](./memo-integration-design.md)** - 与现有系统集成详细设计
+6. **[集成方案详细设计](./integrated-memory-upgrade-with-training.md)** - 与现有系统集成（原 `memo-integration-design.md` 全历史未入库，集成方案见该文档 §5）
 
 ### 6.2 代码结构
 

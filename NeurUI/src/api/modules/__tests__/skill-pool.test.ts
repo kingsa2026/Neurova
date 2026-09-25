@@ -158,6 +158,38 @@ describe('skill-pool API — 新增函数', () => {
 })
 
 // ===========================================================================
+// P1-2 合并审批面 — URL 与后端 skill_pool_api 路由逐字对齐
+// （后端端点先于前端存在，"后端有了没人调"是同一种断裂的反向形态）
+// ===========================================================================
+describe('skill-pool API — 技能合并审批面（P1-2）', () => {
+  it('listConsolidationPlans calls GET /skill-pool/agent/{id}/consolidation/plans', async () => {
+    await skillPool.listConsolidationPlans('agent-1')
+    expect(mockGet).toHaveBeenCalledWith('/skill-pool/agent/agent-1/consolidation/plans')
+  })
+
+  it('approveConsolidation calls POST .../{umbrella}/approve', async () => {
+    await skillPool.approveConsolidation('agent-1', 'read_write_skill')
+    expect(mockPost).toHaveBeenCalledWith(
+      '/skill-pool/agent/agent-1/consolidation/read_write_skill/approve',
+    )
+  })
+
+  it('rejectConsolidation calls POST .../{umbrella}/reject', async () => {
+    await skillPool.rejectConsolidation('agent-1', 'read_write_skill')
+    expect(mockPost).toHaveBeenCalledWith(
+      '/skill-pool/agent/agent-1/consolidation/read_write_skill/reject',
+    )
+  })
+
+  it('umbrella 名字含特殊字符时按路径段转义（后端按路径参数取件，不转义会串段）', async () => {
+    await skillPool.approveConsolidation('agent-1', 'a/b c')
+    expect(mockPost).toHaveBeenCalledWith(
+      `/skill-pool/agent/agent-1/consolidation/${encodeURIComponent('a/b c')}/approve`,
+    )
+  })
+})
+
+// ===========================================================================
 // 端点废弃守护 — 确保不再调用已 _DEPRECATED 的端点
 // ===========================================================================
 describe('skill-pool API — 废弃端点守护', () => {

@@ -470,10 +470,10 @@ ErrorCode (neurova/core/error_handler.py)
 | `Agent` | `agent.py` | Agent 核心（记忆检索/上下文构建/LLM 调用/Router 集成） |
 | `NeurovaCLI` | `cli.py` | 命令行交互界面（15+ 命令） |
 | `ContextBuilder` | `context.py` | 上下文构建器 |
-| `SmartContextCompressor` | `context_compressor.py` | 智能上下文压缩器 |
+| ~~`SmartContextCompressor`~~ | ~~`context_compressor.py`~~ | **已退役**（B6-10 批次 C）：装配即弃的第二份压缩实现，真通路是 `context/orchestrator.py` 的确定性淘汰 |
 | `ContextCacheManager` | `context_cache.py` | 上下文缓存管理器 |
 | `ContextPersistence` | `context_persistence.py` | 上下文持久化 |
-| `EnhancedContextBuilder` | `enhanced_context_builder.py` | 增强版上下文构建器 |
+| ~~`EnhancedContextBuilder`~~ | — | **已退役**（B6-10 / Issue #90）：该类与 `enhanced_context_builder.py` 已从生产侧删除（零生产消费方）。上下文装配的真面是 `context/orchestrator.py` 的 `ContextOrchestrator` |
 | `MemoryReadWriteManager` | `memory_rw_manager.py` | 记忆读写管理器（写缓冲/批量提交） |
 | `LLMClient` | `llm_client.py` | LLM 客户端（OpenAI 兼容/流式输出/重试） |
 | `MessageRouter` | `router.py` | 消息路由器（类型识别/路由分发/Skill 集成） |
@@ -699,13 +699,15 @@ ErrorCode (neurova/core/error_handler.py)
 
 | 文件 | 路径 | 类/函数 | 说明 |
 |------|------|---------|------|
-| `context_compressor.py` | `neurova/` | `SmartContextCompressor` | 智能上下文压缩器（3 层压缩/去重/摘要生成） |
+| ~~`context_compressor.py`~~ | `neurova/` | ~~`SmartContextCompressor`~~ | **已退役**（B6-10 批次 C）：整模块删除，详见 `context/injector.py::_compress_context` 的确定性淘汰 |
 
-### 14.5 增强版上下文构建器
+### 14.5 ~~增强版上下文构建器~~（已退役）
 
-| 文件 | 路径 | 类/函数 | 说明 |
-|------|------|---------|------|
-| `enhanced_context_builder.py` | `neurova/` | `EnhancedContextBuilder` | 增强版上下文构建器（记忆注入/情感注入/时间感知/多粒度检索） |
+`enhanced_context_builder.py` / `EnhancedContextBuilder` 已于 B6-10（Issue #90 审计 §5）
+从生产侧删除：零生产消费方，改由 `context/orchestrator.py` 的 `ContextOrchestrator`
+承担上下文装配（记忆/情感/时间/检索各自有独立注入点，不再有第二份装配路径）。
+
+本节保留标题是为了让按旧名检索的读者能查到去处——不得据此重新加回该类。
 
 ---
 

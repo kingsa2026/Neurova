@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from neurova.core.logger import get_logger
-from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from neurova.channels.base import (
@@ -20,6 +19,7 @@ from neurova.channels.base import (
     ChannelEventType,
     ChannelMessage,
 )
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -368,7 +368,7 @@ class ChannelManager:
 
             import os
 
-            db_path = os.environ.get("NEUROVA_CHANNEL_INGRESS_DB") or Path("data/channel_ingress.db")
+            db_path = callerPath(os.environ.get("NEUROVA_CHANNEL_INGRESS_DB"), "channel_ingress.db")
             queue = ChannelIngressQueue(db_path=db_path)
             self.ingress_queue = queue
             return queue

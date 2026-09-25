@@ -33,6 +33,9 @@ pypdf>=4.0.0
 striprtf>=0.0.26
 odfpy>=1.4.1
 
+# 文档出件（write_pdf：Markdown/HTML → PDF，document_pdf.py 是唯一 import 处）
+reportlab>=4.0
+
 # Utilities
 python-dotenv>=1.0.0
 psutil>=5.9.0
@@ -53,10 +56,31 @@ sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
 
-# Testing (dev)
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
+# 硬依赖补齐（2026-09-18 部署配置一致性门禁 R8 实测）：
+# 下列包在代码里是"裸 import 无降级"，此前只在 requirements-ci.txt 声明，
+# 生产镜像（Dockerfile 只装本文件）装上后对应功能路径 import 即崩：
+#   APScheduler —— neurova/agent/scheduler.py:25-31 模块级 import，定时/工作流
+#                  触发器的唯一调度底座，缺席即 cron 触发器整链不可用
+#   feedparser  —— neurova/web_reach/reach.py:22 模块级 import（RSS 读取），
+#                  且经 skills.builtin 进入技能执行面
+#   pycryptodome —— neurova/llm/providers/secret_store.py 的 AES-GCM 唯一实现，
+#                   此前只经 lark-oapi 传递带入（隐式依赖，上游一改即崩）;
+#                   缺席时 API Key 解密静默失败（provider 缓存空 key）
+APScheduler>=3.10
+feedparser>=6.0
+pycryptodome>=3.20
+# MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）
+# 本节两件事实不可混谈：
+#   1) 依赖声明只此一行，requirements-ci.txt 不再重复声明（单一声明源）；
+#   2) 缺席语义是**功能全断**，不是"优雅降级"——连接一律返回 False 并把
+#      last_error 记成"SDK 未安装"，真实失败原因被掩盖、线上 MCP 全断而 CI 全绿
+#      （Issue #62 偏差）。删改前先读 mcp_client._SDK_AVAILABLE。
+mcp>=1.2.0
+
+# 运行时功能面依赖。此前误挂在 "Testing (dev)" 标题下，逐件核实过 neurova/ 内均有
+# 真实 import（Pillow 截图与图片解析、cryptography 密钥存储、jsonschema 工具层、
+# playwright/curl_cffi 抓取、pyautogui/paramiko/prometheus-client）；测试框架不在
+# 这里声明——pytest 三件由 requirements-ci.txt 单源持有，重复声明会被装进用户机器。
 Pillow>=11.0
 prometheus-client
 pyautogui>=0.9.54
@@ -72,3 +96,18 @@ lark-oapi>=1.6
 dingtalk-stream>=0.20
 # 企业微信智能机器人（aibot WebSocket 长连接）——import aibot
 wecom-aibot-python-sdk>=1.0.2
+
+# 代码裸 import 但此前零声明的运行期依赖（2026-09-21 按 neurova/ 模块级 import
+# 面逐件核实；守卫 tests/unit/desktop/test_install_supply_contract.py）。缺席语义
+# 不是"优雅降级"而是对应功能整条不可用：
+#   modelscope  —— neurova/tts/model_downloader.py:372，ModelScope 下载源唯一实现。
+#                  Windows 首启默认源与国内首选源都走它，缺席即模型下载只剩 hf-mirror
+#   requests    —— neurova/channels/feishu_auth.py:12 模块级 import（飞书 API 通道）。
+#                  此前只经 lark-oapi 传递带入（隐式依赖，上游一改即崩）
+#   PyYAML      —— neurova/plugins/plugin_manager.py:26 模块级 import；插件清单解析
+#   comtypes    —— neurova/tts/sapi5_tts.py，Windows SAPI5 离线 TTS 唯一实现
+#                  （TTS fallback 链：moss-nano → edge-tts → sapi5 → mock）
+modelscope>=1.9.0
+requests>=2.31.0
+PyYAML>=6.0
+comtypes; sys_platform == "win32"

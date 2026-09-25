@@ -176,7 +176,7 @@ result = compressor.compress(days=30)
 
 **文件**：`neurova/agents/collaboration.py`（新建）
 
-**参考文档**：``
+**参考文档**：`docs/01-architecture/04-multi-agent-collaboration.md`
 
 **要做的**：
 1. Agent 间消息路由
@@ -198,7 +198,7 @@ result = compressor.compress(days=30)
 
 **文件**：`neurova/memory/core/compression.py`（新建）
 
-**参考文档**：``
+**参考文档**：`docs/01-architecture/17-memory-compression-mechanism.md`
 
 **要做的**：
 1. 层级压缩

@@ -25,8 +25,14 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # 默认上下文池设置
+# Issue #65：``max_size`` 在 ContextPool「无损归档」改造后**已失效**（池不按容量
+# 驱逐，常驻占用严格线性 0.76 KB/条）。此键仍在响应里（前端/历史调用方在读），
+# 但必须与 ``max_size_effective=False`` 一起返回，否则等于继续谎报"设了有效"。
+# 需要常驻上限请改用 ContextPool(resident_limit=..., ledger_db=...)。
 _default_pool_settings = {
     "max_size": 100,
+    "max_size_effective": False,
+    "resident_limit": None,
     "ttl_seconds": 3600,
     "default_token_budget": 16000,
     "model_budgets": {
@@ -86,7 +92,13 @@ async def get_pool_settings(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取上下文池设置"""
+    """获取上下文池设置
+
+    Issue #65：``max_size``/``ttl_seconds`` 为此前的"名义配置"（PUT 已于
+    2026-09-12 改 501 如实上报"未接线"）。其中 ``max_size`` 更是**失效参数**
+    ——ContextPool 不再按容量驱逐，故连同 ``max_size_effective=False`` 返回，
+    避免调用方把"设了 max_size"误读成"内存有上限"。
+    """
     _get_request_id(request)
 
     try:

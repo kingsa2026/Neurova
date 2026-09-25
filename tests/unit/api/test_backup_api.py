@@ -124,3 +124,26 @@ def _local_key(tmp_path: Path):
 
 def test_unauthenticated_rejected(client):
     assert client.post("/v1/backups/create").status_code in (401, 403)
+
+
+def test_default_sources_follow_injected_workspace_root(tmp_path, monkeypatch):
+    """未给 NEUROVA_BACKUP_SOURCES 时，工作区源取单源解析器的绝对路径。
+
+    原默认值是字面 "agent_workspaces"（CWD 相对）：换根（桌面版把数据放用户目录）
+    或从别处起进程时备份静默跳过该源，只出半个包。
+    """
+    from neurova.api.endpoints import backup_api
+
+    monkeypatch.delenv("NEUROVA_BACKUP_SOURCES", raising=False)
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "wsRoot"))
+    monkeypatch.setenv("NEUROVA_BACKUP_KEY_PATH", str(tmp_path / "key.bin"))
+    monkeypatch.setenv("NEUROVA_BACKUP_WORK_DIR", str(tmp_path / "backups"))
+
+    backup_api._reset_backup_orchestrator()
+    try:
+        sources = backup_api.get_backup_orchestrator().default_sources
+    finally:
+        backup_api._reset_backup_orchestrator()
+
+    assert Path(sources["agent_workspaces"]) == tmp_path / "wsRoot"
+    assert Path(sources["agent_workspaces"]).is_absolute()

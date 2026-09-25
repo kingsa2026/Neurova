@@ -159,7 +159,10 @@ def test_agent_router_initialization_restores_pending(monkeypatch):
     agent = SimpleNamespace(
         config=SimpleNamespace(agent_id="restart-agent", name="restart-agent",
                                enable_active_skill_acquisition=False, enable_skill_packer=True),
-        _skill_registry=Mock(), memory_manager=None, tool_memory=None)
+        _skill_registry=Mock(), memory_manager=None, tool_memory=None,
+        # init_router 经 wire_skill_evolution_recording 注册采集回调（工单 013），
+        # 替身必须满足该接口；本用例断言的是待审模板恢复，与此无关。
+        _on_skill_post_execute=lambda *a, **k: None)
     monkeypatch.setattr("neurova.router.create_default_router", Mock())
     Agent.init_router(agent)
     assert agent.skill_packer.list_pending_templates() == [expected]
@@ -319,7 +322,13 @@ async def test_pipeline_interruption_records_failure(tmp_path, monkeypatch, stag
         cg.flush_task(service, "report", False)
 
 
-def test_parameter_identity_and_unknown_sequence_matching(tmp_path):
+def test_parameter_identity_drives_name_and_similarity(tmp_path):
+    """参数进出结构身份：换序/换参都要产不同名字、不同相似度。
+
+    本用例原有第三行断言 `_calculate_match_score(...) == 0`（未知序列得分 0）。
+    那套关键词打分只服务 `find_skills_for_context`，而它生产零调用方、
+    已随工单 017 B 项删除，故连带删掉这一行断言，用例改名为它真正守护的东西。
+    """
     from neurova.evolution.skill_encapsulation import AutoSkillBuilder, ToolPattern, SkillTemplate
     builder = AutoSkillBuilder()
     first = ToolPattern(pattern_id="one", tool_sequence=STEPS)
@@ -331,7 +340,6 @@ def test_parameter_identity_and_unknown_sequence_matching(tmp_path):
     template = SkillTemplate(tool_sequence=STEPS)
     assert builder._pattern_skill_similarity(first, template) == 1
     assert builder._pattern_skill_similarity(changed, template) == 0
-    assert builder._calculate_match_score(SkillTemplate(tool_sequence=["a", "b"]), [], ["x", "y"]) == 0
 
 
 def test_review_state_survives_restart_and_duplicate_publish(tmp_path, monkeypatch):

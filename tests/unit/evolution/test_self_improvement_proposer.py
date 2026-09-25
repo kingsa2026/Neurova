@@ -39,6 +39,33 @@ from neurova.evolution.rsi.self_improvement_proposer import (
 )
 
 
+def _make_proposer(**kwargs):
+    """测试构造口：补齐工单 005/010 起必须注入的协作者。
+
+    本模块绝大多数用例考的是提案状态机、风险 gate 与安全校验，与"哪个 agent 的
+    技能库"无关；技能链因此注入**真实但隔离到 tmp** 的一对（真 SkillService +
+    独立 SkillRegistry 实例）—— 不用替身冒充"装上了"，也不去碰进程内单例注册表。
+    """
+    agents_dir = kwargs.pop("agents_dir", None)  # 旧沙箱根，现仅用作台账隔离位置
+    if agents_dir is not None and "proposals_dir" not in kwargs:
+        kwargs["proposals_dir"] = Path(agents_dir) / "proposals"
+    kwargs.setdefault("agent_id", "test-agent")
+    kwargs.setdefault("deployment_controller", RSIDeploymentController(initial_phase=0))
+    kwargs.setdefault("rollback_manager", RSIRollbackManager())
+    ledger = Path(kwargs["proposals_dir"])
+    kwargs.setdefault(
+        "skill_service",
+        __import__("neurova.skills.skill_service", fromlist=["SkillService"]).SkillService(
+            kwargs["agent_id"], skills_dir=str(ledger.parent / "agent-skills")
+        ),
+    )
+    kwargs.setdefault(
+        "skill_registry",
+        __import__("neurova.skill_system", fromlist=["SkillRegistry"]).SkillRegistry(),
+    )
+    return SelfImprovementProposer(**kwargs)
+
+
 class TestImprovementProposalDataclass:
     """测试 ImprovementProposal 数据模型"""
 
@@ -97,18 +124,20 @@ class TestProposalStatus:
 class TestSelfImprovementProposerInit:
     """测试 SelfImprovementProposer 初始化"""
 
-    def test_init_with_defaults(self, tmp_path):
-        """测试默认初始化（使用临时 proposals_dir）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / ".agents" / "proposals")
-        assert proposer.proposals_dir.exists()
-        assert proposer.deployment_controller is not None
-        assert proposer.rollback_manager is not None
+    def test_init_requires_injected_collaborators(self, tmp_path):
+        """未注入即失败（工单 005）：目录默认可以有，控制器与回滚管理器不行。
+
+        原用例断言"裸构造后 deployment_controller 非空"，那正是 split-brain 本身：
+        proposer 自带一个 phase=0 的控制器，于是管理员调 rsi_phase 对提案门禁无效。
+        """
+        with pytest.raises(TypeError):
+            SelfImprovementProposer(proposals_dir=tmp_path / ".agents" / "proposals")
 
     def test_init_with_custom_components(self, tmp_path):
         """测试注入自定义 deployment_controller 和 rollback_manager"""
         dc = RSIDeploymentController(initial_phase=2)
         rm = RSIRollbackManager()
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / ".agents" / "proposals",
             deployment_controller=dc,
             rollback_manager=rm,
@@ -120,7 +149,7 @@ class TestSelfImprovementProposerInit:
         """测试初始化时创建 proposals_dir"""
         proposals_dir = tmp_path / ".agents" / "proposals"
         assert not proposals_dir.exists()
-        SelfImprovementProposer(proposals_dir=proposals_dir)
+        _make_proposer(proposals_dir=proposals_dir)
         assert proposals_dir.exists()
 
 
@@ -129,7 +158,7 @@ class TestProposeSkillManifest:
 
     def test_propose_skill_manifest_returns_proposal(self, tmp_path):
         """测试创建 skill manifest 提案"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest(
             skill_id="code-reviewer",
             manifest_yaml="name: code-reviewer\nversion: 1.0.0\ndescription: 代码审查",
@@ -143,7 +172,7 @@ class TestProposeSkillManifest:
 
     def test_propose_skill_manifest_generates_unique_id(self, tmp_path):
         """测试每次提案生成唯一 ID"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         p1 = proposer.propose_skill_manifest("s1", "name: s1")
         p2 = proposer.propose_skill_manifest("s2", "name: s2")
         assert p1.proposal_id != p2.proposal_id
@@ -154,7 +183,7 @@ class TestProposeActionDefinition:
 
     def test_propose_action_definition_returns_proposal(self, tmp_path):
         """测试创建 action definition 提案"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_action_definition(
             action_name="summarize_doc",
             handler_code="def handle(args): return 'summary'",
@@ -171,7 +200,7 @@ class TestProposePRPatch:
 
     def test_propose_pr_patch_returns_proposal(self, tmp_path):
         """测试创建 PR patch 提案"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_pr_patch(
             target_file="neurova/skills/executor.py",
             patch_content="--- a/executor.py\n+++ b/executor.py\n@@ -10,3 +10,5 @@",
@@ -188,7 +217,7 @@ class TestProposalValidation:
 
     def test_validate_safe_skill_manifest(self, tmp_path):
         """测试安全的 skill manifest 通过校验"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("safe-skill", "name: safe-skill")
         result = proposer.validate_proposal(proposal)
         assert result.is_valid is True
@@ -196,7 +225,7 @@ class TestProposalValidation:
 
     def test_validate_rejects_path_traversal_in_target(self, tmp_path):
         """测试拒绝 target 中的路径穿越（../../etc/passwd）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = ImprovementProposal(
             proposal_id="p-evil",
             proposal_type=ProposalType.PR_PATCH,
@@ -210,7 +239,7 @@ class TestProposalValidation:
 
     def test_validate_rejects_pr_patch_targeting_system_files(self, tmp_path):
         """测试拒绝 PR patch 目标为系统文件（如 /etc/、/sys/）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = ImprovementProposal(
             proposal_id="p-evil2",
             proposal_type=ProposalType.PR_PATCH,
@@ -223,7 +252,7 @@ class TestProposalValidation:
 
     def test_validate_rejects_empty_content(self, tmp_path):
         """测试拒绝空内容"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = ImprovementProposal(
             proposal_id="p-empty",
             proposal_type=ProposalType.SKILL_MANIFEST,
@@ -236,7 +265,7 @@ class TestProposalValidation:
 
     def test_validate_rejects_dangerous_imports_in_action(self, tmp_path):
         """测试拒绝 action handler 中的危险导入（os.system/subprocess/Popen）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_action_definition(
             action_name="evil-action",
             handler_code="import os\nos.system('rm -rf /')",
@@ -252,7 +281,7 @@ class TestSubmitProposal:
     def test_submit_persists_proposal_to_disk(self, tmp_path):
         """测试提交后将提案持久化到磁盘"""
         proposals_dir = tmp_path / "proposals"
-        proposer = SelfImprovementProposer(proposals_dir=proposals_dir)
+        proposer = _make_proposer(proposals_dir=proposals_dir)
         proposal = proposer.propose_skill_manifest("my-skill", "name: my-skill")
 
         proposal_id = proposer.submit_proposal(proposal)
@@ -268,7 +297,7 @@ class TestSubmitProposal:
 
     def test_submit_invalid_proposal_raises(self, tmp_path):
         """测试提交无效提案时抛出 ValueError"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = ImprovementProposal(
             proposal_id="p-bad",
             proposal_type=ProposalType.SKILL_MANIFEST,
@@ -284,13 +313,13 @@ class TestListPendingProposals:
 
     def test_list_pending_empty(self, tmp_path):
         """测试空列表"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         pending = proposer.list_pending_proposals()
         assert pending == []
 
     def test_list_pending_returns_only_pending(self, tmp_path):
         """测试只返回 PENDING 状态的提案"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         p1 = proposer.propose_skill_manifest("s1", "name: s1")
         p2 = proposer.propose_skill_manifest("s2", "name: s2")
         proposer.submit_proposal(p1)
@@ -310,7 +339,7 @@ class TestHumanReviewGate:
         """测试批准并应用 skill manifest 提案 —— 写入 .agents/skills/"""
         proposals_dir = tmp_path / "proposals"
         agents_dir = tmp_path / ".agents"
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=proposals_dir,
             agents_dir=agents_dir,
             deployment_controller=RSIDeploymentController(initial_phase=4),  # 全自动阶段
@@ -321,20 +350,27 @@ class TestHumanReviewGate:
         )
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        result = proposer.approve_and_apply(
+            proposal.proposal_id,
+            approver="admin",
+            tool_sequence=["read_memory", "write_memory"],
+        )
 
-        assert result.success is True
-        # 验证 skill manifest 已写入 .agents/skills/test-skill/manifest.yaml
-        skill_file = agents_dir / "skills" / "test-skill" / "manifest.yaml"
-        assert skill_file.exists()
-        assert "name: test-skill" in skill_file.read_text(encoding="utf-8")
+        assert result.success is True, result.error
+        # 工单 010 改写本用例：批准的作用不再是"往 .agents/skills/ 写一个文件"
+        # （那条路径全仓零读取方，APPLIED 只是文件写入），而是装进本 agent 的
+        # 技能库并回灌注册表 —— 断言因此指向库与注册表，且反向钉住旧沙箱不再被写。
+        assert result.applied_skill_id == "test-skill"
+        assert result.registry_hit is True, "回灌后注册表取不到 ⇒ 下一轮对话看不见它"
+        assert proposer.skill_service.get_skill_info("test-skill") is not None
+        assert (agents_dir / "skills").exists() is False, "旧的沙箱目录树又回来了"
         # 验证提案状态变为 APPLIED
         assert result.proposal.status == ProposalStatus.APPLIED
 
     def test_approve_and_apply_creates_snapshot_before(self, tmp_path):
         """测试应用前创建回滚快照"""
         rm = RSIRollbackManager()
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
@@ -343,7 +379,7 @@ class TestHumanReviewGate:
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
 
         assert result.success is True
         assert result.snapshot_id is not None
@@ -353,7 +389,7 @@ class TestHumanReviewGate:
 
     def test_reject_proposal(self, tmp_path):
         """测试拒绝提案"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
 
@@ -365,18 +401,18 @@ class TestHumanReviewGate:
 
     def test_approve_nonexistent_proposal_returns_failure(self, tmp_path):
         """测试批准不存在的提案返回失败"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
-        result = proposer.approve_and_apply("nonexistent-id", approver="admin")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
+        result = proposer.approve_and_apply("nonexistent-id", approver="admin", tool_sequence=["a", "b"])
         assert result.success is False
         assert "not found" in result.error.lower() or "不存在" in result.error
 
     def test_approve_without_approver_returns_failure(self, tmp_path):
         """测试无 approver 时拒绝应用（人类评审 gate）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="")
+        result = proposer.approve_and_apply(proposal.proposal_id, approver="", tool_sequence=["a", "b"])
         assert result.success is False
         assert "approver" in result.error.lower() or "评审" in result.error
 
@@ -386,7 +422,7 @@ class TestDeploymentPhaseGate:
 
     def test_phase_0_blocks_all_auto_apply(self, tmp_path):
         """测试 Phase 0（观察阶段）阻止所有自动应用"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=0),
@@ -394,14 +430,14 @@ class TestDeploymentPhaseGate:
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         # Phase 0 即使有人工批准，low 风险也允许（人工批准是主 gate）
         # 但 medium/high 应被阶段 gate 阻止
         assert result.success is True  # low risk + 人工批准 = 允许
 
     def test_phase_0_blocks_high_risk_even_with_approval(self, tmp_path):
         """测试 Phase 0 阻止高风险 PR patch，即使有人工批准"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=0),
@@ -412,13 +448,13 @@ class TestDeploymentPhaseGate:
         )
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         assert result.success is False
         assert "phase" in result.error.lower() or "阶段" in result.error
 
     def test_phase_4_allows_high_risk_with_approval(self, tmp_path):
         """测试 Phase 4（全自动）允许高风险，但仍需人工批准"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
@@ -429,9 +465,15 @@ class TestDeploymentPhaseGate:
         )
         proposer.submit_proposal(proposal)
 
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
-        # PR patch 在 Phase 4 + 人工批准下可以应用（写入 .agents/patches/）
-        assert result.success is True
+        result = proposer.approve_and_apply(
+            proposal.proposal_id, approver="admin", tool_sequence=["read_memory", "write_memory"]
+        )
+        # 工单 010 改写本用例：Phase 4 + 人工批准**过了阶段 gate**，但 pr_patch
+        # 没有生效通道 —— 原断言 `success is True` 固化的正是"伪报成功"
+        # （它只是往 .agents/patches/ 写了个文件）。现在必须显式拒绝且不改状态。
+        assert result.success is False
+        assert "not_supported" in result.error, result.error
+        assert result.proposal.status == ProposalStatus.PENDING
 
 
 class TestRollbackIntegration:
@@ -440,14 +482,14 @@ class TestRollbackIntegration:
     def test_rollback_proposal_restores_state(self, tmp_path):
         """测试回滚已应用的提案"""
         agents_dir = tmp_path / ".agents"
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=agents_dir,
             deployment_controller=RSIDeploymentController(initial_phase=4),
         )
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
-        apply_result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        apply_result = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         assert apply_result.success is True
         assert apply_result.snapshot_id is not None
 
@@ -463,7 +505,7 @@ class TestRollbackIntegration:
 
     def test_rollback_nonexistent_snapshot_fails(self, tmp_path):
         """测试回滚不存在的快照失败"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         result = proposer.rollback_applied_proposal("nonexistent", "fake-snapshot-id")
         assert result.success is False
 
@@ -473,14 +515,14 @@ class TestApplyResultContract:
 
     def test_apply_result_fields(self, tmp_path):
         """测试 ApplyResult 包含必要字段"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
         )
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
-        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        result = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
 
         assert hasattr(result, "success")
         assert hasattr(result, "proposal")
@@ -489,7 +531,7 @@ class TestApplyResultContract:
 
     def test_validation_result_fields(self, tmp_path):
         """测试 ValidationResult 包含必要字段"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("s", "name: s")
         result = proposer.validate_proposal(proposal)
 
@@ -503,7 +545,7 @@ class TestSecurityHardening:
 
     def test_validate_rejects_absolute_path_in_skill_id(self, tmp_path):
         """C1: skill_id 含绝对路径应被拒绝（防止逃逸 .agents/skills/ 沙箱）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         # Unix 绝对路径
         proposal = proposer.propose_skill_manifest("/etc/evil", "name: evil")
         result = proposer.validate_proposal(proposal)
@@ -512,14 +554,14 @@ class TestSecurityHardening:
 
     def test_validate_rejects_backslash_absolute_path_in_skill_id(self, tmp_path):
         """C1: skill_id 含反斜杠绝对路径应被拒绝（Windows 路径穿越）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("\\Windows\\evil", "name: evil")
         result = proposer.validate_proposal(proposal)
         assert result.is_valid is False
 
     def test_validate_rejects_absolute_path_in_action_name(self, tmp_path):
         """C1: action_name 含绝对路径应被拒绝"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_action_definition(
             "/etc/evil", "def handle(args): pass"
         )
@@ -528,7 +570,7 @@ class TestSecurityHardening:
 
     def test_validate_rejects_windows_forward_slash_system_path(self, tmp_path):
         """C2: C:/Windows/ 形式（正斜杠）应被识别为系统文件并拒绝"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_pr_patch(
             target_file="C:/Windows/System32/evil.py",
             patch_content="patch",
@@ -539,30 +581,35 @@ class TestSecurityHardening:
 
     def test_validate_rejects_skill_id_with_slash(self, tmp_path):
         """C1: skill_id 含斜杠分隔符应被拒绝（skill_id 应为简单名称）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("evil/../../etc", "name: evil")
         result = proposer.validate_proposal(proposal)
         assert result.is_valid is False
 
-    def test_apply_target_path_stays_within_agents_dir(self, tmp_path):
-        """C1 防御纵深：即使校验被绕过，应用路径也必须在 .agents/ 内"""
-        proposer = SelfImprovementProposer(
+    def test_target_never_becomes_a_written_path(self, tmp_path):
+        """C1 防御纵身的继任契约（工单 010）：proposer 不再自己拼落盘路径。
+
+        原用例断言"即使校验被绕过，应用路径也必须在 .agents/ 内"。今天
+        "应用"是调 SkillService 的公开 API 装一个技能，本模块不再从 `target`
+        推导任何文件系统路径 —— 所以这条防御从"路径必须在沙箱内"升级为
+        "根本没有路径可写"。路径穿越仍在 submit 时被 validate_proposal 拦住。
+        """
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
-            agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
         )
-        # 正常 skill 应用的目标路径解析后必须在 .agents/ 内
-        proposal = proposer.propose_skill_manifest("my-skill", "name: my-skill")
-        target_path = proposer._get_apply_target_path(proposal)
-        resolved = target_path.resolve() if target_path else None
-        agents_root = tmp_path.resolve()
-        assert resolved is not None
-        # 解析后的路径必须在 .agents/ 目录树内
-        assert str(resolved).startswith(str(agents_root))
+        assert not hasattr(SelfImprovementProposer, "_get_apply_target_path")
+        assert not hasattr(SelfImprovementProposer, "_apply_proposal_to_disk")
+
+        bad = proposer.propose_skill_manifest(
+            skill_id="../../etc/passwd", manifest_yaml="name: x tool_sequence: [a]"
+        )
+        with pytest.raises(ValueError, match="path traversal"):
+            proposer.submit_proposal(bad)
 
     def test_approve_and_apply_rejects_non_pending_proposal(self, tmp_path):
         """C4: 已 APPLIED 的提案不能再次 approve_and_apply"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
@@ -570,30 +617,30 @@ class TestSecurityHardening:
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
         # 第一次应用
-        first = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        first = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         assert first.success is True
         # 第二次应用同一提案应失败
-        second = proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        second = proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         assert second.success is False
         assert "PENDING" in second.error or "状态" in second.error
 
     def test_reject_proposal_rejects_non_pending_proposal(self, tmp_path):
         """C4: 已 APPLIED 的提案不能被 reject"""
-        proposer = SelfImprovementProposer(
+        proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
             deployment_controller=RSIDeploymentController(initial_phase=4),
         )
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
-        proposer.approve_and_apply(proposal.proposal_id, approver="admin")
+        proposer.approve_and_apply(proposal.proposal_id, approver="admin", tool_sequence=["a", "b"])
         # 已应用的提案不能被拒绝
         ok = proposer.reject_proposal(proposal.proposal_id, reason="too late")
         assert ok is False
 
     def test_rollback_rejects_non_applied_proposal(self, tmp_path):
         """C4: PENDING 状态的提案不能被回滚（未应用就回滚是非法状态转移）"""
-        proposer = SelfImprovementProposer(proposals_dir=tmp_path / "proposals")
+        proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("s", "name: s")
         proposer.submit_proposal(proposal)
         # PENDING 提案不能回滚

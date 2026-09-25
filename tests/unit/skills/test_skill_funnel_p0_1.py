@@ -180,11 +180,16 @@ def test_turn_funnel_record_and_snapshot():
 
 
 def _make_registry(skill_obj=None):
-    """最小注册表替身：skills dict + AsyncMock execute_skill。"""
+    """最小注册表替身：get_skill 取键口 + AsyncMock execute_skill。
+
+    工单 014 把执行入口的存在性检查从 `skills.get(name)` 字典直取迁到协议
+    声明的取键口 `get_skill`。替身必须显式钉这个口：MagicMock 对未声明方法
+    返回自动子对象（恒真），"查无此技能"用例会静默变成"查到了"。
+    """
     from unittest.mock import AsyncMock, MagicMock
 
     registry = MagicMock()
-    registry.skills = {} if skill_obj is None else {"deploy_helper": skill_obj}
+    registry.get_skill = MagicMock(return_value=skill_obj)
     registry.execute_skill = AsyncMock()
     return registry
 

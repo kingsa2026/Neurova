@@ -179,7 +179,7 @@ def test_genetic_engine_registers_to_skill_registry(tmp_path):
 # RED-3: RSI 真实改善 ToolMemory 参数
 # ====================================================================
 
-def test_rsi_closedloop_real_toolmemory_convergence():
+def test_rsi_closedloop_real_toolmemory_convergence(rsi_probe_factory):
     """RSI 迭代应真实改善 ToolMemoryIntegration 参数向 setpoint 收敛.
 
     这验证的是"真实系统实际改善"而非 Mock 系统.
@@ -205,13 +205,15 @@ def test_rsi_closedloop_real_toolmemory_convergence():
     tm.failure_penalty = 0.5  # setpoint：惩罚在场，好坏工具才能分化
     tm.decay_rate = 0.3  # 远离 0.1
 
-    orch = RSIOrchestrator(
-        sleep_system=sleep,
-        emotion_system=emotion,
-        experience_system=experience,
-        tool_memory_system=tm,
-    )
-    orch.deployment_controller._current_phase = 2
+    orch = rsi_probe_factory(
+        rsi_phase=2,
+        systems={
+            "sleep": sleep,
+            "emotion": emotion,
+            "experience": experience,
+            "tool_memory": tm,
+        },
+    ).orchestrator
 
     # 执行足够多迭代
     gains = []

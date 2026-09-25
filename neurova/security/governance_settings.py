@@ -4,7 +4,21 @@ Step9.96 对话规则提取的 LLM 成本门控此前只有 env 开关（NEUROVA
 生产无管理面；RSI 部署阶段同样只能靠 env。本模块提供独立于 /v1/settings 扁平 kv 的
 治理设置：JSON 文件持久化 + 管理端读写（require_admin 在端点层）。
 
-优先级约定：env 显式设 0 强制关 > 治理设置值 > env 默认 > 内置默认。
+V3 调控门（NEUROVA_METACOG_GATE）同病同治：裸 env 开关在生产无写入方，导致教训的
+硬拦截臂恒关，故一并纳入本设置面（metacog_gate_enabled）。工单 015 把同病的另两个
+裸 env（结晶 LLM 裁决闸、技能自动淘汰）收进同一设置面，并抽出 `resolve_flag`
+作为优先级口径的唯一事实源。
+
+优先级约定：env 显式设 0 强制关 > env 显式设 1 强制开 > 治理设置值 > 内置默认。
+
+进程级单文件与 `rsi_phase` 的归属（工单 005 明确并写死，不改行为）：
+本设置面是**一个进程一份 JSON**，`rsi_phase` 因而是全局的而非按 agent 的。
+两个写入方共用同一颗键：管理端（`api/endpoints/governance.py`）代表人工设定，
+`RSIOrchestrator._persist_rsi_phase` 代表自动晋升的回写。多 agent 场景下每个
+编排器各持一个部署控制器，谁最后晋升谁的阶段留在盘上（后写者胜）；按 agent 隔离
+阶段属"明确不做"，因为阶段说的是"这套部署允许 RSI 走多远"，是运维决定而非
+每个 agent 的私有状态。要读当前阶段的唯一真相，读这个文件，不要读任一进程里的
+内存值 —— 后者在重启后按本文件重建。
 """
 
 import json
@@ -14,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -22,6 +37,10 @@ _LOCK = threading.Lock()
 DEFAULTS: Dict[str, Any] = {
     "conversation_rules_enabled": False,  # Step9.96 LLM 成本门控，默认关
     "rsi_phase": 0,  # RSI 部署阶段 0..4（0=观察）
+    "metacog_gate_enabled": False,  # V3 调控门（教训拦截工具），默认关
+    # 工单 015 收口的两个裸 env。默认值＝收口前的现网默认，不顺手改口径
+    "crystallization_llm_gate_enabled": True,  # 结晶 LLM 裁决闸（关=候选直写存储引擎）
+    "skill_auto_retire_enabled": False,  # 技能自动淘汰（关=只上报候选不执行禁用）
 }
 
 
@@ -30,7 +49,7 @@ def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_GOVERNANCE_SETTINGS")
     if custom:
         return Path(custom)
-    return Path("data") / "governance_settings.json"
+    return resolveDataPath("governance_settings.json")
 
 
 def load_governance_settings(path: Optional[Path] = None) -> Dict[str, Any]:
@@ -67,3 +86,23 @@ def save_governance_settings(data: Dict[str, Any], path: Optional[Path] = None) 
         except Exception as e:  # noqa: BLE001
             logger.error("治理设置保存失败: %s", e)
             return False
+
+
+def resolve_flag(key: str, env_var: str) -> bool:
+    """治理布尔开关的唯一优先级口径（工单 015，与 metacog_gate_enabled 同形）。
+
+    env 显式 "0" 强制关 > env 显式 "1" 强制开 > 治理设置值 > DEFAULTS 内置默认。
+    env 里是别的值（拼错、空串）不算"显式设置"，仍由治理面决定——否则一个
+    写歪的 `NEUROVA_X=` 会把整个管理面旁路掉。
+
+    必须在**决策时刻**调用：构造期把结果缓存成属性，等于又造出一个
+    "治理页能改、运行时不认"的幻影旋钮（015 收口前的老毛病）。
+    """
+    if key not in DEFAULTS:
+        raise KeyError(f"治理开关 {key!r} 未在 DEFAULTS 声明，读不到即不可用")
+    raw = os.environ.get(env_var)
+    if raw == "0":
+        return False
+    if raw == "1":
+        return True
+    return bool(load_governance_settings()[key])

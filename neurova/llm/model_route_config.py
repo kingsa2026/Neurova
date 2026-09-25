@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -336,7 +337,7 @@ class ModelRouteConfigStorage:
 
 _singleton: Optional[ModelRouteConfigStorage] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/model_route_config"
+_DEFAULT_DIR = dataPath("model_route_config")
 
 
 def get_model_route_config_storage() -> ModelRouteConfigStorage:

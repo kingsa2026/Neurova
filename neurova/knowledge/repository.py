@@ -16,19 +16,33 @@ tags/source/confidence/created_at/updated_at），重启保留。
 - 无条目时返回空列表（禁止假数据）
 """
 
+import contextlib
 import datetime
 import difflib
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.foundation.entry_ledger import EntryLedger
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
+from neurova.knowledge.foundation.storage_fence import (
+    PRODUCTION_STORAGE_DIR,
+    assertNotUnderProductionStorage,
+)
 
 logger = get_logger(__name__)
 
-DEFAULT_STORAGE_DIR = "./data/knowledge"
+DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
+# 工单 019a–019b-4b：条目权威已从 knowledge.json 换到底座库，**默认开**。
+# 留一个显式回退值（off/json）而不是删掉这条路：搬家是可逆动作，回退步骤见
+# docs/specs/2026-09-20-knowledge-foundation-design.md 的开关台账。
+NARRATIVE_STORE_ENV = "NEUROVA_KB_NARRATIVE_STORE"
+_JSON_BACKEND_VALUES = ("0", "false", "off", "no", "json")
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_PRIVATE = "private"
 _SUBMISSION_PENDING = "pending"
@@ -47,6 +61,15 @@ _INCREMENTAL_OPS_LIMIT = 200
 def _norm_title(title: str) -> str:
     """冲突检测的 subject 归一化：大小写/首尾空白不敏感。"""
     return (title or "").strip().lower()
+
+
+def _narrativeStoreEnabled() -> bool:
+    """叙述层权威在不在底座库。默认在——只有显式写 off/json 才退回旧行为。
+
+    默认值翻向 SQLite 之后，"没设过环境变量"和"设成 off"是两件不同的事：
+    前者是新常态，后者是一次有意的回退，日志与报错都按后者措辞。
+    """
+    return (os.environ.get(NARRATIVE_STORE_ENV) or "").strip().lower() not in _JSON_BACKEND_VALUES
 
 
 def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
@@ -156,7 +179,11 @@ class ChunkRevisionConflict(Exception):
 
 
 class KnowledgeRepository:
-    """按 agent_id 分组的 JSON 知识条目仓库。"""
+    """按 agent_id 分组的条目仓库：权威默认在底座库叙述表，显式关闸才回 knowledge.json。
+
+    `self._items` 是唯一的内存权威——分片索引、检索、冲突检测全部只读它，
+    所以换后端只需要换 `_load` / `_save` 两个边界。
+    """
 
     def __init__(self, storage_dir: str) -> None:
         self._dir = Path(storage_dir)
@@ -164,6 +191,16 @@ class KnowledgeRepository:
         self._path = self._dir / "knowledge.json"
         self._tombstones_path = self._dir / "knowledge_tombstones.json"
         self._conflicts_path = self._dir / "knowledge_conflicts.json"
+        self._narrative_db_path = str(self._dir / FOUNDATION_DB_NAME)
+        # 围栏必须在建库之前：默认翻向底座库之后，构造本身就会落文件（迁移建表），
+        # 只守 _save 等于守不住——测试会话会在 data/knowledge/ 里造出真库。
+        self._assertNotWritingProductionUnderPytest()
+        self._narratives: Optional[NarrativeStore] = None
+        # 治理投影只在闸内发生（工单 019b-2）；闸外三个写动词与旧行为逐字相同。
+        # 账本与事实库句柄都是短命的：长持有会让 Windows 清不掉 tmp 目录。
+        self._projectionDrift: List[str] = []
+        if _narrativeStoreEnabled():
+            self._narratives = NarrativeStore(self._narrative_db_path)
         self._lock = threading.RLock()
         self._items: Dict[str, List[Dict[str, Any]]] = {}  # agent_id -> items
         # P0-2 tombstone：knowledge_id -> {item, deleted_at, deleted_by, superseded_by}
@@ -383,7 +420,19 @@ class KnowledgeRepository:
         self._ensure_indexes(agent_id)
 
     def _load(self) -> None:
-        if self._path.exists():
+        if self._narratives is not None:
+            self._items = self._itemsFromNarratives()
+            # 装载即对齐：开闸后不必再手工跑回填，缺的治理行按同一口径补投
+            # （admit 幂等，同内容即同一知识）。只报不修等于留一道人工断点。
+            self._syncEntryGovernance()
+            with self._entryLedger() as ledger:
+                self._projectionDrift = ledger.verifyProjection(self._items)
+            if self._projectionDrift:
+                logger.error(
+                    "条目与治理层仍分叉 %d 处（前 5 条：%s）——补投没能收敛，"
+                    "先别把这份库当可信读数用", len(self._projectionDrift),
+                    "; ".join(self._projectionDrift[:5]))
+        elif self._path.exists():
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -401,7 +450,23 @@ class KnowledgeRepository:
                 logger.error(
                     "知识库主文件损坏已隔离: %s → %s (%s)", self._path, quarantined, e
                 )
-        if self._tombstones_path.exists():
+        elif NarrativeStore.findArchivedJson(str(self._dir)):
+            raise RuntimeError(
+                "叙述层已搬进 %s（旧文件归档于 %s），此处回退成只读 JSON 会静默开一个空库。"
+                "要保持新后端就别设 %s=off；要回退请把归档文件改回 knowledge.json "
+                "并清空底座库里的 knowledge_narratives / knowledge_tombstones /"
+                " knowledge_entry_conflicts 三张表。"
+                % (self._narrative_db_path, NarrativeStore.findArchivedJson(str(self._dir))[0],
+                   NARRATIVE_STORE_ENV)
+            )
+        if self._narratives is not None:
+            if self._narratives.tombstoneCount() == 0 and self._tombstones_path.exists():
+                report = self._narratives.importTombstonesFromJson(str(self._tombstones_path))
+                archived = self._narratives.archiveSidecar(str(self._tombstones_path))
+                logger.info("墓碑账本一次性搬入底座：导入 %s 条，旧文件归档为 %s",
+                            report["imported"], archived)
+            self._tombstones = self._narratives.loadTombstones()
+        elif self._tombstones_path.exists():
             try:
                 data = json.loads(self._tombstones_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -410,7 +475,14 @@ class KnowledgeRepository:
                     }
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load knowledge tombstones %s: %s", self._tombstones_path, e)
-        if self._conflicts_path.exists():
+        if self._narratives is not None:
+            if self._narratives.conflictCount() == 0 and self._conflicts_path.exists():
+                report = self._narratives.importConflictsFromJson(str(self._conflicts_path))
+                archived = self._narratives.archiveSidecar(str(self._conflicts_path))
+                logger.info("冲突旁账一次性搬入底座：导入 %s 条，旧文件归档为 %s",
+                            report["imported"], archived)
+            self._conflicts = self._narratives.loadConflicts()
+        elif self._conflicts_path.exists():
             try:
                 data = json.loads(self._conflicts_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -420,7 +492,33 @@ class KnowledgeRepository:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load knowledge conflicts %s: %s", self._conflicts_path, e)
 
+    def _itemsFromNarratives(self) -> Dict[str, List[Dict[str, Any]]]:
+        """闸内读条目：权威是底座库，但首次要把旧 JSON 搬进来再归档。
+
+        搬家不写脚本而挂在读路径上，是因为闸一开就必须立即可用——缺这一步等于
+        "开了开关却换到一本空库"。归档则保证它只发生一次：搬完旧文件不再被读到，
+        删空后重启不会拿快照把已删条目复活。
+        """
+        if self._narratives.count() == 0 and self._path.exists():
+            report = self._narratives.importFromJson(str(self._path))
+            archived = self._narratives.archiveImportedJson(str(self._path))
+            logger.info(
+                "叙述层一次性搬入 %s：导入 %s 行，已把旧主文件归档为 %s",
+                self._narrative_db_path, report["imported"], archived,
+            )
+        data = self._narratives.loadAll()
+        return {
+            agent_id: [self._migrate_entry(i) for i in items if isinstance(i, dict)]
+            for agent_id, items in data.items()
+            if isinstance(items, list)
+        }
+
     def _save_tombstones(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            # 与条目同理：吞掉写失败会让内存与库分叉，下一次成功写入抹平分叉期间的账
+            self._narratives.replaceAllTombstones(self._tombstones)
+            return
         try:
             self._tombstones_path.write_text(
                 json.dumps(self._tombstones, ensure_ascii=False, indent=2),
@@ -430,6 +528,10 @@ class KnowledgeRepository:
             logger.error("Failed to save knowledge tombstones %s: %s", self._tombstones_path, e)
 
     def _save_conflicts(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            self._narratives.replaceAllConflicts(self._conflicts)
+            return
         try:
             self._conflicts_path.write_text(
                 json.dumps(self._conflicts, ensure_ascii=False, indent=2),
@@ -451,7 +553,22 @@ class KnowledgeRepository:
             item["graph_node_ids"] = []
         return item
 
+    def _assertNotWritingProductionUnderPytest(self) -> None:
+        """测试会话内禁止落盘到生产目录（判据与路径都在 `storage_fence`，此处只留调用位）。
+
+        真实 knowledge.json 已证实被历史非隔离运行写入过（38 行纯冗余，见
+        docs/specs/2026-09-20-knowledge-foundation-design.md §1.2）。围栏放在
+        _save 的 try 之外——try 里 raise 会被下面的 except Exception 吞成一条日志。
+        """
+        assertNotUnderProductionStorage(self._dir, "条目仓库 %s" % self._path)
+
     def _save(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            # 闸内不吞异常：写失败若只留一条日志，内存与库就分叉了，
+            # 下一次成功写入会把分叉期间的编辑抹平。
+            self._narratives.replaceAll(self._items)
+            return
         try:
             from neurova.core.atomic_io import atomic_write_text
 
@@ -461,6 +578,42 @@ class KnowledgeRepository:
             )
         except Exception as e:  # noqa: BLE001
             logger.error("Failed to save knowledge repo %s: %s", self._path, e)
+
+    # ── 治理投影（工单 019b-2，闸内）───────────────────────────
+
+    @contextlib.contextmanager
+    def _entryLedger(self) -> Iterator[EntryLedger]:
+        store = KnowledgeFactStore(self._narrative_db_path)
+        try:
+            yield EntryLedger(store)
+        finally:
+            store.close()
+
+    def _syncEntryGovernance(self) -> None:
+        """把当前 `_items` 投影到治理层，并把聚合出的置信度回写到条目上。
+
+        闸外直接返回——旧行为一字不改。闸内**不捕异常**：投影失败却让条目写成功，
+        就是"知识入库而无人知道它是谁说的"，正是这套底座要灭的病。
+
+        只投影、不校验：校验在 `_load` 里做（见 `_projectionDrift`）。
+        """
+        if self._narratives is None:
+            return
+        with self._entryLedger() as ledger:
+            report = ledger.syncFromEntries(self._items)
+        confidences = report["confidences"]
+        mediums = report.get("mediums", {})
+        for items in self._items.values():
+            for item in items:
+                kid = str(item.get("knowledge_id", ""))
+                derived = confidences.get(kid)
+                if derived is not None:
+                    # G11：条目上那个数从此是聚合出来的，不是调用方传进来的
+                    item["confidence"] = derived
+                medium = mediums.get(kid)
+                if medium:
+                    # G01：来源改成从断言 medium_ref 派生（审计读的是那张账，不是这个字段）
+                    item["source"] = medium
 
     # ── CRUD ──────────────────────────────────────────────────
 
@@ -504,6 +657,7 @@ class KnowledgeRepository:
         }
         with self._lock:
             self._items.setdefault(agent_id, []).append(item)
+            self._syncEntryGovernance()
             self._save()
             # P0#1：索引已建立时走分片级增量；dirty 时空操作（重建覆盖）
             self._record_index_op("reindex", item["knowledge_id"])
@@ -937,6 +1091,7 @@ class KnowledgeRepository:
                         except Exception as e:  # noqa: BLE001
                             logger.warning("知识条目内容更新重切分块失败（保留旧块）: %s", e)
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
+                    self._syncEntryGovernance()
                     self._save()
                     # 索引文本只含 title+chunks(+header)：graph_node_ids 等回写
                     # （graph_bridge）不再触发任何索引操作
@@ -964,6 +1119,7 @@ class KnowledgeRepository:
                         "deleted_by": str(deleted_by or ""),
                         "superseded_by": None,
                     }
+                    self._syncEntryGovernance()
                     self._save()
                     self._save_tombstones()
                     self._record_index_op("remove", knowledge_id)
@@ -978,6 +1134,8 @@ class KnowledgeRepository:
                 if item.get("knowledge_id") == knowledge_id:
                     del items[idx]
                     self._tombstones.pop(knowledge_id, None)
+                    # 条目与墓碑都没了，治理行必须跟着退场——否则它成为"活着却无人认领"
+                    self._syncEntryGovernance()
                     self._save()
                     self._save_tombstones()
                     self._record_index_op("remove", knowledge_id)
@@ -998,6 +1156,8 @@ class KnowledgeRepository:
             agent_id = rec.get("agent_id") or "default"
             self._items.setdefault(agent_id, []).append(rec["item"])
             del self._tombstones[knowledge_id]
+            # 恢复 = 这条说法又有人认领了，治理行必须同步回到 active（闸内）
+            self._syncEntryGovernance()
             self._save()
             self._save_tombstones()
             self._record_index_op("reindex", knowledge_id)
@@ -1166,6 +1326,11 @@ class KnowledgeRepository:
             ]
         recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
         return recs
+
+    def has_conflict(self, conflict_id: str) -> bool:
+        """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。"""
+        with self._lock:
+            return conflict_id in self._conflicts
 
     def resolve_conflict(
         self, conflict_id: str, resolution: str, resolved_by: str = ""

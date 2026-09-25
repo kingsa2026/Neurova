@@ -53,7 +53,6 @@ class TestPipelineSwitch:
         agent.trace_manager = _FakeTrace()
         agent.memory_agent = MagicMock()
         agent._trajectory_recorder = None
-        agent.pipeline_executor = None
         agent.post_chat_pipeline = MagicMock()
         agent.post_chat_pipeline.process = AsyncMock(return_value={"actual_session_id": "s"})
 

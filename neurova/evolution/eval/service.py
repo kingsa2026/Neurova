@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
 from neurova.evolution.eval.dataset import EvalDataset, dataset_dir_for
@@ -32,7 +33,6 @@ logger = get_logger(__name__)
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
-
 
 class SimulatedAgent:
     """技能→输出的模拟执行器。
@@ -67,7 +67,6 @@ class SimulatedAgent:
             return ""
         return str(result.get("response") or "").strip()
 
-
 @dataclass
 class EvolutionProposal:
     """一条待审进化提案(永不自动应用)。"""
@@ -88,13 +87,13 @@ class EvolutionProposal:
     def to_dict(self) -> dict:
         return asdict(self)
 
-
 class SkillEvolutionService:
     """单 agent 的文本进化服务(API/pipeline 共用门面)。"""
 
     def __init__(self, agent_id: str, base_dir: Optional[Path] = None):
         self.agent_id = agent_id
-        self._dir = Path(base_dir or f"data/agents/{agent_id}/evolution")
+        # 显式 base_dir 就是进化目录本身；缺省才按数据根推出 agents/<id>/evolution
+        self._dir = Path(base_dir) if base_dir else get_data_root() / "agents" / str(agent_id) / "evolution"
         self._proposals_file = self._dir / "proposals.json"
         self._runs_dir = self._dir / "runs"
 

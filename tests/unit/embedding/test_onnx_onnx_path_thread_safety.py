@@ -25,7 +25,7 @@ TDD 测试 — ONNXEmbeddingEngine ONNX 后端路径的统计字段线程安全
    - 真正的 RED 信号是上面的契约测试
 
 运行方式:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.embedding.test_onnx_onnx_path_thread_safety -v
 """
 from __future__ import annotations

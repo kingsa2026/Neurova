@@ -312,11 +312,15 @@ class PlanOrchestrator:
         return TaskComplexity.SIMPLE
 
     def _create_simple_plan(self, intent: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> Plan:
-        """创建简单计划"""
+        """创建简单计划。
+
+        `tool_name` 留空表示"尚未选定执行原语"——此前写的是占位名
+        `general_tool`，而该名全仓注册处为 0：一个看着能调用、实际不存在的路标。
+        诚实形态是空串（`TaskNode.tool_name` 的默认值），由选定工具的那一步填。
+        """
         task = TaskNode(
             name="simple_task",
             description=intent,
-            tool_name="general_tool",
         )
 
         return Plan(
@@ -338,7 +342,6 @@ class PlanOrchestrator:
             task = TaskNode(
                 name=f"step_{i}",
                 description=step.strip(),
-                tool_name="general_tool",
                 dependencies=[f"step_{i-1}"] if i > 0 else [],
             )
             tasks.append(task)
@@ -364,7 +367,6 @@ class PlanOrchestrator:
             task = TaskNode(
                 name=f"parallel_{i}",
                 description=part.strip(),
-                tool_name="general_tool",
             )
             tasks.append(task)
 

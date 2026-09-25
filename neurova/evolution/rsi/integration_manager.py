@@ -8,6 +8,8 @@ from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from .gate_verdict import GateVerdict
+
 logger = get_logger(__name__)
 
 
@@ -76,8 +78,13 @@ class RSIIntegrationManager:
         logger.info("RSIIntegrationManager initialized")
 
     def get_optimizable_parameters(self) -> Dict[str, List[ParameterInfo]]:
-        """
-        获取四大闭环系统中可被 RSI 优化的参数
+        """获取四大闭环系统中可被 RSI 优化的参数
+
+        工单 018：占位系统（`rsi_placeholder`）返回空参数列表。缺席系统只服务
+        `get_feedback` 的中性信号，不得充当参数载体 —— 否则 `orchestrator` 会把
+        替身对象上的镜像默认值当真值去寻优，`_measure_performance` 又回读同一个
+        对象，棘轮因此"奖励自己编辑空对象"并回执 applied=True。
+        在源头返回空列表比在 apply 端拒绝更靠根因：看不见参数就不会产生候选。
 
         Returns:
             Dict[str, List[ParameterInfo]]: 各系统的可优化参数列表
@@ -86,6 +93,9 @@ class RSIIntegrationManager:
 
         for system_name, params_def in self.OPTIMIZABLE_PARAMETERS.items():
             system = self._systems[system_name]
+            if self._is_placeholder(system):
+                result[system_name] = []
+                continue
             params = []
 
             for param_def in params_def:
@@ -105,6 +115,18 @@ class RSIIntegrationManager:
 
         return result
 
+    @staticmethod
+    def _is_placeholder(system: Any) -> bool:
+        """是否为"闭环系统缺席"的占位替身。
+
+        显式契约：必须是类上写死的 `rsi_placeholder = True`。
+        不用 truthiness —— `MagicMock().rsi_placeholder` 恒为真，
+        任何用 MagicMock 冒充闭环系统的测试都会被误判成占位而全线空转。
+        也不用 `get_status() == "null_fallback"` 字符串嗅探：那会把契约
+        绑在一个本就没有接口保证的返回值上。
+        """
+        return getattr(system, "rsi_placeholder", False) is True
+
     def collect_feedback_signals(self) -> Dict[str, Any]:
         """
         从四大闭环系统收集反馈信号
@@ -114,8 +136,12 @@ class RSIIntegrationManager:
         参数贴近度）。此前 sleep/emotion 的 get_feedback() 不暴露性能键，
         导致它们的参数永远不被 RSI 优化。
 
+        工单 018：缺席闭环系统的占位替身是上述注入的例外 —— 只发中性信号并标
+        `unevidenced`，不注入估算分（见 `get_placeholder_system_names`）。
+
         Returns:
-            Dict[str, Any]: 各系统的反馈信号（含注入的 performance_score）
+            Dict[str, Any]: 各系统的反馈信号（含注入的 performance_score；
+                占位系统改为携带 `verdict`，state 为 `unevidenced`）
         """
         from neurova.evolution.rsi.system_performance import estimate_system_performance
 
@@ -135,6 +161,16 @@ class RSIIntegrationManager:
             if not isinstance(signal, dict):
                 signal = {}
 
+            if self._is_placeholder(system):
+                # 工单 018 第 4 项：占位替身的中性信号照发，但必须标 `unevidenced`，
+                # 且**不得**再由 setpoint 贴近度给它倒推一个性能分 ——
+                # 对真实系统那是估算，对不存在的系统就是凭空造数
+                # （参数面来自它自己的镜像默认值，分数只代表"空对象离目标多像"）。
+                signals[system_name] = dict(signal, verdict=GateVerdict.unevidenced(
+                    f"{system_name} 由缺席闭环系统的占位替身顶位：无参数面，性能读数不可估算"
+                ).to_dict())
+                continue
+
             # 注入 performance_score（系统自身未暴露时由 setpoint 梯度估算）
             if not isinstance(signal.get("performance_score"), (int, float)):
                 params = {
@@ -153,15 +189,46 @@ class RSIIntegrationManager:
 
         return signals
 
-    # 审计 P1-F7：数值参数硬边界（缺省 [0, 10] 兜底；负界用 -inf 语义时
-    # 显式列出）。新增可优化参数须同步登记边界，否则兜底夹紧。
+    def get_placeholder_system_names(self) -> List[str]:
+        """当前由占位替身顶着的闭环系统名（工单 018 第 4 项）。
+
+        缺席必须**可见**：只把替身惰化成"零参数"，运维侧读到的仍是
+        `applied_count=0`，与"跑过了但没找到改进空间"无法区分。
+        """
+        return [
+            name for name, system in self._systems.items()
+            if self._is_placeholder(system)
+        ]
+
+    # 审计 P1-F7：数值参数硬边界（未登记者落 _PARAM_BOUND_DEFAULT 兜底；
+    # 负界用 -inf 语义时显式列出）。新增可优化参数须同步登记边界，否则兜底夹紧。
+    #
+    # 工单 002 边界补齐（一致性守卫
+    # tests/unit/evolution/rsi/test_parameter_source_of_truth.py 落地即红）：
+    # tool_memory 四参与 experience.pattern_min_support 此前全靠
+    # _PARAM_BOUND_DEFAULT=(0.0,100.0) 兜底 —— 对置信度/比率类参数等于不夹紧，
+    # apply_optimization 的 10%/轮复利调整可把它们漂出语义域而守卫不触发。
+    # 每条边界的依据写在右侧注释；语义判据与 rsi/eval_harness.py 的行为用例同源。
     PARAMETER_BOUNDS = {
+        # SleepConsolidation 相似度/衰减率均为 [0,1] 语义（memory_layer/sleep.py:142-144）
         ("sleep", "base_decay_rate"): (0.0, 1.0),
         ("sleep", "similarity_threshold"): (0.0, 1.0),
-        ("emotion", "emotional_protection_threshold"): (0.0, 100.0),
+        # 情感分数归一于 [0,1]，阈值越界即保护永久失活（eval_harness em_threshold_band）
+        ("emotion", "emotional_protection_threshold"): (0.0, 1.0),
         ("emotion", "emotional_protection_factor"): (0.0, 10.0),
+        # 门槛/支持度为计数语义，至少 1 次观察才有意义（与 crystallize_min_observations 同域）
         ("experience", "crystallize_min_observations"): (1.0, 1000.0),
         ("experience", "crystallize_min_success_rate"): (0.0, 1.0),
+        ("experience", "pattern_min_support"): (1.0, 1000.0),
+        # success_bonus 为加法递增项、failure_penalty 走乘性 (1-penalty)：
+        # 两者 >1 会让单轮跳变越过乘数夹紧区间 [0.3,1.5]（closed_loop.py:68-69,201-211）
+        ("tool_memory", "success_bonus"): (0.0, 1.0),
+        ("tool_memory", "failure_penalty"): (0.0, 1.0),
+        # decay_rate 进 exp(-rate*hours)，>1 即单轮把闲置乘数击穿下限
+        # （eval_harness tm_decay_forgetting_band 要求"下降但不越下限"）
+        ("tool_memory", "decay_rate"): (0.0, 1.0),
+        # 肌肉记忆阈值是置信度基准，语义域 (0,1]（eval_harness tm_threshold_band）
+        ("tool_memory", "muscle_memory_threshold"): (0.0, 1.0),
     }
     _PARAM_BOUND_DEFAULT = (0.0, 100.0)
 
@@ -192,6 +259,14 @@ class RSIIntegrationManager:
             # 检查系统是否存在
             if system_name not in self._systems:
                 logger.warning("Unknown system: %s", system_name)
+                return False
+
+            # 工单 018 第二道防线：占位替身不接受写入，更不得回执成功
+            if self._is_placeholder(self._systems[system_name]):
+                logger.warning(
+                    "拒绝优化缺席的闭环系统 %s（参数 %s）：占位系统不供参数面",
+                    system_name, parameter_path,
+                )
                 return False
 
             # 检查参数是否可优化

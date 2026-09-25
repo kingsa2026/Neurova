@@ -28,7 +28,7 @@ from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
-def _make_skill(id="genetic_a_b", name="genetic_a_b", sequence=None):
+def _make_skill(id="genetic_a_b", name="read_write_genetic_a_b", sequence=None):
     from neurova.skills.models import Skill, SkillSource
 
     return Skill(
@@ -47,19 +47,17 @@ def _make_skill(id="genetic_a_b", name="genetic_a_b", sequence=None):
     )
 
 
-class _FakeRegistry:
-    def __init__(self):
-        self.skills = {}
+def _registry():
+    """真实 `SkillRegistry`（工单 014 的反掩盖要求）。
 
-    def register_skill(self, skill, path=None):
-        self.skills[skill.name] = skill
-        return True
+    原先这里是个 `_FakeRegistry`：按 `skill.name` 建键、只认 name —— 恰好把
+    "注册表键域 ≠ 进化侧身份域"这个缺陷在测试里洗成绿色；再配上默认
+    `id == name` 的假技能，`apply_improvement` 永远测不到取空。
+    现在两者一起改：真注册表 + `id != name` 的技能。
+    """
+    from neurova.skill_system import SkillRegistry
 
-    def has_skill(self, name):
-        return name in self.skills
-
-    def get_skill(self, name):
-        return self.skills.get(name)
+    return SkillRegistry()
 
 
 class TestUpdateAutoSkill:
@@ -97,17 +95,21 @@ class TestApplyImprovementPersists:
         reset_skill_improver()
         self.tmp = tempfile.mkdtemp()
         self.svc = SkillService(agent_id="t", skills_dir=self.tmp)
-        self.registry = _FakeRegistry()
-        self.skill = _make_skill()
-        self.registry.register_skill(self.skill)
-        register_proven_skill(self.svc, 
-            skill_id=self.skill.name, name=self.skill.name, version="1.0.0",
+        self.registry = _registry()
+        self.manifest = _make_skill()
+        self.registry.register_skill(self.manifest)
+        # 被改进的是注册表里的运行时对象，manifest 只是账本记录；
+        # 用工单 014 的身份键（id != name）取它——取不到即红。
+        self.skill = self.registry.get_skill(self.manifest.id)
+        assert self.skill is not None, f"身份键 {self.manifest.id} 未命中注册对象"
+        register_proven_skill(self.svc,
+            skill_id=self.manifest.id, name=self.manifest.name, version="1.0.0",
             config={"tool_sequence": ["a", "b"]},
         )
 
     def _proposal(self):
         imp = SkillImprovement(
-            skill_id=self.skill.name,
+            skill_id=self.manifest.id,
             improvement_type=ImprovementType.PARAMETER_TUNING,
             changes={"param": "timeout", "from": 5, "to": 10},
             reason="失败率过高",
@@ -119,18 +121,19 @@ class TestApplyImprovementPersists:
         improver = get_skill_improver()
         assert improver.apply_improvement(self._proposal(), self.registry, skill_service=self.svc) is True
         svc2 = SkillService(agent_id="t", skills_dir=self.tmp)
-        info = svc2.get_skill_info(self.skill.name)
+        info = svc2.get_skill_info(self.manifest.id)
         assert info["version"] == "1.0.1"
-        assert info["manifest"]["config"].get("improvements")
+        # 改进留痕落在 revisions（工单 016 断点 b：不再写无人读取的 improvements）
+        assert info["manifest"]["config"].get("revisions")
 
     def test_revert_syncs_to_disk(self):
         improver = get_skill_improver()
         improver.apply_improvement(self._proposal(), self.registry, skill_service=self.svc)
-        assert improver.revert_last_improvement(self.skill.name, self.registry, skill_service=self.svc) is True
+        assert improver.revert_last_improvement(self.manifest.id, self.registry, skill_service=self.svc) is True
         svc2 = SkillService(agent_id="t", skills_dir=self.tmp)
-        info = svc2.get_skill_info(self.skill.name)
+        info = svc2.get_skill_info(self.manifest.id)
         assert info["version"] == "1.0.0"
-        assert not info["manifest"]["config"].get("improvements")
+        assert not info["manifest"]["config"].get("revisions")
 
     def test_apply_without_service_still_works(self):
         """向后兼容：不传 skill_service 行为不变（仅内存）"""

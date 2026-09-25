@@ -27,11 +27,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MANAGED_DIR = PROJECT_ROOT / "data" / "tools" / "ffmpeg"
+MANAGED_DIR = get_data_root() / "tools" / "ffmpeg"
 
 BINARY_NAME = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
@@ -201,6 +202,21 @@ def escape_subtitles_path(p) -> str:
     return s.replace(":", "\\:")
 
 
+# 判据是"含汉字字形"的明确限定词，不是字体家族名。`notosans` 只是家族名：
+# 纯拉丁的 NotoSans[wght].ttf 在全新 Debian/Ubuntu 镜像里预装，按家族名命中
+# 会把它当"有中文字体"，渲染出方框——正是本模块最忌讳的"假成功"。
+# 故只认 CJK 变体名（NotoSansCJK… / NotoSansSC… 、SourceHan…）与
+# 明确的中文字体族（文泉驿 wqy / wenquanyi）。
+_CJK_NAME_MARKERS = ("cjk", "wenquanyi", "wqy", "sourcehan", "source-han",
+                     "notosanssc", "notosanstc", "notosansjp", "notosanskr",
+                     "notoserifsc", "notoseriftc", "notoserifcjk")
+
+
+def _is_cjk_font_name(name: str) -> bool:
+    """文件名是否指向含汉字字形的字体（按明确限定词判定，不用家族名）。"""
+    return any(marker in name for marker in _CJK_NAME_MARKERS)
+
+
 def _cjk_font_candidates() -> List[Path]:
     """各平台常见中文字体路径（纯文件探测，不依赖 fc-list——pf1 教训：
     无中文字体时烧录只会得到方框假成功，必须先探测再决定烧或不烧）。"""
@@ -216,14 +232,22 @@ def _cjk_font_candidates() -> List[Path]:
             continue
         for f in Path(root).rglob("*"):
             name = f.name.lower()
-            if f.suffix in (".ttc", ".ttf", ".otf") and any(
-                    k in name for k in ("cjk", "wenquanyi", "wqy", "sourcehan", "notosans")):
+            if f.suffix in (".ttc", ".ttf", ".otf") and _is_cjk_font_name(name):
                 hits.append(f)
     return hits
 
 
+def find_cjk_font():
+    """第一个真实存在的中文字体路径，没有则 None。
+
+    公开口：字幕烧录与 PDF 出件共用同一探测口径——两处踩的是同一个坑
+    （没有中文字体时照常出件，得到的是方框"假成功"）。
+    """
+    return next((p for p in _cjk_font_candidates() if p.is_file()), None)
+
+
 def has_cjk_font() -> bool:
-    return any(p.is_file() for p in _cjk_font_candidates())
+    return find_cjk_font() is not None
 
 
 def burn_subtitles(ffmpeg: str, in_path, srt_path, out_path,

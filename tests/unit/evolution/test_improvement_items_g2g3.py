@@ -85,9 +85,9 @@ class TestB3RequiresBins(unittest.TestCase):
         async def _fake_execute_skill(skill_name, params, context=None):
             return {"ok": True}
 
-        # 正典 seam（SkillRegistryProtocol：调用方依赖 execute_skill，
-        # skills 只读视图供 config 解析——残留处理 2026-09-13 随执行链迁移）
-        registry.skills = {"s": skill}
+        # 存在性检查与执行分别走协议声明的两个口（工单 014）：
+        # get_skill 定位、execute_skill 执行——skills 视图不再被单个定位读取。
+        registry.get_skill.return_value = skill
         registry.execute_skill = _fake_execute_skill
 
         import asyncio
@@ -138,7 +138,10 @@ class TestC9CrystallizerPersistence(unittest.TestCase):
             stored = []
             engine.store.side_effect = lambda node: stored.append(node)
             c2.observe("web_search", "搜索天气", success=True)
-            self.assertGreaterEqual(len(stored), 1, "恢复计数后第三次 observe 应触发结晶")
+            # 工单 005 之后"规则预筛通过"不再等于入库：候选先排队等 LLM 裁决。
+            # 本用例测的是跨重启计数恢复，所以判据取"越过了预筛"这个输出面。
+            self.assertTrue(stored or c2.list_pending(),
+                            "恢复计数后第三次 observe 应触发结晶（入库或进待裁决队列）")
 
 
 class TestC10SkillReviewGate(unittest.TestCase):

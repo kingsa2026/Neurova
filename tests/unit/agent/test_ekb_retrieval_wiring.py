@@ -116,3 +116,47 @@ class TestEkbRetrievalFillsDeadField:
         pipeline._retrieve_ekb_experience(ctx)
 
         assert ctx.experience_items == []
+
+    def test_disposition_and_evidence_reach_the_injection_seam(self, monkeypatch, tmp_path):
+        """工单 015：处置态必须随条目传到消费方。
+
+        EKB 里写了 `operator_disposition` 而传动轴不带过去，`dedupe_experience_sources`
+        就永远读成基线 70——降权在库里"成功"了，在 prompt 里什么都没发生。
+        这里用真实 EKB 实例而非字典替身：要测的正是"库里的一列能传到优先级"。
+        """
+        from neurova.context.orchestrator import dedupe_experience_sources
+        from neurova.skills.experience_knowledge_base import (
+            ExperienceKnowledgeBase,
+            ExperienceRecord,
+        )
+
+        kb = ExperienceKnowledgeBase(db_path=str(tmp_path / "wire.db"))
+        try:
+            rid = kb.add_experience_record(
+                "chat",
+                ExperienceRecord(
+                    skill_name="chat",
+                    context={"user_input": "帮我查北京天气"},
+                    result={"reply_excerpt": "北京今天晴"},
+                    success=True,
+                ),
+                agent_id="default",
+                evidence=True,
+            )
+            kb.record_injection_adoption([rid], True)
+            kb.set_operator_disposition([rid], "demoted")
+
+            _patch_ekb(monkeypatch, kb.find_similar_experiences)
+            pipeline = _bare_pipeline()
+            ctx = ChatContext(user_input="帮我查北京天气")
+
+            pipeline._retrieve_ekb_experience(ctx)
+
+            item = ctx.experience_items[0]
+            assert item["adoption_outcome"] == "success"
+            assert item["operator_disposition"] == "demoted"
+            assert dedupe_experience_sources(ctx.experience_items, [])[0][2] == 45, (
+                "降权必须落到注入优先级上"
+            )
+        finally:
+            kb.close()

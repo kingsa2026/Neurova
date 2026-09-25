@@ -1,0 +1,23 @@
+# 平台 Schema：npc:go.options 允许的键
+# ---------------------------------------------------------------------------
+# 来源：https://docs.cnb.cool/conf-schema-zh.json → definitions.internalStep
+#       → oneOf 中 type == "npc:go" 的 options.properties
+# 抓取日期：2026-09-22
+#
+# 为什么需要这份清单：
+#   `options` 不受平台 additionalProperties:false 约束 —— 写进去的未知键
+#   不报错、不告警、静默忽略。配置者以为"加了约束"，实际什么都没发生。
+#   本仓就踩过一次：把时间预算禁令写进 npc:go.options.prompt，整条从未生效。
+#
+# 维护方式：升级/换用平台能力时，重新核对上面 URL 的 npc:go 定义，逐个键对齐；
+#   漂移由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
+# ---------------------------------------------------------------------------
+role
+systemPrompt
+userPrompt
+maxTurns
+model
+contextWindow
+maxTokens
+thinkingLevel
+supportImage

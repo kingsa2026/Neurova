@@ -25,6 +25,8 @@ class ToolGenotype:
     """工具基因型：编码工具序列为可变异/交叉的基因。"""
 
     tool_sequence: List[str]
+    # 默认 0.5 只是"未指定"的中性值：种子必须由调用方显式带真实成功率（工单 013），
+    # 靠默认值进种群等于把无证据个体当半成功票。
     success_rate: float = 0.5
     execution_time_ms: float = 0.0
     reuse_count: int = 0
@@ -37,7 +39,20 @@ class ToolGenotype:
 
     @property
     def fitness(self) -> float:
-        """适应度计算：综合成功率、执行时间和复用次数。"""
+        """适应度 = `success_rate × time_penalty + log1p(reuse_count) × 0.1`，夹在 0..1。
+
+        注册可达性（阈值 `validation_threshold=0.8`，判据在
+        `register_to_skill_registry`）是一元一次比较，可直接读出来。缺省
+        `execution_time_ms=0` ⇒ time_penalty=1.0，于是
+        `fitness = success_rate + 0.1·ln(1+reuse_count)`：
+
+        - 真实成功率 ≥ 0.8 的个体**零复用即可注册**（工单 013 选的可达分支）；
+        - 成功率 0.5 需 `ln(1+n) ≥ 3` ⇒ reuse ≥ 20 才够 —— 这正是种子被兜底成
+          0.5 的年代「新挖模式当轮必被跳过」的算术；
+        - 成功率 0.2 需 `ln(1+n) ≥ 6` ⇒ reuse ≈ 403，现实量级内不可达。
+
+        对数项加 1.0 封顶的含义：复用只能放行本来就有证据的个体，刷不过低质门槛。
+        """
         # 基础适应度基于成功率
         base_fitness = self.success_rate
 
@@ -117,29 +132,20 @@ class ToolGeneticEngine:
         # 验证统计
         self._validated_count: int = 0
 
-        # 可用工具池（用于变异）
+        # 可用工具池（用于变异）。此前是一份**手工维护的名字表**，其中
+        # `browser_scroll` / `memory_store` / `code_execute` / `api_call` /
+        # `data_transform` 等 13 个名字全仓注册处为 0 —— 变异出来的基因型带着
+        # 模型读不到的路标，且与合成器的字母表构成第二、三份平行的名字表。
+        # 现在改为从**唯一读侧**派生：注册清单中"可重现"（无副作用）的那一子集。
+        # 可重现性是既有的单源判据（`builtin_tools.is_builtin_tool_reproducible`），
+        # 拿它当过滤条件就得到"能安全组合进基因型的只读原语"，不需要第四张表。
+        from neurova.builtin_tools import (
+            get_registered_tool_names,
+            is_builtin_tool_reproducible,
+        )
+
         self._available_tools: List[str] = [
-            "browser_navigate",
-            "browser_screenshot",
-            "browser_click",
-            "browser_type",
-            "browser_scroll",
-            "browser_wait",
-            "file_read",
-            "file_write",
-            "file_list",
-            "memory_search",
-            "memory_store",
-            "memory_delete",
-            "code_execute",
-            "code_analyze",
-            "code_format",
-            "screenshot",
-            "visual_parse",
-            "smart_click",
-            "api_call",
-            "data_transform",
-            "log_analysis",
+            name for name in get_registered_tool_names() if is_builtin_tool_reproducible(name)
         ]
 
     @property
@@ -496,7 +502,8 @@ class ToolGeneticEngine:
         dict，genetic 技能重启即丢——演化史（generation/reuse_count）清零、
         前端技能页不可见、下轮重复合成。提供 skill_service 时经
         register_auto_skill 持久化到磁盘 manifest（与 _step_pattern_mining
-        的 skill_packer 注册路径对齐）；None 保持原行为向后兼容。
+        的 skill_packer 注册路径对齐——该属性挂的是 evolution.AutoSkillBuilder）；
+        None 保持原行为向后兼容。
 
         Args:
             registry: SkillRegistry 实例
@@ -512,7 +519,8 @@ class ToolGeneticEngine:
         if skill_service is None:
             return 0
         for genotype in self._population:
-            # 仅注册高适应度个体
+            # 仅注册高适应度个体。可达性算术见 `ToolGenotype.fitness`：真实成功率
+            # ≥ 阈值的个体零复用即过，无证据（种子侧为 None）的个体根本不进种群。
             if genotype.fitness < self._validation_threshold:
                 logger.debug(
                     "跳过低适应度基因型 (fitness=%.3f < threshold=%.3f): %s",

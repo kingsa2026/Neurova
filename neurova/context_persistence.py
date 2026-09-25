@@ -12,6 +12,7 @@ from neurova.core.logger import get_logger
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -367,7 +368,7 @@ def get_context_persistence(data_dir: Optional[Path] = None) -> ContextPersisten
         with _persistence_lock:
             if _context_persistence is None:
                 if data_dir is None:
-                    data_dir = Path("data")
+                    data_dir = get_data_root()
                 _context_persistence = ContextPersistence(data_dir=data_dir)
     return _context_persistence
 

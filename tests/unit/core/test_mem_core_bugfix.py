@@ -108,29 +108,9 @@ class TestBug1FlushToLongTermMemory:
         assert len(flush_calls) == 1, "BUG 1 未修复: 满缓冲时 flush() 未被调用"
 
 
-# ============================================================
-# BUG 2 (MEDIUM): memory_agent.py 空壳文件
-# ============================================================
-
-class TestBug2MemoryAgentCompatImport:
-    """BUG 2: memory_agent.py 仅有 docstring 无 import, 导致
-    `from neurova.memory_agent import MemoryAgent` 抛 ImportError。"""
-
-    def test_import_memory_agent_succeeds(self):
-        """from neurova.memory_agent import MemoryAgent 必须成功"""
-        from neurova.memory_agent import MemoryAgent
-        assert MemoryAgent is not None
-
-    def test_memory_agent_is_mem_core(self):
-        """MemoryAgent 应为 MemCore 的别名(向后兼容)"""
-        from neurova.memory_agent import MemoryAgent
-        assert MemoryAgent is MemCore
-
-    def test_memory_agent_all_exported(self):
-        """__all__ 应导出 MemoryAgent"""
-        import neurova.memory_agent as ma
-        assert hasattr(ma, "__all__")
-        assert "MemoryAgent" in ma.__all__
+# BUG 2（memory_agent.py 空壳）段随该壳退役一并移除。真路径是 agent.memory_agent 属性
+# → mem_core.MemCore；反向不变量（旧导入路径不得再被引用）改由
+# tests/unit/core/test_memory_agent_shell_retired.py 钉住。
 
 
 # ============================================================
@@ -331,7 +311,8 @@ class TestBug6GetStatsLockAcquisition:
 
 class TestBug7RunAsyncSafelyCoroLeak:
     """BUG 7: run_async_safely(moe.retrieve(...)) 在传入前已创建协程,
-    若 ThreadPoolExecutor 失败, 协程未被 await 也未 close() → 泄漏。"""
+    若线程池提交失败, 协程未被 await 也未 close() → 泄漏。
+    （P1 起桥接层改用 core.thread_pool 共享具名池，泄漏语义不变。）"""
 
     def test_coro_closed_on_executor_submit_failure(self):
         """当调度协程失败(如事件循环关闭/BrokenExecutor)时, 协程必须被 close()"""
@@ -341,12 +322,13 @@ class TestBug7RunAsyncSafelyCoroLeak:
         coro = sample_coro()
 
         async def runner():
-            # 真实实现走 ThreadPoolExecutor.submit(_run_in_new_loop)（P2-#17 专用循环）。
+            # 真实实现走共享具名池 "mem-async-bridge" 的 submit(_run_in_new_loop)
+            # （P2-#17 专用循环；P1 起改用 core.thread_pool 复用池）。
             # mock 提交边界本身抛异常, 模拟"提交失败"——此时协程尚未被消费, 必须关闭。
             mock_executor = MagicMock()
             mock_executor.submit.side_effect = RuntimeError("BrokenExecutor")
             with patch(
-                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                "neurova.core.thread_pool.get_thread_pool",
                 return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):
@@ -373,7 +355,7 @@ class TestBug7RunAsyncSafelyCoroLeak:
             mock_future.result.side_effect = RuntimeError("result failed")
             mock_executor.submit.return_value = mock_future
             with patch(
-                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                "neurova.core.thread_pool.get_thread_pool",
                 return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):

@@ -36,68 +36,19 @@
           <a-empty v-if="!categories.length && !loadingEmotion" :description="t('common.noData')" style="margin-top: 20px" />
         </a-spin>
 
-        <!-- Motivation State (from growth API) -->
-        <GlassCard :title="t('growth.motivation')" style="margin-top: 20px">
-          <a-spin :spinning="loadingMotivation">
-            <div v-if="motivationData" class="motivation-section">
-              <div class="motivation-overview">
-                <div class="motivation-level">
-                  <div class="big-value">{{ formatPercent(motivationData.level) }}</div>
-                  <a-progress
-                    :percent="Math.round((motivationData.level || 0) * 100)"
-                    :stroke-color="motivationData.level >= 0.7 ? '#10b981' : motivationData.level >= 0.4 ? '#f59e0b' : '#ef4444'"
-                    :show-info="false"
-                  />
-                </div>
-              </div>
-              <div v-if="motivationData.factors?.length" class="factors-grid">
-                <div v-for="factor in motivationData.factors" :key="factor.name" class="factor-card">
-                  <div class="factor-header">
-                    <span class="factor-name">{{ factor.name }}</span>
-                    <span class="factor-value" :class="{ positive: factor.impact > 0, negative: factor.impact < 0 }">
-                      {{ factor.impact > 0 ? '+' : '' }}{{ Math.round(factor.impact * 100) }}%
-                    </span>
-                  </div>
-                  <a-progress
-                    :percent="Math.min(Math.abs(factor.impact) * 100, 100)"
-                    :stroke-color="factor.impact >= 0 ? '#10b981' : '#ef4444'"
-                    size="small"
-                    :show-info="false"
-                  />
-                </div>
-              </div>
-              <div v-if="motivationData.updated_at" class="meta-timestamp">
-                {{ t('common.updated') }}: {{ formatTime(motivationData.updated_at) }}
-              </div>
-            </div>
-            <a-empty v-else-if="!loadingMotivation" :description="t('common.noData')" />
-          </a-spin>
-        </GlassCard>
-
-        <!-- Personality Traits (from growth API) -->
-        <GlassCard :title="t('growth.personality')" style="margin-top: 20px">
-          <a-spin :spinning="loadingProfile">
-            <div v-if="personalityTraits.length > 0" class="personality-section">
-              <!-- Visual bar chart -->
-              <div class="traits-chart">
-                <div v-for="trait in personalityTraits" :key="trait.name" class="trait-bar-row">
-                  <div class="trait-bar-label">{{ trait.name }}</div>
-                  <div class="trait-bar-track">
-                    <div
-                      class="trait-bar-fill"
-                      :style="{ width: `${Math.round((trait.value || 0) * 100)}%`, backgroundColor: traitColor(trait.value) }"
-                    ></div>
-                  </div>
-                  <div class="trait-bar-value">{{ formatPercent(trait.value) }}</div>
-                </div>
-              </div>
-              <div v-if="personalityProfile" class="personality-meta">
-                <a-tag v-if="personalityProfile.communication_style">{{ t('growth.personality') }}: {{ personalityProfile.communication_style }}</a-tag>
-                <a-tag v-if="personalityProfile.decision_style" color="purple">{{ personalityProfile.decision_style }}</a-tag>
-                <a-tag v-for="v in personalityProfile.values" :key="v" color="blue">{{ v }}</a-tag>
-              </div>
-            </div>
-            <a-empty v-else-if="!loadingProfile" :description="t('common.noData')" />
+        <!-- 情绪变化时间轴：效价带符号（正=积极），空桶画断点，悬停看触发事件 -->
+        <GlassCard :title="t('emotion.timelineTitle')" style="margin-top: 20px">
+          <div class="timeline-toolbar">
+            <span class="timeline-hint">{{ t('emotion.timelineAxisHint') }}</span>
+            <a-radio-group v-model:value="timelineRange" size="small">
+              <a-radio-button value="24h">{{ t('emotion.range24h') }}</a-radio-button>
+              <a-radio-button value="7d">{{ t('emotion.range7d') }}</a-radio-button>
+              <a-radio-button value="30d">{{ t('emotion.range30d') }}</a-radio-button>
+              <a-radio-button value="90d">{{ t('emotion.range90d') }}</a-radio-button>
+            </a-radio-group>
+          </div>
+          <a-spin :spinning="loadingTimeline">
+            <VChart :option="emotionTimelineOption" autoresize class="timeline-chart" />
           </a-spin>
         </GlassCard>
       </a-tab-pane>
@@ -173,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -182,11 +133,12 @@ import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import { useAgentPage } from '@/composables/useAgentPage'
-import * as growthApi from '@/api/modules/growth'
-import type { MotivationState, PersonalityProfile } from '@/api/modules/growth'
-import { getEmotionSummary } from '@/api/modules/memory'
+import { useEnumLabel } from '@/composables/useEnumLabel'
+import { getEmotionSummary, getEmotionTimeline } from '@/api/modules/memory'
+import type { EmotionTimelineRange, EmotionTimelinePoint } from '@/api/modules/memory'
 
 const { t } = useI18n()
+const { enumLabel } = useEnumLabel()
 // onAgentChange：切换 agent 后全页按新 agent 重拉（同族页面 Memory/Metacognition 的既有接线契约）
 const { agentId } = useAgentPage({
   onAgentChange: () => {
@@ -199,20 +151,15 @@ const refreshing = ref(false)
 
 // --- 情绪页签状态 ---
 const loadingEmotion = ref(false)
-const loadingMotivation = ref(false)
-const loadingProfile = ref(false)
+// 情绪变化时间轴：窗口 → 粒度由后端推导（24h 按小时 / 7d、30d 按天 / 90d 按周）
+const timelineRange = ref<EmotionTimelineRange>('7d')
+const timelinePoints = ref<EmotionTimelinePoint[]>([])
+const loadingTimeline = ref(false)
 
 // Emotion stats (from /memory/emotion/summary -> { total_annotated, emotion_distribution, emotion_weight })
 const currentEmotion = ref<{ dominant?: string; shared?: number }>({})
 const categories = ref<{ name: string; count: number; value: number }[]>([])
 const totalAnnotated = ref(0)
-
-// Motivation state (from growth API)
-const motivationData = ref<MotivationState | null>(null)
-
-// Personality overview (from growth API)
-const personalityProfile = ref<PersonalityProfile | null>(null)
-const personalityTraits = ref<{ name: string; value: number }[]>([])
 
 // --- 个性页签状态 ---
 const loading = ref(false)
@@ -247,22 +194,7 @@ const emotionEmoji = (emotion?: string) => {
   return map[emotion?.toLowerCase() ?? ''] || '\u{1F610}'
 }
 
-const emotionLabel = (emotion?: string) => {
-  if (!emotion) return ''
-  const key = `emotion.${emotion.toLowerCase()}`
-  return t(key) !== key ? t(key) : emotion
-}
-
-const formatTime = (ts: string | number) => ts ? new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString() : ''
-
-const formatPercent = (val: number | undefined) =>
-  val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
-
-const traitColor = (val: number) => {
-  if (val >= 0.7) return '#10b981'
-  if (val >= 0.4) return '#6366f1'
-  return '#f59e0b'
-}
+const emotionLabel = (emotion?: string) => enumLabel('emotion', emotion)
 
 const polygonPoints = (level: number) => {
   const n = traitList.value.length
@@ -308,35 +240,72 @@ const fetchEmotion = async () => {
   }
 }
 
-const fetchMotivation = async () => {
-  loadingMotivation.value = true
+const fetchTimeline = async () => {
+  loadingTimeline.value = true
   try {
-    const res = await growthApi.getMotivation(agentId.value)
-    motivationData.value = res.data ?? null
-  } catch (e: any) {
-    console.error('Failed to fetch motivation:', e?.response?.data?.message || e?.message)
+    const env: any = await getEmotionTimeline(agentId.value, timelineRange.value)
+    timelinePoints.value = env?.data?.points ?? []
+  } catch {
+    message.error(t('common.error'))
   } finally {
-    loadingMotivation.value = false
+    loadingTimeline.value = false
   }
 }
 
-const fetchEmotionProfile = async () => {
-  loadingProfile.value = true
-  try {
-    const res = await growthApi.getPersonality(agentId.value)
-    personalityProfile.value = res.data ?? null
-    const traits = res.data?.traits
-    if (traits && typeof traits === 'object') {
-      personalityTraits.value = Object.entries(traits)
-        .map(([name, value]) => ({ name, value: value as number }))
-        .sort((a, b) => b.value - a.value)
-    }
-  } catch (e: any) {
-    console.error('Failed to fetch personality:', e?.response?.data?.message || e?.message)
-  } finally {
-    loadingProfile.value = false
+// 窗口切换即换粒度重拉（24h 小时 / 7d、30d 天 / 90d 周）
+watch(timelineRange, fetchTimeline)
+
+/**
+ * 情绪变化时间轴 option。
+ * Y 轴固定 [-1,1]（正=积极、负=消极），0 处画分界虚线；
+ * 空桶保留 null 且 connectNulls=false → 画成断点，不抹平成"中性 0"；
+ * 悬停给该桶的峰值事件：时间 · 情绪项名 · 效价 · 触发它的记忆摘要。
+ */
+const emotionTimelineOption = computed(() => {
+  const points = timelinePoints.value
+  return {
+    grid: { left: 44, right: 16, top: 20, bottom: 28 },
+    tooltip: {
+      trigger: 'axis',
+      // 浮层挂 body：图表在 GlassPanel 的 overflow:hidden 里，挂在容器内会被裁切
+      appendToBody: true,
+      extraCssText: 'max-width: 320px; white-space: normal;',
+      formatter: (items: any[]) => {
+        const point = points[items?.[0]?.dataIndex ?? -1]
+        if (!point || point.valence === null) return ''
+        return [
+          `${point.label} · ${enumLabel('emotion', point.peak_emotion ?? '')}`,
+          point.valence.toFixed(2),
+          point.excerpt,
+        ].filter(Boolean).join('<br/>')
+      },
+    },
+    xAxis: { type: 'category', data: points.map((p) => p.label) },
+    yAxis: {
+      type: 'value',
+      min: -1,
+      max: 1,
+      axisLabel: { color: '#94a3b8' },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.15)' } },
+    },
+    series: [
+      {
+        type: 'line',
+        smooth: true,
+        connectNulls: false,
+        symbolSize: 7,
+        data: points.map((p) => p.valence),
+        itemStyle: { color: '#22d3ee' },
+        lineStyle: { color: '#22d3ee' },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: [{ yAxis: 0, lineStyle: { color: '#94a3b8', type: 'dashed' } }],
+        },
+      },
+    ],
   }
-}
+})
 
 // --- 个性页签取数/编辑 ---
 const fetchPersonality = async () => {
@@ -439,7 +408,7 @@ const evolvePersonality = async () => {
   try {
     await request.post('/growth/personality/evolve', {}, { params: { agent_id: agentId.value } })
     message.success(t('common.success'))
-    await Promise.all([fetchPersonality(), fetchEmotionProfile()])
+    await fetchPersonality()
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -450,7 +419,7 @@ const evolvePersonality = async () => {
 const refreshAll = async () => {
   refreshing.value = true
   try {
-    await Promise.all([fetchEmotion(), fetchMotivation(), fetchEmotionProfile(), fetchPersonality()])
+    await Promise.all([fetchEmotion(), fetchTimeline(), fetchPersonality()])
   } finally {
     refreshing.value = false
   }
@@ -474,93 +443,13 @@ onMounted(refreshAll)
 .emotion-intensity { font-size: 13px; color: var(--nr-text-secondary); margin: 0; }
 .categories-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 
-.motivation-section { display: flex; flex-direction: column; gap: 16px; }
-.motivation-overview { display: flex; align-items: center; gap: 20px; }
-.motivation-level { flex: 1; }
-.motivation-level .big-value {
-  font-family: var(--nr-font-display);
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--nr-text-primary);
-  margin-bottom: 8px;
+/* 情绪变化时间轴：窗口切换与图高 */
+.timeline-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
 }
-.factors-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-.factor-card {
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.factor-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.factor-name {
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  text-transform: capitalize;
-}
-.factor-value {
-  font-size: 12px;
-  font-family: var(--nr-font-mono);
-  font-weight: 600;
-}
-.factor-value.positive { color: var(--nr-success); }
-.factor-value.negative { color: var(--nr-error); }
-
-.personality-section { display: flex; flex-direction: column; gap: 16px; }
-.traits-chart { display: flex; flex-direction: column; gap: 12px; }
-.trait-bar-row {
-  display: grid;
-  grid-template-columns: 120px 1fr 50px;
-  align-items: center;
-  gap: 12px;
-}
-.trait-bar-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--nr-text-primary);
-  text-transform: capitalize;
-  text-align: right;
-}
-.trait-bar-track {
-  height: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.trait-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.4s ease;
-}
-.trait-bar-value {
-  font-size: 12px;
-  font-family: var(--nr-font-mono);
-  color: var(--nr-text-secondary);
-  text-align: right;
-}
-.personality-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.meta-timestamp {
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  font-family: var(--nr-font-mono);
-}
+.timeline-hint { font-size: 12px; color: var(--nr-text-muted); }
+.timeline-chart { height: 260px; width: 100%; }
 
 /* 个性页签：两卡左右分区（窄屏回退单列） */
 .personality-grid {

@@ -17,7 +17,8 @@
     overflow: hidden;
   }
   .top { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-  .top .wordmark { height: 46px; width: auto; }
+  /* 与安装器欢迎页/进度页同款白色 LOGO（350x90 图标+文字构图，build.rs 注入） */
+  .top .wordmark { height: 56px; width: auto; }
 
   .stage {
     min-height: 22px; font-size: 14px; color: #aebcf5; margin-bottom: 12px;
@@ -49,6 +50,39 @@
   .logbox .ln.hl { color: #9db1ff; }
   .done { color: #7de3a2 !important; }
   .err  { color: #ff8f8f !important; }
+
+  /* 下载界面 */
+  #dl-ui { display: none; }
+  .dl-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+  }
+  .dl-row .name { flex: 1; font-size: 13px; }
+  .dl-row .pct { font-size: 12px; color: #aebcf5; min-width: 36px; text-align: right; }
+  .dl-row .status { font-size: 11px; min-width: 50px; text-align: right; }
+  .dl-row .status.ok { color: #7de3a2; }
+  .dl-row .status.fail { color: #ff8f8f; }
+  .dl-row .status.wait { color: #f0c060; }
+  .dl-btn {
+    padding: 5px 14px; border: none; border-radius: 6px; cursor: pointer;
+    background: linear-gradient(135deg, #5b6ee1, #3b4db5); color: #fff;
+    font-size: 12px; font-family: inherit;
+  }
+  .dl-btn:hover { filter: brightness(1.1); }
+  .dl-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .dl-all {
+    margin-top: 6px; padding: 8px 20px; border: none; border-radius: 8px; cursor: pointer;
+    background: linear-gradient(135deg, #34d399, #10b981); color: #0b0e1f;
+    font-size: 14px; font-weight: 600; font-family: inherit;
+  }
+  .dl-all:hover { filter: brightness(1.1); }
+  .dl-all:disabled { opacity: .4; cursor: not-allowed; }
+  .dl-retry {
+    margin-top: 10px; padding: 6px 16px; border: 1px solid #ff8f8f; border-radius: 6px; cursor: pointer;
+    background: transparent; color: #ff8f8f; font-size: 12px; font-family: inherit;
+  }
 </style>
 </head>
 <body>
@@ -56,93 +90,306 @@
     <img class="wordmark" src="data:image/png;base64,__NEUROVA_WORDMARK_B64__" alt="NEUROVA" />
   </div>
 
-  <div class="stage"><span class="dot"></span><span id="stage">正在启动后端服务…</span></div>
-  <div class="bar"><div class="fill" id="fill"></div></div>
-  <div class="logbox" id="logbox"></div>
+  <!-- 下载界面 -->
+  <div id="dl-ui">
+    <div class="stage"><span class="dot"></span><span id="dl-stage">正在检查运行环境…</span></div>
+    <div id="dl-list"></div>
+    <button class="dl-all" id="dl-all-btn" onclick="dlAll()">一键下载全部</button>
+    <button class="dl-retry" id="dl-retry-btn" style="display:none" onclick="dlAll()">重新下载</button>
+  </div>
+
+  <!-- 启动日志界面 -->
+  <div id="boot-ui" style="display:none">
+    <div class="stage"><span class="dot"></span><span id="stage">正在启动后端服务…</span></div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div class="logbox" id="logbox"></div>
+  </div>
 
 <script>
-  // 拉模式：定时 invoke boot_tail 取日志增量 + 后端进程状态。
-  // 不依赖事件时序（WebView 初始化早期事件会丢）。
-  const stageEl = document.getElementById('stage')
-  const fillEl = document.getElementById('fill')
-  const box = document.getElementById('logbox')
-  let progress = 6
-  let stageIdx = -1
-  let done = false
-  let failCount = 0
+const invoke = window.__TAURI__?.core?.invoke
+const dlUi = document.getElementById('dl-ui')
+const bootUi = document.getElementById('boot-ui')
+const dlStage = document.getElementById('dl-stage')
+const dlList = document.getElementById('dl-list')
+const dlAllBtn = document.getElementById('dl-all-btn')
+const dlRetryBtn = document.getElementById('dl-retry-btn')
 
-  const STAGES = [
-    [20, '正在初始化数据库',    /Database tables initialized|sqlite|SQLite/i],
-    [34, '正在加载 Agent',      /agent|workspace|Agent/i],
-    [50, '正在加载记忆系统',    /memory|Memory|MoE|vector|unified/i],
-    [64, '正在加载模型与路由',  /model|Model|LLM|router|provider/i],
-    [76, '正在加载语音服务',    /tts|asr|voice|funasr|whisper/i],
-    [86, '正在加载工具与技能',  /tool|skill|Tool|Skill|MCP/i],
-    [94, '即将完成',            /Routes registered|startup complete|Uvicorn running/i],
-  ]
+let appPhase = 'check' // check | download | boot
+const doneIds = new Set()
+let dlRunning = false
 
-  function setStage(idx) {
-    if (idx === stageIdx || idx < 0 || idx >= STAGES.length) return
-    stageIdx = idx
-    stageEl.textContent = STAGES[idx][1]
-    progress = Math.max(progress, STAGES[idx][0])
-    fillEl.style.width = progress + '%'
-    appendLog('▶ ' + STAGES[idx][1], true)
+// ---- 运行时检查 ----
+
+async function checkReady() {
+  if (!invoke) return
+  try {
+    const r = await invoke('check_runtime_ready')
+    if (r.ready) {
+      enterBoot()
+    } else {
+      enterDownload(r.missing || [])
+    }
+  } catch (e) {
+    appendDlLog('检查运行环境失败: ' + e, true)
+  }
+}
+
+// ---- 下载界面 ----
+
+const LABELS = { python: 'Python 运行环境', node: 'Node.js', models: 'AI 模型文件', deps: 'Python 依赖' }
+
+function addRow(id) {
+  if (document.getElementById('dl-row-' + id)) return
+  const row = document.createElement('div')
+  row.className = 'dl-row'
+  row.id = 'dl-row-' + id
+  row.innerHTML = `
+    <span class="name">${LABELS[id] || id}</span>
+    <span class="pct" id="dl-pct-${id}">0%</span>
+    <span class="status wait" id="dl-st-${id}">等待中</span>
+    <button class="dl-btn" id="dl-btn-${id}" onclick="dlOne('${id}')">下载</button>
+  `
+  dlList.appendChild(row)
+}
+
+function enterDownload(missing) {
+  appPhase = 'download'
+  dlUi.style.display = 'block'
+  bootUi.style.display = 'none'
+  dlStage.textContent = `需要下载 ${missing.length} 个组件`
+  dlList.innerHTML = ''
+  dlAllBtn.style.display = 'inline-block'
+  dlAllBtn.disabled = false
+  dlRetryBtn.style.display = 'none'
+
+  missing.forEach(addRow)
+  // 自动开始下载
+  setTimeout(dlAll, 600)
+}
+
+async function dlAll() {
+  if (dlRunning) return
+  dlRunning = true
+  dlAllBtn.disabled = true
+  dlRetryBtn.style.display = 'none'
+
+  // missing 会随安装推进而变：deps 只有在 Python 落地后才成为缺失项，
+  // 照首帧快照逐项安装永远轮不到它。每轮重取清单，跳过已完成的组件。
+  for (let round = 0; round < 6; round++) {
+    let r
+    try {
+      r = await invoke('check_runtime_ready')
+    } catch (e) {
+      appendDlLog('检查运行环境失败: ' + e, true)
+      break
+    }
+    if (r.ready) break
+    const pending = (r.missing || []).filter(id => !doneIds.has(id))
+    if (!pending.length) break
+    pending.forEach(addRow)
+    dlStage.textContent = `正在准备 ${pending.length} 个组件`
+    for (const id of pending) {
+      await dlOne(id)
+      doneIds.add(id)
+    }
   }
 
-  function appendLog(line, hl) {
-    const s = document.createElement('span')
-    s.className = 'ln' + (hl ? ' hl' : '')
-    s.textContent = line
-    box.appendChild(s)
-    while (box.childNodes.length > 240) box.removeChild(box.firstChild)
-    box.scrollTop = box.scrollHeight
-  }
-
-  function bootDone(ok, msg) {
-    if (done) return
-    done = true
-    fillEl.style.width = '100%'
-    stageEl.textContent = msg || (ok ? '启动完成，即将进入…' : '启动遇到问题')
-    stageEl.classList.add(ok ? 'done' : 'err')
-    setTimeout(() => { try { window.close() } catch (e) {} }, ok ? 800 : 3000)
-  }
-
-  async function tick() {
-    if (done) return
-    const t = window.__TAURI__?.core?.invoke
-    if (!t) {
-      failCount++
-      if (failCount === 3) appendLog('[boot] 未检测到 Tauri 桥接，无法读取后端状态', true)
-      if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
+  try {
+    const fin = await invoke('check_runtime_ready')
+    if (fin.ready) {
+      dlRunning = false
+      enterBoot()
       return
     }
-    try {
-      const p = await t('boot_tail', { logOffset: 0 })
-      failCount = 0
-      for (const line of p.lines || []) {
-        appendLog(line)
-        for (let i = stageIdx + 1; i < STAGES.length; i++) {
-          if (STAGES[i][2].test(line)) { setStage(i); break }
-        }
+  } catch (e) {
+    // 交给下面的重试入口
+  }
+  dlRetryBtn.style.display = 'inline-block'
+  dlRunning = false
+}
+
+async function dlOne(id) {
+  const btn = document.getElementById('dl-btn-' + id)
+  if (btn) btn.disabled = true
+  const st = document.getElementById('dl-st-' + id)
+  if (st) { st.className = 'status wait'; st.textContent = id === 'deps' ? '安装中...' : '下载中...' }
+
+  // start_download 只是把活儿丢给后台线程就返回，必须等这一件从 missing 里消失
+  // 再起下一件：deps 排在 python 之后，并发跑就会在没有解释器时执行 pip。
+  const budget = id === 'deps' ? 1800 : 600
+  try {
+    await invoke('start_download', { what: id })
+    for (let waited = 0; waited < budget; waited += 2) {
+      await sleep(2000)
+      const r = await invoke('check_runtime_ready')
+      if (!(r.missing || []).includes(id)) {
+        if (st) { st.className = 'status ok'; st.textContent = '完成' }
+        return
       }
-      const backend = String(p.backend || '')
-      if (backend.startsWith('exited')) {
-        bootDone(false, '后端进程已退出，详见安装目录 backend\\backend.log')
-      } else if (backend === 'running') {
-        progress = Math.max(progress, 12)
-        fillEl.style.width = progress + '%'
-      }
-    } catch (e) {
-      failCount++
-      if (failCount === 3) appendLog('[boot] 读取后端状态失败: ' + e, true)
-      if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
+      const d = r.download || {}
+      if (d.phase === id) updateDlProgress(d)
+      if (d.phase === 'error') throw (d.error || d.message || '安装失败')
+    }
+    throw '超时'
+  } catch (e) {
+    if (st) { st.className = 'status fail'; st.textContent = '失败' }
+    appendDlLog(`${id} 失败: ${e}`, true)
+  }
+}
+
+function updateDlProgress(status) {
+  const id = status.phase
+  const pctEl = document.getElementById('dl-pct-' + id)
+  const stEl = document.getElementById('dl-st-' + id)
+  if (pctEl) pctEl.textContent = (status.progress || 0) + '%'
+  if (stEl) {
+    if (status.error) {
+      stEl.className = 'status fail'
+      stEl.textContent = '失败'
+    } else if (status.progress >= 100) {
+      stEl.className = 'status ok'
+      stEl.textContent = '完成'
+    } else {
+      stEl.className = 'status wait'
+      stEl.textContent = status.message || '下载中...'
     }
   }
+}
 
-  const timer = setInterval(tick, 700)
-  const stopWhenDone = setInterval(() => { if (done) { clearInterval(timer); clearInterval(stopWhenDone) } }, 500)
+function appendDlLog(msg, hl) {
+  // 简易日志，复用 logbox（boot-ui 隐藏时追加到 dl-ui 下方）
+  let box = document.getElementById('dl-logbox')
+  if (!box) {
+    box = document.createElement('div')
+    box.id = 'dl-logbox'
+    box.className = 'logbox'
+    box.style.marginTop = '10px'
+    dlUi.appendChild(box)
+  }
+  const s = document.createElement('span')
+  s.className = 'ln' + (hl ? ' hl' : '')
+  s.textContent = msg
+  box.appendChild(s)
+  while (box.childNodes.length > 120) box.removeChild(box.firstChild)
+  box.scrollTop = box.scrollHeight
+}
+
+// ---- 启动界面（复用原有逻辑）----
+
+function enterBoot() {
+  appPhase = 'boot'
+  dlUi.style.display = 'none'
+  bootUi.style.display = 'box' // flex via original CSS... actually block is fine
+  bootUi.style.display = 'block'
+  
+  // 通知 Rust 启动后端
+  if (invoke) {
+    invoke('trigger_backend_start').catch(e => {
+      appendLog('[boot] 启动后端失败: ' + e, true)
+    })
+  }
+  
+  // 启动轮询
   tick()
+}
+
+// ---- 原有 boot_tail 逻辑 ----
+
+const stageEl = document.getElementById('stage')
+const fillEl = document.getElementById('fill')
+const box = () => document.getElementById('logbox')
+let progress = 6
+let stageIdx = -1
+let done = false
+let failCount = 0
+let logOffset = 0
+
+const STAGES = [
+  [20, '正在初始化数据库',    /Database tables initialized|sqlite|SQLite/i],
+  [34, '正在加载 Agent',      /agent|workspace|Agent/i],
+  [50, '正在加载记忆系统',    /memory|Memory|MoE|vector|unified/i],
+  [64, '正在加载模型与路由',  /model|Model|LLM|router|provider/i],
+  [76, '正在加载语音服务',    /tts|asr|voice|funasr|whisper/i],
+  [86, '正在加载工具与技能',  /tool|skill|Tool|Skill|MCP/i],
+  [94, '即将完成',            /Routes registered|startup complete|Uvicorn running/i],
+]
+
+function setStage(idx) {
+  if (idx === stageIdx || idx < 0 || idx >= STAGES.length) return
+  stageIdx = idx
+  stageEl.textContent = STAGES[idx][1]
+  progress = Math.max(progress, STAGES[idx][0])
+  fillEl.style.width = progress + '%'
+  appendLog('▶ ' + STAGES[idx][1], true)
+}
+
+function appendLog(line, hl) {
+  const b = box()
+  if (!b) return
+  const s = document.createElement('span')
+  s.className = 'ln' + (hl ? ' hl' : '')
+  s.textContent = line
+  b.appendChild(s)
+  while (b.childNodes.length > 240) b.removeChild(b.firstChild)
+  b.scrollTop = b.scrollHeight
+}
+
+function bootDone(ok, msg) {
+  if (done) return
+  done = true
+  fillEl.style.width = '100%'
+  stageEl.textContent = msg || (ok ? '启动完成，即将进入…' : '启动遇到问题')
+  stageEl.classList.add(ok ? 'done' : 'err')
+  setTimeout(() => { try { window.close() } catch (e) {} }, ok ? 800 : 3000)
+}
+
+async function tick() {
+  if (done || appPhase !== 'boot') return
+  if (!invoke) {
+    failCount++
+    if (failCount === 3) appendLog('[boot] 未检测到 Tauri 桥接，无法读取后端状态', true)
+    if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
+    return
+  }
+  try {
+    const p = await invoke('boot_tail', { logOffset })
+    if (typeof p.offset === 'number') logOffset = p.offset
+    failCount = 0
+    for (const line of p.lines || []) {
+      appendLog(line)
+      for (let i = stageIdx + 1; i < STAGES.length; i++) {
+        if (STAGES[i][2].test(line)) { setStage(i); break }
+      }
+    }
+    const backend = String(p.backend || '')
+    if (backend.startsWith('exited')) {
+      bootDone(false, '后端进程已退出，详见日志：' + (p.logPath || 'logs/ 目录'))
+    } else if (backend === 'running') {
+      progress = Math.max(progress, 12)
+      fillEl.style.width = progress + '%'
+    }
+  } catch (e) {
+    failCount++
+    if (failCount === 3) appendLog('[boot] 读取后端状态失败: ' + e, true)
+    if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+// ---- 启动 ----
+
+// 先检查运行环境
+if (invoke) {
+  checkReady()
+} else {
+  // 无 Tauri 桥接（开发态预览），直接进入启动
+  enterBoot()
+}
+
+// boot 阶段轮询
+setInterval(() => { if (appPhase === 'boot') tick() }, 700)
+const stopWhenDone = setInterval(() => { if (done) { clearInterval(stopWhenDone) } }, 500)
 </script>
 </body>
 </html>

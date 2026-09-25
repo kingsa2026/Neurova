@@ -200,26 +200,13 @@ class TestContextPoolCompatibility:
         messages = pool.build_context_for_model("gpt-3.5-turbo")
         assert len(messages) == 1
         
-        # 测试 compress_context()
-        pool.compress_context()
-        
-        # 测试 merge_with()
-        other_pool = ContextPool(
-            user_id="other_user",
-            agent_id="other_agent",
-            max_tokens=8000
-        )
-        other_pool.add_context(ContextInput(
-            source=ContextSource.MEMORY,
-            content="其他记忆",
-            priority=60
-        ))
-        
-        pool.merge_with(other_pool)
-        
-        # 验证合并后有两个上下文
+        # 压缩/合并出口均已收口：池没有压缩通路（真通路在 orchestrator 的
+        # 信封+历史确定性淘汰），"永久归档"语义下归档不因预算被裁。
+        # 合并入口已收口：`ContextPool.merge_with` 会跨 user/agent/session
+        # 身份把条目并进同一池，与三层隔离契约冲突，且生产零调用，故删净。
+        # 隔离语义由 add_context 的身份标签与 read 分区索引承载（见 isolation 套件）。
         contexts = pool.get_contexts()
-        assert len(contexts) == 2
+        assert len(contexts) == 1
     
     def test_context_pool_isolation(self):
         """测试 ContextPool 隔离机制"""

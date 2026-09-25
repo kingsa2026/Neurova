@@ -27,20 +27,52 @@ class TestPhaseAutoTransition:
         return create_deployment_controller(initial_phase=0)
 
     def test_transition_then_advance(self):
-        """判据通过 → advance_phase 真正推进（判据/推进分离是原设计）"""
+        """判据通过 → advance_phase 真正推进（判据/推进分离是原设计）
+
+        工单 003：返回值由 bool 改为 GateVerdict。断言等价改写并加严一层 ——
+        原来只能表达"放行"，现在还要区分"放行"与"因缺证据而未知"。
+        """
         c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "converging", "roi": 0.1}) is True
+        verdict = c.evaluate_phase_transition({"convergence_status": "converging", "roi": 0.1})
+        assert bool(verdict) is True and verdict.state == "passed", verdict.reason
         assert c.advance_phase() == 1
         assert c.get_current_phase() == 1
 
     def test_diverging_blocks_transition(self):
+        """发散是"有证据的否决"，不得与"取不到证据"混成同一个 False。"""
         c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "diverging", "roi": 0.1}) is False
+        verdict = c.evaluate_phase_transition({"convergence_status": "diverging", "roi": 0.1})
+        assert bool(verdict) is False
+        assert verdict.state == "failed", f"发散应判 failed，实际 {verdict.state}"
         assert c.get_current_phase() == 0
 
     def test_negative_roi_blocks_transition(self):
-        c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "converging", "roi": -0.5}) is False
+        verdict = self._controller().evaluate_phase_transition(
+            {"convergence_status": "converging", "roi": -0.5})
+        assert bool(verdict) is False
+        assert verdict.state == "failed", f"负 ROI 应判 failed，实际 {verdict.state}"
+
+    def test_missing_evidence_is_unevidenced_not_passed(self):
+        """工单 003 新增：读数缺失时不得放行，且要写清缺的是哪一项。
+
+        取 phase 1 而非 phase 0：008 把"必需性"改成按阶段声明——phase 0 是观察期，
+        `roi`/回滚读数在结构上还不可能存在（自动执行要求先晋升到 phase 2），
+        在那里要求它们等于把晋升链锁成循环依赖，所以空读数判 passed
+        （由 `test_phase_zero_requires_no_execution_evidence` 反向钉住这条裁决）。
+        三份读数的全量缺项断言见 tests/unit/evolution/rsi/test_gate_verdict.py。
+        """
+        verdict = RSIDeploymentController(initial_phase=1).evaluate_phase_transition({})
+
+        assert bool(verdict) is False
+        assert verdict.state == "unevidenced"
+        assert "days_without_rollback" in verdict.reason, verdict.reason
+
+    def test_phase_zero_requires_no_execution_evidence(self):
+        """观察期放行空读数：这是"无从产生证据"，不是"证据表明可以晋升"。"""
+        verdict = self._controller().evaluate_phase_transition({})
+
+        assert bool(verdict) is True
+        assert "phase 0" in verdict.reason, verdict.reason
 
     def test_run_iteration_calls_transition_and_advance(self):
         """run_iteration 尾部必须触发判据+推进（断点 B 接线）"""
@@ -96,11 +128,19 @@ class TestRsiApprovalEndpoints:
         import tempfile
         from pathlib import Path
 
+        from neurova.evolution.rsi.deployment_controller import RSIDeploymentController
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
         from neurova.evolution.rsi.self_improvement_proposer import SelfImprovementProposer
 
         # proposer 磁盘持久化（.agents/proposals）——隔离到 tmp 防跨测试泄漏
+        # 工单 005：控制器与回滚管理器必须由调用方注入，proposer 不再自建
         tmp = tempfile.mkdtemp()
-        proposer = SelfImprovementProposer(agents_dir=Path(tmp))
+        proposer = SelfImprovementProposer(
+            agent_id="test-agent",
+            proposals_dir=Path(tmp) / "proposals",
+            deployment_controller=RSIDeploymentController(initial_phase=0),
+            rollback_manager=RSIRollbackManager(),
+        )
         proposal = proposer.propose_skill_manifest(
             skill_id="rsi_escalation_tool_memory_3",
             manifest_yaml="name: fix\n",
@@ -122,10 +162,30 @@ class TestRsiApprovalEndpoints:
         for client in self._client_with_proposer(proposer):
             resp = client.post(
                 f"/api/v1/governance/rsi/proposals/{proposal.proposal_id}/approve",
+                # 工单 010：manifest 里没有可执行内容时，批准人要在请求里补交
+                # tool_sequence —— 否则这条提案按 not_supported 拒绝（409）
+                json={
+                    "approved_by": "admin",
+                    "tool_sequence": ["read_memory", "write_memory"],
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()["data"]
+            assert data["applied"] is True
+            assert data["applied_skill_id"] == "rsi_escalation_tool_memory_3"
+            assert data["registry_hit"] is True, "端点报生效但注册表没命中"
+
+    def test_approve_without_executable_content_is_rejected(self):
+        """not_supported 必须走 409，不能被端点咽成"批准成功"（工单 010）。"""
+        proposer, proposal = self._make_proposer_with_pending()
+        for client in self._client_with_proposer(proposer):
+            resp = client.post(
+                f"/api/v1/governance/rsi/proposals/{proposal.proposal_id}/approve",
                 json={"approved_by": "admin"},
             )
-            assert resp.status_code == 200
-            assert resp.json()["data"]["applied"] is True
+            assert resp.status_code == 409, resp.text
+            assert "not_supported" in resp.json()["detail"], resp.text
+            assert proposer.list_pending_proposals(), "被拒绝的提案不该从待审队列消失"
 
     def test_reject_proposal(self):
         proposer, proposal = self._make_proposer_with_pending()
@@ -147,7 +207,12 @@ class TestRsiApprovalEndpoints:
             )
             assert resp.status_code == 404
 
-    def test_rsi_not_initialized_returns_empty(self):
+    def test_rsi_not_initialized_returns_503(self):
+        """工单 011 改写本用例：`available:false` 的静默 200 把"没装配"读成"一切正常"。
+
+        原断言是 200 + 空列表 + `available:false`；现在"没装配"必须是 503 + 原因，
+        因为运维对这两种情形的处置完全相反（去装配 / 去看为什么没产出）。
+        """
         from unittest.mock import patch
 
         from fastapi import FastAPI
@@ -162,5 +227,5 @@ class TestRsiApprovalEndpoints:
         with patch("neurova.api.endpoints.governance._get_rsi_orchestrator", return_value=None):
             client = TestClient(app)
             resp = client.get("/api/v1/governance/rsi/proposals/pending")
-            assert resp.status_code == 200
-            assert resp.json()["data"]["proposals"] == []
+            assert resp.status_code == 503, resp.text
+            assert resp.json()["detail"], "503 必须带原因"

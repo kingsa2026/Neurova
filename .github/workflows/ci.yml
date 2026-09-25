@@ -13,13 +13,31 @@ on:
 #   4. unit-tests           受保护测试子集（scripts/ci/protected_tests.txt）
 #                           + 覆盖率门禁（pyproject [tool.coverage.run]，fail_under=60）
 #                           py3.11/3.12 matrix
-#   5. frontend             vue-tsc 类型门禁 + vitest（614 用例）
-#   6. dependency-audit     pip-audit 对锁定版本审计（非阻塞，allow-list 演进中）
+#   5. frontend             npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
+#   6. dependency-audit     pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
+#                           + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
+#   7. perf-gate            import 时长预算 + 关键路径微基准（阻断，
+#                           见 scripts/ci/perf_gate.py）
+#   8. deploy-config        部署配置一致性（Dockerfile / docker-compose / Helm /
+#                           requirements 跨文件不变量，阻断，
+#                           见 scripts/ci/deploy_config_consistency_check.py）
+#                           注：GitHub 侧无定时触发，同门禁的"时间维度"兜底由
+#                           cnb 的周级 crontab 流水线承担（.cnb.yml）。
+#   9. experience-quality   经验质量基准（工单 009，阻断）：冻结的真实语料跑
+#                           门槛收紧前/后两臂 A/B，读数取 EKB.quality_snapshot()，
+#                           每次先自证低质探针会被判红（防门禁空转），
+#                           见 scripts/ci/experience_quality_gate.py
+
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
+# 依赖审计为阻塞门禁：扫出漏洞即红灯（allow-list 走 requirements*.lock 版本收敛，
+# 不在 CI 里静默放行）。
 
 jobs:
+  # 静态门禁与 lint 是同一条流水线：pyflakes 与 ruff 都在读同一片全仓 AST，
+  # 拆两个 job 只是多一次容器启动 + 多一遍全仓遍历（Issue #223 第 2 条）。
+  # 合并的是「读几遍」，两条命令逐字保留 —— 不放宽任何一项判据。
   static-gate:
-    name: Static gate (syntax + pyflakes)
+    name: Static gate (syntax + pyflakes + ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,14 +46,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pyflakes
-        run: python -m pip install --upgrade pip pyflakes
+      - name: Install pyflakes + ruff
+        run: python -m pip install pyflakes ruff
 
       - name: Run fast static gate (syntax + undefined names)
         run: python scripts/ci_static_gate.py --skip-import
 
-  lint:
-    name: Lint (ruff E9 + F821)
+      - name: Ruff (规则集与 per-file 豁免见 pyproject)
+        run: python -m ruff check neurova tests --no-cache
+
+  deploy-config:
+    name: Deploy config consistency (Dockerfile / compose / Helm)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +65,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ruff
-        run: python -m pip install --upgrade pip ruff
+      - name: Install pyyaml
+        run: python -m pip install pyyaml
 
-      - name: Ruff (规则集与 per-file 豁免见 pyproject)
-        run: python -m ruff check neurova tests --no-cache
+      - name: Deploy config consistency gate
+        run: python scripts/ci/deploy_config_consistency_check.py
 
   import-and-regression:
     name: Import sweep + audit regression tests
@@ -62,8 +83,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci.lock
 
-      - name: Install core dependencies (lean set, no torch)
-        run: python -m pip install --upgrade pip -r requirements-ci.txt
+      # 装的是锁不是声明：三条 job 装同一份精简依赖，锁过一次就不必各自解析
+      # 整棵依赖树（无锁 pip 解析是这三种装法里最慢的一种，Issue #223 第 3 条）。
+      - name: Install core dependencies (locked lean set, no torch)
+        run: python -m pip install -r requirements-ci.lock
 
       - name: Run full static gate (incl. module import sweep)
         run: python scripts/ci_static_gate.py
@@ -79,7 +102,14 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
+      # fetch-depth: 0 是**判据的运行前提**，不是优化项：
+      #   受保护子集里的 test_protected_subset_registration_history.py 按清单
+      #   历史判「条目曾登记过、是否被静默删掉」，默认的 depth=1 只给到当前一个
+      #   提交，它会拿"只有现值"的假历史作答 —— 台账署名被判成"从未登记过"，
+      #   失败点名的是一屏无关条目。由 tests/unit/ci/…registration_history.py 反锁。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -116,7 +146,6 @@ jobs:
         #                       /metrics 暴露面（历史上曾随 passlib[bcrypt] 等 extras 隐式带入）
         # 以上皆为"裸 import 无降级"，非已知可选依赖，不进 ci_static_gate.KNOWN_OPTIONAL_DEPS
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt --no-deps
           python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest \
             pytest-timeout bcrypt passlib python-dotenv aiosqlite prometheus_client
@@ -142,16 +171,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dependency audit (npm, blocking on high/critical)
+        run: npm audit --audit-level=high
+
       - name: Type check (vue-tsc)
         run: npx vue-tsc --noEmit
 
       - name: Unit tests (vitest)
         run: npx vitest run
 
-  dependency-audit:
-    name: Dependency audit (pip-audit, non-blocking)
+  perf-gate:
+    name: Performance regression gate (import budget + microbench)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+
+      - name: Install minimal deps (locked)
+        run: python -m pip install -r requirements-ci.lock
+
+      - name: Perf regression gate
+        run: python scripts/ci/perf_gate.py
+
+  dependency-audit:
+    name: Dependency audit (pip-audit, blocking)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -160,7 +209,67 @@ jobs:
           python-version: "3.12"
 
       - name: Install pip-audit
-        run: python -m pip install --upgrade pip pip-audit
+        run: python -m pip install pip-audit
 
-      - name: Audit locked dependency set
+      # OSV 离线漏洞库缓存（`scripts/ci/osv_audit.py` 的 OSV_DB_CACHE 落点）。
+      # 不缓存时每一次构建都要重下整份 npm 库（实测 206MB / 47s+），
+      # 而它与「某次提交是否引入漏洞」毫无关系——纯网络往返（Issue #223 第 1 条）。
+      # 卷/缓存判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
+      # OSV_DB_CACHE 同源校验，不写死第二份口径。
+      - name: Cache OSV offline databases
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/osv-scalibr
+          key: osv-scalibr-${{ runner.os }}
+
+      - name: Audit CI locked set
         run: python -m pip_audit -r requirements-ci.lock --progress-spinner off
+
+      - name: Audit full runtime locked set
+        # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
+        # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
+        run: python -m pip_audit -r requirements-full.lock --progress-spinner off
+
+      - name: Prefetch OSV offline databases (best effort)
+        # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
+        # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+        # 在 CI 容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+        # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+        # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+        # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+        run: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+
+      - name: Audit non-pip trees (Rust crates + runtime npx packages)
+        # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
+        #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 447 个 crate
+        #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
+        # 两者都在生产执行路径上，此前无锁无审计。统一走 OSV-Scanner，
+        # 允许清单（带理由+到期日）见 scripts/ci/osv-allowlist.toml。
+        # 不带 `--require-offline`：上面那步预取是 best-effort（`|| true`），
+        # 门禁就不能要求「预取必须成功」——否则预取一失败就是红灯，而这与
+        # 「真有未允许漏洞」在合并流程里同形，读日志的人仍只能重跑。
+        # 缓存不齐时门禁**回退直连并点名缺哪一份**（裁决通路收口在
+        # resolveVerdictChannel 一处），红只留给「真有未允许漏洞」。
+        run: python scripts/ci/osv_audit.py
+
+  experience-quality:
+    name: Experience quality benchmark (real corpus A/B)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+
+      - name: Install minimal deps (locked)
+        run: python -m pip install -r requirements-ci.lock
+
+      - name: Experience quality gate
+        # 语料是冻结在仓内的真实投影（tests/fixtures/experience_quality_corpus.json，
+        # 由 --freeze-corpus 只读抽自生产库），CI 上不碰 data/ 活库；两臂读数取
+        # EKB.quality_snapshot()，判据阈值取 008 的 ALERT_THRESHOLDS。
+        # 每次运行先自证低质探针会被判红，探针不红即 exit 2（门禁不可信）。
+        run: python scripts/ci/experience_quality_gate.py
