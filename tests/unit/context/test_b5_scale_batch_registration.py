@@ -35,6 +35,10 @@ BATCH_FILES = (
     "tests/unit/context/test_archive_moment_scoring.py",
     "tests/unit/context/test_context_degradation_recovery.py",
     "tests/unit/context/test_view_budget_single_form.py",
+    # T-09 残余批（Issue #90 第 18 步）：来源→优先级阶梯的单一事实源
+    "tests/unit/context/test_source_priority_single_source.py",
+    # T-09 残余批 · 切片 B：端点读数的 token 口径与全仓唯一尺子同源
+    "tests/unit/api/test_context_build_token_count_caliber.py",
 )
 
 

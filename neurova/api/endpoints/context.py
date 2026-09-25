@@ -136,6 +136,19 @@ def _get_context_builder(user_id: str = None, agent_id: str = None, session_id: 
         return None
 
 
+
+def _count_tokens(text: str) -> int:
+    """全仓唯一的 token 计数入口（判据与展示同源，T-01）。
+
+    端点不另写一份计数：`context/token_estimator` 是尺子的唯一事实源，
+    `composition` 面板与全部预算判据都走它。就地近似（`len//4`、`len*1.5`、
+    `len(split())`）一律不允许——那是第二把尺子，会让"该压缩时不压缩"。
+    """
+    from neurova.context.token_estimator import estimate_tokens
+
+    return estimate_tokens(text)
+
+
 @router.post("/build", response_model=BuildContextResponse)
 async def build_context(
     request: Request,
@@ -160,10 +173,12 @@ async def build_context(
             # 使用 ContextPool 构建上下文
             try:
                 # 添加用户输入到上下文池
+                # 优先级由来源经池内阶梯派生（`context.pool_models.priorityForSource`）。
+                # 改前此处写死 10 并注释「高优先级」——池内 60–100 才是高档，
+                # 10 属最低档：注释与真值相反，且与编排器同一来源的 90 是两份口径。
                 user_context = ContextInput(
                     content=body.user_input,
                     source=ContextSource.USER_INPUT,
-                    priority=10,  # 高优先级
                 )
                 context_builder.add_context(user_context)
 
@@ -213,7 +228,10 @@ async def build_context(
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
-            token_count=len(context_content.split()),  # 简单估算
+            # 全仓唯一 token 尺子（T-01 契约）。改前这里是 `len(context_content.split())`
+            # ——第二把尺子，且中文整句在空白分词下只算一个词（实测同一句 4 vs 15）。
+            # 响应契约字段报假数不是"粗略"，而是与 composition 面板 / 判据不同源。
+            token_count=_count_tokens(context_content),
             sources=sources,
             build_time=time.time() - start_time,
         )
@@ -248,10 +266,11 @@ async def build_context_v2(
             # 使用 ContextPool 构建上下文
             try:
                 # 添加用户输入到上下文池
+                # 优先级由来源经池内阶梯派生（同 `/build`，单源见
+                # `context.pool_models.priorityForSource`）。
                 user_context = ContextInput(
                     content=body.user_input,
                     source=ContextSource.USER_INPUT,
-                    priority=10,  # 高优先级
                 )
                 context_builder.add_context(user_context)
 
@@ -319,7 +338,8 @@ async def build_context_v2(
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
-            token_count=len(context_content.split()),
+            # 同 `/build`：唯一尺子（单源见 `_count_tokens`）。
+            token_count=_count_tokens(context_content),
             sources=sources,
             build_time=time.time() - start_time,
         )
