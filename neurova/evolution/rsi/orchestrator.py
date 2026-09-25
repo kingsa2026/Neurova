@@ -1051,7 +1051,48 @@ class RSIOrchestrator:
             "escalation": self._last_escalation,
             "experience_channel": experience_channel,
             "metrics": self.metrics.get_dashboard_data(),
+            # 能力缺口读数（T-03 的读侧）：写侧在 `agent/capability_gap` →
+            # `agent/gap_metric_channel`，读侧在此 —— 只写不读是断点
+            # （AGENTS §2），故写进同一个状态面的字段里。
+            "capability_gap": _readGapMetrics(),
+            # 强化口径禁令读数（T-06 的读侧）：写侧在
+            # `tool_layers/capability_graph.noteMetaRewardSkip`。与缺口读数同一
+            # 状态面，不另起第二套观测通道。
+            "meta_reward_guard": _readRewardGuardMetrics(),
         }
+
+
+def _readRewardGuardMetrics() -> Dict[str, Any]:
+    """元检索反哺/发布禁令的命中读数（写侧见 `tool_layers/capability_graph`）。
+
+    与 `_readGapMetrics` 同形：函数级 import，让"读侧未接线"退化为空读数
+    而不是 ImportError。
+    """
+    try:
+        from neurova.tool_layers.capability_graph import readRewardGuardSkips
+
+        by_key = readRewardGuardSkips()
+        by_channel: Dict[str, int] = {}
+        for key, count in by_key.items():
+            channel = key.split(":", 1)[0]
+            by_channel[channel] = by_channel.get(channel, 0) + count
+        return {"by_channel": by_channel, "by_key": by_key, "total": sum(by_key.values())}
+    except Exception:  # noqa: BLE001 - 观测面缺失不得让状态面整体失败
+        return {"by_channel": {}, "by_key": {}, "total": 0}
+
+
+def _readGapMetrics() -> Dict[str, Any]:
+    """能力缺口指标读侧（写侧见 `agent/gap_metric_channel`）。
+
+    独立函数而非直接 import：`agent` 包与本模块的导入链互相牵连，
+    函数级 import 让"读侧未接线"退化为一个空读数而不是 ImportError。
+    """
+    try:
+        from neurova.agent.capability_gap import gapMetricReadout
+
+        return gapMetricReadout()
+    except Exception:  # noqa: BLE001 - 观测面缺失不得让状态面整体失败
+        return {"by_kind": {}, "total": 0}
 
 
 def create_rsi_orchestrator(

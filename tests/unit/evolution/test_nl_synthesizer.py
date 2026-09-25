@@ -173,9 +173,14 @@ class TestNLSynthesis:
         assert "memory_search" in seq
 
     def test_suggest_tool_sequence_general_category(self, synth):
-        """general 分类返回 general_tool"""
+        """general 分类没有已注册候选 ⇒ 空序列（**不再**返回兜底幻名）。
+
+        原断言 `"general_tool" in seq` 钉住的是幻名：该名全仓注册处为 0，
+        被 `plan_orchestrator` 与合成器同时当占位名用。字母表去幻（T-04）后，
+        "无合法候选"的诚实形态就是空序列，由既有置信闸转人工复核。
+        """
         seq = synth.suggest_tool_sequence("some unknown desc", "general")
-        assert "general_tool" in seq
+        assert seq == []
 
     def test_estimate_confidence_real_signature(self, synth):
         """estimate_confidence(description, category, tool_sequence) — 真实签名"""
