@@ -625,7 +625,7 @@ class SwarmManager:
                 return
             content = f"[子Agent报告] {run.agent_name}({run.agent_id}) 关于「{run.task[:80]}」: {run.report[:2000]}"
             pool.add_context(
-                ContextInput(source=ContextSource.EXPERIENCE, content=content, priority=70)
+                ContextInput(source=ContextSource.EXPERIENCE, content=content)
             )
             logger.info("Swarm: 子 Agent 报告已归档进发起者上下文池 (%s)", run.subagent_id)
         except Exception as e:  # noqa: BLE001 - 归档失败不影响返回

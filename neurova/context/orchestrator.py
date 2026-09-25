@@ -1290,7 +1290,7 @@ class ContextOrchestrator:
                         content = memory.get("content", str(memory))
                     else:
                         content = str(memory)
-                    self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
+                    self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content))
 
                 # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
                 for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
@@ -1304,7 +1304,7 @@ class ContextOrchestrator:
                 for log in reflection_logs:
                     full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
                     self.context_pool.add_context(
-                        ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
+                        ContextInput(source=ContextSource.REFLECTION, content=full)
                     )
 
             # ════════════════════════════════════════════════════════
@@ -1552,17 +1552,17 @@ class ContextOrchestrator:
         # 添加系统指令
         for instruction in system_instructions:
             candidate_pool.append(
-                ContextInput(source=ContextSource.SYSTEM_INSTRUCTION, content=instruction, priority=100)
+                ContextInput(source=ContextSource.SYSTEM_INSTRUCTION, content=instruction)
             )
 
         # 添加开发者指令
         for instruction in developer_instructions:
             candidate_pool.append(
-                ContextInput(source=ContextSource.DEVELOPER_INSTRUCTION, content=instruction, priority=90)
+                ContextInput(source=ContextSource.DEVELOPER_INSTRUCTION, content=instruction)
             )
 
         # 添加用户输入
-        candidate_pool.append(ContextInput(source=ContextSource.USER_INPUT, content=user_input, priority=90))
+        candidate_pool.append(ContextInput(source=ContextSource.USER_INPUT, content=user_input))
 
         # 添加对话历史（保留 role 信息）
         for msg in conversation_context:
@@ -1570,7 +1570,6 @@ class ContextOrchestrator:
                 ContextInput(
                     source=ContextSource.CONVERSATION,
                     content=msg["content"],
-                    priority=60,
                     metadata={"role": msg.get("role", "user")},
                 )
             )
@@ -1584,7 +1583,7 @@ class ContextOrchestrator:
                 content = str(memory)
                 metadata = {}
             candidate_pool.append(
-                ContextInput(source=ContextSource.MEMORY, content=content, priority=70, metadata=metadata)
+                ContextInput(source=ContextSource.MEMORY, content=content, metadata=metadata)
             )
 
         # 添加经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
@@ -1599,7 +1598,6 @@ class ContextOrchestrator:
                 ContextInput(
                     source=ContextSource.EMOTION,
                     content=f"用户情感: {agent_emotion.get('label', 'neutral')} (强度 {agent_emotion.get('intensity', 0.0):.2f})",
-                    priority=50,
                     metadata=agent_emotion,
                 )
             )
@@ -1632,7 +1630,6 @@ class ContextOrchestrator:
                         ContextInput(
                             source=ContextSource.MULTIMODAL,
                             content="\n".join(content_parts),
-                            priority=70,
                             metadata={"type": "voice_context"},
                         )
                     )
@@ -1646,7 +1643,6 @@ class ContextOrchestrator:
                 ContextInput(
                     source=ContextSource.REFLECTION,
                     content=f"{log.get('lesson', str(log))}（{log.get('title', '')}）",
-                    priority=60,
                     metadata=log,
                 )
             )
@@ -1842,7 +1838,7 @@ class ContextOrchestrator:
             else:
                 metadata = {"role": role, "turn_id": turn_id}
             self.context_pool.add_context(
-                ContextInput(source=source, content=content, priority=60, metadata=metadata)
+                ContextInput(source=source, content=content, metadata=metadata)
             )
         # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
         self._last_archived_window_hashes = archived_hashes
@@ -2228,7 +2224,6 @@ class ContextOrchestrator:
                 ContextInput(
                     source=ContextSource.CONVERSATION,
                     content=(m or {}).get("content", ""),
-                    priority=60,
                     metadata={"role": (m or {}).get("role", "user")},
                 )
                 for m in dropped_msgs or []
