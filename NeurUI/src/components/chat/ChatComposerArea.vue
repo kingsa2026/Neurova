@@ -312,6 +312,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
 import { useChatModels } from '@/composables/useChatModels'
 import { usePendingFiles } from '@/composables/usePendingFiles'
+import { formatFileSize, getFileIcon } from '@/utils/fileKind'
 import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
 import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
@@ -340,33 +341,6 @@ const emit = defineEmits<{
   /** /compact 斜杠命令（页面经 sendMessage 原链路发往后端命令分发） */
   slashCompact: []
 }>()
-
-/** 附件类型分类（文件图标/附件缩略图着色用），原样迁自 ChatPage */
-function getFileCategory(type?: string): string {
-  if (!type) return 'unknown'
-  if (type.startsWith('image/')) return 'image'
-  if (type.startsWith('audio/')) return 'audio'
-  if (type.startsWith('video/')) return 'video'
-  if (type === 'application/pdf') return 'pdf'
-  return 'file'
-}
-
-function getFileIcon(type?: string): string {
-  const icons: Record<string, string> = {
-    image: 'image',
-    audio: 'audio',
-    video: 'image',
-    pdf: 'fileText',
-    file: 'file',
-  }
-  return icons[getFileCategory(type)] || 'file'
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
 
 const { t } = useI18n()
 const chatStore = useChatStore()
