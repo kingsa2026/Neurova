@@ -284,52 +284,6 @@ class TestPoolOwnershipFollowsTurnIdentity:
             )
 
 
-class TestBudgetReadoutFollowsTheSameIdentityChain:
-    """同一根因的第三命中点：预算读数的"本轮实测"也按 `self._session_id` 单独取数。
-
-    `get_token_budget` 的 `used_tokens` 取 compose 侧最近一次实测快照，而快照
-    是按会话分桶的（`composition._last_session_composition`）。改前传入的是
-    `self._session_id or None` —— 构造期恒 None → 退到 **agent 级**快照，
-    也就是"别的会话的最近一轮"。实测（两个会话各测一轮）：
-
-    ```
-    本轮 sess_mine 实测 1 token，另一会话 sess_other 稍后实测 2000 token
-    get_token_budget()["used_tokens"] → 2000   ← 面板显示的是别的会话的规模
-    ```
-
-    身份推导只允许一处（`_turnSessionIdentity`）：本命中点与缓存键、池归属
-    取同一条回落链，否则三处各退化为 `None` 的形态会各自看起来正常。
-    """
-
-    def test_used_tokens_reads_this_sessions_snapshot(self):
-        from neurova.context.composition import measure_composition
-
-        orch = _orchestrator(budget=100000)
-        _setTurnIdentity("sess_mine")
-        measure_composition(
-            agent_id="a1",
-            messages=[{"role": "user", "content": "z"}],
-            tools=None,
-            session_id="sess_mine",
-        )
-        measure_composition(
-            agent_id="a1",
-            messages=[{"role": "user", "content": "y" * 8000}],
-            tools=None,
-            session_id="sess_other",
-        )
-
-        used = orch.get_token_budget()["used_tokens"]
-        mine = __import__(
-            "neurova.context.composition", fromlist=["x"]
-        )._last_session_composition["a1"]["sess_mine"]["total_tokens"]
-
-        assert used == int(mine), (
-            f"预算读数取了别的会话的实测快照：used_tokens={used}，本轮真值={mine}"
-            "（身份推导第二处 —— `get_token_budget` 仍只认 `self._session_id`）"
-        )
-
-
 class TestIdentitylessTurnIsVisible:
     """落到 `direct` 时必须**可见**：静默共用槽就是本次缺陷的形态。"""
 

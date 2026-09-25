@@ -1,13 +1,13 @@
 """
-上下文功能 Bug 修复 RED 测试 — C-3 + C-4 + C-6（context 模块）
+上下文功能 Bug 修复 RED 测试 — C-3 + C-6（context 模块）
 
 C-3: orchestrator.py:222-226 tool_memory_context 死代码
     根本原因：构建了 tool_memory_context（含 auto_execute_result + tool_decision），但从未注入 ContextPool
     影响：LLM 看不到工具记忆执行状态
 
-C-4: context_facade.py:287-303 全局单例污染
-    根本原因：_facade_instance 缓存第一个 agent_ref，后续传入不同 agent_ref 仍返回第一个
-    影响：多 Agent 系统中第二个 Agent 拿到错误 facade
+（C-4 的 `ContextFacade` 全局单例用例已随该门面层在 B6-10 批次 E 整模块退场而
+退役 —— 那层是编排器的第二份装配路径，零非测试消费者，见
+`test_context_facade_retirement.py` 与本文件同批的判据。）
 
 C-6: orchestrator.py:82-83 skill_registry 无 getattr 保护
     根本原因：return self._agent._skill_registry（直接访问），对比 line 99 growth_log_manager 用 getattr
@@ -72,38 +72,6 @@ class TestC3ToolMemoryContextInjection:
         assert "25°C" in all_content or "25" in all_content, (
             f"RED C-3: auto_execute_result 未注入 context（结果缺失）"
         )
-
-
-class TestC4ContextFacadeSingletonPollution:
-    """C-4: get_context_facade 不应用全局单例污染多 Agent"""
-
-    def test_c4_different_agents_get_different_facades(self):
-        """RED: 不同 agent_ref 应得到不同 ContextFacade 实例
-
-        Bug C-4: context_facade.py:287-303
-        实际代码: _facade_instance 缓存第一个 agent，后续返回同一个
-        """
-        from neurova.context.context_facade import ContextFacade, get_context_facade, reset_context_facade
-
-        reset_context_facade()
-
-        agent_a = MagicMock()
-        agent_a.config = MagicMock(agent_id="agent_a")
-        agent_b = MagicMock()
-        agent_b.config = MagicMock(agent_id="agent_b")
-
-        facade_a = get_context_facade(agent_a)
-        facade_b = get_context_facade(agent_b)
-
-        # 应是不同实例
-        assert facade_a is not facade_b, (
-            "RED C-4: 不同 agent_ref 应得到不同 ContextFacade 实例（全局单例污染）"
-        )
-        # 应绑定不同 agent
-        assert facade_a._agent is agent_a, "facade_a 应绑定 agent_a"
-        assert facade_b._agent is agent_b, "facade_b 应绑定 agent_b（实际绑定 agent_a）"
-
-        reset_context_facade()
 
 
 class TestC6SkillRegistryGetattrProtection:
