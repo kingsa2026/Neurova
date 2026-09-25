@@ -64,7 +64,7 @@ describe('UiIcon 装配完整性', () => {
     const dynamicValues: Array<[string, string[]]> = [
       ['utils/toolCardVariant.ts variantIcon', ['monitor', 'folder', 'search', 'keyboard', 'code', 'wrench']],
       ['ChatPage streamPhaseMeta', ['radar', 'brain', 'wrench', 'edit']],
-      ['ChatPage getFileIcon', ['image', 'audio', 'fileText', 'file']],
+      ['utils/fileKind.ts getFileIcon', ['image', 'audio', 'fileText', 'file']],
       ['utils/artifacts.ts DOCK_ICONS', ['fileText', 'browser', 'image', 'audio', 'file', 'clock', 'archive', 'monitor']],
       ['SubAgentPanel statusIcon', ['clock', 'x', 'check']],
     ]

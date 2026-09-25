@@ -41,6 +41,25 @@ class AnnotationRetrieverAdapter:
     def priority(self) -> int:
         return self._priority
 
+    def get_quality_score(self, memories: List[Dict[str, Any]], query: str) -> float:
+        """评估标注检索结果质量。
+
+        人工定标是最高权威来源，故命中即满分（quality=1.0 与 `retrieve` 的口径
+        同源——两处若各写一套阈值，就会出现"命中却读成低质量"从而被下游熔断）。
+        未命中给 0.0：与其它适配器一致，由责任链继续往下走。
+
+        本方法是 `Retriever` 协议的一员：缺席曾导致 `add_retriever` 的
+        `isinstance` 守卫拒收，而装配点的 except 把拒收降级成一条 warning——
+        人工标注这条检索源因此在每个 Agent 上静默缺席（Issue #189）。
+        """
+        if not memories:
+            return 0.0
+        for entry in memories:
+            metadata = entry.get("metadata") or {}
+            if metadata.get("annotation") is True:
+                return 1.0
+        return 0.0
+
     async def retrieve(self, context) -> Any:
         """执行标注检索（归一精确 → 归一子串兜底）。"""
         from neurova.agent.memory_retrieval_chain import RetrievalQuality, RetrievalResult
