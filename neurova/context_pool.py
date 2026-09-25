@@ -769,6 +769,9 @@ class ContextPool:
             # 咽喉已打好的 metadata，不在这里另算一份判定。
             chat_scope=md.get("chat_scope"),
             created_at=archived_at.isoformat() if archived_at else None,
+            # T-11d：池指纹**原样**落库（不在台账侧二次哈希）。层节点 covers 存的
+            # 就是它，直取面按它建索引；写入侧这一处派生即寻址键的唯一来源。
+            item_hash=getattr(item, "hash", None),
         )
 
     def _maybeGcLedger(self) -> None:
@@ -1056,6 +1059,145 @@ class ContextPool:
         layers.sort(key=lambda layer: layer["level"])
         self._unparsable_layers = unparsable
         return layers
+
+    def drilldown(self, reference: str, *, limit: int = 500) -> Dict[str, Any]:
+        """按 `covers_ref` 确定性下钻：取回该档摘要覆盖的**原文**（T-11d）。
+
+        链路：引用串 → `fold_index.parseCoversRef`（唯一解析处）→ `summaryLayers()`
+        （唯一索引读面）→ 该档 `covers` 的 hash 列表 → 常驻 + 持久台账双源直取
+        → 作用域闸口（与视图路径、`recall_evicted` **同源** `_allowedRecallItems`）。
+
+        为什么不能走 `recall_evicted(query=…)`：那是**概率性**召回（FTS/LIKE +
+        相关性门槛），工单 §12.5 第 3 条明列"下钻靠相关性门槛碰运气"为假实现。
+        本方法只做等值命中，取得到就逐条对齐，取不到就点名原因。
+
+        Returns（永远是这五个键的同一形状，调用方不需要解析日志）：
+            resolved: 引用是否解析成功（False 时 `reason` 非空）
+            reason: 失败点名（`RefUnparsable` / `LayerAbsent` / `SourceMissing` /
+                `ScopeFiltered`），成功时为 None
+            fold_seq: 命中的层序
+            entries: `{content, hash, session_id, turn_id}` 列表（hash 与 covers 逐条相等）
+            unresolved: 在池与台账里都找不到的 covers hash（**不静默丢**）
+            filtered: 被作用域闸口挡下的条数（过滤必须可见）
+            truncated: 因 `limit` 未返回的条数（截断必须可见，见下）
+        """
+        from neurova.context.fold_index import (
+            REASON_LAYER_ABSENT,
+            REASON_REF_UNPARSABLE,
+            REASON_SOURCE_MISSING,
+            parseCoversRef,
+        )
+
+        parsed = parseCoversRef(reference)
+        if parsed is None:
+            return self._drilldownResult(
+                False, REASON_REF_UNPARSABLE, None, [], [], 0
+            )
+        foldSeq, _sessionId = parsed
+
+        layer = next(
+            (item for item in self.summaryLayers() if item["fold_seq"] == foldSeq), None
+        )
+        if layer is None:
+            return self._drilldownResult(False, REASON_LAYER_ABSENT, foldSeq, [], [], 0)
+
+        wanted = list(layer["covers"].get("hashes") or ())
+        resolved: Dict[str, Any] = {}
+        with self._lock:
+            for entry in self.entriesByHash(wanted):
+                resolved[getattr(entry, "hash", None)] = entry
+
+        # 持久兜底：常驻集可能已回收（resident_limit）或本进程从未加载过（T-07
+        # 明确不预载）——按**池指纹**直取，不经 FTS 模糊面。
+        missing = [h for h in wanted if h not in resolved]
+        if missing and self._ledger_db is not None:
+            try:
+                for row in self._ledger_db.rowsByPoolHashes(missing):
+                    row = dict(row)
+                    fingerprint = row.get("pool_hash")
+                    if not fingerprint or fingerprint in resolved:
+                        continue
+                    resolved[fingerprint] = ContextInput(
+                        source=self._sourceOfRow(row),
+                        content=row.get("content") or "",
+                        metadata=_archivedRowMetadata(row),
+                    )
+            except Exception as exc:  # noqa: BLE001 - 兜底读失败必须可见，不静默
+                self._layer_index_error = f"{type(exc).__name__}: {exc}"
+                logger.warning("下钻持久直取失败：%s", self._layer_index_error, exc_info=True)
+
+        # 顺序按 covers 给（索引的顺序即事实，不重新排序）；同一 hash 只出一条
+        # （常驻与台账是双源，重复计入会让"对齐率"虚高）。
+        ordered: List[Any] = []
+        unresolved: List[str] = []
+        for fingerprint in wanted:
+            entry = resolved.get(fingerprint)
+            if entry is None:
+                unresolved.append(fingerprint)
+                continue
+            ordered.append(entry)
+
+        allowed = self._allowedRecallItems(ordered)
+        filtered = len(ordered) - len(allowed)
+        # `limit` 只约束**返回条数**,不能顺手把"还有多少条没取"一起吞掉:
+        # covers 条数不设上限(T-11a 裁定),截断在长轨迹上必然发生,而调用方
+        # (工具面的模型)看不到它 —— 那就是"静默丢内容"。故缺口条数一并上报。
+        kept = allowed[:max(1, int(limit))]
+        entries = [
+            {
+                "content": getattr(entry, "content", ""),
+                "hash": getattr(entry, "hash", None),
+                "session_id": (getattr(entry, "metadata", None) or {}).get("session_id"),
+                "turn_id": (getattr(entry, "metadata", None) or {}).get("turn_id"),
+            }
+            for entry in kept
+        ]
+        reason = None
+        if not allowed and ordered:
+            # 有原文但全被闸口挡下：这不是"取不到"，而是"这一轮不该看见"——
+            # 两者必须分开点名，否则隔离生效会被读成索引坏了。
+            from neurova.context.fold_index import REASON_SCOPE_FILTERED
+
+            reason = REASON_SCOPE_FILTERED
+        elif unresolved:
+            reason = REASON_SOURCE_MISSING
+        return self._drilldownResult(
+            True, reason, foldSeq, entries, unresolved, filtered,
+            truncated=len(allowed) - len(kept), layer=layer,
+        )
+
+    @staticmethod
+    def _drilldownResult(
+        resolvedRef: bool,
+        reason: Optional[str],
+        foldSeq: Optional[int],
+        entries: List[Dict[str, Any]],
+        unresolved: List[str],
+        filtered: int,
+        truncated: int = 0,
+        layer: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """下钻结果的**单一形状**（成功与失败同键，调用方不需分支解析）。"""
+        return {
+            "resolved": bool(resolvedRef),
+            "reason": reason,
+            "fold_seq": foldSeq,
+            "entries": list(entries),
+            "unresolved": list(unresolved),
+            "filtered": int(filtered),
+            "truncated": int(truncated),
+            "level": (layer or {}).get("level"),
+            "session_id": (layer or {}).get("session_id"),
+        }
+
+    @staticmethod
+    def _sourceOfRow(row: Dict[str, Any]) -> Any:
+        """台账行 → 池来源域（缺省按对话域，与 `poolHash` 的兜底同判定）。"""
+        raw = str((row or {}).get("source") or "").strip()
+        try:
+            return ContextSource(raw) if raw else ContextSource.CONVERSATION
+        except ValueError:
+            return ContextSource.CONVERSATION
 
     def entriesByHash(self, hashes) -> List[Any]:
         """按内容指纹批量取池内条目（T-11b：covers 解析的判据面）。

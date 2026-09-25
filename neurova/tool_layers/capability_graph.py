@@ -48,6 +48,7 @@ class ToolCapabilityNode:
 #
 # 名单覆盖面（同根扫荡，教义第 5 条）：
 #   - 记忆/历史检索：memory_search / voice_memory_search / recall_history
+#   - 分层摘要下钻：recall_context_span（同一族：只做"取回已有的东西"）
 #   - 技能目录检索：discover_skills
 #   - 大目录延迟加载的控制工具（tool_search / tool_describe / tool_call）：
 #     与 `context/tool_search.CONTROL_TOOL_NAMES` 同源，由测试断言咬合，
@@ -57,6 +58,7 @@ _META_RETRIEVAL_NAMES = frozenset({
     "memory_search",
     "voice_memory_search",
     "recall_history",
+    "recall_context_span",
     "discover_skills",
 })
 
