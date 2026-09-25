@@ -39,52 +39,266 @@ cleanup = pytest.importorskip("scripts.ci.npc_branch_cleanup")
 LEDGER = PROJECT_ROOT / "docs" / "06-bugfix" / "npc分支归档台账.md"
 
 
-class TestBranchVerdictLogic:
-    """判定口径：`auto/` 命名空间 + 「是 main 的祖先」两个条件同时成立才算已归档。"""
+def _criterion_section(text: str) -> str:
+    """从台账正文里切出「判定口径」那一节（到下一个同级标题为止）。
 
-    def test_merged_npc_branch_is_stale(self):
-        """已合并进 main 的 auto/* 分支 ⇒ stale（待删）。"""
+    只在这一节里断言口径，是为了让判据有**区分力**：散在处置记录里的同名词
+    不该让口径节的断言变绿（见 `test_ledger_declares_the_rule_and_the_probe`）。
+    """
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and "判定口径" in line:
+            start = i + 1
+            break
+    assert start is not None, "台账缺「判定口径」节（## 级标题）"
+    end = len(lines)
+    for j in range(start, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+
+#: 登记「某条分支」的表，其表头必须带这个词。口径由**表头**给出 ——
+#: 不认分支名的形状（有没有 `auto/` 前缀、有没有斜杠都不作判据），
+#: 因为名字是平台的产物、不是事实（见 `classifyBranches` 的口径说明）。
+REGISTRATION_TABLE_HEADER_KEY = "分支"
+_TABLE_DELIMITER_CELL = re.compile(r"^:?-{2,}:?$")
+
+
+def _branch_registration_rows(ledger: Path):
+    """台账里「分支登记表」的数据行，逐条给出 `(行号, 原文)`。
+
+    认定由**表格结构**给出，不由分支名的形状给出：
+
+    1. 找出表头（Markdown 表格的第一行）含 `REGISTRATION_TABLE_HEADER_KEY` 的表；
+    2. 跳过紧随其后的分隔行（`|---|---|` 形态）；
+    3. 其余数据行即登记行。
+
+    早先实现按 `auto/` 前缀找登记行 —— 与判定口径**同一个根因**：拿名字当事实。
+    于是台账里一条不带该前缀的分支（实测形态 `fix-caliber-generated`，本仓真实
+    存在过的 NPC 分支名）写在「分支 / 处置」表里却不被判据看见，写"在途"也不红。
+
+    不越界：表头不含该词的表（读数表、对照表）与正文散文一概不返回 ——
+    判据要拦的是「一张"当前保留"的表/清单」，不是叙述历史的散文。
+    """
+    lines = io.open(ledger, encoding="utf-8").read().splitlines()
+    rows = []
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped.startswith("|") or REGISTRATION_TABLE_HEADER_KEY not in stripped:
+            index += 1
+            continue
+        index += 1
+        # 分隔行：Markdown 表格必须的一行，判定它是"分隔"而不是数据
+        if index < len(lines):
+            cells = [c.strip() for c in lines[index].strip().strip("|").split("|")]
+            if cells and all(_TABLE_DELIMITER_CELL.match(c) for c in cells if c):
+                index += 1
+        while index < len(lines) and lines[index].strip().startswith("|"):
+            rows.append((index + 1, lines[index].strip()))
+            index += 1
+    return rows
+
+
+def _criterion_items(section: str) -> str:
+    """从「判定口径」节里只取**编号条目**（`1. ` / `2. ` …）的正文。
+
+    **为什么必须只取条目**：整节里"第二父"这个词在解释段与反例段也会出现，
+    对整节搜关键词没有区分力 —— 本轮实测：把编号条目 1 整条替换回旧的
+    「分支名以 `auto/` 开头」，整节仍含"第二父"，断言照样绿。口径的**判据**
+    就是这两个条目，故断言只钉在这两条上。
+    """
+    items = [ln for ln in section.splitlines() if re.match(r"^\d+\.\s", ln.strip())]
+    assert items, "「判定口径」节没有编号条目（口径没有写成可复核的条件）"
+    return "\n".join(items)
+
+
+class TestBranchVerdictLogic:
+    """判定口径：两个 git 事实同时成立才算已归档（见 `classifyBranches`）。
+
+    1. 分支头是主线某个 merge commit 的第二父（＝某个已合并请求的源分支头）；
+    2. 该头是 `main` 的祖先（＝提交已在主线里，删掉不丢成果）。
+
+    成员资格由**事实**给出，不由分支名字给出 —— 见
+    `TestCriterionIsMergeFactNotBranchName` 里本轮实测的漏判。
+    """
+
+    def test_merged_source_branch_is_stale(self):
+        """已合并请求的源分支且头已在主线 ⇒ stale（待删）。"""
         heads = {"auto/done-xyz": "abc123"}
         verdicts = cleanup.classifyBranches(
-            heads, ancestorOfMain={"auto/done-xyz": True}
+            heads, {"abc123"}, ancestorOfMain={"auto/done-xyz": True}
         )
         assert cleanup.staleBranches(verdicts) == ["auto/done-xyz"]
 
-    def test_unmerged_npc_branch_is_kept(self):
-        """未合并的 auto/* 分支 ⇒ keep（可能还有在途工作，删掉就是丢成果）。"""
+    def test_unmerged_source_branch_is_kept(self):
+        """源分支头已是主线祖先、但头不在合并记录里 ⇒ keep。"""
         heads = {"auto/inflight-xyz": "abc123"}
         verdicts = cleanup.classifyBranches(
-            heads, ancestorOfMain={"auto/inflight-xyz": False}
+            heads, {"deadbeef"}, ancestorOfMain={"auto/inflight-xyz": False}
         )
         assert cleanup.staleBranches(verdicts) == []
 
     @pytest.mark.parametrize("branch", ["main", "docs/context-chain-reverify-0923", "feature/x"])
-    def test_non_npc_namespace_is_out_of_scope(self, branch):
-        """非 `auto/` 命名空间的分支不由本判据裁决（长期分支由人管理）。
+    def test_branch_outside_the_merge_record_is_out_of_scope(self, branch):
+        """头不在主线合并记录里的分支不由本判据裁决。
 
         反向控制：这条也是判据的区分力证明——把所有已合并分支都判 stale 的实现
         会在这里红（`main` 自己就是"已合并"）。
         """
         heads = {branch: "abc123"}
         verdicts = cleanup.classifyBranches(
-            heads, ancestorOfMain={branch: True}
+            heads, {"deadbeef"}, ancestorOfMain={branch: True}
         )
         assert cleanup.staleBranches(verdicts) == []
-        assert "非 NPC 自动分支命名空间" in str(verdicts[0]["reason"])
+        assert "不是任何已合并请求的源分支头" in str(verdicts[0]["reason"])
 
-    def test_non_npc_namespace_never_triggers_ancestor_lookup(self, monkeypatch):
-        """非 `auto/` 分支不得触发祖先判定——否则判据在"不存在的东西"上依赖环境。
+    def test_non_candidate_never_triggers_ancestor_lookup(self, monkeypatch):
+        """非归档候选不得触发祖先判定——否则判据在"不存在的东西"上依赖环境。
 
         实测回归（本守卫首版发现）：判定对 `main` 自己也跑一次 `merge-base`，
         在只拿到远端头的检出里 `origin/main` 可能还没建，于是判据在环境前置条件上
-        报错。修法是判据只对 `auto/*` 说话（那才是它裁决的对象）。
+        报错。修法是判据只对「头落在主线合并记录里」的分支说话（那才是它裁决的对象）。
         """
         def _boom(*args, **kwargs):  # pragma: no cover - 被调用即失败
-            raise AssertionError("非 NPC 分支触发了祖先判定（判据越界到环境前置条件）")
+            raise AssertionError("非归档候选触发了祖先判定（判据越界到环境前置条件）")
 
         monkeypatch.setattr(cleanup, "isMergedIntoMain", _boom)
-        verdicts = cleanup.classifyBranches({"main": "abc", "docs/x": "def"})
+        verdicts = cleanup.classifyBranches({"main": "abc", "docs/x": "def"}, set())
         assert cleanup.staleBranches(verdicts) == []
+
+
+class TestCriterionIsMergeFactNotBranchName:
+    """成员资格由「经 PR 合并进主线」这一**事实**给出，不由分支名字给出。
+
+    ## 根因（本轮实测，2026-09-25）
+
+    现口径把「是不是 NPC 工作分支」等同于「名字是否以 `auto/` 开头」。而**名字不是事实**：
+    平台按 PR 的 `head.ref` 决定分支名，NPC 会话既可以建 `auto/*`，也可以建
+    `fix/*` / `fix-*`。于是同一件事（一个已合并的归档分支还留在远端）在一种命名下被
+    判 `stale`，在另一种命名下被判 `keep`。
+
+    实测三条读数（`git ls-remote --heads origin` × `git merge-base --is-ancestor`）：
+
+    | 远端分支 | 是 `origin/main` 的祖先 | PR 的 head | 现判据 | 应当 |
+    |---------|----------------------|-----------|--------|------|
+    | `fix-caliber-generated` | 是（`bdda0ba1`） | #217（作者是 NPC） | `keep` | `stale` |
+    | `auto/code-exec-sandbox-555c` | 是（`b1d2057e`） | #212（作者是 NPC） | `stale` | `stale` |
+
+    两行是同一形态，只差名字 —— 判据的区分力挂在了名字上，而不是挂在事实上。
+
+    ## 口径：两个 git 事实同时成立
+
+    1. 该分支头**出现在主线某个 merge commit 的第二父位**（＝它正是某个 PR 的源分支头，
+       即「经 PR 合并进主线」这件事本身）；
+    2. 该分支头**是 `origin/main` 的祖先**（＝它的提交已在主线里，删掉不丢成果）。
+
+    第 1 条取代原先的 `auto/` 前缀判定，同时天然排除 `main` 自身：仓库默认分支的头
+    不会是任何 merge commit 的第二父（它是那些 merge commit 的**后代**）。
+    第 2 条不放宽 —— 头不是祖先（合并后又推了新提交）仍是 `keep`，删掉就是丢成果。
+    """
+
+    def testMergedSourceBranchIsStaleRegardlessOfName(self):
+        """已合并进主线的 PR 源分支 ⇒ stale，与它叫什么名字无关。"""
+        heads = {"fix-caliber-generated": "bdda0ba1"}
+        verdicts = cleanup.classifyBranches(
+            heads,
+            ancestorOfMain={"fix-caliber-generated": True},
+            mergedTips={"bdda0ba1"},
+        )
+        assert cleanup.staleBranches(verdicts) == ["fix-caliber-generated"], (
+            "已合并的 PR 源分支只因不叫 auto/* 就被放行 —— 判据挂在了名字上，"
+            "而名字不是事实（实测：fix-caliber-generated 是 #217 的 head，"
+            "已是 main 的祖先，现判据给 keep）"
+        )
+
+    def testAutoPrefixedMergedBranchStaysStale(self):
+        """反向：`auto/*` 且已合并 ⇒ 仍须 stale（新口径不得把老覆盖丢掉）。"""
+        heads = {"auto/code-exec-sandbox-555c": "b1d2057e"}
+        verdicts = cleanup.classifyBranches(
+            heads,
+            ancestorOfMain={"auto/code-exec-sandbox-555c": True},
+            mergedTips={"b1d2057e"},
+        )
+        assert cleanup.staleBranches(verdicts) == ["auto/code-exec-sandbox-555c"]
+
+    def testDefaultBranchIsNeverStale(self):
+        """仓库默认分支永不被判 stale：它的头不是任何 merge commit 的第二父。
+
+        反向控制：只按「是 main 的祖先」判定（丢掉第二父那条事实）的实现会在这里红 ——
+        `main` 自己就是 main 的祖先。
+        """
+        heads = {"main": "ad1ad254"}
+        verdicts = cleanup.classifyBranches(
+            heads,
+            ancestorOfMain={"main": True},
+            mergedTips={"deadbeef"},  # 默认分支的头不在其中
+        )
+        assert cleanup.staleBranches(verdicts) == []
+
+    def testUnmergedSourceBranchIsKept(self):
+        """在途的 PR 源分支（尚未合并）⇒ keep，删掉就是丢成果。"""
+        heads = {"auto/relay-not-a-gate-217": "0fbb5068"}
+        verdicts = cleanup.classifyBranches(
+            heads,
+            ancestorOfMain={"auto/relay-not-a-gate-217": False},
+            mergedTips={"deadbeef"},
+        )
+        assert cleanup.staleBranches(verdicts) == []
+
+    def testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch(self):
+        """语义红灯：直接对本仓**真实 git 历史**取数，钉住那次漏判的形态。
+
+        本仓主线里存在这样一个合并提交 —— `0cc0719a`（`合并来自
+        fix-caliber-generated 的合并请求 #217`），其第二父 `bdda0ba1` 就是
+        `fix-caliber-generated` 的分支头。这是**已写进主线历史的事实**，
+        不随该分支后来是否被删除而改变，所以这条用例只用本地 git 取数（不碰网络）。
+
+        旧口径按名字前缀判定，对这一形态给 `keep`；`bdda0ba1` 落进合并记录
+        却不带 `auto/` 前缀，正是它漏判的那一类。判据改为「读合并事实」后，
+        同样的输入必须判 `stale`。
+        """
+        tips = cleanup.mergedSourceTips()
+        assert "bdda0ba19933b07935adaf8f40bcbcd04201fd21" in tips, (
+            "本地 git 历史里找不到 0cc0719a 的第二父 —— 取数口径与主线历史不符"
+        )
+        heads = {"fix-caliber-generated": "bdda0ba19933b07935adaf8f40bcbcd04201fd21"}
+        verdicts = cleanup.classifyBranches(
+            heads, tips, ancestorOfMain={"fix-caliber-generated": True}
+        )
+        assert cleanup.staleBranches(verdicts) == ["fix-caliber-generated"], (
+            "实测漏判形态：fix-caliber-generated 是 #217 的分支头、已是 main 的祖先，"
+            "却因名字不带 auto/ 前缀被名字前缀口径放行"
+        )
+
+    def testMergedSourceTipsReadMergeSecondParents(self, tmp_path, monkeypatch):
+        """取数口径：`mergedSourceTips()` 只认 merge commit 的第二父位。
+
+        合成一段 `git log --merges --format=%P` 输出：非 merge 行、单父行都不得混入。
+        """
+        captured = {}
+
+        class _Done:
+            returncode = 0
+            stdout = (
+                "ad1ad254\n"                                        # 非 merge（单父）→ 不收
+                "aaaaaaaa 259b6ad1aaaa00000000000000000000000000\n"     # merge → 收第二父
+                "bbbbbbbb 1ce8f2c0bbbb77777777777777777777777777\n"
+            )
+            stderr = ""
+
+        def _run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return _Done()
+
+        monkeypatch.setattr(cleanup.subprocess, "run", _run)
+        tips = cleanup.mergedSourceTips()
+        assert tips == {"259b6ad1aaaa00000000000000000000000000",
+                        "1ce8f2c0bbbb77777777777777777777777777"}, tips
+        assert "--merges" in captured["cmd"], "取数没有限定 merge commit"
 
 
 class TestRemoteHeadParsing:
@@ -138,18 +352,10 @@ class TestLedgerIsReadableInRepo:
         把散文也算进来，只会训练人删掉解释、留下表格。
         """
         dispositions = ("已删", "已合入", "已归档")
-        #: 只认**具体的分支全名**（`auto/` + 名字）。口径说明里的裸 `auto/` 是命名空间，
-        #: 不是某条分支的登记行 —— 拿前缀本身匹配会把 §1 的判定口径也报成违规。
-        branchNames = re.compile(re.escape(cleanup.NPC_BRANCH_PREFIX) + r"[A-Za-z0-9][\w.\-]*")
         offenders = []
-        for lineno, line in enumerate(io.open(LEDGER, encoding="utf-8").read().splitlines(), 1):
-            stripped = line.strip()
-            if not (stripped.startswith("|") or stripped.startswith("- ")):
-                continue
-            if not branchNames.search(stripped):
-                continue
-            if not any(mark in stripped for mark in dispositions):
-                offenders.append(f"第 {lineno} 行：{stripped[:110]}")
+        for lineno, line in _branch_registration_rows(LEDGER):
+            if not any(mark in line for mark in dispositions):
+                offenders.append(f"第 {lineno} 行：{line[:110]}")
         assert not offenders, (
             "台账登记了分支的**当前状态**而非**已发生的处置**（这类行会随远端变化立刻过期，"
             "且台账没有刷新机制）：\n  " + "\n  ".join(offenders)
@@ -186,10 +392,79 @@ class TestLedgerIsReadableInRepo:
         sys.modules[__name__].TestLedgerIsReadableInRepo() \
             .test_ledger_records_dispositions_not_live_branch_state()
 
+    def test_branch_registration_rows_are_found_structurally(self, tmp_path, monkeypatch):
+        """登记行由**表格结构**认定，不由分支名里有没有斜杠认定。
+
+        ## 根因（与判定口径同一个）
+
+        上一条按 `auto/` 前缀找登记行 —— 那和 `classifyBranches` 原先按 `auto/`
+        认分支是**同一个根因**：拿名字当事实。于是台账里若出现一条不带前缀的分支
+        （实测形态：`fix-caliber-generated`，是本仓真实存在过的 NPC 分支名），
+        它写在「分支 / 处置」表里却**不被判据看见** —— 写「未合并进主线，在途」
+        这类当下状态也不会红。
+
+        口径改为：先按 Markdown 表格结构找出表头含「分支」的表，再逐行检查数据行。
+        登记行的身份由它**在哪张表里**给出，不由它叫什么给出。
+
+        反向控制：既校验漏判形态（无前缀名字也须被扫到），也校验不越界
+        （无关表格与散文不得被判）。
+        """
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 台账\n\n"
+            "## 一、判定口径\n\n两个 git 事实同时成立才算 stale。\n\n"
+            "| 分支 | 对应合并请求 | 处置 |\n|------|------|------|\n"
+            "| `fix-caliber-generated` | #217 | 未合并进主线，在途 |\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys.modules[__name__], "LEDGER", ledger)
+        with pytest.raises(AssertionError, match="fix-caliber-generated"):
+            sys.modules[__name__].TestLedgerIsReadableInRepo() \
+                .test_ledger_records_dispositions_not_live_branch_state()
+
+        # 正向：同一张表里写已完成处置 ⇒ 绿
+        ledger.write_text(
+            "# 台账\n\n"
+            "| 分支 | 对应合并请求 | 处置 |\n|------|------|------|\n"
+            "| `fix-caliber-generated` | #217 | 已删 |\n",
+            encoding="utf-8",
+        )
+        sys.modules[__name__].TestLedgerIsReadableInRepo() \
+            .test_ledger_records_dispositions_not_live_branch_state()
+
+        # 不越界：表头不含「分支」的表不得被当登记表（否则会误伤读数表）
+        ledger.write_text(
+            "# 台账\n\n"
+            "| 读数 | 值 |\n|------|------|\n"
+            "| 应当删除 | 0 条，在途 0 |\n",
+            encoding="utf-8",
+        )
+        sys.modules[__name__].TestLedgerIsReadableInRepo() \
+            .test_ledger_records_dispositions_not_live_branch_state()
+
     def test_ledger_declares_the_rule_and_the_probe(self):
-        """台账须同时给出：纪律出处、复算入口、以及判定口径的两个条件。"""
+        """台账须同时给出：纪律出处、复算入口、以及判定口径的两个事实。
+
+        断言的是**判定口径本身**，不是分支命名空间 —— 命名空间已不再参与判定
+        （见 `TestCriterionIsMergeFactNotBranchName`），拿它当"口径"会把
+        已经退役的判据重新钉进文档。
+        """
         text = io.open(LEDGER, encoding="utf-8").read()
         assert "AGENTS.md" in text, "台账没有指向纪律出处"
         assert "npc_branch_cleanup.py" in text, "台账没有给出复算入口"
-        assert cleanup.NPC_BRANCH_PREFIX in text, "台账没有写明裁决的命名空间"
-        assert re.search(r"祖先|已合并进主线", text), "台账没有写明「已合并」的判定口径"
+        #: 判定口径必须在**「一、判定口径」那一节里**写明，不能散落在处置记录中 ——
+        #: 全文搜"第二父"不够：处置表与修正说明里也会出现这个词，断言会在
+        #: 口径节被改回旧措辞时照样绿（本轮实测：整节替换成旧的"名字以 auto/ 开头"
+        #: 后仍 18 passed）。故先切出该节，再在节内断言两条事实。
+        items = _criterion_items(_criterion_section(text))
+        assert "第二父" in items, (
+            "判定口径的编号条目没有写明「经合并请求并入主线」这条事实（第二父位）——"
+            "成员资格若退回按分支名判定，同一形态的归档分支会被放行"
+        )
+        assert re.search(r"祖先|已合并进主线", items), (
+            "判定口径的编号条目没有写明「已合并」的祖先条件"
+        )
+        assert "分支名以" not in items, (
+            "判定口径的编号条目把成员资格写回了分支名 —— 名字是平台的产物、"
+            "不是事实（实测：fix-caliber-generated 是 #217 的 head 却被名字前缀口径放行）"
+        )
