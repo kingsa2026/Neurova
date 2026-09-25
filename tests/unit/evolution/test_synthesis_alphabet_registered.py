@@ -64,19 +64,26 @@ class TestAlphabetIsRegistered:
                 )
 
     def test_phantomNames_noLongerReferencedByAnyAlphabet(self):
-        """全仓字母表类落点不得再引用幻名（教义第 5 条同根扫荡）。"""
-        import subprocess
-        from pathlib import Path
+        """全仓字母表类落点不得再引用幻名（教义第 5 条同根扫荡）。
 
-        root = Path(__file__).resolve().parents[3]
-        for name in _PHANTOM_NAMES:
-            proc = subprocess.run(
-                ["grep", "-rn", f'"{name}"', "neurova/", "--include=*.py"],
-                cwd=str(root), capture_output=True, text=True, timeout=60,
-            )
-            assert not proc.stdout.strip(), (
-                f"幻名 {name!r} 仍被引用：\n{proc.stdout}"
-            )
+        扫描走本仓唯一 AST 入口 `tests/ast_scan`（纯 Python，不依赖宿主工具）：
+        受保护子集里的守卫一旦 `subprocess.run(["grep", ...])`，CI 镜像没有该
+        二进制时不是断言失败而是 `FileNotFoundError`，整个文件其余断言静默不跑
+        （`test_dev_path_and_runtime_dep_guards` 常驻拦截此形态）。
+        判据是"字面量恰为幻名"，故只看字符串常量，不误伤 `api_calls` 这类
+        以幻名为前缀的长标识符。
+        """
+        import ast
+
+        from tests.ast_scan import PRODUCTION_ROOT, sourceRefsUnder
+
+        offenders = []
+        for ref in sourceRefsUnder(PRODUCTION_ROOT):
+            tree = ast.parse(ref.code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and node.value in _PHANTOM_NAMES:
+                    offenders.append(f"{ref.path.relative_to(PRODUCTION_ROOT)}:{node.lineno}")
+        assert not offenders, f"幻名仍被引用：{offenders}"
 
 
 class TestUnknownCategoryFallsToReview:
