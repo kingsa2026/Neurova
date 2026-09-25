@@ -406,11 +406,20 @@ class BuildContextInjectionTest(unittest.TestCase):
             self.assertNotIn("…", text, "归档正文不得被截断")
         rendered = [m for m in self.context_msgs if str(m.get("content", "")).startswith("[反思]")]
         self.assertEqual(rendered, [], "反思不再作为截断 system 行直注")
-        # P0a：痕迹 = 选中注入的 id（scenario 协程内已取）；pending→applied
-        self.assertEqual(sorted(trace), sorted(e.id for e in self.entries))
+        # B6-11（决策 D5）**推翻的旧断言**：原来这里锁的是「选中即注入」——
+        # 痕迹 = 选中的 id、状态记 applied。那正是 P2-9 的幻影注入：账目记在选中
+        # 那一刻，而条目能不能到模型面前要过池的相关性门槛与信封压缩两层。
+        # 本用例的池是 spy 且 `draw` 恒空 → 条目**没有进视图**，故按新契约：
+        # 不记 applied、不留痕迹。旧断言锁的缺陷见审计 §2.1 P2-9 / §10 D5。
+        # 「进了视图就照旧记账」的正向面由
+        # `tests/unit/context/test_reflection_view_accounting_b6_11.py` 钉住
+        # （同一判定单点，不在此另写一份判定逻辑）。
+        self.assertEqual(rendered, [])
+        self.assertIsNone(trace, "没进视图的条目不得进本轮痕迹（权威裁决输入）")
         self.assertEqual(
             {self.glog._cache[e.id].status for e in self.entries},
-            {ReflectionLogStatus.APPLIED},
+            {ReflectionLogStatus.PENDING},
+            "没进视图不得记 applied —— 选中即记账正是本票要推翻的旧契约",
         )
 
 
