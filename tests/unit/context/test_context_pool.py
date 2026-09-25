@@ -12,6 +12,7 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
+from neurova.context.pool_models import priorityForSource
 from neurova.context_pool import (
     ContextSource,
     ContextInput,
@@ -63,13 +64,20 @@ class TestContextInput:
         assert context_input.metadata["emotion"] == "happy"
     
     def test_default_values(self):
-        """测试默认值"""
+        """测试默认值
+
+        判据语义改写（T-09 残余，Issue #90）：原断言锁「缺省优先级 = 常数 50」，
+        那正是本票要推翻的旧契约——50 是**与阶梯无关的第二份定义**，于是同一个
+        来源在不同写入点拿到不同的分（端点写 10、语音模块给 EMOTION 写 60）。
+        现缺省由来源经 `priorityForSource` 派生，故断言改为「等于阶梯值」，
+        并由 `tests/unit/context/test_source_priority_single_source.py` 逐来源钉住。
+        """
         context_input = ContextInput(
             source=ContextSource.USER_INPUT,
             content="用户输入"
         )
-        
-        assert context_input.priority == 50
+
+        assert context_input.priority == priorityForSource(ContextSource.USER_INPUT)
         assert context_input.metadata == {}
         assert context_input.tokens == 0
     
