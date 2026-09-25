@@ -9,6 +9,7 @@
 - RSI回滚管理器
 - RSI部署控制器
 - RSI仪表盘
+- 判据三态契约 GateVerdict（passed / failed / unevidenced）
 """
 
 from neurova.core.logger import get_logger
@@ -45,14 +46,28 @@ except ImportError as _e:
     _logger.debug("rsi.deployment_controller 未可用: %s", _e)
 
 try:
-    from .dashboard import RSIDashboard, create_rsi_dashboard
-except ImportError as _e:
-    _logger.debug("rsi.dashboard 未可用: %s", _e)
-
-try:
     from .orchestrator import RSIOrchestrator, create_rsi_orchestrator
 except ImportError as _e:
     _logger.debug("rsi.orchestrator 未可用: %s", _e)
+
+# 判据三态契约（工单 003）：无外部依赖，导入零成本，供全部晋升/停止判据共用
+try:
+    from .gate_verdict import GateVerdict
+except ImportError as _e:
+    _logger.debug("rsi.gate_verdict 未可用: %s", _e)
+
+# 迭代结果摘要（响应面/推送面的单一事实源；仅依赖标准库，导入零成本）
+try:
+    from .result_summary import (
+        RSI_SUMMARY_FIELDS,
+        clear_rsi_summaries,
+        convergence_status,
+        get_latest_rsi_summary,
+        record_rsi_summary,
+        summarize_rsi_result,
+    )
+except Exception as _e:
+    _logger.debug("rsi.result_summary 未可用: %s", _e)
 
 __all__ = [
     "RecursiveRatchetPruner",
@@ -72,8 +87,13 @@ __all__ = [
     "create_rollback_manager",
     "RSIDeploymentController",
     "create_deployment_controller",
-    "RSIDashboard",
-    "create_rsi_dashboard",
     "RSIOrchestrator",
     "create_rsi_orchestrator",
+    "GateVerdict",
+    "RSI_SUMMARY_FIELDS",
+    "summarize_rsi_result",
+    "convergence_status",
+    "record_rsi_summary",
+    "get_latest_rsi_summary",
+    "clear_rsi_summaries",
 ]

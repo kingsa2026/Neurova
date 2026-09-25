@@ -128,102 +128,19 @@ class TestExperienceKnowledgeBase(unittest.TestCase):
         self.assertGreater(len(similar), 0)
         self.assertIn("similarity_score", similar[0])
     
-    def test_evaluate_skill_effectiveness(self):
-        """测试技能效果评估"""
-        # 添加多条记录
-        for i in range(10):
-            exp = ExperienceRecord(
-                skill_name=self.skill_name,
-                context={"user_input": f"测试 {i}"},
-                result={"output": f"结果 {i}"},
-                success=(i < 8),  # 80% 成功率
-                timestamp=datetime.now().isoformat(),
-                feedback=f"反馈 {i}"
-            )
-            self.ekb.add_experience_record(
-                self.skill_name, exp, execution_time=1.0 + i * 0.1
-            )
-        
-        # 评估技能效果
-        evaluation = self.ekb.evaluate_skill_effectiveness(self.skill_name)
-        
-        self.assertEqual(evaluation["skill_name"], self.skill_name)
-        self.assertEqual(evaluation["total_records"], 10)
-        self.assertAlmostEqual(evaluation["success_rate"], 0.8, places=1)
-        self.assertIn("effectiveness_score", evaluation)
-        self.assertIn("evaluation", evaluation)
-    
-    def test_recommend_best_practices(self):
-        """测试最佳实践推荐"""
-        # 添加多条成功记录
-        for i in range(10):
-            exp = ExperienceRecord(
-                skill_name=self.skill_name,
-                context={"user_input": f"分析代码 {i}"},
-                result={"output": f"分析结果 {i}"},
-                success=True,
-                timestamp=datetime.now().isoformat(),
-                feedback="成功"
-            )
-            self.ekb.add_experience_record(self.skill_name, exp)
-        
-        # 获取推荐
-        recommendations = self.ekb.recommend_best_practices(self.skill_name)
-        
-        self.assertGreater(len(recommendations), 0)
-        self.assertIn("type", recommendations[0])
-        self.assertIn("recommendation", recommendations[0])
-        self.assertIn("confidence", recommendations[0])
-    
-    def test_get_experience_stats(self):
-        """测试获取经验统计"""
+    def test_skill_records_are_the_stats_source(self):
+        """统计读数取自真实记录集（工单 010 删掉孤岛方法后的唯一事实源）。"""
         # 添加记录
         self.ekb.add_experience_record(self.skill_name, self.exp)
-        
-        # 获取单个技能统计
-        stats = self.ekb.get_experience_stats(self.skill_name)
-        
-        self.assertEqual(stats["skill_name"], self.skill_name)
-        self.assertEqual(stats["total_experiences"], 1)
-        self.assertEqual(stats["success_count"], 1)
-        
-        # 获取全局统计
-        global_stats = self.ekb.get_experience_stats()
-        
-        self.assertIn("total_skills", global_stats)
-        self.assertIn("total_records", global_stats)
-    
-    def test_get_skill_ranking(self):
-        """测试获取技能排名"""
-        # 添加多个技能的记录
-        for i in range(5):
-            skill_name = f"skill-{i}"
-            for j in range(10):
-                exp = ExperienceRecord(
-                    skill_name=skill_name,
-                    context={"user_input": f"测试 {j}"},
-                    result={"output": f"结果 {j}"},
-                    success=(j < 8),  # 80% 成功率
-                    timestamp=datetime.now().isoformat(),
-                    feedback="好"
-                )
-                self.ekb.add_experience_record(skill_name, exp)
-        
-        # 获取排名
-        ranking = self.ekb.get_skill_ranking(metric="success_rate", limit=3)
-        
-        self.assertLessEqual(len(ranking), 3)
-        if ranking:
-            self.assertIn("skill_name", ranking[0])
-            self.assertIn("total", ranking[0])
-    
-    def test_empty_skill_stats(self):
-        """测试空技能的统计"""
-        stats = self.ekb.get_experience_stats("non-existent-skill")
-        
-        self.assertEqual(stats["total_experiences"], 0)
-        # success_rate 字段在空技能时不存在，检查其他字段
-        self.assertIn("skill_name", stats)
+
+        records = self.ekb.get_experience_records(skill_name=self.skill_name)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["skill_name"], self.skill_name)
+        self.assertEqual(records[0]["success"], 1)
+
+        # 空技能：同一取数口的空结果（无记录即无统计）
+        empty = self.ekb.get_experience_records(skill_name="non-existent-skill")
+        self.assertEqual(empty, [])
 
 
 class TestExperienceRecord(unittest.TestCase):

@@ -1,0 +1,130 @@
+// Neurova — 端到端请求流与断点视图
+// 技能来源: flow-visualizer + graphviz
+// 视图状态: current（虚线 BREAK 边为已证实的未接线/中断路径）
+// 证据: 每个节点内 [文件:行号] 直指源码；生成日期 2026-09-19
+// 预览: Qoder DOT 格式查看器；无本地 graphviz 亦可读源
+
+digraph NeurovaFlows {
+    rankdir=TB;
+    splines=ortho;
+    nodesep=0.35; ranksep=0.55;
+    fontname="Sans"; fontsize=13;
+    labelloc=t; fontsize=19;
+    label="Neurova 一次对话请求的完整穿行路径（8 编号步 + 后处理旁路 + 成本支线）\n实线＝已证实调用　红虚线＝断点（BREAK）　灰点线＝意图路径未接线";
+
+    node [shape=box, style="rounded,filled", fillcolor="#f8f9fa", color="#495057", fontsize=11, margin="0.16,0.09"];
+    edge [fontsize=10, color="#495057"];
+
+    // ---------- 入口 ----------
+    user [label="用户消息\n(渠道 / Web / API)", fillcolor="#08427b", fontcolor="#ffffff", shape=oval];
+    adapter [label="ChannelAdapter(ABC)\nconnect / send_message / set_event_callback\n[neurova/channels/base.py:121,153,167]"];
+    chrouter [label="ChannelRouter.make_handler\n_default_agent_lookup → get_agent_instance\n[neurova/channels/channel_router.py:29-32,58]"];
+    api [label="POST /api/v1/chat\n(FastAPI endpoint)\n[neurova/api/endpoints/__init__.py:182-301]"];
+    agent [label="Agent.chat()\n薄封装，直接委派\n[neurova/agent_core.py:1762,1824]"];
+
+    user -> adapter -> chrouter -> api -> agent;
+
+    // ---------- ChatPipeline 主链 ----------
+    subgraph cluster_pipeline {
+        label="ChatPipeline._execute_steps  (chat_pipeline.py:392)  —  实测 8 个编号步，AGENTS.md:44 记为 6 步";
+        labeljust=l; style="rounded"; color="#adb5bd"; fontsize=12;
+
+        s0  [label="Step0  活动追踪 + 会话恢复\n_step_activity_tracking  [chat_pipeline.py:584]"];
+        s05 [label="Step0.5 前置检查：工具记忆 / 技能获取\n_step_pre_llm_checks  [chat_pipeline.py:671]"];
+        s07 [label="Step0.7 附件注入\n_step_inject_attachments  [chat_pipeline.py:1165]"];
+        s1  [label="Step1 记忆检索 + 上下文构建\n_step_retrieve_and_build_context  [chat_pipeline.py:1390]\n检索责任链按优先级装配 [chat_pipeline.py:201-229]"];
+        s2  [label="Step2 Evocate 结构化推理注入\n_step_evocate_injection  [chat_pipeline.py:1815]"];
+        s3  [label="Step3 LLM 调用\n_step_llm_call  [chat_pipeline.py:1869]"];
+        s4  [label="Step4 后处理管线（分叉到旁路）\n_step_post_processing  [chat_pipeline.py:2491]"];
+        s5  [label="Step5 SessionSync 终答广播\n_sync_final_reply  [chat_pipeline.py:449]"];
+
+        s0 -> s05 -> s07 -> s1 -> s2 -> s3 -> s4 -> s5;
+    }
+
+    ctx [label="ChatContext (dataclass)\n步骤间唯一状态载体\nrelevant_memories / context / reply / trace_id\n/citation_registry / writer_claim / result\n[chat_pipeline.py:126]", shape=note, fillcolor="#fff3bf"];
+
+    agent -> s0 [label="execute()"];
+    s0 -> ctx [style=invis];
+    ctx -> s1 [color="#e67700", label="贯穿全部步骤"];
+
+    // ---------- 下游依赖 ----------
+    mem [label="MemCore → memory_layer\n函数级 lazy import，单向向下\n[neurova/mem_core.py:598-604,630,738]"];
+    orch [label="ContextOrchestrator\ncontext/orchestrator.py:2122 行"];
+    llm [label="llm_client.py（顶层门面）\nchat.completions.create × 12 处\n[neurova/llm_client.py:354,445,576,695]"];
+    prov [label="8 家 LLM 服务商\n[neurova/llm/provider_manager.py:2095]", shape=hexagon, fillcolor="#999999", fontcolor="#ffffff"];
+    sync [label="session_sync WS\nseq 游标 + gap 自愈\n[neurova/api/endpoints/session_sync.py:114]"];
+    fe [label="NeurUI useSessionSync\n前端唯一 WS 消费者\n[NeurUI/src/composables/useSessionSync.ts:63-70]"];
+
+    s1 -> mem [label="检索"];
+    s1 -> orch [label="建上下文"];
+    s3 -> llm [label="调用"];
+    llm -> prov [label="HTTPS"];
+    s5 -> sync [label="publishes"];
+    sync -> fe [label="WebSocket"];
+    mem -> s1 [label="relevant_memories", color="#2b8a3e", style=dotted];
+
+    // ---------- 成本支线（断点集中） ----------
+    subgraph cluster_cost {
+        label="成本控支链路  ——  链路两处未闭环";
+        labeljust=l; style="rounded"; color="#c92a2a"; fontsize=12;
+
+        dec [label="track_llm_call 装饰器\n[neurova/models/cost_tracking.py:445]\n覆盖率 2/12：仅 llm_client.py:315,671", fillcolor="#ffe3e3"];
+        noop [label="ImportError 时降级为 no-op\n静默失效\n[neurova/llm_client.py:22-30]", fillcolor="#ffc9c9"];
+        ledger [label="记账 _record_budget_and_check_alerts\n只 record，不抛错不拦截\n[neurova/models/cost_tracking.py:510]"];
+        budget [label="is_over_budget / throttle_if_needed\n[neurova/models/cost_budget.py:276,282]\nLLM 主路径无拦截点", fillcolor="#ffe3e3"];
+        dupdec [label="另两套并行装饰器（零接入）\nllm/cost_tracking_middleware.py:279\ncollaboration/cost_ledger_integration.py:29", fillcolor="#f1f3f5"];
+        capi [label="端点注册状态\ncost_api / computer_api / phase3_api\n/ migration_api → 全未注册\nbudget_api / cost_rollup_api → 已注册", fillcolor="#fff3bf"];
+        fefe [label="前端 baseURL=/api/v1\n但 budget/cost_rollup 只挂 /api\n→ CostDashboard 404 被 .catch 吞掉\n[NeurUI/src/api/index.ts:77; app.py:560,564]", fillcolor="#ffe3e3"];
+        ci [label="CI guard:llm-tracked\ncontinue-on-error: true → 不阻断\n[.github/workflows/cost-guards.yml]"];
+
+        dec -> ledger -> budget;
+        budget -> capi [label="查询", color="#c92a2a"];
+        capi -> fefe [label="前缀断裂", color="#c92a2a"];
+        ci -> dec [label="名义校验"];
+    }
+
+    llm -> dec [label="仅 2 处", color="#c92a2a"];
+    llm -> noop [label="导入失败即静默", color="#c92a2a", style=dashed];
+    dupdec -> ledger [label="无人调用", style=dotted, color="#868e96"];
+
+    // ---------- 后处理旁路 ----------
+    subgraph cluster_post {
+        label="PostChatPipeline (3068 行)  process() [post_chat_pipeline.py:601]";
+        labeljust=l; style="rounded"; color="#868e96"; fontsize=12;
+
+        p1 [label="响应路径：asyncio.gather 两波\n[post_chat_pipeline.py:648-680]"];
+        p2 [label="后台旁路：Step 8.5 / 9 / 9.05 / 9.06\n/ 9.1 / 9.9 / 9.95 / 9.96 / 10 / 10.5 / 11 …20+ 步"];
+        p3 [label="元认知：反思 / 账本 / 自我模型 / 动机\n11 处函数级 import\n[post_chat_pipeline.py:2570,2658,2698]"];
+        p4 [label="evolution_triggered 标志 → RSI 后台化\n[chat_pipeline.py:2548,2558]\nevolution 无调度器：事件 + 启动触发"];
+        p1 -> p2 -> p3 -> p4;
+    }
+
+    s4 -> p1 [label="Step4 委派"];
+    p3 -> mem [label="记忆固化", color="#2b8a3e"];
+    p4 -> prov [label="进化期 LLM 调用", color="#868e96", style=dotted];
+
+    // ---------- 未接线的协调层 ----------
+    subgraph cluster_unwired {
+        label="已实现但未接入运行时的模块（不构成当前流）";
+        labeljust=l; style="rounded"; color="#1c7ed6"; fontsize=12;
+
+        tc [label="turn_coordinator\ncheck_and_execute_turn() [turn_coordinator.py:67]\nget_turn_coordinator() 零调用方 [:324]", fillcolor="#e7f5ff"];
+        crdt [label="crdt/ RGA + 文档\nPython 侧零消费者\n前端唯一引用已注释且用 any 顶替\n[NeurUI/src/stores/collaboration.optimized.ts:21,25]", fillcolor="#e7f5ff"];
+        cmgr [label="computer_manager 单例 [:493-506]\n仅被未注册的 computer_api 消费", fillcolor="#e7f5ff"];
+        cd [label="coordination_decorators.py\n全仓零引用", fillcolor="#e7f5ff"];
+    }
+
+    s2 -> tc [label="设计意图，实际未接线", style=dotted, color="#1c7ed6"];
+    cmgr -> cd [style=invis];
+
+    // ---------- 断点标记 ----------
+    brk1 [label="BREAK-1  预算仅报表读取，主路径无拦截\n预算判定函数存在但零调用", shape=box, style="filled", fillcolor="#c92a2a", fontcolor="#ffffff"];
+    brk2 [label="BREAK-2  装饰器覆盖 2/12\n10 个真实调用点不记账", shape=box, style="filled", fillcolor="#c92a2a", fontcolor="#ffffff"];
+    brk3 [label="BREAK-3  前后端前缀契约断裂\n/api/v1 vs /api → 静默 404", shape=box, style="filled", fillcolor="#c92a2a", fontcolor="#ffffff"];
+    brk4 [label="BREAK-4  协调层未闭环\nturn_coordinator 无调用方", shape=box, style="filled", fillcolor="#e8590c", fontcolor="#ffffff"];
+
+    budget -> brk1 [color="#c92a2a", style=dashed];
+    llm -> brk2 [color="#c92a2a", style=dashed];
+    fefe -> brk3 [color="#c92a2a", style=dashed];
+    tc -> brk4 [color="#e8590c", style=dashed];
+}

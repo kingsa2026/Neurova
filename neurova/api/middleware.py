@@ -227,9 +227,20 @@ def setup_middleware(app: FastAPI) -> None:
 
     # 全局鉴权白名单 (BUG AUDIT S-08 收口)：默认 off 完全惰性；
     # NEUROVA_GLOBAL_AUTH=shadow 记录匿名访问取证 / enforce 白名单外强制凭证。
-    # 最后注册 = 最外层，先于限流/日志拒绝未认证请求。
+    # 先于限流/日志拒绝未认证请求。
     from neurova.api.global_auth import GlobalAuthMiddleware
 
     app.add_middleware(GlobalAuthMiddleware)
+
+    # HTTP 请求时长 (P1-6)：纯 ASGI，route label 用路由模板（不用原始 path，
+    # 否则 /items/1 与 /items/2 各成一条时间线，基数爆炸）。
+    #
+    # 刻意注册在**最外层**（最后注册 = 最外层）：实测若放在 GlobalAuth 内层，
+    # enforce 模式下的 401 拒绝请求完全进不了指标（GlobalAuth 在外层直接返回，
+    # 请求永远到不了内层中间件）—— 于是"401 洪峰"在观测面上是空白。放最外层
+    # 后覆盖"全部入站 HTTP 请求"，且不改变任何鉴权行为（本中间件不做鉴权）。
+    from neurova.api.http_metrics import HttpMetricsMiddleware
+
+    app.add_middleware(HttpMetricsMiddleware)
 
     logger.info("Middleware setup complete")

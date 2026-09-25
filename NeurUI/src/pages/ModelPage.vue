@@ -14,7 +14,7 @@
             v-model:value="defaultConfig.provider_id"
             :placeholder="t('model.defaultProvider')"
             style="width: 200px"
-            :get-popup-container="popupToBody"
+            :get-popup-container="overlayContainerToBody"
             @change="onDefaultProviderChange"
           >
             <a-select-option v-for="p in providersWithModels" :key="p.id" :value="p.id">
@@ -25,7 +25,7 @@
             v-model:value="defaultConfig.model_id"
             :placeholder="t('model.defaultModel')"
             style="width: 260px"
-            :get-popup-container="popupToBody"
+            :get-popup-container="overlayContainerToBody"
           >
             <a-select-option v-for="m in defaultModelOptions" :key="m.id" :value="m.id">
               <div class="nr-model-option">
@@ -493,6 +493,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import type { Provider, ModelItem, DefaultLLMConfig, GenerationParams } from '@/types/model'
+import { overlayContainerToBody } from '@/utils/overlay'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -586,9 +587,6 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
 // ---------------------------------------------------------------------------
 const loading = ref(true)
 const loadingModels = ref(false)
-// 全局 getPopupContainer 把弹层挂在触发节点父容器里，玻璃卡片 overflow:hidden 会截断
-// （默认 LLM 下拉被裁剪事故）；弹层统一挂 body 逃出裁剪。
-const popupToBody = () => document.body
 const savingDefault = ref(false)
 const savingProvider = ref(false)
 const savingConfig = ref(false)

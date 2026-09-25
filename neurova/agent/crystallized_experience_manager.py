@@ -405,32 +405,6 @@ class CrystallizedExperienceManager:
             self._cache.clear()
             return count
 
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        获取统计信息
-
-        Returns:
-            统计字典
-        """
-        total = self._metrics.total_attempts
-        success_rate = self._metrics.successful_attempts / total if total > 0 else 0.0
-        return {
-            "total_attempts": total,
-            "successful_attempts": self._metrics.successful_attempts,
-            "failed_attempts": self._metrics.failed_attempts,
-            "cached_attempts": self._metrics.cached_attempts,
-            "degraded_attempts": self._metrics.degraded_attempts,
-            "success_rate": success_rate,
-            "average_latency_ms": self._metrics.average_latency_ms,
-            "consecutive_failures": self._metrics.consecutive_failures,
-            "health_status": self._metrics.health_status.value,
-            "cache_size": len(self._cache),
-        }
-
-    # ══════════════════════════════════════════════════════════════
-    # 私有方法
-    # ══════════════════════════════════════════════════════════════
-
     def _hash_query(self, query: str) -> str:
         """计算查询哈希
 

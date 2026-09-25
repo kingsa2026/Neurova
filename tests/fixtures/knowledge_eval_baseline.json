@@ -1,0 +1,29 @@
+{
+  "measure_state": "measured",
+  "run_id": "evr_3a1abc27c977",
+  "frozen_at": "2026-09-19T17:28:31.938585+00:00",
+  "case_count": 30,
+  "top_k": 5,
+  "context": {
+    "agent_id": null,
+    "scope": "all",
+    "user": {
+      "role": "admin"
+    }
+  },
+  "readings": {
+    "recall_at_k": 0.855489,
+    "mrr": 0.83,
+    "unhit_rate": 0.1
+  },
+  "labeling_breakdown": {
+    "category": 3,
+    "tag": 3,
+    "title_literal": 24
+  },
+  "unhit_queries": [
+    "architecture",
+    "general",
+    "big_verify"
+  ]
+}

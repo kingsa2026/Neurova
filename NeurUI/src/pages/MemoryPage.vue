@@ -16,6 +16,11 @@
         </div>
       </div>
       <div class="header-actions">
+        <a-tooltip :title="t('memory.reloadHint')">
+          <GlassButton variant="ghost" size="sm" :loading="reloading" @click="handleReloadMemories">
+            {{ t('memory.reload') }}
+          </GlassButton>
+        </a-tooltip>
         <a-tooltip :title="t('memory.decay')">
           <GlassButton variant="ghost" size="sm" :loading="decaying" @click="handleTriggerDecay">
             {{ t('memory.decay') }}
@@ -118,6 +123,8 @@
         <a-tab-pane key="long_term" :tab="t('memory.longTerm')" />
         <a-tab-pane key="episodic" :tab="t('memory.categoryEpisodic')" />
         <a-tab-pane key="semantic" :tab="t('memory.categorySemantic')" />
+        <!-- 工作流经验：012 已进后端枚举，此前界面没有页签所以库里能存筛不出 -->
+        <a-tab-pane key="workflow_experience" :tab="t('memory.typeWorkflowExperience')" />
         <a-tab-pane key="hot" :tab="t('memory.hot')" />
         <a-tab-pane key="crystallized" :tab="t('memory.crystallized')" />
       </a-tabs>
@@ -170,7 +177,7 @@
               <span v-if="(val as number) / result.score > 0.15" class="channel-label">{{ ch }}</span>
             </div>
           </div>
-          <div class="result-date">{{ formatTime(result.created_at) }}</div>
+          <div class="result-date">{{ formatTimestampText(result.created_at) }}</div>
         </div>
       </div>
     </GlassCard>
@@ -196,7 +203,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'content'">
             <div class="content-preview">
-              {{ truncate(record.content, 120) }}
+              {{ truncateText(record.content, 120) }}
               <a-tag v-if="record.tags?.length" color="gold" class="shared-badge">
                 {{ record.tags.join(', ') }}
               </a-tag>
@@ -270,12 +277,9 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.type" style="width: 100%">
-                <a-select-option value="semantic">{{ t('memory.categorySemantic') }}</a-select-option>
-                <a-select-option value="episodic">{{ t('memory.categoryEpisodic') }}</a-select-option>
-                <a-select-option value="working">{{ t('memory.typeWorking') }}</a-select-option>
-                <a-select-option value="procedural">{{ t('memory.typeProcedural') }}</a-select-option>
-                <a-select-option value="pattern">{{ t('memory.typePattern') }}</a-select-option>
-                <a-select-option value="emotional">{{ t('memory.typeEmotional') }}</a-select-option>
+                <a-select-option v-for="mt in MEMORY_TYPES" :key="mt.value" :value="mt.value">
+                  {{ t(mt.labelKey) }}
+                </a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -403,6 +407,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { truncateText } from '@/utils/displayText'
+import { formatTimestampText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -410,6 +416,10 @@ import { useAgentStore } from '@/stores/agents'
 import { useAuthStore } from '@/stores/auth'
 import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
+
+// 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
+// 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
+const MEMORY_TYPES = memoryApi.MEMORY_TYPES
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -433,6 +443,7 @@ const creating = ref(false)
 const updating = ref(false)
 const editing = ref(false)
 const decaying = ref(false)
+const reloading = ref(false)
 const importing = ref(false)
 
 const memories = ref<MemoryEntry[]>([])
@@ -512,7 +523,10 @@ const memoryStats = ref<MemoryStats | null>(null)
 // Semantic search results
 const searchResults = ref<MemorySearchResult[]>([])
 
-const categories = ['general', 'conversation', 'fact', 'preference', 'skill', 'emotion']
+// 分类清单取自后端 MemoryCategory 枚举（MEMORY_CATEGORY_VALUES 单一事实源）。
+// 此前这里是 6 个值的本地数组，其中 fact/preference/skill/emotion 并非后端枚举，
+// 选中即被回落成 general，筛选永远为空（Issue #68）。
+const categories = memoryApi.MEMORY_CATEGORY_VALUES
 
 const createForm = ref({
   content: '',
@@ -522,14 +536,10 @@ const createForm = ref({
   tags: [] as string[],
 })
 
-const typeColor = (type: string) => {
-  // key = 后端 MemoryType 枚举值（页签契约对齐 2026-09-08）
-  const map: Record<string, string> = {
-    working: '#6366f1', episodic: '#f59e0b', semantic: '#8b5cf6',
-    procedural: '#10b981', pattern: '#0ea5e9', emotional: '#f43f5e',
-  }
-  return map[type] || '#6366f1'
-}
+const typeColor = (type: string) =>
+  // 色板与 MEMORY_TYPES 同源（工单 015）：此前这里另有一份 map，新增枚举值时
+  // 页签/下拉/色板三处各自漂移，workflow_experience 就是这么漏掉的
+  memoryApi.MEMORY_TYPE_COLOR[type] || '#6366f1'
 
 // NeRF channel color map for visualization
 const channelColorMap: Record<string, string> = {
@@ -558,6 +568,11 @@ const statsCards = computed(() => [
   {
     label: t('common.type') + 's',
     value: memoryStats.value?.by_type?.length ?? 0,
+  },
+  {
+    // 冲突账读数：检测链落账、读侧可见（unresolved 即尚待处置的部分）。
+    label: t('memory.conflicts'),
+    value: memoryStats.value?.conflicts?.total ?? 0,
   },
 ])
 
@@ -588,10 +603,7 @@ const originLabel = (origin?: string) => {
   return t(i18nMap[key] || 'memory.originAgent')
 }
 
-const truncate = (text: string, len: number) =>
-  text && text.length > len ? text.slice(0, len) + '...' : text || ''
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const importanceColor = (val: number) => {
   if (val >= 0.8) return '#10b981'
@@ -804,6 +816,27 @@ const handleTriggerDecay = async () => {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     decaying.value = false
+  }
+}
+
+/**
+ * 与盘对账：并入外进程（如 CLI 导入）写入的记忆，并回收它在另一进程撤销掉的行，
+ * 然后重读列表。不重新读盘时前者在界面上一条都看不见，而后者会一直"还在"——
+ * 点一次强化就把撤销结果写回盘上（快照只在后端构造时读一次盘）。
+ */
+const handleReloadMemories = async () => {
+  reloading.value = true
+  try {
+    const res = await memoryApi.reloadMemories(agentId.value || undefined)
+    const reloaded = (res as any)?.data?.reloaded ?? 0
+    const reaped = (res as any)?.data?.reaped ?? 0
+    message.success(`${t('memory.reload')}: +${reloaded} / -${reaped}`)
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    reloading.value = false
   }
 }
 

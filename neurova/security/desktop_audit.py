@@ -21,10 +21,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-_DEFAULT_DB = "data/desktop_action_audit.db"
+_DEFAULT_DB = dataPath("desktop_action_audit.db")
 
 # 隐私白名单：审计表全部列（红线不可漂移——测试逐列比对）
 ALLOWED_COLUMNS = (

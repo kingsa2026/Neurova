@@ -97,10 +97,18 @@ class TestCamofoxSupervisorInit:
             CamofoxSupervisor,
             DEFAULT_COMMAND,
         )
+        from neurova.tool_layers.npx_runtime_registry import pinned_spec
 
         s = CamofoxSupervisor()
         assert s._command == DEFAULT_COMMAND
-        assert s._command == ["npx", "-y", "@askjo/camofox-browser"]
+        # Issue #56 残留边界：npx 必须带精确版本——`npx -y <pkg>` 每次解析
+        # latest，既不可复现也不进任何审计覆盖面。版本单点登记在
+        # npx_runtime_registry.PINNED（该清单生成锁文件供 OSV 审计）。
+        assert s._command == [
+            "npx", "-y", pinned_spec("@askjo/camofox-browser"),
+        ]
+        assert s._command[2].startswith("@askjo/camofox-browser@")
+        assert s._command[2] != "@askjo/camofox-browser"  # 裸包名 = 未钉版本
 
     def test_env_command_overrides_default(self, monkeypatch):
         monkeypatch.setenv("NEUROVA_CAMOFOX_COMMAND", "node /path/to/server.js")

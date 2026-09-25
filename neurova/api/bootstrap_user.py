@@ -18,13 +18,14 @@ import os
 from typing import List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
 BOOTSTRAP_ENV = "NEUROVA_BOOTSTRAP_USER"
 
 # 安装包首装向导凭据文件（NSIS 自定义页写入，后端启动消费后删除）
-BOOTSTRAP_ADMIN_FILE = "data/bootstrap_admin.ini"
+BOOTSTRAP_ADMIN_FILE = dataPath("bootstrap_admin.ini")
 
 _user_model_loader = None  # 可注入（测试桩）
 

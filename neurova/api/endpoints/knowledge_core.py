@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
@@ -200,6 +201,104 @@ async def create_knowledge(
         owner_user_id=str(current_user.get("user_id", "")),
     )
     return item_response(item)
+
+
+@router.get("/evaluation/baseline")
+async def get_evaluation_baseline(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """检索评测基线读数（只读）。未冻结基线时回 unevidenced，不回 0。"""
+    import json as _json
+
+    from neurova.knowledge.evaluation import get_retrieval_benchmark
+
+    bench = get_retrieval_benchmark()
+    baseline = bench.baseline()
+    if baseline is None:
+        return {
+            "measure_state": "unevidenced",
+            "missing_reason": "尚未冻结基线：先跑 RetrievalBenchmark.seedFromRepository + run + freezeBaseline",
+            "case_count": bench.caseCount(),
+            "readings": None,
+        }
+    return {
+        "measure_state": baseline.get("measure_state"),
+        "run_id": baseline.get("run_id"),
+        "frozen_at": baseline.get("frozen_at"),
+        "case_count": baseline.get("case_count"),
+        "top_k": baseline.get("top_k"),
+        "context": _json.loads(baseline.get("context_json") or "{}"),
+        "readings": {
+            "recall_at_k": baseline.get("recall_at_k"),
+            "mrr": baseline.get("mrr"),
+            "unhit_rate": baseline.get("unhit_rate"),
+        },
+    }
+
+
+@router.get("/foundation/usage")
+async def get_foundation_usage(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """底座使用与采纳回流度量（只读）。空库回 unevidenced，不回 0% 无视。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    return get_knowledge_fact_store().usageMetrics()
+
+
+@router.get("/foundation/integrity")
+async def get_foundation_integrity(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """溯源链完整性巡检（只读，工单 023 / G02）。
+
+    只报实况不动数据：改写任何一条断言都会在这里露出来，并指到具体活动与第几跳；
+    `unlinked` 是"上链之前写的行"这一维没依据，不等于被篡改。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.digest_chain import ActivityDigestChain
+
+    return ActivityDigestChain(get_knowledge_fact_store()).verify()
+
+
+@router.get("/facts/{fact_id}/lineage")
+async def get_fact_lineage(
+    request: Request,
+    fact_id: str = Path(..., description="事实底座 fact_id"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """一条事实的逐跳血缘（只读，工单 024 / G01）。
+
+    `missing` 是显式的缺维清单：没有断言、断言没挂活动、活动没记介质各占一条。
+    回一条空链会被读成"溯过源、没来源"，那是假的确定性。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.lineage_view import FactLineageView
+
+    view = FactLineageView(get_knowledge_fact_store()).trace(fact_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
+    return view
+
+
+@router.get("/facts/{fact_id}/turtle", response_class=PlainTextResponse)
+async def get_fact_turtle(
+    request: Request,
+    fact_id: str = Path(..., description="事实底座 fact_id"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """血缘的 RDF/Turtle 导出（自拼文本，零新增依赖）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.turtle import serializeFact
+
+    try:
+        return PlainTextResponse(
+            serializeFact(get_knowledge_fact_store(), fact_id), media_type="text/turtle")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/{knowledge_id}/revisions")

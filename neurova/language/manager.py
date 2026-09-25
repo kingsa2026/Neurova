@@ -24,6 +24,7 @@ from neurova.language.models import (
     TranslationResponse,
     UserLanguagePreference,
 )
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -43,7 +44,7 @@ class LanguageManager:
             data_dir: 数据目录路径
             default_language: 默认语言
         """
-        self.data_dir = Path(data_dir) if data_dir else Path("data/language")
+        self.data_dir = callerPath(data_dir, "language")
         self.default_language = default_language
 
         # 线程锁

@@ -19,12 +19,12 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.core.data_root import get_data_root
+
 # 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
 
-
 # ── 技能质量漏斗归因──
-
 
 def compute_skill_funnel_update(
     entries: Optional[List[Dict[str, Any]]], task_completed: bool
@@ -57,9 +57,7 @@ def compute_skill_funnel_update(
             delta["fallbacks"] += 1
     return updates
 
-
 # ── 信任生命周期──
-
 
 def compute_trust_transition(
     state: str, outcome: str, successes_since_failure: int, min_successes: int = 2
@@ -80,7 +78,6 @@ failure 即刻降级并清零计数；晋升须
         return "trusted", 0
     count += 1
     return ("trusted", 0) if count >= max(1, int(min_successes)) else ("provisional", count)
-
 
 def compute_trust_observations(
     entries: Optional[List[Dict[str, Any]]], task_completed: bool
@@ -104,7 +101,6 @@ def compute_trust_observations(
         for skill_id, agg in seen.items()
     }
 
-
 class SkillService:
     """
     Agent 技能服务
@@ -125,7 +121,10 @@ class SkillService:
             skills_dir: 技能目录路径
         """
         self.agent_id = agent_id
-        self.skills_dir = Path(skills_dir) if skills_dir else Path(f"data/agents/{agent_id}/skills")
+        if skills_dir:
+            self.skills_dir = Path(skills_dir)
+        else:
+            self.skills_dir = get_data_root() / "agents" / str(agent_id) / "skills"
         self.manifest_path = self.skills_dir / "manifest.json"
         self._skills: Dict[str, Dict[str, Any]] = {}
         self._logger = get_logger(__name__)
@@ -315,7 +314,7 @@ class SkillService:
         return None
 
     def create_automatic_skill(self, skill_id, name, description, config, version="1.0.0",
-                               alias_ids=()):
+                               alias_ids=(), human_approved: bool = False):
         aliases = tuple(str(a) for a in (alias_ids or ()) if str(a))
         manifest = {"id": skill_id, "name": name, "description": description, "config": config}
         from neurova.skills.creation_governance import manifest_fingerprint
@@ -352,7 +351,8 @@ class SkillService:
                     return {"success": True, "duplicate": True, "skill_id": skill_id}
                 return {"success": False, "error": "Skill ID already exists with different steps",
                         "code": "id_conflict"}
-            ok = self._register_metadata(skill_id, name, description, version, config)
+            ok = self._register_metadata(skill_id, name, description, version, config,
+                                         human_approved=human_approved)
             return {"success": ok, "skill_id": skill_id, **({} if ok else {"error": "Persistence failed"})}
 
     def install_skill(
@@ -361,6 +361,7 @@ class SkillService:
         skill_id: str = None,
         pool_type: str = "agent",
         owner_user_id: str = "",
+        human_approved: bool = False,
     ) -> Dict[str, Any]:
         """
         安装技能
@@ -368,6 +369,10 @@ class SkillService:
         Args:
             skill_path: 技能路径（本地目录/zip 路径，或远程 http(s):// URL）
             skill_id: 技能ID（可选，默认从技能清单中读取）
+            human_approved: 该次安装由人显式批准（工单 010）。`source` 为
+                auto/synthesized/llm_created 时默认按"自动行为"要求三个独立真实
+                成功证据；人类刚批准的提案不是自动行为，若不区分则人工通道
+                按构造走不通。判重、路径穿越与安全扫描不受此参数影响。
 
         Returns:
             安装结果
@@ -438,7 +443,8 @@ class SkillService:
                     # 传 requested_id 让判重只认"别的 ID 声明了同一身份"（跳转），
                     # 同名条目走下方 replacement 快路径保留账本与版本链。
                     decision = self._creation_decision(
-                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"},
+                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"}
+                        and not human_approved,
                         db=db, exclude_ids=(str(skill_id), str(manifest_id)))
                     if decision is None and str(skill_id) in self._skills:
                         # 同名且**同一结构身份** → 同内容的重复安装：如实回报
@@ -1002,6 +1008,7 @@ class SkillService:
         manifest_source: str = "auto",
         pool_type: str = "agent",
         owner_user_id: str = "",
+        human_approved: bool = False,
     ) -> bool:
         """
         注册元数据技能 (无文件路径, 仅 manifest 持久化)
@@ -1040,13 +1047,19 @@ class SkillService:
 
                 from neurova.evolution.skill_review_gate import skill_review_gate_enabled
 
+                # 工单 016：自动产物默认进"注册即禁用"待审，但**人已经批准过的**
+                # （builder 模板过审批面后才走到这里落盘）不得再被这道门按回停用 ——
+                # 否则"批准"停在内存态，重启/下一轮对话读磁盘即不可用。
                 self._skills[skill_id] = {
                     "id": skill_id,
                     "name": name,
                     "version": version,
                     "description": description,
-                    "enabled": not (manifest_source in {"auto", "synthesized", "llm_created"}
-                                    and skill_review_gate_enabled()),
+                    "enabled": not (
+                        manifest_source in {"auto", "synthesized", "llm_created"}
+                        and skill_review_gate_enabled()
+                        and not human_approved
+                    ),
                     "installed_at": datetime.datetime.now().isoformat(),
                     "path": "",  # 自动技能无文件路径
                     "pool_type": str(pool_type or "agent"),
@@ -1080,20 +1093,36 @@ class SkillService:
                       name, description) -> str:
         """P0 「比上一版本优秀」门控——返回拒绝原因，通过返回空串。
 
-        旧实现对本通道零内容校验：正文写空串也落盘成功、版本位由提案方自增、
-        「先批准一次 → 之后任意改写」全程无门。四道确定性闸（零 LLM）：
+        **本门只咬「进化提案链」，不咬「编辑链的字段修改」。**
 
-          1. content_non_empty  — 提交后的有效正文（name/description/正文配置/
-             工具序列）不得为空，拒绝"清空式改写"；
+        `update_auto_skill` 是两条语义链共用的落盘通道：
+          - **进化/提案链**（skill_improver 等）：提交版本 + 全文，自证"比上一
+            版本优秀"——四道闸为它而设；
+          - **编辑链**（`PUT /private`、`PUT /me/skills`、share/push、enabled
+            开关、库内流转）：只改字段、**恒以 version=None 调用**，压根不声称
+            "更优"。
+        拿提案门槛（名述自洽 / 生效正文非空）去咬编辑链，用户改个名字、打个
+        共享标记就 500——门默认开（NEUROVA_SKILL_UPDATE_GATE=1）后实测复现。
+        故本门先按「本次提交了什么」分类，版本/名述两闸对编辑链不做裁决。
+
+        四道确定性闸（零 LLM）：
+          1. content_non_empty  — 拒绝"清空式改写"。**存量空描述不在此闸范围**
+             （编辑链创建条目时 description 默认空串，是真实一等公民，翻开关/
+             打标记不该被拦）；只咬"本次主动提交空描述/把生效正文写空"这个
+             动作；
           2. version_monotonic  — 版本号不得**回退**；不可解析的版本串一律
-             拒绝；同版本仅当**内容确有变化**（name/description/config 任一
-             不同）时放行，否则视为空更新拦下——「同版本原地升级」是库内
-             同源流转/经验重建的真实语义，不能与「只升不降」互斥；
-          3. routing_sanity     — 提案方**同时提交 name+description** 时跑
-             名述自洽自检，与 AutoSkillBuilder.approve_template 同一判据；
+             拒绝；同版本仅当**本次提交的字段确有变化**时放行，纯重复落盘
+             视为空更新拦下——「同版本原地升级」是库内同源流转/经验重建的
+             真实语义，不能与「只升不降」互斥；
+          3. routing_sanity     — **提案方（提交了版本）**提交了新的非空描述
+             时跑名述自洽自检，与 AutoSkillBuilder.approve_template 同一判据；
           4. review_gate        — 评审闸开启且该技能 source∈{auto,synthesized,
              llm_created} 时，改写落盘即重新置回待审（enabled=False）：批准过
              一次不等于永久免疫。
+
+        **前置条件（时序）**：调用方必须在改动条目**之前**取快照并把旧条目传
+        进来——本门所有"本次提交了什么"的判据都依赖旧值。见 `update_auto_skill`
+        里 `_prev` 的取值位置。
         """
         import copy as _copy
 
@@ -1107,11 +1136,47 @@ class SkillService:
         eff_config = (effective.get("manifest") or {}).get("config") or {}
         body = str(eff_config.get("context_template") or "").strip()
         sequence = eff_config.get("tool_sequence") or []
-        # 有效正文 = 指令体 / 描述 / 工具序列，任一非空即算有内容——这样
-        # "把正文写成空串"被拦，而"只改 tool_sequence"的既有通道不受影响。
+        # 有效正文 = 指令体 / 描述 / 工具序列，任一非空即算有内容——"只改
+        # tool_sequence"的既有通道因此不受影响。注意本判据**不足以**拦"清空
+        # 指令体"：工具序列在场时它恒真（见下方 body_cleared 判据）。
         has_body = bool(body) or bool(str(effective.get("description") or "").strip()) or bool(sequence)
+        # 编辑链判定：**本次没有提交版本**。`update_auto_skill` 是两条链共用
+        # 的落盘通道（见方法 docstring），编辑链（PUT/share/push/enabled 开关、
+        # 库内流转）恒以 version=None 调用——它只改字段，不声称"更优"，故
+        # 「版本只升不降」「名述自洽」两闸对它是**无定义**的，不做裁决。
+        editing = version is None
+        # 1. content_non_empty —— 只咬"本次把正文写空"这个动作，不咬存量空。
+        #
+        #    存量空正文条目（编辑链创建时 description 默认空串，前端大多数
+        #    调用不传它）是**真实的一等公民**：翻开关/打共享标记/改 category
+        #    都属正常编辑，不该被"内容为空"拦下（历史误杀实测：PUT 与 share
+        #    恒 500）。故编辑链只在**本次主动提交了一个空描述**（真正的"清空
+        #    描述"动作）时拦；提案方（提交了版本）仍按"生效正文非空"判——
+        #    它自证"更优"，不允许把自己清空成死技能。工具序列不受影响：
+        #    "只改 tool_sequence"的既有通道照常放行。
         if not has_body:
-            return "content_non_empty"
+            # 编辑链（version=None）：提交空描述 = 真正的"清空描述"动作 → 拦；
+            # 未提交描述（存量空条目做字段编辑）→ 放行（存量空不是本次清空，
+            # 否则翻开关/打共享标记恒 500，历史误杀实测）。
+            # 提案方（提交了版本）：生效正文为空一律拦（自证"更优"却清空自己）。
+            if not editing or (description is not None and not str(description).strip()):
+                return "content_non_empty"
+        # 编辑链**主动清空**已有描述：正文虽仍在（工具序列/指令体），但"清空式
+        # 改写"不该从编辑链侧门绕过——旧洞（把描述写成空串照样落盘）必须两侧
+        # 同堵。仅"提交空描述且库存描述非空"这一种形态会命中。
+        if description is not None and not str(description).strip() \
+                and str(entry.get("description") or "").strip():
+            return "content_cleared"
+        # 编辑链/提案方**主动清空指令体**：与上面 `content_cleared`（针对
+        # description）对称的同一类动作。`has_body` 把工具序列也算作内容，
+        # 于是"带序列 + 把 context_template 写成空串"这条形态从判据缝里漏过
+        # （实测落盘成功）。指令体是技能**行为正文**的事实源，被清空后条目
+        # 仍显示"有内容"，评审闸看不出来——故按同一口径拦：只咬"本次提交了
+        # 空的 context_template 且库存非空"这个动作，存量空指令体不受影响。
+        if config is not None and "context_template" in config:
+            if not str(config.get("context_template") or "").strip() \
+                    and str((((entry.get("manifest") or {}).get("config")) or {}).get("context_template") or "").strip():
+                return "body_cleared"
         if version is not None:
             order = self._version_key(version)
             if order is None:
@@ -1123,20 +1188,32 @@ class SkillService:
                     # apply_maintenance_update 豁免通道）。
                     return "version_regression"
                 if order == self._version_key(current):
-                    # 同版本 + 内容无变化 = 空更新（重放/自增噪声），拦下；
-                    # 同版本 + 内容确有变化 = **原地改进**（库内同源流转、经
-                    # 验重建等真实通道都会这样写），放行——否则「只升不降」
-                    # 会与「同版本原地升级」的流转语义互斥，把真路径误杀。
-                    if not self._content_changed(entry, name, description, config):
+                    # 同版本 + 本次提交字段无变化 = 空更新（重放/自增噪声），
+                    # 拦下；同版本 + 提交字段确有变化 = **原地改进**（库内同源
+                    # 流转、经验重建等真实通道都会这样写），放行——否则「只升
+                    # 不降」会与「同版本原地升级」的流转语义互斥，把真路径误杀。
+                    # 只比对**本次提交的字段**：未提交的字段（None）不是"没变
+                    # 更"的证据。
+                    if not self._submitted_change(entry, name, description, config):
                         return "version_not_ascending"
-        # 路由自检只在**名述内容侧确有变化**时咬合（同版本分支已算出）。
-        # 本通道的常规写入有两类都不该被它咬：①"名字即描述"的自动技能
-        # （genetic_* / synth_*）本就不自洽；②库内同源流转/经验重建会把
-        # **源侧现值原样回填**（name/description 与旧值逐字相同），拿这种
-        # 非提案方产出的名述去判，等于用存量罪误杀正常搬运。
-        # 名述自洽是"**新增/改写**名述"的门，不是"重复提交同一名述"的门。
+        # 路由自检只在**提案方（提交了版本）+ 本次提交了非空描述**时咬合。
+        #
+        # 为什么加"提案方"这一条：名述自洽是**进化提案**的自证门槛，与
+        # AutoSkillBuilder.approve_template 同一判据。而编辑链（PUT /private、
+        # /me/skills、share）只改字段、不提交版本，其描述是**给用户看的备注
+        # 文本**（"nd"/"共享标记"这类串与技能名天然无 token 交集），拿提案
+        # 门槛去咬它 = 用户改个名字、打个共享标记就 500（历史误杀实测）。
+        #
+        # 另一类也不该被咬：库内同源流转/经验重建会把**源侧现值原样回填**
+        # （name/description 与旧值逐字相同）——那种情况 `_naming_submitted_-
+        # changed` 已判 False，属"重复提交同一名述"，不是新提案。
         submitted_description = description if description is not None else None
-        if self._naming_changed(entry, name, description) and str(submitted_description or "").strip():
+        naming_proposed = (
+            not editing
+            and self._naming_submitted_changed(entry, name, description)
+            and str(submitted_description or "").strip()
+        )
+        if naming_proposed:
             try:
                 from neurova.skills.skill_injection import routing_sanity_check
 
@@ -1149,6 +1226,39 @@ class SkillService:
             if issues:
                 return "routing_sanity"
         return ""
+
+    @staticmethod
+    def _submitted_change(entry: Dict[str, Any], name, description, config) -> bool:
+        """**本次提交的字段**里是否有真实变化（None=未提交，不计入）。
+
+        与 `_content_changed`（比对合并后的生效值，含"清空"这类变化）分工：
+          - `_content_changed`：回答"生效内容与旧值是否不同"；
+          - `_submitted_change`：回答"提案方这次到底改了什么"，用于**空更新**
+            判定。只改 name 的编辑链必须算有变化，不能因为"版本没升"被拦。
+        """
+        if name is not None and str(name) != str(entry.get("name") or ""):
+            return True
+        if description is not None and str(description) != str(entry.get("description") or ""):
+            return True
+        if config is not None:
+            current = (entry.get("manifest") or {}).get("config") or {}
+            if dict(config) != dict(current):
+                return True
+        return False
+
+    @staticmethod
+    def _naming_submitted_changed(entry: Dict[str, Any], name, description) -> bool:
+        """本次**提交的**名述是否与库内现值不同（未提交的字段不算）。
+
+        `_naming_changed` 在 name/description 均为 None 时回退比对**生效值**；
+        本判据直接判"没提交 = 没新名述"，因为 routing_sanity 咬的是"提案方
+        新提交的名述"，不是"存量名述"。
+        """
+        if name is not None and str(name) != str(entry.get("name") or ""):
+            return True
+        if description is not None and str(description) != str(entry.get("description") or ""):
+            return True
+        return False
 
     @staticmethod
     def _naming_changed(entry: Dict[str, Any], name, description) -> bool:
@@ -1244,7 +1354,19 @@ class SkillService:
                     return False
                 import copy as _copy
 
+                # 门要看的是**旧值**、回滚要的也是**旧值**：必须在改动 entry 之前
+                # 取快照。历史缺陷：这里把 `_prev` 放在三处赋值之后取，于是门拿到的
+                # "旧条目"其实是本轮改完的条目——`_submitted_change` 恒比较
+                # "自己 vs 自己"返回 False，任何字段编辑都被判成空更新/无来源可核。
                 _prev = _copy.deepcopy(entry)  # 深拷贝：version_history/identity 可变容器不回滚遗漏
+                # P0 质量门：内容非空 / 版本只升不降 / 路由自检 / 重走评审闸
+                gate_on = self._update_gate_enabled() if enforce_quality is None else bool(enforce_quality)
+                if gate_on:
+                    reason = self._quality_gate(skill_id, _prev, version, config, name, description)
+                    if reason:
+                        self._logger.warning("update_auto_skill 被质量门拒绝(%s): %s", reason, skill_id)
+                        return False
+                # 门通过后才落字段改动
                 if name is not None:
                     entry["name"] = str(name)
                 if description is not None:
@@ -1253,14 +1375,7 @@ class SkillService:
                     entry["version"] = str(version)
                 if config is not None:
                     entry["manifest"] = {**entry.get("manifest", {}), "config": dict(config)}
-                # P0 质量门：内容非空 / 版本只升不降 / 路由自检 / 重走评审闸
-                gate_on = self._update_gate_enabled() if enforce_quality is None else bool(enforce_quality)
                 if gate_on:
-                    reason = self._quality_gate(skill_id, _prev, version, config, name, description)
-                    if reason:
-                        self._skills[skill_id] = _prev
-                        self._logger.warning("update_auto_skill 被质量门拒绝(%s): %s", reason, skill_id)
-                        return False
                     self._reenter_review_gate(entry)  # 改写落盘即回待审（批准一次 ≠ 永久免疫）
                 # P1-6 版本 DAG（线性 parent 边）：version 变化追加修订历史
                 if version is not None:

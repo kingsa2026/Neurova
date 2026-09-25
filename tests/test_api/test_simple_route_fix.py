@@ -1,49 +1,36 @@
-"""简单的路由修复测试"""
+"""路由前缀对照断言（2026-09-13 起改指现行真集）。
+
+原文件要求 `skill_market` / `skills_market` 必须存在且带 `router`——那与
+ADR 0013「删除 A/B/C 三套、保留 skill_pool_api 为唯一规范端点」的裁定直接对冲，
+也与 Issue #68 的处置台账（skill_market / skills_market 已删除）对冲。
+按教义第 2 条，不能为了保住这条旧断言而让已判定的死套复活；
+改为断言**现行真集**存活、且两个已删套确实不在。
+"""
+import importlib.util
+
 import pytest
 
 
 def test_route_prefix_changes():
-    """测试路由前缀变更"""
-    # 验证修复后的前缀
+    """现行挂载前缀（channels 与 context 两组同名歧义已各自收口）。"""
     fixes = {
         "channels": "/v1/channel-adapters",
-        "context_pool_settings": "/v1/context-pool", 
-        "skill_market": "/v1/skills-market",
+        "context_pool_settings": "/v1/context-pool",
     }
-    
-    print("路由前缀修复:")
     for module, prefix in fixes.items():
-        print(f"  {module} -> {prefix}")
-    
-    # 验证修复
-    assert fixes["channels"] == "/v1/channel-adapters", "channels前缀修复错误"
-    assert fixes["context_pool_settings"] == "/v1/context-pool", "context_pool_settings前缀修复错误"
-    assert fixes["skill_market"] == "/v1/skills-market", "skill_market前缀修复错误"
+        assert prefix.startswith("/v1/"), f"{module} 的前缀未落在 /api/v1 挂载层：{prefix}"
 
 
-def test_import_after_fix():
-    """测试修复后模块导入"""
-    try:
-        from neurova.api.endpoints import channels
-        from neurova.api.endpoints import context
-        from neurova.api.endpoints import context_pool_settings
-        from neurova.api.endpoints import skill_market
-        from neurova.api.endpoints import skills_market
-        
-        print("所有模块导入成功")
-        
-        # 检查router属性
-        assert hasattr(channels, 'router'), "channels模块应该有router"
-        assert hasattr(context, 'router'), "context模块应该有router"
-        assert hasattr(context_pool_settings, 'router'), "context_pool_settings模块应该有router"
-        assert hasattr(skill_market, 'router'), "skill_market模块应该有router"
-        assert hasattr(skills_market, 'router'), "skills_market模块应该有router"
-        
-        print("所有模块都有router属性")
-        
-    except ImportError as e:
-        pytest.fail(f"模块导入失败: {e}")
+def test_current_route_modules_import():
+    """现行路由模块必须可导入且带 `router`。"""
+    for name in ("channels", "context", "context_pool_settings", "skill_pool_api"):
+        module = __import__(f"neurova.api.endpoints.{name}", fromlist=["router"])
+        assert hasattr(module, "router"), f"{name} 模块应该有 router"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+@pytest.mark.parametrize("removed", ["skill_market", "skills_market"])
+def test_deprecated_market_shells_are_removed(removed):
+    """ADR 0013 判定删除的两套市场端点必须真的不在（不是「不注册」）。"""
+    assert importlib.util.find_spec(f"neurova.api.endpoints.{removed}") is None, (
+        f"{removed} 已由 ADR 0013 判定删除，却又出现在仓库里——死套复活。"
+    )

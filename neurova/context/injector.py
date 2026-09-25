@@ -19,7 +19,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # 导入统一的 Token 估算器
-from .token_estimator import EstimationStrategy, TokenEstimator
+from .token_estimator import estimate_tokens as estimate_text_tokens
 
 # 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
 from .envelope import compress_envelope, build_envelope, build_time_block, build_system_time_hint
@@ -155,21 +155,11 @@ class UnifiedContextInjector(BaseModule):
         self._enable_cache = enable_cache
         self._enable_compression = enable_compression
 
-        # 初始化统一的 Token 估算器
-        self._token_estimator = TokenEstimator(EstimationStrategy.BALANCED)
-
-        # 初始化智能压缩器
-        if self._enable_compression:
-            try:
-                from neurova.context_compressor import SmartContextCompressor
-
-                self._compressor = SmartContextCompressor()
-                logger.info("SmartContextCompressor initialized")
-            except Exception as e:
-                logger.warning("SmartContextCompressor initialization failed: %s", e)
-                self._compressor = None
-        else:
-            self._compressor = None
+        # 压缩通路单一事实源（B6-10 批次 C）：确定性淘汰（见 _compress_context）。
+        # 改前此处装配一个可插拔压缩器后**从不读取**（全仓零读取点），且它的
+        # 真实签名与 _compress_context 的调用形状双不符（TypeError 被 except
+        # 吞掉）——装配即弃的第二份实现，已整模块退役，此处不再留装配点。
+        # _enable_compression 仍是确定性淘汰的开关，保留。
 
         self._cache: OrderedDict[str, ContextEntry] = OrderedDict()
         self._max_cache_entries = 100
@@ -703,33 +693,33 @@ class UnifiedContextInjector(BaseModule):
             # 包装（旧实现段头+_build_system_prompt 段头叠加成双标题）
             parts = []
             for exp in similar[:3]:  # 最多显示3条
-                # 2.0: context 是 dict，从中提取 user_input 作为摘要
-                ctx = exp.get("context") or {}
-                if isinstance(ctx, dict):
-                    context_summary = str(ctx.get("user_input", ""))[:50]
-                else:
-                    context_summary = str(ctx)[:50]
-                # 2.0: result 是 dict 或 None
-                # 契约对齐（闭环审计 2026-09-04）：写入端 post_chat 存的是
-                # result["reply_excerpt"]，此处只读 output 曾使注入摘要恒空串
-                result_data = exp.get("result")
-                if isinstance(result_data, dict):
-                    result_summary = str(
-                        result_data.get("reply_excerpt")
-                        or result_data.get("output")
-                        or ""
-                    )[:50]
-                else:
-                    result_summary = str(result_data or "")[:50]
-                # success 在 2.0 中是 int 0/1
-                success_mark = "✓" if exp.get("success") else "✗"
-                parts.append(f"{success_mark} {context_summary} → {result_summary}")
+                parts.append(self._render_experience_line(exp))
 
             return "\n".join(parts)
 
         except Exception as e:
             self.log_warning(f"构建经验上下文失败: {e}")
             return ""
+
+    @staticmethod
+    def _render_experience_line(exp: Dict) -> str:
+        """一条经验 → 进 prompt 的一行（三态与摘要取值的**唯一**渲染口）。
+
+        工单 004 的第五个面就是这里：库/权重/结晶器/API 四面都三态了，唯独真正
+        会改变下一次调用的这一面是二值 —— 未测量（NULL）被渲染成 `✗`，等于告诉
+        模型"上次做砸了"。记号取 `skills.models` 的单源词汇表，不在此处再写字面量。
+
+        `context` / `result` 的取值形状也收在这里：旧实现在两处各写一份
+        `str(x)[:50]`，dict 形状（EKB 2.0 契约）直接切片抛 `TypeError`，
+        被外层 `except` 吞掉后整段经验从 prompt 里静默消失。
+        """
+        from neurova.skills.models import experienceSummary, outcomeMark
+
+        context_summary = experienceSummary(exp.get("context"), ("user_input",))[:50]
+        result_summary = experienceSummary(
+            exp.get("result"), ("reply_excerpt", "output")
+        )[:50]
+        return f"{outcomeMark(exp.get('success'))} {context_summary} → {result_summary}"
 
     def _format_experience_from_list(self, experiences: List[Dict]) -> str:
         """
@@ -751,10 +741,7 @@ class UnifiedContextInjector(BaseModule):
         try:
             parts = []
             for exp in experiences[:3]:  # 最多显示3条
-                context_summary = exp.get("context", "")[:50]
-                result_summary = exp.get("result", "")[:50]
-                success_mark = "✓" if exp.get("success") else "✗"
-                parts.append(f"{success_mark} {context_summary} → {result_summary}")
+                parts.append(self._render_experience_line(exp))
 
             return "\n".join(parts)
 
@@ -843,11 +830,10 @@ class UnifiedContextInjector(BaseModule):
         F5 修复：旧实现按 "## 相关记忆" 字符串切 system_content、降级路径对
         整个 system 硬截断——信封化后 system 恒为稳定 base，压缩改为对信封
         做确定性块淘汰（compress_envelope）。
-        核验轮修复③：原借道 SmartContextCompressor 的调用与其真实签名
-        （compress_context(messages, memories, system_prompt, target_tokens)
-        → 元组）双不符，TypeError 被 except 吞掉 → 压缩器在生产从未生效、
-        信封被整包丢弃。改为确定性历史淘汰：最老轮先弃，保留轮次摘要标记，
-        压缩行为不再依赖压缩器是否可用。
+        核验轮修复③：原借道已退役的第二份压缩实现，其真实签名与调用形状双不符
+        （TypeError 被 except 吞掉）→ 压缩在生产从未生效、信封被整包丢弃。
+        现为确定性历史淘汰：最老轮先弃，保留轮次摘要标记，压缩行为不再依赖
+        任何可插拔压缩器（B6-10 批次 C 已把那份实现整模块退役）。
         """
         try:
             compression_ratio = 1.0
@@ -897,12 +883,11 @@ class UnifiedContextInjector(BaseModule):
         return text[:max_chars] + "\n...[已截断]"
 
     def _count_tokens(self, text: str) -> int:
-        """估算 Token 数"""
+        """估算 Token 数（统一入口，禁止就地近似）"""
         if not text:
             return 0
 
-        # 使用统一的 Token 估算器
-        return self._token_estimator.estimate(text)
+        return estimate_text_tokens(text)
 
     def retrieve_memories(self, query: str, limit: int = 10, prioritize_high_temp: bool = True) -> List[Dict]:
         """检索相关记忆"""

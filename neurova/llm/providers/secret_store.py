@@ -20,6 +20,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,7 @@ _PREFIX_V2 = "enc:v2:"
 _SALT = b"neurova-secret-store-v1"
 _SALT_LEGACY = b"neurova-secret-store-legacy"
 _VERSION_BYTE = 0x01
-_DEFAULT_PATH = "./data/secrets.json"
+_DEFAULT_PATH = dataPath("secrets.json")
 _ITERATIONS = 10000
 
 # AES-GCM 参数

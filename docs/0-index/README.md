@@ -7,8 +7,10 @@
 
 | 入口 | 路径 | 说明 |
 |------|------|------|
+| **纪律与约定（最高优先级）** | [AGENTS.md](../../AGENTS.md) | **修复教义 6 条 + 协作红线（中文交流 / 原创性 / 命名法 / 闭环）**；全仓 97 处引用的唯一事实源 |
 | 项目 README | [README.md](../../README.md) | 项目概述、快速开始、核心特性 |
 | 项目上下文 | [CONTEXT.md](../CONTEXT.md) | 架构概览、技术栈、设计规则 |
+| 文档总索引 | [docs/INDEX.md](../INDEX.md) | 文档体系唯一导航事实源 |
 | 功能模块矩阵 | [见下](#功能模块矩阵) | 全部功能的状态对照 |
 | API 参考 | [API_REFERENCE.md](../02-api/API_REFERENCE.md) | 82 端点模块参考 |
 
@@ -22,7 +24,7 @@
 
 | 功能模块 | 状态 | 关键代码 | 关联文档 |
 |----------|------|----------|----------|
-| 记忆系统（17 维分类 + 温度引擎） | ✅ | `cognitive_layers/memory_layer/` | [02-memory-system](../01-architecture/02-memory-system.md) |
+| 记忆系统（多维度分类 + 温度引擎） | ✅ | `cognitive_layers/memory_layer/` | [02-memory-system](../01-architecture/02-memory-system.md) |
 | NeRF 增强记忆检索（六通道体积渲染） | ✅ | `neurova_recall.py` `volume_renderer.py` `positional_encoding.py` `unified_retriever.py` | [16-vector-retrieval-system](../01-architecture/16-vector-retrieval-system.md) |
 | 记忆温度机制（遗忘曲线 + 固化） | ✅ | `temperature.py` | [12-memory-temperature-mechanism](../01-architecture/12-memory-temperature-mechanism.md) |
 | 睡眠整理（记忆巩固 + 梦境） | ✅ | `sleep.py` `sleep_adapter.py` `sleep_writeback.py` | [13-memory-intelligence-enhancements](../01-architecture/13-memory-intelligence-enhancements.md) |
@@ -51,14 +53,15 @@
 |----------|------|----------|----------|
 | Skill 系统（注册表/版本/热插拔） | ✅ | `skills/` `skill_system/` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | Skill 协议兼容 | ✅ | `skills/adapters/` | [05-skill-system](../01-architecture/05-skill-system.md) |
+| Skill 归档与回滚（治理面 + 技能页入口） | ✅ | `api/endpoints/governance.py` `evolution/skill_experience.py` `NeurUI/src/pages/AgentSkillPage.vue` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | 肌肉记忆（ToolMemory 三层） | 🟡 | `evolution/tool_weights.py` `tool_lifecycle.py`（L1/L2/L3 部分） | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
 | MCP 集成 | ✅ | `tool_layers/mcp_client.py` `mcp_config.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | MCP 治理安全加固（P0 六项） | ✅ | `tool_layers/mcp_bootstrap.py` `security/url_guard.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | LLM Provider 管理（元数据/智能路由） | ✅ | `llm/provider_manager.py` `multi_model_client.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | LLM Router（多模态选择） | ✅ | `llm/llm_router.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | Computer Use（视觉理解） | ✅ | `computer_use/`（vision.py + vision_lite） | [01-core-architecture](../01-architecture/01-core-architecture.md) |
-| 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [agent-reach-integration](../01-architecture/agent-reach-integration.md) |
-| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | [agent-reach-integration](../01-architecture/agent-reach-integration.md) |
+| 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [CUA 能力台账](../CUA能力台账.md)（投递路径与拒绝码登记） |
+| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | `agent-reach-integration.md` 已随第三方痕迹清除波（`663faa5d`）退役 |
 | 插件系统 | ✅ | `plugins/` | [06-plugin-cli-system](../01-architecture/06-plugin-cli-system.md) |
 | 工具编排（Tool Orchestrator） | ✅ | `tool_layers/tool_orchestrator.py` | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
 
@@ -70,7 +73,7 @@
 | REST API（82 端点模块） | ✅ | `api/endpoints/` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | NeurUI 前端（60 页面） | ✅ | `NeurUI/src/pages/` | [UI_FRAMEWORK_GUIDE](../03-user-guide/UI_FRAMEWORK_GUIDE.md) |
 | 上下文管线（活水上下文池） | 🟡 | `context/`（collector/compressor/converter），P1-1 已补齐溢出恢复/真摘要等 | [26-context-pipeline-p1](../01-architecture/26-context-pipeline-p1.md) |
-| 上下文缓存与压缩 | ✅ | `context_cache.py` `context_compressor.py` | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
+| 上下文缓存与压缩 | ✅ | `context_cache.py`（压缩已收口到 `context/orchestrator.py` 的确定性淘汰） | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
 | 移动配对（QR + WebSocket） | ✅ | `api/endpoints/mobile_pairing.py` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | 睡眠系统管理（睡眠设置页） | ✅ | `cognitive_layers/memory_layer/sleep.py` | [02-memory-system](../01-architecture/02-memory-system.md) |
 
@@ -83,7 +86,7 @@
 **核心架构（按阅读顺序）**：
 
 1. [01-core-architecture.md](../01-architecture/01-core-architecture.md) — 整体架构、分层设计（核心）
-2. [02-memory-system.md](../01-architecture/02-memory-system.md) — 记忆系统、17 维分类、LSM 存储
+2. [02-memory-system.md](../01-architecture/02-memory-system.md) — 记忆系统、多维度分类、LSM 存储
 3. [03-message-routing.md](../01-architecture/03-message-routing.md) — 消息路由、14 渠道适配
 4. [04-multi-agent-collaboration.md](../01-architecture/04-multi-agent-collaboration.md) — 多 Agent 协作、任务分配
 5. [05-skill-system.md](../01-architecture/05-skill-system.md) — Skill 系统、协议兼容、沙箱
@@ -120,7 +123,7 @@
 | 文档 | 主题 |
 |------|------|
 | [living_context_pool_design.md](../01-architecture/living_context_pool_design.md) | 活水上下文池设计（五大活水特性） |
-| [agent-reach-integration.md](../01-architecture/agent-reach-integration.md) | Agent-Reach 整合（web_reach 5 工具） |
+| `agent-reach-integration.md`（已退役） | Agent-Reach 整合——该文档随 `663faa5d` 退役，现行能力登记见 [CUA 能力台账](../CUA能力台账.md) |
 | [agent-swarm-orchestration.md](../01-architecture/agent-swarm-orchestration.md) | Agent 集群编排 |
 | [cross-channel-session-sync-design.md](../01-architecture/cross-channel-session-sync-design.md) | 跨渠道会话同步 |
 | [channels.md](../01-architecture/channels.md) | 渠道适配说明 |
@@ -135,7 +138,7 @@
 
 **ADR / 审计 / 记忆专题**：
 
-- [adr/README.md](../01-architecture/adr/README.md) — 13 个架构决策记录（memory/recall/skill/market 等）
+- [adr/README.md](../01-architecture/adr/README.md) — 20 个架构决策记录（memory/recall/skill/market/sandbox 等）
 - [audit/three-tier-isolation-audit.md](../01-architecture/audit/three-tier-isolation-audit.md) — 三层隔离审计报告
 - [audit/three-tier-isolation-fixes.md](../01-architecture/audit/three-tier-isolation-fixes.md) — 隔离修复记录
 - [memory/memo-technical-overview.md](../01-architecture/memory/memo-technical-overview.md) — MeMo 技术综述
@@ -176,6 +179,9 @@
 - [stub-cleanup-plan.md](../04-plans/stub-cleanup-plan.md) — 存根清理计划
 - [DOCS_ALIGNMENT_PLAN.md](../04-plans/DOCS_ALIGNMENT_PLAN.md) — 文档对齐计划
 - [neurova-memory-system-upgrade-technical.md](../04-plans/neurova-memory-system-upgrade-technical.md) — 记忆升级技术方案
+- [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
+- [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
+- [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
 
 ### 05-reports 报告
 
@@ -199,6 +205,8 @@
 - [2026-06-12-code-audit.md](../05-reports/2026-06-12-code-audit.md) — 6 月代码审计
 - [执行摘要.md](../05-reports/执行摘要.md) — 执行摘要
 - [最终集成总结.md](../05-reports/最终集成总结.md) — 最终集成总结
+- [memory-temperature-convergence-2026-09-21.md](../05-reports/memory-temperature-convergence-2026-09-21.md) — 温度衰减双实现比对与收敛（Issue #74 死码退役）
+- [同名函数盘点台账_2026-09-25.md](../05-reports/同名函数盘点台账_2026-09-25.md) — 跨文件同名函数分档与处置结论（Issue #192 待办项收口）
 
 ### 06-bugfix 修复记录
 
@@ -229,7 +237,7 @@
 
 - [README.md](../09-dev-progress/README.md) — 开发进展索引
 - [frontend_development_plan.md](../09-dev-progress/frontend_development_plan.md) — 前端开发计划
-- [api_inventory.md](../09-dev-progress/api_inventory.md) — API 清单
+- [api_inventory.md](../09-dev-progress/api_inventory.md) — 前端 API 面清单（生成物：`python scripts/generate_api_inventory.py --write`，含「调用未命中后端」「后端无前端消费」两组显式差异）
 - [progress_tracker.md](../09-dev-progress/progress_tracker.md) — 进度追踪
 - [module_designs/](../09-dev-progress/module_designs/) — 模块设计（19 篇，含 chat_page/execution_engine/knowledge_base 等）
 - [daily_reports/](../09-dev-progress/daily_reports/) — 日常报告（2026-05-12/13）
@@ -239,6 +247,7 @@
 ### 10-configuration 配置
 
 - [CHANNELS_CONFIG_TEMPLATE.md](../10-configuration/CHANNELS_CONFIG_TEMPLATE.md) — 渠道配置模板
+- [DEPLOYMENT_CONFIG.md](../10-configuration/DEPLOYMENT_CONFIG.md) — 部署配置契约（Dockerfile / docker-compose / Helm 跨文件不变量 + 门禁）
 
 ### 11-legacy 归档
 
@@ -247,6 +256,10 @@
 ---
 
 ## 维护指南
+
+0. **纪律变更**：[`/AGENTS.md`](../../AGENTS.md) 是全仓纪律唯一事实源（`.cnb/settings.yml`
+   的 NPC 人设逐条对齐）。改纪律只改该文件 + 人设两处，由
+   `tests/unit/test_repair_discipline_guard.py` 常驻校验，禁止另造平行准则文档。
 
 1. **新增模块**：在本文档"功能模块矩阵"增加一行（对照代码标注状态）
 2. **状态变更**：功能从🟡→✅ 或⬜→🟡，更新矩阵 + 对应架构文档头部状态

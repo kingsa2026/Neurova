@@ -20,16 +20,20 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-DEFAULT_DB_PATH = Path("data") / "provider_usage.db"
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "provider_usage.db"
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS provider_usage (
@@ -57,7 +61,7 @@ class ProviderUsageCollector:
         self._db_path = (
             db_path
             or os.environ.get("NEUROVA_PROVIDER_USAGE_DB")
-            or str(DEFAULT_DB_PATH)
+            or str(defaultDbPath())
         )
         self._lock = threading.RLock()
         # provider_id -> fetch 协程/普通函数（返回 Dict 快照）
@@ -134,10 +138,20 @@ class ProviderUsageCollector:
         except Exception as e:
             logger.debug("provider_usage DB 初始化失败（统计副路径降级）: %s", e)
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    @contextmanager
+    def _connect(self):
+        """借出/归还池化短连接 + 事务语义（P1-4 / ADR 0014）。
+
+        原写法 `with sqlite3.connect(...) as conn:` 只在出口提交/回滚，
+        **不关闭**连接——每次调用漏一条（长跑进程句柄数线性增长）。池化后
+        漏归还的后果更硬：`_created_count` 只增不减，漏满 max_connections
+        后取连接会阻塞到 timeout。故统一走 `short_transaction()`：提交/回滚
+        语义与原来一致，归还一定发生。
+        """
+        from neurova.core.database import short_transaction
+
+        with short_transaction(str(self._db_path)) as conn:
+            yield conn
 
     def _persist(self, provider_id: str, snapshot: Dict[str, Any]) -> None:
         try:

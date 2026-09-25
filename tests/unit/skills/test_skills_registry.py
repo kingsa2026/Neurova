@@ -71,12 +71,18 @@ class TestSkillRegistryBasic:
         assert reg.register_skill(m, None) is True
         assert reg.get_skill("My Skill") is not None
 
-    def test_has_skill_uses_name(self):
+    def test_has_skill_both_key_domains(self):
+        """name 与台账 id 都能定位（ADR 0017 键值域统一）。
+
+        原名 `test_has_skill_uses_name`，断言 `has_skill("s") is False` ——
+        钉的正是"只认 name"这个让进化侧取键全灭的旧契约。
+        """
         reg = self._make_reg()
         m = SkillManifest(id="s", name="My Skill", version="1.0.0", description="d")
         reg.register_skill(m, None)
         assert reg.has_skill("My Skill") is True
-        assert reg.has_skill("s") is False
+        assert reg.has_skill("s") is True
+        assert reg.has_skill("absent") is False
 
     def test_unregister(self):
         reg = self._make_reg()

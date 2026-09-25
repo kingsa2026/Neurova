@@ -22,6 +22,7 @@ from .builder import ContextBuilder
 from .injector import UnifiedContextInjector
 from .models import TokenBudget
 from .recovery import assign_turn_ids
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,38 @@ class ContextOrchestrator:
     # P0-2：自动压缩默认开启（类级默认兜底 __new__ 直构路径；__init__ 按 env 覆盖）
     auto_compact_enabled: bool = True
 
+    # D2：折叠摘要缓存槽上限。声明为类级常量——`__new__` 直构路径（测试/工具）
+    # 不跑 __init__ 也要能取到，否则一次实例化方式差异就让缓存失去上限。
+    _WINDOW_CACHE_SLOTS: int = 8
+
+    # B6-10 批次 B：折叠/归档指纹集的类级空默认。判据消费面
+    # （`context/fold_integrity.py`）直接读这两个属性——`__new__` 直构路径不跑
+    # `__init__`，没有默认值会让「折叠零丢失」判据在测试/工具路径上抛
+    # AttributeError（那是判据被绕过，不是判据成立）。两者只被整体赋值、
+    # 从不就地增删元素，故类级 set 共享没有串改风险。
+    _last_folded_hashes: set = frozenset()
+    _last_archived_window_hashes: set = frozenset()
+
+    #: 折叠分代的层数上限。**不设上限**（`None`），由负责人 2026-09-25 裁定删掉
+    #: 原值 5（工单 §12.1：档数不设上限，轨迹越长档数自然增长）。
+    #:
+    #: 上限真实代价是把当时最深的一档**丢弃**，而"轨迹越长档数自然增长"正是分辨率
+    #: 梯度成立的前提。原有限制理由（台账 §23.1："进程内易失态不可只增"）不成立：
+    #: 代际栈不是只增容器 —— 每轮折叠是"+1 新代 / 既有代各降一层"的**等量代换**，
+    #: 深度恒等于活代数，本身有界；真正随会话时长累加的只有 `fold_layers` 里的
+    #: 计数（`demoted`），而计数不占内存、正是读数的意义。
+    #:
+    #: 声明为类级常量且取 `None`（而非直接删掉）：无上限是**显式契约**，要有可断言
+    #: 的落点（`tests/unit/context/test_fold_generation_t11a.py` 的
+    #: `test_no_truncation_readout_when_uncapped` 断言它为 `None`）；直接删掉该属性
+    #: 只会让"上限没了"退化成注释里的一句话。截断读数字段一并**退役**（单源口径）：
+    #: 无上限即永不可能截断，留着一个恒 0 的字段就是谎报面（协作红线：不留断点）。
+    #: 若日后要重新加上限，须同批恢复截断计数与读数，不得静默丢层。
+    _MAX_FOLD_GENERATIONS = None
+
+    #: 最新一代的档号（1 = 最细分辨率档；旧摘要每被降一层 +1）。
+    _FOLD_TOP_LEVEL = 1
+
     def __init__(
         self,
         agent_ref,
@@ -108,11 +141,22 @@ class ContextOrchestrator:
         # _window_compaction_cache: session_id -> {"summary", "covered_hashes"}
         # （已摘要覆盖的消息 hash，跨轮增量摘要不重复调 LLM）
         self._window_summarizer = None
+        # 折叠摘要缓存：按**轮次作用域**分槽（`chat_room_id or session_id`），
+        # 每槽 {"summary", "covered", "last_count"}。
+        # P1-1：旧实现按 `self.session_id or "_"` 记账，而 session_id 恒 None
+        # → 整个 Agent 生命周期内所有会话共用一条摘要（B 会话视图注入 A 会话摘要）。
         self._window_compaction_cache: dict = {}
+        # 本轮协作语境（_resolve_turn_scope 的输入；build_context 每轮刷新）
+        self._turn_collab: bool = False
+        self._turn_room_id: str = ""
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
         self._DELTA_RESUMMARY_MSGS = 4
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
+        # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
+        # 它在 _archive_conversation_to_pool 写入、在 context/fold_integrity.py
+        # 读取（判据的唯一消费面），读数并进 get_context_health()["fold_integrity"]
+        # ——留下即被校验，不留空账。类级默认见下方声明（`__new__` 直构路径也要能读）。
         self._last_archived_window_hashes: set = set()
 
         # P0-2：自动压缩开关 + 上下文窗口硬顶
@@ -133,37 +177,12 @@ class ContextOrchestrator:
             max_tokens = ContextPool.get_token_budget_for_model(model_name)
 
             # P1-1③ 接线：驱逐台账持久层（WAL+FTS5，按 agent 分库）+
-            # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）
-            _ledger_db = None
-            _summarizer = None
-            try:
-                from neurova.context.eviction_ledger_db import EvictionLedgerDB
-
-                _agent_id = getattr(agent_ref, "agent_id", "default")
-                _ledger_db = EvictionLedgerDB(
-                    db_path=f"data/context_ledger/{_agent_id}.db",
-                    user_id=getattr(agent_ref, "user_id", "default"),
-                    agent_id=_agent_id,
-                )
-            except Exception as e:
-                logger.warning("驱逐台账初始化失败（回退内存台账）: %s", e)
-
-            try:
-                from neurova.context.summarizing_compressor import SummarizingCompressor
-
-                async def _llm_digest_call(prompt: str) -> str:
-                    """摘要 LLM 桥：MultiModelLLMClient.chat 的 dict 契约提取 content"""
-                    response = await agent_ref.llm_client.chat(
-                        [{"role": "user", "content": prompt}],
-                        model=getattr(agent_ref.config, "llm_model", None),
-                    )
-                    if isinstance(response, dict):
-                        return str(response.get("content") or "")
-                    return str(getattr(response, "content", "") or "")
-
-                _summarizer = SummarizingCompressor(llm_call=_llm_digest_call, timeout_s=60)
-            except Exception as e:
-                logger.warning("摘要压缩器初始化失败（摘要回写停用）: %s", e)
+            # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）。
+            # P2-5/D5：两处装配都记进 `_context_health` 并**允许下一轮重试**——
+            # 改前失败只留一行 warning、能力永久关闭，读数面上看不见。
+            self._context_health = self._emptyContextHealth()
+            _ledger_db = self._buildLedgerDb(agent_ref)
+            _summarizer = self._buildSummarizer(agent_ref)
 
             self.context_pool = ContextPool(
                 user_id=getattr(agent_ref, "user_id", "default"),
@@ -175,6 +194,14 @@ class ContextOrchestrator:
                 auto_tag=auto_tag,
                 ttl_seconds=0,  # [无损归档] 池是永久归档，TTL 不门禁调取（永不丢失）
             )
+            # B6-3/B6-4：按身份登记**这个**池，让读侧（端点 /context/build、
+            # 工作流上下文节点、按身份取池的消费方）取到同一实例。不登记的话
+            # 读侧取不到就只能各自新建——那正是 P2-3"写入即丢"的根因。
+            from neurova.context_pool import poolIdentityOf
+            from neurova.context_pool_registry import get_registry
+
+            get_registry().adopt(self.context_pool)
+            self._pool_identity = poolIdentityOf(agent_ref, session_id)
             logger.info(
                 "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s, session_id: %s",
                 model_name, max_tokens, session_id,
@@ -182,28 +209,448 @@ class ContextOrchestrator:
         else:
             self.context_pool = None
 
-    def set_session_id(self, session_id: str) -> None:
-        """根因 C 修复: 运行时切换 session_id（用于跨 session 调取）
+    def _emptyContextHealth(self) -> Dict[str, Dict]:
+        """降级/身份读数各字段的空形状（**单源**：`__init__`、直构路径与
+        `get_context_health` 都取它，不在三处各写一份字段表）。
 
-        RES-P2-4：切换时裁剪 _window_compaction_cache——该缓存按 session_id
-        记账（每会话一条摘要+hash 集合）且此前永不清理，Agent 长期服务多
-        会话时随历史会话数无界增长。摘要可随时按未覆盖消息重建（零丢失），
-        只保留当前会话条目即可。
+        字段语义：
+        - `ledger` / `summarizer`：装配降级（P2-5），`enabled=False` 时
+          `last_error` 必非空（点名原因）；
+        - `fold_integrity`：折叠零丢失对账（B6-10 批次 B），形状来自校验模块；
+        - `turn_identity`：每轮会话身份的解析结果（T-03b）。落到 `direct`
+          意味着本轮所有单聊共用同一个折叠摘要槽——静默共用正是本缺陷的形态，
+          所以计数与 `last_key` 必须可读。
+        - `tool_turns`：每轮视图内的工具轮计数（T-10d，工单 §11.5）——`assistant.tool_calls`
+          行数 / `tool` 行数 / 旧数据降级次数，以及 `declared_ids` 与实际
+          `tool_call_id` 不匹配的告警。**降级次数取自 `SessionManager` 的计数器本体**
+          （单一事实源），不在编排器另记一份。
+        - `fold_layers`：折叠分代的代际栈读数（T-11a，工单 §12.4）。`levels` 是
+          代际栈深度（含最新一代；**尚无折叠时为 0**，不虚报已有梯度），`demoted`
+          是累计被降层的旧摘要数。**无截断字段**：代际栈不设上限（工单 §12.1，
+          负责人 2026-09-25 裁定删掉原上限 5），无上限即永不可能截断 —— 留一个
+          恒 0 的字段就是谎报面。若日后恢复上限，须同批恢复截断计数与读数。
+          读数是**最近一次折叠所在会话槽**的形态（折叠缓存按会话分槽），
+          `demoted` 为累计量；这与同面 `turn_identity` / `microcompact`
+          的"最近一次"口径一致，故不另造第二份逐会话读数。
+        - `fold_index`：折叠层索引读数（T-11b，工单 §12.4）。`nodes` 是池内
+          **带 covers 的层节点数**，`levels` 是档数，`unparsable` 是解析不出
+          covers/层序的 SUMMARY 节点数（解析失败率必须为 0），`uncovered` 是
+          「覆盖闭合」的反例数（已折叠原文的 hash 不在任何档 covers 内）。
+          读数取自池的**唯一读面** `summaryLayers()`（含持久读回），编排器不
+          在这里另算一份索引——两份索引必然漂移。
+        - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
+          `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
+          `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
         """
-        self._session_id = session_id
-        if self.context_pool is not None:
-            self.context_pool.session_id = session_id
-        cache = self._window_compaction_cache
-        if len(cache) > 1:
-            keep_key = session_id or "_"
-            kept = cache.pop(keep_key, None)
-            cache.clear()
-            if kept is not None:
-                cache[keep_key] = kept
+        return {
+            "ledger": {"enabled": False, "attempts": 0, "last_error": None},
+            "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
+            "fold_integrity": self._foldIntegrityEmptyReport(),
+            "turn_identity": {"identityless": 0, "resolved": 0, "last_key": None, "last_error": None},
+            "fold_layers": {
+                "levels": 0,
+                "demoted": 0,
+                "last_summary_chars": 0,
+            },
+            "fold_index": {
+                "nodes": 0,
+                "levels": 0,
+                "unparsable": 0,
+                "uncovered": 0,
+                "last_error": None,
+            },
+            "microcompact": {
+                "calls": 0,
+                "triggered_calls": 0,
+                "last_replaced": 0,
+                "last_kept": 0,
+                "last_payload_tokens": 0,
+                "last_trigger_tokens": 0,
+            },
+            "tool_turns": {
+                "turns": 0,
+                "tool_call_rows": 0,
+                "tool_rows": 0,
+                "degraded_turns": 0,
+                "rebuilt_pairs": 0,
+                "rebuilt_tool_rows": 0,
+                "killswitch_off": 0,
+                "declared_mismatch": 0,
+                "last_error": None,
+            },
+        }
+
+    def _contextHealthSlot(self, key: str) -> Dict[str, Any]:
+        """取（或建）读数槽：直构路径没跑 `__init__` 时按需补一份空形状。"""
+        health = getattr(self, "_context_health", None)
+        if health is None:
+            health = self._context_health = self._emptyContextHealth()
+        return health.setdefault(key, dict(self._emptyContextHealth()[key]))
+
+    def _recordTurnIdentity(self, resolved: Optional[str]) -> None:
+        """记账本轮会话身份的解析结果（唯一写入方=每轮构建路径）。
+
+        入参是**回落链的原始结果**（可能为 None），不是回落后的键 —— 否则一个
+        真叫 `direct` 的会话会被误判成"无身份轮"。
+
+        无身份轮（`resolved is None`）**必须可见**：计数 + 首次 warning。
+        这类轮次共用同一个折叠摘要槽，正是本次缺陷的形态，靠日志猜不是可观测面。
+        """
+        record = self._contextHealthSlot("turn_identity")
+        record["last_key"] = resolved or "direct"
+        if resolved is None:
+            record["identityless"] += 1
+            if record["identityless"] == 1:
+                logger.warning(
+                    "本轮无会话身份，折叠摘要与其他无身份轮共用 direct 槽"
+                    "（每轮身份单源 `agent.current_session_id` 为空）"
+                )
+        else:
+            record["resolved"] += 1
+
+    def _foldIntegrityEmptyReport(self) -> Dict[str, Any]:
+        """折叠零丢失读数的空形状（与校验模块同源，不复制字段表）。"""
+        from neurova.context.fold_integrity import EMPTY_REPORT
+
+        return dict(EMPTY_REPORT)
+
+    def _buildLedgerDb(self, agent_ref):
+        """装配驱逐台账持久层（失败如实登记，不静默、不粘死）。"""
+        record = self._context_health["ledger"]
+        record["attempts"] += 1
+        try:
+            from neurova.context.eviction_ledger_db import EvictionLedgerDB
+
+            agentId = getattr(agent_ref, "agent_id", "default")
+            db = EvictionLedgerDB(
+                db_path=dataPath("context_ledger", f"{agentId}.db"),
+                user_id=getattr(agent_ref, "user_id", "default"),
+                agent_id=agentId,
+            )
+        except Exception as e:  # noqa: BLE001 - 装配失败不阻断池构造，但必须可见
+            record["enabled"] = False
+            record["last_error"] = f"{type(e).__name__}: {e}"
+            logger.warning("驱逐台账初始化失败（回退内存台账，后续轮次将重试）: %s", e)
+            return None
+        record["enabled"] = True
+        record["last_error"] = None
+        return db
+
+    def _buildSummarizer(self, agent_ref):
+        """装配摘要压缩器（失败如实登记；成功一次即不再重建）。"""
+        record = self._context_health["summarizer"]
+        if record["enabled"]:
+            pool = getattr(self, "context_pool", None)
+            return getattr(pool, "_summarizer", None)
+        record["attempts"] += 1
+        try:
+            from neurova.context.summarizing_compressor import SummarizingCompressor
+
+            async def _llm_digest_call(prompt: str) -> str:
+                """摘要 LLM 桥：MultiModelLLMClient.chat 的 dict 契约提取 content"""
+                response = await agent_ref.llm_client.chat(
+                    [{"role": "user", "content": prompt}],
+                    model=getattr(agent_ref.config, "llm_model", None),
+                )
+                if isinstance(response, dict):
+                    return str(response.get("content") or "")
+                return str(getattr(response, "content", "") or "")
+
+            summarizer = SummarizingCompressor(llm_call=_llm_digest_call, timeout_s=60)
+        except Exception as e:  # noqa: BLE001 - 装配失败不阻断池构造，但必须可见
+            record["enabled"] = False
+            record["last_error"] = f"{type(e).__name__}: {e}"
+            logger.warning("摘要压缩器初始化失败（摘要回写停用，后续轮次将重试）: %s", e)
+            return None
+        record["enabled"] = True
+        record["last_error"] = None
+        return summarizer
+
+    def _retryContextAssemblies(self) -> None:
+        """重试此前装配失败的上下文部件（幂等：已启用的部件不会重建）。"""
+        health = getattr(self, "_context_health", None) or {}
+        pool = getattr(self, "context_pool", None)
+        if pool is None:
+            return
+        if not (health.get("ledger") or {}).get("enabled"):
+            ledger = self._buildLedgerDb(self._agent)
+            if ledger is not None:
+                pool._ledger_db = ledger
+                pool._registerLedgerRows()
+        if not (health.get("summarizer") or {}).get("enabled"):
+            summarizer = self._buildSummarizer(self._agent)
+            if summarizer is not None:
+                pool._summarizer = summarizer
+
+    def get_context_health(self) -> Dict[str, Dict]:
+        """上下文域降级读数（**单源**：编排器持有，池侧读同一份）。
+
+        P2-5：审计要求"降级有可观测读数与重试/恢复路径，不以 warning 代替"。
+        回 `attempts` / `enabled` / `last_error` 三元组：`enabled=False` 时
+        `last_error` 必非空（点名声明的失败原因），消费方无需解析日志。
+        """
+        health = getattr(self, "_context_health", None) or {}
+        empty = self._emptyContextHealth()
+        snapshot = {key: dict(health.get(key) or value) for key, value in empty.items()}
+        # T-11b：层索引读数取自池的**唯一读面**（含持久回读），不在这里另算一份。
+        # 池缺席/读面失败时保留空形状（读数不为幻觉），失败原因由池侧点名。
+        pool = getattr(self, "context_pool", None)
+        reader = getattr(pool, "foldIndexHealth", None)
+        if callable(reader):
+            try:
+                snapshot["fold_index"] = {**empty["fold_index"], **reader(self._foldedHashes())}
+            except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+                snapshot["fold_index"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        return snapshot
+
+    def _foldedHashes(self) -> set:
+        """折叠侧登记的已覆盖 hash 全集（覆盖闭合对账的**唯一**事实源）。
+
+        取折叠缓存各槽 `covered` 的并集 —— 池不另存一份（教义第 6 条），
+        读数时作为入参交给池的层索引读面。
+        """
+        cache = getattr(self, "_window_compaction_cache", None) or {}
+        folded: set = set()
+        for slot in cache.values():
+            folded |= set((slot or {}).get("covered") or ())
+        return folded
 
     @property
     def session_id(self) -> Optional[str]:
+        """实例的**初值**会话身份（构造期入参），只读。
+
+        B6-10 批次 D：会话身份此前有**两个写入方** —— 构造期入参，以及
+        `set_session_id`（零生产调用点的第二份事实源）。两者并存时"实例身份"
+        与"本轮有效会话"谁为准没有单一答案，故第二写入方已删净（审计 D2 的裁决
+        是退役它的裁剪职责，裁剪现由 `_window_cache_slot()` 的槽位上限承担；
+        剩下的赋值语义与 `build_context` 的每轮刷新重复，故一并收口）。
+
+        现约定：本属性是**不可变的初值**；"本轮有效会话"由 `build_context` 每轮
+        以 `chat_room_id or self.session_id` 写入 `context_pool.session_id` 与
+        `_turn_room_id`，那是唯一的可变写入点。要换会话就用 `chat_room_id` /
+        `ctx.session_id` 走每轮刷新，不要在实例上改初值。
+        """
         return self._session_id
+
+    def _resolveTurnSessionId(self) -> Optional[str]:
+        """本轮会话身份的**唯一回落链**（房间 → 构造期显式覆盖 → 每轮单源）。
+
+        T-03b（Issue #90 工单 §4bis）的根因不是"漏传一个参数"，而是装配入口
+        **造了第二条身份通道却全空**：构造期不传 session_id、`build_context`
+        无该形参、`chat_room_id` 又只在协作轮非空 —— 三条通道全空，键便恒退化为
+        `direct`，两个普通单聊会话共用一条折叠摘要（探针 P2 形状一）。
+
+        而本轮的会话身份一直存在：`ChatPipeline` 每轮经 `set_request_identity`
+        把它写进 `core.turn_context` 的 ContextVar（`agent.current_session_id`
+        即其读取契约名，后链的幂等键与落盘 session 都在用它）。所以这里只做一件事：
+        **读那份已在跑的单源**，不新增第二条身份存储（修复教义第 6 条）。
+
+        回落链次序不可换（每条都对应一个真实入口）：
+
+        1. `_turn_room_id`：协作轮的房间身份（群轮身份更具体，由
+           `build_context(chat_room_id=...)` 写入）；
+        2. `_session_id`：构造期显式覆盖 —— 测试与运维的显式入口，语义是"就按这个来"；
+        3. `self._agent.current_session_id`：每轮身份单源（深模块经 `agent_ref` 访问，
+           遵守 AGENTS.md §3；**不新增第二条身份存储**）；
+        4. 全缺 → `None`（调用方落 `direct` 并计数，不静默）。
+
+        刻意**不**给 `build_context` 加 `session_id` 形参：那会与第 3 条并存成两份
+        定义（修复教义第 6 条），掩盖入口真正缺的是"读单源"而不是"少个参数"。
+        """
+        room = getattr(self, "_turn_room_id", "") or ""
+        if room:
+            return room
+        explicit = getattr(self, "_session_id", None)
+        if explicit:
+            return explicit
+        if room:
+            return room
+        explicit = getattr(self, "_session_id", None)
+        if explicit:
+            return explicit
+        # 经 agent_ref 读本轮身份（深模块依赖注入，AGENTS.md §3）。
+        # 异步边界：本方法只在装配的同一条 task 内被调用（`build_context`
+        # 与其同步子步骤），不在发后不管的协程里读——ContextVar 跨 task 会
+        # 指向别的轮。
+        # `__new__` 直构路径（测试/工具）没有 `_agent`：按"无身份"处理并计数，
+        # 而不是让身份推导在这条路径上抛异常（那是判据被绕过）。
+        agent = getattr(self, "_agent", None)
+        turn_session = getattr(agent, "current_session_id", None) if agent is not None else None
+        # 契约类型是字符串（真 Agent 的 `TurnState.current_session_id` 即
+        # `str(get_turn_session_id() or "")`）。非字符串（测试替身、未装配的
+        # 占位对象）一律视为"本轮无身份"，不让它渗进缓存键与池归属。
+        if not isinstance(turn_session, str):
+            turn_session = ""
+        # 显式 `direct` 也是合法身份（某些调用方就用它当会话名），但空串不算。
+        return turn_session.strip() or None
+
+    def _resolve_window_cache_key(self) -> str:
+        """折叠摘要缓存的键：**真实会话身份**（见 `_resolveTurnSessionId` 的回落链）。
+
+        注意与"记忆作用域"的分工：作用域是**隔离策略**（单聊恒 `direct`，
+        用于判定"能不能看见"），而缓存键是**身份**——两个不同的单聊会话
+        作用域都是 `direct`，但摘要绝不能互相串。旧实现用 `self.session_id or "_"`
+        记账，session_id 恒 None → 所有会话共用一条（P1-1 跨会话串台）。
+
+        身份取不到时落 `direct`，但**必须可见**：计数 + 首次 warning
+        （`get_context_health()["turn_identity"]`）——静默共用槽正是
+        T-03b 缺陷的形态，不能换个位置再犯一次。
+        """
+        identity = self._resolveTurnSessionId()
+        if identity:
+            return identity
+        self._noteIdentitylessTurn()
+        # 折叠摘要槽与工具裁剪优先级共用本键；`__new__` 直构路径也必须可读。
+        return "direct"
+
+    def _noteIdentitylessTurn(self) -> None:
+        """无身份轮的可见性（计数 + 首次 warning），读数并入健康面。
+
+        读数槽与写入面与 `_recordTurnIdentity` **同源**（同为
+        `_contextHealthSlot("turn_identity")`）：两处各写一份字段名就是第二份
+        读数口径，消费方读到的计数会与 `last_key` 对不上。
+        """
+        record = self._contextHealthSlot("turn_identity")
+        record["identityless"] = int(record.get("identityless") or 0) + 1
+        if not record.get("last_error"):
+            record["last_error"] = (
+                "IdentitylessTurn: 本轮无会话身份（`_turn_room_id` / 构造期 session_id / "
+                "`agent.current_session_id` 全空），折叠摘要共槽 direct"
+            )
+            logger.warning(
+                "本轮无会话身份（`_turn_room_id` / 构造期 session_id / "
+                "`agent.current_session_id` 全空），折叠摘要共槽 direct —— "
+                "静默共用槽即 T-03b 缺陷的形态，此处点名以便发现身份链路断了"
+            )
+
+    def _advanceFoldGeneration(
+        self,
+        slot: dict,
+        summary: str,
+        covers: Optional[List[str]] = None,
+        turnIds: Optional[List[str]] = None,
+    ) -> None:
+        """把本轮新摘要推进代际栈：旧摘要**降一层**保留，而不是被覆盖（T-11a）。
+
+        根因（工单 §12.2 第 1 行）：折叠摘要在改前是**一个字符串**
+        （`slot["summary"] = ...`）。每轮折叠原地覆盖上一轮，于是整条被压缩的
+        历史永远只塌成一个节点 —— 分辨率梯度（C2）在数据上不可能存在，层即索引
+        （C4）也无从落地。
+
+        本方法是代际栈的**唯一写入点**：自动折叠与手动 `/compact` 都经它
+        （两处各写一遍必然漂移，那正是本仓反复收口的形态）。栈顶即最新一代。
+
+        **档数不设上限**（工单 §12.1，负责人 2026-09-25 裁定删掉原上限 5）。
+        栈深恒等于活代数 —— 每轮折叠是"+1 新代 / 既有代各降一层"的**等量代换**，
+        不是只增容器，故删掉上限不会带来无界内存（原先以"不可只增"为由设限的
+        偏离记录见台账 §23.1，已随之订正）。§12.5 第 2 条把"只保留最后一层却
+        声称轨迹全在"列为假实现，旧上限正是那个形态的轻量版：栈底那一代被丢弃，
+        而读数与视图都不能自证丢了什么。
+        """
+        stack = slot.setdefault("generations", [])
+        demoted = []
+        for node in stack:
+            # 降一层，文本原样（不得就地改写：T-04 的纪律同样适用于摘要层）
+            demoted.append({"summary": node["summary"], "level": int(node["level"]) + 1})
+        slot["demoted_total"] = int(slot.get("demoted_total") or 0) + len(demoted)
+
+        top = {"summary": summary, "level": self._FOLD_TOP_LEVEL}
+        stack = [top] + demoted
+        slot["generations"] = stack
+        # 栈顶投影：既有读侧（防抖 / 静态桩 / 手动压缩回执）据此逐字不变。
+        slot["summary"] = summary
+        slot["level"] = top["level"]
+
+        readout = self._contextHealthSlot("fold_layers")
+        readout["levels"] = len(stack)
+        readout["demoted"] = slot["demoted_total"]
+        readout["last_summary_chars"] = len(summary or "")
+
+        # T-11b：把**这一代**写进池并带 covers（层即索引，工单 §12.4）。
+        # 三件事必须同批，缺一条索引就是假的：
+        #   1) 层序（不可变事实）单调 +1 —— 档号由它派生，不写进归档实体；
+        #   2) covers 的 hash 取**本轮新覆盖**那批（`coveredNow`），其数据源就是
+        #      折叠缓存 `covered` 集合里刚追加的那一批，不另算一份覆盖事实（§12.3）；
+        #   3) 入池走 `archive_summary`（池的唯一写入咽喉）→ 自动继承 T-02 的作用域。
+        coveredNow = [h for h in (covers or ()) if h]
+        if coveredNow and self.context_pool is not None:
+            from neurova.context.fold_index import buildCovers
+
+            slot["fold_seq"] = int(slot.get("fold_seq") or 0) + 1
+            self.context_pool.archive_summary(
+                summary,
+                source_summary=slot.get("summary_prev", ""),
+                covers=buildCovers(turnIds or (), coveredNow),
+                foldSeq=slot["fold_seq"],
+            )
+        slot["summary_prev"] = summary
+
+    def _inlineCoversRef(self, window: list, slot: dict) -> list:
+        """把这一代的 `covers_ref` 追加到窗口里的摘要行尾部（T-11d）。
+
+        引用由 `fold_index.renderCoversRef` 单点派生（与解析同模块，语法只有一个
+        出处）；会话身份取 `_resolveWindowCacheKey()`——**与折叠缓存槽同一个键**。
+        这一点不是巧合而是必需：引用里的会话 = 索引里的会话 = 缓存槽身份，三处
+        同取一条回落链（T-03b）；各取一份就会出现"引用指 A、索引只有 B"的静默落空。
+
+        槽里还没有层序（本轮没推进任何一代，例如摘要失败且无历史摘要）时不追加
+        任何东西 —— 编一个引用出来就是伪造寻址能力，比没有引用更坏。
+        """
+        foldSeq = int(slot.get("fold_seq") or 0)
+        if foldSeq <= 0:
+            return window
+        from neurova.context.fold_index import renderCoversRef
+
+        ref = renderCoversRef(foldSeq, self._resolve_window_cache_key())
+        return [self._withCoversRef(msg, ref) for msg in window]
+
+    @staticmethod
+    def _withCoversRef(msg: dict, ref: str) -> dict:
+        """给摘要行尾部挂上引用；非摘要行原样返回（幂等：已有引用不重复追加）。"""
+        content = str((msg or {}).get("content", ""))
+        if msg.get("role") != "system" or "早期对话摘要" not in content:
+            return msg
+        from neurova.context.fold_index import REF_PREFIX
+
+        if REF_PREFIX in content:
+            return msg
+        return {**msg, "content": f"{content}\n({ref})"}
+
+    def _window_cache_slot(self, key: str) -> dict:
+        """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
+
+        P1-1/D2：键必须是真身份（旧实现恒 `"_"`，跨会话串台）；槽数必须有上限
+        （旧实现的唯一出口是已退役的 `set_session_id` 裁剪）。
+
+        T-03b（工单 §4bis 要求 3）：上限策略是**最近使用**，不是插入序。键数此前
+        恒 1（身份取不到），上限无从触发；身份接通后槽数才真增长，故上限策略与
+        接线同批落地。口径之差在稳态下可见：被反复引用的老会话若按"建得早"先丢，
+        它的摘要会原地重算——等于把"串台"换成"反复失忆"。
+
+        实现靠 dict 的插入序（命中即 pop 后重插，把该键移到队尾），不引第三方
+        有序容器，也不另存一份访问时间戳（第二份状态就是第二份漂移源）。
+        """
+        cache = self._window_compaction_cache
+        slot = cache.get(key)
+        if slot is not None:
+            # 命中即移到队尾：最近使用的那一槽不会被下一次淘汰选中。
+            cache.pop(key, None)
+            cache[key] = slot
+            return slot
+        slot = {
+            "summary": "",
+            "covered": set(),
+            "last_count": 0,
+            # T-11a：代际栈（最新一代在前）。`summary` / `level` 是栈顶的投影，
+            # 保留它们是为了让既有读侧（防抖判定、静态桩沿用、手动压缩回执）
+            # 逐字不变 —— 单一事实源是栈，投影只是同一份数据的两个视图。
+            "level": 0,
+            "generations": [],
+        }
+        cache[key] = slot
+        while len(cache) > self._WINDOW_CACHE_SLOTS:
+            cache.pop(next(iter(cache)), None)
+        return slot
 
     # ---- 属性代理（方便内部访问） ----
     @property
@@ -330,10 +777,15 @@ class ContextOrchestrator:
         return items
 
     def _apply_tool_lifecycle(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
-        """应用工具生命周期过滤与权重排序（委托 EvolutionOrchestrator.on_before_tool_selection）
+        """应用工具生命周期过滤（委托 EvolutionOrchestrator.on_before_tool_selection）
 
         根因修复: on_before_tool_selection 此前零生产调用——归档/冻结工具永远
-        出现在 LLM 工具列表中，降级工具不加权。
+        出现在 LLM 工具列表中。
+
+        T-02：只取过滤语义。此前按权重重排整个 `tools` 数组，而权重每轮都在动
+        （任一工具执行即改窗口成功率与惰性衰减），provider 前缀缓存要求目录会话
+        内稳定——重排一次，整段目录及其后上下文全部重新计费。权重改作 catalog
+        裁剪优先级（会话内冻结），下发顺序保持聚合顺序。
         """
         if not tools:
             return tools
@@ -349,27 +801,20 @@ class ContextOrchestrator:
                 return tools
 
             filtered = set(result.get("filtered", []) or [])
-            ranking = [n for n in (result.get("ranking", []) or []) if n not in filtered]
-            if not ranking:
-                return tools
-
-            by_name = {
-                t["function"]["name"]: t
-                for t in tools
-                if isinstance(t, dict) and t.get("function", {}).get("name")
-            }
-            ordered = [by_name[n] for n in ranking if n in by_name]
-            # ranking 未覆盖的工具（如新增）保持相对顺序追加在尾部（按名字判断过滤）
-            covered = set(by_name)
-            ordered.extend(
-                t
-                for t in tools
-                if isinstance(t, dict)
-                and t.get("function", {}).get("name")
-                and t["function"]["name"] not in covered
-                and t["function"]["name"] not in filtered
-            )
-            return ordered if ordered else tools
+            # 裁剪优先级按会话冻结（钩子排序的唯一消费面＝目录压缩裁剪时谁先留下）。
+            try:
+                cache = getattr(self, "_toolClipOrder", None)
+                if cache is None:
+                    cache = self._toolClipOrder = {}
+                ranking = [n for n in (result.get("ranking") or []) if n not in filtered]
+                key = self._resolve_window_cache_key()
+                if ranking and key not in cache:
+                    cache[key] = ranking
+                    while len(cache) > self._WINDOW_CACHE_SLOTS:
+                        cache.pop(next(iter(cache)))
+            except Exception as e:  # noqa: BLE001 - 簿记失败不改过滤语义
+                logger.debug("工具裁剪优先级簿记跳过: %s", e)
+            return [t for t in tools if (t.get("function") or {}).get("name") not in filtered]
         except Exception as e:
             logger.debug("工具生命周期过滤跳过: %s", e)
             return tools
@@ -382,6 +827,10 @@ class ContextOrchestrator:
         # 创建统一上下文注入器（如果记忆模块可用）
         unified_injector = None
         if self.memory_manager:
+            # 教训注入的开关就是这个身份：不传则 _build_metacog_lessons 恒不执行，
+            # 自模型每 10 轮落的教训只进台账、不改下一轮行为。身份取不到真串时
+            # 维持不注入（MagicMock 测试替身不得被当成真实 agent_id 建台账连接）。
+            _metacog_id = getattr(self._agent.config, "agent_id", None)
             unified_injector = UnifiedContextInjector(
                 memory_manager=self.memory_manager,
                 growth_log_manager=self.growth_log_manager,
@@ -390,6 +839,7 @@ class ContextOrchestrator:
                 enable_cache=True,
                 enable_compression=True,
                 show_empathy=getattr(self._agent.config, "show_empathy", True),
+                metacog_agent_id=_metacog_id if isinstance(_metacog_id, str) and _metacog_id else None,
             )
             logger.info("Agent %s: UnifiedContextInjector 已启用 (16K tokens)", self.config.name)
 
@@ -415,6 +865,8 @@ class ContextOrchestrator:
         crystallized_patterns: Optional[list] = None,
         voice_context: Optional[Dict] = None,
         citation_registry: Optional[Any] = None,
+        chat_collab: bool = False,
+        chat_room_id: str = "",
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -546,32 +998,65 @@ class ContextOrchestrator:
             # 目标：① 省 token（无关归档不进视图）② 永不丢失 ③ 缓存命中
             # ════════════════════════════════════════════════════════
 
-            # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
-            # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
-            self._archive_conversation_to_pool(conversation_context)
+            # P0-2：本轮作用域——归档那一刻就要随内容落进 metadata。
+            # 读侧 `filter_by_scope` 的唯一判据是 `metadata["chat_scope"]`（缺失则
+            # 退到 session_id 前缀，再缺则恒判 direct）→ 写入侧不打标，闸口形同虚设。
+            # 与记忆侧共用 `scope_tag_for_turn`（单源），群轮 = room:<房间 id>。
+            from neurova.collaboration.memory_scope import scope_tag_for_turn
 
-            # 归档记忆
-            for memory in relevant_memories or []:
-                if isinstance(memory, dict):
-                    content = memory.get("content", str(memory))
-                else:
-                    content = str(memory)
-                self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
+            self._turn_collab = bool(chat_collab)
+            # 作用域只认**房间**：单聊轮必须是 direct，把会话 id 当房间会当场破坏隔离。
+            self._turn_room_id = chat_room_id or (self._session_id or "")
+            turn_scope = scope_tag_for_turn(collab=self._turn_collab, room_id=self._turn_room_id)
+            # T-03b 第二命中点：改前这里是 `chat_room_id or self._session_id or None`
+            # ——非协作轮把 None 写进池归属，连带条目 metadata["session_id"] 缺失、
+            # query() 的本会话优先排序退化、写穿台账的 session 列为 NULL。
+            # 归属与缓存键必须取**同一条**回落链（`_resolveTurnSessionId`），
+            # 各写一份就是第二份身份口径（教义第 6 条）。
+            turn_session = self._resolveTurnSessionId()
+            self._recordTurnIdentity(turn_session)
 
-            # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
-            for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
-                )
+            # 池的唯一写入咽喉据此给**全部**写入方打作用域（含 swarm/voice/
+            # 摘要回写等旁路）——写入侧单点接线，读侧闸口才有据可判。
+            self.context_pool.turn_scope = turn_scope
+            self.context_pool.session_id = turn_session
 
-            # 归档反思日志（持久教训，可被语义召回）。2026-09-15 P3：归档
-            # 全文教训+标题（无损池契约，受 draw 预算按相关性取回）；正文不再
-            # 截断、也不再作为 system 行恒定直注（旧直注在下方"本轮产物"块删除）。
-            for log in reflection_logs:
-                full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
-                )
+            # P2-5：降级不粘死——上一轮装配失败的部件在本轮重试一次。摘要器是
+            # 唯一会被"装配失败"永久关掉的 LLM 能力（`_build_window_summarizer`
+            # 闭包读 `pool._summarizer`，为 None 时窗口摘要链路整条停摆），故在
+            # 真·每轮构建路径上重试；成功即恢复，读数同步转 enabled。
+            self._retryContextAssemblies()
+
+            # B4/003：本轮全部归档收进**一次事务**（判据 A2，规格 D8）。
+            # 事务边界就是"本轮归档调用"——批内条目在批结束时一次提交，不做
+            # 异步/后台缓冲刷盘（那会把崩溃窗口内的内容连同"已归档"的承诺一起丢）。
+            with self.context_pool.archiveBatch():
+                # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
+                # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
+                self._archive_conversation_to_pool(conversation_context)
+
+                # 归档记忆（作用域由池的写入咽喉统一打标，见 pool.turn_scope）
+                for memory in relevant_memories or []:
+                    if isinstance(memory, dict):
+                        content = memory.get("content", str(memory))
+                    else:
+                        content = str(memory)
+                    self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
+
+                # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
+                for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
+                    self.context_pool.add_context(
+                        ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
+                    )
+
+                # 归档反思日志（持久教训，可被语义召回）。2026-09-15 P3：归档
+                # 全文教训+标题（无损池契约，受 draw 预算按相关性取回）；正文不再
+                # 截断、也不再作为 system 行恒定直注（旧直注在下方"本轮产物"块删除）。
+                for log in reflection_logs:
+                    full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
+                    self.context_pool.add_context(
+                        ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
+                    )
 
             # ════════════════════════════════════════════════════════
             # 视图层（按需调取 + 稳定前缀）
@@ -593,10 +1078,20 @@ class ContextOrchestrator:
             # 被折叠消息原文已入池、可经 [历史回忆] 语义召回（零丢失）。
             # 审计⑦：视图重建剥 tool_calls/tool_call_id（只保留 role+content），
             # 先重建后 repair——残留 role:"tool" 此处转 user 注记，协议合法
-            window_budget = self._compute_window_budget(
-                system_instructions, developer_instructions, tools_desc
+            window_budget = self._effectiveWindowBudget(
+                self._compute_window_budget(
+                    system_instructions, developer_instructions, tools_desc
+                )
             )
-            window_msgs = await self._apply_window_budget(conversation_context, window_budget)
+            # D4 甲案：窗口与信封共享同一个视图额度，因此**窗口侧先为信封留出保留额度**
+            # ——否则窗口会把额度吃满，信封只能拿到负数被压成空串，检索产物静默消失。
+            # 保留额度 = 信封额度下限（外壳 + 必然要放的部分）；召回内容按剩余额度取。
+            envelope_reserve = self._ENVELOPE_MIN_TOKENS
+            window_msgs = await self._apply_window_budget(
+                conversation_context,
+                max(0, window_budget - envelope_reserve),
+                cache_key=self._resolve_window_cache_key(),
+            )
             # microcompact（Anthropic context editing 对齐，2026-09-10）：
             # 保留最近 3 个工具结果原文，更早的替换为占位指针（池归档无损、
             # 可凭 [历史回忆] 召回）。工具输出通常占窗口大头，先清它比折叠
@@ -605,17 +1100,43 @@ class ContextOrchestrator:
                 window_msgs = self._clear_old_tool_results(window_msgs)
             except Exception as e:  # noqa: BLE001 - 清除失败不阻断
                 logger.debug("工具结果占位清除跳过: %s", e)
+            # T-10d（工单 §11.5）：**在 repair 之前**观测重建产出的配对合法性。
+            # 放 repair 之后计数恒为 0（它把孤儿 tool 行就地转成 user 注记），
+            # 那是一条第 2 条禁止的"恒真判据"—— repair 是通用兜底，它会静默
+            # 修好缺陷，而"重建有缺陷"这件事必须仍然可见。
+            self._recordToolTurnReadout(window_msgs)
             try:
                 from neurova.context.recovery import repair_tool_turns
 
                 window_msgs = repair_tool_turns(window_msgs)
             except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
                 logger.debug("tool-turn 修复跳过: %s", e)
+            # 行数按**实际发给模型**的形状刷新：与上段的配对读数各记一处，
+            # 「重建产出合法」与「最终视图合法」因此可分，不是同一份账抄两遍。
+            self._refreshToolRows(window_msgs)
+            # 视图装配保留协议契约字段（含工具寻址字段）：`tool_call_id` / `name`
+            # / `tool_calls` 被裁掉时，`_tool_placeholder` 的硬地址指针恒为空、
+            # `repair_tool_turns` 也把完整的 tool 轮误判成孤儿转成 user 注记——
+            # "凭 tool_call_id 直取归档原文"这条承诺在 pool 分支不可能成立（P2-4）。
             for msg in window_msgs:
-                context.append({"role": msg.get("role", "user"), "content": msg["content"]})
+                context.append({key: value for key, value in msg.items() if value is not None})
 
-            # 3. 本轮检索产物直接注入（不经抽屉门槛——它们由上游检索链按当前
+            # 3. 本轮检索产物（不经抽屉门槛——它们由上游检索链按当前
             # 查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
+            #
+            # D4 甲案（审计 P2-8）：这类**动态检索文本**不再以 `system` 行直注。
+            # 理由两条（审计 §10.1 的裁决依据）：①`system` 行不在窗口预算管辖内
+            # （窗口预算只覆盖对话消息），是唯一无上限的注入面；②`system` 角色
+            # 权重最高且落在免疫句覆盖范围之外，而知识底座已接入外部来源。
+            # 现在一律收进末条 user 消息的 <system-reminder> 信封，并与对话窗口
+            # 同口径受 `compress_envelope` 确定性淘汰。
+            blocks: Dict[str, list] = {
+                "memories": [],
+                "experience": [],
+                "emotion": [],
+                "tooling": [],
+                "history": [],
+            }
             window_hashes = {
                 ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
                 for msg in window_msgs
@@ -632,22 +1153,20 @@ class ContextOrchestrator:
                 try:
                     from neurova.memory.citation import render_memory_line
 
-                    context.append(
-                        {"role": "system", "content": render_memory_line(memory, registry=citation_registry)}
-                    )
+                    blocks["memories"].append(render_memory_line(memory, registry=citation_registry))
                 except Exception:  # noqa: BLE001 - citation 失败退回旧格式
-                    context.append({"role": "system", "content": f"[记忆] {content}"})
+                    blocks["memories"].append(f"[记忆] {content}")
             for experience in experience_items or []:
                 content = experience.get("content", str(experience)) if isinstance(experience, dict) else str(experience)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, content))
-                context.append({"role": "system", "content": f"[经验] {content}"})
+                blocks["experience"].append(f"[经验] {content}")
             for pattern in crystallized_patterns or []:
                 content = pattern.get("content", str(pattern)) if isinstance(pattern, dict) else str(pattern)
                 crystallized_content = f"[结晶经验] {content}"
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, crystallized_content))
-                context.append({"role": "system", "content": f"[经验] {crystallized_content}"})
+                blocks["experience"].append(f"[经验] {crystallized_content}")
             for question in self._collect_pending_questions():
-                context.append({"role": "system", "content": f"[待探索问题] {question['content']}"})
+                blocks["tooling"].append(f"[待探索问题] {question['content']}")
 
             # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
             # 排除已注入条目（窗口 + 本轮产物），只召回往轮归档
@@ -655,32 +1174,47 @@ class ContextOrchestrator:
             # 否则窗口折叠省下的 token 会被 draw 召回加倍吃回（实测
             # prompt 65920：draw 29 条归档撑爆）。固定前缀不占 draw 预算
             # （drawer 是池归档的独立额度）。
+            # 单源额度：抽屉与信封共用**同一个**剩余额度。二者各留一份额度时，
+            # 抽屉会按自己的份额取回内容、信封再按自己的份额把它们丢掉——
+            # 表现形态就是"召回了但视图里没有"，即检索产物静默消失（教义第 2 条）。
+            # 单源：与信封额度同一个 `_retrievalBudget`（改前此处与信封处各写一份公式）。
+            # B6-9：本轮额度经**入参**透传（改前是 `drawer.max_tokens = ...` 就地改写
+            # 构造期字段——同一字段在不同时刻含义不同，且下一轮忘了写就沿用上一轮的值）。
             try:
-                from neurova.context.window_compactor import estimate_window_tokens
-
-                remaining = max(1000, window_budget - estimate_window_tokens(window_msgs))
-                drawer = getattr(self.context_pool, "_drawer", None)
-                if drawer is not None:
-                    drawer.max_tokens = remaining
+                retrievalBudget = self._retrievalBudget(
+                    window_budget, window_msgs, blocks, user_input
+                )
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
-            drawn_contexts = self.context_pool.draw(need=user_input)
+                retrievalBudget = None
+            drawn_contexts = self.context_pool.draw(need=user_input, budget_tokens=retrievalBudget)
+            # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
+            # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
+            # 的 project_ 前缀判定（与长期记忆同规则）。
+            from neurova.collaboration.memory_scope import filter_by_scope
+            drawn_contexts = filter_by_scope(
+                drawn_contexts,
+                lambda c: getattr(c, "metadata", None) or {},
+                collab=chat_collab,
+                room_id=chat_room_id,
+            )
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
             for ctx in drawn_contexts:
                 if ctx.hash and ctx.hash in injected_hashes:
                     continue  # 已在窗口或本轮产物中，跳过避免重复
+                # 池召回一律进 <history>（D4 甲案：它是原文，池内无损可再召回；
+                # 按来源打标只影响行前缀，不再影响它落在哪一块）
                 if ctx.source == ContextSource.CONVERSATION:
                     role_label = "助手" if (ctx.metadata or {}).get("role") == "assistant" else "用户"
-                    context.append({"role": "system", "content": f"[历史回忆] {role_label}: {ctx.content}"})
+                    blocks["history"].append(f"[历史回忆] {role_label}: {ctx.content}")
                 elif ctx.source == ContextSource.MEMORY:
-                    context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
+                    blocks["history"].append(f"[记忆] {ctx.content}")
                 elif ctx.source == ContextSource.EXPERIENCE:
-                    context.append({"role": "system", "content": f"[经验] {ctx.content}"})
+                    blocks["history"].append(f"[经验] {ctx.content}")
                 elif ctx.source == ContextSource.REFLECTION:
-                    context.append({"role": "system", "content": f"[反思] {ctx.content}"})
+                    blocks["history"].append(f"[反思] {ctx.content}")
                 else:
-                    # 兜底：其他归档来源保持 system 角色
-                    context.append({"role": "system", "content": ctx.content})
+                    blocks["history"].append(str(ctx.content))
 
             # P1-1④：记录本视图覆盖的池 chunk hash（模型请求成功后 ack 确认已读）
             self._last_view_hashes = {
@@ -709,7 +1243,7 @@ class ContextOrchestrator:
                 if tool_memory_context.get("tool_decision") and tool_memory_context["tool_decision"] != "do_not_execute":
                     tool_lines.append(f"决策: {tool_memory_context['tool_decision']}")
                 if tool_lines:
-                    context.append({"role": "system", "content": "[工具记忆] " + " | ".join(tool_lines)})
+                    blocks["tooling"].append("[工具记忆] " + " | ".join(tool_lines))
 
             # 情感状态（本轮瞬态 + 长期倾向/回复基调）
             if agent_emotion:
@@ -718,9 +1252,9 @@ class ContextOrchestrator:
                     emotion_line += f"；长期情感倾向: {agent_emotion['long_term_dominant']}"
                 if agent_emotion.get("tone") and agent_emotion.get("tone") != "neutral":
                     emotion_line += f"；建议回复基调: {agent_emotion['tone']}"
-                context.append({"role": "system", "content": emotion_line})
+                blocks["emotion"].append(emotion_line)
 
-            # 语音上下文（每轮瞬态）
+            # 语音上下文（每轮瞬态）——与 <tooling> 同槽（都是"本轮环境类"注入）
             if voice_context:
                 try:
                     content_parts = []
@@ -734,18 +1268,28 @@ class ContextOrchestrator:
                             f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
                         )
                     if content_parts:
-                        context.append({"role": "system", "content": "\n".join(content_parts)})
+                        blocks["tooling"].append("\n".join(content_parts))
                 except Exception as e:
                     logger.debug("语音上下文注入跳过: %s", e)
 
             # 5. 当前用户输入最后追加，确保是 LLM 看到的最后一条 user 消息
-            # 审计②（批次 A 接入主链）：动态注入内容（记忆/经验/反思/情感已由
-            # 上方 system 注入位承载）+ 分钟级时间以瞬态信封挂末条 user 消息——
-            # 此前 pool 分支完全绕过 UnifiedContextInjector，信封化（F1 前缀
-            # 缓存/免疫句）在默认配置下从未生效
-            from neurova.context.envelope import build_envelope, build_time_block
-
-            _env = build_envelope({"time": build_time_block()})
+            #
+            # D4 甲案前置条件 1：pool 分支接入 `compress_envelope`。不接入的话，
+            # 上面七处内容只是从 system 行**换了个位置**，仍然不受任何 token
+            # 预算管辖——那种半接状态比不改更糟（预算账目更难追）。
+            from neurova.context.envelope import (
+                build_envelope,
+                build_time_block,
+                compress_envelope,
+            )
+            envelope_blocks = {tag: "\n".join(lines) for tag, lines in blocks.items() if lines}
+            envelope_blocks["time"] = build_time_block()
+            _env = build_envelope(envelope_blocks)
+            if _env:
+                # 信封预算 = 固定部分 + 召回额度 + 召回行前缀开销，与抽屉
+                # （`drawer.max_tokens`）同一份额度（单源 `_envelopeBudget`）。
+                env_budget = self._envelopeBudget(window_budget, window_msgs, blocks, user_input)
+                _env = compress_envelope(_env, budget_tokens=env_budget)
             context.append(
                 {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
             )
@@ -919,6 +1463,29 @@ class ContextOrchestrator:
 
         return context
 
+    @staticmethod
+    def _windowChunkIdentity(message: Dict[str, Any]) -> tuple:
+        """窗口消息 →（归档来源域, 内容）的**唯一**派生处。
+
+        归档侧按来源分域：`role=tool` 走 `TOOL_CALL`，其余走 `CONVERSATION`。
+        折叠侧的指纹与防召回集合必须复用同一份派生——各自写一份"一律
+        CONVERSATION"会让工具结果这一支永远匹配不到池内条目（B6-10 批次 B：
+        零丢失判据报假缺失，而防召回对工具归档恒不命中，折叠白做）。
+        """
+        from neurova.context_pool import ContextSource
+
+        msg = message or {}
+        if msg.get("role") == "tool":
+            return ContextSource.TOOL_CALL, msg.get("content", "")
+        return ContextSource.CONVERSATION, msg.get("content", "")
+
+    def _windowChunkHash(self, message: Dict[str, Any]) -> str:
+        """窗口消息的归档指纹（与归档侧同源，见 `_windowChunkIdentity`）。"""
+        from neurova.context_pool import ContextInput
+
+        source, content = self._windowChunkIdentity(message)
+        return ContextInput.compute_hash(source, content)
+
     def _archive_conversation_to_pool(self, conversation_context: List[Dict[str, Any]]) -> None:
         """P1-1① 写入侧归档：对话轮次打标 + tool 结果以 TOOL_CALL 源入池。
 
@@ -933,38 +1500,42 @@ class ContextOrchestrator:
         archived_hashes: set = set()
         for msg, turn_id in assign_turn_ids(conversation_context):
             role = (msg or {}).get("role", "user")
-            if role == "tool":
-                content = msg.get("content", "")
-                archived_hashes.add(ContextInput.compute_hash(ContextSource.TOOL_CALL, content))
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.TOOL_CALL,
-                        content=content,
-                        priority=60,
-                        metadata={
-                            "role": "tool",
-                            "turn_id": turn_id,
-                            "pairs_with": turn_id,
-                            "tool_call_id": msg.get("tool_call_id"),
-                        },
-                    )
-                )
+            source, content = self._windowChunkIdentity(msg)
+            archived_hashes.add(ContextInput.compute_hash(source, content))
+            if source == ContextSource.TOOL_CALL:
+                metadata = {
+                    "role": "tool",
+                    "turn_id": turn_id,
+                    "pairs_with": turn_id,
+                    "tool_call_id": msg.get("tool_call_id"),
+                }
             else:
-                content = msg.get("content", "")
-                archived_hashes.add(ContextInput.compute_hash(ContextSource.CONVERSATION, content))
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.CONVERSATION,
-                        content=content,
-                        priority=60,
-                        metadata={"role": role, "turn_id": turn_id},
-                    )
-                )
+                metadata = {"role": role, "turn_id": turn_id}
+            self.context_pool.add_context(
+                ContextInput(source=source, content=content, priority=60, metadata=metadata)
+            )
         # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
         self._last_archived_window_hashes = archived_hashes
 
-    # microcompact 保留窗口：最近 N 个工具结果保留原文，更早的占位替换
-    _TOOL_RESULT_KEEP_RECENT = 3
+    # ── microcompact（工具结果占位清除）的两根轴（Issue #90 · T-10c 前置裁定）──
+    #
+    # 裁定口径（2026-09-25 负责人）：**裁掉共线**，同时**整合**「未触发折叠但工具
+    # 输出已撑满窗口」那一段的价值。改前的两根轴都取错了对象，且两处"最近 3 条"
+    # 是**同一个数**，稳态上互相抵消（台账 §21.1 的共线）：
+    #
+    # - **触发**看**整窗** token（>8000），而真序列是**先折叠再 microcompact**：
+    #   折叠一旦发生就把窗口压到预算一半以下（8k 档实测 4579 < 8000），触发判据
+    #   在它唯一该起作用的那些轮次上恒假；
+    # - **保留**看条数（最近 3 条），而 3 恰是折叠保留窗（`keep_min_messages=6`
+    #   条消息 = 3 组工具轮）留下的行数 → `len(tool_positions) <= 3` 直接返回。
+    #
+    # 现两根轴都按**它真正管辖的量**——工具结果载荷 token——声明，与折叠的
+    # "保留几条消息"不再共用一个数，折叠发生后仍然动手：
+    _TOOL_PAYLOAD_TRIGGER_TOKENS = 8000  # 绝对臂：载荷合计超过它即换指针
+    _TOOL_PAYLOAD_TRIGGER_SHARE = 0.5  # 相对臂：载荷越过窗口实占的一半 = 工具输出撑满窗口
+    _TOOL_PAYLOAD_MIN_TOKENS = 2000  # 收益门槛：省下的还不抵指针开销时不动手
+    _TOOL_RESULT_KEEP_SHARE = 0.5  # 保留窗：最新若干条累计载荷不超过载荷的一半
+    _TOOL_RESULT_MIN_CHARS = 80  # 极短结果（状态码类）恒保留原文
 
     @classmethod
     def _tool_placeholder(cls, msg: dict) -> str:
@@ -979,32 +1550,145 @@ class ContextOrchestrator:
             "完整内容经 recall_history(session_id, tool_call_id) 取回]"
         )
 
-    def _clear_old_tool_results(self, window_msgs: list) -> list:
-        """microcompact（Anthropic context editing 对齐）：老工具结果占位清除。
+    def _toolPayloadTrigger(self, window_tokens: int) -> int:
+        """触发线：两条臂取**更松**的那个（任一超标即动手），再抬到收益门槛之上。
 
-        只在窗口 token 超过 8k 时启用（短对话不做无谓替换）；保留最近
-        _TOOL_RESULT_KEEP_RECENT 个工具结果原文，更早的替换为寻址占位指针。
-        原文真相在会话台账（metadata.tool_calls，P1-#6）与池归档，
-        占位携带 call_id 硬地址供 recall_history 直取。
+        - 绝对臂：载荷合计过 8000 —— 载荷本身就够大，换指针必然划算；
+        - 相对臂：载荷越过**窗口实占的一半** —— 工具输出已撑满窗口
+          （「未触发折叠但工具输出已撑满窗口」那一段由它覆盖）。
+
+        收益门槛是**下限**：载荷太小时换指针省下的还不抵指针自身的 token 开销，
+        所以不动手（判据取载荷本身，不看条数——条目再多、总量小也不划算）。
         """
-        from neurova.context.window_compactor import estimate_window_tokens
+        return max(self._TOOL_PAYLOAD_MIN_TOKENS,
+                   min(self._TOOL_PAYLOAD_TRIGGER_TOKENS,
+                       int(window_tokens * self._TOOL_PAYLOAD_TRIGGER_SHARE)))
 
-        if estimate_window_tokens(window_msgs) <= 8000:
-            return window_msgs
+    def _recordToolTurnReadout(self, window_msgs: list) -> None:
+        """把本视图的工具轮读数写进 `get_context_health()["tool_turns"]`（T-10d）。
 
-        tool_positions = [
+        三件事此前**完全不可见**（工单 §11.5 要求的可观测计数）：
+        ① 视图内 `assistant.tool_calls` 行数与 `tool` 行数；
+        ② 旧数据降级次数 / 重建配对数 / 回退开关使用次数 —— 取自
+           `SessionManager.get_model_context_stats()` 的计数器**本体**（重建路径
+           才是这些事实的发生地；在这里另记一份就是第二份平行账，两边迟早对不上）；
+        ③ `declared_ids` 与实际 `tool_call_id` 不匹配 —— 孤儿 `tool` 行直发 provider
+           即 400（配对非法），故计数 + 首次 warning 点名，不静默。
+
+        计数一律取**实际视图**，不重算、不复制。
+        """
+        from neurova.context.recovery import orphanToolRows
+
+        readout = self._contextHealthSlot("tool_turns")
+        readout["turns"] = int(readout.get("turns") or 0) + 1
+        readout["rebuilt_tool_rows"] = sum(
+            1 for m in window_msgs if (m or {}).get("role") == "tool"
+        )
+        stats = self._modelContextStats()
+        readout["degraded_turns"] = int(stats.get("degraded_turns") or 0)
+        readout["rebuilt_pairs"] = int(stats.get("rebuilt_pairs") or 0)
+        readout["killswitch_off"] = int(stats.get("killswitch_off") or 0)
+
+        orphaned = orphanToolRows(window_msgs)
+        readout["declared_mismatch"] = int(readout.get("declared_mismatch") or 0) + len(orphaned)
+        if orphaned:
+            ids = [str((m or {}).get("tool_call_id") or "未知") for m in orphaned[:3]]
+            readout["last_error"] = (
+                "ToolPairingMismatch: 本视图有 %d 条 `role=\"tool\"` 行的 tool_call_id "
+                "未被任何 `assistant.tool_calls` 声明（直发 provider 即 400），前几条 id=%s"
+                % (len(orphaned), ids)
+            )
+            logger.warning(
+                "工具轮配对不匹配：%d 条孤儿 tool 行（id=%s）—— provider 会以 400 拒绝",
+                len(orphaned), ids,
+            )
+
+    def _refreshToolRows(self, window_msgs: list) -> None:
+        """刷新视图内的 `assistant.tool_calls` 行数与 `tool` 行数（唯一写入处）。"""
+        readout = self._contextHealthSlot("tool_turns")
+        readout["tool_call_rows"] = sum(
+            1 for m in window_msgs
+            if (m or {}).get("role") == "assistant" and (m or {}).get("tool_calls")
+        )
+        readout["tool_rows"] = sum(1 for m in window_msgs if (m or {}).get("role") == "tool")
+
+    def _modelContextStats(self) -> Dict[str, int]:
+        """重建路径的计数：读 `SessionManager.get_model_context_stats()` **本体**。
+
+        降级次数、重建配对数、回退开关使用次数都发生在那里（重建方法内部累加），
+        在编排器另记一份就是第二份平行账 —— 两边迟早对不上，且对不上时没人能
+        说清谁对（教义第 6 条）。读数不可得时按 0 计，不阻断装配。
+        """
+        manager = getattr(self._agent, "session_manager", None)
+        getter = getattr(manager, "get_model_context_stats", None)
+        if getter is None:
+            return {}
+        try:
+            stats = getter() or {}
+        except Exception:  # noqa: BLE001 - 读数不可得按 0 计，不阻断装配
+            return {}
+        return {str(k): int(v) for k, v in stats.items() if isinstance(v, (int, float))}
+
+    def _clear_old_tool_results(self, window_msgs: list) -> list:
+        """microcompact：老工具结果的载荷换成寻址占位指针（原文在池/台账，可直取）。
+
+        触发与保留都按**工具结果载荷**判定（常量注释见类属性处）：载荷越过
+        `_toolPayloadTrigger` 即动手；保留最新的、累计载荷不超过载荷一半的原文
+        （**至少 1 条**），更早的换成占位指针；极短结果恒保留原文。
+
+        与窗口折叠的分工：折叠管对话文本的**条数**（`keep_min_messages`），本方法
+        管工具载荷的**份额**——两根轴各自声明，折叠发生后本方法仍能动手。
+
+        触发事实记进 `get_context_health()["microcompact"]`：下游（视图渲染/下一段
+        续写）按它知道本轮有工具原文被换成指针，而不是解析日志猜。
+        """
+        from neurova.context.window_compactor import WindowTokenMeter
+
+        positions = [
             i for i, m in enumerate(window_msgs) if (m or {}).get("role") == "tool"
         ]
-        if len(tool_positions) <= self._TOOL_RESULT_KEEP_RECENT:
+        if not positions:
             return window_msgs
 
-        cutoff = tool_positions[-self._TOOL_RESULT_KEEP_RECENT]
+        # 计量单源：与折叠/窗口预算同一把尺（重复计量由 meter 内部缓存承担）
+        meter = WindowTokenMeter()
+        payload_tokens = meter.total([window_msgs[i] for i in positions])
+        trigger_tokens = self._toolPayloadTrigger(meter.total(window_msgs))
+        readout = self._contextHealthSlot("microcompact")
+        readout["calls"] += 1
+        # 未触发也记账：载荷与触发线一律写回，"没触发"与"没跑"因此可分、
+        # "离触发线还有多远"也不是靠日志猜。
+        readout["last_payload_tokens"] = int(payload_tokens)
+        readout["last_trigger_tokens"] = int(trigger_tokens)
+        if payload_tokens < trigger_tokens:
+            readout["last_replaced"] = 0
+            readout["last_kept"] = len(positions)
+            return window_msgs
+
+        # 保留窗：从最新一条往回累计，直到超出保留预算；**至少保留 1 条**
+        keep_budget = payload_tokens * self._TOOL_RESULT_KEEP_SHARE
+        keep_from = positions[-1]
+        kept_tokens = 0.0
+        for i in reversed(positions):
+            row_tokens = meter.one(window_msgs[i])
+            if kept_tokens and kept_tokens + row_tokens > keep_budget:
+                break
+            kept_tokens += row_tokens
+            keep_from = i
+
         cleared = list(window_msgs)
-        for i in tool_positions:
-            if i < cutoff:
-                content = str(cleared[i].get("content", "") or "")
-                if len(content) >= 80:  # 极短结果（如状态码）保留原文
-                    cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
+        replaced = 0
+        for i in positions:
+            if i >= keep_from:
+                continue
+            content = str(cleared[i].get("content", "") or "")
+            if len(content) >= self._TOOL_RESULT_MIN_CHARS:
+                cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
+                replaced += 1
+
+        readout["triggered_calls"] += 1
+        readout["last_replaced"] = replaced
+        readout["last_kept"] = sum(1 for i in positions if i >= keep_from)
         return cleared
 
     # ══════════════════════════════════════════════════════════════
@@ -1018,6 +1702,82 @@ class ContextOrchestrator:
     # 口径，不是双重折减 bug：pool 系数管"视图 vs 窗口"，本层系数管"历史
     # 在 prompt 里的份额"，语义不同层。改动任何一层前先看本注释。
     _WINDOW_SHARE_OF_POOL_BUDGET = 0.6
+
+    # 召回额度地板（D3 裁决：地板按模型上下文自适应，取向以提升前缀缓存命中率
+    # 优先——倾向跨轮**小而稳定**的召回集合，而不是"多召回更懂你"）。
+    #
+    # 为什么是份额而不是常数：固定 1000 在 8k 模型上相对过宽（挤掉窗口份额），
+    # 在 128k 模型上又过窄（召回被压到几乎不可用）。改为窗口预算的既定份额，
+    # 并保留绝对下限——窗口预算极小时额度不得退化为 0（那等于取消召回）。
+    _RECALL_FLOOR_SHARE = 0.05
+    _RECALL_MIN_TOKENS = 1000
+
+    def _resolveRecallFloor(self) -> int:
+        """召回额度地板：窗口预算的既定份额，钳在绝对下限之上。"""
+        budget = self._resolve_window_token_budget()
+        return min(
+            max(self._RECALL_MIN_TOKENS, int(budget * self._RECALL_FLOOR_SHARE)),
+            max(self._RECALL_MIN_TOKENS, budget),
+        )
+
+    @property
+    def _ENVELOPE_MIN_TOKENS(self) -> int:
+        """信封额度地板——与召回地板**同一个**判据（改前是两条各写一份的常数）。"""
+        return self._resolveRecallFloor()
+
+    def _retrievalBudget(
+        self, window_budget: int, window_msgs, blocks: Dict[str, list], user_input
+    ) -> int:
+        """本轮召回内容额度（**单源**：抽屉与信封共用它的返回值）。
+
+        改前同一份公式在 `build_context` 里写了两遍（抽屉联动处与信封额度处），
+        两份各减各的项——口径分裂的典型形态：只要某一处漏减一项，抽屉取回的内容
+        就会被信封丢掉，表现形态是"检索产物静默消失"。
+
+        额度 = 窗口预算 − 对话窗口实占 − 信封固定部分 − 本轮用户输入，
+        下限为召回地板（窗口已吃满时"剩余"为负，不给地板会把内容压成空串）。
+        """
+        from neurova.context.token_estimator import estimate_tokens
+        from neurova.context.window_compactor import estimate_window_tokens
+
+        return max(
+            self._ENVELOPE_MIN_TOKENS,
+            window_budget
+            - estimate_window_tokens(window_msgs)
+            - self._envelopeFixedTokens(blocks)
+            - estimate_tokens(str(user_input or "")),
+        )
+
+    def _envelopeBudget(
+        self, window_budget: int, window_msgs, blocks: Dict[str, list], user_input
+    ) -> int:
+        """信封额度 = 固定部分 + 召回额度 + 召回行前缀开销（同样是**单源**导出）。
+
+        召回行前缀不可省：抽屉按 `drop.content` 计量，渲染成行还要加
+        "[历史回忆] 用户: " 这类前缀；不补进预算则"刚好取满"的内容会被信封丢掉。
+        """
+        from neurova.context.token_estimator import estimate_tokens
+
+        line_prefix = estimate_tokens(
+            "\n".join("[历史回忆] 用户: " for _ in (blocks or {}).get("history", []))
+        )
+        return (
+            self._envelopeFixedTokens(blocks)
+            + self._retrievalBudget(window_budget, window_msgs, blocks, user_input)
+            + line_prefix
+        )
+
+    def _effectiveWindowBudget(self, budget_tokens: int) -> int:
+        """过 90% 硬顶后的窗口预算（**单源**：召回额度与窗口裁剪取同一个值）。
+
+        B6-9（P2-6）：改前 `_apply_window_budget` 内部自钳，而召回额度公式用的是
+        未钳制的 `window_budget`——同一轮里两处对"窗口预算"理解不一致（配置预算
+        大于模型上下文 90% 时，召回按大预算取、窗口按小预算裁）。
+        """
+        hardLimit = self._resolve_auto_compact_hard_limit()
+        if hardLimit and hardLimit < budget_tokens:
+            return hardLimit
+        return budget_tokens
 
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
@@ -1040,6 +1800,66 @@ class ContextOrchestrator:
         except Exception:  # noqa: BLE001 - 预算查询失败不阻断
             pool_budget = 16000
         return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
+
+    # 预算读写只认"窗口预算对象"这一处口径：端点 PUT 的 max_tokens 落成
+    # 显式覆盖（`_window_token_budget`），GET 读回同一个方法——读写同源，
+    # 不存在"PUT 写 A、GET 读 B"的假闸口（B6-2 / P2-2）。
+    _BUDGET_MIN = 1000
+    _BUDGET_MAX = 400000
+
+    def get_token_budget(self) -> Dict[str, int]:
+        """当前生效的 token 预算读数（`max_tokens` 口径 = 窗口预算）。
+
+        `used_tokens` 取 compose 侧最近一次实测的 prompt 总量——面板与判据
+        共用同一把尺子（`context.composition`）。无实测快照时为 0（不是估算）。
+        """
+        max_tokens = self._resolve_window_token_budget()
+        used_tokens = 0
+        try:
+            from neurova.context.composition import get_last_composition
+
+            # T-03b 第三命中点：改前只认 `self._session_id`（构造期恒 None）→
+            # 退到 **agent 级** 快照，面板显示的是别的会话的最近一轮规模。
+            # 身份推导只允许一处（`_resolveTurnSessionId`），与缓存键、池归属同源。
+            snapshot = get_last_composition(
+                str(getattr(self.config, "agent_id", "") or "default"),
+                self._resolveTurnSessionId(),
+            )
+            if snapshot:
+                used_tokens = int(snapshot.get("total_tokens") or 0)
+        except Exception:  # noqa: BLE001 - 无实测快照不影响预算读数
+            used_tokens = 0
+        return {
+            "max_tokens": max_tokens,
+            "used_tokens": used_tokens,
+            "available_tokens": max(0, max_tokens - used_tokens),
+        }
+
+    def set_token_budget(self, max_tokens: int) -> int:
+        """写入生效预算，返回实际生效值（越界被钳位，调用方拿得到真值）。"""
+        value = max(self._BUDGET_MIN, min(self._BUDGET_MAX, int(max_tokens)))
+        self._window_token_budget = value
+        return value
+
+    @staticmethod
+    def _envelopeFixedTokens(blocks: Dict[str, list]) -> int:
+        """信封**固定部分**的 token 占用：外壳（免疫句）+ `<time>` + 非召回块。
+
+        抽屉与信封的额度计算共用它——这是"单源额度"的可证伪形态：若某处
+        自己再算一份，两处口径就会漂移（外壳/时间块被漏算），额度分配随之失衡，
+        表现形态正是"召回取回来了、信封却把它丢掉"。
+        """
+        from neurova.context.envelope import build_envelope, build_time_block
+
+        fixed = {
+            tag: "\n".join(str(x) for x in lines)
+            for tag, lines in (blocks or {}).items()
+            if tag != "history" and lines
+        }
+        fixed["time"] = build_time_block()
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(build_envelope(fixed))
 
     def _compute_window_budget(
         self,
@@ -1112,6 +1932,7 @@ class ContextOrchestrator:
         self,
         conversation_context: list,
         budget_tokens: int,
+        cache_key: Optional[str] = None,
     ) -> list:
         """窗口预算裁剪：未超预算原样返回；超预算折叠老消息为摘要行 + 尾部窗口。
 
@@ -1122,36 +1943,26 @@ class ContextOrchestrator:
  - P0-2：auto_compact_enabled=False 时原样返回；
           有效预算 = min(budget, 模型上下文窗口×90%) 硬顶。
         """
-        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+        from neurova.context.window_compactor import (
+            compact_window,
+            estimate_window_tokens,
+            normalizeViewMessages,
+        )
 
         # P0-2：显式关闭语义——超预算也原样返回（调用方自行承担窗口超限）
         if not getattr(self, "auto_compact_enabled", True):
-            return [
-                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-                for m in (conversation_context or [])
-                if isinstance(m, dict) and (m or {}).get("content")
-            ]
+            return normalizeViewMessages(conversation_context)
 
         # P0-2：硬顶钳制——配置预算再大也不越过模型上下文的 90%
-        hard_limit = self._resolve_auto_compact_hard_limit()
-        if hard_limit and hard_limit < budget_tokens:
-            budget_tokens = hard_limit
+        # （判据单源 `_effectiveWindowBudget`，调用方已按同一值给出入参；此处
+        # 保留一次钳制以便 `_apply_window_budget` 被直接调用时行为不变）
+        budget_tokens = self._effectiveWindowBudget(budget_tokens)
 
-        msgs = [
-            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-            for m in (conversation_context or [])
-            if isinstance(m, dict) and (m or {}).get("content")
-        ]
+        msgs = normalizeViewMessages(conversation_context)
         if not msgs or estimate_window_tokens(msgs) <= budget_tokens:
-            return [
-                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-                for m in (conversation_context or [])
-                if isinstance(m, dict) and (m or {}).get("content")
-            ]
+            return normalizeViewMessages(conversation_context)
 
-        cache = self._window_compaction_cache.setdefault(
-            self.session_id or "_", {"summary": "", "covered": set()}
-        )
+        cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
         # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
         # （省一轮摘要 LLM——实测摘要链路 30s+，每轮重调不可接受）。
         # 未覆盖的消息仍归档在池中，零丢失。
@@ -1173,27 +1984,56 @@ class ContextOrchestrator:
         # 本轮被折叠消息 hash 集（build_context 据此当轮防召回——刚折叠即召回
         # 会让折叠白做；下轮起窗口滑走、恢复正常语义召回）
         kept_contents = {m.get("content", "") for m in compaction.window}
-        from neurova.context_pool import ContextInput as _CI, ContextSource as _CS
-
+        # 指纹域与归档侧同源（`_windowChunkHash`）：工具结果归档在 TOOL_CALL 域，
+        # 折叠侧若一律按 CONVERSATION 取，防召回集合对工具归档恒不命中。
         self._last_folded_hashes = {
-            _CI.compute_hash(_CS.CONVERSATION, m.get("content", ""))
+            self._windowChunkHash(m)
             for m in msgs
             if m.get("content", "") not in kept_contents
         }
+        # 零丢失判据的消费点（改前 `_last_archived_window_hashes` 只写不读）：
+        # 折叠发生即对归档对账，读数并进 get_context_health()["fold_integrity"]。
+        from neurova.context.fold_integrity import verifyOrchestratorFoldIntegrity
 
-        # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）
-        if compaction.summary:
-            cache["summary"] = compaction.summary
+        # `__new__` 直构路径（测试/工具）不跑 __init__、没有 `_context_health`：
+        # 读数面按需建一份（空形状取 `_emptyContextHealth()` 单源，不在此另写
+        # 一份字段表），而不是让判据在这条路径上抛异常（那是判据被绕过）。
+        health = getattr(self, "_context_health", None)
+        if health is None:
+            health = self._context_health = self._emptyContextHealth()
+        health["fold_integrity"] = verifyOrchestratorFoldIntegrity(self)
+
+        # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
+        #
+        # P1-2：只有**新**摘要才能推进覆盖记账。摘要失败时 summarize 会沿用
+        # previous_summary（对池侧是幂等 no-op），返回值仍非空；旧实现据此把
+        # last_count 前移、把新增消息记为"已覆盖"——而那份摘要在诞生时它们
+        # 还在窗口里，等于在摘要层做假账（防抖期内不再重摘要，视图只剩一个
+        # 与内容无关的旧标题）。
+        if compaction.summary and compaction.summary_is_fresh:
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
-            # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的）
+            # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的），
+            # 并同批收集这一代的 covers（hash + 轮次 id）。
+            # 轮次 id 的派生与归档侧**同源**（`assign_turn_ids`）：另起一份
+            # "第几条算一轮"的算法，covers 的 turn 区间会与归档归属对不上。
             kept_set = {m["content"] for m in compaction.window}
-            for m in msgs:
-                if m["content"] not in kept_set:
-                    cache["covered"].add(
-                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
-                    )
+            coveredNow: List[str] = []
+            turnIdsNow: List[str] = []
+            for m, turnId in assign_turn_ids(msgs):
+                if m.get("content", "") in kept_set:
+                    continue
+                fingerprint = self._windowChunkHash(m)
+                cache["covered"].add(fingerprint)
+                coveredNow.append(fingerprint)
+                turnIdsNow.append(turnId)
+            # T-11a/T-11b：新摘要推进代际栈（旧摘要降一层）并写进池带 covers。
+            # 顺序不可换：covers 取的正是上面刚落进 `covered` 的那批 hash，
+            # 先推进则这一代没有任何原文可寻址。
+            self._advanceFoldGeneration(
+                cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
+            )
 
         window = compaction.window
         if compaction.compacted_count > 0 and not compaction.summary:
@@ -1208,6 +2048,12 @@ class ContextOrchestrator:
                 )
             )
             window = [{"role": "system", "content": stub}] + window
+
+        # T-11d：把这一代的 `covers_ref` 内联进摘要行 —— 模型据此**确定性**下钻，
+        # 而不是靠 recall_history 的相关性门槛碰运气（工单 §12.5 第 3 条）。
+        # 放在两条分支汇合处：有 LLM 摘要与只有静态桩两种形状都要带引用，
+        # 否则"摘要行有引用"这件事就只在摘要成功时才成立（那是运气，不是契约）。
+        window = self._inlineCoversRef(window, cache)
 
         logger.info(
             "[WINDOW_COMPACT] 窗口超预算折叠: %d msgs → %d（折叠 %d 条, token %d → %d, LLM摘要=%s）",
@@ -1231,13 +2077,13 @@ class ContextOrchestrator:
             {compacted, folded, kept, tokens_before, tokens_after,
              summary_generated, reason?}
         """
-        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+        from neurova.context.window_compactor import (
+            compact_window,
+            estimate_window_tokens,
+            normalizeViewMessages,
+        )
 
-        msgs = [
-            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-            for m in (conversation_history or [])
-            if isinstance(m, dict) and (m or {}).get("content")
-        ]
+        msgs = normalizeViewMessages(conversation_history)
         if not msgs:
             return {"compacted": False, "reason": "empty_history", "folded": 0, "kept": 0,
                     "tokens_before": 0, "tokens_after": 0, "summary_generated": False}
@@ -1247,9 +2093,7 @@ class ContextOrchestrator:
         # 与 auto 路径同源（_resolve_window_token_budget → _window_token_budget
         # 覆盖生效），保证测试/运维显式预算下两路结论一致
         budget = max(1500, self._resolve_window_token_budget() // 2)
-        cache = self._window_compaction_cache.setdefault(
-            self.session_id or "_", {"summary": "", "covered": set()}
-        )
+        cache = self._window_cache_slot(self._resolve_window_cache_key())
 
         compaction = await compact_window(
             msgs,
@@ -1268,16 +2112,23 @@ class ContextOrchestrator:
                     "summary_generated": False}
 
         if compaction.summary:
-            cache["summary"] = compaction.summary
+            # 与自动折叠**共用同一处**分代推进（教义第 6 条：一个契约一处实现）。
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
             kept_set = {m["content"] for m in compaction.window}
-            for m in msgs:
-                if m["content"] not in kept_set:
-                    cache["covered"].add(
-                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
-                    )
+            coveredNow = []
+            turnIdsNow = []
+            for m, turnId in assign_turn_ids(msgs):
+                if m.get("content", "") in kept_set:
+                    continue
+                fingerprint = self._windowChunkHash(m)
+                cache["covered"].add(fingerprint)
+                coveredNow.append(fingerprint)
+                turnIdsNow.append(turnId)
+            self._advanceFoldGeneration(
+                cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
+            )
         elif cache.get("summary"):
             # 无新摘要但旧摘要存在：保留（后续轮次仍携带）
             pass
@@ -1691,19 +2542,18 @@ class ContextOrchestrator:
             except ValueError:
                 min_catalog = 40
 
-            hidden_candidates = [
-                t["function"]["name"]
-                for t in tools
-                if t.get("function", {}).get("name") not in set(direct)
-                and t.get("function", {}).get("name") not in ("tool_search", "tool_describe", "tool_call")
-            ]
             compacted = _compact(tools, direct, min_catalog=min_catalog)
             if compacted is None:
                 return tools
 
-            from neurova.context.tool_search import build_catalog, get_active_catalog, get_directory_budget
+            from neurova.context.tool_search import get_active_catalog, get_directory_budget
 
             catalog_entries = [e for e in get_active_catalog()]
+            # T-02：目录超预算时按（会话冻结的）裁剪优先级淘汰；sort 稳定。
+            _order = (getattr(self, "_toolClipOrder", None) or {}).get(self._resolve_window_cache_key(), [])
+            if _order:
+                _rank = {n: i for i, n in enumerate(_order)}
+                catalog_entries.sort(key=lambda e: _rank.get(e["name"], len(_rank)))
             directory = render_directory(catalog_entries, max_chars=get_directory_budget())
             _nl = chr(10)
             directory_block = (
@@ -1734,18 +2584,41 @@ def dedupe_experience_sources(experiences, crystallized_patterns):
 
     此前两条注入管线（EKB 经验 / PatternCrystallizer 产物）互不感知，
     同一条经验会以 70/80 两个优先级重复进池。key = 内容去空白前 100 字符。
+
+    工单 007：普通经验的优先级改由 006 的采纳后证据决定，不再无条件 70——
+    "上次照这条做砸了"与"上次照这条做成了"不得在 prompt 里同权争位。
+    证据缺席（NULL / 其他生产者给的裸条目）回落基线 70：没测到既不是加分项
+    也不是扣分项（D1）。结晶产物的 80 基准不动，其生命周期归 017。
+
+    工单 015：人工降权接进同一张表，压在全部证据档之下（`demoted 45`）。
+    `endorsed` **不占档**——人说过"可以用"不等于这条被执行成功过，让它冒领 78
+    就是把判断洗成证据；`suppressed` 也不在这里处理，隐藏已在检索侧出局。
     Returns: List[(tag, content, priority)]
     """
     import re as _re
 
+    _ADOPTION_PRIORITY = {
+        "success": 78,
+        "unevidenced": 65,
+        "failure": 55,
+    }
+    _EXPERIENCE_BASELINE = 70
+    _DEMOTED_PRIORITY = 45
+
     def _key(c: str) -> str:
         return _re.sub(r"[\s]+", "", str(c))[:100]
+
+    def _prio(item) -> int:
+        if isinstance(item, dict) and item.get("operator_disposition") == "demoted":
+            return _DEMOTED_PRIORITY
+        outcome = item.get("adoption_outcome") if isinstance(item, dict) else None
+        return _ADOPTION_PRIORITY.get(outcome, _EXPERIENCE_BASELINE)
 
     seen = set()
     out = []
     # 结晶产物先入（同内容时按优先级保留结晶副本）
     pairs = [(("[结晶经验] ", p, 80)) for p in (crystallized_patterns or [])] + [
-        (("", e, 70)) for e in (experiences or [])
+        (("", e, _prio(e))) for e in (experiences or [])
     ]
     for tag, item, prio in pairs:
         content = item.get("content", str(item)) if isinstance(item, dict) else str(item)
@@ -1998,7 +2871,7 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
                     _cache = _VECTOR_CACHES.get(_agent_id)
                     if _cache is None:
                         _cache = SkillVectorCache(
-                            cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                            cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
                         )
                         _VECTOR_CACHES[_agent_id] = _cache
                     _semantic = semantic_scores_for(_cache, _turn_input, dict(_items))

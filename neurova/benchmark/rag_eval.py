@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -30,7 +31,7 @@ K_DEFAULT = (1, 3, 5, 10)
 
 
 def _datasets_path() -> Path:
-    return Path(os.environ.get("NEUROVA_RAG_EVAL_DATASETS") or "data/rag_eval_datasets.json")
+    return callerPath(os.environ.get("NEUROVA_RAG_EVAL_DATASETS"), "rag_eval_datasets.json")
 
 
 def rag_metrics(gold_ids: set, retrieved_ids: Sequence[str], k_list: Sequence[int] = K_DEFAULT) -> Dict[str, float]:

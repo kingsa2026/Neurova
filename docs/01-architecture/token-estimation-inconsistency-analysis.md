@@ -41,7 +41,12 @@ def _count_tokens(self, text: str) -> int:
 - 其他字符: 0.25 tokens/字符
 - 不区分英文单词，所有非中文字符统一计算
 
-#### 算法 2: context_pool.py - ContextPoolUtils.estimate_tokens (第801-826行)
+#### 算法 2: context_pool.py - ContextPoolUtils.estimate_tokens（第801-826行）
+
+> **已退役（B6-10 / Issue #90 审计 §5）**：`ContextPoolUtils`（含该 staticmethod）
+> 与 `neurova/context/utils.py` 已从生产侧删除——它只是
+> `context/token_estimator.estimate_tokens` 的转发薄壳，即**同契约的第二份入口**。
+> 估算口径的唯一事实源是 `neurova/context/token_estimator.py`。本节保留为历史分析记录。
 ```python
 @staticmethod
 def estimate_tokens(text: str) -> int:
@@ -69,7 +74,12 @@ def estimate_tokens(text: str) -> int:
 - 英文单词: 0.25 tokens/词（按空格分词）
 - 最小返回值为 1
 
-#### 算法 3: context_compressor.py - Message.estimate_tokens (第58-67行)
+> **已退役（B6-10 批次 C）**：`neurova/context_compressor.py` 已整模块删除——
+> 它是装配即弃的第二份压缩实现（真实签名与唯一调用形状双不符，TypeError 被
+> except 吞掉）。本节与下方算法 4 保留为**历史分析记录**，不得据以重新引入。
+> 现行估算口径的唯一事实源是 `neurova/context/token_estimator.py`。
+
+#### 算法 3: ~~context_compressor.py~~ - Message.estimate_tokens (第58-67行，已退役)
 ```python
 def estimate_tokens(self) -> int:
     """估算token数量"""
@@ -88,7 +98,7 @@ def estimate_tokens(self) -> int:
 - 英文单词: 1 token/词（使用正则表达式匹配字母序列）
 - 使用正则表达式进行更精确的分词
 
-#### 算法 4: context_compressor.py - len() // 4 (第271, 611, 634行)
+#### 算法 4: ~~context_compressor.py~~ - len() // 4 (第271, 611, 634行，已退役)
 ```python
 # 第271行
 system_tokens = len(system_prompt) // 4  # 粗略估算
@@ -142,7 +152,7 @@ total += len(content) // 4
 | 层 | 文件:行 | 问题 | 假设 |
 |----|---------|------|------|
 | 1 | `neurova/context/injector.py:757-768` | _count_tokens 使用 chinese_ratio=1.5, english_ratio=0.25 | 可能来自 TokenBudget 配置 |
-| 2 | `neurova/context_pool.py:801-826` | ContextPoolUtils.estimate_tokens 使用中文字符*1.5 + 英文单词*0.25 | 可能与 injector.py 相同来源 |
+| 2 | ~~`neurova/context_pool.py:801-826`~~ | **已退役**（B6-10）：`ContextPoolUtils.estimate_tokens` 是 `token_estimator.estimate_tokens` 的第二份入口，已删净 | — |
 | 3 | `neurova/context_compressor.py:58-67` | Message.estimate_tokens 使用中文字符*2 + 英文单词*1 | 不同的估算策略 |
 | 4 | `neurova/context_compressor.py:271,611,634` | len() // 4 粗略估算 | 简化实现，精度最低 |
 | 5 | `neurova/context/models.py:37-42` | TokenBudget 定义 chinese_ratio=1.5, english_ratio=0.25 | 配置源 |
@@ -322,7 +332,7 @@ class TokenEstimator:
 
 - `neurova/context/injector.py` - 主要问题文件
 - `neurova/context_pool.py` - 主要问题文件
-- `neurova/context_compressor.py` - 主要问题文件
+- ~~`neurova/context_compressor.py`~~ - **已退役**（B6-10 批次 C，整模块删除）
 - `neurova/context/models.py` - TokenBudget 定义
 - `tests/unit/test_token_estimation_inconsistency.py` - 测试文件
 - `test_token_calculation.py` - 计算对比脚本

@@ -1,0 +1,639 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Kai → Neurova 记忆与聊天导入器。
+
+数据源（E:/项目/Kai）→ 目标（agent_workspaces/kai + sessions/kai）：
+
+记忆：
+  workspace/memory/neural_memory.db              memories 874 条（旧库，仅补内容去重增量）
+  两者 created_at 语义均为 UTC → 存储为显式 +00:00，原始时刻不动。
+
+聊天（会话内必须时间升序，用户验收硬约束）：
+  workspace/dialog/*.jsonl          每日对话 jsonl（本地时间 → 显式 +08:00）
+                                    本地时间 → 显式 +08:00；context_msg 合并进
+                                    user 轮、tool_result 折叠不丢 assistant 文本）
+
+身份：
+  SOUL.md → agent_workspaces/kai/memory/soul.md（Agent._load_identity 真实加载位）
+  PROFILE.md → memory/personality.md + workspace 根留档
+  MEMORY.md → workspace 根留档
+
+幂等：记忆按 (agent_id, content, created_at) 去重；会话按消息
+(metadata.kai_import.source, metadata.kai_import.ts) 去重，重跑零增量。
+
+定位（2026-09-20 起）：产品化的导入路径是 scripts/ingest_memory.py + neurova/memory_ingest/
+（结构指纹识别 → 中立包 → 两条咽喉 → 按批次撤销）。聊天三源与媒体已在那边做到等价并超出
+本脚本：会话表一轮多调用按块展开（本脚本只取平列那一个）、每日对话与 1.x 的 tool_use /
+tool_result 也认得（本脚本整块丢掉一万多个工具事件）。
+
+本脚本不再是产品入口，只保留两件事：
+1. 私有方言来源——neural_memory / qwenpaw_memory 记忆库、workspace/session_contexts 快照、
+   memory/ 下的 reme 笔记：无公开格式可依，有意不进指纹表，只在这台机器上有意义；
+2. 身份/人格文件装配（SOUL/PROFILE/MEMORY），按已定方案不并入中立包。
+
+它随仓内的 tests/unit/migration/ 一起留作回归；**新格式一律走 ingest_memory，不要往这里
+加方言**。
+
+用法：
+  python scripts/import_kai_to_neurova.py --kai-root E:/项目/Kai \
+      --neurova-root E:/项目/Neurova [--dry-run]
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from neurova.core.agent_workspaces import AGENT_WORKSPACES_ENV  # noqa: E402
+from neurova.memory_ingest.converters import CONVERTERS  # noqa: E402
+from neurova.memory_ingest.intake import (  # noqa: E402
+    apply_bundle, session_manager_for)
+from neurova.memory_ingest.probe import probe_store  # noqa: E402
+
+CN_TZ = timezone(timedelta(hours=8))  # 源本地时区 Asia/Shanghai
+UTC = timezone.utc
+_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# 源库 memory_type → Neurova (memory_type, category) 映射（合法枚举闭集）
+TYPE_MAP = {
+    "fact": ("semantic", "knowledge"),
+    "preference": ("semantic", "user_preference"),
+    "emotion": ("emotional", "experience"),
+    "conversation": ("episodic", "conversation"),
+    "project_decision": ("semantic", "experience"),
+    "system": ("semantic", "general"),
+    "covenant": ("emotional", "experience"),
+    "session_test": ("episodic", "general"),
+    "general": ("episodic", "general"),
+}
+
+
+def _norm_ts(raw: str, tz: timezone) -> str:
+    """归一时间戳为 ISO8601 带显式偏移；naive 视为 tz 时区，不改变时刻。"""
+    s = str(raw).strip().replace(" ", "T")
+    if s.endswith("Z"):
+        dt = datetime.fromisoformat(s[:-1]).replace(tzinfo=UTC)
+    else:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+    return dt.isoformat()
+
+
+def _utc_to_cn(ts: str) -> str:
+    """UTC 时间戳 → 本地 +08:00 同一时刻（仅时区换算，时刻不变）。"""
+    s = str(ts).strip().replace(" ", "T")
+    if s.endswith("Z"):
+        dt = datetime.fromisoformat(s[:-1]).replace(tzinfo=UTC)
+    else:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(CN_TZ).isoformat()
+
+
+def _safe_name(s: str) -> str:
+    """会话 ID → 文件名安全段。"""
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", s).strip("-") or "unnamed"
+
+
+def _mk_msg(role: str, content: str, ts: str, source: str, src_ts: str,
+            name: str = "", *, reasoning: str = "",
+            tool_calls: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    m: Dict[str, Any] = {"role": role, "content": content, "timestamp": ts}
+    if name:
+        m["name"] = name
+    meta: Dict[str, Any] = {"kai_import": {"source": source, "ts": src_ts}}
+    if reasoning:
+        meta["reasoning_content"] = reasoning
+    if tool_calls:
+        meta["tool_calls"] = tool_calls
+    m["metadata"] = meta
+    return m
+
+
+def _split_blocks(content: Any) -> Tuple[str, str, List[Dict[str, Any]]]:
+    """源库 content 块数组 → (正文, 思考全文, tool_calls 原始调用列表)。
+
+    Neurova 历史回放契约（useChat.ts）：metadata.reasoning_content = 思考全文、
+    metadata.tool_calls = [{type: tool_call, tool_name, params, timestamp},
+    {type: tool_result, tool_name, result}] 交替数组。
+    """
+    if isinstance(content, str):
+        return content, "", []
+    text_parts: List[str] = []
+    think_parts: List[str] = []
+    calls: List[Dict[str, Any]] = []
+    if isinstance(content, list):
+        for blk in content:
+            if not isinstance(blk, dict):
+                continue
+            t = blk.get("type")
+            if t == "text" and blk.get("text"):
+                text_parts.append(blk["text"])
+            elif t == "thinking" and blk.get("thinking"):
+                think_parts.append(blk["thinking"])
+            elif t == "toolCall":
+                calls.append({
+                    "type": "tool_call",
+                    "tool_name": blk.get("name") or "",
+                    "params": blk.get("arguments") or {},
+                })
+    return "\n".join(text_parts), "\n".join(think_parts), calls
+
+
+def _msg_date(ts_iso: str) -> str:
+    """ISO 时间戳 → 会话日期文件后缀（按已换算好的本地时间）。"""
+    return ts_iso[:10]
+
+
+# ══════════════════════════════════════════════════════════════════
+# 记忆导入
+# ══════════════════════════════════════════════════════════════════
+
+
+def _ensure_persist_db(persist_db: Path) -> None:
+    """建表（与 MemoryManager._init_persistence_db 同构，幂等）。"""
+    persist_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(persist_db)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS memories (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            memory_type TEXT NOT NULL DEFAULT 'semantic',
+            category TEXT NOT NULL DEFAULT 'general',
+            lifecycle_stage TEXT NOT NULL DEFAULT 'active',
+            perspective TEXT NOT NULL DEFAULT 'first_person',
+            origin TEXT NOT NULL DEFAULT 'agent',
+            emotion TEXT NOT NULL DEFAULT 'neutral',
+            temperature REAL NOT NULL DEFAULT 100.0,
+            importance REAL NOT NULL DEFAULT 50.0,
+            access_count INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            agent_id TEXT NOT NULL DEFAULT 'default',
+            neuser_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'default',
+            shared INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_accessed_at TEXT
+        )"""
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_mem_agent ON memories(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_category ON memories(category)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_type ON memories(memory_type)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_3tier ON memories(agent_id, neuser_id, user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_temperature ON memories(temperature)",
+    ):
+        conn.execute(stmt)
+    conn.commit()
+    conn.close()
+
+
+def _load_existing_keys(conn: sqlite3.Connection) -> set:
+    return {
+        (r[0], r[1], r[2])
+        for r in conn.execute("SELECT agent_id, content, created_at FROM memories").fetchall()
+    }
+
+
+def _insert_memory(conn: sqlite3.Connection, *, agent_id: str, content: str,
+                   memory_type: str, category: str, importance: int,
+                   created_at: str, updated_at: str, tags: list,
+                   meta: dict, origin: str = "owner") -> str:
+    """按与 MemoryManager.remember 相同的字段约定写入一行，返回新 id。
+
+    id 由内容+时间派生（幂等键），非自增——重复导入命中同一 id。
+    """
+    import hashlib
+
+    key = f"{agent_id}|{content}|{created_at}"
+    mid = "kai-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    meta = dict(meta or {})
+    if tags:
+        meta["kai_tags"] = tags
+    conn.execute(
+        "INSERT OR IGNORE INTO memories (id, content, memory_type, category, lifecycle_stage,"
+        " perspective, origin, emotion, temperature, importance, access_count, metadata,"
+        " agent_id, neuser_id, user_id, shared, created_at, updated_at, last_accessed_at)"
+        " VALUES (?, ?, ?, ?, 'active', 'first_person', ?, 'neutral', 100.0, ?, 0, ?,"
+        " ?, 'default', 'default', 0, ?, ?, NULL)",
+        (mid, content, memory_type, category, origin, float(importance) * 10.0,
+         json.dumps(meta, ensure_ascii=False), agent_id, created_at, updated_at),
+    )
+    return mid
+
+
+def import_memories(src_db: Path, persist_db: Path, agent_id: str = "kai") -> Dict[str, int]:
+    """导入源库主表（qwenpaw_memory，跳过 deleted_at 非空）。"""
+    if not src_db.exists():
+        return {"imported": 0, "skipped_deleted": 0, "skipped_dup": 0}
+    _ensure_persist_db(persist_db)
+    conn = sqlite3.connect(persist_db)
+    existing = _load_existing_keys(conn)
+
+    src = sqlite3.connect(f"file:{src_db.as_posix()}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+    rows = src.execute(
+        "SELECT * FROM qwenpaw_memory WHERE deleted_at IS NULL ORDER BY created_at, id"
+    ).fetchall()
+
+    imported = dup = 0
+    skipped_deleted = src.execute(
+        "SELECT COUNT(*) FROM qwenpaw_memory WHERE deleted_at IS NOT NULL"
+    ).fetchone()[0]
+    for r in rows:
+        created = _norm_ts(r["created_at"], UTC)
+        updated = _norm_ts(r["updated_at"] or r["created_at"], UTC)
+        key = (agent_id, r["content"], created)
+        if key in existing:
+            dup += 1
+            continue
+        mtype, cat = TYPE_MAP.get((r["memory_type"] or "general").strip(),
+                                  ("episodic", "general"))
+        tags = json.loads(r["tags"] or "[]") if (r["tags"] or "").startswith("[") else []
+        try:
+            meta = json.loads(r["metadata"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
+        meta["kai_source"] = {
+            "db": "human_thinking_memory_Kai.db", "id": r["id"],
+            "session_id": r["session_id"], "memory_tier": r["memory_tier"],
+            "memory_category_raw": r["memory_category"], "memory_type_raw": r["memory_type"],
+        }
+        _insert_memory(conn, agent_id=agent_id, content=r["content"],
+                       memory_type=mtype, category=cat,
+                       importance=r["importance"] or 3,
+                       created_at=created, updated_at=updated, tags=tags, meta=meta)
+        existing.add(key)
+        imported += 1
+
+    conn.commit()
+    conn.close()
+    src.close()
+    return {"imported": imported, "skipped_deleted": skipped_deleted, "skipped_dup": dup}
+
+
+_INLINE_DATE_RE = re.compile(r"(2026-\d{2}-\d{2})(?:[ T](\d{2}:\d{2})(?::\d{2})?)?")
+
+
+def _ctx_created_at(content: str, loaded_at: str) -> str:
+    """快照记忆时间戳：优先取正文内嵌日期（如「2026-04-18 23:25:」），
+    否则回退 loaded_at（快照加载时刻）。"""
+    m = _INLINE_DATE_RE.search(content[:200])
+    if m:
+        return _norm_ts(f"{m.group(1)}T{(m.group(2) or '00:00')}:00", CN_TZ)
+    return _norm_ts(loaded_at, UTC)
+
+
+def import_context_snapshots(kai_root: Path, persist_db: Path,
+                             agent_id: str = "kai") -> Dict[str, int]:
+    """workspace/session_contexts/*.json 记忆快照（HumanThinking 时代契约记忆）。
+
+    快照本身无创建时间：有正文内嵌日期用之，否则用 loaded_at；内容级去重
+    与主库共用 (agent_id, content, created_at) 键。
+    """
+    ctx_dir = kai_root / "workspace" / "session_contexts"
+    if not ctx_dir.exists():
+        return {"imported": 0, "skipped_dup": 0}
+    _ensure_persist_db(persist_db)
+    conn = sqlite3.connect(persist_db)
+    existing = _load_existing_keys(conn)
+    existing_contents = {c for (_, c, _) in existing}
+
+    imported = dup = 0
+    for fp in sorted(ctx_dir.glob("*.json")):
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for m in data.get("memories", []):
+            content = (m.get("content") or "").strip()
+            if not content:
+                continue
+            created = _ctx_created_at(content, m.get("loaded_at") or "")
+            if content in existing_contents or (agent_id, content, created) in existing:
+                dup += 1
+                continue
+            mtype, cat = TYPE_MAP.get((m.get("type") or "general").strip().lower(),
+                                      ("emotional", "experience"))
+            try:
+                tags = json.loads(m.get("tags") or "[]") if str(m.get("tags", "")).startswith("[") else []
+            except json.JSONDecodeError:
+                tags = []
+            meta = {"kai_source": {"db": "session_contexts", "file": fp.name,
+                                   "type_raw": m.get("type"),
+                                   "importance_raw": m.get("importance"),
+                                   "original_session": m.get("original_session"),
+                                   "loaded_at": m.get("loaded_at")}}
+            _insert_memory(conn, agent_id=agent_id, content=content,
+                           memory_type=mtype, category=cat,
+                           importance=int(m.get("importance") or 3),
+                           created_at=created, updated_at=created, tags=tags, meta=meta)
+            existing_contents.add(content)
+            imported += 1
+
+    conn.commit()
+    conn.close()
+    return {"imported": imported, "skipped_dup": dup}
+
+
+def import_reme_notes(kai_root: Path, persist_db: Path,
+                      agent_id: str = "kai") -> Dict[str, int]:
+    """ReMe 日记 memory/<YYYY-MM-DD>/<note>.md（跳过索引 .md 与 interests.yaml）。
+
+    created_at 取目录日期 00:00（UTC 落点 = 当日 08:00 北京时间，日历日不变）。
+    """
+    mem_root = kai_root / "memory"
+    if not mem_root.exists():
+        return {"imported": 0}
+    _ensure_persist_db(persist_db)
+    conn = sqlite3.connect(persist_db)
+    existing = _load_existing_keys(conn)
+
+    imported = 0
+    for day_dir in sorted(p for p in mem_root.iterdir() if p.is_dir() and _DAY_RE.fullmatch(p.name)):
+        day = day_dir.name
+        for fp in sorted(day_dir.glob("*.md")):
+            if fp.name == "interests.yaml":
+                continue
+            text = fp.read_text(encoding="utf-8").strip()
+            if not text:
+                continue
+            # frontmatter 提取 description 作为摘要；正文与去重键保持同一形态
+            # （键用 text、插入用 body 会让幂等检查永远失配，靠 INSERT OR IGNORE
+            # 兜底 → imported 计数假阳性）
+            desc = ""
+            fm = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
+            body = text
+            if fm:
+                dm = re.search(r"description:\s*(.+)", fm.group(1))
+                if dm:
+                    desc = dm.group(1).strip()
+                body = text[fm.end():].strip()
+            created = _norm_ts(f"{day}T00:00:00", UTC)
+            if (agent_id, body, created) in existing:
+                continue
+            meta = {"kai_source": {"db": "reme_notes", "file": str(fp.relative_to(kai_root))}}
+            if desc:
+                meta["kai_summary"] = desc
+            _insert_memory(conn, agent_id=agent_id, content=body,
+                           memory_type="episodic", category="experience",
+                           importance=4, created_at=created, updated_at=created,
+                           tags=[], meta=meta)
+            existing.add((agent_id, body, created))
+            imported += 1
+
+    conn.commit()
+    conn.close()
+    return {"imported": imported}
+
+
+def import_neural_memory_delta(src_db: Path, persist_db: Path,
+                               agent_id: str = "kai") -> Dict[str, int]:
+    """旧神经记忆库增量：只补内容级去重后的新条目（大部分已迁移进源库主表）。"""
+    if not src_db.exists():
+        return {"imported": 0, "skipped_dup": 0}
+    _ensure_persist_db(persist_db)
+    conn = sqlite3.connect(persist_db)
+    existing = _load_existing_keys(conn)
+    existing_contents = {c for (_, c, _) in existing}
+
+    src = sqlite3.connect(f"file:{src_db.as_posix()}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+    rows = src.execute("SELECT * FROM memories ORDER BY created_at").fetchall()
+
+    imported = 0
+    for r in rows:
+        if r["content"] in existing_contents:
+            continue
+        created = _norm_ts(r["created_at"], UTC)
+        mtype, cat = TYPE_MAP.get((r["memory_type"] or "general").strip().lower(),
+                                  ("episodic", "general"))
+        try:
+            tags = json.loads(r["tags"] or "[]") if (r["tags"] or "").startswith("[") else []
+        except json.JSONDecodeError:
+            tags = []
+        meta = {"kai_source": {"db": "neural_memory.db", "id": r["id"],
+                               "session_id": r["session_id"]}}
+        _insert_memory(conn, agent_id=agent_id, content=r["content"],
+                       memory_type=mtype, category=cat,
+                       importance=r["importance"] or 3,
+                       created_at=created, updated_at=created, tags=tags, meta=meta)
+        existing_contents.add(r["content"])
+        imported += 1
+
+    conn.commit()
+    conn.close()
+    src.close()
+    return {"imported": imported, "skipped_dup": len(rows) - imported}
+
+
+class _ChatStoreWriter:
+    """会话落盘：把源 store 交给产品链的转换器与写入口（F-18）。
+
+    这里**不**定义会话号、也不定义行幂等键——那两样一旦在本脚本再写一份，同一支源
+    经两条路就会在盘上留下两套身份（实测：老脚本 `kai-dialog-20260501`、ingest
+    `dialog-2026-05-01`，互不认对方，两边重跑各自都当新数据）。会话号与幂等键只在
+    `neurova/memory_ingest/` 的转换器里定义一处，两条路因此天然共享同一个幂等域。
+    """
+
+    def __init__(self, agent_id: str):
+        self.agent_id = agent_id
+
+    def append(self, handprint: str, source: Path) -> Tuple[int, List[str]]:
+        """只读源、产包、按批次写入产品链咽喉；返回 (新增条数, 会话号列表)。
+
+        指纹认不出或该族无转换器时返回 (0, [])、一字节不写（不猜最像的那一家）。
+        会话号从产出的包按 session_id 去重数出：一支 SQLite store 里可以住着多场会话
+        （会话表族就是如此），按 store 计数会把"几场会话"报成"几支库"。
+        """
+        source = Path(source)
+        if not source.is_file():
+            return 0, []
+        convert = CONVERTERS.get(handprint)
+        if convert is None:
+            return 0, []
+        with tempfile.TemporaryDirectory(prefix="neurova-kai-") as staging:
+            bundle = Path(staging) / "bundle"
+            convert(source, bundle, agent_name=self.agent_id)
+            # manager=None：这批只有会话行，记忆面不参与（包里真有记忆行时 intake 会响亮拒绝）
+            report = apply_bundle(bundle, agent_id=self.agent_id, manager=None,
+                                  sessions=session_manager_for())
+            return report.messages_added, _bundle_session_ids(bundle)
+
+
+def _bundle_session_ids(bundle: Path) -> List[str]:
+    """包内 transcripts.jsonl 的 session_id 去重（保持首次出现序）。"""
+    seen: List[str] = []
+    for line in (Path(bundle) / "transcripts.jsonl").read_text(
+            encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        session_id = json.loads(line).get("session_id")
+        if session_id and session_id not in seen:
+            seen.append(str(session_id))
+    return seen
+
+
+def _chat_stores(kai_root: Path) -> List[Tuple[str, Path]]:
+    """三源会话 store 清单：归属按产品链的指纹判定，不由本脚本另立一份"哪族在哪"。
+
+    私有来源（neural_memory / session_contexts / reme）无公开格式可依，不在产品链
+    指纹表内，也不在这里——它们由记忆侧入口单独管。
+    """
+    stores: List[Tuple[str, Path]] = []
+    for root in (kai_root / "history.db", kai_root / "workspace" / "dialog",
+                 kai_root / "workspace" / "sessions"):
+        if not root.exists():
+            continue
+        findings = probe_store(root)
+        findings = findings if isinstance(findings, list) else [findings]
+        for finding in findings:
+            if finding.verdict == "unique" and finding.hits[0] in CONVERTERS:
+                stores.append((finding.hits[0], Path(finding.path)))
+    return stores
+
+
+def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> Dict[str, int]:
+    """三源聊天导入：逐 store 委派产品链（会话号与幂等键在那里定义一处）。
+
+    老脚本只负责"私有来源抽取 + 记忆与身份装配"；公开方言的会话抽取、会话号、行幂等键、
+    轮形装配与批次标签全部走 `neurova/memory_ingest/`。两条路因此共享同一个幂等域——
+    老脚本写过的行，产品链认得出来，反之亦然（互不感知会让同一段历史在盘上留两份）。
+
+    返回口径不变：三族各自的会话数与写入条数照实报，代理到产品链的报告。
+    """
+    kai_root = Path(kai_root)
+    sessions_dir = Path(sessions_dir)
+    # 会话库根目录必须在构造之前定：类级单例只认首次构造
+    session_manager_for(sessions_dir)
+    writer = _ChatStoreWriter(agent_id)
+
+    total = 0
+    seen: set = set()
+    per_family: Dict[str, int] = {}
+
+    for family, store in _chat_stores(kai_root):
+        added, session_ids = writer.append(family, store)
+        if added:
+            per_family[family] = per_family.get(family, 0) + len(session_ids)
+            seen.update(session_ids)
+        total += added
+
+    return {
+        "messages_written": total,
+        "legacy_sessions": per_family.get("legacy_session", 0),
+        "dialog_sessions": per_family.get("dialog_daily", 0),
+        "history_db_sessions": per_family.get("qwenpaw_history", 0),
+        "total_sessions": len(seen),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# 身份文件
+# ══════════════════════════════════════════════════════════════════
+
+
+def import_identity(kai_root: Path, workspace: Path) -> Dict[str, int]:
+    """SOUL.md → memory/soul.md；PROFILE.md → memory/personality.md + 根留档；
+    MEMORY.md → 根留档。全部覆盖式同步（源即真相）。"""
+    kai_root = Path(kai_root)
+    workspace = Path(workspace)
+    mem_dir = workspace / "memory"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+    files = 0
+
+    mapping = [
+        (kai_root / "SOUL.md", mem_dir / "soul.md"),
+        (kai_root / "PROFILE.md", mem_dir / "personality.md"),
+        (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
+        (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
+    ]
+    for src, dst in mapping:
+        if src.exists():
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            files += 1
+    return {"files": files}
+
+
+# ══════════════════════════════════════════════════════════════════
+# CLI
+# ══════════════════════════════════════════════════════════════════
+
+
+def resolve_agent_memory_dir(neurova_root: Path, agent_id: str) -> Path:
+    """目标 agent 的 memory 目录。
+
+    注入根（NEUROVA_AGENT_WORKSPACES_DIR，与后端同一个单源解析器）优先——桌面版
+    把数据放用户目录时，按 --neurova-root 拼出来的目录运行时根本不读；未注入时
+    回落到该安装的默认布局 <neurova_root>/agent_workspaces/<agent_id>/memory。
+    """
+    injected = os.environ.get(AGENT_WORKSPACES_ENV)
+    workspaces_root = Path(injected) if injected else neurova_root / "agent_workspaces"
+    return workspaces_root / agent_id / "memory"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Kai → Neurova 记忆与聊天导入")
+    ap.add_argument("--kai-root", default="E:/项目/Kai")
+    ap.add_argument("--neurova-root", default="E:/项目/Neurova")
+    ap.add_argument("--agent-id", default="kai")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--skip-memories", action="store_true")
+    ap.add_argument("--skip-chats", action="store_true")
+    ap.add_argument("--skip-identity", action="store_true")
+    args = ap.parse_args()
+
+    kai_root = Path(args.kai_root)
+    nv_root = Path(args.neurova_root)
+    mem_dir = resolve_agent_memory_dir(nv_root, args.agent_id)
+    persist_db = mem_dir / "neurova_memories_persist.db"
+    sessions_dir = nv_root / "sessions"
+
+    print(f"Kai 源: {kai_root}")
+    print(f"Neurova 目标: agent={args.agent_id} persist={persist_db}")
+
+    if not args.skip_memories:
+        stats = import_memories(
+            kai_root / "workspace" / "memory" / "human_thinking_memory_Kai.db",
+            persist_db, agent_id=args.agent_id,
+        )
+        print(f"[记忆主库] {stats}")
+        delta = import_neural_memory_delta(
+            kai_root / "workspace" / "memory" / "neural_memory.db",
+            persist_db, agent_id=args.agent_id,
+        )
+        print(f"[神经记忆增量] {delta}")
+        ctx = import_context_snapshots(kai_root, persist_db, agent_id=args.agent_id)
+        print(f"[会话记忆快照] {ctx}")
+        reme = import_reme_notes(kai_root, persist_db, agent_id=args.agent_id)
+        print(f"[ReMe 日记] {reme}")
+
+    if not args.skip_chats:
+        chats = import_chats(kai_root, sessions_dir, agent_id=args.agent_id)
+        print(f"[聊天] {chats}")
+
+    if not args.skip_identity:
+        ident = import_identity(kai_root, nv_root / "agent_workspaces" / args.agent_id)
+        print(f"[身份] {ident}")
+
+    if args.dry_run:
+        print("(dry-run 模式：以上统计中记忆/聊天若为首次统计，真实执行才会落盘)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

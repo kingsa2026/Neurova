@@ -1,5 +1,11 @@
 # Neurova Helm Chart 默认配置
 
+# 名称覆盖（Helm 脚手架约定键：_helpers.tpl 用 `default ... .Values.nameOverride`
+# 形态引用；缺定义时渲染为 <no value> 再被 default 兜底，行为不变，但显式声明
+# 让"模板引用的键都在 values 里"这条不变量成立）
+nameOverride: ""
+fullnameOverride: ""
+
 # 全局配置
 global:
   imageRegistry: ""
@@ -16,7 +22,9 @@ backend:
   # 镜像配置
   image:
     repository: neurova/backend
-    tag: "latest"
+    # tag 留空 = 跟随 Chart.appVersion（templates/_helpers.tpl 的 default 兜底）。
+    # 写死 "latest" 会让同一次 helm upgrade 在不同时刻拉到不同镜像，部署不可复现。
+    tag: ""
     pullPolicy: IfNotPresent
   
   # 副本数
@@ -48,17 +56,26 @@ backend:
     - name: PYTHONUNBUFFERED
       value: "1"
   
-  # 配置挂载
-  configMountPath: /app/config
   
   # 健康检查
+  # 与 Dockerfile HEALTHCHECK / docker-compose healthcheck 同源（30s 周期、5s 超时、
+  # 30s 启动宽限、3 次重试）——此前这里写 10s，同一镜像两套探活口径。
+  # 跨文件一致性由 scripts/ci/deploy_config_consistency_check.py（R2）把关。
   healthCheck:
     enabled: true
     path: /health
     initialDelaySeconds: 30
-    periodSeconds: 10
+    periodSeconds: 30
     timeoutSeconds: 5
     failureThreshold: 3
+    # readiness 与 liveness 刻意分离：就绪判定要比存活更灵敏（更短周期、更早探测），
+    # 所以这里**允许**与上面对齐 Dockerfile 的那组值不同。但必须走 values ——
+    # 硬编码在模板里就等于"两处同源 + 一处隐形口径"，门禁也看不见（R2 只比 values）。
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
   
   # 节点选择
   nodeSelector: {}
@@ -87,7 +104,8 @@ frontend:
   # 镜像配置
   image:
     repository: neurova/frontend
-    tag: "latest"
+    # 与 backend 同理：写死 "latest" 让同一份 values 在不同时刻拉到不同镜像。
+    tag: ""
     pullPolicy: IfNotPresent
   
   # 副本数
@@ -122,20 +140,40 @@ database:
   # 数据库文件路径
   dbPath: /app/data/neurova.db
 
+# 鉴权配置
+auth:
+  # JWT 签名密钥（HS256，≥32 字节强随机值）。
+  # 生产（NEUROVA_ENV=production）下若未提供，每个 Pod 会各自随机生成并写入
+  # 容器内文件 —— 表现为"重启即全员掉线、多副本间 token 互不认可"。
+  # 生成：python -c "import secrets; print(secrets.token_hex(32))"
+  jwtSecret: ""
+  # 开启后：replicaCount > 1 且未提供 jwtSecret 时渲染期直接失败
+  # （防"多副本各自随机密钥"这种只在生产暴露的故障）
+  requireJwtSecret: false
+
 # LLM 配置
 llm:
-  # API 密钥（通过 Secret 注入）
+  # API 密钥（通过 Secret 注入，作为 provider 的初始 key）。
+  # 也可 helm --set llm.apiKey=... / 或用已存在的 Secret（apiKeySecret 同名）。
   apiKeySecret: neurova-llm-secret
   apiKeyKey: api-key
-  
-  # 默认模型配置
-  defaultModel: "gpt-4"
-  defaultProvider: "openai"
+  apiKey: ""
+  # 默认模型/服务商不在此处配置：运行时以应用内持久化配置为准
+  # （~/.neurova/config/providers.json 与 agent_workspaces/<id>/agent_config.json），
+  # 此前 values 里的 defaultModel/defaultProvider 全仓零读取方 = 死配置。
 
-# 日志配置
+# CORS 配置
+cors:
+  # 允许的跨域来源；留空 = 走应用内默认（config/cors.json / 内置开发来源）。
+  # 生产若前后端同源部署，无需在此放开。值为列表，模板以逗号拼接注入
+  # NEUROVA_CORS_ORIGINS（应用真实读取键）。
+  origins: []
+
+# 日志配置（注入键必须是应用真读的：NEUROVA_LOG_LEVEL / NEUROVA_LOG_JSON /
+# NEUROVA_LOG_FILE；此前的 LOG_LEVEL / LOG_FORMAT / LOG_FILE 零读取方）
 logging:
   level: "INFO"
-  format: "json"
+  json: true
   file: "/app/logs/neurova.log"
 
 # 监控配置

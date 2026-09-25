@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -95,7 +96,7 @@ class KnowledgeBaseConfig(BaseModel):
         """获取数据目录"""
         if self.data_dir:
             return Path(self.data_dir)
-        return Path("data/knowledge")
+        return get_data_root() / "knowledge"
 
     def get_vector_store_path(self) -> Path:
         """获取向量存储路径"""

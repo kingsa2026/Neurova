@@ -71,13 +71,86 @@ class TestUpdateQualityGate:
         assert svc.update_auto_skill("sk3", version="next", enforce_quality=True) is False
 
     def test_new_description_must_pass_routing_sanity(self, tmp_path):
-        """新增/改写描述要过路由自检（名述脱钩 = 死技能）。"""
+        """**提案方（提交了版本）**改写描述要过路由自检（名述脱钩 = 死技能）。"""
         svc = _service(tmp_path)
         register_proven_skill(svc, "sk4", name="pdf-converter", description="把扫描文档转成 PDF")
         assert svc.update_auto_skill(
-            "sk4", name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
+            "sk4", version="1.0.1",
+            name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
         ) is False, "名述脱钩的描述不得落盘"
         assert svc.get_skill_info("sk4")["description"] == "把扫描文档转成 PDF"
+
+    def test_editor_chain_description_is_not_routing_gated(self, tmp_path):
+        """**编辑链**（PUT/share/开关，version=None）改描述不咬路由自检。
+
+        历史误杀（本用例是回归锚点）：`PUT /private/{id}` 改个名字描述、`share`
+        打个标记，全走 update_auto_skill(version=None)。旧实现拿提案门槛
+        （名述自洽）去咬它们，用户自述文本与技能名天然无 token 交集 →
+        接口 500，落盘失败。编辑链不声称"更优"，无"更优"可核。
+        """
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk4b", name="pdf-converter", description="把扫描文档转成 PDF")
+        assert svc.update_auto_skill(
+            "sk4b", name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
+        ) is True, "编辑链的描述是用户备注，不是提案名述，不咬路由自检"
+        assert svc.get_skill_info("sk4b")["description"] == "播放无损音乐合集"
+
+    def test_editor_chain_on_bare_description_entry_is_not_blocked(self, tmp_path):
+        """编辑链在**存量空描述**条目上改配置/开关不得被 content_non_empty 拦。
+
+        历史误杀：`POST /private`、`POST /me/skills` 创建条目时 description
+        默认空串（前端大多数调用不传）。旧实现把"生效描述为空"判成清空式
+        改写 → `PUT` 改 enabled、`share` 打标记恒 500。
+        """
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk4c", name="", description="")
+        assert svc.update_auto_skill(
+            "sk4c", config={"tool_sequence": STEPS, "category": "工具"}, enforce_quality=True
+        ) is True, "存量空描述是编辑链一等公民，字段编辑不得被门拦"
+        assert svc.update_auto_skill("sk4c", config={"tool_sequence": STEPS, "shared": True},
+                                     enforce_quality=True) is True
+
+    # ── 本轮补：门必须看到**旧值**（快照时序） ──────────────────
+
+    def test_gate_sees_pre_mutation_snapshot(self, tmp_path):
+        """门拿到的必须是**改动前**的条目，否则所有"本次提交了什么"的判据全瞎。
+
+        这是本轮的根因锚点：`update_auto_skill` 原先在把 name/description/
+        version/config 写进 entry **之后**才取 `_prev` 快照，再把它当"旧条目"
+        传给门。于是门里的 `_submitted_change(entry, ...)` 比较的是
+        "改完的自己 vs 改完的自己"——恒 False。后果：同版本字段编辑被判成
+        空更新（version_not_ascending），`_naming_submitted_changed` 恒 False
+        又让名述自检恒不咬合。快照必须在赋值之前取。
+        """
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "snap1", name="snap1", description="snap1 处理报告")
+        # 同版本 + 有字段变化 = 原地改进（放行）；若门看到的是"改后的自己"，
+        # _submitted_change 恒 False → 会被 version_not_ascending 误杀。
+        assert svc.update_auto_skill(
+            "snap1", version="1.0.0", description="snap1 处理报告并产出摘要", enforce_quality=True
+        ) is True, "门必须看到旧值才能认出'本次确有变化'，否则原地改进被误杀"
+
+    def test_rejected_update_leaves_entry_untouched(self, tmp_path):
+        """被拒时条目必须原样（旧实现：门在赋值之后跑，被拒也已被写脏）。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "snap2", name="snap2", description="snap2 处理报告")
+        assert svc.update_auto_skill(
+            "snap2", version="3.0.0", description="snap2 处理报告并产出摘要", enforce_quality=True
+        ) is True
+        # 降级被拒：version/description 都不得改动
+        assert svc.update_auto_skill(
+            "snap2", version="1.0.0", description="被拒的描述", enforce_quality=True
+        ) is False
+        after = svc.get_skill_info("snap2")
+        assert after["version"] == "3.0.0", "被拒的版本不得落盘"
+        assert after["description"] == "snap2 处理报告并产出摘要", "被拒的描述不得落盘"
+
+    def test_editor_chain_cannot_blank_the_body(self, tmp_path):
+        """编辑链也**不得把描述清空**（避免"清空式改写"从编辑链绕过）。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk4d", name="sk4d", description="有描述")
+        assert svc.update_auto_skill("sk4d", description="", enforce_quality=True) is False
+        assert svc.get_skill_info("sk4d")["description"] == "有描述"
 
     def test_rewrite_reenters_review_gate(self, tmp_path):
         """改写落盘重走评审闸：批准一次 ≠ 永久免疫。"""
@@ -139,11 +212,12 @@ class TestInPlaceUpgradeJudgement:
         assert svc.update_auto_skill("sk9", version="2.0.0", enforce_quality=True) is False
 
     def test_renaming_without_quality_name_is_gated(self, tmp_path):
-        """**改写名述**仍咬路由自检（门只放过"重复提交同一名述"）。"""
+        """**提案方改写名述**（带版本）仍咬路由自检（门只放过"重复提交同一名述"）。"""
         svc = _service(tmp_path)
         register_proven_skill(svc, "sk10", name="pdf-converter", description="把扫描文档转成 PDF")
         assert svc.update_auto_skill(
-            "sk10", name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
+            "sk10", version="1.0.1",
+            name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
         ) is False
 
     def test_same_name_and_description_resubmit_is_not_gated(self, tmp_path):
@@ -287,11 +361,35 @@ class TestBenchGateHonesty:
         assert getattr(gate, "neutral_reason", "") == "no_apply_fn"
 
     def test_gate_with_apply_fn_is_not_neutral(self):
-        from neurova.evolution.eval.bench_gate import make_eval_harness_gate
+        """**真有读数**的一轮必须不再自报中性（本用例的判据对象已修正）。
 
-        gate = make_eval_harness_gate(live_params_provider=lambda: {}, apply_fn=lambda text: (lambda: None))
+        原断言写作"提供了 apply_fn ⇒ neutral 为 False"。Issue #46 收口复核
+        实测证伪：`live_params_provider` 返回空参数时 harness 自报
+        `measurement_blind`（score=None），门按中性返回 0.0——此种情形下
+        `neutral=False` 是**假咬合**，与"真咬合且零增益"对外一模一样，恰好
+        抹掉 `neutral_reason` 存在的意义。故判据对象由"调用方提供了什么"
+        改为"这一轮的结果是不是中性放行"，并补齐两个方向。
+        """
+        from neurova.evolution.eval.bench_gate import (
+            NEUTRAL_REASON_MEASUREMENT_BLIND,
+            make_eval_harness_gate,
+        )
+
+        def engaged_provider():
+            return {"tool_memory": {"success_bonus": 0.1, "failure_penalty": 0.05,
+                                    "decay_rate": 0.1, "muscle_memory_threshold": 0.6}}
+
+        gate = make_eval_harness_gate(live_params_provider=engaged_provider,
+                                      apply_fn=lambda text: (lambda: None))
         gate("a", "b")
-        assert getattr(gate, "neutral", True) is False
+        assert getattr(gate, "neutral", True) is False, "有读数的一轮不得自称中性"
+
+        # 反向：同一门在"取不到读数"的一轮必须如实自报中性，且理由可审计。
+        blind = make_eval_harness_gate(live_params_provider=lambda: {},
+                                       apply_fn=lambda text: (lambda: None))
+        blind("a", "b")
+        assert getattr(blind, "neutral", False) is True
+        assert getattr(blind, "neutral_reason", "") == NEUTRAL_REASON_MEASUREMENT_BLIND
 
 
 # ══════════════════════════════════════════════════════════════

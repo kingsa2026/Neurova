@@ -11,6 +11,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import FlowContext, ScheduledTask
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ class AgentScheduler:
         # 任务持久化: 重启不丢(内存态是遗留缺陷)
         import os
         self.storage_path = str(
-            storage_path or os.environ.get("NEUROVA_SCHEDULER_STORE") or "data/scheduler_tasks.json"
+            storage_path or os.environ.get("NEUROVA_SCHEDULER_STORE") or dataPath("scheduler_tasks.json")
         )
         self._load_from_storage()
 
@@ -384,16 +385,25 @@ def register_action_handlers(scheduler: "AgentScheduler", agent_resolver=None) -
         return asyncio.run(agent.chat(message))
 
     def _execute_skill(task, ctx):
+        """执行技能——一律经执行咽喉，不直调 registry。
+
+        本函数是**同步壳**里起新事件循环（调度器契约），故轮级上下文
+        （轮首 `begin_task` 建的票据上下文、技能视图）必须在新循环里可见：
+        `asyncio.run` 会拷贝当前 `contextvars.Context`，实测可见，据此不需要
+        在该入口手工 `begin_task`（那会在每个新入口重复一遍）。
+        """
         agent = _resolve(task)
         skill_id = (task.parameters or {}).get("skill_id", "") or ""
         if not skill_id:
             raise RuntimeError("execute_skill requires parameters.skill_id")
-        registry = getattr(agent, "_skill_registry", None)
-        if registry is None:
-            raise RuntimeError("agent skill registry not available")
+        executor = getattr(agent, "tool_executor", None)
+        if executor is None:
+            raise RuntimeError("agent tool executor not available")
         import asyncio
 
-        return asyncio.run(registry.execute_skill(skill_id, dict(task.parameters or {})))
+        return asyncio.run(
+            executor.execute_skill_tool(skill_id, dict(task.parameters or {}))
+        )
 
     def _run_workflow(task, ctx):
         workflow_id = (task.parameters or {}).get("workflow_id", "") or ""

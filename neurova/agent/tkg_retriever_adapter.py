@@ -100,6 +100,7 @@ class TKGRetrieverAdapter:
         content = " ".join(p for p in (subject, predicate, object_) if p)
         return {
             "id": fid,
+            "fact_id": fid,   # 句柄认得出这是底座事实，引用才能点到血缘（工单 024）
             "content": content,
             "type": "tkg_fact",
             "created_at": str(created),

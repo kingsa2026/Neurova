@@ -4,7 +4,7 @@
 unregister_skill、__len__/__contains__）。ADR 0011 已统一到
 neurova.skill_system 的 class A，此处重写为 class A 真实 API：
 - register_skill(manifest, path) -> bool
-- get_skill(name) -> Optional[Skill]（key 为 skill.name）
+- get_skill(key) -> Optional[Skill]（name 与身份域两形态归一，ADR 0017）
 - has_skill(name) -> bool
 - list_skills() -> List[SkillInfo]
 - get_skill_names() -> List[str]
@@ -44,15 +44,22 @@ def test_get_skill_returns_skill_object_by_name(registry, manifest):
     assert skill.name == "Test Skill"
 
 
-def test_get_skill_uses_name_not_id(registry, manifest):
+def test_get_skill_resolves_identity_as_well_as_name(registry, manifest):
+    """键值域统一（ADR 0017）：台账 id 与工具名两个形态指向同一对象。
+
+    本用例原断言 `get_skill("test-skill") is None`，钉的是修复前的契约——
+    注册表只认 name，而进化侧 8 个取键点传的都是身份解析的结果，
+    `id != name` 时全部静默落空。契约已改，用例随之翻向新契约。
+    """
     registry.register_skill(manifest, None)
-    assert registry.get_skill("test-skill") is None
+    assert registry.get_skill("test-skill") is registry.get_skill("Test Skill")
 
 
-def test_has_skill_by_name(registry, manifest):
+def test_has_skill_agrees_on_both_key_domains(registry, manifest):
     registry.register_skill(manifest, None)
     assert registry.has_skill("Test Skill") is True
-    assert registry.has_skill("test-skill") is False
+    assert registry.has_skill("test-skill") is True
+    assert registry.has_skill("nope") is False
 
 
 def test_get_skill_names_returns_names(registry, manifest):

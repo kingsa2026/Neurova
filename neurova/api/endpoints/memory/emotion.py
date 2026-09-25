@@ -2,7 +2,7 @@
 记忆接口 - 情绪分析 (Emotion Analysis)
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -180,6 +180,37 @@ async def get_emotion_types(
     except Exception as e:
         logger.exception("获取情绪类型失败: %s", e)
         raise APIError.internal(f"获取情绪类型失败: {str(e)}")
+
+
+@router.get("/emotion/timeline", summary="获取情绪变化时间轴")
+async def get_emotion_timeline(
+    req: Request = None,
+    time_range: Literal["24h", "7d", "30d", "90d"] = Query(
+        default="7d", alias="range", description="时间窗口；分桶粒度由窗口推导"
+    ),
+    agent_id: Optional[str] = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """情绪变化时间轴。
+
+    X 轴按窗口分桶（24h→小时、7d/30d→天、90d→周）；Y 轴为 intensity 加权的带符号
+    效价（正=积极情绪，负=消极情绪）；无情绪事件的桶返回 null，前端据此画断点，
+    不把"没发生情绪"画成"中性"。每桶附峰值事件摘要（触发该次情绪变化的记忆），
+    供悬停展示。
+    """
+    try:
+        manager = get_memory_manager(agent_id, user)
+        return success_response(
+            data=manager.get_emotion_timeline(time_range),
+            message="获取成功",
+            request_id=_get_request_id(req),
+        )
+
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("获取情绪时间轴失败: %s", e)
+        raise APIError.internal(f"获取情绪时间轴失败: {str(e)}")
 
 
 @router.get("/emotion/{emotion_type}", summary="按情绪类型查询记忆")

@@ -10,6 +10,8 @@ Tool Capability Graph v1.0.0 — 工具能力关系图
 """
 
 from neurova.core.logger import get_logger
+import re
+import threading
 import typing
 from collections import deque
 from dataclasses import dataclass, field
@@ -33,6 +35,89 @@ class ToolCapabilityNode:
     provides: typing.List[str] = field(default_factory=list)
     requires: typing.List[str] = field(default_factory=list)
     degrades_to: typing.List[str] = field(default_factory=list)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 元检索工具名单（**单源**）
+# ═══════════════════════════════════════════════════════════════
+# 语义：这些工具只做"找/看/调已有的东西"，**结构上没有失败可能**（检索不到
+# 返回空也是"成功执行"）。因此它们不能靠"本轮调用没报错"来证明任务被推进。
+#
+# 为什么名单落在这里：本模块已是能力语义的单源（工具名 → 能力/依赖/降级），
+# 名单是同一类事实的自然延伸。不新增配置文件、不加 env 开关（D5）。
+#
+# 名单覆盖面（同根扫荡，教义第 5 条）：
+#   - 记忆/历史检索：memory_search / voice_memory_search / recall_history
+#   - 分层摘要下钻：recall_context_span（同一族：只做"取回已有的东西"）
+#   - 技能目录检索：discover_skills
+#   - 大目录延迟加载的控制工具（tool_search / tool_describe / tool_call）：
+#     与 `context/tool_search.CONTROL_TOOL_NAMES` 同源，由测试断言咬合，
+#     不在这里抄第二份字面量。
+#: 记忆/历史检索 + 技能目录检索：名字在本模块**唯一**定义一次。
+_META_RETRIEVAL_NAMES = frozenset({
+    "memory_search",
+    "voice_memory_search",
+    "recall_history",
+    "recall_context_span",
+    "discover_skills",
+})
+
+
+def _metaRetrievalRoster() -> frozenset:
+    """元检索名单的**单源**取值点（含控制工具）。
+
+    控制工具名不在这里抄字面量：它们的定义处是
+    `context/tool_search.CONTROL_TOOL_NAMES`（那次实现的事实源），
+    本函数只是把它并进来。两侧漂移由测试咬合
+    （`test_rosterCoversControlTools`），不靠人工同步。
+    """
+    global _META_RETRIEVAL_ROSTER
+    if _META_RETRIEVAL_ROSTER is None:
+        try:
+            from neurova.context.tool_search import CONTROL_TOOL_NAMES
+
+            controls = frozenset(CONTROL_TOOL_NAMES)
+        except Exception:  # noqa: BLE001 - 控制工具面缺席不得让判断整体失败
+            controls = frozenset()
+        _META_RETRIEVAL_ROSTER = _META_RETRIEVAL_NAMES | controls
+    return _META_RETRIEVAL_ROSTER
+
+
+_META_RETRIEVAL_ROSTER: typing.Optional[frozenset] = None
+
+
+def is_meta_retrieval_tool(tool_name: str) -> bool:
+    """该工具是否属于"结构上不会失败"的元检索面。
+
+    消费方是强化口径侧：遗传反哺与市场自动发布据此跳过（T-06）。
+    """
+    return str(tool_name or "") in _metaRetrievalRoster()
+
+
+#: 反哺禁令命中计数的写侧（读侧见 `evolution/rsi/orchestrator`）。
+#: 独立计数器而非塞进 capability_gap：语义不同（那是"能力不够"，
+#: 这是"奖励发错了对象"），混在一起就再也分不清该补能力还是该收口径。
+_REWARD_GUARD_LOCK = threading.RLock()
+_REWARD_GUARD_SKIPS: typing.Dict[str, int] = {}
+
+
+def noteMetaRewardSkip(tool_name: str, channel: str = "genetic_reward") -> None:
+    """记一次"因属于元检索面而被跳过发奖"（可观测，不静默）。"""
+    key = f"{channel}:{tool_name}"
+    with _REWARD_GUARD_LOCK:
+        _REWARD_GUARD_SKIPS[key] = _REWARD_GUARD_SKIPS.get(key, 0) + 1
+
+
+def readRewardGuardSkips() -> typing.Dict[str, int]:
+    """反哺禁令命中读侧（无命中时是空表，不是缺席）。"""
+    with _REWARD_GUARD_LOCK:
+        return dict(_REWARD_GUARD_SKIPS)
+
+
+def resetRewardGuardSkips() -> None:
+    """清空计数（仅测试与进程重置使用）。"""
+    with _REWARD_GUARD_LOCK:
+        _REWARD_GUARD_SKIPS.clear()
 
 
 class ToolCapabilityGraph:
@@ -341,8 +426,14 @@ class ToolCapabilityGraph:
         return "\n".join(lines)
 
     def _build_default_graph(self) -> None:
-        """构建默认工具关系图"""
-        # 基础工具
+        """构建默认工具关系图。
+
+        节点名必须是**真实存在**的工具名（`builtin_tools._BUILTIN_SCHEMAS` 是工具清单的
+        单一事实源）。历史实现点名的 `code_execute` / `data_process` / `memory_save` /
+        `code_analyze` 从未注册过——据此产出的执行计划里每一步都是「未知工具」，
+        能力图成了工具清单的第二份定义。未知工具名的缺席由
+        `tests/unit/tools/test_tool_orchestrator_wiring.py` 常驻拦截。
+        """
         default_tools = [
             ToolCapabilityNode(
                 tool_name="file_read",
@@ -360,24 +451,18 @@ class ToolCapabilityGraph:
                 tool_name="file_search",
                 capabilities=["search_files", "find_files"],
                 companions=["file_read"],
-                metadata={"category": "filesystem", "description": "搜索文件"},
+                metadata={"category": "filesystem", "description": "按内容搜索文件"},
             ),
             ToolCapabilityNode(
                 tool_name="memory_search",
                 capabilities=["search_memory", "recall"],
-                companions=["memory_save"],
-                metadata={"category": "memory", "description": "搜索记忆"},
-            ),
-            ToolCapabilityNode(
-                tool_name="memory_save",
-                capabilities=["save_memory", "remember"],
-                companions=["memory_search"],
-                metadata={"category": "memory", "description": "保存记忆"},
+                companions=["planning"],
+                metadata={"category": "memory", "description": "检索长期记忆"},
             ),
             ToolCapabilityNode(
                 tool_name="web_search",
                 capabilities=["search_web", "internet_search"],
-                companions=["web_fetch"],
+                companions=["web_fetch", "deep_research"],
                 metadata={"category": "web", "description": "网络搜索"},
             ),
             ToolCapabilityNode(
@@ -387,36 +472,44 @@ class ToolCapabilityGraph:
                 metadata={"category": "web", "description": "获取网页内容"},
             ),
             ToolCapabilityNode(
-                tool_name="code_execute",
-                capabilities=["run_code", "execute_python"],
-                fallbacks=["code_analyze"],
-                metadata={"category": "code", "description": "执行代码"},
-            ),
-            ToolCapabilityNode(
-                tool_name="code_analyze",
-                capabilities=["analyze_code", "lint_code"],
-                companions=["code_execute"],
-                metadata={"category": "code", "description": "分析代码"},
-            ),
-            ToolCapabilityNode(
-                tool_name="data_process",
+                tool_name="deep_research",
                 capabilities=["process_data", "transform_data"],
-                dependencies=["file_read"],
-                fallbacks=["memory_search"],
-                metadata={"category": "data", "description": "处理数据"},
+                dependencies=["web_search"],
+                fallbacks=["web_fetch"],
+                metadata={"category": "web", "description": "多源检索与摘录汇总"},
+            ),
+            ToolCapabilityNode(
+                tool_name="run_code",
+                capabilities=["run_code", "execute_code"],
+                fallbacks=["computer_shell"],
+                companions=["calculator"],
+                metadata={"category": "code", "description": "执行代码或脚本"},
+            ),
+            ToolCapabilityNode(
+                tool_name="calculator",
+                capabilities=["calculate", "compute"],
+                companions=["run_code"],
+                metadata={"category": "code", "description": "安全数学计算"},
+            ),
+            ToolCapabilityNode(
+                tool_name="planning",
+                capabilities=["plan_task", "update_plan"],
+                companions=["memory_search"],
+                metadata={"category": "planning", "description": "任务计划读写"},
             ),
         ]
 
         for tool in default_tools:
             self.add_node(tool)
 
-        # 添加共现关系
+        # 共现关系（weight 越小表示同现越少见）
         co_occurrences = [
             ("file_read", "file_write", 0.9),
             ("file_read", "file_search", 0.8),
-            ("memory_search", "memory_save", 0.7),
             ("web_search", "web_fetch", 0.9),
-            ("code_execute", "code_analyze", 0.6),
+            ("web_search", "deep_research", 0.8),
+            ("run_code", "calculator", 0.6),
+            ("memory_search", "planning", 0.7),
         ]
 
         for tool1, tool2, weight in co_occurrences:

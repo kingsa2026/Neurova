@@ -7,7 +7,6 @@
 - B2 recall_loop_guard 按 session 分桶：并发会话的防护状态不互相覆盖。
 - B3 provider 读路径并发安全：list_providers/get_provider 在增删线程并发下
   不抛 RuntimeError: dict changed size during iteration。
-- B4 EnhancedContextBuilder 并发安全：_sessions 并发 append 不丢消息。
 - B5 热切换原子性：rebuild_loop 进行中其他请求读到完整新旧之一（不半旧半新）。
 - B6 tool_engine 惰性创建单实例。
 """
@@ -160,42 +159,6 @@ class TestB3ProviderReadLock:
             t.join(timeout=2)
 
         assert not errors, f"并发读写 provider 字典抛异常: {errors[:3]}"
-
-
-# ═══════════════════════════════════════════════════════════════
-# B4: EnhancedContextBuilder 并发安全
-# ═══════════════════════════════════════════════════════════════
-
-
-class TestB4EnhancedContextBuilderLock:
-    def test_session_append_no_loss_under_concurrency(self):
-        """并发向同一 session 追加消息不丢条目。"""
-        from neurova.enhanced_context_builder import EnhancedContextBuilder
-
-        builder = EnhancedContextBuilder.__new__(EnhancedContextBuilder)
-        builder._sessions = {}
-        builder._context_cache = {}
-        builder._lock = threading.RLock()
-        if hasattr(builder, "_max_cache_size") is False:
-            pass
-
-        N_THREADS, N_MSG = 4, 50
-
-        def worker(tid):
-            for i in range(N_MSG):
-                with builder._lock:
-                    bucket = builder._sessions.setdefault("s", [])
-                    bucket.append({"t": f"{tid}-{i}"})
-
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(N_THREADS)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(builder._sessions["s"]) == N_THREADS * N_MSG, (
-            f"并发 append 丢消息: {len(builder._sessions['s'])}/{N_THREADS * N_MSG}"
-        )
 
 
 # ═══════════════════════════════════════════════════════════════

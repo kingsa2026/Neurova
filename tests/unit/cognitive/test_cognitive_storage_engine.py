@@ -211,3 +211,37 @@ class TestCognitiveStorageEngineWAL:
         # WAL recovery should restore the data
         results = engine2.retrieve("before crash", limit=10)
         assert len(results) == 1
+
+
+class TestRetrieveTreatsInputAsSubstring:
+    """L1 检索把用户输入当**子串**，不是 LIKE 通配模式（004 的同契约命中点）。
+
+    根因：`retrieve` 的 LIKE 兜底各自拼 `f"%{query}%"`，而 `%` `_` 是 LIKE 元字符。
+    实测（改前）：库内 2 行时查询 `%` 命中 **2 行**（真值 1 行——只有那一行真的含 `%`）。
+    转义判据只此一份（`core.sql_like.likePattern`），不在这里另写一份。
+    """
+
+    def _engine(self, tmp_path):
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
+            CognitiveStorageEngine, UnifiedMemoryNode,
+        )
+
+        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path / "cse"))
+        engine.store(UnifiedMemoryNode(content="含百分号 100% 的记录"))
+        engine.store(UnifiedMemoryNode(content="带下划线 a_b 的记录"))
+        engine.store(UnifiedMemoryNode(content="普通记录"))
+        engine._flush_l0_to_l1()
+        engine._l0_buffer.clear()  # 只走 L1（L0 走的是 Python 子串判定，不经 SQL）
+        return engine
+
+    def test_percentDoesNotActAsWildcard(self, tmp_path):
+        """`%` 走 LIKE 兜底（FTS 对 `%` 直接语法报错），转义后只命中真含 `%` 的行。"""
+        engine = self._engine(tmp_path)
+        hits = [n.content for n in engine.retrieve("%", limit=10)]
+        assert hits == ["含百分号 100% 的记录"], f"`%` 被当成通配模式：{hits}"
+
+    def test_mixedMetacharQueryStaysSubstring(self, tmp_path):
+        """`100%` 同样走兜底：只命中真含 `100%` 的行，不漏也不越权。"""
+        engine = self._engine(tmp_path)
+        hits = [n.content for n in engine.retrieve("100%", limit=10)]
+        assert hits == ["含百分号 100% 的记录"], f"`100%` 子串语义失效：{hits}"

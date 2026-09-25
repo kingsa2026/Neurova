@@ -86,18 +86,27 @@ class TestToolRouterSignature:
 class TestBaseAgentLoopToolRouterCall:
     """测试 BaseAgentLoop 调用 ToolRouter 的方式"""
     
-    def test_base_loop_calls_with_correct_params(self):
-        """验证 BaseAgentLoop 调用时传递正确的参数"""
-        from neurova.agent.loops.base import BaseAgentLoop
-        
-        # 检查源码中调用 ToolRouter 的地方
+    def test_base_loop_delegates_to_the_execution_choke(self):
+        """原生链不再直调 ToolRouter，一律委托执行咽喉（工单 003）。
+
+        旧契约（"base.py 里必须出现 tool_router.execute("）在收编后已经失效：
+        直调 ToolRouter 绕开了票据、`on_tool_executed`、治理预检与 hooks，
+        且与文本链给出两套成败口径。现在契约变成"base.py 通过咽喉执行"。
+        """
         import inspect
+
+        from neurova.agent.loops.base import BaseAgentLoop
+
         source = inspect.getsource(BaseAgentLoop)
-        
-        # 应该调用 execute 并传递 tool_name, params, agent_id, user_id
-        assert "tool_router.execute(" in source, "未找到 tool_router.execute 调用"
-        assert "agent_id=" in source, "缺少 agent_id 参数"
-        assert "user_id=" in source, "缺少 user_id 参数"
+        assert "tool_router.execute(" not in source, (
+            "原生链又出现 ToolRouter 直调（应经 ToolExecutor 咽喉）"
+        )
+        assert "execute_native_tool" in source, "原生链未经咽喉改道模块执行"
+
+        from neurova.agent.native_tool_dispatch import execute_native_tool
+
+        choke_source = inspect.getsource(execute_native_tool)
+        assert "execute_tool(" in choke_source, "改道模块没有走咽喉的公开入口"
 
 
 class TestToolRouterIntegration:

@@ -10,7 +10,7 @@ TDD RED 测试 — ONNXEmbeddingEngine 统计字段线程安全
 修复方案: 加锁保护统计更新 + stats 读取（不是删除 _lock）
 
 运行方式:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.embedding.test_onnx_stats_thread_safety -v
     或直接:
     python tests/unit/embedding/test_onnx_stats_thread_safety.py

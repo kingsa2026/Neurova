@@ -15,6 +15,16 @@ from typing import Any, Callable, Dict, List, Optional
 logger = get_logger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
+# 有界口径的**单源**：`query_database` 的 row_limit 默认值与上界取自
+# `attachment_dataset`（与工具执行体同一份常量），schema 文案不另写一份。
+# ═══════════════════════════════════════════════════════════════
+from neurova.attachment_dataset import (
+    MAX_ROWS_DEFAULT as MAX_DATASET_ROWS_DEFAULT,
+    MAX_ROWS_LIMIT as MAX_DATASET_ROWS_LIMIT,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
 # 内置工具参数 Schema（单一事实源）
 # ═══════════════════════════════════════════════════════════════
 
@@ -29,6 +39,17 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "query": {"type": "string", "description": "召回关键词（在折叠台账中匹配，留空返回最近折叠的内容）"},
                 "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
             },
+        },
+    },
+    "recall_context_span": {
+        "description": "【分层摘要下钻】按上下文里那行『[早期对话摘要] …』尾部的 `covers_ref=fold:<层序>@<会话>` 引用，**确定性**取回该档摘要覆盖的全部原文。与 recall_history 的区别：recall_history 按关键词模糊召回（可能召回不到）、且按指针（call=）直取工具结果；本工具按摘要自带的分层索引直取被折叠的对话原文，不受相关性门槛影响。【何时不用】摘要行上没有 covers_ref 时不要调用（旧摘要无引用）；要搜某个词而非某一段区间时用 recall_history；跨会话长期记忆用 memory_search。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "covers_ref": {"type": "string", "description": "摘要行尾部的引用串（如 covers_ref=fold:2@sess-A）；可直接整行粘贴，本工具自行解析"},
+                "limit": {"type": "integer", "description": "返回原文条数上限", "default": 200},
+            },
+            "required": ["covers_ref"],
         },
     },
     "memory_search": {
@@ -64,6 +85,34 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "max_chars": {"type": "integer", "description": "返回文本上限（默认 50000，超出截断并标 truncated）", "default": 50000},
             },
             "required": ["file_path"],
+        },
+    },
+    "query_database": {
+        "description": (
+            "【数据集查询】按附件句柄只读查询用户上传的 SQLite 数据集（.db/.sqlite）："
+            "缺省列全部表、每表列定义、行数与样例行；给了 sql 则执行该只读查询。"
+            "当附件抽取通道报「未能抽取文本内容」而扩展名是 .db/.sqlite 时用本工具——"
+            "那是原始二进制容器，只有它读得出。"
+            "【何时不用】纯文本/代码用 file_read；PDF/Office 文档用 file_parse；"
+            "平台自有库（users.db 等）与任意路径都不在本工具范围内，它只认附件句柄。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": "附件句柄（注入文案里的 file_id；服务端路径不对外，取用一律凭该句柄）",
+                },
+                "sql": {
+                    "type": "string",
+                    "description": "只读 SQL（可选，缺省=列 schema 与样例）。只允许 SELECT / WITH … SELECT / 只读 PRAGMA；写型语句、ATTACH、多语句一律拒绝。",
+                },
+                "row_limit": {
+                    "type": "integer",
+                    "description": f"最多返回行数（可选，默认 {MAX_DATASET_ROWS_DEFAULT}，上界 {MAX_DATASET_ROWS_LIMIT}；超限截断并在结果里标 truncated）",
+                },
+            },
+            "required": ["file_id"],
         },
     },
     "file_write": {
@@ -637,19 +686,29 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 常规 Agent 工具（2026-08 扩充，run_code ↔ DeepSeek code_interpreter
     # （run_code 执行体早已存在于 tool_executor
     "file_list": {
-        "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。",
+        "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。结果被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页。",
         "parameters": {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "glob 匹配模式，如 *.py、*.json"},
                 "path": {"type": "string", "description": "搜索的根目录（默认当前工作目录）"},
                 "recursive": {"type": "boolean", "description": "是否递归子目录（默认 true）"},
+                "max_results": {
+                    "type": "integer",
+                    "description": "本页返回的最大条目数（默认 500，上限 2000）",
+                    "default": 500,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "跳过前 N 条后再返回（翻页用，配合响应的 next_offset）",
+                    "default": 0,
+                },
             },
             "required": ["pattern"],
         },
     },
     "file_search": {
-        "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。",
+        "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。匹配数被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页，不要靠改写 pattern 去猜剩余结果。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -657,8 +716,44 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "path": {"type": "string", "description": "要搜索的文件或目录路径"},
                 "include": {"type": "string", "description": "搜索目录时的文件名过滤，如 *.py（可选）"},
                 "max_results": {"type": "integer", "description": "返回的最大匹配条数", "default": 50},
+                "offset": {
+                    "type": "integer",
+                    "description": "跳过前 N 条匹配后再返回（翻页用，配合响应的 next_offset）",
+                    "default": 0,
+                },
             },
             "required": ["pattern", "path"],
+        },
+    },
+    "write_pdf": {
+        "description": "【PDF 出件】把 Markdown 正文渲染为 PDF 产物，返回文件名、产物目录路径与鉴权下载地址。用于「要一份可分发文件」的场景（报告、长文归档、交付清单）。【何时不用】只想读文件用 file_read；只想写文本用 file_write；网页另存走 browser_*。响应 warnings 非空时（如无中文字体已降级为阅读器侧字体）必须如实转达，不得报告为完全成功。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Markdown 正文（子集：# 标题、段落、- 与 1. 列表、**粗体**、*斜体*、`行内码`、| 表格 |、![说明](图片路径或 http(s) 链接)、--- 分隔线）。与 content_html 二选一",
+                },
+                "content_html": {
+                    "type": "string",
+                    "description": "HTML 正文（子集：h1-h6/p/ul/ol/li/table/tr/th/td/img/b/strong/i/em/code/pre/hr/br）。script/style/link/iframe 会被丢弃并在 warnings 点名，href 不进 PDF。与 content 二选一",
+                },
+                "title": {"type": "string", "description": "文档标题（进 PDF 元数据与页眉；不参与文件名）"},
+                "template": {
+                    "type": "string",
+                    "enum": ["blank", "report", "cover"],
+                    "description": "模板预设：blank 无页眉页脚无页码；report（默认）页眉=标题、页脚=日期、带页码；cover 在 report 前加一页封面",
+                },
+                "header_text": {"type": "string", "description": "页眉文字，覆盖模板默认（传空串是「关掉页眉」，不是「没填」）"},
+                "footer_text": {"type": "string", "description": "页脚文字，覆盖模板默认（传空串是「关掉页脚」）"},
+                "page_number": {"type": "boolean", "description": "是否画页码（缺省跟随模板：report/cover 开，blank 关）"},
+                "margin_mm": {"type": "number", "description": "四边页边距（毫米，默认 18）"},
+                "path": {
+                    "type": "string",
+                    "description": "落到工作区内的指定路径（必须以 .pdf 结尾，越出工作区会被拒）；省略则落产物目录并返回鉴权 download_url",
+                },
+            },
+            "required": [],
         },
     },
     "git": {
@@ -910,6 +1005,37 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    "orchestrate_tools": {
+        "description": "【多步编排】按显式步骤表在一次调用里跑完一条工具链：层内无依赖的步进并行、有依赖的步进按顺序执行，任一步失败即跳过其下游并点名失败原因。已知确切的执行顺序、且要与一次工具调用等价地拿到整条链的成败时用它。【何时不用】只是把常见序列固化下来供以后反复复用，改用 create_skill（那是持久技能，这里是单次编排）；单个工具直接调它自己；需要可视化分支/循环编排用画布工具族。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "description": "按声明执行的步骤表；同层（互不依赖）并行，声明 depends_on 的步进等前置完成",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string", "description": "被编排的工具名（必须真实存在，如 web_search / file_write / get_datetime）"},
+                            "params": {"type": "object", "description": "传给该工具的参数（支持 {step_<idx>.<field>} 占位符引用前序步骤输出字段）"},
+                            "depends_on": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "本步依赖的前置工具名列表（缺省时按能力图取该工具的前置）",
+                            },
+                        },
+                        "required": ["tool"],
+                    },
+                    "minItems": 1,
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "用一句目标描述让编排器自己规划步骤（与 steps 二选一；两者都给时以 steps 为准）",
+                },
+            },
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -966,7 +1092,18 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
     "spawn_subagent",
+    # 多步编排：内层步进可能含任意写操作，重放制造新变更
+    "orchestrate_tools",
 })
+
+
+def get_registered_tool_names() -> List[str]:
+    """内置工具注册名清单（**单源**读侧）。
+
+    字母表类校验（合成器序列、附件提示文案）一律读这一处，不得各自持有
+    一份名字表——第二份表就是幻名的温床（教义第 6 条）。
+    """
+    return sorted(_BUILTIN_SCHEMAS)
 
 
 def is_builtin_tool_reproducible(tool_name: str) -> bool:

@@ -29,27 +29,45 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
 # job 名（GitHub）→ 流水线名列表（cnb）；unit-tests matrix 两格拆两条
+# perf-gate（Issue #55 新增）：两侧同跑 scripts/ci/perf_gate.py，阻断语义一致
 EXPECTED_MAP = {
+    # static-gate 与 lint 是同一条流水线（Issue #223 第 2 条）：pyflakes 与 ruff
+    # 都在读同一片全仓 AST，拆两条只是多一次容器启动 + 多一遍全仓遍历。
+    # 合并只改「读几遍」，两条命令逐字不动（见下 EXPECTED_CORE_COMMANDS）。
     "static-gate": ["static-gate"],
-    "lint": ["lint"],
+    # deploy-config（Issue #61 新增）：部署配置一致性（Dockerfile / compose /
+    # Helm / requirements 跨文件不变量），两侧同跑同一脚本、同为阻断。
+    "deploy-config": ["deploy-config"],
     "import-and-regression": ["import-and-regression"],
     "unit-tests": ["unit-tests-py311", "unit-tests-py312"],
     "e2e": ["e2e-backend-boot"],
     "frontend": ["frontend"],
+    "perf-gate": ["perf-gate"],
     "dependency-audit": ["dependency-audit"],
+    # 经验质量基准（工单 009 新增）：真实语料 A/B 读数 + 低质探针自证，双侧同命令。
+    "experience-quality": ["experience-quality"],
 }
 
-# 非阻塞（允许失败）的 job：两侧行为必须一致
-EXPECTED_NON_BLOCKING = {"dependency-audit"}
+# 非阻塞（允许失败）的 job：两侧行为必须一致。
+# 2026-09-18 起 dependency-audit 转阻塞（Issue #56）：pip-audit 曾 continue-on-error，
+# 扫出漏洞不拦合并 = 门禁形同虚设。现双侧一致阻塞，本集合为空是刻意契约，
+# 由 test_no_non_blocking_jobs 明文锁定（防被重新放宽而无人察觉）。
+EXPECTED_NON_BLOCKING = set()
 
 # 每对 job/pipeline 的核心门禁命令（"存在于该侧全部脚本中"断言）。
 # 命令改动若属两例试图不同步，这里会红。
 EXPECTED_CORE_COMMANDS = {
-    "static-gate": ["python scripts/ci_static_gate.py --skip-import"],
-    "lint": ["python -m ruff check neurova tests --no-cache"],
+    "static-gate": [
+        "python scripts/ci_static_gate.py --skip-import",
+        "python -m ruff check neurova tests --no-cache",
+    ],
+    "deploy-config": ["python scripts/ci/deploy_config_consistency_check.py"],
     "import-and-regression": [
         "python scripts/ci_static_gate.py",
         "python -m pytest tests/unit/test_audit_regressions.py -q",
+        # 装的是锁不是声明（Issue #223 第 3 条）：无锁 pip 解析是这三种装法里
+        # 最慢的一种，三条 job 装同一份精简依赖时尤其明显。
+        "python -m pip install -r requirements-ci.lock",
     ],
     "unit-tests": [
         "scripts/ci/protected_tests.txt",
@@ -57,8 +75,37 @@ EXPECTED_CORE_COMMANDS = {
         "requirements-ci.lock",
     ],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
-    "frontend": ["npx vue-tsc --noEmit", "npx vitest run"],
-    "dependency-audit": ["python -m pip_audit -r requirements-ci.lock"],
+    "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
+    "perf-gate": [
+        "python scripts/ci/perf_gate.py",
+        "python -m pip install -r requirements-ci.lock",
+    ],
+    "dependency-audit": [
+        "python -m pip_audit -r requirements-ci.lock",
+        # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
+        # curl_cffi/onnxruntime/transformers/playwright/paramiko 等运行时包
+        "python -m pip_audit -r requirements-full.lock",
+        # 非 pip 依赖树（Issue #56 残留边界）：Tauri Cargo.lock（Rust crates）
+        # + tools/npx-runtime 锁（运行时 `npx -y` 现拉的包）。pip-audit 与
+        # npm audit 都看不到它们，此前完全无人审计。
+        #
+        # 预取离线库那一步**不进本表**：它刻意带 `|| true`（允许失败），
+        # 而本表锁的是「阻塞门禁的核心命令」。两侧都已显式登记预取步骤，
+        # 命令逐字一致由 `test_offline_prefetch_is_declared_on_both_sides` 守。
+        #
+        # 门禁本体**不带** `--require-offline`：预取是 best-effort（`|| true`），
+        # 门禁就不能要求「预取必须成功」——否则预取一失败就是阻塞红灯，且与
+        # 「真有未允许漏洞」在合并流程里同形。缓存不齐时门禁回退直连并点名
+        # 缺哪一份，红的成因可读（判据收口在 resolveVerdictChannel 一处）。
+        "python scripts/ci/osv_audit.py",
+    ],
+    # 经验质量基准（工单 009）：读数取自 EKB.quality_snapshot，语料冻结在仓内，
+    # 每次运行先自证低质探针会被判红（详见 scripts/ci/experience_quality_gate.py）。
+    "experience-quality": [
+        "python scripts/ci/experience_quality_gate.py",
+        "python -m pip install -r requirements-ci.lock",
+    ],
+
 }
 
 
@@ -101,6 +148,19 @@ def _job_scripts(job: dict) -> str:
         if isinstance(step, dict) and step.get("run"):
             out.append(str(step["run"]))
     return "\n".join(out)
+
+
+
+def _pipeline_array_for_pr(data):
+    """取 PR 事件流水线：优先 main.pull_request，其次 main.pull_request@<分支> 形态。"""
+    main = data.get("main") or {}
+    if isinstance(main, dict):
+        if isinstance(main.get("pull_request"), list):
+            return main["pull_request"]
+        for key, value in main.items():
+            if isinstance(key, str) and key.startswith("pull_request") and isinstance(value, list):
+                return value
+    return None
 
 
 class TestCoverage:
@@ -149,6 +209,57 @@ class TestCommandParity:
             assert cmd in cnb_scripts, (
                 f".cnb.yml 流水线 {pipe_names} 缺核心命令: {cmd}\n"
                 f"ci.yml 对应 job 有而 cnb 无——命令被单侧改动，放行标准漂移。"
+            )
+
+
+class TestOfflineDatabasePathIsDeclaredOnBothSides:
+    """离线库预取必须两侧都在，且命令逐字一致（否则一侧仍依赖实时可达性）。"""
+
+    _PREFETCH = "python scripts/ci/osv_audit.py --prefetch-offline-databases"
+    _GATE = "python scripts/ci/osv_audit.py"
+
+    def test_offline_prefetch_is_declared_on_both_sides(self, cnb_pipelines, ghw_jobs):
+        job = "dependency-audit"
+        ghw = _job_scripts(ghw_jobs[job])
+        cnb = "\n".join(
+            _pipeline_scripts(cnb_pipelines[n])
+            for n in EXPECTED_MAP[job]
+            if n in cnb_pipelines
+        )
+        # `|| true` 是这一步的语义（允许失败），逐字比对时把它钉住
+        expected = self._PREFETCH + " || true"
+        assert expected in ghw, f"ci.yml job '{job}' 缺离线库预取步骤"
+        assert expected in cnb, (
+            f".cnb.yml 流水线 {EXPECTED_MAP[job]} 缺离线库预取步骤——"
+            "cnb 侧仍会现查 api.osv.dev，网络不可达时门禁红得无从归因"
+        )
+
+    def test_prefetch_is_best_effort_and_gate_does_not_require_it(self, cnb_pipelines):
+        """两句话必须同口径：预取允许失败（`|| true`），门禁就不得要求它成功。
+
+        修复前这里是反的——预取 `|| true`、门禁 `--require-offline`。于是
+        「允许失败的前置步骤」与「必须成功的门禁」互相抵消：预取一失败就是阻塞
+        红灯，而这与「真有未允许漏洞」在合并流程里同形，读日志的人只能重跑
+        （2026-09-22 PR #121 的红就是这么来的，本单要消灭的正是这个形态）。
+
+        正确口径：预取 best-effort，门禁缓存不齐时**回退直连并点名**，
+        红只留给「真有未允许漏洞」（判据收口在 resolveVerdictChannel 一处）。
+        """
+        for name in EXPECTED_MAP["dependency-audit"]:
+            pipe = cnb_pipelines.get(name)
+            if pipe is None:
+                continue
+            scripts = _pipeline_scripts(pipe)
+            assert self._PREFETCH + " || true" in scripts, (
+                f"流水线 {name} 的预取步骤没带 `|| true`——预取失败会阻塞合并，"
+                "而它只是「网络能不能拿到最新库」这一件事"
+            )
+            assert self._GATE + " --require-offline" not in scripts, (
+                f"流水线 {name} 门禁要求了离线，而它上面那步预取被允许失败——"
+                "预取一失败就是阻塞红灯，与「真有未允许漏洞」同形"
+            )
+            assert self._GATE in scripts, (
+                f"流水线 {name} 缺门禁本体命令"
             )
 
 
@@ -213,21 +324,46 @@ class TestAntiRegression:
         ]
         assert not shells, f"cnb 流水线退化为样例空壳: {shells}"
 
+    def test_no_non_blocking_jobs(self):
+        """依赖审计不得退回非阻塞（Issue #56 收口：扫出漏洞必须拦合并）。
+
+        放宽此契约须同时改 .cnb.yml / ci.yml / 本文件，并说明为何放行。
+        """
+        assert EXPECTED_NON_BLOCKING == set(), (
+            "存在非阻塞门禁: "
+            f"{sorted(EXPECTED_NON_BLOCKING)}——依赖审计类门禁必须阻塞，"
+            "否则扫出漏洞也拦不住合并（Issue #56 的原始缺口）。"
+        )
+
     def test_push_and_pr_share_same_pipeline_definition(self, cnb_pipelines):
         """push 与 pull_request 必须共用同一份流水线（锚点别名，单一事实来源）。"""
         data = yaml.safe_load(io.open(CNB, encoding="utf-8").read())
         main = data["main"]
-        assert main["push"] == main.get("pull_request"), (
+        pr = main.get("pull_request")
+        # 常用形态是 YAML 锚点别名 `pull_request: *pipelines`（同一对象）。
+        # 若写成展开副本，也允许——但逐条流水线必须与 push 侧深比较相等，
+        # 否则 PR 门禁与 push 门禁分叉（历史上就是靠这一条抓到的）。
+        if pr is None:
+            pr = _pipeline_array_for_pr(data)
+        assert pr == main["push"], (
             "main.push 与 main.pull_request 定义不一致——PR 门禁与 push 门禁分叉"
         )
 
     def test_referenced_files_exist(self):
         """两份配置引用的门禁构件必须真实存在（缺一个 = 该门禁上线即红）。"""
         for f in (
-            "requirements-ci.txt", "requirements-ci.lock",
+            "requirements-ci.txt", "requirements-ci.lock", "requirements-full.lock",
+            # Issue #56 残留边界：非 pip 依赖树审计的输入与允许清单
+            "NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json",
+            "scripts/ci/osv_audit.py", "scripts/ci/osv-allowlist.toml",
             "scripts/ci_static_gate.py", "scripts/ci/protected_tests.txt",
             "tests/e2e/test_backend_boot.py", "tests/unit/test_audit_regressions.py",
-            "NeurUI/package-lock.json",
+            "NeurUI/package-lock.json", "scripts/ci/perf_gate.py",
+            # 工单 009：经验质量基准的脚本与两份语料（真实冻结语料 + 低质探针）。
+            # 少一份 = 门禁上线即红（探针缺失时无法自证不空转）。
+            "scripts/ci/experience_quality_gate.py",
+            "tests/fixtures/experience_quality_corpus.json",
+            "tests/fixtures/experience_quality_corpus_low_signal.json",
         ):
             assert (PROJECT_ROOT / f).exists(), f"CI 配置引用的门禁构件缺失: {f}"
 

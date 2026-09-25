@@ -37,11 +37,14 @@ def test_skill_proxied_to_skills_models():
             del sys.modules[mod_name]
     from neurova.skill_system import Skill
 
-    # 2026-09-08 甄别：Skill 经 standalone 加载（SkillRegistry.register 依赖
-    # add_event_handler 方法面，models.Skill 无该方法）——同一性改为方法面守卫
-    assert hasattr(Skill, "add_event_handler"), (
-        "neurova.skill_system.Skill 应具备 add_event_handler（非占位类）"
+    # 2026-09-08 甄别：Skill 经 standalone 加载 —— 占位类只有 name/description，
+    # 真类另有 execute/get_info。工单 017 F 项删掉 skill→registry 那条不发声的
+    # 事件桥后，`add_event_handler` 不再是可区分的探针，探针换成 `get_info`。
+    assert hasattr(Skill, "get_info"), (
+        "neurova.skill_system.Skill 应具备 get_info（非占位类）"
     )
+    assert not hasattr(Skill, "add_event_handler"), (
+        "skill→registry 事件桥已退役，不得再长回来")
     assert hasattr(Skill, "execute"), "neurova.skill_system.Skill 应具备 execute"
 
     # 验证非占位类：standalone Skill 为普通类（name/description 构造契约）

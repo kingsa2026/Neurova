@@ -152,14 +152,15 @@
         <template #icon><SafetyOutlined /></template>
       </GlassNavItem>
 
-      <!-- 用户: 协作（低频折叠，含全局渠道接入） -->
+      <!-- 用户: 协作（低频折叠） -->
       <GlassNavGroup
-        v-if="can('/collaboration') || can('/channels')"
+        v-if="can('/collaboration')"
         :label-key="'nav.collaboration'"
         storage-key="user-collaboration"
         :collapsed="appStore.sidebarCollapsed"
         first-item-to="/collaboration/hub"
-        :count="12"
+        active-path-prefix="/collaboration/"
+        :count="10"
       >
         <template #icon><TeamOutlined /></template>
         <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
@@ -177,9 +178,6 @@
         <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><NodeIndexOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/history" :label="t('nav.collaborationhistory')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><HistoryOutlined /></template>
-        </GlassNavItem>
         <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><ProjectOutlined /></template>
         </GlassNavItem>
@@ -195,10 +193,12 @@
         <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><ApiOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed" v-if="can('/channels')">
-          <template #icon><GlobalOutlined /></template>
-        </GlassNavItem>
       </GlassNavGroup>
+
+      <!-- 渠道接入：全局功能，不归属协作域计数 -->
+      <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed" v-if="can('/channels')">
+        <template #icon><GlobalOutlined /></template>
+      </GlassNavItem>
 
       <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed" v-if="can('/notifications')">
         <template #icon><BellOutlined /></template>
@@ -207,6 +207,9 @@
         <template #icon><LineChartOutlined /></template>
       </GlassNavItem>
       <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed" v-if="can('/analytics')">
+        <template #icon><BarChartOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/cost" :label="t('nav.cost')" :collapsed="appStore.sidebarCollapsed" v-if="can('/cost')">
         <template #icon><BarChartOutlined /></template>
       </GlassNavItem>
       <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed" v-if="can('/memory/search-settings')">

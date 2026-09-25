@@ -73,18 +73,19 @@ class TestContextDrop:
         assert data["tags"] == ["标签1", "标签2"]
     
     def test_context_input_timestamps(self):
-        """测试 created_at 和 updated_at 字段"""
+        """归档时刻只有一个字段：`created_at`（B6-7 收口第二条时刻定义）"""
         now = datetime.now()
         ctx = ContextInput(
             source=ContextSource.MEMORY,
             content="记忆内容"
         )
-        
-        # 应该自动设置时间
+
+        # 应该自动设置归档时刻
         assert ctx.created_at is not None
-        assert ctx.updated_at is not None
         assert ctx.created_at >= now
-        assert ctx.updated_at >= now
+        # 改前另有 `updated_at`（构造时同值、零写入方）——读侧读它会拿到构造时刻
+        # 而非归档时刻，故已删净；本用例改判据为"不存在第二次时刻定义"。
+        assert not hasattr(ctx, "updated_at")
 
 
 class TestSemanticMatchDrawer:

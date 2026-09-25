@@ -302,6 +302,10 @@ class MultiModelLLMClient:
                     provider_id=provider.id,
                     base_url=provider.base_url,
                     compat_dict=getattr(provider, "compat_dict", None),
+                    # 协议面（Issue #177）：工具承载能力按 wire protocol 声明，
+                    # 与 provider id / host 行是不同维度、字段级合并。此前解析
+                    # 只按 provider 行，协议面根本没有出口。
+                    protocol=str(provider.provider),
                 ),
                 **_timeout_kwargs,
             )
@@ -461,6 +465,26 @@ class MultiModelLLMClient:
 
     # 404 重连防抖间隔（秒）：同一模型两次重发现之间的最小间隔
     _RECONNECT_DEBOUNCE_SECONDS = 300.0
+
+    @staticmethod
+    def _notePairingReject(error: Exception) -> None:
+        """工具轮配对非法导致的 provider 400 计数（工单 §11.5 唯一硬失败信号）。
+
+        归零判据（灰度期该计数必须为 0）此前无从成立 —— 它连读数都没有。
+        chat() 与 chat_stream() 两条失败路径共用本判定（同一份 `model_error_policy`
+        分类，不在这里另写一套特征词）。
+        """
+        try:
+            from neurova.llm.model_error_policy import toolPairingRejectReason
+
+            reason = toolPairingRejectReason(error)
+            if not reason:
+                return
+            from neurova.core.metrics import record_tool_turn_provider_reject
+
+            record_tool_turn_provider_reject(reason)
+        except Exception:  # noqa: BLE001 - 观测失败不得影响错误上抛
+            pass
 
     @staticmethod
     def _classify_error(error: Exception) -> str:
@@ -865,6 +889,7 @@ class MultiModelLLMClient:
                 limiter.report_429(model_key, pause_seconds=pause)
             elif error_kind == "model_not_found":
                 self._note_404_reconnect(client.provider.id, client.model)
+            self._notePairingReject(e)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -1101,6 +1126,7 @@ class MultiModelLLMClient:
                     limiter.report_429(model_key, pause_seconds=retry_after or 30.0)
                 elif error_kind == "model_not_found":
                     self._note_404_reconnect(client.provider.id, client.model)
+                self._notePairingReject(e)
                 try:
                     from neurova.core.metrics import get_metrics
 

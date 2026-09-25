@@ -8,6 +8,10 @@ from typing import Any, Dict, Optional
 
 logger = get_logger(__name__)
 
+# 关闭时等待 post_chat 后台步骤的上限（秒）。旁路步骤是尽力而为的写入，
+# 关闭不应被它们的慢路径拖住（超时后剩余任务继续跑，不取消也不等）。
+POSTCHAT_BACKGROUND_DRAIN_TIMEOUT = 10.0
+
 
 def bind_and_start_sleep_loop(agent) -> None:
     """绑定并启动空闲-睡眠整理触发链。
@@ -40,6 +44,19 @@ async def shutdown_agent(agent) -> None:
         agent: Agent 实例
     """
     logger.info("Agent %s 正在关闭...", agent.config.name)
+
+    # 收敛 post_chat 后台步骤（P0-1 后台化的旁路写入）：反思/经验/技能漏斗/
+    # 冲突检测/RSI 等以 asyncio task 形式在跑，若不等待就进入睡眠整理与缓冲
+    # 刷新，旁路数据会与关闭流程竞争（甚至随事件循环关闭被丢弃）。
+    _pipeline = getattr(agent, "post_chat_pipeline", None)
+    _drain = getattr(_pipeline, "drain_background", None)
+    if _drain is not None:
+        try:
+            drained = await _drain(timeout=POSTCHAT_BACKGROUND_DRAIN_TIMEOUT)
+            if drained:
+                logger.info("Agent %s: 等待 %d 个后处理后台步骤收尾", agent.config.name, drained)
+        except Exception as e:
+            logger.warning("后处理后台步骤收尾等待失败: %s", e)
 
     # Phase 10: 触发睡眠整理（结果必须写回——此前只打日志，等于无效计算）
     sleep_consolidation = getattr(agent, "sleep_consolidation", None)
@@ -140,6 +157,9 @@ async def shutdown_agent(agent) -> None:
         # 常驻 WAL 连接（sqlite3.Connection 自带 close，幂等）——不入清单
         # 则包导入回滚 rmtree 撞 neurova_memories_persist.db 句柄。
         (getattr(agent, "memory_manager", None), "_persist_conn"),
+        # B4/003 轮补（Issue #90）：ContextPool 的持久台账常驻连接（一个 agent 一个
+        # 库文件）——不入清单则同一根因再现：关闭/删除 agent 时 sqlite 句柄残留。
+        (getattr(agent, "context_orchestrator", None), "context_pool"),
     ):
         if _holder is None:
             continue

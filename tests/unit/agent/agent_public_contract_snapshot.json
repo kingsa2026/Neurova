@@ -182,7 +182,7 @@
     "voice_memory_bridge",
     "voice_pipeline"
   ],
-  "agent_instance_fields_migrated": [],
+  "agent_instance_fields_migrated": ["_tkg_instance"],
   "patch_targets": {
     "module": [
       "AgentLLMClient",

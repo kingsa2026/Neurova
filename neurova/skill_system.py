@@ -85,7 +85,6 @@ class Skill:
         self.name = name
         self.description = description
         self.status = SkillStatus.ACTIVE
-        self._event_handlers: List[Callable] = []
 
     async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
         """
@@ -107,19 +106,6 @@ class Skill:
             description=self.description,
             status=self.status,
         )
-
-    def add_event_handler(self, handler: Callable):
-        """添加事件处理器"""
-        self._event_handlers.append(handler)
-
-    def _emit_event(self, event_type: str, data: Any = None):
-        """触发事件"""
-        event = SkillEvent(event_type, self.name, data)
-        for handler in self._event_handlers:
-            try:
-                handler(event)
-            except Exception as e:
-                get_logger(__name__).error(f"事件处理失败: {e}")
 
 
 class ToolSequenceSkill(Skill):
@@ -160,7 +146,7 @@ class ToolSequenceSkill(Skill):
 
         step_outputs: Dict[int, Any] = {}
         for idx, step in enumerate(sequence):
-            # 步进归一化：进化产物（genetic_engine/skill_packer/nl_synthesizer、
+            # 步进归一化：进化产物（genetic_engine/skill_encapsulation/nl_synthesizer、
             # 冷启动恢复）的 tool_sequence 是 List[str]；create_skill 产物是
             # dict。str 步在此统一为 {"tool": str}，否则自动技能注册成功但
             # 调用必败（"第 0 步格式错误"），闭环后段全是假失败数据。
@@ -434,6 +420,7 @@ class SkillRegistryProtocol(Protocol):
 
     Interface(seam):
         - skills: Dict[str, Skill] — 已注册 Skill 字典(类 B 实现需解包元组)
+        - get_skill(name) -> Skill | None — 定位单个 Skill 的唯一取键口
         - register(skill: Skill) -> None — 注册单个 Skill
         - register_skill(manifest, path=None) -> bool — 兼容 API,接受 manifest
         - list_skills() -> List[Any] — 列出所有 Skill 信息
@@ -443,6 +430,16 @@ class SkillRegistryProtocol(Protocol):
     @property
     def skills(self) -> Dict[str, "Skill"]:
         """已注册的 Skill 字典。"""
+        ...
+
+    def get_skill(self, skill_name: str) -> Optional["Skill"]:
+        """定位单个 Skill——name 与身份域两个形态都归一到同一个对象。
+
+        工单 014 把它补进协议面：此前协议没有"定位"这一口，调用方只能
+        `skills.get(name)` 字典直取，那是只认 name 的第二套键域，与进化侧
+        身份域（skill_id）在 id != name 时分叉。类 B 已退役（ADR 0011），
+        "get_skill 可能是协程"的歧义不复存在。
+        """
         ...
 
     def register(self, skill: "Skill") -> None:
@@ -469,11 +466,18 @@ class SkillRegistry:
 
     def __init__(self, runtime_manager=None):
         self._skills: Dict[str, Skill] = {}
+        # 身份域索引（工单 014）：skill_id/id → 同一个 Skill 对象。
+        # 主字典按 skill.name 建键（name 是执行与展示域：工具清单、LLM 调用都用它），
+        # 而进化侧取键拿的是 resolve_skill_identity()（skill_id 优先）—— 两者在
+        # id != name 时不是同一个串，于是改进/启停/执行全在静默取空。
+        self._identity_index: Dict[str, Skill] = {}
         self._event_handlers: List[Callable] = []
         self._event_callbacks: Dict[str, List[Callable]] = {}
         self._runtime_manager = runtime_manager
         import threading
         self._registration_lock = threading.RLock()
+        # 同名覆盖计数（工单 006 的可观测读数，供运维复算存量库的冲突规模）
+        self._name_collision_count = 0
         # 工具路由器注入: 恢复/注册 ToolSequenceSkill(自动技能)时需要
         # 执行体依靠此路由逐步骤执行工具; 未注入时合成技能"能看见不能调"
         self.tool_router: Any = None
@@ -501,10 +505,35 @@ class SkillRegistry:
                 if key and manifest_fingerprint({"config": getattr(existing, "config", {}),
                                                   "description": existing.description}) == key:
                     return existing
-            canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
+            # canonicalize 已经算出最终身份，直接用它登记，不再二次解析
+            identity = canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
+            # 同名覆盖告警（工单 006 / 审计 L-06b）：注册表按 `skill.name` 建键，
+            # 而身份是 `skill_id`——`name ≠ skill_id` 的自动技能（历史生成器遗留）
+            # 会**静默**顶掉先到的同名条目，工具面永远看不到少了一个。此处只出声
+            # 不硬拒（存量库当场硬拒会让装配失败），迁移方案另票。
+            self._warn_on_name_collision(skill)
             self._skills[skill.name] = skill
-            skill.add_event_handler(self._on_skill_event)
+            if identity:
+                self._identity_index[identity] = skill
             return skill
+
+    def _warn_on_name_collision(self, skill: "Skill") -> None:
+        """同名不同身份的覆盖出声（计数可观测，不硬拒）。"""
+        existing = self._skills.get(skill.name)
+        if existing is None or existing is skill:
+            return
+        from neurova.skills.skill_contract import resolve_skill_identity
+
+        incoming = resolve_skill_identity(skill, fallback=getattr(skill, "name", ""))
+        resident = resolve_skill_identity(existing, fallback=getattr(existing, "name", ""))
+        if incoming and resident and incoming == resident:
+            return
+        self._name_collision_count = getattr(self, "_name_collision_count", 0) + 1
+        logger.warning(
+            "技能同名覆盖（name=%s）：%s 顶替 %s；注册表按 name 建键，两者身份不同则"
+            "先到者在工具面上静默消失（累计 %d 次）",
+            skill.name, incoming or "?", resident or "?", self._name_collision_count,
+        )
 
     @property
     def skills(self) -> Dict[str, Skill]:
@@ -586,13 +615,24 @@ class SkillRegistry:
         except Exception:  # noqa: BLE001 - 只读对象降级，register() 仍按 name 归一
             pass
 
+    def _lookup(self, key: str) -> Optional[Skill]:
+        """注册表唯一的取键口：name 与身份域都归一到同一个对象（工单 014）。
+
+        归一只做在这里，不在 8 个调用方各写一次 resolve —— 那会长出第 9 处口径，
+        而两处口径迟早漂移（本批一路在拆的就是这个）。
+        """
+        skill = self._skills.get(key)
+        if skill is not None:
+            return skill
+        return self._identity_index.get(key)
+
     def set_skill_enabled(self, skill_name: str, enabled: bool) -> bool:
         """启用/禁用技能（2026-09-07 C1 闭环：skill 端点 enable/disable 的真实实现）。
 
         Returns:
             True 表示状态已变更；技能不存在返回 False。
         """
-        skill = self.skills.get(skill_name)
+        skill = self._lookup(skill_name)
         if skill is None:
             return False
         from neurova.skill_system_module_standalone import SkillStatus
@@ -601,17 +641,22 @@ class SkillRegistry:
         return True
 
     def unregister(self, skill_name: str):
-        """注销 Skill"""
-        if skill_name in self._skills:
-            del self._skills[skill_name]
+        """注销 Skill（任一历史形态的键都要能注销干净）"""
+        skill = self._lookup(skill_name)
+        if skill is None:
+            return
+        self._skills.pop(getattr(skill, "name", skill_name), None)
+        for identity, target in list(self._identity_index.items()):
+            if target is skill:
+                self._identity_index.pop(identity, None)
 
     def get_skill(self, skill_name: str) -> Optional[Skill]:
-        """获取 Skill"""
-        return self._skills.get(skill_name)
+        """获取 Skill（name / skill_id 皆可）"""
+        return self._lookup(skill_name)
 
     def has_skill(self, skill_name: str) -> bool:
-        """检查 Skill 是否存在"""
-        return skill_name in self._skills
+        """检查 Skill 是否存在（与 get_skill 同一口径，不许两套判定）"""
+        return self._lookup(skill_name) is not None
 
     def list_skills(self) -> List[SkillInfo]:
         """列出所有 Skill"""
@@ -624,6 +669,7 @@ class SkillRegistry:
     def clear(self) -> None:
         """清空所有已注册技能（主要用于测试与重置）。"""
         self._skills.clear()
+        self._identity_index.clear()
 
     async def execute_skill(
         self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
@@ -749,14 +795,6 @@ class SkillRegistry:
         """添加事件处理器"""
         self._event_handlers.append(handler)
 
-    def _on_skill_event(self, event: SkillEvent):
-        """处理 Skill 事件"""
-        for handler in self._event_handlers:
-            try:
-                handler(event)
-            except Exception as e:
-                get_logger(__name__).error(f"事件处理失败: {e}")
-
     def register_event_callback(self, event_type: str, handler: Callable):
         """按事件类型注册回调。
 
@@ -775,7 +813,7 @@ class SkillRegistry:
             except Exception as e:
                 get_logger(__name__).error(f"事件处理失败: {e}")
         # 按事件类型分发给 register_event_callback 注册的回调（传 skill + data）
-        skill = self._skills.get(skill_name)
+        skill = self._lookup(skill_name)
         for handler in self._event_callbacks.get(event_type, []):
             try:
                 handler(skill, data)
@@ -817,6 +855,15 @@ def create_default_skills(memory_manager=None) -> SkillRegistry:
 # ------------------------------------------------------------------
 
 _skill_registry_singleton = None
+
+
+def registered_collision_count() -> int:
+    """已创建的注册表上的同名覆盖累计次数（未创建时为 0）。
+
+    观测面读数（工单 006）：跨模块直接读模块私有量会绕过包代理，故在此开一个
+    只读取数口。**抓指标绝不懒建注册表**——没有注册表就是 0，不为读数造对象。
+    """
+    return int(getattr(_skill_registry_singleton, "_name_collision_count", 0) or 0)
 
 
 def get_skill_registry(memory_manager=None) -> "SkillRegistry":

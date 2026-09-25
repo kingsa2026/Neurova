@@ -4,13 +4,15 @@ Token 估算计算对比脚本
 """
 
 import sys
-import os
+from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加项目路径：必须是**仓库根**（`scripts/` 的上一层），不是脚本自己所在目录——
+# 后者拿不到 `neurova` 包，`import neurova...` 会 ModuleNotFoundError。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from neurova.context_compressor import Message
-from neurova.context_pool import ContextPoolUtils
+from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 
 
 def count_tokens_injector(text: str) -> int:
@@ -43,24 +45,22 @@ def test_text(text: str, label: str):
     # 方法1: injector.py - _count_tokens
     injector_tokens = count_tokens_injector(text)
     
-    # 方法2: context_pool.py - ContextPoolUtils.estimate_tokens
-    pool_tokens = ContextPoolUtils.estimate_tokens(text)
+    # 方法2: 统一 token 估算入口（context/token_estimator.py，唯一事实源）
+    pool_tokens = estimate_text_tokens(text)
     
-    # 方法3: context_compressor.py - Message.estimate_tokens
-    message = Message(role="user", content=text)
-    compressor_tokens = message.estimate_tokens()
-    
-    # 方法4: context_compressor.py - len() // 4
+    # 方法3（曾为 context_compressor.Message.estimate_tokens）：该模块已随
+    # B6-10 批次 C 退役（装配即弃的第二份压缩实现），探针一并删净——不再把
+    # 已退场实现的旧口径当"对比基准"，那会把历史形态伪装成现状。
+    # 方法4: len() // 4（最粗的基线）
     rough_tokens = len(text) // 4
     
     print(f"\nToken 估算结果:")
     print(f"  1. injector.py (_count_tokens):      {injector_tokens:6d} tokens")
     print(f"  2. context_pool.py (estimate_tokens): {pool_tokens:6d} tokens")
-    print(f"  3. context_compressor.py (Message):   {compressor_tokens:6d} tokens")
     print(f"  4. len() // 4 (粗略估算):             {rough_tokens:6d} tokens")
     
     # 计算统计
-    tokens = [injector_tokens, pool_tokens, compressor_tokens, rough_tokens]
+    tokens = [injector_tokens, pool_tokens, rough_tokens]
     max_token = max(tokens)
     min_token = min(tokens)
     avg_token = sum(tokens) / len(tokens)
@@ -124,7 +124,6 @@ def main():
     print("\n问题诊断:")
     print("1. injector.py: 使用 chinese_ratio=1.5, english_ratio=0.25")
     print("2. context_pool.py: 使用中文字符*1.5 + 英文单词*0.25")
-    print("3. context_compressor.py Message: 使用中文字符*2 + 英文单词*1")
     print("4. len() // 4: 粗略估算，不区分语言")
     
     print("\n影响:")

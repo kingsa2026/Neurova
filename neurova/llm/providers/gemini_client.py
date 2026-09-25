@@ -17,6 +17,7 @@ import aiohttp
 
 from neurova.core.logger import get_logger
 from neurova.llm.providers.protocol_thinking import normalize_gemini_response
+from neurova.llm.providers.tool_transport import toGeminiToolChoice, toGeminiTools
 
 logger = get_logger(__name__)
 
@@ -25,6 +26,9 @@ __all__ = ["build_gemini_body", "GeminiNativeClient", "gemini_endpoint_urls"]
 _THINKING_BUDGET_BY_EFFORT = {"standard": 2048, "deep": 8192}
 
 _DEFAULT_MAX_TOKENS = 4096
+
+#: 每条消息的固定开销（与 `LLMClient._PER_MESSAGE_OVERHEAD` 同源口径）。
+_PER_MESSAGE_OVERHEAD = 4
 
 
 def gemini_endpoint_urls(base_url: str, model: str) -> typing.Tuple[str, str]:
@@ -46,6 +50,8 @@ def build_gemini_body(
     messages: typing.List[dict],
     max_tokens: typing.Optional[int] = None,
     thinking_effort: typing.Optional[str] = None,
+    tools: typing.Optional[typing.List[dict]] = None,
+    tool_choice: typing.Optional[str] = None,
     **kwargs,
 ) -> dict:
     """OpenAI 风格 messages → Gemini generateContent 请求体（纯函数）。
@@ -53,6 +59,9 @@ def build_gemini_body(
     - system 消息 → systemInstruction；其余仅保留 user/assistant 轮
     - thinking_effort（standard/deep）→ thinkingConfig.thinkingBudget；
       light/None 不传（保持模型默认）
+    - tools/tool_choice → `tools[].functionDeclarations[]` 与 `toolConfig`
+      （AUTO/ANY/NONE）。原实现**静默丢弃**工具，使原生链路上的函数调用
+      能力消失（Issue #177）
     """
     system_parts: list = []
     contents: list = []
@@ -75,6 +84,13 @@ def build_gemini_body(
     }
     if system_parts:
         body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
+    gemini_tools = toGeminiTools(tools)
+    if gemini_tools:
+        body["tools"] = gemini_tools
+        tool_config = toGeminiToolChoice(tool_choice)
+        if tool_config is not None:
+            body["toolConfig"] = tool_config
 
     budget = _THINKING_BUDGET_BY_EFFORT.get((thinking_effort or "").strip().lower())
     if budget:
@@ -127,10 +143,18 @@ class GeminiNativeClient:
     # ── 请求体组装 ───────────────────────────────────────────
 
     def _body(self, messages, **kwargs) -> dict:
+        """请求体组装，工具键先过声明位（未声明即剔除并点名 not_supported）。"""
+        compat = getattr(self.config, "compat", None)
+        if compat is not None:
+            from neurova.llm.provider_compat import dropUnsupportedToolKeys
+
+            dropUnsupportedToolKeys(compat, kwargs, self.logger, where=f"{self.provider_id}._body")
         return build_gemini_body(
             messages,
             max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
             thinking_effort=kwargs.get("thinking_effort"),
+            tools=kwargs.get("tools"),
+            tool_choice=kwargs.get("tool_choice"),
             temperature=kwargs.get("temperature", self.config.temperature),
         )
 
@@ -165,11 +189,27 @@ class GeminiNativeClient:
                 yield chunk
 
     def count_tokens(self, text: str) -> int:
-        return max(1, len(text or "") // 4)
+        """估算 token 数（走全仓唯一尺子）。"""
+        from neurova.context.token_estimator import estimate_tokens
+
+        return max(1, estimate_tokens(text))
 
     def count_message_tokens(self, messages, tools=None) -> int:
+        """输入 token 总量（含 `messages` 里的 tool_calls 与 `tools` 目录）。
+
+        与 `LLMClient.count_message_tokens` 逐字同口径：单一事实源，不另立尺子。
+        原实现把 `tools` 形参收下就丢，工具目录不进预算（与 `tool_choice`
+        同型的「接受但不读」死参）。
+        """
         total = 0
         for msg in messages or []:
             content = msg.get("content") or ""
-            total += self.count_tokens(str(content)) + 4
+            total += self.count_tokens(str(content)) + _PER_MESSAGE_OVERHEAD
+            for tc in (msg.get("tool_calls") or []) if isinstance(msg, dict) else []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                total += self.count_tokens(str(fn.get("arguments", ""))) + self.count_tokens(
+                    str(fn.get("name", ""))
+                )
+        for tool in tools or []:
+            total += self.count_tokens(str(tool))
         return total

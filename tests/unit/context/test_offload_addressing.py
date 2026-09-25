@@ -31,12 +31,19 @@ def test_microcompact_placeholder_is_addressable(tmp_path):
         _tool_msg(4, "call_e5", "file_read", "这是工具输出的正文内容 mixed english words 数字 1234567890。" * 700),
     ]
     cleared = orch._clear_old_tool_results(msgs)
-    assert cleared[0]["content"] != msgs[0]["content"], "token>8k 且超出保留窗必须占位"
+    assert cleared[0]["content"] != msgs[0]["content"], "载荷超触发线且超出保留窗必须占位"
     ph = cleared[0]["content"]
     assert "call_a1" in ph and "file_read" in ph, f"占位必须携带硬地址: {ph}"
-    # 最近 3 条保留原文
-    for i in (2, 3, 4):
-        assert cleared[i]["content"] == msgs[i]["content"]
+    # 保留窗按**载荷份额**声明（Issue #90 · T-10c 前置裁定）：最新的若干条保留原文、
+    # 且其累计载荷不超过载荷的一半；至少 1 条。改前这里锁的是"最近 3 条"——那个 3
+    # 正是与窗口折叠共用的同一个数，也是 microcompact 在真序列上恒不触发的根因。
+    from neurova.context.window_compactor import WindowTokenMeter
+
+    meter = WindowTokenMeter()
+    payload = meter.total(msgs)
+    kept = [i for i in range(len(msgs)) if cleared[i]["content"] == msgs[i]["content"]]
+    assert kept == [3, 4], f"保留窗应为最新若干条（载荷份额内），实得 {kept}"
+    assert meter.total([msgs[i] for i in kept]) <= payload * orch._TOOL_RESULT_KEEP_SHARE + meter.one(msgs[3])
 
 
 def test_microcompact_missing_call_id_degrades_not_crash(tmp_path):

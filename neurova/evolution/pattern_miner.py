@@ -14,7 +14,7 @@ Phase 2 P2-1: 从工具执行日志中发现高频工具序列模式。
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.evolution.persistence import PersistedStateMixin
@@ -24,11 +24,17 @@ logger = get_logger(__name__)
 
 @dataclass
 class FrequentPattern:
-    """频繁模式数据"""
+    """频繁模式数据。
+
+    `success_rate` 是三态（工单 013）：来自**含该模式的序列所携带的客观结果**聚合
+    （`wins/(wins+losses)`），None = 这些序列一条客观结果都没有（无证据），
+    既不是 0.5 也不是 0.0。消费方（遗传种子、技能模板）据 None 判"无据不投票"。
+    """
 
     tools: List[str]
     support: int
     context: str = ""
+    success_rate: Optional[float] = None
 
 
 class PatternMiner(PersistedStateMixin):
@@ -56,6 +62,8 @@ class PatternMiner(PersistedStateMixin):
         self._sequences: List[List[str]] = []
         # 存储序列上下文
         self._contexts: List[str] = []
+        # 与序列按位对齐的客观结果位（True/False/None，None=本轮无票据，工单 013）
+        self._outcomes: List[Optional[bool]] = []
         # 存储所有工具
         self._all_tools: Set[str] = set()
         # 存储挖掘结果
@@ -77,13 +85,17 @@ class PatternMiner(PersistedStateMixin):
         """统计唯一工具数"""
         return len(self._all_tools)
 
-    def add_sequence(self, sequence, context: str = "") -> None:
+    def add_sequence(self, sequence, context: str = "",
+                     success: Optional[bool] = None) -> None:
         """
         添加工具调用序列
 
         Args:
             sequence: 工具调用序列，可以是字符串列表或 ToolEntry 对象列表
             context: 上下文描述（可选）
+            success: 本条序列的**客观结果位**（工单 013）：服务端票据三态
+                （`TicketEvidence.ticket`）。None = 无证据，既不投成功票也不投失败票；
+                调用方不得用判空/默认 True 把它抹成有票。
         """
         # 提取工具名称
         tool_names = []
@@ -103,6 +115,7 @@ class PatternMiner(PersistedStateMixin):
                 self._contexts.append(context)
             else:
                 self._contexts.append("")
+            self._outcomes.append(success)
             logger.debug("Added sequence: %s", tool_names)
             self._maybe_persist()
 
@@ -144,6 +157,7 @@ class PatternMiner(PersistedStateMixin):
         """清空所有数据"""
         self._sequences.clear()
         self._contexts.clear()
+        self._outcomes.clear()
         self._all_tools.clear()
         self._patterns.clear()
         self._maybe_persist()
@@ -155,11 +169,13 @@ class PatternMiner(PersistedStateMixin):
             "version": 1,
             "sequences": [list(seq) for seq in self._sequences],
             "contexts": list(self._contexts),
+            "outcomes": list(self._outcomes),
         }
 
     def _restore_payload(self, data: Dict[str, Any]) -> None:
         sequences = data.get("sequences", [])
         contexts = data.get("contexts", [])
+        outcomes = data.get("outcomes", [])
         self._sequences = [
             [str(t) for t in seq] for seq in sequences if isinstance(seq, list)
         ]
@@ -167,6 +183,13 @@ class PatternMiner(PersistedStateMixin):
         self._contexts = [str(c) for c in contexts][: len(self._sequences)]
         while len(self._contexts) < len(self._sequences):
             self._contexts.append("")
+        # 结果位同套对齐，但缺失补 None：旧状态文件没有 outcomes 时是"无证据"，
+        # 补 False 会把历史上每一次复用都记成客观失败票（工单 013）
+        self._outcomes = [
+            o if isinstance(o, bool) else None for o in outcomes
+        ][: len(self._sequences)]
+        while len(self._outcomes) < len(self._sequences):
+            self._outcomes.append(None)
         self._all_tools = {tool for seq in self._sequences for tool in seq}
         self._patterns = []
 
@@ -198,7 +221,9 @@ class PatternMiner(PersistedStateMixin):
                     "tools": pattern.tools,
                     "context": pattern.context,
                     "support": pattern.support,
-                    "success_rate": 1.0,  # 暂时设为 1.0
+                    # 工单 013：不再谎报 1.0 —— None 表示这些序列没有客观结果，
+                    # 消费方（技能封装/注册）据此判无据，不得当满分票用
+                    "success_rate": pattern.success_rate,
                 }
                 templates.append(template)
 
@@ -249,8 +274,14 @@ class PatternMiner(PersistedStateMixin):
         # 3. 添加单个频繁项作为模式（如果长度 >= min_length）
         for item in frequent_items:
             if self.min_length <= 1:
+                support, success_rate = self._pattern_stats([item])
                 patterns.append(
-                    FrequentPattern(tools=[item], support=item_counts[item], context=f"Single item: {item}")
+                    FrequentPattern(
+                        tools=[item],
+                        support=support,
+                        context=f"Single item: {item}",
+                        success_rate=success_rate,
+                    )
                 )
 
         return patterns
@@ -292,10 +323,16 @@ class PatternMiner(PersistedStateMixin):
 
             # 如果模式长度符合要求，添加到结果
             if len(new_prefix) >= self.min_length:
-                # 计算支持度（在原始序列中出现的次数）
-                support = self._count_pattern_support(new_prefix)
+                # 支持度与客观成功率同一趟扫描算出（两者口径必须一致：
+                # 都是"含该模式的序列"，工单 013）
+                support, success_rate = self._pattern_stats(new_prefix)
                 patterns.append(
-                    FrequentPattern(tools=new_prefix, support=support, context=f"Pattern: {' -> '.join(new_prefix)}")
+                    FrequentPattern(
+                        tools=new_prefix,
+                        support=support,
+                        context=f"Pattern: {' -> '.join(new_prefix)}",
+                        success_rate=success_rate,
+                    )
                 )
 
             # 创建新的投影数据库
@@ -317,6 +354,25 @@ class PatternMiner(PersistedStateMixin):
 
         return patterns
 
+    def _pattern_stats(self, pattern: List[str]) -> Tuple[int, Optional[float]]:
+        """模式的支持度与客观成功率（一趟扫描，两者共用"含该模式的序列"这一域）。
+
+        成功率 = 这些序列结果位的 `wins/(wins+losses)`；None 只出现在一个客观结果
+        都没有时 —— 那是"无证据"，不是"全失败"（0.0）也不是中性票（0.5）。
+        """
+        support = wins = losses = 0
+        for seq, outcome in zip(self._sequences, self._outcomes):
+            if not self._is_subsequence(pattern, seq):
+                continue
+            support += 1
+            if outcome is True:
+                wins += 1
+            elif outcome is False:
+                losses += 1
+
+        evidenced = wins + losses
+        return support, (wins / evidenced if evidenced else None)
+
     def _count_pattern_support(self, pattern: List[str]) -> int:
         """
         计算模式在原始序列中的支持度
@@ -327,11 +383,7 @@ class PatternMiner(PersistedStateMixin):
         Returns:
             支持度（出现次数）
         """
-        count = 0
-        for seq in self._sequences:
-            if self._is_subsequence(pattern, seq):
-                count += 1
-        return count
+        return self._pattern_stats(pattern)[0]
 
     def _is_subsequence(self, pattern: List[str], sequence: List[str]) -> bool:
         """

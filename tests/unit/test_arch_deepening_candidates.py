@@ -10,11 +10,14 @@ TDD 测试:架构深化候选实现验证
 TDD 原则: 一次一个测试 → 一次一个实现 → 重复。
 源码扫描测试用 re.sub 去除注释避免假阳性。
 """
+
 import re
 import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
+from tests.repo_paths import repo_str
+
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -42,7 +45,7 @@ class TestSilentExceptReplacedWithLoggerException:
     def test_orchestrator_toolrouter_except_uses_logger_exception(self):
         """orchestrator.py 的 ToolRouter 工具加载 except 应使用 logger.exception。"""
         src = open(
-            "e:/项目/Neurova/neurova/context/orchestrator.py",
+            repo_str("neurova/context/orchestrator.py"),
             encoding="utf-8",
         ).read()
         # 去除注释避免假阳性
@@ -67,7 +70,7 @@ class TestSilentExceptReplacedWithLoggerException:
     def test_orchestrator_skillregistry_except_uses_logger_exception(self):
         """orchestrator.py 的 SkillRegistry 工具加载 except 应使用 logger.exception。"""
         src = open(
-            "e:/项目/Neurova/neurova/context/orchestrator.py",
+            repo_str("neurova/context/orchestrator.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -87,7 +90,7 @@ class TestSilentExceptReplacedWithLoggerException:
     def test_chat_pipeline_nl_synthesis_except_uses_logger_exception(self):
         """chat_pipeline.py 的 NL 工具合成 except 应使用 logger.exception。"""
         src = open(
-            "e:/项目/Neurova/neurova/agent/chat_pipeline.py",
+            repo_str("neurova/agent/chat_pipeline.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -111,7 +114,7 @@ class TestSilentExceptReplacedWithLoggerException:
 # 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
 _SPEC = importlib.util.spec_from_file_location(
     "neurova_skill_system_standalone_for_arch_test",
-    "e:/项目/Neurova/neurova/skill_system.py",
+    repo_str("neurova/skill_system.py"),
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
@@ -168,7 +171,7 @@ class TestUnpackSkillHelper:
     def test_unpack_skill_used_in_discover_skill_tools(self):
         """_discover_skill_tools 应调用 _unpack_skill(消除重复逻辑)。"""
         src = open(
-            "e:/项目/Neurova/neurova/tool_layers/tool_router.py",
+            repo_str("neurova/tool_layers/tool_router.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -189,7 +192,7 @@ class TestUnpackSkillHelper:
     def test_unpack_skill_used_in_resolve_skill_tool(self):
         """_resolve_skill_tool 应调用 _unpack_skill(消除重复逻辑)。"""
         src = open(
-            "e:/项目/Neurova/neurova/tool_layers/tool_router.py",
+            repo_str("neurova/tool_layers/tool_router.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -230,7 +233,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_defined_in_skill_system(self):
         """neurova/skill_system.py 应定义 SkillRegistryProtocol。"""
         src = open(
-            "e:/项目/Neurova/neurova/skill_system.py",
+            repo_str("neurova/skill_system.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -246,7 +249,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_skills_attribute(self):
         """Protocol 应声明 skills: Dict[str, Skill] 接口。"""
         src = open(
-            "e:/项目/Neurova/neurova/skill_system.py",
+            repo_str("neurova/skill_system.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -265,7 +268,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_register_and_register_skill(self):
         """Protocol 应声明 register 和 register_skill 两个方法接口。"""
         src = open(
-            "e:/项目/Neurova/neurova/skill_system.py",
+            repo_str("neurova/skill_system.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -286,7 +289,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_list_skills_and_execute_skill(self):
         """Protocol 应声明 list_skills 和 execute_skill 接口。"""
         src = open(
-            "e:/项目/Neurova/neurova/skill_system.py",
+            repo_str("neurova/skill_system.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -309,7 +312,7 @@ class TestSkillRegistryProtocol:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "neurova_skill_system_for_protocol_test",
-            "e:/项目/Neurova/neurova/skill_system.py",
+            repo_str("neurova/skill_system.py"),
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -328,7 +331,7 @@ class TestSkillRegistryProtocol:
         # 由于 neurova/skill_system.py 被 neurova/skill_system/ 包遮蔽,
         # 需确认 Protocol 通过 __init__.py 或 __getattr__ 导出
         src = open(
-            "e:/项目/Neurova/neurova/skill_system/__init__.py",
+            repo_str("neurova/skill_system/__init__.py"),
             encoding="utf-8",
         ).read()
         assert "SkillRegistryProtocol" in src, (
@@ -456,7 +459,7 @@ class TestCandidate4DeferralDecision:
     def test_stream_branch_has_test_coverage(self):
         """流式分支应有测试覆盖(为未来统一铺路)。"""
         src = open(
-            "e:/项目/Neurova/tests/unit/test_arch_deepening_candidates.py",
+            repo_str("tests/unit/test_arch_deepening_candidates.py"),
             encoding="utf-8",
         ).read()
         assert "test_stream_branch_extracts_content_events" in src

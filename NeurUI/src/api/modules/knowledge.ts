@@ -286,8 +286,17 @@ export function restoreKnowledgeNode(id: string) {
   return api.post<{ code: number; message: string }>(`${BASE}/${id}/restore`)
 }
 
-/** 同值冲突记录（新条目疑似"同一事实的新说法"）。 */
-export interface KnowledgeConflict {
+/**
+ * 冲突队列的一条记录（工单 016）。两条轴共用一个端点，靠 `axis` 判别：
+ * - `entry`：条目侧同值冲突（新条目疑似"同一事实的新说法"），字段与 016 之前逐字相同。
+ * - `fact`：治理层同一 (主体, 谓词) 上的分歧，带 kind / severity / recommended_policy /
+ *   policy_basis —— 没有依据的项在 UI 上不许被"自动裁决"路径关掉。
+ * 用判别联合而不是把所有字段都变可选：模板里拿错轴的字段应当在编译期就红。
+ */
+export type ConflictResolution = 'keep_both' | 'supersede_old' | 'dismiss'
+
+export interface EntryConflict {
+  axis: 'entry'
   conflict_id: string
   old_id: string
   new_id: string
@@ -296,16 +305,117 @@ export interface KnowledgeConflict {
   reason: string
   detected_at: number
   status: string
+  resolution?: string
+  resolved_by?: string
 }
 
-/** Admin: 同值冲突清单（pending 待审 / resolved 历史）。 */
-export function listKnowledgeConflicts(status: 'pending' | 'resolved' = 'pending') {
-  return api.get<KnowledgeConflict[]>(`${BASE}/conflicts`, { params: { status } })
+export interface FactConflict {
+  axis: 'fact'
+  conflict_id: string
+  kind: string
+  subject_key: string
+  subject_label: string
+  predicate_term_id: string
+  member_fact_ids: string[]
+  members_summary: string[]
+  severity: number
+  recommended_policy: string
+  policy_basis: string
+  status: string
+  detected_at: string
+  winner_fact_id?: string | null
+  resolution?: string
+  resolved_by?: string
 }
 
-/** Admin: 裁决冲突。keep_both=保留双条目；supersede_old=新说法接管（旧条目入墓碑）。 */
-export function resolveKnowledgeConflict(conflictId: string, resolution: 'keep_both' | 'supersede_old') {
-  return api.post<{ code: number; message: string }>(`${BASE}/conflicts/${conflictId}/resolve`, { resolution })
+export type KnowledgeConflict = EntryConflict | FactConflict
+
+/** Admin: 冲突队列。默认 axis='all'（两侧都要）；旧调用方可显式传 'entry' 拿原形状。 */
+export function listKnowledgeConflicts(
+  status: 'pending' | 'resolved' = 'pending',
+  axis: 'all' | 'entry' | 'fact' = 'all',
+) {
+  return api.get<KnowledgeConflict[]>(`${BASE}/conflicts`, { params: { status, axis } })
+}
+
+/**
+ * Admin: 裁决冲突。条目侧 keep_both / supersede_old；事实侧另可 dismiss，
+ * 且事实侧 supersede_old 必须带 winner_fact_id——败方要真的退出活动集，
+ * 只写一条 resolution 是假干净。
+ */
+export function resolveKnowledgeConflict(
+  conflictId: string,
+  resolution: ConflictResolution,
+  winnerFactId?: string,
+) {
+  return api.post<{ code: number; message: string; data?: { axis: 'entry' | 'fact' } }>(
+    `${BASE}/conflicts/${conflictId}/resolve`,
+    { resolution, ...(winnerFactId ? { winner_fact_id: winnerFactId } : {}) })
+}
+
+// ---------------------------------------------------------------------------
+// 工单 024：事实血缘与 Turtle 导出（G01 的用户可见面）
+// ---------------------------------------------------------------------------
+
+/** 血缘的一跳：断言跳给"谁在什么介质上说了什么"，推导跳给"由哪条规则、从哪些前提"。 */
+export interface LineageAssertionHop {
+  kind: 'assertion'
+  assertion_id: string
+  actor_type: string
+  actor_id: string
+  medium_ref: string
+  statement_text: string
+  asserted_at: string
+  activity_id: string
+  activity_kind: string
+  activity_basis: string
+  seq: number
+  digest: string
+}
+
+export interface LineagePremise {
+  fact_id: string
+  subject_label: string
+  predicate: string
+  object_term: string
+  statement_texts: string[]
+}
+
+export interface LineageDerivationHop {
+  kind: 'derivation'
+  rule: { rule_id: string; version: string; head_predicate: string } | null
+  rule_ids: string[]
+  premises: LineagePremise[]
+}
+
+export type LineageHop = LineageAssertionHop | LineageDerivationHop
+
+export interface FactLineage {
+  fact_id: string
+  subject_key: string
+  subject_label: string
+  predicate: string
+  object_term: string
+  record_kind: string
+  status: string
+  recorded_at?: string | null
+  qualifier: Record<string, unknown>
+  confidence: number | null
+  hops: LineageHop[]
+  derivation: { rule_id: string; rule_version: string; stratum: number } | null
+  /** 显式缺维：没有断言 / 断言没挂活动 / 活动没记介质。空数组才是"都齐"。 */
+  missing: string[]
+  provenance_state: 'evidenced' | 'unevidenced'
+}
+
+/** 一条事实的逐跳血缘。 */
+export function getFactLineage(factId: string) {
+  return api.get<FactLineage>(`${BASE}/facts/${factId}/lineage`)
+}
+
+/** 同一份血缘的 RDF/Turtle 文本（后端自拼，前端只下载不重排）。 */
+export function getFactTurtle(factId: string) {
+  return api.get<string>(`${BASE}/facts/${factId}/turtle`, { responseType: 'text' })
 }
 
 // ---------------------------------------------------------------------------

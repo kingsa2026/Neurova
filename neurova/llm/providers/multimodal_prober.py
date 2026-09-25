@@ -16,6 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -315,7 +316,7 @@ class MultimodalProber:
 
 _singleton: Optional[MultimodalProber] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/multimodal_prober"
+_DEFAULT_DIR = dataPath("multimodal_prober")
 
 
 def get_multimodal_prober() -> MultimodalProber:

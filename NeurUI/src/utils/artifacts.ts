@@ -12,6 +12,7 @@
  */
 import { useRightDockStore, type DockTabKind } from '@/stores/rightDock'
 import { api } from '@/api'
+import { basenameOf } from '@/utils/pathText'
 
 const PATH_FIELDS = ['file_path', 'audio_path', 'output_ref.path'] as const
 
@@ -39,16 +40,12 @@ const KIND_BY_EXT: Record<string, DockTabKind> = {
   webm: 'video',
   mov: 'video',
   mkv: 'video',
+  pdf: 'pdf',
 }
 
 export function kindForFilename(name: string): DockTabKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   return KIND_BY_EXT[ext] ?? 'text'
-}
-
-function basename(p: string): string {
-  const norm = p.replace(/\\/g, '/')
-  return norm.split('/').pop() || p
 }
 
 /** 稳定短 hash（tab id 去重键用） */
@@ -153,7 +150,7 @@ export function isReadBackReference(resultText: string): boolean {
 
 /** SSE artifact 事件 → 消息产出物项（name 缺省时从 path 取 basename） */
 export function artifactFromEvent(payload: ArtifactEventPayload): MessageArtifact | null {
-  const name = payload.name || (payload.path ? basename(payload.path) : '')
+  const name = payload.name || (payload.path ? basenameOf(payload.path) : '')
   if (!name && !payload.path) return null
   return {
     artifactId: payload.artifact_id,
@@ -169,14 +166,14 @@ export function artifactsFromToolResult(resultText: string): MessageArtifact[] {
   if (isReadBackReference(resultText)) return []
   return parseToolResultArtifacts(resultText).map((ref) => ({
     path: ref.path,
-    name: basename(ref.path),
-    kind: kindForFilename(basename(ref.path)),
+    name: basenameOf(ref.path),
+    kind: kindForFilename(basenameOf(ref.path)),
   }))
 }
 
 /** 产出物去重键：name 优先（两通道归一同键），path basename 兜底 */
 function artifactKey(a: MessageArtifact): string {
-  return a.name || (a.path ? basename(a.path) : '')
+  return a.name || (a.path ? basenameOf(a.path) : '')
 }
 
 /** 合并消息产出物（按 key 去重，先到先得保住 artifactId/size 富信息） */
@@ -201,6 +198,7 @@ const DOCK_ICONS: Record<DockTabKind, string> = {
   image: 'image',
   audio: 'audio',
   video: 'video',
+  pdf: 'fileText',
   text: 'file',
   history: 'clock',
   archive: 'archive',
@@ -274,7 +272,7 @@ export function openToolResultArtifacts(resultText: string): string[] {
   const dock = useRightDockStore()
   const ids: string[] = []
   for (const ref of refs) {
-    const name = basename(ref.path)
+    const name = basenameOf(ref.path)
     const kind = kindForFilename(name)
     const id = `doc:p${shortHash(name)}`
     dock.openTab({

@@ -1,6 +1,6 @@
 # 源码审计修复计划（2026-09-10）
 
-- **来源**：``（5 域扫描，约 62 条确认发现）
+- **来源**：`docs/05-reports/源码全面审计_2026-09-10.md`（5 域扫描，约 62 条确认发现）
 - **纪律**：全程执行 AGENTS.md 修复教义——根因处修复、禁 consumer-only guard、先红后绿 TDD、live-verify、净 LOC ≤ 0 默认、同一根因全命中点扫荡
 - **状态标记**：⬜ 未开始 / 🔄 进行中 / ✅ 完成（含 live-verify）
 
@@ -32,7 +32,7 @@
 | B1 | `_current_user_input/_current_session_id/_current_user_id/_tool_messages_list` 全迁 ContextVar（与 set_request_user_id 同模式） | `agent_core.py:1907-1920,1895-1897`、`chat_pipeline.py:477-489` | 双用户并发同 agent 冒烟测试身份/工具消息不串 |
 | B2 | `_recall_loop_guard` 按 session_id 分桶（ContextVar 或 dict[session_id]） | `tool_executor.py:2097-2105` | 并发会话 guard 不互相覆盖 |
 | B3 | provider 读路径加锁返回快照副本 | `provider_manager.py:673-743` | 并发 add/remove + list 不再 RuntimeError |
-| B4 | EnhancedContextBuilder 加 RLock；build_context 内置惰性维护调用；缓存键改 hash(query) | `enhanced_context_builder.py` | 缓存有界；并发 append 不丢消息 |
+| B4 | EnhancedContextBuilder 加 RLock；build_context 内置惰性维护调用；缓存键改 hash(query) | `enhanced_context_builder.py` | 缓存有界；并发 append 不丢消息 |（**注**：`enhanced_context_builder.py` 已于 B6-10 退役，本条为历史计划记录，不构成待办）
 | B5 | rebuild_loop 原子换引用：请求侧一次性读局部变量，热切换 per-agent asyncio.Lock | `agent_core.py:1050-1062` | 切换期间并发请求用同一代际的 loop |
 | B6 | tool_engine 惰性创建加锁 | `tool_executor.py:220-244` | 并发首调单实例 |
 

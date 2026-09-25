@@ -18,6 +18,8 @@ import pytest
 from neurova.skills.permissions import (
     SkillPermissionModel,
     SkillPermissions,
+    check_tool_permission,
+    tool_categories,
     tool_category,
     tools_for_categories,
 )
@@ -98,6 +100,40 @@ class TestToolCategory:
         """分类展开应覆盖 builtin 注册表（file 类至少含 file_read）"""
         file_tools = tools_for_categories("file")
         assert "file_read" in file_tools and "file_write" in file_tools
+
+
+class TestMultiCategoryTools:
+    """一个工具可以同属多类（write_pdf 既写文件又可能出网）。
+
+    旧实现用 dict 推导生成单值映射，工具进两个集合会被后一个静默覆盖——
+    归类结果取决于遍历顺序，权限判定随之漂移。多归属的语义取"每一类都必须授权"
+    （AND）：只声明 file 的技能拿不到会出网的工具。
+    """
+
+    def test_write_pdf_belongs_to_file_and_network(self):
+        assert tool_categories("write_pdf") == {"file", "network"}
+
+    def test_single_category_tools_are_sets_of_one(self):
+        assert tool_categories("file_read") == {"file"}
+        assert tool_categories("web_fetch") == {"network"}
+        assert tool_categories("mcp.anything") == {"network"}
+        assert tool_categories("memory_search") == set()
+
+    def test_file_only_skill_cannot_reach_the_network_tool(self):
+        perms = SkillPermissions(file=True)
+        assert perms.allows_tool("file_write") is True
+        assert perms.allows_tool("write_pdf") is False
+
+    def test_both_grants_make_it_allowed(self):
+        assert SkillPermissions(file=True, network=True).allows_tool("write_pdf") is True
+
+    def test_read_only_file_face_still_denies_it(self):
+        """只读文件面 + 网络面 ≠ 可以出件（出件是写）。"""
+        assert SkillPermissions(file_read_only=True, network=True).allows_tool("write_pdf") is False
+
+    def test_denial_reason_names_every_category(self):
+        reason = check_tool_permission(SkillPermissions(file=True), "write_pdf")
+        assert reason and "network" in reason
 
 
 class TestCapabilityCheck:

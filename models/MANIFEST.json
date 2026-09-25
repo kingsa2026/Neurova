@@ -1,0 +1,87 @@
+{
+  "built_at": "2026-09-21T00:00:00",
+  "runtime": {
+    "python": {
+      "version": "3.12.14",
+      "urls": [
+        "https://registry.npmmirror.com/-/binary/python-build-standalone/20260901/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz"
+      ]
+    },
+    "node": {
+      "version": "24.16.0",
+      "urls": [
+        "https://npmmirror.com/mirrors/node/v24.16.0/node-v24.16.0-win-x64.zip",
+        "https://mirrors.aliyun.com/nodejs-release/v24.16.0/node-v24.16.0-win-x64.zip",
+        "https://nodejs.org/dist/v24.16.0/node-v24.16.0-win-x64.zip"
+      ]
+    },
+    "pip": {
+      "requirements": "requirements.txt",
+      "indexUrls": [
+        "https://pypi.tuna.tsinghua.edu.cn/simple/",
+        "https://mirrors.aliyun.com/pypi/simple/",
+        "https://pypi.org/simple/"
+      ],
+      "probe": [
+        "fastapi",
+        "uvicorn"
+      ]
+    },
+    "asr": {
+      "enginePackages": [
+        {
+          "spec": "funasr>=1.2.0",
+          "import": "funasr",
+          "reason": "ASRManager 链首引擎；中文 Paraformer 非自回归，CPU 上比 whisper 快一个量级"
+        },
+        {
+          "spec": "torchaudio",
+          "import": "torchaudio",
+          "reason": "FunASR fbank 特征提取依赖（实测缺失报 torchaudio is not installed）"
+        },
+        {
+          "spec": "openai-whisper>=20231117",
+          "import": "whisper",
+          "reason": "本地 whisper 引擎（whisper-base 权重由本清单 models 一并供给）"
+        }
+      ],
+      "note": "可选能力：安装体积大（torch CPU 版约 200MB），install.py 仅在 --with-local-asr 时安装"
+    }
+  },
+  "models": [
+    {
+      "id": "bge-small-zh-v1.5",
+      "path": "models/embedding/bge-small-zh-v1.5/",
+      "required": true,
+      "source": "huggingface",
+      "repo_id": "BAAI/bge-small-zh-v1.5",
+      "size_mb": 183
+    },
+    {
+      "id": "moss-tts-nano",
+      "path": "models/tts/moss-nano/",
+      "required": false,
+      "source": "modelscope",
+      "repo_id": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
+      "size_mb": 642
+    },
+    {
+      "id": "moss-audio-tokenizer",
+      "path": "models/tts/moss-tokenizer/",
+      "required": false,
+      "source": "modelscope",
+      "repo_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
+      "size_mb": 87
+    },
+    {
+      "id": "whisper-base",
+      "path": "models/asr/whisper/",
+      "required": false,
+      "source": "openai-whisper",
+      "model_size": "base",
+      "size_mb": 140,
+      "engineImport": "whisper"
+    }
+  ]
+}

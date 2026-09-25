@@ -176,12 +176,6 @@ class TestChatPipelineWiring:
         ctx = ChatContext(user_input="hi")
         assert ctx.writer_claim is None
 
-    def test_pipeline_request_has_writer_claim_field(self):
-        from neurova.pipeline_executor import PipelineRequest
-
-        req = PipelineRequest(user_input="hi", reply="ok")
-        assert req.writer_claim is None
-
     def test_save_to_session_accepts_writer_claim(self, tmp_path):
         """Agent._save_to_session 透传 writer_claim 到 SessionManager（经共享单例）"""
         from neurova.session_manager import SessionManager

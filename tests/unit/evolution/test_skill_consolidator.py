@@ -70,7 +70,10 @@ class TestConsolidatorPlan:
     def test_plan_to_dict(self):
         plans = SkillConsolidator().plan({"k-a": "A", "k-b": "B"})
         d = plans[0].to_dict()
-        assert set(d) == {"umbrella", "absorbed", "reason", "needs_reference_rehoming", "quality"}
+        # P1 收口：新增 basis/structure/intents——审批人必须能看出本簇依据
+        # 哪一级身份聚出（真重复 vs 跨意图收编），合并风险完全不同。
+        assert set(d) == {"umbrella", "absorbed", "reason", "needs_reference_rehoming",
+                          "quality", "basis", "structure", "intents"}
 
 
 # ── P1-2 接线：质量选取 / 落盘计划仓 / 审批执行 ──────────────────

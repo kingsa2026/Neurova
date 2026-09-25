@@ -46,7 +46,12 @@ class ContextCollector:
             else:
                 remaining_tokens = self.max_tokens - total_tokens
                 if remaining_tokens > 0:
-                    char_limit = int(remaining_tokens * 1.5)
+                    total = self._estimate_tokens(ctx.content)
+                    char_limit = (
+                        max(1, int(len(ctx.content) * remaining_tokens / total))
+                        if total > 0
+                        else len(ctx.content)
+                    )
                     truncated_content = ctx.content[:char_limit]
                     truncated_ctx = ContextInput(
                         source=ctx.source,
@@ -62,6 +67,6 @@ class ContextCollector:
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(text)
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)

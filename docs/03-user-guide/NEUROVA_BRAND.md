@@ -423,24 +423,19 @@ Twitter/微博头像:
 
 **Nova** 作为昵称可在社区非商业场景自由使用。
 
-本项目采用 MIT 许可证 - 查看 LICENSE 文件了解详情。
+本项目采用 MIT 许可证。`LICENSE` 文件从未入库，许可证声明见仓库根 [README.md](../../README.md) 的「许可证」节。
 
 ---
 
 ## 🎁 品牌资源下载
 
-### Logo 文件
-- [neurova-logo.svg](assets/neurova-logo.svg) - 矢量版本
-- [neurova-logo.png](assets/neurova-logo.png) - PNG 版本
-- [neurova-icon.svg](assets/neurova-icon.svg) - 图标版本
+原「品牌资源下载」清单指向的 `assets/` 目录（`neurova-logo.svg` / `brand-guidelines.pdf` /
+`ppt-template.pptx` / `colors.ase` / `colors.css`）全历史未入库，清单已退役。现行品牌资产落点：
 
-### 品牌指南
-- [brand-guidelines.pdf](assets/brand-guidelines.pdf) - PDF 版本
-- [presentation-template.pptx](assets/ppt-template.pptx) - PPT 模板
-
-### 颜色文件
-- [neurova-colors.ase](assets/colors.ase) - Adobe 色板
-- [neurova-colors.css](assets/colors.css) - CSS 变量
+- **Logo / 图标**：`NeurUI/public/img/`（`NEUROVA-black.png`、`NEUROVA-white.png`、
+  `NEUROVA-WORDMARK-white.png`、`neurova-icon.png`），仓库根 `NEUROVA-ICO.png` 用于 README 与 i18n 版式
+- **品牌规范**：[BRAND_GUIDELINES.md](BRAND_GUIDELINES.md) 与 [BRAND_UPDATE.md](BRAND_UPDATE.md)
+- **颜色令牌**：`NeurUI/src/styles/variables.css`（全站唯一色值事实源，禁硬编码色值）
 
 ---
 

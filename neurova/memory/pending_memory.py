@@ -21,7 +21,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -131,28 +133,9 @@ def _fingerprint(content: str) -> str:
     return hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
 
 
-# ── P1#11② NormalizedKey──────────
-# 折叠口径刻意保守：大小写/全半角/标点/空白 + 说话人前缀。key 相同 ≈
-# "同一事实的新说法"；语义级判断（话题归并/矛盾检测）不做——那是 LLM 的
-# 职责（KB 冲突账本/巩固簇合并），写路径保持零模型调用、确定性可复现。
-
-_SPEAKER_PREFIXES = (
-    "助手：", "助手:", "用户：", "用户:", "assistant:", "user:",
-    "助手", "用户",
-)
-
-
-def normalized_key(content: str) -> str:
-    """确定性归一化键：NFKC + 小写 + 去说话人前缀 + 剔除标点/空白。"""
-    import re
-    import unicodedata
-
-    text = unicodedata.normalize("NFKC", str(content or "")).strip().lower()
-    for p in _SPEAKER_PREFIXES:
-        if text.startswith(p):
-            text = text[len(p):].strip()
-            break
-    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+# ── P1#11② NormalizedKey ──────────
+# 折叠口径的事实源在 neurova.core.content_identity（EKB 写入面与记忆写入面
+# 共用同一把键，此处仅按本模块语义消费）。
 
 
 def find_supersede_ids(memories: Any, content: str) -> List[str]:
@@ -527,11 +510,25 @@ _process_store: Optional[PendingMemoryStore] = None
 _process_lock = threading.Lock()
 
 
-def get_pending_memory_store(db_path: str = "./data/memory_pending/pending_memories.db") -> PendingMemoryStore:
-    """进程级单例（与 KnowledgeRepository.get_knowledge_repository 同式）。"""
+def defaultPendingDbPath() -> str:
+    """待确认记忆账本的默认落点：数据根下的 `memory_pending`（绝对路径）。
+
+    原默认值是 CWD 相对路径 `"./data/memory_pending/..."`——换个工作目录就换一个
+    待确认队列，"确认过的还在待确认里"这类现象正是它留下的。
+    """
+
+    return str(get_data_root() / "memory_pending" / "pending_memories.db")
+
+
+def get_pending_memory_store(db_path: str = "") -> PendingMemoryStore:
+    """进程级单例（与 KnowledgeRepository.get_knowledge_repository 同式）。
+
+    `db_path` 缺省（空串）时按数据根推导；显式传路径（测试隔离）一字不改。
+    """
     global _process_store
+    target = db_path or defaultPendingDbPath()
     with _process_lock:
         if _process_store is None:
-            os.makedirs(str(Path(db_path).parent), exist_ok=True)
-            _process_store = PendingMemoryStore(db_path=db_path)
+            os.makedirs(str(Path(target).parent), exist_ok=True)
+            _process_store = PendingMemoryStore(db_path=target)
         return _process_store

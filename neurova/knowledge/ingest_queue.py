@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -94,7 +95,7 @@ class KnowledgeIngressQueue:
         max_attempts: int = 3,
         lease_seconds: float = 120.0,
     ):
-        base = Path("data/knowledge_ingress")
+        base = get_data_root() / "knowledge_ingress"
         self.db_path = str(db_path or base / "ingress.db")
         self.files_dir = Path(files_dir or base / "files")
         self.files_dir.mkdir(parents=True, exist_ok=True)

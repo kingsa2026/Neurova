@@ -398,72 +398,100 @@ class TestMetaCognitionDelegation:
 # ────── TKG 委托测试 ──────
 
 
-class TestTKGDelegation:
-    """验证 TKG stub 委托到 TKGModule"""
+@pytest.fixture
+def tkg_manager(tmp_path):
+    """带隔离底座事实库的 manager：时序事实的唯一权威是底座，测试不许碰生产目录。"""
+    from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
-    def test_tkg_add_fact_no_longer_raises(self, manager):
+    store = KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+    manager = MemoryManager(
+        db_path=str(tmp_path / "test_tkg_delegation.db"), agent_id="test", user_id="test")
+    manager.attachFactStore(store)
+    yield manager
+    manager.close()
+    store.close()
+
+
+class TestTKGDelegation:
+    """验证 TKG stub 委托到 TKGModule（读写的都是底座那一份权威）"""
+
+    def test_tkg_add_fact_no_longer_raises(self, tkg_manager):
         try:
-            manager.tkg_add_fact(subject="Alice", predicate="knows", obj="Bob")
+            tkg_manager.tkg_add_fact(subject="Alice", predicate="knows", obj="Bob")
         except NotImplementedError:
             pytest.fail("tkg_add_fact should delegate to TKGModule")
 
-    def test_tkg_add_fact_returns_str(self, manager):
-        result = manager.tkg_add_fact(subject="Alice", predicate="knows", obj="Bob")
+    def test_tkg_add_fact_returns_str(self, tkg_manager):
+        result = tkg_manager.tkg_add_fact(subject="Alice", predicate="knows", obj="Bob")
         assert isinstance(result, str)
 
-    def test_tkg_query_current_no_longer_raises(self, manager):
+    def test_tkg_add_fact_acceptsApiFieldNames(self, tkg_manager):
+        """端点传的是 entity/attribute/value：委托层必须归一，不能静默写空行。"""
+        factId = tkg_manager.tkg_add_fact(entity="Alice", attribute="knows", value="Bob")
+
+        hits = tkg_manager.tkg_query_current(subject="Alice")
+        assert [h["fact_id"] for h in hits] == [factId]
+        assert hits[0]["predicate"] == "knows" and hits[0]["object"] == "Bob"
+
+    def test_tkg_add_fact_rejectsBlankFields(self, tkg_manager):
+        """缺必填项当场报错——静默兜底写空行就是审计 B-02 那条空三元组。"""
+        with pytest.raises(ValueError):
+            tkg_manager.tkg_add_fact(entity="", attribute="knows", value="Bob")
+
+    def test_tkg_query_current_no_longer_raises(self, tkg_manager):
         try:
-            manager.tkg_query_current(subject="Alice")
+            tkg_manager.tkg_query_current(subject="Alice")
         except NotImplementedError:
             pytest.fail("tkg_query_current should delegate to TKGModule")
 
-    def test_tkg_query_current_returns_list(self, manager):
-        result = manager.tkg_query_current(subject="Alice")
+    def test_tkg_query_current_returns_list(self, tkg_manager):
+        result = tkg_manager.tkg_query_current(subject="Alice")
         assert isinstance(result, list)
 
-    def test_tkg_query_at_time_no_longer_raises(self, manager):
+    def test_tkg_query_at_time_no_longer_raises(self, tkg_manager):
         try:
-            manager.tkg_query_at_time(subject="Alice", time_from=0.0)
+            tkg_manager.tkg_query_at_time(subject="Alice", time_from=0.0)
         except NotImplementedError:
             pytest.fail("tkg_query_at_time should delegate to TKGModule")
 
-    def test_tkg_query_at_time_returns_list(self, manager):
-        result = manager.tkg_query_at_time(subject="Alice", time_from=0.0)
+    def test_tkg_query_at_time_returns_list(self, tkg_manager):
+        result = tkg_manager.tkg_query_at_time(subject="Alice", time_from=0.0)
         assert isinstance(result, list)
 
-    def test_tkg_get_history_no_longer_raises(self, manager):
+    def test_tkg_get_history_no_longer_raises(self, tkg_manager):
         try:
-            manager.tkg_get_history(subject="Alice")
+            tkg_manager.tkg_get_history(subject="Alice")
         except NotImplementedError:
             pytest.fail("tkg_get_history should delegate to TKGModule")
 
-    def test_tkg_get_history_returns_list(self, manager):
-        result = manager.tkg_get_history(subject="Alice")
+    def test_tkg_get_history_returns_list(self, tkg_manager):
+        result = tkg_manager.tkg_get_history(subject="Alice")
         assert isinstance(result, list)
 
-    def test_tkg_detect_conflicts_no_longer_raises(self, manager):
+    def test_tkg_detect_conflicts_no_longer_raises(self, tkg_manager):
+        """017：判定委托到底座咽喉，所以这条委托链的落点是事实库而不是模块私表。"""
         try:
-            manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
+            tkg_manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
         except NotImplementedError:
             pytest.fail("tkg_detect_conflicts should delegate to TKGModule")
 
-    def test_tkg_detect_conflicts_returns_list(self, manager):
-        result = manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
+    def test_tkg_detect_conflicts_returns_list(self, tkg_manager):
+        result = tkg_manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
         assert isinstance(result, list)
 
-    def test_tkg_get_stats_no_longer_raises(self, manager):
+    def test_tkg_get_stats_no_longer_raises(self, tkg_manager):
         try:
-            manager.tkg_get_stats()
+            tkg_manager.tkg_get_stats()
         except NotImplementedError:
             pytest.fail("tkg_get_stats should delegate to TKGModule")
 
-    def test_tkg_get_stats_returns_dict(self, manager):
-        result = manager.tkg_get_stats()
+    def test_tkg_get_stats_returns_dict(self, tkg_manager):
+        result = tkg_manager.tkg_get_stats()
         assert isinstance(result, dict)
 
-    def test_tkg_module_initialized_after_call(self, manager):
-        manager.tkg_get_stats()
-        assert manager._tkg_module is not None
+    def test_tkg_module_initialized_after_call(self, tkg_manager):
+        tkg_manager.tkg_get_stats()
+        assert tkg_manager._tkg_module is not None
 
 
 # ────── WorkingMemory 委托测试 ──────

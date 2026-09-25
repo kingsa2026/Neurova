@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -82,7 +83,7 @@ class MemberBatchAdd(BaseModel):
 # JSON 落盘存储
 # ---------------------------------------------------------------------------
 
-_STORE_FILE = os.environ.get("NEUROVA_TEAMS_PATH", "data/teams_api.json")
+_STORE_FILE = os.environ.get("NEUROVA_TEAMS_PATH") or dataPath("teams_api.json")
 
 _teams_store: Dict[str, Dict[str, Any]] = {}
 
@@ -127,7 +128,7 @@ def _reboot_load() -> None:
     """测试钩子：模拟进程重启（清空内存，从配置路径重载）。"""
     _teams_store.clear()
     global _STORE_FILE
-    _STORE_FILE = os.environ.get("NEUROVA_TEAMS_PATH", "data/teams_api.json")
+    _STORE_FILE = os.environ.get("NEUROVA_TEAMS_PATH") or dataPath("teams_api.json")
     _load_store()
 
 

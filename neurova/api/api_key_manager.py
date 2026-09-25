@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -138,7 +139,7 @@ class APIKeyManager:
             key_length: 密钥长度
             default_expiry_days: 默认过期天数
         """
-        self.storage_path = storage_path or Path("data/api_keys.json")
+        self.storage_path = callerPath(storage_path, "api_keys.json")
         self.key_length = key_length
         self.default_expiry_days = default_expiry_days
 

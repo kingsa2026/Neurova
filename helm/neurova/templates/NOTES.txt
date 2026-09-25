@@ -1,6 +1,6 @@
 1. Neurova AI Agent 框架已成功部署！
 
-2. 获取应用 URL：
+2. 获取应用 URL（API 文档面 /docs 已移除，2026-09-16）：
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ (first $host.paths).path }}
@@ -21,14 +21,11 @@
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
 
-3. API 文档：
-   http://localhost:{{ .Values.backend.service.port }}/docs
-
-4. 健康检查：
+3. 健康检查：
    http://localhost:{{ .Values.backend.service.port }}/health
 
-5. 查看日志：
+4. 查看日志：
    kubectl logs -f deployment/{{ include "neurova.fullname" . }}-backend --namespace {{ .Release.Namespace }}
 
-6. 停止服务：
+5. 停止服务：
    helm uninstall {{ .Release.Name }} --namespace {{ .Release.Namespace }}

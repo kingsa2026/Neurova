@@ -330,7 +330,7 @@ class TestBackgroundIndexer:
         from neurova.mem_core import _background_index_memories
 
         vs = _mock_encode_store()
-        added = _background_index_memories(
+        added, exhausted = _background_index_memories(
             vs,
             _make_fetch(self._rows(10)),
             index_limit=5,
@@ -339,6 +339,7 @@ class TestBackgroundIndexer:
         )
 
         assert added == 5
+        assert exhausted is False
         assert len(vs.memory_ids) == 5
 
     def test_stops_at_data_end(self, settings):
@@ -346,7 +347,7 @@ class TestBackgroundIndexer:
         from neurova.mem_core import _background_index_memories
 
         vs = _mock_encode_store()
-        added = _background_index_memories(
+        added, exhausted = _background_index_memories(
             vs,
             _make_fetch(self._rows(3)),
             index_limit=100,
@@ -355,6 +356,7 @@ class TestBackgroundIndexer:
         )
 
         assert added == 3
+        assert exhausted is True  # 扫尽：源行数未变时下次启动可跳过重扫
         assert len(vs.memory_ids) == 3
 
     def test_respects_existing_index(self, settings):
@@ -365,7 +367,7 @@ class TestBackgroundIndexer:
         rows = self._rows(6)
         vs.index_memories(rows[:3])  # 模拟 init 同步索引
 
-        added = _background_index_memories(
+        added, exhausted = _background_index_memories(
             vs,
             _make_fetch(rows),
             index_limit=5,  # 直接传参：schema min=500 会拒绝对 settings 写 5
@@ -374,6 +376,7 @@ class TestBackgroundIndexer:
         )
 
         assert added == 2, "预算 = index_limit - 已索引 = 2"
+        assert exhausted is False  # 预算截断不等于扫尽
         assert len(vs.memory_ids) == 5
 
     def test_moe_index_limit_schema_default(self):

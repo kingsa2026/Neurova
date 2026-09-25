@@ -25,6 +25,7 @@ vi.mock('@/composables/useAgentPage', () => ({
 
 vi.mock('@/api/modules/memory', () => ({
   getEmotionSummary: vi.fn(),
+  getEmotionTimeline: vi.fn().mockResolvedValue({ code: 0, data: { range: '7d', bucket: 'day', points: [] } }),
 }))
 
 vi.mock('@/api/modules/growth', () => ({
@@ -55,7 +56,7 @@ import { request } from '@/api'
 const zhMessages = {
   nav: { persona: '人格', emotion: '情绪', personality: '个性' },
   common: { refresh: '刷新', edit: '编辑', cancel: '取消', save: '保存', success: '操作成功', error: '操作失败', noData: '暂无数据', updated: '更新于' },
-  emotion: { title: '情绪', analysis: '情绪分析', share: '占比 ', entries: '条', neutral: '中性', joy: '开心' },
+  emotion: { title: '情绪', analysis: '情绪分析', share: '占比 ', entries: '条', neutral: '中性', joy: '开心', timelineTitle: '情绪变化时间轴', timelineAxisHint: '正值=积极情绪，负值=消极情绪', range24h: '24 小时', range7d: '7 天', range30d: '30 天', range90d: '90 天' },
   growth: { motivation: '动力状态', personality: '个性档案', traits: '特质', evolve: '进化' },
   personality: {
     openness: '开放性', conscientiousness: '尽责性', extraversion: '外向性',
@@ -77,6 +78,9 @@ const globalStubs = {
   'a-progress': { props: ['percent'], template: '<div/>' },
   'a-tag': { props: ['color'], template: '<span><slot/></span>' },
   'a-slider': { props: ['value'], template: '<div class="slider-stub"/>' },
+  'a-radio-group': { props: ['value', 'size'], template: '<div><slot/></div>' },
+  'a-radio-button': { props: ['value'], template: '<div><slot/></div>' },
+  VChart: { props: ['option'], template: '<div class="vchart-stub"/>' },
 }
 
 function mountPage() {

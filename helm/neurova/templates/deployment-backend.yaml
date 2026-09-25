@@ -6,6 +6,12 @@ metadata:
     {{- include "neurova.backend.selectorLabels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.backend.replicaCount }}
+  {{- if and .Values.database.persistence.enabled (eq .Values.database.persistence.accessMode "ReadWriteOnce") }}
+  # RWO 卷不可多 Pod 挂载：滚动更新会让新旧 Pod 同时持卷（嵌入式 SQLite
+  # 多进程同写 = 库损坏）。用 Recreate 先停后起，牺牲可用性换数据正确性。
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "neurova.backend.selectorLabels" . | nindent 6 }}
@@ -20,6 +26,20 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      {{- if .Values.database.persistence.enabled }}
+      # subPath 挂载要求子目录已存在，否则 kubelet 报 "no such file or directory"
+      # 起不来。空卷首启时先建目录（幂等；已有目录无副作用）。
+      initContainers:
+        - name: prepare-data-dirs
+          image: {{ include "neurova.backend.image" . }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.backend.securityContext | nindent 12 }}
+          command: ["sh", "-c", "mkdir -p /mnt/data/agent_workspaces /mnt/data/sessions"]
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+      {{- end }}
       containers:
         - name: backend
           image: {{ include "neurova.backend.image" . }}
@@ -43,10 +63,10 @@ spec:
             httpGet:
               path: {{ .Values.backend.healthCheck.path }}
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+            initialDelaySeconds: {{ .Values.backend.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.healthCheck.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.healthCheck.readiness.failureThreshold }}
           {{- end }}
           envFrom:
             - configMapRef:
@@ -57,39 +77,68 @@ spec:
               value: {{ .value | quote }}
             {{- end }}
             {{- if .Values.llm.apiKeySecret }}
+            # 预留键位（应用侧不直读，见 templates/secret.yaml 注释）
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.llm.apiKeySecret }}
                   key: {{ .Values.llm.apiKeyKey }}
+                  optional: true
+            {{- end }}
+            {{- if .Values.auth.jwtSecret }}
+            # 生产必需：缺失时每个 Pod 各自随机生成 JWT 密钥（多副本 token
+            # 互不认可、重启即全员掉线）。来源是 -jwt Secret（独立于 LLM 密钥）。
+            - name: NEUROVA_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neurova.fullname" . }}-jwt
+                  key: jwt-secret
+            {{- else if and .Values.auth.requireJwtSecret (gt (int .Values.backend.replicaCount) 1) }}
+            {{- fail "auth.jwtSecret 未设置且 backend.replicaCount > 1：多副本必须共享同一 JWT 密钥，否则 token 互不认可" }}
             {{- end }}
           volumeMounts:
             {{- if .Values.database.persistence.enabled }}
             - name: data
               mountPath: /app/data
+            # agent 工作区（记忆库/身份文件/技能经验的落盘基座：
+            # agent_workspaces/<agent_id>/memory/*.db，见
+            # neurova/cognitive_layers/memory_layer/manager.py::_default_db_path_for）
+            # 与 sessions（会话存档）同为"用户资产"：共用同一持久卷的不同子路径，
+            # 不挂持久卷时 Pod 重建即整体丢失（此前即如此）。
+            - name: data
+              mountPath: /app/agent_workspaces
+              subPath: agent_workspaces
+            - name: data
+              mountPath: /app/sessions
+              subPath: sessions
             {{- end }}
             - name: logs
               mountPath: /app/logs
-            - name: config
-              mountPath: {{ .Values.backend.configMountPath }}
-              readOnly: true
+            # 这里**刻意不挂** ConfigMap 卷到 /app/config：
+            # ConfigMap 的键全是环境变量，已由上方 envFrom 注入；把它当卷挂到
+            # /app/config 会整体遮蔽**镜像内 config/ 目录**（config/cors.json 与
+            # config/llm_presets/defaults.json 都读不到），与 .dockerignore 挡掉
+            # cors.json 属同一类故障的另一种形态（构建/启动都正常，运行时静默
+            # 回落内置默认值）。守卫见 scripts/ci/deploy_config_consistency_check.py 的 R12。
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
       volumes:
         {{- if .Values.database.persistence.enabled }}
         - name: data
-          {{- if .Values.database.persistence.existingClaim }}
           persistentVolumeClaim:
+            {{- if .Values.database.persistence.existingClaim }}
             claimName: {{ .Values.database.persistence.existingClaim }}
-          {{- else }}
+            {{- else }}
+            # 本 Chart 的 pvc.yaml 创建的卷（原实现此处是 emptyDir：PVC 白建、
+            # 数据随 Pod 重建丢失，与 values 里 persistence.enabled=true 自相矛盾）
+            claimName: {{ include "neurova.fullname" . }}-data
+            {{- end }}
+        {{- else }}
+        - name: data
           emptyDir: {}
-          {{- end }}
         {{- end }}
         - name: logs
           emptyDir: {}
-        - name: config
-          configMap:
-            name: {{ include "neurova.fullname" . }}-config
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

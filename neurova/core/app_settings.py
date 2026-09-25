@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -52,14 +53,28 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # NEUROVA_TOOL_SEARCH 环境变量显式值最优先。
     "tool_search_enabled": True,
 }
+
+# LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。
+ROUTING_DEFAULTS: Dict[str, Any] = {
+    # 可行动性门控：机器源(bot_peer/swarm/collaboration/system)且近期无人类时，
+    # 早退不调 LLM、返回结构化 actionable:false 交上层裁决。默认关（opt-in 观察）。
+    "actionability_enabled": False,
+    # 回看最近多少条会话消息以判定"近期是否有人类介入"。
+    "actionability_lookback": 20,
+    # 群领导选举：多我方 agent 同群仅 leader 应答（防重答/回声）。默认关、仅群聊生效、fail-open。
+    "group_leadership_enabled": False,
+    # leader 租约时长（秒）：静默超时后候选自动接管。
+    "group_lease_ttl_seconds": 90,
+}
 SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "general": GENERAL_DEFAULTS,
     "advanced": ADVANCED_DEFAULTS,
+    "routing": ROUTING_DEFAULTS,
 }
 
 
 def _settings_path(path: Optional[Path] = None) -> Path:
-    return path or (Path("data") / "app_settings.json")
+    return callerPath(path, "app_settings.json")
 
 
 def load_app_settings(path: Optional[Path] = None) -> Dict[str, Any]:

@@ -135,69 +135,6 @@ class TestConvergenceAnalyzer(unittest.TestCase):
         # 验证除零保护
         self.assertEqual(roi, 0.0)
     
-    def test_predict_convergence_point(self):
-        """测试收敛点预测"""
-        # 模拟收敛趋势
-        gains = [0.1, 0.08, 0.06, 0.04, 0.03, 0.02, 0.015, 0.012, 0.011, 0.0105]
-        costs = [0.05] * 10
-        
-        for gain, cost in zip(gains, costs):
-            self.analyzer.record_iteration(gain=gain, cost=cost)
-        
-        prediction = self.analyzer.predict_convergence_point()
-        
-        # 验证预测结果
-        if prediction is not None:
-            self.assertIsInstance(prediction, int)
-            self.assertGreater(prediction, 0)
-    
-    def test_predict_convergence_point_insufficient_data(self):
-        """测试数据不足时的收敛点预测"""
-        # 只记录少量数据
-        self.analyzer.record_iteration(gain=0.1, cost=0.05)
-        
-        prediction = self.analyzer.predict_convergence_point()
-        
-        # 验证无法预测
-        self.assertIsNone(prediction)
-    
-    def test_is_worth_continuing_true(self):
-        """测试值得继续进化"""
-        # 模拟正 ROI
-        self.analyzer.record_iteration(gain=0.1, cost=0.05)
-        self.analyzer.record_iteration(gain=0.08, cost=0.06)
-        self.analyzer.record_iteration(gain=0.05, cost=0.07)
-        
-        result = self.analyzer.is_worth_continuing()
-        
-        # 验证值得继续
-        self.assertTrue(result)
-    
-    def test_is_worth_continuing_false_diverging(self):
-        """测试发散时不值得继续"""
-        # 模拟发散
-        gains = [-0.01, -0.02, -0.03, -0.04, -0.05, -0.06, -0.07, -0.08, -0.09, -0.10]
-        costs = [0.05] * 10
-        
-        for gain, cost in zip(gains, costs):
-            self.analyzer.record_iteration(gain=gain, cost=cost)
-        
-        result = self.analyzer.is_worth_continuing()
-        
-        # 验证不值得继续
-        self.assertFalse(result)
-    
-    def test_is_worth_continuing_false_negative_roi(self):
-        """测试负 ROI 时不值得继续"""
-        # 模拟负 ROI
-        self.analyzer.record_iteration(gain=0.01, cost=0.1)
-        self.analyzer.record_iteration(gain=0.01, cost=0.1)
-        self.analyzer.record_iteration(gain=0.01, cost=0.1)
-        
-        result = self.analyzer.is_worth_continuing()
-        
-        # 验证不值得继续
-        self.assertFalse(result)
 
 
 if __name__ == '__main__':

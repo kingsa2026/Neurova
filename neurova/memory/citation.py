@@ -26,9 +26,16 @@ _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 
 def _identify(memory: Any) -> Optional[Tuple[str, str]]:
-    """(kind, real_id)：knowledge_id → k；memory_id/id → m；无标识 → None。"""
+    """(kind, real_id)：事实底座 fact_id → f；knowledge_id → k；memory_id/id → m。
+
+    工单 024 把句柄扩到知识域：一条答案依据若是底座事实，它就得回指到那条事实的
+    血缘（f 前缀），而不是被当成一条记忆 id——两种东西的查看面完全不同。
+    """
     if not isinstance(memory, dict):
         return None
+    fid = memory.get("fact_id")
+    if fid:
+        return ("f", str(fid))
     kid = memory.get("knowledge_id")
     if kid:
         return ("k", str(kid))
@@ -38,6 +45,10 @@ def _identify(memory: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
+#: 句柄前缀 → 引用标记里该写哪个 id 字段
+_KIND_TO_ATTR = {"m": "memory_id", "k": "memory_id", "f": "fact_id"}
+
+
 class CitationRegistry:
     """本轮检索证据的句柄 ↔ 真实 id 双向表（管线每轮新建，非线程共享）。"""
 
@@ -45,7 +56,8 @@ class CitationRegistry:
         self._id_to_handle: Dict[Tuple[str, str], str] = {}
         self._handle_to_id: Dict[str, str] = {}
         self._ids: set = set()
-        self._counters: Dict[str, int] = {"m": 0, "k": 0}
+        self._handle_kind: Dict[str, str] = {}
+        self._counters: Dict[str, int] = {"m": 0, "k": 0, "f": 0}
 
     def register(self, memory: Any) -> Optional[str]:
         """注册条目并返回句柄；无标识返回 None；同 id 幂等复用。"""
@@ -59,8 +71,13 @@ class CitationRegistry:
         handle = f"{kind}{self._counters[kind]}"
         self._id_to_handle[ident] = handle
         self._handle_to_id[handle] = real
+        self._handle_kind[handle] = kind
         self._ids.add(real)
         return handle
+
+    def attrFor(self, handle: str) -> str:
+        """这个句柄解开后该写进哪个字段：记忆/条目用 memory_id，底座事实用 fact_id。"""
+        return _KIND_TO_ATTR.get(self._handle_kind.get(str(handle), ""), "memory_id")
 
     def handle_for(self, memory: Any) -> Optional[str]:
         ident = _identify(memory)
@@ -128,7 +145,7 @@ def extract_citations(
                 if real is None:
                     continue  # 本轮无此证据 → 引用不成立
                 entry = {k: v for k, v in attrs.items() if k != "ref"}
-                entry["memory_id"] = real
+                entry[registry.attrFor(ref)] = real
                 out.append(entry)
                 continue
             mid = attrs.get("memory_id")
@@ -159,7 +176,7 @@ def decode_citation_handles(
         if real is None:
             return ""  # 伪造/越权引用：整个标记删除
         rest = " ".join(f'{k}="{v}"' for k, v in attrs.items() if k != "ref")
-        marker_attrs = f'memory_id="{real}"' + (f" {rest}" if rest else "")
+        marker_attrs = f'{registry.attrFor(ref)}="{real}"' + (f" {rest}" if rest else "")
         return f"<memory_citation {marker_attrs}/>"
 
     return _CITATION_RE.sub(_repl, text)

@@ -1,7 +1,7 @@
 """knowledge 路由有序快照基线（2026-09-16 模块化拆分守护）。
 
 knowledge.py 由单文件拆为聚合器 + 子路由模块，本文件钉死：
-1. 全部 34 条路由路径-方法逐一保持（拆分不得丢路由）；
+1. 全部路由路径-方法逐一保持（清单即 `_KB_ROUTES`，拆分不得丢路由）；
 2. FastAPI 按注册顺序匹配：GET /{knowledge_id} 参数路由会遮蔽其后注册的
    字面 GET 路由（/configs /collections 等）——原文件靠物理行序保证字面
    GET 先注册，拆分后 include 顺序必须维持同序，此测试用「参数路由前的
@@ -13,7 +13,9 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_kb_order_01
 
 from neurova.api.endpoints import knowledge as kb
 
-# 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）
+from tests.route_table import registeredPathMethods
+
+# 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）+ 工单 002 新增的评测基线只读路由
 _KB_ROUTES = [
     ("", "GET"),
     ("/search", "POST"),
@@ -22,6 +24,11 @@ _KB_ROUTES = [
     ("/public-submissions", "GET"),
     ("/conflicts", "GET"),
     ("/conflicts/{conflict_id}/resolve", "POST"),
+    ("/evaluation/baseline", "GET"),
+    ("/foundation/usage", "GET"),
+    ("/foundation/integrity", "GET"),
+    ("/facts/{fact_id}/lineage", "GET"),
+    ("/facts/{fact_id}/turtle", "GET"),
     ("/deleted", "GET"),
     ("/{knowledge_id}/restore", "POST"),
     ("/{knowledge_id}/revisions", "GET"),
@@ -43,16 +50,25 @@ _KB_ROUTES = [
     ("/{knowledge_id}", "GET"), ("/{knowledge_id}", "PUT"), ("/{knowledge_id}", "DELETE"),
     ("/import", "POST"),
     ("/import-url", "POST"),
+    # Issue #68 收口：精准回复命中表（/annotations*）由 console 域迁入知识域
+    # ——唯一消费者是 KnowledgePage 的 AnnotationDrawer，标注是知识资产。
+    # 注册顺序位于 GET /{knowledge_id} 之前（见下一测试的遮蔽守护）。
+    ("/annotations", "GET"),
+    ("/annotations", "POST"),
+    ("/annotations/{annotation_id}", "PUT"),
+    ("/annotations/{annotation_id}", "DELETE"),
+    ("/annotations/export", "GET"),
 ]
 
 
 def _router_routes(router):
-    return [(r.path, next(iter(r.methods - {"HEAD", "OPTIONS"})))
-            for r in router.routes if getattr(r, "methods", None)]
+    return [(path, method)
+            for path, methods in registeredPathMethods(router)
+            for method in methods - {"HEAD", "OPTIONS"}]
 
 
-def test_all_34_routes_present_after_split():
-    """拆分后 34 条路由路径-方法逐一保持（多重集相等，不锁注册顺序）。
+def test_allRoutesPresentAfterSplit():
+    """拆分后全部路由路径-方法逐一保持（多重集相等，不锁注册顺序）。
 
     除遮蔽顺序契约外（见下一测试），FastAPI 对同一路由集合的注册顺序
     不产生行为差异——锁全序是过度规约，会迫使子模块间虚假耦合。

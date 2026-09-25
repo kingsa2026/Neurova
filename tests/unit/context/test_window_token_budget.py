@@ -183,7 +183,12 @@ class TestWindowTokenBudget:
 
     @pytest.mark.asyncio
     async def test_draw_budget_linked_to_window_remaining(self):
-        """审验闭环：draw 侧预算 = 窗口预算 − 窗口实占（防止召回加倍吃回）。"""
+        """审验闭环：draw 侧预算 = 窗口预算 − 对话窗口实占（防止召回加倍吃回）。
+
+        判据必须比对 orchestrator 真正用来算剩余的**对话窗口**（折叠后窗口 +
+        摘要行），而不是"视图里所有 system 行"——后者含 tools_desc/情感/信封，
+        与 `estimate_window_tokens(window_msgs)` 的口径不同，比对会失真。
+        """
         orch = self._mk_orchestrator(budget=8000)
         ctx = [_long_msg(i) for i in range(30)]
         result = await self._build(orch, ctx)
@@ -191,10 +196,17 @@ class TestWindowTokenBudget:
         drawer = orch.context_pool._drawer
         from neurova.context.window_compactor import estimate_window_tokens
 
-        window_msgs = [m for m in result if m["role"] in ("user", "assistant", "system")
-                       and not m["content"].startswith("[记忆]") and not m["content"].startswith("[经验]")
-                       and not m["content"].startswith("[历史回忆]")]
+        # 折叠只作用于对话窗口：留下的必然是原始长消息或摘要行
+        window_msgs = [
+            m
+            for m in result
+            if m["content"].startswith("长消息") or m["content"].startswith("[早期对话摘要]")
+        ]
+        assert window_msgs, "对话窗口为空——本用例没打到窗口预算路径"
         window_tokens = estimate_window_tokens(window_msgs)
-        assert drawer.max_tokens <= max(1000, 8000 - window_tokens), (
-            f"draw 预算 {drawer.max_tokens} 应 ≤ 窗口剩余 {8000 - window_tokens}"
+        expected = max(1000, 8000 - window_tokens)
+        # B6-9：读本轮**生效**额度（`max_tokens` 是构造期默认值，不再被就地改写）
+        assert drawer.effective_view_budget() <= expected, (
+            f"draw 预算 {drawer.effective_view_budget()} 应 ≤ 窗口剩余 {expected}"
+            f"（窗口实占 {window_tokens}）"
         )

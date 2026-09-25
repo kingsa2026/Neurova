@@ -1,5 +1,12 @@
 # ACP Server 设计文档
 
+> **⚠️ 已退役（2026-09-22）**：本设计描述的实现 `neurova/core/acp_server.py`
+> 已删除。它是 `/acp/sessions*` 的**第二份 ACP 面**——`chat_stream()` 为模拟实现
+> （返回「这是对您消息的回复: …」，不调任何 LLM），默认模型表是幻影条目，
+> 且全仓零消费者。生产链路走的是 `neurova/api/endpoints/acp_api.py`（`/api/acp/*`）
+> 与 `neurova/agent/protocols/acp_runtime.py`。本篇保留作历史设计记录，
+> **不再对应任何在跑的代码**；防复活见 `tests/unit/api/test_orphan_faces_retired_guard.py`。
+
 > **模块ID**: Task6-ACPServer  
 > **创建时间**: 2026-05-13 00:00  
 > **最后更新**: 2026-05-13 00:05  
@@ -622,7 +629,7 @@ data: {"error": "错误信息"}
 ### 4.2 进行中的子任务
 
 - [ ] 注册 ACP 路由到 `neurova/api/app.py`
-- [ ] 更新 ``
+- [ ] 更新 `docs/09-dev-progress/progress_tracker.md`
 
 ### 4.3 待完成的子任务
 
@@ -737,7 +744,7 @@ async def chat_stream(...) -> AsyncGenerator[str, None]:
 
 ### 8.1 参考资料
 
-- `` 第2593-2630行：8.5.2 ACP 说明
+- `docs/01-architecture/NEUROVA_CogArch_2.0.md` 第2593-2630行：8.5.2 ACP 说明
 - [Server-Sent Events (SSE) 规范](https://html.spec.whatwg.org/multipage/server-sent-events.html)
 
 ### 8.2 相关文件
@@ -745,7 +752,7 @@ async def chat_stream(...) -> AsyncGenerator[str, None]:
 - `neurova/core/acp_server.py`：ACP Server 实现
 - `tests/test_acp_server.py`：单元测试
 - `neurova/api/app.py`：需要注册 ACP 路由（待修改）
-- ``：需要更新进度（待修改）
+- `docs/09-dev-progress/progress_tracker.md`：需要更新进度（待修改）
 
 ---
 

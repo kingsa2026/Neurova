@@ -13,6 +13,7 @@ import threading
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import callerPath, dataPath
 
 logger = get_logger(__name__)
 
@@ -173,7 +174,7 @@ class MemoryManager:
 class CognitionOrchestrator:
     def __init__(self, storage_dir: Optional[str] = None):
         self._lock = threading.RLock()
-        base = pathlib.Path(storage_dir) if storage_dir else pathlib.Path("./data/orchestrator")
+        base = callerPath(storage_dir, "orchestrator")
         base.mkdir(parents=True, exist_ok=True)
         self._storage_dir = base
         self._agents_path = base / "agents.json"
@@ -357,7 +358,7 @@ class CognitionOrchestrator:
 
 _singleton: Optional[CognitionOrchestrator] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/orchestrator"
+_DEFAULT_DIR = dataPath("orchestrator")
 
 
 def get_cognition_orchestrator(storage_dir: Optional[str] = None) -> CognitionOrchestrator:

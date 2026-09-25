@@ -102,3 +102,24 @@
 - 前端 `skill-pool.ts` 需修正路由路径
 - `skill_pool_api.py` 需接入 `SkillHubClient`/`SkillService`（依赖 ADR 0012 先落地）
 - 需验证删除后无其他模块 import 被删端点
+
+### 修订 0013-B (2026-09-22): 待删两套按本 ADR 实际删净
+
+**背景**: §2 判定的待删套在很长一段时间里只是「标记 `_DEPRECATED`、不再注册」，
+模块文件仍在盘上。这类「已废弃却留着入口」的形态有两个代价：模块仍会被 AST 扫描
+判为「定义了路由但未挂载」（进入未挂载台账，与「待接线」混在一张名单里），
+且任何后来者都可能顺手给它补上一次挂载。
+
+**落到实处的部分**:
+- 删除 `skill_market.py`（A，全 stub）与 `skills_market.py`（B，demo 数据）——
+  规范端点仍是 D (`skill_pool_api.py`，`/api/v1/skill-pool`)；
+- 同时删除两处**第二份平行实现**（另单处置，与本 ADR 同形）：
+  `neurova/api/openplatform/` 整包（自带 apps/webhooks/keys 三套资源面、
+  全仓零消费者、整条 router 无 `Depends`）与 `neurova/core/acp_server.py`
+  （`chat_stream()` 为模拟实现），以及同名不同物的前端 `modules/openplatform.ts`。
+
+**与 §2 的差异（C 未删）**: §2 曾把 C (`marketplace.py`) 也列为待删，但该条已被
+后续演化取代——前端市场页改走 `/marketplace/skills*`，C 现在是**在用的唯一市场面**
+（本仓「删除不得连带真面」的反向断言即为此设，见
+`tests/unit/api/test_orphan_faces_retired_guard.py` 的 `TestLiveFacesSurvive`）。
+故 §2 的「4 套→1 套」实际落点是：市场面归 C，技能池面归 D，A/B 删净。

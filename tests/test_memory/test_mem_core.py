@@ -229,23 +229,6 @@ class TestMemCoreMemoryOperations:
         assert callable(mem_core.get_memory_stats)
 
 
-class TestMemCoreExperienceRecall:
-    """MemCore 经验回忆测试"""
-
-    def test_unified_experience_recall(self):
-        """测试 unified_experience_recall 方法"""
-        # 准备
-        mock_agent = Mock()
-        mock_agent.config = Mock()
-        mock_agent.config.agent_id = "test_agent"
-        
-        mem_core = MemCore(mock_agent)
-        
-        # 验证
-        assert hasattr(mem_core, 'unified_experience_recall')
-        assert callable(mem_core.unified_experience_recall)
-
-
 class TestMemCoreConversationBuffer:
     """MemCore 对话缓冲区测试"""
 

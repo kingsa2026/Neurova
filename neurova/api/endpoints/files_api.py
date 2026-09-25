@@ -34,7 +34,19 @@ from neurova.api.auth import get_current_user
 logger = get_logger(__name__)
 router = APIRouter()
 
-STORAGE_ROOT = Path("storage/users")
+def _defaultStorageRoot() -> Path:
+    """上传根：数据根下的 `storage/users`（绝对路径）。
+
+    原值 `Path("storage/users")` 是 CWD 相对——上传件的落点随启动目录漂移，
+    与 `file_utils` 的上传根分裂成两处"事实源"。旧的仓库根 `storage/users`
+    只在数据根尚无该目录时搬进来一次。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("storage", "users")
+
+
+STORAGE_ROOT = _defaultStorageRoot()
 
 # BUG AUDIT S-15: 上传原先 await file.read() 全量读内存且无大小/类型限制，
 # 恶意/超大上传可打满内存与磁盘。改为分块流式落盘 + 大小上限 + 危险扩展名黑名单。
@@ -83,7 +95,18 @@ _files_store_lock = threading.Lock()
 # （不阻塞启动，元数据丢失可接受——上传件本体在 storage/ 仍有目录可扫）。
 # ---------------------------------------------------------------------------
 
-_FILES_DB_PATH = "data/users.db"
+def _defaultFilesDbPath() -> str:
+    """文件元数据库默认落点：数据根下的 `users.db`（绝对路径）。
+
+    原值 `"data/users.db"` 是 CWD 相对路径：换个工作目录，文件元数据就写到
+    另一个库里，界面上的"文件还在、元数据没了"由它而来。
+    """
+    from neurova.core.data_root import get_data_root
+
+    return str(get_data_root() / "users.db")
+
+
+_FILES_DB_PATH = _defaultFilesDbPath()
 
 _FILES_DDL = """
 CREATE TABLE IF NOT EXISTS files (
@@ -104,10 +127,9 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
     """写穿单条文件元数据到 files 表（失败仅告警，不影响主流程）。"""
     try:
         Path(_files_db_path(db_path)).parent.mkdir(parents=True, exist_ok=True)
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(_files_db_path(db_path))
-        try:
+        with short_transaction(_files_db_path(db_path)) as conn:
             conn.execute(_FILES_DDL)
             conn.execute(
                 "INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -126,9 +148,6 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
                     info.get("updated_at", 0),
                 ),
             )
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001 - 持久化失败降级为内存态
         logger.warning("files 元数据写穿失败（降级内存态）: %s", e)
 
@@ -136,14 +155,10 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
 def delete_file_record(file_id: str, db_path: Optional[str] = None) -> None:
     """从 files 表删除单条元数据（失败仅告警）。"""
     try:
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(_files_db_path(db_path))
-        try:
+        with short_transaction(_files_db_path(db_path)) as conn:
             conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001
         logger.warning("files 元数据删除失败: %s", e)
 
@@ -158,11 +173,10 @@ def hydrate_files_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, An
     if not Path(db).exists():
         return loaded
     try:
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(db)
-        try:
-            conn.row_factory = sqlite3.Row
+        # 连接从池借出：池连接 row_factory 已为 sqlite3.Row，无需重复设置
+        with short_transaction(db) as conn:
             rows = conn.execute("SELECT * FROM files").fetchall()
             for row in rows:
                 rec = dict(row)
@@ -172,9 +186,6 @@ def hydrate_files_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, An
                     continue
                 loaded[rec["file_id"]] = rec
                 _files_store[rec["file_id"]] = rec
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001 - 坏库不阻塞启动
         logger.warning("files 元数据水合失败（空库降级）: %s", e)
         return {}
@@ -411,6 +422,30 @@ async def preview_file(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
     return FileResponse(str(file_path), media_type=info.get("mime_type", "application/octet-stream"))
+
+
+@router.get("/{file_id}/content")
+async def get_file_content(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """以 UTF-8 文本返回文件内容（前端「预览文本文件」入口）。
+
+    此前只有 `/preview` 与 `/download`，两者都以 `FileResponse` 回**原始字节**；
+    前端 `files.getFileContent` 发 `GET /api/v1/files/{id}/content`，该路由从未注册
+    —— FilePage / AgentFilePage 的文本预览实测恒 404，被 catch 吞成「加载失败」。
+    文本读取失败（二进制/编码不符）显式 415，不悄悄回空串。
+    """
+    info = _get_owned_file(file_id, current_user)
+    file_path = Path(info["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=415, detail="文件不是 UTF-8 文本，无法按文本预览")
+    return {"file_id": file_id, "filename": info.get("filename", ""),
+            "mime_type": info.get("mime_type", ""), "content": text}
 
 
 @router.get("/{file_id}/download")
