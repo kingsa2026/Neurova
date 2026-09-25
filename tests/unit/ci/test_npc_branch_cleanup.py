@@ -60,6 +60,49 @@ def _criterion_section(text: str) -> str:
     return "\n".join(lines[start:end])
 
 
+#: 登记「某条分支」的表，其表头必须带这个词。口径由**表头**给出 ——
+#: 不认分支名的形状（有没有 `auto/` 前缀、有没有斜杠都不作判据），
+#: 因为名字是平台的产物、不是事实（见 `classifyBranches` 的口径说明）。
+REGISTRATION_TABLE_HEADER_KEY = "分支"
+_TABLE_DELIMITER_CELL = re.compile(r"^:?-{2,}:?$")
+
+
+def _branch_registration_rows(ledger: Path):
+    """台账里「分支登记表」的数据行，逐条给出 `(行号, 原文)`。
+
+    认定由**表格结构**给出，不由分支名的形状给出：
+
+    1. 找出表头（Markdown 表格的第一行）含 `REGISTRATION_TABLE_HEADER_KEY` 的表；
+    2. 跳过紧随其后的分隔行（`|---|---|` 形态）；
+    3. 其余数据行即登记行。
+
+    早先实现按 `auto/` 前缀找登记行 —— 与判定口径**同一个根因**：拿名字当事实。
+    于是台账里一条不带该前缀的分支（实测形态 `fix-caliber-generated`，本仓真实
+    存在过的 NPC 分支名）写在「分支 / 处置」表里却不被判据看见，写"在途"也不红。
+
+    不越界：表头不含该词的表（读数表、对照表）与正文散文一概不返回 ——
+    判据要拦的是「一张"当前保留"的表/清单」，不是叙述历史的散文。
+    """
+    lines = io.open(ledger, encoding="utf-8").read().splitlines()
+    rows = []
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped.startswith("|") or REGISTRATION_TABLE_HEADER_KEY not in stripped:
+            index += 1
+            continue
+        index += 1
+        # 分隔行：Markdown 表格必须的一行，判定它是"分隔"而不是数据
+        if index < len(lines):
+            cells = [c.strip() for c in lines[index].strip().strip("|").split("|")]
+            if cells and all(_TABLE_DELIMITER_CELL.match(c) for c in cells if c):
+                index += 1
+        while index < len(lines) and lines[index].strip().startswith("|"):
+            rows.append((index + 1, lines[index].strip()))
+            index += 1
+    return rows
+
+
 def _criterion_items(section: str) -> str:
     """从「判定口径」节里只取**编号条目**（`1. ` / `2. ` …）的正文。
 
@@ -309,18 +352,10 @@ class TestLedgerIsReadableInRepo:
         把散文也算进来，只会训练人删掉解释、留下表格。
         """
         dispositions = ("已删", "已合入", "已归档")
-        #: 只认**具体的分支全名**（`auto/` + 名字）。口径说明里的裸 `auto/` 是命名空间，
-        #: 不是某条分支的登记行 —— 拿前缀本身匹配会把 §1 的判定口径也报成违规。
-        branchNames = re.compile(re.escape(cleanup.NPC_BRANCH_PREFIX) + r"[A-Za-z0-9][\w.\-]*")
         offenders = []
-        for lineno, line in enumerate(io.open(LEDGER, encoding="utf-8").read().splitlines(), 1):
-            stripped = line.strip()
-            if not (stripped.startswith("|") or stripped.startswith("- ")):
-                continue
-            if not branchNames.search(stripped):
-                continue
-            if not any(mark in stripped for mark in dispositions):
-                offenders.append(f"第 {lineno} 行：{stripped[:110]}")
+        for lineno, line in _branch_registration_rows(LEDGER):
+            if not any(mark in line for mark in dispositions):
+                offenders.append(f"第 {lineno} 行：{line[:110]}")
         assert not offenders, (
             "台账登记了分支的**当前状态**而非**已发生的处置**（这类行会随远端变化立刻过期，"
             "且台账没有刷新机制）：\n  " + "\n  ".join(offenders)
@@ -354,6 +389,56 @@ class TestLedgerIsReadableInRepo:
         )
         monkeypatch.setattr(
             sys.modules[__name__], "LEDGER", good)
+        sys.modules[__name__].TestLedgerIsReadableInRepo() \
+            .test_ledger_records_dispositions_not_live_branch_state()
+
+    def test_branch_registration_rows_are_found_structurally(self, tmp_path, monkeypatch):
+        """登记行由**表格结构**认定，不由分支名里有没有斜杠认定。
+
+        ## 根因（与判定口径同一个）
+
+        上一条按 `auto/` 前缀找登记行 —— 那和 `classifyBranches` 原先按 `auto/`
+        认分支是**同一个根因**：拿名字当事实。于是台账里若出现一条不带前缀的分支
+        （实测形态：`fix-caliber-generated`，是本仓真实存在过的 NPC 分支名），
+        它写在「分支 / 处置」表里却**不被判据看见** —— 写「未合并进主线，在途」
+        这类当下状态也不会红。
+
+        口径改为：先按 Markdown 表格结构找出表头含「分支」的表，再逐行检查数据行。
+        登记行的身份由它**在哪张表里**给出，不由它叫什么给出。
+
+        反向控制：既校验漏判形态（无前缀名字也须被扫到），也校验不越界
+        （无关表格与散文不得被判）。
+        """
+        ledger = tmp_path / "ledger.md"
+        ledger.write_text(
+            "# 台账\n\n"
+            "## 一、判定口径\n\n两个 git 事实同时成立才算 stale。\n\n"
+            "| 分支 | 对应合并请求 | 处置 |\n|------|------|------|\n"
+            "| `fix-caliber-generated` | #217 | 未合并进主线，在途 |\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys.modules[__name__], "LEDGER", ledger)
+        with pytest.raises(AssertionError, match="fix-caliber-generated"):
+            sys.modules[__name__].TestLedgerIsReadableInRepo() \
+                .test_ledger_records_dispositions_not_live_branch_state()
+
+        # 正向：同一张表里写已完成处置 ⇒ 绿
+        ledger.write_text(
+            "# 台账\n\n"
+            "| 分支 | 对应合并请求 | 处置 |\n|------|------|------|\n"
+            "| `fix-caliber-generated` | #217 | 已删 |\n",
+            encoding="utf-8",
+        )
+        sys.modules[__name__].TestLedgerIsReadableInRepo() \
+            .test_ledger_records_dispositions_not_live_branch_state()
+
+        # 不越界：表头不含「分支」的表不得被当登记表（否则会误伤读数表）
+        ledger.write_text(
+            "# 台账\n\n"
+            "| 读数 | 值 |\n|------|------|\n"
+            "| 应当删除 | 0 条，在途 0 |\n",
+            encoding="utf-8",
+        )
         sys.modules[__name__].TestLedgerIsReadableInRepo() \
             .test_ledger_records_dispositions_not_live_branch_state()
 
