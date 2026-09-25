@@ -9,7 +9,6 @@ vi.mock('@/api/modules/health', () => ({
   getHealthReport: vi.fn(),
   recoverSubsystem: vi.fn(),
   getHealthStatus: vi.fn(),
-  getSystemMetrics: vi.fn(),
 }))
 
 // Mock ant-design-vue message to avoid DOM side effects

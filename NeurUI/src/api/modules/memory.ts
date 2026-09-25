@@ -508,11 +508,6 @@ export function deleteMemory(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
 }
 
-/** Search memories with semantic similarity. */
-export function searchMemories(agentId: string, query: string, params?: { limit?: number; type?: string }) {
-  return api.post<ApiResponse<MemorySearchResult[]>>(`${BASE}/search`, { agent_id: agentId, query, ...params })
-}
-
 /** Get memory statistics. */
 export function getMemoryStats(agentId: string) {
   return api.get<ApiResponse<MemoryStats>>(`${BASE}/stats`, { params: { agent_id: agentId } })

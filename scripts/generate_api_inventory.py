@@ -55,6 +55,15 @@ SOURCE_ROOTS = ("neurova", "scripts", "tools", "examples")
 WIRING_BASELINE = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
 WIRING_VERDICTS = ("已接线", "已删除", "待实现")
 
+#: 前端调用 ↔ 后端注册 差异的**裁决台账**（行格式 `模块 | 方法 | 路径 | 裁决 | 依据`）。
+#: 裁决是有限枚举，与未挂载台账同纪律——差异表只回答「有哪些差异」，
+#: 裁决表才回答「每条的结论是什么、办了没有」：
+#:   已修   ― 该调用现在命中真实路由表（改指正确契约或补齐后端端点）；
+#:   已退役 ― 该前端调用无任何非测试消费点，属幻影契约，连同函数一起删净；
+#:   待接线 ― 保留待办，须写明依据与承接方（不得留空）。
+FRONT_CONTRACT_BASELINE = PROJECT_ROOT / "tests" / "unit" / "frontContractBaseline.txt"
+FRONT_CONTRACT_VERDICTS = ("已修", "已退役", "待接线")
+
 #: 清单正文里机器区的边界标记（人写说明在标记之外，生成器只碰标记之内）
 BLOCK_BEGIN = "<!-- API-INVENTORY:BEGIN -->"
 BLOCK_END = "<!-- API-INVENTORY:END -->"
@@ -518,6 +527,155 @@ def readWiringBaseline() -> set:
     return {module for module, verdict, _reason in _wiringRows() if verdict == "待实现"}
 
 
+def _frontContractRows() -> list:
+    """前端契约裁决台账逐行 `((模块, 方法, 路径), 裁决, 依据)`。
+
+    单一取数口径：`readFrontCallAdjudications()` 与本函数同源，不再各自解析一遍台账。
+    `#` 起为注释、空行忽略；缺列的行按约定跳过（缺裁决的行无法参与机器判定）。
+    """
+    if not FRONT_CONTRACT_BASELINE.is_file():
+        return []
+    rows = []
+    for line in io.open(FRONT_CONTRACT_BASELINE, encoding="utf-8"):
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
+            continue
+        cells = [cell.strip() for cell in stripped.split("|")]
+        if len(cells) < 5:
+            continue
+        rows.append(((cells[0], cells[1], cells[2]), cells[3], cells[4]))
+    return rows
+
+
+def readFrontCallAdjudications() -> dict:
+    """前端契约差异的**裁决表**：`{(模块, 方法, 路径): {"verdict", "reason"}}`。
+
+    为什么差异表还不够：它把 28 处差异写成「由人去核」——于是同一张表可以被反复
+    登记、永不收敛（与上一单「未挂载名单只列名字」同型）。差异表回答「有哪些差异」，
+    裁决表才回答「每条的结论是什么、办了没有」。裁决是有限枚举，故可机器判定。
+    """
+    return {key: {"verdict": verdict, "reason": reason}
+            for key, verdict, reason in _frontContractRows()}
+
+
+#: 消费者判定要排除的路径段：测试、模块自引用、i18n 文案。
+#: i18n 必须排除——翻译键与导出函数同名是常态（`importComfyuiWorkflow: '导入…'`），
+#: 把它算成消费者会把整批幻影契约读成「有 12 处消费」，口径直接失效。
+_CONSUMER_EXCLUDED = ("__tests__", "/api/modules/", "/i18n/")
+
+
+def _isOwnDefinition(line: str, exported: str) -> bool:
+    """该行是不是函数自己的定义行（`export function <name>(`）。"""
+    return bool(re.search(r"export\s+(?:async\s+)?function\s+" + re.escape(exported) + r"\b", line))
+
+
+def _isTranslationKeyReference(line: str, exported: str) -> bool:
+    """该行是不是**翻译键**引用（`t('ui.importComfyuiWorkflow')` 这类），不是调用点。
+
+    翻译文案与导出函数同名是常态；只按词边界计数会把 `t('ui.<name>')` 当成消费者，
+    整批幻影契约被读成「有活跃消费者」，口径失效。判据是「名字出现在
+    字符串字面量里」——真调用点（`apiModules.<name>(`、`<name>(`、`import { <name> }`）
+    不会把名字包进引号。
+    """
+    for literal in re.findall(r"'([^']*)'|\"([^\"]*)\"", line):
+        for text in literal:
+            if text and exported in text:
+                return True
+    return False
+
+
+def _nonTestConsumers(exported: str) -> int:
+    """前端导出名的非测试消费点数（测试、模块自引用、i18n 文案均不计）。
+
+    判定「有无活跃消费者」只认这一处口径：调用点落在页面/组件/组合式函数里
+    才算消费者；只在自己的模块里被定义、只被测试或翻译键引用的，是幻影契约。
+    """
+    if not exported:
+        return 0
+    import subprocess
+    pattern = r"\b" + re.escape(exported) + r"\b"
+    found = subprocess.run(
+        ["grep", "-rEn", pattern, "NeurUI/src", "--include=*.vue", "--include=*.ts"],
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True).stdout
+    return sum(1 for line in found.splitlines()
+               if not any(part in line for part in _CONSUMER_EXCLUDED)
+               and not _isOwnDefinition(line, exported)
+               and not _isTranslationKeyReference(line, exported))
+
+
+def frontCallExports() -> dict:
+    """每条前端调用的**导出名归属**：`(模块, 方法, 路径) → 导出的函数名`。
+
+    取数靠**同一份文本上的位置对齐**：先扫出所有 `export function <name>` 的位置，
+    再对每个 `api.<verb>(...)` 调用点，取它之前最近的那个导出名为归属——
+    不另做一套「按行号查」的平行解析。取不到名字的调用点（顶层裸调用）
+    返回空串：空串既不冒充消费者，也不会把无名调用误判成幻影。
+    """
+    attribution = {}
+    for relative in frontendClientFiles():
+        text = io.open(PROJECT_ROOT / relative, encoding="utf-8", errors="replace").read()
+        constants = dict(BASE_CONST_PATTERN.findall(text))
+        base = clientBaseUrl(text)
+        owners = [(match.start(), match.group(1))
+                  for match in re.finditer(
+                      r"export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", text)]
+        for match in REQUEST_CALL_PATTERN.finditer(text):
+            method = HTTP_METHODS.get(match.group(1))
+            if not method:
+                continue
+            argument = callArgument(text, match.end(1))
+            if not argument:
+                continue
+            raw = resolveCallPath(argument[0], argument[1], constants)
+            if not raw.startswith("/"):
+                continue
+            owner = ""
+            for offset, name in owners:
+                if offset <= match.start():
+                    owner = name
+                else:
+                    break
+            key = (frontendModuleName(relative), method, joinApiPath(base, raw))
+            attribution[key] = owner
+    return attribution
+
+
+def phantomFrontCalls() -> list:
+    """无真实后端路由、且前端导出名**无任何非测试消费点**的调用（幻影契约）。
+
+    这类调用答不出「谁在用它」：既没有后端接收，也没有页面触发，只在自己的模块
+    里活着。它们在差异表里与「有活跃消费者但后端缺端点」的长得一样，
+    却是**两种不同的断链**——前者该删净，后者该补端点。
+    """
+    attribution = frontCallExports()
+    rows = []
+    for row in unmatchedFrontCallRows():
+        key = (row["module"], row["method"], row["path"])
+        exported = attribution.get(key, "")
+        if exported and _nonTestConsumers(exported) == 0:
+            rows.append({**row, "exported": exported})
+    return sorted(rows, key=lambda item: (item["module"], item["path"], item["method"]))
+
+
+def liveConsumerContractBreaks() -> list:
+    """有活跃非测试消费者、却仍无真实后端路由的调用（用户操作必失败的那一类）。
+
+    与 `phantomFrontCalls()` 互斥且互补：两者并集 == 差异表里所有「导出名可判定」
+    的条目。判据只写一份消费者口径（`_nonTestConsumers`），不在这里另写一套。
+    """
+    attribution = frontCallExports()
+    rows = []
+    for row in unmatchedFrontCallRows():
+        key = (row["module"], row["method"], row["path"])
+        exported = attribution.get(key, "")
+        if not exported:
+            continue
+        consumers = _nonTestConsumers(exported)
+        if consumers > 0:
+            rows.append({**row, "exported": exported, "consumers": consumers})
+    return sorted(rows, key=lambda item: (item["module"], item["path"], item["method"]))
+
+
 def definesRoutes(tree) -> bool:
     """该模块是否声明了路由（装饰器形态），不依赖 import 副作用。"""
     for node in ast.walk(tree):
@@ -720,7 +878,8 @@ def unmatchedFrontCallLines() -> list:
     if rows:
         lines += [
             "下列 **" + str(len(rows)) + "** 处调用在本轮后端注册表里没有对应路由。"
-            "这不等于「后端漏注册」——差异以显式列表暴露，由人去核：",
+            "这不等于「后端漏注册」——差异以显式列表暴露，**逐条裁决见 "
+            "`tests/unit/frontContractBaseline.txt`**（已修 / 已退役 / 待接线 三态，可机器判定办没办）：",
             "",
             "| 模块 | 方法 | 调用路径 | 差异形态 |",
             "|------|------|------|------|",

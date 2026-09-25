@@ -110,11 +110,6 @@
         <a-spin :spinning="loadingTools">
           <a-table :columns="toolColumns" :data-source="publicTools" row-key="id" :pagination="{ pageSize: 15 }" size="small">
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'actions'">
-                <GlassButton variant="ghost" size="sm" @click="installTool(record)">
-                  {{ t('skill.install') }}
-                </GlassButton>
-              </template>
             </template>
           </a-table>
         </a-spin>
@@ -189,7 +184,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import {
-  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, authorizeMCPOAuth, installTool as installToolApi, executeTool as executeToolApi,
+  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, authorizeMCPOAuth, executeTool as executeToolApi,
   listMCPCatalog, installMCPCatalogEntry,
   type MCPServer, type Tool, type MCPCatalogEntry,
 } from '@/api/modules/tool-layers'
@@ -311,16 +306,6 @@ const executeTool = (tool: any) => {
   toolParams.value = '{}'
   execResult.value = ''
   showExecute.value = true
-}
-
-const installTool = async (tool: any) => {
-  try {
-    await installToolApi(tool.id)
-    message.success(t('common.success'))
-    await fetchTools()
-  } catch {
-    message.error(t('common.error'))
-  }
 }
 
 const runTool = async () => {
