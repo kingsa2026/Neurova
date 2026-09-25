@@ -650,6 +650,11 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
         _prom.observe_context_pools()
         # 工单 010/006：链路完整性读数（漏采计数 / 同名覆盖计数）此前只写不读
         _prom.observe_chain_integrity()
+        # Issue #90 · T-10d：上下文域健康读数（ledger/summarizer/fold_integrity/
+        # turn_identity/microcompact/tool_turns）。此前 `get_context_health()`
+        # 在生产代码里**零读者**（只在测试与 manual 脚本里被读）——"写了但没人读"
+        # 正是协作红线点名的断点形态，此处接上既有观测面（不新开端点）。
+        _prom.observe_context_health(_app_state)
 
         headers = {k: v for k, v in request.headers.items()}
         allowed, reason = check_metrics_access(
