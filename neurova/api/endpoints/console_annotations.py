@@ -1,4 +1,8 @@
-"""Console annotation endpoints and compatibility-exported request models."""
+"""精准回复命中表（`/annotations*`）端点与请求模型。
+
+归属：知识域（Issue #68 收口）——此前挂在 `/v1/console` 下，而唯一消费者是
+知识域的 `KnowledgePage` → `AnnotationDrawer`。现由 `knowledge.py` 聚合器 include。
+"""
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,13 +13,13 @@ router = APIRouter()
 
 
 class AnnotationCreateRequest(BaseModel):
-    __module__ = "neurova.api.endpoints.console"
+    __module__ = "neurova.api.endpoints.console_annotations"
     question: str
     answer: str
 
 
 class AnnotationUpdateRequest(BaseModel):
-    __module__ = "neurova.api.endpoints.console"
+    __module__ = "neurova.api.endpoints.console_annotations"
     answer: Optional[str] = None
     enabled: Optional[bool] = None
 

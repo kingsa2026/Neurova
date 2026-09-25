@@ -7,7 +7,7 @@
  *   解包 data.results，后端无 type 参数 → 前端本地过滤。
  *
  * 契约：
- *   1. 调 enhancedSearch（不再调 searchMemories）
+ *   1. 调 enhancedSearch（断链的 searchMemories 已删净，Issue #68 收口）
  *   2. 响应 data.results 元素 {memory_id|id, content, score, channel|type, created_at}
  *      映射为 MemorySearchResult
  *   3. type 过滤在前端生效
@@ -25,9 +25,8 @@ vi.mock('@/composables/useAgentPage', () => ({
   useAgentPage: () => ({ agentId: { value: 'default' } }),
 }))
 
-const { enhancedSearchMock, searchMemoriesMock } = vi.hoisted(() => ({
+const { enhancedSearchMock } = vi.hoisted(() => ({
   enhancedSearchMock: vi.fn(),
-  searchMemoriesMock: vi.fn(),
 }))
 
 vi.mock('@/api/modules/memory', async (importOriginal) => {
@@ -35,7 +34,6 @@ vi.mock('@/api/modules/memory', async (importOriginal) => {
   return {
     ...actual,
     enhancedSearch: enhancedSearchMock,
-    searchMemories: searchMemoriesMock,
   }
 })
 
@@ -57,7 +55,6 @@ import * as memoryApiModule from '@/api/modules/memory'
 
 const memoryApi = {
   enhancedSearch: memoryApiModule.enhancedSearch as unknown as ReturnType<typeof vi.fn>,
-  searchMemories: memoryApiModule.searchMemories as unknown as ReturnType<typeof vi.fn>,
 }
 
 const i18n = createI18n({
@@ -76,7 +73,7 @@ describe('MemoryPage performSemanticSearch（断链修复）', () => {
     vi.clearAllMocks()
   })
 
-  it('calls enhancedSearch instead of broken searchMemories', async () => {
+  it('calls enhancedSearch for semantic search', async () => {
     enhancedSearchMock.mockResolvedValue({
       code: 0,
       data: {
@@ -102,7 +99,8 @@ describe('MemoryPage performSemanticSearch（断链修复）', () => {
     await flushPromises()
 
     expect(memoryApi.enhancedSearch).toHaveBeenCalledWith('hello', { top_k: 20 })
-    expect(memoryApi.searchMemories).not.toHaveBeenCalled()
+    // 断链的 searchMemories 已随 Issue #68 收口删净（后端无 POST /memory/search），
+    // 故此处不再断言「未被调用」——函数已不存在，正向契约由上一行保证。
     const results = (wrapper.vm as any).searchResults
     expect(results).toHaveLength(1)
     expect(results[0]).toMatchObject({ id: 'm1', content: 'hello memory', type: 'semantic' })

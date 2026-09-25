@@ -21,14 +21,6 @@ export interface Plugin {
   updated_at?: string
 }
 
-export interface PluginCreatePayload {
-  name: string
-  description?: string
-  version?: string
-  category?: string
-  config?: Record<string, unknown>
-}
-
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -45,34 +37,9 @@ export function getPlugin(id: string) {
   return api.get<ApiResponse<Plugin>>(`${BASE}/${id}`)
 }
 
-/** Create/register a new plugin. */
-export function createPlugin(data: PluginCreatePayload) {
-  return api.post<ApiResponse<Plugin>>(BASE, data)
-}
-
-/** Update a plugin. */
-export function updatePlugin(id: string, data: Partial<PluginCreatePayload>) {
-  return api.put<ApiResponse<Plugin>>(`${BASE}/${id}`, data)
-}
-
-/** Delete/uninstall a plugin. */
-export function deletePlugin(id: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
-}
-
-/** Discover available plugins (not yet installed). */
-export function discoverPlugins(params?: PageParams & { search?: string; category?: string }) {
-  return api.get<ApiResponse<PaginatedData<Plugin>>>(`${BASE}/discover`, { params })
-}
-
 /** Install a discovered plugin. */
 export function installPlugin(id: string) {
   return api.post<ApiResponse<Plugin>>(`${BASE}/${id}/install`)
-}
-
-/** Uninstall a plugin (remove files, keep config). */
-export function uninstallPlugin(id: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${id}/uninstall`)
 }
 
 /** Load a plugin into memory. */
