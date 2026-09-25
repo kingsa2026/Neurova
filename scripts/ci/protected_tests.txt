@@ -589,6 +589,17 @@ tests/unit/context/test_view_tool_addressing.py
 #    以及两个事实仍由有真实消费者的 `/context/composition` 提供。）
 tests/unit/api/test_context_budget_face_retirement.py
 
+# Issue #90 B6-10（批次 E）：门面层退场裁定。
+#   （根因：`context/context_facade.py` 是编排器的**第二份装配路径**——零非测试
+#    消费者，工厂 `get_context_facade()` 零消费，且它 `await` 一个**同步**方法
+#    （`orchestrator.build_system_prompt` 是 `def`）→ 实测 `object str can't be
+#    used in 'await' expression` 被 `except` 吞成恒空串返回，无人察觉。
+#    裁定「删门面、保工具方法」：那是**两级**却**结局不同**——门面自诞生即坏，
+#    工具方法跑得通并有 8 个测试文件锁着它的契约腿。台账 `build_system_prompt`
+#    行判据类如实由 self_loop 转 no_consumer（门面是它唯一的 call 点），
+#    处置保持「待处置」——不给零消费编造可达性。）
+tests/unit/context/test_context_facade_retirement.py
+
 # 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
 #   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
 #    `hasattr(store, "encode_batch")` 恒假，"批量打分"在 store 层从未接上；
