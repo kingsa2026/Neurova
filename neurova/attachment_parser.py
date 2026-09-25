@@ -20,6 +20,19 @@ from typing import Optional, Tuple
 
 MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
+#: 文本抽取通道结构上打不开的原始二进制容器（不是"解析失败"，是"不该走这条通道"）。
+#: 它们各自有**专用**原语（查表 `_RAW_CONTAINER_PRIMITIVES`），抽取通道不碰。
+_RAW_BINARY_EXTENSIONS = frozenset({".db", ".sqlite", ".sqlite3", ".db3"})
+
+#: 原始二进制容器 → 专用读取原语的**单源**表（名字取自 `builtin_tools` 注册清单）。
+#: 表里没有的容器 = 当前真无原语，调用方必须如实说"没有"，不得编名字（T-02 判据）。
+_RAW_CONTAINER_PRIMITIVES = {
+    ".db": "query_database",
+    ".sqlite": "query_database",
+    ".sqlite3": "query_database",
+    ".db3": "query_database",
+}
+
 
 def _decode_text(data: bytes, filename: str) -> Optional[str]:
     text = None
@@ -98,6 +111,38 @@ def _extract_pdf(data: bytes) -> str:
         if page_text.strip():
             parts.append(page_text)
     return "\n".join(parts)[:MAX_EXTRACT_CHARS]
+
+
+#: 各分类下"真能把这类附件读出内容"的注册原语名（单源建议表）。
+#: 键是文件**分类**，值取自 `builtin_tools.get_registered_tool_names()` 的真实名字；
+#: 表里没有该分类即表示"当前无可用抽取原语"——此时调用方必须如实说没有，
+#: 不得编一个名字充当路标（假路标会让模型拿读不到该附件的工具去试）。
+#: 本表**不含任何按路径读取的原语**：附件取用凭证只有 `file_id`（D1）。
+_EXTRACTION_PRIMITIVES = {
+    "document": "file_parse",
+}
+
+
+def suggestExtractionPrimitive(filename: str, file_type: str) -> Optional[str]:
+    """给出"哪条注册原语可能读得出这个附件"，没有就返回 None（不编名字）。
+
+    只做分类到原语的映射，不猜内容：`filename` 参与分类是为了让
+    `.db` / `.sqlite` 这类"扩展名即能力边界"的附件走 `None`，
+    而不是被 `file_type=file` 笼统盖住。
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    from neurova.builtin_tools import get_registered_tool_names
+
+    registered = get_registered_tool_names()
+    if ext in _RAW_BINARY_EXTENSIONS:
+        # 原始二进制容器走专用原语（SQLite → query_database）；专用表里没有
+        # 就直接返回 None —— 仍是"如实说没有"，不回落通用抽取通道（它对容器无效）。
+        container = _RAW_CONTAINER_PRIMITIVES.get(ext)
+        return container if container in registered else None
+    primitive = _EXTRACTION_PRIMITIVES.get(file_type)
+    if primitive is None:
+        return None
+    return primitive if primitive in registered else None
 
 
 def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple[Optional[str], str]:

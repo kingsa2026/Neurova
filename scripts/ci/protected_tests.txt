@@ -742,3 +742,27 @@ tests/unit/evolution/test_synth_tool_name_carries_identity.py
 tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
+
+# 能力缺口自主闭环批（Issue #197）四票的判据落点（全部逐文件单跑确定全绿）：
+#   T-01 诊断回环：工具失败正文必须携带 stderr/exit_code，禁止只剩兜底串；
+#   T-02 句柄可见：附件抽取失败必须携带 file_id/status 且留痕（截图类断言防路径泄露）；
+#   T-03 缺口驱动：自主造能力的入口改挂能力缺口，不再看用户措辞关键词；
+#   T-04 字母表去幻：合成序列 ⊆ 真实注册名，未知分类转人工复核，名字唯一性。
+tests/unit/agent/test_tool_failure_diagnostics.py
+tests/unit/agent/test_attachment_handle_injection.py
+tests/unit/agent/test_capability_gap_trigger.py
+tests/unit/evolution/test_synthesis_alphabet_registered.py
+
+# 技能注入扫描守卫（P1-6）：NL 合成产物注册前必须过扫描，且正例要真走到注册出口。
+#   T-03 把 `_check_nl_synthesis` 的入口判据换成能力缺口后，本文件两例都在入口早退
+#   （正例看起来红、反例看起来绿，判据从未咬合）——它此前不在子集里，CI 看不见。
+tests/unit/security/test_p1_6_skill_guard.py
+
+# T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
+#   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
+tests/unit/tools/test_query_database.py
+
+# 市场未命中 → 自主合成的回退必须真能走到入口（T-03 改判据后一度成死路）：
+# 既有六例都打方法替身，只证明"调用发出去了"；本文件不走 mock 驱动真入口，
+# 缺口信号须由"市场未命中"这个生产点就地投递。
+tests/unit/agent/test_skill_acquisition_fallback.py
