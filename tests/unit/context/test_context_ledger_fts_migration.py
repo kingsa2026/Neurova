@@ -27,7 +27,7 @@ import pytest
 
 from neurova.context import eviction_ledger_db as ledgerModule
 from neurova.context.eviction_ledger_db import EvictionLedgerDB
-from neurova.core.db_migration import migrate
+from neurova.core.db_migration import latest_version, migrate
 
 LEDGER_DOMAIN = "context_ledger"
 FTS_TABLE = "evicted_fts"
@@ -130,7 +130,7 @@ class TestV2RebuildsTokenizer:
 
         EvictionLedgerDB(db_path=path, user_id="u1", agent_id="a1")
 
-        assert _userVersion(path) == 2
+        assert _userVersion(path) == latest_version(ledgerModule.LEDGER_DOMAIN)
         assert "trigram" in _ftsSql(path), "v2 之后 FTS 仍是 unicode61"
         assert _ftsSql(path, "evicted_fts_v2") is None, "影子表未清理（迁移留了半成品）"
 
@@ -288,7 +288,7 @@ class TestV2IdempotenceAndFailure:
 
         ledger = EvictionLedgerDB(db_path=path, user_id="u1", agent_id="a1")
         try:
-            assert _userVersion(path) == 2
+            assert _userVersion(path) == latest_version(ledgerModule.LEDGER_DOMAIN)
             assert "trigram" in _ftsSql(path)
             fts_rows = ledger._requireConn().execute(
                 "SELECT COUNT(*) AS c FROM evicted_fts"

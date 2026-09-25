@@ -28,9 +28,18 @@ class _FakeLedgerDB:
 
     def record(
         self, *, content, turn_id=None, session_id=None, source=None, metadata=None,
-        chat_scope=None, created_at=None,
+        chat_scope=None, created_at=None, item_hash=None,
     ):
-        self.rows.append({"content": content, "turn_id": turn_id, "source": source})
+        """替身承载**写入侧的完整契约**（与 `count()` 同理，不是可选方法）。
+
+        `item_hash` 是 T-11d 加的池指纹参数：写入咽喉会把条目指纹原样交给台账
+        （下钻的寻址键）。替身少一个形参 ⇒ 写入抛 `TypeError` ⇒ 池按"写失败"
+        如实计数并继续（fail-soft 但可见），于是"全部条目都在台账"这条判据
+        红在一个与它无关的签名漂移上。替身必须跟着契约长，判据才咬得住真东西。
+        """
+        self.rows.append(
+            {"content": content, "turn_id": turn_id, "source": source, "pool_hash": item_hash}
+        )
 
     def gc_stale(self):
         self.gc_calls += 1

@@ -41,6 +41,17 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             },
         },
     },
+    "recall_context_span": {
+        "description": "【分层摘要下钻】按上下文里那行『[早期对话摘要] …』尾部的 `covers_ref=fold:<层序>@<会话>` 引用，**确定性**取回该档摘要覆盖的全部原文。与 recall_history 的区别：recall_history 按关键词模糊召回（可能召回不到）、且按指针（call=）直取工具结果；本工具按摘要自带的分层索引直取被折叠的对话原文，不受相关性门槛影响。【何时不用】摘要行上没有 covers_ref 时不要调用（旧摘要无引用）；要搜某个词而非某一段区间时用 recall_history；跨会话长期记忆用 memory_search。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "covers_ref": {"type": "string", "description": "摘要行尾部的引用串（如 covers_ref=fold:2@sess-A）；可直接整行粘贴，本工具自行解析"},
+                "limit": {"type": "integer", "description": "返回原文条数上限", "default": 200},
+            },
+            "required": ["covers_ref"],
+        },
+    },
     "memory_search": {
         "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。【何时不用】实时/外部信息改用 web_search；查本会话内被折叠的对话用 recall_history；查用户语音说过的话用 voice_memory_search。",
         "parameters": {
