@@ -206,19 +206,10 @@ describe('context API', () => {
     })
   })
 
-  it('getTokenBudget calls GET /context/token-budget', async () => {
-    await contextApi.getTokenBudget('agent1')
-    expect(mockGet).toHaveBeenCalledWith('/context/token-budget', {
-      params: { agent_id: 'agent1' },
-    })
-  })
-
-  it('setTokenBudget calls PUT /context/token-budget', async () => {
-    await contextApi.setTokenBudget('agent1', 32000)
-    expect(mockPut).toHaveBeenCalledWith('/context/token-budget', null, {
-      params: { agent_id: 'agent1', max_tokens: 32000 },
-    })
-  })
+  // 假预算面（context 模块的 token-budget 两条）已随 Issue #90 T-09 下架：
+  // 该面零非测试消费者，端点 + 包装 + 锁 URL 的用例三处同删。
+  // 它服务的两个事实由有真实消费者的 context/composition 承担
+  // （total_tokens = 本轮实测规模，context_window = 模型窗口）。
 })
 
 // ===========================================================================

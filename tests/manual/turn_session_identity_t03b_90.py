@@ -11,10 +11,13 @@
    （写盘全在系统临时目录，经唯一注入口 `NEUROVA_DATA_DIR`）；
 3. 真折叠路径（真 `window_compactor`，经 `build_context` 触发超预算折叠）。
 
-复现三条命中点（同一根因）：
+复现两条命中点（同一根因）：
   A 折叠摘要缓存键 —— 两个单聊会话不得共槽；
-  B 池归属 + 条目 metadata + 持久台账 session 列 —— 非协作轮不得写 None；
-  C 预算读数 `used_tokens` —— 必须取**本会话**的实测快照。
+  B 池归属 + 条目 metadata + 持久台账 session 列 —— 非协作轮不得写 None。
+（原 C 段钉的是 `get_token_budget()["used_tokens"]` 的会话归属。该读写面已随
+Issue #90 T-09 第 2 项下架——它的唯一消费方是无消费者的 HTTP 端点；同一事实
+由 `/context/composition` 的 `total_tokens` 承担，会话归属判据在
+`tests/unit/context/test_composition.py` 与 composition 端点用例内。）
 
 一条命令复现：PYTHONPATH=. python tests/manual/turn_session_identity_t03b_90.py
 """
@@ -137,26 +140,7 @@ def main() -> int:
     print(f"   持久台账行 session 列 = {row_sessions}")
     assert row_sessions == {"sess_ledger"}, f"台账会话列为 {row_sessions}"
 
-    print("C) 预算读数的 used_tokens 取本会话快照")
-    from neurova.context.composition import measure_composition
-
-    measure_composition(
-        agent_id="a1",
-        messages=[{"role": "user", "content": "z"}],
-        tools=None,
-        session_id="sess_ledger",
-    )
-    measure_composition(
-        agent_id="a1",
-        messages=[{"role": "user", "content": "y" * 8000}],
-        tools=None,
-        session_id="sess_other",
-    )
-    used = orch.get_token_budget()["used_tokens"]
-    print(f"   used_tokens = {used}（本会话真值 = 1，另一会话 = 2000）")
-    assert used == 1, f"预算读数取了别的会话的快照：{used}"
-
-    print("D) 无身份轮必须可见（计数 + 点名，不静默共槽）")
+    print("C) 无身份轮必须可见（计数 + 点名，不静默共槽）")
     set_turn_identity("继续", None, "u1")
     orch._resolve_window_cache_key()
     report = orch.get_context_health()["session_identity"]
@@ -166,7 +150,7 @@ def main() -> int:
         "无身份轮没有点名原因（教义第 2 条：不许静默）"
     )
 
-    print("E) 上限策略是最近使用（LRU），不是插入序")
+    print("D) 上限策略是最近使用（LRU），不是插入序")
     # 键数此前恒 1（身份取不到），上限无从触发；身份接通后槽数才真增长，
     # 故上限口径必须与接线同批验证：被反复引用的老会话不该因"建得早"先丢。
     def _lruHistory(label):
