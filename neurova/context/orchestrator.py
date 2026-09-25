@@ -101,6 +101,14 @@ class ContextOrchestrator:
     _last_folded_hashes: set = frozenset()
     _last_archived_window_hashes: set = frozenset()
 
+    #: B6-11（决策 D5）：记账在装配出口进行，故这两个容器在 `__new__` 直构路径
+    #: （测试/工具）也要能读 —— 缺默认值会让"进视图才记账"在那些路径上抛
+    #: AttributeError，等于判定被绕过。候选表只整体重绑（取类级空元组即可）；
+    #: 连击表要按 id 就地读写，故类级默认取 `None`（可变默认值会被直构路径
+    #: 共享并串改），由 `_reflectionMissStreaks()` 惰性补一份实例级 dict。
+    _turnReflectionCandidates: tuple = ()
+    _reflectionMissStreak: Optional[dict] = None
+
     #: 折叠分代的层数上限。**不设上限**（`None`），由负责人 2026-09-25 裁定删掉
     #: 原值 5（工单 §12.1：档数不设上限，轨迹越长档数自然增长）。
     #:
@@ -156,6 +164,10 @@ class ContextOrchestrator:
         self._fold_rollup_worker = None
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
+        # B6-11（决策 D5）：本轮选中的反思条目（记账在装配出口按**真视图**判定）+
+        # 逐条目的「连续未进视图」计数（进视图即清零，达阈值走既有降档）。
+        self._turnReflectionCandidates: list = []
+        self._reflectionMissStreak: dict = {}
         # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
         # 它在 _archive_conversation_to_pool 写入、在 context/fold_integrity.py
         # 读取（判据的唯一消费面），读数并进 get_context_health()["fold_integrity"]
@@ -256,6 +268,11 @@ class ContextOrchestrator:
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
+        - `reflection_injection`：反思「进视图才记账」的读数（B6-11 / 决策 D5）。
+          `selected` 是本轮选中的条数，`entered_view` 是真进了视图注入面的条数，
+          `missed` = 两者之差（"选中了但没到模型面前"必须可见，否则幻影注入
+          只是从 `applied` 挪到了看不见的地方）；`demoted` 是被降档兜底处置的
+          条数（连续 `VIEW_MISS_LIMIT` 轮未进视图，走既有 `register_negative_feedback`）。
         """
         return {
             "ledger": {"enabled": False, "attempts": 0, "last_error": None},
@@ -298,6 +315,13 @@ class ContextOrchestrator:
                 "last_kept": 0,
                 "last_payload_tokens": 0,
                 "last_trigger_tokens": 0,
+            },
+            "reflection_injection": {
+                "selected": 0,
+                "entered_view": 0,
+                "missed": 0,
+                "demoted": 0,
+                "last_error": None,
             },
             "tool_turns": {
                 "turns": 0,
@@ -1181,7 +1205,11 @@ class ContextOrchestrator:
                     }
                     for l in selected
                 ]
-                await mark_injected_logs(self.growth_log_manager, selected)
+                # D5（B6-11）：**不再在选中那一刻记账**。能否到模型面前要过池的
+                # 相关性门槛与信封压缩两层，账目记在这里就是幻影注入（实测：无关
+                # 输入下 status=applied、痕迹里有 id，而视图里一行 [反思] 都没有）。
+                # 候选项在此登记，记账统一落在装配出口 `_finishContext`。
+                self._turnReflectionCandidates = list(selected)
         except Exception as e:
             logger.debug("反思日志获取跳过: %s", e)
 
@@ -1515,7 +1543,7 @@ class ContextOrchestrator:
                 {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
             )
 
-            return context
+            return await self._finishContext(context)
 
         # 如果未启用 ContextPool，使用原有方法
         # 将所有上下文转换为 ContextInput 对象列表
@@ -1661,7 +1689,7 @@ class ContextOrchestrator:
                 else {"time": _build_time_block()}
             )
             fallback.append({"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input})
-            return fallback
+            return await self._finishContext(fallback)
 
         context = self.context_builder.build_from_pool(
             candidate_pool,
@@ -1682,7 +1710,88 @@ class ContextOrchestrator:
         except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
             logger.debug("tool-turn 修复跳过: %s", e)
 
+        return await self._finishContext(context)
+
+    async def _finishContext(self, context: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """装配出口的唯一收尾点（D5 / B6-11）：反思记账 + 降档兜底。
+
+        **为什么收在出口而不是各装配分支里**：三条分支（池 / 非池降级 / 非池
+        经 builder）各自 `return`，账目必须按**真发出去的视图**判——按分支各写
+        一份判定就是三份判据，改一处漏两处（修复教义第 6 条）。且分支内部
+        `draw` 之后还有一步 `compress_envelope` 确定性淘汰，只有出口能看见
+        最终落地形态。
+        """
+        try:
+            await self._accountReflectionInjection(context)
+        except Exception as exc:  # noqa: BLE001 - 记账故障不阻断上下文构建
+            readout = self._contextHealthSlot("reflection_injection")
+            readout["last_error"] = f"{type(exc).__name__}: {exc}"
+            logger.warning("反思进视图记账失败（已在读数点名）: %s", exc)
         return context
+
+    async def _accountReflectionInjection(self, context: List[Dict[str, Any]]) -> None:
+        """进视图才记账 + 未进视图降档兜底（D5 两条，单点实现）。
+
+        - **记账**：`applied` 与本轮痕迹（`core.turn_context` 的
+          `injected_reflections`，效力裁决的输入）只给真的出现在视图注入面里的
+          条目 —— 判据是 `context/reflection_view.enteredViewIds`（客观文本比对，
+          按 `parse_envelope` 解析信封块），不是"draw 取出了它"，也不是"选中了它"。
+        - **降档**：连续 `VIEW_MISS_LIMIT` 轮被选中却从未进视图的条目走**既有**
+          降档单一事实源 `GrowthLogManager.register_negative_feedback`（只降不删，
+          跌破阈值转 rejected）。不新建降档实现：第二份置信度账必然漂移。
+        """
+        from neurova.context.reflection_view import VIEW_MISS_LIMIT, enteredViewIds
+
+        candidates = list(getattr(self, "_turnReflectionCandidates", None) or [])
+        self._turnReflectionCandidates = []
+        readout = self._contextHealthSlot("reflection_injection")
+        readout["selected"] = len(candidates)
+        readout["missed"] = 0
+        readout["entered_view"] = 0
+        readout["last_error"] = None
+        if not candidates:
+            return
+
+        lessons = [(entry.id, self._reflectionLesson(entry)) for entry in candidates]
+        entered = enteredViewIds(context, lessons)
+        enteredCandidates = [entry for entry in candidates if entry.id in entered]
+        missedCandidates = [entry for entry in candidates if entry.id not in entered]
+
+        readout["entered_view"] = len(enteredCandidates)
+        readout["missed"] = len(missedCandidates)
+
+        # 复用既有的"标记并挂痕迹"单源（`mark_injected_logs`）——它只负责已被
+        # 确认进视图的那批，判定在 `enteredViewIds` 一处。**空集也要写**：痕迹的
+        # 语义是"本轮真进视图的反思 id"，不写就沿用上一轮的值，效力裁决会拿旧痕迹
+        # 去裁决一个从没注入过教训的轮次（实测：本轮 history 块被压缩整块淘汰后，
+        # 痕迹仍留着上一轮的 id）。
+        await mark_injected_logs(self.growth_log_manager, enteredCandidates)
+        # 降档：连击按条目累计，进视图即清零
+        streaks = self._reflectionMissStreaks()
+        for entry in enteredCandidates:
+            streaks.pop(entry.id, None)
+        for entry in missedCandidates:
+            streak = streaks.get(entry.id, 0) + 1
+            if streak >= VIEW_MISS_LIMIT:
+                streaks[entry.id] = 0
+                if self.growth_log_manager is not None:
+                    self.growth_log_manager.register_negative_feedback(entry.id)
+                    readout["demoted"] += 1
+            else:
+                streaks[entry.id] = streak
+
+    def _reflectionMissStreaks(self) -> dict:
+        """逐条目的「连续未进视图」计数表（实例级惰性补建，见类级声明处）。"""
+        streaks = getattr(self, "_reflectionMissStreak", None)
+        if not isinstance(streaks, dict):
+            streaks = self._reflectionMissStreak = {}
+        return streaks
+
+    @staticmethod
+    def _reflectionLesson(entry: Any) -> str:
+        """条目的教训正文（渲染侧同一个取法：`insights[0]` 优先，回落 content/title）。"""
+        insights = getattr(entry, "insights", None) or []
+        return str((insights[0] if insights else getattr(entry, "content", "")) or getattr(entry, "title", ""))
 
     @staticmethod
     def _windowChunkIdentity(message: Dict[str, Any]) -> tuple:
