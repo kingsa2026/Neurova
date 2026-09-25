@@ -4,8 +4,10 @@
 """
 
 import json
+import hashlib
 import re
 from collections import OrderedDict
+from neurova.core.data_root import dataLanding
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
 import threading
@@ -15,7 +17,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import fcntl  # type: ignore[import-not-found]  # Unix only
@@ -26,8 +28,54 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+#: 工具轮进模型上下文的回退开关（工单 §11.7 第 3 条）。默认开；`=0` 关闭时
+#: 视图回到 T-10b 之前的形状（只含 user/assistant），等式由判据钉住。
+_TOOL_TURN_VIEW_ENV = "NEUROVA_TOOL_TURN_VIEW"
+
+
+def toolTurnViewEnabled() -> bool:
+    """工具轮进模型上下文是否启用（默认启用，关闭是逃生动作）。"""
+    return (os.environ.get(_TOOL_TURN_VIEW_ENV, "1") or "1").strip() != "0"
+
 # 净化时标记"应丢弃"的哨兵值（与 None 区分——None 是合法 JSON 值）
 _JSON_DROP = object()
+
+
+class SessionOwnerConflict(ValueError):
+    """导入批次的属主与落盘会话已有属主冲突：拒绝整批，不改写既有归属。
+
+    一份会话文件的属主是读侧全部过滤（列表/改名/删除）赖以咬合的事实；导入侧
+    若能改写它，就等于把别人的历史认领成自己的，或把自己的推给别人——读侧在
+    错误的事实上做正确的事，防线等于没有。
+    """
+
+
+def _derive_imported_title(messages) -> str:
+    """导入会话的标题取首条用户消息（运行期占位是"新对话"，导入不该都长那样）。"""
+    for msg in messages:
+        if msg.get("role") == "user" and str(msg.get("content") or "").strip():
+            return str(msg["content"]).strip()[:50]
+    return "新对话"
+
+
+_STORE_KEY_SAFE = re.compile(r"^[0-9A-Za-z._@-]+$")
+
+
+def normalize_store_key(raw: str) -> str:
+    """外部会话标识归一：可安全落盘、且能被 session_*.json 的 glob 读回来。
+
+    实测 Windows 下名字里的冒号被 NTFS 当成数据流分隔符——文件写得出去、glob 看不见，
+    目录里只留一个 0 字节基名；斜杠与 ".." 能越出 agent 目录，方括号与星号破坏按 id
+    拼的 fnmatch 式查找。已合规的 id 原样返回，免得把运行期既有会话改到读不回来。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("session_id 不能为空")
+    if _STORE_KEY_SAFE.match(text) and ".." not in text:
+        return text
+    slug = re.sub(r"[^0-9A-Za-z._@-]+", "-", text).strip("-.")
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+    return f"{(slug or 'session')[:60]}-{digest}"
 
 
 def _json_safe(value: Any) -> Any:
@@ -152,9 +200,11 @@ class SessionManager(SessionRepository):
             self._initialized = True
             # NEUROVA_SESSIONS_DIR 环境变量供测试隔离（单例 __new__ 下
             # 构造参数只在首次生效，env 是唯一可靠覆盖通道）
-            self._sessions_dir = Path(
-                sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR") or "sessions"
-            )
+            # 会话存档落点：显式入参 > NEUROVA_SESSIONS_DIR > 数据根下的 sessions/。
+            # 原兜底是裸相对名 `"sessions"`——换个启动目录就读到另一份会话库。
+            explicit = sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR")
+            self._sessions_dir = (Path(explicit) if explicit
+                                  else dataLanding("sessions"))
             self._sessions_dir.mkdir(parents=True, exist_ok=True)
             # 2026-09-07 根因修复（audit SUB-P0-6）：文件锁改 RLock——
             # _quarantine_broken_file 在 add_message 等持锁路径内被调用且
@@ -200,12 +250,47 @@ class SessionManager(SessionRepository):
         return agent_dir
 
     def _get_session_file(self, agent_id: str, session_id: str, date: str = None) -> Path:
-        """获取session文件路径"""
+        """获取session文件路径（外部 id 先归一，老库源名兜底）。
+
+        归一在写侧只算一次；读侧（``_find_session_files``）再看源名，因为冒号在 POSIX
+        本是合法文件名，升级后若只认新名，频道历史就读丢了。
+        """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
         agent_dir = self._get_session_dir(agent_id)
-        return agent_dir / f"session_{session_id}_{date}.json"
+        raw = str(session_id)
+        key = normalize_store_key(raw)
+        target = agent_dir / f"session_{key}_{date}.json"
+        if key != raw:
+            legacy = agent_dir / f"session_{raw}_{date}.json"
+            if legacy.exists() and not target.exists():
+                return legacy
+        return target
+
+    def iter_session_files(self, agent_id: str) -> List[Path]:
+        """该 agent 的全部会话文件（存档除外）——给需要全文扫描的调用方用的公有入口。"""
+        agent_dir = self._get_session_dir(agent_id)
+        return sorted(agent_dir.glob("session_*.json"))
+
+    @staticmethod
+    def _find_session_files(agent_dir: Path, session_id: str) -> List[Path]:
+        """按会话号取全部日期文件——字面匹配，不走 glob 模式。
+
+        源 id 可能带 [ ] * ? 这些 fnmatch 元字符（按 id 拼模式会误配也漏配），而冒号在
+        Windows 根本不成其为文件名。归一名与源名都找，谁有结果用谁。
+        """
+        candidates = [normalize_store_key(str(session_id)), str(session_id)]
+        seen: List[Path] = []
+        by_name = {}
+        for path in sorted(agent_dir.glob("session_*.json")):
+            by_name.setdefault(path.name, path)
+        for candidate in dict.fromkeys(candidates):
+            prefix = f"session_{candidate}_"
+            for name, path in by_name.items():
+                if name.startswith(prefix) and path not in seen:
+                    seen.append(path)
+        return seen
 
     def _get_archived_dir(self, agent_id: str) -> Path:
         """获取agent的存档目录（sessions/{agent_id}/archived/）。
@@ -289,7 +374,7 @@ class SessionManager(SessionRepository):
         archived_dir = self._get_archived_dir(agent_id)
 
         moved = 0
-        for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(agent_dir, session_id):
             try:
                 file_lock = self._get_file_lock(file_path)
                 with file_lock:
@@ -314,7 +399,7 @@ class SessionManager(SessionRepository):
         archived_dir = self._get_archived_dir(agent_id)
 
         moved = 0
-        for file_path in archived_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(archived_dir, session_id):
             try:
                 file_lock = self._get_file_lock(file_path)
                 with file_lock:
@@ -567,6 +652,174 @@ class SessionManager(SessionRepository):
 
         return f"{agent_id}_{session_id}"
 
+    def import_session_messages(
+        self,
+        agent_id: str,
+        session_id: str,
+        date: str,
+        messages,
+        *,
+        ingest_run_id: str,
+        owner_user_id: str = "",
+    ) -> Tuple[int, int]:
+        """导入专用写入口：一条历史事件一行消息，保留工具调用/结果的分行结构。
+
+        与 add_message 的分工：后者表达运行期"一问一答"的一个轮次；外部历史里一轮可以
+        含多个调用与多个结果、也可以是纯 assistant/纯 tool 行，压成成对消息就会丢结构
+        （市面互导实现的通病）。幂等靠 metadata.ingest.identity_key。
+
+        属主（F-04）：`owner_user_id` 缺省为空 = 共享会话，单用户桌面下这是合法语义，
+        与 pipeline 原生落盘口径（add_message 缺省空 user_id）一致。多用户/多渠道下
+        导入他人历史必须显式给属主：读侧（列表/改名/删除）的过滤规则是"空属主=任何人
+        可见"，那是正确的规则，错的是导入侧生产了"没有属主"这份状态——所以修在产生它
+        的这一侧（写入口），不去读侧加兜底判断。
+
+        归属一旦落盘就是**只读事实**：既有属主与会话属主不符、或用"共享"批次去碰一份
+        已有属主的会话（等于放宽可见范围），一律整批拒绝，不改写既有归属；存量共享会话
+        被指定属主导入时回填（与 add_message 的 DATA-P1-1 同一口径）。
+
+        Returns:
+            (新增条数, 因 identity_key 已存在而跳过的条数)
+
+        Raises:
+            SessionOwnerConflict: 本次批次的属主与会话已有属主冲突。
+        """
+        if not ingest_run_id:
+            raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        store_key = normalize_store_key(session_id)
+        owner = str(owner_user_id or "").strip()
+        messages = list(messages)
+        if not messages:
+            return 0, 0
+
+        file_path = self._get_session_file(agent_id, store_key, date)
+        with self._get_file_lock(file_path):
+            session_data = self._read_session_file(file_path)
+            if session_data is None:
+                session_data = {
+                    "agent_id": agent_id,
+                    "session_id": store_key,
+                    "session_date": date,
+                    "messages": [],
+                    "created_at": messages[0].get("timestamp", ""),
+                    "title": _derive_imported_title(messages),
+                    "user_id": owner,
+                }
+            else:
+                session_data["user_id"] = self._reconcile_owner(
+                    session_data.get("user_id"), owner, store_key)
+            existing = session_data.setdefault("messages", [])
+            seen = {
+                (msg.get("metadata") or {}).get("ingest", {}).get("identity_key")
+                for msg in existing
+            }
+            added = skipped = 0
+            for msg in [_json_safe(m) for m in messages]:
+                key = (msg.get("metadata") or {}).get("ingest", {}).get("identity_key")
+                if key in seen:
+                    skipped += 1
+                    continue
+                metadata = msg.setdefault("metadata", {})
+                metadata["ingest_run_id"] = ingest_run_id
+                ingest = metadata.setdefault("ingest", {})
+                ingest["session_id"] = store_key
+                if owner:
+                    # 属主随行落盘：撤销时按它说出撤的是谁的批次（写→读→反馈闭环）
+                    ingest["owner_user_id"] = owner
+                if store_key != str(session_id):
+                    ingest["source_session_id"] = str(session_id)
+                existing.append(msg)
+                seen.add(key)
+                added += 1
+            # 零新增批次不落盘：给文件盖一个新 updated_at、内容却一个字节没变，会让
+            # 幂等重跑在盘上留下"这次动过"的假象（重复导入必须可证明是空操作）。
+            if not added:
+                return added, skipped
+            session_data["total_messages"] = len(existing)
+            session_data["updated_at"] = datetime.now().isoformat()
+            # 持锁内只调无锁写入版（S4 约束：_write_session_file 会再取同一 file_lock）
+            if not self._write_session_file_unlocked(file_path, session_data):
+                raise IOError(f"导入会话写入失败: {file_path}")
+        return added, skipped
+
+    @staticmethod
+    def _reconcile_owner(existing_owner: Any, owner: str, store_key: str) -> str:
+        """本次批次的属主 → 该会话最终属主，冲突即拒绝（唯一判定处）。"""
+        current = str(existing_owner or "").strip()
+        if not current:
+            return owner          # 共享会话被指定属主导入：回填
+        if current != owner:
+            raise SessionOwnerConflict(
+                f"会话 {store_key!r} 已有属主 {current!r}，本次批次属主 "
+                f"{owner or '<共享>'}；属主是落盘事实，不由导入改写"
+            )
+        return current
+
+    def check_ingest_owners(self, agent_id: str, session_ids, owner_user_id: str) -> None:
+        """写前预检：目标会话的既有属主与本批属主是否相容，冲突即抛（此刻零写入）。
+
+        归属冲突不是"写了一半才发现的坏输入"，它关于**全部**目标会话，所以判定必须在
+        任何写入之前完成——否则前几支会话已落盘、后一支才抛，留下一次既没拒绝成功也
+        没法整批撤销的半程导入。
+        """
+        owner = str(owner_user_id or "").strip()
+        agent_dir = self._get_session_dir(agent_id)
+        for raw_id in session_ids:
+            store_key = normalize_store_key(raw_id)
+            for file_path in self._find_session_files(agent_dir, store_key):
+                data = self._read_session_file(file_path)
+                if not data:
+                    continue
+                self._reconcile_owner(data.get("user_id"), owner, store_key)
+
+    def ingested_run_owners(self, agent_id: str, ingest_run_id: str) -> Tuple[str, ...]:
+        """该批次落盘消息里记着的属主（去重，按首次出现序）；共享批次为空元组。
+
+        与写入侧 `metadata.ingest.owner_user_id` 同一处定义：撤销报告据此说清
+        "撤的是谁的批次"，不再让撤销变成一次无名删除。
+        """
+        owners: List[str] = []
+        agent_dir = self._get_session_dir(agent_id)
+        for file_path in sorted(agent_dir.glob("session_*.json")):
+            session_data = self._read_session_file(file_path) or {}
+            for msg in session_data.get("messages") or []:
+                metadata = msg.get("metadata") or {}
+                if metadata.get("ingest_run_id") != ingest_run_id:
+                    continue
+                owner = (metadata.get("ingest") or {}).get("owner_user_id")
+                if owner and owner not in owners:
+                    owners.append(str(owner))
+        return tuple(owners)
+
+    def delete_ingested_messages(self, agent_id: str, ingest_run_id: str) -> int:
+        """按导入批次撤销某 agent 的会话消息；消息被清空的会话文件直接删除。"""
+        removed = 0
+        agent_dir = self._get_session_dir(agent_id)
+        for file_path in sorted(agent_dir.glob("session_*.json")):
+            with self._get_file_lock(file_path):
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                messages = session_data.get("messages") or []
+                kept = [
+                    msg for msg in messages
+                    if (msg.get("metadata") or {}).get("ingest_run_id") != ingest_run_id
+                ]
+                dropped = len(messages) - len(kept)
+                if not dropped:
+                    continue
+                if not kept:
+                    file_path.unlink(missing_ok=True)
+                    removed += dropped
+                    continue
+                session_data["messages"] = kept
+                session_data["total_messages"] = len(kept)
+                session_data["updated_at"] = datetime.now().isoformat()
+                if not self._write_session_file_unlocked(file_path, session_data):
+                    logger.error("撤销导入时写回失败: %s", file_path)
+                removed += dropped
+        return removed
+
     def get_session(self, agent_id: str, session_id: str, date: str = None) -> SessionRecord:
         """获取session记录"""
         if date is None:
@@ -626,13 +879,13 @@ class SessionManager(SessionRepository):
     def get_sessions_by_id(self, agent_id: str, session_id: str) -> List[str]:
         """获取指定session_id的所有日期文件路径"""
         agent_dir = self._get_session_dir(agent_id)
-        return [str(fp) for fp in agent_dir.glob(f"session_{session_id}_*.json")]
+        return [str(fp) for fp in self._find_session_files(agent_dir, session_id)]
 
     def _get_session_data_list(self, agent_id: str, session_id: str) -> List[Dict[str, Any]]:
         """获取指定session_id的所有日期文件数据"""
         agent_dir = self._get_session_dir(agent_id)
         sessions = []
-        for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(agent_dir, session_id):
             session_data = self._read_session_file(file_path)
             if session_data:
                 sessions.append(session_data)
@@ -725,7 +978,7 @@ class SessionManager(SessionRepository):
         else:
             # 删除所有日期的文件
             deleted_count = 0
-            for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+            for file_path in self._find_session_files(agent_dir, session_id):
                 try:
                     file_lock = self._get_file_lock(file_path)
                     with file_lock:
@@ -823,6 +1076,180 @@ class SessionManager(SessionRepository):
         if max_messages is None:
             return all_messages
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
+
+    def get_recent_model_context(
+        self, agent_id: str, session_id: str, max_messages: Optional[int] = 20
+    ) -> List[Dict[str, Any]]:
+        """会话库 → provider 合法模型上下文（工具轮重建的唯一入口，T-10b R1）。
+
+        与 `get_recent_context` 的分工：那个是"只回 user/assistant"的**防回灌契约**
+        （展示/统计等既有消费方共用），本方法承担工具轮重建——把落盘的
+        `metadata.tool_calls` 展示记录还原成 `assistant.tool_calls` + 配套的
+        `role="tool"` 结果消息。改写前者会让全部既有消费方共同承担新语义。
+
+        旧数据诚实降级（工单 §11.7 第 1 条）：调用侧无 `tool_call_id` 的历史轮次，
+        id 与 arguments 的对应关系不在库里，整条降级为 `user` 注记并计数，
+        **绝不伪造配对**。降级读数经 `get_model_context_stats()` 取回。
+        """
+        self._model_context_stats = {"rebuilt_pairs": 0, "degraded_turns": 0, "killswitch_off": 0}
+        sessions = self._get_session_data_list(agent_id, session_id)
+        if not sessions:
+            return []
+        if not toolTurnViewEnabled():
+            # 回退开关（工单 §11.7 第 3 条）：关闭时视图必须与今天的形状**逐条相等**
+            # ——只含 user/assistant、每条只有 {role, content}。等式由判据钉住，
+            # 不写进注释；这里只保证关闭即走旧投影，不留半开的中间态。
+            self._model_context_stats["killswitch_off"] = 1
+            return self._legacyModelContext(sessions, max_messages)
+        # 模型上下文按时间升序（旧→新）；`get_recent_context` 的降序口径属展示面，
+        # 不由本方法继承——顺序即"谁是最近的"这一语义。
+        sessions.sort(key=lambda x: x.get("session_date", ""))
+        messages: List[Dict[str, Any]] = []
+        for session in sessions:
+            for msg in session.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                entries = (msg.get("metadata") or {}).get("tool_calls") or []
+                if role == "assistant" and entries:
+                    rebuilt = self._rebuildToolTurn(content, entries)
+                    if rebuilt is not None:
+                        messages.extend(rebuilt)
+                        self._model_context_stats["rebuilt_pairs"] += 1
+                        continue
+                    self._model_context_stats["degraded_turns"] += 1
+                    messages.append(
+                        {"role": "user", "content": self._degradeToolTurn(entries, content)}
+                    )
+                    continue
+                if role in ("user", "assistant"):
+                    messages.append({"role": role, "content": content})
+        if max_messages is not None and len(messages) > max_messages:
+            messages = messages[-max_messages:]
+            # 截断必须落在轮边界：切点落在 tool 段中间会让声明它的 assistant 留在
+            # 窗口外，直接产出孤儿 tool 行（provider 400）。
+            while messages and messages[0].get("role") == "tool":
+                messages.pop(0)
+        return messages
+
+    def _legacyModelContext(
+        self, sessions: List[Dict[str, Any]], max_messages: Optional[int]
+    ) -> List[Dict[str, Any]]:
+        """回退形状：T-10b 之前的模型上下文（只含 user/assistant，仅 {role, content}）。
+
+        与 `get_recent_context` 同形状但**顺序相反**（那里是展示面降序，模型面必须
+        升序：顺序本身表达"谁是最近的"）。两者是不同消费面，故不互相复用——
+        复用会把展示面的排序口径带进模型面。
+        """
+        ordered = sorted(sessions, key=lambda x: x.get("session_date", ""))
+        rows: List[Dict[str, Any]] = []
+        for session in ordered:
+            for msg in session.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") in ("user", "assistant"):
+                    rows.append({"role": msg["role"], "content": msg.get("content", "")})
+        if max_messages is not None and len(rows) > max_messages:
+            rows = rows[-max_messages:]
+        return rows
+
+    @staticmethod
+    def _rebuildToolTurn(content: str, entries: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """展示记录 → provider 合法消息对；配对信息不全时返回 None（交调用方降级）。
+
+        合法性要求（缺一条即 provider 400）：调用与结果**一一对应**、
+        每个结果都能找到声明它的调用、每个调用都有结果。
+        """
+        calls = [e for e in entries if isinstance(e, dict) and e.get("type") == "tool_call"]
+        results = [e for e in entries if isinstance(e, dict) and e.get("type") == "tool_result"]
+        if not calls or not results:
+            return None
+        declared: Dict[str, Dict[str, Any]] = {}
+        for call in calls:
+            cid = str(call.get("tool_call_id") or "")
+            if not cid or cid in declared:
+                return None
+            declared[cid] = call
+        matched: set = set()
+        tool_calls: List[Dict[str, Any]] = []
+        for call in calls:
+            cid = str(call.get("tool_call_id") or "")
+            if not any(str(r.get("tool_call_id") or "") == cid for r in results):
+                return None
+            arguments = call.get("arguments")
+            if not isinstance(arguments, str) or not arguments.strip():
+                # 协议原文缺失时的等价形态：由执行面真值序列化，配对不受影响
+                arguments = json.dumps(call.get("params") or {}, ensure_ascii=False)
+            tool_calls.append({
+                "id": cid,
+                "type": "function",
+                "function": {"name": str(call.get("tool_name") or ""), "arguments": arguments},
+            })
+        tool_rows: List[Dict[str, Any]] = []
+        for res in results:
+            cid = str(res.get("tool_call_id") or "")
+            if cid not in declared or cid in matched:
+                return None
+            matched.add(cid)
+            result = res.get("result")
+            tool_rows.append({
+                "role": "tool",
+                "tool_call_id": cid,
+                "name": str(res.get("tool_name") or ""),
+                "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str),
+            })
+        return [{"role": "assistant", "content": content or "", "tool_calls": tool_calls}, *tool_rows]
+
+    @staticmethod
+    def _degradeToolTurn(entries: List[Dict[str, Any]], content: str) -> str:
+        """缺配对的轮次整条降级为 `user` 注记（沿用 `repair_tool_turns` 的孤儿语义）。"""
+        parts = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            tool_name = str(entry.get("tool_name") or "tool")
+            cid = entry.get("tool_call_id") or "未知"
+            if entry.get("type") == "tool_call":
+                parts.append(f"[{tool_name} 调用（tool_call_id={cid}，缺配对信息）] {json.dumps(entry.get('params') or {}, ensure_ascii=False)}")
+            elif entry.get("type") == "tool_result":
+                parts.append(f"[{tool_name} 结果（tool_call_id={cid}，缺配对信息）] {entry.get('result', '')}")
+        note = "\n".join(parts)
+        return f"{content}\n{note}" if content else note
+
+    def get_model_context_stats(self) -> Dict[str, int]:
+        """上次 `get_recent_model_context` 的读数（重建/降级各自计数）。
+
+        降级是"看得见的诚实"：调用方据此报出重建成功率，不拿"看起来有内容"
+        冒充"协议合法"（工单 §11.3）。
+        """
+        stats = getattr(self, "_model_context_stats", None) or {}
+        return {
+            "rebuilt_pairs": int(stats.get("rebuilt_pairs", 0)),
+            "degraded_turns": int(stats.get("degraded_turns", 0)),
+            "killswitch_off": int(stats.get("killswitch_off", 0)),
+        }
+
+    def get_recent_origins(self, agent_id: str, session_id: str, max_messages: Optional[int] = 20) -> List[Optional[str]]:
+        """返回最近若干条 user 轮的来源标记（message.metadata.turn_origin）。
+
+        供 actionability 门控回看"近期是否有人类介入"。与 get_recent_context 分离：
+        后者为喂模型只留 {role,content}，这里只读发起方来源（user 轮），
+        不回灌大 content 与工具/审计行。缺 origin 的历史消息以 None 计。
+        """
+        sessions = self._get_session_data_list(agent_id, session_id)
+        if not sessions:
+            return []
+        sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
+        origins: List[Optional[str]] = []
+        for session in sessions:
+            for msg in session.get("messages", []):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    meta = msg.get("metadata") or {}
+                    origins.append(meta.get("turn_origin"))
+        if max_messages is not None:
+            origins = origins[-max_messages:]
+        return origins
 
     # ══════════════════════════════════════════════════════════════
     # SessionRepository 接口实现（补全方法）
@@ -993,7 +1420,7 @@ class SessionManager(SessionRepository):
             for agent_dir in self._sessions_dir.iterdir():
                 if not agent_dir.is_dir():
                     continue
-                matches = sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+                matches = self._find_session_files(agent_dir, session_id)
                 if not matches:
                     continue
                 # 最新日期文件为代表（与 _collect_summaries 口径一致）
@@ -1284,7 +1711,7 @@ class SessionManager(SessionRepository):
         指纹失配 → 读路径回退重建。零 JSON 解析，仅 stat。
         """
         total = 0
-        for fp in agent_dir.glob(f"session_{session_id}_*.json"):
+        for fp in self._find_session_files(agent_dir, session_id):
             try:
                 st = fp.stat()
             except OSError:
@@ -1342,7 +1769,7 @@ class SessionManager(SessionRepository):
         like = 0
         dislike = 0
         items: List[Dict[str, Any]] = []
-        for fp in sorted(agent_dir.glob(f"session_{session_id}_*.json")):
+        for fp in self._find_session_files(agent_dir, session_id):
             data = self._read_session_file(fp) if quarantine else self._read_json_plain(fp)
             if not data:
                 continue
@@ -1535,7 +1962,7 @@ class SessionManager(SessionRepository):
     def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
         """置顶/取消置顶 session（写入所有日期文件的 pinned 字段）。"""
         agent_dir = self._get_session_dir(agent_id)
-        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        file_paths = self._find_session_files(agent_dir, session_id)
         if not file_paths:
             logger.warning("set_session_pinned: 未找到 session_id=%s 的文件", session_id)
             return False
@@ -1601,7 +2028,7 @@ class SessionManager(SessionRepository):
     def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
         """重命名 session（写入所有日期文件的 title 字段）。"""
         agent_dir = self._get_session_dir(agent_id)
-        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        file_paths = self._find_session_files(agent_dir, session_id)
         if not file_paths:
             logger.warning("rename_session: 未找到 session_id=%s 的文件", session_id)
             return False
@@ -1656,7 +2083,7 @@ class SessionManager(SessionRepository):
     def _iter_session_files(self, agent_id: str, session_id: str) -> List[Path]:
         """按日期升序返回该 session 的所有文件（旧→新，跨日轮次定位需要）。"""
         agent_dir = self._get_session_dir(agent_id)
-        return sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+        return self._find_session_files(agent_dir, session_id)
 
     def delete_round(self, agent_id: str, session_id: str, timestamp: str) -> List[Dict[str, Any]]:
         """删除一轮对话（user 消息 + 其后相邻的 assistant 回复）。

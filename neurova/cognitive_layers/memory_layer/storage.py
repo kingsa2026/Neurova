@@ -14,6 +14,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
 if TYPE_CHECKING:
     from .isolation import IsolationContext
@@ -690,14 +691,27 @@ class MemoryStorage:
 
 _singleton: Optional[MemoryStorage] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/memory_layer"
+# 空串 = "按数据根推导"；测试可用 monkeypatch 指向隔离目录（原 `_DEFAULT_DIR`
+# 是个 CWD 相对常量，保留同名可写槽位，但默认值不再自带路径）。
+_DEFAULT_DIR = ""
+
+
+def defaultStorageDir() -> str:
+    """进程级单例目录：数据根下的 `memory_layer`（绝对路径）。
+
+    原值 `"./data/memory_layer"` 是 CWD 相对路径，落点随启动目录漂移；
+    与知识侧 `data/knowledge`、记忆侧 agent 工作区同一条纪律——先有唯一的根，
+    再谈根下面叫什么。
+    """
+
+    return str(get_data_root() / "memory_layer")
 
 
 def get_memory_storage() -> MemoryStorage:
     global _singleton
     with _singleton_lock:
         if _singleton is None:
-            target = Path(_DEFAULT_DIR)
+            target = Path(_DEFAULT_DIR or defaultStorageDir())
             target.mkdir(parents=True, exist_ok=True)
             _singleton = MemoryStorage(str(target))
     return _singleton

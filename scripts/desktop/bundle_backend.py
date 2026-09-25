@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
-"""桌面壳后端全量打包（路线 A：Python 运行时+依赖+源码+模型 一次装齐）。
+"""桌面壳后端全量打包（路线 B：源码+配置+模型空壳，运行时改走首次启动自动下载）。
 
 产物 = NeurUI/src-tauri/resources/backend/：
-    python/            ← python-build-standalone CPython 3.12（安装即用运行时）
-      Lib/site-packages/  ← 叠加 .venv/Lib/site-packages（同版本 CPython，ABI 兼容）
     neurova/           ← 后端包源码
     start_server.py    ← 后端入口
-    models/ config/    ← 模型与配置
+    models/            ← 模型空壳 + MANIFEST.json（模型改走首次启动按需下载）
+    config/            ← 配置
+    requirements.txt   ← 首启 pip 安装依赖的清单（目标机没有仓库，必须随包发运）
     MANIFEST.json      ← 增量构建标记
 
-增量策略：venv site-packages 的（文件数, 总大小）指纹与上次一致时跳过
-最重的三步大拷贝；neurova/config/models 走快速校验重拷。
+Python、Node.js 运行时不再内嵌（减小安装包体积），由 Neurova 首次启动时
+通过 Rust 层自动下载到 runtime/ 目录。
+
+增量策略：neurova/config/models 走快速校验重拷。
+models/ 只保留空壳与 MANIFEST.json，权重文件由前端下载链路按需获取。
 
 用法（仓库根）：
     .venv/Scripts/python.exe scripts/desktop/bundle_backend.py
@@ -18,23 +21,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
 import sys
-import tarfile
 import time
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
-VENV_SP = REPO / ".venv" / "Lib" / "site-packages"
 STAGE = REPO / "NeurUI" / "src-tauri" / "resources" / "backend"
 MANIFEST = STAGE / "MANIFEST.json"
-
-PYPSA_REPO = "astral-sh/python-build-standalone"
-PYPSA_VERSION_PREFIX = "cpython-3.12."
 
 # .cache = HuggingFace/modelscope 下载缓存（模型目录实测混入，用户点名排除）
 # .git = 任何被拷入的仓库元数据
@@ -77,97 +73,6 @@ def robocopy(src: Path, dst: Path, extra: list[str] | None = None) -> int:
     # robocopy 返回码 < 8 都算成功（1=拷了文件，3=拷了文件+ Extra 等）
     return r.returncode
 
-
-def purge_pyc_cache(stage_python: Path) -> int:
-    """清除暂存区存量 pycache/pyc（robocopy 不带 /PURGE，历史存量需手动清）。"""
-    purged = 0
-    for p in stage_python.rglob("*"):
-        try:
-            if p.is_file() and p.suffix.lower() in {".pyc", ".pyo"}:
-                p.unlink()
-                purged += 1
-        except OSError:
-            continue
-    for d in list(stage_python.rglob("__pycache__")):
-        try:
-            if d.is_dir():
-                shutil.rmtree(d, ignore_errors=True)
-                purged += 1
-        except OSError:
-            continue
-    return purged
-
-
-def ensure_standalone_python(stage_python: Path) -> None:
-    """下载并展开 python-build-standalone CPython 3.12（已存在则跳过）。"""
-    if (stage_python / "python.exe").exists():
-        log(f"运行时已存在: {stage_python}")
-        return
-    if stage_python.exists():
-        shutil.rmtree(stage_python)
-
-    log("查询 python-build-standalone 最新 release…")
-    api = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
-    req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        release = json.loads(resp.read().decode("utf-8"))
-    tag = release["tag_name"]
-    asset = next(
-        a["browser_download_url"]
-        for a in release["assets"]
-        if a["name"].startswith(PYPSA_VERSION_PREFIX)
-        and "x86_64-pc-windows-msvc-install_only.tar.gz" in a["name"]
-        and "_stripped" not in a["name"]
-    )
-    log(f"下载运行时 {asset}（约 12MB）…")
-    tgz = STAGE / "_python-runtime.tar.gz"
-    tgz.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(asset, timeout=300) as resp, open(tgz, "wb") as f:
-        shutil.copyfileobj(resp, f)
-
-    log(f"展开到 {stage_python} …")
-    extract_dir = STAGE / "_python-extract"
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
-    with tarfile.open(tgz, "r:gz") as tf:
-        tf.extractall(extract_dir)
-    # 布局兼容：部分版本解出 <prefix>/install/，部分直接 python/
-    install_dir = None
-    for n in extract_dir.iterdir():
-        if not n.is_dir():
-            continue
-        if (n / "install" / "python.exe").exists():
-            install_dir = n / "install"
-            break
-        if (n / "python.exe").exists():
-            install_dir = n
-            break
-    if install_dir is None:
-        raise RuntimeError("运行时包内未找到 python.exe")
-    shutil.move(str(install_dir), stage_python)
-    shutil.rmtree(extract_dir)
-    tgz.unlink()
-    log(f"运行时就绪: {stage_python / 'python.exe'}")
-
-
-def copy_venv_site_packages(stage_python: Path, manifest: dict) -> None:
-    sp_dst = stage_python / "Lib" / "site-packages"
-    fp_now = dir_fingerprint(VENV_SP)
-    if manifest.get("venv_sp") == fp_now and sp_dst.exists():
-        log("site-packages 指纹未变，跳过大拷贝")
-    else:
-        log(f"拷贝 site-packages → {sp_dst}（{fp_now['files']} 文件 / {fp_now['bytes'] / 1e6:.0f}MB）…")
-        t0 = time.time()
-        rc = robocopy(VENV_SP, sp_dst)
-        if rc >= 8:
-            raise RuntimeError(f"robocopy site-packages 失败 rc={rc}")
-        log(f"site-packages 拷贝完成（{time.time() - t0:.0f}s）")
-        manifest["venv_sp"] = fp_now
-    # 指纹含 pyc：venv 侧任何开发/测试活动都会改指纹触发重拷，但拷贝侧已排除
-    # pyc/pycache；历史存量（robocopy 无 /PURGE）在此统一清除。
-    n = purge_pyc_cache(sp_dst)
-    if n:
-        log(f"清除暂存 pycache/pyc 存量 {n} 项（NSIS 2GB 红线）")
 
 def ensure_runtime_dirs(stage: Path) -> None:
     """预创建后端运行必需的空数据目录。
@@ -244,10 +149,6 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="忽略指纹强制重拷")
     args = ap.parse_args()
 
-    if not VENV_SP.exists():
-        log(f"venv 不存在: {VENV_SP}")
-        return 1
-
     STAGE.mkdir(parents=True, exist_ok=True)
     manifest: dict = {}
     if MANIFEST.exists():
@@ -259,15 +160,20 @@ def main() -> int:
         manifest = {}
 
     stage_python = STAGE / "python"
-    ensure_standalone_python(stage_python)
+    if stage_python.exists():
+        log(f"路线 B 不再打包 Python 运行时，清理残留：{stage_python}")
+        import shutil as _shutil
+        _shutil.rmtree(stage_python, ignore_errors=True)
+    log("路线 B：Python/Node 运行时改由首次启动自动下载，跳过本地打包")
 
     t0 = time.time()
-    copy_venv_site_packages(stage_python, manifest)
 
     copy_tree_light(REPO / "neurova", STAGE / "neurova", manifest, "neurova")
     copy_tree_light(REPO / "models", STAGE / "models", manifest, "models", skip_heavy=True)
     copy_tree_light(REPO / "config", STAGE / "config", manifest, "config")
     copy_tree_light(REPO / "start_server.py", STAGE / "start_server.py", manifest, "start_server")
+    # 首启 pip 装依赖要有清单可用：目标机上没有仓库，requirements.txt 必须随包发运
+    copy_tree_light(REPO / "requirements.txt", STAGE / "requirements.txt", manifest, "requirements")
     ensure_runtime_dirs(STAGE)
 
     # 出厂清洁：剥离开发/测试期生成的运行时数据（.agents 补丁目录、

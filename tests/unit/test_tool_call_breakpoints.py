@@ -11,10 +11,13 @@ TDD 测试:工具调用断点修复
  - 断点 #10 (MID): openai_loop.py _tools_supported 一次性 400 后永久 False,
    后续所有工具调用静默失效,需要重启 agent 才恢复。
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.repo_paths import repo_str
+
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ class TestConsoleHistoryNotForceEmpty:
     def test_console_no_history_in_metadata(self):
         """console.py 不应在 metadata 中传 history=[]。"""
         src = open(
-            "e:/项目/Neurova/neurova/api/endpoints/console.py",
+            repo_str("neurova/api/endpoints/console.py"),
             encoding="utf-8",
         ).read()
         # 查找 history_for_agent = [] 这行
@@ -186,7 +189,7 @@ class TestToolsSupportedNotPermanent:
     def test_tools_supported_resets_per_request(self):
         """_tools_supported 应在每个 predict_step 开始时重置为 True。"""
         src = open(
-            "e:/项目/Neurova/neurova/agent/loops/openai_loop.py",
+            repo_str("neurova/agent/loops/openai_loop.py"),
             encoding="utf-8",
         ).read()
         # 查找 predict_step 方法中是否重置 _tools_supported
@@ -205,33 +208,52 @@ class TestToolsSupportedNotPermanent:
 # 断点 #4: SkillRegistry 异常应 fallback 到 ToolRouter
 # ──────────────────────────────────────────────────────────────────
 
-class TestSkillExceptionFallback:
-    """#B-4: SkillRegistry 执行抛异常时,应 fallback 到 ToolRouter 而非直接报错。
+class TestSkillFailureIsHonestlyReported:
+    """#B-4 的语义在咽喉收编后由执行咽喉统一承载（工单 003）。
 
-    当前实现:try 块包裹 SkillRegistry + ToolRouter,异常直接进 except,
-    返回 error,ToolRouter 不被尝试。
+    原实现让 `loops/base.py` 自己写两级回退（SkillRegistry → ToolRouter），
+    与文本链两套口径；现在原生链统一委托 `ToolExecutor`，回退链在咽喉内
+    （ToolEngine → 内置 → Skill → ToolRouter）。
+
+    本用例改测**契约本身**：技能执行体抛异常时，该工具必须回一条失败 tool 消息、
+    带上真实错误，不得伪造成成功。
     """
 
     @pytest.mark.asyncio
-    async def test_skill_exception_falls_back_to_tool_router(self):
-        """SkillRegistry 抛异常时,应尝试 ToolRouter 而非直接失败。"""
-        from neurova.agent.loops.base import BaseAgentLoop
+    async def test_skill_exception_is_reported_as_failure(self):
+        from neurova.agent.loops.openai_loop import OpenAILoop
+        from neurova.tool_executor import ToolExecutor
+
+        async def _boom(skill_name, params, context=None):
+            raise RuntimeError("skill bug")
+
+        # 技能名避开内置工具表（内置同名会先在咽喉里命中内置那一档）
+        class _Registry:
+            skills = {"probe_skill": object()}
+
+            async def execute_skill(self, skill_name, params, context=None):
+                return await _boom(skill_name, params, context)
+
+            def get_skill(self, name):
+                return self.skills.get(name)
+
+            def has_skill(self, name):
+                return name in self.skills
+
+            def list_skills(self):
+                return []
 
         agent = MagicMock()
         agent._tool_messages_list = []
-        # SkillRegistry 抛异常
-        sr = MagicMock()
-        sr.execute_skill = AsyncMock(side_effect=RuntimeError("skill bug"))
-        agent.skill_registry = sr
-        # ToolRouter 应能成功执行(base.py 读取 router_result.result,不是 .data)
-        tr = MagicMock()
-        router_result = MagicMock()
-        router_result.success = True
-        router_result.result = {"result": "from_tool_router"}
-        tr.execute = AsyncMock(return_value=router_result)
-        agent.tool_router = tr
-
-        from neurova.agent.loops.openai_loop import OpenAILoop
+        agent.skill_registry = None
+        agent._skill_registry = _Registry()
+        agent.tool_memory = None
+        agent.tool_lifecycle = None
+        agent.skill_packer = None
+        agent.tool_router = None
+        agent.config = MagicMock()
+        agent.workspace_path = "."
+        agent.tool_executor = ToolExecutor(agent)
 
         loop = OpenAILoop.__new__(OpenAILoop)
         loop.agent = agent
@@ -240,20 +262,17 @@ class TestSkillExceptionFallback:
             "id": "call_004",
             "type": "function",
             "function": {
-                "name": "weather",
+                "name": "probe_skill",
                 "arguments": json.dumps({"city": "上海"}),
             },
         }]
 
         messages = await loop.handle_tool_calls(tool_calls, [])
 
-        # ToolRouter 应被调用(fallback 生效)
-        assert tr.execute.called, (
-            "SkillRegistry 异常时,ToolRouter 应被尝试 fallback 执行"
-        )
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert len(tool_msgs) > 0
-        assert tool_msgs[0]["name"] == "weather"
-        # 结果应是 ToolRouter 的成功结果
+        assert tool_msgs[0]["name"] == "probe_skill"
         result = json.loads(tool_msgs[0]["content"])
-        assert result.get("result") == "from_tool_router"
+        assert "skill bug" in json.dumps(result, ensure_ascii=False), (
+            f"技能异常被抹平为笼统错误：{result}"
+        )

@@ -210,7 +210,9 @@ class TestJwtSecretHardening:
             pytest.skip("POSIX mode bits not enforced on NTFS")
         import neurova.api.auth as auth
 
-        monkeypatch.chdir(tmp_path)
+        # 隔离走 NEUROVA_DATA_DIR 注入：密钥落点由数据根推导，
+        # "靠改 CWD 隔离"正是本批要灭的形态。
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
         auth._write_secret_file("x" * 40)
         mode = os.stat(tmp_path / ".jwt_secret").st_mode
         assert stat.S_IMODE(mode) == 0o600

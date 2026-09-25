@@ -32,8 +32,41 @@ from neurova.agent.retriever_adapters import (
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
+from neurova.agent.actionability import evaluate_actionability, get_actionability_config
+from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value, resolve_turn_origin
 
 logger = get_logger(__name__)
+
+
+def composeUnparseableAttachmentNotice(
+    filename: str,
+    file_type: str,
+    status: str,
+    file_id: str = "",
+    primitive: Optional[str] = None,
+) -> str:
+    """抽取不到文本时的注入文案（**单源构造点**，含句柄、原因、可用原语）。
+
+    为什么必须带句柄：附件落在 `data/storage/users/**` 下，而 `file_search` /
+    `file_list` 锚定 agent 工作区（`_resolve_agent_path`），**永远看不到它**。
+    没有 `file_id` 时 agent 对"不可抽取的附件"结构上无从下手。
+
+    为什么原语要么点名真名、要么明说没有：附件取用凭证只有 `file_id`（D1），
+    而当前注册原语里没有任何一条接受 `file_id` 去读原始二进制容器。
+    此时若编一个 `file_parse` 之类的名字，模型会拿一条读不到该附件的工具去试
+    —— 那是假路标，比"没有"更坏（教义第 2 条：诚实形态暴露）。
+    """
+    parts = [
+        f"[用户上传了文件 {filename}（{file_type}），未能抽取文本内容]",
+        f"原因: {status}",
+    ]
+    if file_id:
+        parts.append(f"附件句柄 file_id={file_id}（服务端路径不对外，取用一律凭该句柄）")
+    if primitive:
+        parts.append(f"如需读取内容，请用 `{primitive}` 并传上述 file_id。")
+    else:
+        parts.append("当前无可用抽取原语：现有工具面没有任何原语可以按 file_id 读取这类附件。")
+    return " ".join(parts)
 
 # ── 思考程度（light/standard/deep）→ 系统提示指令 ──────────────
 # 提示词方式对所有模型通用；standard 为默认行为不注入
@@ -223,7 +256,9 @@ class ChatPipeline:
 
             register_annotation_retriever(self._memory_retrieval_chain)
         except Exception as e:
-            logger.warning("AnnotationRetrieverAdapter 接入失败（降级跳过）: %s", e)
+            # 缺席必须是可见的（与 TKG/图检索两条分支同口径）：人工标注是最高权威
+            # 检索源，"没挂上"等于本轮对话拿不到人工修正过的答案，不是无事发生。
+            logger.error("AnnotationRetrieverAdapter 接入失败（本轮无人工标注可用）: %s", e)
 
         # 3. KnowledgeRetriever（知识库，中低优先级：记忆/MoE 之后、Cache 之前）
         try:
@@ -237,30 +272,58 @@ class ChatPipeline:
         except Exception as e:
             logger.warning("KnowledgeRetrieverAdapter 接入失败（知识库检索降级跳过）: %s", e)
 
-        # 3.5 TKGRetriever（时效知识图谱事实，priority 26——补课 5.2 接线）
-        # TKG 构造失败/为空时跳过（可选增强，不阻断链装配）
+        # 3.5 时效事实分支（priority 26）——权威在底座库（工单 012，灭 B01）
+        # 旧装配是 `TemporalKGMemoryBridge(TemporalKnowledgeGraph())`：无参构造的 db_path
+        # 默认 ":memory:"，这条分支每轮扫自己那张空表（命中恒 0），还可能每轮重造实例。
+        # 现在读底座，形状契约不变（TKGRetrieverAdapter 只调 query_tkg_for_context）。
         try:
-            from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import (
-                TemporalKGMemoryBridge,
-                TemporalKnowledgeGraph,
-            )
+            from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+            from neurova.knowledge.foundation.temporal_facts import TemporalFactReader
 
-            tkg = getattr(self._agent, "_tkg_instance", None)
-            if tkg is None:
-                # 适配器调用 query_tkg_for_context（Bridge 方法，关键词抽取+
-                # 时效窗口+置信度排序），裸 TemporalKnowledgeGraph 没有该方法
-                # （实测缺陷：每次检索 TKG 分支必 AttributeError 空转）。
-                tkg = TemporalKGMemoryBridge(TemporalKnowledgeGraph())
+            reader = getattr(self._agent, "_temporalFactsReader", None)
+            if reader is None:
+                # 必须带本 agent 的域：读面的锚点查询（"这句在问谁"）是守卫式过滤，
+                # agentId 为空即不过滤 ⇒ 从别人的库里挑出起点再往下答。
+                reader = TemporalFactReader(get_knowledge_fact_store(),
+                                            agentId=self._factDomain())
                 try:
-                    self._agent._tkg_instance = tkg
+                    self._agent._temporalFactsReader = reader
                 except Exception:
-                    logger.debug("set_request_user_id 注入失败（身份归属可能退化为 default）", exc_info=True)
-            if tkg is not None:
-                tkg_adapter = TKGRetrieverAdapter(tkg)
-                self._memory_retrieval_chain.add_retriever(tkg_adapter)
-                logger.debug("Added TKGRetrieverAdapter to retrieval chain")
+                    # 挂不上就每轮重造一个 reader：只多一次构造，不再退化成空表
+                    logger.debug("时效事实读面无法挂到 agent 上（每轮重建）", exc_info=True)
+            self._memory_retrieval_chain.add_retriever(TKGRetrieverAdapter(reader))
+            logger.debug("Added TKGRetrieverAdapter to retrieval chain")
         except Exception as e:
-            logger.warning("TKGRetrieverAdapter 接入失败（TKG 检索降级跳过）: %s", e)
+            # 缺席必须是可见的：B01 能活这么久，就是因为这类失败只留一条 warning。
+            logger.error("时效事实分支接入失败（本轮对话没有时效事实可读，不是没有相关事实）: %s", e)
+
+        # 3.6 多跳图检索（priority 27）——读底座的递归 CTE，不读 JSON 属性图
+        # （工单 013，灭 B04：图有覆盖率但答题时从不被用）。读面与时效分支同源，
+        # 所以不会出现"图上说一套、事实库里说一套"。可关闸，但缺席必须是 ERROR 级读数。
+        try:
+            from neurova.agent.graph_retriever_adapter import GraphRetrieverAdapter
+            from neurova.knowledge.foundation.graph_walk import (
+                GRAPH_RETRIEVER_ENV,
+                GraphFactWalker,
+                GraphWalkConfig,
+            )
+            from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+
+            if GraphWalkConfig.fromEnv().enabled:
+                walker = getattr(self._agent, "_graphFactWalker", None)
+                if walker is None:
+                    walker = GraphFactWalker(get_knowledge_fact_store(),
+                                             agentId=self._factDomain())
+                    try:
+                        self._agent._graphFactWalker = walker
+                    except Exception:
+                        logger.debug("图走查器无法挂到 agent 上（每轮重建）", exc_info=True)
+                self._memory_retrieval_chain.add_retriever(GraphRetrieverAdapter(walker))
+                logger.debug("Added GraphRetrieverAdapter to retrieval chain")
+            else:
+                logger.info("图检索分支按 %s 关闸跳过（有意的回退，不是故障）", GRAPH_RETRIEVER_ENV)
+        except Exception as e:
+            logger.error("图检索分支接入失败（本轮对话没有多跳事实可读，不是没有相关事实）: %s", e)
 
         # 4. CacheRetriever（低优先级）
         cache_adapter = CacheRetrieverAdapter()
@@ -276,6 +339,16 @@ class ChatPipeline:
         logger.info(
             f"MemoryRetrievalChain initialized with {len(self._memory_retrieval_chain.get_retrievers())} retrievers"
         )
+
+    def _factDomain(self) -> str:
+        """底座读面的 agent 域。
+
+        与检索链其余各路取 agent_id 的口径一致（`getattr(config, "agent_id", ...)`）。
+        取不到时落到 `"default"` 而**不是** `None`：`None` 在时效与多跳两条读面里是
+        "不过滤锚点"，那正好是本次要灭的跨 agent 读口——默认到某个具体域不会越权读。
+        """
+        config = getattr(self._agent, "config", None)
+        return str(getattr(config, "agent_id", "") or "default")
 
     # ---- 属性代理 ----
     @property
@@ -401,6 +474,20 @@ class ChatPipeline:
         except Exception:
             logger.debug("get_model_context_window 失败（上下文窗口预算按缺省值）", exc_info=True)
 
+        # 成本记账归属：把本轮 agent/session/turn 写入 ContextVar，
+        # 深层 LLMClient 在同步/流式同任务上下文内直接读取，无需逐层透传。
+        try:
+            from neurova.models.cost_tracking import set_llm_cost_context
+
+            set_llm_cost_context(
+                agent_id=getattr(self.config, "agent_id", None)
+                or getattr(self._agent, "id", None),
+                session_id=ctx.session_id,
+                turn_id=ctx.trace_id,
+            )
+        except Exception:
+            logger.debug("成本记账上下文注入失败（忽略）", exc_info=True)
+
         self._init_agent_state(ctx)
 
         # Step 0: 记录活动 + 轨迹
@@ -510,6 +597,11 @@ class ChatPipeline:
         """初始化 Agent 的临时状态（经 Agent 轮次级显式 API，P3-c 收窄）"""
         self._agent.set_current_reasoning(None)
         self._agent.reset_tool_messages()
+        # 能力缺口收件箱与工具消息账本同生命周期：同轮起点清空，
+        # 否则上一轮的缺口会在这一轮无据重放一次合成（T-03）。
+        from neurova.agent.capability_gap import clearCapabilityGap
+
+        clearCapabilityGap(str(ctx.session_id or ""))
         # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
         # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
         # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）；
@@ -642,7 +734,11 @@ class ChatPipeline:
                     self._agent.conversation_history = saved_messages
                     logger.info("从 session %s 恢复了 %s 条对话历史", ctx.session_id, len(saved_messages))
 
-            ctx.session_context = self.session_manager.get_recent_context(
+            # T-10b（R1）：模型上下文的会话历史走**专用读 API**，它把落盘的
+            # `metadata.tool_calls` 还原成 provider 合法的工具轮（assistant.tool_calls
+            # + 配套 role="tool"）。旧 `get_recent_context` 的"只回 user/assistant"
+            # 是展示/统计面共用的防回灌契约，模型面另立入口，两条各自成立。
+            ctx.session_context = self.session_manager.get_recent_model_context(
                 agent_id=self.config.agent_id,
                 session_id=ctx.session_id,
                 max_messages=20,
@@ -655,13 +751,53 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成"""
+        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控"""
         await self._check_compact_command(ctx)
         await self._check_review_command(ctx)
         await self._check_command_dispatch(ctx)
         await self._check_tool_memory(ctx)
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
+        await self._check_actionability(ctx)
+
+    async def _check_actionability(self, ctx: ChatContext):
+        """任务2 可行动性门控：仅当"门控开启 + 明确机器源 + 近期无人类"时置不可行标记，
+        由 _step_llm_call 据此早退（不调 LLM）。默认关、fail-open；人类/存疑轮永不抑制。"""
+        try:
+            enabled, lookback = get_actionability_config()
+            if not enabled:
+                return
+            origin = resolve_turn_origin(ctx.metadata)
+            human_recent = self._recent_human_involved(ctx, lookback)
+            actionable, reason = evaluate_actionability(enabled, origin, human_recent)
+            if not actionable:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["actionable"] = False
+                ctx.metadata["actionable_reason"] = reason
+                ctx.metadata["actionable_origin"] = origin.value
+                logger.info(
+                    "actionability 门控：origin=%s 近期无人类介入，本轮标记不可行", origin.value
+                )
+        except Exception:  # noqa: BLE001 - 门控异常一律放行，不阻断对话
+            logger.debug("actionability 门控检查失败（放行）", exc_info=True)
+
+    def _recent_human_involved(self, ctx: ChatContext, lookback: int) -> bool:
+        """近窗内是否有人类介入：取不到/空/含任何非机器源（含 None/unknown）→ True（放行）；
+        仅当整窗均为已确认机器源才 False（方可抑制）。缺 origin 一律按人类计，绝不误吞。"""
+        try:
+            origins = self.session_manager.get_recent_origins(
+                agent_id=getattr(getattr(self, "config", None), "agent_id", None),
+                session_id=ctx.session_id,
+                max_messages=lookback,
+            )
+        except Exception:  # noqa: BLE001 - 历史不可用 → 保守放行
+            return True
+        if not origins:
+            return True
+        for o in origins:
+            if not is_machine_origin_value(o):
+                return True
+        return False
 
     async def _check_review_command(self, ctx: ChatContext):
         """/review 受限评审子会话命令（P1-8 命令面，交互契约与 /compact 同构）。
@@ -790,7 +926,7 @@ class ChatPipeline:
             registry = getattr(self._agent, "_skill_registry", None)
             if registry is None or not getattr(registry, "has_skill", lambda _n: False)(skill_name):
                 return
-            raw = registry.skills.get(skill_name)
+            raw = registry.get_skill(skill_name)
             if raw is None:
                 return
             from neurova.skill_system.compat import unpack_skill
@@ -887,41 +1023,104 @@ class ChatPipeline:
                 callback=self._on_tool_execution_status_change,
             )
 
-            # 检查执行结果
-            if execution_context.status == ExecutionStatus.COMPLETED:
-                ctx.auto_execute_result = execution_context.result
-                exec_status = ctx.auto_execute_result.get("status") if ctx.auto_execute_result else None
-                if exec_status == "success":
-                    logger.info("工具自动执行成功: %s", tool_name)
-                    ctx.tool_decision = "auto_executed"
-                elif exec_status == "failure":
-                    error_msg = ctx.auto_execute_result.get("error", "未知错误")
-                    logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
-                    ctx.tool_decision = "failed"
-                    await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
-            elif execution_context.status == ExecutionStatus.TIMEOUT:
+            # 检查执行结果：成败由**执行器给出的判据**裁定（结果里的 success），
+            # 调用生命周期只用来分派非终态（超时 / 取消 / 异常）。
+            ctx.auto_execute_result = execution_context.result
+            if execution_context.status == ExecutionStatus.TIMEOUT:
                 logger.warning("工具自动执行超时: %s (>%ss)", tool_name, execution_context.timeout)
                 ctx.tool_decision = "timeout"
-                ctx.auto_execute_result = None
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
             elif execution_context.status == ExecutionStatus.CANCELLED:
                 logger.warning("工具自动执行被取消: %s", tool_name)
                 ctx.tool_decision = "cancelled"
-                ctx.auto_execute_result = None
-            elif execution_context.status == ExecutionStatus.FAILED:
-                error_msg = execution_context.error or "未知错误"
-                logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
-                ctx.tool_decision = "failed"
-                ctx.auto_execute_result = {"status": "failure", "error": error_msg}
-                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
+            elif execution_context.status == ExecutionStatus.COMPLETED:
+                # 判据只在结果里读一次：`{"error": …}` 的原生工具结果、判据缺席、
+                # 以及超时补写的 `success=False`，在这里是同一个分支。
+                if self._succeeded(execution_context.result) is True:
+                    logger.info("工具自动执行成功: %s", tool_name)
+                    ctx.tool_decision = "auto_executed"
+                    await self._record_tool_outcome(tool_name, ctx, success=True)
+                else:
+                    ctx.tool_decision = "failed"
+                    await self._report_tool_outcome(tool_name, ctx, execution_context)
             else:
-                logger.warning("工具自动执行未知状态: %s, 状态: %s", tool_name, execution_context.status)
+                # FAILED / 未知状态：同样按失败回流，不再各写一份分支。
+                logger.warning("工具自动执行失败: %s, 状态: %s", tool_name, execution_context.status)
                 ctx.tool_decision = "failed"
-                ctx.auto_execute_result = None
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
 
         except Exception as e:
             logger.error("工具自动执行异常: %s, 错误: %s", tool_name, e)
             ctx.tool_decision = "failed"
-            ctx.auto_execute_result = {"status": "failure", "error": str(e)}
+            ctx.auto_execute_result = {"status": "failure", "error": str(e), "success": False}
+            await self._record_tool_outcome(tool_name, ctx, success=False, error_msg=str(e))
+
+    def _succeeded(self, result) -> Optional[bool]:
+        """本次工具执行是否成功：读**执行器产出的判据**，读不到返回 None。
+
+        优先读 `ToolExecutionManager.execute()` 随结果落下的 `success`
+        （生产端已经从执行器的 `_result_is_success` 归一过一次）；为兼容
+        直接调用 `execute_from_memory_async` 的入口，兜底读执行器的同一判据，
+        以及信封式 `{"status": "success"}` 的老形状。
+        """
+        if not isinstance(result, dict):
+            return None
+        if isinstance(result.get("success"), bool):
+            return result["success"]
+        if "status" in result:
+            return result.get("status") == "success"
+        judge = getattr(self.tool_executor, "_result_is_success", None)
+        if callable(judge):
+            try:
+                return bool(judge(result))
+            except Exception as e:  # noqa: BLE001 - 判据异常不得伪装成成功
+                logger.warning("工具成败判据抛异常，按失败处置: %s", e, exc_info=True)
+                return False
+        return None
+
+    async def _report_tool_outcome(self, tool_name: str, ctx: ChatContext, execution_context):
+        """失败/超时/取消统一出口：写出可读结果 + 记失败教训（成败信号回流）。"""
+        error_msg = ""
+        if isinstance(ctx.auto_execute_result, dict):
+            error_msg = ctx.auto_execute_result.get("error") or ""
+        error_msg = error_msg or execution_context.error or f"工具执行未成功（状态: {execution_context.status.value}）"
+        logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
+        ctx.auto_execute_result = {"status": "failure", "error": error_msg, "success": False}
+        await self._record_tool_outcome(tool_name, ctx, success=False, error_msg=error_msg)
+
+    async def _record_tool_outcome(self, tool_name: str, ctx: ChatContext,
+                                   success: bool, error_msg: str = ""):
+        """把这一轮的成败回流给肌肉记忆（成功与失败走同一出口）。
+
+        为什么成功也要回流：肌肉记忆的连击计数、成功率与温度都靠这条信号；
+        只有失败回流时，成功侧永远停在旧读数上——闭环写成"写入→读取"两半，
+        反馈那一半是断的。
+        落盘失败不得影响本轮结论，但必须出声（不静默吞异常）。
+        """
+        try:
+            if success:
+                self._record_muscle_memory_outcome(ctx, success=True)
+            else:
+                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+        except Exception as e:
+            logger.warning("工具成败回流到肌肉记忆失败（不影响本轮结论）: %s", e, exc_info=True)
+
+    def _record_muscle_memory_outcome(self, ctx: ChatContext, success: bool) -> None:
+        """在肌肉记忆上记一笔真实执行结果（命中本身不记账，见 check_tool_memory）。"""
+        tool_memory = self.tool_memory
+        muscle_memory = getattr(tool_memory, "muscle_memory", None)
+        if muscle_memory is None or not callable(getattr(muscle_memory, "record_usage", None)):
+            logger.debug("肌肉记忆不可用，成败回流跳过: success=%s", success)
+            return
+        record = ctx.tool_memory_result or {}
+        muscle_memory.record_usage(
+            tool_name=record.get("tool_name"),
+            query=ctx.user_input,
+            parameters=record.get("tool_params") or {},
+            success=success,
+            metadata={"source": "auto_execute", "confidence": record.get("confidence", 0)},
+        )
 
     def _on_tool_execution_status_change(self, event):
         """工具执行状态变更回调"""
@@ -959,11 +1158,31 @@ class ChatPipeline:
                 if acquired:
                     logger.info("主动技能获取: 成功安装 %s 个技能 %s", len(acquired), acquired)
                 else:
-                    logger.info("需要技能: %s，但未在市场中找到", [r.get("skill_name") for r in skills_needed if isinstance(r, dict)])
+                    _missing_skills = [
+                        r.get("skill_name") for r in skills_needed if isinstance(r, dict)
+                    ]
+                    logger.info("需要技能: %s，但未在市场中找到", _missing_skills)
                     # [BUGFIX] 市场未命中时，不应仅记录日志后放弃：回退到 NL 合成自主创建。
                     # 此前 `_check_nl_synthesis` 被 `skill_manager.auto_acquire` 互斥屏蔽，
                     # 导致「查询到所需技能结构但市场无此技能」时既不获取、也不合成——agent
                     # 永远无法自主创建工具/技能。这里用 force=True 显式绕过该守卫。
+                    #
+                    # T-03 之后入口判据是**能力缺口**，故本分支必须**就地投递**缺口信号：
+                    # 这里才是真正知道"这条能力取不到"的生产点（读数来自市场返回，
+                    # 不重算）。只记日志不投信号，回退调用就会被入口的
+                    # `detectCapabilityGap()` 读到空而直接 return —— 回退成死路
+                    # （`force=True` 此时只绕开了 auto_acquire 互斥，绕不开缺口判据）。
+                    # 类别复用既有 S3（能力检索零命中），不新增第四类信号。
+                    from neurova.agent.capability_gap import (
+                        GAP_CATALOG_MISS,
+                        recordCapabilityGap,
+                    )
+
+                    recordCapabilityGap(
+                        GAP_CATALOG_MISS,
+                        {"surface": "skill_market", "skills": _missing_skills},
+                        str(ctx.session_id or ""),
+                    )
                     await self._check_nl_synthesis(ctx, force=True)
         except Exception:
             logger.exception("主动技能获取检查失败")
@@ -982,23 +1201,20 @@ class ChatPipeline:
             return
 
         try:
-            action_keywords = [
-                "帮我",
-                "读取",
-                "写入",
-                "搜索",
-                "下载",
-                "转换",
-                "生成",
-                "read",
-                "write",
-                "search",
-                "download",
-                "convert",
-                "generate",
-            ]
-            if not any(kw in ctx.user_input.lower() for kw in action_keywords):
+            # 入口判据由**用户措辞关键词**改为**能力缺口**（T-03）。
+            # 老判据的病灶：事故三轮原话（"还有这个 你看看有什么信息可以提炼"
+            # "继续补充" "出什么问题了？继续任务"）零命中，而模型确实缺一条
+            # 读 SQLite 的能力 —— 入口只对"用户说得像不像命令"敏感，
+            # 对"确实缺能力"不敏感。缺口信号单源在 `agent/capability_gap.py`。
+            from neurova.agent.capability_gap import detectCapabilityGap
+
+            # 附件缺口（S1）由注入步在生产点投递（那里才知道抽取结果），
+            # 此处只消费判据。
+            gap = detectCapabilityGap()
+            if not gap.hasGap:
                 return
+
+            logger.info("[能力缺口] 驱动自主创建：kinds=%s", gap.kinds)
 
             skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
@@ -1029,6 +1245,20 @@ class ChatPipeline:
                 )
                 # Bug T-2 修复: ToolSynthesisResult 无 stage/tool/confidence 字段，
                 # 它们在 synthesized_tool 上；且 SynthesisStage.COMPLETED.value == "completed"（小写）
+                # 工单 014：调用方判据同步收紧。产物存在但未真正通过（低置信落
+                # PENDING_REVIEW，或 success 与 stage 自相矛盾）一律不注册且必须留痕
+                # ——原实现只看两个字段就静默跳过，看不出"门拦了"还是"根本没门"。
+                from neurova.evolution.nl_synthesizer import SynthesisStage
+
+                _tool = getattr(synth_result, "synthesized_tool", None) if synth_result else None
+                if _tool is not None and not (
+                    synth_result.success and _tool.stage is SynthesisStage.COMPLETED
+                ):
+                    logger.info(
+                        "NL 合成产物未过闸，不注册: %s stage=%s confidence=%.2f",
+                        getattr(_tool, "name", ""), _tool.stage.value, _tool.confidence,
+                    )
+                    return
                 if synth_result and synth_result.success and synth_result.synthesized_tool:
                     tool = synth_result.synthesized_tool
                     if tool.stage.value == "completed":
@@ -1338,9 +1568,32 @@ class ChatPipeline:
                     f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}"
                 )
             else:
-                parts.append(f"[用户上传了文件 {filename}（{file_type}），无法解析文本内容]")
-                if status not in ("unsupported_format", "empty_file"):
-                    logger.debug("[附件注入] %s 未抽取文本: %s", filename, status)
+                from neurova.attachment_parser import suggestExtractionPrimitive
+
+                # 抽取失败一律留痕：`unsupported_format` 此前被显式排除在日志外，
+                # 于是事故轮在日志里零痕迹，问题只能靠人肉复现（T-03 的缺口信号
+                # 也要读得到它，故级别取 warning）。
+                logger.warning(
+                    "[附件注入] %s（%s）未抽取文本: %s（file_id=%s）",
+                    filename,
+                    file_type,
+                    status,
+                    file_id or "缺失",
+                )
+                # S1 生产点（T-03）：这里才知道"这个附件真读不出内容"，
+                # `status` 也是抽取器给的那一份。缺口驱动入口消费它。
+                from neurova.agent.capability_gap import noteAttachmentSignal
+
+                noteAttachmentSignal(filename, file_type, file_id, status)
+                parts.append(
+                    composeUnparseableAttachmentNotice(
+                        filename=filename,
+                        file_type=file_type,
+                        status=status,
+                        file_id=file_id,
+                        primitive=suggestExtractionPrimitive(filename, file_type),
+                    )
+                )
 
         return "\n\n".join(parts), vision_parts
 
@@ -1433,6 +1686,8 @@ class ChatPipeline:
             session_context=ctx.session_context,
             voice_context=voice_context,
             citation_registry=ctx.citation_registry,
+            chat_collab=(ctx.metadata or {}).get("turn_origin") == "collaboration",
+            chat_room_id=(ctx.session_id or "") if (ctx.metadata or {}).get("turn_origin") == "collaboration" else "",
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
@@ -1499,8 +1754,13 @@ class ChatPipeline:
         if _active_memory_enabled():
             result = await self._active_memory_escalation(ctx, result, user_id)
 
-        # 提取记忆内容
-        ctx.relevant_memories = result.memories
+        # 提取记忆内容（按会话作用域隔离：单聊只见 direct；群聊见 direct + 本群，群群互不可见）
+        from neurova.collaboration.memory_scope import filter_memories_by_scope
+
+        _collab = (ctx.metadata or {}).get("turn_origin") == "collaboration"
+        ctx.relevant_memories = filter_memories_by_scope(
+            result.memories, collab=_collab, room_id=(ctx.session_id or "") if _collab else ""
+        )
 
         # 记录检索统计
         logger.info(
@@ -1731,8 +1991,15 @@ class ChatPipeline:
         查 data/experience_knowledge.db 中与当前输入相似的历史经验（≤3 条），
         填充 ctx.experience_items——orchestrator 池路径据此归档 + 以
         `[经验]` 注入。查询失败不阻断主流程。
+
+        工单 006：每条 EKB 条目带行 id，并把本轮注入的 id 集立进 turn_context，
+        回合末据此回写采纳结果；任何一条路径走完都必须重立该集（含清空），
+        否则会沿用上一轮的身份集把账记到错误的行上。
         """
+        from neurova.core.turn_context import set_turn_injected_experiences
+
         if ctx.experience_items or not ctx.user_input:
+            set_turn_injected_experiences([])
             return
         try:
             from neurova.skills.experience_knowledge_base import (
@@ -1760,6 +2027,8 @@ class ChatPipeline:
                         "source": "growth_lesson", "status": "retrieved",
                         "question_id": lesson["question_id"], "revision": lesson["revision"],
                     })
+            from neurova.skills.models import outcomeMark, outcomeState
+
             for hit in hits or []:
                 if not isinstance(hit, dict) or hit.get("skill_name") == "growth_answer":
                     continue
@@ -1780,18 +2049,36 @@ class ChatPipeline:
                     reply_side = str(hit_result)
                 else:
                     reply_side = ""
-                mark = "✓" if hit.get("success") else "✗"
+                # 工单 004 边界：三态原样带走。工单 016 补一处——`bool(...)`
+                # 把未测量（NULL）折成 False 传给下游（池归档、去重优先级、
+                # 最终进 prompt 的那一行都据此判断）。真相在库里，传动轴只负责
+                # 原样搬运，不得在这里做二次解释。
+                # 记号与归一都取 `skills.models` 的单源词汇（折叠点被逐条改完
+                # 之后，剩下的失效模式是"每人各写一份三元表达式"）。
+                mark = outcomeMark(hit.get("success"))
                 items.append(
                     {
                         "content": f"{mark} {user_side[:80]} → {reply_side[:80]}",
                         "source": "ekb",
-                        "success": bool(hit.get("success")),
+                        "success": outcomeState(hit.get("success")),
+                        # 工单 006：回写身份。growth_lesson 条目住在另一张表，
+                        # 刻意不带 id，避免把账记到错误的行上
+                        "id": hit.get("id"),
+                        # 工单 007：注入优先级按采纳证据算，证据必须随条目带到消费方
+                        "adoption_outcome": hit.get("adoption_outcome"),
+                        # 工单 015：人工处置态同理——没带到消费方，降权就永远读不出来
+                        "operator_disposition": hit.get("operator_disposition"),
+                        "similarity_score": hit.get("similarity_score"),
                     }
                 )
+            set_turn_injected_experiences(
+                [i["id"] for i in items if i.get("source") == "ekb" and i.get("id") is not None]
+            )
             if items:
                 ctx.experience_items = items
                 logger.debug("EKB 经验检索命中 %s 条", len(items))
         except Exception as e:  # noqa: BLE001 - 经验检索失败不阻断主流程
+            set_turn_injected_experiences([])
             logger.debug("EKB 经验检索跳过: %s", e)
 
     # ══════════════════════════════════════════════════════════════
@@ -1823,12 +2110,37 @@ class ChatPipeline:
     # Step 3: LLM 调用（含自动续写）
     # ══════════════════════════════════════════════════════════════
 
+    def _resolve_auto_effort(self, ctx: ChatContext):
+        """G2 per-turn 自动定档：调用方未显式选档时，按查询难度保守推断并回写
+        metadata["thinking_effort"]（与指令注入/reasoning_effort 两路共用单一真源）。
+
+        安全边界：显式档位绝不覆盖；歧义不改现状；kill-switch=NEUROVA_AUTO_EFFORT=off；
+        无 LLM/IO，fail-open——任何异常不阻断对话。
+        """
+        try:
+            from neurova.agent.effort_inference import auto_effort_enabled, infer_query_effort
+
+            if not auto_effort_enabled():
+                return
+            current = ""
+            if isinstance(ctx.metadata, dict):
+                current = str(ctx.metadata.get("thinking_effort") or "").strip().lower()
+            if current:  # 尊重调用方显式档位（含 standard），绝不改写
+                return
+            inferred = infer_query_effort(ctx.user_input or "")
+            if inferred:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["thinking_effort"] = inferred
+        except Exception:  # noqa: BLE001 - 自动定档失败回落现状，不阻断对话
+            logger.debug("自动定档解析失败（忽略）", exc_info=True)
+
     def _apply_thinking_effort(self, ctx: ChatContext):
         """按 metadata.thinking_effort（light/standard/deep）注入回答深度指令。
 
         采用提示词方式而非原生 reasoning 参数：对所有模型通用，
         且避免不支持的 API 因未知参数报 400。
         """
+        self._resolve_auto_effort(ctx)
         effort = ""
         if isinstance(ctx.metadata, dict):
             effort = str(ctx.metadata.get("thinking_effort") or "").lower()
@@ -1862,6 +2174,15 @@ class ChatPipeline:
             # 可能在本轮已激活请求级 override（ContextVar 随请求任务存活，不会
             # 因提前返回消亡），漏清会让同任务后续 LLM 调用串到视觉模型。
             self._clear_vision_routing(ctx)
+            return
+        # 任务2：actionability 门控判定不可行 → 跳过 LLM（结构化标记，交上层裁决）
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("actionable") is False:
+            logger.info(
+                "actionability 门控判定不可行（origin=%s reason=%s），本轮跳过 LLM 调用",
+                ctx.metadata.get("actionable_origin"),
+                ctx.metadata.get("actionable_reason"),
+            )
+            ctx.reply = ""
             return
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
@@ -2033,8 +2354,6 @@ class ChatPipeline:
         （不入回复文本）不变。
         """
         reply_parts = []
-        # C1: 捕获原生 function-calling 的工具事件，循环后合并到 _tool_messages_list
-        native_tool_events: List[Dict] = []
         # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
@@ -2099,8 +2418,11 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 retry 失败: %s", e)
             elif etype in ("tool_call", "tool_result"):
-                # C1: 原生 function-calling 元数据，接入工具消息列表
-                native_tool_events.append(event)
+                # 工具事件的取证记录由执行链自己落（`loops/base.py` 的
+                # `handle_tool_calls` 经 `append_tool_messages` 写入扁平记录）。
+                # 这里只做传输：转发 SSE / 蜂群流。曾经此处把事件原样并入取证源，
+                # 导致同一列表里出现 `{type, data}` 包装条目——`turn_state` 读不到
+                # `tool_name`、`post_chat` 读出 `unknown`，成败与工具名一起失真。
                 # [真流式] 仅当调用方显式开启 emit_tool_events（console SSE 桥接）
                 # 时才转发工具事件；默认关闭——该通道同时服务蜂群子 Agent
                 # 逐 token 流，需保持纯文本契约（见 test_chat_stream_events）
@@ -2120,10 +2442,6 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 %s 失败: %s", etype, e)
             # reasoning 等其他元数据事件不入回复
-            # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
-        if native_tool_events:
-            self._agent.append_tool_messages(native_tool_events)
-            logger.debug("原生模式捕获 %d 个工具事件", len(native_tool_events))
         if cit_buf is not None and emitter is not None:
             try:
                 _tail = cit_buf.flush()
@@ -2538,6 +2856,12 @@ error_type 五类标准键（multi_model_client 流内
             "reasoning": self._agent.current_reasoning,
             "tool_messages": self._collect_tool_messages(),
             "proactive_question": post_result.get("proactive_question"),
+            # RSI 摘要（真接线）：不是整个迭代 dict，而是
+            # {status, applied_count, gain, phase_advanced, turn, stale}——
+            # 字段名对齐 RSIOrchestrator.run_iteration 真实输出，由
+            # neurova.evolution.rsi.result_summary 裁剪。RSI 步骤已后台化，
+            # 这里给的是该会话最近一次已完成迭代（从未跑过则 None）。
+            "rsi": post_result.get("rsi"),
         }
 
         # 结束轨迹
@@ -2550,43 +2874,13 @@ error_type 五类标准键（multi_model_client 流内
             self._trajectory_recorder.end_trace(ctx.trace_id)
 
     async def _run_post_chat_pipeline(self, ctx: ChatContext) -> Dict[str, Any]:
-        """Bug #5+11: 提取的 post_chat_pipeline 调用辅助方法
+        """执行对话后处理管线（委托 PostChatPipeline.process）。
 
-        优先使用 PipelineExecutor，失败时 fallback 到 post_chat_pipeline。
         Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError。
-        Bug #11: 消除 fallback 代码重复。
         """
-        pipeline_executor = getattr(self._agent, "pipeline_executor", None)
-        if pipeline_executor:
-            try:
-                from neurova.pipeline_executor import PipelineRequest
-
-                request = PipelineRequest(
-                    user_input=ctx.user_input,
-                    reply=ctx.reply,
-                    session_id=ctx.session_id,
-                    save_memory=ctx.save_memory,
-                    enable_tts=ctx.enable_tts,
-                    metadata=ctx.metadata or {},
-                    writer_claim=ctx.writer_claim,
-                )
-                response = await pipeline_executor.execute(request)
-                # 转换为旧格式以保持兼容性
-                return {
-                    "actual_session_id": response.session_id,
-                    "audio_path": response.audio_url,
-                    "audio_data": response.metadata.get("audio_data"),
-                    "cognitive_score": response.cognitive_score,
-                    "proactive_question": response.metadata.get("proactive_question"),
-                }
-            except Exception as e:
-                logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)
-
-        # Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError
         if self.post_chat_pipeline is None:
             raise RuntimeError(
-                "post_chat_pipeline is not initialized — cannot execute post-chat processing. "
-                "Either initialize Agent.post_chat_pipeline or configure pipeline_executor."
+                "post_chat_pipeline is not initialized — cannot execute post-chat processing."
             )
 
         return await self.post_chat_pipeline.process(

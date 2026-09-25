@@ -1,3 +1,11 @@
+# 依赖单一事实源 = requirements.txt（生产安装路径：Dockerfile / install.py 都装它，
+# 锁文件 requirements-full.lock 由它编译）。本文件**刻意不设** [project].dependencies——
+# 两处声明必然漂移，而漂移的代价不对称：requirements-ci.txt 里有、运行时没有的包
+# （Issue #62 的 mcp>=1.2.0）会让 CI 全绿而线上静默降级。
+# CI 薄环境清单见 requirements-ci.txt / requirements-ci.lock；
+# 不变量由 tests/unit/test_dev_path_and_runtime_dep_guards.py 与
+# tests/unit/test_lock_integrity_guard.py 常驻校验。
+
 [tool.black]
 line-length = 120
 target-version = ['py310']
@@ -93,13 +101,29 @@ max-attributes = 15
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
-python_functions = ["test_*"]
+# pytest 默认口径是**前缀** `test`（`--help` 的 "Prefixes or glob names"），
+# 故 def testFoo（驼峰）本就被收集；真正会静默丢用例的是把它收窄成 ["test_*"]。
+# 本项显式列出两条，效果比默认更严：`def test` / `def testing_helper` 这类
+# 名字像用例却非用例的落点不再被收集（收集到它们只会得到一条恒真的假绿）。
+# 判定语义（前缀 或 glob）与仓内落点由
+# tests/unit/core/test_pytest_collection_hygiene.py 按**活配置**逐条反证。
+python_functions = ["test_*", "test[A-Z]*"]
 # 使用 importlib import mode 避免重名测试模块冲突
 # （tests/ 下有 ad-hoc 文件与 unit/ 下的同名文件，prepend 模式会冲突）
 addopts = "-v --tb=short --import-mode=importlib"
 # pytest-timeout 全局挂死保护（Windows 自动用 thread 方法，Linux 用 signal）；
 # 慢测试用 @pytest.mark.timeout(N) 单独放宽，CLI --timeout 可临时覆盖
 timeout = 30
+# 精准屏蔽第三方 SDK 生命周期噪声：lark_oapi 的 lark.Client 内部 ExpiringCache 会起后台
+# asyncio cron，测试事件循环关闭后才被 GC，__del__→cancel() 抛 "Event loop is closed"（经
+# PytestUnraisableExceptionWarning）。非本仓代码缺陷、非测试失败，且无法在不改 vendored SDK
+# 前提下根治。仅屏蔽该 ExpiringCache.__del__ 一条，其余 unraisable 照常暴露。
+filterwarnings = [
+    "ignore:Exception ignored in.*ExpiringCache.*__del__:pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+    "slow: 全库扫描等耗时测试（node guard 扫 953 文件），默认仍随 pytest 运行，可用 -m 'not slow' 跳过",
+]
 
 [tool.coverage.run]
 # P0-6：CI 覆盖率门禁的度量范围 = 受保护子集实际 exercising 的模块。

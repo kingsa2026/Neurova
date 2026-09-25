@@ -6,7 +6,57 @@ import type { ApiResponse, PaginatedData } from '@/types/response'
 // ---------------------------------------------------------------------------
 
 /** 记忆类型 = 后端 MemoryType 枚举值（页签过滤键 / 列表 type 列数据源） */
-export type MemoryTypeValue = 'semantic' | 'episodic' | 'procedural' | 'pattern' | 'emotional' | 'working'
+export type MemoryTypeValue =
+  | 'semantic'
+  | 'episodic'
+  | 'procedural'
+  | 'pattern'
+  | 'emotional'
+  | 'working'
+  | 'workflow_experience'
+
+/**
+ * 记忆类型词表（工单 015 收拢）：类型值 + 标签键 + 色板一处登记。
+ *
+ * 收拢前同一个枚举在 MemoryPage 的页签、新建下拉、typeColor 里各抄了一份，
+ * 后端 012 补上的 `workflow_experience` 因此在库里能存能检、界面上筛不出来。
+ * 新增类型只改这里，界面三处自动跟上。
+ */
+export const MEMORY_TYPES: ReadonlyArray<{ value: MemoryTypeValue; labelKey: string; color: string }> = [
+  { value: 'semantic', labelKey: 'memory.categorySemantic', color: '#8b5cf6' },
+  { value: 'episodic', labelKey: 'memory.categoryEpisodic', color: '#f59e0b' },
+  { value: 'working', labelKey: 'memory.typeWorking', color: '#6366f1' },
+  { value: 'procedural', labelKey: 'memory.typeProcedural', color: '#10b981' },
+  { value: 'pattern', labelKey: 'memory.typePattern', color: '#0ea5e9' },
+  { value: 'emotional', labelKey: 'memory.typeEmotional', color: '#f43f5e' },
+  { value: 'workflow_experience', labelKey: 'memory.typeWorkflowExperience', color: '#14b8a6' },
+]
+
+/** 类型值 → 色板（与 MEMORY_TYPES 同源，不再第二份 map） */
+export const MEMORY_TYPE_COLOR: Record<string, string> = Object.fromEntries(
+  MEMORY_TYPES.map((m) => [m.value, m.color]),
+)
+
+/**
+ * 分类值清单（后端 `MemoryCategory` 枚举，7 值，唯一事实源）。
+ *
+ * 修 Issue #68 登记的界面欠账：MemoryPage 筛选/新建下拉曾另有一份本地数组
+ * `['general','conversation','fact','preference','skill','emotion']` ——
+ * **6 个值里有 4 个不是后端枚举**（fact/preference/skill/emotion 经
+ * `remember()` 一律回落成 general），选它们筛选永远为空；而
+ * experience/tool_usage/reflection/user_preference 四个真实分类在界面上
+ * 筛不出来，于是"库里 99% 是 general"这件事在 UI 上既看不见也筛不出。
+ * 新增分类只改这里（值本身的显示沿用枚举字面量，文案 i18n 由页面按需绑定）。
+ */
+export const MEMORY_CATEGORY_VALUES: ReadonlyArray<string> = [
+  'general',
+  'conversation',
+  'knowledge',
+  'experience',
+  'tool_usage',
+  'reflection',
+  'user_preference',
+]
 
 export interface MemoryEntry {
   id: string
@@ -34,15 +84,16 @@ export interface MemoryEntry {
  * - all → 不传（全量）
  * - hot / crystallized → 走各自专用端点，不走此映射
  * - working → 工作记忆页签
- * - long_term → 排除 working 的五类显式列表（后端逗号多值）
- * - episodic / semantic → 同名类型
+ * - long_term → 排除 working 的全部长期类型（后端逗号多值）
+ * - episodic / semantic / workflow_experience → 同名类型
  */
 export const MEMORY_TYPE_BY_TAB: Record<string, string | undefined> = {
   all: undefined,
   short_term: 'working',
-  long_term: 'semantic,episodic,procedural,pattern,emotional',
+  long_term: 'semantic,episodic,procedural,pattern,emotional,workflow_experience',
   episodic: 'episodic',
   semantic: 'semantic',
+  workflow_experience: 'workflow_experience',
 }
 
 export interface MemoryCreatePayload {
@@ -57,8 +108,10 @@ export interface MemoryCreatePayload {
   perspective?: string
   tags?: string[]
   metadata?: Record<string, unknown>
+  /** 是否自动分类推断（后端 AddMemoryRequest.auto_classify；只补未声明的分类维度） */
   auto_classify?: boolean
-  classification_context?: string
+  /** 分类上下文（后端为 dict，如 { emotion: 'joy' 触发情感亲和增强 }；此前 TS 误标为 string） */
+  classification_context?: Record<string, unknown>
   auto_analyze_emotion?: boolean
 }
 
@@ -76,6 +129,13 @@ export interface MemoryStats {
   by_type: { type: string; count: number }[]
   avg_importance: number
   storage_used: number
+  /** 记忆侧冲突账读数（检测链落账，读侧可见；unresolved 尚待处置）。 */
+  conflicts?: {
+    total: number
+    resolved: number
+    unresolved: number
+    by_type: Record<string, number>
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +173,30 @@ export interface EmotionSummary {
 
 export interface EmotionDistribution {
   [emotion: string]: number
+}
+
+/** 情绪时间轴窗口；分桶粒度由窗口推导（24h→小时、7d/30d→天、90d→周）。 */
+export type EmotionTimelineRange = '24h' | '7d' | '30d' | '90d'
+
+export interface EmotionTimelinePoint {
+  /** 桶起点（epoch 秒） */
+  ts: number
+  /** 后端给定的 X 轴标签：小时 "HH:00"、日/周 "MM-DD" */
+  label: string
+  /** intensity 加权的带符号效价（正=积极）；无情绪事件的桶为 null */
+  valence: number | null
+  count: number
+  /** 桶内 |valence|×intensity 最大那条记忆的情绪与强度 */
+  peak_emotion: string | null
+  peak_intensity: number | null
+  /** 触发该次情绪变化的记忆内容摘要 */
+  excerpt: string
+}
+
+export interface EmotionTimeline {
+  range: EmotionTimelineRange
+  bucket: 'hour' | 'day' | 'week'
+  points: EmotionTimelinePoint[]
 }
 
 export interface EmotionAnalysisResult {
@@ -424,11 +508,6 @@ export function deleteMemory(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
 }
 
-/** Search memories with semantic similarity. */
-export function searchMemories(agentId: string, query: string, params?: { limit?: number; type?: string }) {
-  return api.post<ApiResponse<MemorySearchResult[]>>(`${BASE}/search`, { agent_id: agentId, query, ...params })
-}
-
 /** Get memory statistics. */
 export function getMemoryStats(agentId: string) {
   return api.get<ApiResponse<MemoryStats>>(`${BASE}/stats`, { params: { agent_id: agentId } })
@@ -447,6 +526,17 @@ export function getCrystallizedMemories(agentId: string, limit = 20) {
 /** Manually trigger temperature decay cycle. */
 export function triggerDecay(agentId: string) {
   return api.post<ApiResponse<{ decayed: number }>>(`${BASE}/decay`, null, { params: { agent_id: agentId } })
+}
+
+/**
+ * 与盘对账：把外进程写入的记忆并入运行中后端的快照，并回收盘上已消失的行（F-05 / 断点①）。
+ *
+ * 记忆快照只在后端构造时读一次盘：CLI 在另一个进程导入的记忆看不见（reloaded），
+ * 它在另一个进程撤销掉的行也不会消失、还能被界面的一次强化写回盘上（reaped）。
+ * 两个读数都只报真实发生量（幂等，无事发生时为 0），无需重启后端。
+ */
+export function reloadMemories(agentId?: string) {
+  return api.post<ApiResponse<{ reloaded: number; reaped: number }>>(`${BASE}/reload`, null, { params: { agent_id: agentId } })
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +593,11 @@ export function getEmotionSummary(agentId: string) {
 /** Get emotion distribution. */
 export function getEmotionDistribution(agentId: string) {
   return api.get<ApiResponse<EmotionDistribution>>(`${EMOTION_BASE}/distribution`, { params: { agent_id: agentId } })
+}
+
+/** 情绪变化时间轴：按窗口分桶的带符号效价序列。 */
+export function getEmotionTimeline(agentId: string, range: EmotionTimelineRange) {
+  return api.get<ApiResponse<EmotionTimeline>>(`${EMOTION_BASE}/timeline`, { params: { agent_id: agentId, range } })
 }
 
 /** Analyze text emotion. */

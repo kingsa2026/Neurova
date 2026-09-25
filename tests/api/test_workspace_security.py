@@ -23,7 +23,7 @@ from neurova.api.deps import get_current_user
 def ws_root(tmp_path, monkeypatch):
     root = tmp_path / "agent_workspaces"
     root.mkdir()
-    monkeypatch.setattr(wf, "_WORKSPACES_ROOT", root)
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(root))
     return root
 
 
@@ -111,7 +111,9 @@ def test_workspace_root_is_absolute(ws_root):
     """P1-8：工作区根为绝对路径，不随进程 CWD 漂移。"""
     from pathlib import Path
 
-    assert Path(wf._WORKSPACES_ROOT).is_absolute()
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    assert Path(get_agent_workspaces_root()).is_absolute()
 
 
 def test_unauthenticated_rejected(ws_root, client):

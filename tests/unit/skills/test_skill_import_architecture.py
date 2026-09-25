@@ -210,35 +210,25 @@ class TestMarketEndpointsUnified:
     """验证 4 套市场端点收敛到 1 套。"""
 
     def test_skill_market_endpoint_removed(self):
-        """stub 端点 skill_market.py 应被删除或不再注册。"""
-        try:
-            mod = importlib.import_module("neurova.api.endpoints.skill_market")
-            # 如果模块仍存在，检查是否被标记 deprecated
-            assert hasattr(mod, "_DEPRECATED") or hasattr(mod, "DEPRECATED"), (
-                "skill_market.py stub 端点应被删除或标记 deprecated"
-            )
-        except ImportError:
-            pass  # 已删除 — 通过
+        """stub 端点 skill_market.py 已按 ADR 0013 删除（不得再注册）。"""
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("neurova.api.endpoints.skill_market")
 
     def test_skills_market_endpoint_removed(self):
-        """demo 端点 skills_market.py 应被删除或不再注册。"""
-        try:
-            mod = importlib.import_module("neurova.api.endpoints.skills_market")
-            assert hasattr(mod, "_DEPRECATED") or hasattr(mod, "DEPRECATED"), (
-                "skills_market.py demo 端点应被删除或标记 deprecated"
-            )
-        except ImportError:
-            pass  # 已删除 — 通过
+        """demo 端点 skills_market.py 已按 ADR 0013 删除（不得再注册）。"""
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("neurova.api.endpoints.skills_market")
 
-    def test_marketplace_endpoint_removed(self):
-        """调 stub importer 的 marketplace.py 应被删除或不再注册。"""
-        try:
-            mod = importlib.import_module("neurova.api.endpoints.marketplace")
-            assert hasattr(mod, "_DEPRECATED") or hasattr(mod, "DEPRECATED"), (
-                "marketplace.py 端点应被删除或标记 deprecated"
-            )
-        except ImportError:
-            pass  # 已删除 — 通过
+    def test_marketplace_is_still_the_canonical_market_face(self):
+        """marketplace.py 例外：它仍挂在 /api/v1/marketplace，且前端 skill-pool.ts 正调它。
+
+        ADR 0013 的 §2 把 marketplace.py 也列为待删，但该条已被后续演化取代
+        （前端 market 页改走 `/marketplace/skills*`，见 ADR 修订记录）。故本项只锁
+        「规范面唯一」这条不变式：待删的 skill_market / skills_market 已删净，
+        marketplace 仍服役——不把在用的面一并删掉。
+        """
+        mod = importlib.import_module("neurova.api.endpoints.marketplace")
+        assert hasattr(mod, "router"), "marketplace.py 仍是前端 market 页的服务面"
 
     def test_skill_pool_api_is_canonical(self):
         """skill_pool_api.py 应为唯一规范端点。"""

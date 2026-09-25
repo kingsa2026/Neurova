@@ -1,11 +1,4 @@
 <template>
-  <!--
-    CanvasDesignerPage.vue — 可视化画布设计器
-    职责：可视化拖拽编排工作流节点 + 多 Agent 协作流程
-    设计：三栏布局（左侧节点库 | 中间画布 | 右侧属性面板）
-
-    当前为骨架版本，后续可集成 Vue Flow / reactflow 风格的节点画布。
-  -->
   <div class="canvas-designer" ref="canvasRoot">
     <!-- 顶部工具栏 -->
     <div class="canvas-toolbar">

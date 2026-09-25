@@ -90,5 +90,4 @@ class AutoTagger:
             tags=all_tags,
             hash=context.hash,
             created_at=context.created_at,
-            updated_at=context.updated_at,
         )

@@ -18,7 +18,7 @@
           <div class="overview-grid">
             <GlassCard :title="t('growth.motivation')">
               <div class="big-stat">
-                <div class="big-value">{{ formatPercent(motivationData?.level) }}</div>
+                <div class="big-value">{{ formatPercentText(motivationData?.level) }}</div>
                 <a-progress
                   :percent="Math.round((motivationData?.level || 0) * 100)"
                   :stroke-color="(motivationData?.level || 0) >= 0.7 ? '#10b981' : '#f59e0b'"
@@ -29,7 +29,7 @@
               <div v-if="motivationData?.factors?.length" class="factors-list">
                 <div v-for="factor in motivationData.factors" :key="factor.name" class="factor-row">
                   <div class="factor-info">
-                    <span class="factor-name">{{ factor.name }}</span>
+                    <span class="factor-name">{{ enumLabel('motivation', factor.name) }}</span>
                     <span class="factor-impact" :class="{ positive: factor.impact > 0, negative: factor.impact < 0 }">
                       {{ factor.impact > 0 ? '+' : '' }}{{ Math.round(factor.impact * 100) }}%
                     </span>
@@ -51,8 +51,8 @@
               <div v-if="personalityTraits.length > 0" class="traits-list">
                 <div v-for="trait in personalityTraits" :key="trait.name" class="trait-row">
                   <div class="trait-info">
-                    <span class="trait-name">{{ trait.name }}</span>
-                    <span class="trait-value">{{ formatPercent(trait.value) }}</span>
+                    <span class="trait-name">{{ enumLabel('personality', trait.name) }}</span>
+                    <span class="trait-value">{{ formatPercentText(trait.value) }}</span>
                   </div>
                   <a-progress
                     :percent="Math.round((trait.value || 0) * 100)"
@@ -258,13 +258,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { formatPercentText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
+import { useEnumLabel } from '@/composables/useEnumLabel'
 import * as growthApi from '@/api/modules/growth'
 import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthQuestion, ProactiveAction, GrowthCapabilities } from '@/api/modules/growth'
 
 const { t } = useI18n()
+const { enumLabel } = useEnumLabel()
 const { agentId, currentAgent } = useAgentPage({
   onAgentChange: () => {
     fetchOverview()
@@ -308,8 +311,6 @@ const newRuleText = ref('')
 const newRulePriority = ref(1)
 const deletingRule = ref(false)
 
-const formatPercent = (val: number | undefined) =>
-  val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
 // 能力维度标签：i18n 两层键契约（growth.dimensionCognitive 等）
 const dimLabel = (key: string) => t(`growth.dimension${key.charAt(0).toUpperCase()}${key.slice(1)}`)

@@ -68,7 +68,7 @@ class TestSourceResolution:
         monkeypatch.setattr(md, "_download_via_modelscope", self._ok_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._fail_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._fail_engine("hf", calls))
-        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+        md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False).ensure_model(
             "bge-small-zh-v1.5", source="auto")
         assert calls == ["ms"]
 
@@ -78,7 +78,7 @@ class TestSourceResolution:
         monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._fail_engine("hf", calls))
-        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+        md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False).ensure_model(
             "moss-tts-nano", source="auto")
         assert calls == ["ms", "mirror"]   # mirror 成功即止，不再落 hf
 
@@ -87,7 +87,7 @@ class TestSourceResolution:
         monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._fail_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
-        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+        md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False).ensure_model(
             "bge-small-zh-v1.5", source="auto")
         assert calls == ["ms", "mirror", "hf"]
 
@@ -96,7 +96,7 @@ class TestSourceResolution:
         monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
-        dl = md.ModelDownloader(base_dir=str(tmp_path))
+        dl = md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
         with pytest.raises(RuntimeError):
             dl.ensure_model("bge-small-zh-v1.5", source="modelscope")
         assert calls == ["ms"]  # 显式指定源：失败不换源
@@ -106,19 +106,19 @@ class TestSourceResolution:
         monkeypatch.setattr(md, "_download_via_modelscope", self._ok_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
-        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+        md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False).ensure_model(
             "bge-small-zh-v1.5", source="huggingface")
         assert calls == ["hf"]
 
     def test_invalid_source_rejected(self, tmp_path):
         with pytest.raises(ValueError):
-            md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+            md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False).ensure_model(
                 "bge-small-zh-v1.5", source="ftp")
 
     def test_progress_callback_wired_to_all_sources(self, tmp_path, monkeypatch):
         """进度回调在三个源都要接上（前端进度条的数据源）。"""
         seen = []
-        dl = md.ModelDownloader(base_dir=str(tmp_path))
+        dl = md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
         dl.set_progress_callback(lambda p: seen.append(p))
 
         def engine(registry, model_dir, cb=None):
@@ -173,7 +173,7 @@ class TestSourceStore:
 
 class TestPendingDownloads:
     def test_pending_lists_missing_models(self, tmp_path):
-        dl = md.ModelDownloader(base_dir=str(tmp_path))
+        dl = md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
         pending = dl.pending_downloads()
         assert isinstance(pending, list)
         assert pending, "干净目录下三个模型全缺失"
@@ -182,6 +182,6 @@ class TestPendingDownloads:
             assert item["available"] is False
 
     def test_pending_empty_when_all_present(self, tmp_path, monkeypatch):
-        dl = md.ModelDownloader(base_dir=str(tmp_path))
+        dl = md.ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
         monkeypatch.setattr(dl, "is_model_available", lambda name: True)
         assert dl.pending_downloads() == []

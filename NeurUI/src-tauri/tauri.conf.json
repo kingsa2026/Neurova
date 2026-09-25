@@ -65,11 +65,10 @@
       }
     },
     "resources": {
-      "resources/backend/python": "backend/python",
       "resources/backend/neurova": "backend/neurova",
       "resources/backend/models": "backend/models",
       "resources/backend/config": "backend/config",
-      "resources/backend/node": "backend/node",
+      "resources/backend/requirements.txt": "backend/requirements.txt",
       "resources/backend/start_server.py": "backend/start_server.py"
     }
   }

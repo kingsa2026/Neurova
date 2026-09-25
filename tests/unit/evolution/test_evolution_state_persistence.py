@@ -171,10 +171,17 @@ class TestToolLifecyclePersistence(_PersistenceTestBase):
 
 class TestExperienceFeedbackPersistence(_PersistenceTestBase):
     def _feedback_with_history(self):
+        """成败必须显式给出（工单 010）。
+
+        原夹具靠"成功完成/再次成功/完成了"这些字样让关键词粗分代投成功票 —— 010
+        把关键词退到最后一格且不再计票，本夹具要验的是**计数能否往返**，喂进去的
+        就得是客观票，否则三条都成了"尝试数 3、成功数 0"，往返断言测不到东西。
+        """
         fb = ExperienceFeedback()
-        fb.process_experience("使用 web_search 搜索成功完成", task_type="research")
-        fb.process_experience("web_search 再次成功", task_type="research")
-        fb.process_experience("web_search 完成了", task_type="research")
+        fb.process_experience("使用 web_search 搜索完成", task_type="research",
+                              outcome="success")
+        fb.process_experience("web_search 再次", task_type="research", outcome="success")
+        fb.process_experience("web_search 完成了", task_type="research", outcome="success")
         return fb
 
     def test_save_load_roundtrip_preserves_counters(self):

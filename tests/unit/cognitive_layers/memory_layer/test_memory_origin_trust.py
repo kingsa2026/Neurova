@@ -125,29 +125,58 @@ class TestRetrievalOriginWeighting:
         assert results[0]["content"] == "香蕉是黄色的水果"
 
 
-class TestSchemaMigrationOrigin:
-    """schema.py 迁移：旧库幂等加列"""
+class TestOriginMigrationWiring:
+    """`origin` 列的旧库兼容：由 MemoryManager 持久库建库路径幂等补列承载。
 
-    def test_migrate_schema_adds_origin(self, tmp_path):
+    原断言挂在 `memory_layer/schema.py::migrate_schema`——该模块是第二套 DDL
+    （memories + FTS5 + memory_relations + trigger_chains），全仓无人建表，
+    随 Issue #74 退役。真正让旧库拿到 `origin` 列的是 MemoryManager 的持久库
+    建库路径（`manager.py` 内 `ALTER TABLE memories ADD COLUMN origin`），
+    断言随之落到生产点，而不是留在死模块上。
+    """
+
+    def test_legacy_persist_db_gets_origin_column(self, tmp_path):
         import sqlite3
-        import threading
 
-        from neurova.cognitive_layers.memory_layer.schema import migrate_schema
+        from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
-        db = str(tmp_path / "legacy.db")
-        conn = sqlite3.connect(db)
-        # 模拟旧库：无 origin 列的 memories 表
+        # 持久库路径 = db_path 同目录下的 neurova_memories_persist.db（manager 约定）
+        persist = tmp_path / "neurova_memories_persist.db"
+        conn = sqlite3.connect(str(persist))
+        # 模拟旧库：列与现行 DDL 一致，但**没有** origin 列
         conn.execute(
-            "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, "
-            "agent_id TEXT NOT NULL DEFAULT 'default')"
+            """CREATE TABLE memories (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL,
+                memory_type TEXT NOT NULL DEFAULT 'semantic',
+                category TEXT NOT NULL DEFAULT 'general',
+                lifecycle_stage TEXT NOT NULL DEFAULT 'active',
+                perspective TEXT NOT NULL DEFAULT 'first_person',
+                emotion TEXT NOT NULL DEFAULT 'neutral',
+                temperature REAL NOT NULL DEFAULT 100.0,
+                importance REAL NOT NULL DEFAULT 50.0,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                agent_id TEXT NOT NULL DEFAULT 'default',
+                neuser_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL DEFAULT 'default',
+                shared INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                last_accessed_at TEXT
+            )"""
         )
         conn.commit()
-        migrate_schema(conn, threading.Lock())
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
-        # 幂等：再跑一次不炸
-        migrate_schema(conn, threading.Lock())
         conn.close()
-        assert "origin" in cols
+
+        MemoryManager(db_path=str(tmp_path / "agent.db"), agent_id="origin_migration_probe")
+
+        check = sqlite3.connect(str(persist))
+        cols = {r[1] for r in check.execute("PRAGMA table_info(memories)").fetchall()}
+        check.close()
+
+        assert "origin" in cols, (
+            "旧持久库经 MemoryManager 打开后仍缺 origin 列——来源信任分级在旧库上失效。"
+            "补列点在 manager 的持久库建库路径（ALTER TABLE ... ADD COLUMN origin）。"
+        )
 
 
 class TestKnowledgeAdapterOrigin:

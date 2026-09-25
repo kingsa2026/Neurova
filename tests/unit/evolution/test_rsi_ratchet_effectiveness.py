@@ -51,10 +51,19 @@ class MockSystem:
         return out
 
 
-def _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=0):
-    orch = RSIOrchestrator(sleep, emotion, experience, tool_memory)
-    orch.deployment_controller._current_phase = initial_phase
-    return orch
+def _build_orchestrator(probe_factory, sleep, emotion, experience, tool_memory, initial_phase=0):
+    """经治理设置装配编排器（工单 001：取代原先直接写
+    ``orch.deployment_controller._current_phase`` 的做法——私赋阶段会绕过
+    正待修复的晋升判据，把缺陷洗成绿色）。"""
+    return probe_factory(
+        rsi_phase=initial_phase,
+        systems={
+            "sleep": sleep,
+            "emotion": emotion,
+            "experience": experience,
+            "tool_memory": tool_memory,
+        },
+    ).orchestrator
 
 
 # ============ 根因 1：细筛验证评分错接 ============
@@ -109,7 +118,7 @@ def test_pruner_excludes_invalid_candidate():
 
 # ============ 根因 2：零活动虚假收敛 ============
 
-def test_no_signal_no_false_convergence():
+def test_no_signal_no_false_convergence(rsi_probe_factory):
     """无真实反馈信号（无可提取性能）时，RSI 不应虚假收敛。
 
     修复前：phase 0 下从不应用优化，每轮喂入 gain=0，~20 次后被判定 “converged”，
@@ -119,7 +128,7 @@ def test_no_signal_no_false_convergence():
     emotion = MockSystem("emotion", feedback={"emotional_memories": 0, "avg_intensity": 0.0}, params={})
     experience = MockSystem("experience", feedback={"crystallized_patterns": 0, "success_rate": 0.9}, params={})
     tool_memory = MockSystem("tool_memory", feedback={"total_usages": 0, "success_rate": 0.9}, params={})
-    orch = _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=0)
+    orch = _build_orchestrator(rsi_probe_factory, sleep, emotion, experience, tool_memory, initial_phase=0)
     for _ in range(30):
         if not orch.should_continue():
             break
@@ -132,7 +141,7 @@ def test_no_signal_no_false_convergence():
 
 # ============ 根因 3：无失控漂移 + 真正收敛到最优 ============
 
-def test_parameter_optimization_converges_to_setpoint_and_stops():
+def test_parameter_optimization_converges_to_setpoint_and_stops(rsi_probe_factory):
     """phase>=2 下，参数感知性能分为棘轮提供真实梯度：远离 setpoint 的参数
     被驱动至 setpoint 附近并收敛停止（证明 RSI 真正"改善"参数），且不会失控漂移。
 
@@ -150,7 +159,7 @@ def test_parameter_optimization_converges_to_setpoint_and_stops():
         params={"success_bonus": 1.0, "failure_penalty": 0.5, "decay_rate": 0.1, "muscle_memory_threshold": 0.7},
         should_change_feedback=False,  # success_rate 恒定；改善来自参数感知性能分的 setpoint 梯度
     )
-    orch = _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=2)
+    orch = _build_orchestrator(rsi_probe_factory, sleep, emotion, experience, tool_memory, initial_phase=2)
     snap_before = dict(
         success_bonus=tool_memory.success_bonus,
         failure_penalty=tool_memory.failure_penalty,
@@ -187,7 +196,7 @@ def test_parameter_optimization_converges_to_setpoint_and_stops():
     assert orch.should_continue() is False, "应最终收敛停止（真实棘轮）"
 
 
-def test_measured_improvement_yields_positive_gain():
+def test_measured_improvement_yields_positive_gain(rsi_probe_factory):
     """存在真实可测改善时（应用后 success_rate 上升），增益应为正，验证棘轮可度量收益。"""
     sleep = MockSystem("sleep", feedback={}, params={})
     emotion = MockSystem("emotion", feedback={}, params={})
@@ -198,7 +207,7 @@ def test_measured_improvement_yields_positive_gain():
         params={"success_bonus": 1.0, "failure_penalty": 0.5, "decay_rate": 0.1, "muscle_memory_threshold": 0.7},
         should_change_feedback=True,  # success_rate 随参数上升
     )
-    orch = _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=2)
+    orch = _build_orchestrator(rsi_probe_factory, sleep, emotion, experience, tool_memory, initial_phase=2)
     result = orch.run_iteration()
     assert result["applied_count"] > 0, "应当实际应用优化"
     assert result["gain"] >= 0.0, f"有真实改善时增益应>=0，实际 {result['gain']}"

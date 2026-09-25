@@ -13,6 +13,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
@@ -48,7 +49,7 @@ _DEFAULT_USER = "default"
 class PlanStore:
     """计划 SQLite 存储层（归属 = (agent_id, user_id) 二维；SQL 内联 + 参数绑定；RLock）"""
 
-    def __init__(self, db_path: str = "data/plans.db"):
+    def __init__(self, db_path: str = ""):
         self.db_path = db_path
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
@@ -58,12 +59,41 @@ class PlanStore:
         logger.info("PlanStore initialized with db_path=%s", db_path)
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """借出池化短连接（P1-4 / ADR 0014）。调用方须成对 `_close_conn`。"""
+        from neurova.core.database import get_short_connection
+
+        return get_short_connection(self.db_path)
+
+    def _close_conn(self, conn: sqlite3.Connection) -> None:
+        """归还池化短连接。"""
+        from neurova.core.database import release_short_connection
+
+        try:
+            release_short_connection(conn)
+        except Exception:  # noqa: BLE001 - 归还失败不改变调用方语义
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    @contextmanager
+    def _connection(self):
+        """借出/归还池化短连接 + 保留原"成功提交"语义。
+
+        原实现写的是 `with self._get_conn() as conn:` —— sqlite3.Connection 的
+        上下文管理器在出口提交（成功）/回滚（异常），但**不关闭连接**。于是
+        PlanStore 的每次读写都漏一条连接（长跑进程句柄数线性增长）。池化后
+        漏归还更直接：`_created_count` 只增不减，漏满 max_connections 即阻塞。
+
+        故此处用 `short_transaction()`：提交/回滚语义与原来一致，归还一定发生。
+        """
+        from neurova.core.database import short_transaction
+
+        with short_transaction(self.db_path) as conn:
+            yield conn
 
     def _init_db(self) -> None:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             self._migrate_legacy(conn)
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS plans (
@@ -138,7 +168,7 @@ class PlanStore:
         step_notes: List[str],
     ) -> None:
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """INSERT INTO plans (plan_id, agent_id, user_id, title, steps, step_statuses,
                      step_notes, created_at, updated_at)
@@ -156,21 +186,21 @@ class PlanStore:
             )
 
     def delete(self, plan_id: str, agent_id: str, user_id: str) -> None:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "DELETE FROM plans WHERE plan_id = ? AND agent_id = ? AND user_id = ?",
                 (plan_id, agent_id, user_id),
             )
 
     def clear_active(self, agent_id: str, user_id: str) -> None:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE plans SET is_active = 0 WHERE agent_id = ? AND user_id = ?",
                 (agent_id, user_id),
             )
 
     def set_active(self, plan_id: str, agent_id: str, user_id: str) -> None:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE plans SET is_active = 0 WHERE agent_id = ? AND user_id = ?",
                 (agent_id, user_id),
@@ -182,7 +212,7 @@ class PlanStore:
             )
 
     def get(self, plan_id: str, agent_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM plans WHERE plan_id = ? AND agent_id = ? AND user_id = ?",
                 (plan_id, agent_id, user_id),
@@ -190,7 +220,7 @@ class PlanStore:
         return self._row_to_dict(row) if row else None
 
     def get_active(self, agent_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM plans WHERE agent_id = ? AND user_id = ? AND is_active = ?",
                 (agent_id, user_id, 1),
@@ -199,7 +229,7 @@ class PlanStore:
         return self._row_to_dict(rows[0]) if rows else None
 
     def list_all(self, agent_id: str, user_id: str) -> List[Dict[str, Any]]:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM plans WHERE agent_id = ? AND user_id = ?",
                 (agent_id, user_id),
@@ -228,7 +258,7 @@ class PlanningTool:
 
     name = "planning"
 
-    def __init__(self, db_path: str = "data/plans.db", store: Optional[PlanStore] = None):
+    def __init__(self, db_path: str = "", store: Optional[PlanStore] = None):
         self._store = store or PlanStore(db_path)
 
     async def run_command(
@@ -371,7 +401,7 @@ _store_instance: Optional[PlanStore] = None
 _store_lock = threading.Lock()
 
 
-def get_planning_store(db_path: str = "data/plans.db") -> PlanStore:
+def get_planning_store(db_path: str = "") -> PlanStore:
     global _store_instance
     if _store_instance is None:
         with _store_lock:

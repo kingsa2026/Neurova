@@ -1,4 +1,12 @@
-version: '3.8'
+# Neurova 本地/单机编排
+#
+# 与 Helm Chart（helm/neurova）保持同一套资源与接线契约：
+#   R1 端口 9527 / R2 健康检查 30s·5s·30s·3 / R3 资源 500m·1Gi ↔ 2000m·4Gi
+#   R5 环境变量名必须是应用真读的键（DATABASE_PATH/LOG_LEVEL 此前是死配置）
+# 跨文件一致性由 scripts/ci/deploy_config_consistency_check.py 常驻把关。
+#
+# 不写 `version:` 键：Compose v2 已废弃该字段（写了会告警 "the attribute
+# `version` is obsolete"），规格版本由 docker compose 自行判定。
 
 services:
   # 后端服务
@@ -14,10 +22,24 @@ services:
       - NEUROVA_HOST=0.0.0.0
       - NEUROVA_ENV=production
       - PYTHONUNBUFFERED=1
-      - LOG_LEVEL=INFO
-      - DATABASE_PATH=/app/data/neurova.db
+      # 日志：三个键都是应用真读的（NEUROVA_LOG_LEVEL → start_server.py，
+      # NEUROVA_LOG_JSON → neurova/core/logger.py，NEUROVA_LOG_FILE → console_system.py）
+      - NEUROVA_LOG_LEVEL=INFO
+      - NEUROVA_LOG_FILE=/app/logs/neurova.log
+      - NEUROVA_LOG_JSON=0
+      # 数据库路径的实际读取键是 NEUROVA_DB_PATH（neurova/core/db_indexes.py）；
+      # 此前写的 DATABASE_PATH 全仓零读取方 = 死配置
+      - NEUROVA_DB_PATH=/app/data/neurova.db
+      # 多副本/多实例场景必须由宿主提供（缺省时空值 → 自动生成，写容器内文件，
+      # 重启即失效）。单机默认留空即可。
+      - NEUROVA_JWT_SECRET=${NEUROVA_JWT_SECRET:-}
+      # 会话存档落点。应用侧默认落数据根（/app/data/sessions），本行显式指回
+      # 既有卷，老部署的会话档案不因落点收口而失联（SessionManager 真读这个键）。
+      - NEUROVA_SESSIONS_DIR=/app/sessions
     volumes:
       - neurova-data:/app/data
+      - neurova-workspaces:/app/agent_workspaces
+      - neurova-sessions:/app/sessions
       - neurova-logs:/app/logs
       - ./config:/app/config:ro
     healthcheck:
@@ -26,13 +48,29 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    # 资源口径与 Helm backend.resources 逐字对齐（R3）：
+    #   requests  = deploy.resources.reservations  500m / 1Gi
+    #   limits    = deploy.resources.limits        2000m / 4Gi
+    # 同时给出非 Swarm 模式生效的 cpus/mem_limit 等价写法（compose v2 直接生效）。
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.5"
+          memory: 1g
+        limits:
+          cpus: "2"
+          memory: 4g
+    cpus: 2.0
+    mem_limit: 4g
     restart: unless-stopped
     networks:
       - neurova-network
 
   # 前端服务（可选，生产模式下不需要）
   frontend:
-    image: node:18-alpine
+    # Node 大版本与 CI（.github/workflows/ci.yml node-version: "20"）一致：
+    # 此前是 node:18-alpine，本地 dev 与 CI 跑不同大版本，vitest/vite 行为会分叉
+    image: node:20-alpine
     container_name: neurova-frontend
     working_dir: /app
     volumes:
@@ -41,7 +79,7 @@ services:
       - "8100:8100"
     command: ["npm", "run", "dev", "--", "--port", "8100", "--host"]
     environment:
-      - VITE_API_BASE_URL=http://localhost:9527
+      VITE_API_BASE_URL: http://localhost:9527/api/v1
     depends_on:
       - backend
     networks:
@@ -51,6 +89,10 @@ services:
 
 volumes:
   neurova-data:
+    driver: local
+  neurova-workspaces:
+    driver: local
+  neurova-sessions:
     driver: local
   neurova-logs:
     driver: local

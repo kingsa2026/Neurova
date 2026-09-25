@@ -24,14 +24,31 @@ from neurova.collaboration.canvas_ops import (
 )
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.core.logger import get_logger
+from neurova.document_model import DocSettings
+from neurova.document_pdf import RenderUnavailable, render_document
+from neurova.document_sources import parse_html, parse_markdown
 import re
 import shlex
+import sqlite3
 import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
+
+_SLUG_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _ascii_slug(text: str, max_len: int = 40) -> str:
+    """产物文件名用的 ASCII slug。
+
+    产物路由 `GET /generation/files/{name}` 有 `[A-Za-z0-9._-]+` 白名单，
+    中文名会被拒在鉴权路由之外——标题进 PDF 元数据，不进文件名。
+    """
+    return (_SLUG_RE.sub("-", text or "").strip("-").lower()[:max_len]) or "document"
+
 
 # ToolEngine 延迟导入（避免循环依赖）
 _TOOL_ENGINE_AVAILABLE = False
@@ -236,18 +253,21 @@ class ToolExecutor:
     _builtin_dispatch: Dict[str, str] = {
         "memory_search": "_execute_memory_search",
         "recall_history": "_execute_recall_history",
+        "recall_context_span": "_execute_recall_context_span",
         "search": "_execute_web_search",
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
         "discover_skills": "_execute_discover_skills",
         "file_read": "_execute_file_read",
         "file_parse": "_execute_file_parse",
+        "query_database": "_execute_query_database",
         "file_write": "_execute_file_write",
         "file_create": "_execute_file_create",
         "file_delete": "_execute_file_delete",
         "file_edit": "_execute_file_edit",
         "file_list": "_execute_file_list",
         "file_search": "_execute_file_search",
+        "write_pdf": "_execute_write_pdf",
         "web_fetch": "_execute_web_fetch",
         "deep_research": "_execute_deep_research",
         "calculator": "_execute_calculator",
@@ -304,6 +324,9 @@ class ToolExecutor:
         "canvas_layout": "_execute_canvas_layout",
         "canvas_run": "_execute_canvas_run",
         "canvas_list_nodes": "_execute_canvas_list_nodes",
+        # 多步编排入口（DAG 工具编排器的生产消费方）：整条链的每一步都经咽喉，
+        # 票据 / on_tool_executed / 治理预检 / hooks / per-tool 超时全链生效。
+        "orchestrate_tools": "_execute_orchestrate_tools",
     }
 
     # file_search 跳过的噪音目录（依赖/构建/版本控制）
@@ -404,14 +427,27 @@ class ToolExecutor:
     def _metacog_gate_check(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """V3 调控门：查询该工具是否命中活跃 avoid_tool 教训。
 
-        env NEUROVA_METACOG_GATE=="1" 才启用（新扩展点默认关）；返回教训
-        metadata（含 text/recommendation/evidence），无教训或门关时返回 None。
-        故障一律放行（fail-open）——调控建议不得阻断主链路。
+        开关优先级与 Step9.96 成本门控同口径：env 显式设 0 强制关 > env 显式设 1 >
+        治理设置 metacog_gate_enabled > 内置默认关。收口原因：裸 env 开关在生产无写入
+        方，硬拦截臂恒关。返回教训 metadata（含 text/recommendation/evidence），无教训
+        或门关时返回 None。故障一律放行（fail-open）——调控建议不得阻断主链路。
         """
         import os as _os
 
-        if _os.environ.get("NEUROVA_METACOG_GATE") != "1":
+        _gate_env = _os.environ.get("NEUROVA_METACOG_GATE")
+        if _gate_env == "0":
             return None
+        if _gate_env != "1":
+            try:
+                from neurova.security.governance_settings import (
+                    load_governance_settings,
+                )
+
+                if not load_governance_settings().get("metacog_gate_enabled"):
+                    return None
+            except Exception:  # noqa: BLE001 - 设置不可用维持默认关
+                logger.debug("治理设置读取失败，调控门维持默认关", exc_info=True)
+                return None
         try:
             from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
 
@@ -910,12 +946,11 @@ class ToolExecutor:
         _funnel_id = skill_name
         _funnel_applied = False
         try:
-            # 获取 Skill——经 Protocol 只读视图（skill_system.SkillRegistryProtocol
-            # 正典面）。原 get_skill() 不在接口内：对纯 Protocol 注册表拿到协程
-            # 对象恒真绕过存在检查、`.execute` 于协程上 AttributeError 被吞、
-            # 且绕开 execute_skill 丢失 before/after 生命周期事件（残留处理
-            # 2026-09-13 根治，防回归=AsyncMock 契约测试必踩此面）。
-            skill = self._skill_registry.skills.get(skill_name)
+            # 获取 Skill——经协议声明的唯一取键口 get_skill（工单 014）。
+            # 此处曾直接 `skills.get(skill_name)`：只认 name 的第二套键域，
+            # 进化侧按身份键（skill_id）点名时恒判"不存在"。类 B 退役后
+            # "get_skill 可能是协程"的歧义不再存在（残留处理 2026-09-13）。
+            skill = self._skill_registry.get_skill(skill_name)
             if not skill:
                 _p, _o = _prov(skill_name)
                 record_turn_skill_funnel(skill_name, applied=False, ok=False, pool=_p, owner_key=_o)
@@ -1268,8 +1303,9 @@ class ToolExecutor:
                 result = precheck
                 return result
 
-            # V3 调控门（治理预检后、执行前）：env NEUROVA_METACOG_GATE=="1" 时，
-            # 命中活跃 avoid_tool 教训的工具返回结构化拦截建议（fail-open，默认关）。
+            # V3 调控门（治理预检后、执行前）：开关开时（治理设置 metacog_gate_enabled
+            # 或 env，见 _metacog_gate_check），命中活跃 avoid_tool 教训的工具返回结构化
+            # 拦截建议（fail-open，默认关）。
             advisory = self._metacog_gate_check(tool_name)
             if advisory is not None:
                 return {
@@ -1304,15 +1340,29 @@ class ToolExecutor:
             result, success, tool_source = core_out
             # P1-6：大输出落盘为引用——默认未
             # 装配恒透传；写盘失败诚实降级原样返回（宁可膨胀不丢输出）。
+            # 成败判据由本处传入（`_result_is_success` 是全仓唯一判据）：
+            # **失败结果不折叠**——它的正文（error/stderr/exit_code）就是模型
+            # 自我纠正所需的诊断，折叠成引用即诊断蒸发；体量折叠由回环处的
+            # `apply_offload_policy` 单源承担。
             from neurova.agent.tool_output_ref import maybe_output_ref
 
             result = maybe_output_ref(
-                tool_name, result, getattr(self._agent, "workspace_path", None)
+                tool_name, result, getattr(self._agent, "workspace_path", None),
+                success=success,
             )
             return result
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
             elapsed = time.time() - start
+            # 工单 009：elapsed 此前只喂钩子，"经验落库的 execution_time"没有来源
+            # （生产库 103 行 nonNULL 0/103）。咽喉是唯一知道真实耗时的地方，
+            # 故在此累加到轮级聚合，由 post-chat 读走。
+            try:
+                from neurova.core.turn_context import add_turn_tool_elapsed
+
+                add_turn_tool_elapsed(elapsed)
+            except Exception:  # noqa: BLE001 - 聚合失败不影响工具结果
+                logger.debug("轮级工具耗时聚合跳过", exc_info=True)
             try:
                 from neurova.skills.creation_governance import record_tool_execution
 
@@ -1615,7 +1665,7 @@ class ToolExecutor:
     # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
     # 文件写等不在列，一律 fail-closed（未知代码面无治理审查放行 = 裸奔）。
     _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
-        "memory_search", "recall_history", "voice_memory_search",
+        "memory_search", "recall_history", "recall_context_span", "voice_memory_search",
         "computer_screenshot", "computer_dom_snapshot", "get_datetime", "weather", "web_search",
         "discover_skills",
         "file_list", "file_search", "file_read", "file_parse", "list_agents",
@@ -2479,6 +2529,70 @@ class ToolExecutor:
             "duration": getattr(instance, "duration", None),
         }
 
+    async def _execute_orchestrate_tools(self, params: Dict) -> Dict:
+        """多步编排入口（DAG 工具编排器 `ToolOrchestrator` 的生产消费方）。
+
+        编排器只做声明解析、分层与结果汇总，**执行一律回到本咽喉**：每个步进经
+        `_execute_single_tool` 走同一管道，于是整条链的每一跳都拿到票据、
+        `on_tool_executed`、治理预检、hooks 与 per-tool 超时——与单工具调用同口径。
+
+        自嵌套（步进里再点名 `orchestrate_tools`）会让编排器在自身执行链上无限递归，
+        故在入口 fail-closed 拒绝并点名工具名。
+        """
+        orchestrator = getattr(self._agent, "tool_orchestrator", None)
+        if orchestrator is None:
+            return {"success": False, "error": "工具编排器未装配（Agent 初始化失败），无法执行多步编排"}
+
+        raw_steps = params.get("steps")
+        goal = str(params.get("goal") or "").strip()
+        if not raw_steps and not goal:
+            return {
+                "success": False,
+                "error": "缺少 steps 或 goal 参数：多步编排需要显式步骤表或一句可规划的目标",
+            }
+        if raw_steps:
+            try:
+                steps = orchestrator.normalize_steps(raw_steps)
+            except ValueError as invalid:
+                return {"success": False, "error": str(invalid)}
+        else:
+            steps = orchestrator.build_plan_from_goal(goal)
+            if not steps:
+                return {
+                    "success": False,
+                    "error": f"目标无法规划出执行计划（读不懂或能力图无承接工具）: {goal}",
+                }
+            steps = orchestrator.normalize_steps(steps)
+
+        nested = sorted(
+            {step.tool_name for step in steps if step.tool_name == "orchestrate_tools"}
+        )
+        if nested:
+            return {
+                "success": False,
+                "error": (
+                    "拒绝自嵌套编排：步进不得再点名 orchestrate_tools"
+                    "（会在同一条执行链上无限递归）"
+                ),
+            }
+
+        from neurova.core.turn_context import get_turn_user_input
+
+        try:
+            goal = get_turn_user_input() or "多步工具编排"
+        except Exception:  # noqa: BLE001 - 非轮次上下文（脚本/评测）按通用目标
+            goal = "多步工具编排"
+
+        # 执行器由 Agent 装配期一次性注入（指向同一个咽喉），此处**不再改写**——
+        # 每轮重新 set_executor 会在 Agent 级共享对象上做无谓写，且写的是同一等价体。
+        result = await orchestrator.orchestrate(goal, tool_plan=steps)
+
+        payload = result.to_dict()
+        payload["success"] = result.status.value == "completed"
+        if not payload["success"]:
+            payload["error"] = result.error or "编排未全部完成"
+        return payload
+
     @staticmethod
     def _blocking_fetch(url: str, user_agent: str, timeout: int = 10) -> str:
         """阻塞式 HTTP 抓取 — 只允许经 asyncio.to_thread 在线程池中调用。
@@ -2611,7 +2725,7 @@ class ToolExecutor:
                 from pathlib import Path as _P
 
                 cache = SkillVectorCache(
-                    cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                    cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
                 )
                 _VECTOR_CACHES[_agent_id] = cache
             qvec = cache.encode_query(query)
@@ -2908,10 +3022,43 @@ class ToolExecutor:
             value = int(value)  # 4.0 → 4，便于阅读
         return {"expression": expression, "result": value}
 
-    async def _execute_get_datetime(self, params: Dict) -> Dict:
-        """获取当前日期时间或换算时间戳（支持 IANA 时区名与 ±HH:MM 偏移）"""
+    # 零偏移时区名（UTC 等义名）——按定义恒 +00:00，不查系统 tzdata。
+    # 根因（Issue #62）：容器/宿主 tzdata 包损坏时（如 /usr/share/zoneinfo/Etc/UTC
+    # 被覆盖成 CST-8 内容），ZoneInfo("UTC") 会安静返回 +08:00，时间戳换算
+    # 结果错得毫无痕迹。契约层面"UTC"不需要查 tzdata——它是规范定义的零偏移。
+    _ZERO_OFFSET_TIMEZONE_NAMES = frozenset({
+        "utc", "gmt", "z", "zulu", "universal", "etc/utc", "etc/gmt", "etc/zulu",
+        "etc/universal", "gmt0", "etc/gmt0", "utc0", "etc/utc0",
+    })
+
+    def _resolve_timezone(self, tz_param: str):
+        """解析时区参数 → tzinfo；无法解析返回 None。
+
+        优先级：零偏移等义名（内置 timezone.utc）→ IANA 名称（ZoneInfo）
+        → ±HH:MM / GMT+H 偏移字面量。
+        """
         import re
         from datetime import timedelta, timezone as dt_timezone
+
+        if tz_param.strip().casefold() in self._ZERO_OFFSET_TIMEZONE_NAMES:
+            return dt_timezone.utc
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(tz_param)
+        except Exception:
+            # IANA 名称解析失败时，尝试 ±HH:MM / GMT+H 风格的偏移
+            m = re.fullmatch(r"(?:GMT|UTC)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_param)
+            if m:
+                sign = 1 if m.group(1) == "+" else -1
+                hours, minutes = int(m.group(2)), int(m.group(3) or 0)
+                if hours <= 23 and minutes <= 59:
+                    return dt_timezone(sign * timedelta(hours=hours, minutes=minutes))
+        return None
+
+    async def _execute_get_datetime(self, params: Dict) -> Dict:
+        """获取当前日期时间或换算时间戳（支持 IANA 时区名与 ±HH:MM 偏移）"""
+        from datetime import timezone as dt_timezone
 
         tz_param = (params.get("timezone") or params.get("tz") or "").strip()
         ts_param = params.get("timestamp")
@@ -2925,19 +3072,7 @@ class ToolExecutor:
             return {"error": f"无效的时间戳: {ts_param}（{e}）"}
 
         if tz_param:
-            tz = None
-            try:
-                from zoneinfo import ZoneInfo
-
-                tz = ZoneInfo(tz_param)
-            except Exception:
-                # IANA 名称解析失败时，尝试 ±HH:MM / GMT+H 风格的偏移
-                m = re.fullmatch(r"(?:GMT|UTC)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_param)
-                if m:
-                    sign = 1 if m.group(1) == "+" else -1
-                    hours, minutes = int(m.group(2)), int(m.group(3) or 0)
-                    if hours <= 23 and minutes <= 59:
-                        tz = dt_timezone(sign * timedelta(hours=hours, minutes=minutes))
+            tz = self._resolve_timezone(tz_param)
             if tz is None:
                 return {
                     "error": f"无法解析时区: {tz_param}（支持 Asia/Shanghai 等 IANA 名称或 +08:00 偏移）"
@@ -2973,7 +3108,16 @@ class ToolExecutor:
             from neurova.session_repository import get_session_repository
 
             repo = get_session_repository()
-        history = repo.get_history(agent_id="", session_id=session_id) or []
+        # 台账按**会话属主**读：写侧 `mem_core.save_to_session` 落在
+        # `<sessions>/<config.agent_id>/` 下，空 agent_id 会被
+        # `SessionManager._get_session_dir` 归入 `default/` 目录 ——
+        # 用空值读等于去别的目录找一个刚落下的硬地址，直取恒落空
+        # （T-10a 的 `tool_call_id` 与 T-10b 的重建都以它为唯一寻址）。
+        # 属主派生复用本模块既有的 `_agent_identity()`，不另写第二份判据。
+        _user_id, _owner_id = self._agent_identity()
+        history = repo.get_history(
+            agent_id=str(_owner_id or ""), session_id=session_id
+        ) or []
         entry = None
         for msg in reversed(history):
             for tc in ((msg or {}).get("metadata") or {}).get("tool_calls") or []:
@@ -3027,6 +3171,86 @@ class ToolExecutor:
             "source": "session_ledger",
             "content": entry.get("result"),
         }
+
+    async def _execute_recall_context_span(self, params: Dict) -> Dict:
+        """按 `covers_ref` 确定性取回分层摘要覆盖的原文（Issue #90 · T-11d）。
+
+        与 `recall_history` 的分工是本票的要点：那个是**模糊**召回（FTS/LIKE，
+        允许召回不到，靠关键词匹配）；本工具是**确定性**直取（引用 → 索引 → 原文，
+        不设门槛、不打相关性分）。工单 §12.5 第 3 条把"下钻靠相关性门槛碰运气"
+        列为假实现，故这里没有退化路径 —— 取不到就如实报错并点名原因。
+
+        全程只有一条寻址口径：`covers_ref` 由 `fold_index` 单点派生与解析，
+        本方法不解析引用语法、也不重算 covers。
+        """
+        try:
+            reference = str(params.get("covers_ref") or "").strip()
+            if not reference:
+                return {"error": "缺少 covers_ref：请粘贴摘要行尾部的引用串（形如 covers_ref=fold:2@会话）"}
+            try:
+                limit = int(params.get("limit", 200))
+            except (TypeError, ValueError):
+                limit = 200
+            limit = max(1, min(limit, 500))
+
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            pool = getattr(orchestrator, "context_pool", None) if orchestrator else None
+            if pool is None:
+                return {"error": "上下文池不可用，无法下钻分层摘要"}
+            reader = getattr(pool, "drilldown", None)
+            if not callable(reader):
+                return {"error": "上下文池不支持分层摘要下钻（池版本过旧）"}
+
+            span = reader(reference, limit=limit)
+            if not span.get("resolved"):
+                # 解析不出引用 / 档位不存在：如实报错并附**本会话现有档位**，
+                # 让模型能自行纠正引用，而不是盲重试（教义第 2 条：不伪装空结果）。
+                available = [
+                    layer["fold_seq"] for layer in pool.summaryLayers()
+                ]
+                return {
+                    "error": f"covers_ref 下钻失败（{span.get('reason')}）",
+                    "reason": span.get("reason"),
+                    "covers_ref": reference,
+                    "available_fold_seqs": available,
+                }
+            if not span["entries"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"该档位（fold_seq={span['fold_seq']}）的覆盖原文本轮不可见"
+                        f"（{span.get('reason')}）"
+                    ),
+                    "reason": span.get("reason"),
+                    "filtered": span.get("filtered", 0),
+                    "unresolved": span.get("unresolved", []),
+                }
+
+            # 不静默：部分覆盖原文取不回时，把缺口条数与原因一并交给模型。
+            return {
+                "success": True,
+                "fold_seq": span["fold_seq"],
+                "level": span.get("level"),
+                "count": len(span["entries"]),
+                "filtered": span.get("filtered", 0),
+                # 截断必须交给模型：covers 条数不设上限，长轨迹上一档覆盖上千条
+                # 是常态；不报 `truncated` 就等于让模型以为"这就是全部"。
+                "truncated": span.get("truncated", 0),
+                "unresolved": span.get("unresolved", []),
+                "reason": span.get("reason"),
+                "originals": [
+                    {
+                        "content": entry["content"],
+                        "turn_id": entry.get("turn_id"),
+                        "session_id": entry.get("session_id"),
+                        "hash": entry.get("hash"),
+                    }
+                    for entry in span["entries"]
+                ],
+            }
+        except Exception as e:
+            logger.warning("recall_context_span 执行失败: %s", e)
+            return {"error": f"分层下钻失败: {e}"}
 
     async def _execute_recall_history(self, params: Dict) -> Dict:
         """召回历史上下文（P1-1③ + P1-#6 双模式）。
@@ -3194,6 +3418,69 @@ class ToolExecutor:
     _PARSE_TEXT_EXTS = frozenset({".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".log"})
     # 解析前置体积闸门（50MB）——防超大文件拖垮内存；超限诚实报错
     _PARSE_MAX_BYTES = 50 * 1024 * 1024
+
+    async def _execute_query_database(self, params: Dict) -> Dict:
+        """只读数据集查询（T-05）：附件句柄 → 表结构 / 样例行 / 只读 SQL。
+
+        安全边界四道全在 `attachment_dataset`（句柄域 / 只读连接 / SQL 白名单 /
+        有界），本处只做**身份串联**：属主校验用 `get_attachment_info(file_id, 调用者)`
+        取元数据，取字节用 `get_attachment_bytes(file_id)`。两者都走附件域的既有
+        咽喉，本处**不开任何按路径读取的口子**（D1：形参里没有 file_path）。
+        """
+        from neurova.api.endpoints import files_api
+        from neurova.attachment_dataset import (
+            assertReadOnlySql,
+            materializeReadOnlyCopy,
+            normalizeRowLimit,
+            openReadOnlyConnection,
+            readDatasetSummary,
+            runReadOnlyQuery,
+        )
+
+        file_id = str(params.get("file_id") or "").strip()
+        if not file_id:
+            return {"error": "缺少 file_id 参数（附件取用凭证，见注入文案里的句柄）"}
+
+        caller_user_id, _agent_id = self._agent_identity()
+        info = files_api.get_attachment_info(file_id, caller_user_id)
+        if not info:
+            return {
+                "error": f"附件不存在或不属于当前用户: {file_id}（跨用户句柄一律拒绝）"
+            }
+
+        data = files_api.get_attachment_bytes(file_id)
+        if not data:
+            return {"error": f"附件字节不可读: {file_id}"}
+
+        row_limit = normalizeRowLimit(params.get("row_limit"))
+        sql = params.get("sql")
+        if sql is not None and not str(sql).strip():
+            sql = None
+
+        def _run() -> Dict:
+            copy_path = materializeReadOnlyCopy(
+                file_id, data, str(info.get("filename") or "")
+            )
+            conn = openReadOnlyConnection(copy_path)
+            try:
+                if sql is None:
+                    return readDatasetSummary(conn, row_limit)
+                # 白名单判定要在这条**真连接**上干跑：`WITH … DELETE` 这类
+                # "语句头非写、最外层动作是写"的形态，只有带 schema 的连接
+                # 才分得出来（内存探针实测漏放）。
+                assertReadOnlySql(str(sql), conn)
+                return runReadOnlyQuery(conn, str(sql), row_limit)
+            finally:
+                conn.close()
+
+        try:
+            return await asyncio.to_thread(_run)
+        except ValueError as e:
+            return {"error": f"SQL 被只读白名单拒绝: {e}"}
+        except sqlite3.Error as e:
+            return {"error": f"数据集读取失败: {type(e).__name__}: {e}"}
+        except Exception as e:  # noqa: BLE001 - 失败以诚实体暴露，不吞
+            return {"error": f"数据集读取失败: {type(e).__name__}: {e}"}
 
     async def _execute_file_parse(self, params: Dict) -> Dict:
         """执行文档解析（P0-1：PDF/Office 二进制 → 文本，复用 attachment_parser）"""
@@ -3550,15 +3837,25 @@ class ToolExecutor:
                     m for m in matches
                     if self._path_within(os.path.abspath(m), base_abs)
                 ]
-            limit = 500
-            truncated = len(matches) > limit
-            matches = matches[:limit]
-            return {
-                "files": matches,
-                "count": len(matches),
-                "truncated": truncated,
+            # 上限 2000：响应体积仍需有界（glob 结果本就全量物化在内存里）
+            try:
+                max_results = max(1, min(2000, int(params.get("max_results", 500))))
+            except (TypeError, ValueError):
+                max_results = 500
+            try:
+                offset = max(0, int(params.get("offset", 0)))
+            except (TypeError, ValueError):
+                offset = 0
+            page = matches[offset : offset + max_results]
+            payload = {
+                "files": page,
+                "count": len(page),
+                "truncated": len(matches) > offset + len(page),
                 "pattern": pattern,
             }
+            if payload["truncated"]:
+                payload["next_offset"] = offset + len(page)
+            return payload
         except Exception as e:
             return {"error": f"文件枚举失败: {e}"}
 
@@ -3580,9 +3877,14 @@ class ToolExecutor:
             return {"error": "缺少 path 参数"}
         include = params.get("include") or None
         try:
-            max_results = int(params.get("max_results", 50))
+            # 下限 1：max_results=0 会让 next_offset 恒等于 offset，调用方翻页死循环
+            max_results = max(1, int(params.get("max_results", 50)))
         except (TypeError, ValueError):
             max_results = 50
+        try:
+            offset = max(0, int(params.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
 
         # 相对基准目录同样锚定 agent 工作区（与文件读写同一解析口径）
         if not os.path.isabs(path):
@@ -3617,6 +3919,8 @@ class ToolExecutor:
                     break
 
         matches = []
+        skipped = 0
+        probe_limit = max_results + 1  # 多取一条探测"还有下一页"，避免为计数重扫整棵树
         for candidate in candidates:
             try:
                 with open(candidate, "r", encoding="utf-8", errors="replace") as f:
@@ -3624,27 +3928,189 @@ class ToolExecutor:
                         continue  # 跳过二进制文件
                     f.seek(0)
                     for lineno, line in enumerate(f, 1):
-                        if regex.search(line):
-                            matches.append(
-                                {
-                                    "file": candidate,
-                                    "line": lineno,
-                                    "text": line.strip()[:200],
-                                }
-                            )
-                            if len(matches) >= max_results:
-                                break
+                        if not regex.search(line):
+                            continue
+                        if skipped < offset:
+                            skipped += 1
+                            continue
+                        matches.append(
+                            {
+                                "file": candidate,
+                                "line": lineno,
+                                "text": line.strip()[:200],
+                            }
+                        )
+                        if len(matches) >= probe_limit:
+                            break
             except (OSError, UnicodeDecodeError):
                 continue
-            if len(matches) >= max_results:
+            if len(matches) >= probe_limit:
                 break
 
-        return {
+        has_more = len(matches) >= probe_limit
+        matches = matches[:max_results]
+        payload = {
             "matches": matches,
             "count": len(matches),
-            "truncated": len(matches) >= max_results,
+            "truncated": has_more,
             "pattern": pattern,
         }
+        if has_more:
+            payload["next_offset"] = offset + len(matches)
+        return payload
+
+    _PDF_MAX_IMAGES = 20
+    _PDF_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+    async def _resolve_pdf_images(self, blocks: List, slug: str) -> tuple:
+        """图片引用 → 本地可读路径（工单 003）。
+
+        三路来源：工作区内路径、产物目录内文件名、http(s)。远程一律经 persist_media，
+        它带全局出网 SSRF 校验——不在别处再开第二条下载路（两条路的校验强度会漂移）。
+        解析不到的图降级成一行文字并报告：少一张图的报告仍然有用，但要说清少了。
+        """
+        import os as _os
+        from pathlib import Path
+
+        from neurova.document_model import Block, InlineRun, NodeKind
+        from neurova.llm.generators.runtime import GENERATION_OUTPUT_DIR, persist_media
+
+        kept: List = []
+        warnings: List[str] = []
+        seen = 0
+        for block in blocks:
+            if block.kind != NodeKind.IMAGE:
+                kept.append(block)
+                continue
+            if seen >= self._PDF_MAX_IMAGES:
+                seen += 1
+                warnings.append(
+                    f"图片数量上限 {self._PDF_MAX_IMAGES} 张，第 {seen} 张起已跳过（含：{block.alt or block.src}）"
+                )
+                continue
+            seen += 1
+            src = (block.src or "").strip()
+            label = block.alt or src
+
+            if src.startswith(("http://", "https://")):
+                try:
+                    block.src = await persist_media(src, "image", slug, seen)
+                    kept.append(block)
+                except Exception as e:  # noqa: BLE001 - 远程图失败不该带走整份文档
+                    warnings.append(f"图片已跳过（远程取回失败：{type(e).__name__}）：{label}")
+                    if block.alt:
+                        kept.append(Block(NodeKind.PARAGRAPH, runs=[InlineRun(f"[图：{block.alt}]")]))
+                continue
+
+            candidates = (
+                [Path(src)]
+                if _os.path.isabs(src)
+                else [Path(self._workspace_base()) / src, GENERATION_OUTPUT_DIR / src]
+            )
+            hit = next((c for c in candidates if c.is_file()), None)
+            if hit is None:
+                warnings.append(f"图片已跳过（解析不到本地文件）：{label}")
+                if block.alt:
+                    kept.append(Block(NodeKind.PARAGRAPH, runs=[InlineRun(f"[图：{block.alt}]")]))
+                continue
+            if hit.stat().st_size > self._PDF_MAX_IMAGE_BYTES:
+                warnings.append(f"图片已跳过（超过 {self._PDF_MAX_IMAGE_BYTES // (1024 * 1024)}MB）：{label}")
+                continue
+
+            block.src = str(hit)
+            kept.append(block)
+        return kept, warnings
+
+    async def _execute_write_pdf(self, params: Dict) -> Dict:
+        """Markdown → PDF 出件，落产物目录并回鉴权下载口（工单 001）。
+
+        产物命名复用 persist_bytes：与图片/音频产物同一套白名单与属主口径，
+        所以中文标题只能进 PDF 元数据，不进文件名。`content`（Markdown）与
+        `content_html`（HTML 子集）二选一，两条入口归一到同一棵中间树；
+        模板与 path 分支分别属工单 005/006。
+        """
+        content, content_html = params.get("content"), params.get("content_html")
+        if bool(content) == bool(content_html):
+            return {"error": "content 与 content_html 只能二选一，且其一必填"}
+        if content_html:
+            parsed = parse_html(str(content_html))
+        else:
+            parsed = parse_markdown(str(content))
+        if not str(content or content_html or "").strip():
+            return {"error": "content 为空，未出件"}
+        if not parsed.blocks:
+            return {"error": "content 未解析出任何可渲染内容，未出件"}
+
+        title = str(params.get("title") or "")
+        try:
+            margin = float(params.get("margin_mm") or 18.0)
+        except (TypeError, ValueError):
+            return {"error": "margin_mm 必须是数字（毫米）"}
+        settings = DocSettings(
+            template=str(params.get("template") or "report"),
+            title=title,
+            header_text=params.get("header_text"),
+            footer_text=params.get("footer_text"),
+            page_number=params.get("page_number"),
+            margin_mm=margin,
+        )
+        slug = _ascii_slug(title or "document")
+        blocks, image_warnings = await self._resolve_pdf_images(parsed.blocks, slug)
+        try:
+            rendered = render_document(blocks, settings)
+        except RenderUnavailable as e:
+            return {"error": str(e)}
+        except (ValueError, FileNotFoundError) as e:
+            return {"error": f"未出件：{e}"}
+
+        pdf = rendered["pdf"]
+        warnings = list(parsed.warnings) + image_warnings + list(rendered["warnings"])
+        base = {
+            "bytes": len(pdf),
+            "pages": rendered["pages"],
+            "font": rendered["font"],
+            "decor": rendered["decor"],
+            "warnings": warnings,
+        }
+
+        target = str(params.get("path") or "").strip()
+        if target:
+            resolved, err = self._resolve_pdf_target_path(target)
+            if err:
+                return {"error": err}
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_bytes(pdf)
+            except OSError as e:
+                return {"error": f"出件已渲染但写入失败：{e}"}
+            return {**base, "file_path": str(resolved), "file_name": resolved.name}
+
+        import hashlib
+
+        from pathlib import Path
+
+        from neurova.llm.generators.runtime import persist_bytes
+
+        stem = f"{slug}-{hashlib.sha256(pdf).hexdigest()[:8]}"
+        path = await persist_bytes(pdf, "pdf", stem)
+        name = Path(path).name
+        return {**base, "file_name": name, "file_path": path, "download_url": f"/api/v1/generation/files/{name}"}
+
+    def _resolve_pdf_target_path(self, target: str):
+        """`path` 落在工作区内（与 file_write 同锚定口径），越界一律拒。"""
+        import os as _os
+        from pathlib import Path
+
+        base = Path(self._workspace_base()).resolve()
+        candidate = Path(target)
+        if not candidate.is_absolute():
+            candidate = base / candidate
+        candidate = candidate.resolve()
+        if candidate != base and not str(candidate).startswith(str(base) + _os.sep):
+            return None, f"path 越出工作区（{base}），已拒绝：{target}"
+        if candidate.suffix.lower() != ".pdf":
+            return None, "path 必须以 .pdf 结尾"
+        return candidate, None
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图
@@ -5015,6 +5481,27 @@ class ToolExecutor:
                 )
             except Exception:
                 logger.debug("tool metrics 埋点跳过", exc_info=True)
+
+        # S2 生产点（T-03）：成败判据就是上面这个 `success`（客观回执，来自
+        # `_result_is_success`）。策略拒绝不算缺口（决策 ≠ 故障，与断点 B 同口径）。
+        # 阈值判定在 `capability_gap.recordCapabilityGap` 一处，此处不重写。
+        if not policy_denial:
+            try:
+                from neurova.agent.capability_gap import (
+                    GAP_REPEATED_TOOL_FAILURE,
+                    noteToolSuccess,
+                    recordCapabilityGap,
+                )
+
+                if success:
+                    noteToolSuccess()
+                else:
+                    recordCapabilityGap(
+                        GAP_REPEATED_TOOL_FAILURE,
+                        {"tool": tool_name, "tool_source": tool_source or ""},
+                    )
+            except Exception:
+                logger.debug("能力缺口 S2 投递跳过", exc_info=True)
 
         # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
         if self.tool_memory and not policy_denial:

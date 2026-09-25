@@ -120,6 +120,16 @@ class ObservationRecord:
 # ────── 主类 ──────
 
 
+def pattern_skill_id(pattern_id: str) -> str:
+    """旧命名的唯一构造点：``skill_<pattern_id>``（pattern_id 是 64 位指纹全串）。
+
+    **只**供两处使用：向 SkillService 登记别名（让改名前的既有引用仍能解析）、
+    兜住空序列退回历史键。模板身份由 `_canonical_template_id` 单点构造，
+    两条键域过去长期不等 ⇒ 同一模式每轮重封、批准态每轮被撤销（工单 015）。
+    """
+    return f"skill_{pattern_id}"
+
+
 class AutoSkillBuilder:
     """
     技能自动构建器
@@ -336,11 +346,54 @@ class AutoSkillBuilder:
             pattern.tool_sequence, pattern.metadata.get("task_purpose", "")
         ):
             return
-        if f"skill_{pattern.pattern_id}" in self._templates:
+        if self._existing_template(pattern) is not None:
             return
 
         # 封装为技能模板
         self._encapsulate_pattern(pattern)
+
+    def _existing_template(self, pattern: ToolPattern) -> Optional[SkillTemplate]:
+        """命中既有模板的判定——与建键共用同一个身份构造函数（工单 015/016）。
+
+        三跳各有分工：
+        1. 规范 ID 直取，覆盖正常路径；
+        2. 指纹身份那一跳兜住**旧命名**恢复出来的模板（历史版本把它存成
+           `skill_<64 位全串>`，跨重启仍在表里）；
+        3. 磁盘那一跳兜住**上一进程已批准并落盘**的技能：`__init__` 只认领
+           `builder_pending` 条目，已启用那条不在内存表里，同一模式再被观察到
+           就会重封一条待审的，把人工批准撤销（工单 016 断点 c 的跨重启面）。
+        """
+        template_id = self._canonical_template_id(pattern)
+        existing = self._templates.get(template_id)
+        if existing is not None:
+            return existing
+        for template in self._templates.values():
+            if self._pattern_skill_similarity(pattern, template) == 1.0:
+                return template
+        return self._adopt_disk_template(template_id)
+
+    def _adopt_disk_template(self, template_id: str) -> Optional[SkillTemplate]:
+        """按规范身份从磁盘 manifest 认领已存在的自动技能，登记进内存模板表。"""
+        service = getattr(self, "_skill_service", None)
+        if service is None:
+            return None
+        info = service.get_skill_info(template_id)
+        if not info:
+            return None
+        config = (info.get("manifest") or {}).get("config") or {}
+        template = SkillTemplate(
+            template_id=info["id"],
+            name=info.get("name", template_id),
+            description=info.get("description", ""),
+            tool_sequence=config.get("tool_sequence") or [],
+            context_template=config.get("context_template", ""),
+            parameter_hints=config.get("parameter_hints") or {},
+            success_rate=float(config.get("success_rate", 0.0) or 0.0),
+            is_active=bool(info.get("enabled")),
+        )
+        self._templates[template_id] = template
+        logger.info("自动技能 %s 从磁盘认领（enabled=%s）", template_id, template.is_active)
+        return template
 
     def _pattern_skill_similarity(self, pattern: ToolPattern, template: SkillTemplate) -> float:
         """计算模式与技能模板的相似度"""
@@ -379,7 +432,7 @@ class AutoSkillBuilder:
         self._templates[template_id] = template
         # 旧命名登记为别名：外部按 ``skill_<pattern_id>`` 的既有引用（manifest/
         # 账本/前端）在改名后仍能解析到同一条技能。
-        legacy_id = f"skill_{pattern.pattern_id}"
+        legacy_id = pattern_skill_id(pattern.pattern_id)
         if legacy_id != template_id and self._skill_service is not None:
             try:
                 self._skill_service.register_skill_alias(template_id, legacy_id)
@@ -396,102 +449,25 @@ class AutoSkillBuilder:
         purpose = pattern.metadata.get("task_purpose", "") if pattern.metadata else ""
         canonical = canonical_skill_id(steps, purpose)
         # 无工具序列（理论上不该发生）：退回旧命名，不制造空 ID。
-        return canonical or f"skill_{pattern.pattern_id}"
+        return canonical or pattern_skill_id(pattern.pattern_id)
 
     def _generate_skill_name(self, pattern: ToolPattern) -> str:
-        """生成技能名称"""
-        # 使用前两个工具名
-        if len(pattern.tool_sequence) >= 2:
-            tools = [s["tool"] if isinstance(s, dict) else s for s in pattern.tool_sequence]
+        """技能名称——工具域的名字，不是身份。
+
+        名字不带 `skill_` 前缀：那前缀属于身份域，两种含义共用一个前缀
+        正是本单收口的病灶（工单 015）。
+        """
+        tools = [s["tool"] if isinstance(s, dict) else s for s in pattern.tool_sequence]
+        if len(tools) >= 2:
             return f"{tools[0]}_{tools[1]}_skill_{pattern.pattern_id}"
-        return f"skill_{pattern.pattern_id}"
+        if len(tools) == 1:
+            return f"{tools[0]}_skill_{pattern.pattern_id}"
+        return f"auto_skill_{pattern.pattern_id}"
 
     def _generate_skill_description(self, pattern: ToolPattern) -> str:
         """生成技能描述"""
         tools = " → ".join(s["tool"] if isinstance(s, dict) else s for s in pattern.tool_sequence[:3])
         return f"自动封装的技能：执行 {tools}，成功率 {pattern.success_rate * 100:.0f}%%"
-
-    def find_skills_for_context(self, context: str, tool_sequence: Optional[List[str]] = None) -> List[SkillTemplate]:
-        """
-        根据上下文查找匹配的技能
-
-        参数:
-            context: 上下文描述
-            tool_sequence: 工具序列（可选）
-
-        返回:
-            List[SkillTemplate]: 匹配的技能模板列表
-        """
-        with self._lock:
-            keywords = self._extract_keywords(context)
-            results = []
-
-            for template in self._templates.values():
-                if not template.is_active:
-                    continue
-
-                # 计算匹配分数
-                score = self._calculate_match_score(template, keywords, tool_sequence)
-
-                if score > 0.3:  # 最低匹配阈值
-                    results.append((template, score))
-
-            # 按分数排序
-            results.sort(key=lambda x: x[1], reverse=True)
-
-            return [template for template, score in results]
-
-    def _calculate_match_score(
-        self, template: SkillTemplate, context_keywords: List[str], tool_sequence: Optional[List[str]] = None
-    ) -> float:
-        """计算匹配分数"""
-        score = 0.0
-
-        # 关键词匹配
-        if template.pattern and template.pattern.context_keywords:
-            common_keywords = set(template.pattern.context_keywords) & set(context_keywords)
-            keyword_score = len(common_keywords) / max(1, len(template.pattern.context_keywords))
-            score += keyword_score * 0.5
-
-        # 工具序列匹配
-        if tool_sequence and template.tool_sequence:
-            from neurova.skills.creation_governance import fingerprint
-
-            key = fingerprint(tool_sequence)
-            seq_score = float(bool(key) and key == fingerprint(template.tool_sequence))
-            score += seq_score * 0.3
-
-        # 成功率加成
-        score += template.success_rate * 0.2
-
-        return min(1.0, score)
-
-    def get_pattern_statistics(self) -> Dict[str, Any]:
-        """获取模式统计信息"""
-        with self._lock:
-            total_patterns = len(self._patterns)
-            total_templates = len(self._templates)
-            total_observations = len(self._observations)
-
-            # 按成功率排序的 top 模式
-            top_patterns = sorted(self._patterns.values(), key=lambda p: p.success_rate * p.total_uses, reverse=True)[
-                :10
-            ]
-
-            return {
-                "total_patterns": total_patterns,
-                "total_templates": total_templates,
-                "total_observations": total_observations,
-                "top_patterns": [
-                    {
-                        "pattern_id": p.pattern_id,
-                        "tool_sequence": p.tool_sequence,
-                        "success_rate": p.success_rate,
-                        "total_uses": p.total_uses,
-                    }
-                    for p in top_patterns
-                ],
-            }
 
     def get_template(self, template_id: str) -> Optional[SkillTemplate]:
         """获取技能模板"""
@@ -619,20 +595,14 @@ class AutoSkillBuilder:
 
                 if skill_service is None:
                     continue
-                result = publish_automatic(skill_service, registry, skill)
+                # 工单 016：能走到这一支说明模板已过审批面（is_active），
+                # 落盘时不得再被"自动产物注册即禁用"那道门按回停用 ——
+                # 那会把人工批准留在内存态，下一轮对话读磁盘即不可用。
+                result = publish_automatic(skill_service, registry, skill, human_approved=True)
                 if result.get("success") and not result.get("duplicate"):
                     registered_count += 1
 
         return registered_count
-
-    def deactivate_template(self, template_id: str) -> bool:
-        """停用技能模板"""
-        with self._lock:
-            template = self._templates.get(template_id)
-            if template:
-                template.is_active = False
-                return True
-            return False
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
@@ -689,18 +659,3 @@ _builder_instance: Optional[AutoSkillBuilder] = None
 _instance_lock = threading.Lock()
 
 
-def get_skill_builder(**kwargs) -> AutoSkillBuilder:
-    """获取技能构建器单例"""
-    global _builder_instance
-    if _builder_instance is None:
-        with _instance_lock:
-            if _builder_instance is None:
-                _builder_instance = AutoSkillBuilder(**kwargs)
-    return _builder_instance
-
-
-def reset_skill_builder():
-    """重置技能构建器单例"""
-    global _builder_instance
-    with _instance_lock:
-        _builder_instance = None

@@ -7,9 +7,25 @@ Pytest 配置和共享 fixtures
 import pytest
 import sys
 import os
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# MoE 索引状态目录——会话级兜底。per-test fixture 用 monkeypatch 指向 tmp_path，
+# 但那一刻之后仍有写盘：daemon 索引线程可能拖到 monkeypatch 撤销后才落盘，
+# 起子进程的测试也不一定带上这个变量。实测（2026-09-19）全量 tests/unit 期间
+# 4 个真实 workspace 键就被写回仓库 data/。这里在导入期把默认值钉进会话临时
+# 目录，两种迟到写都落在临时区，且随子进程 env 继承下去。
+MOE_STATE_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaMoeState-"))
+os.environ.setdefault("NEUROVA_MOE_INDEX_STATE_DIR", str(MOE_STATE_SESSION_DIR))
+
+
+@pytest.fixture(scope="session")
+def moe_state_session_dir() -> Path:
+    """会话级 MoE 状态目录（供断言兜底层生效）"""
+    return MOE_STATE_SESSION_DIR
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +58,48 @@ def _isolate_session_manager_singletons():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_connection_pools():
+    """跨测试释放连接池持有的 idle SQLite 连接。
+
+    `connection_pool` 按路径持有连接且不随测试结束关闭；当测试把工作库建在
+    TemporaryDirectory 内时，Windows 下临时目录清理会因残留池连接报 WinError 32
+    （standalone 尤其明显）。每测试后 close_all_pools() 归还/关闭，池会在下次
+    get_connection_pool 时惰性重建。
+    """
+    yield
+    try:
+        from neurova.core.connection_pool import close_all_pools
+
+        close_all_pools()
+    except Exception:  # pragma: no cover - 池模块不可用时跳过
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_execution_engine_singleton():
+    """ExecutionEngine 单例跨测试隔离（Issue #65）。
+
+    ExecutionEngine 是**类级单例**（``_instance`` 挂在类上），此前
+    ``reset_execution_engine()`` 只清模块级缓存 → 重置后取回同一对象、
+    ``_executions`` 里上一测试的执行记录原样存活（实测 e2 is e1 → True）。
+    依赖它做隔离的测试会拿到脏状态，且该函数在全仓没有任何调用方——
+    "重置"契约从未被验证。
+
+    这里每测试后调用修复后的 ``reset_execution_engine()``（三层清：模块缓存
+    + 类级 _instance + 执行记录），把契约钉在真实调用点上。
+    """
+    yield
+    try:
+        from neurova.shared_core.execution_engine import reset_execution_engine
+    except Exception:  # pragma: no cover - 模块不可用时跳过
+        return
+    try:
+        reset_execution_engine()
+    except Exception:  # pragma: no cover - 重置失败不得连带测试失败
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_skill_service_storage(tmp_path, monkeypatch):
     """Keep default skill-library writes out of user data during regressions."""
     import hashlib
@@ -53,6 +111,30 @@ def _isolate_skill_service_storage(tmp_path, monkeypatch):
         return original(self, agent_id, skills_dir if skills_dir is not None else str(directory))
 
     monkeypatch.setattr(SkillService, "__init__", isolated)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_moe_index_state_dir(tmp_path, monkeypatch):
+    """MoE 索引状态目录隔离（防仓库 data/ 泄漏）。
+
+    状态文件名是 md5(agent_id:persist_db_path)，测试的 tmp_path 工作区每用例给
+    一个新键、每次 pytest 运行再换一层基目录，落到仓库 data/ 就是不可回收的
+    一次性文件。指向 tmp_path 后随测试临时目录一并清理。
+    """
+    monkeypatch.setenv("NEUROVA_MOE_INDEX_STATE_DIR", str(tmp_path / "moeIndexState"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_workspaces_root(tmp_path, monkeypatch):
+    """agent 工作区根隔离到 tmp_path（防污染真实记忆库）。
+
+    app.py 用这个根建默认 Agent 并枚举已持久化 agent；测试里用 TestClient 起
+    真 app 就会打开 agent_workspaces/<id>/memory/ 并往里写记忆行（实测某轮跑测
+    期间 default 库从 301 行涨到 306 行）。生产默认仍是仓库 agent_workspaces/。
+    """
+    monkeypatch.setenv(
+        "NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agentWorkspaces")
+    )
 
 
 @pytest.fixture
@@ -338,6 +420,39 @@ def _isolate_governance_settings(tmp_path, monkeypatch):
     与 _isolate_usage_history 同模式。
     """
     monkeypatch.setenv("NEUROVA_GOVERNANCE_SETTINGS", str(tmp_path / "governance_settings.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rsi_proposal_ledger(tmp_path, monkeypatch):
+    """RSI 提案台账（SelfImprovementProposer 的 proposals 根目录）指向临时目录。
+
+    工单 010 之前它硬编码仓库根同名目录，且构造即 mkdir —— 于是每个构造编排器的
+    用例都在往工作树里写提案，实测一次八目录套件留下 873 个 JSON
+    （`sleep` 429 / `emotion` 175 / `tool_memory` 157 / `experience` 112）。
+    台账按 agent 分域之后，根路径仍可注入；这里统一注入到每测试临时目录。
+    """
+    monkeypatch.setenv("NEUROVA_PROPOSALS_ROOT", str(tmp_path / "rsi-proposal-ledger"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_evolution_state_paths(tmp_path, monkeypatch):
+    """进化状态持久化各件统一指向每测试临时目录。
+
+    `bootstrap_evolution_persistence` 按 env 解析默认路径；调用方只覆盖其中
+    四件时，第五件（技能经验库）就写进仓库 `data/evolution/skill_experiences.json`
+    —— 实测 `test_evolution_state_persistence.py` 单跑一次即改写该生产文件。
+    工单 016 给 `AutoSkillImprover` 挂持久化，泄漏面会再多一处，故先在根 conftest
+    收口（默认值也注入，测试自己不再需要逐个补 env）。
+    """
+    state_dir = tmp_path / "evolution"
+    for key, name in (
+        ("NEUROVA_EVOLUTION_WEIGHTS", "tool_weights.json"),
+        ("NEUROVA_EVOLUTION_PATTERNS", "pattern_sequences.json"),
+        ("NEUROVA_EVOLUTION_LIFECYCLE", "tool_lifecycle.json"),
+        ("NEUROVA_EVOLUTION_EXPERIENCE", "experience_feedback.json"),
+        ("NEUROVA_EVOLUTION_SKILL_EXPERIENCE", "skill_experiences.json"),
+    ):
+        monkeypatch.setenv(key, str(state_dir / name))
 
 
 @pytest.fixture(autouse=True)

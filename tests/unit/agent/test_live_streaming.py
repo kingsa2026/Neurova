@@ -86,7 +86,9 @@ class TestApplyThinkingEffort:
         p._apply_thinking_effort(ctx)
         assert ctx.context == before
 
-        ctx2 = ChatContext(user_input="hi", metadata=None)
+        ctx2 = ChatContext(user_input="帮我看看这个项目", metadata=None)
+        # 用歧义文本代表"缺省无信号→不注入"；寒暄/长文等强信号→light/deep 的
+        # 自动定档属 G2 有意增强，另由 tests/unit/agent/test_effort_inference.py 覆盖。
         ctx2.context = [{"role": "system", "content": "S"}]
         p._apply_thinking_effort(ctx2)
         assert ctx2.context[0]["content"] == "S"
@@ -305,8 +307,14 @@ class TestConsoleFlushDedup:
         assert tool_results[0]["name"] == "get_datetime"
 
     @pytest.mark.asyncio
-    async def test_flush_skips_native_event_wrappers(self):
-        """_tool_messages_list 里的原生事件包装不得产生空 name 的 SSE 事件"""
+    async def test_flush_reports_flat_tool_records(self):
+        """取证源只有扁平记录形状 ⇒ flush 必然拿得到工具名。
+
+        原生链一度把 `{type, data}` 包装事件与原生的扁平记录写进同一个列表，
+        展示层只好自己加一层"跳过没有 tool_name 的条目"的守卫。工单 002 把生产者
+        收口为单一形状（`chat_pipeline._call_loop_stream` 不再并入取证源），
+        该守卫随之删净；这里改为断言"形状对时 flush 完整透出工具名"。
+        """
 
         class FakeAgent:
             async def chat(self, message, stream=False, session_id=None, metadata=None, model=None):
@@ -316,28 +324,21 @@ class TestConsoleFlushDedup:
                     "tool_messages": [
                         {
                             "type": "tool_call",
-                            "data": {
-                                "id": "call_1",
-                                "function": {"name": "get_datetime", "arguments": '{"timezone": "+00:00"}'},
-                            },
+                            "tool_name": "get_datetime",
+                            "params": {"timezone": "+00:00"},
                         },
                         {
                             "type": "tool_result",
-                            "data": {
-                                "role": "tool",
-                                "tool_call_id": "call_1",
-                                "name": "get_datetime",
-                                "content": '{"datetime": "2026-08-28"}',
-                            },
+                            "tool_name": "get_datetime",
+                            "result": '{"datetime": "2026-08-28"}',
+                            "success": True,
                         },
                     ],
                 }
 
         events = await self._drain_sse(FakeAgent())
-        empty_name = [
-            e for e in events if e.get("type") in ("tool_call", "tool_result") and not e.get("name")
-        ]
-        assert empty_name == [], f"flush 推出了空 name 事件: {empty_name}"
+        tool_events = [e for e in events if e.get("type") in ("tool_call", "tool_result")]
+        assert [e["name"] for e in tool_events] == ["get_datetime", "get_datetime"]
 
     @pytest.mark.asyncio
     async def test_flush_dedup_survives_escaped_unicode_content(self):

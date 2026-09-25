@@ -11,16 +11,19 @@ V2-8 (LOW): base.py _build_tools_from_skills 是死代码(无调用点),
 
 TDD 垂直切片: 一次一个测试 → 一次一个实现。
 """
+
 import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
+from tests.repo_paths import repo_path, repo_str
+
 
 
 # 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
 _SPEC = importlib.util.spec_from_file_location(
     "neurova_skill_system_standalone_for_test_v3",
-    "e:/项目/Neurova/neurova/skill_system.py",
+    repo_str("neurova/skill_system.py"),
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
@@ -115,14 +118,17 @@ class TestBuildToolsFromSkillsDeadCodeRemoved:
 
     def test_no_callers_of_build_tools_from_skills(self):
         """全代码库不应有任何代码调用 _build_tools_from_skills。"""
-        import subprocess
-        # 用 ripgrep 搜索调用点(排除方法定义本身和测试文件)
-        result = subprocess.run(
-            ["rg", "_build_tools_from_skills", "e:/项目/Neurova/neurova"],
-            capture_output=True, text=True, shell=False,
-        )
+        # 纯 Python 扫描(不用 ripgrep/grep:薄 CI 镜像里没有 rg,
+        # 外部二进制缺席会让本守卫 FileNotFoundError 直接炸 = 守卫没跑)。
+        offenders = []
+        for py in sorted(repo_path("neurova").rglob("*.py")):
+            if "__pycache__" in py.parts:
+                continue
+            text = py.read_text(encoding="utf-8")
+            if "_build_tools_from_skills" in text:
+                offenders.append(str(py.relative_to(repo_path("neurova"))))
         # 修复后,neurova 目录下不应有任何匹配(包括方法定义)
-        assert result.returncode != 0 or not result.stdout.strip(), (
-            f"仍存在 _build_tools_from_skills 引用:\n{result.stdout}"
+        assert not offenders, (
+            f"仍存在 _build_tools_from_skills 引用: {offenders}"
             "死代码应完全删除,包括定义。"
         )

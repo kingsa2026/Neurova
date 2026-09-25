@@ -3,10 +3,11 @@
 锁定契约：
 - register_artifact：路径解析 + kind 映射 + 同路径幂等（sha1 去重）；
 - 归属：user_id/agent_id 记录，非属主 404（_get_owned_artifact 语义）；
-- 读取白名单：工作区根（_WORKSPACE_ROOT）内路径放行；
+- 读取白名单：工作区根（NEUROVA_AGENT_WORKSPACES_DIR 注入）内路径放行；
   %TEMP%/neurova_tts/（TTS 音频）放行；白名单外路径拒绝注册。
 """
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,7 +37,9 @@ class TestRegisterArtifact(unittest.TestCase):
     def setUp(self):
         artifacts_api._artifacts_store.clear()
         self.tmp = tempfile.mkdtemp(prefix="nr_art_")
-        self._root_patch = mock.patch.object(artifacts_api, "_WORKSPACE_ROOT", Path(self.tmp))
+        self._root_patch = mock.patch.dict(
+            os.environ, {"NEUROVA_AGENT_WORKSPACES_DIR": self.tmp}
+        )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
         self.ws = Path(self.tmp) / "ag1"

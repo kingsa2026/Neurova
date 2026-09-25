@@ -23,6 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -103,7 +104,7 @@ class NegativeScreenConfigManager:
         Args:
             data_dir: 数据存储目录
         """
-        self._data_dir = Path(data_dir or "data/negative_screen")
+        self._data_dir = callerPath(data_dir, "negative_screen")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
@@ -331,51 +332,6 @@ class NegativeScreenPusher:
 
         # 执行推送
         return await self._execute_push(config.push_url, push_data, task_id)
-
-    async def push_rsi_result(
-        self,
-        config: NegativeScreenConfig,
-        rsi_result: Dict[str, Any],
-    ) -> PushResult:
-        """
-        推送 RSI 结果到负一屏
-
-        Args:
-            config: 用户配置
-            rsi_result: RSI 迭代结果
-
-        Returns:
-            推送结果
-        """
-        # 格式化 RSI 结果
-        iteration = rsi_result.get("iteration", 0)
-        improvements = rsi_result.get("improvements", 0)
-        convergence_score = rsi_result.get("convergence_score", 0.0)
-        status = rsi_result.get("status", "unknown")
-
-        task_name = f"RSI 迭代 #{iteration}"
-        task_content = f"""## RSI 自我优化报告
-
-### 迭代信息
-- **迭代次数**: {iteration}
-- **优化数量**: {improvements}
-- **收敛分数**: {convergence_score * 100:.2f}%%
-- **状态**: {status}
-
-### 详细结果
-```json
-{json.dumps(rsi_result, indent=2, ensure_ascii=False)}
-```
-"""
-        task_result = f"RSI 迭代 {iteration} 完成，{improvements} 项优化，收敛分数 {convergence_score * 100:.2f}%%"
-
-        return await self.push_task(
-            config=config,
-            task_name=task_name,
-            task_content=task_content,
-            task_result=task_result,
-            task_id=f"rsi_{iteration}_{uuid.uuid4().hex[:8]}",
-        )
 
     def _build_push_data(
         self,

@@ -123,6 +123,33 @@ def classify_model_error(error: Union[BaseException, str]) -> ModelErrorDecision
     )
 
 
+#: 配对非法的 provider 400 特征串（工具轮进视图的**唯一硬失败信号**，工单 §11.5）。
+#: 网关措辞不一，故按"同时点出 tool_calls 与响应关系"判定，不匹配单个词。
+_PAIRING_REJECT_MARKERS = (
+    "must be followed by tool messages",
+    "tool_call_id",
+    "tool_calls",
+)
+
+
+def toolPairingRejectReason(error: Union[BaseException, str]) -> Optional[str]:
+    """判定一个 provider 错误是否为**工具轮配对非法**导致的 400；是则返回点名串。
+
+    为什么单独一个判定：灰度期"provider 400 必须归零"是本能力的唯一硬判据，
+    而 400 的成因很多（未知字段、参数越界、内容策略……）。把全部 400 计进去，
+    判据会被无关错误顶红；只判"400 且两处特征同时在场"，才叫咬合。
+    非 400 一律返回 `None`（429/5xx 与配对无关）。
+    """
+    decision = classify_model_error(error)
+    if decision.status_code != 400 and decision.kind != "bad_request":
+        return None
+    message = str(error).lower()
+    hits = [m for m in _PAIRING_REJECT_MARKERS if m in message]
+    if len(hits) < 2:
+        return None
+    return "ToolPairingReject"
+
+
 def is_retryable_same_model(error: Union[BaseException, str]) -> bool:
     """同一模型是否值得重试。"""
     return classify_model_error(error).retryable

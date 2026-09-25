@@ -14,6 +14,13 @@ import logging
 import sys
 from pathlib import Path
 
+# 同 demo_closed_loop：仓库根须先于 `import neurova` 进 sys.path。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import resolveDataPath  # noqa: E402
+
 # 设置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -287,7 +294,7 @@ def main():
     """)
     
     # 创建数据目录
-    Path("data/demo").mkdir(parents=True, exist_ok=True)
+    resolveDataPath("demo").mkdir(parents=True, exist_ok=True)
     
     # 演示各功能
     demo_task_scheduler()

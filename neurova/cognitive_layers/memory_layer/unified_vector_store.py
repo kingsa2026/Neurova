@@ -24,6 +24,7 @@ from array import array
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -35,24 +36,31 @@ logger = get_logger(__name__)
 # 修复：内容寻址（sha256(文本)）缓存，落盘持久化，重启后同文本同模型直接命中。
 #
 # 纪律：
-# - 仅真实模型后端且 encoder 已初始化的向量可入缓存。tfidf 词汇表漂移、
-#   onnx 懒加载失败降级 tfidf 的路径一律绕过缓存，防止维度漂移向量毒化。
-# - 指纹 backend:model_name 不匹配 → 整体失效。
+# - 入缓存的**判据是向量形态稳定**，不是"后端是不是模型"：真模型后端且 encoder
+#   已初始化时可入；tfidf 在**词表为空**时走定维（100）哈希编码，同文本同维度、
+#   跨轮不变，同样可入（Issue #90 B6-6：改前一律绕过，实测同批文本跨轮各重编码
+#   301 次）。词表一旦被 IDF 填充，向量随语料漂移 → 指纹变化，旧缓存自动失配。
+# - 指纹 backend:model_name 是**命名空间**：同一进程里 tfidf 分片与真模型后端
+#   并存时互不失效（旧实现"指纹不匹配即整体失效"，两边会互相清空、每轮重算）。
 # - 内存态存 base64(float32)（20000×512 维按 float 列表存约 250MB，b64 约 56MB）；
 #   命中时解码（微秒级），落盘/内存同形。
 # - 环境变量 NEUROVA_EMBEDDING_CACHE 可覆盖落盘路径（测试隔离）。
 # ═══════════════════════════════════════════════════════════════
 
 _EMBEDDING_CACHE_MAX_ENTRIES = 20000
-# 类型: sha256(文本) → base64(float32 向量字节)
-_embedding_cache: Optional[Dict[str, str]] = None
-_embedding_cache_fingerprint: str = ""
+#: 新增条目累计到这个数就写穿一次落盘：既让进程级缓存跨重启有效，
+#: 又不至于每批编码都整文件重写（20000 条 JSON 达数 MB）。
+_EMBEDDING_CACHE_FLUSH_EVERY = 512
+_embedding_cache_dirty = 0
+#: 缓存命名空间 → { sha256(文本): base64(float32 向量字节) }。
+#: 命名空间就是指纹，各后端/模型独立共存（见文件头纪律）。
+_embedding_cache: Optional[Dict[str, Dict[str, str]]] = None
 _embedding_cache_path: Optional[Path] = None
 _embedding_cache_lock = threading.RLock()
 
 
 def _embedding_fingerprint(backend: str, encoder: Any) -> str:
-    """模型指纹：同文本不同模型/维度的向量不可互用"""
+    """模型指纹：同文本不同模型/维度的向量不可互用（tfidf 见实例侧 `_cacheFingerprint`）"""
     model_name = getattr(encoder, "model_name", "") or getattr(encoder, "_model_name", "")
     return f"{backend}:{model_name}"
 
@@ -61,7 +69,7 @@ def _embedding_cache_file() -> Path:
     env = os.environ.get("NEUROVA_EMBEDDING_CACHE", "").strip()
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[3] / "data" / "embedding_cache.json"
+    return get_data_root() / "embedding_cache.json"
 
 
 def _vec_to_b64(vec: List[float]) -> Optional[str]:
@@ -80,43 +88,67 @@ def _b64_to_vec(b64: str) -> Optional[List[float]]:
         return None
 
 
+def _flushEmbeddingCacheIfDirty() -> None:
+    """累积到阈值即写穿（调用方持锁语义由 `_persist_embedding_cache` 自己保证）。"""
+    global _embedding_cache_dirty
+    if _embedding_cache_dirty < _EMBEDDING_CACHE_FLUSH_EVERY:
+        return
+    _embedding_cache_dirty = 0
+    _persist_embedding_cache()
+
+
 def _load_embedding_cache(fingerprint: str) -> Dict[str, str]:
-    """加载落盘缓存；指纹不匹配或文件损坏时整体失效（返回空表）"""
-    global _embedding_cache, _embedding_cache_fingerprint, _embedding_cache_path
+    """加载落盘缓存，返回**该命名空间**的条目（损坏/缺失返回空表）。
+
+    命名空间各自独立：别的指纹落盘的内容不影响本指纹（旧实现"指纹不匹配即
+    整体失效"会让 tfidf 分片与真模型后端互相清空）。旧格式（顶层
+    `fingerprint`/`entries`）按同一命名空间读回，不因格式升级丢弃既有缓存。
+    """
+    global _embedding_cache, _embedding_cache_path
     with _embedding_cache_lock:
-        if _embedding_cache is not None and _embedding_cache_fingerprint == fingerprint:
-            return _embedding_cache
-        path = _embedding_cache_file()
-        _embedding_cache_path = path
-        entries: Dict[str, str] = {}
-        if path.exists():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if raw.get("fingerprint") == fingerprint:
-                    entries = raw.get("entries", {})
-                    logger.info("嵌入缓存已加载: %d 条 (fingerprint=%s)", len(entries), fingerprint)
-                else:
-                    logger.info("嵌入缓存指纹不匹配（模型变更），整体失效重建")
-            except Exception as e:
-                logger.warning("嵌入缓存文件损坏，重建: %s", e)
-        _embedding_cache = entries
-        _embedding_cache_fingerprint = fingerprint
-        return entries
+        if _embedding_cache is None:
+            entries: Dict[str, dict] = {}
+            path = _embedding_cache_file()
+            _embedding_cache_path = path
+            if path.exists():
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(raw.get("namespaces"), dict):
+                        entries = {
+                            str(name): dict(items or {})
+                            for name, items in raw["namespaces"].items()
+                        }
+                    elif raw.get("fingerprint"):
+                        # 旧格式（单命名空间）——按同名读回，不静默丢弃
+                        entries = {str(raw["fingerprint"]): dict(raw.get("entries") or {})}
+                    logger.info(
+                        "嵌入缓存已加载: %d 个命名空间 (总 %d 条)",
+                        len(entries), sum(len(v) for v in entries.values()),
+                    )
+                except Exception as e:
+                    logger.warning("嵌入缓存文件损坏，重建: %s", e)
+            _embedding_cache = entries
+        return _embedding_cache.setdefault(fingerprint, {})
 
 
-def _persist_embedding_cache(fingerprint: str, entries: Dict[str, str]) -> None:
-    """批处理边界统一写穿（原子替换，防半截 JSON）；超上限时按插入序截断"""
+def _persist_embedding_cache() -> None:
+    """批处理边界统一写穿（原子替换，防半截 JSON）；每命名空间按插入序截断"""
     global _embedding_cache_path
     with _embedding_cache_lock:
+        if _embedding_cache is None:
+            return
         if _embedding_cache_path is None:
             _embedding_cache_path = _embedding_cache_file()
         path = _embedding_cache_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            trimmed = dict(list(entries.items())[-_EMBEDDING_CACHE_MAX_ENTRIES:])
+            trimmed = {
+                name: dict(list(items.items())[-_EMBEDDING_CACHE_MAX_ENTRIES:])
+                for name, items in _embedding_cache.items()
+            }
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(
-                json.dumps({"fingerprint": fingerprint, "entries": trimmed}),
+                json.dumps({"namespaces": trimmed}),
                 encoding="utf-8",
             )
             os.replace(tmp, path)
@@ -126,23 +158,29 @@ def _persist_embedding_cache(fingerprint: str, entries: Dict[str, str]) -> None:
 
 def flush_embedding_cache() -> None:
     """把进程内新增嵌入写穿落盘（index_memories/initialize_centroids 批结束调用）"""
-    with _embedding_cache_lock:
-        if _embedding_cache is None:
-            return
-        _persist_embedding_cache(_embedding_cache_fingerprint, _embedding_cache)
+    _persist_embedding_cache()
 
 
 def reset_embedding_cache() -> None:
     """清空进程内缓存状态（测试用；不删落盘文件）"""
-    global _embedding_cache, _embedding_cache_fingerprint, _embedding_cache_path
+    global _embedding_cache, _embedding_cache_path, _embedding_cache_dirty
     with _embedding_cache_lock:
         _embedding_cache = None
-        _embedding_cache_fingerprint = ""
         _embedding_cache_path = None
+        _embedding_cache_dirty = 0
 
 
 def _cacheable_vector(backend: str, encoder: Any) -> bool:
-    """该后端+encoder 的向量是否可入缓存：仅真实模型后端且 encoder 已就绪"""
+    """该后端+encoder 的向量形态是否稳定到可入缓存。
+
+    真模型后端（faiss/fastembed/onnx）要求 encoder 已就绪；tfidf 的稳定性不由
+    后端类型决定，而由**词汇表形态**决定（见 `UnifiedVectorStore._cacheFingerprint`）
+    ——故这里对 tfidf 只回答"形态可判定"，实例侧再按词表给出具体命名空间。
+    `_cacheable_vector("onnx", store._encoder)` 仍是既有消费方的判据入口，
+    语义未变（未初始化的编码器仍不可缓存）。
+    """
+    if backend == "tfidf":
+        return True
     if backend not in ("faiss", "fastembed", "onnx"):
         return False
     return bool(getattr(encoder, "is_initialized", False))
@@ -308,30 +346,130 @@ class UnifiedVectorStore:
         Returns:
             归一化向量
         """
+        return self.encode_batch([text])[0]
+
+    def encode_batch(self, texts: List[str]) -> List[float]:
+        """批量编码（**唯一入口**：单条 `encode` 由本方法派生，不是第二份实现）。
+
+        B6-6 根因：`UnifiedVectorStore` 此前没有批量入口，于是
+        `semantic_drawer.ScoringContext.build` 的 `hasattr(store, "encode_batch")`
+        分支恒假——"批量打分"在 store 这一层从未接上，逐条 encode 是唯一路径。
+
+        - 真模型后端：批内**未命中缓存**的文本合成一次编码器调用（批内去重），
+          命中则直接取缓存，实现里零维度漂移风险；
+        - tfidf：形态稳定时（词表为空 → 定维哈希）同样参与缓存，同批文本跨轮
+          真编码次数降为 0；词表被 IDF 填充后指纹变化，旧向量自动失配。
+        """
+        if not texts:
+            return []
+        entries = self._cacheEntries()
+        pending: List[str] = []      # 需要真编码的文本（保插入序、批内去重）
+        vectors: Dict[str, List[float]] = {}
+
+        for text in texts:
+            if text in vectors:
+                continue
+            cached = self._cacheGet(entries, text)
+            if cached is not None:
+                vectors[text] = cached
+            elif text not in pending:
+                pending.append(text)
+
+        if pending:
+            computed = self._encodeManyUncached(pending)
+            for text, vec in zip(pending, computed):
+                vec = list(vec)
+                vectors[text] = vec
+                self._cachePut(entries, text, vec)
+
+        return [vectors[text] for text in texts]
+
+    def _cacheFingerprint(self) -> Optional[str]:
+        """本实例的缓存命名空间；形态不稳定时返回 `None`（不读不写缓存）。
+
+        tfidf 是**两相**后端：词表为空时走定维（100）哈希编码，同文本同维度、
+        跨轮不变；词表被 IDF 填充后向量随语料漂移。前者可缓存，后者不可——
+        改前这两相被一起排除在外，所以同批文本跨轮各重编码 301 次（B6-6）。
+        """
         backend = self.backend
         encoder = self._encoder
-        cacheable = _cacheable_vector(backend, encoder)
-        fingerprint = _embedding_fingerprint(backend, encoder) if cacheable else ""
-        cache_key = ""
-        if cacheable:
-            cache_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            entries = _load_embedding_cache(fingerprint)
-            with _embedding_cache_lock:
-                cached_b64 = entries.get(cache_key)
-            if cached_b64 is not None:
-                cached = _b64_to_vec(cached_b64)
-                if cached is not None:
-                    return cached
+        if not _cacheable_vector(backend, encoder):
+            return None
+        if backend == "tfidf":
+            # IDF 加权后向量随语料继续漂移（词表每扩一次，同一文本的分量就变），
+            # 无稳定命名空间可用 → 不入缓存（改前是一种形态都不缓存，B6-6 只放开
+            # 稳定相；漂移相宁可重算，不可复用形状不一致的向量）。
+            if getattr(self, "_idf_values", None):
+                return None
+            return "tfidf:hash"
+        return _embedding_fingerprint(backend, encoder)
 
-        vec = self._encode_uncached(text)
+    def _cacheEntries(self) -> Optional[Dict[str, str]]:
+        """本实例的缓存条目表（不稳定形态返回 None，调用方按无缓存处理）。"""
+        fingerprint = self._cacheFingerprint()
+        if not fingerprint:
+            return None
+        return _load_embedding_cache(fingerprint)
 
-        if cacheable and cache_key:
-            b64 = _vec_to_b64(vec)
-            if b64 is not None:
-                entries = _load_embedding_cache(fingerprint)
-                with _embedding_cache_lock:
-                    entries[cache_key] = b64
-        return vec
+    @staticmethod
+    def _cacheGet(entries: Optional[Dict[str, str]], text: str) -> Optional[List[float]]:
+        if entries is None:
+            return None
+        cache_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        with _embedding_cache_lock:
+            cached_b64 = entries.get(cache_key)
+        if cached_b64 is None:
+            return None
+        return _b64_to_vec(cached_b64)
+
+    @staticmethod
+    def _cachePut(entries: Optional[Dict[str, str]], text: str, vec: List[float]) -> None:
+        global _embedding_cache_dirty
+        if entries is None:
+            return
+        cache_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        b64 = _vec_to_b64(vec)
+        if b64 is None:
+            return
+        with _embedding_cache_lock:
+            if cache_key in entries:
+                return
+            entries[cache_key] = b64
+            _embedding_cache_dirty += 1
+        _flushEmbeddingCacheIfDirty()
+
+    def _encodeManyUncached(self, texts: List[str]) -> List[List[float]]:
+        """批内真编码（不含缓存逻辑）：能走编码器批量 API 就走一次调用。"""
+        if self.backend in ("faiss", "fastembed", "onnx") and self._encoder:
+            if self.backend == "onnx" and not self._encoder.is_initialized:
+                # 同步懒初始化：initialize_sync 可在事件循环内直接调用
+                # （2026-09-10 CPU 事故修复——原"检测到运行中事件循环即放弃
+                # 初始化降级 TF-IDF"分支导致编码器永远无法就绪，请求路径
+                # 每轮全量 TF-IDF 重算打满 CPU）
+                if not self._encoder.initialize_sync():
+                    logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
+                    return [self._tfidf_encode(text) for text in texts]
+            batch = self._encoderBatch(texts)
+            if batch is not None:
+                return batch
+        return [self._tfidf_encode(text) for text in texts]
+
+    def _encoderBatch(self, texts: List[str]) -> Optional[List[List[float]]]:
+        """编码器批量 API 的契约归一（形状不一致一律返回 None，退回逐条）。"""
+        encoder = self._encoder
+        if self.backend == "faiss":
+            encoded = encoder.encode(texts, normalize_embeddings=True)
+            return [list(vec) for vec in encoded]
+        if self.backend == "fastembed":
+            return [list(vec) for vec in encoder.embed(texts)]
+        batch = getattr(encoder, "encode_batch", None)
+        if batch is None:
+            return [list(encoder.encode(text)) for text in texts]
+        result = batch(texts)
+        vectors = getattr(result, "vectors", result)
+        if not isinstance(vectors, list) or len(vectors) != len(texts):
+            return [list(encoder.encode(text)) for text in texts]
+        return [list(vec) for vec in vectors]
 
     def _encode_uncached(self, text: str) -> List[float]:
         """真实编码路径（原 encode 主体，无缓存逻辑）"""

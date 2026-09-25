@@ -448,51 +448,6 @@ class TestConflictDetector:
 # 6. 结果处理器测试
 # ═══════════════════════════════════════
 
-class TestResultProcessor:
-    """结果处理器测试"""
-
-    def test_process_returns_max_5_results(self):
-        """处理返回最多 5 条结果"""
-        from neurova.cognitive_layers.memory_layer.result_processor import ResultProcessor
-
-        processor = ResultProcessor(max_results=5)
-        results = MOCK_MEMORIES * 3  # 15 条
-
-        import asyncio
-        processed = asyncio.run(processor.process(results))
-
-        assert len(processed.independent) <= 5
-
-    def test_process_deduplicates(self):
-        """处理去重"""
-        from neurova.cognitive_layers.memory_layer.result_processor import ResultProcessor
-
-        processor = ResultProcessor()
-
-        # 添加重复项
-        results = MOCK_MEMORIES + [MOCK_MEMORIES[0].copy()]
-
-        import asyncio
-        processed = asyncio.run(processor.process(results))
-
-        # 去重后应该只有 5 条
-        assert len(processed.independent) == 5
-
-    def test_process_handles_conflicts(self):
-        """处理冲突"""
-        from neurova.cognitive_layers.memory_layer.result_processor import ResultProcessor
-
-        processor = ResultProcessor()
-
-        import asyncio
-        processed = asyncio.run(processor.process(MOCK_MEMORIES))
-
-        # 如果有冲突，应该有 conflict_groups
-        if processed.has_conflicts:
-            assert len(processed.conflict_groups) > 0
-            assert processed.injection_text is not None
-
-
 # ═══════════════════════════════════════
 # 7. 端到端集成测试
 # ═══════════════════════════════════════
@@ -505,7 +460,6 @@ class TestEndToEndIntegration:
         """完整系统"""
         from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
         from neurova.cognitive_layers.memory_layer.moe_router import MoEMemoryRouter, VectorGatingNetwork
-        from neurova.cognitive_layers.memory_layer.result_processor import ResultProcessor
 
         # Mock 存储
         mock_storage = Mock()
@@ -522,29 +476,30 @@ class TestEndToEndIntegration:
             vector_store=vector_store,
         )
 
-        processor = ResultProcessor(max_results=5)
-
-        return router, processor
+        return router, None
 
     def test_full_retrieval_flow(self, full_system):
-        """完整检索流程"""
-        router, processor = full_system
+        """完整检索流程 — 断言生产契约（MoEMemoryRouter.retrieve 的返回形状）
+
+        ResultProcessor 已随 Issue #74 退役（零生产消费者）；MoEMemoryRouter 的
+        真实消费方是 MoERetrieverAdapter → memory_retrieval_chain，故此处直接
+        断言适配器实际读取的字段，不再经中间死模块。
+        """
+        router, _ = full_system
 
         import asyncio
-        # 检索
-        raw_results = asyncio.run(router.retrieve("张三 文件下载"))
-        # 处理
-        processed = asyncio.run(processor.process(raw_results))
+        results = asyncio.run(router.retrieve("张三 文件下载"))
 
-        assert len(processed.independent) > 0
-        assert len(processed.independent) <= 5
-        assert processed.injection_text is not None
+        assert results, "端到端检索应有结果"
+        assert len(results) <= 5
+        for item in results:
+            assert "id" in item and "content" in item
+            assert "score" in item, "适配器按 score 排序，缺此字段会排序失效"
 
     def test_full_flow_with_conflict(self, full_system):
-        """带冲突的完整流程"""
-        router, processor = full_system
+        """带近义记忆的完整流程 — 兜底路径仍返回可消费结果"""
+        router, _ = full_system
 
-        # 添加冲突记忆
         conflict_memories = MOCK_MEMORIES + [
             {
                 "id": "mem_006",
@@ -559,12 +514,12 @@ class TestEndToEndIntegration:
         router.storage.execute.return_value.fetchall.return_value = conflict_memories
 
         import asyncio
-        raw_results = asyncio.run(router.retrieve("数据库"))
-        processed = asyncio.run(processor.process(raw_results))
+        results = asyncio.run(router.retrieve("数据库"))
 
-        # 应该检测到冲突
-        if processed.has_conflicts:
-            assert "冲突" in processed.injection_text or "选项" in processed.injection_text
+        assert results, "含冲突记忆时仍应返回结果"
+        assert any("数据库" in r.get("content", "") for r in results), (
+            "查询词命中的记忆必须出现在结果里（否则路由/兜底链断了）"
+        )
 
 
 if __name__ == "__main__":

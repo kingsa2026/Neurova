@@ -1,0 +1,149 @@
+// Neurova — 模块依赖与并行实现视图
+// 技能来源: dependency-impact-analyzer + graphviz
+// 视图状态: current
+// 关注问题: Q4「谁依赖谁」「改动波及面」「同名并行实现有几套」
+// 证据: [文件:行号]；生成日期 2026-09-19
+
+digraph NeurovaDependencies {
+    rankdir=TB;
+    nodesep=0.4; ranksep=0.7;
+    fontname="Sans"; fontsize=13;
+    labelloc=t; fontsize=19;
+    label="Neurova 后端依赖方向与并行实现\n红粗线＝双向/回手指向私有成员　蓝虚线＝遮蔽与别名注入　橙框＝同域概念多套定义";
+
+    node [shape=box, style="rounded,filled", fillcolor="#f8f9fa", color="#495057", fontsize=11, margin="0.15,0.08"];
+    edge [fontsize=10];
+
+    // ================= 装配根 =================
+    subgraph cluster_root {
+        label="装配根  (neurova/agent_core.py, 2159 行)";
+        style="rounded"; color="#2b2b2b"; fontsize=13; labeljust=l;
+
+        agent [label="class Agent [:1038]\n__init__ [:1061] → 仅两行委派 [:1071-1075]"];
+        ssc [label="SubSystemContainer [:452]\n12 个 init_* 分组 [:483-496]\n_build_dependency_graph 拓扑序 [:503]\n＋ InitializationManager 循环检测\n[neurova/core/initialization_manager.py:83,154,252]", fillcolor="#ffe8cc"];
+        attrs [label="agent 上约 40 个属性构成隐式共享总线\nmemory_agent / context_orchestrator / llm_client\n/ tool_executor / tool_router / chat_pipeline\n/ post_chat_pipeline / loop_manager / evolution …\n[agent_core.py:559-1012]  ← 读写矩阵未穷举(unknown)", fillcolor="#fff3bf"];
+
+        agent -> ssc [label="init_all()"];
+        ssc -> attrs [label="挂载"];
+    }
+
+    // ================= 深度模块 + agent_ref =================
+    subgraph cluster_deep {
+        label="深度模块（约定：经 agent_ref 反向读宿主，不 import Agent）";
+        style="rounded"; color="#2b8a3e"; fontsize=12; labeljust=l;
+
+        cp [label="ChatPipeline [agent/chat_pipeline.py:169]\n__init__(agent_ref) [:181-182]\n51 处 agent_ref / 10 文件"];
+        pc [label="PostChatPipeline [:172]"];
+        te [label="ToolExecutor [:220]\n__init__(agent_ref) [:321]\n5159 行＝全仓最大", fillcolor="#ffe3e3"];
+        mc [label="MemCore [mem_core.py:19-23]\ndocstring 明示 agent_ref 注入"];
+        co [label="ContextOrchestrator [context/orchestrator.py]"];
+        ts [label="TurnState [agent/turn_state.py:50]\n硬约束「不得 import agent_core」[:20]\nagent 侧 17 个同名 API 一行转发\n[agent_core.py:2021-2104]", fillcolor="#d3f9d8"];
+    }
+
+    attrs -> cp; attrs -> pc; attrs -> te; attrs -> mc; attrs -> co;
+    cp -> ts [label="读写轮次态"];
+    pc -> cp [color="#868e96", style=dotted, label="由 Step4 调用"];
+
+    // ================= 工具层双向耦合 =================
+    subgraph cluster_tool {
+        label="工具层  ——  环已破但靠约定维持";
+        style="rounded"; color="#c92a2a"; fontsize=12; labeljust=l;
+
+        tls [label="tool_layers/ (21 文件)\nToolRouter / UnifiedToolRegistry\n/ ToolOrchestrator / ToolMarketplace / MCP\n由 init_tools 建 [agent_core.py:881,925,971]"];
+        tex [label="tool_executor.py\nexecute 四级回退链\nToolEngine→内置→Skill→ToolRouter [:1045]"];
+    }
+
+    ssc -> tls [label="装配"];
+    tex -> tls [label="executor 不 import tool_layers\n（无正向依赖）", style=dotted, color="#868e96"];
+    tls -> tex [label="反向回手：router.set_tool_executor 注入\n[agent_core.py:979-980]\n再调私有方法 _execute_builtin_tool\n[tool_layers/tool_router.py:643-645]", color="#c92a2a", penwidth=2.6];
+    tls -> tex [label="mcp_server import tool_executor\n[tool_layers/mcp_server.py:205]", color="#c92a2a", penwidth=2.6];
+
+    // ================= LLM 层：门面在包外 =================
+    subgraph cluster_llm {
+        label="LLM 层  ——  门面仍是顶层文件，包反向依赖顶层";
+        style="rounded"; color="#e67700"; fontsize=12; labeljust=l;
+
+        topc [label="neurova/llm_client.py (975 行)\nclass LLMClient [:163]\n← 真正门面", fillcolor="#fff3bf"];
+        stub [label="llm/client.py\n8 行 pyc 骨架恢复占位\n声明「实际代码在 neurova.llm_client」[:2-5]", fillcolor="#f1f3f5", style="rounded,filled,dashed"];
+        mmc [label="llm/multi_model_client.py (1469)\nget_multi_model_client [:1429]"];
+        pm [label="llm/provider_manager.py (2161)\nproviders/* 8 家"];
+        lr [label="llm/llm_router.py\n请求类型路由，32 处消费"];
+        island [label="llm/{adapters, registry, interfaces, sandbox}\n自引闭环并行孤岛\n外部消费仅 1-4 处\n终态未定 → unknown", fillcolor="#e7f5ff", style="rounded,filled,dashed"];
+        triage [label="llm/triage.py\n仅 coordination_api 消费\n未进决策主链", fillcolor="#f1f3f5"];
+    }
+
+    ssc -> topc [label="装配"];
+    stub -> topc [label="声明指向", style=dotted];
+    mmc -> topc [label="包内反向 import 顶层 [:38]", color="#c92a2a", penwidth=2.6];
+    mmc -> pm;
+    topc -> lr;
+    island -> topc [label="并行替代（未收敛）", style=dashed, color="#1c7ed6"];
+
+    // ================= 三组同域并行实现 =================
+    subgraph cluster_dup_mem {
+        label="记忆域：三套并行入口";
+        style="rounded"; color="#1971c2"; fontsize=12; labeljust=l;
+
+        d1 [label="neurova/cognitive/orchestrator.py\nMemoryType [:35] / MemoryManager [:112]"];
+        d2 [label="neurova/cognitive_layers/memory_layer/\nMemoryType [models.py:15] / MemoryManager [manager.py:136]\n118 文件＝认知层 86% 体积", fillcolor="#d0ebff"];
+        d3 [label="neurova/core/cognition_orchestrator.py\nMemoryType [:43] / MemoryManager [:193]"];
+        d4 [label="neurova/memory/  命名空间兼容层\n实体实在 cognitive_layers/memory_layer\n[memory/__init__.py:2-5]"];
+        d5 [label="neurova/memory_agent.py\n纯 re-export：MemCore as MemoryAgent [:10]", fillcolor="#f1f3f5"];
+    }
+
+    mc -> d2 [label="lazy import manager/storage\n/temperature/working_memory/neurova_recall\n/moe_router [mem_core.py:598-604,630,738]"];
+    d5 -> mc [label="别名"];
+    d4 -> d2 [label="转发"];
+    d1 -> d2 [label="重复定义，无收敛记录", color="#e8590c", penwidth=2.2];
+    d3 -> d2 [label="重复定义，无收敛记录", color="#e8590c", penwidth=2.2];
+
+    subgraph cluster_dup_skill {
+        label="技能域：三层命名空间 + 同名遮蔽";
+        style="rounded"; color="#1971c2"; fontsize=12; labeljust=l;
+
+        sk1 [label="neurova/skills/ (49 文件)\n产品面：manifest + SkillExecutor [:36]"];
+        sk2 [label="neurova/skill_system/  (包)\n兼容垫片 + __getattr__ 代理", fillcolor="#ffe3e3"];
+        sk3 [label="neurova/skill_system.py (32KB, 已跟踪)\nSkillRegistry / Skill / MemorySkill\n/ WebSearchSkill / create_default_skills\n← 规范实现所在", fillcolor="#ffe3e3"];
+        sk4 [label="neurova/skill/__init__.py:4\n第三命名空间"];
+        phantom [label="neurova.skill_system_module_standalone\n磁盘上不存在\n仅由 spec_from_file_location 注入 sys.modules\n[__init__.py:193-196,214-217]", fillcolor="#e7f5ff", style="rounded,filled,dashed"];
+    }
+
+    sk2 -> phantom [label="__getattr__ 别名注入", color="#1c7ed6", penwidth=2.4, style=dashed];
+    phantom -> sk3 [label="实际按路径加载被遮蔽文件", color="#1c7ed6", penwidth=2.4, style=dashed];
+    sk2 -> sk1 [label="SkillResult re-export 规范类 [:263]"];
+    sk3 -> sk2 [label="包名永久遮蔽：import neurova.skill_system\n只会命中包，命中不到 .py", color="#c92a2a", penwidth=3];
+    sk4 -> sk1 [style=dotted];
+
+    subgraph cluster_dup_cost {
+        label="成本域：三套装饰器并存";
+        style="rounded"; color="#1971c2"; fontsize=12; labeljust=l;
+
+        c1 [label="models/cost_tracking.py:445\n← 真身，2/12 覆盖"];
+        c2 [label="llm/cost_tracking_middleware.py:279\n全仓零消费者（362 行死码）"];
+        c3 [label="collaboration/cost_ledger_integration.py:29\n仅未注册的 phase3_api 引用"];
+    }
+    c2 -> c1 [label="平行实现", color="#e8590c", penwidth=2.2];
+    c3 -> c1 [label="平行实现", color="#e8590c", penwidth=2.2];
+
+    // ================= 协作域命名冲突 =================
+    subgraph cluster_collab {
+        label="协作域：collaboration vs collaborate（零调用关系）";
+        style="rounded"; color="#862e9c"; fontsize=12; labeljust=l;
+
+        cb1 [label="neurova/collaboration/ (62 文件)\n运行时协作 + neurflow 引擎 (48 文件)\n__init__.py:15 只导出 CollaborationIsolationManager\n:21-24 为 try: pass 死码\n→ 7 个新模块全部未进 __init__，靠绝对路径直连"];
+        cb2 [label="neurova/collaborate/ (7 文件)\nCollaborationTemplate / TemplateManager\n[__init__.py:8-11]"];
+        iso [label="孤岛（工作树未跟踪）\ncoordination_decorators.py  0 引用\nturn_coordinator.py:324      0 调用方\nmodel_selector.py:175       仅 e2e 引用\ncrdt/                       0 消费者", fillcolor="#ffe3e3"];
+    }
+    cb1 -> cb2 [label="无继承 / 无导入", color="#862e9c", style=dashed];
+    ssc -> cb1 [label="装配"];
+    iso -> cb1 [label="归属本域但未接线", style=dotted, color="#868e96"];
+
+    // ================= 量化摘要 =================
+    summary [label="并行定义量化（grep 实测）\nneurova/ 下顶层类名重复 2+ 次者＝129 个\n含核心域类型：SkillInfo×6, MemoryType×4,\nWorkflowDefinition×4, NodeType×4,\nMessage×3, MessageType×3, MemoryManager×3,\nCognitiveState×3, AgentStatus×3\n\nADR 0001/0008/0009/0010/0011/0013 六次\n以「N 套收敛到 1」为决策主题\n＝同一重复生成机制的系统性证据",
+        shape=note, fillcolor="#fff9db", fontsize=11];
+    cluster_dup_mem -> summary [style=invis];
+    cluster_dup_skill -> summary [style=invis];
+
+    legend [label="图例\n红粗线＝反向/回手指向私有成员（最高改动风险）\n蓝虚线＝非正常 import 路径（遮蔽、别名注入）\n橙线＝同域概念重复定义且无收敛记录\n灰点线＝弱／声明性依赖\n虚线框＝stub、孤岛或终态未定",
+        shape=plaintext, fontsize=10];
+}

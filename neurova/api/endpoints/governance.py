@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
@@ -239,16 +239,47 @@ async def reject_approval(request: Request, request_id: str,
 # 永远滞留。此处委托 RSI 单例（agent_core 注入 evolution 单例）暴露审批面。
 
 
-def _get_rsi_orchestrator():
-    from neurova.evolution.closed_loop import get_evolution_orchestrator
+_RSI_NOT_READY = "RSI 编排器未初始化：本轮没有可报的进化状态（不是进化一切正常）"
 
-    return getattr(get_evolution_orchestrator(), "rsi_orchestrator", None)
+
+def _rsi_not_ready(agent_id: str) -> "HTTPException":
+    return HTTPException(
+        status_code=503,
+        detail=f"agent {agent_id!r} 上没有 RSI 编排器：{_RSI_NOT_READY}",
+    )
+
+
+def _get_rsi_orchestrator(agent_id: Optional[str] = None):
+    """按 agent 定位 RSI 编排器 —— 与 `_get_agent()` 同源，不读进程级单例属性。
+
+    历史实现是 `getattr(get_evolution_orchestrator(), "rsi_orchestrator", None)`：
+    每个 agent 构造编排器时都往那**一个**属性上写，后构造者覆盖前者，于是
+    "待审列表 / 批准 / 拒绝"永远作用在最后那个 agent 上（工单 011 证据）。
+    指名了 agent 而它不在池中时返回 None 而**不回落**：回落到默认 agent 等于把
+    批准动作装进别人的技能库，是本单要拆的缺陷而不是可接受的兜底。
+    """
+    state = None
+    from neurova.api.endpoints import get_app_state
+
+    state = get_app_state()
+    if not state:
+        return None
+    try:
+        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
+    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
+        agent = None
+    return getattr(agent, "rsi_orchestrator", None) if agent is not None else None
 
 
 class RsiApproveRequest(BaseModel):
     """RSI 提案批准"""
 
     approved_by: str = Field(..., min_length=1, description="批准者（人类评审 gate）")
+    tool_sequence: Optional[List[str]] = Field(
+        default=None,
+        description="批准人补交的可执行工具序列；manifest 缺 tool_sequence 时必须在此补上，"
+        "否则该提案按 not_supported 拒绝（工单 010）",
+    )
 
 
 class RsiRejectRequest(BaseModel):
@@ -257,25 +288,74 @@ class RsiRejectRequest(BaseModel):
     reason: str = ""
 
 
-@router.get("/rsi/proposals/pending")
-async def list_pending_rsi_proposals(_admin: Any = Depends(_governance_admin_dep)):
-    """列出 RSI 升级提案（PENDING 状态）"""
-    rsi = _get_rsi_orchestrator()
+@router.get("/rsi/status")
+async def get_rsi_status(
+    agent_id: Optional[str] = None, _admin: Any = Depends(_governance_admin_dep)
+):
+    """RSI 状态只读面（工单 012）：阶段、最近一轮晋升判据三态、候选统计、回滚留痕、告警。
+
+    这里**不**提供 `available:false` 的静默 200：`orchestrator.get_status()` 此前
+    生产零调用方，而"RSI 根本没装配"与"RSI 跑了一轮什么都没改"在观测上是两件
+    相反的事，压成同一个 200 就是把前者读成后者（工单 011 同一条证据）。
+    """
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        return {"code": 0, "data": {"proposals": [], "available": False}}
+        raise _rsi_not_ready(agent_id)
+    return {"code": 0, "data": rsi.get_status()}
+
+
+@router.get("/rsi/proposals/pending")
+async def list_pending_rsi_proposals(
+    agent_id: Optional[str] = None, _admin: Any = Depends(_governance_admin_dep)
+):
+    """列出 RSI 升级提案（PENDING 状态）"""
+    rsi = _get_rsi_orchestrator(agent_id)
+    if rsi is None:
+        raise _rsi_not_ready(agent_id)
     proposer = rsi.self_improvement_proposer
     proposals = [p.to_dict() for p in proposer.list_pending_proposals()]
-    return {"code": 0, "data": {"proposals": proposals, "available": True}}
+    return {"code": 0, "data": {"proposals": proposals, "agent_id": rsi.agent_id}}
+
+
+@router.get("/rsi/proposals")
+async def list_rsi_proposals(
+    state: Literal["all", "pending", "applied", "rejected", "rolled_back"] = "all",
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """全状态提案列表。只有 PENDING 可见时，"批准过什么、结果如何"永久消失，
+    回滚与事后审计都无从下手（工单 011，读的是工单 010 的 `list_all_proposals()`）。"""
+    rsi = _get_rsi_orchestrator(agent_id)
+    if rsi is None:
+        raise _rsi_not_ready(agent_id)
+    proposer = rsi.self_improvement_proposer
+    proposals = (
+        proposer.list_all_proposals() if state == "all"
+        else [p for p in proposer.list_all_proposals() if p.status.value == state]
+    )
+    return {
+        "code": 0,
+        "data": {
+            "proposals": [p.to_dict() for p in proposals],
+            "state": state,
+            "agent_id": rsi.agent_id,
+        },
+    }
 
 
 @router.post("/rsi/proposals/{proposal_id}/approve")
-async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest, _admin: Any = Depends(_governance_admin_dep)):
+async def approve_rsi_proposal(
+    proposal_id: str,
+    body: RsiApproveRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
     """人工批准并应用 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator()
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+        raise _rsi_not_ready(agent_id)
     result = rsi.self_improvement_proposer.approve_and_apply(
-        proposal_id, approver=body.approved_by
+        proposal_id, approver=body.approved_by, tool_sequence=body.tool_sequence
     )
     if result is None or not getattr(result, "success", False):
         error = getattr(result, "error", "") or "批准失败"
@@ -283,15 +363,30 @@ async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest, _admin
             raise HTTPException(status_code=404, detail=error)
         raise HTTPException(status_code=409, detail=error)
     logger.info("RSI 提案 %s 已批准并应用（by %s）", proposal_id, body.approved_by)
-    return {"code": 0, "data": {"applied": True, "result": getattr(result, "to_dict", lambda: {})()}}
+    # 生效证据（工单 010）：装了哪个技能、回灌后注册表是否真取得到。
+    # 只回 "applied: true" 就是本单拆掉的那个假象本身。
+    return {
+        "code": 0,
+        "data": {
+            "applied": True,
+            "applied_skill_id": getattr(result, "applied_skill_id", ""),
+            "registry_hit": bool(getattr(result, "registry_hit", False)),
+            "result": getattr(result, "to_dict", lambda: {})(),
+        },
+    }
 
 
 @router.post("/rsi/proposals/{proposal_id}/reject")
-async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest, _admin: Any = Depends(_governance_admin_dep)):
+async def reject_rsi_proposal(
+    proposal_id: str,
+    body: RsiRejectRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
     """拒绝 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator()
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+        raise _rsi_not_ready(agent_id)
     if not rsi.self_improvement_proposer.reject_proposal(proposal_id, reason=body.reason):
         raise HTTPException(
             status_code=404,
@@ -299,6 +394,120 @@ async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest, _admin: 
         )
     logger.info("RSI 提案 %s 已拒绝", proposal_id)
     return {"code": 0, "data": {"rejected": True}}
+
+
+# ── 技能归档读面 + 回滚写面（工单 011）────────────────────────
+
+
+class SkillRollbackRequest(BaseModel):
+    """技能回滚动作"""
+
+    operator: str = Field(..., min_length=1, description="操作者（回滚留痕要记是谁按的）")
+    agent_id: Optional[str] = Field(default=None, description="目标 agent；留空取默认 agent")
+
+
+def _skill_rollback_context(agent_id: Optional[str] = None):
+    """按 agent 定位回滚面所需的 (存档库, 注册表, 技能服务)。
+
+    三者必须**同源同一 agent**：存档库里的 skill_id 只能经该 agent 的注册表
+    取到执行体，写盘也只能写回该 agent 的技能库。取不到就返回 None ——
+    调用方据此返 503，而不是回落到默认 agent（那会把回滚装进别人的技能库）。
+    """
+    state = None
+    from neurova.api.endpoints import get_app_state
+
+    state = get_app_state()
+    if not state:
+        return None
+    try:
+        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
+    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
+        agent = None
+    if agent is None:
+        return None
+    registry = getattr(agent, "skill_registry", None) or getattr(agent, "_skill_registry", None)
+    if registry is None:
+        return None
+    resolved_id = str(getattr(getattr(agent, "config", None), "agent_id", "") or agent_id or "default")
+    from neurova.evolution.skill_experience import get_skill_experience_store
+    from neurova.skills import library_service as _lib
+
+    try:
+        service = _lib.get_library(_lib.POOL_AGENT, resolved_id)
+    except ValueError as bad_key:
+        logger.warning("技能库路由非法（agent_id=%s）：%s", resolved_id, bad_key)
+        return None
+    return get_skill_experience_store(), registry, service
+
+
+def _skill_surface_not_ready(agent_id: Optional[str]) -> "HTTPException":
+    return HTTPException(
+        status_code=503,
+        detail=(
+            f"agent {agent_id!r} 上没有可用的技能回滚面（注册表或技能库未装配）："
+            "无法区分'没有归档'与'没装配'，故不返回空列表"
+        ),
+    )
+
+
+@router.get("/skills/{skill_id}/archives")
+async def list_skill_archives(
+    skill_id: str,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """归档读面：该技能保留的可回滚快照（由重建与回滚有界写入）。
+
+    `get_archives` 此前在顶层 `neurova/` 零生产调用方 —— 归档只写不读，
+    等于没有回滚窗口（人无从知道能退回哪一版）。
+    """
+    context = _skill_rollback_context(agent_id)
+    if context is None:
+        raise _skill_surface_not_ready(agent_id)
+    store, _registry, _service = context
+    return {
+        "code": 0,
+        "data": {"skill_id": skill_id, "archives": store.get_archives(skill_id)},
+    }
+
+
+@router.post("/skills/{skill_id}/rollback")
+async def rollback_skill_to_archive(
+    skill_id: str,
+    body: SkillRollbackRequest,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """回滚到最近一次归档的定义（写面：留痕可选审计）。
+
+    归档为空时显式 409 拒绝：静默成功会让"按钮点了没反应"变成"看起来回滚了"
+    ——那正是本单要消灭的形态。回滚后工具面随之变化，依赖 006 的停用生效判据。
+    """
+    context = _skill_rollback_context(body.agent_id)
+    if context is None:
+        raise _skill_surface_not_ready(body.agent_id)
+    store, registry, service = context
+    if not store.get_archives(skill_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能 {skill_id} 没有可回滚的归档（空归档不得静默成功）",
+        )
+    if not store.rollback_skill(
+        skill_id, registry, skill_service=service, operator=body.operator
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能 {skill_id} 回滚未生效（注册表里取不到该技能或落盘失败）",
+        )
+    logger.info("技能 %s 已回滚至最近归档（操作者 %s）", skill_id, body.operator)
+    return {
+        "code": 0,
+        "data": {
+            "rolled_back": True,
+            "skill_id": skill_id,
+            "operator": body.operator,
+            "archives_left": len(store.get_archives(skill_id)),
+        },
+    }
 
 
 # ── 治理设置（治理遗留收口 2026-09-05） ────────────────────────
@@ -432,10 +641,16 @@ async def update_llm_retry_settings(body: LlmRetrySettingsUpdate, admin=Depends(
 
 
 class GovernanceSettingsUpdate(BaseModel):
-    """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控）"""
+    """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控；
+    metacog_gate_enabled: V3 调控门，命中教训的工具执行前拦截；
+    crystallization_llm_gate_enabled: 结晶候选是否送 LLM 裁决（关=直写存储引擎）；
+    skill_auto_retire_enabled: 技能淘汰是否执行禁用（关=只上报候选）"""
 
     conversation_rules_enabled: Optional[bool] = None
     rsi_phase: Optional[int] = Field(None, ge=0, le=4)
+    metacog_gate_enabled: Optional[bool] = None
+    crystallization_llm_gate_enabled: Optional[bool] = None
+    skill_auto_retire_enabled: Optional[bool] = None
 
 
 @router.put("/settings")

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -41,7 +42,7 @@ def _default_market_skills_dir() -> Path:
 
         return get_market_importer()._skills_dir
     except Exception:  # noqa: BLE001
-        return Path("data/skills")
+        return get_data_root() / "skills"
 
 
 def _build_executable_skill(skill_id: str, description: str, market_skills_dir: Any = None) -> Optional[Any]:
@@ -132,6 +133,7 @@ def persist_synthesized_skill(
     tool_sequence: list,
     service: Any,
     permissions: Optional[dict] = None,
+    human_approved: bool = False,
 ) -> bool:
     """agent 自主分装（合成）技能持久化到 agent 技能页 manifest。
 
@@ -146,6 +148,7 @@ def persist_synthesized_skill(
         service, skill_id, name, description, version,
         source="synthesized",
         extra_config=extra,
+        human_approved=human_approved,
     )
 
 
@@ -157,6 +160,7 @@ def _write_agent_manifest(
     version: str,
     source: str = "marketplace",
     extra_config: Optional[dict] = None,
+    human_approved: bool = False,
 ) -> bool:
     """以 staging 目录挂 manifest.json，走 SkillService.install_skill 公开 API"""
     manifest = {
@@ -177,7 +181,9 @@ def _write_agent_manifest(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            result = service.install_skill(str(stage), skill_id=skill_id)
+            result = service.install_skill(
+                str(stage), skill_id=skill_id, human_approved=human_approved
+            )
             return bool(result and result.get("success", True)) and service.get_skill_info(skill_id) is not None
     except Exception as e:  # noqa: BLE001 — 技能页可见性失败不阻断安装主链路
         logger.error("market skill %s -> agent manifest failed: %s", skill_id, e)

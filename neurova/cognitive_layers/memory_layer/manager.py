@@ -22,15 +22,17 @@ MemoryManager — 记忆管理器（CogArch 总线版）
 
 import json
 import datetime
+from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 import os
-from pathlib import Path
 import sqlite3
 import threading
 import time
+
+from neurova.knowledge.foundation.storage_fence import assertNotUnderProductionMemory
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
     EventBus,
@@ -119,6 +121,22 @@ def _is_valid_category(category: str) -> bool:
         return False
 
 
+def _ingest_memory_id(identity_key: str) -> str:
+    """导入行的确定性主键：同一 identity_key 反复导入命中同一行（幂等靠它）。"""
+    import hashlib
+
+    return "ing-" + hashlib.sha256(str(identity_key).encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_import_ts(value: str) -> datetime.datetime:
+    """历史时间戳照原样落库；解析不了的退到 now 并留警，不静默造一个假时间。"""
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        logger.warning("导入记录时间戳无法解析 (%r)，按当前时间落库", value)
+        return datetime.datetime.now(datetime.timezone.utc)
+
+
 def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
     """按 category 过滤记忆列表
 
@@ -133,21 +151,32 @@ def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
     return [m for m in mems if m.metadata.get("_original_category") == category]
 
 
+# "调用方没给路径"的哨兵：与 `db_path=""`（显式非法）区分开。
+# 用裸文件名当默认值是本轮要灭的根因，用 `""` 当默认值又会让既有校验把
+# "没给"误判成"给错了"，所以另立一个不可能与真实路径相撞的值。
+_DEFAULT_DB_SENTINEL = "\x00__agent_workspace__"
+
+
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
 
     def __init__(
         self,
-        db_path: str = "neurova_memory.db",
+        db_path: str = _DEFAULT_DB_SENTINEL,
         agent_id: str = "default",
         neuser_id: str = "default",
         user_id: str = "default",
         enable_buffer: bool = True,
     ):
-        # P-4 修复: 空路径校验, 测试期望 MemoryManager(db_path="") 抛 ValueError
+        # 空路径仍是显式的非法输入（P-4 的判据不变），"没给"另由哨兵承载。
         if not db_path:
             raise ValueError("db_path must not be empty")
-
+        # 裸文件名 `neurova_memory.db` 曾当默认值，persist 库随之随 CWD 散落五处
+        # （仓库根那份攒了 71,831 行测试数据）。默认落点改为按 agent 工作区推导，
+        # 与 `get_memory_manager` 同源——同一件事不允许有两套推导。
+        if db_path == _DEFAULT_DB_SENTINEL:
+            db_path = _default_db_path_for(agent_id)
+        assertNotUnderProductionMemory(db_path, "主记忆库")
         self._db_path = db_path
         self._agent_id = agent_id
         self._neuser_id = neuser_id
@@ -158,6 +187,9 @@ class MemoryManager:
 
         # 内部存储（简易实现，子模块可覆盖）
         self._memories: Dict[str, Memory] = {}
+        # 内容门索引（011）：作用域三元组 + 归一化内容键 → 既有记忆 id
+        self._content_index: Dict[Tuple[str, str, str, str], str] = {}
+        self._content_index_ready = False
         self._counter = 0
         self._lock = threading.RLock()
         self._last_decay_at: Optional[float] = None   # 节流：上次 run_decay_cycle 的 monotonic 时间戳
@@ -165,6 +197,9 @@ class MemoryManager:
 
         # 子模块引用（延迟初始化）
         self._storage = None
+        # 运行期增量维护的向量库（MoE 路由器自建的那个，见
+        # register_runtime_vector_store）；未起 MoE 时为 None
+        self._runtime_vector_store = None
         self._emotion_analyzer = None
         self._auto_classifier = None
         self._conversation_buffer = None  # 受 enable_buffer 控制,下方按需初始化
@@ -207,6 +242,8 @@ class MemoryManager:
         self._self_model_module = None
         self._self_manager_module = None
         self._tkg_module = None
+        # 底座事实库句柄：时序事实的唯一权威（None = 用生产单例，见 TKGModule._store）
+        self._factStore = None
         self._working_memory_module = None
         self._forgetting_recovery_module = None
         self._auto_context_module = None
@@ -241,6 +278,15 @@ class MemoryManager:
             "total_memories": len(self._memories),
             "recall_count": 0,
             "remember_count": 0,
+            # 工单 012：未知类型写入的可见计数（0 才是正常态）
+            "unknown_memory_type_count": 0,
+            # Issue #68：分类闭环的可见计数。
+            # auto_classified_count 长期为 0 = "自动分类没接线"（本次修复前的现状）；
+            # unknown_category_count 与 unknown_memory_type_count 同纪律：非法分类
+            # 回落 GENERAL 时留痕 + 计数，不静默换成 general。
+            "auto_classified_count": 0,
+            "auto_classify_declared_skipped_count": 0,
+            "unknown_category_count": 0,
         }
 
         logger.info(
@@ -271,9 +317,21 @@ class MemoryManager:
     def _init_persistence_db(self):
         """初始化 SQLite 持久化数据库"""
         try:
+            if str(self._db_path).startswith(":memory:"):
+                # 工单 011 顺带修根因：`db_path=":memory:"` 曾被"取同目录"规则
+                # 落到仓库根的共享 neurova_memories_persist.db（实测攒进 7 万余行
+                # 测试数据），于是"内存库"测试跨运行、跨用例互相读到对方的行。
+                # 声明为内存库就不该落盘：持久层整条关闭，_persist_memory 静默跳过。
+                self._persist_db_path = None
+                self._persist_conn = None
+                logger.debug("MemoryManager(db_path=':memory:') 不落盘持久库")
+                return
             # 使用与 db_path 同目录的持久化文件
             db_dir = os.path.dirname(self._db_path) or "."
             self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
+            # 主库被围栏守住之后，persist 库是同一目录下的第二个写面：
+            # 只守一个等于留了侧门。
+            assertNotUnderProductionMemory(self._persist_db_path, "持久记忆库")
             # 审计 P1-D1：常驻连接 + WAL + synchronous=NORMAL——原每条记忆一次
             # connect->INSERT->commit->close（DELETE journal 每次 commit fsync），
             # 写放大是数量级瓶颈；同项目 dependency_graph 等库早已 WAL。
@@ -332,20 +390,104 @@ class MemoryManager:
             self._persist_db_path = None
             self._persist_conn = None
 
+    def _row_to_memory(self, row) -> "Memory":
+        """把一篇持久行翻成 Memory（装载与 reload 共用的唯一构造处）。"""
+        from datetime import datetime
+
+        return Memory(
+            # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
+            id=self._plain_memory_id(row["id"]),
+            content=row["content"],
+            memory_type=MemoryType(row["memory_type"]),
+            category=MemoryCategory(row["category"]),
+            lifecycle_stage=LifecycleStage(row["lifecycle_stage"]),
+            emotion=EmotionType(row["emotion"]),
+            temperature=row["temperature"],
+            importance=row["importance"],
+            access_count=row["access_count"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            agent_id=row["agent_id"],
+            neuser_id=row["neuser_id"],
+            user_id=row["user_id"],
+            shared=bool(row["shared"]),
+            # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
+            origin=_row_origin(row),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            last_accessed_at=(
+                datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
+            ),
+        )
+
+    def _merge_loaded_memory(self, mem: "Memory") -> bool:
+        """把一篇持久行并入快照；返回是否真的并入了（装载与 reload 共用一条口径）。
+
+        M-25: 作用域限定行剥前缀后可能与普通行同 id（跨作用域自定义 id）。
+        内存 dict 每 id 只能留一份 —— 当前生效作用域匹配的行优先，持久层两行
+        均保留（重启不丢）。
+        """
+        existing = self._memories.get(mem.id)
+        if existing is None:
+            self._memories[mem.id] = mem
+            return True
+        new_match = (
+            mem.neuser_id == self._eff_neuser_id()
+            and mem.user_id == self._eff_user_id()
+        )
+        old_match = (
+            existing.neuser_id == self._eff_neuser_id()
+            and existing.user_id == self._eff_user_id()
+        )
+        if new_match or not old_match:
+            self._memories[mem.id] = mem
+            return True
+        return False
+
+    def _already_loaded(self, mem: "Memory") -> bool:
+        """该持久行是否已在快照里（判据 = 业务 id + 行自带三元组）。"""
+        existing = self._memories.get(mem.id)
+        return existing is not None and (
+            existing.agent_id, existing.neuser_id, existing.user_id
+        ) == (mem.agent_id, mem.neuser_id, mem.user_id)
+
+    def _seed_counter_from_db(self, conn) -> None:
+        """审计修复 (P1-7): 计数器跨作用域取全局最大 id。
+
+        原实现只按本作用域已加载行回填 _counter, 新作用域实例会重新从
+        mem_000001 生成 id, 与其他作用域同 id 行 INSERT OR REPLACE 互踩。
+        """
+        try:
+            row = conn.execute(
+                "SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) FROM memories WHERE id LIKE 'mem\\_%' ESCAPE '\\'"
+            ).fetchone()
+            if row and row[0]:
+                self._counter = max(self._counter, int(row[0]))
+        except Exception as e:
+            logger.debug("Seed counter from persist DB failed: %s", e)
+
     def _load_from_db(self):
         """从 SQLite 加载记忆到内存
 
         快照口径 = agent 全量(WHERE 仅 agent_id 一层): 视图层(_scoped_memories
         三层隔离 / agent_wide 浏览口径)再按调用语义过滤。早期按三元组加载会
         把其他用户域的记忆挡在快照外, 管理页永远看不全。
+
+        只在**构造期**跑一次。此后另一个进程写入的行要进门，走 `reload_memories()`
+        （F-05：可见性条件是重启或显式 reload，二者不能各写一套装配）。
         """
         if not getattr(self, "_persist_db_path", None):
             return
+        conn = None
+        released = False
         try:
-            # P1-D1：常驻连接读取
+            # P1-D1：常驻连接读取（自持连接，不得归还——ADR 0014）
             conn = getattr(self, "_persist_conn", None)
             if conn is None:
-                conn = sqlite3.connect(self._persist_db_path)
+                # 常驻连接缺席时的兜底：池化短连接（借出即用完归还）
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM memories WHERE agent_id = ? "
@@ -353,51 +495,10 @@ class MemoryManager:
                 (self._agent_id,),
             ).fetchall()
 
-            from datetime import datetime
-
             for row in rows:
                 try:
-                    mem = Memory(
-                        # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
-                        id=self._plain_memory_id(row["id"]),
-                        content=row["content"],
-                        memory_type=MemoryType(row["memory_type"]),
-                        category=MemoryCategory(row["category"]),
-                        lifecycle_stage=LifecycleStage(row["lifecycle_stage"]),
-                        emotion=EmotionType(row["emotion"]),
-                        temperature=row["temperature"],
-                        importance=row["importance"],
-                        access_count=row["access_count"],
-                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
-                        agent_id=row["agent_id"],
-                        neuser_id=row["neuser_id"],
-                        user_id=row["user_id"],
-                        shared=bool(row["shared"]),
-                        # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
-                        origin=_row_origin(row),
-                        created_at=datetime.fromisoformat(row["created_at"]),
-                        updated_at=datetime.fromisoformat(row["updated_at"]),
-                        last_accessed_at=(
-                            datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
-                        ),
-                    )
-                    # M-25: 作用域限定行剥前缀后可能与普通行同 id（跨作用域
-                    # 自定义 id）。内存 dict 每 id 只能留一份 —— 当前生效作用域
-                    # 匹配的行优先, 持久层两行均保留（重启不丢）。
-                    existing = self._memories.get(mem.id)
-                    if existing is not None:
-                        new_match = (
-                            mem.neuser_id == self._eff_neuser_id()
-                            and mem.user_id == self._eff_user_id()
-                        )
-                        old_match = (
-                            existing.neuser_id == self._eff_neuser_id()
-                            and existing.user_id == self._eff_user_id()
-                        )
-                        if new_match or not old_match:
-                            self._memories[mem.id] = mem
-                    else:
-                        self._memories[mem.id] = mem
+                    mem = self._row_to_memory(row)
+                    self._merge_loaded_memory(mem)
                     # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
                     # 只落 metadata、stage 停在 active，读取端永远查不到。
                     # 装载时按 metadata 标记收敛 stage 并回写。
@@ -413,25 +514,149 @@ class MemoryManager:
                 except Exception as e:
                     logger.debug("Skip invalid memory row %s: %s", row['id'], e)
 
-            # 审计修复 (P1-7): 计数器跨作用域取全局最大 id。
-            # 原实现只按本作用域已加载行回填 _counter, 新作用域实例会重新从
-            # mem_000001 生成 id, 与其他作用域同 id 行 INSERT OR REPLACE 互踩。
-            try:
-                row = conn.execute(
-                    "SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) FROM memories WHERE id LIKE 'mem\\_%' ESCAPE '\\'"
-                ).fetchone()
-                if row and row[0]:
-                    self._counter = max(self._counter, int(row[0]))
-            except Exception as e:
-                logger.debug("Seed counter from persist DB failed: %s", e)
+            self._seed_counter_from_db(conn)
 
-            # P1-D1：常驻连接不关（降级临时连接由下文统一处理）
-            if getattr(self, "_persist_conn", None) is None:
-                conn.close()
-
+            # P1-D1：常驻连接不关；兜底池连接在 finally 统一归还（ADR 0014）
             logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
             logger.warning("Failed to load memories from DB: %s", e)
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
+
+    def reload_memories(self) -> Dict[str, int]:
+        """与盘对账：并入盘上新增的行，回收盘上已消失的行（F-05 可见性补齐 + 断点①）。
+
+        为什么需要它：快照只在构造期 `_load_from_db` 读一次盘，于是**另一个进程**
+        （CLI 导入、备份恢复、多实例）写下的记忆，对运行中的服务一条都看不见——
+        报告写着"已写入"、界面上却没有，是既非拒绝也非申报的假成功。可见性条件
+        是"服务重启"或本方法，兑现手段只有这一处。
+
+        对账是**双向**的（Issue #81 断点①，用户拍板）：只补缺无法兑现撤销——
+        另一进程 `undo` 删掉的行在快照里既不会消失，还能被用户的一次强化经
+        `update_memory` 写回盘上（实测 0 → 1 行、重开实例复活）。所以重读时以盘
+        为准：盘上没有的行，快照里一并回收。回收后 `update_memory` 找不到该 id
+        自然返回 False——**不在写路径加兜底判断**，复活路径断在上游。
+
+        口径与 `_load_from_db` 同源（agent 全量，视图层再按调用语义过滤）：
+
+        - **并入增量**：已有行（业务 id + 行自带三元组都在快照里）直接跳过，不重装、
+          不覆盖本进程运行期对温度/访问计数的改变；
+        - **回收消失行**：判据与并入对称（业务 id + 行自带三元组），盘上无此键即回收；
+        - **召回面同步**：并入逐条 `upsert_memory_index`（**禁用** `build_keyword_index`
+          ——它先 `clear()`，只喂缺失行会抹掉既有倒排）；回收经 `_drop_from_recall_indexes`
+          摘除，不留指向不存在记忆的残留文档；
+        - **内容门索引**：并入缺键才登记（否则 reload 之后同一句话会被门放过去、再写
+          一条），回收同步撤键；
+        - **不写盘**：这是读侧对账通道，不新增也不改写任何持久行。
+
+        Returns:
+            `{"reloaded": 并入条数, "reaped": 回收条数}`——两个数都只报真实发生量。
+        """
+        if not getattr(self, "_persist_db_path", None):
+            return {"reloaded": 0, "reaped": 0}
+        conn = None
+        released = False
+        loaded: List["Memory"] = []
+        reaped: List["Memory"] = []
+        try:
+            conn = getattr(self, "_persist_conn", None)
+            if conn is None:
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
+                (self._agent_id,),
+            ).fetchall()
+
+            # 盘上现存的全部行键（业务 id + 行自带三元组）。读盘成功之前不回收——
+            # 读失败时"盘上没有"是未知，不是事实。
+            on_disk: Set[Tuple[str, str, str, str]] = set()
+            for row in rows:
+                on_disk.add((
+                    self._plain_memory_id(row["id"]),
+                    str(row["agent_id"]), str(row["neuser_id"]), str(row["user_id"]),
+                ))
+
+            with self._lock:
+                for row in rows:
+                    try:
+                        mem = self._row_to_memory(row)
+                    except Exception as e:
+                        logger.debug("Skip invalid memory row %s: %s", row["id"], e)
+                        continue
+                    if self._already_loaded(mem):
+                        continue
+                    self._merge_loaded_memory(mem)
+                    loaded.append(mem)
+                    self._counter = max(
+                        self._counter,
+                        int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0,
+                    )
+                for mem in list(self._memories.values()):
+                    if (mem.id, mem.agent_id, mem.neuser_id, mem.user_id) in on_disk:
+                        continue
+                    del self._memories[mem.id]
+                    reaped.append(mem)
+                if loaded:
+                    self._seed_counter_from_db(conn)
+                    self._merge_content_index(loaded)
+                if loaded or reaped:
+                    self._stats["total_memories"] = len(self._memories)
+        except Exception as e:
+            logger.warning("Failed to reload memories from DB: %s", e)
+            return {"reloaded": len(loaded), "reaped": len(reaped)}
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
+
+        for mem in loaded:
+            self._index_reloaded_memory(mem)
+        for mem in reaped:
+            self._drop_from_recall_indexes(mem.id)
+            self._drop_content_index(mem)
+        if loaded or reaped:
+            logger.info("Reloaded %s memories from persistence DB (reaped %s)",
+                        len(loaded), len(reaped))
+        return {"reloaded": len(loaded), "reaped": len(reaped)}
+
+    def _drop_content_index(self, mem: "Memory") -> None:
+        """撤掉回收行的内容门键（只撤指向该行的那一条，不动别人的键）。"""
+        self._ensure_content_index()
+        key = self._content_gate_key(mem)
+        if key is not None and self._content_index.get(key) == mem.id:
+            del self._content_index[key]
+
+    def _merge_content_index(self, mems: List["Memory"]) -> None:
+        """把并入的行登记进内容门索引（缺键才登记，不抢已有键的归属）。
+
+        `_content_index` 只收在服务期的行（与 `_ensure_content_index` 同一谓词），
+        且同一键只留一条——直接赋值会把先到的行挤掉，故只补空缺。
+        """
+        self._ensure_content_index()
+        for mem in mems:
+            key = self._content_gate_key(mem)
+            if key is not None:
+                self._content_index.setdefault(key, mem.id)
+
+    @staticmethod
+    def _index_reloaded_memory(mem: "Memory") -> None:
+        """把并入的行喂给召回面（关键词倒排逐条增量；索引维护失败不阻断并入）。"""
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import (
+                get_semantic_search,
+            )
+
+            get_semantic_search().upsert_memory_index(mem.to_dict())
+        except Exception:  # noqa: BLE001 - 与 remember 同口径：索引失败不阻断可见性
+            logger.debug("关键词索引增量并入失败: %s", mem.id, exc_info=True)
 
     # M-25: id 为全表主键, 原 INSERT OR REPLACE 按 id 覆盖 —— A 作用域自定义 id
     # 会被 B 作用域同 id 的写入直接覆盖（重启丢数据）。改为作用域三元组匹配的
@@ -521,13 +746,13 @@ class MemoryManager:
                         self._persist_upsert(conn, m)
                     conn.commit()
             else:
-                # 常驻连接不可用时降级：一次连接批量写（仍优于逐条）
-                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-                conn.execute("PRAGMA busy_timeout=4000")
-                for m in mems:
-                    self._persist_upsert(conn, m)
-                conn.commit()
-                conn.close()
+                # 常驻连接不可用时降级：走池化短连接（ADR 0014：这是"兜底短连接"，
+                # 不是常驻连接；池化后连接无需每个调用点自己 close 到真关闭）
+                from neurova.core.database import short_transaction
+
+                with short_transaction(self._persist_db_path) as conn:
+                    for m in mems:
+                        self._persist_upsert(conn, m)
         except Exception as e:
             logger.warning("Persist memory batch failed (%d mems): %s", len(mems), e)
 
@@ -546,55 +771,57 @@ class MemoryManager:
                     self._persist_upsert(conn, mem)
                     conn.commit()
                 return
-            conn = sqlite3.connect(self._persist_db_path)
-            self._persist_upsert(conn, mem)
-            conn.commit()
-            conn.close()
+            from neurova.core.database import short_transaction
+
+            with short_transaction(self._persist_db_path) as conn:
+                self._persist_upsert(conn, mem)
         except Exception as e:
             # 2026-09-07 修复（audit SUB-P2-18）：原 DEBUG 级吞掉 = 重启静默
             # 丢记忆且无从排查；升级 WARNING 并重试一次（写竞争场景）
             logger.warning("Persist memory failed (id=%s): %s", mem.id, e)
             try:
-                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-                conn.execute("PRAGMA busy_timeout=4000")
-                self._persist_upsert(conn, mem)
-                conn.commit()
-                conn.close()
+                from neurova.core.database import short_transaction
+
+                with short_transaction(self._persist_db_path) as conn:
+                    self._persist_upsert(conn, mem)
                 logger.warning("Persist memory retry succeeded (id=%s)", mem.id)
             except Exception as e2:
                 logger.error("Persist memory retry failed (id=%s): %s", mem.id, e2)
                 if strict:
                     raise OSError("Question queue persistence failed") from e2
 
-    def _delete_persisted_memory(self, memory_id: str):
+    def _delete_persisted_memory(self, memory_id: str, owner=None):
         """从 SQLite 删除持久化记忆
 
+        owner 是**行自带**的三元组 (agent_id, neuser_id, user_id)；缺省用当前生效三元组。
+
         审计修复 (P1-6): 原 DELETE 仅按 id, 知道对方 memory_id 即可越权删除
-        任何作用域的持久化行。现强制附带生效三元组, 跨作用域删不掉。
-        M-15: 连接补 busy_timeout（对齐同文件先例）, close() 收口到 finally
-        （原 execute 抛错即泄漏连接）。
+        任何作用域的持久化行。现强制附带三元组, 跨作用域删不掉。
+        调用方若已确知目标行归属（如按批次撤销——批量标签就是授权凭据），
+        必须显式传入，因为"行的归属"与"调用现场的归属"本就是两件事：
+        按现场三元组删，跨上下文的撤销会删掉内存却留下盘上行，重启即复活。
+        M-15: 连接必被归还，execute 抛错也不例外（原 execute 抛错即泄漏连接）。
+        busy_timeout 不再在此逐条设置：走池后由池的 PRAGMA 基线统一提供
+        （ADR 0014），且借用者本地改动会在归还时被复原。
         M-25: 自定义 id 跨作用域冲突时持久化为作用域限定行, 删除需同时命中。
         """
         if not getattr(self, "_persist_db_path", None):
             return
-        conn = None
+        from neurova.core.database import short_transaction
+
+        agent_id, neuser_id, user_id = owner or (
+            self._agent_id, self._eff_neuser_id(), self._eff_user_id()
+        )
         try:
-            conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-            conn.execute("PRAGMA busy_timeout=4000")
-            scoped_id = "\x1f".join(
-                (self._agent_id, self._eff_neuser_id(), self._eff_user_id(), memory_id)
-            )
-            conn.execute(
-                "DELETE FROM memories WHERE id IN (?, ?) "
-                "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
-                (memory_id, scoped_id, self._agent_id, self._eff_neuser_id(), self._eff_user_id()),
-            )
-            conn.commit()
+            with short_transaction(self._persist_db_path) as conn:
+                scoped_id = "\x1f".join((agent_id, neuser_id, user_id, memory_id))
+                conn.execute(
+                    "DELETE FROM memories WHERE id IN (?, ?) "
+                    "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
+                    (memory_id, scoped_id, agent_id, neuser_id, user_id),
+                )
         except Exception as e:
             logger.debug("Delete persisted memory failed: %s", e)
-        finally:
-            if conn is not None:
-                conn.close()
 
     # ────── Properties ──────
 
@@ -688,11 +915,109 @@ class MemoryManager:
 
     # ────── Core Memory Operations ──────
 
+    # 内容门只对"仍在服务"的记忆生效：已遗忘/归档的旧行不充当拦截目标，
+    # 否则重新学到同一句会被改道回一条死行（链 B 的 supersede 语义依赖这点）。
+    _CONTENT_GATE_STAGES = (
+        LifecycleStage.ACTIVE,
+        LifecycleStage.CONSOLIDATED,
+        LifecycleStage.CRYSTALLIZED,
+    )
+
+    def _content_gate_key(self, mem: Memory) -> Optional[Tuple[str, ...]]:
+        """既有记忆的内容门键；已出服务期或无内容身份时返回 None。"""
+        if mem.lifecycle_stage not in self._CONTENT_GATE_STAGES:
+            return None
+        return self._gate_key(
+            mem.agent_id,
+            mem.neuser_id,
+            mem.user_id,
+            mem.content,
+            mem.category,
+            mem.memory_type,
+            mem.perspective,
+            mem.origin,
+        )
+
+    def _gate_key(
+        self,
+        agent_id: str,
+        neuser_id: str,
+        user_id: str,
+        content: str,
+        category: Any,
+        memory_type: Any,
+        perspective: Any,
+        origin: Any,
+    ) -> Optional[Tuple[str, ...]]:
+        """门键 = 作用域三元组 + 归一化内容 + 读取侧据以区分行的分类维度。
+
+        分类维度必须进键：同文本但 origin/类型/分类/视角不同是两条语义不同的
+        记忆（检索按 origin 降权、按 category/memory_type 过滤），合并等于丢
+        一条。生命周期阶段与温度/重要度/情感是"同一事实的可变状态"，不进键。
+        归一后为空（纯空白/纯标点）不携带内容身份 ⇒ 返回 None，不拦截。
+        """
+        text = normalized_key(content)
+        if not text:
+            return None
+        return (
+            agent_id,
+            neuser_id,
+            user_id,
+            text,
+            *(str(getattr(v, "value", v)) for v in (category, memory_type, perspective, origin)),
+        )
+
+    def _ensure_content_index(self) -> None:
+        """首次写入前按当前快照建索引（含从持久层载入的行，故门跨重启生效）。"""
+        if self._content_index_ready:
+            return
+        self._content_index = {}
+        for mem in self._memories.values():
+            key = self._content_gate_key(mem)
+            if key is not None:
+                self._content_index.setdefault(key, mem.id)
+        self._content_index_ready = True
+
+    def _content_gate_lookup(self, key: Optional[Tuple[str, ...]]) -> Optional[str]:
+        """命中既有同内容活跃记忆的 id；无内容身份（key=None）时返回 None。"""
+        if key is None:
+            return None
+        hit = self._content_index.get(key)
+        if hit is None:
+            return None
+        mem = self._memories.get(hit)
+        if mem is not None and self._content_gate_key(mem) == key:
+            return hit
+        # 自愈：目标行已被删除/遗忘/归档，键重新开放
+        del self._content_index[key]
+        return None
+
+    def _sync_content_index(
+        self, mem: Memory, old_key: Optional[Tuple[str, ...]]
+    ) -> None:
+        """行内容/阶段变更后跟随索引：撤掉旧键、登记新键。
+
+        旧键由调用方在改动**前**取好（O(1) 归一化），避免为找旧键扫全索引——
+        睡眠整合会成批改写内容。只做跟随不做合并：把某行改成与另一行同键时，
+        不得顺手删掉任何一行（那是把"改一条记忆"放大成"丢一条记忆"）。
+        """
+        self._ensure_content_index()
+        if old_key is not None and self._content_index.get(old_key) == mem.id:
+            del self._content_index[old_key]
+        key = self._content_gate_key(mem)
+        if key is not None:
+            self._content_index[key] = mem.id
+
     def remember(
         self,
         content: str,
-        category: str = "general",
-        memory_type: str = "semantic",
+        # Issue #68：默认 None = "未声明"，不是"general/semantic"。
+        # 原默认值把"没传"与"明确要求 general"混为一谈，自动分类无从下手
+        # （99% 的行因此恒 general）。未声明且 auto_classify=True 时由唯一分类
+        # 引擎推断；未声明且 auto_classify=False 时仍回落 general/semantic，
+        # 与历史默认值等价。
+        category: Optional[str] = None,
+        memory_type: Optional[str] = None,
         temperature: Optional[float] = None,
         importance: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -704,10 +1029,30 @@ class MemoryManager:
         perspective: Optional[str] = None,
         # P1-9 来源信任分级: 闭集 owner/agent/untrusted/system, 写入时定级
         origin: Optional[str] = None,
-        # 控制参数(留 kwargs): auto_analyze_emotion / auto_classify / classification_context
+        # Issue #68：这两个控制参数曾是 kwargs 黑洞（文档写了、实现没有）——
+        # 现在显式入参并真的接线：auto_classify 触发分类推断，
+        # classification_context 作为引擎的元数据（如 {"emotion": "joy"} 走情感亲和）。
+        auto_classify: bool = False,
+        classification_context: Optional[Dict[str, Any]] = None,
+        # 其余控制参数(留 kwargs): auto_analyze_emotion
         **kwargs,
     ) -> str:
-        """存储一条记忆"""
+        """存储一条记忆
+
+        内容门语义（工单 011，择一写明）：同一作用域内归一化后相同的表述**只保
+        首条** —— 后到的同键写入返回既有 id、刷新 `updated_at`（再确认），不新增
+        行也不另记计数。计数版语义落在 EKB `add_experience_record`（`seen_count`），
+        两处口径不同是因为记忆行的温度/权重由衰减器持有，重复计数在此无消费方。
+
+        自动分类（Issue #68 闭环）：`auto_classify=True` 时按
+        `auto_classifier.MemoryAutoClassifier`（唯一引擎，词汇表 = models.py
+        枚举）推断 category / memory_type / perspective，并**只补未声明项**——
+        调用方显式传了就不覆盖（写入侧最了解自己那条是什么）。推断证据落
+        `metadata["_auto_classified"] = {...,"inferred":[...],"confidence":float}`，
+        使"这条分类是猜的"可复现、可审计；显式声明项不进 inferred。
+        默认 False：既有调用方（管线/睡眠写回等，自己标好类型）行为不变，
+        API 侧 `AddMemoryRequest.auto_classify` 默认 True 显式传入。
+        """
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
         # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
         # 阈值 80，新记忆从未真正参与衰减）；
@@ -724,6 +1069,7 @@ class MemoryManager:
                 importance = float(_cfg.get("manager.new_memory_importance", 50.0))
 
         with self._lock:
+            self._ensure_content_index()
             self._counter += 1
             mem_id = kwargs.get("id", f"mem_{self._counter:06d}")
 
@@ -735,13 +1081,33 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     emotion_val = EmotionType.NEUTRAL
 
+            # ── 自动分类（Issue #68：让声明过的开关真正起作用）──────────────
+            # 只补未声明项；推断证据落 metadata 供审计（分类是猜的就写清是猜的）。
+            _auto_classify_evidence: Optional[Dict[str, Any]] = None
+            if auto_classify:
+                _auto_classify_evidence = self._infer_and_apply_classification(
+                    content=content,
+                    category=category,
+                    memory_type=memory_type,
+                    perspective=perspective,
+                    context=classification_context,
+                )
+                if _auto_classify_evidence["inferred"]:
+                    category = _auto_classify_evidence["values"]["category"]
+                    memory_type = _auto_classify_evidence["values"]["memory_type"]
+                    perspective = _auto_classify_evidence["values"]["perspective"]
+
             # 安全解析 memory_type（防御无效枚举值）
+            # 工单 012：回落 SEMANTIC 不再静默——原声明进 metadata、计数进 _stats，
+            # 行照存（按 D1"标无证据不砍量"：拒绝会把用户内容丢成一次 500）。
+            _declared_memory_type: Optional[str] = None
             if isinstance(memory_type, str):
                 try:
                     parsed_memory_type = MemoryType(memory_type)
                 except (ValueError, KeyError):
                     logger.warning("Invalid memory_type '%s', falling back to SEMANTIC", memory_type)
                     parsed_memory_type = MemoryType.SEMANTIC
+                    _declared_memory_type = memory_type
             elif memory_type is None:
                 # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
                 parsed_memory_type = MemoryType.SEMANTIC
@@ -757,6 +1123,8 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     logger.warning("Invalid category '%s', falling back to GENERAL", category)
                     parsed_category = MemoryCategory.GENERAL
+                    # Issue #68：与未知 memory_type 同纪律——回落留痕 + 计数可见
+                    self._stats["unknown_category_count"] += 1
             elif category is None:
                 # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
                 parsed_category = MemoryCategory.GENERAL
@@ -775,6 +1143,25 @@ class MemoryManager:
             # P-3 修复: 非法枚举 category 字符串保留到 metadata, 供 recall 按原始标签过滤
             if isinstance(category, str) and parsed_category == MemoryCategory.GENERAL and category != "general":
                 final_metadata["_original_category"] = category
+
+            # Issue #68：自动分类证据（只记推断出来的项 + 置信度/依据）。
+            # 分类一旦不可复现，"库里全是 general"这类问题就再也查不出来。
+            if _auto_classify_evidence is not None:
+                if _auto_classify_evidence["inferred"]:
+                    final_metadata["_auto_classified"] = {
+                        "inferred": _auto_classify_evidence["inferred"],
+                        "confidence": _auto_classify_evidence["confidence"],
+                        "reasoning": _auto_classify_evidence["reasoning"],
+                    }
+                    self._stats["auto_classified_count"] += 1
+                else:
+                    # 调用方三项都显式声明 → 引擎不推断，但开关确实生效过
+                    self._stats["auto_classify_declared_skipped_count"] += 1
+
+            # 工单 012：未知 memory_type 的原始声明留痕 + 计数可见（不静默换类型）
+            if _declared_memory_type is not None:
+                final_metadata["_declared_memory_type"] = _declared_memory_type
+                self._stats["unknown_memory_type_count"] += 1
 
             # P1-9 来源信任分级: 只认显式 origin 形参, metadata 不可改写（结构门控）。
             # 非法值 fail-safe 降级为 untrusted（绝不静默升权）。
@@ -813,6 +1200,26 @@ class MemoryManager:
             else:
                 final_lifecycle_stage = LifecycleStage.ACTIVE
 
+            # 内容门（011）：作用域 + 归一化内容 + 分类维度同键 ⇒ 命中既有活跃
+            # 记忆，返回其 id 并刷新 updated_at（再确认），不新增行。
+            # 显式 id 是身份寻址写入（M-25 自定义 id / 恢复路径），不得被改道。
+            if "id" not in kwargs:
+                gate_key = self._gate_key(
+                    self._agent_id,
+                    self._eff_neuser_id(),
+                    self._eff_user_id(),
+                    content,
+                    parsed_category,
+                    parsed_memory_type,
+                    parsed_perspective,
+                    parsed_origin,
+                )
+                hit = self._content_gate_lookup(gate_key)
+                if hit is not None:
+                    self._memories[hit].updated_at = datetime.datetime.now(datetime.timezone.utc)
+                    self._persist_memory(self._memories[hit])
+                    return hit
+
             mem = Memory(
                 id=mem_id,
                 content=content,
@@ -832,6 +1239,9 @@ class MemoryManager:
             if final_metadata.get("type") == "question_queue":
                 self._persist_memory(mem)
             self._memories[mem_id] = mem
+            gated_key = self._content_gate_key(mem)
+            if gated_key is not None:
+                self._content_index[gated_key] = mem_id
             # 审计 P1-D6：关键词倒排增量维护（替代 recall 每查询全量重建）
             try:
                 from neurova.cognitive_layers.memory_layer.semantic_search import (
@@ -841,6 +1251,7 @@ class MemoryManager:
                 get_semantic_search().upsert_memory_index(mem.to_dict())
             except Exception:  # noqa: BLE001 - 索引维护失败不阻断记忆写入
                 logger.debug("关键词索引增量维护失败: %s", mem_id, exc_info=True)
+            self._sync_runtime_vector_store(mem)
             self._stats["remember_count"] += 1
             self._stats["total_memories"] = len(self._memories)
 
@@ -1042,6 +1453,235 @@ class MemoryManager:
                 self._vector_stores.pop(next(iter(self._vector_stores)), None)
         return store
 
+    def register_runtime_vector_store(self, store) -> None:
+        """登记一个需要在运行期增量维护的向量库（由 MemCore 装配 MoE 时调用）。
+
+        MoE 路由器持有的是 init_moe_router 自建的 UnifiedVectorStore，与本类
+        按隔离键缓存的召回 store 不是同一对象；此前它只在启动扫描时被灌满，
+        运行期新增/遗忘的记忆要到下次重启才进得了 MoE 检索。
+
+        只同步"新增"与"硬删除"，与既有语义索引钩子同处、同语义：
+        index_memories(incremental=True) 按 id 去重跳过（不更新既有 id 的内容），
+        软遗忘（lifecycle_stage=FORGOTTEN）也不摘除——启动扫描按该谓词过滤。
+        """
+        self._runtime_vector_store = store
+
+    def _sync_runtime_vector_store(self, mem: "Memory" = None, memory_id: str = "") -> None:
+        """把单条记忆的写入/删除镜像到运行期向量库（未登记则直接返回）"""
+        store = self._runtime_vector_store
+        if store is None:
+            return
+        try:
+            if memory_id:
+                store.remove_documents(lambda indexed_id: indexed_id == memory_id)
+            else:
+                store.index_memories([mem.to_dict()], incremental=True)
+        except Exception as e:
+            logger.warning("运行期向量库同步失败: %s", e)
+
+    def import_memories(self, records, *, ingest_run_id: str,
+                        owner_user_id: str = "") -> Dict[str, Any]:
+        """导入专用写入口：批量单事务、保留历史时间戳、不触发运行期副作用。
+
+        与 remember() 的分工（docs/specs/2026-09-20-external-agent-ingest-design.md §4）：
+        这里不跑内容门、不喂关键词倒排、不同步 MoE 向量库、不计 remember_count——回填的
+        历史不是"刚发生的经验"，重新定温或参与再确认会篡改它的时序语义。可见性不受影响：
+        行同时进内存表与持久层（persist_memory_batch 单事务）。
+
+        **属主**（Issue #81 断点②）：`owner_user_id` 是"这批历史是谁的"。缺省为空时取
+        调用现场作用域（CLI 下的既有口径，单用户桌面下无感）；显式给定时两轴同定标——
+        只写一轴等于让三层隔离的第二轴回落到调用现场，属主实例按作用域检索依旧看不见，
+        "为他人导入"就只兑现了一半。与 F-04 同源：错在导入侧生产了"没有属主"这份状态，
+        所以修在产生它的一侧（本写入口），不在读侧加兜底判断。
+
+        **声明取代必须真的生效**：`MemoryRecord.supersedes`（源库 `supersedes_key`）
+        说的是"我取代了谁"。此前它只被搬进 `metadata["supersedes"]` 就没人再读，
+        旧行照旧 active、retrieval 新旧一起端出来（审计 §5.3 / B-11）。现在导入
+        写这条链的闭环：按内容身份定位被取代的旧活跃行并软遗忘它，找不到就申报。
+
+        Returns:
+            `{"added": int, "skipped": int, "superseded": [memory_id], "supersede_unresolved": [声明值]}`
+        """
+        if not ingest_run_id:
+            raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        owner = str(owner_user_id or "").strip()
+        # 幂等键按**行的作用域**分槽：identity_key 是"这段历史"的身份，行的三元组是
+        # "这段历史是谁的"——两者不是同一件事。按全局键去重，同一份历史导给第二个人会
+        # 静默回落成 skipped（报告 +0、他的列表据此为空），而盘上本应各留一行。
+        scope_ne = owner or self._eff_neuser_id()
+        scope_uid = owner or self._eff_user_id()
+        existing_keys = {
+            (
+                mem.neuser_id, mem.user_id,
+                (mem.metadata or {}).get("ingest", {}).get("identity_key"),
+            )
+            for mem in self._memories.values()
+        }
+        imported: List[Memory] = []
+        skipped = 0
+        superseded: List[str] = []
+        unresolved: List[str] = []
+        with self._lock:
+            for rec in records:
+                if (scope_ne, scope_uid, rec.identity_key) in existing_keys:
+                    skipped += 1
+                    continue
+                mem = self._build_imported_memory(
+                    rec, ingest_run_id, owner_user_id=owner_user_id)
+                self._memories[mem.id] = mem
+                existing_keys.add((scope_ne, scope_uid, rec.identity_key))
+                imported.append(mem)
+                declared = str(getattr(rec, "supersedes", "") or "").strip()
+                if declared:
+                    # 取代声明的旧行要在**本批行的作用域**里找：属主导入的取代若按调用
+                    # 现场作用域去找，跨上下文导入时永远落空（声明了却"找不到目标"）。
+                    retired = self._retireSuperseded(
+                        declared, keepId=mem.id, scope=(scope_ne, scope_uid))
+                    superseded.extend(retired)
+                    if not retired:
+                        unresolved.append(declared)
+            if imported:
+                self.persist_memory_batch(imported)
+            self._stats["total_memories"] = len(self._memories)
+        if unresolved:
+            self._stats["supersede_unresolved_count"] = (
+                self._stats.get("supersede_unresolved_count", 0) + len(unresolved))
+            logger.warning("导入声明取代 %s 条，其中 %s 条在库里找不到被取代的旧记忆: %s",
+                           len(superseded) + len(unresolved), len(unresolved), unresolved)
+        return {"added": len(imported), "skipped": skipped,
+                "superseded": superseded, "supersede_unresolved": unresolved}
+
+    def _retireSuperseded(self, declared: str, keepId: str,
+                          scope: Optional[Tuple[str, str]] = None) -> List[str]:
+        """把声明被取代的旧活跃行软遗忘；返回被遗忘的 memory_id。
+
+        定位口径复用内容身份（`normalized_key`，与内容门同一把键）：声明值可能是旧行
+        的原文，也可能是旧行的 identity_key——两种都按"同一份内容身份"认，不另立匹配规则。
+        只动本作用域、只动仍活跃的行；软遗忘是既有语义（可恢复、不删数据），
+        这里不新造第二种"作废"。
+
+        `scope` 缺省取调用现场三元组；导入路径显式传**本批行**的作用域（属主给定的
+        情况下它与调用现场不是同一个上下文）。
+        """
+        from neurova.core.content_identity import normalized_key
+
+        wanted = normalized_key(declared)
+        if not wanted:
+            return []
+        scope_ne, scope_uid = scope or (self._eff_neuser_id(), self._eff_user_id())
+        retired: List[str] = []
+        for mem in list(self._memories.values()):
+            if mem.id == keepId or mem.agent_id != self._agent_id:
+                continue
+            if mem.neuser_id != scope_ne or mem.user_id != scope_uid:
+                continue
+            if mem.lifecycle_stage == LifecycleStage.FORGOTTEN:
+                continue
+            identity = str((mem.metadata or {}).get("ingest", {}).get("identity_key") or "")
+            if normalized_key(mem.content) != wanted and normalized_key(identity) != wanted:
+                continue
+            mem.lifecycle_stage = LifecycleStage.FORGOTTEN
+            mem.metadata = dict(mem.metadata or {})
+            mem.metadata["superseded_by_ingest"] = keepId
+            self._persist_memory(mem)
+            retired.append(mem.id)
+        return retired
+
+    def _build_imported_memory(self, rec, ingest_run_id: str,
+                               owner_user_id: str = "") -> "Memory":
+        """把 MemoryRecord 翻成 Memory：枚举与时间戳解析口径与 remember 一致。
+
+        `owner_user_id` 非空时两轴同定标（"这批历史是谁的"），空则取调用现场作用域。
+        """
+        owner = str(owner_user_id or "").strip()
+        memory_type = MemoryType.SEMANTIC
+        declared_type = None
+        try:
+            memory_type = MemoryType(rec.memory_type)
+        except (ValueError, KeyError):
+            declared_type = rec.memory_type          # 工单 012 口径：未知类型留痕不静默换
+            self._stats["unknown_memory_type_count"] = (
+                self._stats.get("unknown_memory_type_count", 0) + 1)
+        category = MemoryCategory.GENERAL
+        original_category = None
+        try:
+            category = MemoryCategory(rec.category)
+        except (ValueError, KeyError):
+            original_category = rec.category
+        try:
+            origin = MemoryOrigin(rec.origin)
+        except (ValueError, KeyError):
+            logger.warning("导入记忆 origin 非法 '%s'，fail-safe 降为 UNTRUSTED", rec.origin)
+            origin = MemoryOrigin.UNTRUSTED
+        created_at = _parse_import_ts(rec.ts)
+        metadata: Dict[str, Any] = {
+            "ingest_run_id": ingest_run_id,
+            "ingest": {"identity_key": rec.identity_key, "source_ref": rec.source_ref},
+        }
+        if rec.tags:
+            metadata["tags"] = list(rec.tags)
+        if declared_type is not None:
+            metadata["_declared_memory_type"] = declared_type
+        if original_category is not None:
+            metadata["_original_category"] = original_category
+        if rec.supersedes:
+            metadata["supersedes"] = rec.supersedes
+        return Memory(
+            id=_ingest_memory_id(rec.identity_key),
+            content=rec.content,
+            memory_type=memory_type,
+            category=category,
+            temperature=float(rec.temperature),
+            importance=float(rec.importance),
+            origin=origin,
+            lifecycle_stage=LifecycleStage.ACTIVE,
+            metadata=metadata,
+            agent_id=self._agent_id,
+            neuser_id=owner or self._eff_neuser_id(),
+            user_id=owner or self._eff_user_id(),
+            created_at=created_at,
+            updated_at=created_at,
+            # 事件时刻与获知时刻是两个时刻：created_at 记源侧历史时刻（照原样保留），
+            # last_accessed_at 记系统获知时刻（本次导入）。缺了它，衰减周期会把
+            # "刚导入"读成"闲置了半年"——days_idle 取 last_accessed_at or created_at，
+            # 半年回填的历史会被直接判成 ARCHIVED/FORGOTTEN。在产生该状态的这一侧定标，
+            # 不去改衰减消费方（消费方按"距今多久没被访问"算，语义本就正确）。
+            last_accessed_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+    def delete_ingested_memories(self, ingest_run_id: str) -> int:
+        """按导入批次精确撤销（设计 §6：回滚靠标签，不靠快照）。
+
+        删盘按**行自带**三元组（导入行记着它是谁的历史），不按调用现场的生效作用域——
+        批次标签本身就是授权凭据，而 CLI 撤销永远跑在实例默认作用域，二者不是同一上下文。
+        倒排索引与运行期向量库同 forget 口径一并摘除：只删内存与盘、不摘索引，
+        会让已撤销的条子在召回链路里留一份指向不存在记忆的残留文档。
+        """
+        removed = 0
+        with self._lock:
+            for mem_id, mem in list(self._memories.items()):
+                if (mem.metadata or {}).get("ingest_run_id") != ingest_run_id:
+                    continue
+                del self._memories[mem_id]
+                self._delete_persisted_memory(
+                    mem_id, (mem.agent_id, mem.neuser_id, mem.user_id))
+                self._drop_from_recall_indexes(mem_id)
+                removed += 1
+            self._stats["total_memories"] = len(self._memories)
+        return removed
+
+    def _drop_from_recall_indexes(self, memory_id: str) -> None:
+        """把一条记忆从关键词倒排与运行期向量库摘掉（与 forget 的硬删同一口径）。"""
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import (
+                get_semantic_search,
+            )
+
+            get_semantic_search().remove_memory_index(memory_id)
+        except Exception:  # noqa: BLE001 - 索引维护失败不阻断撤销
+            logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
+        self._sync_runtime_vector_store(memory_id=memory_id)
+
     def _semantic_recall(
         self, query: str, memories: list, limit: int, agent_wide: bool = False
     ) -> list:
@@ -1168,6 +1808,10 @@ class MemoryManager:
             mem = self._memories.get(memory_id)
             if not mem:
                 return False
+            # 内容门索引跟随（011）：门键只由内容 + 阶段决定，故只在这两类字段
+            # 被改写时同步，并在改动发生**前**取旧键。
+            gate_follows = "content" in kwargs or "lifecycle_stage" in kwargs
+            gate_old_key = self._content_gate_key(mem) if gate_follows else None
             if (mem.metadata or {}).get("type") == "question_queue":
                 from copy import deepcopy
 
@@ -1215,6 +1859,8 @@ class MemoryManager:
             mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
             self._persist_memory(mem)  # 更新持久化
             self._memories[memory_id] = mem
+            if gate_follows:
+                self._sync_content_index(mem, gate_old_key)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
         self._bus.emit(
             MemoryEvent(
@@ -1253,15 +1899,8 @@ class MemoryManager:
                 self._persist_memory(self._memories[memory_id])  # 更新持久化
             else:
                 del self._memories[memory_id]
-                # 审计 P1-D6：关键词倒排增量摘除
-                try:
-                    from neurova.cognitive_layers.memory_layer.semantic_search import (
-                        get_semantic_search,
-                    )
-
-                    get_semantic_search().remove_memory_index(memory_id)
-                except Exception:  # noqa: BLE001
-                    logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
+                # 审计 P1-D6：关键词倒排增量摘除（与撤销共用同一处收口）
+                self._drop_from_recall_indexes(memory_id)
                 self._delete_persisted_memory(memory_id)  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
@@ -1317,21 +1956,21 @@ class MemoryManager:
         排序——温度通道每查询全库扫描的根因）。"""
         if not getattr(self, "_persist_db_path", None):
             return []
+        conn = None
+        released = False
         try:
             conn = getattr(self, "_persist_conn", None)
-            owned = False
             if conn is None:
-                conn = sqlite3.connect(self._persist_db_path)
-                owned = True
+                # 兜底短连接走池（ADR 0014）；常驻连接在场时不得归还
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
             conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
-                    (int(limit),),
-                ).fetchall()
-            finally:
-                if owned:
-                    conn.close()
+            rows = conn.execute(
+                "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
             results = []
             for row in rows:
                 try:
@@ -1352,6 +1991,11 @@ class MemoryManager:
         except Exception as e:
             logger.warning("get_top_memories_by_temperature failed: %s", e)
             return []
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
 
     def get_all_memories(self) -> List[Dict[str, Any]]:
         """获取所有记忆（用于睡眠整合）"""
@@ -1428,6 +2072,15 @@ class MemoryManager:
         with self._lock:
             # M-06: 基集构造移入锁内（同 recall/get_memories 修复）
             base = self._agent_memories() if agent_wide else self._scoped_memories()
+            # Issue #68：分类分布是"17 维分类是否真起作用"的唯一可观测读数——
+            # 此前库里 99% 是 general 却无处可查。按生效作用域统计，与 total 同口径。
+            by_category: Dict[str, int] = {}
+            by_type: Dict[str, int] = {}
+            for m in base:
+                cat = getattr(getattr(m, "category", None), "value", None) or "unknown"
+                mtype = getattr(getattr(m, "memory_type", None), "value", None) or "unknown"
+                by_category[cat] = by_category.get(cat, 0) + 1
+                by_type[mtype] = by_type.get(mtype, 0) + 1
             return {
                 # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量;
                 # agent_wide=True(管理页)按 agent 全量口径计数。
@@ -1436,7 +2089,38 @@ class MemoryManager:
                 "recall_count": self._stats["recall_count"],
                 "bus_events": self._bus.emit_count,
                 "bus_handlers": self._bus.handler_count(),
+                # 分类闭环读数（0 是正常态；auto_classified_count 为 0 表示
+                # 自动分类没有被任何写入路径使用）
+                "by_category": by_category,
+                "by_memory_type": by_type,
+                "auto_classified_count": self._stats["auto_classified_count"],
+                "auto_classify_declared_skipped_count": self._stats[
+                    "auto_classify_declared_skipped_count"
+                ],
+                "unknown_memory_type_count": self._stats["unknown_memory_type_count"],
+                "unknown_category_count": self._stats["unknown_category_count"],
+                # 导入侧累计的"取代声明落了空"：写进 _stats 就要在读面看得见，
+                # 否则这条读数只写不读（/memory/stats 走的就是本方法）。
+                "supersede_unresolved_count": self._stats.get(
+                    "supersede_unresolved_count", 0
+                ),
+                # Issue #72：冲突是记忆侧的一条真实产出，读数必须与检测链同源。
+                # 此前 `get_conflict_summary()` 全仓零调用方，检出了什么在读取侧看不见。
+                "conflicts": self._conflictReading(),
             }
+
+    def _conflictReading(self) -> Dict[str, Any]:
+        """冲突账读数（/memory/stats 与 get_conflict_summary 同源）。"""
+        module = self._conflict_module
+        if module is None:
+            return {"total": 0, "resolved": 0, "unresolved": 0, "by_type": {}}
+        stats = module.get_stats()
+        return {
+            "total": stats.get("total_conflicts", 0),
+            "resolved": stats.get("resolved", 0),
+            "unresolved": stats.get("unresolved", 0),
+            "by_type": dict(stats.get("by_type", {})),
+        }
 
     def get_full_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
         """获取完整统计"""
@@ -1473,6 +2157,128 @@ class MemoryManager:
         """获取情感分布（委托到 EmotionModule.get_stats）"""
         return self._emotion_module.get_stats().get("emotion_distribution", {})
 
+    # ── 情绪变化时间轴（读侧聚合）────────────────────────────────────
+
+    #: range → (桶粒度, 桶数)
+    _TIMELINE_RANGES: Dict[str, Tuple[str, int]] = {
+        "24h": ("hour", 24),
+        "7d": ("day", 7),
+        "30d": ("day", 30),
+        "90d": ("week", 13),
+    }
+    _TIMELINE_DEFAULT_RANGE = "7d"
+    _TIMELINE_EXCERPT_LIMIT = 80
+
+    def get_emotion_timeline(self, range_key: str = _TIMELINE_DEFAULT_RANGE) -> Dict[str, Any]:
+        """情绪变化时间轴：按时间桶聚合带符号效价（正=积极情绪，负=消极情绪）。
+
+        时间源取 memories.created_at —— 情感标注与记忆写入由同一条链产生，
+        写入时刻即情绪事件时刻，因此不必给 memory_emotions 补时间列。
+        只有 emotion_module 的标注行才算情绪事件：memories.emotion 列的 DDL 默认值
+        就是 'neutral'，"没分析过"与"判为中性"不可区分，计入会让未标注记忆把曲线拽向 0。
+        无事件的桶 valence=None：把"没发生情绪"画成 0 会被读成"中性"。
+        """
+        resolved = range_key if range_key in self._TIMELINE_RANGES else self._TIMELINE_DEFAULT_RANGE
+        unit, bucket_count = self._TIMELINE_RANGES[resolved]
+
+        starts = self._timeline_bucket_starts(unit, bucket_count)
+        index_by_bucket = {
+            self._timeline_bucket_key(start, unit): i for i, start in enumerate(starts)
+        }
+        points: List[Dict[str, Any]] = [
+            {
+                "ts": int(start.timestamp()),
+                "label": self._timeline_label(start, unit),
+                "valence": None,
+                "count": 0,
+                "peak_emotion": None,
+                "peak_intensity": None,
+                "excerpt": "",
+            }
+            for start in starts
+        ]
+        weighted = [0.0] * bucket_count
+        weights = [0.0] * bucket_count
+        peak_strength = [-1.0] * bucket_count
+
+        for mem in self._memories.values():
+            index = index_by_bucket.get(
+                self._timeline_bucket_key(self._to_local_time(mem.created_at), unit)
+            )
+            if index is None:
+                continue  # 窗口外
+            sample = self._timeline_sample(mem)
+            if sample is None:
+                continue  # 无情绪标注 → 不是情绪事件
+            valence, intensity, emotion_value = sample
+            weighted[index] += valence * intensity
+            weights[index] += intensity
+            points[index]["count"] += 1
+            strength = abs(valence) * intensity
+            if strength > peak_strength[index]:
+                peak_strength[index] = strength
+                points[index]["peak_emotion"] = emotion_value
+                points[index]["peak_intensity"] = intensity
+                points[index]["excerpt"] = self._timeline_excerpt(mem.content)
+
+        for i, point in enumerate(points):
+            if point["count"]:
+                point["valence"] = (
+                    round(weighted[i] / weights[i], 4) if weights[i] > 0 else 0.0
+                )
+
+        return {"range": resolved, "bucket": unit, "points": points}
+
+    def _timeline_sample(self, mem) -> Optional[Tuple[float, float, str]]:
+        """该记忆的情绪样本 (效价, 强度, 情绪值)；无标注行返回 None。"""
+        state = self._emotion_module.get_emotion(mem.id) if self._emotion_module else None
+        if state is None:
+            return None
+        return float(state.valence), float(state.intensity), state.primary_emotion.value
+
+    @staticmethod
+    def _to_local_time(moment: datetime.datetime) -> datetime.datetime:
+        """aware（UTC 存量）→ 本地 naive；无 tzinfo 的存量按本地看待。"""
+        if moment.tzinfo is not None:
+            return moment.astimezone().replace(tzinfo=None)
+        return moment
+
+    def _timeline_bucket_starts(self, unit: str, count: int) -> List[datetime.datetime]:
+        now = datetime.datetime.now().replace(tzinfo=None)
+        if unit == "hour":
+            base = now.replace(minute=0, second=0, microsecond=0)
+            step = datetime.timedelta(hours=1)
+        elif unit == "week":
+            base = (now - datetime.timedelta(days=now.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            step = datetime.timedelta(days=7)
+        else:
+            base = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            step = datetime.timedelta(days=1)
+        return [base - step * (count - 1 - i) for i in range(count)]
+
+    @staticmethod
+    def _timeline_bucket_key(
+        moment: datetime.datetime, unit: str
+    ) -> datetime.datetime:
+        if unit == "hour":
+            return moment.replace(minute=0, second=0, microsecond=0)
+        day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        if unit == "week":
+            return day - datetime.timedelta(days=day.weekday())
+        return day
+
+    @staticmethod
+    def _timeline_label(start: datetime.datetime, unit: str) -> str:
+        return start.strftime("%H:00") if unit == "hour" else start.strftime("%m-%d")
+
+    def _timeline_excerpt(self, content: str) -> str:
+        text = " ".join((content or "").split())
+        if len(text) <= self._TIMELINE_EXCERPT_LIMIT:
+            return text
+        return text[: self._TIMELINE_EXCERPT_LIMIT] + "…"
+
     def update_emotional_state(self, state) -> Dict[str, Any]:
         """更新情感状态（P-2 修复: 接受 dict 或 str）
 
@@ -1488,18 +2294,12 @@ class MemoryManager:
             # dict 模式: 合并情感状态到 emotion_module
             try:
                 from neurova.cognitive_layers.memory_layer.modules.emotion_module import (
+                    EMOTION_VALENCE,
                     EmotionState,
                     EmotionType,
                 )
                 # 找出最高强度的情感作为 primary
-                emotion_map = {
-                    "joy": EmotionType.JOY,
-                    "sadness": EmotionType.SADNESS,
-                    "anger": EmotionType.ANGER,
-                    "fear": EmotionType.FEAR,
-                    "surprise": EmotionType.SURPRISE,
-                    "neutral": EmotionType.NEUTRAL,
-                }
+                emotion_map = {e.value: e for e in EmotionType}
                 primary = EmotionType.NEUTRAL
                 max_intensity = 0.0
                 for key, value in state.items():
@@ -1513,17 +2313,12 @@ class MemoryManager:
                     arousal = 0.2
                 else:
                     intensity = min(1.0, max_intensity)
-                    valence_map = {
-                        EmotionType.JOY: 0.8, EmotionType.SADNESS: -0.6,
-                        EmotionType.ANGER: -0.7, EmotionType.FEAR: -0.5,
-                        EmotionType.SURPRISE: 0.3, EmotionType.NEUTRAL: 0.0,
-                    }
                     arousal_map = {
                         EmotionType.JOY: 0.6, EmotionType.SADNESS: 0.3,
                         EmotionType.ANGER: 0.8, EmotionType.FEAR: 0.7,
                         EmotionType.SURPRISE: 0.9, EmotionType.NEUTRAL: 0.2,
                     }
-                    valence = valence_map.get(primary, 0.0)
+                    valence = EMOTION_VALENCE.get(primary.value, 0.0)
                     arousal = arousal_map.get(primary, 0.5)
                 emotion = EmotionState(
                     primary_emotion=primary,
@@ -1584,10 +2379,23 @@ class MemoryManager:
         emotion = self._emotion_module.analyze_text_emotion(user_text)
         return emotion.to_dict()
 
-    # ────── Classification (委托到 modules/classifier_module.py) ──────
+    # ────── Classification（唯一引擎 = auto_classifier.MemoryAutoClassifier）──────
+
+    def _ensure_auto_classifier(self):
+        """懒加载唯一分类引擎（Issue #68：此前 `self._auto_classifier` 建好就没人读，
+        真正的规则却有两份——引擎私有枚举 + ClassifierModule 的 6 个硬编码桶）。
+        现在两个入口都走它。"""
+        if self._auto_classifier is None:
+            from neurova.cognitive_layers.memory_layer.auto_classifier import (
+                MemoryAutoClassifier,
+            )
+
+            self._auto_classifier = MemoryAutoClassifier()
+            logger.info("MemoryAutoClassifier lazily initialized")
+        return self._auto_classifier
 
     def _ensure_classifier_module(self):
-        """懒加载 ClassifierModule（首次调用时初始化）"""
+        """懒加载 ClassifierModule（分类缓存 / 标签面；推断已委托唯一引擎）"""
         if self._classifier_module is None:
             from neurova.cognitive_layers.memory_layer.modules.classifier_module import ClassifierModule
 
@@ -1596,30 +2404,138 @@ class MemoryManager:
             logger.info("ClassifierModule lazily initialized")
         return self._classifier_module
 
-    def classify_memory(self, content: str) -> Dict[str, Any]:
-        """分类记忆（委托到 ClassifierModule）"""
+    def classify_memory(
+        self, content: str, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """分类记忆内容（只推断，不落库）
+
+        返回契约（API `/api/v1/memory/classify` 的 ClassifyMemoryResponse 逐字段
+        对齐）：`category` / `type` / `perspective` 是**字符串值**，各自带
+        `*_confidence`；另有 `categories`（多标签候选，含最佳）与 `tags`。
+
+        历史坑（Issue #68）：本方法的返回被 API 端点当成
+        `result["category"][0]`（以为值是 `(枚举, 置信度)` 元组），而实际返回是
+        `{"memory_id","categories","tags"}` ⇒ 端点恒 500。现把契约写死在这里，
+        端点只做透传。
+
+        Args:
+            content: 记忆内容
+            context: 可选分类上下文（透传引擎 metadata，如 {"emotion": "joy"}）
+        """
+        engine = self._ensure_auto_classifier()
+        result = engine.classify(content, context)
         module = self._ensure_classifier_module()
         # 使用内容哈希作为临时 memory_id
         memory_id = f"cls_{abs(hash(content)) % (10 ** 8)}"
-        categories = module.classify(memory_id=memory_id, content=content)
+        categories = module.classify(memory_id=memory_id, content=content, metadata=context)
         tags = module.extract_tags(memory_id=memory_id, content=content)
-        return {"memory_id": memory_id, "categories": categories, "tags": tags}
+        details = result["details"]
+        return {
+            "memory_id": memory_id,
+            "categories": categories,
+            "tags": tags,
+            "category": result["category"].value,
+            "category_confidence": float(details["category_confidence"]),
+            "type": result["memory_type"].value,
+            "type_confidence": float(details["type_confidence"]),
+            "perspective": result["perspective"].value,
+            "perspective_confidence": float(details["perspective_confidence"]),
+            "emotion": result["emotion"].value,
+            "is_important": bool(result["is_important"]),
+            "is_crystallized": bool(result["is_crystallized"]),
+            "confidence": float(result["confidence"]),
+            "reasoning": result["reasoning"],
+        }
+
+    def _infer_and_apply_classification(
+        self,
+        content: str,
+        category: Any,
+        memory_type: Any,
+        perspective: Any,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """推断并回填"未声明"的分类维度（`remember(auto_classify=True)` 用）。
+
+        只补未声明项：调用方显式传了就原样保留并记进 `declared`——写入侧最了解
+        自己那条记忆是什么，自动分类不该覆盖它。引擎异常不阻断写入（记忆内容比
+        分类标签重要），异常路径返回空推断并把原因记进 reasoning。
+
+        Returns:
+            {"values": {category/memory_type/perspective}, "inferred": [...],
+             "declared": [...], "confidence": float, "reasoning": str}
+        """
+        declared = {
+            "category": category is not None,
+            "memory_type": memory_type is not None,
+            "perspective": perspective is not None,
+        }
+        values = {"category": category, "memory_type": memory_type, "perspective": perspective}
+        if all(declared.values()) or not (content or "").strip():
+            return {
+                "values": values,
+                "inferred": [],
+                "declared": [k for k, v in declared.items() if v],
+                "confidence": 0.0,
+                "reasoning": "三项均已声明" if all(declared.values()) else "内容为空",
+            }
+
+        try:
+            result = self._ensure_auto_classifier().classify(content, context)
+        except Exception as exc:  # noqa: BLE001 - 分类失败不得丢用户内容
+            logger.warning("自动分类失败（按未声明项回落默认值）: %s", exc)
+            return {
+                "values": values,
+                "inferred": [],
+                "declared": [k for k, v in declared.items() if v],
+                "confidence": 0.0,
+                "reasoning": f"分类引擎异常: {exc}",
+            }
+
+        inferred = []
+        if not declared["category"]:
+            values["category"] = result["category"].value
+            inferred.append("category")
+        if not declared["memory_type"]:
+            values["memory_type"] = result["memory_type"].value
+            inferred.append("memory_type")
+        if not declared["perspective"]:
+            values["perspective"] = result["perspective"].value
+            inferred.append("perspective")
+
+        return {
+            "values": values,
+            "inferred": inferred,
+            "declared": [k for k, v in declared.items() if v],
+            "confidence": float(result["confidence"]),
+            "reasoning": result["reasoning"],
+        }
 
     def classify_and_remember(self, content: str, **kwargs) -> str:
-        # 根因修复（P2-#15）: 原先直接 remember 而完全丢弃分类结果。
-        # 先分类，再将分类类别并入 tags，使记忆携带分类信息。
+        """分类并记忆（一站式：分类结果真的落到记忆行）
+
+        Issue #68：原实现把分类类别只塞进 `kwargs["tags"]`，而 `remember()` 的
+        kwargs 并不接收 `tags` ⇒ 分类结果照样丢。现改为**直接落分类维度**：
+        auto_classify 交给 `remember` 的推断分支（显式项仍优先），并把多标签
+        候选写进 `metadata["categories"]` 保留"可能属于多类"的信息。
+        """
         try:
-            cls = self.classify_memory(content)
+            cls = self.classify_memory(content, kwargs.get("classification_context"))
         except Exception as e:  # noqa: BLE001
             logger.warning("classify_and_remember 分类失败，仅记忆原文: %s", e)
             cls = None
+
         if isinstance(cls, dict):
-            cats = cls.get("categories") or []
-            if cats:
-                tags = kwargs.get("tags")
-                if not isinstance(tags, list):
-                    tags = []
-                kwargs["tags"] = tags + [str(c) for c in cats]
+            kwargs.setdefault("auto_classify", True)
+            metadata = dict(kwargs.get("metadata") or {})
+            metadata.setdefault("categories", list(cls.get("categories") or []))
+            if cls.get("categories"):
+                metadata.setdefault("_auto_classified", {
+                    "inferred": ["category"],
+                    "confidence": cls.get("category_confidence", 0.0),
+                    "reasoning": cls.get("reasoning", ""),
+                })
+            kwargs["metadata"] = metadata
         return self.remember(content, **kwargs)
 
     # ────── Temperature ──────
@@ -2250,70 +3166,122 @@ class MemoryManager:
         logger.info("EKIModule reconfigured: ensemble_size=%s, inflation_factor=%s", ensemble_size, inflation_factor)
 
     # ────── TKG (委托到 modules/tkg_module.py) ──────
+    #
+    # 时序事实的权威是底座 `knowledge_facts`（012 起对话链就读它）。委托层因此
+    # 只做两件事：把门面的入参形状**归一**到权威的字段名，再转交；一份事实都不自己存。
+    #
+    # 字段归一是必需的，不是兼容：`POST /memory/tkg/facts` 传的是
+    # entity/attribute/value，而这里曾用 `.get("subject", "")` 取 subject —— 取不到就
+    # 静默写一条空三元组，HTTP 还回 200（审计 B-02）。现改成显式映射 + 缺字段报错。
 
     def _ensure_tkg_module(self):
-        """懒加载 TKGModule（首次调用时初始化）"""
+        """懒加载 TKGModule（首次调用时初始化，并绑定本实例的 agent 域）"""
         if self._tkg_module is None:
             from neurova.cognitive_layers.memory_layer.modules.tkg_module import TKGModule
 
-            self._tkg_module = TKGModule(time_window_hours=24.0)
+            self._tkg_module = TKGModule(time_window_hours=24.0, factStore=self._factStore)
             self._tkg_module.init()
+            self._tkg_module.bindAgent(self._agent_id)
             logger.info("TKGModule lazily initialized")
         return self._tkg_module
 
+    def attachFactStore(self, store: Any) -> None:
+        """注入底座事实库（测试/隔离装配用；不注入则用生产单例）。"""
+        self._factStore = store
+        if self._tkg_module is not None:
+            self._tkg_module._factStore = store
+
+    # 门面入参别名表：键是权威字段名，值是它被叫过的写法（端点/前端/旧桥各一种）。
+    # 写成表而不是三串 if：加一个别名是加一行，不是加一个分支。
+    _TKG_FIELD_ALIASES = {
+        "subject": ("subject", "entity"),
+        "predicate": ("predicate", "relation", "attribute"),
+        "obj": ("obj", "object", "value"),
+    }
+
+    @classmethod
+    def _tkgField(cls, kwargs: Dict[str, Any], field: str) -> str:
+        """把入参归一成权威字段名下的一个非空字符串；取不到就是空。"""
+        for name in cls._TKG_FIELD_ALIASES[field]:
+            value = kwargs.get(name)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
     def tkg_add_fact(self, **kwargs) -> str:
-        """添加时序事实（委托到 TKGModule.add_fact）"""
+        """添加时序事实（委托到 TKGModule.add_fact）。
+
+        缺必填项**当场报错**：静默兜底写空行的代价是"调用方以为写进去了"，
+        而库里多一条谁也读不出来的空事实。
+        """
         module = self._ensure_tkg_module()
+        subject = self._tkgField(kwargs, "subject")
+        predicate = self._tkgField(kwargs, "predicate")
+        obj = self._tkgField(kwargs, "obj")
+        for name, value in (("subject", subject), ("predicate", predicate), ("obj", obj)):
+            if not value:
+                raise ValueError(
+                    "时序事实缺必填字段 %s（接受 subject/entity、predicate/relation/attribute、"
+                    "obj/object/value 三种写法）" % name)
         return module.add_fact(
-            subject=kwargs.get("subject", ""),
-            predicate=kwargs.get("predicate", ""),
-            obj=kwargs.get("obj", kwargs.get("object", "")),
-            confidence=kwargs.get("confidence", 1.0),
+            subject=subject,
+            predicate=predicate,
+            obj=obj,
+            confidence=kwargs.get("confidence"),
             valid_from=kwargs.get("valid_from"),
             valid_until=kwargs.get("valid_until"),
+            agentId=kwargs.get("agent_id") or self._agent_id,
+            mediumRef=str(kwargs.get("source") or ""),
+            statementText=str(kwargs.get("statement_text") or ""),
         )
+
+    def _tkgQuery(self, kwargs: Dict[str, Any], *, defaultLimit: int,
+                  timeFrom: Any = None, timeUntil: Any = None) -> List[Dict[str, Any]]:
+        """四个查询动词共用的一次转发：入参归一只有这一处，避免各改各的。"""
+        return self._ensure_tkg_module().query_facts(
+            subject=self._tkgField(kwargs, "subject"),
+            predicate=self._tkgField(kwargs, "predicate"),
+            obj=self._tkgField(kwargs, "obj"),
+            time_from=timeFrom,
+            time_until=timeUntil,
+            limit=kwargs.get("limit", defaultLimit),
+        )
+
+    def tkg_query(self, **kwargs) -> List[Dict[str, Any]]:
+        """按时序事实查询（`POST /memory/tkg/query` 的落点）。
+
+        这条动词此前**不存在**：端点调 `manager.tkg_query(...)` 直接 AttributeError
+        被吞成 500（审计 §5.1 同类病灶）。入参形状与端点契约一致：
+        entity / relation / start_time / end_time / limit。
+        """
+        return self._tkgQuery(kwargs, defaultLimit=10,
+                              timeFrom=kwargs.get("start_time") or kwargs.get("time_from"),
+                              timeUntil=kwargs.get("end_time") or kwargs.get("time_until"))
 
     def tkg_query_current(self, **kwargs) -> List[Dict[str, Any]]:
         """查询当前事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            limit=kwargs.get("limit", 10),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=10)
 
     def tkg_query_at_time(self, **kwargs) -> List[Dict[str, Any]]:
         """按时间查询事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            time_from=kwargs.get("time_from"),
-            time_until=kwargs.get("time_until"),
-            limit=kwargs.get("limit", 10),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=10,
+                              timeFrom=kwargs.get("time_from"),
+                              timeUntil=kwargs.get("time_until"))
 
     def tkg_get_history(self, **kwargs) -> List[Dict[str, Any]]:
         """获取历史事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            limit=kwargs.get("limit", 50),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=50)
 
     def tkg_detect_conflicts(self, **kwargs) -> List[Dict[str, Any]]:
         """检测冲突（委托到 TKGModule.detect_conflicts）"""
-        module = self._ensure_tkg_module()
-        conflicts = module.detect_conflicts(
-            subject=kwargs.get("subject", ""),
-            predicate=kwargs.get("predicate", ""),
-            obj=kwargs.get("obj", kwargs.get("object", "")),
+        return self._ensure_tkg_module().detect_conflicts(
+            subject=self._tkgField(kwargs, "subject"),
+            predicate=self._tkgField(kwargs, "predicate"),
+            obj=self._tkgField(kwargs, "obj"),
         )
-        return conflicts
 
     def tkg_get_stats(self) -> Dict[str, Any]:
         """获取 TKG 统计（委托到 TKGModule.get_stats）"""
@@ -2582,16 +3550,53 @@ class MemoryManager:
     def get_traces_by_trigger(
         self, trigger: Optional[str] = None, limit: int = 10, **kwargs
     ) -> List[Dict[str, Any]]:
-        """按触发器获取追踪（P-1 修复: 接受 trigger 位置参数 + limit）
+        """按来源获取冲突账（P-1 修复: 接受 trigger 位置参数 + limit）。
 
-        Args:
-            trigger: 触发器名称（如 'remember'/'recall'）; 当前 ConflictModule 未按触发器过滤, 返回全部
-            limit: 返回上限
+        `trigger` 此前**无任何过滤效果**（注释自陈"返回全部"）——按来源取账是
+        冲突账唯一的读取口径（谁检出的、哪条链检出的），故把它接到
+        `ConflictModule.record(source=...)` 写下的 `source` 上。
         """
         module = self._ensure_conflict_module()
-        conflicts = module.get_conflicts()
+        conflicts = module.get_conflicts(source=trigger or None)
         traces = [c.to_dict() for c in conflicts]
         return traces[:limit]
+
+    def record_conflicts(self, conflicts: List[Dict[str, Any]], *, source: str = "") -> int:
+        """把检测到的冲突落进记忆侧的账，返回真正入账的条数。
+
+        检测链（`post_chat_pipeline._step_conflict_detection`）的写入收口：
+        检出多少不等于账上留下多少——依据缺失的按 `ConflictModule.record` 的
+        诚实边界拒绝入账，这里的返回值如实反映差额。
+        """
+        from neurova.cognitive_layers.memory_layer.modules.conflict_module import (
+            ConflictType,
+        )
+
+        # 只认唯一判据产出的两种类型：来源不明的载荷不入账（宁可不记，
+        # 也不记一条自己都说不清属于哪类的账）。
+        _knownKinds = {"negation_conflict", "semantic_contradiction"}
+        module = self._ensure_conflict_module()
+        recorded = 0
+        for item in conflicts or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("type") or "") not in _knownKinds:
+                continue
+            basis = str(item.get("basis") or item.get("description") or "").strip()
+            if not basis:
+                continue
+            kind = ConflictType.CONTRADICTION
+            stored = module.record(
+                str(item.get("memory1_id") or ""),
+                str(item.get("memory2_id") or ""),
+                kind,
+                basis,
+                confidence=float(item.get("contradiction_score") or 0.0) or 0.7,
+                source=source,
+            )
+            if stored is not None:
+                recorded += 1
+        return recorded
 
     def detect_conflict(self, **kwargs) -> List[Dict[str, Any]]:
         """检测冲突（委托到 ConflictModule.detect_conflict）"""
@@ -3204,8 +4209,9 @@ def _default_db_path_for(agent_id: str) -> str:
     原默认值 "neurova_memory.db" 是相对路径——持久化文件随进程 cwd 散落
     （项目根 / data / neurova/memory/data 各一份且互不一致）。
     """
-    base_dir = Path(__file__).resolve().parents[3]  # neurova/cognitive_layers/memory_layer → 项目根
-    path = base_dir / "agent_workspaces" / (agent_id or "default") / "memory" / "memory.db"
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    path = get_agent_workspace_dir(agent_id) / "memory" / "memory.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
 

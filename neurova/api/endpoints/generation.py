@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import get_agent_instance, get_app_state
+from neurova.core.agent_workspaces import get_agent_workspaces_root
 from neurova.core.logger import get_logger
 # 批次0（三栈收敛）：凭据解析/产物落盘/路径常量单源在 llm.generators.runtime，
 # 端点保留同名薄包装（tests/api/test_generation_security.py 的模块全局 patch 面不变）
@@ -58,7 +59,7 @@ def _validate_ref_images(refs: list) -> None:
     """
     allowed_roots = (
         GENERATION_OUTPUT_DIR.resolve(),
-        (PROJECT_ROOT / "agent_workspaces").resolve(),
+        get_agent_workspaces_root().resolve(),
         (PROJECT_ROOT / "storage").resolve(),
     )
     for ref in refs or []:

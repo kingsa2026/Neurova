@@ -27,8 +27,10 @@ from neurova.plan_mode.errors import PlanDocError, PlanDocNotFound  # noqa: E402
 
 
 def _workspace_base() -> Path:
-    """agent_workspaces 根目录（项目根，与 home.py/knowledge_graph 同基座）。"""
-    return Path(__file__).resolve().parents[2] / "agent_workspaces"
+    """agent 工作区根目录（与 home.py/knowledge_graph/记忆库同源）。"""
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    return get_agent_workspaces_root()
 
 
 def _slugify(title: str) -> str:

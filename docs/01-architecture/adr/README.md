@@ -17,11 +17,22 @@
 | [0009](./0009-unify-execution-status.md) | 统一 ExecutionStatus 枚举 | Accepted | 2026-07-09 |
 | [0010](./0010-unify-tool-execution-context.md) | 统一 ToolExecutionContext dataclass | Accepted | 2026-07-09 |
 | [0011](./0011-unify-skill-registry.md) | 统一 SkillRegistry | Accepted | 2026-07-09 |
+| [0012](./0012-activate-skill-hub-client-and-service.md) | 激活技能仓库客户端与技能服务 | Accepted | 2026-07-14 |
+| [0013](./0013-unify-skill-market-endpoints.md) | 统一技能市场端点（4 套→1 套） | Accepted | 2026-07-14 |
+| [0014](./0014-connection-pool-short-lived-only.md) | 连接池只管短连接（常驻连接不进池） | Accepted | 2026-09-18 |
+| [0015](./0015-context-pool-retention-contract.md) | ContextPool 回收契约（归档无损 + 显式常驻上限 + 读路径索引） | Accepted | 2026-09-18 |
+| [0016](./0016-rsi-parameter-source-of-truth.md) | RSI 可优化参数的事实源（四类角色各自唯一 + 边界全登记） | Accepted | 2026-09-19 |
+| [0017](./0017-skill-registry-key-domain.md) | 技能注册表键值域统一（name 与身份域归一为一次查找） | Accepted | 2026-09-20 |
+| [0018](./0018-memory-classification-vocabulary.md) | 记忆分类词汇表唯一事实源（分类引擎只有一套枚举） | Accepted | 2026-09-21 |
+| [0019](./0019-skill-view-key-domain.md) | 技能视图键域收口（查询键 = name，记账键 = identity） | Accepted | 2026-09-21 |
+| [0020](./0020-sandbox-single-value-domain.md) | 沙箱值域唯一事实源（一套形态，两种承载能力） | Accepted | 2026-09-25 |
 
 ## 主题分类
 
 ### 记忆系统
 - [ADR 0003: 记忆系统架构](./0003-memory-system-architecture.md) — 总体分层 + 深度模块
+- [ADR 0018: 记忆分类词汇表唯一事实源](./0018-memory-classification-vocabulary.md) — 分类枚举只有 models.py 一处；「17 维」口径废止
+- [ADR 0019: 技能视图键域收口](./0019-skill-view-key-domain.md) — name 查询必取到 identity entry；停用/熔断以"工具面少一项"为判据
 - [ADR 0001: 统一 Memory dataclass](./0001-unify-memory-dataclass.md) — 3+1 套 dataclass 量纲统一
 - [ADR 0002: 保留 UnifiedMemoryNode](./0002-retain-unified-memory-node.md) — LSM-Tree 独立数据模型
 
@@ -40,6 +51,19 @@
 - [ADR 0009: 统一 ExecutionStatus](./0009-unify-execution-status.md) — 4 个不兼容枚举收敛到 tool_layers/types.py
 - [ADR 0010: 统一 ToolExecutionContext](./0010-unify-tool-execution-context.md) — 2 个不兼容 dataclass 收敛 + 删除死代码
 - [ADR 0011: 统一 SkillRegistry](./0011-unify-skill-registry.md) — class A 为规范，class B re-export
+- [ADR 0017: 技能注册表键值域统一](./0017-skill-registry-key-domain.md) — name 与身份域归一为注册表内一次查找，取键口进 Protocol
+
+### 执行与隔离
+- [ADR 0020: 沙箱值域唯一事实源](./0020-sandbox-single-value-domain.md) — 代码执行与思维沙箱共用一套形态；后端选择与隔离强度随每次执行自报
+
+### 存储层
+- [ADR 0014: 连接池只管短连接](./0014-connection-pool-short-lived-only.md) — 常驻连接（写放大优化）不进池
+
+### 上下文处理
+- [ADR 0015: ContextPool 回收契约](./0015-context-pool-retention-contract.md) — 归档无损 / 显式常驻上限 / 读路径分区索引
+
+### 进化系统（RSI）
+- [ADR 0016: RSI 可优化参数的事实源](./0016-rsi-parameter-source-of-truth.md) — 清单/目标/边界/起点四类各唯一；"起点≠目标"是设计意图
 
 ## ADR 编写规范
 

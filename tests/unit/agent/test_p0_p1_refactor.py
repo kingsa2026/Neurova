@@ -250,7 +250,7 @@ class TestPostChatPipeline:
 
         out = tmp_path / "artifact_live_verify.md"
         out.write_text("live-verify 产出物卡片", encoding="utf-8")
-        monkeypatch.setattr(artifacts_api, "_WORKSPACE_ROOT", tmp_path)
+        monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
         monkeypatch.setattr(artifacts_api, "_artifacts_store", {})
 
         mock_agent = Mock()

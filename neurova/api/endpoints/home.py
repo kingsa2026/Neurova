@@ -84,9 +84,10 @@ def _GLOB_AGENT_WORKSPACES() -> list:
     """标准布局兜底：agent_workspaces/*/memory/neurova_memories_persist.db。"""
     try:
         import glob
-        from pathlib import Path
 
-        base_dir = Path(__file__).resolve().parents[3] / "agent_workspaces"  # 项目根
+        from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+        base_dir = get_agent_workspaces_root()
         return glob.glob(str(base_dir / "*" / "memory" / "neurova_memories_persist.db"))
     except Exception:
         return []

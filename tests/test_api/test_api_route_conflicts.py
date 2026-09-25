@@ -36,32 +36,14 @@ def test_context_route_conflict():
         pytest.skip(f"跳过测试: 模块导入失败 - {e}")
 
 
-def test_skill_market_route_conflict():
-    """测试skill_market和skills_market模块路由冲突"""
-    # 根据分析文档，两个模块分别注册到 /v1/skill-market 和 /v1/skills-market
-    
-    app = FastAPI()
-    
-    try:
-        from neurova.api.endpoints import skill_market
-        from neurova.api.endpoints import skills_market
-        
-        # 检查两个模块是否都有router
-        assert hasattr(skill_market, 'router'), "skill_market模块应该有router"
-        assert hasattr(skills_market, 'router'), "skills_market模块应该有router"
-        
-        # 检查路由前缀
-        skill_market_prefix = skill_market.router.prefix
-        skills_market_prefix = skills_market.router.prefix
-        
-        print(f"skill_market模块路由前缀: {skill_market_prefix}")
-        print(f"skills_market模块路由前缀: {skills_market_prefix}")
-        
-        # 根据分析文档，两个模块分别注册到不同前缀
-        # 但命名不一致（单复数混淆）
-        
-    except ImportError as e:
-        pytest.skip(f"跳过测试: 模块导入失败 - {e}")
+def test_deprecated_market_shells_are_gone():
+    """skill_market / skills_market 双套已按 ADR 0013 删除，单复数冲突主体消失。
+
+    此前本文件断言两套都仍有 `router`——那正是待删套还活着的读数。
+    """
+    for name in ("neurova.api.endpoints.skill_market", "neurova.api.endpoints.skills_market"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 def test_endpoint_registration_count():

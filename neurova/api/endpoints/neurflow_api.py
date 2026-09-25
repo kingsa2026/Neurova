@@ -395,11 +395,19 @@ async def execute_workflow(
 
     if agent:
         memory_manager = getattr(agent, "memory_manager", None)
-        # context_pool: 尝试从 context_orchestrator 获取，或使用 Agent 的 context_pool 属性
-        context_pool = getattr(agent, "context_pool", None)
-        if context_pool is None and hasattr(agent, "context_orchestrator"):
-            # context_orchestrator 可能有 pool 属性
-            context_pool = getattr(agent.context_orchestrator, "pool", None)
+        # context_pool: 取 Agent 编排器上**那个**池。
+        # 改前读的是 `agent.context_orchestrator.pool`，而编排器上的属性名是
+        # `context_pool`（没有 `pool`）→ 恒 None → 下面走"降级新建池"，工作流
+        # 节点的 $context 读的是一个与对话链毫不相干的空池（写入即丢的同一形态）。
+        orchestrator = getattr(agent, "context_orchestrator", None)
+        context_pool = getattr(orchestrator, "context_pool", None) if orchestrator is not None else None
+        if context_pool is None:
+            # 仍未取到时按身份查**已登记**的池（不新建——新建等于又造一个丢弃池）
+            from neurova.context_pool import get_context_pool
+
+            context_pool = get_context_pool(
+                user_id=user_id, agent_id=agent_id, session_id=None
+            )
         # emotion_module: 从 memory_manager 获取
         if memory_manager:
             emotion_module = getattr(memory_manager, "_emotion_module", None)

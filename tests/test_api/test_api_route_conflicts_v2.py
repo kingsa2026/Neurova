@@ -77,38 +77,11 @@ def test_context_route_registration():
     # 两个模块都注册到 /api/v1/context，这会导致冲突
 
 
-def test_skill_market_route_registration():
-    """测试skill_market和skills_market模块的实际路由注册"""
-    app = create_test_app()
-    
-    # 注册skill_market模块
-    try:
-        from neurova.api.endpoints import skill_market
-        app.include_router(skill_market.router, prefix="/api/v1/skill-market", tags=["skill_market"])
-    except ImportError:
-        pytest.skip("skill_market模块导入失败")
-    
-    # 注册skills_market模块
-    try:
-        from neurova.api.endpoints import skills_market
-        app.include_router(skills_market.router, prefix="/api/v1/skills-market", tags=["skills_market"])
-    except ImportError:
-        pytest.skip("skills_market模块导入失败")
-    
-    # 获取所有路由
-    routes = []
-    for route in app.routes:
-        if hasattr(route, "path"):
-            routes.append(route.path)
-    
-    print(f"注册的路由: {routes}")
-    
-    # 检查路由命名不一致
-    has_skill_market = any("/api/v1/skill-market" in route for route in routes)
-    has_skills_market = any("/api/v1/skills-market" in route for route in routes)
-    
-    print(f"是否有 /api/v1/skill-market 路由: {has_skill_market}")
-    print(f"是否有 /api/v1/skills-market 路由: {has_skills_market}")
+def test_deprecated_market_shells_are_gone():
+    """skill_market / skills_market 双套已按 ADR 0013 删除（不再注册到任何前缀）。"""
+    for name in ("neurova.api.endpoints.skill_market", "neurova.api.endpoints.skills_market"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 def test_actual_registration_simulation():
@@ -117,11 +90,9 @@ def test_actual_registration_simulation():
     
     # 模拟注册列表中的前几个模块
     endpoint_modules = [
-        ("neurova.api.endpoints.channels", "/v1/channels", "Channels API"),
+        ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channels API"),
         ("neurova.api.endpoints.context", "/v1/context", "Context API"),
         ("neurova.api.endpoints.context_pool_settings", "/v1/context", "Context Pool Settings API"),
-        ("neurova.api.endpoints.skill_market", "/v1/skill-market", "Skill Market API"),
-        ("neurova.api.endpoints.skills_market", "/v1/skills-market", "Skills Market API"),
     ]
     
     registered_routes = []

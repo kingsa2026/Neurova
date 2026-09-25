@@ -12,7 +12,8 @@ import {
   listSessions, listTemplates, listHistory, startSession,
   createTemplate, updateTemplate, deleteTemplate,
   getCollabStats, saveCanvas, runCanvas, getCanvas, updateCanvas,
-  type CollabSession, type CollabTemplate, type CollabStats,
+  toSession, toTemplate,
+  type CollabSession, type CollabTemplate, type CollabStats, type RawSession, type RawTemplate,
   type CanvasSnapshot, type StartSessionPayload, type CreateTemplatePayload, type SaveCanvasPayload,
 } from '@/api/modules/collaboration'
 import { handleError } from '@/utils/error'
@@ -34,7 +35,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
   const sessionCount = computed(() => sessions.value.length)
 
   // ── Actions ──
-  // 兼容两种后端包裹形态：data 直接为数组，或 data: { history/sessions: [...] } 对象。
+  // 兼容多种后端包裹形态：data 直接为数组，或 data: { history/sessions/templates/items: [...] } 对象。
   // 修复：/history 返回 {history:[...], total} 时被整体赋给数组 ref，
   // 导致页面 history.value.slice is not a function 崩溃。
   function asArray<T>(payload: unknown, keys: string[] = []): T[] {
@@ -50,7 +51,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     loading.value = true
     try {
       const res = await listSessions()
-      sessions.value = asArray<CollabSession>((res as any)?.data ?? res, ['sessions'])
+      sessions.value = asArray<RawSession>((res as any)?.data ?? res, ['sessions', 'items']).map(toSession)
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchSessions')
@@ -64,7 +65,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     loading.value = true
     try {
       const res = await listTemplates()
-      templates.value = asArray<CollabTemplate>((res as any)?.data ?? res, ['templates'])
+      templates.value = asArray<RawTemplate>((res as any)?.data ?? res, ['templates', 'items']).map(toTemplate)
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchTemplates')
@@ -78,7 +79,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     loading.value = true
     try {
       const res = await listHistory()
-      history.value = asArray<CollabSession>((res as any)?.data ?? res, ['history'])
+      history.value = asArray<RawSession>((res as any)?.data ?? res, ['history', 'items']).map(toSession)
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchHistory')

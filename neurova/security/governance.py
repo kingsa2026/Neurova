@@ -56,12 +56,18 @@ def is_policy_denial(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
     # param_guard 键：与治理 DENY 同源口径，不计工具故障。
-    # swarm_rejection 键：蜂群 spawn 数据层结构化拒绝同为"决策"非"后端故障"
+    # swarm_rejection 键：蜂群 spawn 数据层结构化拒绝同为"决策"非"后端故障"。
+    # hook_blocked 键：PreToolUse 安全钩子拦截（`tool_executor.py` 的
+    # `_execute_single_tool`）——拦截是决策，粘成工具故障会让该结构身份
+    # 永久失败粘性（`creation_governance.py` 的 MIN(success)）。
+    # metacog_advisory 键：元认知调控门的结构化建议，同属裁决非故障。
     return bool(
         result.get("governance")
         or result.get("pending_approval")
         or result.get("param_guard")
         or result.get("swarm_rejection")
+        or result.get("hook_blocked")
+        or result.get("metacog_advisory")
     )
 
 

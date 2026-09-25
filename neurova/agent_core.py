@@ -106,6 +106,7 @@ def debug_log(msg: str) -> None:
     logger.debug(msg)
 
 
+from neurova.core.data_root import ensure_agent_data_dir
 from neurova.core.trace_recorder import get_trajectory_recorder
 from neurova.session_manager import get_session_manager
 from neurova.agent_loop_detection import calculate_similarity, detect_content_loop, has_repeated_patterns
@@ -375,21 +376,10 @@ class _NullSystem:
 
     P0-A2 修复：提供中性默认反馈信号（performance_score=0.5），
     使 RSI 在缺失真实系统时仍能运行（虽效果有限），而非收到空 dict 导致空转。
+    工单 018：`rsi_placeholder` 声明"只供信号、不供参数"（见集成器同名判定）。
     """
 
-    # 提供可优化参数的默认值（与 RSIIntegrationManager.OPTIMIZABLE_PARAMETERS 对齐）
-    base_decay_rate = 0.1
-    similarity_threshold = 0.8
-    merge_threshold = 0.9
-    emotional_protection_threshold = 0.5
-    emotional_protection_factor = 1.0
-    crystallize_min_observations = 3
-    crystallize_min_success_rate = 0.7
-    pattern_min_support = 2
-    success_bonus = 0.1
-    failure_penalty = 0.1
-    decay_rate = 0.05
-    muscle_memory_threshold = 0.85
+    rsi_placeholder = True
 
     def get_feedback(self):
         # 返回中性性能指标（0.5 = 既不差也不好），RSI 据此生成保守优化
@@ -927,42 +917,14 @@ class SubSystemContainer:
             a.tool_orchestrator = ToolOrchestrator()
 
             async def _orchestrator_executor(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-                if a._skill_registry:
-                    # Wave H-W2 可见门（第三执行链）：轮级视图在场且视图外
-                    # 技能 → 不尝试执行（ToolRouter 路径照常）
-                    try:
-                        from neurova.core.turn_context import get_turn_skill_view
-
-                        _sv = get_turn_skill_view()
-                    except Exception:  # noqa: BLE001
-                        _sv = None
-                    if _sv is not None and not _sv.invocable(tool_name):
-                        skill = None
-                    else:
-                        skill = a._skill_registry.get_skill(tool_name)
-                    if skill:
-                        # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：
-                        # file_operation 相对路径锚定本 agent 工作区，服务端
-                        # 赋值覆盖调用方伪造的同名参数
-                        if tool_name == "file_operation":
-                            params = {**(params or {}),
-                                      "_base_dir": str(getattr(a, "workspace_path", "") or ".")}
-                        result = await a._skill_registry.execute_skill(tool_name, params)
-                        if result.success:
-                            return {"success": True, "data": result.data}
-                        return {"success": False, "error": result.error}
-                if a.tool_router:
-                    router_result = await a.tool_router.execute(
-                        tool_name=tool_name,
-                        params=params,
-                        agent_id=a.config.agent_id,
-                        user_id=getattr(a.config, "user_id", "default"),
-                    )
-                    if router_result and router_result.success:
-                        return {"success": True, "data": router_result.result}
-                    error = getattr(router_result, "error", None) if router_result else "no result"
-                    return {"success": False, "error": str(error) if error else "unknown error"}
-                return {"success": False, "error": f"工具 '{tool_name}' 未找到"}
+                # 执行一律委托执行咽喉（工单 005：ToolOrchestrator 也是执行入口）。
+                # 此前这里自己走 SkillRegistry → ToolRouter 两级回退，绕开了票据、
+                # `on_tool_executed`、治理预检与沙箱根注入，与主链给出两套成败口径。
+                payload = await a.tool_executor.execute(tool_name, dict(params or {}))
+                if a.tool_executor._result_is_success(payload):
+                    return {"success": True, "data": payload}
+                error = (payload or {}).get("error") if isinstance(payload, dict) else None
+                return {"success": False, "error": str(error or "unknown error")}
 
             a.tool_orchestrator.set_executor(_orchestrator_executor)
         except Exception as e:
@@ -1468,9 +1430,8 @@ class Agent:
 
     def _init_cognitive_graph(self):
         """初始化认知图谱存储架构"""
-        # 创建数据目录
-        data_dir = Path(f"data/{self.config.agent_id}")
-        data_dir.mkdir(parents=True, exist_ok=True)
+        # 创建数据目录：与删除端点取同一处推导，CWD 不再决定它是哪儿
+        data_dir = ensure_agent_data_dir(self.config.agent_id)
 
         # 1. 初始化 CognitiveStorageEngine
         self.cognitive_engine = CognitiveStorageEngine(
@@ -1537,8 +1498,7 @@ class Agent:
                     sleep_system=sleep_system or _NullSystem(),
                     emotion_system=emotion_system or _NullSystem(),
                     experience_system=experience_system or _NullSystem(),
-                    tool_memory_system=tool_memory_system or _NullSystem(),
-                )
+                    tool_memory_system=tool_memory_system or _NullSystem(), agent_id=str(self.config.agent_id))
                 logger.info("Agent %s: RSI 编排器已初始化 (%s/4 闭环系统可用)", self.config.name, len(available_systems))
             else:
                 logger.info("Agent %s: RSI 未初始化（无可用闭环系统）", self.config.name)
@@ -1578,13 +1538,10 @@ class Agent:
         else:
             logger.info("Agent %s: SkillRegistry 已存在，跳过重复初始化", self.config.name)
 
-        # 注册 ToolMemory 回调：Skill 成功执行后记录到 ToolMemory
-        if self.tool_memory and self._skill_registry:
-            self._skill_registry.register_event_callback(
-                SkillEvent.POST_EXECUTE,
-                self._on_skill_post_execute,
-            )
-            logger.info("Agent %s: ToolMemory 回调已注册（Skill成功执行时记录）", self.config.name)
+        # 技能进化采集装配（工单 013：注册门不再绑 tool_memory；根因见该模块文档串）
+        from neurova.evolution.skill_recording import wire_skill_evolution_recording
+
+        wire_skill_evolution_recording(self)
 
         # 创建 Router 并注入所有依赖
         self._router = create_default_router(

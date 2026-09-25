@@ -2,8 +2,12 @@
 
 - ContextPool hash 索引：add 去重与 mark_hashes_seen 由全池 O(n) 线性扫
   改为索引直取；整体重排（clear/dedup/compress/cleanup）后索引同步重建。
-- ContextOrchestrator.set_session_id：切换会话时裁剪 _window_compaction_cache
+- ContextOrchestrator 的会话身份：实例级 setter 已删净（B6-10 批次 D），
+  身份只由构造期初值与 `build_context` 每轮刷新写入；折叠缓存由槽位上限收口
   （旧实现按 session_id 记账永不清理，随历史会话数无界增长）。
+
+B6-10：`mark_turn_seen` 与其配套 turn 索引（`_by_turn`）生产零消费，已删净；
+本文件的 TestTurnIndex 一并退役（契约搬到了 `test_ack_set.py` 的抽屉分层用例）。
 """
 
 from neurova.context.pool_models import ContextInput, ContextSource
@@ -73,14 +77,23 @@ class TestMarkHashesSeen:
         pool.add_context(_make_ctx(ContextSource.USER_INPUT, "hello"))
         assert pool._collector._contexts[0].seen_confirmed is False
 
-    def test_dedup_rebuild_keeps_index_accurate(self):
-        """dedup() 整体重排列表后，索引必须与列表一致。"""
+    def test_clear_rebuild_keeps_index_accurate(self):
+        """整体重排（clear）后，索引必须与列表一致。
+
+        B6-10 批次 C：原用例驱动 `pool.dedup(stage=...)` 触发整体重排，而那个
+        出口零消费、已删净（真面是 add_context 的 _by_hash 去重）。改锁仍然
+        存活的整体重排路径 `clear`，判据不变：`_by_hash` 与列表逐条对应。
+        """
         pool = _make_pool()
         c1 = _make_ctx(ContextSource.USER_INPUT, "a")
         c2 = _make_ctx(ContextSource.CONVERSATION, "b")
         pool.add_context(c1)
         pool.add_context(c2)
-        pool.dedup(stage="output")
+        for c in pool._collector._contexts:
+            assert pool._by_hash.get(c.hash) is c, "入池路径必须同步 hash 索引"
+        pool.clear()
+        assert pool._by_hash == {}, "整体重排后 hash 索引必须与列表一致（清空）"
+        pool.add_context(_make_ctx(ContextSource.USER_INPUT, "a"))
         assert len(pool._by_hash) == len([c for c in pool._collector._contexts if c.hash])
         for c in pool._collector._contexts:
             assert pool._by_hash.get(c.hash) is c
@@ -96,61 +109,44 @@ class TestOrchestratorCacheTrim:
         orch._window_compaction_cache = {}
         return orch
 
-    def test_set_session_id_keeps_only_current_session(self):
-        orch = self._make_orch()
-        orch._window_compaction_cache = {
-            "s1": {"summary": "a", "covered": set()},
-            "s2": {"summary": "b", "covered": set()},
-            "s3": {"summary": "c", "covered": set()},
-        }
-        orch.set_session_id("s2")
-        assert set(orch._window_compaction_cache) == {"s2"}
-        assert orch._window_compaction_cache["s2"]["summary"] == "b"
+    def test_cache_slots_are_bounded_by_class_limit(self):
+        """D2：裁剪职责已从 set_session_id 收口到槽位上限（旧出口零生产调用点）。
 
-    def test_set_session_id_preserves_current_entry(self):
+        原用例锁定"切换 session 时只保留当前槽"——那是缓存无界增长的唯一出口，
+        但 `set_session_id` 在全 neurova/ 内零调用点，等于闸口不存在。现在改锁
+        `_window_cache_slot` 的**上限**语义：这才是真正能生效的那道闸。
+        """
+        orch = self._make_orch()
+        for i in range(orch._WINDOW_CACHE_SLOTS + 4):
+            orch._window_cache_slot(f"room{i}")
+        assert len(orch._window_compaction_cache) == orch._WINDOW_CACHE_SLOTS
+        # 最近插入的槽必须在（淘汰的是最老插入的）
+        assert f"room{orch._WINDOW_CACHE_SLOTS + 3}" in orch._window_compaction_cache
+
+    def test_session_identity_is_read_only(self):
+        """B6-10 批次 D：实例级 setter 已删净，身份读面只读且不改缓存。
+
+        原用例锁的是 `set_session_id` 的"只赋值、不裁剪缓存"语义。该方法是
+        **零生产调用点的第二写入方**（身份的真写入点是 `build_context` 每轮刷新），
+        审计 D2 裁决退役其裁剪职责后它只剩赋值——与每轮刷新重复，故一并删净。
+        契约搬到这里：身份读得到（构造期初值），但**没有写通道**，
+        且读写身份都不触碰折叠缓存。
+        """
         orch = self._make_orch()
         orch._window_compaction_cache = {"s1": {"summary": "keep", "covered": set()}}
-        orch.set_session_id("s1")
-        assert orch._window_compaction_cache["s1"]["summary"] == "keep"
+        assert orch.session_id == "s1", "身份读面丢失（构造期初值应读得到）"
+        assert not hasattr(orch, "set_session_id"), (
+            "`set_session_id` 又回来了 —— 会话身份于是有两个写入方"
+            "（构造期入参 + 每轮刷新）。"
+        )
+        assert orch._window_compaction_cache == {"s1": {"summary": "keep", "covered": set()}}, (
+            "读身份不得改动折叠缓存"
+        )
 
-    def test_empty_cache_no_error(self):
+    def test_slot_creation_is_idempotent(self):
         orch = self._make_orch()
-        orch.set_session_id("s9")
-        assert orch._window_compaction_cache == {}
-
-
-class TestTurnIndex:
-    """B-8：mark_turn_seen 经 turn 索引 O(k) 直取（旧行为为全池 O(n) 扫）。"""
-
-    def test_mark_turn_seen_via_index_and_idempotent(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="a", metadata={"turn_id": "t1"}))
-        assert pool.mark_turn_seen("t1") == 2
-        assert pool._collector._contexts[0].seen_confirmed is True
-        assert pool.mark_turn_seen("t1") == 0
-
-    def test_turn_index_rebuilt_after_clear(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
-        pool.clear()
-        assert pool.mark_turn_seen("t1") == 0
-        assert pool._by_turn == {}
-
-    def test_replace_updates_turn_index(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=10, metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=99, metadata={"turn_id": "t2"}))
-        # 替换后旧 turn 不再持有该条目、新 turn 持有
-        assert pool.mark_turn_seen("t1") == 0
-        assert pool.mark_turn_seen("t2") == 1
-
-    def test_dedup_rebuild_keeps_turn_index_consistent(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="a", metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="b", metadata={"turn_id": "t1"}))
-        pool.dedup(stage="output")
-        for c in pool._collector._contexts:
-            tid = (c.metadata or {}).get("turn_id")
-            if tid:
-                assert c in pool._by_turn.get(tid, [])
+        orch._window_compaction_cache = {}
+        a = orch._window_cache_slot("s1")
+        a["summary"] = "kept"
+        b = orch._window_cache_slot("s1")
+        assert b is a and b["summary"] == "kept"

@@ -28,13 +28,15 @@ import uuid
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from neurova.core.data_root import resolveDataPath
+
 
 logger = logging.getLogger(__name__)
 
 # 与前端 errorReporter.ts 同一端点（官网 nginx rewrite 白名单已登记）
 REPORT_URL = "https://www.neurova.top/error-report.php"
 _HTTP_TIMEOUT = 5.0  # 秒——启动失败场景不能卡死退出流程
-_CLIENT_ID_FILE = Path("data") / "nv_client_id"
+_CLIENT_ID_FILE = resolveDataPath("nv_client_id")
 
 _PLATFORM_MAP = {
     "win32": "desktop-windows",

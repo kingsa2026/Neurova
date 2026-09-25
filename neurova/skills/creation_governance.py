@@ -13,6 +13,10 @@ import threading
 import uuid
 from typing import Dict
 
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 MIN_SUCCESSES = 3
 _locks = {}
 _locks_guard = threading.RLock()
@@ -43,8 +47,27 @@ def normalize_purpose(purpose=""):
     return " ".join(str(purpose or "").casefold().split())
 
 
+def structural_identity(steps):
+    """**结构身份**的归一与哈希：结构 = 工具序列 + 每一步的参数。
+
+    这里是"结构"的唯一定义处（工单 009）。`fingerprint`（业务身份）与
+    `structure_key`（结构身份）都经它出哈希，差异只在**有没有把意图并进载荷**——
+    两个键各自复写一遍归并与序列化，等于让"结构 = 工具序列 + 参数"有了第二份实现，
+    任一处漂移都会让票据侧与经验侧对同一次执行算出两个身份。
+    """
+    normalized = normalize_steps(steps)
+    if not normalized:
+        return None
+    return normalized
+
+
+def _hash_identity(identity):
+    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
 def fingerprint(steps, purpose=""):
-    """结构身份 = 工具序列 + 参数 + 业务意图，三者全吸收。
+    """业务身份 = 结构（工具序列 + 参数）+ 业务意图，三者全吸收。
 
     历史缺陷（P1 统一指纹）：旧实现只在**所有**步骤 params 为空时才吸收
     purpose，于是同一业务意图的两种真实形态（带参步 / 裸工具名）产出两个
@@ -53,16 +76,15 @@ def fingerprint(steps, purpose=""):
       - 裸工具名：identity = {steps(裸名), purpose}
     purpose 为空时（旧 API 的缺省调用）退回纯结构身份，向后兼容。
     """
-    steps = normalize_steps(steps)
-    if not steps:
+    normalized = structural_identity(steps)
+    if not normalized:
         return None
-    identity = {"steps": steps}
+    identity = {"steps": normalized}
     # purpose 恒为身份的一部分（空串也占位）：否则**同一批任务**里有的证据带
     # 意图、有的不带就会落到两个身份——计量分叉（任务计数/成功数各算一半）。
     # 空意图 = "未标注意图"这一等价类，不是"任意意图"。
     identity["purpose"] = normalize_purpose(purpose)
-    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
-                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return _hash_identity(identity)
 
 
 def structure_key(steps):
@@ -78,13 +100,16 @@ def structure_key(steps):
     任务永远查不回来**，"三次独立成功"闸门因此恒不可达。二键分离后，
     record 同时落业务身份与结构身份（一行一列），查询按结构身份聚合，
     两个问题各自有正确答案。
+
+    结构 = **工具序列 + 每一步的参数**（工单 009 的"参数形状指纹"）：只按工具名
+    计身份会让"同一串工具、不同参数"塌成一条经验，参数形状的差异必须可分辨。
+    参数值随结构进哈希（哈希不可逆，明文不外泄），`post_chat_pipeline` 只把哈希
+    写进 EKB `context`，从不落参数明文。
     """
-    steps = normalize_steps(steps)
-    if not steps:
+    normalized = structural_identity(steps)
+    if not normalized:
         return None
-    identity = {"steps": steps}
-    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
-                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return _hash_identity({"steps": normalized})
 
 
 def canonical_skill_id(steps, purpose="", prefix="skill"):
@@ -201,9 +226,34 @@ def begin_task():
                     "closed": False, "lock": threading.RLock()})
 
 
+_missing_context_counter = 0
+_missing_context_lock = threading.Lock()
+
+
+def missing_context_count() -> int:
+    """票据上下文缺失的累计次数（观测面读数，进程级）。
+
+    "这个 agent 从没调过工具"与"它的工具调用没被采到"是两件事：`begin_task()`
+    只由 `reset_turn_tool_messages()` 触发（chat 主链轮首），子代理 / swarm /
+    neurflow / API 直调等入口全在此静默丢票。没有这个读数，005 迁移期出现的
+    漏采在观测面完全不可见。
+    """
+    return _missing_context_counter
+
+
 def record_tool_execution(tool_name, params, success, result):
     task = _execution.get()
-    if task is None or tool_name == "create_skill":
+    if task is None:
+        global _missing_context_counter
+        with _missing_context_lock:
+            _missing_context_counter += 1
+        logger.warning(
+            "票据上下文缺失，本次工具执行未进证据账本（入口/工具=%s）——"
+            "该入口未经 reset_turn_tool_messages 建任务上下文，属漏采",
+            tool_name,
+        )
+        return
+    if tool_name == "create_skill":
         return
     from neurova.security.governance import is_policy_denial
     ok = (success is True and result is not None and not is_policy_denial(result)
@@ -284,7 +334,7 @@ def manifest_structure(manifest):
     return structure_key(_manifest_config(manifest).get("tool_sequence"))
 
 
-def publish_automatic(service, registry, manifest, *, alias_id=""):
+def publish_automatic(service, registry, manifest, *, alias_id="", human_approved=False):
     """Disk first; restore the canonical identity without bypassing evidence.
 
     **统一命名（P0 收口）**：本函数是三条写入臂（AutoSkillBuilder /
@@ -314,7 +364,8 @@ def publish_automatic(service, registry, manifest, *, alias_id=""):
     aliases.discard("")
     if canonical:
         manifest = _renamed(manifest, canonical)
-    return _publish_automatic(service, registry, manifest, config, sorted(aliases))
+    return _publish_automatic(service, registry, manifest, config, sorted(aliases),
+                              human_approved=human_approved)
 
 
 def _canonical_prefix(original_id):
@@ -345,10 +396,11 @@ def _renamed(manifest, new_id):
     return SimpleNamespace(**fields)
 
 
-def _publish_automatic(service, registry, manifest, config, aliases):
+def _publish_automatic(service, registry, manifest, config, aliases, human_approved=False):
     result = service.create_automatic_skill(
         manifest.id, manifest.name, manifest.description, config,
-        version=getattr(manifest, "version", "1.0.0"), alias_ids=aliases)
+        version=getattr(manifest, "version", "1.0.0"), alias_ids=aliases,
+        human_approved=human_approved)
     if not result.get("success"):
         return result
     # 别名登记：调用方沿用的 ID（含被归一掉的原 ID）都解析到落盘条目。

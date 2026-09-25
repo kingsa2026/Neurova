@@ -1,0 +1,106 @@
+# 工具/loop 域「死线」台账（T-01，Issue #175；形态复用上下文域 B6-1）
+#
+# 行格式：`符号 | 种类 | 判据类 | 阈值可达性 | 引用点数 | 处置 | 依据`（七列，`#` 注释与空行忽略）。
+#
+# ── 两轴分离（沿用上下文域的核心纪律） ──────────────────────────────
+# ① **判据类**（第 3 列）：机器算出来的直接可达性，**不得人填**。
+#    器械单源是 scripts/ci/tool_loop_deadline_ledger.py（符号级走
+#    scripts/ci/context_deadline_ledger.py::classify，同词汇同规则），四值：
+#      absent      ― 生产侧无定义、无赋值（符号不存在或已删除）
+#      no_consumer ― 有定义/赋值，但生产侧零消费点
+#      self_loop   ― 有定义，消费点全落在自己定义文件内（无外部消费者）
+#      consumed    ― 有定义，且存在跨文件消费点
+#    台账值与算出来的不一致 → 守卫报红。人改台账去迎合等于把判据降级成自述。
+# ② **阈值可达性**（第 4 列）：**本域新增的第二判据轴，同样机器算**。
+#    它不是判据类的第五态——判据类回答「AST 事实能证明的直接可达性」，
+#    本轴回答「阈值的**值**在合法配置域够不够得到」，两者证据不同、必须分开，
+#    否则四值分支不再能由 referenceSites() 的事实直接验算，且与上下文域不可比。
+#      not_a_threshold     ― 非阈值型门控（check() 内无 `self.<阈值参数>` 比较）
+#      unbound             ― 阈值型，但阈值参数无配置键绑定来源
+#      single_source       ― 阈值型，配置键在生产侧只有一份尺度（阈值可达）
+#      scaled_unreachable  ― 被同键的更小尺度守卫遮蔽，合法域内门控吃不到阈值
+#      scaled_sparse       ― 同上，但合法域内极少数配置能让门控出声
+#    证据三条（缺一条都不成立，由 thresholdAxis() 复算）：门控构造直接绑定配置键；
+#    同键存在 `…[同键] // d`（d≥2）的更小尺度守卫；合法配置域内存在/不存在可达配置。
+#    站点次序（同一轮内守卫先还是门控先）按**函数**分组输出，因为它是
+#    scaled_unreachable 与 scaled_sparse 的唯一分界。
+# ③ **引用点数**（第 5 列）：台账照抄实测总数，**与实测不符即报红**（Issue #175 显式要求）。
+# ④ **处置**（第 6 列）：人对该条的决定，有限枚举、机器可判定（与上下文域同枚举）：
+#      待处置 / 已接线 / 已删除 / 收口第二份
+#    **本片（T-01）只建判据、不做处置**，故全部条目均为「待处置」。
+#
+# ── 取数口径（本域比上下文域多两种形态） ────────────────────────────
+# 种类（第 2 列，机器算）：
+#   symbol  ― 模块级符号：属/类/函数/import，走上下文域单源 referenceSites()
+#   binding ― 函数内局部量：按 ast.Name 的 Store/Load 计写读，**限定在写入它的
+#             最内层函数作用域内**（否则全仓同名局部会串台）
+#   key     ― 字典字符串键：下标赋值记 write，下标取值/get/in 记 read，
+#             pop/del 记 **write**（移除型访问证明有人动过它，不证明有人消费它的值）
+# 另一条事实（**不参与机器判定**，只写进依据）：binding/key 的引用点带**接收者**
+#   （局部量=函数名，键=被下标的表达式）。接收者归属需要类型推断，静态近似必然误判
+#   ——上下文域已实测 `dedup` / `clear` 两面反例；故「唯一一处 read 落在另一个接收者上」
+#   这类结论写在依据里逐条论证，不靠机器猜。
+#
+# ── 判据口径为什么不绑墙钟 ─────────────────────────────────────────
+# 唯一解析入口是 tests/ast_scan.py（按前缀择优 + 文本预筛 + 整进程复用），本模块不做
+# `rglob + ast.parse`（同类形态由 tests/unit/test_ci_ast_scan_budget_guard.py 常驻拦截）。
+#
+# ── 扫描限径（本域特有约束，Issue #175 前置警告 2） ─────────────────
+# NeurUI/src-tauri/{resources,target/debug,target/release}/backend/neurova/ 下是整套
+# 字节偏移的运行时副本（ToolExecutor 在副本 :235、正典 neurova/tool_executor.py:236）。
+# 不带生产根约束的扫描会把副本算成消费点 ⇒ 判据只认 `neurova/` 前缀（inProductionScope）。
+#
+# ── 常驻守卫 ─────────────────────────────────────────────────────
+# tests/unit/tools/test_tool_loop_deadline_ledger.py 双向钉住：判据类与机器一致 /
+# 阈值轴与机器一致 / 引用点数与实测一致 / 处置枚举合法 / 依据非空 / 符号级而非文件级 /
+# 扫描限径 / 反向控制项永远为「待处置」。新测试文件不进 protected_tests.txt（T-10 登记）。
+#
+# 取数命令：python scripts/ci/tool_loop_deadline_ledger.py
+# 处置批：T-09（死码处置批）/ T-04（轮次预算单源）/ T-03（provider 工具通路）/ T-05（审批阻塞语义）。
+#
+# ── 反向控制（known-reachable，永远「待处置」） ──────────────────────
+# notify_tool_result / get_pipeline_observers / TokenBudgetGate：
+#   前两条与 ToolExecutionPipeline 同处 agent/tool_pipeline.py——按文件判「死」会连带
+#   砍断熔断器的观测接线，故它们被钉成 consumed 且永不赋处置；TokenBudgetGate 钉住
+#   「阈值轴不是恒判 shadowed」。
+#
+UnifiedToolRegistry | symbol | no_consumer | not_a_threshold | 2 | 待处置 | unified_registry.py:50 定义。生产侧只有 tool_layers/__init__.py:44 的 import（**孤立 import，同文件内无该符号的调用/读取** → 再导出，不算消费）。`ToolRouter`（真面，agent_core.py:873 消费）已覆盖注册与同步职责，本类是介于 ToolRouter 与 ToolEngine 之间的第二份注册面。**传递不可达已论证**：其三个延迟构造入口（get_capability_graph/get_cli_executor/get_tool_logger）的接收者全部只在类内（`_get_*` 工厂与 `self._*` 字段），类自身零实例化 ⇒ 这些存活符号是**类内自循环**，不构成类可达的证据。处置须先裁定「ToolRouter 与 ToolEngine 的同步是否需要第二份注册表」，不在本片（T-09 死码处置批）。
+#   ← 出处：tool_layers/unified_registry.py:50（§类/模块）
+ToolExecutionLogger | symbol | consumed | not_a_threshold | 4 | 待处置 | tool_logger.py:76 定义。判据为 consumed：唯一外部消费点是 unified_registry.py:40（`_get_tool_logger` 工厂内 `return ToolExecutionLogger()`）。**但该消费方自身不可达**（见本表 UnifiedToolRegistry 行，判据 no_consumer）⇒ 1 跳可达、链路整体不通。形态与上下文域的 ContextCompressor 同型（「唯一消费点落在一个自己不可达的符号上」）。处置：与 UnifiedToolRegistry 同批裁定（写给 evolution/pattern_miner.py 的 JSON Lines 序列目前无生产写入方）。
+#   ← 出处：tool_layers/tool_logger.py:76
+ToolSchemaConverter | symbol | consumed | not_a_threshold | 6 | 待处置 | openai_schema.py:128 定义。**自 Issue #177（T-03）起判据类由 no_consumer 变 consumed**：接线前只有 tool_layers/__init__.py:90 一条孤立 import（只导入不消费，按断点计）；T-03 新增的 `neurova/llm/providers/tool_transport.py` 拿它做原生协议 tools 转换的**唯一**落点（`toAnthropicTools` / `toGeminiTools` 各调一次 `openai_to_anthropic` / `openai_to_google`），本类因此第一次有了跨文件消费点。处置仍**待处置**：T-03 只接线，未清除本类的存量判断口径（与 ToolCallParser 同文件，是否收口成单一协议桥由后续片裁定）。
+#   ← 出处：tool_layers/openai_schema.py:128
+ToolCallParser | symbol | consumed | not_a_threshold | 4 | 待处置 | openai_schema.py 定义。**自 Issue #177（T-03）起判据类由 no_consumer 变 consumed**：接线前只有 tool_layers/__init__.py 一条孤立 import（只导入不消费，按断点计）；T-03 把 `protocol_thinking.toOpenAIToolCalls` 接到它上面 —— 原生协议的 tool_use / functionCall 块经本类解析为 LLMResponse.tool_calls 契约，故它现在是响应侧工具调用的唯一转换点（真面已吸收）。处置仍**待处置**：T-03 只接线，未清除本类内部「自动检测三形态」的冗余分支。
+#   ← 出处：tool_layers/openai_schema.py:285
+ToolSchema | symbol | self_loop | not_a_threshold | 4 | 待处置 | 判据为 self_loop。生产侧有两处**同名类定义**：tool_layers/schemas.py:140（本行登记对象）与 api/endpoints/tool_schema.py:32（pydantic 响应模型）。schemas.py:140 的消费点只有自身文件内的`schemas.py:214 add_parameter()` 调用与 tool_layers/__init__.py:27 的孤立再导出 ⇒ 外部零消费者。**同名第二份是本域最容易误判的形态**（按名字 grep 会把 api 端点的自消费算成它的可达性）——与上下文域 `dedup` 按名字计数会误判为「可删」同型，故处置须按「收口第二份」论证，不在本片。
+#   ← 出处：tool_layers/schemas.py:140（与 api/endpoints/tool_schema.py:32 同名）
+ToolParameter | symbol | self_loop | not_a_threshold | 7 | 待处置 | 判据为 self_loop。生产侧三处**同名定义**：tool_layers/schemas.py:96（本行登记对象）、execution_engine/tool_engine.py:33、execution_engine/__init__.py:39（后两者是 dataclass 与占位 fallback，彼此在同文件内互用）。schemas.py:96 的消费点只有自身文件内 `schemas.py:214 add_parameter()` 构造 ⇒ 工具 Schema 面的参数模型在工具层内部自循环，未被 provider 组装面消费（真面是交给 LLMClient 的 dict 形态）。处置与 ToolSchema / ToolSource 同批（T-09）。
+#   ← 出处：tool_layers/schemas.py:96（与 execution_engine/tool_engine.py:33 同名）
+ToolSource | symbol | no_consumer | not_a_threshold | 2 | 待处置 | schemas.py:36 定义。生产侧只有 tool_layers/__init__.py:27 的孤立 import（再导出）。它是 `ToolSchema.source` 字段（schemas.py:149）的类型标注——标注本身不构成消费点，而 `ToolSchema` 自身也是 self_loop ⇒ 两者同批裁定。
+#   ← 出处：tool_layers/schemas.py:36
+ToolExecutionPipeline | symbol | no_consumer | not_a_threshold | 1 | 待处置 | agent/tool_pipeline.py:202 定义，生产侧**零引用**（连 import 都没有）——判据 no_consumer。**这一行是 Issue #175 前置警告 1 的落点**：同一文件内 `notify_tool_result`（:460）与 `get_pipeline_observers`（:443）是活的，被 tool_executor.py:5354 与 security/tool_circuit_breaker.py:136 消费（两者均为本表反向控制）。按文件判「死」会连带砍断熔断器的观测接线 ⇒ 处置必须落在**类**这一级，且须先确认五段流水线是否要以 `PipelineConfig`/`PipelineGuardAdapter` 形态接线——见本表 `PipelineObserversRegistry` 相关事实，不在本片。
+#   ← 出处：agent/tool_pipeline.py:202
+CostTrackingMixin | symbol | no_consumer | not_a_threshold | 1 | 待处置 | llm/cost_tracking_middleware.py:27 定义，生产侧零引用（无 import、无继承）。实测：全仓唯一对本模块的字符串出现就是它自身的类定义行 ⇒ 该中间件从未被任何 LLM 客户端混入。**成本记账面是否已有真面**（llm_client 的 `_stats` 与 `@track_llm_call` 装饰器）须与接线一并裁定，故本片只登记。
+#   ← 出处：llm/cost_tracking_middleware.py:27
+CLIToolExecutor | symbol | consumed | not_a_threshold | 4 | 待处置 | cli_tool.py:22 定义。判据为 consumed：唯一外部消费点是 unified_registry.py:33（`_get_cli_executor` 工厂内实例化）。**该消费方自身不可达**（见 UnifiedToolRegistry 行）⇒ 与 ToolExecutionLogger 同型：链路 1 跳可达但整体不通。沙箱侧另有 exec_sandbox.py:10 的**注释级**提及（说明接口兼容性，不是消费点，判据按 AST 未计入）。
+#   ← 出处：tool_layers/cli_tool.py:22
+IterationGate | symbol | consumed | scaled_sparse | 6 | 待处置 | gates.py:59 定义，被 openai_loop.py:101 / :136 构造、经 GateRunner 每轮 `check()` ⇒ 判据 consumed。**本片唯一的设计争议点，裁定：不加第五态，改为给台账加第二判据轴「阈值可达性」。**理由：四值回答的是「AST 事实能直接证明的直接可达性」，这门控确实可达；「阈值在值域上够不够得到」是**值比较**事实，两件事合并后四值分支将不再能由 `referenceSites()` 的事实直接验算，且与上下文域判据不可比。第二轴实测 `scaled_sparse`，三条机器证据：① 门控构造直接绑定配置键 `max_loop_rounds`（openai_loop.py:101 / :136，尺度 1）；② 同键存在更小尺度守卫 `self._max_tool_rounds = get_effective_limits()['max_loop_rounds'] // 2`（:256，d=2），它在 :377（`_predict_normal`）与 :711（`_predict_stream_once`）被比较；③ 合法配置域 = `security/agent_limits_settings.py:33 MIN_ROUNDS=2` 夹逼到 `:34 MAX_ROUNDS=200`，域内使门控吃到阈值的配置只有 **max_loop_rounds=2 一个**（`n // 2 + 1 >= n` 仅在 n=2 成立）。**站点次序（必须与值域事实分开读）**：非流式 `_predict_normal` 是 guard(:377) 先于 gate(:394) ⇒ 该路径上门控永远吃不到阈值；流式 `_predict_stream_once` 是 gate(:671) 先于 guard(:711) ⇒ **n=2 且走流式路径时，门控第 2 轮确实会 TERMINATE**。故本行不是「恒不出声」，而是「默认配置（20）下不出声、合法域内仅 n=2 且仅流式路径出声」——这正是四态表达不了、而第二轴能表达的形态。它同时是 `MIN_ROUNDS/MAX_ROUNDS` 夹逼之上的二次夹逼。处置（T-04 轮次预算单源）把尺度收口成一份后，证据②消失、轴值必然改变，`reconcile()` 的 threshold_conflict 会报红。
+#   ← 出处：agent/gates.py:59（阈值型门控）
+TokenBudgetGate | symbol | consumed | single_source | 6 | 待处置 | 反向控制（阈值型·已知可达）：gates.py:78 定义，openai_loop.py:102 / :137 构造，且 `round_usage` 由流式 usage 聚合写入（:619）⇒ 门控有真实读数。第二轴实测 `single_source`：阈值键 `token_budget` 在生产侧只有一个尺度（无 `// d` 更小尺度守卫），故本行证明「第二轴不是恒判 shadowed」——轴有判别力。本行永远为「待处置」。
+#   ← 出处：agent/gates.py:78（阈值型门控·反向控制）
+notify_tool_result | symbol | consumed | not_a_threshold | 3 | 待处置 | 反向控制（符号级）：agent/tool_pipeline.py:460 定义，唯一接入点是 tool_executor.py:5352 import + :5354 调用 ⇒ consumed。与 `ToolExecutionPipeline`（:202，零引用）**同处一个文件**——本行存在的意义就是钉住「判据落到符号级而非文件级」：若判据按文件判「死」，砍掉这个文件会连带砍断工具结果观察者通道。本行永远为「待处置」。
+#   ← 出处：agent/tool_pipeline.py:460（反向控制·符号级）
+get_pipeline_observers | symbol | consumed | not_a_threshold | 4 | 待处置 | 反向控制（符号级）：agent/tool_pipeline.py:443 定义，被自身模块（:482 `notify_tool_result` 内）与 security/tool_circuit_breaker.py:30 import + :136 调用消费 ⇒ consumed（熔断器经此挂载结果观察者）。同 ToolExecutionPipeline 一个文件，同 notify_tool_result 一行理由。本行永远为「待处置」。
+#   ← 出处：agent/tool_pipeline.py:443（反向控制·符号级）
+set_goal_gate | symbol | no_consumer | not_a_threshold | 1 | 待处置 | 放大视角补登（grep 同一根因：定义了、生产零调用）。openai_loop.py:140 定义，生产侧零调用；`GoalGate`（gates.py:149）本身是活的（openai_loop.py:150 构造），但这条**注入入口**无人调——即 goal 模式门控在生产侧没有任何装配点。与 IterationGate 同属「门控装配面」断链，处置归 T-04 同批裁定。
+#   ← 出处：agent/loops/openai_loop.py:140（放大视角补登）
+reset_pipeline_observers | symbol | no_consumer | not_a_threshold | 1 | 待处置 | 放大视角补登。agent/tool_pipeline.py:453 定义，生产侧零调用（测试用重置入口）。它在 `__all__` 里（:500），属**导出但无消费者**形态；与 `ToolExecutionPipeline` 同批处置，不得因「测试在用」而就地删除（判据只谈生产侧，测试可能正是该契约的唯一守卫）。
+#   ← 出处：agent/tool_pipeline.py:453（放大视角补登）
+ToolExecutionResult | symbol | no_consumer | not_a_threshold | 3 | 待处置 | 放大视角补登。tool_layers/schemas.py:291 定义，生产侧只有两条孤立 import（tool_layers/__init__.py:27 再导出、unified_registry.py:45 在 `_get_execution_result_class` 工厂内返回）——后者所在消费方自身不可达（UnifiedToolRegistry 行）。与 UnifiedToolRegistry / ToolExecutionLogger / CLIToolExecutor 构成**同一条不可达链**，处置同批（T-09）。
+#   ← 出处：tool_layers/schemas.py:291（放大视角补登）
+tool_choice | key | consumed | not_a_threshold | 12 | 待处置 | openai_loop.py:281 写入、:328/:358 降级路径移除；经 `LLMClient._build_request_params` 纳入转发面（按 `config.compat.supports_tool_choice` 门控）到网关。**自 Issue #177（T-03）起判据类由 self_loop 变 consumed**：原先唯一 read 落在 kwargs、与写入接收者 `request_params` 不是同一字典，且 llm_client 只透传 tools 不透传 tool_choice ⇒ 真链路上到不了网关（本行原文即「全链路空转」）。T-03 补齐转发面、并把承载能力做成 `provider_compat.ProviderCompat.supports_tool_choice` 声明位后，本键第一次有了跨文件消费点。live 实测：修复前 SDK 边界 `tool_choice=None`，修复后 `tool_choice='auto'`。
+#   ← 出处：agent/loops/openai_loop.py:281（只写不读）
+MAX_TOOL_CALL_ROUNDS | binding | no_consumer | not_a_threshold | 1 | 待处置 | chat_pipeline.py:2443 函数内局部量（`_auto_continue` 内 `MAX_TOOL_CALL_ROUNDS = 5`），全函数作用域内**只有这一处 Store、零 Load** ⇒ 判据 no_consumer（只写不读）。同函数内其余九个上界常量（MAX_CONTINUE_ROUNDS / MAX_TOTAL_CHARS / …）都有真实读取点，故本行不是「常量都在告一段落时列出」的误判。**同函数的 `tool_call_rounds`（:2450）同样只写不读**，两者是同一处断链的两半：截断续写段的工具轮次上界从未生效（loop 条件里用的是 MAX_CONTINUE_ROUNDS 与 MAX_TOTAL_CHARS，另加 `not response.tool_calls`）。处置归 T-05（审批阻塞语义）所在的 chat_pipeline 片。
+#   ← 出处：agent/chat_pipeline.py:2443（写后无读）
+ctx_snapshot | binding | self_loop | not_a_threshold | 4 | 待处置 | chat_pipeline.py:2451 函数内局部量（`ctx_snapshot = list(ctx.context)`），判据 self_loop：写入 1 处（:2451），读取 3 处（:2469 / :2470 / :2481），全部落在 `_auto_continue` 自身作用域内——**它是活的**（读改写进 messages 后送 predict_step），登记它是为第二轴与接收者事实留证：与 `MAX_TOOL_CALL_ROUNDS` 同处一个函数，一条活一条死，判据必须能分开（同「符号级而非文件级」纪律）。
+#   ← 出处：agent/chat_pipeline.py:2451

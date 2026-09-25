@@ -23,8 +23,13 @@ from neurova.builtin_tools import BuiltinToolRegistry
 
 
 def _make_loop():
-    """构造最小 BaseAgentLoop 子类（仅实现抽象方法；__init__ 不跑）。"""
+    """构造最小 BaseAgentLoop 子类（仅实现抽象方法；__init__ 不跑）。
+
+    原生链的工具执行经咽喉（工单 003），故替身必须带真 `ToolExecutor`；
+    接口替身放在 `tool_router`（非技能路径）与 `_skill_registry`（技能路径）。
+    """
     from neurova.agent.loops.base import BaseAgentLoop
+    from neurova.tool_executor import ToolExecutor
 
     class _StubLoop(BaseAgentLoop):
         async def predict_step(self, messages, tools=None, **kwargs):  # pragma: no cover
@@ -32,13 +37,51 @@ def _make_loop():
 
     agent = SimpleNamespace(
         skill_registry=None,
+        _skill_registry=None,
+        tool_memory=None,
+        tool_lifecycle=None,
+        skill_packer=None,
         tool_router=None,
         append_tool_messages=lambda records: None,
-        config=SimpleNamespace(user_id="default", agent_id="test-agent"),
+        config=SimpleNamespace(name="probe", user_id="default", agent_id="test-agent"),
+        workspace_path=".",
     )
+    agent.tool_executor = ToolExecutor(agent)
     loop = _StubLoop.__new__(_StubLoop)
     loop.agent = agent
     return loop
+
+
+class _StubSkill:
+    """技能替身：只承载执行体与 `config`（取件契约 `get_skill`）。"""
+
+    def __init__(self, name):
+        self.name = name
+        self.description = "taskName 探针技能"
+        self.config = {}
+
+
+class _StubSkillRegistry:
+    """技能注册表替身：`get_skill` / `has_skill` / `execute_skill` 三契约。"""
+
+    def __init__(self, name, execute):
+        self._skill = _StubSkill(name)
+        self.skills = {name: self._skill}
+        self.execute_skill = execute
+
+    def get_skill(self, skill_name):
+        return self._skill if skill_name == self._skill.name else None
+
+    def has_skill(self, skill_name):
+        return skill_name == self._skill.name
+
+    def list_skills(self):
+        return []
+
+
+def _attach_skill(loop, name, execute):
+    loop.agent._skill_registry = _StubSkillRegistry(name, execute)
+    return loop.agent._skill_registry
 
 
 def _router_result(success=True, data=None, error=None):
@@ -68,13 +111,14 @@ class TestExecutionLayerStripping:
     async def test_task_name_extracted_and_stripped(self):
         loop = _make_loop()
         router = MagicMock()
-        router.execute = AsyncMock(return_value=_router_result(success=True, data={"ok": 1}))
+        router.route = AsyncMock(return_value={"ok": 1})
         loop.agent.tool_router = router
 
+        # 非内置工具名：内置工具在咽喉里会真执行，本用例只要看路由收到的参数
         tool_call = {
             "id": "call_1",
             "function": {
-                "name": "web_search",
+                "name": "mcp_probe.search",
                 "arguments": json.dumps(
                     {
                         "query": "北京天气",
@@ -88,8 +132,8 @@ class TestExecutionLayerStripping:
         tool_msg, records = await loop._execute_tool_call_worker(tool_call)
 
         # 真实参数不含 taskName*（模型参数不污染执行面）
-        router.execute.assert_awaited_once()
-        sent_params = router.execute.await_args.kwargs.get("params") or router.execute.await_args.kwargs
+        router.route.assert_awaited_once()
+        sent_params = router.route.await_args.kwargs.get("params") or router.route.await_args.kwargs
         blob = json.dumps(sent_params, ensure_ascii=False, default=str)
         assert "taskNameActive" not in blob and "已查天气" not in blob
 
@@ -103,12 +147,12 @@ class TestExecutionLayerStripping:
     async def test_no_task_name_passes_clean(self):
         loop = _make_loop()
         router = MagicMock()
-        router.execute = AsyncMock(return_value=_router_result(success=True, data={"ok": 1}))
+        router.route = AsyncMock(return_value={"ok": 1})
         loop.agent.tool_router = router
 
         tool_call = {
             "id": "call_2",
-            "function": {"name": "web_search", "arguments": json.dumps({"query": "x"})},
+            "function": {"name": "mcp_probe.search", "arguments": json.dumps({"query": "x"})},
         }
         _, records = await loop._execute_tool_call_worker(tool_call)
         call_rec = next(r for r in records if r["type"] == "tool_call")
@@ -118,23 +162,25 @@ class TestExecutionLayerStripping:
 
     @pytest.mark.asyncio
     async def test_stripping_survives_skill_path(self):
-        """SkillRegistry 路径同样收不到 taskName*（先于双通道分发剥离）。"""
+        """技能路径同样收不到 taskName*（剥离发生在分发之前，与执行通道无关）。"""
         loop = _make_loop()
-        registry = MagicMock()
-        skill_result = SimpleNamespace(success=True, data={"done": True}, error=None, metadata={})
-        registry.execute_skill = AsyncMock(return_value=skill_result)
-        loop.agent.skill_registry = registry
+        seen = {}
+
+        async def _execute_skill(skill_name, params, context=None):
+            seen["params"] = params
+            return {"done": True}
+
+        _attach_skill(loop, "memory_probe", _execute_skill)
 
         tool_call = {
             "id": "call_3",
             "function": {
-                "name": "memory",
+                "name": "memory_probe",
                 "arguments": json.dumps({"action": "search", "taskNameActive": "查记忆"}),
             },
         }
         await loop._execute_tool_call_worker(tool_call)
-        sent_args = registry.execute_skill.await_args.args[1]
-        assert "taskNameActive" not in sent_args
+        assert "taskNameActive" not in seen["params"]
 
 
 class TestSSEPassThrough:
@@ -266,10 +312,13 @@ class TestWorkspaceBaseDirInjection:
     @pytest.mark.asyncio
     async def test_file_operation_skill_gets_workspace_base_dir(self, tmp_path):
         loop = self._make_loop_with_workspace(tmp_path)
-        registry = MagicMock()
-        skill_result = SimpleNamespace(success=True, data={"done": True}, error=None, metadata={})
-        registry.execute_skill = AsyncMock(return_value=skill_result)
-        loop.agent.skill_registry = registry
+        seen = {}
+
+        async def _execute_skill(skill_name, params, context=None):
+            seen["params"] = params
+            return {"done": True}
+
+        _attach_skill(loop, "file_operation", _execute_skill)
 
         tool_call = {
             "id": "call_w1",
@@ -283,23 +332,24 @@ class TestWorkspaceBaseDirInjection:
         }
         await loop._execute_tool_call_worker(tool_call)
 
-        sent_args = registry.execute_skill.await_args.args[1]
         # 服务端赋值（agent 工作区）覆盖 LLM 伪造值
-        assert sent_args["_base_dir"] == str(tmp_path)
+        assert seen["params"]["_base_dir"] == str(tmp_path)
 
     @pytest.mark.asyncio
     async def test_non_file_skills_do_not_receive_base_dir(self, tmp_path):
         loop = self._make_loop_with_workspace(tmp_path)
-        registry = MagicMock()
-        skill_result = SimpleNamespace(success=True, data={"done": True}, error=None, metadata={})
-        registry.execute_skill = AsyncMock(return_value=skill_result)
-        loop.agent.skill_registry = registry
+        seen = {}
+
+        async def _execute_skill(skill_name, params, context=None):
+            seen["params"] = params
+            return {"done": True}
+
+        _attach_skill(loop, "memory_probe", _execute_skill)
 
         tool_call = {
             "id": "call_w2",
-            "function": {"name": "memory", "arguments": json.dumps({"action": "search"})},
+            "function": {"name": "memory_probe", "arguments": json.dumps({"action": "search"})},
         }
         await loop._execute_tool_call_worker(tool_call)
 
-        sent_args = registry.execute_skill.await_args.args[1]
-        assert "_base_dir" not in sent_args
+        assert "_base_dir" not in seen["params"]

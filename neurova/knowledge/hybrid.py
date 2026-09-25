@@ -205,8 +205,17 @@ def hybrid_search_knowledge(
     }
     fused = rrf_fusion(routes, weights or DEFAULT_ROUTE_WEIGHTS, k=k)
 
+    # ── 末端精排（工单 014，灭 B05；关闸即取 RRF 前 limit 名，行为与接入前逐字一致）──
+    from neurova.knowledge.rerank.main_path import (
+        MainPathRerankConfig,
+        refineMainPathResults,
+    )
+
+    rerankConfig = MainPathRerankConfig.fromEnv()
+    take = max(1, int(limit)) * (max(rerankConfig.poolFactor, 1) if rerankConfig.enabled else 1)
+
     out: List[Dict[str, Any]] = []
-    for kid, rrf in fused[: max(1, int(limit))]:
+    for kid, rrf in fused[: take]:
         item = lexical_map.get(kid)
         if item is None:
             item = visible_map.get(kid)
@@ -223,4 +232,7 @@ def hybrid_search_knowledge(
             "rrf": round(rrf, 6),
         }
         out.append(merged)
+    out, rerankNote = refineMainPathResults(query, out, limit=limit, config=rerankConfig)
+    if rerankNote:
+        logger.warning("知识 hybrid：末端精排降级 %s", rerankNote)
     return out

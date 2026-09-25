@@ -19,8 +19,9 @@ NLToolSynthesizer v1.0.0 — 自然语言工具合成器 (Phase 3 P3-3)
        └─▶ SynthesizedTool → 导出格式
 """
 
-from neurova.core.logger import get_logger
 import re
+
+from neurova.core.logger import get_logger
 import typing
 import uuid
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ class SynthesisStage(Enum):
     SEQUENCE_SUGGESTION = "sequence_suggestion"  # 序列建议
     CONFIDENCE_ESTIMATION = "confidence_estimation"  # 置信度估算
     COMPLETED = "completed"  # 完成
+    PENDING_REVIEW = "pending_review"  # 置信闸拦下：待人工复核，不得进注册路径
     FAILED = "failed"  # 失败
 
 
@@ -135,7 +137,7 @@ class NLToolSynthesizer:
 
     def __init__(
         self,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.5,
         max_sequence_length: int = 5,
         enable_pattern_mining: bool = True,
         pattern_miner: typing.Any = None,
@@ -144,7 +146,13 @@ class NLToolSynthesizer:
         初始化合成器
 
         参数:
-            min_confidence: 最小置信度阈值
+            min_confidence: 最小置信度阈值（工单 014 从 0.3 抬到 0.5）。
+                抬阈值不是收紧口径，是让门**可达**：`estimate_confidence` 对任何
+                非空描述都有 ≈0.45 的下界（分类为 general 也给 5 分、序列只要非空
+                就满 25 分），配 0.3 时低置信分支永远不触发——门做实了却仍不存在。
+                实测样本：0.45（"帮我 zzzz"）/0.5/0.65（"帮我搜索文件"）/0.7。
+                估器本身"有序列即满分"的虚高是同批次的另一处待修（属质量度量面），
+                本处不靠改打分公式交差，避免把注册率一次性打没。
             max_sequence_length: 最大序列长度
             enable_pattern_mining: 是否启用模式挖掘
             pattern_miner: 可选的 PatternMiner 实例（P0-B3 修复：
@@ -156,33 +164,80 @@ class NLToolSynthesizer:
         self._enable_pattern_mining = enable_pattern_mining
         # P0-B3: 保留 pattern_miner 引用供合成流程使用（可选）
         self._pattern_miner = pattern_miner
+        # 置信闸拦下计数（工单 014）：008 指标面就绪前的可观测落点
+        self.low_confidence_rejections = 0
+        # 字母表校验拦下计数（T-04）：与上面同一类可观测落点，含义是"产出含未注册名"。
+        # 二者分开计数：低置信是估分问题，字母表不合法是**名字根本不存在**，
+        # 混在一个计数器里就再也分不清"该调估分器"还是"该补原语"。
+        self.unregistered_alphabet_rejections = 0
+
+        # 分类 → 候选原语（**单源**分类表；未知分类不在表内，即"无合法候选"）
+        self._category_primitives = self._load_category_primitives()
 
         # 内置工具模式库
         self._tool_patterns = self._load_tool_patterns()
 
         logger.info("NLToolSynthesizer initialized (pattern_miner=%s)", pattern_miner is not None)
 
+    def _load_category_primitives(self) -> typing.Dict[str, typing.List[str]]:
+        """加载"分类 → 候选原语"表（单源）。
+
+        表里的名字一律取自**真实注册名**。原表 10 个分类里 7 个是幻名
+        （`db_query`/`data_process`/`image_process`/`text_process`/
+        `model_predict`/`task_execute`/`api_call` 注册处均为 0），
+        产出的序列因此是模型读不到的路标；未知分类还落到同样不存在的
+        `general_tool`。现在：表内只有已注册名，分类不在表内即**无候选**。
+        """
+        return {
+            "search": ["memory_search"],
+            "file": ["file_read"],
+            "data": ["file_parse"],
+            "web": ["web_fetch"],
+            "image": ["file_parse"],
+            "text": ["file_read"],
+            "ai": ["deep_research"],
+            "automation": ["update_plan"],
+            # T-05 补上的那条真原语：附件句柄 → 只读数据集查询。
+            # 在它落地之前这一行**刻意留空**（当时硬塞 `file_parse` 等于给模型
+            # 指一条读不到数据集的路）。现在真名有了，才接线——单一事实源。
+            "database": ["query_database"],
+        }
+        # `api` **不在此表里**：它是"确实缺原语"的分类，不是"有原语但名字写错了"。
+        # 缺原语就该在合成面上诚实暴露为"无合法候选、转人工复核"。
+
     def _load_tool_patterns(self) -> typing.Dict[str, typing.Any]:
-        """加载工具模式库"""
+        """加载工具模式库。
+
+        表里的 `tools` 一律取自**真实注册名**（`builtin_tools.get_registered_tool_names`
+        是唯一读侧）。原实现里 `data_process` / `data_analyze` / `web_scrape` 三个名字
+        全仓注册处为 0 —— 合成序列经这条表产出后，模型拿到的是一条读不到的工具路标。
+        """
+        from neurova.builtin_tools import get_registered_tool_names
+
+        registered = set(get_registered_tool_names())
+
+        def _pick(*names: str) -> typing.List[str]:
+            return [name for name in names if name in registered]
+
         return {
             "search_pattern": {
                 "keywords": ["搜索", "查找", "查询"],
-                "tools": ["memory_search", "web_search"],
+                "tools": _pick("memory_search", "web_search"),
                 "category": "search",
             },
             "file_pattern": {
                 "keywords": ["文件", "读取", "写入"],
-                "tools": ["file_read", "file_write"],
+                "tools": _pick("file_read", "file_write"),
                 "category": "file",
             },
             "data_pattern": {
                 "keywords": ["数据", "分析", "处理"],
-                "tools": ["data_process", "data_analyze"],
+                "tools": _pick("file_parse", "calculator"),
                 "category": "data",
             },
             "web_pattern": {
                 "keywords": ["网页", "爬取", "网络"],
-                "tools": ["web_fetch", "web_scrape"],
+                "tools": _pick("web_fetch", "web_search"),
                 "category": "web",
             },
         }
@@ -236,26 +291,74 @@ class NLToolSynthesizer:
             tool.tool_sequence = sequence
             result.stages_completed.append(SynthesisStage.SEQUENCE_SUGGESTION)
 
+            # 阶段4.5: 字母表闸（T-04）——序列里出现**未注册名**即拒绝合成。
+            # 为什么摆在置信度之前：名字不存在与估分高低无关。放后面会让
+            # "高置信的幻名序列"以 COMPLETED 出现在产物面上 —— 那正是 T-03
+            # 打开入口后幽灵技能放大器的形态。D4：不降级为部分合成。
+            # 空序列（未知分类无合法候选）**不在此另开分支**：它由紧随其后的
+            # 既有置信闸处置（序列为空自然拿不到"序列合理性"分，估分即低）。
+            # 单开一条分支等于第二套拦截口径 —— 教义第 6 条，且会让"调阈值"
+            # 这条既有旋钮对未知分类失效。
+            from neurova.builtin_tools import get_registered_tool_names
+
+            _unregistered = [
+                _name for _name in sequence if _name not in set(get_registered_tool_names())
+            ]
+            if _unregistered:
+                self.unregistered_alphabet_rejections += 1
+                tool.stage = SynthesisStage.PENDING_REVIEW
+                result.stages_completed.append(SynthesisStage.PENDING_REVIEW)
+                result.success = False
+                result.error_message = (
+                    f"合成序列含未注册工具 {_unregistered}（字母表不合法，转人工复核）"
+                )
+                tool.name = self._generate_tool_name(description, category)
+                tool.description = description
+                tool.tool_id = f"synth_{uuid.uuid4().hex[:8]}"
+                result.synthesized_tool = tool
+                logger.warning("NL 合成被字母表闸拦下: %s", result.error_message)
+                result.processing_time = time.time() - start_time
+                return result
+
             # 阶段5: 估算置信度
             tool.stage = SynthesisStage.CONFIDENCE_ESTIMATION
             confidence = self.estimate_confidence(description, category, sequence)
             tool.confidence = confidence
             result.stages_completed.append(SynthesisStage.CONFIDENCE_ESTIMATION)
 
-            # 设置工具信息
-            tool.name = self._generate_tool_name(description, category)
-            tool.description = description
+            # 设置工具信息。身份先定、名字后拼——名字必须携带身份，否则
+            # "同 category 的两条产物同名"会一路走到 SkillRegistry（按 name 建键）
+            # 把先到者顶掉（Issue #189 实测累计 10 次：ai_tool / general_tool）。
             tool.tool_id = f"synth_{uuid.uuid4().hex[:8]}"
+            tool.name = self._generate_tool_name(description, category, tool_id=tool.tool_id)
+            tool.description = description
 
-            # 检查置信度
+            # 置信闸（工单 014）：低置信是闸，不是提示。
+            # 原实现在这里只 warnings.append 一条，随后无条件 COMPLETED + success=True，
+            # 调用方只看这两个字段 ⇒ 门不存在。拦下时产物仍挂在 synthesized_tool 上
+            # 供人工复核（拦 ≠ 丢），warnings 保留为信息位但不再是唯一处置。
             if confidence < self._min_confidence:
                 result.warnings.append(f"低置信度: {confidence:.2f} < {self._min_confidence}")
+                self.low_confidence_rejections += 1
+                tool.stage = SynthesisStage.PENDING_REVIEW
+                result.stages_completed.append(SynthesisStage.PENDING_REVIEW)
+                result.success = False
+                result.error_message = (
+                    f"置信度 {confidence:.2f} 低于阈值 {self._min_confidence}，转人工复核"
+                )
+                result.synthesized_tool = tool
+                # 指标面（工单 008）就绪前先落日志，计数同步落在
+                # `low_confidence_rejections` 上，便于后续接进质量读数。
+                logger.warning(
+                    "NL 合成被置信闸拦下: %s (confidence=%.2f < %.2f)",
+                    tool.name, confidence, self._min_confidence,
+                )
+            else:
+                tool.stage = SynthesisStage.COMPLETED
+                result.stages_completed.append(SynthesisStage.COMPLETED)
 
-            tool.stage = SynthesisStage.COMPLETED
-            result.stages_completed.append(SynthesisStage.COMPLETED)
-
-            result.success = True
-            result.synthesized_tool = tool
+                result.success = True
+                result.synthesized_tool = tool
 
         except Exception as e:
             logger.error("Synthesis failed: %s", e)
@@ -399,6 +502,29 @@ class NLToolSynthesizer:
 
         return base_schema
 
+    def resolveAlphabetCandidates(self, category: str, description: str) -> typing.List[str]:
+        """给定分类与描述，给出**已注册**的候选原语（单源解析点）。
+
+        与 `suggest_tool_sequence` 同处一个类、同一份读侧：
+        候选来源只有两处——分类基础表与模式库表，两处都由
+        `builtin_tools.get_registered_tool_names()` 过滤后返回。
+        未知分类**不编造**候选，也没有兜底幻名：返回空列表，
+        由调用方转人工复核（D4：不降级为部分合成）。
+        """
+        from neurova.builtin_tools import get_registered_tool_names
+
+        registered = set(get_registered_tool_names())
+        if category not in self._category_primitives:
+            return []
+
+        base = [name for name in self._category_primitives[category] if name in registered]
+        for pattern in self._tool_patterns.values():
+            if any(keyword in description for keyword in pattern["keywords"]):
+                base.extend(name for name in pattern["tools"] if name in registered)
+        # 去重保序（同名原语只建议一次）
+        seen: typing.Set[str] = set()
+        return [name for name in base if not (name in seen or seen.add(name))]
+
     def suggest_tool_sequence(self, description: str, category: str) -> typing.List[str]:
         """
         建议工具执行序列
@@ -410,33 +536,7 @@ class NLToolSynthesizer:
         返回:
             List[str]: 工具序列
         """
-        sequence = []
-
-        # 基于分类建议基础工具
-        category_tools = {
-            "search": ["memory_search"],
-            "file": ["file_read"],
-            "data": ["data_process"],
-            "web": ["web_fetch"],
-            "api": ["api_call"],
-            "image": ["image_process"],
-            "text": ["text_process"],
-            "database": ["db_query"],
-            "ai": ["model_predict"],
-            "automation": ["task_execute"],
-        }
-
-        base_tools = category_tools.get(category, ["general_tool"])
-        sequence.extend(base_tools)
-
-        # 基于模式库扩展
-        for pattern_name, pattern in self._tool_patterns.items():
-            for keyword in pattern["keywords"]:
-                if keyword in description:
-                    for tool in pattern["tools"]:
-                        if tool not in sequence:
-                            sequence.append(tool)
-                    break
+        sequence = self.resolveAlphabetCandidates(category, description)
 
         # 限制序列长度
         return sequence[: self._max_sequence_length]
@@ -495,20 +595,35 @@ class NLToolSynthesizer:
 
         return min(1.0, score / max_score)
 
-    def _generate_tool_name(self, description: str, category: str) -> str:
+    #: 合成工具名的固定后缀 + 身份前后的分隔约定（名字只是**展示与派发域**的键，
+    #: 身份永远是 `tool_id`；这里只保证"身份不同 ⇒ 名字不同"）。
+    _NAME_SUFFIX = "_tool"
+
+    def _generate_tool_name(
+        self, description: str, category: str, tool_id: str = ""
+    ) -> str:
         """
         生成工具名称
 
         参数:
             description: 自然语言描述
             category: 工具分类
+            tool_id: 产物身份。**必须传**（装配点已传）——名字要携带身份。
 
         返回:
             str: 工具名称
 
-        Bug T-3 修复: OpenAI function calling 工具名规范为 ^[a-zA-Z0-9_-]{1,64}$，
-        不允许中文。原正则 [\\u4e00-\\u9fff] 匹配中文字符导致工具名含中文被 LLM 拒绝。
-        修复: 只提取 ASCII 单词，中文描述回退到 category（category 来自 CATEGORY_KEYWORDS 映射，恒为 ASCII）。
+        两条约束同时成立：
+
+        1. 合法工具名（Bug T-3：OpenAI function calling 规范
+           `^[a-zA-Z0-9_-]{1,64}$`，不允许中文）——只提取 ASCII 词，中文描述
+           回退到 category；
+        2. **名字携带身份**（Issue #189）：描述部分对"同 category 的两条产物"
+           没有区分力（中文描述一律回退到 category，于是都叫 `ai_tool`），
+           而 `SkillRegistry` 按 `skill.name` 建键，后到者会静默顶掉先到者，
+           工具面上少了一个却无从察觉。另两条写入臂早已携带身份
+           （`skill_encapsulation._generate_skill_name` 带 pattern_id、
+           `genetic_engine` 直接用身份当名字），本臂补齐。
         """
         # 只提取 ASCII 单词（字母开头，含字母数字下划线），避免中文进入工具名
         words = re.findall(r"[a-zA-Z][a-zA-Z0-9_]+", description.lower())
@@ -520,7 +635,17 @@ class NLToolSynthesizer:
             # 中文描述无 ASCII 词时回退到 category（恒为 ASCII，如 search/file/web）
             name_part = category
 
-        return f"{name_part}_tool"
+        ident = re.sub(r"[^a-zA-Z0-9_]", "_", str(tool_id or ""))
+        if not ident:
+            # 身份缺席（旧调用方/直接单测）：保持历史上的无名形态，不伪造身份
+            return f"{name_part}{self._NAME_SUFFIX}"[:64]
+
+        # 身份后缀优先于描述部分保住：截断只砍 description 侧，否则名字会被
+        # 砍到退化成"同 category 全同名"，等于没修。
+        budget = 64 - len(self._NAME_SUFFIX) - len(ident) - 1
+        if budget < 1:
+            return f"{ident}{self._NAME_SUFFIX}"[:64]
+        return f"{name_part[:budget]}_{ident}{self._NAME_SUFFIX}"[:64]
 
 
 # ────── 单例管理 ──────

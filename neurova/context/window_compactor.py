@@ -6,11 +6,79 @@ get_recent_context 是固定 20 条消息数窗口——两者都不约束 promp
 build_context 中做「尾部保留 + 老消息折叠」的自动压缩。
 """
 
+import json
 import typing
 from dataclasses import dataclass
 
-# 每条消息的协议开销（role/分隔符等的保守估计）
-_PER_MSG_OVERHEAD = 4
+# 每条消息的协议开销（role/分隔符等的保守估计）。
+# 单一事实源：模块内一切"整窗计量"与"逐条计量"都必须经 WindowTokenMeter，
+# 它按此常量补开销；`estimate_window_tokens` 只是它的无状态入口。
+# 第二份开销常数（含就地写法 `+ 4`）即口径分裂，守卫见
+# tests/unit/context/test_window_token_metering.py。
+PER_MSG_OVERHEAD = 4
+_PER_MSG_OVERHEAD = PER_MSG_OVERHEAD
+
+#: 图像分段的固定计价（vision 分段不按 URL 字符数计——base64 串的长度与真实
+#: 视觉 token 无关，按字符计会把一张图算成几万 token，比真值高两个量级）。
+#: 单源：判据侧与展示侧都读这一处，不再各写一个数。
+IMAGE_PART_TOKENS = 800
+
+
+def messagePayloadTokens(
+    message: typing.Any, estimator: typing.Optional[typing.Callable[[str], int]] = None
+) -> int:
+    """一条消息发给 provider 的**载荷 token**（不含 `PER_MSG_OVERHEAD`）。
+
+    这是"一条消息值多少 token"的**唯一派生处** —— 判据侧（`WindowTokenMeter`，
+    折叠 / microcompact / 窗口预算 / 召回额度都经它）与展示侧
+    （`context.composition` 的容量面板）都读它。
+
+    改前是两份平行口径（修复教义第 6 条）：判据只读 `content` 字符串，展示另加
+    `tool_calls` 原文串与多模态分段。后果不是"面板数字不准"，而是**判据在工具轮上
+    空判** —— T-10b 之后 `assistant.tool_calls` 会进视图真发给模型（`arguments`
+    原文串常是调用参数本体），却不进任何窗口判据，于是"含工具轮的窗口 ≤ 预算"
+    这条判据在它最该起作用的形状上恒真（实测低估 270×，台账 §21.3）。
+
+    载荷 = 文本内容｜多模态分段（文本段按文本、图像段按 `IMAGE_PART_TOKENS`）
+    + `tool_calls` 协议原文串。`content` 为分段 list 时不得抛异常 ——
+    判据面缺多模态口径，等于多模态轮不受预算管辖。
+    """
+    segments, fixed = _payloadSegments(message)
+    if estimator is None:
+        from neurova.context.token_estimator import estimate_tokens
+
+        estimator = estimate_tokens
+    return sum(estimator(text) for text in segments) + fixed
+
+
+def _payloadSegments(message: typing.Any) -> typing.Tuple[typing.List[str], int]:
+    """载荷拆成（待计量的文本段, 固定计价部分）。
+
+    非 dict 的条目按改前 `str(message)` 语义处理（兼容裸字符串序列）。
+    """
+    if not isinstance(message, dict):
+        return ([str(message)] if message else []), 0
+
+    segments: typing.List[str] = []
+    fixed = 0
+    content = message.get("content", "")
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            kind = part.get("type")
+            if kind == "text":
+                segments.append(str(part.get("text", "")))
+            elif kind == "image_url":
+                fixed += IMAGE_PART_TOKENS
+    elif content:
+        segments.append(str(content))
+
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        # 协议原文形态（`arguments` 是 JSON 串）——与 provider 收到的字节对齐计价
+        segments.append(json.dumps(tool_calls, ensure_ascii=False))
+    return segments, fixed
 
 # 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
@@ -18,15 +86,96 @@ _PER_MSG_OVERHEAD = 4
 _SUMMARY_MAX_RETRIES = 3
 
 
-def estimate_window_tokens(msgs: typing.Iterable) -> int:
-    """估算窗口消息序列的 token 总量（统一估算器 BALANCED 策略）。"""
-    from neurova.context.token_estimator import estimate_tokens
+class WindowTokenMeter:
+    """窗口 token 计量的**单源记忆体**（Issue #90 台账 §2 补充发现的根因修复）。
 
-    total = 0
-    for m in msgs or []:
-        content = (m or {}).get("content", "") if isinstance(m, dict) else str(m)
-        total += estimate_tokens(content) + _PER_MSG_OVERHEAD
-    return total
+    改前形态：`split_window_by_budget` 每轮重算整窗、又为每条单算一次；
+    `compact_window` 的递进折叠循环（ratio 每轮 +0.1，从 0.5 走到 1.0）每轮再各来
+    一遍——单位调用内对同一批文本重复计量约 **2.4×**。尺子换成 o200k 精确计数后，
+    单次折叠从约 20ms 涨到 75ms，重复计量按倍数放大。
+
+    本类把"计量"收成一次：同一条消息在同一 meter 生命周期内只真正算一次，
+    整窗总量由逐条值求和得出（不再有第二套整窗算法）。
+
+    生命周期纪律：一个 meter 只服务一次折叠调用。跨调用复用会把已变化的窗口
+    当旧的算——所以 `compact_window` / `split_window_by_budget` 的 `meter` 参数
+    缺省为 None，每次调用自建。
+    """
+
+    def __init__(self, estimator: typing.Optional[typing.Callable[[str], int]] = None):
+        if estimator is None:
+            from neurova.context.token_estimator import estimate_tokens
+
+            estimator = estimate_tokens
+        self._estimator = estimator
+        # 键是 id(obj)，但**同时持有强引用**——只存 id 会被 CPython 的 id 复用
+        # 击中（对象被回收后新对象拿到同一 id → 计量结果串号）。meter 生命周期
+        # 只有一次折叠调用，持有引用的代价可忽略。
+        self._per_message: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
+        self._totals: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
+
+    def one(self, message) -> int:
+        """单条消息的 token 占用（含协议开销）。
+
+        载荷经 `messagePayloadTokens` 派生（文本内容 / 多模态分段 / `tool_calls`
+        原文串都算）——判据侧与展示侧因此共用同一份口径，不再各算一份。
+        """
+        key = id(message)
+        cached = self._per_message.get(key)
+        if cached is not None and cached[0] is message:
+            return cached[1]
+        value = messagePayloadTokens(message, self._estimator) + PER_MSG_OVERHEAD
+        self._per_message[key] = (message, value)
+        return value
+
+    def total(self, msgs: typing.Iterable) -> int:
+        """消息序列的 token 总量：逐条求和（与 `one` 同源，无第二套算法）。"""
+        seq = msgs if isinstance(msgs, (list, tuple)) else list(msgs or [])
+        key = id(seq)
+        cached = self._totals.get(key)
+        if cached is not None and cached[0] is seq:
+            return cached[1]
+        value = sum(self.one(m) for m in seq)
+        self._totals[key] = (seq, value)
+        return value
+
+
+def estimate_window_tokens(msgs: typing.Iterable) -> int:
+    """估算窗口消息序列的 token 总量（统一估算器 EXACT/BALANCED 策略）。
+
+    无状态入口：等价于一次性 `WindowTokenMeter`。需要在一段逻辑内多次求值时，
+    请显式持有 meter，避免重复计量。
+    """
+    return WindowTokenMeter().total(msgs)
+
+
+#: 视图归一化保留的字段（协议契约字段 + 工具寻址字段）。
+#: 单源：折叠、视图重建、窗口计量三处都读这一份，避免各留各的字段白名单。
+_MESSAGE_FIELDS = ("role", "content", "tool_call_id", "name", "tool_calls")
+
+
+def normalizeViewMessages(messages: typing.Optional[typing.List[dict]]) -> typing.List[dict]:
+    """把消息序列归一化为视图序列（保留契约字段，剔除空内容项）。
+
+    视图装配的**唯一归一入口**：折叠、视图重建、窗口计量三处共用，避免各自
+    写一份字段白名单——改前正是三处各抄一份"只留 role+content"，于是工具寻址
+    字段被无声裁掉（审计 P2-4）。
+    """
+    out = [_normalizeMessage(m) for m in (messages or []) if isinstance(m, dict)]
+    return [m for m in out if m.get("content") or m.get("tool_calls")]
+
+
+def _normalizeMessage(message: typing.Optional[dict]) -> dict:
+    """把一条消息归一化为视图消息：只保留契约字段（含工具寻址字段）。
+
+    不含 `tool_call_id`/`name`/`tool_calls` 的形态会让"硬地址直取"与
+    "tool 轮配对"两条链同时断掉（见模块顶部 P2-4 说明）。
+    """
+    src = message or {}
+    out = {key: src[key] for key in _MESSAGE_FIELDS if key in src}
+    out.setdefault("role", "user")
+    out.setdefault("content", "")
+    return out
 
 
 def split_window_by_budget(
@@ -34,6 +183,7 @@ def split_window_by_budget(
     budget_tokens: int,
     keep_min_messages: int = 6,
     target_ratio: float = 0.5,
+    meter: typing.Optional["WindowTokenMeter"] = None,
 ) -> typing.Tuple[typing.List[dict], typing.List[dict]]:
     """按 token 预算把窗口切成 (dropped, kept)。
 
@@ -45,14 +195,15 @@ def split_window_by_budget(
     msgs = list(msgs or [])
     if not msgs:
         return [], []
-    if estimate_window_tokens(msgs) <= budget_tokens:
+    meter = meter or WindowTokenMeter()
+    if meter.total(msgs) <= budget_tokens:
         return [], msgs
 
     target = max(budget_tokens * target_ratio, 1.0)
     acc = 0.0
     kept_count = 0
     for m in reversed(msgs):
-        t = estimate_window_tokens([m])
+        t = meter.one(m)
         if kept_count >= keep_min_messages and acc + t > target:
             break
         acc += t
@@ -73,6 +224,11 @@ class WindowCompaction:
     compacted_count: int  # 被折叠的消息条数
     tokens_before: int
     tokens_after: int
+    # P1-2：本轮的 summary 是否为**新**产出。摘要器失败时会沿用 previous_summary
+    # （对池侧是幂等 no-op），返回值仍非空——调用方若据此推进"已覆盖"记账，
+    # 就是把新增消息谎报为已被摘要覆盖。判据取"与上一轮摘要不同"这一可观察事实，
+    # 因此对任何 summarize 实现（含调用方自注入的桥）都成立。
+    summary_is_fresh: bool = False
 
 
 async def compact_window(
@@ -83,6 +239,7 @@ async def compact_window(
     keep_min_messages: int = 6,
     target_ratio: float = 0.5,
     summary_prefix: str = "[早期对话摘要] ",
+    meter: typing.Optional["WindowTokenMeter"] = None,
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
@@ -93,13 +250,16 @@ async def compact_window(
 
     summarize: async (dropped_msgs, previous_summary) -> Optional[str]
     """
-    msgs = [
-        {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-        for m in (conversation_context or [])
-        if isinstance(m, dict) and (m or {}).get("content")
-    ]
+    # 归一化**只裁协议外字段**：工具寻址字段（tool_call_id / name / tool_calls）
+    # 必须随消息走——它们被裁掉后，`_tool_placeholder` 的硬地址指针与
+    # `repair_tool_turns` 的配对判据同时失效（前者产空指针、后者把完整的
+    # tool 轮误判为孤儿），模型再也无法凭指针直取归档原文（审计 P2-4）。
+    msgs = normalizeViewMessages(conversation_context)
     if not msgs:
         return None
+
+    # 单源计量：整段折叠（含递进各轮）共用同一个 meter，同一条消息只算一次。
+    meter = meter or WindowTokenMeter()
 
     summary = None
     ratio = target_ratio
@@ -107,18 +267,18 @@ async def compact_window(
 
     while True:
         dropped, kept = split_window_by_budget(
-            msgs, budget_tokens, keep_min_messages, target_ratio=ratio
+            msgs, budget_tokens, keep_min_messages, target_ratio=ratio, meter=meter
         )
         if not dropped:
             # 无可折叠（keep_min 下限本身超预算等物理无解）：返回保留态的
             # 尽力结果（零折叠、带说明性摘要行），不静默丢弃折叠机会
-            if best is None and estimate_window_tokens(msgs) > budget_tokens:
+            if best is None and meter.total(msgs) > budget_tokens:
                 best = WindowCompaction(
                     window=list(msgs),
                     summary=None,
                     compacted_count=0,
-                    tokens_before=estimate_window_tokens(msgs),
-                    tokens_after=estimate_window_tokens(msgs),
+                    tokens_before=meter.total(msgs),
+                    tokens_after=meter.total(msgs),
                 )
             break
 
@@ -154,8 +314,10 @@ async def compact_window(
             window=window,
             summary=round_summary,
             compacted_count=len(dropped),
-            tokens_before=estimate_window_tokens(msgs),
-            tokens_after=estimate_window_tokens(window),
+            tokens_before=meter.total(msgs),
+            tokens_after=meter.total(window),
+            summary_is_fresh=bool(round_summary)
+            and (not previous_summary or round_summary != previous_summary),
         )
         summary = round_summary or summary
 

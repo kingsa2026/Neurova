@@ -15,8 +15,10 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
+from neurova.core.data_root import dataPath
 
-PERSONALITY_DIR = "data/personality"
+
+PERSONALITY_DIR = dataPath("personality")
 
 
 def personality_path(agent_id: str) -> pathlib.Path:

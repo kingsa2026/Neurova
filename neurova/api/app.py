@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -93,18 +94,24 @@ _app_instance: Optional[FastAPI] = None
 _state_lock = threading.Lock()
 
 
-def _make_database_health_check(db_path: str = "neurova_memory.db"):
+def _make_database_health_check(db_path: str = ""):
     """构造 database 健康检查闭包（可注入 db_path 供测试）。
 
     刻意不走业务连接池：池 get_connection 空池时阻塞等待 30s，
     健康探测需要轻量独立、不与业务争连接。
+
+    默认库落点走数据根（原值裸文件名 `"neurova_memory.db"` 随 CWD 漂移，
+    健康检查会连到一个并不存在的库并误报 degraded）。
     """
+    from neurova.core.database import defaultDbPath
+
+    resolved = db_path or defaultDbPath()
 
     def check_database():
         try:
             import sqlite3
 
-            conn = sqlite3.connect(db_path, timeout=3)
+            conn = sqlite3.connect(resolved, timeout=3)
             try:
                 conn.execute("SELECT 1").fetchone()
             finally:
@@ -226,11 +233,13 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
     )
 
 
-def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
+def _load_saved_agents(app_state: AppState) -> None:
     """从 workspace 目录加载已持久化的 agent 配置"""
     import json as _json
 
-    workspaces_dir = os.path.dirname(default_workspace)  # agent_workspaces/
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    workspaces_dir = str(get_agent_workspaces_root())  # 根由单源解析器给，不反推 default 的父目录
     # 全新安装（打包版）该数据目录天然不存在；加载路径不得因缺目录崩溃，
     # 补建空目录以对齐"安装即有默认工作区"的不变量（bundle 同步预创建）。
     try:
@@ -363,11 +372,9 @@ def _initialize_components(app_state: AppState) -> None:
 
     # 初始化 Admin Service
     try:
-        import os as _os
-
         from neurova.admin.admin_service import AdminService
 
-        admin_storage = _os.path.join(_os.getcwd(), "data", "admin")
+        admin_storage = dataPath("admin")
         app_state.admin_service = AdminService(storage_dir=admin_storage)
     except Exception as e:
         logger.warning("AdminService init failed: %s", e)
@@ -380,10 +387,10 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # 计算默认工作目录（在 try 块外，供 _load_saved_agents 使用）
-    default_workspace = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
-    )
+    # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    default_workspace = str(get_agent_workspace_dir("default"))
 
     # 初始化默认 Agent
     try:
@@ -434,7 +441,7 @@ def _initialize_components(app_state: AppState) -> None:
         logger.warning("Default Agent init failed: %s", e)
 
     # 加载已持久化的 agent（独立于默认 Agent 初始化，确保即使默认 Agent 失败也能加载已有 agent）
-    _load_saved_agents(app_state, default_workspace)
+    _load_saved_agents(app_state)
 
     # 初始化 TTS Manager
     try:
@@ -513,11 +520,7 @@ def _register_core_modules(app_state: AppState) -> None:
 def _register_routes(app: FastAPI, app_state: AppState) -> None:
     """注册所有 API 路由"""
     from neurova.api.endpoints import (
-        acp_router,
-        evolution_router,
-        rag_router,
         register_endpoint_routers,
-        router,
         set_app_state,
     )
 
@@ -545,19 +548,12 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         }
     )
 
-    # 注册主路由
-    app.include_router(router, prefix="/api")
-
-    # 注册特殊路由
-    app.include_router(acp_router, prefix="/api/acp", tags=["ACP"])
-    app.include_router(evolution_router, prefix="/api/evolution", tags=["Evolution"])
-    app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
-    
-    # 注册 NEURON 系统路由
-    from neurova.api.endpoints.neuron import router as neuron_router
-    app.include_router(neuron_router, prefix="/api/neuron", tags=["NEURON"])
-
-    # 注册所有端点路由
+    # 路由挂载只有一个入口：`endpoint_modules` 注册表（含 ACP / 预算 / 成本聚合 /
+    # NEURON / 协作域）。此前这里另有一组旁路 include_router，与注册表并存成了
+    # 第二份挂载事实：neuron 与 coordination 被叠两次前缀（真实路径
+    # /api/neuron/neuron/*、/api/coordination/coordination/*），预算与成本聚合被挂在
+    # /api 下（缺 /v1，前端 baseURL=/api/v1 → 必 404），另有三个空 router 挂出
+    # /api、/api/evolution、/api/rag 三个零路由前缀。旁路已删除。
     register_endpoint_routers(app)
 
     # 工具大输出 OutputRef 落盘引用（产物预览计划 W1-4，2026-09-08）：
@@ -576,6 +572,16 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         hydrate_files_store()
     except Exception as _hyd_err:  # noqa: BLE001
         logger.warning("files 元数据水合异常（忽略）: %s", _hyd_err)
+
+    # artifact 元数据 SQLite 水合（Issue #81 断点③）：条目一丢，预览与
+    # /v1/artifacts/{id}/content 全 404，而会话消息里还记着 artifact_id——
+    # "文件在、条目没"同样是假成功。与 files 水合同一处、同一失败姿态。
+    try:
+        from neurova.api.endpoints.artifacts_api import hydrate_artifacts_store
+
+        hydrate_artifacts_store()
+    except Exception as _art_hyd_err:  # noqa: BLE001
+        logger.warning("artifact 元数据水合异常（忽略）: %s", _art_hyd_err)
 
     # 遗留①：bootstrap 用户引导（NEUROVA_BOOTSTRAP_USER 配置时；fail-open）
     try:
@@ -617,60 +623,50 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
 
     P2-4：指标定义收口到 neurova/core/metrics.py（Counter/Histogram 全量
     埋点），此处做运行态 gauge 快照 + generate_latest 输出。
+
+    单一事实源：本端点只负责"抓取时刷新 gauge + 输出 registry"，不得再手工
+    拼接 # HELP/# TYPE 文本（历史上残留过一套死代码，制造双事实源错觉）。
+
+    P2-7：暴露策略由 `neurova.api.metrics_access` 决定（public/local/token，
+    默认 public 保持向后兼容）。本端点仍在 global_auth 的公共白名单内 ——
+    全局鉴权放行"未登录"，本端点再按抓取策略判来源/令牌，是两层不同的门。
     """
     from neurova.core.metrics import get_metrics as _get_prom_metrics
     from neurova.core.metrics import generate_metrics_text as _generate_metrics_text
+    from neurova.api.metrics_access import check_metrics_access
 
     _prom = _get_prom_metrics()
 
     @app.get("/metrics")
-    async def get_metrics():
+    async def get_metrics(request: Request):
+        # 抓取时刷新运行态快照（gauge 非常驻埋点）
         _prom.observe_state(_app_state)
-        metrics = []
-        # 基础指标
-        metrics.append(f"# HELP neurova_uptime_seconds Neurova uptime in seconds")
-        metrics.append(f"# TYPE neurova_uptime_seconds gauge")
-        uptime = _app_state.get_uptime() if _app_state else 0
-        metrics.append(f"neurova_uptime_seconds {uptime}")
+        # P0-2：连接池 / 共享线程池运行态快照
+        _prom.observe_pools()
+        # P1-6：缓存命中率快照（只读已创建实例，不懒建）
+        _prom.observe_caches()
+        # Issue #65：上下文池常驻/回收快照（池是永久归档，只增不减——
+        # 此前"常驻规模"在观测面上完全空白）
+        _prom.observe_context_pools()
+        # 工单 010/006：链路完整性读数（漏采计数 / 同名覆盖计数）此前只写不读
+        _prom.observe_chain_integrity()
+        # Issue #90 · T-10d：上下文域健康读数（ledger/summarizer/fold_integrity/
+        # turn_identity/microcompact/tool_turns）。此前 `get_context_health()`
+        # 在生产代码里**零读者**（只在测试与 manual 脚本里被读）——"写了但没人读"
+        # 正是协作红线点名的断点形态，此处接上既有观测面（不新开端点）。
+        _prom.observe_context_health(_app_state)
 
-        metrics.append(f"# HELP neurova_agents_total Total number of agents")
-        metrics.append(f"# TYPE neurova_agents_total gauge")
-        agent_count = len(_app_state.agents) if _app_state else 0
-        metrics.append(f"neurova_agents_total {agent_count}")
-
-        # P3: 语音性能指标
-        metrics.append(f"# HELP neurova_voice_engines_total Total number of voice engines")
-        metrics.append(f"# TYPE neurova_voice_engines_total gauge")
-        voice_count = len(_app_state.voice_engines) if _app_state else 0
-        metrics.append(f"neurova_voice_engines_total {voice_count}")
-
-        metrics.append(f"# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_tts_available gauge")
-        tts_available = 0
-        if _app_state and "tts" in _app_state.voice_engines:
-            try:
-                tts_available = 1 if _app_state.voice_engines["tts"].is_available() else 0
-            except Exception:
-                tts_available = 0
-        metrics.append(f"neurova_voice_tts_available {tts_available}")
-
-        metrics.append(f"# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_asr_available gauge")
-        asr_available = 0
-        if _app_state and "asr" in _app_state.voice_engines:
-            try:
-                asr_available = 1 if _app_state.voice_engines["asr"].is_available() else 0
-            except Exception:
-                asr_available = 0
-        metrics.append(f"neurova_voice_asr_available {asr_available}")
-
-        # 渠道指标
-        metrics.append(f"# HELP neurova_channels_total Total number of registered channels")
-        metrics.append(f"# TYPE neurova_channels_total gauge")
-        channel_count = 0
-        if _app_state and _app_state.channel_manager:
-            channel_count = len(_app_state.channel_manager._adapters)
-        metrics.append(f"neurova_channels_total {channel_count}")
+        headers = {k: v for k, v in request.headers.items()}
+        allowed, reason = check_metrics_access(
+            request.client.host if request.client else None, headers
+        )
+        if not allowed:
+            logger.warning(
+                "拒绝 /metrics 抓取: %s (client=%s)",
+                reason,
+                request.client.host if request.client else "?",
+            )
+            return PlainTextResponse("forbidden", status_code=403)
 
         return PlainTextResponse(_generate_metrics_text(), media_type="text/plain")
 
@@ -822,6 +818,29 @@ async def _on_startup(app_state: AppState) -> None:
             logger.info("飞书 KB 定时同步循环已启动")
         except Exception as _kbsync_err:  # noqa: BLE001
             logger.warning("飞书 KB 定时同步循环启动失败（忽略）: %s", _kbsync_err)
+
+    # P0-3：索引可观测启动采集（index_list/index_info 聚合 + 热点 EQP 白名单）。
+    # fail-open：可观测不得成为启动依赖（库损坏/权限不足时仅无数据）
+    try:
+        from neurova.core.db_indexes import bootstrap_index_observability
+
+        await asyncio.to_thread(bootstrap_index_observability)
+    except Exception as _idx_err:  # noqa: BLE001
+        logger.debug("索引可观测启动采集失败（忽略）: %s", _idx_err)
+
+    # LLM 成本账本装配：装配后 @track_llm_call 与流式记账才真正落盘 SQLite，
+    # 并启动小时聚合后台任务。默认开，NEUROVA_COST_TRACKING=off 显式停用；
+    # 账本路径由 NEUROVA_LLM_COST_DB 覆盖（缺省 data/llm_cost.db）。fail-open 不阻断启动。
+    if (os.environ.get("NEUROVA_COST_TRACKING") or "on").strip().lower() != "off":
+        try:
+            from neurova.models.cost_rollup import get_rollup_manager
+            from neurova.models.cost_store import install_llm_cost_store
+
+            install_llm_cost_store()
+            get_rollup_manager().start_background_job()
+            logger.info("LLM 成本账本已装配，小时聚合后台任务已启动")
+        except Exception as _cost_err:  # noqa: BLE001
+            logger.warning("LLM 成本账本装配失败（忽略）: %s", _cost_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
@@ -1290,6 +1309,13 @@ def run_server(
     host = config.get("NEUROVA_HOST", host)
     port = config.get_int("NEUROVA_PORT", port)
     debug = config.get_bool("NEUROVA_DEBUG", False) or debug
+
+    # 端口预检先于应用装配：uvicorn 的次序是 lifespan 先跑完再 bind，
+    # 全量装配（Agent/LLM/DB）之后才失败等于把唯一有用的信息埋进日志尾部。
+    # 与 start_server.py / guest_agent 同源判据（neurova.core.port_guard）。
+    from neurova.core.port_guard import preflightPortAvailable
+
+    preflightPortAvailable(host, port)
 
     # 创建应用
     app = create_app(host=host, port=port, debug=debug)

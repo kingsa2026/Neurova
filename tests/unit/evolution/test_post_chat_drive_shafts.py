@@ -57,7 +57,11 @@ class TestPatternMiningUsesAgentRegistry:
         # Frequency replay is no longer a creation source; finish_task owns registration.
         packer.observe.assert_not_called()
         packer.register_to_skill_registry.assert_not_called()
-        pattern_miner.add_sequence.assert_called_once_with(["w1", "w2"])
+        # 旧契约（`assert_called_once_with(["w1", "w2"])`）在工单 013 后失效：
+        # add_sequence 必须额外携带客观结果位。本用例的记录没有 `type: tool_call`，
+        # 无从查票 ⇒ 只能是 None（无证据），不得在调用方兜底成 True。
+        # "有票必须把票传到" 的正向锁见 test_genetic_seed_evidence.py::TestPipelineWiring。
+        pattern_miner.add_sequence.assert_called_once_with(["w1", "w2"], success=None)
         pattern_miner.mine.assert_called_once()
 
     @pytest.mark.asyncio

@@ -19,9 +19,7 @@ from neurova.context_pool import (
     ContextInput,
     ContextCollector,
     ContextConverter,
-    ContextCompressor,
     ContextPool,
-    ContextPoolUtils,
 )
 
 
@@ -378,5 +376,9 @@ class TestContextPoolDeepModule:
         assert hasattr(pool, 'add_context')
         assert hasattr(pool, 'get_contexts')
         assert hasattr(pool, 'build_context_for_model')
-        assert hasattr(pool, 'compress_context')
-        assert hasattr(pool, 'merge_with')
+        # B6-10 批次 C：池的公共面只保留**归档 + 按需取用**——压缩与去重
+        # 不是池的职责（压缩真通路在 orchestrator 的信封+历史确定性淘汰，
+        # 去重真面在 add_context 的 _by_hash 去重），那两个出口已删净。
+        assert hasattr(pool, 'draw')
+        assert not hasattr(pool, 'compress_context')
+        assert not hasattr(pool, 'dedup')

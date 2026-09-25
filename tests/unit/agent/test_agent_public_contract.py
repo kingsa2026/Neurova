@@ -83,6 +83,12 @@ def live_contract(agent_module):
     with tempfile.TemporaryDirectory() as td:
         agent = Agent(workspace_path=td, enable_memory=False)
         fields = sorted(vars(agent))
+        # Agent 初始化会经审批管理器在 td/.approval/approvals.db 建连接池；池按路径持有
+        # 连接、不随作用域结束关闭，Windows 下 TemporaryDirectory 清理会撞 WinError 32。
+        # 全量跑因别的用例已清池不犯，单跑该文件才暴露——在退出 with 前主动释放池连接。
+        from neurova.core.connection_pool import close_all_pools
+
+        close_all_pools()
 
     return {"members": members, "signatures": signatures, "fields": fields}
 

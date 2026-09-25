@@ -11,12 +11,16 @@ Experience Knowledge Base API - 经验知识库接口（真实 SQLite 存储）
 - GET  /stats?agent_id   统计卡（total_experiences/success_rate/…）
 - POST /similar         相似经验检索（关键词重叠 60% + 话题 30% + 成功加权 10%）
 - GET  /{id} / DELETE /{id}  单条查看/删除
+- PUT  /{id}/disposition  人工处置（审核/降权/隐藏/恢复，工单 015）
+
+处置与删除是两条通路（工单 015）：PUT 只改 `operator_disposition`，可逆、不删行、
+不写采纳证据列；要让条目永久不存在仍然走 DELETE。
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
@@ -42,6 +46,17 @@ class FindSimilarExperiencesRequest(BaseModel):
     agent_id: Optional[str] = None
     query: str
     limit: int = Field(default=5, ge=1, le=20)
+
+
+class ExperienceDispositionRequest(BaseModel):
+    """人工处置态（工单 015）：审核通过 / 降权 / 隐藏 / null=恢复未处置。
+
+    刻意不给 "deleted"：删除是另一个动作（DELETE /{id}），不可逆。
+    刻意不给 confidence/成功位：采纳证据由 006 的回写通路独占，人的判断写进
+    那一格就是把审核洗成执行成功。
+    """
+
+    disposition: Optional[Literal["endorsed", "demoted", "suppressed"]] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,15 +96,33 @@ def reset_experience_kb() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _to_contract(row: Dict[str, Any]) -> Dict[str, Any]:
+def _outcome_word(success: Any) -> str:
+    """成败三态 → 契约词汇（True / False / None 各归各位，不折叠）。
+
+    实现收口到 `skills.models.outcomeWord`（三态词汇的唯一定义处）：本文件此前
+    自带一份字面量，与进 prompt 的那一面各写各的，正是"三态在半路裂开"的形态。
+    名字保留是调用方与既有判据的落点。
+    """
+    from neurova.skills.models import outcomeWord
+
+    return outcomeWord(success)
+
+
+def _to_contract(row: Dict[str, Any], experience_count: int) -> Dict[str, Any]:
+    """EKB 行 → 前端 ExperienceRecord 契约（工单 015 起不再自造读数）。
+
+    `experience_count` 必须由调用方给出真实聚合值：这里曾硬编码 1，同一技能在生产
+    库里攒到 7 条，界面仍然显示 1。
+    置信度缺失保持 None，不再回落成 `1.0/0.0` 二值——二值喂给五格星级，等于把
+    "没测到"演成"满级/零级"。
+    """
     ctx = row.get("context") or {}
     if isinstance(ctx, dict):
         ctx_text = str(ctx.get("user_input", "") or "")
     else:
         ctx_text = str(ctx)
     confidence = row.get("confidence_score")
-    if confidence is None:
-        confidence = 1.0 if row.get("success") else 0.0
+    rating = round(float(confidence), 4) if confidence is not None else None
     feedback = row.get("feedback") or ""
     lessons = [l for l in str(feedback).splitlines() if l.strip()] if feedback else []
     return {
@@ -98,11 +131,21 @@ def _to_contract(row: Dict[str, Any]) -> Dict[str, Any]:
         "task_type": row.get("skill_name", ""),
         "skill_name": row.get("skill_name", ""),
         "context": ctx_text,
-        "outcome": "success" if row.get("success") else "failure",
-        "success_rate": round(float(confidence), 4) if confidence is not None else 0.0,
-        "proficiency": round(float(confidence), 4) if confidence is not None else 0.0,
-        "experience_count": 1,
+        # 工单 004：三态不许在半路裂开——NULL 输出 `unevidenced`（与
+        # `evidence_state` 同一词汇表），旧写法 `if row.get("success")` 把
+        # "没测到"演成"失败"。
+        "outcome": _outcome_word(row.get("success")),
+        "success_rate": rating,
+        "proficiency": rating,
+        "experience_count": experience_count,
         "lessons": lessons,
+        # 工单 006/008/015 的运营读数来源：证据态与处置态原样给到界面，
+        # 界面自己不做二次推断（008 已删掉那批"零调用方的假聚合"）
+        "adoption_outcome": row.get("adoption_outcome"),
+        "evidence_state": row.get("evidence_state"),
+        "injected_count": row.get("injected_count"),
+        "seen_count": row.get("seen_count"),
+        "operator_disposition": row.get("operator_disposition"),
         "metadata": {
             "result": row.get("result"),
             "tags": row.get("tags") or [],
@@ -111,6 +154,18 @@ def _to_contract(row: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": row.get("created_at") or "",
         "updated_at": row.get("created_at") or "",
     }
+
+
+def _to_contracts(kb, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """批量映射：一次 GROUP BY 拿到全部 (agent_id, skill_name) 的真实条数。
+
+    计数键直接从行里取，与 `experience_counts_by_skill` 同源，所以不做兜底默认——
+    键对不上就是聚合口径裂了，得炸出来而不是显示 1。
+    """
+    counts = kb.experience_counts_by_skill()
+    return [
+        _to_contract(r, counts[(r.get("agent_id"), r.get("skill_name"))]) for r in rows
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +182,9 @@ async def add_experience_record(body: AddExperienceRecordRequest):
         skill_name=body.task_type,
         context={"user_input": body.context, "task_type": body.task_type},
         result=body.metadata or {},
-        success=body.outcome != "failure",
+        # 工单 004：`outcome == "failure"` 的补集把 `unevidenced` 洗成成功。
+        # 三态各自成值，未测量不冒充成功（同列 106-110 注释的禁则）。
+        success=None if body.outcome == "unevidenced" else (body.outcome != "failure"),
         timestamp="",
         feedback="\n".join(body.lessons or []),
     )
@@ -136,14 +193,23 @@ async def add_experience_record(body: AddExperienceRecordRequest):
             skill_name=body.task_type,
             exp=exp,
             agent_id=body.agent_id,
-            confidence_score=1.0 if exp.success else 0.0,
+            # 置信度不得由 success 二值折算（上一批工单 015 的行契约）：
+            # 未测量 ⇒ 不写（NULL），真成功/真失败才给端点值。
+            confidence_score=None if exp.success is None else (1.0 if exp.success else 0.0),
             tags=list((body.metadata or {}).get("tags", [])) or None,
         )
     except Exception as e:
         logger.exception("add experience record failed: %s", e)
         raise HTTPException(status_code=500, detail=f"add experience record failed: {e}")
 
-    return {"code": 0, "message": "Record added", "data": _to_contract({"id": rid, "skill_name": body.task_type, "context": {"user_input": body.context}, "success": exp.success, "confidence_score": 1.0 if exp.success else 0.0, "feedback": "\n".join(body.lessons or []), "agent_id": body.agent_id, "created_at": ""})}
+    # 回读落库后的真实行：命中内容门合并时返回的是既有行，手拼一份"看起来对"的
+    # 字典只会让契约与库里不一致（experience_count 就是这么变成假的）
+    kb = get_experience_kb()
+    return {
+        "code": 0,
+        "message": "Record added",
+        "data": _to_contracts(kb, [kb.get_record_by_id(rid)])[0],
+    }
 
 
 @router.get("/ranking")
@@ -162,7 +228,7 @@ async def get_experience_ranking(
         )
         total = len(records)
         start = (page - 1) * size
-        items = [_to_contract(r) for r in records[start : start + size]]
+        items = _to_contracts(kb, records[start : start + size])
         return {
             "code": 0,
             "message": "success",
@@ -180,11 +246,18 @@ async def get_experience_stats(agent_id: str = Query(default="")):
         kb = get_experience_kb()
         records = kb.get_experience_records(agent_id=agent_id or None)
         total = len(records)
+        # 工单 004：success 列的三态是 1 / 0 / NULL——NULL（未测量）在这里天然是
+        # 假值，进不了成功分子；分母保持全部条目（真失败也在分母里，否则成功率
+        # 会被未测量条目稀释成假高）。三态的可分辨性落在上面的 `outcome` 字段。
         successes = sum(1 for r in records if r.get("success"))
         proficiency_values = [
             float(r.get("confidence_score") or 0) for r in records if r.get("confidence_score") is not None
         ]
-        avg_proficiency = round(sum(proficiency_values) / len(proficiency_values), 4) if proficiency_values else 0.0
+        # 全空必须给 None（"没测到"≠"零分"），由调用方决定怎么显示
+        avg_proficiency = (
+            round(sum(proficiency_values) / len(proficiency_values), 4)
+            if proficiency_values else None
+        )
         counts: Dict[str, int] = {}
         for r in records:
             key = r.get("skill_name") or "unknown"
@@ -212,12 +285,17 @@ async def get_experience_stats(agent_id: str = Query(default="")):
 async def find_similar_experiences(body: FindSimilarExperiencesRequest):
     """查找与查询文本相似的经验记录（EKB 关键词/话题/成功加权算法）"""
     try:
-        results = get_experience_kb().find_similar_experiences(
+        kb = get_experience_kb()
+        results = kb.find_similar_experiences(
             context={"user_input": body.query},
             limit=body.limit,
             agent_id=body.agent_id or None,
         )
-        return {"code": 0, "message": "success", "data": {"results": [_to_contract(r) for r in results], "total": len(results)}}
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {"results": _to_contracts(kb, results), "total": len(results)},
+        }
     except Exception as e:
         logger.exception("find similar experiences failed: %s", e)
         raise HTTPException(status_code=500, detail=f"find similar experiences failed: {e}")
@@ -226,8 +304,9 @@ async def find_similar_experiences(body: FindSimilarExperiencesRequest):
 @router.get("/{record_id}")
 async def get_experience(record_id: str):
     """单条经验记录"""
+    kb = get_experience_kb()
     try:
-        record = get_experience_kb().get_record_by_id(int(record_id))
+        record = kb.get_record_by_id(int(record_id))
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid record id")
     except Exception as e:
@@ -235,7 +314,35 @@ async def get_experience(record_id: str):
         raise HTTPException(status_code=500, detail=f"get experience failed: {e}")
     if record is None:
         raise HTTPException(status_code=404, detail="experience record not found")
-    return {"code": 0, "message": "success", "data": _to_contract(record)}
+    return {"code": 0, "message": "success", "data": _to_contracts(kb, [record])[0]}
+
+
+@router.put("/{record_id}/disposition")
+async def set_experience_disposition(record_id: str, body: ExperienceDispositionRequest):
+    """人工处置单条经验（工单 015）：审核通过 / 降权 / 隐藏 / 恢复未处置。
+
+    处置走 EKB 的 `operator_disposition` 列，与检索排序、注入优先级同一条链
+    （`find_similar_experiences` / `dedupe_experience_sources`），不是在响应里
+    编一个态。全程可逆、不删行、不写采纳证据列。
+    """
+    kb = get_experience_kb()
+    try:
+        rid = int(record_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid record id")
+    record = kb.get_record_by_id(rid)
+    if record is None:
+        raise HTTPException(status_code=404, detail="experience record not found")
+    try:
+        kb.set_operator_disposition([rid], body.disposition)
+    except Exception as e:
+        logger.exception("set experience disposition failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"set experience disposition failed: {e}")
+    return {
+        "code": 0,
+        "message": "Disposition updated",
+        "data": _to_contracts(kb, [kb.get_record_by_id(rid)])[0],
+    }
 
 
 @router.delete("/{record_id}")

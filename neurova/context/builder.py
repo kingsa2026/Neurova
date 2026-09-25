@@ -198,7 +198,10 @@ class ContextBuilder:
                     {
                         "context": item.content[:100],  # 使用内容作为上下文摘要
                         "result": item.metadata.get("result", ""),
-                        "success": item.metadata.get("success", True),
+                        # 工单 016：默认值必须是第三态。此处的 `True` 默认让
+                        # 「元数据里根本没记成败」被演成"成功"——与 prompt 面
+                        # 把 NULL 演成"失败"是同一条三态契约上的两个方向。
+                        "success": item.metadata.get("success"),
                         "lesson": item.metadata.get("lesson", ""),
                         "confidence": item.metadata.get("confidence", 1.0),
                     }

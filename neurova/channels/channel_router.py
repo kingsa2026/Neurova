@@ -22,6 +22,10 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
+from neurova.channels.group_leadership import (
+    get_group_leadership_arbiter,
+    get_group_leadership_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,21 @@ def _flag(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
     return bool(value)
+
+
+def _detect_sender_is_bot(message: ChannelMessage) -> bool:
+    """判定入站消息发送者是否 bot/对端 agent（任务2 actionability 信号）。
+
+    依次查适配器已解析的 metadata（sender_is_bot/is_bot）与 raw_event 里的平台真实
+    字段（telegram from.is_bot / discord author.bot）。缺字段/非法一律 False（=人类，安全侧）。"""
+    meta = getattr(message, "metadata", None)
+    if isinstance(meta, dict) and (meta.get("sender_is_bot") or meta.get("is_bot")):
+        return True
+    raw = getattr(message, "raw_event", None)
+    if not isinstance(raw, dict):
+        return False
+    sender = raw.get("from") or raw.get("author") or {}
+    return isinstance(sender, dict) and bool(sender.get("is_bot") or sender.get("bot"))
 
 
 def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -> Callable:
@@ -93,6 +112,29 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # 可信轮次来源（任务2 actionability 门控地基）：默认 human——人类/未标注一律
+        # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
+        sender_is_bot = _detect_sender_is_bot(message)
+        meta["turn_origin"] = "bot_peer" if sender_is_bot else "human"
+
+        # 群领导选举（spec 2026-09-19）：多我方 agent 同群仅 leader 应答，防重答/回声。
+        # 默认关、仅群聊生效、fail-open（仲裁异常/缺 chat_id 一律放行，绝不吞人类）。
+        gl_enabled, gl_ttl = get_group_leadership_config()
+        if gl_enabled and message.chat_type == "group" and message.chat_id:
+            try:
+                granted = get_group_leadership_arbiter().may_respond(
+                    (message.channel_type, message.chat_id), agent_id, ttl=gl_ttl
+                )
+            except Exception:  # noqa: BLE001 - 仲裁故障不阻断应答（安全侧放行）
+                logger.debug("群领导选举异常，放行", exc_info=True)
+                granted = True
+            meta["leadership"] = {"granted": granted}
+            if not granted:
+                logger.info(
+                    "ChannelRouter: 群领导选举非 leader，静默 agent=%s group=%s",
+                    agent_id, message.chat_id,
+                )
+                return None
         # 可读会话标题（仅首轮建记录时生效）：渠道·发送者/群，替代恒"新对话"，
         # 控制台列表一眼区分是哪个渠道哪个会话。
         who = meta["channel_name"] or (message.chat_id[:8] if message.chat_id else "")

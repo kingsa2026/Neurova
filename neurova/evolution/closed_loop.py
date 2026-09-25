@@ -179,13 +179,19 @@ class AdaptiveToolWeights:
         with self._lock:
             return self._weights.get(tool_name)
 
-    def update_weight(self, tool_name: str, success: bool, latency: float = 0.0) -> None:
-        """更新工具权重
+    def update_weight(self, tool_name: str, success, latency: float = 0.0) -> None:
+        """更新工具权重（三态：True 记成功票 / False 记失败票 / None **不投票**）。
 
         multiplier：成功走加法递减收益（A 版思想：bonus/(1+0.1*success_count)），
         失败走乘法惩罚；两者共用 [min_multiplier, max_multiplier] 夹紧。
         同时维护滑动窗口（A 版思想①），供 get_effective_weight 的近期成功率消费。
+
+        `success=None` 表示"这轮没有客观回执"（工单 002/004 的三态语义）。旧写法
+        `if success: … else: 记失败` 把"未测量"折成失败票，与同文件 pattern_miner /
+        pattern_crystallizer 的"不投票"契约相悖，也和 004 的三态口径分叉。
         """
+        if success is None:
+            return
         with self._lock:
             if tool_name not in self._weights:
                 self._weights[tool_name] = ToolWeight(tool_name=tool_name)
@@ -321,6 +327,7 @@ from neurova.evolution.genetic_engine import ToolGeneticEngine
 
 # 从真实实现导入，替代占位符
 from neurova.evolution.pattern_miner import PatternMiner
+from neurova.core.data_root import get_data_root
 
 
 class PatternBasedToolSynthesizer:
@@ -378,6 +385,22 @@ class EvolutionOrchestrator:
         self._lifecycle_eval_interval: float = 3600.0  # 1 小时
 
         logger.info("EvolutionOrchestrator initialized")
+
+    @property
+    def crystallizer(self) -> Optional[Any]:
+        return self._crystallizer
+
+    @crystallizer.setter
+    def crystallizer(self, value: Optional[Any]) -> None:
+        """注入结晶器时同步挂上门槛桥（工单 004）。
+
+        `agent_core.py` 是在构造之后才把 agent 自己的结晶器赋进来，
+        所以桥必须挂在 setter 上：否则 RSI 调 `crystallize_min_*` 只改报表，
+        入库闸仍读结晶器里的默认值。
+        """
+        self._crystallizer = value
+        if value is not None:
+            self.experience_feedback.attach_crystallizer(value)
 
     def register_tools(self, tool_names: List[str]) -> None:
         """注册工具列表（同时注册到权重和生命周期管理器）"""
@@ -479,6 +502,31 @@ class EvolutionOrchestrator:
 
         logger.debug("Tool execution recorded: %s, success=%s", tool_name, success)
 
+    def on_pattern_crystallized(
+        self,
+        *,
+        pattern_key: str,
+        primary_tool: str,
+        success_rate: float,
+        sample_count: int,
+    ) -> Dict[str, Any]:
+        """结晶入库通报 —— 触发进化节流路径，但**不投任何成败票**（工单 005）。
+
+        原路径走 `record_experience(..., True, ...)`：把"我刚存了一条模式"当成一次
+        任务成功经验写进关联计数，等于门槛给自己加分（还会再触发一轮结晶）。
+        入库这件事的证据已经在候选的样本计数里，不需要再造一张票。
+        """
+        logger.info(
+            "结晶模式入库: key='%s' tool=%s rate=%.2f samples=%s",
+            pattern_key, primary_tool, success_rate, sample_count,
+        )
+        rsi_state = self._maybe_trigger_rsi(force=False)
+        return {
+            "notified": True,
+            "rsi": rsi_state if rsi_state is not None
+            else {"triggered": False, "reason": "throttled_or_no_rsi"},
+        }
+
     def on_experience_recorded(
         self,
         text: str,
@@ -502,11 +550,14 @@ class EvolutionOrchestrator:
         Returns:
             包含洞察信息的字典
         """
-        # 使用 ExperienceFeedback 处理经验
-        outcome = "success" if success else "failure"
+        # 使用 ExperienceFeedback 处理经验 —— 三态贯通（工单 003）：
+        # 原实现算出 outcome 却没传下去，被 :261 的关键词粗分覆盖，
+        # 于是客观失败与"无回执"都被洗成成功票。
+        objective = None if success is None else ("success" if success else "failure")
         result = self.experience_feedback.process_experience(
             experience_text=text,
             task_type=task,
+            outcome=objective,
         )
 
         # 更新权重
@@ -515,12 +566,15 @@ class EvolutionOrchestrator:
                 self.tool_weights.update_weight(tool, success)
 
         # 更新模式挖掘器
+        # 工单 013：`success` 原样进序列台账（装配点已按 010 做成票据优先的三态）。
+        # 这里不再判空也不默认 True —— 无票就是 None，模式即"无证据"，不投票。
         if tools:
-            self.pattern_miner.add_sequence(tools, context=task)
+            self.pattern_miner.add_sequence(tools, context=task, success=success)
 
         # 触发经验结晶
-        # 入口放宽：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的
-        # skill_name="chat" 约定一致——否则无工具轮永不进入结晶缓冲
+        # 入口：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的 skill_name="chat"
+        # 约定一致；`success` 三态原样传给结晶器，由它把 None 记成"无证据观察"
+        # （既不投成功票也不投失败票，工单 003/004）
         cryst = crystallizer or self.crystallizer
         if cryst:
             observe_targets = tools if tools else ["chat"]
@@ -544,7 +598,7 @@ class EvolutionOrchestrator:
         return {
             "insights_count": result.get("insights_created", 0),
             "tools_mentioned": result.get("tools_mentioned", []),
-            "outcome": result.get("outcome", outcome),
+            "outcome": result.get("outcome", objective),
             "task": task,
             "success": success,
             "association": result.get("associations_updated", 0),
@@ -674,7 +728,7 @@ def default_evolution_weights_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_WEIGHTS")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "tool_weights.json"
+    return get_data_root() / "evolution" / "tool_weights.json"
 
 
 def default_evolution_patterns_path() -> Path:
@@ -682,7 +736,7 @@ def default_evolution_patterns_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_PATTERNS")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "pattern_sequences.json"
+    return get_data_root() / "evolution" / "pattern_sequences.json"
 
 
 def default_evolution_lifecycle_path() -> Path:
@@ -690,7 +744,7 @@ def default_evolution_lifecycle_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_LIFECYCLE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "tool_lifecycle.json"
+    return get_data_root() / "evolution" / "tool_lifecycle.json"
 
 
 def default_evolution_experience_path() -> Path:
@@ -698,7 +752,7 @@ def default_evolution_experience_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_EXPERIENCE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "experience_feedback.json"
+    return get_data_root() / "evolution" / "experience_feedback.json"
 
 
 def default_evolution_skill_experience_path() -> Path:
@@ -706,7 +760,15 @@ def default_evolution_skill_experience_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_SKILL_EXPERIENCE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "skill_experiences.json"
+    return get_data_root() / "evolution" / "skill_experiences.json"
+
+
+def default_evolution_improvements_path() -> Path:
+    """默认技能改进史持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_IMPROVEMENTS")
+    if env_path:
+        return Path(env_path)
+    return get_data_root() / "evolution" / "skill_improvements.json"
 
 
 def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
@@ -714,9 +776,9 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
 
     与 get_evolution_orchestrator 分离：单例保持零 IO 副作用，
     测试/嵌入场景不会污染 data/；生产由 start_server 显式装配。
-    装配五件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
-    （后四件此前纯内存，重启进化史清零）。
-    返回是否从既有文件恢复了权重（后四件恢复结果只记日志，失败不阻断启动）。
+    装配六件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
+    + 技能改进史（工单 016 补最后一件；此前纯内存的组件重启即归零）。
+    返回是否从既有文件恢复了权重（其余件恢复结果只记日志，失败不阻断启动）。
     """
     orchestrator = get_evolution_orchestrator()
     persist_path = path or default_evolution_weights_path()
@@ -753,6 +815,19 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
         logger.warning("技能经验库持久化装配失败", exc_info=True)
 
+    # 技能改进史（工单 016 断点 c）：使用记录 / 改进史 / 变体 / 同签名去重集。
+    # 此前纯内存 ⇒ 重启归零，失败率分母每轮从 0 重算、同一条改进被重复应用。
+    try:
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        improver = get_skill_improver()
+        im_path = default_evolution_improvements_path()
+        improver.attach_persistence(im_path)
+        if improver.load(im_path):
+            logger.info("技能改进史已从 %s 恢复", im_path)
+    except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
+        logger.warning("技能改进史持久化装配失败", exc_info=True)
+
     # P1-4 进化作业队列崩溃恢复（默认关时不建单例、零副作用）：把上一进程
     # 遗留的 running 租约超时作业释放回可重试池，供下一次 post_chat drain。
     try:
@@ -768,7 +843,7 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
 
 
 def flush_evolution_persistence() -> Dict[str, bool]:
-    """关停时强制落盘五件进化状态（绕过节流）。
+    """关停时强制落盘六件进化状态（绕过节流）。
 
     节流落盘（默认 10s）意味着关停前最后窗口期内的变更只在内存——
     优雅关停必须 flush 一次，否则每次短会话重启都会丢尾部变更。
@@ -794,6 +869,15 @@ def flush_evolution_persistence() -> Dict[str, bool]:
     except Exception:  # noqa: BLE001
         logger.warning("技能经验库关停落盘失败", exc_info=True)
         result["skill_experience_store"] = False
+
+    # 技能改进史（工单 016 断点 c，同批 flush）
+    try:
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        result["skill_improver"] = get_skill_improver().save()
+    except Exception:  # noqa: BLE001
+        logger.warning("技能改进史关停落盘失败", exc_info=True)
+        result["skill_improver"] = False
     return result
 
 

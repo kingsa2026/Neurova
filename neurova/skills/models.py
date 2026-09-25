@@ -21,6 +21,72 @@ class SkillSource(Enum):
     BUILTIN = "builtin"
 
 
+# ── 经验成败三态：词、记号、摘要提取的**唯一**定义处 ────────────────────────
+# 工单 004 要求"三态不许在半路裂开"。此前每个展示面各自写一份真假值判断
+# （EKB 行 `INTEGER NULL`、权重表、结晶器、API 的 `_outcome_word`、以及进 prompt
+# 的那一段），同一根因有五六份实现，逐个漏改——进 prompt 那一面就是这么漏掉的。
+# 此处收口：词与记号只在这里定义，各消费方按需取用，不得再写字面量。
+OUTCOME_SUCCESS = "success"
+OUTCOME_FAILURE = "failure"
+OUTCOME_UNEVIDENCED = "unevidenced"
+
+#: 三态 → 展示记号。未测量刻意**不**复用失败记号：`✗` 对模型说的是
+#: "上次这条做砸了"，而事实是"这轮没测到"。
+OUTCOME_MARKS: Dict[Optional[bool], str] = {
+    True: "✓",
+    False: "✗",
+    None: "○",
+}
+
+
+def outcomeWord(success: Optional[bool]) -> str:
+    """三态 → 契约词汇（与 `knowledge_facts.EVIDENCE_STATES` 同一词汇表）。"""
+    return {True: OUTCOME_SUCCESS, False: OUTCOME_FAILURE}.get(
+        outcomeState(success), OUTCOME_UNEVIDENCED
+    )
+
+
+def outcomeState(success: Any) -> Optional[bool]:
+    """把任意来源的 `success` 归一为三态之一：True / False / None。
+
+    三态契约的**入口**：bool 原样、`None` 原样、EKB 2.0 里的 int 0/1 按真值解释，
+    其余无法解释的值落 `None`（"没有可读回执"）——既不猜成成功，也不猜成失败。
+    此前每个搬运点各写一份 `bool(...)`，同一列 `INTEGER NULL` 被折多次：
+    `chat_pipeline` 折一次（真值搬运）、`ExperienceRecord.from_dict` 折一次
+    （往返把三态洗成两态）。归一收在这里，搬运点只负责调用。
+    """
+    if success is None:
+        return None
+    if isinstance(success, bool):
+        return success
+    if isinstance(success, int):
+        return bool(success)
+    return None
+
+
+def outcomeMark(success: Optional[bool]) -> str:
+    """三态 → 展示记号（True/False/None 各归各位，不折叠）。"""
+    return OUTCOME_MARKS.get(success, OUTCOME_MARKS[None])
+
+
+def experienceSummary(value: Any, keys: tuple = ()) -> str:
+    """经验条目里的"摘要"取值口：dict 取第一个非空键、标量原样、其余留空。
+
+    旧实现在两处各写一份 `str(x)[:50]`，dict 形状（EKB 2.0 的 `context`/`result`
+    就是 dict）直接切片抛 `TypeError`，被外层 `except` 吞掉后**整段经验从 prompt
+    里静默消失**。取值形状收在这里一处，消费方不再各自猜。
+    """
+    if isinstance(value, dict):
+        for key in keys:
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate)
+        return ""
+    if value is None:
+        return ""
+    return str(value)
+
+
 @dataclass
 class SkillMetadata:
     """技能元数据"""
@@ -355,7 +421,9 @@ class ExperienceRecord:
     skill_name: str = ""
     context: Dict[str, Any] = field(default_factory=dict)
     result: Optional[Dict[str, Any]] = None
-    success: bool = False
+    # 三态：True 成功 / False 失败 / None 未测量（本轮没有客观回执）。
+    # 工单 004 之前是 `bool`，`bool(None)` 的折叠让"没测到"永久等于"失败"。
+    success: Optional[bool] = None
     timestamp: str = ""
     feedback: str = ""
 
@@ -371,11 +439,15 @@ class ExperienceRecord:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExperienceRecord":
+        # 工单 016：三态原样还原。`bool(data.get("success", False))` 把
+        # 「键缺席」与「值为 None」两种"未测量"都折成 False（失败），
+        # 与票面 004 在同一条链路上打对台——往返一次就把三态洗成两态。
+        # 归一取本模块的 `outcomeState`（三态入口就在文件上方，不再跨模块借）。
         return cls(
             skill_name=data.get("skill_name", ""),
             context=dict(data.get("context", {})) if data.get("context") else {},
             result=dict(data.get("result")) if data.get("result") else None,
-            success=bool(data.get("success", False)),
+            success=outcomeState(data.get("success")),
             timestamp=data.get("timestamp", ""),
             feedback=data.get("feedback", ""),
         )

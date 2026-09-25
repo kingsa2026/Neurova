@@ -11,9 +11,13 @@
 2. **静态门禁 ImportError 族捕获** —— check_imports 只捕
    ModuleNotFoundError 会漏掉 `from X import Y` 形态的可选包缺失
    （exc.name 指向 X），误报为失败。
-3. **硬依赖声明完整** —— feedparser/apscheduler/segno 为裸 import 无降级，
-   必须同时在 requirements-ci.txt 与 requirements-ci.lock 中声明；
-   也不得被误登记进 KNOWN_OPTIONAL_DEPS（该表仅收"缺失可优雅降级"项）。
+3. **硬依赖声明完整** —— feedparser/apscheduler/segno/prometheus_client 为裸
+   import 无降级，必须同时在 requirements-ci.txt 与 requirements-ci.lock 中
+   声明；也不得被误登记进 KNOWN_OPTIONAL_DEPS（该表仅收"缺失可优雅降级"项）。
+4. **CI 锁定集覆盖直接依赖** —— requirements-ci.txt 新增一行但漏跑
+   `uv pip compile` 重新生成 lock，CI 装的是 lock，声明的包根本没进环境
+   （2026-09-18 实锤：requirements-ci.txt 有 prometheus_client>=0.20，lock 无
+   对应 pin → unit-tests 两条流水线 ModuleNotFoundError 全红，本地却绿）。
 """
 
 import ast
@@ -21,6 +25,8 @@ import io
 import re
 import sys
 from pathlib import Path
+
+from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -103,17 +109,23 @@ def _find_annotation_mines(src: str, tree: ast.AST, exempt_tops: set[str]) -> li
 
 class TestAnnotationMineSweep:
     def test_whole_neurova_zero_mines(self):
-        """neurova/ 全目录无注解地雷（新增降级导入模块时须先惰性化注解）。"""
+        """neurova/ 全目录无注解地雷（新增降级导入模块时须先惰性化注解）。
+
+        解析走 `tests/ast_scan.py`（Issue #148）：本判据要读注解，不能靠文本预筛
+        缩面，但**解析结果跨用例复用**——`ast_scan.sourceRefsUnder` 一次读盘、
+        `ast_scan._cachedParse` 一次编译，同进程里其余「单源」守卫共享这份预算。
+        实测全仓 `ast.parse` 单跑 3.9s，与另外 170 个受保护文件共享机器时撞
+        30s 默认墙钟（本次构建实测 timeout），故粒度保持不变而成本大幅下降。
+        """
         exempt = _ci_top_packages() | {"neurova"}
         mines = []
-        for path in sorted((PROJECT_ROOT / "neurova").rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            src = path.read_text(encoding="utf-8")
-            tree = ast.parse(src)
+        # 文本预筛：地雷必然含 `except ImportError`，其余文件连读都不用读
+        for ref in ast_scan.sourceRefsUnder(
+                PROJECT_ROOT / "neurova", hints=("except ImportError",)):
+            tree = ast_scan._cachedParse(ref.stamp, ref.code)
             mines += [
-                f"{path.relative_to(PROJECT_ROOT).as_posix()} -> {top}"
-                for top in _find_annotation_mines(src, tree, exempt)
+                f"{ast_scan.relativeToRepo(ref.path)} -> {top}"
+                for top in _find_annotation_mines(ref.code, tree, exempt)
             ]
         assert not mines, (
             "发现注解地雷（无包环境导入即 AttributeError，CI 薄环境实锤形态）：\n"
@@ -167,7 +179,7 @@ class TestStaticGateCapture:
 
 class TestHardDepsDeclared:
     # 裸 import 无降级的硬依赖：任何一侧缺席，CI 薄环境导入巡检必红
-    HARD_DEPS = {"feedparser", "apscheduler", "segno"}
+    HARD_DEPS = {"feedparser", "apscheduler", "segno", "prometheus_client"}
 
     def test_declared_in_requirements_ci_txt(self):
         declared = _ci_top_packages()
@@ -190,6 +202,30 @@ class TestHardDepsDeclared:
         registered = set(re.findall(r'"([a-zA-Z_0-9]+)"', table))
         leaked = self.HARD_DEPS & registered
         assert not leaked, f"硬依赖被误登记为可选依赖: {sorted(leaked)}"
+
+
+class TestCILockCoversDirectDeps:
+    """requirements-ci.txt 的每个直接依赖都必须 lock 在 requirements-ci.lock。
+
+    CI unit-tests/perf-gate 两侧装的都是 lock（`uv pip install -r
+    requirements-ci.lock`），lock 缺 pin 时本地声明的包在 CI 环境根本不存在，
+    且两侧日志都只表现为 ModuleNotFoundError，根因指向漂移而非代码。
+    修法：改 requirements-ci.txt 后必须重跑
+    `uv pip compile --universal requirements-ci.txt -o requirements-ci.lock`。
+    """
+
+    def test_every_direct_dep_is_pinned_in_lock(self):
+        lock = _read("requirements-ci.lock")
+        pinned = {
+            m.group(1).lower().replace("-", "_")
+            for m in re.finditer(r"(?m)^([A-Za-z0-9_.-]+)==", lock)
+        }
+        missing = sorted(_ci_top_packages() - pinned)
+        assert not missing, (
+            "requirements-ci.lock 缺直接依赖 pin（CI 装 lock，这些包在 CI 环境缺席）: "
+            f"{missing}\n修法：uv pip compile --universal requirements-ci.txt "
+            "-o requirements-ci.lock"
+        )
 
 
 class TestRemovedPackagesStayRemoved:

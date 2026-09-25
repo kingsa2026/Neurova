@@ -11,18 +11,17 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 sys.path.insert(0, project_root)
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from neurova.core.data_root import get_data_root
 
 
 def import_initial_memories():
-    db_path = os.path.join(os.path.dirname(project_root), "memory", "data", "yi_ling_memory.db")
+    """写入种子记忆到数据根下的 `yi_ling_memory.db`。
 
-    # 如果默认路径不存在，尝试相对路径
-    if not os.path.exists(os.path.dirname(db_path)):
-        db_path = os.path.join(project_root, "..", "memory", "data", "yi_ling_memory.db")
+    原实现按 project_root 反推三条候选路径——同一份根在别处又推一遍，
+    换个工作目录就换个库。收口到数据根。
+    """
 
-    # 如果还是不存在，使用当前目录下的数据库
-    if not os.path.exists(os.path.dirname(db_path)):
-        db_path = os.path.join(project_root, "memory.db")
+    db_path = str(get_data_root() / "yi_ling_memory.db")
 
     print("智星，正在导入记忆到数据库...")
     print(f"数据库路径: {db_path}\n")

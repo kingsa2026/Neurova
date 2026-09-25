@@ -1,0 +1,32 @@
+{
+  "schema": "neurova.experience.quality.corpus/v1",
+  "source": {
+    "kind": "adversarialLowSignalProbe",
+    "rowCount": 2,
+    "note": "刻意构造的低质语料，用于自证门禁不空转：全自述成功、零客观回执、同句反复（002/010/011 三条病形态的合体）。它不是生产分布，不能当基准——load_corpus 默认拒绝本文件的来源标记。"
+  },
+  "turns": [
+    {
+      "adoptionOutcome": null,
+      "agentId": null,
+      "evidenceState": "unevidenced",
+      "rowId": 1,
+      "seenCount": 4,
+      "skillName": "chat",
+      "success": true,
+      "timestamp": "2026-09-19T09:00:00+00:00",
+      "userInput": "这个方案就这么定了"
+    },
+    {
+      "adoptionOutcome": null,
+      "agentId": null,
+      "evidenceState": "unevidenced",
+      "rowId": 2,
+      "seenCount": 4,
+      "skillName": "chat",
+      "success": true,
+      "timestamp": "2026-09-19T09:05:00+00:00",
+      "userInput": "这个方案就这么定了"
+    }
+  ]
+}

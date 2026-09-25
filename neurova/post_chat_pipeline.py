@@ -16,16 +16,31 @@ PostChatPipeline — 对话后处理管线
 - 步骤 9.95: P2 记忆版本快照（Phase 10）
 - 步骤 10:  P2 主动提问决策（Phase 10）
 
+分层执行（P0 尾延迟优化）：
+- **响应路径**（必须 await）：save_session / save_memory / TTS / 认知分析 /
+  主动提问——它们的结果随本轮响应返回，或后续步骤依赖它们。
+- **响应无关**（后台并发）：反思、经验记录、经验漏斗回写、Evocate、P0 后处理、
+  冲突检测、版本快照、规则提取、动机观察、RSI 迭代——纯旁路写入，结果不进
+  响应。经 _spawn_background() 起 asyncio task，任务登记在
+  _background_tasks，可 drain_background() 等待。
+- **并发**：互不依赖的响应路径步骤（save_session × 记忆温度衰减）走
+  asyncio.gather，而非顺序 await。
+
 设计原则：
 - 依赖注入：通过 agent_ref 访问 Agent 实例
 - 异步友好：核心方法为 async
 - 可独立测试
+- 可观测：每个步骤都出 neurova_pipeline_steps_total（计数，带 status）与
+  neurova_pipeline_step_seconds（耗时直方图），整轮出
+  neurova_pipeline_run_seconds——_safe_step/_safe_step_sync 是唯一埋点收口处
 """
 
 from neurova.core.logger import get_logger
 from neurova.cognitive_layers.growth_layer.analyzer import GrowthDimension
 import asyncio
+import collections
 import contextvars
+import os
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -47,6 +62,89 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+def _isMetaRetrievalTool(tool_name: str) -> bool:
+    """元检索工具判定（**单一 import 点**，名单本体在 `tool_layers/capability_graph`）。
+
+    本包装只为让"撤掉反哺禁令 ⇒ 故障复现"这条反向锁可被单独观测
+    （教义第 1 条判据）；判定口径本身不在这里定义，不构成第二份名单。
+    """
+    from neurova.tool_layers.capability_graph import is_meta_retrieval_tool
+
+    return is_meta_retrieval_tool(tool_name)
+
+
+def _noteRewardGuardSkip(tool_name: str, channel: str) -> None:
+    """反哺/发布禁令命中的观测写入（失败不阻断主链）。"""
+    try:
+        from neurova.tool_layers.capability_graph import noteMetaRewardSkip
+
+        noteMetaRewardSkip(tool_name, channel)
+    except Exception:  # noqa: BLE001 - 观测缺失不得让后处理步骤整体失败
+        logger.debug("反哺禁令计数写入失败", exc_info=True)
+
+# RSI 降频巡检窗口（工单 008）：收敛或度量失明时，每 N 轮仍跑一次。
+# 取 20 与收敛窗口（convergence_analyzer.window_size 默认 20）同量级 ——
+# 一个窗口的证据过期之后就重新量一次，而不是永久停机。
+_RSI_BACKOFF_EVERY_TURNS = 20
+
+
+def _landedEvidenceRows(stepResults: List[Any], memoryManager: Any) -> List[Dict[str, Any]]:
+    """本轮 `save_memory` 真实落地的证据行（从步骤读数取 id，再回库定位）。
+
+    身份的唯一来源是**落库结果**，不是检测步骤自己编的 id：`save_memory` 步骤读数里的
+    `user_memory_id` / `agent_memory_id` 是权威写入链的返回值，照读即可；回库再查一次
+    拿内容（`get_memory` 读不到的行按"未落地"处理）。账上成员必须是能定位的行——
+    说不清是谁的账无法被处置，只能停在纯观测（Issue #72 正文最后一条断链）。
+    """
+    ids: List[str] = []
+    for result in stepResults or []:
+        if getattr(result, "step_name", "") != "save_memory":
+            continue
+        data = getattr(result, "data", None) or {}
+        for key in ("user_memory_id", "agent_memory_id"):
+            memoryId = str(data.get(key) or "")
+            if memoryId and memoryId not in ids:
+                ids.append(memoryId)
+    rows: List[Dict[str, Any]] = []
+    for memoryId in ids:
+        row = memoryManager.get_memory(memoryId, agent_wide=True)
+        if isinstance(row, dict) and row.get("content"):
+            rows.append(row)
+    return rows
+
+
+def _detectAgainstEvidenceRows(
+    detector: Any, evidenceRows: List[Dict[str, Any]], earlierMemories: List[Any]
+) -> List[Dict[str, Any]]:
+    """逐条拿本轮证据行与已有记忆比对，返回带**可定位成员 id** 的信号。
+
+    对比单位是"一句证据"，不是把整轮对话揉成一个字符串：合成文本经子句切分后与
+    子句并看不出差别，但它**没有对应的行**——报出来的冲突指不出成员是谁。
+    """
+    from neurova.cognitive_layers.memory_layer.models import Memory
+
+    found: List[Dict[str, Any]] = []
+    for row in evidenceRows:
+        newMemory = Memory(id=str(row["id"]), content=str(row["content"]))
+        found.extend(detector.detect_conflict(
+            newMemory, [m for m in earlierMemories if m.id != newMemory.id]
+        ))
+    return found
+
+
+def _conflictsWithLocatableMembers(
+    conflicts: List[Dict[str, Any]], locatable: Any
+) -> List[Dict[str, Any]]:
+    """只保留两个成员都能在库里定位的信号：说不清是谁的账无法被处置。"""
+    kept: List[Dict[str, Any]] = []
+    for conflict in conflicts or []:
+        left = str(conflict.get("memory1_id") or "")
+        right = str(conflict.get("memory2_id") or "")
+        if left and right and left in locatable and right in locatable:
+            kept.append(conflict)
+    return kept
+
+
 class StepStatus(str, Enum):
     """步骤执行状态"""
 
@@ -66,6 +164,43 @@ class StepResult:
     message: str = ""
     duration_ms: float = 0.0
     data: Dict[str, Any] = field(default_factory=dict)
+
+
+def _elapsed_ms(started: float) -> float:
+    """从 perf_counter 起点算毫秒（与步骤内 time.time() 口径一致）。"""
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _pipeline_metrics():
+    """管线埋点入口（惰性导入：prometheus_client 缺席时不拖垮整轮对话）。"""
+    try:
+        from neurova.core.metrics import get_metrics
+
+        return get_metrics()
+    except Exception:  # noqa: BLE001 - 观测面故障绝不影响业务
+        return None
+
+
+def _record_step_metric(step_name: str, status: str, duration_ms: float) -> None:
+    """单步埋点（失败静默：观测是旁路，不能成为新的故障点）。"""
+    metrics = _pipeline_metrics()
+    if metrics is None:
+        return
+    try:
+        metrics.record_pipeline_step(step_name, status, duration_ms)
+    except Exception:  # noqa: BLE001
+        logger.debug("pipeline step metric 记录失败: %s", step_name, exc_info=True)
+
+
+def _record_run_metric(mode: str, duration_s: float) -> None:
+    """整轮埋点（mode=blocking/background）。"""
+    metrics = _pipeline_metrics()
+    if metrics is None:
+        return
+    try:
+        metrics.record_pipeline_run(mode, duration_s)
+    except Exception:  # noqa: BLE001
+        logger.debug("pipeline run metric 记录失败", exc_info=True)
 
 
 def _consolidation_plan_store(skills_dir):
@@ -158,9 +293,33 @@ class PostChatPipeline:
         self._neurflow_executor = None
         self._voice_pipeline = None
 
+        # 后台步骤任务表（响应无关步骤）。见 _bg_tasks / _bg_errors：
+        # 惰性创建，兼容 PostChatPipeline.__new__ 构造（测试用）。
+        self._background_tasks: Optional[set] = None
+        self._background_errors = None
+
     @property
     def _agt(self):
         return self._agent
+
+    # ── 后台步骤状态（惰性创建，兼容 __new__ 构造）──
+    # 强引用 + done 回调摘除：既避免"asyncio 任务被 GC 回收"，也避免无界
+    # 增长（完成即摘，无需上限）。实例级而非每轮重置——同一 pipeline 并发
+    # 服务多轮时（Agent 单例语义），重置会把仍在跑的任务从表里摘掉，
+    # drain_background 就漏等它们。
+    @property
+    def _bg_tasks(self) -> set:
+        if self._background_tasks is None:
+            self._background_tasks = set()
+        return self._background_tasks
+
+    # 后台任务的非取消异常（观测用；不向调用方抛——后台本就旁路）；
+    # 有界（只留最近若干条），避免长期运行无界增长
+    @property
+    def _bg_errors(self) -> "collections.deque":
+        if self._background_errors is None:
+            self._background_errors = collections.deque(maxlen=100)
+        return self._background_errors
 
     @property
     def _step_results(self) -> List[StepResult]:
@@ -324,9 +483,17 @@ class PostChatPipeline:
         会 re-raise，让真实 bug 暴露给调用方；ImportError 按 A-14 降级为
         步骤失败+warning；运营错误（OSError/ValueError/
         RuntimeError 等）仍按原逻辑降级为 default 值。
+
+        可观测性（P0）：本方法是异步步骤的唯一收口处，耗时在此测量并写入
+        步骤结果（duration_ms）+ prometheus（计数×status、耗时直方图）。
+        步骤内部自带 duration_ms 的记录（同步步骤）保持不变，不重复覆盖。
         """
+        _started = time.perf_counter()
         try:
-            return await coro
+            result = await coro
+            # 步骤内已记录结果（多数步骤自己 append）时只补埋点，不重复 append
+            self._record_step_metric_if_unlogged(step_name, StepStatus.EXECUTED, _started)
+            return result
         except ImportError as e:
             # A-14: 导入错误（含可选依赖缺失 ModuleNotFoundError）按步骤失败
             # 降级跳过，不 re-raise——炸穿整轮 chat() 的代价比漏一步高
@@ -336,9 +503,8 @@ class PostChatPipeline:
                 e,
                 exc_info=True,
             )
-            self._step_results.append(
-                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
-            )
+            self._append_failed_step(step_name, e, _started)
+            _record_step_metric(step_name, StepStatus.FAILED.value, _elapsed_ms(_started))
             return default
         except self._PROGRAMMING_ERRORS:
             # P0-C2: 编程错误必须 re-raise，不能被吞没
@@ -347,13 +513,47 @@ class PostChatPipeline:
                 step_name,
                 exc_info=True,
             )
+            # 观测面要看得见"炸穿"，否则编程错误在指标里凭空消失
+            _record_step_metric(step_name, "error_raised", _elapsed_ms(_started))
             raise
         except Exception as e:
             logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
-            self._step_results.append(
-                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
-            )
+            self._append_failed_step(step_name, e, _started)
+            _record_step_metric(step_name, StepStatus.FAILED.value, _elapsed_ms(_started))
             return default
+
+    def _append_failed_step(self, step_name: str, exc: BaseException, started: float) -> None:
+        """记失败步骤（带真实耗时）。
+
+        步骤名重复时也照记：失败次数本身是信号（同一轮同一名字多次失败
+        不应被折叠成一条）。
+        """
+        self._step_results.append(
+            StepResult(
+                step_name=step_name,
+                status=StepStatus.FAILED,
+                message=str(exc),
+                duration_ms=_elapsed_ms(started),
+            )
+        )
+
+    def _record_step_metric_if_unlogged(self, step_name: str, status: StepStatus, started: float) -> None:
+        """步骤成功：把耗时补进步骤结果（该步未自行记录时 append 一条），并埋点。
+
+        同步步骤 / 自带 start_time 的步骤已 append 过自己的 StepResult
+        （含 duration_ms），此处只补 metrics，避免结果列表出现重复项。
+        """
+        elapsed = _elapsed_ms(started)
+        if not any(r.step_name == step_name for r in self._step_results):
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=status,
+                    message="completed",
+                    duration_ms=elapsed,
+                )
+            )
+        _record_step_metric(step_name, status.value, elapsed)
 
     def _safe_step_sync(self, step_name: str, func, default=None):
         """P-1: 安全执行同步步骤,异常只记录不传播
@@ -361,9 +561,15 @@ class PostChatPipeline:
         P0-C2 修复：编程错误（TypeError/AttributeError/NameError/SyntaxError）
         会 re-raise，让真实 bug 暴露给调用方；ImportError 按 A-14 降级为
         步骤失败+warning；运营错误仍按原逻辑降级为 default 值。
+
+        可观测性（P0）：同 _safe_step——同步步骤（含 asyncio.to_thread 派发
+        的 update_memory_temperature）在此收口埋点。
         """
+        _started = time.perf_counter()
         try:
-            return func()
+            result = func()
+            self._record_step_metric_if_unlogged(step_name, StepStatus.EXECUTED, _started)
+            return result
         except ImportError as e:
             # A-14: 同 _safe_step——导入错误降级为步骤失败，不 re-raise
             logger.warning(
@@ -372,9 +578,8 @@ class PostChatPipeline:
                 e,
                 exc_info=True,
             )
-            self._step_results.append(
-                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
-            )
+            self._append_failed_step(step_name, e, _started)
+            _record_step_metric(step_name, StepStatus.FAILED.value, _elapsed_ms(_started))
             return default
         except self._PROGRAMMING_ERRORS:
             # P0-C2: 编程错误必须 re-raise，不能被吞没
@@ -383,13 +588,98 @@ class PostChatPipeline:
                 step_name,
                 exc_info=True,
             )
+            _record_step_metric(step_name, "error_raised", _elapsed_ms(_started))
             raise
         except Exception as e:
             logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
-            self._step_results.append(
-                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
-            )
+            self._append_failed_step(step_name, e, _started)
+            _record_step_metric(step_name, StepStatus.FAILED.value, _elapsed_ms(_started))
             return default
+
+    # ── 后台任务（响应无关步骤）──
+    # 默认开启：与响应无关的旁路写入（反思/经验/冲突/快照/规则/动机/RSI）
+    # 不再占响应路径。NEUROVA_POSTCHAT_BACKGROUND=0 回退旧行为（全串行 await），
+    # 用于排查/兼容；每次调用读环境变量，便于灰度与测试。
+    _BACKGROUND_ENV = "NEUROVA_POSTCHAT_BACKGROUND"
+
+    @staticmethod
+    def background_enabled() -> bool:
+        """后台化开关（默认开；显式 0/false/no/off 关）。"""
+        raw = os.environ.get(PostChatPipeline._BACKGROUND_ENV, "1")
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+
+    def _spawn_background(self, step_name: str, coro, after=None):
+        """把响应无关步骤派发为后台任务（返回 asyncio.Task）。
+
+        - 强引用保存在 self._background_tasks，完成后经
+          _background_task_done 摘除——避免"任务被 GC 回收"与无界增长两个极端。
+        - 单个后台步骤的异常语义与前台一致：走 _safe_step（编程错误仍
+          re-raise，落到任务回调里由 _background_task_done 记日志 + 埋点，
+          不静默丢失）。
+        - after：可选"前驱任务"。后台步骤之间的真实依赖（9.95 快照 → 9.96
+          规则提取）用它表达：各自仍是独立任务、各自经 _safe_step 收口，但
+          执行顺序被钉住。用 asyncio.wait 等前驱结束——前驱失败/取消不阻断
+          后继（旧实现里两步都各自失败降级，互不牵连）。
+        - 整段耗时写 neurova_pipeline_run_seconds{mode="background"}，
+          用于验证后台化收益。
+        """
+        _started = time.perf_counter()
+
+        async def _runner():
+            try:
+                if after is not None:
+                    await asyncio.wait([after])
+                await self._safe_step(step_name, coro)
+            finally:
+                _record_run_metric("background", time.perf_counter() - _started)
+
+        task = asyncio.create_task(_runner(), name=f"postchat:{step_name}")
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._background_task_done)
+        return task
+
+    def _background_task_done(self, task: "asyncio.Task") -> None:
+        """后台任务收尾：摘引用 + 记录非取消异常（不许静默丢失）。"""
+        self._bg_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        self._bg_errors.append(exc)
+        logger.error(
+            "PostChatPipeline 后台步骤异常（不影响本轮响应）: %s",
+            exc,
+            exc_info=exc,
+        )
+
+    def _background_failures(self) -> list:
+        """后台任务的非取消异常（测试/运维可读；不阻塞调用方）。"""
+        return [e for e in self._bg_errors]
+
+    async def drain_background(self, timeout: Optional[float] = None) -> int:
+        """等待后台步骤收尾，返回已完成任务数。
+
+        服务优雅关闭、测试断言、以及"需要本轮全部旁路写入落定"的调用方使用。
+        timeout=None 表示等到全部完成。超时后剩余任务继续运行（不取消）。
+
+        循环取快照：后台任务仍可能派发后继任务（当前实现是派发时一次性
+        建好，循环只为防未来改动漏等）。
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        completed = 0
+        while True:
+            tasks = [t for t in list(self._bg_tasks) if not t.done()]
+            if not tasks:
+                return completed
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if remaining == 0.0:
+                return completed
+            done, _pending = await asyncio.wait(tasks, timeout=remaining)
+            completed += len(done)
+            if not done and deadline is not None:
+                # 超时且本轮无进展：不再空转（剩余任务继续跑，不取消）
+                return completed
 
     async def process(
         self,
@@ -409,124 +699,204 @@ class PostChatPipeline:
             "audio_data": Optional[bytes],
             "cognitive_score": Optional[float],
             "proactive_question": Optional[str],
-            "rsi_result": Optional[Dict],
-            "step_results": List[StepResult],
+            "rsi_result": Optional[Dict],   # 后台化后恒为 None（原始迭代快照不进响应）
+            "rsi": Optional[Dict],          # RSI 摘要（最近一次已完成迭代；见下）
+            "duration_ms": float,           # 响应路径耗时（可观测）
         }
+
+        关于 "rsi"：RSI 步骤已后台化，本轮结果赶不上响应组装，故这里给的是
+        **该会话最近一次已完成**的迭代摘要——字段
+        ``{status, applied_count, gain, phase_advanced, turn, stale}``
+        （前四个对齐 RSIOrchestrator.run_iteration 的真实输出，由
+        neurova.evolution.rsi.result_summary 统一裁剪，不再各自猜字段名）。
+        从未跑过 RSI 时为 None。stale=True 表示摘要不是本轮的（后台仍在跑
+        或本轮被 should_continue() 跳过）——宁可标注来源，也不虚报成本轮产物。
+
+        执行分两层（P0 尾延迟优化）：
+        - 响应路径（await）：save_session / 记忆温度衰减 / 认知分析 / 主动提问
+          → save_memory / TTS。互不依赖的并发跑（gather），有依赖的串链
+          （save_memory、TTS 依赖 save_session 产出的 session_id）。
+        - 后台路径（asyncio.create_task）：反思、经验记录、工作流经验、技能
+          漏斗回写、Evocate、P0 后处理、冲突检测、版本快照、规则提取、动机
+          观察、RSI 迭代。它们只写旁路数据，结果不进响应。需等待时调
+          drain_background()。
         """
         # Bug #6 fix: 每次调用创建新的步骤结果列表，通过 contextvar 隔离并发调用
         # 原 self._step_results.clear() 会修改共享列表，并发请求互相覆盖
         self._step_results = []
+        _run_started = time.perf_counter()
 
-        # P-1: 每个步骤用 _safe_step 包裹,异常只记录不传播
-        # 步骤 6: 保存到 session 文件
-        # Bug #4 fix: save_session 失败时回退到原始 session_id（而非 session_id or ""）
-        # 避免 None 袝转为空字符串，导致记忆存到 "default" session
-        actual_session_id = await self._safe_step(
-            "save_session",
-            self._step_save_session(user_input, reply, session_id, save_memory, metadata, writer_claim),
-            default=session_id,
+        # ── 响应路径 · 第一波（互不依赖，并发）──────────────────────────
+        # 1) save_session：产出 actual_session_id，后续两步依赖它
+        # 2) 记忆温度衰减：同步阻塞重活（全量遍历 + SQLite），to_thread 移出事件循环
+        # 3) 认知分析：纯计算 + 成长记录，独立于 session
+        # 4) 主动提问决策：结果随响应返回，独立于 session
+        actual_session_id, _temp_result, cognitive_score, proactive_question = await asyncio.gather(
+            self._safe_step(
+                "save_session",
+                self._step_save_session(
+                    user_input, reply, session_id, save_memory, metadata, writer_claim
+                ),
+                default=session_id,
+            ),
+            asyncio.to_thread(
+                self._safe_step_sync,
+                "update_memory_temperature",
+                self._step_update_memory_temperature,
+            ),
+            self._safe_step(
+                "cognitive_analysis", self._step_cognitive_analysis(user_input), default=0.0
+            ),
+            self._safe_step(
+                "proactive_question",
+                self._step_proactive_question(user_input, reply),
+                default=None,
+            ),
         )
 
-        # 步骤 6.5: 保存对话记忆到数据库
-        await self._safe_step("save_memory", self._step_save_memory(user_input, reply, actual_session_id, save_memory))
-
-        # 步骤 6.6: 更新记忆温度（批量衰减）
-        # 性能修复(2026-08-28): run_decay_cycle 全量遍历海量记忆 + SQLite 持久化是同步阻塞操作，
-        # 直接在事件循环执行会导致 HTTP 对话请求超时/无响应。
-        # 通过 asyncio.to_thread 移到工作线程，避免卡死事件循环。
-        await asyncio.to_thread(
-            self._safe_step_sync, "update_memory_temperature", self._step_update_memory_temperature
-        )
-
-        # 步骤 7: TTS 语音生成
-        tts_result = await self._safe_step(
-            "generate_tts",
-            self._step_generate_tts(reply, actual_session_id, enable_tts),
-            default=(None, None),
+        # ── 响应路径 · 第二波（依赖 session_id，彼此独立，并发）────────
+        _memory_result, tts_result = await asyncio.gather(
+            self._safe_step(
+                "save_memory",
+                self._step_save_memory(user_input, reply, actual_session_id, save_memory, metadata),
+            ),
+            self._safe_step(
+                "generate_tts",
+                self._step_generate_tts(reply, actual_session_id, enable_tts),
+                default=(None, None),
+            ),
         )
         audio_path, audio_data = tts_result if tts_result else (None, None)
 
-        # 步骤 8: 认知能力分析
-        cognitive_score = await self._safe_step(
-            "cognitive_analysis", self._step_cognitive_analysis(user_input), default=0.0
-        )
+        # ── 后台路径（响应无关的旁路写入）──────────────────────────────
+        # save_memory 之后派发：冲突检测/版本快照按"新记忆已入库"召回相关记忆。
 
-        # 步骤 8.5: 反思日志生成
-        await self._safe_step("reflection", self._step_reflection(user_input, reply))
+        # 每项 = (步骤名, 协程工厂, 前驱步骤名 or None)
+        _background_steps = [
+            ("reflection", lambda: self._step_reflection(user_input, reply), None),
+            (
+                "record_experience",
+                lambda: self._step_record_experience(user_input, reply, save_memory),
+                None,
+            ),
+            (
+                "record_workflow_experience",
+                lambda: self._step_record_workflow_experience(user_input, reply, actual_session_id),
+                None,
+            ),
+            # 技能质量漏斗回写 + 信任观测（每回合一个独立 task 观测）
+            (
+                "skill_funnel_flush",
+                lambda: self._step_skill_funnel_flush(reply, actual_session_id),
+                None,
+            ),
+            (
+                "evocate_generation",
+                lambda: self._step_evocate_generation(user_input, reply, actual_session_id),
+                None,
+            ),
+            # P0 后处理组（lifecycle → pattern_mining → genetic → marketplace，
+            # 组内有序，故整组一个任务）
+            ("p0_post_processing", lambda: self._step_p0_post_processing(save_memory), None),
+            (
+                "conflict_detection",
+                lambda: self._step_conflict_detection(user_input, reply),
+                None,
+            ),
+            # 9.95 → 9.96 有依赖（快照先落，规则提取再消费相关记忆）：
+            # 两个独立任务，靠 after 钉住顺序。
+            ("version_snapshot", lambda: self._step_version_snapshot(user_input), None),
+            (
+                "extract_conversation_rules",
+                lambda: self._step_extract_conversation_rules(
+                    user_input, reply, actual_session_id
+                ),
+                "version_snapshot",
+            ),
+            (
+                "motivation_observations",
+                lambda: self._step_motivation_observations(
+                    user_input, reply, cognitive_score, proactive_question
+                ),
+                None,
+            ),
+            # RSI 迭代：内含技能进化/市场发布/LLM 裁决，最重的一步
+            ("rsi_iteration", lambda: self._step_rsi_iteration(), None),
+        ]
 
-        # 步骤 9: 经验记录
-        await self._safe_step("record_experience", self._step_record_experience(user_input, reply, save_memory))
+        if self.background_enabled():
+            _spawned: Dict[str, Any] = {}
+            for _name, _factory, _after_name in _background_steps:
+                _spawned[_name] = self._spawn_background(
+                    _name,
+                    _factory(),
+                    after=_spawned.get(_after_name) if _after_name else None,
+                )
+        else:
+            # 兼容通道：环境变量显式关闭后台化时维持旧语义（全串行 await）
+            for _name, _factory, _after_name in _background_steps:
+                await self._safe_step(_name, _factory())
 
-        # 步骤 9.05: 记录工作流执行经验
-        await self._safe_step(
-            "record_workflow_experience",
-            self._step_record_workflow_experience(user_input, reply, actual_session_id),
-        )
+        # ── 观测收口 ──────────────────────────────────────────────────
+        duration_s = time.perf_counter() - _run_started
+        _record_run_metric("blocking", duration_s)
 
-        # 步骤 9.06: 技能质量漏斗回写——把本轮
-        # tool_executor 记的技能派发账本按归因规则写穿 SkillService manifest；
-        # P0-2 信任观测同源（每回合一个独立 task 观测，session#turn 身份）
-        await self._safe_step(
-            "skill_funnel_flush", self._step_skill_funnel_flush(reply, actual_session_id)
-        )
-
-        # 步骤 9.1: Evocate 生成
-        await self._safe_step(
-            "evocate_generation", self._step_evocate_generation(user_input, reply, actual_session_id)
-        )
-
-        # 步骤 9.5-9.8: P0 后处理
-        await self._safe_step("p0_post_processing", self._step_p0_post_processing(save_memory))
-
-        # 步骤 9.9: 记忆冲突检测
-        await self._safe_step("conflict_detection", self._step_conflict_detection(user_input, reply))
-
-        # 步骤 9.95: 记忆版本快照
-        await self._safe_step("version_snapshot", self._step_version_snapshot(user_input))
-
-        # 步骤 9.96: 从对话提取规则并关联经验记忆
-        await self._safe_step(
-            "extract_conversation_rules",
-            self._step_extract_conversation_rules(user_input, reply, actual_session_id),
-        )
-
-        # 步骤 10: 主动提问决策
-        proactive_question = await self._safe_step(
-            "proactive_question", self._step_proactive_question(user_input, reply), default=None
-        )
-
-        # 步骤 10.5: 动机观察（2026-09-15 真实化）——本轮真实信号灌入四驱动：
-        # 回合成败→能力感 / 认知分析分→成长感 / 主动提问→自主性
-        await self._safe_step(
-            "motivation_observations",
-            self._step_motivation_observations(user_input, reply, cognitive_score, proactive_question),
-        )
-
-        # 步骤 11: RSI 迭代
-        rsi_result = await self._safe_step("rsi_iteration", self._step_rsi_iteration(), default=None)
-
-        # 记录步骤统计
         executed = sum(1 for r in self._step_results if r.status == StepStatus.EXECUTED)
         skipped = sum(1 for r in self._step_results if r.status == StepStatus.SKIPPED)
         failed = sum(1 for r in self._step_results if r.status == StepStatus.FAILED)
         degraded = sum(1 for r in self._step_results if r.status == StepStatus.DEGRADED)
 
         logger.info(
-            "PostChatPipeline completed: executed=%d, skipped=%d, failed=%d, degraded=%d",
+            "PostChatPipeline completed: executed=%d, skipped=%d, failed=%d, degraded=%d, "
+            "durations=%s",
             executed,
             skipped,
             failed,
             degraded,
+            self._format_slowest_steps(),
+        )
+        logger.debug(
+            "PostChatPipeline 响应路径耗时 %.1fms，后台任务 %d 个（background=%s）",
+            duration_s * 1000.0,
+            len(self._bg_tasks),
+            self.background_enabled(),
         )
 
+        # rsi_result 恒为 None：RSI 已后台化，原始迭代快照不进响应（旧字段保留兼容）；
+        # 观测面走 "rsi" 摘要（字段名对齐 run_iteration，取最近一次已完成迭代）。
         return {
             "actual_session_id": actual_session_id,
             "audio_path": audio_path,
             "audio_data": audio_data,
             "cognitive_score": cognitive_score,
             "proactive_question": proactive_question,
-            "rsi_result": rsi_result,
+            "rsi_result": None,
+            "rsi": self._latest_rsi_summary(),
+            "duration_ms": duration_s * 1000.0,
         }
+
+    def _latest_rsi_summary(self) -> Optional[Dict[str, Any]]:
+        """最近一次已完成 RSI 迭代的摘要（无法取到时返回 None，绝不阻断响应）。"""
+        try:
+            from neurova.core.turn_context import get_turn_count, get_turn_session_id
+            from neurova.evolution.rsi.result_summary import get_latest_rsi_summary
+
+            agent_id = getattr(getattr(self._agent, "config", None), "agent_id", None)
+            session_id = get_turn_session_id() or getattr(self._agent, "session_id", None)
+            return get_latest_rsi_summary(agent_id, session_id, current_turn=get_turn_count())
+        except Exception as e:  # noqa: BLE001 - 观测字段不得拖垮响应
+            logger.debug("RSI 摘要读取跳过: %s", e)
+            return None
+
+    def _format_slowest_steps(self, top: int = 5) -> str:
+        """最慢的 top-N 步骤（"step=ms"），供日志快速定位尾延迟来源。"""
+        timed = [
+            (r.step_name, float(r.duration_ms or 0.0))
+            for r in self._step_results
+            if r.duration_ms
+        ]
+        timed.sort(key=lambda item: item[1], reverse=True)
+        return ", ".join(f"{name}={ms:.1f}ms" for name, ms in timed[:top]) or "n/a"
 
     def _step_update_memory_temperature(self):
         """更新记忆温度（批量衰减）"""
@@ -718,6 +1088,7 @@ class PostChatPipeline:
         reply: str,
         session_id: str,
         save_memory: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """保存对话记忆到记忆数据库"""
         step_name = "save_memory"
@@ -769,18 +1140,23 @@ class PostChatPipeline:
 
             # 使用记忆管理器
             if memory_manager:
+                # 会话作用域打标：协作群轮 → room:<id>；其余 → direct（基线，跨会话共享）。
+                from neurova.collaboration.memory_scope import scope_tag_for_turn
+
+                _collab = isinstance(metadata, dict) and metadata.get("turn_origin") == "collaboration"
+                _scope = scope_tag_for_turn(collab=_collab, room_id=session_id if _collab else "")
                 # 保存用户消息记忆
                 user_memory_id = memory_manager.remember(
                     content=f"用户: {user_input}",
                     memory_type="episodic",
-                    metadata={"sender_type": "user", "session_id": session_id or "default"},
+                    metadata={"sender_type": "user", "session_id": session_id or "default", "chat_scope": _scope},
                     origin="owner",
                 )
                 # 保存助手回复记忆
                 agent_memory_id = memory_manager.remember(
                     content=f"助手: {reply}",
                     memory_type="episodic",
-                    metadata={"sender_type": "agent", "session_id": session_id or "default"},
+                    metadata={"sender_type": "agent", "session_id": session_id or "default", "chat_scope": _scope},
                     origin="agent",
                 )
                 logger.debug("对话已直接写入记忆数据库")
@@ -1273,6 +1649,23 @@ class PostChatPipeline:
 
         return "未知触发"
 
+    @staticmethod
+    def _turn_structure_key(ticket) -> str:
+        """本轮的工具序列结构指纹——与咽喉票据的 `structure_key` 同函数产出。
+
+        单源在同名函数 `creation_governance.structure_key`（票据写入侧也用它），
+        这里只是把已解析出的 steps 再喂一次，**不另写第二份指纹算法**。
+        """
+        if not ticket.steps:
+            return ""
+        try:
+            from neurova.skills.creation_governance import structure_key
+
+            return structure_key([dict(step) for step in ticket.steps]) or ""
+        except Exception:  # noqa: BLE001 - 指纹算不出就不落该键（不阻断沉淀）
+            logger.debug("结构指纹计算跳过", exc_info=True)
+            return ""
+
     async def _step_record_experience(
         self,
         user_input: str,
@@ -1316,8 +1709,16 @@ class PostChatPipeline:
             if hasattr(evolution, "on_experience_recorded"):
                 from neurova.evolution.evolution_facade import EvolutionFacade
                 facade = EvolutionFacade(evolution)
-                # P-5: success 基于工具实际成败,而非"是否调用了工具"
-                tool_success = any(tm.get("success", True) for tm in tool_messages) if tool_messages else True
+                # P-5 → 工单 002 → 工单 010：成败来源改为服务端票据优先。
+                # 002 让 `success` 位开始携带信息（只读 `tool_result`，无回执即
+                # None），但它读的是本轮工具执行自己的回执；010 把它降为**旁路
+                # 证据**：`creation_governance` 的票据口径更严（还要求结果非空、
+                # 非策略拒绝、按独立任务算失败粘性），有结论即覆盖本轮回执。
+                # 无票据 ⇒ 记录聚合继续决定成败位，但落库标 `unevidenced`（D1）。
+                from neurova.evolution.objective_evidence import resolve_ticket_evidence
+
+                ticket = resolve_ticket_evidence(self._agent, tool_messages)
+                tool_success = ticket.outcome
                 # agent 级隔离: 显式传本 agent 的结晶器。单例上的
                 # evolution.crystallizer 会被多 agent 初始化 last-writer-wins
                 # 覆盖,不传会把 A agent 的经验结晶进 B agent 的库
@@ -1328,11 +1729,12 @@ class PostChatPipeline:
                     success=tool_success,
                     crystallizer=getattr(self._agent, "crystallizer", None),
                 )
-                logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
+                logger.info("📚 对话经验已记录 (工具: %s, 票据: %s)", tools_used, ticket.lookup)
 
                 # EKB 写入闭环：同步沉淀到经验知识库（注入侧
                 # context/injector._build_experience_context 的数据源）。
                 # 此前 EKB 只读不写，"相关经验"注入永远查不到对话沉淀。
+                adoption_writeback = 0
                 try:
                     from neurova.skills.experience_knowledge_base import (
                         ExperienceKnowledgeBase,
@@ -1347,12 +1749,28 @@ class PostChatPipeline:
                     )
 
                     ekb = get_experience_knowledge_base()
+                    # 工单 009：置信度取四态语义（未测量 ⇒ NULL，不得由 success
+                    # 二值折算）；耗时取咽喉累加的轮级聚合。两者此前在生产写侧
+                    # 都无人写入（库实测 nonNULL 0/103）。
+                    # 工单 016：耗时同为三态——未测量 NULL，测到则原样落（含 0.0）。
+                    from neurova.core.turn_context import (
+                        get_turn_tool_elapsed_measurement,
+                    )
+
                     ekb.add_experience_record(
                         skill_name=skill_tag,
                         exp=ExperienceRecord(
                             skill_name=skill_tag,
-                            context={"user_input": user_input},
+                            context={
+                                "user_input": user_input,
+                                # 结构身份（工具序列 + 参数形状的指纹，**只存
+                                # 指纹不存参数明文**）：让"这串工具该怎么传参"
+                                # 成为可查询的事实，同时不落敏感参数内容。
+                                "structure_key": self._turn_structure_key(ticket),
+                            },
                             result={"reply_excerpt": reply[:200]},
+                            # 工单 004：`bool(None)` 把"本轮没有客观回执"折成失败，
+                            # 于是库里三分变两分。三态原样落库（NULL=未测量）。
                             success=tool_success,
                             feedback=user_input[:100],
                         ),
@@ -1360,6 +1778,27 @@ class PostChatPipeline:
                         # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
                         agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
+                        # 工单 016：三态原样落库——`or None` 曾把"测到 0.0"
+                        # （工具真跑了，耗时落在时钟粒度之下）折成 NULL"未测量"，
+                        # 于是同一列上"没跑工具"与"跑了但很快"不可分辨。
+                        execution_time=get_turn_tool_elapsed_measurement(),
+                        # 置信度是"这条经验值多少"的读数：只有服务端票据带结论时
+                        # 才有值，未测量保持 NULL（不写 0.5 之类占位）。
+                        confidence_score=(
+                            None if ticket.ticket is None else (1.0 if ticket.ticket else 0.0)
+                        ),
+                        # 工单 002→008→010：形成侧第三态走一等列 evidence_state。
+                        # 等级只认服务端票据（`ticket.evidence`）——002 的记录聚合
+                        # 在无票据时仍是成败位的来源，但它不再是"有证据"。
+                        evidence=ticket.evidence,
+                    )
+                    # 工单 006：按本轮注入身份集回写采纳结果，成败取票据优先的
+                    # 三态（None 记 unevidenced，不是"成功"也不是"失败"）。
+                    # 未注入 ⇒ record_injection_adoption 直接返回 0，不写任何行。
+                    from neurova.core.turn_context import get_turn_injected_experiences
+
+                    adoption_writeback = ekb.record_injection_adoption(
+                        get_turn_injected_experiences(), tool_success
                     )
                 except Exception as ekb_error:  # noqa: BLE001 - 沉淀失败不阻断主流程
                     logger.debug("经验知识库写入失败（不阻断）: %s", ekb_error)
@@ -1369,7 +1808,17 @@ class PostChatPipeline:
                         status=StepStatus.EXECUTED,
                         message=f"Experience recorded with {len(tools_used)} tools",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"tools_used": tools_used},
+                        data={
+                            "tools_used": tools_used,
+                            # 回写行数进观测面：008 的质量指标要能区分"没注入"与
+                            # "注入了但回写通路断了"
+                            "adoption_writeback": adoption_writeback,
+                            # 工单 010：取证过程本身必须可观测——"查不到票"与
+                            # "查不了票"在库里都是 unevidenced，只有在观测面分得开
+                            # 才不会被误读成"这个 agent 从来没有客观回执"
+                            "ticket_state": ticket.lookup,
+                            "ticket_reason": ticket.verdict.reason,
+                        },
                     )
                 )
             else:
@@ -1632,7 +2081,12 @@ class PostChatPipeline:
                 sequence.append(tm.get("tool_name", "unknown"))
 
             # 添加序列并挖掘
-            pattern_miner.add_sequence(sequence)
+            # 工单 013：台账只记服务端票据的三态（010 的 `TicketEvidence.ticket`）。
+            # 本轮回执不是票据，无票就传 None —— 在这里判空兜底等于给模式自投成功票。
+            from neurova.evolution.objective_evidence import resolve_ticket_evidence
+
+            pattern_miner.add_sequence(
+                sequence, success=resolve_ticket_evidence(self._agent, tool_messages).ticket)
             patterns = pattern_miner.mine()
 
             if patterns:
@@ -1707,21 +2161,27 @@ class PostChatPipeline:
             # 从模式构建基因型种子
             from neurova.evolution.genetic_engine import ToolGenotype
 
+            # 工单 013：成功率来自序列台账（010 的服务端票据），删掉 `or 0.5` 兜底。
+            # 兜底把"没有证据"洗成"中性票"，而 0.5 在阈值 0.8 下的实际效果是永不注册
+            # —— 于是遗传臂的静默被误读成"模式质量差"，看不见真正缺的是证据。
+            # 无据一律不播种（无据不投票，与 002/005 同口径）。
+            seeded = skipped_unevidenced = 0
             for pattern in top_patterns:
-                # 用真实成功率替换硬编码 0.5：
-                # 否则 fitness 恒 ≤ 0.5×1 + 0 = 0.5，永远达不到注册阈值 0.8，
-                # 遗传进化产物永远无法注册为可复用技能（闭环断裂根因之一）
                 if isinstance(pattern, dict):
                     seq = pattern.get("tools") or []
-                    p_success = pattern.get("success_rate") or 0.5
+                    p_success = pattern.get("success_rate")
                 else:
                     seq = getattr(pattern, "tools", [])
-                    p_success = getattr(pattern, "success_rate", None) or 0.5
+                    p_success = getattr(pattern, "success_rate", None)
+                if p_success is None:
+                    skipped_unevidenced += 1
+                    continue
                 genotype = ToolGenotype(
                     tool_sequence=seq,
                     success_rate=float(p_success),
                 )
                 genetic_engine.add_to_population(genotype)
+                seeded += 1
 
             # 执行进化
             new_gen = genetic_engine.evolve()
@@ -1732,12 +2192,32 @@ class PostChatPipeline:
             # AdaptiveToolWeights 上不存在，hasattr 恒 False 使遗传高适应度
             # 反哺静默失效；改用公开 API get_weight/update_weight
             tool_weights = getattr(evolution, "tool_weights", None)
+            # 元检索反哺禁令（T-06）：纯检索基因型的适应度高只说明"这轮检索
+            # 成功"，而检索**结构上没有失败可能** —— 给它记成功票等于按"省事"
+            # 计价，`tool_weights.json` 实测把 memory_search 顶到 1.500 上限、
+            # 把唯一能解题的 run_code 压到 0.8924。判据：撤掉禁令 ⇒ 上限复现。
+            reward_skipped = 0
             for genotype in new_gen:
+                if genotype.fitness <= 0.5:
+                    continue
+                # 逐**工具**过滤，而不是只看整条序列：混合基因型里真正干活的是
+                # 执行原语，检索工具只是同轮搭了便车。实测（真种群 40 轮）只按
+                # "整条序列全为元检索"过滤时，`['memory_search','file_read']`
+                # 这类占多数的混合型照样把 memory_search 抬到 1.500 上限 ——
+                # 同一根因的剩余形态，一并修净（教义第 5 条）。
                 for tool_name in genotype.tools:
+                    if _isMetaRetrievalTool(tool_name):
+                        _noteRewardGuardSkip(tool_name, "genetic_reward")
+                        reward_skipped += 1
+                        continue
                     if tool_weights and tool_weights.get_weight(tool_name) is not None:
                         # 高适应度个体的工具应获得权重提升
-                        if genotype.fitness > 0.5:
-                            tool_weights.update_weight(tool_name, True)
+                        tool_weights.update_weight(tool_name, True)
+            if reward_skipped:
+                logger.info(
+                    "🧬 元检索工具不参与权重反哺: %s 处（检索无失败可能，按省事计价会挤掉执行原语）",
+                    reward_skipped,
+                )
 
             # Bug A-6 修复: 将高适应度进化工具注册到 SkillRegistry
             # 之前进化成果只停留在 genetic_engine 内部种群，下次对话时
@@ -1778,6 +2258,10 @@ class PostChatPipeline:
                         "population_size": len(genetic_engine.population),
                         "new_individuals": len(new_gen),
                         "registered_to_skill_registry": registered_to_registry,
+                        # 工单 013：无据不播种必须可观测 —— 否则"遗传臂没动静"与
+                        # "这一轮根本没有客观证据"在观测面上分不开
+                        "seeded": seeded,
+                        "skipped_unevidenced": skipped_unevidenced,
                     },
                 )
             )
@@ -1817,6 +2301,13 @@ class PostChatPipeline:
             for tm in tool_messages:
                 tool_name = tm.get("tool_name", "")
                 if not tool_name:
+                    continue
+                # 内置元工具跳过（T-06 同根第二处）：实测 `auto-tool_search` 被
+                # 发布两遍，是零信息增量发布——市场上多一条自己找自己的工具，
+                # 使用者却拿它做不了任何新事。
+                if _isMetaRetrievalTool(tool_name):
+                    _noteRewardGuardSkip(tool_name, "marketplace_publish")
+                    logger.debug("🏪 跳过发布内置元工具（零信息增量）: %s", tool_name)
                     continue
 
                 # 检查是否已存在
@@ -1876,7 +2367,26 @@ class PostChatPipeline:
             )
 
     async def _step_conflict_detection(self, user_input: str, reply: str):
-        """Step 9.9: 新记忆写入后自动检测冲突"""
+        """Step 9.9: 记忆冲突**纯观测**——只记录，不阻断、不回滚（工单 012 裁决）。
+
+        本步跑在 `save_memory` 之后，且检测器只给信号、判不出"两条里哪条是
+        错的"；据此否决会随机丢真实记忆（回滚本身有 Step 9.95 版本快照兜底，缺
+        的是"以哪条为准"的判据）。故显式定性为观测：结论里 `blocking=False`
+        与 message 一同自陈"不阻断"，不得再留"检出了冲突"这种读起来像已处置的表述。
+
+        **成员身份由本步负责，检测器只负责信号**（Issue #72 第四轮）：账上每条
+        冲突的两个成员都必须是**库里查得到的行**。此前本步用一个自造 id
+        `pending_new_memory` 充当"新证据"——那个 id 在库里不存在，账上成员因此
+        永远指不出是谁，下游连"哪条跟哪条打架"都无从下手，这条链停在纯观测、
+        "判不出哪条为准"的现场根因就在这里。现在"新证据"取本轮 `save_memory`
+        真实落地的行（从步骤读数取 id，再回库定位），逐行与已有记忆比对。
+        无法定位成员的信号如实计进 `conflicts_unidentified`，不入账。
+
+        **检出与可读分开、但不留断点**：本步把检出的冲突连同依据落进记忆侧的账
+        （`memory_manager.record_conflicts`，source 自陈本步名），
+        于是"检出过什么"在 `get_conflict_summary()` / `/memory/stats` 上读得到。
+        依据缺失的条目按诚实边界拒绝入账，`conflicts_recorded` 如实反映差额。
+        """
         step_name = "conflict_detection"
         start_time = time.time()
 
@@ -1906,7 +2416,6 @@ class PostChatPipeline:
 
         try:
             recent_memories = memory_manager.recall(user_input, limit=5)
-            new_memory_content = f"用户: {user_input}\n助手: {reply}"
 
             # P2-9 修复: 真实 API 是
             # detect_conflict(new_memory: Memory, existing_memories: List[Memory]) -> List[Dict]。
@@ -1915,43 +2424,89 @@ class PostChatPipeline:
             # AttributeError 被 except 吞掉，冲突检测步骤恒 FAILED（从未真正运行）。
             from neurova.cognitive_layers.memory_layer.models import Memory
 
-            existing_memories = [
+            evidence_rows = _landedEvidenceRows(self._step_results, memory_manager)
+            evidence_ids = {row["id"] for row in evidence_rows}
+            earlier_memories = [
                 Memory(id=str(m.get("id", "")), content=str(m.get("content", "")))
                 for m in recent_memories
-                if isinstance(m, dict) and m.get("content")
+                if isinstance(m, dict) and m.get("content") and str(m.get("id", "")) not in evidence_ids
             ]
-            new_memory = Memory(id="pending_new_memory", content=new_memory_content)
+            locatable = evidence_ids | {m.id for m in earlier_memories}
 
-            conflicts = conflict_detector.detect_conflict(new_memory, existing_memories)
+            if evidence_rows:
+                raw_conflicts = _detectAgainstEvidenceRows(
+                    conflict_detector, evidence_rows, earlier_memories
+                )
+                conflicts = _conflictsWithLocatableMembers(raw_conflicts, locatable)
+            else:
+                # 本轮没有落地的证据行：**不造合成对象**——那正是查不到的成员的旧写法。
+                # 没有可定位的对象就如实报"无对象可比"，不假装检出、也不入账。
+                raw_conflicts = []
+                conflicts = []
+            unidentified = len(raw_conflicts) - len(conflicts)
 
-            if conflicts:
-                logger.warning("⚠️ 检测到 %s 处记忆冲突", len(conflicts))
+            if raw_conflicts:
                 for conflict in conflicts:
                     logger.info(
                         "  冲突: %s (相似度=%.2f, 矛盾分=%.2f) - %s",
                         conflict.get("type"),
                         conflict.get("similarity", 0.0),
                         conflict.get("contradiction_score", 0.0),
-                        conflict.get("description"),
+                        conflict.get("basis") or conflict.get("description"),
                     )
+                logger.warning("⚠️ 检测到 %s 处记忆冲突（可定位成员 %s 处）",
+                               len(raw_conflicts), len(conflicts))
+                # 落账：检出多少条、账上留下多少条要分得开。依据缺失的按诚实边界
+                # 拒绝入账（宁可不记，也不记一条读不懂的账），返回值如实反映差额。
+                # 此前这一步只写日志、不写账，`get_conflict_summary()` 因此全仓
+                # 零调用方——检出了什么在读取侧看不见（Issue #72 登记的残余项）。
+                recorded = 0
+                recorder = getattr(memory_manager, "record_conflicts", None)
+                if callable(recorder):
+                    try:
+                        recorded = int(recorder(conflicts, source=step_name))
+                    except Exception as e:  # noqa: BLE001 - 记账失败不阻断观测
+                        logger.warning("冲突入账失败（观测结果仍在步骤读数里）: %s", e)
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"Detected {len(conflicts)} conflicts",
+                        message=(
+                            f"检测到 {len(raw_conflicts)} 处记忆冲突（纯观测，不阻断写入；"
+                            f"入账 {recorded} 条）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": len(conflicts), "conflicts": conflicts},
+                        data={
+                            "conflicts_count": len(raw_conflicts),
+                            "conflicts_recorded": recorded,
+                            # 成员在库里定位不到的条数：这些信号如实报出但不入账
+                            # （说不清是谁的账无法被处置）。
+                            "conflicts_unidentified": unidentified,
+                            "evidence_rows": len(evidence_rows),
+                            "blocking": False,
+                            "conflicts": raw_conflicts,
+                        },
                     )
                 )
             else:
-                logger.debug("记忆冲突检测通过，无冲突")
+                logger.debug("记忆冲突纯观测：未检出冲突（本轮证据行 %d 条）", len(evidence_rows))
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message="No conflicts detected",
+                        message=(
+                            "未检出记忆冲突（纯观测，不阻断写入）"
+                            if evidence_rows
+                            else "没有本轮落地的证据行，冲突无对象可比（纯观测，不阻断写入）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": 0},
+                        data={
+                            "conflicts_count": 0,
+                            "conflicts_recorded": 0,
+                            "conflicts_unidentified": unidentified,
+                            "evidence_rows": len(evidence_rows),
+                            "blocking": False,
+                        },
                     )
                 )
         except Exception as e:
@@ -2188,11 +2743,14 @@ class PostChatPipeline:
         """
         step_name = "rsi_iteration"
         start_time = time.time()
+        # 本步内三个消费方（改进落盘的 SkillService、MetaLedger、归因台账）必须用
+        # 同一个 agent_id —— 台账按 agent 分库，各算各的会把归因查成 "default"。
+        agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "") or "default")
 
         # 根因修复: AutoSkillImprover 此前零调用——每轮批量扫描技能使用数据，
         # 对失败率超阈值的技能提出改进提案，并沉淀为反思日志回流上下文。
         # 断点 #3 修复：提案先尝试 apply_improvement 回写技能本体（保守语义：
-        # 仅追加 config.improvements 记录+版本递增，不改工具序列），已应用的
+        # 修订留痕进 config.revisions + 版本递增，不改工具序列），已应用的
         # 提案不再重复刷反思日志；未应用的（registry 不可用等）保持原提案日志。
         # P1-4：NEUROVA_EVOLUTION_QUEUE=1
         # 时改道"入队 + 就地 drain"——作业持久化，崩溃/失败可重试（启动
@@ -2206,7 +2764,6 @@ class PostChatPipeline:
             improver = get_skill_improver()
             growth_log_manager = self._get_dependency("growth_log_manager")
             skill_registry = getattr(self._agt, "_skill_registry", None)
-            agent_id = str(getattr(self._agt.config, "agent_id", "") or "default")
             # 改进落盘最后一米（复审残余点 C）：SkillService 传给 apply_improvement，
             # 应用后 config+version 同步磁盘 manifest——否则改进重启即失
             skill_service = None
@@ -2273,7 +2830,7 @@ class PostChatPipeline:
 
         # 经验-定义分离维护：未合并 applied 记录攒够阈值
         # → 定期重建技能定义（先归档可回滚）；使用统计圈淘汰候选（自动禁用
-        # 默认关，NEUROVA_SKILL_AUTO_RETIRE=1 才执行）。
+        # 默认关，治理设置 skill_auto_retire_enabled 打开才执行）。
         try:
             from neurova.evolution.skill_experience import run_skill_experience_maintenance
 
@@ -2282,14 +2839,13 @@ class PostChatPipeline:
             try:
                 from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
 
-                _meta_ledger = get_meta_ledger(
-                    str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
-                )
+                _meta_ledger = get_meta_ledger(agent_id)
             except Exception as ledger_err:
                 logger.debug("MetaLedger 获取失败，归因跳过: %s", ledger_err)
 
             _mtn = run_skill_experience_maintenance(
-                registry=skill_registry, skill_service=skill_service, ledger=_meta_ledger
+                registry=skill_registry, skill_service=skill_service,
+                ledger=_meta_ledger, agent_id=agent_id,
             )
             if _mtn.get("attributed") or _mtn.get("rebuilt") or _mtn.get("retired") or _mtn.get("retire_candidates"):
                 logger.info(
@@ -2363,6 +2919,24 @@ class PostChatPipeline:
                         )
         except Exception as _ce:
             logger.debug("结晶候选裁决失败（候选留队）: %s", _ce)
+
+        # 工单 017：结晶模式冷处理（闲置超期 ⇒ 降温 ⇒ 退出注入池）。与候选裁决同通道
+        # 低频跑（每 50 轮一次），不逐轮扫库；淘汰路径必须有写入方，否则只是文档。
+        try:
+            _crystallizer = getattr(self._agt, "crystallizer", None)
+            _turns = getattr(self._agt, "turn_count", 0)
+            if (
+                _crystallizer is not None
+                and hasattr(_crystallizer, "reap_stale_patterns")
+                and isinstance(_turns, int)
+                and _turns > 0
+                and _turns % 50 == 0
+            ):
+                _reaped = _crystallizer.reap_stale_patterns()
+                if _reaped.get("decayed"):
+                    logger.info("🧊 结晶模式冷处理: 降温 %s 条", _reaped["decayed"])
+        except Exception as _reap_error:
+            logger.debug("结晶模式冷处理失败（不阻断）: %s", _reap_error)
 
         # 根因修复: MetaCognition 认知负荷模块此前零调用——每轮用真实轮次指标
         # （工具步数/错误率/耗时/记忆规模）更新认知状态；低负荷且到达轮次间隔时
@@ -2439,29 +3013,69 @@ class PostChatPipeline:
             return None
 
         try:
-            if rsi.should_continue():
+            # 工单 008：派发层不再把 should_continue()==False 当作"本进程内永不进化"。
+            # 原实现在此直接 SKIPPED，而收敛结论只对其依据的那份证据有效 ——
+            # 参数会漂、代码会变，永久跳过等于进化一次性终止。
+            # 现在按 cadence 决定频率：run 每轮跑；backoff（已收敛 / 评测集度量失明）
+            # 降频巡检 —— 度量失明尤其不能停，它意味着测量坏了，需要持续被暴露。
+            from neurova.core.turn_context import get_turn_count as _turn_count
+
+            cadence = rsi.iteration_cadence()
+            turn = _turn_count()
+            due = cadence.mode != "backoff" or turn % _RSI_BACKOFF_EVERY_TURNS == 0
+
+            if due:
                 # A-13: run_iteration 含 SQLite 读写/参数寻优（同步重活），
                 # 直接在事件循环内调用会卡死所有并发请求——移到工作线程。
                 # to_thread 原样透传返回值与异常，外层 try/except 语义不变。
                 result = await asyncio.to_thread(rsi.run_iteration)
-                logger.info("RSI 迭代完成: %s", result.get('convergence', {}).get('status', 'unknown'))
+                # convergence 是 dict；历史写法 result.get("convergence", {}).get("status")
+                # 在 convergence 非 dict 时会炸，统一走摘要模块的取值口径。
+                from neurova.evolution.rsi.result_summary import (
+                    convergence_status,
+                    record_rsi_summary,
+                )
+
+                status = convergence_status(result)
+                logger.info("RSI 迭代完成: %s", status)
+                # 真接线（Issue #55 后续）：把这次迭代压成响应面摘要落库——
+                # 本步骤在后台 task 里跑，结果赶不上本轮响应组装，故由
+                # process() 取"最近一次已完成摘要"随 ctx.result["rsi"] 返回。
+                try:
+                    from neurova.core.turn_context import get_turn_count, get_turn_session_id
+
+                    record_rsi_summary(
+                        getattr(getattr(self._agt, "config", None), "agent_id", None),
+                        get_turn_session_id() or getattr(self._agt, "session_id", None),
+                        result,
+                        turn=get_turn_count(),
+                    )
+                except Exception as _sum_err:  # noqa: BLE001 - 摘要落库失败不影响迭代本身
+                    logger.debug("RSI 摘要记录跳过: %s", _sum_err)
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"RSI iteration completed: {result.get('convergence', {}).get('status', 'unknown')}",
+                        message=f"RSI iteration completed: {status}",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"convergence_status": result.get("convergence", {}).get("status")},
+                        data={"convergence_status": status},
                     )
                 )
                 return result
             else:
+                # SKIPPED 不是"不再进化"，是本轮不跑：必须说清依据哪个判据、什么读数
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.SKIPPED,
-                        message="RSI should_continue returned False",
+                        message=(
+                            f"RSI 降频巡检（判据 {cadence.basis}：{cadence.evidence}；"
+                            f"每 {_RSI_BACKOFF_EVERY_TURNS} 轮跑一次，当前轮次 {turn} 不在窗口）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
+                        data={"cadence": cadence.mode, "basis": cadence.basis,
+                              "evidence": cadence.evidence, "turn": turn,
+                              "backoff_every": _RSI_BACKOFF_EVERY_TURNS},
                     )
                 )
         except Exception as e:
@@ -2715,12 +3329,19 @@ class PostChatPipeline:
             
             # 3. 更新经验记忆融合器
             fusion = self._get_dependency("experience_fusion")
-            if fusion and tool_names:
+            # 工单 002 同根因命中点：这里曾无条件写 `"success": True`，
+            # 等于给融合器与知识图谱投确证成功票。无客观回执时不投（宁缺毋伪）。
+            from neurova.agent.turn_state import resolve_tool_outcome
+
+            turn_outcome = resolve_tool_outcome(tools_used)
+            if fusion and tool_names and turn_outcome is None:
+                logger.debug("本轮无工具结果回执，跳过经验融合写入（不投成功票）")
+            elif fusion and tool_names:
                 for tool_name in tool_names:
                     fusion.fuse(
                         tool_result={
                             "tool_name": tool_name,
-                            "success": True,
+                            "success": turn_outcome,
                             "problem_text": user_input[:100],
                         },
                         graph_context={
@@ -2730,9 +3351,15 @@ class PostChatPipeline:
                     )
             
             # 4. 更新模式挖掘器
+            # 工单 013：同上，只记服务端票据的三态（本步骤的 `turn_outcome` 是给
+            # 融合器的旁路证据，不得在这里升格成模式的客观成功票）。
             pattern_miner = self._get_dependency("pattern_miner")
             if pattern_miner and len(tool_names) > 1:
-                pattern_miner.add_sequence(tool_names)
+                from neurova.evolution.objective_evidence import resolve_ticket_evidence
+
+                pattern_miner.add_sequence(
+                    tool_names,
+                    success=resolve_ticket_evidence(self._agent, tools_used).ticket)
             
             self._step_results.append(
                 StepResult(
