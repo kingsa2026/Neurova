@@ -58,14 +58,30 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 
 删除后复算读数：`应当删除 0 条：[]`。
 
-保留的分支（各自理由是**未合并**，不是"没注意"）：
+### 2026-09-25（Issue #197 批收口，本轮）
 
-| 分支 | 状态 | 保留理由 |
+| 分支 | 对应合并请求 | 处置 |
 |------|------|------|
-| `auto/issue197-judgement-registration` | 未合并进主线 | 该 PR 已 closed 但提交未入主线；删分支即丢内容，须先由人裁决 |
-| `auto/issue197-registration-guard-recover` | 未合并进主线 | 同上 |
-| `auto/npc-glmcoder-59d9` | 未合并进主线 | PR #50 仍 `open`，在途工作 |
-| `auto/t11a-uncap-generations-90` | 未合并进主线 | PR #209 仍 `open`，在途工作 |
+| `auto/ast-scan-text-cache-and-relpath-memo` | #215 | 已删（已合入主线，删除前为 `main` 的祖先） |
+
+删除后复算读数：`应当删除 0 条：[]`。
+
+**本台账不登记「当前保留哪些分支」**（此前 §3 有一张这样的表，已删）。原因是
+**它自己会过期且无人刷新**：那条表里的 4 行到本轮实测已有 3 行失效
+（`auto/issue197-judgement-registration`、`auto/issue197-registration-guard-recover`、
+`auto/t11a-uncap-generations-90` 对应提交已合入或分支已删），而 §4 原本就写明
+"分支列表本身**不**入台账——它每次 fetch 都在变，抄进文档就立刻过期"。
+规则与行为不一致，且没有任何判据拦它——这类"看着登记了、其实早已失效"的行
+比不登记更坏：读者会把过期状态当事实。
+现由常驻判据
+`tests/unit/ci/test_npc_branch_cleanup.py::TestLedgerIsReadableInRepo::test_ledger_records_dispositions_not_live_branch_state`
+钉住：台账里出现的每条分支行必须带**已完成**的处置标记（已删 / 已合入 / 已归档），
+写"未合并 / 在途"这类当下状态即红。当前在途分支一律**现算**：
+
+```
+python scripts/ci/npc_branch_cleanup.py            # 人读
+python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
+```
 
 ## 四、与既有纪律的关系（不新造平行体系）
 
