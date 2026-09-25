@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class ContextSource(Enum):
@@ -31,13 +31,45 @@ class ContextSource(Enum):
     SUMMARY = "summary"  # 溢出折叠摘要（P1-1③：压缩视图而非丢内容）
 
 
+#: 上下文来源 → 优先级阶梯（**唯一事实源**）。
+#:
+#: 为什么必须收在一处：`draw` 按 `priority` 打分排序，于是"同一来源在不同写入点
+#: 拿到不同的分"会让同一来源的内容按写入方不同而争位。改前正是这个形态——
+#: 编排器声明一套阶梯、端点 `/context/build` 另写 `10`（注释还写"高优先级"）、
+#: `voice_context_module` 又给 EMOTION 写 `60` 而编排器写 `50`。三份口径各自
+#: 都"看着合理"，合起来却是同一契约的多份定义（`AGENTS.md` 修复教义第 6 条）。
+#:
+#: 显式传入的 `priority` 仍然生效：经验档位由采纳证据决定（见
+#: `dedupe_experience_sources`），那是**政策**而非阶梯的第二份副本。
+SOURCE_PRIORITY = {
+    ContextSource.SYSTEM_INSTRUCTION: 100,
+    ContextSource.SUMMARY: 90,
+    ContextSource.DEVELOPER_INSTRUCTION: 90,
+    ContextSource.USER_INPUT: 90,
+    ContextSource.MEMORY: 70,
+    ContextSource.MULTIMODAL: 70,
+    ContextSource.EXPERIENCE: 70,
+    ContextSource.CONVERSATION: 60,
+    ContextSource.TOOL_CALL: 60,
+    ContextSource.REFLECTION: 60,
+    ContextSource.EMOTION: 50,
+}
+
+
+def priorityForSource(source: ContextSource) -> int:
+    """来源 → 优先级（阶梯的唯一入口，见 `SOURCE_PRIORITY`）。"""
+    return SOURCE_PRIORITY[source]
+
+
 @dataclass
 class ContextInput:
     """上下文输入数据类 - 活水上下文池的基础单元"""
 
     source: ContextSource
     content: str
-    priority: int = 50
+    #: 显式取值优先（证据驱动的档位）；缺省由来源经 `priorityForSource` 派生——
+    #: 不再是一个与阶梯无关的独立常数（那就是第二份定义）。
+    priority: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     tokens: int = 0
     tags: List[str] = field(default_factory=list)  # 标签列表
@@ -59,6 +91,10 @@ class ContextInput:
 
     def __post_init__(self):
         """初始化后处理"""
+        # 优先级缺省由来源派生（阶梯单源，见 priorityForSource）
+        if self.priority is None:
+            self.priority = priorityForSource(self.source)
+
         # 自动生成哈希
         if self.hash is None:
             self.hash = self.compute_hash(self.source, self.content)

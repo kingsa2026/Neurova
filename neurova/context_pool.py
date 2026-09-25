@@ -978,7 +978,6 @@ class ContextPool:
             ContextInput(
                 source=ContextSource.SUMMARY,
                 content=summary.strip(),
-                priority=90,
                 metadata=metadata,
             )
         )
