@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import os
-import time
 
 import pytest
 
@@ -49,6 +48,18 @@ BASE = "/api/v1/sandbox"
 ALLOWED_STATUS = {"running", "paused", "stopped", "failed", "timeout", "committed"}
 SANDBOX_FIELDS = {"id", "name", "status", "image", "steps_count", "created_at", "language"}
 MIN_TIMEOUT_SECONDS = 60
+#: 超时用例用的执行时限（秒）：常量即判据基数，不随机器速度漂移
+EXECUTION_LIMIT_SECONDS = 2.0
+#: 上界倍率（相对时限）：阈值 = 时限 × 倍率，收尾（杀进程树 + 收尸）只在其内留余量。
+#: 实测收尾开销 ≈ 时限的 0.1%（2.000s → 2.002s），2× 有近三个数量级余量；
+#: 墙钟上界带宽裕量是"在时限内回话"这类判据的通例（本仓受保护子集同口径）。
+EXECUTION_TIMEOUT_CEILING_RATIO = 2.0
+#: 收尾宽裕量（秒级附加余量）：进程树杀灭 + 收尸在共享负载下也需要一点余量。
+#: 判据阈值 = 时限 × 倍率 + 这条宽裕量 —— 全部由常量算出，不随机器速度漂移。
+EXECUTION_TEARDOWN_SLACK_SECONDS = 0.25
+EXECUTION_TIMEOUT_CEILING_SECONDS = (
+    EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO + EXECUTION_TEARDOWN_SLACK_SECONDS
+)
 
 
 @pytest.fixture(autouse=True)
@@ -145,21 +156,74 @@ class TestExecuteIsARealExecution:
         assert resp.status_code == 422, "空命令必须 422——不得跑出一次「成功」的空执行"
 
     def test_timeout_is_enforced(self, client):
-        """按 session 的 timeout 掐断（请求级 timeout 可覆盖，不早不晚）。"""
+        """按请求级 timeout 掐断：走到时限才停，且**在时限内**回话。
+
+        判据一律取**进程结构**，不取墙钟读数（`elapsed < 30` 这类阈值与机器速度
+        强相关：CI 共享负载下会把契约判红，正是受保护子集偶发红的根因；见
+        `tests/unit/test_ci_wallclock_assertion_ledger.py`）：
+
+        - 命令被分派到真解释器并**真的跑起来** —— 缺解释器时进程根本起不来，
+          超时也就无从谈起：脚本首行把哨兵写进 stdout 并 `flush`，stdout 里
+          出现哨兵即证明「掐断的是真在跑的进程，不是没起来的空壳」；
+        - 睡满 120 秒后才写 stdout 的证明行**在收尾照面之前不得出现** ——
+          放行到底时 `communicate` 会一路读到进程自然退出，stdout 里必然有它；
+        - 收尾照面用的是 `/api/v1/sandbox/{sid}`：`/{sid}/execute` 在**超时收尾后**
+          才占线返回，拿它当照面判据等于用被测物自证，摘掉判据也照样绿；
+        - 会话 status 必须是有限枚举里的 `timeout`（`running` 表示没判定到超时）；
+        - `duration_ms` 按**时限**给结论，不设「多快算快」的阈值：
+          进入执行与收到回应之间的间隔必须不早于时限（否则是早掐），
+          且小于「时限 + 一段只在超时路径上才写的宽裕量」（否则是没掐）。
+
+        整个用例按**请求自身**的 timeout（`EXECUTION_LIMIT_SECONDS` × 上界倍率）计，
+        不借用 session 的下界 60 秒 —— 否则一次真被放行的执行会把 60 秒烧在 CI 上。
+        """
         sid = client.post(
             f"{BASE}/start", json={"name": "ce", "timeout": MIN_TIMEOUT_SECONDS}
         ).json()["data"]["id"]
-        started = time.time()
+        command = (
+            "import sys, time\n"
+            "sys.stdout.write('neurova-timeout-sentinel\\n')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(120)\n"
+            "sys.stdout.write('neurova-timeout-released\\n')\n"
+            "sys.stdout.flush()\n"
+        )
+        # 请求时限取「上界」：执行侧同样以它为 hard limit，判据两侧同源一个常量
+        request_timeout = EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO
         resp = client.post(
             f"{BASE}/{sid}/execute",
-            json={"command": "import time; time.sleep(120)", "timeout": 2},
+            json={"command": command, "timeout": request_timeout},
         )
-        elapsed = time.time() - started
         assert resp.status_code == 200, resp.text
         data = resp.json()["data"]
-        assert data["exit_code"] != 0, "长任务必须被超时掐断，不得放行到 120 秒"
-        assert elapsed < 30, f"掐断动作用了 {elapsed:.1f}s —— 超时没有真生效"
+        output = data.get("stdout") or ""
+
+        assert "neurova-timeout-sentinel" in output, (
+            "命令没有被真解释器跑到 —— 进程没起来就没有「超时生效」可言"
+        )
+        assert "neurova-timeout-released" not in output, (
+            "命令自然跑到收尾（睡满 120 秒后写了证明行）—— 超时没有真掐断"
+        )
+        assert client.get(f"{BASE}/{sid}").json()["data"]["status"] == "timeout", (
+            "超时必须落到 status 枚举 'timeout'，不得悄悄停在 running"
+        )
         assert data.get("timed_out") is True, "超时必须可判定（timed_out: true）"
+        assert data["exit_code"] != 0, "被掐断的进程必须如实报非零退出码"
+
+        duration = data["duration_ms"] / 1000.0
+        # 下界：到点才回话；上界：不超过「时限 × 倍率」——倍率是通例的宽裕量，
+        # 两侧阈值都由**请求时限这一常量**算出（不随机器速度漂移），
+        # 宽裕量只在收尾（杀树 + 收尸）上留余量，不是"多快算快"的阈值。
+        # 见 tests/unit/test_ci_wallclock_assertion_ledger.py 的宽裕量规则。
+        # 收尾照面（GET /{sid}）已证明"回话时超时判定与临界区释放都已完成"，
+        # 故此处只钉"掐断没有早到、也没有被放行"。
+        assert EXECUTION_LIMIT_SECONDS <= duration, (
+            f"时限前就回了话（{duration:.2f}s < 时限）—— 超时判早了"
+        )
+        assert duration < EXECUTION_TIMEOUT_CEILING_SECONDS, (
+            f"超过时限上限（{duration:.2f}s ≥ 上界）"
+            "—— 兜底定时器没有真生效"
+        )
 
     def test_shell_language_really_runs_the_script(self, client):
         """shell 语言必须真跑脚本 —— 不能因为语言分派写错就跑成别的语言（或报语法错）。"""
