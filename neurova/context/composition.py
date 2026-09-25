@@ -24,6 +24,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.context.token_estimator import estimate_tokens
+from neurova.context.window_compactor import messagePayloadTokens
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -140,23 +141,12 @@ def _measure_messages(messages: Optional[List[Dict]]) -> Dict[str, Any]:
         if not isinstance(msg, dict):
             continue
         role = _message_role_bucket(str(msg.get("role") or ""))
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            # 多模态 content parts：文本段计数，图片段按固定 800 token 计
-            text = " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict) and p.get("type") == "text")
-            images = sum(1 for p in content if isinstance(p, dict) and p.get("type") == "image_url")
-            tokens = _estimate(text) + images * 800
-        else:
-            tokens = _estimate(str(content or ""))
-        # tool_calls 定义本身也是 prompt 的一部分
-        tool_calls = msg.get("tool_calls")
-        if tool_calls:
-            try:
-                import json
-
-                tokens += _estimate(json.dumps(tool_calls, ensure_ascii=False))
-            except Exception:  # noqa: BLE001
-                pass
+        # 载荷派生只经 `window_compactor.messagePayloadTokens()`（**单源**）：
+        # 展示面板的数字与判据侧（折叠 / microcompact / 窗口预算 / 召回额度）
+        # 必须是同一个口径 —— 两处各算一份时，面板上看着没超、判据侧却按另一个
+        # 数字决定压不压缩，UI 上看不出超限（改前正是这个形态：判据只读 content，
+        # 展示另加 tool_calls 与多模态分段）。
+        tokens = messagePayloadTokens(msg)
         buckets[role]["count"] += 1
         buckets[role]["tokens"] += tokens
         total += tokens

@@ -6,6 +6,7 @@ get_recent_context 是固定 20 条消息数窗口——两者都不约束 promp
 build_context 中做「尾部保留 + 老消息折叠」的自动压缩。
 """
 
+import json
 import typing
 from dataclasses import dataclass
 
@@ -16,6 +17,68 @@ from dataclasses import dataclass
 # tests/unit/context/test_window_token_metering.py。
 PER_MSG_OVERHEAD = 4
 _PER_MSG_OVERHEAD = PER_MSG_OVERHEAD
+
+#: 图像分段的固定计价（vision 分段不按 URL 字符数计——base64 串的长度与真实
+#: 视觉 token 无关，按字符计会把一张图算成几万 token，比真值高两个量级）。
+#: 单源：判据侧与展示侧都读这一处，不再各写一个数。
+IMAGE_PART_TOKENS = 800
+
+
+def messagePayloadTokens(
+    message: typing.Any, estimator: typing.Optional[typing.Callable[[str], int]] = None
+) -> int:
+    """一条消息发给 provider 的**载荷 token**（不含 `PER_MSG_OVERHEAD`）。
+
+    这是"一条消息值多少 token"的**唯一派生处** —— 判据侧（`WindowTokenMeter`，
+    折叠 / microcompact / 窗口预算 / 召回额度都经它）与展示侧
+    （`context.composition` 的容量面板）都读它。
+
+    改前是两份平行口径（修复教义第 6 条）：判据只读 `content` 字符串，展示另加
+    `tool_calls` 原文串与多模态分段。后果不是"面板数字不准"，而是**判据在工具轮上
+    空判** —— T-10b 之后 `assistant.tool_calls` 会进视图真发给模型（`arguments`
+    原文串常是调用参数本体），却不进任何窗口判据，于是"含工具轮的窗口 ≤ 预算"
+    这条判据在它最该起作用的形状上恒真（实测低估 270×，台账 §21.3）。
+
+    载荷 = 文本内容｜多模态分段（文本段按文本、图像段按 `IMAGE_PART_TOKENS`）
+    + `tool_calls` 协议原文串。`content` 为分段 list 时不得抛异常 ——
+    判据面缺多模态口径，等于多模态轮不受预算管辖。
+    """
+    segments, fixed = _payloadSegments(message)
+    if estimator is None:
+        from neurova.context.token_estimator import estimate_tokens
+
+        estimator = estimate_tokens
+    return sum(estimator(text) for text in segments) + fixed
+
+
+def _payloadSegments(message: typing.Any) -> typing.Tuple[typing.List[str], int]:
+    """载荷拆成（待计量的文本段, 固定计价部分）。
+
+    非 dict 的条目按改前 `str(message)` 语义处理（兼容裸字符串序列）。
+    """
+    if not isinstance(message, dict):
+        return ([str(message)] if message else []), 0
+
+    segments: typing.List[str] = []
+    fixed = 0
+    content = message.get("content", "")
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            kind = part.get("type")
+            if kind == "text":
+                segments.append(str(part.get("text", "")))
+            elif kind == "image_url":
+                fixed += IMAGE_PART_TOKENS
+    elif content:
+        segments.append(str(content))
+
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        # 协议原文形态（`arguments` 是 JSON 串）——与 provider 收到的字节对齐计价
+        segments.append(json.dumps(tool_calls, ensure_ascii=False))
+    return segments, fixed
 
 # 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
@@ -51,19 +114,17 @@ class WindowTokenMeter:
         self._per_message: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
         self._totals: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
 
-    @staticmethod
-    def _contentOf(message) -> str:
-        if isinstance(message, dict):
-            return (message or {}).get("content", "") or ""
-        return str(message)
-
     def one(self, message) -> int:
-        """单条消息的 token 占用（含协议开销）。"""
+        """单条消息的 token 占用（含协议开销）。
+
+        载荷经 `messagePayloadTokens` 派生（文本内容 / 多模态分段 / `tool_calls`
+        原文串都算）——判据侧与展示侧因此共用同一份口径，不再各算一份。
+        """
         key = id(message)
         cached = self._per_message.get(key)
         if cached is not None and cached[0] is message:
             return cached[1]
-        value = self._estimator(self._contentOf(message)) + PER_MSG_OVERHEAD
+        value = messagePayloadTokens(message, self._estimator) + PER_MSG_OVERHEAD
         self._per_message[key] = (message, value)
         return value
 
