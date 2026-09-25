@@ -10,6 +10,8 @@ Tool Capability Graph v1.0.0 — 工具能力关系图
 """
 
 from neurova.core.logger import get_logger
+import re
+import threading
 import typing
 from collections import deque
 from dataclasses import dataclass, field
@@ -33,6 +35,87 @@ class ToolCapabilityNode:
     provides: typing.List[str] = field(default_factory=list)
     requires: typing.List[str] = field(default_factory=list)
     degrades_to: typing.List[str] = field(default_factory=list)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 元检索工具名单（**单源**）
+# ═══════════════════════════════════════════════════════════════
+# 语义：这些工具只做"找/看/调已有的东西"，**结构上没有失败可能**（检索不到
+# 返回空也是"成功执行"）。因此它们不能靠"本轮调用没报错"来证明任务被推进。
+#
+# 为什么名单落在这里：本模块已是能力语义的单源（工具名 → 能力/依赖/降级），
+# 名单是同一类事实的自然延伸。不新增配置文件、不加 env 开关（D5）。
+#
+# 名单覆盖面（同根扫荡，教义第 5 条）：
+#   - 记忆/历史检索：memory_search / voice_memory_search / recall_history
+#   - 技能目录检索：discover_skills
+#   - 大目录延迟加载的控制工具（tool_search / tool_describe / tool_call）：
+#     与 `context/tool_search.CONTROL_TOOL_NAMES` 同源，由测试断言咬合，
+#     不在这里抄第二份字面量。
+#: 记忆/历史检索 + 技能目录检索：名字在本模块**唯一**定义一次。
+_META_RETRIEVAL_NAMES = frozenset({
+    "memory_search",
+    "voice_memory_search",
+    "recall_history",
+    "discover_skills",
+})
+
+
+def _metaRetrievalRoster() -> frozenset:
+    """元检索名单的**单源**取值点（含控制工具）。
+
+    控制工具名不在这里抄字面量：它们的定义处是
+    `context/tool_search.CONTROL_TOOL_NAMES`（那次实现的事实源），
+    本函数只是把它并进来。两侧漂移由测试咬合
+    （`test_rosterCoversControlTools`），不靠人工同步。
+    """
+    global _META_RETRIEVAL_ROSTER
+    if _META_RETRIEVAL_ROSTER is None:
+        try:
+            from neurova.context.tool_search import CONTROL_TOOL_NAMES
+
+            controls = frozenset(CONTROL_TOOL_NAMES)
+        except Exception:  # noqa: BLE001 - 控制工具面缺席不得让判断整体失败
+            controls = frozenset()
+        _META_RETRIEVAL_ROSTER = _META_RETRIEVAL_NAMES | controls
+    return _META_RETRIEVAL_ROSTER
+
+
+_META_RETRIEVAL_ROSTER: typing.Optional[frozenset] = None
+
+
+def is_meta_retrieval_tool(tool_name: str) -> bool:
+    """该工具是否属于"结构上不会失败"的元检索面。
+
+    消费方是强化口径侧：遗传反哺与市场自动发布据此跳过（T-06）。
+    """
+    return str(tool_name or "") in _metaRetrievalRoster()
+
+
+#: 反哺禁令命中计数的写侧（读侧见 `evolution/rsi/orchestrator`）。
+#: 独立计数器而非塞进 capability_gap：语义不同（那是"能力不够"，
+#: 这是"奖励发错了对象"），混在一起就再也分不清该补能力还是该收口径。
+_REWARD_GUARD_LOCK = threading.RLock()
+_REWARD_GUARD_SKIPS: typing.Dict[str, int] = {}
+
+
+def noteMetaRewardSkip(tool_name: str, channel: str = "genetic_reward") -> None:
+    """记一次"因属于元检索面而被跳过发奖"（可观测，不静默）。"""
+    key = f"{channel}:{tool_name}"
+    with _REWARD_GUARD_LOCK:
+        _REWARD_GUARD_SKIPS[key] = _REWARD_GUARD_SKIPS.get(key, 0) + 1
+
+
+def readRewardGuardSkips() -> typing.Dict[str, int]:
+    """反哺禁令命中读侧（无命中时是空表，不是缺席）。"""
+    with _REWARD_GUARD_LOCK:
+        return dict(_REWARD_GUARD_SKIPS)
+
+
+def resetRewardGuardSkips() -> None:
+    """清空计数（仅测试与进程重置使用）。"""
+    with _REWARD_GUARD_LOCK:
+        _REWARD_GUARD_SKIPS.clear()
 
 
 class ToolCapabilityGraph:
