@@ -19,6 +19,7 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
+import { basenameOf } from '@/utils/pathText'
 
 const { t } = useI18n()
 const { imageModelOptions, providerOf } = useAigcModels()
@@ -91,9 +92,6 @@ async function onRefUpload(file: File) {
   }
 }
 
-function refFileName(p: string): string {
-  return p.split(/[\\/]/).pop() || p
-}
 
 async function generate() {
   if (!prompt.value.trim()) return
@@ -166,7 +164,7 @@ function preview(img: { url: string }) {
             </a-upload>
             <div v-if="refImages.length" class="aigc-ref-chips">
               <span v-for="(p, i) in refImages" :key="i" class="aigc-ref-chip">
-                {{ refFileName(p) }}<button class="aigc-ref-chip-x" type="button" @click="refImages.splice(i, 1)">✕</button>
+                {{ basenameOf(p) }}<button class="aigc-ref-chip-x" type="button" @click="refImages.splice(i, 1)">✕</button>
               </span>
             </div>
           </a-form-item>

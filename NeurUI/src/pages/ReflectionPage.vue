@@ -139,7 +139,7 @@
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'content'">
-                  <div class="content-preview">{{ truncate(record.content, 100) }}</div>
+                  <div class="content-preview">{{ truncateText(record.content, 100) }}</div>
                 </template>
                 <template v-else-if="column.key === 'quality'">
                   <div class="quality-cell">
@@ -254,6 +254,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { truncateText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -392,8 +393,6 @@ const categoryBreakdown = computed(() => {
   return [...cats]
 })
 
-const truncate = (text: string, len: number) =>
-  text && text.length > len ? text.slice(0, len) + '...' : text || ''
 
 const onTableChange = (pagination: any) => {
   page.value = pagination.current || 1

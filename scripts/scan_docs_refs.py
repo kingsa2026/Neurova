@@ -626,7 +626,7 @@ def archiveDanglingUnion() -> list:
             continue
         for item in scanDirectory(directory):
             found[(item["file"], item["line"], item["ref"])] = dict(item, form="行内码")
-        for path in sorted(directory.rglob("*.md")):
+        for path in trackedMarkdownUnder(directory):
             relative = displayPath(path)
             if relative in LEDGER_DOCUMENTS:
                 continue
@@ -734,11 +734,34 @@ def renderNavigationImpact(rows: list) -> str:
     return "\n".join(lines)
 
 
+def trackedMarkdownUnder(directory: Path) -> list:
+    """目录下的 Markdown 载体清单 —— **枚举口径的唯一出处**。
+
+    枚举必须与解析同源。解析基准是 `indexByBasename(trackedFiles())`（只认
+    入库文件），若枚举走 `rglob`（文件系统实况），未入库文档会被当作载体
+    扫出来，再拿去与「只含入库文件的索引」比对，必然判为悬空 —— 于是同一
+    提交在不同工作区给出不同读数：跑过 `npm ci` 的工作区多出第三方 README
+    里的空代码位，干净检出为 0 条。**门禁读数取决于是否装过依赖，等于门禁
+    自己不可复算。**
+
+    仓库外的目录（测试临时目录等）不在 git 索引里，退回文件系统枚举，
+    由调用方自行对结果负责。
+    """
+    try:
+        relativeRoot = directory.resolve().relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        return sorted(directory.rglob("*.md"))
+    raw = str(relativeRoot).replace("\\", "/")
+    prefix = "" if raw == "." else raw + "/"
+    pattern = re.compile(r"^" + re.escape(prefix) + r".*\.md$")
+    return [PROJECT_ROOT / path for path in trackedFiles() if pattern.match(path)]
+
+
 def scanDirectory(targetDir: Path) -> list:
     """扫描目录下全部 Markdown，按（文件, 行号, 引用）去重。"""
     byBasename = indexByBasename(trackedFiles())
     entries, seen = [], set()
-    for path in sorted(targetDir.rglob("*.md")):
+    for path in trackedMarkdownUnder(targetDir):
         if displayPath(path) in LEDGER_DOCUMENTS:
             continue
         for item in scanFile(path, byBasename):
