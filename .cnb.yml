@@ -541,6 +541,24 @@ $:
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   现补同一份收尾接力，判据同源，对话载体继续经 env 传下去。
   #
+  # 中止原文必须**两种都覆盖**（构建 cnb-m74-1k3cm87o9 实测，2026-09-26）：
+  #   `$CNB_BUILD_FAILED_MSG` 在平台侧有两种取值来源，判据曾只认第一种：
+  #     · 轮数用满 → `Agent aborted: reached maxTurns limit (N)`
+  #       （实测 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）
+  #     · 整轮会话撞 2h 墙钟 →
+  #       `Agent 已中止：构建环境异常终止，或流水线超过最大运行时长（2h）。`
+  #       （实测 cnb-m74-1k3cm87o9）
+  #   只认前者时，后者整格被判 `skipped`（该构建日志逐字：
+  #     ⏳ 轮数触顶接力：自动开启下一轮（判据取平台收尾事实）: 106ms (skipped)），
+  #   Agent 跑了 222 轮、7,330,218ms 后改而未提交的成果（工作树不跨轮保存）
+  #   随容器一起丢，用户只在 Issue 上看到一条构建号。
+  #   两种原文都接力：它回答的是「上一轮是否被平台中止而没走完」，
+  #   而不是"中止的具体原因"——原因不同不分优先级，成果同样会丢。
+  #   判据仍只覆盖**平台中止**这两种形态：门禁红/依赖装不上等真故障
+  #   不进接力（否则等于把真故障转写成烧配额）。
+  #   本改动由 tests/unit/ci/test_npc_turn_handoff_execution.py 的
+  #   `TestRelayCoversEveryPlatformAbortReason` 常驻钉住。
+  #
   # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
   #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
   #   （push/commit.add/branch.create/pull_request.target/pull_request.mergeable/
@@ -634,7 +652,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -653,7 +671,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -667,7 +685,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -752,7 +770,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff

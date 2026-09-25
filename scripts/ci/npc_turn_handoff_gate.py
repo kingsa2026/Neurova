@@ -27,9 +27,16 @@ NPC 流水线的前置步骤必须能在镜像里真的跑起来，否则整条�
 代价可复算：接力落点 32 次构建 / 22.2 小时墙钟。
 
 判据已搬到**平台在收尾时刻注入的事实变量**上（`$CNB_PIPELINE_STATUS` 与
-`$CNB_BUILD_FAILED_MSG`，实测原文 `Agent aborted: reached maxTurns limit (200)`），
-落点见 `.cnb.yml` 的收尾 `endStages.if`。判据只有一处，本脚本不再持有第二份，
-也不向任何通道发射真值 —— 探针文件名带 `probe` 就是为了一眼看出它没有下游消费者。
+`$CNB_BUILD_FAILED_MSG`），落点见 `.cnb.yml` 的收尾 `endStages.if`。
+判据只有一处，本脚本不再持有第二份，也不向任何通道发射真值 ——
+探针文件名带 `probe` 就是为了一眼看出它没有下游消费者。
+
+`$CNB_BUILD_FAILED_MSG` 在平台侧有**两种**中止原文，判据必须都覆盖：
+轮数用满给 `Agent aborted: reached maxTurns limit (N)`
+（实测 cnb-s4f-1k3c46us9），整轮会话撞 2h 墙钟给
+`Agent 已中止：构建环境异常终止，或流水线超过最大运行时长（2h）。`
+（实测 cnb-m74-1k3cm87o9）。此前判据只认前者，于是后者整格 `skipped`，
+222 轮里改而未提交的成果随容器一起丢。
 
 用法：
     python scripts/ci/npc_turn_handoff_gate.py          # 人类可读
