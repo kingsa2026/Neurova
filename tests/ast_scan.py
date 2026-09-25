@@ -24,7 +24,7 @@
    都要走完整棵常驻图——**成本随代码总量涨**，与本文件开头的根因同形，只是账单
    记在 GC 上（实测 1787 个测试文件全量解析后单次 gen2 1030ms vs 不留 0.78ms）。
    `RETIRE_STEP` 控制退役步长：常驻树每新增这么多棵就把整棵图移出扫描分代
-   （读侧 `retireStats()`）。**保留量不变**（跨用例仍只编译一次），变的只是
+   （读侧 `retireStats()` 给出 `retires` / `pending` / `frozen`）。**保留量不变**（跨用例仍只编译一次），变的只是
    扫描面——故不得改用 LRU 限制保留量：被淘汰的树要在下一条判据里重新解析，
    实测 miss 从 1586 涨到 4790，反而更慢。
 
@@ -150,21 +150,44 @@ RETIRE_STEP = 8
 #: 退役账：写侧在 `_retireResidentGraphIfDue`，读侧为
 #: `tests/unit/test_ci_ast_scan_budget_guard.py::TestResidentGraphIsRetiredFromTheScannedGenerations`
 #: （判据按它反证「退役真发生了」），不留只写不读的断点。
-_RETIRE_LEDGER = {"retires": 0, "next": RETIRE_STEP}
+#:
+#: `parsesSinceRetire` 记的是**自上次退役以来新增的常驻树数**，不与 `currsize` 挂钩。
+#: 为什么不按「常驻树总数」推游标：那个量**可以被外部拉回 0**（受保护子集里就有
+#: 用例显式 `_cachedParse.cache_clear()` 自证缓存语义），而游标是高水位——清空之后
+#: 它还停在高位，于是接下来几百次解析一棵也不退役，扫描面重新无界，判据退化成
+#: 「取决于前面跑过哪些用例」（判据与运行环境捆绑，正是本文件开头点名的形态）。
+#: 靶点是新增量，故与清缓存解耦。
+_RETIRE_LEDGER = {"retires": 0, "parsesSinceRetire": 0}
 
 
 def retireStats() -> dict:
     """退役读数（唯一读取口）。
 
-    `retires` 已发生的退役次数；`retained` 常驻树数（本次调用时点）；
-    `frozen` 当前被移出扫描分代的对象数；`step` 现行步长。
+    `retires` 已发生的退役次数（判据按它反证「退役真发生了」）；
+    `pending` 距下次退役还差的新增数量（判据按它反证「退役后已复位」）；
+    `frozen` 当前被移出扫描分代的对象数。
+
+    只给这三个：`步长` 就是模块常量 `RETIRE_STEP`、`常驻树数` 就是两条缓存的
+    `cache_info().currsize`，搬进来只是第二份定义，且没有人读它（教义第 6 条：
+    只写不读的字段是断点）。
     """
     return {
-        "step": RETIRE_STEP,
         "retires": _RETIRE_LEDGER["retires"],
-        "retained": _cachedParse.cache_info().currsize + _cachedNodes.cache_info().currsize,
+        "pending": _RETIRE_LEDGER["parsesSinceRetire"],
         "frozen": gc.get_freeze_count(),
     }
+
+
+def resetRetireLedger() -> None:
+    """把退役账复位到初值（**账的形态只在本模块定义一处**）。
+
+    给出这个复位点，是为了让判据能构造「刚开工」的进程状态而不必手抄
+    `_RETIRE_LEDGER` 的键名——手抄私有字段就是第二份定义，键改名时静默错位
+    （实测形态：判据 monkeypatch 一份旧键名，生产侧改名后判据以 `KeyError` 收场，
+    报错点名的却不是真因）。
+    """
+    _RETIRE_LEDGER["retires"] = 0
+    _RETIRE_LEDGER["parsesSinceRetire"] = 0
 
 
 def _retireResidentGraphIfDue(pendingEntries: int) -> None:
@@ -174,20 +197,22 @@ def _retireResidentGraphIfDue(pendingEntries: int) -> None:
     「跨用例只编译一次」决定，不该为了 GC 去动它（实测按 LRU 限制保留量反而更慢：
     被淘汰的树在下一条判据里要重新解析，miss 从 1586 涨到 4790）。
 
+    触发量是**自上次退役以来的新增解析数**（`parsesSinceRetire`），不是常驻树总数：
+    后者可被 `cache_clear()` 拉回 0，而游标是高水位——清空后它停在高位，退役停摆。
+
     `pendingEntries`：本次调用后才会写进缓存的条数。`functools.lru_cache` 是在被包
     函数**返回之后**才写缓存的（实测：函数体内 `cache_info().currsize` 不含本条），
     故不计入这个增量，退役就会整整滞后一棵树。命中路径传 `0`，零额外开销。
     """
     if RETIRE_STEP <= 0:
         return
-    retained = (_cachedParse.cache_info().currsize + _cachedNodes.cache_info().currsize
-                + pendingEntries)
-    if retained < _RETIRE_LEDGER["next"]:
+    _RETIRE_LEDGER["parsesSinceRetire"] += pendingEntries
+    if _RETIRE_LEDGER["parsesSinceRetire"] < RETIRE_STEP:
         return
     gc.collect()
     gc.freeze()
     _RETIRE_LEDGER["retires"] += 1
-    _RETIRE_LEDGER["next"] = retained + RETIRE_STEP
+    _RETIRE_LEDGER["parsesSinceRetire"] = 0
 
 
 @functools.lru_cache(maxsize=None)
