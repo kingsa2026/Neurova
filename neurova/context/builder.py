@@ -188,7 +188,14 @@ class ContextBuilder:
         return None
 
     def _extract_experience_dicts_from_pool(self, pool: list) -> List[Dict]:
-        """从候选池中提取经验条目，还原为 dict 格式"""
+        """从候选池中提取经验条目，还原为 dict 格式。
+
+        工单 004 边界：`success` 取 `metadata` 的**原值**，缺键即 `None`（未测量）。
+        旧写法 `item.metadata.get("success", True)` 用默认值把"没测到"演成"测到成功"，
+        而归档口（`context/orchestrator.py` 构造 `ContextInput` 时只给 source/content/
+        priority，**不传 metadata**）正是缺键形态 —— 于是这个默认值在生产路径上
+        必然生效。默认值不是兜底，是把未知消毒成已知。
+        """
         from neurova.context_pool import ContextSource
 
         experiences = []
@@ -198,7 +205,7 @@ class ContextBuilder:
                     {
                         "context": item.content[:100],  # 使用内容作为上下文摘要
                         "result": item.metadata.get("result", ""),
-                        "success": item.metadata.get("success", True),
+                        "success": item.metadata.get("success"),
                         "lesson": item.metadata.get("lesson", ""),
                         "confidence": item.metadata.get("confidence", 1.0),
                     }

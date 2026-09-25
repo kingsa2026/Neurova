@@ -1951,6 +1951,8 @@ class ChatPipeline:
                         "source": "growth_lesson", "status": "retrieved",
                         "question_id": lesson["question_id"], "revision": lesson["revision"],
                     })
+            from neurova.skills.models import outcomeMark
+
             for hit in hits or []:
                 if not isinstance(hit, dict) or hit.get("skill_name") == "growth_answer":
                     continue
@@ -1971,12 +1973,17 @@ class ChatPipeline:
                     reply_side = str(hit_result)
                 else:
                     reply_side = ""
-                mark = "✓" if hit.get("success") else "✗"
+                # 工单 004 边界：三态原样带走。旧写法 `"✓" if … else "✗"` 与
+                # 紧跟的 `bool(...)` 是同一条折叠的两个命中点 —— 未测量（NULL）
+                # 既被渲染成"上次做砸了"，又被折成 False 传给下游（池归档、去重
+                # 优先级、最终进 prompt 的那一行都据此判断）。真相在库里，
+                # 传动轴只负责原样搬运，不得在这里做二次解释。
+                mark = outcomeMark(hit.get("success"))
                 items.append(
                     {
                         "content": f"{mark} {user_side[:80]} → {reply_side[:80]}",
                         "source": "ekb",
-                        "success": bool(hit.get("success")),
+                        "success": hit.get("success"),
                         # 工单 006：回写身份。growth_lesson 条目住在另一张表，
                         # 刻意不带 id，避免把账记到错误的行上
                         "id": hit.get("id"),

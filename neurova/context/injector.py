@@ -693,27 +693,7 @@ class UnifiedContextInjector(BaseModule):
             # 包装（旧实现段头+_build_system_prompt 段头叠加成双标题）
             parts = []
             for exp in similar[:3]:  # 最多显示3条
-                # 2.0: context 是 dict，从中提取 user_input 作为摘要
-                ctx = exp.get("context") or {}
-                if isinstance(ctx, dict):
-                    context_summary = str(ctx.get("user_input", ""))[:50]
-                else:
-                    context_summary = str(ctx)[:50]
-                # 2.0: result 是 dict 或 None
-                # 契约对齐（闭环审计 2026-09-04）：写入端 post_chat 存的是
-                # result["reply_excerpt"]，此处只读 output 曾使注入摘要恒空串
-                result_data = exp.get("result")
-                if isinstance(result_data, dict):
-                    result_summary = str(
-                        result_data.get("reply_excerpt")
-                        or result_data.get("output")
-                        or ""
-                    )[:50]
-                else:
-                    result_summary = str(result_data or "")[:50]
-                # success 在 2.0 中是 int 0/1
-                success_mark = "✓" if exp.get("success") else "✗"
-                parts.append(f"{success_mark} {context_summary} → {result_summary}")
+                parts.append(self._render_experience_line(exp))
 
             return "\n".join(parts)
 
@@ -741,16 +721,33 @@ class UnifiedContextInjector(BaseModule):
         try:
             parts = []
             for exp in experiences[:3]:  # 最多显示3条
-                context_summary = exp.get("context", "")[:50]
-                result_summary = exp.get("result", "")[:50]
-                success_mark = "✓" if exp.get("success") else "✗"
-                parts.append(f"{success_mark} {context_summary} → {result_summary}")
+                parts.append(self._render_experience_line(exp))
 
             return "\n".join(parts)
 
         except Exception as e:
             self.log_warning(f"格式化经验列表失败: {e}")
             return ""
+
+    @staticmethod
+    def _render_experience_line(exp: Dict) -> str:
+        """一条经验 → 进 prompt 的一行（三态与摘要取值的**唯一**渲染口）。
+
+        工单 004 的第五个面就是这里：库/权重/结晶器/API 四面都三态了，唯独真正
+        会改变下一次调用的这一面是二值 —— 未测量被渲染成 `✗`，等于告诉模型
+        "上次做砸了"。记号取 `skills.models` 的单源词汇表，不在此处再写字面量。
+
+        `context` / `result` 的取值形状也收在这里：旧实现在两处各写一份
+        `str(x)[:50]`，dict 形状（EKB 2.0 契约）直接切片抛 `TypeError`，
+        被外层 `except` 吞掉后整段经验从 prompt 里静默消失。
+        """
+        from neurova.skills.models import experienceSummary, outcomeMark
+
+        context_summary = experienceSummary(exp.get("context"), ("user_input",))[:50]
+        result_summary = experienceSummary(
+            exp.get("result"), ("reply_excerpt", "output")
+        )[:50]
+        return f"{outcomeMark(exp.get('success'))} {context_summary} → {result_summary}"
 
     def _format_emotion(self, emotion: Dict) -> str:
         """格式化情感状态"""
