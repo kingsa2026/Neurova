@@ -19,7 +19,6 @@ NLToolSynthesizer v1.0.0 — 自然语言工具合成器 (Phase 3 P3-3)
        └─▶ SynthesizedTool → 导出格式
 """
 
-import hashlib
 import re
 
 from neurova.core.logger import get_logger
@@ -327,10 +326,12 @@ class NLToolSynthesizer:
             tool.confidence = confidence
             result.stages_completed.append(SynthesisStage.CONFIDENCE_ESTIMATION)
 
-            # 设置工具信息
-            tool.name = self._generate_tool_name(description, category)
-            tool.description = description
+            # 设置工具信息。身份先定、名字后拼——名字必须携带身份，否则
+            # "同 category 的两条产物同名"会一路走到 SkillRegistry（按 name 建键）
+            # 把先到者顶掉（Issue #189 实测累计 10 次：ai_tool / general_tool）。
             tool.tool_id = f"synth_{uuid.uuid4().hex[:8]}"
+            tool.name = self._generate_tool_name(description, category, tool_id=tool.tool_id)
+            tool.description = description
 
             # 置信闸（工单 014）：低置信是闸，不是提示。
             # 原实现在这里只 warnings.append 一条，随后无条件 COMPLETED + success=True，
@@ -594,20 +595,35 @@ class NLToolSynthesizer:
 
         return min(1.0, score / max_score)
 
-    def _generate_tool_name(self, description: str, category: str) -> str:
+    #: 合成工具名的固定后缀 + 身份前后的分隔约定（名字只是**展示与派发域**的键，
+    #: 身份永远是 `tool_id`；这里只保证"身份不同 ⇒ 名字不同"）。
+    _NAME_SUFFIX = "_tool"
+
+    def _generate_tool_name(
+        self, description: str, category: str, tool_id: str = ""
+    ) -> str:
         """
         生成工具名称
 
         参数:
             description: 自然语言描述
             category: 工具分类
+            tool_id: 产物身份。**必须传**（装配点已传）——名字要携带身份。
 
         返回:
             str: 工具名称
 
-        Bug T-3 修复: OpenAI function calling 工具名规范为 ^[a-zA-Z0-9_-]{1,64}$，
-        不允许中文。原正则 [\\u4e00-\\u9fff] 匹配中文字符导致工具名含中文被 LLM 拒绝。
-        修复: 只提取 ASCII 单词，中文描述回退到 category（category 来自 CATEGORY_KEYWORDS 映射，恒为 ASCII）。
+        两条约束同时成立：
+
+        1. 合法工具名（Bug T-3：OpenAI function calling 规范
+           `^[a-zA-Z0-9_-]{1,64}$`，不允许中文）——只提取 ASCII 词，中文描述
+           回退到 category；
+        2. **名字携带身份**（Issue #189）：描述部分对"同 category 的两条产物"
+           没有区分力（中文描述一律回退到 category，于是都叫 `ai_tool`），
+           而 `SkillRegistry` 按 `skill.name` 建键，后到者会静默顶掉先到者，
+           工具面上少了一个却无从察觉。另两条写入臂早已携带身份
+           （`skill_encapsulation._generate_skill_name` 带 pattern_id、
+           `genetic_engine` 直接用身份当名字），本臂补齐。
         """
         # 只提取 ASCII 单词（字母开头，含字母数字下划线），避免中文进入工具名
         words = re.findall(r"[a-zA-Z][a-zA-Z0-9_]+", description.lower())
@@ -619,12 +635,17 @@ class NLToolSynthesizer:
             # 中文描述无 ASCII 词时回退到 category（恒为 ASCII，如 search/file/web）
             name_part = category
 
-        # 唯一化后缀：注册表按 name 建键，纯词干名会让"同一描述连跑两次"的两个
-        # 产物互相顶替（启动日志累计 10 条 `技能同名覆盖（name=general_tool/ai_tool）`）。
-        # 后缀取描述指纹——同描述的重复合成因此**幂等**（同名的确是同一个东西），
-        # 不同描述必不撞名。不取随机数：随机后缀会让"重复合成"变成产生一堆垃圾技能。
-        fingerprint = hashlib.sha256(description.encode("utf-8", "replace")).hexdigest()[:8]
-        return f"{name_part}_{fingerprint}_tool"
+        ident = re.sub(r"[^a-zA-Z0-9_]", "_", str(tool_id or ""))
+        if not ident:
+            # 身份缺席（旧调用方/直接单测）：保持历史上的无名形态，不伪造身份
+            return f"{name_part}{self._NAME_SUFFIX}"[:64]
+
+        # 身份后缀优先于描述部分保住：截断只砍 description 侧，否则名字会被
+        # 砍到退化成"同 category 全同名"，等于没修。
+        budget = 64 - len(self._NAME_SUFFIX) - len(ident) - 1
+        if budget < 1:
+            return f"{ident}{self._NAME_SUFFIX}"[:64]
+        return f"{name_part[:budget]}_{ident}{self._NAME_SUFFIX}"[:64]
 
 
 # ────── 单例管理 ──────

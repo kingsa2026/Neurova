@@ -116,46 +116,18 @@ class TestUnknownCategoryFallsToReview:
 
 
 class TestArtifactNameUniqueness:
+    """产物名唯一性的**判据唯一归属**是 `test_synth_tool_name_carries_identity.py`
+    （Issue #189 已合入 main，名字携带身份 `tool_id`）。
+
+    本文件不再复述"名字怎么拼"——那是同契约的第二份定义（教义第 6 条）。
+    此处只保留一条**与名字拼法无关**的收敛读数：不同描述的两条产物不得同名，
+    不论拼法是身份后缀还是描述指纹，这条都必须成立。
+    """
+
     def test_differentDescriptions_doNotCollideOnName(self, synth):
-        """不同描述必须产出不同名字 —— 原实现里所有未命中关键词的描述都叫
-        `general_tool_tool`，注册表按 name 建键，后到者静默顶替先到者。"""
         name_a = synth.synthesize("帮我搜索文件").synthesized_tool.name
         name_b = synth.synthesize("读取配置文件").synthesized_tool.name
         assert name_a != name_b, f"不同描述的产物名互相顶替：{name_a!r} == {name_b!r}"
-
-    def test_sameDescription_isIdempotentNotColliding(self, synth):
-        """同描述重复合成落到同一名字：同名即同一身份，注册表不产生覆盖告警。
-
-        取描述指纹而非随机后缀是有意的——随机后缀会让"同一件事重复合成"
-        变成产生一堆垃圾技能（每次都是新身份）。
-        """
-        from neurova.skills.skill_contract import resolve_skill_identity
-
-        first = synth.synthesize("帮我搜索文件")
-        second = synth.synthesize("帮我搜索文件")
-
-        assert first.synthesized_tool.name == second.synthesized_tool.name
-        assert first.synthesized_tool.tool_id != second.synthesized_tool.tool_id
-        assert first.synthesized_tool.name not in _REGISTERED, "产物名撞了内置工具名"
-
-    def test_generatedNameCarriesDescriptionFingerprint(self, synth):
-        """名字必须带唯一化后缀（描述指纹），不是纯词干。"""
-        import hashlib
-        import re
-
-        result = synth.synthesize("帮我搜索文件")
-        tool = result.synthesized_tool
-        fingerprint = hashlib.sha256(tool.description.encode("utf-8", "replace")).hexdigest()[:8]
-        assert fingerprint in tool.name, (
-            f"产物名没有描述指纹后缀：name={tool.name!r} fingerprint={fingerprint!r}"
-        )
-        assert re.match(r"^[a-zA-Z0-9_-]{1,64}$", tool.name)
-
-    def test_generatedNameMatchesOpenAiToolNameRule(self, synth):
-        import re
-
-        result = synth.synthesize("帮我搜索文件")
-        assert re.match(r"^[a-zA-Z0-9_-]{1,64}$", result.synthesized_tool.name)
 
 
 class TestSingleSourceAlphabet:
