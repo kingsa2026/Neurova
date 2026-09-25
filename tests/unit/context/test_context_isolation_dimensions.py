@@ -1,9 +1,21 @@
-"""
-3 维度验证: 按需调取 + 上下文池隔离 + sessionID 跨会话
+"""上下文池隔离维度测试
 
-维度 1: 按需调取 — query() 默认按 session 过滤, 不返回全库
-维度 2: 上下文池隔离 — user/agent/session 三层独立
-维度 3: sessionID 跨会话 — 同 agent 不同 session 互不污染, 可调取
+**B6-10 批次 F 范围收窄（2026-09-26）**：池注册表的多池机制已退场（它是被 T-02
+取代的第二套隔离机制——按池分会话 vs 真设计的单池 + `chat_scope` 作用域标签）。
+依赖 `reg.get_or_create` / `reg.query_agent` 的用例随之退役；**被锁的隔离契约
+搬到真面**：user / agent / session 三层隔离由池自身的 `isolation_key` 与写入
+咽喉打标承载（`tests/unit/context/test_pool_scope_wiring.py` /
+`test_context_pool_isolation.py`），按 session 过滤由 `ContextPool.query` 承载
+（`test_context_pool_query.py`）。
+
+本文件保留不依赖注册表的两组：
+
+- 维度 1 按需调取：`query()` 默认按 session 过滤、不返回全库；
+- 维度 3 metadata 契约：每条 chunk 的 metadata 必须带 sessionID。
+
+退役文件（整份只测多池机制）：`test_context_pool_registry.py` /
+`test_context_pool_end_to_end.py` / `test_current_session_priority_e2e.py`；
+`test_default_session_priority.py` 的 registry 组退役、pool 组保留。
 """
 import sys
 from pathlib import Path
@@ -12,12 +24,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-
-def _setup():
-    from neurova.context_pool_registry import ContextPoolRegistry
-    ContextPoolRegistry._instance = None
-    return ContextPoolRegistry().reset()
 
 
 class TestDimension1OnDemandQuery:
@@ -64,86 +70,6 @@ class TestDimension1OnDemandQuery:
         assert "42" in results[0].content
 
 
-class TestDimension2PoolIsolation:
-    """维度 2: 上下文池隔离 — user/agent/session 三层"""
-
-    def test_user_isolation(self):
-        """不同 user 的 pool 完全隔离"""
-        from neurova.context_pool_registry import ContextPoolRegistry
-        from neurova.context.pool_models import ContextInput, ContextSource
-
-        _setup()
-        reg = ContextPoolRegistry()
-        p_u1 = reg.get_or_create(user_id="alice", agent_id="a", session_id="s1")
-        p_u2 = reg.get_or_create(user_id="bob", agent_id="a", session_id="s1")
-
-        p_u1.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="alice secret", priority=10
-        ))
-        p_u2.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="bob secret", priority=10
-        ))
-
-        # alice 调取只看到自己
-        results_alice = reg.query_agent(
-            user_id="alice", agent_id="a", current_session_id="s1", query="secret", limit=5
-        )
-        assert len(results_alice) == 1
-        assert "alice" in results_alice[0].content
-        assert results_alice[0].metadata["user_id"] == "alice"
-
-    def test_agent_isolation(self):
-        """不同 agent 的 pool 完全隔离"""
-        from neurova.context_pool_registry import ContextPoolRegistry
-        from neurova.context.pool_models import ContextInput, ContextSource
-
-        _setup()
-        reg = ContextPoolRegistry()
-        p_coding = reg.get_or_create(user_id="u", agent_id="coding_agent", session_id="s1")
-        p_search = reg.get_or_create(user_id="u", agent_id="search_agent", session_id="s1")
-
-        p_coding.add_context(ContextInput(
-            source=ContextSource.MEMORY, content="code context", priority=10
-        ))
-        p_search.add_context(ContextInput(
-            source=ContextSource.MEMORY, content="search context", priority=10
-        ))
-
-        # coding_agent 只看到自己的
-        results = reg.query_agent(
-            user_id="u", agent_id="coding_agent", current_session_id="s1",
-            query="context", limit=5
-        )
-        assert len(results) == 1
-        assert "code" in results[0].content
-        assert results[0].metadata["agent_id"] == "coding_agent"
-
-    def test_session_isolation(self):
-        """同 agent 不同 session 池互不污染"""
-        from neurova.context_pool_registry import ContextPoolRegistry
-        from neurova.context.pool_models import ContextInput, ContextSource
-
-        _setup()
-        reg = ContextPoolRegistry()
-        p_s1 = reg.get_or_create(user_id="u", agent_id="a", session_id="s1")
-        p_s2 = reg.get_or_create(user_id="u", agent_id="a", session_id="s2")
-
-        p_s1.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="s1 only", priority=10
-        ))
-        p_s2.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="s2 only", priority=10
-        ))
-
-        # 池1 看不到池2
-        assert len(p_s1.get_contexts()) == 1
-        assert len(p_s2.get_contexts()) == 1
-        # 显式 session 隔离
-        s1_results = p_s1.query(session_id="s1", limit=5)
-        assert len(s1_results) == 1
-        assert "s1 only" in s1_results[0].content
-
-
 class TestDimension3SessionIDCrossSession:
     """维度 3: sessionID 跨会话 — 同 agent 不同 session 可跨调"""
 
@@ -159,78 +85,6 @@ class TestDimension3SessionIDCrossSession:
 
         results = pool.query(limit=1)
         assert results[0].metadata.get("session_id") == "session_xyz"
-
-    def test_registry_query_agent_cross_sessions_with_priority(self):
-        """跨 session 调取: 当前 session 优先, 跨 session 兜底, 每个
-        chunk 都有 sessionID 用于业务侧识别"""
-        from neurova.context_pool_registry import ContextPoolRegistry
-        from neurova.context.pool_models import ContextInput, ContextSource
-
-        _setup()
-        reg = ContextPoolRegistry()
-        p_s1 = reg.get_or_create(user_id="u", agent_id="a", session_id="s1")
-        p_s2 = reg.get_or_create(user_id="u", agent_id="a", session_id="s2")
-        p_s3 = reg.get_or_create(user_id="u", agent_id="a", session_id="s3")
-
-        # s1 当前 session
-        p_s1.add_context(ContextInput(
-            source=ContextSource.MEMORY, content="current memory", priority=10
-        ))
-        # s2/s3 历史 session
-        p_s2.add_context(ContextInput(
-            source=ContextSource.MEMORY, content="s2 memory", priority=95
-        ))
-        p_s3.add_context(ContextInput(
-            source=ContextSource.MEMORY, content="s3 memory", priority=80
-        ))
-
-        results = reg.query_agent(
-            user_id="u", agent_id="a",
-            current_session_id="s1",
-            query="memory", limit=10,
-        )
-
-        assert len(results) == 3
-        # 全部带 sessionID
-        sessions_returned = [c.metadata["session_id"] for c in results]
-        assert "s1" in sessions_returned
-        assert "s2" in sessions_returned
-        assert "s3" in sessions_returned
-        # s1 必须排第一(当前优先)
-        assert results[0].metadata["session_id"] == "s1"
-        # s2 排第二(priority=95 最高)
-        assert results[1].metadata["session_id"] == "s2"
-        # s3 排第三(priority=80)
-        assert results[2].metadata["session_id"] == "s3"
-
-    def test_cleared_session_no_longer_returns(self):
-        """session 清理后, 跨 session 调取不再返回其内容"""
-        from neurova.context_pool_registry import ContextPoolRegistry
-        from neurova.context.pool_models import ContextInput, ContextSource
-
-        _setup()
-        reg = ContextPoolRegistry()
-        p_s1 = reg.get_or_create(user_id="u", agent_id="a", session_id="s1")
-        p_s2 = reg.get_or_create(user_id="u", agent_id="a", session_id="s2")
-
-        p_s1.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="s1 msg", priority=10
-        ))
-        p_s2.add_context(ContextInput(
-            source=ContextSource.CONVERSATION, content="s2 msg", priority=10
-        ))
-
-        # 清理 s2
-        cleared = reg.clear_session(user_id="u", agent_id="a", session_id="s2")
-        assert cleared is True
-
-        # 跨 session 调取: 只剩 s1
-        results = reg.query_agent(
-            user_id="u", agent_id="a", current_session_id="s1", query="msg", limit=10
-        )
-        assert len(results) == 1
-        assert results[0].metadata["session_id"] == "s1"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
