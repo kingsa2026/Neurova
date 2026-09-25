@@ -21,6 +21,7 @@
             <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTimestampText(sb.created_at) }}</p>
             <p class="sb-meta">{{ t('sandbox.steps') }}{{ sb.steps_count ?? 0 }}</p>
             <p v-if="sb.image" class="sb-meta">{{ t('sandbox.image') }}{{ sb.image }}</p>
+            <p v-if="sb.language" class="sb-meta">{{ t('sandbox.language') }}{{ sb.language }}</p>
           </div>
           <template #footer>
             <div class="sb-actions">
@@ -49,6 +50,9 @@
       </div>
       <div v-if="execOutput" class="exec-output">
         <h4>{{ t('sandbox.output') }}</h4>
+        <p v-if="execMeta" class="exec-meta" :class="{ 'exec-meta-warn': execMeta.enforced === false }">
+          {{ execMetaText }}
+        </p>
         <pre>{{ execOutput }}</pre>
       </div>
     </GlassCard>
@@ -71,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { sandboxApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
@@ -90,9 +94,22 @@ const showStart = ref(false)
 const stepCommand = ref('')
 const stepLanguage = ref('python')
 const execOutput = ref('')
+// 隔离诚实面：后端自报的 backend / enforced 原样展示，不替用户判断"安全不安全"
+const execMeta = ref<{ backend?: string; enforced?: boolean; exit_code?: number; duration_ms?: number } | null>(null)
 
 const newSandbox = ref<sandboxApi.CreateSandboxPayload>({ name: '', image: 'python:3.11-slim', timeout: 300 })
 
+const execMetaText = computed(() => {
+  const meta = execMeta.value
+  if (!meta) return ''
+  const parts: string[] = []
+  if (meta.backend) parts.push(`${t('sandbox.backend')}${meta.backend}`)
+  if (meta.enforced === true) parts.push(t('sandbox.isolated'))
+  if (meta.enforced === false) parts.push(t('sandbox.notIsolated'))
+  if (typeof meta.exit_code === 'number') parts.push(`${t('sandbox.exitCode')}${meta.exit_code}`)
+  if (typeof meta.duration_ms === 'number') parts.push(`${meta.duration_ms}ms`)
+  return parts.join(' · ')
+})
 
 const fetchSandboxes = async () => {
   loading.value = true
@@ -130,6 +147,7 @@ const confirmStart = async () => {
 const selectSandbox = async (sb: sandboxApi.Sandbox) => {
   selectedSandbox.value = sb
   execOutput.value = ''
+  execMeta.value = null
   try {
     const res = await sandboxApi.getSandbox(sb.id)
     selectedSandbox.value = res ?? sb
@@ -146,9 +164,16 @@ const executeStep = async () => {
       command: stepCommand.value,
       language: stepLanguage.value,
     })
-    execOutput.value = res.output ?? res.result ?? JSON.stringify(res, null, 2)
+    execOutput.value = res.output ?? res.stdout ?? res.result ?? JSON.stringify(res, null, 2)
+    execMeta.value = {
+      backend: res.backend,
+      enforced: res.enforced,
+      exit_code: res.exit_code,
+      duration_ms: res.duration_ms,
+    }
   } catch (e: any) {
-    execOutput.value = e.message || t('common.error')
+    execOutput.value = e?.response?.data?.detail ?? e?.message ?? t('common.error')
+    execMeta.value = null
   } finally {
     executing.value = false
   }
@@ -198,5 +223,7 @@ onMounted(fetchSandboxes)
 .exec-actions { display: flex; gap: 8px; align-items: center; }
 .exec-output { margin-top: 16px; }
 .exec-output h4 { color: var(--nr-text-primary); font-size: 14px; margin-bottom: 8px; }
+.exec-meta { font-size: 12px; color: var(--nr-text-tertiary); font-family: var(--nr-font-mono); margin-bottom: 6px; }
+.exec-meta-warn { color: var(--nr-warning, #faad14); }
 .exec-output pre { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--nr-text-secondary); font-family: var(--nr-font-mono); max-height: 300px; overflow: auto; white-space: pre-wrap; margin: 0; }
 </style>

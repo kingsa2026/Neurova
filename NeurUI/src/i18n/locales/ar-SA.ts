@@ -2092,6 +2092,11 @@ export default {
     python: 'Python',
     shell: 'Shell',
     javascript: 'JavaScript',
+    language: 'اللغة: ',
+    backend: 'الخلفية: ',
+    isolated: 'العزل مفعّل',
+    notIsolated: 'بدون عزل (لا يوجد عزل على مستوى النواة)',
+    exitCode: 'رمز الخروج: ',
   },
   firewall: {
     title: 'جدار الحماية',

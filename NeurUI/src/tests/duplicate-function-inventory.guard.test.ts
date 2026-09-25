@@ -20,11 +20,15 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  CALIBER_BEGIN,
+  CALIBER_END,
   LEDGER_BEGIN,
   LEDGER_END,
   auditDuplicateFunctions,
   inventoryPayload,
+  renderCaliberBlock,
   renderLedgerBlock,
+  reportCounts,
 } from '../../scripts-qa/duplicate-function-audit.mjs'
 
 const LEDGER_PATH = join(
@@ -85,6 +89,36 @@ describe('跨文件同名函数盘点', () => {
     for (const name of hazardous) {
       const groups = tiers.C.filter((group) => group.name === name)
       expect(groups.length, `${name} 应作为同名异体登记在 C 类`).toBe(1)
+    }
+  })
+
+  it('口径候选表是生成物：台账 §1.1 的每个读数都必须等于同一脚本的实跑值', () => {
+    const ledger = readLedger()
+    const begin = ledger.indexOf(CALIBER_BEGIN)
+    const end = ledger.indexOf(CALIBER_END)
+    expect(begin, '台账缺少口径候选段起始标记').toBeGreaterThan(-1)
+    expect(end, '台账缺少口径候选段结束标记').toBeGreaterThan(begin)
+    const actual = ledger.slice(begin, end + CALIBER_END.length)
+    expect(
+      actual,
+      '台账口径候选段与实跑口径不一致：手抄读数会脱节，请重跑 node scripts-qa/duplicate-function-audit.mjs --write-ledger <台账>',
+    ).toBe(renderCaliberBlock())
+  })
+
+  it('组数口径自洽：唯一名字数等于三档名字并集，不得把重叠组当两条独立名字相加', () => {
+    const report = auditDuplicateFunctions()
+    const counts = reportCounts(report)
+    const union = new Set(
+      [...report.tiers.A, ...report.tiers.B, ...report.tiers.C].map((group) => group.name),
+    )
+    expect(counts.crossFileUniqueNames, '唯一名字数必须与三档名字并集相等').toBe(union.size)
+    // 同一个名字可同时落在同体档与异体档：此时组数之和必然大于唯一名字数，
+    // 任何「唯一名字 = 同体组数 + 异体组数」的写法都必须被这条咬住。
+    if (counts.sameBodyGroups + counts.variantBodyGroups > counts.crossFileUniqueNames) {
+      expect(
+        counts.overlappingNames.length,
+        '组数之和大于唯一名字数时，重叠名必须被逐个点名，否则读数无法复算',
+      ).toBeGreaterThan(0)
     }
   })
 })

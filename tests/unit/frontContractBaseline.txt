@@ -31,7 +31,7 @@
 # 乙·已退役 14 条（无任何非测试消费点，幻影契约）：
 #   console/debug、console/push、health/metrics、memory/search、models 四条、
 #   neurflow/comfyui/import、plugins 五条、shared-config/llm-providers/*/test
-# 丙·待接线 1 条：
+# 丙·待接线 0 条：
 files | GET | /api/v1/files/*/content | 已修 | 后端新增 GET /api/v1/files/{id}/content（files_api.py）；此前只有 /preview 与 /download 两个字节面，FilePage/AgentFilePage 的文本预览实测恒 404
 health | GET | /api/v1/health/status | 已修 | 前端改指 GET /api/v1/health（后端 health.py 的 @router.get("")）；原 /health/status 从未注册过路由
 knowledge | POST | /api/v1/knowledge/annotations | 已修 | annotations router 由 console.py 迁入 knowledge.py 聚合器；标注是知识资产，唯一消费者是 KnowledgePage 的 AnnotationDrawer
@@ -59,4 +59,4 @@ plugins | GET | /api/v1/plugins/discover | 已退役 | 前端 discoverPlugins �
 shared-config | POST | /api/v1/shared-config/llm-providers/*/test | 已退役 | 前端 testProvider 无任何非测试消费点；后端无 /shared-config/*/test，函数已删净（连接测试真身在 tool-layers）
 shared-config | POST | /api/v1/shared-config/mcp-servers/*/test | 已退役 | 前端 testMCPServer 无任何非测试消费点；同一契约真身在 tool-layers.ts（后端 /tool-layers/mcp-servers/*/test），本副本已删净
 tool-layers | POST | /api/v1/tool-layers/tools/install | 已退役 | 前端 installTool 无任何非测试消费点；后端无 /tools/install，且公开工具本就在同一 ToolEngine 里可执行，「安装」无语义对象，函数与按钮已删净
-sandbox | POST | /api/v1/sandbox/*/execute | 待接线 | 前端 SandboxPage 描述的是「代码执行沙箱」（image/command/language），后端 neurova/api/endpoints/sandbox.py 实现的是「思维沙箱」（topic/step/commit-to-memory），两者不是同一能力：后端 `/{id}/step` 收 {input, context}，前端发 {command, language}；`/sandbox/start` 后端要求 agent_id/topic，前端发 name/image/timeout（必 422）。属前端先行、后端从未实现的功能面，需先裁决「做代码沙箱还是退役该页」，不在本单射程；承接方：待立项。
+sandbox | POST | /api/v1/sandbox/*/execute | 已修 | 后端新增 POST /api/v1/sandbox/{id}/execute（sandbox.py），执行后端 neurova/sandbox/code_sandbox.py 真跑解释器；连同 /start（收 name/image/timeout）、/{id}/commit（body 可省）、DELETE /{id} 一并按前端契约对齐

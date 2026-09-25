@@ -2092,6 +2092,11 @@ export default {
     python: 'Python',
     shell: 'Shell',
     javascript: 'JavaScript',
+    language: 'Sprache: ',
+    backend: 'Backend: ',
+    isolated: 'Isolierung aktiv',
+    notIsolated: 'Nicht isoliert (keine Kernel-Isolierung)',
+    exitCode: 'Exit-Code: ',
   },
   firewall: {
     title: 'Firewall',
