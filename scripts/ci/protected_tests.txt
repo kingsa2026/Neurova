@@ -896,3 +896,10 @@ tests/unit/ci/test_npc_branch_cleanup.py
 #    关联：tests/unit/frontContractBaseline.txt 该条已由「待接线」改判「已修」，
 #    docs/09-dev-progress/api_inventory.md 第四节差集归零。）
 tests/unit/sandbox/test_code_execution_sandbox_contract.py
+
+# Issue #223 CI 流水线耗时收口：四条结论（离线库跨构建复用 / 静态门禁合并 /
+#   重复依赖走同一份锁 / 不自举 pip）逐条钉住，回退即红。
+#   （根因：`.cnb.yml` 的 11 条流水线各装各的依赖、各扫各的全仓 AST，耗时构成
+#    此前无任何机器判据——改完就没人守，下一个人回填一处 `--upgrade pip` 不会有红。
+#    处置与刻意不动的三件事见 docs/04-plans/2026-09-25-ci-pipeline-cost-convergence.md）
+tests/unit/test_ci_pipeline_speed_guard.py
