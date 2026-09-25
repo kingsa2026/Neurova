@@ -101,6 +101,14 @@ class ContextOrchestrator:
     _last_folded_hashes: set = frozenset()
     _last_archived_window_hashes: set = frozenset()
 
+    #: 折叠分代的层数上限（T-11a，工单 §12.4 的"降一层"语义）。超过即从**最深一档**
+    #: 丢弃 —— 丢弃量计入 `get_context_health()["fold_layers"]["truncated"]`，不静默。
+    #: 上限的存在理由与对工单 §12.1"档数不设上限"的偏离，见 `_advanceFoldGeneration`。
+    _MAX_FOLD_GENERATIONS = 5
+
+    #: 最新一代的档号（1 = 最细分辨率档；旧摘要每被降一层 +1）。
+    _FOLD_TOP_LEVEL = 1
+
     def __init__(
         self,
         agent_ref,
@@ -204,6 +212,13 @@ class ContextOrchestrator:
           行数 / `tool` 行数 / 旧数据降级次数，以及 `declared_ids` 与实际
           `tool_call_id` 不匹配的告警。**降级次数取自 `SessionManager` 的计数器本体**
           （单一事实源），不在编排器另记一份。
+        - `fold_layers`：折叠分代的代际栈读数（T-11a，工单 §12.4）。`levels` 是
+          代际栈深度（含最新一代；**尚无折叠时为 0**，不虚报已有梯度），`demoted`
+          是累计被降层的旧摘要数，`truncated` 是超过 `_MAX_FOLD_GENERATIONS` 被
+          丢弃的层数 —— 截断必须可见，否则"轨迹始终可寻址"会在无读数的情况下失效。
+          读数是**最近一次折叠所在会话槽**的形态（折叠缓存按会话分槽），
+          `demoted` / `truncated` 为累计量；这与同面 `turn_identity` / `microcompact`
+          的"最近一次"口径一致，故不另造第二份逐会话读数。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
@@ -213,6 +228,12 @@ class ContextOrchestrator:
             "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
             "fold_integrity": self._foldIntegrityEmptyReport(),
             "turn_identity": {"identityless": 0, "resolved": 0, "last_key": None, "last_error": None},
+            "fold_layers": {
+                "levels": 0,
+                "demoted": 0,
+                "truncated": 0,
+                "last_summary_chars": 0,
+            },
             "microcompact": {
                 "calls": 0,
                 "triggered_calls": 0,
@@ -455,6 +476,53 @@ class ContextOrchestrator:
                 "静默共用槽即 T-03b 缺陷的形态，此处点名以便发现身份链路断了"
             )
 
+    def _advanceFoldGeneration(self, slot: dict, summary: str) -> None:
+        """把本轮新摘要推进代际栈：旧摘要**降一层**保留，而不是被覆盖（T-11a）。
+
+        根因（工单 §12.2 第 1 行）：折叠摘要在改前是**一个字符串**
+        （`slot["summary"] = ...`）。每轮折叠原地覆盖上一轮，于是整条被压缩的
+        历史永远只塌成一个节点 —— 分辨率梯度（C2）在数据上不可能存在，层即索引
+        （C4）也无从落地。
+
+        本方法是代际栈的**唯一写入点**：自动折叠与手动 `/compact` 都经它
+        （两处各写一遍必然漂移，那正是本仓反复收口的形态）。栈顶即最新一代。
+
+        截断**不静默**：超出 `_MAX_FOLD_GENERATIONS` 时从最深一档丢弃，计数进
+        `get_context_health()["fold_layers"]["truncated"]`。这条不是可选的观测面
+        —— §12.5 第 2 条把"只保留最后一层却声称轨迹全在"列为假实现，而没有读数
+        的截断与覆盖在外部不可区分。
+
+        **对工单 §12.1「档数不设上限」的偏离记录**：本票给代际栈加了上限。理由是
+        §12.1 那条指的是**视图内**档数（由 T-11c 按位置几何退避自然增长），而这里
+        限的是**进程内易失缓存**的深度 —— 它是进程内状态，无上限即随会话时长单调
+        增长（T-07 已把"持久层不可只增"立为纪律，同一理由适用于摘要栈）。深层节点
+        的**长期驻留**属 T-11b：届时栈要写进池（`ContextSource.SUMMARY`）并带
+        `covers` 索引，持久层自会承载比进程内缓存深得多的历史。本票只保证
+        "多代际存在 + 降层可见 + 截断可见"，不预判 T-11b 的落库形态。
+        """
+        stack = slot.setdefault("generations", [])
+        demoted = []
+        for node in stack:
+            # 降一层，文本原样（不得就地改写：T-04 的纪律同样适用于摘要层）
+            demoted.append({"summary": node["summary"], "level": int(node["level"]) + 1})
+        slot["demoted_total"] = int(slot.get("demoted_total") or 0) + len(demoted)
+
+        top = {"summary": summary, "level": self._FOLD_TOP_LEVEL}
+        stack = [top] + demoted
+        dropped = max(0, len(stack) - self._MAX_FOLD_GENERATIONS)
+        if dropped:
+            stack = stack[: self._MAX_FOLD_GENERATIONS]
+        slot["generations"] = stack
+        # 栈顶投影：既有读侧（防抖 / 静态桩 / 手动压缩回执）据此逐字不变。
+        slot["summary"] = summary
+        slot["level"] = top["level"]
+
+        readout = self._contextHealthSlot("fold_layers")
+        readout["levels"] = len(stack)
+        readout["demoted"] = slot["demoted_total"]
+        readout["truncated"] = int(readout.get("truncated") or 0) + dropped
+        readout["last_summary_chars"] = len(summary or "")
+
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
 
@@ -476,7 +544,16 @@ class ContextOrchestrator:
             cache.pop(key, None)
             cache[key] = slot
             return slot
-        slot = {"summary": "", "covered": set(), "last_count": 0}
+        slot = {
+            "summary": "",
+            "covered": set(),
+            "last_count": 0,
+            # T-11a：代际栈（最新一代在前）。`summary` / `level` 是栈顶的投影，
+            # 保留它们是为了让既有读侧（防抖判定、静态桩沿用、手动压缩回执）
+            # 逐字不变 —— 单一事实源是栈，投影只是同一份数据的两个视图。
+            "level": 0,
+            "generations": [],
+        }
         cache[key] = slot
         while len(cache) > self._WINDOW_CACHE_SLOTS:
             cache.pop(next(iter(cache)), None)
@@ -1841,7 +1918,9 @@ class ContextOrchestrator:
         # 还在窗口里，等于在摘要层做假账（防抖期内不再重摘要，视图只剩一个
         # 与内容无关的旧标题）。
         if compaction.summary and compaction.summary_is_fresh:
-            cache["summary"] = compaction.summary
+            # T-11a：新摘要推进代际栈（旧摘要降一层），栈顶投影回 `cache["summary"]`
+            # —— 上面那个"是否为新鲜摘要"的判据一字不改，分代只改变旧摘要的去向。
+            self._advanceFoldGeneration(cache, compaction.summary)
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
@@ -1922,7 +2001,8 @@ class ContextOrchestrator:
                     "summary_generated": False}
 
         if compaction.summary:
-            cache["summary"] = compaction.summary
+            # 与自动折叠**共用同一处**分代推进（教义第 6 条：一个契约一处实现）。
+            self._advanceFoldGeneration(cache, compaction.summary)
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
