@@ -177,7 +177,7 @@
               <span v-if="(val as number) / result.score > 0.15" class="channel-label">{{ ch }}</span>
             </div>
           </div>
-          <div class="result-date">{{ formatTime(result.created_at) }}</div>
+          <div class="result-date">{{ formatTimestampText(result.created_at) }}</div>
         </div>
       </div>
     </GlassCard>
@@ -203,7 +203,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'content'">
             <div class="content-preview">
-              {{ truncate(record.content, 120) }}
+              {{ truncateText(record.content, 120) }}
               <a-tag v-if="record.tags?.length" color="gold" class="shared-badge">
                 {{ record.tags.join(', ') }}
               </a-tag>
@@ -407,6 +407,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { truncateText } from '@/utils/displayText'
+import { formatTimestampText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -601,10 +603,7 @@ const originLabel = (origin?: string) => {
   return t(i18nMap[key] || 'memory.originAgent')
 }
 
-const truncate = (text: string, len: number) =>
-  text && text.length > len ? text.slice(0, len) + '...' : text || ''
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const importanceColor = (val: number) => {
   if (val >= 0.8) return '#10b981'

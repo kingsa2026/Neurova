@@ -41,7 +41,7 @@
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'timestamp'">
-            <span class="audit-time">{{ formatTime(record.timestamp) }}</span>
+            <span class="audit-time">{{ formatTimestampText(record.timestamp) }}</span>
           </template>
           <template v-if="column.key === 'action'">
             <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
@@ -75,6 +75,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
 
@@ -105,7 +106,6 @@ const actionColor = (action: string) => {
   return map[action] || 'default'
 }
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const fetchAudit = async () => {
   loading.value = true

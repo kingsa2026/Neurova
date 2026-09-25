@@ -25,7 +25,7 @@
           <div class="notif-content">
             <div class="notif-header">
               <span class="notif-title">{{ notif.title }}</span>
-              <span class="notif-time">{{ formatTime(notif.created_at) }}</span>
+              <span class="notif-time">{{ formatTimestampText(notif.created_at) }}</span>
             </div>
             <p class="notif-body">{{ notif.message }}</p>
             <div class="notif-meta">
@@ -57,7 +57,7 @@
       <div v-if="detailNotif" class="notif-detail">
         <div class="notif-detail-header">
           <a-tag :color="typeColor(detailNotif.type)">{{ detailNotif.type }}</a-tag>
-          <span class="notif-time">{{ formatTime(detailNotif.created_at) }}</span>
+          <span class="notif-time">{{ formatTimestampText(detailNotif.created_at) }}</span>
         </div>
         <h4 class="notif-detail-title">{{ detailNotif.title }}</h4>
         <p class="notif-detail-body">{{ detailNotif.message }}</p>
@@ -98,6 +98,7 @@ import { useI18n } from 'vue-i18n'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 import * as notifApi from '@/api/modules/notifications'
 import { reviewKnowledgePublic } from '@/api/modules/knowledge'
 import { reviewSkillSubmission } from '@/api/modules/skill-pool'
@@ -139,7 +140,6 @@ const typeColor = (type: string) => {
   return map[type] || 'default'
 }
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const fetchNotifications = async () => {
   loading.value = true

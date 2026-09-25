@@ -153,7 +153,7 @@
           >
             <div class="wf-meta">
               <span class="meta-text">{{ t('workflow.nodes') }}: {{ cv.node_count ?? 0 }}</span>
-              <span v-if="cv.updated_at" class="meta-text">{{ formatTime(cv.updated_at) }}</span>
+              <span v-if="cv.updated_at" class="meta-text">{{ formatEpochSecondText(cv.updated_at) }}</span>
             </div>
             <div class="wf-actions">
               <GlassButton variant="primary" size="sm" @click="router.push(`/collaboration/canvas/${cv.id}`)">{{ t('common.open') }}</GlassButton>
@@ -170,6 +170,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import { formatEpochSecondText } from '@/utils/displayText'
 import type { Dayjs } from 'dayjs'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -395,10 +396,6 @@ function scheduleText(cfg: Record<string, unknown>): string {
   return String(cfg.type ?? '-')
 }
 
-function formatTime(ts?: number): string {
-  if (!ts) return ''
-  return new Date(ts * 1000).toLocaleString()
-}
 
 onMounted(fetchAll)
 </script>

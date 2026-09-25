@@ -205,6 +205,7 @@
 - [执行摘要.md](../05-reports/执行摘要.md) — 执行摘要
 - [最终集成总结.md](../05-reports/最终集成总结.md) — 最终集成总结
 - [memory-temperature-convergence-2026-09-21.md](../05-reports/memory-temperature-convergence-2026-09-21.md) — 温度衰减双实现比对与收敛（Issue #74 死码退役）
+- [同名函数盘点台账_2026-09-25.md](../05-reports/同名函数盘点台账_2026-09-25.md) — 跨文件同名函数分档与处置结论（Issue #192 待办项收口）
 
 ### 06-bugfix 修复记录
 
