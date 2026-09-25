@@ -32,6 +32,7 @@
 - **D 门禁留在受保护子集**：判据要在 CI 上真的跑，否则 A/B/C 无人执行。
 
 可证伪路径：
+- 把人设改回「把 1 写进 `.npc-turn-handoff`」→ A 红；
 - 把 `.cnb.yml` 里跑门禁的那一步删掉 → B 红；
 - 把人设里的两个平台变量名删掉、或加回自造标记 → A 红；
 - 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → D 红。
@@ -52,13 +53,12 @@ SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 已作废的接力标记文件名（Issue #158 引入、Issue #189 废止）。
-#: 保留常量只为**反向钉住**「它不得再出现」—— 见
-#: `TestPersonaTeachesTheCurrentRelayContract`：收尾 `if` 自 #189 起读平台
+#: 保留常量只为**反向钉住**「它不得再出现」—— 收尾 `if` 自 #189 起读平台
 #: 注入的 `$CNB_PIPELINE_STATUS` / `$CNB_BUILD_FAILED_MSG`，
 #: 这个文件不再是任何判据的输入。
 HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
-#: 门的脚本（接力环境前提自证）
+#: 开工前自证脚本（接力环境前提与工作区落点自证）。
 GATE_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
 
 
@@ -193,9 +193,9 @@ class TestGateScriptIsExecutedByTheBuild:
         ]
         assert not missing, (
             f"{len(missing)} 条 npc:go 流水线未执行 scripts/ci/npc_turn_handoff_gate.py\n"
-            "该步在真实构建里自证工作区可写，"
+            "该步在真实构建里自证 `$CNB_BUILD_WORKSPACE` 可写可读，"
             "并反向自证 $PWD 是否等于 $CNB_BUILD_WORKSPACE——"
-            "这是接手时唯一能回答「构建环境前提是否成立」的读数。"
+            "这是接手时唯一能回答「构建环境前提是否成立、工作区到底在哪」的读数。"
         )
 
     def test_gate_is_registered_in_the_import_sweep_or_directly_runnable(self):
@@ -569,3 +569,78 @@ class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
                     f"{where}: 接力 env 未把 Issue/PR 标识传下去（下一轮读不到对话载体）"
                 )
         assert seen and not problems, "\n  ".join(problems)
+
+#: 接力落点事件：其流水线是**续跑载体**，不是门禁。
+#: 它跑的是「上一轮撞满轮数后继续干」这一件事，配额用满即它的正常结束形态。
+HANDOFF_CARRIER_EVENT = HANDOFF_APPLY_EVENT
+
+
+class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
+    """续跑载体不得把「Agent 用满轮数」上报成**提交状态失败**（Issue #217 的假红）。
+
+    ## 实测形态（2026-09-25，本轮取证）
+
+    PR #217 本身是**已合并**的：PR 流水线全绿（`cnb pulls check-status` 读数
+    `state: success`）、合并提交 `0cc0719a` 也在 `main` 上。但它的**提交状态**里
+    多出一条失败：
+
+        cnb/api_trigger_npc_handoff/pipeline-1   error [1h 8m]   ← 构建 cnb-sis-1k3bnmick
+
+    同形态在近 8 次接力里出现 5 次（44m / 1h8m / 1h20m / 1h42m / 41m 后 error），
+    每一次的原因都是同一句：`Agent aborted: reached maxTurns limit (200)` ——
+    也就是本仓**自己声明**的「配额触发的正常收官」。于是：
+
+    * 合并提交在提交列表 / PR 页上被标红，用户读到的就是「合并失败」；
+    * 而这份失败**不是**任何门禁的结论 —— 门禁流水线当时全绿。
+
+    ## 根因：续跑载体把「设计内的收官」报进了**门禁的通道**
+
+    `endStages` 不影响流水线状态（平台文档「语法手册」），所以撞顶的 `npc:go`
+    必然把整条载体流水线判成 `error`；而平台把它当**提交状态检查**上报，
+    与门禁共用同一条通道。用户无法从这一格里区分「门禁拦住了合并」与
+    「续跑那一轮跑满了轮数」。
+
+    平台已声明的区分手段只有一处：流水线的 `allowFailure`
+    （平台文档「语法手册」：为 `true` 时，流水线的失败状态**不会上报**到 CNB 上）。
+    故修法是在**载体**上声明它，而不是在报错处加判空、也不是把门禁放宽。
+
+    ## 判据咬合（正向 + 反向，缺一不可）
+
+    * 正向：载体流水线必须声明 `allowFailure`；撤掉它 → 立刻转红。
+    * 反向：`main.push` / `main.pull_request` 的**门禁**流水线一律不得声明它 ——
+      余下所有 npc:go 事件定义（评论触发的那两条）与全部门禁流水线都不在放宽
+      范围内。
+      否则这条判据会被拿去"顺手全局放宽"，那才是把失败改写成 warning。
+    """
+
+    def test_carrier_declares_allow_failure(self, cnb_doc):
+        fallback = cnb_doc.get("$") or {}
+        body = fallback.get(HANDOFF_CARRIER_EVENT)
+        assert body, f"`$` 段缺少接力落点事件 {HANDOFF_CARRIER_EVENT}"
+        jobs = [job for job in (body if isinstance(body, list) else []) if isinstance(job, dict)]
+        assert jobs, f"{HANDOFF_CARRIER_EVENT}: 流水线体为空"
+        unflagged = [i for i, job in enumerate(jobs) if job.get("allowFailure") is not True]
+        assert not unflagged, (
+            f"{HANDOFF_CARRIER_EVENT} 的流水线未声明 allowFailure（下标 {unflagged}）——"
+            "续跑轮撞满 maxTurns 是本仓自己声明的正常收官，平台却把它当**提交状态失败**"
+            "上报，于是合并提交被标红、用户读到「合并失败」。\n"
+            "实测：构建 cnb-sis-1k3bnmick 以 `error [1h 8m]` 挂在 0cc0719a 的提交状态上，"
+            "而该合并的门禁流水线全绿。\n"
+            "修法只允许一处：在**载体**上按平台声明的 `allowFailure` 关掉这格上报，"
+            "不得改判据、不得放宽门禁。"
+        )
+
+    def test_gate_pipelines_stay_blocking(self, cnb_doc):
+        main = cnb_doc.get("main") or {}
+        offenders = []
+        for event, body in main.items():
+            for i, pipe in enumerate(body if isinstance(body, list) else []):
+                if not isinstance(pipe, dict):
+                    continue
+                if pipe.get("allowFailure"):
+                    offenders.append(f"main.{event}[{i}]({pipe.get('name')})")
+        assert not offenders, (
+            "门禁流水线被放宽成非阻塞（放行标准被单侧放宽）: " + ", ".join(offenders) +
+            "\n允许放宽的只有续跑载体 —— 它不裁决任何契约；"
+            "门禁一旦非阻塞，扫出问题也拦不住合并。"
+        )

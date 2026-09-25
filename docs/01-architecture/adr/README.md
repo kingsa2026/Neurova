@@ -26,6 +26,7 @@
 | [0018](./0018-memory-classification-vocabulary.md) | 记忆分类词汇表唯一事实源（分类引擎只有一套枚举） | Accepted | 2026-09-21 |
 | [0019](./0019-skill-view-key-domain.md) | 技能视图键域收口（查询键 = name，记账键 = identity） | Accepted | 2026-09-21 |
 | [0020](./0020-sandbox-single-value-domain.md) | 沙箱值域唯一事实源（一套形态，两种承载能力） | Accepted | 2026-09-25 |
+| [0021](./0021-skill-name-domain-derivation.md) | 技能名字域迁移（同 name 不同身份 ⇒ 名字携带身份） | Accepted | 2026-09-25 |
 | [0022](./0022-relay-judgment-source-of-truth.md) | 接力判据的事实源（读平台在收尾期注入的事实，不读构建侧自造的真值） | Accepted | 2026-09-25 |
 
 ## 主题分类

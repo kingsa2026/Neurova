@@ -375,12 +375,17 @@ class TestGuardIsInProtectedSubset:
 #: 判据读平台在收尾期注入的两个变量，见 `TestRelayJudgmentReadsPlatformFacts`。
 WORKSPACE_PROBE_FILE = ".npc-workspace-probe"
 
-#: 写燃料的门禁脚本：`.cnb.yml` 在 Agent 开工前调用它。
+#: 开工前自证脚本：`.cnb.yml` 在 Agent 开工前调用它（只证工作区可写 / `$PWD` 同址）。
 HANDOFF_GATE_SCRIPT = "scripts/ci/npc_turn_handoff_gate.py"
 
-#: 「本轮是接力轮」的变量名。`.cnb.yml` 的 `env` / `endStages.if` 与门禁逐字一致，
-#: 全仓只有一处事实源。
+#: 上一代「本轮是接力轮」的变量名。**已作废**（Issue #158 / #189）——保留常量
+#: 只为**反向钉住**"它不得再出现在配置的 env / exports 里"：它由 Agent 开工前的
+#: 门禁无条件写成 1，跟"是否撞顶"无关。
 TURN_FLAG_VAR = "turnLimitReached"
+
+#: `##[set-output]` 协议标记。开工前的步骤**不得**再产出它（Issue #158 的根因）：
+#: 那一刻无从知道本轮会不会撞顶，写出来的判据必然是拍脑袋的。
+SET_OUTPUT_DIRECTIVE = "##[set-output"
 
 #: 收尾接力唯一允许的内置任务类型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
 #: `cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，改用适用「所有事件」的
@@ -430,126 +435,81 @@ def _schema_allowlist() -> set:
     }
 
 
-class TestRelayJudgmentReadsPlatformFacts:
-    """接力的判据必须读**平台在收尾期给出的事实**，不许读自己事前伪造的燃料。
+class TestPreAgentStageProducesNoRelayPredicate:
+    """Agent 开工前的 Step **不得**产出任何接力判据（Issue #158 的根因处判据）。
 
-    根因（本轮实测取证，2026-09-25）：
-    燃料曾被设计为「由门禁在 Agent 开工前**无条件**写出 1」——门禁的判据是
-    `CNB` 非空即写（真实构建里 `CNB=1`，该条件恒真），于是
-    `##[set-output turnLimitReached=1]` → `exports` → Pipeline 级环境变量，
-    收尾 `if` **恒真**。这不是判据写松了，而是**判据的输入端被自己填成了真值**：
-    该变量回答的是「上一轮是否用满配额」，而得知这件事的唯一时点是收尾期。
-    后果是空轮防护全失效，任一正常收官也照拉下一轮：
+    根因（2026-09-25 实测，四条评论触发的父构建 + 一个真探针）：
+    判据的生产方把「本轮会不会撞顶」这个**未来事实**，交给 Agent 开工**之前**
+    跑的步骤无条件写成 1：
 
-        cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
-        cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
+        $NPX_CALL scripts/ci/npc_turn_handoff_gate.py   # Agent 开工前
+        ##[set-output turnLimitReached=1]               # ← 与是否撞顶无关
 
-    平台已在收尾期注入这两个事实（平台「环境变量」篇；真 `npc:go` 撞
-    `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）：
+    于是「用户新发的 @ → 不接力」这条空轮防护**从未成立过**：
 
-        CNB_PIPELINE_STATUS=[error]
-        CNB_BUILD_FAILED_MSG=[Agent aborted: reached maxTurns limit (1)]
+        cnb-2q8-1k3buskao   97 / 200 轮 → 收尾接力 success
+        cnb-tr2-1k3bm5ssd  135 / 200 轮 → 收尾接力 success
+        cnb-cou-1k3bmaal8  164 / 200 轮 → 收尾接力 success
+        cnb-ofm-1k3bq16ij   76 / 200 轮 → 收尾接力 success
 
-    本类钉住"判据读它们"，并钉住"全仓不再有自造真值"。
+    代价可复算：接力落点 `api_trigger_npc_handoff` 共 32 次构建 / 22.2 小时
+    墙钟，其中 17 次又跑满 200 轮 —— 一次普通提问被放大成自动续跑的链条。
+
+    判据因此落在**产出侧**：开工前的步骤只准做开工前能证实的事（工作区可写、
+    解释器可用），不得写任何"这一轮是接力轮"的凭据 —— 那件事只有平台在收尾
+    时刻才知道。接力判据本身的正确形态由 ``TestRelayJudgmentReadsPlatformFacts``
+    （本文件）与 ``tests/unit/ci/test_npc_turn_handoff_execution.py`` 共同钉住。
     """
 
-    #: 平台在收尾期注入的事实（`endStages` 内可读，平台「环境变量」篇）。
-    STATUS_VAR = "CNB_PIPELINE_STATUS"
-    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+    def test_pre_agent_gate_exists_and_does_not_emit_relay_predicates(self):
+        """门禁必须存在（解释器可达性），但不得再向 stdout 写接力标记。"""
+        gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
+        assert gate.exists(), (
+            "开工前自证脚本丢失 —— 解释器/工作区可达性无人自证"
+            "（构建 cnb-du8-1k34cfhg1 的 rc=127 形态会复活）。"
+        )
+        source = io.open(gate, encoding="utf-8").read()
+        offenders = [
+            f"{number}: {line.strip()}"
+            for number, line in enumerate(source.splitlines(), 1)
+            if SET_OUTPUT_DIRECTIVE in line
+            and not line.strip().startswith("#")
+            and "写入" not in line
+        ]
+        assert not offenders, (
+            f"{gate.relative_to(PROJECT_ROOT)} 仍在产出接力判据（该步骤跑在 Agent "
+            "开工前，那一刻无从知道本轮会不会撞顶）:\n  " + "\n  ".join(offenders) +
+            "\n实测四条父构建在 76~164 轮即被接力；判据已搬到平台收尾事实变量。"
+        )
 
-    #: 真实撞顶时平台给出的错误原文片段（构建 cnb-s4f-1k3c46us9 实测）。
-    ABORT_MARKER = "reached maxTurns limit"
-
-    def test_handoff_stage_reads_the_platform_facts(self, cnb_doc):
-        """收尾接力的 `if` 必须同时读「流水线状态」与「失败原文片段」。
-
-        接力 Stage 的内置任务类型由 Issue #170 定死为 `cnb:trigger`：
-        `cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，写在 `@npc` 流水线里
-        注定执行不了（构建 cnb-i5m-1k355ooo1 实测）。这里只判"读什么"，
-        通道由 `tests/unit/ci/test_npc_turn_handoff_execution.py` 单独钉住。
-
-        为何要两个条件同时成立：`stages` 失败的原因有很多种（门禁红、
-        依赖装不上、脚本报错），只有"用满轮数"才该续跑 —— 只看 status
-        等于把真故障转写成烧配额。
-        """
+    def test_every_npc_job_still_runs_the_pre_agent_gate(self, cnb_doc):
+        """每条 `npc:go` 流水线都要在 Agent 开工前跑一次自证（可达性）。"""
         fallback = cnb_doc.get("$") or {}
-        handoffs = [
-            stage
+        jobs = [
+            job
             for event, body in fallback.items()
             if isinstance(event, str) and event.endswith("@npc")
             for job in (body if isinstance(body, list) else [])
             if isinstance(job, dict)
-            for stage in (job.get("endStages") or [])
-            if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE
         ]
-        assert handoffs, f"$ 段 NPC 流水线缺收尾接力（{HANDOFF_TRIGGER_TYPE}）"
-        for stage in handoffs:
-            conditions = stage.get("if") or []
-            if isinstance(conditions, str):
-                conditions = [conditions]
-            blob = "\n".join(str(item) for item in conditions)
-            assert self.STATUS_VAR in blob, (
-                f"收尾接力未读 ${self.STATUS_VAR}：{conditions!r}\n"
-                "接力判据只允许一处（单一事实源），新增计数文件/状态字段都是平行体系。"
+        assert jobs, "$ 段缺 NPC 事件定义"
+        missing = [
+            event
+            for event, body in fallback.items()
+            if isinstance(event, str) and event.endswith("@npc")
+            for job in (body if isinstance(body, list) else [])
+            if isinstance(job, dict)
+            if not any(
+                HANDOFF_GATE_SCRIPT in str(stage.get("script") or "")
+                for stage in (job.get("stages") or [])
+                if isinstance(stage, dict)
             )
-            assert self.FAILED_MSG_VAR in blob, (
-                f"收尾接力未读 ${self.FAILED_MSG_VAR}：{conditions!r}\n"
-                "只看 status 会把任何失败都接成新一轮（真故障被转写成烧配额）。"
-            )
-            assert self.ABORT_MARKER in blob, (
-                f"收尾接力未按平台原文片段 {self.ABORT_MARKER!r} 判定：{conditions!r}"
-            )
-
-    def test_no_self_fabricated_relay_truth_anywhere(self):
-        """全仓不得再有"构建侧提前写出接力真值"的形态。
-
-        判据落在**真实文件内容**上：`.cnb.yml`、门禁脚本、人设三处都不得
-        再出现发射/映射该标记的写法 —— 留着任何一处，空轮防护就还是恒真。
-        可证伪路径：把任一处 `##[set-output turnLimitReached=1]` 或
-        `exports: {turnLimitReached: ...}` 加回来 → 立刻转红。
-        """
-        sources = {
-            ".cnb.yml": CNB,
-            ".cnb/settings.yml": SETTINGS,
-        }
-        offenders = []
-        for label, path in sources.items():
-            if not path.exists():
-                continue
-            for lineno, line in enumerate(io.open(path, encoding="utf-8"), 1):
-                if TURN_FLAG_VAR in line or "##[set-output" in line:
-                    offenders.append(f"{label}:{lineno}: {line.strip()}")
-        assert not offenders, (
-            "仍在发射/映射一个由构建侧提前写出的接力标记（空轮防护恒真）：\n  "
-            + "\n  ".join(offenders) +
-            f"\n真值只能来自平台在收尾期注入的 ${self.STATUS_VAR} + ${self.FAILED_MSG_VAR}。"
+        ]
+        assert not missing, (
+            f"{missing} 未在 Agent 开工前跑 {HANDOFF_GATE_SCRIPT} —— "
+            "解释器/工作区可达性不再由真实构建自证。"
         )
 
-    def test_gate_only_probes_the_workspace(self):
-        """门禁只做环境自证，不再产出任何被 `if` 消费的真值。
-
-        判据落在"两个解释器分支各有一处写点、且写的是探针文件"上：
-        探针文件名带 `probe` 是为了一眼看出它没有下游消费者；
-        NPC 镜像只有 node，故 node 分支是必达通路。
-        """
-        gate = PROJECT_ROOT / HANDOFF_GATE_SCRIPT
-        assert gate.exists(), (
-            f"{HANDOFF_GATE_SCRIPT} 丢失 —— 接力的环境前提（工作区可写、"
-            "$PWD 是否与它同址）无人自证"
-        )
-        source = io.open(gate, encoding="utf-8").read()
-        assert source.count(f'"{WORKSPACE_PROBE_FILE}"') >= 2, (
-            f"{gate.relative_to(PROJECT_ROOT)} 的探针常量必须在 python 与 node "
-            "两个分支各出现一次（NPC 镜像只有 node，缺一侧即那侧无法自证）。"
-        )
-        for symbol in ("checkWorkspaceWritable", "checkWorkingDirectory"):
-            assert source.count(f"function {symbol}") == 1, (
-                f"{gate.relative_to(PROJECT_ROOT)} 的 node 分支缺 {symbol}() —— "
-                "镜像里没有 python 时该分支是唯一可执行通路。"
-            )
-            assert source.count(f"def {symbol}") == 1, (
-                f"{gate.relative_to(PROJECT_ROOT)} 的 python 分支缺 {symbol}()。"
-            )
 
 
 def _gate_invocations(gate):
@@ -612,17 +572,22 @@ def _run_gate_capture_stdout(gate, argv=None, workspace=None):
     return proc.stdout.decode("utf-8", "replace")
 
 
-class TestGateProbeIsTheOnlyThingTheGateEmits:
-    """门禁的 stdout 只承载**环境自证读数**，不再承载任何接力真值。
+class TestRelayPredicateIsNotCarriedByAnExportChannel:
+    """接力判据**不再经导出通道**传递，门禁 stdout 只承载环境自证读数。
 
-    这里保留的是上一代守卫要钉的那件事的另一面：门禁确实被真实构建执行过、
-    且两个解释器分支（NPC 镜像只有 node）读数逐字一致 —— 那两件事与
-    "它输出的是什么"无关，故判据从"必须发出某个标记"改成
-    "必须不发出标记、且两条分支输出一致"。
+    导出通道本身是真的（平台文档「环境变量」篇：脚本 stdout 的
+    `##[set-output key=value]` → `exports` 映射为环境变量，生命周期覆盖整个
+    Pipeline）。但用它承载接力判据的前提是「有一个 Agent 开工前就知道答案的值」
+    —— 那正是被证伪的前提：开工前无从知道本轮会不会撞顶，写出来的值是拍脑袋的。
 
-    事故依据：该守卫上一代断言"必须输出 `##[set-output turnLimitReached=1]`"，
-    而那条标记正是空轮防护恒真的来源（见 `TestRelayJudgmentReadsPlatformFacts`）。
-    判据跟着错误设计走，是本案最难发现的一环 —— 守卫全绿而行为全错。
+    事故依据：本类上一代断言"门禁必须输出 `##[set-output turnLimitReached=1]`"，
+    而那条标记正是空轮防护恒真的来源。判据跟着错误设计走，是本案最难发现的一环
+    —— 守卫全绿而行为全错。故现在同一件事反过来钉：
+
+    - 门禁的**两个解释器分支**都不得再向 stdout 写任何 `##[set-output]` 标记；
+    - 两个分支的自证读数必须逐字一致（NPC 镜像只有 node）；
+    - `.cnb.yml` 里不得再有为它而设的 `exports` 映射，也不得再引用
+      平台不存在的 `$CNB_ENV` / `$GITHUB_ENV` 文件通道（那批假设早已被证伪）。
     """
 
     def test_the_gate_emits_no_relay_truth(self):
@@ -685,11 +650,13 @@ class TestGateProbeIsTheOnlyThingTheGateEmits:
                 "现场未注入）；继续保留它只会让接力在绿灯下静默失效。"
             )
 
-    def test_npc_jobs_do_not_pass_a_relay_flag_downstream(self, cnb_doc):
-        """NPC Job 的 `env` 与门禁 Stage 的 `exports` 都不得再承载接力标记。
+    def test_no_relay_flag_is_passed_downstream_anywhere(self, cnb_doc):
+        """NPC Job 的 `env` 与任何 Stage 的 `exports` 都不得承载接力标记。
 
         留任一处，收尾 `if` 的输入就还是自造值 —— 判据必须落在**这些位置为空**
-        上，而不是落在"别处还有没有提到它"上。
+        上，而不是落在"别处还有没有提到它"上。可证伪路径：把任一处
+        `##[set-output turnLimitReached=1]` 或 `exports: {turnLimitReached: ...}`
+        加回来 → 立刻转红。
         """
         fallback = cnb_doc.get("$") or {}
         jobs = [
@@ -708,9 +675,20 @@ class TestGateProbeIsTheOnlyThingTheGateEmits:
                 if not isinstance(stage, dict):
                     continue
                 if TURN_FLAG_VAR in (stage.get("exports") or {}):
-                    offenders.append(f"{event}: {stage.get('name')!r} 的 exports 仍映射 {TURN_FLAG_VAR}")
+                    offenders.append(
+                        f"{event}: {stage.get('name')!r} 的 exports 仍映射 {TURN_FLAG_VAR}"
+                    )
+        for event, body in fallback.items():
+            if not isinstance(event, str) or event.startswith("."):
+                continue
+            for job in (body if isinstance(body, list) else []):
+                if not isinstance(job, dict):
+                    continue
+                for stage in (job.get("stages") or []):
+                    if isinstance(stage, dict) and stage.get("exports"):
+                        offenders.append(f"{event}: exports={stage.get('exports')}")
         assert not offenders, (
             "仍有位置在把自造的接力真值传下去：\n  " + "\n  ".join(offenders) +
             "\n真值来自平台在收尾期注入的 $CNB_PIPELINE_STATUS + $CNB_BUILD_FAILED_MSG，"
-            "不需要任何传递。"
+            "不需要任何传递（导出通道更承载不了它：开工前的步骤无从知道本轮是否撞顶）。"
         )

@@ -52,19 +52,17 @@ from tests import ast_scan
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
-#: 确需保留者必须逐条写明理由，并说明为何不能走 `tests/ast_scan.py` 的预筛。
+#: 确需保留者必须逐条写明理由，并说明为何**两条**共享入口都不适用：
+#: 会重复扫的走保留型（`nodeScan` 一族），只扫一次的走一次性
+#: （`transientTree` / `transientNodes`）—— 后者不留常驻树，故「保留更慢」
+#: 不再构成入账理由。
 REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
-    "tests/unit/core/test_pytest_collection_hygiene.py": (
-        "判据的对象**就是**每个测试文件的用例名（`def` / `class` 声明面），"
-        "故必须逐个测试文件解析，且**预筛可证无效**：本仓 1783 个 `test_*.py` 里"
-        "1752 个含 `def test` / `class Test` 字样（98%），预筛缩不掉解析量。"
-        "路由到共享解析缓存实测**更慢**（本文件单跑 2.0s → 6.0s）："
-        "`_cachedParse` 是 `maxsize=None`，保留全部语法树后 gen2 GC 要反复扫描"
-        "这棵常驻图，成本仍随代码总量涨（实测 1783 文件：不保留 1.00s vs "
-        "保留 4.74s；`gc.freeze()` 后 1.21s）。**这是共享缓存自身的保留策略问题**，"
-        "不是本判据的形态问题 —— 修正缓存保留策略后再改路由，"
-        "在此之前按教义第 2 条如实登记，不做 consumer 侧的规避。"
-    ),
+    # 现值：**空集**。原先登记在这里的 `tests/unit/core/test_pytest_collection_hygiene.py`
+    # 已销账 —— 它当初入账的理由是「路由到保留型共享预算**更慢**（2.0s → 6.0s）」，
+    # 而本批把根因修在了共享源：`ast_scan.transientTree` / `transientNodes` 提供
+    # **不留常驻语法树**的一次性入口（保留的收益只在重复扫描时成立，成本却每次
+    # 扫描都付：本机 2985 个 `.py` 空进程 gen2 1.0ms / 保留全部语法树 2243ms）。
+    # 该判据是典型的一次性全仓扫描，改走一次性入口后既进 CI 也不再与代码总量捆绑。
 }
 
 
@@ -371,8 +369,10 @@ class TestNoUnprefilteredRepoWideScan:
             "受保护子集里出现「rglob + ast.parse」全仓扫描（判据与代码总量、"
             "与机器速度捆绑，30s 默认墙钟下必偶发红）:\n  "
             + "\n  ".join(f"{rel} → {hits}" for rel, hits in sorted(unledgered.items()))
-            + "\n修法：走 tests/ast_scan.py（callSites / importsOf / classDefsIn / nodeScan(hints=...)）;"
-            "\n确需保留时登记进 REPO_WIDE_SCAN_LEDGER 并写明为何预筛不适用。"
+            + "\n修法：会重复扫的走 tests/ast_scan.py 的保留型入口"
+            "（callSites / importsOf / classDefsIn / nodeScan(hints=...)），"
+            "只扫一次的走一次性入口（transientTree / transientNodes，不留常驻语法树）;"
+            "\n确需保留时登记进 REPO_WIDE_SCAN_LEDGER 并写明为何**两条**入口都不适用。"
         )
 
     def test_ledger_has_no_stale_entries(self):
@@ -1008,7 +1008,71 @@ class TestSharedParseBudgetIsReal:
         )
 
 
+class TestOneShotScanDoesNotRetainTrees:
+    """**一次性**扫描入口不得留下常驻语法树（保留策略与收益必须对齐）。
+
+    根因：`_cachedParse` / `_cachedNodes` 是 `maxsize=None`，对**任何**一次扫描
+    都无条件保留整棵 AST。于是「保留」这份收益（跨判据复用）只有重复扫描才有，
+    成本（常驻对象图让 gen2 GC 按图大小收费）却每次扫描都付。实测本机 2985 个
+    `.py`：空进程 gen2 1.0ms / 只保留文本 1.1ms / 保留全部语法树 **2243ms**
+    （532 万对象）。真会话里 12 个消费方同进程跑，gen2 合计 8.5s、单次峰值 1.26s、
+    进程末存活 143 万 ast 节点。
+
+    这是 Issue #148「代码总量被编码成时间上界」的**第二条通道**。
+
+    实测证明「绑小 maxsize」不是解法（淘汰引发重复解析，省下的 GC 被解析吃掉）：
+
+        三连扫 1200 文件（3600 次访问）
+          maxsize=None  wall= 5.86s  gen2= 906ms
+          maxsize=1024  wall=20.83s  gen2= 955ms
+          maxsize=256   wall=22.72s  gen2= 239ms
+          maxsize=64    wall=13.33s  gen2=  17ms
+          不保留         wall= 7.42s  gen2=  0.8ms
+    """
+
+    def test_oneShotEntryExistsInTheSharedSource(self):
+        for name in ("transientTree", "transientNodes"):
+            assert hasattr(ast_scan, name), (
+                f"tests/ast_scan.py 未提供一次性扫描入口 {name}：一次性判据只能"
+                "自己 `rglob` + `ast.parse` 各写一套，Issue #148 的根因会回来。"
+            )
+
+    def test_transientTree_leaves_no_retained_trees(self, tmp_path):
+        (tmp_path / "a.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        before = ast_scan._cachedParse.cache_info().currsize
+        tree = ast_scan.transientTree(tmp_path / "a.py")
+        assert tree is not None, "一次性入口没返回语法树"
+        after = ast_scan._cachedParse.cache_info().currsize
+        assert after == before, (
+            "一次性入口把语法树留进了 `_cachedParse`：保留的收益（跨判据复用）"
+            f"只对重复扫描成立，成本却每次扫描都付（currsize {before} → {after}）。\n"
+            "修法：一次性扫描走 `transientTree`，显式不留常驻树。"
+        )
+
+    def test_transientNodes_leaves_no_retained_trees(self, tmp_path):
+        (tmp_path / "b.py").write_text("def g(x):\n    return x.attest()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        ast_scan._cachedNodes.cache_clear()
+        hits = [p for p, _n in ast_scan.transientNodes(tmp_path, hints=("attest",))]
+        assert hits, "一次性节点入口没产出任何节点"
+        assert ast_scan._cachedParse.cache_info().currsize == 0, (
+            "`transientNodes` 留下了常驻语法树"
+        )
+        assert ast_scan._cachedNodes.cache_info().currsize == 0, (
+            "`transientNodes` 留下了常驻节点元组"
+        )
+
+    def test_transientNodes_keeps_the_prefilter(self, tmp_path):
+        """一次性入口同样吃文本预筛：不是「绕开门禁」的后门。"""
+        (tmp_path / "hit.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        (tmp_path / "miss.py").write_text("def f(x):\n    return x.other()\n", encoding="utf-8")
+        seen = {p.name for p, _n in ast_scan.transientNodes(tmp_path, hints=("attest",))}
+        assert seen == {"hit.py"}, f"一次性入口的预筛口径失效：{seen}"
+
+
 class TestSharedBudgetIsReusedWithinOneProcess:
+
     """同进程内 N 个判据扫同一棵子树，解析只付一次（这正是「预算」的含义）。"""
 
     def test_repeated_scan_hits_the_cache(self, tmp_path):

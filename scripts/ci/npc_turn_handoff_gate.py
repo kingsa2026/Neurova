@@ -1,41 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""NPC 接力构建环境自证（Issue #145；判据两轮收口见 Issue #189）。
+"""NPC 接力构建环境自证（Issue #145 / #151；判据三轮收口见 Issue #158 / #170 / #189）。
 
-## 这道自证回答什么
+## 它现在只做一件事：在 Agent 开工前证明「这条流水线跑得起来、工作区落点在哪」
 
-`npc:go` 撞到 `maxTurns` 时，平台把 Agent 中止、不执行任何收尾指令或工具调用
-（构建 cnb-2e8-1k341d9s1 / cnb-2v8-1k34htd2p 实测：3191326ms / 2362852ms 后被
-`Agent aborted: reached maxTurns limit (200)` 收场）。故"撞顶后把活交给下一轮"
-只能由**配置侧**在收尾阶段显式判出来。
+NPC 流水线的前置步骤必须能在镜像里真的跑起来，否则整条流水线以
+「请求的解释器不存在」收场，而用户看到的是「流水线构建失败」——与任务内容无关。
+构建 cnb-du8-1k34cfhg1 的实测原文：
 
-判据经历三轮，每轮都被下一个真实构建推翻：
+    sh: 1: python: not found
+    Finished, code: 127, duration: 0.1s
 
-1. 燃料由 Agent 在最后一轮自己写标记文件 → 触顶那一轮跑不到任何指令，
-   `if` 恒假、收尾 Stage 每次 `skipped`，Issue 上没有任何回音。
-2. 燃料改由本门禁在 Agent 开工前**无条件**写出（`CNB` 非空即写，真实构建里恒真），
-   再经 stdout 的 `##[set-output]` + `exports` 变成 Pipeline 级环境变量 →
-   `if` 恒**真**。这不是判据写松了，而是**判据的输入端被自己填成了真值**：
-   该变量回答「上一轮是否用满配额」，而得知这件事的唯一时点是收尾期。
-   后果是空轮防护全失效，正常收官也照拉下一轮：
-     cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
-     cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
-3. 现形态（Issue #189）：收尾 `if` 直接读**平台在收尾期注入的事实** ——
-   `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（平台「环境变量」篇；
-   真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）。
-   构建侧不再产出任何被 `if` 消费的真值，故**本门禁不再写任何接力标记**。
+故本门禁断言两件开工前就能证实的事：
 
-## 本门禁现在做什么
+- `$CNB_BUILD_WORKSPACE` 可达（能写、能读回、值相符）——工作区是 Agent 的落点；
+- `$PWD` 与 `$CNB_BUILD_WORKSPACE` 是否同一目录（读数，不判红：它只回答
+  「按字面理解工作目录会写到哪」，本身不是非法状态）。
 
-只做一件事：把接力的**环境前提**在 Agent 开工前证一遍 ——
+## 它不再做的事：产出接力判据
 
-- 断言 `$CNB_BUILD_WORKSPACE` 存在、可写、写后读得回（探针文件即用即删）；
-- 反向自证 `$PWD` 是否等于 `$CNB_BUILD_WORKSPACE`：两者不同即说明"Agent 按字面
-  理解写文件"会写错地方，这本身就是一份可读读数（打印出来，不判红 ——
-  它不是本门禁要裁的非法状态）。
+此前本门禁还向 stdout 写一行标记，作为「本轮是接力轮」的凭据。**该机制已被
+真实构建证伪并删净**（Issue #158 / #189 两轮）：撞顶那一刻平台不给 Agent 任何
+执行机会，而构建侧在 Agent 开工**之前**根本无从知道本轮会不会撞满轮数 ——
+于是标记被无条件写成 1，`if` 从"恒假"变成"恒真"。实测四条评论触发的父构建
+（maxTurns=200）分别只跑了 97 / 135 / 164 / 76 轮，收尾接力却一律 success；
+代价可复算：接力落点 32 次构建 / 22.2 小时墙钟。
 
-缺 `$CNB_BUILD_WORKSPACE`：判红。它不是"环境没配好"，而是环境前提没有落点，
-必须点名而不是静默跳过。
+判据已搬到**平台在收尾时刻注入的事实变量**上（`$CNB_PIPELINE_STATUS` 与
+`$CNB_BUILD_FAILED_MSG`，实测原文 `Agent aborted: reached maxTurns limit (200)`），
+落点见 `.cnb.yml` 的收尾 `endStages.if`。判据只有一处，本脚本不再持有第二份，
+也不向任何通道发射真值 —— 探针文件名带 `probe` 就是为了一眼看出它没有下游消费者。
 
 用法：
     python scripts/ci/npc_turn_handoff_gate.py          # 人类可读
@@ -43,13 +37,12 @@
 
 ## 为什么同一份脚本要能跑在 node 上
 
-NPC 流水线的镜像（`cnbcool/default-npc:latest`）里**没有 python**：
-构建 cnb-du8-1k34cfhg1 实测，本步以 `sh: 1: python: not found`（rc=127）收场，
-Agent 那一步被 skipper 跳过，用户在 Issue 上只看到「构建失败」。
-故本脚本自带**逐字等价**的 node 分支：解释器由 `.cnb.yml` 的探测结果给出
-（python3 → python → node），判据、读数键名、退出码三处都不因解释器而漂移。
-两份实现的等价性由
-tests/unit/ci/test_ci_npc_config_guard.py::TestNpcScriptInterpreterReachability 常驻校验。
+NPC 流水线的镜像（`cnbcool/default-npc:latest`）里**没有 python**，故本脚本自带
+**逐字等价**的 node 分支：判据、读数键名、退出码三处都不因解释器而漂移。
+解释器由 `.cnb.yml` 的探测结果给出（python3 → python → node），
+`node` 分支经桥脚本 `scripts/ci/run_gate_under_node.sh` 执行
+（node 按扩展名解析模块，`.py` 交 node 会在解析前以
+`ERR_UNKNOWN_FILE_EXTENSION` 退出，构建 cnb-9cc-1k34ff3t1 实测 rc=1）。
 """
 
 from __future__ import annotations
@@ -60,26 +53,25 @@ import os
 import sys
 from pathlib import Path
 
-#: 探针文件名。本门禁写它、读回、再删掉 —— 只为证明工作区**可写**，
-#: 与接力判据无关（判据读平台在收尾期注入的两个变量，见模块 docstring 第 3 轮）。
-#: 名字带 `probe` 就是为了一眼看出它没有下游消费者，避免被当成"燃料"再次接线。
-WORKSPACE_PROBE_FILE = ".npc-workspace-probe"
+#: 工作区自证所用的临时文件名（写完即删，不是任何判据的落点）。
+#: 它与流水线的其它环节没有约定关系——保留仅为让自证可被人眼核对。
+PROBE_MARKER_FILE = ".npc-workspace-probe"
 
 
 def resolveWorkspaceRoot(env: dict) -> str:
-    """接力判据的落点：环境变量给定，未给定返回空串。"""
+    """工作区根：环境变量给定，未给定返回空串。"""
     return (env.get("CNB_BUILD_WORKSPACE") or "").strip()
 
 
 def checkWorkspaceWritable(root: str) -> dict:
-    """在给定根下写探针文件并读回，证明工作区确实可写（探针即用即删）。"""
-    marker = Path(root) / WORKSPACE_PROBE_FILE
+    """在给定根下写探针文件并读回，证明工作区真的可写。"""
+    marker = Path(root) / PROBE_MARKER_FILE
     marker.write_text("1", encoding="utf-8")
     try:
         readback = marker.read_text(encoding="utf-8").strip()
     finally:
         marker.unlink(missing_ok=True)
-    return {"probe": str(marker), "readback": readback, "ok": readback == "1"}
+    return {"marker": str(marker), "readback": readback, "ok": readback == "1"}
 
 
 def checkWorkingDirectory(env: dict, cwd: str) -> dict:
@@ -92,51 +84,58 @@ def checkWorkingDirectory(env: dict, cwd: str) -> dict:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="NPC 轮数触顶接力门禁")
-    parser.add_argument("--json", action="store_true", help="机器可读输出")
-    args = parser.parse_args()
-
-    root = resolveWorkspaceRoot(os.environ)
-    failures: list[str] = []
+def evaluate(env: dict, cwd: str) -> tuple[dict, list]:
+    """判据本体：产出 (读数, 失败项)，供 python 与 node 两个入口共用同一口径。"""
+    root = resolveWorkspaceRoot(env)
+    failures: list = []
     result: dict = {"env_cnb_build_workspace": root or None}
 
     if not root:
         failures.append(
-            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，"
-            "本步无法自证工作区可写与 $PWD 同址"
+            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 工作区没有落点，"
+            "Agent 与各 Stage 都无从确认自己在哪写文件"
         )
     elif not Path(root).is_dir():
         failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
     else:
         try:
-            result["probe_check"] = checkWorkspaceWritable(root)
-            if not result["probe_check"]["ok"]:
+            result["marker_check"] = checkWorkspaceWritable(root)
+            if not result["marker_check"]["ok"]:
                 failures.append(
-                    f"{WORKSPACE_PROBE_FILE} 写入后读不回原值 —— 工作区不可信，接力环境前提不成立"
+                    f"{PROBE_MARKER_FILE} 写入后读不回原值 —— 工作区不可靠，"
+                    "Agent 的改动可能落不下来"
                 )
         except OSError as exc:
-            failures.append(f"{WORKSPACE_PROBE_FILE} 写入失败: {type(exc).__name__}: {exc}")
+            failures.append(f"{PROBE_MARKER_FILE} 写入失败: {type(exc).__name__}: {exc}")
 
-    result["working_directory_check"] = checkWorkingDirectory(os.environ, os.getcwd())
+    result["working_directory_check"] = checkWorkingDirectory(env, cwd)
     if root and not result["working_directory_check"]["identical"]:
         result["working_directory_divergence"] = (
-            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到"
-            "「工作区工作目录」，与门禁自证的位置不是一处"
+            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：按字面理解「工作目录」"
+            "会写到另一个地方，这是一份可读的读数"
         )
+    return result, failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="NPC 流水线开工前可达性自证")
+    parser.add_argument("--json", action="store_true", help="机器可读输出")
+    args = parser.parse_args()
+
+    result, failures = evaluate(os.environ, os.getcwd())
 
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
         return 1 if failures else 0
 
-    lines = ["=" * 72, "NPC 轮数触顶接力门禁", "=" * 72]
+    lines = ["=" * 72, "NPC 流水线开工前可达性自证", "=" * 72]
     lines += [f"  {key}: {json.dumps(value, ensure_ascii=False)}" for key, value in result.items()]
     if failures:
-        lines += ["", "=" * 72, f"❌ 接力判据不可达（{len(failures)} 项）："]
+        lines += ["", "=" * 72, f"❌ 开工前自证不通过（{len(failures)} 项）："]
         lines += [f"  - {item}" for item in failures]
         sys.stdout.write("\n".join(lines) + "\n")
         return 1
-    lines += ["", "✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址"]
+    lines += ["", "✅ 开工前自证通过：工作区可写、解释器可用"]
     sys.stdout.write("\n".join(lines) + "\n")
     return 0
 
@@ -144,12 +143,12 @@ def main() -> int:
 NODE_IMPLEMENTATION = r"""
 #!/usr/bin/env node
 // 与 Python 分支逐字等价的实现（同判据、同读数键名、同退出码）。
-// 存在理由：NPC 流水线镜像里没有 python，见模块 docstring「为什么同一份脚本要能跑在 node 上」。
+// 存在理由：NPC 流水线镜像里没有 python，见模块 docstring
+// 「为什么同一份脚本要能跑在 node 上」。
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 
-const WORKSPACE_PROBE_FILE = ".npc-workspace-probe";
+const PROBE_MARKER_FILE = ".npc-workspace-probe";
 
 // 与 Python 的 json.dumps 对齐：缩进 2 空格、**不**转义非 ASCII、
 // 字符串外的空格与 Python 的 separators 一致（", " / ": "）。
@@ -158,13 +157,11 @@ function pythonJsonScalar(value) {
   if (value === true) return "true";
   if (value === false) return "false";
   if (typeof value === "number") return String(value);
-  // 非 ASCII 原样输出（与 Python json.dumps(..., ensure_ascii=False) 对齐）
   return JSON.stringify(value);
 }
 
 function pythonJson(value, indent = 0) {
   if (indent < 0) {
-    // 单行形态：等价 Python json.dumps 默认 separators（", " / ": "）
     if (value === null || typeof value !== "object") return pythonJsonScalar(value);
     if (Array.isArray(value)) return "[" + value.map((v) => pythonJson(v, -1)).join(", ") + "]";
     return (
@@ -181,10 +178,7 @@ function pythonJson(value, indent = 0) {
   if (value === true) return "true";
   if (value === false) return "false";
   if (typeof value === "number") return String(value);
-  if (typeof value === "string") {
-    // 非 ASCII 原样输出（与 Python json.dumps(..., ensure_ascii=False) 对齐）
-    return JSON.stringify(value);
-  }
+  if (typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]";
     const items = value.map((v) => inner + pythonJson(v, indent + 1));
@@ -201,7 +195,7 @@ function resolveWorkspaceRoot(env) {
 }
 
 function checkWorkspaceWritable(root) {
-  const marker = path.join(root, WORKSPACE_PROBE_FILE);
+  const marker = path.join(root, PROBE_MARKER_FILE);
   let readback = null;
   let failReason = null;
   try {
@@ -230,48 +224,55 @@ function checkWorkingDirectory(env, cwd) {
   };
 }
 
-function main(argv) {
-  const asJson = argv.includes("--json");
-  const root = resolveWorkspaceRoot(process.env);
+function evaluate(env, cwd) {
+  const root = resolveWorkspaceRoot(env);
   const failures = [];
   const result = { env_cnb_build_workspace: root || null };
 
   if (!root) {
     failures.push(
-      "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，" +
-      "本步无法自证工作区可写与 $PWD 同址");
+      "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 工作区没有落点，" +
+      "Agent 与各 Stage 都无从确认自己在哪写文件");
   } else if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     failures.push("CNB_BUILD_WORKSPACE 指向的目录不存在: " + root);
   } else {
     const check = checkWorkspaceWritable(root);
-    result.probe_check = { probe: check.marker, readback: check.readback, ok: check.ok };
+    result.marker_check = { marker: check.marker, readback: check.readback, ok: check.ok };
     if (check.failReason) {
-      failures.push(WORKSPACE_PROBE_FILE + " 写入失败: " + check.failReason);
+      failures.push(PROBE_MARKER_FILE + " 写入失败: " + check.failReason);
     } else if (!check.ok) {
-      failures.push(WORKSPACE_PROBE_FILE + " 写入后读不回原值 —— 工作区不可信，接力环境前提不成立");
+      failures.push(
+        PROBE_MARKER_FILE + " 写入后读不回原值 —— 工作区不可靠，" +
+        "Agent 的改动可能落不下来");
     }
   }
 
-  result.working_directory_check = checkWorkingDirectory(process.env, process.cwd());
+  result.working_directory_check = checkWorkingDirectory(env, cwd);
   if (root && !result.working_directory_check.identical) {
     result.working_directory_divergence =
-      "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到" +
-      "「工作区工作目录」，与门禁自证的位置不是一处";
+      "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：按字面理解「工作目录」" +
+      "会写到另一个地方，这是一份可读的读数";
   }
+  return { result, failures };
+}
+
+function main(argv) {
+  const asJson = argv.includes("--json");
+  const { result, failures } = evaluate(process.env, process.cwd());
 
   if (asJson) {
     console.log(pythonJson({ result, failures }, 0));
     return failures.length ? 1 : 0;
   }
 
-  const lines = ["=".repeat(72), "NPC 轮数触顶接力门禁", "=".repeat(72)];
+  const lines = ["=".repeat(72), "NPC 流水线开工前可达性自证", "=".repeat(72)];
   for (const [key, value] of Object.entries(result)) {
     lines.push("  " + key + ": " + pythonJson(value, -1));
   }
   if (failures.length) {
     lines.push("");
     lines.push("=".repeat(72));
-    lines.push("❌ 接力判据不可达（" + failures.length + " 项）：");
+    lines.push("❌ 开工前自证不通过（" + failures.length + " 项）：");
     for (const item of failures) {
       lines.push("  - " + item);
     }
@@ -279,62 +280,13 @@ function main(argv) {
     return 1;
   }
   lines.push("");
-  lines.push("✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址");
+  lines.push("✅ 开工前自证通过：工作区可写、解释器可用");
   process.stdout.write(lines.join("\n") + "\n");
   return 0;
 }
 
 process.exit(main(process.argv.slice(2)));
 """
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="NPC 轮数触顶接力门禁")
-    parser.add_argument("--json", action="store_true", help="机器可读输出")
-    args = parser.parse_args()
-
-    root = resolveWorkspaceRoot(os.environ)
-    failures: list[str] = []
-    result: dict = {"env_cnb_build_workspace": root or None}
-
-    if not root:
-        failures.append(
-            "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力环境前提没有落点，"
-            "本步无法自证工作区可写与 $PWD 同址"
-        )
-    elif not Path(root).is_dir():
-        failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
-    else:
-        try:
-            result["probe_check"] = checkWorkspaceWritable(root)
-            if not result["probe_check"]["ok"]:
-                failures.append(
-                    f"{WORKSPACE_PROBE_FILE} 写入后读不回原值 —— 工作区不可信，接力环境前提不成立"
-                )
-        except OSError as exc:
-            failures.append(f"{WORKSPACE_PROBE_FILE} 写入失败: {type(exc).__name__}: {exc}")
-
-    result["working_directory_check"] = checkWorkingDirectory(os.environ, os.getcwd())
-    if root and not result["working_directory_check"]["identical"]:
-        result["working_directory_divergence"] = (
-            "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把文件写到"
-            "「工作区工作目录」，与门禁自证的位置不是一处"
-        )
-
-    if args.json:
-        print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
-        return 1 if failures else 0
-
-    lines = ["=" * 72, "NPC 轮数触顶接力门禁", "=" * 72]
-    lines += [f"  {key}: {json.dumps(value, ensure_ascii=False)}" for key, value in result.items()]
-    if failures:
-        lines += ["", "=" * 72, f"❌ 接力判据不可达（{len(failures)} 项）："]
-        lines += [f"  - {item}" for item in failures]
-        sys.stdout.write("\n".join(lines) + "\n")
-        return 1
-    lines += ["", "✅ 接力环境前提成立：工作区可写，且 $PWD 与它同址"]
-    sys.stdout.write("\n".join(lines) + "\n")
-    return 0
 
 
 if __name__ == "__main__":

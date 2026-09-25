@@ -85,25 +85,71 @@ class TestNpcConfigCarriesDiscipline:
 
 
 class TestDisciplineBlockHasSingleSource:
-    """档位角色各带一份纪律块 —— 抄两份就有漂移；此处锁"逐字一致"。"""
+    """各角色共用一份正文 —— 抄成多份就有漂移；此处锁「逐字一致」。
 
-    @staticmethod
-    def _discipline_block(prompt: str) -> str:
-        start = prompt.find("修复纪律")
-        assert start != -1, "prompt 无「修复纪律」块"
-        end = prompt.find("工作方式：", start)
-        return prompt[start:end if end != -1 else len(prompt)].strip()
+    ## 判据区间为何必须覆盖**整段共享正文**，而不是「修复纪律」一段
 
-    def test_discipline_block_identical_across_roles(self, roles):
-        blocks = {
-            (r or {}).get("name"): self._discipline_block((r or {}).get("prompt") or "")
+    首版只比对从「修复纪律」到「工作方式：」的一段。实测缺口（Issue #158 的 CI 红）：
+    共享正文里还有「轮数触顶接力」一段落在该区间**之外** ——
+    上一轮改接力判据来源时同步了 DSCoder / DSCoder-max 两份，
+    main 上新增的第三份角色（GLMCoder）漏改，判据区间盖不到它，
+    于是漂移只在 `tests/unit/ci/test_npc_turn_handoff_execution.py`
+    与 CI 上暴露，本文件给出 14 passed 的假绿
+    （本地实测：往核心原则段注入一处漂移，本文件照样 14 passed）。
+
+    故区间取「核心原则：」到「身份统一为」（角色落款之前）：
+    共享段落全部在内，角色专属的两处（开头的自称与模型、末尾的落款）在外。
+    """
+
+    #: 共享正文的边界。左端到「核心原则：」，右端到角色落款「身份统一为」之前。
+    BODY_START = "核心原则："
+    BODY_END = "身份统一为 "
+
+    @classmethod
+    def _shared_body(cls, prompt: str) -> str:
+        start = prompt.find(cls.BODY_START)
+        assert start != -1, f"prompt 无「{cls.BODY_START}」段"
+        end = prompt.find(cls.BODY_END, start)
+        assert end != -1, (
+            f"prompt 无角色落款「{cls.BODY_END}」—— "
+            "它标出共享正文的右端；缺了它判据区间会一直吃到文末，把角色专属文字算进来"
+        )
+        return prompt[start:end].strip()
+
+    def test_shared_body_identical_across_roles(self, roles):
+        bodies = {
+            (r or {}).get("name"): self._shared_body((r or {}).get("prompt") or "")
             for r in roles if (r or {}).get("prompt")
         }
-        distinct = set(blocks.values())
+        distinct = set(bodies.values())
         assert len(distinct) == 1, (
-            "档位角色的修复纪律块出现漂移（同一纪律抄成多份就会各写各的）: "
-            f"{ {k: len(v) for k, v in blocks.items()} }\n"
-            "改纪律时两侧必须逐字同步。"
+            "NPC 角色的共享正文出现漂移（同一份正文抄成多份就会各写各的）: "
+            f"{ {k: len(v) for k, v in bodies.items()} }\n"
+            "改任一段（修复纪律 / 轮数触顶接力 / 协作红线 / 时间预算…）时，"
+            "所有角色必须逐字同步；漏改一份就是给那个角色留一条过期指令。"
+            "实测（Issue #158）：`轮数触顶接力` 段曾漏改 main 上新增的第三份角色，"
+            "本文件因区间未覆盖该段而给出假绿，红只在 CI 上出现。"
+        )
+
+    def test_shared_body_spans_the_handoff_section(self, roles):
+        """区间必须盖住「轮数触顶接力」段 —— 区间收窄即红（防假绿复发）。
+
+        反向钉住的是「判据区间不得缩回只覆盖修复纪律」：只要有人把右端改回
+        「工作方式：」，接力段的漂移立刻又落在区间外，而这条会先红。
+        """
+        missing = []
+        for r in roles:
+            prompt = (r or {}).get("prompt") or ""
+            if not prompt:
+                continue
+            body = self._shared_body(prompt)
+            for section in ("修复纪律", "轮数触顶接力", "协作红线"):
+                if section not in body:
+                    missing.append(f"{(r or {}).get('name')}: 共享正文区间漏了「{section}」段")
+        assert not missing, (
+            "共享正文的判据区间不完整（区间外的段落无人咬合）:\n  "
+            + "\n  ".join(missing)
+            + "\n区间由 BODY_START / BODY_END 给出，须覆盖全部共享段落。"
         )
 
 
