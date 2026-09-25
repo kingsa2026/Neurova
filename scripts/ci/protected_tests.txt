@@ -710,6 +710,25 @@ tests/unit/agent/test_tool_call_recall_owner.py
 #    判据同时反锁旧 API 形态逐字节不变，避免把展示/统计面一起拖进新语义。）
 tests/unit/agent/test_model_context_tool_rebuild.py
 
+# 上下文三链路批（Issue #90）T-10c 前置裁定：microcompact 的触发轴与保留窗与窗口
+#   折叠各自声明（裁掉共线），并整合「未触发折叠但工具输出已撑满窗口」那一段。
+#   （根因：触发曾看整窗 token、保留曾看条数"最近 3 条"，而 3 恰是折叠留下的
+#    工具行数 —— 真序列先折叠后 microcompact，两处稳态互相抵消，占位指针恒不触发。
+#    现两根轴都按工具结果载荷 token 声明：触发=`min(8000, 窗口实占半数)` 再抬到
+#    收益门槛，保留=载荷的一半（至少 1 条）。触发事实记进
+#    `get_context_health()["microcompact"]`，供下游按读数判断而非解析日志。）
+tests/unit/context/test_microcompact_threshold_decoupling.py
+
+# 上下文三链路批（Issue #90）T-10c 收口：工具轮载荷必须进窗口预算判据。
+#   （根因：窗口计量只读 `content` 字符串，而 T-10b 之后 `assistant.tool_calls`
+#    会进视图真发给模型，`arguments` 原文串常是调用参数本体 —— 却不在任何窗口
+#    判据里。同一批消息因此有两个计量结果：判据读到 85 token、展示侧读到 10321
+#    （270× 低估），折叠/清占位/召回额度全按假读数判，工单 §11.4 第 2 条
+#    「含工具轮的窗口 ≤ 预算」在这形状上恒真。
+#    现收口为单源派生 `window_compactor.messagePayloadTokens()`：文本内容 /
+#    多模态分段 / `tool_calls` 原文串，判据侧与展示侧共用。）
+tests/unit/context/test_tool_payload_budget_accounting.py
+
 # Issue #189 启动器一致性批：
 #   ① 端口判据收口到 neurova/core/port_guard.py（唯一实现），start_server.py 的
 #      预检必须在 create_app 之前 —— 判据是 AST 行号（结构性），不用墙钟上界；
