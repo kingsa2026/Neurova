@@ -829,5 +829,36 @@ tests/unit/api/test_knowledge_annotations_contract.py
 
 # T-11a 折叠分代（Issue #90 工单 §12.4）：新折叠产出新节点，旧摘要降一层保留。
 #   （根因：摘要在改前是一个字符串，每轮折叠原地覆盖——多节点/梯度在数据上
-#    不可能存在。截断可见（fold_layers.truncated），不静默丢层。）
+#    不可能存在。代际栈不设上限（工单 §12.1，负责人 2026-09-25 裁定撤销原上限 5），
+#    一档都不丢：栈深 == 代数，读数里无 truncated 字段（无上限即不可能截断）。）
 tests/unit/context/test_fold_generation_t11a.py
+# 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
+# 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
+# 合并解冲突时更容易整段带走（实测 `88901c00` 想删重复条目，结果两份都删了；
+# `7d672487` 的合并正文写着"两侧纯追加、无删除"，实际删掉 4 条）。
+# 下列 9 条的文件都还在仓里、逐文件单跑确定全绿（合跑 128 passed），故复原登记；
+# 文件已不在仓、按依据退役的 4 条记在
+# tests/unit/ci/protectedSubsetRetired.txt，不在此处静默消失。
+# T-10a 工具调用展示记录必须携带配对锚点（Issue #90 §11.2）：
+#   id↔arguments 的对应关系不得在落盘时丢，tool_result 既有键一个不许动。
+tests/unit/agent/test_tool_call_record_identity.py
+# T-10a 出口脱敏的键集合契约：载荷键集合单点声明，集合内每个键走同一条脱敏路径；
+#   `arguments` 的敏感值不得从 channel/SSE 原样透出（含反向控制）。
+tests/unit/security/test_tool_event_export_redaction.py
+# Issue #128：记忆增强端点必须读写真 MemoryManager，不得留进程内影子字典
+#   （否则「导入成功」「遗忘成功」都是假成功，真记忆库纹丝不动）。
+tests/unit/api/test_memory_enhancement_real_manager.py
+# Issue #90 B4/004 同契约命中点（教义第 5 条）：neurflow 搜索与 CSE 检索的
+#   LIKE 兜底同样直拼用户输入（`%` 把整表拉回），转义与候选集上限单源。
+tests/unit/neurflow/test_storage.py
+tests/unit/cognitive/test_cognitive_storage_engine.py
+# Issue #56 依赖安全收口四件套：锁完整性（声明↔锁漂移 / 缺 pin / 幽灵 root /
+#   孤儿包）、非 pip 依赖树审计门禁契约、运行时 npx 包钉版本、模型产物 sha256。
+tests/unit/test_lock_integrity_guard.py
+tests/unit/test_osv_audit_gate.py
+tests/unit/tools/test_npx_runtime_pinning.py
+tests/unit/tts/test_model_integrity_manifest.py
+
+# 清单历史登记的守卫本身：曾登记过、文件仍在仓、却不在清单里的条目即红
+#   （根因：删一行即可让整票判据从 CI 消失且无任何红；本批已复原 9 条）。
+tests/unit/ci/test_protected_subset_registration_history.py

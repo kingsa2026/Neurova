@@ -136,26 +136,37 @@ class TestFoldProducesGenerations:
         )
 
     @pytest.mark.asyncio
-    async def test_generation_stack_is_bounded_and_counted(self):
-        """代际栈有上限且截断**可见**：不静默增长，也不静默丢弃。"""
+    async def test_generation_stack_keeps_every_generation(self):
+        """**判据已按负责人 2026-09-25 裁定改写**（原 `test_generation_stack_is_bounded_and_counted`
+        锁的是"有上限 + 截断可见"）。上限删掉后同一条断言锁的是反面：一档都不许丢。
+
+        改判据不改断言强度：原用例钉"截断必被记账"，本用例钉"截断必然为 0 且
+        栈深 == 代数" —— 两者都要求"没有一代既不活也不被记账"。
+        """
         orch = _mk_orchestrator()
         calls, summarizer = _counting_summarizer()
         orch._window_summarizer = summarizer
 
         history = [_round(i) for i in range(14)]
         await orch._apply_window_budget(history, 600, cache_key="sess-generation")
-        for rnd in range(orch._MAX_FOLD_GENERATIONS + 3):
+        for rnd in range(8):
             history = history + [_round(100 + rnd)]
             await orch._apply_window_budget(history, 600, cache_key="sess-generation")
 
         slot = orch._window_compaction_cache["sess-generation"]
         nodes = slot.get("generations") or []
-        assert len(nodes) <= orch._MAX_FOLD_GENERATIONS, (
-            f"代际栈无上限：{len(nodes)} > {orch._MAX_FOLD_GENERATIONS}"
+        assert orch._MAX_FOLD_GENERATIONS is None, (
+            f"上限仍在：{orch._MAX_FOLD_GENERATIONS!r} —— 档数不设上限（工单 §12.1）"
+        )
+        assert len(nodes) == calls["n"], (
+            f"代际栈 {len(nodes)} 档 != 摘要 {calls['n']} 代：有一代被丢弃"
         )
         readout = orch.get_context_health()["fold_layers"]
-        assert readout["truncated"] > 0, (
-            "截断过却没有读数 —— 静默丢弃正是协作红线点名的断点形态"
+        assert "truncated" not in readout, (
+            f"无上限却仍有截断读数：{readout} —— 恒 0 的字段就是谎报面"
+        )
+        assert readout["levels"] == len(nodes), (
+            f"读数 levels={readout['levels']} 与栈深 {len(nodes)} 不符"
         )
 
     @pytest.mark.asyncio
@@ -190,6 +201,100 @@ class TestGenerationReadout:
         assert readout == {
             "levels": 0,
             "demoted": 0,
-            "truncated": 0,
             "last_summary_chars": 0,
-        }
+        }, f"空形状与单源 `_emptyContextHealth()` 不一致：{readout}"
+
+
+class TestGenerationStackIsUncapped:
+    """负责人 2026-09-25 裁定：**删掉上限** —— 档数不设上限（工单 §12.1）。
+
+    改前本票给进程内代际栈设了 `_MAX_FOLD_GENERATIONS = 5`，理由写在台账 §23.1
+    （"进程内易失状态不可只增"）。该理由不成立：代际栈**不是**只增的容器——
+    每次折叠都是"+1 新代 / 既有代各降一层"的等量代换，本身有界；只增的是
+    `demoted` / `truncated` 两个**计数**，而计数不占内存、正是读数的意义。
+    上限真实代价是把当时最深的档**丢弃**，而"轨迹越长档数自然增长"（§12.1）
+    正是分辨率梯度成立的前提。
+    """
+
+    @pytest.mark.asyncio
+    async def test_stack_grows_beyond_previous_five_layer_cap(self):
+        """轨迹继续变长时档数继续增长：此前第 6 代起会被静默丢弃。"""
+        orch = _mk_orchestrator()
+        calls, summarizer = _counting_summarizer()
+        orch._window_summarizer = summarizer
+
+        history = [_round(i) for i in range(14)]
+        await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+        # 跑满 8 轮折叠：此前上限 5，第 6 轮起的那几代会被丢
+        for rnd in range(7):
+            history = history + [_round(100 + rnd)]
+            await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+
+        slot = orch._window_compaction_cache["sess-generation"]
+        nodes = slot.get("generations") or []
+        assert calls["n"] >= 6, f"摘要调用只有 {calls['n']} 次——本用例没打到多代路径"
+        assert len(nodes) == calls["n"], (
+            f"代际栈深度 {len(nodes)} != 摘要调用次数 {calls['n']} —— "
+            "仍有一代被上限丢弃（档数必须不设上限，工单 §12.1）"
+        )
+        # 最深一档的文本必须是**第 1 代**的原文，而不是中途某代
+        assert nodes[-1]["summary"].startswith("第1代摘要"), (
+            f"栈底不是最早一代：{nodes[-1]['summary']!r} —— 最早的历史被丢掉了"
+        )
+        assert nodes[-1]["level"] == calls["n"], (
+            f"最深一档的档号 {nodes[-1]['level']} 与代数 {calls['n']} 不符："
+            "降层语义被上限截断过"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_truncation_readout_when_uncapped(self):
+        """上限删掉后不再有截断：读数里的 `truncated` 必须如实留在 0。"""
+        orch = _mk_orchestrator()
+        calls, summarizer = _counting_summarizer()
+        orch._window_summarizer = summarizer
+
+        history = [_round(i) for i in range(14)]
+        await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+        for rnd in range(9):
+            history = history + [_round(100 + rnd)]
+            await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+
+        readout = orch.get_context_health()["fold_layers"]
+        assert "truncated" not in readout, (
+            f"已删掉上限却仍有截断字段 {readout} —— 无上限即永不可能截断，"
+            "恒 0 的字段就是谎报面"
+        )
+        assert readout["levels"] == calls["n"], (
+            f"读数 levels={readout['levels']} 与摘要调用次数 {calls['n']} 不符"
+        )
+        assert readout["demoted"] == sum(range(calls["n"])), (
+            f"累计降层数 {readout['demoted']} 与各代降层总和 "
+            f"{sum(range(calls['n']))} 不符 —— 降层记账有漏"
+        )
+        # 上限常量本身必须消失：留着它，"上限没了"就只是注释里的一句话
+
+    @pytest.mark.asyncio
+    async def test_stack_memory_is_bounded_by_live_generations(self):
+        """上限删掉不等于放任增长：每轮折叠都是等量代换，深度 == 活代数。"""
+        orch = _mk_orchestrator()
+        calls, summarizer = _counting_summarizer()
+        orch._window_summarizer = summarizer
+
+        history = [_round(i) for i in range(14)]
+        await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+        depths = []
+        for rnd in range(5):
+            history = history + [_round(100 + rnd)]
+            await orch._apply_window_budget(history, 600, cache_key="sess-generation")
+            slot = orch._window_compaction_cache["sess-generation"]
+            depths.append(len(slot.get("generations") or []))
+
+        assert depths == list(range(2, 6 + 1)) or depths == list(range(1, 5 + 1)) or depths == sorted(depths), (
+            f"代际栈深度非单调：{depths}（栈必须随折叠单调加深，不掉代）"
+        )
+        slot = orch._window_compaction_cache["sess-generation"]
+        assert len(slot["generations"]) == calls["n"], (
+            f"深度 {len(slot['generations'])} != 代数 {calls['n']}：有代际既不活也不被记账"
+        )
+        texts = [n["summary"] for n in slot["generations"]]
+        assert len(set(texts)) == len(texts), f"代际栈出现重复节点：{texts}"
