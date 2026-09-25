@@ -39,6 +39,8 @@ BATCH_FILES = (
     "tests/unit/context/test_source_priority_single_source.py",
     # T-09 残余批 · 切片 B：端点读数的 token 口径与全仓唯一尺子同源
     "tests/unit/api/test_context_build_token_count_caliber.py",
+    # T-09 残余批 · 切片 C：上下文链路纳入覆盖率度量范围（第 6 项）
+    "tests/unit/ci/test_context_coverage_scope.py",
 )
 
 
