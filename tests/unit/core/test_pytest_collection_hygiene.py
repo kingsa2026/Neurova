@@ -24,11 +24,31 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests import ast_scan
+
 _TESTS_DIR = Path(__file__).resolve().parents[2]
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _CASE_PREFIX = "test"
 _CLASS_PREFIX = "Test"
 _GUARD_SELF_PATTERN = "test_"
+
+
+def _treeOf(path: Path):
+    """按文件取语法树（走本仓唯一 AST 入口 `tests/ast_scan` 的共享解析预算）。
+
+    Issue #197：本文件原先自己 `read_text` + `ast.parse` 逐文件解析 1783 个
+    测试文件，与其余跨文件判据**互不共享**。解析收口到共享入口后，同一份源码
+    在整进程里只编译一次；扫描面由 `ast_scan.RETIRE_STEP` 的退役策略限定为有界窗口。
+
+    实测（本机，1903 个测试文件）：本文件单跑 私有解析 1.13s vs 共享 1.44s ——
+    单文件冷跑本文件略慢，但受保护子集里其余判据（`test_ci_wallclock_assertion_ledger`
+    等）扫的是同一棵树，整会话只付一次编译；且退役后共享缓存的 gen2 账单
+    （实测整会话 7.4s → 1.4s）远小于私有解析省下的那点。
+    """
+    try:
+        return ast_scan._cachedParse(ast_scan._cacheKey(path), ast_scan.sourceCode(path))
+    except (SyntaxError, OSError):
+        return None
 
 
 def _matchesCollectionPattern(patterns: list, name: str) -> bool:
@@ -79,9 +99,8 @@ def _declaredCases(path: Path, classPatterns: list) -> list:
     把不可达的定义算进来只会制造假阳。模块级与类方法共用同一份
     `python_functions`（pytest 侧本就如此），容器标记只影响报错措辞。
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except SyntaxError:
+    tree = _treeOf(path)
+    if tree is None:
         return []
     declared = []
     for node in tree.body:
