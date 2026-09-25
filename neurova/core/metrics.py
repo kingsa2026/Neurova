@@ -350,6 +350,14 @@ class _Metrics:
         非数值字段（`last_error` 之类的点名串）不落 gauge：把它们塞进数字会让
         读数变成不可判读的编码。故这里只搬数值，异常一律隔离（单个 agent 失败
         不影响其余）。
+
+        **`bool` 是数值**（`bool` 是 `int` 的子类）：`enabled` 这类降级位天然是
+        0/1 gauge，必须照搬。改前过滤条件把布尔与字符串合成了一条
+        （`isinstance(value, bool) or not isinstance(value, (int, float))`），
+        副作用是**所有降级位在生产读数上消失** —— 健康 agent 与装配失败的 agent
+        在 `/metrics` 上长得一模一样（都只有 `attempts=1`），P2-5 的"能力被关掉
+        与这轮本来不需要长得一样"于是换了一层皮（Issue #90 探针 P10）。
+        真正要排除的是字符串，那一条判据本身没错；收窄的只是布尔。
         """
         agents = getattr(state, "agents", None) if state is not None else None
         if not isinstance(agents, dict):
@@ -367,7 +375,9 @@ class _Metrics:
                 if not isinstance(slot, dict):
                     continue
                 for field, value in slot.items():
-                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    # 只排除非数值（点名串）。布尔**不排除** —— 它是 int 的子类，
+                    # 降级位（enabled）正是 0/1 gauge 的标准形态。
+                    if not isinstance(value, (int, float)):
                         continue
                     try:
                         self.context_health_value.labels(

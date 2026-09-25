@@ -253,34 +253,3 @@ class TestIdentitylessTurnIsVisible:
         readout = orch.get_context_health()["turn_identity"]
         assert readout["identityless"] == 0, f"有身份轮被误报为无身份：{readout}"
         assert readout["last_key"] == "sess-visible-1"
-
-
-class TestBudgetReadoutUsesTurnIdentity:
-    """放大视角：同一身份契约的**其他消费方**一并收口（教义第 5 条）。
-
-    `get_token_budget()` 的 `used_tokens` 原先按构造期初值 `self._session_id`
-    取会话快照，而该初值在生产恒 `None` → 读到 agent 级快照（别的会话的上下文），
-    面板显示的是串了会话的数字。身份消费方只允许一处解析，故同批改指回落链。
-    """
-
-    def test_budget_readout_reads_turn_session_snapshot(self):
-        from neurova.context.composition import measure_composition
-
-        orch = _orchestrator()
-        # 会话 B 自己的快照（消息多 → token 多）
-        measure_composition(
-            "a1",
-            [{"role": "user", "content": "会话 B 的 prompt 正文 " * 40}],
-            [],
-            session_id="sess-budget-b",
-        )
-        # 再用**另一个会话**（agent 级）写一份更小的快照，把两条路读数拉开
-        measure_composition("a1", [{"role": "user", "content": "短"}], [], session_id=None)
-        others = orch.get_token_budget()["used_tokens"]
-
-        set_turn_identity("你好", session_id="sess-budget-b", user_id="u1")
-        mine = orch.get_token_budget()["used_tokens"]
-        assert mine != others and mine > others, (
-            "预算读数没按本轮身份取快照 —— 读的是构造期初值（生产恒 None）→ "
-            f"拿到的是别的会话的数字：{mine} vs 他会话 {others}"
-        )

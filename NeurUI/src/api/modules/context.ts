@@ -31,12 +31,6 @@ export interface ContextStats {
   compression_rate: number
 }
 
-export interface TokenBudget {
-  max_tokens: number
-  used_tokens: number
-  available_tokens: number
-}
-
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -81,14 +75,4 @@ export function injectMemories(agentId: string, query = '', limit = 10) {
 /** Inject hot memories into context. */
 export function injectHotMemories(agentId: string, limit = 5) {
   return api.get<ApiResponse<{ hot_memories: unknown[]; count: number }>>(`${BASE}/inject/hot`, { params: { agent_id: agentId, limit } })
-}
-
-/** Get token budget. */
-export function getTokenBudget(agentId: string) {
-  return api.get<ApiResponse<TokenBudget>>(`${BASE}/token-budget`, { params: { agent_id: agentId } })
-}
-
-/** Set token budget. */
-export function setTokenBudget(agentId: string, maxTokens: number) {
-  return api.put<ApiResponse<{ max_tokens: number }>>(`${BASE}/token-budget`, null, { params: { agent_id: agentId, max_tokens: maxTokens } })
 }
