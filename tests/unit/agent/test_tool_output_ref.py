@@ -35,7 +35,7 @@ class TestOutputRef:
         from neurova.agent.tool_output_ref import maybe_output_ref
 
         result = {"success": True, "result": "x" * 100}
-        assert maybe_output_ref("t", result, workspace) is result
+        assert maybe_output_ref("t", result, workspace, success=True) is result
 
     def test_small_result_unchanged(self, workspace):
         from neurova.agent import tool_output_ref
@@ -43,7 +43,7 @@ class TestOutputRef:
 
         tool_output_ref.install_tool_output_ref(max_chars=1000)
         result = {"success": True, "result": "x" * 100}
-        assert maybe_output_ref("t", result, workspace) is result
+        assert maybe_output_ref("t", result, workspace, success=True) is result
 
     def test_big_result_replaced_by_ref(self, workspace):
         from neurova.agent import tool_output_ref
@@ -51,7 +51,7 @@ class TestOutputRef:
 
         tool_output_ref.install_tool_output_ref(max_chars=1000)
         result = {"success": True, "result": "x" * 5000}
-        ref = maybe_output_ref("big_tool", result, workspace)
+        ref = maybe_output_ref("big_tool", result, workspace, success=True)
 
         assert ref is not result
         assert ref["success"] is True
@@ -68,15 +68,30 @@ class TestOutputRef:
             stored = json.load(f)
         assert stored["result"] == "x" * 5000
 
-    def test_error_result_preserves_success_false(self, workspace):
+    def test_failureResult_isNeverFoldedIntoARef(self, workspace):
+        """失败结果不得被折叠成无诊断信息的引用（CI 实测根因）。
+
+        失败正文就是诊断载体（`error` / `stderr` / `exit_code`），引用结构里
+        只有 `{path, size_bytes, truncated, preview}` —— 在咽喉处先折叠，等于
+        把 T-01 修好的"诊断蒸发"原样放回来。体量折叠的**单源**是回环处的
+        `apply_offload_policy`（head+tail 预览 + 可回读指针），它保留诊断；
+        本层只该管成功结果。夹具按生产判据显式传入 `success`。
+        """
         from neurova.agent import tool_output_ref
         from neurova.agent.tool_output_ref import maybe_output_ref
 
         tool_output_ref.install_tool_output_ref(max_chars=100)
-        result = {"error": "boom " + "x" * 500}
-        ref = maybe_output_ref("t", result, workspace)
-        assert ref["success"] is False
-        assert ref["output_ref"]["truncated"] is True
+        result = {"success": False, "error": "boom", "stderr": "x" * 5000, "exit_code": 3}
+        assert maybe_output_ref("t", result, workspace, success=False) is result
+
+    def test_successResult_stillFolds(self, workspace):
+        """反例对照：成功结果照旧折叠（负例不是探针断了才看起来像拦住了）。"""
+        from neurova.agent import tool_output_ref
+        from neurova.agent.tool_output_ref import maybe_output_ref
+
+        tool_output_ref.install_tool_output_ref(max_chars=100)
+        result = {"success": True, "result": "x" * 5000}
+        assert maybe_output_ref("t", result, workspace, success=True) is not result
 
     def test_no_workspace_skips(self, workspace):
         """无工作区（None）时不落盘，原样返回（诚实降级优于丢输出）。"""
@@ -85,14 +100,14 @@ class TestOutputRef:
 
         tool_output_ref.install_tool_output_ref(max_chars=100)
         result = {"success": True, "result": "x" * 500}
-        assert maybe_output_ref("t", result, None) is result
+        assert maybe_output_ref("t", result, None, success=True) is result
 
     def test_non_dict_result_untouched(self, workspace):
         from neurova.agent import tool_output_ref
         from neurova.agent.tool_output_ref import maybe_output_ref
 
         tool_output_ref.install_tool_output_ref(max_chars=10)
-        assert maybe_output_ref("t", "small", workspace) == "small"
+        assert maybe_output_ref("t", "small", workspace, success=True) == "small"
 
     def test_install_idempotent(self):
         from neurova.agent import tool_output_ref
