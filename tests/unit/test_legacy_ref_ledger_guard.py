@@ -311,3 +311,43 @@ class TestErasureFormDoesNotGrow:
         assert not [e for e in found if e["verdict"] == scanner.VERDICT_EMPTY], (
             f"合法转义写法被误报为空引用: {found}"
         )
+
+class TestEnumerationSharesTheResolutionBaseline:
+    """枚举口径必须与解析口径同源（棘轮读数不得依赖工作区状态）。
+
+    根因：`scanDirectory` 枚举走 `rglob`（**文件系统实况**），而判定悬空的
+    解析基线走 `indexByBasename(trackedFiles())`（**git 索引**）。两者不同源时，
+    未入库目录里的文档会被扫出来、再拿去与「只含入库文件的索引」比对，
+    必然判为悬空 —— 于是同一提交在不同工作区给出不同读数：跑过 `npm ci` 的
+    工作区多出 40 条（第三方 README 里的空代码位），干净检出为 0 条，
+    而基线正是 0。门禁读数取决于是否装过依赖，等于门禁自己不可复算。
+
+    修法是收口到一份事实源：既然解析基准只认入库文件，枚举也必须只认入库文件。
+    """
+
+    def test_untracked_markdown_is_not_a_carrier(self):
+        """注入一份**未入库**的 Markdown（含空引用），不得被当作载体扫出来。"""
+        probe_dir = PROJECT_ROOT / "_erasure_untracked_probe"
+        probe_dir.mkdir(exist_ok=True)
+        probe = probe_dir / "probe.md"
+        probe.write_text("参考：`` 与 `neurova/这条路径并不存在_zzz.py`。\n", encoding="utf-8")
+        try:
+            entries = scanner.scanDirectory(PROJECT_ROOT)
+            offenders = [e for e in entries if e["file"].startswith("_erasure_untracked_probe/")]
+            assert not offenders, (
+                "未入库文档被当成了悬空引用的载体——枚举走文件系统、解析走 git 索引，"
+                f"门禁读数会随工作区是否装过依赖而变:\n  {offenders[:3]}"
+            )
+        finally:
+            probe.unlink()
+            probe_dir.rmdir()
+
+    def test_enumeration_is_not_empty(self):
+        """负向控制的反面：收口后枚举不得空转，已入库载体仍须被抓到。"""
+        entries = scanner.scanDirectory(PROJECT_ROOT)
+        assert entries, "收口后枚举为空——门禁被短路，不是修复"
+        tracked = set(scanner.trackedFiles())
+        untracked_carriers = sorted({e["file"] for e in entries if e["file"] not in tracked})
+        assert not untracked_carriers, (
+            f"仍存在未入库载体（枚举与解析不同源）: {untracked_carriers[:3]}"
+        )
