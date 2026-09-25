@@ -1,134 +1,72 @@
 """
 Neurova 端口工具模块
 提供跨平台的端口检查、释放、进程查找等功能
+
+占用判据（`check_port` / `get_processes_by_port`）不是本模块自有的第二份实现，
+而是委托 `neurova/core/port_guard.py`——那是全仓唯一判据。此前这里自成一体
+（connect 探活），而容器/桌面入口 `start_server.py` 干脆不判，两套启动器对
+"端口被占"的反应完全不同（Issue #189 主诉）。判据收口到 `neurova/` 才能让
+生产容器（只拷 `neurova/` + `start_server.py`）也拿得到同一套判定。
 """
 
+import os
+import signal
 import socket
 import subprocess
 import sys
 import time
-import signal
-import os
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import List, Optional
+
+# 仓库根须先于 `import neurova` 进 sys.path：本模块的占用判据委托给
+# `neurova.core.port_guard`，而脚本以文件路径执行时不保证 CWD 是仓库根。
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def check_port(port: int) -> bool:
     """
-    检查端口是否被占用（跨平台，同时检测 IPv4 和 IPv6）
-    
+    检查端口是否被占用（判据与启动器同源：neurova.core.port_guard）
+
     Args:
         port: 端口号
-        
+
     Returns:
         bool: 端口是否被占用
     """
-    # 同时尝试 IPv4 和 IPv6，因为服务可能只监听其中一个
-    for family, host in ((socket.AF_INET, '127.0.0.1'), (socket.AF_INET6, '::1')):
-        try:
-            with socket.socket(family, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex((host, port)) == 0:
-                    return True
-        except OSError:
-            pass
-    return False
+    from neurova.core.port_guard import isPortOccupied
+
+    return bool(isPortOccupied(port))
 
 
 def get_process_by_port(port: int) -> Optional[int]:
     """
     获取占用端口的进程 ID（跨平台）
-    
+
     Args:
         port: 端口号
-        
+
     Returns:
         Optional[int]: 进程 ID，如果没有找到则返回 None
     """
-    try:
-        if sys.platform == "win32":
-            # Windows: 使用 netstat
-            result = subprocess.run(
-                ['netstat', '-ano'],
-                capture_output=True,
-                timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            # netstat 在中文 Windows 上输出 GBK，用 bytes 处理避免编码错误
-            stdout = result.stdout.decode('gbk', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
-            if result.returncode == 0:
-                for line in stdout.split('\n'):
-                    if 'LISTENING' not in line:
-                        continue
-                    parts = line.split()
-                    # 本地地址列（第2列）形如 0.0.0.0:8080——尾部 ':port' 精确匹配，
-                    # 避免子串误匹配（port=0 时 ':0' 命中 ':5000' 等行 → 假阳性 PID）
-                    if len(parts) >= 2 and parts[1].rsplit(':', 1)[-1] == str(port):
-                        if parts[-1].isdigit():
-                            return int(parts[-1])
-        else:
-            # Unix/Linux/Mac: 使用 lsof
-            result = subprocess.run(
-                ['lsof', '-i', f':{port}', '-t'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split('\n')
-                if pids and pids[0].isdigit():
-                    return int(pids[0])
-    except Exception:
-        pass
-    return None
+    pids = get_processes_by_port(port)
+    return pids[0] if pids else None
 
 
 def get_processes_by_port(port: int) -> List[int]:
     """
     获取占用端口的所有进程 ID（跨平台）
-    
+
     Args:
         port: 端口号
-        
+
     Returns:
         List[int]: 进程 ID 列表
     """
-    pids = []
-    try:
-        if sys.platform == "win32":
-            # Windows: 使用 netstat
-            result = subprocess.run(
-                ['netstat', '-ano'],
-                capture_output=True,
-                timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            # netstat 在中文 Windows 上输出 GBK，用 bytes 处理避免编码错误
-            stdout = result.stdout.decode('gbk', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
-            if result.returncode == 0:
-                for line in stdout.split('\n'):
-                    if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        if parts and parts[-1].isdigit():
-                            pid = int(parts[-1])
-                            if pid not in pids:
-                                pids.append(pid)
-        else:
-            # Unix/Linux/Mac: 使用 lsof
-            result = subprocess.run(
-                ['lsof', '-i', f':{port}', '-t'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                for pid_str in result.stdout.strip().split('\n'):
-                    if pid_str.isdigit():
-                        pid = int(pid_str)
-                        if pid not in pids:
-                            pids.append(pid)
-    except Exception:
-        pass
-    return pids
+    from neurova.core.port_guard import findPortListeners
+
+    return list(findPortListeners(port))
 
 
 def kill_process(pid: int) -> bool:
