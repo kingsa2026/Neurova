@@ -781,6 +781,26 @@ tests/unit/tools/test_query_database.py
 # 缺口信号须由"市场未命中"这个生产点就地投递。
 tests/unit/agent/test_skill_acquisition_fallback.py
 
+# T-01 同契约（Issue #197）：失败结果不得被 OutputRef 折叠成无诊断信息的引用
+#   ——失败正文（error/stderr/exit_code）就是诊断载体，体量折叠的单源是回环处
+#   既有的 apply_offload_policy，本层只管成功结果。
+tests/unit/agent/test_tool_output_ref.py
+
+# T-04 同契约（Issue #197）：`general` 分类无已注册候选 ⇒ 空序列，
+#   不再落兜底幻名 general_tool（该名全仓注册处为 0）。
+tests/unit/evolution/test_nl_synthesizer.py
+
+# T-06 强化口径（Issue #197）：纯检索基因型不得被遗传反哺顶到权重上限；
+#   内置元工具不得零信息增量重复发布到市场。
+#   本条曾登记过、又被同批后一票（df0f1f15 编辑本文件时）静默删掉——
+#   删一行就让整票判据从 CI 上消失，「登记被删」这一向由
+#   tests/unit/ci/test_issue197_judgement_registration.py 常驻反锁。
+tests/unit/evolution/test_reward_does_not_gamble_on_retrieval.py
+
+# Issue #197 批的登记纪律守卫本身：本批任一判据条目被摘掉即红
+#   （根因：同批后一票曾把一个不相关条目的登记静默删走）。
+tests/unit/ci/test_issue197_judgement_registration.py
+
 # Issue #68 收口：前端调用 ↔ 后端注册差异的裁决与补齐。
 #   （根因：清单第四节把 28 处差异写成「由人去核」——只登记、不裁决，
 #    于是同一张表可被反复登记、永不收敛。有活跃消费者的一类实测全是
