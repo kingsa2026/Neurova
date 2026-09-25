@@ -57,6 +57,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 #: 例外台账：曾登记过、现已按依据退役的条目。行格式 `路径 | 依据`。
@@ -72,6 +74,33 @@ def _listedNow() -> set:
     }
 
 
+def _requireCompleteHistory(repo) -> None:
+    """断言 `repo` 是**完整历史**检出。
+
+    本判据按「曾登记过」作答，前提是历史可得。浅克隆（`--depth 1`）里
+    `git log` 只返回当前一个提交，`_listedEver()` 拿到的是"只有现值"的假历史，
+    于是台账的退役署名会被判成"历史上从未登记过" —— 报错点名的是一屏无关条目，
+    真正的原因（检出深度不足）一个字都不提，正是教义第 2 条禁止的"误导形态"。
+
+    故在取历史前先把前提钉成硬判据：不成立就**响亮失败**并点名修复方式，
+    不静默用假历史作答（该前提下算出来的读数，与"没有登记过"无法区分）。
+    """
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+    if shallow == "true":
+        raise AssertionError(
+            f"{repo} 是浅克隆（shallow），历史不可得 —— 本守卫按「曾登记过」判"
+            "受保护子集条目，缺历史即无从作答。CI 检出需完整历史："
+            "GitHub Actions 侧 `actions/checkout` 加 `with: fetch-depth: 0`；"
+            "CNB 侧构建默认全量检出，如被改为浅检出同样要恢复。"
+        )
+    assert shallow == "false", (
+        f"`git rev-parse --is-shallow-repository` 读数异常：{shallow!r}"
+    )
+
+
 def _listedEver() -> set:
     """清单**历史上**出现过的全部条目（按提交逐个读清单全文，不解析 patch）。
 
@@ -83,6 +112,7 @@ def _listedEver() -> set:
     为何用 `--full-history`：合并提交若只在一侧带上清单变更，默认简化会跳过它，
     于是"只在合并里发生"的那次删除看不见。
     """
+    _requireCompleteHistory(PROJECT_ROOT)
     shas = subprocess.run(
         ["git", "log", "--full-history", "--format=%H", "--",
          "scripts/ci/protected_tests.txt"],
@@ -204,4 +234,74 @@ def test_guard_itself_is_registered():
     rel = "tests/unit/ci/test_protected_subset_registration_history.py"
     assert rel in _listedNow(), (
         f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
+    )
+
+
+def _makeShallowClone(into) -> "Path":
+    """在临时目录里造一个**真**浅仓库（depth 1），不 mock git。"""
+    src = subprocess.run(
+        ["git", "init", "-q", str(into / "seed")],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert src.returncode == 0, src.stderr
+    (into / "seed" / "f.txt").write_text("x", encoding="utf-8")
+    for cmd in (["add", "-A"],
+                ["-c", "user.email=t@t", "-c", "user.name=t",
+                 "-c", "commit.gpgsign=false", "commit", "-qm", "seed"]):
+        r = subprocess.run(["git", *cmd], cwd=str(into / "seed"),
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+    r = subprocess.run(
+        ["git", "clone", "-q", "--depth", "1",
+         (into / "seed").as_uri(), str(into / "shallow")],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert r.returncode == 0, r.stderr
+    return into / "shallow"
+
+
+def test_shallow_checkout_isRefusedInsteadOfJudgingOnEmptyHistory(tmp_path):
+    """浅检出下本判据的前提（历史可得）不成立，必须**响亮失败**并给出修复指引。
+
+    红灯形态（修复前实测，见提交说明）：浅检出里 `git log` 只返回当前一个提交，
+    `_listedEver()` 拿到的是"只有现值"的假历史 —— 于是台账的 4 行退役署名
+    被判成"历史上从未登记过"，报错点名的是一屏无关条目，真正的原因
+    （检出深度不足）一个字都不提。教义第 2 条：不得把失败改写成误导形态。
+    """
+    shallow = _makeShallowClone(tmp_path)
+    with pytest.raises(AssertionError) as caught:
+        _requireCompleteHistory(shallow)
+    assert "fetch-depth" in str(caught.value), (
+        "浅检出被拒时必须点名修复方式（CI 检出需要完整历史），"
+        f"实测报错为：{caught.value}"
+    )
+    # 反向：完整检出下前提成立，直接放行（同一函数两个相反读数 → 非恒真壳）
+    _requireCompleteHistory(PROJECT_ROOT)
+
+
+def test_github_ci_checkout_declares_fullHistory():
+    """本判据依赖完整历史 —— GitHub 侧检出步骤必须显式声明（配置面咬合）。
+
+    只在本机加断言不够：`actions/checkout@v4` 默认 `fetch-depth: 1`，浅检出下本文件
+    会以"条目未经登记"的形态响亮失败，报错点名的是一屏无关条目，与真实原因
+    （检出深度不足）不符。故把运行前提钉在**仓内可写的唯一那份配置**上。
+
+    CNB 侧不在此断言：它的检出由平台构建器完成（实测全量 fetch，无 `--depth`），
+    不在 `.cnb.yml` 里表达，拿文本近似当判据只会是一条拦不住真漂移的弱代理。
+    那一侧的事实由本文件运行时的 `_requireCompleteHistory()` 自证 ——
+    前提不成立时响亮失败并点名修复方式，两侧因此都不静默。
+    """
+    yaml = pytest.importorskip("yaml")
+
+    gh = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+    jobs = yaml.safe_load(gh.read_text(encoding="utf-8"))["jobs"]
+    steps = jobs["unit-tests"]["steps"]
+    checkout = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert checkout, "GitHub 侧 unit-tests 没有检出步骤"
+    depth = (checkout[0].get("with") or {}).get("fetch-depth")
+    assert depth == 0, (
+        "GitHub 侧 unit-tests 的 actions/checkout 必须声明 `fetch-depth: 0`："
+        "受保护子集里的 test_protected_subset_registration_history.py 按清单历史判"
+        "「曾登记过」，默认的 depth=1 会让它用假历史作答。"
+        f"实测 fetch-depth={depth!r}"
     )
