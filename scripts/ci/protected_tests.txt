@@ -734,9 +734,11 @@ tests/unit/agent/test_attachment_handle_injection.py
 tests/unit/agent/test_capability_gap_trigger.py
 tests/unit/evolution/test_synthesis_alphabet_registered.py
 
+# 技能注入扫描守卫（P1-6）：NL 合成产物注册前必须过扫描，且正例要真走到注册出口。
+#   T-03 把 `_check_nl_synthesis` 的入口判据换成能力缺口后，本文件两例都在入口早退
+#   （正例看起来红、反例看起来绿，判据从未咬合）——它此前不在子集里，CI 看不见。
+tests/unit/security/test_p1_6_skill_guard.py
+
 # T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
 #   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
 tests/unit/tools/test_query_database.py
-# T-06 强化口径（Issue #197）：纯检索基因型不得被遗传反哺顶到权重上限；
-#   内置元工具不得零信息增量重复发布到市场。
-tests/unit/evolution/test_reward_does_not_gamble_on_retrieval.py
