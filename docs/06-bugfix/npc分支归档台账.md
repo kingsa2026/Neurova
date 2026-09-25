@@ -113,6 +113,26 @@ python scripts/ci/npc_branch_cleanup.py            # 人读
 python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
 ```
 
+### 2026-09-25（#218 后续复核，本轮）
+
+复算入口（先 `git fetch origin --prune`）：`应当删除 5 条`。五条均为 `main` 的祖先，
+处置如下：
+
+| 分支 | 处置 |
+|------|------|
+| `auto/ast-scan-one-shot-retention` | 已删（已合入主线） |
+| `auto/branch-archive-fact-criterion` | 已删（已合入主线） |
+| `auto/cnb-header-count-single-source-9c14` | 已删（已合入主线） |
+| `auto/npc-handoff-predicate-158` | 已删（已合入主线） |
+| `auto/t11e-rollup-90` | 已删（已合入主线） |
+
+同轮另删一条**未合并**的并行分支：`auto/relay-criterion-from-pipeline-status`
+（其 PR #234 已关闭）。删它的理由不是「已合并」，而是**同一根因只能有一份实现**：
+#233 已就「接力判据改读平台在收尾期给出的事实」做了更完整的实现（含 ADR 0022），
+两份并存会让 `.cnb.yml` 同一段互相冲突，也无人能判断哪份是事实源（教义第 6 条）。
+
+删除后复算读数：`应当删除 0 条：[]`（`keep` 的未合并分支照旧保留）。
+
 ## 四、与既有纪律的关系（不新造平行体系）
 
 - 本台账只承接**一条**纪律（§0 的"合并后立即删分支"），不复制 §0 的其它条款；
