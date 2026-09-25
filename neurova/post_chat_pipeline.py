@@ -61,6 +61,27 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+
+def _isMetaRetrievalTool(tool_name: str) -> bool:
+    """元检索工具判定（**单一 import 点**，名单本体在 `tool_layers/capability_graph`）。
+
+    本包装只为让"撤掉反哺禁令 ⇒ 故障复现"这条反向锁可被单独观测
+    （教义第 1 条判据）；判定口径本身不在这里定义，不构成第二份名单。
+    """
+    from neurova.tool_layers.capability_graph import is_meta_retrieval_tool
+
+    return is_meta_retrieval_tool(tool_name)
+
+
+def _noteRewardGuardSkip(tool_name: str, channel: str) -> None:
+    """反哺/发布禁令命中的观测写入（失败不阻断主链）。"""
+    try:
+        from neurova.tool_layers.capability_graph import noteMetaRewardSkip
+
+        noteMetaRewardSkip(tool_name, channel)
+    except Exception:  # noqa: BLE001 - 观测缺失不得让后处理步骤整体失败
+        logger.debug("反哺禁令计数写入失败", exc_info=True)
+
 # RSI 降频巡检窗口（工单 008）：收敛或度量失明时，每 N 轮仍跑一次。
 # 取 20 与收敛窗口（convergence_analyzer.window_size 默认 20）同量级 ——
 # 一个窗口的证据过期之后就重新量一次，而不是永久停机。
@@ -2165,12 +2186,32 @@ class PostChatPipeline:
             # AdaptiveToolWeights 上不存在，hasattr 恒 False 使遗传高适应度
             # 反哺静默失效；改用公开 API get_weight/update_weight
             tool_weights = getattr(evolution, "tool_weights", None)
+            # 元检索反哺禁令（T-06）：纯检索基因型的适应度高只说明"这轮检索
+            # 成功"，而检索**结构上没有失败可能** —— 给它记成功票等于按"省事"
+            # 计价，`tool_weights.json` 实测把 memory_search 顶到 1.500 上限、
+            # 把唯一能解题的 run_code 压到 0.8924。判据：撤掉禁令 ⇒ 上限复现。
+            reward_skipped = 0
             for genotype in new_gen:
+                if genotype.fitness <= 0.5:
+                    continue
+                # 逐**工具**过滤，而不是只看整条序列：混合基因型里真正干活的是
+                # 执行原语，检索工具只是同轮搭了便车。实测（真种群 40 轮）只按
+                # "整条序列全为元检索"过滤时，`['memory_search','file_read']`
+                # 这类占多数的混合型照样把 memory_search 抬到 1.500 上限 ——
+                # 同一根因的剩余形态，一并修净（教义第 5 条）。
                 for tool_name in genotype.tools:
+                    if _isMetaRetrievalTool(tool_name):
+                        _noteRewardGuardSkip(tool_name, "genetic_reward")
+                        reward_skipped += 1
+                        continue
                     if tool_weights and tool_weights.get_weight(tool_name) is not None:
                         # 高适应度个体的工具应获得权重提升
-                        if genotype.fitness > 0.5:
-                            tool_weights.update_weight(tool_name, True)
+                        tool_weights.update_weight(tool_name, True)
+            if reward_skipped:
+                logger.info(
+                    "🧬 元检索工具不参与权重反哺: %s 处（检索无失败可能，按省事计价会挤掉执行原语）",
+                    reward_skipped,
+                )
 
             # Bug A-6 修复: 将高适应度进化工具注册到 SkillRegistry
             # 之前进化成果只停留在 genetic_engine 内部种群，下次对话时
@@ -2254,6 +2295,13 @@ class PostChatPipeline:
             for tm in tool_messages:
                 tool_name = tm.get("tool_name", "")
                 if not tool_name:
+                    continue
+                # 内置元工具跳过（T-06 同根第二处）：实测 `auto-tool_search` 被
+                # 发布两遍，是零信息增量发布——市场上多一条自己找自己的工具，
+                # 使用者却拿它做不了任何新事。
+                if _isMetaRetrievalTool(tool_name):
+                    _noteRewardGuardSkip(tool_name, "marketplace_publish")
+                    logger.debug("🏪 跳过发布内置元工具（零信息增量）: %s", tool_name)
                     continue
 
                 # 检查是否已存在

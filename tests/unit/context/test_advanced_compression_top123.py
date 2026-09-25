@@ -3,8 +3,9 @@
 
 Top1 摘要提示词时间保留修正（The Sleeping Agent, arXiv 2608.11775）：
     提示词必须显式要求保留时间/计量表达。
-Top2 工具结果占位清除（Anthropic context editing 对齐）：
-    老工具结果替换为占位指针，最近 3 个保留原文；仅 8k+ 窗口启用。
+Top2 工具结果占位清除：
+    老工具结果替换为占位指针；触发与保留都按**工具结果载荷**判定
+    （Issue #90 · T-10c 前置裁定，见 test_microcompact_threshold_decoupling.py）。
 Top3 递进折叠比例（Letta compaction 对齐）：
     折叠比例从 target_ratio 起步，折叠后仍超预算按 +0.1 步进重试。
 """
@@ -105,7 +106,7 @@ class TestTop2ToolResultClearing:
         return msgs
 
     def test_old_tool_results_cleared_when_large(self):
-        """大窗口：最近 3 个保留原文，更早的占位替换。"""
+        """大载荷：更早的占位替换，最新若干条（载荷份额内）保留原文。"""
         orch = _mk_orchestrator()
         msgs = self._tool_window(6, big=True)
         cleared = orch._clear_old_tool_results(msgs)
@@ -113,8 +114,9 @@ class TestTop2ToolResultClearing:
         tool_contents = [m["content"] for m in cleared if m.get("role") == "tool"]
         assert tool_contents[0].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
         assert tool_contents[1].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
-        assert tool_contents[-1].startswith("工具结果5")  # 最近 3 个保留
+        assert tool_contents[-1].startswith("工具结果5")  # 最新一条恒保留
         assert tool_contents[-3].startswith("工具结果3")
+        assert orch._TOOL_RESULT_KEEP_SHARE > 0, "保留窗按载荷份额声明（非与折叠共用的条数）"
 
     def test_small_window_untouched(self):
         """小窗口（≤8k token）：零替换。"""

@@ -200,12 +200,23 @@ class ContextOrchestrator:
         - `turn_identity`：每轮会话身份的解析结果（T-03b）。落到 `direct`
           意味着本轮所有单聊共用同一个折叠摘要槽——静默共用正是本缺陷的形态，
           所以计数与 `last_key` 必须可读。
+        - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
+          `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
+          `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
         """
         return {
             "ledger": {"enabled": False, "attempts": 0, "last_error": None},
             "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
             "fold_integrity": self._foldIntegrityEmptyReport(),
             "turn_identity": {"identityless": 0, "resolved": 0, "last_key": None, "last_error": None},
+            "microcompact": {
+                "calls": 0,
+                "triggered_calls": 0,
+                "last_replaced": 0,
+                "last_kept": 0,
+                "last_payload_tokens": 0,
+                "last_trigger_tokens": 0,
+            },
         }
 
     def _contextHealthSlot(self, key: str) -> Dict[str, Any]:
@@ -1313,8 +1324,25 @@ class ContextOrchestrator:
         # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
         self._last_archived_window_hashes = archived_hashes
 
-    # microcompact 保留窗口：最近 N 个工具结果保留原文，更早的占位替换
-    _TOOL_RESULT_KEEP_RECENT = 3
+    # ── microcompact（工具结果占位清除）的两根轴（Issue #90 · T-10c 前置裁定）──
+    #
+    # 裁定口径（2026-09-25 负责人）：**裁掉共线**，同时**整合**「未触发折叠但工具
+    # 输出已撑满窗口」那一段的价值。改前的两根轴都取错了对象，且两处"最近 3 条"
+    # 是**同一个数**，稳态上互相抵消（台账 §21.1 的共线）：
+    #
+    # - **触发**看**整窗** token（>8000），而真序列是**先折叠再 microcompact**：
+    #   折叠一旦发生就把窗口压到预算一半以下（8k 档实测 4579 < 8000），触发判据
+    #   在它唯一该起作用的那些轮次上恒假；
+    # - **保留**看条数（最近 3 条），而 3 恰是折叠保留窗（`keep_min_messages=6`
+    #   条消息 = 3 组工具轮）留下的行数 → `len(tool_positions) <= 3` 直接返回。
+    #
+    # 现两根轴都按**它真正管辖的量**——工具结果载荷 token——声明，与折叠的
+    # "保留几条消息"不再共用一个数，折叠发生后仍然动手：
+    _TOOL_PAYLOAD_TRIGGER_TOKENS = 8000  # 绝对臂：载荷合计超过它即换指针
+    _TOOL_PAYLOAD_TRIGGER_SHARE = 0.5  # 相对臂：载荷越过窗口实占的一半 = 工具输出撑满窗口
+    _TOOL_PAYLOAD_MIN_TOKENS = 2000  # 收益门槛：省下的还不抵指针开销时不动手
+    _TOOL_RESULT_KEEP_SHARE = 0.5  # 保留窗：最新若干条累计载荷不超过载荷的一半
+    _TOOL_RESULT_MIN_CHARS = 80  # 极短结果（状态码类）恒保留原文
 
     @classmethod
     def _tool_placeholder(cls, msg: dict) -> str:
@@ -1329,32 +1357,80 @@ class ContextOrchestrator:
             "完整内容经 recall_history(session_id, tool_call_id) 取回]"
         )
 
-    def _clear_old_tool_results(self, window_msgs: list) -> list:
-        """microcompact（Anthropic context editing 对齐）：老工具结果占位清除。
+    def _toolPayloadTrigger(self, window_tokens: int) -> int:
+        """触发线：两条臂取**更松**的那个（任一超标即动手），再抬到收益门槛之上。
 
-        只在窗口 token 超过 8k 时启用（短对话不做无谓替换）；保留最近
-        _TOOL_RESULT_KEEP_RECENT 个工具结果原文，更早的替换为寻址占位指针。
-        原文真相在会话台账（metadata.tool_calls，P1-#6）与池归档，
-        占位携带 call_id 硬地址供 recall_history 直取。
+        - 绝对臂：载荷合计过 8000 —— 载荷本身就够大，换指针必然划算；
+        - 相对臂：载荷越过**窗口实占的一半** —— 工具输出已撑满窗口
+          （「未触发折叠但工具输出已撑满窗口」那一段由它覆盖）。
+
+        收益门槛是**下限**：载荷太小时换指针省下的还不抵指针自身的 token 开销，
+        所以不动手（判据取载荷本身，不看条数——条目再多、总量小也不划算）。
         """
-        from neurova.context.window_compactor import estimate_window_tokens
+        return max(self._TOOL_PAYLOAD_MIN_TOKENS,
+                   min(self._TOOL_PAYLOAD_TRIGGER_TOKENS,
+                       int(window_tokens * self._TOOL_PAYLOAD_TRIGGER_SHARE)))
 
-        if estimate_window_tokens(window_msgs) <= 8000:
-            return window_msgs
+    def _clear_old_tool_results(self, window_msgs: list) -> list:
+        """microcompact：老工具结果的载荷换成寻址占位指针（原文在池/台账，可直取）。
 
-        tool_positions = [
+        触发与保留都按**工具结果载荷**判定（常量注释见类属性处）：载荷越过
+        `_toolPayloadTrigger` 即动手；保留最新的、累计载荷不超过载荷一半的原文
+        （**至少 1 条**），更早的换成占位指针；极短结果恒保留原文。
+
+        与窗口折叠的分工：折叠管对话文本的**条数**（`keep_min_messages`），本方法
+        管工具载荷的**份额**——两根轴各自声明，折叠发生后本方法仍能动手。
+
+        触发事实记进 `get_context_health()["microcompact"]`：下游（视图渲染/下一段
+        续写）按它知道本轮有工具原文被换成指针，而不是解析日志猜。
+        """
+        from neurova.context.window_compactor import WindowTokenMeter
+
+        positions = [
             i for i, m in enumerate(window_msgs) if (m or {}).get("role") == "tool"
         ]
-        if len(tool_positions) <= self._TOOL_RESULT_KEEP_RECENT:
+        if not positions:
             return window_msgs
 
-        cutoff = tool_positions[-self._TOOL_RESULT_KEEP_RECENT]
+        # 计量单源：与折叠/窗口预算同一把尺（重复计量由 meter 内部缓存承担）
+        meter = WindowTokenMeter()
+        payload_tokens = meter.total([window_msgs[i] for i in positions])
+        trigger_tokens = self._toolPayloadTrigger(meter.total(window_msgs))
+        readout = self._contextHealthSlot("microcompact")
+        readout["calls"] += 1
+        # 未触发也记账：载荷与触发线一律写回，"没触发"与"没跑"因此可分、
+        # "离触发线还有多远"也不是靠日志猜。
+        readout["last_payload_tokens"] = int(payload_tokens)
+        readout["last_trigger_tokens"] = int(trigger_tokens)
+        if payload_tokens < trigger_tokens:
+            readout["last_replaced"] = 0
+            readout["last_kept"] = len(positions)
+            return window_msgs
+
+        # 保留窗：从最新一条往回累计，直到超出保留预算；**至少保留 1 条**
+        keep_budget = payload_tokens * self._TOOL_RESULT_KEEP_SHARE
+        keep_from = positions[-1]
+        kept_tokens = 0.0
+        for i in reversed(positions):
+            row_tokens = meter.one(window_msgs[i])
+            if kept_tokens and kept_tokens + row_tokens > keep_budget:
+                break
+            kept_tokens += row_tokens
+            keep_from = i
+
         cleared = list(window_msgs)
-        for i in tool_positions:
-            if i < cutoff:
-                content = str(cleared[i].get("content", "") or "")
-                if len(content) >= 80:  # 极短结果（如状态码）保留原文
-                    cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
+        replaced = 0
+        for i in positions:
+            if i >= keep_from:
+                continue
+            content = str(cleared[i].get("content", "") or "")
+            if len(content) >= self._TOOL_RESULT_MIN_CHARS:
+                cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
+                replaced += 1
+
+        readout["triggered_calls"] += 1
+        readout["last_replaced"] = replaced
+        readout["last_kept"] = sum(1 for i in positions if i >= keep_from)
         return cleared
 
     # ══════════════════════════════════════════════════════════════
