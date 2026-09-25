@@ -862,3 +862,9 @@ tests/unit/tts/test_model_integrity_manifest.py
 # 清单历史登记的守卫本身：曾登记过、文件仍在仓、却不在清单里的条目即红
 #   （根因：删一行即可让整票判据从 CI 消失且无任何红；本批已复原 9 条）。
 tests/unit/ci/test_protected_subset_registration_history.py
+
+# AGENTS.md §0：NPC 分支合并/废弃后必须立即删除远端分支（Issue #204 遗留清理）。
+#   （根因：构建配置随分支走，归档分支的过期 .cnb.yml 会永久复现同一场失败。
+#    判定口径与复算入口在 scripts/ci/npc_branch_cleanup.py，台账见
+#    docs/06-bugfix/npc分支归档台账.md；守卫不连网。）
+tests/unit/ci/test_npc_branch_cleanup.py
