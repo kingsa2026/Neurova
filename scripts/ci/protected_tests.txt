@@ -829,7 +829,8 @@ tests/unit/api/test_knowledge_annotations_contract.py
 
 # T-11a 折叠分代（Issue #90 工单 §12.4）：新折叠产出新节点，旧摘要降一层保留。
 #   （根因：摘要在改前是一个字符串，每轮折叠原地覆盖——多节点/梯度在数据上
-#    不可能存在。截断可见（fold_layers.truncated），不静默丢层。）
+#    不可能存在。代际栈不设上限（工单 §12.1，负责人 2026-09-25 裁定撤销原上限 5），
+#    一档都不丢：栈深 == 代数，读数里无 truncated 字段（无上限即不可能截断）。）
 tests/unit/context/test_fold_generation_t11a.py
 # 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
 # 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
