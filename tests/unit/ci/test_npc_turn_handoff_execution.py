@@ -644,3 +644,76 @@ class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
             "\n允许放宽的只有续跑载体 —— 它不裁决任何契约；"
             "门禁一旦非阻塞，扫出问题也拦不住合并。"
         )
+
+
+class TestRelayCoversEveryPlatformAbortReason:
+    """接力判据必须覆盖平台的**每一种**中止原文，不只 maxTurns 那一种。
+
+    根因（构建 cnb-m74-1k3cm87o9 实测，2026-09-26）：
+    `$CNB_BUILD_FAILED_MSG` 的原文字符串在平台侧有**两种**取值来源 ——
+    `maxTurns` 用满与整轮会话撞 2h 墙钟。彼时判据只认前者：
+
+        case "$CNB_BUILD_FAILED_MSG" in
+          *"reached maxTurns limit"*) true;; *) false;; esac
+
+    而该构建的真实中止原文是
+    `Agent 已中止：构建环境异常终止，或流水线超过最大运行时长（2h）。` ——
+    `case` 落到 `*)` 分支为假，收尾接力整格被判 **skipped**：
+
+        ⏳ 轮数触顶接力：自动开启下一轮（判据取平台收尾事实）: 106ms (skipped)
+
+    后果不是"少接力一轮"这么轻：Agent 在 222 轮里改而未提交的成果
+    （工作树不跨轮保存）随容器一起丢，用户看到的是一条「流水线构建失败」，
+    Issue 上没有任何回音。判据把「配额触发的正常收官」写成了唯一形态，
+    于是「被墙钟掐断」这一形态永远静默落空。
+
+    这是教义第 1 条的典型形态：修在报错处（判据）**不是**consumer-only guard，
+    但判据只覆盖了同一根因的一个命中点 —— 第 5 条要求同时扫清全部命中点。
+
+    判据：`.cnb.yml` 里每一条收尾接力的 `if`，都必须同时覆盖
+    「轮数用满」与「整轮会话超时」两种平台原文片段。
+    """
+
+    #: 平台给出的两种中止原文片段（前者实测于 cnb-s4f-1k3c46us9，
+    #: 后者实测于 cnb-m74-1k3cm87o9）。
+    ABORT_MARKERS = (
+        "reached maxTurns limit",
+        "超过最大运行时长",
+    )
+
+    @staticmethod
+    def _relay_stages(cnb_doc):
+        """产出 (挂载点, 接力 Stage) —— 与同文件既有实现同源，不另造一份。"""
+        for mount, body in cnb_doc.items():
+            if not isinstance(body, dict):
+                continue
+            for event, event_body in body.items():
+                for i, job in enumerate(event_body if isinstance(event_body, list) else []):
+                    if not isinstance(job, dict):
+                        continue
+                    for stage in (job.get("endStages") or []):
+                        if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE:
+                            yield f"{mount}.{event}[{i}]", stage
+
+    def test_every_relay_condition_covers_both_abort_reasons(self, cnb_doc):
+        seen = 0
+        problems = []
+        for where, stage in self._relay_stages(cnb_doc):
+            seen += 1
+            conditions = stage.get("if") or []
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            blob = "\n".join(str(item) for item in conditions)
+            for marker in self.ABORT_MARKERS:
+                if marker not in blob:
+                    problems.append(
+                        f"{where}: 接力 `if` 未覆盖平台中止原文 {marker!r} —— "
+                        "该形态下的中止将静默落空（实测 cnb-m74-1k3cm87o9）"
+                    )
+        assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
+        assert not problems, (
+            "接力判据未覆盖平台的全部中止原文：\n  " + "\n  ".join(problems) +
+            "\n平台的 `$CNB_BUILD_FAILED_MSG` 至少有两种取值来源（轮数用满 / "
+            "整轮会话撞 2h 墙钟）。判据漏掉任一种，那一类中止就永远不接力，"
+            "Agent 改而未提交的成果随容器一起丢。"
+        )
