@@ -72,6 +72,12 @@ class SourceRef(NamedTuple):
     code: str
 
 
+@functools.lru_cache(maxsize=None)
+def _cachedCode(stamp: Tuple[str, int, int]) -> str:
+    """按内容戳缓存文件文本：同进程里 N 个跨文件判据只读盘一次。"""
+    return Path(stamp[0]).read_text(encoding="utf-8", errors="replace")
+
+
 def sourceRefsUnder(root: Path, suffix: str = ".py",
                     hints: Tuple[str, ...] = ()) -> List[SourceRef]:
     """`root` 子树下的源码引用清单：文件系统只读一遍，交给解析/遍历缓存。
@@ -81,19 +87,17 @@ def sourceRefsUnder(root: Path, suffix: str = ".py",
     谓词是 `X.<name>(...)`，连 `<name>` 三个字都没出现的文件不可能命中。
     实测 `neurova/` 1014 文件里含 `attest` 的只有 4 个——预筛把「解析量」从
     **代码总量**变成**命中面**，判据与文件数彻底脱钩（0.06s vs 6.5s）。
+
+    文本读取也走 `_cachedCode()`：预筛**必须先有文本**，而此前本函数对生产根下
+    每个文件（实测 1007 个）都裸读一遍，调用方每符号各来一次 —— 实测 20140 次
+    读盘 / 2.6s 里读盘占 0.67s（`cnb-2p6-1k347lfg1` 的同形账：判据与文件数挂钩）。
+    改后同一进程里同一文件只读一次，口径不变（仍是全量清单 + hints 过滤）。
     """
-    refs = [SourceRef(path, _cacheKey(path),
-                      path.read_text(encoding="utf-8", errors="replace"))
+    refs = [SourceRef(path, _cacheKey(path), _cachedCode(_cacheKey(path)))
             for path in filesUnder(root, suffix)]
     if not hints:
         return refs
     return [ref for ref in refs if any(hint in ref.code for hint in hints)]
-
-
-@functools.lru_cache(maxsize=None)
-def _cachedCode(stamp: Tuple[str, int, int]) -> str:
-    """按内容戳缓存文件文本：同进程里 N 个跨文件判据只读盘一次。"""
-    return Path(stamp[0]).read_text(encoding="utf-8", errors="replace")
 
 
 def sourceCode(path: Path) -> str:
@@ -218,6 +222,16 @@ def importsOf(scan: Iterable[Tuple[Path, ast.AST]], moduleName: str) -> List[Tup
     return hits
 
 
+@functools.lru_cache(maxsize=None)
 def relativeToRepo(path: Path) -> str:
-    """仓内相对路径（统一正斜杠，报错信息跨平台一致）。"""
+    """仓内相对路径（统一正斜杠，报错信息跨平台一致）。
+
+    按**路径**记忆化：这是纯函数，且调用方常在**逐节点**循环里取它（实测
+    `context_deadline_ledger._rawNodes` 一度逐节点调 25 万次 `Path.relative_to`
+    ≈ 2.2s，占该取数整体一半以上）。缓存键是路径本身，同一路径只算一次；
+    Path 不可变，故不存在陈旧读数面。
+
+    收口点放在**共享源**而不是各消费方：任何一个消费方漏配，它就会退回按节点
+    计算（消费方自己的镜像缓存层正是「consumer-only guard」的形态）。
+    """
     return path.relative_to(REPO_ROOT).as_posix()

@@ -18,8 +18,8 @@
               <a-list-item class="trace-list-item" :class="{ selected: selectedTrace?.id === item.id }" @click="selectTrace(item)">
                 <div class="trace-summary">
                   <div class="trace-top">
-                    <a-tag :color="statusColor(item.status)">{{ item.status }}</a-tag>
-                    <span class="trace-time">{{ formatTime(item.started_at || item.timestamp) }}</span>
+                    <a-tag :color="traceStatusTagColor(item.status)">{{ item.status }}</a-tag>
+                    <span class="trace-time">{{ formatTimestampText(item.started_at || item.timestamp) }}</span>
                   </div>
                   <span class="trace-id">{{ item.name || item.id }}</span>
                   <span class="trace-meta">{{ item.steps_count ?? 0 }} steps · {{ item.duration_ms ?? 0 }}ms</span>
@@ -40,11 +40,11 @@
               <a-descriptions :column="1" size="small" bordered>
                 <a-descriptions-item :label="t('trace.id')">{{ selectedTrace.id }}</a-descriptions-item>
                 <a-descriptions-item :label="t('common.status')">
-                  <a-tag :color="statusColor(selectedTrace.status)">{{ selectedTrace.status }}</a-tag>
+                  <a-tag :color="traceStatusTagColor(selectedTrace.status)">{{ selectedTrace.status }}</a-tag>
                 </a-descriptions-item>
                 <a-descriptions-item :label="t('trajectory.duration')">{{ selectedTrace.duration_ms ?? 0 }}ms</a-descriptions-item>
                 <a-descriptions-item :label="t('trajectory.steps')">{{ selectedTrace.steps_count ?? 0 }}</a-descriptions-item>
-                <a-descriptions-item :label="t('trajectory.started')">{{ formatTime(selectedTrace.started_at) }}</a-descriptions-item>
+                <a-descriptions-item :label="t('trajectory.started')">{{ formatTimestampText(selectedTrace.started_at) }}</a-descriptions-item>
               </a-descriptions>
 
               <h4 class="detail-section-title">{{ t('trajectory.events') }}</h4>
@@ -52,7 +52,7 @@
                 <a-timeline-item v-for="(event, i) in traceEvents" :key="i" :color="eventColor(event.type)">
                   <div class="event-item">
                     <span class="event-type">{{ event.type }}</span>
-                    <span class="event-time">{{ formatTime(event.timestamp) }}</span>
+                    <span class="event-time">{{ formatTimestampText(event.timestamp) }}</span>
                   </div>
                   <p v-if="event.message" class="event-message">{{ event.message }}</p>
                 </a-timeline-item>
@@ -79,6 +79,8 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
+import { traceStatusTagColor } from '@/utils/traceStatus'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -95,12 +97,7 @@ const traces = ref<any[]>([])
 const selectedTrace = ref<any>(null)
 const traceEvents = ref<any[]>([])
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
-const statusColor = (status: string) => {
-  const map: Record<string, string> = { completed: 'green', running: 'blue', failed: 'red', pending: 'default' }
-  return map[status] || 'default'
-}
 
 const eventColor = (type: string) => {
   const map: Record<string, string> = { tool_call: 'blue', llm_call: 'purple', error: 'red', input: 'cyan', output: 'green' }

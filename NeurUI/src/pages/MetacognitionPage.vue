@@ -35,7 +35,7 @@
                 :stroke-color="stats.avg_confidence >= 0.7 ? '#10b981' : '#f59e0b'"
                 :show-info="false"
               />
-              <span class="stat-ring-value">{{ formatPercent(stats.avg_confidence) }}</span>
+              <span class="stat-ring-value">{{ formatPercentText(stats.avg_confidence) }}</span>
             </div>
           </div>
         </GlassCard>
@@ -94,19 +94,19 @@
               <a-badge :status="loadBadge" :text="loadState.load_level || 'unknown'" />
             </a-descriptions-item>
             <a-descriptions-item :label="t('metacognition.loadScore')">
-              {{ formatPercent(loadState.load_score) }}
+              {{ formatPercentText(loadState.load_score) }}
             </a-descriptions-item>
             <a-descriptions-item :label="t('metacognition.activeTasks')">
               {{ loadState.active_tasks }}
             </a-descriptions-item>
             <a-descriptions-item :label="t('metacognition.errorRate')">
-              {{ formatPercent(loadState.error_rate) }}
+              {{ formatPercentText(loadState.error_rate) }}
             </a-descriptions-item>
             <a-descriptions-item :label="t('metacognition.responseTime')">
               {{ Math.round(loadState.response_time_ms || 0) }} ms
             </a-descriptions-item>
             <a-descriptions-item :label="t('metacognition.updatedAt')">
-              {{ formatTime(loadState.created_at) || '-' }}
+              {{ formatTimestampText(loadState.created_at) || '-' }}
             </a-descriptions-item>
           </a-descriptions>
         </div>
@@ -119,7 +119,7 @@
           <div v-for="dim in factors" :key="dim.name" class="dimension-row">
             <div class="dim-info">
               <span class="dim-name">{{ dim.name }}</span>
-              <span class="dim-value">{{ formatPercent(dim.value) }}</span>
+              <span class="dim-value">{{ formatPercentText(dim.value) }}</span>
             </div>
             <a-progress
               :percent="Math.round((dim.value || 0) * 100)"
@@ -165,7 +165,7 @@
             >
               <div class="entry-header">
                 <a-tag :color="typeColorMap[entry.type] || 'default'">{{ formatType(entry.type) }}</a-tag>
-                <span class="entry-date">{{ formatTime(entry.created_at) }}</span>
+                <span class="entry-date">{{ formatTimestampText(entry.created_at) }}</span>
               </div>
               <p class="entry-content">{{ entry.content }}</p>
               <div v-if="entry.context" class="entry-context">
@@ -261,7 +261,7 @@
         </a-form-item>
         <a-form-item :label="t('metacognition.confidence')">
           <a-slider v-model:value="createForm.confidence" :min="0" :max="1" :step="0.05" />
-          <span class="confidence-display">{{ formatPercent(createForm.confidence) }}</span>
+          <span class="confidence-display">{{ formatPercentText(createForm.confidence) }}</span>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -272,6 +272,8 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
+import { formatPercentText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -361,8 +363,6 @@ const toggleTrace = (entry: MetacognitionEntry) => {
   expandedTraceIds.value = next
 }
 
-const formatPercent = (val: number | undefined | null) =>
-  val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
 const formatType = (type: string) => {
   const map: Record<string, string> = {
@@ -380,7 +380,6 @@ const formatType = (type: string) => {
   return map[type] || type
 }
 
-const formatTime = (ts: string | null) => (ts ? new Date(ts).toLocaleString() : '')
 const formatDate = (d: string) => {
   if (!d) return ''
   const date = new Date(d)
@@ -400,14 +399,14 @@ const metrics = computed(() => {
   return [
     {
       label: t('metacognition.loadScore'),
-      displayValue: formatPercent(s.load_score),
+      displayValue: formatPercentText(s.load_score),
       percent: Math.round((s.load_score || 0) * 100),
       color: '#6366f1',
       status: (s.load_score || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
     },
     {
       label: t('metacognition.errorRate'),
-      displayValue: formatPercent(s.error_rate),
+      displayValue: formatPercentText(s.error_rate),
       percent: Math.round((s.error_rate || 0) * 100),
       color: '#f59e0b',
       status: (s.error_rate || 0) <= 0.3 ? t('metacognition.low') : t('metacognition.high'),

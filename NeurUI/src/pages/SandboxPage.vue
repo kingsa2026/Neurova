@@ -18,7 +18,7 @@
             </div>
           </template>
           <div class="sb-body">
-            <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTime(sb.created_at) }}</p>
+            <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTimestampText(sb.created_at) }}</p>
             <p class="sb-meta">{{ t('sandbox.steps') }}{{ sb.steps_count ?? 0 }}</p>
             <p v-if="sb.image" class="sb-meta">{{ t('sandbox.image') }}{{ sb.image }}</p>
             <p v-if="sb.language" class="sb-meta">{{ t('sandbox.language') }}{{ sb.language }}</p>
@@ -81,6 +81,7 @@ import { sandboxApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
 
@@ -109,8 +110,6 @@ const execMetaText = computed(() => {
   if (typeof meta.duration_ms === 'number') parts.push(`${meta.duration_ms}ms`)
   return parts.join(' · ')
 })
-
-const formatTime = (ts?: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const fetchSandboxes = async () => {
   loading.value = true

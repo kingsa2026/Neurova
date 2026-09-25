@@ -3384,7 +3384,10 @@ class ToolExecutor:
             try:
                 if sql is None:
                     return readDatasetSummary(conn, row_limit)
-                assertReadOnlySql(str(sql))
+                # 白名单判定要在这条**真连接**上干跑：`WITH … DELETE` 这类
+                # "语句头非写、最外层动作是写"的形态，只有带 schema 的连接
+                # 才分得出来（内存探针实测漏放）。
+                assertReadOnlySql(str(sql), conn)
                 return runReadOnlyQuery(conn, str(sql), row_limit)
             finally:
                 conn.close()

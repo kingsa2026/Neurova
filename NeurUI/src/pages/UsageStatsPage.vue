@@ -16,10 +16,10 @@
     <a-spin :spinning="loading">
       <!-- KPI cards（持久化口径：累计/单日峰值/最长会话时长/连续天数） -->
       <div class="nr-usage-kpis">
-        <GlassStatCard :label="t('usageStats.totalTokens')" :value="formatTokens(summary.total_tokens)" emoji="📊" spark-color="#a78bfa" :spark-data="sparkDaily" />
-        <GlassStatCard :label="t('usageStats.cacheHitTokens')" :value="formatTokens(summary.cache_read_tokens)" emoji="⚡" spark-color="#34d399" :spark-data="sparkDaily" />
+        <GlassStatCard :label="t('usageStats.totalTokens')" :value="formatTokenCount(summary.total_tokens)" emoji="📊" spark-color="#a78bfa" :spark-data="sparkDaily" />
+        <GlassStatCard :label="t('usageStats.cacheHitTokens')" :value="formatTokenCount(summary.cache_read_tokens)" emoji="⚡" spark-color="#34d399" :spark-data="sparkDaily" />
         <GlassStatCard :label="t('usageStats.cacheHitRate')" :value="`${((summary.cache_hit_rate || 0) * 100).toFixed(1)}%`" emoji="🎯" spark-color="#22d3ee" :spark-data="sparkDaily" />
-        <GlassStatCard :label="t('usageStats.peakTokens')" :value="formatTokens(summary.peak_daily_tokens)" emoji="⚡" spark-color="#60a5fa" :spark-data="sparkDaily" />
+        <GlassStatCard :label="t('usageStats.peakTokens')" :value="formatTokenCount(summary.peak_daily_tokens)" emoji="⚡" spark-color="#60a5fa" :spark-data="sparkDaily" />
         <GlassStatCard :label="t('usageStats.longestSession')" :value="formatDuration(summary.longest_session_seconds)" emoji="⏱️" spark-color="#34d399" :spark-data="sparkCalls" />
         <GlassStatCard :label="t('usageStats.currentStreak')" :value="`${summary.current_streak_days} ${t('usageStats.days')}`" emoji="🔥" spark-color="#fbbf24" :spark-data="sparkCalls" />
         <GlassStatCard :label="t('usageStats.longestStreak')" :value="`${summary.longest_streak_days} ${t('usageStats.days')}`" emoji="🏆" spark-color="#f472b6" :spark-data="sparkCalls" />
@@ -85,6 +85,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { formatTokenCount } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -153,11 +154,6 @@ const heatDays = computed<UsageOverviewHeatmapDay[]>(() => overview.value.heatma
 const sparkDaily = computed(() => heatDays.value.map((d) => d.tokens))
 const sparkCalls = computed(() => heatDays.value.map((d) => d.calls))
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
-  return String(n)
-}
 
 function formatDuration(seconds: number): string {
   if (seconds >= 86_400) {
