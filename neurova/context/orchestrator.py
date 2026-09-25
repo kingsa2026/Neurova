@@ -151,6 +151,9 @@ class ContextOrchestrator:
         self._turn_room_id: str = ""
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
         self._DELTA_RESUMMARY_MSGS = 4
+        # T-11e：折叠 rollup 后台 worker（懒建；`NEUROVA_CONTEXT_ROLLUP=0` 时不建）。
+        # 关键路径只付 1 次摘要调用，失败批次的补做在它那里，见 `foldRollupWorker`。
+        self._fold_rollup_worker = None
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
         # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
@@ -238,6 +241,11 @@ class ContextOrchestrator:
           「覆盖闭合」的反例数（已折叠原文的 hash 不在任何档 covers 内）。
           读数取自池的**唯一读面** `summaryLayers()`（含持久读回），编排器不
           在这里另算一份索引——两份索引必然漂移。
+        - `fold_rollup`：折叠 rollup 后台补做的读数（T-11e，工单 §12.6/§12.7 判据 6）。
+          关键路径每轮至多一次摘要 LLM 调用（`summary_call_budget=1`）；失败批次交
+          `ContextRollupWorker` 后台补做，`succeeded` 才推进覆盖账。
+          `dispatched` / `succeeded` / `failed` / `dropped`（队列有界，超出即丢并计数）
+          / `in_flight`；失败必须点名 `last_error`（后台不是"发后不管"，异常在此可见）。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
@@ -257,6 +265,14 @@ class ContextOrchestrator:
                 "levels": 0,
                 "unparsable": 0,
                 "uncovered": 0,
+                "last_error": None,
+            },
+            "fold_rollup": {
+                "dispatched": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "in_flight": 0,
+                "dropped": 0,
                 "last_error": None,
             },
             "microcompact": {
@@ -401,6 +417,16 @@ class ContextOrchestrator:
                 snapshot["fold_index"] = {**empty["fold_index"], **reader(self._foldedHashes())}
             except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
                 snapshot["fold_index"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        # T-11e：rollup 后台补做的读数取自 worker 本体（它才是派发/成败的记账处），
+        # 编排器不另记一份——两份账必然漂移（教义第 6 条）。开关关闭/尚未懒建时
+        # 保留空形状（读数不为幻觉）。
+        worker = getattr(self, "_fold_rollup_worker", None)
+        reader = getattr(worker, "stats", None)
+        if callable(reader):
+            try:
+                snapshot["fold_rollup"] = {**empty["fold_rollup"], **reader()}
+            except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+                snapshot["fold_rollup"]["last_error"] = f"{type(exc).__name__}: {exc}"
         return snapshot
 
     def _foldedHashes(self) -> set:
@@ -615,6 +641,52 @@ class ContextOrchestrator:
         if REF_PREFIX in content:
             return msg
         return {**msg, "content": f"{content}\n({ref})"}
+
+    def foldRollupWorker(self):
+        """折叠 rollup 后台 worker（懒建；开关关闭时返回 None）。
+
+        T-11e：关键路径上的折叠只付**一次**摘要 LLM 调用（判据 6），失败批次的
+        重试与补做落到这里。懒建而不是在 `__init__` 里建：装配期没有事件循环，
+        `asyncio.ensure_future` 会当场失败（那正是"配置都对却秒挂"的形态）。
+        开关关闭时不建 —— 回退等式（§12.6）要求关掉即回到本票之前的形状。
+        """
+        from neurova.context.fold_rollup import ContextRollupWorker, rollupEnabled
+
+        if not rollupEnabled():
+            return None
+        worker = getattr(self, "_fold_rollup_worker", None)
+        if worker is None:
+            worker = ContextRollupWorker(self._commitRollupSummary)
+            self._fold_rollup_worker = worker
+        return worker
+
+    def _commitRollupSummary(
+        self,
+        sessionKey: str,
+        summary: str,
+        covers: List[str],
+        turnIds: List[str],
+        lastCount: int,
+    ) -> None:
+        """后台补做**成功**后的写入侧（唯一的提交点）。
+
+        只有摘要成功才走到这里，因此"失败不推进覆盖账"由调用点位置保证 ——
+        worker 在失败分支压根不调它（T-05 同族的假账纪律）。
+
+        提交内容与热路径逐字同源：`covered` 集合、`last_count`、代际推进（含写进池
+        并带 covers）。`lastCount` 取派发那一刻的窗口条数 —— 后台跑完时窗口早已
+        前移，用当前条数会把期间新增的消息一并谎报为已覆盖。
+        """
+        cache = self._window_compaction_cache.get(sessionKey)
+        if cache is None:
+            # 会话槽已被近期使用淘汰：不重建槽（重建出来的是一份没有历史的
+            # 空账，会把"覆盖了哪些"记错），如实丢弃并让它留痕在 worker 读数里。
+            raise RuntimeError(f"SessionSlotEvicted: 折叠缓存槽 {sessionKey} 已淘汰")
+
+        cache["last_count"] = max(int(cache.get("last_count") or 0), int(lastCount))
+        for fingerprint in covers:
+            cache["covered"].add(fingerprint)
+        self._advanceFoldGeneration(cache, summary, covers=covers, turnIds=turnIds)
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -1976,6 +2048,13 @@ class ContextOrchestrator:
             budget_tokens,
             summarize=summarize,
             previous_summary=cache.get("summary", ""),
+            # T-11e（工单 §12.7 判据 6）：关键路径**只付一次**摘要 LLM 调用。
+            # 压缩器的"失败丢最旧一条重试"与"递进扩折叠重摘要"都是它自己的收敛
+            # 保证（对直接调用者有意义），不该由热路径代付 —— 实测把它们留在热
+            # 路径上时，恒失败的摘要器会让单轮发起 4 次调用。补做落点在下方
+            # `foldRollupWorker()`。
+            summary_max_retries=0,
+            summary_call_budget=1,
         )
         if compaction is None:
             self._last_folded_hashes = set()
@@ -2034,6 +2113,32 @@ class ContextOrchestrator:
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
+        elif compaction.compacted_count > 0 and summarize is not None:
+            # T-11e：本轮摘要失败（或没轮到它）。折叠发生了，但覆盖账**不推进**
+            # （T-05 同族：不给折叠缓存记假账），批次交后台补做。
+            # 视图这一轮走下方既有静态桩语义 —— 不阻塞当轮回答，也不谎报已覆盖。
+            # covers 与派发时刻的窗口条数一并发给 worker：后台跑完时窗口早已前移，
+            # 用那时的条数会把期间新增的消息一并谎报为已覆盖。
+            worker = self.foldRollupWorker()
+            if worker is not None:
+                kept_set = {m["content"] for m in compaction.window}
+                coversNow: List[str] = []
+                turnsNow: List[str] = []
+                droppedMsgs: List[dict] = []
+                for m, turnId in assign_turn_ids(msgs):
+                    if m.get("content", "") in kept_set:
+                        continue
+                    coversNow.append(self._windowChunkHash(m))
+                    turnsNow.append(turnId)
+                    droppedMsgs.append(m)
+                worker.dispatch(
+                    sessionKey=cache_key or self._resolve_window_cache_key(),
+                    summarize=summarize,
+                    droppedMsgs=droppedMsgs,
+                    covers=coversNow,
+                    turnIds=turnsNow,
+                    lastCount=len(msgs),
+                )
 
         window = compaction.window
         if compaction.compacted_count > 0 and not compaction.summary:

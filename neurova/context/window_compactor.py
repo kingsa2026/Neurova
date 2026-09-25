@@ -240,6 +240,8 @@ async def compact_window(
     target_ratio: float = 0.5,
     summary_prefix: str = "[早期对话摘要] ",
     meter: typing.Optional["WindowTokenMeter"] = None,
+    summary_max_retries: typing.Optional[int] = None,
+    summary_call_budget: typing.Optional[int] = None,
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
@@ -249,6 +251,19 @@ async def compact_window(
     一次激进摘要丢信息（最小摘要原则）。
 
     summarize: async (dropped_msgs, previous_summary) -> Optional[str]
+
+    summary_max_retries: 摘要失败后"丢最旧一条重试"的上限；`None` 取本模块默认
+    （`_SUMMARY_MAX_RETRIES`）。
+    summary_call_budget: 本次调用**允许发起的摘要 LLM 调用总数**上限；`None`
+    为不限。递进折叠（下面的 ratio 循环）每一轮都会对更大的折叠区重新摘要，
+    于是"重试上限"单独并不足以给出成本上界。
+
+    工单 §12.7 判据 6 要求"每轮新增摘要 LLM 调用 ≤ 1 次（rollup 走后台）"，
+    **放进关键路径的调用方应同时给 `summary_max_retries=0` 与
+    `summary_call_budget=1`**：重试与递进重摘要都是压缩器级的收敛保证（对直接
+    调用者有意义），不该由热路径代付 —— 实测把它们留在热路径上时，恒失败的
+    摘要器会让单轮发起 4 次调用。补做的落点见 T-11e 的后台 worker
+    （`context/fold_rollup.py`）。
     """
     # 归一化**只裁协议外字段**：工具寻址字段（tool_call_id / name / tool_calls）
     # 必须随消息走——它们被裁掉后，`_tool_placeholder` 的硬地址指针与
@@ -264,6 +279,7 @@ async def compact_window(
     summary = None
     ratio = target_ratio
     best: typing.Optional[WindowCompaction] = None
+    calls_made = 0
 
     while True:
         dropped, kept = split_window_by_budget(
@@ -282,13 +298,23 @@ async def compact_window(
                 )
             break
 
+        # 成本上界（判据 6）：预算耗尽即不再重摘要，也不再扩折叠 —— 扩折叠却
+        # 不带对应摘要，会让"折叠区已被摘要覆盖"这句话失去依据；此时如实返回
+        # 上一轮的产物（编排层按既有语义注入静态桩，覆盖账不推进）。
+        if summary_call_budget is not None and calls_made >= max(0, int(summary_call_budget)):
+            break
+
         round_summary = None
         skipped_oldest = 0
         if summarize is not None:
+            calls_made += 1
             # P0-2 收敛保证：摘要失败 → 丢最旧一条缩小输入重试（上限 3 次），
             # 而非直接放弃摘要。被丢弃的前缀在摘要行显式标注，不静默消失。
             dropped_for_summary = list(dropped)
-            for attempt in range(_SUMMARY_MAX_RETRIES + 1):
+            retry_budget = (
+                _SUMMARY_MAX_RETRIES if summary_max_retries is None else max(0, int(summary_max_retries))
+            )
+            for attempt in range(retry_budget + 1):
                 try:
                     round_summary = await summarize(dropped_for_summary, previous_summary)
                 except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
@@ -296,7 +322,7 @@ async def compact_window(
                 if isinstance(round_summary, str) and round_summary.strip():
                     skipped_oldest = attempt
                     break
-                if attempt >= _SUMMARY_MAX_RETRIES or len(dropped_for_summary) <= 1:
+                if attempt >= retry_budget or len(dropped_for_summary) <= 1:
                     round_summary = None
                     break
                 dropped_for_summary = dropped_for_summary[1:]
