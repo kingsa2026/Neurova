@@ -6,6 +6,8 @@ tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
 # 受保护子集里的墙钟上界断言逐条有结论（CI 偶发红的根因：结构契约被编码成墙钟阈值）
 tests/unit/test_ci_wallclock_assertion_ledger.py
+# 受保护子集里的进程内计时口径逐条有结论（同根的另一半：判分时钟被换回墙钟）
+tests/unit/ci/test_clock_caliber_ledger.py
 tests/unit/test_ci_thin_env_guards.py
 # Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
 tests/unit/api/test_coordination_router_reachability.py
@@ -747,6 +749,14 @@ tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
 
+# Issue #197 §7 台账 N4（预算账本边界）：
+#   金额域（成本侧 float，价格表与 cost_store 的 REAL 列）与账本域（Decimal 算术）
+#   的交界上两处都缺归一 —— float 进 Decimal 账本即 TypeError，被 fail-open
+#   兜住后记账整体静默失效（用量恒 0.00、超支闸恒 False）；
+#   告警阈值又写成 0~1 制，与用量读数（0~100 制）不同尺度，1% 用量即全档触发。
+#   RECOVERED 档同函数内被当成越线档，超支时反报"已恢复到 125000%"。
+#   三处判据同文件，全部经真实记账入口（record_llm_cost）驱动。
+tests/unit/models/test_cost_budget_ledger_boundary.py
 # 能力缺口自主闭环批（Issue #197）四票的判据落点（全部逐文件单跑确定全绿）：
 #   T-01 诊断回环：工具失败正文必须携带 stderr/exit_code，禁止只剩兜底串；
 #   T-02 句柄可见：附件抽取失败必须携带 file_id/status 且留痕（截图类断言防路径泄露）；
