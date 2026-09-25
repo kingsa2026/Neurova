@@ -66,7 +66,7 @@
 | `NeurUI/src/api/modules/stats.ts` | `/stats` | 是 | 6 |
 | `NeurUI/src/api/modules/studio.ts` | `/studio` | **否** | 6 |
 | `NeurUI/src/api/modules/synonyms.ts` | `/synonyms` | 是 | 1 |
-| `NeurUI/src/api/modules/system-logs.ts` | `/logs` | 是 | 1 |
+| `NeurUI/src/api/modules/system-logs.ts` | — | 是 | 1 |
 | `NeurUI/src/api/modules/tasks.ts` | `/tasks` | 是 | 0 |
 | `NeurUI/src/api/modules/teams.ts` | `/teams` | 是 | 2 |
 | `NeurUI/src/api/modules/text-evolution.ts` | `/evolution` | **否** | 2 |
@@ -184,43 +184,16 @@
 
 **未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/logs`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
 
-下列 **28** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
+下列 **1** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，**逐条裁决见 `tests/unit/frontContractBaseline.txt`**（已修 / 已退役 / 待接线 三态，可机器判定办没办）：
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
 |------|------|------|------|
-| console | POST | `/api/v1/console/debug` | 路径未注册 |
-| console | POST | `/api/v1/console/push` | 路径未注册 |
-| files | GET | `/api/v1/files/*/content` | 路径未注册 |
-| health | GET | `/api/v1/health/metrics` | 路径未注册 |
-| health | GET | `/api/v1/health/status` | 路径未注册 |
-| knowledge | POST | `/api/v1/knowledge/annotations` | 方法不匹配 |
-| knowledge | DELETE | `/api/v1/knowledge/annotations/*` | 路径未注册 |
-| knowledge | PUT | `/api/v1/knowledge/annotations/*` | 路径未注册 |
-| knowledge | GET | `/api/v1/knowledge/annotations/export` | 路径未注册 |
-| memory | PUT | `/api/v1/memory/*` | 方法不匹配 |
-| memory | POST | `/api/v1/memory/search` | 方法不匹配 |
-| models | POST | `/api/v1/models` | 方法不匹配 |
-| models | GET | `/api/v1/models/*` | 方法不匹配 |
-| models | POST | `/api/v1/models/active` | 方法不匹配 |
-| models | GET | `/api/v1/models/fetch` | 方法不匹配 |
-| neurflow | POST | `/api/v1/neurflow/comfyui/import` | 路径未注册 |
-| plugins | POST | `/api/v1/plugins` | 方法不匹配 |
-| plugins | DELETE | `/api/v1/plugins/*` | 方法不匹配 |
-| plugins | PUT | `/api/v1/plugins/*` | 方法不匹配 |
-| plugins | POST | `/api/v1/plugins/*/uninstall` | 方法不匹配 |
-| plugins | GET | `/api/v1/plugins/discover` | 方法不匹配 |
 | sandbox | POST | `/api/v1/sandbox/*/execute` | 路径未注册 |
-| settings | POST | `/api/v1/settings/clear-cache` | 方法不匹配 |
-| shared-config | POST | `/api/v1/shared-config/llm-providers/*/test` | 路径未注册 |
-| shared-config | POST | `/api/v1/shared-config/mcp-servers/*/test` | 路径未注册 |
-| system-logs | POST | `/api/v1/logs/clear` | 路径未注册 |
-| tool-layers | POST | `/api/v1/tool-layers/tools/*/execute` | 路径未注册 |
-| tool-layers | POST | `/api/v1/tool-layers/tools/install` | 路径未注册 |
 
 ## 五、后端已注册 ↔ 前端消费方 差集
 

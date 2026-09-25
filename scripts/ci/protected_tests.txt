@@ -723,3 +723,15 @@ tests/unit/evolution/test_synth_tool_name_carries_identity.py
 tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
+
+# Issue #68 收口：前端调用 ↔ 后端注册差异的裁决与补齐。
+#   （根因：清单第四节把 28 处差异写成「由人去核」——只登记、不裁决，
+#    于是同一张表可被反复登记、永不收敛。有活跃消费者的一类实测全是
+#    404/405：PUT /memory/{id}、GET /files/{id}/content、
+#    POST /settings/clear-cache 等。裁决台账 tests/unit/frontContractBaseline.txt
+#    与守卫同源咬合，三态可机器判定办没办。）
+tests/unit/api/test_front_contract_endpoints.py
+# Issue #68 收口：精准回复命中表（/annotations*）由 console 域迁入知识域。
+#   （唯一消费者是 KnowledgePage 的 AnnotationDrawer，前端按
+#    /api/v1/knowledge/annotations* 请求；此前挂在 /v1/console 下，实测恒 404。）
+tests/unit/api/test_knowledge_annotations_contract.py
