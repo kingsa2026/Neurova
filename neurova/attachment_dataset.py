@@ -54,12 +54,83 @@ MAX_RESULT_BYTES = 200_000
 _SQL_HEAD_ALLOWED = ("SELECT", "WITH", "PRAGMA")
 _SQL_COMMENT_PATTERN = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)
 _SQL_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"", re.S)
-_SQL_WRITE_KEYWORDS = re.compile(
-    r"\b(attach|detach|insert|update|delete|drop|alter|create|replace|vacuum|reindex"
-    r"|begin|commit|rollback|savepoint|release)\b",
-    re.IGNORECASE,
-)
-_SQL_PRAGMA_WRITE = re.compile(r"\bpragma\b\s+[a-z_][a-z0-9_]*\s*[^;\s]=|=", re.IGNORECASE)
+
+#: 只读 PRAGMA 的**单源**名单，按"取不取对象名实参"分两类。
+#: 名单之外一律拒（fail-closed）——`journal_mode` / `writable_schema` 这类
+#: 既可读又可设置的 PRAGMA 不在名单内，故 `PRAGMA journal_mode(WAL)` 与
+#: `PRAGMA writable_schema=ON` 两种写法都被挡下。
+READ_ONLY_PRAGMA_OBJECT_ARGUMENT = frozenset({
+    "table_info",
+    "table_xinfo",
+    "index_info",
+    "index_xinfo",
+    "index_list",
+    "foreign_key_list",
+})
+READ_ONLY_PRAGMA_NO_ARGUMENT = frozenset({
+    "database_list",
+    "table_list",
+    "page_count",
+    "page_size",
+    "schema_version",
+    "user_version",
+    "freelist_count",
+})
+
+#: SQLite 授权回调里的**写型动作**（唯一判定依据：交给 SQLite 自己的解析器分类）。
+#: 为什么不用关键字扫描：文本里出现 `delete` / `replace` / `=` 与"这条语句会写"
+#: 是两回事 —— `SELECT ... WHERE id = 1` 与 `SELECT replace(...)` 都是纯读，
+#: 却被关键字扫描误杀；而 `PRAGMA journal_mode(WAL)` 会写、却不带等号。
+#: 授权动作是 SQLite 对**语句结构**的分类，不随写法漂移。
+_SQL_WRITE_ACTIONS = frozenset({
+    sqlite3.SQLITE_INSERT,
+    sqlite3.SQLITE_UPDATE,
+    sqlite3.SQLITE_DELETE,
+    sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_DROP_TABLE,
+    sqlite3.SQLITE_DROP_INDEX,
+    sqlite3.SQLITE_DROP_VIEW,
+    sqlite3.SQLITE_DROP_TRIGGER,
+    sqlite3.SQLITE_CREATE_TABLE,
+    sqlite3.SQLITE_CREATE_INDEX,
+    sqlite3.SQLITE_CREATE_VIEW,
+    sqlite3.SQLITE_CREATE_TRIGGER,
+    sqlite3.SQLITE_ATTACH,
+    sqlite3.SQLITE_DETACH,
+    sqlite3.SQLITE_TRANSACTION,
+    sqlite3.SQLITE_REINDEX,
+    sqlite3.SQLITE_ANALYZE,
+})
+
+#: 只读面明确拒绝的函数（文件 I/O 与扩展加载）。即使当前连接从未调用
+#: `enable_load_extension`，也显式拒 —— 判据不许依赖"上游恰好没开门"。
+_SQL_DENIED_FUNCTIONS = frozenset({
+    "load_extension",
+    "readfile",
+    "writefile",
+    "edit",
+    "fts3_tokenizer",
+})
+
+_WRITE_ACTION_LABELS = {
+    sqlite3.SQLITE_INSERT: "INSERT",
+    sqlite3.SQLITE_UPDATE: "UPDATE",
+    sqlite3.SQLITE_DELETE: "DELETE",
+    sqlite3.SQLITE_ALTER_TABLE: "ALTER TABLE",
+    sqlite3.SQLITE_DROP_TABLE: "DROP TABLE",
+    sqlite3.SQLITE_DROP_INDEX: "DROP INDEX",
+    sqlite3.SQLITE_DROP_VIEW: "DROP VIEW",
+    sqlite3.SQLITE_DROP_TRIGGER: "DROP TRIGGER",
+    sqlite3.SQLITE_CREATE_TABLE: "CREATE TABLE",
+    sqlite3.SQLITE_CREATE_INDEX: "CREATE INDEX",
+    sqlite3.SQLITE_CREATE_VIEW: "CREATE VIEW",
+    sqlite3.SQLITE_CREATE_TRIGGER: "CREATE TRIGGER",
+    sqlite3.SQLITE_ATTACH: "ATTACH",
+    sqlite3.SQLITE_DETACH: "DETACH",
+    sqlite3.SQLITE_TRANSACTION: "TRANSACTION",
+    sqlite3.SQLITE_REINDEX: "REINDEX",
+    sqlite3.SQLITE_ANALYZE: "ANALYZE",
+}
 
 
 def resolveQueryCacheRoot() -> Path:
@@ -108,8 +179,86 @@ def _stripSqlComments(text: str) -> str:
     return _SQL_LITERAL_PATTERN.sub(" '' ", stripped)
 
 
-def assertReadOnlySql(sql: str) -> str:
+def _readOnlyAuthorizer(violations: List[str]):
+    """在连接上装**唯一**的只读授权判定（写型动作 / 非许可 PRAGMA / 危险函数）。
+
+    为什么是授权回调而不是文本扫描：语句会做什么是**解析结果**，不是文本特征。
+    关键字扫描把 `SELECT ... WHERE id = 1`（裸等号）读成写型 PRAGMA、把标量
+    函数 `replace(...)` 读成 `REPLACE INTO`，同时又漏掉 `PRAGMA journal_mode(WAL)`
+    这种不带等号的写 —— 同一份判据两头都错。授权动作由 SQLite 按**语句结构**
+    给出，且 `WITH … DELETE` 这类"语句头是 WITH、最外层动作是写"的形态也分得开。
+
+    `violations` 由调用方持有，命中时被点名（判据是诚实形态暴露，不静默拦截）。
+    """
+
+    def _authorizer(action, argument1, argument2, _dbname, _source):
+        if action == sqlite3.SQLITE_PRAGMA:
+            name = str(argument1 or "").lower()
+            if _pragmaFormAllowed(name, argument2):
+                return sqlite3.SQLITE_OK
+            violations.append(f"写型或未许可的 PRAGMA {name}")
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_FUNCTION:
+            name = str(argument2 or "").lower()
+            if name in _SQL_DENIED_FUNCTIONS:
+                violations.append(f"被禁函数 {name}")
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+        if action in _SQL_WRITE_ACTIONS:
+            violations.append(_WRITE_ACTION_LABELS.get(action, f"动作 {action}"))
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    return _authorizer
+
+
+def _dryRunClassify(conn: sqlite3.Connection, sql: str) -> Optional[str]:
+    """在**既有 schema 的连接**上干跑一次分类，返回违规点名（纯读返回 None）。
+
+    按 `EXPLAIN` 干跑而非直接执行：分类要的是解析与授权结果，不是数据。
+    必须用真连接：无 schema 的探针解析不了对象名，`WITH … DELETE` 这类
+    最外层动作就无从判定（实测漏放）。
+
+    准备阶段失败但**不是**授权拦下的（表/列不存在、语法错）一律放行，由真实
+    执行给出诚实报错 —— 不把"读不出来的表"改写成"白名单拒绝"（两回事必须
+    分得开）。这不构成放行面：准备失败的语句压根无法执行，写不可能落地；
+    反过来，能执行的写型语句在准备阶段必然被授权拦下（判据咬合）。
+    """
+    violations: List[str] = []
+
+    previous = conn.set_authorizer(None)
+    try:
+        conn.set_authorizer(_readOnlyAuthorizer(violations))
+        try:
+            conn.execute("EXPLAIN " + sql)
+        except sqlite3.ProgrammingError as err:
+            return f"只允许单条语句：{err}"
+        except sqlite3.DatabaseError as err:
+            if violations:
+                return "、".join(dict.fromkeys(violations))
+            if "not authorized" in str(err):
+                return "未许可的语句动作"
+            return None
+    finally:
+        conn.set_authorizer(previous)
+    return None
+
+
+def _pragmaFormAllowed(name: str, argument: Optional[str]) -> bool:
+    """该 PRAGMA 写法是否属于许可的只读形态（名单单源，名单外一律拒）。"""
+    if name in READ_ONLY_PRAGMA_OBJECT_ARGUMENT:
+        return True
+    if argument is None:
+        return name in READ_ONLY_PRAGMA_NO_ARGUMENT
+    return False
+
+
+def assertReadOnlySql(sql: str, conn: sqlite3.Connection) -> str:
     """SQL 白名单（第三件）：不合法即抛 `ValueError`，不降级、不放行。
+
+    `conn` 是要干跑其上的只读连接：结构判定需要 schema 才分得出
+    `WITH … DELETE` 这类"语句头非写、最外层动作是写"的形态（内存探针实测
+    漏放）。形参不给默认值——退化成无 schema 的探针等于开一条放行面。
 
     判据是**诚实形态**暴露 —— 拒的时候点名原因，不做"静默改成只读"这类改写
     （改写会让模型以为自己的写语句生效了）。
@@ -131,11 +280,9 @@ def assertReadOnlySql(sql: str) -> str:
             f"只读白名单只允许 SELECT / WITH … SELECT / 只读 PRAGMA，收到 {head}"
         )
 
-    hit = _SQL_WRITE_KEYWORDS.search(code)
-    if hit:
-        raise ValueError(f"只读白名单拒绝写型语句：命中 {hit.group(1).upper()}")
-    if _SQL_PRAGMA_WRITE.search(code):
-        raise ValueError("只读白名单拒绝写型 PRAGMA（只允许不带赋值的读取形态）")
+    violation = _dryRunClassify(conn, code)
+    if violation:
+        raise ValueError(f"只读白名单拒绝非读取语句：{violation}")
     return sql
 
 
