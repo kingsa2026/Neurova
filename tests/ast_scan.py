@@ -222,6 +222,16 @@ def importsOf(scan: Iterable[Tuple[Path, ast.AST]], moduleName: str) -> List[Tup
     return hits
 
 
+@functools.lru_cache(maxsize=None)
 def relativeToRepo(path: Path) -> str:
-    """仓内相对路径（统一正斜杠，报错信息跨平台一致）。"""
+    """仓内相对路径（统一正斜杠，报错信息跨平台一致）。
+
+    按**路径**记忆化：这是纯函数，且调用方常在**逐节点**循环里取它（实测
+    `context_deadline_ledger._rawNodes` 一度逐节点调 25 万次 `Path.relative_to`
+    ≈ 2.2s，占该取数整体一半以上）。缓存键是路径本身，同一路径只算一次；
+    Path 不可变，故不存在陈旧读数面。
+
+    收口点放在**共享源**而不是各消费方：任何一个消费方漏配，它就会退回按节点
+    计算（消费方自己的镜像缓存层正是「consumer-only guard」的形态）。
+    """
     return path.relative_to(REPO_ROOT).as_posix()

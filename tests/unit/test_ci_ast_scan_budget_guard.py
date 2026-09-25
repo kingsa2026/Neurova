@@ -113,6 +113,102 @@ class TestNoUnprefilteredRepoWideScan:
         assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
 
 
+class TestTextCacheIsOnTheHotPath:
+    """跨判据复用的文本缓存必须真被热路径读到（写了不读 = 断点）。
+
+    根因（同根新命中点）：`sourceRefsUnder` 一度**绕开**本模块自己的
+    `_cachedCode`，逐次 `path.read_text()`。于是「同进程里 N 个跨文件判据
+    只读盘一次」是纸面承诺 —— 实测 20 个登记符号读盘 **20140 次**
+    （生产树里只有 1007 个文件）。读写同源一处定义，却只有写侧（缓存）
+    没有读侧（消费），正是协作红线点名的断点。
+    """
+
+    def test_sourceRefsUnder_reuses_the_text_cache(self, tmp_path):
+        for i in range(3):
+            (tmp_path / f"m{i}.py").write_text(f"V{i} = {i}\n", encoding="utf-8")
+        ast_scan._cachedCode.cache_clear()
+        ast_scan.sourceRefsUnder(tmp_path, hints=("V0",))
+        info = ast_scan._cachedCode.cache_info()
+        assert info.misses == 3, (
+            "`sourceRefsUnder` 没走 `_cachedCode`：它把每份源码都重新读盘一次，"
+            f"文本缓存形同不存在（实测 misses={info.misses}，应为文件数 3）。\n"
+            "修法：`sourceRefsUnder` 用 `_cachedCode(_cacheKey(path))` 取文本，"
+            "与 `sourceCode` 同源。"
+        )
+
+    def test_repeated_hint_scans_read_each_file_once(self, tmp_path):
+        for i in range(4):
+            (tmp_path / f"m{i}.py").write_text(f"TARGET_{i} = {i}\n", encoding="utf-8")
+        ast_scan._cachedCode.cache_clear()
+        for hint in ("TARGET_0", "TARGET_1", "TARGET_2", "TARGET_3"):
+            ast_scan.sourceRefsUnder(tmp_path, hints=(hint,))
+        info = ast_scan._cachedCode.cache_info()
+        assert info.misses == 4, (
+            "同一棵树被 4 个判据各读一遍：读盘次数随**判据数**增长而不是随"
+            f"**文件数**收敛（实测 misses={info.misses}，应为 4）。"
+        )
+
+
+class TestRelativeToRepoIsMemoized:
+    """`relativeToRepo` 必须按路径记忆化：调用次数不得与**节点数**挂钩。
+
+    根因：调用方（如 `context_deadline_ledger._rawNodes`）在**逐节点**的循环里
+    调它，`Path.relative_to` 每次都要重新解析路径（实测 249547 次调用 ≈ 2.2s，
+    占该取数整体耗时的一半）。
+
+    收口点必须在**共享源**：若只在某个消费方加一层镜像缓存，别的消费方
+    （`tests/unit/llm/test_capability_cache_single_source.py` 等也逐节点取它）
+    照样按节点付账 —— 那是 consumer-only guard 的形态。
+    """
+
+    def test_same_path_is_computed_once(self):
+        target = ast_scan.REPO_ROOT / "tests" / "ast_scan.py"
+        ast_scan.relativeToRepo.cache_clear()
+        calls = {"n": 0}
+        real = Path.relative_to
+
+        def counting(self, *args, **kwargs):
+            calls["n"] += 1
+            return real(self, *args, **kwargs)
+
+        Path.relative_to = counting
+        try:
+            for _ in range(50):
+                ast_scan.relativeToRepo(target)
+        finally:
+            Path.relative_to = real
+        assert calls["n"] == 1, (
+            f"同一路径调 50 次却算了 {calls['n']} 次相对路径——未记忆化，"
+            "调用方一旦在逐节点循环里用它，耗时即与节点数成正比。"
+        )
+
+    def test_call_count_does_not_track_node_count(self):
+        """反向控制：**节点数**涨时，`relativeToRepo` 调用次数不得涨。"""
+        path = ast_scan.REPO_ROOT / "neurova" / "context" / "orchestrator.py"
+        nodes = list(ast_scan._cachedNodes(ast_scan.SourceRef(
+            path, ast_scan._cacheKey(path), ast_scan.sourceCode(path))))
+        assert len(nodes) > 1000, f"夹具节点数太少（{len(nodes)}），判不出随节点增长"
+
+        ast_scan.relativeToRepo.cache_clear()
+        seen = []
+        real = Path.relative_to
+
+        def counting(self, *args, **kwargs):
+            seen.append(self)
+            return real(self, *args, **kwargs)
+
+        Path.relative_to = counting
+        try:
+            for _ in nodes:
+                ast_scan.relativeToRepo(path)
+        finally:
+            Path.relative_to = real
+        assert len(seen) == 1, (
+            f"{len(nodes)} 个节点调了 {len(seen)} 次相对路径——调用次数随节点数增长，"
+            "正是墙钟超时的来源（缓存清空后，同一路径只该真实计算一次）。"
+        )
+
+
 class TestSharedParseBudgetIsReal:
     """共享预算入口必须真能用，否则各守卫会退回各写一套（门禁空转）。"""
 
