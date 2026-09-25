@@ -24,7 +24,7 @@
             <a-tag :color="p.status === 'active' ? 'green' : 'default'">{{ p.status || 'active' }}</a-tag>
             <span class="meta-text">{{ t('project.teams') }}: {{ p.teams_count ?? 0 }}</span>
             <span class="meta-text">{{ t('project.tasks') }}: {{ p.tasks_count ?? 0 }}</span>
-            <span v-if="p.updated_at" class="meta-text">{{ formatTime(p.updated_at) }}</span>
+            <span v-if="p.updated_at" class="meta-text">{{ formatEpochSecondText(p.updated_at) }}</span>
           </div>
         </GlassCard>
       </div>
@@ -51,6 +51,7 @@ import { useRouter } from 'vue-router'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { listProjects, createProject, type ProjectInfo } from '@/api/modules/projects'
+import { formatEpochSecondText } from '@/utils/displayText'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -98,10 +99,6 @@ async function handleCreate() {
   }
 }
 
-function formatTime(ts?: number): string {
-  if (!ts) return ''
-  return new Date(ts * 1000).toLocaleString()
-}
 
 onMounted(fetchProjects)
 </script>

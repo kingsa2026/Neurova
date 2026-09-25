@@ -78,7 +78,7 @@
       <a-timeline>
         <a-timeline-item v-for="ver in versions" :key="ver.version" :color="ver.version === currentVersion ? 'green' : 'gray'">
           <div class="version-item">
-            <span>v{{ ver.version }} - {{ formatTime(ver.created_at) }}</span>
+            <span>v{{ ver.version }} - {{ formatTimestampText(ver.created_at) }}</span>
             <span class="version-size">{{ formatBytes(ver.size ?? 0) }}</span>
           </div>
         </a-timeline-item>
@@ -96,6 +96,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
 import type { UploadFile } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
 
@@ -134,7 +135,6 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const getFileIcon = (name: string) => {
   if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(name)) return '🖼️'

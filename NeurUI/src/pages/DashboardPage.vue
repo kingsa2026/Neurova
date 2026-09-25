@@ -182,6 +182,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import { useDashboardStats, type DashboardStatCard } from '@/composables/useDashboardStats'
 import { useFeedbackStats } from '@/composables/useFeedbackStats'
+import { formatTokenCount } from '@/utils/displayText'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -216,7 +217,7 @@ const CARD_META: Record<
 > = {
   agents: { emoji: '🤖', color: '#6366f1', labelKey: 'dashboard.totalAgents' },
   conversations: { emoji: '💬', color: '#22d3ee', labelKey: 'dashboard.totalConversations' },
-  tokens: { emoji: '📊', color: '#a78bfa', labelKey: 'dashboard.totalTokens', format: formatTokens },
+  tokens: { emoji: '📊', color: '#a78bfa', labelKey: 'dashboard.totalTokens', format: formatTokenCount },
   calls: { emoji: '⚡', color: '#10b981', labelKey: 'dashboard.totalCalls' },
   memories: { emoji: '🧠', color: '#f472b6', labelKey: 'dashboard.totalMemories' },
   knowledge: { emoji: '📚', color: '#fbbf24', labelKey: 'dashboard.totalKnowledge' },
@@ -264,13 +265,6 @@ const tokenPieOption = computed(() => {
     ],
   }
 })
-
-/** Format large token counts for display. */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
-  return String(n)
-}
 
 /** 取卡片数值（有格式化函数则应用，无则原样）。模板内二次索引会丢失 TS 收窄，故收敛到函数。 */
 function formatCardValue(card: DashboardStatCard): number | string {
