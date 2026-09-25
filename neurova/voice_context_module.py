@@ -222,7 +222,6 @@ class VoiceContextModule:
                     ContextInput(
                         source=ContextSource.MULTIMODAL,
                         content=content,
-                        priority=70,  # 语音上下文中等优先级
                         metadata={
                             "type": "voice_context",
                             "confidence": voice_context.get("confidence", 0),
@@ -251,7 +250,6 @@ class VoiceContextModule:
                     ContextInput(
                         source=ContextSource.EMOTION,
                         content=emotion_content,
-                        priority=60,  # 情感上下文中等偏低优先级
                         metadata={
                             "type": "voice_emotion",
                             "primary_emotion": emotion["primary_emotion"],
