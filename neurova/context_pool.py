@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 from neurova.core.logger import get_logger
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = get_logger(__name__)
 
@@ -195,6 +195,14 @@ class ContextPool:
         # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
         self._ledger_db = ledger_db
         self._summarizer = summarizer
+        # T-11b：层索引（SUMMARY 节点的 covers）的读面状态。
+        # `_unparsable_layers` 与 `_layer_index_error` 只服务于"解析失败率必须为 0"
+        # 这条判据的可见性（不留静默失败的索引）。池**不另存**折叠侧的覆盖集合：
+        # 那是编排器折叠缓存的既有事实，读的时候作为入参传进来即可（教义第 6 条：
+        # 同一份事实不留两份）。
+        self._unparsable_layers: List[str] = []
+        self._layer_index_error: Optional[str] = None
+
         # B4/001：写穿计数——写失败必须显式可见（get_retention_stats 上报 + 点名原因）
         self._ledger_written = 0
         self._ledger_write_failed = 0
@@ -938,21 +946,156 @@ class ContextPool:
         except Exception:
             logger.warning("溢出摘要回写失败（忽略）", exc_info=True)
 
-    def archive_summary(self, summary: str, source_summary: str = "") -> None:
+    def archive_summary(
+        self,
+        summary: str,
+        source_summary: str = "",
+        covers: Optional[Dict[str, Any]] = None,
+        foldSeq: Optional[int] = None,
+    ) -> None:
         """P1-1③：把折叠摘要以 SUMMARY 源回写池（高优先级，视图可调取）。
 
         归档无损语义不破坏——被折叠 chunk 仍保留，摘要只是压缩视图的入口。
+
+        T-11b：可选的层索引参数（`foldSeq` / `covers`）由折叠路径传入，本方法只是
+        把它交给池的唯一写入咽喉 —— 作用域因此自动继承（教义第 5 条：不在每个
+        写入点各自打标）。不传则维持原有形状（溢出恢复路径的摘要不参加层索引）。
         """
         if not (summary or "").strip():
             return
+        metadata: Dict[str, Any] = {"source_summary": source_summary}
+        if covers is not None or foldSeq is not None:
+            from neurova.context.fold_index import COVERS_KEY, FOLD_SEQ_KEY
+
+            if covers is not None:
+                metadata[COVERS_KEY] = covers
+            if foldSeq is not None:
+                metadata[FOLD_SEQ_KEY] = int(foldSeq)
         self.add_context(
             ContextInput(
                 source=ContextSource.SUMMARY,
                 content=summary.strip(),
                 priority=90,
-                metadata={"source_summary": source_summary},
+                metadata=metadata,
             )
         )
+
+    def summaryLayers(self) -> List[Dict[str, Any]]:
+        """层索引的**唯一读面**（T-11b）：常驻 + 持久两源合并，档号在这里派生。
+
+        返回值每条 = `{content, level, fold_seq, covers, session_id, hash}`，
+        按档号升序（最细分辨率档在前）。
+
+        三件事刻意放在这里而不是散到调用方：
+
+        1. **档号派生**：档号随新代产生而整体下移，而归档实体不可就地改写
+           （T-04 的纪律）——故 metadata 存**层序**（不可变事实），档号在此按
+           `fold_index.layerLevel` 派生。派生只此一份。
+        2. **持久读回**：跨重启可寻址（规格 D1）要求索引不只活在常驻列表里，
+           故并上台账里 `source=summary` 的行。两源按内容 hash 去重。
+        3. **解析失败可计数**：`unparsable` / `coverage_gap` 由读面自己上报，
+           不给空 covers 兜底（那会把"索引没写"伪装成"索引为空"）。
+        """
+        with self._lock:
+            lanes: List[Any] = [
+                c
+                for c in self._collector._contexts
+                if getattr(c, "source", None) == ContextSource.SUMMARY
+            ]
+            if self._ledger_db is not None:
+                try:
+                    for row in self._ledger_db.rowsBySource(ContextSource.SUMMARY.value):
+                        row = dict(row)
+                        md = _archivedRowMetadata(row)
+                        lanes.append(
+                            ContextInput(
+                                source=ContextSource.SUMMARY,
+                                content=row.get("content") or "",
+                                metadata=md,
+                            )
+                        )
+                except Exception as exc:  # noqa: BLE001 - 读面失败必须可见，不静默
+                    self._layer_index_error = f"{type(exc).__name__}: {exc}"
+                    logger.warning("层索引持久读回失败：%s", self._layer_index_error, exc_info=True)
+            return self._projectLayers(lanes)
+
+    def _projectLayers(self, lanes: List[Any]) -> List[Dict[str, Any]]:
+        """把层节点候选投影成档号有序的索引（调用方须持 `_lock`）。"""
+        from neurova.context.fold_index import parseCovers, foldSeqOf, layerLevel, newestFoldSeq
+
+        seen: set = set()
+        rows: List[Any] = []
+        for item in lanes:
+            fingerprint = getattr(item, "hash", None)
+            if fingerprint and fingerprint in seen:
+                continue
+            if fingerprint:
+                seen.add(fingerprint)
+            rows.append(item)
+
+        seqs = [(foldSeqOf(getattr(r, "metadata", None)), r) for r in rows]
+        newest = newestFoldSeq(seqs)
+        layers: List[Dict[str, Any]] = []
+        unparsable: List[str] = []
+        for seq, item in seqs:
+            covers = parseCovers(getattr(item, "metadata", None))
+            level = layerLevel(seq, newest)
+            if covers is None or level is None:
+                # 缺 covers / 缺层序 = 解析不出来。给空 covers 兜底会把"索引没写"
+                # 伪装成"索引为空"，故如实计数（`unparsable`）而不是当成空格。
+                unparsable.append(str(getattr(item, "hash", "") or ""))
+                continue
+            layers.append({
+                "content": str(getattr(item, "content", "")),
+                "level": level,
+                "fold_seq": seq,
+                "covers": covers,
+                "session_id": (getattr(item, "metadata", None) or {}).get("session_id"),
+                "hash": getattr(item, "hash", None),
+            })
+        layers.sort(key=lambda layer: layer["level"])
+        self._unparsable_layers = unparsable
+        return layers
+
+    def entriesByHash(self, hashes) -> List[Any]:
+        """按内容指纹批量取池内条目（T-11b：covers 解析的判据面）。
+
+        与 `mark_hashes_seen` 同源（都走 `_by_hash` 索引 O(k) 直取，不线性扫池）；
+        找不到的 hash 不进结果——调用方据此把"索引指向不存在的原文"计出来，
+        而不是让这里替它补一个空对象（那会把断链伪装成命中）。
+        """
+        wanted = [h for h in (hashes or ()) if h]
+        if not wanted:
+            return []
+        with self._lock:
+            return [self._by_hash[h] for h in wanted if h in self._by_hash]
+
+    def foldIndexHealth(self, folded: Iterable[str] = ()) -> Dict[str, Any]:
+        """层索引读数（T-11b）：`nodes` / `levels` / `unparsable` / `uncovered`。
+
+        `folded` 是**折叠侧登记的已覆盖 hash 全集**，由编排器从折叠缓存传入
+        （`_foldedHashes()`）——池不另存一份：同一份事实留两份必然漂移
+        （教义第 6 条）。
+
+        **覆盖闭合**（工单 §12.7 判据 3）在这里对账：视图外（已折叠）的原文 hash
+        全集必须 ⊆ ∪(各档 covers)。少了任一条即 `uncovered` 非 0，不静默放过。
+        """
+        layers = self.summaryLayers()
+        covered: set = set()
+        for layer in layers:
+            covered |= set(layer["covers"]["hashes"])
+        gap = sorted(set(folded or ()) - covered)
+        return {
+            "nodes": len(layers),
+            "levels": len({layer["level"] for layer in layers}),
+            "unparsable": len(self._unparsable_layers),
+            "uncovered": len(gap),
+            "last_error": self._layer_index_error or (
+                f"CoverageGap: {len(gap)} 条已折叠原文不在任何档的 covers 内（{gap[:2]}）"
+                if gap
+                else None
+            ),
+        }
 
     def mark_hashes_seen(self, hashes) -> int:
         """ack 集：按内容 hash 标记已读（视图捕获路径）。
@@ -1188,6 +1331,20 @@ class ContextPool:
             all_drops = self._collector.collect()
             # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
             all_drops = self._filter_ttl(all_drops)
+            # T-11b：层索引节点（带层序的 SUMMARY）**不参加概率性相关性召回**。
+            # 它们由确定性索引 `summaryLayers()` 寻址（工单 §12.5 第 3 条把
+            # "下钻靠相关性门槛碰运气"列为假实现）；混进召回面还有两个当场可见的
+            # 后果：① 本会话的折叠摘要会被再召回一次，与折叠桩重复注入；
+            # ② 抽屉召回应跨会话（单聊轮只见 direct，而两个单聊会话作用域都是
+            # direct）→ A 会话的摘要泄进 B 会话视图，把 T-03 刚收口的隔离又破掉。
+            # 排除发生在**取数之后**：pool 的归档语义不变（节点仍在池/台账里）。
+            from neurova.context.fold_index import isIndexNode
+
+            all_drops = [
+                drop
+                for drop in all_drops
+                if not isIndexNode(getattr(drop, "metadata", None))
+            ]
             deduped = self._deduplicator.dedup(all_drops, stage="output")
             selected = self._drawer.draw(deduped, need=need, budget_tokens=budget_tokens)
             # P1-1①（方案 §4.1）：视图出口配对完整性校验——预算/相关性选取
@@ -1215,6 +1372,21 @@ from neurova.context.converter import ContextConverter
 from neurova.context.dedup import DriftSafeDeduplicator
 from neurova.context.semantic_drawer import SemanticMatchDrawer
 from neurova.context.auto_tagger import AutoTagger
+
+def _archivedRowMetadata(row: Dict[str, Any]) -> Dict[str, Any]:
+    """台账行 → metadata dict（T-11b 层索引的持久读回用）。
+
+    metadata 与来源域两条事实都还要从行里取回：层索引只认 `source=summary` 的行，
+    而 covers/层序在 metadata 里。不复制 `eviction_ledger_db` 的解析（那是第二份
+    规则），只把它单源取回并补上来源域与行内事实。
+    """
+    from neurova.context.eviction_ledger_db import archivedMetadata
+
+    md = dict(archivedMetadata(row))
+    if "session_id" not in md and row.get("session_id"):
+        md["session_id"] = row.get("session_id")
+    return md
+
 
 def poolIdentityOf(agent_ref, session_id: Optional[str] = None) -> tuple:
     """池身份三元组的**唯一派生处**（(user_id, agent_id, session_id)）。

@@ -2092,6 +2092,11 @@ export default {
     python: 'Python',
     shell: 'Shell',
     javascript: 'JavaScript',
+    language: '언어: ',
+    backend: '백엔드: ',
+    isolated: '격리 적용됨',
+    notIsolated: '격리되지 않음(커널 격리 없음)',
+    exitCode: '종료 코드: ',
   },
   firewall: {
     title: '방화벽',

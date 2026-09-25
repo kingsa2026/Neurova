@@ -44,7 +44,14 @@ const i18n = createI18n({
     'zh-CN': {
       common: { create: '创建', open: '打开', noData: '暂无数据', error: '错误', success: '成功', name: '名称', confirm: '确认' },
       system: { sandbox: '沙箱' },
-      sandbox: { created: '创建于: ', steps: '步骤数: ', commit: '提交', destroy: '销毁', image: '镜像: ' },
+      sandbox: {
+        created: '创建于: ', steps: '步骤数: ', commit: '提交', destroy: '销毁', image: '镜像: ',
+        executeStep: '执行步骤', commandPlaceholder: '输入命令或代码...', output: '输出',
+        startSandbox: '启动沙箱', imageLabel: '镜像', timeout: '超时时间 (秒)',
+        python: 'Python', shell: 'Shell', javascript: 'JavaScript',
+        language: '语言: ', backend: '后端: ', isolated: '隔离已生效',
+        notIsolated: '未隔离(平台无内核隔离)', exitCode: '退出码: ',
+      },
       tool: { execute: '执行' },
     },
   },
@@ -62,6 +69,13 @@ const mountPage = () =>
         'a-input': { template: '<input />' },
         'a-input-number': { template: '<input />' },
         'a-select': { template: '<select><slot /></select>' },
+        'a-textarea': {
+          props: ['value'],
+          emits: ['update:value'],
+          template: '<textarea :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+        },
+        'a-modal': { template: '<div><slot /></div>' },
+        'a-tag': { template: '<span><slot /></span>' },
       },
     },
   })
@@ -91,5 +105,56 @@ describe('SandboxPage 信封解包', () => {
     // v-for 遍历信封对象会渲染 3 个空卡 — 防回归：卡片区域不应出现两次以上「打开」
     const openCount = wrapper.findAll('button').filter((b) => b.text().includes('打开')).length
     expect(openCount).toBe(0)
+  })
+})
+
+/**
+ * 隔离诚实面（Issue #68 收口）：`/execute` 的后端自报必须原样展示。
+ *
+ * 根因：页面此前只渲染 `res.output`，把 `backend`/`enforced` 丢掉——用户看到的
+ * 「执行成功」既不知道跑在什么后端上，也不知道声明了隔离却是否真隔离。
+ * 平台无内核隔离时后端如实回 `enforced: false`，页面必须把这个降级显形。
+ */
+describe('SandboxPage 隔离诚实面', () => {
+  /** 先备好桩数据，再挂载（onMounted 立刻取列表），然后打开卡片并执行一段代码。 */
+  const runOnce = async (execRes: any) => {
+    listMock.mockResolvedValue({
+      code: 0,
+      message: 'success',
+      data: { sandboxes: [{ id: 'sb1', name: 's', status: 'running', steps_count: 0 }], total: 1 },
+    })
+    ;(sandboxApi.getSandbox as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'sb1', name: 's', status: 'running',
+    })
+    ;(sandboxApi.executeInSandbox as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(execRes)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const openBtn = wrapper.findAll('button').find((b) => b.text().includes('打开'))
+    await openBtn!.trigger('click')
+    await flushPromises()
+    await wrapper.find('textarea').setValue('print(1)')
+    const runBtn = wrapper.findAll('button').find((b) => b.text().includes('执行'))
+    await runBtn!.trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('enforced=false 时把「未隔离」显形（不静默当成功）', async () => {
+    const wrapper = await runOnce({
+      output: 'ok', stdout: 'ok', stderr: '', exit_code: 0,
+      backend: 'process', enforced: false, duration_ms: 12,
+    })
+    expect(wrapper.text()).toContain('process')
+    expect(wrapper.text()).toContain('未隔离')
+  })
+
+  it('enforced=true 时展示隔离已生效与后端名', async () => {
+    const wrapper = await runOnce({
+      output: 'ok', stdout: 'ok', stderr: '', exit_code: 0,
+      backend: 'docker', enforced: true, duration_ms: 30,
+    })
+    expect(wrapper.text()).toContain('docker')
+    expect(wrapper.text()).toContain('隔离已生效')
   })
 })
