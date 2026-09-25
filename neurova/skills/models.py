@@ -21,6 +21,54 @@ class SkillSource(Enum):
     BUILTIN = "builtin"
 
 
+# ── 经验成败三态：词、记号、摘要提取的**唯一**定义处 ────────────────────────
+# 工单 004 要求"三态不许在半路裂开"。此前每个展示面各自写一份真假值判断
+# （EKB 行 `INTEGER NULL`、权重表、结晶器、API 的 `_outcome_word`、以及进 prompt
+# 的那一段），同一根因有五六份实现，逐个漏改——进 prompt 那一面就是这么漏掉的。
+# 此处收口：词与记号只在这里定义，各消费方按需取用，不得再写字面量。
+OUTCOME_SUCCESS = "success"
+OUTCOME_FAILURE = "failure"
+OUTCOME_UNEVIDENCED = "unevidenced"
+
+#: 三态 → 展示记号。未测量刻意**不**复用失败记号：`✗` 对模型说的是
+#: "上次这条做砸了"，而事实是"这轮没测到"。
+OUTCOME_MARKS: Dict[Optional[bool], str] = {
+    True: "✓",
+    False: "✗",
+    None: "○",
+}
+
+
+def outcomeWord(success: Optional[bool]) -> str:
+    """三态 → 契约词汇（与 `knowledge_facts.EVIDENCE_STATES` 同一词汇表）。"""
+    if success is None:
+        return OUTCOME_UNEVIDENCED
+    return OUTCOME_SUCCESS if success else OUTCOME_FAILURE
+
+
+def outcomeMark(success: Optional[bool]) -> str:
+    """三态 → 展示记号（True/False/None 各归各位，不折叠）。"""
+    return OUTCOME_MARKS.get(success, OUTCOME_MARKS[None])
+
+
+def experienceSummary(value: Any, keys: tuple = ()) -> str:
+    """经验条目里的"摘要"取值口：dict 取第一个非空键、标量原样、其余留空。
+
+    旧实现在两处各写一份 `str(x)[:50]`，dict 形状（EKB 2.0 的 `context`/`result`
+    就是 dict）直接切片抛 `TypeError`，被外层 `except` 吞掉后**整段经验从 prompt
+    里静默消失**。取值形状收在这里一处，消费方不再各自猜。
+    """
+    if isinstance(value, dict):
+        for key in keys:
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate)
+        return ""
+    if value is None:
+        return ""
+    return str(value)
+
+
 @dataclass
 class SkillMetadata:
     """技能元数据"""
