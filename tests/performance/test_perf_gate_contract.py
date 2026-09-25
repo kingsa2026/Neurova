@@ -38,6 +38,16 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATE = PROJECT_ROOT / "scripts" / "ci" / "perf_gate.py"
 
+#: 有界注入：注入的等待**墙钟总量**不变，而系统调用数降 `INJECT_EVERY` 倍。
+#: 逐次小睡会把 N 次 `sleep` 铺进被测链路，而 `time.thread_time()` 读
+#: `CLOCK_THREAD_CPUTIME_ID`（**含内核态时间**），调度拥挤时每次 `sleep` 的
+#: 内核开销随同机负载一起涨 ⇒ "等待"经系统调用换算成 CPU 读数，
+#: 判据自身变成负载相关。实测（2000 次注入）：逐次 9.2~10.3ms，粗粒度 0.2ms。
+INJECT_EVERY = 100
+#: 逐次注入的等价单次等待（ms）；粗睡时长 = 本值 × `INJECT_EVERY`。
+PER_CALL_WAIT_MS = 0.3
+PER_CALL_POOL_WAIT_MS = 0.1
+
 #: 本套件要跑门禁本体与三个生产装配点，故依赖 `prometheus_client` / `psutil`
 #: （门禁 import 面 → `neurova.core.metrics`；占用者观测面 → `port_guard`）。
 #: 这两者由 CI 与运行时的依赖清单声明（`requirements-ci.lock` / `requirements.txt`），
@@ -143,6 +153,83 @@ class TestJudgingIgnoresMachineLoad:
             f"注入 300ms 纯等待被计了 {charged:.1f}ms——等待不得进入判分"
         )
 
+    def test_no_injection_hook_sleeps_on_every_call(self):
+        """注入钩子一律不得"每次调用都小睡"——系统调用数必须与迭代数解耦。
+
+        根因（2026-09-25 py3.12 CI 实测红，`unit-tests-py312` 收尾残留 1 failed）：
+        `time.thread_time()` 读 `CLOCK_THREAD_CPUTIME_ID`，**含内核态时间**。
+        逐次注入一次小睡（2000 × 0.2ms）会把 2000 次 `sleep` 系统调用铺进被测链路，
+        每次调用的内核开销随同机调度拥挤一起涨 —— "等待"就这么经系统调用换算成
+        CPU 读数。失败原文：
+
+            2000 次 record_pipeline_step 耗时 68.8ms > 预算 50ms
+
+        这处此前**只修了一个命中点**，同一根因的其余形态留下来了：`cb92f2d1`
+        把 `TestJudgingIgnoresMachineLoad` 两处改成粗粒度后，
+        `TestJudgedValueIsLoadIndependent` 那条（经 `_injectLoad` 注入，
+        同样是 2000 × 0.2ms 逐次小睡）接着红。
+
+        判据按**结构**扫全文件（教义第 5 条：同一根因全命中点扫荡）：
+        `monkeypatch` 用的注入钩子是**嵌套函数**（`slowed` / `injectedStep` /
+        `injectedPool`），其中每个 `time.sleep` 都必须落在 `if` 保护内。
+        非嵌套的一次性注入（如 `measureThreadCpu(lambda: time.sleep(0.3))`）
+        不与迭代数同阶，不在此列。
+        """
+        source = io.open(__file__, encoding="utf-8").read()
+        tree = ast.parse(source)
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            # 注入钩子=嵌套函数：外层还有函数定义（顶层测试方法不算）
+            ancestor = parents.get(node)
+            is_hook = False
+            while ancestor is not None:
+                if isinstance(ancestor, ast.FunctionDef):
+                    is_hook = True
+                    break
+                ancestor = parents.get(ancestor)
+            if not is_hook:
+                continue
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call):
+                    continue
+                func = inner.func
+                if not (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "sleep"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "time"
+                ):
+                    continue
+                # 守卫必须是"按调用计数取模"的有界注入，而不是常量开关：
+                # `if sleep_ms:` 这种开关对被测链路而言恒真，等于无条件逐次小睡
+                # ——`_injectLoad` 正是这样漏网的第三个命中点。
+                guarded = False
+                chain = parents.get(inner)
+                while chain is not None and chain is not node:
+                    if isinstance(chain, ast.If) and any(
+                        isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Mod)
+                        for sub in ast.walk(chain.test)
+                    ):
+                        guarded = True
+                        break
+                    chain = parents.get(chain)
+                if not guarded:
+                    offenders.append((node.name, inner.lineno))
+
+        assert not offenders, (
+            "以下注入钩子对每次调用都执行 time.sleep（函数, 行号）："
+            f"{offenders}。迭代 N 次即 N 次系统调用，其内核开销经 thread_time "
+            "计入判分，判据自身变成负载相关（同机负载越高越红）。"
+            "改法：按调用计数每 N 次粗睡一次、时长 ×N，注入墙钟总量不变而系统调用数降 N 倍。"
+        )
+
     def test_injected_waiting_is_not_charged_by_step_metric_check(self, monkeypatch):
         """真正的红：在门禁**真实取数链路**上注入等待，判据必须仍判绿。"""
         gate = importlib.import_module("scripts.ci.perf_gate")
@@ -151,9 +238,14 @@ class TestJudgingIgnoresMachineLoad:
 
         collector = type(get_metrics())
         original = collector.record_pipeline_step
+        calls = {"n": 0}
 
         def slowed(self, step_name, status, duration_ms):
-            time.sleep(0.0003)
+            # 有界注入：每 N 次粗睡一次、时长 ×N。注入的墙钟总量与逐次小睡等价，
+            # 而系统调用数降 N 倍 —— 逐次小睡的内核开销会经 thread_time 计入判分。
+            calls["n"] += 1
+            if calls["n"] % INJECT_EVERY == 0:
+                time.sleep(PER_CALL_WAIT_MS * INJECT_EVERY / 1000.0)
             return original(self, step_name, status, duration_ms)
 
         monkeypatch.setattr(collector, "record_pipeline_step", slowed)
@@ -192,9 +284,12 @@ class TestJudgingIgnoresMachineLoad:
         gate = importlib.import_module("scripts.ci.perf_gate")
         pool_mod = _importlib.import_module("neurova.core.thread_pool")
         original = pool_mod.get_thread_pool
+        calls = {"n": 0}
 
         def slowed(*args, **kwargs):
-            time.sleep(0.0001)
+            calls["n"] += 1
+            if calls["n"] % INJECT_EVERY == 0:
+                time.sleep(PER_CALL_POOL_WAIT_MS * INJECT_EVERY / 1000.0)
             return original(*args, **kwargs)
 
         monkeypatch.setattr(pool_mod, "get_thread_pool", slowed)
@@ -518,13 +613,21 @@ def _injectLoad(monkeypatch, sleep_ms: float, cpu_ms: float):
     collector = type(get_metrics())
     original_step = collector.record_pipeline_step
 
+    step_calls = {"n": 0}
+
     def injectedStep(self, step_name, status, duration_ms):
         if cpu_ms:
             deadline = time.thread_time() + cpu_ms / 1000.0
             while time.thread_time() < deadline:
                 pass
         if sleep_ms:
-            time.sleep(sleep_ms / 1000.0)
+            # 有界注入：每 `INJECT_EVERY` 次粗睡一次、时长 ×`INJECT_EVERY`。
+            # 逐次小睡会把 N 次 `sleep` 系统调用铺进被测链路，其内核开销
+            # 经 `thread_time`（CLOCK_THREAD_CPUTIME_ID，含内核态）计入判分，
+            # 判据自身因此变成负载相关。
+            step_calls["n"] += 1
+            if step_calls["n"] % INJECT_EVERY == 0:
+                time.sleep(sleep_ms * INJECT_EVERY / 1000.0)
         return original_step(self, step_name, status, duration_ms)
 
     monkeypatch.setattr(collector, "record_pipeline_step", injectedStep)
@@ -532,13 +635,17 @@ def _injectLoad(monkeypatch, sleep_ms: float, cpu_ms: float):
     pool_module = importlib.import_module("neurova.core.thread_pool")
     original_pool = pool_module.get_thread_pool
 
+    pool_calls = {"n": 0}
+
     def injectedPool(*args, **kwargs):
         if cpu_ms:
             deadline = time.thread_time() + cpu_ms / 1000.0
             while time.thread_time() < deadline:
                 pass
         if sleep_ms:
-            time.sleep(sleep_ms / 1000.0)
+            pool_calls["n"] += 1
+            if pool_calls["n"] % INJECT_EVERY == 0:
+                time.sleep(sleep_ms * INJECT_EVERY / 1000.0)
         return original_pool(*args, **kwargs)
 
     monkeypatch.setattr(pool_module, "get_thread_pool", injectedPool)
