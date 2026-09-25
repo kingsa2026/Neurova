@@ -12,13 +12,21 @@
 `AGENTS.md` 修复教义第 2 条点名的「判据与机器速度捆绑」形态：
 判据本身与代码行数、与机器快慢都无关，墙钟上界不会因为它变松而更成立。
 
-处置分两层，**都在本模块里收口**，不在各守卫里各写一套：
+处置分三层，**都在本模块里收口**，不在各守卫里各写一套：
 
 1. **解析按前缀择优**：`moduleSourcesUnder()` / `filesUnder()` 只列目标子树；
 2. **同进程内复用**：`parsedModules()` / `walkedModules()` 以「文件路径 + mtime +
    大小」为键整进程缓存解析结果与词法节点，同一批受保护用例里的 N 个守卫共用
    一次解析。缓存键含 mtime 与 size，改文件即失效——不做「一次解析永久有效」
    这种会静默漏报的缓存。
+3. **常驻图按步长退役**（Issue #197 登记后本轮实证）：第 2 层的缓存是
+   `maxsize=None`，保留下来的每棵树都还留在 gen2 的扫描面里，于是 gen2 每扫一遍
+   都要走完整棵常驻图——**成本随代码总量涨**，与本文件开头的根因同形，只是账单
+   记在 GC 上（实测 1787 个测试文件全量解析后单次 gen2 1030ms vs 不留 0.78ms）。
+   `RETIRE_STEP` 控制退役步长：常驻树每新增这么多棵就把整棵图移出扫描分代
+   （读侧 `retireStats()` 给出 `retires` / `pending` / `frozen`）。**保留量不变**（跨用例仍只编译一次），变的只是
+   扫描面——故不得改用 LRU 限制保留量：被淘汰的树要在下一条判据里重新解析，
+   实测 miss 从 1586 涨到 4790，反而更慢。
 
 口径只写一份：任何新增的跨文件 AST 判据都走本模块，不自己 `ast.parse`
 （`AGENTS.md` 修复教义第 6 条：不新造平行体系）。
@@ -34,6 +42,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import gc
 from pathlib import Path
 from typing import Iterable, Iterator, List, NamedTuple, Tuple
 
@@ -111,10 +120,110 @@ def sourceCode(path: Path) -> str:
     return _cachedCode(_cacheKey(path))
 
 
+#: 常驻语法树的**退役步长**：常驻树每新增这么多棵，就把已保留的语法图整体移出
+#: GC 的扫描分代（`gc.freeze()`）。0 = 关闭退役（仅供反向锁判据使用）。
+#:
+#: 为什么必须有退役（Issue #197 登记后本轮实证）：本缓存是 `maxsize=None`——
+#: 跨用例复用要求「同一份源码只编译一次」，但**保留下来的每棵树都还留在 gen2 的
+#: 扫描面里**，于是 gen2 每扫一遍都要走完整棵常驻图，成本随代码总量涨。这与
+#: Issue #148 同根，只是账单记在 GC 上而不是 `ast.parse` 上。实测（本机，
+#: 1787 个 `test_*.py` 全量解析后）：
+#:
+#: | 保留策略 | 建缓存 | 单次 gen2 | 常驻对象 |
+#: |---|---|---|---|
+#: | 不保留 | 1.10s | 0.78ms | 1.2 万 |
+#: | 全部保留（改前） | 4.51s | **1030.43ms** | 267 万 |
+#: | 全部保留 + 退役（改后） | 1.07s | **1.9ms** | 267 万 |
+#:
+#: 受保护子集整会话读数（同一批文件、同机同顺序）：gen2 合计 7.4s → 1.4s。
+#: 退役本身是链表拼接（实测 1792 次退役合计 0.6ms），代价可忽略；**保留量不变**
+#: （两种策略的 RSS 相同：退役只改变扫描面，不改变保留对象）。
+#:
+#: 退役的**代价与边界**（如实登记，不做无痕处理）：`gc.freeze()` 是进程级操作，
+#: 冻结的是**当时全部**被跟踪对象。故冻结前先 `gc.collect()`——冻结之后不可达
+#: 对象永远不会再被回收（实测：冻结前已不可达的环，`gc.collect()` 恒返回 0，
+#: 解冻后才回收），不先回收就等于把当时的垃圾冻成永久垃圾。残留边界：**冻结时
+#: 还活着、之后才变成垃圾**的对象本轮不会再被回收；测试进程生命周期内可接受，
+#: 但不得据此假定冻结不改变可达性。
+RETIRE_STEP = 8
+
+#: 退役账：写侧在 `_retireResidentGraphIfDue`，读侧为
+#: `tests/unit/test_ci_ast_scan_budget_guard.py::TestResidentGraphIsRetiredFromTheScannedGenerations`
+#: （判据按它反证「退役真发生了」），不留只写不读的断点。
+#:
+#: `parsesSinceRetire` 记的是**自上次退役以来新增的常驻树数**，不与 `currsize` 挂钩。
+#: 为什么不按「常驻树总数」推游标：那个量**可以被外部拉回 0**（受保护子集里就有
+#: 用例显式 `_cachedParse.cache_clear()` 自证缓存语义），而游标是高水位——清空之后
+#: 它还停在高位，于是接下来几百次解析一棵也不退役，扫描面重新无界，判据退化成
+#: 「取决于前面跑过哪些用例」（判据与运行环境捆绑，正是本文件开头点名的形态）。
+#: 靶点是新增量，故与清缓存解耦。
+_RETIRE_LEDGER = {"retires": 0, "parsesSinceRetire": 0}
+
+
+def retireStats() -> dict:
+    """退役读数（唯一读取口）。
+
+    `retires` 已发生的退役次数（判据按它反证「退役真发生了」）；
+    `pending` 距下次退役还差的新增数量（判据按它反证「退役后已复位」）；
+    `frozen` 当前被移出扫描分代的对象数。
+
+    只给这三个：`步长` 就是模块常量 `RETIRE_STEP`、`常驻树数` 就是两条缓存的
+    `cache_info().currsize`，搬进来只是第二份定义，且没有人读它（教义第 6 条：
+    只写不读的字段是断点）。
+    """
+    return {
+        "retires": _RETIRE_LEDGER["retires"],
+        "pending": _RETIRE_LEDGER["parsesSinceRetire"],
+        "frozen": gc.get_freeze_count(),
+    }
+
+
+def resetRetireLedger() -> None:
+    """把退役账复位到初值（**账的形态只在本模块定义一处**）。
+
+    给出这个复位点，是为了让判据能构造「刚开工」的进程状态而不必手抄
+    `_RETIRE_LEDGER` 的键名——手抄私有字段就是第二份定义，键改名时静默错位
+    （实测形态：判据 monkeypatch 一份旧键名，生产侧改名后判据以 `KeyError` 收场，
+    报错点名的却不是真因）。
+    """
+    _RETIRE_LEDGER["retires"] = 0
+    _RETIRE_LEDGER["parsesSinceRetire"] = 0
+
+
+def _retireResidentGraphIfDue(pendingEntries: int) -> None:
+    """常驻图增长到步长就把整棵图移出 GC 的扫描分代。
+
+    判据的靶点是**扫描面**（gen2 要走的对象数），不是保留量——保留量由
+    「跨用例只编译一次」决定，不该为了 GC 去动它（实测按 LRU 限制保留量反而更慢：
+    被淘汰的树在下一条判据里要重新解析，miss 从 1586 涨到 4790）。
+
+    触发量是**自上次退役以来的新增解析数**（`parsesSinceRetire`），不是常驻树总数：
+    后者可被 `cache_clear()` 拉回 0，而游标是高水位——清空后它停在高位，退役停摆。
+
+    `pendingEntries`：本次调用后才会写进缓存的条数。`functools.lru_cache` 是在被包
+    函数**返回之后**才写缓存的（实测：函数体内 `cache_info().currsize` 不含本条），
+    故不计入这个增量，退役就会整整滞后一棵树。命中路径传 `0`，零额外开销。
+    """
+    if RETIRE_STEP <= 0:
+        return
+    _RETIRE_LEDGER["parsesSinceRetire"] += pendingEntries
+    if _RETIRE_LEDGER["parsesSinceRetire"] < RETIRE_STEP:
+        return
+    gc.collect()
+    gc.freeze()
+    _RETIRE_LEDGER["retires"] += 1
+    _RETIRE_LEDGER["parsesSinceRetire"] = 0
+
+
 @functools.lru_cache(maxsize=None)
 def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
-    """按**代码文本**缓存语法树；`compile()` 是这条链上唯一的大头。"""
-    return ast.parse(code)
+    """按**代码文本**缓存语法树；`compile()` 是这条链上唯一的大头。
+
+    每次未命中都会按 `RETIRE_STEP` 检查退役（命中路径零额外开销）。
+    """
+    tree = ast.parse(code)
+    _retireResidentGraphIfDue(pendingEntries=1)
+    return tree
 
 
 def parsedModules(root: Path, suffix: str = ".py") -> List[Tuple[Path, ast.AST]]:
@@ -178,7 +287,9 @@ def _cachedNodes(ref: SourceRef) -> Tuple[ast.AST, ...]:
     量级上与 `compile()` 同量级（实测 4.3s vs 5.1s），只缓存解析不缓存遍历
     等于把这笔账留着。
     """
-    return tuple(ast.walk(_cachedParse(ref.stamp, ref.code)))
+    tuple_ = tuple(ast.walk(_cachedParse(ref.stamp, ref.code)))
+    _retireResidentGraphIfDue(pendingEntries=1)
+    return tuple_
 
 
 def nodeScan(root: Path, suffix: str = ".py",
