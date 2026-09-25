@@ -252,6 +252,7 @@
 
 - [CHANNELS_CONFIG_TEMPLATE.md](../10-configuration/CHANNELS_CONFIG_TEMPLATE.md) — 渠道配置模板
 - [DEPLOYMENT_CONFIG.md](../10-configuration/DEPLOYMENT_CONFIG.md) — 部署配置契约（Dockerfile / docker-compose / Helm 跨文件不变量 + 门禁）
+- [KNOWLEDGE_BASE.md](../10-configuration/KNOWLEDGE_BASE.md) — 知识库索引接线（索引面 / 参数口径 / Open API 检索 / 重建方式）
 
 ### 11-legacy 归档
 

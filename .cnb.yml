@@ -40,16 +40,19 @@
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 `main.push` 的每条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐
+#     `main.push` 的每条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐
 #     （unit-tests 按 py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；
 #     static-gate 与 ruff 并成一条，对应 GitHub 侧同为一条的 static-gate job）。
 #     条数不在这里手抄：单一事实源是 `main.push` 数组本身的长度，
 #     现读数由 tests/unit/ci/test_cnb_header_pipeline_count.py 常驻比对——
 #     头部曾手抄过 10 / 11 两个互相矛盾的口径（工单 009 改成 11、Issue #223 合回 10），
 #     手抄的那一份漂移时平台不报任何错，故不再保留第二份。
+#   - 事件的覆盖面不限于 push/pull_request，也**不限于门禁**：`main` 下另有
+#     `commit.add` 的知识库索引与非门禁的周级巡检。它们**不在** `main.push` 数组里，
+#     故既不计入上面那个条数、也不参与 GitHub job 的对齐（对齐的对象只是门禁）。
 #   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
-#     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
-#     巡检流水线（deploy-config 的时间维度兜底），不计入 `main.push` 的条数。
+#     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件的周级巡检
+#     流水线（deploy-config 的时间维度兜底）同样不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
@@ -60,10 +63,15 @@
 # 触发范围与 GitHub 侧一致：push 到 main；PR 目标为 main。
 # （GitHub 还监听 master，已核对本仓库远端仅 main 分支，故此处不声明。）
 #
-# 与 GitHub 侧的刻意差异（唯一一处，明确记录）：
-#   GitHub 的 e2e job 带 needs: static-gate（静态门禁过了才启动冒烟）；
-#   cnb 同一事件下的流水线相互并发、无跨流水线依赖原语，故 e2e 与 static-gate
-#   并行启动。放行标准不变（失败上报、阻塞合并）。
+# 与 GitHub 侧的刻意差异（逐条记录，改任一条都要同步本段与 PR 描述）：
+#   1. GitHub 的 e2e job 带 needs: static-gate（静态门禁过了才启动冒烟）；
+#      cnb 同一事件下的流水线相互并发、无跨流水线依赖原语，故 e2e 与 static-gate
+#      并行启动。放行标准不变（失败上报、阻塞合并）。
+#   2. cnb 侧多一条**非门禁**的 `main.commit.add` 知识库索引流水线（Issue #242）；
+#      GitHub 侧没有等价 job —— 它不是放行标准的一部分（不裁决任何合并契约），
+#      对齐的对象始终只是门禁，故不需要（也不应该）在 GitHub 上造一条空壳 job。
+#      为什么不用 `push` 键：`push: &pipelines` 被 `pull_request: *pipelines`
+#      以锚点别名共用同一对象，挂上去等于"每提一次 PR 就重建整个知识库"。
 # ============================================================================
 
 main:
@@ -322,6 +330,41 @@ main:
 
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
   pull_request: *pipelines
+
+  # ── 非门禁流水线：文档知识库增量索引（Issue #242）────────────────────────
+  # 为什么挂在 `commit.add` 而不是塞进 `push`：`push: &pipelines` 被
+  # `pull_request: *pipelines` 以锚点别名共用（同一个对象），把建库塞进
+  # `main.push` 会让「每提一次 PR 就重建整个知识库」——PR 内容尚未定稿，
+  # 且建库不裁决任何合并契约，与门禁同列会把两件事的语义混同。
+  # `commit.add` 与 `push` 同为「分支被推送新提交」的入口，却是**独立的事件键**，
+  # 故建库只跑在 main 的推送侧，PR 侧一个字都不受影响。
+  # 这一处偏离 Issue #242 示例（示例把建库挂在 `main.push`）是刻意的，
+  # 偏离点与补偿措施全写在 PR 描述里，并由
+  # tests/unit/ci/test_knowledge_base_index_wiring.py 常驻钉住。
+  #
+  # exclude 只有一条，且它不是装饰：`docs/11-legacy/**` 正文自述
+  # 「历史/过时文档……不再维护」，喂给 RAG 会让已被取代的旧方案与现行文档
+  # 同权回答用户。
+  # 它的命中面由守卫逐条反证 —— **空转的排除项进不了配置**：
+  # `docs/.cf_doc.md` / `docs/.roles.md`（第三方产品文档）看着该排，实则
+  # `docs/**/*.md` 本就不匹配点文件（实测 glob 551 篇 / 含隐藏 553 篇），
+  # 给它们各写一条 exclude 就是只写不读的第二份定义。
+  commit.add:
+    - name: knowledge-base
+      stages:
+        - name: 更新知识库（docs 文档 + Issue）
+          type: knowledge:update
+          options:
+            include:
+              - "docs/**/*.md"
+            exclude:
+              - "docs/11-legacy/**"
+            chunkSize: 1500
+            chunkOverlap: 50
+            embeddingModel: hunyuan
+            issueSyncEnabled: true
+            forceRebuild: false
+            ignoreProcessFailures: true
 
   # ── 周级巡检：部署配置漂移（crontab）─────────────────────────────────────
   # 为什么独立成 crontab 而不只放 push/PR：漂移的主要来源**不在本仓的提交里**——
