@@ -956,3 +956,13 @@ tests/unit/ci/test_cnb_header_pipeline_count.py
 # Issue #242 知识库索引接线：建库流水线的挂载事件 / options 键集 /
 # include 真命中且 exclude 不空转 / 每个在册角色的知识库作答纪律 / 指南导航可达
 tests/unit/ci/test_knowledge_base_index_wiring.py
+# Issue #90 T-09 残余（清场批）：上下文「来源 → 优先级」阶梯收口为单一事实源
+#   （端点曾写 priority=10 且注释称「高优先级」、语音模块给 EMOTION 写 60 而编排器写 50）
+#   判据：缺省由来源派生 / 端点写入与阶梯同源 / 生产侧不再自写整数字面量优先级。
+tests/unit/context/test_source_priority_single_source.py
+# Issue #90 T-09 残余（清场批·切片 B）：/context/build 的 token_count 走全仓唯一尺子
+#   （改前是 len(content.split())——第二把尺子，中文整句实测 4 vs 19）。
+tests/unit/api/test_context_build_token_count_caliber.py
+# Issue #90 T-09 残余（清场批·切片 C）：上下文链路纳入覆盖率度量范围
+#   （改前 include 只有八个模块，注释里的前置早已满足；阈值单源在 CI 命令行）。
+tests/unit/ci/test_context_coverage_scope.py
