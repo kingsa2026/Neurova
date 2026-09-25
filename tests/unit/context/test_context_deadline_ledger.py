@@ -48,12 +48,38 @@ class TestJudgeIsMachineComputed:
     """判据类由机器算、台账照抄：两者不一致即判据口径漂移。"""
 
     def test_ledger_matches_computed_judge_classes(self):
-        problems = ledger.reconcile()["judge_conflict"]
+        """台账的判据类必须等于机器算出的判据类（双向钉住）。
+
+        取数走 `computeJudgeClasses()`（判据类单源 `classify()` 的轻取数面），
+        不再整份跑 `reconcile()` 的引用点核对 —— 后者对**只比判据类**的用例是
+        重复取数，且实测把本用例推到 2.64s，与其余 170 个受保护文件共享机器时
+        撞 pytest-timeout 的 30s 墙钟（构建 `cnb-ddh-1k3bgqn80` 的 py3.12 腿
+        即因此判红：`Failed: Timeout (>30.0s)`，同一提交 py3.11 全绿）。
+
+        判据强度未降：不一致照样报红，报错文案也是逐条列出的同一份文案。
+        """
+        computed = ledger.computeJudgeClasses()
+        entries = ledger.readLedger()
+        problems = [
+            {
+                "symbol": symbol,
+                "ledger": entries[symbol]["judge"],
+                "computed": judge,
+                "rule": ledger.classify(symbol)[1]["rule"],
+            }
+            for symbol, judge in computed.items()
+            if entries[symbol]["judge"] != judge
+        ]
         assert not problems, (
             "台账的判据类与机器算出来的不一致——判据是从事实取的，"
             "台账必须照抄；改台账去迎合等于把判据降级成自述：\n  "
             + "\n  ".join(f"{p['symbol']}: 台账 {p['ledger']} / 实测 {p['computed']}"
                           f"（{p['rule']}）" for p in problems)
+        )
+        # 同源自证：轻取数面与完整对账面**同一判据**（同源 `classify()`），
+        # 但只比一次取数 —— 再跑一遍 `reconcile()` 就是把 2.6s 的重复取数请回来。
+        assert ledger.computedJudge("dedup") == computed["dedup"], (
+            "单符号取数与批量取数不一致 —— 取数收口被改坏"
         )
 
     def test_every_registered_symbol_has_a_ledger_row(self):
