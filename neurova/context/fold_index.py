@@ -14,6 +14,17 @@ T-11a 让折叠**分代**了，但代际栈只活在 `_window_compaction_cache`�
 读取侧解一次（`parseCovers`）。两处各写一份字段名与区间算法，就是第二份索引
 格式（修复教义第 6 条）。
 
+## 引用（covers_ref）为什么必须可解析
+
+索引存在 ≠ 取回的到。层节点的 `covers` 只活在池里，视图里那行摘要是一段纯文本
+——模型读到摘要却没有任何确定性寻址手段，只能退回 `recall_history(query=…)` 的
+相关性门槛碰运气（工单 §12.5 第 3 条明列为假实现）。
+
+故引用（`covers_ref`）由本模块**单点**派生（`renderCoversRef`）与解析
+（`parseCoversRef`），视图只在摘要行尾部内联它的渲染结果。两处各写一遍引用语法，
+就是第二份寻址口径 —— 与 `_tool_placeholder` 的 `call=` 指针同纪律：地址由生产
+它的那一处给，消费方只解析，不猜。
+
 ## 为什么 metadata 存层序而不是档号
 
 工单 §12.4 的原话是"SUMMARY metadata 增 `level` + `covers`"。实现存的键是
@@ -27,6 +38,7 @@ T-11a 让折叠**分代**了，但代际栈只活在 `_window_compaction_cache`�
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 #: SUMMARY 层节点 metadata 里的两个键。写入与读取都取这里，不各写一份字面串。
@@ -37,11 +49,51 @@ FOLD_SEQ_KEY = "fold_seq"
 TURN_RANGE_KEY = "turn_range"
 HASHES_KEY = "hashes"
 
-#: 无法进索引的点名（读数与日志共用同一串，避免两处各写一份措辞）。
+#: 无法进索引 / 无法下钻的点名（读数与日志共用同一串，避免两处各写一份措辞）。
 REASON_NO_COVERS = "NoCovers"
 REASON_NO_FOLD_ORDINAL = "NoFoldOrdinal"
 REASON_POOL_ABSENT = "PoolAbsent"
 REASON_COVERAGE_GAP = "CoverageGap"
+#: 下钻侧的失败点名（与上四条同域，一处定义）。
+REASON_REF_UNPARSABLE = "RefUnparsable"
+REASON_LAYER_ABSENT = "LayerAbsent"
+REASON_SOURCE_MISSING = "SourceMissing"
+REASON_SCOPE_FILTERED = "ScopeFiltered"
+
+#: 引用语法：`covers_ref=fold:<层序>@<会话身份>`。档号（level）不入引用——
+#: 它随新代产生整体下移（见本模块顶部），写进引用会在下一次折叠后指向别的档。
+REF_PREFIX = "covers_ref="
+_REF_RE = re.compile(
+    r"covers_ref=fold:(?P<seq>\d+)@(?P<session>[^\s\]\[()（），、;；]+)"
+)
+
+
+def renderCoversRef(foldSeq: int, sessionId: Optional[str]) -> str:
+    """派生一个层节点的引用串（**唯一**派生处）。
+
+    会话身份取写入那一刻的**同一份**身份（`_advanceFoldGeneration` 的折叠槽键，
+    即 T-03b 的身份单源），不在这里另算一次 —— 引用里的会话与索引里的会话若来自
+    两份口径，下钻就会在"引用指 A、索引只有 B"之间静默落空。
+    """
+    return f"{REF_PREFIX}fold:{int(foldSeq)}@{sessionId or ''}"
+
+
+def parseCoversRef(text: str) -> Optional[Tuple[int, str]]:
+    """从任意文本（视图摘要行 / 模型复述的引用）解析出 `(层序, 会话身份)`。
+
+    解析不出返回 None，不猜默认值 —— 调用方据此点名 `RefUnparsable`，
+    给个兜底引用只会把"没有引用"伪装成"指向某处"。
+    """
+    match = _REF_RE.search(str(text or ""))
+    if match is None:
+        return None
+    try:
+        foldSeq = int(match.group("seq"))
+    except (TypeError, ValueError):
+        return None
+    if foldSeq <= 0:
+        return None
+    return foldSeq, match.group("session")
 
 
 def buildCovers(turnIds: Iterable[str], hashes: Iterable[str]) -> Dict[str, Any]:
