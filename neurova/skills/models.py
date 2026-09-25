@@ -41,9 +41,27 @@ OUTCOME_MARKS: Dict[Optional[bool], str] = {
 
 def outcomeWord(success: Optional[bool]) -> str:
     """三态 → 契约词汇（与 `knowledge_facts.EVIDENCE_STATES` 同一词汇表）。"""
+    return {True: OUTCOME_SUCCESS, False: OUTCOME_FAILURE}.get(
+        outcomeState(success), OUTCOME_UNEVIDENCED
+    )
+
+
+def outcomeState(success: Any) -> Optional[bool]:
+    """把任意来源的 `success` 归一为三态之一：True / False / None。
+
+    三态契约的**入口**：bool 原样、`None` 原样、EKB 2.0 里的 int 0/1 按真值解释，
+    其余无法解释的值落 `None`（"没有可读回执"）——既不猜成成功，也不猜成失败。
+    此前每个搬运点各写一份 `bool(...)`，同一列 `INTEGER NULL` 被折多次：
+    `chat_pipeline` 折一次（真值搬运）、`ExperienceRecord.from_dict` 折一次
+    （往返把三态洗成两态）。归一收在这里，搬运点只负责调用。
+    """
     if success is None:
-        return OUTCOME_UNEVIDENCED
-    return OUTCOME_SUCCESS if success else OUTCOME_FAILURE
+        return None
+    if isinstance(success, bool):
+        return success
+    if isinstance(success, int):
+        return bool(success)
+    return None
 
 
 def outcomeMark(success: Optional[bool]) -> str:
@@ -421,11 +439,15 @@ class ExperienceRecord:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExperienceRecord":
+        # 工单 016：三态原样还原。`bool(data.get("success", False))` 把
+        # 「键缺席」与「值为 None」两种"未测量"都折成 False（失败），
+        # 与票面 004 在同一条链路上打对台——往返一次就把三态洗成两态。
+        # 归一取本模块的 `outcomeState`（三态入口就在文件上方，不再跨模块借）。
         return cls(
             skill_name=data.get("skill_name", ""),
             context=dict(data.get("context", {})) if data.get("context") else {},
             result=dict(data.get("result")) if data.get("result") else None,
-            success=bool(data.get("success", False)),
+            success=outcomeState(data.get("success")),
             timestamp=data.get("timestamp", ""),
             feedback=data.get("feedback", ""),
         )

@@ -1752,9 +1752,9 @@ class PostChatPipeline:
                     # 工单 009：置信度取四态语义（未测量 ⇒ NULL，不得由 success
                     # 二值折算）；耗时取咽喉累加的轮级聚合。两者此前在生产写侧
                     # 都无人写入（库实测 nonNULL 0/103）。
+                    # 工单 016：耗时同为三态——未测量 NULL，测到则原样落（含 0.0）。
                     from neurova.core.turn_context import (
-                        get_turn_tool_elapsed,
-                        has_turn_tool_measurement,
+                        get_turn_tool_elapsed_measurement,
                     )
 
                     ekb.add_experience_record(
@@ -1778,11 +1778,10 @@ class PostChatPipeline:
                         # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
                         agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
-                        # 工单 004 同款折叠的另一命中点：`X or None` 用读数真假值回答
-                        # "测没测到"，把"测到 0.0 秒"折成 NULL。改问测量计数。
-                        execution_time=(
-                            get_turn_tool_elapsed() if has_turn_tool_measurement() else None
-                        ),
+                        # 工单 016：三态原样落库——`or None` 曾把"测到 0.0"
+                        # （工具真跑了，耗时落在时钟粒度之下）折成 NULL"未测量"，
+                        # 于是同一列上"没跑工具"与"跑了但很快"不可分辨。
+                        execution_time=get_turn_tool_elapsed_measurement(),
                         # 置信度是"这条经验值多少"的读数：只有服务端票据带结论时
                         # 才有值，未测量保持 NULL（不写 0.5 之类占位）。
                         confidence_score=(
