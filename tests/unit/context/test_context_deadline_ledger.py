@@ -136,6 +136,73 @@ class TestReachableControlsAreNotVacuouslyGreen:
         )
 
 
+class TestTakeIsIndependentOfProductionNodeCount:
+    """取数**调用次数**不得与生产节点数挂钩（同根新命中点，Issue #148 一脉）。
+
+    根因：`_rawNodes` 一度把 `nodeScan` 的**每个**节点都物化成 `(相对路径, 节点)`
+    元组 —— 实测 20 个登记符号共物化 **249547** 个，而按 `_classifyNode` /
+    `_writeLines` 读得到的类型筛一遍只剩 42435 个（17%），真正可能是引用点的更是
+    只有 43 个。多出来的部分是 `Load` / `Name` / `Constant` / `arguments` 这类
+    **结构上不可能**成为引用的节点，却要为每个付一次 `relativeToRepo`。
+
+    形态危害与 Issue #148 一致：判据本身与代码总量无关，实现却把**代码总量**
+    编码成了**时间上界** —— 单跑绿、与受保护子集共享机器时撞 30s 墙钟。
+    """
+
+    def test_rawNodes_keeps_only_site_shaped_nodes(self):
+        """`_rawNodes` 只保留**形态上可能成为引用**的节点。"""
+        symbol = "get_context_pool"
+        nodes = ledger._rawNodes(symbol)
+        assert nodes, f"{symbol} 取数为空——判据空转，本用例失去区分力"
+
+        offenders = sorted({type(node).__name__ for _rel, node in nodes
+                            if not isinstance(node, ledger.SITE_SHAPES)})
+        assert not offenders, (
+            f"`_rawNodes` 保留了形态上不可能成为引用的节点：{offenders}\n"
+            "这类节点永远不会被 `_classifyNode` / `_writeLines` 判出形态，"
+            "留着只会让取数耗时随节点数增长（Issue #148 的墙钟形态）。"
+        )
+
+    def test_site_shapes_covers_every_shape_the_judge_reads(self):
+        """形态集合必须咬合 `_classifyNode`：判定口径新增分支而预筛漏配即报红。
+
+        这是**单一事实源**的双向钉法：`SITE_SHAPES` 是取数的形态口径，
+        `_classifyNode` 是判定口径 —— 两者一旦漂移，要么多物化（墙钟回归）、
+        要么漏节点（**判据静默失准，比超时更坏**）。故从 `_classifyNode` 源码里
+        把 `isinstance(本节点, X)` 的类型名反解出来，逐个断言被 `SITE_SHAPES` 覆盖。
+        """
+        import ast as _ast
+        import inspect as _inspect
+
+        func = ledger._classifyNode
+        first_param = list(_inspect.signature(func).parameters)[0]
+        inspected = set()
+        for node in _ast.walk(_ast.parse(_inspect.getsource(func))):
+            if not (isinstance(node, _ast.Call)
+                    and isinstance(node.func, _ast.Name)
+                    and node.func.id == "isinstance"):
+                continue
+            # 只看**判的是本节点**的那些：`isinstance(func, ast.Name)` 判的是子节点，
+            # 它所属的父节点（`Call`）已在集合内，收进来只会虚假报红。
+            subject = node.args[0]
+            if not (isinstance(subject, _ast.Name) and subject.id == first_param):
+                continue
+            for arg in node.args[1:]:
+                names = arg.elts if isinstance(arg, _ast.Tuple) else [arg]
+                for name in names:
+                    if isinstance(name, _ast.Attribute):
+                        inspected.add(name.attr)
+                    elif isinstance(name, _ast.Name):
+                        inspected.add(name.id)
+        assert inspected, "未能从 `_classifyNode` 反解出任何类型——本用例失去区分力"
+
+        missing = sorted(inspected - {cls.__name__ for cls in ledger.SITE_SHAPES})
+        assert not missing, (
+            f"`_classifyNode` 读这些类型，但取数预筛 `SITE_SHAPES` 不含它们：{missing}\n"
+            "取数会漏掉这些节点 —— 判据静默失准（比超时更坏的形态）。"
+        )
+
+
 class TestJudgeRulesAreDecidable:
     """判据规则本身必须可复算：同一份代码两次取数结果一致。"""
 
