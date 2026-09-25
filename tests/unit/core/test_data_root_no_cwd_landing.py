@@ -21,9 +21,15 @@ from __future__ import annotations
 import ast
 import functools
 import re
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
+
 DATA_ROOT_MODULE = PROJECT_ROOT / "neurova" / "core" / "data_root.py"
 SCANNED_ROOTS = ("neurova", "scripts")
 
@@ -78,9 +84,18 @@ def _textOf(path: Path) -> str:
 
 @functools.lru_cache(maxsize=None)
 def _treeOf(path: Path):
-    """按文件缓存 AST；语法错误返回 None（与旧行为一致：跳过该文件）。"""
+    """按文件缓存 AST；语法错误返回 None（与旧行为一致：跳过该文件）。
+
+    解析落在本仓唯一入口 `tests/ast_scan`（Issue #148 / #197）：本文件原先自己
+    `rglob` + 逐文件 `ast.parse` 把生产树 1068 个文件全量解析一遍，且**不与其余
+    跨文件判据共享**。改后枚举走 `ast_scan.filesUnder`、解析走 `_cachedParse`，
+    同一文件在整进程里只解析一次。
+
+    实测（本机，与 `test_runtime_landing_root.py` 同跑，两文件共享同一棵生产树）：
+    修复前 11.5s → 修复后 8.6s，失败集合逐行一致。
+    """
     try:
-        return ast.parse(_textOf(path))
+        return ast_scan._cachedParse(ast_scan._cacheKey(path), _textOf(path))
     except SyntaxError:
         return None
 
@@ -225,10 +240,15 @@ def _cwdRelativeHits(path: Path) -> list:
 
 
 def _scannedFiles() -> list:
+    """`neurova/` 与 `scripts/` 的源码清单（枚举收口到共享入口）。
+
+    唯一推导点仍是 `SCANNED_ROOTS`，只是枚举不再自持一份 `rglob`
+    （`ast_scan.filesUnder` 已跳过 `__pycache__`）。
+    """
     files = []
     for root in SCANNED_ROOTS:
-        for path in sorted((PROJECT_ROOT / root).rglob("*.py")):
-            if "__pycache__" in path.parts or path == DATA_ROOT_MODULE:
+        for path in ast_scan.filesUnder(PROJECT_ROOT / root, ".py"):
+            if path == DATA_ROOT_MODULE:
                 continue
             files.append(path)
     return files
