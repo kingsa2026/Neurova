@@ -101,10 +101,22 @@ class ContextOrchestrator:
     _last_folded_hashes: set = frozenset()
     _last_archived_window_hashes: set = frozenset()
 
-    #: 折叠分代的层数上限（T-11a，工单 §12.4 的"降一层"语义）。超过即从**最深一档**
-    #: 丢弃 —— 丢弃量计入 `get_context_health()["fold_layers"]["truncated"]`，不静默。
-    #: 上限的存在理由与对工单 §12.1"档数不设上限"的偏离，见 `_advanceFoldGeneration`。
-    _MAX_FOLD_GENERATIONS = 5
+    #: 折叠分代的层数上限。**不设上限**（`None`），由负责人 2026-09-25 裁定删掉
+    #: 原值 5（工单 §12.1：档数不设上限，轨迹越长档数自然增长）。
+    #:
+    #: 上限真实代价是把当时最深的一档**丢弃**，而"轨迹越长档数自然增长"正是分辨率
+    #: 梯度成立的前提。原有限制理由（台账 §23.1："进程内易失态不可只增"）不成立：
+    #: 代际栈不是只增容器 —— 每轮折叠是"+1 新代 / 既有代各降一层"的**等量代换**，
+    #: 深度恒等于活代数，本身有界；真正随会话时长累加的只有 `fold_layers` 里的
+    #: 计数（`demoted`），而计数不占内存、正是读数的意义。
+    #:
+    #: 声明为类级常量且取 `None`（而非直接删掉）：无上限是**显式契约**，要有可断言
+    #: 的落点（`tests/unit/context/test_fold_generation_t11a.py` 的
+    #: `test_no_truncation_readout_when_uncapped` 断言它为 `None`）；直接删掉该属性
+    #: 只会让"上限没了"退化成注释里的一句话。截断读数字段一并**退役**（单源口径）：
+    #: 无上限即永不可能截断，留着一个恒 0 的字段就是谎报面（协作红线：不留断点）。
+    #: 若日后要重新加上限，须同批恢复截断计数与读数，不得静默丢层。
+    _MAX_FOLD_GENERATIONS = None
 
     #: 最新一代的档号（1 = 最细分辨率档；旧摘要每被降一层 +1）。
     _FOLD_TOP_LEVEL = 1
@@ -214,10 +226,11 @@ class ContextOrchestrator:
           （单一事实源），不在编排器另记一份。
         - `fold_layers`：折叠分代的代际栈读数（T-11a，工单 §12.4）。`levels` 是
           代际栈深度（含最新一代；**尚无折叠时为 0**，不虚报已有梯度），`demoted`
-          是累计被降层的旧摘要数，`truncated` 是超过 `_MAX_FOLD_GENERATIONS` 被
-          丢弃的层数 —— 截断必须可见，否则"轨迹始终可寻址"会在无读数的情况下失效。
+          是累计被降层的旧摘要数。**无截断字段**：代际栈不设上限（工单 §12.1，
+          负责人 2026-09-25 裁定删掉原上限 5），无上限即永不可能截断 —— 留一个
+          恒 0 的字段就是谎报面。若日后恢复上限，须同批恢复截断计数与读数。
           读数是**最近一次折叠所在会话槽**的形态（折叠缓存按会话分槽），
-          `demoted` / `truncated` 为累计量；这与同面 `turn_identity` / `microcompact`
+          `demoted` 为累计量；这与同面 `turn_identity` / `microcompact`
           的"最近一次"口径一致，故不另造第二份逐会话读数。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
@@ -231,7 +244,6 @@ class ContextOrchestrator:
             "fold_layers": {
                 "levels": 0,
                 "demoted": 0,
-                "truncated": 0,
                 "last_summary_chars": 0,
             },
             "microcompact": {
@@ -487,18 +499,12 @@ class ContextOrchestrator:
         本方法是代际栈的**唯一写入点**：自动折叠与手动 `/compact` 都经它
         （两处各写一遍必然漂移，那正是本仓反复收口的形态）。栈顶即最新一代。
 
-        截断**不静默**：超出 `_MAX_FOLD_GENERATIONS` 时从最深一档丢弃，计数进
-        `get_context_health()["fold_layers"]["truncated"]`。这条不是可选的观测面
-        —— §12.5 第 2 条把"只保留最后一层却声称轨迹全在"列为假实现，而没有读数
-        的截断与覆盖在外部不可区分。
-
-        **对工单 §12.1「档数不设上限」的偏离记录**：本票给代际栈加了上限。理由是
-        §12.1 那条指的是**视图内**档数（由 T-11c 按位置几何退避自然增长），而这里
-        限的是**进程内易失缓存**的深度 —— 它是进程内状态，无上限即随会话时长单调
-        增长（T-07 已把"持久层不可只增"立为纪律，同一理由适用于摘要栈）。深层节点
-        的**长期驻留**属 T-11b：届时栈要写进池（`ContextSource.SUMMARY`）并带
-        `covers` 索引，持久层自会承载比进程内缓存深得多的历史。本票只保证
-        "多代际存在 + 降层可见 + 截断可见"，不预判 T-11b 的落库形态。
+        **档数不设上限**（工单 §12.1，负责人 2026-09-25 裁定删掉原上限 5）。
+        栈深恒等于活代数 —— 每轮折叠是"+1 新代 / 既有代各降一层"的**等量代换**，
+        不是只增容器，故删掉上限不会带来无界内存（原先以"不可只增"为由设限的
+        偏离记录见台账 §23.1，已随之订正）。§12.5 第 2 条把"只保留最后一层却
+        声称轨迹全在"列为假实现，旧上限正是那个形态的轻量版：栈底那一代被丢弃，
+        而读数与视图都不能自证丢了什么。
         """
         stack = slot.setdefault("generations", [])
         demoted = []
@@ -509,9 +515,6 @@ class ContextOrchestrator:
 
         top = {"summary": summary, "level": self._FOLD_TOP_LEVEL}
         stack = [top] + demoted
-        dropped = max(0, len(stack) - self._MAX_FOLD_GENERATIONS)
-        if dropped:
-            stack = stack[: self._MAX_FOLD_GENERATIONS]
         slot["generations"] = stack
         # 栈顶投影：既有读侧（防抖 / 静态桩 / 手动压缩回执）据此逐字不变。
         slot["summary"] = summary
@@ -520,7 +523,6 @@ class ContextOrchestrator:
         readout = self._contextHealthSlot("fold_layers")
         readout["levels"] = len(stack)
         readout["demoted"] = slot["demoted_total"]
-        readout["truncated"] = int(readout.get("truncated") or 0) + dropped
         readout["last_summary_chars"] = len(summary or "")
 
     def _window_cache_slot(self, key: str) -> dict:

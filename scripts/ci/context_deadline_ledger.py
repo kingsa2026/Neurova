@@ -191,19 +191,55 @@ def _writeLines(symbol: str) -> Dict[str, set]:
     return writes
 
 
+#: 取数只保留**形态上可能成为引用**的节点。
+#:
+#: 这是 `_rawNodes` 的**唯一**预筛谓词面，与文本预筛同一条纪律：预筛必须是
+#: **充分条件** —— `_classifyNode` 与 `_writeLines` 只可能从这几类节点里判出形态，
+#: 其余节点（`Load` / `Name` / `Constant` / `arguments` / `Module` …）结构上永远
+#: 判不出，留着只是把**代码总量**编码成**时间上界**（`cnb-2p6-1k347lfg1` /
+#: 2026-09-25 py3.12 腿 `Failed: Timeout (>30.0s)` 的同形账）。
+#:
+#: 实测：20 个登记符号共 249547 个节点，按本集合筛后 42435 个（17%），
+#: 而真正可能是引用点的只有 43 个。
+#:
+#: **为什么是类型元组而不是照抄一遍判定分支**：谓词必须覆盖 `_rawNodes` 的
+#: **全部**消费方所认的形态 —— 不只是 `_classifyNode`，还有 `_writeLines`
+#: （认 `ast.Assign`）。手写分支漏一类**不会报错**，只会让「只写不读」类死线
+#: 静默变成 `absent`（把活线伪装成死线）。故改为「判定面派生 + 常驻咬合判据」：
+#: 覆盖性由 `tests/unit/context/test_context_deadline_ledger.py` 的
+#: `test_site_shapes_covers_every_shape_the_judge_reads` 从 `_classifyNode`
+#: 源码反解 `isinstance(本节点, X)` 后逐个反证，漏配即报红。
+SITE_SHAPES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Call,
+    ast.ImportFrom,
+    ast.Import,
+    ast.Attribute,
+    ast.Assign,
+)
+
+
 @functools.lru_cache(maxsize=None)
 def _rawNodes(symbol: str) -> Tuple[SourceKey, ...]:
-    """该符号的全部节点取数（按符号整进程缓存）。
+    """该符号的**候选**节点取数（按符号整进程缓存）。
 
     为什么不直接 `list(nodeScan(...))`：每个符号要跑两遍（一遍取引用、一遍取
     写入归属），而 `sourceRefsUnder` 每次都要遍历并读取生产根下的全部文件。
     20 个登记符号 × 多次调用 = 数万次文件读取，实测单跑 50s，会直接撞
     pytest-timeout 的 30s 墙钟（本仓已有 `cnb-2p6-1k347lfg1` 的同形事故）。
-    缓存键是符号名，值是**已解析的节点**（`_cachedNodes` 已按内容戳缓存，
+    缓存键是符号名，值是**已解析的候选节点**（`_cachedNodes` 已按内容戳缓存，
     这里只是避免重复的文本预筛遍历）。
+
+    预筛掉的是**形态上不可能成为引用**的节点（见 `SITE_SHAPES`）：预筛漏一类
+    形态不会报错，只会让死线静默失准，故覆盖性由咬合判据常驻反证。
     """
-    return tuple((ast_scan.relativeToRepo(path), node)
-                 for path, node in ast_scan.nodeScan(PRODUCTION_ROOT, hints=(symbol,)))
+    return tuple(
+        (ast_scan.relativeToRepo(path), node)
+        for path, node in ast_scan.nodeScan(PRODUCTION_ROOT, hints=(symbol,))
+        if isinstance(node, SITE_SHAPES)
+    )
 
 
 @functools.lru_cache(maxsize=None)
@@ -288,6 +324,8 @@ def facts() -> Tuple[Dict[str, object], ...]:
     for symbol, origin in AUDIT_SYMBOLS:
         sites = referenceSites(symbol)
         consumers = [s for s in sites if s.form not in ("def", "write")]
+        # `classify()` 仍是判据类单源；`computedJudge` 只是它的按符号缓存，
+        # 让只比判据类的调用方不必再走一遍完整对账取数（见 `computedJudge`）。
         judge, detail = classify(symbol)
         rows.append({
             "symbol": symbol,
@@ -317,6 +355,37 @@ def readLedger() -> Dict[str, Dict[str, str]]:
         basis = "|".join(parts[3:]).strip()
         entries[symbol] = {"judge": judge, "disposal": disposal, "basis": basis}
     return entries
+
+
+@functools.lru_cache(maxsize=None)
+def computedJudge(symbol: str) -> str:
+    """`symbol` 的机器判据类（单源 = `classify()`），按符号整进程缓存。
+
+    为什么需要它（根因，2026-09-25 实测）：`reconcile()` 会为每个登记符号构造
+    完整对账行（`facts()` 的 `classify` 明细 + 引用点数核对），而**只比判据类**
+    的调用方（`tests/unit/context/test_context_deadline_ledger.py` 的
+    `test_ledger_matches_computed_judge_classes`）跟着付全价：实测该用例
+    **2.64s**，占受保护子集整跑（556s）里的可测尖峰，叠加并发负载即撞 30s 的
+    `pytest-timeout` 墙钟 —— py3.12 那条流水线 2026-09-25 即因此判红
+    （`Failed: Timeout (>30.0s)`，PR #209；同一提交 py3.11 全绿）。
+
+    这不是"把判据改松"：判据类仍由 `classify()` 单源算出（不新造平行体系，
+    `AGENTS.md` 修复教义第 6 条），台账与实测不一致照样报红；省掉的是**同一
+    事实的重复取数**。引用点数核对只有在登记符号集变化时才可能变，缓存键是
+    符号名 —— 与 `referenceSites()` / `_rawNodes()` 既有缓存同一形态。
+    """
+    return classify(symbol)[0]
+
+
+def computeJudgeClasses() -> Dict[str, str]:
+    """`{符号: 机器判据类}` —— **只比判据类**的调用方的唯一取数入口。
+
+    与 `reconcile()["judge_conflict"]` 同一判据（都是 `classify()` 单源的
+    `computedJudge()`），故两条路径不可能给出不同结论；差别只在取数范围：
+    本函数不构造引用点清单与点数核对，成本从「20 符号全量对账」降到「20 次按符号
+    缓存的判据分类」。
+    """
+    return {symbol: computedJudge(symbol) for symbol, _origin in AUDIT_SYMBOLS}
 
 
 def reconcile() -> Dict[str, List[Dict[str, object]]]:

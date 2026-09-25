@@ -145,6 +145,52 @@ class TestRealRead:
         assert result["rows"][0][1] == "记忆条目 1"
 
     @pytest.mark.asyncio
+    async def test_whereClauseEquality_isReadable(self, tmp_path):
+        """带 `WHERE 列 = 值` 的只读查询必须读得出来。
+
+        白名单的写型判定若在正文里扫关键字，裸等号会被当成写型 PRAGMA，
+        于是**最常见的一类查询**（按条件取行）全被误拒——工具的显式查询面
+        名存实亡（文档 §8 判据 5「读得到」）。
+        """
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+        executor = _makeExecutor(tmp_path)
+
+        result = await executor._execute_builtin_tool(
+            "query_database", {"file_id": file_id, "sql": "SELECT id, content FROM memories WHERE id = 1"}
+        )
+
+        assert "error" not in result, result
+        assert result["rows"] == [[1, "记忆条目 1"]], result
+
+    @pytest.mark.asyncio
+    async def test_scalarFunctionNamedReplace_isReadable(self, tmp_path):
+        """`SELECT replace(...)` 是标量函数，不是写型 `REPLACE INTO`。"""
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+        executor = _makeExecutor(tmp_path)
+
+        result = await executor._execute_builtin_tool(
+            "query_database",
+            {"file_id": file_id, "sql": "SELECT replace(content, '记忆', 'mem') FROM memories WHERE id = 2"},
+        )
+
+        assert "error" not in result, result
+        assert result["rows"] == [["mem条目 2"]], result
+
+    @pytest.mark.asyncio
+    async def test_readOnlyPragmaTableInfo_returnsColumns(self, tmp_path):
+        """只读 PRAGMA（表结构）是白名单内的读取形态。"""
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+        executor = _makeExecutor(tmp_path)
+
+        result = await executor._execute_builtin_tool(
+            "query_database", {"file_id": file_id, "sql": "PRAGMA table_info(memories)"}
+        )
+
+        assert "error" not in result, result
+        names = [row[1] for row in result["rows"]]
+        assert names == ["id", "content", "score"], result
+
+    @pytest.mark.asyncio
     async def test_rowLimitTruncatesAndMarks(self, tmp_path):
         file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path, rows=8))
         executor = _makeExecutor(tmp_path)
@@ -177,6 +223,12 @@ class TestSafetyRedLines:
             "DELETE FROM memories",
             "ATTACH DATABASE '/etc/passwd' AS leak",
             "PRAGMA journal_mode = WAL",
+            # 写形态的 PRAGMA 不带等号也是写：只查等号会漏（同一根因的第二形态）
+            "PRAGMA journal_mode(WAL)",
+            "REPLACE INTO memories (id, content) VALUES (99, 'x')",
+            # CTE 前缀后的写型语句：语句头是 WITH，正文里的 DELETE 才是最外层动作
+            "WITH victim AS (SELECT id FROM memories) DELETE FROM memories",
+            "SELECT load_extension('x')",
             "SELECT 1; DROP TABLE memories",
         ],
     )
@@ -246,7 +298,7 @@ class TestReverseLock:
         """
         from neurova import attachment_dataset as dataset
 
-        monkeypatch.setattr(dataset, "assertReadOnlySql", lambda sql: sql)
+        monkeypatch.setattr(dataset, "assertReadOnlySql", lambda sql, conn: sql)
         file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
 
         result = await _makeExecutor(tmp_path)._execute_builtin_tool(
@@ -275,7 +327,7 @@ class TestReverseLock:
         monkeypatch.setattr(
             dataset, "openReadOnlyConnection", lambda path: _sqlite3.connect(str(path))
         )
-        monkeypatch.setattr(dataset, "assertReadOnlySql", lambda sql: sql)
+        monkeypatch.setattr(dataset, "assertReadOnlySql", lambda sql, conn: sql)
         file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
 
         result = await _makeExecutor(tmp_path)._execute_builtin_tool(
@@ -283,6 +335,24 @@ class TestReverseLock:
         )
 
         assert "error" not in result, f"两道只读防线都撤掉后写仍被拒：{result}"
+
+    @pytest.mark.asyncio
+    async def test_withoutPragmaFormList_writeFormPragmaSlipsThrough(self, tmp_path, monkeypatch):
+        """反向锁③：放宽 PRAGMA 形态名单 ⇒ `PRAGMA journal_mode(WAL)` 立即可达。
+
+        这条钉住的是"白名单按**PRAGMA 形态**判读写"这件事本身：
+        名单一旦退化成"只查名不查实参"，不带等号的写型 PRAGMA 就会被放行。
+        """
+        from neurova import attachment_dataset as dataset
+
+        monkeypatch.setattr(dataset, "_pragmaFormAllowed", lambda name, argument: True)
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+
+        result = await _makeExecutor(tmp_path)._execute_builtin_tool(
+            "query_database", {"file_id": file_id, "sql": "PRAGMA journal_mode(WAL)"}
+        )
+
+        assert "error" not in result, f"名单已放宽，该写型 PRAGMA 应当可达：{result}"
 
     @pytest.mark.asyncio
     async def test_readOnlyDefensesHoldByDefault(self, tmp_path):

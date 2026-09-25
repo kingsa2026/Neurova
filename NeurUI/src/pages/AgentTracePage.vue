@@ -31,13 +31,13 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'status'">
-              <a-tag :color="statusColor(record.status)">{{ record.status }}</a-tag>
+              <a-tag :color="traceStatusTagColor(record.status)">{{ record.status }}</a-tag>
             </template>
             <template v-if="column.key === 'duration'">
               <span class="mono">{{ record.duration_ms ?? 0 }}ms</span>
             </template>
             <template v-if="column.key === 'timestamp'">
-              <span class="mono">{{ formatTime(record.started_at || record.timestamp) }}</span>
+              <span class="mono">{{ formatTimestampText(record.started_at || record.timestamp) }}</span>
             </template>
           </template>
           <template #expandedRowRender="{ record }">
@@ -106,6 +106,8 @@ import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
+import { traceStatusTagColor } from '@/utils/traceStatus'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -121,12 +123,7 @@ const traces = ref<any[]>([])
 const stats = ref<Record<string, any>>({})
 const expandedKeys = ref<string[]>([])
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
-const statusColor = (status: string) => {
-  const map: Record<string, string> = { completed: 'green', running: 'blue', failed: 'red', pending: 'default' }
-  return map[status] || 'default'
-}
 
 const traceColumns = computed(() => [
   { title: t('trace.id'), dataIndex: 'id', key: 'id', width: 120 },
