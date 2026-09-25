@@ -200,6 +200,10 @@ class ContextOrchestrator:
         - `turn_identity`：每轮会话身份的解析结果（T-03b）。落到 `direct`
           意味着本轮所有单聊共用同一个折叠摘要槽——静默共用正是本缺陷的形态，
           所以计数与 `last_key` 必须可读。
+        - `tool_turns`：每轮视图内的工具轮计数（T-10d，工单 §11.5）——`assistant.tool_calls`
+          行数 / `tool` 行数 / 旧数据降级次数，以及 `declared_ids` 与实际
+          `tool_call_id` 不匹配的告警。**降级次数取自 `SessionManager` 的计数器本体**
+          （单一事实源），不在编排器另记一份。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
@@ -216,6 +220,17 @@ class ContextOrchestrator:
                 "last_kept": 0,
                 "last_payload_tokens": 0,
                 "last_trigger_tokens": 0,
+            },
+            "tool_turns": {
+                "turns": 0,
+                "tool_call_rows": 0,
+                "tool_rows": 0,
+                "degraded_turns": 0,
+                "rebuilt_pairs": 0,
+                "rebuilt_tool_rows": 0,
+                "killswitch_off": 0,
+                "declared_mismatch": 0,
+                "last_error": None,
             },
         }
 
@@ -915,12 +930,20 @@ class ContextOrchestrator:
                 window_msgs = self._clear_old_tool_results(window_msgs)
             except Exception as e:  # noqa: BLE001 - 清除失败不阻断
                 logger.debug("工具结果占位清除跳过: %s", e)
+            # T-10d（工单 §11.5）：**在 repair 之前**观测重建产出的配对合法性。
+            # 放 repair 之后计数恒为 0（它把孤儿 tool 行就地转成 user 注记），
+            # 那是一条第 2 条禁止的"恒真判据"—— repair 是通用兜底，它会静默
+            # 修好缺陷，而"重建有缺陷"这件事必须仍然可见。
+            self._recordToolTurnReadout(window_msgs)
             try:
                 from neurova.context.recovery import repair_tool_turns
 
                 window_msgs = repair_tool_turns(window_msgs)
             except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
                 logger.debug("tool-turn 修复跳过: %s", e)
+            # 行数按**实际发给模型**的形状刷新：与上段的配对读数各记一处，
+            # 「重建产出合法」与「最终视图合法」因此可分，不是同一份账抄两遍。
+            self._refreshToolRows(window_msgs)
             # 视图装配保留协议契约字段（含工具寻址字段）：`tool_call_id` / `name`
             # / `tool_calls` 被裁掉时，`_tool_placeholder` 的硬地址指针恒为空、
             # `repair_tool_turns` 也把完整的 tool 轮误判成孤儿转成 user 注记——
@@ -1370,6 +1393,71 @@ class ContextOrchestrator:
         return max(self._TOOL_PAYLOAD_MIN_TOKENS,
                    min(self._TOOL_PAYLOAD_TRIGGER_TOKENS,
                        int(window_tokens * self._TOOL_PAYLOAD_TRIGGER_SHARE)))
+
+    def _recordToolTurnReadout(self, window_msgs: list) -> None:
+        """把本视图的工具轮读数写进 `get_context_health()["tool_turns"]`（T-10d）。
+
+        三件事此前**完全不可见**（工单 §11.5 要求的可观测计数）：
+        ① 视图内 `assistant.tool_calls` 行数与 `tool` 行数；
+        ② 旧数据降级次数 / 重建配对数 / 回退开关使用次数 —— 取自
+           `SessionManager.get_model_context_stats()` 的计数器**本体**（重建路径
+           才是这些事实的发生地；在这里另记一份就是第二份平行账，两边迟早对不上）；
+        ③ `declared_ids` 与实际 `tool_call_id` 不匹配 —— 孤儿 `tool` 行直发 provider
+           即 400（配对非法），故计数 + 首次 warning 点名，不静默。
+
+        计数一律取**实际视图**，不重算、不复制。
+        """
+        from neurova.context.recovery import orphanToolRows
+
+        readout = self._contextHealthSlot("tool_turns")
+        readout["turns"] = int(readout.get("turns") or 0) + 1
+        readout["rebuilt_tool_rows"] = sum(
+            1 for m in window_msgs if (m or {}).get("role") == "tool"
+        )
+        stats = self._modelContextStats()
+        readout["degraded_turns"] = int(stats.get("degraded_turns") or 0)
+        readout["rebuilt_pairs"] = int(stats.get("rebuilt_pairs") or 0)
+        readout["killswitch_off"] = int(stats.get("killswitch_off") or 0)
+
+        orphaned = orphanToolRows(window_msgs)
+        readout["declared_mismatch"] = int(readout.get("declared_mismatch") or 0) + len(orphaned)
+        if orphaned:
+            ids = [str((m or {}).get("tool_call_id") or "未知") for m in orphaned[:3]]
+            readout["last_error"] = (
+                "ToolPairingMismatch: 本视图有 %d 条 `role=\"tool\"` 行的 tool_call_id "
+                "未被任何 `assistant.tool_calls` 声明（直发 provider 即 400），前几条 id=%s"
+                % (len(orphaned), ids)
+            )
+            logger.warning(
+                "工具轮配对不匹配：%d 条孤儿 tool 行（id=%s）—— provider 会以 400 拒绝",
+                len(orphaned), ids,
+            )
+
+    def _refreshToolRows(self, window_msgs: list) -> None:
+        """刷新视图内的 `assistant.tool_calls` 行数与 `tool` 行数（唯一写入处）。"""
+        readout = self._contextHealthSlot("tool_turns")
+        readout["tool_call_rows"] = sum(
+            1 for m in window_msgs
+            if (m or {}).get("role") == "assistant" and (m or {}).get("tool_calls")
+        )
+        readout["tool_rows"] = sum(1 for m in window_msgs if (m or {}).get("role") == "tool")
+
+    def _modelContextStats(self) -> Dict[str, int]:
+        """重建路径的计数：读 `SessionManager.get_model_context_stats()` **本体**。
+
+        降级次数、重建配对数、回退开关使用次数都发生在那里（重建方法内部累加），
+        在编排器另记一份就是第二份平行账 —— 两边迟早对不上，且对不上时没人能
+        说清谁对（教义第 6 条）。读数不可得时按 0 计，不阻断装配。
+        """
+        manager = getattr(self._agent, "session_manager", None)
+        getter = getattr(manager, "get_model_context_stats", None)
+        if getter is None:
+            return {}
+        try:
+            stats = getter() or {}
+        except Exception:  # noqa: BLE001 - 读数不可得按 0 计，不阻断装配
+            return {}
+        return {str(k): int(v) for k, v in stats.items() if isinstance(v, (int, float))}
 
     def _clear_old_tool_results(self, window_msgs: list) -> list:
         """microcompact：老工具结果的载荷换成寻址占位指针（原文在池/台账，可直取）。

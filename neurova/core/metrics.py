@@ -16,6 +16,8 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.record_hot_query_plan(db, query_id, indexed, duration_ms)  # 热点查询计划
 - Metrics.observe_caches()  # 缓存命中率 gauges 快照（P1-6）
 - Metrics.record_http_request(method, route, status, duration_s)  # HTTP 时长（P1-6）
+- Metrics.record_tool_turn_provider_reject(reason)  # 工具轮配对非法 400（T-10d 归零判据）
+- Metrics.observe_context_health(state)  # 上下文域健康读数快照（T-10d）
 """
 
 from __future__ import annotations
@@ -181,6 +183,24 @@ class _Metrics:
             ["kind"],
         )
 
+        # T-10d（工单 §11.5）：工具轮进视图的**唯一硬失败信号** —— 灰度期
+        # provider 400（配对非法）必须归零。此前该信号完全不可观测：连"发生了
+        # 几次配对非法导致的 400"都无从回答，归零判据便无从成立。
+        self.tool_turn_provider_rejects_total = Counter(
+            "neurova_tool_turn_provider_rejects_total",
+            "Provider 400 rejections caused by illegal tool-turn pairing",
+            ["reason"],
+        )
+        # 上下文域健康读数（ledger/summarizer/fold_integrity/turn_identity/
+        # microcompact/tool_turns）。抓取时按 agent 快照，不常驻埋点。
+        # 此前 `get_context_health()` 在**生产代码里零读者**（只在测试与 manual
+        # 脚本里被读）——"写了但没人读"正是协作红线点名的断点形态。
+        self.context_health_value = Gauge(
+            "neurova_context_health_value",
+            "Context-domain health readout (scrape-time snapshot by agent)",
+            ["agent", "kind", "field"],
+        )
+
         # ── 记忆检索 ──
         self.memory_recall_total = Counter(
             "neurova_memory_recall_total",
@@ -312,6 +332,49 @@ class _Metrics:
                 self.capability_gap_total.labels(kind=str(kind)).inc()
         except Exception:  # noqa: BLE001 - 观测失败不得影响对话主链
             logger.debug("capability gap metric failed", exc_info=True)
+
+    def record_tool_turn_provider_reject(self, reason: str) -> None:
+        """工具轮配对非法导致的 provider 400 计数（归零判据的唯一读数）。"""
+        try:
+            self.tool_turn_provider_rejects_total.labels(reason=str(reason)).inc()
+        except Exception:  # noqa: BLE001 - 观测失败不得影响错误上抛路径
+            logger.debug("tool turn reject metric failed", exc_info=True)
+
+    def observe_context_health(self, state: Any = None) -> None:
+        """上下文域健康读数快照（/metrics 抓取时调用）。
+
+        逐 agent 读它自己的编排器（`agent.context_orchestrator.get_context_health()`）
+        —— 读数是编排器**单源**持有的那份，不在这里重算、也不新造一份账。
+        只读已存在的编排器（与 `observe_caches` 同原则：抓取绝不懒建对象）。
+
+        非数值字段（`last_error` 之类的点名串）不落 gauge：把它们塞进数字会让
+        读数变成不可判读的编码。故这里只搬数值，异常一律隔离（单个 agent 失败
+        不影响其余）。
+        """
+        agents = getattr(state, "agents", None) if state is not None else None
+        if not isinstance(agents, dict):
+            return
+        for agent_id, agent in list(agents.items()):
+            orchestrator = getattr(agent, "context_orchestrator", None)
+            if orchestrator is None or not hasattr(orchestrator, "get_context_health"):
+                continue
+            try:
+                health = orchestrator.get_context_health()
+            except Exception:  # noqa: BLE001 - 读数失败不影响其它 agent
+                logger.debug("context health readout failed: %s", agent_id, exc_info=True)
+                continue
+            for kind, slot in (health or {}).items():
+                if not isinstance(slot, dict):
+                    continue
+                for field, value in slot.items():
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        continue
+                    try:
+                        self.context_health_value.labels(
+                            agent=str(agent_id), kind=str(kind), field=str(field)
+                        ).set(float(value))
+                    except Exception:  # noqa: BLE001
+                        logger.debug("context health gauge failed: %s", field, exc_info=True)
 
     def record_circuit_rejection(self, provider: str) -> None:
         try:
@@ -634,6 +697,11 @@ def record_db_connection_closed(db_path: str) -> None:
 def record_index_snapshot(db_path: str, index_count: int, duration_ms: float) -> None:
     """模块级便捷入口（索引快照埋点）。"""
     get_metrics().record_index_snapshot(db_path, index_count, duration_ms)
+
+
+def record_tool_turn_provider_reject(reason: str) -> None:
+    """模块级便捷入口（工具轮配对非法 400 埋点）。"""
+    get_metrics().record_tool_turn_provider_reject(reason)
 
 
 def record_hot_query_plan(
