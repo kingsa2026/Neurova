@@ -110,7 +110,14 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
+      # fetch-depth: 0 是**判据的运行前提**，不是优化项：
+      #   受保护子集里的 test_protected_subset_registration_history.py 按清单
+      #   历史判「条目曾登记过、是否被静默删掉」，默认的 depth=1 只给到当前一个
+      #   提交，它会拿"只有现值"的假历史作答 —— 台账署名被判成"从未登记过"，
+      #   失败点名的是一屏无关条目。由 tests/unit/ci/…registration_history.py 反锁。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
