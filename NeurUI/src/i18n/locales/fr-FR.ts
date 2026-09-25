@@ -2707,7 +2707,7 @@ export default {
     taskType: '任务类型',
     outcomeSuccess: '成功',
     outcomeFailure: '失败',
-    outcomePartial: '部分成功',
+    outcomeUnevidenced: 'Non mesuré',
     addLessons: '添加经验教训',
     title: 'Connaissance expérientielle',
     successRate: 'Taux de réussite',
