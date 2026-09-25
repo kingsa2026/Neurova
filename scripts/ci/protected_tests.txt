@@ -271,6 +271,9 @@ tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py
 tests/unit/core/test_chain_integrity_observability.py
 tests/unit/agent/test_tool_experience_loop_offline_probe.py
 tests/unit/skills/test_skill_name_collision_recount.py
+# Issue #189 残留：存量库名字域迁移（同 name 不同身份 ⇒ 派生名携带身份；
+#   迁移幂等 + 装配后工具面条目数 = 库内条目数 + 新写入按构造成立）
+tests/unit/skills/test_skill_name_domain_migration.py
 tests/unit/test_script_index_registration.py
 
 # Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
