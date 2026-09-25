@@ -701,6 +701,26 @@ class UnifiedContextInjector(BaseModule):
             self.log_warning(f"构建经验上下文失败: {e}")
             return ""
 
+    @staticmethod
+    def _render_experience_line(exp: Dict) -> str:
+        """一条经验 → 进 prompt 的一行（三态与摘要取值的**唯一**渲染口）。
+
+        工单 004 的第五个面就是这里：库/权重/结晶器/API 四面都三态了，唯独真正
+        会改变下一次调用的这一面是二值 —— 未测量（NULL）被渲染成 `✗`，等于告诉
+        模型"上次做砸了"。记号取 `skills.models` 的单源词汇表，不在此处再写字面量。
+
+        `context` / `result` 的取值形状也收在这里：旧实现在两处各写一份
+        `str(x)[:50]`，dict 形状（EKB 2.0 契约）直接切片抛 `TypeError`，
+        被外层 `except` 吞掉后整段经验从 prompt 里静默消失。
+        """
+        from neurova.skills.models import experienceSummary, outcomeMark
+
+        context_summary = experienceSummary(exp.get("context"), ("user_input",))[:50]
+        result_summary = experienceSummary(
+            exp.get("result"), ("reply_excerpt", "output")
+        )[:50]
+        return f"{outcomeMark(exp.get('success'))} {context_summary} → {result_summary}"
+
     def _format_experience_from_list(self, experiences: List[Dict]) -> str:
         """
         从预检索的经验列表格式化经验上下文（Phase 4: 消除双重检索）。
@@ -728,26 +748,6 @@ class UnifiedContextInjector(BaseModule):
         except Exception as e:
             self.log_warning(f"格式化经验列表失败: {e}")
             return ""
-
-    @staticmethod
-    def _render_experience_line(exp: Dict) -> str:
-        """一条经验 → 进 prompt 的一行（三态与摘要取值的**唯一**渲染口）。
-
-        工单 004 的第五个面就是这里：库/权重/结晶器/API 四面都三态了，唯独真正
-        会改变下一次调用的这一面是二值 —— 未测量被渲染成 `✗`，等于告诉模型
-        "上次做砸了"。记号取 `skills.models` 的单源词汇表，不在此处再写字面量。
-
-        `context` / `result` 的取值形状也收在这里：旧实现在两处各写一份
-        `str(x)[:50]`，dict 形状（EKB 2.0 契约）直接切片抛 `TypeError`，
-        被外层 `except` 吞掉后整段经验从 prompt 里静默消失。
-        """
-        from neurova.skills.models import experienceSummary, outcomeMark
-
-        context_summary = experienceSummary(exp.get("context"), ("user_input",))[:50]
-        result_summary = experienceSummary(
-            exp.get("result"), ("reply_excerpt", "output")
-        )[:50]
-        return f"{outcomeMark(exp.get('success'))} {context_summary} → {result_summary}"
 
     def _format_emotion(self, emotion: Dict) -> str:
         """格式化情感状态"""
