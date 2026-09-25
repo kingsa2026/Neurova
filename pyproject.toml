@@ -127,7 +127,10 @@ markers = [
 
 [tool.coverage.run]
 # P0-6：CI 覆盖率门禁的度量范围 = 受保护子集实际 exercising 的模块。
-# context/ 等待 P1-1 测试落地后加入；预存失败模块不进度量。
+# 阈值（fail_under=60）**不在这里**：它的事实源是 CI 命令行，两处各写一份必然漂移。
+# context/ 段与 context_pool.py 于 T-09 第 6 项加入（Issue #90）——注释里"等待
+# P1-1 测试落地"的前置已由 T-01…T-06 与 B4/B5/B6 满足；加入前已本地实跑受保护
+# 子集（278 文件）取读数：上下文域无预存失败被计入，TOTAL 84% > 60%。
 # 注意：include 与 source 并用会被忽略（coverage 限制），此处只列 include。
 include = [
     "*/tool_layers/mcp_client.py",
@@ -138,6 +141,10 @@ include = [
     "*/security/governance.py",
     "*/api/endpoints/tool_layers.py",
     "*/api/endpoints/shared_config.py",
+    # T-09 第 6 项（Issue #90）：上下文链路此前不在度量范围内 —— "覆盖率 60%"
+    # 这条门禁对 T-01…T-11 全部新代码零约束。
+    "*/context/*.py",
+    "*/context_pool.py",
 ]
 
 [tool.ruff.lint]
