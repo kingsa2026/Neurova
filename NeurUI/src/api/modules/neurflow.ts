@@ -304,18 +304,6 @@ export interface ComfyuiExecuteResult {
   error: string | null
 }
 
-/** 导入 ComfyUI API 格式工作流为 Neurflow WorkflowDefinition。 */
-export function importComfyuiWorkflow(data: {
-  name: string
-  description?: string
-  workflow: Record<string, unknown>
-}) {
-  return api.post<ApiResponse<{ workflow: WorkflowDefinition; message: string }>>(
-    `${BASE}/comfyui/import`,
-    data,
-  )
-}
-
 /** 检查 ComfyUI 服务可用性。 */
 export function getComfyuiStatus() {
   return api.get<ApiResponse<ComfyuiStatus>>(`${BASE}/comfyui/status`)
