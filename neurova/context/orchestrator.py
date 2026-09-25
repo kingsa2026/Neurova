@@ -151,6 +151,9 @@ class ContextOrchestrator:
         self._turn_room_id: str = ""
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
         self._DELTA_RESUMMARY_MSGS = 4
+        # T-11e：折叠 rollup 后台 worker（懒建；`NEUROVA_CONTEXT_ROLLUP=0` 时不建）。
+        # 关键路径只付 1 次摘要调用，失败批次的补做在它那里，见 `foldRollupWorker`。
+        self._fold_rollup_worker = None
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
         # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
@@ -238,6 +241,18 @@ class ContextOrchestrator:
           「覆盖闭合」的反例数（已折叠原文的 hash 不在任何档 covers 内）。
           读数取自池的**唯一读面** `summaryLayers()`（含持久读回），编排器不
           在这里另算一份索引——两份索引必然漂移。
+        - `fold_rollup`：折叠 rollup 后台补做的读数（T-11e，工单 §12.6/§12.7 判据 6）。
+          关键路径每轮至多一次摘要 LLM 调用（`summary_call_budget=1`）；失败批次交
+          `ContextRollupWorker` 后台补做，`succeeded` 才推进覆盖账。
+          `dispatched` / `succeeded` / `failed` / `dropped`（队列有界，超出即丢并计数）
+          / `in_flight`；失败必须点名 `last_error`（后台不是"发后不管"，异常在此可见）。
+        - `fold_resolution`：分辨率装配读数（T-11c，工单 §12.6/§12.7 判据 1、2）。
+          `levels` 是**视图本轮实际装配的档数**，`level_budgets` 是各档授予的
+          token 预算（阶梯单源 `context/fold_resolution.py`），相邻预算比恒为
+          `budget_ratio`（= 4，即 1:4:16 的相邻比）。索引里存在但未被装配的深档
+          计入 `dropped_levels`（不静默丢层：它们仍可由 covers_ref 确定性下钻）；
+          被预算裁掉的字符数计入 `truncated_chars`（截断必须可见）。
+          开关 `NEUROVA_CONTEXT_FOLD_RESOLUTION=0` 时 `enabled=False` 且只装栈顶一档。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
@@ -257,6 +272,23 @@ class ContextOrchestrator:
                 "levels": 0,
                 "unparsable": 0,
                 "uncovered": 0,
+                "last_error": None,
+            },
+            "fold_rollup": {
+                "dispatched": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "in_flight": 0,
+                "dropped": 0,
+                "last_error": None,
+            },
+            "fold_resolution": {
+                "enabled": True,
+                "levels": 1,
+                "dropped_levels": 0,
+                "budget_ratio": 4,
+                "level_budgets": (),
+                "truncated_chars": 0,
                 "last_error": None,
             },
             "microcompact": {
@@ -401,6 +433,16 @@ class ContextOrchestrator:
                 snapshot["fold_index"] = {**empty["fold_index"], **reader(self._foldedHashes())}
             except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
                 snapshot["fold_index"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        # T-11e：rollup 后台补做的读数取自 worker 本体（它才是派发/成败的记账处），
+        # 编排器不另记一份——两份账必然漂移（教义第 6 条）。开关关闭/尚未懒建时
+        # 保留空形状（读数不为幻觉）。
+        worker = getattr(self, "_fold_rollup_worker", None)
+        reader = getattr(worker, "stats", None)
+        if callable(reader):
+            try:
+                snapshot["fold_rollup"] = {**empty["fold_rollup"], **reader()}
+            except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+                snapshot["fold_rollup"]["last_error"] = f"{type(exc).__name__}: {exc}"
         return snapshot
 
     def _foldedHashes(self) -> set:
@@ -615,6 +657,185 @@ class ContextOrchestrator:
         if REF_PREFIX in content:
             return msg
         return {**msg, "content": f"{content}\n({ref})"}
+
+    def _assembleResolutionLadder(
+        self, window: list, slot: dict, windowBudget: int
+    ) -> list:
+        """按位置几何退避装配多档概览行（T-11c，工单 §12.4 第 17 步）。
+
+        **根因**：T-11a/b/d/e 交出的是数据（代际栈、池内层节点、可解析引用、
+        后台 rollup），而视图装配器从没改过 —— `compact_window` 产出的那一行摘要
+        （= 代际栈顶）被直接拼进 `context` 就结束。实测连跑 6 轮：池内 6 档层节点、
+        视图内 1 行摘要。于是 §12.1 的 C2 梯度在数据上不成立，"越远分辨率越低"
+        （§12.0 B）无从谈起。
+
+        **为什么替掉那一行、而不是在它后面再补几行**：池索引（`summaryLayers()`）
+        是层事实的**唯一读面**（T-11b），它已经含栈顶那一代的原文（`archive_summary`
+        存的就是同一个字符串）。留着旧行再加索引行，同一个档会在视图里出现两次。
+        索引取不到（从未成功摘要过）时本方法**原样返回** —— 那时视图里那行静态折叠桩
+        是诚实的降级面，不能拿"索引里没有"为由把它删掉。
+
+        **额度纪律**：概览区额度 = 窗口预算 − 尾部原文实占（不足地板时取地板）。
+        故阶梯总量恒 ≤ 窗口预算，且不留存"额度用多少"这类第二份账本。档数由索引
+        深度决定、不设上限（§12.1）；装不下的深档计入 `dropped_levels`，且它们
+        仍可由 `covers_ref` 确定性下钻（T-11d）—— 视图省一行不等于内容丢了。
+        """
+        from neurova.context.fold_index import renderCoversRef
+        from neurova.context.fold_resolution import (
+            GEO_RATIO,
+            MIN_LEVEL_TOKENS,
+            fitToBudget,
+            ladderBudgets,
+            resolutionEnabled,
+        )
+        from neurova.context.token_estimator import estimate_tokens
+        from neurova.context.window_compactor import SUMMARY_PREFIX, estimate_window_tokens
+
+        enabled = resolutionEnabled()
+        readout = self._contextHealthSlot("fold_resolution")
+        readout.update(
+            {
+                "enabled": enabled,
+                "levels": 1,
+                "dropped_levels": 0,
+                "budget_ratio": GEO_RATIO,
+                "level_budgets": (),
+                "truncated_chars": 0,
+                "last_error": None,
+            }
+        )
+
+        summaryRow = next(
+            (
+                idx
+                for idx, msg in enumerate(window or [])
+                if (msg or {}).get("role") == "system"
+                and SUMMARY_PREFIX in str((msg or {}).get("content", ""))
+            ),
+            None,
+        )
+        if summaryRow is None:
+            # 本轮没有概览行（未折叠/被更早的分支拦下）：本票无事可做，且不得
+            # 凭空造一行出来——没有折叠却声明"概览常驻"就是谎报（§12.5 第 2 条）。
+            return window
+
+        pool = getattr(self, "context_pool", None)
+        if pool is None or not enabled:
+            # 开关关闭（§12.6 回退等式）：视图逐字保留本票之前的形状，读数如实
+            # 报 `enabled=False` 且只装栈顶一档 —— 不谎报装配过多档。
+            return window
+
+        # **本会话**的档（T-11c 的 A/B 咬出的跨会话泄漏）：层序是会话内的事实，
+        # 而台账库按 (user, agent) 分库、内含该 agent 其它会话的层行。不过滤就会
+        # 把别人的摘要装进本轮视图（P1-1/T-03 同族）。判据取池的本轮身份
+        # （`pool.session_id`，就是写入侧打标的同一个值，不另算一份身份）。
+        layers = [
+            layer
+            for layer in pool.summaryLayers()
+            if layer.get("session_id") == pool.session_id
+        ]
+        if not layers:
+            # 本会话从未成功摘要（`fold_seq` 恒 0，或索引里只有别人的档）：
+            # 视图里那行是静态折叠桩，是本票之前就有的诚实降级面，原样留着。
+            # 此时读数如实报"只有一档"，不拿别人的档充数。
+            return window
+
+        tail = [
+            msg
+            for idx, msg in enumerate(window)
+            if idx != summaryRow
+        ]
+        regionBudget = max(
+            MIN_LEVEL_TOKENS, int(windowBudget) - estimate_window_tokens(tail)
+        )
+        budgets = ladderBudgets(len(layers), regionBudget)
+
+        sessionKey = self._resolve_window_cache_key()
+        rows: list = []
+        truncated = 0
+        assembled = 0
+        # 由远及近（老 → 新）：位置序必须在视图里显式成立，否则"越远分辨率越低"
+        # 没有落点（模型读到的是乱序历史）。
+        for layer in reversed(layers):
+            budget = budgets.get(layer["level"])
+            if budget is None:
+                continue
+            ref = renderCoversRef(layer["fold_seq"], sessionKey)
+            refTokens = estimate_tokens(f"\n({ref})")
+            body, cut = fitToBudget(
+                f"{SUMMARY_PREFIX}{layer['content']}", max(1, budget - refTokens)
+            )
+            truncated += cut
+            rows.append({"role": "system", "content": f"{body}\n({ref})"})
+            assembled += 1
+
+        if not assembled:
+            return window
+
+        readout["levels"] = assembled
+        readout["dropped_levels"] = max(0, len(layers) - assembled)
+        readout["level_budgets"] = tuple(
+            budgets[layer["level"]] for layer in layers if layer["level"] in budgets
+        )
+        readout["truncated_chars"] = truncated
+
+        logger.info(
+            "[FOLD_RESOLUTION] 视图装配 %d 档概览（索引 %d 档，省 %d 档），"
+            "概览区额度 %d，相邻预算比 %d，截断 %d 字符",
+            assembled,
+            len(layers),
+            readout["dropped_levels"],
+            regionBudget,
+            GEO_RATIO,
+            truncated,
+        )
+        return rows + tail
+
+    def foldRollupWorker(self):
+        """折叠 rollup 后台 worker（懒建；开关关闭时返回 None）。
+
+        T-11e：关键路径上的折叠只付**一次**摘要 LLM 调用（判据 6），失败批次的
+        重试与补做落到这里。懒建而不是在 `__init__` 里建：装配期没有事件循环，
+        `asyncio.ensure_future` 会当场失败（那正是"配置都对却秒挂"的形态）。
+        开关关闭时不建 —— 回退等式（§12.6）要求关掉即回到本票之前的形状。
+        """
+        from neurova.context.fold_rollup import ContextRollupWorker, rollupEnabled
+
+        if not rollupEnabled():
+            return None
+        worker = getattr(self, "_fold_rollup_worker", None)
+        if worker is None:
+            worker = ContextRollupWorker(self._commitRollupSummary)
+            self._fold_rollup_worker = worker
+        return worker
+
+    def _commitRollupSummary(
+        self,
+        sessionKey: str,
+        summary: str,
+        covers: List[str],
+        turnIds: List[str],
+        lastCount: int,
+    ) -> None:
+        """后台补做**成功**后的写入侧（唯一的提交点）。
+
+        只有摘要成功才走到这里，因此"失败不推进覆盖账"由调用点位置保证 ——
+        worker 在失败分支压根不调它（T-05 同族的假账纪律）。
+
+        提交内容与热路径逐字同源：`covered` 集合、`last_count`、代际推进（含写进池
+        并带 covers）。`lastCount` 取派发那一刻的窗口条数 —— 后台跑完时窗口早已
+        前移，用当前条数会把期间新增的消息一并谎报为已覆盖。
+        """
+        cache = self._window_compaction_cache.get(sessionKey)
+        if cache is None:
+            # 会话槽已被近期使用淘汰：不重建槽（重建出来的是一份没有历史的
+            # 空账，会把"覆盖了哪些"记错），如实丢弃并让它留痕在 worker 读数里。
+            raise RuntimeError(f"SessionSlotEvicted: 折叠缓存槽 {sessionKey} 已淘汰")
+
+        cache["last_count"] = max(int(cache.get("last_count") or 0), int(lastCount))
+        for fingerprint in covers:
+            cache["covered"].add(fingerprint)
+        self._advanceFoldGeneration(cache, summary, covers=covers, turnIds=turnIds)
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -1976,6 +2197,13 @@ class ContextOrchestrator:
             budget_tokens,
             summarize=summarize,
             previous_summary=cache.get("summary", ""),
+            # T-11e（工单 §12.7 判据 6）：关键路径**只付一次**摘要 LLM 调用。
+            # 压缩器的"失败丢最旧一条重试"与"递进扩折叠重摘要"都是它自己的收敛
+            # 保证（对直接调用者有意义），不该由热路径代付 —— 实测把它们留在热
+            # 路径上时，恒失败的摘要器会让单轮发起 4 次调用。补做落点在下方
+            # `foldRollupWorker()`。
+            summary_max_retries=0,
+            summary_call_budget=1,
         )
         if compaction is None:
             self._last_folded_hashes = set()
@@ -2034,6 +2262,32 @@ class ContextOrchestrator:
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
+        elif compaction.compacted_count > 0 and summarize is not None:
+            # T-11e：本轮摘要失败（或没轮到它）。折叠发生了，但覆盖账**不推进**
+            # （T-05 同族：不给折叠缓存记假账），批次交后台补做。
+            # 视图这一轮走下方既有静态桩语义 —— 不阻塞当轮回答，也不谎报已覆盖。
+            # covers 与派发时刻的窗口条数一并发给 worker：后台跑完时窗口早已前移，
+            # 用那时的条数会把期间新增的消息一并谎报为已覆盖。
+            worker = self.foldRollupWorker()
+            if worker is not None:
+                kept_set = {m["content"] for m in compaction.window}
+                coversNow: List[str] = []
+                turnsNow: List[str] = []
+                droppedMsgs: List[dict] = []
+                for m, turnId in assign_turn_ids(msgs):
+                    if m.get("content", "") in kept_set:
+                        continue
+                    coversNow.append(self._windowChunkHash(m))
+                    turnsNow.append(turnId)
+                    droppedMsgs.append(m)
+                worker.dispatch(
+                    sessionKey=cache_key or self._resolve_window_cache_key(),
+                    summarize=summarize,
+                    droppedMsgs=droppedMsgs,
+                    covers=coversNow,
+                    turnIds=turnsNow,
+                    lastCount=len(msgs),
+                )
 
         window = compaction.window
         if compaction.compacted_count > 0 and not compaction.summary:
@@ -2054,6 +2308,10 @@ class ContextOrchestrator:
         # 放在两条分支汇合处：有 LLM 摘要与只有静态桩两种形状都要带引用，
         # 否则"摘要行有引用"这件事就只在摘要成功时才成立（那是运气，不是契约）。
         window = self._inlineCoversRef(window, cache)
+        # T-11c：把唯一那行摘要换成**按距离几何退避的多档概览**（近细远粗）。
+        # 放在引用内联之后：本方法自己渲染每一档的引用（引用属于**该档**，
+        # 拿栈顶那一份去挂全部档位就是第二份寻址口径）。
+        window = self._assembleResolutionLadder(window, cache, budget_tokens)
 
         logger.info(
             "[WINDOW_COMPACT] 窗口超预算折叠: %d msgs → %d（折叠 %d 条, token %d → %d, LLM摘要=%s）",

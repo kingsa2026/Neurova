@@ -30,6 +30,12 @@
 
 口径只写一份：任何新增的跨文件 AST 判据都走本模块，不自己 `ast.parse`
 （`AGENTS.md` 修复教义第 6 条：不新造平行体系）。
+
+本模块对外有**两条**入口，按「这棵树会不会被重复扫」选：
+
+- **会重复扫** → 保留型（`parsedModules` / `nodeScan` / `callSites` …），同进程内复用；
+- **只扫一次** → 一次性（`transientTree` / `transientNodes`），不留常驻树 ——
+  保留的收益此时不存在，成本（常驻对象图让 gen2 GC 按图大小收费）却照付。
 """
 
 from __future__ import annotations
@@ -206,6 +212,44 @@ def walkedModules(root: Path, suffix: str = ".py",
     """逐节点产出 `(路径, 节点)`（含 Module 本身；命中缓存时零解析）。"""
     for ref in sourceRefsUnder(root, suffix, hints):
         for node in _cachedNodes(ref):
+            yield ref.path, node
+
+
+def transientTree(path: Path) -> ast.AST:
+    """**一次性**解析单文件：返回语法树但**不留常驻缓存**。
+
+    为什么要单开一个入口而不是复用 `_cachedParse`：保留这份收益（跨判据复用）
+    只在**重复扫描**同一棵树时成立，而成本（常驻对象图让 gen2 GC 按图大小收费）
+    是**每次扫描都付**。实测本机 2985 个 `.py`：空进程 gen2 1.0ms、只留文本 1.1ms、
+    留全部语法树 **2243ms**（532 万对象）；真会话里 12 个消费方同进程跑，gen2 合计
+    8.5s、单次峰值 1.26s、进程末存活 143 万 ast 节点。
+
+    典型适用面是**一次性全仓判据**（只为「仓库里有没有出现某个形状」跑一遍，
+    不存在第二次命中）。这类判据走保留型入口**更慢**：实测同一个一次性全仓扫描
+    私有解析 2.59s / gen2 0.7ms，走保留型 5.74s / gen2 892ms。
+
+    绑小 `maxsize` 不是解法 —— 淘汰引发重复解析，省下的 GC 被解析吃掉（实测
+    三连扫 1200 文件：`None` 5.86s / 1024 档 20.83s / 256 档 22.72s / 不保留 7.42s）。
+    故保留型入口与一次性入口**并存且各有适用面**，由消费方按「会不会重复扫」
+    自行选择，口径仍只在本模块一处。
+    """
+    return ast.parse(sourceCode(path))
+
+
+def transientNodes(root: Path, suffix: str = ".py",
+                   hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
+    """**一次性**逐节点产出 `(路径, 节点)`，不留常驻语法树。
+
+    与 `nodeScan` 同形（同样吃文本预筛、同样惰性），区别只在**不留常驻树**：
+    每条 `(路径, 节点)` 用完即可回收。文本缓存 `_cachedCode` 保留 —— 它便宜
+    （实测只留文本 gen2 1.1ms vs 只留语法树 2243ms），且判据常对同一棵树多次预筛。
+    """
+    for ref in sourceRefsUnder(root, suffix, hints):
+        try:
+            tree = ast.parse(ref.code)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
             yield ref.path, node
 
 

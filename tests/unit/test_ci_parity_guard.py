@@ -31,8 +31,10 @@ GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 # job 名（GitHub）→ 流水线名列表（cnb）；unit-tests matrix 两格拆两条
 # perf-gate（Issue #55 新增）：两侧同跑 scripts/ci/perf_gate.py，阻断语义一致
 EXPECTED_MAP = {
+    # static-gate 与 lint 是同一条流水线（Issue #223 第 2 条）：pyflakes 与 ruff
+    # 都在读同一片全仓 AST，拆两条只是多一次容器启动 + 多一遍全仓遍历。
+    # 合并只改「读几遍」，两条命令逐字不动（见下 EXPECTED_CORE_COMMANDS）。
     "static-gate": ["static-gate"],
-    "lint": ["lint"],
     # deploy-config（Issue #61 新增）：部署配置一致性（Dockerfile / compose /
     # Helm / requirements 跨文件不变量），两侧同跑同一脚本、同为阻断。
     "deploy-config": ["deploy-config"],
@@ -55,12 +57,17 @@ EXPECTED_NON_BLOCKING = set()
 # 每对 job/pipeline 的核心门禁命令（"存在于该侧全部脚本中"断言）。
 # 命令改动若属两例试图不同步，这里会红。
 EXPECTED_CORE_COMMANDS = {
-    "static-gate": ["python scripts/ci_static_gate.py --skip-import"],
-    "lint": ["python -m ruff check neurova tests --no-cache"],
+    "static-gate": [
+        "python scripts/ci_static_gate.py --skip-import",
+        "python -m ruff check neurova tests --no-cache",
+    ],
     "deploy-config": ["python scripts/ci/deploy_config_consistency_check.py"],
     "import-and-regression": [
         "python scripts/ci_static_gate.py",
         "python -m pytest tests/unit/test_audit_regressions.py -q",
+        # 装的是锁不是声明（Issue #223 第 3 条）：无锁 pip 解析是这三种装法里
+        # 最慢的一种，三条 job 装同一份精简依赖时尤其明显。
+        "python -m pip install -r requirements-ci.lock",
     ],
     "unit-tests": [
         "scripts/ci/protected_tests.txt",
@@ -69,7 +76,10 @@ EXPECTED_CORE_COMMANDS = {
     ],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
     "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
-    "perf-gate": ["python scripts/ci/perf_gate.py"],
+    "perf-gate": [
+        "python scripts/ci/perf_gate.py",
+        "python -m pip install -r requirements-ci.lock",
+    ],
     "dependency-audit": [
         "python -m pip_audit -r requirements-ci.lock",
         # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
@@ -91,7 +101,10 @@ EXPECTED_CORE_COMMANDS = {
     ],
     # 经验质量基准（工单 009）：读数取自 EKB.quality_snapshot，语料冻结在仓内，
     # 每次运行先自证低质探针会被判红（详见 scripts/ci/experience_quality_gate.py）。
-    "experience-quality": ["python scripts/ci/experience_quality_gate.py"],
+    "experience-quality": [
+        "python scripts/ci/experience_quality_gate.py",
+        "python -m pip install -r requirements-ci.lock",
+    ],
 
 }
 

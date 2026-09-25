@@ -7,7 +7,7 @@
 
 | 入口 | 路径 | 说明 |
 |------|------|------|
-| **纪律与约定（最高优先级）** | [AGENTS.md](../../AGENTS.md) | **修复教义 6 条 + 协作红线（中文交流 / 原创性 / 命名法 / 闭环）**；全仓 97 处引用的唯一事实源 |
+| **纪律与约定（最高优先级）** | [AGENTS.md](../../AGENTS.md) | **修复教义 6 条 + 协作红线（中文交流 / 原创性 / 命名法 / 闭环）**；全仓引用的唯一事实源 |
 | 项目 README | [README.md](../../README.md) | 项目概述、快速开始、核心特性 |
 | 项目上下文 | [CONTEXT.md](../CONTEXT.md) | 架构概览、技术栈、设计规则 |
 | 文档总索引 | [docs/INDEX.md](../INDEX.md) | 文档体系唯一导航事实源 |
@@ -138,7 +138,7 @@
 
 **ADR / 审计 / 记忆专题**：
 
-- [adr/README.md](../01-architecture/adr/README.md) — 20 个架构决策记录（memory/recall/skill/market/sandbox 等）
+- [adr/README.md](../01-architecture/adr/README.md) — 架构决策记录（memory/recall/skill/market/sandbox/接力判据 等）
 - [audit/three-tier-isolation-audit.md](../01-architecture/audit/three-tier-isolation-audit.md) — 三层隔离审计报告
 - [audit/three-tier-isolation-fixes.md](../01-architecture/audit/three-tier-isolation-fixes.md) — 隔离修复记录
 - [memory/memo-technical-overview.md](../01-architecture/memory/memo-technical-overview.md) — MeMo 技术综述
@@ -181,6 +181,7 @@
 - [neurova-memory-system-upgrade-technical.md](../04-plans/neurova-memory-system-upgrade-technical.md) — 记忆升级技术方案
 - [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
 - [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
+- [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
 
 ### 05-reports 报告
 
@@ -209,7 +210,7 @@
 
 ### 06-bugfix 修复记录
 
-- [bugfix-*.md](../06-bugfix/) — 47 个修复记录（Agent/LLM/Memory/Skill/UI 等各领域，按文件名）
+- [bugfix-*.md](../06-bugfix/) — 修复记录（Agent/LLM/Memory/Skill/UI 等各领域，按文件名）
 
 代表性修复文档：
 
@@ -238,9 +239,9 @@
 - [frontend_development_plan.md](../09-dev-progress/frontend_development_plan.md) — 前端开发计划
 - [api_inventory.md](../09-dev-progress/api_inventory.md) — 前端 API 面清单（生成物：`python scripts/generate_api_inventory.py --write`，含「调用未命中后端」「后端无前端消费」两组显式差异）
 - [progress_tracker.md](../09-dev-progress/progress_tracker.md) — 进度追踪
-- [module_designs/](../09-dev-progress/module_designs/) — 模块设计（19 篇，含 chat_page/execution_engine/knowledge_base 等）
+- [module_designs/](../09-dev-progress/module_designs/) — 模块设计（含 chat_page/execution_engine/knowledge_base 等）
 - [daily_reports/](../09-dev-progress/daily_reports/) — 日常报告（2026-05-12/13）
-- [code_reviews/](../09-dev-progress/code_reviews/) — 代码评审（3 篇）
+- [code_reviews/](../09-dev-progress/code_reviews/) — 代码评审
 - [architecture/frontend_architecture_guide.md](../09-dev-progress/architecture/frontend_architecture_guide.md) — 前端架构指南
 
 ### 10-configuration 配置
@@ -250,7 +251,7 @@
 
 ### 11-legacy 归档
 
-- 历史/过时文档 30 篇（grilling-* 分析、旧升级方案、旧 UI 方案、旧测试结果等），保留可追溯，不再维护。
+- 历史/过时文档（grilling-* 分析、旧升级方案、旧 UI 方案、旧测试结果等），保留可追溯，不再维护。
 
 ---
 
