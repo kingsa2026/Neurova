@@ -78,6 +78,37 @@ def _synth_tool_result(calls_seen: List[str]) -> str:
     )
 
 
+def declaredToolCallIds(messages: List[Dict[str, Any]]) -> set:
+    """序列中被 `assistant.tool_calls` 声明过的 id 集合（**单一事实源**）。
+
+    配对判定有两处消费方：本模块的修复（孤儿转注记）与编排器的可观测计数
+    （T-10d 的 `declared_ids` 不匹配告警）。各写一份"什么叫声明"就是第二份
+    口径 —— 修复按一份判、告警按另一份判，两边对不上时无人能说清谁对。
+    """
+    declared: set = set()
+    for msg in messages:
+        if _opens_tool_block(msg):
+            for call in msg.get("tool_calls") or []:
+                cid = (call or {}).get("id") if isinstance(call, dict) else None
+                if cid:
+                    declared.add(cid)
+    return declared
+
+
+def orphanToolRows(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """未被任何 `assistant.tool_calls` 声明的 `role="tool"` 行（配对不匹配）。
+
+    缺 `tool_call_id` 的行也算不匹配 —— 它同样"找不到声明它的调用"，直发
+    provider 即 400。判定与 `repair_tool_turns` 的孤儿语义同源（同一份
+    `declaredToolCallIds`），故修复前后的读数可对齐。
+    """
+    declared = declaredToolCallIds(messages)
+    return [
+        msg for msg in messages
+        if _is_tool_result(msg) and (msg or {}).get("tool_call_id") not in declared
+    ]
+
+
 def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """折叠/压缩/视图重建后修复 tool_use/tool_result 配对完整性。
 
@@ -99,13 +130,7 @@ def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return []
 
     # 前向扫描：记录每个 tool_call_id 是否已被某个 assistant.tool_calls 声明
-    declared_ids: set = set()
-    for msg in messages:
-        if _opens_tool_block(msg):
-            for call in msg.get("tool_calls") or []:
-                cid = (call or {}).get("id") if isinstance(call, dict) else None
-                if cid:
-                    declared_ids.add(cid)
+    declared_ids = declaredToolCallIds(messages)
 
     out: List[Dict[str, Any]] = []
     for msg in messages:
