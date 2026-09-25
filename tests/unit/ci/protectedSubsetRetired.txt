@@ -13,3 +13,4 @@ tests/unit/agent/test_tool_call_egress_redaction.py | 两份平行判据收口�
 tests/unit/agent/test_tool_call_record_pairing.py | 同上：与 test_tool_call_egress_redaction.py 是同一次收口删净的两份平行判据
 tests/unit/api/test_endpoint_mount_wiring_guard.py | 与 test_route_mount_contract_guard.py 是同一根因的两份实现，收口到后者一份；该文件与其生成器 scripts/gen_api_inventory.py 同批删除（依据见 docs/04-plans/2026-09-22-api-inventory-refresh-plan.md 第 7 节）
 tests/unit/test_devRulesConfigGuard.py | 随 dev 规则配置退役：所守的配置面已由 AGENTS.md 与 .cnb/settings.yml 的角色 prompt 单点持有，文件不再存在
+tests/unit/api/test_token_budget_endpoint_contract.py | 随假预算面整体下架：该文件锁的就是 /context/token-budget 的面（Issue #90 §10 第 2 项判定为无消费者的对外契约，端点 + 前端包装 + 锁 URL 的用例三处同删）。判据未消失，由 tests/unit/api/test_context_budget_face_retirement.py 取代（钉下架后不得回潮 + 两个事实仍由 /context/composition 承担）
