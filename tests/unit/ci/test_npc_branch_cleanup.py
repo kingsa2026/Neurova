@@ -117,6 +117,75 @@ class TestLedgerIsReadableInRepo:
             "AGENTS.md §0 要求归档分支立即删除；无台账则该纪律在仓内不可复核。"
         )
 
+    def test_ledger_records_dispositions_not_live_branch_state(self):
+        """台账只登记**已发生的处置**，不登记**当前的远端分支状态**。
+
+        根因（本轮实测）：台账 §3 有一张"保留的分支"表，逐行断言某分支"未合并进主线、
+        在途工作"——那是**当下的远端事实**，而台账没有任何刷新机制。Issue #197 批收口后
+        实测：该表 4 行里 **3 行已失效**（`auto/issue197-judgement-registration` /
+        `auto/issue197-registration-guard-recover` / `auto/t11a-uncap-generations-90`
+        对应 PR 已合入或已删，三支均不在远端），第 4 行 `auto/npc-glmcoder-59d9` 尚在。
+        台账自己 §4 已写明"分支列表本身不入台账——每次 fetch 都在变，抄进文档就立刻过期"，
+        但 §3 正是抄了一份：规则与行为不一致，且**无人复核**（本条判据之前不存在）。
+
+        判据：台账里的**登记行**（表格行 / 列表项）每出现一条分支，就必须带一个
+        **已完成的处置**标记（已删 / 已合入 / 已归档）。写"未合并进主线 / 在途工作"
+        这类当下状态即红——要查当前在途分支，跑 `scripts/ci/npc_branch_cleanup.py`
+        （唯一取数入口）。
+
+        为什么只判登记行：判据要拦的形态是「一张"当前保留"的表/清单」，不是
+        正文里叙述历史的散文（那段散文提到已失效的分支名，正是要说明它们为何被删）。
+        把散文也算进来，只会训练人删掉解释、留下表格。
+        """
+        dispositions = ("已删", "已合入", "已归档")
+        #: 只认**具体的分支全名**（`auto/` + 名字）。口径说明里的裸 `auto/` 是命名空间，
+        #: 不是某条分支的登记行 —— 拿前缀本身匹配会把 §1 的判定口径也报成违规。
+        branchNames = re.compile(re.escape(cleanup.NPC_BRANCH_PREFIX) + r"[A-Za-z0-9][\w.\-]*")
+        offenders = []
+        for lineno, line in enumerate(io.open(LEDGER, encoding="utf-8").read().splitlines(), 1):
+            stripped = line.strip()
+            if not (stripped.startswith("|") or stripped.startswith("- ")):
+                continue
+            if not branchNames.search(stripped):
+                continue
+            if not any(mark in stripped for mark in dispositions):
+                offenders.append(f"第 {lineno} 行：{stripped[:110]}")
+        assert not offenders, (
+            "台账登记了分支的**当前状态**而非**已发生的处置**（这类行会随远端变化立刻过期，"
+            "且台账没有刷新机制）：\n  " + "\n  ".join(offenders)
+            + "\n修法：台账只写「已删 / 已合入 / 已归档」这类完成的动作；"
+            "当前在途分支用 `python scripts/ci/npc_branch_cleanup.py` 现算，不抄进文档。"
+        )
+
+    def test_disposition_check_has_discriminating_power(self, tmp_path, monkeypatch):
+        """反向锁：人造一份「当前保留」表 → 必须判红；处置表 → 必须判绿。
+
+        没有这条，上面那条只是「当前这份文档恰好长这样」的快照。
+        """
+        stale = tmp_path / "stale.md"
+        stale.write_text(
+            "# 台账\n\n| 分支 | 状态 | 保留理由 |\n"
+            "|------|------|----------|\n"
+            "| `auto/inflight-x` | 未合并进主线 | 在途工作 |\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            sys.modules[__name__], "LEDGER", stale)
+        with pytest.raises(AssertionError, match="auto/inflight-x"):
+            sys.modules[__name__].TestLedgerIsReadableInRepo() \
+                .test_ledger_records_dispositions_not_live_branch_state()
+
+        good = tmp_path / "good.md"
+        good.write_text(
+            "# 台账\n\n| 分支 | 处置 |\n|------|------|\n"
+            "| `auto/done-x` | 已删 |\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            sys.modules[__name__], "LEDGER", good)
+        sys.modules[__name__].TestLedgerIsReadableInRepo() \
+            .test_ledger_records_dispositions_not_live_branch_state()
+
     def test_ledger_declares_the_rule_and_the_probe(self):
         """台账须同时给出：纪律出处、复算入口、以及判定口径的两个条件。"""
         text = io.open(LEDGER, encoding="utf-8").read()
