@@ -82,6 +82,22 @@ class AddMemoryRequest(BaseModel):
     auto_analyze_emotion: bool = Field(default=True, description="是否自动分析情绪 (默认开启)")
 
 
+class UpdateMemoryRequest(BaseModel):
+    """更新记忆请求（只改传入的字段，未传的保持原值）。
+
+    字段面取管理器 `update_memory(memory_id, **kwargs)` 实际受理的维度，
+    与 `AddMemoryRequest` 的差异是**故意**的：更新不重跑分类推断
+    （`auto_classify` 是写入期行为，不是改一改内容就该重推断的）。
+    """
+
+    content: Optional[str] = Field(default=None, min_length=1, max_length=50000, description="记忆内容")
+    category: Optional[str] = Field(default=None, description="记忆分类")
+    importance: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="重要性")
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="记忆温度")
+    metadata: Optional[dict] = Field(default=None, description="额外元数据 (合并，不替换)")
+    lifecycle_stage: Optional[str] = Field(default=None, description="生命周期阶段")
+
+
 class MemoryItem(BaseModel):
     """记忆项"""
 

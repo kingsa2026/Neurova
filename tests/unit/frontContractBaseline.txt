@@ -1,0 +1,62 @@
+# 前端调用 ↔ 后端注册 差异的**裁决台账**（Issue #68 收口）
+#
+# 行格式：`模块 | 方法 | 路径 | 裁决 | 依据`
+#
+# 布局纪律：台账行必须集中在文件**头部**，正文注释不得插在行之间再回头续行。
+# 写入侧 (`_frontContractRows()`) 只认「首个非空行」起的一段连续行。
+#
+# 收录口径：`scripts/generate_api_inventory.py::unmatchedFrontCallRows()` 报出的
+# 每一条「前端调用在后端注册表里无对应路由」。清单第四节只登记「有哪些差异」，
+# 本台账回答「每条的结论是什么、办了没有」——与未挂载端点台账同纪律。
+#
+# 裁决是**有限枚举**，机器可判定（FRONT_CONTRACT_VERDICTS）：
+#   已修   ― 该调用现在命中真实路由表（改指正确契约或补齐后端端点）；
+#   已退役 ― 该前端调用无任何非测试消费点，属幻影契约，连同函数一起删净；
+#   待接线 ― 保留待办，必须写明依据与承接方（不得留空）。
+#
+# 判据单源在 scripts/generate_api_inventory.py；守卫
+# tests/unit/api/test_route_mount_contract_guard.py 双向钉住
+# （新增断链无裁决即红、裁决为「已修」却仍在差异表里亦红）。
+#
+# ── 本轮裁决（28 条差异）──
+# 甲·已修 13 条（有活跃消费者、后端补齐端点或改指真实契约）：
+#   files:        `/{id}/content` 后端新增（原只有 /preview 与 /download 两个字节面）
+#   health:       `/health/status` 改指 `GET /api/v1/health`（后端 `@router.get("")`）
+#   knowledge:    `/knowledge/annotations*` 4 条——annotations router 从 console 迁入知识域
+#                 （唯一消费者是 KnowledgePage 的 AnnotationDrawer；标注是知识资产）
+#   memory:       `PUT /memory/{id}` 后端新增（能力早在 manager.update_memory，缺 HTTP 面）
+#   settings:     `/settings/clear-cache` 后端新增（接 memory cache 注册表，非空转端点）
+#   system-logs:  `/logs/clear` 改指 `DELETE /api/v1/logs`（后端 `@router.delete("")`）
+#   tool-layers:  `/tools/{id}/execute` 改指 `POST /tools/execute`（工具名与参数都在 body）
+# 乙·已退役 14 条（无任何非测试消费点，幻影契约）：
+#   console/debug、console/push、health/metrics、memory/search、models 四条、
+#   neurflow/comfyui/import、plugins 五条、shared-config/llm-providers/*/test
+# 丙·待接线 1 条：
+files | GET | /api/v1/files/*/content | 已修 | 后端新增 GET /api/v1/files/{id}/content（files_api.py）；此前只有 /preview 与 /download 两个字节面，FilePage/AgentFilePage 的文本预览实测恒 404
+health | GET | /api/v1/health/status | 已修 | 前端改指 GET /api/v1/health（后端 health.py 的 @router.get("")）；原 /health/status 从未注册过路由
+knowledge | POST | /api/v1/knowledge/annotations | 已修 | annotations router 由 console.py 迁入 knowledge.py 聚合器；标注是知识资产，唯一消费者是 KnowledgePage 的 AnnotationDrawer
+knowledge | DELETE | /api/v1/knowledge/annotations/* | 已修 | 同上（annotations router 归属知识域）
+knowledge | PUT | /api/v1/knowledge/annotations/* | 已修 | 同上（annotations router 归属知识域）
+knowledge | GET | /api/v1/knowledge/annotations/export | 已修 | 同上（annotations router 归属知识域）
+memory | PUT | /api/v1/memory/* | 已修 | 后端新增 PUT /api/v1/memory/{id}（crud.py·update_memory）；能力早在 manager.update_memory，缺的只是 HTTP 面
+settings | POST | /api/v1/settings/clear-cache | 已修 | 后端新增 POST /api/v1/settings/clear-cache（settings.py）；清空 memory cache 注册表，接上写消费者
+system-logs | POST | /api/v1/logs/clear | 已修 | 前端改指 DELETE /api/v1/logs（后端 logs.py 的 @router.delete("")）；原 /logs/clear 从未注册过路由
+tool-layers | POST | /api/v1/tool-layers/tools/*/execute | 已修 | 前端改指 POST /api/v1/tool-layers/tools/execute（tool_layers.py·ToolExecuteRequest 工具名与参数都在 body）；tool_id 与 name 恒等，按名传入不丢身份
+console | POST | /api/v1/console/debug | 已退役 | 前端 debugAgent 无任何非测试消费点；后端无 /console/debug（只有 /console/debug/command），属幻影契约，函数已删净
+console | POST | /api/v1/console/push | 已退役 | 前端 pushSystemMessage 无任何非测试消费点；后端 /console/push/message 是管理员广播语义、与「推送到某 agent 会话」不同物，函数已删净
+health | GET | /api/v1/health/metrics | 已退役 | 前端 getSystemMetrics 无任何非测试消费点；后端 /metrics 是 Prometheus 文本面、非 JSON 系统指标，函数已删净
+memory | POST | /api/v1/memory/search | 已退役 | 前端 searchMemories 无任何非测试消费点（MemoryPage 已改调 enhancedSearch），函数已删净
+models | POST | /api/v1/models | 已退役 | 前端 createModel 无任何非测试消费点；后端 model.py 无 POST 根路由，函数已删净
+models | GET | /api/v1/models/* | 已退役 | 前端 getModel 无任何非测试消费点；后端无按 id 的 GET（只有 PUT/DELETE），函数与其幻影测试用例已删净
+models | POST | /api/v1/models/active | 已退役 | 前端 setActiveModel 无任何非测试消费点；后端激活走 POST /models/switch，函数已删净
+models | GET | /api/v1/models/fetch | 已退役 | 前端 fetchModelsFromProvider 无任何非测试消费点；后端无 /models/fetch，函数已删净
+neurflow | POST | /api/v1/neurflow/comfyui/import | 已退役 | 前端 importComfyuiWorkflow 无任何非测试消费点（WorkflowPage 只 import 了 status/templates 等 6 个）；后端无 /neurflow/comfyui/import，函数已删净
+plugins | POST | /api/v1/plugins | 已退役 | 前端 createPlugin 无任何非测试消费点；后端 plugin.py 无 POST 根路由，函数已删净
+plugins | DELETE | /api/v1/plugins/* | 已退役 | 前端 deletePlugin 无任何非测试消费点；后端卸载走 DELETE /{id}/uninstall，函数已删净
+plugins | PUT | /api/v1/plugins/* | 已退役 | 前端 updatePlugin 无任何非测试消费点；后端无 PUT 路由，函数已删净
+plugins | POST | /api/v1/plugins/*/uninstall | 已退役 | 前端 uninstallPlugin 无任何非测试消费点（后端卸载是 DELETE 语义），函数已删净
+plugins | GET | /api/v1/plugins/discover | 已退役 | 前端 discoverPlugins 无任何非测试消费点（后端 discover 是 POST），函数已删净
+shared-config | POST | /api/v1/shared-config/llm-providers/*/test | 已退役 | 前端 testProvider 无任何非测试消费点；后端无 /shared-config/*/test，函数已删净（连接测试真身在 tool-layers）
+shared-config | POST | /api/v1/shared-config/mcp-servers/*/test | 已退役 | 前端 testMCPServer 无任何非测试消费点；同一契约真身在 tool-layers.ts（后端 /tool-layers/mcp-servers/*/test），本副本已删净
+tool-layers | POST | /api/v1/tool-layers/tools/install | 已退役 | 前端 installTool 无任何非测试消费点；后端无 /tools/install，且公开工具本就在同一 ToolEngine 里可执行，「安装」无语义对象，函数与按钮已删净
+sandbox | POST | /api/v1/sandbox/*/execute | 待接线 | 前端 SandboxPage 描述的是「代码执行沙箱」（image/command/language），后端 neurova/api/endpoints/sandbox.py 实现的是「思维沙箱」（topic/step/commit-to-memory），两者不是同一能力：后端 `/{id}/step` 收 {input, context}，前端发 {command, language}；`/sandbox/start` 后端要求 agent_id/topic，前端发 name/image/timeout（必 422）。属前端先行、后端从未实现的功能面，需先裁决「做代码沙箱还是退役该页」，不在本单射程；承接方：待立项。

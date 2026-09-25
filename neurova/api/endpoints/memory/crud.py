@@ -18,6 +18,7 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     AddMemoryRequest,
+    UpdateMemoryRequest,
     _get_request_id,
     _get_user_ids_from_token,
     get_memory_manager,
@@ -307,6 +308,44 @@ async def traverse_relations(
     except Exception as e:
         logger.exception("关系图遍历失败: %s", e)
         raise APIError.internal(f"关系图遍历失败: {str(e)}")
+
+
+@router.put("/{memory_id}", summary="更新记忆")
+async def update_memory(
+    memory_id: str,
+    body: UpdateMemoryRequest,
+    agent_id: Optional[str] = Query(default=None, description="Agent ID"),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """更新指定记忆的字段（记忆页的「编辑内容」入口）。
+
+    此前前端 `memoryApi.updateMemory` 发 `PUT /api/v1/memory/{id}`，而本文件
+    从未注册过 PUT 路由 —— 实测 405，页面「编辑」按钮点下去必失败。
+    能力早已在 `MemoryManager.update_memory(memory_id, **kwargs)`，缺的只是 HTTP 面。
+    """
+    try:
+        manager = get_memory_manager(agent_id, user)
+        payload = body.model_dump(exclude_none=True)
+        if not payload:
+            raise HTTPException(status_code=422, detail="没有可更新的字段")
+        if not manager.update_memory(memory_id, **payload):
+            raise APIError.not_found(f"记忆不存在: {memory_id}")
+
+        updated = manager.storage.get(memory_id)
+        from neurova.cognitive_layers.memory_layer.models import Memory
+
+        return success_response(
+            data=memory_to_dict(Memory.from_dict(updated)) if updated else None,
+            message="更新成功",
+            request_id=_get_request_id(None),
+        )
+    except APIError:
+        raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("更新记忆失败: %s", e)
+        raise APIError.internal(f"更新记忆失败: {str(e)}")
 
 
 @router.delete("/{memory_id}", summary="删除记忆")
