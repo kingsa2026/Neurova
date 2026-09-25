@@ -8,7 +8,7 @@
 判据（四条都要过）：
 1. 多轮折叠后，**上一代摘要仍以文本原样在场**（不是被覆盖）；
 2. 代际栈的档号单调：栈顶 level=1，往深依次 +1；
-3. 代际栈超上限时截断**可见**（`truncated` 计数非 0）；
+3. 档数**不设上限**：跑满 8 轮后栈深 == 代数（最早那一代仍在栈底，一档不丢）；
 4. 读数经既有观测面可抓取（不新开端点）。
 
 跑法：`PYTHONPATH=. python tests/manual/fold_generation_t11a_90.py`
@@ -64,7 +64,7 @@ async def main() -> None:
     orch._window_summarizer = summarizer
 
     history = [_round(i) for i in range(16)]
-    for rnd in range(orch._MAX_FOLD_GENERATIONS + 3):
+    for rnd in range(8):
         history = history + [_round(100 + rnd) for _ in range(3)]
         with patch.object(orch, "get_tools_description", new_callable=AsyncMock) as m:
             m.return_value = "工具描述"
@@ -88,19 +88,32 @@ async def main() -> None:
     )
     # 相邻两代确实是**不同的历史覆盖范围**（同文本重复入栈就是假分代）
     assert len(set(texts)) == len(texts), f"代际栈出现重复节点：{texts}"
-    # 被截断掉的那几代：读数里如实可见（不是静默丢）
-    assert calls["n"] == len(stack) + readout["truncated"], (
-        f"摘要调用 {calls['n']} 次，栈内 {len(stack)} + 截断 {readout['truncated']}"
-        " 对不上 —— 有一代既不在栈里也没被记为截断"
+    # 判据 3：档数不设上限 —— 一档都不许丢（栈深 == 代数），且无截断字段
+    assert orch._MAX_FOLD_GENERATIONS is None, (
+        f"上限仍在：{orch._MAX_FOLD_GENERATIONS!r}（工单 §12.1 档数不设上限）"
+    )
+    assert calls["n"] == len(stack), (
+        f"摘要调用 {calls['n']} 次，栈内只有 {len(stack)} 代 —— 有一代被丢弃了"
+    )
+    assert "truncated" not in readout, (
+        f"无上限却仍有截断字段 {readout} —— 恒 0 的字段就是谎报面"
+    )
+    # 栈底必须是最早一代（不是中途某代）：上限删干净才可能成立
+    assert stack[-1]["summary"].startswith("第1代摘要"), (
+        f"栈底不是最早一代：{stack[-1]['summary']!r} —— 最早的历史被丢掉了"
+    )
+    assert stack[-1]["level"] == calls["n"], (
+        f"最深一档档号 {stack[-1]['level']} 与代数 {calls['n']} 不符"
     )
 
     # 判据 2：档号单调 —— 栈顶 1，往深 +1
     levels = [n["level"] for n in stack]
     assert levels == sorted(levels) and levels[0] == 1, f"档号非单调或栈顶不是 1：{levels}"
 
-    # 判据 3：截断可见
-    assert readout["truncated"] > 0, f"截断发生了却无读数：{readout}"
-    assert readout["levels"] == len(stack)
+    # 判据 3 之二：读数与栈一致（读数不虚报、不缩水）
+    assert readout["levels"] == len(stack), (
+        f"读数 levels={readout['levels']} 与栈深 {len(stack)} 不符"
+    )
 
     # 判据 4：既有观测面可抓取（kind=fold_layers）
     orch.get_context_health()  # 编排器单源持有
