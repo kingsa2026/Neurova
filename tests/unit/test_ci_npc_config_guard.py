@@ -680,6 +680,17 @@ def _strip_self_event(pipeline):
 #:   是同一件事（触发本仓自定义事件流水线）在 `@npc` 宿主下唯一可行的通道。
 HANDOFF_TRIGGER_TYPE = "cnb:trigger"
 
+#: 平台在收尾时刻注入的**事实**变量（Issue #158 的判据来源）。
+#: 实测读数（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3 / cnb-o8q-1k3c25fpt，
+#: 2026-09-25）：`endStages` 里 `CNB_PIPELINE_STATUS=error`、
+#: `CNB_BUILD_FAILED_MSG=Agent aborted: reached maxTurns limit (N)`；
+#: 同一 Job 的 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串。
+PLATFORM_STATUS_VAR = "CNB_PIPELINE_STATUS"
+
+#: 平台自己的中止措辞。四条独立构建里逐字一致：
+#: `Agent aborted: reached maxTurns limit (200)`。
+ABORT_MARKER = "reached maxTurns limit"
+
 
 def _handoff_carries_context(pipeline, key):
     """收尾接力的 env 里有没有把指定对话载体键传下去（逐字点名，不看注释）。"""
@@ -731,18 +742,17 @@ class TestTurnHandoffCeiling:
     已改未提交的成果随容器一起丢，用户必须自己发现并手动催下一轮。
     平台没有「Agent 用满轮数后自动重跑同一条流水线」的原生开关
     （`retry` / `allowFailure` / `endStages` 都只管当前这条流水线，不产生新的
-    轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:apply`
-    再拉一次同一事件，`turnLimitReached` 标记把「接力轮」与用户新发的
-    `@` 区分开，防止同一条评论被无限重跑。
+    轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:trigger`
+    再拉一次自定义事件，并由**平台在收尾时刻注入的事实变量**把「本轮真撞顶」
+    与用户新发的 `@` 区分开，防止同一条评论被无限重跑。
+    （`turnLimitReached` 那条预写判据已由 Issue #158 证伪并删净：
+    它由 Agent 开工前的步骤无条件写成 1，跟"是否撞顶"无关。）
 
     判据落在**是否有这笔接力**，不落在 `$变量` 替换后的形态上：
     `api_trigger_pipeline` 的 options 在配置期做 Schema 校验，事件名写成
     `$VAR` 会被平台拒掉；且 `type: cnb:apply` 的 `env` 值只接受 `$变量`
     （见 tests/unit/test_ci_thin_env_guards.py 同型的薄环境事故）。
     """
-
-    #: 判定「这一轮是轮数触顶的接力轮」的标记名（run 计数器的唯一事实源）
-    HANDOFF_FLAG = "turnLimitReached"
 
     @staticmethod
     def _npc_pipelines(cnb_doc):
@@ -814,22 +824,31 @@ class TestTurnHandoffCeiling:
                         f"{where}: 接力未给 slug —— `cnb:trigger` 的 slug 是必填项"
                         "（目标仓库完整路径），缺它触发不了"
                     )
-            # 标记必须由上一轮经 env 传下来、由 NPC 在触顶时写出，
-            # 且两处变量名逐字一致——否则守卫会因为「标记永不为真」拦不住无限接力。
-            passed_down = str(job.get("env", {}).get("turnLimitReached", ""))
-            if passed_down.strip() != f"${self.HANDOFF_FLAG}":
-                problems.append(
-                    f"{where}: 收尾阶段缺 {self.HANDOFF_FLAG} 标记"
-                    "（无标记则每轮都判定「已触顶」，同一评论会被无限接力）"
-                )
+            # 判据必须取自**平台在收尾时刻注入的事实**，不得读任何预写变量。
+            # 预写变量的根因（Issue #158，2026-09-25 实测）：它由 Agent 开工**之前**
+            # 的门禁无条件写成 1，与"本轮是否撞顶"无关 —— 四条评论触发的父构建
+            # （maxTurns=200）分别只跑了 97 / 135 / 164 / 76 轮，收尾接力却一律
+            # success；接力落点 32 次构建 / 22.2h 墙钟，其中 17 次又跑满 200 轮。
+            # 平台事实的实测读数见本文件
+            # tests/unit/ci/test_npc_turn_handoff_predicate.py 的模块 docstring。
+            for stage in triggers:
+                conditions = " ".join(str(c) for c in (stage.get("if") or []))
+                if PLATFORM_STATUS_VAR not in conditions:
+                    problems.append(
+                        f"{where}: 接力 `if` 未读 ${PLATFORM_STATUS_VAR}"
+                        "（收尾状态由平台给出，不是上一轮预写的）"
+                    )
+                if ABORT_MARKER not in conditions:
+                    problems.append(
+                        f"{where}: 接力 `if` 未认平台的中止措辞 {ABORT_MARKER!r}"
+                    )
         assert seen, "未在 .cnb.yml 找到任何 npc:go 流水线——守卫失效（判据空转）"
         assert not problems, (
             "NPC 轮数触顶后没有接力（构建 cnb-m48-1k33grbms 的丢成果形态）:\n  "
             + "\n  ".join(problems) +
-            "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
-            "`type: cnb:apply` + `event: <api_trigger_* 事件>` + `env: {"
-            f"{self.HANDOFF_FLAG}: ${self.HANDOFF_FLAG}" + "}`，"
-            "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go。"
+            "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages，"
+            f"且判据取自平台收尾事实（${PLATFORM_STATUS_VAR} + {ABORT_MARKER!r}）——"
+            "由开工前的步骤预写标记只会让接力变成'每次都接力'（Issue #158）。"
             "改完请同步 .cnb.yml 注释里的轮次上界推演。"
         )
 
@@ -894,55 +913,63 @@ class TestTurnHandoffCeiling:
         )
 
 
-    def test_handoff_flag_is_the_only_reading_of_reached_state(self, cnb_doc):
-        """接力标记只允许出现在「读它」的位置，不许新增第二份判据。
+    #: 已被证伪的预写判据变量名（Issue #158）。它由 Agent 开工**之前**的门禁
+    #: 无条件写成 1，与"本轮是否撞顶"无关，故在配置里必须删净 —— 注释里
+    #: 保留旧形态作理由记录不算违规，真去读它才算。
+    RETIRED_PREWRITTEN_FLAG = "turnLimitReached"
 
-        白名单是逐行判据，不是计数：每一行含标记的文本都必须落在
-        （a）流水线 `env` 的传入/传出、（b）`if` 条件的判定、
-        （c）导出通道的声明（把 `##[set-output]` 的键映射成环境变量，见下）
-        这三类用途之内；任何新形态（例如 Agent 另写一个 state 文件、
-        或再加一个 handoff 计数器）都会被这条拦下——那是平行体系。
+    def test_the_prewritten_flag_is_gone_from_the_relay_chain(self, cnb_doc):
+        """接力链上不得再有预写判据：判据只有一处，就是平台收尾事实。
 
-        第 (c) 类的必要性（Issue #158）：接力变量要能被收尾 `endStages` 的
-        `if` 读到，必须经平台声明的导出通道 —— 门禁脚本向 stdout 写
-        `##[set-output turnLimitReached=1]`，再由同一 Stage 的 `exports`
-        映射成环境变量（生命周期覆盖整个 Pipeline）。这条映射就是 `(c)`：
-        它只是把同一个标记换个承载形态，不是第二套判据。
+        根因（Issue #158 收口，2026-09-25 实测）：预写变量由 Agent 开工**之前**
+        跑的门禁无条件写成 1，于是「用户新发的 @ → 不接力」这条空轮防护从未
+        成立过。四条评论触发的父构建（maxTurns=200）分别只跑了
+        97 / 135 / 164 / 76 轮，收尾接力却一律 success；接力落点 32 次构建 /
+        22.2 小时墙钟，其中 17 次又跑满 200 轮。
         """
-        allowed = (
-            "turnLimitReached:",
-            '"$turnLimitReached" = "1"',
-            "turnLimitReached: turnLimitReached",
-        )
-        offenders = [
-            f"{lineno}: {line.strip()}"
-            for lineno, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
-            if self.HANDOFF_FLAG in line
-            and not any(mark in line for mark in allowed)
-        ]
+        offenders = []
+        for where, event, job in self._npc_pipelines(cnb_doc):
+            for stage in (job.get("endStages") or []):
+                if not isinstance(stage, dict):
+                    continue
+                conditions = " ".join(str(c) for c in (stage.get("if") or []))
+                if self.RETIRED_PREWRITTEN_FLAG in conditions:
+                    offenders.append(f"{where}: if 仍读 ${self.RETIRED_PREWRITTEN_FLAG}")
+                env = (stage.get("options") or {}).get("env") or {}
+                if self.RETIRED_PREWRITTEN_FLAG in env:
+                    offenders.append(f"{where}: env 仍传出 ${self.RETIRED_PREWRITTEN_FLAG}")
+        for lineno, raw in enumerate(io.open(CNB, encoding="utf-8"), 1):
+            stripped = raw.strip()
+            if self.RETIRED_PREWRITTEN_FLAG in stripped and not stripped.startswith("#"):
+                offenders.append(f"{CNB.name}:{lineno}: {stripped}")
         assert not offenders, (
-            "接力标记出现在白名单之外的位置:\n  " + "\n  ".join(offenders) +
-            "\n标记只有两个合法用途：流水线 env 传入/传出、if 条件判定。"
+            "已被证伪的预写判据仍在接力链上:\n  " + "\n  ".join(offenders) +
+            "\n它由开工前的门禁无条件写成 1，不构成「本轮撞顶」的证据；"
+            "判据只有一处：平台收尾事实变量。"
         )
-
-    #: 接力协议的书写落点：NPC 人设必须把「怎么写出标记」讲清楚，
-    #: 否则 .cnb.yml 里的收尾阶段永远读不到真值（写不出 → 永不接力 = 死配置）。
-    HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
     def test_npc_personas_declare_handoff_protocol(self, settings_doc):
-        """每个 NPC 角色的人设都要写明接力标记的写法与唯一的判据文件。"""
+        """每个 NPC 角色的人设都要写清接力协议，并**禁止**自己写状态标记。
+
+        判据随根因一起改了（Issue #158）：旧协议要求 Agent 在触顶那一轮写标记，
+        而那件事平台根本不给它机会做（撞顶即中止、不执行任何收尾指令）；
+        随后改成"由开工前的门禁预写"，又变成与"是否撞顶"无关的恒真判据。
+        现协议是：**判据由平台在收尾时刻自己判定，Agent 什么都不用写** ——
+        人设必须把这一点讲明白，否则下一轮 Agent 会去新建第二套状态文件。
+        """
         roles = (settings_doc.get("npc") or {}).get("roles") or []
         assert roles, ".cnb/settings.yml 无角色——NPC 人设未入库"
-        missing = [
-            r.get("name") for r in roles
-            if self.HANDOFF_MARKER_FILE not in (r.get("prompt") or "")
-        ]
+        missing = []
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            if "不需要你做任何事" not in prompt or "分段" not in prompt:
+                missing.append(role.get("name"))
         assert not missing, (
             f"NPC 角色未写明轮数触顶接力协议: {missing}\n"
-            f"人设里必须写清「用满轮数且还有未完成步骤时，把 1 写进 "
-            f"$CNB_BUILD_WORKSPACE/{self.HANDOFF_MARKER_FILE}」——"
-            "这是 .cnb.yml 收尾阶段唯一的读点，写不出就等于没有接力；"
-            "同时要提醒 Agent 用评论落进度（工作树不跨轮保存）。"
+            "人设里必须写清两件事："
+            "（1）「这一轮撞没撞顶」由平台在收尾时刻判定，Agent 不需要写任何标记文件"
+            "（写标记=新造平行判据）；"
+            "（2）用**分段落评论**落进度（工作树不跨轮保存）。"
         )
 
 
