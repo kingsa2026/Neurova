@@ -51,13 +51,7 @@ from typing import Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-#: NPC 自动分支的**习惯**命名空间。**不参与判定**，仅用于台账措辞与文档表述
-#: —— 见 `mergedSourceTips()` 的口径说明：名字是平台的产物、不是事实，
-#: 把成员资格挂在名字上会让同一形态（已合并的归档分支仍在远端）在一种命名下
-#: 被拦、在另一种命名下被放行（实测漏判见该函数 docstring）。
-NPC_BRANCH_PREFIX = "auto/"
-
-#: 主line 引用。判定「已合并」即「这个提交是不是它的祖先」。
+#: 主线引用。判定「已合并」即「这个提交是不是它的祖先」。
 MAIN_REF = "origin/main"
 
 
