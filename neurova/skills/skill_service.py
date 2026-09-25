@@ -141,6 +141,15 @@ class SkillService:
 
         # 加载已安装的技能
         self._load_skills()
+        # 存量库的**名字域**收敛（Issue #189 残留 · ADR 0019 留的口）：库被打开
+        # 的这一刻就地收敛一次。落在这里而不是各装配点，是因为"名空间唯一"是
+        # 库自身的不变量（判据单源 `skills/skill_name_domain`），装库方不该各写
+        # 一次；迁移幂等，无异名时不落盘。失败只出声不炸构造——ADR 0019 明确
+        # 不硬拒存量库（当场炸会让装配起不来）。
+        try:
+            self.migrateNameDomain()
+        except Exception as e:  # noqa: BLE001 - 存量库迁移故障不得阻断库可用
+            self._logger.error("开业时名字域收敛失败（按现状继续）: %s", e, exc_info=True)
 
         self._logger.info("SkillService initialized for agent %s", agent_id)
 
@@ -157,6 +166,77 @@ class SkillService:
         except Exception as e:
             self._logger.error("Failed to load skills: %s", e)
             self._skills = {}
+
+    def migrateNameDomain(self) -> Dict[str, Any]:
+        """存量库的**名字域**迁移：同 name 不同身份的条目各自拿到携带身份的名字。
+
+        病灶（Issue #189 残留，ADR 0019 留的口）：注册表按 `skill.name` 建键
+        （ADR 0017 定的键域），历史 manifest 里 `ai_tool` / `general_tool` 被
+        多条不同身份的自动技能共用——先到者留得住，其余在工具面上**静默**
+        消失。上一批只修了产生侧（新名字携带身份），存量库迁移留给本单。
+
+        口径只写一份：`neurova.skills.skill_name_domain`（本方法只是它的
+        读写壳——读盘 → 就地收敛 → 落盘）。三件事同时成立：
+
+        - **幂等**：无改名就不落盘，重跑零副作用（装配可以放心调用）；
+        - **不丢条目、不动血缘**：只改 `name` 一处取值，`id`/`identity`/
+          `version_history`/别名表与其余字段一概不动；
+        - **落盘失败如实暴露**：盘/内存不同步时回读磁盘，并出声报 `persisted=False`
+          ——不把"没写成功"读成"迁移完成"。
+
+        Returns:
+            {"renamed_count": int, "renamed": [...], "persisted": bool}
+        """
+        from neurova.skills.skill_name_domain import migrateManifestNames
+
+        with self._lock:
+            self._load_skills()
+            report = migrateManifestNames(self._skills)
+            if not report["renamed_count"]:
+                return {**report, "persisted": True}
+            if not self._save_manifest():
+                # 落盘失败：回读磁盘，避免"内存改了、盘上没改"的分叉被后续
+                # 装配当成已收敛（如实暴露，不静默当作成功）。
+                self._load_skills()
+                self._logger.error(
+                    "名字域迁移落盘失败（%d 条未生效）：%s",
+                    report["renamed_count"], self.manifest_path,
+                )
+                return {**report, "persisted": False}
+            self._logger.warning(
+                "存量库名字域迁移 %d 条（同 name 不同身份 ⇒ 派生名携带身份）：%s",
+                report["renamed_count"], self.manifest_path,
+            )
+            return {**report, "persisted": True}
+
+    def _claimNameForNewEntry(self, name: str, skill_id: str) -> str:
+        """新条目取名：名字被**别的身份**占用时派生携带身份的名字。
+
+        按构造成立（而不是装配时事后补救）：本方法让"名字域 = 身份的函数"成为
+        写入口的不变量，下次装配自然不再撞回同一个 name。判据来自
+        `skills/skill_name_domain`（单一事实源），此处只负责列出占用集。
+
+        占用集按 `skill_id` 排自己：同名**覆盖式重装**（同一 ID）是一等语义，
+        不参与占用判定，否则升级安装会被自己拦成"撞名"。
+        """
+        from neurova.skills.skill_name_domain import claimUniqueName
+
+        base = str(name or skill_id or "")
+        taken = {
+            str(entry.get("name") or key)
+            for key, entry in self._skills.items()
+            if key != self._ALIASES_KEY
+            and isinstance(entry, dict)
+            and key != str(skill_id)
+        }
+        claimed = claimUniqueName(base, str(skill_id or ""), taken)
+        if claimed != base:
+            self._logger.warning(
+                "技能名字域收敛（id=%s，本次为新增条目取名）：%s → %s；"
+                "该名字已被别的身份占用，原样落盘会让其中一条在工具面上静默消失",
+                skill_id, base, claimed,
+            )
+        return claimed
 
     def _save_manifest(self) -> bool:
         """
@@ -498,6 +578,12 @@ class SkillService:
                     # 特意绕开本咽喉的"force 清零坑"，本体一直没修）。
                     from neurova.evolution.skill_review_gate import skill_review_gate_enabled
                     _prev = self._skills.get(skill_id) or self._skills.get(manifest_id) or {}
+                    # 新条目取名走名字域判据（单一事实源）：名字被**别的身份**
+                    # 占用时派生携带身份的名字。覆盖式重装（同一 ID）保留原名字
+                    # ——那是升级，不是撞名。
+                    _entry_name = str(manifest.get("name") or skill_id)
+                    if not _prev:
+                        _entry_name = self._claimNameForNewEntry(_entry_name, str(skill_id))
                     # 覆盖式重装：条目一律落在调用方/清单声明的 ID 上，旧条目
                     # （ID 与清单不一致时）随迁移移除，不留孤条双份。
                     for _stale in (skill_id, manifest_id):
@@ -505,7 +591,7 @@ class SkillService:
                             self._skills.pop(_stale, None)
                     self._skills[skill_id] = {
                         "id": skill_id,
-                        "name": manifest.get("name", skill_id),
+                        "name": _entry_name,
                         "version": manifest.get("version", "1.0.0"),
                         "description": manifest.get("description", ""),
                         "enabled": bool(_prev.get("enabled", not (
@@ -1052,7 +1138,9 @@ class SkillService:
                 # 否则"批准"停在内存态，重启/下一轮对话读磁盘即不可用。
                 self._skills[skill_id] = {
                     "id": skill_id,
-                    "name": name,
+                    # 新增条目取名走名字域判据（单一事实源）：名字被别的身份
+                    # 占用时派生携带身份的名字——否则落盘就是"下次装配静默少一条"。
+                    "name": self._claimNameForNewEntry(name, skill_id),
                     "version": version,
                     "description": description,
                     "enabled": not (
