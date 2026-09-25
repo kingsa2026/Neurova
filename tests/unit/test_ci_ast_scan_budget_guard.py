@@ -55,19 +55,47 @@ def protectedFiles() -> list:
             if line.split("#", 1)[0].strip()]
 
 
+def _callsOutsideDefs(statements) -> set:
+    """这些语句里的调用名（`X.f(...)` 取 `f`），**不下潜**进 def / class 体。
+
+    为什么要剪枝：模块级与函数级是**两个**扫描落点，混在一起判会让
+    「模块级」分支把每个函数体都算进来，于是每个文件都被误报。
+    """
+    names = set()
+    stack = list(statements)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                names.add(func.attr)
+            elif isinstance(func, ast.Name):
+                names.add(func.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return names
+
+
 def _repoWideAstScans(source: str) -> list:
-    """文件里「`rglob(...)` + `ast.parse(...)` 同处一个用例」的用例名。"""
+    """文件里「文件系统枚举 + `ast.parse`」同处的落点（函数名，模块级记 `<模块级>`）。
+
+    判据的落点**不限于** `test*` 函数：全仓扫描经常被放在 helper 里，`test_x`
+    只是调用它的壳。只认 `test` 名的实现会在 helper 处留一个盲区 ——
+    扫描成本照付（判据仍与代码总量捆绑），门禁却看不见。
+    `tests/unit/api/test_orphan_faces_retired_guard.py::_references` 正落在
+    这个盲区里（Issue #197 批遗留的同根形态）。
+    """
     hits = []
-    for func in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    if {"rglob", "parse"} <= _callsOutsideDefs(tree.body):
+        hits.append("<模块级>")
+    for func in ast.walk(tree):
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not func.name.startswith("test"):
-            continue
-        calls = {node.func.attr for node in ast.walk(func)
-                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-        if "rglob" in calls and "parse" in calls:
+        if {"rglob", "parse"} <= _callsOutsideDefs(func.body):
             hits.append(func.name)
-    return sorted(hits)
+    return sorted(set(hits))
 
 
 class TestNoUnprefilteredRepoWideScan:
@@ -111,6 +139,55 @@ class TestNoUnprefilteredRepoWideScan:
                 live[rel] = hits
         stale = sorted(set(REPO_WIDE_SCAN_LEDGER) - set(live))
         assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
+
+
+class TestDetectionSurfaceCoversHelpersNotJustTestNames:
+    """检测面必须覆盖 helper：全仓扫描常被放进 helper，`test_x` 只是它的壳。
+
+    根因（Issue #197 批遗留的同根剩余形态）：本门禁原先只认函数名以 `test`
+    开头的落点。于是
+    `tests/unit/api/test_orphan_faces_retired_guard.py::_references`（一个
+    `_` 前缀的 helper，被 `test_no_reference_remains` 调用）**照旧全仓
+    `rglob` + `ast.parse`**——成本照付（单次 5.2s，随仓库规模线性涨），
+    门禁却看不见它。判据与它要守的事实（"不得与代码总量捆绑"）之间，
+    差的就是这一个盲区。
+    """
+
+    def test_helper_holding_the_scan_is_reported(self):
+        """反向锁：把扫描挪进 helper，检测仍必须报出它。"""
+        source = (
+            "def _scan():\n"
+            "    import ast\n"
+            "    return [ast.parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+            "\n\n"
+            "def test_calls_it():\n"
+            "    assert _scan() == []\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"helper 里的全仓扫描没被报出：{_repoWideAstScans(source)}"
+            "（检测面退回「只认 test* 函数名」即红）"
+        )
+
+    def test_module_level_scan_is_reported(self):
+        """模块级的全仓扫描同样报出（它连函数壳都没有）。"""
+        source = (
+            "import ast\n"
+            "TREES = [ast.parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["<模块级>"], (
+            f"模块级全仓扫描没被报出：{_repoWideAstScans(source)}"
+        )
+
+    def test_script_local_scan_without_repo_root_is_not_reported(self):
+        """单文件解析不算全仓扫描（否则门禁会因假阳性而失去区分力）。"""
+        source = (
+            "import ast\n"
+            "def test_one_file():\n"
+            "    return ast.parse(SOURCE.read_text())\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"单文件解析被误报成全仓扫描：{_repoWideAstScans(source)}"
+        )
 
 
 class TestTextCacheIsOnTheHotPath:
@@ -287,6 +364,7 @@ class TestSharedBudgetIsReusedWithinOneProcess:
     "tests/unit/llm/test_capability_cache_single_source.py",
     "tests/unit/test_ci_thin_env_guards.py",
     "tests/unit/test_dev_path_and_runtime_dep_guards.py",
+    "tests/unit/api/test_orphan_faces_retired_guard.py",
 ])
 def test_known_hit_points_use_the_shared_budget(rel):
     """本次收口的命中点必须一直用共享预算（改回全仓 rglob+parse 即红）。"""
