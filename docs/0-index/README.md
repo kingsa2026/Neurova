@@ -181,6 +181,7 @@
 - [neurova-memory-system-upgrade-technical.md](../04-plans/neurova-memory-system-upgrade-technical.md) — 记忆升级技术方案
 - [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
 - [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
+- [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
 
 ### 05-reports 报告
 
