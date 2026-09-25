@@ -26,13 +26,13 @@
         </GlassCard>
         <GlassCard variant="subtle">
           <div class="stat-item">
-            <div class="stat-value">{{ formatPercent(stats.success_rate) }}</div>
+            <div class="stat-value">{{ formatPercentText(stats.success_rate) }}</div>
             <div class="stat-label">{{ t('experience.successRate') }}</div>
           </div>
         </GlassCard>
         <GlassCard variant="subtle">
           <div class="stat-item">
-            <div class="stat-value">{{ formatPercent(stats.avg_proficiency) }}</div>
+            <div class="stat-value">{{ formatPercentText(stats.avg_proficiency) }}</div>
             <div class="stat-label">{{ t('experience.proficiency') }}</div>
           </div>
         </GlassCard>
@@ -84,7 +84,7 @@
                       :show-info="false"
                       style="width: 80px"
                     />
-                    <span class="rate-text">{{ formatPercent(record.success_rate) }}</span>
+                    <span class="rate-text">{{ formatPercentText(record.success_rate) }}</span>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'experience_count'">
@@ -236,7 +236,7 @@
                   </ul>
                 </div>
                 <div v-if="rec.success_rate" class="rec-confidence">
-                  {{ t('experience.successRate') }}: {{ formatPercent(rec.success_rate) }}
+                  {{ t('experience.successRate') }}: {{ formatPercentText(rec.success_rate) }}
                 </div>
               </div>
             </GlassCard>
@@ -266,7 +266,7 @@
               <span v-for="(lesson, idx) in sim.lessons" :key="idx" class="lesson-chip">{{ lesson }}</span>
             </div>
             <div v-if="sim.success_rate" class="similar-score">
-              {{ t('experience.successRate') }}: {{ formatPercent(sim.success_rate) }}
+              {{ t('experience.successRate') }}: {{ formatPercentText(sim.success_rate) }}
             </div>
           </div>
         </div>
@@ -308,6 +308,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { formatPercentText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -371,8 +372,6 @@ const taskTypes = computed(() => {
   return [...types]
 })
 
-const formatPercent = (val: number | undefined) =>
-  val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
 const rankingColumns = computed(() => [
   { title: t('skill.title'), key: 'skill_name', dataIndex: 'task_type' },

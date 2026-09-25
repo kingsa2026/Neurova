@@ -291,7 +291,7 @@
               </div>
               <div v-if="conflict.resolution" class="conflict-resolution">
                 <a-tag color="green">{{ strategyLabel(conflict.resolution) }}</a-tag>
-                <span class="resolution-time">{{ formatTime(conflict.created_at) }}</span>
+                <span class="resolution-time">{{ formatTimestampText(conflict.created_at) }}</span>
               </div>
             </div>
           </div>
@@ -306,6 +306,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentPageTabs from '@/components/AgentPageTabs.vue'
@@ -385,7 +386,6 @@ const saveMutation = useMutation<Partial<SleepSettings>, SleepSettings>(
 )
 
 // --- Helpers ---
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 // --- Fetchers ---
 const fetchSettings = async () => {
