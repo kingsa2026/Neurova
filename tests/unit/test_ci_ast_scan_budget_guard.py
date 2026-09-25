@@ -43,9 +43,21 @@ from tests import ast_scan
 
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
-#: 允许保留的「rglob + ast.parse」全仓扫描：**空集是默认政策**。
+#: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
 #: 确需保留者必须逐条写明理由，并说明为何不能走 `tests/ast_scan.py` 的预筛。
-REPO_WIDE_SCAN_LEDGER: dict = {}  # type: ignore[type-arg]
+REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
+    "tests/unit/core/test_pytest_collection_hygiene.py": (
+        "判据的对象**就是**每个测试文件的用例名（`def` / `class` 声明面），"
+        "故必须逐个测试文件解析，且**预筛可证无效**：本仓 1783 个 `test_*.py` 里"
+        "1752 个含 `def test` / `class Test` 字样（98%），预筛缩不掉解析量。"
+        "路由到共享解析缓存实测**更慢**（本文件单跑 2.0s → 6.0s）："
+        "`_cachedParse` 是 `maxsize=None`，保留全部语法树后 gen2 GC 要反复扫描"
+        "这棵常驻图，成本仍随代码总量涨（实测 1783 文件：不保留 1.00s vs "
+        "保留 4.74s；`gc.freeze()` 后 1.21s）。**这是共享缓存自身的保留策略问题**，"
+        "不是本判据的形态问题 —— 修正缓存保留策略后再改路由，"
+        "在此之前按教义第 2 条如实登记，不做 consumer 侧的规避。"
+    ),
+}
 
 
 def protectedFiles() -> list:
@@ -55,13 +67,54 @@ def protectedFiles() -> list:
             if line.split("#", 1)[0].strip()]
 
 
-def _callsOutsideDefs(statements) -> set:
-    """这些语句里的调用名（`X.f(...)` 取 `f`），**不下潜**进 def / class 体。
+#: 文件系统枚举调用：属性形态（`X.rglob` / `X.iterdir` …）
+ENUMERATION_ATTRS = frozenset({"rglob", "glob", "iglob", "iterdir", "listdir", "scandir"})
+#: 文件系统枚举调用：裸名形态（`glob(...)` / `listdir(...)` …）
+ENUMERATION_NAMES = frozenset({"glob", "iglob", "listdir", "scandir"})
+#: 共享预算的**扫描**入口：枚举与解析都在预算内完成。调用它们即已走预算，
+#: 既不计枚举也不计解析、且不再下潜（下潜会把预算实现自身报红）——
+#: `tests/unit/test_dev_path_and_runtime_dep_guards.py::test_no_shell_out_to_ripgrep`
+#: 正是走 `ast_scan.nodeScan(hints=...)` 的合规写法。
+SHARED_BUDGET_ENTRIES = frozenset({
+    "nodeScan", "sourceRefsUnder", "parsedModules", "walkedModules",
+    "callSites", "callNodes", "classDefsIn",
+})
+#: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
+#: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
+SHARED_ENUM_ENTRIES = frozenset({"filesUnder"})
+
+
+def _moduleAliases(tree, module: str) -> set:
+    """`import <module> as X` / `from <module> import X` 引入的本地名。"""
+    aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module:
+                    aliases.add(alias.asname or module)
+        elif isinstance(node, ast.ImportFrom) and node.module == module:
+            aliases.update(alias.asname or alias.name for alias in node.names)
+    return aliases
+
+
+def _callsOutsideDefs(statements, aliases) -> tuple:
+    """这些语句里的调用，**不下潜**进 def / class 体。
+
+    返回 `({被调名}, {文件系统枚举}, {解析})`：
+
+    - 枚举：`X.rglob` / `X.iterdir` / `X.glob` / `X.listdir` / `X.scandir`，
+      以及 `import os` 之后裸写的 `os.walk`（`X.walk` 只有落在 `os` 模块别名上
+      才算 —— `ast.walk` 是词法遍历，`tests/unit/ci/` 里另有一批同名本地 `walk`
+      递归函数，按名字判会把它们全算成枚举）；
+    - 解析：`<ast 别名>.parse(...)` 与裸 `parse(...)`；`tests/ast_scan` 的共享
+      预算入口一律**不算**解析落点（它是本门禁的推荐修法）。
 
     为什么要剪枝：模块级与函数级是**两个**扫描落点，混在一起判会让
     「模块级」分支把每个函数体都算进来，于是每个文件都被误报。
     """
-    names = set()
+    osAliases = aliases["os"]
+    astAliases = aliases["ast"]
+    callees, enumerations, parses = set(), set(), set()
     stack = list(statements)
     while stack:
         node = stack.pop()
@@ -70,31 +123,82 @@ def _callsOutsideDefs(statements) -> set:
         if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Attribute):
-                names.add(func.attr)
+                callees.add(func.attr)
+                root = ast.unparse(func.value).split(".")[0].split("[")[0]
+                if func.attr == "parse" and root in astAliases:
+                    parses.add("ast.parse")
+                elif func.attr == "walk" and root in osAliases:
+                    enumerations.add("os.walk")
+                elif func.attr in SHARED_BUDGET_ENTRIES:
+                    pass  # 已走预算：既不计枚举也不计解析
+                elif func.attr in SHARED_ENUM_ENTRIES:
+                    enumerations.add(func.attr)
+                elif func.attr in ENUMERATION_ATTRS and root not in astAliases:
+                    enumerations.add(func.attr)
             elif isinstance(func, ast.Name):
-                names.add(func.id)
+                callees.add(func.id)
+                if func.id == "parse":
+                    parses.add("parse")
+                elif func.id == "walk" and func.id in aliases["os"]:
+                    enumerations.add("walk")
+                elif func.id in ENUMERATION_NAMES:
+                    enumerations.add(func.id)
         stack.extend(ast.iter_child_nodes(node))
-    return names
+    return callees, enumerations, parses
 
 
 def _repoWideAstScans(source: str) -> list:
-    """文件里「文件系统枚举 + `ast.parse`」同处的落点（函数名，模块级记 `<模块级>`）。
+    """文件里「文件系统枚举 + 解析」的落点（函数名，模块级记 `<模块级>`）。
 
-    判据的落点**不限于** `test*` 函数：全仓扫描经常被放在 helper 里，`test_x`
-    只是调用它的壳。只认 `test` 名的实现会在 helper 处留一个盲区 ——
-    扫描成本照付（判据仍与代码总量捆绑），门禁却看不见。
-    `tests/unit/api/test_orphan_faces_retired_guard.py::_references` 正落在
-    这个盲区里（Issue #197 批遗留的同根形态）。
+    判据的靶点是**成本随代码总量增长**，不是「源码里恰好写了哪两个名字」：
+
+    - 落点**不限于** `test*` 函数：全仓扫描常被放在 helper 里，`test_x` 只是
+      调用它的壳（`tests/unit/api/test_orphan_faces_retired_guard.py::_references`
+      就落在这个盲区里，Issue #197 批遗留的同根形态）；
+    - 枚举**不限于** `rglob`：`os.walk` 展开整棵树、`iterdir` / `glob` / `listdir`
+      同样是枚举，只要后面跟着解析，成本照样随代码总量涨；
+    - 解析**不限于**裸名 `parse`：`import ast as _ast` 之后是 `_ast.parse`；
+    - 两者可以分处**两层 helper**：只在同一函数体里找名字同现会漏掉这种拆法。
+      报出的落点是**发起枚举的那一层**；纯解析的 helper 不是扫描落点，不报。
+
+    两条不得报出的形态（假阳性会训练人忽略门禁）：解析**单个函数自己的源码**
+    （`ast.walk(ast.parse(inspect.getsource(func)))`，它枚举的是树、不是仓库）、
+    以及走 `tests/ast_scan` 共享预算的写法。
     """
-    hits = []
     tree = ast.parse(source)
-    if {"rglob", "parse"} <= _callsOutsideDefs(tree.body):
-        hits.append("<模块级>")
-    for func in ast.walk(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    aliases = {
+        "os": _moduleAliases(tree, "os"),
+        "ast": _moduleAliases(tree, "ast") or {"ast"},
+    }
+    byName = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            byName.setdefault(node.name, []).append(node)
+
+    units = [("<模块级>", tree.body)]
+    for name, defs in byName.items():
+        units.extend((name, fn.body) for fn in defs)
+
+    hits = []
+    for name, body in units:
+        callees, enumerations, parses = _callsOutsideDefs(body, aliases)
+        if name in SHARED_BUDGET_ENTRIES:
+            # 预算实现自身的定义不是「调用方落点」：它的枚举与解析都在预算内。
             continue
-        if {"rglob", "parse"} <= _callsOutsideDefs(func.body):
-            hits.append(func.name)
+        seen = set()
+        stack = [name for name in callees if name not in SHARED_BUDGET_ENTRIES]
+        while stack:
+            callee = stack.pop()
+            if callee in seen or callee not in byName:
+                continue
+            seen.add(callee)
+            for fn in byName[callee]:
+                more, enums2, parses2 = _callsOutsideDefs(fn.body, aliases)
+                enumerations |= enums2
+                parses |= parses2
+                stack.extend(n for n in more if n not in SHARED_BUDGET_ENTRIES)
+        if enumerations and parses:
+            hits.append(name)
     return sorted(set(hits))
 
 
@@ -163,9 +267,15 @@ class TestDetectionSurfaceCoversHelpersNotJustTestNames:
             "def test_calls_it():\n"
             "    assert _scan() == []\n"
         )
-        assert _repoWideAstScans(source) == ["_scan"], (
-            f"helper 里的全仓扫描没被报出：{_repoWideAstScans(source)}"
+        hits = _repoWideAstScans(source)
+        assert "_scan" in hits, (
+            f"helper 里的全仓扫描没被报出：{hits}"
             "（检测面退回「只认 test* 函数名」即红）"
+        )
+        assert "test_calls_it" in hits, (
+            f"调用侧壳函数没被一并点名：{hits}"
+            "（报错只指 helper 时，读者会以为把 helper 改掉即可，"
+            "而真正付出成本的是每条调用路径）"
         )
 
     def test_module_level_scan_is_reported(self):
@@ -187,6 +297,148 @@ class TestDetectionSurfaceCoversHelpersNotJustTestNames:
         )
         assert _repoWideAstScans(source) == [], (
             f"单文件解析被误报成全仓扫描：{_repoWideAstScans(source)}"
+        )
+
+
+class TestDetectionSurfaceCoversEveryJudgedShape:
+    """检测面必须覆盖**每一种**「枚举 + 解析」形态，而不是某一种字面组合。
+
+    根因（Issue #197 批上轮未闭环第 2 条）：本门禁原先只认 `rglob` + `parse`
+    两个**调用名**同处一处的写法。于是同一根因的其它形态 —— `os.walk` 展开整棵树、
+    `import ast as _ast` 之后再解析 —— 照旧全仓扫，门禁一个字都不说。
+    与上一轮补的 helper 盲区是同一件事的两半：**判据的靶点是「成本随代码总量涨」，
+    不是「源码里恰好写了这两个名字」**。
+
+    反向锁同样重要（假阳性会训练人忽略门禁）：解析**单个函数自己的源码**
+    （`ast.walk(ast.parse(obj.getsource(func)))`）不是全仓扫描；文件名恰好叫
+    `walk` 的本地函数不是标准库那一个；`tests/ast_scan` 的共享预算入口
+    （`_cachedParse`）正是本门禁推荐的修法，不得反被它报出来。
+    """
+
+    def test_os_walk_enumeration_is_reported(self):
+        source = (
+            "import ast, os\n"
+            "def test_x():\n"
+            "    for root, dirs, files in os.walk('neurova'):\n"
+            "        ast.parse(open(root).read())\n"
+        )
+        assert _repoWideAstScans(source) == ["test_x"], (
+            f"`os.walk` 展开整棵树 + 解析没被报出：{_repoWideAstScans(source)}"
+            "（检测面只认 `rglob` 字面名即红）"
+        )
+
+    def test_aliased_ast_module_is_reported(self):
+        source = (
+            "import ast as _ast\n"
+            "def _scan():\n"
+            "    return [_ast.parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+        )
+        assert _repoWideAstScans(source) == ["_scan"], (
+            f"`import ast as _ast` 之后的解析漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_iterdir_enumeration_is_reported(self):
+        source = (
+            "import ast\n"
+            "def test_x():\n"
+            "    return [ast.parse(p.read_text()) for p in ROOT.iterdir()]\n"
+        )
+        assert _repoWideAstScans(source) == ["test_x"], (
+            f"`iterdir` 枚举 + 解析漏报：{_repoWideAstScans(source)}"
+        )
+
+    def test_enumeration_and_parse_split_across_a_call_chain(self):
+        """枚举与解析分处两层 helper：**发起枚举的那个落点**必须报出。
+
+        只认「同一函数体里两个名字同现」的写法会漏掉这种拆法 —— 而它照样把
+        代码总量编码成时间上界（枚举了一层树、又逐文件解析）。
+        纯解析的 helper 本身不是扫描落点，不得被误报（假阳性会训练人忽略门禁）。
+        """
+        source = (
+            "import ast\n"
+            "def _inner(p):\n"
+            "    return ast.parse(p.read_text())\n"
+            "\n\n"
+            "def _outer():\n"
+            "    return [_inner(p) for p in ROOT.rglob('*.py')]\n"
+            "\n\n"
+            "def test_calls_it():\n"
+            "    assert _outer() is None or True\n"
+        )
+        hits = _repoWideAstScans(source)
+        assert "_outer" in hits, (
+            f"跨层拆分的扫描没被报出：{hits}（只认同处一处即红）"
+        )
+        assert "_inner" not in hits, (
+            f"只做解析、不做枚举的 helper 被误报：{hits}"
+            "（报出纯解析 helper 会让门禁失去区分力）"
+        )
+
+    def test_walking_a_single_function_source_is_not_reported(self):
+        """解析**单个函数自己的源码**不是全仓扫描（否则门禁会把合规写法报红）。"""
+        source = (
+            "import ast\n"
+            "import inspect\n"
+            "def test_x():\n"
+            "    return ast.walk(ast.parse(inspect.getsource(func)))\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"单函数源码被误报成全仓扫描：{_repoWideAstScans(source)}"
+        )
+
+    def test_local_function_named_walk_is_not_reported(self):
+        """本地定义的 `walk` 不是标准库那一个，不得据此判成枚举。"""
+        source = (
+            "import ast\n"
+            "def walk(node):\n"
+            "    return [node]\n"
+            "\n\n"
+            "def test_x():\n"
+            "    return walk(ast.parse('X = 1'))\n"
+        )
+        assert _repoWideAstScans(source) == [], (
+            f"同名本地函数被误判成文件系统枚举：{_repoWideAstScans(source)}"
+        )
+
+    def test_shared_budget_entries_are_not_reported(self):
+        """本门禁推荐的修法（调用 `tests/ast_scan` 的共享预算入口）不得反被报红。
+
+        两臂都要钉：
+
+        - 走 `ast_scan.nodeScan(hints=...)` 的合规写法（真实样本：
+          `tests/unit/test_dev_path_and_runtime_dep_guards.py::test_no_shell_out_to_ripgrep`）
+          必须零命中 —— 否则门禁把推荐修法报红，等于逼人绕开共享预算；
+        - 但这不能变成免检通道：**自己**枚举后逐文件 `ast.parse` 仍须报出。
+        """
+        viaBudget = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.nodeScan(ROOT, hints=('x',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _repoWideAstScans(viaBudget) == [], (
+            f"走共享预算的合规写法被误报：{_repoWideAstScans(viaBudget)}"
+            "（门禁把推荐的修法报红，等于逼人绕开它）"
+        )
+        privateScan = (
+            "from tests import ast_scan\n"
+            "import ast\n"
+            "def test_x():\n"
+            "    for path in ast_scan.filesUnder(ROOT, '.py'):\n"
+            "        ast.parse(path.read_text())\n"
+        )
+        assert _repoWideAstScans(privateScan) == ["test_x"], (
+            f"共享预算入口成了免检通道：自己枚举后私有解析未被报出"
+            f"（{_repoWideAstScans(privateScan)}）"
+        )
+
+    def test_shared_budget_module_itself_is_not_reported(self):
+        """`tests/ast_scan.py` 自身不得被报红：它**就是**共享预算的实现。"""
+        source = io.open(
+            ast_scan.__file__, encoding="utf-8").read()
+        assert _repoWideAstScans(source) == [], (
+            f"共享预算实现自身被误报：{_repoWideAstScans(source)}"
+            "（把预算实现报成违规，门禁就会逼人绕开它）"
         )
 
 

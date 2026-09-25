@@ -25,10 +25,15 @@ from __future__ import annotations
 import ast
 import io
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
 PROTECTED = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 取时钟的函数名（`time.perf_counter()` / `perf_counter()` / `time.time()` …）
@@ -57,6 +62,24 @@ def protectedFiles() -> List[str]:
         for line in text.splitlines()
         if line.split("#", 1)[0].strip()
     ]
+
+
+def _outsideSubsetRefs() -> List:
+    """子集外的测试文件源码引用（**枚举与文本读取**收口到共享预算）。
+
+    取数落在本仓唯一 AST 入口 `tests/ast_scan`：`sourceRefsUnder` 的 `hints`
+    用的就是本模块自己的 `PARSE_HINTS`（`_maybeContainsWallclock` 的同一份词表，
+    不抄第二份），故预筛口径与本地判定逐字一致；文本读取走 `_cachedCode`，
+    与其余跨文件判据复用同一份缓存（Issue #148 / #197）。
+
+    解析**不**并入共享缓存：实测 224 个候选文件私有 `ast.parse` 0.22s、
+    走 `_cachedParse` 0.82s —— 共享缓存的 `maxsize=None` 会把语法树全部留下，
+    gen2 GC 随即反复扫描这棵常驻图，成本反随命中面增长（见门禁台账里
+    `test_pytest_collection_hygiene.py` 那条同因读数）。故本处保留私有解析，
+    范围已由预筛限定在命中面之内。
+    """
+    return ast_scan.sourceRefsUnder(
+        REPO_ROOT / "tests", ".py", hints=PARSE_HINTS)
 
 
 def _derivesFromClock(node: ast.AST) -> bool:
@@ -373,15 +396,15 @@ class TestOutsideSubsetHitsAreCounted:
 
     def test_outside_subset_counts_match(self):
         live: Dict[str, int] = {}
-        for path in sorted((REPO_ROOT / "tests").rglob("test_*.py")):
-            rel = path.relative_to(REPO_ROOT).as_posix()
-            if rel in set(protectedFiles()):
+        subset = set(protectedFiles())
+        for ref in _outsideSubsetRefs():
+            if not ref.path.match("test_*.py"):
                 continue
-            text = io.open(path, encoding="utf-8", errors="ignore").read()
-            if not _maybeContainsWallclock(text):
+            rel = ast_scan.relativeToRepo(ref.path)
+            if rel in subset or not _maybeContainsWallclock(ref.code):
                 continue
             try:
-                count = len(wallclockBounds(text))
+                count = len(wallclockBounds(ref.code))
             except SyntaxError:
                 continue
             if count:
