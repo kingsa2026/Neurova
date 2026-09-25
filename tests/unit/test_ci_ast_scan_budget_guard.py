@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import ast
+import gc
 import io
 import sys
 from pathlib import Path
@@ -1086,6 +1087,160 @@ class TestSharedBudgetIsReusedWithinOneProcess:
             "本预算就成了纸面承诺。"
         )
 
+
+class TestResidentGraphIsRetiredFromTheScannedGenerations:
+    """常驻语法树必须退役出 GC 的扫描分代：扫描面是**有界窗口**，不随解析量涨。
+
+    根因（Issue #197 批上轮登记为「未闭环第 1 条」，本轮实证）：`_cachedParse` /
+    `_cachedNodes` 是 `maxsize=None` —— 整进程保留**全部**语法树。保留本身没错
+    （跨用例复用正是预算的意义），错的是这些树全留在 gen2 的扫描面里：
+    gen2 每扫一遍都要走完整棵常驻图，**成本随代码总量涨**。
+
+    实测（本机，1787 个 `test_*.py` 全量解析后）：
+
+    | 保留策略 | 建缓存 | 单次 gen2 | 常驻对象 |
+    |---|---|---|---|
+    | 不保留 | 1.10s | 0.78ms | 1.2 万 |
+    | 全部保留（改前） | 4.51s | **1030.43ms** | 267 万 |
+    | 全部保留 + 退役（改后） | 1.07s | **1.9ms** | 267 万 |
+
+    受保护子集整会话读数（同一批文件、同机、同顺序）：gen2 合计 7.4s → 1.4s。
+
+    判据是**结构不变量**而非秒数（墙钟阈值另有常驻台账）：退役步长 K 决定「至多
+    K 个文件的树还没被移出扫描面」，故扫描面上界 = **步长 × 单文件最大节点量**，
+    与解析了多少文件无关。用「单文件最大节点量」而不是常数，是为了不把任何
+    单文件规模编码进判据——步长是常数，与代码总量无关。
+    """
+
+    LARGE = 240
+    #: 上界余量：退役按「常驻树数」触发，故窗口内至多 K 棵，取 2 倍余量。
+    WINDOW_FACTOR = 2
+
+    _seq = 0
+
+    def _parseBatch(self, count: int):
+        """解析 `count` 份源码，返回（本次新增且可见的节点数，单文件最大节点量）。"""
+        type(self)._seq += 1
+        tag = f"probe-{type(self)._seq}"
+        before = {id(node) for node in gc.get_objects() if isinstance(node, ast.AST)}
+        widest = 1
+        for path in ast_scan.filesUnder(ast_scan.PRODUCTION_ROOT)[:count]:
+            tree = ast_scan._cachedParse(("probe", tag, str(path)), ast_scan.sourceCode(path))
+            widest = max(widest, sum(1 for _ in ast.walk(tree)))
+        gc.collect()
+        visible = sum(1 for node in gc.get_objects()
+                      if isinstance(node, ast.AST) and id(node) not in before)
+        return visible, widest
+
+    def _windowBound(self, widest: int, step: int) -> int:
+        return widest * max(step, 1) * self.WINDOW_FACTOR
+
+    def test_scanned_surface_is_a_bounded_window(self):
+        _, widest = self._parseBatch(1)
+        visible, widest = self._parseBatch(self.LARGE)
+        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
+        assert visible <= bound, (
+            f"解析 {self.LARGE} 份源码后，gen2 仍能扫到 {visible} 个新增 AST 节点，"
+            f"超出退役窗口上界 {bound}（= 单文件最大 {widest} 节点 × 步长 "
+            f"{ast_scan.RETIRE_STEP} × {self.WINDOW_FACTOR}）：常驻解析缓存没把已保留的"
+            "图移出扫描分代，gen2 每扫一遍都要走完整棵常驻图，成本随代码总量涨"
+            "（实测 1787 文件单次 1030ms vs 不留 0.78ms）。"
+            "修法：`tests/ast_scan` 按退役步长 `gc.freeze()` 已保留的图。"
+        )
+
+    def test_retirement_is_not_vacuous_when_disabled(self, monkeypatch):
+        """反向锁：把退役步长设为 0（关闭退役），扫描面必然越界。"""
+        _, widest = self._parseBatch(1)
+        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 0)
+        visible, widest = self._parseBatch(self.LARGE)
+        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
+        assert visible > bound, (
+            f"关掉退役后扫描面只有 {visible} 个节点（窗口上界 {bound}）：判据在"
+            "「不退役」这一侧不成立，说明它测的不是退役本身。"
+        )
+
+    def test_retirement_reclaims_unreachable_objects_before_freezing(self, monkeypatch):
+        """退役前必须先回收：先把垃圾冻住 = 把它变成永久垃圾。
+
+        `gc.freeze()` 是进程级操作，冻结**当时全部**被跟踪对象；冻结之后不可达
+        对象永远不会再被回收（实测：冻结前已不可达的环，`gc.collect()` 恒返回 0，
+        解冻后才回收）。故退役顺序必须是「先 `gc.collect()` 再 `gc.freeze()`」——
+        顺序反了不会有任何报错，只是把垃圾永久留在进程里。
+        """
+        import weakref
+
+        class Cycle:
+            def __init__(self):
+                self.me = self
+
+        ast_scan._cachedParse.cache_clear()
+        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
+        ast_scan.resetRetireLedger()
+
+        gc.collect()
+        garbage = Cycle()
+        watcher = weakref.ref(garbage)
+        del garbage
+        ast_scan._cachedParse(("probe-order",), "X = 1")
+        assert ast_scan.retireStats()["retires"] == 1, "退役没发生，判据测不到顺序"
+        assert watcher() is None, (
+            "退役时把当时已不可达的环一起冻住了（弱引用仍存活）：`gc.freeze()` 之前"
+            "少了 `gc.collect()`，垃圾被冻成永久不可回收。"
+        )
+        gc.unfreeze()
+
+    def test_retirement_survives_a_cache_clear(self, monkeypatch):
+        """清空缓存后退役不得停摆：触发量必须是**自上次退役以来的新增数**。
+
+        根因（本判据先红后绿）：退役游标由「常驻树总数」推出，而该量**可以被
+        外部拉回 0** —— 受保护子集里就有用例显式 `_cachedParse.cache_clear()`
+        自证缓存语义（本文件 `TestTextCacheIsOnTheHotPath` 一族）。清空之后
+        游标仍停在高位，于是接下来几百次解析**一棵也不退役**，扫描面重新变成
+        无界 —— 判据退化成「取决于前面跑过哪些用例」，正是本文件开头点名的
+        「判据与运行环境捆绑」形态。
+
+        靶点是**新增量**：把「自上次退役以来新解析了多少棵」直接计成一笔单调
+        的账，与 `currsize` 无关，故清缓存不影响它。
+        """
+        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 8)
+        ast_scan._cachedParse.cache_clear()
+        ast_scan._cachedNodes.cache_clear()
+
+        # 先解析到高位（等效于同会话里更早的消费方），再把缓存清回 0。
+        self._parseBatch(self.LARGE)
+        highWater = ast_scan.retireStats()["retires"]
+        assert highWater > 0, "预热阶段没发生退役，判据测不到东西"
+        ast_scan._cachedParse.cache_clear()
+        ast_scan._cachedNodes.cache_clear()
+
+        before = ast_scan.retireStats()
+        _, widest = self._parseBatch(self.LARGE)
+        after = ast_scan.retireStats()
+        assert after["retires"] > before["retires"], (
+            f"清空缓存后再解析 {self.LARGE} 份源码，退役次数一动没动"
+            f"（{before['retires']} → {after['retires']}）：退役游标是按"
+            "「常驻树总数」推的绝对值，缓存被清回 0 之后它仍停在高位，扫描面重新无界。"
+            "修法：触发量记成「自上次退役以来的新增解析数」，与 currsize 解耦。"
+        )
+        assert 0 <= after["pending"] < ast_scan.RETIRE_STEP, (
+            f"待退役量 {after['pending']} 不在 [0, 步长) 内："
+            "退役后必须复位，否则扫描面按解析量单调涨。"
+        )
+
+    def test_retirement_is_read_back_through_the_ledger(self, monkeypatch):
+        """退役账必须可读回：写侧退役了、读侧看不见，就是断点。
+
+        台账按步长累积，故本用例把步长与游标钉在初值（与用例执行顺序无关）。
+        """
+        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
+        ast_scan.resetRetireLedger()
+        gc.unfreeze()
+        self._parseBatch(4)
+        after = ast_scan.retireStats()
+        assert after["retires"] > 0, (
+            f"退役发生了但台账读不回（{after}）：写侧无读侧即断点。"
+        )
+        assert after["frozen"] > 0, f"退役后冻结对象仍为 0：{after}"
 
 @pytest.mark.parametrize("rel", [
     "tests/unit/knowledge/test_write_boundary_closes_verification.py",
