@@ -52,6 +52,18 @@ def registered_domains() -> List[str]:
         return sorted(_DOMAIN_MIGRATIONS)
 
 
+def latest_version(domain: str = "memory") -> int:
+    """该版本域已注册的**最大版本号**（"库该落在哪一版"的唯一读处）。
+
+    调用方（迁移门禁、探针与用例）不得各自写死一个数字：迁移链每加一版，
+    写死的断言就会以"与任务无关"的形式变红（002 加 v2 时正是如此）。
+    域未注册返回 0（与"库还没有版本号"同义）。
+    """
+    with _registry_lock:
+        steps = _DOMAIN_MIGRATIONS.get(domain) or []
+    return steps[-1][0] if steps else 0
+
+
 def schema_version(conn) -> int:
     """读取库的 user_version（调用方须已确定 domain）。"""
     return int(conn.execute("PRAGMA user_version").fetchone()[0])

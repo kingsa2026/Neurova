@@ -253,6 +253,7 @@ class ToolExecutor:
     _builtin_dispatch: Dict[str, str] = {
         "memory_search": "_execute_memory_search",
         "recall_history": "_execute_recall_history",
+        "recall_context_span": "_execute_recall_context_span",
         "search": "_execute_web_search",
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
@@ -1664,7 +1665,7 @@ class ToolExecutor:
     # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
     # 文件写等不在列，一律 fail-closed（未知代码面无治理审查放行 = 裸奔）。
     _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
-        "memory_search", "recall_history", "voice_memory_search",
+        "memory_search", "recall_history", "recall_context_span", "voice_memory_search",
         "computer_screenshot", "computer_dom_snapshot", "get_datetime", "weather", "web_search",
         "discover_skills",
         "file_list", "file_search", "file_read", "file_parse", "list_agents",
@@ -3170,6 +3171,86 @@ class ToolExecutor:
             "source": "session_ledger",
             "content": entry.get("result"),
         }
+
+    async def _execute_recall_context_span(self, params: Dict) -> Dict:
+        """按 `covers_ref` 确定性取回分层摘要覆盖的原文（Issue #90 · T-11d）。
+
+        与 `recall_history` 的分工是本票的要点：那个是**模糊**召回（FTS/LIKE，
+        允许召回不到，靠关键词匹配）；本工具是**确定性**直取（引用 → 索引 → 原文，
+        不设门槛、不打相关性分）。工单 §12.5 第 3 条把"下钻靠相关性门槛碰运气"
+        列为假实现，故这里没有退化路径 —— 取不到就如实报错并点名原因。
+
+        全程只有一条寻址口径：`covers_ref` 由 `fold_index` 单点派生与解析，
+        本方法不解析引用语法、也不重算 covers。
+        """
+        try:
+            reference = str(params.get("covers_ref") or "").strip()
+            if not reference:
+                return {"error": "缺少 covers_ref：请粘贴摘要行尾部的引用串（形如 covers_ref=fold:2@会话）"}
+            try:
+                limit = int(params.get("limit", 200))
+            except (TypeError, ValueError):
+                limit = 200
+            limit = max(1, min(limit, 500))
+
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            pool = getattr(orchestrator, "context_pool", None) if orchestrator else None
+            if pool is None:
+                return {"error": "上下文池不可用，无法下钻分层摘要"}
+            reader = getattr(pool, "drilldown", None)
+            if not callable(reader):
+                return {"error": "上下文池不支持分层摘要下钻（池版本过旧）"}
+
+            span = reader(reference, limit=limit)
+            if not span.get("resolved"):
+                # 解析不出引用 / 档位不存在：如实报错并附**本会话现有档位**，
+                # 让模型能自行纠正引用，而不是盲重试（教义第 2 条：不伪装空结果）。
+                available = [
+                    layer["fold_seq"] for layer in pool.summaryLayers()
+                ]
+                return {
+                    "error": f"covers_ref 下钻失败（{span.get('reason')}）",
+                    "reason": span.get("reason"),
+                    "covers_ref": reference,
+                    "available_fold_seqs": available,
+                }
+            if not span["entries"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"该档位（fold_seq={span['fold_seq']}）的覆盖原文本轮不可见"
+                        f"（{span.get('reason')}）"
+                    ),
+                    "reason": span.get("reason"),
+                    "filtered": span.get("filtered", 0),
+                    "unresolved": span.get("unresolved", []),
+                }
+
+            # 不静默：部分覆盖原文取不回时，把缺口条数与原因一并交给模型。
+            return {
+                "success": True,
+                "fold_seq": span["fold_seq"],
+                "level": span.get("level"),
+                "count": len(span["entries"]),
+                "filtered": span.get("filtered", 0),
+                # 截断必须交给模型：covers 条数不设上限，长轨迹上一档覆盖上千条
+                # 是常态；不报 `truncated` 就等于让模型以为"这就是全部"。
+                "truncated": span.get("truncated", 0),
+                "unresolved": span.get("unresolved", []),
+                "reason": span.get("reason"),
+                "originals": [
+                    {
+                        "content": entry["content"],
+                        "turn_id": entry.get("turn_id"),
+                        "session_id": entry.get("session_id"),
+                        "hash": entry.get("hash"),
+                    }
+                    for entry in span["entries"]
+                ],
+            }
+        except Exception as e:
+            logger.warning("recall_context_span 执行失败: %s", e)
+            return {"error": f"分层下钻失败: {e}"}
 
     async def _execute_recall_history(self, params: Dict) -> Dict:
         """召回历史上下文（P1-1③ + P1-#6 双模式）。

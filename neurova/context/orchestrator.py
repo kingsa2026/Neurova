@@ -585,6 +585,37 @@ class ContextOrchestrator:
             )
         slot["summary_prev"] = summary
 
+    def _inlineCoversRef(self, window: list, slot: dict) -> list:
+        """把这一代的 `covers_ref` 追加到窗口里的摘要行尾部（T-11d）。
+
+        引用由 `fold_index.renderCoversRef` 单点派生（与解析同模块，语法只有一个
+        出处）；会话身份取 `_resolveWindowCacheKey()`——**与折叠缓存槽同一个键**。
+        这一点不是巧合而是必需：引用里的会话 = 索引里的会话 = 缓存槽身份，三处
+        同取一条回落链（T-03b）；各取一份就会出现"引用指 A、索引只有 B"的静默落空。
+
+        槽里还没有层序（本轮没推进任何一代，例如摘要失败且无历史摘要）时不追加
+        任何东西 —— 编一个引用出来就是伪造寻址能力，比没有引用更坏。
+        """
+        foldSeq = int(slot.get("fold_seq") or 0)
+        if foldSeq <= 0:
+            return window
+        from neurova.context.fold_index import renderCoversRef
+
+        ref = renderCoversRef(foldSeq, self._resolve_window_cache_key())
+        return [self._withCoversRef(msg, ref) for msg in window]
+
+    @staticmethod
+    def _withCoversRef(msg: dict, ref: str) -> dict:
+        """给摘要行尾部挂上引用；非摘要行原样返回（幂等：已有引用不重复追加）。"""
+        content = str((msg or {}).get("content", ""))
+        if msg.get("role") != "system" or "早期对话摘要" not in content:
+            return msg
+        from neurova.context.fold_index import REF_PREFIX
+
+        if REF_PREFIX in content:
+            return msg
+        return {**msg, "content": f"{content}\n({ref})"}
+
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
 
@@ -2017,6 +2048,12 @@ class ContextOrchestrator:
                 )
             )
             window = [{"role": "system", "content": stub}] + window
+
+        # T-11d：把这一代的 `covers_ref` 内联进摘要行 —— 模型据此**确定性**下钻，
+        # 而不是靠 recall_history 的相关性门槛碰运气（工单 §12.5 第 3 条）。
+        # 放在两条分支汇合处：有 LLM 摘要与只有静态桩两种形状都要带引用，
+        # 否则"摘要行有引用"这件事就只在摘要成功时才成立（那是运气，不是契约）。
+        window = self._inlineCoversRef(window, cache)
 
         logger.info(
             "[WINDOW_COMPACT] 窗口超预算折叠: %d msgs → %d（折叠 %d 条, token %d → %d, LLM摘要=%s）",
