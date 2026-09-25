@@ -16,32 +16,31 @@
 `df0f1f15` 编辑清单时带走），本轮的 `test_issue197_judgement_registration.py`
 只钉住了**本批**那几条，不足以拦住其它批次的同类删除。
 
-## 实测（本仓历史的真实读数，不是推测）
+## 实测（本仓历史的真实读数，复跑方式见下，不采信转述）
 
-按 `git log` 取出清单曾经登记过的**全部**条目，与 `origin/main` 现值比对：
+复跑命令（与本文件 `_listedEver()` 同一口径：逐提交读清单全文，不解析 patch）：
 
-```
-曾登记过 250 条，现值 243 条 —— 差集 7 条
-```
-
-其中 2 条对应的文件已被有意退役（`test_endpoint_mount_wiring_guard.py`
-并入 `test_route_mount_contract_guard.py`；`test_devRulesConfigGuard.py`
-随 dev 规则配置退役），另 5 条的文件**都还在仓里且逐文件单跑全绿**，
-却已不在 CI 清单上：
-
-```
-tests/unit/agent/test_tool_call_record_identity.py        5 passed
-tests/unit/security/test_tool_event_export_redaction.py   5 passed
-tests/unit/api/test_memory_enhancement_real_manager.py    7 passed
-tests/unit/neurflow/test_storage.py                      32 passed
-tests/unit/cognitive/test_cognitive_storage_engine.py    17 passed
+```python
+ever = _listedEver(); now = _listedNow()
+inrepo = [p for p in sorted(ever - now) if (PROJECT_ROOT / p).exists()]
 ```
 
-最典型的一例是 `88901c00`（"清掉清单里的重复登记行"）：它要删的是
+修复前（取证时刻）：`ever=266 / now=253`，差集 13 条 —— 4 条文件已不在仓
+（有意退役），**9 条的文件都还在仓里且逐文件单跑全绿**，却已不在 CI 清单上。
+
+修复后（现值，本守卫常驻此读数）：`ever=266 / now=262`，差集 4 条全部对应
+`protectedSubsetRetired.txt` 的退役署名，**在仓却未登记的条目为 0**。
+
+被复原的 9 条里最典型的一例是 `88901c00`（"清掉清单里的重复登记行"）：它要删的是
 `test_tool_event_export_redaction.py` 的**重复**条目，实际把**两份都删了**，
 顺带带走只登记过一次的 `test_tool_call_record_identity.py`。该提交的正文
 写着"保留 e3f15895 收口后的 704 段"，而 704 段也在同一次编辑里消失——
 **"删重复"与"删光"在清单这种纯文本上没有区别，删除动作本身不产生任何红。**
+
+另一例 `7d672487` 更隐蔽：其合并正文写着"两侧均为纯追加的受保护测试登记……
+无删除"，实际删掉 4 条 Issue #56 登记。**删除只发生在合并提交里**，按
+`git log -p` 的增行法看不见，必须逐提交读清单全文（本文件取历史即按此实现，
+并带 `--full-history`，否则合并侧的变更会被默认简化跳过）。
 
 ## 判据
 
