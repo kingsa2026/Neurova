@@ -640,7 +640,26 @@ $:
   #   `role: DSCoder` 让平台按 .cnb/settings.yml 解析人设并拼进 system prompt
   #   （人设仍是配置期唯一必达通道），userPrompt 只补本轮要干的活。
   api_trigger_npc_handoff:
-    - docker:
+    # 本流水线是**续跑载体**，不是门禁：它跑的是「上一轮用满轮数后继续干」，
+    # 配额用满即它的正常结束形态（`npc:go` 会把整条流水线判 error，
+    # 而 `endStages` 不改流水线状态 —— 平台「语法手册」）。
+    # 不声明 allowFailure 的实测后果（2026-09-25 取证）：
+    #   平台把这份 error 当**提交状态检查**上报，与门禁流水线共用同一条通道，
+    #   于是合并提交被标红、用户在 PR 上读到的就是「合并失败」。
+    #   最近 8 次接力里 5 次如此（41m / 44m / 1h8m / 1h20m / 1h42m 后 error），
+    #   每一次的原文都是 `Agent aborted: reached maxTurns limit (200)` ——
+    #   本仓自己声明的「配额触发的正常收官」，不是任何门禁的结论。
+    #   实例：0cc0719a（#217 的合并提交）的提交状态里挂着
+    #   `cnb/api_trigger_npc_handoff/pipeline-1 error [1h 8m]`，而该合并的
+    #   门禁流水线当时全绿。
+    # 为什么修在**载体**上而不是修判据/放宽门禁（教义第 1／2 条）：
+    #   平台已声明用于「失败状态不上报」的唯一手段就是 allowFailure
+    #   （平台「语法手册」：为 true 时，流水线的失败状态不会上报到 CNB 上）。
+    #   门禁一律保持阻塞——放宽范围由
+    #   tests/unit/ci/test_npc_turn_handoff_execution.py 的
+    #   `test_gate_pipelines_stay_blocking` 常驻反向钉住。
+    - allowFailure: true
+      docker:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       env:
