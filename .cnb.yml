@@ -40,12 +40,16 @@
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 10 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
-#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；static-gate 与 ruff
-#     并成一条，对应 GitHub 侧同为一条的 static-gate job）。
+#     故 `main.push` 的每条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐
+#     （unit-tests 按 py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；
+#     static-gate 与 ruff 并成一条，对应 GitHub 侧同为一条的 static-gate job）。
+#     条数不在这里手抄：单一事实源是 `main.push` 数组本身的长度，
+#     现读数由 tests/unit/ci/test_cnb_header_pipeline_count.py 常驻比对——
+#     头部曾手抄过 10 / 11 两个互相矛盾的口径（工单 009 改成 11、Issue #223 合回 10），
+#     手抄的那一份漂移时平台不报任何错，故不再保留第二份。
 #   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
-#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 10 条 push 流水线。
+#     巡检流水线（deploy-config 的时间维度兜底），不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
