@@ -1339,10 +1339,15 @@ class ToolExecutor:
             result, success, tool_source = core_out
             # P1-6：大输出落盘为引用——默认未
             # 装配恒透传；写盘失败诚实降级原样返回（宁可膨胀不丢输出）。
+            # 成败判据由本处传入（`_result_is_success` 是全仓唯一判据）：
+            # **失败结果不折叠**——它的正文（error/stderr/exit_code）就是模型
+            # 自我纠正所需的诊断，折叠成引用即诊断蒸发；体量折叠由回环处的
+            # `apply_offload_policy` 单源承担。
             from neurova.agent.tool_output_ref import maybe_output_ref
 
             result = maybe_output_ref(
-                tool_name, result, getattr(self._agent, "workspace_path", None)
+                tool_name, result, getattr(self._agent, "workspace_path", None),
+                success=success,
             )
             return result
         finally:
