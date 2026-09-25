@@ -7,33 +7,45 @@
 # 改动任一侧配置必须同步另一侧并更新守卫的 EXPECTED_* 表。
 #
 # 分层（自内向外加固，与 GitHub 侧一致；全部为阻断门禁，无 continue-on-error）：
-#   1. static-gate           语法/未定义名巡检（pyflakes，成本极低）
-#   2. lint                  ruff E9+F821（规则集与豁免见 pyproject）
-#   3. import-and-regression 模块导入巡检 + 审计回归
-#   4. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
+#   1. static-gate           语法/未定义名巡检（pyflakes）+ ruff E9+F821
+#                            （规则集与豁免见 pyproject）——两条都在读同一片全仓 AST，
+#                            故并成一条流水线，不再各扫一遍（Issue #223 第 2 条）
+#   2. import-and-regression 模块导入巡检 + 审计回归
+#   3. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
 #                            + 覆盖率门禁 fail_under=60，py3.11/3.12 双跑
-#   5. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
-#   6. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
-#   7. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
-#                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
-#   8. perf-gate             import 时长预算 + 关键路径微基准（阻断，
+#   4. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
+#   5. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
+#   6. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
+#                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）；
+#                            离线漏洞库缓存挂卷跨构建复用（Issue #223 第 1 条）
+#   7. perf-gate             import 时长预算 + 关键路径微基准（阻断，
 #                            见 scripts/ci/perf_gate.py）
-#   9. deploy-config         部署配置一致性（Dockerfile / docker-compose /
+#   8. deploy-config         部署配置一致性（Dockerfile / docker-compose /
 #                            Helm / requirements 跨文件不变量，阻断，
 #                            见 scripts/ci/deploy_config_consistency_check.py）
-#   10. experience-quality   经验质量基准（工单 009，阻断）：冻结真实语料的
+#   9. experience-quality    经验质量基准（工单 009，阻断）：冻结真实语料的
 #                            门槛收紧前后 A/B 读数 + 低质探针自证，
 #                            见 scripts/ci/experience_quality_gate.py
+#
+# 依赖安装口径（Issue #223 第 3/4 条，四条规则，全仓命中点一次扫清）：
+#   - 无锁的 `-r requirements-ci.txt` 一律不再出现在 CI 里：装锁
+#     （`requirements-ci.lock`）不必解析依赖树，是无锁解析之外最省的一种装法；
+#   - 不自举 pip（`pip install --upgrade pip`）：每次构建一次 PyPI 网络往返，
+#     与「这次提交是否合格」无关；确需新版 pip 请钉进依赖清单；
+#   - e2e 的 `--no-deps` + 显式点名两段式语义**不动**（薄环境是它的设计目的）；
+#   - 装的是同一份锁的三条流水线由 tests/unit/test_ci_pipeline_speed_guard.py
+#     逐条钉住，回填无锁安装即红。
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 11 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
-#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
+#     故 10 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；static-gate 与 ruff
+#     并成一条，对应 GitHub 侧同为一条的 static-gate job）。
 #   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
-#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 11 条 push 流水线。
+#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 10 条 push 流水线。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
@@ -53,7 +65,10 @@
 main:
   # push 事件：流水线定义一次（锚点 &pipelines）
   push: &pipelines
-    # ── 1. 静态门禁：语法 + 未定义名（无依赖安装，秒级反馈）──────────────
+    # ── 1. 静态门禁：语法 + 未定义名 + lint（全仓 AST，一条读到底）─────────
+    # 本流水线曾是两条（static-gate 与 lint）：pyflakes 与 ruff 都在读同一片
+    # 全仓 AST，拆两条只是多一次容器启动 + 多一遍全仓遍历（Issue #223 第 2 条）。
+    # 两条命令逐字保留 —— 合并的是「读几遍」，不是「放宽哪一项判据」。
     - name: static-gate
       runner:
         tags: cnb:arch:amd64
@@ -63,24 +78,11 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install pyflakes
-          script: python -m pip install --upgrade pip pyflakes
+        - name: install pyflakes + ruff
+          script: python -m pip install pyflakes ruff
         - name: fast static gate (syntax + undefined names)
           script: python scripts/ci_static_gate.py --skip-import
           timeout: 10m
-
-    # ── 2. Lint：ruff E9 + F821 ──────────────────────────────────────────
-    - name: lint
-      runner:
-        tags: cnb:arch:amd64
-        cpus: 2
-      docker:
-        image: python:3.12
-        volumes:
-          - /root/.cache/pip
-      stages:
-        - name: install ruff
-          script: python -m pip install --upgrade pip ruff
         - name: ruff check
           script: python -m ruff check neurova tests --no-cache
           timeout: 15m
@@ -95,8 +97,10 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install core dependencies (lean set, no torch)
-          script: python -m pip install --upgrade pip -r requirements-ci.txt
+        # 装的是锁不是声明：三条流水线装同一份精简依赖，锁过一次就不必各自
+        # 解析整棵依赖树（无锁 pip 解析是这三种装法里最慢的一种，Issue #223 第 3 条）。
+        - name: install core dependencies (locked lean set, no torch)
+          script: python -m pip install -r requirements-ci.lock
           timeout: 20m
         - name: full static gate (incl. module import sweep)
           script: python scripts/ci_static_gate.py
@@ -118,7 +122,7 @@ main:
       stages:
         - name: install uv + locked dependencies
           script: |
-            python -m pip install --upgrade pip uv
+            python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
         - name: protected subset with coverage gate (fail_under=60)
@@ -139,7 +143,7 @@ main:
       stages:
         - name: install uv + locked dependencies
           script: |
-            python -m pip install --upgrade pip uv
+            python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
         - name: protected subset with coverage gate (fail_under=60)
@@ -167,7 +171,6 @@ main:
         # 以上皆为"裸 import 无降级"，非已知可选依赖，不进 ci_static_gate.KNOWN_OPTIONAL_DEPS
         - name: install minimal runtime deps
           script: |
-            python -m pip install --upgrade pip
             python -m pip install -r requirements.txt --no-deps
             python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest \
               pytest-timeout bcrypt passlib python-dotenv aiosqlite prometheus_client
@@ -214,8 +217,8 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install minimal deps
-          script: python -m pip install --upgrade pip -r requirements-ci.txt
+        - name: install minimal deps (locked)
+          script: python -m pip install -r requirements-ci.lock
           timeout: 20m
         - name: perf regression gate
           script: python scripts/ci/perf_gate.py
@@ -236,7 +239,7 @@ main:
           - /root/.cache/pip
       stages:
         - name: install pyyaml
-          script: python -m pip install --upgrade pip pyyaml
+          script: python -m pip install pyyaml
           timeout: 10m
         - name: deploy config consistency gate
           script: python scripts/ci/deploy_config_consistency_check.py
@@ -251,9 +254,15 @@ main:
         image: python:3.12
         volumes:
           - /root/.cache/pip
+          # OSV 离线漏洞库缓存（`scripts/ci/osv_audit.py` 的 OSV_DB_CACHE 落点）。
+          # 不挂卷时每一次构建都要重下整份 npm 库（实测 206MB / 47s+），
+          # 而它与「某次提交是否引入漏洞」毫无关系——纯网络往返（Issue #223 第 1 条）。
+          # 卷判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
+          # OSV_DB_CACHE 同源校验，不写死第二份口径。
+          - /root/.cache/osv-scalibr
       stages:
         - name: install pip-audit
-          script: python -m pip install --upgrade pip pip-audit
+          script: python -m pip install pip-audit
           timeout: 15m
         - name: audit CI locked set
           script: python -m pip_audit -r requirements-ci.lock --progress-spinner off
@@ -300,8 +309,8 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install minimal deps
-          script: python -m pip install --upgrade pip -r requirements-ci.txt
+        - name: install minimal deps (locked)
+          script: python -m pip install -r requirements-ci.lock
           timeout: 20m
         - name: experience quality gate
           script: python scripts/ci/experience_quality_gate.py
@@ -332,7 +341,7 @@ main:
           - /root/.cache/pip
       stages:
         - name: install pyyaml
-          script: python -m pip install --upgrade pip pyyaml
+          script: python -m pip install pyyaml
           timeout: 10m
         - name: weekly deploy config consistency audit
           script: python scripts/ci/deploy_config_consistency_check.py
@@ -624,7 +633,26 @@ $:
   #   `role: DSCoder` 让平台按 .cnb/settings.yml 解析人设并拼进 system prompt
   #   （人设仍是配置期唯一必达通道），userPrompt 只补本轮要干的活。
   api_trigger_npc_handoff:
-    - docker:
+    # 本流水线是**续跑载体**，不是门禁：它跑的是「上一轮用满轮数后继续干」，
+    # 配额用满即它的正常结束形态（`npc:go` 会把整条流水线判 error，
+    # 而 `endStages` 不改流水线状态 —— 平台「语法手册」）。
+    # 不声明 allowFailure 的实测后果（2026-09-25 取证）：
+    #   平台把这份 error 当**提交状态检查**上报，与门禁流水线共用同一条通道，
+    #   于是合并提交被标红、用户在 PR 上读到的就是「合并失败」。
+    #   最近 8 次接力里 5 次如此（41m / 44m / 1h8m / 1h20m / 1h42m 后 error），
+    #   每一次的原文都是 `Agent aborted: reached maxTurns limit (200)` ——
+    #   本仓自己声明的「配额触发的正常收官」，不是任何门禁的结论。
+    #   实例：0cc0719a（#217 的合并提交）的提交状态里挂着
+    #   `cnb/api_trigger_npc_handoff/pipeline-1 error [1h 8m]`，而该合并的
+    #   门禁流水线当时全绿。
+    # 为什么修在**载体**上而不是修判据/放宽门禁（教义第 1／2 条）：
+    #   平台已声明用于「失败状态不上报」的唯一手段就是 allowFailure
+    #   （平台「语法手册」：为 true 时，流水线的失败状态不会上报到 CNB 上）。
+    #   门禁一律保持阻塞——放宽范围由
+    #   tests/unit/ci/test_npc_turn_handoff_execution.py 的
+    #   `test_gate_pipelines_stay_blocking` 常驻反向钉住。
+    - allowFailure: true
+      docker:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       env:
