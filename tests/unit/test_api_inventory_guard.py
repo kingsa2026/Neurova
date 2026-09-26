@@ -160,6 +160,72 @@ class TestDifferencesAreListedExplicitly:
         )
 
 
+class TestQueryStringIsNotARouteSegment:
+    """查询串是请求参数，不是路由段——它不得参与路径比对。
+
+    根因（把报错恢复原状就会复现）：`resolveCallPath()` 把实参模板原样当路径，
+    于是 `getConsoleChatHistory()` 的 `` `${BASE}/chat/history?session_id=…` ``
+    被归一成 `/api/v1/console/chat/history?session_id=*`，而真实路由表里的键是
+    `/api/v1/console/chat/history` —— 尾段不等、永不匹配。后果不是「少报一条」，
+    而是**假阳性**：真实存在的端点被报成「路径未注册」，连带把有活跃消费者的
+    `getConsoleChatHistory` 判成幻影契约、要求删净。假阳性比漏报更坏——它会
+    训练人整体忽略那张差异表。
+
+    路由表的键从不含 `?`（参数在 `Query(...)` 里，不在路径里），故判据是
+    「带查询串的调用按**路径段**比对」，而不是「把这条差异从表里删掉」。
+    """
+
+    CLIENT = "NeurUI/src/api/modules/console.ts"
+
+    def test_query_string_is_not_part_of_the_call_path(self):
+        calls = generator.frontendModuleCalls(self.CLIENT)
+        assert calls, f"{self.CLIENT} 解析不出任何调用——取数口径失效"
+        offenders = [f"{method} {path}" for method, path, _raw in calls if "?" in path]
+        assert not offenders, (
+            "调用路径里带着查询串，按路由段比对必然失配（真实端点被报成断链）：\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_registered_endpoint_with_query_is_not_reported_as_a_gap(self):
+        """真存在、只是调用时带了查询串的端点，不得进差异表。"""
+        assert "/api/v1/console/chat/history" in generator.registeredRoutePaths(), (
+            "实测路由表缺 `/api/v1/console/chat/history`——本条的反向控制失去意义"
+        )
+        gaps = [(row["module"], row["method"], row["path"])
+                for row in generator.unmatchedFrontCallRows()
+                if row["module"] == "console" and "history" in row["path"]]
+        assert not gaps, (
+            "真实存在的 history 端点被判成「后端未注册」——假阳性会训练人忽略差异表：\n  "
+            + "\n  ".join(f"{m} {me} {p}" for m, me, p in gaps)
+        )
+
+    def test_genuinely_unregistered_path_with_query_is_still_reported(
+        self, tmp_path, monkeypatch
+    ):
+        """反向控制：真不在路由表里、且带查询串的路径，仍须被判为「路径未注册」。
+
+        没有这一条，上面的修法就可能被做成「凡带 `?` 就跳过」——那是**规避报错**
+        （教义第 2 条），差异就此静默。本条的期望值同时钉住「查询串被剥掉」这个
+        归一化事实：报出的路径必须是纯路径段。
+        """
+        probe = tmp_path / "NeurUI" / "src" / "api" / "modules"
+        probe.mkdir(parents=True)
+        (probe / "zzz-probe.ts").write_text(
+            "const BASE = '/console'\n"
+            "export function probeMissing() {\n"
+            "  return api.get(`${BASE}/zzz-nope?session_id=${id}`)\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(generator, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(generator, "MODULES_DIR", probe)
+        monkeypatch.setattr(generator, "FRONTEND_CLIENT_FILES", ())
+        rows = generator.unmatchedFrontCallRows()
+        assert [(row["module"], row["method"], row["path"]) for row in rows] == [
+            ("zzz-probe", "GET", "/api/v1/console/zzz-nope")
+        ], f"注入的带查询串断链未被如实报出（或路径未归一）：{rows}"
+
+
 class TestSnapshotDiscipline:
     """快照纪律：命令与日期必须可核，过期必须显式标注。
 
