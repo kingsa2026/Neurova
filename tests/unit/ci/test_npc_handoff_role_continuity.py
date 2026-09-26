@@ -326,3 +326,84 @@ class TestRosterKeepsTheBareDSCoderRole:
             capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+class TestRosterRestoresTheMaxAliasRole:
+    """E：名单必须恢复 `DSCoder-max`（六角色口径）。
+
+    `DSCoder-max` 曾是 `DSCoder` 的同档别名（max 档），在 PR #273 的批量改名里
+    与 `GLMCoder` 一起退场。用户口径已定：**恢复**，与无后缀 `DSCoder` 及
+    四个后缀角色并存（共六个在册角色），`@kingsa2026/neurova(DSCoder-max)`
+    必须仍能召到本仓人设。
+
+    判据两向可证伪：
+    * 正向：`DSCoder-max` 在册（缺了即红）；
+    * 反向：把它从名单摘掉，本判据立刻红。
+
+    名单事实源仍是 `.cnb/settings.yml` 的 `npc.roles`，本判据不抄第二份；
+    共用的运行参数与档位另由 `tests/unit/test_ci_npc_config_guard.py` 咬合。
+    """
+
+    #: 用户点名要恢复的同档别名角色。
+    RESTORED_ROLE = "DSCoder-max"
+
+    def test_restored_role_is_registered(self, settings_doc):
+        names = _registryRoleNames(settings_doc)
+        assert self.RESTORED_ROLE in names, (
+            f"名单里没有 {self.RESTORED_ROLE} —— "
+            "用户口径要求恢复该同档别名角色，与无后缀 DSCoder 及四个后缀角色并存"
+            f"（共六个在册角色）。\n现有：{sorted(names)}"
+        )
+
+    def test_restored_role_is_callable_through_admission(self):
+        """准入脚本对 `DSCoder-max` 必须放行（否则被 @ 时静默不住册、白烧 token）。"""
+        import os
+        import subprocess
+        import sys
+
+        script = PROJECT_ROOT / "scripts" / "ci" / "npc_role_admission.py"
+        env = {k: v for k, v in os.environ.items() if k != "CNB_NPC_NAME"}
+        env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
+        env["CNB_NPC_NAME"] = self.RESTORED_ROLE
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    def test_restored_role_is_an_alias_of_the_bare_role(self, settings_doc):
+        """同档别名与本尊的运行约束必须逐字一致，不得各自漂移。
+
+        别名与本尊的差异只允许在**卡片字段**（`name` / `slogan`）与身份行上；
+        人设正文（含时长纪律、修复教义、接力判据）逐字复用，否则「同档」名不副实。
+        判据按**共享正文的指纹**（去掉身份行后逐行比对）咬合。
+        """
+        roles = {
+            (role or {}).get("name"): (role or {})
+            for role in ((settings_doc.get("npc") or {}).get("roles") or [])
+        }
+        bare = roles.get("DSCoder") or {}
+        alias = roles.get(self.RESTORED_ROLE) or {}
+        assert bare and alias, (
+            f"缺少比对对象：DSCoder={bool(bare)} {self.RESTORED_ROLE}={bool(alias)}"
+        )
+
+        def sharedBody(prompt: str) -> list:
+            """去掉**身份行**后的正文行。
+
+            身份行有两处形态，都随角色名变化：
+              * 开头的「你是 `<角色名>` —— …」；
+              * 结尾的「身份统一为 `<角色名>`，…」。
+            其余正文（核心原则 / 修复教义 / 预算纪律 / 接力判据 / 协作红线）
+            必须逐字一致 —— 那才是「同档」的判据。
+            """
+            return [
+                line for line in (prompt or "").splitlines()
+                if not line.strip().startswith("你是 ")
+                and not line.strip().startswith("身份统一为 ")
+            ]
+
+        assert sharedBody(bare.get("prompt")) == sharedBody(alias.get("prompt")), (
+            f"{self.RESTORED_ROLE} 与 DSCoder 的共享正文不一致 —— "
+            "同档别名只允许卡片字段与身份行不同，正文漂移不会有任何红。"
+        )
