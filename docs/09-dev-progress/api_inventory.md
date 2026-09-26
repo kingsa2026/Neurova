@@ -23,7 +23,7 @@
 | `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 2 |
-| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 5 |
+| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 7 |
 | `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
 | `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
 | `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 是 | 0 |
