@@ -20,6 +20,9 @@ import sys
 import tempfile
 import time
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 

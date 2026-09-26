@@ -22,6 +22,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 random.seed(90)
 CJK_WORDS = "上下文 压缩 池 归档 检索 注入 记忆 经验 反思 工具 结果 窗口 预算".split()
 ENGLISH = "The context window budget decides whether folding triggers and how much history stays resident. "

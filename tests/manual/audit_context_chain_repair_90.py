@@ -23,6 +23,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
 os.environ.setdefault("NEUROVA_AGENT_DB", os.path.join(tempfile.mkdtemp(prefix="ctxchain90_"), "agent.db"))
 
 import tiktoken  # noqa: E402
