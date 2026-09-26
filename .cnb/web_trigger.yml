@@ -4,16 +4,24 @@
 # 这里只放**按需执行**的入口，不放合并门禁——门禁一律由 push / PR 事件自动触发，
 # 让人去点按钮才算跑的门禁等于没有门禁。
 #
-# 按钮指向的事件必须在 `.cnb.yml` 的 `main` 下真实存在（平台对未知事件名
-# 不报错，只是点下去什么都不发生），这条绑定由
+# 平台约束（web-trigger.md 的 Button 定义，逐字）：
+#   * `event`：必填，触发的 CI 事件名，需要在 `.cnb.yml` 中配置。
+#     仅支持 web_trigger 自定义事件。
+# 故按钮只认 `web_trigger*` —— 指向 `api_trigger*` 时点下去不报错、只是没反应
+# （本批第一版正是这个形态）。它指向的事件与 CLI 触发口解析到 `.cnb.yml` 里的
+# **同一份**流水线对象（锚点别名），绑定由
 # tests/unit/ci/test_docker_image_pipeline_wiring.py 常驻校验。
 # ============================================================================
 
 branch:
-  - buttons:
+  # 事件定义在 `.cnb.yml` 的 `main:` 下（只匹配 main 分支），故按钮只在 main
+  # 分支详情页出现 —— 不写 reg 的话，功能分支上也会显示一个点下去
+  # `CONFIG_EVENT_EMPTY` 的按钮，而页面不会解释为什么没反应。
+  - reg: ^main$
+    buttons:
       # 真构建 + 真运行 + 真探活 + 推制品库。全量依赖下载与构建一次约十几分钟，
       # 故只做手动入口，不进 main.push。
       - name: 构建 Docker 镜像
         description: 真 docker build + 起容器探活 /health + 推送到本仓制品库
-        event: api_trigger_docker_image
+        event: web_trigger_docker_image
         groupName: 按需执行
