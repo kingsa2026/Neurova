@@ -67,6 +67,27 @@ Helm 侧 config 资产遮蔽（R12）。
 契约守卫：`tests/unit/test_deploy_config_guard.py`（已进
 `scripts/ci/protected_tests.txt`），含负向控制用例——门禁退化成"永远绿"会被抓到。
 
+## 手动跑一次镜像（按需，不是门禁）
+
+R1~R12 是**静态**跨文件一致性比对：它们读文件、比字段，从不执行 `docker build`。
+`tests/e2e/test_backend_boot.py` 跑的是**源码直启**（`python start_server.py`），
+也不是镜像里那份运行时。于是「Dockerfile 真能构建出可运行镜像吗」
+「镜像里的后端真能起来吗」这两件事只有一条手动路径：
+
+```bash
+cnb build start-build --repo <slug> --branch main --event api_trigger_docker_image
+```
+
+或在本仓页面点「构建 Docker 镜像」按钮（`.cnb/web_trigger.yml`）。
+
+它做四件事：`docker build` 本仓 Dockerfile → 起容器 →
+探活（URL 与端口**运行期从 Dockerfile 派生**，不手抄）→ 推送到本仓 Docker 制品库
+（tag 为 `<registry>/<slug>:image-<commit short>`）。
+
+不进 `main.push` 的理由：全量依赖（含 torch 与 CUDA 运行库）下载 + 构建一次
+十余分钟、镜像 content size 数 GB，它裁决的不是「这次提交合不合格」。
+接线判据见 `tests/unit/ci/test_docker_image_pipeline_wiring.py`。
+
 ## 配置 CORS
 
 `config/cors.json` 是运行时读取的资产，**必须**在 `.dockerignore` 里显式放行
