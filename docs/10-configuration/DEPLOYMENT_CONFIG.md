@@ -67,6 +67,38 @@ Helm 侧 config 资产遮蔽（R12）。
 契约守卫：`tests/unit/test_deploy_config_guard.py`（已进
 `scripts/ci/protected_tests.txt`），含负向控制用例——门禁退化成"永远绿"会被抓到。
 
+## 手动跑一次镜像（按需，不是门禁）
+
+R1~R12 是**静态**跨文件一致性比对：它们读文件、比字段，从不执行 `docker build`。
+`tests/e2e/test_backend_boot.py` 跑的是**源码直启**（`python start_server.py`），
+也不是镜像里那份运行时。于是「Dockerfile 真能构建出可运行镜像吗」
+「镜像里的后端真能起来吗」这两件事只有一条手动路径：
+
+```bash
+cnb build start-build --repo <slug> --branch main --event api_trigger_docker_image
+```
+
+或在本仓 main 分支详情页点「构建 Docker 镜像」按钮（`.cnb/web_trigger.yml`）。
+
+两个入口各有自己的事件名空间：CLI 的 `--event` 只认 `api_trigger*`，页面按钮只认
+`web_trigger*`（平台 web-trigger.md 的 Button 定义）。`.cnb.yml` 里
+`web_trigger_docker_image` 以 YAML 锚点引用 `api_trigger_docker_image` 的
+**同一份对象**——写成两份内容相同的副本时，两份会各自演化而没有任何判据会响。
+
+它做四件事：`docker build` 本仓 Dockerfile → 起容器 →
+探活（URL 与端口**运行期从 Dockerfile 派生**，不手抄）→ 推送到本仓 Docker 制品库
+（tag 为 `<registry>/<slug>:image-<commit short>`）。
+
+探活有两层，缺一层就是"绿的毫无意义"：**宿主 curl 到 200** 与 **容器自己声明的
+探针（Dockerfile `HEALTHCHECK`）收敛到 `healthy`**。后者才是 compose 的
+`healthcheck` 与 Helm 探针判定的依据；首次实测里宿主已 200 而容器仍
+`starting`（`FailingStreak:1`），故流水线在有界等待内确认 `healthy`，未收敛即打
+容器日志判红。
+
+不进 `main.push` 的理由：全量依赖（含 torch 与 CUDA 运行库）下载 + 构建一次
+十余分钟、镜像 content size 数 GB，它裁决的不是「这次提交合不合格」。
+接线判据见 `tests/unit/ci/test_docker_image_pipeline_wiring.py`。
+
 ## 配置 CORS
 
 `config/cors.json` 是运行时读取的资产，**必须**在 `.dockerignore` 里显式放行

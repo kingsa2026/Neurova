@@ -1041,3 +1041,11 @@ tests/unit/ci/test_context_coverage_scope.py
 #    判定只读两处机器事实：该批判据在受保护子集里、该批退役产物已从仓库消失；
 #    连带把 T-07/T-08 两行「读回待验 / 未落地」的 09-23 旧快照口径改判为收口记录。）
 tests/unit/context/test_batch_status_docs_coupling.py
+
+# Issue #90（手动镜像构建）：Dockerfile 真构建 + 真运行 + 真探活 + 推制品库的接线判据。
+#   （根因：三种交付形态都有静态一致性门禁，但没有一处把镜像真的构建出来、运行起来——
+#    deploy-config 只比字段，e2e-backend-boot 跑的是源码直启而非镜像里的运行时。
+#    判据钉：事件只在手动口（不进 main.push）/ 构建的是本仓 Dockerfile /
+#    端口与探活口径只有 Dockerfile 一份（脚本里不得出现那个端口的字面量）/
+#    推送落点取平台注入的制品库事实 / 页面按钮指向同一事件。）
+tests/unit/ci/test_docker_image_pipeline_wiring.py
