@@ -28,7 +28,7 @@
 | `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
 | `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |
 
-| `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布，含 §10.1 的否证阈值判定；可用 `--metrics-file` 离线复算 | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
+| `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
 
 ## 二、检查脚本（checks）
 
