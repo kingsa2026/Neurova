@@ -269,7 +269,6 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.openplatform_keys", "/v1/openplatform", "Open Platform API"),
     ("neurova.api.endpoints.model_adapter", "/v1/model-adapter", "Model Adapter API"),
     ("neurova.api.endpoints.context", "/v1/context", "Context API"),
-    ("neurova.api.endpoints.context_pool_settings", "/v1/context-pool", "Context Pool Settings API"),
     ("neurova.api.endpoints.metacognition_api", "/v1/metacognition", "Metacognition API"),
     ("neurova.api.endpoints.experience_knowledge_api", "/v1/experience", "Experience API"),
     ("neurova.api.endpoints.knowledge_graph_api", "/v1/knowledge-graph", "Knowledge Graph API"),
