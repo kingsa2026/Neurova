@@ -347,8 +347,11 @@ main:
   # 同权回答用户。
   # 它的命中面由守卫逐条反证 —— **空转的排除项进不了配置**：
   # `docs/.cf_doc.md` / `docs/.roles.md`（第三方产品文档）看着该排，实则
-  # `docs/**/*.md` 本就不匹配点文件（实测 glob 551 篇 / 含隐藏 553 篇），
+  # `docs/**/*.md` 按 unix 通配语义本就不匹配前导点文件，
   # 给它们各写一条 exclude 就是只写不读的第二份定义。
+  # 命中面与点文件差的篇数不在此处写死：读数的事实源是仓库文件系统本身，
+  # 复算命令见 docs/10-configuration/KNOWLEDGE_BASE.md 第 2 节（判据见同目录守卫
+  # tests/unit/ci/test_knowledge_base_index_wiring.py 的 TestIndexReadingsAreNotHandCopied）。
   commit.add:
     - name: knowledge-base
       stages:
