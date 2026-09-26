@@ -89,6 +89,12 @@ cnb build start-build --repo <slug> --branch main --event api_trigger_docker_ima
 探活（URL 与端口**运行期从 Dockerfile 派生**，不手抄）→ 推送到本仓 Docker 制品库
 （tag 为 `<registry>/<slug>:image-<commit short>`）。
 
+探活有两层，缺一层就是"绿的毫无意义"：**宿主 curl 到 200** 与 **容器自己声明的
+探针（Dockerfile `HEALTHCHECK`）收敛到 `healthy`**。后者才是 compose 的
+`healthcheck` 与 Helm 探针判定的依据；首次实测里宿主已 200 而容器仍
+`starting`（`FailingStreak:1`），故流水线在有界等待内确认 `healthy`，未收敛即打
+容器日志判红。
+
 不进 `main.push` 的理由：全量依赖（含 torch 与 CUDA 运行库）下载 + 构建一次
 十余分钟、镜像 content size 数 GB，它裁决的不是「这次提交合不合格」。
 接线判据见 `tests/unit/ci/test_docker_image_pipeline_wiring.py`。
