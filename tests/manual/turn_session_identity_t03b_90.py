@@ -143,9 +143,9 @@ def main() -> int:
     print("C) 无身份轮必须可见（计数 + 点名，不静默共槽）")
     set_turn_identity("继续", None, "u1")
     orch._resolve_window_cache_key()
-    report = orch.get_context_health()["session_identity"]
-    print(f"   session_identity 读数 = {report}")
-    assert report["identityless_turns"] >= 1, "无身份轮没有被计数"
+    report = orch.get_context_health()["turn_identity"]
+    print(f"   turn_identity 读数 = {report}")
+    assert report["identityless"] >= 1, "无身份轮没有被计数"
     assert report["last_error"] and "IdentitylessTurn" in report["last_error"], (
         "无身份轮没有点名原因（教义第 2 条：不许静默）"
     )

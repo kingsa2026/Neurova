@@ -27,6 +27,9 @@ from prometheus_client import REGISTRY
 
 from neurova.context.orchestrator import ContextOrchestrator
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 PAIRING_400 = (
     "Error code: 400 - {'error': {'message': \"An assistant message with 'tool_calls' "
     "must be followed by tool messages responding to each 'tool_call_id'\"}}"

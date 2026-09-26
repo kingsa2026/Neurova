@@ -22,6 +22,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from tests.manual._liveVerifyIsolation import dataPathUnder, useDataRoot  # noqa: E402
+
 # 002 实施前的库前像（v0）：无 user_version、无 digest/created_at/chat_scope
 LEGACY_DDL = """
 CREATE TABLE IF NOT EXISTS evicted_chunks (
@@ -100,13 +102,18 @@ def readLedgerFacts(dbPath):
 
 
 def legacyDbPath(cwd, agentId):
-    """生产构造面下 `EvictionLedgerDB` 实际使用的库路径（`data/context_ledger/<agent>.db`）。
+    """生产构造面下 `EvictionLedgerDB` 实际使用的库路径。
+
+    落点**由生产单点推导**（`core/data_root.dataPath`）——脚本不另拼一层
+    `data/`：数据根绝对锚定之后，脚本拼的路径与生产打开的库会不是同一个文件
+    （环境实测：脚本造的前像库落在 `/tmp/x/data/`，生产却打开
+    `$NEUROVA_DATA_DIR/context_ledger/default.db`，于是断言读到 0 行）。
 
     生产形状里 orchestrator 取的是 `agent_ref.agent_id`（本仓 Agent 对象不带该属性
-    → 落在 `default`），故路径从构造面自身读回，不在脚本里另写一份推断。
+    → 落在 `default`），故路径从构造面自身读回，不另写一份推断。
     """
-    p = os.path.join(cwd, "data", "context_ledger", f"{agentId}.db")
-    return p if os.path.exists(p) else os.path.join(cwd, "data", "context_ledger", "default.db")
+    p = dataPathUnder("context_ledger", f"{agentId}.db")
+    return p if os.path.exists(p) else dataPathUnder("context_ledger", "default.db")
 
 
 def migrateThroughProduction(cwd, agentId):
@@ -138,7 +145,8 @@ def recallThroughProduction(cwd, agentId, query):
 def main():
     workdir = tempfile.mkdtemp(prefix="ctxLedgerMigration90_")
     agentId = "ctxmig90"
-    os.makedirs(os.path.join(workdir, "data", "context_ledger"), exist_ok=True)
+    useDataRoot(os.path.join(workdir, "root"))
+    os.makedirs(os.path.dirname(dataPathUnder("context_ledger", "x.db")), exist_ok=True)
     dbPath = legacyDbPath(workdir, agentId)
 
     beforeVersion, beforeRows = buildLegacyDb(dbPath)
