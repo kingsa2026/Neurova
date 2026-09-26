@@ -72,8 +72,8 @@ find docs -maxdepth 1 -name '.*.md'
   页面入口由 `.cnb/settings.yml` 的 `npc.button`（按钮名与描述）与 `npc.defaultRole`
   （默认选中角色）给出 —— 按钮缺名字就没有入口，`defaultRole` 写错名字平台
   **静默回落**且不报错，故两者都由守卫盯住；
-- **评论里 @ 角色**：`.cnb/settings.yml` 的在册角色（`DSCoder` / `DSCoder-max` /
-  `GLMCoder`）prompt 里都载明「优先依据本仓知识库作答……知识库中没有相关内容时
+- **评论里 @ 角色**：`.cnb/settings.yml` 的在册角色（名单以该文件的 `npc.roles`
+  为唯一事实源，此处不抄第二份）prompt 里都载明「优先依据本仓知识库作答……知识库中没有相关内容时
   明确说明」。这一段是**唯一必达通道**：`npc:go.options` 没有 `prompt` 键，
   写在那里会被静默忽略；
 - **Open API**：供外部应用自建 RAG，见下节。
