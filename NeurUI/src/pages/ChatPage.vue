@@ -379,6 +379,14 @@ import { useAppStore } from '@/stores/app'
 import { useAgentStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
+import {
+  abortChatStream,
+  attachChatStreamView,
+  claimChatStream,
+  currentChatStream,
+  detachChatStreamView,
+  releaseChatStream,
+} from '@/composables/chatStreamRegistry'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
 import { StreamTTSRunner, audioSourceFor, requireNonEmptyAudioBlob, prepareSpeechText, createSpeechAnnouncer, toolAnnouncementText, type SpeechAnnouncer } from '@/composables/useStreamTTS'
 import { resolveAudioUrl } from '@/utils/audioUrl'
@@ -1085,10 +1093,13 @@ async function loadSessions(): Promise<void> {
 }
 
 async function switchSession(sessionId: string): Promise<void> {
-  // BUG-2 修复：流式中切走先 abort 旧流并复位 streaming 态，
-  // 否则 usage 记账/队列 drain 会污染刚打开的新会话
+  // BUG-2 修复：流式中切走先中止旧流并复位 streaming 态，
+  // 否则 usage 记账/队列 drain 会污染刚打开的新会话。
+  // 中止走 registry（switchedSession 是显式用户意图，与"离开页面"不同）
   if (isStreaming.value) {
-    abortController?.abort()
+    const leavingSid = activeStreamSessionId || currentSessionId.value
+    if (leavingSid) abortChatStream(leavingSid, 'switchedSession')
+    else abortController?.abort()
     abortController = null
     chatStore.setStreaming(false)
     stopStreamTTS()
@@ -1327,6 +1338,12 @@ async function sendMessage() {
 
   const readStream = async (replayFrom?: number): Promise<void> => {
     abortController = new AbortController()
+    // 会话级所有权登记：控制器不再只活在本组件作用域里——离开聊天页后视图被销毁，
+    // 这一轮仍在写同一会话，Stop 按钮与新挂载的视图必须还能命中它。
+    // 重连换新控制器时，先放行同一轮的旧登记，避免留下读不上数的孤儿流。
+    const streamSid = activeStreamSessionId || currentSessionId.value || ''
+    if (currentChatStream(streamSid)?.roundKey === roundTimestamp) releaseChatStream(streamSid)
+    claimChatStream({ sessionId: streamSid, roundKey: roundTimestamp, controller: abortController })
     try {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
       const response = await fetch(`${baseUrl}/console/chat`, {
@@ -1416,6 +1433,8 @@ async function sendMessage() {
     streamingMsg.repliedAt = new Date().toISOString()
     chatStore.setStreaming(false)
     abortController = null
+    // 本轮结算：放行会话级登记（发送锁在等这个信号才放，见 useSessionSendLock）
+    releaseChatStream(activeStreamSessionId || currentSessionId.value || '')
     scrollToBottom()
     // 补课 P3-b：当前轮结束 → 自动续发下一条排队消息（暂停时不续发）
     // BUG-2 修复：仅当用户仍停留在发起会话时才 drain，
@@ -1720,7 +1739,8 @@ function stopStreaming() {
       .post(`/console/chat/stop?session_id=${encodeURIComponent(sid)}`)
       .catch(() => {})
   }
-  abortController?.abort()
+  if (sid) abortChatStream(sid, 'userStopped')
+  else abortController?.abort()
   stopStreamTTS()
   chatStore.setStreaming(false)
 }
@@ -2285,9 +2305,13 @@ watch(agentId, (newId, oldId) => {
   if (newId && newId !== oldId) {
     // P1-11（审计 2026-09-11）：切 Agent 必须先中止在途流并复位 streaming 态——
     // 旧流继续把增量写进已换走的孤儿 assistant proxy，且 isStreaming 挂到
-    // finally 才复位，新 Agent 页面发送按钮被禁用数十秒；旧草稿同样先存后走
+    // finally 才复位，新 Agent 页面发送按钮被禁用数十秒；旧草稿同样先存后走。
+    // 这里必须真中止（切 Agent 紧跟着 clearMessages，脱离视图的流会继续往
+    // 已被清掉的会话写）——与"离开聊天页只解绑视图"是两种用户意图。
     if (isStreaming.value) {
-      abortController?.abort()
+      const leavingSid = activeStreamSessionId || currentSessionId.value
+      if (leavingSid) abortChatStream(leavingSid, 'switchedAgent')
+      else abortController?.abort()
       abortController = null
       activeStreamSessionId = null
       chatStore.setStreaming(false)
@@ -2323,6 +2347,23 @@ onMounted(() => {
   void nextTick().then(() => scrollToBottomForHistory())
 })
 
+// 回到聊天页把视图接回在途流：离开页面只解绑视图（不中止流），这一轮可能还在
+// 后台往同一会话写。重绑后 Stop 按钮拿得到活着的控制器，不会变成哑按钮。
+// 用 watch 而非只在 onMounted 做——loadSessions 异步自动选首会话时，挂载瞬间
+// currentSessionId 还是空。
+watch(
+  currentSessionId,
+  (sid) => {
+    if (!sid) return
+    const inflight = attachChatStreamView(sid)
+    if (inflight) {
+      activeStreamSessionId = sid
+      abortController = inflight.controller
+    }
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   historyAnchorObserver?.disconnect()
   historyAnchorObserver = null
@@ -2335,7 +2376,11 @@ onBeforeUnmount(() => {
   // 补课 D：离开页面保存当前会话草稿
   if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
   disposeMermaid()
-  abortController?.abort()
+  // 离开页面只解绑视图，不中止流（根修 2026-09-26"切页即断"）：
+  // 后端这一轮本就与 SSE 解耦、跑完即落库，还备了 replay 缓冲；原实现在这里
+  // abort，把仍在生成的回答从显示侧掐死，回到页面既不重连也不重载，气泡永久停在半截。
+  // 中止权收口在 chatStreamRegistry，只认 userStopped/switchedSession/switchedAgent。
+  detachChatStreamView(activeStreamSessionId || currentSessionId.value || '')
   stopRecording()
   for (const pf of pendingFiles.value) {
     if (pf.preview) URL.revokeObjectURL(pf.preview)
