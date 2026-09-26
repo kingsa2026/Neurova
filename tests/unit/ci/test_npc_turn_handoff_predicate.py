@@ -49,12 +49,18 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 平台在收尾时刻注入的两个事实变量（实测读数见模块 docstring）。
+#: v2（Issue #272）：第二个是**失败 stage 名**，不是失败 stage 的最后一行输出。
+#: 实测（探针 cnb-m16-1k3f5s0ri）证明 `$CNB_BUILD_FAILED_MSG` 的取值是
+#: 失败 stage 自己打印的最后一行（Job 被 SIGKILL 后为 `start`），
+#: 按它匹配文案等于看运气；`$CNB_BUILD_FAILED_STAGE_NAME` 才是确定性事实。
 STATUS_VAR = "CNB_PIPELINE_STATUS"
-FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
 
-#: 平台自己的中止措辞。实测原文 `Agent aborted: reached maxTurns limit (200)`，
-#: 在四条独立构建里逐字一致。判据只认这一个子串，不认「上一轮写的标记」。
-ABORT_MARKER = "reached maxTurns limit"
+#: npc:go 所在 stage 名里的 ASCII 标记（判据按它匹配）。
+GO_STAGE_MARKER = "npc-go"
+
+#: 被实测推翻的 v1 事实源（不得作为判据的唯一输入）。
+FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
 
 #: 已被证伪的旧判据：由 Agent 开工前的门禁无条件写出的变量。
 RETIRED_FLAG = "turnLimitReached"
@@ -106,24 +112,46 @@ class TestPredicateReadsPlatformFacts:
         )
 
     def test_conditions_read_the_platform_facts(self, cnb_doc):
-        """每条接力的 `if` 必须同时判定 status=error 与 maxTurns 中止。"""
+        """每条接力的 `if` 必须同时判定 status=error 与「失败 stage 是 Agent 那格」。
+
+        v2：判据的第二个事实源是 `$CNB_BUILD_FAILED_STAGE_NAME`（确定性），
+        不是 `$CNB_BUILD_FAILED_MSG`（失败 stage 的最后一行输出，实测不可靠）。
+        """
         problems = []
         for event, stage in _relay_stages(cnb_doc):
             joined = " ".join(str(c) for c in (stage.get("if") or []))
             if STATUS_VAR not in joined:
                 problems.append(f"{event}: 判据未读 ${STATUS_VAR}（收尾状态由平台给出）")
-            if ABORT_MARKER not in joined:
+            if FAILED_STAGE_VAR not in joined:
                 problems.append(
-                    f"{event}: 判据未认平台的中止措辞 {ABORT_MARKER!r}"
-                    "—— 上一轮的预写变量与「是否真撞顶」无关"
+                    f"{event}: 判据未读 ${FAILED_STAGE_VAR}"
+                    "—— 上一轮的预写变量与「是否真被中止」无关"
                 )
-            if FAILED_MSG_VAR not in joined:
-                problems.append(f"{event}: 判据未读 ${FAILED_MSG_VAR}（中止原因由平台给出）")
+            if GO_STAGE_MARKER not in joined:
+                problems.append(
+                    f"{event}: 判据未匹配 npc:go 的 stage 名标记 {GO_STAGE_MARKER!r}"
+                )
         assert not problems, (
             "收尾接力的判据没取平台事实:\n  " + "\n  ".join(problems) +
             "\n实测（探针 cnb-c9g-1k3c3dqg7，2026-09-25）：endStages 里 "
-            f"{STATUS_VAR}=error、{FAILED_MSG_VAR}='Agent aborted: {ABORT_MARKER} (1)'。"
+            f"{STATUS_VAR}=error；失败 stage 名由 ${FAILED_STAGE_VAR} 给出。"
         )
+
+    def test_conditions_do_not_judge_on_the_message_text(self, cnb_doc):
+        """反向控制：判据不得只认 `$CNB_BUILD_FAILED_MSG` 的文案。
+
+        实测（cnb-m16-1k3f5s0ri）：该变量是失败 stage 最后一行输出，
+        Job 被 SIGKILL 后取值是脚本自己最后 echo 的那行（`start`）。
+        """
+        offenders = []
+        for event, stage in _relay_stages(cnb_doc):
+            joined = " ".join(str(c) for c in (stage.get("if") or []))
+            if FAILED_MSG_VAR in joined:
+                offenders.append(
+                    f"{event}: 判据仍在读 ${FAILED_MSG_VAR} ——"
+                    "它是失败 stage 的最后一行输出，不是平台文案"
+                )
+        assert not offenders, "\n  ".join(offenders)
 
     def test_relay_never_reads_the_retired_prewritten_flag(self, cnb_doc):
         """旧判据变量必须删净：它与「本轮是否撞顶」无关，是第二条平行判据。"""
@@ -169,7 +197,7 @@ class TestPredicateTimingIsLegal:
                 continue
             if in_stages and indent <= base:
                 in_stages = False
-            if in_stages and (STATUS_VAR in stripped or FAILED_MSG_VAR in stripped):
+            if in_stages and (STATUS_VAR in stripped or FAILED_STAGE_VAR in stripped):
                 offenders.append(f"{lineno}: {stripped}")
         assert not offenders, (
             "收尾时刻才成立的变量被用在 Agent 开工前的 Stage 里（该处读数为空）:\n  "
