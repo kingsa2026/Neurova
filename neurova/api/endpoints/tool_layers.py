@@ -68,6 +68,11 @@ class MCPServerConnectRequest(BaseModel):
     # 协议层 _open_session 已消费 config.headers（httpx/sse_client），本字段补通
     # connect 请求体断点（2026-09-12 复核修复：register 弹窗 auth_token 此前无处安放）
     headers: Dict[str, str] = Field(default_factory=dict, description="http/sse 请求头")
+    # 并行能力声明位（工具名 → 声明）。MCP 工具的 schema 由第三方 server 提供、
+    # 本仓改不了，故声明落在本仓侧的 server 配置上。缺省空表 = 全部串行。
+    tool_capabilities: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict, description="工具并行能力声明（缺省全部串行）"
+    )
 
 
 class MCPOAuthAuthorizeRequest(BaseModel):
@@ -163,6 +168,7 @@ async def connect_mcp_server(
         "env": body.env,
         "headers": body.headers,
         "enabled": True,
+        "tool_capabilities": dict(body.tool_capabilities or {}),
     }
 
     result = await _register_mcp_server(config_raw, role)
