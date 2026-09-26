@@ -206,6 +206,9 @@ tests/unit/test_legacy_ref_ledger_guard.py
 #   + 成败三态 + 采集可观测 + 肌肉记忆止血/终态 + 视图键域收口 + 入口迁移
 #   + 回滚/归档接进审批面（011：判据单源 + 治理面端点）
 tests/unit/agent/test_tool_loop_funnel_probes.py
+# 工具轮协议配对（2026-09-26 kai/sensetime 400 根因）：续写请求必须带 assistant(tool_calls)，
+#   孤儿 tool 结果被严格网关判 400001；三条命中点（流式/非流式/Anthropic）同源单点构造
+tests/unit/agent/test_tool_round_protocol_pairing.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
