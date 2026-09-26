@@ -8,7 +8,8 @@ NPC 事件的流水线用的是**NPC 所属仓库**的 `.cnb.yml`（平台「自
 本仓在 `$` 下把 `issue.comment@npc` / `pull_request.comment@npc` /
 `api_trigger_npc_handoff` 三条事件都声明了，故本仓自定义角色的续跑链路成立；
 而续跑落点（`api_trigger_npc_handoff`）里的 `npc:go.options.role` 此前写死为
-`DSCoder` —— 一个**早已不在册**的角色名。
+`DSCoder` —— 在 PR #273 把角色改名为 `DSCoder-Red/Green/Yello/Blue` 的那一批里，
+它一度**不在册**（名字与名单是两份口径，改名漏改不会有任何红）。
 
 平台对 `role` 的解析规则（平台「npc:go」篇）：`role` 需在 `.cnb/settings.yml` 的
 `npc.roles` 中定义；名字未命中时**静默回落**平台默认 prompt —— 不报错、不告警。
@@ -26,7 +27,8 @@ Issue #272 的角色改名（`DSCoder` → `DSCoder-Red/Green/Yello/Blue`）正�
 
 - **A 角色名必须在册**：`.cnb.yml` 里每一处 `npc:go.options.role` 的**字面量**取值，
   都必须在 `.cnb/settings.yml` 的 `npc.roles[].name` 里；写成 `$变量` 的形态另由 C 判。
-  可证伪：把 `role` 改回 `DSCoder` → 立刻红。
+  且**载体不得硬编码任何在册名字**（哪怕改回某个当前在册的名字，下一位改名即再断）。
+  可证伪：把载体 `role` 改回任一字面量角色名 → 立刻红。
 - **B 续跑必须把角色身份带下去**：收尾接力的 `cnb:trigger.options.env` 必须把
   `$CNB_NPC_NAME`（平台注入的当前角色名）传给下一轮，落点再把它喂给
   `npc:go.options.role` —— 否则每一轮都只能硬编码一个角色名，与名单再次分叉。
@@ -38,6 +40,13 @@ Issue #272 的角色改名（`DSCoder` → `DSCoder-Red/Green/Yello/Blue`）正�
 
 角色名唯一事实源是 `.cnb/settings.yml` 的 `npc.roles`，本文件不抄第二份：
 它读同一份配置逐条比对。
+
+## D 名单保留无后缀的 `DSCoder`（五角色口径）
+
+用户口径已改：无后缀 `DSCoder` 与四个后缀角色**并存**（共五个在册角色）。
+早期一版判据把 `DSCoder` 钉成「已退役、不得回归」，本文件据此把该前提反转 ——
+判据不再针对某个具体名字，而是钉住**形态**（载体只能 `$变量`），
+另加一条正向判据钉「`DSCoder` 在册」。两向都可证伪。
 """
 from __future__ import annotations
 
@@ -162,15 +171,21 @@ class TestNpcGoRoleMustBeInRegistry:
             + "\n  ".join(problems)
         )
 
-    def test_retired_bare_role_name_never_returns(self, cnb_doc):
-        """已退役的无后缀 `DSCoder` 不得再作为字面量出现（收敛不倒退）。"""
+    def test_carrier_role_is_never_a_bare_retired_literal(self, cnb_doc, settings_doc):
+        """载体不得**硬编码**任何角色字面量 —— 身份随轮传递才能免受改名影响。
+
+        与早期「退役名字面量不得回归」的区别：本判据不针对某个具体名字，
+        而是钉住**形态**（载体的 role 只能是 `$变量`）。所以无论名单里有哪些角色
+        （含无后缀的 DSCoder），硬编码一个名字都是漂移源，一律红。
+        """
+        names = _registryRoleNames(settings_doc)
         offenders = [
-            path for path, value in _npcGoRoleReadings(cnb_doc)
-            if isinstance(value, str) and value.strip() == "DSCoder"
+            (path, value) for path, value in _npcGoRoleReadings(cnb_doc)
+            if isinstance(value, str) and value.strip() in names
         ]
         assert not offenders, (
-            "退役角色名 `DSCoder` 重新出现在 npc:go.options.role："
-            f"{offenders}\nIssue #272 已把角色改名，硬编码旧名即静默回落平台默认 prompt。"
+            "npc:go.options.role 硬编码了在册角色名（应改用 $变量随轮传递）："
+            f"{offenders}\n角色一改名即从第二轮起静默回落平台默认 prompt。"
         )
 
 
@@ -270,3 +285,44 @@ class TestNpcRoleContinuityAcrossRounds:
             f"npc.defaultRole={fallback!r} 不在册（{sorted(names)}）—— "
             "回落到默认角色的场景会静默回落平台默认 prompt"
         )
+
+
+class TestRosterKeepsTheBareDSCoderRole:
+    """D：名单必须保留无后缀的 `DSCoder`（五角色口径）。
+
+    早期一版判据把无后缀 `DSCoder` 钉成「已退役、不得回归」。用户口径已改：
+    `DSCoder` 与四个后缀角色并存，`@kingsa2026/neurova(DSCoder)` 必须仍能召到
+    本仓人设。故在此把**正反两面**都钉住：
+
+    * 正向：`DSCoder` 在册（缺了即红）；
+    * 反向可证伪：把它从名单摘掉，本判据立刻红。
+
+    名单事实源仍是 `.cnb/settings.yml` 的 `npc.roles`，本判据不抄第二份。
+    """
+
+    #: 用户点名要保留的无后缀主角色。
+    BARE_ROLE = "DSCoder"
+
+    def test_bare_role_is_registered(self, settings_doc):
+        names = _registryRoleNames(settings_doc)
+        assert self.BARE_ROLE in names, (
+            f"名单里没有无后缀的 {self.BARE_ROLE} —— "
+            "用户口径要求它与四个后缀角色并存（共五个在册角色）。"
+            f"\n现有：{sorted(names)}"
+        )
+
+    def test_bare_role_is_callable_through_admission(self):
+        """准入脚本对 `DSCoder` 必须放行（否则被 @ 时静默不住册、白烧 token）。"""
+        import os
+        import subprocess
+        import sys
+
+        script = PROJECT_ROOT / "scripts" / "ci" / "npc_role_admission.py"
+        env = {k: v for k, v in os.environ.items() if k != "CNB_NPC_NAME"}
+        env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
+        env["CNB_NPC_NAME"] = self.BARE_ROLE
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -738,14 +738,17 @@ $:
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   现补同一份收尾接力，判据同源，对话载体继续经 env 传下去。
   #
-  # 接力载体的 `role:` 必须与 `.cnb/settings.yml` 的 `npc.defaultRole` 一致（Issue #272）：
-  #   PR #273 把角色改名为 `DSCoder-Red / -Green / -Yello / -Blue` 并删掉 `DSCoder`，
-  #   而载体仍写 `role: DSCoder` —— 平台直接以
+  # 接力载体的 `role:` 读**上一跳传下来的角色身份**（`$handoffRole`），不硬编码名字：
+  #   PR #273 把角色改名为 `DSCoder-Red / -Green / -Yello / -Blue`，
+  #   而载体当时仍写 `role: DSCoder` —— 平台直接以
   #   `Role "DSCoder" not found in .cnb/settings.yml` 拒绝该流水线
   #   （实测探针 cnb-ffc-1k3f5v4rm），接力轮**零产出**。
-  #   改名那一次没有任何判据会响，故本轮把它钉成常驻判据：
-  #   `.cnb.yml` 的每个 `role:` 字面量都必须在 `npc.roles` 名单里，
-  #   且载体那处必须等于 `npc.defaultRole`。
+  #   只把名字换成「当前在册的某一个」不治病：角色名再改一次即复断。
+  #   根修是身份随轮传递 —— 评论侧收尾把平台注入的 `$CNB_NPC_NAME` 经
+  #   `handoffRole` 供上，载体读 `$handoffRole`，落点自己的收尾再 `$handoffRole` 传下去。
+  #   常驻判据：`.cnb.yml` 的每个 `role:` 字面量都必须在 `npc.roles` 名单里，
+  #   且载体**不得**硬编码任何在册名字（只能是 `$变量`）。见
+  #   tests/unit/ci/test_npc_handoff_role_continuity.py。
   #
   # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
   #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
