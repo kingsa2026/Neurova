@@ -1084,3 +1084,10 @@ tests/unit/agent/test_goal_gate_wiring.py
 #   装配面同时收口：`GateRunner([...])` 全仓唯一构造点在 `OpenAILoop._buildGateRunner()`
 #   （`buildGateRunner()` 只是转调它的命名入口），`__init__` 与懒初始化路径同调它。
 tests/unit/agent/test_turn_run_state_isolation.py
+
+# Issue #272 NPC 运行期预算（超时与超轮次的处理方式收口）：
+#   · 工具单次执行的超时锚点唯一（三处 npc:go 引用同一处，不再各写一个数字）；
+#   · 量尺 scripts/ci/npc_runtime_budget.py 由真实构建执行，四态判据可证伪；
+#   · 角色准入 scripts/ci/npc_role_admission.py 排在 npc:go 之前，名单单源；
+#   · 纪律与阈值读数落在每个在册角色的 prompt（评论触发时唯一必达通道）。
+tests/unit/ci/test_npc_runtime_budget.py

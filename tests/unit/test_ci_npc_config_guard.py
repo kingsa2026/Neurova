@@ -64,18 +64,13 @@ THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 # 已知的思考强度后缀变体名（不是合法 model ID）
 SUFFIX_VARIANTS = ("-low", "-high", "-max")
 
-# 本仓只保留 max 一档（2026-09-18 收敛）：
-# 档位角色名 → 期望的 thinkingLevel
-LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
-
-# NPC **挂载点**（.cnb.yml 顶层 key）→ 期望的 thinkingLevel。
+# 本仓的全部在册角色共用**同一份运行参数**：一个底座模型、一个最高思考档。
 #
-# `$` 是唯一允许的挂载点：.cnb.yml 的顶层 key 在平台 Schema 里只认分支名
-# （未知 key 只有 `^\..` 锚点形态被放行），`DSCoder-max` 这类角色名顶层 key
-# 会同时过不了 Schema 与「仓库级事件只能在 $ 下」的语义规则。
-# 别名角色（DSCoder-max）因此只保留在 settings.yml 侧，运行参数复用 `$` 的定义——
-# 见 `LEVEL_BY_ROLE`，若将来别名需要不同参数，正确做法是拆出**分支**而不是再造顶层 key。
-LEVEL_BY_MOUNT = {"$": "xhigh"}
+# 为什么不再按角色名枚举档位（Issue #272）：角色名此前带 `-low` / `-max` 这类档位后缀，
+# 于是「角色名 → 期望档位」必须另建一张表，而那张表与 `.cnb/settings.yml` 的角色定义、
+# 与 `$` 挂载点的现值是**三份**口径，任何一处改动都要三处同步。现在全部角色同为最高档，
+# 档位只剩一处事实源：`$` 挂载点的 thinkingLevel 现值。
+LEVEL_BY_MOUNT = {"$": "max"}
 
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
@@ -483,20 +478,21 @@ class TestRolePipelineAlignment:
             "若确要恢复分档，请同步更新守卫的 LEVEL_BY_ROLE / LEVEL_BY_MOUNT 与文档说明。"
         )
 
-    def test_settings_level_roles_match_declared_table(self, settings_doc):
-        """带档位后缀的角色名必须在本仓档位表内（防新增角色漏挂顶层 key）。"""
-        roles = [
-            (r or {}).get("name")
-            for r in ((settings_doc.get("npc") or {}).get("roles") or [])
-        ]
-        level_roles = {
-            r for r in roles
-            if isinstance(r, str) and r.endswith(SUFFIX_VARIANTS)
+    def test_every_role_shares_the_single_declared_level(self, settings_doc, cnb_doc):
+        """全部在册角色共用同一档 —— 档位事实源只有 `$` 挂载点的现值。
+
+        替代此前那张「角色名 → 档位」表：本仓全部角色同档，那张表就是一份
+        与 `$` 现值并列的第二份口径，改一处漏一处不会有任何红（教义第 6 条）。
+        """
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, ".cnb/settings.yml 未声明任何 NPC 角色"
+        expected = LEVEL_BY_MOUNT["$"]
+        levels = {
+            opt.get("thinkingLevel")
+            for _path, opt in _iter_npc_go_options(cnb_doc)
         }
-        unknown = sorted(level_roles - set(LEVEL_BY_ROLE))
-        assert not unknown, (
-            f"档位角色未在守卫档位表登记: {unknown}\n"
-            "新增档位需同时改 .cnb.yml 挂载点、settings.yml 角色与守卫档位表。"
+        assert levels == {expected}, (
+            f"npc:go 的 thinkingLevel 读数 {sorted(levels)} 与本仓声明的 {expected!r} 不一致。"
         )
 
     def test_no_retired_level_mounts_in_cnb(self, cnb_doc):
