@@ -369,6 +369,127 @@ main:
             forceRebuild: false
             ignoreProcessFailures: true
 
+  # ── 非门禁流水线：手动镜像构建 + 真运行 + 真探活 + 推制品库（Issue #90）──
+  # 为什么需要它：本仓有三种交付形态（Dockerfile / compose / Helm）与覆盖它们的
+  # 跨文件门禁（deploy-config 的 R1~R12），但**没有任何一处把镜像真的构建出来、
+  # 真的运行起来**：
+  #   * deploy-config 只做静态比对（读文件、比字段），不执行 docker build；
+  #   * e2e-backend-boot 跑的是**源码直启**（python start_server.py），
+  #     不是镜像里那份运行时；
+  #   * compose / Helm 是给运维用的编排定义，CI 里没有任何一条会拉起容器。
+  # 于是「Dockerfile 真能构建出可运行镜像吗」「镜像里的后端真能起来吗」这两件事，
+  # 此前只能靠人手动执行——而人不会每次提交都做。
+  #
+  # 为什么**不**放进 `main.push`（即不做合并门禁）：全量依赖（含 torch 与 CUDA
+  # 运行库，实测单次下载约 3.4GB）下载 + 构建一次约 12 分钟、镜像层数 GB 量级。
+  # 挂在每次提交上就是 Issue #223 消灭的那种「每次提交都付一遍」的代价，而它
+  # 裁决的并不是「这次提交合不合格」。故落在手动口：`cnb build start-build`
+  # 指定本事件，或页面上点 .cnb/web_trigger.yml 里的按钮。
+  #
+  # 端口与探活口径**只有 Dockerfile 一份**（`EXPOSE` 与 `HEALTHCHECK` 的 URL）：
+  # 脚本在运行期从 Dockerfile 派生，不手抄字面量。判据
+  # tests/unit/ci/test_docker_image_pipeline_wiring.py 反向钉住这一点——
+  # 脚本里再出现 Dockerfile 那个端口即红，因为「两处恰好相同」的判据在
+  # 改 Dockerfile 时同样绿（探活会打到别的端口上照样报绿）。
+  #
+  # 推送落点用平台注入的制品库事实（${CNB_DOCKER_REGISTRY} + 仓库路径 + 提交短号，
+  # 见 docs.cnb.cool/zh/artifact/docker.md 的命名规则），tag 不写 latest：
+  # 同一份 tag 在不同时刻指向不同镜像是"制品不可追溯"的经典成因。
+  # 两个入口，一份定义：CLI 触发（`cnb build start-build --event`）只认
+  # `api_trigger*`，页面按钮只认 `web_trigger*`（平台 web-trigger.md 的 Button
+  # 定义逐字写着「仅支持 web_trigger 自定义事件」）—— 两个事件名空间互不通用，
+  # 故用 YAML 锚点让第二个事件名引用第一处的**同一份对象**。
+  # 写成两份内容相同的副本是不行的：那正是「同一事实的第二份手抄」（教义第 6 条），
+  # 各自演化时没有任何判据会响。绑定由
+  # tests/unit/ci/test_docker_image_pipeline_wiring.py 的
+  # `test_both_entrypoints_share_one_definition` 取 `is`（同一对象）钉住。
+  api_trigger_docker_image: &docker-image-pipeline
+    - name: docker-image
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 4
+      services:
+        - docker
+      env:
+        DOCKER_BUILDKIT: "1"
+      stages:
+        - name: 从 Dockerfile 派生镜像契约并构建
+          script: |
+            set -eu
+            CONTAINER_PORT=$(sed -n 's/^EXPOSE[[:space:]]*\([0-9][0-9]*\).*/\1/p' Dockerfile | head -n 1)
+            PROBE_URL=$(grep -o 'http://localhost:[0-9][0-9]*/[^ "]*' Dockerfile | head -n 1)
+            if [ -z "$CONTAINER_PORT" ] || [ -z "$PROBE_URL" ]; then
+              echo "Dockerfile 解析不到 EXPOSE 或 HEALTHCHECK 探活 URL —— 镜像契约的事实源缺失" >&2
+              exit 1
+            fi
+            echo "derived_container_port=$CONTAINER_PORT"
+            echo "derived_probe_url=$PROBE_URL"
+            IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:image-${CNB_COMMIT_SHORT}"
+            echo "$IMAGE" > /tmp/neurova_image_tag
+            echo "$CONTAINER_PORT" > /tmp/neurova_container_port
+            echo "$PROBE_URL" > /tmp/neurova_probe_url
+            echo "image_tag=$IMAGE"
+            time docker build -t "$IMAGE" .
+            docker image inspect "$IMAGE" --format 'image_size_bytes={{.Size}}'
+          timeout: 110m
+        - name: 起容器并真探活（失败即打日志再判红）
+          script: |
+            set -eu
+            IMAGE=$(cat /tmp/neurova_image_tag)
+            CONTAINER_PORT=$(cat /tmp/neurova_container_port)
+            PROBE_URL=$(cat /tmp/neurova_probe_url)
+            PROBE_LOCAL=$(echo "$PROBE_URL" | sed 's#http://localhost:#http://127.0.0.1:#')
+            echo "probe_local=$PROBE_LOCAL"
+            NAME=neurova-image-smoke
+            docker rm -f "$NAME" >/dev/null 2>&1 || true
+            docker run -d --name "$NAME" \
+              -e NEUROVA_ENV=production \
+              -p "${CONTAINER_PORT}:${CONTAINER_PORT}" "$IMAGE"
+            CODE=000
+            for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+              CODE=$(curl -s -o /tmp/neurova_health.json -w '%{http_code}' "$PROBE_LOCAL" || true)
+              if [ "$CODE" = "200" ]; then break; fi
+              sleep 3
+            done
+            echo "health_http_code=$CODE"
+            cat /tmp/neurova_health.json 2>/dev/null || true
+            echo
+            # 容器**自己声明的**探针（Dockerfile HEALTHCHECK）也必须收敛：
+            # 首次实测（构建 cnb-neq-1k3e0m107）宿主 curl 已 200 时，容器自身仍
+            # 处于 starting / FailingStreak=1 —— 两者不是同一件事，而 compose 的
+            # healthcheck 与 Helm 探针走的是容器内那一套语义。
+            HEALTH=unknown
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              HEALTH=$(docker inspect "$NAME" --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown)
+              if [ "$HEALTH" = "healthy" ]; then break; fi
+              sleep 6
+            done
+            echo "container_health_status=$HEALTH"
+            docker inspect "$NAME" --format 'container_health={{json .State.Health}}' || true
+            if [ "$CODE" != "200" ] || [ "$HEALTH" != "healthy" ]; then
+              docker logs --tail 60 "$NAME" 2>&1 || true
+              docker stop "$NAME" >/dev/null 2>&1 || true
+              docker rm "$NAME" >/dev/null 2>&1 || true
+              echo "镜像未通过自证：health_http_code=$CODE container_health_status=$HEALTH" >&2
+              echo "（宿主探火 200 与容器自身 HEALTHCHECK 收敛是两件事，见本 stage 注释）" >&2
+              exit 1
+            fi
+            docker stop "$NAME" >/dev/null
+            docker rm "$NAME" >/dev/null
+            echo "残留容器数=$(docker ps -a --filter name=$NAME --format '{{.Names}}' | wc -l)"
+          timeout: 20m
+        - name: 推送到本仓 Docker 制品库
+          script: |
+            set -eu
+            IMAGE=$(cat /tmp/neurova_image_tag)
+            echo "push_target=$IMAGE"
+            time docker push "$IMAGE"
+            echo "pushed_ok"
+          timeout: 40m
+
+  # 页面按钮入口（同一条流水线的第二个事件名，见上方锚点注释）。
+  web_trigger_docker_image: *docker-image-pipeline
+
   # ── 周级巡检：部署配置漂移（crontab）─────────────────────────────────────
   # 为什么独立成 crontab 而不只放 push/PR：漂移的主要来源**不在本仓的提交里**——
   # 基础镜像上游发版、Helm/K8s API 演进、依赖上游 CVE，都会让"上次对齐过"的
