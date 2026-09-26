@@ -86,8 +86,16 @@ class AnthropicLoop(BaseAgentLoop):
             # 执行工具
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
 
-            # 将工具结果添加到 messages
-            messages.extend(tool_messages)
+            # 将工具结果添加到 messages——连同声明这些调用的 assistant 消息：
+            # _convert_messages_to_anthropic 靠它产出 tool_use 块，缺块时
+            # tool_result 没有前置声明，协议判为非法（与 OpenAI 侧同一根因）
+            messages.extend(
+                self.buildToolRoundMessages(
+                    response.tool_calls,
+                    tool_messages,
+                    assistantText=getattr(response, "content", "") or "",
+                )
+            )
 
             # 递归调用，直到没有 tool_calls
             return await self.predict_step(messages, tools, computer_handler, _top_level=False, **kwargs)

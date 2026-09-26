@@ -54,22 +54,25 @@ class TestReasoningReplayGate:
 
     def test_env_on_requires_capability(self, monkeypatch):
         monkeypatch.setenv("NEUROVA_REASONING_REPLAY", "1")
-        from neurova.agent.loops.reasoning_replay import (
-            build_reasoning_assistant_message,
-            should_replay_reasoning,
-        )
+        from neurova.agent.loops.reasoning_replay import should_replay_reasoning
 
         # 无 REASONING 能力标记的模型不回放（能力门）
         assert should_replay_reasoning("not-a-real-model-xyz") is False
 
-        # 消息构造契约（与闸门独立）
-        msg = build_reasoning_assistant_message(
-            "思考...", "回答",
-            [type("TC", (), {"id": "c1", "function": type("F", (), {"name": "t", "arguments": "{}"})()})()],
-        )
-        assert msg["role"] == "assistant"
-        assert msg["reasoning_content"] == "思考..."
-        assert msg["tool_calls"][0]["function"]["name"] == "t"
+    def test_replay_message_has_single_constructor(self):
+        """回放消息只在 BaseAgentLoop.buildToolRoundMessages 一处构造。
+
+        reasoning_replay 曾自带一份 assistant 构造器，两侧对 tool_calls 的
+        id 解析不同源（getattr 读 dict 恒取默认值→合成 call_0/call_1），
+        与 tool 结果的 tool_call_id 配不上。平行定义已收口，此处钉住不回退。
+        """
+        import inspect
+
+        from neurova.agent.loops import reasoning_replay
+
+        assert not hasattr(reasoning_replay, "build_reasoning_assistant_message")
+        source = inspect.getsource(reasoning_replay)
+        assert '"tool_calls"' not in source, "回放模块不得再自行声明 tool_calls"
 
 
 if __name__ == "__main__":
