@@ -78,7 +78,12 @@ R1~R12 是**静态**跨文件一致性比对：它们读文件、比字段，从
 cnb build start-build --repo <slug> --branch main --event api_trigger_docker_image
 ```
 
-或在本仓页面点「构建 Docker 镜像」按钮（`.cnb/web_trigger.yml`）。
+或在本仓 main 分支详情页点「构建 Docker 镜像」按钮（`.cnb/web_trigger.yml`）。
+
+两个入口各有自己的事件名空间：CLI 的 `--event` 只认 `api_trigger*`，页面按钮只认
+`web_trigger*`（平台 web-trigger.md 的 Button 定义）。`.cnb.yml` 里
+`web_trigger_docker_image` 以 YAML 锚点引用 `api_trigger_docker_image` 的
+**同一份对象**——写成两份内容相同的副本时，两份会各自演化而没有任何判据会响。
 
 它做四件事：`docker build` 本仓 Dockerfile → 起容器 →
 探活（URL 与端口**运行期从 Dockerfile 派生**，不手抄）→ 推送到本仓 Docker 制品库
