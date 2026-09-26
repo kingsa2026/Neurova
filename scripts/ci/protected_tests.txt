@@ -1049,3 +1049,15 @@ tests/unit/context/test_batch_status_docs_coupling.py
 #    端口与探活口径只有 Dockerfile 一份（脚本里不得出现那个端口的字面量）/
 #    推送落点取平台注入的制品库事实 / 页面按钮指向同一事件。）
 tests/unit/ci/test_docker_image_pipeline_wiring.py
+
+# Issue #90「环境实测是否闭环」批：手工 live-verify 脚本的常驻契约。
+#   （根因：`tests/manual/*.py` 是全部交付的活体证据，但手工跑、不进 CI —— 于是
+#    它们的失效对 CI 完全不可见。2026-09-26 全量实跑翻出两种形态：①
+#    `turn_session_identity_t03b_90.py` 读 `get_context_health()["session_identity"]`，
+#    而生产键域在 T-03b 同单两份交付收口时已统一成 `turn_identity` → KeyError，
+#    脚本永远跑不到 PASSED；② 22 份脚本把生产库写进仓库根 `data/` 或把落点抄成
+#    第二份（数据根 2026-09-22 起绝对锚定，`os.chdir()` 已不能隔离），实测 2 份因此
+#    断言读到 0 行而恒红。判据钉：读数键必须在 `_emptyContextHealth()` 单点键域内 /
+#    落点只准经 `core/data_root.py` 推导 / 构造生产持久对象的脚本必须经唯一注入口
+#    或隔离单点 `tests/manual/_liveVerifyIsolation.py`。三条各带反向控制。）
+tests/unit/ci/test_manual_live_verify_contract.py

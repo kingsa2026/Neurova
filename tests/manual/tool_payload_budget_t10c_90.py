@@ -18,6 +18,9 @@ from neurova.context.composition import _measure_messages
 from neurova.context.orchestrator import ContextOrchestrator
 from neurova.context.window_compactor import estimate_window_tokens
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 
 def _agent():
     agent = MagicMock()
