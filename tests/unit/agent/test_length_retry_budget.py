@@ -58,7 +58,7 @@ class TestLengthRetry:
         """打桩 _predict_stream_once：第一次 length 空回复，第二次按脚本"""
         calls = []
 
-        async def fake_once(self, params):
+        async def fake_once(self, params, state=None):
             calls.append(dict(params))
             if len(calls) == 1:
                 yield {"type": "reasoning", "data": "思考…" * 100}
@@ -89,7 +89,7 @@ class TestLengthRetry:
         }
         calls = []
 
-        async def fake_once(self, params):
+        async def fake_once(self, params, state=None):
             calls.append(dict(params))
             if len(calls) == 1:
                 yield {"type": "reasoning", "data": "思考…" * 100}
@@ -121,7 +121,7 @@ class TestLengthRetry:
 
         calls = []
 
-        async def fake_once(self, params):
+        async def fake_once(self, params, state=None):
             calls.append(dict(params))
             if len(calls) == 1:
                 yield {"type": "reasoning", "data": "思考…" * 200}
@@ -157,7 +157,7 @@ class TestLengthRetry:
 
         calls = []
 
-        async def fake_once(self, params):
+        async def fake_once(self, params, state=None):
             calls.append(dict(params))
             yield {"type": "reasoning", "data": "思考…"}
             yield {"type": "done", "reply": "", "finish_reason": "length"}
