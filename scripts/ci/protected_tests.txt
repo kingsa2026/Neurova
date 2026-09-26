@@ -518,6 +518,13 @@ tests/unit/ci/test_npc_pipeline_time_budget.py
 #（事故：cnb-158 批把判据交给 Agent 开工前的门禁无条件写 1，四条父构建在
 #  76~164 轮即接力；接力落点 32 次构建 / 22.2h 墙钟，其中 17 次又跑满 200 轮）
 tests/unit/ci/test_npc_turn_handoff_predicate.py
+# NPC **自动续跑**的接线：接力载体的 role 必须与 npc.defaultRole 一致，
+# 判据读失败 stage 名（不读被推翻的报错原文片段）（Issue #272）
+#（事故：cnb-ffc-1k3f5v4rm 实测——PR #273 角色改名后载体仍写 role: DSCoder，
+#  平台以 `Role "DSCoder" not found` 直接拒绝接力轮，零产出；
+#  同一根因的另一形态见 cnb-m16-1k3f5s0ri：硬中止时 CNB_BUILD_FAILED_MSG
+#  只是失败 stage 最后一行输出，按文案片段匹配等于看运气）
+tests/unit/ci/test_npc_auto_continue_wiring.py
 # NPC 轮数触顶接力的**执行面**：标记落点写作纪律 + 落点由真实构建自证
 #（事故：cnb-2e8-1k341d9s1 撞满 200 轮，接力 Stage 因读不到标记被 skipped，成果全丢）
 tests/unit/ci/test_npc_turn_handoff_execution.py
