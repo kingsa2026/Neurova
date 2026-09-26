@@ -95,18 +95,25 @@ class TestPersonaTeachesTheCurrentRelayContract:
     """
 
     #: 平台在收尾期注入的两个事实（`.cnb.yml` 收尾 `if` 读它们）。
+    #: v2：第二个事实源是**失败 stage 名**，不是失败 stage 的最后一行输出。
     STATUS_VAR = "CNB_PIPELINE_STATUS"
-    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+    FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
+
+    #: npc:go 那一格的 stage 名标记（判据按它匹配）。
+    GO_STAGE_MARKER = "npc-go"
 
     def test_personas_name_the_platform_facts_the_relay_reads(self, npc_personas):
         missing = [
             name
             for name, prompt in npc_personas.items()
-            if self.STATUS_VAR not in prompt or self.FAILED_MSG_VAR not in prompt
+            if self.STATUS_VAR not in prompt
+            or self.FAILED_STAGE_VAR not in prompt
+            or self.GO_STAGE_MARKER not in prompt
         ]
         assert not missing, (
             f"NPC 人设未点明接力判据读的平台事实: {missing}\n"
-            f"收尾 `if` 读的是 ${self.STATUS_VAR} 与 ${self.FAILED_MSG_VAR}；"
+            f"收尾 `if` 读的是 ${self.STATUS_VAR} 与 ${self.FAILED_STAGE_VAR}"
+            f"（后者命中 {self.GO_STAGE_MARKER} 标记）；"
             "人设里不写清楚，Agent 会以为接力还需要它配合，"
             "或者以为接力不存在而另造一套判据。"
         )
@@ -228,22 +235,41 @@ class TestRelayJudgmentReadsPlatformFacts:
     这不是"判据写松了"，而是**判据的输入端被自己填成了真值**：
     该变量回答的是"上一轮是否用满配额"，而得知这件事的唯一时点是收尾期。
 
-    平台已在 `endStages` 内提供这两个事实（构建 cnb-s4f-1k3c46us9 与
+    平台已在 `endStages` 内提供**收尾期事实**（构建 cnb-s4f-1k3c46us9 与
     cnb-p2q-1k3c2g7u3 实测，真 `npc:go` 撞 `maxTurns: 1`）：
 
         PROBE_STATUS=[error]
         PROBE_MSG=[Agent aborted: reached maxTurns limit (1)]
 
-    故判据改为读它们，并删净事前伪造的燃料链路（门禁发射、`exports`、
+    故判据改为读平台事实，并删净事前伪造的燃料链路（门禁发射、`exports`、
     `env` 透传）——留着它就是"看着守住了空轮、其实恒真"。
+
+    ## v2 修正（Issue #272，2026-09-26 live 实测）
+
+    v1 把「平台事实」写成了 `$CNB_BUILD_FAILED_MSG` 的**原文片段**。
+    实测（探针 cnb-m16-1k3f5s0ri）证明该变量不是一段平台文案，
+    而是**失败 stage 最后一行输出**：
+
+        Job 超时被 SIGKILL（signal 9）→ PROBE_MSG=[start]
+        （`start` 就是脚本自己最后 echo 的那行）
+
+    ⇒ 按文案片段匹配，等于让「是否接力」取决于脚本最后打印了什么；
+    v1 后来补的片段 `超过最大运行时长` 在任何一份可下载日志里都搜不到。
+
+    v2 判据改读**确定性事实**：`$CNB_PIPELINE_STATUS` + 失败 stage 名
+    （`$CNB_BUILD_FAILED_STAGE_NAME`）里的 `npc-go` 标记 ——
+    它回答「被中止的是不是 Agent 那一格」，与打印内容无关。
+    本类因此钉：状态取 `error`、失败 stage 名取到 npc:go 那一格、且不读自造标记。
     """
 
     #: 平台在收尾期给出的事实（`endStages` 内可读，平台「环境变量」篇）。
     STATUS_VAR = "CNB_PIPELINE_STATUS"
-    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
 
-    #: 真实撞顶时平台给出的错误原文片段（构建 cnb-s4f-1k3c46us9 实测）。
-    ABORT_MARKER = "reached maxTurns limit"
+    #: 失败 stage 名 —— v2 的第二个事实源（取值是 stage 名，不是打印内容）。
+    FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
+
+    #: npc:go 所在 stage 名里的 ASCII 标记（判据按它匹配）。
+    GO_STAGE_MARKER = "npc-go"
 
     @staticmethod
     def _relay_stages(cnb_doc):
@@ -260,7 +286,11 @@ class TestRelayJudgmentReadsPlatformFacts:
                             yield f"{mount}.{event}[{i}]", event, job, stage
 
     def test_every_relay_condition_reads_the_two_platform_facts(self, cnb_doc):
-        """接力 `if` 必须同时读「流水线状态」与「失败原文」，不得读自造标记。"""
+        """接力 `if` 必须读「流水线状态」与「失败 stage 名」，不得读自造标记。
+
+        v2：第二个事实源是 `$CNB_BUILD_FAILED_STAGE_NAME`（取值是 stage 名），
+        不是 `$CNB_BUILD_FAILED_MSG`（取值是失败 stage 的最后一行输出）。
+        """
         seen = 0
         problems = []
         for where, event, job, stage in self._relay_stages(cnb_doc):
@@ -271,18 +301,18 @@ class TestRelayJudgmentReadsPlatformFacts:
             blob = "\n".join(str(item) for item in conditions)
             if self.STATUS_VAR not in blob:
                 problems.append(f"{where}: 接力 `if` 未读 ${self.STATUS_VAR}")
-            if self.FAILED_MSG_VAR not in blob:
-                problems.append(f"{where}: 接力 `if` 未读 ${self.FAILED_MSG_VAR}")
-            if self.ABORT_MARKER not in blob:
+            if self.FAILED_STAGE_VAR not in blob:
+                problems.append(f"{where}: 接力 `if` 未读 ${self.FAILED_STAGE_VAR}")
+            if self.GO_STAGE_MARKER not in blob:
                 problems.append(
-                    f"{where}: 接力 `if` 未按平台原文片段 {self.ABORT_MARKER!r} 判定"
-                    "（不许以其它近似条件代替）"
+                    f"{where}: 接力 `if` 未匹配 npc:go 的 stage 名标记 "
+                    f"{self.GO_STAGE_MARKER!r}（不许以其它近似条件代替）"
                 )
         assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
         assert not problems, (
             "接力判据没有读平台给出的事实：\n  " + "\n  ".join(problems) +
-            "\n该变量回答「上一轮是否用满配额」，唯一得知时点是收尾期；"
-            "$" + self.STATUS_VAR + " 与 $" + self.FAILED_MSG_VAR + " 由平台注入。"
+            "\n该变量回答「上一轮是否被中止在 Agent 那一格」，唯一得知时点是收尾期；"
+            "$" + self.STATUS_VAR + " 与 $" + self.FAILED_STAGE_VAR + " 由平台注入。"
         )
 
     def test_no_self_fabricated_relay_flag_anywhere(self):
@@ -732,39 +762,39 @@ class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
 
 
 class TestRelayCoversEveryPlatformAbortReason:
-    """接力判据必须覆盖平台的**每一种**中止原文，不只 maxTurns 那一种。
+    """接力判据必须覆盖**每一种**平台中止形态（不只 maxTurns 那一种）。
 
-    根因（构建 cnb-m74-1k3cm87o9 实测，2026-09-26）：
-    `$CNB_BUILD_FAILED_MSG` 的原文字符串在平台侧有**两种**取值来源 ——
-    `maxTurns` 用满与整轮会话撞 2h 墙钟。彼时判据只认前者：
+    历史（记两轮，免得再犯）：
 
-        case "$CNB_BUILD_FAILED_MSG" in
-          *"reached maxTurns limit"*) true;; *) false;; esac
+    * v1 只认 `$CNB_BUILD_FAILED_MSG` 里的 `reached maxTurns limit` ——
+      整轮会话撞 2h 墙钟那一形态被判 `skipped`
+      （构建 cnb-m74-1k3cm87o9：`106ms (skipped)`），Agent 跑了 222 轮、
+      7,330,218ms 后改而未提交的成果随容器一起丢。
+    * v1 的补丁是"再猜一段文案"（`超过最大运行时长`）。**这一猜被实测推翻**
+      （Issue #272，探针 cnb-m16-1k3f5s0ri）：`$CNB_BUILD_FAILED_MSG` 不是
+      平台文案，而是**失败 stage 最后一行输出** —— Job 超时被 SIGKILL 后
+      它是 `start`（脚本自己最后 echo 的那行）。
+      按文案片段匹配，等于让「是否接力」取决于脚本最后打印了什么；
+      那段补进去的文案在任何可下载日志里都搜不到。
 
-    而该构建的真实中止原文是
-    `Agent 已中止：构建环境异常终止，或流水线超过最大运行时长（2h）。` ——
-    `case` 落到 `*)` 分支为假，收尾接力整格被判 **skipped**：
+    v2 判据改读**确定性事实**：`$CNB_PIPELINE_STATUS = error`
+    且 `$CNB_BUILD_FAILED_STAGE_NAME` 命中 npc:go 那一格的 `npc-go` 标记。
+    它把「轮数用满」与「撞墙钟被掐」**统一**为同一件事 ——
+    「Agent 那一格被中止了」，不再逐一枚举中止原因（枚举永远会漏）。
 
-        ⏳ 轮数触顶接力：自动开启下一轮（判据取平台收尾事实）: 106ms (skipped)
-
-    后果不是"少接力一轮"这么轻：Agent 在 222 轮里改而未提交的成果
-    （工作树不跨轮保存）随容器一起丢，用户看到的是一条「流水线构建失败」，
-    Issue 上没有任何回音。判据把「配额触发的正常收官」写成了唯一形态，
-    于是「被墙钟掐断」这一形态永远静默落空。
-
-    这是教义第 1 条的典型形态：修在报错处（判据）**不是**consumer-only guard，
-    但判据只覆盖了同一根因的一个命中点 —— 第 5 条要求同时扫清全部命中点。
-
-    判据：`.cnb.yml` 里每一条收尾接力的 `if`，都必须同时覆盖
-    「轮数用满」与「整轮会话超时」两种平台原文片段。
+    本类钉两件事：
+    * 每条接力 `if` 都读失败 stage 名（不读文案片段）；
+    * 判据不得回退到 `$CNB_BUILD_FAILED_MSG` 的文案匹配（那是被推翻的口径）。
     """
 
-    #: 平台给出的两种中止原文片段（前者实测于 cnb-s4f-1k3c46us9，
-    #: 后者实测于 cnb-m74-1k3cm87o9）。
-    ABORT_MARKERS = (
-        "reached maxTurns limit",
-        "超过最大运行时长",
-    )
+    #: v2 的事实源：失败 stage 名。
+    FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
+
+    #: npc:go 那一格的 stage 名标记。
+    GO_STAGE_MARKER = "npc-go"
+
+    #: 被实测推翻的 v1 事实源（不得作为判据的唯一输入）。
+    RETIRED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
 
     @staticmethod
     def _relay_stages(cnb_doc):
@@ -780,25 +810,52 @@ class TestRelayCoversEveryPlatformAbortReason:
                         if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE:
                             yield f"{mount}.{event}[{i}]", stage
 
-    def test_every_relay_condition_covers_both_abort_reasons(self, cnb_doc):
+    def _conditions_blob(self, stage):
+        conditions = stage.get("if") or []
+        if isinstance(conditions, str):
+            conditions = [conditions]
+        return "\n".join(str(item) for item in conditions)
+
+    def test_every_relay_condition_judges_on_the_failed_stage_name(self, cnb_doc):
         seen = 0
         problems = []
         for where, stage in self._relay_stages(cnb_doc):
             seen += 1
-            conditions = stage.get("if") or []
-            if isinstance(conditions, str):
-                conditions = [conditions]
-            blob = "\n".join(str(item) for item in conditions)
-            for marker in self.ABORT_MARKERS:
-                if marker not in blob:
-                    problems.append(
-                        f"{where}: 接力 `if` 未覆盖平台中止原文 {marker!r} —— "
-                        "该形态下的中止将静默落空（实测 cnb-m74-1k3cm87o9）"
-                    )
+            blob = self._conditions_blob(stage)
+            if self.FAILED_STAGE_VAR not in blob:
+                problems.append(
+                    f"{where}: 接力 `if` 未读 ${self.FAILED_STAGE_VAR} —— "
+                    "该形态下的中止将静默落空"
+                )
+            if self.GO_STAGE_MARKER not in blob:
+                problems.append(
+                    f"{where}: 接力 `if` 未匹配 npc:go 的 stage 名标记 "
+                    f"{self.GO_STAGE_MARKER!r}"
+                )
         assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
         assert not problems, (
-            "接力判据未覆盖平台的全部中止原文：\n  " + "\n  ".join(problems) +
-            "\n平台的 `$CNB_BUILD_FAILED_MSG` 至少有两种取值来源（轮数用满 / "
-            "整轮会话撞 2h 墙钟）。判据漏掉任一种，那一类中止就永远不接力，"
-            "Agent 改而未提交的成果随容器一起丢。"
+            "接力判据未覆盖全部平台中止形态：\n  " + "\n  ".join(problems) +
+            "\n平台把「轮数用满」与「撞墙钟被掐」统一表现为"
+            "「失败 stage 是 Agent 那一格」；判据漏掉 stage 名这一事实源时，"
+            "某一类中止就永远不接力，成果随容器一起丢。"
         )
+
+    def test_relay_never_judges_on_the_unstable_message_text(self, cnb_doc):
+        """反向控制：判据不得回退到 `$CNB_BUILD_FAILED_MSG` 的文案匹配。
+
+        实测（cnb-m16-1k3f5s0ri）：该变量是失败 stage 最后一行输出
+        （SIGKILL 后为 `start`），按它匹配等于看运气。
+        """
+        seen = 0
+        offenders = []
+        for where, stage in self._relay_stages(cnb_doc):
+            seen += 1
+            blob = self._conditions_blob(stage)
+            if self.RETIRED_MSG_VAR in blob:
+                offenders.append(
+                    f"{where}: 接力 `if` 仍在读 ${self.RETIRED_MSG_VAR} ——"
+                    "它是失败 stage 的最后一行输出（实测 cnb-m16-1k3f5s0ri："
+                    "SIGKILL 后为 `start`），不是平台文案"
+                )
+        assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
+        assert not offenders, "\n  ".join(offenders)
