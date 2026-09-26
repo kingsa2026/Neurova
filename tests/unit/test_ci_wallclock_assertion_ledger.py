@@ -615,6 +615,12 @@ class TestConvertedSitesStayStructural:
 #: 本批只修"会让 CI 偶发红"的那批（受保护子集内已改结构不变量的 4 处 + 逐条登记的 1 处）。
 #: 子集外这些要么本意就是量真实机时（性能/超时类基准），要么被测对象是墙上时钟本身，
 #: 改动它们属于另一票的范围；此处登记以免"没人知道还有多少处"。
+#:
+#: `tests/unit/agent/test_handle_tool_calls_parallel.py` 已**销账**（原登记 1 处）：
+#: 该文件的并行资格判据全部改为**事件序结构不变量**（在飞高水位 + 执行区间是否重叠），
+#: 与机器速度无关。它不在受保护子集，故不入 `CONVERTED_TO_INVARIANT`（那张表要求
+#: 登记文件在子集里，否则是在给守卫扫不到的靶点作保）；但"加回墙钟即判红"的咬合
+#: 并未削弱——该键从本表消失后，任何一处新增的墙钟上界都会让分布比对判红。
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
@@ -622,7 +628,6 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/integration/test_multi_agent_coordination.py": 1,
     "tests/performance/test_context_pool_load.py": 1,
     "tests/unit/agent/test_b7_worker_occupancy.py": 2,
-    "tests/unit/agent/test_handle_tool_calls_parallel.py": 1,
     "tests/unit/agent/test_post_chat_pipeline_tdd.py": 1,
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
