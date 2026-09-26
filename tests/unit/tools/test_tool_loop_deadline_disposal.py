@@ -79,6 +79,10 @@ class TestDisposalIsMachineCheckable:
         "get_turn_goal": "G2 目标读取面：loops/base.resolveTurnGoal 唯一解析点",
         "goal_max_continuations": "G2 续跑预算：GoalGate 构造时绑定该配置键",
         "goal_verification_enabled": "G2 成本闸：base.goalVerificationEnabled 读取",
+        # G3 工具批次并行（Issue #271）：本片把并行上限从"无上限的 gather"
+        # 改为单源配置键。`agent/loops/base.py:resolveParallelBudget()` 是生产侧
+        # 唯一读取点，批次分组时传进 `planToolBatches` ⇒ 跨文件消费成立。
+        "max_parallel_tools": "G3 工具批次并行：base.resolveParallelBudget 唯一读取点",
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
