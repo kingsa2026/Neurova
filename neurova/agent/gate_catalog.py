@@ -5,7 +5,7 @@ GateCatalog 声明式门控配置层
 NV 的 gates.py 提供全部执行面（DoomLoop/Iteration/TokenBudget/GoalGate +
 GateRunner 故障隔离）。本模块补配置层：
 - 可配置白名单：iteration / token_budget / doom_loop
-  （goal 类需要运行时 completion_check 回调，不走配置层——由 set_goal_gate 注入）
+  （goal 类由轮次目标槽 + Loop 出口求值承载，不走配置层）
 - pydantic 严格参数校验（extra=forbid：未知参数 fail fast）
 - describe()：输出各 gate 的参数 JSON Schema 形状（给前端配置 UI）
 - compile_gates()：先全量验证再构建（原子语义：一个非法全部不建）
@@ -121,7 +121,7 @@ class GateCatalog:
         if spec is None:
             raise ValueError(
                 f"unknown gate type: {gate_type!r}（可用: {sorted(self._specs)}；"
-                "goal 类需运行时回调，由 set_goal_gate 注入）"
+                "goal 类由轮次目标槽承载，不走配置层）"
             )
         return spec
 

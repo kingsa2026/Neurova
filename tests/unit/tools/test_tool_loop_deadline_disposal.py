@@ -17,9 +17,11 @@ T-01 的判据层（`test_tool_loop_deadline_ledger.py`）钉住了「判据类 
    若它被改成 `scaled_unreachable`（或轴整体退化），说明值域证据没被复算——
    而反向控制 `TokenBudgetGate` 必须一直是 `single_source`（同域、同根因、阈值可达），
    两者一起才证明「阈值轴有判别力」。
-3. **本片不动生产码**：T-01 只建判据。若某条处置被改成「已接线」，本片就变成了
-   越界改生产码的片子——故本片全部条目**必须是「待处置」**，并因此**不含**任何
-   「已接线」条目（该断言同时是 1 的自证：处理解被填错即红）。
+3. **处置必须有机器证据、且必须逐条留痕**：原实现把「T-01 只建判据」这条**波次
+   范围**写成了「全部条目永为待处置」的**恒久不变式**——处置批一落地（T-04 轮次预算
+   单源、G2 目标验收链）它就必然报红，而它报红的原因与"判据坏没坏"无关。现改为
+   分条钉：`已接线` 的每一条都必须跨文件消费（由 `disposalConflicts()` 机器验），
+   `待处置` 的每一条必须仍在原状，并逐条点名「是哪一批处置的、依据是什么」。
 
 判据口径不在这里复制：一律取 `scripts/ci/tool_loop_deadline_ledger.py`
 （单一事实源）。
@@ -69,17 +71,52 @@ class TestDisposalIsMachineCheckable:
                 f"实测 {c['judge']}" for c in conflicts)
         )
 
-    def test_this_wave_touches_no_disposal(self):
-        """本片只建判据（Issue #175：只建判据，不做处置）。"""
-        offenders = [
-            f"{symbol}: {entry['disposal']}"
-            for symbol, entry in ledger.readLedger().items()
-            if entry["disposal"] != THIS_WAVE_DISPOSAL
-        ]
+    #: 已被后续处置批接线的条目（`符号: 处置批`）。每条都必须**逐条论证**，
+    #: 不接受"批量已接线"这种无据口径——它正是原实现那条恒久不变式的反面。
+    WIRED_BY_LATER_WAVES = {
+        "GoalGate": "G2 目标验收链（Issue #267）：进 `_buildGateRunner` 默认装配",
+        "set_turn_goal": "G2 目标写入面：chat_pipeline 轮次装配 + orchestrate_tools 派生",
+        "get_turn_goal": "G2 目标读取面：loops/base.resolveTurnGoal 唯一解析点",
+        "goal_max_continuations": "G2 续跑预算：GoalGate 构造时绑定该配置键",
+        "goal_verification_enabled": "G2 成本闸：base.goalVerificationEnabled 读取",
+    }
+
+    def test_every_disposal_is_either_pending_or_justified(self):
+        """处置只允许两种形态：停在「待处置」，或在后续处置批里被点名接线。
+
+        不再断言"全部待处置"——那是波次范围而非不变式；但也不放行任意处置：
+        每条非待处置的条目都必须在 `WIRED_BY_LATER_WAVES` 里逐条说明是哪一批、
+        依据是什么。无据的「已接线/已删除」即红。
+        """
+        offenders = []
+        for symbol, entry in ledger.readLedger().items():
+            disposal = entry["disposal"]
+            if disposal == THIS_WAVE_DISPOSAL:
+                continue
+            if symbol not in self.WIRED_BY_LATER_WAVES:
+                offenders.append(f"{symbol}: {disposal}（无处置批论证）")
         assert not offenders, (
-            "本片（T-01）不做处置，所有条目必须停在「待处置」：\n  "
+            "出现无据的处置（既没停在待处置，也不在任何处置批的论证里）：\n  "
             + "\n  ".join(offenders)
-            + "\n若某条已接线/已删除，说明本片越界动了生产码（红线 4）或台账被改坏。"
+            + "\n处置必须是「有批次的动作」，不是顺手改台账。"
+        )
+
+    def test_wired_entries_are_actually_consumed(self):
+        """`已接线` 的每一条都必须真的跨文件可达——态度由机器判，不由人声称。"""
+        facts = _facts()
+        offenders = []
+        for symbol in self.WIRED_BY_LATER_WAVES:
+            row = facts.get(symbol)
+            if row is None:
+                offenders.append(f"{symbol}: 已接线但不在登记符号表里（僵尸声明）")
+                continue
+            if row["judge"] != ledger.JUDGE_CONSUMED:
+                offenders.append(f"{symbol}: 判据类 {row['judge']}，未跨文件消费")
+            entry = ledger.readLedger().get(symbol, {})
+            if entry.get("disposal") != ledger.DISPOSAL_WIRED:
+                offenders.append(f"{symbol}: 台账处置为 {entry.get('disposal')}，未标已接线")
+        assert not offenders, (
+            "声明已接线而机器判据不成立：\n  " + "\n  ".join(offenders)
         )
 
     def test_baseline_of_absent_symbols_is_empty_in_this_wave(self):
