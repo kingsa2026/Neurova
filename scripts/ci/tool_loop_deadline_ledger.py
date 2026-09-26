@@ -181,6 +181,7 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("tool_choice", KIND_KEY, "agent/loops/openai_loop.py:281（只写不读）"),
     ("MAX_TOOL_CALL_ROUNDS", KIND_BINDING, "agent/chat_pipeline.py:2443（写后无读）"),
     ("ctx_snapshot", KIND_BINDING, "agent/chat_pipeline.py:2451"),
+    ("max_parallel_tools", KIND_KEY, "security/agent_limits_settings.py（工具批次并行上限）"),
 )
 
 #: 反向控制：已知生产可达，必须报 `consumed`，且台账处置**永远**是「待处置」。
