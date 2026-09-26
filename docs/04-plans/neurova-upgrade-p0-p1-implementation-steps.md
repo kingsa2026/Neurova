@@ -136,22 +136,25 @@ trigger_ratio/output_reserve。
 （calculator 5s/memory_search 10s/web_search 30s/browser_* 60-90s，未知回落 60s）+
 ToolCoordinator（run_with_timeout 超时**转后台不取消**——同一任务继续持有引用防 GC，
 观察者协程投递 pending hints；pop_pending_hints 取走即清）+ is_concurrency_safe
-声明制（只读清单，未知保守 False）。11 用例。
+声明制（**2026-09-26 起**读工具自身的 `capability` 声明并做三态合取推导，
+名单形态已删净，见 Issue #271；未知保守 False）。11 用例。
 **切片 2（☑ fd7ea92）**：`_execute_single_tool` 执行链抽取为 `_execute_tool_core`
 （返回三元组）+ run_with_timeout 单一咽喉点覆盖全部执行路径（治理预检后、H5 钩子前）；
 chat_pipeline step3 pending hints 以 [后台工具完成] system 消息注入。4 用例。
 **教训**：neurova.agent 包 __init__ 链回 tool_executor——模块级导入循环，
 协调器导入必须懒加载（AGENTS.md 纪律再次验证）。
-**切片 3（☑ 已提交 b49dbda）**：循环体抽取 `_execute_tool_call_worker`
-（顺序无关纯执行单元，返回 (tool_message, records)）+ 声明制并行——全部
-is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按原 tool_call
-顺序回装，call/result 记录保持相邻配对契约；全部修复注释语义原样保留。
-9 用例（并行时序/混合降级/结果对应/解析隔离/未知工具/user_id 穿透）。
+**切片 3（☑ 已提交 b49dbda；2026-09-26 由 Issue #271 改写判据）**：循环体抽取
+`_execute_tool_call_worker`（顺序无关纯执行单元，返回 (tool_message, records)）+
+声明制并行；结果按原 tool_call 顺序回装，call/result 记录保持相邻配对契约；
+全部修复注释语义原样保留。9 用例（并行时序/混合降级/结果对应/解析隔离/未知工具/user_id 穿透）。
+**Issue #271 变更**：原判据为 all-or-nothing（任一未声明 ⇒ 整轮串行），现改为
+按每个工具的能力声明**分组调度**（连续资格项成组合并发，受单源上限截断），
+判据形状与推导在 `core/tool_capability.py`、成员在各工具的 schema 声明位。
 **P1-2 状态：三切片全部 ☑**。余项=文本正则兜底收窄（原计划第 6 步，随 P2 清理）。
 
 1. 红测：三通道（loop 原生/文本兜底/肌肉记忆）同入口；独立工具并行结果完整；超时转后台语义；hint 注入下一轮
 2. 统一入口 `execute(tool_name, params, source, context)`（`tool_executor.py` 收敛；肌肉记忆自动执行=白名单+高置信直通）
-3. 并行：`loops/base.py:69-277` 独立调用 `asyncio.gather`（工具元数据 `is_concurrency_safe` 声明制，默认串行保守）
+3. 并行：`loops/base.py` 按能力声明分组调用 `asyncio.gather`（`is_concurrency_safe` 读工具自身声明推导，默认串行保守）
 4. per-tool 超时注册表
 5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}_coordinator.py` offload 语义）
 6. 文本正则兜底收窄到 openai 兼容层 tools-400 降级路径

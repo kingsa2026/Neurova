@@ -25,15 +25,26 @@ from neurova.tool_executor import ToolExecutor
 
 
 def _declare_concurrency(monkeypatch, safe_names):
-    """把"哪些工具可并行"这一声明面收窄到本用例的替身工具名。
+    """把"哪些工具可并行"这一**能力声明面**收窄到本用例的替身工具名。
 
-    并行/串行判据本身（`is_concurrency_safe`）不在本文件被测范围——本文件测的是
-    `handle_tool_calls` 按声明分流后是否真的 gather / 真的串行。
+    并行/串行判据本身（`is_concurrency_safe` / `planToolBatches`）不在本文件被测
+    范围——本文件测的是 `handle_tool_calls` 按声明分组后是否真的 gather / 真的串行。
+
+    替身工具不是内置工具，故这里替换**解析入口**（`resolveToolCapability`）而不是
+    任何名单：声明面已无名单可替换（事实源是各工具自己的 schema 声明位）。
     """
     import neurova.agent.tool_coordinator as coordinator
+    from neurova.core.tool_capability import ToolCapability, WriteScope
+
+    eligible = ToolCapability(
+        readOnly=True, concurrentSafe=True, writeScopes=frozenset({WriteScope.NONE})
+    )
+    names = {str(n).lower() for n in safe_names}
 
     monkeypatch.setattr(
-        coordinator, "_CONCURRENCY_SAFE_TOOLS", {str(n).lower() for n in safe_names}
+        coordinator,
+        "resolveToolCapability",
+        lambda name: eligible if str(name or "").strip().lower() in names else None,
     )
 
 
@@ -142,8 +153,14 @@ class TestParallelGather:
         assert [m["tool_call_id"] for m in msgs] == ["c1", "c2"]
 
     @pytest.mark.asyncio
-    async def test_mixed_batch_degrades_to_serial(self, monkeypatch):
-        """任一调用未声明安全 → 整轮串行（保守语义）"""
+    async def test_undeclaredItemIsSerialAndDoesNotDragSiblings(self, monkeypatch):
+        """未声明项自己串行，**不拖累**相邻已声明项——这是本次改造的判据变化。
+
+        改前是 all-or-nothing：`[读, 写]` 里写未声明 ⇒ 读也拿不到并行。
+        改后读仍按声明执行；本用例两项都只有 1 次执行，故时序与串行等价，
+        这里钉的是**语义**（不再整轮降级），分组本身由
+        `tests/unit/tools/test_tool_batch_parallelism.py` 逐形态测。
+        """
         _declare_concurrency(monkeypatch, {"probe_read"})
         registry = _make_registry(
             ["probe_read", "probe_write"], delays={"probe_read": 0.25, "probe_write": 0.25}
@@ -151,12 +168,29 @@ class TestParallelGather:
         loop = _make_loop(registry)
         calls = [_call("c1", "probe_read"), _call("c2", "probe_write")]
 
+        msgs = await loop.handle_tool_calls(calls, [])
+        assert [m["tool_call_id"] for m in msgs] == ["c1", "c2"]
+
+    @pytest.mark.asyncio
+    async def test_mixedBatchRunsEligiblePairConcurrently(self, monkeypatch):
+        """[读,读,写]：两个已声明项成组并行，未声明项串行——旧判据整轮串行。"""
+        _declare_concurrency(monkeypatch, {"probe_read", "probe_search"})
+        registry = _make_registry(
+            ["probe_read", "probe_search", "probe_write"],
+            delays={"probe_read": 0.25, "probe_search": 0.25, "probe_write": 0.25},
+        )
+        loop = _make_loop(registry)
+        calls = [
+            _call("c1", "probe_read"), _call("c2", "probe_search"), _call("c3", "probe_write"),
+        ]
+
         start = time.monotonic()
         msgs = await loop.handle_tool_calls(calls, [])
         elapsed = time.monotonic() - start
 
-        assert elapsed >= 2 * 0.25, f"串行降级未生效：耗时 {elapsed:.2f}s（应 ~0.5s）"
-        assert [m["tool_call_id"] for m in msgs] == ["c1", "c2"]
+        # 旧判据：3 项全串行 ≈0.75s；新判据：2 并行 + 1 串行 ≈0.5s
+        assert elapsed < 3 * 0.25, f"混合批未拿到并行：耗时 {elapsed:.2f}s（应 ~0.5s）"
+        assert [m["tool_call_id"] for m in msgs] == ["c1", "c2", "c3"]
 
     @pytest.mark.asyncio
     async def test_single_tool_unaffected(self):
@@ -190,6 +224,26 @@ class TestResultAssembly:
 
         types = [e["type"] for e in loop.agent._tool_messages_list]
         assert types == ["tool_call", "tool_result", "tool_call", "tool_result"]
+
+    @pytest.mark.asyncio
+    async def test_groupedBatchKeepsCallResultPairsAdjacent(self, monkeypatch):
+        """分组后回装仍按原序、且 call/result 相邻——前端配对契约无回归。
+
+        混合批（2 个已声明 + 1 个未声明）走分组路径：已声明两项成组并发，
+        未声明项串行，但回装次序必须与 `tool_calls` 完全一致。
+        """
+        _declare_concurrency(monkeypatch, {"probe_read", "probe_search"})
+        registry = _make_registry(["probe_read", "probe_search", "probe_write"])
+        loop = _make_loop(registry)
+        calls = [
+            _call("c1", "probe_read"), _call("c2", "probe_write"), _call("c3", "probe_search"),
+        ]
+
+        msgs = await loop.handle_tool_calls(calls, [])
+
+        assert [m["tool_call_id"] for m in msgs] == ["c1", "c2", "c3"]
+        types = [e["type"] for e in loop.agent._tool_messages_list]
+        assert types == ["tool_call", "tool_result"] * 3
 
     @pytest.mark.asyncio
     async def test_parse_error_isolated_in_parallel_batch(self):

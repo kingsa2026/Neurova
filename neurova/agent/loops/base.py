@@ -146,6 +146,22 @@ def _exitContinuationBudget(runner: Any) -> int:
     return 0
 
 
+def resolveParallelBudget() -> int:
+    """单批并行上限（单源 `agent_limits_settings` 的 `max_parallel_tools`）。
+
+    不在此处再写一份默认值或夹紧边界：合法域在配置单源里夹好，本函数只读取。
+    读不到设置时回落到**安全的一侧**——上限取下界，即"最多 1 个并发"退回串行，
+    而不是放开。上限的意义是护栏（缺陷 E：`asyncio.gather` 此前无上限，一轮
+    20 个 MCP 调用就是 20 并发），故取不到时宁可保守。
+    """
+    try:
+        from neurova.security.agent_limits_settings import get_effective_limits
+
+        return int(get_effective_limits().get("max_parallel_tools", 1) or 1)
+    except Exception:  # noqa: BLE001 - 读不到设置不改变既有保守语义（按串行）
+        return 1
+
+
 def goalVerificationEnabled() -> bool:
     """目标验收链总开关（单源 `agent_limits_settings`）。
 
@@ -328,22 +344,31 @@ class BaseAgentLoop(ABC):
         """
         new_messages = []
 
-        # P1-2 切片 3：声明制并行——同轮全部调用均声明并行安全才 gather，
-        # 任一未声明（含未知工具）→ 整轮保守串行（混合批次的排序/共享状态
-        # 复杂度不进热路径）。结果按原 tool_call 顺序回装（id 一一对应）。
-        from neurova.agent.tool_coordinator import is_concurrency_safe
+        # 声明制分组并行：按**每个工具自己的能力声明**分组，连续的资格项合成
+        # 一批 gather（受单源上限截断），其余项各自成池串行。改前是 all-or-nothing
+        # ——任一调用未声明 ⇒ 整轮全串行，于是"读三个文件 + 一次搜索 + 写一个文件"
+        # 这种最常见的混合批一点并行都拿不到。
+        #
+        # 保序不变：分组只改**执行时序**，回装仍按原 tool_call 顺序（见下方回装段），
+        # 前端 call/result 相邻配对契约不受影响。
+        from neurova.agent.tool_coordinator import resolveBatchCapabilities
+        from neurova.core.tool_capability import planToolBatches
 
-        use_parallel = len(tool_calls) > 1 and all(
-            is_concurrency_safe((tc.get("function") or {}).get("name", ""))
-            for tc in tool_calls
-        )
+        capabilities = resolveBatchCapabilities(tool_calls)
 
-        if use_parallel:
-            outcomes = await asyncio.gather(
-                *(self._execute_tool_call_worker(tc) for tc in tool_calls)
-            )
-        else:
-            outcomes = [await self._execute_tool_call_worker(tc) for tc in tool_calls]
+        outcomes: List = []
+        for batch in planToolBatches(
+            tool_calls, capabilities, maxParallel=resolveParallelBudget()
+        ):
+            if batch.parallel:
+                batch_outcomes = await asyncio.gather(
+                    *(self._execute_tool_call_worker(tc) for _, tc in batch.items)
+                )
+            else:
+                batch_outcomes = [
+                    await self._execute_tool_call_worker(tc) for _, tc in batch.items
+                ]
+            outcomes.extend(batch_outcomes)
 
         # 回装（原序）：tool 消息 + call/result 展示记录（保持相邻配对契约）
         for msg, records in outcomes:
