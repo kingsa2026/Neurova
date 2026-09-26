@@ -327,3 +327,128 @@ def _families(text):
     from prometheus_client.parser import text_string_to_metric_families
 
     return list(text_string_to_metric_families(text))
+
+
+class TestReadoutOnARealScrape:
+    """离线复算的真实使用形态：喂**抓回来的** `/metrics` 体，不是喂"理想文本"。
+
+    本类来自一次真实取数（Issue #271 M3 前置）：要拿生产观测面的读数，
+    实际拿到的却是反代/官网吞掉后的 **HTML**。取数入口当时以解释器栈收场——
+    读者分不清"判定结果是 sparse"与"你喂的不是 /metrics 文本"，而这两种情形
+    在观测面上必须**分得开**（同"采不到要出声"的纪律）。
+
+    三件事各钉一条：
+    1. 喂错内容 → 点名原因，不是 traceback；
+    2. `no_data` → 不得被读成 §10.1 的否证（它不是否证条件）；
+    3. 两个口径各自正名：`grouped_share` 与多工具轮占比是**两个不同的问题**。
+    """
+
+    def test_htmlScrapeIsRejectedByNameNotByTraceback(self, tmp_path):
+        """抓取体不是 Prometheus 文本时必须点名，而不是抛 ValueError 栈。
+
+        实测（真抓取）：`prometheus_client` 对 HTML 抛
+        `ValueError: invalid metric name:<!DOCTYPE html>...`，退出码 1。
+        取数命令的读者是**决策者**，他需要读到"这份输入不是 /metrics 文本"。
+        """
+        import subprocess
+
+        html = tmp_path / "scrape.html"
+        html.write_text(
+            "<!DOCTYPE html><html><body>proxy intercepted</body></html>", encoding="utf-8"
+        )
+        result = subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(html)],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert "Traceback" not in result.stderr, (
+            f"喂错内容以解释器栈收场，读者分不清它是不是判定结论：{result.stderr[-500:]}"
+        )
+        combined = result.stdout + result.stderr
+        assert "不是 Prometheus 文本" in combined or "not prometheus" in combined.lower(), (
+            f"没有点名输入形态错误：{combined[-500:]}"
+        )
+        assert result.returncode != 0, "喂错内容不得报成正常完成"
+
+    def test_missingFileIsNamedNotTracebacked(self, tmp_path):
+        """同一根因的另一半：`--metrics-file` 指向不存在的文件也必须点名。
+
+        `_metricText` 有两条"输入不可用"的路径（文件读不到 / 内容不是
+        Prometheus 文本），它们是同一个事实的两半 —— 只修被点名的那一半，
+        另一半照样以解释器栈收场（教义第 5 条：同契约全部命中点一并修）。
+        """
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(tmp_path / "nope.txt")],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert "Traceback" not in result.stderr, (
+            f"文件读不到以解释器栈收场：{result.stderr[-400:]}"
+        )
+        assert "读不到" in result.stderr + result.stdout, (
+            f"没有点名文件不可读：{(result.stderr + result.stdout)[-400:]}"
+        )
+        assert result.returncode != 0
+
+    def test_noDataIsNotReadAsTheSparsenessFalsification(self, tmp_path):
+        """`no_data` 必须显式标注"不构成 §10.1 否证"。
+
+        它是判据**输入缺失**，而 sparse 是判据**结论**。两者混同就等于
+        "拿失明当结论"——本仓已为此付过代价（Issue #271 上一片：占比恒不可达时
+        「低于 5% 就放弃」与「数据缺失」在观测面上同形）。
+        """
+        import subprocess
+
+        empty = tmp_path / "empty_metrics.txt"
+        empty.write_text("", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(empty)],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-500:]
+        assert "no_data" in result.stdout, "零样本没有被读成 no_data"
+        assert "否证" in result.stdout and "不构成" in result.stdout, (
+            "no_data 没有显式标注「不构成否证」——它会被读成 sparse（拿失明当结论）："
+            f"{result.stdout[-600:]}"
+        )
+
+    def test_twoSharesAreNamedApart(self, tmp_path):
+        """两个口径必须各自正名：它们会给出**相反**的 verdict。
+
+        实测同一份数据：某路径 21 个单调用轮 + 1 个成组轮 ⇒
+        「成组批 / 多调用轮」= 1.0（worthwhile），
+        「多工具轮 / 全部轮」= 1/22 ≈ 0.045（sparse）。
+        一个字段两种读法、结论相反，必须分别命名，不许折叠成一个 `share`。
+        """
+        import json as _json
+        import subprocess
+
+        text = tmp_path / "mixed.txt"
+        text.write_text(
+            "# HELP neurova_tool_batch_shapes_total b\n"
+            "# TYPE neurova_tool_batch_shapes_total counter\n"
+            + "".join(
+                f'neurova_tool_batch_shapes_total{{path="P",shape="single_call"}} 1\n'
+                for _ in range(21)
+            )
+            + 'neurova_tool_batch_shapes_total{path="P",shape="multi_parallel"} 1\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(text), "--json"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-800:]
+        payload = _json.loads(result.stdout.strip().splitlines()[-1])
+        assert payload["per_path"]["P"]["grouped_share"] == 1.0
+        assert "multi_tool_round_share" in payload, "多工具轮占比口径缺失（§10.1 原文口径）"
+        assert payload["multi_tool_round_share"] == round(1 / 22, 4), (
+            f"多工具轮占比算错了（拿到 {payload['multi_tool_round_share']}）"
+        )
+        # verdict 落 §10.1 的**原文口径**（多工具批次占全部轮）：1/22 < 0.05 ⇒ sparse。
+        # 另一个口径在同一份数据上给 1.0（worthwhile）—— 两者结论相反，必须各挂名。
+        assert payload["grouped_parallel_share"] == 1.0
+        assert payload["verdict"] == "sparse", (
+            "verdict 没落在 §10.1 原文口径（多工具批次 / 全部轮）上："
+            f"拿到 {payload['verdict']}，会把'多工具轮本身就极少'读成'值得做 M3'"
+        )
