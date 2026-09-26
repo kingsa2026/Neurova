@@ -557,10 +557,12 @@ main:
           timeout: 10m
 
 # ============================================================================
-# 自定义 NPC —— DSCoder
+# 自定义 NPC —— 运行参数（角色定义见 .cnb/settings.yml）
 # ============================================================================
 # 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，只管运行参数，不管人设。
-# 触发：Issue/PR 评论中 @kingsa2026/neurova(DSCoder)
+# 触发：Issue/PR 评论中 @kingsa2026/neurova(<在册角色名>)
+#   （角色名单的事实源是 .cnb/settings.yml 的 npc.roles，本文件不抄第二份；
+#    不在册的名字由「角色准入」那一步响亮拦下，不消耗 token。）
 # 合并机制：本段覆盖同名事件，未声明的事件保留系统默认行为（故两个事件都声明）。
 #
 # 为何不写 model：
@@ -582,16 +584,18 @@ main:
 #   thinkingLevel 的取值域是枚举（off/minimal/low/medium/high/xhigh/max），
 #   写成 $NPC_THINKING 会以「值不在枚举内」配置期直接红。所以档位必须写字面量。
 #
-# 装配方式（对齐官方《NPC - 按角色名配置》）：
-#   档位角色挂【角色名顶层 key】，同名事件覆盖 $ 下的定义，互不干扰；$ 为兜底。
+# 装配方式：**一份 Job 体 + 每个事件引用它**（`&npc-dscoder-job` 锚点）。
+#   角色名**不挂**顶层 key —— 顶层 key 在平台 Schema 里只认分支名，
+#   角色名 key 在推送分支那一刻就是非法配置；全部角色靠 `$` 兜底覆盖。
 #
-# 档位收敛（2026-09-18 按用户口径）：
-#   DSCoder 只保留 max 模式，取消 low / high 两档（顶层 key 与 settings.yml
-#   角色定义同步删除，守卫同步收敛）。
-#   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
+# 档位收敛（2026-09-18 → 2026-09-26 按用户口径，Issue #272）：
+#   本仓历史上按思考强度拆过档位（-low / -high / max）。现行口径是**只保留最高档**：
+#   全部在册角色同模型、同人设、同运行参数，差异只有名字与 slogan。
+#   于是「角色名 → 档位」这张表被删净 —— 它是一份与 `$` 现值并列的第二份口径，
+#   改一处漏一处不会有任何红（教义第 6 条）。
 # ============================================================================
-# ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
-# 运行参数只在 `$` 下写一份（落 thinkingLevel: xhigh），
+# ── 运行参数（全部角色共用一份）：@kingsa2026/neurova(<在册角色名>) ────────
+# 运行参数只在 `$` 下写一份（thinkingLevel: max，即最高档），
 # 避免「$ 中性档 + 被 @ 时落到平台默认低档」的档位漂移；
 # 档位角色名与参数的一致性由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
 #
@@ -657,6 +661,28 @@ main:
     echo "无可用脚本解释器（python3 / python / node 均不存在）" >&2
     exit 127
   fi
+
+# ── NPC 工具单次执行的超时（唯一事实源）──────────────────────────────────────
+# 同一个数字被三处 npc:go 消费（issue 评论 / PR 评论 / 接力载体），
+# 故只在这里写一份，三处经 `<<:` 引用 —— 三份手抄就是三条可独立漂移的口径。
+#
+# 为什么是 30m 而不是「刚好够用」：
+#   平台对超时至少有三种不同语义，混在一起时「哪个阈值先破」只能靠猜：
+#     · 流水线**整体**运行时长：由 Runner 下发，仓库侧改不掉（声明 timeout 也抬不动）；
+#     · Job / Stage 单次最长：`timeout`，平台上限 12h；
+#     · 无输出超时：默认 10 分钟，声明 `timeout` 后与它等长；
+#     · `npc:go` 的 `timeout` 作用于 Agent 的**每一次工具执行**（不是整个会话）。
+#   本仓实测过「不声明 timeout」的后果：`sleep 720` 的 Stage 在 10 分 0 秒被掐
+#   （Finished, code: -1）—— 而「等一长串命令跑完」正是长时间无输出的典型场景
+#   （单次 `pytest` 全量可达 20 分钟以上）。30m 把这一步从"随时可能被无输出阈值打断"
+#   变成"留给单条命令的确定预算"，同时远低于平台 12h 上限。
+#
+# 它**抬不了**流水线整体运行时长，也**不是**轮数配额 —— 三件事各有事实源：
+# 时长上限由平台下发；轮数配额是 `$` 段的 maxTurns；这里只管单次工具执行。
+# 三处引用该锚点由 tests/unit/ci/test_npc_runtime_budget.py 常驻校验。
+.工具超时: &npc-tool-timeout
+  timeout: 30m
+
 
 $:
   # ── 轮数触顶接力（回答 Issue #131；判据三次收口见 Issue #158 / #170 / #189）───
@@ -781,11 +807,25 @@ $:
           #   且它跑在 Agent 开工**之前**：环境前提有问题要在烧掉整轮预算前响亮。
           script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
-        - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
-          # npc:go 的 `timeout` 作用于 Agent 的**每一次工具执行**（bash 命令），
-          # 不是整个 Agent 会话；会话整体只受流水线 20h 上限约束。
-          # 它挡不住「300s+420s+480s 串起来的 sleep 轮询」——那只能靠 prompt 禁令兜住。
-          timeout: 20m
+        - name: "角色准入：被 @ 的角色名必须在册"
+          # 平台按角色名解析人设，未命中的名字会被**静默回落** —— 用户以为切了角色，
+          # 实际拿到的是平台默认 prompt，本仓的修复教义随之失效，而平台不报错。
+          # 故在 Agent 开工**之前**把准入钉成可读判据：不在册就响亮失败，
+          # 且**不消耗任何 token**（npc:go 那一步不会被执行）。
+          # 名单事实源是 `.cnb/settings.yml` 的 `npc.roles`，本文件不抄第二份 ——
+          # 脚本读的就是同一份配置，角色增删自动跟随。
+          script: "$NPX_CALL scripts/ci/npc_role_admission.py"
+          timeout: 2m
+        - name: "运行期预算量尺（工具单次执行超时：见 &npc-tool-timeout 锚点）"
+          # Agent 开工后会按需自己重跑这道量尺（见角色人设）；开工前先跑一次的意义
+          # 在于把「这条流水线的时长预算」写进日志，让「预算口径」有一个可核对的起点读数。
+          # 它不是判据：脚本退出码恒为 0，机器可读真值是输出里的 `verdict=` 那一行。
+          script: "$NPX_CALL scripts/ci/npc_runtime_budget.py"
+          timeout: 2m
+        - name: "在册角色执行任务（thinkingLevel: max，最高思考档）"
+          # 工具单次执行的超时只有一个事实源：文件上方的 `&npc-tool-timeout` 锚点。
+          # 三处 npc:go 引用同一个锚点，故「超时是多少」在本仓只有一处可读定义。
+          <<: *npc-tool-timeout
           type: npc:go
           options:
             # `npc:go.options` **没有 prompt 键**：平台 Schema 只认
@@ -793,15 +833,19 @@ $:
             # maxTokens / thinkingLevel / supportImage，写别的键被静默忽略。
             # 行为约束一律写在 .cnb/settings.yml 的角色 prompt 里（唯一必达通道）。
             # 不写 model = 走平台默认模型（规避 400）；要锁定底座模型就填真实 ID。
-            maxTurns: 500
+            # 轮数配额（不是耗时上界）：2000 轮。用户口径（Issue #272）：对话轮次上限 2000。
+            # 配额只在这里写一处；人设里的「现行 2000 轮」是它的**读数引用**，
+            # 不一致由 tests/unit/test_ci_npc_config_guard.py 常驻拦截。
+            maxTurns: 2000
+            # 上下文窗口 1m（用户口径）。
             contextWindow: 1m
             maxTokens: 48k
-            # 平台档位枚举为 off/minimal/low/medium/high/xhigh/max（官方 npc:go 文档），
-            # 现行值取 xhigh —— 这是本仓**主动选定**的档位，不是"平台没有 max"。
-            # （此前注释写成"平台最高档是 xhigh、没有 max"，是对文档的误读：
-            #  枚举里确有 max。要不要提到 max 是耗时/质量权衡，属功能决策，
-            #  故只纠正说法、不动取值。）
-            thinkingLevel: xhigh
+            # 思考档拉满：平台档位枚举为 off/minimal/low/medium/high/xhigh/max，
+            # 现行值取最高档 max（Issue #272 的用户口径）。
+            thinkingLevel: max
+            # 图片识别（用户口径）：boolean 必须写字面量 true，写成 $变量会因
+            # 替换成字符串而过不了 Schema 的类型校验。
+            supportImage: true
       # 轮数触顶后自动开启下一轮。判据取自**平台在收尾时刻注入的事实变量**
       # （`CNB_PIPELINE_STATUS` / `CNB_BUILD_FAILED_MSG`，实测读数见 `$` 段注释），
       # 不再读任何预写标记或自造状态文件 —— 预写值与"本轮是否撞顶"无关
@@ -814,7 +858,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -834,7 +878,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -849,7 +893,7 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -937,27 +981,31 @@ $:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       stages:
-        - name: "DSCoder 接力执行任务（thinkingLevel: xhigh，max 档）"
-          timeout: 20m
+        - name: "在册角色接力执行任务（thinkingLevel: max，最高思考档）"
+          # 同一个超时事实源（见文件上方的 `&npc-tool-timeout` 锚点）：
+          # 接力轮与首轮受同一份预算约束，不另写一个数字。
+          <<: *npc-tool-timeout
           type: npc:go
           options:
             # 人设走 .cnb/settings.yml 的角色，唯一必达通道不变。
             role: DSCoder
             # API 触发下必填：说明本轮为何被拉起、成果落点在哪。
-            systemPrompt: 你是 DSCoder-max —— Neurova 仓库的专属代码搭档。本轮是上一轮撞满轮数配额后的接力轮：上一轮 Agent 被平台中止，成果只留在 Issue/PR 评论里。请先读 Issue/PR 评论区里上一轮的分段落交接（干了什么、下一步是什么、未提交的改动在哪），再从断点继续。
+            systemPrompt: 你是在册的 Neurova 代码搭档。本轮是上一轮撞满轮数配额后的接力轮：上一轮 Agent 被平台中止，成果只留在 Issue/PR 评论里。请先读 Issue/PR 评论区里上一轮的分段落交接（干了什么、下一步是什么、未提交的改动在哪），再从断点继续。
             # 对话载体由上一轮经 env 传下来（api_trigger 流水线里拿不到 CNB_ISSUE_IID）。
             userPrompt: 请先在 Issue/PR 评论区读取上一轮的交接评论，然后继续推进未完成的工作，完成后按惯例提交 PR 并在评论里汇报结论与未闭环项。
-            maxTurns: 500
+            # 接力轮与首轮共用同一份运行参数（同一配额、同一窗口、同一档位、同一图片开关）。
+            maxTurns: 2000
             contextWindow: 1m
             maxTokens: 48k
-            thinkingLevel: xhigh
+            thinkingLevel: max
+            supportImage: true
       # 接力轮撞顶后同样要接力 —— 否则链条到这一轮就断（实测 17 次 error）。
       endStages:
         - name: "轮数触顶接力：接力轮再撞顶时继续接力"
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*) true;; *) false;; esac'
+            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -974,8 +1022,8 @@ $:
 #   * Schema 层：顶层未知 key 只有 `^\..` 形态（锚点定义）被放行，其余一律要求是分支对象；
 #   * 语义层：`issue.*` 是仓库级事件，只能落在 `$` 兜底分支下。
 # 本仓库在 `$` 下用 `&npc-dscoder-issue / &npc-dscoder-pr` 定义了 max 档的全部运行参数，
-# 且不再写 model、只写 thinkingLevel: xhigh —— 这两点正是 DSCoder 与 DSCoder-max 的**全部差异**，
-# 故别名无需第二份定义：被 @ 时落到哪一份，运行参数都相同。
+# 且不再写 model、只写 thinkingLevel: max —— 全部在册角色的运行参数因此完全相同，
+# 故「同一档位的别名」无需第二份定义：被 @ 时落到哪一份，参数都一样。
 #
 # 「不带后缀的 DSCoder 会不会静默回落平台默认 prompt」这件事仍要有人守：
 #   平台按角色名动态匹配顶层 key，未命中角色名时回落 `$`；而角色人设来自

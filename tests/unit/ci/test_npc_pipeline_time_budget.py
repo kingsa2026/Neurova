@@ -65,12 +65,21 @@ SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 SCHEMA = PROJECT_ROOT / ".cnb" / "npc_schema_keys.txt"
 
-# 本仓的档位角色枚举（2026-09-18 收敛为单档）。
-# 这些名字同时出现在：
-#   .cnb/settings.yml 的角色定义（人设 + 时间条款的唯一必达通道）
-#   .cnb/npc_schema_keys.txt（平台 Schema 允许的 options 键，防止写错键被静默忽略）
-#   本文件（枚举事实源，防重命名漂移）
-LEVEL_ROLES = ("DSCoder", "DSCoder-max")
+# 档位角色名单**不再在本文件枚举**（Issue #272）：全部在册角色共用同一份人设与
+# 同一份运行参数，名单的唯一事实源是 `.cnb/settings.yml` 的 `npc.roles`。
+# 此前在这里抄一份的代价是实测过的：改名（DSCoder → DSCoder-Red 一族）时，
+# 本文件的副本与配置分叉，红落在「角色不存在于 settings.yml」这种误导形态上 ——
+# 真正的原因（两份名单）一个字都不提。
+LEVEL_ROLES = None
+
+
+def levelRoles(settings_doc) -> tuple:
+    """在册档位角色名（名单事实源：`.cnb/settings.yml` 的 `npc.roles`）。"""
+    return tuple(
+        (role or {}).get("name")
+        for role in ((settings_doc.get("npc") or {}).get("roles") or [])
+        if (role or {}).get("name")
+    )
 
 # ── 时间预算条款（必须出现在每个档位角色的 prompt 里）──────────────────────
 # 条款锚点：整段以它开头，守卫据此定位条款正文。
@@ -86,8 +95,22 @@ REQUIRED_CLAUSE_TERMS = {
     "timeout": "单条命令自带超时（防单步挂死吃满流水线）",
 }
 
-# 轮数配额的声明区间：低于 1 无意义，高于上限撑爆墙钟。
-MIN_TURNS, MAX_TURNS = 1, 1000
+# 轮数配额的形态下界（低于 1 无意义）。上限**不写死数字** ——
+# 上一版写死 1000，于是把配额调到 2000 时红落在「超出声明区间」上，而判据真正要防的
+# （取值非法 / 变量不展开）与那个数字无关。上限取 `.cnb.yml` 的现行配额现值，
+# 由 tests/unit/test_ci_npc_config_guard.py 的 maxTurnsCeiling 同源给出（Issue #272）。
+MIN_TURNS = 1
+
+
+def declaredTurnCeiling(cnb_doc) -> int:
+    """现行配额上限：`$` 段 NPC 流水线声明的最大 maxTurns 现值。"""
+    values = [
+        (stage.get("options") or {}).get("maxTurns")
+        for _, stage in _iter_npc_go_stages(cnb_doc)
+        if isinstance((stage.get("options") or {}).get("maxTurns"), int)
+    ]
+    assert values, "没有任何 npc:go 声明了整数 maxTurns —— 本判据空转"
+    return max(values)
 
 # 与 `.cnb/npc_schema_keys.txt` 的绑定关系由本文件校验（防两份事实源漂移）。
 SCHEMA_SENTINEL = "# 平台 Schema：npc:go.options 允许的键"
@@ -179,13 +202,14 @@ class TestBudgetFieldsAreLiterals:
     """预算字段出现时必须是字面量（Schema 校验先于变量替换，$VAR 不展开）。"""
 
     def test_max_turns_within_declared_range(self, cnb_doc):
+        ceiling = declaredTurnCeiling(cnb_doc)
         problems = []
         for path, stage in _iter_npc_go_stages(cnb_doc):
             turns = (stage.get("options") or {}).get("maxTurns")
             if not isinstance(turns, int):
                 problems.append(f"{path}: maxTurns={turns!r} 未声明或非整数")
-            elif not (MIN_TURNS <= turns <= MAX_TURNS):
-                problems.append(f"{path}: maxTurns={turns} 不在 [{MIN_TURNS}, {MAX_TURNS}]")
+            elif not (MIN_TURNS <= turns <= ceiling):
+                problems.append(f"{path}: maxTurns={turns} 不在 [{MIN_TURNS}, {ceiling}]")
         assert not problems, (
             "npc:go 的轮数配额超出声明区间：\n  " + "\n  ".join(problems) +
             "\n轮数是配额、不是耗时上界：实测 251 轮/7262s 吃满平台上限的根因是"
@@ -238,7 +262,7 @@ class TestTimeClauseLivesOnTheReachableChannel:
 
     def test_every_level_role_has_the_clause(self, level_roles):
         problems = []
-        for role in LEVEL_ROLES:
+        for role in level_roles:
             prompt = level_roles.get(role)
             if prompt is None:
                 problems.append(f"{role}: 角色不存在于 .cnb/settings.yml")
@@ -252,7 +276,7 @@ class TestTimeClauseLivesOnTheReachableChannel:
 
     def test_clause_covers_every_known_failure_mode(self, level_roles):
         problems = []
-        for role in LEVEL_ROLES:
+        for role in level_roles:
             prompt = level_roles.get(role) or ""
             if CLAUSE_ANCHOR not in prompt:
                 continue
@@ -269,7 +293,7 @@ class TestTimeClauseLivesOnTheReachableChannel:
         那两段本来就按角色不同。
         """
         bodies = {}
-        for role in LEVEL_ROLES:
+        for role in level_roles:
             prompt = level_roles.get(role) or ""
             if CLAUSE_ANCHOR not in prompt:
                 continue
@@ -283,7 +307,7 @@ class TestTimeClauseLivesOnTheReachableChannel:
     def test_clause_is_immediately_before_the_working_style_section(self, level_roles):
         """条款必须紧贴人设的「工作方式」段之前：位置漂移会让后文被挤掉。"""
         problems = []
-        for role in LEVEL_ROLES:
+        for role in level_roles:
             prompt = level_roles.get(role) or ""
             if CLAUSE_ANCHOR not in prompt:
                 continue
@@ -297,7 +321,8 @@ class TestLevelRoleEnumUnchanged:
     """档位角色名不得被悄悄重命名（改名即失去配置期唯一必达通道）。"""
 
     def test_settings_declares_every_level_role(self, level_roles):
-        missing = [role for role in LEVEL_ROLES if role not in level_roles]
+        """名单非空即可 —— 名单本身由 settings.yml 给出，本文件不抄第二份。"""
+        missing = [] if level_roles else ["<.cnb/settings.yml 未声明任何角色>"]
         assert not missing, (
             f".cnb/settings.yml 缺档位角色: {missing}\n"
             "角色名是 NPC 人设与时间条款的配置期唯一入口——改名而不同步流水线挂载点，"
@@ -305,7 +330,7 @@ class TestLevelRoleEnumUnchanged:
             "而平台不会以任何方式报错。"
         )
 
-    def test_every_level_role_has_mount_point(self, cnb_doc):
+    def test_every_level_role_has_mount_point(self, cnb_doc, settings_doc):
         """每个档位角色都必须落到**合法**挂载点上 —— 非法顶层的唯一形态是角色名。
 
         本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧最初把本条判据写成
@@ -317,7 +342,7 @@ class TestLevelRoleEnumUnchanged:
         洞见（不能静默回落）保留，实现取合法形态。
         """
         problems = []
-        for role in LEVEL_ROLES:
+        for role in levelRoles(settings_doc):
             if role in cnb_doc:
                 problems.append(
                     f"{role}: 角色名挂在 .cnb.yml 顶层 key 上 —— 顶层 key 只认分支名，"
