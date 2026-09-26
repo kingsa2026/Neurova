@@ -17,6 +17,7 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.observe_caches()  # 缓存命中率 gauges 快照（P1-6）
 - Metrics.record_http_request(method, route, status, duration_s)  # HTTP 时长（P1-6）
 - Metrics.record_tool_turn_provider_reject(reason)  # 工具轮配对非法 400（T-10d 归零判据）
+- Metrics.record_tool_batch_shape(path, shape)  # 工具批次形态（M3 收益判据输入）
 - Metrics.record_goal_verification(outcome)  # 目标达成判定结果（G2）
 - Metrics.observe_context_health(state)  # 上下文域健康读数快照（T-10d）
 """
@@ -150,11 +151,32 @@ class _Metrics:
             "Total tool executions",
             ["tool_name", "source", "success"],
         )
+        # 桶位含**毫秒级**细分（原最细桶 50ms）：纯本地工具（读文件、取时间、
+        # 列目录）实测是个位数毫秒，全被最细桶吃掉 ⇒ 分布只剩一个 bar，
+        # "耗时落在哪一段"答不出来，而"量不出来"与"没必要量"在读数上同形
+        # （M3 方案 §10.1 要的正是这一段分布）。加细只是让既有仪表能分辨
+        # 真实量级：不改语义、不漏计，也不新造第二份直方图。
         self.tool_execution_seconds = Histogram(
             "neurova_tool_execution_seconds",
             "Tool execution duration",
             ["tool_name"],
-            buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120),
+            buckets=(
+                0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,
+                1, 2.5, 5, 10, 30, 60, 120,
+            ),
+        )
+
+        # ── 工具批次形态（M3 前置）──
+        # M3 的收益判据（"多工具批次占比低于 ~5% 则方案不成立"）此前**没有落点**：
+        # 一轮里到底有几个工具调用、其中有几批真成了组，全仓无处可读。缺这个计数，
+        # "M3 没收益"与"数据没采到"在观测面上同形，判据恒不可达。
+        # `path` 分档不是装饰：`AnthropicLoop` 逐条转发 `super().handle_tool_calls`，
+        # 那条路径上任何声明都拿不到成组执行——不分档会把一条路径的盲区
+        # 算成"M3 没有收益"，据此砍掉方案就是拿失明当结论。
+        self.tool_batch_shapes_total = Counter(
+            "neurova_tool_batch_shapes_total",
+            "Tool rounds by batch shape (single_call / multi_serial / multi_parallel)",
+            ["path", "shape"],
         )
 
         # ── LLM 调用 ──
@@ -323,6 +345,17 @@ class _Metrics:
             self.tool_execution_seconds.labels(tool_name=tool_name).observe(duration_s)
         except Exception:
             logger.debug("tool metrics record failed", exc_info=True)
+
+    def record_tool_batch_shape(self, path: str, shape: str) -> None:
+        """记一轮工具的批次形态（`path` = 调度实现类名，`shape` = 三态之一）。
+
+        由**唯一调度点**在分组结果出来后写一次（`agent/loops/base.py`），
+        不逐批累加：一轮就是一条读数，否则"占比"会被批数加权而失真。
+        """
+        try:
+            self.tool_batch_shapes_total.labels(path=str(path), shape=str(shape)).inc()
+        except Exception:  # noqa: BLE001 - 观测失败不影响调度
+            logger.debug("tool batch shape metric failed", exc_info=True)
 
     def record_llm_call(
         self, provider: str, model: str, success: bool, duration_s: float
@@ -734,6 +767,11 @@ def record_index_snapshot(db_path: str, index_count: int, duration_ms: float) ->
 def record_tool_turn_provider_reject(reason: str) -> None:
     """模块级便捷入口（工具轮配对非法 400 埋点）。"""
     get_metrics().record_tool_turn_provider_reject(reason)
+
+
+def record_tool_batch_shape(path: str, shape: str) -> None:
+    """模块级便捷入口（工具批次形态，M3 前置读数）。"""
+    get_metrics().record_tool_batch_shape(path, shape)
 
 
 def record_hot_query_plan(
