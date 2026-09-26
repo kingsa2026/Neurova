@@ -26,6 +26,9 @@ from types import SimpleNamespace
 from neurova.session_manager import SessionManager
 from neurova.tool_executor import ToolExecutor
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 OWNER = "neurova_owner_lv"
 SESSION = "sess_lv_t10a"
 CALL_ID = "call_lv_owner_1"

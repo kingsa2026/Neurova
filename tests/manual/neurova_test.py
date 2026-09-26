@@ -11,6 +11,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from tests.manual._liveVerifyIsolation import dataPathUnder, isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
@@ -106,8 +109,8 @@ async def test_agent_initialization():
         config = AgentConfig(
             name="TestAgent",
             agent_id="test_agent",
-            workspace_path="data/test_agent",
-            db_path="data/test_agent/memory.db",
+            workspace_path=dataPathUnder("test_agent"),
+            db_path=dataPathUnder("test_agent", "memory.db"),
         )
 
         agent = Agent(config)
