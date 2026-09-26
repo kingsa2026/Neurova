@@ -190,6 +190,47 @@ def _prefix_repeat_ratio(prev_messages: Optional[List[Dict]], curr_messages: Opt
     return round(min(1.0, lo / max(1, len(curr_text))), 4)
 
 
+def providerCacheTokens(providerUsage: Optional[Dict[str, Any]]) -> Optional[tuple]:
+    """从**任一**供应商 usage 形状里取 `(命中 token, prompt token)`；取不到返回 None。
+
+    归一口径只有这一份。两个形状都认，因为生产链路上它们是**同一条事实的两件外衣**：
+
+    - **归一形**：`core.usage_accounting` 的 payload（`cache_read_tokens` /
+      `prompt_tokens`）—— `multi_model_client._extract_cache_tokens` 已把
+      OpenAI 与 Anthropic 两形合并到这一处，`last_call()` 给的就是它；
+    - **原始形**：供应商原样回传的 `prompt_tokens_details.cached_tokens`。
+
+    只认后者的后果是"真值在手却读不出来"：生产调用点拿到的永远是前者，
+    于是命中率静默退回前缀估算 —— 那正是判据 7 明禁的"估算口径自证"。
+    取不到返回 None（调用方据此如实标 `none`，不伪造）。
+    """
+    if not isinstance(providerUsage, dict):
+        return None
+    promptTokens = providerUsage.get("prompt_tokens")
+    cached = providerUsage.get("cache_read_tokens")
+    if cached is None:
+        details = providerUsage.get("prompt_tokens_details")
+        if isinstance(details, dict):
+            cached = details.get("cached_tokens")
+    if cached is None:
+        return None
+    try:
+        return int(cached), int(promptTokens or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cacheHitFromProvider(providerUsage: Optional[Dict[str, Any]]) -> Optional[float]:
+    """命中率 = 命中 token / prompt token（口径单点；prompt 为 0 时如实取 None）。"""
+    tokens = providerCacheTokens(providerUsage)
+    if tokens is None:
+        return None
+    cached, promptTokens = tokens
+    if promptTokens <= 0:
+        return None
+    return round(min(1.0, cached / promptTokens), 4)
+
+
 def measure_composition(
     agent_id: str,
     messages: Optional[List[Dict]],
@@ -227,14 +268,11 @@ def measure_composition(
     # 命中率：优先供应商明细，否则重复前缀比例
     cache_hit_rate: Optional[float] = None
     cache_source = "none"
-    details = None
-    if isinstance(provider_usage, dict):
-        details = provider_usage.get("prompt_tokens_details") or {}
-        if isinstance(details, dict) and details.get("cached_tokens") is not None:
-            prompt_tokens = float(provider_usage.get("prompt_tokens") or 0)
-            if prompt_tokens > 0:
-                cache_hit_rate = round(min(1.0, float(details["cached_tokens"]) / prompt_tokens), 4)
-                cache_source = "provider"
+    # 供应商真值优先（口径单点 `_cacheHitFromProvider`）——含归一形与原始形两件外衣
+    providerRate = _cacheHitFromProvider(provider_usage)
+    if providerRate is not None:
+        cache_hit_rate = providerRate
+        cache_source = "provider"
 
     if cache_hit_rate is None:
         ratio = _prefix_repeat_ratio(previous_messages, messages)
@@ -259,6 +297,43 @@ def measure_composition(
         if session_id:
             _last_session_composition.setdefault(agent_id, {})[session_id] = composition
     return composition
+
+
+def applyProviderCacheUsage(
+    agent_id: str,
+    session_id: Optional[str],
+    providerUsage: Optional[Dict[str, Any]],
+) -> bool:
+    """把**本轮**供应商真值回填进刚落的组成快照（命中率口径的唯一回填口）。
+
+    为什么需要这一步：组成快照在 **LLM 调用之前**实测（"紧邻真实 LLM 请求"，
+    口径与发送内容一致 —— 那是这个面板存在的意义），而本轮的 `cached_tokens`
+    只能**调用之后**才拿到。故闭合形态是"先测组成 → 调 LLM → 用本轮真值回填
+    同一份快照"，而不是把上一轮的真值贴到本轮组成上（形状对、内容错）。
+
+    只改两个字段（`cache_hit_rate` / `cache_source`）—— 组成是调用前的实测事实，
+    回填重算它就等于把"发了什么"与"供应商怎么计费"混成一件事。
+
+    三种"不做事"都**不报错也不伪造**：
+    - 无真值（`providerUsage` 为空或取不到命中 token）：保持原口径，不动读数；
+    - 无快照（本轮没走到测量点）：直接返回 False，不凭空造一份组成出来；
+    - prompt token 为 0：真值不可判读，保持原口径。
+
+    返回是否真的回填了（调用方可据此决定要不要记一笔，不靠反查快照猜）。
+    """
+    rate = _cacheHitFromProvider(providerUsage)
+    if rate is None:
+        return False
+    with _lock:
+        if session_id:
+            comp = _last_session_composition.get(agent_id, {}).get(session_id)
+        else:
+            comp = _last_composition.get(agent_id)
+        if comp is None:
+            return False
+        comp["cache_hit_rate"] = rate
+        comp["cache_source"] = "provider"
+    return True
 
 
 def get_last_composition(agent_id: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
