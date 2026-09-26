@@ -379,66 +379,6 @@ main:
   # 复算命令见 docs/10-configuration/KNOWLEDGE_BASE.md 第 2 节（判据见同目录守卫
   # tests/unit/ci/test_knowledge_base_index_wiring.py 的 TestIndexReadingsAreNotHandCopied）。
 
-  # ── 非门禁流水线：手动镜像构建 + 真运行 + 真探活 + 推制品库（Issue #243）──
-  # 为什么需要它：本仓有三种交付形态（Dockerfile / compose / Helm）与覆盖它们的
-  # 跨文件门禁（deploy-config 的 R1~R12），但**没有任何一处把镜像真的构建出来、
-  # 真的运行起来** —— 见 docs/10-configuration/DEPLOYMENT_CONFIG.md 对应节。
-  # 为什么**不**放进 `main.push`（即不做合并门禁）：全量依赖下载 + 构建一次
-  # 约 12 分钟、镜像层数 GB 量级，挂在每次提交上就是「每次提交都付一遍」的代价，
-  # 而它裁决的并不是「这次提交合不合格」。故落在手动口。
-  #
-  # 两个入口，一份定义：CLI 触发（`cnb build start-build --event`）只认
-  # `api_trigger*`，页面按钮只认 `web_trigger*`（平台 web-trigger.md 逐字写着
-  # 「仅支持 web_trigger 自定义事件」）—— 两个事件名空间互不通用，
-  # 故用 YAML 锚点让第二个事件名引用第一处的**同一份对象**。
-  # 该绑定由 tests/unit/ci/test_docker_image_pipeline_wiring.py 取 `is`（同一对象）钉住。
-  api_trigger_docker_image: &docker-image-pipeline
-    - name: docker-image
-      # 非门禁 → 不上报提交状态（口径与理由见上方「提交状态通道 = 门禁专用」契约段）。
-      # 它是手动口的真构建/真运行/真探活，探针失败属**预期内的探测行为**，
-      # 不裁决任何合并契约；不带本行时它一失败就把「状态检查：未通过」写到提交上。
-      # 实测（2026-09-26）：PR #255 的合并提交 `d5210625` 聚合为 `failure`，
-      # 红格里就有 `cnb/api_trigger_docker_image/.cnb.yml`，而该 PR 门禁全绿。
-      # 声明后失败仍以诚实形态暴露：构建列表 error、日志原文可读、构建号可定位。
-      allowFailure: true
-      runner:
-        tags: cnb:arch:amd64
-        cpus: 4
-      services:
-        - docker
-      env:
-        DOCKER_BUILDKIT: "1"
-      stages:
-        - name: 从 Dockerfile 派生镜像契约并构建
-          script: |
-            set -eu
-            CONTAINER_PORT=$(sed -n 's/^EXPOSE[[:space:]]*\([0-9][0-9]*\).*/\1/p' Dockerfile | head -n 1)
-            PROBE_URL=$(grep -o 'http://localhost:[0-9][0-9]*/[^ "]*' Dockerfile | head -n 1)
-            [ -n "$CONTAINER_PORT" ] || { echo "Dockerfile 未声明 EXPOSE" >&2; exit 1; }
-            [ -n "$PROBE_URL" ] || { echo "Dockerfile 未声明 HEALTHCHECK URL" >&2; exit 1; }
-            IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG}:${CNB_COMMIT_SHORT}"
-            echo "image=$IMAGE"
-            docker build -t "$IMAGE" .
-          timeout: 40m
-        - name: 真运行 + 真探活 + 推制品库
-          script: |
-            set -eu
-            CONTAINER_PORT=$(sed -n 's/^EXPOSE[[:space:]]*\([0-9][0-9]*\).*/\1/p' Dockerfile | head -n 1)
-            PROBE_URL=$(grep -o 'http://localhost:[0-9][0-9]*/[^ "]*' Dockerfile | head -n 1)
-            IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG}:${CNB_COMMIT_SHORT}"
-            docker run -d --name probe -p "${CONTAINER_PORT}:${CONTAINER_PORT}" "$IMAGE"
-            for i in $(seq 1 60); do
-              if curl -fsS "$PROBE_URL" >/dev/null 2>&1; then break; fi
-              sleep 2
-            done
-            curl -fsS "$PROBE_URL" >/dev/null
-            docker exec probe sh -c 'test -n "$(docker inspect --format "{{.State.Health.Status}}" probe 2>/dev/null || true)"' || true
-            docker push "$IMAGE"
-          timeout: 40m
-
-  # 页面按钮入口（同一条流水线的第二个事件名，见上方锚点注释）。
-  web_trigger_docker_image: *docker-image-pipeline
-
   commit.add:
     - name: knowledge-base
       # 非门禁 → 不上报提交状态（口径与理由见本段上方「提交状态通道 = 门禁专用」）。
@@ -494,6 +434,13 @@ main:
   # `test_both_entrypoints_share_one_definition` 取 `is`（同一对象）钉住。
   api_trigger_docker_image: &docker-image-pipeline
     - name: docker-image
+      # 非门禁 → 不上报提交状态（口径与理由见上方「提交状态通道 = 门禁专用」契约段）。
+      # 它是手动口的真构建/真运行/真探活，探针失败属**预期内的探测行为**，
+      # 不裁决任何合并契约；不带本行时它一失败就把「状态检查：未通过」写到提交上。
+      # 实测（2026-09-26）：PR #255 的合并提交 `d5210625` 聚合为 `failure`，
+      # 红格里就有 `cnb/api_trigger_docker_image/.cnb.yml`，而该 PR 门禁全绿。
+      # 声明后失败仍以诚实形态暴露：构建列表 error、日志原文可读、构建号可定位。
+      allowFailure: true
       runner:
         tags: cnb:arch:amd64
         cpus: 4
