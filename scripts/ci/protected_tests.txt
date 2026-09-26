@@ -1064,3 +1064,12 @@ tests/unit/ci/test_docker_image_pipeline_wiring.py
 #    落点只准经 `core/data_root.py` 推导 / 构造生产持久对象的脚本必须经唯一注入口
 #    或隔离单点 `tests/manual/_liveVerifyIsolation.py`。三条各带反向控制。）
 tests/unit/ci/test_manual_live_verify_contract.py
+
+# Issue #267（G2 目标达成验收链 / GoalGate 接线）：目标"假完成"的求值点、写入面与判定纪律。
+#   （根因：目标是运行时唯一事实源，而它此前**只读不写**——唯一读点
+#    `getattr(agent, "_goal", None) or {}` 静默降级成空 goal；且两条路径都在工具轮内
+#    求值门控，"模型不再调工具"这一主出口一行都不过门 ⇒ 假完成无人拦。判据钉：
+#    出口求值必须发声（流式/非流式同语义）/ 无目标零判定调用 / 续跑硬封上限 /
+#    判据坏掉不阻断回复 / 非流式 ctx 与流式同键 / 门控装配单源 / goal 有跨文件读写面 /
+#    台账阈值轴为 single_source。含一处放大视角命中点：受限子会话通道形态归一）
+tests/unit/agent/test_goal_gate_wiring.py

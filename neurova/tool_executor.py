@@ -2545,6 +2545,12 @@ class ToolExecutor:
 
         raw_steps = params.get("steps")
         goal = str(params.get("goal") or "").strip()
+        # G2 目标写入面 ②：编排目标派生成本轮目标（既有入口，不新增暴露面）。
+        # 归一仍是 turn_context 单点；解析不出目标时不写（不猜目标）。
+        if goal and not raw_steps:
+            from neurova.core.turn_context import set_turn_goal
+
+            set_turn_goal({"statement": goal, "successCriteria": []})
         if not raw_steps and not goal:
             return {
                 "success": False,
