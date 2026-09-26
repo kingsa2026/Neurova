@@ -33,6 +33,18 @@ def _safe_json_dumps(obj: Any) -> str:
         return json.dumps({"non_serializable": repr(obj)[:500]})
 
 
+def resolveCallId(tool_call: Dict) -> str:
+    """工具调用 id 的唯一解析点——assistant 声明侧与 tool 结果侧必须同源于此。
+
+    两侧若各算各的，assistant.tool_calls 的 id 与 tool 消息的 tool_call_id 就
+    对不上，配对判据（context/recovery.repair_tool_turns）会把整轮判为孤儿。
+    provider 首片不给 id 时（兼容网关实测）就地合成：None 两侧一致也只是
+    "同样非法"，协议仍要求每条调用带有效 id。
+    """
+    callId = tool_call.get("id")
+    return str(callId) if callId else f"call_{id(tool_call)}"
+
+
 class BaseAgentLoop(ABC):
     """
     Agent Loop 基类
@@ -68,6 +80,43 @@ class BaseAgentLoop(ABC):
         # A-11：abstractmethod 只在实例化时拦截；动态构造/热加载等绕过 ABC
         # 检查的路径会落到这里——必须显式抛错，不得静默返回 None（空回复）
         raise NotImplementedError("子类必须实现 predict_step()")
+
+    def buildToolRoundMessages(
+        self,
+        tool_calls: List[Dict],
+        tool_messages: List[Dict],
+        assistantText: str = "",
+        reasoningText: Optional[str] = None,
+    ) -> List[Dict]:
+        """工具轮回放的协议合法块：assistant 声明 tool_calls + 逐条 tool 结果。
+
+        OpenAI 协议要求每条 role="tool" 必须紧跟在声明它的 assistant.tool_calls
+        之后。缺这条声明时，严格校验的网关会把整次续写判为
+        `400 inference request is invalid`（商汤 400001 实测），宽容网关则照常
+        返回——同一畸形序列在不同服务商下的两种表象，故协议正确性不能做成开关。
+
+        reasoningText 仅在调用方过完 REASONING 能力门后传入：思考链回传被部分
+        provider 显式禁止，声明 tool_calls 与被禁止的 reasoning_content 必须分档。
+        """
+        declaredCalls = [
+            {
+                "id": resolveCallId(tc),
+                "type": (tc.get("type") or "function"),
+                "function": {
+                    "name": (tc.get("function") or {}).get("name", "") or "",
+                    "arguments": (tc.get("function") or {}).get("arguments") or "{}",
+                },
+            }
+            for tc in tool_calls
+        ]
+        assistantMessage: Dict[str, Any] = {
+            "role": "assistant",
+            "content": str(assistantText or ""),
+            "tool_calls": declaredCalls,
+        }
+        if reasoningText:
+            assistantMessage["reasoning_content"] = str(reasoningText)
+        return [assistantMessage, *tool_messages]
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
@@ -147,7 +196,7 @@ class BaseAgentLoop(ABC):
 
         # 每次迭代使用独立的变量名，防止跨迭代器状态污染
         _tc_function_name = tool_call.get("function", {}).get("name", "unknown_tool")
-        _tc_id = tool_call.get("id", f"call_{id(tool_call)}")
+        _tc_id = resolveCallId(tool_call)
 
         # [TOOLROBUST-A] 参数 JSON 解析单独 try：
         # 原实现在 try 外 json.loads，一遇到某条工具参数是非法 JSON，

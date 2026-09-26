@@ -23,6 +23,9 @@ from prometheus_client import REGISTRY
 
 from neurova.context.orchestrator import ContextOrchestrator
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 
 def _agent():
     agent = MagicMock()
