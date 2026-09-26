@@ -260,7 +260,22 @@ class AnthropicLoop(BaseAgentLoop):
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
         处理工具调用 (重写基类方法，添加 computer 工具支持)
+
+        **无 `computer` 调用时整批交给基类**：基类的批次分组按整批算，逐条转发
+        `super().handle_tool_calls([单条])` 会让这条路径上永远只有一项 ⇒ 任何能力
+        声明都拿不到成组执行（`claude-*` 走的就是本 Loop），而这一点在形态读数上
+        表现为"全是 single_call"，不解读者会以为 M3 在这侧没有收益。
+
+        `computer` 调用仍逐条处理：它是共享外设（并行轴上必须串行），且回装形状
+        与基类不同（`tool_result` 块）。取"批里有它才走逐条"，而不是默认逐条——
+        逐条是特例，整批才是常态。
         """
+        if tool_calls and all(
+            ((tc or {}).get("function") or {}).get("name") != "computer"
+            for tc in tool_calls
+        ):
+            return await super().handle_tool_calls(tool_calls, messages)
+
         new_messages = []
 
         for tool_call in tool_calls:

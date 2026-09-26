@@ -146,6 +146,39 @@ def _exitContinuationBudget(runner: Any) -> int:
     return 0
 
 
+def _recordBatchShape(batches: List, loop: Any) -> None:
+    """落一轮的批次形态读数（M3 收益判据的输入，唯一落点）。
+
+    三态按**执行形态**分，不按工具类别分：
+
+    - `single_call`：本轮只有一个调用——M3 在这上面本来就没有收益可言，
+      混进分母会把"多工具批次占比"稀释成两个不同问题的平均数；
+    - `multi_parallel`：至少有一个**成组**批（`planToolBatches` 只在 ≥2 项时
+      给 `parallel=True`）——这是 M3 唯一能兑现收益的形态；
+    - `multi_serial`：多调用但零成组批——M3 的**目标客户**，`w ≥ 1` 的
+      一票否决形态与"全未声明"都落这里，两者对 M3 的意义相同（都拿不到并行）。
+
+    `path` 取调度实现类名：`AnthropicLoop.handle_tool_calls` 逐条转发
+    `super().handle_tool_calls([单条])`，那条路径上**永远**只会是 `single_call`
+    （每轮都被拆散）——分开计，是因为把它并进总数会把一条路径的盲区
+    读成"M3 没有收益"。读数失败不影响调度（观测面故障不得改变执行语义）。
+    """
+    try:
+        from neurova.core.metrics import record_tool_batch_shape
+
+        count = sum(len(batch.items) for batch in batches)
+        grouped = any(batch.parallel for batch in batches)
+        if count <= 1:
+            shape = "single_call"
+        elif grouped:
+            shape = "multi_parallel"
+        else:
+            shape = "multi_serial"
+        record_tool_batch_shape(type(loop).__name__, shape)
+    except Exception:  # noqa: BLE001 - 观测失败不改变执行语义
+        logger.debug("批次形态读数跳过", exc_info=True)
+
+
 def resolveParallelBudget() -> int:
     """单批并行上限（单源 `agent_limits_settings` 的 `max_parallel_tools`）。
 
@@ -356,10 +389,13 @@ class BaseAgentLoop(ABC):
 
         capabilities = resolveBatchCapabilities(tool_calls)
 
-        outcomes: List = []
-        for batch in planToolBatches(
+        batches = planToolBatches(
             tool_calls, capabilities, maxParallel=resolveParallelBudget()
-        ):
+        )
+        _recordBatchShape(batches, self)
+
+        outcomes: List = []
+        for batch in batches:
             if batch.parallel:
                 batch_outcomes = await asyncio.gather(
                     *(self._execute_tool_call_worker(tc) for _, tc in batch.items)
