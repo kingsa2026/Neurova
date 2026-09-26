@@ -30,6 +30,8 @@ from neurova.attachment_dataset import (
 
 _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "recall_history": {
+        # 并行能力声明：本地会话折叠台账的只读召回（执行体只读存储，无写作用域）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话与工具结果（P1-1③ + P1-#6）。两种模式：①按指针直取——上下文里看到『[工具输出已移出上下文/已溢出至工作区文件: ... call=<id> ...]』的占位时，传 tool_call_id 精确取回完整结果（溢出条目自动读回工作区文件全文）；②按关键词召回——用户提到“之前讨论过”“刚才说的”时用 query 模糊匹配折叠台账。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
         "parameters": {
             "type": "object",
@@ -42,6 +44,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "recall_context_span": {
+        # 并行能力声明：按折叠索引只读取回原文，无写作用域。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【分层摘要下钻】按上下文里那行『[早期对话摘要] …』尾部的 `covers_ref=fold:<层序>@<会话>` 引用，**确定性**取回该档摘要覆盖的全部原文。与 recall_history 的区别：recall_history 按关键词模糊召回（可能召回不到）、且按指针（call=）直取工具结果；本工具按摘要自带的分层索引直取被折叠的对话原文，不受相关性门槛影响。【何时不用】摘要行上没有 covers_ref 时不要调用（旧摘要无引用）；要搜某个词而非某一段区间时用 recall_history；跨会话长期记忆用 memory_search。",
         "parameters": {
             "type": "object",
@@ -53,6 +57,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "memory_search": {
+        # 并行能力声明：长期记忆库只读检索，无写作用域。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。【何时不用】实时/外部信息改用 web_search；查本会话内被折叠的对话用 recall_history；查用户语音说过的话用 voice_memory_search。",
         "parameters": {
             "type": "object",
@@ -65,6 +71,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_read": {
+        # 并行能力声明：本地文件只读（执行体 to_thread 打开只读句柄），无写作用域。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【文件读取】读取指定路径文件的内容。已知确切路径时用本工具；还不知道路径先用 file_list 枚举、按内容找用 file_search。【何时不用】大文件建议带 offset 分段读；网页内容不要用本工具（用 web_fetch）。",
         "parameters": {
             "type": "object",
@@ -77,6 +85,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_parse": {
+        # 并行能力声明：本地文件解析只读；大文件解析落线程池，不持有共享态。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【文档解析】把 PDF/Word/Excel/PPT/RTF/ODF 等二进制文档抽取为纯文本（复用附件抽取通道）。已知是二进制办公文档时用本工具；【何时不用】纯文本/代码/markdown/json 用 file_read（保留行号/编码语义）；网页抓取用 web_fetch；图片/音频/视频不要用本工具（走 vision/asr 通道）。",
         "parameters": {
             "type": "object",
@@ -161,6 +171,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_screenshot": {
+        # 并行能力声明：只读但作用域为共享（整屏/窗口截图，读的是共享桌面的瞬时画面）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "截取屏幕截图。结果回带 screen 元数据（宽高/DPI scale/虚拟屏原点）与引导信息；UI 元素事实（按钮/输入框/菜单）不要靠反复截图观察，用 computer_dom_snapshot 获取。",
         "parameters": {
             "type": "object",
@@ -208,6 +220,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 协议：先 computer_dom_snapshot 拿控件树事实，再按 index 语义操作；
     # 像素坐标 computer_click 仅作快照无法表达时的兜底
     "computer_dom_snapshot": {
+        # 并行能力声明：只读但作用域为共享（UIA 树快照，读的是共享桌面的瞬时结构）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口的控件树（按钮/输入框/菜单等，带 index、角色、名称、矩形、可交互标记）。桌面交互前必须先调用本工具，从快照事实中获取元素 index，再用 computer_click_element/computer_set_value 语义操作，不要盲猜屏幕坐标。窗口内容变化后旧快照失效（generation 递增），需重新快照。",
         "parameters": {
             "type": "object",
@@ -249,6 +263,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     # ── SOM 视觉快照 + 编号点击（R3-1，无 UIA 树桌面的语义中间档）──
     "computer_som_snapshot": {
+        # 并行能力声明：只读但作用域为共享（SOM 标注快照，读的是共享桌面的瞬时画面）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【SOM 视觉快照】对自绘 UI/游戏/远程像素流等无 UIA 树的目标，把截图标注成编号可交互区域图（推操作面板），返回 marks（id/中心坐标/label）。拿到编号后用 computer_click_mark(index=编号) 点击。【何时不用】有 UIA 树的标准窗口一律先 computer_dom_snapshot（结构化更准），本工具是其无法表达时的兜底档。",
         "parameters": {
             "type": "object",
@@ -397,6 +413,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_read": {
+        # 并行能力声明：只读但作用域为共享（分片续读推进同一个浏览器页面的游标（session_id 跨调用共享））⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_fetch 互补：web_fetch 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。长文自动分片：首读返回前 60,000 字符 + session_id/can_continue/next_offset；正文未读完时必须带 session_id 续读直到 can_continue=false，不要凭首片下结论。【何时不用】静态页直接 web_fetch（更轻更快）；搜索发现 URL 先 web_search；已打开页面内的正文提取用 browser_extract_text。",
         "parameters": {
             "type": "object",
@@ -411,6 +429,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_dom_read": {
+        # 并行能力声明：只读但作用域为共享（分片续读推进同一页面的可访问性树游标）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【页面快照分片读取】获取当前页面的 aria 可访问性树正文，长快照自动分片：首读返回前 8,000 字符 + session_id/can_continue/next_offset。需要继续读取时带 session_id 续读直到 can_continue=false。与 browser_dom_snapshot 的区别：dom_snapshot 面向交互定位（拿 role+name），本工具面向完整阅读（分片拿全文）。页面导航/交互后旧 session 失效，需重新调用。【何时不用】快照未截断时不要调用（直接消费 browser_dom_snapshot 结果）；未打开页面前不要调用（先 browser_navigate）。",
         "parameters": {
             "type": "object",
@@ -562,6 +582,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "weather": {
+        # 并行能力声明：远端天气查询为无副作用读（只发 GET，不改远端状态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【实时天气查询】通过 wttr.in 服务获取指定地点的实时天气信息。可查询当前天气、温度、降水、风力等。支持中文城市名（如'许昌'、'北京'）或英文地名。需要实时天气信息时必须调用此工具，不要回复'无法获取'。",
         "parameters": {
             "type": "object",
@@ -589,6 +611,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_search": {
+        # 并行能力声明：联网检索为无副作用读（只发 GET，不改远端状态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。工具选择阶梯（最轻优先）：不知道网址先用本工具搜索 → 拿到具体网址后用 web_fetch 读取 → 仅当页面需要交互/登录/动态渲染才升级 browser_* 工具，不要直接开浏览器做纯检索。【何时不用】已知确切 URL 直接 web_fetch；站点限定内容（B站/V2EX/RSS）用对应垂直工具；内部记忆问题用 memory_search。",
         "parameters": {
             "type": "object",
@@ -686,6 +710,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 常规 Agent 工具（2026-08 扩充，run_code ↔ DeepSeek code_interpreter
     # （run_code 执行体早已存在于 tool_executor
     "file_list": {
+        # 并行能力声明：本地目录枚举只读，无写作用域。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。结果被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页。",
         "parameters": {
             "type": "object",
@@ -708,6 +734,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_search": {
+        # 并行能力声明：本地内容搜索只读（打开的文件全部来自校验后基准目录内的 os.walk 结果）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。匹配数被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页，不要靠改写 pattern 去猜剩余结果。",
         "parameters": {
             "type": "object",
@@ -781,6 +809,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_fetch": {
+        # 并行能力声明：网页抓取为无副作用读（只发 GET，不改远端状态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。若本工具返回空或内容不完整（JS 动态页），再升级 browser_* 工具处理，不要跳过本工具直接用浏览器。【何时不用】未拿到具体 URL 时先用 web_search；JS 渲染/需登录页改用 browser_read；本地文件用 file_read。",
         "parameters": {
             "type": "object",
@@ -835,6 +865,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "calculator": {
+        # 并行能力声明：纯函数式计算，不触碰任何外部状态。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【计算器】精确计算数学表达式。支持 + - * / // % **、括号，以及 sqrt/abs/round/min/max/sin/cos/tan/log/floor/ceil 函数和 pi/e 常量。涉及数值计算时应调用此工具，不要心算，避免算术错误。",
         "parameters": {
             "type": "object",
@@ -867,6 +899,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "get_datetime": {
+        # 并行能力声明：本地时钟/时区换算，不触碰任何外部状态。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【日期时间】获取当前日期时间（含星期、ISO 格式、Unix 时间戳），或将 Unix 时间戳换算为指定时区的日期时间。用于需要当前时间、时区换算、时间戳换算的场合。",
         "parameters": {
             "type": "object",
@@ -893,6 +927,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_read": {
+        # 并行能力声明：只读但作用域为共享（读共享画布快照与 version（并发读会互相拿到对方的中间态））⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【读取画布】读取画布完整快照（节点、连线、各节点配置和当前 version）。用于：了解画布现状、version_conflict 后重新获取最新版本再重试。返回的 version 应作为后续修改操作的 base_version。",
         "parameters": {
             "type": "object",
@@ -994,6 +1030,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_list_nodes": {
+        # 并行能力声明：只读但作用域为共享（读共享节点库快照）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【查询节点库】列出/搜索可用节点类型（含 type、名称、分类、来源）。添加节点前如不确定 node_type，先用本工具查询；搜索无果说明节点库缺少该能力，可考虑建议用户创建自定义节点。",
         "parameters": {
             "type": "object",
@@ -1152,6 +1190,65 @@ def list_sandbox_required_tools() -> List[str]:
         name
         for name, schema in _BUILTIN_SCHEMAS.items()
         if isinstance(schema, dict) and schema.get(_SANDBOX_REQUIRED_KEY) is True
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具并行能力声明位（事实源：每个工具自己的 schema）
+# ═══════════════════════════════════════════════════════════════
+# 语义：schema 可携带与 description/parameters 平级的 `capability` 键，声明该工具
+# 的只读性 / 可并发性 / 写作用域（形状与推导在 `core/tool_capability.py`）。
+# 未声明 = 最保守（不可并发、不算只读），与改造前的现网行为逐条一致。
+# 声明位不进入 to_openai_format()（模型可见面零变化）。
+#
+# **为什么成员落在这里、而不是集中一份大名单**：能力是"这个工具自身"的属性，
+# 定义该工具的 schema 就是它的自然归属。集中一份名单正是被替换掉的那种形态
+# （`AGENTS.md` 修复教义第 6 条：单一事实源指"一个事实一处定义"，不是"所有
+# 名单塞一个文件"）。
+_CAPABILITY_KEY = "capability"
+
+
+def get_builtin_tool_capability(tool_name: str):
+    """读取内置工具的并行能力声明；未声明/形态非法/非内置一律返回 None。
+
+    形态非法按未声明处理（fail-closed）——声明面自身不做攻击面：写错的声明
+    只会让该工具退回串行，绝不会误放开。
+    """
+    from neurova.core.tool_capability import ToolCapability, WriteScope
+
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return None
+    raw = schema.get(_CAPABILITY_KEY)
+    if not isinstance(raw, dict):
+        return None
+    read_only = raw.get("readOnly")
+    concurrent = raw.get("concurrentSafe")
+    scopes = raw.get("writeScopes")
+    if not isinstance(read_only, bool) or not isinstance(concurrent, bool):
+        return None
+    if not isinstance(scopes, (list, tuple)):
+        return None
+    try:
+        parsed = frozenset(WriteScope(str(item)) for item in scopes)
+    except ValueError:
+        # 未登记的取值 ⇒ 整条声明作废（不部分采信：半个声明比没声明更危险）
+        return None
+    if not parsed:
+        # 空集合是非法声明：分不清"没填"与"确认没有"，而两者安全处置相反。
+        # 按未声明处置（fail-closed），不替调用方推断意图。
+        return None
+    return ToolCapability(
+        readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed
+    )
+
+
+def list_declared_capabilities() -> List[str]:
+    """枚举**声明了**并行能力的内置工具名（装配期一致性判据的取数口）。"""
+    return [
+        name
+        for name, schema in _BUILTIN_SCHEMAS.items()
+        if isinstance(schema, dict) and isinstance(schema.get(_CAPABILITY_KEY), dict)
     ]
 
 
