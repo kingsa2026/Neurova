@@ -331,6 +331,32 @@ main:
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
   pull_request: *pipelines
 
+  # ── 「提交状态通道 = 门禁专用」这条契约的单一事实源 ─────────────────────
+  # 事实：平台把**每条流水线**的结果当提交状态检查上报，与门禁共用同一条通道
+  #   （`git get-commit-statuses` 读数里 `cnb/push/...` 与 `cnb/api_trigger_...`
+  #   混在同一张 statuses 数组里，聚合 `state` 由它们共同决定）。
+  #   于是任何非门禁流水线一失败，合并提交就在提交列表里挂红叉，
+  #   用户读到的是一句「合并失败」—— 而门禁本身可能全绿。
+  # 实测（2026-09-26，PR #255 复核）：合并提交 `d5210625` 聚合为 `failure`，
+  #   红格全部来自手动 `api_trigger` 探针与 `config error`；
+  #   该 PR 的 10 条门禁流水线当时**全绿**。
+  # 平台唯一的上报开关是流水线的 `allowFailure`（语法手册：为 true 时流水线的
+  #   失败状态不会上报到 CNB 上）。A/B 对照实测（同一提交 69f0a45e）：
+  #     allowFailure: true  → 构建 status=error，提交状态描述为 `allowFailure [5.3s]`，不计入聚合
+  #     不声明             → 同一份失败脚本把该提交的聚合拉成 `failure`
+  # 判定口径（按**事件类别**，不按枚举「只有某几条」）：
+  #   * 门禁 = `push` / `pull_request`（与 GitHub job 逐条对齐的那份数组）→ 保持阻塞；
+  #   * 非门禁 = `main` 下其余事件（`commit.add` 建库 / `crontab` 周级巡检 /
+  #     任何后加的手动触发口）与 `$` 下的 NPC 接力载体 → 必须 `allowFailure: true`。
+  # 为什么按类别而不是枚举：口径曾写成「允许放宽的只有续跑载体」，
+  #   于是同契约的其余消费方全部漏网 —— 那正是本段记录的这次故障
+  #   （教义第 5 条：一个断链点名后要扫清同契约的全部命中点）。
+  # 放宽**不等于**掩盖：失败仍以诚实形态暴露（构建列表 `error`、日志原文可读、
+  #   构建号可定位），只是不再冒充门禁结论（教义第 2 条）。
+  # 常驻判据：tests/unit/ci/test_npc_turn_handoff_execution.py 的
+  #   `TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure`
+  #   （载体正向 + 非门禁全覆盖 + 门禁反向，三条互为反向控制）。
+
   # ── 非门禁流水线：文档知识库增量索引（Issue #242）────────────────────────
   # 为什么挂在 `commit.add` 而不是塞进 `push`：`push: &pipelines` 被
   # `pull_request: *pipelines` 以锚点别名共用（同一个对象），把建库塞进
@@ -354,6 +380,8 @@ main:
   # tests/unit/ci/test_knowledge_base_index_wiring.py 的 TestIndexReadingsAreNotHandCopied）。
   commit.add:
     - name: knowledge-base
+      # 非门禁 → 不上报提交状态（口径与理由见本段上方「提交状态通道 = 门禁专用」）。
+      allowFailure: true
       stages:
         - name: 更新知识库（docs 文档 + Issue）
           type: knowledge:update
@@ -382,6 +410,8 @@ main:
   # 也不存在"任务最长存活 3 天"的限制；配置错误的形态只会在解析期报错。
   "crontab: 30 3 * * 1":
     - name: weekly-deploy-config-audit
+      # 非门禁 → 不上报提交状态（口径与理由见上方「提交状态通道 = 门禁专用」）。
+      allowFailure: true
       runner:
         tags: cnb:arch:amd64
         cpus: 2
