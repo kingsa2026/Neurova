@@ -7,10 +7,13 @@
  *
  * 语义：
  * - isOwner=true 的标签才能 sendMessage；非持有者发送按钮禁用并提示
- * - 组件卸载自动释放（release 回调）
+ * - 最后一个视图实例卸载时释放；但该会话仍有在途流时推迟到流结算
+ *   （锁跟着流走，不跟着视图走——否则另一标签可并发写同一会话）
  * - 无 locks API（旧浏览器）→ 恒返回 owner=true（能力降级不阻塞）
  */
 import { getCurrentInstance, onUnmounted, ref, watch, type Ref } from 'vue'
+
+import { currentChatStream, onChatStreamSettled } from '@/composables/chatStreamRegistry'
 
 // ---------------------------------------------------------------------------
 // 2026-09-08 dock 收编 / composer 拆分产物：共享单例。
@@ -68,16 +71,36 @@ async function sharedAcquire(key: string): Promise<void> {
   }
 }
 
+/**
+ * 最后一个视图实例离开时的放锁决策。
+ *
+ * 流的生命周期已与会话对齐（离开聊天页不再中止在途流），锁若此时立刻释放，
+ * 另一个标签马上能往**同一个会话**发消息，两条流并发写同一会话。所以：
+ * 该会话还有在途流 → 锁跟着流走，等这轮流结算再放；没有 → 照旧立即释放。
+ */
+function releaseAfterViewsGone(): void {
+  const heldKey = sharedCurrentKey
+  if (heldKey && currentChatStream(heldKey)) {
+    const unsubscribe = onChatStreamSettled((settledId) => {
+      if (settledId !== heldKey) return
+      // 期间会话键已变（新标签/新挂载抢了别的会话）→ 不能替新的放锁
+      if (sharedCurrentKey !== heldKey) return
+      unsubscribe()
+      sharedRelease()
+    })
+    return
+  }
+  sharedIsOwner.value = true
+  sharedRelease()
+}
+
 export function useSessionSendLock(sessionId: Ref<string | null | undefined>) {
   // P1-13：接线卸载释放（引用计数，最后一个实例卸载才真正释放）
   if (getCurrentInstance()) {
     sharedInstanceCount++
     onUnmounted(() => {
       sharedInstanceCount--
-      if (sharedInstanceCount <= 0) {
-        sharedIsOwner.value = true
-        sharedRelease()
-      }
+      if (sharedInstanceCount <= 0) releaseAfterViewsGone()
     })
   }
   // 每个调用方各自 watch 同一 store ref（回调都写共享状态，天然去重：
