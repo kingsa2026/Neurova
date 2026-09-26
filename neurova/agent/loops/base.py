@@ -8,6 +8,7 @@ import asyncio
 import json
 from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -31,6 +32,146 @@ def _safe_json_dumps(obj: Any) -> str:
         return json.dumps(obj)
     except (TypeError, ValueError):
         return json.dumps({"non_serializable": repr(obj)[:500]})
+
+
+#: 主出口求值的三态动词（与 `gates.StopAction` 不重合：那边是门控意见，
+#: 这边是"循环该怎么办"的落地决定；`done` 不新增门控语义、不做第二套干预通路）。
+LOOP_DONE = "done"
+LOOP_CONTINUE = "continue"
+LOOP_STOP = "stop"
+
+
+@dataclass(frozen=True)
+class LoopExitDecision:
+    """主出口（模型不再调用工具）的求值结果。
+
+    三态：正常收口 / 注入提示后续跑 / 有理由地终止。
+    载荷 `continuation_prompt` 直译自 `StopDecision.continuation_prompt`，
+    不新增 StopAction 枚举值——门控的动词集只有一套表达。
+    """
+
+    action: str = LOOP_DONE
+    continuation_prompt: str = ""
+    reason: str = ""
+    gate_name: str = ""
+
+    @classmethod
+    def done(cls) -> "LoopExitDecision":
+        return cls(action=LOOP_DONE)
+
+    @classmethod
+    def stop(cls, reason: str, gate_name: str = "") -> "LoopExitDecision":
+        return cls(action=LOOP_STOP, reason=reason, gate_name=gate_name)
+
+    @classmethod
+    def resume(cls, prompt: str, gate_name: str = "") -> "LoopExitDecision":
+        return cls(action=LOOP_CONTINUE, continuation_prompt=prompt, gate_name=gate_name)
+
+
+async def evaluateLoopExit(loop: "BaseAgentLoop", *, reply: str, roundUsage: Any, toolRound: int) -> LoopExitDecision:
+    """主出口的门控求值（**唯一实现点**，两条路径共用）。
+
+    为什么必须存在：工具轮的求值发生在 `if tool_calls:` 块内，而"模型不再调用
+    工具"这一主出口在块外收口——假完成（停手且目标未达成）在那里一次都不会
+    被看到。加调用方不改变这一点，缺的是求值点。
+
+    ctx 带 `isLoopExit=True`，使 GoalGate 能区分"停在工具轮中途"与"自认为完成"：
+    只有后者才是假完成，也只有后者才值得注入提示续跑。
+
+    判定输入由 `ctx["goal_verdict"]` 承载（异步判定在进入门控前完成），
+    故门控本身保持纯同步、无 I/O。
+    """
+    from neurova.core import turn_context as turnContext
+
+    goal = loop.resolveTurnGoal()
+    if not goal or not goalVerificationEnabled():
+        # **无目标就不求值**（D-4），这是本求值点的成本边界，也是语义边界：
+        # 出口求值要抓的是"假完成"——一个伪命题在没有目标时并不存在。
+        # 若在此照跑门控集合，死循环门会拿出口签名去判重，普通对话会因此
+        # 收到一次没有意义的"换策略"续跑（实测：length 恢复重试被多打一轮）。
+        return LoopExitDecision.done()
+
+    runner = loop.gateRunnerForExit()
+    if runner is None:
+        return LoopExitDecision.done()
+
+    from neurova.agent.gates import StopAction
+    from neurova.agent.goal_verifier import verifyGoalCompletion
+    from neurova.agent.loop_goal import normalizeGoal
+
+    verdict = await verifyGoalCompletion(
+        loop.llm_client.chat, normalizeGoal(goal), loop.buildExitEvidence(reply)
+    )
+    turnContext.set_turn_goal_verdict(verdict)
+    recordGoalVerification(verdict)
+
+    decision = runner.on_round_end({
+        "tool_rounds": toolRound,
+        "round_reply": reply,
+        "round_usage": roundUsage or {},
+        "round_signature": loop.turnRoundSignature(),
+        "goal": goal or {},
+        "isLoopExit": True,
+        "goal_verdict": verdict,
+        "goal_continuations": turnContext.get_turn_goal_continuations(),
+    })
+    if decision.action == StopAction.TERMINATE:
+        if verdict and verdict.get("achieved"):
+            return LoopExitDecision.done()
+        return LoopExitDecision.stop(decision.reason, decision.gate_name)
+    if decision.action == StopAction.INTERRUPT_AND_CONTINUE:
+        # 出口续跑是 goal 门控的能力，**预算归它所有**：任何门控在出口请求续跑
+        # 都受同一个上限约束，否则一个恒发声的门控就能让出口无限递归。
+        budget = _exitContinuationBudget(runner)
+        spent = turnContext.get_turn_goal_continuations()
+        if budget <= 0 or spent >= budget:
+            return LoopExitDecision.stop(
+                f"目标未达成且续跑预算耗尽（{budget}）: {decision.reason}",
+                decision.gate_name,
+            )
+        turnContext.mark_turn_goal_continuation()
+        logger.info("主出口门控 %s 软干预（提示将注入消息序列）: %s", decision.gate_name, decision.reason)
+        return LoopExitDecision.resume(decision.continuation_prompt, decision.gate_name)
+    return LoopExitDecision.done()
+
+
+def _exitContinuationBudget(runner: Any) -> int:
+    """出口续跑预算：取自装配面里 goal 门控的**同一个** `maxContinuations`。
+
+    不新造第二份预算定义——阈值只在 `GoalGate` 上有一处，本函数只是读取它。
+    """
+    for gate in runner.gates:
+        if getattr(gate, "name", "") == "goal":
+            return int(getattr(gate, "maxContinuations", 0) or 0)
+    return 0
+
+
+def goalVerificationEnabled() -> bool:
+    """目标验收链总开关（单源 `agent_limits_settings`）。
+
+    默认开：本片修的正是"假完成无人拦"，默认关等于接了线不通电。成本边界由
+    **目标是否存在**守住（无目标零判定调用），开关只作运营侧的成本闸。
+    """
+    try:
+        from neurova.security.agent_limits_settings import get_effective_limits
+
+        return bool(get_effective_limits().get("goal_verification_enabled", True))
+    except Exception:  # noqa: BLE001 - 读不到设置不改变既有行为（按开）
+        return True
+
+
+def recordGoalVerification(verdict: Dict[str, Any]) -> None:
+    """判定结果入观测面（唯一埋点入口；不常驻 agent）。"""
+    if not verdict.get("parse_ok"):
+        outcome = "parse_failed"
+    else:
+        outcome = "achieved" if verdict.get("achieved") else "unmet"
+    try:
+        from neurova.core.metrics import record_goal_verification
+
+        record_goal_verification(outcome)
+    except Exception:  # noqa: BLE001 - 观测失败不影响对话主链
+        logger.debug("目标判定埋点失败（忽略）", exc_info=True)
 
 
 def resolveCallId(tool_call: Dict) -> str:
@@ -63,6 +204,59 @@ class BaseAgentLoop(ABC):
         """
         self.agent = agent
         self.llm_client = agent.llm_client
+
+    # ── 目标验收链（G2 出口求值）的共享接入点 ──────────────────────────
+
+    def resolveTurnGoal(self) -> Optional[Dict[str, Any]]:
+        """本轮目标（归一后的 dict 形态；未声明返回 None）。
+
+        **全环唯一解析点**：写入方经 `turn_context.set_turn_goal` 单点归一，
+        读取方一律走这里——两条路径各自 `getattr(agent, ...)` 就是第二份读法。
+        """
+        from neurova.core.turn_context import get_turn_goal
+
+        return get_turn_goal()
+
+    def buildExitEvidence(self, reply: str) -> str:
+        """判定证据：本轮最终回复 + 已执行工具的动作摘要。
+
+        只取本轮（不是全量历史），避免判定调用二次 token 膨胀。
+        """
+        from neurova.core.turn_context import get_turn_tool_messages_snapshot
+
+        parts = [f"最终回复：{str(reply or '')}"]
+        lines: List[str] = []
+        for record in (get_turn_tool_messages_snapshot() or [])[-12:]:
+            if not isinstance(record, dict):
+                continue
+            kind = record.get("type")
+            if kind == "tool_call":
+                lines.append(f"- 调用 {record.get('tool_name')}")
+            elif kind == "tool_result":
+                lines.append(
+                    f"- 结果 {record.get('tool_name')}: success={record.get('success')}"
+                )
+        if lines:
+            parts.append("本轮工具动作：\n" + "\n".join(lines))
+        return "\n".join(parts)[:4000]
+
+    def turnRoundSignature(self) -> str:
+        """主出口的轮次签名。
+
+        刻意**不带回复正文**，而是带续跑序号：出口上的"重复"与工具轮上的重复
+        不是一回事——反复在出口停手是"假完成"，它的权威判据是目标门的续跑预算
+        （有上限、理由可点名），不是死循环门。两处各管一件事，不设双重权威；
+        反之若把正文当签名，模型两次给出同样措辞就会被死循环门提前掐断，
+        预算耗尽的原因反而说不清。
+        """
+        from neurova.core.turn_context import get_turn_goal_continuations
+
+        key = getattr(self, "_round_user_key", "") or ""
+        return f"{key}:exit:{get_turn_goal_continuations()}"
+
+    def gateRunnerForExit(self) -> Any:
+        """主出口使用的门控执行器；子类未装配门控时返回 None（求值退化为正常收口）。"""
+        return None
 
     @abstractmethod
     async def predict_step(self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs) -> Any:

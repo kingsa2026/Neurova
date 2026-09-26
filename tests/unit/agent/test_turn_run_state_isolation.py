@@ -58,13 +58,18 @@ class ScriptedChat:
         return script[idx]
 
 
-def tool_call_response(call_id, name="web_search"):
+def tool_call_response(call_id, name="web_search", arguments="{}"):
+    """构造工具调用响应。
+
+    `arguments` 必须逐轮区分（见 `TestDoomLoopWindowIsPerTurn`）：参数相同即签名相同，
+    会被死循环门正确地判成重复调用，与被交叠会话无关。
+    """
     return LLMResponse(
         content="",
         tool_calls=[{
             "id": call_id,
             "type": "function",
-            "function": {"name": name, "arguments": "{}"},
+            "function": {"name": name, "arguments": arguments},
         }],
         finish_reason="tool_calls",
     )
@@ -139,9 +144,24 @@ class TestRoundBudgetIsPerTurn:
 
 class TestDoomLoopWindowIsPerTurn:
     def test_otherTurnSignatureDoesNotPolluteThisTurnWindow(self):
-        """A 会话的调用签名不得被 B 会话判成重复调用。"""
-        rounds = {"B": [tool_call_response("shared"), tool_call_response("b2"), tool_call_response("b3")],
-                  "A": [tool_call_response("shared")]}
+        """A 会话的调用签名不得被 B 会话判成重复调用。
+
+        构造要点：B 的**每一轮工具调用签名必须彼此不同**。门控判据是"调用签名
+        在窗口内重复"，若 B 自己两轮发出同签名的调用（如各轮都用 `web_search({})`），
+        死循环门判重复是**正确行为**，与 A 会话无关——那样的断言会自我触发
+        （实测：B 单独跑也会在第 2 轮收到重复提示，交叠与否都一样）。
+        故这里让 B 各轮参数不同，只剩"A 的签名是否漏进 B 的窗口"这一个变量。
+        """
+        rounds = {
+            "B": [
+                tool_call_response("shared", arguments='{"q": "b1"}'),
+                tool_call_response("b2", arguments='{"q": "b2"}'),
+                # 收尾轮：不再调工具（B 必须能自然收口，否则脚本尾项会被反复
+                # 复用成自己的"重复调用"，污染判据的来源就说不清了）
+                LLMResponse(content="B 完成", finish_reason="stop"),
+            ],
+            "A": [tool_call_response("shared", arguments='{"q": "a1"}')],
+        }
 
         async def scenario_conflicting():
             chat = ScriptedChat(rounds)

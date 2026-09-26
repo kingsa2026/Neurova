@@ -59,6 +59,15 @@ _skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=Fals
 # /chat/feedback 与 Step 8.5 困惑降权据此裁决效力。
 _injected_reflections_var: ContextVar = ContextVar("neurova_turn_injected_reflections", default=None)
 
+# 目标验收链（G2）：本轮声明的目标，与判定结果的可观测落地。
+# **本槽是目标在运行期的唯一事实源**——写入方只有轮次装配面
+# （会话 metadata 归一 / 工具编排入口），读侧只有 Loop 出口求值。
+# 历史上目标挂在 `agent._goal` 裸属性上：全仓零写入点、读侧 `getattr(..., None) or {}`
+# 静默降级成空 goal，门控即使挂上也永远拿到 `{}`（协作红线点名的断点形态）。
+_goal_var: ContextVar = ContextVar("neurova_turn_goal", default=None)
+_goal_verdict_var: ContextVar = ContextVar("neurova_turn_goal_verdict", default=None)
+_goal_continuations_var: ContextVar = ContextVar("neurova_turn_goal_continuations", default=0)
+
 
 def set_turn_injected_reflections(ids: Optional[list]) -> None:
     _injected_reflections_var.set(list(ids) if ids else None)
@@ -66,6 +75,51 @@ def set_turn_injected_reflections(ids: Optional[list]) -> None:
 
 def get_turn_injected_reflections() -> Optional[list]:
     return _injected_reflections_var.get()
+
+
+def set_turn_goal(goal: Any) -> None:
+    """写入本轮目标（`None` = 清除）。
+
+    归一由 `neurova.agent.loop_goal.normalizeGoal` 单源负责，本函数只落槽；
+    非法/空声明一律落 `None`（无目标即不做验收，不产生额外判定调用）。
+    """
+    from neurova.agent.loop_goal import normalizeGoal
+
+    _goal_var.set(normalizeGoal(goal))
+
+
+def get_turn_goal() -> Optional[dict]:
+    """本轮目标（归一后的 dict 形态；未声明返回 None）。"""
+    goal = _goal_var.get()
+    return goal.asDict() if goal is not None else None
+
+
+def mark_turn_goal_continuation() -> int:
+    """记一次"目标未达成 → 续跑"，返回累计次数（上限由门控裁决）。"""
+    count = int(_goal_continuations_var.get() or 0) + 1
+    _goal_continuations_var.set(count)
+    return count
+
+
+def reset_turn_goal_continuations() -> None:
+    """清零续跑计数（轮次起点调用；与 `_round_usage` 同属"本轮"语义）。"""
+    _goal_continuations_var.set(0)
+
+
+def get_turn_goal_continuations() -> int:
+    """本轮已发生的续跑次数。"""
+    return int(_goal_continuations_var.get() or 0)
+
+
+def set_turn_goal_verdict(verdict: Optional[dict]) -> None:
+    """写入本目标的判定结果（供观测面/反思链消费；`None` = 清除）。"""
+    _goal_verdict_var.set(dict(verdict) if verdict else None)
+
+
+def get_turn_goal_verdict() -> Optional[dict]:
+    """本目标的判定结果（未判定返回 None）。"""
+    verdict = _goal_verdict_var.get()
+    return dict(verdict) if verdict else None
 
 # 工单 006（经验回写通路）：本轮被注入 prompt 的 EKB 经验行 id。
 # 检索侧（chat_pipeline._retrieve_ekb_experience）写入，回合末
@@ -393,11 +447,14 @@ def clear_turn_state() -> None:
         _skills_off_var,
         _injected_reflections_var,
         _injected_experiences_var,
+        _goal_var,
+        _goal_verdict_var,
     ):
         if var is _skills_off_var:
             var.set(False)
         else:
             var.set(None)
+    _goal_continuations_var.set(0)
     reset_turn_tool_elapsed()
     _begin_skill_funnel_turn()
     with _turn_count_lock:
@@ -431,6 +488,13 @@ __all__ = [
     "reset_turn_tool_elapsed",
     "set_turn_injected_reflections",
     "get_turn_injected_reflections",
+    "set_turn_goal",
+    "get_turn_goal",
+    "mark_turn_goal_continuation",
+    "reset_turn_goal_continuations",
+    "get_turn_goal_continuations",
+    "set_turn_goal_verdict",
+    "get_turn_goal_verdict",
     "append_turn_tool_event",
     "get_turn_tool_events",
     "increment_turn_count",
