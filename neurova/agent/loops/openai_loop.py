@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
+from neurova.core import turn_context
 from neurova.llm_client import LLMResponse
 
 logger = get_logger(__name__)
@@ -86,24 +87,16 @@ class OpenAILoop(BaseAgentLoop):
         self._last_round_calls: List[tuple] = []
         self._stagnation_count = 0
         self._round_user_key: Optional[str] = None  # 首轮 predict_step 时计算
-        # P2-5：循环门控——DoomLoop/Iteration/TokenBudget 默认装配，
-        # goal 模式由调用方经 set_goal_gate 注入 GoalGate
-        from neurova.agent.gates import (
-            DoomLoopGate,
-            GateRunner,
-            IterationGate,
-            TokenBudgetGate,
-        )
-
-        limits = self._load_agent_limits()
-        self._gate_runner = GateRunner([
-            DoomLoopGate(),
-            IterationGate(max_rounds=limits["max_loop_rounds"]),
-            TokenBudgetGate(max_tokens=limits["token_budget"]),
-        ])
+        # P2-5：循环门控——装配**单点**在 _buildGateRunner（修复教义第 6 条：
+        # 门控清单此前在 __init__ 与 _ensure_gate_runner 各写一遍，加门控必然
+        # 只加到其中一份）。G2 起 GoalGate 进默认装配：目标由轮次槽承载，
+        # 出口求值点见 `_predict_normal` / `_predict_stream_once` 的收口处。
+        self._gate_runner = self._buildGateRunner()
+        _limits = self._load_agent_limits()
         logger.info(
-            "OpenAILoop initialized for agent: %s (max_rounds=%s, token_budget=%s)",
-            agent.config.name, limits["max_loop_rounds"], limits["token_budget"],
+            "OpenAILoop initialized for agent: %s (max_rounds=%s, token_budget=%s, goal_continuations=%s)",
+            agent.config.name, _limits["max_loop_rounds"], _limits["token_budget"],
+            _limits.get("goal_max_continuations"),
         )
 
     @staticmethod
@@ -118,37 +111,45 @@ class OpenAILoop(BaseAgentLoop):
             return get_effective_limits()
         except Exception as e:  # noqa: BLE001
             logger.warning("读取 agent limits 失败，使用默认: %s", e)
-            return {"token_budget": 100000, "max_loop_rounds": 20}
+            return {
+                "token_budget": 100000,
+                "max_loop_rounds": 20,
+                "goal_max_continuations": 2,
+            }
+
+    def _buildGateRunner(self):
+        """门控装配的唯一实现点（`__init__` 与懒初始化路径同调它）。
+
+        GoalGate 绑定 `goal_max_continuations`——**独立配置键**，与工具轮预算
+        不共享尺度来源（同键两尺度正是 IterationGate 被判 scaled_sparse 的成因）。
+        `max_rounds` 不在此绑定：工具轮预算的单源是 IterationGate 与
+        `_max_tool_rounds`，GoalGate 保留该参数只为门控自身契约。
+        """
+        from neurova.agent.gates import (
+            DoomLoopGate,
+            GateRunner,
+            GoalGate,
+            IterationGate,
+            TokenBudgetGate,
+        )
+
+        limits = self._load_agent_limits()
+        return GateRunner([
+            DoomLoopGate(),
+            IterationGate(max_rounds=limits["max_loop_rounds"]),
+            TokenBudgetGate(max_tokens=limits["token_budget"]),
+            GoalGate(maxContinuations=limits["goal_max_continuations"]),
+        ])
 
     def _ensure_gate_runner(self) -> None:
         """懒初始化门控执行器（__new__ 绕过 __init__ 的测试构造兼容）。"""
         if getattr(self, "_gate_runner", None) is None:
-            from neurova.agent.gates import (
-                DoomLoopGate,
-                GateRunner,
-                IterationGate,
-                TokenBudgetGate,
-            )
+            self._gate_runner = self._buildGateRunner()
 
-            limits = self._load_agent_limits()
-            self._gate_runner = GateRunner([
-                DoomLoopGate(),
-                IterationGate(max_rounds=limits["max_loop_rounds"]),
-                TokenBudgetGate(max_tokens=limits["token_budget"]),
-            ])
-
-    def set_goal_gate(self, goal: Dict[str, Any], completion_check=None, max_rounds: int = 15) -> None:
-        """goal 模式：注入 GoalGate（目标达成判定 + 轮次预算）。
-
-        completion_check(goal, ctx) -> (achieved, summary) 由调用方提供
-        （LLM rubric 或显式条件）。
-        """
-        from neurova.agent.gates import GoalGate
-
+    def gateRunnerForExit(self) -> Any:
+        """主出口使用的门控执行器（与工具轮同一个实例、同一份门控集合）。"""
         self._ensure_gate_runner()
-        self._gate_runner.add_gate(
-            GoalGate(goal=goal, completion_check=completion_check, max_rounds=max_rounds)
-        )
+        return getattr(self, "_gate_runner", None)
 
     def _assess_stagnation(
         self, round_reply: str, current_calls: List[tuple], previous_calls: List[tuple]
@@ -249,6 +250,9 @@ class OpenAILoop(BaseAgentLoop):
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        # 同理由：目标续跑次数是"本轮"语义，跨请求残留会让下一轮一开局就
+        # 撞上已耗尽的续跑预算（目标门在出口直接 TERMINATE，回复被掐断）。
+        turn_context.reset_turn_goal_continuations()
         # 非流式路径的工具轮次上限读取设置（与 IterationGate 同源）
         try:
             from neurova.security.agent_limits_settings import get_effective_limits
@@ -391,13 +395,23 @@ class OpenAILoop(BaseAgentLoop):
                 f"{str((tc.get('function') or {}).get('arguments', ''))[:64]}"
                 for tc in tool_calls
             )
+            # RC-3：ctx 与流式路径**同键**——缺键会让对应门控在本路径恒不可触发
+            # （TokenBudgetGate / GoalGate 曾因此在本路完全失明）。
             _gd = self._gate_runner.on_round_end({
                 "tool_rounds": self._tool_rounds,
+                "round_reply": getattr(response, "content", "") or "",
                 "round_signature": f"{self._round_user_key}:{_tool_sigs}",
+                "round_usage": getattr(self.agent, "_round_usage", None) or {},
+                "goal": self.resolveTurnGoal() or {},
             })
             if _gd is not None and _gd.action == _SA.TERMINATE:
                 logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
                 return response
+            _interrupt_prompt = (
+                _gd.continuation_prompt
+                if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE
+                else ""
+            )
 
             logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), self._tool_rounds)
 
@@ -430,9 +444,42 @@ class OpenAILoop(BaseAgentLoop):
                 )
             )
 
+            # RC-3：软干预与流式路径同一行为（原实现直接丢弃 INTERRUPT，
+            # 同一条门控意见一条路执行、一条路扔掉）；注入点与流式一致——工具
+            # 结果入历史之后、续跑之前。
+            if _interrupt_prompt:
+                request_params["messages"].append(
+                    {"role": "user", "content": _interrupt_prompt}
+                )
+                logger.info("门控 %s 软干预（非流式，提示已注入消息序列）: %s", _gd.gate_name, _gd.reason)
+
             # 递归调用，直到没有 tool_calls
             return await self._predict_normal(request_params)
 
+        return await self._settleMainExit(request_params, response)
+
+    async def _settleMainExit(self, request_params: Dict, response: LLMResponse) -> Any:
+        """非流式路径的主出口收口（RC-1：出口也过门）。
+
+        "模型不再调用工具"是循环的主出口，也是假完成的唯一可识别位置——
+        工具轮内求值永远看不到它。判定与门控经基类 `evaluateLoopExit`
+        （单一实现点，流式路径同调它）。
+        """
+        from neurova.agent.loops.base import LOOP_CONTINUE, evaluateLoopExit
+
+        decision = await evaluateLoopExit(
+            self,
+            reply=getattr(response, "content", "") or "",
+            roundUsage=getattr(self.agent, "_round_usage", None) or {},
+            toolRound=getattr(self, "_tool_rounds", 0),
+        )
+        if decision.action == LOOP_CONTINUE:
+            request_params["messages"].append(
+                {"role": "user", "content": decision.continuation_prompt}
+            )
+            return await self._predict_normal(request_params)
+        if decision.action != "done":
+            logger.warning("主出口门控 %s 终止: %s", decision.gate_name, decision.reason)
         return response
 
     async def _predict_stream(self, request_params: Dict) -> Any:
@@ -675,7 +722,7 @@ class OpenAILoop(BaseAgentLoop):
                 "round_reply": round_reply,
                 "round_signature": round_signature,
                 "round_usage": getattr(self.agent, "_round_usage", None) or {},
-                "goal": getattr(self.agent, "_goal", None) or {},
+                "goal": self.resolveTurnGoal() or {},
             })
             if gate_decision.action.value == "terminate":
                 logger.warning("门控 %s 终止循环: %s", gate_decision.gate_name, gate_decision.reason)
@@ -743,6 +790,36 @@ class OpenAILoop(BaseAgentLoop):
                     yield event
                 return
             logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
+
+        from neurova.agent.loops.base import LOOP_CONTINUE, LOOP_DONE, evaluateLoopExit
+
+        _exitDecision = await evaluateLoopExit(
+            self,
+            reply="".join(reply_parts),
+            roundUsage=getattr(self.agent, "_round_usage", None) or {},
+            toolRound=getattr(self, "_tool_rounds", 0),
+        )
+        if _exitDecision.action == LOOP_CONTINUE:
+            request_params["messages"].append(
+                {"role": "user", "content": _exitDecision.continuation_prompt}
+            )
+            yield {"type": "reasoning", "data": _exitDecision.continuation_prompt}
+            async for event in self._predict_stream(request_params):
+                yield event
+            return
+        if _exitDecision.action != LOOP_DONE:
+            # 有理由地终止，且**不得静默**：reasoning 是前端会显示的既有通道
+            # （与停滞终止同一范式），gate_terminate 供管道侧消费；
+            # 正文照常随 done 交出——只发理由不发正文 = 用户看到空气泡。
+            yield {
+                "type": "gate_terminate",
+                "reason": _exitDecision.reason,
+                "gate": _exitDecision.gate_name,
+            }
+            yield {
+                "type": "reasoning",
+                "data": f"已停止继续尝试：{_exitDecision.reason}",
+            }
 
         yield {
             "type": "done",
