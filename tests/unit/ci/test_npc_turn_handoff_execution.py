@@ -38,6 +38,7 @@
 - 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → D 红。
 """
 import ast
+import copy
 import io
 import subprocess
 import sys
@@ -574,6 +575,11 @@ class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
 #: 它跑的是「上一轮撞满轮数后继续干」这一件事，配额用满即它的正常结束形态。
 HANDOFF_CARRIER_EVENT = HANDOFF_APPLY_EVENT
 
+#: 门禁事件：与 GitHub job 逐条对齐、裁决合并、逐条上报提交状态。
+#: 判据按**枚举**取，不按"除某几个之外"取 —— 后者会把后加的非门禁事件判成门禁，
+#: 于是「非门禁不上报提交状态」这条契约重新失效（PR #255 复核的根因形态）。
+GATE_EVENTS = ("push", "pull_request")
+
 
 class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
     """续跑载体不得把「Agent 用满轮数」上报成**提交状态失败**（Issue #217 的假红）。
@@ -611,7 +617,65 @@ class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
       余下所有 npc:go 事件定义（评论触发的那两条）与全部门禁流水线都不在放宽
       范围内。
       否则这条判据会被拿去"顺手全局放宽"，那才是把失败改写成 warning。
+
+    ## 口径收口（PR #255 复核，2026-09-26）
+
+    本类的第二版口径把"允许放宽"写成了**一份枚举**——「只有续跑载体」。而它要表达的
+    契约其实是**按类别**的：*提交状态通道是门禁专用的，非门禁流水线一律不上报*。
+    枚举漏掉了同契约的其余全部消费方（`commit.add` 建库、`crontab` 周级巡检、
+    以及后加的手动触发口），于是它们一失败就照常写「状态检查：未通过」。
+
+    实测（PR #255 的合并提交 `d5210625`）：该 PR 已合并、10 条门禁全绿，聚合却是
+    `failure` —— 红格全部来自手动 `api_trigger` 探针与 `config error`，
+    用户在提交列表里读到的就是「合并失败」。同一个根因在提交状态上留了一条
+    看不出成因的红。
+
+    故口径改为按事件类别判定：`push` / `pull_request` 是门禁（保持阻塞），
+    `main` 下其余事件与 `$` 下的接力载体是非门禁（必须 `allowFailure`）。
+    两类判定互为反向控制 —— 缺任一条，另一条都可能被"顺手全局放宽"或
+    退化成恒真断言。
     """
+
+    def test_every_non_gate_pipeline_is_off_the_commit_status_channel(self, cnb_doc):
+        """口径收口：`main` 下**每一条非门禁**流水线都不上报提交状态。
+
+        同一个契约的全部消费方一次扫清（教义第 5 条）：此前只有接力载体那一处，
+        建库 / 周级巡检 / 手动触发口全部漏网 —— 它们一失败就把「状态检查：未通过」
+        写到提交上，与门禁结论同形。可证伪：给 `main` 注入一条不带 `allowFailure`
+        的新非门禁事件 → 立刻红。
+        """
+        main = cnb_doc.get("main") or {}
+        offenders = []
+        for event, body in main.items():
+            if event in GATE_EVENTS:
+                continue
+            for i, pipe in enumerate(body if isinstance(body, list) else []):
+                if not isinstance(pipe, dict):
+                    continue
+                if pipe.get("allowFailure") is not True:
+                    offenders.append(f"main.{event}[{i}]({pipe.get('name') or '<未命名>'})")
+        assert not offenders, (
+            "这些非门禁流水线未声明 allowFailure，失败时会写成「状态检查：未通过」——"
+            "合并提交在提交列表里挂红叉，而门禁本身全绿，用户读到的就是一句「合并失败」。\n  "
+            + "\n  ".join(offenders)
+            + "\n实测：PR #255 的合并提交 d5210625 聚合为 failure，红格全部来自手动 "
+            "api_trigger 探针与 config error，而该 PR 的 10 条门禁流水线全绿。\n"
+            "修法：流水线体加 `allowFailure: true` —— 失败仍以诚实形态暴露"
+            "（构建列表与日志里 error），只是不再占用门禁通道。"
+        )
+
+    def test_non_gate_coverage_is_not_tautological(self, cnb_doc):
+        """反向控制：注入一条新的非门禁事件，本判定必须翻转。"""
+        injected = copy.deepcopy(cnb_doc)
+        injected["main"]["api_trigger_probe_injected"] = [
+            {"name": "probe", "stages": [{"script": "echo x"}]}
+        ]
+        offenders = [
+            f"main.api_trigger_probe_injected[{i}]({p.get('name')})"
+            for i, p in enumerate(injected["main"]["api_trigger_probe_injected"])
+            if isinstance(p, dict) and p.get("allowFailure") is not True
+        ]
+        assert offenders, "注入新的非门禁事件后判定没有变化 —— 判据的输入端没接上真实文档"
 
     def test_carrier_declares_allow_failure(self, cnb_doc):
         fallback = cnb_doc.get("$") or {}
@@ -633,17 +697,38 @@ class TestHandoffCarrierDoesNotReportQuotaEndAsCommitFailure:
     def test_gate_pipelines_stay_blocking(self, cnb_doc):
         main = cnb_doc.get("main") or {}
         offenders = []
-        for event, body in main.items():
-            for i, pipe in enumerate(body if isinstance(body, list) else []):
+        for event in GATE_EVENTS:
+            for i, pipe in enumerate(main.get(event) or []):
                 if not isinstance(pipe, dict):
                     continue
                 if pipe.get("allowFailure"):
                     offenders.append(f"main.{event}[{i}]({pipe.get('name')})")
         assert not offenders, (
             "门禁流水线被放宽成非阻塞（放行标准被单侧放宽）: " + ", ".join(offenders) +
-            "\n允许放宽的只有续跑载体 —— 它不裁决任何契约；"
+            "\n允许放宽的是**非门禁**流水线 —— 它不裁决任何契约；"
             "门禁一旦非阻塞，扫出问题也拦不住合并。"
         )
+
+    def test_gate_block_detection_is_not_tautological(self, cnb_doc):
+        """反向控制：给门禁注入 `allowFailure`，本判定必须抓得到。"""
+        injected = copy.deepcopy(cnb_doc)
+        push = injected["main"]["push"]
+        push[0] = {**push[0], "allowFailure": True}
+        offenders = [
+            f"main.push[{i}]({p.get('name')})"
+            for i, p in enumerate(push) if isinstance(p, dict) and p.get("allowFailure")
+        ]
+        assert offenders, "门禁被注入 allowFailure 后判定仍为空 —— 它是一条恒真断言"
+
+    def test_gate_events_are_an_enumeration_not_a_wildcard(self):
+        """门禁事件是**枚举**，不得写成「除某几个之外全是门禁」的反向口径。
+
+        事实源：`.github/workflows/ci.yml` 的 job 枚举（对照表在
+        `tests/unit/test_ci_parity_guard.py::EXPECTED_MAP`）。门禁只有
+        `push` / `pull_request` 两个事件键；写成通配会把后加的
+        非门禁事件一并判成门禁，于是「非门禁不上报」重新失效。
+        """
+        assert GATE_EVENTS == ("push", "pull_request")
 
 
 class TestRelayCoversEveryPlatformAbortReason:
