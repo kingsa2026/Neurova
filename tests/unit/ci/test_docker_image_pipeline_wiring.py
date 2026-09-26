@@ -225,17 +225,72 @@ class TestPushesToTheRepoTargetRegistry:
         )
 
 
-class TestManualButtonPointsAtTheSameEvent:
-    """F. 页面上那个手动按钮指向的必须是同一条事件（否则按钮点了没反应）。"""
+class TestManualButtonPointsAtAWebTriggerEvent:
+    """F. 页面按钮只支持 `web_trigger*` 事件（平台约束），且两条事件只能有一份定义。
 
-    def test_web_trigger_button_uses_the_pipeline_event(self):
+    ## 根因（本批自己踩到的形态，2026-09-26）
+
+    第一版把按钮指向 `api_trigger_docker_image` —— 而平台文档（web-trigger.md 的
+    Button 定义）逐字写着 `event`「仅支持 web_trigger 自定义事件」。按钮点下去
+    不会报任何错，只是什么都不发生，或者以 `CONFIG_EVENT_EMPTY` 收场 ——
+    这正是本仓反复出现的形态：**配置写了一个平台不支持的形态，平台不报错，
+    只在真被执行时才响亮**。
+
+    故按钮指向的事件必须是 `web_trigger` 或以 `web_trigger_` 开头。
+
+    ## 但 CLI 触发（`cnb build start-build --event`）只认 `api_trigger*`
+
+    两个入口的事件名空间互不通用（平台 `--event` 参数校验「须为 api_trigger 或以
+    它开头」；按钮只认 web_trigger）。于是同一条流水线必须被两个事件名覆盖 ——
+    而**定义只能有一份**（教义第 6 条）：此处用 YAML 锚点让两个事件名解析到
+    同一份对象，判据取 `is`（同一对象）而不是「内容相等」——
+    内容相等允许两份各自演化的副本，同一对象不允许。
+    """
+
+    #: 按钮入口的事件名。
+    BUTTON_EVENT = "web_trigger_docker_image"
+
+    def test_button_targets_a_web_trigger_event(self):
         button = PROJECT_ROOT / ".cnb" / "web_trigger.yml"
         if not button.exists():
             pytest.skip("本仓未配置页面手动按钮（CLI 触发路径仍可用）")
-        text = io.open(button, encoding="utf-8").read()
-        assert IMAGE_EVENT in text, (
-            f".cnb/web_trigger.yml 的按钮未指向 {IMAGE_EVENT} —— "
-            "按钮点下去触发的是别的事件（或什么都不触发），而页面不会报错。"
+        doc = yaml.safe_load(io.open(button, encoding="utf-8").read())
+        buttons = [
+            item
+            for group in (doc.get("branch") or [])
+            for item in ((group or {}).get("buttons") or [])
+        ]
+        assert buttons, ".cnb/web_trigger.yml 未声明任何按钮 —— 本判据会静默空转"
+        offenders = [
+            b.get("event") for b in buttons
+            if not str(b.get("event") or "").startswith("web_trigger")
+        ]
+        assert not offenders, (
+            f"页面按钮指向了非 web_trigger 事件: {offenders} —— "
+            "平台文档（web-trigger.md 的 Button 定义）写明 `event` 仅支持 "
+            "web_trigger 自定义事件；写成别的形态时按钮点下去不报错、只是没反应。"
+        )
+
+    def test_button_event_is_declared_in_the_config(self, cnb_doc):
+        main = cnb_doc.get("main") or {}
+        assert main.get(self.BUTTON_EVENT), (
+            f"`.cnb.yml` 的 main 下缺 {self.BUTTON_EVENT} —— "
+            "按钮指向一个平台上不存在的事件，点下去只会以 CONFIG_EVENT_EMPTY 收场。"
+        )
+
+    def test_both_entrypoints_share_one_definition(self, cnb_doc):
+        """CLI 口与页面口必须解析到**同一份**流水线对象（不是两份内容相同的副本）。"""
+        main = cnb_doc.get("main") or {}
+        cli_body = main.get(IMAGE_EVENT)
+        button_body = main.get(self.BUTTON_EVENT)
+        assert cli_body and button_body, (
+            f"两个入口的事件未同时声明（{IMAGE_EVENT} / {self.BUTTON_EVENT}）——"
+            "CLI 触发与页面按钮各有其一，缺一个就等于该入口静默失效。"
+        )
+        assert cli_body is button_body, (
+            f"`{IMAGE_EVENT}` 与 `{self.BUTTON_EVENT}` 解析出的不是同一份对象 ——"
+            "两条定义会各自演化（同一个事实的第二份手抄，教义第 6 条）。"
+            "修法：用 YAML 锚点让第二个事件名引用第一处定义。"
         )
 
 

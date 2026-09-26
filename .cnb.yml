@@ -395,7 +395,15 @@ main:
   # 推送落点用平台注入的制品库事实（${CNB_DOCKER_REGISTRY} + 仓库路径 + 提交短号，
   # 见 docs.cnb.cool/zh/artifact/docker.md 的命名规则），tag 不写 latest：
   # 同一份 tag 在不同时刻指向不同镜像是"制品不可追溯"的经典成因。
-  api_trigger_docker_image:
+  # 两个入口，一份定义：CLI 触发（`cnb build start-build --event`）只认
+  # `api_trigger*`，页面按钮只认 `web_trigger*`（平台 web-trigger.md 的 Button
+  # 定义逐字写着「仅支持 web_trigger 自定义事件」）—— 两个事件名空间互不通用，
+  # 故用 YAML 锚点让第二个事件名引用第一处的**同一份对象**。
+  # 写成两份内容相同的副本是不行的：那正是「同一事实的第二份手抄」（教义第 6 条），
+  # 各自演化时没有任何判据会响。绑定由
+  # tests/unit/ci/test_docker_image_pipeline_wiring.py 的
+  # `test_both_entrypoints_share_one_definition` 取 `is`（同一对象）钉住。
+  api_trigger_docker_image: &docker-image-pipeline
     - name: docker-image
       runner:
         tags: cnb:arch:amd64
@@ -466,6 +474,9 @@ main:
             time docker push "$IMAGE"
             echo "pushed_ok"
           timeout: 40m
+
+  # 页面按钮入口（同一条流水线的第二个事件名，见上方锚点注释）。
+  web_trigger_docker_image: *docker-image-pipeline
 
   # ── 周级巡检：部署配置漂移（crontab）─────────────────────────────────────
   # 为什么独立成 crontab 而不只放 push/PR：漂移的主要来源**不在本仓的提交里**——
