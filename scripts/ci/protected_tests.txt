@@ -1098,3 +1098,12 @@ tests/unit/agent/test_turn_run_state_isolation.py
 #   · 角色准入 scripts/ci/npc_role_admission.py 排在 npc:go 之前，名单单源；
 #   · 纪律与阈值读数落在每个在册角色的 prompt（评论触发时唯一必达通道）。
 tests/unit/ci/test_npc_runtime_budget.py
+
+# Issue #272 NPC 续跑的角色连续性：
+#   · `.cnb.yml` 里每处 npc:go.options.role 的字面量都必须在 .cnb/settings.yml 的
+#     npc.roles 里 —— 平台对不在册的角色名**静默回落**平台默认 prompt，
+#     从第二轮起本仓人设与修复教义全部失效，而日志里看不出异常；
+#   · 接力把角色身份经 env（handoffRole ← $CNB_NPC_NAME）随轮传递，落点读 $handoffRole，
+#     不再硬编码角色名（角色一改名即断链）；
+#   · 判据的根取值是平台注入的 $CNB_NPC_NAME，名单唯一事实源仍是 npc.roles。
+tests/unit/ci/test_npc_handoff_role_continuity.py
