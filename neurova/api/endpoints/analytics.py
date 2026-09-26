@@ -31,6 +31,23 @@ router = APIRouter()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _counterSamples(families, metric_name: str):
+    """取某个 counter 的样本：**按样本名匹配**，不按族名。
+
+    为什么不能比 `mf.name == "…_total"`：`prometheus_client` 的 `Family.name`
+    对 counter 是**去掉 `_total` 后缀**的归一形态（`neurova_tool_executions_total`
+    的族名是 `neurova_tool_executions`）。于是原判据恒不命中——`usage_count` /
+    `total_calls` 从上线起就是 0，而直方图那一支（族名不带后缀）一直好用，
+    所以"耗时读得到、计数读不到"这种半明半暗的形态没有被人注意。
+    判据落在**样本名**上：它逐字等于暴露出来的指标名，与客户端版本对族名的
+    处理方式无关。
+    """
+    for family in families:
+        for sample in family.samples:
+            if sample.name == metric_name:
+                yield sample
+
+
 def _read_llm_metrics() -> Dict[str, Any]:
     """聚合 LLM 埋点（进程级 prometheus REGISTRY）。
 
@@ -48,15 +65,15 @@ def _read_llm_metrics() -> Dict[str, Any]:
         hist_count = 0
         buckets: Dict[float, float] = {}
 
-        for mf in REGISTRY.collect():
-            if mf.name == "neurova_llm_calls_total":
-                for s in mf.samples:
-                    key = (s.labels.get("provider", ""), s.labels.get("model", ""))
-                    e = per_model.setdefault(key, {"calls": 0, "failed": 0, "sum_s": 0.0, "count": 0})
-                    e["calls"] += int(s.value)
-                    if s.labels.get("success") == "false":
-                        e["failed"] += int(s.value)
-            elif mf.name == "neurova_llm_call_seconds" and mf.type == "histogram":
+        _families = list(REGISTRY.collect())
+        for s in _counterSamples(_families, "neurova_llm_calls_total"):
+            key = (s.labels.get("provider", ""), s.labels.get("model", ""))
+            e = per_model.setdefault(key, {"calls": 0, "failed": 0, "sum_s": 0.0, "count": 0})
+            e["calls"] += int(s.value)
+            if s.labels.get("success") == "false":
+                e["failed"] += int(s.value)
+        for mf in _families:
+            if mf.name == "neurova_llm_call_seconds" and mf.type == "histogram":
                 for s in mf.samples:
                     key = (s.labels.get("provider", ""), s.labels.get("model", ""))
                     if s.name.endswith("_sum"):
@@ -108,23 +125,57 @@ def _read_llm_metrics() -> Dict[str, Any]:
 
 
 def _read_tool_metrics(top_n: int = 5) -> List[Dict[str, Any]]:
-    """工具执行计数（按 tool_name 聚合），按调用数降序取前 top_n。"""
+    """工具执行计数与平均耗时（按 tool_name 聚合），按调用数降序取前 top_n。
+
+    耗时取自**直方图本体**（`neurova_tool_execution_seconds` 的 `_sum` / `_count`），
+    与 `_read_llm_metrics` 同一取法。改前本函数只读计数器：`avg_duration_ms` 从被
+    创建那一刻起就没有任何赋值点，恒 `0.0` —— 前端契约里有这个字段、面板上也画
+    它，读到的却是"没测到"与"测得极快"折叠成的同一个 0（工单 016 的同一形态）。
+    仪表本来就在（`tool_executor` 咽喉是唯一写入方），缺的是读侧那一半。
+
+    没有样本的工具诚实保持 0.0：直方图 `_count` 为 0 时不做除法，也不把
+    "无样本"折算成任何非零估计。
+    """
     try:
         from prometheus_client import REGISTRY
 
         per_tool: Dict[str, Dict[str, Any]] = {}
-        for mf in REGISTRY.collect():
-            if mf.name == "neurova_tool_executions_total":
-                for s in mf.samples:
-                    name = s.labels.get("tool_name", "?")
-                    entry = per_tool.setdefault(
-                        name, {"name": name, "usage_count": 0, "success_count": 0, "avg_duration_ms": 0.0}
-                    )
-                    entry["usage_count"] += int(s.value)
-                    if s.labels.get("success") == "true":
-                        entry["success_count"] += int(s.value)
 
-        return sorted(per_tool.values(), key=lambda e: e["usage_count"], reverse=True)[:top_n]
+        def _entry(name: str) -> Dict[str, Any]:
+            return per_tool.setdefault(
+                name,
+                {
+                    "name": name,
+                    "usage_count": 0,
+                    "success_count": 0,
+                    "avg_duration_ms": 0.0,
+                    "_duration_sum_s": 0.0,
+                    "_duration_count": 0,
+                },
+            )
+
+        _families = list(REGISTRY.collect())
+        for s in _counterSamples(_families, "neurova_tool_executions_total"):
+            entry = _entry(s.labels.get("tool_name", "?"))
+            entry["usage_count"] += int(s.value)
+            if s.labels.get("success") == "true":
+                entry["success_count"] += int(s.value)
+        for mf in _families:
+            if mf.name == "neurova_tool_execution_seconds" and mf.type == "histogram":
+                for s in mf.samples:
+                    entry = _entry(s.labels.get("tool_name", "?"))
+                    if s.name.endswith("_sum"):
+                        entry["_duration_sum_s"] += float(s.value)
+                    elif s.name.endswith("_count"):
+                        entry["_duration_count"] += int(s.value)
+
+        rows: List[Dict[str, Any]] = []
+        for entry in per_tool.values():
+            count = int(entry.pop("_duration_count", 0) or 0)
+            total = float(entry.pop("_duration_sum_s", 0.0) or 0.0)
+            entry["avg_duration_ms"] = round(total / count * 1000, 2) if count else 0.0
+            rows.append(entry)
+        return sorted(rows, key=lambda e: e["usage_count"], reverse=True)[:top_n]
     except Exception:
         logger.debug("tool metrics read failed", exc_info=True)
         return []
