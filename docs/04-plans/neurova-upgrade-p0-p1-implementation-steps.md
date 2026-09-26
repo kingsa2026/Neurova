@@ -205,6 +205,8 @@ e2e boot 冒烟（纯 subprocess——in-process create_app 实测卡死故弃�
 **P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py+ call_tool 401→刷新→重试一次。10 用例。
 **P2-5 循环门控+goal 模式 ☑（f11e162）**：gates.py（StopAction 三态+DoomLoop/Iteration/TokenBudget/Goal 四 gate+Runner 故障隔离）+ openai_loop 双路径接入（懒初始化；INTERRUPT=提示注入消息序列；TERMINATE yield gate_terminate）+ set_goal_gate。21 用例。
 
+> **2026-09-26 修正（G2，Issue #267）**：上面这条只交付了**门控的执行面**，goal 链并未闭环，四处根因经逐行核实：① 两条路径都在 `if tool_calls:` 块内求值门控，「模型不再调工具」这一**主出口一行都不过门」⇒ 假完成无人拦（加 caller 不改变这一点，缺的是求值点）；② goal **只读不写**——唯一读点 `getattr(agent, "_goal", None) or {}` 全仓零写入点，门控永远只能拿到空 goal；③ 两条路径 ctx 不对称（非流式缺 `round_reply`/`round_usage`/`goal`，`TokenBudgetGate` 与 `GoalGate` 在非流式路径**恒不触发**，且 `INTERRUPT_AND_CONTINUE` 被直接丢弃）；④ 门控装配在 `__init__` 与 `_ensure_gate_runner` 各写一遍。G2 已修：出口求值点 `base.evaluateLoopExit`（两路共用）、目标事实源收口到轮次槽（`turn_context.set_turn_goal` / `get_turn_goal`，写入面 = 会话 metadata + `orchestrate_tools` 的 goal 参数）、`GoalGate` 出口分支（未达成 → 注入续跑提示，预算 `goal_max_continuations` 硬封）、装配收口到 `_buildGateRunner`。同一根因的第二处命中点一并修：受限子会话通道形态（`/review` 原无条件 `to_thread`，而两条生产调用点注入的都是 async 门面 ⇒ 评审恒判解析失败）。判据进死线台账（`GoalGate` 阈值轴 `single_source`），常驻守卫 `tests/unit/agent/test_goal_gate_wiring.py`。
+
 ---
 
 ## P3 渐进项 ☑（2026-09-01，全部落地）
