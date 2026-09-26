@@ -95,9 +95,12 @@ npc:
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
-          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（轮数用满时后者含
-          `reach` + `maxTurns limit`，整轮会话撞 2h 墙钟时后者含
-          `超过最大运行时长` —— 两种中止都接力），
+          `$CNB_PIPELINE_STATUS`（`error` 才接力）与 `$CNB_BUILD_FAILED_STAGE_NAME`
+          （须命中 Agent 那一格 stage 名里的标记 `npc-go`）——
+          它回答的是「上一轮是不是**被中止在 Agent 那一格**、成果没落地」，
+          而不去猜平台中止的报错原文（原文其实是该 stage 最后一行输出，
+          靠它匹配等于看运气）。你被中止在 Agent 那格就接力；角色准入/环境自证
+          那类**配置错误**不接力（续跑只会原样再失败）。
           正常收官（status=success）不接力。
           所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
           不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
@@ -231,9 +234,12 @@ npc:
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
-          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（轮数用满时后者含
-          `reach` + `maxTurns limit`，整轮会话撞 2h 墙钟时后者含
-          `超过最大运行时长` —— 两种中止都接力），
+          `$CNB_PIPELINE_STATUS`（`error` 才接力）与 `$CNB_BUILD_FAILED_STAGE_NAME`
+          （须命中 Agent 那一格 stage 名里的标记 `npc-go`）——
+          它回答的是「上一轮是不是**被中止在 Agent 那一格**、成果没落地」，
+          而不去猜平台中止的报错原文（原文其实是该 stage 最后一行输出，
+          靠它匹配等于看运气）。你被中止在 Agent 那格就接力；角色准入/环境自证
+          那类**配置错误**不接力（续跑只会原样再失败）。
           正常收官（status=success）不接力。
           所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
           不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
@@ -367,9 +373,12 @@ npc:
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
-          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（轮数用满时后者含
-          `reach` + `maxTurns limit`，整轮会话撞 2h 墙钟时后者含
-          `超过最大运行时长` —— 两种中止都接力），
+          `$CNB_PIPELINE_STATUS`（`error` 才接力）与 `$CNB_BUILD_FAILED_STAGE_NAME`
+          （须命中 Agent 那一格 stage 名里的标记 `npc-go`）——
+          它回答的是「上一轮是不是**被中止在 Agent 那一格**、成果没落地」，
+          而不去猜平台中止的报错原文（原文其实是该 stage 最后一行输出，
+          靠它匹配等于看运气）。你被中止在 Agent 那格就接力；角色准入/环境自证
+          那类**配置错误**不接力（续跑只会原样再失败）。
           正常收官（status=success）不接力。
           所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
           不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
@@ -503,9 +512,12 @@ npc:
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
-          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（轮数用满时后者含
-          `reach` + `maxTurns limit`，整轮会话撞 2h 墙钟时后者含
-          `超过最大运行时长` —— 两种中止都接力），
+          `$CNB_PIPELINE_STATUS`（`error` 才接力）与 `$CNB_BUILD_FAILED_STAGE_NAME`
+          （须命中 Agent 那一格 stage 名里的标记 `npc-go`）——
+          它回答的是「上一轮是不是**被中止在 Agent 那一格**、成果没落地」，
+          而不去猜平台中止的报错原文（原文其实是该 stage 最后一行输出，
+          靠它匹配等于看运气）。你被中止在 Agent 那格就接力；角色准入/环境自证
+          那类**配置错误**不接力（续跑只会原样再失败）。
           正常收官（status=success）不接力。
           所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
           不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
