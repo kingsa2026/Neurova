@@ -311,14 +311,14 @@ class TestPathSymmetry:
         # 非流式
         loop, _llm = self._toolRoundAgent([toolCall, LLMResponse(content="完")])
         spy = SpyGate()
-        loop._gate_runner.add_gate(spy)
+        loop.registerGate(spy)
         await loop.predict_step([{"role": "user", "content": "开始"}], stream=False)
         seen["normal"] = spy.contexts[-1]
 
         # 流式
         loop2, _llm2 = self._toolRoundAgent([toolCall, LLMResponse(content="完")])
         spy2 = SpyGate()
-        loop2._gate_runner.add_gate(spy2)
+        loop2.registerGate(spy2)
         [
             e
             async for e in await loop2.predict_step(
@@ -344,7 +344,7 @@ class TestPathSymmetry:
             finish_reason="tool_calls",
         )
         loop, llm = self._toolRoundAgent([toolCall, LLMResponse(content="完")])
-        loop._gate_runner.add_gate(InterruptGate())
+        loop.registerGate(InterruptGate())
 
         sent = []
         original = llm.chat
@@ -370,16 +370,35 @@ class TestPathSymmetry:
 
 class TestGateAssemblyIsSingleSource:
     def test_gateRunnerIsConstructedOnce(self):
+        """`GateRunner([...])` 只允许在装配单点 `_buildGateRunner` 出现。"""
         src = _readText(OPENAI_LOOP)
-        assert src.count("GateRunner([") == 1, (
-            "`GateRunner([` 在 openai_loop.py 出现多次：门控清单有两份定义，"
-            "加门控必然只加到其中一份（修复教义第 6 条）"
+        owners = [
+            line.strip()
+            for line in src.splitlines()
+            if "GateRunner([" in line
+        ]
+        assert len(owners) == 1, (
+            f"`GateRunner([` 在 openai_loop.py 出现多次：门控清单有两份定义，"
+            f"加门控必然只加到其中一份（修复教义第 6 条）：{owners}"
         )
 
     def test_gateAssemblyIsSharedByInitAndLazyPath(self):
-        """__init__ 与懒初始化路径必须同调一个装配函数。"""
+        """三条装配入口（__init__ / 懒初始化 / 每轮重建）必须同调一个装配函数。
+
+        轮次态归属（Issue #268）要求门控执行器每轮一份，故入口不止 __init__、
+        懒初始化两处；判据钉的是"装配实现只有一处"，而不是"调用点只有一处"。
+        """
         src = _readText(OPENAI_LOOP)
         assert "_buildGateRunner" in src, "门控装配未收口到单一函数"
+        assert "def _buildGateRunner" in src, "装配单点函数未定义"
+        callers = [
+            line.strip()
+            for line in src.splitlines()
+            if re.search(r"self\._buildGateRunner\(\)", line)
+        ]
+        assert len(callers) >= 3, (
+            f"装配入口应含 __init__ / 懒初始化 / 每轮重建三处，实测 {callers}"
+        )
 
 
 # ══════════════════════════════════════════════════════════════
