@@ -186,6 +186,7 @@
 **CI / NPC 口径**：
 
 - [npc轮数配额口径收口_2026-09-25.md](../05-reports/npc轮数配额口径收口_2026-09-25.md) — NPC `maxTurns` 配额口径收口（Issue #236：删掉「2h ÷ 单轮耗时」上钳、配额单源化到 `.cnb.yml`）
+- [npc接力载体env自引用_2026-09-26.md](../05-reports/npc接力载体env自引用_2026-09-26.md) — 接力载体 `env` 自引用收口（Issue #256：键集合对齐，报错落在无关处的「Invalid container name」）
 
 ### 05-reports 报告
 
