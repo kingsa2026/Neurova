@@ -454,12 +454,24 @@ main:
             echo "health_http_code=$CODE"
             cat /tmp/neurova_health.json 2>/dev/null || true
             echo
+            # 容器**自己声明的**探针（Dockerfile HEALTHCHECK）也必须收敛：
+            # 首次实测（构建 cnb-neq-1k3e0m107）宿主 curl 已 200 时，容器自身仍
+            # 处于 starting / FailingStreak=1 —— 两者不是同一件事，而 compose 的
+            # healthcheck 与 Helm 探针走的是容器内那一套语义。
+            HEALTH=unknown
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              HEALTH=$(docker inspect "$NAME" --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown)
+              if [ "$HEALTH" = "healthy" ]; then break; fi
+              sleep 6
+            done
+            echo "container_health_status=$HEALTH"
             docker inspect "$NAME" --format 'container_health={{json .State.Health}}' || true
-            if [ "$CODE" != "200" ]; then
+            if [ "$CODE" != "200" ] || [ "$HEALTH" != "healthy" ]; then
               docker logs --tail 60 "$NAME" 2>&1 || true
               docker stop "$NAME" >/dev/null 2>&1 || true
               docker rm "$NAME" >/dev/null 2>&1 || true
-              echo "镜像起不来或探活未在时限内 200 —— 报错原文与容器日志见上" >&2
+              echo "镜像未通过自证：health_http_code=$CODE container_health_status=$HEALTH" >&2
+              echo "（宿主探火 200 与容器自身 HEALTHCHECK 收敛是两件事，见本 stage 注释）" >&2
               exit 1
             fi
             docker stop "$NAME" >/dev/null

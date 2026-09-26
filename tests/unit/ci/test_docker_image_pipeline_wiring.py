@@ -202,6 +202,81 @@ class TestRunsAndProbesTheRealContainer:
         )
 
 
+class TestContainerOwnHealthConverges:
+    """G. 镜像**自己声明的**探针也必须收敛到 healthy，不只是宿主 curl 到 200。
+
+    ## 为什么这两件事不是同一件（本批实测读数）
+
+    最终形态流水线的第一次 live 跑（构建 cnb-neq-1k3e0m107）逐字给出：
+
+        health_http_code=200                                   ← 宿主 curl 通了
+        container_health={"Status":"starting","FailingStreak":1,
+                          "Log":[{... "curl: (7) Failed to connect to l..."}]}
+
+    即：宿主的 curl 与容器内 `HEALTHCHECK` 走的是同一处 URL（都由 Dockerfile 派生），
+    但**容器自己的探针当时还没收敛**（start-period 30s、interval 30s，
+    应用约 40s 才监听）。compose 的 `healthcheck` 与 Helm 的探针走的是容器内的
+    这一套语义，所以「宿主通」并不蕴含「部署编排会认为它健康」——
+    Dockerfile 的 `start-period` / `interval` 若被改成不够用的值，
+    宿主探针照样绿，而容器会被编排判为不健康并反复重启。
+
+    故探活段必须在**有界等待**内确认 `docker inspect .State.Health.Status` 收敛到
+    `healthy`，未收敛则打日志并判红（不许只 `|| true` 印一行了事）。
+    """
+
+    def test_script_waits_for_the_containers_own_health_status(self, cnb_doc):
+        scripts = _image_scripts(cnb_doc)
+        assert ".State.Health.Status" in scripts, (
+            f"{IMAGE_EVENT} 未读取容器自身的健康状态（.State.Health.Status）——"
+            "「宿主 curl 通」与「容器内声明的探针收敛」不是同一件事，"
+            "后者才是 compose / Helm 判定健康的依据。"
+        )
+        assert "healthy" in scripts, (
+            f"{IMAGE_EVENT} 未把容器自身健康状态与 healthy 比较 —— "
+            "读出来只印一行（`|| true`）等于没有判据。"
+        )
+
+    def test_unhealthy_container_fails_the_stage(self, cnb_doc):
+        """未收敛到 healthy 时必须判红，且把容器日志带出来。
+
+        判据分三件，各自可证伪（第一版把它们写成"脚本里出现过 healthy 与
+        exit 1"，两个词各自出现即可满足——反向控制 A/B 当场把这条判据证伪：
+
+            A 摘掉判定条件里的 `|| [ "$HEALTH" != "healthy" ]` → 不判红
+            B 把状态读取换成写死 `HEALTH=healthy`（假收敛）      → 不判红
+
+        故改成：读的是容器运行期真值、比较是**否定式**、且判红与比较同处一段）。
+        """
+        text = _image_scripts(cnb_doc)
+        lines = text.splitlines()
+
+        # 一、状态必须读自容器运行期（反向控制 B：写死一个 healthy 不算读）
+        fake = [line.strip() for line in lines if re.match(r'^HEALTH=("?healthy"?)$', line.strip())]
+        assert not fake, (
+            f"{IMAGE_EVENT} 把容器健康状态写死成 healthy: {fake} —— "
+            "那不是读运行期真值，是假收敛（反向控制 B 的形态）。"
+        )
+
+        # 二、比较必须是否定式（`!= "healthy"`），且其后 20 行内判红
+        judged = [i for i, line in enumerate(lines)
+                  if "healthy" in line and "!=" in line]
+        assert judged, (
+            f"{IMAGE_EVENT} 未把容器健康状态与 healthy 做**否定式**比较 ——"
+            "只读出来印一行、或只在循环里做肯定式 break，都等于没有判据。"
+        )
+        offenders = [i for i in judged
+                     if not any("exit 1" in tail for tail in lines[i:i + 20])]
+        assert not offenders, (
+            f"{IMAGE_EVENT} 比较了容器健康状态却不判红（行号 {offenders}）—— "
+            "报错要么被根修，要么以诚实形态暴露（教义第 2 条）。"
+        )
+
+        # 三、判红前必须带出容器日志（失败原因可归因）
+        assert "docker logs" in text, (
+            f"{IMAGE_EVENT} 判红前未打印容器日志 —— 失败原因不可归因。"
+        )
+
+
 class TestPushesToTheRepoTargetRegistry:
     """D. 推送到本仓 Docker 制品库，tag 与提交绑定。"""
 
