@@ -589,6 +589,20 @@ tests/unit/context/test_view_tool_addressing.py
 #    以及两个事实仍由有真实消费者的 `/context/composition` 提供。）
 tests/unit/api/test_context_budget_face_retirement.py
 
+# Issue #90 T-09 §10 第 2b 项：上下文池设置假面下架（Issue #90）。
+#   （根因：`context_pool_settings` 与上一行同性质——**零非测试消费者**（前端
+#     `context-pool.ts` 的四个包装无任何 .vue / store 调用，唯一"引用"是锁它自己
+#    URL 的用例），且该面**就算接上也是假的**：GET 返回模块级常量（`ttl_seconds`
+#    与池的生产档 0 冲突、`model_budgets` 是 `ContextPool._STATIC_MODEL_BUDGETS`
+#    的第二份表），PUT 早已 501。工单把裁定权挂给 T-07，而 T-07 spec 与 001–009
+#    已全部交付却未裁定它——本票把它裁定完。端点 + 注册表行 + 前端模块与 barrel
+#    再导出 + 锁 URL 的用例一并下架；两个事实由真有消费者的面承担：
+#    池规模/回收 → `/metrics` 的 `observe_context_pools` gauges，
+#    模型窗口 → `/context/composition` 的 `context_window`。
+#    反向控制：池侧 `get_token_budget_for_model` 必须仍在——它有真实生产消费者
+#    （`orchestrator` 构造期算视图预算），不是这个 HTTP 面的附属。）
+tests/unit/api/test_context_pool_settings_face_retirement.py
+
 # Issue #90 B6-10（批次 E）：门面层退场裁定。
 #   （根因：`context/context_facade.py` 是编排器的**第二份装配路径**——零非测试
 #    消费者，工厂 `get_context_facade()` 零消费，且它 `await` 一个**同步**方法

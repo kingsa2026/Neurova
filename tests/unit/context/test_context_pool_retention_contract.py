@@ -4,7 +4,7 @@
 基线问题（实测）：``max_size=200`` 时池内仍保留 10000 条，``pool_len`` 纹丝不动
 ——「无损归档」改造后 ``max_size`` 已不再约束常驻内存，占用严格线性
 0.76 KB/条，长会话单调累积。代码只有一行注释说明，**参数本身仍默默存在**
-（API 的 GET /pool-settings 还在返回它），属误导。
+（此前 API 的 GET /pool-settings 还在返回它，该面已于 2026-09-26 下架），属误导。
 
 本套件钉四件事：
 
@@ -289,21 +289,23 @@ class TestRecyclingCostDoesNotScaleWithResident:
         ]
 
 
-class TestApiReportsEffectiveCapacity:
-    """Issue #65：API 也不得继续谎报 max_size 有效。"""
+class TestCapacityReportHasASingleFace:
+    """Issue #65 的「失效必须可见」只有**一个**对外面（2026-09-26 收窄）。
 
-    def test_pool_settings_reports_max_size_ineffective(self):
-        from fastapi import FastAPI
-        from starlette.testclient import TestClient
+    本类原来锁的是 `GET /v1/context-pool/pool-settings` 的响应字段
+    （`max_size_effective is False`）。该面已按 Issue #90 §10 第 2b 项判定下架
+    （零非测试消费者 + 读数是模块级常量 + PUT 早已 501），断言**未删、搬到真面**：
 
-        from neurova.api.auth import get_current_user
-        from neurova.api.endpoints import context_pool_settings
+    - 池侧统计（本文件 `TestMaxSizeIsExplicitlyIneffective` 的直接断言）；
+    - `/metrics` 抓取期读数（`observe_context_pools` 读同一份 `get_retention_stats()`）。
 
-        app = FastAPI()
-        app.include_router(context_pool_settings.router, prefix="/v1/context-pool")
-        app.dependency_overrides[get_current_user] = lambda: {"user_id": "u"}
+    判据 `tests/unit/api/test_context_pool_settings_face_retirement.py` 反向锁住
+    「该 HTTP 面不得回潮」。
+    """
 
-        data = TestClient(app).get("/v1/context-pool/pool-settings").json()["data"]
-        assert data["max_size"] == 100  # 兼容保留（前端仍在读）
-        assert data["max_size_effective"] is False, "API 又谎报 max_size 有效"
-        assert data["resident_limit"] is None
+    def test_retention_stats_is_the_only_external_face(self):
+        pool = _pool(max_size=10)
+        _fill(pool, 12)
+        stats = pool.get_retention_stats()
+        assert stats["max_size_effective"] is False
+        assert stats["resident_limit"] is None

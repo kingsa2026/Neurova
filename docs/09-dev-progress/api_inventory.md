@@ -9,7 +9,7 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（60 个）
+## 一、前端 API 模块（59 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
@@ -24,7 +24,6 @@
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 2 |
 | `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 5 |
-| `NeurUI/src/api/modules/context-pool.ts` | `/context-pool` | 是 | 1 |
 | `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
 | `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
 | `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 是 | 0 |
@@ -76,7 +75,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（91 条）
+## 二、后端挂载前缀（90 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -107,7 +106,6 @@
 | `neurova/api/endpoints/computer_api.py` | `/api/v1/computers` |
 | `neurova/api/endpoints/console.py` | `/api/v1/console` |
 | `neurova/api/endpoints/context.py` | `/api/v1/context` |
-| `neurova/api/endpoints/context_pool_settings.py` | `/api/v1/context-pool` |
 | `neurova/api/endpoints/cost_rollup_api.py` | `/api/v1/cost-rollup` |
 | `neurova/api/endpoints/enhanced_memory_search_api.py` | `/api/v1/enhanced-memory-search` |
 | `neurova/api/endpoints/enhanced_users_api.py` | `/api/v1/enhanced-users` |
