@@ -710,16 +710,20 @@ def _strip_self_event(pipeline):
 #:   是同一件事（触发本仓自定义事件流水线）在 `@npc` 宿主下唯一可行的通道。
 HANDOFF_TRIGGER_TYPE = "cnb:trigger"
 
-#: 平台在收尾时刻注入的**事实**变量（Issue #158 的判据来源）。
+#: 平台在收尾时刻注入的**事实**变量（Issue #158 的判据来源；v2 见 Issue #272）。
 #: 实测读数（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3 / cnb-o8q-1k3c25fpt，
-#: 2026-09-25）：`endStages` 里 `CNB_PIPELINE_STATUS=error`、
-#: `CNB_BUILD_FAILED_MSG=Agent aborted: reached maxTurns limit (N)`；
+#: 2026-09-25）：`endStages` 里 `CNB_PIPELINE_STATUS=error`；
 #: 同一 Job 的 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串。
 PLATFORM_STATUS_VAR = "CNB_PIPELINE_STATUS"
 
-#: 平台自己的中止措辞。四条独立构建里逐字一致：
-#: `Agent aborted: reached maxTurns limit (200)`。
-ABORT_MARKER = "reached maxTurns limit"
+#: v2 的第二个事实源：**失败 stage 名**（Issue #272）。
+#: 为什么不是 `CNB_BUILD_FAILED_MSG`：实测（探针 cnb-m16-1k3f5s0ri，2026-09-26）
+#: 证明该变量取的是**失败 stage 最后一行输出** —— Job 超时被 SIGKILL 后它是
+#: 脚本自己最后 echo 的 `start`，不是平台文案。按文案片段匹配等于看运气。
+PLATFORM_FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
+
+#: npc:go 所在 stage 名里的 ASCII 标记（判据按它匹配）。
+GO_STAGE_MARKER = "npc-go"
 
 
 def _handoff_carries_context(pipeline, key):
@@ -790,8 +794,10 @@ class TestTurnHandoffCeiling:
 
     #: 平台在收尾期注入的事实（平台「环境变量」篇，`endStages` 内可读）。
     #: 真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9。
+    #: v2（Issue #272）：第二个事实源改为**失败 stage 名** ——
+    #: `CNB_BUILD_FAILED_MSG` 实测是失败 stage 的最后一行输出（不可靠）。
     STATUS_VAR = "CNB_PIPELINE_STATUS"
-    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+    FAILED_STAGE_VAR = "CNB_BUILD_FAILED_STAGE_NAME"
 
     @staticmethod
     def _npc_pipelines(cnb_doc):
@@ -876,15 +882,15 @@ class TestTurnHandoffCeiling:
             if isinstance(conditions, str):
                 conditions = [conditions]
             blob = "\n".join(str(item) for item in conditions)
-            for needed in (self.STATUS_VAR, self.FAILED_MSG_VAR):
+            for needed in (self.STATUS_VAR, self.FAILED_STAGE_VAR):
                 if needed not in blob:
                     problems.append(
                         f"{where}: 收尾接力未读 ${needed} —— "
                         "无限接力的拦阻必须落在平台事实上，不是上一轮预写的值"
                     )
-            if ABORT_MARKER not in blob:
+            if GO_STAGE_MARKER not in blob:
                 problems.append(
-                    f"{where}: 收尾接力未认平台的中止措辞 {ABORT_MARKER!r}"
+                    f"{where}: 收尾接力未匹配 npc:go 的 stage 名标记 {GO_STAGE_MARKER!r}"
                 )
             if self.HANDOFF_FLAG in (job.get("env") or {}):
                 problems.append(
@@ -897,8 +903,8 @@ class TestTurnHandoffCeiling:
             + "\n  ".join(problems) +
             "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
             "`type: cnb:trigger` + `event: <api_trigger_* 事件>` + "
-            f"`if: [ $${self.STATUS_VAR} = error 且 $${self.FAILED_MSG_VAR} 含 "
-            "reached maxTurns limit ]`，"
+            f"`if: [ $${self.STATUS_VAR} = error 且 $${self.FAILED_STAGE_VAR} 命中 "
+            f"{GO_STAGE_MARKER} 标记 ]`，"
             "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go ——"
             "由开工前的步骤预写标记只会让接力变成'每次都接力'（Issue #158）。"
             "改完请同步 .cnb.yml 注释里的轮次上界推演。"
@@ -979,7 +985,8 @@ class TestTurnHandoffCeiling:
         missing = []
         for role in roles:
             prompt = role.get("prompt") or ""
-            if self.STATUS_VAR not in prompt or self.FAILED_MSG_VAR not in prompt:
+            if (self.STATUS_VAR not in prompt or self.FAILED_STAGE_VAR not in prompt
+                    or GO_STAGE_MARKER not in prompt):
                 missing.append(f"{role.get('name')}: 未点明接力判据读的平台事实")
             if "别去写任何状态文件或标记" not in prompt:
                 missing.append(f"{role.get('name')}: 未显式禁止写状态文件/标记")
@@ -988,7 +995,7 @@ class TestTurnHandoffCeiling:
         assert not missing, (
             "NPC 角色人设未写明轮数触顶接力协议:\n  " + "\n  ".join(missing) +
             f"\n`.cnb.yml` 的收尾 `if` 读 ${self.STATUS_VAR} 与 "
-            f"${self.FAILED_MSG_VAR}（撞顶时后者含 `reached maxTurns limit`）；"
+            f"${self.FAILED_STAGE_VAR}（后者命中 {GO_STAGE_MARKER} 标记）；"
             "人设里不写清楚，Agent 会以为接力还需要它配合，或另造一套平行判据。"
         )
 
