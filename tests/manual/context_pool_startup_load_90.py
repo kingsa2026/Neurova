@@ -23,6 +23,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from tests.manual._liveVerifyIsolation import dataPathUnder, useDataRoot  # noqa: E402
+
 AGENT_ID = "ctxstartup90"
 
 
@@ -95,8 +97,9 @@ def startupThroughProduction(cwd, rows, probe=True):
     from neurova.agent_core import Agent, AgentConfig
 
     os.chdir(cwd)
-    os.makedirs(os.path.join(cwd, "data", "context_ledger"), exist_ok=True)
-    dbPath = os.path.join(cwd, "data", "context_ledger", "default.db")
+    useDataRoot(os.path.join(cwd, "root"))
+    os.makedirs(os.path.dirname(dataPathUnder("context_ledger", "x.db")), exist_ok=True)
+    dbPath = dataPathUnder("context_ledger", "default.db")
     if not os.path.exists(dbPath):
         seedLegacyDb(dbPath, rows)
 
@@ -136,8 +139,9 @@ def startupCostOnly(cwd, rows):
     import neurova.context.eviction_ledger_db as ledgerModule
 
     os.chdir(cwd)
-    os.makedirs(os.path.join(cwd, "data", "context_ledger"), exist_ok=True)
-    dbPath = os.path.join(cwd, "data", "context_ledger", "cost.db")
+    useDataRoot(os.path.join(cwd, "root"))
+    os.makedirs(os.path.dirname(dataPathUnder("context_ledger", "x.db")), exist_ok=True)
+    dbPath = dataPathUnder("context_ledger", "cost.db")
     seedLegacyDb(dbPath, rows)
 
     warmer = ledgerModule.EvictionLedgerDB(db_path=dbPath, user_id="default", agent_id="default")

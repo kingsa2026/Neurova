@@ -14,6 +14,9 @@ import tempfile
 from types import SimpleNamespace
 from pathlib import Path
 
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+isolatedDataRoot()
+
 RESULTS: list[tuple[str, str]] = []
 
 
