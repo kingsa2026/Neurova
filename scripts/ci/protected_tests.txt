@@ -1033,3 +1033,11 @@ tests/unit/api/test_context_build_token_count_caliber.py
 # Issue #90 T-09 残余（清场批·切片 C）：上下文链路纳入覆盖率度量范围
 #   （改前 include 只有八个模块，注释里的前置早已满足；阈值单源在 CI 命令行）。
 tests/unit/ci/test_context_coverage_scope.py
+
+# Issue #90 收尾批：各批「是否已交付」的文档陈述必须与机器事实咬合。
+#   （根因：B6 各批的交付状态被手抄在十余处，之间无任何判据，同一时刻给出
+#    互相矛盾的结论——台账 §31 已写「B6-10 至此无剩余项」，而同文件更早的
+#    §2/§14/§17.3/§18/§22.5… 与 B6 工单索引仍写「仍未开工 / 剩余两组待实施」。
+#    判定只读两处机器事实：该批判据在受保护子集里、该批退役产物已从仓库消失；
+#    连带把 T-07/T-08 两行「读回待验 / 未落地」的 09-23 旧快照口径改判为收口记录。）
+tests/unit/context/test_batch_status_docs_coupling.py
