@@ -26,12 +26,26 @@ DEFAULTS: Dict[str, Any] = {
     "token_budget": 100000,
     # IterationGate：单次会话最大工具循环轮次
     "max_loop_rounds": 20,
+    # GoalGate：单轮内"目标未达成 → 注入提示续跑"的次数上限。
+    # **独立配置键**，不与 max_loop_rounds 共享尺度来源——一次续跑消耗本键一格，
+    # 不消耗工具轮预算（IterationGate 因同键两尺度被机器算成 scaled_sparse，
+    # 本键不得再现该形态；阈值可达性由 tool_loop_deadline_ledger 机器复算）。
+    "goal_max_continuations": 2,
+    # GoalGate 总开关：目标验收链的成本闸（默认**开**）。
+    # 默认关等于"接了线不通电"——本片修的正是"假完成无人拦"，关着就等于没修。
+    # 成本边界由**目标是否存在**守住（无目标 → 零判定调用，见 D-4），
+    # 本开关只作运营侧的成本闸，且已登记进 toolLoopDeadlines 台账（不留只写不读的配置）。
+    "goal_verification_enabled": True,
 }
 
 MIN_TOKEN_BUDGET = 1000
 MAX_TOKEN_BUDGET = 10_000_000
 MIN_ROUNDS = 2
 MAX_ROUNDS = 200
+# 续跑预算合法域：0 = 只判定不续跑（判定结果仍入观测面），上限 5
+# （每次续跑 ≈ 一次完整模型往返，3 次以上收益递减且会掩盖"目标本身不可达"）。
+MIN_GOAL_CONTINUATIONS = 0
+MAX_GOAL_CONTINUATIONS = 5
 
 
 def settings_path() -> Path:
@@ -101,4 +115,9 @@ def get_effective_limits() -> Dict[str, Any]:
     settings["max_loop_rounds"] = max(
         MIN_ROUNDS, min(MAX_ROUNDS, int(settings["max_loop_rounds"]))
     )
+    settings["goal_max_continuations"] = max(
+        MIN_GOAL_CONTINUATIONS,
+        min(MAX_GOAL_CONTINUATIONS, int(settings["goal_max_continuations"])),
+    )
+    settings["goal_verification_enabled"] = bool(settings["goal_verification_enabled"])
     return settings
