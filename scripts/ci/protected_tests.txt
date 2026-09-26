@@ -1064,3 +1064,13 @@ tests/unit/ci/test_docker_image_pipeline_wiring.py
 #    落点只准经 `core/data_root.py` 推导 / 构造生产持久对象的脚本必须经唯一注入口
 #    或隔离单点 `tests/manual/_liveVerifyIsolation.py`。三条各带反向控制。）
 tests/unit/ci/test_manual_live_verify_contract.py
+
+# Issue #268：轮次态归属（G1 方案切片 A）——loop 单例上的轮次控制状态迁到
+#   每轮显式的 `TurnRunState`，两处 loop（OpenAI 流式/非流式、Anthropic）同批收口。
+#   根因：轮次计数与停滞计数挂在 per-agent 单例 loop 上，同一 agent 上两个会话
+#   交叠时后进入者入口清零会改写前者的预算（实测被交叠会话 LLM 调用 3→4 次）
+#   与停滞计数；门控执行器同理（DoomLoopGate 窗口是会话级态）。
+#   判据三条：轮次预算/死循环窗口/停滞计数在交叠与会话单独跑时读数必须一致；
+#   Anthropic 侧同款两条判据；两条 loop 的公有入口不再带 `_top_level` 递归补丁参数。
+#   装配面同时收口：`GateRunner([...])` 全仓唯一构造点在 `OpenAILoop.buildGateRunner()`。
+tests/unit/agent/test_turn_run_state_isolation.py

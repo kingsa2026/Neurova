@@ -203,16 +203,18 @@ class TestNoSilentFallback:
 
 class TestStagnationDetection:
     def test_assess_stagnation_content_and_call_signature(self):
+        from neurova.agent.loops.turn_run_state import TurnRunState
+
         loop = make_loop()
-        loop._round_replies = ["我搜索一下 A。"]
+        state = TurnRunState(roundReplies=["我搜索一下 A。"], lastRoundCalls=[("search", "{}")])
         # 内容相似 + 调用签名相同 → 停滞
-        assert loop._assess_stagnation("我搜索一下 A。", [("search", "{}")], [("search", "{}")]) is True
+        assert loop._assess_stagnation(state, "我搜索一下 A。", [("search", "{}")]) is True
         # 内容不同但调用签名重复 → 停滞
-        assert loop._assess_stagnation("完全不同的回复内容。", [("search", "{}")], [("search", "{}")]) is True
+        assert loop._assess_stagnation(state, "完全不同的回复内容。", [("search", "{}")]) is True
         # 都不同 → 非停滞
-        assert loop._assess_stagnation("完全不同的回复内容。", [("search", "{}")], [("browse", "{}")]) is False
+        assert loop._assess_stagnation(state, "完全不同的回复内容。", [("browse", "{}")]) is False
         # 空回复（纯工具轮）不算内容停滞，签名不同 → 非停滞
-        assert loop._assess_stagnation("", [("search", "{}")], [("search", "{other}")]) is False
+        assert loop._assess_stagnation(state, "", [("search", "{other}")]) is False
 
     def test_stagnation_flow_injects_then_stops(self):
         """时间线：round1 首轮非停滞 → round2 停滞#1 注入提示 →
