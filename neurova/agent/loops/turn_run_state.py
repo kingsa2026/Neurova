@@ -32,6 +32,15 @@ class TurnRunState:
     roundReplies: List[str] = field(default_factory=list)
     lastRoundCalls: List[Tuple[str, str]] = field(default_factory=list)
     toolsSupported: bool = True
+    #: 已求过门控的轮次号。门控**每轮只求值一次**：`DoomLoopGate.check()` 会自行
+    #: 把本轮签名记入窗口，同轮二次求值等于把自己的签名判成"重复"。取轮次号而非
+    #: 签名：签名在"上一轮调用与本轮调用完全一致"的真死循环里也相同，用它去重会
+    #: 让死循环门永远看不到第二次重复。
+    gatedRound: int = -1
+    #: 本轮门控执行器——**必填**，由入口构造时传入（`_buildGateRunner` 单点装配）。
+    #: 同一轮内三条调用路径（非流式 / 流式 / 二者各自的续跑）共用这一份：
+    #: `DoomLoopGate` 的滑动窗口与中断计数都挂在这份实例上，同一轮内多建一份
+    #: 会让窗口不再累计、后续追加的门控只落在其中一份上。
     gateRunner: Any = None
 
     def roundSignature(self, toolSignatures: str = "") -> str:

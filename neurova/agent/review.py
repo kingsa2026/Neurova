@@ -12,6 +12,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.agent.sub_session import callSubSessionChannel
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -103,9 +104,11 @@ async def run_review(llm_chat: Callable, review_target: str, focus: str = "") ->
     """受限 review 子会话：llm_chat 由调用方注入（生产=agent.llm_client.chat，
     测试=替身）。不携带 tools/联网——纯文本进出，天然禁工具禁网。"""
     messages = build_review_messages(review_target, focus=focus)
-    import asyncio
-
-    response = await asyncio.to_thread(llm_chat, messages)
+    # 通道形态由单源负责（同步 LLMClient.chat 要搬去线程，异步 Agent 门面要直接 await）。
+    # 原实现无条件 to_thread：两条生产调用点注入的都是 Agent 门面的 async `chat`
+    # （chat_pipeline 与 console 的 `lambda messages: llm.chat(messages)`），
+    # 于是永远只拿到一只从未被 await 的 coroutine，/review 恒判 parse_ok=False。
+    response = await callSubSessionChannel(llm_chat, messages)
     content = getattr(response, "content", None)
     if content is None and isinstance(response, dict):
         content = response.get("content")

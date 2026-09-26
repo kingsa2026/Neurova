@@ -611,6 +611,12 @@ class ChatPipeline:
             session_id=ctx.session_id,
             user_id=(ctx.metadata or {}).get("user_id"),
         )
+        # G2 目标写入面 ①：会话声明的目标（`metadata["goal"]`，与 thinking_effort
+        # 同一注入面）。归一由 turn_context 单点负责；未声明即清槽——否则上一轮的
+        # 目标会跨请求残留，把普通对话也拖进验收链。
+        from neurova.core.turn_context import set_turn_goal
+
+        set_turn_goal((ctx.metadata or {}).get("goal"))
         # Wave H-W2 三层技能库：装配轮级可见视图（agent 私库 + 当前会话用户
         # 私库 + 公共库，就近优先）。视图缺席（构建失败）时各消费点回退
         # 现状 agent 视图——装配失败绝不放大为对话失败。
@@ -2843,6 +2849,30 @@ error_type 五类标准键（multi_model_client 流内
                     "model": self.config.llm_config.model,
                 },
             )
+
+        # G2 判定结果写回历史：verdict 摘要并入同一条 reasoning trace，
+        # 使反思链能吃到"是否真完成"这个事实（§4.5 的第 3 个消费者）。
+        # 无目标或未判定时不写，不留空条目。
+        try:
+            from neurova.core.turn_context import get_turn_goal, get_turn_goal_verdict
+
+            _goal = get_turn_goal()
+            _verdict = get_turn_goal_verdict()
+            if _goal and _verdict and ctx.reasoning_trace_id and self.trace_manager:
+                _outcome = (
+                    "达成" if _verdict.get("achieved")
+                    else ("判据不可用" if not _verdict.get("parse_ok") else "未达成")
+                )
+                self.trace_manager.add_step(
+                    ctx.reasoning_trace_id,
+                    action="goal_verification",
+                    input_summary=str(_goal.get("statement") or "")[:200],
+                    output_summary=(
+                        f"{_outcome}；缺失：{'；'.join(_verdict.get('missing') or []) or '无'}"
+                    )[:200],
+                )
+        except Exception as e:  # noqa: BLE001 - 判定写回失败不影响主流程
+            logger.debug("目标判定写回推理链失败: %s", e)
 
         # 推理链记录
         if ctx.reasoning_trace_id and self.trace_manager:

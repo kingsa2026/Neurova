@@ -17,6 +17,7 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.observe_caches()  # 缓存命中率 gauges 快照（P1-6）
 - Metrics.record_http_request(method, route, status, duration_s)  # HTTP 时长（P1-6）
 - Metrics.record_tool_turn_provider_reject(reason)  # 工具轮配对非法 400（T-10d 归零判据）
+- Metrics.record_goal_verification(outcome)  # 目标达成判定结果（G2）
 - Metrics.observe_context_health(state)  # 上下文域健康读数快照（T-10d）
 """
 
@@ -174,6 +175,15 @@ class _Metrics:
             ["provider"],
         )
 
+        # ── 目标达成验收（G2）──
+        # "假完成"此前完全不可观测：GoalGate 在出口一行都不过门，判定到底跑了没、
+        # 判成什么，观测面上同形。这三种结果就是该链唯一的存在证明。
+        self.goal_verification_total = Counter(
+            "neurova_goal_verification_total",
+            "Goal verification verdicts by outcome (achieved/unmet/parse_failed)",
+            ["outcome"],
+        )
+
         # ── 能力缺口（T-03）──
         # "自主造能力的入口"由用户措辞改挂到能力缺口之后，缺口本身必须可测：
         # 没有这个计数，"入口没被触发"与"入口根本没接电"在观测上同形。
@@ -324,6 +334,13 @@ class _Metrics:
             self.llm_call_seconds.labels(provider=provider, model=model).observe(duration_s)
         except Exception:
             logger.debug("llm metrics record failed", exc_info=True)
+
+    def record_goal_verification(self, outcome: str) -> None:
+        """目标判定结果计数（achieved / unmet / parse_failed）。"""
+        try:
+            self.goal_verification_total.labels(outcome=str(outcome)).inc()
+        except Exception:  # noqa: BLE001 - 观测失败不得影响对话主链
+            logger.debug("goal verification metric failed", exc_info=True)
 
     def observe_capability_gap(self, kinds) -> None:
         """能力缺口命中埋点（按类别累加）。"""
@@ -679,6 +696,11 @@ class _Metrics:
 
 
 _metrics: Optional[_Metrics] = None
+
+
+def record_goal_verification(outcome: str) -> None:
+    """模块级便捷入口（目标判定结果埋点）。"""
+    get_metrics().record_goal_verification(outcome)
 
 
 def observe_capability_gap(kinds) -> None:
