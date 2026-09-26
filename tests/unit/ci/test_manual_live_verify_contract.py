@@ -50,9 +50,20 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+#: 跨文件 AST 判据的唯一解析入口（Issue #148）：本文件是**一次性**全仓扫描
+#: （只问「仓库里有没有出现某个形状」，不存在第二次命中），故走一次性入口
+#: `transientTree` —— 不留常驻语法树，判据成本不随代码总量与机器速度挂钩。
+#: 自扫自解（`Path.glob` + `ast.parse`）会被
+#: `tests/unit/test_ci_ast_scan_budget_guard.py` 判红：那是把代码总量编码成
+#: 时间上界，单跑绿、全套撞 `pytest-timeout` 的 30s 默认墙钟。
+from tests import ast_scan
 MANUAL_ROOT = PROJECT_ROOT / "tests" / "manual"
 ORCHESTRATOR = PROJECT_ROOT / "neurova" / "context" / "orchestrator.py"
 
@@ -182,8 +193,7 @@ def testManualScriptsConstructingProductionObjectsInjectDataRoot():
         text = path.read_text(encoding="utf-8")
         if _injectsDataRoot(text):
             continue
-        tree = ast.parse(text, filename=str(path))
-        if _callsProductionBuilder(tree):
+        if _callsProductionBuilder(ast_scan.transientTree(path)):
             offenders.append(str(path.relative_to(PROJECT_ROOT)))
     assert not offenders, (
         "以下脚本构造了生产持久对象却没注入数据根 —— 未注入时 `get_data_root()` "
