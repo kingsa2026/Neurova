@@ -32,8 +32,13 @@ Issue #242 要求「搭建 neurova 知识库」：把 `docs/**/*.md` 切片、�
   没有 `prompt` 键，Issue #242 里给的写法正是那条永不生效的通路）。
 - **E 指南可达**：`docs/10-configuration/KNOWLEDGE_BASE.md` 存在，且在
   `docs/0-index/README.md` 的导航里登记（新增文档不登记＝读者找不到入口）。
+- **G 读数不手抄**：索引面的篇数只在正文里以**复算命令**的形式存在，不写死数字。
+  读数的事实源是文件系统本身，写下的每一个数字都是第二份定义，且它会在**同批合并的
+  另一条 PR** 动到 `docs/` 时当场过期——平台与 CI 都不报错（同型收口见
+  `tests/unit/test_docs_index_hand_copied_counts.py` 与 Issue #231）。
 
-反向锁：注入一个平台未声明的 option 键、或摘掉建库流水线，本文件必须判红。
+反向锁：注入一个平台未声明的 option 键、或摘掉建库流水线、或往正文塞一个手抄读数，
+本文件必须判红。
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from __future__ import annotations
 import fnmatch
 import glob
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -84,6 +90,12 @@ KB_ANSWER_CLAUSE = (
 #: 本仓用 `commit.add` 而非 `push` 的理由在 `.cnb.yml` 的注释里逐字写明，
 #: 判据只要求"落在推送类事件上"，不绑死具体那一个（避免把实现细节当契约）。
 PUSH_LIKE_EVENTS = ("push", "commit.add")
+
+#: 手抄「可漂移读数」的句式：`<数字> 篇`。索引面篇数的事实源是文件系统本身
+#: （`glob.glob('docs/**/*.md')`），写进正文的每个数字都是第二份定义；
+#: 它的漂移不需要任何人改错——同批合并的另一条 PR 往 `docs/` 加一篇文档，
+#: 本文件里的读数当场过期，而平台与 CI 都不报错。
+HAND_COPIED_READING = re.compile(r"\d+\s*篇")
 
 
 def _load(path: Path) -> dict:
@@ -274,9 +286,9 @@ class TestIndexSurfaceDoesNotSpindle:
     def test_every_exclude_changes_the_index_surface(self, cnb_doc):
         """exclude 逐条必须真的改变索引面 —— 空转的排除项就是「只写不读的配置」。
 
-        本轮实测就是这条判据抓到的：`docs/**/*.md` 本就不匹配点文件
-        （glob 551 篇 / 含隐藏 553 篇），给 `docs/.cf_doc.md` 之类各写一条 exclude
-        看着很尽责，实则一个文件都没排掉 —— 而平台不报任何错，
+        本轮实测就是这条判据抓到的：`docs/**/*.md` 本就不匹配前导点文件，
+        给 `docs/.cf_doc.md` 之类各写一条 exclude 看着很尽责，
+        实则一个文件都没排掉 —— 而平台不报任何错，
         下一个人照着它以为"点文件已被排除"。
         """
         for opts in self._optionsOf(cnb_doc):
@@ -298,8 +310,8 @@ def _globFiles(pattern: str) -> list:
     口径取 `glob.glob`，**不取** `pathlib.Path.glob`：两者对前导点的处理不同——
     平台的分支匹配明确采用 unix 通配（`触发规则` 一节指向 globster，
     `*` 默认不匹配前导点），`glob.glob` 与它同语义，而 `pathlib` 的 `*` 会把
-    前导点也吃掉。实测差 2 篇（`glob.glob` 551 / `pathlib` 553，
-    差的是 `docs/.cf_doc.md` 与 `docs/.roles.md`）。
+    前导点也吃掉。差值恰好是 `docs/.cf_doc.md` 与 `docs/.roles.md` 两个点文件
+    （篇数不在此处写死，复算命令见 `docs/10-configuration/KNOWLEDGE_BASE.md` 第 2 节）。
 
     这个差别不是细节：按 `pathlib` 口径，「给点文件各写一条 exclude」会显得
     非空转（判据放行），而它其实一条都没必要写 —— 本轮就是靠这一条把三处
@@ -335,6 +347,64 @@ def _asList(value) -> list:
     if isinstance(value, str):
         return [value]
     return [str(item) for item in value]
+
+
+def handCopiedReadings(text: str) -> list:
+    """文本里**手抄的可漂移读数**（空列表＝读数只以复算命令的形式存在）。"""
+    return HAND_COPIED_READING.findall(text)
+
+
+def readingBearingFiles() -> tuple:
+    """承接建库读数的三个落点：配置注释 / 使用指南 / 本守卫自身的正文。
+
+    取模块全局而非闭包捕获，是为了让反向锁能 monkeypatch 其中一个落点。
+    """
+    return (CNB, GUIDE_DOC, Path(__file__))
+
+
+def assertNoHandCopiedReading(path: Path) -> None:
+    """`path` 的正文不得手抄可漂移读数（命中即报出落点与原文）。"""
+    offenders = handCopiedReadings(io.open(path, encoding="utf-8").read())
+    assert not offenders, (
+        f"{Path(path).name} 手抄了可漂移的读数: {offenders}\n"
+        "索引面篇数的事实源是文件系统本身；写死数字与实况之间没有任何机器判据，"
+        "而同批合并的另一条 PR 动到 docs/ 就会让它过期——平台与 CI 都不报错。\n"
+        "修法：删掉数字，改写成复算命令（见 docs/10-configuration/KNOWLEDGE_BASE.md 第 2 节）。"
+    )
+
+
+class TestIndexReadingsAreNotHandCopied:
+    """G：索引面的读数以复算命令存在，不以写死的数字存在。
+
+    这条根因不是"数字写错了"，而是"数字没人复核"：`docs/` 的篇数随任何一次文档
+    增删而变，写进注释/文档的那一份没有任何判据咬合，于是从写下那一刻起就在漂移。
+    修法沿用本仓既有口径（`tests/unit/test_docs_index_hand_copied_counts.py`）——
+    不把数字改对，而是**不写数字**，改写成读者能当场复算的命令。
+    """
+
+    def test_no_landing_point_hand_copies_a_reading(self):
+        for path in readingBearingFiles():
+            assertNoHandCopiedReading(path)
+
+    def test_the_surface_is_recomputable_from_the_repo(self):
+        """不写数字的前提是**读者能复算**：命中面必须能被仓库内的命令算出。"""
+        readings = _globFiles(DOC_GLOB)
+        assert readings, f"{DOC_GLOB} 一个文件都没命中 —— 复算命令无从谈起"
+
+    def test_discriminating_power(self, tmp_path, monkeypatch):
+        """反向锁：往落点里塞一个手抄读数 → 必须判红。"""
+        import tests.unit.ci.test_knowledge_base_index_wiring as module
+
+        # 注入的读数是**当场复算出来的**，不在本文件里再写一个数字——
+        # 否则反向锁的夹具本身就成了它要拦的那类手抄（判据会咬自己）。
+        drifted = tmp_path / "KNOWLEDGE_BASE.md"
+        drifted.write_text(
+            f"（实测 {len(_globFiles(DOC_GLOB))} 篇）", encoding="utf-8"
+        )
+        monkeypatch.setattr(module, "GUIDE_DOC", drifted)
+        assert module.handCopiedReadings(io.open(drifted, encoding="utf-8").read())
+        with pytest.raises(AssertionError, match="手抄了可漂移的读数"):
+            module.assertNoHandCopiedReading(drifted)
 
 
 @pytest.fixture(scope="module")
