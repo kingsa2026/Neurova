@@ -696,6 +696,7 @@ $:
             branch: $CNB_BRANCH
             env:
               handoffIssueIid: $CNB_ISSUE_IID
+              handoffPrIid: ""
 
   issue.comment@npc:
     - <<: *npc-dscoder-job
@@ -711,6 +712,7 @@ $:
             branch: $CNB_BRANCH
             env:
               handoffIssueIid: $CNB_ISSUE_IID
+              handoffPrIid: ""
   pull_request.comment@npc:
     - <<: *npc-dscoder-job
       endStages:
@@ -724,6 +726,7 @@ $:
             event: api_trigger_npc_handoff
             branch: $CNB_BRANCH
             env:
+              handoffIssueIid: ""
               handoffPrIid: $CNB_PULL_REQUEST_IID
 
   # ── 接力落点：轮数触顶后「下一轮」的真正入口 ──────────────────────────
@@ -750,6 +753,31 @@ $:
   #   于是接力轮一旦再撞顶就断链 —— 实测 17 次接力轮以 error 收场
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   判据与上游同源（平台收尾事实变量），对话载体继续经 env 往下传。
+  #
+  # 对话载体为什么不能在本层声明成「同名变量」（构建 cnb-5bc-1k3e046c7 实测）：
+  #   本层此前写的是
+  #       env:
+  #         handoffIssueIid: $handoffIssueIid
+  #         handoffPrIid: $handoffPrIid
+  #   而真值只由收尾 `endStages` 的 `cnb:trigger.options.env` 从触发方传下来，
+  #   本层 `env` 里那句自引用**永远解析不到值**——平台对无值变量不报错、不告警，
+  #   只把配置里的 `$name` 当字面量往下传；下一跳的 carries 再读它、再写一次，
+  #   字面量沿链越掺越长（实测 18 → 35 → 84 字符）：
+  #       +84 characters ... "...$handoffPrIid-1k3ddqln6$handoffPrIid"
+  #   最终 `cnb:trigger` 的目标流水线名被掺坏，报错落在与它无关的地方：
+  #       docker: Error response from daemon: Invalid container name (x),
+  #       only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
+  #   （`x` 是镜像自带 entrypoint 给探测容器起的名字，本仓配置里没有这个字符串。）
+  #
+  #   根因不在报错那一格，而在「声明了 `$同名变量`、却没有任何一跳向它赋值」
+  #   这种写法本身（教义第 1 条）。
+  #   现形态：本层不再声明 `env`，载体由上一跳经 `cnb:trigger.options.env`
+  #   直接注入（平台「环境变量」篇：子流水线的 env 由触发方给出）；
+  #   两个键**不成对地缺失**由上游负责——评论侧与载体侧的收尾接力都把
+  #   两个键显式供上，不适用的一侧给空串（空串有界，不掺坏流水线名）。
+  #   载体层的键集合与每一跳供上的键集合必须一致，由
+  #   tests/unit/ci/test_npc_turn_handoff_predicate.py 的
+  #   `TestCarrierDeclaresNoSelfReferencingEnv` 常驻钉住。
   #
   # 提示词为何要自带：`role` / `systemPrompt` / `userPrompt` 三个参数
   #   「仅 API 触发时生效」，且 systemPrompt / userPrompt 在 API 触发下**必填**——
@@ -779,9 +807,6 @@ $:
       docker:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
-      env:
-        handoffIssueIid: $handoffIssueIid
-        handoffPrIid: $handoffPrIid
       stages:
         - name: "DSCoder 接力执行任务（thinkingLevel: xhigh，max 档）"
           timeout: 20m
