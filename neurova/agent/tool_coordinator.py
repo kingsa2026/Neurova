@@ -5,8 +5,8 @@
 - 超时转后台不取消：执行超时的任务转入后台继续跑并持有独立引用，
   立即返回 background 信封（{"status":"background","task_id",...}），
   后台完成后结果/错误落入 pending hints，供下一轮注入 LLM 上下文
-- 并行安全声明制：is_concurrency_safe 只对声明的只读工具为 True
-  （并行 gather 的白名单依据；未知工具保守串行）
+- 并行能力声明制：可并发性由**工具自己的声明**回答（`core/tool_capability.py`
+  定形状与推导，`builtin_tools` 的 schema 声明位定成员）；未声明一律串行
 """
 
 from __future__ import annotations
@@ -57,30 +57,48 @@ _OFFLOAD_HINTS: Dict[str, str] = {
     "spawn_subagent": "可用 subagent_status 查询子 Agent 状态与报告（subagent_id 可省略，省略时返回最近派生列表）",
 }
 
-# 并行安全声明清单：只读/无共享可变状态的工具（P1-2 并行 gather 白名单）
-_CONCURRENCY_SAFE_TOOLS = {
-    "calculator",
-    "memory_search",
-    "recall_history",
-    "recall_context_span",
-    "web_search",
-    "web_fetch",
-    "file_parse",
-    "weather",
-    "get_time",
-    "time_now",
-}
-
-
 def get_tool_timeout(tool_name: str, default: Optional[float] = None) -> float:
     """per-tool 超时；未知工具回落默认（大小写不敏感）。"""
     name = (tool_name or "").strip().lower()
     return TOOL_TIMEOUTS_S.get(name, default if default is not None else TOOL_DEFAULT_TIMEOUT_S)
 
 
+def resolveToolCapability(tool_name: str):
+    """取工具的并行能力声明；未声明/未知工具返回 None（调用方按串行处置）。
+
+    唯一的解析入口：事实源是**工具自己的声明**（`builtin_tools` 的 schema
+    声明位），本函数只做"取"与"归一"，不持有任何名单。
+    """
+    from neurova.builtin_tools import get_builtin_tool_capability
+
+    return get_builtin_tool_capability((tool_name or "").strip().lower())
+
+
+def resolveBatchCapabilities(tool_calls: List) -> Dict[str, Any]:
+    """为一批调用解析能力声明：`{归一工具名: 声明或 None}`（每名只解析一次）。
+
+    解析入口的**批量形态**，供调度侧取数用——调度侧不自行拼装工具名归一与
+    去重（那会变成第二份口径），只认这一个口。
+    """
+    resolved: Dict[str, Any] = {}
+    for tool_call in tool_calls or []:
+        name = ((tool_call or {}).get("function") or {}).get("name", "")
+        key = (name or "").strip().lower()
+        if key not in resolved:
+            resolved[key] = resolveToolCapability(key)
+    return resolved
+
+
 def is_concurrency_safe(tool_name: str) -> bool:
-    """并行安全声明制：只读清单内的工具可并行，其余（含未知）保守串行。"""
-    return (tool_name or "").strip().lower() in _CONCURRENCY_SAFE_TOOLS
+    """并行安全查询：读工具**自己的声明**推导资格；未声明一律 False（fail-closed）。
+
+    保留本函数作为"单个工具够不够格并行"的查询口（既有消费方与守卫的契约），
+    但判据已从"查一份名字清单"改为"读该工具的声明 + 三态合取推导"。
+    """
+    from neurova.core.tool_capability import isParallelEligible
+
+    cap = resolveToolCapability(tool_name)
+    return cap is not None and isParallelEligible(cap)
 
 
 class ToolCoordinator:
