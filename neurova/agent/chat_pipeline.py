@@ -2271,6 +2271,12 @@ class ChatPipeline:
         else:
             ctx.reply = await self._call_legacy(ctx)
 
+        # 判据 7（工单 §12.7 第 7 条）/ 裁决 D3：命中率以 provider `cached_tokens`
+        # 计，**不用估算口径自证**。组成快照在上方 LLM 调用**之前**实测（口径与
+        # 发送内容一致），而本轮真值只能调用之后拿到 —— 故在此用本轮真值回填
+        # 同一份快照，而不是把上一轮的贴到本轮组成上（形状对、内容错）。
+        self._backfillProviderCacheUsage(ctx)
+
         # 解析并执行文本中的工具调用
         ctx.reply = await self.tool_executor.execute_text_tool_calls(ctx.reply, ctx.user_input)
 
@@ -2314,6 +2320,30 @@ class ChatPipeline:
 
         # 视觉路由覆盖恢复：LLM 主调用与工具续调均已完成，覆盖使命结束        #（异常路径不经过此处——ContextVar 随请求任务消亡，无跨轮残留）
         self._clear_vision_routing(ctx)
+
+    def _backfillProviderCacheUsage(self, ctx: ChatContext) -> bool:
+        """把本轮供应商真值回填进组成快照（判据 7 的闭环点）。
+
+        真值出处**只有一处**：`core.usage_accounting.last_call()` —— 它已是
+        `multi_model_client._extract_cache_tokens` 归一后的形状（OpenAI
+        `prompt_tokens_details.cached_tokens` 与 Anthropic 风格合并到
+        `cache_read_tokens`）。不在这里另解析一份供应商 usage：那是第二份归一口径。
+
+        无真值 / 无快照 / prompt token 为 0 都如实返回 False，不改读数、不伪造
+        （回填语义在 `composition.applyProviderCacheUsage` 单点定义）。
+        """
+        try:
+            from neurova.context.composition import applyProviderCacheUsage
+            from neurova.core.usage_accounting import get_usage_accounting
+
+            return applyProviderCacheUsage(
+                getattr(self.config, "agent_id", "default") or "default",
+                ctx.session_id,
+                get_usage_accounting().last_call(),
+            )
+        except Exception:  # noqa: BLE001 - 观测副路径失败不影响回复
+            logger.debug("供应商命中率回填跳过", exc_info=True)
+            return False
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """通过 Agent Loop 调用 LLM"""

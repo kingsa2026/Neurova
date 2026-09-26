@@ -371,3 +371,57 @@ class TestIndexIsSessionScoped:
             "本会话视图里出现了别的会话的摘要 —— 索引跨会话串档，装配器按档号把"
             "别的会话的内容装了进来（P1-1/T-03 同族的泄漏）"
         )
+
+class TestAssemblyWorkDoesNotScaleWithTrajectoryLength:
+    """判据 6 延迟侧的**结构不变量**（常驻门禁；比值侧见 live-verify 脚本）。
+
+    工单 §12.7 判据 6 的延迟口径是「视图构建延迟 p95 ≤ 关闭时基线 ×1.2」。
+    本仓的既定纪律（`test_ci_wallclock_assertion_ledger` /
+    `test_clock_caliber_ledger` 两份台账）是：**把结构性契约编码成墙钟阈值**
+    会被负载判红、且误判方向是"越忙越红"，而那条捷径恰好放行真的尾延迟回归。
+
+    故常驻门禁守**结构**：装配工作量由概览区额度界定，**不随索引档数增长** ——
+    同一份窗口预算下，索引 5 档与 30 档装配出的档数必须相同、各档授予预算相同。
+    真退化（"越长的轨迹装越多档"）在这条判据上当场咬合，与机器快慢无关。
+
+    比值侧的可比读数由 live-verify 脚本留存（它打印同机 A/B 的 p50/p95），
+    实测 p95 比 1.02–1.07、裕量 8–16% —— 裕量偏小，故不做常驻阈值判据。
+    """
+
+    @staticmethod
+    def _sessionLayerCount(orch) -> int:
+        pool = orch.context_pool
+        return len(
+            [layer for layer in pool.summaryLayers() if layer["session_id"] == pool.session_id]
+        )
+
+    @pytest.mark.asyncio
+    async def test_assembly_work_does_not_scale_with_trajectory_length(self):
+        """同一窗口预算下：索引档数从 5 涨到 30，装配档数与各档预算必须不变。"""
+        shapes = {}
+        for rounds in (5, 15, 30):
+            orch = _orchestrator(agentId=f"a-t11c-scale-{rounds}")
+            await _foldMany(orch, rounds=rounds)
+            readout = orch.get_context_health()["fold_resolution"]
+            shapes[rounds] = (
+                self._sessionLayerCount(orch),
+                readout["levels"],
+                tuple(readout["level_budgets"]),
+            )
+            orch.context_pool.close()
+
+        indexCounts = [shapes[r][0] for r in (5, 15, 30)]
+        assert indexCounts == [5, 15, 30], (
+            f"索引档数未随轨迹增长（{indexCounts}）—— 本用例没打到长轨迹形态，"
+            "判据在空转"
+        )
+        assembled = {shapes[r][1] for r in (5, 15, 30)}
+        budgets = {shapes[r][2] for r in (5, 15, 30)}
+        assert len(assembled) == 1, (
+            f"装配档数随索引档数增长：{ {r: shapes[r][1] for r in (5, 15, 30)} } —— "
+            "工作量与轨迹长度挂钩（判据 6 的延迟侧会随会话变长劣化）"
+        )
+        assert len(budgets) == 1, (
+            f"各档预算随轨迹长度漂移：{ {r: shapes[r][2] for r in (5, 15, 30)} } —— "
+            "预算由概览区额度界定，不该受索引深度影响"
+        )
