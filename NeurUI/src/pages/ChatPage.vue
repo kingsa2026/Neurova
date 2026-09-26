@@ -674,6 +674,8 @@ const {
   // 会话分叉 / 消息钩子
   forkSession: _forkSession,
   setCheckpoint: _setCheckpoint,
+  // 时间线补课（Issue #262）：从落盘 append-only 事件重放缺失增量
+  replaySessionTimeline: _replaySessionTimeline,
   // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
   // (#2 / ADR 0008 函数调用库契约的一部分 — switchSession / deleteSession 本身
   //  不弹 toast, 调用方按需调 notifySwitchFailure / notifyDeleteFailure;
@@ -1104,6 +1106,13 @@ async function switchSession(sessionId: string): Promise<void> {
   _notifySwitchFailure(result)
   // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
   chatStore.setInputText(chatDraft.restore(sessionId))
+  // 补课 E（Issue #262）：历史（落盘消息）与时间线（落盘事件）是两份事实，
+  // 上次会话中途断流时历史只有已提交的部分，尾轮增量只在时间线里。
+  // 此处对账：历史能对上时间线前缀就把差额补上，对不上则不动（见
+  // replayTimelineInto 的前缀守卫）。
+  if (result.ok) {
+    await _replaySessionTimeline(sessionId, { continueTail: true })
+  }
   scrollToBottomForHistory()
 }
 
