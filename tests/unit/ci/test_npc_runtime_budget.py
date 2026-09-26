@@ -440,18 +440,45 @@ class TestRoleAdmissionIsPinnedBeforeTheAgent:
                 )
         assert not offenders, "\n  ".join(offenders)
 
+    #: 唯一允许出现角色名的形态：接力载体的 `role:` 选项。
+    #: 它是**消费方**（一处引用），不是**名单副本**（一张表）。
+    ROLE_OPTION_LINE = re.compile(r"^\s*role:\s*(?P<name>\S+)\s*$")
+
     def test_role_names_are_not_restated_in_the_pipeline(self, cnb_doc, roles):
-        """`.cnb.yml` 不得抄一份角色名单：抄了就立刻过期，且过期处不会有任何红。"""
+        """`.cnb.yml` 不得抄一份角色**名单**：抄了就立刻过期，且过期处不会有任何红。
+
+        唯一例外是接力载体的 `role:` 选项 —— 它是名单的**消费方**（一处引用）。
+        API 触发的 `npc:go` 必须自带 `role`（平台文档：`role`/`systemPrompt`/
+        `userPrompt` 仅 API 触发时生效），而这个值只能是字面量（Schema 校验在
+        变量替换之前）。故本条只放行 `role:` 这一种形态，且它必须：
+          * 取值在 `npc.roles` 名单内；
+          * 等于 `npc.defaultRole`（钉到声明的默认角色这一个事实源上，
+            改名漏改即红 —— 实测 cnb-ffc-1k3f5v4rm：写错角色名时平台以
+            `Role "…" not found` 直接拒绝接力轮，零产出）。
+        其余任何地方出现角色名都是「第二份名单」，照旧判红。
+        """
         names = {r.get("name") for r in roles if r.get("name")}
-        offenders = [
-            f"{number}: {line.strip()}"
-            for number, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
-            if not line.strip().startswith("#")
-            and any(name in line for name in names)
-        ]
+        default_role = (_load(SETTINGS).get("npc") or {}).get("defaultRole")
+        offenders = []
+        for number, line in enumerate(io.open(CNB, encoding="utf-8"), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if not any(name in line for name in names):
+                continue
+            match = self.ROLE_OPTION_LINE.match(line)
+            if match and match.group("name") in names:
+                if default_role and match.group("name") != default_role:
+                    offenders.append(
+                        f"{number}: {stripped} —— 与 npc.defaultRole "
+                        f"{default_role!r} 不一致（改名漏改不会有任何红）"
+                    )
+                continue
+            offenders.append(f"{number}: {stripped}")
         assert not offenders, (
             "`.cnb.yml` 把角色名单抄成了第二份"
-            "（名单事实源只有 .cnb/settings.yml 的 npc.roles）:\n  " + "\n  ".join(offenders)
+            "（名单事实源只有 .cnb/settings.yml 的 npc.roles）:\n  " + "\n  ".join(offenders) +
+            "\n唯一放行的形态是接力载体的 `role:` 选项（名单的消费方，非名单副本）。"
         )
 
     @staticmethod
