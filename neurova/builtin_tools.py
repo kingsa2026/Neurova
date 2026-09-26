@@ -1211,36 +1211,15 @@ _CAPABILITY_KEY = "capability"
 def get_builtin_tool_capability(tool_name: str):
     """读取内置工具的并行能力声明；未声明/形态非法/非内置一律返回 None。
 
-    形态非法按未声明处理（fail-closed）——声明面自身不做攻击面：写错的声明
-    只会让该工具退回串行，绝不会误放开。
+    本函数只做"取那个声明位"，**解析**交给 `core/tool_capability.parseToolCapability`
+    ——内置侧与 MCP 侧共用同一处口径，两处各写一遍就是给同一种输入两个事实。
     """
-    from neurova.core.tool_capability import ToolCapability, WriteScope
+    from neurova.core.tool_capability import parseToolCapability
 
     schema = _BUILTIN_SCHEMAS.get(tool_name)
     if not isinstance(schema, dict):
         return None
-    raw = schema.get(_CAPABILITY_KEY)
-    if not isinstance(raw, dict):
-        return None
-    read_only = raw.get("readOnly")
-    concurrent = raw.get("concurrentSafe")
-    scopes = raw.get("writeScopes")
-    if not isinstance(read_only, bool) or not isinstance(concurrent, bool):
-        return None
-    if not isinstance(scopes, (list, tuple)):
-        return None
-    try:
-        parsed = frozenset(WriteScope(str(item)) for item in scopes)
-    except ValueError:
-        # 未登记的取值 ⇒ 整条声明作废（不部分采信：半个声明比没声明更危险）
-        return None
-    if not parsed:
-        # 空集合是非法声明：分不清"没填"与"确认没有"，而两者安全处置相反。
-        # 按未声明处置（fail-closed），不替调用方推断意图。
-        return None
-    return ToolCapability(
-        readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed
-    )
+    return parseToolCapability(schema.get(_CAPABILITY_KEY))
 
 
 def list_declared_capabilities() -> List[str]:
