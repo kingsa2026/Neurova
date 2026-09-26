@@ -609,6 +609,16 @@ tests/unit/context/test_context_facade_retirement.py
 #    根因处收窄条件（只排除非数值），不给 summarizer 单开 gauge。）
 tests/unit/context/test_summarizer_degradation_bit_observable.py
 
+# Issue #90 B6-10（批次 F）：池注册表的 session 分区读路径退场。
+#   （根因：注册表的多池机制（`get_or_create` 按 (user,agent,session) 造池 +
+#    `query_agent` 跨 session 分区调取）是**被 T-02 取代的第二套隔离机制**——
+#    真设计是单池 + `chat_scope` 作用域标签。实测生产只登记一个池（键 session 段
+#    恒空），`query_agent` 按 '' 枚举、又用池每轮刷新的 session_id 取数 → 无因果，
+#    池里有内容也一条取不回来，且**返回空列表而不是报错**。
+#    `adopt` / `get_pool`（B6-3/B6-4 已接线）保留为单池读侧入口。
+#    两条裸名撞名（get_or_create / list_sessions）的终局走拥有者级断言。）
+tests/unit/context/test_pool_registry_session_partition_retirement.py
+
 # 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
 #   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
 #    `hasattr(store, "encode_batch")` 恒假，"批量打分"在 store 层从未接上；
