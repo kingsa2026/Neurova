@@ -710,42 +710,42 @@ $:
   #      （通道另修过两次：`cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，
   #        详见下方"通道选型"。）
   #
-  # 判据（平台「环境变量」篇，收尾期可读；构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3
-  # 以真 npc:go 撞 maxTurns 实测，探针 cnb-c9g-1k3c3dqg7 / cnb-o8q-1k3c25fpt 复核）：
-  #   $CNB_PIPELINE_STATUS   收尾期的流水线状态（`error` 表示 stages 失败）
-  #   $CNB_BUILD_FAILED_MSG  失败原文，撞顶时为
-  #                          `Agent aborted: reached maxTurns limit (N)`
-  #   同一 Job 的 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串 —— 故判据只能落在
-  #   `endStages` 的 `if` 上（`.cnb.yml` 的 `stages` 块不得出现这两个变量）。
-  #   ⇒ 两者同时成立才接力。用户只说一句「你好」的正常收官是 `success`，
-  #     第一条即为假，不接力（空轮不烧配额）。
-  #   为什么按原文片段判而不是只看 status：`stages` 失败的原因有很多种
-  #   （门禁红、依赖装不上、脚本报错），只有"用满轮数"才该续跑；
-  #   把任何失败都接成新一轮，等于把真故障转写成烧配额。
-  #   判据仍是**一处**：收尾 `if`。既没有第二份状态文件，也没有计数器/预写变量。
+  # 判据（**v2：改读确定性事实——失败 stage 名**；Issue #272 复核）
+  #   v1 读两处：`$CNB_PIPELINE_STATUS` + `$CNB_BUILD_FAILED_MSG` 的原文片段。
+  #   平台「环境变量」篇确认二者都在收尾期可读（探针 cnb-s4f-1k3c46us9 实测
+  #   `endStages` 里 STATUS=error、MSG=`Agent aborted: reached maxTurns limit (1)`；
+  #   同一 Job 的 `failStages` 里 STATUS 为空串，故判据只能落在 `endStages`）。
+  #   但 v1 的第二个输入**不可靠**：`CNB_BUILD_FAILED_MSG` 不是一段平台文案，
+  #   而是**失败 stage 最后一行输出**。实测（探针 cnb-m16-1k3f5s0ri，2026-09-26）：
+  #     Job 超时被 SIGKILL（signal 9）→ `MSG=[start]`，即脚本自己最后 echo 的那行；
+  #     探针 cnb-ffc-1k3f5v4rm（npc:go 角色名不存在）→ `MSG=[Role "…" not found …]`。
+  #   于是「按原文片段匹配」等于让「是否接力」取决于脚本最后打印了什么：
+  #   v1 补的 `*"超过最大运行时长"*` 片段**在任何一份可下载日志里都搜不到**，
+  #   它是对某次 Agent 自述文案的转抄，不是平台读数。
+  #
+  #   v2 判据（两处，都是平台注入的事实）：
+  #     $CNB_PIPELINE_STATUS        收尾期的流水线状态（`error` = stages 失败）
+  #     $CNB_BUILD_FAILED_STAGE_NAME 失败 stage 的名字
+  #   第二条匹配 npc:go 所在 stage 名字里的 ASCII 标记 `npc-go`：
+  #     · 命中 ⇒ 被中止的是 **Agent 那一格**，成果未落地，该续跑；
+  #     · 未命中（如角色准入/环境自证失败）⇒ 那是配置错误，续跑只会原样再失败，
+  #       必须停在响亮失败上，不得转写成烧配额。
+  #   stage 名与标记的双向锁由 tests/unit/ci/test_npc_auto_continue_wiring.py 钉住：
+  #   改名不改判据、或改判据不改名，任缺其一即红。
   #
   # 接力落点自身也要接力：`api_trigger_npc_handoff` 原先没有
   #   `endStages`，接力轮一旦再撞顶就断链 —— 实测 17 次接力轮以 error 收场
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   现补同一份收尾接力，判据同源，对话载体继续经 env 传下去。
   #
-  # 中止原文必须**两种都覆盖**（构建 cnb-m74-1k3cm87o9 实测，2026-09-26）：
-  #   `$CNB_BUILD_FAILED_MSG` 在平台侧有两种取值来源，判据曾只认第一种：
-  #     · 轮数用满 → `Agent aborted: reached maxTurns limit (N)`
-  #       （实测 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）
-  #     · 整轮会话撞 2h 墙钟 →
-  #       `Agent 已中止：构建环境异常终止，或流水线超过最大运行时长（2h）。`
-  #       （实测 cnb-m74-1k3cm87o9）
-  #   只认前者时，后者整格被判 `skipped`（该构建日志逐字：
-  #     ⏳ 轮数触顶接力：自动开启下一轮（判据取平台收尾事实）: 106ms (skipped)），
-  #   Agent 跑了 222 轮、7,330,218ms 后改而未提交的成果（工作树不跨轮保存）
-  #   随容器一起丢，用户只在 Issue 上看到一条构建号。
-  #   两种原文都接力：它回答的是「上一轮是否被平台中止而没走完」，
-  #   而不是"中止的具体原因"——原因不同不分优先级，成果同样会丢。
-  #   判据仍只覆盖**平台中止**这两种形态：门禁红/依赖装不上等真故障
-  #   不进接力（否则等于把真故障转写成烧配额）。
-  #   本改动由 tests/unit/ci/test_npc_turn_handoff_execution.py 的
-  #   `TestRelayCoversEveryPlatformAbortReason` 常驻钉住。
+  # 接力载体的 `role:` 必须与 `.cnb/settings.yml` 的 `npc.defaultRole` 一致（Issue #272）：
+  #   PR #273 把角色改名为 `DSCoder-Red / -Green / -Yello / -Blue` 并删掉 `DSCoder`，
+  #   而载体仍写 `role: DSCoder` —— 平台直接以
+  #   `Role "DSCoder" not found in .cnb/settings.yml` 拒绝该流水线
+  #   （实测探针 cnb-ffc-1k3f5v4rm），接力轮**零产出**。
+  #   改名那一次没有任何判据会响，故本轮把它钉成常驻判据：
+  #   `.cnb.yml` 的每个 `role:` 字面量都必须在 `npc.roles` 名单里，
+  #   且载体那处必须等于 `npc.defaultRole`。
   #
   # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
   #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
@@ -822,7 +822,7 @@ $:
           # 它不是判据：脚本退出码恒为 0，机器可读真值是输出里的 `verdict=` 那一行。
           script: "$NPX_CALL scripts/ci/npc_runtime_budget.py"
           timeout: 2m
-        - name: "在册角色执行任务（thinkingLevel: max，最高思考档）"
+        - name: "npc-go 在册角色执行任务（thinkingLevel: max，最高思考档）"
           # 工具单次执行的超时只有一个事实源：文件上方的 `&npc-tool-timeout` 锚点。
           # 三处 npc:go 引用同一个锚点，故「超时是多少」在本仓只有一处可读定义。
           <<: *npc-tool-timeout
@@ -847,7 +847,7 @@ $:
             # 替换成字符串而过不了 Schema 的类型校验。
             supportImage: true
       # 轮数触顶后自动开启下一轮。判据取自**平台在收尾时刻注入的事实变量**
-      # （`CNB_PIPELINE_STATUS` / `CNB_BUILD_FAILED_MSG`，实测读数见 `$` 段注释），
+      # （`CNB_PIPELINE_STATUS` / `CNB_BUILD_FAILED_STAGE_NAME`，实测读数见 `$` 段注释），
       # 不再读任何预写标记或自造状态文件 —— 预写值与"本轮是否撞顶"无关
       # （Issue #158 的根因）。全仓只有这一处判据。
       # `env` 里的对话载体由外层三条事件各自补（见下方 `<<:` 覆写）——
@@ -858,7 +858,11 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
+            # 判据取**失败 stage 名**，不取报错原文：硬中止（stage 被 SIGKILL）时
+            # `CNB_BUILD_FAILED_MSG` 只是该 stage 最后一行输出（实测 cnb-m16-1k3f5s0ri：
+            # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
+            # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
+            - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -879,7 +883,11 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
+            # 判据取**失败 stage 名**，不取报错原文：硬中止（stage 被 SIGKILL）时
+            # `CNB_BUILD_FAILED_MSG` 只是该 stage 最后一行输出（实测 cnb-m16-1k3f5s0ri：
+            # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
+            # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
+            - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -895,7 +903,11 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
+            # 判据取**失败 stage 名**，不取报错原文：硬中止（stage 被 SIGKILL）时
+            # `CNB_BUILD_FAILED_MSG` 只是该 stage 最后一行输出（实测 cnb-m16-1k3f5s0ri：
+            # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
+            # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
+            - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -984,14 +996,14 @@ $:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       stages:
-        - name: "在册角色接力执行任务（thinkingLevel: max，最高思考档）"
+        - name: "npc-go 在册角色接力执行任务（thinkingLevel: max，最高思考档）"
           # 同一个超时事实源（见文件上方的 `&npc-tool-timeout` 锚点）：
           # 接力轮与首轮受同一份预算约束，不另写一个数字。
           <<: *npc-tool-timeout
           type: npc:go
           options:
             # 人设走 .cnb/settings.yml 的角色，唯一必达通道不变。
-            # 角色身份随轮传递（Issue #272）：硬编码角色名与 .cnb/settings.yml 的
+            # 角色身份随轮传递（PR #276）：硬编码角色名与 .cnb/settings.yml 的
             # npc.roles 是两份口径，角色一改名（DSCoder → DSCoder-Red/Green/Yello/Blue）
             # 就从第二轮起**静默回落平台默认 prompt** —— 平台对不在册的名字不报错、不告警。
             # 现读平台注入的当前角色名（由上一轮收尾经 env 传下来，见 handoffRole）。
@@ -1012,7 +1024,11 @@ $:
           type: cnb:trigger
           if:
             - '[ "$CNB_PIPELINE_STATUS" = "error" ]'
-            - 'case "$CNB_BUILD_FAILED_MSG" in *"reached maxTurns limit"*|*"超过最大运行时长"*|*"角色准入"*) true;; *) false;; esac'
+            # 判据取**失败 stage 名**，不取报错原文：硬中止（stage 被 SIGKILL）时
+            # `CNB_BUILD_FAILED_MSG` 只是该 stage 最后一行输出（实测 cnb-m16-1k3f5s0ri：
+            # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
+            # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
+            - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
