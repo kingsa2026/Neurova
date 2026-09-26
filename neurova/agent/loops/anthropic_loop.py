@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
+from neurova.agent.loops.turn_run_state import ROUND_BUDGET_FALLBACK, TurnRunState
 from neurova.llm_client import LLMResponse
 
 logger = get_logger(__name__)
@@ -46,44 +47,24 @@ class AnthropicLoop(BaseAgentLoop):
         返回:
             LLMResponse 对象
         """
-
-        # 每次外部调用重置轮次计数（递归内部经 _top_level=False 不清零）
-        if kwargs.get('_top_level', True):
-            self._tool_rounds = 0
-        # 转换 messages 格式 (OpenAI → Anthropic)
-        anthropic_messages = self._convert_messages_to_anthropic(messages)
-
-        # 准备请求参数
-        request_params = {
-            "messages": anthropic_messages,
-        }
-
-        # 添加工具 (包括 computer 工具)
-        if tools:
-            # Anthropic 使用 tools 参数
-            request_params["tools"] = self._convert_tools_to_anthropic(tools)
-
-        # 添加 computer 工具 (如果提供了 computer_handler)
-        if computer_handler:
-            computer_tool = await self._build_computer_tool(computer_handler)
-            if "tools" not in request_params:
-                request_params["tools"] = []
-            request_params["tools"].append(computer_tool)
-
-        # 执行预测
-        response = await self._predict_anthropic(request_params)
-
-        # 处理 tool_calls (包括 computer 工具)
-        if response.tool_calls:
-            # 2026-09-07 根因修复（audit P2-11）：原实现递归无轮次上限——
-            # claude-* 模型工具循环可无限烧 token；对齐 OpenAILoop 的 10 轮上限
-            self._tool_rounds = getattr(self, "_tool_rounds", 0) + 1
-            if self._tool_rounds > 10:
-                logger.warning("Anthropic 工具调用轮次超过上限 (%s)，终止递归", self._tool_rounds)
+        # 轮次态随本次调用构造、逐轮传递：原先挂在实例上，同一 agent 上两个会话
+        # 交叠时后进入者会改写前者的轮次计数（与 OpenAILoop 同一根因，Issue #268）。
+        state = TurnRunState(maxToolRounds=self.resolveToolRoundBudget())
+        while True:
+            response = await self._predict_anthropic(
+                await self._build_request(tools, computer_handler, messages)
+            )
+            if not response.tool_calls:
                 return response
-            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), self._tool_rounds)
 
-            # 执行工具
+            state.toolRounds += 1
+            if state.toolRounds > state.maxToolRounds:
+                logger.warning(
+                    "Anthropic 工具调用轮次超过上限 (%s)，终止工具循环", state.toolRounds
+                )
+                return response
+            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), state.toolRounds)
+
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
 
             # 将工具结果添加到 messages——连同声明这些调用的 assistant 消息：
@@ -97,10 +78,27 @@ class AnthropicLoop(BaseAgentLoop):
                 )
             )
 
-            # 递归调用，直到没有 tool_calls
-            return await self.predict_step(messages, tools, computer_handler, _top_level=False, **kwargs)
+    @staticmethod
+    def resolveToolRoundBudget() -> int:
+        """工具轮上限：配置键 `max_loop_rounds` 派生，读设置失败回退兜底值。"""
+        try:
+            from neurova.security.agent_limits_settings import get_effective_limits
 
-        return response
+            return get_effective_limits()["max_loop_rounds"] // 2
+        except Exception:  # noqa: BLE001 - 设置不可读不阻断对话
+            return ROUND_BUDGET_FALLBACK
+
+    async def _build_request(self, tools, computer_handler, messages) -> Dict:
+        """构造一次 Anthropic 请求参数（含 tools 与 computer 工具）。"""
+        request_params: Dict[str, Any] = {
+            "messages": self._convert_messages_to_anthropic(messages),
+        }
+        if tools:
+            request_params["tools"] = self._convert_tools_to_anthropic(tools)
+        if computer_handler:
+            computer_tool = await self._build_computer_tool(computer_handler)
+            request_params.setdefault("tools", []).append(computer_tool)
+        return request_params
 
     def _convert_messages_to_anthropic(self, messages: List[Dict]) -> List[Dict]:
         """

@@ -130,25 +130,58 @@ def _tool_round_chunks():
 
 
 class _RoundsLLM:
-    """按调用轮次产出预设 chunk 序列的假流式客户端（轮次用尽复用末轮）。"""
+    """按调用轮次产出预设 chunk 序列的假客户端（轮次用尽复用末轮）。
+
+    同时具备 `chat_stream`（流式）与 `chat`（非流式）两个模型边界契约，
+    同一个脚本驱动两条路径，便于比对它们是否停在同一轮。
+    """
 
     def __init__(self, rounds):
+        self.config = SimpleNamespace(
+            temperature=None, max_tokens=None, top_p=None,
+            frequency_penalty=None, model="gpt-4o",
+        )
         self.rounds = rounds
         self.calls = []
 
-    async def chat_stream(self, messages, **kwargs):
+    def _next(self, messages):
         self.calls.append(list(messages))
         idx = min(len(self.calls) - 1, len(self.rounds) - 1)
-        for chunk in self.rounds[idx]:
+        return self.rounds[idx]
+
+    async def chat_stream(self, messages, **kwargs):
+        for chunk in self._next(messages):
             yield chunk
+
+    async def chat(self, messages, **kwargs):
+        chunks = self._next(messages)
+        for chunk in chunks:
+            if isinstance(chunk, LLMResponse):
+                return chunk
+        return LLMResponse(content="", finish_reason="stop")
 
 
 async def _collect(gen):
     return [event async for event in gen]
 
 
+def _tools_payload():
+    return [{
+        "type": "function",
+        "function": {"name": "web_search", "parameters": {"type": "object", "properties": {}}},
+    }]
+
+
 class TestA19StreamRoundLimitSingleSource:
-    def _make_loop(self, llm):
+    """流式与非流式的工具轮上限必须同源（A-19）。
+
+    配置口径单源在 `security/agent_limits_settings`：`max_loop_rounds // 2`
+    （`max_loop_rounds // 2`）。判据是**两条路径在同一配置下
+    停在同一轮**——修复前流式硬编码 `<=10`：配置轮次上限 2 时非流式 2 次调用
+    收尾、流式继续到第 3 次。
+    """
+
+    def _make_loop(self, llm, max_rounds_env="2"):
         agent = MagicMock()
         agent._tool_messages_list = []
         agent.skill_registry = None
@@ -158,29 +191,38 @@ class TestA19StreamRoundLimitSingleSource:
         loop = OpenAILoop(agent)
         loop.llm_client = llm
         loop.agent.llm_client = llm
-        # predict_step 正常时从 get_effective_limits() 读取；此处直设模拟配置=1
-        loop._max_tool_rounds = 1
         return loop
 
-    def test_stream_respects_configured_max_tool_rounds(self):
-        """配置 _max_tool_rounds=1：流式第 2 轮必须停止递归并产出 done 事件。
+    @pytest.fixture(autouse=True)
+    def _rounds_budget(self, monkeypatch):
+        """经生产配置点设定轮次上限 2 → 工具轮上限 1。"""
+        monkeypatch.setenv("NEUROVA_AGENT_MAX_LOOP_ROUNDS", "2")
+        from neurova.security.agent_limits_settings import get_effective_limits
 
-        修复前硬编码 <=10：第 2 轮仍续写（3 次 LLM 调用），第 3 轮被停滞
-        检测终止（无 done 事件）——口径与非流式漂移。
-        """
-        llm = _RoundsLLM([_tool_round_chunks(), _tool_round_chunks()])
-        loop = self._make_loop(llm)
-
-        events = asyncio.run(
-            _collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
+        assert get_effective_limits()["max_loop_rounds"] // 2 == 1, (
+            "测试前提：配置点解析出的工具轮上限为 1"
         )
-        types = [e["type"] for e in events]
 
-        assert len(llm.calls) == 2, (
-            f"A-19: _max_tool_rounds=1 时流式应恰好 2 次 LLM 调用，实际 {len(llm.calls)} 次"
+    def test_stream_and_normal_stop_at_same_round(self):
+        stream_llm = _RoundsLLM([_tool_round_chunks(), _tool_round_chunks()])
+        stream_loop = self._make_loop(stream_llm)
+        asyncio.run(
+            _collect(stream_loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
         )
-        assert types[-1] == "done", f"A-19: 超限后必须收尾产出 done 事件，实际事件序列 {types}"
-        assert types.count("tool_call") == 2
+
+        normal_llm = _RoundsLLM([_tool_round_chunks(), _tool_round_chunks()])
+        normal_loop = self._make_loop(normal_llm)
+        asyncio.run(
+            normal_loop.predict_step([{"role": "user", "content": "hi"}], tools=_tools_payload())
+        )
+
+        assert len(stream_llm.calls) == len(normal_llm.calls), (
+            "A-19: 同一配置下流式与非流式的 LLM 调用次数必须一致，"
+            f"实际 流式 {len(stream_llm.calls)} 次 / 非流式 {len(normal_llm.calls)} 次"
+        )
+        assert len(stream_llm.calls) == 2, (
+            f"A-19: 工具轮上限=1 时流式应恰好 2 次 LLM 调用，实际 {len(stream_llm.calls)} 次"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
