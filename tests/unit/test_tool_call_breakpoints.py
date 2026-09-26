@@ -13,6 +13,7 @@ TDD 测试:工具调用断点修复
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -187,20 +188,55 @@ class TestToolsSupportedNotPermanent:
     """
 
     def test_tools_supported_resets_per_request(self):
-        """_tools_supported 应在每个 predict_step 开始时重置为 True。"""
-        src = open(
-            repo_str("neurova/agent/loops/openai_loop.py"),
-            encoding="utf-8",
-        ).read()
-        # 查找 predict_step 方法中是否重置 _tools_supported
-        # 修复后应在 predict_step 开始时重置(或在 except 后恢复)
-        assert (
-            "self._tools_supported = True" in src
-            and src.count("self._tools_supported = True") >= 2
-        ), (
-            "OpenAILoop._tools_supported 应在每次 predict_step 开始时重置为 True,"
-            "避免一次性 400 后永久禁用所有工具调用。"
-            "应在 __init__ 和 predict_step 两处设置 _tools_supported = True。"
+        """一次 400 降级不得污染下一次请求：第二轮请求必须重新带 tools。
+
+        判据走行为而不是扫源码字符串：`toolsSupported` 现由每轮
+        `TurnRunState` 承载（Issue #268），源码里不再有实例属性可扫。
+        """
+        import asyncio
+
+        from neurova.llm_client import LLMResponse
+
+        class _DegradingLLM:
+            """第一轮带 tools 即抛工具型 400，第二轮按正文返回。"""
+
+            def __init__(self):
+                self.config = SimpleNamespace(
+                    temperature=None, max_tokens=None, top_p=None,
+                    frequency_penalty=None, model="gpt-4o",
+                )
+                self.seen_tools = []
+
+            async def chat(self, messages, **kwargs):
+                self.seen_tools.append("tools" in kwargs and bool(kwargs["tools"]))
+                if len(self.seen_tools) == 1:
+                    raise RuntimeError(
+                        'Error code: 400 - invalid_request_error: tools is not supported (422)'
+                    )
+                return LLMResponse(content="ok", finish_reason="stop")
+
+        from neurova.agent.loops.openai_loop import OpenAILoop
+
+        llm = _DegradingLLM()
+        agent = MagicMock()
+        agent.llm_client = llm
+        agent.config = SimpleNamespace(name="probe", llm_model="gpt-4o")
+        agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        loop = OpenAILoop(agent)
+        loop.llm_client = llm
+        tools = [{"type": "function", "function": {"name": "weather", "parameters": {}}}]
+
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            loop.predict_step([{"role": "user", "content": "hi"}], tools)
+        )
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            loop.predict_step([{"role": "user", "content": "hi again"}], tools)
+        )
+        assert llm.seen_tools[0] is True, "第一轮首次请求应带 tools"
+        assert False in llm.seen_tools, "第一轮 400 后应在本轮内降级重试（不带 tools）"
+        assert llm.seen_tools[-1] is True, (
+            "第二次 predict_step 的请求必须重新带 tools"
+            "（per-request 禁用，不是永久禁用）"
         )
 
 
