@@ -738,14 +738,17 @@ $:
   #   （cnb-sis-1k3bnmick / cnb-f08-1k3bqnvtf 等），成果随容器一起丢。
   #   现补同一份收尾接力，判据同源，对话载体继续经 env 传下去。
   #
-  # 接力载体的 `role:` 必须与 `.cnb/settings.yml` 的 `npc.defaultRole` 一致（Issue #272）：
-  #   PR #273 把角色改名为 `DSCoder-Red / -Green / -Yello / -Blue` 并删掉 `DSCoder`，
-  #   而载体仍写 `role: DSCoder` —— 平台直接以
+  # 接力载体的 `role:` 读**上一跳传下来的角色身份**（`$handoffRole`），不硬编码名字：
+  #   PR #273 把角色改名为 `DSCoder-Red / -Green / -Yello / -Blue`，
+  #   而载体当时仍写 `role: DSCoder` —— 平台直接以
   #   `Role "DSCoder" not found in .cnb/settings.yml` 拒绝该流水线
   #   （实测探针 cnb-ffc-1k3f5v4rm），接力轮**零产出**。
-  #   改名那一次没有任何判据会响，故本轮把它钉成常驻判据：
-  #   `.cnb.yml` 的每个 `role:` 字面量都必须在 `npc.roles` 名单里，
-  #   且载体那处必须等于 `npc.defaultRole`。
+  #   只把名字换成「当前在册的某一个」不治病：角色名再改一次即复断。
+  #   根修是身份随轮传递 —— 评论侧收尾把平台注入的 `$CNB_NPC_NAME` 经
+  #   `handoffRole` 供上，载体读 `$handoffRole`，落点自己的收尾再 `$handoffRole` 传下去。
+  #   常驻判据：`.cnb.yml` 的每个 `role:` 字面量都必须在 `npc.roles` 名单里，
+  #   且载体**不得**硬编码任何在册名字（只能是 `$变量`）。见
+  #   tests/unit/ci/test_npc_handoff_role_continuity.py。
   #
   # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
   #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
@@ -874,6 +877,7 @@ $:
             env:
               handoffIssueIid: $CNB_ISSUE_IID
               handoffPrIid: ""
+              handoffRole: $CNB_NPC_NAME
 
   issue.comment@npc:
     - <<: *npc-dscoder-job
@@ -894,6 +898,7 @@ $:
             env:
               handoffIssueIid: $CNB_ISSUE_IID
               handoffPrIid: ""
+              handoffRole: $CNB_NPC_NAME
   pull_request.comment@npc:
     - <<: *npc-dscoder-job
       endStages:
@@ -913,6 +918,7 @@ $:
             env:
               handoffIssueIid: ""
               handoffPrIid: $CNB_PULL_REQUEST_IID
+              handoffRole: $CNB_NPC_NAME
 
   # ── 接力落点：轮数触顶后「下一轮」的真正入口 ──────────────────────────
   # 三次修，前两次都修错了方向，记在这里免得再犯：
@@ -1000,7 +1006,11 @@ $:
           type: npc:go
           options:
             # 人设走 .cnb/settings.yml 的角色，唯一必达通道不变。
-            role: DSCoder-Red
+            # 角色身份随轮传递（PR #276）：硬编码角色名与 .cnb/settings.yml 的
+            # npc.roles 是两份口径，角色一改名（DSCoder → DSCoder-Red/Green/Yello/Blue）
+            # 就从第二轮起**静默回落平台默认 prompt** —— 平台对不在册的名字不报错、不告警。
+            # 现读平台注入的当前角色名（由上一轮收尾经 env 传下来，见 handoffRole）。
+            role: $handoffRole
             # API 触发下必填：说明本轮为何被拉起、成果落点在哪。
             systemPrompt: 你是在册的 Neurova 代码搭档。本轮是上一轮撞满轮数配额后的接力轮：上一轮 Agent 被平台中止，成果只留在 Issue/PR 评论里。请先读 Issue/PR 评论区里上一轮的分段落交接（干了什么、下一步是什么、未提交的改动在哪），再从断点继续。
             # 对话载体由上一轮经 env 传下来（api_trigger 流水线里拿不到 CNB_ISSUE_IID）。
@@ -1029,6 +1039,10 @@ $:
             env:
               handoffIssueIid: $handoffIssueIid
               handoffPrIid: $handoffPrIid
+              # 角色身份随轮传递：平台把无值变量替换为空串，故根必须来自
+              # 平台注入的 $CNB_NPC_NAME（见上游三条事件的收尾接力），
+              # 本跳只做「把上一跳传下来的原样继续传」。
+              handoffRole: $handoffRole
 
 # 全部在册角色都不挂顶层 key：一律落到 `$` 兜底。
 # （不写死角色数量与名单——名单的事实源是 .cnb/settings.yml 的 npc.roles，
