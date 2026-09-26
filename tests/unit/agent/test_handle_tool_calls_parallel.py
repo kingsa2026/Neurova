@@ -2,11 +2,15 @@
 P1-2 切片 3 — handle_tool_calls 声明制并行红测
 
 语义：
-- 同轮全部调用均声明并行安全（is_concurrency_safe）→ asyncio.gather 并行执行
-- 任一调用未声明 → 整轮保守串行（混合批次降级，避免排序/共享状态复杂度）
+- 同轮调用按**各自的能力声明**分组：连续资格项成组并发，未声明项各自串行
+  （分组形态由 `tests/unit/tools/test_tool_batch_parallelism.py` 逐条测）
 - 结果按原 tool_call 顺序回装（tool_call_id 一一对应）；_tool_messages_list
   内 call/result 记录保持相邻（前端配对展示契约）
 - 解析错误/未知工具不杀伤同批其他调用
+
+并行资格判据用**事件序**（进门高水位 + 执行区间是否重叠），不用墙钟上界：
+墙钟阈值与机器负载强相关，共享 CI 机上会把正确实现读成"未并行"，
+且此类判据由 `tests/unit/test_ci_wallclock_assertion_ledger.py` 逐条登记管控。
 
 注：假路由经 MagicMock 附加异步方法（源码不出现 "def execute(" 字面——
 Mimosa 对该形态误报 SQL 注入，见环境记忆 18-⑧）。
@@ -14,8 +18,8 @@ Mimosa 对该形态误报 SQL 注入，见环境记忆 18-⑧）。
 
 import asyncio
 import json
-import time
 from types import SimpleNamespace
+from typing import Dict, List
 from unittest.mock import AsyncMock
 
 import pytest
@@ -85,17 +89,60 @@ class _StubRegistry:
         return []
 
 
-def _make_registry(tool_names, delays=None):
-    """假技能注册表：按工具名返回固定结果，可注入延迟。"""
+class _ConcurrencyProbe:
+    """并行资格探针：记「进门/离场」事件序与在飞高水位，**不读墙钟**。
+
+    "两个调用是否同时在做"是事件序的事：同批调用进门即 +1、离场即 -1，
+    串行执行时高水位恒为 1、且任一时刻在飞数恒为 1。墙钟阈值与机器负载强相关
+    （共享 CI 机上会把正确实现读成"未并行"），故本文件不用它做判据——
+    受保护子集内的墙钟上界由 `tests/unit/test_ci_wallclock_assertion_ledger.py`
+    逐条管控。
+    """
+
+    def __init__(self):
+        self.events: List = []          # [("enter"|"exit", 工具名), ...]
+        self.live: List = []            # 当前在飞的调用
+        self.peak = 0                   # 在飞高水位
+        self.overlapped: Dict = {}      # 工具名 → 是否曾与别的调用同时在飞
+
+    def enter(self, tool_name):
+        self.events.append(("enter", tool_name))
+        if self.live:
+            self.overlapped[tool_name] = True
+            for other in self.live:
+                self.overlapped[other] = True
+        self.overlapped.setdefault(tool_name, False)
+        self.live.append(tool_name)
+        self.peak = max(self.peak, len(self.live))
+
+    def exit(self, tool_name):
+        self.events.append(("exit", tool_name))
+        if tool_name in self.live:
+            self.live.remove(tool_name)
+
+
+def _enteredAfter(probe, later, earlier):
+    """`later` 是否在 `earlier` **离场之后**才进门（串行次序，非秒数）。"""
+    return probe.events.index(("enter", later)) > probe.events.index(("exit", earlier))
+
+
+def _make_registry(tool_names, probe=None, delays=None):
+    """假技能注册表：按工具名返回固定结果，可注入延迟与在飞探针。"""
     delays = delays or {}
     executed = []
 
     async def _invoke(tool_name):
-        executed.append(tool_name)
-        delay = delays[tool_name] if tool_name in delays else 0.0
-        if delay:
-            await asyncio.sleep(delay)
-        return {"tool": tool_name}
+        if probe is not None:
+            probe.enter(tool_name)
+        try:
+            executed.append(tool_name)
+            delay = delays[tool_name] if tool_name in delays else 0.0
+            if delay:
+                await asyncio.sleep(delay)
+            return {"tool": tool_name}
+        finally:
+            if probe is not None:
+                probe.exit(tool_name)
 
     registry = _StubRegistry(_invoke)
     for name in tool_names:
@@ -137,19 +184,22 @@ def _call(cid, name, args=None):
 class TestParallelGather:
     @pytest.mark.asyncio
     async def test_all_safe_tools_run_concurrently(self, monkeypatch):
+        """两个已声明项必须**同时在飞**：结构判据（在飞高水位），串行时恒为 1。"""
         _declare_concurrency(monkeypatch, {"probe_read", "probe_search"})
+        probe = _ConcurrencyProbe()
         registry = _make_registry(
-            ["probe_read", "probe_search"], delays={"probe_read": 0.25, "probe_search": 0.25}
+            ["probe_read", "probe_search"],
+            probe=probe,
+            delays={"probe_read": 0.05, "probe_search": 0.05},
         )
         loop = _make_loop(registry)
         calls = [_call("c1", "probe_read"), _call("c2", "probe_search")]
 
-        start = time.monotonic()
         msgs = await loop.handle_tool_calls(calls, [])
-        elapsed = time.monotonic() - start
 
-        # 判据用同批次相对耗时：执行器本身有固定开销，绝对秒数会被环境噪声左右
-        assert elapsed < 2 * 0.25 + 0.15, f"并行未生效：耗时 {elapsed:.2f}s（应 ~0.25s）"
+        assert probe.peak == 2, (
+            f"两个已声明项未同时在飞（在飞高水位 {probe.peak}）——串行 await 时恒为 1"
+        )
         assert [m["tool_call_id"] for m in msgs] == ["c1", "c2"]
 
     @pytest.mark.asyncio
@@ -162,35 +212,83 @@ class TestParallelGather:
         `tests/unit/tools/test_tool_batch_parallelism.py` 逐形态测。
         """
         _declare_concurrency(monkeypatch, {"probe_read"})
+        probe = _ConcurrencyProbe()
         registry = _make_registry(
-            ["probe_read", "probe_write"], delays={"probe_read": 0.25, "probe_write": 0.25}
+            ["probe_read", "probe_write"],
+            probe=probe,
+            delays={"probe_read": 0.05, "probe_write": 0.05},
         )
         loop = _make_loop(registry)
         calls = [_call("c1", "probe_read"), _call("c2", "probe_write")]
 
         msgs = await loop.handle_tool_calls(calls, [])
+
+        assert probe.peak == 1, (
+            f"未声明项与已声明项同时在飞（在飞高水位 {probe.peak}）——未声明项必须串行"
+        )
         assert [m["tool_call_id"] for m in msgs] == ["c1", "c2"]
 
     @pytest.mark.asyncio
     async def test_mixedBatchRunsEligiblePairConcurrently(self, monkeypatch):
-        """[读,读,写]：两个已声明项成组并行，未声明项串行——旧判据整轮串行。"""
+        """[读,读,写]：两个已声明项同时在飞，未声明项在**它们离场之后**才跑。
+
+        旧判据（墙钟上界 `elapsed < 0.75s`）与机器负载强相关，共享 CI 机上会把
+        正确实现读成"未并行"；这里改读事件序：并行组的在飞高水位为 2，
+        串行项的整段执行期内没有别的调用在飞，且它的进门晚于并行组的离场。
+        """
         _declare_concurrency(monkeypatch, {"probe_read", "probe_search"})
+        probe = _ConcurrencyProbe()
         registry = _make_registry(
             ["probe_read", "probe_search", "probe_write"],
-            delays={"probe_read": 0.25, "probe_search": 0.25, "probe_write": 0.25},
+            probe=probe,
+            delays={"probe_read": 0.05, "probe_search": 0.05, "probe_write": 0.05},
         )
         loop = _make_loop(registry)
         calls = [
             _call("c1", "probe_read"), _call("c2", "probe_search"), _call("c3", "probe_write"),
         ]
 
-        start = time.monotonic()
         msgs = await loop.handle_tool_calls(calls, [])
-        elapsed = time.monotonic() - start
 
-        # 旧判据：3 项全串行 ≈0.75s；新判据：2 并行 + 1 串行 ≈0.5s
-        assert elapsed < 3 * 0.25, f"混合批未拿到并行：耗时 {elapsed:.2f}s（应 ~0.5s）"
+        assert probe.overlapped["probe_read"] and probe.overlapped["probe_search"], (
+            f"混合批的已声明两项未同时在飞——旧判据整轮串行；事件序 {probe.events}"
+        )
+        assert not probe.overlapped["probe_write"], (
+            f"未声明项与同批其它调用同时在飞——串行语义被破坏；事件序 {probe.events}"
+        )
+        assert _enteredAfter(probe, "probe_write", "probe_search"), (
+            f"串行项未排在并行组之后；事件序 {probe.events}"
+        )
         assert [m["tool_call_id"] for m in msgs] == ["c1", "c2", "c3"]
+
+    @pytest.mark.asyncio
+    async def test_criterionDetectsSerialDegradation(self, monkeypatch):
+        """反向控制：单源上限置 1（合法域下界 = 串行）后，同一批调用必须读成串行。
+
+        两条一起钉住：判据不是恒真的（串行时读数确实变化），且分组真的由
+        单源配置键 `max_parallel_tools` 驱动（只写不读即在此判红）。
+        """
+        monkeypatch.setenv("NEUROVA_AGENT_MAX_PARALLEL_TOOLS", "1")
+        _declare_concurrency(monkeypatch, {"probe_read", "probe_search"})
+        probe = _ConcurrencyProbe()
+        registry = _make_registry(
+            ["probe_read", "probe_search", "probe_write"],
+            probe=probe,
+            delays={"probe_read": 0.05, "probe_search": 0.05, "probe_write": 0.05},
+        )
+        loop = _make_loop(registry)
+        calls = [
+            _call("c1", "probe_read"), _call("c2", "probe_search"), _call("c3", "probe_write"),
+        ]
+
+        await loop.handle_tool_calls(calls, [])
+
+        assert probe.peak == 1, (
+            f"上限置 1 后仍有并发在飞（高水位 {probe.peak}）——上限只写不读"
+        )
+        assert not any(probe.overlapped.values()), (
+            f"上限置 1 后仍有调用同时在飞；事件序 {probe.events}"
+        )
 
     @pytest.mark.asyncio
     async def test_single_tool_unaffected(self):
