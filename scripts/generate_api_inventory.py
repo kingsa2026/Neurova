@@ -85,6 +85,10 @@ _ROUTE_DECORATOR_HINTS = tuple(
     sorted({f"@{owner}.{verb}" for owner in ("router", "app")
             for verb in HTTP_METHODS} | {"APIRouter", "FastAPI"}))
 
+#: 请求参数与 URL 片段：路由表里从不出现，按路径比对前必须先剥掉（见 `resolveCallPath`）。
+#: 两条成分同属「路径段之后的请求目标」，故同一条判据一次覆盖（不各剥一遍）。
+QUERY_OR_FRAGMENT = re.compile(r"[?#].*$", re.S)
+
 REQUEST_CALL_PATTERN = re.compile(
     r"\b(?:" + "|".join(REQUEST_CLIENTS) + r")\.(" + "|".join(HTTP_METHODS) + r")\b")
 BASE_CONST_PATTERN = re.compile(r"const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"]([^'\"]+)['\"]")
@@ -195,13 +199,25 @@ def callArgument(text: str, index: int) -> tuple:
 
 
 def resolveCallPath(raw: str, quote: str, constants: dict) -> str:
-    """把实参原文解析成调用路径（模板串按常量表还原，其余插值归一成 `*`）。"""
+    """把实参原文解析成**调用路径**（模板串按常量表还原，其余插值归一成 `*`）。
+
+    「路径」不含请求参数与片段：路由表的键是 `@router.get("/chat/history")` 的
+    路径本身，查询参数在端点的 `Query(...)` 里、片段根本不发给服务端。故
+    `` `/console/chat/history?session_id=x` `` 与 `` `/console/chat/history` ``
+    是同一条路由的两次调用 —— 不剥掉尾部成分就会拿 `...history?session_id=*`
+    去比 `...history`，**永远不匹配**。
+
+    这不是「少报一条」：它让真实存在的端点被判成「后端未注册」，连带把有活跃
+    消费者的导出函数判成幻影契约（要求删净）。假阳性比漏报更坏 —— 它会训练人
+    整体忽略那张差异表，故归一化落在本函数据一处（`frontendModuleCalls()` 与
+    `frontCallExports()` 两个消费方同源受益，不各自再剥一遍）。
+    """
     if quote == "identifier":
         return constants.get(raw, "")
     if quote == "'":
-        return raw
+        return QUERY_OR_FRAGMENT.sub("", raw)
     resolved = TEMPLATE_CONST.sub(lambda match: constants.get(match.group(1), WILDCARD), raw)
-    return TEMPLATE_ANY.sub(WILDCARD, resolved)
+    return QUERY_OR_FRAGMENT.sub("", TEMPLATE_ANY.sub(WILDCARD, resolved))
 
 
 def joinApiPath(base: str, raw: str) -> str:
