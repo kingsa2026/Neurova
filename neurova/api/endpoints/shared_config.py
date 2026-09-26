@@ -84,6 +84,9 @@ class MCPServerRequest(BaseModel):
     timeout_ms: typing.Optional[int] = None
     enabled: bool = True
     description: str = ""
+    # 并行能力声明位（工具名 → 声明）。缺省空表 = 全部串行（fail-closed：
+    # 向第三方 server 的信任不该默认给）。形状与推导见 core/tool_capability.py。
+    tool_capabilities: typing.Dict[str, dict] = Field(default_factory=dict)
 
 
 class ImportConfigRequest(BaseModel):
@@ -231,6 +234,7 @@ def _mcp_config_from_body(body: "MCPServerRequest") -> dict:
         "headers": dict(body.headers or {}),
         "enabled": body.enabled,
         "description": body.description,
+        "tool_capabilities": dict(body.tool_capabilities or {}),
     }
     if body.timeout_ms:
         config["timeout_ms"] = body.timeout_ms

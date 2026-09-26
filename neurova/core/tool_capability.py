@@ -44,6 +44,7 @@ __all__ = [
     "WriteScope",
     "ToolCapability",
     "ToolBatch",
+    "parseToolCapability",
     "isParallelEligible",
     "planToolBatches",
 ]
@@ -88,6 +89,43 @@ class ToolCapability:
     readOnly: bool = False
     concurrentSafe: bool = False
     writeScopes: FrozenSet[WriteScope] = _DEFAULT_WRITE_SCOPES
+
+
+def parseToolCapability(raw: Any) -> "ToolCapability | None":
+    """把一份**原始声明**（dict，来自某提供方的声明位）解析为 `ToolCapability`。
+
+    **唯一一处**声明解析。内置工具从 `_BUILTIN_SCHEMAS` 的声明位取、MCP 工具从本仓侧
+    server 配置的声明位取，两条路径都走这里——两处各写一遍解析，就会给同一种输入
+    两个事实（一侧拒、一侧采信），这正是本模块要收掉的那种分叉。
+
+    失败一律返回 `None`（调用方按未声明处置，即最保守的串行）。三条拒收规则：
+
+    - 形态非法（不是 dict / 布尔位不是布尔 / 作用域不是序列）：不部分采信——
+      半个声明比没声明更危险；
+    - 作用域含未登记取值：整条作废，不做"忽略未知项"的宽容；
+    - 作用域是**空集合**：分不清"没填"与"确认没有"，而两种语义的安全处置相反
+      （前者最保守、后者可放行），故不替调用方推断意图。
+
+    声明面因此自身不构成攻击面：写错的声明只会让该工具退回串行，绝不会误放开。
+    """
+    if not isinstance(raw, dict):
+        return None
+    read_only = raw.get("readOnly")
+    concurrent = raw.get("concurrentSafe")
+    scopes = raw.get("writeScopes")
+    if not isinstance(read_only, bool) or not isinstance(concurrent, bool):
+        return None
+    if not isinstance(scopes, (list, tuple)):
+        return None
+    try:
+        parsed = frozenset(WriteScope(str(item)) for item in scopes)
+    except ValueError:
+        return None
+    if not parsed:
+        return None
+    return ToolCapability(
+        readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed
+    )
 
 
 def isParallelEligible(cap: ToolCapability) -> bool:

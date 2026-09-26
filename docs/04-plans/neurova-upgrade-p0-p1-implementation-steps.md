@@ -154,11 +154,18 @@ chat_pipeline step3 pending hints 以 [后台工具完成] system 消息注入�
 执行区间是否重叠 + 串行项是否晚于并行组进门）——墙钟阈值与机器负载强相关，
 共享 CI 机上会把正确实现读成"未并行"，且此类判据由
 `tests/unit/test_ci_wallclock_assertion_ledger.py` 逐条登记管控。
+**Issue #271 M4（☑ 2026-09-27）**：MCP 注册点接能力声明通道。第三方 server 提供的
+schema 本仓改不了，故声明位落**本仓侧 server 配置** `tool_capabilities`（配置入口 +
+归一化副本 + 写面 API 三处闭合）；声明解析收口到 `core/tool_capability.parseToolCapability`
+（**唯一一处**，内置侧改为委托它，两侧不再各写一遍）；解析通道认 `mcp.{server}.{tool}`
+命名空间名，**裸名不借 MCP 声明**（否则第三方配置会覆盖本仓工具）。缺省仍串行
+（D-4：向第三方 server 的信任不该默认给）。守卫
+`tests/unit/tools/test_mcp_capability_declaration.py`。
 **P1-2 状态：三切片全部 ☑**。余项=文本正则兜底收窄（原计划第 6 步，随 P2 清理）。
 
 1. 红测：三通道（loop 原生/文本兜底/肌肉记忆）同入口；独立工具并行结果完整；超时转后台语义；hint 注入下一轮
 2. 统一入口 `execute(tool_name, params, source, context)`（`tool_executor.py` 收敛；肌肉记忆自动执行=白名单+高置信直通）
-3. 并行：`loops/base.py` 按能力声明分组调用 `asyncio.gather`（`is_concurrency_safe` 读工具自身声明推导，默认串行保守）
+3. 并行：`loops/base.py` 按能力声明分组调用 `asyncio.gather`（`is_concurrency_safe` 读工具自身声明推导，默认串行保守）；声明源已覆盖内置与 MCP 两条注册路径（Issue #271 的 M1+M2 与 M4）
 4. per-tool 超时注册表
 5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}_coordinator.py` offload 语义）
 6. 文本正则兜底收窄到 openai 兼容层 tools-400 降级路径

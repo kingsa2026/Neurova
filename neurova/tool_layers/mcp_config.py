@@ -13,6 +13,7 @@ transport 推断（command→stdio / url→http，显式声明优先）、缺必
     command/args/cwd/env    stdio 必需 command
     url/headers             http、sse 必需 url
     timeout_ms  默认 30000，必须为正数
+    tool_capabilities  可选，{工具名: 并行能力声明}；缺省空表（一律串行）
 """
 
 import os.path
@@ -23,6 +24,10 @@ _ALLOWED_KEYS = {
     "command", "args", "cwd", "env",
     "url", "headers",
     "timeout_ms",
+    # 本仓侧的并行能力声明位（工具名 → 声明）。MCP 工具的 schema 由第三方 server
+    # 提供、本仓改不了，故声明落在**本仓侧的 server 配置**上——即"每个提供方
+    # 自己的声明处"，不是集中一份大名单。形状与推导见 `core/tool_capability.py`。
+    "tool_capabilities",
 }
 
 _VALID_TRANSPORTS = {"stdio", "http", "sse"}
@@ -97,6 +102,16 @@ def _validate_types(server: typing.Dict[str, typing.Any]) -> None:
         if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)) or timeout_ms <= 0:
             _reject("timeout_ms 必须为正数")
 
+    capabilities = server.get("tool_capabilities")
+    if capabilities is not None:
+        if not isinstance(capabilities, dict):
+            _reject("tool_capabilities 必须为「工具名 → 声明」的字典")
+        for tool_name, declaration in capabilities.items():
+            if not isinstance(tool_name, str) or not tool_name:
+                _reject("tool_capabilities 的工具名必须为非空字符串")
+            if not isinstance(declaration, dict):
+                _reject(f"tool_capabilities[{tool_name!r}] 必须为字典")
+
     transport = server.get("transport")
     if transport:
         # 空字符串视为未指定（交由 _infer_transport 按 command/url 推断）
@@ -106,6 +121,16 @@ def _validate_types(server: typing.Dict[str, typing.Any]) -> None:
 
 
 def _infer_transport(server: typing.Dict[str, typing.Any]) -> str:
+    capabilities = server.get("tool_capabilities")
+    if capabilities is not None:
+        if not isinstance(capabilities, dict):
+            _reject("tool_capabilities 必须为「工具名 → 声明」的字典")
+        for tool_name, declaration in capabilities.items():
+            if not isinstance(tool_name, str) or not tool_name:
+                _reject("tool_capabilities 的工具名必须为非空字符串")
+            if not isinstance(declaration, dict):
+                _reject(f"tool_capabilities[{tool_name!r}] 必须为字典")
+
     transport = server.get("transport")
     if transport:
         return _TRANSPORT_ALIASES.get(transport, transport)
@@ -157,5 +182,11 @@ def validate_mcp_server_config(server: typing.Dict[str, typing.Any]) -> typing.D
         "url": server.get("url", ""),
         "headers": dict(server.get("headers") or {}),
         "timeout_ms": server.get("timeout_ms") or _DEFAULT_TIMEOUT_MS,
+        # 声明位进归一化副本：只加允许键而不落输出，声明会在校验那一刻被静默丢弃
+        # （写了没人读的断点）。逐条深拷贝，调用方改返回值不会回写输入。
+        "tool_capabilities": {
+            str(tool_name): dict(declaration)
+            for tool_name, declaration in (server.get("tool_capabilities") or {}).items()
+        },
     }
     return normalized

@@ -66,12 +66,59 @@ def get_tool_timeout(tool_name: str, default: Optional[float] = None) -> float:
 def resolveToolCapability(tool_name: str):
     """取工具的并行能力声明；未声明/未知工具返回 None（调用方按串行处置）。
 
-    唯一的解析入口：事实源是**工具自己的声明**（`builtin_tools` 的 schema
-    声明位），本函数只做"取"与"归一"，不持有任何名单。
+    唯一的解析入口。事实源按**提供方自己的声明处**取，本函数只做"取"与"归一"，
+    不持有任何名单：
+
+    - 内置工具：`builtin_tools` 的 schema 声明位（工具名大小写不敏感，既有口径）；
+    - MCP 工具：`mcp.{server}.{tool}` → 该 server 在本仓侧配置里的 `tool_capabilities`
+      声明位。第三方 server 提供的 schema 本仓改不了，故声明落在本仓侧的 server
+      配置上——即"每个提供方自己的声明处"，不是集中一份大名单。
     """
     from neurova.builtin_tools import get_builtin_tool_capability
 
-    return get_builtin_tool_capability((tool_name or "").strip().lower())
+    cap = get_builtin_tool_capability((tool_name or "").strip().lower())
+    if cap is not None:
+        return cap
+    return _resolveMcpToolCapability(tool_name)
+
+
+def _resolveMcpToolCapability(tool_name: str):
+    """MCP 命名空间名的声明取数（`mcp.{server}.{tool}`）。
+
+    名字形态解析复用 `security/mcp_grants.parse_mcp_tool_name`（既有单源，不另写
+    一份拆分）。**裸名一律不走这里**：MCP 工具在工具面上有裸名别名，按裸名取声明
+    等于让第三方 server 的配置覆盖本仓工具；裸名归各自来源。
+    前缀严格按小写匹配（真实注册名恒为小写前缀），不做"宽容匹配"——那是没有
+    真实生产者的分支。
+
+    取数落点是**配置的单一事实源**（`SharedConfigManager`，内存态字典，无落盘 IO）
+    ——API 写入、bootstrap 读取、本函数取声明，三处同一个存储。改读各客户端的
+    连接态副本会立刻造出第二份事实源（bootstrap 表与进程级单例各一份，取哪一份
+    取决于走了哪条路径），正是协作红线点名的断点形态。
+    未注册 server / 未声明工具一律返回 None，调用方按串行处置（fail-closed：
+    向第三方 server 的信任不该默认给）。
+    """
+    from neurova.core.tool_capability import parseToolCapability
+    from neurova.security.mcp_grants import parse_mcp_tool_name
+
+    parts = parse_mcp_tool_name(str(tool_name or ""))
+    if parts is None:
+        return None
+    server_id, tool = parts
+
+    from neurova.shared_config import get_shared_config_manager
+
+    try:
+        entry = get_shared_config_manager().get_mcp_server(server_id) or {}
+    except Exception as e:  # noqa: BLE001
+        # 读不到配置 ⇒ 按**未声明**处置（即串行）。这不是"把失败改写成成功"：
+        # 能力解析的失败一侧本来就与"未声明"同一处置（fail-closed），串行是安全
+        # 的那一侧；反之让解析异常穿透出去会打断整轮工具执行——那是把"少用一点
+        # 并行"升级成"这一轮工具全不跑"。失败以警告形态暴露，不静默。
+        # 与 `resolveParallelBudget()` 的取不到设置口径同型（读不到即退保守侧）。
+        logger.warning("MCP 并行声明读取失败（按未声明处置，退串行）: %s", e)
+        return None
+    return parseToolCapability((entry.get("tool_capabilities") or {}).get(tool))
 
 
 def resolveBatchCapabilities(tool_calls: List) -> Dict[str, Any]:

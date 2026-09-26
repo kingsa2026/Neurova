@@ -1107,3 +1107,14 @@ tests/unit/ci/test_npc_runtime_budget.py
 #     不再硬编码角色名（角色一改名即断链）；
 #   · 判据的根取值是平台注入的 $CNB_NPC_NAME，名单唯一事实源仍是 npc.roles。
 tests/unit/ci/test_npc_handoff_role_continuity.py
+
+# Issue #271 M4 片：MCP 注册点的并行能力声明通道（能力无法由提供方声明 = 封闭性缺陷）。
+#   根因：上一片把并行资格换成"读工具自己的声明"，但只落了内置工具一条注册路径；
+#   MCP 工具的 schema 由第三方 server 提供、本仓改不了，且 `mcp_config` 的未知键
+#   显式拒绝把任何声明位当场拒掉 ⇒ `resolveToolCapability("mcp.srv.tool")` 恒 None，
+#   多路 MCP 检索必然整轮串行。
+#   修法三处根因：声明解析收口到 `core/tool_capability.parseToolCapability`（唯一一处，
+#   内置侧改为委托它）；声明位落本仓侧 server 配置 `tool_capabilities`（配置入口
+#   + 归一化副本 + 写面 API 三处闭合）；解析通道接 `mcp.{server}.{tool}`（裸名不借声明）。
+#   判据：写入 → 持久化 → 解析 → 分组调度端到端；未声明/形态非法/共享作用域一律串行。
+tests/unit/tools/test_mcp_capability_declaration.py
