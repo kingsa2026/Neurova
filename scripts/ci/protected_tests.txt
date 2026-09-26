@@ -927,6 +927,23 @@ tests/unit/context/test_fold_rollup_t11e.py
 #   同批在根因处修了索引读面按全局层序派生档号导致跨会话串档（见本文件用例
 #   TestIndexIsSessionScoped）—— 层序是会话内事实，档号只在本会话内派生。
 tests/unit/context/test_fold_resolution_t11c.py
+# 上下文三链路批（Issue #90）T-11c 判据 4：顶概览**每轮常驻**且触达会话起点。
+#   §12.7 判据 4 的通过线（"连续 30 轮每轮都含 L3 且其 covers 触达会话起点；
+#   出现『只剩尾部原文、无任何概览』的轮次即红"）此前**只写在工单里**，
+#   既无判据也无探针读数（台账 §27.5 第 3 条如实登记"未单独钉住"）。
+#   本文件把它落成常驻门禁：判定取三个实测事实（本轮是否折叠 / 视图有无概览行 /
+#   该行对应档的 covers 左端是否等于本会话覆盖起点），并带两条反向控制
+#   （档不覆盖起点必须判违规、别的会话的档不得充当本会话概览）——
+#   没有反向控制它就是恒真断言（教义第 3 条明禁）。
+tests/unit/context/test_fold_top_overview_resident_t11c.py
+# 上下文三链路批（Issue #90）判据 7：前缀命中率以 provider `cached_tokens` 计。
+#   工单 §12.7 判据 7 与裁决 D3 都写明"不用估算口径自证"。实测两处断点，都是契约面：
+#   ① 形状分裂 —— 生产唯一能拿到的真值是 usage_accounting.last_call() 的归一形
+#      （cache_read_tokens），而 composition 只认原始形（prompt_tokens_details.
+#      cached_tokens）→ 真值在手却读不出来；② 生产从不喂 —— measure_composition
+#      的 provider_usage 形参零生产实参，面板命中率永远是 prefix_estimate。
+#   判据带反向控制（原始形不得回退、无真值不得伪装成 provider）。
+tests/unit/context/test_provider_cache_truth_wiring_90.py
 # 上下文三链路批（Issue #90）B6-11（决策 D5）：反思效力记账改「进视图才记账」+ 降档兜底。
 #   根因不是"少传一个参数"：`mark_injected_logs` 记在**选中**那一刻，而条目能不能到
 #   模型面前要过池的相关性门槛（反思归档优先级 60）与信封压缩两层。实测真

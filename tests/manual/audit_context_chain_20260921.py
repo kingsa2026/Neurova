@@ -545,9 +545,13 @@ def p15():
     `estimate_tokens`（T-01 之后的唯一判据尺）；预算取 128k 档型号的窗口份额
     （8000 ≈ 该档 `_resolve_window_token_budget()` 的一档形态）。
 
-    判据两条（都取**实际授予**的读数，不自己算几何比 —— 自算就是恒真断言）：
-    1. 视图内档数 ≥ 3；
-    2. 相邻档预算比落在 4 ±25%（即 1:4:16 的相邻比）。
+    判据三条（都取**实测**读数，不自己算几何比 —— 自算就是恒真断言）：
+    1. 视图内档数 ≥ 3（§12.7 判据 1）；
+    2. 相邻档预算比落在 4 ±25%（即 1:4:16 的相邻比，同判据 1）；
+    3. **顶概览常驻**：连续 30 轮里凡发生折叠的轮次，视图必含一档触达本会话
+       覆盖起点（§12.7 判据 4）。判定与常驻判据同源
+       `tests/unit/context/test_fold_top_overview_resident_t11c.py`
+       的 `topOverviewReachesSessionStart` —— 两处各写一份判定就是第二份口径。
     """
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
@@ -600,24 +604,78 @@ def p15():
                 user_input="继续", session_context=history, relevant_memories=[]
             )
 
+    from neurova.context.fold_index import parseCoversRef
+    from neurova.context.window_compactor import SUMMARY_PREFIX
+
+    def _overviewRows(view):
+        return [
+            str(m.get("content", ""))
+            for m in (view or [])
+            if m.get("role") == "system" and SUMMARY_PREFIX in str(m.get("content", ""))
+        ]
+
+    def _sessionStart():
+        pool = orch.context_pool
+        lefts = []
+        for layer in pool.summaryLayers():
+            if layer.get("session_id") != pool.session_id:
+                continue
+            span = (layer.get("covers") or {}).get("turn_range") or []
+            if span:
+                lefts.append(int(span[0]))
+        return min(lefts) if lefts else None
+
+    def _reachesStart(rows):
+        pool = orch.context_pool
+        start = _sessionStart()
+        if start is None:
+            return False
+        bySeq = {
+            layer["fold_seq"]: layer
+            for layer in pool.summaryLayers()
+            if layer.get("session_id") == pool.session_id
+        }
+        for row in rows:
+            parsed = parseCoversRef(row)
+            layer = bySeq.get(parsed[0]) if parsed else None
+            if layer is None:
+                continue
+            span = (layer.get("covers") or {}).get("turn_range") or []
+            if span and int(span[0]) <= start:
+                return True
+        return False
+
     history = [_round(i) for i in range(14)]
     asyncio.run(_build(history))
+    foldedTurns = 0
+    residentViolations = []
     for rnd in range(29):
         history = history + [_round(100 + rnd)]
-        asyncio.run(_build(history))
+        view = asyncio.run(_build(history))
+        if not getattr(orch, "_last_folded_hashes", None):
+            continue  # 未折叠的轮次没有概览行是正确形状（不凭空造行）
+        foldedTurns += 1
+        rows = _overviewRows(view)
+        if not rows:
+            residentViolations.append((rnd + 1, "无任何概览行"))
+        elif not _reachesStart(rows):
+            residentViolations.append((rnd + 1, "概览不触达会话起点"))
 
     readout = orch.get_context_health()["fold_resolution"]
     levels = readout["levels"]
     budgets = list(readout["level_budgets"])[:3]
     ratios = [round(near / far, 2) for near, far in zip(budgets, budgets[1:])]
     inTolerance = len(ratios) >= 2 and all(4 * 0.75 <= r <= 4 * 1.25 for r in ratios)
-    ok = levels >= 3 and inTolerance
+    resident = foldedTurns > 0 and not residentViolations
+    ok = levels >= 3 and inTolerance and resident
+    poolLayers = len(orch.context_pool.summaryLayers()) if orch.context_pool else 0
     orch.context_pool.close()
     emit(
         "P15",
-        f"30 轮后视图档数={levels}（池内索引档数={len(orch.context_pool.summaryLayers()) if orch.context_pool else 0}）"
+        f"30 轮后视图档数={levels}（池内索引档数={poolLayers}）"
         f" 前{len(budgets)}档预算={budgets} 相邻比={ratios} 1:4:16 容差内={inTolerance} "
-        f"摘要调用={calls['n']} 截断字符={readout['truncated_chars']} "
+        f"摘要调用={calls['n']} 截断字符={readout['truncated_chars']} | "
+        f"判据4 折叠轮={foldedTurns} 未触达起点轮={residentViolations[:3]} 常驻={resident} "
         f"{'PASS' if ok else 'FAIL'}",
     )
 
