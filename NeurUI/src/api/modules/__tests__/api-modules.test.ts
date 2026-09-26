@@ -16,7 +16,6 @@ import * as image from '@/api/modules/image'
 import * as builder from '@/api/modules/builder'
 import * as modelAdapter from '@/api/modules/model-adapter'
 import * as contextApi from '@/api/modules/context'
-import * as contextPool from '@/api/modules/context-pool'
 import * as agentEnhancement from '@/api/modules/agent-enhancement'
 import * as agentCommunication from '@/api/modules/agent-communication'
 import * as neurflow from '@/api/modules/neurflow'
@@ -213,31 +212,10 @@ describe('context API', () => {
 })
 
 // ===========================================================================
-// context-pool.ts
+// context-pool.ts 的包装已随 Issue #90 §10 第 2b 项下架（假设置面：零 .vue 消费者、
+// 读数是模块级常量、PUT 早已 501）。端点 + 前端模块 + barrel 再导出 + 锁 URL 的用例
+// 四处同删；防复活钉见 tests/unit/api/test_context_pool_settings_face_retirement.py。
 // ===========================================================================
-describe('context-pool API', () => {
-  it('getPoolSettings calls GET /context-pool/pool-settings', async () => {
-    await contextPool.getPoolSettings()
-    expect(mockGet).toHaveBeenCalledWith('/context-pool/pool-settings')
-  })
-
-  it('updatePoolSettings calls PUT /context-pool/pool-settings', async () => {
-    await contextPool.updatePoolSettings({ max_size: 200 })
-    expect(mockPut).toHaveBeenCalledWith('/context-pool/pool-settings', { max_size: 200 })
-  })
-
-  it('getModelTokenBudget calls GET with model name in path', async () => {
-    await contextPool.getModelTokenBudget('gpt-4o')
-    expect(mockGet).toHaveBeenCalledWith('/context-pool/pool-settings/token-budget/gpt-4o')
-  })
-
-  it('testBudgetCalculation calls POST /context-pool/pool-settings/test-budget', async () => {
-    await contextPool.testBudgetCalculation({ model_name: 'gpt-4o' })
-    expect(mockPost).toHaveBeenCalledWith('/context-pool/pool-settings/test-budget', {
-      model_name: 'gpt-4o',
-    })
-  })
-})
 
 // ===========================================================================
 // agent-enhancement.ts
