@@ -404,29 +404,31 @@ class OpenAILoop(BaseAgentLoop):
             # 执行工具
             tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
 
-            # P2-6：工具轮间回放推理链。
-            # 默认关（NEUROVA_REASONING_REPLAY=1 开）+ 能力门——DeepSeek 等
-            # provider 禁止回传 reasoning_content，盲目回放是兼容回归。
-            if reasoning_content:
+            # P2-6：工具轮间回放推理链——reasoning_content 默认关
+            # （NEUROVA_REASONING_REPLAY=1 开）+ REASONING 能力门，部分 provider
+            # 显式禁止回传；而 assistant.tool_calls 声明是无条件的协议要求，
+            # 缺它会被严格网关判 400（与流式路径同一 buildToolRoundMessages）
+            _round_reasoning = reasoning_content or ""
+            _replayReasoning = False
+            if _round_reasoning:
                 try:
-                    from neurova.agent.loops.reasoning_replay import (
-                        build_reasoning_assistant_message,
-                        should_replay_reasoning,
-                    )
+                    from neurova.agent.loops.reasoning_replay import should_replay_reasoning
 
-                    if should_replay_reasoning(
+                    _replayReasoning = should_replay_reasoning(
                         str(getattr(self.agent.config, "llm_model", "") or "")
-                    ):
-                        request_params["messages"].append(
-                            build_reasoning_assistant_message(
-                                reasoning_content, tool_calls=tool_calls
-                            )
-                        )
+                    )
                 except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
-                    logger.debug("reasoning 回放失败(忽略)", exc_info=True)
+                    logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
 
-            # 将工具结果添加到消息
-            request_params["messages"].extend(tool_messages)
+            # 将工具结果添加到消息（连同协议要求的 assistant 声明）
+            request_params["messages"].extend(
+                self.buildToolRoundMessages(
+                    tool_calls,
+                    tool_messages,
+                    assistantText=getattr(response, "content", "") or "",
+                    reasoningText=_round_reasoning if _replayReasoning else None,
+                )
+            )
 
             # 递归调用，直到没有 tool_calls
             return await self._predict_normal(request_params)
@@ -710,29 +712,28 @@ class OpenAILoop(BaseAgentLoop):
             # predict_step 顶层从 get_effective_limits() 读取）——消除硬编码 10 漂移
             if self._tool_rounds <= (getattr(self, "_max_tool_rounds", None) or 10):
                 # 工具结果入历史后流式续写（递归），保持后续轮次同样逐 token 转发
-                # P2-6（断点④核验补齐）：流式路径同样回放推理链（与非流式
-                # _predict_normal 同闸门——env 默认关 + REASONING 能力门）
+                # P2-6：流式路径同批回放推理链——但 reasoning_content 与被禁止它的
+                # provider 分档，assistant.tool_calls 声明本身是无条件协议要求
+                # （缺声明 → 严格网关把续写判 400，见 base.buildToolRoundMessages）
                 _round_reasoning = "".join(reasoning_parts)
+                _replayReasoning = False
                 if _round_reasoning:
                     try:
-                        from neurova.agent.loops.reasoning_replay import (
-                            build_reasoning_assistant_message,
-                            should_replay_reasoning,
-                        )
+                        from neurova.agent.loops.reasoning_replay import should_replay_reasoning
 
-                        if should_replay_reasoning(
+                        _replayReasoning = should_replay_reasoning(
                             str(getattr(self.agent.config, "llm_model", "") or "")
-                        ):
-                            request_params["messages"].append(
-                                build_reasoning_assistant_message(
-                                    _round_reasoning,
-                                    round_reply=round_reply,
-                                    tool_calls=pending_tool_calls,
-                                )
-                            )
+                        )
                     except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
-                        logger.debug("reasoning 回放失败(忽略)", exc_info=True)
-                request_params["messages"].extend(tool_messages)
+                        logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
+                request_params["messages"].extend(
+                    self.buildToolRoundMessages(
+                        pending_tool_calls,
+                        tool_messages,
+                        assistantText=round_reply,
+                        reasoningText=_round_reasoning if _replayReasoning else None,
+                    )
+                )
                 if stagnant:
                     stagnation_prompt = (
                         "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。"
