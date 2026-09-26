@@ -14,6 +14,15 @@ export interface ConsoleSession {
   updated_at?: string
 }
 
+/** 会话时间线事件（后端 append-only JSONL 的原样形态，字段按事件类型变化）。 */
+export type ConsoleTimelineEvent = Record<string, unknown>
+
+export interface ConsoleTimelineResult {
+  sessionId: string
+  events: ConsoleTimelineEvent[]
+  total: number
+}
+
 export interface UploadResult {
   filename: string
   path: string
@@ -30,6 +39,25 @@ const BASE = '/console'
 /** Get console session list. */
 export function getConsoleSessions(params?: { agent_id?: string; limit?: number }) {
   return api.get<ApiResponse<ConsoleSession[]>>(`${BASE}/chat/sessions`, { params })
+}
+
+/** Get the file-message history of a console session. */
+export function getConsoleChatHistory(sessionId: string) {
+  return api.get<ApiResponse<{ messages: unknown[]; session_id: string }>>(
+    `${BASE}/chat/history?session_id=${encodeURIComponent(sessionId)}`,
+  )
+}
+
+/**
+ * 取会话时间线（SSE 事件的 append-only 重放面）。
+ *
+ * limit<=0 表示「全量」——后端把 0 当作无上限，故不把 0 发上线。
+ * 服务端语义为「取最近 N 条」，调用方无须关心截断方向。
+ */
+export function getConsoleSessionTimeline(sessionId: string, limit = 0) {
+  const path = `${BASE}/chat/sessions/${encodeURIComponent(sessionId)}/timeline`
+  const query = limit > 0 ? `?limit=${Math.trunc(limit)}` : ''
+  return api.get<ApiResponse<{ session_id: string; events: ConsoleTimelineEvent[]; total: number }>>(path + query)
 }
 
 /** Delete a console session. */

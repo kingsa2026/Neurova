@@ -1,9 +1,15 @@
 import { ref } from 'vue'
 import api from '@/api'
-import { archiveConsoleSession, deleteConsoleSession, unarchiveConsoleSession } from '@/api/modules/console'
+import {
+  archiveConsoleSession,
+  deleteConsoleSession,
+  getConsoleSessionTimeline,
+  unarchiveConsoleSession,
+} from '@/api/modules/console'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
 import { buildStepsFromHistory } from '@/utils/chatSteps'
+import { replayTimelineInto } from '@/utils/timelineEvents'
 import { artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, type ArtifactEventPayload } from '@/utils/artifacts'
 import bus from '@/bus'
 import i18n from '@/i18n'
@@ -56,6 +62,16 @@ export type SwitchResult =
  * "前端错误反馈策略深化" 小节.
  */
 export type DeleteResult = { ok: true } | { ok: false; error: unknown }
+
+/**
+ * 时间线补课结果.
+ *
+ * 与 SwitchResult / DeleteResult 同形：不内部弹 toast，仅返回 ok/error，
+ * 错误策略由调用方 own（补课是后台自愈动作，默认静默）。
+ */
+export type TimelineReplayResult =
+  | { ok: true; added: number }
+  | { ok: false; error: unknown }
 
 export interface UseChatOptions {
   /** i18n error message resolver, e.g. (key, fallback) => t(key) || fallback */
@@ -444,6 +460,41 @@ export function useChat(options: UseChatOptions = {}) {
   }
 
   /**
+   * 会话时间线补课（Issue #262）。
+   *
+   * SSE 断线重连时，浏览器侧缺的增量可以从服务端 append-only 时间线取回。
+   * 与实时流的 replay_from 不同：那条走 SSE 缓冲，本函数走落盘事实源——
+   * 缓冲有界、落盘是全域，两者互为兜底。
+   *
+   * 写入契约：只在目标会话仍是当前会话时写 store（会话已切走则丢弃结果，
+   * 与 switchSession 的请求序号守卫同向）；时间线为空是正常态（未启用
+   * 落盘的旧会话），返回 ok 且 added=0，不造空消息。
+   */
+  async function replaySessionTimeline(
+    sessionId: string,
+    replayOptions: { skipRounds?: number; continueTail?: boolean; limit?: number } = {},
+  ): Promise<TimelineReplayResult> {
+    try {
+      const res = await getConsoleSessionTimeline(sessionId, replayOptions.limit ?? 0)
+      const data = (res as { data?: { events?: unknown } } | undefined)?.data
+      const events = Array.isArray(data?.events) ? data.events : []
+      if (events.length === 0) return { ok: true, added: 0 }
+      if (store.currentSessionId !== sessionId) return { ok: true, added: 0 }
+
+      const added = replayTimelineInto(store.messages, events, {
+        skipRounds: replayOptions.skipRounds ?? 0,
+        continueTail: replayOptions.continueTail ?? false,
+      })
+      for (const message of added) store.addMessage(message)
+      return { ok: true, added: added.length }
+    } catch (err) {
+      // 补课是自愈动作，失败不打断用户（与 loadArchivedSessions 同策略）
+      console.warn('[Chat] Session timeline replay failed:', err)
+      return { ok: false, error: err }
+    }
+  }
+
+  /**
    * 用户主动删除场景的错误策略: 删除失败时弹 toast.
    *
    * 仅 ChatPage.deleteSession wrapper (用户点击删除菜单项) 应调用此函数.
@@ -600,6 +651,8 @@ export function useChat(options: UseChatOptions = {}) {
     archiveSession,
     loadArchivedSessions,
     restoreSession,
+    // timeline replay — 断线补课：从落盘 append-only 时间线取回缺失增量
+    replaySessionTimeline,
     // round actions
     deleteRound,
     sendFeedback,
