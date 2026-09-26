@@ -1,39 +1,27 @@
 """测试API路由冲突问题"""
-import pytest
 import importlib
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+import importlib.util
+
+import pytest
 
 
 # 2026-09-13 死壳清理：endpoints/channel.py(/v1/channels 假桥) 已删除，
 # 原 channel-vs-channels 冲突测试主体消失；渠道唯一真集为 channel_config.py(/v1/channel-configs)
 # 与 channels.py(/v1/channel-adapters)，防复活钉见 tests/unit/api/test_channel_shell_removed.py
 def test_context_route_conflict():
-    """测试context和context_pool_settings模块路由冲突"""
-    # 根据分析文档，两个模块都注册到 /v1/context
-    
-    app = FastAPI()
-    
-    try:
-        from neurova.api.endpoints import context
-        from neurova.api.endpoints import context_pool_settings
-        
-        # 检查两个模块是否都有router
-        assert hasattr(context, 'router'), "context模块应该有router"
-        assert hasattr(context_pool_settings, 'router'), "context_pool_settings模块应该有router"
-        
-        # 检查路由前缀
-        context_prefix = context.router.prefix
-        context_pool_prefix = context_pool_settings.router.prefix
-        
-        print(f"context模块路由前缀: {context_prefix}")
-        print(f"context_pool_settings模块路由前缀: {context_pool_prefix}")
-        
-        # 根据分析文档，两个模块都注册到 /v1/context
-        # 这会导致冲突
-        
-    except ImportError as e:
-        pytest.skip(f"跳过测试: 模块导入失败 - {e}")
+    """context / context_pool_settings 的同名歧义已随后者下架而消失。
+
+    2026-09-13 那次修复把两者分别挂到 `/v1/context` 与 `/v1/context-pool`；
+    2026-09-26（Issue #90 §10 第 2b 项）判定 `context_pool_settings` 是零非测试
+    消费者的假设置面，整面下架 —— 冲突主体不复存在。本用例改锁**该面确实不在**
+    （防复活），判据单源在 `tests/unit/api/test_context_pool_settings_face_retirement.py`。
+    """
+    assert importlib.util.find_spec("neurova.api.endpoints.context_pool_settings") is None, (
+        "context_pool_settings 已判定下架却又出现 —— 已收口的同名歧义面复活了。"
+    )
+    from neurova.api.endpoints import context
+
+    assert hasattr(context, "router"), "context 模块应该有 router"
 
 
 def test_deprecated_market_shells_are_gone():

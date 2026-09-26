@@ -3,6 +3,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import importlib
+import importlib.util
 
 
 def create_test_app():
@@ -48,33 +49,26 @@ def test_channel_route_registration():
 
 
 def test_context_route_registration():
-    """测试context和context_pool_settings模块的实际路由注册"""
+    """context / context_pool_settings 的实际路由注册（后者已下架，改锁防复活）。
+
+    2026-09-26（Issue #90 §10 第 2b 项）：`context_pool_settings` 判定为假设置面
+    整面下架，故本用例不再把它挂进测试 app —— 全仓唯一挂载点由主装配路由表覆盖，
+    判据单源在 `tests/unit/api/test_context_pool_settings_face_retirement.py`。
+    """
+    assert importlib.util.find_spec("neurova.api.endpoints.context_pool_settings") is None, (
+        "context_pool_settings 已判定下架却又出现。"
+    )
+
     app = create_test_app()
-    
-    # 注册context模块
-    try:
-        from neurova.api.endpoints import context
-        app.include_router(context.router, prefix="/api/v1/context", tags=["context"])
-    except ImportError:
-        pytest.skip("context模块导入失败")
-    
-    # 注册context_pool_settings模块
-    try:
-        from neurova.api.endpoints import context_pool_settings
-        app.include_router(context_pool_settings.router, prefix="/api/v1/context", tags=["context_pool_settings"])
-    except ImportError:
-        pytest.skip("context_pool_settings模块导入失败")
-    
-    # 获取所有路由
-    routes = []
-    for route in app.routes:
-        if hasattr(route, "path"):
-            routes.append(route.path)
-    
-    print(f"注册的路由: {routes}")
-    
-    # 检查是否有重复的路由
-    # 两个模块都注册到 /api/v1/context，这会导致冲突
+    from neurova.api.endpoints import context
+
+    app.include_router(context.router, prefix="/api/v1/context", tags=["context"])
+    # 装配后的路由表取数走本仓唯一口径（现行 FastAPI 的 `include_router` 不再把
+    # 子路由就地摊平，直接 `for r in app.routes: r.path` 会静默取空集）。
+    from tests.route_table import registeredPaths
+
+    routes = registeredPaths(app)
+    assert any("/api/v1/context" in route for route in routes), routes
 
 
 def test_deprecated_market_shells_are_gone():
@@ -92,7 +86,6 @@ def test_actual_registration_simulation():
     endpoint_modules = [
         ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channels API"),
         ("neurova.api.endpoints.context", "/v1/context", "Context API"),
-        ("neurova.api.endpoints.context_pool_settings", "/v1/context", "Context Pool Settings API"),
     ]
     
     registered_routes = []
