@@ -93,7 +93,7 @@ class TestEnrichmentNotInterleaving:
 
         assert [h["knowledge_id"] for h in hits] == ["entry-1", "ghost"], "合一不得改命中顺序"
         assert hits[0]["lineage_id"] and hits[0]["evidence_state"] == "evidenced"
-        assert hits[0]["confidence"] == pytest.approx(0.50)
+        assert hits[0]["confidence"] == pytest.approx(0.45)
         assert hits[1].get("lineage_id") is None, "查不到治理行就原样放行，不编造"
         assert lineage == [hits[0]["lineage_id"]]
 

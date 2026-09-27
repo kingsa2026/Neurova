@@ -125,16 +125,17 @@ class TestNarrativeRecordShape:
             AdmissionRequest(agentId="default", subjectLabel="甲", objectTerm="乙",
                              content="乙", confidence=0.7)
         one = gate.admit(_narrative("k-1"), allowPendingSegments=True)
-        # 0.45 基线 + 0.05 可回放：叙述记录的"现场"就是那条条目，咽喉把 source_turn_id
-        # 兜底成 entry:<kid>，所以这一项天然带权——不是白送分，是确实可回放。
-        assert store.fact(one.factId)["confidence"] == pytest.approx(0.50)
+        # 1 源 = 0.45 基线。001 摘掉了"有现场可回放 +0.05"：它的判据是
+        # source_turn_id 非空，而咽喉把该列兜底成 entry:<kid>（条目身份），
+        # 于是这一项对任何写入恒真、对任何缺证恒不减——不是可回放凭证。
+        assert store.fact(one.factId)["confidence"] == pytest.approx(0.45)
 
         second = gate.admit(_narrative("k-2", subjectLabel="另一个条目主体名称",
                                        content=_OTHER_BODY,
                                        assertions=[_assertion("u1"), _assertion("u2")]),
                             allowPendingSegments=True)
-        # 2 源 0.60 + 可回放 0.05
-        assert store.fact(second.factId)["confidence"] == pytest.approx(0.65)
+        # 2 源 = 0.60
+        assert store.fact(second.factId)["confidence"] == pytest.approx(0.60)
 
 
 class TestReadSurfaceGuard:

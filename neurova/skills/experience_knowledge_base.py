@@ -214,6 +214,11 @@ class ExperienceKnowledgeBase:
             # "这条经验被执行后客观成没成"，人说的话不能写进那一格（否则 007 的排序
             # 与 008 的读数一起吃到的就不再是证据）。NULL = 未处置。
             ("operator_disposition", "TEXT"),
+            # 工单 001：逐字可核结论。与 `evidence_state`（本轮有没有服务端票据）
+            # 和 `adoption_outcome`（被采纳后成没成）**三轴正交**——三者挤进任何
+            # 一栏，那一栏的读数就不再指它原本指的东西。
+            # 存量行回填 `unchecked`：它们写入时本闸还不存在，宣称"核过了"是假的。
+            ("verifiability_state", "TEXT NOT NULL DEFAULT 'unchecked'"),
         ):
             if column not in cols:
                 cur.execute(f"ALTER TABLE experience_records ADD COLUMN {column} {ddl}")
@@ -311,6 +316,7 @@ class ExperienceKnowledgeBase:
         confidence_score: Optional[float] = None,
         tags: Optional[List[str]] = None,
         evidence: Optional[bool] = None,
+        evidence_text: str = "",
     ) -> int:
         """添加经验记录
 
@@ -322,6 +328,11 @@ class ExperienceKnowledgeBase:
             execution_time: 执行耗时（秒）
             confidence_score: 置信度 [0,1]
             tags: 标签列表
+            evidence_text: 生成这段 `result` 的原料（工单 001）。只有调用方知道
+                这段说法是从哪读出来的（用户输入 / 原文）。提供时走共享逐字可核闸，
+                违规记 `verifiability_state='violated'` 并在检索侧降权；不提供则落
+                `unchecked`，**不冒充**核过——旧调用点未被改造前，读面上
+                "没核"与"核过"必须分得开。
             evidence: 本轮是否拿到**服务端客观票据**（工单 010 起的口径）。
                 None（含未传）⇒ 落 `evidence_state='unevidenced'`：模型自述与本轮
                 工具回执（002 的记录聚合）都不算证据，条目照常入库（D1）但检索侧
@@ -344,6 +355,13 @@ class ExperienceKnowledgeBase:
         content_key = normalized_payload_key(exp.context)
         success_flag = None if exp.success is None else (1 if exp.success else 0)
         evidence_state = "evidenced" if evidence is not None else "unevidenced"
+        # 工单 001：`result` 是模型输出，引用精确标识符（URL/路径/版本/hash）时
+        # 必须在 `evidence_text` 里逐字存在。判定实现在共享位——与摘要器同源。
+        # 处置是**降权不阻塞**：经验是概率性资产，阻塞会让检索面大面积失声，
+        # 而一条编造的经验只是"这次别照它做"，不是"这条不能存在"。
+        from neurova.knowledge.verifiability import verifiabilityState
+
+        verifiability_state = verifiabilityState(result_json or "", evidence_text)
 
         with self._lock:
             cur = self._conn.cursor()
@@ -373,10 +391,13 @@ class ExperienceKnowledgeBase:
                         UPDATE experience_records
                         SET result = ?, timestamp = ?, seen_count = seen_count + 1,
                             evidence_state = CASE WHEN ? = 'evidenced'
-                                                  THEN 'evidenced' ELSE evidence_state END
+                                                  THEN 'evidenced' ELSE evidence_state END,
+                            verifiability_state = CASE WHEN ? <> 'unchecked'
+                                                       THEN ? ELSE verifiability_state END
                         WHERE id = ?
                         """,
-                        (result_json, exp.timestamp, evidence_state, record_id),
+                        (result_json, exp.timestamp, evidence_state,
+                         verifiability_state, verifiability_state, record_id),
                     )
                     self._conn.commit()
                     logger.debug("Duplicate experience merged into id=%s", record_id)
@@ -387,8 +408,8 @@ class ExperienceKnowledgeBase:
                 INSERT INTO experience_records
                     (skill_name, context, result, success, timestamp, feedback,
                      agent_id, session_id, execution_time, confidence_score, tags, created_at,
-                     content_key, seen_count, evidence_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                     content_key, seen_count, evidence_state, verifiability_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     skill_name,
@@ -405,6 +426,7 @@ class ExperienceKnowledgeBase:
                     created_at,
                     content_key,
                     evidence_state,
+                    verifiability_state,
                 ),
             )
             self._conn.commit()
@@ -457,6 +479,10 @@ class ExperienceKnowledgeBase:
     # 0.45 不是拍的：证据档跨度是 +0.15（success）到 −0.25（failure），罚分必须大于
     # 这个跨度，否则"被降权的成功条"仍然压在"客观失败条"上面，降权等于没降。
     DEMOTION_PENALTY = 0.45
+    # 逐字可核违规的罚分（工单 001）：0.30 取在证据档跨度（0.40）之内、人工处罚
+    # （0.45）之下——编造的路径/版本比"照它做砸了"更该躲，但一个人明确说了
+    # "这条别用"仍排在更后面（人的否定语义更强）。
+    VERIFIABILITY_PENALTY = 0.30
 
     def set_operator_disposition(self, record_ids: Optional[List[int]], disposition: Optional[str]) -> int:
         """登记人工处置态：审核通过 / 降权 / 隐藏 / 恢复。可逆，不删行，不碰证据列。
@@ -731,6 +757,12 @@ class ExperienceKnowledgeBase:
                 quality_score = 0.1 if d.get("success") else -0.05
 
             similarity = relevance + quality_score
+            # 逐字可核违规（工单 001）降权不剔除：这条经验引用了原文里不存在的
+            # 路径/版本，照它做的代价比"没经验"更大，但它本身仍是一条可查的
+            # 记录（也可能是唯一记录下"这轮出过幻觉"的行）。`unchecked` 不扣分：
+            # 没核过不是核出问题，扣它等于替未被改造的调用点罚分。
+            if d.get("verifiability_state") == "violated":
+                similarity -= self.VERIFIABILITY_PENALTY
             # 人工降权（工单 015）压在证据档之下再扣一档：`endorsed` 刻意**不**加分，
             # 人的判断不是执行证据，加上去等于把审核洗成成功票。
             if disposition == "demoted":

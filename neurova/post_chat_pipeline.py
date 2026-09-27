@@ -1791,6 +1791,12 @@ class PostChatPipeline:
                         # 等级只认服务端票据（`ticket.evidence`）——002 的记录聚合
                         # 在无票据时仍是成败位的来源，但它不再是"有证据"。
                         evidence=ticket.evidence,
+                        # 工单 001：把可核原料交给共享逐字可核闸。`result` 是本轮
+                        # 模型输出，它引用的路径/URL/版本号必须能在本轮证据（用户
+                        # 输入 + 回复）里找到；找不到即记 `violated` 并在检索侧降权。
+                        # 不阻塞写入：经验是概率性资产，阻塞会让检索面大面积失声，
+                        # 而一条编造的经验只是"这次别照它做"。
+                        evidence_text="%s\n%s" % (user_input or "", reply or ""),
                     )
                     # 工单 006：按本轮注入身份集回写采纳结果，成败取票据优先的
                     # 三态（None 记 unevidenced，不是"成功"也不是"失败"）。
