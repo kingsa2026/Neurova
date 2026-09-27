@@ -42,6 +42,7 @@ from typing import Any, Dict, FrozenSet, List, Sequence, Tuple
 
 __all__ = [
     "WriteScope",
+    "TimeoutDisposition",
     "ToolCapability",
     "ToolBatch",
     "ToolBatchShape",
@@ -75,6 +76,26 @@ class WriteScope(str, Enum):
 _DEFAULT_WRITE_SCOPES: FrozenSet[WriteScope] = frozenset({WriteScope.SHARED})
 
 
+class TimeoutDisposition(str, Enum):
+    """工具超时后**放弃**它的语义（处置轴，与并行轴正交）。
+
+    为什么必须与"能不能并行"分开：并行轴问"两个调用同时跑会不会互相干扰"，
+    本轴问"这个调用被放弃时意味着什么"。三态是**必要区分**，不是兼容垫片——
+    纯 IO 型工具放弃的只是"这次结果"，进程型工具放弃的是"那个进程还得死"。
+
+    - `BACKGROUND`：现状默认——同一任务继续在后台跑完，结果经 hints 回收。
+      对纯 async/IO 型工具这是**优于报错**的处置（结果稍后照样有用）。
+    - `ABORT`：可打断的 async 工具超时即取消，不转后台。
+    - `KILL`：进程型工具。置位取消令牌（触发进程组杀灭）→ 有界收尸 → 报取消。
+
+    **缺省是 `BACKGROUND`** ⇒ 不声明即与改造前逐字节同行为，改造可零风险铺。
+    """
+
+    BACKGROUND = "background"
+    ABORT = "abort"
+    KILL = "kill"
+
+
 @dataclass(frozen=True)
 class ToolCapability:
     """工具自身能力的声明（缺省即最保守：不可并行、不算只读）。
@@ -91,6 +112,8 @@ class ToolCapability:
     readOnly: bool = False
     concurrentSafe: bool = False
     writeScopes: FrozenSet[WriteScope] = _DEFAULT_WRITE_SCOPES
+    #: 超时后放弃该调用的语义（见 `TimeoutDisposition`）。缺省即现状行为。
+    timeoutDisposition: "TimeoutDisposition" = TimeoutDisposition.BACKGROUND
 
 
 def parseToolCapability(raw: Any) -> "ToolCapability | None":
@@ -125,8 +148,18 @@ def parseToolCapability(raw: Any) -> "ToolCapability | None":
         return None
     if not parsed:
         return None
+    disposition = TimeoutDisposition.BACKGROUND
+    raw_disposition = raw.get("timeoutDisposition")
+    if raw_disposition is not None:
+        # 与其余字段同一条拒收规则：取值不在域内即整条作废，不做"忽略未知项"的宽容
+        # ——半个声明比没声明更危险（声明写错只会退回串行/现状，绝不会误杀进程）。
+        try:
+            disposition = TimeoutDisposition(str(raw_disposition))
+        except ValueError:
+            return None
     return ToolCapability(
-        readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed
+        readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed,
+        timeoutDisposition=disposition,
     )
 
 

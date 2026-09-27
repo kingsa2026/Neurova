@@ -14,9 +14,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:  # 导入期不引入 core 依赖（本模块被 tool_executor 早加载）
+    from neurova.core.tool_capability import TimeoutDisposition
 
 logger = logging.getLogger(__name__)
+
+#: 收尸窗口兜底值（`asyncio.wait` 的 `timeout` 不接受 None 以外的语义缺失）。
+#: 数值单源在 `sandbox/exec_sandbox.KILL_GRACE_S`——此处**只**作为导入失败时的
+#: 最后兜底，正常运行恒走单源（见 `_reapCancelled` 与取消分支的导入）。
+KILL_GRACE_FALLBACK_S = 5.0
 
 # per-tool 超时（秒）：只读/轻工具短超时，浏览器/重 IO 长超时
 TOOL_TIMEOUTS_S: Dict[str, float] = {
@@ -136,6 +144,20 @@ def resolveBatchCapabilities(tool_calls: List) -> Dict[str, Any]:
     return resolved
 
 
+def resolveTimeoutDisposition(tool_name: str) -> TimeoutDisposition:
+    """取工具的超时处置声明；未声明/未知一律 `BACKGROUND`（与改造前同行为）。
+
+    与 `resolveToolCapability` 共用同一个解析入口——本函数只做"从解析结果里取
+    那一个字段"，不自己再读一遍声明位（那会变成第二份解析口径）。
+    """
+    from neurova.core.tool_capability import TimeoutDisposition
+
+    cap = resolveToolCapability(tool_name)
+    if cap is None:
+        return TimeoutDisposition.BACKGROUND
+    return cap.timeoutDisposition
+
+
 class ToolCoordinator:
     """工具执行协调：per-tool 超时 + 超时转后台 + pending hints。"""
 
@@ -153,28 +175,68 @@ class ToolCoordinator:
         tool_name: str,
         awaitable_or_factory: Any,
         timeout: Optional[float] = None,
+        token: Any = None,
+        disposition: Any = None,
     ) -> Any:
-        """带超时执行；超时不取消——同一任务继续在后台跑完，返回 background 信封。
+        """带超时执行；超时按**工具自己的处置声明**分派。
 
- 语义：转后台的必须是**同一个**任务——工厂重建会
-        让副作用工具双执行。本方法持有任务引用防止 GC 静默吞掉；观察者协程
-        在任务完成后把结果/错误推入 pending hints。
+        三条分支（`TimeoutDisposition`）：
+
+        - `BACKGROUND`（缺省）：同一任务继续在后台跑完，返回 background 信封。
+          **同一任务**这条语义是硬要求——工厂重建会让副作用工具双执行。本方法
+          持有任务引用防止 GC 静默吞掉；观察者协程把结果/错误推入 pending hints。
+        - `ABORT`：取消任务并返回 cancelled 形态（可打断的 async 工具）。
+        - `KILL`：置位取消令牌（触发已注册的进程组杀灭）→ 有界收尸 → 报取消。
 
         Args:
             tool_name: 工具名（查超时注册表）
             awaitable_or_factory: 协程/可等待对象，或返回协程的零参工厂
             timeout: 显式超时；None 用注册表
+            token: 取消令牌（`KILL` 分支置位用）；缺省取本轮令牌，再缺省即无令牌
+            disposition: 显式处置；None 用该工具的声明
 
         Returns:
-            工具结果；或 background 信封 dict（{"status":"background","task_id",...}）
+            工具结果；或 background 信封；或 cancelled 形态
+            （{"status":"cancelled","cancelled":True,...}）
         """
+        from neurova.core.tool_capability import TimeoutDisposition
+
         effective = timeout if timeout is not None else get_tool_timeout(tool_name)
+        mode = disposition
+        if mode is None:
+            mode = resolveTimeoutDisposition(tool_name)
+        if token is None:
+            from neurova.core.cancel_token import getTurnCancelToken
+
+            token = getTurnCancelToken()
+
         aw = awaitable_or_factory() if callable(awaitable_or_factory) else awaitable_or_factory
         task = asyncio.ensure_future(aw)
-        done, pending = await asyncio.wait({task}, timeout=effective)
+        try:
+            done, pending = await asyncio.wait({task}, timeout=effective)
+        except asyncio.CancelledError:
+            # 用户停止（`task_tracker.request_session_stop` 取消整轮 chat 任务）时，
+            # 取消经 await 点传到这里。**这里是执行层唯一能兑现它的地方**：
+            # 外层取消对已进 `to_thread` 的调用无效（线程照跑到自然结束），
+            # 只有置位令牌才能让 worker 注册的进程杀灭回调真正发出。
+            # 收尸有界，随后把取消原样继续上抛——本层不吞取消。
+            if token is not None:
+                token.cancel("user")
+            task.cancel()
+            try:
+                await asyncio.wait({task}, timeout=KILL_GRACE_FALLBACK_S)
+            except Exception as e:  # noqa: BLE001 - 收尸失败不改写"已取消"这个事实
+                logger.warning("取消收尸异常（%s）: %s", tool_name, e)
+            raise
+
 
         if not pending:
             return task.result()
+
+        if mode is TimeoutDisposition.KILL:
+            return await self._reapCancelled(tool_name, task, token, "timeout")
+        if mode is TimeoutDisposition.ABORT:
+            return await self._reapCancelled(tool_name, task, None, "timeout")
 
         # 超时 → 转后台：同一任务继续（持有引用防 GC 静默吞掉），观察者投递 hint
         task_id = f"bg_{uuid.uuid4().hex[:12]}"
@@ -208,6 +270,51 @@ class ToolCoordinator:
             "message": message,
         }
 
+    async def _reapCancelled(
+        self, tool_name: str, task: asyncio.Future, token: Any, reason: str
+    ) -> Dict[str, Any]:
+        """放弃一个已超时的任务，并**确认它真的停了**。
+
+        `KILL` 走令牌：令牌上挂着执行体注册的进程组杀灭回调（`CancelToken.onCancel`），
+        置位时同步执行。收尸窗口有界——上限取自 `exec_sandbox.KILL_GRACE_S`
+        （既有沙箱路径 `communicate(timeout=5)` 的同一数值，不新造第二个尺度）。
+
+        窗口内任务没退 ⇒ **如实标注**"已发杀灭、未确认退出"，不谎报已终止
+        （`AGENTS.md` 修复教义第 2 条：报错要么根修、要么以诚实形态暴露）。
+        """
+        from neurova.sandbox.exec_sandbox import KILL_GRACE_S
+
+        reaped = False
+        if token is not None:
+            token.cancel(reason)
+        task.cancel()
+        try:
+            await asyncio.wait({task}, timeout=KILL_GRACE_S)
+            reaped = task.done()
+        except Exception as e:  # noqa: BLE001 - 收尸失败不改变"已取消"这个终态
+            logger.warning("取消后收尸异常（%s）: %s", tool_name, e)
+
+        outcome: Dict[str, Any] = {
+            "status": "cancelled",
+            "cancelled": True,
+            "tool_name": tool_name,
+            "reason": reason,
+        }
+        if not reaped:
+            # 诚实形态：不返回"已终止"，而是把未确认这一事实交给上层与用户。
+            outcome["message"] = (
+                f"工具 {tool_name} 已发杀灭，但在 {KILL_GRACE_S:.0f}s 内未确认退出；"
+                "进程可能仍在收尾"
+            )
+            logger.warning(
+                "工具 %s 取消后未在 %.0fs 内收尸（已发杀灭，未确认退出）",
+                tool_name, KILL_GRACE_S,
+            )
+        else:
+            outcome["message"] = f"工具 {tool_name} 已取消（{reason}）"
+            logger.info("工具 %s 已取消并收尸（reason=%s）", tool_name, reason)
+        return outcome
+
     async def _observe_background(self, tool_name: str, task_id: str, task: asyncio.Future) -> None:
         entry = self._background.get(task_id)
         if entry is None:
@@ -224,6 +331,18 @@ class ToolCoordinator:
         except asyncio.CancelledError:
             entry["success"] = False
             entry["error"] = "cancelled"
+            # 断链修复（G4-RC6）：取消分支此前既不投 hint 也不记日志，`finally`
+            # 只把 entry 移入 `_completed`。于是 `get_background_status` 查得到
+            # "cancelled"，而下一轮 LLM 与用户**永远收不到这条终态**——一个已经
+            # 转后台的工具被取消后凭空消失。终态必须回到反馈环。
+            self._pending_hints.append({
+                "task_id": task_id,
+                "tool_name": tool_name,
+                "success": False,
+                "cancelled": True,
+                "error": "cancelled",
+            })
+            logger.info("后台工具 %s (%s) 已取消", tool_name, task_id)
         except Exception as e:
             entry["error"] = str(e)
             entry["success"] = False

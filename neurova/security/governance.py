@@ -61,6 +61,11 @@ def is_policy_denial(result: Any) -> bool:
     # `_execute_single_tool`）——拦截是决策，粘成工具故障会让该结构身份
     # 永久失败粘性（`creation_governance.py` 的 MIN(success)）。
     # metacog_advisory 键：元认知调控门的结构化建议，同属裁决非故障。
+    # cancelled 键：用户停止 / 超时取消——与上述六键完全同构的**决策**。
+    # 不认这一键的后果与 hook_blocked 同型：取消会以失败身份进入
+    # `on_tool_executed` 的三处统计与熔断观察者，并经
+    # `creation_governance` 的 MIN(success) 把该工具的结构身份永久判失败
+    # ——用户按几次停止就能把一个好工具在治理面上钉死。
     return bool(
         result.get("governance")
         or result.get("pending_approval")
@@ -68,6 +73,7 @@ def is_policy_denial(result: Any) -> bool:
         or result.get("swarm_rejection")
         or result.get("hook_blocked")
         or result.get("metacog_advisory")
+        or result.get("cancelled")
     )
 
 
