@@ -29,8 +29,8 @@ ADMIN = {"user_id": "u", "username": "u", "role": "admin"}
 
 @pytest.fixture()
 def api(tmp_path, monkeypatch):
-    monkeypatch.setattr(CC, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(CC, "CONFIG_FILE", tmp_path / "channel_configs.json")
+    # 落点经数据根推导（调用时解析）——隔离走唯一注入口，不 patch 落点常量
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     app = FastAPI()
     app.include_router(CC.router, prefix="/api/v1")
     app.dependency_overrides[auth_u] = lambda: dict(ADMIN)
@@ -131,8 +131,7 @@ class TestStartupBootstrap:
             made.append(inst)
             return inst
 
-        monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channel_configs.json")
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
         monkeypatch.setattr(cc, "_create_adapter", factory)
         (tmp_path / "channel_configs.json").write_text(
             json.dumps({
@@ -176,8 +175,7 @@ class TestStartupBootstrap:
             def set_event_callback(self, cb):
                 self.cb = cb
 
-        monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channel_configs.json")
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
         monkeypatch.setattr(cc, "_create_adapter", lambda *a, **k: _Failing())
         (tmp_path / "channel_configs.json").write_text(
             json.dumps({

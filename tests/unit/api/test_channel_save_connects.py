@@ -20,8 +20,8 @@ from neurova.api.endpoints import channel_config as cc
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channel_configs.json")
+    # 落点经数据根推导——隔离走唯一注入口（`cc` 已无落点常量可 patch）
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
 
     made = {}
 
