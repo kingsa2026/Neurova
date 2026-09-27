@@ -327,7 +327,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "computer_shell": {
         # 并行能力声明：在用户计算机上执行 shell 命令——共享宿主机状态与终端面板。
-        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        # 超时处置 KILL：同 exec_command，放弃即须终止那个 shell 进程。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
+                       "timeoutDisposition": "kill"},
         "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。Windows 注意：cmd.exe 不认单引号包裹的参数（会被当字面量），含空格/特殊字符的路径与参数必须用双引号（如 reg query \"HKLM\\...\"）；查询系统信息类需求优先用本机工具结果（如 computer_screenshot 回带的 screen 元数据），不要跑 reg query 探测。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
         "sandbox_required": True,
         "parameters": {
@@ -869,7 +871,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "git": {
         # 并行能力声明：含写子命令（commit/push/checkout）会抢同一 .git/index.lock；工具粒度从严，与
         # _NON_REPRODUCIBLE_TOOLS 把整个 git 列为不可重现同一处置。
-        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        # 超时处置 KILL：`_execute_git` 起真 git 进程（经 to_thread 下沉），放弃它
+        # 即意味着那个进程还得死——`Task.cancel()` 对已进线程池的调用只丢结果。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
+                       "timeoutDisposition": "kill"},
         "description": "【Git 仓库操作】在指定仓库执行 git 命令。command 为完整命令行（含 git 前缀），如 'git status --short'；仓库目录由 path 锚定（相对锚定工作区，默认工作区根，禁止 --git-dir/-C/--work-tree 等逃逸选项）。读操作（status/diff/log/show/blame/ls-files）直接执行；写操作（add/commit/push/checkout/reset…）触发人工确认。【何时不用】GitHub PR/issue/CI 等远程托管操作用 github MCP 工具；不要用本工具跑 shell 通用命令（用 run_code/computer_shell）；不要用 curl 代替 git fetch。",
         "parameters": {
             "type": "object",
@@ -911,7 +916,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "run_code": {
         # 并行能力声明：任意代码执行——共享解释器与工作目录，副作用面不可预判。
-        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        # 超时处置 KILL：本工具起真进程（`LocalExecutor` / Docker），放弃它就意味着
+        # 那个进程还得死——否则占 CPU、持句柄、继续写盘，而界面已认为中止。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
+                       "timeoutDisposition": "kill"},
         "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、算法计算、文本批量处理、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。【何时不用】系统操作类命令（进程/服务/环境变量）改用 computer_shell；纯数值计算禁止心算，一律用本工具跑 Python。",
         "sandbox_required": True,
         "parameters": {
@@ -929,7 +937,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "exec_command": {
         # 并行能力声明：启动常驻 shell 进程——进程与 workdir 是共享资源，并发启动会互抢同一工作目录。
-        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        # 超时处置 KILL：常驻进程超时后必须终止（会话的 terminate 注册为杀灭回调），
+        # 否则它会随应用退出而泄漏。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
+                       "timeoutDisposition": "kill"},
         "description": "【会话式命令执行】启动一个常驻 shell 命令/进程并等待 yield_time_ms 毫秒：已完成直接返回输出与退出码（status=completed）；未结束返回 session_id（status=running），之后用 write_stdin 向该会话写输入或轮询新输出。适合构建、测试、dev server、交互式脚本等长任务。【何时不用】一次性快速命令用 computer_shell；跑 Python 数据处理用 run_code；需要远程机器用 computer_ssh_exec。",
         "sandbox_required": True,
         "parameters": {
