@@ -4,7 +4,7 @@
     <div class="nr-ci-header">
       <div class="nr-ci-title-row">
       <a-select v-model:value="agentId" size="small" style="width: 200px; margin-left: 12px"
-        :options="[{ value: 'default', label: t('channel.defaultAgent') }, ...agentStore.agentOptions.map((o: any) => ({ value: o.id, label: o.name }))]"
+        :options="agentSelectOptions"
         @change="onAgentChange" />
         <h2>{{ t('channel.integration') }}</h2>
         <!-- B4-a：机器人身份冲突检测（多渠道复用同一凭据会串回调） -->
@@ -310,6 +310,7 @@ import {
   type FieldSchema, type ChannelCatalogItem,
 } from '@/config/channelFields'
 import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
+import { buildAgentSelectOptions } from '@/config/agentOptions'
 
 type ChannelItem = ChannelCatalogItem
 
@@ -322,6 +323,14 @@ const agentId = ref<string>('default')
 
 // ─── 字段表与卡片目录：共享模块单一来源（agent 隔离 Phase C） ───
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
+
+// agent 身份的唯一组装点：`config/agentOptions.ts`（Agent 渠道页共用同一份）。
+// 本页与 Agent 渠道页曾各写一份同样的错映射（读 o.id/o.name，而 store 契约是
+// {label, value}）—— 两页共享字段目录却没共享选择器映射，故收口到单源。
+const agentSelectOptions = computed(() => [
+  { value: 'default', label: t('channel.defaultAgent') },
+  ...buildAgentSelectOptions(agentStore.agentOptions),
+])
 
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
 
@@ -671,7 +680,9 @@ const tabs = computed(() => [
 ])
 
 onMounted(() => {
+  // 与 Agent 渠道页同契约：两源都拉、但不阻塞配置取数（详见 AgentChannelPage 同处注释）。
   agentStore.loadAgents?.()
+  agentStore.loadWorkflowAgents?.()
   search.value = ''
   loadConfigs()
 })

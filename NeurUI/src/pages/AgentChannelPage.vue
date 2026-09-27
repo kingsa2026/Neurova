@@ -133,6 +133,7 @@ import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import { getNegativeScreenConfig } from '@/api/modules/negative-screen'
 import { useAgentStore } from '@/stores/agents'
+import { buildAgentSelectOptions } from '@/config/agentOptions'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -168,9 +169,13 @@ const allFields = computed<FieldSchema[]>(() => {
   return [...commonFields.value, ...(channelFieldsMap.value[current.value.channelKey] || [])]
 })
 
+// agent 身份的唯一组装点：`config/agentOptions.ts`（系统渠道页共用同一份）。
+// 曾经此处读 `o.id / o.name`，而 store 契约是 `{label, value}` —— 选项落成
+// 空白行，选中后 agentId=undefined 不发参数，后端把它兜成 default，
+// 于是"给 X 配渠道"静默写进 default 的表。禁止在此再写第二份映射。
 const agentSelectOptions = computed(() => [
   { value: 'default', label: t('channel.defaultAgent') },
-  ...agentStore.agentOptions.map((o: any) => ({ value: o.id, label: o.name })),
+  ...buildAgentSelectOptions(agentStore.agentOptions),
 ])
 
 function baseCatalog(): AgentChannel[] {
@@ -311,7 +316,13 @@ function removeChannel(ch: AgentChannel) {
 }
 
 onMounted(() => {
+  // 两源都要拉：工作流编译出的 agent 由 loadWorkflowAgents 提供，
+  // 此前从未调用 → 这类 agent 在本页永远不出现（同一"身份没走通"契约的命中点）。
+  // 但**不阻塞** fetchConfigs：渠道列表按路由带来的 agent 身份取数，
+  // 与 agent 选项列表无依赖关系 —— 把主内容挂在无关请求上，
+  // 会让一次慢/失败的 /agents 拖空整页（选项本身是响应式的，到了就渲染）。
   agentStore.loadAgents?.()
+  agentStore.loadWorkflowAgents?.()
   fetchConfigs()
 })
 </script>

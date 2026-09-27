@@ -5,9 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-from neurova.core.data_root import get_data_root
+from neurova.memory.scripts.seed_db_landing import seedDbPath
 
-mm = MemoryManager(db_path=str(get_data_root() / "yi_ling_memory.db"))
+mm = MemoryManager(db_path=str(seedDbPath()))
 
 memories = [
     {

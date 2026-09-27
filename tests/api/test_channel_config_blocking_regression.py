@@ -29,8 +29,7 @@ from neurova.api.endpoints import channel_config as cc
 @pytest.fixture
 def isolated_env(monkeypatch, tmp_path):
     """隔离配置文件与渠道管理器单例（单测零副作用）。"""
-    monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channels.json")
-    monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     # 真实默认 token 路径永不触达（本日有测试改写真实用户文件的事故）
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
