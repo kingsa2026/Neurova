@@ -192,6 +192,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click": {
+        # 执行语义声明：改变共享桌面的画面（鼠标落点）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面——鼠标与焦点是全局单例，并发点击会互相打断。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "点击屏幕指定位置",
@@ -206,6 +208,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_type": {
+        # 执行语义声明：改变共享桌面的画面（键盘输入）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面——键盘焦点是全局单例，并发输入会串到对方的窗口。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "键盘输入文本",
@@ -219,6 +223,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_scroll": {
+        # 执行语义声明：改变共享桌面的画面（视口滚动）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面——滚动作用于当前指针位置的全局滚动目标。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "滚动屏幕",
@@ -251,6 +257,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click_element": {
+        # 执行语义声明：改变共享桌面的画面（语义点击）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面（五级递降链的语义点击）——桌面聚焦与快照代次是全局单例。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按元素点击】通过快照元素 index 点击桌面控件（来自 computer_dom_snapshot 快照事实）。内部走语义动作→消息直投的递降链，默认不抢用户焦点、不移动真实光标。快照过期（generation 不符）会被拒绝并提示重新快照。",
@@ -267,6 +275,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_set_value": {
+        # 执行语义声明：改变共享桌面的画面（控件赋值）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面（UIA ValuePattern 直写控件）——目标控件与快照代次是全局单例。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按元素赋值】通过快照元素 index 向桌面输入框/可编辑控件直接写入文本（UIA ValuePattern，比逐键敲入更快更可靠，且不依赖焦点位置）。参数必须来自 computer_dom_snapshot 快照。",
@@ -296,6 +306,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click_mark": {
+        # 执行语义声明：改变共享桌面的画面（SOM 编号点击）⇒ 动作后补拍有意义。
+        # 补登：它一直就在刷新链上（执行体调 _emit_action_refreshed_screenshot），
+        # 而旧的刷新名单没跟着扩——漏登正是本声明位要根修的那条漂移。
+        "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面，且读本实例最近一次 SOM 快照的编号表——两处都是共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按 SOM 编号点击】点击 computer_som_snapshot 返回的某个编号区域中心（内部经 id2xy 解算像素坐标并走 DPI/多屏换算的点击链）。编号来自最近一次 SOM 快照，过期需重新快照。",
@@ -312,6 +326,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
         # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。
         "shell_dialect": True,
+        # 执行语义声明：把 command 文本当命令在远端机器上执行——
+        # 高危档（任意命令）与远端档的成员资格均由本处声明推导，
+        # 桌面档不另持手写名单（见 computer_use/runtime_policy.py）。
+        "arbitrary_command": True,
+        "remote_execution": True,
         # 并行能力声明：在远端机器执行命令——共享远端会话与凭据分桶，输出经同一终端面板渲染。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【SSH 远程命令】经 SSH 在远程 Linux/macOS 机器上执行命令，返回 stdout/stderr/退出码，操作在聊天页的终端窗口展示。用于远程跑命令（无需图形桌面）。host 必填；用户名/密钥/密码从你的 SSH 凭据配置读取（platform=ssh），不必在此传密码。【何时不用】本机命令用 computer_shell；数据处理/算法用 run_code。",
@@ -332,6 +351,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
         # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。
         "shell_dialect": True,
+        # 执行语义声明：把 command 文本当命令在**本机**执行——有任意命令语义，
+        # 但动作落本机（非远端），故只声明前者。
+        "arbitrary_command": True,
         # 并行能力声明：在用户计算机上执行 shell 命令——共享宿主机状态与终端面板。
         # 超时处置 KILL：同 exec_command，放弃即须终止那个 shell 进程。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
@@ -1403,6 +1425,71 @@ def list_declared_capabilities() -> List[str]:
         name
         for name, schema in _BUILTIN_SCHEMAS.items()
         if isinstance(schema, dict) and isinstance(schema.get(_CAPABILITY_KEY), dict)
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 执行语义声明位（两枚布尔键，Issue #271 M5 尾巴）
+# ═══════════════════════════════════════════════════════════════
+# 语义：schema 可携带与 description/parameters 平级的两个布尔键，各自回答
+# **一个**事实，供 `computer_use/runtime_policy.py` 的桌面运行档按声明投影成员：
+#
+#   arbitrary_command  ― 该工具会把调用者给的文本当命令执行（任意命令执行语义）
+#   remote_execution   ― 该工具在**远端**机器上执行动作（不是本机）
+#   interactive_desktop ― 该动作会改变**共享桌面**的画面（故动作后补拍有意义）
+#
+# **为什么必须与 `capability` / `sandbox_required` 分开**（三条轴，各自答一个事实）：
+#   `capability.readOnly`      问"两个调用同时跑会不会互踩"（并行轴）
+#   `sandbox_required`         问"要不要真隔离执行"（P2-15 沙箱轴）
+#   `arbitrary_command`        问"会不会执行任意命令"（桌面高危档）
+#   `remote_execution`         问"动作落在本机还是远端"（远端档：进沙箱对它无意义）
+#   `interactive_desktop`      问"动作会不会改变共享桌面画面"（动作后补拍面）
+# 前两条与后两条当前在 `computer_*` 上成员恰好重合，但那是**巧合**——按教义第 6 条
+# 不得把巧合当同源，也不得合并成上帝字段（合并后"去掉沙箱要求"会连带降级高危档）。
+# `interactive_desktop` 与前几条的分界更直白：`computer_shell` 有任意命令语义，
+# 但它改的是机器状态而不是桌面画面（跑完 shell 去补拍一张本机截图毫无意义）。
+# 由 tests/unit/computer_use/{test_desktop_policy_projection,test_action_refresh_declaration}.py
+# 把"不合并"钉成活判据。
+#
+# 声明位不进入 to_openai_format()（模型可见面零变化），仅供裁决面消费。
+_ARBITRARY_COMMAND_KEY = "arbitrary_command"
+_REMOTE_EXECUTION_KEY = "remote_execution"
+_INTERACTIVE_DESKTOP_KEY = "interactive_desktop"
+
+#: 三枚已登记的执行语义声明键（**唯一**登记处；取数口按本表校验未知键）。
+_DECLARED_FLAG_KEYS = (
+    _ARBITRARY_COMMAND_KEY,
+    _REMOTE_EXECUTION_KEY,
+    _INTERACTIVE_DESKTOP_KEY,
+)
+
+
+def get_builtin_tool_flags(tool_name: str) -> Dict[str, bool]:
+    """读取工具的两枚执行语义声明。
+
+    Returns:
+        只含**显式置 True** 的键（未声明 = 缺省 = 不参与裁决，与改造前等价）。
+    """
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return {}
+    return {
+        key: True for key in _DECLARED_FLAG_KEYS if schema.get(key) is True
+    }
+
+
+def listBuiltinToolsWithFlag(flagKey: str) -> List[str]:
+    """枚举显式声明了 `flagKey` 的内置工具名（裁决面的**内置取数口**）。
+
+    只为两枚已登记的键取数：未知键返回空列表，不把拼错的键静默当成"无人声明"
+    （那样裁决面会悄悄退回空集，而不是响亮点名）。
+    """
+    if flagKey not in _DECLARED_FLAG_KEYS:
+        raise KeyError(f"未登记的执行语义声明键：{flagKey}")
+    return [
+        name
+        for name, schema in _BUILTIN_SCHEMAS.items()
+        if isinstance(schema, dict) and schema.get(flagKey) is True
     ]
 
 
