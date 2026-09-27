@@ -1174,3 +1174,12 @@ tests/unit/memory_ingest/test_seed_db_landing_relocation.py
 #   「含未知工具」而拒绝安装。判据：注册面逐名过门 + 真未知名仍被拒 +
 #   MCP 声明口径不变 + AST 复算"安装门里不得再出现手写名字表"。
 tests/unit/skills/test_install_gate_known_tools.py
+# Issue #271 M5 尾巴（桌面档轴与补拍面，同根因两命中点）：名单成员资格此前是
+#   手写快照，与声明面之间无对账机制。本批把成员下沉到各工具 schema 的声明位，
+#   并把两处已证实的漂移一并根修（`computer_click_mark` 一直被接在刷新链上却漏登）。
+#   · test_desktop_policy_projection.py：三条桌面清单 == 声明面投影（含反向控制
+#     改声明即改读数、两条轴不互为别名、11 工具×4 档决策矩阵逐格不变）；
+#   · test_action_refresh_declaration.py：补拍名单 == AST 复算的执行体实际调用面
+#     （漏登 computer_click_mark 在这条上红）+ 入口守卫真消费（摘声明即断链）。
+tests/unit/computer_use/test_desktop_policy_projection.py
+tests/unit/computer_use/test_action_refresh_declaration.py
