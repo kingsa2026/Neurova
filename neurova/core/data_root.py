@@ -153,10 +153,10 @@ def nameConflictOnce(legacy: str, target: str) -> None:
 def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
     """旧落点（CWD 相对时代的产物）搬进新落点，只为**空缺时救济**。
 
-    收口"落点锚到绝对根"有个不得不认的代价：老部署在仓库根留下的
-    `config/infrastructure.json`、`agents.json`、`neurova_memory.db` 等，
-    换根之后新代码看不见它们——配置静默回默认值、库看起来"空了"。
-    本函数在**新落点尚无该物**时把旧物搬过去一次：
+    旧落点按**仓库根**的相对路径给出（`"config"` / `("neurova", "data", "x.json")`）。
+    形状不在仓库根下的面（例如"与主库同目录的配对文件"，其旧落点在旧主库旁边）
+    用 `adoptLandingFrom()` 直接给出绝对旧落点——两者的收养语义逐字相同，
+    实现也只此一份。
 
     - 新落点已在 ⇒ 原样返回 False（旧物不覆盖新物，避免把已生效的配置盖回旧版），
       但**两侧同时在场必须点名**：那是"同一份东西有两个落点"的实况，
@@ -167,7 +167,26 @@ def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
     调用点一律写在"落点解析"处，不写在业务路径里——收养只发生一次，
     之后事实源仍是新落点。
     """
-    legacy = repoRoot().joinpath(*legacyParts)
+    return adoptLandingFrom(target, legacyLanding(*legacyParts))
+
+
+def legacyLanding(*legacyParts: str) -> Path:
+    """旧落点的**绝对路径**（仓库根 + 相对段）——唯一推导，供收养端与排查端共用。
+
+    为什么要有它：调用方若 `from ... import repoRoot` 再自己拼，就是拿了一份
+    **绑定在导入时刻**的函数引用 —— 仓库根被替换（测试隔离、打包态排查）时
+    它照样指向老地方，收养静默搬错对象。经本函数取，仓库根的解析点始终只有一处。
+    """
+    return repoRoot().joinpath(*legacyParts)
+
+
+def adoptLandingFrom(target: Path, legacy: Path) -> bool:
+    """收养的**唯一实现**：把 `legacy` 处的东西搬到 `target`（空缺时才动）。
+
+    与 `adoptLegacyLanding` 的分工只在"旧落点怎么算出来"：那个按仓库根推，
+    本函数由调用方给绝对路径。收养规则（不覆盖、冲突点名、失败不抛）逐字同一份，
+    两处各写一遍就是两条可独立漂移的救济语义。
+    """
     if not legacy.exists():
         return False
     if target.exists():
@@ -181,3 +200,8 @@ def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
         return False
     logger.info("旧落点已收养：%s → %s", legacy, target)
     return True
+
+
+def nameConflictOnceFor(target: Path, legacy: Path) -> None:
+    """按落点对点名两侧冲突（供成对落点的第二半复用同一去重口径）。"""
+    nameConflictOnce(str(legacy), str(target))
