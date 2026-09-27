@@ -240,3 +240,71 @@ class TestCallToolFirewall:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── 5. 治理故障放行白名单必须与工具的**只读声明**咬合（M5 跨轴收口） ──
+
+
+class TestFailOpenAllowlistMatchesReadOnlyDeclaration:
+    """白名单的契约是「无 command/code 执行语义，放行的最坏后果是查询失败」。
+
+    它因此隐含一条成员资格判据：成员必须是**声明为只读**的工具。该判据此前
+    无人复核，于是 `planning` 混在名单里，而它自己的声明写着
+    `readOnly=False`（`create` / `update` / `delete` 三个子命令会写 PlanStore，
+    跨会话持久）。后果很具体：**治理服务不可用时，计划可被任意改写/删除**，
+    而白名单的立论对它不成立。
+
+    两轴（审批放行轴 / 并行轴）确实不同轴、不合并；但同一个工具的
+    `readOnly` 事实必须两轴一致——否则同一份声明在两条轴上被读成两件事。
+    """
+
+    @pytest.mark.asyncio
+    async def test_governance_down_planning_is_denied(self, monkeypatch):
+        """planning 声明为可写（PlanStore 落盘）⇒ 不得进只读白名单。"""
+        monkeypatch.setattr(
+            governance_module, "get_governance",
+            MagicMock(side_effect=RuntimeError("governance down")),
+        )
+        ex = _make_executor()
+        result = await ex._governance_precheck(
+            "planning", {"command": "delete", "plan_id": "p1"}
+        )
+        assert result is not None and result.get("success") is False, (
+            "planning 会改写/删除持久化计划，治理故障时不得按「只读查询」放行"
+        )
+
+    def test_everyAllowlistMemberDeclaresReadOnly(self):
+        """白名单每个成员自己声明了只读——声明与名单不一致即红（漂移无人拦）。"""
+        from neurova.builtin_tools import get_builtin_tool_capability
+        from neurova.tool_executor import ToolExecutor
+
+        offenders = []
+        for name in sorted(ToolExecutor._GOVERNANCE_FAILOPEN_READONLY_TOOLS):
+            cap = get_builtin_tool_capability(name)
+            if cap is None or not cap.readOnly:
+                offenders.append(name)
+        assert offenders == [], (
+            "这些工具在治理故障放行白名单里，却没声明为只读——"
+            f"名单必须与工具的只读声明咬合：{offenders}"
+        )
+
+    def test_everyAllowlistMemberIsDispatchable(self):
+        """白名单成员必须真可执行：幻名会让「放行」变成一条无效规则。"""
+        from neurova.tool_executor import ToolExecutor
+
+        phantoms = sorted(
+            name for name in ToolExecutor._GOVERNANCE_FAILOPEN_READONLY_TOOLS
+            if name not in ToolExecutor._builtin_dispatch
+        )
+        assert phantoms == [], f"白名单里有不可分发的名字: {phantoms}"
+
+    @pytest.mark.asyncio
+    async def test_readonlyAllowlistedToolStillAllowed(self, monkeypatch):
+        """反向控制：真只读工具在治理故障时仍放行（本收口不得把它一并挡掉）。"""
+        monkeypatch.setattr(
+            governance_module, "get_governance",
+            MagicMock(side_effect=RuntimeError("governance down")),
+        )
+        ex = _make_executor()
+        result = await ex._governance_precheck("file_read", {"path": "a.txt"})
+        assert result is None, "只读白名单成员被误挡——这是收窄而非对齐"

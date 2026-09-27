@@ -1664,12 +1664,23 @@ class ToolExecutor:
     # 审计 A3：治理故障时允许放行的内置只读工具白名单——这些工具无
     # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
     # 文件写等不在列，一律 fail-closed（未知代码面无治理审查放行 = 裸奔）。
+    #
+    # 成员资格判据 = **该工具自己声明了只读**（`get_builtin_tool_capability`）。
+    # 本名单与并行轴是两条不同的轴（这里问"故障放行最坏后果是什么"，那里问
+    # "两个调用同时跑会不会互踩"），故不合并；但同一个工具的只读事实必须两轴
+    # 一致，否则同一份声明在两条轴上被读成两件事。判据由
+    # `tests/unit/security/test_governance_mcp.py` 逐名钉住。
+    #
+    # `planning` 曾在此列（审计 A3 时代口径），它现在自己的声明是
+    # `readOnly=False`（create/update/delete 会写跨会话持久的 PlanStore）——
+    # 白名单的立论"最坏后果是查询失败"对它不成立，故移出，按 fail-closed 处置。
+    # 这条既是跨轴矛盾，也是可复算的：声明面是 M3 的产物，冲突由它照出来。
     _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
         "memory_search", "recall_history", "recall_context_span", "voice_memory_search",
         "computer_screenshot", "computer_dom_snapshot", "get_datetime", "weather", "web_search",
         "discover_skills",
         "file_list", "file_search", "file_read", "file_parse", "list_agents",
-        "calculator", "emotion_analyze", "planning",
+        "calculator", "emotion_analyze",
     })
 
     # P0-B2：recall 循环防护按会话分桶（避免并发会话共用一个 guard 互踩）
