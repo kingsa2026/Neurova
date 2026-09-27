@@ -25,11 +25,18 @@
 `super().handle_tool_calls([单条])`，那条路径上永远只会是 `single_call`——
 并进总数就把一条路径的盲区读成"M3 没有收益"，据此砍方案是拿失明当结论。
 
-**读数的三种"没有结论"必须分得开**：`sparse` 是判据结论（否证成立）、
-`worthwhile` 是判据结论（否证未成立）、`no_data` 是**判据输入没采到**（无法
-判定，不构成否证）。把 `no_data` 读成"没收益"就是拿失明当结论 —— 故它在输出
-里显式标注，输入不可用（文件读不到 / 内容不是 Prometheus 文本）则以非零退出码
-点名收场，不抛解释器栈（真抓取被反代吞成 HTML 正是这条路径的真实形态）。
+**读数要区分四件事，其中两种"没结论"的处置相反**：
+
+- `sparse` / `worthwhile` 是**判据结论**（否证成立 / 未成立）；
+- `no_data` 是**判据输入没采到**（无法判定，不构成否证）—— 把它读成"没收益"
+  就是拿失明当结论；
+- `no_data` 自身还分两种成因，**处置相反**：`instrument_absent`（判据仪表在这份
+  抓取里缺席 ⇒ 恒不可达，该动**部署**）与 `zero_samples`（仪表在位、只是还没有
+  样本 ⇒ 可达且已就位，该**等真实轮次**）。两者原先同形，读者无从分辨该修哪里
+  （见 `instrumentPresence`）。
+
+输入不可用（文件读不到 / 内容不是 Prometheus 文本）另走一条路：非零退出码点名
+收场，不抛解释器栈（真抓取被反代吞成 HTML 正是这条路径的真实形态）。
 
 用法：
     python scripts/diagnostics/tool_parallelism_readout.py            # 人类可读
@@ -54,6 +61,11 @@ if str(ROOT) not in sys.path:
 SHAPE_METRIC = "neurova_tool_batch_shapes_total"
 DURATION_METRIC = "neurova_tool_execution_seconds"
 
+#: 形态仪表在**抓取文本里的家族名**：`prometheus_client` 暴露 counter 时族名去
+#: `_total` 后缀（`neurova/api/endpoints/analytics.py` 的两处读侧正是栽在这里）。
+#: 由 `SHAPE_METRIC` **派生**而非另写一份字面量：两处各写一遍就会漂移。
+SHAPE_FAMILY = SHAPE_METRIC.removesuffix("_total")
+
 #: 方案 §10.1 的否证阈值：多调用轮里成组批的占比低于它就说明 M3 收益不成立。
 #: 写在脚本里而非散在说明里，是为了让"低于阈值就放弃"这件事**可机器判定**。
 SPARSE_SHARE = 0.05
@@ -77,8 +89,14 @@ def _metricText(metrics_file: str) -> str:
     一并收口——它们是同一个事实的两半，分别在两处兜底就是两处可独立漂移的口径。
     """
     if not metrics_file:
-        from neurova.core.metrics import generate_metrics_text
+        # 先**装配**仪表再导出 —— `/metrics` 端点就是这么做的
+        # （`api/app.py::_register_metrics_endpoint` 第一行 `get_metrics()`）。
+        # 少了这一步，`generate_metrics_text()` 会导出一个**空注册表**，
+        # 于是"本进程还没装配仪表"被读成"这份部署里没有仪表"，把处置指向
+        # 无辜的部署 —— 判据必须关于部署，不能关于本进程有没有先热身。
+        from neurova.core.metrics import generate_metrics_text, get_metrics
 
+        get_metrics()
         return generate_metrics_text()
 
     path = Path(metrics_file)
@@ -112,6 +130,69 @@ def _families(text: str):
     from prometheus_client.parser import text_string_to_metric_families
 
     return list(text_string_to_metric_families(text))
+
+
+def instrumentPresence(text: str) -> Dict[str, Any]:
+    """两条判据仪表**在不在这份抓取里**——"在位"与"有样本"是两件事。
+
+    `no_data` 的成因由此分开，因为两种成因的**处置相反**：
+
+    - `instrument_absent`（家族头都不在）：判据**恒不可达** —— 该部署里的
+      `core/metrics.py` 早于埋点提交（实测镜像 revision `d5210625` 对
+      `tool_batch_shapes` 零命中），再跑多少轮、再等多久都不会有样本。要动的
+      是**部署**。
+    - `zero_samples`（家族头在、样本数为 0）：判据**可达且已就位** —— 仪表是
+      进程级的，重启清空计数器，样本随真实工具轮到达。要动的是**等真实轮次**
+      （或去看那套部署为什么一轮工具都没跑）。
+
+    两件事在改前的输出里同形（都只印一个 `no_data`），读者无从分辨该修部署
+    还是该等样本。判据落在**导出文本本身**：家族头在不在是导出器的事实，
+    不是我们从别处猜的意图。
+    """
+    presence: Dict[str, Any] = {
+        "shape_family": {"name": SHAPE_FAMILY, "present": False, "sample_total": 0},
+        "duration_family": {"name": DURATION_METRIC, "present": False, "sample_total": 0},
+    }
+    for family in _families(text):
+        if family.name in (SHAPE_METRIC, SHAPE_FAMILY):
+            presence["shape_family"]["present"] = True
+            presence["shape_family"]["sample_total"] += len(family.samples)
+        elif family.name == DURATION_METRIC:
+            presence["duration_family"]["present"] = True
+            presence["duration_family"]["sample_total"] += len(family.samples)
+    return presence
+
+
+def segmentCause(instrument: Dict[str, Any], family_key: str) -> str:
+    """某一段读数的成因分型（**唯一一处**）：仪表缺席，还是仪表在位但零样本。
+
+    按**该段自己的仪表**判，不借用别段的结论：形态段与耗时段在观测面上是两支
+    独立的仪表（`tool_execution_seconds` 的历史比形态表早得多，实测那份旧部署
+    里它在位、形态表缺席）—— 把形态段的成因抄给耗时段，就是拿另一支仪表的
+    事实冒充这一支，读者会照着错的处置去动。
+    """
+    if not instrument[family_key]["present"]:
+        return "instrument_absent"
+    return "zero_samples"
+
+
+#: 成因 → 人类可读的一句话（处置不同，故不许折叠成一句"无数据"）。
+_CAUSE_DISPOSITION = {
+    "instrument_absent": (
+        "判据仪表在本份抓取里**缺席** —— 判据恒不可达，该动的是**部署**"
+        "（那份部署早于埋点提交，等多久都不会有样本），不是在这里等"
+    ),
+    "zero_samples": (
+        "判据仪表在位、样本数为 0 —— 判据**可达且已就位**，"
+        "样本随真实工具轮到达，重跑本命令即出结论"
+    ),
+}
+
+
+def _emptyReadoutLine(cause: str, segment: str) -> str:
+    """零样本两行（形态段 / 耗时段）的成因标注：两段共用一套处置词汇。"""
+    disposition = _CAUSE_DISPOSITION.get(cause, "成因未判定")
+    return f"  （无样本，成因={cause or '?'}：{disposition}{segment}）"
 
 
 def parseBatchShapes(text: str) -> Dict[str, Dict[str, int]]:
@@ -249,12 +330,19 @@ def collect(metrics_file: str = "") -> Dict[str, Any]:
     text = _metricText(metrics_file)
     _rejectNonPrometheusText(text, str(metrics_file) if metrics_file else "进程注册表")
     shapes = parseBatchShapes(text)
+    instrument = instrumentPresence(text)
     out: Dict[str, Any] = {
         "batch_shapes": shapes,
         "tool_durations": parseToolDurations(text),
         "sparse_share_threshold": SPARSE_SHARE,
+        "instrument": instrument,
     }
     out.update(batchShapeVerdict(shapes))
+    # 成因是 `no_data` **专属**：有结论的读数上挂一个成因，就是给无人消费的槽位
+    # 留了个位置（协作红线：只写不读的字段是断点）。
+    out["no_data_cause"] = (
+        segmentCause(instrument, "shape_family") if out["verdict"] == "no_data" else ""
+    )
     return out
 
 
@@ -276,9 +364,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(payload, ensure_ascii=False))
         return 0
 
+    cause = payload.get("no_data_cause") or ""
+
     print("工具批次形态（按调度路径分档——不合并，见下方两个口径）：")
     if not payload["batch_shapes"]:
-        print("  （无样本——本条读数由 base.handle_tool_calls 落点产生，先跑几轮对话）")
+        print(_emptyReadoutLine(cause, "；本条读数由 base.handle_tool_calls 落点产生"))
     for path, counts in payload["batch_shapes"].items():
         row = payload["per_path"][path]
         grouped = row["grouped_share"]
@@ -303,10 +393,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if verdict == "no_data":
         # 关键：**输入缺失**不是**判据结论**。no_data 落在同一行旁不说话，
         # 就会被读成"没收益"，即拿失明当结论（本仓已为此付过代价）。
+        # 成因同样要出声：**仪表缺席**与**零样本**的处置相反（修部署 vs 等样本），
+        # 只印一个 no_data 等于把这条判断留在我们自己脑内。
         print(
             "结论：no_data"
             "   # 不是 sparse，**不构成 §10.1 的否证**：这是判据输入没采到，"
             "无法判定。不得据此放弃 M3 —— 先取到真 /metrics 抓取文本再判。"
+        )
+        print(
+            f"      成因：{cause or '未判定'} —— "
+            f"{_CAUSE_DISPOSITION.get(cause, '成因未判定')}"
         )
     else:
         print(
@@ -317,7 +413,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print("\n工具耗时分布（均值来自直方图本体）：")
     if not payload["tool_durations"]:
-        print("  （无样本）")
+        # 耗时段按**它自己的**仪表判成因（与形态表各自独立，见 segmentCause）。
+        print(_emptyReadoutLine(segmentCause(payload["instrument"], "duration_family"), ""))
     for row in payload["tool_durations"]:
         print(f"  {row['name']}: n={row['count']} 均值={row['avg_ms']}ms 区间={row['segments_s']}")
     return 0
