@@ -1049,3 +1049,149 @@ class TestShapeVocabularyHasOneSource:
         assert payload["multi_tool_round_share"] is None, (
             "不完整分母上仍给出占比：读者会拿这个数字当结论"
         )
+
+class TestPerToolParallelWorthiness:
+    """逐工具「值不值得为它成组等待」：**P50 口径** + 冷路径另档（Issue #271 交接第 ② 条）。
+
+    判据形状来自真机读数（Issue #271）：`file_read` 34ms 落门外、`memory_search`
+    991ms 冷 / 83ms 热落在边界上。两条要求同时成立：
+
+    1. **只用 P50**，不用 avg —— "这个工具**常态**值不值得等"是分位问题，avg 会被
+       一小撮冷样本拖走（同分布下 avg ≥ 200ms 而中位仅个位数毫秒是真实现象）；
+    2. **冷路径另档**，不进门槛 —— 它是部署/超时该管的事，不是并行收益该管的事；
+       两件事必须在读数上分开，否则"有冷样本"会被读成"这个工具常态很慢"。
+
+    而 200ms **不是**直方图的桶边界（桶是 0.1 / 0.25），故 P50 在这副仪表上只能
+    **夹逼**：真值落在 `(lower, upper]` 内。判据因此是三态 —— 区间整段落在门槛之上
+    判"值得"、整段落在门槛之下判"不值得"、**跨过门槛则如实说"边界"**。硬判一个是/否
+    就是拿仪表分辨率装出来的确定性。
+    """
+
+    @staticmethod
+    def _scrape(tmp_path, name: str, tool: str, buckets, total: int, sum_s: float) -> str:
+        """按给定累计桶造一份真形态的抓取文本（累计语义：`le` 是"≤ 该值"的计数）。"""
+        lines = [
+            "# HELP neurova_tool_execution_seconds Tool execution duration",
+            "# TYPE neurova_tool_execution_seconds histogram",
+        ]
+        for le, cum in buckets:
+            lines.append(
+                f'neurova_tool_execution_seconds_bucket{{le="{le}",tool_name="{tool}"}} {cum}'
+            )
+        lines.append(f'neurova_tool_execution_seconds_sum{{tool_name="{tool}"}} {sum_s}')
+        lines.append(f'neurova_tool_execution_seconds_count{{tool_name="{tool}"}} {total}')
+        path = tmp_path / name
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(path)
+
+    @staticmethod
+    def _row(payload, tool: str):
+        rows = {r["name"]: r for r in payload["tool_durations"]}
+        assert tool in rows, f"耗时读数里没有 {tool}：{sorted(rows)}"
+        return rows[tool]
+
+    def test_p50IsABucketBracketNotAInterpolatedPoint(self, tmp_path):
+        """P50 必须报成**桶边界夹逼**，不许插值出一个假的小数点。
+
+        真值落在 `(lower, upper]`：`upper` 是累计计数首次达到一半的那个桶界，
+        `lower` 是它前一个未到一半的桶界。与 `analytics` 里 p95 的"桶上限、无插值"
+        同一口径——本仓已有的分位语义就这一条，不另造一份。
+        """
+        path = self._scrape(
+            tmp_path, "bracket.txt", "bracket_tool",
+            [("0.005", 2), ("0.01", 4), ("+Inf", 4)], total=4, sum_s=0.03,
+        )
+        row = self._row(_readoutJson("--metrics-file", path), "bracket_tool")
+        assert row.get("p50_upper_ms") == 5.0, (
+            f"P50 上界不是桶界（累计首次过半处 le=0.005）：拿到 {row.get('p50_upper_ms')!r}"
+        )
+        assert row.get("p50_lower_ms") == 0.0, (
+            f"P50 下界不是桶界（首个过半桶之前没有更小桶）：拿到 {row.get('p50_lower_ms')!r}"
+        )
+
+    def test_fastToolIsNotWorthWaiting(self, tmp_path):
+        """常态快（区间整段 < 门槛）⇒ 明确判"不值得"，不给边界态兜底。"""
+        path = self._scrape(
+            tmp_path, "fast.txt", "fast_tool",
+            [("0.01", 3), ("0.1", 5), ("0.25", 6), ("+Inf", 6)], total=6, sum_s=0.2,
+        )
+        row = self._row(_readoutJson("--metrics-file", path), "fast_tool")
+        assert row.get("worth_waiting") is False, (
+            f"常态 10ms 级的工具没被判成'不值得等'：拿到 {row.get('worth_waiting')!r}"
+        )
+
+    def test_slowToolIsWorthWaiting(self, tmp_path):
+        """常态慢（区间整段 > 门槛）⇒ 判"值得"，这是 M3 的真实客户。"""
+        path = self._scrape(
+            tmp_path, "slow.txt", "slow_tool",
+            [("0.5", 1), ("2.5", 3), ("+Inf", 4)], total=4, sum_s=6.0,
+        )
+        row = self._row(_readoutJson("--metrics-file", path), "slow_tool")
+        assert row.get("worth_waiting") is True, (
+            f"常态 1s 级的工具没被判成'值得等'：拿到 {row.get('worth_waiting')!r}"
+        )
+
+    def test_boundaryToolIsNotForcedIntoEitherSide(self, tmp_path):
+        """P50 夹逼区间**跨过门槛**（(0.1s, 0.25s] 跨 200ms）⇒ 三态里的"边界"。
+
+        这正是真机读数里 `memory_search` 的位置。硬判是/否就是拿仪表分辨率
+        装出来的确定性 —— 处置应当是"要么补精细桶、要么等更多样本"。
+        """
+        path = self._scrape(
+            tmp_path, "boundary.txt", "boundary_tool",
+            [("0.1", 1), ("0.25", 3), ("+Inf", 4)], total=4, sum_s=1.2,
+        )
+        payload = _readoutJson("--metrics-file", path)
+        row = self._row(payload, "boundary_tool")
+        assert row.get("p50_lower_ms") == 100.0 and row.get("p50_upper_ms") == 250.0
+        assert row.get("worth_waiting") is None, (
+            f"跨门槛的夹逼区间被硬判成 {row.get('worth_waiting')!r}——"
+            "仪表分辨率答不出的问题不许装出答案"
+        )
+        text = _runReadout("--metrics-file", path).stdout
+        assert "边界" in text, f"人类可读输出没把'边界'这一态说出来：{text[-400:]}"
+
+    def test_coldTailIsReportedApartAndNeverFlipsTheVerdict(self, tmp_path):
+        """冷路径**另档呈现**，且不得把常态判据带偏（本片的核心纪律）。
+
+        10 个样本里 6 个在 10ms 级、4 个在 1s 级（冷热双峰）：常态不快不慢地
+        偏在快侧 ⇒ 判"不值得"；而"有 40% 落在 >0.25s"必须另有一档读数可见，
+        却不能把 verdict 翻成"值得"。
+        """
+        path = self._scrape(
+            tmp_path, "bimodal.txt", "bimodal_tool",
+            [("0.01", 6), ("0.25", 6), ("1.0", 8), ("2.5", 10), ("+Inf", 10)],
+            total=10, sum_s=4.0,
+        )
+        row = self._row(_readoutJson("--metrics-file", path), "bimodal_tool")
+        assert row.get("worth_waiting") is False, (
+            "冷样本把常态判据带偏了（P50 明明在快侧）："
+            f"拿到 {row.get('worth_waiting')!r}"
+        )
+        assert row.get("slow_share") == 0.4, (
+            f"冷路径没另档呈现（应为 4/10）：拿到 {row.get('slow_share')!r}"
+        )
+
+    def test_judgementUsesTheMedianNotTheAverage(self, tmp_path):
+        """反向控制：avg 被冷样本拖到秒级、中位仍在毫秒级 ⇒ 判据必须跟中位走。
+
+        这正是本片选 P50 的理由；若实现改回比 avg，本用例立刻红。
+        """
+        path = self._scrape(
+            tmp_path, "avgbias.txt", "avgbias_tool",
+            [("0.01", 3), ("120.0", 4), ("+Inf", 4)], total=4, sum_s=120.0,
+        )
+        row = self._row(_readoutJson("--metrics-file", path), "avgbias_tool")
+        assert row["avg_ms"] > 200.0, "用例前提：avg 已被冷样本拖过门槛"
+        assert row.get("worth_waiting") is False, (
+            f"判据跟了 avg 而不是 P50：拿到 {row.get('worth_waiting')!r}"
+        )
+
+    def test_thresholdValueIsNamedInTheReadout(self, tmp_path):
+        """门槛值必须在读数里点名——不点名的门槛读者无法复核（也不会知道是多少）。"""
+        path = self._scrape(
+            tmp_path, "named.txt", "named_tool",
+            [("0.01", 3), ("0.25", 5), ("+Inf", 6)], total=6, sum_s=0.05,
+        )
+        text = _runReadout("--metrics-file", path).stdout
+        assert "200" in text, f"门槛值没在输出里点名：{text[-500:]}"
