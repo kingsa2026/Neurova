@@ -103,6 +103,8 @@ goal_max_continuations | key | consumed | not_a_threshold | 4 | 已接线 | G2 �
 #   ← 出处：security/agent_limits_settings.py（G2 续跑预算）
 goal_verification_enabled | key | consumed | not_a_threshold | 3 | 已接线 | G2 成本闸（默认开：默认关等于"接了线不通电"）。本键的读取点在 `agent/loops/base.py:goalVerificationEnabled()`（出口求值前判），写入点在设置持久层 ⇒ 不是"只写不读的配置"。成本边界另由**目标是否存在**守住（无目标零判定调用），本键只作运营侧成本闸。
 #   ← 出处：security/agent_limits_settings.py（G2 成本闸）
+kill_all | symbol | consumed | not_a_threshold | 3 | 已接线 | execution_engine/shell_sessions.py:300 定义（`ShellSessionManager.kill_all`）。**登记时实测判据类为 `no_consumer`**（实现完整、生产侧零调用——调用方只有 tests/unit/tools/test_shell_sessions.py），属协作红线点名的「写了却无人读」断点；G4（Issue #288）把 `exec_command` 起的常驻 shell 会话接进应用关停后，跨文件消费点成立（api/app.py 的 `_on_shutdown`），判据类由机器算为 `consumed`。引用点数 3 = 定义 1 + api/app.py:1155 的 call/read 2（同一行的读与调用按 AST 形态各记一次）。阈值轴 not_a_threshold：它不是「类 + check() 内阈值比较」的门控形态。
+#   ← 出处：execution_engine/shell_sessions.py:300（G4 会话进程回收）
 reset_pipeline_observers | symbol | no_consumer | not_a_threshold | 1 | 待处置 | 放大视角补登。agent/tool_pipeline.py:453 定义，生产侧零调用（测试用重置入口）。它在 `__all__` 里（:500），属**导出但无消费者**形态；与 `ToolExecutionPipeline` 同批处置，不得因「测试在用」而就地删除（判据只谈生产侧，测试可能正是该契约的唯一守卫）。
 #   ← 出处：agent/tool_pipeline.py:453（放大视角补登）
 ToolExecutionResult | symbol | no_consumer | not_a_threshold | 3 | 待处置 | 放大视角补登。tool_layers/schemas.py:291 定义，生产侧只有两条孤立 import（tool_layers/__init__.py:27 再导出、unified_registry.py:45 在 `_get_execution_result_class` 工厂内返回）——后者所在消费方自身不可达（UnifiedToolRegistry 行）。与 UnifiedToolRegistry / ToolExecutionLogger / CLIToolExecutor 构成**同一条不可达链**，处置同批（T-09）。

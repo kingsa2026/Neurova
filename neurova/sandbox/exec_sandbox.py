@@ -26,6 +26,63 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+def killProcessTree(proc: subprocess.Popen) -> None:
+    """按平台杀灭整棵进程树（**全仓唯一**的进程组杀灭实现）。
+
+    - POSIX: 进程组 SIGKILL（调用方须以 `start_new_session=True` 起进程，
+      否则 `getpgid` 返回的是宿主进程组，杀它会连带杀掉宿主自身）；
+      进程已退出时 `getpgid` 抛 `ProcessLookupError`，退回直接 kill。
+    - Windows: `taskkill /T /F`（`TerminateProcess` 只杀单个进程，
+      `taskkill /T` 遍历子树）；taskkill 缺失/失败时退回 `proc.kill()`。
+
+    公开成模块级函数，是因为它不再只服务沙箱内部：工具超时/用户取消路径也要
+    经它收尸（`core/cancel_token.CancelToken.onCancel` 注册的就是本函数）。
+    此前它是 `ExecSandbox` 的私有方法，沙箱外的调用方只能各自再写一份——
+    第二份杀灭实现正是本函数要挡掉的形态。
+    """
+    if sys.platform == "win32":
+        taskkill = shutil.which("taskkill")
+        if taskkill is not None:
+            try:
+                subprocess.run(
+                    [taskkill, "/T", "/F", "/PID", str(proc.pid)],
+                    capture_output=True,
+                    timeout=10,
+                )
+                return
+            except Exception:  # noqa: BLE001 - taskkill 失败退回单杀
+                pass
+        proc.kill()
+        return
+    import signal
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+
+
+def spawnKwargsForKill() -> Dict[str, Any]:
+    """起进程时该带的 kwargs：让子进程自成一团，供后续整组杀灭。
+
+    **这不是可选优化**：POSIX 下不带它，`os.getpgid(child)` 返回的是**宿主**进程组，
+    按组杀灭会连带杀掉宿主自身（本仓实测：未成团时子进程 pgid == 本进程 pgid）。
+    故"要杀进程树的调用方"与"起进程的调用方"必须共用这一处取值——
+    各自手写 `{"start_new_session": True}` 就是给同一约束两份定义。
+
+    Windows 无需成团（`taskkill /T` 按父子关系遍历），返回空 dict。
+    """
+    if sys.platform == "win32":
+        return {}
+    return {"start_new_session": True}
+
+
+#: 进程杀灭后的**收尸窗口**（秒）。杀灭是异步生效的：`SIGKILL` 发出后进程
+#: 还需要一点时间被回收，立刻读 `returncode` 会拿到 `None`（僵尸未收）。
+#: 数值沿用既有沙箱路径的 `communicate(timeout=5)`——不新造第二个尺度。
+KILL_GRACE_S = 5.0
+
+
 class SandboxSeverity(str, Enum):
     """隔离强度等级"""
 
@@ -149,39 +206,12 @@ class ExecSandbox:
             }
 
     def _spawn_kwargs(self) -> Dict[str, Any]:
-        """C-22: POSIX 下让子进程成为新进程组首进程，供超时后整组杀灭。"""
-        if sys.platform == "win32":
-            return {}
-        return {"start_new_session": True}
+        """C-22: POSIX 下让子进程成为新进程组首进程，供超时后整组杀灭（单源转发）。"""
+        return spawnKwargsForKill()
 
     def _kill_process_tree(self, proc: subprocess.Popen) -> None:
-        """C-22: 按平台杀灭整棵进程树。
-
-        - POSIX: 进程组 SIGKILL（execute 经 start_new_session 建组）；
-          进程已退出时 getpgid 抛 ProcessLookupError，退回直接 kill。
-        - Windows: taskkill /T /F（TerminateProcess 只杀单个进程，
-          taskkill /T 遍历子树）；taskkill 缺失/失败时退回 proc.kill()。
-        """
-        if sys.platform == "win32":
-            taskkill = shutil.which("taskkill")
-            if taskkill is not None:
-                try:
-                    subprocess.run(
-                        [taskkill, "/T", "/F", "/PID", str(proc.pid)],
-                        capture_output=True,
-                        timeout=10,
-                    )
-                    return
-                except Exception:  # noqa: BLE001 - taskkill 失败退回单杀
-                    pass
-            proc.kill()
-        else:
-            import signal
-
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
+        """实例方法形态：转调模块级单源 `killProcessTree`（薄转发，不含逻辑）。"""
+        killProcessTree(proc)
 
 
 class ProcessSandbox(ExecSandbox):
@@ -410,6 +440,9 @@ async def execute_in_sandbox_async(
 
 
 __all__ = [
+    "KILL_GRACE_S",
+    "killProcessTree",
+    "spawnKwargsForKill",
     "SandboxSeverity",
     "ExecSandbox",
     "ProcessSandbox",

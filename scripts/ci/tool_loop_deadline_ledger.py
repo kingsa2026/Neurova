@@ -182,6 +182,10 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("MAX_TOOL_CALL_ROUNDS", KIND_BINDING, "agent/chat_pipeline.py:2443（写后无读）"),
     ("ctx_snapshot", KIND_BINDING, "agent/chat_pipeline.py:2451"),
     ("max_parallel_tools", KIND_KEY, "security/agent_limits_settings.py（工具批次并行上限）"),
+    # G4 工具取消/超时处置（Issue #288）：会话进程回收的接线。
+    # 登记前实测判据类为 `no_consumer`（实现完整、生产侧零调用），接线后机器算
+    # 为 `consumed`——这一行就是「写了却无人读」那条断点的闭环证据。
+    ("kill_all", KIND_SYMBOL, "execution_engine/shell_sessions.py（G4 会话进程回收）"),
 )
 
 #: 反向控制：已知生产可达，必须报 `consumed`，且台账处置**永远**是「待处置」。

@@ -11,6 +11,7 @@ Execution Runtime + Transport Abstraction v1.0.0
 """
 
 from neurova.core.logger import get_logger
+import asyncio
 import os
 import subprocess
 import threading
@@ -209,10 +210,28 @@ class LocalExecutor(ExecutionRuntime):
         cwd: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> ExecutionResult:
-        """执行本地命令"""
+        """执行本地命令。
+
+        两处此前是**结构性**缺陷，都在这里根修：
+
+        1. `communicate` 是阻塞调用，此前直接在 `async def` 里跑——整条事件循环
+           被它占住（实测：0.6s 的命令期间，每 50ms 一跳的定时器在这段时间内
+           一跳都没出）。下沉线程池后循环保持可用，工具面与心跳不再被单条命令拖住。
+        2. `process.kill()` 只杀直接子进程，且外部（超时/用户取消）拿不到句柄。
+           改走单源杀灭原语 + 进程自成团（否则按组杀灭会命中宿主进程组）。
+        """
         start_time = time.time()
 
         try:
+            # 局部导入：`exec_sandbox` 在自身函数内反向引用本模块（Docker 执行器），
+            # 提到模块级会把这条懒加载环变成导入期环。
+            from neurova.core.cancel_token import registerKillAction
+            from neurova.sandbox.exec_sandbox import (
+                KILL_GRACE_S,
+                killProcessTree,
+                spawnKwargsForKill,
+            )
+
             cmd = [command] + (args or [])
             merged_env = {**os.environ, **(env or {})}
 
@@ -222,14 +241,28 @@ class LocalExecutor(ExecutionRuntime):
                 stderr=subprocess.PIPE,
                 env=merged_env,
                 cwd=cwd,
+                **spawnKwargsForKill(),
             )
+            # 句柄立刻交给取消令牌：用户停止 / 超时都能兑现为进程组杀灭。
+            # 刻意**不**写 `self._process`：运行时实例经 RuntimeManager 复用，
+            # 并发 exec 会互相覆盖该字段、并在 `finally` 里把对方的句柄抹掉
+            # （它此前恒为 None，故这是一处新引入的竞态，不是既有缺陷）。
+            registerKillAction(lambda: killProcessTree(process))
+
+            # `communicate` 的第一个位置参是 `input` 而非 `timeout`，故经关键字传
+            # （写成 `to_thread(process.communicate, timeout)` 会把秒数当 stdin 内容）。
+            def _reap(grace: Optional[float]):
+                return process.communicate(timeout=grace)
 
             try:
-                stdout, stderr = process.communicate(timeout=timeout)
+                stdout, stderr = await asyncio.to_thread(_reap, timeout)
                 exit_code = process.returncode
             except subprocess.TimeoutExpired:
-                process.kill()
-                stdout, stderr = process.communicate()
+                killProcessTree(process)
+                try:
+                    stdout, stderr = await asyncio.to_thread(_reap, KILL_GRACE_S)
+                except Exception:  # noqa: BLE001 - 收尸失败不改变超时契约
+                    stdout, stderr = b"", b""
                 exit_code = -1
 
             duration_ms = (time.time() - start_time) * 1000

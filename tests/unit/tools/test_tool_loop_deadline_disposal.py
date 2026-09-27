@@ -83,6 +83,10 @@ class TestDisposalIsMachineCheckable:
         # 改为单源配置键。`agent/loops/base.py:resolveParallelBudget()` 是生产侧
         # 唯一读取点，批次分组时传进 `planToolBatches` ⇒ 跨文件消费成立。
         "max_parallel_tools": "G3 工具批次并行：base.resolveParallelBudget 唯一读取点",
+        # G4 工具取消/超时处置（Issue #288）：会话进程随应用退出泄漏——
+        # `kill_all` 实现完整、生产侧零调用，属协作红线点名的「写了却无人读」断点。
+        # 本片把常驻 shell 会话接进 `api/app.py` 的 `_on_shutdown`，跨文件消费成立。
+        "kill_all": "G4 会话进程回收：app._on_shutdown 关停时终止常驻会话",
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
