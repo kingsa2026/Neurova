@@ -1142,3 +1142,11 @@ tests/unit/agent/test_anthropic_loop_batch_handoff.py
 #   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
 #   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
 tests/unit/tools/test_tool_cancellation.py
+
+# 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
+#   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含
+#     write_pdf 命中点与「只读也可不可重放」的反向控制；
+#   · test_command_segment_approval.py：壳方言成员资格读声明（exec_command /
+#     computer_ssh_exec 真 shell 却不在分段面上），含幻名删净与外部别名台账。
+tests/unit/tools/test_reproducible_flag.py
+tests/unit/security/test_command_segment_approval.py
