@@ -135,9 +135,10 @@ trigger_ratio/output_reserve。
 **切片 1（☑）**：`neurova/agent/tool_coordinator.py`——per-tool 超时注册表
 （calculator 5s/memory_search 10s/web_search 30s/browser_* 60-90s，未知回落 60s）+
 ToolCoordinator（run_with_timeout 超时**转后台不取消**——同一任务继续持有引用防 GC，
-观察者协程投递 pending hints；pop_pending_hints 取走即清）+ is_concurrency_safe
-声明制（**2026-09-26 起**读工具自身的 `capability` 声明并做三态合取推导，
-名单形态已删净，见 Issue #271；未知保守 False）。11 用例。
+观察者协程投递 pending hints；pop_pending_hints 取走即清）+ 并行资格声明制
+（**2026-09-26 起**读工具自身的 `capability` 声明并做三态合取推导，
+名单形态已删净，见 Issue #271；未声明保守 False；包装入口于 Issue #286 收口，
+唯一推导处是 `core/tool_capability.isParallelEligible`）。11 用例。
 **切片 2（☑ fd7ea92）**：`_execute_single_tool` 执行链抽取为 `_execute_tool_core`
 （返回三元组）+ run_with_timeout 单一咽喉点覆盖全部执行路径（治理预检后、H5 钩子前）；
 chat_pipeline step3 pending hints 以 [后台工具完成] system 消息注入。4 用例。
@@ -165,7 +166,7 @@ schema 本仓改不了，故声明位落**本仓侧 server 配置** `tool_capabi
 
 1. 红测：三通道（loop 原生/文本兜底/肌肉记忆）同入口；独立工具并行结果完整；超时转后台语义；hint 注入下一轮
 2. 统一入口 `execute(tool_name, params, source, context)`（`tool_executor.py` 收敛；肌肉记忆自动执行=白名单+高置信直通）
-3. 并行：`loops/base.py` 按能力声明分组调用 `asyncio.gather`（`is_concurrency_safe` 读工具自身声明推导，默认串行保守）；声明源已覆盖内置与 MCP 两条注册路径（Issue #271 的 M1+M2 与 M4）
+3. 并行：`loops/base.py` 按能力声明分组调用 `asyncio.gather`（`isParallelEligible` 读工具自身声明推导，默认串行保守）；声明源已覆盖内置与 MCP 两条注册路径（Issue #271 的 M1+M2 与 M4）
 4. per-tool 超时注册表
 5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}_coordinator.py` offload 语义）
 6. 文本正则兜底收窄到 openai 兼容层 tools-400 降级路径

@@ -164,12 +164,18 @@ def classifyBatchShape(batchCount: int, hasGroupedBatch: bool) -> ToolBatchShape
     return ToolBatchShape.MULTI_SERIAL
 
 
-def isParallelEligible(cap: ToolCapability) -> bool:
-    """并行资格推导（**唯一**一处，取代按名字查清单的成员判定）。
+def isParallelEligible(cap: "ToolCapability | None") -> bool:
+    """并行资格推导（**唯一**一处：取代按名字查清单的成员判定）。
 
     合取三态：显式声明可并发 + 声明只读 + 写作用域为空。
     任一条不成立即串行（fail-closed，与改造前对未声明工具的处置同）。
+
+    **未声明（`None`）也走这里**：它是最保守的那一侧（串行），不是另一种判据。
+    此前生产侧另有一个包装函数替调用方先判 `cap is not None`，于是同一句合取
+    在两处各写一遍——两处漂移时不会有任何红，正是本模块要收掉的那种形态。
     """
+    if cap is None:
+        return False
     if not cap.concurrentSafe or not cap.readOnly:
         return False
     return set(cap.writeScopes) <= {WriteScope.NONE}
@@ -226,7 +232,7 @@ def planToolBatches(
     for index, toolCall in enumerate(toolCalls or []):
         name = ((toolCall or {}).get("function") or {}).get("name", "")
         cap = capabilities.get(_normalizeName(name))
-        if cap is not None and isParallelEligible(cap):
+        if isParallelEligible(cap):
             pending.append((index, toolCall))
             if len(pending) >= limit:
                 _flush()

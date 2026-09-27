@@ -21,9 +21,10 @@
    逐工具 `_sum`/`_count`，给出均值与"落在各桶区间"的分布。方案 §10.1 要求
    的耗时分布就是这一份，不另造一套账。
 
-**`path` 分档必须读，不能合并**：`AnthropicLoop.handle_tool_calls` 逐条转发
-`super().handle_tool_calls([单条])`，那条路径上永远只会是 `single_call`——
-并进总数就把一条路径的盲区读成"M3 没有收益"，据此砍方案是拿失明当结论。
+**`path` 分档必须读，不能合并**：`AnthropicLoop.handle_tool_calls` 在批里含
+`computer` 时逐条转发 `super().handle_tool_calls([单条])`，那些批恒为
+`single_call`；其余批整批交基类。并进总数就会把这条残留盲区读成"M3 没有
+收益"，据此砍方案是拿失明当结论。
 
 **读数要区分四件事，其中三种"没结论"的处置各不相同**：
 

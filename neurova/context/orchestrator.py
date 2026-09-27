@@ -108,6 +108,8 @@ class ContextOrchestrator:
     #: 共享并串改），由 `_reflectionMissStreaks()` 惰性补一份实例级 dict。
     _turnReflectionCandidates: tuple = ()
     _reflectionMissStreak: Optional[dict] = None
+    #: 同上：本轮"对话原文"（当轮输入 + 会话历史），进视图判定刨除用；只整体重绑。
+    _turnAuthoredTexts: tuple = ()
 
     #: 折叠分代的层数上限。**不设上限**（`None`），由负责人 2026-09-25 裁定删掉
     #: 原值 5（工单 §12.1：档数不设上限，轨迹越长档数自然增长）。
@@ -168,6 +170,7 @@ class ContextOrchestrator:
         # 逐条目的「连续未进视图」计数（进视图即清零，达阈值走既有降档）。
         self._turnReflectionCandidates: list = []
         self._reflectionMissStreak: dict = {}
+        self._turnAuthoredTexts: list = []
         # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
         # 它在 _archive_conversation_to_pool 写入、在 context/fold_integrity.py
         # 读取（判据的唯一消费面），读数并进 get_context_health()["fold_integrity"]
@@ -1228,6 +1231,14 @@ class ContextOrchestrator:
                 {"role": m["role"], "content": m["content"]} for m in (self.conversation_history or [])
             )
 
+        # D5（B6-11）：本轮"对话原文"（当轮输入 + 会话历史）在此登记一次，供装配
+        # 出口的进视图判定刨除（信封被整封弃掉时末条消息就是裸用户输入，历史窗口
+        # 更是用户往轮原话——不刨就会把"用户提过"记成"教训进过视图"）。来源取
+        # 本处**已算出的**那两份，不另推一份口径。
+        from neurova.context.reflection_view import authoredTexts
+
+        self._turnAuthoredTexts = authoredTexts(user_input, conversation_context)
+
         logger.info(
             "[CTX_TRACE] conversation_context=%d msgs, session_context_provided=%s",
             len(conversation_context),
@@ -1740,6 +1751,8 @@ class ContextOrchestrator:
 
         candidates = list(getattr(self, "_turnReflectionCandidates", None) or [])
         self._turnReflectionCandidates = []
+        authored = list(getattr(self, "_turnAuthoredTexts", None) or [])
+        self._turnAuthoredTexts = []
         readout = self._contextHealthSlot("reflection_injection")
         readout["selected"] = len(candidates)
         readout["missed"] = 0
@@ -1749,7 +1762,7 @@ class ContextOrchestrator:
             return
 
         lessons = [(entry.id, self._reflectionLesson(entry)) for entry in candidates]
-        entered = enteredViewIds(context, lessons)
+        entered = enteredViewIds(context, lessons, authored)
         enteredCandidates = [entry for entry in candidates if entry.id in entered]
         missedCandidates = [entry for entry in candidates if entry.id not in entered]
 

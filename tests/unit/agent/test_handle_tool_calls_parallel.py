@@ -31,7 +31,7 @@ from neurova.tool_executor import ToolExecutor
 def _declare_concurrency(monkeypatch, safe_names):
     """把"哪些工具可并行"这一**能力声明面**收窄到本用例的替身工具名。
 
-    并行/串行判据本身（`is_concurrency_safe` / `planToolBatches`）不在本文件被测
+    并行/串行判据本身（`isParallelEligible` / `planToolBatches`）不在本文件被测
     范围——本文件测的是 `handle_tool_calls` 按声明分组后是否真的 gather / 真的串行。
 
     替身工具不是内置工具，故这里替换**解析入口**（`resolveToolCapability`）而不是
