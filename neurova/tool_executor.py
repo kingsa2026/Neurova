@@ -994,8 +994,14 @@ class ToolExecutor:
                 # 的相对路径必须落在 agent 工作区。在 execute_skill_tool 咽喉处
                 # 注入（服务端赋值覆盖 LLM 伪造的同名参数，同 _caller_user_id
                 # 防线），覆盖 chat 主链与审批重放等全部 skill 执行路径。
-                if skill_name == "file_operation":
-                    params = {**(params or {}), "_base_dir": self._workspace_base()}
+                # 成员资格与解析口径**一律走单源 helper**：此前这里自带
+                # `skill_name == "file_operation"` 判定与一份 `_workspace_base()`
+                # 解析，而 helper 侧另有一份——两处的解析口径已经分叉（helper 不校验
+                # `is_dir()`），同一条事实两个答案。判据见
+                # tests/unit/skills/test_sandbox_root_single_source.py。
+                from neurova.skills.sandbox_root import inject_sandbox_root
+
+                params = inject_sandbox_root(self._agent, skill_name, params)
                 # 执行 Skill——走 registry.execute_skill 正典 seam（生命周期
                 # 事件/未注册 ValueError 语义由其统一承载，P1-#9 残留处理）
                 result = await self._skill_registry.execute_skill(skill_name, params, context)
@@ -3788,24 +3794,24 @@ class ToolExecutor:
     # 基准目录内，防止 glob/walk 经 ../ 或符号链接逃逸出预期目录。
 
     def _workspace_base(self) -> str:
-        """agent 工作区根（相对路径的锚定基准）。
+        """agent 工作区根（内置文件工具的锚定基准）。
 
         根因修复（2026-09-08 事故）：内置文件工具与 file_operation 技能的
         相对路径解析各随其便（进程 CWD），写盘散落项目根且与 SSE artifact
         注册不一致。统一锚定 agent.workspace_path；拿不到有效工作区时
         回退 "."（保持无 agent 上下文构造的旧语义）。
-        """
-        ws = getattr(self._agent, "workspace_path", None)
-        if not ws:
-            return "."
-        try:
-            from pathlib import Path
 
-            p = Path(str(ws))
-            # 非真实目录（含 Mock 泄漏）视为缺失，宁可回退也不拿伪根
-            return str(p) if p.is_dir() else "."
-        except Exception:  # noqa: BLE001
-            return "."
+        **解析委托单源**：口径（缺失/非真实目录/异常 → `.`）由
+        `skills/sandbox_root.resolveWorkspaceRoot` 唯一回答。本方法此前自带
+        一份同形实现，与 helper 已经分叉（helper 不校验 `is_dir()`）——同一条
+        事实两个答案，而 `_base_dir` 是覆盖 LLM 伪造参数的服务端赋值。
+        保留本方法是因为内置文件工具有 5 处消费点（`_resolve_agent_path` /
+        `file_list` / `file_search` / `write_pdf` 源解析），它们锚定的正是同一个
+        工作区，不该各持一份口径。
+        """
+        from neurova.skills.sandbox_root import resolveWorkspaceRoot
+
+        return resolveWorkspaceRoot(self._agent)
 
     def _resolve_agent_path(self, file_path: str) -> tuple:
         """内置文件读写类工具的路径解析咽喉。

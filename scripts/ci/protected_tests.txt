@@ -1165,3 +1165,11 @@ tests/unit/api/test_channel_config_landing_anchor.py
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
 #   存量收养、不覆盖、无旧物时不得凭空造文件。
 tests/unit/memory_ingest/test_seed_db_landing_relocation.py
+
+# Issue #271 M5 尾巴（第三命中点）：`file_operation` 沙箱根此前是「一条事实两处
+#   实现」——成员判定在 `sandbox_root.SANDBOX_ROOT_TOOLS` 与咽喉的
+#   `skill_name == "file_operation"` 各写一份，解析口径也各写一份且**已分叉**
+#   （helper 不校验 `is_dir()`、咽喉校验）。`_base_dir` 是覆盖 LLM 伪造参数的
+#   服务端赋值，故防线只在其中一条路径上成立。判据：成员单源 + 解析单源 +
+#   咽喉不得自带成员比较（AST）+ 真执行体落盘 + 防伪根回落。
+tests/unit/skills/test_sandbox_root_single_source.py
