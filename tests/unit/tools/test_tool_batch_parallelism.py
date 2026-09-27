@@ -533,18 +533,6 @@ class TestHazardsExcluded:
             "recall", "recall_evicted", "drilldown", "search", "connect",
         }
 
-        def sinkNames(node):
-            """收集一次调用链上的末段函数名（`a.b.c()` → `c`，`f()` → `f`）。"""
-            names = set()
-            for item in ast.walk(node):
-                if isinstance(item, ast.Call):
-                    target = item.func
-                    if isinstance(target, ast.Attribute):
-                        names.add(target.attr)
-                    elif isinstance(target, ast.Name):
-                        names.add(target.id)
-            return names
-
         def offloadedHelperNodes(fn):
             """交给 `to_thread` 的内部函数**函数体节点集**——它们不参与本判据。
 
@@ -603,7 +591,7 @@ class TestHazardsExcluded:
                     continue
                 target = node.func
                 label = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
-                if label in blocking_sinks and label not in offloaded:
+                if label in blocking_sinks:
                     blocking.append(f"{name}:{label}")
                     break
         assert not blocking, (
@@ -709,3 +697,110 @@ class TestFullDeclarationCoverage:
         assert resolveToolCapability("unregistered_probe_tool") is None
         assert "unregistered_probe_tool" not in _BUILTIN_SCHEMAS
         assert "unregistered_probe_tool" not in list_declared_capabilities()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 七：判据只有一处定义（收口第二入口 + 折叠重复的合取）
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestEligibilityHasOneDefinition:
+    """「这一项够不够格并行」只允许一处定义。
+
+    实测（M3 收尾）：同一句合取 `cap is not None and isParallelEligible(cap)`
+    在生产侧出现了两次——`core/tool_capability.planToolBatches` 内一次、
+    `agent/tool_coordinator.is_concurrency_safe` 一次。后者在 M1+M2 之后
+    **生产侧零消费**（`base.py` 改走 `resolveBatchCapabilities` + `planToolBatches`），
+    只剩测试在用：它是一条与事实源并列的第二读法，漂移时两侧不会同时红。
+
+    处置按 `AGENTS.md` 第 6 条：把「未声明（None）⇒ 串行」折进**唯一**那处推导，
+    删净包装函数。删除不是收窄能力——判据本身一条不丢。
+    """
+
+    def test_undeclaredCapabilityIsSerial(self):
+        """「未声明 ⇒ 串行」属于推导本身（fail-closed 的那一侧）。"""
+        from neurova.core.tool_capability import isParallelEligible
+
+        assert isParallelEligible(None) is False
+
+    def test_secondEntryIsGone(self):
+        """包装函数 `is_concurrency_safe` 必须物理消失（第二读法不得留存）。"""
+        from tests import ast_scan
+
+        hits = ast_scan.sourceRefsUnder(
+            ast_scan.PRODUCTION_ROOT, hints=("is_concurrency_safe",)
+        )
+        found = [
+            (ref.path.name, lineno)
+            for ref in hits
+            for lineno, line in enumerate(ref.code.splitlines(), start=1)
+            if "is_concurrency_safe" in line
+        ]
+        assert not found, (
+            "生产侧仍有第二份资格读法（事实源唯一：`isParallelEligible`）: "
+            f"{found}"
+        )
+
+    def test_declaredCapabilityStillResolves(self):
+        """反向控制：收口后真工具仍读得出资格（判据没被一起删掉）。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
+
+        assert isParallelEligible(resolveToolCapability("file_read")) is True
+        assert isParallelEligible(resolveToolCapability("file_write")) is False
+        assert isParallelEligible(resolveToolCapability("no_such_tool")) is False
+
+
+# ═══════════════════════════════════════════════════════════════
+# 八：这批判据必须真被 CI 跑到（登记收口）
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestM3JudgementsAreRegisteredInCI:
+    """M3 的四份判据必须进受保护子集，否则"全绿"与"判据真跑过"是两件事。
+
+    根因（本仓已两次踩过，两种方向都有常驻守卫）：`scripts/ci/protected_tests.txt`
+    是 CI 实际跑的清单，文件在仓、单跑全绿、**清单里没有** ⇒ CI 从未跑过它，
+    而 CI 照样全绿。同批同根因的 `test_mcp_capability_declaration.py` 登记了，
+    本批另外四份没有。
+
+    判据落在**唯一事实源**（该清单本身），不另建一份文件清单：登记被摘掉即红。
+    守卫自己也在其中一份被守文件里，故它随登记一起上 CI，不需要第二条规则。
+    """
+
+    BATCH_FILES = (
+        "tests/unit/tools/test_tool_batch_parallelism.py",
+        "tests/unit/tools/test_tool_parallelism_readout.py",
+        "tests/unit/agent/test_handle_tool_calls_parallel.py",
+        "tests/unit/agent/test_anthropic_loop_batch_handoff.py",
+    )
+
+    @staticmethod
+    def _listed() -> set:
+        import io
+        from pathlib import Path
+
+        raw = io.open(
+            Path(__file__).resolve().parents[3] / "scripts/ci/protected_tests.txt",
+            encoding="utf-8",
+        ).read()
+        return {
+            line.split("#", 1)[0].strip()
+            for line in raw.splitlines()
+            if line.split("#", 1)[0].strip()
+        }
+
+    def test_batchFilesAreRegistered(self):
+        listed = self._listed()
+        missing = [rel for rel in self.BATCH_FILES if rel not in listed]
+        assert missing == [], (
+            "M3 的判据文件不在受保护子集里 —— CI 不会跑它们，"
+            f"回归会静默放行：{missing}\n"
+            "修复：单跑全绿后加进 scripts/ci/protected_tests.txt。"
+        )
+
+    def test_guardItselfRunsInCI(self):
+        rel = "tests/unit/tools/test_tool_batch_parallelism.py"
+        assert rel in self._listed(), (
+            f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
+        )

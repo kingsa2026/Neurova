@@ -1118,3 +1118,18 @@ tests/unit/ci/test_npc_handoff_role_continuity.py
 #   + 归一化副本 + 写面 API 三处闭合）；解析通道接 `mcp.{server}.{tool}`（裸名不借声明）。
 #   判据：写入 → 持久化 → 解析 → 分组调度端到端；未声明/形态非法/共享作用域一律串行。
 tests/unit/tools/test_mcp_capability_declaration.py
+
+# Issue #286（M3 判据登记收口）：工具批次并行的四份判据此前文件在仓、单跑全绿，
+#   而受保护子集里一条都没有 ⇒ CI 从未跑过它们（同批同根因的
+#   test_mcp_capability_declaration.py 登记了，这四份漏了）。形态与本仓既有守卫
+#   tests/unit/context/test_b5_scale_batch_registration.py 记录的「绿得毫无意义」同型。
+#   · test_tool_batch_parallelism.py：资格推导为三态合取 + 分组调度保序 +
+#     71/71 全量声明覆盖 + 可并行工具不得同步阻塞事件循环 + 本批登记自证；
+#   · test_tool_parallelism_readout.py：§10.1 取数的三态可分（worthwhile / sparse /
+#     no_data×3 成因）、口径不折叠、依据行与活行为咬合；
+#   · test_handle_tool_calls_parallel.py：真 handle_tool_calls 链路的成组/串行与回装保序；
+#   · test_anthropic_loop_batch_handoff.py：Anthropic 路径的整批交基类与残留盲区。
+tests/unit/tools/test_tool_batch_parallelism.py
+tests/unit/tools/test_tool_parallelism_readout.py
+tests/unit/agent/test_handle_tool_calls_parallel.py
+tests/unit/agent/test_anthropic_loop_batch_handoff.py
