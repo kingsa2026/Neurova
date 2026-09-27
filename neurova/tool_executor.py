@@ -3207,7 +3207,10 @@ class ToolExecutor:
             if not callable(reader):
                 return {"error": "上下文池不支持分层摘要下钻（池版本过旧）"}
 
-            span = reader(reference, limit=limit)
+            # 下钻是同步的台账/索引直取（常驻集 + SQLite 持久兜底），
+            # 下沉线程池——本工具已声明可并行，留在事件循环里会把成组批中
+            # 同批全部兄弟一起卡住（与 file_read 的既证处置同口径）。
+            span = await asyncio.to_thread(reader, reference, limit=limit)
             if not span.get("resolved"):
                 # 解析不出引用 / 档位不存在：如实报错并附**本会话现有档位**，
                 # 让模型能自行纠正引用，而不是盲重试（教义第 2 条：不伪装空结果）。
@@ -3284,7 +3287,9 @@ class ToolExecutor:
             if pool is None:
                 return {"error": "上下文池不可用，无法召回历史"}
 
-            recalled = pool.recall_evicted(query=query, limit=limit)
+            # 召回是同步的双源读取（本进程常驻台账 + SQLite 持久台账，见
+            # `ContextPool.recall_evicted`），下沉线程池——理由同上。
+            recalled = await asyncio.to_thread(pool.recall_evicted, query=query, limit=limit)
 
             # P1-a：召回循环防护——同轮同查询同结果拒绝（防模型死循环重试）
             # P0-B2：guard 按 session_id 分桶（原挂在单例 Agent 实例上，并发
@@ -3808,7 +3813,16 @@ class ToolExecutor:
         return child == base or child.startswith(base + os.sep)
 
     async def _execute_file_list(self, params: Dict) -> Dict:
-        """文件枚举（glob 模式，默认递归子目录）"""
+        """文件枚举（glob 模式，默认递归子目录）。
+
+        目录遍历与 glob 都是同步阻塞 I/O：本工具已声明可并行，执行体若留在
+        事件循环里，成组批中会把同批**全部**兄弟一起卡住（比串行更差）。
+        故整段求值下沉线程池，与 file_read / file_parse 的既证处置同口径。
+        """
+        return await asyncio.to_thread(self._list_files_sync, params)
+
+    def _list_files_sync(self, params: Dict) -> Dict:
+        """`_execute_file_list` 的同步执行体（线程池内调用）。"""
         import glob
         import os
 
@@ -3866,11 +3880,18 @@ class ToolExecutor:
             return {"error": f"文件枚举失败: {e}"}
 
     async def _execute_file_search(self, params: Dict) -> Dict:
-        """文件内容搜索（grep：返回 文件/行号/行内容）
+        """文件内容搜索（grep：返回 文件/行号/行内容）。
 
-        只读操作；遍历范围被 _safe_search_base 规范化并禁止 ..，
-        打开的文件全部来自校验后基准目录内的 os.walk 结果。
+        遍历范围被 `_safe_search_base` 规范化并禁止 ..，打开的文件全部来自
+        校验后基准目录内的 `os.walk` 结果。
+
+        与 file_list 同因：整段是同步目录遍历 + 逐文件读取，又已声明可并行，
+        留在事件循环里会在成组批中连累同批全部兄弟。下沉线程池。
         """
+        return await asyncio.to_thread(self._search_files_sync, params)
+
+    def _search_files_sync(self, params: Dict) -> Dict:
+        """`_execute_file_search` 的同步执行体（线程池内调用）。"""
         import fnmatch
         import os
         import re
@@ -5257,7 +5278,11 @@ class ToolExecutor:
                     return {"results": [], "query": query, "count": 0}
 
             # 搜索语音转写记忆（使用 category 过滤）
-            memories = memory_manager.recall(
+            # 与 memory_search 同一 recall 路径（同步 SQLite/向量 I/O），故同处置：
+            # 下沉线程池。本工具已声明可并行，留在事件循环里会在成组批中
+            # 连累同批全部兄弟——那比串行更差。
+            memories = await asyncio.to_thread(
+                memory_manager.recall,
                 query=query,
                 category="voice_transcription",  # 语音转写类别
                 limit=limit,

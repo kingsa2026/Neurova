@@ -98,6 +98,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "query_database": {
+        # 并行能力声明：语义只读但作用域为共享（执行体经 attachment_dataset.materializeReadOnlyCopy
+        # 把只读副本写进共享查询缓存根）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": (
             "【数据集查询】按附件句柄只读查询用户上传的 SQLite 数据集（.db/.sqlite）："
             "缺省列全部表、每表列定义、行数与样例行；给了 sql 则执行该只读查询。"
@@ -126,6 +129,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_write": {
+        # 并行能力声明：整体覆盖写工作区文件——工作区是共享态，两个并发写同一路径会互相覆盖。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【文件写入】写入（整体覆盖）指定路径文件的内容。【何时不用】对已有文件做局部修改改用 file_edit（查找替换，避免整文件重写）；创建全新文件用 file_create。",
         "parameters": {
             "type": "object",
@@ -138,6 +143,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_create": {
+        # 并行能力声明：新建工作区文件——工作区是共享态，与同批任何写操作并发都会互相覆盖。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "创建新文件",
         "parameters": {
             "type": "object",
@@ -149,6 +156,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_delete": {
+        # 并行能力声明：删除工作区文件——工作区是共享态，并发下"先判存在再删"是 TOCTOU，与写操作互踩。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "删除文件",
         "parameters": {
             "type": "object",
@@ -159,6 +168,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_edit": {
+        # 并行能力声明：读-改-写序列改工作区文件——工作区是共享态，两路并发改同一文件必丢更新。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【文件编辑】查找替换方式修改已有文件：old_str 必须与文件内容逐字符一致且在文件中唯一（含足够上下文行），不唯一则不执行替换。对已有文件的局部修改一律用本工具。【何时不用】整体重写文件用 file_write；新建文件用 file_create。",
         "parameters": {
             "type": "object",
@@ -181,6 +192,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click": {
+        # 并行能力声明：操作共享宿主桌面——鼠标与焦点是全局单例，并发点击会互相打断。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "点击屏幕指定位置",
         "parameters": {
             "type": "object",
@@ -193,6 +206,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_type": {
+        # 并行能力声明：操作共享宿主桌面——键盘焦点是全局单例，并发输入会串到对方的窗口。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "键盘输入文本",
         "parameters": {
             "type": "object",
@@ -204,6 +219,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_scroll": {
+        # 并行能力声明：操作共享宿主桌面——滚动作用于当前指针位置的全局滚动目标。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "滚动屏幕",
         "parameters": {
             "type": "object",
@@ -234,6 +251,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click_element": {
+        # 并行能力声明：操作共享宿主桌面（五级递降链的语义点击）——桌面聚焦与快照代次是全局单例。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按元素点击】通过快照元素 index 点击桌面控件（来自 computer_dom_snapshot 快照事实）。内部走语义动作→消息直投的递降链，默认不抢用户焦点、不移动真实光标。快照过期（generation 不符）会被拒绝并提示重新快照。",
         "parameters": {
             "type": "object",
@@ -248,6 +267,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_set_value": {
+        # 并行能力声明：操作共享宿主桌面（UIA ValuePattern 直写控件）——目标控件与快照代次是全局单例。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按元素赋值】通过快照元素 index 向桌面输入框/可编辑控件直接写入文本（UIA ValuePattern，比逐键敲入更快更可靠，且不依赖焦点位置）。参数必须来自 computer_dom_snapshot 快照。",
         "parameters": {
             "type": "object",
@@ -275,6 +296,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_click_mark": {
+        # 并行能力声明：操作共享宿主桌面，且读本实例最近一次 SOM 快照的编号表——两处都是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按 SOM 编号点击】点击 computer_som_snapshot 返回的某个编号区域中心（内部经 id2xy 解算像素坐标并走 DPI/多屏换算的点击链）。编号来自最近一次 SOM 快照，过期需重新快照。",
         "parameters": {
             "type": "object",
@@ -286,6 +309,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_ssh_exec": {
+        # 并行能力声明：在远端机器执行命令——共享远端会话与凭据分桶，输出经同一终端面板渲染。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【SSH 远程命令】经 SSH 在远程 Linux/macOS 机器上执行命令，返回 stdout/stderr/退出码，操作在聊天页的终端窗口展示。用于远程跑命令（无需图形桌面）。host 必填；用户名/密钥/密码从你的 SSH 凭据配置读取（platform=ssh），不必在此传密码。【何时不用】本机命令用 computer_shell；数据处理/算法用 run_code。",
         "sandbox_required": True,
         "parameters": {
@@ -301,6 +326,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_shell": {
+        # 并行能力声明：在用户计算机上执行 shell 命令——共享宿主机状态与终端面板。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。Windows 注意：cmd.exe 不认单引号包裹的参数（会被当字面量），含空格/特殊字符的路径与参数必须用双引号（如 reg query \"HKLM\\...\"）；查询系统信息类需求优先用本机工具结果（如 computer_screenshot 回带的 screen 元数据），不要跑 reg query 探测。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
         "sandbox_required": True,
         "parameters": {
@@ -314,6 +341,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 浏览器操作工具──
     # 执行过程的页面截图会实时推送到聊天页的电脑操作分屏面板
     "browser_navigate": {
+        # 并行能力声明：驱动同一个内置浏览器实例——页面是共享态，并发导航会互相顶掉对方的页。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。这是工具阶梯中最重的一档：仅当 web_search/web_fetch 无法完成任务（需要页面交互、登录或 JS 动态渲染）时才使用；纯读取内容一律先用 web_search 搜索、web_fetch 抓取。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。【何时不用】已知 URL 的静态页读取不要导航（直接 web_fetch）；站点内搜索不要用导航拼 URL（用 web_search 或 bilibili_search 等垂直工具）。",
         "parameters": {
             "type": "object",
@@ -324,6 +353,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_click": {
+        # 并行能力声明：驱动同一个内置浏览器实例——并发点击会互相打断对方的页面动作。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【浏览器点击】点击当前页面上的元素。selector 支持 CSS 选择器或 Playwright 的 text= 文本定位；也可只传 text 按可见文本查找（如'登录'按钮）。",
         "parameters": {
             "type": "object",
@@ -335,6 +366,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_type": {
+        # 并行能力声明：驱动同一个内置浏览器实例——并发输入会串到对方的焦点元素。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【浏览器输入】向页面输入框填写文本。先清空原内容再输入，适合搜索框、表单、登录框等。",
         "parameters": {
             "type": "object",
@@ -346,6 +379,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_screenshot": {
+        # 并行能力声明：语义只读但作用域为共享（取同一浏览器实例的瞬时画面）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【浏览器截图】截取当前浏览器页面的画面。截图会实时显示在聊天页的电脑操作面板中，并返回页面标题和 URL。",
         "parameters": {
             "type": "object",
@@ -354,6 +389,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_extract_text": {
+        # 并行能力声明：语义只读但作用域为共享（读同一浏览器实例的当前页正文，并发会拿到对方翻页后的中间态）
+        # ⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【浏览器提取文本】提取当前浏览器页面的正文文字内容，用于阅读网页、总结文章、获取搜索结果等。建议先用 browser_navigate 打开页面。【何时不用】还没打开页面时先 browser_navigate；需要完整长文分片阅读改用 browser_dom_read；未驱动浏览器前抓静态页直接 web_fetch，不要为本工具单独开浏览器。",
         "parameters": {
             "type": "object",
@@ -365,6 +403,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 协议：先 browser_dom_snapshot 拿结构化页面事实，再从快照里取 role+name 交互；
     # 快照已包含目标信息时禁止用 evaluate/HTML 探索；禁止猜测 CSS 选择器
     "browser_dom_snapshot": {
+        # 并行能力声明：语义只读但作用域为共享（aria 快照读同一浏览器实例的当前页与代次游标）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。可见长页面/长列表快照不完整时，可调大 max_nodes/max_depth 预算（默认节点 1200/深度 32）。",
         "parameters": {
             "type": "object",
@@ -377,6 +417,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_click_role": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按 ARIA 角色定位）——页面与代次是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按角色点击】通过 ARIA 角色和可访问名称点击页面元素（如 role=button, name=登录）。参数必须来自 browser_dom_snapshot 快照中的事实，不要编造。元素不可点击或页面已变化（generation 过期）时返回错误说明。",
         "parameters": {
             "type": "object",
@@ -389,6 +431,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_fill_role": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按 ARIA 角色写入）——页面与代次是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【按角色输入】通过 ARIA 角色和可访问名称定位输入框并填写文本（如 role=textbox, name=用户名）。参数必须来自 browser_dom_snapshot 快照；text 传空串表示清空输入框。",
         "parameters": {
             "type": "object",
@@ -499,6 +543,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "planning": {
+        # 并行能力声明：计划存储的增删改（PlanStore 落盘）——存储是共享态；与 update_plan 的分工见其声明。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【任务计划】创建和管理结构化任务计划，适合多步骤长任务：先 create 建立步骤清单，执行过程中用 mark_step 标记各步状态（completed/in_progress/blocked），让用户和后续轮次都能看到全局进度。计划持久化存储，重启后仍可 get 查询继续推进。对于需要多轮才能完成的任务，开工前先建计划。状态机纪律：同一时刻至多一个 in_progress 步骤；步骤完成立即标记，不要攒到最后批量勾选；探索/搜索/阅读类动作不要登记为步骤；计划需要大改时先说明理由再 update。",
         "parameters": {
             "type": "object",
@@ -539,6 +585,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "asr_transcribe": {
+        # 并行能力声明：语义只读但作用域为共享（执行体先 await manager.initialize() 懒建共享引擎，
+        # 两路并发会重复加载同一模型）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "将音频转写为文本（语音识别）",
         "parameters": {
             "type": "object",
@@ -551,6 +600,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "tts_synthesize": {
+        # 并行能力声明：语义只读但作用域为共享（懒初始化同一个 tts_manager，且音频落共享临时目录）
+        # ⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "将文本合成为语音",
         "parameters": {
             "type": "object",
@@ -567,6 +619,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "voice_memory_search": {
+        # 并行能力声明：与 memory_search 走**同一条** recall 路径（同一记忆库的只读检索），无写作用域。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【内部语音记忆检索】仅搜索用户之前通过语音说过的内容（语音转写后的记录）。不能搜索互联网、不能查天气、不能获取外部信息。仅用于回忆用户语音对话历史。【何时不用】查打字/文字对话记忆改用 memory_search；查本会话被折叠内容用 recall_history；两者结果都不足时再回退本工具，不要每次都查三路。",
         "parameters": {
             "type": "object",
@@ -657,6 +711,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "spawn_subagent": {
+        # 并行能力声明：派生子 Agent 有副作用（蜂群记录 + 父会话邮箱投递），不是只读工具。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。配额纪律（系统强制，超限派生会被数据层直接拒绝）：任务要求 N 个子任务就只调 N 次；用户未指定数量时每层 1-3 个；禁止为同一子任务重复派生；禁止派生与当前任务无关的子 Agent；并发上限 5，超限先 subagent_status 等待回收再派生。【何时不用】固定步骤序列的自动化改用工作流/画布（canvas_run）；单步工具能完成的不要派生子 Agent。",
         "parameters": {
             "type": "object",
@@ -703,6 +759,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "create_skill": {
+        # 并行能力声明：注册技能并落盘技能库——技能注册表是共享态，并发注册同名技能会互相覆盖。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【创建可执行技能】当你发现一组工具调用反复出现（可由 LLM 直接复用）时，把它们组合成持久化的可执行技能；之后任何对话都能通过 `name` 一键调用。技能 = 一次或多次工具调用的有序执行 + 可选的步间占位符（`{step_<idx>.<field>}` 引用前序步骤的输出字段）。创建后立即在本会话与 SkillRegistry 中可见可调。",
         "parameters": {
             "type": "object",
@@ -776,6 +834,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "write_pdf": {
+        # 并行能力声明：产物落盘并注册 artifact——产物目录与登记表都是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【PDF 出件】把 Markdown 正文渲染为 PDF 产物，返回文件名、产物目录路径与鉴权下载地址。用于「要一份可分发文件」的场景（报告、长文归档、交付清单）。【何时不用】只想读文件用 file_read；只想写文本用 file_write；网页另存走 browser_*。响应 warnings 非空时（如无中文字体已降级为阅读器侧字体）必须如实转达，不得报告为完全成功。",
         "parameters": {
             "type": "object",
@@ -807,6 +867,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "git": {
+        # 并行能力声明：含写子命令（commit/push/checkout）会抢同一 .git/index.lock；工具粒度从严，与
+        # _NON_REPRODUCIBLE_TOOLS 把整个 git 列为不可重现同一处置。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【Git 仓库操作】在指定仓库执行 git 命令。command 为完整命令行（含 git 前缀），如 'git status --short'；仓库目录由 path 锚定（相对锚定工作区，默认工作区根，禁止 --git-dir/-C/--work-tree 等逃逸选项）。读操作（status/diff/log/show/blame/ls-files）直接执行；写操作（add/commit/push/checkout/reset…）触发人工确认。【何时不用】GitHub PR/issue/CI 等远程托管操作用 github MCP 工具；不要用本工具跑 shell 通用命令（用 run_code/computer_shell）；不要用 curl 代替 git fetch。",
         "parameters": {
             "type": "object",
@@ -819,6 +882,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "deep_research": {
+        # 并行能力声明：内层已有并发扇出（检索 gather + 抓取限流信号量 6）——外层再并行是**叠乘**，
+        # 缺的是资源护栏而不是作用域隔离，故用并发位表达、作用域仍是 none。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
         "description": "【深度研究采集】对主题做多源检索+正文摘录，返回带 [n] 编号引用的源料包（title/url/excerpt），你在其基础上综合撰写带引用的研究报告。比逐条 web_search+web_fetch 省往返，适合'调研X现状/对比A与B'类任务。【何时不用】单条已知链接用 web_fetch；简单事实查 web_search；本工具只采集源料，不做结论（结论由你写）。可传 sub_queries 给出多个检索角度（拆解子问题）。",
         "parameters": {
             "type": "object",
@@ -844,6 +910,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "run_code": {
+        # 并行能力声明：任意代码执行——共享解释器与工作目录，副作用面不可预判。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、算法计算、文本批量处理、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。【何时不用】系统操作类命令（进程/服务/环境变量）改用 computer_shell；纯数值计算禁止心算，一律用本工具跑 Python。",
         "sandbox_required": True,
         "parameters": {
@@ -860,6 +928,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "exec_command": {
+        # 并行能力声明：启动常驻 shell 进程——进程与 workdir 是共享资源，并发启动会互抢同一工作目录。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【会话式命令执行】启动一个常驻 shell 命令/进程并等待 yield_time_ms 毫秒：已完成直接返回输出与退出码（status=completed）；未结束返回 session_id（status=running），之后用 write_stdin 向该会话写输入或轮询新输出。适合构建、测试、dev server、交互式脚本等长任务。【何时不用】一次性快速命令用 computer_shell；跑 Python 数据处理用 run_code；需要远程机器用 computer_ssh_exec。",
         "sandbox_required": True,
         "parameters": {
@@ -874,6 +944,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "write_stdin": {
+        # 并行能力声明：向既有 shell 会话写输入并推进输出游标——会话是共享态，两路并发会交错丢输出。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【会话输入/轮询】向 exec_command 返回的 session_id 会话写入文本（自动补换行）并等待新输出；chars 传空串表示纯轮询输出。进程结束后返回 exit_code。【何时不用】没有进行中的 exec_command 会话时不要调用。",
         "parameters": {
             "type": "object",
@@ -899,6 +971,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "update_plan": {
+        # 并行能力声明：纯本地校验后原样返回计划（无落盘、无事件、无共享态）；计划**持久化**面在
+        # planning 工具，本工具只产出结果供前端时间轴消费。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【任务计划】维护当前任务的步骤清单（todo list）：复杂/多阶段任务开工前建立计划，每完成一步立即更新状态，计划变化时说明原因。约束：同一时刻至多一个 in_progress。【何时不用】简单单步任务不要建计划。",
         "parameters": {
             "type": "object",
@@ -938,6 +1013,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 用户可随时抢占编辑，携带 base_version 的过期操作会返回
     # code=version_conflict + current_version，此时应 canvas_read 重读后重试。
     "canvas_create": {
+        # 并行能力声明：新建共享画布（CanvasOpService 服务端状态）——服务是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【创建画布】新建一张空白工作流画布，返回 canvas_id（后续所有 canvas_* 操作都需要它）。当用户希望你搭建/设计/制作一个工作流、流水线、流程图时先调用本工具。画布会实时显示在前端协作画布页。",
         "parameters": {
             "type": "object",
@@ -961,6 +1038,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_add_node": {
+        # 并行能力声明：改动共享画布内容（服务端状态 + 乐观锁版本号）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【添加节点】向画布添加一个节点。node_type 必须是节点库中已注册的类型（不确定时先用 canvas_list_nodes 查询）。返回新节点（含自动生成的 id 与自动落位）。可选携带 base_version 做乐观锁校验。",
         "parameters": {
             "type": "object",
@@ -976,6 +1055,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_connect": {
+        # 并行能力声明：改动共享画布连线（服务端状态 + 乐观锁版本号）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【连接节点】在画布上把两个节点用连线接起来（source_node 的输出 → target_node 的输入）。端口 id 缺省时使用默认端口。重复连线会返回 duplicate_edge 错误。",
         "parameters": {
             "type": "object",
@@ -991,6 +1072,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_set_config": {
+        # 并行能力声明：改动共享画布节点配置（浅合并，服务端状态）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【配置节点】修改画布上某节点的配置项（浅合并：只覆盖传入的键，其余保留）。values 的键是节点表单字段 id（可通过 canvas_read 查看节点现有 config）。",
         "parameters": {
             "type": "object",
@@ -1004,6 +1087,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_move_node": {
+        # 并行能力声明：改动共享画布节点坐标（服务端状态 + 乐观锁版本号）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【移动节点】调整画布上某节点的坐标位置。一般搭完流程后直接用 canvas_layout 自动布局即可，仅在需要微调时使用。",
         "parameters": {
             "type": "object",
@@ -1018,6 +1103,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_remove_node": {
+        # 并行能力声明：改动共享画布结构（连删节点与其连线，服务端状态）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【删除节点】从画布删除某节点，与其相连的连线会一并删除（返回删除的连线数）。",
         "parameters": {
             "type": "object",
@@ -1030,6 +1117,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_layout": {
+        # 并行能力声明：全量重排共享画布节点（服务端状态 + 乐观锁，与同批任何画布改动作业互踩）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【自动布局】按拓扑分层对画布全部节点自动排版（上游在左、下游在右）。建议在添加完节点和连线后调用一次，让画布整齐可读。",
         "parameters": {
             "type": "object",
@@ -1041,6 +1130,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_run": {
+        # 并行能力声明：编译并同步执行整张共享画布（内层跑工作流，副作用面不可预判）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【运行画布】把画布编译为工作流并同步执行，返回整体状态与每个节点的执行结果（状态/输出/错误/耗时）。搭完工作流后用它验证流程是否跑通。【何时不用】把已保存的工作流交给子 Agent 长期执行改用 spawn_subagent；一次性简单任务不要包装成画布，直接用对应工具。",
         "parameters": {
             "type": "object",
@@ -1066,6 +1157,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "orchestrate_tools": {
+        # 并行能力声明：内层按步骤表跑任意工具链（可含写操作）——外层再并行是叠乘且副作用面不可预判。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【多步编排】按显式步骤表在一次调用里跑完一条工具链：层内无依赖的步进并行、有依赖的步进按顺序执行，任一步失败即跳过其下游并点名失败原因。已知确切的执行顺序、且要与一次工具调用等价地拿到整条链的成败时用它。【何时不用】只是把常见序列固化下来供以后反复复用，改用 create_skill（那是持久技能，这里是单次编排）；单个工具直接调它自己；需要可视化分支/循环编排用画布工具族。",
         "parameters": {
             "type": "object",
