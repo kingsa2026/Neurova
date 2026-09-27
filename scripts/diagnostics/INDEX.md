@@ -28,7 +28,7 @@
 | `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
 | `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |
 
-| `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**，且**按成因分型**（`instrument_absent` 仪表缺席⇒恒不可达、该修部署 / `zero_samples` 仪表在位⇒可达且已就位、该等真实轮次 / `schema_drift` 抓取里有本词表不认识的形态标签⇒分母残缺、该修词表；两段各自按本段仪表的表判，互不借用）；形态词表派生自写入侧单一事实源（`core/tool_capability.ToolBatchShape`），漂移样本点名且不再静默丢弃；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
+| `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**，且**按成因分型**（`absent_in_this_scrape` 本份抓取里没有该族仪表⇒先核对抓取、确为完整抓取时才落到部署 / `zero_samples` 仪表在位⇒可达且已就位、该等真实轮次 / `schema_drift` 抓取里有本词表不认识的形态标签⇒分母残缺、该修词表；两段各自按本段仪表的表判，互不借用）；形态词表派生自写入侧单一事实源（`core/tool_capability.ToolBatchShape`），漂移样本点名且不再静默丢弃；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
 
 ## 二、检查脚本（checks）
 
