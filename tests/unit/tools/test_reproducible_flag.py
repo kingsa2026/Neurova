@@ -18,6 +18,8 @@ from neurova.builtin_tools import (
 EXPECTED_NON_REPRODUCIBLE = {
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "spawn_subagent", "planning",
+    # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
+    "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
     "canvas_move_node", "canvas_set_config", "canvas_layout", "canvas_run",
     "computer_click", "computer_click_element", "computer_click_mark",
@@ -158,3 +160,73 @@ class TestSynthesizedSkillInheritsStandard:
         # 未知（MCP/无声明）保守 False
         assert resolve_tool_reproducible(agent, "mcp__x__y") is False
         assert resolve_tool_reproducible(None, "whatever") is False
+
+# ── 跨轴一致性：写作用域声明 ⇒ 不可重现（与 Issue #286 的 planning 同根因）──
+
+
+class TestWriteScopedToolsAreNeverReproducible:
+    """有写作用域的工具不得被判为可重现 —— 两条轴不同，但这条**单向蕴含**必须成立。
+
+    两条轴各答一个事实：`capability.readOnly` 问"两个调用同时跑会不会互踩"
+    （并行轴）；`_NON_REPRODUCIBLE_TOOLS` 问"重放会不会制造新副作用"（重放轴）。
+    两轴**不合并** —— `computer_screenshot` 是反例：语义只读、却因瞬时快照而不可重放，
+    它留在名单里是正确处置（见下面的反向控制）。
+
+    但一个方向必须成立：声明了写作用域（`readOnly=False`）的工具，结果不可能
+    "重放不制造新变更" —— 那正是 `readOnly=False` 的定义。反过来不成立
+    （只读也可能不可重放），故本判据**只钉单向蕴含**，不把两轴并成一个字段。
+
+    命中点：`write_pdf`（工单 001）落产物目录并注册 artifact，声明面写着
+    `readOnly=False`，重放轴上却算可重现 ⇒ 它进了遗传引擎的"可安全组合的只读原语"
+    池（`genetic_engine._available_tools` 由本名单派生），溢出元数据也把它标成可重放。
+    与 `planning` 在治理放行轴上被误算同类：**同一份事实在两条轴上被读成两件事**。
+    """
+
+    def test_offendersAreNamed(self):
+        from neurova.builtin_tools import (
+            _BUILTIN_SCHEMAS,
+            _NON_REPRODUCIBLE_TOOLS,
+            get_builtin_tool_capability,
+        )
+
+        offenders = sorted(
+            name
+            for name in _BUILTIN_SCHEMAS
+            if (cap := get_builtin_tool_capability(name)) is not None
+            and not cap.readOnly
+            and name not in _NON_REPRODUCIBLE_TOOLS
+        )
+        assert not offenders, (
+            "这些工具声明了写作用域（readOnly=False），重放轴上却被判为可重现："
+            f"{offenders} —— 重放会制造新变更（落盘/注册 artifact）"
+        )
+
+    def test_reverseDirectionIsNotClaimed(self):
+        """反向不成立，判据不得被读成"两轴合并"。
+
+        只读工具**可以**不可重放：截图/DOM 快照重放不回当时画面。若有人把两轴
+        并成一个字段，这条会红 —— 它钉住"不合并"这件事本身。
+        """
+        from neurova.builtin_tools import _NON_REPRODUCIBLE_TOOLS, get_builtin_tool_capability
+
+        for name in ("computer_screenshot", "computer_dom_snapshot", "computer_som_snapshot"):
+            cap = get_builtin_tool_capability(name)
+            assert cap is not None and cap.readOnly, f"{name} 应声明为只读"
+            assert name in _NON_REPRODUCIBLE_TOOLS, (
+                f"{name} 是瞬时快照：只读但不可重放，必须留在重放名单里"
+            )
+
+    def test_writePdfIsNotInTheReproduciblePool(self):
+        """消费面自证：遗传引擎的"只读原语"池里不得出现写作用域工具。"""
+        from neurova.evolution.genetic_engine import ToolGeneticEngine
+
+        pool = ToolGeneticEngine(seed=11)._available_tools
+        from neurova.builtin_tools import get_builtin_tool_capability
+
+        leaked = [
+            name
+            for name in pool
+            if (cap := get_builtin_tool_capability(name)) is not None and not cap.readOnly
+        ]
+        assert not leaked, f"写作用域工具进了只读原语池：{leaked}"
+
