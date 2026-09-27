@@ -452,3 +452,230 @@ class TestReadoutOnARealScrape:
             "verdict 没落在 §10.1 原文口径（多工具批次 / 全部轮）上："
             f"拿到 {payload['verdict']}，会把'多工具轮本身就极少'读成'值得做 M3'"
         )
+
+
+class TestNoDataCauseIsSplitByInstrumentPresence:
+    """`no_data` 有两种成因，**处置相反** —— 它们此前在输出上完全同形。
+
+    实测两条真实路径（Issue #271 取数）：
+
+    - **仪表缺席**：部署镜像 revision `d5210625`（09-26 12:23）的 `core/metrics.py`
+      对 `tool_batch_shapes` **零命中**，该 revision 导出的抓取里连家族头都没有
+      ⇒ 判据**恒不可达**：再跑多少轮、再等多久都不会有样本，要动的是**部署**；
+    - **零样本**：当前源码导出的抓取里家族头在、样本数为 0（重启清空计数器，
+      而新实例一次工具轮都没跑过）⇒ 判据**可达且已就位**：样本随真实轮次到达，
+      重跑本命令即出结论。
+
+    两种情形都印一个 `no_data`。读者因此分不清"该修部署"与"该等样本" ——
+    这是本仓反复付代价的"把失明当结论"的同一族形态，只是又深了一层：上一片
+    分开了「判据结论（sparse）」与「判据输入没采到（no_data）」，这一片必须
+    再分开「输入根本没采到（仪表缺席）」与「输入可达、只是还没样本」。
+    """
+
+    @staticmethod
+    def _run(tmp_path, text: str, *extra):
+        import subprocess
+
+        scrape = tmp_path / "scrape.txt"
+        scrape.write_text(text, encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(scrape), *extra],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+
+    @staticmethod
+    def _zeroSampleScrape(tmp_path) -> str:
+        """真源码导出的零样本抓取：家族头在、`{...}` 样本行一条都没有。
+
+        **必须另起进程**导出：本进程的注册表被同文件其它用例写过，就地导出会带上
+        它们的样本，用例前提随执行序漂移（实测：单跑该类时零样本、全文件跑时不是）。
+        另起进程同时正是"重启后新实例"的真实形态——判据仪表是进程级的，
+        重启即清空计数器，样本随真实工具轮到达。
+        """
+        import subprocess
+
+        fresh = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from neurova.core.metrics import get_metrics, generate_metrics_text;"
+                " get_metrics();"
+                " print(generate_metrics_text(), end='')",
+            ],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert fresh.returncode == 0, f"新进程导出抓取失败：{fresh.stderr[-600:]}"
+        return fresh.stdout
+
+    def test_zeroSampleScrapeIsReachableNotBlind(self, tmp_path):
+        """家族头在 + 零样本 ⇒ 成因是**可达且已就位**，不是"量不到"。
+
+        判据：`zero_samples`。处置是"等真实轮次"，不是"去修部署"、更不是
+        "据此放弃 M3"——判据本身是可达的。
+        """
+        import json as _json
+
+        text = self._zeroSampleScrape(tmp_path)
+        assert "neurova_tool_batch_shapes" in text, (
+            "本进程的抓取里连家族头都没有：判据仪表没接线（这条断言守的是本用例的前提）"
+        )
+        assert 'neurova_tool_batch_shapes_total{' not in text, (
+            "本用例的前提是**零样本**（没有任何 {...} 样本行）"
+        )
+
+        result = self._run(tmp_path, text, "--json")
+        assert result.returncode == 0, result.stderr[-500:]
+        payload = _json.loads(result.stdout.strip().splitlines()[-1])
+        assert payload["verdict"] == "no_data", (
+            f"零样本没被判成 no_data（拿到 {payload['verdict']}）"
+        )
+        assert payload.get("no_data_cause") == "zero_samples", (
+            "零样本的成因没被分开：它会被读成'判据不可达'，于是该等样本的时候"
+            f"跑去改部署（拿到 {payload.get('no_data_cause')!r}）"
+        )
+        assert payload["instrument"]["shape_family"]["present"] is True
+        assert payload["instrument"]["shape_family"]["sample_total"] == 0
+
+    def test_absentInstrumentIsNamedAsUnreachable(self, tmp_path):
+        """家族头不在 ⇒ 成因是**恒不可达**，处置指向部署而不是"再等等"。
+
+        判据：`instrument_absent`。这份抓取取自埋点提交之前的代码（实测镜像
+        revision `d5210625` 对 `tool_batch_shapes` 零命中），此时等多久都不会有样本。
+        """
+        import json as _json
+
+        text = (
+            "# HELP neurova_tool_executions_total h\n"
+            "# TYPE neurova_tool_executions_total counter\n"
+            'neurova_tool_executions_total{tool_name="file_read",source="builtin",success="true"} 4\n'
+        )
+        result = self._run(tmp_path, text, "--json")
+        assert result.returncode == 0, result.stderr[-500:]
+        payload = _json.loads(result.stdout.strip().splitlines()[-1])
+        assert payload["verdict"] == "no_data"
+        assert payload.get("no_data_cause") == "instrument_absent", (
+            "仪表缺席没被点名：读者会以为'再等等就有读数'，而这份部署永远不会有"
+            f"（拿到 {payload.get('no_data_cause')!r}）"
+        )
+        assert payload["instrument"]["shape_family"]["present"] is False
+
+    def test_twoCausesAreDistinguishable(self, tmp_path):
+        """反向控制：两种成因必须**分得开**，不许折叠成同一个值。
+
+        折叠回同一个 `no_data` 就是本片要修的那个缺陷本身。
+        """
+        import json as _json
+
+        zero = self._run(tmp_path, self._zeroSampleScrape(tmp_path), "--json")
+        absent = self._run(
+            tmp_path, "# HELP neurova_whatever_total h\n# TYPE neurova_whatever_total counter\n", "--json"
+        )
+        zero_cause = _json.loads(zero.stdout.strip().splitlines()[-1])["no_data_cause"]
+        absent_cause = _json.loads(absent.stdout.strip().splitlines()[-1])["no_data_cause"]
+        assert zero_cause != absent_cause, (
+            f"两种成因被折叠成同一个值 {zero_cause!r}——读者无从分辨处置"
+        )
+
+    def test_humanReadableNamesDispositionPerCause(self, tmp_path):
+        """人类可读输出必须**各自点名处置**：该修部署 vs 该等样本。
+
+        只印一句"input 不可用"，读者仍要自己猜该动哪里——那等于把判据留在
+        我们自己脑内。
+        """
+        absent = self._run(tmp_path, "# HELP neurova_x_total h\n# TYPE neurova_x_total counter\n")
+        assert "instrument_absent" in absent.stdout, (
+            f"缺席成因没在人类可读输出里点名：{absent.stdout[-400:]}"
+        )
+        assert "部署" in absent.stdout, (
+            f"缺席的处置没写清楚（该动的是部署，不是在这里等）：{absent.stdout[-400:]}"
+        )
+
+        zero = self._run(tmp_path, self._zeroSampleScrape(tmp_path))
+        assert "zero_samples" in zero.stdout, (
+            f"零样本成因没在人类可读输出里点名：{zero.stdout[-400:]}"
+        )
+        assert "可达" in zero.stdout, (
+            f"零样本的'判据可达'没说清（它会被读成恒不可达）：{zero.stdout[-400:]}"
+        )
+
+    def test_durationReadoutSplitsTheSameTwoCases(self, tmp_path):
+        """同一根因的第二个命中点：耗时分布那行也把两种情形印成"（无样本）"。
+
+        教义第 5 条：一个断链被点名后，同契约的其余命中点一并修。
+        """
+        absent = self._run(tmp_path, "# HELP neurova_x_total h\n# TYPE neurova_x_total counter\n")
+        assert "（无样本）" not in absent.stdout or "仪表" in absent.stdout, (
+            "耗时读数只说'（无样本）'，与'仪表缺席'同形：读者分不清该等还是该修"
+            f"：{absent.stdout[-400:]}"
+        )
+        assert "仪表" in absent.stdout, (
+            f"耗时读数没点出仪表缺席：{absent.stdout[-400:]}"
+        )
+
+    def test_durationSegmentJudgesByItsOwnInstrument(self, tmp_path):
+        """耗时段按**它自己的**仪表判成因，不借用形态段的结论。
+
+        实测这份旧部署（revision `d5210625`）里两支仪表状态不同：
+        `tool_execution_seconds` 早就在位（埋点先于形态表），形态表则缺席。
+        把形态段的"仪表缺席"抄给耗时段，读者会照着错的处置去动 ——
+        而两支仪表在观测面上本来就是独立的两条读数。
+        """
+        text = (
+            "# HELP neurova_tool_execution_seconds d\n"
+            "# TYPE neurova_tool_execution_seconds histogram\n"
+        )
+        result = self._run(tmp_path, text)
+        assert result.returncode == 0, result.stderr[-500:]
+        duration_line = [l for l in result.stdout.splitlines() if "耗时" in l or "成因=" in l]
+        tail = result.stdout.split("工具耗时分布")[-1]
+        assert "zero_samples" in tail, (
+            "耗时段借用了形态段的成因：它自己的仪表明明在位（只是零样本），"
+            f"却被判成'仪表缺席、该修部署'：{tail[-400:]}"
+        )
+
+    def test_inProcessReadAssemblesRegistryLikeTheEndpoint(self):
+        """进程内路径必须先装配仪表，再导出文本——与 `/metrics` 端点同一条装配。
+
+        实测（live-verify）：不装依赖跑 `python tool_parallelism_readout.py`（无参数），
+        它给出 `instrument_absent` —— 而这是**误判**：`generate_metrics_text()` 单独
+        调用时 `_Metrics()` 从未被构造，注册表里一条 neurova 家族都没有，于是
+        "本进程还没装配仪表"被读成"这份部署里没有仪表"，把处置指向了无辜的部署。
+
+        真 `/metrics` 端点在注册时就 `get_metrics()`（`api/app.py` 的
+        `_register_metrics_endpoint` 第一行），故进程内取数要照同一条装配走，
+        判出来的"仪表在不在"才是关于**部署**的事实，而不是关于**本进程偷懒**。
+        """
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(READOUT_SCRIPT), "--json"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-600:]
+        import json as _json
+
+        payload = _json.loads(result.stdout.strip().splitlines()[-1])
+        assert payload["instrument"]["shape_family"]["present"] is True, (
+            "进程内取数把'本进程尚未装配仪表'读成了'部署里没有仪表'："
+            "处置会被指向无辜的部署（与 /metrics 端点的装配不一致）"
+        )
+        assert payload["verdict"] == "no_data"
+        assert payload["no_data_cause"] == "zero_samples", (
+            f"新实例的真实成因是零样本（拿到 {payload['no_data_cause']!r}）"
+        )
+
+    def test_nonNoDataCarriesNoCause(self, tmp_path):
+        """反向控制：判据出结论时不得挂一个无意义的成因。"""
+        import json as _json
+
+        text = (
+            "# HELP neurova_tool_batch_shapes_total b\n"
+            "# TYPE neurova_tool_batch_shapes_total counter\n"
+            'neurova_tool_batch_shapes_total{path="P",shape="single_call"} 1\n'
+        )
+        result = self._run(tmp_path, text, "--json")
+        payload = _json.loads(result.stdout.strip().splitlines()[-1])
+        assert payload["verdict"] in ("worthwhile", "sparse")
+        assert payload.get("no_data_cause") in ("", None), (
+            f"有结论的轮次挂了成因 {payload.get('no_data_cause')!r}——成因是 no_data 专属"
+        )
