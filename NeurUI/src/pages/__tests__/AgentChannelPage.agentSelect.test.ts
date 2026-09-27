@@ -19,7 +19,11 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { agentId: '216fb777' } }) }))
+vi.mock('vue-router', () => ({
+  // 同 layout 用例：本档钉的是选择器选项契约，路由替身只需满足形状。
+  useRoute: () => ({ params: { agentId: '216fb777' } }),
+  useRouter: () => ({ push: vi.fn() }),
+}))
 vi.mock('@/api/modules/channel-configs', () => ({
   listChannelConfigs: vi.fn().mockResolvedValue([]),
   createChannelConfig: vi.fn().mockResolvedValue({}),
