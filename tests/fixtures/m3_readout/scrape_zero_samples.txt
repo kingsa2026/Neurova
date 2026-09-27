@@ -1,0 +1,11 @@
+# provenance: 当前源码真导出（新实例、尚未跑过任何工具轮）——家族头在、样本行零条
+# 来源命令: python3 -c "from neurova.core.metrics import get_metrics, generate_metrics_text; get_metrics(); print(generate_metrics_text(), end='')"
+# 判据仪表是进程级的：重启即清空计数器，样本随真实工具轮到达（Issue #271 的 zero_samples 态）。
+# 
+
+# HELP neurova_tool_executions_total Total tool executions
+# TYPE neurova_tool_executions_total counter
+# HELP neurova_tool_execution_seconds Tool execution duration
+# TYPE neurova_tool_execution_seconds histogram
+# HELP neurova_tool_batch_shapes_total Tool rounds by batch shape (single_call / multi_serial / multi_parallel)
+# TYPE neurova_tool_batch_shapes_total counter
