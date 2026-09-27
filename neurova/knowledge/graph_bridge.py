@@ -197,6 +197,11 @@ def admitExtractedFacts(
                 relationKind="entity",
                 assertions=[_assertionFor(item, statement)],
                 sourceTurnId="entry:%s" % str(item.get("knowledge_id", "") or ""),
+                # 工单 001：抽取产物是模型输出，引用到的路径/版本号必须能在被抽取的
+                # 条目原文里逐字找到。拒的是这条断言，不是整条条目的抽取——坏三元组
+                # 入底座后会被当事实读，降权没有意义（底座没有"权重"）。
+                evidenceText="%s\n%s" % (str(item.get("title", "") or ""),
+                                         str(item.get("content", "") or "")),
                 activityKind="extract",
                 activityBasis="graph_bridge.extract_knowledge_to_graph（LLM 抽取落底座）",
             ))

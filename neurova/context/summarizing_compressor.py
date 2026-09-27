@@ -20,6 +20,11 @@ from typing import Awaitable, Callable, List, Optional
 
 from neurova.context.pool_models import ContextInput
 
+# 逐字可核闸的判定实现在共享位（`knowledge/verifiability.py`）：同一类风险
+# （模型编造）全仓只允许一份判定——摘要、经验、知识、教训四条调用点共用。
+# 这里只保留摘要侧特有的语义：生成 → 脱敏 → 校验 → 单次 repair → fail-closed。
+from neurova.knowledge.verifiability import extract_identifiers, find_violations
+
 logger = logging.getLogger(__name__)
 
 # 脱敏模式（摘要出口）：常见密钥形态
@@ -61,38 +66,6 @@ _REPAIR_PROMPT_TEMPLATE = """你上一版摘要包含以下**在原始对话中�
 {chunks}
 
 [输出修正后的摘要]"""
-
-# 高风险标识符提取：URL / 绝对路径 / 版本号 / hex-hash
-_IDENTIFIER_PATTERNS = (
-    re.compile(r"https?://[^\s<>\"')\]\uFF0C\u3002\uFF1B\uFF01\uFF1F\uFF08\uFF09\u3010\u3011\u300A\u300B]+", re.IGNORECASE),
-    re.compile(r"(?<![\w\-/])(/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+)"),  # 多段路径
-    re.compile(r"\b\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.\-]+)?\b"),  # semver 形
-    re.compile(r"\b[0-9a-f]{12,64}\b", re.IGNORECASE),  # hex hash/sha 片段
-)
-
-
-def extract_identifiers(text: str) -> List[str]:
-    """从文本提取高风险精确标识符（URL/路径/版本号/hash）——反幻觉校验域。"""
-    found: List[str] = []
-    seen = set()
-    for pattern in _IDENTIFIER_PATTERNS:
-        for m in pattern.finditer(text or ""):
-            value = m.group(0).rstrip(".,;:，。；）)…")
-            if value and value.lower() not in seen and len(value) >= 5:
-                seen.add(value.lower())
-                found.append(value)
-    return found
-
-
-def find_violations(summary: str, evidence: str) -> List[str]:
-    """摘要中存在但证据（chunks+previous）中逐字缺失的标识符。"""
-    evidence_lower = evidence or ""
-    return [
-        ident
-        for ident in extract_identifiers(summary)
-        if ident.lower() not in evidence_lower
-    ]
-
 
 def _redact(text: str) -> str:
     """摘要出口脱敏：带捕获组的模式保留键名只脱敏值，其余整段替换。"""

@@ -58,13 +58,14 @@ class TestCreateAdmits:
         repo, tmp_path = gated
         item = repo.create_knowledge("default", "检索评测台架", _BODY_B,
                                      owner_user_id="u7", confidence=0.7)
-        # 1 个来源 0.45，加"有现场可回放"0.05（source_turn_id=entry:<kid>）= 0.50；
-        # 要验的是它由聚合而来，不是调用方传进来的那个数。
-        assert item["confidence"] == pytest.approx(0.50)
+        # 1 个来源 = 0.45 基线。要验的是它由聚合而来，不是调用方传进来的那个数；
+        # 001 摘掉了"有现场可回放 +0.05"（判据取 source_turn_id 非空，而该列承载
+        # 条目身份，任何写法都拿分），故此处读数就是裸基线。
+        assert item["confidence"] == pytest.approx(0.45)
         store = _facts(tmp_path)
         try:
             fact = _active(store, "default", item["knowledge_id"])
-            assert fact["confidence"] == pytest.approx(0.50)
+            assert fact["confidence"] == pytest.approx(0.45)
         finally:
             store.close()
 
@@ -117,7 +118,7 @@ class TestEditSupersedes:
             assert store.factCount() == 1
             again = store.fact(factId)
             assert again["status"] == "active"
-            assert again["confidence"] == pytest.approx(0.50)
+            assert again["confidence"] == pytest.approx(0.45)
         finally:
             store.close()
 
