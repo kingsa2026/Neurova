@@ -12,14 +12,13 @@ from typing import Any, Dict, List, Optional
 _SOURCE_BASE = {0: None, 1: 0.45, 2: 0.60, 3: 0.70}
 _MULTI_SOURCE_BASE = 0.80
 _HETEROGENEOUS_BONUS = 0.10
-_REPLAYABLE_BONUS = 0.05
 _CONTRADICTION_PENALTY = 0.25
 _CEILING = 0.95
 _FLOOR = 0.05
 
 _DEFINITION = (
     "confidence = 独立来源数基线（1→0.45 / 2→0.60 / 3→0.70 / ≥4→0.80）"
-    " + 异构来源种类 ≥2 加 0.10 + 有现场可回放（source_turn_id）加 0.05"
+    " + 异构来源种类 ≥2 加 0.10"
     " - 被标记矛盾扣 0.25，上下界 [%.2f, %.2f]；无断言则为 NULL。"
     "该数不等于真值度量，只描述支持结构。" % (_FLOOR, _CEILING)
 )
@@ -49,9 +48,11 @@ class ConfidenceAggregator:
             confidence += _HETEROGENEOUS_BONUS
             basis.append("来源种类 %d 种异构(+%.2f)" % (len(kinds), _HETEROGENEOUS_BONUS))
 
-        if str(fact.get("source_turn_id") or ""):
-            confidence += _REPLAYABLE_BONUS
-            basis.append("有现场可回放(+%.2f)" % _REPLAYABLE_BONUS)
+        # 曾有一项"有现场可回放 +0.05"，判据是 `source_turn_id` 非空。该列由咽喉
+        # 兜底成 `entry:<kid>`（条目身份，见 `admission.py` 的叙述记录分支），
+        # 于是任何写法都拿这 0.05、任何缺证都扣不到它 —— 一个不携带信息的恒真加分。
+        # 它比没有加分更坏：下游按分档映射注入优先级时会被整体抬高一档。
+        # 换真实来源语义要另立项（该列另有三处读者），故先摘掉，不在此处补判据。
 
         contradicted = fact.get("contradicted_by") or []
         if contradicted:

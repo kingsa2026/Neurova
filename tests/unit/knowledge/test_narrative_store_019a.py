@@ -185,7 +185,7 @@ class TestRepositorySwitch:
         pairs = list(zip(_flatItems(reopened), _flatItemsFromDict(before)))
         assert any(i["confidence"] != b["confidence"] for i, b in pairs),             "开闸不回填置信度，这条豁免就只是给旧行为开后门"
         assert all("source" in i and i["source"] for i, _ in pairs),             "source 派生后必须仍非空，否则豁免变成藏缺陷"
-        assert all(i["confidence"] in (0.45, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85)
+        assert all(i["confidence"] in (0.45, 0.6, 0.7, 0.8)
                    for i, _ in pairs), "置信度必须落在聚合格点上，不是任意小数"
 
 
@@ -284,9 +284,9 @@ class TestWriteSurfaceUnderGate:
         restored = again.get_item("default", kid)
         assert restored["title"] == "改过的标题"
         assert restored["visibility"] == "public"
-        # 闸内 confidence 是聚合出来的（1 源 + 可回放现场 = 0.5），调用方传的 0.9 不再落账；
+        # 闸内 confidence 是聚合出来的（1 源 = 0.45），调用方传的 0.9 不再落账；
         # 关闸态仍然原样存 0.9——见 test_gateOffWritesOnlyJson 那条口径。
-        assert restored["confidence"] == pytest.approx(0.5)
+        assert restored["confidence"] == pytest.approx(0.45)
         assert "u9" in restored["shared_with"]
         assert restored["submission"]["status"] == "approved"
         assert restored["chunks"][0]["content"] == "块正文被改写了"

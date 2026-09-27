@@ -16,6 +16,7 @@ SEGMENTS: tuple = (
     "content_identity",     # 004
     "identity_resolution",  # 006
     "ontology_adjudication",  # 020/021
+    "verifiability",        # 001
     "conflict_judgement",   # 007
     "credibility_record",   # 009/010
     "lineage",              # 005
@@ -40,6 +41,7 @@ SEGMENT_STATUS: dict = {
     "content_identity": "wired",       # 段1 在 admit() 内联实现
     "identity_resolution": "wired",
     "ontology_adjudication": "wired",
+    "verifiability": "wired",          # 段3.5 在 admit() 内联实现（共享门见 knowledge/verifiability.py）
     "conflict_judgement": "wired",
     "credibility_record": "wired",
     "lineage": "wired",
@@ -101,6 +103,10 @@ class AdmissionRequest:
     activityBasis: str = ""
     # 调用方已经开好活动时直接接上，咽喉不再另开一条同义活动。
     activityId: str = ""
+    # 逐字可核闸的证据文本（工单 001）：生成这段 `content` 的原料。
+    # 由**调用方**声明——只有它知道这段说法是从哪读出来的（条目正文 / 对话轮次 /
+    # 回执原文）。不声明时本闸不动作，也**不假装验过**（见 `_checkVerifiability`）。
+    evidenceText: str = ""
 
 
 @dataclass
@@ -129,6 +135,25 @@ class AdmissionReceipt:
 import threading
 
 _deriveState = threading.local()
+
+
+class AdmissionError(ValueError):
+    """断言未过逐字可核闸——拒的是**这条断言**，不是整条知识的存在权。
+
+    为什么拒：知识会被当事实注入下游决策。模型编造出的路径/版本号一旦入库，
+    下游读到的是"权威说这里有这个东西"，而权威里根本没有它。
+    异常而不是布尔返回：调用方（七条写入链）各自的失败处置不同，靠返回值判定
+    必然有人漏判；上抛让"没处置"这件事当场可见。
+
+    违规清单进异常——只说"没过闸"的报错，读的人无法判断是模型编的、还是证据漏带的。
+    """
+
+    def __init__(self, violations: List[str], statement: str) -> None:
+        self.violations = list(violations)
+        super().__init__(
+            "逐字可核闸未过：断言引用了证据中不存在的内容 %s（断言：%.80s）"
+            % (" / ".join(self.violations), statement)
+        )
 
 
 class AdmissionSegmentMissing(RuntimeError):
@@ -206,6 +231,27 @@ class KnowledgeAdmissionGate:
         """`delegated` 段的归属点位——读回执的人据此找到真正负责的实现。"""
         return {name: list(SEGMENT_OWNERS.get(name, ()))
                 for name in SEGMENTS if SEGMENT_STATUS.get(name) == "delegated"}
+
+    @staticmethod
+    def _checkVerifiability(request: AdmissionRequest) -> None:
+        """段3.5：断言里的精确标识符必须在调用方声明的证据里逐字存在。
+
+        判据与摘要器同源（共享门 `knowledge/verifiability.py`）：模型最容易在
+        URL / 路径 / 版本号 / hash 上编造，而这几类恰好是下游会照做的（"这个文件在
+        这里""这个版本要装"）。知识入库后会被当事实读，所以这里的处置是**拒绝**，
+        不是降权——降权留着一条"权威说过它存在"的行，读面分不出它与真事实。
+
+        只查**调用方声明了证据**的写入。没声明就等于"这次没有可核的原料"，
+        此时不查也不自称查过——把"查不了"演成"查过了"，比不查更坏。
+        """
+        evidence = str(request.evidenceText or "")
+        if not evidence:
+            return
+        from ..verifiability import find_violations
+
+        violations = find_violations(str(request.content or ""), evidence)
+        if violations:
+            raise AdmissionError(violations, str(request.content or ""))
 
     @staticmethod
     def _validate(request: AdmissionRequest) -> None:
@@ -290,6 +336,10 @@ class KnowledgeAdmissionGate:
             )
 
         subjectKey, needsReview, applied = self._resolveSubject(request)
+        # 段3.5 逐字可核：本体判"这个说法挂在谁身上合法吗"，本段判"这段文本是不是编的"。
+        # 放在写入之前——拒得越早，越少人读到过那条不存在的路径。
+        self._checkVerifiability(request)
+        applied.append("verifiability")
         # 段3 前半：本体校验。放在消解之后、写入之前——校验要看的是"这条说法挂在谁身上"，
         # 而主体还没定就校验等于校验一个还不存在的落点。违规即拒（G08 的硬判据）。
         ontology = self._collaborators.get("ontology_adjudication")

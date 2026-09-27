@@ -57,6 +57,44 @@ def _wilson_interval(successes: int, total: int, z: float = 1.96):
     return p, max(0.0, center - spread), min(1.0, center + spread)
 
 
+def lessonEvidence(events: List[Dict[str, Any]]) -> str:
+    """一条教训的**可核原料**：产出它的事件原文（工具名与描述）。
+
+    教训的文本是模板拼出来的，但模板里嵌的 `subject` 来自工具事件的
+    `description`，而那一栏的源头是模型自己发出的工具调用名（`function.name`）。
+    所以"教训文本里出现的精确标识符"必须能在事件原文里找到，否则就是把
+    模型编造的内容烙成了教训。
+    """
+    parts = []
+    for event in events or []:
+        for key in ("description", "subject", "tool"):
+            value = str((event or {}).get(key) or "")
+            if value:
+                parts.append(value)
+    return "\n".join(parts)
+
+
+def lessonViolations(lessons: List[Dict[str, Any]], evidence_text: str) -> List[Dict[str, Any]]:
+    """哪些教训引用了证据里不存在的内容（返回违规教训清单，不返回改过的副本）。
+
+    判据与摘要器同一份实现（共享门 `knowledge/verifiability.py`）：教训会经
+    `context/injector` 注入 prompt，`avoid_tool` 那一类还会被
+    `tool_executor._metacog_gate_check` 读成"这个工具别用了"——编造的内容在
+    这里会直接停用一个工具，故处置是**拒绝生成**，比经验侧的降权更严。
+    """
+    from neurova.knowledge.verifiability import find_violations
+
+    evidence = str(evidence_text or "")
+    if not evidence:
+        return []
+    out = []
+    for lesson in lessons or []:
+        violations = find_violations(str((lesson or {}).get("text") or ""), evidence)
+        if violations:
+            out.append({"lesson": lesson, "violations": violations})
+    return out
+
+
 class SelfModelEngine:
     """洞察编译器：台账 → 结构化教训 → 调控建议"""
 
@@ -157,6 +195,9 @@ class SelfModelEngine:
         with self._lock:
             events = list(reversed(self.ledger.list_events(agent_id=self._agent_id, limit=2000)))
             lessons: List[Dict[str, Any]] = []
+            # 被逐字可核闸拒掉的教训主体（读数面要看得见"拒过什么"，否则
+            # 拒了等于静默消失——与本批一路在拆的"没测到当成没出问题"同形）。
+            refused: set = set()
             observations: List[str] = []
 
             # P1-4：per-operator 隔离——原单 try 包五算子，_op_drift 一崩
@@ -173,6 +214,21 @@ class SelfModelEngine:
                 except Exception as e:
                     logger.debug("洞察编译器算子 %s 异常: %s", op_name, e)
 
+            # 工单 001 段：教训落台账前过逐字可核闸。拒的是**这一条教训**，
+            # 不是整轮反思——一条编造的教训会经注入面进 prompt，`avoid_tool`
+            # 那一类还会直接停用一个工具（`tool_executor._metacog_gate_check`），
+            # 所以处置取三者中最严的"拒绝生成"，且被拒的条目要在返回里可见。
+            evidence_text = lessonEvidence(events)
+            blocked = lessonViolations(lessons, evidence_text)
+            if blocked:
+                refused.update(str(item["lesson"].get("subject") or "") for item in blocked)
+                for item in blocked:
+                    logger.warning(
+                        "教训被逐字可核闸拒绝（%s）：引用了事件原文中不存在的内容 %s",
+                        item["lesson"].get("subject"), " / ".join(item["violations"]),
+                    )
+                blocked_ids = {id(b["lesson"]) for b in blocked}
+                lessons = [l for l in lessons if id(l) not in blocked_ids]
             for lesson in lessons:
                 lesson["source"] = "template"
                 self.ledger.create_record(
@@ -196,6 +252,7 @@ class SelfModelEngine:
             report = {
                 "trigger": trigger,
                 "lessons": lessons,
+                "lessons_refused": sorted(refused),
                 "observations": observations,
                 "confidence": 0.9 if lessons else 0.5,
                 "summary": summary,
