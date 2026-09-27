@@ -1165,3 +1165,12 @@ tests/unit/api/test_channel_config_landing_anchor.py
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
 #   存量收养、不覆盖、无旧物时不得凭空造文件。
 tests/unit/memory_ingest/test_seed_db_landing_relocation.py
+
+# Issue #271 M5 尾巴（第五命中点）：安装门的「已知工具全集」此前是一份 41 项
+#   手写探针清单，注释自陈理由（"注册表无直接列表 API"）不成立——
+#   `get_registered_tool_names()` 就是那个读侧，其 docstring 明确禁止再持第二份
+#   名字表。实测漏 30/71，后果是**安装门误拒**：白名单里写 deep_research /
+#   write_stdin / query_database / orchestrate_tools / git 等合法工具名会被判
+#   「含未知工具」而拒绝安装。判据：注册面逐名过门 + 真未知名仍被拒 +
+#   MCP 声明口径不变 + AST 复算"安装门里不得再出现手写名字表"。
+tests/unit/skills/test_install_gate_known_tools.py
