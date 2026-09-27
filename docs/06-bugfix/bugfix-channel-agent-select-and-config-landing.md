@@ -161,16 +161,39 @@ LIVE-VERIFY PASSED / Issue #290 Bug B
 
 ## 未闭环项（登记，不静默遗留）
 
+### 已收口（2026-09-28 第二批）
+
+2. ~~**Agent 渠道页的 agent 切换不走路由**~~ **已修**：身份收口到路由
+   （`agentId` 改读 `route.params`，选择器只推路由；首挂载与后续 URL 变化走
+   同一条取数路径）。判据 `NeurUI/src/pages/__tests__/AgentChannelPage.agentRouteSync.test.ts`。
+3. ~~**管理面 agent 盲**~~ **已修**：`restart` / `clear-queue` / `conflicts`
+   三端点加 `agent_id` 形参，manager 按复合键取实例，冲突扫描面改全量实例表，
+   队列清空按 `payload.metadata.agent_id`（行自带的事实）收口，前端调用点透传身份。
+   判据 `tests/unit/channels/test_mgmt_agent_scope_290.py` +
+   `ChannelIntegrationPage.mgmtAgentScope.test.ts`。
+4. ~~**落点已分叉的另外两项**~~ **部分收口**：`neurova/memory/data/neurova_memories_persist.db`
+   已按**配对**收养（见下节"配对"）。**`yi_ling_memory.db` 的打包态落点仍未实拍**
+   （需真实桌面部署环境），如实留在这里。
+
+### 配对收养（本批发现的更深一层根因）
+
+记忆持久层是**一对文件**：`MemoryManager` 拿 `db_path` 当主库，另在同目录配一个
+持久库，而**真行写进的是后者**。原先的换锚救济按单文件语义工作，只搬了主库 ——
+搬过来的是空壳（读到 0 行），症状与"完全没搬"逐字相同，而"旧物已搬走"的断言全绿。
+
+现收口到 `memory_layer/persist_landing.py` 的 `persistCompanionPath()` 单点
+（写入端与收养端共用），`seed_db_landing.seedDbPath()` 按成对收养。
+判据 `tests/unit/memory_ingest/test_seed_db_landing_companion.py`；
+live-verify `tests/manual/seed_memory_pair_relocation_290.py`。
+
+> 口径提醒：本条只解决**收养**。旧锚点那份与真工作区库的**内容归属**
+> （哪一份是权威）仍属产品口径，不在本批范围内。
+
+### 仍未闭环（需产品口径或另单承接）
+
 1. **存量渠道的归属裁决**：存量 5 条挂在 `agents.default` 下，而侧栏进的是
-   `/agent/<真 agent id>/channel`。修 A 与修 B 之后用户**能主动切回** `default`
-   看到配置，但"存量该继续挂 default，还是按 `agents.json` 的真实身份重新归属"
-   属产品口径，需拍板后再动。
-2. **Agent 渠道页的 agent 切换不走路由**：`@change="fetchConfigs"` 只改本地 ref，
-   URL 仍是旧 agent，刷新即回退。属同一"agent 身份没走通"的契约断点，
-   与第 1 条一起做（路由成为唯一事实源）更稳。
-3. **管理面 agent 盲**：`restart` / `clear-queue` / `conflicts` 三个端点无
-   `agent_id` 形参，在非 default 视图操作动的是 default 的同平台实例。
-4. **落点已分叉的另外两项**：`neurova/memory/data/neurova_memories_persist.db`
-   （新锚点已有一份更小的）与 `yi_ling_memory.db` 的**打包态**落点未实拍。
+   `/agent/<真 agent id>/channel`。修 A、B、②之后用户**能主动切回** `default`
+   看到配置，切换也不再回退，但"存量该继续挂 default，还是按 `agents.json`
+   的真实身份重新归属"属产品口径，需拍板后再动。
 5. **`app_secret` 明文落盘的旧账**：搬迁会把这份明文一起搬到新落点，是否同批落掩码
    需单独决定（旧账见 `docs/空数据页面与保存落盘排查_2026-09-12.md`）。
