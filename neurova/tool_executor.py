@@ -81,10 +81,26 @@ COMPUTER_USE_TOOLS = frozenset(
     }
 )
 
-# R0-3：成功动作后自动补拍刷新截图
-COMPUTER_ACTION_REFRESH_TOOLS = frozenset(
-    {"computer_click", "computer_type", "computer_scroll", "computer_click_element", "computer_set_value"}
-)
+# R0-3：成功动作后自动补拍刷新截图。
+#
+# 成员资格从**工具自己的声明**投影（`interactive_desktop`），不在这里持手写名单：
+# 本名单纯手工维护过一轮而无人对账——`computer_click_mark` 一直被接在刷新链上
+# （执行体里调 `_emit_action_refreshed_screenshot`），名单却没跟着扩，且全仓
+# **零消费**（唯一出现处就是定义行）⇒ 漂移没有任何代价，也没人会发现。
+# 故成员下沉到各工具 schema 的 `interactive_desktop`，并把本名单接成
+# `_emit_action_refreshed_screenshot` 的**唯一入口守卫**：未声明的工具即使误调
+# 也进不去，名单从"摆设"变成真闸门。
+# 判据：tests/unit/computer_use/test_action_refresh_declaration.py（含
+# AST 复算"名单 == 执行体实际调用面"与"摘掉声明即断链"两条反向控制）。
+#
+# **取数口是函数而不是模块级常量**：常量在 import 时求值一次，此后声明面怎么改
+# 它都不动 —— 那又是一个"看着像投影、实为快照"的第二事实源（正是本片要根修的
+# 形态）。故成员一律在消费时刻现读。
+def computerActionRefreshTools() -> frozenset:
+    """补拍面成员：声明了 `interactive_desktop` 的内置工具（现读，不缓存快照）。"""
+    from neurova.builtin_tools import listBuiltinToolsWithFlag
+
+    return frozenset(listBuiltinToolsWithFlag("interactive_desktop"))
 ACTION_REFRESH_DELAY_SECONDS = 0.5  # 等待 UI 渲染出动作效果后再补拍
 ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需在结果中确认请再调用 computer_screenshot）"
 
@@ -4803,7 +4819,12 @@ class ToolExecutor:
         截图只走 computer_action WS 旁路（双通道契约不变，base64 不进 LLM 结果）；
         事件带 refreshed=True，前端据此更新最近一条动作的画面而非新开日志行。
         任何失败静默——刷新是增强，绝不影响动作主流程。
+
+        **本函数是补拍面的唯一入口守卫**：未声明 `interactive_desktop` 的工具直接
+        短路。否则名单只是文档，误调一处就多发一张截图而无人可读。
         """
+        if tool_name not in computerActionRefreshTools():
+            return
         try:
             await asyncio.sleep(ACTION_REFRESH_DELAY_SECONDS)
             from neurova.computer_use import get_computer_use_manager
