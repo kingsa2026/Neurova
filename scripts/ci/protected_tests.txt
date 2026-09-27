@@ -1133,3 +1133,12 @@ tests/unit/tools/test_tool_batch_parallelism.py
 tests/unit/tools/test_tool_parallelism_readout.py
 tests/unit/agent/test_handle_tool_calls_parallel.py
 tests/unit/agent/test_anthropic_loop_batch_handoff.py
+# Issue #288 G4 工具取消与超时处置：取消承诺此前只在未进线程池的工具上成立。
+#   根因三条：① 超时一律"转后台"——对进程型工具（run_code/git/exec_command/
+#   computer_shell）意味着子进程继续跑，而界面与模型都以为它停了；② `Task.cancel()`
+#   对已进入 `to_thread` 的调用只丢结果、不停执行（实测：取消后 worker 仍在推进），
+#   故取消必须协作式下沉进 worker；③ 进程组杀灭原语存在，但主工具路不吃它，
+#   且 `ShellSessionManager.kill_all` 生产侧零调用（会话进程随应用退出而泄漏）。
+#   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
+#   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
+tests/unit/tools/test_tool_cancellation.py

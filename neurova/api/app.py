@@ -1142,6 +1142,22 @@ async def _on_shutdown(app_state: AppState) -> None:
     if app_state.startup_manager:
         app_state.startup_manager.stop()
 
+    # 终止常驻 shell 会话进程（`exec_command` 起的）。
+    # 此前 `ShellSessionManager.kill_all` 实现完整、生产侧**零调用方**——会话进程
+    # 于是随应用退出而泄漏：父进程没了，那些 shell 还挂着（读线程是 daemon，
+    # 进程本身不是）。这里接进关停流程，与既有的资源回收同批。
+    try:
+        from neurova.execution_engine.shell_sessions import get_shell_session_manager
+
+        manager = get_shell_session_manager()
+        if manager.list_sessions():
+            logger.info("终止 %d 个常驻 shell 会话", len(manager.list_sessions()))
+        await asyncio.wait_for(manager.kill_all(), timeout=AGENT_SHUTDOWN_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning("shell 会话终止超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT)
+    except Exception as e:  # noqa: BLE001 - 会话收敛失败不阻断关停
+        logger.warning("shell 会话终止失败: %s", e)
+
     # 关闭 camofox-browser 子进程(supervisor 拉起的)并清理临时痕迹
     try:
         from neurova.computer_use.camofox_supervisor import get_camofox_supervisor

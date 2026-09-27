@@ -33,10 +33,11 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.sandbox.exec_sandbox import (
-    ProcessSandbox,
     SandboxSeverity,
     docker_available,
     get_exec_sandbox,
+    killProcessTree,
+    spawnKwargsForKill,
 )
 
 logger = get_logger(__name__)
@@ -145,7 +146,7 @@ class _Enforcer:
     def _fire(self) -> None:
         self._fired.set()
         try:
-            _killTree(self._proc)
+            killProcessTree(self._proc)
         except Exception as exc:  # noqa: BLE001 - 兜底杀失败不阻断收尸路径
             logger.warning("沙箱超时兜底杀进程失败: %s", exc)
 
@@ -261,7 +262,7 @@ class CodeSandboxSession:
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
             timed_out = True
-            _killTree(proc)
+            killProcessTree(proc)
             try:
                 stdout, stderr = proc.communicate(timeout=5)
             except Exception:  # noqa: BLE001 - 收尸失败不改变超时结果契约
@@ -333,7 +334,7 @@ class CodeSandboxSession:
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
             timed_out = True
-            _killTree(proc)
+            killProcessTree(proc)
             try:
                 stdout, stderr = proc.communicate(timeout=5)
             except Exception:  # noqa: BLE001
@@ -367,14 +368,10 @@ class CodeSandboxSession:
 
 
 def _spawnKwargs() -> Dict[str, Any]:
-    if sys.platform == "win32":
-        return {}
-    return {"start_new_session": True}
+    """转发到 `exec_sandbox.spawnKwargsForKill`（单源；本处是历史函数名契约）。"""
+    return spawnKwargsForKill()
 
 
-def _killTree(proc: subprocess.Popen) -> None:
-    """按平台杀灭整棵进程树（与 exec_sandbox 同一姿态，不另造一套）。"""
-    ProcessSandbox()._kill_process_tree(proc)
 
 
 __all__ = [
