@@ -42,6 +42,15 @@ READOUT_SCRIPT = PROJECT_ROOT / "scripts" / "diagnostics" / "tool_parallelism_re
 
 SHAPE_METRIC = "neurova_tool_batch_shapes_total"
 
+"""形态词汇的单一事实源在写入侧（`core/tool_capability.ToolBatchShape`）；
+本文件的词表由读侧入口暴露，不另写一份字面量。"""
+try:
+    import scripts.diagnostics.tool_parallelism_readout as _readout_mod
+
+    SHAPE_LABELS = tuple(getattr(_readout_mod, "SHAPE_LABELS", ()))
+except Exception:  # noqa: BLE001 - 读侧入口不可导入时由用例自己点名
+    SHAPE_LABELS = ()
+
 
 def _call(index: int, name: str) -> dict:
     return {"id": f"c{index}", "function": {"name": name, "arguments": "{}"}}
@@ -678,4 +687,228 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         assert payload["verdict"] in ("worthwhile", "sparse")
         assert payload.get("no_data_cause") in ("", None), (
             f"有结论的轮次挂了成因 {payload.get('no_data_cause')!r}——成因是 no_data 专属"
+        )
+
+
+#: 三态素材的落点（同一条命令、三份**真抓取**、三种读数）。
+M3_FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "m3_readout"
+
+
+def _runReadout(*args, timeout: int = 300):
+    """跑一次取数命令（真子进程，与决策者手里的用法逐字相同）。"""
+    import subprocess
+
+    return subprocess.run(
+        [sys.executable, str(READOUT_SCRIPT), *args],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _readoutJson(*args):
+    result = _runReadout(*args, "--json")
+    assert result.returncode == 0, result.stderr[-800:]
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+class TestThreeStatesOfOneCommand:
+    """同一条命令、三份真抓取、三种读数——三态素材落库并逐态钉住。
+
+    Issue #271 的真机反馈把 M3 判据的三态都跑出来了：重启前 `instrument_absent`、
+    刚重启后 `zero_samples`、跑过工具轮之后有样本。三态在改前**同形**（都只印一个
+    `no_data`），本片把它们各自的素材固化下来，任何一次重复制都会把某两态压回同形。
+
+    素材来源（逐份可复算，非构造文本）：
+    - `scrape_sampled.txt`：真 `RegisteredOpenAILoop` → 真分组 → 真执行咽喉 → 真注册表
+      导出（轮 1 三次、轮 2 两次、轮 3 单调用），与真机读数同形（multi_parallel 2 /
+      single_call 1，path=`RegisteredOpenAILoop`）；
+    - `scrape_zero_samples.txt`：当前源码真导出（新实例、零工具轮）；
+    - `scrape_before_instrumentation.txt`：埋点提交之前那份 `core/metrics.py` 的真导出
+      （形态表连家族头都不在）。
+    """
+
+    def test_sampledScrapeReachesTheJudgement(self):
+        payload = _readoutJson("--metrics-file", str(M3_FIXTURES / "scrape_sampled.txt"))
+        assert payload["instrument"]["shape_family"]["present"] is True
+        assert payload["instrument"]["shape_family"]["sample_total"] == 2
+        assert payload["batch_shapes"]["RegisteredOpenAILoop"] == {
+            "multi_parallel": 2, "single_call": 1,
+        }
+        assert payload["multi_tool_round_share"] == round(2 / 3, 4)
+        assert payload["verdict"] == "worthwhile", (
+            f"有样本态没有给出判据结论（拿到 {payload['verdict']}）"
+        )
+        assert payload["no_data_cause"] == "", (
+            f"有结论的读数挂了成因 {payload['no_data_cause']!r}——成因是 no_data 专属"
+        )
+        assert {r["name"] for r in payload["tool_durations"]} == {"file_read"}, (
+            "耗时读数没跟着形态一起出来：真导出的 tool_name 只有 file_read"
+        )
+
+    def test_allSingleCallScrapeReachesTheFalsification(self):
+        """否证分支必须**可达**：全是单调用轮 ⇒ 多工具轮占比 0 ⇒ sparse。
+
+        §10.1 的放弃条件（"多工具批次占比低于 ~5%"）此前恒不可达——判据没有输入，
+        于是"低于阈值就放弃"与"数据缺失"在读数上同形。这一态钉住的是：条件本身
+        能被真实样本满足（否则"放弃 M3"这个结论永远只是纸面上的）。
+        """
+        import tempfile
+
+        text = (
+            "# HELP neurova_tool_batch_shapes_total b\n"
+            "# TYPE neurova_tool_batch_shapes_total counter\n"
+            + "".join(
+                f'neurova_tool_batch_shapes_total{{path="RegisteredOpenAILoop",shape="single_call"}} 1.0\n'
+                for _ in range(3)
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "scrape.txt"
+            path.write_text(text, encoding="utf-8")
+            payload = _readoutJson("--metrics-file", str(path))
+        assert payload["multi_tool_round_share"] == 0.0
+        assert payload["verdict"] == "sparse", (
+            f"否证条件没有被满足（拿到 {payload['verdict']}）——§10.1 的放弃条件不可达"
+        )
+        assert payload["no_data_cause"] == ""
+
+    def test_zeroSampleScrapeIsReachableNotAbsent(self):
+        payload = _readoutJson("--metrics-file", str(M3_FIXTURES / "scrape_zero_samples.txt"))
+        assert payload["verdict"] == "no_data"
+        assert payload["no_data_cause"] == "zero_samples", (
+            f"拿到 {payload['no_data_cause']!r}——零样本态会被读成'仪表缺席'，"
+            "处置被指向无辜的部署"
+        )
+        assert payload["instrument"]["shape_family"]["present"] is True
+
+    def test_beforeInstrumentationScrapeIsAbsent(self):
+        payload = _readoutJson(
+            "--metrics-file", str(M3_FIXTURES / "scrape_before_instrumentation.txt")
+        )
+        assert payload["verdict"] == "no_data"
+        assert payload["no_data_cause"] == "instrument_absent", (
+            f"拿到 {payload['no_data_cause']!r}——埋点前的抓取会被读成'等样本'，"
+            "而它等多久都不会有样本"
+        )
+        assert payload["instrument"]["shape_family"]["present"] is False
+
+    def test_theThreeStatesStayDistinct(self):
+        """三态必须彼此可分——把它们压回一个 `no_data` 就是本片要防的复发。"""
+        sampled = _readoutJson("--metrics-file", str(M3_FIXTURES / "scrape_sampled.txt"))
+        zero = _readoutJson("--metrics-file", str(M3_FIXTURES / "scrape_zero_samples.txt"))
+        absent = _readoutJson(
+            "--metrics-file", str(M3_FIXTURES / "scrape_before_instrumentation.txt")
+        )
+        readings = [
+            (sampled["verdict"], sampled["no_data_cause"]),
+            (zero["verdict"], zero["no_data_cause"]),
+            (absent["verdict"], absent["no_data_cause"]),
+        ]
+        assert len(set(readings)) == 3, f"三态压回了同形：{readings}"
+
+
+class TestShapeVocabularyHasOneSource:
+    """形态词汇只允许一处定义：写入侧与读数侧**同一份**（教义第 6 条）。
+
+    改前它有两份：`base._recordBatchShape` 里三个字面量（写），读数脚本里
+    另三个字面量（读）。两份一漂移，读数侧把不认识的标签**静默丢掉**，然后照样
+    给出一个有把握的结论——实测（3 个 `single_call` + 5 个 `multi_pipeline`）：
+    8 个样本里 5 个被扔掉，读数给出 `sparse`（"多工具轮占比 0"），而真相是
+    "有 5 轮形态不明"。这正是本仓反复栽过的那类问题：拿失明当结论。
+    """
+
+    def test_shapeLabelsHaveExactlyOneDefinition(self):
+        """三个标签的字面量在生产侧**只允许**出现在 `core/tool_capability.py`。
+
+        定义处 = `ToolBatchShape` 的三个成员值。写入侧与读数侧的其它落点一律
+        引用它们，不得再写第二遍字面量——写两份就会漂移，漂移后读数侧静默丢样本。
+        """
+        import ast
+
+        from tests import ast_scan
+
+        labels = set(SHAPE_LABELS)
+        assert len(labels) == 3, f"形态词汇不是三值：{SHAPE_LABELS}"
+        source = PROJECT_ROOT / "neurova" / "core" / "tool_capability.py"
+        offenders, definitions = [], []
+        # 两个面都扫：生产侧（写入侧落点）与 `scripts/`（读数侧落点）。
+        # 只扫一边就会漏掉另一半——本片之前的形态正是"两侧各写一份"。
+        for ref in list(
+            ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, hints=tuple(sorted(labels)))
+        ) + list(
+            ast_scan.sourceRefsUnder(
+                PROJECT_ROOT / "scripts", hints=tuple(sorted(labels))
+            )
+        ):
+            tree = ast.parse(ref.code)
+            docstrings = set()
+            for node in ast.walk(tree):
+                if isinstance(
+                    node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                ):
+                    doc = ast.get_docstring(node, clean=False)
+                    if doc is not None:
+                        docstrings.add(id(node.body[0]))
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and node.value in labels
+                    and id(node) not in docstrings
+                ):
+                    continue
+                if ref.path == source:
+                    definitions.append((node.lineno, node.value))
+                else:
+                    offenders.append((ref.path.name, node.lineno, node.value))
+        assert not offenders, (
+            "形态标签在生产侧另有字面量落点（写侧与读侧各写一份就会漂移，"
+            f"漂移后读数侧静默丢样本）：{offenders}"
+        )
+        assert sorted(value for _, value in definitions) == sorted(labels), (
+            f"单一事实源与词表对不上：定义处 {definitions} vs 词表 {sorted(labels)}"
+        )
+
+    def test_readoutVocabularyComesFromTheWriterSide(self):
+        """读数侧的词表必须**派生**自写入侧的那一份，而不是自己再写一遍。"""
+        from neurova.core.tool_capability import ToolBatchShape
+
+        assert set(SHAPE_LABELS) == {shape.value for shape in ToolBatchShape}, (
+            "读数侧词表与写入侧定义漂移："
+            f"{sorted(SHAPE_LABELS)} vs {sorted(s.value for s in ToolBatchShape)}"
+        )
+
+    def test_unknownShapeLabelIsNeverSilentlyDropped(self):
+        """不认识的标签必须点名，且**不得**据此出结论（分母已经不完整）。"""
+        import tempfile
+
+        text = (
+            "# HELP neurova_tool_batch_shapes_total b\n"
+            "# TYPE neurova_tool_batch_shapes_total counter\n"
+            + "".join(
+                f'neurova_tool_batch_shapes_total{{path="P",shape="single_call"}} 1.0\n'
+                for _ in range(3)
+            )
+            + "".join(
+                f'neurova_tool_batch_shapes_total{{path="P",shape="multi_pipeline"}} 1.0\n'
+                for _ in range(5)
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "scrape.txt"
+            path.write_text(text, encoding="utf-8")
+            payload = _readoutJson("--metrics-file", str(path))
+
+        assert payload.get("unrecognized_shape_labels") == {"multi_pipeline": 5}, (
+            "不认识的形态标签被静默丢掉了："
+            f"拿到 {payload.get('unrecognized_shape_labels')!r}"
+        )
+        assert payload["verdict"] == "no_data", (
+            f"分母不完整却给出了结论 {payload['verdict']!r}——8 个样本有 5 个没被读懂"
+        )
+        assert payload["no_data_cause"] == "schema_drift", (
+            f"成因没点名词汇漂移（拿到 {payload['no_data_cause']!r}）——"
+            "它会被读成'零样本，等真实轮次'，而该动的是读数侧的词表"
+        )
+        assert payload["multi_tool_round_share"] is None, (
+            "不完整分母上仍给出占比：读者会拿这个数字当结论"
         )

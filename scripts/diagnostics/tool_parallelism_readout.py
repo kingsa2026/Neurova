@@ -25,15 +25,20 @@
 `super().handle_tool_calls([单条])`，那条路径上永远只会是 `single_call`——
 并进总数就把一条路径的盲区读成"M3 没有收益"，据此砍方案是拿失明当结论。
 
-**读数要区分四件事，其中两种"没结论"的处置相反**：
+**读数要区分四件事，其中三种"没结论"的处置各不相同**：
 
 - `sparse` / `worthwhile` 是**判据结论**（否证成立 / 未成立）；
 - `no_data` 是**判据输入没采到**（无法判定，不构成否证）—— 把它读成"没收益"
   就是拿失明当结论；
-- `no_data` 自身还分两种成因，**处置相反**：`instrument_absent`（判据仪表在这份
-  抓取里缺席 ⇒ 恒不可达，该动**部署**）与 `zero_samples`（仪表在位、只是还没有
-  样本 ⇒ 可达且已就位，该**等真实轮次**）。两者原先同形，读者无从分辨该修哪里
-  （见 `instrumentPresence`）。
+- `no_data` 自身还分三种成因，**处置各不相同**：`instrument_absent`（判据仪表在这份
+  抓取里缺席 ⇒ 恒不可达，该动**部署**）、`zero_samples`（仪表在位、只是还没有
+  样本 ⇒ 可达且已就位，该**等真实轮次**）与 `schema_drift`（抓取里有本词表不认识
+  的形态标签 ⇒ **分母残缺**，该动**词表**）。三者原先同形，读者无从分辨该修哪里
+  （见 `instrumentPresence` / `shapeCause`）。
+
+**词表是单一事实源，不在本脚本里另写一份**：`SHAPE_LABELS` 派生自写入侧
+（`core/tool_capability.ToolBatchShape`）。两边各写一遍字面量，漂移时的表现不是
+报错而是**静默丢样本**——实测 8 轮里 5 轮不认识，读数在残缺分母上给出 `sparse`。
 
 输入不可用（文件读不到 / 内容不是 Prometheus 文本）另走一条路：非零退出码点名
 收场，不抛解释器栈（真抓取被反代吞成 HTML 正是这条路径的真实形态）。
@@ -60,6 +65,13 @@ if str(ROOT) not in sys.path:
 
 SHAPE_METRIC = "neurova_tool_batch_shapes_total"
 DURATION_METRIC = "neurova_tool_execution_seconds"
+
+#: 形态词汇**派生**自写入侧的单一事实源（`core/tool_capability.ToolBatchShape`）：
+#: 读数侧自己再写一份字面量就会漂移，漂移的后果不是报错而是**静默丢样本**——
+#: 不认识的标签被跳过，读数照着一个不完整的分母给出 `sparse`（拿失明当结论）。
+from neurova.core.tool_capability import ToolBatchShape  # noqa: E402
+
+SHAPE_LABELS = tuple(shape.value for shape in ToolBatchShape)
 
 #: 形态仪表在**抓取文本里的家族名**：`prometheus_client` 暴露 counter 时族名去
 #: `_total` 后缀（`neurova/api/endpoints/analytics.py` 的两处读侧正是栽在这里）。
@@ -176,6 +188,18 @@ def segmentCause(instrument: Dict[str, Any], family_key: str) -> str:
     return "zero_samples"
 
 
+def shapeCause(instrument: Dict[str, Any], unrecognized: Dict[str, int]) -> str:
+    """形态段成因：**词汇漂移优先于零样本**（两者的处置方向相反）。
+
+    漂移时仪表在位、样本也有——它们只是不是这份词表的名字。判成 `zero_samples`
+    会把读者指向"等真实轮次"，而那一等永远等不来；正确处置是**对齐词表**
+    （写侧新增了形态，或这份抓取来自另一个版本的部署）。
+    """
+    if unrecognized:
+        return "schema_drift"
+    return segmentCause(instrument, "shape_family")
+
+
 #: 成因 → 人类可读的一句话（处置不同，故不许折叠成一句"无数据"）。
 _CAUSE_DISPOSITION = {
     "instrument_absent": (
@@ -185,6 +209,10 @@ _CAUSE_DISPOSITION = {
     "zero_samples": (
         "判据仪表在位、样本数为 0 —— 判据**可达且已就位**，"
         "样本随真实工具轮到达，重跑本命令即出结论"
+    ),
+    "schema_drift": (
+        "抓取里有**不认识**的形态标签 —— 分母不完整，结论无从谈起；"
+        "该动的是**词表**（写侧新增了形态，或这份抓取来自另一个版本的部署），不是等样本"
     ),
 }
 
@@ -203,15 +231,41 @@ def parseBatchShapes(text: str) -> Dict[str, Dict[str, int]]:
     `neurova/api/endpoints/analytics.py` 的两处读侧正是栽在这里（本片一并根修）。
     """
     out: Dict[str, Dict[str, int]] = {}
+    for path, shape, count in _shapeSamples(text):
+        bucket = out.setdefault(path, {})
+        bucket[shape] = bucket.get(shape, 0) + count
+    return out
+
+
+def unrecognizedShapeLabels(text: str) -> Dict[str, int]:
+    """抓取里出现、但**不在写入侧词表里**的形态标签及其轮数。
+
+    这些样本此前的处置是"跳过"——于是它们从分母里消失，而读数照样给出一个有把握
+    的结论：实测 3 个 `single_call` + 5 个 `multi_pipeline`，读数报
+    `多工具轮 / 全部轮 = 0` ⇒ `sparse`（"该放弃 M3"）。真相是"8 轮里有 5 轮形态不明"，
+    正确处置是**先对齐词表**（写侧加了新形态、或抓的是别的版本的部署）。
+
+    非空即意味着分母不完整 ⇒ `batchShapeVerdict` 不得出结论（见其成因分型）。
+    """
+    drift: Dict[str, int] = {}
+    for _, shape, count in _shapeSamples(text):
+        if shape in SHAPE_LABELS:
+            continue
+        drift[shape] = drift.get(shape, 0) + count
+    return drift
+
+
+def _shapeSamples(text: str):
+    """形态表的原始三元组 `(path, shape, 轮数)`——取数只在这里落一次。"""
     for family in _families(text):
         for sample in family.samples:
             if sample.name != SHAPE_METRIC:
                 continue
-            path = str(sample.labels.get("path") or "?")
-            shape = str(sample.labels.get("shape") or "?")
-            bucket = out.setdefault(path, {})
-            bucket[shape] = bucket.get(shape, 0) + int(sample.value)
-    return out
+            yield (
+                str(sample.labels.get("path") or "?"),
+                str(sample.labels.get("shape") or "?"),
+                int(sample.value),
+            )
 
 
 def parseToolDurations(text: str) -> List[Dict[str, Any]]:
@@ -267,7 +321,10 @@ def parseToolDurations(text: str) -> List[Dict[str, Any]]:
     return rows
 
 
-def batchShapeVerdict(shapes: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
+def batchShapeVerdict(
+    shapes: Dict[str, Dict[str, int]],
+    unrecognized: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     """按 §10.1 给结论，**两个口径各自正名、并列输出**。
 
     这两个口径回答的是**两个不同的问题**，且会在同一份数据上给出**相反**的
@@ -287,32 +344,46 @@ def batchShapeVerdict(shapes: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
     grouped = 0
     total_multi = 0
     total_rounds = 0
+    singleLabel, serialLabel, parallelLabel = SHAPE_LABELS
     for path, counts in shapes.items():
-        single_call = int(counts.get("single_call", 0))
-        multi_serial = int(counts.get("multi_serial", 0))
-        multi_parallel = int(counts.get("multi_parallel", 0))
+        single_call = int(counts.get(singleLabel, 0))
+        multi_serial = int(counts.get(serialLabel, 0))
+        multi_parallel = int(counts.get(parallelLabel, 0))
         sub = multi_serial + multi_parallel
+        # 逐路径的占比与顶层同一处置：词表漂移时分母同样残缺，故一并回退成 None。
+        # 顶层说"读不了"、逐路径印 0.0%，读者会拿后者当结论（那正是本片要防的形态）。
+        driftFree = not unrecognized
         perPath[path] = {
-            "single_call": single_call,
-            "multi_serial": multi_serial,
-            "multi_parallel": multi_parallel,
+            singleLabel: single_call,
+            serialLabel: multi_serial,
+            parallelLabel: multi_parallel,
             # 本路径内：成组批 / 多调用轮（"多调用轮里成组吃到了多少"）
-            "grouped_share": round(multi_parallel / sub, 4) if sub else None,
+            "grouped_share": round(multi_parallel / sub, 4) if (sub and driftFree) else None,
             # 本路径内：多工具轮 / 全部轮（§10.1 口径，逐路径给）
             "multi_tool_round_share": round(sub / (sub + single_call), 4)
-            if (sub + single_call)
+            if ((sub + single_call) and driftFree)
             else None,
         }
         grouped += multi_parallel
         total_multi += sub
         total_rounds += sub + single_call
 
-    multi_tool_round_share = (
-        round(total_multi / total_rounds, 4) if total_rounds else None
-    )
     grouped_parallel_share = round(grouped / total_multi, 4) if total_multi else None
 
-    if multi_tool_round_share is None:
+    # 词汇漂移时**分母不完整**：不认识标签的样本已经从分子分母里消失了。
+    # 此时任何占比都是"在残缺样本上算出来的数"，而读者会把它当成结论
+    # （实测 8 轮里 5 轮不认识，读数报占比 0 且结论 sparse）。故先判漂移，
+    # 占比回退成 None：宁可说"这一份读不了"，也不给一个不完整的数字。
+    drifted = bool(unrecognized)
+    multi_tool_round_share = (
+        None if (drifted or not total_rounds) else round(total_multi / total_rounds, 4)
+    )
+    if drifted:
+        grouped_parallel_share = None
+
+    if drifted:
+        verdict = "no_data"
+    elif multi_tool_round_share is None:
         verdict = "no_data"
     elif multi_tool_round_share < SPARSE_SHARE:
         verdict = "sparse"
@@ -331,17 +402,21 @@ def collect(metrics_file: str = "") -> Dict[str, Any]:
     _rejectNonPrometheusText(text, str(metrics_file) if metrics_file else "进程注册表")
     shapes = parseBatchShapes(text)
     instrument = instrumentPresence(text)
+    drift = unrecognizedShapeLabels(text)
     out: Dict[str, Any] = {
         "batch_shapes": shapes,
         "tool_durations": parseToolDurations(text),
         "sparse_share_threshold": SPARSE_SHARE,
         "instrument": instrument,
+        # 只写不读是断点，而这个字段**有**读侧：下面按它分型。空值也留着，
+        # 是为了让"这一份读数是干净的"成为一个可断言的事实，而不是缺席。
+        "unrecognized_shape_labels": drift,
     }
-    out.update(batchShapeVerdict(shapes))
+    out.update(batchShapeVerdict(shapes, drift))
     # 成因是 `no_data` **专属**：有结论的读数上挂一个成因，就是给无人消费的槽位
     # 留了个位置（协作红线：只写不读的字段是断点）。
     out["no_data_cause"] = (
-        segmentCause(instrument, "shape_family") if out["verdict"] == "no_data" else ""
+        shapeCause(instrument, drift) if out["verdict"] == "no_data" else ""
     )
     return out
 
@@ -374,12 +449,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         grouped = row["grouped_share"]
         multi_round = row["multi_tool_round_share"]
         print(
-            f"  {path}: 单调用 {counts.get('single_call', 0)} | "
-            f"多调用串行 {counts.get('multi_serial', 0)} | "
-            f"多调用成组 {counts.get('multi_parallel', 0)} | "
+            f"  {path}: 单调用 {counts.get(SHAPE_LABELS[0], 0)} | "
+            f"多调用串行 {counts.get(SHAPE_LABELS[1], 0)} | "
+            f"多调用成组 {counts.get(SHAPE_LABELS[2], 0)} | "
             f"成组/多调用轮 {'无多调用轮' if grouped is None else f'{grouped * 100:.1f}%'} | "
             f"多工具轮/全部轮 {'无样本' if multi_round is None else f'{multi_round * 100:.1f}%'}"
         )
+
+    drift = payload.get("unrecognized_shape_labels") or {}
+    if drift:
+        # 把名字印出来：成因只说"有漂移"，读者仍需自己去 grep 是哪几个标签。
+        named = "、".join(f"{k}（{v} 轮）" for k, v in sorted(drift.items()))
+        print(f"\n⚠ 抓取里有本词表不认识的形态标签：{named}")
+        print(f"  本读数只认识：{'、'.join(SHAPE_LABELS)}")
+        print("  这些样本已从本节的分母里排除——占比回退为空值，不得据此出结论。")
 
     print("\n两个口径（回答的是两个不同的问题，同一份数据可以给出相反结论）：")
     print(
