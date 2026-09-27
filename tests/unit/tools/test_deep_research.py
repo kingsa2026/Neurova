@@ -161,7 +161,8 @@ class TestToolTimeouts:
 
     def test_file_parse_concurrency_safe(self):
         """file_parse 只读无共享态 → 并行安全名单；git/deep_research 保守留外。"""
-        from neurova.agent.tool_coordinator import is_concurrency_safe
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
 
-        assert is_concurrency_safe("file_parse")
-        assert not is_concurrency_safe("git")
+        assert isParallelEligible(resolveToolCapability("file_parse"))
+        assert not isParallelEligible(resolveToolCapability("git"))

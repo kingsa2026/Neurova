@@ -134,10 +134,11 @@ class TestSchemaAndDispatchWiring:
 
     def test_write_stdin_not_concurrency_safe(self):
         """write_stdin 触碰共享会话状态，禁止声明并行安全。"""
-        from neurova.agent.tool_coordinator import is_concurrency_safe
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
 
-        assert is_concurrency_safe("write_stdin") is False
-        assert is_concurrency_safe("exec_command") is False
+        assert not isParallelEligible(resolveToolCapability("write_stdin"))
+        assert not isParallelEligible(resolveToolCapability("exec_command"))
 
     @pytest.mark.asyncio
     async def test_end_to_end_via_tool_executor(self):

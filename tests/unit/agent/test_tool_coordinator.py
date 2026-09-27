@@ -4,7 +4,8 @@ P1-2 工具执行协调器红测
 - 超时注册表：per-tool 超时元数据（未知工具回落默认）
 - 超时转后台：执行超时不取消——任务转入后台继续跑，立即返回 background
   信封；后台完成后经 pop_pending_hints 取回结果提示（注入下一轮上下文）
-- 并行安全声明制：is_concurrency_safe 只对声明清单内的只读工具为 True
+- 并行安全声明制：并行资格由工具自己的声明推导（唯一一处是
+  `core/tool_capability.isParallelEligible`），未声明一律串行
 """
 
 import asyncio
@@ -14,9 +15,15 @@ import pytest
 from neurova.agent.tool_coordinator import (
     TOOL_DEFAULT_TIMEOUT_S,
     get_tool_timeout,
-    is_concurrency_safe,
+    resolveToolCapability,
     ToolCoordinator,
 )
+from neurova.core.tool_capability import isParallelEligible
+
+
+def _parallelEligible(tool_name: str) -> bool:
+    """并行资格（读工具自己的声明，走唯一那处推导）。"""
+    return isParallelEligible(resolveToolCapability(tool_name))
 
 
 class TestTimeoutRegistry:
@@ -35,14 +42,14 @@ class TestTimeoutRegistry:
 class TestConcurrencySafeDeclaration:
     def test_readonly_tools_declared_safe(self):
         for name in ("memory_search", "recall_history", "web_search", "calculator"):
-            assert is_concurrency_safe(name) is True, name
+            assert _parallelEligible(name) is True, name
 
     def test_side_effect_tools_not_safe(self):
         for name in ("file_write", "file_delete", "browser_click", "shell_execute"):
-            assert is_concurrency_safe(name) is False, name
+            assert _parallelEligible(name) is False, name
 
     def test_unknown_tool_conservative_false(self):
-        assert is_concurrency_safe("totally_unknown_tool") is False
+        assert _parallelEligible("totally_unknown_tool") is False
 
 
 class TestCoordinatorOffload:

@@ -20,9 +20,9 @@
 ## 判据落点
 
 - 形态读数写在**唯一调度点**（`base.handle_tool_calls`）并带 `path` 标签：
-  `AnthropicLoop` 逐条转发 `super().handle_tool_calls([单条])`，于是那条路径上
-  任何声明放行都拿不到成组执行 —— 这个失明点必须**在读数上直接可见**
-  （不分档就会把一条路径的盲区算成"M3 没有收益"）。
+  `AnthropicLoop` 在批里含 `computer` 时逐条转发 `super().handle_tool_calls([单条])`，
+  那些批拿不到成组执行 —— 这个残留盲区必须**在读数上直接可见**
+  （不分档就会把它算成"M3 没有收益"）。
 - 耗时读侧真读直方图；本文件钉 `avg_duration_ms > 0`（改前恒 0）。
 """
 
@@ -225,6 +225,72 @@ class TestDurationDistributionIsReadable:
 
         rows = analytics._read_tool_metrics(top_n=100)
         assert all(r["avg_duration_ms"] >= 0.0 for r in rows)
+
+
+class TestEvidenceLinesMatchLiveBehaviour:
+    """依据行不得停在**已经被修掉的事实**上（M3 前置那片的下游残留）。
+
+    `47be5594` 已把 Anthropic 路径改成「无 `computer` 调用时整批交基类」，
+    但同一批的三处依据行还写着「逐条转发 ⇒ 那条路径上**永远**只会是
+    single_call」。依据行是"改声明的人"读的第一手材料，它过期就会把人引向
+    一个不存在的盲区——而盲区本身还在（含 `computer` 的批），只是变窄了。
+
+    判据取**活行为**再比文字：同一句依据若与实测相反，文字侧必须改。
+    """
+
+    STALE = "永远"
+
+    def _sites(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3]
+        return {
+            "neurova/agent/loops/base.py": root / "neurova/agent/loops/base.py",
+            "neurova/core/metrics.py": root / "neurova/core/metrics.py",
+            "scripts/diagnostics/tool_parallelism_readout.py":
+                root / "scripts/diagnostics/tool_parallelism_readout.py",
+            "tests/unit/tools/test_tool_parallelism_readout.py": Path(__file__),
+        }
+
+    def test_liveBehaviourIsWholeBatchHandoff(self):
+        """活行为：无 `computer` 的批必须整批交基类（成组执行拿得到）。"""
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[3]
+            / "neurova/agent/loops/anthropic_loop.py"
+        ).read_text(encoding="utf-8")
+        assert "return await super().handle_tool_calls(tool_calls, messages)" in text, (
+            "Anthropic 路径不再整批交基类——依据行的前提变了，须重新取证"
+        )
+
+    def test_evidenceLinesDoNotClaimAnAbsoluteBlindSpot(self):
+        """依据行不得把盲区写成整条路径的绝对判断（残留盲区有前置条件）。"""
+        offenders = []
+        for rel, path in self._sites().items():
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if "single_call" in line and self.STALE in line:
+                    offenders.append(f"{rel}:{lineno}")
+        assert offenders == [], (
+            "这些依据行写着已被修掉的绝对判断（活行为是整批交基类，"
+            "残留盲区只在含 `computer` 的批上）——依据会静默过期："
+            f"{offenders}"
+        )
+
+    def test_evidenceLinesNameTheRemainingBlindSpot(self):
+        """依据行必须点名**残留**盲区的条件（含 `computer` 的批），不是笼统一句。"""
+        missing = []
+        for rel, path in self._sites().items():
+            text = path.read_text(encoding="utf-8")
+            if "AnthropicLoop" not in text:
+                continue
+            if "computer" not in text:
+                missing.append(rel)
+        assert missing == [], (
+            f"这些依据行提到了 Anthropic 路径却没点名残留盲区的条件: {missing}"
+        )
 
 
 class TestReadoutEntryPoint:
