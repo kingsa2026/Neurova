@@ -1,0 +1,44 @@
+# provenance: 真链路第三态导出（真 RegisteredOpenAILoop → 真分组 → 真 execute_native_tool 咽喉 → 真注册表）
+# 链路: 轮 1 = 同轮三次 file_read（成组批）；轮 2 = 同轮两次（成组批）；轮 3 = 单调用轮
+# 生成: 真 handle_tool_calls + 真 ToolExecutor，无手工埋点、无替身工具
+# 与真机同形: Issue #271 读数 = multi_parallel 2 / single_call 1，path=RegisteredOpenAILoop
+#             ⇒ 多工具轮 / 全部轮 = 2/3 ≈ 0.6667，verdict = worthwhile
+
+# HELP neurova_tool_executions_total Total tool executions
+# TYPE neurova_tool_executions_total counter
+neurova_tool_executions_total{source="builtin",success="true",tool_name="file_read"} 6.0
+# HELP neurova_tool_executions_created Total tool executions
+# TYPE neurova_tool_executions_created gauge
+neurova_tool_executions_created{source="builtin",success="true",tool_name="file_read"} 1.7904921279022753e+09
+# HELP neurova_tool_execution_seconds Tool execution duration
+# TYPE neurova_tool_execution_seconds histogram
+neurova_tool_execution_seconds_bucket{le="0.001",tool_name="file_read"} 0.0
+neurova_tool_execution_seconds_bucket{le="0.0025",tool_name="file_read"} 0.0
+neurova_tool_execution_seconds_bucket{le="0.005",tool_name="file_read"} 2.0
+neurova_tool_execution_seconds_bucket{le="0.01",tool_name="file_read"} 3.0
+neurova_tool_execution_seconds_bucket{le="0.025",tool_name="file_read"} 5.0
+neurova_tool_execution_seconds_bucket{le="0.05",tool_name="file_read"} 5.0
+neurova_tool_execution_seconds_bucket{le="0.1",tool_name="file_read"} 5.0
+neurova_tool_execution_seconds_bucket{le="0.25",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="0.5",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="1.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="2.5",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="5.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="10.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="30.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="60.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="120.0",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_bucket{le="+Inf",tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_count{tool_name="file_read"} 6.0
+neurova_tool_execution_seconds_sum{tool_name="file_read"} 0.16943025588989258
+# HELP neurova_tool_execution_seconds_created Tool execution duration
+# TYPE neurova_tool_execution_seconds_created gauge
+neurova_tool_execution_seconds_created{tool_name="file_read"} 1.790492127902327e+09
+# HELP neurova_tool_batch_shapes_total Tool rounds by batch shape (single_call / multi_serial / multi_parallel)
+# TYPE neurova_tool_batch_shapes_total counter
+neurova_tool_batch_shapes_total{path="RegisteredOpenAILoop",shape="multi_parallel"} 2.0
+neurova_tool_batch_shapes_total{path="RegisteredOpenAILoop",shape="single_call"} 1.0
+# HELP neurova_tool_batch_shapes_created Tool rounds by batch shape (single_call / multi_serial / multi_parallel)
+# TYPE neurova_tool_batch_shapes_created gauge
+neurova_tool_batch_shapes_created{path="RegisteredOpenAILoop",shape="multi_parallel"} 1.7904921277868798e+09
+neurova_tool_batch_shapes_created{path="RegisteredOpenAILoop",shape="single_call"} 1.7904921279292452e+09

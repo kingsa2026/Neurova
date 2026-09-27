@@ -44,9 +44,11 @@ __all__ = [
     "WriteScope",
     "ToolCapability",
     "ToolBatch",
+    "ToolBatchShape",
     "parseToolCapability",
     "isParallelEligible",
     "planToolBatches",
+    "classifyBatchShape",
 ]
 
 
@@ -126,6 +128,40 @@ def parseToolCapability(raw: Any) -> "ToolCapability | None":
     return ToolCapability(
         readOnly=read_only, concurrentSafe=concurrent, writeScopes=parsed
     )
+
+
+class ToolBatchShape(str, Enum):
+    """一轮工具调用的**执行形态**（取值即埋点标签，是判据的输入而不是分类学）。
+
+    三态按"这一轮 M3 有没有拿到并行"分，不按工具类别分：
+
+    - `SINGLE_CALL`：本轮只有一个调用 —— M3 在这上面本来就没有收益可言，
+      混进分母会把"多工具批次占比"稀释成两个不同问题的平均数；
+    - `MULTI_PARALLEL`：至少有一个**成组**批 —— M3 唯一能兑现收益的形态；
+    - `MULTI_SERIAL`：多调用但零成组批 —— M3 的目标客户。
+
+    **写入侧与读数侧共用这一份词汇**：两边各写一遍字面量，漂移时读数侧会把不认识
+    的标签静默丢掉，然后照着一个不完整的分母出结论（实测 8 个样本里 5 个被扔掉，
+    读数给出 `sparse`）。故标签值只在本处定义，其余落点一律引用。
+    """
+
+    SINGLE_CALL = "single_call"
+    MULTI_SERIAL = "multi_serial"
+    MULTI_PARALLEL = "multi_parallel"
+
+
+def classifyBatchShape(batchCount: int, hasGroupedBatch: bool) -> ToolBatchShape:
+    """批次计划 → 形态（**唯一一处**判定，取代调用点里的三字面量分支）。
+
+    Args:
+        batchCount: 本轮所有批次里的调用总数。
+        hasGroupedBatch: 是否存在成组批（`planToolBatches` 只在 ≥2 项时标记并发）。
+    """
+    if batchCount <= 1:
+        return ToolBatchShape.SINGLE_CALL
+    if hasGroupedBatch:
+        return ToolBatchShape.MULTI_PARALLEL
+    return ToolBatchShape.MULTI_SERIAL
 
 
 def isParallelEligible(cap: ToolCapability) -> bool:
