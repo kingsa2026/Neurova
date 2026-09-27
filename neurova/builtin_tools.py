@@ -403,6 +403,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
+        # 并行能力声明：语义只读但作用域为共享（yt-dlp 的 YouTube extractor 会把播放器
+        # 数据写进固定的进程外缓存根，本仓不可控；字幕本体写本次调用的临时目录并清理）
+        # ⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【YouTube 字幕】提取 YouTube 视频的字幕/自动字幕文本，用于总结视频内容、翻译、要点提取。仅支持 youtube.com/watch 或 youtu.be 链接。",
         "parameters": {
             "type": "object",
@@ -443,6 +447,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "bilibili_search": {
+        # 并行能力声明：无副作用远端读（B 站搜索走独立子进程（yt-dlp bilisearch），只取远端结果，不落本地态。）
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。【何时不用】仅限 B 站内容；通用搜索/其他平台改用 web_search，拿到视频链接后要字幕内容用 youtube_transcript（仅限 YouTube）。",
         "parameters": {
             "type": "object",
@@ -454,6 +460,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "rss_read": {
+        # 并行能力声明：无副作用远端读（RSS/Atom 读取只发 GET 并解析响应，不落本地态。）
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【RSS 阅读】读取 RSS/Atom 订阅源的最新条目（标题/链接/摘要）。用于追踪博客、播客、新闻源更新。【何时不用】需要条目全文时拿链接用 web_fetch 续读；源已失效或非 RSS 地址改用 web_search / web_fetch；搜索未知站点不要用本工具。",
         "parameters": {
             "type": "object",
@@ -465,6 +473,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "v2ex_hot": {
+        # 并行能力声明：无副作用远端读（V2EX 热门榜只发 GET 并解析响应，不落本地态。）
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【V2EX 热门】获取 V2EX 社区当前热门帖子（标题/链接/回复数/作者）。用于了解开发者社区热议话题。【何时不用】仅限 V2EX 站点；查帖子全文拿链接用 web_fetch；通用技术搜索改用 web_search。",
         "parameters": {
             "type": "object",
@@ -475,6 +485,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "social_search": {
+        # 并行能力声明：语义只读但作用域为共享（凭据经 SecretStore.get_secret 读取时会
+        # 回写该密钥的访问元数据与访问日志——共享凭据桶）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【社交平台搜索】查询社交平台（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）的搜索接入状态。已配置登录态后端时返回后端与命令信息；未配置时返回配置引导。不自动登录。【何时不用】仅限上述社交平台；通用搜索改用 web_search；本工具未配置接入时不要反复重试，按返回的配置引导提示用户。",
         "parameters": {
             "type": "object",
@@ -514,6 +527,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "emotion_analyze": {
+        # 并行能力声明：纯文本打分（EmotionAnalyzer.analyze 只读预编译正则，不写实例态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "分析文本情感",
         "parameters": {
             "type": "object",
@@ -571,6 +586,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 或 schema 预算化时，模型主动发现技能库的元数据检索面——只回
     # name/description/调用提示，绝不回指令正文（正文经 $mention 按需加载）。
     "discover_skills": {
+        # 并行能力声明：语义只读但作用域为共享（语义档会懒建模块级向量缓存条目并把
+        # 向量写进 embeddings.json）⇒ 推导判为不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
         "description": "【技能发现】按查询词检索已安装技能库，返回候选技能的元数据清单（名称/描述/何时用）。当你判断需要某个已有技能、但它不在当前工具面时调用；确认要用后，通过 $技能名 加载完整指令执行。",
         "parameters": {
             "type": "object",
@@ -660,6 +678,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "subagent_status": {
+        # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【查询子Agent状态】查询蜂群派生的子 Agent 的执行状态与最终报告。配合 spawn_subagent(background=true) 或前台 spawn 转后台后的主动轮询使用。subagent_id 省略时返回最近派生的子 Agent 列表（新→旧，report 截断）。",
         "parameters": {
             "type": "object",
@@ -673,6 +693,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "list_agents": {
+        # 并行能力声明：只读 Agent 注册表快照（注册表写点由 RLock 串行，本执行体不落盘）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【列出可用Agent】列出系统中所有可用的 Agent（含各自的名字、职责描述、模型配置）。在蜂群派生（spawn_subagent）前调用，以便为子任务挑选最合适的执行者。",
         "parameters": {
             "type": "object",

@@ -332,6 +332,77 @@ class TestDeclarationWiring:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 三之二：逐工具判定（M3）——每个 verdict 都要有依据，拒绝也要点名
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPerToolVerdictsAreArgued:
+    """覆盖缺口逐名收口：**能并行**与**判为串行**的都要落声明，不许沉默。
+
+    覆盖率的敌人不是"慢"，是"没人声明"——未声明与"论证过应当串行"在调度上
+    同形（都串行），在维护上却是两件事：前者是待办、后者是结论。故本类同时
+    钉住两侧：拿得到并行的（收益面）与**明确判为串行且写明成因**的（否证面）。
+    """
+
+    def test_networkReadFamilyIsEligible(self):
+        """无副作用远端读：GET/独立子进程，不落盘、不碰共享态。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
+
+        for name in ("rss_read", "v2ex_hot", "bilibili_search"):
+            cap = resolveToolCapability(name)
+            assert cap is not None, f"{name} 未声明能力——覆盖缺口会静默退回串行，无人知"
+            assert isParallelEligible(cap), f"{name} 是无副作用远端读，却被判为串行"
+
+    def test_localMetadataReadFamilyIsEligible(self):
+        """本地只读枚举/打分：读注册表、读运行记录、纯文本打分。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
+
+        for name in ("list_agents", "subagent_status", "emotion_analyze"):
+            cap = resolveToolCapability(name)
+            assert cap is not None, f"{name} 未声明能力——覆盖缺口会静默退回串行，无人知"
+            assert isParallelEligible(cap), f"{name} 是本地只读，却被判为串行"
+
+    def test_refusalsAreDeclaredWithSharedScopeAndNamedCause(self):
+        """拒绝并行不等于不声明：三者作用域落在共享态，逐名钉住。
+
+        - `social_search`：取凭据经 `SecretStore.get_secret` 回写访问元数据与
+          访问日志（共享凭据桶）；
+        - `youtube_transcript`：yt-dlp 的 YouTube extractor 会把播放器数据写进
+          固定的进程外缓存根（共享且不在本仓可控范围）；
+        - `discover_skills`：检索面只读，但会懒建并落盘技能向量缓存
+          （模块级 `_VECTOR_CACHES` + embeddings.json）。
+
+        三者的共同点：**语义只读、执行会动共享态**——正是 §4 那条"一个布尔字段
+        表达不了两件事"的真实落点，故用作用域表达，而不是把它们留在未声明里。
+        """
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import WriteScope, isParallelEligible
+
+        for name in ("social_search", "youtube_transcript", "discover_skills"):
+            cap = resolveToolCapability(name)
+            assert cap is not None, f"{name} 未声明——拒绝也要点名，沉默与结论同形"
+            assert not isParallelEligible(cap), f"{name} 会动共享态，却被判为可并行"
+            assert WriteScope.SHARED in set(cap.writeScopes), (
+                f"{name} 的拒绝理由必须落在共享作用域上（成因要可读，不是随笔一个 False）"
+            )
+
+    def test_sharedScopeDeclarationDoesNotLeakIntoEligibleSet(self):
+        """反向控制：共享作用域的声明**不得**让工具挤进并行资格集合。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import WriteScope, isParallelEligible
+
+        cap = resolveToolCapability("youtube_transcript")
+        assert cap is not None and cap.readOnly and cap.concurrentSafe
+        assert set(cap.writeScopes) == {WriteScope.SHARED}
+        assert not isParallelEligible(cap), (
+            "两个布尔位都放行时，作用域合取必须仍然把共享态挡在门外（教义第 1 条："
+            "不得在报错处兜底，判据要在上游一次判死）"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 # 四：并行上限是单源配置键（缺陷 E）
 # ═══════════════════════════════════════════════════════════════
 
