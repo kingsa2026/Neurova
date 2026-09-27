@@ -326,9 +326,11 @@ class MemoryManager:
                 self._persist_conn = None
                 logger.debug("MemoryManager(db_path=':memory:') 不落盘持久库")
                 return
-            # 使用与 db_path 同目录的持久化文件
-            db_dir = os.path.dirname(self._db_path) or "."
-            self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
+            # 使用与 db_path 同目录的持久化文件（配对规则取单点，见 persist_landing：
+            # 换锚救济按单文件语义工作，配对若在这里另拼一份，搬走的就只是壳）
+            from neurova.cognitive_layers.memory_layer.persist_landing import persistCompanionPath
+
+            self._persist_db_path = str(persistCompanionPath(self._db_path))
             # 主库被围栏守住之后，persist 库是同一目录下的第二个写面：
             # 只守一个等于留了侧门。
             assertNotUnderProductionMemory(self._persist_db_path, "持久记忆库")
