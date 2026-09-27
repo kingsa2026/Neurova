@@ -25,6 +25,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.sandbox.exec_sandbox import killProcessTree, spawnKwargsForKill
 
 logger = get_logger(__name__)
 
@@ -99,7 +100,23 @@ class _ShellSession:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE,
+            **spawnKwargsForKill(),
         )
+        # `spawnKwargsForKill`（POSIX: start_new_session）**不是可选优化**：
+        # 进程未成团时 `getpgid` 返回的是**宿主**进程组，而下文注册的杀灭回调走
+        # 的就是按组杀灭——实测未成团的会话子进程与宿主同 pgid，那一下会把宿主
+        # 连同自己一起杀掉。
+        #
+        # 会话进程注册到本轮取消令牌：用户停止 / 该工具超时都要终止它。
+        # 只调 `terminate`（单进程）不够——`shell=True` 起的是 shell，真正的
+        # 长任务往往是它的子进程，故走进程组杀灭单源；进程未成团时该原语退回
+        # 单杀，`getpgid` 不会误命中宿主（见 `spawnKwargsForKill`）。
+        try:
+            from neurova.core.cancel_token import registerKillAction
+
+            registerKillAction(self.terminate)
+        except Exception as e:  # noqa: BLE001 - 注册失败只影响可取消性，不阻断会话启动
+            logger.debug("会话进程取消回调注册失败: %s", e)
         self._reader = threading.Thread(
             target=self._read_loop, name=f"shell-session-{session_id}", daemon=True
         )
@@ -140,9 +157,14 @@ class _ShellSession:
             logger.debug("write_stdin 写入失败（进程可能已退出）: session=%s", self.session_id)
 
     def terminate(self) -> None:
+        """终止会话进程（**含其子进程**）。
+
+        单个 `proc.kill()` 只杀直接子进程，而 `shell=True` 起的 shell 之下
+        通常还挂着一整棵命令树；残留会继续占 CPU 与句柄，并可能持续写盘。
+        """
         try:
             if self.proc.poll() is None:
-                self.proc.kill()
+                killProcessTree(self.proc)
         except Exception:  # noqa: BLE001
             pass
 

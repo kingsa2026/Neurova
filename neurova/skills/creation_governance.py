@@ -256,13 +256,20 @@ def record_tool_execution(tool_name, params, success, result):
     if tool_name == "create_skill":
         return
     from neurova.security.governance import is_policy_denial
-    ok = (success is True and result is not None and not is_policy_denial(result)
+    # 裁决（治理拦截/待审批/安全钩子/元认知建议/取消）**不进成败票**：
+    # 它是"没测量"，不是"失败"。这条此前只挡了"算成功"那一半（`not is_policy_denial`
+    # 让 ok 恒 False），没挡"拖垮结构身份"那一半——于是同一次取消既不算成功（对）、
+    # 又经 `MIN(success)` 的粘性把该工具永久判失败（错）。实测：把 cancelled 键补进
+    # `is_policy_denial` 之后本处仍判失败，因为 `success is True` 先一步把它挡下。
+    decision = is_policy_denial(result)
+    ok = (success is True and result is not None and not decision
           and not (isinstance(result, dict) and
                    (result.get("error") or result.get("success") is False)))
     with task["lock"]:
         if not task["closed"]:
             task["steps"].append({"tool": tool_name, "params": copy.deepcopy(params)})
-            task["success"] = task["success"] and ok
+            if not decision:
+                task["success"] = task["success"] and ok
 
 
 def finish_task(agent, purpose, completed):

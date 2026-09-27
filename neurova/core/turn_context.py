@@ -312,6 +312,10 @@ def reset_turn_tool_messages() -> None:
     # 被本轮续累（并行轮的子任务在轮首之后才创建，沿用旧列表即续写旧账）。
     _begin_skill_funnel_turn()
     reset_turn_tool_elapsed()
+    # 取消令牌同款**换新对象**：复位已置位的令牌会让本轮首个进程注册的杀灭
+    # 回调被上一轮的取消理由立即兑现——新任务被上一轮的取消杀掉。
+    from neurova.core.cancel_token import resetTurnCancelToken
+    resetTurnCancelToken()
     from neurova.skills.creation_governance import begin_task
     begin_task()
 

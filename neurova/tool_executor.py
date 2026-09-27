@@ -3703,8 +3703,15 @@ class ToolExecutor:
         timeout = max(1, min(int(params.get("timeout") or 60), 600))
 
         try:
-            import shutil
             import os
+            import shutil
+
+            from neurova.core.cancel_token import registerKillAction
+            from neurova.sandbox.exec_sandbox import (
+                KILL_GRACE_S,
+                killProcessTree,
+                spawnKwargsForKill,
+            )
 
             git_bin = shutil.which("git")
             if not git_bin:
@@ -3712,24 +3719,50 @@ class ToolExecutor:
 
             def _run() -> Dict:
                 env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat", "GIT_EDITOR": "true"}
-                proc = subprocess.run(
+                # 超时/取消时须能杀掉整棵进程树，故用 Popen 而非 subprocess.run：
+                # `run` 的 timeout 只杀直接子进程，且它把 proc 关在内部，外部
+                # 取消时拿不到句柄。`start_new_session` 让 git 自成一团——
+                # 这也是杀灭安全的前提（未成团的进程 `getpgid` 返回宿主进程组）。
+                proc = subprocess.Popen(
                     [git_bin, *argv[1:]],
-                    cwd=path, capture_output=True, text=True,
-                    encoding="utf-8", errors="replace",
-                    timeout=timeout, env=env, shell=False,
+                    cwd=path, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding="utf-8", errors="replace",
+                    env=env, shell=False,
+                    **spawnKwargsForKill(),
                 )
+                # 句柄在进程刚起来时就交给取消令牌：置位可能发生在注册之**前**
+                # （上层已超时），而 `onCancel` 对迟到回调立即兑现，故两种次序都安全。
+                registerKillAction(lambda: killProcessTree(proc))
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    killProcessTree(proc)
+                    try:
+                        stdout, stderr = proc.communicate(timeout=KILL_GRACE_S)
+                    except Exception:  # noqa: BLE001 - 收尸失败不改变超时契约
+                        stdout, stderr = "", ""
+                    return {
+                        "success": False,
+                        "returncode": -1,
+                        "stdout": stdout or "",
+                        "stderr": stderr or "",
+                        "command": command,
+                        "path": path,
+                        "error": f"git 命令超时（{timeout}s）: {command}",
+                    }
                 return {
                     "success": proc.returncode == 0,
                     "returncode": proc.returncode,
-                    "stdout": proc.stdout or "",
-                    "stderr": proc.stderr or "",
+                    "stdout": stdout or "",
+                    "stderr": stderr or "",
                     "command": command,
                     "path": path,
                 }
 
             return await asyncio.to_thread(_run)
-        except subprocess.TimeoutExpired:
-            return {"error": f"git 命令超时（{timeout}s）: {command}"}
+        except asyncio.CancelledError:
+            # 取消原样上抛（本层不吞）：进程的收尸由注册的杀灭回调负责（见 `_run`）。
+            raise
         except FileNotFoundError:
             return {"error": "系统未安装 git"}
         except Exception as e:
