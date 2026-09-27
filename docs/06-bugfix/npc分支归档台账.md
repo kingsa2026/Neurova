@@ -145,6 +145,46 @@ python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
 符合第一节的口径；遗留原因与历次同型（合并后未按 §0 删分支）。
 删除后复算读数：`应当删除 0 条：[]`。
 
+### 2026-09-27（Issue #271 会话，接续收口）
+
+复算入口（先 `git fetch origin --prune`）：**`应当删除 18 条`** —— 本台账历次累计
+删除量最多的一轮，形态与历次同型（合并后未按 §0 删分支），但**积压面明显变大**：
+其中 2 条的命名不带 `auto/` 前缀（`fix/*`），正是第一节那条"成员资格不看名字"的
+判据改动的现实意义。
+
+被删除的 18 条（删除前均已是 `main` 的祖先，且其头命中主线某 merge 的第二父位，
+两个 git 事实逐条独立复算；删除前远端均无在途 PR——当轮 open PR 仅 #281 一条）：
+
+| 分支 | 删除前 sha（远端头） | 处置 |
+|------|------|------|
+| `auto/cnb-dup-key-fix-cdab` | `386c30e3` | 已删（已合入主线） |
+| `auto/docker-image-run-90` | `61ad8e0f` | 已删（已合入主线） |
+| `auto/kb-index-count-single-source-38af` | `1b924fa2` | 已删（已合入主线） |
+| `auto/m3-prereq-turn-calls-fe2a` | `47be5594` | 已删（已合入主线） |
+| `auto/m3-readout-honesty-7f3a` | `a07e4fcd` | 已删（已合入主线） |
+| `auto/manual-live-verify-contract-90-5892` | `9952f6fe` | 已删（已合入主线） |
+| `auto/mcp-capability-declaration-9f2c` | `af8389c8` | 已删（已合入主线） |
+| `auto/npc-auto-continue-272` | `6919331a` | 已删（已合入主线） |
+| `auto/npc-branch-ledger-251-0d34` | `28c80f53` | 已删（已合入主线） |
+| `auto/npc-four-roles-max-272` | `eb79e755` | 已删（已合入主线） |
+| `auto/npc-handoff-role-continuity-dac7` | `74daee0a` | 已删（已合入主线） |
+| `auto/npc-restore-dscoder-max-272` | `0042fc01` | 已删（已合入主线） |
+| `auto/relay-carrier-env-pairing-256` | `a03dc23c` | 已删（已合入主线） |
+| `auto/t90-status-closure-86db` | `f1d10d2c` | 已删（已合入主线） |
+| `auto/timeline-frontend-consumer-262` | `a33fc73d` | 已删（已合入主线） |
+| `auto/tool-batch-parallel-7c4e` | `46c127a7` | 已删（已合入主线） |
+| `fix/chat-stream-survives-page-navigation` | `b20dd5d8` | 已删（已合入主线） |
+| `fix/tool-round-assistant-declaration` | `4e9ecd82` | 已删（已合入主线） |
+
+删除后复算读数：`应当删除 0 条：[]`（`keep` 的 `auto/m3-nodata-fork` 是在途 PR #281
+的源分支，照旧保留）。
+
+**本轮暴露的一处形态（登记，不当已消解）**：积压不是"偶发遗忘"，而是**没有触发面**
+—— 删除动作只在"某轮会话恰好跑一次复算入口"时发生，而 §0 的这句纪律不在任何门禁的
+覆盖面内（悬空扫描只认文档路径与链接、CI 只跑代码与配置，远端分支列表两地都不认）。
+本台账第四节把这点写清在先：守卫不调网络，故它**钉判据、不钉积压**。积压归零靠的是
+"有人跑复算入口"，这一点在机制上没有保证 —— 本轮如实记录，不假称已闭环。
+
 ## 四、与既有纪律的关系（不新造平行体系）
 
 - 本台账只承接**一条**纪律（§0 的"合并后立即删分支"），不复制 §0 的其它条款；
