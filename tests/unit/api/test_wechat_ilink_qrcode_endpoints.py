@@ -10,8 +10,8 @@
 - POST /channel-configs/{type}/test：wechat 无 token → 诚实失败 {success: False,
   needs_scan: True}，绝不假成功；有 token → authenticate 真正执行（F-2）。
 
-纪律：所有测试隔离 CONFIG_FILE 与 HOME/USERPROFILE，绝不触碰真实
-data/channel_configs.json 与 ~/.Neurova/weixin_bot_token。
+纪律：所有测试隔离数据根（`NEUROVA_DATA_DIR` 是唯一注入口）与 HOME/USERPROFILE，
+绝不触碰真实 `data/channel_configs.json` 与 ~/.Neurova/weixin_bot_token。
 """
 from __future__ import annotations
 
@@ -30,11 +30,10 @@ from neurova.api.endpoints.channel_config import (
 
 @pytest.fixture()
 def isolated_env(tmp_path, monkeypatch):
-    """隔离：配置文件 → tmp；HOME/USERPROFILE → tmp（防误写真实 token）。"""
+    """隔离：数据根 → tmp；HOME/USERPROFILE → tmp（防误写真实 token）。"""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channel_configs.json")
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     return tmp_path
 
 

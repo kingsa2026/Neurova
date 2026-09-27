@@ -11,7 +11,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 sys.path.insert(0, project_root)
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-from neurova.core.data_root import get_data_root
+from neurova.memory.scripts.seed_db_landing import seedDbPath
 
 
 def import_initial_memories():
@@ -21,7 +21,7 @@ def import_initial_memories():
     换个工作目录就换个库。收口到数据根。
     """
 
-    db_path = str(get_data_root() / "yi_ling_memory.db")
+    db_path = str(seedDbPath())
 
     print("智星，正在导入记忆到数据库...")
     print(f"数据库路径: {db_path}\n")

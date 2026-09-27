@@ -18,6 +18,7 @@ CWD）、`Path(__file__).resolve().parents[N] / "data"`（反推层数）、
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 from pathlib import Path
@@ -136,6 +137,19 @@ def dataLanding(*parts: str, legacy: "tuple | None" = None) -> Path:
     return target
 
 
+@functools.lru_cache(maxsize=256)
+def nameConflictOnce(legacy: str, target: str) -> None:
+    """两侧同时在场时点名一次（同一对落点不重复刷屏）。
+
+    落点解析在每次读写路径上都会被调用，逐次告警会把同一条冲突打成每请求一行；
+    但**不点名**又等于让旧物里的内容无声失效 —— 故按落点对去重后告警。
+    """
+    logger.warning(
+        "旧落点仍在场且新落点已有同名物，旧物不覆盖：%s（新落点 %s 为事实源；"
+        "旧物需人工核对后处置，例如确认无差异再删除）", legacy, target,
+    )
+
+
 def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
     """旧落点（CWD 相对时代的产物）搬进新落点，只为**空缺时救济**。
 
@@ -144,7 +158,9 @@ def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
     换根之后新代码看不见它们——配置静默回默认值、库看起来"空了"。
     本函数在**新落点尚无该物**时把旧物搬过去一次：
 
-    - 新落点已在 ⇒ 原样返回 False（旧物不覆盖新物，避免把已生效的配置盖回旧版）；
+    - 新落点已在 ⇒ 原样返回 False（旧物不覆盖新物，避免把已生效的配置盖回旧版），
+      但**两侧同时在场必须点名**：那是"同一份东西有两个落点"的实况，
+      不点名就等于让旧物里的内容（可能是用户以为在生效的配置）无声失效；
     - 旧落点不存在 ⇒ 返回 False（无旧物可收）；
     - 搬迁失败 ⇒ 返回 False 并留下告警，**不抛**：收养是救济，不该阻断启动。
 
@@ -152,7 +168,10 @@ def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
     之后事实源仍是新落点。
     """
     legacy = repoRoot().joinpath(*legacyParts)
-    if target.exists() or not legacy.exists():
+    if not legacy.exists():
+        return False
+    if target.exists():
+        nameConflictOnce(str(legacy), str(target))
         return False
     try:
         target.parent.mkdir(parents=True, exist_ok=True)

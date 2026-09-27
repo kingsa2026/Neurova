@@ -7,7 +7,7 @@
 import os
 import sqlite3
 import sys
-from neurova.core.data_root import get_data_root
+from neurova.memory.scripts.seed_db_landing import seedDbPath
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, project_root)
@@ -16,7 +16,7 @@ sys.path.insert(0, project_root)
 def get_db_path() -> str:
     """库落点：数据根下的 `yi_ling_memory.db`（原值按 project_root 反推，是第二份根）。"""
 
-    return str(get_data_root() / "yi_ling_memory.db")
+    return str(seedDbPath())
 
 
 def create_all_tables(conn: sqlite3.Connection):
