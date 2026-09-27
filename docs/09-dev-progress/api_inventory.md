@@ -19,7 +19,7 @@
 | `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 4 |
 | `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
 | `NeurUI/src/api/modules/builder.ts` | `/builder` | 是 | 1 |
-| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 5 |
+| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 7 |
 | `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 2 |
@@ -46,7 +46,7 @@
 | `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 1 |
 | `NeurUI/src/api/modules/model-adapter.ts` | `/model-adapter` | 是 | 1 |
 | `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 12 |
-| `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 5 |
+| `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 6 |
 | `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |
 | `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 6 |
 | `NeurUI/src/api/modules/plans.ts` | `/plans` | 是 | 3 |
