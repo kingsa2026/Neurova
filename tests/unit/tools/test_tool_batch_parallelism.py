@@ -265,9 +265,9 @@ class TestDeclarationWiring:
 
         for name in ("computer_screenshot", "computer_dom_snapshot", "computer_som_snapshot",
                      "browser_read", "browser_dom_read", "canvas_read", "canvas_list_nodes"):
-            if resolveToolCapability(name) is None:
-                continue
-            assert not isParallelEligible(resolveToolCapability(name)), (
+            cap = resolveToolCapability(name)
+            assert cap is not None, f"{name} 未声明——覆盖缺口会静默退回串行，无人知"
+            assert not isParallelEligible(cap), (
                 f"{name} 读的是共享外设的瞬时态，并发会互相拿到对方的画面"
             )
 
@@ -278,8 +278,7 @@ class TestDeclarationWiring:
         for name in ("file_write", "file_delete", "git", "run_code", "exec_command",
                      "write_stdin", "computer_shell", "spawn_subagent"):
             cap = resolveToolCapability(name)
-            if cap is None:
-                continue
+            assert cap is not None, f"{name} 未声明——覆盖缺口会静默退回串行，无人知"
             assert not isParallelEligible(cap), f"{name} 有副作用，不得声明为可并发"
 
     def test_everyWriteScopeHasAProducer(self):
@@ -498,3 +497,215 @@ class TestHazardsExcluded:
 
         await asyncio.gather(*(accumulate(0.25) for _ in range(3)))
         assert turn_context.get_turn_tool_elapsed() == pytest.approx(0.75)
+
+    def test_eligibleToolsDoNotBlockTheEventLoop(self):
+        """声明了可并行的工具**不得**在事件循环里做同步阻塞 I/O。
+
+        并行的收益前提是"每个调用真的让出事件循环"。一个同步阻塞的执行体进了
+        成组批，不但自己不快，还会把同批**全部**兄弟一起卡住——比串行更差。
+        故判据与"可并行"绑定：已声明可并行的工具，逐个核"重活是否下沉线程池"。
+
+        判据形态说明（两处反例都实测过）：
+
+        - **要穿透嵌套**：`file_read` 把同步读包在内部函数里再交 `to_thread`，
+          只看顶层语句会把正确实现读成阻塞；
+        - **要排除已下沉的辅助函数**：交给 `to_thread` 的内部函数体不在此判，
+          否则同一段代码既算"已下沉"又算"阻塞"。
+
+        同一根因的真实命中点（本片修）：`voice_memory_search` 与 `memory_search`
+        走同一条 `MemoryManager.recall` 路径，只有后者在审计 P1-E1 时下了线程池；
+        `file_list` / `file_search` 整段目录遍历与逐文件读取留在循环里；
+        `recall_history` / `recall_context_span` 直读同步 SQLite 台账。
+        """
+        import ast
+        from pathlib import Path
+
+        import neurova.tool_executor as executor_module
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS
+        from neurova.core.tool_capability import isParallelEligible
+
+        # 同步阻塞 I/O 的咽喉名（末段名匹配）。判据只认这些进入点：它们是
+        # "最长可卡住事件循环"的那类调用，纯内存计算不在列。
+        blocking_sinks = {
+            "open", "read_text", "read_bytes", "write_text", "write_bytes",
+            "glob", "walk", "listdir", "scandir", "run", "check_output",
+            "recall", "recall_evicted", "drilldown", "search", "connect",
+        }
+
+        def sinkNames(node):
+            """收集一次调用链上的末段函数名（`a.b.c()` → `c`，`f()` → `f`）。"""
+            names = set()
+            for item in ast.walk(node):
+                if isinstance(item, ast.Call):
+                    target = item.func
+                    if isinstance(target, ast.Attribute):
+                        names.add(target.attr)
+                    elif isinstance(target, ast.Name):
+                        names.add(target.id)
+            return names
+
+        def offloadedHelperNodes(fn):
+            """交给 `to_thread` 的内部函数**函数体节点集**——它们不参与本判据。
+
+            必须按节点集排除、而不是按函数名：内部函数体仍挂在同一个 AST 上，
+            只排除名字的话 `ast.walk` 照样走到它里面（`file_read` 把 `open` 包在
+            内部 `_read()` 里再交 `to_thread`，就成了误报）。
+            """
+            offloaded = set()
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                target = node.func
+                label = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
+                if label != "to_thread":
+                    continue
+                for arg in node.args:
+                    helper = None
+                    if isinstance(arg, ast.Name):
+                        helper = next(
+                            (item for item in ast.walk(fn)
+                             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                             and item.name == arg.id),
+                            None,
+                        )
+                    if helper is not None:
+                        offloaded.update(id(item) for item in ast.walk(helper))
+            return offloaded
+
+        source = Path(executor_module.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        holder = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "ToolExecutor"
+        )
+        dispatch = {}
+        for node in holder.body:
+            if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "_builtin_dispatch":
+                dispatch = ast.literal_eval(node.value)
+        methods = {
+            node.name: node for node in holder.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+        blocking = []
+        for name in sorted(_BUILTIN_SCHEMAS):
+            if not isParallelEligible(resolveToolCapability(name)):
+                continue
+            function = methods.get(dispatch.get(name, ""))
+            if function is None:
+                continue
+            offloaded = offloadedHelperNodes(function)
+            for node in ast.walk(function):
+                if id(node) in offloaded:
+                    continue
+                if not isinstance(node, ast.Call):
+                    continue
+                target = node.func
+                label = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
+                if label in blocking_sinks and label not in offloaded:
+                    blocking.append(f"{name}:{label}")
+                    break
+        assert not blocking, (
+            "这些工具已声明可并行，但执行体在事件循环里做同步阻塞 I/O——"
+            f"成组批里会把同批全部兄弟一起卡住：{sorted(blocking)}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 六：全量声明覆盖（M3 续作）——未声明不得作为"沉默的第三种答案"
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestFullDeclarationCoverage:
+    """覆盖缺口必须以**声明**闭合，不得以"未声明"形态静默存在。
+
+    未声明与"论证过应当串行"在调度上同形（都是串行），在维护上却是两件事：
+    前者是待办、后者是结论。真实危害是**两者在读数上不可分**——覆盖率统计会把
+    待办读成结论，于是"还有哪些工具没论证过"这个问题没有任何机器判据能回答。
+    故本类把"每个内置工具都必须给出裁决（放行或点名拒绝）"钉成常驻判据。
+
+    拒绝也不是一个布尔：本仓要区分两种**处置相反**的拒绝成因——
+
+    - 共享态（`writeScopes=("shared",)`）：语义只读、执行会动共享对象
+      （桌面 / 浏览器 / 画布 / 工作区 / 会话），同批并发会互踩；
+    - 内层扇出叠乘（`concurrentSafe=False`）：工具自身已经是并发扇出体
+      （`deep_research` 信号量 6），外层再并行是乘数放大，缺的是资源护栏
+      而不是作用域隔离——用作用域表达它会把两个不同的成因读成同一个。
+    """
+
+    def test_everyToolDeclaresCapability(self):
+        """71 个内置工具逐个给出裁决：放行或点名拒绝，不留未声明。"""
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS, list_declared_capabilities
+
+        gap = sorted(set(_BUILTIN_SCHEMAS) - set(list_declared_capabilities()))
+        assert not gap, (
+            "这些内置工具既未声明可并行、也未点名拒绝——沉默与结论同形，"
+            f"覆盖缺口无人可读：{gap}"
+        )
+
+    def test_everyDeclarationCarriesEvidenceLine(self):
+        """每条声明必须带**依据行**：误声明的第一层防护是逐条可核（方案 §12）。
+
+        判据读声明位自身的注释，不读文档：声明与依据分开两处时，改声明
+        不必改依据，依据会静默过期。
+        """
+        from pathlib import Path
+
+        import neurova.builtin_tools as builtin
+
+        lines = Path(builtin.__file__).read_text(encoding="utf-8").splitlines()
+        missing = []
+        for index, line in enumerate(lines):
+            if not line.strip().startswith('"capability"'):
+                continue
+            window = [item.strip() for item in lines[max(0, index - 4): index] if item.strip()]
+            if not any(item.startswith("# 并行能力声明：") for item in window):
+                missing.append(index + 1)
+        assert not missing, f"这些声明位缺少依据行（# 并行能力声明：…）: 行 {missing}"
+
+    def test_eligibleSetIsExplicit(self):
+        """可并行集合逐名钉住：放行与收窄都必须是有意为之，不得随声明漂移。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS
+        from neurova.core.tool_capability import isParallelEligible
+
+        eligible = sorted(
+            name for name in _BUILTIN_SCHEMAS
+            if isParallelEligible(resolveToolCapability(name))
+        )
+        assert eligible == [
+            "bilibili_search", "calculator", "emotion_analyze", "file_list", "file_parse",
+            "file_read", "file_search", "get_datetime", "list_agents", "memory_search",
+            "recall_context_span", "recall_history", "rss_read", "subagent_status",
+            "update_plan", "v2ex_hot", "voice_memory_search", "weather", "web_fetch",
+            "web_search",
+        ], f"可并行集合发生变化，须逐条给出依据：{eligible}"
+
+    def test_refusalReasonsAreDistinguishable(self):
+        """两种拒绝成因不得折叠：共享态用作用域表达，内层扇出用并发位表达。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import WriteScope, isParallelEligible
+
+        shared_scope = resolveToolCapability("file_write")
+        assert shared_scope is not None and WriteScope.SHARED in set(shared_scope.writeScopes)
+        assert not isParallelEligible(shared_scope)
+
+        fan_out = resolveToolCapability("deep_research")
+        assert fan_out is not None, "deep_research 未声明——覆盖缺口会静默退回串行，无人知"
+        assert fan_out.readOnly and set(fan_out.writeScopes) == {WriteScope.NONE}, (
+            "deep_research 不动共享态，把它写成 shared 会把两个不同成因折叠成一个"
+        )
+        assert fan_out.concurrentSafe is False, (
+            "deep_research 内层已有并发扇出（信号量 6），外层再并行是叠乘"
+        )
+        assert not isParallelEligible(fan_out)
+
+    def test_undeclaredGapIsNotSilentlySerial(self):
+        """反向控制：判据确实会因覆盖缺口报红（对 `_BUILTIN_SCHEMAS` 注入幻名）。"""
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS, list_declared_capabilities
+
+        assert resolveToolCapability("unregistered_probe_tool") is None
+        assert "unregistered_probe_tool" not in _BUILTIN_SCHEMAS
+        assert "unregistered_probe_tool" not in list_declared_capabilities()
