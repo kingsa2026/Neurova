@@ -470,7 +470,8 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
 
     - **仪表缺席**：部署镜像 revision `d5210625`（09-26 12:23）的 `core/metrics.py`
       对 `tool_batch_shapes` **零命中**，该 revision 导出的抓取里连家族头都没有
-      ⇒ 判据**恒不可达**：再跑多少轮、再等多久都不会有样本，要动的是**部署**；
+      ⇒ 本份抓取上判据没有输入：再跑多少轮、再等多久都不会有样本（确为完整抓取时
+      要动的是**部署**）；
     - **零样本**：当前源码导出的抓取里家族头在、样本数为 0（重启清空计数器，
       而新实例一次工具轮都没跑过）⇒ 判据**可达且已就位**：样本随真实轮次到达，
       重跑本命令即出结论。
@@ -546,10 +547,12 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         assert payload["instrument"]["shape_family"]["sample_total"] == 0
 
     def test_absentInstrumentIsNamedAsUnreachable(self, tmp_path):
-        """家族头不在 ⇒ 成因是**恒不可达**，处置指向部署而不是"再等等"。
+        """家族头不在 ⇒ 成因**不得指向"再等等"**，且作用域只到本份抓取。
 
-        判据：`instrument_absent`。这份抓取取自埋点提交之前的代码（实测镜像
-        revision `d5210625` 对 `tool_batch_shapes` 零命中），此时等多久都不会有样本。
+        判据：`absent_in_this_scrape`。这份抓取取自埋点提交之前的代码（实测镜像
+        revision `d5210625` 对 `tool_batch_shapes` 零命中）。成因名的作用域是
+        **本份抓取**：同一读数也可能是子集抓取 / 被截断 —— 判据只关于文本，
+        就不许越过文本去断言部署（那要读者拿完整抓取去证）。
         """
         import json as _json
 
@@ -562,8 +565,8 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         assert result.returncode == 0, result.stderr[-500:]
         payload = _json.loads(result.stdout.strip().splitlines()[-1])
         assert payload["verdict"] == "no_data"
-        assert payload.get("no_data_cause") == "instrument_absent", (
-            "仪表缺席没被点名：读者会以为'再等等就有读数'，而这份部署永远不会有"
+        assert payload.get("no_data_cause") == "absent_in_this_scrape", (
+            "本份抓取里仪表缺席没被点名：读者会以为'再等等就有读数'"
             f"（拿到 {payload.get('no_data_cause')!r}）"
         )
         assert payload["instrument"]["shape_family"]["present"] is False
@@ -592,11 +595,15 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         我们自己脑内。
         """
         absent = self._run(tmp_path, "# HELP neurova_x_total h\n# TYPE neurova_x_total counter\n")
-        assert "instrument_absent" in absent.stdout, (
+        assert "absent_in_this_scrape" in absent.stdout, (
             f"缺席成因没在人类可读输出里点名：{absent.stdout[-400:]}"
         )
+        assert "核对抓取" in absent.stdout, (
+            "缺席的处置没先指向抓取本身：子集抓取 / 被截断 / 抓错服务都会长成这样，"
+            f"直接指向部署就是把文本级事实当成部署级结论：{absent.stdout[-400:]}"
+        )
         assert "部署" in absent.stdout, (
-            f"缺席的处置没写清楚（该动的是部署，不是在这里等）：{absent.stdout[-400:]}"
+            f"部署分支被一并删掉了（确为完整抓取时该给的处置仍要给）：{absent.stdout[-400:]}"
         )
 
         zero = self._run(tmp_path, self._zeroSampleScrape(tmp_path))
@@ -614,11 +621,11 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         """
         absent = self._run(tmp_path, "# HELP neurova_x_total h\n# TYPE neurova_x_total counter\n")
         assert "（无样本）" not in absent.stdout or "仪表" in absent.stdout, (
-            "耗时读数只说'（无样本）'，与'仪表缺席'同形：读者分不清该等还是该修"
-            f"：{absent.stdout[-400:]}"
+            "耗时读数只说'（无样本）'，与'本份抓取里仪表缺席'同形："
+            f"读者分不清该等还是该核对抓取：{absent.stdout[-400:]}"
         )
         assert "仪表" in absent.stdout, (
-            f"耗时读数没点出仪表缺席：{absent.stdout[-400:]}"
+            f"耗时读数没点出本份抓取里仪表缺席：{absent.stdout[-400:]}"
         )
 
     def test_durationSegmentJudgesByItsOwnInstrument(self, tmp_path):
@@ -646,7 +653,7 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         """进程内路径必须先装配仪表，再导出文本——与 `/metrics` 端点同一条装配。
 
         实测（live-verify）：不装依赖跑 `python tool_parallelism_readout.py`（无参数），
-        它给出 `instrument_absent` —— 而这是**误判**：`generate_metrics_text()` 单独
+        它给出 `absent_in_this_scrape` —— 而这是**误判**：`generate_metrics_text()` 单独
         调用时 `_Metrics()` 从未被构造，注册表里一条 neurova 家族都没有，于是
         "本进程还没装配仪表"被读成"这份部署里没有仪表"，把处置指向了无辜的部署。
 
@@ -710,10 +717,140 @@ def _readoutJson(*args):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
+class TestAbsentFamilyCauseIsScopedToTheScrape:
+    """"这一份抓取里没有"与"那套部署里没有"是两件事——成因只许声明前者。
+
+    实测（真跑）：喂一份**只含形态族**的抓取切片（`tool_batch_shapes` 在、
+    `tool_execution_seconds` 不在，正是"只抓了一个族"的常见形态），耗时段印的是
+    **改前**的 `instrument_absent` + "该动的是**部署**（那份部署早于埋点提交，等多久
+    都不会有样本）"。而这份文本对部署一无所知：它可能只是子集抓取、被反代截断、
+    或抓的根本不是本服务。
+
+    这与上一片修掉的"进程内路径误判"同族（把本机/本文件的事实说成部署的事实），
+    根因不同：那里仪表其实在位，这里**在这份文本上**确实没有。故判据不许越过文本
+    断言部署——成因名与处置都收拢到"本份抓取"的作用域，部署分支只作为**可核实的
+    条件分支**保留（确为完整抓取时才成立）。
+    """
+
+    #: 只含形态族的切片：形态段在、耗时段不在（真实形态，非构造）
+    SHAPE_ONLY = (
+        "# HELP neurova_tool_batch_shapes_total b\n"
+        "# TYPE neurova_tool_batch_shapes_total counter\n"
+        'neurova_tool_batch_shapes_total{path="P",shape="single_call"} 1.0\n'
+    )
+
+    @staticmethod
+    def _scrape(tmp_path, name: str, text: str) -> str:
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_subsetScrapeDoesNotAssertADeploymentFact(self, tmp_path):
+        """文本级缺席不得写成部署级结论，且处置要**先指向抓取本身**。"""
+        path = self._scrape(tmp_path, "shape_only.txt", self.SHAPE_ONLY)
+        result = _runReadout("--metrics-file", path)
+        assert result.returncode == 0, result.stderr[-500:]
+        assert "absent_in_this_scrape" in result.stdout, (
+            "成因名没把作用域写进契约（读者会读成'那套部署里没有'）："
+            f"{result.stdout[-500:]}"
+        )
+        assert "该动的是**部署**" not in result.stdout, (
+            "文本级缺席被写成了部署级结论：这份文本对部署一无所知"
+            f"（子集抓取 / 被截断 / 抓错服务都会长成这样）：{result.stdout[-500:]}"
+        )
+        assert "核对抓取" in result.stdout, (
+            f"处置没有先指向抓取本身：{result.stdout[-500:]}"
+        )
+        assert "部署" in result.stdout, (
+            "部署分支被一并删掉了：确为完整抓取时该给的处置仍然要给"
+        )
+
+    def test_foreignScrapeKeepsTheSameTextScope(self, tmp_path):
+        """同一根因的另一个命中点：整份抓取里连一个 neurova_* 家族都没有。
+
+        成因仍只能声明"本份抓取里没有"，不得推断部署（这份文本同样可能只是
+        抓错了目标）。机器可读字段 `no_data_cause` 与人类可读输出同一条契约。
+        """
+        path = self._scrape(
+            tmp_path,
+            "foreign.txt",
+            "# HELP go_goroutines Number of goroutines\n"
+            "# TYPE go_goroutines gauge\n"
+            "go_goroutines 12\n",
+        )
+        payload = _readoutJson("--metrics-file", path)
+        assert payload["no_data_cause"] == "absent_in_this_scrape", (
+            f"抓错目标的文本给出了部署级成因 {payload['no_data_cause']!r}"
+        )
+        text = _runReadout("--metrics-file", path).stdout
+        assert "该动的是**部署**" not in text, f"{text[-500:]}"
+
+    def test_theDeploymentBranchSurvivesAsACondition(self, tmp_path):
+        """反向控制：作用域收拢**不得**把部署分支软成一句"先看看"。
+
+        `scrape_before_instrumentation.txt` 是该部署的**完整**真导出：
+        "该部署早于埋点提交"此时才是可核实的结论，读者需要的处置
+        （重新部署当前版本）必须仍在输出里——把报错降级成 warning 是本仓明令禁止的。
+        """
+        fixture = M3_FIXTURES / "scrape_before_instrumentation.txt"
+        payload = _readoutJson("--metrics-file", str(fixture))
+        assert payload["no_data_cause"] == "absent_in_this_scrape"
+        text = _runReadout("--metrics-file", str(fixture)).stdout
+        assert "重新部署当前版本" in text, (
+            f"部署分支的条件处置丢了（报错被软掉）：{text[-500:]}"
+        )
+
+    def test_absentIsStillNotZeroSamples(self, tmp_path):
+        """反向控制：作用域正名**不得**把两种成因折叠回去。
+
+        两个输入都必须是 `no_data`（成因只在 `no_data` 上出现）：`SHAPE_ONLY`
+        形态族里带样本 ⇒ 判据出结论 `sparse`、成因本就该是空值，故这里另造一份
+        "两族家族头都在、样本为零"的文本作对照。
+        """
+        absent = self._scrape(
+            tmp_path,
+            "foreign2.txt",
+            "# HELP go_goroutines g\n# TYPE go_goroutines gauge\ngo_goroutines 1\n",
+        )
+        zero = self._scrape(
+            tmp_path,
+            "zero.txt",
+            "# HELP neurova_tool_batch_shapes_total b\n"
+            "# TYPE neurova_tool_batch_shapes_total counter\n"
+            "# HELP neurova_tool_execution_seconds d\n"
+            "# TYPE neurova_tool_execution_seconds histogram\n",
+        )
+        absent_cause = _readoutJson("--metrics-file", absent)["no_data_cause"]
+        zero_cause = _readoutJson("--metrics-file", zero)["no_data_cause"]
+        assert absent_cause == "absent_in_this_scrape", (
+            f"拿错目标的文本没给出文本级成因（拿到 {absent_cause!r}）"
+        )
+        assert zero_cause == "zero_samples", (
+            f"两族在位的零样本态被读成了 {zero_cause!r}"
+        )
+        assert absent_cause != zero_cause, "两种成因被折叠回了同一个值"
+
+    def test_shapeOnlySliceStillReachesItsJudgement(self, tmp_path):
+        """反向控制：只抓了一个族的切片里，**可判的那一段照常出结论**。
+
+        作用域收拢只改"没结论"的措辞，不许把有结论的读数也拖成 no_data——
+        形态族有样本时 `verdict` 仍是 `sparse`/`worthwhile`，成因字段保持空值
+        （成因是 `no_data` 专属）。
+        """
+        path = self._scrape(tmp_path, "shape_only2.txt", self.SHAPE_ONLY)
+        payload = _readoutJson("--metrics-file", path)
+        assert payload["verdict"] == "sparse", (
+            f"形态族有样本却没给出判据结论（拿到 {payload['verdict']!r}）"
+        )
+        assert payload["no_data_cause"] == "", (
+            f"有结论的读数挂了成因 {payload['no_data_cause']!r}"
+        )
+
+
 class TestThreeStatesOfOneCommand:
     """同一条命令、三份真抓取、三种读数——三态素材落库并逐态钉住。
 
-    Issue #271 的真机反馈把 M3 判据的三态都跑出来了：重启前 `instrument_absent`、
+    Issue #271 的真机反馈把 M3 判据的三态都跑出来了：重启前 `absent_in_this_scrape`、
     刚重启后 `zero_samples`、跑过工具轮之后有样本。三态在改前**同形**（都只印一个
     `no_data`），本片把它们各自的素材固化下来，任何一次重复制都会把某两态压回同形。
 
@@ -785,7 +922,7 @@ class TestThreeStatesOfOneCommand:
             "--metrics-file", str(M3_FIXTURES / "scrape_before_instrumentation.txt")
         )
         assert payload["verdict"] == "no_data"
-        assert payload["no_data_cause"] == "instrument_absent", (
+        assert payload["no_data_cause"] == "absent_in_this_scrape", (
             f"拿到 {payload['no_data_cause']!r}——埋点前的抓取会被读成'等样本'，"
             "而它等多久都不会有样本"
         )

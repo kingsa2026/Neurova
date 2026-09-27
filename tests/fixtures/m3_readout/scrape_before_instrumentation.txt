@@ -1,7 +1,8 @@
 # provenance: 埋点提交之前的代码导出的抓取（真导出，非构造）
 # 取数基线 d5210625（真部署 revision）的 neurova/core/metrics.py；该版本对 tool_batch_shapes 零命中 ⇒
-# 形态表连家族头都不在（判据恒不可达，该动的是部署）；而耗时直方图家族它在位（埋点历史更早）。
-# 这正是 Issue #271 的 instrument_absent 态，也是'两段各按本段自己的仪表判'的真实素材。
+# 形态表连家族头都不在（本份抓取上判据没有输入；这份是该部署的完整导出，故成因落到部署）；
+# 而耗时直方图家族它在位（埋点历史更早）。
+# 这正是 Issue #271 的 absent_in_this_scrape 态，也是'两段各按本段自己的仪表判'的真实素材。
 # 
 
 # HELP neurova_tool_executions_total Total tool executions
