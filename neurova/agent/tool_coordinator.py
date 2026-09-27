@@ -136,18 +136,6 @@ def resolveBatchCapabilities(tool_calls: List) -> Dict[str, Any]:
     return resolved
 
 
-def is_concurrency_safe(tool_name: str) -> bool:
-    """并行安全查询：读工具**自己的声明**推导资格；未声明一律 False（fail-closed）。
-
-    保留本函数作为"单个工具够不够格并行"的查询口（既有消费方与守卫的契约），
-    但判据已从"查一份名字清单"改为"读该工具的声明 + 三态合取推导"。
-    """
-    from neurova.core.tool_capability import isParallelEligible
-
-    cap = resolveToolCapability(tool_name)
-    return cap is not None and isParallelEligible(cap)
-
-
 class ToolCoordinator:
     """工具执行协调：per-tool 超时 + 超时转后台 + pending hints。"""
 

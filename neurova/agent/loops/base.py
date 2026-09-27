@@ -158,10 +158,13 @@ def _recordBatchShape(batches: List, loop: Any) -> None:
     - `multi_serial`：多调用但零成组批——M3 的**目标客户**，`w ≥ 1` 的
       一票否决形态与"全未声明"都落这里，两者对 M3 的意义相同（都拿不到并行）。
 
-    `path` 取调度实现类名：`AnthropicLoop.handle_tool_calls` 逐条转发
-    `super().handle_tool_calls([单条])`，那条路径上**永远**只会是 `single_call`
-    （每轮都被拆散）——分开计，是因为把它并进总数会把一条路径的盲区
-    读成"M3 没有收益"。读数失败不影响调度（观测面故障不得改变执行语义）。
+    `path` 取调度实现类名，因为**两条路径的批形态不同**：`AnthropicLoop`
+    只在批里含 `computer` 时才逐条转发 `super().handle_tool_calls([单条])`
+    （其余整批交基类），故它的残留盲区是"含 `computer` 的批恒 `single_call`"，
+    而不是整条路径——分开计，是因为把它并进总数会把这条盲区读成
+    "M3 没有收益"。依据的活行为由 `anthropic_loop.handle_tool_calls` 的分支
+    给出，不在此抄一份（抄了就会像它上一版那样静默过期）。
+    读数失败不影响调度（观测面故障不得改变执行语义）。
     """
     try:
         from neurova.core.metrics import record_tool_batch_shape
