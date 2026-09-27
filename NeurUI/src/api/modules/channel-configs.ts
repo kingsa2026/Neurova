@@ -109,17 +109,23 @@ export function getIngressStats() {
 // B4-a 渠道管理能力面（restart / clear-queue / conflict-check）
 // ---------------------------------------------------------------------------
 
-/** 重启渠道适配器（disconnect → connect，配置变更生效/断线重连）。 */
-export function restartChannelAdapter(type: string) {
+/**
+ * 重启渠道适配器（disconnect → connect，配置变更生效/断线重连）。
+ *
+ * agent 身份必须随行：实例表主键是 `(agent_id, type)`，同一平台在两个 agent
+ * 下可以是两个独立 bot。不带参数时后端按 default 处置 —— 用户在「凯蒂」视图
+ * 点重启，动的却是 default 的长连接，而屏幕上看不出差别。
+ */
+export function restartChannelAdapter(type: string, agentId?: string) {
   return api.post<{ code: number; message: string; data: { success: boolean; error?: string } }>(
-    `/channel-adapters/${type}/restart`,
+    `/channel-adapters/${type}/restart`, undefined, { params: agentId ? { agent_id: agentId } : {} },
   )
 }
 
-/** 清空渠道待处理入站队列（积压清理）。 */
-export function clearChannelQueue(type: string) {
+/** 清空该 (agent, 渠道) 的待处理入站队列（积压清理）。 */
+export function clearChannelQueue(type: string, agentId?: string) {
   return api.post<{ code: number; message: string; data: { cleared: number } }>(
-    `/channel-adapters/${type}/clear-queue`,
+    `/channel-adapters/${type}/clear-queue`, undefined, { params: agentId ? { agent_id: agentId } : {} },
   )
 }
 

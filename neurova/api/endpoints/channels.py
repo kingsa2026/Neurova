@@ -19,12 +19,21 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.api.deps import get_current_user
-from fastapi import Depends, APIRouter, HTTPException, Request, Response
+from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from neurova.channels.manager import get_channel_manager
 
 logger = get_logger(__name__)
+
+
+def _norm_agent(agent_id: Any) -> str:
+    """空/非字符串身份回落 default（与 `channel_config._norm_agent` 同口径）。
+
+    端点被直调（不经 FastAPI DI）时 `Query(default=...)` 会以 Query 对象进入
+    函数体，故必须判类型而不只判真值。
+    """
+    return agent_id if isinstance(agent_id, str) and agent_id else "default"
 
 router = APIRouter(tags=["渠道管理"])
 
@@ -316,11 +325,17 @@ async def health_check_all():
 @router.post("/{channel_type}/restart", summary="重启指定渠道")
 async def restart_channel(
     channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID"),
     current_user: Any = Depends(get_current_user),
 ):
-    """渠道重启（disconnect → connect，配置变更生效/断线重连）。"""
+    """渠道重启（disconnect → connect，配置变更生效/断线重连）。
+
+    agent 维度不可省：实例表主键是 `(agent_id, channel_type)`，同一平台在不
+    同 agent 下可以是两个独立 bot。缺了它，用户在「凯蒂」视图点重启动的是
+    default 的长连接 —— 屏幕上看不出差别。
+    """
     manager = get_channel_manager()
-    result = await manager.restart_channel(channel_type)
+    result = await manager.restart_channel(channel_type, agent_id=_norm_agent(agent_id))
     if not result.get("success") and "error" in result:
         return {"code": 1, "message": result["error"], "data": result}
     return {"code": 0, "message": "Channel restarted", "data": result}
@@ -329,20 +344,32 @@ async def restart_channel(
 @router.post("/{channel_type}/clear-queue", summary="清空渠道待处理队列")
 async def clear_channel_queue(
     channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID"),
     current_user: Any = Depends(get_current_user),
 ):
-    """清空渠道入站持久化队列中的待处理事件（积压清理）。"""
+    """清空该 (agent, 渠道) 入站队列中的待处理事件（积压清理）。
+
+    同平台两个 agent 各有各的积压：按渠道裸名清会把别人的待办一起删掉，
+    而用户只能看见自己视图里的积压数。
+    """
+    agent = _norm_agent(agent_id)
     manager = get_channel_manager()
     try:
-        cleared = manager.clear_channel_queue(channel_type)
+        cleared = manager.clear_channel_queue(channel_type, agent_id=agent)
     except Exception as e:  # noqa: BLE001 — 队列不可用诚实报错
         raise HTTPException(status_code=503, detail=f"入站队列不可用: {e}")
-    return {"code": 0, "message": "Queue cleared", "data": {"channel_type": channel_type, "cleared": cleared}}
+    return {"code": 0, "message": "Queue cleared",
+            "data": {"channel_type": channel_type, "agent_id": agent, "cleared": cleared}}
 
 
 @router.get("/conflicts/check", summary="机器人身份冲突检测")
 async def channel_conflict_check(current_user: Any = Depends(get_current_user)):
-    """扫描已注册渠道，检测复用同一身份凭据（app_id/api_key）的冲突。"""
+    """扫描**全量 agent** 已注册渠道，检测复用同一身份凭据（app_id/api_key）的冲突。
+
+    扫描面覆盖所有 agent：同身份跨 agent 复用正是最容易漏、后果最重的一类
+    （两个 bot 抢同一条平台事件流），只扫 default 视图等于对它完全失明。
+    结果条目的 channel 带上 agent 前缀，便于分辨是哪两个实例。
+    """
     manager = get_channel_manager()
     result = manager.conflict_check()
     return {"code": 0, "message": "success", "data": result}
