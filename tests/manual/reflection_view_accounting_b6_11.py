@@ -71,10 +71,15 @@ def _growthLog(dataDir: str, agentId: str) -> GrowthLogManager:
     return GrowthLogManager(memory_manager=manager)
 
 
-def _viewText(messages) -> str:
-    from neurova.context.reflection_view import injectionSurface
+def _viewText(messages, userInput: str = "", history=None) -> str:
+    """注入面文本：走生产那处判定，并把本轮对话原文一并喂进去。
 
-    return injectionSurface(messages)
+    `authored` 不可省 —— 信封被整封弃掉时末条消息退化成裸用户输入，不刨原文
+    就会把"用户自己提过这句"算成"教训进过视图"（本片修的那条判定）。
+    """
+    from neurova.context.reflection_view import authoredTexts, injectionSurface
+
+    return injectionSurface(messages, authoredTexts(userInput, history))
 
 
 async def main() -> None:
@@ -100,7 +105,7 @@ async def main() -> None:
 
     # [1] 未进视图不记账
     msgs, trace = await build("今天天气怎么样")
-    in_view = LESSON in _viewText(msgs)
+    in_view = LESSON in _viewText(msgs, "今天天气怎么样", history)
     readout = orch.get_context_health()["reflection_injection"]
     print(
         f"[1 未进视图] 视图含教训={in_view} 状态={glog._cache[entry.id].status.value} "
@@ -116,11 +121,11 @@ async def main() -> None:
     msgs, trace = await build(f"{LESSON}吗")
     readout = orch.get_context_health()["reflection_injection"]
     print(
-        f"[2 进视图] 视图含教训={LESSON in _viewText(msgs)} "
+        f"[2 进视图] 视图含教训={LESSON in _viewText(msgs, f'{LESSON}吗', history)} "
         f"状态={glog._cache[entry.id].status.value} 痕迹={trace} "
         f"读数=selected {readout['selected']}/entered {readout['entered_view']}/missed {readout['missed']}"
     )
-    assert LESSON in _viewText(msgs), "前置条件：相关输入应召回该教训"
+    assert LESSON in _viewText(msgs, f"{LESSON}吗", history), "前置条件：相关输入应召回该教训"
     assert glog._cache[entry.id].status == ReflectionLogStatus.APPLIED
     assert trace == [entry.id]
     assert (readout["selected"], readout["entered_view"], readout["missed"]) == (1, 1, 0), readout
@@ -130,11 +135,22 @@ async def main() -> None:
         type=ReflectionType.ERROR, title="另一条", content="正文乙",
         insights=["另一条教训：先复述需求"], confidence=0.6,
     )
-    orch._envelopeBudget = lambda *a, **k: 120  # noqa: SLF001 - 判据打在真正落地那一步
+    # 额度取固定部分（免疫句壳 + `<time>`）的复算值：硬编码常数会在跨日历边界
+    # 失效（`<time>` 随"临近节日"多一行，一旦常数低于固定部分，弃掉的是整封，
+    # 被测形态根本没发生）。
+    orch._envelopeBudget = lambda *a, **k: orch._envelopeFixedTokens({})  # noqa: SLF001 - 判据打在真正落地那一步
     msgs, trace = await build("另一条教训要不要用")
-    dropped = "先复述需求" not in _viewText(msgs)
-    print(f"[3 压缩淘汰] history 块被丢={dropped} 状态={glog._cache[entry2.id].status.value} 痕迹={trace}")
-    assert dropped, "前置条件：预算不足时 history 块应被整块淘汰"
+    from neurova.context.envelope import parse_envelope
+
+    blocks = parse_envelope(str(msgs[-1].get("content", "")))
+    dropped = "先复述需求" not in _viewText(msgs, "另一条教训要不要用", history)
+    print(
+        f"[3 压缩淘汰] 信封在场={bool(blocks)} history 块被丢={'history' not in blocks} "
+        f"教训不在注入面={dropped} 状态={glog._cache[entry2.id].status.value} 痕迹={trace}"
+    )
+    assert blocks, "前置条件：壳 + `<time>` 装得下 ⇒ 信封在场"
+    assert "history" not in blocks, "前置条件：预算不足时 history 块应被整块淘汰"
+    assert dropped, "被淘汰的块里的文本不该出现在注入面"
     assert glog._cache[entry2.id].status == ReflectionLogStatus.PENDING, "被淘汰等于没进视图"
     del orch._envelopeBudget
 
