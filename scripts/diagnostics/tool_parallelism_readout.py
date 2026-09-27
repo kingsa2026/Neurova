@@ -30,11 +30,11 @@
 - `sparse` / `worthwhile` 是**判据结论**（否证成立 / 未成立）；
 - `no_data` 是**判据输入没采到**（无法判定，不构成否证）—— 把它读成"没收益"
   就是拿失明当结论；
-- `no_data` 自身还分三种成因，**处置各不相同**：`instrument_absent`（判据仪表在这份
-  抓取里缺席 ⇒ 恒不可达，该动**部署**）、`zero_samples`（仪表在位、只是还没有
-  样本 ⇒ 可达且已就位，该**等真实轮次**）与 `schema_drift`（抓取里有本词表不认识
-  的形态标签 ⇒ **分母残缺**，该动**词表**）。三者原先同形，读者无从分辨该修哪里
-  （见 `instrumentPresence` / `shapeCause`）。
+- `no_data` 自身还分三种成因，**处置各不相同**：`absent_in_this_scrape`（本份抓取里
+  没有这一族的家族头 ⇒ 先**核对抓取**，确为完整抓取时才指向**部署**）、
+  `zero_samples`（仪表在位、只是还没有样本 ⇒ 可达且已就位，该**等真实轮次**）与
+  `schema_drift`（抓取里有本词表不认识的形态标签 ⇒ **分母残缺**，该动**词表**）。
+  三者原先同形，读者无从分辨该修哪里（见 `instrumentPresence` / `shapeCause`）。
 
 **词表是单一事实源，不在本脚本里另写一份**：`SHAPE_LABELS` 派生自写入侧
 （`core/tool_capability.ToolBatchShape`）。两边各写一遍字面量，漂移时的表现不是
@@ -149,17 +149,22 @@ def instrumentPresence(text: str) -> Dict[str, Any]:
 
     `no_data` 的成因由此分开，因为两种成因的**处置相反**：
 
-    - `instrument_absent`（家族头都不在）：判据**恒不可达** —— 该部署里的
-      `core/metrics.py` 早于埋点提交（实测镜像 revision `d5210625` 对
-      `tool_batch_shapes` 零命中），再跑多少轮、再等多久都不会有样本。要动的
-      是**部署**。
+    - `absent_in_this_scrape`（本份抓取里家族头都不在）：在这份文本上判据**没有
+      输入** —— 先核对抓取本身（子集抓取 / 被反代截断 / 抓错服务都长这样）；
+      确为完整抓取时才成立"该部署里的 `core/metrics.py` 早于埋点提交
+      （实测镜像 revision `d5210625` 对 `tool_batch_shapes` 零命中），再跑多少轮、
+      再等多久都不会有样本"这一**可核实**结论，处置是重新部署当前版本。
     - `zero_samples`（家族头在、样本数为 0）：判据**可达且已就位** —— 仪表是
       进程级的，重启清空计数器，样本随真实工具轮到达。要动的是**等真实轮次**
       （或去看那套部署为什么一轮工具都没跑）。
 
     两件事在改前的输出里同形（都只印一个 `no_data`），读者无从分辨该修部署
     还是该等样本。判据落在**导出文本本身**：家族头在不在是导出器的事实，
-    不是我们从别处猜的意图。
+    不是我们从别处猜的意图。**也正因为判据只关于文本，成因名与处置都不许越过
+    文本去断言部署**：同一份"本份抓取里没有这一族"的读数，既可能是部署早于埋点
+    提交，也可能只是抓了子集 / 被反代截断 / 抓错了服务。故成因落
+    `absent_in_this_scrape`，部署分支保留为**可核实的条件**（见
+    `_CAUSE_DISPOSITION`），由读者拿抓取本身去证。
     """
     presence: Dict[str, Any] = {
         "shape_family": {"name": SHAPE_FAMILY, "present": False, "sample_total": 0},
@@ -182,9 +187,12 @@ def segmentCause(instrument: Dict[str, Any], family_key: str) -> str:
     独立的仪表（`tool_execution_seconds` 的历史比形态表早得多，实测那份旧部署
     里它在位、形态表缺席）—— 把形态段的成因抄给耗时段，就是拿另一支仪表的
     事实冒充这一支，读者会照着错的处置去动。
+
+    返回值的作用域**只是本份抓取**：`absent_in_this_scrape` 回答"这份文本里没有"，
+    不回答"那套部署里没有"（后者要读者拿完整抓取去证，见 `_CAUSE_DISPOSITION`）。
     """
     if not instrument[family_key]["present"]:
-        return "instrument_absent"
+        return "absent_in_this_scrape"
     return "zero_samples"
 
 
@@ -202,9 +210,11 @@ def shapeCause(instrument: Dict[str, Any], unrecognized: Dict[str, int]) -> str:
 
 #: 成因 → 人类可读的一句话（处置不同，故不许折叠成一句"无数据"）。
 _CAUSE_DISPOSITION = {
-    "instrument_absent": (
-        "判据仪表在本份抓取里**缺席** —— 判据恒不可达，该动的是**部署**"
-        "（那份部署早于埋点提交，等多久都不会有样本），不是在这里等"
+    "absent_in_this_scrape": (
+        "本份抓取里**没有**这一族的仪表（连家族头都不在）—— 先**核对抓取**本身："
+        "是否只抓了一个族、是否被反代/网关截断成子集、是否抓对了服务；"
+        "确为**完整抓取**时成因才落到部署（实测镜像 revision `d5210625` 早于埋点提交，"
+        "等多久都不会有样本），处置是**重新部署当前版本**"
     ),
     "zero_samples": (
         "判据仪表在位、样本数为 0 —— 判据**可达且已就位**，"
