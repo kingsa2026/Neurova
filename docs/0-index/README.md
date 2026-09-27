@@ -228,6 +228,7 @@
 | [bugfix-llm-no-client-available.md](../06-bugfix/bugfix-llm-no-client-available.md) | LLM 无客户端修复 |
 | [bugfix-provider-routing.md](../06-bugfix/bugfix-provider-routing.md) | Provider 路由修复 |
 | [bugfix-memory-system-breakpoints.md](../06-bugfix/bugfix-memory-system-breakpoints.md) | 记忆系统断点修复 |
+| [bugfix-channel-agent-select-and-config-landing.md](../06-bugfix/bugfix-channel-agent-select-and-config-landing.md) | 渠道页选不到智能体 + 已有渠道配置失效（Issue #290） |
 | [bugfix-p1-p2-report.md](../06-bugfix/bugfix-p1-p2-report.md) | P1/P2 修复报告 |
 | [bug-audit-report-2026-06-25.md](../06-bugfix/bug-audit-report-2026-06-25.md) | 6 月 Bug 审计 |
 | [TDD修复总结.md](../06-bugfix/TDD修复总结.md) | TDD 修复总结 |
