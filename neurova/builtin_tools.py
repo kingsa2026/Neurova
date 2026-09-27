@@ -309,6 +309,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_ssh_exec": {
+        # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
+        # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。
+        "shell_dialect": True,
         # 并行能力声明：在远端机器执行命令——共享远端会话与凭据分桶，输出经同一终端面板渲染。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【SSH 远程命令】经 SSH 在远程 Linux/macOS 机器上执行命令，返回 stdout/stderr/退出码，操作在聊天页的终端窗口展示。用于远程跑命令（无需图形桌面）。host 必填；用户名/密钥/密码从你的 SSH 凭据配置读取（platform=ssh），不必在此传密码。【何时不用】本机命令用 computer_shell；数据处理/算法用 run_code。",
@@ -326,6 +329,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_shell": {
+        # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
+        # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。
+        "shell_dialect": True,
         # 并行能力声明：在用户计算机上执行 shell 命令——共享宿主机状态与终端面板。
         # 超时处置 KILL：同 exec_command，放弃即须终止那个 shell 进程。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",),
@@ -936,6 +942,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "exec_command": {
+        # 壳方言声明：command 文本交给常驻真 shell 执行（`shell_sessions` 用
+        # `shell=True`），|/;/&& 是命令连接符 ⇒ 必须走分段审批面。
+        "shell_dialect": True,
         # 并行能力声明：启动常驻 shell 进程——进程与 workdir 是共享资源，并发启动会互抢同一工作目录。
         # 超时处置 KILL：常驻进程超时后必须终止（会话的 terminate 注册为杀灭回调），
         # 否则它会随应用退出而泄漏。
@@ -1236,6 +1245,15 @@ _SANDBOX_REQUIRED_KEY = "sandbox_required"
 # 工具（突变/副作用/瞬时快照类）——重放不可能或重放制造新副作用；集合之外
 # 一律 True。误标 True 的后果=溢出文件 30 天被清且重放失败丢原文；误标
 # False 的后果=会话文件偏大。方向上取"数据保真优先"，故名单从严。
+#
+# 与 `capability.readOnly`（并行轴）**不合并**：截图/快照是反例——语义只读，
+# 却因"重放不回当时画面"必须留在此名单里。两轴各答一个事实，合并会造出一个
+# 语义混淆的上帝字段。
+#
+# 但**单向蕴含**必须成立：声明了写作用域（`readOnly=False`）的工具，结果不可能
+# "重放不制造新变更"。反向不成立（只读也可能不可重放），故只钉这一个方向。
+# 守卫：tests/unit/tools/test_reproducible_flag.py 的
+# TestWriteScopedToolsAreNeverReproducible 三面复算（正蕴含 / 反例仍在 / 消费面池）。
 _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 任意代码/命令：输出依赖外部状态且可能已产生副作用
     "run_code", "computer_shell", "computer_ssh_exec",
@@ -1244,6 +1262,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 文件/画布/技能写操作：结果即回执，重放制造新变更
     "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "planning",
+    # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
+    "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
     "canvas_move_node", "canvas_set_config", "canvas_layout", "canvas_run",
     # 桌面/浏览器操作：突变或瞬时快照（截图重放不回当时画面）
@@ -1333,6 +1353,13 @@ def list_sandbox_required_tools() -> List[str]:
 # 名单塞一个文件"）。
 _CAPABILITY_KEY = "capability"
 
+#: 壳方言声明键：工具的**命令文本**是否交给真 shell 解析。
+#: 它答的是一件事：`|` / `;` / `&&` 在这份文本里是命令连接符还是普通字符。
+#: 判据的**成员**落在这里（各工具声明处），**规则**在
+#: `security/governance.py` 的分段审批面；两侧各持一份名单就会像 `exec_command`
+#: 那样漂移（它跑真 shell 却不在分段面上，白名单前缀匹配放行了搭便车注入）。
+_SHELL_DIALECT_KEY = "shell_dialect"
+
 
 def get_builtin_tool_capability(tool_name: str):
     """读取内置工具的并行能力声明；未声明/形态非法/非内置一律返回 None。
@@ -1346,6 +1373,28 @@ def get_builtin_tool_capability(tool_name: str):
     if not isinstance(schema, dict):
         return None
     return parseToolCapability(schema.get(_CAPABILITY_KEY))
+
+
+def getBuiltinToolShellDialect(tool_name: str) -> Optional[bool]:
+    """读取工具的壳方言声明。
+
+    Returns:
+        True: 该工具的命令文本交给真 shell 执行，须走分段审批面
+        None: 未声明（代码本体/非 shell 语义），调用方不得据此裁决
+    """
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return None
+    return True if schema.get(_SHELL_DIALECT_KEY) is True else None
+
+
+def listShellDialectTools() -> List[str]:
+    """枚举声明了壳方言的内置工具名（分段审批面的**内置取数口**）。"""
+    return [
+        name
+        for name, schema in _BUILTIN_SCHEMAS.items()
+        if isinstance(schema, dict) and schema.get(_SHELL_DIALECT_KEY) is True
+    ]
 
 
 def list_declared_capabilities() -> List[str]:
