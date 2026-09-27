@@ -1150,3 +1150,18 @@ tests/unit/tools/test_tool_cancellation.py
 #     computer_ssh_exec 真 shell 却不在分段面上），含幻名删净与外部别名台账。
 tests/unit/tools/test_reproducible_flag.py
 tests/unit/security/test_command_segment_approval.py
+# Issue #290（渠道页 agent 选择器 + 渠道配置落点）：两条独立根因的判据。
+#   Bug B 根因：`721ef038` 把渠道配置锚点从包内 `neurova/data/` 换到数据根，
+#   而**存量没跟着搬** —— `_load_store()` 在新锚点找不到文件即静默返回空表，
+#   用户侧是"所有渠道配置全没了"（页面全未启用 / 重启后零适配器连接 /
+#   跨 agent 冲突检测同时失明）。既有 `test_data_root_no_cwd_landing.py` 的判据是
+#   **源码字形**（不得出现第二份根），它对"换锚之后原来的数据还在不在"零判据；
+#   渠道测试又全部 monkeypatch 落点，锚点于是从未被断言过。本文件补三件：
+#   活锚点（落点经数据根**调用时**推导，注入即生效）、存量收养（空缺才搬、
+#   不覆盖、两侧都在则点名不静默）、装配可读（bootstrap 按搬回来的存量重建）。
+tests/unit/api/test_channel_config_landing_anchor.py
+#   同根因的第二批命中点（教义第 5 条）：种子记忆库 `yi_ling_memory.db` 的八个
+#   脚本同样在换锚时丢了存量（旧锚点 `neurova/memory/data/`，换锚后无人读也不被清，
+#   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
+#   存量收养、不覆盖、无旧物时不得凭空造文件。
+tests/unit/memory_ingest/test_seed_db_landing_relocation.py

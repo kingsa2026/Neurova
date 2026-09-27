@@ -40,15 +40,34 @@ from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
-from neurova.core.data_root import get_data_root
+from neurova.core.data_root import dataLanding
 
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/channel-configs", tags=["渠道配置"])
 
-# 配置文件路径
-CONFIG_DIR = get_data_root()
-CONFIG_FILE = CONFIG_DIR / "channel_configs.json"
+# 配置文件落点：数据根下的 `channel_configs.json`（2026-09-28 换锚存量救济）。
+#
+# 锚点换过一次而存量没搬：`721ef038` 之前是 `Path(__file__).parent.parent.parent / "data"`
+# （即包内 `neurova/data/`），之后是数据根。旧落点里那份带着真实凭据的配置
+# 因此**再无人读**——`_load_store()` 在新锚点找不到文件即静默返回空表，
+# 用户侧是"所有渠道配置全没了"：页面全未启用、重启后零适配器连接
+# （装配日志全零，看起来一切正常）、跨 agent 身份冲突检测同时失明。
+# 现按"落点推导与存量搬迁同批"处理：经 `dataLanding(..., legacy=...)` 一次，
+# 空缺时把旧物收养过来；两侧都在则点名告警、以新落点为准（见 data_root 同名函数）。
+#
+# 落点**调用时解析**（不是模块级常量）：数据根由 `NEUROVA_DATA_DIR` 注入，
+# 且按 `data_root.py` 的纪律在调用时解析才对延迟装配与子线程生效。
+_LEGACY_CONFIG_PARTS = ("neurova", "data", "channel_configs.json")
+
+
+def _configFile() -> Path:
+    """渠道配置落点（数据根下），空缺时收养换锚前的包内落点。
+
+    `dataLanding` 自身即调用时解析（内层每次取 `get_data_root()`），
+    故本函数取落点时注入的 `NEUROVA_DATA_DIR` 一律生效。
+    """
+    return dataLanding("channel_configs.json", legacy=_LEGACY_CONFIG_PARTS)
 
 # ============================================================
 # 请求/响应模型
@@ -97,17 +116,19 @@ class ChannelTestResult(BaseModel):
 
 
 def _save_store(store: Dict[str, Any]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+    target = _configFile()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(CONFIG_FILE)
+    tmp.replace(target)
 
 
 def _load_store() -> Dict[str, Any]:
-    if not CONFIG_FILE.exists():
+    target = _configFile()
+    if not target.exists():
         return {"version": 2, "agents": {}}
     try:
-        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, IOError):
         return {"version": 2, "agents": {}}
     if isinstance(raw, dict) and raw.get("version") == 2 and isinstance(raw.get("agents"), dict):
