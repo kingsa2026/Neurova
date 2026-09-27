@@ -1133,3 +1133,11 @@ tests/unit/tools/test_tool_batch_parallelism.py
 tests/unit/tools/test_tool_parallelism_readout.py
 tests/unit/agent/test_handle_tool_calls_parallel.py
 tests/unit/agent/test_anthropic_loop_batch_handoff.py
+
+# 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
+#   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含
+#     write_pdf 命中点与「只读也可不可重放」的反向控制；
+#   · test_command_segment_approval.py：壳方言成员资格读声明（exec_command /
+#     computer_ssh_exec 真 shell 却不在分段面上），含幻名删净与外部别名台账。
+tests/unit/tools/test_reproducible_flag.py
+tests/unit/security/test_command_segment_approval.py
