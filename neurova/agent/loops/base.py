@@ -165,16 +165,13 @@ def _recordBatchShape(batches: List, loop: Any) -> None:
     """
     try:
         from neurova.core.metrics import record_tool_batch_shape
+        from neurova.core.tool_capability import classifyBatchShape
 
-        count = sum(len(batch.items) for batch in batches)
-        grouped = any(batch.parallel for batch in batches)
-        if count <= 1:
-            shape = "single_call"
-        elif grouped:
-            shape = "multi_parallel"
-        else:
-            shape = "multi_serial"
-        record_tool_batch_shape(type(loop).__name__, shape)
+        shape = classifyBatchShape(
+            sum(len(batch.items) for batch in batches),
+            any(batch.parallel for batch in batches),
+        )
+        record_tool_batch_shape(type(loop).__name__, shape.value)
     except Exception:  # noqa: BLE001 - 观测失败不改变执行语义
         logger.debug("批次形态读数跳过", exc_info=True)
 
