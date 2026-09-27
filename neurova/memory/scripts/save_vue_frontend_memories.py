@@ -5,9 +5,9 @@
 import json
 import sqlite3
 import time
-from neurova.core.data_root import get_data_root
+from neurova.memory.scripts.seed_db_landing import seedDbPath
 
-db_path = get_data_root() / "yi_ling_memory.db"
+db_path = seedDbPath()
 
 db_path.parent.mkdir(parents=True, exist_ok=True)
 
