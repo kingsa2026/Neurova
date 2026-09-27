@@ -123,16 +123,17 @@ async def _build(orch, user_input: str):
     return msgs, get_turn_injected_reflections()
 
 
-def _injectionText(msgs) -> str:
-    """本轮视图的注入面文本（信封块 + 非信封消息正文）。"""
-    from neurova.context.envelope import parse_envelope
+def _injectionText(msgs, user_input: str = "", history: list | None = None) -> str:
+    """本轮视图的注入面文本。
 
-    parts = []
-    for msg in msgs or []:
-        content = str((msg or {}).get("content", "") or "")
-        blocks = parse_envelope(content)
-        parts.append("\n".join(blocks.values()) if blocks else content)
-    return "\n".join(parts)
+    直接调用**生产那处**判定（`reflection_view.injectionSurface`）——判据侧不再
+    自带一份"什么是注入面"的副本：两份实现一旦漂移，就会出现"测试说进了视图、
+    生产说不算"的分裂（本片修的红灯正是这个形态的半边，副本当时把用户原话
+    也算成注入面）。
+    """
+    from neurova.context.reflection_view import authoredTexts, injectionSurface
+
+    return injectionSurface(msgs, authoredTexts(user_input, history))
 
 
 class TestViewEntryDecidesAccounting:
@@ -147,7 +148,9 @@ class TestViewEntryDecidesAccounting:
 
         msgs, trace = await _build(orch, "今天天气怎么样")
 
-        assert LESSON not in _injectionText(msgs), "前置条件：无关输入下该教训本就不该进视图"
+        assert LESSON not in _injectionText(msgs, "今天天气怎么样", _history()), (
+            "前置条件：无关输入下该教训本就不该进视图"
+        )
         assert glog._cache[entry.id].status == ReflectionLogStatus.PENDING, (
             "条目没进视图却被记为 applied —— 这正是 P2-9 的幻影注入"
         )
@@ -162,7 +165,9 @@ class TestViewEntryDecidesAccounting:
 
         msgs, trace = await _build(orch, f"{LESSON}吗")
 
-        assert LESSON in _injectionText(msgs), "前置条件：相关输入应把该教训召回进视图"
+        assert LESSON in _injectionText(msgs, f"{LESSON}吗", _history()), (
+            "前置条件：相关输入应把该教训召回进视图"
+        )
         assert glog._cache[entry.id].status == ReflectionLogStatus.APPLIED
         assert trace == [entry.id], f"真进视图的条目必须在痕迹里，实得 {trace!r}"
 
@@ -176,12 +181,23 @@ class TestViewEntryDecidesAccounting:
         glog = _growthLog(tmp_path)
         entry = await _lesson(glog)
         orch = _orchestrator(glog)
-        # 把信封额度压到装不下 history 块：draw 照旧命中，落地被淘汰。
-        orch._envelopeBudget = lambda *a, **k: 120  # noqa: SLF001 - 判据要打在真正落地的那一步
+        # 额度不由魔法数给定：取**固定部分**（免疫句壳 + `<time>`）的复算值，
+        # 与生产同一个推导（`_envelopeFixedTokens`，单源）。硬编码常数会在跨
+        # 日历边界时失效 —— `<time>` 块随"临近节日"预测多出一行，常数一旦低于
+        # 固定部分，`compress_envelope` 的兜底守卫弃掉的是**整封**，被测形态
+        # （history 块整块淘汰）根本没发生，判据会以"前置条件不成立"的形式报假红。
+        orch._envelopeBudget = lambda *a, **k: orch._envelopeFixedTokens({})  # noqa: SLF001 - 判据要打在真正落地的那一步
 
         msgs, trace = await _build(orch, f"{LESSON}吗")
 
-        assert LESSON not in _injectionText(msgs), "前置条件：预算不足时 history 块应被整块淘汰"
+        from neurova.context.envelope import parse_envelope
+
+        blocks = parse_envelope(str(msgs[-1].get("content", "")))
+        assert blocks, "前置条件：壳 + `<time>` 装得下 ⇒ 信封在场（整封被弃是另一种形态）"
+        assert "history" not in blocks, "前置条件：预算不足时 history 块应被整块淘汰"
+        assert LESSON not in _injectionText(msgs, f"{LESSON}吗", _history()), (
+            "前置条件：被淘汰的块里的文本不该出现在注入面"
+        )
         assert glog._cache[entry.id].status == ReflectionLogStatus.PENDING
         assert not trace
 
@@ -262,6 +278,100 @@ class TestJudgmentFollowsTheViewNotTheBranch:
 
         msgs, trace = await _build(orch, "随便问点什么")
 
-        assert LESSON in _injectionText(msgs), "前置条件：降级分支把反思以独立消息注入视图"
+        assert LESSON in _injectionText(msgs, "随便问点什么", _history()), (
+            "前置条件：降级分支把反思以独立消息注入视图"
+        )
         assert glog._cache[entry.id].status == ReflectionLogStatus.APPLIED
         assert trace == [entry.id]
+
+
+class TestSurfaceExcludesUserUtterance:
+    """注入面判据的退化形态：信封被整封弃掉时，末条消息只剩用户原话。
+
+    `injectionSurface` 的契约是"模型实际看到的**系统注入**面"——用户原文不属于
+    注入面（模块 docstring）。但当 `compress_envelope` 的兜底守卫把整封弃掉
+    （`budget_tokens` 连免疫句壳都装不下）时，末条消息退化为**裸 user 输入**，
+    旧实现对"无信封消息"按正文全文计入 ⇒ 用户自己说的那句被算成注入面。
+
+    后果与 B6-11 要修的幻影注入同型、方向相反：用户复述了某条教训的内容，
+    条目从未进视图，却被判定"进了视图"→ 记 `applied` + 进痕迹 → 用户对一个
+    自己随口提到的教训投的票被当成对模型注入效果的裁决。
+    """
+
+    @pytest.mark.asyncio
+    async def test_bare_user_utterance_is_not_injection_surface(self, tmp_path):
+        """信封整封弃掉 + 用户原话含教训文本 → 不得判定为"进了视图"。"""
+        glog = _growthLog(tmp_path)
+        entry = await _lesson(glog)
+        orch = _orchestrator(glog)
+        # 1 token 的额度：免疫句壳都装不下 ⇒ compress_envelope 返回空串（整封弃）。
+        orch._envelopeBudget = lambda *a, **k: 1  # noqa: SLF001
+
+        msgs, trace = await _build(orch, f"{LESSON}吗")
+
+        last = str(msgs[-1].get("content", ""))
+        assert last == f"{LESSON}吗", "前置条件：信封被整封弃掉，末条消息应只剩用户原话"
+        assert glog._cache[entry.id].status == ReflectionLogStatus.PENDING, (
+            "教训只出现在用户原话里，视图注入面里一行都没有 —— 不得记 applied"
+        )
+        assert not trace, f"没进视图的条目不得进本轮痕迹，实得 {trace!r}"
+
+    @pytest.mark.asyncio
+    async def test_history_utterance_is_not_injection_surface(self, tmp_path):
+        """会话历史里用户自己说过这句 → 同样不算"教训进了视图"。
+
+        同一根因的第二个命中点：注入面原来把"无信封消息的正文"整条计入，
+        于是**用户说过的任何一句**都可能把一条从未注入的教训判成已注入。
+        """
+        glog = _growthLog(tmp_path)
+        entry = await _lesson(glog)
+        orch = _orchestrator(glog)
+        history = [
+            {"role": "user", "content": LESSON},
+            {"role": "assistant", "content": "好的"},
+        ]
+
+        msgs = await orch.build_context(
+            user_input="今天天气怎么样", session_context=history, relevant_memories=[]
+        )
+        trace = get_turn_injected_reflections()
+
+        assert LESSON in "\n".join(str(m.get("content", "")) for m in msgs), (
+            "前置条件：这句文本确实在视图里（历史对话窗口），但它是用户说的、不是注入的"
+        )
+        assert glog._cache[entry.id].status == ReflectionLogStatus.PENDING, (
+            "用户历史里说过这句，不等于这条教训被注入过 —— 不得记 applied"
+        )
+        assert not trace, f"没进视图的条目不得进本轮痕迹，实得 {trace!r}"
+
+    @pytest.mark.asyncio
+    async def test_injected_reflection_message_is_still_accounted(self, tmp_path):
+        """反向控制：把同一条文本**真注入**成独立消息 → 判定必须翻转。
+
+        上一条的结论不是"这段文本一律不算"：判定跟的是**作者身份**，不是文本内容。
+        降级分支（`context_builder is None`）里反思由注入器渲染，落成独立 user
+        消息、与任何对话原文都不逐字相同 —— 那时它必须算进注入面。
+        """
+        glog = _growthLog(tmp_path)
+        entry = await _lesson(glog)
+        agent = _agent(glog, tmp_path)
+        agent.context_builder = None
+        orch = _orchestrator(glog, use_pool=False, agent=agent)
+
+        msgs, trace = await _build(orch, "随便问点什么")
+
+        authored = {"随便问点什么", "第0轮闲聊", "第1轮闲聊", "第2轮闲聊"}
+        carriers = [
+            str(m.get("content", ""))
+            for m in msgs
+            if LESSON in str(m.get("content", ""))
+        ]
+        assert carriers, "前置条件：降级分支把反思渲染进视图"
+        assert all(text not in authored for text in carriers), (
+            "前置条件：承载反思的消息由注入器渲染，与任何对话原文都不逐字相同 —— "
+            f"实得 {carriers!r}"
+        )
+        assert glog._cache[entry.id].status == ReflectionLogStatus.APPLIED, (
+            "真注入的条目必须照旧记账 —— 判定跟作者身份，不是把这段文本一律排除"
+        )
+        assert trace == [entry.id], f"真进视图的条目必须在痕迹里，实得 {trace!r}"
