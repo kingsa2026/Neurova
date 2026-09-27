@@ -82,6 +82,16 @@ SHAPE_FAMILY = SHAPE_METRIC.removesuffix("_total")
 #: 写在脚本里而非散在说明里，是为了让"低于阈值就放弃"这件事**可机器判定**。
 SPARSE_SHARE = 0.05
 
+#: 逐工具「值不值得为它成组等待」的门槛（秒）。M3 的收益按工具分布**极不均匀**：
+#: 真机读数（Issue #271）里 `file_read` 34ms 落门外、`memory_search` 991ms 冷 /
+#: 83ms 热落在边界上。这个量级在仓内另有同源目标可援引：检索路径的延迟目标是
+#: `< 200ms`（`docs/01-architecture/20-retrieval-context-injection.md` §10）。
+#:
+#: 它是**读数门槛**，不是放行门禁：结论只回答"这个工具的常态耗时值不值得等"，
+#: 要不要把某个工具声明为可并行，仍由逐工具论证（依据行）决定——把读数当门禁
+#: 用，就是拿一个通用数字替掉本该逐条给出的依据。
+WORTH_WAITING_BUDGET_S = 0.2
+
 
 class ReadoutInputError(RuntimeError):
     """取数输入不可用（读不到 / 不是 Prometheus 文本）。
@@ -278,6 +288,52 @@ def _shapeSamples(text: str):
             )
 
 
+def percentileBracket(bounds: List[float], cumulative: Dict[float, int], count: int, quantile: float):
+    """分位所在桶的**夹逼区间** `(lower, upper]`（秒）；无样本时 `None`。
+
+    为什么是夹逼而不是一个点：直方图只报"落在哪个桶"，真值在桶内何处是**未知**的。
+    `neurova/api/endpoints/analytics.py` 的 p95 取"分位所在桶的上限、无插值"，
+    同一诚实语义；本函数额外给出下界，是因为逐工具判据要问的是"整段区间在门槛的
+    哪一侧"——只给上界会把跨门槛的情形（`(0.1s, 0.25s]`）硬判成一侧。
+
+    `lower` 的取值：首个累计过半的桶界**之前**的那个桶界（没有更小桶时是 0）；
+    `upper` 就是那个桶界本身。
+    """
+    if count <= 0:
+        return None
+    target = quantile * count
+    ordered = sorted(b for b in bounds if b != float("inf"))
+    for index, bound in enumerate(ordered):
+        if cumulative.get(bound, 0) >= target:
+            lower = 0.0 if index == 0 else ordered[index - 1]
+            return (lower, bound)
+    # 分位落在 `+Inf` 桶（样本比最大有限桶还慢）：下界是最大有限桶界，上界未知。
+    if ordered:
+        return (ordered[-1], float("inf"))
+    return None
+
+
+def parallelWorthiness(bracket, slow_bound: Optional[float]) -> Dict[str, Any]:
+    """逐工具判据：**P50 与门槛比**；冷路径另档，不进这一判断。
+
+    三态而非二态（`True` / `False` / `None`）：桶界把 P50 夹在 `(lower, upper]` 里，
+    区间**整段**在门槛之上判 `True`、整段在门槛之下判 `False`、**跨过门槛则 `None`**
+    （"边界"）。给跨门槛的区间硬挑一侧，就是拿仪表分辨率装出来的确定性。
+
+    冷路径（`slow_share`）**不参与**：它是部署/超时该管的事，不是并行收益该管的事。
+    混进来就会把"这个部署有冷启动样本"读成"这个工具常态很慢"，进而给一个常态只要
+    几十毫秒的工具发并行资格——那正是真机读数里 `memory_search` 的双峰形态。
+    """
+    verdict = None
+    if bracket is not None:
+        lower, upper = bracket
+        if lower >= WORTH_WAITING_BUDGET_S:
+            verdict = True
+        elif upper <= WORTH_WAITING_BUDGET_S:
+            verdict = False
+    return {"worth_waiting": verdict, "slow_bound_s": slow_bound}
+
+
 def parseToolDurations(text: str) -> List[Dict[str, Any]]:
     """逐工具耗时：均值来自 `_sum`/`_count`；另给**区间**分布。
 
@@ -320,14 +376,29 @@ def parseToolDurations(text: str) -> List[Dict[str, Any]]:
                 label = "<=%gs" % bound if index == 0 else "%gs<..<=%gs" % (lower, bound)
             segments[label] = max(0, running - int(previous))
             previous = running
-        rows.append(
-            {
-                "name": name,
-                "count": count,
-                "avg_ms": round(sums[name] / count * 1000, 2) if count else 0.0,
-                "segments_s": {k: v for k, v in segments.items() if v},
-            }
+        bracket = percentileBracket(bounds, cumulative.get(name, {}), count, 0.5)
+        # 冷路径的**保守下界**：只数"确定比门槛慢"的样本。桶界中点附近的样本
+        # （`(0.1s, 0.25s]` 里跨 200ms 的那些）在读数上无从分辨，不算进来——
+        # 少报一个已知下界，好过把不确定的样本算成确定很慢。
+        slow_bound = next((b for b in bounds if b != float("inf") and b >= WORTH_WAITING_BUDGET_S), None)
+        slow_share = (
+            round((count - cumulative[name].get(slow_bound, 0)) / count, 4)
+            if (slow_bound is not None and count)
+            else None
         )
+        row: Dict[str, Any] = {
+            "name": name,
+            "count": count,
+            "avg_ms": round(sums[name] / count * 1000, 2) if count else 0.0,
+            "p50_lower_ms": round(bracket[0] * 1000, 2) if bracket else None,
+            "p50_upper_ms": (
+                round(bracket[1] * 1000, 2) if (bracket and bracket[1] != float("inf")) else None
+            ),
+            "slow_share": slow_share,
+            "segments_s": {k: v for k, v in segments.items() if v},
+        }
+        row.update(parallelWorthiness(bracket, slow_bound))
+        rows.append(row)
     return rows
 
 
@@ -505,11 +576,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
     print("\n工具耗时分布（均值来自直方图本体）：")
-    if not payload["tool_durations"]:
-        # 耗时段按**它自己的**仪表判成因（与形态表各自独立，见 segmentCause）。
-        print(_emptyReadoutLine(segmentCause(payload["instrument"], "duration_family"), ""))
     for row in payload["tool_durations"]:
         print(f"  {row['name']}: n={row['count']} 均值={row['avg_ms']}ms 区间={row['segments_s']}")
+    if payload["tool_durations"]:
+        print(
+            f"\n逐工具「值不值得为它成组等待」（判据：P50 与 {WORTH_WAITING_BUDGET_S * 1000:g}ms 门槛比；"
+            "冷路径另档，不进这一判断）："
+        )
+        for row in payload["tool_durations"]:
+            bracket = (
+                f"({row['p50_lower_ms']}ms, {row['p50_upper_ms']}ms]"
+                if row.get("p50_upper_ms") is not None
+                else f">{row.get('p50_lower_ms')}ms（超出最大有限桶，上界未知）"
+                if row.get("p50_lower_ms") is not None
+                else "无样本"
+            )
+            verdict = row.get("worth_waiting")
+            if verdict is True:
+                judgement = "值得等（P50 整段在门槛之上）"
+            elif verdict is False:
+                judgement = "不值得等（P50 整段在门槛之下）"
+            elif verdict is None and row.get("count"):
+                judgement = (
+                    f"**边界**：P50 夹逼区间跨过 {WORTH_WAITING_BUDGET_S * 1000:g}ms 门槛，"
+                    "本副仪表的分辨率答不出"
+                    "（要么补精细桶，要么等更多样本），不硬挑一侧"
+                )
+            else:
+                judgement = "无样本"
+            slow = row.get("slow_share")
+            slow_note = (
+                f"｜冷路径下界 {slow * 100:.1f}%（另档，不进上面的判断）"
+                if slow is not None else ""
+            )
+            print(f"  {row['name']}: P50={bracket} ⇒ {judgement}{slow_note}")
+    else:
+        # 耗时段按**它自己的**仪表判成因（与形态表各自独立，见 segmentCause）。
+        print(_emptyReadoutLine(segmentCause(payload["instrument"], "duration_family"), ""))
     return 0
 
 
