@@ -1173,3 +1173,13 @@ tests/unit/memory_ingest/test_seed_db_landing_relocation.py
 #   服务端赋值，故防线只在其中一条路径上成立。判据：成员单源 + 解析单源 +
 #   咽喉不得自带成员比较（AST）+ 真执行体落盘 + 防伪根回落。
 tests/unit/skills/test_sandbox_root_single_source.py
+
+# Issue #271 M5 尾巴（桌面档轴与补拍面，同根因两命中点）：名单成员资格此前是
+#   手写快照，与声明面之间无对账机制。本批把成员下沉到各工具 schema 的声明位，
+#   并把两处已证实的漂移一并根修（`computer_click_mark` 一直被接在刷新链上却漏登）。
+#   · test_desktop_policy_projection.py：三条桌面清单 == 声明面投影（含反向控制
+#     改声明即改读数、两条轴不互为别名、11 工具×4 档决策矩阵逐格不变）；
+#   · test_action_refresh_declaration.py：补拍名单 == AST 复算的执行体实际调用面
+#     （漏登 computer_click_mark 在这条上红）+ 入口守卫真消费（摘声明即断链）。
+tests/unit/computer_use/test_desktop_policy_projection.py
+tests/unit/computer_use/test_action_refresh_declaration.py
