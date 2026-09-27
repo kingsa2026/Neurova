@@ -1165,3 +1165,12 @@ tests/unit/api/test_channel_config_landing_anchor.py
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
 #   存量收养、不覆盖、无旧物时不得凭空造文件。
 tests/unit/memory_ingest/test_seed_db_landing_relocation.py
+
+# Issue #271 M5 尾巴（第六命中点）：per-tool 超时表 `TOOL_TIMEOUTS_S` 的键从未
+#   与注册面对过账，实测含一个**幻名** `dom_snapshot`（不在内置 71、全仓无注册处）
+#   —— 那条 45s 窗口从未作用在任何工具上；真名有两个（浏览器侧与桌面侧 UIA 树
+#   快照）都没拿到。与并行轴旧名单里被逮住的 `get_time`/`time_now` 同型。
+#   另：声明了 `timeoutDisposition` 的工具此前没人论证过超时窗口是否够得到。
+#   判据：表键必须是注册面真名 + 快照真名拿到原意窗口 + 处置声明工具逐条有结论
+#   （有条目，或登记为有意走默认且理由具体）+ 既有读数逐条不变（等价迁移）。
+tests/unit/agent/test_timeout_table_honesty.py

@@ -40,7 +40,14 @@ TOOL_TIMEOUTS_S: Dict[str, float] = {
     "browser_type": 60,
     "browser_screenshot": 60,
     "browser_extract_text": 60,
-    "dom_snapshot": 45,
+    # 快照类留 45s 余量（枚举控件树/可访问性树是慢操作）。
+    # 此处曾写 `"dom_snapshot": 45` —— **幻名**：它不在内置注册面（71）内，
+    # 全仓也没有任何注册处，故那条放宽从未作用在任何工具上。真名有两个
+    # （浏览器侧与桌面侧 UIA 树快照），都已补上。
+    # 判据：tests/unit/agent/test_timeout_table_honesty.py 逐名复算
+    # 「表里的键必须是注册面真名」+「快照类真名拿到了放宽」。
+    "browser_dom_snapshot": 45,
+    "computer_dom_snapshot": 45,
     # computer_ssh_exec：缺凭据时按需卡弹出后有限轮询等待（≤90s）+ SSH 命令本身，
     # 放宽到 180s 避免等待期被协调器掐断（当场续跑的前提）
     "computer_ssh_exec": 180,
