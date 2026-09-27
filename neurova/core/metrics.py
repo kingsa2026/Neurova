@@ -170,9 +170,9 @@ class _Metrics:
         # M3 的收益判据（"多工具批次占比低于 ~5% 则方案不成立"）此前**没有落点**：
         # 一轮里到底有几个工具调用、其中有几批真成了组，全仓无处可读。缺这个计数，
         # "M3 没收益"与"数据没采到"在观测面上同形，判据恒不可达。
-        # `path` 分档不是装饰：`AnthropicLoop` 逐条转发 `super().handle_tool_calls`，
-        # 那条路径上任何声明都拿不到成组执行——不分档会把一条路径的盲区
-        # 算成"M3 没有收益"，据此砍掉方案就是拿失明当结论。
+        # `path` 分档不是装饰：`AnthropicLoop` 在批里含 `computer` 时逐条转发
+        # `super().handle_tool_calls`，那些批拿不到成组执行——不分档会把这条
+        # 残留盲区算成"M3 没有收益"，据此砍掉方案就是拿失明当结论。
         self.tool_batch_shapes_total = Counter(
             "neurova_tool_batch_shapes_total",
             "Tool rounds by batch shape (single_call / multi_serial / multi_parallel)",

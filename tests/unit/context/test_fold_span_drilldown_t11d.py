@@ -296,7 +296,8 @@ class TestDrilldownToolWiring:
 
     def test_schema_has_dispatch_and_readonly_declarations(self):
         from neurova.builtin_tools import _BUILTIN_SCHEMAS
-        from neurova.agent.tool_coordinator import is_concurrency_safe
+        from neurova.agent.tool_coordinator import resolveToolCapability
+        from neurova.core.tool_capability import isParallelEligible
         from neurova.tool_executor import ToolExecutor
 
         name = "recall_context_span"
@@ -305,7 +306,9 @@ class TestDrilldownToolWiring:
         assert name in ToolExecutor._GOVERNANCE_FAILOPEN_READONLY_TOOLS, (
             "只读直取工具未进治理故障放行白名单"
         )
-        assert is_concurrency_safe(name), "只读直取工具未声明并行安全"
+        assert isParallelEligible(resolveToolCapability(name)), (
+            "只读直取工具未声明并行安全"
+        )
 
     def test_roster_and_reproducibility(self):
         from neurova.builtin_tools import is_builtin_tool_reproducible
