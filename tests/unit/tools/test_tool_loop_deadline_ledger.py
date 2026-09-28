@@ -127,33 +127,61 @@ class TestJudgeIsMachineComputed:
 class TestJudgeIsSymbolScopedNotFileScoped:
     """前置警告 1：判据必须落到符号级。
 
-    同一文件里既有死符号（`ToolExecutionPipeline`）也有活符号
-    （`notify_tool_result` / `get_pipeline_observers`）。若判据按文件一刀切，
-    砍掉「死文件」就会连带砍断熔断器的观测接线——故本组反向钉住两条活线。
+    `agent/tool_pipeline.py` 里曾同时有死符号与活符号。**T-09 死码处置批已把死符号
+    真删**，于是本组的前置事实从「同一文件里一死一活」变成「同一个退役动作之后，
+    活符号原样活着」——这正是前置警告 1 要守的东西，只是形态从**空间**（同文件）
+    移到了**时间**（同批退役）：判据若按文件一刀切，那次退役就会连带砍断熔断器的
+    观测接线。故本组保留两条活线的反向钉住，并把「死符号已真删」也钉住。
+
+    `DEAD_IN_FILE` 的判据类**必然**从 `no_consumer` 变成 `absent`——那不是口径放宽，
+    是按纪律做了退役（`tests/unit/tools/test_t09_pipeline_face_ruling.py` 另有
+    拥有者级判据与逐条论证）。故本组不再断言它停在 `no_consumer`。
     """
 
     DEAD_IN_FILE = "ToolExecutionPipeline"
     ALIVE_IN_FILE = ("notify_tool_result", "get_pipeline_observers")
 
-    def test_dead_and_alive_symbols_share_a_file(self):
+    def test_alive_symbols_share_the_file_with_the_retired_one(self):
+        """活符号仍在（与被退役符号**曾**同处的）那个文件里定义。
+
+        这是前置警告 1 的时效形态：退役之后，那个文件必须还在、活符号必须还在
+        ——若退役是按文件做的，这条会直接失败。
+        """
         facts = _facts()
-        paths = {
-            "dead": facts[self.DEAD_IN_FILE]["classify"]["def_files"],
-            "alive": [
-                path for symbol in self.ALIVE_IN_FILE
-                for path in facts[symbol]["classify"]["def_files"]
-            ],
-        }
-        assert set(paths["dead"]) == set(paths["alive"]), (
-            "前置事实变了：本组要钉的正是「同一文件内既有死符号也有活符号」，"
-            f"实测 dead={paths['dead']} alive={set(paths['alive'])}"
+        fileOfRetired = "neurova/agent/tool_pipeline.py"
+        assert facts[self.DEAD_IN_FILE]["origin"].startswith("agent/tool_pipeline.py"), (
+            f"{self.DEAD_IN_FILE} 的登记出处变了（实测 {facts[self.DEAD_IN_FILE]['origin']}）"
+        )
+        for symbol in self.ALIVE_IN_FILE:
+            paths = facts[symbol]["classify"]["def_files"]
+            assert fileOfRetired in paths, (
+                f"{symbol} 不再定义在 {fileOfRetired}——退役把活符号一起带走了"
+                f"（实测定义文件 {paths}）"
+            )
+
+    def test_dead_symbol_is_retired_not_tolerated(self):
+        """被点名的那条死符号必须**已从生产侧消失**，而不是停在原状。
+
+        与 `test_dead_symbol_was_not_consumed_by_relaxed_judgement` 成对：
+        这一条钉「它真的走了」，下一条钉「它不是靠放宽判据糊过去的」。
+        """
+        row = _facts()[self.DEAD_IN_FILE]
+        assert row["judge"] == ledger.JUDGE_ABSENT, (
+            f"{self.DEAD_IN_FILE} 判据类实测 {row['judge']}，未随 T-09 退场"
         )
 
-    def test_dead_symbol_is_not_consumed(self):
+    def test_dead_symbol_was_not_consumed_by_relaxed_judgement(self):
+        """它**不得**被判成 `consumed`——那才是判据口径被放宽的形态。
+
+        T-01 建判据时这一条断言的期望值是 `no_consumer`；T-09 退役后合法终局是
+        `absent`。两种都是「口径没被放宽」的诚实读数，`consumed` 不是——所以断言
+        从「必须等于 no_consumer」收窄为「必须属于 {no_consumer, absent}」，
+        把原来的判别力（拒收 consumed）完整保留下来。
+        """
         row = _facts()[self.DEAD_IN_FILE]
-        assert row["judge"] == ledger.JUDGE_NO_CONSUMER, (
-            f"{self.DEAD_IN_FILE} 的判据类变了（实测 {row['judge']}）："
-            "本片只建判据不做处置，若它被判成 consumed 说明判据口径被放宽"
+        assert row["judge"] in (ledger.JUDGE_NO_CONSUMER, ledger.JUDGE_ABSENT), (
+            f"{self.DEAD_IN_FILE} 被判成 {row['judge']}：它不是「有定义零消费」，"
+            "也没有被真删——而是被判据算成了可达，说明口径被放宽"
         )
 
     def test_alive_symbols_are_consumed(self):

@@ -19,6 +19,7 @@ P2 死代码"标注保留"而非真删
     待清理"，实际是把"还有调用方"的错觉留给后来者。已迁移测试引用后真删。
 """
 
+import io
 import os
 
 import pytest
@@ -353,30 +354,86 @@ class TestDeadCodeReallyRemoved:
     def test_live_observer_gateway_is_intact(self):
         """删的是死的那半，活的那半（result 观察者门面）必须还在。
 
-        生产消费方：`security/tool_circuit_breaker.py` 经它挂熔断观察者。
+        生产消费方：`security/tool_circuit_breaker.py` 经它挂熔断观察者、
+        `ToolExecutor.on_tool_executed` 经它发通知。
+
+        **口径迁移（T-09 死码处置批，Issue #174 / #310）**：本条原先点名六个符号
+        都「是活接线」——那是 **T-01 建判据之前**的目测口径。T-01 的机器取数
+        证明 `ToolExecutionPipeline` 生产侧**零引用**，T-09 据此裁定五段框架
+        （`ToolExecutionPipeline` / `PipelineConfig` / `PipelineGuardAdapter` /
+        `ToolExecutionStep` / `PipelineReject` / `ToolExecutionContext` 兼容子类）
+        整体退场。故「活接线」的名单收窄为**真有生产消费方**的四条；
+        原六个符号的逐条论证见 `scripts/ci/toolLoopDeadlines.txt` 与
+        `tests/unit/tools/test_t09_pipeline_face_ruling.py`。
         """
         import neurova.agent.tool_pipeline as tp
 
-        for symbol in ("ToolExecutionPipeline", "ToolExecutionContext",
-                       "ToolExecutionReport", "get_pipeline_observers",
-                       "notify_tool_result", "reset_pipeline_observers"):
+        for symbol in ("ToolExecutionReport", "get_pipeline_observers",
+                       "notify_tool_result", "PipelineObserversRegistry"):
             assert hasattr(tp, symbol), f"{symbol} 是活接线，不得误删"
 
-    def test_unread_pipeline_config_flags_deleted(self):
-        """6 个从未被读取的开关必须删——留着是"可以关掉某一步"的假能力。
+        # `ToolExecutionContext` 的消费方口径是 `tool_layers.types` 里那份
+        # （`agent/tool_execution_manager.py` 装配行取的是它）。它在本模块的
+        # **兼容子类**已随五段框架退场，故这里钉的是"本模块不再持有第二份
+        # 上下文类型"——工具层只允许一份，名字存在而指向别处就是第二份。
+        assert not hasattr(tp, "ToolExecutionContext"), (
+            "工具执行上下文只允许一份（tool_layers.types），本模块不得再持兼容子类"
+        )
+        from neurova.tool_layers import types as canonical
+        assert hasattr(canonical, "ToolExecutionContext"), (
+            "工具执行上下文的单一事实源必须仍在 tool_layers.types"
+        )
 
-        只有 `parallel_independent_steps` / `max_workers` 有真实消费方
-        （`_run_post_steps` 读它们）。
+    def test_live_observer_gateway_has_a_production_consumer(self):
+        """"活"的**判据本身**必须来自生产消费方，不能只看名字在不在。
+
+        上一条是"名字还在"（留住了名字，但名字也可能是空壳）；本条接上另一半：
+        名字后面真的还有人用。两条合起来才挡得住"接线改没了、空壳名字留着"——
+        而那正是本条诞生的原因：P2（a875f5d8）当初就是用"名字在 ⇒ 判活"的方式
+        把 `ToolExecutionPipeline` 留了下来的，复核只需
+        `grep -rn 'ToolExecutionPipeline' neurova/` 就会发现生产零命中。
+
+        本条把那次复核动作钉成常驻判据：result 面的两个入口各有一个真消费方——
+        写入侧 `ToolExecutor.on_tool_executed` 尾部、读取侧熔断器挂观察者。
+        反向自证：把任一侧的挂载点摘掉，对应断言立刻红。
         """
-        from neurova.agent.tool_pipeline import PipelineConfig
+        root = os.path.join(_REPO, "neurova")
+        consumers = {}
+        for base, _dirs, files in os.walk(root):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(base, name)
+                with io.open(path, encoding="utf-8") as handle:
+                    src = handle.read()
+                if "notify_tool_result" in src:
+                    consumers.setdefault("notify_tool_result", []).append(path)
+                if "add_result_observer" in src:
+                    consumers.setdefault("add_result_observer", []).append(path)
 
-        cfg = PipelineConfig()
-        assert hasattr(cfg, "parallel_independent_steps")
-        assert hasattr(cfg, "max_workers")
-        for dead in ("enable_memory_recording", "enable_lifecycle_update",
-                     "enable_skill_observation", "enable_evolution_feedback",
-                     "continue_on_error", "log_level"):
-            assert not hasattr(cfg, dead), f"{dead} 从未被读取，应删除"
+        writer = [p for p in consumers.get("notify_tool_result", [])
+                  if not p.endswith("tool_pipeline.py")]
+        reader = [p for p in consumers.get("add_result_observer", [])
+                  if not p.endswith("tool_pipeline.py")]
+        assert writer, "result 写入侧零生产消费方——观察者门面已成空转"
+        assert reader, "result 读取侧零生产消费方——观察者门面已成空转"
+
+    def test_pipeline_frame_is_gone_not_merely_deprecated(self):
+        """五段框架（含 `PipelineConfig` 的开关）必须**整段消失**，不是标注保留。
+
+        本条是原 `test_unread_pipeline_config_flags_deleted` 的等价强化：那条问
+        「6 个没被读的开关删了没」，收窄了讨论面（好像类本身该留）。T-09 的裁定是
+        **类本身也没有生产消费方**——四条注册入口（`add_pre_step` / `add_guard` /
+        `add_execute_wrapper` / `add_post_step`）全仓零调用。故判据升到「整段没了」。
+        """
+        import neurova.agent.tool_pipeline as tp
+
+        for symbol in ("PipelineConfig", "ToolExecutionPipeline",
+                       "PipelineGuardAdapter", "ToolExecutionStep", "PipelineReject"):
+            assert not hasattr(tp, symbol), (
+                f"{symbol} 是五段框架的一部分，四条注册入口生产侧零调用——"
+                f"应随 T-09 整段退场，而不是标注保留"
+            )
 
     def test_review_gate_docstring_no_longer_claims_dead_arm(self):
         """评审闸的覆盖面说明不得再提已删的 SkillPacker 臂（否则文档撒谎）。"""

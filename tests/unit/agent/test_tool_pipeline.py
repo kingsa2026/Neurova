@@ -1,39 +1,28 @@
-"""ToolExecutionPipeline 五段流水线契约测试。
+"""工具执行结果观察门面契约测试（T-09 处置后）。
 
-五段语义（与治理中心的关系见模块头注释）：
-pre → guard → execute(main) → post → result
+**本文件在 T-09 死码处置批（Issue #174 / #310）之后的覆盖范围**：
+只剩一件真事——把工具执行结果以**冻结快照**形态分发给注册的观察者。
 
-- pre：预处理步骤，可改写上下文或抛 PipelineReject 拒绝（拒绝→跳过 main，
-  post/result 仍执行以便观测）
-- guard：abstain 放行、deny 跳过 main）
-- execute：主执行体（由调用方经 middleware 包装传入；wrapper 可环绕/改写结果）
-- post：既有步骤段（记忆/生命周期/技能/进化），旧四步语义保留
-- result：观察者收到独立冻结的不可变快照，异常彼此隔离
+- `notify_tool_result(...)`：写入侧唯一接入点，被 `ToolExecutor.on_tool_executed` 尾部调用；
+- `get_pipeline_observers()`：读取侧门面，`security/tool_circuit_breaker.py` 经它挂观察者；
+- `ToolExecutionReport`：发给观察者的对外契约形状（`frozen()` 深拷贝快照）。
+
+**已退场的五段框架测试随能力一并退役**（不是被删掉当清理）：pre / guard / execute / post
+四段的注册入口生产侧全仓零调用，`ToolExecutionPipeline` 本身零引用——留着它们的测试
+会让人以为这条能力还有调用方。退役的逐条论证与反向控制见
+`tests/unit/tools/test_t09_pipeline_face_ruling.py`（常驻判据）。
 """
 
 import importlib
-import warnings
 import unittest
 from unittest.mock import Mock
-
-from neurova.security.monotonic_guard import GuardVerdict
-from neurova.tool_layers.types import ToolExecutionContext
-
-
-def _ctx(**overrides):
-    defaults = dict(
-        context_id="c1",
-        tool_name="test_tool",
-        params={"command": "ls"},
-        user_input="list files",
-    )
-    defaults.update(overrides)
-    return ToolExecutionContext(**defaults)
 
 
 class TestPipelineModule(unittest.TestCase):
     def test_import_no_longer_warn_deprecated(self):
         """模块不再是死代码：import 不产生 DeprecationWarning。"""
+        import warnings
+
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             importlib.reload(importlib.import_module("neurova.agent.tool_pipeline"))
@@ -45,283 +34,105 @@ class TestPipelineModule(unittest.TestCase):
         self.assertEqual(deprecated, [])
 
 
-class TestLegacyCompatibility(unittest.TestCase):
-    """旧 API（add_step + execute）语义保留：不下降。"""
+class TestObserverGateway(unittest.TestCase):
+    """通知门面：`ToolExecutor.on_tool_executed` 尾部挂载点（真面）。"""
 
-    def test_legacy_add_step_execute_runs_post_steps(self):
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
+    def setUp(self):
+        """每个用例前清空全局观察者。
 
-        pipeline = ToolExecutionPipeline()
-        step = Mock()
-        step.name = "lifecycle_update"  # dependent 类步骤（非并行段）
-        step.error_level = "warning"
-        pipeline.add_step(step)
-        report = pipeline.execute(_ctx())
-
-        self.assertTrue(step.execute.called)
-        self.assertFalse(report.errors)
-        self.assertEqual(report.tool_name, "test_tool")
-
-    def test_legacy_step_times_and_warnings(self):
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
-
-        pipeline = ToolExecutionPipeline()
-        ok = Mock()
-        ok.name = "step1"
-        ok.error_level = "warning"
-        bad = Mock()
-        bad.name = "step2"
-        bad.error_level = "warning"
-        bad.execute.side_effect = RuntimeError("x")
-        pipeline.add_step(ok)
-        pipeline.add_step(bad)
-        report = pipeline.execute(_ctx())
-        self.assertIn("step1", report.step_times)
-        self.assertIn("step2", report.step_times)
-        self.assertEqual(len(report.warnings), 1)  # 步骤失败 → warning 不炸传
-        self.assertIn("total_processing_time", report.to_dict())
-
-    def test_legacy_four_step_facade_is_deleted(self):
-        """P2（Issue #46）：零生产调用的旧四步门面**真删**，不是标注保留。
-
-        删除前的事实：`create_default_pipeline` 与四个旧 Step 类
-        （MemoryRecordingStep / LifecycleUpdateStep / SkillObservationStep /
-        EvolutionFeedbackStep）在 `neurova/` 内**无任何调用方**，只有本测试在
-        调它——保留只会让后来者以为"还有调用方"，并把 SkillPacker 时代的
-        无证据通道当成新增接线的模板。
-
-        生产链路的替代（唯一）：`creation_governance` 的 ContextVar 采集器
-        （begin_task / record_tool_execution / finish_task）——那条才有证据闸；
-        记忆/生命周期记录在 `ToolExecutor.on_tool_executed` 尾部承担。
+        `reset_pipeline_observers()` 已随五段框架退场（生产侧零调用），
+        故测试改走注册表自己的 `clear()` —— 它是**仍在役**的清理入口，
+        不再为测试专门保留一个生产零调用的重置函数。
         """
-        import neurova.agent.tool_pipeline as tp
+        from neurova.agent.tool_pipeline import get_pipeline_observers
 
-        for symbol in ("create_default_pipeline", "MemoryRecordingStep",
-                       "LifecycleUpdateStep", "SkillObservationStep",
-                       "EvolutionFeedbackStep"):
-            self.assertFalse(hasattr(tp, symbol), f"{symbol} 是死代码，应已删除")
+        self.observers = get_pipeline_observers()
+        self.observers.clear()
 
-    def test_empty_pipeline_is_noop(self):
-        """空流水线：无步骤、无守卫、无观察者 → 正常空报告（等价于未接入）。"""
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
+    def test_gateway_empty_is_noop(self):
+        """空注册表 = 零行为变化（未接入的默认形态）。"""
+        from neurova.agent.tool_pipeline import notify_tool_result
 
-        report = ToolExecutionPipeline().execute(_ctx())
-        self.assertFalse(report.errors)
-        self.assertFalse(report.is_fully_successful)
+        self.assertEqual(len(self.observers.list_result_observers()), 0)
+        notify_tool_result(tool_name="t", success=True, result={"content": "x"})
+        self.assertEqual(len(self.observers.list_result_observers()), 0)
 
-
-class TestFiveStageOrder(unittest.TestCase):
-    """五段顺序固定：pre → guard → execute → post → result。"""
-
-    def test_stage_order(self):
-        from neurova.agent.tool_pipeline import (
-            PipelineGuardAdapter,
-            ToolExecutionPipeline,
-        )
-
-        order = []
-        pipeline = ToolExecutionPipeline()
-
-        class PreStep:
-            name = "pre_custom"
-            error_level = "warning"
-
-            def execute(self, context, report):
-                order.append("pre")
-
-        pipeline.add_pre_step(PreStep())
-        pipeline.add_guard(PipelineGuardAdapter("g1", lambda *a: GuardVerdict.ABSTAIN))
-
-        def main(context):
-            order.append("main")
-            return {"content": "ok"}
-
-        pipeline.add_execute_wrapper(lambda context, next_fn: next_fn(context))
-
-        class PostStep:
-            name = "post_step"
-            error_level = "warning"
-
-            def execute(self, context, report):
-                order.append("post")
-
-        pipeline.add_post_step(PostStep())
-        pipeline.add_result_observer(lambda frozen: order.append("result"))
-
-        report = pipeline.resolve(_ctx(), main=main)
-        self.assertEqual(order[:4], ["pre", "main", "post", "result"])
-        self.assertEqual(report.result, {"content": "ok"})
-
-    def test_execute_delegates_to_resolve(self):
-        """execute() 是 resolve() 的兼容入口。"""
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
-
-        order = []
-        pipeline = ToolExecutionPipeline()
-
-        def main(context):
-            order.append("main")
-
-        report = pipeline.resolve(_ctx(), main=main)
-        self.assertEqual(order, ["main"])
-        self.assertFalse(report.rejected)
-
-
-class TestPreStage(unittest.TestCase):
-    def test_reject_short_circuits_main_but_runs_post_and_result(self):
-        from neurova.agent.tool_pipeline import PipelineReject, ToolExecutionPipeline
-
-        order = []
-        pipeline = ToolExecutionPipeline()
-
-        class PreStep:
-            name = "pre_reject"
-            error_level = "warning"
-
-            def execute(self, context, report):
-                order.append("pre")
-                raise PipelineReject("not allowed")
-
-        pipeline.add_pre_step(PreStep())
-        pipeline.add_result_observer(lambda frozen: order.append("result"))
-
-        def main(context):
-            order.append("main")
-
-        report = pipeline.resolve(_ctx(), main=main)
-        self.assertEqual(order, ["pre", "result"])
-        self.assertTrue(report.rejected)
-        self.assertIn("not allowed", "; ".join(report.errors))
-
-
-class TestGuardStage(unittest.TestCase):
-    def test_guard_deny_skips_main_runs_post_and_result(self):
-        from neurova.agent.tool_pipeline import PipelineGuardAdapter, ToolExecutionPipeline
-
-        order = []
-        pipeline = ToolExecutionPipeline()
-        pipeline.add_guard(PipelineGuardAdapter("deny_all", lambda *a: GuardVerdict.DENY))
-        pipeline.add_result_observer(lambda frozen: order.append("result"))
-
-        def main(context):
-            order.append("main")
-
-        report = pipeline.resolve(_ctx(), main=main)
-        self.assertNotIn("main", order)
-        self.assertIn("result", order)
-        self.assertTrue(report.rejected)
-        self.assertIn("deny_all", "; ".join(report.errors))
-
-    def test_guard_abstain_proceeds_to_main(self):
-        from neurova.agent.tool_pipeline import PipelineGuardAdapter, ToolExecutionPipeline
-
-        order = []
-        pipeline = ToolExecutionPipeline()
-        pipeline.add_guard(PipelineGuardAdapter("watch", lambda *a: GuardVerdict.ABSTAIN))
-
-        def main(context):
-            order.append("main")
-
-        pipeline.resolve(_ctx(), main=main)
-        self.assertEqual(order, ["main"])
-
-    def test_guard_exception_is_fail_closed(self):
-        from neurova.agent.tool_pipeline import PipelineGuardAdapter, ToolExecutionPipeline
-
-        def bad_guard(tool_name, params, user_id=None):
-            raise RuntimeError("boom")
-
-        pipeline = ToolExecutionPipeline()
-        pipeline.add_guard(PipelineGuardAdapter("exploder", bad_guard))
-        report = pipeline.resolve(_ctx(), main=lambda c: {"content": "x"})
-        self.assertTrue(report.rejected)
-        self.assertIn("exploder", "; ".join(report.errors))
-
-
-class TestExecuteStage(unittest.TestCase):
-    def test_wrapper_is_middleware_can_rewrite_result(self):
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
-
-        def wrapper(context, next_fn):
-            result = next_fn(context)  # 真实主执行
-            result["content"] = result["content"] + "!"  # 环绕改写
-            return result
-
-        pipeline = ToolExecutionPipeline()
-        pipeline.add_execute_wrapper(wrapper)
-        report = pipeline.resolve(_ctx(), main=lambda c: {"content": "ok"})
-        self.assertEqual(report.result, {"content": "ok!"})
-
-
-class TestResultStage(unittest.TestCase):
-    def test_observer_receives_independent_frozen_snapshot(self):
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
-
-        seen = []
-        pipeline = ToolExecutionPipeline()
-        pipeline.add_result_observer(lambda frozen: seen.append(frozen))
-        report = pipeline.resolve(_ctx(), main=lambda c: {"content": "ok", "deep": {"x": 1}})
-
-        snapshot = seen[0]
-        self.assertEqual(snapshot.tool_name, "test_tool")
-        self.assertTrue(snapshot.success is True or snapshot.success is False)
-        # 快照与最终报告互不污染（深拷贝）
-        snapshot_dict = snapshot.to_dict()
-        snapshot_dict["result"]["content"] = "mutated"
-        self.assertEqual(report.to_dict()["result"]["content"], "ok")
-
-    def test_observer_failure_is_isolated(self):
-        from neurova.agent.tool_pipeline import ToolExecutionPipeline
+    def test_gateway_singles_observers_and_clear_removes_them(self):
+        from neurova.agent.tool_pipeline import notify_tool_result
 
         got = []
-        pipeline = ToolExecutionPipeline()
+        self.observers.add_result_observer(got.append)
+        notify_tool_result(tool_name="t", success=True, result={"content": "x"})
+        self.assertEqual(got[0].tool_name, "t")
+        self.assertTrue(got[0].success)
 
-        def bad(frozen):
+        self.observers.clear()
+        notify_tool_result(tool_name="t", success=False)
+        self.assertEqual(len(got), 1)  # clear 后不再触发
+
+    def test_observer_receives_independent_frozen_snapshot(self):
+        """观察者拿到的是**深拷贝快照**：改动它不污染源报告。"""
+        from neurova.agent.tool_pipeline import notify_tool_result
+
+        seen = []
+        self.observers.add_result_observer(seen.append)
+        notify_tool_result(
+            tool_name="t", success=True,
+            result={"content": "ok", "deep": {"x": 1}},
+        )
+        snapshot = seen[0]
+        self.assertEqual(snapshot.tool_name, "t")
+        snapshot_dict = snapshot.to_dict()
+        snapshot_dict["result"]["deep"]["x"] = 999
+        self.assertEqual(seen[0].to_dict()["result"]["deep"]["x"], 1)
+
+    def test_observer_failure_is_isolated(self):
+        """单个观察者抛异常不得影响后序观察者（故障隔离）。"""
+        from neurova.agent.tool_pipeline import notify_tool_result
+
+        got = []
+
+        def bad(_frozen):
             raise RuntimeError("observer down")
 
-        pipeline.add_result_observer(bad)
-        pipeline.add_result_observer(lambda frozen: got.append(frozen))
-        report = pipeline.resolve(_ctx(), main=lambda c: {"content": "ok"})
-        self.assertEqual(len(got), 1)  # 后序观察者仍执行
-        self.assertEqual(len(report.warnings), 1)  # 异常被记录未炸传
+        self.observers.add_result_observer(bad)
+        self.observers.add_result_observer(got.append)
+        notify_tool_result(tool_name="t", success=True, result={"content": "ok"})
+        self.assertEqual(len(got), 1)
+
+    def test_disposer_removes_only_its_own_observer(self):
+        """`add_result_observer` 返回的 disposer 只摘自己那一个。"""
+        got_a, got_b = [], []
+        dispose_a = self.observers.add_result_observer(got_a.append)
+        self.observers.add_result_observer(got_b.append)
+        dispose_a()
+
+        from neurova.agent.tool_pipeline import notify_tool_result
+
+        notify_tool_result(tool_name="t", success=True)
+        self.assertEqual(got_a, [])
+        self.assertEqual(len(got_b), 1)
 
 
-class TestObserverGateway(unittest.TestCase):
-    """通知门面：ToolExecutor.on_tool_executed 尾部挂载点。"""
+class TestFiveStageFrameIsGone(unittest.TestCase):
+    """五段框架与重置出口**真删**——不留「标注保留」的折中。"""
 
-    def test_gateway_empty_noop(self):
-        from neurova.agent.tool_pipeline import (
-            get_pipeline_observers,
-            notify_tool_result,
-            reset_pipeline_observers,
-        )
+    def test_frame_symbols_are_gone(self):
+        """逐名断言模块属性不存在：删的是实现，不是把它标成 deprecated。"""
+        import neurova.agent.tool_pipeline as tp
 
-        reset_pipeline_observers()
-        try:
-            self.assertEqual(len(get_pipeline_observers().list_result_observers()), 0)
-            notify_tool_result(tool_name="t", success=True, result={"content": "x"})
-        finally:
-            reset_pipeline_observers()
+        for symbol in ("ToolExecutionPipeline", "PipelineConfig",
+                       "PipelineGuardAdapter", "ToolExecutionStep",
+                       "PipelineReject", "reset_pipeline_observers"):
+            self.assertFalse(hasattr(tp, symbol), f"{symbol} 已随 T-09 处置退场")
 
-    def test_gateway_singles_observers_and_resets(self):
-        from neurova.agent.tool_pipeline import (
-            get_pipeline_observers,
-            notify_tool_result,
-            reset_pipeline_observers,
-        )
+    def test_result_face_survives(self):
+        """真面必须仍在——退役不得连带砍断结果分发。"""
+        import neurova.agent.tool_pipeline as tp
 
-        reset_pipeline_observers()
-        try:
-            got = []
-            get_pipeline_observers().add_result_observer(got.append)
-            notify_tool_result(tool_name="t", success=True, result={"content": "x"})
-            self.assertEqual(got[0].tool_name, "t")
-            self.assertTrue(got[0].success)
-            reset_pipeline_observers()
-            notify_tool_result(tool_name="t", success=False)
-            self.assertEqual(len(got), 1)  # reset 后不再触发
-        finally:
-            reset_pipeline_observers()
+        for symbol in ("notify_tool_result", "get_pipeline_observers",
+                       "ToolExecutionReport", "PipelineObserversRegistry"):
+            self.assertTrue(hasattr(tp, symbol), f"真面 {symbol} 被连带删除")
 
 
 class TestToolExecutorIntegration(unittest.TestCase):
@@ -335,12 +146,9 @@ class TestToolExecutorIntegration(unittest.TestCase):
         return executor
 
     def test_on_tool_executed_notifies_registered_observer(self):
-        from neurova.agent.tool_pipeline import (
-            get_pipeline_observers,
-            reset_pipeline_observers,
-        )
+        from neurova.agent.tool_pipeline import get_pipeline_observers
 
-        reset_pipeline_observers()
+        get_pipeline_observers().clear()
         try:
             got = []
             get_pipeline_observers().add_result_observer(got.append)
@@ -357,12 +165,12 @@ class TestToolExecutorIntegration(unittest.TestCase):
             self.assertEqual(got[0].tool_name, "browser_navigate")
             self.assertTrue(got[0].success)
         finally:
-            reset_pipeline_observers()
+            get_pipeline_observers().clear()
 
     def test_on_tool_executed_without_observers_is_unchanged(self):
-        from neurova.agent.tool_pipeline import reset_pipeline_observers
+        from neurova.agent.tool_pipeline import get_pipeline_observers
 
-        reset_pipeline_observers()
+        get_pipeline_observers().clear()
         try:
             self._minimal_executor().on_tool_executed(
                 tool_name="memory_search",
@@ -374,7 +182,7 @@ class TestToolExecutorIntegration(unittest.TestCase):
                 result=None,
             )  # 无观察者：no-op，不抛异常
         finally:
-            reset_pipeline_observers()
+            get_pipeline_observers().clear()
 
 
 class TestPolicyDenialStats(unittest.TestCase):
