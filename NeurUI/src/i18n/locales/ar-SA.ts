@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "دين غير مسدد",
+    debtNone: "لا دين",
+    debtUnknownRows: "أسطر قديمة بلا تسعير",
+    debtGateAllow: "البوابة العكسية تسمح",
+    debtGateBlock: "البوابة العكسية تحجب",
+    debtWriteFailure: "فشل كتابة السجل",
+    paramActivityLabel: "نشاط المعاملات",
+    paramActivityMoving: "متحرك",
+    paramActivitySparse: "متناثر",
+    paramActivityNeverProposed: "لم يُقترح قط",
+    paramActivityNoData: "لا بيانات (لا يمكن الحكم)",
   },
 
   settings: {

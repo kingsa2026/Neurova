@@ -1298,3 +1298,13 @@ tests/unit/ci/test_npc_turn_output_budget_discipline.py
 #   对账 + 反向控制四条（缺陷形态必须报出；等真事件、真定时、同循环内推进、
 #   不声称"等到了"的定次让出四条合法形态必须不报）。
 tests/unit/ci/test_count_bounded_wait_ledger.py
+# Issue #289 · 003/004（RSI 回执负债口径与反向闸 / 参数身份守卫与参数活性读数）：
+#   003：回执行补 cost/repayment 两列（代价口径引用 002 的输出字段，不另立定义）、
+#     存量行「字段缺失 ≠ 值为 0」两态分辨、欠账未清则拒下一次寻优、丢行走安全侧
+#     （账记不下就不敢动）、回滚处置债务不得制造无主欠账、原因值映射回 002 命名体系；
+#   004：参数表身份 = **物理落点唯一**（别名 property 穿透到真实属性）、
+#     经济性参数入表前置条件（无 003 记账则不入表）、宿主缺席沿用 _is_placeholder 口径、
+#     参数活性三态（moving / sparse / never_proposed / no_data）不折叠、
+#     纪元归零不得连带清掉 003 的欠账、入表参数在治理面可见。
+tests/unit/evolution/test_rsi_debt_ledger.py
+tests/unit/evolution/test_rsi_parameter_identity_and_epoch.py

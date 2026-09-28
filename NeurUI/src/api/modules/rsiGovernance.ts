@@ -44,6 +44,31 @@ export interface RsiStatus {
   rollback_history: unknown[]
   escalation?: { verdict?: RsiVerdict; proposals?: string[]; skipped?: { system: string; reason: string }[] }
   metrics?: Record<string, unknown>
+  /** 回执负债读数（Issue #289 · 003）：账本新增两列必须在界面可见。 */
+  debt?: RsiDebtReadout
+  /** 参数活性读数（Issue #289 · 004 M3）：三态不折叠。 */
+  parameter_activity?: RsiParameterActivity
+}
+
+/** 负债读数（`available: false` = 账本未开，**不是**"没有欠账"）。 */
+export interface RsiDebtReadout {
+  available: boolean
+  reason?: string
+  outstanding?: number
+  priced_rows?: number
+  unknown_rows?: number
+  settled_rows?: number
+  last_write_failure?: string | null
+  next_step?: { allow: boolean; reason: string; outstanding: number }
+}
+
+/** 参数活性读数：`no_data` / `sparse` / `never_proposed` 三态各成一值。 */
+export interface RsiParameterActivity {
+  states: Record<string, string>
+  movements: Record<string, number>
+  vocabulary: string[]
+  overall: string
+  reason?: string | null
 }
 
 export interface RsiApproveEvidence {

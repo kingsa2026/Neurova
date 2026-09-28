@@ -50,9 +50,30 @@ class RSIIntegrationManager:
             {"name": "decay_rate", "description": "衰减率"},
             {"name": "muscle_memory_threshold", "description": "肌肉记忆阈值"},
         ],
+        # 上下文经济性参数（Issue #289 · 004 M2）。此前"预算 / 淘汰次序 /
+        # 压缩比 / 保留窗口"一个都不在表里 —— 上下文链的自动决策参数
+        # 对棘轮完全不可见。
+        #
+        # 入表前置条件（004 票面 M2）：该参数必须已有 003 的负债/代价记账。
+        # 无账本的参数进表，就是工单 018 `_is_placeholder` 修过的
+        # "棘轮奖励自己编辑空对象"的第二形态。前置条件在
+        # `parameter_identity.admits_into_table` 里逐条咬合。
+        "context": [
+            {"name": "max_total", "description": "上下文总 token 预算"},
+            {"name": "memories", "description": "记忆档保留窗口"},
+            {"name": "conversation_history", "description": "对话历史保留窗口"},
+            {"name": "experience_knowledge", "description": "经验知识保留窗口"},
+        ],
     }
 
-    def __init__(self, sleep_system: Any, emotion_system: Any, experience_system: Any, tool_memory_system: Any):
+    def __init__(
+        self,
+        sleep_system: Any,
+        emotion_system: Any,
+        experience_system: Any,
+        tool_memory_system: Any,
+        context_system: Any = None,
+    ):
         """
         初始化 RSI 集成管理器
 
@@ -67,13 +88,20 @@ class RSIIntegrationManager:
         self.experience_system = experience_system
         self.tool_memory_system = tool_memory_system
 
-        # 系统名称到系统对象的映射
+        # 四大**闭环系统**：参与反馈信号、性能估算与缺席判定。这个集合的语义是
+        # "RSI 盯着的四个闭环"，不因新增参数载体而扩张。
         self._systems = {
             "sleep": sleep_system,
             "emotion": emotion_system,
             "experience": experience_system,
             "tool_memory": tool_memory_system,
         }
+
+        # 参数**宿主**：`OPTIMIZABLE_PARAMETERS` 里每一族的落点对象。四闭环在此
+        # 原样复用；`context` 是纯参数载体（不是闭环系统，不产反馈信号，
+        # 也不参与缺席名单），故只在这一份映射里出现。
+        # 单一事实源：`get_optimizable_parameters` / `apply_optimization` 都读它。
+        self._hosts: Dict[str, Any] = {**self._systems, "context": context_system}
 
         logger.info("RSIIntegrationManager initialized")
 
@@ -90,10 +118,16 @@ class RSIIntegrationManager:
             Dict[str, List[ParameterInfo]]: 各系统的可优化参数列表
         """
         result = {}
+        admissions = self._admission_verdicts()
 
         for system_name, params_def in self.OPTIMIZABLE_PARAMETERS.items():
-            system = self._systems[system_name]
+            system = self._hosts.get(system_name)
             if self._is_placeholder(system):
+                result[system_name] = []
+                continue
+            if not admissions.get(system_name, True):
+                # 入表前置条件未满足（该族参数尚无负债/代价记账）⇒ 在**源头**
+                # 返回空列表，不在 apply 端补判空（教义第 1 条）。
                 result[system_name] = []
                 continue
             params = []
@@ -116,6 +150,28 @@ class RSIIntegrationManager:
         return result
 
     @staticmethod
+    def _admission_verdicts() -> Dict[str, bool]:
+        """各族参数的**入表前置条件**结论（004 M2 的咬合点）。
+
+        上下文经济性族要求 003 的负债/代价记账已落地：无账本的参数进表，
+        就是工单 018 修过的"棘轮奖励自己编辑空对象"的第二形态。
+        其余族在 003 之前就在表里，不设新前置（不追溯改变既有行为）。
+        """
+        try:
+            from neurova.evolution.rsi.parameter_identity import (
+                admits_into_table,
+                debt_accounting_present,
+            )
+        except Exception as e:  # noqa: BLE001 - 判据面不可用 ⇒ 保守不出表
+            logger.warning("入表前置条件不可判定，上下文经济性族按不出表处置: %s", e)
+            return {"context": False}
+        if not debt_accounting_present():
+            return {"context": False}
+        return {
+            "context": admits_into_table(cost_field="cost", repayment_field="repayment"),
+        }
+
+    @staticmethod
     def _is_placeholder(system: Any) -> bool:
         """是否为"闭环系统缺席"的占位替身。
 
@@ -125,6 +181,11 @@ class RSIIntegrationManager:
         也不用 `get_status() == "null_fallback"` 字符串嗅探：那会把契约
         绑在一个本就没有接口保证的返回值上。
         """
+        if system is None:
+            # `context` 主机在装配点缺席时以 `None` 顶位（它的预算对象由
+            # `TokenBudget()` 默认构造，不在四系统装配里）—— 缺席即不供参数面，
+            # 这与 `rsi_placeholder` 是同一语义的两个入口。
+            return True
         return getattr(system, "rsi_placeholder", False) is True
 
     def collect_feedback_signals(self) -> Dict[str, Any]:
@@ -229,6 +290,17 @@ class RSIIntegrationManager:
         ("tool_memory", "decay_rate"): (0.0, 1.0),
         # 肌肉记忆阈值是置信度基准，语义域 (0,1]（eval_harness tm_threshold_band）
         ("tool_memory", "muscle_memory_threshold"): (0.0, 1.0),
+        # 上下文经济性族：token 计数的语义域 (0, 模型窗口] 且必须为正 ——
+        # 预算为 0 等于本链完全失能（`over_budget` 恒真、装配结果恒定被压空）。
+        # 上界取 `TokenBudget.max_total` 的默认构造 ×4（现网 16000），
+        # 各档保留窗口同域。
+        # 各档保留窗口：下界取 1（该档必须真的保留一点，0 等于该档失能，
+        # 而"某档完全不预留"是 `enable_compression` 的语义，不是预算参数的事）；
+        # 上界取 `TokenBudget` 各档默认值的 2 倍 —— 档和不得溢出总预算。
+        ("context", "max_total"): (1000.0, 64000.0),
+        ("context", "memories"): (1.0, 8000.0),
+        ("context", "conversation_history"): (1.0, 12000.0),
+        ("context", "experience_knowledge"): (1.0, 3000.0),
     }
     _PARAM_BOUND_DEFAULT = (0.0, 100.0)
 
@@ -236,13 +308,25 @@ class RSIIntegrationManager:
     def _parameter_bounds(cls, system_name: str, param_name: str) -> tuple:
         return cls.PARAMETER_BOUNDS.get((system_name, param_name), cls._PARAM_BOUND_DEFAULT)
 
-    def apply_optimization(self, parameter_path: str, new_value: Any) -> bool:
+    def apply_optimization(
+        self,
+        parameter_path: str,
+        new_value: Any,
+        *,
+        debt_ledger: Any = None,
+        cost: int = 0,
+        repayment: int = 0,
+    ) -> bool:
         """
         应用优化到指定参数
 
         Args:
             parameter_path: 参数路径，格式为 "system.parameter_name"
             new_value: 新的参数值
+            debt_ledger: 负债账本（Issue #289 · 003）。传入时回执行带 `cost` /
+                `repayment` 两列；未传入时维持四字段遗产形态。
+            cost: 本次动作的代价（口径引用 002 的输出字段）。
+            repayment: 后续动作已累计偿还量。
 
         Returns:
             bool: 是否成功应用
@@ -256,13 +340,13 @@ class RSIIntegrationManager:
 
             system_name, param_name = parts
 
-            # 检查系统是否存在
-            if system_name not in self._systems:
+            # 检查系统是否存在（按**宿主**判，含纯参数载体的 context 族）
+            if system_name not in self._hosts:
                 logger.warning("Unknown system: %s", system_name)
                 return False
 
             # 工单 018 第二道防线：占位替身不接受写入，更不得回执成功
-            if self._is_placeholder(self._systems[system_name]):
+            if self._is_placeholder(self._hosts[system_name]):
                 logger.warning(
                     "拒绝优化缺席的闭环系统 %s（参数 %s）：占位系统不供参数面",
                     system_name, parameter_path,
@@ -278,7 +362,7 @@ class RSIIntegrationManager:
                 return False
 
             # 应用优化
-            system = self._systems[system_name]
+            system = self._hosts[system_name]
             if hasattr(system, param_name):
                 old_value = getattr(system, param_name)
                 # 审计 P1-F7：数值参数夹紧——RSI 棘轮调整（10%/次）若无界可
@@ -289,7 +373,18 @@ class RSIIntegrationManager:
                 setattr(system, param_name, new_value)
                 logger.info("Applied optimization: %s = %s", parameter_path, new_value)
                 # C12 回执（工具面审计）：优化前后快照落 JSONL，可审计可回溯
-                self._write_optimization_receipt(parameter_path, old_value, new_value)
+                written = self._write_optimization_receipt(
+                    parameter_path, old_value, new_value,
+                    debt_ledger=debt_ledger, cost=cost, repayment=repayment,
+                )
+                if debt_ledger is not None and not written:
+                    # 丢行语义（003 M1）：回执没落盘 ⇒ 本笔动作不得回执成功，
+                    # 否则反向闸可以靠"把账写丢"绕过（安全侧优先）。
+                    self._logger.warning(
+                        "回执未落盘，撤销本次优化并拒回执成功: %s", parameter_path,
+                    )
+                    setattr(system, param_name, old_value)
+                    return False
                 return True
             else:
                 logger.warning("System %s does not have parameter %s", system_name, param_name)
@@ -299,9 +394,26 @@ class RSIIntegrationManager:
             logger.error("Failed to apply optimization: %s", e)
             return False
 
-    def _write_optimization_receipt(self, parameter_path: str, old_value: Any, new_value: Any) -> None:
-        """C12：优化回执落盘（JSONL 追加；env NEUROVA_RSI_RECEIPTS 覆盖路径，
-        默认 data/evolution/rsi_receipts.jsonl）。写失败仅告警不影响主流程。"""
+    def _write_optimization_receipt(
+        self,
+        parameter_path: str,
+        old_value: Any,
+        new_value: Any,
+        *,
+        debt_ledger: Any = None,
+        cost: int = 0,
+        repayment: int = 0,
+    ) -> bool:
+        """C12：优化回执落盘（JSONL 追加；env NEUROVA_RSI_RECEIPTS 覆盖路径）。
+
+        负债语义（Issue #289 · 003）：传入 `debt_ledger` 时，行形态改由负债账本
+        负责（带 `cost` / `repayment` 两列）—— 代价口径引用 002 的输出字段，
+        本处不另立一份定义。不传时维持遗产形态（四字段），供既有调用点零变更。
+
+        Returns:
+            bool: 是否真落盘。`False` 表示本行没写进去 —— 反向闸据此走安全侧
+            （票面前置：把闸建在允许丢行的账本上等于闸可以靠丢行绕过）。
+        """
         import json as _json
         import os as _os
         import time as _time
@@ -311,7 +423,17 @@ class RSIIntegrationManager:
             env_path = _os.environ.get("NEUROVA_RSI_RECEIPTS")
             if not env_path:
                 # 单例零 IO 教义：未显式配置路径（生产由 start_server 注入）不落盘
-                return
+                return True
+            if debt_ledger is not None:
+                return bool(
+                    debt_ledger.record(
+                        parameter_path=parameter_path,
+                        old_value=old_value,
+                        new_value=new_value,
+                        cost=cost,
+                        repayment=repayment,
+                    )
+                )
             path = _Path(env_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             receipt = {
@@ -322,8 +444,10 @@ class RSIIntegrationManager:
             }
             with open(path, "a", encoding="utf-8") as f:
                 f.write(_json.dumps(receipt, ensure_ascii=False) + chr(10))
+            return True
         except Exception as e:
             self._logger.warning("优化回执写入失败: %s", e)
+            return False
 
     def get_system_status(self) -> Dict[str, Any]:
         """
@@ -351,7 +475,11 @@ class RSIIntegrationManager:
 
 
 def create_rsi_integration_manager(
-    sleep_system: Any, emotion_system: Any, experience_system: Any, tool_memory_system: Any
+    sleep_system: Any,
+    emotion_system: Any,
+    experience_system: Any,
+    tool_memory_system: Any,
+    context_system: Any = None,
 ) -> RSIIntegrationManager:
     """
     创建 RSI 集成管理器实例
@@ -370,4 +498,5 @@ def create_rsi_integration_manager(
         emotion_system=emotion_system,
         experience_system=experience_system,
         tool_memory_system=tool_memory_system,
+        context_system=context_system,
     )

@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "미상환 부채",
+    debtNone: "부채 없음",
+    debtUnknownRows: "가격 미정 레거시 행",
+    debtGateAllow: "역방향 게이트 허용",
+    debtGateBlock: "역방향 게이트 차단",
+    debtWriteFailure: "원장 기록 실패",
+    paramActivityLabel: "파라미터 활성도",
+    paramActivityMoving: "동작 중",
+    paramActivitySparse: "희소",
+    paramActivityNeverProposed: "제안된 적 없음",
+    paramActivityNoData: "데이터 없음(판단 불가)",
   },
 
   settings: {

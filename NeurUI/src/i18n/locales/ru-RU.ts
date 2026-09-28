@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "Непогашенный долг",
+    debtNone: "Долга нет",
+    debtUnknownRows: "Устаревшие строки без цены",
+    debtGateAllow: "Обратный шлюз разрешает",
+    debtGateBlock: "Обратный шлюз блокирует",
+    debtWriteFailure: "Ошибка записи журнала",
+    paramActivityLabel: "Активность параметров",
+    paramActivityMoving: "В движении",
+    paramActivitySparse: "Разреженный",
+    paramActivityNeverProposed: "Ни разу не предложен",
+    paramActivityNoData: "Нет данных (судить нельзя)",
   },
 
   settings: {
