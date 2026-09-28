@@ -282,6 +282,27 @@ class TestSwitchOnChangesDecisionHonestly:
         assert readout["deferred_reason"] == CompressionAction.INSUFFICIENT_DATA.value
         assert result.compression_ratio < 1.0, "默认关时既有压缩路径必须仍然生效"
 
+    def testSwitchOnRefusesToArmWhenRulerFallsBack(self, monkeypatch):
+        """尺子掉档（无 tokenizer）时闸不得生效 —— 且是**接线**层面的拒绝，不只是纯函数。
+
+        这是"不得在坏尺上建闸"的可核形态：探针报出未校准，注入器的判定链
+        必须据此拒绝，而不是绕过探针自己判断。
+        """
+        from neurova.context import token_estimator
+
+        monkeypatch.setattr(token_estimator, "isRulerCalibrated", lambda: False, raising=True)
+        injector = _make_injector(compression_economics=True, window_ceiling=50000)
+        injector._lastCompressionRatio = 0.25  # 即便前情"看起来很划算"，坏尺也不许开工
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert readout["action"] == CompressionAction.RULER_UNCALIBRATED.value, readout
+        assert result.compression_ratio == 1.0, "坏尺上的闸必须不动作"
+
     def testSwitchOnFoldsWhenPriorRoundProvesItPays(self):
         """开关开 + 上一轮实测证明折叠真的省下 ⇒ 判据放行（不是恒不放行的死闸）。"""
         injector = _make_injector(compression_economics=True, window_ceiling=50000)
