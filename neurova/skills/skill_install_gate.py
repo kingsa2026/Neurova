@@ -87,29 +87,20 @@ def validate_permissions_for_install(permissions_raw: Any) -> Dict[str, Any]:
             "network", "file", "system", "model", "node"
         )
         try:
-            from neurova.builtin_tools import get_builtin_tool_params
+            # 注册面**单源读侧**：`get_registered_tool_names()` 的 docstring 明写
+            # 它「是内置工具注册名清单的单源读侧」，且「不得各自持有一份名字表
+            # ——第二份表就是幻名的温床（教义第 6 条）」。
+            #
+            # 此处曾是一份 41 项**手写探针清单**，注释自陈的理由是"注册表无直接
+            # 列表 API"——该理由不成立（上面那个函数就是）。实测它漏掉 30/71 个
+            # 真内置工具，后果是**安装门误拒**：技能白名单里写 `deep_research` /
+            # `write_stdin` / `query_database` / `orchestrate_tools` / `git` 等
+            # 完全合法的工具名，会被判「含未知工具」而拒绝安装。
+            # 判据：tests/unit/skills/test_install_gate_known_tools.py 逐名复算
+            # 「注册面每一个工具，安装门都必须认它合法」。
+            from neurova.builtin_tools import get_registered_tool_names
 
-            # 注册表探针：知名工具逐个验证（注册表无直接列表 API）
-            builtin_known = {
-                name
-                for name in (
-                    "recall_history", "memory_search", "file_read", "file_write",
-                    "file_create", "file_delete", "file_edit", "file_list",
-                    "file_search", "computer_screenshot", "computer_click",
-                    "computer_type", "computer_scroll", "computer_shell",
-                    "browser_navigate", "browser_click", "browser_type",
-                    "browser_screenshot", "browser_extract_text", "browser_dom_snapshot",
-                    "browser_dom_read", "browser_click_role", "browser_fill_role",
-                    "youtube_transcript",
-                    "browser_read", "bilibili_search", "rss_read", "social_search",
-                    "planning", "emotion_analyze", "asr_transcribe", "tts_synthesize",
-                    "voice_memory_search", "weather", "web_search", "spawn_subagent",
-                    "subagent_status", "list_agents", "create_skill", "web_fetch",
-                    "run_code",
-                )
-                if get_builtin_tool_params(name) is not None
-            }
-            known |= builtin_known
+            known |= set(get_registered_tool_names())
         except Exception:
             pass
 
