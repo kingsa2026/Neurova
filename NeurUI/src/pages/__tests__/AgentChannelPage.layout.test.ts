@@ -8,7 +8,12 @@ import { createPinia, setActivePinia } from 'pinia'
  * 钉：已激活进大卡面板、未激活进紧凑小卡面板、负一屏出现在未激活面板。
  */
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { agentId: 'default' } }) }))
+vi.mock('vue-router', () => ({
+  // 身份以路由为唯一事实源后，页面同时消费 useRoute / useRouter；
+  // 本用例钉的是面板布局，路由替身只需满足形状（推送行为另有专档判据）。
+  useRoute: () => ({ params: { agentId: 'default' } }),
+  useRouter: () => ({ push: vi.fn() }),
+}))
 vi.mock('@/stores/agents', () => ({
   useAgentStore: () => ({ agentOptions: [], loadAgents: vi.fn() }),
 }))

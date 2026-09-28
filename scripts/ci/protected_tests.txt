@@ -1165,6 +1165,12 @@ tests/unit/api/test_channel_config_landing_anchor.py
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
 #   存量收养、不覆盖、无旧物时不得凭空造文件。
 tests/unit/memory_ingest/test_seed_db_landing_relocation.py
+#   同一处的补充判据（Issue #290 未闭环项④）：种子库是**一对文件** —— 主库旁边
+#   还有同目录的持久库，而真行写进的是后者。只搬主库等于搬个空壳（新锚点有文件、
+#   读到 0 行，"旧物已搬走"的断言却全绿）。判据：整对搬且经真 MemoryManager 能读到
+#   旧记忆（用户可见的结果，不是文件数）、不覆盖且两侧都在点名、无旧物不凭空造物、
+#   配对推导与写入端逐字一致（单一事实源）。
+tests/unit/memory_ingest/test_seed_db_landing_companion.py
 
 # Issue #271 M5 尾巴（第五命中点）：安装门的「已知工具全集」此前是一份 41 项
 #   手写探针清单，注释自陈理由（"注册表无直接列表 API"）不成立——
@@ -1181,7 +1187,6 @@ tests/unit/skills/test_install_gate_known_tools.py
 #   服务端赋值，故防线只在其中一条路径上成立。判据：成员单源 + 解析单源 +
 #   咽喉不得自带成员比较（AST）+ 真执行体落盘 + 防伪根回落。
 tests/unit/skills/test_sandbox_root_single_source.py
-
 # Issue #271 M5 尾巴（桌面档轴与补拍面，同根因两命中点）：名单成员资格此前是
 #   手写快照，与声明面之间无对账机制。本批把成员下沉到各工具 schema 的声明位，
 #   并把两处已证实的漂移一并根修（`computer_click_mark` 一直被接在刷新链上却漏登）。
