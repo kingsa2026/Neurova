@@ -36,6 +36,13 @@ DEFAULTS: Dict[str, Any] = {
     # 成本边界由**目标是否存在**守住（无目标 → 零判定调用，见 D-4），
     # 本开关只作运营侧的成本闸，且已登记进 toolLoopDeadlines 台账（不留只写不读的配置）。
     "goal_verification_enabled": True,
+    # 子代理派生深度上限（护栏）：蜂群**嵌套派生**的层数上限。
+    # 这是**独立配置键**，不与 max_loop_rounds / MAX_ACTIVE_CHILDREN 共享尺度来源：
+    # 广度（同时运行中的子 Agent 数）由 SwarmManager.MAX_ACTIVE_CHILDREN 守，
+    # 深度（一条派生链能嵌几层）由本键守。两者此前只有广度一处声明，深度只是
+    # "全局广度帽跑满之前先撞上"的偶发现象——同一天花板会随兄弟数量读出不同层数
+    # （Issue #268 切片 D：深度必须是契约，不是广度的副作用）。
+    "max_subagent_depth": 2,
     # 单批工具调用并行上限（护栏）：一轮里资格项成组并发时的组内上限。
     # 4 已能在典型"读 3~4 个文件"场景吃满收益；更高只会加剧连接池/共享外设
     # 竞争。它是**独立配置键**：不与 max_loop_rounds 共享尺度（那个键已有
@@ -51,6 +58,11 @@ MAX_ROUNDS = 200
 # （每次续跑 ≈ 一次完整模型往返，3 次以上收益递减且会掩盖"目标本身不可达"）。
 MIN_GOAL_CONTINUATIONS = 0
 MAX_GOAL_CONTINUATIONS = 5
+# 子代理深度合法域。下界 0 = 禁止嵌套派生（只有顶层能派生一层，子代理不得再派生）；
+# 上界 5 与 MAX_ACTIVE_CHILDREN 同档：单链再深没有收益，只会把成本/限流沿链放大，
+# 且与广度帽的量级对齐（深度不该比广度还宽）。
+MIN_SUBAGENT_DEPTH = 0
+MAX_SUBAGENT_DEPTH_LIMIT = 5
 # 并行上限合法域。下界 1 = 串行（关掉并行组的唯一形态）；
 # 上界 16 与 `ToolOrchestrator._max_parallel` 的默认量级同档：再高没有收益，
 # 只会让一轮把连接池/共享外设的等待叠在一起。
@@ -106,7 +118,8 @@ def save_agent_limits(data: Dict[str, Any], path: Optional[Path] = None) -> bool
 def get_effective_limits() -> Dict[str, Any]:
     """生效限制值（环境变量显式设置优先于持久化设置）。
 
-    env 键：NEUROVA_AGENT_TOKEN_BUDGET / NEUROVA_AGENT_MAX_LOOP_ROUNDS
+    env 键：NEUROVA_AGENT_TOKEN_BUDGET / NEUROVA_AGENT_MAX_LOOP_ROUNDS /
+    NEUROVA_AGENT_MAX_SUBAGENT_DEPTH / NEUROVA_AGENT_MAX_PARALLEL_TOOLS
     """
     settings = load_agent_limits()
 
@@ -117,6 +130,10 @@ def get_effective_limits() -> Dict[str, Any]:
     env_rounds = os.environ.get("NEUROVA_AGENT_MAX_LOOP_ROUNDS")
     if env_rounds and env_rounds.isdigit():
         settings["max_loop_rounds"] = int(env_rounds)
+
+    env_depth = os.environ.get("NEUROVA_AGENT_MAX_SUBAGENT_DEPTH")
+    if env_depth and env_depth.isdigit():
+        settings["max_subagent_depth"] = int(env_depth)
 
     env_parallel = os.environ.get("NEUROVA_AGENT_MAX_PARALLEL_TOOLS")
     if env_parallel and env_parallel.isdigit():
@@ -137,5 +154,9 @@ def get_effective_limits() -> Dict[str, Any]:
     settings["max_parallel_tools"] = max(
         MIN_PARALLEL_TOOLS,
         min(MAX_PARALLEL_TOOLS, int(settings["max_parallel_tools"])),
+    )
+    settings["max_subagent_depth"] = max(
+        MIN_SUBAGENT_DEPTH,
+        min(MAX_SUBAGENT_DEPTH_LIMIT, int(settings["max_subagent_depth"])),
     )
     return settings
