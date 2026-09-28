@@ -37,6 +37,7 @@ Stage status=error → 主链中断 → `npc:go` 那一步被 skipper 跳过。
 - 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → D 红。
 """
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -125,8 +126,20 @@ class TestInterpreterIsProbedBeforeUse:
             "中断主链，Agent 那一步被 skipper 跳过，而用户只看到「构建失败」。"
         )
 
+    #: 纯 Shell 步骤的识别：正文里**不调用任何解释器**（只做文件操作与判定）。
+    #: 这类步骤天然可移植，不适用「走探测结果」这条 —— 它们的正确性判据是
+    #: 「在镜像里跑得起来」，而那由 F 类（在被 @ 的仓库里真跑）负责。
+    SHELL_ONLY_CALL = re.compile(r"(^|[\s;&|])(python3?|node)([\s]|$)")
+
     def test_script_stages_call_the_probed_interpreter(self, cnb_doc):
-        """含脚本正文的 stage 不得写死 python/node，必须用探测结果变量。"""
+        """**要跑解释器**的 NPC stage 不得写死 python/node，必须用探测结果变量。
+
+        判据按「这一步是否调用解释器」取，不按「有没有 script」取：
+        `Issue #314` 的物化步是纯 POSIX shell（`git` + `cp` + `test`），
+        它不请求任何解释器，也就不存在「写死 python/node」这种失败形态。
+        把纯 shell 步骤也判成违规，会逼着人给它套一个用不上的解释器变量 ——
+        那是为了让判据变绿而改被测物，不是修问题。
+        """
         offenders = []
         for mount, body in cnb_doc.items():
             if not isinstance(body, dict):
@@ -140,6 +153,9 @@ class TestInterpreterIsProbedBeforeUse:
                     for stage in job.get("stages") or []:
                         script = str((stage or {}).get("script") or "")
                         if not script or INTERPRETER_ANCHOR.strip("&") in script:
+                            continue
+                        # 纯 Shell 步骤：正文里没有解释器调用，不适用本条。
+                        if not self.SHELL_ONLY_CALL.search(script):
                             continue
                         if not SCRIPT_INTERPRETER_ALLOWLIST.match(script):
                             offenders.append(f"{mount}.{event}: {script.strip()}")
@@ -412,6 +428,290 @@ class TestNodeDispatchReallyWorks:
         )
         assert "ERR_UNKNOWN_FILE_EXTENSION" in result.stderr, (
             f"node 拒收 .py 的原因不是扩展名，请复核本桥的前提:\n{result.stderr[:500]}"
+        )
+
+
+class TestGateScriptsAreReachableFromTheRealWorkspace:
+    """F. 门禁脚本必须在**它真正被执行的**工作区里可达（Issue #314）。
+
+    ## 事故（构建 cnb-2cl-1k3k4gq0d，2026-09-28）
+
+    `.cnb.yml` 的三条门禁 Stage 用**相对路径**引用脚本：
+
+        $NPX_CALL scripts/ci/npc_turn_handoff_gate.py
+        $NPX_CALL scripts/ci/npc_role_admission.py
+        $NPX_CALL scripts/ci/npc_runtime_budget.py
+
+    同一份配置里 `.解释器探测` 锚点的注释记着它修过一次「同一条死链的另一半」：
+    构建 cnb-du8-1k34cfhg1 那次是 `sh: 1: python: not found`（rc=127），
+    修法是**探测解释器、逐级降级 python3 → python → node**。
+    但**路径本身从没被验证过**；这次撞的就是剩下那一半。平台日志逐字：
+
+        sh: 1: scripts/ci/npc_turn_handoff_gate.py: not found
+        Finished, code: 127
+
+    ## 根因：配置写死了「工作区 = 配置仓库」这一前提
+
+    平台文档《NPC》「事件执行 → 执行位置」逐字：流水线跑在**当前 Issue 或 PR
+    所属仓库**下（不是 NPC 所属仓库）。于是：
+
+    * `CNB_REPO_SLUG` / `CNB_BUILD_WORKSPACE` = **被 @ 的那个仓库**；
+    * 本仓自己的 `scripts/` 与 `.cnb/` 压根不在工作区里。
+
+    实测取证（`git clone --depth 1 kingsa2026/Qwen3.8-27B-Uncensored-FP8`，
+    即本次被 @ 的仓库）：根目录只有
+    `CONTRIBUTING.md LICENSE Modelfile README.md assets bin examples lib package.json test`
+    —— 既没有 `scripts/`，也没有 `.cnb/`。
+
+    所以三条门禁全部落空，且**与任务内容无关**：第一条就以 127 收场，
+    后续 Stage（含真正的 `npc-go`）全部 `skipped`，Agent 一秒都没跑起来。
+
+    ## 为什么它此前是绿的：守卫把宿主环境当成了生产环境
+
+    既有守卫（本文件 A~E）全部在**仓库根**上跑脚本（`cwd=PROJECT_ROOT`），
+    于是 `scripts/ci/*.py` 永远可取 —— 那正是本仓（配置仓库）的形态，
+    而**不是**门禁真实运行的那台工作区。判据的输入端被宿主的目录布局填成了真值。
+
+    ## 口径
+
+    判据按 `.cnb.yml` 里**逐字写下的调用形态**取，在「被 @ 的仓库」这一形态的
+    工作区里真跑（该工作区**没有** `scripts/`、也没有 `.cnb/`），要求：
+
+    * 退出码不为 127/2 这类「文件/命令不存在」；
+    * 三条门禁的**读数仍然成立** —— 自证能答「工作区在哪」，
+      准入能答「谁是角色」，量尺能答「还有多少时间」。
+    """
+
+    #: 三条门禁脚本（`.cnb.yml` 的 NPC 流水线里逐字引用）。
+    GATE_SCRIPTS = (
+        "scripts/ci/npc_turn_handoff_gate.py",
+        "scripts/ci/npc_role_admission.py",
+        "scripts/ci/npc_runtime_budget.py",
+    )
+
+    @staticmethod
+    def _npc_repo_workspace(tmp_path: Path) -> Path:
+        """模拟「被 @ 的仓库」工作区：有普通仓库内容，没有 `scripts/` 与 `.cnb/`。
+
+        目录名照实测的被 @ 仓库（kingsa2026/Qwen3.8-27B-Uncensored-FP8）取，
+        好让失败信息一眼看出「这里是别人的仓库，不是配置仓库」。
+        """
+        workspace = tmp_path / "Qwen3.8-27B-Uncensored-FP8"
+        for name in ("assets", "bin", "examples", "lib", "test"):
+            (workspace / name).mkdir(parents=True)
+        (workspace / "README.md").write_text("被 @ 的仓库\n", encoding="utf-8")
+        (workspace / "package.json").write_text("{}\n", encoding="utf-8")
+        return workspace
+
+    def _gate_call_forms(self) -> dict:
+        """从 `.cnb.yml` 取每条门禁 Stage 逐字写下的调用形态（脚本名 → 命令）。
+
+        取的是**配置原文**，不是本文件另抄一份 —— 否则改配置而守卫不知道。
+        """
+        text = io.open(CNB, encoding="utf-8").read()
+        forms = {}
+        for script in self.GATE_SCRIPTS:
+            match = re.search(
+                r"script:\s*\"?([^\n\"]*" + re.escape(script) + r")\"?", text
+            )
+            assert match, f".cnb.yml 里找不到对 {script} 的调用"
+            forms[script] = match.group(1).strip()
+        return forms
+
+    @staticmethod
+    def _interpreter_forms(cnb_text: str, script: str) -> list:
+        """把探测段登记的每个分支的调用形态，与脚本路径拼成完整命令。
+
+        返回**全部**分支（python3 → python → node），因为镜像里任一分支都可能被选中，
+        而「哪一支不可达」正是本条要拦的。
+        """
+        anchor_at = cnb_text.find(INTERPRETER_ANCHOR)
+        assert anchor_at >= 0, f"`.cnb.yml` 缺探测段锚点 {INTERPRETER_ANCHOR}"
+        body = cnb_text[anchor_at:]
+        cut = body.find("\n$:", 1)
+        if cut > 0:
+            body = body[:cut]
+        commands = []
+        for line in body.splitlines():
+            if line.strip().startswith("#"):
+                continue
+            match = re.search(r'NPX_CALL="([^"]+)"', line)
+            if match:
+                commands.append(f"{match.group(1)} {script}")
+        assert commands, "探测段没有登记任何调用形态 $NPX_CALL"
+        return commands
+
+    @staticmethod
+    def _shell() -> str:
+        shell = shutil.which("sh")
+        if shell is None:
+            pytest.skip("本环境无 sh，跑不了配置里登记的调用形态")
+        return shell
+
+    @staticmethod
+    def _gate_env(workspace: Path) -> dict:
+        """门禁在平台里看到的那一组环境变量（工作区/角色/预算读数）。"""
+        return {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "CNB_BUILD_WORKSPACE": str(workspace),
+            "CNB_NPC_NAME": os.environ.get("CNB_NPC_NAME", "DSCoder-Red"),
+            "CNB_PIPELINE_MAX_RUN_TIME": "7200000",
+            "CNB_BUILD_START_TIME": "2026-09-28T00:00:00.000Z",
+        }
+
+    def _runInWorkspace(self, command: str, workspace: Path, env_extra=None) -> subprocess.CompletedProcess:
+        """把配置里的命令搬到「被 @ 的仓库」工作区上执行。
+
+        关键：命令里的**相对路径**按工作区解析（平台就是这么跑的），
+        而本守卫在宿主机上执行 —— 故必须在 workspace 里建一个等价的调用现场。
+        """
+        env = self._gate_env(workspace)
+        env.update(env_extra or {})
+        return subprocess.run(
+            [self._shell(), "-c", command], cwd=str(workspace), env=env,
+            capture_output=True, text=True, timeout=180,
+        )
+
+    @classmethod
+    def _bootstrap_commands(cls) -> list:
+        """从 `.cnb.yml` 取 NPC Job 里**排在门禁之前**的物化步骤（逐字命令）。
+
+        判据只认配置原文：物化怎么跑、有没有跑，都必须由 `.cnb.yml` 说了算 ——
+        本文件另写一遍就是第二份口径（改配置而守卫不知道）。
+        """
+        import yaml as _yaml
+        doc = _yaml.safe_load(io.open(CNB, encoding="utf-8").read())
+        job = (doc.get("$") or {}).get("issue.comment@npc", [{}])[0]
+        stages = [s for s in (job.get("stages") or []) if isinstance(s, dict)]
+        # 门禁步的形态是**逐字调用**：`$NPX_CALL <script>`。按调用形态取，不按
+        # 子串取 —— 物化步的报错文案里也会提脚本名（本守卫踩过这个坑：按子串
+        # 锚定会把物化步自己当成门禁步，于是「门禁之前」为空，判据退化成恒真）。
+        gate_at = next(
+            (i for i, s in enumerate(stages)
+             if "$NPX_CALL" in str(s.get("script") or "")
+             and "npc_turn_handoff_gate.py" in str(s.get("script") or "")),
+            None,
+        )
+        assert gate_at is not None, "NPC Job 里找不到自证门禁步"
+        # 「物化步」的形态：排在**第一条门禁之前**、且自身**不是**门禁调用的脚本步。
+        # 判据按调用形态取（`$NPX_CALL` 缺席 = 不是门禁），不按脚本名子串取 ——
+        # 物化步的报错文案里也会提到脚本名，按子串取会把它自己一起筛掉
+        # （本守卫踩过这个坑：于是「门禁之前」为空，判据退化成一条恒真断言）。
+        commands = []
+        for stage in stages[:gate_at]:
+            script = str(stage.get("script") or "")
+            if stage.get("type") is not None or not script.strip():
+                continue
+            if "$NPX_CALL" in script:
+                continue
+            commands.append(script)
+        return commands
+
+    def _materializeWorkspace(self, workspace: Path) -> list:
+        """按 `.cnb.yml` 的**实际 stage 顺序**先把门禁物化到工作区，产出每步读数。
+
+        这一步是本守卫的关键：它模拟的是「平台按配置从上到下跑 stage」，
+        而不是「直接去工作区里找脚本」。少了它，守卫会退化成
+        「仓库根上 obviously 有 scripts/」那种恒真断言（事故之所以全绿的原因）。
+        """
+        runs = []
+        for command in self._bootstrap_commands():
+            assert command.strip(), "物化步骤的 script 为空 —— 门禁脚本无从取回"
+            run = self._runInWorkspace(
+                command, workspace,
+                env_extra={"CNB_NPC_SLUG": "kingsa2026/neurova"},
+            )
+            runs.append((command, run))
+            # 物化失败的形态必须响亮（教义第 2 条），否则后面全是级联假红。
+            assert run.returncode == 0, (
+                f"配置里的物化步骤在「被 @ 的仓库」工作区里失败（rc={run.returncode}）:\n"
+                f"  {command.strip()[:200]}\n"
+                f"  stdout={run.stdout}\n  stderr={run.stderr}"
+            )
+        return runs
+
+    def test_no_gate_call_form_dies_on_a_missing_file(self, tmp_path):
+        """配置里登记的每一条命令，都不得**因为文件不存在**而失败。
+
+        事故的判据是「脚本拉不起来」，故这里只拦**缺文件**这一类失败：
+
+        * `can't open file` / `cannot open` / `not found` 且命令所指的是脚本本身；
+        * 纯解释器缺席（`sh: 1: python: not found`，宿主没有该解释器）**不算** ——
+          那是探测段逐级降级的合法结果，平台在任一分支缺席时会落到下一支。
+          把它算成失败，会让本守卫在「宿主恰好缺某一支解释器」时假红，
+          而它要拦的从来不是这个。
+
+        可证伪路径：把调用形态改回裸相对路径（且不提物化）→ 立刻红。
+        """
+        cnb_text = io.open(CNB, encoding="utf-8").read()
+        workspace = self._npc_repo_workspace(tmp_path)
+        materialized = self._materializeWorkspace(workspace)
+        assert materialized, (
+            "NPC Job 里没有任何物化步骤 —— 门禁脚本与角色名单不会出现在"
+            "「被 @ 的仓库」工作区里（Issue #314 的根因）"
+        )
+        problems = []
+        for script in self.GATE_SCRIPTS:
+            for command in self._interpreter_forms(cnb_text, script):
+                run = self._runInWorkspace(command, workspace)
+                blob = run.stdout + run.stderr
+                last = blob.strip().splitlines()[-1] if blob.strip() else ""
+                # 缺脚本文件的两种形态：解释器自己的 "can't open file <path>"，
+                # 与 shell 的 "cannot open <path>" / "<path>: not found"。
+                # 判据落在**命令里那个脚本路径**上，故与解释器是哪一个无关。
+                missing_script = script in blob and (
+                    "can't open file" in blob
+                    or "cannot open" in blob
+                    or "not found" in blob
+                )
+                if missing_script:
+                    problems.append(f"{command}\n    rc={run.returncode} :: {last}")
+        assert not problems, (
+            "NPC 门禁脚本在它真实运行的工作区里**不可达**"
+            "（NPC 事件跑在被 @ 的仓库下，平台文档《NPC》「事件执行」）:\n  "
+            + "\n  ".join(problems) +
+            "\n被 @ 的仓库里没有 `scripts/`、也没有 `.cnb/` —— 实测取证："
+            "`git clone --depth 1 kingsa2026/Qwen3.8-27B-Uncensored-FP8` 后根目录只有 "
+            "assets/ bin/ examples/ lib/ test/ 与若干文档。\n"
+            "构建 cnb-2cl-1k3k4gq0d 逐字读数："
+            "`sh: 1: scripts/ci/npc_turn_handoff_gate.py: not found` / rc=127，"
+            "后续 Stage（含 npc-go）全部 skipped —— 构建失败与任务内容无关。"
+        )
+
+    def test_gate_readings_survive_in_the_foreign_workspace(self, tmp_path):
+        """三条门禁在「别人的仓库」里仍要给出**成立**的读数，不是只求退出码非 127。
+
+        判据取各自的可观察结论：
+        * 自证：点名工作区落点（`working_directory_check`）；
+        * 准入：对**在册**角色给通过（名单必须仍能读到）；
+        * 量尺：给出 `verdict=`（缺变量时也必须有结论，不是崩栈）。
+        """
+        cnb_text = io.open(CNB, encoding="utf-8").read()
+        workspace = self._npc_repo_workspace(tmp_path)
+        self._materializeWorkspace(workspace)
+
+        expectations = {
+            "scripts/ci/npc_turn_handoff_gate.py": ("working_directory_check", True),
+            "scripts/ci/npc_role_admission.py": ("在册", True),
+            "scripts/ci/npc_runtime_budget.py": ("verdict=", True),
+        }
+        problems = []
+        for script, (needle, expect_ok) in expectations.items():
+            commands = self._interpreter_forms(cnb_text, script)
+            run = self._runInWorkspace(commands[0], workspace)
+            blob = run.stdout + run.stderr
+            if needle not in blob:
+                problems.append(
+                    f"{script}: 读数里没有 {needle!r}（rc={run.returncode}）\n"
+                    f"    {blob.strip()[:400]}"
+                )
+        assert not problems, (
+            "门禁在「被 @ 的仓库」里给不出读数 —— 它的数据源与它一起留在了配置仓库:\n  "
+            + "\n  ".join(problems) +
+            "\n`npc_role_admission.py` 要读 `.cnb/settings.yml` 的角色名单，"
+            "而那份名单在**配置仓库**、不在被 @ 的仓库里 ——"
+            "「工作区即配置仓库」这个前提整体不成立，须一并修正。"
         )
 
 
