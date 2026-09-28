@@ -13,6 +13,7 @@ LLM 调用次数由 3 次变 4 次（预算被放大），`_stagnation_count` �
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,6 +43,52 @@ class TurnRunState:
     #: `DoomLoopGate` 的滑动窗口与中断计数都挂在这份实例上，同一轮内多建一份
     #: 会让窗口不再累计、后续追加的门控只落在其中一份上。
     gateRunner: Any = None
+    #: 创建者指纹（Issue #268 切片 C）：轮次归属已迁到本就是唯一事实源，
+    #: 但"谁创建了它"此前从未被记录——把上一轮的 state 误递进新请求时，
+    #: 新请求会继承旧轮次计数且**静默**（计数合法、上限不被违反）。
+    #: 记录创建者后，交叉使用在开发期即由 `assertSameTurnAs` 点名报出。
+    turnId: str = ""
+    agentId: str = ""
+
+    @classmethod
+    def forTurn(cls, *, agentId: str, roundUserKey: Optional[str] = None, **kw: Any) -> "TurnRunState":
+        """本轮轮次态的**唯一构造点**：签发 turnId 并记下创建者 agentId。
+
+        直接 `TurnRunState(...)` 会得到空 turnId（无创建者记录），故生产侧一律
+        走此处——两个构造点各不记指纹，正是"归属可自证"要消灭的形态。
+        """
+        return cls(
+            roundUserKey=roundUserKey,
+            agentId=str(agentId or ""),
+            turnId=uuid.uuid4().hex,
+            **kw,
+        )
+
+    def assertRoundInvariant(self) -> None:
+        """轮入口自检：`toolRounds` 不得越过 `maxToolRounds`。
+
+        上限判定本应在累加处咬合（越限即终止）。这条不变量在轮入口被违反，
+        说明**上限判定被绕过**——今天唯一可复现的成因是跨会话污染（缺陷 A 的形态）：
+        另一个会话把本方计数抹平，本方于是越过了自己的上限继续续轮。
+        故它把缺陷 A 从"要靠并发活体才测得到"降级为"任何一轮入口都能自证"。
+        """
+        if self.toolRounds > self.maxToolRounds:
+            raise RuntimeError(
+                "轮次态不变量被违反：toolRounds="
+                f"{self.toolRounds} > maxToolRounds={self.maxToolRounds}"
+                f"（turnId={self.turnId or '<未签发>'}）"
+                "——上限判定被绕过，通常是另一方会话污染了本轮的计数。"
+            )
+
+    def assertSameTurnAs(self, other: "TurnRunState") -> None:
+        """交叉使用检查：两个 state 必须来自同一次 turn（否则点名两个 turnId）。"""
+        if self.turnId != other.turnId:
+            raise RuntimeError(
+                "轮次态交叉使用："
+                f"本 state turnId={self.turnId or '<未签发>'}，"
+                f"传入 state turnId={other.turnId or '<未签发>'}"
+                "——不同 turn 的轮次态不得互相传递（会把旧轮次计数带进新请求）。"
+            )
 
     def roundSignature(self, toolSignatures: str = "") -> str:
         """死循环签名（本轮用户指纹 + 调用签名）——签名口径单源在此。"""
