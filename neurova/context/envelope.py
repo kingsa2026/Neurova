@@ -144,12 +144,18 @@ def compress_envelope(
     envelope: str,
     budget_tokens: int,
     count_tokens: Optional[Callable[[str], int]] = None,
+    report: Optional[dict] = None,
 ) -> str:
     """确定性信封压缩（F5 重设计：替代原 system 字符串手术 + 整体硬截断）。
 
     顺序：整块淘汰（emotion→reflection→experience→lessons→time）→
     memories 尾部行淘汰（行已按分数降序）→ 仍超则截尾行加标记。
     system 消息不经过本函数——由调用方保证 system 只读不动。
+
+    `report`（可选，Issue #289 002）：把本条路径的**不可归因损失**登记进调用方
+    给的字典。弃封是净损失路径——今天它只返回空串，事后从账上看不出；
+    有了 `discarded`/`reason` 两个字段，它才成为一条可核对的读数。
+    原因值取自经济性判据的封闭枚举（同域事实，不开第二套枚举）。
     """
     if not envelope:
         return envelope
@@ -172,7 +178,13 @@ def compress_envelope(
         blocks["memories"] = "\n".join(lines[:-1])
 
     result = build_envelope(blocks)
-    # 兜底守卫：免疫句壳本身都装不下预算时，放弃信封（user 原文神圣，信封可弃）
+    # 兜底守卫：免疫句壳本身都装不下预算时，放弃信封（user 原文神圣，信封可弃）。
+    # 弃封是净损失路径，故在此登记可归因读数（不许静默丢）。
     if result and count(result) > budget_tokens:
+        if report is not None:
+            from neurova.context.compression_economics import CompressionAction
+
+            report["discarded"] = True
+            report["reason"] = CompressionAction.ENVELOPE_DISCARDED.value
         return ""
     return result

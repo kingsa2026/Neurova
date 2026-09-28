@@ -59,7 +59,9 @@ class TestSpawnForeground:
     async def test_fallback_to_default_when_agent_missing(self, swarm):
         default_agent = make_mock_agent(name="默认Agent")
 
-        def resolve(agent_id):
+        def resolve(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`get_agent_instance`）。
+            agent_id = args[0] if args else kwargs.get("agent_id")
             return default_agent if agent_id == "default" else None
 
         with patch("neurova.api.endpoints.get_agent_instance", side_effect=resolve):

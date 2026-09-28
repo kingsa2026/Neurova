@@ -149,8 +149,9 @@ class TestSocialSearchRealExecution:
 
         captured = {}
 
-        def fake_social_search(platform, query, limit=10, user_id=None):
-            captured["user_id"] = user_id
+        def fake_social_search(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`social_search`）。
+            captured["user_id"] = kwargs.get("user_id", args[3] if len(args) > 3 else None)
             return {"success": True, "data": {"results": []}}
 
         with (
