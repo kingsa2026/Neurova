@@ -1,214 +1,23 @@
-"""
-LLM Cost Ledger Integration - Automatic Cost Tracking
+"""协作域生命周期事件出口（成本账本接线面）。
+
+本模块承载 agent/session/task 等生命周期事件到 Outbox 的发布出口，
+供 `api/endpoints/phase3_api.py` 消费。
+
+**成本记账不在这里。** 本模块曾另有一个 `track_llm_call_integration` 装饰器
+（第三套并行记账装饰器，与 `models/cost_tracking.track_llm_call`、
+已退役的 `llm/cost_tracking_middleware` 同形），生产侧零引用，
+已随第三份记账面一并退役——记账的唯一入口是
+`models/cost_tracking.record_llm_cost`。
 """
 
 import time
-import functools
 import threading
-from typing import Callable, Any, Optional, Dict
-from functools import wraps
-from datetime import datetime
+from typing import Optional, Dict
 
 from neurova.core.logger import get_logger
-from neurova.models.cost_tracking import (
-    CostTracker,
-    LLMCall,
-    LLMProvider,
-    LLMDirection,
-    get_cost_tracker,
-)
-from neurova.collaboration.outbox_handler import (
-    get_outbox_handler,
-    OutboxEvent,
-)
+from neurova.collaboration.outbox_handler import get_outbox_handler
 
 logger = get_logger(__name__)
-
-def track_llm_call_integration(
-    provider: LLMProvider,
-    model: str,
-    agent_id: str,
-    session_id: Optional[str] = None,
-):
-    """
-    增强的 LLM 调用追踪装饰器 (集成 Outbox)
-
-    Usage:
-        @track_llm_call_integration(
-            provider=LLMProvider.OPENAI,
-            model="gpt-4",
-            agent_id="default"
-        )
-        async def call_llm(messages):
-            ...
-    """
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            # Start tracking
-            start_time = time.time()
-
-            try:
-                # Execute LLM call
-                result = await func(*args, **kwargs)
-
-                # Extract usage from result
-                usage = result.get('usage', {})
-
-                # Calculate cost
-                input_tokens = usage.get('prompt_tokens', 0)
-                output_tokens = usage.get('completion_tokens', 0)
-
-                cost_usd = _calculate_cost_from_usage(
-                    provider, model, input_tokens, output_tokens
-                )
-
-                # Log to cost tracker
-                call = LLMCall(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    provider=provider,
-                    model=model,
-                    direction=LLMDirection.OUTPUT,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost_usd=cost_usd,
-                    called_at=datetime.utcnow(),
-                    metadata={
-                        "duration_seconds": time.time() - start_time,
-                    },
-                )
-
-                # Async log to cost ledger
-                cost_tracker = get_cost_tracker()
-                if hasattr(cost_tracker, 'log_call'):
-                    await cost_tracker.log_call(call)
-
-                # Publish cost event to outbox
-                _publish_cost_event(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    call=call,
-                )
-
-                return result
-
-            except Exception as e:
-                logger.error(f"LLM call failed: {e}")
-                raise
-
-            finally:
-                # Record in outbox even on failure
-                duration = time.time() - start_time
-
-                if session_id:
-                    _publish_timing_event(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        duration=duration,
-                        success=False,
-                    )
-
-        return wrapper
-    return decorator
-
-def _calculate_cost_from_usage(
-    provider: LLMProvider,
-    model: str,
-    input_tokens: int,
-    output_tokens: int,
-) -> float:
-    """从 usage 计算成本"""
-    price_tables = {
-        LLMProvider.OPENAI: {
-            "gpt-4": {"input": 0.03, "output": 0.06},
-            "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-            "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-            "gpt-4o": {"input": 0.0025, "output": 0.01},
-            "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-        },
-        LLMProvider.ANTHROPIC: {
-            "claude-3-opus": {"input": 0.015, "output": 0.075},
-            "claude-3-sonnet": {"input": 0.003, "output": 0.015},
-            "claude-3-haiku": {"input": 0.00025, "output": 0.00125},
-            "claude-3.5-sonnet": {"input": 0.003, "output": 0.015},
-        },
-        LLMProvider.GEMINI: {
-            "gemini-1.5-pro": {"input": 0.0025, "output": 0.0075},
-            "gemini-1.5-flash": {"input": 0.000375, "output": 0.00075},
-        },
-    }
-
-    price_map = price_tables.get(provider, {}).get(model, {"input": 0, "output": 0})
-
-    cost = (
-        input_tokens * price_map["input"] / 1000 +
-        output_tokens * price_map["output"] / 1000
-    )
-
-    return round(cost, 6)
-
-def _publish_cost_event(
-    agent_id: str,
-    session_id: Optional[str],
-    call: LLMCall,
-) -> None:
-    """发布成本事件到 Outbox"""
-    try:
-        outbox = get_outbox_handler()
-
-        payload = {
-            "call_id": call.call_id,
-            "model": call.model,
-            "tokens": {
-                "input": call.input_tokens,
-                "output": call.output_tokens,
-            },
-            "cost_usd": call.cost_usd,
-            "timestamp": call.called_at.isoformat(),
-        }
-
-        outbox.publish(
-            event_type="llm_cost_recorded",
-            agent_id=agent_id,
-            session_id=session_id,
-            payload=payload,
-            priority=5,
-            expiration_ttl=86400,  # 24 hours
-        )
-
-        logger.debug(f"Published cost event for call {call.call_id}")
-
-    except Exception as e:
-        logger.warning(f"Failed to publish cost event: {e}")
-
-def _publish_timing_event(
-    agent_id: str,
-    session_id: str,
-    duration: float,
-    success: bool,
-) -> None:
-    """发布性能指标事件"""
-    try:
-        outbox = get_outbox_handler()
-
-        payload = {
-            "duration_seconds": duration,
-            "success": success,
-            "timestamp": time.time(),
-        }
-
-        outbox.publish(
-            event_type="llm_performance_metric",
-            agent_id=agent_id,
-            session_id=session_id,
-            payload=payload,
-            priority=3,
-            expiration_ttl=3600,  # 1 hour
-        )
-
-    except Exception as e:
-        logger.warning(f"Failed to publish timing event: {e}")
 
 # ============================================================================
 # Agent Lifecycle Hooks

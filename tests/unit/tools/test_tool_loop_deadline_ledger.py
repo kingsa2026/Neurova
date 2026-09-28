@@ -303,17 +303,36 @@ class TestJudgeRulesAreDecidable:
 
 
 class TestReachableControlsAreNotVacuouslyGreen:
-    """反向控制：已知可达的符号必须报 `consumed`，且不得被赋任何处置。"""
+    """反向控制：已知**在生产侧存活**的符号，且不得被赋任何处置。"""
 
-    def test_controls_are_consumed(self):
+    #: 判据类的**存活**取值域：反向控制各自落在其中之一。
+    #:
+    #: 为什么不统一要求 `consumed`（Issue #310 收口）：`ctx_snapshot` 是**局部量**，
+    #: 它的消费点天然落在自己函数内，判据类必然是 `self_loop` —— 要求它 `consumed`
+    #: 等于要求把一个活在自己函数里的局部量接出函数外，那才是把它改坏。
+    #: 本断言的原意是「判据不能空转」（预筛丢掉全部文件时会退化成 `absent`/`no_consumer`），
+    #: 而「不是 `absent` 也不是 `no_consumer`」恰好就是那个原意的**机器可验形态**，
+    #: 且对两类控制都成立——收窄成 `consumed` 是过严，不是更严。
+    LIVE_JUDGES = (ledger.JUDGE_CONSUMED, ledger.JUDGE_SELF_LOOP)
+
+    def test_controls_are_alive(self):
         facts = _facts()
         for symbol in ledger.REACHABLE_CONTROLS:
-            assert facts[symbol]["judge"] == ledger.JUDGE_CONSUMED, (
-                f"反向控制项 {symbol} 未被判为 {ledger.JUDGE_CONSUMED}，"
+            assert facts[symbol]["judge"] in self.LIVE_JUDGES, (
+                f"反向控制项 {symbol} 未被判为存活（{self.LIVE_JUDGES}），"
                 f"实为 {facts[symbol]['judge']}（{facts[symbol]['classify']['rule']}）——"
                 "判据整体失效（例如预筛丢掉全部文件）时正是这个形态，"
                 "而单看「零消费」断言无法察觉。"
             )
+
+    def test_liveJudgesAreNotVacuous(self):
+        """`LIVE_JUDGES` 必须真的在判别：喂两个「死」判据类进来必须被拒。
+
+        这条是本类上一条断言的反向控制——否则把 `LIVE_JUDGES` 改成「四个判据类全收」
+        也能通过，该断言就退化成恒真。
+        """
+        assert ledger.JUDGE_ABSENT not in self.LIVE_JUDGES
+        assert ledger.JUDGE_NO_CONSUMER not in self.LIVE_JUDGES
 
     def test_controls_carry_no_disposal(self):
         problems = ledger.reconcile()["pending_controls"]
