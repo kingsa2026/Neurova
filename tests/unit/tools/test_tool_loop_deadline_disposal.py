@@ -151,6 +151,18 @@ class TestDisposalIsMachineCheckable:
             "T-09 死码处置批（Issue #310）：自循环面同批退场；同名第二份"
             "（api/endpoints/tool_schema.py 的 pydantic 模型）是活的、不连坐。"
         ),
+        # T-09 死码处置批：五段流水线框架与重置面（Issue #174 / #310）。
+        # 裁定 = 不接线：四段的注册入口生产侧全仓零调用，唯一活着的 result 段
+        # 已独立成面（熔断器 + ToolExecutor 真实消费）。**符号级退役**，
+        # 文件整模块保留 —— 与反向控制同处一个文件。
+        "ToolExecutionPipeline": (
+            "T-09 死码处置批（Issue #310）：五段框架整体退场（编排面没人用）；"
+            "常驻判据 tests/unit/tools/test_t09_pipeline_face_ruling.py"
+        ),
+        "reset_pipeline_observers": (
+            "T-09 死码处置批（Issue #310）：与五段框架同批退场（重置面没人用）——"
+            "观察者单例由 get_pipeline_observers() 惰性创建，进程内不需要重置点。"
+        ),
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
