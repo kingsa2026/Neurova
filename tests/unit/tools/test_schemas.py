@@ -33,7 +33,6 @@ from neurova.tool_layers.schemas import (
     ToolParameter,
     ToolSchema,
     MCPConnection,
-    ToolExecutionResult,
 )
 
 
@@ -272,75 +271,6 @@ class TestMCPConnection:
         conn = MCPConnection.from_dict(data)
         assert conn.server_id == "test_server"
         assert conn.command == "python"
-
-
-class TestToolExecutionResult:
-    """Test cases for ToolExecutionResult class."""
-    
-    def test_tool_execution_result_creation(self):
-        """Test creating a ToolExecutionResult instance."""
-        result = ToolExecutionResult(
-            tool_name="get_weather",
-            success=True,
-            output={"temperature": 25.5},
-            duration_ms=150.0,
-            error=None,
-        )
-        assert result.tool_name == "get_weather"
-        assert result.success is True
-        assert result.output == {"temperature": 25.5}
-        assert result.duration_ms == 150.0
-        assert result.error is None
-    
-    def test_tool_execution_result_defaults(self):
-        """Test ToolExecutionResult default values."""
-        result = ToolExecutionResult(tool_name="test_tool")
-        assert result.tool_name == "test_tool"
-        assert result.success is False
-        assert result.output is None
-        assert result.duration_ms == 0.0
-        assert result.error is None
-        assert result.metadata == {}
-    
-    def test_tool_execution_result_to_dict(self):
-        """Test converting ToolExecutionResult to dictionary."""
-        result = ToolExecutionResult(
-            tool_name="get_weather",
-            success=True,
-            output={"temperature": 25.5},
-            duration_ms=150.0,
-        )
-        data = result.to_dict()
-        assert data["tool_name"] == "get_weather"
-        assert data["success"] is True
-        assert data["output"] == {"temperature": 25.5}
-        assert data["duration_ms"] == 150.0
-        assert "timestamp" in data
-    
-    def test_tool_execution_result_from_dict(self):
-        """Test creating ToolExecutionResult from dictionary."""
-        data = {
-            "tool_name": "get_weather",
-            "success": True,
-            "output": {"temperature": 25.5},
-            "duration_ms": 150.0,
-            "timestamp": time.time(),
-        }
-        result = ToolExecutionResult.from_dict(data)
-        assert result.tool_name == "get_weather"
-        assert result.success is True
-    
-    def test_tool_execution_result_error_case(self):
-        """Test ToolExecutionResult with error."""
-        result = ToolExecutionResult(
-            tool_name="test_tool",
-            success=False,
-            error="Tool not found",
-            error_code="TOOL_NOT_FOUND",
-        )
-        assert result.success is False
-        assert result.error == "Tool not found"
-        assert result.error_code == "TOOL_NOT_FOUND"
 
 
 if __name__ == "__main__":

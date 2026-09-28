@@ -113,6 +113,28 @@ class TestDisposalIsMachineCheckable:
             "T-09 死码处置批（Issue #174）：_auto_continue 里只写不读的护栏残骸，"
             "声明删除；常驻判据 tests/unit/agent/test_auto_continue_dead_budget.py"
         ),
+        # T-09 死码处置批（Issue #174 / #310）：第二份注册面与它撑起的整条不可达链。
+        # 裁定「ToolRouter 与 ToolEngine 之间是否需要第二份注册表」= 不需要
+        # （真面四方法签名逐字相同且真装配；ToolEngine 侧经 ExecutionEngine 直取；
+        #  该类生产零实例化）。逐条论证见 scripts/ci/toolLoopDeadlines.txt 的四行。
+        "UnifiedToolRegistry": (
+            "T-09 死码处置批（Issue #310）：第二份注册面整模块退场，"
+            "与 ToolRouter 同名四方法签名逐字相同；常驻判据 "
+            "tests/unit/tools/test_t09_dead_registry_retirement.py"
+        ),
+        "ToolExecutionLogger": (
+            "T-09 死码处置批（Issue #310）：唯一消费方是不可达的 UnifiedToolRegistry；"
+            "其 JSON Lines 序列在生产侧从来无写入方（pattern_miner 的三处真实调用"
+            "全喂当轮工具序列）。同批整模块退场。"
+        ),
+        "CLIToolExecutor": (
+            "T-09 死码处置批（Issue #310）：唯一消费方是不可达的 UnifiedToolRegistry；"
+            "沙箱执行真面在 neurova/sandbox/。同批整模块退场。"
+        ),
+        "ToolExecutionResult": (
+            "T-09 死码处置批（Issue #310）：同一条不可达链的最后一段——"
+            "schemas.py 的三处自消费全在类内，全仓唯一跨文件引用就是那条死链。"
+        ),
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
