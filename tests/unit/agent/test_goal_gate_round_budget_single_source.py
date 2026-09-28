@@ -132,6 +132,25 @@ class TestRoundBudgetIsDeclaredNotLiteral:
         )
         assert seen[200] == 200, f"配到 200 时门控预算应为 200，实测 {seen[200]}"
 
+    def test_class_default_is_fail_soft_not_a_second_default(self):
+        """静态+活体：类构造器的缺省不得是第二个「看着合适」的默认值。
+
+        生产装配点一律显式传配置值；若类自身的缺省仍是一个像 15 那样"看着合适"的
+        数，它就成了第二份事实源——装配一旦漏传，上限会**静默**不受配置管辖。
+        兜底取下界（越早开火越容易被看见），且必须显式命名为 fallback。
+        """
+        from neurova.agent.gates import GoalGate
+
+        assert hasattr(GoalGate, "ROUND_BUDGET_FALLBACK"), (
+            "GoalGate 缺显式命名的兜底常量——缺省仍在扮演第二个默认值。"
+        )
+        assert GoalGate().max_rounds == GoalGate.ROUND_BUDGET_FALLBACK, (
+            "无参构造未落到声明的兜底值。"
+        )
+        assert GoalGate().max_rounds <= 2, (
+            f"兜底值 {GoalGate().max_rounds} 太大：它会被误当成正常默认值。"
+        )
+
     def test_no_literal_default_in_assembly_or_setter(self):
         """静态：装配路径与 setter 的缺省参数都不得自带第二份字面量。
 

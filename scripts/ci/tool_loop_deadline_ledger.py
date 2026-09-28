@@ -175,6 +175,7 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("set_turn_goal", KIND_SYMBOL, "core/turn_context.py（G2 目标写入面）"),
     ("get_turn_goal", KIND_SYMBOL, "core/turn_context.py（G2 目标读取面）"),
     ("goal_max_continuations", KIND_KEY, "security/agent_limits_settings.py（G2 续跑预算）"),
+    ("goal_round_budget", KIND_KEY, "security/agent_limits_settings.py（GoalGate 工具轮预算）"),
     ("goal_verification_enabled", KIND_KEY, "security/agent_limits_settings.py（G2 成本闸）"),
     ("reset_pipeline_observers", KIND_SYMBOL, "agent/tool_pipeline.py:453（放大视角补登）"),
     ("ToolExecutionResult", KIND_SYMBOL, "tool_layers/schemas.py:291（放大视角补登）"),
