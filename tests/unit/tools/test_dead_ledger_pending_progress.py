@@ -170,3 +170,43 @@ class TestProgressIsNotVacuous:
             symbol for symbol, entry in _pendingEntries().items()
             if not ledger.pendingBatchOf(entry)
         ), "模块单源函数与守卫的就地判定不一致"
+
+class TestProgressAxisHasTeeth:
+    """本轴必须在**合成输入**上真的咬合，否则是「看一眼就判」的第二份自述。"""
+
+    def test_reconcileAxisFiresOnSyntheticUnowned(self):
+        """喂一个无归属的待处置条目，纯函数必须报出——证明判据不是恒真。"""
+        conflicts = ledger.pendingOwnerConflicts(
+            {"幽灵符号": {"disposal": ledger.DISPOSAL_PENDING, "basis": "无批次标记的依据"}}
+        )
+        assert any(c["symbol"] == "幽灵符号" and c["kind"] == "unowned" for c in conflicts), (
+            "合成样本（无归属待处置）未被判为冲突——进度轴失去了判别力，"
+            "本片要拦的「登记 ×N 无人认领」形态会照样溜过"
+        )
+
+    def test_reconcileAxisFiresOnSyntheticUnknownBatch(self):
+        """喂一个点名不存在批次的条目，必须报出——归属值域不可自造。"""
+        conflicts = ledger.pendingOwnerConflicts(
+            {"幽灵符号": {
+                "disposal": ledger.DISPOSAL_PENDING,
+                "basis": "依据里点名〔待处置批：T-99〕这个不存在的批次",
+            }}
+        )
+        assert any(
+            c["symbol"] == "幽灵符号" and c["kind"] == "unknown_batch"
+            and c.get("batch") == "T-99"
+            for c in conflicts
+        ), "点名不存在批次未被判冲突——人填的归属没有机器判定，与 disposal 轴纪律不符"
+
+    def test_reconcileAxisIsSilentOnTheRealLedger(self):
+        """反向：真台账上必须静默——否则守卫会靠「恒红」冒充咬合。"""
+        assert ledger.pendingOwnerConflicts() == [], (
+            "真台账上进度轴报出冲突：" + repr(ledger.pendingOwnerConflicts())
+        )
+        problems = ledger.reconcile()
+        assert not problems["pending_owner"], (
+            f"reconcile() 报出无归属待处置：{problems['pending_owner']}"
+        )
+        assert not problems["unknown_pending_batch"], (
+            f"reconcile() 报出未知批次归属：{problems['unknown_pending_batch']}"
+        )
