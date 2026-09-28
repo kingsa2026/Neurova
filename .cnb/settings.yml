@@ -18,7 +18,7 @@
 # 本文件是 prompt 的唯一必达通道：`.cnb.yml` 的 `npc:go.options` 不认 prompt 键
 # （平台 Schema 只声明 role/systemPrompt/userPrompt/model/maxTurns/contextWindow/
 #  maxTokens/thinkingLevel/supportImage），写进去会被静默忽略。故运行期硬约束
-# （时间预算条款、运行期预算纪律）与人设一起放在各角色的 prompt 里。
+# （时间预算条款、运行期预算纪律、单轮输出预算纪律）与人设一起放在各角色的 prompt 里。
 #
 # 共享正文逐字复用：运行参数相同、行为约束相同，拆成多份手抄就必然漂移，
 # 而漂移处不会有任何红（教义第 6 条）。
