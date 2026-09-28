@@ -6,9 +6,10 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 
 import asyncio
 import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Agent 仅用于类型注解；运行时导入会与 agent_core 形成循环依赖
 if TYPE_CHECKING:
@@ -26,6 +27,76 @@ logger = get_logger(__name__)
 
 #: 本轮门控已求值时的占位决策（BYPASS）——避免同轮二次求值污染 DoomLoopGate 窗口。
 _BYPASS_DECISION = _StopDecision.bypass()
+
+#: 流式单轮的"本轮已推进，请循环开下一轮"让出标记。
+#:
+#: 用 sentinel 而不是在单轮里 yield `done`：整条流恰好一个 done 是既有契约
+#: （前端与管线都按"done 即收尾"消费），迭代化若让每个工具轮都 yield done，
+#: 正文会被当成多轮回复拼接。
+_STREAM_END = object()
+
+#: 输出预算耗尽（length 空回复）重试仍空时的可见提示（杜绝空气泡）。
+_LENGTH_EMPTY_NOTICE = (
+    "⚠️ 未能生成回复：输出预算被思考过程占满（finish_reason=length），"
+    "压缩上下文重试后仍未产出正文。建议切换非思考模型，"
+    "或在模型设置中调大最大输出 token。"
+)
+
+
+@dataclass
+class _TurnOutcome:
+    """非流式单轮的推进结果。
+
+    `done` 非空 = 整轮结束（收口 / 门控终止 / 轮次超限），循环把该响应交回调用方；
+    `done` 为空 = 本轮已就地推进（工具轮完成或出口续跑提示已入历史），
+    循环继续下一轮。迭代化把"下一步"从一次自递归变成一个返回值，
+    栈深因此与轮数无关。
+    """
+
+    done: Optional[LLMResponse] = None
+
+    @classmethod
+    def finished(cls, response: LLMResponse) -> "_TurnOutcome":
+        return cls(done=response)
+
+    @classmethod
+    def running(cls) -> "_TurnOutcome":
+        return cls(done=None)
+
+
+@dataclass
+class _RoundEnd:
+    """流式单轮的让出结果。
+
+    `advanced=True` 表示本轮已就地推进（工具轮续写 / 出口续跑），下一轮由
+    `_predict_stream` 的循环开，本轮**不**产出 done；为假则 `done` 是本轮的
+    done 事件（整条流由它收尾）。
+    """
+
+    advanced: bool
+    gotContent: bool
+    done: Optional[Dict[str, Any]] = None
+
+
+class _StreamRounds:
+    """流式循环的轮间标志（均为"本轮"语义，一轮结束即重置）。
+
+    `advanced` 是"本轮是否已被接续"：为真（工具轮续写 / 出口续跑）时下一轮由循环开；
+    为假时本轮的 done 就是整条流的收尾。
+    """
+
+    def __init__(self) -> None:
+        self.exhausted = False           # 轮次超限（无 done 可交，直接收尾）
+        self.lengthEmpty = False         # 本轮 length 且正文为空 → 值得重试
+        self.lengthEmptyRetried = False   # 已发生一次 length 重试（防循环）
+        self.retriedStillEmpty = False    # 重试后仍空 → 收尾时补可见提示
+        self.advanced = False             # 本轮被接续（工具轮续写/出口续跑）
+
+    def beginNextRound(self) -> None:
+        """进入下一轮：清掉只属于"上一轮"的标志。"""
+        self.lengthEmpty = False
+        self.advanced = False
+        self.retriedStillEmpty = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -383,41 +454,37 @@ class OpenAILoop(BaseAgentLoop):
             if key in kwargs and kwargs[key] is not None:
                 request_params[key] = kwargs[key]
 
-        # 执行预测（如果 tools 导致 API 400，回退到无 tools 模式）
-        try:
-            if stream:
-                return self._predict_stream(request_params, state)
-            else:
-                return await self._predict_normal(request_params, state)
-        except Exception as e:
-            err_str = str(e)
-            # [TOOLROBUST-B] 精确判定 400：
-            # 原实现用宽泛子串 "400"/"Invalid"/"Missing" 判断，会把 "Invalid API key"
-            # 等认证错误误判为"工具不被支持"而静默降级，掩盖真实错误、另本轮无工具可用。
-            # 现在：先排除认证/权限类错误，再要求同时命中 HTTP 4xx 状态码 + tools 语义才算降级。
-            if tools and self._is_tools_rejected_error(err_str):
-                logger.warning(
-                    "[TOOLROBUST-B] function calling 疑似不被 API 支持，本轮降级为无 tools 重试并注入文本教学。错误: %s",
-                    e,
-                )
-                state.toolsSupported = False
-                # 标记降级事件，供可观测（agent.ui / 监控可读）
-                try:
-                    self.agent.append_tool_event({"type": "tools_degraded", "reason": err_str[:200]})
-                except Exception:
-                    pass
-                request_params.pop("tools", None)
-                request_params.pop("tool_choice", None)
-                # 降级后注入文本调用教学，避免模型在无 tools 状态下完全不会调工具
-                request_params["messages"] = self._append_tool_hint(request_params["messages"])
-                if stream:
-                    return self._predict_stream(request_params, state)
-                else:
-                    return await self._predict_normal(request_params, state)
-            raise
+        # 执行预测（tools 被拒的降级在**单轮内**完成，见 `_chatNormalWithDegrade`
+        # 与流式的降级分支；此处不再重入整条循环——重入会让"这一轮"多一层栈帧）
+        if stream:
+            return self._predict_stream(request_params, state)
+        return await self.predict_normal(request_params, state)
 
-    async def _predict_normal(self, request_params: Dict, state: TurnRunState = None) -> LLMResponse:
-        """普通预测 (非流式)。
+    def _dropToolsForDegrade(self, request_params: Dict, state: TurnRunState, error: str) -> None:
+        """工具被拒后的降级准备：摘掉 tools 并注入文本调用教学。"""
+        logger.warning(
+            "[TOOLROBUST-B] function calling 疑似不被 API 支持，本轮降级为无 tools 重试并注入文本教学。错误: %s",
+            error,
+        )
+        state.toolsSupported = False
+        # 标记降级事件，供可观测（agent.ui / 监控可读）
+        try:
+            self.agent.append_tool_event({"type": "tools_degraded", "reason": error[:200]})
+        except Exception:
+            pass
+        request_params.pop("tools", None)
+        request_params.pop("tool_choice", None)
+        # 降级后注入文本调用教学，避免模型在无 tools 状态下完全不会调工具
+        request_params["messages"] = self._append_tool_hint(request_params["messages"])
+
+    async def predict_normal(self, request_params: Dict, state: TurnRunState = None) -> LLMResponse:
+        """非流式循环（**单层迭代**，Issue #268 切片 B）。
+
+        一次调用推进到"模型不再调工具"为止：工具轮、门控终止、出口续跑三类推进
+        都在这一个 `while` 里就地完成，不靠"再调一次本方法"叠帧。
+        切片 A 之后轮次态已随 `state` 传递，只剩控制流还是递归；递归不炸栈
+        （方案 §1 实测可嵌套 493 轮，合法上限 100），代价是每多一层就多一次
+        "参数是否传全"的机会——栈深随轮数增长正是这件事的读数（红灯实测每轮 +1 帧）。
 
         [TOOLROBUST-B] 自动降级：带 tools 的请求若被 API 拒绝（工具型 400），
         去掉 tools 并注入文本调用教学后重试一次，避免整轮崩溃且弱 provider 仍有工具通道。
@@ -426,27 +493,21 @@ class OpenAILoop(BaseAgentLoop):
         """
         if state is None:
             state = self._startTurnState(request_params.get("messages") or [])
-        try:
-            response = await self.llm_client.chat(**request_params)
-        except Exception as e:
-            err_str = str(e)
-            if request_params.get("tools") and self._is_tools_rejected_error(err_str):
-                logger.warning(
-                    "[TOOLROBUST-B] function calling 疑似不被 API 支持，本轮降级为无 tools 重试并注入文本教学。错误: %s",
-                    e,
-                )
-                state.toolsSupported = False
-                try:
-                    self.agent.append_tool_event({"type": "tools_degraded", "reason": err_str[:200]})
-                except Exception:
-                    pass
-                request_params.pop("tools", None)
-                request_params.pop("tool_choice", None)
-                # 降级后注入文本调用教学，避免模型在无 tools 状态下完全不会调工具
-                request_params["messages"] = self._append_tool_hint(request_params["messages"])
-                response = await self.llm_client.chat(**request_params)
-            else:
-                raise
+        while True:
+            outcome = await self._runOneNormalRound(request_params, state)
+            if outcome.done is not None:
+                return outcome.done
+            # 出口续跑：提示已入历史，就地开下一轮
+
+    async def _runOneNormalRound(
+        self, request_params: Dict, state: TurnRunState
+    ) -> "_TurnOutcome":
+        """非流式**单轮**：一次模型往返 + 工具执行 + 门控求值 + 出口裁决。
+
+        返回值三态：`done` 为最终响应（收口/终止/超限），`done is None` 表示
+        "本轮已注入续跑提示，请继续下一轮"。
+        """
+        response = await self._chatNormalWithDegrade(request_params, state)
 
         # 记录思考过程（用于前端展示）
         reasoning_content = getattr(response, "reasoning_content", None)
@@ -457,91 +518,115 @@ class OpenAILoop(BaseAgentLoop):
 
         # 处理 tool_calls（部分 provider 响应无 tool_calls 字段，需容错）
         tool_calls = getattr(response, "tool_calls", None)
-        if tool_calls:
-            state.toolRounds += 1
-            _max_rounds = getattr(self, "_max_tool_rounds", None) or ROUND_BUDGET_FALLBACK
-            if state.toolRounds > _max_rounds:
-                # 2026-09-07 根因修复（audit P2-8）：原实现只打日志继续递归，
-                # 实际上限是 IterationGate 的 20；现在超限真正终止
-                logger.warning("工具调用轮次超过上限 (%s)，终止递归", state.toolRounds)
-                return response
-            # P2-5：非流式路径同样过门控（TERMINATE 即终止递归）
-            from neurova.agent.gates import StopAction as _SA
+        if not tool_calls:
+            return await self._settleMainExit(request_params, response, state)
 
-            # LLMResponse.tool_calls 契约是 List[Dict]（llm_client 已把 SDK 对象转
-            # dict，base.py 执行链同样按 dict 访问）；原属性访问 tc.name 在 dict 上
-            # AttributeError → 整轮回退 legacy、工具环丢失（2026-09-14 飞书事故）
-            _tool_sigs = "|".join(
-                f"{(tc.get('function') or {}).get('name', '')}:"
-                f"{str((tc.get('function') or {}).get('arguments', ''))[:64]}"
-                for tc in tool_calls
-            )
-            # 门控 ctx 走本轮 state（轮次计数/签名不读实例——Issue #268）；
-            # 键集合与流式路径对齐（RC-3）：缺键会让 TokenBudgetGate / GoalGate
-            # 在非流式路径恒不可触发。
-            # **每轮只求值一次**：`DoomLoopGate.check()` 会自行把本轮签名记入窗口，
-            # 同轮重复求值等于把自己的签名判成"重复"（实测：同轮二次求值 → 第二轮
-            # 即被误判死循环终止）。出口续跑经 `_settleMainExit` 重入本方法时轮次号
-            # 未变，故按轮次号去重。
-            _interrupt_prompt = ""
-            if state.gatedRound != state.toolRounds:
-                state.gatedRound = state.toolRounds
-                _gd = state.gateRunner.on_round_end(state.gateContext(
-                    _tool_sigs,
-                    round_reply=getattr(response, "content", "") or "",
-                    round_usage=getattr(self.agent, "_round_usage", None) or {},
-                    goal=self.resolveTurnGoal() or {},
-                ))
-                if _gd is not None and _gd.action == _SA.TERMINATE:
-                    logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
-                    return response
-                if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
-                    _interrupt_prompt = _gd.continuation_prompt
+        return await self._advanceNormalRound(request_params, state, response, tool_calls, reasoning_content)
 
-            logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), state.toolRounds)
+    async def _chatNormalWithDegrade(self, request_params: Dict, state: TurnRunState) -> LLMResponse:
+        """模型往返 + 工具型 400 的无工具降级重试（单轮内，不叠帧）。"""
+        try:
+            return await self.llm_client.chat(**request_params)
+        except Exception as e:
+            if not (request_params.get("tools") and self._is_tools_rejected_error(str(e))):
+                raise
+            self._dropToolsForDegrade(request_params, state, str(e))
+            return await self.llm_client.chat(**request_params)
 
-            # 执行工具
-            tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
+    async def _advanceNormalRound(
+        self,
+        request_params: Dict,
+        state: TurnRunState,
+        response: LLMResponse,
+        tool_calls: List,
+        reasoning_content: Optional[str],
+    ) -> "_TurnOutcome":
+        """非流式工具轮：超限判定 → 门控 → 执行 → 回放 → 入历史。
 
-            # P2-6：工具轮间回放推理链——reasoning_content 默认关
-            # （NEUROVA_REASONING_REPLAY=1 开）+ REASONING 能力门，部分 provider
-            # 显式禁止回传；而 assistant.tool_calls 声明是无条件的协议要求，
-            # 缺它会被严格网关判 400（与流式路径同一 buildToolRoundMessages）
-            _round_reasoning = reasoning_content or ""
-            _replayReasoning = False
-            if _round_reasoning:
-                try:
-                    from neurova.agent.loops.reasoning_replay import should_replay_reasoning
+        `done is None` 表示本轮结束、循环继续（迭代形态里"继续"就是返回上一层
+        的 `while`，不再是一次自调用）。
+        """
+        state.toolRounds += 1
+        if state.toolRounds > state.maxToolRounds:
+            # 2026-09-07 根因修复（audit P2-8）：原实现只打日志继续递归，
+            # 实际上限是 IterationGate 的 20；现在超限真正终止
+            logger.warning("工具调用轮次超过上限 (%s)，终止", state.toolRounds)
+            return _TurnOutcome.finished(response)
+        # P2-5：非流式路径同样过门控（TERMINATE 即终止）
+        from neurova.agent.gates import StopAction as _SA
 
-                    _replayReasoning = should_replay_reasoning(
-                        str(getattr(self.agent.config, "llm_model", "") or "")
-                    )
-                except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
-                    logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
+        # LLMResponse.tool_calls 契约是 List[Dict]（llm_client 已把 SDK 对象转
+        # dict，base.py 执行链同样按 dict 访问）；原属性访问 tc.name 在 dict 上
+        # AttributeError → 整轮回退 legacy、工具环丢失（2026-09-14 飞书事故）
+        _tool_sigs = "|".join(
+            f"{(tc.get('function') or {}).get('name', '')}:"
+            f"{str((tc.get('function') or {}).get('arguments', ''))[:64]}"
+            for tc in tool_calls
+        )
+        # 门控 ctx 走本轮 state（轮次计数/签名不读实例——Issue #268）；
+        # 键集合与流式路径对齐（RC-3）：缺键会让 TokenBudgetGate / GoalGate
+        # 在非流式路径恒不可触发。
+        # **每轮只求值一次**：`DoomLoopGate.check()` 会自行把本轮签名记入窗口，
+        # 同轮重复求值等于把自己的签名判成"重复"（实测：同轮二次求值 → 第二轮
+        # 即被误判死循环终止）。出口续跑经 `_settleMainExit` 重入本方法时轮次号
+        # 未变，故按轮次号去重。
+        _interrupt_prompt = ""
+        if state.gatedRound != state.toolRounds:
+            state.gatedRound = state.toolRounds
+            _gd = state.gateRunner.on_round_end(state.gateContext(
+                _tool_sigs,
+                round_reply=getattr(response, "content", "") or "",
+                round_usage=getattr(self.agent, "_round_usage", None) or {},
+                goal=self.resolveTurnGoal() or {},
+            ))
+            if _gd is not None and _gd.action == _SA.TERMINATE:
+                logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
+                return _TurnOutcome.finished(response)
+            if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
+                _interrupt_prompt = _gd.continuation_prompt
 
-            # 将工具结果添加到消息（连同协议要求的 assistant 声明）
-            request_params["messages"].extend(
-                self.buildToolRoundMessages(
-                    tool_calls,
-                    tool_messages,
-                    assistantText=getattr(response, "content", "") or "",
-                    reasoningText=_round_reasoning if _replayReasoning else None,
+        logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), state.toolRounds)
+
+        # 执行工具
+        tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
+
+        # P2-6：工具轮间回放推理链——reasoning_content 默认关
+        # （NEUROVA_REASONING_REPLAY=1 开）+ REASONING 能力门，部分 provider
+        # 显式禁止回传；而 assistant.tool_calls 声明是无条件的协议要求，
+        # 缺它会被严格网关判 400（与流式路径同一 buildToolRoundMessages）
+        _round_reasoning = reasoning_content or ""
+        _replayReasoning = False
+        if _round_reasoning:
+            try:
+                from neurova.agent.loops.reasoning_replay import should_replay_reasoning
+
+                _replayReasoning = should_replay_reasoning(
+                    str(getattr(self.agent.config, "llm_model", "") or "")
                 )
+            except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
+                logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
+
+        # 将工具结果添加到消息（连同协议要求的 assistant 声明）
+        request_params["messages"].extend(
+            self.buildToolRoundMessages(
+                tool_calls,
+                tool_messages,
+                assistantText=getattr(response, "content", "") or "",
+                reasoningText=_round_reasoning if _replayReasoning else None,
             )
+        )
 
-            # RC-3：软干预与流式路径同一行为（原实现直接丢弃 INTERRUPT，
-            # 同一条门控意见一条路执行、一条路扔掉）；注入点与流式一致——工具
-            # 结果入历史之后、续跑之前。
-            if _interrupt_prompt:
-                request_params["messages"].append(
-                    {"role": "user", "content": _interrupt_prompt}
-                )
-                logger.info("门控 %s 软干预（非流式，提示已注入消息序列）: %s", _gd.gate_name, _gd.reason)
+        # RC-3：软干预与流式路径同一行为（原实现直接丢弃 INTERRUPT，
+        # 同一条门控意见一条路执行、一条路扔掉）；注入点与流式一致——工具
+        # 结果入历史之后、续跑之前。
+        if _interrupt_prompt:
+            request_params["messages"].append(
+                {"role": "user", "content": _interrupt_prompt}
+            )
+            logger.info("门控 %s 软干预（非流式，提示已注入消息序列）: %s", _gd.gate_name, _gd.reason)
 
-            # 递归调用，直到没有 tool_calls
-            return await self._predict_normal(request_params, state)
-
-        return await self._settleMainExit(request_params, response, state)
+        # 本轮结束、循环继续（迭代形态：返回上一层 while，不再递归自身）
+        return _TurnOutcome.running()
 
     async def _settleMainExit(
         self, request_params: Dict, response: LLMResponse, state: TurnRunState
@@ -565,23 +650,36 @@ class OpenAILoop(BaseAgentLoop):
             reply=getattr(response, "content", "") or "",
             roundUsage=getattr(self.agent, "_round_usage", None) or {},
             toolRound=state.toolRounds,
+            roundSignature=state.exitSignature(),
         )
         if decision.action == LOOP_CONTINUE:
             request_params["messages"].append(
                 {"role": "user", "content": decision.continuation_prompt}
             )
-            return await self._predict_normal(request_params, state)
+            # 续跑就地开下一轮（不再递归自身）：state 继续传递，交叠会话下
+            # 不会捡到"最后进入本 loop 的会话"留下的门控执行器。
+            return _TurnOutcome.running()
         if decision.action != "done":
             logger.warning("主出口门控 %s 终止: %s", decision.gate_name, decision.reason)
-        return response
+        return _TurnOutcome.finished(response)
 
     async def _predict_stream(self, request_params: Dict, state: TurnRunState = None) -> Any:
-        """流式预测入口（P1-1① 溢出恢复包装）。
+        """流式循环（**单层迭代**，Issue #268 切片 B）。
 
-        请求打开即上下文溢出（TokenLimitExceeded，且尚无内容产出）→ 折叠
- 消息后单次重试；重试仍溢出原样抛出，
-        不做第二次重试（防循环）。流中途溢出（已有内容）原样抛——重试会
-        造成内容重复。
+        两条恢复机制都并入这一层 `while`，不再靠递归自身叠帧：
+
+        - 请求打开即上下文溢出（`TokenLimitExceeded`，且尚无内容产出）→ 折叠消息后
+          单次重试；重试仍溢出原样抛出（防循环）；流中途溢出（已有内容）原样抛
+          （重试会造成内容重复）。
+        - 输出预算耗尽（`finish_reason=length` 且正文为空：思考模型把 max_tokens
+          吃满，HTTP 200 无异常）→ 放宽输出预算 + 思考降级 + 压缩消息后单次重试；
+          重试仍空则补一条可见提示，`done.reply` 同步改写（杜绝空气泡）。
+
+        迭代化后这两条从"再进一次 `_predict_stream`"变成"改 `request_params` 就地
+        开下一轮"，已产出的正文事件**不重复 yield**（重放会变成两次 done 事件，
+        前端正文翻倍）。
+
+        返回：恰好一个 `done` 事件收尾的异步生成器。
         """
         from neurova.context.recovery import (
             compact_messages_for_overflow,
@@ -590,120 +688,181 @@ class OpenAILoop(BaseAgentLoop):
 
         if state is None:
             state = self._startTurnState(request_params.get("messages") or [])
-        first_error: Optional[BaseException] = None
-        got_content = False
-        try:
-            async for event in self._predict_stream_once(request_params, state):
-                if isinstance(event, dict) and event.get("type") == "content" and event.get("data"):
-                    got_content = True
-                # 修3（2026-09-09）：输出预算耗尽防线——finish_reason=length
-                # 且正文为空（思考模型把 max_tokens 吃满，HTTP 200 无异常，
-                # TokenLimitExceeded 溢出恢复永远不触发）。放宽输出预算+
-                # 思考降级+压缩消息后单次重试；重试仍空则原样转发该 done
-                # （不二次重试，防循环）。
-                if (
-                    isinstance(event, dict)
-                    and event.get("type") == "done"
-                    and not got_content
-                    and not request_params.get("_length_empty_retried")
-                    and not (event.get("reply") or "").strip()
-                    and str(event.get("finish_reason") or "").lower() in ("length", "max_tokens")
+
+        self._rounds = _StreamRounds()  # 本轮流式循环的轮间标志（见 `_resumeAfterLengthEmpty`）
+        while True:
+            produced = None
+            gotContent = False
+            try:
+                async for item in self._streamOneRound(request_params, state):
+                    if isinstance(item, _RoundEnd):
+                        produced, gotContent = item.done, item.gotContent
+                        self._rounds.advanced = item.advanced
+                        break
+                    if isinstance(item, dict) and item.get("type") == "content" and item.get("data"):
+                        gotContent = True
+                    yield item
+            except BaseException as e:  # noqa: BLE001 - 统一捕获后按类型分流
+                resumed = self._resumeAfterOverflow(
+                    e, request_params, gotContent, compact_messages_for_overflow, is_context_overflow_error
+                )
+                if resumed is None:
+                    raise
+                request_params = resumed
+                continue
+
+            if self._rounds.exhausted:
+                # 轮次超限：本轮没有 done 可交，静默收尾（与非流式「终止」同判据）
+                return
+
+            if self._rounds.lengthEmpty:
+                # 输出预算耗尽（本轮 length 且正文为空）→ 放宽预算后就地重试。
+                # 本轮的空 done 不让出（无正文可看），只让出提示；重试仍空由
+                # `retriedStillEmpty` 分支补可见提示并改写 done.reply（杜绝空气泡）。
+                resumed, notice = self._resumeAfterLengthEmpty(
+                    request_params, compact_messages_for_overflow
+                )
+                if resumed is None:
+                    # 无可动旋钮 / 无可折叠 → 原样交出该 done（不二次重试，防循环）
+                    if produced is not None:
+                        yield produced
+                    return
+                if notice is not None:
+                    yield notice
+                request_params = resumed
+                continue
+
+            if produced is not None:
+                # 首轮(或重试轮)的 done：重试仍空 → 补可见提示并改写 done.reply，
+                # 使 ctx.reply 非空、落盘与前端气泡均有内容（杜绝空气泡，闭环）
+                if not (produced.get("reply") or "").strip() and (
+                    self._rounds.retriedStillEmpty or self._rounds.lengthEmptyRetried
                 ):
-                    compact, info = compact_messages_for_overflow(request_params.get("messages") or [])
-                    # 可动旋钮判定：输出预算（max_tokens）或思考档位任一存在即值得
-                    # 重试；两者皆无且输入无可折叠 → 不重试（防空转循环）。
-                    # 病根在输出侧（思考吃满 max_tokens），重试必须同步放宽输出
-                    # 预算+思考降级，只压缩输入会原样撞同一堵墙。
-                    _budget_knobs = "max_tokens" in request_params or any(
-                        k in request_params
-                        for k in ("thinking_enabled", "thinking_effort", "reasoning_effort", "thinking_budget")
-                    )
-                    if info.get("folded_count", 0) > 0 or _budget_knobs:
-                        logger.warning(
-                            "[CTX_RECOVERY] 输出预算耗尽(length)且正文为空，放宽输出预算+思考降级后单次重试（折叠 %d 条）",
-                            info.get("folded_count", 0),
-                        )
-                        yield {
-                            "type": "reasoning",
-                            "data": "检测到回复为空（输出预算被思考过程耗尽），正在放宽输出预算并压缩上下文后重试…",
-                        }
-                        # 被折叠消息摘要回写池（fire-and-forget，与溢出恢复同构）
-                        try:
-                            pool = getattr(
-                                getattr(self.agent, "context_orchestrator", None), "context_pool", None
-                            )
-                            if pool is not None:
-                                asyncio.ensure_future(
-                                    pool.rollup_overflow_digest(info.get("folded_messages") or [])
-                                )
-                        except Exception:
-                            logger.debug("length 恢复摘要回写跳过", exc_info=True)
-                        retry_params = {
-                            **request_params,
-                            "messages": compact,
-                            "_length_empty_retried": True,
-                            # 输出侧放宽：思考关停（预算让位给正文）；仅当原请求
-                            # 显式带预算/档位键时才覆写对应键，不凭空注入预算。
-                            "thinking_enabled": False,
-                        }
-                        if "max_tokens" in request_params:
-                            retry_params["max_tokens"] = _raised_output_budget(
-                                request_params.get("max_tokens")
-                            )
-                        if "thinking_effort" in request_params:
-                            retry_params["thinking_effort"] = "light"
-                        if "reasoning_effort" in request_params:
-                            retry_params["reasoning_effort"] = "low"
-                        retry_params.pop("thinking_budget", None)
-                        async for ev in self._predict_stream(retry_params, state):
-                            # 重试仍空 → 补可见提示（杜绝空气泡），done.reply 同步改写
-                            # 使 ctx.reply 非空、落盘与前端气泡均有内容（闭环）
-                            if (
-                                isinstance(ev, dict)
-                                and ev.get("type") == "done"
-                                and not (ev.get("reply") or "").strip()
-                            ):
-                                notice = (
-                                    "⚠️ 未能生成回复：输出预算被思考过程占满（finish_reason=length），"
-                                    "压缩上下文重试后仍未产出正文。建议切换非思考模型，"
-                                    "或在模型设置中调大最大输出 token。"
-                                )
-                                yield {"type": "content", "data": notice}
-                                ev = {**ev, "reply": notice}
-                            yield ev
-                        return
-                yield event
+                    # `lengthEmptyRetried` 为真 = 重试轮仍空（本轮就是那次重试）
+                    yield {"type": "content", "data": _LENGTH_EMPTY_NOTICE}
+                    produced = {**produced, "reply": _LENGTH_EMPTY_NOTICE}
+                yield produced
+                return
+
+            if self._rounds.advanced:
+                # 本轮被接续（工具轮续写 / 出口续跑）：下一轮由循环开
+                continue
             return
-        except BaseException as e:  # noqa: BLE001 - 统一捕获后按类型分流
-            first_error = e
 
-        # 流中途已产出内容 → 重试会造成内容重复，原样抛
-        if got_content or not is_context_overflow_error(first_error):
-            raise first_error
+    def _resumeAfterOverflow(
+        self,
+        error: BaseException,
+        request_params: Dict,
+        gotContent: bool,
+        compactMessages,
+        isOverflow,
+    ) -> Optional[Dict]:
+        """溢出恢复：返回"下一轮要用的 request_params"，或 `None` 表示原样抛出。
 
+        单次语义由调用方经 `request_params` 上的 `_overflowRetried` 标记保证：
+        已重试过的轮不再重试（原实现靠"重试走另一条分支、不再进同一判断"实现，
+        迭代后同一段代码会被再次进入，故标记必须显式）。
+        """
+        if gotContent or not isOverflow(error) or request_params.get("_overflowRetried"):
+            return None
         messages = request_params.get("messages") or []
-        compact, info = compact_messages_for_overflow(messages)
+        compact, info = compactMessages(messages)
         if info.get("folded_count", 0) <= 0:
-            raise first_error  # 无可折叠内容，恢复无意义
+            return None  # 无可折叠内容，恢复无意义
         logger.warning(
             "[CTX_RECOVERY] 上下文溢出，折叠 %d 条消息后单次重试（%d → %d）",
             info["folded_count"], info["original_count"], info["compact_count"],
         )
-        # 增强①：被折叠消息生成摘要回写池（fire-and-forget，不阻塞重试；
-        # 无池/无摘要器 no-op——rollup 内部自兜底）
+        self._rollupFoldedDigest(info)
+        return {**request_params, "messages": compact, "_overflowRetried": True}
+
+    def _resumeAfterLengthEmpty(self, request_params: Dict, compactMessages):
+        """输出预算耗尽恢复：返回（下一轮的 request_params, 首轮提示事件）。
+
+        `request_params is None` 表示无旋钮可动、不重试。病根在输出侧
+        （思考吃满 max_tokens），重试必须同步放宽输出预算 + 思考降级；
+        只压缩输入会原样撞同一堵墙。
+        """
+        if request_params.get("_length_empty_retried"):
+            return None, None
+        compact, info = compactMessages(request_params.get("messages") or [])
+        budgetKnobs = "max_tokens" in request_params or any(
+            k in request_params
+            for k in ("thinking_enabled", "thinking_effort", "reasoning_effort", "thinking_budget")
+        )
+        if info.get("folded_count", 0) <= 0 and not budgetKnobs:
+            return None, None
+        logger.warning(
+            "[CTX_RECOVERY] 输出预算耗尽(length)且正文为空，放宽输出预算+思考降级后单次重试（折叠 %d 条）",
+            info.get("folded_count", 0),
+        )
+        self._rollupFoldedDigest(info)
+        retryParams = {
+            **request_params,
+            "messages": compact,
+            "_length_empty_retried": True,
+            # 输出侧放宽：思考关停（预算让位给正文）；仅当原请求显式带预算/档位键
+            # 时才覆写对应键，不凭空注入预算。
+            "thinking_enabled": False,
+        }
+        if "max_tokens" in request_params:
+            retryParams["max_tokens"] = _raised_output_budget(request_params.get("max_tokens"))
+        if "thinking_effort" in request_params:
+            retryParams["thinking_effort"] = "light"
+        if "reasoning_effort" in request_params:
+            retryParams["reasoning_effort"] = "low"
+        retryParams.pop("thinking_budget", None)
+        self._rounds.lengthEmptyRetried = True
+        # 紧接着的这一轮若仍空即"重试仍空"：由收尾路径补可见提示（不再重试，防循环）
+        self._rounds.retriedStillEmpty = True
+        return retryParams, {
+            "type": "reasoning",
+            "data": "检测到回复为空（输出预算被思考过程耗尽），正在放宽输出预算并压缩上下文后重试…",
+        }
+
+    def _rollupFoldedDigest(self, info: Dict) -> None:
+        """被折叠消息生成摘要回写池（fire-and-forget，不阻塞重试；无池 no-op）。"""
         try:
-            pool = getattr(
-                getattr(self.agent, "context_orchestrator", None), "context_pool", None
-            )
+            pool = getattr(getattr(self.agent, "context_orchestrator", None), "context_pool", None)
             if pool is not None:
-                asyncio.ensure_future(
-                    pool.rollup_overflow_digest(info.get("folded_messages") or [])
-                )
+                asyncio.ensure_future(pool.rollup_overflow_digest(info.get("folded_messages") or []))
         except Exception:
-            logger.debug("溢出摘要回写跳过", exc_info=True)
-        retry_params = {**request_params, "messages": compact}
-        async for event in self._predict_stream_once(retry_params, state):
+            logger.debug("折叠摘要回写跳过", exc_info=True)
+
+    async def _streamOneRound(self, request_params: Dict, state: TurnRunState) -> Any:
+        """流式**单轮**：拉一轮 chunk（让出正文事件），再就地推进工具轮/出口。
+
+        循环推进的语义（三类）都在这里落地成 `rounds` 上的标志，由
+        `_predict_stream` 决定是继续下一轮还是收尾——单轮本身不递归、不循环。
+        """
+        self._rounds.beginNextRound()
+        gotContent = False
+        advanced = False
+        doneEvent: Optional[Dict[str, Any]] = None
+        async for event in self._predict_stream_once(request_params, state):
+            if event is _STREAM_END:
+                # 本轮已就地推进（工具轮续写 / 出口续跑）：done 不由本单轮交出
+                advanced = True
+                continue
+            if isinstance(event, dict) and event.get("type") == "content" and event.get("data"):
+                gotContent = True
+            if isinstance(event, dict) and event.get("type") == "done":
+                # done 由迭代层让出（不在此就地 yield）：恢复路径要先看读数的
+                # 决定发不发它（length 空回复重试时那一轮的空 done 不该让用户看见）
+                doneEvent = event
+                continue
             yield event
+
+        self._rounds.advanced = advanced
+        if not advanced and not gotContent and doneEvent is not None:
+            # 输出预算耗尽防线（前置于 done 事件的判定，见 `_predict_stream` 分支）
+            self._rounds.lengthEmpty = (
+                not request_params.get("_length_empty_retried")
+                and not (doneEvent.get("reply") or "").strip()
+                and str(doneEvent.get("finish_reason") or "").lower() in ("length", "max_tokens")
+            )
+
+        yield _RoundEnd(advanced, gotContent, doneEvent)
 
     async def _predict_stream_once(self, request_params: Dict, state: TurnRunState = None) -> Any:
         """流式预测 — 实时 yield 结构化事件（content / reasoning / tool_call / tool_result / done）。
@@ -713,8 +872,10 @@ class OpenAILoop(BaseAgentLoop):
         1. 把 chunk 实时转成 typed 事件（reasoning/content 逐片段转发，思考过程不再整块滞后）；
         2. 流式 tool_calls 分片按 index 合并为完整调用（OpenAI 兼容流中首片带 id/name，
            后续片段仅携带 arguments 碎片），流结束后执行并产出 tool_result 事件；
-        3. 工具执行后以流式续写（递归本方法），直到模型不再调用工具；
-        4. 整个生成器恰好 yield 一个 done 事件（携带最终轮正文快照）；
+        3. 工具执行后就地推进（让出 `_STREAM_END` 给 `_predict_stream` 的循环，
+           由它开下一轮），本方法**不递归、不循环**；
+        4. 单轮结束时 yield 一个 done 事件（携带本轮正文快照）——整条流恰好一个
+           done 由 `_predict_stream` 保证；
         5. error 字典抛 RuntimeError 交由管线降级，而不是静默返回空回复。
         """
         if state is None:
@@ -730,7 +891,7 @@ class OpenAILoop(BaseAgentLoop):
         # 但泄漏进 provider 兼容层属于未定义行为）
         stream_kwargs = {
             k: v for k, v in request_params.items()
-            if k not in ("messages", "stream", "_length_empty_retried")
+            if k not in ("messages", "stream", "_length_empty_retried", "_overflowRetried")
         }
         async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
             if isinstance(chunk, dict):
@@ -853,10 +1014,11 @@ class OpenAILoop(BaseAgentLoop):
             else:
                 state.stagnationCount = 0
 
-            # A-19：与非流式 _predict_normal 同一可配置来源（_max_tool_rounds，
+            # A-19：与非流式 predict_normal 同一可配置来源（state.maxToolRounds，
             # predict_step 入口从 get_effective_limits() 读取）——消除硬编码 10 漂移
-            if state.toolRounds <= (getattr(self, "_max_tool_rounds", None) or ROUND_BUDGET_FALLBACK):
-                # 工具结果入历史后流式续写（递归），保持后续轮次同样逐 token 转发
+            if state.toolRounds <= state.maxToolRounds:
+                # 工具结果入历史后就地推进（迭代形态：由 `_predict_stream` 的循环
+                # 开下一轮），保持后续轮次同样逐 token 转发
                 # P2-6：流式路径同批回放推理链——但 reasoning_content 与被禁止它的
                 # provider 分档，assistant.tool_calls 声明本身是无条件协议要求
                 # （缺声明 → 严格网关把续写判 400，见 base.buildToolRoundMessages）
@@ -884,10 +1046,10 @@ class OpenAILoop(BaseAgentLoop):
                         "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。"
                     )
                     request_params["messages"].append({"role": "user", "content": stagnation_prompt})
-                async for event in self._predict_stream(request_params, state):
-                    yield event
+                # 单轮结束：本轮正文/工具事件已让出，下一轮由循环开
+                yield _STREAM_END
                 return
-            logger.warning("工具调用轮次超过上限 (%s)，停止递归", state.toolRounds)
+            logger.warning("工具调用轮次超过上限 (%s)，停止", state.toolRounds)
 
         from neurova.agent.loops.base import LOOP_CONTINUE, LOOP_DONE, evaluateLoopExit
 
@@ -896,16 +1058,18 @@ class OpenAILoop(BaseAgentLoop):
             reply="".join(reply_parts),
             roundUsage=getattr(self.agent, "_round_usage", None) or {},
             toolRound=state.toolRounds,
+            roundSignature=state.exitSignature(),
         )
         if _exitDecision.action == LOOP_CONTINUE:
             request_params["messages"].append(
                 {"role": "user", "content": _exitDecision.continuation_prompt}
             )
             yield {"type": "reasoning", "data": _exitDecision.continuation_prompt}
-            # 同 `_settleMainExit`：续跑是本轮的续跑，state 必须继续传递，
-            # 否则续跑段会捡起最后进入本 loop 的会话留下的门控执行器。
-            async for event in self._predict_stream(request_params, state):
-                yield event
+            # 同 `_settleMainExit`：续跑是本轮的续跑，state 继续传递（门控执行器
+            # 随 state 走，不会捡到最后一个进入本 loop 的会话留下的那份）；
+            # 下一轮由 `_predict_stream` 的循环开——本轮不 yield done，
+            # 整条流仍恰好一个 done。
+            yield _STREAM_END
             return
         if _exitDecision.action != LOOP_DONE:
             # 有理由地终止，且**不得静默**：reasoning 是前端会显示的既有通道
@@ -921,6 +1085,7 @@ class OpenAILoop(BaseAgentLoop):
                 "data": f"已停止继续尝试：{_exitDecision.reason}",
             }
 
+        # 单轮收口（整条流到此结束，`_predict_stream` 不再开下一轮）
         yield {
             "type": "done",
             "reply": "".join(reply_parts),
@@ -1005,6 +1170,11 @@ class OpenAILoop(BaseAgentLoop):
             entry["function"]["name"] = (entry["function"].get("name") or "") + fn["name"]
         if fn.get("arguments"):
             entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn["arguments"]
+
+    #: `_predict_normal` 是本方法的既有私有名（既有测试与调试脚本按它驱动单轮/多轮）。
+    #: 迭代化只改控制流，入口名保持不变——改名会把调用面一并拖进来，
+    #: 与"切片 B 不动公有面"的边界不符。
+    _predict_normal = predict_normal
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
