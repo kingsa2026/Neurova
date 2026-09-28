@@ -14,7 +14,9 @@ from neurova.builtin_tools import (
     _BUILTIN_SCHEMAS,
 )
 
-# 快照/突变/副作用类——重放不可能或重放制造新副作用
+# 快照/突变/副作用类——重放不可能或重放制造新副作用。
+# 快照族含**浏览器侧**两条与**桌面侧**三条：同一根因（瞬时画面/结构）的全部命中点，
+# 漏一条就少一份「只读也可能不可重放」的证据（教义第 5 条）。
 EXPECTED_NON_REPRODUCIBLE = {
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "spawn_subagent", "planning",
@@ -26,7 +28,7 @@ EXPECTED_NON_REPRODUCIBLE = {
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_shell", "computer_ssh_exec", "computer_screenshot",
     "browser_click", "browser_click_role", "browser_fill_role",
-    "browser_type", "browser_navigate", "browser_screenshot",
+    "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
@@ -209,11 +211,36 @@ class TestWriteScopedToolsAreNeverReproducible:
         """
         from neurova.builtin_tools import _NON_REPRODUCIBLE_TOOLS, get_builtin_tool_capability
 
-        for name in ("computer_screenshot", "computer_dom_snapshot", "computer_som_snapshot"):
+        for name in (
+            "computer_screenshot", "computer_dom_snapshot", "computer_som_snapshot",
+            # 同一根因的全部命中点（教义第 5 条）：浏览器侧的瞬时快照与桌面侧同族。
+            # 只列桌面三条时，`browser_dom_snapshot` 漏登在名单之外而无人察觉——
+            # 「只读也可能不可重放」这条反例因此少一条证据。
+            "browser_screenshot", "browser_dom_snapshot",
+        ):
             cap = get_builtin_tool_capability(name)
             assert cap is not None and cap.readOnly, f"{name} 应声明为只读"
             assert name in _NON_REPRODUCIBLE_TOOLS, (
                 f"{name} 是瞬时快照：只读但不可重放，必须留在重放名单里"
+            )
+
+    def test_readOnlyCursorToolsAreReproducible(self):
+        """反向钉：**只读也可能可重放**——会话游标族与快照族同族不同轴。
+
+        两个族都只读，在重放轴上却必须给出相反读数。若有人把两轴并成一个字段
+        （或把"共享作用域 ⇒ 不可重放"当成规则），这一条会红。
+        """
+        from neurova.builtin_tools import (
+            _NON_REPRODUCIBLE_TOOLS,
+            get_builtin_tool_capability,
+        )
+
+        for name in ("browser_read", "browser_dom_read"):
+            cap = get_builtin_tool_capability(name)
+            assert cap is not None and cap.readOnly, f"{name} 应声明为只读"
+            assert name not in _NON_REPRODUCIBLE_TOOLS, (
+                f"{name} 推进的是分片续读游标（同参数重放取回同一段文本），"
+                "属可重放；把它并入名单会让「只读也可能不可重放」的反例失去判别力"
             )
 
     def test_writePdfIsNotInTheReproduciblePool(self):
