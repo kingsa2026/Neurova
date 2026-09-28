@@ -12,11 +12,12 @@ T-01 的判据层（`test_tool_loop_deadline_ledger.py`）钉住了「判据类 
 1. **处置与判据咬合**：声明「已删除 / 收口第二份」⇒ 实测判据类必须是 `absent`；
    声明「已接线」⇒ 必须是 `consumed`。写法与上下文域同一条规则（
    `disposalConflicts()` 是纯函数，可喂合成输入自证）。
-2. **第二轴不许恒真**：`IterationGate` 是本片唯一的设计争议点，第二轴实测
-   `scaled_sparse`（合法配置域内只有一个配置能让门控出声，且只在流式路径上）。
-   若它被改成 `scaled_unreachable`（或轴整体退化），说明值域证据没被复算——
-   而反向控制 `TokenBudgetGate` 必须一直是 `single_source`（同域、同根因、阈值可达），
-   两者一起才证明「阈值轴有判别力」。
+2. **第二轴不许恒真**：`IterationGate` 是本片唯一的设计争议点——登记时实测
+   `scaled_sparse`（同键两尺度，合法配置域内只有一个配置能让门控出声）。
+   **T-04 轮次预算单源已把尺度收口成一份**，该轴随之变 `single_source`，本守卫
+   改为钉住**收口的终局**（证据②归零 + 守卫与门控同取一处派生），而不是钉住
+   收口前的读数；反向控制 `TokenBudgetGate` 仍是 `single_source`（同域、同根因、
+   阈值可达），两者一起才证明「阈值轴有判别力」。
 3. **处置必须有机器证据、且必须逐条留痕**：原实现把「T-01 只建判据」这条**波次
    范围**写成了「全部条目永为待处置」的**恒久不变式**——处置批一落地（T-04 轮次预算
    单源、G2 目标验收链）它就必然报红，而它报红的原因与"判据坏没坏"无关。现改为
@@ -46,10 +47,15 @@ GUARD_REL = "tests/unit/tools/test_tool_loop_deadline_disposal.py"
 THIS_WAVE_DISPOSAL = ledger.DISPOSAL_PENDING
 
 #: 第二轴的期望值：争议点与反向控制成对登记，缺一则轴失去判别力。
+#: **T-04 轮次预算单源已交付**，争议点随之收口：`IterationGate` 由
+#: `scaled_sparse` 变 `single_source` —— 这正是台账在收口前就预告的读数
+#: （「把尺度收口成一份后，证据②消失、轴值必然改变」）。改这一行不是让守卫
+#: 迁就实现，而是把**收口的终局**钉成新的期望值：此后若有人再把同键的两个尺度
+#: 写回来，轴会立刻退回 `scaled_sparse`，本表即红。
 THRESHOLD_EXPECTATIONS = {
-    # 设计争议点：同一个配置键取两个尺度（max_loop_rounds 与 max_loop_rounds//2），
-    # 合法配置域（MIN_ROUNDS=2..MAX_ROUNDS=200）内只有一个配置让门控吃到阈值。
-    "IterationGate": ledger.THRESHOLD_SCALED_SPARSE,
+    # 争议点（已收口）：尺度只有一处派生（turn_run_state.resolveToolRoundBudget），
+    # 守卫与门控同取它 ⇒ 该配置键在生产侧只有一个尺度，阈值可达。
+    "IterationGate": ledger.THRESHOLD_SINGLE_SOURCE,
     # 反向控制：同域阈值型门控，配置键只有一份尺度 ⇒ 阈值可达。
     "TokenBudgetGate": ledger.THRESHOLD_SINGLE_SOURCE,
 }
@@ -97,6 +103,13 @@ class TestDisposalIsMachineCheckable:
         # `agent/loops/openai_loop.py:_goalRoundBudget()` 是生产侧唯一读取点，
         # `_buildGateRunner` 默认装配与 `_buildGoalGate` 两处构造时读它 ⇒ 跨文件消费成立。
         "goal_round_budget": "GoalGate 轮次预算：openai_loop._goalRoundBudget 唯一读取点",
+        # T-04 轮次预算单源（Issue #310）：本片把「同一个配置键读出两个尺度」
+        # 收口成一份派生。前像：门控取尺度 1（`limits["max_loop_rounds"]`），
+        # 守卫取尺度 1/2（`…["max_loop_rounds"] // 2`，且在两处各写一遍、值存在
+        # per-agent 单例的 `self._max_tool_rounds` 上）。收口后尺度只有一处派生
+        # （`turn_run_state.resolveToolRoundBudget()`），守卫与门控同取它 ⇒
+        # 该门控阈值第一次真正可达（第二轴机器算出 single_source）。
+        "IterationGate": "T-04 轮次预算单源：turn_run_state.resolveToolRoundBudget 唯一派生点",
         # T-03 协议桥收口（Issue #177 / #310）：三协议形态判别从「请求侧与响应侧
         # 各判一遍」收口为单一事实源 `openai_schema.detectToolCallFormat()`。
         # 三条目的判据类本就成立（T-03 已接线），本批清的是**依据里那句存量**。
@@ -319,37 +332,65 @@ class TestThresholdAxisIsNotVacuous:
             + "\n  ".join(problems)
         )
 
-    def test_iteration_gate_shadow_evidence_is_three_fold(self):
-        """争议点的判据必须三条证据齐全，缺一条即说明轴退化成「看一眼就判」。"""
+    def test_iteration_gate_closure_removed_the_second_scale(self):
+        """T-04 收口后：争议点的证据①仍在（绑定配置键），**证据②必须归零**。
+
+        证据②（同键 `…[max_loop_rounds] // d`，d≥2 的更小尺度守卫）消失，正是
+        收口本身的读数：尺度只有一处派生，不存在第二个更小的尺度去抢先开火。
+        若它又出现，说明有人把 `// 2` 写了回来 ⇒ 本判据红。
+        """
         detail = _facts()["IterationGate"]["threshold_detail"]
         assert detail.get("config_key") == "max_loop_rounds", (
-            "找不到门控构造处直接绑定的配置键——证据①缺失，轴会退化成无条件判定"
+            "门控构造处没绑定配置键——收口后它必须仍绑着单源，否则上限又不受配置管辖"
         )
-        witnesses = detail.get("witnesses") or []
-        assert witnesses and int(witnesses[0]["divisor"]) >= 2, (
-            "找不到同键的更小尺度守卫（`…[max_loop_rounds] // d`，d≥2）——证据②缺失"
+        # 直接问机器要证据②的取数（`single_source` 分支不携带 witnesses 字段，
+        # 故不能靠 detail 里"有没有这个键"来判断——那会把"没算"读成"没有"）。
+        witnesses = ledger._scalingWitnesses("max_loop_rounds")
+        assert not witnesses, (
+            "同键又出现了更小尺度守卫（`…[max_loop_rounds] // d`，d≥2）——"
+            "T-04 已把尺度收口成一份，它不该再存在：\n  " + repr(witnesses)
         )
-        legal = detail.get("legal_configs") or {}
-        assert int(legal.get("lower", 0)) == 2 and int(legal.get("upper", 0)) == 200, (
-            f"合法配置域不是由单源夹逼常量算出来的：{legal}——证据③缺失"
-        )
-        build = ledger.settingsBounds()
-        assert build.get("MIN_ROUNDS") == 2 and build.get("MAX_ROUNDS") == 200, (
-            f"夹逼常量取数失效：{build}（合法域的证据必须来自生产单源，不得人填）"
+        binding = detail.get("binding") or {}
+        assert binding.get("config_key") == "max_loop_rounds", (
+            f"绑定来源不是 max_loop_rounds：{binding}"
         )
 
-    def test_order_facts_are_per_function_not_per_file(self):
-        """站点次序必须按函数分组：全文件取最小行号会把「门控先于守卫」掩成相反。"""
-        orders = _facts()["IterationGate"]["threshold_detail"].get("orders") or []
-        assert len(orders) >= 2, (
-            f"站点次序只取到 {len(orders)} 组——流式与非流式是两条独立路径，"
-            "全文件取最小行号会掩盖其中一条"
+    def test_single_source_binding_form_is_recognized(self):
+        """收口后的绑定写法（调单源派生点）必须被器械认成配置绑定。
+
+        不认它，轴会退成 `unbound` —— 那是**判据替旧形态背书**：收口本身被判违规。
+        本判据同时钉住两种写法都可被识别：下标（构造处直取）与单源派生点（函数体内取）。
+        """
+        derivations = ledger._singleSourceDerivations()
+        assert derivations.get("resolveToolRoundBudget") == "max_loop_rounds", (
+            "单源派生点未被识别出它读的配置键——绑定写法②会退成 unbound：\n  "
+            + repr({k: v for k, v in derivations.items() if "Round" in k})
         )
-        by_function = {pair["function"]: pair["order"] for pair in orders}
-        assert len(set(by_function.values())) >= 2, (
-            f"两条路径的次序读数相同（{by_function}）——正是「全文件取最小行号」的退化形态，"
-            "而本片争议点的结论（scaled_sparse 而非 scaled_unreachable）恰取决于这个差异"
-        )
+        assert ledger._derivationCallKey(
+            "resolveToolRoundBudget()", derivations
+        ) == "max_loop_rounds", "调用单源派生点的形态未被认成绑定"
+
+    def test_guard_and_gate_share_one_derivation(self):
+        """收口的终局判据：守卫与门控取到**同一个数**（逐档实测，不是静态声称）。"""
+        import neurova.security.agent_limits_settings as als
+
+        original = dict(als.DEFAULTS)
+        try:
+            from tests.unit.agent.test_tool_round_budget_single_source import (
+                _buildLoop,
+                _gateThreshold,
+                _guardBudget,
+            )
+
+            for rounds in (2, 20, 200):
+                loop = _buildLoop({"max_loop_rounds": rounds, "goal_round_budget": None})
+                assert _guardBudget() == _gateThreshold(loop) == rounds, (
+                    f"max_loop_rounds={rounds} 时守卫与门控不同取一处派生："
+                    f"守卫={_guardBudget()} 门控={_gateThreshold(loop)}"
+                )
+        finally:
+            als.DEFAULTS.clear()
+            als.DEFAULTS.update(original)
 
     def test_legal_config_enumeration_is_honest(self):
         """可达配置必须**如实枚举**有限域，不能用一个恒假断言代替。"""
