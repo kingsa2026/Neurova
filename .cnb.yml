@@ -1172,3 +1172,74 @@ $:
 #   `^\.` 锚点形态）由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
 # （若将来某两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
 #   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）
+
+  # ── 云原生开发环境（Issue #289 评论「自定义一个适配 neurova 的开发环境」）───
+  # 挂在 `$` 兜底块下：开发环境的用途正是"在任意分支上开发"，挂 `main` 下会
+  # 让分支页面点按钮落到平台默认镜像（官方《自定义环境创建流程》：`vscode`
+  # 事件在建环境时触发；本仓把它放兜底块，故所有分支共用同一份声明）。
+  #
+  # 为什么不是"用默认镜像就行"：默认镜像 `cnbcool/default-dev-env` 里既没有本仓的
+  # 生产解释器（python:3.12）与前端工具链（Node 20），也没有本仓全量运行依赖
+  # （语义检索/TTS/抓取/桌面自动化）。用它只能得到一个能开 WebIDE、却跑不了
+  # 本仓受保护子集与功能链的壳。故 build 本仓 `.ide/Dockerfile`。
+  #
+  # `image` 是**回退镜像**（官方文档：build 失败时的回退镜像）：`.ide/Dockerfile`
+  # 构建不出来时不至于"环境创建失败"，至少给一个可用环境。两者都声明。
+  #
+  # 预装口径：`.ide/Dockerfile` 已在**构建期**装好整装运行环境 ——
+  # `requirements-full.lock`（与生产 `requirements.txt` 同源）、playwright 浏览器
+  # 二进制（`install --with-deps`）、Node 20 与 code-server。故 stages 这里只做
+  # "工作区就位后才能做"的两件事（前端 `npm ci` 需 NeurUI 目录 + 环境自证），
+  # 不再重复装后端依赖（重复装即第二份依赖口径，教义第 6 条）。
+  #
+  # 契约守卫：tests/unit/ci/test_dev_environment_contract.py 钉住
+  #   「build == .ide/Dockerfile + 有回退镜像 + services 含 vscode/docker
+  #    + 镜像装了全量运行环境 + stages 从既有锁文件装依赖（不得另写第二份清单）」。
+  vscode:
+    - name: "neurova-dev-env"
+      # 资源规格显式声明（官方《自定义云原生开发流水线》：`runner.cpus` 决定
+      # CPU 核数，内存 = cpus × 2GiB）。开发环境要跑 pytest 子集 + vitest，
+      # 不声明就等于"配了什么资源无从作答"而落到平台默认值。
+      # 与 .cnb/settings.yml 的 workspace.launch.cpus 必须一致——
+      # 前者是流水线实际申请的资源，后者是按钮展示与创建时用的规格，
+      # 二者分叉即"按钮说 8 核、实际跑另一个数"的不可见降配（守卫钉住）。
+      runner:
+        cpus: 8
+      docker:
+        build: .ide/Dockerfile
+        image: cnbcool/default-dev-env:latest
+      services:
+        - vscode
+        - docker
+      # 进入开发环境时自动执行一次（官方《默认开发环境》的 CNB_WELCOME_CMD）。
+      # 镜像已装 cnbcool.cnb-welcome 插件，此处只声明要跑的命令。
+      env:
+        CNB_WELCOME_CMD: echo "Neurova 开发环境已就绪：python $(python -V 2>&1) / node $(node -v) / 依赖已预装"
+      stages:
+        # 后端全量依赖已在镜像构建期装好（.ide/Dockerfile 的 requirements-full.lock）。
+        # 此处只做工作区就位后才能做的那两步。
+        - name: 安装前端依赖（工作区就位后）
+          script: |
+            set -e
+            cd NeurUI && npm ci
+        - name: 环境自证（整装运行环境开箱可用）
+          script: |
+            set -e
+            echo "python=$(python -V 2>&1)  node=$(node -v)  npm=$(npm -v)"
+            echo "code-server=$(command -v code-server || echo MISSING)"
+            python -m pytest --version
+            # 全量运行依赖的抽样自证：装了才算数，缺席即点名（不吞异常）。
+            python - <<'EOF'
+            import importlib
+            probes = ["onnxruntime", "sentence_transformers", "transformers",
+                      "edge_tts", "playwright", "pyautogui", "jieba", "reportlab"]
+            missing = []
+            for name in probes:
+                try:
+                    importlib.import_module(name)
+                except Exception as exc:
+                    missing.append(f"{name}: {exc}")
+            if missing:
+                raise SystemExit("全量运行依赖缺席：\n  - " + "\n  - ".join(missing))
+            print("全量运行依赖抽样自证 PASSED / 8 项", flush=True)
+            EOF
