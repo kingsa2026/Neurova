@@ -135,6 +135,22 @@ class TestDisposalIsMachineCheckable:
             "T-09 死码处置批（Issue #310）：同一条不可达链的最后一段——"
             "schemas.py 的三处自消费全在类内，全仓唯一跨文件引用就是那条死链。"
         ),
+        # T-09 死码处置批：schemas.py 自循环面三条。真面是 openai_schema 的
+        # ToolSchemaConverter 家族（T-03 已接线）与 OpenAIFunctionSchema.parameters
+        # 的 dict 形态——给 LLMClient 的实际契约。逐条论证见台账三行。
+        "ToolSource": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场——它是 ToolSchema.source "
+            "字段的标注（标注不构成消费点），真面是 ToolRouter 的 _tool_metadata[source]。"
+        ),
+        "ToolParameter": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场；同名第二份"
+            "（execution_engine/tool_engine.py）不连坐，拥有者级判据见 "
+            "tests/unit/tools/test_t09_selfloop_face_ruling.py"
+        ),
+        "ToolSchema": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场；同名第二份"
+            "（api/endpoints/tool_schema.py 的 pydantic 模型）是活的、不连坐。"
+        ),
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
@@ -180,6 +196,13 @@ class TestDisposalIsMachineCheckable:
 
         机器事实：退役的符号不再被 `facts()` 取到（判据类 `absent`），
         且台账处置标为「已删除」。两者缺一即红。
+
+        **例外只有一处，且不是放宽而是换判据**：`ledger.OWNER_LEVEL_RETIREMENTS`
+        里的符号是**裸名撞名**（同名第二份在另一个拥有者上仍活着），裸名判据只能
+        读到残留站点、给不出 `absent`。它们的咬合由**拥有者级判据**承担
+        （`tests/unit/tools/test_t09_selfloop_face_ruling.py`：断言登记那一份的定义
+        已从它的文件消失，并反向断言同名第二份仍在）。在这里硬塞一条 `absent`
+        只会逼人改台账去迎合 —— 那正是把判据降级成自述。
         """
         facts = _facts()
         offenders = []
@@ -188,11 +211,35 @@ class TestDisposalIsMachineCheckable:
             entry = ledger.readLedger().get(symbol, {})
             if entry.get("disposal") != ledger.DISPOSAL_RETIRED:
                 offenders.append(f"{symbol}: 台账处置为 {entry.get('disposal')}，未标已删除")
+                continue
+            if symbol in ledger.OWNER_LEVEL_RETIREMENTS:
+                continue
             if row is not None and row["judge"] != ledger.JUDGE_ABSENT:
                 offenders.append(
                     f"{symbol}: 标了已删除但判据类仍为 {row['judge']}（符号还在，处置是口号）"
                 )
         assert not offenders, "退役批声明与机器事实不符：\n  " + "\n  ".join(offenders)
+
+    def test_ownerLevelRetirementsAreProvenElsewhere(self):
+        """裸名撞名的退役条目必须**真的**由拥有者级判据兜住，不是漏网。
+
+        这条是上一条例外的守门人：例外集合不许悄悄长大，且集合里每个符号都必须
+        有对应的拥有者级判据文件存在（否则例外就成了逃逸口）。
+        """
+        assert set(ledger.OWNER_LEVEL_RETIREMENTS) <= set(self.RETIRED_BY_LATER_WAVES), (
+            "OWNER_LEVEL_RETIREMENTS 里有符号不在退役批论证里——例外必须先被论证"
+        )
+        ownerTest = PROJECT_ROOT / "tests/unit/tools/test_t09_selfloop_face_ruling.py"
+        assert ownerTest.exists(), (
+            "OWNER_LEVEL_RETIREMENTS 的拥有者级判据文件不存在——"
+            "例外没有兜底判据，等于把「已删除」降级成自述"
+        )
+        for symbol in ledger.OWNER_LEVEL_RETIREMENTS:
+            row = _facts().get(symbol)
+            assert row is not None, (
+                f"{symbol} 在拥有者级例外里却已从取数表整条消失——"
+                "那它就该校验 `absent`，不该留在例外集合里"
+            )
 
     def test_baseline_of_absent_symbols_is_empty_in_this_wave(self):
         """自证：除**已登记的退役批**之外，本片不出现 `absent` 条目。

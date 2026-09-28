@@ -21,13 +21,7 @@ logger = get_logger(__name__)
 
 # 导入核心模块
 try:
-    from neurova.tool_layers.schemas import (
-        MCPConnection,
-        ToolParameter,
-        ToolSchema,
-        ToolSource,
-        ToolType,
-    )
+    from neurova.tool_layers.schemas import MCPConnection, ToolType
 except ImportError as e:
     logger.warning("Failed to import schemas: %s", e)
 
@@ -139,9 +133,6 @@ if "ToolMarketplace" not in dir() or ToolMarketplace is None:  # type: ignore[po
 
 __all__ = [
     # 核心数据模型
-    "ToolSource",
-    "ToolParameter",
-    "ToolSchema",
     "MCPConnection",
     "ToolType",
     # 核心类
