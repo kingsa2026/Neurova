@@ -109,14 +109,26 @@ def test_placeholder_system_exposes_no_optimizable_parameters(rsi_probe_factory,
 
     比在 apply 端拒绝更靠根因：`orchestrator.py:444` 见 current_value 为 None 即跳过候选，
     参数看不见就不会有"优化成功"的回执，也不会再有假增益。
+
+    口径收窄（Issue #289 · 004 M2）：断言对象是**占位系统**，而不是"表里所有键"。
+    `context` 族是纯参数宿主（不入 `_systems`，不产反馈信号），四闭环全缺席
+    不代表上下文预算对象不存在 —— 把它一起要求为空，是拿"四闭环缺席"去否定
+    一个独立的宿主，与判据本意无关，且会掩盖 context 族的真实状态。
     """
     orchestrator = rsi_probe_factory(rsi_phase=2, systems=null_systems).orchestrator
+    integration_manager = orchestrator.integration_manager
 
-    optimizable = orchestrator.integration_manager.get_optimizable_parameters()
+    placeholders = set(integration_manager.get_placeholder_system_names())
+    assert placeholders == {"sleep", "emotion", "experience", "tool_memory"}, placeholders
 
-    assert all(params == [] for params in optimizable.values()), (
-        f"占位系统仍在暴露参数面：{ {k: [p.name for p in v] for k, v in optimizable.items() if v} }"
-    )
+    optimizable = integration_manager.get_optimizable_parameters()
+
+    leaked = {
+        name: [p.name for p in optimizable.get(name, [])]
+        for name in placeholders
+        if optimizable.get(name)
+    }
+    assert not leaked, f"占位系统仍在暴露参数面：{leaked}"
 
 
 def test_apply_optimization_refuses_placeholder_system(rsi_probe_factory, null_systems):

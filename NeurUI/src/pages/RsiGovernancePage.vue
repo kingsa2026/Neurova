@@ -57,6 +57,25 @@ function stateLabel(item: ProposalStateFilter): string {
 }
 
 /**
+ * 参数活性读数（Issue #289 · 004 M3）的取值文案映射。
+ *
+ * `no_data` / `sparse` / `never_proposed` 必须各有一条独立文案 —— 折叠成
+ * 同一个"未知"就把"判不了"和"从未提名"混成一件事，正是本仓在 success 三态上
+ * 修过的同一病灶。
+ */
+const ACTIVITY_KEYS: Record<string, string> = {
+  moving: 'paramActivityMoving',
+  sparse: 'paramActivitySparse',
+  never_proposed: 'paramActivityNeverProposed',
+  no_data: 'paramActivityNoData',
+}
+
+function activityLabel(value: string | undefined): string {
+  if (!value) return t('rsiGovernance.paramActivityNoData')
+  return t(`rsiGovernance.${ACTIVITY_KEYS[value] || 'paramActivityNoData'}`)
+}
+
+/**
  * 响应拆包。
  *
  * `api` 的响应拦截器返回 `response.data`（即 `{code, data}` 这个 body），
@@ -188,6 +207,35 @@ onMounted(load)
         <span v-if="status.escalation?.verdict" data-testid="rsi-escalation">
           {{ t('rsiGovernance.escalationLabel') }}: {{ status.escalation.verdict.state }}
           <em>{{ status.escalation.verdict.reason }}</em>
+        </span>
+        <!-- 回执负债读数（Issue #289 · 003）：账本新增两列而界面看不到，
+             就是"只写不读的字段"（AGENTS.md §2 功能与升级改造红线）。 -->
+        <span v-if="status.debt" data-testid="rsi-debt">
+          {{ t('rsiGovernance.debtLabel') }}:
+          <a-tag data-testid="rsi-debt-outstanding">
+            {{ status.debt.available === false
+              ? t('rsiGovernance.paramActivityNoData')
+              : ((status.debt.outstanding ?? 0) > 0 ? status.debt.outstanding : t('rsiGovernance.debtNone')) }}
+          </a-tag>
+          <em data-testid="rsi-debt-gate">
+            {{ status.debt.next_step?.allow
+              ? t('rsiGovernance.debtGateAllow')
+              : `${t('rsiGovernance.debtGateBlock')}·${status.debt.next_step?.reason || '—'}` }}
+          </em>
+          <em v-if="status.debt.unknown_rows" data-testid="rsi-debt-legacy">
+            {{ t('rsiGovernance.debtUnknownRows') }}: {{ status.debt.unknown_rows }}
+          </em>
+          <em v-if="status.debt.last_write_failure" data-testid="rsi-debt-write-failure">
+            {{ t('rsiGovernance.debtWriteFailure') }}: {{ status.debt.last_write_failure }}
+          </em>
+        </span>
+        <!-- 参数活性读数（Issue #289 · 004 M3）：三态不折叠，缺一态即看不到
+             "从未提名"与"判不了"的区别。 -->
+        <span v-if="status.parameter_activity" data-testid="rsi-param-activity">
+          {{ t('rsiGovernance.paramActivityLabel') }}:
+          <a-tag data-testid="rsi-param-activity-overall">
+            {{ activityLabel(status.parameter_activity.overall) }}
+          </a-tag>
         </span>
       </div>
     </GlassCard>

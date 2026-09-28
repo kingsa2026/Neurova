@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "未返済の負債",
+    debtNone: "負債なし",
+    debtUnknownRows: "価格未設定の既存行",
+    debtGateAllow: "逆方向ゲート許可",
+    debtGateBlock: "逆方向ゲート遮断",
+    debtWriteFailure: "台帳の書き込み失敗",
+    paramActivityLabel: "パラメータ活性",
+    paramActivityMoving: "稼働中",
+    paramActivitySparse: "疎",
+    paramActivityNeverProposed: "未提案",
+    paramActivityNoData: "データなし（判定不可）",
   },
 
   settings: {

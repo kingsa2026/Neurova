@@ -34,6 +34,14 @@ SYSTEM_SETPOINTS: Dict[str, Dict[str, float]] = {
         "decay_rate": 0.01,
         "muscle_memory_threshold": 0.8,
     },
+    # 上下文经济性族（Issue #289 · 004 M2）。目标值取 `TokenBudget` 的默认构造，
+    # 即现网实际值 —— 起点即目标时该族零梯度，棘轮不为"把预算改来改去"而动作。
+    "context": {
+        "max_total": 16000,
+        "memories": 4000,
+        "conversation_history": 6000,
+        "experience_knowledge": 1500,
+    },
 }
 
 

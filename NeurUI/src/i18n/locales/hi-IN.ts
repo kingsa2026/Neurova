@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "बकाया ऋण",
+    debtNone: "कोई ऋण नहीं",
+    debtUnknownRows: "मूल्य-रहित विरासत पंक्तियाँ",
+    debtGateAllow: "रिवर्स गेट अनुमति देता है",
+    debtGateBlock: "रिवर्स गेट रोकता है",
+    debtWriteFailure: "लेजर लेखन विफल",
+    paramActivityLabel: "पैरामीटर सक्रियता",
+    paramActivityMoving: "गतिमान",
+    paramActivitySparse: "विरल",
+    paramActivityNeverProposed: "कभी प्रस्तावित नहीं",
+    paramActivityNoData: "कोई डेटा नहीं (निर्णय असंभव)",
   },
 
   settings: {

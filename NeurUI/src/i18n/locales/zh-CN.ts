@@ -2234,7 +2234,18 @@ export default {
     rejectReason: "人工评审不予采纳",
     sequencePlaceholder: "补交工具序列，逗号分隔",
     evidenceHit: "已装入且注册表命中",
-    evidenceMiss: "回灌未命中，下一轮仍看不见"
+    evidenceMiss: "回灌未命中，下一轮仍看不见",
+    debtLabel: "未清欠账",
+    debtNone: "无欠账",
+    debtUnknownRows: "存量未定价行",
+    debtGateAllow: "反向闸放行",
+    debtGateBlock: "反向闸拦下",
+    debtWriteFailure: "账本写失败",
+    paramActivityLabel: "参数活性",
+    paramActivityMoving: "在动",
+    paramActivitySparse: "稀疏",
+    paramActivityNeverProposed: "从未提名",
+    paramActivityNoData: "无数据（判不了）",
   },
 
   settings: {
