@@ -17,9 +17,34 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-#: 工具轮上限的兜底值（设置不可读时）。上限本身由 `OpenAILoop` 从
-#: `security/agent_limits_settings` 的 `max_loop_rounds` 派生——不在此另立一份尺度。
+#: 工具轮上限的兜底值（设置不可读时）。上限本身取自配置单源
+#: `security/agent_limits_settings` 的 `max_loop_rounds`——派生点唯一，即下文的
+#: `resolveToolRoundBudget()`；不在此另立一份尺度，也不在任何路径内联再算一遍。
 ROUND_BUDGET_FALLBACK = 10
+
+
+def resolveToolRoundBudget() -> int:
+    """工具轮上限的**唯一派生点**（T-04：同一份尺度不得读出两个值）。
+
+    此前这条派生写在两处、且写法是 `get_effective_limits()["max_loop_rounds"] // 2`：
+
+    - `openai_loop.predict_step` 把它存进 `self._max_tool_rounds`（单例字段）；
+    - `anthropic_loop.resolveToolRoundBudget()` 各写一遍同样的 `// 2`。
+
+    于是同一个配置键被读成**两个尺度**：守卫（n//2）与 `IterationGate`（n）。
+    更小的那个总先开火，门控因此几乎永远吃不到自己的阈值——台账第二轴把它记为
+    `scaled_sparse`（"可达但阈值够不到"），成因就是这里。
+
+    现在只有一个数：守卫与门控同取本函数。**不再做 `// 2`** —— 那个折半是在补
+    "两道闸不同尺度"的症状，而不是设计；两道闸读同一个数之后，先开火的那个就是
+    它们共同的契约（教义第 1 条：在上游消灭非法状态，不在下游补折半）。
+    """
+    try:
+        from neurova.security.agent_limits_settings import get_effective_limits
+
+        return int(get_effective_limits()["max_loop_rounds"])
+    except Exception:  # noqa: BLE001 - 设置不可读不阻断对话，回退兜底值
+        return ROUND_BUDGET_FALLBACK
 
 
 @dataclass
