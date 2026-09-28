@@ -27,12 +27,17 @@ from .deployment_controller import (
 from .integration_manager import create_rsi_integration_manager
 from .metrics import RSIMetrics, create_rsi_metrics
 from .recursive_ratchet_pruner import RecursiveRatchetPruner, Candidate
+from .debt_ledger import DebtVerdict, resolve_debt_ledger
 from .rollback_manager import create_rollback_manager, resolve_rollback_state_path
 from .self_improvement_proposer import SelfImprovementProposer, ProposalType
 from .system_performance import get_setpoint
 from neurova.security.governance_settings import save_governance_settings
 
 logger = get_logger(__name__)
+
+#: 一次参数动作的代价（与 `convergence_analyzer.record_iteration(cost=1.0)`
+#: 同一计量单位，单源引用，不新造第二个尺度）。
+_PARAM_ACTION_COST = 1
 
 
 @dataclass(frozen=True)
@@ -92,11 +97,23 @@ class RSIOrchestrator:
             tool_memory_system: 工具记忆闭环系统
         """
         # 创建集成管理器
+        # 上下文经济性宿主（004 M2）：预算对象在生产由 `TokenBudget()` 默认构造
+        # （`context/orchestrator.py` 两处装配点亦如此），故此处同源取默认构造；
+        # 宿主缺席时 `context` 族在源头返回空参数列表。
+        context_system = kwargs.pop("context_system", None)
+        if context_system is None:
+            try:
+                from neurova.context.models import TokenBudget
+
+                context_system = TokenBudget()
+            except Exception as e:  # noqa: BLE001 - 宿主不可用即缺席，不猜
+                logger.debug("上下文经济性宿主不可用: %s", e)
         self.integration_manager = create_rsi_integration_manager(
             sleep_system=sleep_system,
             emotion_system=emotion_system,
             experience_system=experience_system,
             tool_memory_system=tool_memory_system,
+            context_system=context_system,
         )
 
         # 创建收敛性分析器
@@ -117,6 +134,10 @@ class RSIOrchestrator:
                 # 首次启动：立刻把装配时刻钉到盘上。否则每次重启都重置成"现在"，
                 # "7 天无回滚"这条判据在任何跨重启的部署里永远累计不满。
                 self.rollback_manager.save()
+
+        # 负债账本（Issue #289 · 003）：长在**同一份** `rsi_receipts.jsonl` 上 ——
+        # 单一事实源，不新增第二份账本文件。未配置 env 时零 IO（与回执同款约定）。
+        self.debt_ledger = resolve_debt_ledger()
 
         # 创建部署控制器（治理遗留收口：rsi_phase 来自治理设置，默认 0 观察期）
         try:
@@ -162,6 +183,8 @@ class RSIOrchestrator:
         self._last_phase_outcome: Dict[str, Any] = {}
         # 工单 009：升级通道走没走过、为什么没走，也要能从状态面读到
         self._last_escalation: Dict[str, Any] = {}
+        # 003：反向闸最近一轮拦没拦、为什么拦（同一条"没做也要说得出为什么"的纪律）
+        self._last_debt_gate: Dict[str, Any] = {}
 
         # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
         self._eval_harness: Optional[Any] = None
@@ -311,6 +334,28 @@ class RSIOrchestrator:
             if self.convergence_analyzer.cost_history else None
         )
 
+        # 反向闸（003 M2）：上一次动作的代价未清 ⇒ 本次不动作 + 记原因。
+        # 灰度复用 deployment_controller 的阶段语义（K3）：phase < 2 时不生效，
+        # 与"低风险自动执行"同一档位判据，不新造第二个开关。
+        debt_verdict = self._debt_gate_verdict()
+        if optimizations and debt_verdict.allow is False and self.deployment_controller.can_auto_execute("low"):
+            logger.info(
+                "RSI 反向闸拦下本轮寻优：%s（未清余额=%s）",
+                debt_verdict.reason, debt_verdict.outstanding,
+            )
+            optimizations = []
+            self._last_debt_gate: Dict[str, Any] = {
+                "blocked": True,
+                "reason": debt_verdict.reason,
+                "outstanding": debt_verdict.outstanding,
+            }
+        else:
+            self._last_debt_gate = {
+                "blocked": False,
+                "reason": debt_verdict.reason,
+                "outstanding": debt_verdict.outstanding,
+            }
+
         if optimizations and self.deployment_controller.can_auto_execute("low"):
             perf_before = self._measure_performance()
             eval_before = self._last_eval_outcome
@@ -348,6 +393,10 @@ class RSIOrchestrator:
                             "RSI 回滚已执行但留痕失败（snapshot_id=%s）：晋升判据将看不到本次回滚",
                             snapshot_id,
                         )
+                    # 回滚处置债务（003 票面"连带必改"）：该笔代价必须结清或
+                    # 显式转挂，不许静默消失 —— 否则回滚反而制造"无主欠账"。
+                    if self.debt_ledger is not None:
+                        self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
                     applied_count = 0
                     gain = 0.0
         else:
@@ -475,6 +524,9 @@ class RSIOrchestrator:
             # 工单 018：哪几路是占位替身必须随行——否则 `applied_count=0`
             # 在观测面上与"跑过了但没找到改进空间"无法区分
             "placeholder_systems": self.integration_manager.get_placeholder_system_names(),
+            # 反向闸读数（003 M2）：拦没拦、为什么拦 —— 拦下必须可归因，
+            # 不得表现为"这轮刚好没有候选"（两者在观测上是相反的事）。
+            "debt_gate": self._last_debt_gate,
             "convergence": convergence,
             "optimizations": optimizations,
             "applied_results": applied_results,
@@ -916,6 +968,40 @@ class RSIOrchestrator:
                 return float(val)
         return None
 
+    def _debt_gate_verdict(self) -> DebtVerdict:
+        """反向闸判据：欠账未清则本次不动作。
+
+        账本缺席（未配置 env / 未装配）时**放行**并为原因值 `debt_clear`：
+        "没有账"与"账上欠着"是两件事，把前者读成后者会让未开账的部署全线停摆。
+        """
+        if self.debt_ledger is None:
+            return DebtVerdict(True, "debt_clear", 0)
+        try:
+            return self.debt_ledger.evaluate_next_step()
+        except Exception as e:  # noqa: BLE001 - 判据不可用按安全侧处理并留读数
+            logger.warning("负债闸判据失败，按安全侧（不动作）处置: %s", e)
+            return DebtVerdict(False, "ledger_write_failed", -1)
+
+    def _debt_readout(self) -> Dict[str, Any]:
+        """负债读数（治理面与状态面共用同一份，不新开第二套观测通道）。"""
+        if self.debt_ledger is None:
+            return {"available": False, "reason": "ledger_not_configured"}
+        try:
+            lookup = self.debt_ledger.outstanding_lookup()
+            verdict = self._debt_gate_verdict()
+            return {
+                "available": True,
+                **lookup,
+                "last_write_failure": self.debt_ledger.last_write_failure_reason(),
+                "next_step": {
+                    "allow": verdict.allow,
+                    "reason": verdict.reason,
+                    "outstanding": verdict.outstanding,
+                },
+            }
+        except Exception as e:  # noqa: BLE001 - 读数失败如实暴露，不编造数值
+            return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+
     def apply_optimizations(self, optimizations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         应用优化建议
@@ -931,9 +1017,18 @@ class RSIOrchestrator:
         for optimization in optimizations:
             parameter = optimization.get("parameter")
             new_value = optimization.get("new_value")
+            # 代价口径（003 M1）：引用 002 的输出字段 `cost`，不另立一份定义。
+            # 一次参数动作的成本就是它一轮的实际耗用（`convergence_analyzer`
+            # 记成本用的同一计量单位），故取 1.0 —— 与 `record_iteration(cost=1.0)`
+            # 同源，不新造第二个尺度。
+            cost = int(optimization.get("cost", _PARAM_ACTION_COST))
+            repayment = int(optimization.get("repayment", 0))
 
             if parameter and new_value is not None:
-                success = self.integration_manager.apply_optimization(parameter, new_value)
+                success = self.integration_manager.apply_optimization(
+                    parameter, new_value,
+                    debt_ledger=self.debt_ledger, cost=cost, repayment=repayment,
+                )
                 results.append(
                     {
                         "parameter": parameter,
@@ -1048,6 +1143,10 @@ class RSIOrchestrator:
                 "pass_rate": ((generated - pruned) / generated) if generated else 0.0,
             },
             "rollback_history": self.rollback_manager.get_rollback_history(),
+            # 负债读数（003 M3 的读侧）：只写不读的字段是 AGENTS.md §2 点名的断点。
+            "debt": self._debt_readout(),
+            # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
+            "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
             "experience_channel": experience_channel,
             "metrics": self.metrics.get_dashboard_data(),
@@ -1060,6 +1159,68 @@ class RSIOrchestrator:
             # 状态面，不另起第二套观测通道。
             "meta_reward_guard": _readRewardGuardMetrics(),
         }
+
+
+def _readParameterActivitySurface() -> Dict[str, Any]:
+    """参数活性读数（004 M3）：账本落点与 003 同一枚 env，不新开第二套读数体系。"""
+    from neurova.evolution.rsi.parameter_activity import readParameterActivity
+
+    import os as _os
+
+    env_path = _os.environ.get("NEUROVA_RSI_RECEIPTS")
+    if not env_path:
+        return {
+            "states": {},
+            "movements": {},
+            "vocabulary": ["moving", "sparse", "never_proposed", "no_data"],
+            "overall": "no_data",
+            "reason": "ledger_not_configured",
+        }
+    from pathlib import Path as _Path
+
+    return readParameterActivity(_Path(env_path))
+
+
+def parameter_host_classes() -> Dict[str, type]:
+    """参数表各系统的**宿主类**单一事实源（004 M1 的落点解析读它）。
+
+    取真实子系统类，不用探针桩：探针桩上没有 property 别名，
+    用它验不出"两个名字落同一物理落点"这条缺陷 —— 守卫会恒绿。
+    """
+    hosts: Dict[str, type] = {}
+    try:
+        from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
+
+        hosts["sleep"] = SleepConsolidation
+    except Exception as e:  # noqa: BLE001 - 宿主不可导入即缺席，由守卫如实报
+        logger.debug("sleep 宿主类不可导入: %s", e)
+    try:
+        from neurova.evolution.experience_feedback import ExperienceFeedback
+
+        hosts["experience"] = ExperienceFeedback
+    except Exception as e:  # noqa: BLE001
+        logger.debug("experience 宿主类不可导入: %s", e)
+    try:
+        from neurova.cognitive_layers.memory_layer.tool_memory_integration import (
+            ToolMemoryIntegration,
+        )
+
+        hosts["tool_memory"] = ToolMemoryIntegration
+    except Exception as e:  # noqa: BLE001
+        logger.debug("tool_memory 宿主类不可导入: %s", e)
+    try:
+        from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+
+        hosts["emotion"] = EmotionModule
+    except Exception as e:  # noqa: BLE001
+        logger.debug("emotion 宿主类不可导入: %s", e)
+    try:
+        from neurova.context.models import TokenBudget
+
+        hosts["context"] = TokenBudget
+    except Exception as e:  # noqa: BLE001
+        logger.debug("context 宿主类不可导入: %s", e)
+    return hosts
 
 
 def _readRewardGuardMetrics() -> Dict[str, Any]:
