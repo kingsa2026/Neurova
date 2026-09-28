@@ -2222,7 +2222,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "Offene Schuld",
+    debtNone: "Keine Schuld",
+    debtUnknownRows: "Altzeilen ohne Preis",
+    debtGateAllow: "Rückwärts-Gate erlaubt",
+    debtGateBlock: "Rückwärts-Gate blockiert",
+    debtWriteFailure: "Ledger-Schreibfehler",
+    paramActivityLabel: "Parameteraktivität",
+    paramActivityMoving: "In Bewegung",
+    paramActivitySparse: "Sparse",
+    paramActivityNeverProposed: "Nie vorgeschlagen",
+    paramActivityNoData: "Keine Daten (nicht beurteilbar)",
   },
 
   settings: {
