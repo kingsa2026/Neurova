@@ -36,7 +36,10 @@ class _FakeHandler:
 def client(monkeypatch):
     app = FastAPI()
     app.include_router(CC.router, prefix="/api/v1")
-    app.dependency_overrides[get_current_user] = lambda: {"sub": "u", "username": "u"}
+    # 归属门（Issue #290 追问②）先于路由内的一切判定：本文件测的是路由解析与
+    # 扫码契约，故用已授权身份；越权形态（403 先于存在性）由
+    # tests/unit/api/test_channel_agent_access_290.py 咬合。
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "u", "username": "u", "role": "admin"}
     monkeypatch.setitem(qrcode_auth.QRCODE_AUTH_HANDLERS, "feishu", _FakeHandler())
     return TestClient(app)
 

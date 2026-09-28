@@ -160,8 +160,24 @@
     <div v-if="showEmptyAttribution" class="nr-ci-empty-attribution" data-testid="empty-attribution">
       <p class="nr-ci-empty-title">{{ t('channel.noConfigsForAgent', { agent: agentId }) }}</p>
       <p class="nr-ci-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
-      <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
-        @click="switchToDefaultAgent">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+      <div class="nr-ci-empty-actions">
+        <!-- 与 Agent 渠道页同一套入口（同一契约的第二个消费方）：只在默认视图下
+             提示"配置在那边"而不给搬过来的路，用户就得一直来回切视图。 -->
+        <GlassButton size="sm" variant="primary" data-testid="migrate-legacy-channels"
+          :disabled="migrating" @click="migrateLegacyChannels">
+          {{ migrating ? t('channel.migrating') : t('channel.migrateLegacyChannels') }}
+        </GlassButton>
+        <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
+          @click="switchToDefaultAgent">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+      </div>
+      <p v-if="migrateError" class="nr-ci-empty-error" data-testid="migrate-error">{{ migrateError }}</p>
+    </div>
+
+    <!-- 归属门与「真的没有配置」必须可区分：合并渲染会让用户重蹈本 bug 的老路。 -->
+    <div v-if="accessDenied" class="nr-ci-empty-attribution" data-testid="access-denied">
+      <p class="nr-ci-empty-title">{{ t('channel.accessDenied') }}</p>
+      <p class="nr-ci-empty-hint">{{ accessDenied }}</p>
+      <p class="nr-ci-empty-hint">{{ t('channel.accessDeniedHint') }}</p>
     </div>
 
     <!-- Toast notification -->
@@ -307,7 +323,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, type ChannelIngressStats } from '@/api/modules/channel-configs'
+import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, migrateAgentChannelConfigs, type ChannelIngressStats } from '@/api/modules/channel-configs'
 import { getNegativeScreenConfig, updateNegativeScreenConfig, testNegativeScreenPush } from '@/api/modules/negative-screen'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -361,6 +377,11 @@ const toastMessage = ref('')
 
 /** 已保存配置的 extra（F-2：测试连接发送真实已存凭据，而非恒空 {}） */
 const savedExtras = ref<Record<string, Record<string, any>>>({})
+const migrating = ref(false)
+// 迁移失败与归属拒绝的**诚实原文**：403（仅属主/管理员）与 409（冲突）都不是
+// "网络错误"，笼统的"出错了"会诱导用户以为是偶发问题。
+const migrateError = ref('')
+const accessDenied = ref('')
 
 const currentQrcodeMeta = computed(() =>
   currentChannel.value ? QRCODE_CHANNELS[currentChannel.value.channelKey] : undefined,
@@ -448,7 +469,8 @@ function onAgentChange() {
 
 /** 空态归因只在"确实可能是别人的配置"时给，且判据是**已存配置行数为 0**。 */
 const showEmptyAttribution = computed(
-  () => agentId.value !== 'default' && !loadingConfigs.value && Object.keys(savedExtras.value).length === 0,
+  () => agentId.value !== 'default' && !loadingConfigs.value && !accessDenied.value
+    && Object.keys(savedExtras.value).length === 0,
 )
 
 function switchToDefaultAgent() {
@@ -456,8 +478,41 @@ function switchToDefaultAgent() {
   onAgentChange()
 }
 
+/**
+ * 把默认视图名下的存量渠道**移动**到当前智能体（与 Agent 渠道页同一动作）。
+ *
+ * 不做乐观更新：后端是移动语义、冲突时两边原样返回，故成功即重取本视图，
+ * 让屏幕上的状态始终来自服务端那唯一的事实源。
+ */
+async function migrateLegacyChannels() {
+  const target = agentId.value
+  if (target === 'default' || migrating.value) return
+  migrating.value = true
+  migrateError.value = ''
+  try {
+    const res: any = await migrateAgentChannelConfigs('default', target)
+    const data = res?.data ?? res
+    const moved: string[] = data?.migrated ?? []
+    await loadConfigs()
+    if (moved.length) {
+      showToast(t('channel.migrateSuccess', { count: moved.length, agent: target }))
+    } else {
+      showToast(t('channel.migrateEmpty'))
+    }
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    migrateError.value = t('channel.migrateFailed', {
+      reason: String(detail || e?.message || ''),
+    })
+  } finally {
+    migrating.value = false
+  }
+}
+
 async function loadConfigs() {
   loadingConfigs.value = true
+  accessDenied.value = ''
+  migrateError.value = ''
   try {
     // B4-d：插件渠道动态接入——先追加卡片（在已存配置合并前，否则状态回填错过新卡片）
     try {
@@ -512,8 +567,15 @@ async function loadConfigs() {
         /* 保持默认停用 */
       }
     }
-  } catch (e) {
-    message.error(t('common.error'))
+  } catch (e: any) {
+    // 403 是归属门（仅属主/管理员），与"这个 agent 真的没配过"是两回事：
+    // 合并成同一句提示，正是本 bug 被拖 6 天没人定位到落点的形态。
+    const detail = e?.response?.data?.detail
+    if (e?.response?.status === 403) {
+      accessDenied.value = String(detail || t('channel.accessDenied'))
+    } else {
+      message.error(detail ? t('channel.genericFailure', { reason: String(detail) }) : t('common.error'))
+    }
   } finally {
     loadingConfigs.value = false
   }
@@ -1036,6 +1098,8 @@ onMounted(() => {
 }
 .nr-ci-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--nr-text-secondary); }
 .nr-ci-empty-hint { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-text-tertiary); }
+.nr-ci-empty-actions { display: flex; gap: 8px; }
+.nr-ci-empty-error { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-error, #ef4444); }
 
 .nr-ci-toast {
   position: fixed;
