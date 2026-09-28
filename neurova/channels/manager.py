@@ -566,9 +566,14 @@ class ChannelManager:
     # B4-a 渠道管理能力面
     # ============================================================
 
-    async def restart_channel(self, channel_type: str) -> Dict[str, Any]:
-        """渠道重启：disconnect → connect（配置变更生效/断线重连语义）。"""
-        adapter = self.get_adapter(channel_type)
+    async def restart_channel(self, channel_type: str, agent_id: str = "default") -> Dict[str, Any]:
+        """渠道重启：disconnect → connect（配置变更生效/断线重连语义）。
+
+        必须带 agent 维度：实例表的主键是 `(agent_id, channel_type)`，同一平台
+        在不同 agent 下可以是两个独立 bot。缺了 agent 就会去动 default 的实例 ——
+        用户在「凯蒂」的视图里点重启，动的是别人的长连接，而屏幕上看不出差别。
+        """
+        adapter = self.get_adapter(channel_type, agent_id=agent_id)
         if adapter is None:
             return {"success": False, "channel_type": channel_type, "error": "渠道未注册"}
         try:
@@ -600,30 +605,46 @@ class ChannelManager:
         except Exception as e:  # noqa: BLE001
             return {"success": False, "channel_type": channel_type, "error": str(e)}
 
-    def clear_channel_queue(self, channel_type: str) -> int:
-        """清空渠道待处理入站队列，返回清除条数（队列不可用抛 IngressQueueUnavailable）。"""
+    def clear_channel_queue(self, channel_type: str, agent_id: str = "default") -> int:
+        """清空该 (agent, 渠道) 的待处理入站队列，返回清除条数。
+
+        队列按 agent 归属：同平台两个 agent 各自的积压必须分开清 ——
+        按渠道裸名清会把别人的待办一起删掉（用户只看得见自己视图里的积压数）。
+        队列不可用抛 IngressQueueUnavailable。
+        """
         queue = self._get_ingress_queue()
-        return queue.clear(channel_type)
+        return queue.clear(channel_type, agent_id=agent_id)
 
     def conflict_check(self) -> Dict[str, Any]:
-        """机器人身份冲突检测。
+        """机器人身份冲突检测（**跨 agent 全量扫描面**）。
 
         两个渠道复用同一身份凭据（app_id/api_key 相同）时，平台的回调/事件
         会串渠道。按身份指纹分组，返回出现 ≥2 次的冲突项。
+
+        扫描面必须是全量实例表 `_agent_adapters`：曾经只扫 `_adapters`（default
+        兼容视图），于是「agent A 的飞书」与「agent B 的钉钉」用同一个 app_id
+        配出来时，检测**完全看不见** —— 而这两个 bot 会互相抢同一条平台事件流，
+        正是本检测存在的理由。归属对带上 agent，否则同名平台分不清是哪两个实例。
         """
         groups: Dict[str, List[str]] = {}
-        for channel_type, adapter in self._adapters.items():
+        table = getattr(self, "_agent_adapters", {}) or {}
+        owners = table if table else {
+            ("default", channel_type): adapter for channel_type, adapter in self._adapters.items()
+        }
+        for (agent_id, channel_type), adapter in owners.items():
             cfg = getattr(adapter, "config", None)
             app_id = str(getattr(cfg, "app_id", "") or "")
             api_key = str(getattr(cfg, "api_key", "") or "")
             identity = app_id or api_key
             if not identity:
                 continue
-            groups.setdefault(identity, []).append(channel_type)
+            groups.setdefault(identity, []).append(
+                channel_type if agent_id == "default" else f"{agent_id}:{channel_type}"
+            )
         conflicts = [
-            {"identity": identity, "channels": chans}
-            for identity, chans in groups.items()
-            if len(chans) >= 2
+            {"identity": identity, "channels": channels}
+            for identity, channels in groups.items()
+            if len(channels) >= 2
         ]
         return {"conflicts": conflicts, "checked": len(groups)}
 

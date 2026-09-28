@@ -33,6 +33,9 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+#: 缺 agent 上下文时的归属（与 `ChannelManager` / `channel_router` 同一口径）
+_DEFAULT_AGENT_ID = "default"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS channel_ingress_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,18 +104,26 @@ class ChannelIngressQueue:
         self._stopping = False
         self._processed_total = 0
 
-    def clear(self, channel_type: str) -> int:
-        """B4-a：清空指定渠道的待处理事件。
+    def clear(self, channel_type: str, agent_id: str = "default") -> int:
+        """B4-a：清空指定 (agent, 渠道) 的待处理事件。
 
         仅删除 pending（未消费）事件；processing/done/dead 等终态或租赁中
         的行不动（防并发消费竞争）。返回清除条数；DB 故障抛 IngressQueueUnavailable。
+
+        agent 维度按 `payload.metadata.agent_id` 判（**行自带的事实，不另存一列**：
+        再存一列就是同一件事的第二份定义，两者漂移时没有任何一处会响亮）。
+        生产路径上该字段由 `ChannelManager._make_event_callback` 在入队**之前**
+        写入 metadata，故每行都带来源 agent；历史行缺该键时按 default 处置 ——
+        与全仓"缺 agent 上下文即 default"同一口径。
         """
+        agent = agent_id or _DEFAULT_AGENT_ID
         try:
             with self._lock:
                 with self._conn:
                     cur = self._conn.execute(
-                        "DELETE FROM channel_ingress_events WHERE channel_type=? AND status='pending'",
-                        (channel_type,),
+                        "DELETE FROM channel_ingress_events WHERE channel_type=? AND status='pending'"
+                        " AND COALESCE(json_extract(payload, '$.metadata.agent_id'), ?)=?",
+                        (channel_type, _DEFAULT_AGENT_ID, agent),
                     )
                     return cur.rowcount or 0
         except sqlite3.Error as e:

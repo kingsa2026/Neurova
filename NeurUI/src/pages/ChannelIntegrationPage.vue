@@ -593,7 +593,7 @@ async function testChannel(ch: ChannelItem) {
 // ── B4-a：运行管理（重启 / 清空队列 / 身份冲突检测） ──────────────────────
 async function restartAdapter(ch: ChannelItem) {
   try {
-    const res: any = await restartChannelAdapter(ch.backendType)
+    const res: any = await restartChannelAdapter(ch.backendType, agentId.value)
     const data = res?.data ?? res
     if (data?.success) {
       showToast(t('channel.restartOk'))
@@ -607,7 +607,7 @@ async function restartAdapter(ch: ChannelItem) {
 
 async function clearQueue(ch: ChannelItem) {
   try {
-    const res: any = await clearChannelQueue(ch.backendType)
+    const res: any = await clearChannelQueue(ch.backendType, agentId.value)
     const data = res?.data ?? res
     showToast(`${t('channel.queueCleared')}: ${data?.cleared ?? 0}`)
   } catch (e: any) {
