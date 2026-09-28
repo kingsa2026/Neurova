@@ -140,8 +140,11 @@ class TestWSSecretWeakDefault:
         from neurova.api.endpoints import mobile_pairing as mp
         from fastapi import HTTPException
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
             # NEUROVA_ENV=production, NEUROVA_WS_SECRET 未配置
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_ENV":
                 return "production"
             if key == "NEUROVA_WS_SECRET":

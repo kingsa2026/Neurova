@@ -1233,3 +1233,16 @@ tests/unit/agent/test_timeout_table_honesty.py
 #   （静态守卫）+ 默认关 ⇒ 现网行为零变更 + 两条接入点共用同一份判据。
 #   反向控制：开关开时同一输入必须真的挡下折叠（不是恒放行的死闸）。
 tests/unit/context/test_compression_economics.py
+
+# PR #304（Issue #289 · 002）CI 红的根因：测试替身**手抄**了本仓生产符号的
+#   签名。生产侧给 `envelope.compress_envelope` 加了第四个参数 `report`，
+#   而 `test_pool_branch_envelope_transient.py` 里的替身自写了一份形参表，
+#   于是那份手抄表成了钉住旧签名的第二份定义（教义第 6 条），CI 当场
+#   `TypeError: spy() got an unexpected keyword argument 'report'`（构建
+#   `cnb-6c0-1k3iv2o5f-003`）。危害不止"加参数即红"：生产侧**删**参数时
+#   替身会吃进错位的实参而**照样绿**，断言看错了东西却不报错。
+#   判据：受保护子集内零例外（替身一律 `*args, **kwargs` 透传）+ 面外债务
+#   台账双向对账（账实相符，不是免检通道）；反向控制钉住"检测器真的会报"、
+#   "参数化形态真的豁免"、以及"`autospec=True` **不是**豁免"（实测：
+#   autospec 只约束 mock 自身，`side_effect` 那个函数照样因签名漂移 TypeError）。
+tests/unit/ci/test_stub_signature_single_source.py

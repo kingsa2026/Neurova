@@ -48,7 +48,10 @@ class TestComfyUIExecutorIntegration:
 
         reset_comfyui_client()
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_COMFYUI_HOST":
                 return "http://localhost:8188"
             return default
@@ -88,7 +91,10 @@ class TestComfyUIExecutorIntegration:
 
         reset_comfyui_client()
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_COMFYUI_HOST":
                 return "http://localhost:8188"
             return default
@@ -112,7 +118,10 @@ class TestComfyUIExecutorIntegration:
 
         reset_comfyui_client()
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_COMFYUI_HOST":
                 return "http://localhost:8188"
             return default

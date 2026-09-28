@@ -188,16 +188,20 @@ class TestEnvelopeIsUnderBudgetControl:
         seen = {}
         original = envelopeModule.compress_envelope
 
-        def spy(envelope, budget_tokens, count_tokens=None):
-            seen["budget"] = budget_tokens
-            result = original(envelope, budget_tokens, count_tokens=count_tokens)
+        def spy(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象本身。生产侧加/删参数时
+            # 这里自动跟随，不会变成钉住旧签名的第二份定义
+            # （PR #304 的 CI 红正是那份手抄表拦下了新增的 `report`）。
+            seen["budget"] = kwargs.get("budget_tokens", args[1] if len(args) > 1 else None)
+            envelope = args[0] if args else kwargs.get("envelope", "")
+            result = original(*args, **kwargs)
             seen["before"] = len(envelope)
             seen["after"] = len(result)
             return result
 
         orch = _orchestrator(budget=1200)
         bulky = "这是一条很长的记忆内容，用于撑爆信封预算。" * 40
-        with patch.object(envelopeModule, "compress_envelope", side_effect=spy):
+        with patch.object(envelopeModule, "compress_envelope", autospec=True, side_effect=spy):
             result = await _build(
                 orch,
                 user_input="问题",
