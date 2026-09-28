@@ -637,6 +637,19 @@ main:
 #   python3 → python → node（自证脚本用 node 可跑，见
 #   tests/unit/ci/test_npc_script_interpreter_reachability.py）；
 #   三级都不可用即以 127 收场 —— 请求解释器失败必须响亮，不得静默跳过（教义第 2 条）。
+#
+# 探测解决的是「怎么跑」，**不解决「跑哪个文件」**。另一半死链（Issue #314）：
+#   NPC 事件流水线跑在**被 @ 的仓库**下（平台文档《NPC》「事件执行 → 执行位置」），
+#   而门禁脚本与角色名单留在配置仓库 —— 相对路径解析到别人的仓库里，
+#   第一条门禁就以 `not found`（rc=127）收场，后续 Stage 全部 skipped。
+#   构建 cnb-2cl-1k3k4gq0d 逐字读数：
+#     sh: 1: scripts/ci/npc_turn_handoff_gate.py: not found
+#     Finished, code: 127
+#   故门禁开工前必须先跑 `.配置仓库物化`（见其后的 `&npc-config-repo-bootstrap` 锚点），
+#   把 scripts/ci/ 与 .cnb/settings.yml 从 `$CNB_NPC_SLUG` 指到的配置仓库取进工作区。
+#   常驻判据：tests/unit/ci/test_npc_script_interpreter_reachability.py 的
+#   `TestGateScriptsAreReachableFromTheRealWorkspace`（在「被 @ 的仓库」形态的
+#   工作区里真跑配置里逐字写下的每条调用形态）。
 .解释器探测: &npc-script-interpreter |
   # 探测结果给出「怎么跑门禁脚本」。第三级 node 是**特例**：
   # node 按扩展名解析模块，把 `.py` 交给 node 会在解析前以
@@ -681,6 +694,86 @@ main:
 # 三处引用该锚点由 tests/unit/ci/test_npc_runtime_budget.py 常驻校验。
 .工具超时: &npc-tool-timeout
   timeout: 30m
+
+# ── NPC 门禁的配置仓库物化（Issue #314）──────────────────────────────────────
+# 平台文档《NPC》「事件执行 → 执行位置」逐字：NPC 事件流水线跑在
+# **当前 Issue 或 PR 所属仓库**下（不是 NPC 所属仓库）。于是工作区里是
+# **被 @ 的那个仓库**，而门禁脚本与角色名单留在本仓（配置仓库）——
+# 相对路径 `scripts/ci/<script>` 与 `.cnb/settings.yml` 在工作区里都不存在。
+#
+# 实测取证（本次被 @ 的仓库 kingsa2026/Qwen3.8-27B-Uncensored-FP8）：
+# `git clone --depth 1` 后根目录只有
+#   CONTRIBUTING.md LICENSE Modelfile README.md assets bin examples lib package.json test
+# —— 没有 scripts/，也没有 .cnb/。这与任务内容无关，Agent 一秒都没跑起来。
+#
+# 修法：不假定工作区是配置仓库，而是把门禁的代码与数据**取到**工作区。
+# 只取两条浅路径（sparse + blob:none），不是整仓克隆；工作区已是本仓时短路不取。
+# 脚本与判据仍**只有一份**（仓库里的 scripts/ci/*.py，既是受保护子集的被测物，
+# 也是流水线真正执行的物）—— 不把判据内联进 YAML，那就成了第二份定义。
+# 它**内联**在这里，而不是放 `scripts/ci/*.sh`：那正是本次事故的形态 ——
+# 物化步本身若也要从工作区里取，就还是「先有鸡还是先有蛋」。
+# 它也不携带任何判据，只是取文件；判据仍全在 `scripts/ci/*.py`（唯一事实源）。
+.配置仓库物化: &npc-config-repo-bootstrap |
+  # 幂等短路：工作区已是配置仓库（push/PR 事件）时，两样都在，不做任何网络往返。
+  if [ -d scripts/ci ] && [ -f .cnb/settings.yml ]; then
+    echo "config_repo_bootstrap=already_present"
+    exit 0
+  fi
+
+  if [ -z "${CNB_NPC_SLUG:-}" ]; then
+    echo "取不到配置仓库路径：\$CNB_NPC_SLUG 未注入，而工作区里既没有 scripts/ci" >&2
+    echo "也没有 .cnb/settings.yml —— 门禁脚本不可达，且无法把它取回来。" >&2
+    exit 1
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "镜像里没有 git，无法从配置仓库 ${CNB_NPC_SLUG} 取门禁脚本与角色名单" >&2
+    exit 127
+  fi
+
+  CONFIG_URL="https://cnb.cool/${CNB_NPC_SLUG}.git"
+  FETCH_REF="${CNB_NPC_SHA:-HEAD}"
+  STAGE_DIR=".npc-config-repo"
+
+  echo "config_repo_bootstrap=fetching"
+  echo "config_repo_slug=$CNB_NPC_SLUG"
+  echo "config_repo_ref=$FETCH_REF"
+
+  rm -rf "$STAGE_DIR"
+  mkdir -p "$STAGE_DIR"
+  git -C "$STAGE_DIR" init -q .
+  # 取用现场不继承宿主机的签名/身份配置，也不把凭据落到本仓任何地方。
+  git -C "$STAGE_DIR" config commit.gpgsign false
+  git -C "$STAGE_DIR" remote add origin "$CONFIG_URL"
+  # 只取浅历史与这两条路径（`--filter=blob:none` 让未 checkout 的对象不下传）：
+  # 门禁每次开工都跑本步，取全量等于让「开工前自证」变成最贵的一步。
+  git -C "$STAGE_DIR" fetch -q --depth 1 --filter=blob:none origin "$FETCH_REF"
+  git -C "$STAGE_DIR" sparse-checkout init --cone
+  git -C "$STAGE_DIR" sparse-checkout set scripts/ci .cnb
+  git -C "$STAGE_DIR" checkout -q FETCH_HEAD
+
+  # 取不到就是取不到，不得静默放行（教义第 2 条）：说清缺哪一条、落点是什么。
+  if [ ! -f "$STAGE_DIR/scripts/ci/npc_turn_handoff_gate.py" ]; then
+    echo "配置仓库 ${CNB_NPC_SLUG} 的 ${FETCH_REF} 里没有 scripts/ci/npc_turn_handoff_gate.py" >&2
+    echo "—— 门禁脚本在配置仓库侧的落点变了，本步的取用路径需要同步。" >&2
+    exit 1
+  fi
+  if [ ! -f "$STAGE_DIR/.cnb/settings.yml" ]; then
+    echo "配置仓库 ${CNB_NPC_SLUG} 的 ${FETCH_REF} 里没有 .cnb/settings.yml" >&2
+    echo "—— 角色名单是准入判据的唯一事实源，读不到就无法回答「谁在册」。" >&2
+    exit 1
+  fi
+
+  # 按工作区相对落点物化：门禁脚本与角色名单在 `.cnb.yml` 与脚本里都按这组
+  # 相对路径引用（`scripts/ci/<script>` / `.cnb/settings.yml`），故放回同样的位置。
+  mkdir -p scripts/ci .cnb
+  cp -R "$STAGE_DIR/scripts/ci/." scripts/ci/
+  cp "$STAGE_DIR/.cnb/settings.yml" .cnb/settings.yml
+  rm -rf "$STAGE_DIR"
+
+  echo "config_repo_bootstrap=materialized"
+  echo "gate_files=$(ls -1 scripts/ci | wc -l | tr -d ' ')"
+  echo "role_list_bytes=$(wc -c < .cnb/settings.yml | tr -d ' ')"
 
 
 $:
@@ -795,6 +888,24 @@ $:
         image: cnbcool/default-npc:latest
       envScript: *npc-script-interpreter
       stages:
+        - name: "配置仓库物化：门禁脚本与角色名单取到当前工作区"
+          # 为什么它是**第一步**（Issue #314，构建 cnb-2cl-1k3k4qg0d）：
+          #   NPC 事件跑在被 @ 的仓库下（平台文档《NPC》「事件执行」），
+          #   而三条门禁的脚本与角色名单留在配置仓库 —— 不先物化，
+          #   第一条门禁就以 `not found`（rc=127）收场，Agent 一秒都跑不起来。
+          #   事故读数：`sh: 1: scripts/ci/npc_turn_handoff_gate.py: not found`
+          #   / `Finished, code: 127`，后续 Stage（含 npc-go）全部 skipped。
+          # 它跑在解释器探测之后：探测给的是「怎么跑」（$NPX / $NPX_CALL），
+          #   物化给的是「跑哪个文件」—— 两半死链各有各的守卫。
+          # 取不到时以非 0 退出，**不**把后续门禁降级成 skipped（教义第 2 条）。
+          env:
+            # 配置仓库路径与版本由平台注入（NPC 类变量，见平台「环境变量」篇）：
+            # `CNB_NPC_SLUG` 是 NPC 所属仓库路径，`CNB_NPC_SHA` 是其默认分支最新提交。
+            # 取 SHA 而非 HEAD 是为了让「这一轮跑的是哪一版门禁」可复算。
+            CNB_NPC_SLUG: $CNB_NPC_SLUG
+            CNB_NPC_SHA: $CNB_NPC_SHA
+          script: *npc-config-repo-bootstrap
+          timeout: 5m
         - name: "构建环境自证：工作区落点可达且与 $PWD 同址"
           # 为何必须由真实构建自证（Issue #151，构建 cnb-du8-1k34cfhg1）：
           #   镜像里没有 python 时，前置步骤会以 `sh: 1: python: not found`

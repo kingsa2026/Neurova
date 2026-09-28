@@ -528,9 +528,20 @@ tests/unit/ci/test_npc_auto_continue_wiring.py
 # NPC 轮数触顶接力的**执行面**：标记落点写作纪律 + 落点由真实构建自证
 #（事故：cnb-2e8-1k341d9s1 撞满 200 轮，接力 Stage 因读不到标记被 skipped，成果全丢）
 tests/unit/ci/test_npc_turn_handoff_execution.py
-# NPC 流水线脚本解释器的**可达性**守卫（Issue #151）
-#（事故：cnb-du8-1k34cfhg1 第 1 步 `python ...` 在只有 node 的镜像里 rc=127，
-#  npc:go 被 skipper 跳过；同一条死链在 issue/PR 两处逐字重复）
+# NPC 流水线脚本解释器与**门禁脚本**的可达性守卫（Issue #151 / #314）
+#（Issue #151 事故：cnb-du8-1k34cfhg1 第 1 步 `python ...` 在只有 node 的镜像里
+#  rc=127，npc:go 被 skipper 跳过；同一条死链在 issue/PR 两处逐字重复。
+#  Issue #314 事故：修的是解释器这半边，**路径**那半边从没被验证过 ——
+#  cnb-2cl-1k3k4gq0d 第 2 个 Stage 以
+#  `sh: 1: scripts/ci/npc_turn_handoff_gate.py: not found`（rc=127）收场，
+#  后续 Stage（含 npc-go）全部 skipped，Agent 一秒都没跑起来。
+#  根因：NPC 事件流水线跑在**被 @ 的仓库**下（平台《NPC》「事件执行」），
+#  而门禁脚本与角色名单留在配置仓库；配置写死了「工作区 = 配置仓库」这一前提。
+#  实测取证：`git clone --depth 1 kingsa2026/Qwen3.8-27B-Uncensored-FP8` 后
+#  根目录只有 assets/ bin/ examples/ lib/ test/ 与若干文档，无 scripts/ 与 .cnb/。
+#  判据在 F 类：把配置里逐字写下的调用形态搬到「被 @ 的仓库」形态的工作区里真跑，
+#  并按配置的 stage 顺序先执行物化步 —— 既有守卫全在仓库根上跑脚本
+#  （cwd=PROJECT_ROOT），判据的输入端被宿主目录布局填成了真值，故此前全绿。）
 tests/unit/ci/test_npc_script_interpreter_reachability.py
 #   守卫与上一条（路由挂载契约）同文件，判据同一处——不再另立第二份接线守卫
 #   （同一根因两份守卫 = 第二套平行体系，改一处漏一处）。
