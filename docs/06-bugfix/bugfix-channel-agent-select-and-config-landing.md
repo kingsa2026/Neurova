@@ -171,9 +171,11 @@ LIVE-VERIFY PASSED / Issue #290 Bug B
    队列清空按 `payload.metadata.agent_id`（行自带的事实）收口，前端调用点透传身份。
    判据 `tests/unit/channels/test_mgmt_agent_scope_290.py` +
    `ChannelIntegrationPage.mgmtAgentScope.test.ts`。
-4. ~~**落点已分叉的另外两项**~~ **部分收口**：`neurova/memory/data/neurova_memories_persist.db`
-   已按**配对**收养（见下节"配对"）。**`yi_ling_memory.db` 的打包态落点仍未实拍**
-   （需真实桌面部署环境），如实留在这里。
+4. ~~**落点已分叉的另外两项**~~ **已销账**：`neurova/memory/data/neurova_memories_persist.db`
+   按**配对**收养（见下节"配对"）；`yi_ling_memory.db` 一处经用户裁定——那份库是
+   早期 coding agent 留下的，**不在本产品数据面内**，本条据此关闭（不再作为待办挂着）。
+5. ~~**`app_secret` 明文落盘的旧账**~~ **已修**（见下节"凭据封存"）。
+6. ~~**空态不可归因**~~ **已修**（见下节"空态归因"）。
 
 ### 配对收养（本批发现的更深一层根因）
 
@@ -189,11 +191,83 @@ live-verify `tests/manual/seed_memory_pair_relocation_290.py`。
 > 口径提醒：本条只解决**收养**。旧锚点那份与真工作区库的**内容归属**
 > （哪一份是权威）仍属产品口径，不在本批范围内。
 
-### 仍未闭环（需产品口径或另单承接）
+### 凭据封存（2026-09-28 第三批）
+
+**根因**：保存路径注释写着「不保存明文密钥到文件」，行为却是把
+`safe_model_dump(request)` 原样写盘 —— 注释与行为相反。`app_secret`、以及 `extra`
+里的 `bot_token` / `client_secret` / `secret_key` / `access_token` / `password`
+全族**明文**躺在 `channel_configs.json` 里；换锚救济还会把这份明文一并搬到新落点
+（旧账见 `docs/空数据页面与保存落盘排查_2026-09-12.md` §D）。
+
+谁拿到这个文件（备份、云同步、误传的附件）谁就握有平台凭据，而界面上那个「密码」
+输入框与 `app_id_masked` 只掩住了展示面——这正是"看起来受保护、实际是明文"。
+
+**修法**（教义第 1 条：在产生非法状态的上游修）：落盘的唯一写入口 `_save_store()`
+经 `sealSecrets()` 封存，唯一读入口 `_load_store()` 经 `unsealSecrets()` 解回；
+加密原语不新造，复用 `neurova/security/secret_store.py`（`enc:v1:` Fernet，
+密钥链 env → keyring → `data/.secret_key`），与 `shared_config.py` 的 api_key 同源同格式。
+**加密只改磁盘表示，不改内存契约** —— 装配、冲突检测、扫码回填照旧拿明文，
+消费端因此不会派生第二套语义。存量明文读侧原样透传，下一次保存自动迁移为密文。
+
+顺带删掉只写不读的 `_app_secret_stored` 标记（写出无人读的字段是断点，
+封存落地后它更无意义）；`_load_store()` 对损坏文件改为**点名**告警，
+使「没有配置」与「读不到」在日志里可区分。
+
+**红灯**（实现前实测，`tests/unit/api/test_channel_credential_sealing_290.py`）：
+
+```
+FAILED ...::TestSecretsAreNotPlainOnDisk::test_topLevelSecretIsSealedOnDisk
+       AssertionError: app_secret 以明文落盘
+FAILED ...::test_extraCredentialsAreSealedOnDisk      AssertionError: extra 里的 bot_token 明文落盘
+FAILED ...::TestLegacyPlaintextStoreMigrates::test_plaintextFileIsSealedOnNextSave
+       AssertionError: 存量明文凭据未在下一次保存时迁移为密文
+FAILED ...::TestCorruptStoreIsNamedNotSilent::test_corruptFileIsNamedInLog
+       AssertionError: 配置文件损坏被静默当成「没有配置」
+4 failed, 3 passed
+```
+
+**绿灯**：同文件 9 passed。文件级突变自证（摘掉 `encrypt_key` 一项，前端仍声明
+它是密码字段）→ `test_everyFrontendPasswordFieldIsSealed` 转红并点名
+`['encrypt_key']`。
+
+**live-verify**（真链路，脚本入库 `tests/manual/channel_credential_sealing_290.py`）：
+
+```
+[1] POST 落盘: 200
+[2] 磁盘上 app_secret 是否已封存: True ｜ extra.bot_token: True ｜ 存量 telegram.bot_token: True
+[3] 读回 app_secret 是否原文: True  ｜ [4] extra.bot_token: True ｜ [5] 存量: True
+[7] 装配 stats: {'registered': 2, 'connected': 2, 'skipped': 0, 'failed': 0}
+[8] 装配拿到的凭据是否原文: True
+LIVE-VERIFY PASSED / Issue #290 ⑤
+```
+
+改前同一脚本 [2] 三项全是 `False`（明文落盘），读侧全 True —— 即"掩码只掩展示面"。
+
+### 空态归因（2026-09-28 第三批）
+
+本页的 `channels` 恒为**整份渠道目录**（未配置的渠道也要能点"启用"），故
+"没有配置"从不在那个 `a-empty` 分支上，而在**已配置行为 0**。此前它与
+"配置读不到"渲染成同一个样子：整页卡片一律「未启用」，用户读到的结论只有
+"配置全没了"，没有任何线索可循——**这正是本 bug 被拖了 6 天没人定位到落点的原因**
+（取证报告 §2.7-4 已把"可归因空态"列为验收线）。
+
+现按路由 agent 取数为空、且该 agent 不是 `default` 时，点名当前身份 + 说明存量可能
+在默认视图下 + 给出一键切过去的入口；`default` 视图与"有配置"两种情形不给提示
+（反向控制，防提示变成噪音）。
+
+**红灯**：`AgentChannelPage.emptyAttribution.test.ts` 2 failed（归因节点不存在 /
+切换入口不存在）；仅回退 Vue 改动后同文件仍 2 failed，实现到位即绿。
+**绿灯**：4 passed（含两条反向控制）。判据用**真语言包** `zh-CN.ts` 而非手写桩——
+桩里补了键而真语言包漏了也照样绿，那正是"看着咬合、实际没咬住"的老路。
+
+### 仍未闭环（需产品口径）
 
 1. **存量渠道的归属裁决**：存量 5 条挂在 `agents.default` 下，而侧栏进的是
-   `/agent/<真 agent id>/channel`。修 A、B、②之后用户**能主动切回** `default`
-   看到配置，切换也不再回退，但"存量该继续挂 default，还是按 `agents.json`
-   的真实身份重新归属"属产品口径，需拍板后再动。
-5. **`app_secret` 明文落盘的旧账**：搬迁会把这份明文一起搬到新落点，是否同批落掩码
-   需单独决定（旧账见 `docs/空数据页面与保存落盘排查_2026-09-12.md`）。
+   `/agent/<真 agent id>/channel`。「继续挂 `default`，还是按 `agents.json`
+   的真实身份重新归属」**仍是产品口径，未擅自决定** —— 重归属会改写用户既有凭据的
+   归属键，猜错方向的代价由用户承担。
+
+   本轮把它的**用户侧症状**根修了，因此这条不再是盲区：修 ② 之后切换不再回退，
+   第三批的空态归因会在非 `default` 视图为空时**直接点名**存量所在位置并给出一键
+   入口 —— 用户无需数据搬迁即可自助找回配置。要不要进一步做重归属，
+   等你给口径再动。
