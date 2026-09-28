@@ -64,6 +64,29 @@ Issue #175 点名的符号里有两类是上下文域的取数模型看不见的
 故 `n=2`（合法域下界）时流式路径的门控**确有可能**出声——本模块把站点次序作为事实
 输出（`shadow_orders`），由台账依据逐条论证，不由机器猜。
 
+## 「待处置」轴的进度判据（Issue #310 收口）
+
+判据类与阈值轴回答「这条死线**现在**可不可达」，处置轴回答「人对它做了什么决定」。
+但处置轴只对**已处置**的条目有约束（`已接线` / `已删除` 必须逐条点名批次），
+对**待处置**的条目**只要求「仍在原状」**——不要求任何进展。于是实际发生过：
+
+    `GoalGate` 的 15 轮硬顶被切片 B/D/C **四次独立登记**，每次都能复现、
+    每次判断都对、每次都写「属 T-04，不在本片顺手改」。四次都正确，**四次都不红**。
+    它最终被收口，是因为用户碰巧点了「下一步」，而不是因为有任何东西拦住了下一个人。
+
+**登记 ×N 而不产生红，是「静默遗留」的另一种长相**：台账里有、Issue 里有，
+却没有一处判据会在下一个人路过时拦他一下。故本模块补第三件事（前两件是判据类
+与阈值轴）：**待处置条目必须能回答「它归哪一批处置」**。
+
+- 归属写在依据列的**结构化标记**里（`〔待处置批：X〕`），值域由 `PENDING_BATCHES`
+  单源给出（不在守卫里另立第二份词汇）；
+- 无归属 = **没人认领的遗留**，`reconcile()` 报 `pending_owner`；
+- 归属点名一个不存在的批次 = `unknown_pending_batch`（与 `disposal` 轴同一条纪律：
+  人填的值由机器判定）。
+
+判据以纯函数 `pendingOwnerConflicts(entries)` 暴露，可喂合成输入自证咬合
+（见 `tests/unit/tools/test_dead_ledger_pending_progress.py` 的反向控制）。
+
 ## 判据为什么不绑墙钟
 
 唯一解析入口是 `tests/ast_scan.py`（按前缀择优 + 文本预筛 + 整进程复用），
@@ -117,6 +140,46 @@ DISPOSAL_WIRED = symbolLedger.DISPOSAL_WIRED
 DISPOSAL_RETIRED = symbolLedger.DISPOSAL_RETIRED
 DISPOSAL_MERGED = symbolLedger.DISPOSAL_MERGED
 DISPOSALS = symbolLedger.DISPOSALS
+
+#: 「待处置」条目的**批次归属**（有限枚举，单源在此；守卫不另立一份词汇）。
+#: 一个待处置条目必须能回答「它归哪一批处置」——无归属的待处置 = **没人认领的遗留**，
+#: 正是 Issue #310 点名的形态：`GoalGate` 的 15 轮硬顶被切片 B/D/C 四次独立登记，
+#: 四次判断都对、四次都不红，最后靠用户碰巧点「下一步」才收口。
+#: 「登记 ×N 而不产生红」是静默遗留的另一种长相——台账里有、Issue 里有，却没有
+#: 任何东西会在下一个人路过时拦他一下。故本轴补的不是「再加一句劝告」，是**归属**。
+PENDING_BATCH_ISSUE_SCOPE = "未分期"  #: 单条待处置项，尚未并入任何处置批
+PENDING_BATCHES: Tuple[str, ...] = (
+    "T-03",  #: provider 工具通路（协议桥接线，未清存量判据口径）
+    "T-04",  #: 轮次预算单源 / 门控阈值收口
+    "T-05",  #: 审批阻塞语义
+    "T-09",  #: 死码处置批（tool_layers 自循环面与不可达链）
+    "G2",    #: 目标验收链（Issue #267）
+    "G4",    #: 工具取消 / 超时与会话回收（Issue #288）
+    "切片 D",  #: 子代理深度上限（Issue #268）
+    PENDING_BATCH_ISSUE_SCOPE,
+)
+
+#: 批次归属在「依据」列里的**结构化标记**：`〔待处置批：T-09〕`。
+#: 用标记而不是新开一列：依据列已是逐条论证的唯一承载，再开一列会与它双源。
+_PENDING_BATCH_MARKER = re.compile(r"〔待处置批：([^〕]+)〕")
+
+
+def pendingBatchOf(entry: Dict[str, str]) -> str:
+    """从条目「依据」列解析批次归属。无标记**如实返回空串**——不兜底猜。
+
+    反向控制（守卫喂合成输入自证）：无标记的依据必须返回空，否则判据恒真。
+    """
+    matched = _PENDING_BATCH_MARKER.search(str(entry.get("basis") or ""))
+    return matched.group(1).strip() if matched else ""
+
+
+def unownedPendingSymbols() -> List[str]:
+    """无批次归属的待处置条目（**没人认领的遗留**），逐条报出。"""
+    return [
+        symbol
+        for symbol, entry in readLedger().items()
+        if entry["disposal"] == DISPOSAL_PENDING and not pendingBatchOf(entry)
+    ]
 
 THRESHOLD_NOT_APPLICABLE = "not_a_threshold"
 THRESHOLD_UNBOUND = "unbound"
@@ -757,6 +820,7 @@ def reconcile() -> Dict[str, List[Dict[str, object]]]:
         "unknown_disposal": [], "unknown_kind": [], "unknown_threshold": [],
         "empty_basis": [], "judge_conflict": [], "threshold_conflict": [],
         "count_conflict": [], "kind_conflict": [], "pending_controls": [],
+        "pending_owner": [], "unknown_pending_batch": [],
     }
     for row in rows:
         symbol = str(row["symbol"])
@@ -798,11 +862,43 @@ def reconcile() -> Dict[str, List[Dict[str, object]]]:
         if symbol in REACHABLE_CONTROLS and entry["disposal"] != DISPOSAL_PENDING:
             problems["pending_controls"].append(
                 {"symbol": symbol, "disposal": entry["disposal"]})
+        # 「待处置」轴的进度判据（Issue #310）：见 `pendingOwnerConflicts` 的论证。
+        if entry["disposal"] == DISPOSAL_PENDING:
+            batch = pendingBatchOf(entry)
+            if not batch:
+                problems["pending_owner"].append({"symbol": symbol})
+            elif batch not in PENDING_BATCHES:
+                problems["unknown_pending_batch"].append(
+                    {"symbol": symbol, "batch": batch, "allowed": list(PENDING_BATCHES)})
     registered = {str(row["symbol"]) for row in rows}
     for symbol in ledger:
         if symbol not in registered:
             problems["missing"].append({"symbol": symbol})
     return problems
+
+
+def pendingOwnerConflicts(entries: Optional[Dict[str, Dict[str, str]]] = None) -> List[Dict[str, object]]:
+    """「待处置」轴的进度判据（**纯函数**，可喂合成输入自证）。
+
+    一个待处置条目必须能回答「它归哪一批处置」（依据列的结构化标记
+    `〔待处置批：X〕`）。两种违规各自报出：
+
+    - **无归属**：没人认领的遗留——正是「登记 ×N 而不产生红」这一静默遗留形态
+      的机器可读长相（`GoalGate` 的 15 轮硬顶被四次登记、四次都不红）；
+    - **归属不在值域**：点名一个不存在的批次——与 `disposal` 轴同一条纪律，
+      人填的值由机器判定，不得自造批次词汇。
+    """
+    source = readLedger() if entries is None else entries
+    conflicts: List[Dict[str, object]] = []
+    for symbol, entry in source.items():
+        if entry.get("disposal") != DISPOSAL_PENDING:
+            continue
+        batch = pendingBatchOf(entry)
+        if not batch:
+            conflicts.append({"symbol": symbol, "kind": "unowned"})
+        elif batch not in PENDING_BATCHES:
+            conflicts.append({"symbol": symbol, "kind": "unknown_batch", "batch": batch})
+    return conflicts
 
 
 def disposalConflicts() -> List[Dict[str, object]]:
