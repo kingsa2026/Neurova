@@ -124,3 +124,46 @@ def decrypt_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
     for container, key in _walk_api_keys(config):
         container[key] = decrypt_secret(container[key])
     return config
+
+
+#: 需要封存落盘的凭据键名（值形如 `enc:v1:<fernet>`）。
+#:
+#: 与前端 `NeurUI/src/config/channelFields.ts` 里标为 `type: 'password'` 的字段
+#: 是同一份事实的两个语言面：前端那一份管「渲染成密码框」，本集合管「落盘要封」。
+#: 两面不许各改各的 —— 守卫 `tests/unit/api/test_channel_secret_at_rest_290.py`
+#: 逐名比对（前端新增一个密码字段而本集合没收，即红），并带反向控制
+#: （身份/路径/开关类键名不得混进来，防「把集合塞满」式的假通过）。
+CREDENTIAL_KEY_NAMES = frozenset({
+    # 前端字段表声明的密码字段
+    "access_token", "app_secret", "bot_token", "client_secret", "dashscope_api_key",
+    "encrypt_key", "password", "secret_key", "sip_password", "verification_token",
+    # 后端装配链真读、但未进前端字段表的同族键（扫码回填 / 平台专有）
+    "callback_token", "encoding_aes_key", "secret", "token", "webhook_token",
+})
+
+
+def _sealWalk(value: Any, transform: "Any") -> Any:
+    """按**键名**递归改写字符串值，返回新结构（不改原对象）。
+
+    只吃 `dict` / `list` / `str`：`bool`、数字、`None` 原样透传 ——
+    `secret: false` 这类开关字段不是凭据，加密它们只会造出无法判真值的怪值。
+    """
+    if isinstance(value, dict):
+        return {
+            key: (transform(item) if isinstance(item, str) and key in CREDENTIAL_KEY_NAMES
+                  else _sealWalk(item, transform))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sealWalk(item, transform) for item in value]
+    return value
+
+
+def sealSecrets(config: Any) -> Any:
+    """配置树内所有凭据字段 → 密文（返回新树；非凭据字段与明文兼容不动）。"""
+    return _sealWalk(config, encrypt_secret)
+
+
+def unsealSecrets(config: Any) -> Any:
+    """配置树内所有密文凭据 → 明文（返回新树；存量明文原样透传）。"""
+    return _sealWalk(config, decrypt_secret)
