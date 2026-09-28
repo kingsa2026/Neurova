@@ -542,7 +542,20 @@ def _scalingWitnesses(configKey: str) -> Tuple[Dict[str, object], ...]:
 
 
 def _aliasesOf(rel: str, targets: List[str]) -> List[str]:
-    """被赋值量派生的局部别名（`_max_rounds = getattr(self, "_max_tool_rounds", None) or 10`）。"""
+    """被赋值量派生的别名（守卫经别名间接比较即靠它认出来）。
+
+    两种落点都收：
+    - **局部量**：`_max_rounds = getattr(self, "_max_tool_rounds", None) or 10`
+      （历史上非流式路径的写法，T-04 收口后已不存在）；
+    - **属性**：`state.maxToolRounds = getattr(self, "_max_tool_rounds", None) or 10`
+      （轮次态迁到 `TurnRunState` 之后的写法——守卫比较的是 `state.maxToolRounds`，
+      漏了这条别名，"守卫在哪比较"就会被算成空集，第二轴随之退化成值域单条证据）。
+
+    只按**名字**认（`target.split(".")[-1]`）而不做类型推断：本模块的既有口径是
+    "事实写入依据、判定不靠猜"（同文件顶栏「接收者归属」一节），别名识别只影响
+    「哪个函数里做了这次比较」，同名局部量串台的最坏后果是**多**认一个站点，
+    而漏认会让轴值从 scaled_sparse 退成 scaled_unreachable——两者不等价，故宁可多认。
+    """
     aliases: List[str] = []
     for node in ast.walk(_parsed(rel)):
         if not isinstance(node, ast.Assign):
@@ -550,8 +563,9 @@ def _aliasesOf(rel: str, targets: List[str]) -> List[str]:
         text = ast.unparse(node.value)
         if not any(target.split(".")[-1] in text for target in targets):
             continue
-        aliases += [ast.unparse(target) for target in node.targets
-                    if isinstance(target, ast.Name)]
+        for target in node.targets:
+            name = ast.unparse(target)
+            aliases.append(name if isinstance(target, ast.Name) else name.split(".")[-1])
     return aliases
 
 

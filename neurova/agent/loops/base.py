@@ -68,7 +68,14 @@ class LoopExitDecision:
         return cls(action=LOOP_CONTINUE, continuation_prompt=prompt, gate_name=gate_name)
 
 
-async def evaluateLoopExit(loop: "BaseAgentLoop", *, reply: str, roundUsage: Any, toolRound: int) -> LoopExitDecision:
+async def evaluateLoopExit(
+    loop: "BaseAgentLoop",
+    *,
+    reply: str,
+    roundUsage: Any,
+    toolRound: int,
+    roundSignature: Optional[str] = None,
+) -> LoopExitDecision:
     """主出口的门控求值（**唯一实现点**，两条路径共用）。
 
     为什么必须存在：工具轮的求值发生在 `if tool_calls:` 块内，而"模型不再调用
@@ -77,6 +84,11 @@ async def evaluateLoopExit(loop: "BaseAgentLoop", *, reply: str, roundUsage: Any
 
     ctx 带 `isLoopExit=True`，使 GoalGate 能区分"停在工具轮中途"与"自认为完成"：
     只有后者才是假完成，也只有后者才值得注入提示续跑。
+
+    `roundSignature` 由调用方从**本轮 `TurnRunState`** 取（`state.exitSignature()`）：
+    这里原先读 loop 实例的 `turnRoundSignature()`，而它依赖的 `_round_user_key`
+    在轮次态迁出实例后已成零写入点的死属性——出口签名恒为 `":exit:N"`，
+    交叠会话的两条出口判定因此同签名。缺省仍退回实例读法，兼容未传的调用方。
 
     判定输入由 `ctx["goal_verdict"]` 承载（异步判定在进入门控前完成），
     故门控本身保持纯同步、无 I/O。
@@ -109,7 +121,7 @@ async def evaluateLoopExit(loop: "BaseAgentLoop", *, reply: str, roundUsage: Any
         "tool_rounds": toolRound,
         "round_reply": reply,
         "round_usage": roundUsage or {},
-        "round_signature": loop.turnRoundSignature(),
+        "round_signature": roundSignature or loop.turnRoundSignature(),
         "goal": goal or {},
         "isLoopExit": True,
         "goal_verdict": verdict,
@@ -290,18 +302,17 @@ class BaseAgentLoop(ABC):
         return "\n".join(parts)[:4000]
 
     def turnRoundSignature(self) -> str:
-        """主出口的轮次签名。
+        """主出口轮次签名的**兜底**读法（无 state 可用时）。
 
-        刻意**不带回复正文**，而是带续跑序号：出口上的"重复"与工具轮上的重复
-        不是一回事——反复在出口停手是"假完成"，它的权威判据是目标门的续跑预算
-        （有上限、理由可点名），不是死循环门。两处各管一件事，不设双重权威；
-        反之若把正文当签名，模型两次给出同样措辞就会被死循环门提前掐断，
-        预算耗尽的原因反而说不清。
+        正式取数点是 `TurnRunState.exitSignature()`——签名的主体是"本轮用户
+        指纹"，而轮次态归属已迁到那次调用自己的 state 上（Issue #268）。
+        本方法保留给"直接驱动 `evaluateLoopExit` 而无 state"的调用方，
+        指纹位因此只能为空：不做第二份事实源（`_round_user_key` 已随切片 A
+        成为零写入点的死属性，不再从实例读它）。
         """
         from neurova.core.turn_context import get_turn_goal_continuations
 
-        key = getattr(self, "_round_user_key", "") or ""
-        return f"{key}:exit:{get_turn_goal_continuations()}"
+        return f":exit:{get_turn_goal_continuations()}"
 
     def gateRunnerForExit(self) -> Any:
         """主出口使用的门控执行器；子类未装配门控时返回 None（求值退化为正常收口）。"""
