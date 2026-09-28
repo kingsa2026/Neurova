@@ -3,10 +3,15 @@
 
 ## 现象与事实
 
-`scripts/ci/toolLoopDeadlines.txt` 的两行（`MAX_TOOL_CALL_ROUNDS` 与
-`tool_call_rounds`，判据类 `no_consumer`）实测复算：`_auto_continue` 函数作用域内
-**只有 Store、零 Load**。同函数的其余上界常量（`MAX_CONTINUE_ROUNDS` /
-`MAX_TOTAL_CHARS`）都有真实读取点，故这不是「常量都在函数头列出」的误判。
+`scripts/ci/toolLoopDeadlines.txt` 登记的 `MAX_TOOL_CALL_ROUNDS`（判据类
+`no_consumer`）实测复算：`_auto_continue` 函数作用域内**只有 Store、零 Load**。
+同函数的其余上界常量（`MAX_CONTINUE_ROUNDS` / `MAX_TOTAL_CHARS`）都有真实读取点，
+故这不是「常量都在函数头列出」的误判。
+
+（原文写的是「两行（`MAX_TOOL_CALL_ROUNDS` 与 `tool_call_rounds`）」。那是当时
+台账与代码的实况；本批把 `MAX_TOOL_CALL_ROUNDS` 三处残骸一并删净后，`tool_call_rounds`
+这个名字在生产侧已零出现——故本条判据同步收窄为只钉仍在册的那一个符号，
+不留一条指向已消失符号的"镜像行"。）
 
 ## 根因（不是「谁忘了读」）
 
@@ -38,15 +43,27 @@ from __future__ import annotations
 
 import ast
 import io
+import sys
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+
 PIPELINE = PROJECT_ROOT / "neurova" / "agent" / "chat_pipeline.py"
 
-#: 台账（scripts/ci/toolLoopDeadlines.txt）登记为 no_consumer 的两条。
-LEDGER_ENTRIES = ("MAX_TOOL_CALL_ROUNDS", "tool_call_rounds")
+#: 台账（`scripts/ci/toolLoopDeadlines.txt`）登记为 `no_consumer` 的条目。
+#: 登记名必须与台账模块（`scripts/ci/tool_loop_deadline_ledger.py`）的登记表一致——
+#: 由 `TestLedgerScopeStaysBound` 双向钉住。
+#:
+#: 为什么不手抄一份：手抄的第二份正是本批要根修的形态——同一事实两处定义，
+#: 代码里的残骸删掉了、判据里那份留着，于是判据指向一个已不存在的符号，
+#: 它对 `_auto_continue` 的 `Name` 记账恒为空、恒真通过。
+LEDGER_ENTRIES = ("MAX_TOOL_CALL_ROUNDS",)
 
 
 def _auto_continue_node() -> ast.AST:
@@ -135,4 +152,30 @@ class TestWhileConditionAlreadyExcludesToolRounds:
             "本批「工具轮次上界没有存在必要」的论证前提不存在了，"
             "请重新评估是否真的需要在续写段加工具轮次上界（不要再把死分支原样贴回来）。"
             f"\n实测条件：{ast.unparse(condition)}"
+        )
+
+
+class TestLedgerScopeStaysBound:
+    """台账口径与判据口径必须仍指向同一个符号（**不手抄**）。
+
+    判据的取数面取自台账模块的**登记表**（`AUDIT_SYMBOLS`），符号的「死/活」事实
+    取自 `_auto_continue` 的 AST 记账——两者各自取数，本组钉住它们仍对得上。
+    若台账那条被摘掉（或改了登记名），判据会静默变成空转；把它显式钉住。
+    """
+
+    def test_scopeMatchesLedgerRegistration(self):
+        registered = [name for name, _kind, _origin in ledger.AUDIT_SYMBOLS]
+        missing = [name for name in LEDGER_ENTRIES if name not in registered]
+        assert not missing, (
+            f"台账登记表里已无这些符号：{missing}——本判据的取数面与台账登记面漂移，"
+            "且它会静默变成空转（`_nameAccesses` 取不到名字 ⇒ 恒真通过）"
+        )
+
+    def test_everyScopedNameIsStillAbsentFromThePipeline(self):
+        """本批的处置事实：这些名字在生产链路上已零出现（不只是本函数）。"""
+        source = io.open(PIPELINE, encoding="utf-8").read()
+        lingering = [name for name in (*LEDGER_ENTRIES, "tool_call_rounds") if name in source]
+        assert not lingering, (
+            f"这些名字又回到了 chat_pipeline：{lingering}——本批已按「删声明本身」处置"
+            "（声明 + 计数一并删净），复活一个恒假消费者的配套残骸是倒退"
         )
