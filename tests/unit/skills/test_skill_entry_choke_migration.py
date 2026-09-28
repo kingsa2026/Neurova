@@ -28,12 +28,16 @@ NEUROVA = REPO_ROOT / "neurova"
 
 
 class TestSandboxRootSingleSource:
-    def test_injection_uses_agent_workspace(self):
-        agent = type("A", (), {"workspace_path": "/tmp/ws"})()
-        assert inject_sandbox_root(agent, "file_operation", {})["_base_dir"] == "/tmp/ws"
+    def test_injection_uses_agent_workspace(self, tmp_path):
+        # 期望值必须是一个**真实目录**：解析口径按 `is_dir()` 校验（非真实目录
+        # 回落 `.`，见 `resolveWorkspaceRoot` 的防伪根守卫）。此前这里写
+        # `/tmp/ws`（不存在的路径），把"解析不校验"这个实现细节编码进了判据——
+        # 口径收口后那条断言测的是"能否把伪路径当沙箱根"，与本用例名不符。
+        agent = type("A", (), {"workspace_path": str(tmp_path)})()
+        assert inject_sandbox_root(agent, "file_operation", {})["_base_dir"] == str(tmp_path)
 
-    def test_non_file_operation_untouched(self):
-        agent = type("A", (), {"workspace_path": "/tmp/ws"})()
+    def test_non_file_operation_untouched(self, tmp_path):
+        agent = type("A", (), {"workspace_path": str(tmp_path)})()
         assert "_base_dir" not in inject_sandbox_root(agent, "memory_search", {})
 
     def test_missing_workspace_falls_back_to_dot(self):
@@ -41,10 +45,15 @@ class TestSandboxRootSingleSource:
         assert inject_sandbox_root(agent, "file_operation", {})["_base_dir"] == "."
 
     def test_no_second_implementation_in_repo(self):
-        """守卫：`_base_dir` 的注入只允许出现在单源 helper 与咽喉内。"""
+        """守卫：`_base_dir` 的注入**只允许出现在单源 helper 内**。
+
+        `tool_executor.py` 曾在此放行（咽喉自带一份 `skill_name == "file_operation"`
+        判定与一份 `_workspace_base()` 解析）。本片把咽喉也收口到 helper 后，那条
+        放行就变成了一条**没人再用的豁免**——放行集不收紧，第三处实现照样能溜进来
+        而判据照绿。故此处同步收紧为只有 helper 一处。
+        """
         allowed = {
             "neurova/skills/sandbox_root.py",
-            "neurova/tool_executor.py",
         }
         offenders: List[str] = []
         for path in NEUROVA.rglob("*.py"):
