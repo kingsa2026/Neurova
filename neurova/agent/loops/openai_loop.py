@@ -19,7 +19,7 @@ from neurova.agent.gates import StopDecision as _StopDecision
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
-from neurova.agent.loops.turn_run_state import ROUND_BUDGET_FALLBACK, TurnRunState
+from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.core import turn_context
 from neurova.llm_client import LLMResponse
 
@@ -226,7 +226,9 @@ class OpenAILoop(BaseAgentLoop):
         )
         return GateRunner([
             DoomLoopGate(),
-            IterationGate(max_rounds=limits["max_loop_rounds"]),
+            # T-04：门控阈值与轮内守卫**同取一处派生**，不再各读一遍配置键的
+            # 不同尺度（那正是本轴被判 `scaled_sparse` 的成因）。
+            IterationGate(max_rounds=resolveToolRoundBudget()),
             TokenBudgetGate(max_tokens=limits["token_budget"]),
             goal_gate,
             *list(getattr(self, "_extra_gate_specs", None) or []),
@@ -384,7 +386,7 @@ class OpenAILoop(BaseAgentLoop):
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_runner,
         )
-        state.maxToolRounds = getattr(self, "_max_tool_rounds", None) or ROUND_BUDGET_FALLBACK
+        state.maxToolRounds = resolveToolRoundBudget()
         return state
 
     def _agentFingerprint(self) -> str:
@@ -428,13 +430,12 @@ class OpenAILoop(BaseAgentLoop):
         # 本轮轮次态：入口构造、逐轮传递、随轮释放。
         # 不得写回 self——loop 是 per-agent 单例，实例态会让交叠会话互相清零
         # 彼此的轮次预算（Issue #268，缺陷 A）。
-        # 工具轮上限读取设置（与 IterationGate 同源；尺度收口属 T-04，本片不动口径）
-        try:
-            from neurova.security.agent_limits_settings import get_effective_limits
-
-            self._max_tool_rounds = get_effective_limits()["max_loop_rounds"] // 2
-        except Exception:  # noqa: BLE001 - 设置不可读不阻断对话
-            self._max_tool_rounds = ROUND_BUDGET_FALLBACK
+        #
+        # 工具轮上限（T-04 收口）：尺度只有一处派生（`state.toolRoundBudget()` →
+        # `resolveToolRoundBudget()`），守卫与 `IterationGate` 同取它。此前这里把
+        # `max_loop_rounds // 2` 存进 `self._max_tool_rounds` —— 既让同键读出两个
+        # 尺度（门控因此恒被守卫抢先，第二轴记 `scaled_sparse`），又把值挂在单例上
+        # （切片 A 已从轮次态里消灭的形态）。
         # 门控执行器每轮一份：**读取面就是判定面**（同一份实例）。
         # `DoomLoopGate` 的窗口与中断计数是会话级态，挂在单例 loop 上会让两个会话
         # 互相把对方的正常调用判成重复（Issue #268 缺陷 A）；但同一轮内两条路径
@@ -447,7 +448,7 @@ class OpenAILoop(BaseAgentLoop):
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_round_gate_runner,
         )
-        state.maxToolRounds = getattr(self, "_max_tool_rounds", None) or ROUND_BUDGET_FALLBACK
+        state.maxToolRounds = resolveToolRoundBudget()
         # 2026-09-07 回归修复：_round_usage 是"本轮 token 预算"语义，必须
         # 每次用户请求重置——原修复只加了写入方，忘了重置，跨请求无限累计
         # 导致第二轮 LLM 调用被 TokenBudgetGate 掐死（回复空白回归）
