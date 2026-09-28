@@ -343,20 +343,34 @@ class OpenAILoop(BaseAgentLoop):
         return msgs
 
     def _startTurnState(self, messages: List[Dict]) -> TurnRunState:
-        """入口构造本轮轮次态（`_predict_*` 被直接驱动时的兜底同源）。
+        """入口构造本轮轮次态（`predict_step` 与 `_predict_*` 直接驱动的兜底同源）。
 
         门控执行器就地取规格装配（单点 `_buildGateRunner`），并写回实例引用：
         读取面与判定面必须是**同一份**，否则经 `_gate_runner` 追加的门控与
         `DoomLoopGate` 的窗口都只落在其中一份上。
+
+        构造一律走 `TurnRunState.forTurn`（唯一签发点）：切片 C 之后轮次态要能
+        自证归属，而"谁创建的"只有签发时知道——直接 `TurnRunState(...)` 会得到
+        空 turnId，正是"构造点各写一份、指纹无人记"的形态。
         """
         _runner = self._buildGateRunner()
         self._gate_runner = _runner
-        state = TurnRunState(
+        state = TurnRunState.forTurn(
+            agentId=self._agentFingerprint(),
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_runner,
         )
         state.maxToolRounds = getattr(self, "_max_tool_rounds", None) or ROUND_BUDGET_FALLBACK
         return state
+
+    def _agentFingerprint(self) -> str:
+        """创建者指纹（切片 C）：优先 agent_id，退到 name——两者皆无则空串。"""
+        config = getattr(self.agent, "config", None)
+        return str(
+            getattr(config, "agent_id", None)
+            or getattr(config, "name", None)
+            or ""
+        )
 
     @staticmethod
     def _fingerprintUserMessage(messages: List[Dict]) -> str:
@@ -404,7 +418,8 @@ class OpenAILoop(BaseAgentLoop):
         # 故入口重建一次、实例引用即本轮判定面，`TurnRunState.gateRunner` 直接持有它。
         _round_gate_runner = self._buildGateRunner()
         self._gate_runner = _round_gate_runner
-        state = TurnRunState(
+        state = TurnRunState.forTurn(
+            agentId=self._agentFingerprint(),
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_round_gate_runner,
         )
@@ -494,6 +509,9 @@ class OpenAILoop(BaseAgentLoop):
         if state is None:
             state = self._startTurnState(request_params.get("messages") or [])
         while True:
+            # 轮入口不变量（切片 C）：越限即点名——把"上限判定被绕过"
+            # （跨会话污染的形态）从要靠并发活体才测得到，降级为每轮可自证。
+            state.assertRoundInvariant()
             outcome = await self._runOneNormalRound(request_params, state)
             if outcome.done is not None:
                 return outcome.done
@@ -691,6 +709,8 @@ class OpenAILoop(BaseAgentLoop):
 
         self._rounds = _StreamRounds()  # 本轮流式循环的轮间标志（见 `_resumeAfterLengthEmpty`）
         while True:
+            # 轮入口不变量（切片 C）：与非流式同判据，两条路径共用同一份自证。
+            state.assertRoundInvariant()
             produced = None
             gotContent = False
             try:

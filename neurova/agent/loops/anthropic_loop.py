@@ -49,8 +49,16 @@ class AnthropicLoop(BaseAgentLoop):
         """
         # 轮次态随本次调用构造、逐轮传递：原先挂在实例上，同一 agent 上两个会话
         # 交叠时后进入者会改写前者的轮次计数（与 OpenAILoop 同一根因，Issue #268）。
-        state = TurnRunState(maxToolRounds=self.resolveToolRoundBudget())
+        # 构造走 `forTurn`（切片 C 唯一签发点）：记录创建者指纹，交叉使用可自证。
+        _config = getattr(self.agent, "config", None)
+        state = TurnRunState.forTurn(
+            agentId=str(
+                getattr(_config, "agent_id", None) or getattr(_config, "name", None) or ""
+            ),
+            maxToolRounds=self.resolveToolRoundBudget(),
+        )
         while True:
+            state.assertRoundInvariant()
             response = await self._predict_anthropic(
                 await self._build_request(tools, computer_handler, messages)
             )
