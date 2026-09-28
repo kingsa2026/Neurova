@@ -92,16 +92,30 @@ class TestNoPerCallPoolCreation:
         )
 
     def test_retired_pipeline_site_does_not_reintroduce_a_pool(self):
-        """`tool_pipeline.py` 的并行站点已随 T-09 退场——不得重新引入直建池。
+        """`tool_pipeline.py` 的并行站点已随 T-09 退场——不该再有任何池。
 
         这是上一条对它失效之后**补上的等价判据**：原判据问「它有没有用共享池」，
-        现判据问「它有没有重新直建池」。后者才是本套件的原始红线，且对「站点被
+        现判据问「它有没有重新建池」。后者才是本套件的原始红线，且对「站点被
         删掉」与「站点被接回来但接错了」两种情形都成立。
+
+        **两个形态都要拦**（各拦一次，不是"随便哪一条拦得住就算"）：
+
+        - `ThreadPoolExecutor`：直建池，本套件第一红线；
+        - `get_thread_pool`：具名共享池。它在这个文件上同样是**退场残留**——
+          该模块已经没有任何提交任务的调用点，"接回共享池"只会是一个没有
+          `submit` 的死引用。只拦直建池会漏掉这一种。
+
+        反证（实测）：只写 `ThreadPoolExecutor` 那一条时，往文件里加回
+        `get_thread_pool(name="tool-pipeline")` 调用仍全绿——那就是漏。
         """
         src = io.open(PROJECT_ROOT / "neurova/agent/tool_pipeline.py", encoding="utf-8").read()
         assert "ThreadPoolExecutor" not in src, (
-            "tool_pipeline.py 重新引入了线程池——若并行面要接回来，"
+            "tool_pipeline.py 重新引入了直建线程池——若并行面要接回来，"
             "必须走 neurova.core.thread_pool.get_thread_pool(name=...)，不得直建"
+        )
+        assert "get_thread_pool" not in src, (
+            "tool_pipeline.py 已经没有任何线程池站点，残留具名池调用即死码"
+            "——接回并行面时再连同 get_thread_pool 一起加，不要只加池"
         )
 
 

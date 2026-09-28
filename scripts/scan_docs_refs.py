@@ -168,6 +168,43 @@ def displayPath(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+# 协议/锚点前缀：这几类从来不是仓内位置
+NON_PATH_PREFIXES = ("http", "mailto:", "#")
+# 以 `/` / `./` / `../` 开头是文件系统路径，不是仓内相对位置
+ABSOLUTE_PATH_PREFIXES = ("/", "./", "../")
+# 路径必须以这些后缀收尾（`foo.bar()` 这类方法调用形态因此被挡下）
+PATH_SUFFIX_PATTERN = re.compile(r"\.(?:" + "|".join(PATH_SUFFIXES) + r")$")
+
+
+def looksLikeARepoPath(ref: str) -> bool:
+    """引用原文像不像一条**路径**（`scanFile` 的形态门槛）。
+
+    两条件全部成立才算：不是协议/锚点前缀，且以 `PATH_SUFFIXES` 里的后缀收尾
+    ——后者挡下 `foo.bar()` 这类方法调用片段。
+
+    为什么门槛只到"后缀收尾"为止、**不**要求整串相等：同一行代码可以在代码里带
+    锚点。**带行号是 Markdown 里的常规写法**——
+    `neurova/agent/tool_pipeline.py:201`（指到那一行）、`docs/INDEX.md#L12`
+    （指到那一节）都是指路，读者点开文件按行找得到，不是叙述性提及。
+
+    旧实现用 `ref.endswith(".py")` 这类"整串相等"判形态，于是**所有带行号的路径
+    引用一律被判为「不是路径」而静默不入账**：台账少记，守门跟着少判——那条
+    "归档层失效引用已归零"的结论，在一种常规书写形态上是空的。更麻烦的是它
+    专挑**被删文件**漏：删掉一批模块，它们在归档层里被"按行点名"的引用本该变成
+    悬空待处置，恰恰因为带了行号而一条都不进台账。
+
+    计数必须由**引用本身**决定，不能因为换了种写法就漏。
+
+    裸文件名（`tool_pipeline.py`）仍交给 `codeSpanNamesARepoLocation` 判：
+    全仓有同名命中才入账，零命中的裸名是叙述性提及。
+    """
+    if ref.startswith(NON_PATH_PREFIXES) or ref.startswith(ABSOLUTE_PATH_PREFIXES):
+        return False
+    # 裸名可能带 `::用例名` 尾标（`test_x.py::TestFoo::testBar`），那不是路径的一部分
+    head = ref.split("::", 1)[0]
+    return bool(PATH_SUFFIX_PATTERN.search(head))
+
+
 def codeSpanNamesARepoLocation(ref: str, byBasename: dict) -> bool:
     """行内码是否在表达**仓库内位置**（`scanFile` 的入账门槛）。
 
@@ -208,9 +245,7 @@ def scanFile(path: Path, byBasename: dict) -> list:
             found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—"))
         for match in CODE_PATH_PATTERN.finditer(line):
             ref = match.group(1)
-            if ref.startswith(("http", "mailto:", "#")):
-                continue
-            if not ref.endswith(tuple("." + suffix for suffix in PATH_SUFFIXES)):
+            if not looksLikeARepoPath(ref):
                 continue
             if PLACEHOLDER_PATTERN.search(ref):
                 continue
