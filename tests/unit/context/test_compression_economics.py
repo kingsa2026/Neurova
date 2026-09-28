@@ -365,28 +365,27 @@ class TestBothEntryPointsShareOneGate:
         `injector.py` 内部的 `self._compress_context`）——同名不同类的两处实现
         （记忆层 `AutoContextModule` 自己那份）不属同一契约，不并入。
         这是"放大视角"的机器形态：新增一个调用点忘了过闸，本条即红。
+
+        取数走 `tests/ast_scan` 的共享预算入口（`callNodes` 带文本预筛）：
+        判据本身与代码总量、与机器快慢都无关，不许手写 `rglob + ast.parse`
+        全仓扫描——那会把代码行数编码成时间上界，撞 30s 默认墙钟即偶发红
+        （门禁：`tests/unit/test_ci_ast_scan_budget_guard.py`）。
         """
         import ast
 
+        from tests import ast_scan
+
         offenders = []
-        for path in (REPO_ROOT / "neurova").rglob("*.py"):
-            text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text, filename=str(path))
-            lines = text.splitlines()
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                if getattr(func, "attr", None) != "_compress_context":
-                    continue
-                receiver = ast.unparse(func.value)
-                if receiver == "self" and path.name != "injector.py":
-                    continue  # 同名不同类：不属本契约
-                if receiver not in ("self", "self._unified_injector"):
-                    continue
-                window = "\n".join(lines[max(0, node.lineno - 40): node.lineno])
-                if "_economics_allows" not in window:
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        for path, node in ast_scan.callNodes(REPO_ROOT / "neurova", "_compress_context"):
+            receiver = ast.unparse(node.func.value)
+            if receiver == "self" and path.name != "injector.py":
+                continue  # 同名不同类：不属本契约
+            if receiver not in ("self", "self._unified_injector"):
+                continue
+            lines = ast_scan.sourceCode(path).splitlines()
+            window = "\n".join(lines[max(0, node.lineno - 40): node.lineno])
+            if "_economics_allows" not in window:
+                offenders.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
         assert offenders == [], f"未过判据的压缩调用点：{offenders}"
 
 class TestBaselineCompatibility:
