@@ -20,8 +20,13 @@
 #  maxTokens/thinkingLevel/supportImage），写进去会被静默忽略。故运行期硬约束
 # （时间预算条款、运行期预算纪律）与人设一起放在各角色的 prompt 里。
 #
-# 共享正文只写**一份**（YAML 锚点），各角色逐字复用：运行参数相同、行为约束相同，
-# 拆成多份手抄就必然漂移，而漂移处不会有任何红（教义第 6 条）。
+# 共享正文逐字复用：运行参数相同、行为约束相同，拆成多份手抄就必然漂移，
+# 而漂移处不会有任何红（教义第 6 条）。
+# **本文件里没有 YAML 锚点**：六份 prompt 各自写全，逐字一致性由
+# tests/unit/ci/test_npc_pipeline_time_budget.py 与
+# tests/unit/ci/test_npc_turn_output_budget_discipline.py 分别按条款区间比对。
+# （此处曾写「共享正文只写一份（YAML 锚点）」，与文件实际形态不符 ——
+#    它是只写不读的说明，2026-09-28 随 Issue #306 一并纠正。）
 # 卡片字段（slogan / enableThinking）各角色不同，仍写在各自条目里。
 # ============================================================================
 
@@ -163,6 +168,28 @@ npc:
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
 
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
+
         工作方式：
         - 需求明确时直接执行，无需反复确认。
         - 涉及代码改动时，提交 PR 并在 PR 描述中说明改了什么、为什么、如何验证。
@@ -303,6 +330,28 @@ npc:
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
 
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
+
         工作方式：
         - 需求明确时直接执行，无需反复确认。
         - 涉及代码改动时，提交 PR 并在 PR 描述中说明改了什么、为什么、如何验证。
@@ -441,6 +490,28 @@ npc:
         `pkill -f start_server.py` 收尾，把自己所在的构建容器一并打掉；整条流水线
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
+
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
 
         工作方式：
         - 需求明确时直接执行，无需反复确认。
@@ -581,6 +652,28 @@ npc:
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
 
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
+
         工作方式：
         - 需求明确时直接执行，无需反复确认。
         - 涉及代码改动时，提交 PR 并在 PR 描述中说明改了什么、为什么、如何验证。
@@ -719,6 +812,28 @@ npc:
         `pkill -f start_server.py` 收尾，把自己所在的构建容器一并打掉；整条流水线
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
+
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
 
         工作方式：
         - 需求明确时直接执行，无需反复确认。
@@ -859,6 +974,28 @@ npc:
         `pkill -f start_server.py` 收尾，把自己所在的构建容器一并打掉；整条流水线
         7261220ms 全部耗在一次零产出的等待上，构建号失效、Issue 上没有任何回复。
         本条款由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验（改一处必须同步另一处）。
+
+        【单轮输出预算纪律（Issue #306，违反即整轮白跑）】
+
+        上一条管的是**墙钟**，这一条管的是**单轮输出预算**，两者是两件事。
+
+        - 单轮输出预算与推理共享。`thinkingLevel: max` 下的推理可以长到十几万字符，
+          一旦吃满预算，**这一轮就到此为止**：没有正文、没有工具调用。
+        - 实测读数（构建 cnb-p3m-1k3j7bd05 / cnb-t13-1k3im568q / cnb-q0r-1k3j7r965 /
+          cnb-dc6-1k3j9phhs / cnb-90f-1k3if9qm1 五条，末轮逐条同形）：
+          `finish with length, out=32000`，`reasoning_tokens=32000`，正文 0 字符，
+          工具调用 0 次。该轮**零产出**。
+        - 零产出的一轮**不会触发接力**：收尾判据读的是平台在收尾时刻注入的
+          `$CNB_PIPELINE_STATUS` 与失败 stage 名（`$CNB_BUILD_FAILED_STAGE_NAME`），
+          而零产出收官是 `success` —— 两条都不成立，收尾 Stage 每次 `skipped`，
+          改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+
+        所以：**先落盘，后继续**。每完成一个可独立成立的片段（一条判据转绿、
+        一次红灯取证、一段结论），立刻 commit / push / 回帖，再开下一段。
+        不要把"把结论一次性整理完再交代"当成工作方式 —— 推理一旦吃满单轮预算，
+        你连交代的机会都没有；而那些已完成的读数只能靠下一轮重新复算。
+
+        本条款由 tests/unit/ci/test_npc_turn_output_budget_discipline.py 常驻校验（改一处必须同步另一处）。
 
         工作方式：
         - 需求明确时直接执行，无需反复确认。
