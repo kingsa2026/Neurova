@@ -1111,6 +1111,16 @@ tests/unit/ci/test_npc_runtime_budget.py
 #   · 判据的根取值是平台注入的 $CNB_NPC_NAME，名单唯一事实源仍是 npc.roles。
 tests/unit/ci/test_npc_handoff_role_continuity.py
 
+# Issue #306 NPC 会话空转（构建被创建但跑的不是本仓声明的 Job）：
+#   · 本仓 NPC Job 缺 `docker.image` 时，平台按 key 覆盖合并系统默认配置与本仓配置，
+#     平台那一份 runtime 顶上 —— 实际运行环境不再由本仓 `.cnb.yml` 决定，
+#     而平台侧与日志里都看不出这件事（实测读数见
+#     docs/05-reports/npc系统事件通道_2026-09-28.md）；
+#   · 判据按「每个 @npc 事件下的每个 Job」遍历（共用 Job 体 + 接力载体一次扫清），
+#     并带反向控制（把镜像换成别的值必须被抓到）；
+#   · 同一根因的另一半是入口：@ 平台内置系统 NPC 时本仓配置不参与，
+#     该结论与 npc续跑角色连续性_2026-09-26.md §1.2 一致。
+
 # Issue #271 M4 片：MCP 注册点的并行能力声明通道（能力无法由提供方声明 = 封闭性缺陷）。
 #   根因：上一片把并行资格换成"读工具自己的声明"，但只落了内置工具一条注册路径；
 #   MCP 工具的 schema 由第三方 server 提供、本仓改不了，且 `mcp_config` 的未知键
