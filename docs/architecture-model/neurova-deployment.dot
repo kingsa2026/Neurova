@@ -118,7 +118,7 @@ digraph NeurovaDeployment {
         label="⑥ CI/CD —— 真实门禁 vs 纸面门禁";
         style="rounded"; color="#1864ab"; fontsize=13; labeljust=l;
 
-        ci [label="ci.yml 226 行 / 9 job（push main+PR+dispatch）\nstatic-gate · lint(ruff E9/F821) · deploy-config\n(把 Dockerfile/compose/Helm 端口与资源钉住)\nimport-and-regression · unit-tests(3.11/3.12 matrix\n只跑 scripts/ci/protected_tests.txt 受保护子集+覆盖率门)\ne2e boot smoke · frontend(vue-tsc+vitest)\n· perf-gate · dependency-audit(pip-audit+osv)"];
+        ci [label="ci.yml 226 行 / 9 job（push main+PR+dispatch）\nstatic-gate · lint(ruff E9/F821) · deploy-config\n(把 Dockerfile/compose/Helm 端口与资源钉住)\nimport-and-regression · unit-tests(单腿=生产解释器 3.12\n只跑 scripts/ci/protected_tests.txt 受保护子集+覆盖率门)\ne2e boot smoke · frontend(vue-tsc+vitest)\n· perf-gate · dependency-audit(pip-audit+osv)"];
         codeql [label="codeql.yml  cron 23 4 * * 1，仅 python，不阻塞"];
         costci [label="cost-guards.yml（未跟踪）\nnode:18 + 根 npm ci + guard:big-brain\n依赖的 package.json 与 scripts/guard-*.cjs 均未跟踪\nguard:llm-tracked 标 continue-on-error: true [:32]\n第二 job 仅 push main 触发", fillcolor="#ffe3e3"];
         cnb [label=".cnb.yml 19KB 镜像同一管线\n→ 双 CI 事实源"];
@@ -144,6 +144,6 @@ digraph NeurovaDeployment {
         harmony -> beproc [label="同一 API", style=dotted];
     }
 
-    version [label="Python 版本无打包级强制\npyproject.toml 缺 requires-python\n仅 [tool.black] target-version py310 [:11]\n约束散在 scripts/config.py:20 / start.py:556-567\n/ start.sh:24-34 / Dockerfile:8 注释 / CI matrix 3.11·3.12", shape=note, fillcolor="#fff3bf"];
+    version [label="Python 版本无打包级强制\npyproject.toml 缺 requires-python\n仅 [tool.black] target-version py310 [:11]\n约束散在 scripts/config.py:20 / start.py:556-567\n/ start.sh:24-34 / Dockerfile 注释（解释器事实源）/ CI 受保护子集单腿=3.12", shape=note, fillcolor="#fff3bf"];
     img -> version [style=dotted];
 }
