@@ -212,11 +212,17 @@ class OpenAILoop(BaseAgentLoop):
         # G2：GoalGate 默认进装配（目标续跑预算绑定独立配置键 `goal_max_continuations`）；
         # `set_goal_gate` 只登记**规格**（显式 goal / completion_check / max_rounds），
         # 不再持有第二份装配路径——规格与默认装配同在这一个构造点成型。
+        # 轮次预算一律走 `_goalRoundBudget()`（配置单源 `goal_round_budget`）：
+        # **默认装配路径也必须传它**，否则 GoalGate 回落到 gates.py 的类字面量，
+        # 上限再次不受任何配置键管辖——这正是本片要消灭的形态。
         spec = getattr(self, "_goal_gate_spec", None)
         goal_gate = (
             self._buildGoalGate()
             if spec
-            else GoalGate(maxContinuations=limits["goal_max_continuations"])
+            else GoalGate(
+                maxContinuations=limits["goal_max_continuations"],
+                max_rounds=self._goalRoundBudget(limits),
+            )
         )
         return GateRunner([
             DoomLoopGate(),
@@ -243,8 +249,22 @@ class OpenAILoop(BaseAgentLoop):
         return GoalGate(
             goal=spec.get("goal") or {},
             completion_check=spec.get("completion_check"),
-            max_rounds=spec.get("max_rounds", 15),
+            max_rounds=self._goalRoundBudget(),
         )
+
+    def _goalRoundBudget(self, limits: Optional[dict] = None) -> int:
+        """GoalGate 的轮次预算——单源取 `goal_round_budget`（跟随 max_loop_rounds）。
+
+        `set_goal_gate(max_rounds=...)` 是**显式覆盖**，优先级高于配置：它是调用方
+        对该次会话目标的直接裁定，不是第二份默认值。缺省（`None`）时一律回配置单源
+        —— 此前缺省是字面量 15，装配路径不传它，于是上限不受任何配置键管辖。
+        """
+        spec = getattr(self, "_goal_gate_spec", None) or {}
+        override = spec.get("max_rounds")
+        if override is not None:
+            return int(override)
+        values = limits if limits is not None else self._load_agent_limits()
+        return int(values["goal_round_budget"])
 
     def registerGate(self, gate: Any) -> None:
         """登记**追加门控规格**（替换为门控实例，由装配单点每轮成型）。
@@ -258,10 +278,14 @@ class OpenAILoop(BaseAgentLoop):
             self._extra_gate_specs: List[Any] = []
         self._extra_gate_specs.append(gate)
 
-    def set_goal_gate(self, goal: Dict[str, Any], completion_check=None, max_rounds: int = 15) -> None:
+    def set_goal_gate(
+        self, goal: Dict[str, Any], completion_check=None, max_rounds: Optional[int] = None
+    ) -> None:
         """goal 模式：登记 GoalGate 规格（目标达成判定 + 轮次预算）。
 
         只登记规格，不再持有第二份装配路径（修复教义第 6 条）。
+        `max_rounds=None`（缺省）= 不覆盖，取配置单源 `goal_round_budget`
+        ——此前缺省是字面量 15，与 `_buildGoalGate` 的缺省构成同一份数字的两处落点。
         """
         self._goal_gate_spec = {
             "goal": goal,
