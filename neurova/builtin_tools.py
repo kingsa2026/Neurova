@@ -1274,8 +1274,15 @@ _SANDBOX_REQUIRED_KEY = "sandbox_required"
 #
 # 但**单向蕴含**必须成立：声明了写作用域（`readOnly=False`）的工具，结果不可能
 # "重放不制造新变更"。反向不成立（只读也可能不可重放），故只钉这一个方向。
-# 守卫：tests/unit/tools/test_reproducible_flag.py 的
-# TestWriteScopedToolsAreNeverReproducible 三面复算（正蕴含 / 反例仍在 / 消费面池）。
+#
+# **同一只读族内还有两条子语义，各自取数、不得并成一个名单口径**：
+#   瞬时快照（截图 / SOM / DOM 快照）― 冻结"当时"的画面与结构，重放取不回那一帧；
+#   会话游标（browser_read / browser_dom_read）― 推进同一个页面的分片续读游标
+#   （`session_id` 跨调用共享），同参数重放取回同一段文本，属可重放。
+# 判据：tests/unit/tools/test_reproducible_flag.py 的
+# TestWriteScopedToolsAreNeverReproducible 三面复算（正蕴含 / 反例仍在 / 消费面池），
+# 与 tests/unit/tools/test_cross_axis_declarations.py 的
+# TestCursorToolsAreADifferentAxis（快照族与游标族在重放轴上必须给出**不同**读数）。
 _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 任意代码/命令：输出依赖外部状态且可能已产生副作用
     "run_code", "computer_shell", "computer_ssh_exec",
@@ -1293,7 +1300,7 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
     "browser_click", "browser_click_role", "browser_fill_role",
-    "browser_type", "browser_navigate", "browser_screenshot",
+    "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
