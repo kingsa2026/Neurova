@@ -43,12 +43,41 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "file_edit", "file_list", "file_search", "write_pdf",
     },
     "system": {
-        "computer_shell", "computer_screenshot", "computer_click",
-        "computer_type", "computer_scroll", "run_code", "spawn_subagent",
+        # 桌面动作族：会改变共享桌面状态（或读取其瞬时态），属本机系统动作
+        "computer_screenshot", "computer_click", "computer_type", "computer_scroll",
+        "computer_click_element", "computer_set_value", "computer_som_snapshot",
+        "computer_dom_snapshot", "computer_click_mark",
+        # 本机代码/进程：无 sandbox_required 声明，但执行的是系统动作
+        "computer_shell", "run_code", "spawn_subagent",
     },
     "model": {"tts_synthesize", "asr_transcribe"},
     "node": {"run_workflow_agent"},
 }
+
+# ── 系统面的**声明面投影**（Issue #271 M5 尾巴） ──────────────────────
+# 上表是手写登记；系统面还须收下一切**工具自己声明了"须真隔离执行"**的工具
+# （`sandbox_required`，M5 已立的声明位）。两条各自答一半：
+#
+#   手写登记  ― 这些工具执行本机系统动作，但没有 sandbox_required 声明
+#               （桌面动作族、run_code、spawn_subagent）；
+#   声明投影  ― 工具自己承诺"须在真隔离下执行"，系统面必须收它，否则
+#               声明了 `system: false` 的技能照样能调它。
+#
+# 缺口实测（收口前）：`computer_ssh_exec`（远端真 shell）与 `exec_command`
+# （`shell=True` 跑真命令）都声明了 sandbox_required，却因不在手写表里而
+# **不受系统面约束**——`system: false` 的技能可直接执行它们。
+# 判据：tests/unit/skills/test_permission_system_face_closure.py 逐名复算。
+def _declaredIsolationTools() -> Set[str]:
+    """声明了 `sandbox_required` 的内置工具（现读，不缓存快照）。"""
+    try:
+        from neurova.builtin_tools import list_sandbox_required_tools
+
+        return set(list_sandbox_required_tools())
+    except Exception:  # noqa: BLE001 - 声明表不可达时退回手写登记（不误收紧）
+        return set()
+
+
+_CATEGORY_TOOLS["system"] = _CATEGORY_TOOLS["system"] | _declaredIsolationTools()
 
 _TOOL_TO_CATEGORY: Dict[str, str] = {
     tool: cat for cat, tools in _CATEGORY_TOOLS.items() for tool in tools
