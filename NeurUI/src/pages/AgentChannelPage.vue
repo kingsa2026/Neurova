@@ -9,6 +9,16 @@
         :options="agentSelectOptions" @change="switchAgent" />
     </div>
 
+    <!-- 空态归因：本页的 `channels` 恒为整份渠道目录（未配置的渠道也要能点"启用"），
+         故"没有配置"不在 a-empty 那个分支上，而在**已配置行为 0**。把它与"读不到
+         配置"合成一个样子正是本 bug 被拖了 6 天没人定位到落点的原因。 -->
+    <div v-if="showEmptyAttribution" class="nr-ac-empty-attribution" data-testid="empty-attribution">
+      <p class="nr-ac-empty-title">{{ t('channel.noConfigsForAgent', { agent: agentId }) }}</p>
+      <p class="nr-ac-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
+      <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
+        @click="switchAgent('default')">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+    </div>
+
     <a-spin :spinning="loading">
       <template v-if="channels.length > 0">
         <section v-if="enabledChannels.length > 0" class="nr-ac-panel" data-testid="panel-enabled">
@@ -63,6 +73,10 @@
           </div>
         </section>
       </template>
+      <!-- 空态必须**可归因**：整页「未启用」与「真读不到配置」此前共用一个 a-empty，
+           用户读到的结论只有"配置全没了"。存量渠道归属默认视图（见
+           docs/06-bugfix/bugfix-channel-agent-select-and-config-landing.md），
+           故非 default 视图为空时点名当前身份，并给出一键切到默认视图的入口。 -->
       <a-empty v-else :description="t('channel.noChannels')" />
     </a-spin>
 
@@ -195,6 +209,14 @@ function switchAgent(value: unknown) {
   if (!next || next === agentId.value) return
   router.push({ name: 'AgentChannel', params: { agentId: next } })
 }
+
+// 空态归因只在"确实可能是别人的配置"时给：`default` 视图本身就是存量的
+// 归属地，在那里为空就是真的没配过，加提示只会制造噪音。
+// 判据是**已配置行数为 0**，不是 `channels.length`——后者恒等于整份渠道目录。
+const showEmptyAttribution = computed(
+  () => agentId.value !== 'default' && !loading.value
+    && channels.value.length > 0 && !channels.value.some((c) => c.configured),
+)
 
 function baseCatalog(): AgentChannel[] {
   // NV 独有渠道：鸿蒙负一屏推送（Phase C 换共享目录时只加在系统页，
@@ -362,6 +384,9 @@ watch(agentId, () => { fetchConfigs() }, { immediate: true })
   border-radius: 16px; background: rgba(255, 255, 255, 0.015);
 }
 .nr-ac-panel--dashed { border-style: dashed; }
+.nr-ac-empty-attribution { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.nr-ac-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--nr-text-secondary); }
+.nr-ac-empty-hint { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-text-tertiary); }
 .nr-ac-panel-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 600; color: var(--nr-text-primary);
