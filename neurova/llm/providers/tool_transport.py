@@ -40,28 +40,42 @@ _GEMINI_TOOL_CHOICE = {"auto": "AUTO", "required": "ANY", "none": "NONE"}
 def _asOpenAIFunction(tool: dict) -> typing.Optional[dict]:
     """把一条工具定义归一到 (name, description, parameters)。
 
-    **形态判别在此收口**：调用方可能已按目标协议转好（`AnthropicLoop`
-    自带的 `_convert_tools_to_anthropic` 就是这么做的），也可能给的是
-    OpenAI 形态。判别一次、两条路都归到同一中间形态，避免同一份 tools
-    被转两次而互相清空（这是本片 live 自证里实测到的形态）。
+    **形态判别不在这里**：判别的单一事实源是
+    `tool_layers.openai_schema.detectToolCallFormat()`（T-03 收口）——
+    请求侧与响应侧（`protocol_thinking.toOpenAIToolCalls` → `ToolCallParser`）
+    共用同一份判别表。此前两处各判一遍，判别表漂移时不会有任何东西报红。
+
+    调用方可能已按目标协议转好（`AnthropicLoop` 自带的
+    `_convert_tools_to_anthropic` 就是这么做的），也可能给的是 OpenAI 形态；
+    判别一次、两条路都归到同一中间形态，避免同一份 tools 被转两次而互相清空
+    （这是 T-03 live 自证里实测到的形态）。
     """
+    from neurova.tool_layers.openai_schema import (
+        FORMAT_ANTHROPIC,
+        FORMAT_GOOGLE,
+        FORMAT_OPENAI,
+        detectToolCallFormat,
+    )
+
     tool = tool or {}
-    if isinstance(tool.get("function"), dict):  # OpenAI 形态
+    call_format = detectToolCallFormat(tool)
+    defaultSchema = {"type": "object", "properties": {}}
+    if call_format == FORMAT_OPENAI and isinstance(tool.get("function"), dict):
         func = tool["function"]
         name = str(func.get("name") or "")
-        parameters = func.get("parameters") or {"type": "object", "properties": {}}
+        parameters = func.get("parameters") or defaultSchema
         description = str(func.get("description") or "")
-    elif tool.get("input_schema") is not None:  # 已是 Anthropic 形态
+    elif call_format == FORMAT_ANTHROPIC:
         name = str(tool.get("name") or "")
-        parameters = tool.get("input_schema") or {"type": "object", "properties": {}}
+        parameters = tool.get("input_schema") or defaultSchema
         description = str(tool.get("description") or "")
-    elif tool.get("parameters") is not None:  # 已是 Google 形态
+    elif call_format == FORMAT_GOOGLE:
         name = str(tool.get("name") or "")
-        parameters = tool.get("parameters") or {"type": "object", "properties": {}}
+        parameters = tool.get("parameters") or defaultSchema
         description = str(tool.get("description") or "")
     else:  # 裸 {name, description, parameters} 或无参工具
         name = str(tool.get("name") or "")
-        parameters = {"type": "object", "properties": {}}
+        parameters = defaultSchema
         description = str(tool.get("description") or "")
     if not name:
         return None
