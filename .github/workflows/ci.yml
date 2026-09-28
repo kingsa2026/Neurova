@@ -12,7 +12,8 @@ on:
 #   3. import-and-regression 模块导入巡检 + 审计回归（既有）
 #   4. unit-tests           受保护测试子集（scripts/ci/protected_tests.txt）
 #                           + 覆盖率门禁（pyproject [tool.coverage.run]，fail_under=60）
-#                           py3.11/3.12 matrix
+#                           单腿：跑生产解释器（Issue #301，版本事实源 = Dockerfile
+#                           的 FROM；判据见 tests/unit/ci/test_unit_tests_single_leg.py）
 #   5. frontend             npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
 #   6. dependency-audit     pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
 #                           + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
@@ -97,10 +98,6 @@ jobs:
   unit-tests:
     name: Unit tests (protected subset + coverage)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       # fetch-depth: 0 是**判据的运行前提**，不是优化项：
       #   受保护子集里的 test_protected_subset_registration_history.py 按清单
@@ -113,7 +110,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          # 单腿即生产解释器（Issue #301）：与 Dockerfile 的 `FROM python:` 同源，
+          # 不在此写死第二份版本的事实源。
+          python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v5
 
