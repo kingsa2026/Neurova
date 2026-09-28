@@ -306,3 +306,133 @@ class TestCarrierRoleHasARealSource:
                     '平台以 `Role "…" not found` 直接拒绝接力轮）'
                 )
         assert not problems, "\n  ".join(problems)
+
+
+#: `issue.comment@npc` 的宿主事件名 —— 接力链上所有 Job 的运行配置都随它走。
+#: 平台「自定义 NPC」篇：NPC 事件触发时，系统把系统默认配置与 **NPC 所属仓库**的
+#: `.cnb.yml` 合并；`@CodeBuddy` 是平台内置系统 NPC，其「NPC 所属仓库」是平台的，
+#: 故本仓在 `$` 下写的这套 Job 对系统 NPC 完全不生效（实测读者见报告
+#: `docs/05-reports/npc系统事件通道_2026-09-28.md`）。
+HOST_NPC_EVENT = "issue.comment@npc"
+
+#: 本仓 NPC 流水线的容器镜像：脚本解释器探测的降级链（`&npc-script-interpreter`）
+#: 只按这个镜像设计 —— 它**只有 node，没有 python**。
+REQUIRED_DOCKER_IMAGE = "cnbcool/default-npc:latest"
+
+
+def _npc_jobs(cnb_doc):
+    """产出 ($ 段每个 NPC 事件名, 该事件下的 Job)。"""
+    fallback = cnb_doc.get("$") or {}
+    for event, body in fallback.items():
+        if not isinstance(event, str) or not event.endswith("@npc"):
+            continue
+        for job in (body if isinstance(body, list) else []):
+            if isinstance(job, dict):
+                yield event, job
+
+
+class TestNpcJobsSelfContainTheirContainerRuntime:
+    """本仓 NPC Job 必须自带容器 runtime —— 缺项会被平台系统默认配置按 key 覆盖。
+
+    ## 根因（实测读数，不是推测）
+
+    2026-09-28 的一次真实调用：用户在 Issue #306 评论里 @ 了本仓在册角色
+    `@kingsa2026/neurova(DSCoder-max)`，平台上同时出现两台构建，且**都停在中转态**：
+
+        cnb-1ii-1k3jc0fgm-001  pipeline 001                      pending
+        cnb-tb2-1k3jc0fgm-001  cnb/issue.comment@npc/pipeline-1  pending
+
+    同一条评论的前一次（@CodeBuddy）留下的读数是 `cnb/issue.comment@npc/default` ——
+    「default」那一格是**平台默认配置**的流水线，本仓 `.cnb.yml` 里那条
+    `$` → `issue.comment@npc` 定义的 stage 名（构建环境自证 / 角色准入 /
+    npc-go 在册角色执行任务）一个都不在里面。
+
+    两件事同源：**本仓写的 Job 没有自带 `docker.image`**。平台按 key 覆盖合并
+    系统默认配置与本仓配置，本仓缺的那一项由平台补上，Job 的实际运行环境
+    不再由本仓 `.cnb.yml` 决定 —— 而这条差异在平台侧与日志里都不响。
+
+    ## 判据
+
+    每个 NPC 事件下的每个 Job 都必须自带 `docker.image`，且取值是平台 NPC 镜像
+    （本仓的解释器探测只按该镜像设计）。可证伪路径：删掉 `docker.image` → 立刻红。
+    """
+
+    def test_every_npc_job_declares_its_own_image(self, cnb_doc):
+        fallback = cnb_doc.get("$") or {}
+        missing = [
+            f"$.{event}[{i}]"
+            for event, body in fallback.items()
+            if isinstance(event, str) and event.endswith("@npc")
+            for i, job in enumerate(body if isinstance(body, list) else [])
+            if isinstance(job, dict)
+            and not str(((job.get("docker") or {}).get("image") or "")).strip()
+        ]
+        assert list(_npc_jobs(cnb_doc)), "`$` 段找不到任何 NPC 事件 Job —— 本守卫空转"
+        assert not missing, (
+            "以下 NPC Job 未自带 docker.image：\n  " + "\n  ".join(missing) +
+            "\n平台合并系统默认配置与本仓配置时按 key 覆盖：本仓缺 docker.image 时，"
+            "平台那一份会顶上，Job 的实际运行环境不再由本仓 `.cnb.yml` 决定，"
+            "而平台侧与日志里都看不出这件事。"
+        )
+
+    def test_npc_job_image_is_the_platform_npc_runtime(self, cnb_doc):
+        offenders = [
+            f"$.{event}[{i}]: {((job.get('docker') or {}).get('image'))!r}"
+            for event, body in ((k, v) for k, v in (cnb_doc.get("$") or {}).items()
+                                if isinstance(k, str) and k.endswith("@npc"))
+            for i, job in enumerate(body if isinstance(body, list) else [])
+            if isinstance(job, dict)
+            and str(((job.get("docker") or {}).get("image") or "")).strip()
+            != REQUIRED_DOCKER_IMAGE
+        ]
+        assert not offenders, (
+            "NPC Job 的容器镜像不是平台 NPC 运行时：\n  " + "\n  ".join(offenders) +
+            f"\n本仓的脚本解释器探测、门禁脚本与 npc:go 都按 {REQUIRED_DOCKER_IMAGE!r} 设计"
+            "（`&npc-script-interpreter` 的降级链只认该镜像的 node 分支）。"
+        )
+
+    def test_image_check_is_not_tautological(self, cnb_doc):
+        """反向控制：把 `docker.image` 改成别的镜像，本判定必须抓得到。"""
+        import copy
+        injected = copy.deepcopy(cnb_doc)
+        injected["$"][HOST_NPC_EVENT][0]["docker"] = {"image": "python:3.12"}
+        offenders = [
+            ((job.get("docker") or {}).get("image"))
+            for _event, job in _npc_jobs(injected)
+            if str(((job.get("docker") or {}).get("image") or "")).strip()
+            != REQUIRED_DOCKER_IMAGE
+        ]
+        assert offenders, "把镜像改成别的值后判定没有变化 —— 本判据接不上真实文档"
+
+
+class TestNpcEventChannelIsTheRepositoriesOwn:
+    """@ 本仓角色产出的构建必须落在本仓声明的事件定义上（静态面自洽）。
+
+    ## 实测形态（2026-09-28，Issue #306）
+
+    用户在 Issue #306 评论里 @ 了本仓在册角色 `DSCoder-max`，平台上同时出现两台
+    构建，`statuses.npc.data` 的读数是：
+
+        cnb-1ii-1k3jc0fgm-001  pipeline 001                      pending
+        cnb-tb2-1k3jc0fgm-001  cnb/issue.comment@npc/pipeline-1  pending
+
+    两条流水线**同时** pending、没有一条进入执行 —— 用户看到的就是「NPC 空转」。
+
+    这一格 shape 属平台测（`pipeline-1` 是本仓 `$` → `issue.comment@npc`
+    那**数组的第 1 条**，`pipeline 001` 是被触发的构建），不能只由静态文本判定；
+    但配置能否被执行，有静态可判的一半：
+
+    * 本仓必须同时声明 issue / PR 两个 NPC 评论事件 —— 漏一个即走平台默认行为；
+    * 每个 Job 必须自带容器 runtime（见上一个类）。
+    """
+
+    def test_host_event_is_declared_with_both_comment_events(self, cnb_doc):
+        fallback = cnb_doc.get("$") or {}
+        missing = [
+            key for key in ("issue.comment@npc", "pull_request.comment@npc")
+            if key not in fallback
+        ]
+        assert not missing, (
+            f"`$` 段缺 NPC 评论事件 {missing} —— 平台按事件独立合并，"
+            "漏配的事件走平台默认行为（本仓 Job 完全不参与）。"
+        )
