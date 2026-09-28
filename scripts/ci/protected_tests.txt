@@ -1174,6 +1174,14 @@ tests/unit/memory_ingest/test_seed_db_landing_relocation.py
 #   「含未知工具」而拒绝安装。判据：注册面逐名过门 + 真未知名仍被拒 +
 #   MCP 声明口径不变 + AST 复算"安装门里不得再出现手写名字表"。
 tests/unit/skills/test_install_gate_known_tools.py
+# Issue #271 M5 尾巴（第三命中点）：`file_operation` 沙箱根此前是「一条事实两处
+#   实现」——成员判定在 `sandbox_root.SANDBOX_ROOT_TOOLS` 与咽喉的
+#   `skill_name == "file_operation"` 各写一份，解析口径也各写一份且**已分叉**
+#   （helper 不校验 `is_dir()`、咽喉校验）。`_base_dir` 是覆盖 LLM 伪造参数的
+#   服务端赋值，故防线只在其中一条路径上成立。判据：成员单源 + 解析单源 +
+#   咽喉不得自带成员比较（AST）+ 真执行体落盘 + 防伪根回落。
+tests/unit/skills/test_sandbox_root_single_source.py
+
 # Issue #271 M5 尾巴（桌面档轴与补拍面，同根因两命中点）：名单成员资格此前是
 #   手写快照，与声明面之间无对账机制。本批把成员下沉到各工具 schema 的声明位，
 #   并把两处已证实的漂移一并根修（`computer_click_mark` 一直被接在刷新链上却漏登）。
@@ -1183,3 +1191,10 @@ tests/unit/skills/test_install_gate_known_tools.py
 #     （漏登 computer_click_mark 在这条上红）+ 入口守卫真消费（摘声明即断链）。
 tests/unit/computer_use/test_desktop_policy_projection.py
 tests/unit/computer_use/test_action_refresh_declaration.py
+# Issue #271 M5 尾巴（第四命中点）：能力面「系统面」此前是纯手写名单，而工具的
+#   "须真隔离执行"承诺是它自己的声明（`sandbox_required`）⇒ 两条事实无对账。
+#   实测缺口有后果：`computer_ssh_exec`（远端真 shell）与 `exec_command`
+#   （shell=True 跑真命令）声明了 sandbox_required 却不在系统面内，于是声明了
+#   `system: false` 的技能照样能调它们。判据：声明面逐名咬合（凡声明必须入面）、
+#   桌面动作族逐名在面、手写部分逐名钉住、平台能力不被误收紧（反向控制）。
+tests/unit/skills/test_permission_system_face_closure.py
