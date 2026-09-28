@@ -1160,6 +1160,15 @@ tests/unit/security/test_command_segment_approval.py
 #   活锚点（落点经数据根**调用时**推导，注入即生效）、存量收养（空缺才搬、
 #   不覆盖、两侧都在则点名不静默）、装配可读（bootstrap 按搬回来的存量重建）。
 tests/unit/api/test_channel_config_landing_anchor.py
+#   未闭环项⑤（凭据落盘明文）：保存路径的注释写着「不保存明文密钥到文件」，
+#   行为却是把 `safe_model_dump(request)` 原样写盘 —— `app_secret` / `extra` 里的
+#   `bot_token` / `client_secret` / `secret_key` / `access_token` 全族明文躺在配置
+#   文件里（旧账见 `docs/空数据页面与保存落盘排查_2026-09-12.md` §D），换锚救济还会
+#   把这份明文一并搬到新落点。判据：落盘无凭据原文、读回仍是原文（业务链路不得拿
+#   到密文）、装配链拿到的也是原文（反向控制）、存量明文下一次保存即迁移、幂等不
+#   叠前缀、损坏文件点名不静默，以及前后端两张「凭据字段」表逐名咬合 + 非凭据键
+#   不得被扫进封存集合（反向控制）。
+tests/unit/api/test_channel_credential_sealing_290.py
 #   同根因的第二批命中点（教义第 5 条）：种子记忆库 `yi_ling_memory.db` 的八个
 #   脚本同样在换锚时丢了存量（旧锚点 `neurova/memory/data/`，换锚后无人读也不被清，
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、

@@ -154,6 +154,16 @@
     <a-empty v-else :description="t('channel.noChannels')" />
     </a-spin>
 
+    <!-- 空态归因（教义第 5 条：同一根因的第二个消费方）。本页选择器带真实 agent
+         列表，而整页「未启用」与「读不到配置」此前渲染成同一个样子；存量渠道归属
+         default，用户切到自己的 agent 视图时读到的结论只有"配置全没了"。 -->
+    <div v-if="showEmptyAttribution" class="nr-ci-empty-attribution" data-testid="empty-attribution">
+      <p class="nr-ci-empty-title">{{ t('channel.noConfigsForAgent', { agent: agentId }) }}</p>
+      <p class="nr-ci-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
+      <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
+        @click="switchToDefaultAgent">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+    </div>
+
     <!-- Toast notification -->
     <Teleport to="body">
       <div v-if="toastMessage" class="nr-ci-toast">{{ toastMessage }}</div>
@@ -434,6 +444,16 @@ function onAgentChange() {
   // 切换 agent：清缓存视图并重拉该 agent 的渠道配置
   savedExtras.value = {}
   loadConfigs()
+}
+
+/** 空态归因只在"确实可能是别人的配置"时给，且判据是**已存配置行数为 0**。 */
+const showEmptyAttribution = computed(
+  () => agentId.value !== 'default' && !loadingConfigs.value && Object.keys(savedExtras.value).length === 0,
+)
+
+function switchToDefaultAgent() {
+  agentId.value = 'default'
+  onAgentChange()
 }
 
 async function loadConfigs() {
@@ -1011,6 +1031,12 @@ onMounted(() => {
 }
 
 /* Toast */
+.nr-ci-empty-attribution {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 12px;
+}
+.nr-ci-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--nr-text-secondary); }
+.nr-ci-empty-hint { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-text-tertiary); }
+
 .nr-ci-toast {
   position: fixed;
   top: 24px;
