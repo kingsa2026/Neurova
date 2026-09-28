@@ -129,3 +129,4 @@ max_parallel_tools | key | consumed | not_a_threshold | 4 | 已接线 | 单批�
 # 钉成"该工具自己声明了只读"，由 tests/unit/security/test_governance_mcp.py 逐名复算。
 # 本行**不是**台账条目（不是符号级死线判据），署名在此是因为它是 M3 声明面照出来的
 # 跨轴矛盾：声明面是判据的产物，冲突由它复算得出。
+max_subagent_depth | key | consumed | not_a_threshold | 5 | 已接线 | 蜂群**派生深度**上限的唯一阈值单源（默认 2，合法域 0..5，Issue #268 切片 D）。`security/agent_limits_settings.py`DEFAULTS 定义、env `NEUROVA_AGENT_MAX_SUBAGENT_DEPTH` 覆盖、`get_effective_limits()` 按 `MIN_SUBAGENT_DEPTH`/`MAX_SUBAGENT_DEPTH_LIMIT` 夹紧；消费点在 `agent/swarm.py:_effective_max_depth()`（`spawn()` 深处闸读它）⇒ 写入与读取跨文件，判据 consumed（取数：write×2 定义/夹紧 + read×1 swarm 深度闸 + read×1 swarm 兜底常量取值 + read×1 定义读回，共 5 点）。阈值轴 not_a_threshold：本键不是「类 + check() 内阈值比较」的门控形态，其可达性由「单源消费点 + 合法域夹紧」保证——生产侧只有 `_effective_max_depth()` 一处读取，不新造第二份默认值或边界。**为什么必须是独立键**：此前深度只由 `MAX_ACTIVE_CHILDREN`（全局**广度**帽）间接封顶，即「深度是广度的副作用」——同一条链的封顶层数随兄弟数量改变，不是被声明的契约。本键把深度变成可声明的单源契约（与 `max_parallel_tools`/`goal_max_continuations` 同形）。
