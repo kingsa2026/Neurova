@@ -1183,3 +1183,10 @@ tests/unit/skills/test_sandbox_root_single_source.py
 #     （漏登 computer_click_mark 在这条上红）+ 入口守卫真消费（摘声明即断链）。
 tests/unit/computer_use/test_desktop_policy_projection.py
 tests/unit/computer_use/test_action_refresh_declaration.py
+# Issue #271 M5 尾巴（第四命中点）：能力面「系统面」此前是纯手写名单，而工具的
+#   "须真隔离执行"承诺是它自己的声明（`sandbox_required`）⇒ 两条事实无对账。
+#   实测缺口有后果：`computer_ssh_exec`（远端真 shell）与 `exec_command`
+#   （shell=True 跑真命令）声明了 sandbox_required 却不在系统面内，于是声明了
+#   `system: false` 的技能照样能调它们。判据：声明面逐名咬合（凡声明必须入面）、
+#   桌面动作族逐名在面、手写部分逐名钉住、平台能力不被误收紧（反向控制）。
+tests/unit/skills/test_permission_system_face_closure.py
