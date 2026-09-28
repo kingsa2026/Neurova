@@ -161,6 +161,143 @@ class TestEnvelopeDiscardAttribution:
         assert CompressionAction.ENVELOPE_DISCARDED in INACTION_VALUES
 
 
+class TestDiscardAttributionOnEveryEndpoint:
+    """弃封出账必须在**两个**接入点都接上，不许只接池侧。
+
+    `envelope.compress_envelope` 的 `report` 契约只被池分支传了
+    （`orchestrator.py`），而非池主路径 `injector._compress_context`——它同时是
+    非池直连与 builder 降级链两处的唯一压缩入口——调用时**没传**。
+    于是"弃封不再静默"只在最不常走的池分支成立：用户侧最常走的这条，
+    整封被丢之后仍从账上看不出来（教义第 5 条：同一契约的消费方一并修）。
+    """
+
+    def testNonPoolDiscardIsAttributableFromBuildResult(self):
+        """非池弃封必须在装配结果里可归因（不是只在 `envelope.py` 直调时可归因）。"""
+        injector = _make_injector(max_total=1000)
+        result = injector.build_context(
+            system_prompt="S" * 3000,  # 预算被 system 吃掉 ⇒ 信封额度落到 0
+            memories=[{"content": "记忆内容" * 200}],
+            conversation_history=[{"role": "user", "content": "历史" * 100}],
+            user_input="问" * 800,
+        )
+        assert "<system-reminder>" not in result.context[-1]["content"], (
+            "前置条件：该输入必须真的把整封弃掉，否则本条不成立"
+        )
+        readout = result.stats["compression_economics"]
+        assert readout.get("discarded") is True, f"非池弃封未出账：{readout}"
+        assert readout.get("reason") == CompressionAction.ENVELOPE_DISCARDED.value
+
+    def testNonDiscardingTurnLeavesNoDiscardMark(self):
+        """反向控制：真跑了压缩、但**没有**弃封的那一轮不得被记成丢弃（否则账本恒真）。
+
+        额度取 2500：实测该输入下 `compress_envelope` 被调用且信封落回额度内
+        （不是"压根没走压缩"那种"因为没发生所以没记"的假绿）。
+        """
+        injector = _make_injector(max_total=2500)
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        assert result.compression_ratio < 1.0, (
+            "前置条件：该输入必须真的触发压缩，否则本条退化成'没发生所以没记'"
+        )
+        readout = result.stats["compression_economics"]
+        assert readout.get("discarded") is not True, f"未弃封却记了丢弃：{readout}"
+
+
+class TestPoolSideReadoutsAreReadable:
+    """池分支的读数必须**可读**，不能只写进私有字段。
+
+    根因（教义第 5 条同根扫荡）：`orchestrator` 侧新增的三个字段
+    （`_poolCompressionRatio` / `_poolEconomicsReadout` / `_poolDiscardReadout`）
+    全仓**零读者** —— 生产、测试、观测面都没有人读它。写进私有字段就等于
+    写进日志：事后既查不到"这轮该不该压"，也查不到"整封是不是被丢了"，
+    与本票要灭的"净损失路径不可归因"是同一形态换了个位置。
+    """
+
+    def testPoolDiscardAndVerdictReachContextHealth(self):
+        """池侧弃封与判据读数必须经既有观测面（`get_context_health`）可读。
+
+        不新开第二套读数体系（教义第 6 条）：`get_context_health` 是本仓上下文域
+        降级/读数的既有单源，池侧读数并进它，`/metrics` 随即自动可见。
+        """
+        from tests.unit.context.test_pool_branch_envelope_transient import _orchestrator
+
+        from tests.unit.context.test_pool_branch_envelope_transient import _orchestrator
+
+        orch = _orchestrator(budget=1200)
+        health = orch.get_context_health()
+        assert "compression_economics" in health, (
+            f"池侧读数未接上观测面，现有读面键：{sorted(health)}"
+        )
+        slot = health["compression_economics"]
+        assert "enabled" in slot and "action" in slot, f"判据读数缺字段：{sorted(slot)}"
+
+    @pytest.mark.asyncio
+    async def testPoolCrossTurnFeedbackIsWrittenAndReadBack(self):
+        """池侧跨趟反馈必须**写进去又被下一轮读回**（不是恒 None 的死字段）。
+
+        不留存 `_poolCompressionRatio` 的后果不是"少一个数字"：池侧判据的
+        `prior_compression_ratio` 恒为 `None` ⇒ 每一轮都停在
+        `INSUFFICIENT_DATA`，开关打开也永不动作 —— 闸恒不开，且"开了"与
+        "关着"在读面上长得一模一样。
+        """
+        from tests.unit.context.test_pool_branch_envelope_transient import (
+            _build,
+            _orchestrator,
+        )
+
+        orch = _orchestrator(budget=1200)
+        bulky = "这是一条很长的记忆内容，用于撑爆信封预算。" * 40
+        async def turn():
+            return await _build(
+                orch,
+                user_input="问题",
+                relevant_memories=[{"content": bulky}],
+                session_context=[{"role": "user", "content": "短历史" * 20}],
+            )
+
+        await turn()
+        assert orch._poolCompressionRatio is not None, (  # noqa: SLF001
+            "首轮压缩后没有留下可被下一轮回读的实测读数（池侧跨趟反馈断了）"
+        )
+        first = orch._poolCompressionRatio  # noqa: SLF001
+        assert 0.0 < first <= 1.0, f"折叠比不在合法区间：{first}"
+
+        await turn()
+        slot = orch.get_context_health()["compression_economics"]
+        assert slot["prior_ratio"] is not None, (
+            f"第二轮没把上一轮读数喂进判据（prior_ratio 恒 None）：{slot}"
+        )
+
+    @pytest.mark.asyncio
+    async def testPoolDiscardIsVisibleAfterADiscardingTurn(self):
+        """弃封之后读数必须翻转（不是恒真的形状位）。
+
+        额度经**既有测试钩子** `_envelopeBudget` 注入 1 —— 池分支正常路径下
+        信封额度有地板（`_ENVELOPE_MIN_TOKENS`），故弃封这条净损失路径必须
+        显式构造；本文件与 `test_pool_branch_envelope_transient.py` 用的是
+        同一个钩子（不手工赋私有字段）。
+        """
+        from tests.unit.context.test_pool_branch_envelope_transient import (
+            _build,
+            _orchestrator,
+        )
+
+        orch = _orchestrator(budget=1200)
+        orch._envelopeBudget = lambda *a, **k: 1  # noqa: SLF001 - 既有测试钩子
+        await _build(
+            orch,
+            user_input="问题",
+            relevant_memories=[{"content": "记忆" * 400}],
+        )
+        slot = orch.get_context_health()["compression_economics"]
+        assert slot.get("discarded") is True, f"弃封未在观测面出账：{slot}"
+        assert slot.get("reason") == CompressionAction.ENVELOPE_DISCARDED.value
+
+
 class TestWiringAndStaticGuards:
     def testCompressionRatioIsConsumedByDecisionNotOnlyLogged(self):
         """`compression_ratio` 必须成为判据输入之一（跨趟反馈），而不是只落日志。"""

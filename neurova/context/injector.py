@@ -427,12 +427,14 @@ class UnifiedContextInjector(BaseModule):
         total_tokens = system_tokens + history_tokens + user_tokens
 
         compression_ratio = 1.0
+        # 弃封出账位（Issue #289 · 002）：与本轮读数同域，故并与它一份。
+        discard_report: Dict[str, Any] = {}
         over_budget = total_tokens > self._token_budget.max_total
         if over_budget and self._enable_compression and self._economics_allows(
             envelope=envelope, history=history, occupied=total_tokens, budget=self._token_budget.max_total
         ):
             envelope, history, compression_ratio = self._compress_context(
-                envelope, history, user_bare_tokens, system_tokens
+                envelope, history, user_bare_tokens, system_tokens, report=discard_report
             )
             user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
             total_tokens = (
@@ -473,6 +475,9 @@ class UnifiedContextInjector(BaseModule):
         if over_budget:
             # 跨趟反馈留存：本轮实测比例供下一轮判据回读（唯一写入点）。
             self._lastCompressionRatio = compression_ratio
+        # 弃封是净损失路径：读数与本轮 economics 读数同域出账（同一份 stats），
+        # 不新开第二套读数体系（教义第 6 条）。
+        self._lastEconomicsReadout = {**self._lastEconomicsReadout, **discard_report}
         result.stats["compression_economics"] = self._lastEconomicsReadout
 
         self.log_info(
@@ -944,7 +949,12 @@ class UnifiedContextInjector(BaseModule):
         return 0
 
     def _compress_context(
-        self, envelope: str, history: List[Dict], user_tokens: int, system_tokens: int = 0
+        self,
+        envelope: str,
+        history: List[Dict],
+        user_tokens: int,
+        system_tokens: int = 0,
+        report: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """压缩上下文（批次 A 重设计）：压缩对象=信封+历史，system 只读不动。
 
@@ -983,8 +993,14 @@ class UnifiedContextInjector(BaseModule):
 
             # 2) 信封确定性淘汰（块级→行级），落预算
             envelope_budget = _budget_after(history)
+            # 弃封出账（Issue #289 · 002）：本函数是非池直连与 builder 降级链
+            # **共用**的唯一压缩入口，`report` 在这里透传 —— 只在池分支传
+            # 等于把同一块静默缺口留在用户侧最常走的那条路上。
             envelope = compress_envelope(
-                envelope, budget_tokens=max(0, envelope_budget), count_tokens=self._count_tokens
+                envelope,
+                budget_tokens=max(0, envelope_budget),
+                count_tokens=self._count_tokens,
+                report=report,
             )
 
             return envelope, history, compression_ratio
