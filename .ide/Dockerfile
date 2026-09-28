@@ -28,6 +28,15 @@
 # 客户端版本控制（官方《常见问题解答》）：code-server 来自社区，个别版本有
 #   导致 WebIDE 不可用的 bug。此处不钉版本、随 install.sh 取稳定版；若某次
 #   环境创建后 WebIDE 打不开，按官方指引钉 `--version <可用版本>` 即可。
+#
+# 预装口径：**整装运行环境**，不是"薄壳等 stages 补"。
+#   本文件在构建期就把本仓后端全量依赖装上（`requirements-full.lock`，与生产
+#   镜像的 `requirements.txt` 同源编译），前端 `npm ci` 与 playwright 浏览器
+#   也一并装机。理由：开发环境的用途是"开箱即可开发与验证"，而本仓大半功能
+#   路径（语义检索 onnxruntime/transformers、TTS edge-tts、抓取 playwright、
+#   桌面自动化 pyautogui）都在 `requirements-ci.txt` 刻意排除的重依赖之列。
+#   用薄环境当开发环境，这些路径开箱即 import 失败 —— 而"预装好运行环境"
+#   正是本项的诉求。
 # ============================================================================
 
 FROM python:3.12-slim
@@ -71,16 +80,50 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --install-extension vue.volar \
     && rm -rf /root/.cache/code-server
 
-# 后端依赖：装的是仓库里那份锁（`requirements-ci.lock`），**不**在此另列包名。
-# 另列一份就是教义第 6 条点名的第二份依赖定义，与锁文件必然漂移 —— 而漂移的
-# 代价是 CI 绿、开发环境装不上。镜像构建期尚无源码，故先只装锁里那份薄环境；
-# 完整 `requirements.txt` 由 `.cnb.yml` 的 stages 在工作区就位后再装。
-# 这一步让"开环境即可跑受保护子集"成立，不必等 stages 跑完。
-COPY requirements-ci.lock /tmp/requirements-ci.lock
-RUN pip install --no-cache-dir -r /tmp/requirements-ci.lock \
-    && rm -f /tmp/requirements-ci.lock
+# CodeBuddy Code CLI（`codebuddy` 命令）。
+#
+# 官方《CodeBuddy Web》：云开发入口页（WebIDE / CodeBuddy Web / 我的云原生开发）
+# 只在镜像装有 `codebuddy` 且版本 >= 2.137.0 时展示 CodeBuddy Web 入口。
+# 自定义镜像不装它，就等于把平台自带的一条入口静默丢掉 —— 而症状只是"入口页
+# 少一个按钮"，没人会把它和本文件联系起来。
+#
+# 本仓的协作流程大量借助 AI 角色（NPC + CodeBuddy），这条入口是它的浏览器端。
+RUN npm install -g @tencent-ai/codebuddy-code \
+    && codebuddy --version
 
-# 前端依赖的安装（`npm ci`）留给 `.cnb.yml` 的 stages：它必须在工作区
-# （NeurUI/ 目录）就位后才能跑，而该目录是启动时才挂进来的。
+# 后端全量运行环境（构建期装机，不留给 stages）。
+#
+# 装的是 `requirements-full.lock` —— 它与生产镜像装的 `requirements.txt` 同源
+# （`uv pip compile --universal requirements.txt -o requirements-full.lock`），
+# 是同一份依赖的**锁定形态**，不是第二份清单（教义第 6 条）。
+#
+# 为什么不用 `requirements-ci.lock`：那份是"够 CI 跑静态门禁与审计回归的薄子集"，
+# 文件头明文列了被刻意排除的重依赖（onnxruntime / sentence-transformers /
+# transformers / tokenizers / edge-tts / playwright / pyautogui ...）。开发环境
+# 装它，本仓语义检索 / TTS / 抓取 / 桌面自动化四条链开箱即不可用。
+COPY requirements-full.lock /tmp/requirements-full.lock
+# 装到**系统** site-packages（不 `--user`）：`--user` 落 `/root/.local`，只有 root
+# 的 `sys.path` 认它 —— 平台若以非 root 起会话，`import onnxruntime` 立刻 ModuleNotFound，
+# 而镜像里明明装着。系统级安装对任何用户一致。
+RUN pip install --no-cache-dir -r /tmp/requirements-full.lock \
+    && rm -f /tmp/requirements-full.lock
+
+# playwright 浏览器二进制（pip 装包 ≠ 能跑浏览器）。
+#
+# `requirements-full.lock` 里的 playwright 只是**客户端**：真正抓取/截图时它去
+# `~/.cache/ms-playwright` 找浏览器，找不到就报 "Executable doesn't exist"。
+# 这是"依赖装了却跑不动"最典型的一种，必须在构建期一次装好。
+#
+# `--with-deps` 一并装无图形界面容器所需的系统库（X11 / 字体 / 音视频编解码），
+# 缺了它表现为"包都装了、一跑就崩在 libXXX.so"，且报错点在运行时而不是安装时。
+# 装到镜像级的 `/ms-playwright` 并显式导 PLAYWRIGHT_BROWSERS_PATH，让**非 root
+# 用户与 stages** 都能找到同一份（默认落 `~/.cache`，用户一切换就丢）。
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
+
+# 非 root 会话也要能读到整套依赖：系统 site-packages 默认组可读，
+# 但 `pip install --with-deps` 顺手改过权限的目录在这里统一放宽一次。
+RUN chmod -R a+rX /usr/local/lib/python3.12/site-packages
 
 WORKDIR /workspace
