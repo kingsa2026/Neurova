@@ -353,30 +353,40 @@ class TestDeadCodeReallyRemoved:
     def test_live_observer_gateway_is_intact(self):
         """删的是死的那半，活的那半（result 观察者门面）必须还在。
 
-        生产消费方：`security/tool_circuit_breaker.py` 经它挂熔断观察者。
+        生产消费方：`security/tool_circuit_breaker.py` 经它挂熔断观察者、
+        `ToolExecutor.on_tool_executed` 经它发通知。
+
+        **口径迁移（T-09 死码处置批，Issue #174 / #310）**：本条原先点名六个符号
+        都「是活接线」——那是 **T-01 建判据之前**的目测口径。T-01 的机器取数
+        证明 `ToolExecutionPipeline` 生产侧**零引用**，T-09 据此裁定五段框架
+        （`ToolExecutionPipeline` / `PipelineConfig` / `PipelineGuardAdapter` /
+        `ToolExecutionStep` / `PipelineReject` / `ToolExecutionContext` 兼容子类）
+        整体退场。故「活接线」的名单收窄为**真有生产消费方**的四条；
+        原六个符号的逐条论证见 `scripts/ci/toolLoopDeadlines.txt` 与
+        `tests/unit/tools/test_t09_pipeline_face_ruling.py`。
         """
         import neurova.agent.tool_pipeline as tp
 
-        for symbol in ("ToolExecutionPipeline", "ToolExecutionContext",
-                       "ToolExecutionReport", "get_pipeline_observers",
-                       "notify_tool_result", "reset_pipeline_observers"):
+        for symbol in ("ToolExecutionReport", "get_pipeline_observers",
+                       "notify_tool_result", "PipelineObserversRegistry"):
             assert hasattr(tp, symbol), f"{symbol} 是活接线，不得误删"
 
-    def test_unread_pipeline_config_flags_deleted(self):
-        """6 个从未被读取的开关必须删——留着是"可以关掉某一步"的假能力。
+    def test_pipeline_frame_is_gone_not_merely_deprecated(self):
+        """五段框架（含 `PipelineConfig` 的开关）必须**整段消失**，不是标注保留。
 
-        只有 `parallel_independent_steps` / `max_workers` 有真实消费方
-        （`_run_post_steps` 读它们）。
+        本条是原 `test_unread_pipeline_config_flags_deleted` 的等价强化：那条问
+        「6 个没被读的开关删了没」，收窄了讨论面（好像类本身该留）。T-09 的裁定是
+        **类本身也没有生产消费方**——四条注册入口（`add_pre_step` / `add_guard` /
+        `add_execute_wrapper` / `add_post_step`）全仓零调用。故判据升到「整段没了」。
         """
-        from neurova.agent.tool_pipeline import PipelineConfig
+        import neurova.agent.tool_pipeline as tp
 
-        cfg = PipelineConfig()
-        assert hasattr(cfg, "parallel_independent_steps")
-        assert hasattr(cfg, "max_workers")
-        for dead in ("enable_memory_recording", "enable_lifecycle_update",
-                     "enable_skill_observation", "enable_evolution_feedback",
-                     "continue_on_error", "log_level"):
-            assert not hasattr(cfg, dead), f"{dead} 从未被读取，应删除"
+        for symbol in ("PipelineConfig", "ToolExecutionPipeline",
+                       "PipelineGuardAdapter", "ToolExecutionStep", "PipelineReject"):
+            assert not hasattr(tp, symbol), (
+                f"{symbol} 是五段框架的一部分，四条注册入口生产侧零调用——"
+                f"应随 T-09 整段退场，而不是标注保留"
+            )
 
     def test_review_gate_docstring_no_longer_claims_dead_arm(self):
         """评审闸的覆盖面说明不得再提已删的 SkillPacker 臂（否则文档撒谎）。"""
