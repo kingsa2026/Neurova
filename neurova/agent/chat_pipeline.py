@@ -2566,14 +2566,12 @@ class ChatPipeline:
         TAIL_CONTEXT_CHARS = 800
         SIMILARITY_WINDOW = 3
         SIMILARITY_THRESHOLD = 0.8
-        MAX_TOOL_CALL_ROUNDS = 5
 
         # 语言检测
         hint = self._build_continue_hint(ctx.user_input, reply)
 
         continue_round = 0
         recent_contents = []
-        tool_call_rounds = 0
         ctx_snapshot = list(ctx.context)
 
         while (

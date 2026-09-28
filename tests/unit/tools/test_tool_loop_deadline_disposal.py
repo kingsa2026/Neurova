@@ -99,6 +99,22 @@ class TestDisposalIsMachineCheckable:
         "goal_round_budget": "GoalGate 轮次预算：openai_loop._goalRoundBudget 唯一读取点",
     }
 
+    #: 已被**退役处置批**删除的条目（`符号: 处置批`）。与 `WIRED_BY_LATER_WAVES`
+    #: 同一条纪律：每条都必须逐条论证「是哪一批、凭什么」，不接受"批量退役"。
+    #: 语义差别：这里声明 `已删除`，机器判据必须是 `absent`（由
+    #: `disposalConflicts()` 验），且该符号必须**真的不在**取数表里。
+    RETIRED_BY_LATER_WAVES = {
+        # T-09 死码处置批（Issue #174）：前像（33b71a25）里它是活的护栏——
+        # `tool_call_rounds >= MAX_TOOL_CALL_ROUNDS` 决定 `_tools = None`。
+        # dc9b9a0f 判定该消费者恒假（`while` 条件已排除带 tool_calls 的响应）并删除，
+        # 但只删了消费者的两处、留下「声明 + 计数」两半残骸 ⇒ 只写不读。
+        # 本批处置：删声明本身（不恢复恒假的消费者）。
+        "MAX_TOOL_CALL_ROUNDS": (
+            "T-09 死码处置批（Issue #174）：_auto_continue 里只写不读的护栏残骸，"
+            "声明删除；常驻判据 tests/unit/agent/test_auto_continue_dead_budget.py"
+        ),
+    }
+
     def test_every_disposal_is_either_pending_or_justified(self):
         """处置只允许两种形态：停在「待处置」，或在后续处置批里被点名接线。
 
@@ -111,7 +127,7 @@ class TestDisposalIsMachineCheckable:
             disposal = entry["disposal"]
             if disposal == THIS_WAVE_DISPOSAL:
                 continue
-            if symbol not in self.WIRED_BY_LATER_WAVES:
+            if symbol not in self.WIRED_BY_LATER_WAVES and symbol not in self.RETIRED_BY_LATER_WAVES:
                 offenders.append(f"{symbol}: {disposal}（无处置批论证）")
         assert not offenders, (
             "出现无据的处置（既没停在待处置，也不在任何处置批的论证里）：\n  "
@@ -137,15 +153,41 @@ class TestDisposalIsMachineCheckable:
             "声明已接线而机器判据不成立：\n  " + "\n  ".join(offenders)
         )
 
+    def test_retired_entries_are_really_gone_from_the_ledger(self):
+        """`已删除` 的每一条都必须真的从取数表里消失——不留"已删声明"这种折中。
+
+        机器事实：退役的符号不再被 `facts()` 取到（判据类 `absent`），
+        且台账处置标为「已删除」。两者缺一即红。
+        """
+        facts = _facts()
+        offenders = []
+        for symbol in self.RETIRED_BY_LATER_WAVES:
+            row = facts.get(symbol)
+            entry = ledger.readLedger().get(symbol, {})
+            if entry.get("disposal") != ledger.DISPOSAL_RETIRED:
+                offenders.append(f"{symbol}: 台账处置为 {entry.get('disposal')}，未标已删除")
+            if row is not None and row["judge"] != ledger.JUDGE_ABSENT:
+                offenders.append(
+                    f"{symbol}: 标了已删除但判据类仍为 {row['judge']}（符号还在，处置是口号）"
+                )
+        assert not offenders, "退役批声明与机器事实不符：\n  " + "\n  ".join(offenders)
+
     def test_baseline_of_absent_symbols_is_empty_in_this_wave(self):
-        """自证：本片应**零** `absent` 条目——一个都没有，处置才可能全是「待处置」。"""
+        """自证：除**已登记的退役批**之外，本片不出现 `absent` 条目。
+
+        原文口径是"一个都没有"，它默认本片不做退役处置。T-09 死码处置批落地后
+        这条会与「退役必须登记」互相打架——故改为「absent 必须 ⊆ 退役批名单」：
+        仍能抓住"取数口径坏了把有定义的符号误判成不存在"（那种符号不会在名单里），
+        同时不再惩罚"按纪律做了退役并登记"。
+        """
         absent = [
             str(row["symbol"]) for row in ledger.facts()
             if row["judge"] == ledger.JUDGE_ABSENT
         ]
-        assert absent == [], (
-            f"本片出现 absent 条目 {absent}：判据取数把「有定义」的符号误判成不存在"
-            "（取数口径坏了），而非符号真的缺席——先查取数再谈处置"
+        unregistered = [s for s in absent if s not in self.RETIRED_BY_LATER_WAVES]
+        assert not unregistered, (
+            f"出现未登记的 absent 条目 {unregistered}：要么判据取数把「有定义」的符号"
+            "误判成不存在（口径坏了），要么删了符号却没在退役批里登记（不许静默退役）"
         )
 
     def test_disposalRuleIsNotVacuous(self):
