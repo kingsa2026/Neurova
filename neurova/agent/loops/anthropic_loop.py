@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
-from neurova.agent.loops.turn_run_state import ROUND_BUDGET_FALLBACK, TurnRunState
+from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.llm_client import LLMResponse
 
 logger = get_logger(__name__)
@@ -55,7 +55,7 @@ class AnthropicLoop(BaseAgentLoop):
             agentId=str(
                 getattr(_config, "agent_id", None) or getattr(_config, "name", None) or ""
             ),
-            maxToolRounds=self.resolveToolRoundBudget(),
+            maxToolRounds=resolveToolRoundBudget(),
         )
         while True:
             state.assertRoundInvariant()
@@ -85,16 +85,6 @@ class AnthropicLoop(BaseAgentLoop):
                     assistantText=getattr(response, "content", "") or "",
                 )
             )
-
-    @staticmethod
-    def resolveToolRoundBudget() -> int:
-        """工具轮上限：配置键 `max_loop_rounds` 派生，读设置失败回退兜底值。"""
-        try:
-            from neurova.security.agent_limits_settings import get_effective_limits
-
-            return get_effective_limits()["max_loop_rounds"] // 2
-        except Exception:  # noqa: BLE001 - 设置不可读不阻断对话
-            return ROUND_BUDGET_FALLBACK
 
     async def _build_request(self, tools, computer_handler, messages) -> Dict:
         """构造一次 Anthropic 请求参数（含 tools 与 computer 工具）。"""

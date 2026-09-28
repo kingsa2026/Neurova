@@ -270,11 +270,17 @@ class TestAnthropicLoopStateOwnership:
         )
 
     def test_roundBudgetFollowsConfigurationNotHardcoded(self, monkeypatch):
-        """轮次上限取自生产配置点，不硬编码 10。"""
-        monkeypatch.setenv("NEUROVA_AGENT_MAX_LOOP_ROUNDS", "2")
-        from neurova.security.agent_limits_settings import get_effective_limits
+        """轮次上限取自生产配置点，不硬编码 10。
 
-        expected = get_effective_limits()["max_loop_rounds"] // 2
+        T-04 把这条上限收成**一份派生**（`turn_run_state.resolveToolRoundBudget()`）：
+        守卫与 `IterationGate` 同取它，不再有 `// 2` 的第二个尺度。故本用例的
+        期望值改为**问生产要那个数**，而不是在测试里复算一遍折半——测试里复算
+        等于把旧尺度抄成第二份定义，收口后它会继续替旧形态背书。
+        """
+        monkeypatch.setenv("NEUROVA_AGENT_MAX_LOOP_ROUNDS", "2")
+        from neurova.agent.loops.turn_run_state import resolveToolRoundBudget
+
+        expected = resolveToolRoundBudget()
 
         class _AlwaysToolCalls:
             def __init__(self):
