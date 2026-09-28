@@ -16,7 +16,9 @@ Neurova 同一套后端服务有三种交付形态，它们必须共享同一份
 - **健康检查**：`GET /health`，周期 30s、超时 5s、启动宽限 30s、失败阈值 3
   （Dockerfile `HEALTHCHECK` / compose `healthcheck` / Helm `backend.healthCheck` 三处同源）
 - **后端资源**：requests `500m` / `1Gi`，limits `2000m` / `4Gi`
-- **运行时**：Python 3.12（必须落在 CI 实测矩阵 3.11/3.12 内）、Node 20（与 CI 一致）
+- **运行时**：Python 3.12（受保护子集自 Issue #301 起只跑这一腿，跑的就是本镜像的
+  解释器；版本事实源是 `Dockerfile` 的 `FROM python:`，判据见
+  `tests/unit/ci/test_unit_tests_single_leg.py`）、Node 20（与 CI 一致）
 - **版本**：`Chart.appVersion` == `neurova/__init__.py::__version__`；
   镜像 `tag` 留空跟随 appVersion（不要写死 `latest`）
 - **持久化**：`database.persistence.enabled=true` 时数据卷必须是 PVC

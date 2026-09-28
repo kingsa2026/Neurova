@@ -7,8 +7,9 @@
 
 本守卫锁定四件事：
 
-1. **覆盖集**：GitHub 每个 job 必须在 cnb 有对应流水线（unit-tests 的
-   matrix 两格对应 py311/py312 两条流水线）；反向不得有多余流水线；
+1. **覆盖集**：GitHub 每个 job 必须在 cnb 有对应流水线（一对一；受保护子集
+   自 Issue #301 起只跑一腿，见 `tests/unit/ci/test_unit_tests_single_leg.py`）；
+   反向不得有多余流水线；
 2. **命令同源**：每对 job/pipeline 的核心门禁命令逐字一致（语义漂移
    最常见形态就是命令被"顺手改一下"）；
 3. **放行标准**：非阻塞语义对齐（GitHub continue-on-error ↔ cnb allowFailure）；
@@ -28,7 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
-# job 名（GitHub）→ 流水线名列表（cnb）；unit-tests matrix 两格拆两条
+# job 名（GitHub）→ 流水线名列表（cnb）；现为一对一
 # perf-gate（Issue #55 新增）：两侧同跑 scripts/ci/perf_gate.py，阻断语义一致
 EXPECTED_MAP = {
     # static-gate 与 lint 是同一条流水线（Issue #223 第 2 条）：pyflakes 与 ruff
@@ -39,7 +40,10 @@ EXPECTED_MAP = {
     # Helm / requirements 跨文件不变量），两侧同跑同一脚本、同为阻断。
     "deploy-config": ["deploy-config"],
     "import-and-regression": ["import-and-regression"],
-    "unit-tests": ["unit-tests-py311", "unit-tests-py312"],
+    # unit-tests（Issue #301）：受保护子集只跑一腿，且那一腿是生产解释器
+    # （3.12）。收敛依据与判据见 tests/unit/ci/test_unit_tests_single_leg.py：
+    # 101 次 PR 构建里两腿状态完全一致（单边红 0 次）。
+    "unit-tests": ["unit-tests"],
     "e2e": ["e2e-backend-boot"],
     "frontend": ["frontend"],
     "perf-gate": ["perf-gate"],
