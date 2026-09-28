@@ -6,13 +6,10 @@
 包含以下核心模块：
 - schemas: 统一工具层数据模型
 - tool_router: 统一工具路由器
-- unified_registry: 统一工具注册表
 - mcp_client: MCP 工具客户端
 - capability_graph: 工具能力关系图
 - tool_orchestrator: DAG 工具编排器
 - tool_marketplace: 工具市场（含贝叶斯评分）
-- tool_logger: 结构化工具执行日志
-- cli_tool: CLI 工具执行器
 - browser_capability: 浏览器后端能力描述
 - openai_schema: OpenAI Tool Schema 兼容层
 """
@@ -26,7 +23,6 @@ logger = get_logger(__name__)
 try:
     from neurova.tool_layers.schemas import (
         MCPConnection,
-        ToolExecutionResult,
         ToolParameter,
         ToolSchema,
         ToolSource,
@@ -39,11 +35,6 @@ try:
     from neurova.tool_layers.tool_router import ToolRouter
 except ImportError as e:
     logger.warning("Failed to import tool_router: %s", e)
-
-try:
-    from neurova.tool_layers.unified_registry import UnifiedToolRegistry
-except ImportError as e:
-    logger.warning("Failed to import unified_registry: %s", e)
 
 try:
     from neurova.tool_layers.mcp_client import MCPToolClient, ToolNotFoundError
@@ -70,16 +61,6 @@ try:
     )
 except ImportError as e:
     logger.warning("Failed to import tool_marketplace: %s", e)
-
-try:
-    from neurova.tool_layers.tool_logger import ToolExecutionEntry, ToolExecutionLogger
-except ImportError as e:
-    logger.warning("Failed to import tool_logger: %s", e)
-
-try:
-    from neurova.tool_layers.cli_tool import CLIToolExecutor
-except ImportError as e:
-    logger.warning("Failed to import cli_tool: %s", e)
 
 try:
     from neurova.tool_layers.browser_capability import BrowserBackendCapability
@@ -162,11 +143,9 @@ __all__ = [
     "ToolParameter",
     "ToolSchema",
     "MCPConnection",
-    "ToolExecutionResult",
     "ToolType",
     # 核心类
     "ToolRouter",
-    "UnifiedToolRegistry",
     "MCPToolClient",
     "ToolNotFoundError",
     "ToolCapabilityGraph",
@@ -180,9 +159,6 @@ __all__ = [
     "BayesianRating",
     "ToolReview",
     "ToolFork",
-    "ToolExecutionLogger",
-    "ToolExecutionEntry",
-    "CLIToolExecutor",
     "BrowserBackendCapability",
     # OpenAI Schema 兼容层
     "OpenAIFunctionSchema",
