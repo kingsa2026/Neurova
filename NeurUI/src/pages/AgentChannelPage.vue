@@ -15,8 +15,25 @@
     <div v-if="showEmptyAttribution" class="nr-ac-empty-attribution" data-testid="empty-attribution">
       <p class="nr-ac-empty-title">{{ t('channel.noConfigsForAgent', { agent: agentId }) }}</p>
       <p class="nr-ac-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
-      <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
-        @click="switchAgent('default')">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+      <div class="nr-ac-empty-actions">
+        <!-- 存量归属迁移的入口落在**用户看见存量那一屏**：只说"配置在默认视图下"
+             而不给搬过来的入口，用户就得一直来回切视图用别人的身份配自己的 bot。 -->
+        <GlassButton size="sm" variant="primary" data-testid="migrate-legacy-channels"
+          :disabled="migrating" @click="migrateLegacyChannels">
+          {{ migrating ? t('channel.migrating') : t('channel.migrateLegacyChannels') }}
+        </GlassButton>
+        <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
+          @click="switchAgent('default')">{{ t('channel.viewDefaultAgent') }}</GlassButton>
+      </div>
+      <p v-if="migrateError" class="nr-ac-empty-error" data-testid="migrate-error">{{ migrateError }}</p>
+    </div>
+
+    <!-- 归属门（非属主/非管理员）与「真的没有配置」是两回事：渲染成同一个样子
+         会让用户重蹈本 bug 的老路（分不清"没配"与"看不到"）。 -->
+    <div v-if="accessDenied" class="nr-ac-empty-attribution" data-testid="access-denied">
+      <p class="nr-ac-empty-title">{{ t('channel.accessDenied') }}</p>
+      <p class="nr-ac-empty-hint">{{ accessDenied }}</p>
+      <p class="nr-ac-empty-hint">{{ t('channel.accessDeniedHint') }}</p>
     </div>
 
     <a-spin :spinning="loading">
@@ -136,7 +153,7 @@ import { message, Modal } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import {
-  listChannelConfigs, createChannelConfig, deleteChannelConfig,
+  listChannelConfigs, createChannelConfig, deleteChannelConfig, migrateAgentChannelConfigs,
 } from '@/api/modules/channel-configs'
 import {
   buildChannelCatalog, buildChannelFieldsMap, buildCommonFields,
@@ -172,6 +189,11 @@ const form = reactive<{ enabled: boolean; values: Record<string, any> }>({ enabl
 const savedExtras = ref<Record<string, Record<string, unknown>>>({})
 
 const channels = ref<AgentChannel[]>([])
+const migrating = ref(false)
+// 迁移失败/归属拒绝的**诚实原文**：403（非属主/非管理员）与 409（冲突）都不是
+// "网络错误"，笼统的"出错了"会让用户以为重试就好。
+const migrateError = ref('')
+const accessDenied = ref('')
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
 
@@ -214,7 +236,7 @@ function switchAgent(value: unknown) {
 // 归属地，在那里为空就是真的没配过，加提示只会制造噪音。
 // 判据是**已配置行数为 0**，不是 `channels.length`——后者恒等于整份渠道目录。
 const showEmptyAttribution = computed(
-  () => agentId.value !== 'default' && !loading.value
+  () => agentId.value !== 'default' && !loading.value && !accessDenied.value
     && channels.value.length > 0 && !channels.value.some((c) => c.configured),
 )
 
@@ -253,6 +275,8 @@ function onQrError(type: 'fetch' | 'expired' | 'fail') {
 
 async function fetchConfigs() {
   loading.value = true
+  accessDenied.value = ''
+  migrateError.value = ''
   try {
     const list: any = await listChannelConfigs(agentId.value)
     const rows: any[] = Array.isArray(list) ? list : (list?.data ?? [])
@@ -274,11 +298,49 @@ async function fetchConfigs() {
     } catch {
       /* 保持默认停用 */
     }
-  } catch {
+  } catch (e: any) {
     channels.value = baseCatalog()
-    message.error(t('common.error'))
+    // 403 与"没有配置"必须可区分：前者是归属门（仅属主/管理员），后者是真没配过。
+    // 合并成同一句"出错了"正是本 bug 被拖 6 天没人定位到落点的形态。
+    const detail = e?.response?.data?.detail
+    if (e?.response?.status === 403) {
+      accessDenied.value = String(detail || t('channel.accessDenied'))
+      return
+    }
+    message.error(detail ? t('channel.genericFailure', { reason: String(detail) }) : t('common.error'))
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 把默认视图名下的存量渠道**移动**到当前智能体。
+ *
+ * 后端是移动语义且冲突时两边原样返回，所以这里不做乐观更新：失败就把原因
+ * 原样显示，成功就重取本视图——让屏幕上的状态始终来自服务端那唯一的事实源。
+ */
+async function migrateLegacyChannels() {
+  const target = agentId.value
+  if (target === 'default' || migrating.value) return
+  migrating.value = true
+  migrateError.value = ''
+  try {
+    const res: any = await migrateAgentChannelConfigs('default', target)
+    const data = res?.data ?? res
+    const moved: string[] = data?.migrated ?? []
+    await fetchConfigs()
+    if (moved.length) {
+      message.success(t('channel.migrateSuccess', { count: moved.length, agent: target }))
+    } else {
+      message.info(t('channel.migrateEmpty'))
+    }
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    migrateError.value = detail
+      ? t('channel.migrateFailed', { reason: String(detail) })
+      : t('channel.migrateFailed', { reason: String(e?.message || '') })
+  } finally {
+    migrating.value = false
   }
 }
 
@@ -387,6 +449,8 @@ watch(agentId, () => { fetchConfigs() }, { immediate: true })
 .nr-ac-empty-attribution { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .nr-ac-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--nr-text-secondary); }
 .nr-ac-empty-hint { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-text-tertiary); }
+.nr-ac-empty-actions { display: flex; gap: 8px; }
+.nr-ac-empty-error { margin: 0; max-width: 420px; font-size: 12px; color: var(--nr-error, #ef4444); }
 .nr-ac-panel-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 600; color: var(--nr-text-primary);

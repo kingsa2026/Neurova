@@ -14,9 +14,15 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
-__all__ = ["can_access_agent", "resolve_agent_owner"]
+from fastapi import HTTPException
+
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+__all__ = ["agentOwnerById", "can_access_agent", "requireAgentOwner", "resolve_agent_owner"]
 
 
 def can_access_agent(user_id: str, role: str, owner: Optional[str]) -> bool:
@@ -42,3 +48,46 @@ def resolve_agent_owner(agent_id: str, *, state_agent: Any = None, registered_cf
         if owner:
             return str(owner)
     return None
+
+
+def agentOwnerById(agent_id: str) -> Optional[str]:
+    """按 agent_id 取属主：运行实例优先，中枢登记（agents.json / workspace 同步）回退。
+
+    **取数也收在这一处**：此前渠道、技能池、agent 各面各自拼一遍"先查 state 再查
+    登记"，同一契约多份取数实现 —— 其中任何一份漏了回退，就会把有主 agent 判成
+    无主，而无主的判据是"仅 admin"，属主本人被自己挡在门外。
+    """
+    state_agent = None
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        state_agent = get_agent_instance(agent_id)
+    except Exception as exc:  # noqa: BLE001 - 状态面不可用即按"无实例"走登记回退
+        logger.debug("agent 实例查询失败 %s: %s", agent_id, exc)
+    registered_cfg = None
+    if state_agent is None:
+        try:
+            from neurova.api.endpoints.agent import get_agent_config_manager
+
+            registered_cfg = get_agent_config_manager().get_agent(agent_id)
+        except Exception as exc:  # noqa: BLE001 - 登记面不可用即按"无登记"走
+            logger.debug("agent 登记查询失败 %s: %s", agent_id, exc)
+    return resolve_agent_owner(agent_id, state_agent=state_agent, registered_cfg=registered_cfg)
+
+
+def requireAgentOwner(agent_id: str, current_user: Any, *, action: str = "访问") -> None:
+    """HTTP 门：admin 全量；非 admin 仅属主；**无主（含 `default`）仅 admin**。
+
+    与 `can_access_agent` 同一判据，只是把"拒绝"落成 403。门的默认方向是
+    **拒绝**：身份缺席（端点被直调而未传身份）按匿名处理，不让"忘了传身份"
+    变成绕过口的旁路。
+    """
+    identity = current_user if isinstance(current_user, Mapping) else {}
+    uid = str(identity.get("user_id") or "")
+    role = str(identity.get("role") or "user")
+    if can_access_agent(uid, role, agentOwnerById(agent_id)):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=f"无权{action}智能体『{agent_id}』（仅属主或管理员可操作）",
+    )

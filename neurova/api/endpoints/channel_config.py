@@ -40,6 +40,7 @@ from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
+from neurova.api.agent_access import requireAgentOwner
 from neurova.core.data_root import dataLanding
 from neurova.security.secret_store import sealSecrets, unsealSecrets
 
@@ -88,6 +89,16 @@ class ChannelConfigRequest(BaseModel):
     encrypt_key: str = Field("", description="加密密钥")
     verification_token: str = Field("", description="验证 Token")
     extra: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
+
+
+class ChannelMigrationRequest(BaseModel):
+    """存量渠道归属迁移请求（把源 agent 名下的渠道配置移到目标 agent）。"""
+
+    from_agent_id: str = Field("default", description="源归属 Agent（存量挂在 default 名下）")
+    to_agent_id: str = Field(..., description="目标 Agent（迁移后的归属）")
+    channel_types: Optional[list] = Field(
+        None, description="只迁这些渠道；缺省=源表全部。空数组视为未点名，同缺省"
+    )
 
 
 class ChannelConfigResponse(BaseModel):
@@ -216,6 +227,22 @@ def _identity_conflict_owner(store: Dict[str, Any], agent_id: str, channel_type:
         if isinstance(other_cfg, dict) and _extract_identity(channel_type, other_cfg) == ident:
             return other_agent
     return None
+
+
+# 归属门：渠道配置按 (agent_id, channel_type) 落表，读的是**该 agent 的 bot 凭据**
+# （app_secret / bot_token / …）。此前本路由只挂 `Depends(get_current_user)`
+# ——任何登录用户都能读写**任意** agent 的渠道配置，含 `default`、含别人的 agent。
+#
+# 判据不新造：`default` 是**无主 agent**（`api/app.py` 建它时不传 owner），按
+# `api/agent_access.py` 的单源口径（admin 全量 / 属主匹配 / **无主仅 admin**）
+# 即「仅管理员可配」；有主 agent 归其属主。
+#
+# 门放在**取数之前**：403 先于任何读写副作用，且不泄露"该 agent 有没有配置"。
+_ACCESS_ACTION = {"read": "查看", "write": "配置", "delete": "删除", "test": "测试"}
+
+
+def _requireChannelAccess(agent_id: str, current_user: Any = None, *, action: str = "read") -> None:
+    requireAgentOwner(agent_id, current_user, action=_ACCESS_ACTION.get(action, "访问"))
 
 
 # ============================================================
@@ -385,9 +412,13 @@ async def ingress_stats():
 
 
 @router.get("", summary="列出渠道配置")
-async def list_configs(agent_id: str = Query(default="default", description="Agent ID")):
+async def list_configs(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Any = Depends(get_current_user),
+):
     agent_id = _norm_agent(agent_id)
     """列出指定 agent 已配置的渠道（agent 隔离视图，缺省 default 向后兼容）"""
+    _requireChannelAccess(agent_id, current_user, action="read")
     manager = get_channel_manager()
 
     result = []
@@ -424,9 +455,14 @@ async def list_plugin_channel_schemas():
 
 
 @router.get("/{channel_type}", summary="获取指定渠道配置")
-async def get_config(channel_type: str, agent_id: str = Query(default="default")):
+async def get_config(
+    channel_type: str,
+    agent_id: str = Query(default="default"),
+    current_user: Any = Depends(get_current_user),
+):
     agent_id = _norm_agent(agent_id)
     """获取指定 agent 的渠道配置"""
+    _requireChannelAccess(agent_id, current_user, action="read")
     configs = _agent_map(_load_store(), agent_id)
     if channel_type not in configs:
         raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not configured")
@@ -470,8 +506,12 @@ def _promote_credential_aliases(channel_type: str, request: ChannelConfigRequest
 async def create_or_update_config(
     request: ChannelConfigRequest,
     agent_id: str = Query(default="default", description="归属 Agent（agent 隔离多实例）"),
+    current_user: Any = Depends(get_current_user),
 ):
     agent_id = _norm_agent(agent_id)
+    # 403 必须先于冲突检测与落盘：否则"写不进"与"身份撞了"两种失败会被混成
+    # 409，且冲突检测本身会读到他人 agent 的凭据身份（越权信息泄露）。
+    _requireChannelAccess(agent_id, current_user, action="write")
     """创建或更新指定 agent 的渠道配置并注册适配器
 
  2026-09-13 agent 隔离：配置写 agents[agent_id]、
@@ -545,10 +585,138 @@ async def create_or_update_config(
     }
 
 
+@router.post("/migrate-agent", summary="迁移存量渠道的归属 agent")
+async def migrate_agent_configs(
+    request: ChannelMigrationRequest,
+    current_user: Any = Depends(get_current_user),
+):
+    """把源 agent 名下的渠道配置**移动**到目标 agent（存量归属裁决的执行面）。
+
+    为什么是移动而不是复制：渠道实例表的主键是 `(agent_id, channel_type)`，
+    同一平台在两个 agent 下会建**两条独立连接**。复制出来的是同一个 bot 的
+    第二份接入——平台侧表现为串台/抢占（飞书单机器人只允许一条长连接），
+    正是身份冲突检测存在的理由。故源表清空、目标表接收，逐条原子完成。
+
+    配置与实例必须同源：迁移里一并断开源侧实例、在目标侧按新归属注册并连接。
+    只改配置不动实例，用户侧就是"迁过去反而收不到消息"——那比不迁更坏。
+
+    冲突两种，都**先于任何写入**检测，拒绝时两边原样（不留半截状态）：
+    - 目标已有同渠道 → 409，点名是哪条；
+    - 目标侧已有同平台同身份的另一个 bot → 409（复用 `_identity_conflict_owner`，
+      不另起第二套身份口径）。
+    """
+    from_id = _norm_agent(request.from_agent_id)
+    to_id = _norm_agent(request.to_agent_id)
+    if from_id == to_id:
+        raise HTTPException(status_code=400, detail="源与目标不能是同一个 agent")
+
+    # 门先行：源多为 default（无主 → 仅 admin），目标是接收方（非属主不得塞入）
+    _requireChannelAccess(from_id, current_user, action="delete")
+    _requireChannelAccess(to_id, current_user, action="write")
+
+    store = _load_store()
+    source = _agent_map(store, from_id)
+    target = _agent_map(store, to_id)
+
+    wanted = [t for t in (request.channel_types or []) if isinstance(t, str) and t]
+    moving = [t for t in source if not wanted or t in wanted]
+
+    if not moving:
+        return {"success": True, "from_agent_id": from_id, "to_agent_id": to_id, "migrated": []}
+
+    occupied = [t for t in moving if t in target]
+    if occupied:
+        raise HTTPException(
+            status_code=409,
+            detail=f"目标智能体『{to_id}』已有同渠道配置，迁移会覆盖既有 bot：{'、'.join(sorted(occupied))}",
+        )
+
+    # 冲突预演必须在**迁移后的全量视图**上做：身份冲突的性质是"同一个 bot 被两个
+    # agent 各持一条连接"，只扫目标表就把检测面收窄回自己——那样迁到 kai 时，
+    # other 名下已占同身份的 bot 反而看不见，正是本检测存在的理由。
+    # 视图 = 源表减去待迁项、目标表加上待迁项（即本次动作的真实终态）；
+    # 源里那些渠道随后就要被 pop，不能拿"源还占着身份"把自己判成冲突。
+    sourceAfter = {t: cfg for t, cfg in source.items() if t not in moving}
+    scope = {
+        "agents": {
+            **store["agents"],
+            from_id: sourceAfter,
+            to_id: {**target, **{t: source[t] for t in moving}},
+        }
+    }
+    collisions = {
+        t: owner for t in moving
+        if (owner := _identity_conflict_owner(scope, to_id, t, source[t]))
+    }
+    if collisions:
+        points = "、".join(f"{t}（身份已被『{owner}』占用）" for t, owner in sorted(collisions.items()))
+        raise HTTPException(
+            status_code=409,
+            detail=f"平台身份冲突：{points}；同一 bot 双接入会导致消息串台",
+        )
+
+    manager = get_channel_manager()
+    for channel_type in moving:
+        adapter = manager.get_adapter(channel_type, agent_id=from_id)
+        if adapter is not None:
+            try:
+                await adapter.disconnect()
+            except Exception as e:  # noqa: BLE001 - 拆旧连接失败不阻断迁移（配置已确认可迁）
+                logger.warning("迁移拆旧连接失败 %s(%s→%s): %s", channel_type, from_id, to_id, e)
+            manager.unregister_adapter(channel_type, agent_id=from_id)
+
+    moved = []
+    for channel_type in moving:
+        cfg = source.pop(channel_type)
+        target[channel_type] = cfg
+        moved.append(channel_type)
+
+    _save_store(store)
+
+    for channel_type in moved:
+        cfg = target[channel_type]
+        if not cfg.get("enabled", True):
+            continue
+        if channel_type == "wechat" and _wechat_needs_scan(cfg.get("extra") or {}):
+            continue
+        channel_config = ChannelConfig(
+            channel_type=channel_type,
+            enabled=True,
+            app_id=cfg.get("app_id", "") or "",
+            app_secret=cfg.get("app_secret", "") or "",
+            use_stream=cfg.get("use_stream", True),
+            webhook_url=cfg.get("webhook_url", "") or "",
+            webhook_token=cfg.get("webhook_token", "") or "",
+            encrypt_key=cfg.get("encrypt_key", "") or "",
+            verification_token=cfg.get("verification_token", "") or "",
+            extra=cfg.get("extra", {}) or {},
+        )
+        try:
+            adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
+        except Exception as e:  # noqa: BLE001 - 单渠道注册失败不吞迁移结果（如实点名）
+            logger.warning("迁移后重建实例失败 %s(agent=%s): %s", channel_type, to_id, e)
+            continue
+        if adapter is None:
+            continue
+        manager.register_adapter(adapter, agent_id=to_id)
+        try:
+            await adapter.connect()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("迁移后连接失败 %s(agent=%s): %s", channel_type, to_id, e)
+
+    logger.info("渠道归属迁移完成: %s → %s，迁移 %s", from_id, to_id, moved)
+    return {"success": True, "from_agent_id": from_id, "to_agent_id": to_id, "migrated": moved}
+
+
 @router.delete("/{channel_type}", summary="删除渠道配置")
-async def delete_config(channel_type: str, agent_id: str = Query(default="default")):
+async def delete_config(
+    channel_type: str,
+    agent_id: str = Query(default="default"),
+    current_user: Any = Depends(get_current_user),
+):
     agent_id = _norm_agent(agent_id)
     """删除指定 agent 的渠道配置并注销其适配器实例"""
+    _requireChannelAccess(agent_id, current_user, action="delete")
     store = _load_store()
     configs = _agent_map(store, agent_id)
     if channel_type not in configs:
@@ -571,9 +739,15 @@ async def delete_config(channel_type: str, agent_id: str = Query(default="defaul
 
 
 @router.post("/{channel_type}/test", summary="测试渠道连接")
-async def test_connection(channel_type: str, request: ChannelConfigRequest, agent_id: str = Query(default="default")):
+async def test_connection(
+    channel_type: str,
+    request: ChannelConfigRequest,
+    agent_id: str = Query(default="default"),
+    current_user: Any = Depends(get_current_user),
+):
     agent_id = _norm_agent(agent_id)
     """测试渠道连接是否正常"""
+    _requireChannelAccess(agent_id, current_user, action="test")
     # F-2：wechat iLink 无 token 时诚实失败并引导扫码——绝不创建适配器
     # （旧路径会进入 authenticate→二维码 300s 阻塞轮询，或空 extra 假成功）
     if channel_type == "wechat" and _wechat_needs_scan(request.extra):

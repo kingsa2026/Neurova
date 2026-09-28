@@ -136,6 +136,27 @@ export function checkChannelConflicts() {
   )
 }
 
+/**
+ * 存量渠道归属迁移：把源 agent（多为 `default`）名下已配置的渠道**移动**到目标 agent。
+ *
+ * 不传 `channelTypes` 即整表搬迁。后端是移动语义（源表清空），冲突时 409 并
+ * **两边原样**返回——所以这里不吞错误，由调用方把原因显示给用户。
+ */
+export function migrateAgentChannelConfigs(
+  fromAgentId: string,
+  toAgentId: string,
+  channelTypes?: string[],
+) {
+  return api.post<ApiResponse<{ success: boolean; from_agent_id: string; to_agent_id: string; migrated: string[] }>>(
+    `${BASE}/migrate-agent`,
+    {
+      from_agent_id: fromAgentId,
+      to_agent_id: toAgentId,
+      ...(channelTypes && channelTypes.length ? { channel_types: channelTypes } : {}),
+    },
+  )
+}
+
 /** 插件渠道动态表单 schema（B4-d；未注册插件时为空数组）。 */
 export function listPluginChannelSchemas() {
   return api.get<{ code: number; message: string; data: { schemas: { channel_type: string; name: string; config_fields: { key: string; label?: string; type: string; required?: boolean; default?: unknown; placeholder?: string }[] }[] } }>(
