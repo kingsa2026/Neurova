@@ -130,3 +130,16 @@ def get_token_estimator(strategy: EstimationStrategy = EstimationStrategy.EXACT)
 def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy.EXACT) -> int:
     """估算文本的 token 数量（全仓统一入口）。"""
     return get_token_estimator(strategy).estimate(text)
+
+
+def isRulerCalibrated() -> bool:
+    """尺子是否处于**校准档**（判定类动作允许生效的唯一前置）。
+
+    校准档 = `EXACT` 且 `o200k` 编码器真的可用。缺 tokenizer 时估算会走
+    按类上界比例的回退档——那个档只保证"不低估"，不保证判据所需的分辨率，
+    拿它算盈亏就是**在坏尺上建闸**（方向确定地偏向"不压"）。
+
+    探针只在本处实现一处：谁要判断"尺子准不准"一律调它，不得自己再写一遍
+    `import tiktoken` 或可用性判断（那是第二份事实源）。
+    """
+    return get_token_estimator(EstimationStrategy.EXACT)._get_tiktoken_encoder() is not None

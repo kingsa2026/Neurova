@@ -290,6 +290,16 @@ class ContextBuilder:
                     user_bare = strip_envelope(user_bare)
                 except Exception:
                     pass
+                # 压缩经济性判据（Issue #289 · 002，第三条接入点）：
+                # 此前这条路径**直接**调 `_compress_context`，绕过了判据——同一份
+                # 契约里的第三个消费方只接两条，等于把缺口留在最常走的降级链上。
+                if not self._unified_injector._economics_allows(
+                    envelope="",  # 信封已挂在末条 user 上；此路径的压缩对象只有历史
+                    history=history,
+                    occupied=total_tokens,
+                    budget=self.MAX_CONTEXT_TOKENS,
+                ):
+                    return context
                 _, compressed_history, _ = self._unified_injector._compress_context(
                     "",  # 信封已挂在末条 user 上；此路径的压缩对象只有历史
                     history,

@@ -73,12 +73,15 @@ class TestComfyUIStatusEndpoint:
 
         reset_comfyui_client()
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_COMFYUI_HOST":
                 return "http://localhost:8188"
             return default
 
-        with patch("neurova.core.config.get", side_effect=mock_get):
+        with patch("neurova.core.config.get", autospec=True, side_effect=mock_get):
             response = client.get("/v1/neurflow/comfyui/status")
 
         assert response.status_code == 200
@@ -117,7 +120,10 @@ class TestComfyUIExecuteEndpoint:
 
         reset_comfyui_client()
 
-        def mock_get(key, default=None):
+        def mock_get(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`config.get`）。
+            key = args[0] if args else kwargs.get("key")
+            default = kwargs.get("default", args[1] if len(args) > 1 else None)
             if key == "NEUROVA_COMFYUI_HOST":
                 return "http://localhost:8188"
             return default
@@ -127,7 +133,7 @@ class TestComfyUIExecuteEndpoint:
         mock_response.json.return_value = {"prompt_id": "api-test-001", "number": 1, "node_errors": {}}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("neurova.core.config.get", side_effect=mock_get), \
+        with patch("neurova.core.config.get", autospec=True, side_effect=mock_get), \
              patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             response = client.post(
                 "/v1/neurflow/comfyui/execute",

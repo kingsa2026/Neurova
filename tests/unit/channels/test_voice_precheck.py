@@ -127,7 +127,9 @@ class TestManagerWiring:
 
         msg = _voice_msg(audio_bytes=b"fake")
 
-        async def _fake_transcribe(m):
+        async def _fake_transcribe(*args, **kwargs):
+            # 形参表不手抄：签名的事实源是生产对象（`transcribe_voice_message`）。
+            m = args[0] if args else kwargs["message"]
             m.content = "转写后的指令"
             m.metadata["voice_transcribed"] = True
             return m

@@ -105,6 +105,17 @@ from .models import (
     clip_reflection_lesson,
 )
 
+
+def _evaluateEconomics(**kwargs):
+    """判据入口（单源转调 `context.compression_economics`）。
+
+    本函数**不重算**任何代价/收益——那是第二份口径（教义第 6 条）。
+    """
+    from neurova.context.compression_economics import evaluateCompressionEconomics
+
+    return evaluateCompressionEconomics(**kwargs)
+
+
 if TYPE_CHECKING:
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
@@ -122,6 +133,9 @@ class UnifiedContextInjector(BaseModule):
     4. 高温记忆优先注入
     5. reflection_log 注入到系统提示
     """
+
+    #: 被弃消息留存一行摘要的 token 占位（判据的"代价"口径之一，单源）。
+    _SUMMARY_LINE_TOKENS_PER_DROPPED = 12
 
     MODULE_ID = "context.unified_injector"
     MODULE_NAME = "UnifiedContextInjector"
@@ -168,6 +182,44 @@ class UnifiedContextInjector(BaseModule):
         # F6：从 agent config 读取（缺省 True 保持行为不变）；运行时仍可经
         # context.set_priority 事件调整（_handle_set_priority）
         self._show_empathy = bool(kwargs.pop("show_empathy", True))
+
+        # 压缩经济性判据（Issue #289 · 002）：
+        # - 判据本体收口在 `context.compression_economics`（唯一一处"值不值"定义）；
+        # - 开关并入既有治理事实源（`security.governance_settings.DEFAULTS`），
+        #   默认关 ⇒ 现行"必然装不下就压"的行为**零变更**；
+        # - 上一轮实测 `compression_ratio` 在此留存，供下一轮判据回读（跨趟反馈）。
+        self._economicsGate = kwargs.pop("economics_gate", None) or (
+            lambda **kw: _evaluateEconomics(**kw)
+        )
+        #: 窗口硬顶覆盖（测试/运维用；缺省走模型元数据解析，与折叠链同入口）。
+        self._windowCeilingOverride = kwargs.pop("window_ceiling", None)
+        _economics_override = kwargs.pop("compression_economics", None)
+        self._enable_economics = (
+            self._resolveEconomicsSwitch() if _economics_override is None else bool(_economics_override)
+        )
+        self._lastCompressionRatio: Optional[float] = None
+        self._lastEconomicsReadout: Dict[str, Any] = {}
+
+    @staticmethod
+    def _resolveEconomicsSwitch() -> bool:
+        """经济性判据开关：env 显式 0/1 > 治理设置 > 内置默认（同一优先级口径）。"""
+        try:
+            from neurova.security.governance_settings import resolve_flag
+
+            return resolve_flag(
+                "compression_economics_enabled", "NEUROVA_COMPRESSION_ECONOMICS"
+            )
+        except Exception as e:  # noqa: BLE001 - 治理面不可读时按默认关处置（安全侧）
+            logger.debug("压缩经济性开关解析失败，按默认关处置: %s", e)
+            return False
+
+    def readCompressionFeedback(self) -> Optional[float]:
+        """回读上一轮实测的 `compression_ratio`（跨趟反馈的唯一入口）。
+
+        返回 `None` 表示**从未测过** —— 与"测了但不省"（1.0）是两件事：
+        把未测量演成不划算，正是本仓在 `success` 三态上已经修过的同类病灶。
+        """
+        return self._lastCompressionRatio
 
     async def on_initialize(self) -> None:
         """初始化钩子"""
@@ -375,9 +427,14 @@ class UnifiedContextInjector(BaseModule):
         total_tokens = system_tokens + history_tokens + user_tokens
 
         compression_ratio = 1.0
-        if total_tokens > self._token_budget.max_total and self._enable_compression:
+        # 弃封出账位（Issue #289 · 002）：与本轮读数同域，故并与它一份。
+        discard_report: Dict[str, Any] = {}
+        over_budget = total_tokens > self._token_budget.max_total
+        if over_budget and self._enable_compression and self._economics_allows(
+            envelope=envelope, history=history, occupied=total_tokens, budget=self._token_budget.max_total
+        ):
             envelope, history, compression_ratio = self._compress_context(
-                envelope, history, user_bare_tokens, system_tokens
+                envelope, history, user_bare_tokens, system_tokens, report=discard_report
             )
             user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
             total_tokens = (
@@ -415,10 +472,19 @@ class UnifiedContextInjector(BaseModule):
             },
         )
 
+        if over_budget:
+            # 跨趟反馈留存：本轮实测比例供下一轮判据回读（唯一写入点）。
+            self._lastCompressionRatio = compression_ratio
+        # 弃封是净损失路径：读数与本轮 economics 读数同域出账（同一份 stats），
+        # 不新开第二套读数体系（教义第 6 条）。
+        self._lastEconomicsReadout = {**self._lastEconomicsReadout, **discard_report}
+        result.stats["compression_economics"] = self._lastEconomicsReadout
+
         self.log_info(
             "上下文构建完成 "
             f"(total_tokens={total_tokens}, within_budget={result.stats['within_budget']}, "
-            f"compression_ratio={compression_ratio})"
+            f"compression_ratio={compression_ratio}, "
+            f"economics={self._lastEconomicsReadout.get('action', 'n/a')})"
         )
 
         return result
@@ -822,8 +888,73 @@ class UnifiedContextInjector(BaseModule):
 
         return trimmed
 
+    def _economics_allows(
+        self, *, envelope: str, history: List[Dict], occupied: int, budget: int
+    ) -> bool:
+        """过经济性判据：是否允许这一次有损折叠（默认关 ⇒ 恒放行，行为零变更）。
+
+        判据入参全部取自本处已有的量，**不新造任何口径**：
+        - `foldable_tokens`：本轮拟折叠对象（信封 + 历史）的 token 量；
+        - `summary_tokens`：折叠后**留存**的量——上限按"每条被弃消息留一行摘要"
+          估（`_SUMMARY_LINE_TOKENS_PER_DROPPED`），因为留存行本身要占位；
+        - `occupied_tokens`：装配后总占用；`window_ceiling`：**硬顶**，非"软预算"
+          （只有真硬顶才允许让安全线压过经济性；把软预算当硬顶会让闸形同虚设）；
+        - `prior_compression_ratio`：上一轮实测读数，`None` = 从未测过。
+
+        判据拿不准时**不动作**并出原因（不许"拿不准就压"——那是 consumer-only
+        guard 的反面形态：拿不准恰恰是唯一必须出声的地方）。
+        """
+        from neurova.context.token_estimator import isRulerCalibrated
+
+        dropped = len(history) + (1 if envelope else 0)
+        verdict = self._economicsGate(
+            foldable_tokens=self._count_tokens(envelope)
+            + sum(self._count_tokens(m.get("content", "")) for m in history),
+            summary_tokens=dropped * self._SUMMARY_LINE_TOKENS_PER_DROPPED,
+            occupied_tokens=occupied,
+            window_ceiling=self._windowCeiling(),
+            prior_compression_ratio=self._lastCompressionRatio,
+            ruler_calibrated=isRulerCalibrated(),
+        )
+        self._lastEconomicsReadout = {
+            "enabled": self._enable_economics,
+            "action": verdict.action.value,
+            "profit": verdict.profit,
+            "cost": verdict.cost,
+            "prior_ratio": self._lastCompressionRatio,
+            "deferred_reason": None if verdict.act else verdict.action.value,
+        }
+        if not self._enable_economics:
+            # 默认关：判据只**观测**不出门（现网行为逐条不变），读数照样落账。
+            return True
+        return verdict.act
+
+    def _windowCeiling(self) -> int:
+        """窗口硬顶：模型上下文窗口 × 90%（与折叠链同一个解析入口，零新口径）。
+
+        取不到模型元数据时返回 0 = **本链无已知硬顶**，此时判据不构造
+        "安全线让位"（不许把未知当撞顶，那会让闸恒不让位）。
+        """
+        override = getattr(self, "_windowCeilingOverride", None)
+        if override:
+            return max(1000, int(override))
+        try:
+            from neurova.llm.llm_router import resolve_model_context_window
+
+            window = resolve_model_context_window("")
+            if window and window > 0:
+                return max(1000, int(window * 0.9))
+        except Exception as e:  # noqa: BLE001 - 解析失败退"无已知硬顶"
+            logger.debug("窗口硬顶解析失败: %s", e)
+        return 0
+
     def _compress_context(
-        self, envelope: str, history: List[Dict], user_tokens: int, system_tokens: int = 0
+        self,
+        envelope: str,
+        history: List[Dict],
+        user_tokens: int,
+        system_tokens: int = 0,
+        report: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """压缩上下文（批次 A 重设计）：压缩对象=信封+历史，system 只读不动。
 
@@ -862,8 +993,14 @@ class UnifiedContextInjector(BaseModule):
 
             # 2) 信封确定性淘汰（块级→行级），落预算
             envelope_budget = _budget_after(history)
+            # 弃封出账（Issue #289 · 002）：本函数是非池直连与 builder 降级链
+            # **共用**的唯一压缩入口，`report` 在这里透传 —— 只在池分支传
+            # 等于把同一块静默缺口留在用户侧最常走的那条路上。
             envelope = compress_envelope(
-                envelope, budget_tokens=max(0, envelope_budget), count_tokens=self._count_tokens
+                envelope,
+                budget_tokens=max(0, envelope_budget),
+                count_tokens=self._count_tokens,
+                report=report,
             )
 
             return envelope, history, compression_ratio
