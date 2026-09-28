@@ -8,7 +8,14 @@
 - neurova/asr/manager.py:154 同理；
 而 core/thread_pool.py 的共享单例只有 neurova_recall.py 在用。
 
-本套件钉住：三处都改走共享具名池，同一 name 复用同一实例。
+本套件钉住：这些站点都走共享具名池，同一 name 复用同一实例。
+
+**T-09 死码处置批（Issue #174 / #310）之后**：`tool_pipeline.py` 里那个用池的
+站点（五段框架的并行 post 段）随框架整体退场，该模块**已不再持有线程池**。
+故本套件的第三条（`test_site_uses_named_shared_pool`）对它不再适用——**判据不是
+被删掉，而是换了形态**：从「它用了共享池」改为「它不得重新引入直建池」
+（`test_no_direct_thread_pool_construction` 对它仍然生效，且这才是本套件的原始
+红线）。若日后有人把并行面接回来，直建池会被立刻抓住。
 """
 
 import ast
@@ -73,7 +80,6 @@ class TestNoPerCallPoolCreation:
     @pytest.mark.parametrize(
         "rel_path,pool_name",
         [
-            ("neurova/agent/tool_pipeline.py", "tool-pipeline"),
             ("neurova/mem_core.py", "mem-async-bridge"),
             ("neurova/asr/manager.py", "asr-consent"),
         ],
@@ -83,6 +89,33 @@ class TestNoPerCallPoolCreation:
         assert "get_thread_pool(" in src, f"{rel_path} 未接入共享线程池"
         assert pool_name in src, (
             f"{rel_path} 未用具名池 {pool_name!r}——具名才能隔离 busy 面"
+        )
+
+    def test_retired_pipeline_site_does_not_reintroduce_a_pool(self):
+        """`tool_pipeline.py` 的并行站点已随 T-09 退场——不该再有任何池。
+
+        这是上一条对它失效之后**补上的等价判据**：原判据问「它有没有用共享池」，
+        现判据问「它有没有重新建池」。后者才是本套件的原始红线，且对「站点被
+        删掉」与「站点被接回来但接错了」两种情形都成立。
+
+        **两个形态都要拦**（各拦一次，不是"随便哪一条拦得住就算"）：
+
+        - `ThreadPoolExecutor`：直建池，本套件第一红线；
+        - `get_thread_pool`：具名共享池。它在这个文件上同样是**退场残留**——
+          该模块已经没有任何提交任务的调用点，"接回共享池"只会是一个没有
+          `submit` 的死引用。只拦直建池会漏掉这一种。
+
+        反证（实测）：只写 `ThreadPoolExecutor` 那一条时，往文件里加回
+        `get_thread_pool(name="tool-pipeline")` 调用仍全绿——那就是漏。
+        """
+        src = io.open(PROJECT_ROOT / "neurova/agent/tool_pipeline.py", encoding="utf-8").read()
+        assert "ThreadPoolExecutor" not in src, (
+            "tool_pipeline.py 重新引入了直建线程池——若并行面要接回来，"
+            "必须走 neurova.core.thread_pool.get_thread_pool(name=...)，不得直建"
+        )
+        assert "get_thread_pool" not in src, (
+            "tool_pipeline.py 已经没有任何线程池站点，残留具名池调用即死码"
+            "——接回并行面时再连同 get_thread_pool 一起加，不要只加池"
         )
 
 

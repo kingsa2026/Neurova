@@ -7,7 +7,7 @@
 - Windows: AppContainer（受限执行，降级为常规执行并标注）
 - 通用降级: ProcessSandbox（无内核隔离，仅进程级）
 
-所有后端对外暴露统一的 `execute()` 接口，返回与 CLIToolExecutor 兼容的字典。
+所有后端对外暴露统一的 `execute()` 接口，返回调用方约定的字典形态。
 """
 
 from __future__ import annotations
