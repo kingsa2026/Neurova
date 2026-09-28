@@ -519,6 +519,7 @@ def _classNode(symbol: str) -> Optional[Tuple[str, ast.ClassDef]]:
 def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
     """生产侧构造该门控时，阈值参数的绑定表达式（含从哪个配置键取）。"""
     bindings: List[Dict[str, object]] = []
+    derivations = _singleSourceDerivations()
     for ref in ast_scan.sourceRefsUnder(PRODUCTION_ROOT, hints=(symbol,)):
         rel = ast_scan.relativeToRepo(ref.path)
         for node in ast.walk(_parsed(rel)):
@@ -539,7 +540,193 @@ def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
                         "file": rel,
                         "line": node.lineno,
                     })
+                    continue
+                # 写法②：绑到单源派生点（函数体内读配置键）。收口后这是唯一形态，
+                # 不认它等于把收口判成"无来源"。
+                key = _derivationCallKey(expr, derivations)
+                if key:
+                    bindings.append({
+                        "param": keyword.arg or "",
+                        "expr": expr,
+                        "config_key": key,
+                        "via": "single_source_derivation",
+                        "file": rel,
+                        "line": node.lineno,
+                    })
     return tuple(bindings)
+
+
+def _singleSourceDerivations() -> Dict[str, str]:
+    """单源派生点：`{函数名: 它读的配置键}`（全生产侧扫一遍，不在此手抄键名）。
+
+    **为什么需要它**：阈值参数绑到配置单源有两种正确写法——
+    ① 构造处直接下标 `IterationGate(max_rounds=limits["max_loop_rounds"])`；
+    ② 构造处调**唯一的派生点** `IterationGate(max_rounds=self.resolveToolRoundBudget())`，
+       而那个函数体内才是下标。
+
+    写法②正是 T-04 的收口形态（尺度只有一处派生，守卫与门控同取它）。只看①会把
+    收口后的绑定算成"无来源"（轴值退成 `unbound`），于是**收口本身被判成违规**——
+    那是判据在替旧形态背书。故这里按 AST 取出"某函数读了哪个配置键"，供
+    `_ctorBindings` 把写法②认成绑定。
+
+    取法：函数体内出现 `get_effective_limits()[<键>]` 或 `limits[<键>]` 形态即记
+    `函数名 → 键`。同名函数只认同一个键（同一函数读两个键属异常，取首个并保留事实）。
+    """
+    findings: Dict[str, str] = {}
+    for path in PRODUCTION_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = ast_scan.relativeToRepo(path)
+        try:
+            tree = _parsed(rel)
+        except (SyntaxError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Subscript):
+                    found = _SUBSCRIPT_KEY.search(ast.unparse(sub))
+                    if found:
+                        findings.setdefault(node.name, found.group(1))
+    return findings
+
+
+#: 单源派生点的取数口径：**函数体内直接读到了配置键下标**（`…[<键>]`）的取值函数。
+#:
+#: 判据落在"它体内有没有读配置键"上，而不是函数名——名字是约定，体内读数才是事实。
+#: 只按名字认会漏掉 `_goalRoundBudget` 这类不以固定前缀命名的派生点；只按"任意调用"
+#: 认则会把 `spec.get("goal")` 这类普通取值也当成绑定（实测它会从无关模块抓来
+#: `access_count` 当配置键，于是每个关键字参数都报一个假绑定，轴值随之失真）。
+#:
+#: 两道过滤合起来：函数名以 `resolve` 起头**或**体内直接读到配置键下标，二者取一。
+_DERIVATION_PREFIXES = ("resolve", "_goal", "_effective")
+
+
+def _derivationCallKey(expr: str, derivations: Dict[str, str]) -> Optional[str]:
+    """表达式是否是「调用某单源派生点」的形态；是则返回它读的配置键。
+
+    两种写法都认（都要求该函数体内确实读了配置键下标，见 `_singleSourceDerivations`）：
+
+        self.resolveToolRoundBudget()      实例/类方法派生点
+        self._goalRoundBudget(limits)      私有派生点（可带实参）
+    """
+    for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", expr):
+        name = match.group(1)
+        if not name.startswith(_DERIVATION_PREFIXES):
+            continue
+        key = derivations.get(name)
+        if key:
+            return key
+    return None
+
+
+def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
+    """生产侧构造该门控时，阈值参数的绑定表达式（含从哪个配置键取）。"""
+    bindings: List[Dict[str, object]] = []
+    derivations = _singleSourceDerivations()
+    for ref in ast_scan.sourceRefsUnder(PRODUCTION_ROOT, hints=(symbol,)):
+        rel = ast_scan.relativeToRepo(ref.path)
+        for node in ast.walk(_parsed(rel)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name != symbol:
+                continue
+            for keyword in node.keywords:
+                expr = ast.unparse(keyword.value)
+                found = _SUBSCRIPT_KEY.search(expr)
+                if found:
+                    bindings.append({
+                        "param": keyword.arg or "",
+                        "expr": expr,
+                        "config_key": found.group(1),
+                        "file": rel,
+                        "line": node.lineno,
+                    })
+                    continue
+                # 写法②：绑到单源派生点（函数体内读配置键）。收口后这是唯一形态，
+                # 不认它等于把收口判成"无来源"。
+                key = _derivationCallKey(expr, derivations)
+                if key:
+                    bindings.append({
+                        "param": keyword.arg or "",
+                        "expr": expr,
+                        "config_key": key,
+                        "via": "single_source_derivation",
+                        "file": rel,
+                        "line": node.lineno,
+                    })
+    return tuple(bindings)
+
+
+def _singleSourceDerivations() -> Dict[str, str]:
+    """单源派生点：`{函数名: 它读的配置键}`（全生产侧扫一遍，不在此手抄键名）。
+
+    **为什么需要它**：阈值参数绑到配置单源有两种正确写法——
+    ① 构造处直接下标 `IterationGate(max_rounds=limits["max_loop_rounds"])`；
+    ② 构造处调**唯一的派生点** `IterationGate(max_rounds=self.resolveToolRoundBudget())`，
+       而那个函数体内才是下标。
+
+    写法②正是 T-04 的收口形态（尺度只有一处派生，守卫与门控同取它）。只看①会把
+    收口后的绑定算成"无来源"（轴值退成 `unbound`），于是**收口本身被判成违规**——
+    那是判据在替旧形态背书。故这里按 AST 取出"某函数读了哪个配置键"，供
+    `_ctorBindings` 把写法②认成绑定。
+
+    取法：函数体内出现 `get_effective_limits()[<键>]` 或 `limits[<键>]` 形态即记
+    `函数名 → 键`。同名函数只认同一个键（同一函数读两个键属异常，取首个并保留事实）。
+    """
+    findings: Dict[str, str] = {}
+    for path in PRODUCTION_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = ast_scan.relativeToRepo(path)
+        try:
+            tree = _parsed(rel)
+        except (SyntaxError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Subscript):
+                    found = _SUBSCRIPT_KEY.search(ast.unparse(sub))
+                    if found:
+                        findings.setdefault(node.name, found.group(1))
+    return findings
+
+
+#: 单源派生点的**命名契约**：只有读配置键、且名字落在本前缀上的取值函数才被
+#: 认作"阈值参数的绑定来源"。收窄到前缀而不是"任意函数调用"，是因为后者会把
+#: `spec.get("goal")` 这类普通取值也算成绑定——实测它会从无关模块抓来
+#: `access_count` 当配置键，于是 `_ctorBindings` 对**每个**关键字参数都报一个
+#: 假绑定，轴值随之失真。宁可少认（退回 unbound，红着让人看见）不可乱认。
+_DERIVATION_PREFIXES = ("resolve",)
+
+
+def _derivationCallKey(expr: str, derivations: Dict[str, str]) -> Optional[str]:
+    """表达式是否是「调用某单源派生点」的形态；是则返回它读的配置键。
+
+    只认两种写法（都要求函数名以 `resolve` 起头，见 `_DERIVATION_PREFIXES`）：
+
+        self.resolveToolRoundBudget()      实例/类方法派生点
+        resolveToolRoundBudget()           模块级派生点
+    """
+    for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", expr):
+        name = match.group(1)
+        if not name.startswith(_DERIVATION_PREFIXES):
+            continue
+        # `.get(` / `.resolve(` 这类属性调用不算：`resolve` 前缀必须是**函数名本身**。
+        if expr[max(0, match.start() - 1)] == "." and name != "resolveToolRoundBudget":
+            key = derivations.get(name)
+            if key:
+                return key
+            continue
+        key = derivations.get(name)
+        if key:
+            return key
+    return None
 
 
 def _enclosingFunction(rel: str, lineno: int) -> Tuple[str, int]:
