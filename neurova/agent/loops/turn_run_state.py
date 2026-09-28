@@ -47,6 +47,19 @@ class TurnRunState:
         """死循环签名（本轮用户指纹 + 调用签名）——签名口径单源在此。"""
         return f"{self.roundUserKey}:{toolSignatures}"
 
+    def exitSignature(self) -> str:
+        """主出口（模型不再调工具）的轮次签名。
+
+        出口求值点原先读 loop 实例上的 `_round_user_key`，而那个属性在切片 A
+        之后**全仓零写入点**（只剩 `base.py` 一处 `getattr` 读），出口签名因此
+        恒为 `":exit:N"` —— 交叠会话的两条出口判定签名完全相同。签发权归本轮
+        state：指纹在这里，续跑序号走 `turn_context`（续跑计数是**轮级**量，
+        不属本对象）。
+        """
+        from neurova.core.turn_context import get_turn_goal_continuations
+
+        return f"{self.roundUserKey or ''}:exit:{get_turn_goal_continuations()}"
+
     def gateContext(self, toolSignatures: str = "", **extra: Any) -> Dict[str, Any]:
         """门控 ctx：轮次计数与签名从 state 取，不再从 loop 实例读。"""
         context: Dict[str, Any] = {
