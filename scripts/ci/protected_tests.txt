@@ -1259,7 +1259,8 @@ tests/unit/ci/test_stub_signature_single_source.py
 
 # Issue #306（NPC 空转：单轮输出预算被推理吃满 ⇒ 零产出一轮 + 不触发接力）：
 #   用户观感是「跑满半小时、Issue 无回音、分支无提交，流水线却 success」。
-#   逐轮复算六条构建的末轮读数：`finish with length, out≈32000`、
+#   逐轮复算六条构建的末轮读数（另有 cnb-4l0-1k3jbt9v7 当晚再次复现同一形态）：
+#   `finish with length, out≈32000`、
 #   `reasoning_tokens=32000`、正文 0 字符、工具调用 0 次 —— 该轮零产出
 #   （且这六条全程 `cnb issues comment` / `git commit` / `git push` 一条没执行过）；
 #   而零产出收官是 success，收尾判据（`$CNB_PIPELINE_STATUS`=error +

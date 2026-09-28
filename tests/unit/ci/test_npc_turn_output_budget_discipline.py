@@ -5,7 +5,7 @@ r"""NPC 单轮输出预算的纪律守卫（Issue #306）。
 
 Issue #306：`@kingsa2026/neurova(DSCoder-max)` 连着几轮"跑了半小时，Issue 上
 没有回音、分支上没有提交"，流水线却一律报 `success`。逐轮复算**六条**同形构建的
-末轮读数（`cnb build get-build-stage ... --stageId stage-3`，字段取自 AI 请求明细）：
+末轮读数（`cnb build get-build-stage ... --stageId stage-3`，字段取自 AI 请求明细）。前六条是同一晚的连续空转，第七条 `cnb-4l0-1k3jbt9v7` 是用户另发的取证请求上**再次复现**同一形态：
 
 ```
 cnb-t13-1k3im568q  46 轮 / 1352s   末轮 finish with length, in=2109  out=32000
@@ -14,6 +14,7 @@ cnb-q0r-1k3j7r965  31 轮 /  689s   末轮 finish with length, in=2783  out=3200
 cnb-dc6-1k3j9phhs  37 轮 / 1031s   末轮 finish with length, in=2897  out=31998
 cnb-90f-1k3if9qm1  46 轮 / 1338s   末轮 finish with length, in=2117  out=32000
 cnb-mm8-1k3iu5fr8  36 轮 /  931s   末轮 finish with length, in=1683  out=31999
+cnb-4l0-1k3jbt9v7  51 轮 / 1074s   末轮 finish with length, in=1463  out=32000
 ```
 
 每一轮的读数都用严格解析复算（`^Master[agent][\d+] … finish with …`，
