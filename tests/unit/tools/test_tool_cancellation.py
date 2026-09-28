@@ -50,39 +50,48 @@ def _spawnSleep(seconds: float = 30.0) -> subprocess.Popen:
     )
 
 
-def _pollUntil(condition, attempts: int = 200) -> bool:
-    """轮询直到 `condition()` 成立；返回是否成立。
+async def _awaitReap(proc: subprocess.Popen) -> bool:
+    """等**真事实**：OS 报出子进程已退出；返回是否在收尸窗口内等到。
 
-    刻意按**迭代次数**收口而不是按秒数：本文件要回答的是"进程还在不在"这个
-    结构事实，与机器快慢无关。一旦掺入耗时读数，判据就绑上了机器负载
-    （本仓已两次因此得到同码一红一绿），故本文件**零时钟读数**。
+    此前这里是「让步 200 次」的计数等待（`for _ in range(200)` + `sleep(0)`），
+    想当然地认为"让出若干轮就够 OS 回收完子进程"。空载机上 1~7 次让步即命中，
+    看着必然够用；而在 CI 上受保护子集与 4000+ 条用例共享同一批 vCPU，
+    `sleep(0)` 只把控制权交回事件循环、**不保证内核完成一次调度**：
+
+        构建 cnb-v4f-1k3jg3a81（PR #308）实测：
+        FAILED TestCancelTokenProtocol::testCancelRunsRegisteredKillAction
+        AssertionError: 令牌置位后进程仍然存活——回调没兑现
+
+    复现口径：48 路 CPU 自旋超额订阅下跑本用例，200 次让步在 5ms 内走完而子进程
+    仍未被回收（`poll()` 仍为 `None`），用例转红——**这是假红**：杀灭回调已兑现，
+    只是等待窗口被机器负载决定（`AGENTS.md` 修复教义第 2 条点名的
+    「判据与机器速度捆绑」形态）。
+
+    故等待改为「等 OS 报出子进程退出」，上界取**单源常量** `KILL_GRACE_S`
+    （生产侧 `_reapCancelled` / 沙箱路径收尸用的同一个窗口，不新造第二个尺度）：
+    窗口内等到 ⇒ True；窗口外没等到 ⇒ False，判据照旧红——判据从"机器多快"
+    回到"进程还在不在"。
     """
-    for _ in range(attempts):
-        if condition():
-            return True
-    return False
+    from neurova.sandbox.exec_sandbox import KILL_GRACE_S
 
-
-async def _pollUntilAsync(condition, attempts: int = 200) -> bool:
-    """`_pollUntil` 的异步形态：每轮让出事件循环，等待的是 OS 的调度而非秒数。
-
-    测试进程与刚杀掉的子进程共享同一台机器，收尸（子进程退出 →
-    `poll()` 读得到 returncode）需要落一次 OS 调度；轮询必须把事件循环交出去
-    才有机会观察到它。次数上限是**迭代上界**，不是时间上界——判据仍与机器快慢无关。
-    """
-    for _ in range(attempts):
-        if condition():
-            return True
-        await asyncio.sleep(0)
-    return False
+    try:
+        await asyncio.to_thread(proc.wait, timeout=KILL_GRACE_S)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def _reap(proc: subprocess.Popen) -> None:
-    """兜底回收测试自己起的进程（用例失败时也不留残留）。"""
+    """兜底回收测试自己起的进程（用例失败时也不留残留）。
+
+    等待上界同取 `KILL_GRACE_S`：与判据用的是同一个窗口，不给同一件事第二份定义。
+    """
+    from neurova.sandbox.exec_sandbox import KILL_GRACE_S
+
     try:
         if proc.poll() is None:
             proc.kill()
-        proc.wait(timeout=5)
+        proc.wait(timeout=KILL_GRACE_S)
     except Exception:  # noqa: BLE001 - 测试兜底不做判据
         pass
 
@@ -113,7 +122,7 @@ class TestCancelTokenProtocol:
             token = CancelToken()
             token.onCancel(lambda: killProcessTree(proc))
             token.cancel("timeout")
-            assert await _pollUntilAsync(lambda: proc.poll() is not None), (
+            assert await _awaitReap(proc), (
                 "令牌置位后进程仍然存活——回调没兑现"
             )
         finally:
@@ -251,7 +260,7 @@ class TestTimeoutDispositionDispatch:
             assert 0 < KILL_GRACE_S < float("inf"), (
                 f"收尸窗口常量 {KILL_GRACE_S!r} 不是有界正数——KILL 分支可能无限等待"
             )
-            assert await _pollUntilAsync(lambda: proc.poll() is not None), (
+            assert await _awaitReap(proc), (
                 "KILL 分支返回了，但进程还在跑"
             )
         finally:
