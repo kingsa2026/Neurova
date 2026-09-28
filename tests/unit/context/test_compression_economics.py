@@ -325,6 +325,49 @@ class TestBothEntryPointsShareOneGate:
         src = (REPO_ROOT / "neurova/context/orchestrator.py").read_text(encoding="utf-8")
         assert "report=_discard_report" in src, "池分支弃封未出账 = 同一块静默缺口留在另一条路上"
 
+    def testBuilderPathAlsoPassesTheGate(self):
+        """第三条接入点：`builder.compress_if_needed` 此前**直接**调 `_compress_context`。
+
+        同一份契约里的三个消费方只接两条，等于把缺口留在降级链上——用户侧
+        最常走的正是这条（无池可用时）。
+        """
+        src = (REPO_ROOT / "neurova/context/builder.py").read_text(encoding="utf-8")
+        assert "_economics_allows" in src, "builder 路径绕过了判据"
+        gate_pos = src.index("_economics_allows")
+        compress_pos = src.index("_compress_context", gate_pos)
+        assert gate_pos < compress_pos, "判据必须在压缩动作之前"
+
+    def testEveryProductionCallerOfCompressContextPassesTheGate(self):
+        """全量扫荡：注入器那份 `_compress_context` 的每个生产调用点都必须在判据之后。
+
+        口径按**被调对象**限定（`self._unified_injector._compress_context` 与
+        `injector.py` 内部的 `self._compress_context`）——同名不同类的两处实现
+        （记忆层 `AutoContextModule` 自己那份）不属同一契约，不并入。
+        这是"放大视角"的机器形态：新增一个调用点忘了过闸，本条即红。
+        """
+        import ast
+
+        offenders = []
+        for path in (REPO_ROOT / "neurova").rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(path))
+            lines = text.splitlines()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if getattr(func, "attr", None) != "_compress_context":
+                    continue
+                receiver = ast.unparse(func.value)
+                if receiver == "self" and path.name != "injector.py":
+                    continue  # 同名不同类：不属本契约
+                if receiver not in ("self", "self._unified_injector"):
+                    continue
+                window = "\n".join(lines[max(0, node.lineno - 40): node.lineno])
+                if "_economics_allows" not in window:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        assert offenders == [], f"未过判据的压缩调用点：{offenders}"
+
 class TestBaselineCompatibility:
     """003 的负债口径引用本模块的 `profit`/`cost`，故两字段必须在读数里可读。"""
 
