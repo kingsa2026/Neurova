@@ -282,6 +282,47 @@ class ToolSchemaConverter:
         return result
 
 
+#: 三协议工具载荷的**形态判别单一事实源**（T-03，Issue #177 / #310）。
+#:
+#: 判别表**只此一份**：请求侧（`llm/providers/tool_transport._asOpenAIFunction`）
+#: 与响应侧（本模块的 `ToolCallParser.parse_tool_call`）都调它。两处各自维护一份
+#: 判别表的形态是教义第 6 条点名的第二份定义——判别表一旦漂移（加第四种协议、
+#: 或某个标识键改名），两边会各自按自己那份走，而不会有任何东西报红。
+#:
+#: 判别依据是各协议**载荷自身的标识键**，不靠调用方声明：
+#:   OpenAI    ― 带 `function` 子字典（工具定义）或 `function` 本身（工具调用）
+#:   Anthropic ― 带 `input_schema`（工具定义）或 `type == "tool_use"`（工具调用）
+#:   Google    ― 带 `parameters`（工具定义）或 `functionCall`（工具调用）
+#: 全不命中返回 `"unknown"`，由调用方走自己的兜底分支（不猜协议）。
+FORMAT_OPENAI = "openai"
+FORMAT_ANTHROPIC = "anthropic"
+FORMAT_GOOGLE = "google"
+FORMAT_UNKNOWN = "unknown"
+
+
+def detectToolCallFormat(payload: typing.Optional[typing.Dict[str, typing.Any]]) -> str:
+    """判别一份工具载荷属于哪一协议形态（工具定义与工具调用共用同一份判别表）。
+
+    `payload` 为 None / 非字典时返回 `FORMAT_UNKNOWN`——**不猜**。
+    """
+    if not isinstance(payload, dict):
+        return FORMAT_UNKNOWN
+    if "function" in payload:
+        return FORMAT_OPENAI
+    if payload.get("type") == "tool_use":
+        return FORMAT_ANTHROPIC
+    if "functionCall" in payload:
+        return FORMAT_GOOGLE
+    if "input_schema" in payload:
+        return FORMAT_ANTHROPIC
+    if "parameters" in payload:
+        return FORMAT_GOOGLE
+    if payload.get("name") is not None:
+        # 裸 {name, description, parameters} 或无参工具：按 OpenAI 形态收敛
+        return FORMAT_OPENAI
+    return FORMAT_UNKNOWN
+
+
 class ToolCallParser:
     """
     工具调用解析器
@@ -351,26 +392,21 @@ class ToolCallParser:
         返回:
             解析结果
         """
-        # 检测格式
-        if "function" in tool_call:
-            # OpenAI 格式
+        # 形态判别**单一事实源**在模块级 `detectToolCallFormat()`（T-03 收口）——
+        # 请求侧 `tool_transport._asOpenAIFunction` 与这里共用同一份判别表。
+        call_format = detectToolCallFormat(tool_call)
+        if call_format == FORMAT_OPENAI:
             return self.parse_openai_tool_call(tool_call)
-
-        elif tool_call.get("type") == "tool_use":
-            # Anthropic 格式
+        if call_format == FORMAT_ANTHROPIC:
             return self.parse_anthropic_tool_call(tool_call)
-
-        elif "functionCall" in tool_call:
-            # Google 格式
+        if call_format == FORMAT_GOOGLE:
             return self.parse_google_tool_call(tool_call)
-
-        else:
-            # 尝试通用解析
-            return {
-                "id": tool_call.get("id", ""),
-                "name": tool_call.get("name", ""),
-                "arguments": self.parse_arguments(tool_call.get("arguments", tool_call.get("input", {}))),
-            }
+        # 全不命中：通用解析（不猜协议）
+        return {
+            "id": tool_call.get("id", ""),
+            "name": tool_call.get("name", ""),
+            "arguments": self.parse_arguments(tool_call.get("arguments", tool_call.get("input", {}))),
+        }
 
     def parse_arguments(
         self, arguments: typing.Union[str, typing.Dict[str, typing.Any]]

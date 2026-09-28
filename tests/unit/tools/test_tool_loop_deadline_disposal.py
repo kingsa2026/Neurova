@@ -97,6 +97,23 @@ class TestDisposalIsMachineCheckable:
         # `agent/loops/openai_loop.py:_goalRoundBudget()` 是生产侧唯一读取点，
         # `_buildGateRunner` 默认装配与 `_buildGoalGate` 两处构造时读它 ⇒ 跨文件消费成立。
         "goal_round_budget": "GoalGate 轮次预算：openai_loop._goalRoundBudget 唯一读取点",
+        # T-03 协议桥收口（Issue #177 / #310）：三协议形态判别从「请求侧与响应侧
+        # 各判一遍」收口为单一事实源 `openai_schema.detectToolCallFormat()`。
+        # 三条目的判据类本就成立（T-03 已接线），本批清的是**依据里那句存量**。
+        "ToolSchemaConverter": (
+            "T-03 协议桥：t_tool_transport.toAnthropicTools/toGeminiTools 的唯一转换器；"
+            "存量（形态判别第二份）已收口，常驻判据 "
+            "tests/unit/tools/test_t03_protocol_bridge_single_source.py"
+        ),
+        "ToolCallParser": (
+            "T-03 协议桥：protocol_thinking.toOpenAIToolCalls 的唯一解析器；"
+            "内部「自动检测三形态」改走同一份判别表（detectToolCallFormat）"
+        ),
+        "tool_choice": (
+            "T-03 协议桥：经 LLMClient._build_request_params 纳入转发面，"
+            "由 provider_compat.ProviderCompat.supports_tool_choice 门控——"
+            "本条**无待清存量**（不存在第二份形态判别），随同批收口一并终局"
+        ),
     }
 
     #: 已被**退役处置批**删除的条目（`符号: 处置批`）。与 `WIRED_BY_LATER_WAVES`
