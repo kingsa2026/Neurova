@@ -1172,3 +1172,46 @@ $:
 #   `^\.` 锚点形态）由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
 # （若将来某两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
 #   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）
+
+  # ── 云原生开发环境（Issue #289 评论「自定义一个适配 neurova 的开发环境」）───
+  # 挂在 `$` 兜底块下：开发环境的用途正是"在任意分支上开发"，挂 `main` 下会
+  # 让分支页面点按钮落到平台默认镜像（官方《自定义环境创建流程》：`vscode`
+  # 事件在建环境时触发；本仓把它放兜底块，故所有分支共用同一份声明）。
+  #
+  # 为什么不是"用默认镜像就行"：默认镜像 `cnbcool/default-dev-env` 里没有本仓的
+  # 生产解释器（python:3.12）与前端工具链（Node 20），用它只能得到一个能开
+  # WebIDE、却跑不了本仓受保护子集的壳。故 build 本仓 `.ide/Dockerfile`。
+  #
+  # `image` 是**回退镜像**（官方文档：build 失败时的回退镜像）：`.ide/Dockerfile`
+  # 构建不出来时不至于"环境创建失败"，至少给一个可用环境。两者都声明。
+  #
+  # 契约守卫：tests/unit/ci/test_dev_environment_contract.py 钉住
+  #   「build == .ide/Dockerfile + 有回退镜像 + services 含 vscode/docker
+  #    + stages 从既有锁文件装依赖（不得另写第二份依赖清单）」。
+  vscode:
+    - name: "neurova-dev-env"
+      docker:
+        build: .ide/Dockerfile
+        image: cnbcool/default-dev-env:latest
+      services:
+        - vscode
+        - docker
+      # 预装依赖取自**既有**锁/清单，不在此另列包名（教义第 6 条）：
+      # 后端 = requirements-ci.lock 与 requirements.txt，前端 = NeurUI/package.json。
+      # requirements-ci.lock 已在镜像构建期装好（见 .ide/Dockerfile），此处
+      # 只补工作区就位后才能做的那两步（完整依赖 + 前端 node_modules）。
+      stages:
+        - name: 安装后端依赖（工作区就位后）
+          script: |
+            set -e
+            pip install --no-cache-dir -r requirements-ci.lock
+        - name: 安装前端依赖
+          script: |
+            set -e
+            cd NeurUI && npm ci
+        - name: 环境自证
+          script: |
+            set -e
+            echo "python=$(python -V 2>&1)  node=$(node -v)  npm=$(npm -v)"
+            echo "code-server=$(command -v code-server || echo MISSING)"
+            python -m pytest --version
