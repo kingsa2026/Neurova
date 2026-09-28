@@ -54,10 +54,10 @@ CI 曾转红（PR #304，构建 `cnb-6c0-1k3iv2o5f-003`）：
 """
 
 import ast
-import importlib.util
 import io
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
@@ -172,16 +172,38 @@ def scanTree(path: Path) -> list:
     return handCopiedStubs(tree)
 
 
+def candidateRefs(root: Optional[Path] = None):
+    """候选文件（走共享预算入口 + 文本预筛）。
+
+    预筛是**充分条件**，两个词都必须在：命中点必然是「`patch(...)` 调用」，
+    且其挂载键必是 `side_effect` / `wraps` / `new` 之一。故判据保证：
+    两个词缺任一 ⇒ 不可能命中（漏报为 0）。
+
+    `sourceRefsUnder` 的 `hints` 是 **OR** 语义，故这里先按挂载键取候选，
+    再叠加 `patch` 做 AND —— 只按 `patch` 取会把上千个只含这个词的文件
+    拉进来（实测 1016 个，是收敛后的 2.5 倍）。
+
+    为何必须收：判据本身不得与仓库规模捆绑。手写 `rglob + ast.parse` 全仓扫描
+    会把代码行数编码成时间上界，撞 30s 默认墙钟即偶发红（Issue #148 同根，
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 常驻守住这一形态）。
+    """
+    refs = ast_scan.sourceRefsUnder(
+        root or ast_scan.REPO_ROOT / "tests", hints=STUB_KEYS
+    )
+    return [ref for ref in refs if "patch" in ref.code]
+
+
 class TestProtectedSubsetHasNoHandCopiedStub:  # noqa: N801 - 与仓内既有类名风格无关，保持驼峰可读
     """受保护子集内零例外：那里的断链就是 CI 的红。"""
 
     def test_no_handCopiedProductionStubInProtectedSubset(self):
+        protected = set(protectedFiles())
         offenders = []
-        for rel in protectedFiles():
-            path = PROJECT_ROOT / rel
-            if not path.is_file() or path.suffix != ".py":
+        for ref in candidateRefs():
+            rel = ast_scan.relativeToRepo(ref.path)
+            if rel not in protected:
                 continue
-            for lineno, name, target in scanTree(path):
+            for lineno, name, target in scanTree(ref.path):
                 offenders.append(f"{rel}:{lineno} 替身 {name}() 手抄了 {target} 的签名")
         assert offenders == [], (
             "替身手抄了本仓生产符号的签名（第二份签名定义，生产侧加/删参数即断）：\n  "
@@ -210,7 +232,8 @@ class TestOffFaceLedgerMatchesReality:
     def test_everyOffFaceHitIsSigned(self):
         """面外新增命中点必须署名；未署名的命中点即红。"""
         unsigned = []
-        for path in ast_scan.filesUnder(PROJECT_ROOT / "tests"):
+        for ref in candidateRefs():
+            path = ref.path
             rel = ast_scan.relativeToRepo(path)
             if rel in protectedFiles() or rel in OFF_FACE_LEDGER or rel == GUARD_REL:
                 continue
@@ -328,11 +351,56 @@ def test_sample():
         assert self._report(self.THIRD_PARTY) == [], "第三方符号被误报——口径扩错了域"
 
 
+class TestPrefilterDoesNotDropHits:
+    """文本预筛是**充分条件**，必须自证不漏报（否则它是"更快的假安全"）。
+
+    预筛只保留同时含 `patch` 与挂载键之一的文件。漏报风险在于**检测器的命中条件
+    是否真被这两个词覆盖**——本组用它自己的反向控制样本 + 真实语料两侧钉住。
+    """
+
+    #: 预筛谓词与检测器分开写在这里，故意的：两边各自独立，才验得到一致性。
+    @staticmethod
+    def _prefilterKeeps(source: str) -> bool:
+        return "patch" in source and any(key in source for key in STUB_KEYS)
+
+    def test_everyReportedShapeSurvivesThePrefilter(self):
+        """凡检测器会报出的形态，预筛必须留下（用 4 份反向控制样本逐个验）。"""
+        samples = {
+            "手抄签名": TestDetectorIsNotVacuous.HAND_COPIED,
+            "参数化": TestDetectorIsNotVacuous.PARAMETERIZED,
+            "autospec": TestDetectorIsNotVacuous.AUTOSPEC,
+        }
+        for label, source in samples.items():
+            assert self._prefilterKeeps(source), f"预筛会丢下这一形态的文件：{label}"
+
+    def test_droppedFilesReallyHaveNoHits(self):
+        """真实语料反证：被预筛丢掉的文件里，检测器确实一个命中都没有。
+
+        这是**非空转**的那一半：不是"我认为丢了没关系"，而是对被丢掉的那批
+        文件真跑一遍检测器。代价有界（只解析被丢掉的那部分，实测 0.2s 量级），
+        不随仓库规模线性涨——判据不得与代码总量捆绑。
+        """
+        kept = {ref.path for ref in candidateRefs()}
+        dropped = [
+            ref for ref in ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT / "tests", hints=STUB_KEYS)
+            if ref.path not in kept
+        ]
+        offenders = [
+            f"{ast_scan.relativeToRepo(ref.path)}:{lineno}"
+            for ref in dropped
+            for lineno, _name, _target in scanTree(ref.path)
+        ]
+        assert offenders == [], (
+            f"预筛丢掉了真有命中的文件（判据漏报）：{offenders}"
+            " —— 预筛谓词与检测器条件已不一致，必须放宽谓词而不是放过漏报"
+        )
+
+
 class TestGuardIsReachableFromCi:
     """守卫自己必须在 CI 面上（否则本门禁绿得毫无意义）。"""
 
     def test_guardIsRegisteredInProtectedSubset(self):
-        assert importlib.util.find_spec("tests.unit.ci.test_stub_signature_single_source") is not None
+        assert (PROJECT_ROOT / GUARD_REL).is_file(), "守卫文件不在仓里"
         assert GUARD_REL in protectedFiles(), (
             "本守卫未登记进 scripts/ci/protected_tests.txt —— 它不会在 CI 上跑，"
             "本 PR 那条断链下次照旧能合进来。"
