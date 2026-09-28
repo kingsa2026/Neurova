@@ -1333,3 +1333,25 @@ tests/unit/deploy/test_image_model_assets.py
 #   处置＝删声明（不复活死分支）；反向控制：同函数活常量必须仍被读、
 #   `while` 必须仍排除带 tool_calls 的响应（处置的论证前提）。
 tests/unit/agent/test_auto_continue_dead_budget.py
+
+# Issue #289 评论「自定义一个适配 neurova 的开发环境」：
+#   仓库此前**没有任何**开发环境声明（`.ide/Dockerfile` 不存在、`.cnb.yml` 里
+#   没有 `vscode` 事件），点「云原生开发」拿到的是平台默认镜像 —— 里面既没有
+#   本仓的生产解释器，也没有前端工具链。于是「开发环境 / CI / 生产镜像」三份
+#   口径各写各的而互不对账（本仓已有同型事故记账：compose 前端 node:18-alpine
+#   与 CI 的 node-version 20 分叉，注释自陈"本地 dev 与 CI 跑不同大版本"）。
+#   本判据把三面收口到已有的单一事实源，不新造版本号：
+#   · 解释器 = 仓库根 `Dockerfile` 的 `FROM python:`，下限 = scripts/config.py
+#     的 MIN_PYTHON_VERSION（同源脚本：deploy_config_consistency_check.py 的 R4）；
+#   · Node 大版本 = `.github/workflows/ci.yml` 的 node-version 且 == compose
+#     前端镜像大版本（第三面补齐）；
+#   · 预装依赖取自既有锁/清单（requirements-ci.lock / NeurUI/package.json），
+#     不得在 stages 里另列包名（教义第 6 条的第二份定义）。
+#   另钉「code-server 已装 ⇒ 平台走单容器模式」与「openssh-server 已装」——
+#   二者都是官方客户端接入的前提；判定取**真安装指令**（执行 install.sh 的
+#   `RUN` 行 / apt 安装块里真被点名的包），不取字符串出现在注释里的形态
+#   （后者会让注释替安装发合格证：摘掉安装只留注释，门禁照样绿）。
+#   反向控制九刀全部咬合（解释器换 3.11 / Node 源换 18 / 摘 code-server /
+#   摘 openssh-server / 摘回退镜像 / 事件挪出 `$` / stages 改列包名 /
+#   摘 services.docker / 摘 npm 安装 ⇒ 各 1 红）。
+tests/unit/ci/test_dev_environment_contract.py
