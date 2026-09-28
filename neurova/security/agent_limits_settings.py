@@ -31,6 +31,13 @@ DEFAULTS: Dict[str, Any] = {
     # 不消耗工具轮预算（IterationGate 因同键两尺度被机器算成 scaled_sparse，
     # 本键不得再现该形态；阈值可达性由 tool_loop_deadline_ledger 机器复算）。
     "goal_max_continuations": 2,
+    # GoalGate：工具轮分支的**轮次预算**（`None` = 跟随 max_loop_rounds）。
+    # 此前它是 gates.py 的类字面量 15，装配路径不传它 ⇒ **不受任何配置键管辖**：
+    # 实测 max_loop_rounds 配到 200 时，门控仍在第 15 轮以"goal 模式轮次预算耗尽
+    # （15）"先开火，工具轮预算形同虚设（Issue #268 切片 B/D/C 四次登记，本键收口）。
+    # 默认**跟随**而非固化：两者同属一次会话的轮次尺度，独立固化会让它们再度漂移；
+    # 显式设值时才偏离（合法域与 max_loop_rounds 同档，夹紧在 get_effective_limits）。
+    "goal_round_budget": None,
     # GoalGate 总开关：目标验收链的成本闸（默认**开**）。
     # 默认关等于"接了线不通电"——本片修的正是"假完成无人拦"，关着就等于没修。
     # 成本边界由**目标是否存在**守住（无目标 → 零判定调用，见 D-4），
@@ -68,6 +75,10 @@ MAX_SUBAGENT_DEPTH_LIMIT = 5
 # 只会让一轮把连接池/共享外设的等待叠在一起。
 MIN_PARALLEL_TOOLS = 1
 MAX_PARALLEL_TOOLS = 16
+# goal 轮次预算合法域：与 max_loop_rounds 同档（两者同属一次会话的轮次尺度，
+# 不该一个能到 200、另一个被封在 15）。`None` 是"跟随"哨兵，不参与夹紧。
+MIN_GOAL_ROUND_BUDGET = MIN_ROUNDS
+MAX_GOAL_ROUND_BUDGET = MAX_ROUNDS
 
 
 def settings_path() -> Path:
@@ -119,7 +130,8 @@ def get_effective_limits() -> Dict[str, Any]:
     """生效限制值（环境变量显式设置优先于持久化设置）。
 
     env 键：NEUROVA_AGENT_TOKEN_BUDGET / NEUROVA_AGENT_MAX_LOOP_ROUNDS /
-    NEUROVA_AGENT_MAX_SUBAGENT_DEPTH / NEUROVA_AGENT_MAX_PARALLEL_TOOLS
+    NEUROVA_AGENT_MAX_SUBAGENT_DEPTH / NEUROVA_AGENT_MAX_PARALLEL_TOOLS /
+    NEUROVA_AGENT_GOAL_ROUND_BUDGET
     """
     settings = load_agent_limits()
 
@@ -139,6 +151,10 @@ def get_effective_limits() -> Dict[str, Any]:
     if env_parallel and env_parallel.isdigit():
         settings["max_parallel_tools"] = int(env_parallel)
 
+    env_goal_rounds = os.environ.get("NEUROVA_AGENT_GOAL_ROUND_BUDGET")
+    if env_goal_rounds and env_goal_rounds.isdigit():
+        settings["goal_round_budget"] = int(env_goal_rounds)
+
     # 夹紧到合法区间
     settings["token_budget"] = max(
         MIN_TOKEN_BUDGET, min(MAX_TOKEN_BUDGET, int(settings["token_budget"]))
@@ -150,6 +166,15 @@ def get_effective_limits() -> Dict[str, Any]:
         MIN_GOAL_CONTINUATIONS,
         min(MAX_GOAL_CONTINUATIONS, int(settings["goal_max_continuations"])),
     )
+    # goal 轮次预算：`None` = 跟随 max_loop_rounds（单源不是"两份默认值"，
+    # 而是"没显式声明就取同一次会话的轮次尺度"）；显式设值才夹进合法域。
+    _goal_rounds = settings.get("goal_round_budget")
+    if _goal_rounds is None:
+        settings["goal_round_budget"] = int(settings["max_loop_rounds"])
+    else:
+        settings["goal_round_budget"] = max(
+            MIN_GOAL_ROUND_BUDGET, min(MAX_GOAL_ROUND_BUDGET, int(_goal_rounds))
+        )
     settings["goal_verification_enabled"] = bool(settings["goal_verification_enabled"])
     settings["max_parallel_tools"] = max(
         MIN_PARALLEL_TOOLS,
