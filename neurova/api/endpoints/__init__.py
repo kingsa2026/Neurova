@@ -80,22 +80,6 @@ def init_default_user():
         logger.warning("Failed to init default user: %s", e)
 
 
-def load_agents_config():
-    """加载 Agent 配置（随代码走的资产，锚在仓库根，不随 CWD 漂移）。"""
-    from neurova.core.data_root import repoAsset
-
-    config_path = repoAsset("agents.json")
-    if config_path.exists():
-        try:
-            import json
-
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning("Failed to load agents config: %s", e)
-    return {}
-
-
 def startup_version_check():
     """版本检查"""
     import sys
