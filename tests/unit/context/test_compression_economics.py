@@ -1,0 +1,347 @@
+# -*- coding: utf-8 -*-
+"""002 · 压缩经济性判据与不动作原因枚举（Issue #289）。
+
+本仓此前只回答"怎么塞下"，不回答"该不该塞"：`compression_ratio` 是"装不下
+就等比缩小"的**结果**，算出来只进日志、跨趟无人回读；而 `envelope.py` 那条
+"装不下弃整个信封"是净损失路径，此前不产生任何可归因读数。
+
+验收契约（对应票面九条红灯）：
+1. 收益为正但补不回代价 ⇒ 不动作，且原因是被点名的**那一个**；
+2. 整封被弃 ⇒ 必须带可归因原因，不再静默丢弃；
+3. "没测到"与"不划算"必须是两个不同值（未测量不得演成失败）；
+4. 撞窗口硬顶时安全线让位，经济性不得削弱它；
+5. 预演无物可切时不得先动作再失败；
+6. `compression_ratio` 必须被决策回读，而不是只落日志；
+7/8. 判据链路只允许一把尺子、只允许一处"代价"定义（静态守卫）；
+9. 尺子未校准时闸不得进入生效态。
+"""
+
+import re
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from neurova.context.compression_economics import (
+    ACTING_VALUES,
+    INACTION_VALUES,
+    CompressionAction,
+    evaluateCompressionEconomics,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _verdict(**overrides):
+    """基线的"划算"输入：折叠 4000、留存 100、未撞顶、上一轮实测 0.25。"""
+    params = {
+        "foldable_tokens": 4000,
+        "summary_tokens": 100,
+        "occupied_tokens": 900,
+        "window_ceiling": 10000,
+        "prior_compression_ratio": 0.25,
+    }
+    params.update(overrides)
+    return evaluateCompressionEconomics(**params)
+
+
+def _make_injector(**kwargs):
+    from neurova.context.injector import UnifiedContextInjector
+    from neurova.context.models import TokenBudget
+
+    return UnifiedContextInjector(
+        memory_manager=SimpleNamespace(),
+        token_budget=TokenBudget(max_total=kwargs.pop("max_total", 1000)),
+        enable_cache=False,
+        **kwargs,
+    )
+
+
+def _big_history(turns=6):
+    return [{"role": "user", "content": "历史消息" * 400} for _ in range(turns)]
+
+
+#: 触发压缩的输入形态：历史会被 `_trim_history` 先裁到预算内，故由 user 侧吃满。
+_OVER_BUDGET_INPUT = "问" * 2000
+
+
+class TestClosedReasonEnumeration:
+    """原因集合穷举且互斥，每个非动作原因至少一条用例。"""
+
+    def testProfitPositiveButCostUnrecoverableYieldsDeferredReason(self):
+        """折叠确实省了一点，但补不回为留存摘要付出的代价 ⇒ 不动作。"""
+        v = _verdict(foldable_tokens=150, summary_tokens=100)
+        assert v.act is False
+        assert v.action is CompressionAction.UNECONOMICAL
+        assert v.profit == 50, "收益要如实报出（正数），不得报 0 掩盖"
+        assert v.cost == 100
+
+    def testProfitNotPositiveYieldsOwnReason(self):
+        """折叠后省不出 token ⇒ 另一个原因值，不与"不划算"混用。"""
+        v = _verdict(foldable_tokens=100, summary_tokens=100)
+        assert v.act is False
+        assert v.action is CompressionAction.PROFIT_NOT_POSITIVE
+
+    def testUnmeasuredPriorRoundReasonDiffersFromUneconomicalReason(self):
+        """`None` = 从未测过 ≠ 测了但不划算。三态不许折叠。"""
+        unmeasured = _verdict(prior_compression_ratio=None)
+        uneconomical = _verdict(foldable_tokens=150, summary_tokens=100)
+        assert unmeasured.act is False
+        assert unmeasured.action is CompressionAction.INSUFFICIENT_DATA
+        assert unmeasured.action is not uneconomical.action
+
+    def testPriorRoundMeasuredFutileFoldIsUneconomical(self):
+        """上一轮实测压缩比 1.0（压了等于没压）⇒ 重复同一动作不划算。"""
+        v = _verdict(prior_compression_ratio=1.0)
+        assert v.act is False
+        assert v.action is CompressionAction.UNECONOMICAL
+
+    def testInfeasibleCutIsDetectedBeforeAbort(self):
+        """预演发现无物可切 ⇒ 不进入动作（不许动作之后再失败）。"""
+        v = _verdict(foldable_tokens=0, summary_tokens=0)
+        assert v.act is False
+        assert v.action is CompressionAction.INFEASIBLE
+
+    def testActingAndInactionValuesPartitionTheEnum(self):
+        """两轴互补且穷举：集合之外没有第三个态。"""
+        assert ACTING_VALUES | INACTION_VALUES == set(CompressionAction)
+        assert not (ACTING_VALUES & INACTION_VALUES)
+
+    def testEconomicalFoldActs(self):
+        """正控：真省得下来时必须动作（否则这闸就是恒不放行的死闸）。"""
+        v = _verdict()
+        assert v.act is True
+        assert v.action is CompressionAction.ECONOMICAL
+
+
+class TestSafetyLineAndRuler:
+    def testSafetyLineBypassesEconomicGate(self):
+        """撞窗口硬顶必须压：经济性不得削弱安全线。"""
+        v = _verdict(
+            foldable_tokens=100, summary_tokens=100, occupied_tokens=10000, window_ceiling=10000
+        )
+        assert v.act is True
+        assert v.action is CompressionAction.SAFETY_LINE_YIELD
+
+    def testGateRefusesToArmWhileEstimatorRulerIsUncorrected(self):
+        """尺子未校准 ⇒ 闸不得进入生效态，且以显式原因值暴露（不许"看起来在工作"）。"""
+        v = _verdict(ruler_calibrated=False)
+        assert v.act is False
+        assert v.action is CompressionAction.RULER_UNCALIBRATED
+
+    def testRulerCalibrationProbeIsSingleSource(self):
+        """校准探针只有一处：判据不得自己再实现一遍 tiktoken 可用性判断。"""
+        economics = (REPO_ROOT / "neurova/context/compression_economics.py").read_text(encoding="utf-8")
+        assert "import tiktoken" not in economics
+        probe = (REPO_ROOT / "neurova/context/token_estimator.py").read_text(encoding="utf-8")
+        assert "def isRulerCalibrated" in probe
+
+
+class TestEnvelopeDiscardAttribution:
+    def testWholeEnvelopeDiscardEmitsAttributableReason(self):
+        """整封被弃是净损失路径 ⇒ 产生该状态的地方就要出原因（今天静默返回空串）。"""
+        from neurova.context.envelope import build_envelope, compress_envelope
+
+        envelope = build_envelope({"memories": "\n".join(["记忆行" + "细节" * 20] * 50)})
+        report = {}
+        out = compress_envelope(envelope, budget_tokens=1, report=report)
+        assert out == "", "预算小到外壳都装不下时应弃封"
+        assert report.get("discarded") is True, "弃封必须留下可归因标记"
+        assert report.get("reason") == CompressionAction.ENVELOPE_DISCARDED.value
+
+    def testNonDiscardingPathLeavesNoDiscardMark(self):
+        """反向控制：正常压缩不得被记成丢弃（否则账本恒真）。"""
+        from neurova.context.envelope import compress_envelope
+
+        report = {}
+        compress_envelope("<system-reminder><memories>x</memories></system-reminder>", budget_tokens=500, report=report)
+        assert report.get("discarded") is not True
+
+    def testEnvelopeDiscardReasonIsInClosedEnum(self):
+        assert CompressionAction.ENVELOPE_DISCARDED in INACTION_VALUES
+
+
+class TestWiringAndStaticGuards:
+    def testCompressionRatioIsConsumedByDecisionNotOnlyLogged(self):
+        """`compression_ratio` 必须成为判据输入之一（跨趟反馈），而不是只落日志。"""
+        injector = _make_injector()
+        assert injector.readCompressionFeedback() is None, "未跑过任何一轮 ⇒ 读回 None（未测量）"
+
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        assert result.compression_ratio < 1.0, "该输入必须真的触发压缩，否则本条不成立"
+        ratio = injector.readCompressionFeedback()
+        assert ratio is not None, "首轮压缩后必须留下可被下一轮回读的实测读数"
+        assert ratio == pytest.approx(result.compression_ratio)
+
+    def testFeedbackIsFedIntoNextRoundDecision(self):
+        """跨趟闭环：上一轮读数必须真的进判据入参（接线，不是摆设）。"""
+        injector = _make_injector()
+        first = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        first_readout = first.stats["compression_economics"]
+        assert first_readout["enabled"] is False, "默认关：开关未开"
+        assert first_readout["prior_ratio"] is None, "首轮无实测：入参必须是 None（未测量）"
+
+        second = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        assert second.stats["compression_economics"]["prior_ratio"] == pytest.approx(
+            injector.readCompressionFeedback()
+        ), "第二轮必须拿到第一轮的实测读数"
+        assert second.stats["compression_economics"]["prior_ratio"] is not None
+
+    def testSingleSourceForCostAcrossTickets(self):
+        """静态守卫：全仓"一次动作代价"的定义处有且仅有一处。"""
+        hits = [
+            p
+            for p in (REPO_ROOT / "neurova").rglob("*.py")
+            if re.search(r"^def evaluateCompressionEconomics", p.read_text(encoding="utf-8"), re.M)
+        ]
+        assert [p.name for p in hits] == ["compression_economics.py"], hits
+        for rel in ("neurova/context/injector.py", "neurova/context/orchestrator.py"):
+            src = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            assert re.search(r"^\s*cost\s*=\s*foldable", src, re.M) is None, rel
+
+    def testEconomicsGateUsesOnlySharedTokenEstimator(self):
+        """静态守卫：判据链路里不得出现第二处 token 估算实现。"""
+        for rel in (
+            "neurova/context/injector.py",
+            "neurova/context/orchestrator.py",
+            "neurova/context/compression_economics.py",
+        ):
+            src = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            for pattern in (r"len\([^)]*\)\s*//\s*4", r"len\([^)]*\)\s*\*\s*1\.5", r"chars_per_token\s*\*"):
+                assert re.search(pattern, src) is None, f"{rel} 命中就地近似：{pattern}"
+
+    def testEconomicsSwitchIsDeclaredInGovernanceDefaults(self):
+        """开关并入既有治理事实源，默认关 ⇒ 现网行为零变更。"""
+        from neurova.security.governance_settings import DEFAULTS
+
+        assert "compression_economics_enabled" in DEFAULTS
+        assert DEFAULTS["compression_economics_enabled"] is False
+
+
+class TestSwitchOnChangesDecisionHonestly:
+    def testSwitchOnStillCompressesWhenSafetyLineRequires(self):
+        """开关开 + 撞窗口硬顶 ⇒ 照压，不因经济性判据挡下（安全线优先）。"""
+        injector = _make_injector(compression_economics=True, window_ceiling=1000)
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert readout["enabled"] is True
+        assert readout["action"] == CompressionAction.SAFETY_LINE_YIELD.value
+        assert result.compression_ratio < 1.0
+
+    def testSwitchOnRefusesFoldWhenNoPriorMeasurement(self):
+        """开关开 + 无上一轮实测 ⇒ 不动作，且原因是 INSUFFICIENT_DATA（不是"不划算"）。"""
+        injector = _make_injector(compression_economics=True, window_ceiling=50000)
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert readout["action"] == CompressionAction.INSUFFICIENT_DATA.value, readout
+        assert readout["deferred_reason"] == CompressionAction.INSUFFICIENT_DATA.value
+        assert result.compression_ratio == 1.0, "判据不动作 ⇒ 不得发生有损折叠"
+
+    def testDefaultOffKeepsCompressionBehaviorUnchanged(self):
+        """默认关 ⇒ 判据只**观测**不出门：它本会挡下的这一刀，照旧照压。
+
+        与 `testSwitchOnRefusesFoldWhenNoPriorMeasurement` 是同一输入的开关两侧：
+        开关开 ⇒ ratio == 1.0（不压）；开关关 ⇒ ratio < 1.0（照压）。两行合起来
+        才是"默认关 ⇒ 现网行为零变更"的可核形态。
+        """
+        injector = _make_injector(window_ceiling=50000)
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert readout["enabled"] is False
+        assert readout["action"] == CompressionAction.INSUFFICIENT_DATA.value, "判据本会挡下这一刀"
+        assert readout["deferred_reason"] == CompressionAction.INSUFFICIENT_DATA.value
+        assert result.compression_ratio < 1.0, "默认关时既有压缩路径必须仍然生效"
+
+    def testSwitchOnFoldsWhenPriorRoundProvesItPays(self):
+        """开关开 + 上一轮实测证明折叠真的省下 ⇒ 判据放行（不是恒不放行的死闸）。"""
+        injector = _make_injector(compression_economics=True, window_ceiling=50000)
+        injector._lastCompressionRatio = 0.25
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert readout["action"] == CompressionAction.ECONOMICAL.value, readout
+        assert readout["profit"] > readout["cost"]
+        assert result.compression_ratio < 1.0
+
+class TestBothEntryPointsShareOneGate:
+    """两条接入点（非池 `injector.py` / 池 `orchestrator.py`）必须过同一份判据。
+
+    只接一条 = 第二形态的"视图与账本不一致"——同一件事在两处各有一套判法。
+    """
+
+    def testParserEntryPointExistsOnOrchestrator(self):
+        from neurova.context.orchestrator import ContextOrchestrator
+
+        assert hasattr(ContextOrchestrator, "_poolEconomicsAllows")
+        src = (REPO_ROOT / "neurova/context/orchestrator.py").read_text(encoding="utf-8")
+        assert "evaluateCompressionEconomics" in src, "池分支必须消费同一份判据"
+        assert re.search(r"^def evaluateCompressionEconomics", src, re.M) is None, (
+            "池分支不得自带第二份判据实现"
+        )
+
+    def testPoolBranchReadsSameGovernanceSwitch(self):
+        """池分支开关与非池分支读同一个治理键（单源，不新开开关）。"""
+        src = (REPO_ROOT / "neurova/context/orchestrator.py").read_text(encoding="utf-8")
+        assert '"compression_economics_enabled"' in src
+        injector_src = (REPO_ROOT / "neurova/context/injector.py").read_text(encoding="utf-8")
+        assert '"compression_economics_enabled"' in injector_src
+
+    def testPoolEnvelopeCompressionEmitsDiscardReadout(self):
+        """池分支弃封同样出账：`report` 必须在池侧被接上（不许只有非池出账）。"""
+        src = (REPO_ROOT / "neurova/context/orchestrator.py").read_text(encoding="utf-8")
+        assert "report=_discard_report" in src, "池分支弃封未出账 = 同一块静默缺口留在另一条路上"
+
+class TestBaselineCompatibility:
+    """003 的负债口径引用本模块的 `profit`/`cost`，故两字段必须在读数里可读。"""
+
+    def testReceiptCanReadProfitAndCostFromReadout(self):
+        injector = _make_injector(window_ceiling=50000)
+        result = injector.build_context(
+            system_prompt="BASE",
+            memories=[],
+            conversation_history=_big_history(),
+            user_input=_OVER_BUDGET_INPUT,
+        )
+        readout = result.stats["compression_economics"]
+        assert isinstance(readout["profit"], int)
+        assert isinstance(readout["cost"], int)
+        assert set(readout) >= {"enabled", "action", "profit", "cost", "prior_ratio", "deferred_reason"}
+
+    def testReasonEnumValuesAreStableIdentifiers(self):
+        """原因值是对外可引用的稳定标识串（003 与界面都按它对齐，不按序号）。"""
+        for action in CompressionAction:
+            assert re.fullmatch(r"[a-z][a-z_]*", action.value), action

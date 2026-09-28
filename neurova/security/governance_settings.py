@@ -41,6 +41,8 @@ DEFAULTS: Dict[str, Any] = {
     # 工单 015 收口的两个裸 env。默认值＝收口前的现网默认，不顺手改口径
     "crystallization_llm_gate_enabled": True,  # 结晶 LLM 裁决闸（关=候选直写存储引擎）
     "skill_auto_retire_enabled": False,  # 技能自动淘汰（关=只上报候选不执行禁用）
+    # 压缩经济性判据（关=沿用"必然装不下就等比缩小"的既有行为，现网零变更）
+    "compression_economics_enabled": False,
 }
 
 

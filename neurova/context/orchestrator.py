@@ -186,6 +186,12 @@ class ContextOrchestrator:
         self.auto_compact_enabled = _os.environ.get("NEUROVA_AUTO_COMPACT", "1") != "0"
         self._window_hard_limit: Optional[int] = None
 
+        # 压缩经济性判据（Issue #289 · 002）：池分支的读数位。
+        # 跨趟反馈与丢弃归因都落这里，池与非池共用同一份判据（不新造第二体系）。
+        self._poolCompressionRatio: Optional[float] = None
+        self._poolEconomicsReadout: Dict[str, Any] = {}
+        self._poolDiscardReadout: Dict[str, Any] = {}
+
         # 初始化 ContextPool（如果启用）
         if use_pool:
             from neurova.context_pool import ContextPool
@@ -1549,7 +1555,15 @@ class ContextOrchestrator:
                 # 信封预算 = 固定部分 + 召回额度 + 召回行前缀开销，与抽屉
                 # （`drawer.max_tokens`）同一份额度（单源 `_envelopeBudget`）。
                 env_budget = self._envelopeBudget(window_budget, window_msgs, blocks, user_input)
-                _env = compress_envelope(_env, budget_tokens=env_budget)
+                # 压缩经济性判据（Issue #289 · 002）：池分支必须与非池分支
+                # 共用同一份判据与同一份读数——只接一条 = 第二形态的
+                # "视图与账本不一致"。弃封读数经 `report` 出账（不再静默）。
+                _discard_report: Dict[str, Any] = {}
+                if self._poolEconomicsAllows(_env, env_budget, window_budget):
+                    _env = compress_envelope(
+                        _env, budget_tokens=env_budget, report=_discard_report
+                    )
+                self._poolDiscardReadout = _discard_report
             context.append(
                 {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
             )
@@ -2117,6 +2131,50 @@ class ContextOrchestrator:
         if hardLimit and hardLimit < budget_tokens:
             return hardLimit
         return budget_tokens
+
+    def _poolEconomicsAllows(self, envelope: str, env_budget: int, window_budget: int) -> bool:
+        """池分支的经济性判据闸（与非池分支**同一份判据、同一份读数**）。
+
+        与非池分支的差别只在"代价/收益"的取数来源：这里拟折叠对象是**信封本体**
+        （`env_budget` 已是它该落到的额度），不涉及历史淘汰。
+
+        默认关 ⇒ 恒放行（池上现网行为零变更），读数照样落 `_poolDiscardReadout`。
+        """
+        from neurova.context.compression_economics import evaluateCompressionEconomics
+        from neurova.context.token_estimator import estimate_tokens, isRulerCalibrated
+
+        foldable = estimate_tokens(envelope)
+        verdict = evaluateCompressionEconomics(
+            foldable_tokens=foldable,
+            summary_tokens=env_budget,
+            occupied_tokens=window_budget,
+            window_ceiling=self._resolve_auto_compact_hard_limit() or 0,
+            prior_compression_ratio=getattr(self, "_poolCompressionRatio", None),
+            ruler_calibrated=isRulerCalibrated(),
+        )
+        self._poolEconomicsReadout = {
+            "enabled": self._poolEconomicsEnabled(),
+            "action": verdict.action.value,
+            "profit": verdict.profit,
+            "cost": verdict.cost,
+            "prior_ratio": getattr(self, "_poolCompressionRatio", None),
+            "deferred_reason": None if verdict.act else verdict.action.value,
+        }
+        if not self._poolEconomicsEnabled():
+            return True
+        return verdict.act
+
+    def _poolEconomicsEnabled(self) -> bool:
+        """池分支开关：与注入器分支同一个治理键（单源，不新开开关）。"""
+        try:
+            from neurova.security.governance_settings import resolve_flag
+
+            return resolve_flag(
+                "compression_economics_enabled", "NEUROVA_COMPRESSION_ECONOMICS"
+            )
+        except Exception as e:  # noqa: BLE001 - 治理面不可读按默认关处置（安全侧）
+            logger.debug("池分支压缩经济性开关解析失败，按默认关处置: %s", e)
+            return False
 
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
