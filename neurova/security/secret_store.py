@@ -130,7 +130,7 @@ def decrypt_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
 #:
 #: 与前端 `NeurUI/src/config/channelFields.ts` 里标为 `type: 'password'` 的字段
 #: 是同一份事实的两个语言面：前端那一份管「渲染成密码框」，本集合管「落盘要封」。
-#: 两面不许各改各的 —— 守卫 `tests/unit/api/test_channel_secret_at_rest_290.py`
+#: 两面不许各改各的 —— 守卫 `tests/unit/api/test_channel_credential_sealing_290.py`
 #: 逐名比对（前端新增一个密码字段而本集合没收，即红），并带反向控制
 #: （身份/路径/开关类键名不得混进来，防「把集合塞满」式的假通过）。
 CREDENTIAL_KEY_NAMES = frozenset({
