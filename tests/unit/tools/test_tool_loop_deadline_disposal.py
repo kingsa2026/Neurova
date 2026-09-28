@@ -87,6 +87,10 @@ class TestDisposalIsMachineCheckable:
         # `kill_all` 实现完整、生产侧零调用，属协作红线点名的「写了却无人读」断点。
         # 本片把常驻 shell 会话接进 `api/app.py` 的 `_on_shutdown`，跨文件消费成立。
         "kill_all": "G4 会话进程回收：app._on_shutdown 关停时终止常驻会话",
+        # 切片 D 子代理深度上限（Issue #268）：本片把"深度"从广度的副作用
+        # 变成可声明的单源契约。`agent/swarm.py:_effective_max_depth()` 是生产侧
+        # 唯一读取点，`spawn()` 的深度闸读它 ⇒ 跨文件消费成立。
+        "max_subagent_depth": "切片 D 子代理深度：swarm._effective_max_depth 唯一读取点",
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):

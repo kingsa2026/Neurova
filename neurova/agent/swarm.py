@@ -25,6 +25,7 @@ import os
 import threading
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -32,6 +33,32 @@ logger = logging.getLogger(__name__)
 
 # 事件发射器签名：(event_type, data) -> None，event_type ∈ {"content", "reasoning"}
 StreamEmitter = Callable[[str, Any], None]
+
+# 当前正在执行的 member 所在深度（顶层用户会话 = 0）。派生深度 = 本值 + 1。
+#
+# 为什么不挂 Agent 实例：Agent 是进程级单例（AppState.agents 共享池），同一
+# agent_id 既可能作为某条链的 member，也可能被另一个顶层会话直接使用——实例
+# 属性存深度会在并发链间互踩（与切片 A「轮次态不得挂单例」同一条根因）。
+# 存 ContextVar：`_run_member` 在子 Agent 的 `chat` 之前按 run.depth 绑定、
+# 之后复位；member 内的 `spawn_subagent` 读到的就是它自己那条链的深度。
+# 后台派生走 `asyncio.create_task`（拷贝当前上下文），绑定发生在创建任务**之后**、
+# 子 Agent chat **之前**，故后台链同样读到正确深度。
+_subagentDepthVar: ContextVar = ContextVar("neurova_subagent_depth", default=0)
+
+
+def current_subagent_depth() -> int:
+    """当前执行上下文所在的派生深度（顶层 = 0）。"""
+    return int(_subagentDepthVar.get() or 0)
+
+
+def set_subagent_depth(depth: int):
+    """绑定当前执行的派生深度，返回 token 供复位。"""
+    return _subagentDepthVar.set(int(depth))
+
+
+def reset_subagent_depth(token) -> None:
+    """复位派生深度到绑定前（token 由 set_subagent_depth 返回）。"""
+    _subagentDepthVar.reset(token)
 
 
 @dataclass
@@ -44,6 +71,7 @@ class SubAgentRun:
     task: str = ""
     model: str = ""  # 派生目标模型名（解析失败为 ""）——预算/并发/冷却治理据此判定
     origin: str = "chat"  # chat | workflow
+    depth: int = 1  # 派生深度（顶层派生的子 Agent 为 1；member 内再派生递增）
     session_id: Optional[str] = None  # 事件广播目标（发起者的聊天会话）
     # P2-9：member 会话键。
     # member 的任务对话经既有 save_to_session → SessionManager.add_message
@@ -75,6 +103,7 @@ class SubAgentRun:
             "task": self.task,
             "model": self.model,
             "origin": self.origin,
+            "depth": self.depth,
             "session_id": self.session_id,
             "member_session_id": self.member_session_id,
             "status": self.status,
@@ -86,6 +115,18 @@ class SubAgentRun:
             "node_id": self.node_id,
             "execution_id": self.execution_id,
         }
+
+
+def _settingsDefaultSubagentDepth() -> int:
+    """深度上限的默认值：**取自** `agent_limits_settings.DEFAULTS` 单源。
+
+    本函数只是把单源的值搬进类属性（供设置不可读时的 `_effective_max_depth()`
+    回落），不在此手抄第二份数字。单源不可导入是真实故障，交给 import 出声，
+    不吞异常改成静默常量。
+    """
+    from neurova.security.agent_limits_settings import DEFAULTS
+
+    return int(DEFAULTS["max_subagent_depth"])
 
 
 class SwarmManager:
@@ -113,6 +154,14 @@ class SwarmManager:
     MAX_ACTIVE_CHILDREN = 5
     # 单个 task 长度上限（防 LLM 把整段对话历史塞进 task 拖垮子 Agent）
     MAX_TASK_CHARS = 8000
+    # ── spawn 三明治之深度契约 ────────────────────────────────────
+    # 派生链的**深度**上限（不是广度）。广度（同时运行中的子 Agent 数）由
+    # MAX_ACTIVE_CHILDREN 守；深度（一条链能嵌几层）必须独立声明——否则它只是
+    # "全局广度帽跑满之前先撞上"的偶发现象，随兄弟数量读出不同层数（切片 D 根因）。
+    # 这是设置不可读时的**兜底值**，且它**取自** `agent_limits_settings.DEFAULTS`
+    # 单源（`_settingsDefaultSubagentDepth()`）——不在此手抄第二份数字。
+    # 生效值仍由 `_effective_max_depth()` 经设置层读取。
+    MAX_SUBAGENT_DEPTH = _settingsDefaultSubagentDepth()
 
     # ── fan-out 治理（吸收进 spawn 三明治，防成本/限流踩踏；0=关闭保持既有突发语义）──
     # 同一模型的并发子 Agent 上限（"大模型并发帽"）
@@ -168,6 +217,16 @@ class SwarmManager:
                 f"task 长度 {len(task)} 超过硬限 {self.MAX_TASK_CHARS}——"
                 "请压缩为自包含的子任务描述，不要把对话历史整段塞入",
             )
+        child_depth = current_subagent_depth() + 1
+        max_depth = self._effective_max_depth()
+        if child_depth > max_depth:
+            return self._rejection(
+                "SUBAGENT_DEPTH_EXCEEDED",
+                f"派生深度 {child_depth} 超过上限 {max_depth}——"
+                "子 Agent 不得在链上无限嵌套派生；请把子任务拆成并列的兄弟任务，"
+                "或由顶层直接派生",
+            )
+
         active_children = self._count_active()
         if active_children >= self.MAX_ACTIVE_CHILDREN:
             return self._rejection(
@@ -219,6 +278,7 @@ class SwarmManager:
                     )
 
         run = SubAgentRun(
+            depth=child_depth,
             agent_id=resolved_id,
             agent_name=getattr(agent.config, "name", resolved_id) if hasattr(agent, "config") else resolved_id,
             task=task,
@@ -303,6 +363,19 @@ class SwarmManager:
         return [r.to_dict() for r in runs[:limit]]
 
     # ── 内部实现 ──────────────────────────────────────────────
+
+    def _effective_max_depth(self) -> int:
+        """生效深度上限：单源在 `agent_limits_settings.max_subagent_depth`。
+
+        配置不可读时回落到 `MAX_SUBAGENT_DEPTH` 常量——**不在此另立尺度**，
+        常量只是设置层的兜底镜像（设置层自身也有内置默认）。
+        """
+        try:
+            from neurova.security.agent_limits_settings import get_effective_limits
+
+            return int(get_effective_limits().get("max_subagent_depth", self.MAX_SUBAGENT_DEPTH))
+        except Exception:  # noqa: BLE001 - 设置不可读走常量兜底，不阻断派生
+            return self.MAX_SUBAGENT_DEPTH
 
     def _count_active(self) -> int:
         """运行中（pending/running）派生数（含后台任务）。"""
@@ -484,6 +557,7 @@ class SwarmManager:
                 "agent_name": run.agent_name,
                 "task": run.task,
                 "origin": run.origin,
+                "depth": run.depth,
                 "node_id": run.node_id,
                 "execution_id": run.execution_id,
             },
@@ -493,6 +567,11 @@ class SwarmManager:
         if stream:
             emitter = self._make_emitter(run)
 
+        # 深度绑定：本条链的 member 在执行期读到 run.depth。member 内的
+        # `spawn_subagent` 因此算出的 child_depth = run.depth + 1——深度沿链传递，
+        # 与"同时有几个兄弟在跑"无关（切片 D：深度不是广度的副作用）。
+        # 绑定必须在 `await agent.chat` 之前；`finally` 复位，避免污染同任务后续链。
+        depth_token = set_subagent_depth(run.depth)
         try:
             # [签名约束] Agent.chat(user_input, *, stream, save_memory, session_id,
             # metadata, enable_tts) —— 不接受 temperature/max_tokens，
@@ -534,6 +613,8 @@ class SwarmManager:
             run.status = "failed"
             run.error = str(e)
             run.finished_at = time.time()
+        finally:
+            reset_subagent_depth(depth_token)
 
         await self._broadcast(
             run,
@@ -545,6 +626,7 @@ class SwarmManager:
                 "status": run.status,
                 "report": run.report,
                 "error": run.error,
+                "depth": run.depth,
                 "duration": run.duration,
                 "node_id": run.node_id,
                 "execution_id": run.execution_id,
@@ -652,6 +734,9 @@ def reset_swarm_manager() -> None:
 __all__ = [
     "SubAgentRun",
     "SwarmManager",
+    "current_subagent_depth",
     "get_swarm_manager",
+    "reset_subagent_depth",
     "reset_swarm_manager",
+    "set_subagent_depth",
 ]
