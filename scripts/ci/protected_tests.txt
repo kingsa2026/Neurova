@@ -1319,3 +1319,17 @@ tests/unit/ci/test_count_bounded_wait_ledger.py
 #     纪元归零不得连带清掉 003 的欠账、入表参数在治理面可见。
 tests/unit/evolution/test_rsi_debt_ledger.py
 tests/unit/evolution/test_rsi_parameter_identity_and_epoch.py
+# Issue #289 评论「处理权重没打进镜像」：
+#   资产清单**从生产读取方反推**（`repoAsset(...)` 调用点即事实源），不手抄第二份；
+#   每条资产必须落进「进镜像」或「显式登记为可选能力」之一，不许悬空；
+#   「放行（.dockerignore 不挡）+ 拷贝（Dockerfile COPY 命中）」两句同时成立 ——
+#   只满足一句的后果分别是 `COPY` 构建失败与运行时静默降级 TF-IDF；
+#   模型段的**跨目录权重通配**（`models/*.ext`）归零：`*` 不跨 `/`，它挡不住
+#   真权重（权重在 models/embedding/<资产>/ 下）却制造「权重已排除」的错觉。
+tests/unit/deploy/test_image_model_assets.py
+# Issue #174 台账 T-09 命中点（scripts/ci/toolLoopDeadlines.txt）：
+#   `_auto_continue` 里 MAX_TOOL_CALL_ROUNDS / tool_call_rounds「只写不读」——
+#   前像里是活护栏，dc9b9a0f 判定其消费者恒假并删除时只删了消费者、留下声明。
+#   处置＝删声明（不复活死分支）；反向控制：同函数活常量必须仍被读、
+#   `while` 必须仍排除带 tool_calls 的响应（处置的论证前提）。
+tests/unit/agent/test_auto_continue_dead_budget.py
