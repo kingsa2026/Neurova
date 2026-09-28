@@ -37,6 +37,12 @@ def isolated_env(tmp_path, monkeypatch):
     return tmp_path
 
 
+# 归属门（Issue #290 追问②）：端点被**直调**时不传身份即匿名 → 403（门的默认
+# 方向是拒绝）。本文件测的是 iLink 扫码契约本身，故显式带一个已授权身份；
+# 门的判据由 tests/unit/api/test_channel_agent_access_290.py 咬合。
+ADMIN = {"user_id": "u", "username": "u", "role": "admin"}
+
+
 def _save_wechat_config(extra: dict):
     """直接落一份 wechat 已保存配置（绕过端点，聚焦被测端点）。"""
     cc._save_configs({"wechat": {"channel_type": "wechat", "enabled": True, "extra": extra}})
@@ -62,7 +68,7 @@ class TestSaveNeedsScan:
             enabled=True,
             extra={"mode": "ilink", "bot_token": "", "token_file": ""},
         )
-        result = asyncio.run(create_or_update_config(request))
+        result = asyncio.run(create_or_update_config(request, current_user=ADMIN))
 
         assert result["success"] is True
         assert result["needs_scan"] is True
@@ -84,7 +90,7 @@ class TestSaveNeedsScan:
             enabled=True,
             extra={"mode": "ilink", "token_file": str(token_file)},
         )
-        result = asyncio.run(create_or_update_config(request))
+        result = asyncio.run(create_or_update_config(request, current_user=ADMIN))
 
         assert result["success"] is True
         assert result["needs_scan"] is False
@@ -102,7 +108,7 @@ class TestSaveNeedsScan:
             enabled=True,
             extra={"bot_token": "tg-token"},
         )
-        result = asyncio.run(create_or_update_config(request))
+        result = asyncio.run(create_or_update_config(request, current_user=ADMIN))
 
         assert result["success"] is True
         assert result.get("needs_scan", False) is False
@@ -119,7 +125,7 @@ class TestWechatTestConnection:
             channel_type="wechat",
             extra={"mode": "ilink", "bot_token": ""},
         )
-        result = asyncio.run(cc.test_connection("wechat", request))
+        result = asyncio.run(cc.test_connection("wechat", request, current_user=ADMIN))
 
         assert result.success is False
         assert result.needs_scan is True
@@ -151,7 +157,7 @@ class TestWechatTestConnection:
             channel_type="wechat",
             extra={"mode": "ilink", "token_file": str(token_file)},
         )
-        result = asyncio.run(cc.test_connection("wechat", request))
+        result = asyncio.run(cc.test_connection("wechat", request, current_user=ADMIN))
 
         assert result.success is True
         getconfig.assert_awaited_once()  # 真实凭据校验发生
@@ -173,7 +179,7 @@ class TestWechatTestConnection:
             channel_type="wechat",
             extra={"mode": "ilink", "token_file": str(token_file)},
         )
-        result = asyncio.run(cc.test_connection("wechat", request))
+        result = asyncio.run(cc.test_connection("wechat", request, current_user=ADMIN))
 
         assert result.success is False
         assert result.needs_scan is False

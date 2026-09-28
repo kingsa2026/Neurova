@@ -19,6 +19,7 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.api.deps import get_current_user
+from neurova.api.agent_access import requireAgentOwner
 from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
@@ -333,7 +334,11 @@ async def restart_channel(
     agent 维度不可省：实例表主键是 `(agent_id, channel_type)`，同一平台在不
     同 agent 下可以是两个独立 bot。缺了它，用户在「凯蒂」视图点重启动的是
     default 的长连接 —— 屏幕上看不出差别。
+
+    归属门同为不可省：重启是**破坏性运维动作**（拆掉该 agent 的 bot 长连接再重连），
+    只验登录态等于任何登录用户都能让别人的机器人掉线。判据复用配置面的同一单源。
     """
+    requireAgentOwner(_norm_agent(agent_id), current_user, action="重启")
     manager = get_channel_manager()
     result = await manager.restart_channel(channel_type, agent_id=_norm_agent(agent_id))
     if not result.get("success") and "error" in result:
@@ -351,8 +356,10 @@ async def clear_channel_queue(
 
     同平台两个 agent 各有各的积压：按渠道裸名清会把别人的待办一起删掉，
     而用户只能看见自己视图里的积压数。
+    清队列是**不可逆的删除**，故归属门与配置面同源（非属主不得清他人积压）。
     """
     agent = _norm_agent(agent_id)
+    requireAgentOwner(agent, current_user, action="清空队列")
     manager = get_channel_manager()
     try:
         cleared = manager.clear_channel_queue(channel_type, agent_id=agent)
@@ -369,7 +376,12 @@ async def channel_conflict_check(current_user: Any = Depends(get_current_user)):
     扫描面覆盖所有 agent：同身份跨 agent 复用正是最容易漏、后果最重的一类
     （两个 bot 抢同一条平台事件流），只扫 default 视图等于对它完全失明。
     结果条目的 channel 带上 agent 前缀，便于分辨是哪两个实例。
+
+    本条是**跨全量 agent 的读**：清单里带着各 bot 的平台身份（app_id），
+    非管理员从中可读别人的机器人身份，故限管理员——判据不新造，仍是
+    `requireAgentOwner` 的无主形态（`default` 即无主 agent：仅 admin）。
     """
+    requireAgentOwner("default", current_user, action="检测全量渠道身份冲突")
     manager = get_channel_manager()
     result = manager.conflict_check()
     return {"code": 0, "message": "success", "data": result}

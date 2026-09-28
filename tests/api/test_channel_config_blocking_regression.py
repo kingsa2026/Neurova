@@ -38,6 +38,12 @@ def isolated_env(monkeypatch, tmp_path):
     return manager
 
 
+# 归属门（Issue #290 追问②）：直调端点不传身份即匿名 → 403。本文件测的是
+# 事件循环不被同步工厂饿死（RES-P0-2），故显式带已授权身份；门本身由
+# tests/unit/api/test_channel_agent_access_290.py 咬合。
+ADMIN = {"user_id": "u", "username": "u", "role": "admin"}
+
+
 def _req(channel_type: str = "wechat", extra: dict = None):
     """注意：extra 必须直接作为请求体 extra 字段，不得二次包裹。"""
     return cc.ChannelConfigRequest(
@@ -77,8 +83,8 @@ async def test_create_config_does_not_block_event_loop(isolated_env, monkeypatch
     monkeypatch.setattr(cc, "_create_adapter", fake_create)
 
     results, elapsed, ticks = await _gather_with_probe([
-        cc.create_or_update_config(_req(extra={"mode": "ilink", "bot_token": "t1", "private_strategy": "open"})),
-        cc.create_or_update_config(_req(extra={"mode": "ilink", "bot_token": "t2", "group_strategy": "closed"})),
+        cc.create_or_update_config(_req(extra={"mode": "ilink", "bot_token": "t1", "private_strategy": "open"}), current_user=ADMIN),
+        cc.create_or_update_config(_req(extra={"mode": "ilink", "bot_token": "t2", "group_strategy": "closed"}), current_user=ADMIN),
     ])
     assert all(r["success"] for r in results)
     assert not any(r.get("needs_scan") for r in results), "带 token 不得短路 needs_scan"
@@ -106,7 +112,7 @@ async def test_test_connection_does_not_block_event_loop(isolated_env, monkeypat
     monkeypatch.setattr(cc, "_create_adapter", fake_create)
 
     (result,), elapsed, ticks = await _gather_with_probe(
-        [cc.test_connection("wechat", _req(extra={"mode": "ilink", "bot_token": "t1"}))]
+        [cc.test_connection("wechat", _req(extra={"mode": "ilink", "bot_token": "t1"}), current_user=ADMIN)]
     )
     assert result.success is True, f"{result.message} / {result.details}"
     assert elapsed < 0.75
@@ -119,11 +125,11 @@ async def test_wechat_ilink_without_token_honest_needs_scan(isolated_env, monkey
     calls = []
     monkeypatch.setattr(cc, "_create_adapter", lambda *a, **k: calls.append(a) or MagicMock())
 
-    save = await cc.create_or_update_config(_req(extra={"mode": "ilink"}))
+    save = await cc.create_or_update_config(_req(extra={"mode": "ilink"}), current_user=ADMIN)
     assert save["success"] is True and save["needs_scan"] is True
     assert len(calls) == 0, "needs_scan 路径不得创建适配器"
 
-    result = await cc.test_connection("wechat", _req(extra={"mode": "ilink"}))
+    result = await cc.test_connection("wechat", _req(extra={"mode": "ilink"}), current_user=ADMIN)
     assert result.success is False, "无 token 必须诚实失败，绝不假阳性（F-2）"
     assert getattr(result, "needs_scan", False) is True
     assert len(calls) == 0
@@ -150,6 +156,7 @@ async def test_wechat_ilink_verify_flow_offloop(isolated_env, monkeypatch, tmp_p
     token_file = tmp_path / "ilink_token"
     result = await cc.test_connection(
         "wechat", _req(extra={"mode": "ilink", "bot_token": "tok-123", "token_file": str(token_file)}),
+        current_user=ADMIN,
     )
 
     assert result.success is True, f"iLink 校验链路被破坏: {result.message} / {result.details}"
