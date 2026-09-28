@@ -15,7 +15,7 @@
 密钥链走 env `NEUROVA_SECRET_KEY`（不碰真实 `data/.secret_key`、不碰 keyring）。
 适配器工厂换成记账替身：真凭据建真长连接有外部副作用（取证报告 §4 已点名）。
 
-跑法：`python tests/manual/channel_secret_sealed_290.py`
+跑法：`python tests/manual/channel_credential_sealing_290.py`
 """
 
 from __future__ import annotations
