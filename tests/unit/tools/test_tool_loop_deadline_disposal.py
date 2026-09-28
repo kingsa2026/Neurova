@@ -91,6 +91,12 @@ class TestDisposalIsMachineCheckable:
         # 变成可声明的单源契约。`agent/swarm.py:_effective_max_depth()` 是生产侧
         # 唯一读取点，`spawn()` 的深度闸读它 ⇒ 跨文件消费成立。
         "max_subagent_depth": "切片 D 子代理深度：swarm._effective_max_depth 唯一读取点",
+        # GoalGate 轮次预算单源（Issue #310）：本片把 GoalGate 的工具轮上限从
+        # gates.py 的类字面量 15 变成可声明的单源配置键——此前装配路径不传它，
+        # 上限不受任何配置键管辖（max_loop_rounds 配到 200 时门控仍在第 15 轮开火）。
+        # `agent/loops/openai_loop.py:_goalRoundBudget()` 是生产侧唯一读取点，
+        # `_buildGateRunner` 默认装配与 `_buildGoalGate` 两处构造时读它 ⇒ 跨文件消费成立。
+        "goal_round_budget": "GoalGate 轮次预算：openai_loop._goalRoundBudget 唯一读取点",
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):
