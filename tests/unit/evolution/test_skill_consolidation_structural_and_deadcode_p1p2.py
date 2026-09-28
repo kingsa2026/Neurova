@@ -19,6 +19,7 @@ P2 死代码"标注保留"而非真删
     待清理"，实际是把"还有调用方"的错觉留给后来者。已迁移测试引用后真删。
 """
 
+import io
 import os
 
 import pytest
@@ -370,6 +371,52 @@ class TestDeadCodeReallyRemoved:
         for symbol in ("ToolExecutionReport", "get_pipeline_observers",
                        "notify_tool_result", "PipelineObserversRegistry"):
             assert hasattr(tp, symbol), f"{symbol} 是活接线，不得误删"
+
+        # `ToolExecutionContext` 的消费方口径是 `tool_layers.types` 里那份
+        # （`agent/tool_execution_manager.py` 装配行取的是它）。它在本模块的
+        # **兼容子类**已随五段框架退场，故这里钉的是"本模块不再持有第二份
+        # 上下文类型"——工具层只允许一份，名字存在而指向别处就是第二份。
+        assert not hasattr(tp, "ToolExecutionContext"), (
+            "工具执行上下文只允许一份（tool_layers.types），本模块不得再持兼容子类"
+        )
+        from neurova.tool_layers import types as canonical
+        assert hasattr(canonical, "ToolExecutionContext"), (
+            "工具执行上下文的单一事实源必须仍在 tool_layers.types"
+        )
+
+    def test_live_observer_gateway_has_a_production_consumer(self):
+        """"活"的**判据本身**必须来自生产消费方，不能只看名字在不在。
+
+        上一条是"名字还在"（留住了名字，但名字也可能是空壳）；本条接上另一半：
+        名字后面真的还有人用。两条合起来才挡得住"接线改没了、空壳名字留着"——
+        而那正是本条诞生的原因：P2（a875f5d8）当初就是用"名字在 ⇒ 判活"的方式
+        把 `ToolExecutionPipeline` 留了下来的，复核只需
+        `grep -rn 'ToolExecutionPipeline' neurova/` 就会发现生产零命中。
+
+        本条把那次复核动作钉成常驻判据：result 面的两个入口各有一个真消费方——
+        写入侧 `ToolExecutor.on_tool_executed` 尾部、读取侧熔断器挂观察者。
+        反向自证：把任一侧的挂载点摘掉，对应断言立刻红。
+        """
+        root = os.path.join(_REPO, "neurova")
+        consumers = {}
+        for base, _dirs, files in os.walk(root):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(base, name)
+                with io.open(path, encoding="utf-8") as handle:
+                    src = handle.read()
+                if "notify_tool_result" in src:
+                    consumers.setdefault("notify_tool_result", []).append(path)
+                if "add_result_observer" in src:
+                    consumers.setdefault("add_result_observer", []).append(path)
+
+        writer = [p for p in consumers.get("notify_tool_result", [])
+                  if not p.endswith("tool_pipeline.py")]
+        reader = [p for p in consumers.get("add_result_observer", [])
+                  if not p.endswith("tool_pipeline.py")]
+        assert writer, "result 写入侧零生产消费方——观察者门面已成空转"
+        assert reader, "result 读取侧零生产消费方——观察者门面已成空转"
 
     def test_pipeline_frame_is_gone_not_merely_deprecated(self):
         """五段框架（含 `PipelineConfig` 的开关）必须**整段消失**，不是标注保留。
