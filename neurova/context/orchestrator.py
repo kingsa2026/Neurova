@@ -332,6 +332,21 @@ class ContextOrchestrator:
                 "demoted": 0,
                 "last_error": None,
             },
+            # Issue #289 002：池分支压缩经济性判据读数。字段与注入器侧
+            # `_lastEconomicsReadout` **同名同义**（同一份判据的两个接入点，
+            # 不另立第二套口径）；`discarded`/`reason` 只在真的弃封时出现，
+            # 故这里是形状而非恒定值 —— 「没弃封」与「没跑过」因此可分。
+            "compression_economics": {
+                "enabled": False,
+                "action": None,
+                "profit": 0,
+                "cost": 0,
+                "prior_ratio": None,
+                "deferred_reason": None,
+                "discarded": False,
+                "reason": None,
+                "last_error": None,
+            },
             "tool_turns": {
                 "turns": 0,
                 "tool_call_rows": 0,
@@ -476,6 +491,21 @@ class ContextOrchestrator:
                 snapshot["fold_rollup"] = {**empty["fold_rollup"], **reader()}
             except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
                 snapshot["fold_rollup"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        # Issue #289 002：池分支压缩经济性读数并进**既有**观测面。写进私有字段
+        # 等于写进日志 —— 事后既查不到"这轮该不该压"，也查不到"整封是不是被丢了"，
+        # 与"净损失路径不可归因"是同一形态换个位置（本仓对只写不读的处置一贯如此：
+        # 接上既有读面，不新开第二套读数体系）。
+        try:
+            pool_readout = getattr(self, "_poolEconomicsReadout", None) or {}
+            discard = getattr(self, "_poolDiscardReadout", None) or {}
+            snapshot["compression_economics"] = {
+                **empty["compression_economics"],
+                **pool_readout,
+                **discard,
+                "prior_ratio": getattr(self, "_poolCompressionRatio", None),
+            }
+        except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+            snapshot["compression_economics"]["last_error"] = f"{type(exc).__name__}: {exc}"
         return snapshot
 
     def _foldedHashes(self) -> set:
@@ -1558,10 +1588,24 @@ class ContextOrchestrator:
                 # 压缩经济性判据（Issue #289 · 002）：池分支必须与非池分支
                 # 共用同一份判据与同一份读数——只接一条 = 第二形态的
                 # "视图与账本不一致"。弃封读数经 `report` 出账（不再静默）。
+                from neurova.context.token_estimator import estimate_tokens
+
                 _discard_report: Dict[str, Any] = {}
+                _before_tokens = estimate_tokens(_env)
                 if self._poolEconomicsAllows(_env, env_budget, window_budget):
                     _env = compress_envelope(
                         _env, budget_tokens=env_budget, report=_discard_report
+                    )
+                    # 跨趟反馈留存：本轮实测折叠比供**下一轮**判据回读（唯一写点）。
+                    # 口径与判据入参同契约（`1.0` = 压了等于没压），只是被压对象
+                    # 是信封本体（池侧压缩对象即信封，非池侧是历史 —— 两者是不同
+                    # 对象上的同一件事，故不并成一份读数）。
+                    # 不留存则 `prior_compression_ratio` 恒为 `None` ⇒ 池侧判据
+                    # 永远停在 INSUFFICIENT_DATA：开关开了也不动作，且"开了"与
+                    # "关着"在读数上同形（本仓在 `success` 三态上修过的同类形态）。
+                    # 尺子取自判据同一份 `estimate_tokens`，不新造第二个口径。
+                    self._poolCompressionRatio = (
+                        estimate_tokens(_env) / _before_tokens if _before_tokens else None
                     )
                 self._poolDiscardReadout = _discard_report
             context.append(
