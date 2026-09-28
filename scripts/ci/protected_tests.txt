@@ -1259,11 +1259,16 @@ tests/unit/ci/test_stub_signature_single_source.py
 
 # Issue #306（NPC 空转：单轮输出预算被推理吃满 ⇒ 零产出一轮 + 不触发接力）：
 #   用户观感是「跑满半小时、Issue 无回音、分支无提交，流水线却 success」。
-#   逐轮复算五条构建的末轮读数：`finish with length, out=32000`、
-#   `reasoning_tokens=32000`、正文 0 字符、工具调用 0 次 —— 该轮零产出；
+#   逐轮复算六条构建的末轮读数：`finish with length, out≈32000`、
+#   `reasoning_tokens=32000`、正文 0 字符、工具调用 0 次 —— 该轮零产出
+#   （且这六条全程 `cnb issues comment` / `git commit` / `git push` 一条没执行过）；
 #   而零产出收官是 success，收尾判据（`$CNB_PIPELINE_STATUS`=error +
 #   失败 stage 名命中 `npc-go`，ADR 0022）两条都不成立 ⇒ 收尾 Stage 每次
 #   `skipped`，改而未提交的成果随容器丢，Issue 上没有任何回音。
+#   同配置真对照（同 `maxTokens=48000`，只有思考档不同）：cnb-i5u-1k3carfm9 /
+#   cnb-9ro-1k3f57fif / cnb-s07-1k3f0uhcv 末轮全是 stop，一条 length 都没有。
+#   读数复算口径：日志会回显别的构建的日志原文，必须按**行首锚定**解析并校验
+#   轮号 1..N 连续 + 与 `done. N turns` 一致（本轮实测踩过这个坑）。
 #   人设里原有「时间预算硬约束」只覆盖墙钟（sleep 轮询 / 单条命令超时 /
 #   宽匹配 pkill），对单轮输出预算只字未提 —— 这是根因侧唯一能修的地方
 #   （`npc:go.options` 不认 prompt 键，评论触发时提示词一律由角色自带）。
