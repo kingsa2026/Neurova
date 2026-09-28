@@ -1333,3 +1333,12 @@ tests/unit/deploy/test_image_model_assets.py
 #   处置＝删声明（不复活死分支）；反向控制：同函数活常量必须仍被读、
 #   `while` 必须仍排除带 tool_calls 的响应（处置的论证前提）。
 tests/unit/agent/test_auto_continue_dead_budget.py
+# Issue #289 评论「自定义开发环境」+「不要默认镜像，预装好运行环境」：
+#   三面口径（开发环境 / CI / 生产镜像）收口到既有单一事实源——解释器取
+#   `Dockerfile` 的 `FROM python:`、Node 取 CI `node-version` 且 == compose 前端大版本、
+#   依赖取 `requirements-full.lock`（与生产 `requirements.txt` 同源编译）。
+#   整装判据：镜像构建期必须装全量运行依赖 + playwright 浏览器（`install --with-deps`），
+#   不得只装 `requirements-ci.lock` 薄子集；判定只认真装指令，注释不算。
+#   另钉三处：`.dockerignore` 不得挡 COPY 源（否则构建直接失败）、codebuddy 命令
+#   决定 CodeBuddy Web 入口是否可见、`runner.cpus` 与启动按钮 cpus 必须同源。
+tests/unit/ci/test_dev_environment_contract.py
