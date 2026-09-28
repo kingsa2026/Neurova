@@ -2224,7 +2224,18 @@ export default {
     rejectReason: "Declined on human review",
     sequencePlaceholder: "Supply tool_sequence, comma-separated",
     evidenceHit: "installed, registry hit",
-    evidenceMiss: "registry miss; still invisible next turn"
+    evidenceMiss: "registry miss; still invisible next turn",
+    debtLabel: "Outstanding debt",
+    debtNone: "No debt",
+    debtUnknownRows: "Legacy unpriced rows",
+    debtGateAllow: "Reverse gate allows",
+    debtGateBlock: "Reverse gate blocks",
+    debtWriteFailure: "Ledger write failed",
+    paramActivityLabel: "Parameter activity",
+    paramActivityMoving: "Moving",
+    paramActivitySparse: "Sparse",
+    paramActivityNeverProposed: "Never proposed",
+    paramActivityNoData: "No data (cannot judge)",
   },
 
   settings: {
