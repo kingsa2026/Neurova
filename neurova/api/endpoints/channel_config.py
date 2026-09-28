@@ -41,6 +41,7 @@ from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 from neurova.core.data_root import dataLanding
+from neurova.security.secret_store import sealSecrets, unsealSecrets
 
 logger = get_logger(__name__)
 
@@ -119,7 +120,12 @@ def _save_store(store: Dict[str, Any]) -> None:
     target = _configFile()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 凭据封存只发生在**落盘这一处**（读侧对称解密见 `_load_store`）：
+    # 加密改的是磁盘表示，不改业务链路拿到的内存契约 —— 装配、冲突检测、
+    # 扫码回填照旧读明文，不会在消费端派生第二套语义。
+    tmp.write_text(
+        json.dumps(sealSecrets(store), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     tmp.replace(target)
 
 
@@ -129,10 +135,13 @@ def _load_store() -> Dict[str, Any]:
         return {"version": 2, "agents": {}}
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError) as exc:
+        # 损坏与「没有配置」是两回事：静默返回空表会把用户的真实配置
+        # 变成"从未配过"，且下一次保存就地覆盖 —— 故此处点名文件与原因。
+        logger.warning("渠道配置文件不可读，按空表继续（下一次保存将覆盖）: %s (%s)", target, exc)
         return {"version": 2, "agents": {}}
     if isinstance(raw, dict) and raw.get("version") == 2 and isinstance(raw.get("agents"), dict):
-        return raw
+        return unsealSecrets(raw)
     # v1 平铺 {channel_type: cfg} → 迁移为 default agent 并落盘（幂等）
     v1 = {k: v for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
     store = {"version": 2, "agents": {"default": v1}}
@@ -472,9 +481,6 @@ async def create_or_update_config(
     _promote_credential_aliases(request.channel_type, request)
     store = _load_store()
     config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
-    # 不保存明文密钥到文件
-    if request.app_secret:
-        config_data["_app_secret_stored"] = True
 
     owner = _identity_conflict_owner(store, agent_id, request.channel_type, config_data)
     if owner:
