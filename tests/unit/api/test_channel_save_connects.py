@@ -56,6 +56,12 @@ def env(tmp_path, monkeypatch):
     ChannelManager._instance = None
 
 
+# 归属门（Issue #290 追问②）：端点被**直调**时不传身份即匿名 → 403。
+# 本文件测的是"保存必须即时 connect"，与判权无关，故显式带一个已授权身份；
+# 门的判据本身由 tests/unit/api/test_channel_agent_access_290.py 咬合。
+ADMIN = {"user_id": "u", "username": "u", "role": "admin"}
+
+
 def _req(enabled=True, extra=None):
     return cc.ChannelConfigRequest(
         channel_type="feishu", enabled=enabled,
@@ -66,7 +72,7 @@ def _req(enabled=True, extra=None):
 @pytest.mark.asyncio
 async def test_save_enabled_connects(env):
     mgr, made, _ = env
-    res = await cc.create_or_update_config(_req(enabled=True))
+    res = await cc.create_or_update_config(_req(enabled=True), current_user=ADMIN)
     assert res["success"] is True
     assert made["connects"] == 1, "启用保存必须即时 connect（不重启即生效）"
     assert made["adapter"].connected is True
@@ -76,7 +82,7 @@ async def test_save_enabled_connects(env):
 @pytest.mark.asyncio
 async def test_save_disabled_does_not_connect(env):
     mgr, made, _ = env
-    res = await cc.create_or_update_config(_req(enabled=False))
+    res = await cc.create_or_update_config(_req(enabled=False), current_user=ADMIN)
     assert res["success"] is True
     assert made.get("connects", 0) == 0, "停用保存不得连接"
     assert mgr.get_adapter("feishu", agent_id="default") is None, "停用后不应留有连接实例"
@@ -86,8 +92,8 @@ async def test_save_disabled_does_not_connect(env):
 async def test_resave_tears_down_previous_connection(env):
     """重存同渠道：旧适配器必须先 disconnect（飞书单机器人仅 1 条长连接）。"""
     mgr, made, _ = env
-    await cc.create_or_update_config(_req(enabled=True))
+    await cc.create_or_update_config(_req(enabled=True), current_user=ADMIN)
     first = made["adapter"]
-    await cc.create_or_update_config(_req(enabled=True))
+    await cc.create_or_update_config(_req(enabled=True), current_user=ADMIN)
     assert first.disconnected is True, "重存必须先断开旧实例连接，否则双连接被平台拒"
     assert made["connects"] == 2
