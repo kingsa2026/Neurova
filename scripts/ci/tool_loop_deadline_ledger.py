@@ -959,11 +959,27 @@ def batchProgressLine() -> str:
     return f"{' | '.join(parts)} ｜ 合计待处置 {pending} 条"
 
 
+#: **裸名撞名**的退役条目：同一个名字在**另一个拥有者**上仍然活着，故裸名判据
+#: 只能读到那些残留站点，给不出 `absent`（上下文域已实测 `dedup` / `clear` 两面
+#: 反例，本域是 `ToolSchema` = `api/endpoints/tool_schema.py` 的 pydantic 模型、
+#: `ToolParameter` = `execution_engine/tool_engine.py` 的 dataclass）。
+#:
+#: 对这些条目**不放宽判据**，而是换一把**拥有者级判据**：由
+#: `tests/unit/tools/test_t09_selfloop_face_ruling.py` 直接断言「登记那一份的定义
+#: 出现在的文件里不再有它的定义落点」，并反向断言同名第二份仍在（证明判据不连坐）。
+#: 把台账硬改成 `absent` 去迎合一条读不到的判据 = 把判据降级成自述（B6-1 明令禁止）；
+#: 所以台账**如实保留**判据类与实测引用点数，收窄口径这件事写在依据里。
+OWNER_LEVEL_RETIREMENTS = ("ToolSchema", "ToolParameter")
+
+
 def disposalConflicts() -> List[Dict[str, object]]:
     """处置与判据的咬合判据（纯函数，可喂合成输入自证）。
 
     声明「已删除 / 收口第二份」⇒ 实测判据类必须是 `absent`；
     声明「已接线」⇒ 必须是 `consumed`。写「已删除」而符号还在 = 处置是口号。
+
+    例外只有一处，且**不是放宽而是换判据**：`OWNER_LEVEL_RETIREMENTS`（裸名撞名）
+    的咬合由拥有者级判据承担，不在这里用裸名值判——理由见该常量的论证。
     """
     factsBySymbol = {str(row["symbol"]): row for row in facts()}
     conflicts: List[Dict[str, object]] = []
@@ -973,6 +989,8 @@ def disposalConflicts() -> List[Dict[str, object]]:
             continue
         judge = str(row["judge"])
         disposal = entry["disposal"]
+        if symbol in OWNER_LEVEL_RETIREMENTS and disposal in (DISPOSAL_RETIRED, DISPOSAL_MERGED):
+            continue
         if disposal in (DISPOSAL_RETIRED, DISPOSAL_MERGED) and judge != JUDGE_ABSENT:
             conflicts.append({
                 "symbol": symbol, "disposal": disposal, "judge": judge,
