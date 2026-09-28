@@ -901,6 +901,64 @@ def pendingOwnerConflicts(entries: Optional[Dict[str, Dict[str, str]]] = None) -
     return conflicts
 
 
+#: 每个处置批的可读名字（**只用于人类可读输出**，判定不看它）。
+#: 名字写在这里而不是散落在各批的 Issue 里：`PENDING_BATCHES` 是值域单源，
+#: 这一份是同一单源的标签，新增批次必须两处同批——标签缺失即启动失败（见
+#: `_batchLabel`），不静默退化成裸代号。
+BATCH_LABELS: Dict[str, str] = {
+    "T-03": "provider 工具通路（协议桥接线，未清存量判据口径）",
+    "T-04": "轮次预算单源 / 门控阈值收口",
+    "T-05": "审批阻塞语义",
+    "T-09": "死码处置批（tool_layers 自循环面与不可达链）",
+    "G2": "目标验收链（Issue #267）",
+    "G4": "工具取消 / 超时与会话回收（Issue #288）",
+    "切片 D": "子代理深度上限（Issue #268）",
+    PENDING_BATCH_ISSUE_SCOPE: "单条待处置项，尚未并入任何处置批",
+}
+
+
+def _batchLabel(batch: str) -> str:
+    """批次的标签：缺失即抛——不允许 `PENDING_BATCHES` 与 `BATCH_LABELS` 各写一份。"""
+    return BATCH_LABELS[batch]
+
+
+def batchProgress() -> Dict[str, Dict[str, object]]:
+    """按处置批汇总进度（**纯函数形态的读数**，可喂合成输入自证）。
+
+    这是「审批/处置批推进一步」这件工作在台账上的**唯一读数**：一批还剩多少条
+    没处置，一眼可数，不再靠 grep 依据列。
+
+    `closed` 的判据是「该批次名下**一条待处置都不剩**」。它是从台账现算的事实，
+    不是人手填的状态位——手填的进度就是第二份自述（`登记 ×N 而不红`的同一条根因）。
+    """
+    progress: Dict[str, Dict[str, object]] = {
+        batch: {"pending": [], "total": 0, "closed": False} for batch in PENDING_BATCHES
+    }
+    for symbol, entry in readLedger().items():
+        batch = pendingBatchOf(entry)
+        if not batch:
+            continue
+        bucket = progress.setdefault(batch, {"pending": [], "total": 0, "closed": False})
+        bucket["pending"].append(symbol)
+        bucket["total"] = len(bucket["pending"])
+    for batch, bucket in progress.items():
+        bucket["pending"] = sorted(bucket["pending"])
+        bucket["total"] = len(bucket["pending"])
+        bucket["closed"] = not bucket["pending"]
+        bucket["label"] = _batchLabel(batch) if batch in BATCH_LABELS else ""
+    return progress
+
+
+def batchProgressLine() -> str:
+    """一行机器可读判据：每个批次的 `已清/总数`（人类可读输出的尾部）。"""
+    parts: List[str] = []
+    for batch, bucket in batchProgress().items():
+        state = "已清" if bucket["closed"] else f"{bucket['total']} 条待处置"
+        parts.append(f"{batch}={state}")
+    pending = sum(bucket["total"] for bucket in batchProgress().values())
+    return f"{' | '.join(parts)} ｜ 合计待处置 {pending} 条"
+
+
 def disposalConflicts() -> List[Dict[str, object]]:
     """处置与判据的咬合判据（纯函数，可喂合成输入自证）。
 
@@ -960,6 +1018,8 @@ def main() -> int:
                 print(f"  {key}: {items}")
         return 1
 
+    print("\n批次进度（`待处置` 必须能回答「归哪一批」，见 `PENDING_BATCHES`）：")
+    print(f"  {batchProgressLine()}")
     print(f"\n反向控制项（必须为 {JUDGE_CONSUMED} 且处置为「{DISPOSAL_PENDING}」）："
           f"{', '.join(REACHABLE_CONTROLS)}")
     print("一致性 OK：判据类/第二轴/引用点数与台账一致、枚举合法、依据非空。")
