@@ -901,11 +901,85 @@ def pendingOwnerConflicts(entries: Optional[Dict[str, Dict[str, str]]] = None) -
     return conflicts
 
 
+#: 每个处置批的可读名字（**只用于人类可读输出**，判定不看它）。
+#: 名字写在这里而不是散落在各批的 Issue 里：`PENDING_BATCHES` 是值域单源，
+#: 这一份是同一单源的标签，新增批次必须两处同批——标签缺失即启动失败（见
+#: `_batchLabel`），不静默退化成裸代号。
+BATCH_LABELS: Dict[str, str] = {
+    "T-03": "provider 工具通路（协议桥接线，未清存量判据口径）",
+    "T-04": "轮次预算单源 / 门控阈值收口",
+    "T-05": "审批阻塞语义",
+    "T-09": "死码处置批（tool_layers 自循环面与不可达链）",
+    "G2": "目标验收链（Issue #267）",
+    "G4": "工具取消 / 超时与会话回收（Issue #288）",
+    "切片 D": "子代理深度上限（Issue #268）",
+    PENDING_BATCH_ISSUE_SCOPE: "单条待处置项，尚未并入任何处置批",
+}
+
+
+def _batchLabel(batch: str) -> str:
+    """批次的标签：缺失即抛——不允许 `PENDING_BATCHES` 与 `BATCH_LABELS` 各写一份。"""
+    return BATCH_LABELS[batch]
+
+
+def batchProgress() -> Dict[str, Dict[str, object]]:
+    """按处置批汇总进度（**纯函数形态的读数**，可喂合成输入自证）。
+
+    这是「审批/处置批推进一步」这件工作在台账上的**唯一读数**：一批还剩多少条
+    没处置，一眼可数，不再靠 grep 依据列。
+
+    `closed` 的判据是「该批次名下**一条待处置都不剩**」。它是从台账现算的事实，
+    不是人手填的状态位——手填的进度就是第二份自述（`登记 ×N 而不红`的同一条根因）。
+    """
+    progress: Dict[str, Dict[str, object]] = {
+        batch: {"pending": [], "total": 0, "closed": False} for batch in PENDING_BATCHES
+    }
+    for symbol, entry in readLedger().items():
+        batch = pendingBatchOf(entry)
+        if not batch:
+            continue
+        bucket = progress.setdefault(batch, {"pending": [], "total": 0, "closed": False})
+        bucket["pending"].append(symbol)
+        bucket["total"] = len(bucket["pending"])
+    for batch, bucket in progress.items():
+        bucket["pending"] = sorted(bucket["pending"])
+        bucket["total"] = len(bucket["pending"])
+        bucket["closed"] = not bucket["pending"]
+        bucket["label"] = _batchLabel(batch) if batch in BATCH_LABELS else ""
+    return progress
+
+
+def batchProgressLine() -> str:
+    """一行机器可读判据：每个批次的 `已清/总数`（人类可读输出的尾部）。"""
+    parts: List[str] = []
+    for batch, bucket in batchProgress().items():
+        state = "已清" if bucket["closed"] else f"{bucket['total']} 条待处置"
+        parts.append(f"{batch}={state}")
+    pending = sum(bucket["total"] for bucket in batchProgress().values())
+    return f"{' | '.join(parts)} ｜ 合计待处置 {pending} 条"
+
+
+#: **裸名撞名**的退役条目：同一个名字在**另一个拥有者**上仍然活着，故裸名判据
+#: 只能读到那些残留站点，给不出 `absent`（上下文域已实测 `dedup` / `clear` 两面
+#: 反例，本域是 `ToolSchema` = `api/endpoints/tool_schema.py` 的 pydantic 模型、
+#: `ToolParameter` = `execution_engine/tool_engine.py` 的 dataclass）。
+#:
+#: 对这些条目**不放宽判据**，而是换一把**拥有者级判据**：由
+#: `tests/unit/tools/test_t09_selfloop_face_ruling.py` 直接断言「登记那一份的定义
+#: 出现在的文件里不再有它的定义落点」，并反向断言同名第二份仍在（证明判据不连坐）。
+#: 把台账硬改成 `absent` 去迎合一条读不到的判据 = 把判据降级成自述（B6-1 明令禁止）；
+#: 所以台账**如实保留**判据类与实测引用点数，收窄口径这件事写在依据里。
+OWNER_LEVEL_RETIREMENTS = ("ToolSchema", "ToolParameter")
+
+
 def disposalConflicts() -> List[Dict[str, object]]:
     """处置与判据的咬合判据（纯函数，可喂合成输入自证）。
 
     声明「已删除 / 收口第二份」⇒ 实测判据类必须是 `absent`；
     声明「已接线」⇒ 必须是 `consumed`。写「已删除」而符号还在 = 处置是口号。
+
+    例外只有一处，且**不是放宽而是换判据**：`OWNER_LEVEL_RETIREMENTS`（裸名撞名）
+    的咬合由拥有者级判据承担，不在这里用裸名值判——理由见该常量的论证。
     """
     factsBySymbol = {str(row["symbol"]): row for row in facts()}
     conflicts: List[Dict[str, object]] = []
@@ -915,6 +989,8 @@ def disposalConflicts() -> List[Dict[str, object]]:
             continue
         judge = str(row["judge"])
         disposal = entry["disposal"]
+        if symbol in OWNER_LEVEL_RETIREMENTS and disposal in (DISPOSAL_RETIRED, DISPOSAL_MERGED):
+            continue
         if disposal in (DISPOSAL_RETIRED, DISPOSAL_MERGED) and judge != JUDGE_ABSENT:
             conflicts.append({
                 "symbol": symbol, "disposal": disposal, "judge": judge,
@@ -960,6 +1036,8 @@ def main() -> int:
                 print(f"  {key}: {items}")
         return 1
 
+    print("\n批次进度（`待处置` 必须能回答「归哪一批」，见 `PENDING_BATCHES`）：")
+    print(f"  {batchProgressLine()}")
     print(f"\n反向控制项（必须为 {JUDGE_CONSUMED} 且处置为「{DISPOSAL_PENDING}」）："
           f"{', '.join(REACHABLE_CONTROLS)}")
     print("一致性 OK：判据类/第二轴/引用点数与台账一致、枚举合法、依据非空。")

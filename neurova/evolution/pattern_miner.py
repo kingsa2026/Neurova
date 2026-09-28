@@ -5,7 +5,7 @@ Phase 2 P2-1: 从工具执行日志中发现高频工具序列模式。
 使用 PrefixSpan 算法进行频繁序列模式挖掘。
 
 核心流程:
-  ToolExecutionLogger (JSON Lines) ──▶ PatternMiner.add_sequence()
+  当轮工具调用序列（post_chat_pipeline 从 tool 消息取 `tool_name`）──▶ add_sequence()
       │
       ▼
   PrefixSpan 投影数据库增长

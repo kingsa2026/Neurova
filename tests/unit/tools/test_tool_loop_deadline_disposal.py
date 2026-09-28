@@ -97,6 +97,23 @@ class TestDisposalIsMachineCheckable:
         # `agent/loops/openai_loop.py:_goalRoundBudget()` 是生产侧唯一读取点，
         # `_buildGateRunner` 默认装配与 `_buildGoalGate` 两处构造时读它 ⇒ 跨文件消费成立。
         "goal_round_budget": "GoalGate 轮次预算：openai_loop._goalRoundBudget 唯一读取点",
+        # T-03 协议桥收口（Issue #177 / #310）：三协议形态判别从「请求侧与响应侧
+        # 各判一遍」收口为单一事实源 `openai_schema.detectToolCallFormat()`。
+        # 三条目的判据类本就成立（T-03 已接线），本批清的是**依据里那句存量**。
+        "ToolSchemaConverter": (
+            "T-03 协议桥：t_tool_transport.toAnthropicTools/toGeminiTools 的唯一转换器；"
+            "存量（形态判别第二份）已收口，常驻判据 "
+            "tests/unit/tools/test_t03_protocol_bridge_single_source.py"
+        ),
+        "ToolCallParser": (
+            "T-03 协议桥：protocol_thinking.toOpenAIToolCalls 的唯一解析器；"
+            "内部「自动检测三形态」改走同一份判别表（detectToolCallFormat）"
+        ),
+        "tool_choice": (
+            "T-03 协议桥：经 LLMClient._build_request_params 纳入转发面，"
+            "由 provider_compat.ProviderCompat.supports_tool_choice 门控——"
+            "本条**无待清存量**（不存在第二份形态判别），随同批收口一并终局"
+        ),
     }
 
     #: 已被**退役处置批**删除的条目（`符号: 处置批`）。与 `WIRED_BY_LATER_WAVES`
@@ -112,6 +129,56 @@ class TestDisposalIsMachineCheckable:
         "MAX_TOOL_CALL_ROUNDS": (
             "T-09 死码处置批（Issue #174）：_auto_continue 里只写不读的护栏残骸，"
             "声明删除；常驻判据 tests/unit/agent/test_auto_continue_dead_budget.py"
+        ),
+        # T-09 死码处置批（Issue #174 / #310）：第二份注册面与它撑起的整条不可达链。
+        # 裁定「ToolRouter 与 ToolEngine 之间是否需要第二份注册表」= 不需要
+        # （真面四方法签名逐字相同且真装配；ToolEngine 侧经 ExecutionEngine 直取；
+        #  该类生产零实例化）。逐条论证见 scripts/ci/toolLoopDeadlines.txt 的四行。
+        "UnifiedToolRegistry": (
+            "T-09 死码处置批（Issue #310）：第二份注册面整模块退场，"
+            "与 ToolRouter 同名四方法签名逐字相同；常驻判据 "
+            "tests/unit/tools/test_t09_dead_registry_retirement.py"
+        ),
+        "ToolExecutionLogger": (
+            "T-09 死码处置批（Issue #310）：唯一消费方是不可达的 UnifiedToolRegistry；"
+            "其 JSON Lines 序列在生产侧从来无写入方（pattern_miner 的三处真实调用"
+            "全喂当轮工具序列）。同批整模块退场。"
+        ),
+        "CLIToolExecutor": (
+            "T-09 死码处置批（Issue #310）：唯一消费方是不可达的 UnifiedToolRegistry；"
+            "沙箱执行真面在 neurova/sandbox/。同批整模块退场。"
+        ),
+        "ToolExecutionResult": (
+            "T-09 死码处置批（Issue #310）：同一条不可达链的最后一段——"
+            "schemas.py 的三处自消费全在类内，全仓唯一跨文件引用就是那条死链。"
+        ),
+        # T-09 死码处置批：schemas.py 自循环面三条。真面是 openai_schema 的
+        # ToolSchemaConverter 家族（T-03 已接线）与 OpenAIFunctionSchema.parameters
+        # 的 dict 形态——给 LLMClient 的实际契约。逐条论证见台账三行。
+        "ToolSource": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场——它是 ToolSchema.source "
+            "字段的标注（标注不构成消费点），真面是 ToolRouter 的 _tool_metadata[source]。"
+        ),
+        "ToolParameter": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场；同名第二份"
+            "（execution_engine/tool_engine.py）不连坐，拥有者级判据见 "
+            "tests/unit/tools/test_t09_selfloop_face_ruling.py"
+        ),
+        "ToolSchema": (
+            "T-09 死码处置批（Issue #310）：自循环面同批退场；同名第二份"
+            "（api/endpoints/tool_schema.py 的 pydantic 模型）是活的、不连坐。"
+        ),
+        # T-09 死码处置批：五段流水线框架与重置面（Issue #174 / #310）。
+        # 裁定 = 不接线：四段的注册入口生产侧全仓零调用，唯一活着的 result 段
+        # 已独立成面（熔断器 + ToolExecutor 真实消费）。**符号级退役**，
+        # 文件整模块保留 —— 与反向控制同处一个文件。
+        "ToolExecutionPipeline": (
+            "T-09 死码处置批（Issue #310）：五段框架整体退场（编排面没人用）；"
+            "常驻判据 tests/unit/tools/test_t09_pipeline_face_ruling.py"
+        ),
+        "reset_pipeline_observers": (
+            "T-09 死码处置批（Issue #310）：与五段框架同批退场（重置面没人用）——"
+            "观察者单例由 get_pipeline_observers() 惰性创建，进程内不需要重置点。"
         ),
     }
 
@@ -158,6 +225,13 @@ class TestDisposalIsMachineCheckable:
 
         机器事实：退役的符号不再被 `facts()` 取到（判据类 `absent`），
         且台账处置标为「已删除」。两者缺一即红。
+
+        **例外只有一处，且不是放宽而是换判据**：`ledger.OWNER_LEVEL_RETIREMENTS`
+        里的符号是**裸名撞名**（同名第二份在另一个拥有者上仍活着），裸名判据只能
+        读到残留站点、给不出 `absent`。它们的咬合由**拥有者级判据**承担
+        （`tests/unit/tools/test_t09_selfloop_face_ruling.py`：断言登记那一份的定义
+        已从它的文件消失，并反向断言同名第二份仍在）。在这里硬塞一条 `absent`
+        只会逼人改台账去迎合 —— 那正是把判据降级成自述。
         """
         facts = _facts()
         offenders = []
@@ -166,11 +240,35 @@ class TestDisposalIsMachineCheckable:
             entry = ledger.readLedger().get(symbol, {})
             if entry.get("disposal") != ledger.DISPOSAL_RETIRED:
                 offenders.append(f"{symbol}: 台账处置为 {entry.get('disposal')}，未标已删除")
+                continue
+            if symbol in ledger.OWNER_LEVEL_RETIREMENTS:
+                continue
             if row is not None and row["judge"] != ledger.JUDGE_ABSENT:
                 offenders.append(
                     f"{symbol}: 标了已删除但判据类仍为 {row['judge']}（符号还在，处置是口号）"
                 )
         assert not offenders, "退役批声明与机器事实不符：\n  " + "\n  ".join(offenders)
+
+    def test_ownerLevelRetirementsAreProvenElsewhere(self):
+        """裸名撞名的退役条目必须**真的**由拥有者级判据兜住，不是漏网。
+
+        这条是上一条例外的守门人：例外集合不许悄悄长大，且集合里每个符号都必须
+        有对应的拥有者级判据文件存在（否则例外就成了逃逸口）。
+        """
+        assert set(ledger.OWNER_LEVEL_RETIREMENTS) <= set(self.RETIRED_BY_LATER_WAVES), (
+            "OWNER_LEVEL_RETIREMENTS 里有符号不在退役批论证里——例外必须先被论证"
+        )
+        ownerTest = PROJECT_ROOT / "tests/unit/tools/test_t09_selfloop_face_ruling.py"
+        assert ownerTest.exists(), (
+            "OWNER_LEVEL_RETIREMENTS 的拥有者级判据文件不存在——"
+            "例外没有兜底判据，等于把「已删除」降级成自述"
+        )
+        for symbol in ledger.OWNER_LEVEL_RETIREMENTS:
+            row = _facts().get(symbol)
+            assert row is not None, (
+                f"{symbol} 在拥有者级例外里却已从取数表整条消失——"
+                "那它就该校验 `absent`，不该留在例外集合里"
+            )
 
     def test_baseline_of_absent_symbols_is_empty_in_this_wave(self):
         """自证：除**已登记的退役批**之外，本片不出现 `absent` 条目。
