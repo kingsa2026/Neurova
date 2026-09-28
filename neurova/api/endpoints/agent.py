@@ -232,22 +232,6 @@ def get_agent_config_manager():
     return get_config_manager()
 
 
-def load_agents_config() -> Dict[str, Any]:
-    """加载 Agent 配置列表（固定在项目根目录，避免依赖 CWD）"""
-    from neurova.core.data_root import repoAsset
-
-    candidates = [repoAsset("agents.json")]
-    for config_path in candidates:
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.warning("Failed to load agents config: %s", e)
-                return {}
-    return {}
-
-
 def agent_to_info(agent) -> Dict[str, Any]:
     """将 Agent 对象转换为信息字典"""
     # 从 config 获取 agent_id

@@ -50,9 +50,22 @@ session/
 uploads/
 
 # 模型文件
-models/*.bin
-models/*.onnx
-models/*.safetensors
+#
+# 这里**不能**写 `models/*.safetensors` 这类跨目录通配：它挡的不是某个可选大件，
+# 而是整棵 models/ 树里所有权重。embedding 权重是**随代码走的资产**——
+# neurova/embedding/onnx_embedding.py 经 repoAsset("models","embedding",
+# "bge-small-zh-v1.5") 从仓库根读它，Dockerfile 也 `COPY models/` 进镜像；
+# 被 .dockerignore 挡掉时 `COPY` 会**构建失败**，不是"少拷一个文件"。
+# 故排除必须落在**具体的大件路径**上——窄到只命中真正不要的那几个大件，
+# 其余（元数据、tokenizer、MANIFEST）自然进上下文。
+# 判据从生产读取方反推（tests/unit/deploy/test_image_model_assets.py），
+# 不靠人工维护第二份清单。
+models/tts/moss-nano/*.onnx
+models/tts/moss-nano/*.data
+models/tts/moss-tokenizer/*.onnx
+models/tts/moss-tokenizer/*.data
+models/embedding/bge-small-zh-v1.5/*.safetensors
+models/embedding/bge-small-zh-v1.5/*.bin
 
 # 前端文件（生产模式下由后端服务静态文件）
 NeurUI/
