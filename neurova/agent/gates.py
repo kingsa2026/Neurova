@@ -64,7 +64,9 @@ class IterationGate(StopGate):
     def __init__(self, max_rounds: int = 20):
         self.name = "iteration"
         self.priority = 10
-        self.max_rounds = max_rounds
+        self.max_rounds = (
+            int(max_rounds) if max_rounds is not None else self.ROUND_BUDGET_FALLBACK
+        )
 
     def check(self, ctx: Dict[str, Any]) -> StopDecision:
         rounds = int(ctx.get("tool_rounds") or 0)
@@ -161,22 +163,34 @@ class GoalGate(StopGate):
       `ctx["goal_continuations"]` 计数，上限是 `maxContinuations`（**唯一的
       配置绑定阈值**，配置键 `goal_max_continuations`）。
 
+    工具轮预算 `max_rounds` 由配置单源 `goal_round_budget` 提供，且只在**有目标
+    声明**时才比较——没有目标时这个上限不替 IterationGate 开火（它的意义是
+    "目标没达成但轮次用完了"，没有目标时该命题不存在）。
+
     判据不可用（`parse_ok` 为假）时一律 BYPASS：绝不因判据坏掉而阻断正常回复；
     该情形由出口处的观测面以诚实形态暴露。
     """
+
+    #: 无配置键可用时的兜底轮次预算（fail-soft 用，**不是**默认值）。
+    #: 生产装配点一律显式传 `goal_round_budget`——若这里成了一个被实际取到的值，
+    #: 说明又出现了"装配不传它"的形态，上限会再次不受配置管辖。故它取的是
+    #: 合法域下界而非某个"看着合适"的数：越早开火越容易被看见。
+    ROUND_BUDGET_FALLBACK = 2
 
     def __init__(
         self,
         goal: Optional[Dict[str, Any]] = None,
         completion_check: Optional[Callable[[Dict[str, Any], Dict[str, Any]], tuple]] = None,
-        max_rounds: int = 15,
+        max_rounds: Optional[int] = None,
         maxContinuations: int = 2,
     ):
         self.name = "goal"
         self.priority = 15
         self.goal = dict(goal or {})
         self._completion_check = completion_check
-        self.max_rounds = max_rounds
+        self.max_rounds = (
+            int(max_rounds) if max_rounds is not None else self.ROUND_BUDGET_FALLBACK
+        )
         # 续跑预算独立于工具轮预算：一次续跑消耗一格 goal_max_continuations，
         # 不消耗工具轮预算。两者绑定**不同的配置键**，故阈值可达性为 single_source
         # （不得与 max_loop_rounds 共享尺度来源——那是 IterationGate 被机器算成
@@ -231,7 +245,11 @@ class GoalGate(StopGate):
                     gate_name=self.name,
                 )
 
-        if rounds >= self.max_rounds:
+        # 轮次预算只在**本门控真的在管这个目标**时才比较：无目标声明时它不替
+        # IterationGate 开火（出口求值点已按 D-4 在无目标时整体跳过，工具轮分支
+        # 此前仍无条件比较 —— 于是普通对话在第 15 轮被一个与它无关的"goal 模式
+        # 轮次预算耗尽"终止，IterationGate 的配置形同虚设）。
+        if (goal or self.goal) and rounds >= self.max_rounds:
             return StopDecision(
                 action=StopAction.TERMINATE,
                 reason=f"goal 模式轮次预算耗尽（{self.max_rounds}）",
