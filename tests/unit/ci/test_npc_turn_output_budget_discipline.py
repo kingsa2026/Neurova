@@ -3,38 +3,53 @@
 
 ## 用户看到的"空转"
 
-Issue #306：`@kingsa2026/neurova(DSCoder-max)` 连着五轮"跑了半小时，Issue 上
-没有回音、分支上没有提交"，流水线却一律报 `success`。逐轮复算五条构建的末轮读数
-（`cnb build get-build-stage ... --stageId stage-3`，字段取自 AI 请求明细）：
+Issue #306：`@kingsa2026/neurova(DSCoder-max)` 连着几轮"跑了半小时，Issue 上
+没有回音、分支上没有提交"，流水线却一律报 `success`。逐轮复算**六条**同形构建的
+末轮读数（`cnb build get-build-stage ... --stageId stage-3`，字段取自 AI 请求明细）：
 
 ```
-cnb-t13-1k3im568q  46 轮 / 1351s   末轮 finish with length, in=2109  out=32000
+cnb-t13-1k3im568q  46 轮 / 1352s   末轮 finish with length, in=2109  out=32000
 cnb-p3m-1k3j7bd05  31 轮 /  316s   末轮 finish with length, in=3630  out=32000
-cnb-q0r-1k3j7r965  31 轮 /  688s   末轮 finish with length, in=2783  out=32000
-cnb-dc6-1k3j9phhs  37 轮 / 1030s   末轮 finish with length, in=2897  out=31998
-cnb-90f-1k3if9qm1  46 轮 / 1337s   末轮 finish with length, in=2117  out=32000
+cnb-q0r-1k3j7r965  31 轮 /  689s   末轮 finish with length, in=2783  out=32000
+cnb-dc6-1k3j9phhs  37 轮 / 1031s   末轮 finish with length, in=2897  out=31998
+cnb-90f-1k3if9qm1  46 轮 / 1338s   末轮 finish with length, in=2117  out=32000
+cnb-mm8-1k3iu5fr8  36 轮 /  931s   末轮 finish with length, in=1683  out=31999
 ```
+
+每一轮的读数都用严格解析复算（`^Master[agent][\d+] … finish with …`，
+并校验轮号 1..N 连续、与 `done. N turns` 一致 —— 日志里会回显别的构建的日志原文，
+不锚行首就会把嵌入内容算成本轮读数）。
 
 同一批里 `finish_reason=length` 的那一轮，`completion_tokens_detail.reasoning_tokens`
 恰为 32000、`content` 聚合长度 **0 字符**、`tool_calls` 数 **0**
 （构建 `cnb-p3m-1k3j7bd05` 的请求明细逐字：`finish: length`，
 `completion_tokens: 32000 / reasoning_tokens: 32000`）。
 
-## 根因（两个事实相乘，缺一不成立）
+## 根因（三个事实相乘，缺一不成立）
 
 1. **推理与正文共享单轮输出预算，且预算会被推理吃满**：`thinkingLevel: max`
    下的单轮推理可达 11.9 万字符（`cnb-p3m-1k3j7bd05` 末轮 `thinking_end,
    length: 118537`），远超单轮输出上界。吃满即当轮**零正文、零工具调用** ——
-   该轮白跑。同批对照：`thinkingLevel: off` 的构建
-   （`cnb-1hm-1k3e5csiq` / `cnb-35s-1k3et5jc9`）末轮 `out` 只有数百，
-   `finish_reason=stop`，无一条零产出读数。
-2. **零产出的一轮不会触发接力**：收尾 `if` 的判据是平台在收尾时刻注入的
+   该轮白跑。
+   同配置真对照（同一条 `$` 段、同 `maxTokens=48000`，只有思考档不同）：
+   `cnb-i5u-1k3carfm9` / `cnb-9ro-1k3f57fif` / `cnb-s07-1k3f0uhcv`
+   分别是 147 / 100 / 234 轮，末轮全是 `finish with stop`，
+   **一条 `length` 都没有**。
+2. **那一轮恰好是会话的最后一轮**：六条构建的 `done. N turns` 与末轮轮号逐条一致
+   （46/31/31/37/46/36），末轮之后再无任何工具命令 —— 会话就停在那一次截断上。
+3. **零产出的一轮不会触发接力**：收尾 `if` 的判据是平台在收尾时刻注入的
    `$CNB_PIPELINE_STATUS=error` + 失败 stage 名命中 `npc-go`（ADR 0022）。
    零产出的收官是 `success`，两条都不成立 ⇒ 收尾 Stage 每次 `skipped`
-   （五条构建逐条如此：`轮数触顶接力…: 160ms (skipped)`）。
-   这一轮改而未提交的成果随容器一起丢，Issue 上没有任何回音。
+   （六条构建逐条如此：`轮数触顶接力…: 160ms (skipped)`）。
 
-两条合起来解释了用户的观感：**跑满墙钟、零产出、无人接手**。
+三条相乘的画面：**该轮白跑、会话停在那里、无人接手**。
+而真正让损失不可逆的是「全程没有落盘」：这六条构建里
+`cnb issues comment` / `git commit` / `git push` 三类命令**一条都没有执行过**
+（逐段扫描读数，见下）。同配置的 `cnb-bgo-1k3iskj3v` / `cnb-i65-1k3isrpu4` /
+`cnb-b0m-1k3ia89au` 末轮是 `stop`，且分别在第 36~226 / 146~153 / 148~198 轮
+执行过落盘命令 —— 它们截断时也不至于全丢。
+
+所以三条合起来解释了用户的观感：**跑满墙钟、零产出、无人接手、成果全丢**。
 
 ## 为什么修在指令面
 
@@ -52,7 +67,7 @@ NPC 的运行时在平台侧（`cnbcool/default-npc` 镜像 + 平台 Agent），
 ## 本文件钉三件事（都可证伪）
 
 - **A 条款在册**：每个在册角色的 prompt 都必须含「单轮输出预算纪律」条款，
-  且点名四条事实：单轮输出预算、推理吃满、零产出、不接力。
+  且点名四条事实：单轮输出预算、推理吃满、零产出、不会触发接力。
   可证伪：从任一角色 prompt 删掉该条款 → 立刻红。
 - **B 条款正文逐字一致**：条款正文（锚点 → 结束锚点）在各角色间必须逐字相同。
   六份人设是手抄的共享正文，改一处漏一处不会有任何红（教义第 6 条）。
@@ -60,6 +75,19 @@ NPC 的运行时在平台侧（`cnbcool/default-npc` 镜像 + 平台 Agent），
 - **C 动作约束可核**：条款必须给出**可执行**的落盘动作（"先落盘"），
   而不是只描述现象 —— 只描述现象等于把纪律写成了背景知识。
   可证伪：把动作句删掉、只留现象描述 → 立刻红。
+
+## 复算口径（防把嵌入日志算成本轮读数）
+
+日志里会**回显别的构建的日志原文**（实测踩过：`cnb-bgo-1k3iskj3v` 的 stage 日志里
+嵌着 `cnb-t13-1k3im568q` 的输出），按子串匹配会把嵌入内容算成本轮读数。
+本文件引用的读数一律按**行首锚定**的正则解析，并校验轮号 1..N 连续、
+与 `done. N turns` 一致后才采纳。
+
+初版曾把 `cnb-1hm-1k3e5csiq` / `cnb-35s-1k3et5jc9` 当"思考档对照"，
+复核后**不成立**：它们跑的是平台默认流水线体（stage 只有
+`Prepare → npc go → BeforeEnd → …`，无本仓四段门禁；参数为
+`maxTokens=64000` / `thinkingLevel=off`），不是本仓配置。
+已换成同配置真对照（`cnb-i5u-1k3carfm9` / `cnb-9ro-1k3f57fif` / `cnb-s07-1k3f0uhcv`）。
 
 ## 未闭环（点名，不静默）
 
