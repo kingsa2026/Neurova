@@ -72,7 +72,8 @@ def test_list_private_skills_degrades_when_service_raises():
     """演化契约: 磁盘读失败 → 空列表 + logger.exception（不静默吞，不再回退内存源）。"""
     from neurova.api.endpoints import skill_pool_api as mod
 
-    def _boom(agent_id):
+    def _boom(*args, **kwargs):
+        # 形参表不手抄：签名的事实源是生产对象（`_pool_service`）。
         raise RuntimeError("disk error")
 
     with patch.object(mod, "_pool_service", side_effect=_boom):
