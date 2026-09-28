@@ -200,7 +200,7 @@ MIT License
 - 端口：`9527`（后端）/ `8100`（前端）
 - 健康检查：`/health`，周期 30s、超时 5s、启动宽限 30s、失败阈值 3
 - 后端资源：requests `500m`/`1Gi`，limits `2000m`/`4Gi`
-- 镜像：后端 Python 3.12（与 CI 矩阵一致）；appVersion 跟随 `neurova.__version__`
+- 镜像：后端 Python 3.12（受保护子集单腿即此版本，事实源为 `Dockerfile` 的 `FROM`）；appVersion 跟随 `neurova.__version__`
 - 持久化：`database.persistence.enabled=true` 时数据卷必须是 PVC（`<fullname>-data`）
 
 改任一侧前先跑：

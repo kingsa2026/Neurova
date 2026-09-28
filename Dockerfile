@@ -3,8 +3,9 @@
 
 # 多阶段构建
 #
-# 基础镜像版本必须落在 CI 实测矩阵内（.github/workflows/ci.yml 与 .cnb.yml 的
-# unit-tests 跑 3.11/3.12）：此前是 3.10-slim，等于生产解释器从未过 CI 门禁。
+# 本文件是 CI 解释器版本的事实源：受保护子集（unit-tests）自 Issue #301 起
+# 只跑一腿，那一腿跑的就是这里的基础镜像版本——此前是 3.10-slim，等于生产
+# 解释器从未过 CI 门禁。判据见 tests/unit/ci/test_unit_tests_single_leg.py。
 # 同时须 ≥ scripts/config.py 的 MIN_PYTHON_VERSION(3,10)。
 FROM python:3.12-slim as builder
 

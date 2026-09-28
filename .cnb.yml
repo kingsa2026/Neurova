@@ -12,7 +12,8 @@
 #                            故并成一条流水线，不再各扫一遍（Issue #223 第 2 条）
 #   2. import-and-regression 模块导入巡检 + 审计回归
 #   3. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
-#                            + 覆盖率门禁 fail_under=60，py3.11/3.12 双跑
+#                            + 覆盖率门禁 fail_under=60；单腿跑在生产解释器上
+#                            （Issue #301：两腿状态实测恒同，理由见第 4 段注释）
 #   4. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
 #   5. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
 #   6. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
@@ -41,8 +42,8 @@
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
 #     `main.push` 的每条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐
-#     （unit-tests 按 py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；
-#     static-gate 与 ruff 并成一条，对应 GitHub 侧同为一条的 static-gate job）。
+#     （unit-tests 与 static-gate 各一条，粒度与 GitHub 的 job 一对一；
+#     受保护子集为何只跑一腿、那一腿为何是生产解释器：见第 4 段注释）。
 #     条数不在这里手抄：单一事实源是 `main.push` 数组本身的长度，
 #     现读数由 tests/unit/ci/test_cnb_header_pipeline_count.py 常驻比对——
 #     头部曾手抄过 10 / 11 两个互相矛盾的口径（工单 009 改成 11、Issue #223 合回 10），
@@ -121,29 +122,27 @@ main:
           script: python -m pytest tests/unit/test_audit_regressions.py -q
           timeout: 20m
 
-    # ── 4. 单元测试受保护子集 + 覆盖率门禁（py3.11 / py3.12 双跑）────────
-    - name: unit-tests-py311
-      runner:
-        tags: cnb:arch:amd64
-        cpus: 4
-      docker:
-        image: python:3.11
-        volumes:
-          - /root/.cache/pip
-          - /root/.cache/uv
-      stages:
-        - name: install uv + locked dependencies
-          script: |
-            python -m pip install uv
-            uv pip install --system -r requirements-ci.lock
-          timeout: 30m
-        - name: protected subset with coverage gate (fail_under=60)
-          script: |
-            TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 30m
-
-    - name: unit-tests-py312
+    # ── 4. 单元测试受保护子集 + 覆盖率门禁（单腿：生产解释器）────────────
+    # 为什么只有一腿（Issue #301，用户提问"这两条有必要重复跑么"）：
+    #   此前是 py3.11/py3.12 双跑（cnb 两条、GitHub matrix 两格），理由是
+    #   "对应 matrix、两侧一致的放行标准"。按平台构建列表复算 `pull_request`
+    #   事件的实测读数是：**两腿状态完全一致** —— 101 次构建 84 次双绿、17 次双红，
+    #   **单边红 0 次**；更早（11 条流水线时代）那 9 次单边红的根因全是**判据绑了
+    #   墙钟**（perf_gate 微基准 21.9ms>20ms、死线账本撞 30s 超时），已由
+    #   19065c3f / f4f71943 / 930db08a 逐个根修 —— 它们不是"版本差异"，
+    #   修完即消失（收敛后单边红回到 0）。故重复的那一腿不提供新信号，
+    #   只花费 runner 资源（每构建约 29.5 CPU·min）。
+    #   墙钟也不受影响：同一批里 3.12 腿在 94/101 次中本就是最慢的那条流水线
+    #   （中位 492s vs 3.11 腿 435s），构建墙钟与最慢流水线之差中位仅 3s。
+    # 为什么留下的是 3.12：生产解释器是 3.12（Dockerfile 两阶段均 FROM
+    #   python:3.12-slim），留下的那一腿跑的就是线上那份解释器。
+    # 3.11 并未从 CI 消失：static-gate（pyflakes + ruff 全仓 AST，按 3.11 解析）
+    #   与 import-and-regression（真导入全模块）仍在 python:3.11 上跑，
+    #   "3.11 上能不能解析、能不能导入"仍有解释器级覆盖。
+    # 收敛的是"跑几遍"，不是"判据"：受保护子集与 --cov-fail-under=60 逐字不动。
+    # 版本不在此处写死第二份：事实源是 Dockerfile 的 FROM，判据见
+    # tests/unit/ci/test_unit_tests_single_leg.py（改镜像而这里不响即红）。
+    - name: unit-tests
       runner:
         tags: cnb:arch:amd64
         cpus: 4
