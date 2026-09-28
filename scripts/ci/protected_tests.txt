@@ -1277,3 +1277,24 @@ tests/unit/ci/test_stub_signature_single_source.py
 #   （单轮输出预算 / 推理 / 零产出 / 不会触发接力）+ 给出可执行落盘动作 +
 #   各角色条款正文逐字一致（防改一处漏一处的静默漂移）。
 tests/unit/ci/test_npc_turn_output_budget_discipline.py
+
+# PR #308（受保护子集 CI 红：等待以「让步次数」为界 ⇒ 判据绑上机器负载）：
+#   构建 cnb-v4f-1k3jg3a81（PR #308）的 unit-tests 腿红一条：
+#     FAILED tests/unit/tools/test_tool_cancellation.py
+#            ::TestCancelTokenProtocol::testCancelRunsRegisteredKillAction
+#     AssertionError: 令牌置位后进程仍然存活——回调没兑现
+#   红的是**假红**：杀灭回调已兑现（子进程确实被杀灭），只是等待窗口被机器负载
+#   决定。原写法 `for _ in range(200): if proc.poll() is not None: ... await sleep(0)`
+#   以让步次数为界；`sleep(0)` 只把控制权交回事件循环、**不保证内核完成一次调度**。
+#   复现（本轮实测，8 vCPU + 48 路 CPU 自旋超额订阅）：200 次让步在 5ms 内走完而
+#   子进程仍未被回收 ⇒ 同一份代码空载绿、负载下红——即 AGENTS.md 修复教义第 2 条
+#   点名的「判据与机器速度捆绑」（本仓此前两次同源事故：perf_gate.py 微基准、
+#   test_perf_gate_contract.py 等待注入）。
+#   修法：等待改等**真事实**——`asyncio.to_thread(proc.wait, timeout=KILL_GRACE_S)`，
+#   上界取生产侧收尸窗口的单源常量（不新造第二个尺度）；判据从"机器多快"回到
+#   "进程还在不在"。根因是「以让步次数为界的等待」这一形态，故同时立守卫拦同形。
+#   判据：受保护子集里每一处「让步计数为界的等待」（计数为界 + 按条件提前退出 +
+#   零延迟让步 + 等的是本循环推不动的条件，四者合取）逐条有结论 + 台账账实双向
+#   对账 + 反向控制四条（缺陷形态必须报出；等真事件、真定时、同循环内推进、
+#   不声称"等到了"的定次让出四条合法形态必须不报）。
+tests/unit/ci/test_count_bounded_wait_ledger.py
