@@ -5,8 +5,8 @@
         <h2>{{ t('channel.agentChannels') }}</h2>
         <p class="nr-ac-desc">{{ t('channel.agentChannelsDesc') }}</p>
       </div>
-      <a-select v-model:value="agentId" size="small" style="width: 200px"
-        :options="agentSelectOptions" @change="fetchConfigs" />
+      <a-select :value="agentId" size="small" style="width: 200px"
+        :options="agentSelectOptions" @change="switchAgent" />
     </div>
 
     <a-spin :spinning="loading">
@@ -115,9 +115,9 @@
  * agent 维度（多实例：同一平台不同 agent 各配各的 bot），字段表与系统渠道
  * 管理页共享 config/channelFields.ts 单一来源。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -137,14 +137,19 @@ import { buildAgentSelectOptions } from '@/config/agentOptions'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const agentStore = useAgentStore()
 
 interface AgentChannel extends ChannelCatalogItem {
   configured: boolean
 }
 
-const routeAgentId = String(route.params.agentId || '')
-const agentId = ref(routeAgentId || 'default')
+// agent 身份的唯一事实源是**路由**：URL 可分享、刷新不丢、前进后退可回放。
+// 曾经的写法把身份落在本地 ref（`@change="fetchConfigs"` 只改 ref，URL 不动），
+// 于是刷新一次就回退到路由里的旧 agent —— 用户以为"配置又没了"，
+// 而 saveConfig / removeChannel 都按 ref 落盘，两个事实源说出不同身份时
+// 用户按屏幕认知操作、系统按另一个身份写。
+const agentId = computed<string>(() => String(route.params.agentId || '') || 'default')
 const loading = ref(false)
 const saving = ref(false)
 const showModal = ref(false)
@@ -177,6 +182,19 @@ const agentSelectOptions = computed(() => [
   { value: 'default', label: t('channel.defaultAgent') },
   ...buildAgentSelectOptions(agentStore.agentOptions),
 ])
+
+/**
+ * 切 agent = 换 URL。身份只有一个写入口：路由。
+ *
+ * 只改本地 ref 的旧写法会让 URL 与屏幕说两个身份（刷新回退、链接不可分享、
+ * 落盘归属与用户认知不一致），故此处**不**直接改任何本地身份变量：
+ * 推路由 → `route.params.agentId` 变 → `agentId` computed 变 → `watch` 触发取数。
+ */
+function switchAgent(value: unknown) {
+  const next = String(value ?? '')
+  if (!next || next === agentId.value) return
+  router.push({ name: 'AgentChannel', params: { agentId: next } })
+}
 
 function baseCatalog(): AgentChannel[] {
   // NV 独有渠道：鸿蒙负一屏推送（Phase C 换共享目录时只加在系统页，
@@ -323,8 +341,12 @@ onMounted(() => {
   // 会让一次慢/失败的 /agents 拖空整页（选项本身是响应式的，到了就渲染）。
   agentStore.loadAgents?.()
   agentStore.loadWorkflowAgents?.()
-  fetchConfigs()
 })
+
+// 身份变化即取数：`agentId` 源自路由，故首挂载与后续 URL 变化（选择器、前进后退、
+// 外部跳转）走**同一条**取数路径 —— 不必也不许再写第二处 fetchConfigs 调用，
+// 否则两条路各自演化，"切换后看到的是谁的配置"就没人能一眼答出。
+watch(agentId, () => { fetchConfigs() }, { immediate: true })
 </script>
 
 <style scoped>

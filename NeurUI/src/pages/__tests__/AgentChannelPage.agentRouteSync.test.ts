@@ -4,25 +4,50 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Agent 渠道页·agent 选择器契约。
+ * Agent 渠道页·agent 切换必须以**路由为唯一事实源**（Issue #290 未闭环项②）。
  *
- * 缺陷回归（2026-09-28 取证报告 Bug A）：本页与系统渠道页曾按 `o.id / o.name`
- * 读 agentOptions，而生产端（stores/agents.ts）给出的元素是 `{label, value, isWorkflow}`
- * —— 两个键名都是 undefined，于是选择器渲染出无文字空白行；选中即
- * `agentId = undefined`，`listChannelConfigs(undefined)` 不发 agent_id 参数，
- * 后端 Query 默认值把它兜成 default：**用户以为在给 X 配飞书，实际写进了 default 的表**。
+ * ## 缺陷（2026-09-28 取证报告登记，未修）
  *
- * 本文件**不得** mock `useAgentStore` 的 agentOptions（旧布局用例把 store mock 成空数组，
- * `.map()` 对空数组恒等，错键名因此永远不会显形）：改用真 pinia store + mock `GET /agents`。
+ * `@change="fetchConfigs"` 只改本地 `agentId` ref，URL 仍是进入时的旧 agent。
+ * 后果分三层，逐层都比"显示不同步"更重：
+ *
+ * 1. **刷新即回退**：用户切到「凯蒂」配完渠道，F5 一次回到路由里的旧 agent，
+ *    页面看起来"配置又没了"——而配置其实在「凯蒂」名下，只是当前视图读的是别人；
+ * 2. **可分享性丧失**：URL 不再表达当前身份，"把这个 agent 的渠道页发给我"做不到；
+ * 3. **写错归属**：`saveConfig` / `removeChannel` 都按 `agentId.value` 落盘，
+ *    而浏览器前进后退、外部链接跳转都会用**路由**重算本页 —— 两个事实源说出
+ *    不同身份时，用户按屏幕认知操作、系统按另一个身份写。
+ *
+ * ## 判据
+ *
+ * 切换选择器后：
+ * - 路由被推到**新 agent** 的渠道页（URL 成为事实源）；
+ * - 列表按新身份重新取数（不是只改本地变量）；
+ * - 从路由进入（`/agent/X/channel`）时，页面身份与路由一致。
  */
+
+/**
+ * 路由替身：`params` 是**响应式**的，`push` 会真的改它 —— 与真路由同形。
+ * 若替身把 push 记成「被调用」却不改 params，判据就只咬得住「有没有调 push」，
+ * 咬不住「切换后页面身份是否真的跟着走」，正是本用例要防的那种半截判据。
+ */
+const routeState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { reactive } = require('vue')
+  return { current: reactive({ params: { agentId: '216fb777' } as Record<string, string> }) }
+})
+const routerPush = vi.fn((target: unknown) => {
+  const params = (target as { params?: Record<string, string> })?.params
+  if (params?.agentId) routeState.current.params.agentId = String(params.agentId)
+  return Promise.resolve()
+})
 
 vi.mock('@/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 vi.mock('vue-router', () => ({
-  // 同 layout 用例：本档钉的是选择器选项契约，路由替身只需满足形状。
-  useRoute: () => ({ params: { agentId: '216fb777' } }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRoute: () => routeState.current,
+  useRouter: () => ({ push: routerPush }),
 }))
 vi.mock('@/api/modules/channel-configs', () => ({
   listChannelConfigs: vi.fn().mockResolvedValue([]),
@@ -43,7 +68,6 @@ import { api } from '@/api'
 import { listChannelConfigs } from '@/api/modules/channel-configs'
 import AgentChannelPage from '../AgentChannelPage.vue'
 
-/** 真 store 的响应源：两个已注册智能体（与登记表实测同名同 ID 形状）。 */
 const AGENTS = [
   { id: '216fb777', name: '凯蒂', status: 'active' },
   { id: 'kai', name: '凯', status: 'active' },
@@ -72,7 +96,6 @@ const messages = {
   },
 }
 
-/** a-select 假体把 options 原样渲成 <option> 节点，并保留 v-model 回写。 */
 const agentSelectStub = {
   props: ['options', 'value'],
   emits: ['update:value', 'change'],
@@ -105,17 +128,10 @@ function mountPage() {
   })
 }
 
-/** 选择器选项的 {value,label} 读数（从真实渲染出的 option 节点取，不看内部变量）。 */
-function selectOptions(wrapper: ReturnType<typeof mountPage>) {
-  return wrapper.findAll('.agent-select option').map((o) => ({
-    value: o.attributes('value'),
-    label: o.text(),
-  }))
-}
-
-describe('AgentChannelPage — agent 选择器携带真身份', () => {
+describe('AgentChannelPage — 切换 agent 以路由为唯一事实源', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    routeState.current.params.agentId = '216fb777'
     vi.clearAllMocks()
     ;(api.get as unknown as { mockImplementation: (fn: (url: string) => Promise<unknown>) => void })
       .mockImplementation((url: string) => {
@@ -126,20 +142,25 @@ describe('AgentChannelPage — agent 选择器携带真身份', () => {
   })
   afterEach(() => { document.body.innerHTML = '' })
 
-  it('选项里出现真智能体的 id 与名字，不是空白行', async () => {
+  it('切换 agent 后路由被推到新身份的渠道页（刷新不丢身份）', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    const options = selectOptions(wrapper)
-    expect(options).toContainEqual({ value: '216fb777', label: '凯蒂' })
-    expect(options).toContainEqual({ value: 'kai', label: '凯' })
-    expect(options.some((o) => !o.value || o.value === 'undefined')).toBe(false)
-  })
-
-  it('列表按路由来的 agent 身份取数，不静默落到 default', async () => {
-    mountPage()
+    await wrapper.find('.agent-select').setValue('kai')
     await flushPromises()
 
-    expect(listChannelConfigs).toHaveBeenCalledWith('216fb777')
+    expect(routerPush).toHaveBeenCalled()
+    expect(routeState.current.params.agentId).toBe('kai')
+  })
+
+  it('切换后按新身份重新取数，不只改本地变量', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    ;(listChannelConfigs as unknown as { mockClear: () => void }).mockClear()
+
+    await wrapper.find('.agent-select').setValue('kai')
+    await flushPromises()
+
+    expect(listChannelConfigs).toHaveBeenCalledWith('kai')
   })
 })
