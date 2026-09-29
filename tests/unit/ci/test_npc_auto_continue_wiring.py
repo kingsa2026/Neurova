@@ -58,6 +58,7 @@ maxTurns limit (1)`，`reveal-end-facts` 能读到）。但 PR #273 把角色改
 → C 红；把载体 `role:` 改成 `$notProvidedAnywhere` → D 红。
 """
 import io
+import os
 import re
 from pathlib import Path
 
@@ -81,6 +82,15 @@ HANDOFF_EVENT = "api_trigger_npc_handoff"
 
 #: 接力触发的内置任务类型。
 HANDOFF_TRIGGER_TYPE = "cnb:trigger"
+
+#: 量尺脚本的落点 —— 收尾判据第三问的**唯一事实源**（Issue #327）。
+BUDGET_SCRIPT_REL = "scripts/ci/npc_runtime_budget.py"
+
+#: 判据第三问：`eval "$($NPX_PREDICATE)"` 里的调用形态标记（怎么调用由探测段登记）。
+PREDICATE_CALL_MARKER = "NPX_PREDICATE"
+
+#: 解释器探测段锚点（`$NPX_PREDICATE` 的赋值处）。
+INTERPRETER_ANCHOR = "npc-script-interpreter"
 
 
 @pytest.fixture(scope="module")
@@ -248,6 +258,128 @@ class TestGoStageMarkerIsBidirectionallyLocked:
                 problems.append(f"{where}: 接力 `if` 未匹配标记 {GO_STAGE_MARKER!r}")
         assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
         assert not problems, "\n  ".join(problems)
+
+
+class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
+    """E：判据必须再问一句「这次中止可归因到时长配额吗」（Issue #327）。
+
+    ## 根因（真实构建实测，不是推测）
+
+    构建 cnb-urv-1k3lagkdv：NPC 会话在第 36 轮 / 7.4 分钟被平台 AI 网关中止
+    （`Pipeline has been stopped, Agent aborted`，该轮 `in=0 out=0 duration=0.0s`），
+    四道上限（流水线整体 / Job / 无输出 / `maxTurns`）**一道都没触达** ——
+    而接力真的触发了。旧判据（B/C 两条）回答的是「是不是被中止在 Agent 那一格」，
+    对「这次中止是不是撞墙」一无所知，于是每约 7 分钟拉起一轮新 `npc:go`，
+    以同样方式再被掐、再接力，无限循环，每一轮都真实计入 LLM 成本。
+
+    ## 判据
+
+    每条接力的 `if` 里必须有一条**消费量尺事实源**的条件，且该消费必须
+    可追溯到唯一的调用形态登记处（解释器探测段的 `$NPX_PREDICATE`）：
+
+    * 条件里出现 `$NPX_PREDICATE`（怎么调用只有一处登记）；
+    * 探测段确实给它赋了值，且取值指向 `npc_runtime_budget.py`；
+    * 量尺脚本真的把判据片段算出来（`--predicate` 在脚本里可达）。
+
+    反向控制：把任意一条接力的第三问删掉 → 红；把 `$NPX_PREDICATE` 的赋值
+    改指到别的脚本 → 红。
+    """
+
+    def test_every_relay_if_consumes_the_quota_wall_predicate(self, cnb_doc):
+        seen, problems = 0, []
+        for where, stage in _relay_stages(cnb_doc):
+            seen += 1
+            conditions = stage.get("if") or []
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            blob = "\n".join(str(item) for item in conditions)
+            if PREDICATE_CALL_MARKER not in blob:
+                problems.append(
+                    f"{where}: 接力 `if` 未消费 ${PREDICATE_CALL_MARKER} —— "
+                    "判据只答得了「有没有被中止在 Agent 那格」，"
+                    "答不了「这次中止是不是撞在配额上」（Issue #327："
+                    "平台网关的 7.4 分钟外部中止被放大成自动续跑链条）"
+                )
+        assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
+        assert not problems, "\n  ".join(problems)
+
+    def test_predicate_call_form_is_registered_once(self):
+        """`$NPX_PREDICATE` 的赋值必须在解释器探测段 —— 调用形态只有一处登记。"""
+        text = io.open(CNB, encoding="utf-8").read()
+        anchor_at = text.find(INTERPRETER_ANCHOR)
+        assert anchor_at >= 0, f"`.cnb.yml` 缺探测段锚点 {INTERPRETER_ANCHOR}"
+        body = text[anchor_at:]
+        cut = body.find("\n$:", 1)
+        if cut > 0:
+            body = body[:cut]
+        assignments = [
+            line.strip() for line in body.splitlines()
+            if PREDICATE_CALL_MARKER in line
+            and not line.strip().startswith("#")
+            and "=" in line
+        ]
+        assert assignments, (
+            f"探测段没有登记 {PREDICATE_CALL_MARKER} 的调用形态 —— "
+            "判据第三问无从复算"
+        )
+        joined = " ".join(assignments)
+        assert BUDGET_SCRIPT_REL in joined, (
+            f"{PREDICATE_CALL_MARKER} 没有指向 {BUDGET_SCRIPT_REL}：\n  "
+            + "\n  ".join(assignments) +
+            "\n判据的阈值与解析口径只在量尺脚本里有一份定义，"
+            "指到别处就等于新造第二份。"
+        )
+
+    def test_budget_script_actually_computes_the_predicate(self):
+        """量尺脚本必须真能算出判据片段：`--predicate` 有执行体、读数可分辨。"""
+        script = PROJECT_ROOT / BUDGET_SCRIPT_REL
+        assert script.exists(), f"{BUDGET_SCRIPT_REL} 丢失 —— 判据第三问的事实源没了"
+        source = io.open(script, encoding="utf-8").read()
+        assert "--predicate" in source, (
+            f"{BUDGET_SCRIPT_REL} 没有 `--predicate` 入口 —— "
+            "`.cnb.yml` 消费的是一个不存在的读数"
+        )
+        # 真跑两支：远未触达（外部中止）与触达阈值，判据必须可分辨。
+        import subprocess, sys, time
+        def run(start_offset_s: int) -> str:
+            start = time.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - start_offset_s)
+            )
+            env = dict(
+                os.environ,
+                CNB_PIPELINE_MAX_RUN_TIME="7200000",
+                CNB_BUILD_START_TIME=start,
+            )
+            proc = subprocess.run(
+                [sys.executable, str(script), "--predicate"],
+                capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            )
+            assert proc.returncode == 0, proc.stderr
+            return proc.stdout.strip()
+
+        early, late = run(7 * 60), run(int(7200 * 0.9))
+        assert early == "false", (
+            "已用 7 分钟（2h 配额的 6%）时判据仍为真 —— 平台网关的外部中止"
+            "依旧会被当成撞墙，自动续跑链条没有断（Issue #327）"
+        )
+        assert late == "true", "已用 90% 配额时判据为假 —— 真撞墙的中止反而不会续跑"
+        assert early != late, "两种相反的输入给出同一读数 —— 判据是恒真壳"
+
+    def test_missing_readings_do_not_relay(self):
+        """量不出（两个平台变量缺失）时必须判 false：不把「量不出来」转写成接力。"""
+        import subprocess, sys
+        script = PROJECT_ROOT / BUDGET_SCRIPT_REL
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        proc = subprocess.run(
+            [sys.executable, str(script), "--predicate"],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "false", (
+            "读不到预算变量时判据为真 —— 「量不出来」被当成了撞墙证据，"
+            "而那正是烧配额的接力（教义第 2 条：不得用兜底默认把不确定性抹平）"
+        )
 
 
 class TestCarrierRoleHasARealSource:
