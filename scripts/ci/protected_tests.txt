@@ -375,6 +375,11 @@ tests/unit/context/test_pool_startup_load.py
 #   副本含修复、锁文件真走本地、允许清单条目与补丁绑定、门禁逐条核验本地补丁——
 #   任一环松掉都会让"已修"退回"拿清单静音"。
 tests/unit/desktop/test_rust_vendor_patch_guard.py
+# 安装器资源自证（Issue #332）：NSIS 模板的 Hero/按钮位图路径必须与 bundler
+#   目标布局解耦 —— 写死单一相对深度时，交叉编译布局（多一层目标三元组）
+#   下 makensis 找不到资产、整包产不出来。判据两条：File 指令一律经 ${NSIS_ART}；
+#   该定义同时覆盖原生（四级）与交叉（五级）两种候选。
+tests/unit/desktop/test_nsis_asset_layout.py
 
 # Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
 #   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
