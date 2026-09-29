@@ -174,3 +174,39 @@ def testKitRefreshesMachinePathBeforeProbe():
     assert run_src.find("refresh_machine_path()") < run_src.find("probe_toolchain()"), (
         "刷新必须在工具链探测之前 —— 探测读的就是刷新后的 PATH"
     )
+
+
+def testRequiredToolchainHasNoPhantomEntry():
+    """工具链清单里不得有「没有消费者」的条目（Issue #332 实机踩到）。
+
+    实机证据（2026-09-30，节点 orange-connector）：`makensis` 被列进必需工具链、
+    流水线逐件点名，而它在盘上**且不在 PATH**（choco 的 NSIS 包不写机器 PATH、
+    也不建 shim）—— 于是探测在 `makensis` 上响亮失败。
+
+    但构建链**根本不调用 `makensis`**：`package_installer_zip.py` 只调 `npx tauri build`，
+    NSIS 内核由 Tauri 自己的 NSIS 打包器（自带 makensis，落到 `%LOCALAPPDATA%\\tauri`）
+    产出；WPF 壳只把内核当 `/resource` 内嵌。grep 全链（`*.py`/`*.cmd`/`*.ps1`/`*.nsi`
+    的调用点）没有任何一处 exec `makensis`。
+
+    即：这是一个**只声明、无消费者**的必需项 —— 按「功能与升级改造」红线，只写不读的
+    配置属断点，必须删除而不是给它补路径兜底（补兜底 = consumer-only guard，
+    把「工具没装」与「装了但没用上」两个事实继续搅在一起）。
+
+    判据：必需清单里每个工具都必须能在构建链里找到调用点，或属 Windows 自带件
+    （`csc.exe`/`robocopy`）。Tauri 自带的 NSIS 打包器不需要宿主 `makensis`。
+    """
+    funcs = _functions()
+    assert "TOOLCHAIN" in _kit_source(), "工具链清单必须存在于脚本里"
+    # 从 AST 取 TOOLCHAIN 的字面量（不靠正则猜）
+    tree = _kit_ast()
+    toolchain: tuple[str, ...] | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "TOOLCHAIN":
+                    toolchain = tuple(ast.literal_eval(node.value))
+    assert toolchain is not None, "未找到 TOOLCHAIN 的字面量定义（不得动态拼装）"
+    assert "makensis" not in toolchain, (
+        "makensis 是无消费者的必需项：构建链走 Tauri 自带 NSIS 打包器，"
+        "宿主 makensis 不被任何步骤调用。要求它 = 制造一个永远可红的假要求。"
+    )

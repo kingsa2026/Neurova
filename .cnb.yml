@@ -1380,7 +1380,9 @@ $:
             # 逐件点名，缺席即失败（不吞异常）
             # 与 scripts/desktop/win_installer_kit.py 的 TOOLCHAIN 同源同形：
             # 少一件即探测链过、打包链缺（判据错位），故此处不得漏项。
-            $probes = @("node", "npm", "npx", "cargo", "rustc", "makensis", "python")
+            # **不含 makensis**：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis
+            # 无任何调用点 —— 列为必需项只会在「装了但不在 PATH」上假红。
+            $probes = @("node", "npm", "npx", "cargo", "rustc", "python")
             $missing = @()
             foreach ($p in $probes) {
               $cmd = Get-Command $p -ErrorAction SilentlyContinue
