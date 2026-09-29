@@ -1284,3 +1284,123 @@ $:
                 raise SystemExit("全量运行依赖缺席：\n  - " + "\n  - ".join(missing))
             print("全量运行依赖抽样自证 PASSED / 8 项", flush=True)
             EOF
+
+  # ==========================================================================
+  # Windows 自定义界面安装包（Issue #332，路线 A：根组织自托管 Windows 构建机）
+  # ==========================================================================
+  # 为什么不能留在容器里：自定义界面那层壳（`NeurUI/src-tauri/installer-wpf/`）
+  # 是 WPF(net48)，编译依赖 Windows 自带件 —— `csc.exe`（.NET Framework 4.8）
+  # 与 `robocopy`。CI 容器是 Linux，加交叉编译工具链也补不上这两个（WPF 是
+  # Windows 桌面框架，不是可交叉的 native 目标）。
+  #
+  # 自托管节点的两条硬语义（官方《构建节点》，与平台容器节点不同）：
+  #   1) 脚本**直接跑在宿主机**上，不经过 Docker —— 故本流水线**没有** `docker.image`，
+  #      也**不能**有；写上去会被静默忽略（`runner.cpus` 同理无效，由宿主机整机资源决定）。
+  #   2) 命中靠 `runner.namespace: group` + `runner.tags`（tags 必须是节点已声明标签的
+  #      **子集**，与节点标签是"与"关系）。故 `default-npc` 那类容器镜像在本流水线里不出现。
+  #
+  # 标签的**唯一事实源**是下面 `&win-installer-tags` 锚点，三处 stage 共用同一份定义。
+  # 节点若不在线，Prepare 阶段会报 error（无日志）—— 这正是我们要的响亮失败：
+  # 宁可不产包，也不产一个来源不明的包。
+  #
+  # 触发方式（api_trigger 自定义事件，仅 API 可触发；不在 push/pull_request 门禁里）：
+  #   cnb build start-build --repo <slug> --event api_trigger_win_installer \
+  #     --config "$(cat .cnb/win-installer.json)" --branch main
+  # 具体口径见 `.cnb/win-installer.json`（`cnb:apply` 的 config 载体）。
+  .win-installer-tags: &win-installer-tags
+    - windows
+  .win-installer-runner: &win-installer-runner
+    namespace: group
+    tags: *win-installer-tags
+
+  api_trigger_win_installer:
+    - name: windows-custom-ui-installer
+      runner: *win-installer-runner
+      stages:
+        # ── 0. 节点自证：确认跑在 Windows 宿主机上，且构建工具链在位 ──────────
+        # 不假设环境，逐件点名。任一缺席即当场失败（不静默跳过、不留空壳产物）。
+        - name: 环境自证（Windows 宿主机 + 工具链点名）
+          script: |
+            $ErrorActionPreference = "Stop"
+            # 先把"这是 Windows 宿主"钉死：自托管节点脚本默认走 PowerShell，
+            # `ver` 是 cmd 内建命令，须经 cmd /c 调用（实测口径见官方文档）。
+            cmd /c ver
+            Write-Host "[env] PSVersion=$($PSVersionTable.PSVersion)"
+
+            # csc.exe = WPF 壳编译器（.NET Framework 4.8 在位标志）
+            $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+            if (-not (Test-Path $csc)) {
+              $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe"
+            }
+            if (-not (Test-Path $csc)) { throw "[env] 缺席：csc.exe（需 .NET Framework 4.x）" }
+            Write-Host "[env] csc=$csc"
+
+            # 逐件点名，缺席即失败（不吞异常）
+            $probes = @("node", "npm", "cargo", "rustc", "makensis", "python")
+            $missing = @()
+            foreach ($p in $probes) {
+              $cmd = Get-Command $p -ErrorAction SilentlyContinue
+              if ($null -eq $cmd) { $missing += $p; continue }
+              Write-Host "[env] $p = $($cmd.Source)"
+            }
+            if ($missing.Count -gt 0) {
+              throw "[env] 构建工具链缺席：$($missing -join ', ')"
+            }
+            Write-Host "[env] PASSED"
+
+        # ── 1. 前端依赖 + 桌面构建 ────────────────────────────────────────────
+        - name: 前端依赖（npm ci）+ vite build:desktop
+          script: |
+            $ErrorActionPreference = "Stop"
+            Set-Location "$env:CNB_BUILD_WORKSPACE\NeurUI"
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci 失败" }
+            npm run build:desktop
+            if ($LASTEXITCODE -ne 0) { throw "前端构建失败（npm run build:desktop）" }
+
+        # ── 2. 后端资源暂存（路线 B：源码+配置+模型空壳）─────────────────────
+        - name: 后端资源暂存（bundle_backend）
+          script: |
+            $ErrorActionPreference = "Stop"
+            Set-Location "$env:CNB_BUILD_WORKSPACE"
+            python scripts/desktop/bundle_backend.py
+            if ($LASTEXITCODE -ne 0) { throw "bundle_backend 失败" }
+
+        # ── 3. NSIS 内核（tauri build 原生 Windows 路径）─────────────────────
+        - name: tauri build（NSIS 内核，原生 Windows）
+          script: |
+            $ErrorActionPreference = "Stop"
+            Set-Location "$env:CNB_BUILD_WORKSPACE\NeurUI"
+            npx tauri build
+            if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
+
+        # ── 4. WPF 自定义界面壳（内嵌内核 → 单文件安装器）────────────────────
+        # 复用仓内唯一打包脚本，不在此手抄第二份构建命令（教义第 6 条）。
+        - name: WPF 壳 + 单文件安装器（package_installer_zip，--skip-tauri）
+          script: |
+            $ErrorActionPreference = "Stop"
+            Set-Location "$env:CNB_BUILD_WORKSPACE"
+            python scripts/desktop/package_installer_zip.py --skip-tauri
+            if ($LASTEXITCODE -ne 0) { throw "打包失败（package_installer_zip.py）" }
+
+        # ── 5. 产物结构自证：1011 条以上的 install 目录 + sha256 落盘 ─────────
+        # 「装包成功」不等于「包里东西对」。逐项点名内核与后端资源必须在位。
+        - name: 产物结构自证（单文件 exe 存在 + 体积 + sha256）
+          script: |
+            $ErrorActionPreference = "Stop"
+            Set-Location "$env:CNB_BUILD_WORKSPACE"
+            $exe = Get-ChildItem "dist\installer\Neurova_Setup_*_x64.exe" |
+                   Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($null -eq $exe) { throw "产物缺席：dist\installer\Neurova_Setup_*_x64.exe" }
+            $sizeMb = [math]::Round($exe.Length / 1MB, 1)
+            # 体积红线：beta4 自定义界面版 477MB 量级；内核内嵌后不得塌成空壳
+            if ($exe.Length -lt 300MB) {
+              throw "产物体积异常偏小（$sizeMb MB）—— 内核可能未内嵌"
+            }
+            $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+            Write-Host "[artifact] $($exe.FullName)"
+            Write-Host "[artifact] size=$sizeMb MB"
+            Write-Host "[artifact] sha256=$hash"
+            # sha256 落盘随附件发布（ISSUE 回帖引用它，人可核对）
+            "$hash  $($exe.Name)" | Out-File -Encoding ascii (Join-Path $exe.Directory "SHA256SUMS.txt")
+            Write-Host "[artifact] PASSED"
