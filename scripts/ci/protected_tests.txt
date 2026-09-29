@@ -1351,3 +1351,12 @@ tests/unit/agent/test_auto_continue_dead_budget.py
 #   另钉三处：`.dockerignore` 不得挡 COPY 源（否则构建直接失败）、codebuddy 命令
 #   决定 CodeBuddy Web 入口是否可见、`runner.cpus` 与启动按钮 cpus 必须同源。
 tests/unit/ci/test_dev_environment_contract.py
+# Issue #330（构建 cnb-h61-1k3lf1duo 红在镜像真探活）：
+#   镜像以 `USER neurova` 运行，而 Dockerfile 没建家目录、也没把 HOME 交给它 ——
+#   Python 对不可写 HOME **只告警不退出**（site 的 Can't create user site-packages），
+#   于是 modelscope 的 `~/.modelscope`、huggingface 的 `~/.cache` 在运行期建不出来，
+#   下载三源依次失败 ⇒ ensure_model 抛错 ⇒ 后端起不来，而 `docker build` 全绿。
+#   判据面两条：① 运行用户的 HOME 必须自己拥有（或显式改指可写目录）；
+#   ② 用户级 site-packages 落点必须与 `COPY --from=builder` 的落点重合
+#   （否则包在盘上、`import` 找不到 —— 镜像在 `import uvicorn` 处崩）。
+tests/unit/deploy/test_image_runtime_selfproof.py
