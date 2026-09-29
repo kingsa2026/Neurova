@@ -1,6 +1,6 @@
 <template>
   <a-modal :open="open" :title="t('channel.migrateDialogTitle')" :footer="null"
-    @cancel="close">
+    @cancel="dismissMigration">
     <a-spin :spinning="loading">
       <!-- 没有可迁的源：诚实说明，不给假动作（不渲染提交按钮） -->
       <div v-if="!loading && sources.length === 0" data-testid="migration-no-sources">
@@ -38,7 +38,7 @@
 
         <!-- 提交：未选源或未勾任何渠道时禁用，避免"点了没反应" -->
         <div class="nr-mig-footer">
-          <GlassButton variant="ghost" @click="close">{{ t('common.cancel') }}</GlassButton>
+          <GlassButton variant="ghost" @click="dismissMigration">{{ t('common.cancel') }}</GlassButton>
           <GlassButton variant="primary" data-testid="migration-confirm"
             :disabled="!sourceId || picked.length === 0 || submitting" @click="submit">
             {{ submitting ? t('channel.migrating') : t('channel.migrateConfirm') }}
@@ -133,7 +133,7 @@ function toggleAll() {
   picked.value = allPicked.value ? [] : [...availableChannels.value]
 }
 
-function close() {
+function dismissMigration() {
   emit('close')
 }
 
