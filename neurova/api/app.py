@@ -45,7 +45,6 @@ class AppState:
         self.startup_manager = None
         self.health_checker = None
         self.agents: Dict[str, Any] = {}  # agent_id -> Agent instance
-        self.default_agent_id: str = "default"
         self.llm_client = None
         self.provider_manager = None
         self.llm_router = None
@@ -66,9 +65,16 @@ class AppState:
         self._lock = threading.RLock()
 
     def get_agent(self, agent_id: str = None) -> Optional[Any]:
-        """获取 Agent 实例"""
-        aid = agent_id or self.default_agent_id
-        return self.agents.get(aid)
+        """获取 Agent 实例——解析口径单源在 `neurova.api.endpoints`。
+
+        这里曾经自持一份 `self.default_agent_id`（`__init__` 赋死 `"default"`，全仓
+        无人改写），而"切换默认 Agent"写的是 `_app_state["default_agent_id"]`：两份
+        各持一半，同一个问题两个答案。属性随本行收口删除，不再留"两边都留着靠同步脚本"
+        的平行体系（教义第 6 条）。
+        """
+        from neurova.api.endpoints import get_agent_instance
+
+        return get_agent_instance(agent_id or "")
 
     def add_agent(self, agent_id: str, agent: Any) -> None:
         """添加 Agent 实例"""
@@ -390,7 +396,11 @@ def _initialize_components(app_state: AppState) -> None:
     # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
     from neurova.core.agent_workspaces import get_agent_workspace_dir
 
-    default_workspace = str(get_agent_workspace_dir("default"))
+    # 默认 agent 的身份字面量单源在 endpoints 包（解析侧与登记侧共用同一个串，
+    # 否则"未指名解析"找不到刚登记上去的那一位）
+    from neurova.api.endpoints import DEFAULT_AGENT_ID
+
+    default_workspace = str(get_agent_workspace_dir(DEFAULT_AGENT_ID))
 
     # 初始化默认 Agent
     try:
@@ -427,7 +437,7 @@ def _initialize_components(app_state: AppState) -> None:
 
         config = AgentConfig(
             name=_saved_cfg.get("name") or "Neurova",
-            agent_id="default",
+            agent_id=DEFAULT_AGENT_ID,
             enable_memory=True,
             workspace_path=default_workspace,
             llm_model=_default_llm_model,
@@ -435,7 +445,7 @@ def _initialize_components(app_state: AppState) -> None:
             description=_saved_cfg.get("description") or "",
         )
         agent = Agent(config=config)
-        app_state.add_agent("default", agent)
+        app_state.add_agent(DEFAULT_AGENT_ID, agent)
         logger.info("Default Agent initialized")
     except Exception as e:
         logger.warning("Default Agent init failed: %s", e)
@@ -498,10 +508,6 @@ def _register_core_modules(app_state: AppState) -> None:
         from neurova.core.module_system import Module
 
         class AgentModule(Module):
-            def __init__(self, **kwargs):
-                super().__init__(**kwargs)
-                self._agent = app_state.get_agent()
-
             def _on_start(self):
                 pass
 

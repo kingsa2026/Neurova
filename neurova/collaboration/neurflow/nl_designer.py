@@ -89,11 +89,11 @@ async def _call_agent_llm(prompt: str, agent_id: str = "default", model: Optiona
     agent_id: 指定用户已有的 Agent（其独立人设/记忆/模型）；不存在回退 default。
     model: 可选，覆盖 Agent 当前模型（Agent.chat 的 hot-swap 路由）。
     """
-    from neurova.api.endpoints import get_agent_instance
+    from neurova.api.endpoints import defaultAgentId, get_agent_instance
 
     agent = get_agent_instance(agent_id)
     if not agent:
-        agent = get_agent_instance("default")
+        agent = get_agent_instance(defaultAgentId())
     if not agent:
         raise RuntimeError(f"未找到 agent: {agent_id}")
     response = await agent.chat(user_input=prompt, stream=False, model=model)
