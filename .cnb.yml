@@ -674,6 +674,11 @@ main:
     exit 127
   fi
 
+  # 收尾接力的判据片段（Issue #327）走同一份探测结果：判据的事实源是
+  # scripts/ci/npc_runtime_budget.py 的 meetsQuotaWall()，本变量只是把
+  # "怎么调用它"登记一处 —— `.cnb.yml` 里不重写阈值、不新造第二份口径。
+  NPX_PREDICATE="$NPX_CALL scripts/ci/npc_runtime_budget.py --predicate"
+
 # ── NPC 工具单次执行的超时（唯一事实源）──────────────────────────────────────
 # 同一个数字被三处 npc:go 消费（issue 评论 / PR 评论 / 接力载体），
 # 故只在这里写一份，三处经 `<<:` 引用 —— 三份手抄就是三条可独立漂移的口径。
@@ -815,13 +820,29 @@ $:
   #   v1 补的 `*"超过最大运行时长"*` 片段**在任何一份可下载日志里都搜不到**，
   #   它是对某次 Agent 自述文案的转抄，不是平台读数。
   #
-  #   v2 判据（两处，都是平台注入的事实）：
-  #     $CNB_PIPELINE_STATUS        收尾期的流水线状态（`error` = stages 失败）
-  #     $CNB_BUILD_FAILED_STAGE_NAME 失败 stage 的名字
-  #   第二条匹配 npc:go 所在 stage 名字里的 ASCII 标记 `npc-go`：
-  #     · 命中 ⇒ 被中止的是 **Agent 那一格**，成果未落地，该续跑；
-  #     · 未命中（如角色准入/环境自证失败）⇒ 那是配置错误，续跑只会原样再失败，
-  #       必须停在响亮失败上，不得转写成烧配额。
+  #   三轮修法的方向各不相同，根因却是同一个：**拿一个只能回答「有没有被中止」
+  #   的事实，去回答「要不要续跑」**（见 ADR 0022 与 ADR 0023）。
+  #
+  #   v3 判据（三处同时成立才算「用满配额被中止」，前两处是平台注入的事实，
+  #   第三处是同一份运行时长预算的事实源）：
+  #     $CNB_PIPELINE_STATUS         收尾期的流水线状态（`error` = stages 失败）
+  #     $CNB_BUILD_FAILED_STAGE_NAME 失败 stage 的名字，匹配 npc:go 所在 stage
+  #                                  名字里的 ASCII 标记 `npc-go`
+  #     $NPX_PREDICATE               `scripts/ci/npc_runtime_budget.py --predicate`
+  #                                  —— 已用时长比例是否触达 HALT_PCT
+  #   三处的分工：
+  #     · 前两处答「是不是被中止在 Agent 那一格」——未命中（如角色准入/环境自证
+  #       失败）是配置错误，续跑只会原样再失败，必须停在响亮失败上；
+  #     · 第三处答「这次中止能不能归因到时长配额」——平台网关的**外部中止**与
+  #       撞满配额在收尾期的可见形态完全相同，只有时长余量能把两者分开。
+  #   Issue #327 实测（构建 cnb-urv-1k3lagkdv）：第 36 轮 / 7.4 分钟被网关中止
+  #   （`Pipeline has been stopped, Agent aborted`，该轮 in=0 out=0 duration=0.0s），
+  #   四道上限一道都没触达，而前两处判据全为真 ⇒ 接力触发 ⇒ 每约 7 分钟一轮的
+  #   自动续跑链条，每一轮都真实计入 LLM 成本。缺的正是第三问。
+  #   第三处的阈值与解析口径都只有一处定义（npc_runtime_budget.py 的
+  #   HALT_PCT / meetsQuotaWall），`.cnb.yml` 写的只是"怎么读它"；
+  #   两个平台变量缺失或解析失败时判据为 false：**不续跑** ——
+  #   「量不出来」不得被转写成一次烧配额的接力（教义第 2 条）。
   #   stage 名与标记的双向锁由 tests/unit/ci/test_npc_auto_continue_wiring.py 钉住：
   #   改名不改判据、或改判据不改名，任缺其一即红。
   #
@@ -976,6 +997,11 @@ $:
             # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
             # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
             - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
+            # 第三问（Issue #327）：这次中止**可归因到时长配额**吗？
+            # 事实源与口径见上方 `$` 段的判据块与 ADR 0023 ——
+            # 本行只写"怎么读它"，阈值与解析都不在这里出现第二份。
+            # 四处判据逐字同源（共用 Job 体 + issue/PR 评论 + 接力载体）。
+            - 'eval "$($NPX_PREDICATE)"'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -1001,6 +1027,11 @@ $:
             # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
             # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
             - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
+            # 第三问（Issue #327）：这次中止**可归因到时长配额**吗？
+            # 事实源与口径见上方 `$` 段的判据块与 ADR 0023 ——
+            # 本行只写"怎么读它"，阈值与解析都不在这里出现第二份。
+            # 四处判据逐字同源（共用 Job 体 + issue/PR 评论 + 接力载体）。
+            - 'eval "$($NPX_PREDICATE)"'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -1021,6 +1052,11 @@ $:
             # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
             # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
             - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
+            # 第三问（Issue #327）：这次中止**可归因到时长配额**吗？
+            # 事实源与口径见上方 `$` 段的判据块与 ADR 0023 ——
+            # 本行只写"怎么读它"，阈值与解析都不在这里出现第二份。
+            # 四处判据逐字同源（共用 Job 体 + issue/PR 评论 + 接力载体）。
+            - 'eval "$($NPX_PREDICATE)"'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
@@ -1142,6 +1178,11 @@ $:
             # Job 被掐后 `MSG=[start]`），按文案片段匹配等于让「是否接力」取决于
             # 脚本最后打印了什么。stage 名由平台在收尾期注入，与打印内容无关。
             - 'case "$CNB_BUILD_FAILED_STAGE_NAME" in *"npc-go"*) true;; *) false;; esac'
+            # 第三问（Issue #327）：这次中止**可归因到时长配额**吗？
+            # 事实源与口径见上方 `$` 段的判据块与 ADR 0023 ——
+            # 本行只写"怎么读它"，阈值与解析都不在这里出现第二份。
+            # 四处判据逐字同源（共用 Job 体 + issue/PR 评论 + 接力载体）。
+            - 'eval "$($NPX_PREDICATE)"'
           options:
             slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
