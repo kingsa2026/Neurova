@@ -28,6 +28,7 @@ vi.mock('@/api/modules/channel-configs', () => ({
   createChannelConfig: vi.fn(),
   deleteChannelConfig: vi.fn(),
   migrateAgentChannelConfigs: vi.fn(),
+  listChannelMigrationSources: vi.fn().mockResolvedValue({ data: { sources: [] } }),
   restartChannelAdapter: vi.fn(),
   clearChannelQueue: vi.fn(),
   checkChannelConflicts: vi.fn(),
@@ -42,6 +43,7 @@ import {
   listChannelConfigs, migrateAgentChannelConfigs,
 } from '@/api/modules/channel-configs'
 import AgentChannelPage from '../AgentChannelPage.vue'
+import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 
 // 用**真语言包**而非手写桩：桩里补了键而真语言包漏了键也照样绿——那正是
 // "看着咬合、实际没咬住"的老路（与 emptyAttribution 同口径）。
@@ -90,7 +92,7 @@ describe('AgentChannelPage — 存量归属迁移入口', () => {
     expect(cta.text().length).toBeGreaterThan(0)
   })
 
-  it('点击后按当前身份发起迁移并刷新本视图', async () => {
+  it('点击后打开迁移弹层、并把当前身份作为目标，不直接发起搬迁', async () => {
     const wrapper = mountPage()
     await flushPromises()
     ;(listChannelConfigs as any).mockClear()
@@ -98,23 +100,26 @@ describe('AgentChannelPage — 存量归属迁移入口', () => {
     await wrapper.find('[data-testid="migrate-legacy-channels"]').trigger('click')
     await flushPromises()
 
-    expect(migrateAgentChannelConfigs).toHaveBeenCalledWith('default', 'kai')
-    expect(listChannelConfigs).toHaveBeenCalledWith('kai')
+    // Issue #326 第 3 条：搬迁是归属的不可逆变更，必须先让用户在弹层里
+    // 选源、勾渠道——入口自己发起搬迁就等于替用户把选择做完了。
+    expect(wrapper.findComponent(ChannelMigrationDialog).props('open')).toBe(true)
+    expect(wrapper.findComponent(ChannelMigrationDialog).props('targetAgentId')).toBe('kai')
+    expect(migrateAgentChannelConfigs).not.toHaveBeenCalled()
   })
 
-  it('迁移失败（403/409）如实说出原因，不静默', async () => {
-    ;(migrateAgentChannelConfigs as any).mockRejectedValue({
-      response: { status: 403, data: { detail: '无权删除智能体『default』（仅属主或管理员可操作）' } },
-    })
+  it('弹层回报成功后重取本视图（迁移失败归因在弹层内，见其自身套件）', async () => {
     const wrapper = mountPage()
     await flushPromises()
-
     await wrapper.find('[data-testid="migrate-legacy-channels"]').trigger('click')
     await flushPromises()
+    ;(listChannelConfigs as any).mockClear()
 
-    const notice = wrapper.find('[data-testid="migrate-error"]')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('无权删除智能体')
+    wrapper.findComponent(ChannelMigrationDialog).vm.$emit('migrated',
+      { from: 'default', to: 'kai', channels: ['feishu'] })
+    await flushPromises()
+
+    expect(listChannelConfigs).toHaveBeenCalledWith('kai')
+    expect(wrapper.findComponent(ChannelMigrationDialog).props('open')).toBe(false)
   })
 
   it('反向控制：default 视图不给迁移入口（那儿就是存量所在地）', async () => {

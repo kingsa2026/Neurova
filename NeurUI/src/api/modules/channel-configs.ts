@@ -136,6 +136,24 @@ export function checkChannelConflicts() {
   )
 }
 
+/** 迁移候选源（Issue #326：源要可选，且按用户隔离——门在服务端）。 */
+export interface ChannelMigrationSource {
+  agent_id: string
+  channels: string[]
+}
+
+/**
+ * 列出可作为迁移源的 agent 及其名下渠道。
+ *
+ * 可见性由服务端按归属门裁定（非属主不可见、无主 agent 仅 admin），
+ * 前端不得自行拼源清单——猜出来的源点下去只会 403。
+ */
+export function listChannelMigrationSources(toAgentId?: string) {
+  return api.get<ApiResponse<{ sources: ChannelMigrationSource[] }>>(`${BASE}/migration-sources`, {
+    params: toAgentId ? { to_agent_id: toAgentId } : {},
+  })
+}
+
 /**
  * 存量渠道归属迁移：把源 agent（多为 `default`）名下已配置的渠道**移动**到目标 agent。
  *

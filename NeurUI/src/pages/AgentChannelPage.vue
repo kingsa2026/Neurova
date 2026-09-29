@@ -17,15 +17,18 @@
       <p class="nr-ac-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
       <div class="nr-ac-empty-actions">
         <!-- 存量归属迁移的入口落在**用户看见存量那一屏**：只说"配置在默认视图下"
-             而不给搬过来的入口，用户就得一直来回切视图用别人的身份配自己的 bot。 -->
+             而不给搬过来的入口，用户就得一直来回切视图用别人的身份配自己的 bot。
+             入口只负责**打开弹层**（Issue #326 第 3 条）：搬迁是归属的不可逆变更，
+             源与渠道都该由用户在弹层里看着选，而不是点一下就整表搬走。 -->
         <GlassButton size="sm" variant="primary" data-testid="migrate-legacy-channels"
-          :disabled="migrating" @click="migrateLegacyChannels">
-          {{ migrating ? t('channel.migrating') : t('channel.migrateLegacyChannels') }}
+          @click="showMigration = true">
+          {{ t('channel.migrateLegacyChannels') }}
         </GlassButton>
         <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
           @click="switchAgent('default')">{{ t('channel.viewDefaultAgent') }}</GlassButton>
       </div>
-      <p v-if="migrateError" class="nr-ac-empty-error" data-testid="migrate-error">{{ migrateError }}</p>
+      <ChannelMigrationDialog :open="showMigration" :target-agent-id="agentId"
+        @close="showMigration = false" @migrated="onMigrated" />
     </div>
 
     <!-- 归属门（非属主/非管理员）与「真的没有配置」是两回事：渲染成同一个样子
@@ -153,7 +156,7 @@ import { message, Modal } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import {
-  listChannelConfigs, createChannelConfig, deleteChannelConfig, migrateAgentChannelConfigs,
+  listChannelConfigs, createChannelConfig, deleteChannelConfig,
 } from '@/api/modules/channel-configs'
 import {
   buildChannelCatalog, buildChannelFieldsMap, buildCommonFields,
@@ -162,6 +165,7 @@ import {
 } from '@/config/channelFields'
 import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
+import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 import { getNegativeScreenConfig } from '@/api/modules/negative-screen'
 import { useAgentStore } from '@/stores/agents'
 import { buildAgentSelectOptions } from '@/config/agentOptions'
@@ -189,10 +193,9 @@ const form = reactive<{ enabled: boolean; values: Record<string, any> }>({ enabl
 const savedExtras = ref<Record<string, Record<string, unknown>>>({})
 
 const channels = ref<AgentChannel[]>([])
-const migrating = ref(false)
-// 迁移失败/归属拒绝的**诚实原文**：403（非属主/非管理员）与 409（冲突）都不是
-// "网络错误"，笼统的"出错了"会让用户以为重试就好。
-const migrateError = ref('')
+// 迁移动作与它的错误归因都在弹层里（Issue #326 第 3 条）：页面只负责
+// 打开它、并在成功后重取本视图——屏幕状态始终来自服务端那唯一的事实源。
+const showMigration = ref(false)
 const accessDenied = ref('')
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
@@ -276,7 +279,6 @@ function onQrError(type: 'fetch' | 'expired' | 'fail') {
 async function fetchConfigs() {
   loading.value = true
   accessDenied.value = ''
-  migrateError.value = ''
   try {
     const list: any = await listChannelConfigs(agentId.value)
     const rows: any[] = Array.isArray(list) ? list : (list?.data ?? [])
@@ -313,34 +315,14 @@ async function fetchConfigs() {
   }
 }
 
-/**
- * 把默认视图名下的存量渠道**移动**到当前智能体。
- *
- * 后端是移动语义且冲突时两边原样返回，所以这里不做乐观更新：失败就把原因
- * 原样显示，成功就重取本视图——让屏幕上的状态始终来自服务端那唯一的事实源。
- */
-async function migrateLegacyChannels() {
-  const target = agentId.value
-  if (target === 'default' || migrating.value) return
-  migrating.value = true
-  migrateError.value = ''
-  try {
-    const res: any = await migrateAgentChannelConfigs('default', target)
-    const data = res?.data ?? res
-    const moved: string[] = data?.migrated ?? []
-    await fetchConfigs()
-    if (moved.length) {
-      message.success(t('channel.migrateSuccess', { count: moved.length, agent: target }))
-    } else {
-      message.info(t('channel.migrateEmpty'))
-    }
-  } catch (e: any) {
-    const detail = e?.response?.data?.detail
-    migrateError.value = detail
-      ? t('channel.migrateFailed', { reason: String(detail) })
-      : t('channel.migrateFailed', { reason: String(e?.message || '') })
-  } finally {
-    migrating.value = false
+/** 弹层回报迁移成功：重取本视图，并按服务端的返回点名搬了哪些。 */
+async function onMigrated(payload: { from: string; to: string; channels: string[] }) {
+  showMigration.value = false
+  await fetchConfigs()
+  if (payload.channels.length) {
+    message.success(t('channel.migrateSuccess', { count: payload.channels.length, agent: payload.to }))
+  } else {
+    message.info(t('channel.migrateEmpty'))
   }
 }
 
