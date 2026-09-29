@@ -381,6 +381,15 @@ tests/unit/desktop/test_rust_vendor_patch_guard.py
 #   该定义同时覆盖原生（四级）与交叉（五级）两种候选。
 tests/unit/desktop/test_nsis_asset_layout.py
 
+# 安装器首装凭据通道（Issue #332）：NSIS 对 Page custom 的硬语义是 /S 下回调
+#   一律不执行，而 WPF 界面壳正是以 /S 调起内核 —— 于是
+#   PageLeaveAdminAccount 那套「校验并置 $AdminWritten」在真正的安装路径上
+#   从来不跑：安装报成功、bootstrap_admin.ini 却没生成、用户设的管理员账号
+#   被静默丢弃。凭据必须有一条不经页面的通道（/NU= /NP= → .onInit IfSilent 分支）。
+#   判据三条：.onInit 解析 /NU= 与 /NP=；静默分支自行置 $AdminWritten；
+#   交互路径仍保留校验与置位（不被静默通道顶掉）。
+tests/unit/desktop/test_nsis_silent_admin_bootstrap.py
+
 # Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
 #   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
 #   混在一起：绝大多数条目的载体今天没人走得到；少数条目的载体**导航可达**，
