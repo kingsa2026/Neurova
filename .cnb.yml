@@ -1313,6 +1313,31 @@ $:
     namespace: group
     tags: *win-installer-tags
 
+  # ── 打包机「上机包」产出点（Issue #332）────────────────────────────────────
+  # 为什么需要它：Windows 节点接入只有**页面**入口 —— OpenAPI 里没有任何 runner
+  # 管理端点（api.cnb.cool/swagger.json 的 199 条路径逐条 grep `runner`，
+  # 只剩一条下载构建日志的读接口）。「新增 Runner」这一步人点一次，之后才谈得上
+  # 调度。而在那之前，打包机脚本与工具链清单必须有一个**可下载、可复算**的落点：
+  # 靠人记步骤 = 换台机器就重新摸一遍，而「工具链缺了哪件」不会有任何红。
+  #
+  # 本流水线只做一件事：把 `scripts/desktop/win_installer_kit.py` 与
+  # `scripts/desktop/win_installer_kit-init.ps1` 作为**附件挂到上游提交**，
+  # 打包机上 `curl` 一次即可取回（不是让人从仓库里手抄）。
+  #
+  # 仍要 `namespace: group` + tags —— 因为**在没有节点之前**发这条，会以
+  # `No runner for namespace: group tags: windows` 响亮失败。这不是缺陷：
+  # 它是「当前到底有没有可调度的打包机」的**唯一可复算读数**，比人去看页面准。
+  api_trigger_win_installer_provision:
+    - name: windows-installer-provision
+      runner: *win-installer-runner
+      stages:
+        - name: 打包机上机包落成附件（脚本 + 工具链清单）
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./scripts/desktop/win_installer_kit.py"
+              - "./scripts/desktop/win_installer_kit-init.ps1"
+
   api_trigger_win_installer:
     - name: windows-custom-ui-installer
       runner: *win-installer-runner

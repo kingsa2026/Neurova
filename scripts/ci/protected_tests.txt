@@ -1389,3 +1389,11 @@ tests/unit/ci/test_win_installer_pipeline.py
 #   处置：版本改由构建期从 tauri.conf.json 写入嵌入资源，壳只读不算；
 #   守卫三条（壳不得写死版本字面量 / 两份事实源必须一致 / NSIS 占位符不得写死）。
 tests/unit/desktop/test_installer_version_single_source.py
+# Issue #332（打包机上机包的契约面）：自定义界面壳是 WPF(net48)，`csc.exe` 与
+#   `robocopy` 是 Windows 自带件，WPF 不是可交叉编译的 native 目标 —— 容器里加什么
+#   工具链都补不上。于是「怎么在一台 Windows 机器上从零出包」此前只存在于人的步骤
+#   记忆里：脚本没有、守卫没有，失败形态是「换个环境就没人知道该装什么」。
+#   守卫钉住可复算：工具链逐件点名且缺席即抛（判据与动作同链，写在探测函数里）、
+#   版本只读 tauri.conf.json 不得写死、构建链与发布链都必须复用仓内既有脚本
+#   （不得手抄第二份）、体积红线与 sha256 必须落在脚本里。
+tests/unit/desktop/test_win_installer_kit.py
