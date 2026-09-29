@@ -315,9 +315,10 @@ def cmd_run(args) -> int:
 
 def newest_installer(repo: Path) -> Path:
     out = repo / "dist" / "installer"
-    cands = sorted(out.glob("Neurova_Setup_*_x64.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # 通配容下 _unsigned 标记（证书缺席时产物名带该后缀，见 package_installer_zip.py）
+    cands = sorted(out.glob("Neurova_Setup_*_x64*.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not cands:
-        raise RuntimeError(f"产物缺席：{out} 下没有 Neurova_Setup_*_x64.exe")
+        raise RuntimeError(f"产物缺席：{out} 下没有 Neurova_Setup_*_x64*.exe")
     return cands[0]
 
 
