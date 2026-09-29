@@ -70,9 +70,9 @@ async def call_llm(prompt: str, system_prompt: str = "",
                    model: Optional[str] = None, temperature: float = 0.7) -> str:
     """经 Agent 对话通道调用 LLM（与 drama 节点同源；失败抛异常由服务层兜底）。"""
     try:
-        from neurova.api.endpoints import get_agent_instance
+        from neurova.api.endpoints import defaultAgentId, get_agent_instance
 
-        agent = get_agent_instance("default")
+        agent = get_agent_instance(defaultAgentId())
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Agent 通道不可用: {e}") from e
     if agent is None:

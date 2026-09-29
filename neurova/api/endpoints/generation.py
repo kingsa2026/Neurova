@@ -184,7 +184,7 @@ def _get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-def _get_agent(agent_id: str = "default"):
+def _get_agent(agent_id: str = ""):
     """获取 Agent 实例"""
     return get_agent_instance(agent_id)
 

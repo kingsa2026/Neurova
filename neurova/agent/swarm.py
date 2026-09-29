@@ -498,16 +498,20 @@ class SwarmManager:
             (agent 实例或 None, resolved_id, 是否发生回退)
         """
         try:
-            from neurova.api.endpoints import get_agent_instance
+            from neurova.api.endpoints import defaultAgentId, get_agent_instance
 
             if agent_id:
                 agent = get_agent_instance(agent_id)
                 if agent is not None:
                     return agent, agent_id, False
 
-            default_agent = get_agent_instance("default")
+            # 回退位是**当前**默认 agent（可被 switch 改），不是字面量 "default"：
+            # 返回的 resolved_id 必须与真正取到的那一位一致，否则上层按 id 记账时
+            # 记到一个并非执行者的名字上。
+            defaultId = defaultAgentId()
+            default_agent = get_agent_instance(defaultId)
             if default_agent is not None:
-                return default_agent, "default", bool(agent_id and agent_id != "default")
+                return default_agent, defaultId, bool(agent_id and agent_id != defaultId)
 
             # 兜底：注册表中取第一个可用实例
             state = None

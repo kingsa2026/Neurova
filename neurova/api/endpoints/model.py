@@ -147,7 +147,7 @@ def _get_provider_manager(current_user: Optional[Dict[str, Any]] = None):
     return get_provider_manager()
 
 
-def _get_agent(agent_id: str = "default"):
+def _get_agent(agent_id: str = ""):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
 
