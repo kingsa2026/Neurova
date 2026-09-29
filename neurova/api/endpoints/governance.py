@@ -49,17 +49,24 @@ def _pending_status():
     return ApprovalStatus.PENDING
 
 
-def _get_agent():
-    from neurova.api.endpoints import get_app_state
+def _get_agent(agent_id: Optional[str] = None) -> Optional[Any]:
+    """按 agent_id 定位 Agent 实例——单源取法，与 chat/context/skill/model/generation/sleep 同源。
 
-    state = get_app_state()
-    if not state:
-        return None
-    try:
-        return state.get_agent()
-    except Exception:
-        agent = state.get("agent")
-        return agent
+    语义两条，都必须保住：
+    - 未指名（None/空）→ 落 `"default"`；
+    - **指名而不在池中 → None，不回落**。回落到默认 agent 等于把批准/拒绝动作
+      装进别人的技能库（工单 011 已为此拆过一次历史实现）。
+
+    此前这里三处（本函数、`_get_rsi_orchestrator`、技能注册表定位）都写的是
+    `state.get_agent(...)`，而 `set_app_state(state: Dict[str, Any])` 存的是**字典**——
+    字典没有该方法，`AttributeError` 被紧邻的裸 `except Exception` 吞成 `None`，
+    表现成"Agent 未就绪"而不是"我用错了 API 形状"。后果是真实的：活体服务上
+    用户点了批准、审批单变成 approved，而工具从未执行（`executed=False`、marker 0 行）。
+    那个 except 不是容错，是把根因涂改成无害状态的笔——故本次一并去掉。
+    """
+    from neurova.api.endpoints import get_agent_instance
+
+    return get_agent_instance(agent_id or "default")
 
 
 class WhitelistEntryRequest(BaseModel):
@@ -235,7 +242,10 @@ async def approve_and_execute(request: Request, request_id: str,
     if not tool_name:
         return {"code": 0, "data": {"approved": True, "executed": False}}
 
-    agent = _get_agent()
+    # 重放必须落在**发起这次调用的那个 agent** 上：审批记录自带 agent_id，
+    # 端点此前一律 `_get_agent()` 取默认 agent，等于把别人上下文里的工具
+    # 搬到 default agent 上执行（工具若经 agent_ref 依赖注入即取错实例）。
+    agent = _get_agent(req.agent_id)
     if agent is None:
         return {
             "code": 0,
@@ -295,11 +305,11 @@ async def reject_approval(request: Request, request_id: str,
     # 无人等（原轮次已收尾）则与批准同路投递晚到提示，否则模型那次调用
     # 永远停在「待用户确认」——用户其实已经答复了，只是答复没人送回去。
     if not hasApprovalWaiter(request_id):
-        agent = _get_agent()
-        reqMeta = (getattr(req, "metadata", None) or {}) if req else {}
+        agent = _get_agent(req.agent_id)
+        reqMeta = req.metadata or {}
         toolName = str(reqMeta.get("tool_name") or "")
         coordinator = getattr(getattr(agent, "tool_executor", None), "tool_coordinator", None)
-        if agent is not None and toolName and coordinator is not None:
+        if toolName and coordinator is not None:
             coordinator.recordApprovalOutcome(
                 toolName,
                 reqMeta.get("tool_call_id"),
@@ -320,10 +330,31 @@ async def reject_approval(request: Request, request_id: str,
 _RSI_NOT_READY = "RSI 编排器未初始化：本轮没有可报的进化状态（不是进化一切正常）"
 
 
-def _rsi_not_ready(agent_id: str) -> "HTTPException":
+def _agentLabel(agentId: Optional[str]) -> str:
+    """文案里的 agent 指称——未指名时如实写作 `"default"`，与 `_get_agent` 的落点一致。"""
+    return repr(agentId or "default")
+
+
+def _rsiAgentAbsent(agentId: Optional[str]) -> "HTTPException":
+    """指名的 agent 不在运行池中。
+
+    与"没装配编排器"是**两条相反的运维事实**：前者要查请求里的 agent_id（或 agent
+    没起来），后者要查评审闸与 evolution 装配。两者过去共用一句
+    "…上没有 RSI 编排器：RSI 编排器未初始化"，于是值班拿着后者去排查前者，
+    走一条必定不通的路——错误归因比无归因更贵。
+    """
     return HTTPException(
         status_code=503,
-        detail=f"agent {agent_id!r} 上没有 RSI 编排器：{_RSI_NOT_READY}",
+        detail=f"agent {_agentLabel(agentId)} 不在运行池中：审批无处落脚，"
+        "且不回落到别的 agent（回落等于把批准动作装进别人的技能库）",
+    )
+
+
+def _rsiNotAssembled(agentId: Optional[str]) -> "HTTPException":
+    """agent 在池中，但它没装配 RSI 编排器（评审闸关 / evolution 未启用）。"""
+    return HTTPException(
+        status_code=503,
+        detail=f"agent {_agentLabel(agentId)} 上没有 RSI 编排器：{_RSI_NOT_READY}",
     )
 
 
@@ -335,18 +366,29 @@ def _get_rsi_orchestrator(agent_id: Optional[str] = None):
     "待审列表 / 批准 / 拒绝"永远作用在最后那个 agent 上（工单 011 证据）。
     指名了 agent 而它不在池中时返回 None 而**不回落**：回落到默认 agent 等于把
     批准动作装进别人的技能库，是本单要拆的缺陷而不是可接受的兜底。
-    """
-    state = None
-    from neurova.api.endpoints import get_app_state
 
-    state = get_app_state()
-    if not state:
-        return None
-    try:
-        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
-    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
-        agent = None
+    返回 None 的契约保持不变（工单 012 的观测面按它写），端点一侧不得直接
+    `if rsi is None: raise 同一句文案` —— 那会把两条相反事实合成一条，
+    故改走 `_requireRsiOrchestrator()`。
+    """
+    agent = _get_agent(agent_id)
     return getattr(agent, "rsi_orchestrator", None) if agent is not None else None
+
+
+def _requireRsiOrchestrator(agentId: Optional[str] = None):
+    """端点用的定位器：命中即返回，落空时按**真因**抛可分诊的 503。
+
+    次序是刻意的：先问单源定位器，再仅在落空时二分。反过来先 `_get_agent` 会把
+    定位器降成"第二问"，而工单 011/012 的三套测试都打在 `_get_rsi_orchestrator`
+    这个缝上——先查 agent 会让那个缝变成死路，端点从此只看得到替身看不到的
+    agent 池（表现是三条不相干的用例一起红，且红在器械不在缺陷）。
+    """
+    orchestrator = _get_rsi_orchestrator(agentId)
+    if orchestrator is not None:
+        return orchestrator
+    if _get_agent(agentId) is not None:
+        raise _rsiNotAssembled(agentId)
+    raise _rsiAgentAbsent(agentId)
 
 
 class RsiApproveRequest(BaseModel):
@@ -376,9 +418,7 @@ async def get_rsi_status(
     生产零调用方，而"RSI 根本没装配"与"RSI 跑了一轮什么都没改"在观测上是两件
     相反的事，压成同一个 200 就是把前者读成后者（工单 011 同一条证据）。
     """
-    rsi = _get_rsi_orchestrator(agent_id)
-    if rsi is None:
-        raise _rsi_not_ready(agent_id)
+    rsi = _requireRsiOrchestrator(agent_id)
     return {"code": 0, "data": rsi.get_status()}
 
 
@@ -387,9 +427,7 @@ async def list_pending_rsi_proposals(
     agent_id: Optional[str] = None, _admin: Any = Depends(_governance_admin_dep)
 ):
     """列出 RSI 升级提案（PENDING 状态）"""
-    rsi = _get_rsi_orchestrator(agent_id)
-    if rsi is None:
-        raise _rsi_not_ready(agent_id)
+    rsi = _requireRsiOrchestrator(agent_id)
     proposer = rsi.self_improvement_proposer
     proposals = [p.to_dict() for p in proposer.list_pending_proposals()]
     return {"code": 0, "data": {"proposals": proposals, "agent_id": rsi.agent_id}}
@@ -403,9 +441,7 @@ async def list_rsi_proposals(
 ):
     """全状态提案列表。只有 PENDING 可见时，"批准过什么、结果如何"永久消失，
     回滚与事后审计都无从下手（工单 011，读的是工单 010 的 `list_all_proposals()`）。"""
-    rsi = _get_rsi_orchestrator(agent_id)
-    if rsi is None:
-        raise _rsi_not_ready(agent_id)
+    rsi = _requireRsiOrchestrator(agent_id)
     proposer = rsi.self_improvement_proposer
     proposals = (
         proposer.list_all_proposals() if state == "all"
@@ -429,9 +465,7 @@ async def approve_rsi_proposal(
     _admin: Any = Depends(_governance_admin_dep),
 ):
     """人工批准并应用 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator(agent_id)
-    if rsi is None:
-        raise _rsi_not_ready(agent_id)
+    rsi = _requireRsiOrchestrator(agent_id)
     result = rsi.self_improvement_proposer.approve_and_apply(
         proposal_id, approver=body.approved_by, tool_sequence=body.tool_sequence
     )
@@ -462,9 +496,7 @@ async def reject_rsi_proposal(
     _admin: Any = Depends(_governance_admin_dep),
 ):
     """拒绝 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator(agent_id)
-    if rsi is None:
-        raise _rsi_not_ready(agent_id)
+    rsi = _requireRsiOrchestrator(agent_id)
     if not rsi.self_improvement_proposer.reject_proposal(proposal_id, reason=body.reason):
         raise HTTPException(
             status_code=404,
@@ -491,16 +523,7 @@ def _skill_rollback_context(agent_id: Optional[str] = None):
     取到执行体，写盘也只能写回该 agent 的技能库。取不到就返回 None ——
     调用方据此返 503，而不是回落到默认 agent（那会把回滚装进别人的技能库）。
     """
-    state = None
-    from neurova.api.endpoints import get_app_state
-
-    state = get_app_state()
-    if not state:
-        return None
-    try:
-        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
-    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
-        agent = None
+    agent = _get_agent(agent_id)
     if agent is None:
         return None
     registry = getattr(agent, "skill_registry", None) or getattr(agent, "_skill_registry", None)

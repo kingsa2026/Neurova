@@ -606,14 +606,16 @@ async def list_pending_skills(agent_id: str):
     "skill_packer" 这个名字从此只指向 AutoSkillBuilder 一处，不再有歧义。
     Agent 未就绪返回空列表（闸关时恒空）。
 
-    ⚠️ 可达性（2026-09-17 复核）：本面只在 Agent 单例**已初始化**时有值——
-    `_get_agent()` 返回 None 时恒空列（表现为"审批面永远没有待审件"）。
+    ⚠️ 可达性（2026-09-17 复核 · 2026-09-30 修根因）：本面只在 Agent 实例**已就绪**时有值。
+    此前四处一律 `_get_agent()` 丢掉路径里的 `agent_id`，与治理端点同一处缺陷
+    （`state.get_agent()` 打在 dict 上被裸 except 吞成 None），表现为"审批面永远没有待审件"；
+    现按 URL 指名解析，指名而不在池中即 503，不回落给默认 agent。
     与 approve/reject 同因同治：Agent 未就绪时 approve 会 503 而非静默成功。
     """
     try:
         from neurova.api.endpoints.governance import _get_agent
 
-        agent = _get_agent()
+        agent = _get_agent(agent_id)
         packer = getattr(agent, "skill_packer", None) if agent is not None else None
         if packer is None or not hasattr(packer, "list_pending_templates"):
             return []
@@ -628,7 +630,7 @@ async def approve_pending_skill(agent_id: str, template_id: str):
     """C10 审批面：批准待审模板（激活后下轮 pattern_mining 注册进 Registry）。"""
     from neurova.api.endpoints.governance import _get_agent
 
-    agent = _get_agent()
+    agent = _get_agent(agent_id)
     packer = getattr(agent, "skill_packer", None) if agent is not None else None
     if packer is None or not hasattr(packer, "approve_template"):
         raise HTTPException(status_code=503, detail="Agent 未就绪或评审闸未开启")
@@ -643,7 +645,7 @@ async def reject_pending_skill(agent_id: str, template_id: str):
     """C10 审批面：拒绝并删除待审模板。"""
     from neurova.api.endpoints.governance import _get_agent
 
-    agent = _get_agent()
+    agent = _get_agent(agent_id)
     packer = getattr(agent, "skill_packer", None) if agent is not None else None
     if packer is None or not hasattr(packer, "reject_template"):
         raise HTTPException(status_code=503, detail="Agent 未就绪或评审闸未开启")
@@ -685,7 +687,7 @@ async def approve_pending_experience(agent_id: str, record_id: str):
     from neurova.api.endpoints.governance import _get_agent
     from neurova.evolution.skill_experience import get_skill_experience_store
 
-    agent = _get_agent()
+    agent = _get_agent(agent_id)
     registry = getattr(agent, "_skill_registry", None) if agent is not None else None
     ok = get_skill_experience_store().approve_experience(record_id, registry=registry)
     if not ok:
