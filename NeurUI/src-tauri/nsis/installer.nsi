@@ -71,6 +71,18 @@ ${StrLoc}
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
 
+; 安装器美术资产的编译期根目录（Hero/按钮位图）。
+; 相对 makensis 的脚本目录按候选顺序探测：四级=原生布局
+; target/release/nsis/x64；五级=交叉编译布局 target/<triple>/release/nsis/x64。
+; 两候选都不命中即编译期报错，不静默降级成"无图安装器"。
+!if /FileExists "..\..\..\..\nsis\assets\hero_zh.bmp"
+  !define NSIS_ART "..\..\..\..\nsis\assets"
+!else if /FileExists "..\..\..\..\..\nsis\assets\hero_zh.bmp"
+  !define NSIS_ART "..\..\..\..\..\nsis\assets"
+!else
+  !error "NSIS 美术资产不可达：nsis/assets 既不在四级也不在五级相对路径下"
+!endif
+
 Var PassiveMode
 Var UpdateMode
 Var NoShortcutMode
@@ -1236,10 +1248,11 @@ Function PageWelcome
   System::Call "user32::SetWindowPos(p $hCustDlg, p 0, i 0, i 0, i $R8, i $R7, i 0x10)"
 
   ; Hero 位图 1:1 贴（496x150，占页面上部；中英按安装器语言挑选）。
-  ; 编译期路径：bundler 的 makensis cwd = target/release/nsis/x64，
-  ; 相对上行四级即 src-tauri/nsis/assets；独立验证时 expand 脚本注入绝对路径。
-  File /oname=$PLUGINSDIR\hero.bmp "..\..\..\..\nsis\assets\hero_zh.bmp"
-  File /oname=$PLUGINSDIR\hero_en.bmp "..\..\..\..\nsis\assets\hero_en.bmp"
+  ; 编译期路径按 ${NSIS_ART} 取（定义见文件头）：原生构建的 makensis cwd 是
+  ; target/release/nsis/x64（上行四级），交叉编译多一层目标三元组
+  ; （target/<triple>/release/nsis/x64，上行五级）——单一定义覆盖两种布局。
+  File /oname=$PLUGINSDIR\hero.bmp "${NSIS_ART}\hero_zh.bmp"
+  File /oname=$PLUGINSDIR\hero_en.bmp "${NSIS_ART}\hero_en.bmp"
   ${NSD_CreateBitmap} 0 0 1u 1u ""
   Pop $hHeroBitmap
   ${NSD_SetImage} $hHeroBitmap "$PLUGINSDIR\hero.bmp" "$PLUGINSDIR\hero.bmp"
@@ -1286,7 +1299,7 @@ Function PageWelcome
 
   ; 一键安装大按钮（原生位图按钮 240x58 品牌主色胶囊，1:1 不裁切；
   ; 位图归控件所有，不 DeleteObject——删了即空白）
-  File /oname=$PLUGINSDIR\btn_install.bmp "..\..\..\..\nsis\assets\btn_install.bmp"
+  File /oname=$PLUGINSDIR\btn_install.bmp "${NSIS_ART}\btn_install.bmp"
   ${NSD_CreateButton} 1u 1u 1u 1u "$(nsInstallBtn)"
   Pop $hBtnInstall
   ${NSD_OnClick} $hBtnInstall OnInstallBtnClick
