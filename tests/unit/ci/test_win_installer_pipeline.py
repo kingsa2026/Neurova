@@ -191,3 +191,23 @@ def testEveryToolInvokingStageRefreshesPath():
         "跨 stage 不继承，工具会在这些 stage 里 CommandNotFound：\n  - "
         + "\n  - ".join(offenders)
     )
+
+
+def testPipelineDoesNotDuplicateTauriInvocation():
+    """流水线不得自己调 `tauri build` —— 构建链只有一处定义（教义第 6 条）。
+
+    实机证据（2026-09-30，节点 orange-connector）：流水线第 3 个 stage 直接
+    `npx tauri build`，第 4 个 stage 再 `package_installer_zip.py --skip-tauri`。
+    于是打包脚本里刚做的签名注入（`tauri_signing_args`）**根本不在这条链上** ——
+    tauri 仍按产品配置里写死的指纹签名、在没有该证书的机器上硬失败。
+
+    这正是「两份定义」的典型代价：修一处，另一处照旧。收口方式：内核与壳都由
+    `package_installer_zip.py` 一站产出（它已内含前端构建 + tauri + 壳），
+    流水线只调它，不手抄第二份构建命令。
+    """
+    src = _scripts()
+    assert "tauri build" not in src, (
+        "流水线里出现了 `tauri build` 直调 —— 构建链必须收口到 "
+        "scripts/desktop/package_installer_zip.py（那里才有签名注入）"
+    )
+    assert "package_installer_zip.py" in src, "流水线必须调用仓内打包脚本"
