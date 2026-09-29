@@ -95,7 +95,18 @@ def tauri_signing_args() -> tuple[list[str], bool]:
         return [], False
     log(f"签名证书缺席（{thumb} 不在本机证书库），本次构建不签名 —— 产物将显式标注")
     # 覆盖成 null = 不签；只在本次构建生效，不改产品配置。
-    return ["--config", '{"bundle":{"windows":{"certificateThumbprint":null}}}'], False
+    #
+    # **落文件传路径，不内联 JSON**：`--config '{...}'` 经 shell 会把引号剥掉，
+    # tauri 收到 `{bundle:{windows:{...}}}` 报 `key must be a string`
+    # （实机踩到，2026-09-30）。结构化数据不进命令行是根本，不是加转义。
+    import json
+
+    override = Path(os.environ.get("TEMP", ".")) / "neurova-unsigned-bundle.json"
+    override.write_text(
+        json.dumps({"bundle": {"windows": {"certificateThumbprint": None}}}),
+        encoding="utf-8",
+    )
+    return ["--config", str(override)], False
 
 
 def build_tauri() -> Path:
@@ -106,8 +117,10 @@ def build_tauri() -> Path:
     extra, signed = tauri_signing_args()
     build_tauri.last_signed = signed  # 交回调用点：不签名的产物要点名
     log("tauri build（Rust release + NSIS bundle，可能 10 分钟+）…")
-    cmd = " ".join(["npx", "tauri", "build", *extra])
-    if run(cmd, shell=True, cwd=REPO / "NeurUI") != 0:
+    # 传 argv 数组、不经 shell：`--config` 的路径可能含空格，过 shell 会被二次解析
+    # （实机踩到引号被剥）。Windows 上 npx 是 npx.cmd，须经 cmd 解析扩展名。
+    npx = "npx.cmd" if os.name == "nt" else "npx"
+    if run([npx, "tauri", "build", *extra], cwd=REPO / "NeurUI") != 0:
         raise RuntimeError("tauri build 失败")
     return find_kernel()
 
