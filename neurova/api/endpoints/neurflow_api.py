@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user, get_current_user_or_default
-from neurova.api.endpoints import get_agent_instance
+from neurova.api.endpoints import defaultAgentId, get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.event_recorder import (
     attach_event_recorder,
@@ -390,8 +390,10 @@ async def execute_workflow(
     if agent_id:
         agent = get_agent_instance(agent_id)
     if agent is None:
-        # 尝试获取默认 Agent
-        agent = get_agent_instance("default")
+        # 回退到**当前**默认 agent：身份经 `defaultAgentId()` 单源解析（switch 之后
+        # 跟着走），不写死字面量；显式传参而不是留空，是为了与全站"按 id 取实例"的
+        # 调用形状一致——替身与守卫都按单参契约写，留空会在测试面上凭空多一类红。
+        agent = get_agent_instance(defaultAgentId())
 
     if agent:
         memory_manager = getattr(agent, "memory_manager", None)

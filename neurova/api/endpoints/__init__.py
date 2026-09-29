@@ -16,6 +16,10 @@ logger = get_logger(__name__)
 # 全局状态（由 app.py 初始化时设置）
 _app_state: Optional[Dict[str, Any]] = None
 
+# 默认 agent 身份的初值——全仓只此一处字面量，`_app_state["default_agent_id"]`
+# 一旦被人改写（`switch_agent`），后续每一次未指名的解析都跟着走那份状态。
+DEFAULT_AGENT_ID = "default"
+
 
 def set_app_state(state: Dict[str, Any]) -> None:
     global _app_state
@@ -59,15 +63,33 @@ def get_provider_manager():
     return None
 
 
-def get_agent_instance(agent_id: str = "default"):
-    """获取 Agent 实例"""
+def get_agent_instance(agent_id: str = ""):
+    """按 agent_id 取实例；**未指名时按"当前默认 agent"解析，不写死字面量**。
+
+    默认位是运行期可变的（`POST /v1/agents/{agent_id}/switch` 就在改它），所以这里
+    经 `defaultAgentId()` 取，而不是把 `"default"` 当成事实。历史上解析侧写死
+    字面量、写侧另写一个键名且全仓无人读，于是"切换默认 Agent"回 200 而无人执行。
+    """
     if _app_state:
         agents = _app_state.get("agents", {})
-        # 如果 agent_id 为空，使用默认 agent
-        if not agent_id:
-            agent_id = "default"
-        return agents.get(agent_id)
+        return agents.get(agent_id or defaultAgentId())
     return None
+
+
+def defaultAgentId() -> str:
+    """当前默认 agent 的身份——唯一读点。未设置过时用初值 `DEFAULT_AGENT_ID`。"""
+    if _app_state:
+        return _app_state.get("default_agent_id") or DEFAULT_AGENT_ID
+    return DEFAULT_AGENT_ID
+
+
+def setDefaultAgentId(agentId: str) -> None:
+    """当前默认 agent 的身份——唯一写点。
+
+    写入口与 `defaultAgentId()` 同处一模块：键名字面量一旦散到第二个模块，就会出现
+    "一边写 default_agent_id、一边读硬编码 default"这种两半各自成立、合起来失效的形态。
+    """
+    _app_state["default_agent_id"] = agentId
 
 
 def init_default_user():

@@ -324,10 +324,10 @@ async def rag_datasets_delete(dataset_id: str):
 
 def _rag_llm_fn(agent_id: str):
     """出题/Judge 的同步 LLM 通道（graph_bridge 同款：agent 候选 llm_client）。"""
-    from neurova.api.endpoints import get_agent_instance
+    from neurova.api.endpoints import defaultAgentId, get_agent_instance
 
     clients = []
-    for agent in (get_agent_instance(agent_id=agent_id), get_agent_instance(agent_id="default")):
+    for agent in (get_agent_instance(agent_id=agent_id), get_agent_instance(agent_id=defaultAgentId())):
         client = getattr(agent, "llm_client", None) if agent else None
         if client is not None and client not in clients:
             clients.append(client)
