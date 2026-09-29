@@ -96,6 +96,49 @@ def csc_path() -> Path | None:
     return None
 
 
+def refresh_machine_path() -> None:
+    """把**机器/用户级** PATH 合并进本进程（自托管环境里必须做）。
+
+    为什么需要它（2026-09-30 实机踩到，节点 orange-connector）：CNB 自托管 Runner
+    以**服务**形态常驻，其进程环境在服务启动那一刻定型。此后用 `choco install
+    python312` / `nsis` 往机器 PATH（`HKLM\\SYSTEM\\...\\Environment`）写的新条目，
+    正在跑的 Runner **读不到** —— 只有重启服务才会重读。于是出现分裂事实：
+
+        C:\\Python312\\python.exe                        在盘上
+        C:\\Program Files (x86)\\NSIS\\makensis.exe        在盘上
+        Get-Command python / makensis                    MISSING
+
+    失败形态是「工具链缺席：makensis, python」——看着像整机没装，人会去重装、
+    换机器，打一场打不赢的仗，而根因只是环境没继承。
+
+    人手工在打包机上跑时，重开一个 PowerShell 就绕过去了（`install` 结尾的提示）；
+    但 `run` 被自动化调用时没有「重开终端」这一步，故在探测**之前**自行合并。
+    非 Windows（如 CI 里做静态自证）为 no-op，不引入平台分支到调用点。
+    """
+    if os.name != "nt":
+        return
+    try:
+        import winreg
+    except ImportError:  # 非 Windows 上 winreg 不存在；上面已拦，此处兜底
+        return
+    parts: list[str] = []
+    for hive, sub in (
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+    ):
+        try:
+            with winreg.OpenKey(hive, sub) as k:
+                raw, _ = winreg.QueryValueEx(k, "Path")
+        except OSError:
+            continue
+        parts.append(os.path.expandvars(raw))
+    if not parts:
+        return
+    merged = ";".join([*parts, os.environ.get("PATH", "")])
+    os.environ["PATH"] = merged
+    log(f"PATH 已合并机器/用户级条目（{merged.count(';') + 1} 段）")
+
+
 def probe_toolchain() -> list[str]:
     """逐件点名工具链。
 
@@ -252,6 +295,8 @@ def cmd_run(args) -> int:
     ver = product_version()
     log(f"版本事实源 = {ver}（读自 NeurUI/src-tauri/tauri.conf.json）")
 
+    # 先刷新 PATH 再探测：自托管 Runner 的进程环境是冻结的（见 refresh_machine_path 注释）
+    refresh_machine_path()
     probe_toolchain()  # 缺席即抛（判据与动作都在函数里，调用点不重复一份）
     log("工具链自证 PASSED")
 

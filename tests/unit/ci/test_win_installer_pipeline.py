@@ -90,3 +90,52 @@ def testHostSelfProofAndToolchainNaming():
     assert "cmd /c ver" in scripts, "缺 Windows 宿主自证（cmd /c ver）"
     for tool in ("csc.exe", "makensis", "cargo", "python"):
         assert tool in scripts, f"工具链未点名：{tool}"
+
+
+# ── 自托管节点的「进程环境冻结」硬语义（Issue #332 实机踩到）────────────────
+# 自托管 Runner 以**服务**形态常驻，其进程环境在服务启动那一刻定型。此后用
+# `choco install python312` 之类往**机器 PATH**（HKLM\...\Environment）写新条目，
+# 正在跑的 Runner **读不到** —— 只有重启服务才会重新读。
+#
+# 实机证据（2026-09-30，节点 orange-connector，20C/31G）：
+#   machine PATH 含 `C:\Python312\`         ← 已装
+#   Runner 进程 PATH 只有 `...\chocolatey\bin`（无 Python、无 NSIS）
+#   于是 `Get-Command python` / `makensis` 全部 MISSING —— 而它们**就在盘上**。
+#
+# 这对本流水线是致命的：`Prepare` 与 stage 脚本都在 Runner 进程里跑，
+# 于是「机器上明明装了」与「构建期查不到」分裂成两个事实。不修的话失败形态是
+# 「工具链缺席：makensis, python」——看起来像整机没装，实际是环境没刷新，
+# 人会去打一场打不赢的仗（重装、换机器），而根因在环境继承。
+#
+# 根修点：**流水线自己从机器注册表刷新 PATH**，而不是指望管理员重启 Runner 服务。
+# 判据（看结构不看措辞）：
+#   · 事件块内必须有刷新机器 PATH 的语句（`GetEnvironmentVariable(...,"Machine")`）；
+#   · 该刷新必须发生在工具链探测**之前**（探测读的就是被刷新的那份 PATH）。
+
+
+def _scripts() -> str:
+    return "\n".join(
+        stage.get("script", "")
+        for job in _jobs()
+        for stage in job.get("stages", [])
+    )
+
+
+def testMachinePathIsRefreshedBeforeToolchainProbe():
+    """自托管 Runner 进程环境在服务启动时冻结；工具链探测前必须刷新机器 PATH。"""
+    src = _scripts()
+    assert 'GetEnvironmentVariable("Path", "Machine")' in src or \
+        "GetEnvironmentVariable('Path', 'Machine')" in src, (
+        "缺机器 PATH 刷新：自托管 Runner 进程环境冻结，"
+        "后装的 python/makensis 在盘上却查不到（实机证据见本节注释）"
+    )
+    # 刷新必须在探测之前：取首次出现位置比对。
+    refresh_at = max(
+        src.find('GetEnvironmentVariable("Path", "Machine")'),
+        src.find("GetEnvironmentVariable('Path', 'Machine')"),
+    )
+    probe_at = src.find("$probes =")
+    assert probe_at != -1, "缺工具链逐件点名段落"
+    assert refresh_at < probe_at, (
+        "机器 PATH 刷新必须发生在工具链探测之前 —— 探测读的就是刷新后的 PATH"
+    )

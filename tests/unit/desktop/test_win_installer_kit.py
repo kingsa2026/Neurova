@@ -140,3 +140,37 @@ def testArtifactSizeFloorAndChecksumAreEnforced():
         "必须校验体积红线并落 sha256 校验文件"
     assert re.search(r"raise RuntimeError\(f?\"?产物体积异常偏小", src), \
         "体积低于红线必须抛错，不得只打印警告"
+
+
+def testKitRefreshesMachinePathBeforeProbe():
+    """打包机脚本也要刷新机器 PATH —— 与流水线同一根因（Issue #332 实机踩到）。
+
+    实机证据（2026-09-30，节点 orange-connector）：Runner 以服务常驻，进程环境在
+    服务启动那刻冻结。此后 `choco install python312` / `nsis` 写进机器 PATH 的条目
+    读不到 —— `python.exe` 与 `makensis.exe` 都在盘上，`Get-Command` 却 MISSING。
+
+    人手工在打包机上跑 `install` 之后**重开 PowerShell 才生效**（脚本结尾就是这么
+    提示的），但 `run` 一旦被自动化调用（本仓流水线、或任何 CI 包装），就落在冻结的
+    环境里。故 `run` 的工具链探测之前必须自行合并机器/用户 PATH —— 与 `.cnb.yml`
+    的同名修法同源（教义第 5 条：同一根因全命中点扫荡）。
+    """
+    src = _kit_source()
+    # 判据看「有没有去读机器级 PATH」，不绑定语言习语：本脚本是 Python，
+    # 走 winreg 读 HKLM\...\Environment 才是自然写法；`.cnb.yml` 那边是
+    # PowerShell，用 GetEnvironmentVariable —— 两处同根因、不同形态，
+    # 把判据写成某一种习语的字面量会在另一边假红（实测踩过）。
+    assert "refresh_machine_path" in src, (
+        "缺机器 PATH 刷新入口函数：工具链探测会读到冻结的进程环境，"
+        "后装的 python/makensis 在盘上却查不到"
+    )
+    assert "Session Manager\\Environment" in src or "HKEY_LOCAL_MACHINE" in src, (
+        "刷新必须真去读机器级注册表 PATH（HKLM），而不是只读进程环境凑数"
+    )
+    funcs = _functions()
+    assert "refresh_machine_path" in funcs, "刷新必须独立成函数，调用点不各写一份"
+    # 必须发生在探测之前：run 里 refresh 调用点先于 probe_toolchain 调用点。
+    run_src = src[src.find("def cmd_run"):src.find("def newest_installer")]
+    assert run_src.find("refresh_machine_path()") != -1, "cmd_run 里没有刷新调用"
+    assert run_src.find("refresh_machine_path()") < run_src.find("probe_toolchain()"), (
+        "刷新必须在工具链探测之前 —— 探测读的就是刷新后的 PATH"
+    )
