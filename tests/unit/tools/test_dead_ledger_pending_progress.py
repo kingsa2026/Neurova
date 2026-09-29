@@ -63,10 +63,17 @@ WAVES_THAT_TOUCHED_THIS_DOMAIN = {
 
 
 def _pendingEntries() -> dict:
+    """**纳入归属判据**的待处置条目：排除反向控制。
+
+    反向控制的「待处置」是**终局**语义（没有可处置的动作），不是积压——要求它
+    点名一个处置批等于要求它编一个不存在的批。排除判定走台账模块单源
+    `ledger.isReachableControl`，本守卫不自己写成员测试（教义第 6 条）。
+    """
     return {
         symbol: entry
         for symbol, entry in ledger.readLedger().items()
         if entry["disposal"] == ledger.DISPOSAL_PENDING
+        and not ledger.isReachableControl(symbol)
     }
 
 
@@ -123,6 +130,7 @@ class TestPendingEntriesHaveAnOwner:
             + "\n  ".join(offenders)
             + "\n无归属的待处置条目没有任何东西会在下一个人路过时拦他一下——"
             "这正是本片要消灭的「登记 ×N 而不产生红」形态。"
+            "（反向控制不在此列：它们的待处置是终局，没有批可归。）"
         )
 
 
@@ -155,9 +163,62 @@ class TestProgressIsNotVacuous:
             f"但同域仍有无人认领的待处置条目 {unowned}——"
             "它们被反复登记却始终没有批次归属，正是 Issue #310 点名的静默遗留形态"
         )
-        assert owned, (
-            "本域一个待处置条目都没有归属——若取数坏了（`_pendingEntries` 返回空），"
-            "上一条断言会空转通过；这条钉住「确实有归属被解析出来」"
+        # 非空转：上一条断言在 `_pendingEntries()` 返回空时会通过，故必须证明
+        # 「待处置条目确实存在，且被本判据**如实分类**」——而不是被取数静默丢掉。
+        #
+        # Issue #310 收口后本域已**排空**（两条「未分期」都已裁定），故不能再用
+        # 「必须至少有一条带归属的待处置」来自证非空转：那会把「本域已清」误判成
+        # 「取数坏了」。改成断言**分类覆盖**：台账里每一条待处置，要么在归属判据里、
+        # 要么是反向控制——两者都不落 = 取数把它们吞了。
+        all_pending = {
+            symbol: entry
+            for symbol, entry in ledger.readLedger().items()
+            if entry["disposal"] == ledger.DISPOSAL_PENDING
+        }
+        assert all_pending, (
+            "本域一条待处置都没有——若台账真被排空，本类其余断言都在空转；"
+            "而 `REACHABLE_CONTROLS` 决定了至少有反向控制项，故这必然是取数坏了"
+        )
+        swallowed = [
+            symbol for symbol in all_pending
+            if symbol not in _pendingEntries() and not ledger.isReachableControl(symbol)
+        ]
+        assert not swallowed, (
+            f"以下待处置条目既不在归属判据里、又不是反向控制 {swallowed}——"
+            "它们被取数吞了，上一条断言是空转通过的"
+        )
+        assert owned or not any(
+            not ledger.isReachableControl(sym) for sym in all_pending
+        ), (
+            "仍有非反向控制的待处置条目，却一条归属都没解析出来——"
+            "归属解析坏了（这正是「登记 ×N 无人认领」判据恒真的形态）"
+        )
+
+    def test_reverseControlsAreExcludedByTheSingleSource(self):
+        """反向控制必须被**台账模块单源**排除出归属判据之外（不靠本守卫自己筛）。
+
+        这条钉住「终局语义 ≠ 积压语义」这件事：反向控制项在 `REACHABLE_CONTROLS`
+        里，`isReachableControl()` 必须认它们；且它们确实在台账里、处置为待处置。
+        若单源函数坏掉（恒返回 False），本域会因为 `ctx_snapshot` 无归属而报红——
+        这正是本片并 `ctx_snapshot` 时走通的那条路。
+        """
+        assert hasattr(ledger, "isReachableControl"), (
+            "台账模块未提供反向控制单源判定——守卫若自己写成员测试，"
+            "两处口径必然漂移（教义第 6 条）"
+        )
+        for symbol in ledger.REACHABLE_CONTROLS:
+            assert ledger.isReachableControl(symbol), (
+                f"{symbol} 在 REACHABLE_CONTROLS 里但单源判定不认它"
+            )
+            entry = ledger.readLedger().get(symbol)
+            assert entry is not None and entry["disposal"] == ledger.DISPOSAL_PENDING, (
+                f"{symbol} 不是待处置——反向控制的处置列永远是「待处置」"
+            )
+            assert symbol not in _pendingEntries(), (
+                f"{symbol} 仍被算进归属判据——反向控制不适用「归哪一批」这条轴"
+            )
+        assert not ledger.isReachableControl("__不存在的符号__"), (
+            "isReachableControl 对任意符号恒真——单源判定失去判别力"
         )
 
     def test_unownedPendingSymbolsIsTheOneSourceOfTruth(self):

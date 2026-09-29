@@ -193,6 +193,19 @@ class TestDisposalIsMachineCheckable:
             "T-09 死码处置批（Issue #310）：与五段框架同批退场（重置面没人用）——"
             "观察者单例由 get_pipeline_observers() 惰性创建，进程内不需要重置点。"
         ),
+        # 第三条「未分期」条目裁定（Issue #310 收口）：成本记账面**已有真面**，
+        # 故 llm/cost_tracking_middleware.py（362 行，零引用）是第三份并行定义，
+        # 与 T-09 处置的 UnifiedToolRegistry / ToolExecutionLogger 同一条根因。
+        # 处置口径同 T-09：删声明本身，不给死面补消费者。
+        # 同根因全命中点一并扫掉（collaboration/cost_ledger_integration.py 的
+        # track_llm_call_integration 符号级退役 + computer_api.py 的 5 个孤儿
+        # import）；常驻判据 tests/unit/tools/test_unscheduled_two_rulings.py。
+        "CostTrackingMixin": (
+            "第三份记账面退场（Issue #310）：真面是 models/cost_tracking 的 "
+            "record_llm_cost 单一入口（+ @track_llm_call + chat_stream 显式记账 "
+            "+ chat_pipeline 轮次归属 + api/app.py 装配），本模块生产零引用；"
+            "常驻判据 tests/unit/tools/test_unscheduled_two_rulings.py"
+        ),
     }
 
     def test_every_disposal_is_either_pending_or_justified(self):

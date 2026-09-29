@@ -174,11 +174,17 @@ def pendingBatchOf(entry: Dict[str, str]) -> str:
 
 
 def unownedPendingSymbols() -> List[str]:
-    """无批次归属的待处置条目（**没人认领的遗留**），逐条报出。"""
+    """无批次归属的待处置条目（**没人认领的遗留**），逐条报出。
+
+    反向控制**不在此列**：它们归 `REACHABLE_CONTROLS`，待处置是终局，
+    不问「归哪一批」（没有批可归）——判定走单源 `isReachableControl()`。
+    """
     return [
         symbol
         for symbol, entry in readLedger().items()
-        if entry["disposal"] == DISPOSAL_PENDING and not pendingBatchOf(entry)
+        if entry["disposal"] == DISPOSAL_PENDING
+        and not isReachableControl(symbol)
+        and not pendingBatchOf(entry)
     ]
 
 THRESHOLD_NOT_APPLICABLE = "not_a_threshold"
@@ -253,10 +259,24 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("kill_all", KIND_SYMBOL, "execution_engine/shell_sessions.py（G4 会话进程回收）"),
 )
 
-#: 反向控制：已知生产可达，必须报 `consumed`，且台账处置**永远**是「待处置」。
-#: 前两条同时钉住前置警告 1（符号级而非文件级）：它们与 `ToolExecutionPipeline`
+#: 反向控制：**已知在生产侧可达/存活**，处置列**永远**是「待处置」。
+#:
+#: 前两条（`notify_tool_result` / `get_pipeline_observers`）判据类是 `consumed`，
+#: 且同时钉住前置警告 1（符号级而非文件级）：它们与 `ToolExecutionPipeline`
 #: 同处 `agent/tool_pipeline.py`，按文件判「死」会连带砍断熔断器的观测接线。
-REACHABLE_CONTROLS = ("notify_tool_result", "get_pipeline_observers", "TokenBudgetGate")
+#: `TokenBudgetGate` 判据 `consumed`，钉住「阈值轴不是恒判 shadowed」。
+#:
+#: `ctx_snapshot`（Issue #310 收口）与上三条**同类但不同判据类**：它的判据是
+#: `self_loop`（写 1 读 3，全落在 `_auto_continue` 自身作用域内）——**它是活的**，
+#: 只是活在自己函数里。它登记的意义与 `MAX_TOOL_CALL_ROUNDS` **成对**：两者同处
+#: 一个函数，一条活一条死，判据必须能把它们分开（同「符号级而非文件级」纪律）。
+#: 故它的正解就是「待处置」——不是「暂时没空处理」，而是「没有可处置的动作」。
+REACHABLE_CONTROLS = (
+    "notify_tool_result",
+    "get_pipeline_observers",
+    "TokenBudgetGate",
+    "ctx_snapshot",
+)
 
 #: 移除型访问：证明有人动过这个键，不证明有人消费它的值。
 _REMOVAL_METHODS = ("pop", "del")
@@ -1050,7 +1070,9 @@ def reconcile() -> Dict[str, List[Dict[str, object]]]:
             problems["pending_controls"].append(
                 {"symbol": symbol, "disposal": entry["disposal"]})
         # 「待处置」轴的进度判据（Issue #310）：见 `pendingOwnerConflicts` 的论证。
-        if entry["disposal"] == DISPOSAL_PENDING:
+        # **反向控制不在此轴**：它们的「待处置」是**终局**（没有可处置的动作），
+        # 不是积压——要求它们点名一个处置批等于要求它们编一个不存在的批。
+        if entry["disposal"] == DISPOSAL_PENDING and symbol not in REACHABLE_CONTROLS:
             batch = pendingBatchOf(entry)
             if not batch:
                 problems["pending_owner"].append({"symbol": symbol})
@@ -1080,12 +1102,28 @@ def pendingOwnerConflicts(entries: Optional[Dict[str, Dict[str, str]]] = None) -
     for symbol, entry in source.items():
         if entry.get("disposal") != DISPOSAL_PENDING:
             continue
+        if isReachableControl(symbol):
+            # 反向控制：待处置是终局，不问「归哪一批」（没有批可归）。
+            continue
         batch = pendingBatchOf(entry)
         if not batch:
             conflicts.append({"symbol": symbol, "kind": "unowned"})
         elif batch not in PENDING_BATCHES:
             conflicts.append({"symbol": symbol, "kind": "unknown_batch", "batch": batch})
     return conflicts
+
+
+def isReachableControl(symbol: str) -> bool:
+    """该符号是否是反向控制（`REACHABLE_CONTROLS` 的**单源判定**）。
+
+    反向控制的「待处置」是**终局**语义——它的正解就是待处置（没有可处置的动作），
+    与「尚未并入任何处置批」的积压语义不同。故「待处置必须归一批」这条进度判据
+    对它不适用：要求它点名一个批等于要求它编一个不存在的批。
+
+    单源在此：`reconcile()` 与 `pendingOwnerConflicts()` 都经它判定，不各写一遍
+    成员测试（教义第 6 条）。
+    """
+    return symbol in REACHABLE_CONTROLS
 
 
 #: 每个处置批的可读名字（**只用于人类可读输出**，判定不看它）。
@@ -1225,8 +1263,8 @@ def main() -> int:
 
     print("\n批次进度（`待处置` 必须能回答「归哪一批」，见 `PENDING_BATCHES`）：")
     print(f"  {batchProgressLine()}")
-    print(f"\n反向控制项（必须为 {JUDGE_CONSUMED} 且处置为「{DISPOSAL_PENDING}」）："
-          f"{', '.join(REACHABLE_CONTROLS)}")
+    print(f"\n反向控制项（必须**在生产侧存活**（判据类见各自台账行）且处置为"
+          f"「{DISPOSAL_PENDING}」）：{', '.join(REACHABLE_CONTROLS)}")
     print("一致性 OK：判据类/第二轴/引用点数与台账一致、枚举合法、依据非空。")
     return 0
 

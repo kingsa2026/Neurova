@@ -57,20 +57,26 @@
 #
 # 取数命令：python scripts/ci/tool_loop_deadline_ledger.py
 # 处置批：T-09（死码处置批）/ T-04（轮次预算单源）/ T-03（provider 工具通路）/ T-05（审批阻塞语义）。
-# 清账进度（机器现算，`batchProgressLine()`）：T-03 / T-04 / T-05 / T-09 已清；
-# 余量只剩反向控制项（G2 成本闸 3 条、未分期 2 条）——反向控制项按纪律**永远**为待处置。
+# 清账进度（机器现算，`batchProgressLine()`）：T-03 / T-04 / T-05 / T-09 已清，
+# **「未分期」已清**（Issue #310：CostTrackingMixin 退役为第二份定义、ctx_snapshot
+# 并入反向控制）；余量只剩反向控制项（G2 成本闸 3 条 + ctx_snapshot 1 条）
+# ——反向控制项按纪律**永远**为待处置。
+# 「未分期」哨兵本身**保留在枚举里**（`PENDING_BATCH_ISSUE_SCOPE`）：它是判据对
+# 「单条待处置项尚未并入任何批」这一形态的**可表达能力**，不是本域的状态。
 #
 # ── 反向控制（known-reachable，永远「待处置」） ──────────────────────
-# notify_tool_result / get_pipeline_observers / TokenBudgetGate：
+# notify_tool_result / get_pipeline_observers / TokenBudgetGate / ctx_snapshot：
 #   前两条与 ToolExecutionPipeline 同处 agent/tool_pipeline.py——按文件判「死」会连带
 #   砍断熔断器的观测接线，故它们被钉成 consumed 且永不赋处置；TokenBudgetGate 钉住
-#   「阈值轴不是恒判 shadowed」。
+#   「阈值轴不是恒判 shadowed」；ctx_snapshot（Issue #310 并入）是**活符号级**反向
+#   控制——判据 `self_loop`（消费点天然落在自己函数内），与 MAX_TOOL_CALL_ROUNDS
+#   同处一个函数、一条活一条死，是「判据有判别力」这件事的机器证据本身。
 #
 ToolSchemaConverter | symbol | consumed | not_a_threshold | 6 | 已接线 | openai_schema.py:128 定义。**自 Issue #177（T-03）起判据类由 no_consumer 变 consumed**：接线前只有 tool_layers/__init__.py:90 一条孤立 import（只导入不消费，按断点计）；T-03 新增的 `neurova/llm/providers/tool_transport.py` 拿它做原生协议 tools 转换的**唯一**落点（`toAnthropicTools` / `toGeminiTools` 各调一次 `openai_to_anthropic` / `openai_to_google`），本类因此第一次有了跨文件消费点。**处置（T-03 收口，Issue #177 / #310）：已接线。**存量已清——三协议形态判别收口为**单一事实源** `openai_schema.detectToolCallFormat()`，本模块与 `llm/providers/tool_transport.py` 的请求侧共用同一份判别表（此前两处各判一遍，判别表漂移时不会有任何东西报红，正是教义第 6 条点名的第二份定义）。常驻判据 `tests/unit/tools/test_t03_protocol_bridge_single_source.py`。
 #   ← 出处：tool_layers/openai_schema.py:128
 ToolCallParser | symbol | consumed | not_a_threshold | 4 | 已接线 | openai_schema.py 定义。**自 Issue #177（T-03）起判据类由 no_consumer 变 consumed**：接线前只有 tool_layers/__init__.py 一条孤立 import（只导入不消费，按断点计）；T-03 把 `protocol_thinking.toOpenAIToolCalls` 接到它上面 —— 原生协议的 tool_use / functionCall 块经本类解析为 LLMResponse.tool_calls 契约，故它现在是响应侧工具调用的唯一转换点（真面已吸收）。**处置（T-03 收口）：已接线。**存量已清——本类 `parse_tool_call()` 内部的「自动检测三形态」**形态判别**改走模块级单一事实源 `detectToolCallFormat()`，与请求侧共用同一份判别表；`FORMAT_OPENAI` / `FORMAT_ANTHROPIC` / `FORMAT_GOOGLE` 三个常量是该判别的取值域单源。
 #   ← 出处：tool_layers/openai_schema.py:285
-CostTrackingMixin | symbol | no_consumer | not_a_threshold | 1 | 待处置 | llm/cost_tracking_middleware.py:27 定义，生产侧零引用（无 import、无继承）。实测：全仓唯一对本模块的字符串出现就是它自身的类定义行 ⇒ 该中间件从未被任何 LLM 客户端混入。**成本记账面是否已有真面**（llm_client 的 `_stats` 与 `@track_llm_call` 装饰器）须与接线一并裁定，故本片只登记。〔待处置批：未分期〕
+CostTrackingMixin | symbol | absent | not_a_threshold | 0 | 已删除 | **第三条「未分期」已裁定并处置（Issue #310）：成本记账面已有真面，故本行是第二份定义，删声明本身。**台账原文要求裁定「成本记账面是否已有真面」——实测**已有，且四路闭环**：① `llm_client.chat`（:334）与 `_call_api`（:690）走 `@track_llm_call` 装饰器；② `chat_stream` / `chat_stream_sync` 在末尾显式调 `record_llm_cost`（:545 / :673）；③ 归属由 `chat_pipeline` 每轮 `set_llm_cost_context`（:480）绑定；④ 落盘由 `api/app.py:833` 的 `install_llm_cost_store()` + 小时聚合后台任务接通。单一入口是 `models/cost_tracking.record_llm_cost`（docstring 自陈「所有 LLM 调用成本记账的唯一入口」）。`llm_client._stats` 亦非死面：`Agent.get_stats()`（`agent_core.py:205`）→ `api/endpoints/agent.py:673` 真实对外暴露。而本模块（362 行）与 `models/cost_tracking.track_llm_call`、`collaboration/cost_ledger_integration.track_llm_call_integration` 构成**三套并行记账装饰器**（`docs/architecture-model/architecture-findings.md:284` 早已点名「分头写了三遍，一次都没接通」）——与 T-09 处置的 `UnifiedToolRegistry` / `ToolExecutionLogger` 同一条根因。故处置口径与 T-09 同：**删声明本身，不给死面补消费者**（教义第 1/6 条）。另注：它依赖的 `CostTracker.log_call` 需要 `_db_pool`，而该单例在生产侧从未 `initialize()` ⇒ 即便接上也只打 warning，接线方案本身就是否证过的。**同根因全命中点扫荡（教义第 5 条）**：`collaboration/cost_ledger_integration.py` 的 `track_llm_call_integration`（第三套，零引用）**符号级**退役——该文件的 `on_agent_created` / `on_session_started` / `on_task_completed` 被 `phase3_api.py` 真实消费，**不能整删**；连带清掉 `api/endpoints/computer_api.py` 的 5 个 cost_tracking 孤儿 import（只导入不消费）。常驻判据 `tests/unit/tools/test_unscheduled_two_rulings.py`。反向控制：若日后真面断链（`record_llm_cost` 不再被四路调用 / `install_llm_cost_store` 不再装配），本批的裁定前提失效，该判据会报红。
 #   ← 出处：llm/cost_tracking_middleware.py:27
 #   ← 出处：agent/gates.py:59（阈值型门控）
 IterationGate | symbol | consumed | single_source | 4 | 已接线 | gates.py:59 定义，被 openai_loop.py `_buildGateRunner()`（全仓唯一装配点，`buildGateRunner()` 转调它）构造、经 GateRunner 每轮 `check()` ⇒ 判据 consumed。**本片唯一的设计争议点，裁定：不加第五态，改为给台账加第二判据轴「阈值可达性」。**理由：四值回答的是「AST 事实能直接证明的直接可达性」，这门控确实可达；「阈值在值域上够不够得到」是**值比较**事实，两件事合并后四值分支将不再能由 `referenceSites()` 的事实直接验算，且与上下文域判据不可比。**处置（T-04 轮次预算单源）：已接线。**存量已清——第二轴由 `scaled_sparse` 变 `single_source`，这正是台账此前预告的那个读数：此前同键 `max_loop_rounds` 被读出**两个尺度**（门控取尺度 1；守卫取 `…['max_loop_rounds'] // 2`，d=2），更小的那个总先开火，门控因此在合法配置域内几乎永远吃不到自己的阈值。收口后尺度只有**一处派生**：`agent/loops/turn_run_state.py:resolveToolRoundBudget()`，守卫与门控同取它，`// d` 的更小尺度守卫在生产侧归零（`_scalingWitnesses('max_loop_rounds')` 实测为空）⇒ 证据②消失，`thresholdAxis()` 机器算出 `single_source`。**顺带收掉的两条同根因命中点（教义第 5 条）**：① 同一份 `// 2` 派生原在两处各写一遍（`openai_loop.predict_step` 与 `anthropic_loop.resolveToolRoundBudget`），判别式漂移时两边各走各的且无东西报红（教义第 6 条）；② 那份值原写在 `self._max_tool_rounds` —— **per-agent 单例上的实例态**，正是 Issue #268 切片 A 从轮次态里消灭掉的形态（交叠会话互相改写对方的轮次预算）。现在上限随轮次态走（`TurnRunState.toolRoundBudget()`），单例上无副本。常驻判据 `tests/unit/agent/test_tool_round_budget_single_source.py`（含反面：门控必须真的能在自己阈值上开火）。**判据器械同批扩了一条**：`_ctorBindings()` 除下标写法外，另认「构造处调单源派生点」这一形态（`_singleSourceDerivations()` 按 AST 取「函数名 → 它读的配置键」）——收口后的规范写法正是这一种，不认它会把收口算成 `unbound`，即判据替旧形态背书。
@@ -97,7 +103,7 @@ tool_choice | key | consumed | not_a_threshold | 11 | 已接线 | openai_loop.py
 #   ← 出处：agent/loops/openai_loop.py:281（只写不读）
 MAX_TOOL_CALL_ROUNDS | binding | absent | not_a_threshold | 0 | 已删除 | **本行已按 T-09 处置：声明本身删除，不是「补一个消费者」。**前像（`git show 33b71a25:neurova/agent/chat_pipeline.py`）里它**是活的**——`护栏 D: 工具调用循环` 段 `tool_call_rounds += 1; if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS: _tools = None`。`dc9b9a0f` 的「Bug A-5 修复」判定该消费者**恒假**（`while` 条件里已有 `not getattr(response, "tool_calls", None)`，分支内的 `response.tool_calls` 必然为空）并删除——那个判定是对的。**错的是只删了消费者的两处、留下声明**：一条护栏的声明与判据拆散后，剩下的部分读起来仍像「工具轮次有上界」，而实际零 Load。处置口径：被删的消费者不可恢复（恢复即复活死分支），故删声明本身——续写段从一开始就走不到「工具轮次」这件事，护栏没有存在的必要。常驻判据 `tests/unit/agent/test_auto_continue_dead_budget.py`（含反向控制：同函数活着的 MAX_CONTINUE_ROUNDS / MAX_TOTAL_CHARS 必须仍被读，以及 `while` 条件必须仍排除带 tool_calls 的响应——那是本处置的论证前提）。
 #   ← 出处：agent/chat_pipeline.py:2443（写后无读）
-ctx_snapshot | binding | self_loop | not_a_threshold | 4 | 待处置 | chat_pipeline.py:2451 函数内局部量（`ctx_snapshot = list(ctx.context)`），判据 self_loop：写入 1 处（:2451），读取 3 处（:2469 / :2470 / :2481），全部落在 `_auto_continue` 自身作用域内——**它是活的**（读改写进 messages 后送 predict_step），登记它是为第二轴与接收者事实留证：与 `MAX_TOOL_CALL_ROUNDS` 同处一个函数，一条活一条死，判据必须能分开（同「符号级而非文件级」纪律）。〔待处置批：未分期〕
+ctx_snapshot | binding | self_loop | not_a_threshold | 4 | 待处置 | **反向控制（活符号级·Issue #310 并入）：它的处置列永远「待处置」。**chat_pipeline.py:2575 函数内局部量（`ctx_snapshot = list(ctx.context)`），判据 self_loop：写入 1 处（:2575），读取 3 处（:2593 / :2594 / :2605），全部落在 `_auto_continue` 自身作用域内——**它是活的**（读改写进 messages 后送 predict_step）。它登记的意义与 `MAX_TOOL_CALL_ROUNDS` **成对**：两者同处一个函数，一条活一条死，判据必须能把它们分开（同「符号级而非文件级」纪律）——这是「判据有判别力」这件事的机器证据本身。故它并入 `REACHABLE_CONTROLS`：与 `notify_tool_result` / `get_pipeline_observers` 同类，**已知可达**；差别只在判据类（它 `self_loop`，前者 `consumed`），因为它是局部量、消费点天然落在自己函数内。它「待处置」不是「暂时没空处理」，而是**没有可处置的动作**：删它会砍断续写段的上下文快照，接线无从谈起（它本来就通）。反向控制：若它不再被读（写入点仍在、读取点归零），判据类会变 `no_consumer`，`disposalConflicts()` 立刻报红。
 #   ← 出处：agent/chat_pipeline.py:2451
 max_parallel_tools | key | consumed | not_a_threshold | 4 | 已接线 | 单批工具调用并行上限（缺陷 E 的护栏）。`security/agent_limits_settings.py` 定义、`DEFAULTS` 登记、`get_effective_limits()` 按 `MIN_PARALLEL_TOOLS`/`MAX_PARALLEL_TOOLS` 夹紧；消费点在 `agent/loops/base.py:resolveParallelBudget()`（批次分组时读它传 `planToolBatches`）⇒ 写入与读取跨文件，判据 consumed。阈值轴 not_a_threshold：本键不是「类 + check() 内阈值比较」的门控形态（本轴只对门控产出 single_source/scaled_*），它的可达性由「单源消费点 + 合法域夹紧」保证——生产侧只有 base.py 一处读取，不新造第二份默认值或边界。撤销本行即回到「gather 无上限」（一轮 20 个 MCP 调用即 20 并发）。
 #   ← 出处：security/agent_limits_settings.py（工具批次并行上限）
