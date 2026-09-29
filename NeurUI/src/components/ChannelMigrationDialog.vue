@@ -144,8 +144,12 @@ async function submit() {
   submitting.value = true
   errorText.value = ''
   try {
-    await migrateAgentChannelConfigs(from, props.targetAgentId, channels)
-    emit('migrated', { from, to: props.targetAgentId, channels })
+    const res: any = await migrateAgentChannelConfigs(from, props.targetAgentId, channels)
+    const data = res?.data ?? res
+    // 回报**服务端返回的** migrated，不是本地勾选集合：两者在并发下不等
+    // （列源与提交之间源表可能已被改动），屏幕与提示必须来自唯一事实源。
+    const moved: string[] = Array.isArray(data?.migrated) ? data.migrated : channels
+    emit('migrated', { from, to: props.targetAgentId, channels: moved })
   } catch (e: any) {
     // 原样说出原因：409（目标已有同渠道 / 身份冲突）与 403（非属主）
     // 都不是"网络错误"，笼统的"出错了"会诱导用户以为是偶发问题。
