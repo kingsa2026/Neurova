@@ -24,6 +24,7 @@ vi.mock('@/api/modules/channel-configs', () => ({
   checkChannelConflicts: vi.fn(),
   listPluginChannelSchemas: vi.fn(),
   migrateAgentChannelConfigs: vi.fn(),
+  listChannelMigrationSources: vi.fn().mockResolvedValue({ data: { sources: [] } }),
 }))
 vi.mock('@/api/modules/negative-screen', () => ({
   getNegativeScreenConfig: vi.fn().mockResolvedValue({ enabled: false }),
@@ -36,6 +37,7 @@ vi.mock('@/api/modules/negative-screen', () => ({
 import { api } from '@/api'
 import { listChannelConfigs, migrateAgentChannelConfigs } from '@/api/modules/channel-configs'
 import ChannelIntegrationPage from '../ChannelIntegrationPage.vue'
+import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 import zhCN from '@/i18n/locales/zh-CN'
 
 const AGENTS = [
@@ -104,7 +106,7 @@ describe('ChannelIntegrationPage — 存量归属迁移入口', () => {
     expect(wrapper.find('[data-testid="migrate-legacy-channels"]').exists()).toBe(true)
   })
 
-  it('点击后按当前身份把 default 的存量搬过来', async () => {
+  it('点击后打开迁移弹层并把当前身份作为目标（选择权交回用户）', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await pickAgent(wrapper, 'kai')
@@ -113,7 +115,25 @@ describe('ChannelIntegrationPage — 存量归属迁移入口', () => {
     await wrapper.find('[data-testid="migrate-legacy-channels"]').trigger('click')
     await flushPromises()
 
-    expect(migrateAgentChannelConfigs).toHaveBeenCalledWith('default', 'kai')
+    // 同一契约的第二个消费方（教义第 5 条）：本页与 Agent 渠道页都只负责
+    // 打开弹层，由弹层里的「选源 + 勾渠道」决定到底搬什么（Issue #326）。
+    expect(wrapper.findComponent(ChannelMigrationDialog).props('open')).toBe(true)
+    expect(wrapper.findComponent(ChannelMigrationDialog).props('targetAgentId')).toBe('kai')
+    expect(migrateAgentChannelConfigs).not.toHaveBeenCalled()
+  })
+
+  it('弹层回报成功后重取本视图', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await pickAgent(wrapper, 'kai')
+    await wrapper.find('[data-testid="migrate-legacy-channels"]').trigger('click')
+    await flushPromises()
+    ;(listChannelConfigs as any).mockClear()
+
+    wrapper.findComponent(ChannelMigrationDialog).vm.$emit('migrated',
+      { from: 'default', to: 'kai', channels: ['feishu', 'qq'] })
+    await flushPromises()
+
     expect(listChannelConfigs).toHaveBeenCalledWith('kai')
   })
 
