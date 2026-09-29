@@ -53,7 +53,8 @@ def _get_agent(agent_id: Optional[str] = None) -> Optional[Any]:
     """按 agent_id 定位 Agent 实例——单源取法，与 chat/context/skill/model/generation/sleep 同源。
 
     语义两条，都必须保住：
-    - 未指名（None/空）→ 落 `"default"`；
+    - 未指名（None/空）→ 交给单源解析当前默认位（`defaultAgentId()`，可被
+      `POST /v1/agents/{id}/switch` 改写），**不写死 `"default"`**；
     - **指名而不在池中 → None，不回落**。回落到默认 agent 等于把批准/拒绝动作
       装进别人的技能库（工单 011 已为此拆过一次历史实现）。
 
@@ -66,7 +67,7 @@ def _get_agent(agent_id: Optional[str] = None) -> Optional[Any]:
     """
     from neurova.api.endpoints import get_agent_instance
 
-    return get_agent_instance(agent_id or "default")
+    return get_agent_instance(agent_id or "")
 
 
 class WhitelistEntryRequest(BaseModel):

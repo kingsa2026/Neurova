@@ -12,7 +12,7 @@ from typing import Any, Dict
 from fastapi import Request
 
 
-def get_agent(agent_id: str = "default"):
+def get_agent(agent_id: str = ""):
     """获取 Agent 实例（原 growth._get_agent，经聚合器 re-export 保持兼容）"""
     from neurova.api.endpoints import get_agent_instance
 

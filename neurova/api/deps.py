@@ -105,12 +105,17 @@ async def get_optional_user(
     return _user_identity(payload)
 
 
-def get_agent_instance(agent_id: str = "default"):
+def get_agent_instance(agent_id: str = ""):
     """
     FastAPI 依赖：获取 Agent 实例
 
+    解析口径**不在这里**——委托 `neurova.api.endpoints.get_agent_instance` 单源
+    （含"未指名按当前默认 agent"那条可变规则）。本层只加一件事：取不到就 404。
+    历史上这里自带一份 `agents.get(agent_id)` 与写死的 `"default"` 默认参数，
+    于是走依赖注入的端点与走解析器的端点对"当前默认是谁"给出两个答案。
+
     Args:
-        agent_id: Agent ID
+        agent_id: Agent ID；留空即"当前默认 agent"
 
     Returns:
         Agent 实例
@@ -118,20 +123,15 @@ def get_agent_instance(agent_id: str = "default"):
     Raises:
         HTTPException: Agent 不存在
     """
-    try:
-        app_state = get_app_state()
-        if app_state:
-            agents = app_state.get("agents", {})
-            agent = agents.get(agent_id)
-            if agent:
-                return agent
-    except Exception as e:
-        logger.warning("Failed to get agent from app state: %s", e)
+    from neurova.api.endpoints import defaultAgentId, get_agent_instance as _resolve
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Agent not found: {agent_id}",
-    )
+    agent = _resolve(agent_id)
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent not found: {agent_id or defaultAgentId()}",
+        )
+    return agent
 
 
 def get_memory_manager(
