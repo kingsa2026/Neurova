@@ -70,7 +70,7 @@ def _remove_tree_with_retry(path: Path, retries: int = 3, delay: float = 0.25) -
     return False
 
 # 模块级导入（避免重复导入）
-from neurova.api.endpoints import get_app_state
+from neurova.api.endpoints import get_app_state, setDefaultAgentId
 
 
 def _save_agent_config(agent) -> None:
@@ -693,7 +693,10 @@ async def switch_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    state["default_agent_id"] = agent_id
+    # 走单源写入口：解析侧 `defaultAgentId()` 读的是同一份，切换才真的有下游。
+    # 此前这里直接 `state["default_agent_id"] = agent_id`，而解析侧写死回落 `"default"`
+    # ——端点回 200 说"已切换"，全仓却无人读那个键。
+    setDefaultAgentId(agent_id)
 
     return {"code": 0, "message": f"Switched to agent '{agent_id}'"}
 

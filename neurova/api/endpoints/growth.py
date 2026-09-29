@@ -73,7 +73,7 @@ def _get_request_id(request: Request) -> str:
     return _get_request_id_impl(request)
 
 
-def _get_agent(agent_id: str = "default"):
+def _get_agent(agent_id: str = ""):
     """获取 Agent 实例（本文件端点局部别名，转发 growth_common；测试 patch 此名）"""
     return _get_agent_impl(agent_id)
 
