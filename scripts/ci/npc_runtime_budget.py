@@ -38,10 +38,17 @@
 把退出码做成判据，等于让「量不出时间」本身变成一次红灯，与任务成败无关。
 
 用法：
-    python scripts/ci/npc_runtime_budget.py           # 人类可读
-    python scripts/ci/npc_runtime_budget.py --json    # 机器可读（含读数与判据）
+    python scripts/ci/npc_runtime_budget.py              # 人类可读
+    python scripts/ci/npc_runtime_budget.py --json       # 机器可读（含读数与判据）
+    python scripts/ci/npc_runtime_budget.py --predicate  # 收尾接力的判据片段（`true`/`false`）
 
 调用时机（由角色人设约束）：开工第一件事跑一次；**每次准备开新工作面之前再跑一次**。
+
+`--predicate` 是给**收尾接力**用的（Issue #327）：判据此前只问「有没有被中止在
+Agent 那一格」，于是平台 AI 网关的中途掐断与撞满配额被混为一谈，前者被放大成
+每约 7 分钟一轮的自动续跑链条（构建 cnb-urv-1k3lagkdv：第 36 轮 / 7.4 分钟，
+四道上限一道未触达）。第三问「可归因到时长配额吗」复用本脚本的
+`meetsQuotaWall()`，阈值与解析口径因此只有一处定义。
 
 ## 为什么同一份脚本要能跑在 node 上
 
@@ -66,6 +73,11 @@ WRAP_PCT = 70
 
 #: 到这里就必须停：立刻收尾落盘 + 回帖，别再开新工作面。
 HALT_PCT = 85
+
+#: 收尾接力的判据片段（Issue #327）：本次中止是否撞在**时长配额**上。
+#: 它被 shell 的 `eval` 读，取值只能是这两条 —— 不在这里印第三份口径。
+PREDICATE_QUOTA_WALL = "true"
+PREDICATE_NOT_QUOTA_WALL = "false"
 
 #: 缺变量时的判据（按保守纪律走，不默认「时间还很多」）。
 VERDICT_UNKNOWN = "unknown"
@@ -100,6 +112,39 @@ def parseStartEpoch(raw) -> float:
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     return stamp.timestamp()
+
+
+def readElapsedPct(env: dict, now_epoch: float) -> int:
+    """已用百分比；两处口径（总额 / 起点）任一缺失即 -1（= 量不出）。
+
+    与 readBudget 共用同一套解析与取整，故「量尺里的读数」与「接力判据里的读数」
+    不可能分叉（Issue #327：判据要回答的正是"这次中止是不是撞在时长上"）。
+    """
+    total_ms = parseMilliseconds(env.get("CNB_PIPELINE_MAX_RUN_TIME"))
+    start_epoch = parseStartEpoch(env.get("CNB_BUILD_START_TIME"))
+    if not total_ms or not start_epoch:
+        return -1
+    total_s = total_ms // 1000
+    if not total_s:
+        return -1
+    elapsed_s = max(0, int(now_epoch - start_epoch))
+    return min(100, elapsed_s * 100 // total_s)
+
+
+def meetsQuotaWall(env: dict, now_epoch: float) -> bool:
+    """本次中止能否归因到**时长配额**（= 已用比例触达 HALT_PCT）。
+
+    判据方向（Issue #327 的根因）：收尾接力此前只问「是不是被中止在 Agent 那一格」，
+    于是**平台网关在中途掐断**（构建 cnb-urv-1k3lagkdv：第 36 轮 / 7.4 分钟 /
+    `Pipeline has been stopped, Agent aborted`）也被当成「用满配额」，被放大成
+    每约 7 分钟一轮的自动续跑链条，每一轮都真实计入 LLM 成本。
+    现在多问一句：中止时刻离配额墙还有多远 —— 远未触达即外部中止，不续跑。
+
+    拿不出读数（变量缺失/解析失败）时返回 False：**不续跑**。
+    教义第 2 条——「量不出来」不得被转写成一次烧配额的接力。
+    """
+    elapsed_pct = readElapsedPct(env, now_epoch)
+    return elapsed_pct >= HALT_PCT
 
 
 def verdictFor(elapsed_pct: int) -> str:
@@ -182,6 +227,7 @@ def renderHuman(reading: dict) -> str:
 #: tests/unit/ci/test_npc_runtime_budget.py 逐字比对。
 NODE_IMPLEMENTATION = r"""
 const WRAP_PCT = 70, HALT_PCT = 85;
+const PREDICATE_QUOTA_WALL = "true", PREDICATE_NOT_QUOTA_WALL = "false";
 function parseMilliseconds(raw) {
   const text = String(raw || "").trim();
   if (!/^[0-9]+$/.test(text)) return 0;
@@ -193,6 +239,18 @@ function parseStartEpoch(raw) {
   if (!text) return 0;
   const ms = Date.parse(text);
   return Number.isFinite(ms) ? ms / 1000 : 0;
+}
+function readElapsedPct(env, nowEpoch) {
+  const totalMs = parseMilliseconds(env.CNB_PIPELINE_MAX_RUN_TIME);
+  const startEpoch = parseStartEpoch(env.CNB_BUILD_START_TIME);
+  if (!totalMs || !startEpoch) return -1;
+  const totalS = Math.floor(totalMs / 1000);
+  if (!totalS) return -1;
+  const elapsedS = Math.max(0, Math.floor(nowEpoch - startEpoch));
+  return Math.min(100, Math.floor(elapsedS * 100 / totalS));
+}
+function meetsQuotaWall(env, nowEpoch) {
+  return readElapsedPct(env, nowEpoch) >= HALT_PCT;
 }
 function verdictFor(pct) {
   if (pct >= HALT_PCT) return "halt";
@@ -254,19 +312,32 @@ function renderHuman(reading) {
   return lines.join("\n");
 }
 const wantJson = process.argv.includes("--json");
-const reading = readBudget(process.env, Date.now() / 1000);
-process.stdout.write((wantJson ? JSON.stringify(reading) : renderHuman(reading)) + "\n");
+const wantPredicate = process.argv.includes("--predicate");
+const nowEpoch = Date.now() / 1000;
+if (wantPredicate) {
+  process.stdout.write((meetsQuotaWall(process.env, nowEpoch)
+    ? PREDICATE_QUOTA_WALL : PREDICATE_NOT_QUOTA_WALL) + "\n");
+} else {
+  const reading = readBudget(process.env, nowEpoch);
+  process.stdout.write((wantJson ? JSON.stringify(reading) : renderHuman(reading)) + "\n");
+}
 """
 
 
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="NPC 运行期预算自查")
     parser.add_argument("--json", action="store_true", help="输出机器可读读数")
+    parser.add_argument("--predicate", action="store_true",
+                        help="只输出收尾接力的判据片段（true/false）——被 `eval` 读")
     parser.add_argument("--now", type=float, default=None,
                         help="覆盖「现在」（epoch 秒），仅供判据侧复算")
     args = parser.parse_args(argv)
 
     now_epoch = args.now if args.now is not None else datetime.now(timezone.utc).timestamp()
+    if args.predicate:
+        print(PREDICATE_QUOTA_WALL if meetsQuotaWall(dict(os.environ), now_epoch)
+              else PREDICATE_NOT_QUOTA_WALL)
+        return 0
     reading = readBudget(dict(os.environ), now_epoch)
     if args.json:
         print(json.dumps(reading, ensure_ascii=False))

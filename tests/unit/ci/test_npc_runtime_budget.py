@@ -297,6 +297,60 @@ class TestBudgetScriptIsExecutedByTheBuild:
         )
 
 
+class TestPredicateExitServesTheRelay:
+    """收尾接力消费的判据片段（Issue #327）：阈值只有本脚本一处定义。
+
+    判据此前只问「有没有被中止在 Agent 那一格」，于是平台 AI 网关的中途掐断
+    与撞满配额被混为一谈。第三问复用本脚本的 ``meetsQuotaWall()``：
+    `.cnb.yml` 里写的只是 `eval "$($NPX_PREDICATE)"` 这个**消费**动作，
+    阈值（`HALT_PCT`）与两个平台变量的解析不留第二份。
+    """
+
+    def _predicate(self, env_extra: dict) -> str:
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env.update(env_extra)
+        proc = subprocess.run(
+            [sys.executable, str(BUDGET_SCRIPT), "--predicate"],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.strip()
+
+    def _at(self, elapsed_pct: int) -> str:
+        import time
+        total_ms = PLATFORM_JOB_DEFAULT_MAX * 1000
+        start = time.strftime(
+            "%Y-%m-%dT%H:%M:%S.000Z",
+            time.gmtime(time.time() - PLATFORM_JOB_DEFAULT_MAX * elapsed_pct // 100),
+        )
+        return self._predicate({
+            "CNB_PIPELINE_MAX_RUN_TIME": str(total_ms),
+            "CNB_BUILD_START_TIME": start,
+        })
+
+    def test_predicate_tracks_the_halt_threshold(self):
+        assert self._at(5) == "false", (
+            "已用 5% 时判据为真 —— 平台网关的中途掐断仍会被当成撞墙续跑"
+            "（Issue #327：第 36 轮 / 7.4 分钟的外部中止被放大成续跑链条）"
+        )
+        assert self._at(HALT_PCT + 5) == "true", "已用超过 HALT_PCT 时判据为假 —— 真撞墙反而不续跑"
+        assert self._at(5) != self._at(HALT_PCT + 5), "两种相反输入同一读数 —— 判据是恒真壳"
+
+    def test_predicate_is_not_quota_attributable_when_unreadable(self):
+        """量不出（变量缺失）必须为假：不把「量不出来」转写成一次接力。"""
+        assert self._predicate({}) == "false", (
+            "读不到预算变量时判据为真 —— 不确定性被抹平成撞墙证据（教义第 2 条）"
+        )
+
+    def test_predicate_threshold_matches_the_verdict_threshold(self):
+        """判据线与 `verdict=halt` 必须同一条 —— 两处各写一个数即双源。"""
+        assert self._at(WRAP_PCT + 1) == "false", (
+            "刚过 wrapup 线就判成撞墙 —— 判据线与 halt 线分了叉"
+        )
+        assert self._at(HALT_PCT) == "true", "恰在 halt 线上时判据为假"
+
+
 class TestVerdictsAreFalsifiable:
     """C：四态判据逐条可证伪（阈值边界 + 缺失路径），不是恒真断言。"""
 
