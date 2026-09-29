@@ -1196,6 +1196,12 @@ tests/unit/api/test_channel_config_landing_anchor.py
 #   叠前缀、损坏文件点名不静默，以及前后端两张「凭据字段」表逐名咬合 + 非凭据键
 #   不得被扫进封存集合（反向控制）。
 tests/unit/api/test_channel_credential_sealing_290.py
+#   Issue #326 第 1/2 条（迁移前选源、选既有渠道）：此前 `migrate-agent` 只接受
+#   前端硬编码的 `default`，而没有任何读面告诉用户「有哪些可选」。判据：只列有渠道
+#   的候选源（空源点下去只会得到「什么都没迁」）、候选面与迁移门**同一判据**
+#   （教义第 6 条：非属主看不见无主/他人的源，否则是「列出来点下去 403」的假选项）、
+#   目标自身不出现在候选（迁给它是 400）、渠道清单随候选一次带回且稳定排序。
+tests/unit/api/test_channel_migration_sources_326.py
 #   同根因的第二批命中点（教义第 5 条）：种子记忆库 `yi_ling_memory.db` 的八个
 #   脚本同样在换锚时丢了存量（旧锚点 `neurova/memory/data/`，换锚后无人读也不被清，
 #   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、

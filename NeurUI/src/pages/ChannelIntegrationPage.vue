@@ -162,15 +162,18 @@
       <p class="nr-ci-empty-hint">{{ t('channel.noConfigsForAgentHint') }}</p>
       <div class="nr-ci-empty-actions">
         <!-- 与 Agent 渠道页同一套入口（同一契约的第二个消费方）：只在默认视图下
-             提示"配置在那边"而不给搬过来的路，用户就得一直来回切视图。 -->
+             提示"配置在那边"而不给搬过来的路，用户就得一直来回切视图。
+             入口只负责**打开弹层**（Issue #326 第 3 条）——源与渠道由用户在
+             弹层里看着选，不再点一下就把默认视图整表搬走。 -->
         <GlassButton size="sm" variant="primary" data-testid="migrate-legacy-channels"
-          :disabled="migrating" @click="migrateLegacyChannels">
-          {{ migrating ? t('channel.migrating') : t('channel.migrateLegacyChannels') }}
+          @click="showMigration = true">
+          {{ t('channel.migrateLegacyChannels') }}
         </GlassButton>
         <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
           @click="switchToDefaultAgent">{{ t('channel.viewDefaultAgent') }}</GlassButton>
       </div>
-      <p v-if="migrateError" class="nr-ci-empty-error" data-testid="migrate-error">{{ migrateError }}</p>
+      <ChannelMigrationDialog :open="showMigration" :target-agent-id="agentId"
+        @close="showMigration = false" @migrated="onMigrated" />
     </div>
 
     <!-- 归属门与「真的没有配置」必须可区分：合并渲染会让用户重蹈本 bug 的老路。 -->
@@ -323,9 +326,10 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, migrateAgentChannelConfigs, type ChannelIngressStats } from '@/api/modules/channel-configs'
+import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, type ChannelIngressStats } from '@/api/modules/channel-configs'
 import { getNegativeScreenConfig, updateNegativeScreenConfig, testNegativeScreenPush } from '@/api/modules/negative-screen'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
+import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -377,10 +381,9 @@ const toastMessage = ref('')
 
 /** 已保存配置的 extra（F-2：测试连接发送真实已存凭据，而非恒空 {}） */
 const savedExtras = ref<Record<string, Record<string, any>>>({})
-const migrating = ref(false)
-// 迁移失败与归属拒绝的**诚实原文**：403（仅属主/管理员）与 409（冲突）都不是
-// "网络错误"，笼统的"出错了"会诱导用户以为是偶发问题。
-const migrateError = ref('')
+// 迁移动作与错误归因都在弹层里（Issue #326 第 3 条）：本页只负责打开它、
+// 成功后重取本视图——屏幕状态始终来自服务端那唯一的事实源。
+const showMigration = ref(false)
 const accessDenied = ref('')
 
 const currentQrcodeMeta = computed(() =>
@@ -478,41 +481,20 @@ function switchToDefaultAgent() {
   onAgentChange()
 }
 
-/**
- * 把默认视图名下的存量渠道**移动**到当前智能体（与 Agent 渠道页同一动作）。
- *
- * 不做乐观更新：后端是移动语义、冲突时两边原样返回，故成功即重取本视图，
- * 让屏幕上的状态始终来自服务端那唯一的事实源。
- */
-async function migrateLegacyChannels() {
-  const target = agentId.value
-  if (target === 'default' || migrating.value) return
-  migrating.value = true
-  migrateError.value = ''
-  try {
-    const res: any = await migrateAgentChannelConfigs('default', target)
-    const data = res?.data ?? res
-    const moved: string[] = data?.migrated ?? []
-    await loadConfigs()
-    if (moved.length) {
-      showToast(t('channel.migrateSuccess', { count: moved.length, agent: target }))
-    } else {
-      showToast(t('channel.migrateEmpty'))
-    }
-  } catch (e: any) {
-    const detail = e?.response?.data?.detail
-    migrateError.value = t('channel.migrateFailed', {
-      reason: String(detail || e?.message || ''),
-    })
-  } finally {
-    migrating.value = false
+/** 弹层回报迁移成功：重取本视图，并按服务端的返回点名搬了哪些。 */
+async function onMigrated(payload: { from: string; to: string; channels: string[] }) {
+  showMigration.value = false
+  await loadConfigs()
+  if (payload.channels.length) {
+    showToast(t('channel.migrateSuccess', { count: payload.channels.length, agent: payload.to }))
+  } else {
+    showToast(t('channel.migrateEmpty'))
   }
 }
 
 async function loadConfigs() {
   loadingConfigs.value = true
   accessDenied.value = ''
-  migrateError.value = ''
   try {
     // B4-d：插件渠道动态接入——先追加卡片（在已存配置合并前，否则状态回填错过新卡片）
     try {
