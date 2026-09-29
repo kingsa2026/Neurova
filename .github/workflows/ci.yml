@@ -114,7 +114,7 @@ jobs:
           # 不在此写死第二份版本的事实源。
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
 
       - name: Install locked dependencies
         run: uv pip install --system -r requirements-ci.lock
