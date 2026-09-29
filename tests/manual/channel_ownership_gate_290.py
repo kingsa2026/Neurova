@@ -134,6 +134,25 @@ def main() -> int:
         check("[3] 管理员可读 default", r.status_code == 200 and rows_default_before == sorted(PLATFORMS),
               str(rows_default_before))
 
+        # ── [3.5] 候选源读面（Issue #326 第 1、2 条）────────────────────
+        # 用户口径：迁移前先选源、再选既有渠道。这条读面就是把「有哪些可选」
+        # 交给用户的那一步 —— 它与迁移门**同一判据**，故此处按两个身份各验一遍。
+        r = c.get("/api/v1/channel-configs/migration-sources", params={"to_agent_id": "kai"})
+        admin_sources = {x["agent_id"]: x["channels"] for x in (r.json().get("sources") or [])}
+        check("[3.5] 管理员可见候选源，渠道清单随候选带回（稳定排序）",
+              r.status_code == 200
+              and admin_sources.get("default") == sorted(PLATFORMS)
+              and "kai" not in admin_sources,
+              str(admin_sources))
+
+        app.dependency_overrides[auth_u] = lambda: dict(STRANGER)
+        r = c.get("/api/v1/channel-configs/migration-sources", params={"to_agent_id": "kai"})
+        stranger_sources = {x["agent_id"] for x in (r.json().get("sources") or [])}
+        check("[3.6] 候选面与迁移门同口径：非属主看不见无主/他人的源",
+              r.status_code == 200 and "default" not in stranger_sources,
+              str(stranger_sources))
+        app.dependency_overrides[auth_u] = lambda: dict(ADMIN)
+
         # ── [4] 迁移：目标表接住同一份凭据、源表清空 ────────────────────
         r = c.post("/api/v1/channel-configs/migrate-agent",
                    json={"from_agent_id": "default", "to_agent_id": "kai"})
@@ -177,6 +196,28 @@ def main() -> int:
               and src2.get("feishu", {}).get("app_id") == "bot-feishu-2"
               and dst2.get("feishu", {}).get("app_id") == "bot-feishu",
               f"{r2.status_code} / {r2.json().get('detail', '')[:70]}")
+
+        # ── [9] 按 channel_types 收窄：弹层勾选在真链路上的判据（Issue #326）──
+        # 前端弹层提交的就是 (源, 目标, 选中渠道) 三元组；此处验它只动被点名的
+        # 那几条，其余留在源表（否则「勾选」只是 UI 上的装饰）。
+        store9 = cc._load_store()
+        store9["agents"].setdefault("default", {}).update({
+            p: {"channel_type": p, "enabled": True, "app_id": f"pick-{p}",
+                "app_secret": "s", "extra": {}}
+            for p in ("feishu", "dingtalk")
+        })
+        store9["agents"].setdefault("other", {})
+        cc._save_store(store9)
+        r3 = c.post("/api/v1/channel-configs/migrate-agent",
+                    json={"from_agent_id": "default", "to_agent_id": "other",
+                          "channel_types": ["feishu"]})
+        store3 = cc._load_store()
+        moved3 = sorted((store3.get("agents") or {}).get("other") or {})
+        left3 = sorted((store3.get("agents") or {}).get("default") or {})
+        check("[9] 只迁被点名的渠道，未勾的留在源表",
+              r3.status_code == 200 and r3.json().get("migrated") == ["feishu"]
+              and moved3 == ["feishu"] and left3 == ["dingtalk"],
+              f"{r3.status_code} / moved={moved3} / left={left3}")
 
     ChannelManager._instance = None
     set_app_state(None)
