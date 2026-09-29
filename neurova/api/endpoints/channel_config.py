@@ -20,7 +20,7 @@ import asyncio
 import json
 from neurova.core.logger import get_logger
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
@@ -40,7 +40,7 @@ from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
-from neurova.api.agent_access import requireAgentOwner
+from neurova.api.agent_access import agentOwnerById, can_access_agent, requireAgentOwner
 from neurova.core.data_root import dataLanding
 from neurova.security.secret_store import sealSecrets, unsealSecrets
 
@@ -436,6 +436,38 @@ async def list_configs(
             )
         )
     return result
+
+
+@router.get("/migration-sources", summary="存量迁移的候选源与可迁渠道（Issue #326）")
+async def list_migration_sources(
+    to_agent_id: str = Query(default="", description="迁移目标（显式给出时自身不出现在候选里）"),
+    current_user: Any = Depends(get_current_user),
+):
+    """列出可作为迁移源的 agent 及其名下渠道（用户口径第 1、2 条的数据面）。
+
+    只列**有渠道**的 agent：空源点下去只会得到 `migrated: []`，那不是选项。
+    可见性复用迁移门的同一判据（`can_access_agent` + `agentOwnerById`）——
+    否则会出现"列出来的源点下去 403"的假选项，比没有选项更坏。
+    `to_agent_id` 自身不列：迁给它是 400，不该被摆成一个可选项。
+    渠道清单一次带回（勾选/全选的数据面），不为此再发 N 次请求。
+
+    路由必须注册在 `/{channel_type}` 之前（字面量优先），否则会被当成渠道类型 404。
+    """
+    # 缺省不排除任何源：`default` 恰是最常见的源，把它设成默认目标等于把
+    # 候选面最需要的那一条藏起来（前端总是显式传目标）。
+    to_id = str(to_agent_id or "").strip()
+    identity = current_user if isinstance(current_user, Mapping) else {}
+    uid = str(identity.get("user_id") or "")
+    role = str(identity.get("role") or "user")
+
+    sources = []
+    for agent_id, channels in (_load_store().get("agents") or {}).items():
+        if agent_id == to_id or not isinstance(channels, dict) or not channels:
+            continue
+        if not can_access_agent(uid, role, agentOwnerById(agent_id)):
+            continue
+        sources.append({"agent_id": agent_id, "channels": sorted(channels)})
+    return {"sources": sorted(sources, key=lambda item: item["agent_id"])}
 
 
 @router.get("/schemas", summary="插件渠道动态表单 schema（B4-d）")
