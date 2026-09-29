@@ -108,40 +108,34 @@ def refresh_machine_path() -> None:
 
     为什么需要它（2026-09-30 实机踩到，节点 orange-connector）：CNB 自托管 Runner
     以**服务**形态常驻，其进程环境在服务启动那一刻定型。此后用 `choco install
-    python312` / `nsis` 往机器 PATH（`HKLM\\SYSTEM\\...\\Environment`）写的新条目，
-    正在跑的 Runner **读不到** —— 只有重启服务才会重读。于是出现分裂事实：
+    python312` 往机器 PATH（`HKLM\\SYSTEM\\...\\Environment`）写的新条目，正在跑的
+    Runner **读不到** —— 只有重启服务才会重读。于是出现分裂事实：
 
-        C:\\Python312\\python.exe                        在盘上
-        C:\\Program Files (x86)\\NSIS\\makensis.exe        在盘上
-        Get-Command python / makensis                    MISSING
+        C:\\Python312\\python.exe        在盘上（机器 PATH 里也有这一条）
+        Get-Command python              MISSING
 
-    失败形态是「工具链缺席：makensis, python」——看着像整机没装，人会去重装、
-    换机器，打一场打不赢的仗，而根因只是环境没继承。
+    失败形态是「工具链缺席：python」——看着像整机没装，人会去重装、换机器，
+    打一场打不赢的仗，而根因只是环境没继承。
 
-    人手工在打包机上跑时，重开一个 PowerShell 就绕过去了（`install` 结尾的提示）；
-    但 `run` 被自动化调用时没有「重开终端」这一步，故在探测**之前**自行合并。
-    非 Windows（如 CI 里做静态自证）为 no-op，不引入平台分支到调用点。
+    **单一定义**：刷新逻辑落在 `scripts/desktop/refresh_machine_path.ps1`，与
+    `.cnb.yml` 各 stage 的 dot-source 是同一份（教义第 6 条）。本函数调它并把
+    合并结果取回本进程环境 —— 不在 Python 里另写一份 winreg 版本（那会是第二份
+    定义：改一处漏一处，而两处都不会红）。非 Windows 为 no-op。
     """
     if os.name != "nt":
         return
-    try:
-        import winreg
-    except ImportError:  # 非 Windows 上 winreg 不存在；上面已拦，此处兜底
-        return
-    parts: list[str] = []
-    for hive, sub in (
-        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
-        (winreg.HKEY_CURRENT_USER, r"Environment"),
-    ):
-        try:
-            with winreg.OpenKey(hive, sub) as k:
-                raw, _ = winreg.QueryValueEx(k, "Path")
-        except OSError:
-            continue
-        parts.append(os.path.expandvars(raw))
-    if not parts:
-        return
-    merged = ";".join([*parts, os.environ.get("PATH", "")])
+    helper = REPO / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    if not helper.exists():
+        raise RuntimeError(f"PATH 刷新 helper 缺席：{helper}")
+    # 让 helper 在子进程里跑一遍、回读它合并后的 PATH（helper 打印的只是段数）。
+    probe = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+         f'. "{helper}"; [Environment]::GetEnvironmentVariable("Path", "Process")'],
+        capture_output=True, text=True,
+    )
+    if probe.returncode != 0:
+        raise RuntimeError(f"PATH 刷新失败：{probe.stderr.strip()}")
+    merged = probe.stdout.strip().splitlines()[-1]
     os.environ["PATH"] = merged
     log(f"PATH 已合并机器/用户级条目（{merged.count(';') + 1} 段）")
 
