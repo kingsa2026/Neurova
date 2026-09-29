@@ -1668,20 +1668,95 @@ class ToolExecutor:
             }
 
         if verdict.decision == GovernanceDecision.ASK:
-            # ASK 语义：创建待审批记录（metadata 存完整调用供批准后重放），
-            # 前端据 approval_id 弹出确认框
-            approval_id = self._create_approval_request(tool_name, params, verdict)
+            return await self._awaitApprovalVerdict(tool_name, params, verdict)
+
+        return None  # ALLOW 放行
+
+    async def _awaitApprovalVerdict(self, tool_name: str, params: Dict, verdict) -> Optional[Dict]:
+        """ASK 的裁决通路：有界阻塞等人工裁决，醒来后由**本调用**在完整管线里执行。
+
+        返回 None 表示放行（调用方继续走真执行）；返回 dict 表示终态回给模型。
+
+        三种终态必须分得开，且都不许伪装成"工具失败"：
+        - **批准** → None，工具在咽喉里执行，钩子/超时/审计/大输出折叠一条不少；
+          不在批准端点重放（那里没有这条链），见 `approval_relay.hasApprovalWaiter`。
+        - **拒绝 / 过期** → `approval_denied`，模型据此知道"人不同意"，而不是以为工具坏了。
+        - **等待超时** → `approval_timeout` 并**让出**：本次不执行，但审批单留着，
+          人工稍后仍可批准，那时由带外重放投递结果（B 片）。
+
+        三种形态都带 `governance` 键，于是 `is_policy_denial` 天然认得它们是
+        "决策"而非"后端故障"——不会被记进工具失败统计、也不会把该工具的结构身份
+        经 `creation_governance` 的 MIN(success) 永久钉死。
+
+        等待预算为 0、或无运行中的事件循环（CLI/带外路径）时，退回改造前的
+        "pending 当结果"语义——这是灰度与回退入口，不是第二条判据。
+        """
+        approval_id = self._create_approval_request(tool_name, params, verdict)
+
+        def _pendingShape(extra: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "success": False,
-                "pending_approval": True,
                 "approval_id": approval_id,
                 "tool_name": tool_name,
                 "params": params,
                 "error": "操作待用户确认: " + "; ".join(verdict.reasons),
                 "governance": verdict.to_dict(),
+                **extra,
             }
 
-        return None  # ALLOW 放行
+        if not approval_id:
+            # 审批系统故障：ASK 降级为直接拒绝（保持既有语义），不阻塞
+            return _pendingShape({"pending_approval": True})
+
+        from neurova.security.governance_settings import (
+            APPROVAL_WAIT_BOUNDS,
+            resolve_seconds,
+        )
+
+        budget = resolve_seconds("approval_wait_seconds", "NEUROVA_APPROVAL_WAIT_SECONDS",
+                                 APPROVAL_WAIT_BOUNDS)
+        if budget <= 0:
+            return _pendingShape({"pending_approval": True})
+
+        from neurova.security.approval_relay import (
+            registerApprovalWaiter,
+            unregisterApprovalWaiter,
+        )
+
+        waiter = registerApprovalWaiter(approval_id)
+        if waiter is None:
+            return _pendingShape({"pending_approval": True})
+
+        try:
+            status = await asyncio.wait_for(waiter, timeout=budget)
+        except asyncio.TimeoutError:
+            # 必须注销：`hasApprovalWaiter` 是批准端点决定"要不要重放"的唯一依据，
+            # 留着陈旧登记会让人工稍后批准时两边都不执行——比不阻塞更糟的静默丢单。
+            unregisterApprovalWaiter(approval_id, waiter)
+            logger.info("审批等待超时（%ss），让出并保持审批单: %s", budget, approval_id)
+            return _pendingShape({
+                "approval_timeout": True,
+                "waited_seconds": budget,
+                "error": f"操作等待人工确认超过 {budget:.0f}s，已暂缓；"
+                         "审批单仍在待处理列表，获准后将执行并回报结果",
+            })
+        except asyncio.CancelledError:
+            # 用户中断本轮：同上，登记必须注销，否则批准端点误判"有人在等"而跳过重放
+            unregisterApprovalWaiter(approval_id, waiter)
+            raise
+        else:
+            unregisterApprovalWaiter(approval_id, waiter)
+
+        if status == "approved":
+            logger.info("审批 %s 已获准，由本调用在完整管线内执行: %s", approval_id, tool_name)
+            return None
+
+        logger.info("审批 %s 终态为 %s，回结构化裁决: %s", approval_id, status, tool_name)
+        return _pendingShape({
+            "approval_denied": True,
+            "approval_status": status,
+            "error": f"操作未获批准（{status}）：" + "; ".join(verdict.reasons),
+        })
 
     # 审计 A3：治理故障时允许放行的内置只读工具白名单——这些工具无
     # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
@@ -1746,6 +1821,31 @@ class ToolExecutor:
             },
         }
 
+    def _approvalRoutingAddress(self) -> Dict[str, Optional[str]]:
+        """审批记录的**回投地址**：这一次调用属于哪个会话、哪一个 tool_call。
+
+        为什么必须由创建侧写：批准后的重放在另一个请求里发生（HTTP approve 端点），
+        那时原调用早已不在栈上。没有这两个键，"把执行结果送回原调用"这件事
+        不是没人做，是**无路可寻**。
+
+        取不到就是 None 而不是编一个占位值——非循环路径（如文本工具分派、
+        带外手动执行）本就没有可回投的调用，回投侧据此判"不发"，
+        而不是把结果投到一个不存在的 call_id 上。
+        """
+        try:
+            from neurova.core.turn_context import (
+                get_turn_session_id,
+                get_turn_tool_call_id,
+            )
+
+            return {
+                "session_id": get_turn_session_id(),
+                "tool_call_id": get_turn_tool_call_id(),
+            }
+        except Exception as e:  # noqa: BLE001 - 地址缺失不该让审批创建失败
+            logger.debug("审批回投地址取不到（保持 None）: %s", e)
+            return {"session_id": None, "tool_call_id": None}
+
     def _create_approval_request(self, tool_name: str, params: Dict, verdict) -> Optional[str]:
         """为 ASK 裁决创建待审批请求；失败不阻断主流程（返回 None 走原语义）。"""
         try:
@@ -1762,6 +1862,7 @@ class ToolExecutor:
                     "tool_name": tool_name,
                     "params": params,
                     "governance": verdict.to_dict(),
+                    **self._approvalRoutingAddress(),
                 },
             )
             return getattr(request, "request_id", None)
@@ -1788,6 +1889,7 @@ class ToolExecutor:
                     "params": params,
                     "kind": "sandbox_escalation",
                     "sandbox_denial": denial,
+                    **self._approvalRoutingAddress(),
                 },
             )
             return getattr(request, "request_id", None)
@@ -2019,7 +2121,12 @@ class ToolExecutor:
                 command=f"desktop::{tool_name}",
                 description=f"审核模式：agent 请求执行 {tool_name}",
                 danger_reason="桌面运行权限=审核模式",
-                metadata={"kind": "desktop_review", "tool_name": tool_name, "params": params},
+                metadata={
+                    "kind": "desktop_review",
+                    "tool_name": tool_name,
+                    "params": params,
+                    **self._approvalRoutingAddress(),
+                },
             )
             rid = getattr(req, "request_id", None)
             return {

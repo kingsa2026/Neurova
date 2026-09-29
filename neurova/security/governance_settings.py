@@ -43,7 +43,18 @@ DEFAULTS: Dict[str, Any] = {
     "skill_auto_retire_enabled": False,  # 技能自动淘汰（关=只上报候选不执行禁用）
     # 压缩经济性判据（关=沿用"必然装不下就等比缩小"的既有行为，现网零变更）
     "compression_economics_enabled": False,
+    # G5-D：治理判 ASK 时，执行咽喉阻塞等待人工裁决的上界（秒）。
+    # 为什么必须有键、而不是在代码里写字面量：把"不阻塞"改成"阻塞"之后，
+    # 没有上界的阻塞就是永久挂起——审批人在别处、不点、会话就永远卡在这一次调用上。
+    #
+    # 默认 **0＝不阻塞**，沿用收口前的现网语义（pending 当结果 + 带外重放投递），
+    # 与 `工单 015` 立的口径同形："默认值＝收口前的现网默认，不顺手改口径"。
+    # 阻塞会把每个 ASK 变成最长 budget 的停顿，属于必须由运维显式开启的行为变更。
+    "approval_wait_seconds": 0.0,
 }
+
+#: `approval_wait_seconds` 的合法域。夹紧而非报错：配置写歪不该让整轮失败。
+APPROVAL_WAIT_BOUNDS = (0.0, 3600.0)
 
 
 def settings_path() -> Path:
@@ -108,3 +119,29 @@ def resolve_flag(key: str, env_var: str) -> bool:
     if raw == "1":
         return True
     return bool(load_governance_settings()[key])
+
+
+def resolve_seconds(key: str, env_var: str, bounds: tuple) -> float:
+    """治理数值开关的优先级口径——与 `resolve_flag` 同一条，只是值域不同。
+
+    为什么不另写一份读法、也不在调用方就地 `float(env or default)`：优先级
+    "env > 治理面 > 默认"这件事若有两份实现，两份迟早对不上（一个认 env、
+    一个不认），而这正是本模块被抽出来的原因。
+
+    `bounds` 必填：无上界的"可配置"等于把会话挂起的时长交给一个手滑的数字。
+    env 里写歪（非数字/越界）不旁路治理面，与 resolve_flag 对"别的值"的处置同形。
+    """
+    if key not in DEFAULTS:
+        raise KeyError(f"治理数值键 {key!r} 未在 DEFAULTS 声明，读不到即不可用")
+    low, high = bounds
+    raw = os.environ.get(env_var)
+    if raw is not None:
+        try:
+            return min(max(float(raw), low), high)
+        except (TypeError, ValueError):
+            logger.debug("%s 环境变量 %r 非数值，回落治理面", key, raw)
+    try:
+        value = float(load_governance_settings()[key])
+    except (TypeError, ValueError):
+        value = float(DEFAULTS[key])
+    return min(max(value, low), high)

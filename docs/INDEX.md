@@ -136,7 +136,8 @@
 `mflow_vs_neurova_memory_comparison.md`、`sirchmunk_vs_neurova_comparison.md`、
 `CODE_BASED_COMPARISON_ANALYSIS.md`、`CODE_BASED_COMPREHENSIVE_COMPARISON.md`、
 `agent-memory-cutting-edge-research-2026.md`、`funasr-vs-moss-audio-comparison.md`、
-`moss-audio-completeness-check.md`、`neurova_skill_vs_meta_skill_comparison.md`
+`moss-audio-completeness-check.md`、`neurova_skill_vs_meta_skill_comparison.md`、
+[`08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md`](08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md)（外部编码代理工具调用与迭代循环对标，含 G1–G8 缺口复验与本文自我更正记录）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
