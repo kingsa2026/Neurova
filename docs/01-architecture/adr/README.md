@@ -28,6 +28,7 @@
 | [0020](./0020-sandbox-single-value-domain.md) | 沙箱值域唯一事实源（一套形态，两种承载能力） | Accepted | 2026-09-25 |
 | [0021](./0021-skill-name-domain-derivation.md) | 技能名字域迁移（同 name 不同身份 ⇒ 名字携带身份） | Accepted | 2026-09-25 |
 | [0022](./0022-relay-judgment-source-of-truth.md) | 接力判据的事实源（读平台在收尾期注入的事实，不读构建侧自造的真值） | Accepted | 2026-09-25 |
+| [0023](./0023-relay-judgment-quota-attribution.md) | 接力判据加问第三问（中止可归因到配额吗，不只问「有没有被中止」） | Accepted | 2026-09-29 |
 
 ## 主题分类
 
