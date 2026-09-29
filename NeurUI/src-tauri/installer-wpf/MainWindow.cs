@@ -1,4 +1,4 @@
-// Neurova 安装器（与前端登录页同款视觉：Cosmic 深色星空 + 玻璃拟态卡片）
+﻿// Neurova 安装器（与前端登录页同款视觉：Cosmic 深色星空 + 玻璃拟态卡片）
 // 三页：欢迎（Logo/协议/自定义折叠/立即安装）→ 管理员账号（两次密码+一致性
 // 校验+权限警示）→ 进度 → 完成。安装内核 = NSIS /S（侧车优先，否则解压内嵌资源）。
 // 语法上限 C# 5（系统 csc）：禁 $""、?.、using var、数字分隔符。
@@ -858,6 +858,15 @@ namespace Neurova.Installer
                 return "请设置密码";
             if (p1.Length > 16)
                 return "密码长度须为 16 位以内";
+            // 密码不得含空白：内核命令行开关 /NP= 以空格分界，${GetOptions} 会把
+            // 含空格的密码截断。静默通道传不了 → 服务端 BuildAdminCredentialArgs
+            // 会整条拒绝（不写 ini、不写错凭据）。与其让用户填完在安装后被静默丢弃，
+            // 不如在此挡在界面上，明示原因。
+            foreach (char c in p1)
+            {
+                if (char.IsWhiteSpace(c) || c == '"')
+                    return "密码不能含空格或引号";
+            }
             if (string.CompareOrdinal(p1, p2) != 0)
                 return "两次输入的密码不一致，请重新确认";
             return null;
@@ -928,10 +937,17 @@ namespace Neurova.Installer
                 });
 
                 // 阶段二：NSIS /S 静默安装（15-95% 按目录增长映射）
+                // 凭据必须随命令行带进去：/S 下 NSIS 不执行任何 Page custom 回调
+                // （含 PRE/显示/LEAVE），内核的 PageLeaveAdminAccount 一次都不会跑。
+                // 内核 .onInit 的 IfSilent 分支专收 /NU= /NP=，据此写
+                // <安装目录>\backend\data\bootstrap_admin.ini。
+                // 升级安装（_isUpgrade）adminUser/adminPass 为 null：不带这两个开关，
+                // 内核静默分支同样不置 $AdminWritten——沿用既有安装的账号，不重复写入。
                 var psi = new ProcessStartInfo
                 {
                     FileName = effectiveKernel,
-                    Arguments = "/S /D=" + targetDir,
+                    Arguments = "/S" + BuildAdminCredentialArgs(adminUser, adminPass)
+                        + " /D=" + targetDir,
                     UseShellExecute = true,
                     Verb = "runas",
                 };
@@ -979,6 +995,36 @@ namespace Neurova.Installer
                     });
                 }
             });
+        }
+
+        // 首装凭据 → 内核命令行开关（.onInit 的 IfSilent 分支消费）。
+        // 两条实测约束（wine 真机，非推断）：
+        //  1. 禁止加引号。ProcessStartInfo.Arguments 不做 shell 解析，Windows 上
+        //     引号会原样进命令行；而 NSIS ${GetOptions} **不剥引号**——
+        //     `/NU="alice"` 取回来是 `"alice"`，会连引号一起写进 bootstrap_admin.ini，
+        //     管理员用户名/密码直接错掉。
+        //  2. 因此凭据必须是单 token（无空格）。含空格的凭据一律拒绝随命令行传递：
+        //     静默通道拿不到它，宁可不传（内核不置 $AdminWritten → 不写 ini，
+        //     首启由应用内向导兜底），也不能写一份错的凭据进去。
+        // 空/含空格 → 返回不带开关，静默分支据此保持 $AdminWritten=0。
+        private static string BuildAdminCredentialArgs(string adminUser, string adminPass)
+        {
+            bool usable = IsKernelSafeCredential(adminUser) && IsKernelSafeCredential(adminPass);
+            if (!usable) return "";
+            return " /NU=" + adminUser + " /NP=" + adminPass;
+        }
+
+        private static bool IsKernelSafeCredential(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            // NSIS 硬约束：用户名 1-32 位（ValidateAdminUsername 同口径），
+            // 且不得含引号/空白——两者都会让 ${GetOptions} 截断或误纳引号。
+            if (value.Length > 32) return false;
+            foreach (char c in value)
+            {
+                if (char.IsWhiteSpace(c) || c == '"') return false;
+            }
+            return true;
         }
 
         private string ExtractEmbeddedKernel(string destPath, Action<int> onProgress)
