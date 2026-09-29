@@ -896,7 +896,13 @@ def get_approval_manager(
     if _approval_manager is None:
         with _am_lock:
             if _approval_manager is None:
-                _approval_manager = ApprovalManager(workspace_path, approval_level)
+                manager = ApprovalManager(workspace_path, approval_level)
+                # G5-C：先接中继再暴露单例——否则第一条审批可能在"广播无人订阅"的
+                # 窗口里被批准，等待方永远醒不来（表现为会话卡到超时，而非报错）。
+                from neurova.security.approval_relay import installApprovalRelay
+
+                installApprovalRelay(manager)
+                _approval_manager = manager
     return _approval_manager
 
 

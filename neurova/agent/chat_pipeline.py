@@ -2230,7 +2230,7 @@ class ChatPipeline:
             logger.debug("EventType 导入失败，跳过事件广播")
 
         # P1-2：上一轮转后台的工具完成后，把结果提示注入本轮 LLM 上下文
-        # 
+        # G5-B：带外批准/拒绝的终态走同一条晚到通路，故在此一起排干
         try:
             _coordinator = getattr(self.tool_executor, "tool_coordinator", None)
             if _coordinator:
@@ -2240,6 +2240,18 @@ class ChatPipeline:
                         if _hint.get("success")
                         else f"失败: {_hint.get('error')}"
                     )
+                    if _hint.get("kind") == "approval":
+                        # 措辞必须与后台完成区分开：这条的语义是"人工裁决之后才跑的"，
+                        # 模型据此知道先前那次「待用户确认」已有下文，而不是又一件后台事。
+                        ctx.context.append({
+                            "role": "system",
+                            "content": (
+                                f"[审批已裁决] {_hint.get('tool_name')}"
+                                f"（call_id={_hint.get('task_id')}）："
+                                f"{'已获准执行，结果: ' if _hint.get('success') else ''}{_outcome}"
+                            ),
+                        })
+                        continue
                     ctx.context.append({
                         "role": "system",
                         "content": (
