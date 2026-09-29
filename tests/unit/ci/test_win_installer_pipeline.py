@@ -19,6 +19,8 @@ Windows 自带件（`csc.exe` / `robocopy`），容器是 Linux，故该包**只
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 import yaml
@@ -122,20 +124,70 @@ def _scripts() -> str:
 
 
 def testMachinePathIsRefreshedBeforeToolchainProbe():
-    """自托管 Runner 进程环境在服务启动时冻结；工具链探测前必须刷新机器 PATH。"""
+    """自托管 Runner 进程环境在服务启动时冻结；工具链探测前必须刷新机器 PATH。
+
+    刷新逻辑是**单一定义**：落在仓内 `scripts/desktop/refresh_machine_path.ps1`，
+    各 stage 一行 dot-source（`testEveryToolInvokingStageRefreshesPath` 钉住覆盖面）。
+    本守卫钉「读机器级注册表」与「先于探测」两件。
+    """
+    repo = Path(__file__).resolve().parents[3]
+    helper = repo / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    helper_src = helper.read_text(encoding="utf-8") if helper.exists() else ""
+    assert 'GetEnvironmentVariable("Path", "Machine")' in helper_src, (
+        "刷新 helper 必须真读机器级注册表 PATH —— "
+        "自托管 Runner 进程环境冻结，后装的 python 在盘上却查不到"
+    )
+
     src = _scripts()
-    assert 'GetEnvironmentVariable("Path", "Machine")' in src or \
-        "GetEnvironmentVariable('Path', 'Machine')" in src, (
-        "缺机器 PATH 刷新：自托管 Runner 进程环境冻结，"
-        "后装的 python/makensis 在盘上却查不到（实机证据见本节注释）"
-    )
-    # 刷新必须在探测之前：取首次出现位置比对。
-    refresh_at = max(
-        src.find('GetEnvironmentVariable("Path", "Machine")'),
-        src.find("GetEnvironmentVariable('Path', 'Machine')"),
-    )
+    # env 自证 stage 必须 dot-source 刷新，且先于探测。
+    refresh_at = src.find("refresh_machine_path.ps1")
     probe_at = src.find("$probes =")
+    assert refresh_at != -1, "env 自证 stage 缺 refresh_machine_path.ps1 dot-source"
     assert probe_at != -1, "缺工具链逐件点名段落"
     assert refresh_at < probe_at, (
         "机器 PATH 刷新必须发生在工具链探测之前 —— 探测读的就是刷新后的 PATH"
+    )
+
+
+def testEveryToolInvokingStageRefreshesPath():
+    """每个调用 python/cargo/npx 的 stage 都必须先刷新机器 PATH。
+
+    实机证据（2026-09-30，节点 orange-connector）：CNB 的流水线 stage **各自独立**
+    起一个 PowerShell 进程（同 Runner，但环境不跨 stage 继承）。把刷新只写在
+    「环境自证」stage 里，到第 2 个 stage 就失效了 —— 实测 `python` 在 env 自证里
+    解析成功（`C:\\Python312\\python.exe`），到 bundle_backend stage 立刻
+    `无法将"python"项识别为 cmdlet`（`CommandNotFoundException`）。
+
+    故刷新必须**逐 stage**生效。单一定义靠仓内 helper（不逐 stage 手抄 8 行）：
+    每个需要的 stage 只写一行 dot-source，helper 本体只此一份（教义第 6 条）。
+    """
+    repo = Path(__file__).resolve().parents[3]
+    helper = repo / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    assert helper.exists(), (
+        "缺 scripts/desktop/refresh_machine_path.ps1 —— 刷新逻辑要有单一定义，"
+        "不逐 stage 手抄"
+    )
+    helper_src = helper.read_text(encoding="utf-8")
+    assert 'GetEnvironmentVariable("Path", "Machine")' in helper_src, (
+        "helper 必须真读机器级注册表 PATH"
+    )
+
+    # 每个 script 里出现工具调用的 stage，都必须 dot-source 这个 helper。
+    dot_source = "refresh_machine_path.ps1"
+    offenders: list[str] = []
+    for job in _jobs():
+        for stage in job.get("stages", []):
+            script = stage.get("script", "")
+            if not script:
+                continue
+            usesTool = any(
+                re.search(rf"(?<![\w.-]){tool}(?![\w.-])", script)
+                for tool in ("python", "cargo", "rustc", "npx")
+            )
+            if usesTool and dot_source not in script:
+                offenders.append(stage.get("name", "<无名 stage>"))
+    assert offenders == [], (
+        "下列 stage 调用了 python/cargo/npx 却没刷新机器 PATH —— "
+        "跨 stage 不继承，工具会在这些 stage 里 CommandNotFound：\n  - "
+        + "\n  - ".join(offenders)
     )

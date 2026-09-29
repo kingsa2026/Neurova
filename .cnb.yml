@@ -1348,21 +1348,9 @@ $:
           script: |
             $ErrorActionPreference = "Stop"
 
-            # ── 先把机器 PATH 刷新进本进程（自托管节点的「进程环境冻结」）──────
-            # 实机踩到（2026-09-30，节点 orange-connector）：Runner 以**服务**常驻，
-            # 它的进程环境在服务启动那一刻定型。此后 `choco install python312` /
-            # `nsis` 往**机器 PATH**（HKLM\SYSTEM\...\Environment）写的新条目，
-            # 正在跑的 Runner **读不到** —— 只有重启服务才会重读。
-            # 于是出现分裂事实：`C:\Python312\python.exe` 与
-            # `C:\Program Files (x86)\NSIS\makensis.exe` 都在盘上，
-            # 而 `Get-Command python` / `makensis` 全部 MISSING。
-            # 失败形态是「工具链缺席：makensis, python」，看着像整机没装 ——
-            # 人会去重装、换机器，打一场打不赢的仗，而根因只是环境没继承。
-            # 根修点在这里：流水线自己合并机器 PATH，不指望管理员重启 Runner 服务。
-            $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-            $env:Path = "$machinePath;$userPath;$env:Path"
-            Write-Host "[env] PATH 已合并机器/用户级条目（$($env:Path.Split(';').Count) 段）"
+            # 先把机器 PATH 刷新进本进程。**每个用到工具链的 stage 都要做**：
+            # stage 各自独立起进程、环境不跨 stage 继承（见 helper 头注释）。
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
 
             # 先把"这是 Windows 宿主"钉死：自托管节点脚本默认走 PowerShell，
             # `ver` 是 cmd 内建命令，须经 cmd /c 调用（实测口径见官方文档）。
@@ -1408,6 +1396,7 @@ $:
         - name: 后端资源暂存（bundle_backend）
           script: |
             $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE"
             python scripts/desktop/bundle_backend.py
             if ($LASTEXITCODE -ne 0) { throw "bundle_backend 失败" }
@@ -1416,6 +1405,7 @@ $:
         - name: tauri build（NSIS 内核，原生 Windows）
           script: |
             $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE\NeurUI"
             npx tauri build
             if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
@@ -1425,6 +1415,7 @@ $:
         - name: WPF 壳 + 单文件安装器（package_installer_zip，--skip-tauri）
           script: |
             $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE"
             python scripts/desktop/package_installer_zip.py --skip-tauri
             if ($LASTEXITCODE -ne 0) { throw "打包失败（package_installer_zip.py）" }
