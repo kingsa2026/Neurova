@@ -108,6 +108,6 @@ wecom-aibot-python-sdk>=1.0.2
 #   comtypes    —— neurova/tts/sapi5_tts.py，Windows SAPI5 离线 TTS 唯一实现
 #                  （TTS fallback 链：moss-nano → edge-tts → sapi5 → mock）
 modelscope>=1.9.0
-requests>=2.31.0
+requests>=2.34.2
 PyYAML>=6.0
 comtypes; sys_platform == "win32"
