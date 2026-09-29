@@ -216,7 +216,7 @@ jobs:
       # 卷/缓存判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
       # OSV_DB_CACHE 同源校验，不写死第二份口径。
       - name: Cache OSV offline databases
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/osv-scalibr
           key: osv-scalibr-${{ runner.os }}
