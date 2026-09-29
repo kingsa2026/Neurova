@@ -140,6 +140,44 @@ describe('ChannelMigrationDialog — 源与渠道的选择面', () => {
     expect(migrateAgentChannelConfigs).toHaveBeenCalledWith('default', 'kai', ['feishu'])
   })
 
+  it('回报的是服务端返回的 migrated，不是本地勾选集合', async () => {
+    // 两者在正常情况下相等，但**并发下不等**：列源与提交之间源表可能已被
+    // 另一次操作改动（同渠道被别人配了、或已迁走）。屏幕与提示必须来自
+    // 服务端那唯一的事实源，本地勾选只是请求参数。
+    migrateAgentChannelConfigs.mockResolvedValue({
+      data: { success: true, from_agent_id: 'default', to_agent_id: 'kai', migrated: ['feishu'] },
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.find('.source-select').setValue('default')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-select-all"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-confirm"]').trigger('click')
+    await flushPromises()
+
+    const events = wrapper.emitted('migrated') as unknown[][]
+    expect(events?.length).toBe(1)
+    expect((events[0][0] as { channels: string[] }).channels).toEqual(['feishu'])
+  })
+
+  it('服务端回报空清单时如实回传（不拿本地勾选冒充已迁）', async () => {
+    migrateAgentChannelConfigs.mockResolvedValue({
+      data: { success: true, from_agent_id: 'default', to_agent_id: 'kai', migrated: [] },
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.find('.source-select').setValue('default')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-select-all"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-confirm"]').trigger('click')
+    await flushPromises()
+
+    const events = wrapper.emitted('migrated') as unknown[][]
+    expect((events[0][0] as { channels: string[] }).channels).toEqual([])
+  })
+
   it('没有可迁的源时诚实说明，不给假动作', async () => {
     listChannelMigrationSources.mockResolvedValue({ data: { sources: [] } })
     const wrapper = mountDialog()
