@@ -95,3 +95,20 @@ def testUnsignedMarkerDoesNotEscapeArtifactDiscovery():
     assert "Neurova_Setup_*_x64*.exe" in kit, (
         "win_installer_kit.py 的产物通配没容下 _unsigned 标记"
     )
+
+
+def testSigningOverrideIsPassedAsFileNotInlineJson():
+    """签名覆盖必须落**文件**再传路径 —— 内联 JSON 过 shell 会被剥掉引号。
+
+    实机证据（2026-09-30，节点 orange-connector）：内联 `--config '{...}'` 经
+    shell=True（cmd.exe/PowerShell）后引号被吃掉，tauri 收到的是
+    `{bundle:{windows:{...}}}`，报
+    `failed to parse config ... as JSON: key must be a string`。
+    这与签名逻辑无关，是「把结构化数据塞进命令行」的固有缺陷：
+    正确做法是写临时 json 文件、把**路径**交给 tauri（`--config` 支持路径）。
+    """
+    src = _src()
+    assert "certificateThumbprint\":null" not in src.replace(" ", ""), (
+        "内联 JSON 覆盖过 shell 会丢引号 —— 必须落文件传路径"
+    )
+    assert "write_text" in src, "签名覆盖应写成临时 json 文件"
