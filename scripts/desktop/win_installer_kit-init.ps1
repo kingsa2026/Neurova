@@ -1,5 +1,6 @@
 # Neurova Windows 打包机初始化（Issue #332）
-# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / NSIS / VS Build Tools(MSVC) / Python
+# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / VS Build Tools(MSVC) / Python
+# 不装 NSIS：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis 无消费者（见 win_installer_kit.py）
 # 任一步失败即中止（$ErrorActionPreference = "Stop"），不产来源不明的包。
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -40,11 +41,6 @@ Step "MSVC 生成工具（C++ 编译 tauri 原生部分所需）" {
   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget `
     --accept-package-agreements --accept-source-agreements `
     --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-}
-
-Step "NSIS" {
-  if (Get-Command makensis -ErrorAction SilentlyContinue) { makensis /VERSION; return }
-  winget install --id NSIS.NSIS -e --source winget --accept-package-agreements --accept-source-agreements
 }
 
 Step "Python 3.12" {
