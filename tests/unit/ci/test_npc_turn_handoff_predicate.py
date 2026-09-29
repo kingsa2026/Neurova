@@ -23,10 +23,13 @@
 ## 本文件钉三件事（都可证伪）
 
 - **A 判据取平台事实**：收尾接力的 `if` 必须直接读平台在收尾时刻注入的
-  `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`，不得读「上一轮预写」
-  的变量。实测（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3，2026-09-25）：
+  `$CNB_PIPELINE_STATUS` 与失败 stage 名（v2），不得读「上一轮预写」的变量。
+  实测（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3，2026-09-25）：
   在 `endStages` 里 `CNB_PIPELINE_STATUS=error`、
-  `CNB_BUILD_FAILED_MSG=Agent aborted: reached maxTurns limit (N)`。
+  `CNB_BUILD_FAILED_STAGE_NAME=force-maxTurns-abort`。
+- **A′ 判据加问第三问**（Issue #327）：平台网关的外部中止与撞满配额在收尾期的
+  可见形态相同，判据必须再问「可归因到时长配额吗」——消费运行时长预算量尺的
+  `--predicate` 出口（阈值的唯一事实源仍在量尺脚本里）。
 - **B 判据时机合法**：这两个变量只在收尾时刻成立（`failStages` 里为空，
   探针 cnb-o8q-1k3c25fpt 实测），故判据只能出现在 `endStages` 的 `if` 上，
   不得出现在 Agent 开工前的 Stage。
@@ -34,7 +37,8 @@
   否则接力轮一旦再撞顶就断链（实测 17 次接力轮以 error 收场）。
 
 可证伪路径：把 `if` 改回读 `$turnLimitReached` → A 红；
-把判据挪回 Agent 开工前的 Stage → B 红；删掉接力落点的 `endStages` → C 红。
+删掉判据第三问 → A′ 红；把判据挪回 Agent 开工前的 Stage → B 红；
+删掉接力落点的 `endStages` → C 红。
 """
 import io
 import re
@@ -67,6 +71,10 @@ RETIRED_FLAG = "turnLimitReached"
 
 #: 收尾接力落点事件。
 HANDOFF_EVENT = "api_trigger_npc_handoff"
+
+#: 判据第三问的消费标记（Issue #327）：`eval "$($NPX_PREDICATE)"` ——
+#: `$NPX_PREDICATE` 由解释器探测段登记，取值指向运行时长预算量尺。
+PREDICATE_MARKER = "NPX_PREDICATE"
 
 #: 收尾接力唯一允许的内置任务类型（适用「所有事件」，见 cnb/trigger.md）。
 HANDOFF_TRIGGER_TYPE = "cnb:trigger"
@@ -136,6 +144,23 @@ class TestPredicateReadsPlatformFacts:
             "\n实测（探针 cnb-c9g-1k3c3dqg7，2026-09-25）：endStages 里 "
             f"{STATUS_VAR}=error；失败 stage 名由 ${FAILED_STAGE_VAR} 给出。"
         )
+
+    def test_conditions_also_ask_whether_the_abort_is_quota_attributable(self, cnb_doc):
+        """判据必须再问一句「这次中止可归因到时长配额吗」（Issue #327）。
+
+        前两条判据答的是「有没有被中止在 Agent 那一格」——它们对
+        「这次中止是不是撞墙」一无所知。构建 cnb-urv-1k3lagkdv 实测：平台 AI 网关
+        在第 36 轮 / 7.4 分钟主动中止（`Pipeline has been stopped, Agent aborted`，
+        该轮 `in=0 out=0 duration=0.0s`），四道上限一道都没触达，而接力照样触发 ——
+        于是每约 7 分钟一轮的自动续跑链条，每一轮都真实计入 LLM 成本。
+        """
+        offenders = [
+            f"{event}: 判据未消费 ${PREDICATE_MARKER} —— 外部中止与撞满配额"
+            "在收尾期的可见形态相同，缺这一问就分不开（Issue #327）"
+            for event, stage in _relay_stages(cnb_doc)
+            if PREDICATE_MARKER not in " ".join(str(c) for c in (stage.get("if") or []))
+        ]
+        assert not offenders, "\n  ".join(offenders)
 
     def test_conditions_do_not_judge_on_the_message_text(self, cnb_doc):
         """反向控制：判据不得只认 `$CNB_BUILD_FAILED_MSG` 的文案。
