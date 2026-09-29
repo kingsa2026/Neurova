@@ -708,8 +708,36 @@ LangString autostart ${LANG_ENGLISH} "Start Neurova automatically when Windows s
 LangString autostart ${LANG_SIMPCHINESE} "开机自动启动 Neurova"
 
 Function .onInit
-  ; Neurova：账号页凭据标志（仅 PageLeaveAdminAccount 置 1）
+  ; Neurova：账号页凭据标志。交互安装由 PageLeaveAdminAccount 校验后置 1；
+  ; 静默安装走下方 IfSilent 分支（页面回调在 /S 下整体不执行）。
   StrCpy $AdminWritten "0"
+
+  ; 静默安装（/S）——WPF 界面壳 MainWindow.cs 段二正是以
+  ; `Process.Start(kernel, "/S /D=<dir>")` 调起本内核。NSIS 对 Page custom 的
+  ; 硬语义是：/S 下页面回调（PRE / 显示 / LEAVE）一律不执行，所以
+  ; PageLeaveAdminAccount 里那套"校验并置 $AdminWritten"的逻辑在静默路径上
+  ; 从来不会跑。凭据必须由一条不经页面的通道带进来：/NU=<用户名> /NP=<密码>。
+  ; 不置位则安装段 $AdminWritten == "1" 判据不成立 → ini 不写、
+  ; 安装却报成功 → 用户设的管理员账号被静默丢弃。
+  ; 无 /NU= 或无 /NP= 时保持 "0"：宁可不写 ini（首启由应用内向导兜底，
+  ; 后端 consume_bootstrap_admin_file 对空文件本就是 no-op），
+  ; 也不写一份只有用户名没有密码的半截凭据。
+  IfSilent silentAdminCred
+    Goto adminCredDone
+  silentAdminCred:
+    ${GetOptions} $CMDLINE "/NU=" $AdminUsername
+    ${If} ${Errors}
+      StrCpy $AdminUsername ""
+    ${EndIf}
+    ${GetOptions} $CMDLINE "/NP=" $AdminPassword
+    ${If} ${Errors}
+      StrCpy $AdminPassword ""
+    ${EndIf}
+    ${If} "$AdminUsername" != ""
+    ${AndIf} "$AdminPassword" != ""
+      StrCpy $AdminWritten "1"
+    ${EndIf}
+  adminCredDone:
 
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
