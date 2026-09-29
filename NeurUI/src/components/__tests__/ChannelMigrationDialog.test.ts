@@ -178,6 +178,26 @@ describe('ChannelMigrationDialog — 源与渠道的选择面', () => {
     expect((events[0][0] as { channels: string[] }).channels).toEqual([])
   })
 
+  it('失败原样点名（403 不是"网络错误"），且不关闭弹层', async () => {
+    migrateAgentChannelConfigs.mockRejectedValue({
+      response: { status: 403, data: { detail: '无权删除智能体『default』（仅属主或管理员可操作）' } },
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.find('.source-select').setValue('default')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-select-all"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="migration-confirm"]').trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.find('[data-testid="migrate-error"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('无权删除智能体')
+    expect(wrapper.emitted('migrated')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
   it('没有可迁的源时诚实说明，不给假动作', async () => {
     listChannelMigrationSources.mockResolvedValue({ data: { sources: [] } })
     const wrapper = mountDialog()
