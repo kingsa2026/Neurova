@@ -1374,3 +1374,18 @@ tests/unit/ci/test_dev_environment_contract.py
 #   ② 用户级 site-packages 落点必须与 `COPY --from=builder` 的落点重合
 #   （否则包在盘上、`import` 找不到 —— 镜像在 `import uvicorn` 处崩）。
 tests/unit/deploy/test_image_runtime_selfproof.py
+# Issue #332（路线 A：根组织自托管 Windows 构建机）：
+#   自定义界面壳是 WPF(net48)，编译依赖 Windows 自带件（csc.exe / robocopy），
+#   容器是 Linux，加交叉编译工具链也补不上 —— 该包只能在自托管 Windows 节点产出。
+#   自托管节点与容器节点是两套语义：脚本**直接跑在宿主机**上，故 `docker.image`
+#   与 `runner.cpus` 写了都不生效（静默忽略，不会有任何红）；命中靠
+#   `namespace: group` + tags。守卫逐条钉住「别把容器节点那套抄过来」，
+#   并要求 Windows 宿主自证（cmd /c ver）与构建工具链逐件点名。
+tests/unit/ci/test_win_installer_pipeline.py
+# Issue #332（实测断裂）：自定义界面壳的欢迎页把版本写死成字面量 `v1.0.0`，
+#   而产品版本事实源（tauri.conf.json / package.json）已跑到 `1.0.0-beta5` ——
+#   装出来的包**显示了一个错版本号**，用户无法据此判断装的是哪一版。
+#   编译通过、装包成功、界面正常渲染，只有显示的值是错的（不会有任何红）。
+#   处置：版本改由构建期从 tauri.conf.json 写入嵌入资源，壳只读不算；
+#   守卫三条（壳不得写死版本字面量 / 两份事实源必须一致 / NSIS 占位符不得写死）。
+tests/unit/desktop/test_installer_version_single_source.py

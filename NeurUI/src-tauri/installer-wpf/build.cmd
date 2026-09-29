@@ -44,6 +44,22 @@ if not "%~1"=="" (
 )
 if "%ICON%"=="" set ICON=%~dp0..\icons\icon.ico
 if exist "%ICON%" set RESOURCES=%RESOURCES% /resource:"%ICON%",Neurova.Installer.neurova-logo.png
+
+rem Version: read the SINGLE source of truth (tauri.conf.json) at build time and
+rem embed it as a resource. The shell must never hardcode a version string.
+rem Parsed with findstr so cmd needs no external toolchain.
+set VERFILE=%OUTDIR%\version.txt
+for /f "tokens=2 delims=:," %%V in ('findstr /r /c:"\"version\"" "%~dp0..\tauri.conf.json"') do set SHELLVER=%%V
+if "%SHELLVER%"=="" (
+  echo [error] cannot read version from tauri.conf.json
+  exit /b 1
+)
+set SHELLVER=%SHELLVER: =%
+set SHELLVER=%SHELLVER:"=%
+rem NOTE: writes inside a parenthesized block would use parse-time values; keep flat.
+> "%VERFILE%" echo|set /p="%SHELLVER%"
+set RESOURCES=%RESOURCES% /resource:"%VERFILE%",Neurova.Installer.version.txt
+echo [info] version=%SHELLVER% (from tauri.conf.json)
 if not "%~1"=="" (
   echo [info] embed mode: kernel=%~1 icon=%ICON%
 ) else (

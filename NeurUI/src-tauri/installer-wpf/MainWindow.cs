@@ -24,6 +24,10 @@ namespace Neurova.Installer
         private const string NsisKernel = "Neurova-kernel-setup.exe";
         private const string EmbeddedKernel = "Neurova.Installer.kernel-setup.exe";
         private const string EmbeddedLogo = "Neurova.Installer.neurova-logo.png";
+        // 版本由构建期从单一事实源写入资源（见 build.cmd 的 version.txt），
+        // 壳不手抄字面量 —— 抄一份就会与实际版本分叉（守卫钉住）。
+        private const string EmbeddedVersion = "Neurova.Installer.version.txt";
+        private const string FallbackVersion = "unknown";
         private const string TermsUrl = "https://www.neurova.top/terms";
         private const string PrivacyUrl = "https://www.neurova.top/privacy";
         // Cosmic 皮肤色板（styles/variables.css 对齐）
@@ -375,7 +379,7 @@ namespace Neurova.Installer
             links.Children.Add(FooterLink("www.neurova.top", true, 0, "https://www.neurova.top"));
             panel.Children.Add(links);
 
-            panel.Children.Add(Text("v1.0.0", 11, FontWeights.Normal, TextSub, 6));
+            panel.Children.Add(Text("v" + ProductVersion(), 11, FontWeights.Normal, TextSub, 6));
             return panel;
         }
 
@@ -1025,6 +1029,30 @@ namespace Neurova.Installer
                 if (char.IsWhiteSpace(c) || c == '"') return false;
             }
             return true;
+        }
+
+        // ---------- 版本号（构建期注入，运行时读取） ----------
+        // 事实源：NeurUI/src-tauri/tauri.conf.json 的 version。
+        // build.cmd 把它写进 version.txt 并作为嵌入资源随壳编译，壳只读不算。
+        private static string ProductVersion()
+        {
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                using (var s = asm.GetManifestResourceStream(EmbeddedVersion))
+                {
+                    if (s != null)
+                    {
+                        using (var r = new StreamReader(s))
+                        {
+                            var v = r.ReadToEnd().Trim();
+                            if (v.Length > 0) return v;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return FallbackVersion;
         }
 
         private string ExtractEmbeddedKernel(string destPath, Action<int> onProgress)
