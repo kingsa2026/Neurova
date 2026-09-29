@@ -464,6 +464,15 @@ class BaseAgentLoop(ABC):
         _tc_function_name = tool_call.get("function", {}).get("name", "unknown_tool")
         _tc_id = resolveCallId(tool_call)
 
+        # G5-A：把"正在执行哪一次调用"绑进当前任务的上下文，供深层的执行咽喉
+        # （治理判 ASK 时要给审批记录写上回投地址）读取。写入点放在这里而不是
+        # 逐层加形参：这条链要穿 native_tool_dispatch → execute_tool → execute →
+        # _execute_single_tool → _governance_precheck 五层，而只有最里层用得着它；
+        # 且并行批次下每个 worker 跑在自己的 gather 子任务里，上下文副本天然隔离。
+        from neurova.core.turn_context import set_turn_tool_call_id
+
+        set_turn_tool_call_id(_tc_id)
+
         # [TOOLROBUST-A] 参数 JSON 解析单独 try：
         # 原实现在 try 外 json.loads，一遇到某条工具参数是非法 JSON，
         # handle_tool_calls 整体抛异常 → 被 loop 当作"工具调用失败"降级/回退到

@@ -370,8 +370,30 @@ class ToolCoordinator:
             while len(self._completed) > self._MAX_COMPLETED:
                 self._completed.pop(next(iter(self._completed)), None)
 
+    def recordApprovalOutcome(self, tool_name: str, call_id: Optional[str], *,
+                              success: bool, session_id: Optional[str] = None,
+                              result: Any = None, error: Optional[str] = None) -> None:
+        """把"带外批准之后才产生的工具终态"投进同一条晚到通路。
+
+        为什么复用 `_pending_hints` 而不是另起一条：本方法要解决的事与"超时转后台的
+        工具完成后回报"是同一件——**结果比轮次晚到**，而下一轮才是它能被读到的时刻。
+        再造一条通道就会有两个排水点、两种注入措辞、两套丢单语义（同一契约的第二份定义）。
+
+        `success` 由调用方给定，不在这里自己判：成败判据全仓唯一
+        （`ToolExecutor._result_is_success`），在此重推一遍就是造第二份。
+        """
+        self._pending_hints.append({
+            "kind": "approval",
+            "task_id": call_id,
+            "tool_name": tool_name,
+            "session_id": session_id,
+            "success": success,
+            "result": result,
+            "error": error,
+        })
+
     def pop_pending_hints(self) -> List[Dict[str, Any]]:
-        """取走全部已完成的后台提示（清空）——注入下一轮 LLM 上下文。"""
+        """取走全部已完成的晚到提示（清空）——注入下一轮 LLM 上下文。"""
         hints = self._pending_hints
         self._pending_hints = []
         return hints
