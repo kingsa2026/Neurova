@@ -163,9 +163,15 @@ def testKitRefreshesMachinePathBeforeProbe():
         "缺机器 PATH 刷新入口函数：工具链探测会读到冻结的进程环境，"
         "后装的 python/makensis 在盘上却查不到"
     )
-    assert "Session Manager\\Environment" in src or "HKEY_LOCAL_MACHINE" in src, (
-        "刷新必须真去读机器级注册表 PATH（HKLM），而不是只读进程环境凑数"
+    # 读机器级注册表这件事收口在 helper 里（单一定义，见 refresh_machine_path 注释）：
+    # 本脚本是调用方，不另写一份 winreg 版本。
+    helper = _REPO / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    assert helper.exists(), "PATH 刷新 helper 缺席：scripts/desktop/refresh_machine_path.ps1"
+    helper_src = helper.read_text(encoding="utf-8")
+    assert 'GetEnvironmentVariable("Path", "Machine")' in helper_src, (
+        "刷新必须真去读机器级注册表 PATH，而不是只读进程环境凑数"
     )
+    assert "refresh_machine_path.ps1" in src, "本脚本必须调用该 helper（不另写第二份定义）"
     funcs = _functions()
     assert "refresh_machine_path" in funcs, "刷新必须独立成函数，调用点不各写一份"
     # 必须发生在探测之前：run 里 refresh 调用点先于 probe_toolchain 调用点。
