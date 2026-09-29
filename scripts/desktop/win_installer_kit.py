@@ -53,7 +53,14 @@ DEFAULT_CLONE = DEFAULT_HOME / "neurova"
 
 # 构建机必须逐件具备的工具链（缺哪个当场失败，不产来源不明的包）。
 # csc.exe / robocopy 由 Windows 自带，单独探测；其余必须显式点名。
-TOOLCHAIN = ("node", "npm", "npx", "cargo", "rustc", "makensis", "python")
+#
+# **不列 `makensis`**：构建链不调用它。`package_installer_zip.py` 只调仓内打包脚本，
+# NSIS 内核由 **Tauri 自带的 NSIS 打包器**产出（自带 makensis，
+# 落到 `%LOCALAPPDATA%\tauri`），WPF 壳只把内核当 `/resource` 内嵌 —— 全链
+# 没有任何一处 exec 宿主 `makensis`。把无消费者的工具列为必需项，会让探测在
+# 「装了但不在 PATH」（choco 的 NSIS 包不写机器 PATH、不建 shim）上假红，
+# 而补路径兜底只是把「没装」与「装了没用上」继续搅在一起（教义第 2 条）。
+TOOLCHAIN = ("node", "npm", "npx", "cargo", "rustc", "python")
 
 # pip 与 npm 的镜像源：国内打包机上裸连 PyPI / registry.npmjs.org 会慢到不可用，
 # 且失败形态是「挂住」而不是报错。这里显式走国内镜像，来源与 .npmrc / pip 一致。
@@ -219,11 +226,6 @@ Step "MSVC 生成工具（C++ 编译 tauri 原生部分所需）" {
   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget `
     --accept-package-agreements --accept-source-agreements `
     --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-}
-
-Step "NSIS" {
-  if (Get-Command makensis -ErrorAction SilentlyContinue) { makensis /VERSION; return }
-  winget install --id NSIS.NSIS -e --source winget --accept-package-agreements --accept-source-agreements
 }
 
 Step "Python 3.12" {
