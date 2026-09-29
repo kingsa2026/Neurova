@@ -219,6 +219,7 @@ async def testApprovedReplayDeliversResultToConversation(monkeypatch):
     class _Request:
         request_id = "apr_g5_1"
         status = ApprovalStatus.PENDING
+        agent_id = "agent_g5"
         metadata = {
             "tool_name": "exec_command",
             "params": {"command": "echo hi"},
@@ -253,8 +254,14 @@ async def testApprovedReplayDeliversResultToConversation(monkeypatch):
             self.tool_executor = _Executor(self)
 
     agent = _Agent()
+    lookedUp: list = []
+
+    def _resolveAgent(agent_id=None):
+        lookedUp.append(agent_id)
+        return agent
+
     monkeypatch.setattr(gov, "_get_approvals", lambda: _Store())
-    monkeypatch.setattr(gov, "_get_agent", lambda: agent)
+    monkeypatch.setattr(gov, "_get_agent", _resolveAgent)
     # 端点里是函数级 import（from neurova.tool_executor import ToolExecutor），
     # 接缝必须打在源模块上 —— 打 gov.ToolExecutor 会 AttributeError，红在器械不在缺陷。
     monkeypatch.setattr("neurova.tool_executor.ToolExecutor", _Executor)
@@ -264,6 +271,10 @@ async def testApprovedReplayDeliversResultToConversation(monkeypatch):
     )
     payload = response.get("data") if isinstance(response, dict) else None
     assert payload and payload.get("executed") is True, f"批准未走到重放分支：{response!r}"
+    assert lookedUp == ["agent_g5"], (
+        f"重放没有落在审批单自带的 agent 上（查询名 {lookedUp!r}）⇒ 取的是默认 agent，"
+        "工具跑在了别人的上下文/工作目录里"
+    )
 
     hints = agent.tool_executor.tool_coordinator.pop_pending_hints()
     assert hints, (
@@ -292,6 +303,7 @@ async def testRejectedApprovalAlsoReachesLateResultChannel(monkeypatch):
     class _Request:
         request_id = "apr_g5_r"
         status = ApprovalStatus.PENDING
+        agent_id = "agent_r"
         metadata = {"tool_name": "file_write", "params": {"path": "x"},
                     "session_id": "sess_r", "tool_call_id": "call_r"}
 
@@ -312,11 +324,21 @@ async def testRejectedApprovalAlsoReachesLateResultChannel(monkeypatch):
     class _Agent:
         tool_executor = _Executor()
 
+    lookedUp: list = []
+
+    def _resolveAgent(agent_id=None):
+        lookedUp.append(agent_id)
+        return _Agent()
+
     monkeypatch.setattr(gov, "_get_approvals", lambda: _Store())
-    monkeypatch.setattr(gov, "_get_agent", lambda: _Agent())
+    monkeypatch.setattr(gov, "_get_agent", _resolveAgent)
 
     await gov.reject_approval(
         None, "apr_g5_r", gov.ApprovalActionRequest(approved_by="admin", note="不许"), _admin=None
+    )
+    assert lookedUp == ["agent_r"], (
+        f"拒绝回投没有落在审批单自带的 agent 上（查询名 {lookedUp!r}）"
+        "⇒ 终态投进了默认 agent 那条没人排水的 coordinator"
     )
     hints = _Executor.tool_coordinator.pop_pending_hints()
     assert hints and hints[0].get("success") is False and hints[0].get("task_id") == "call_r", (
@@ -498,3 +520,44 @@ async def testApprovalWakeCrossesRealThreadBoundary(tmp_path, monkeypatch):
         f"批准时登记不在场（{observed!r}）⇒ 端点会重放、咽喉也会执行，同一条命令跑两遍"
     )
     assert not hasApprovalWaiter(requestId["id"]), "裁决后登记未注销，后续同名审批会被误判"
+
+
+# ───────────────────────────────────────────────────────────────
+# E · 批准端点取不到 agent ⇒ "批准即失效"（活体实测发现，非单测推演）
+# ───────────────────────────────────────────────────────────────
+
+
+def testGovernanceResolvesAgentFromTheSameSourceAsOtherEndpoints(monkeypatch):
+    """`governance._get_agent` 必须与其它端点同源（`get_agent_instance`）。
+
+    活体实测：真实服务里点了批准，`executed=False`，marker 文件 0 行——工具从未执行。
+    根因：`set_app_state(state: Dict[...])` 存的是**字典**，而这里调
+    `state.get_agent()`（字典无此方法）→ AttributeError 被裸 `except Exception`
+    吞掉 → 回落去读不存在的 `"agent"` 键 → None。
+    那个 except 正是缺陷长期隐形的地方：它把"我用错了 API 形状"翻译成了"agent 没就绪"。
+    其余 8 个端点（chat/context/skill/model/generation/sleep…）全走单源，唯此一处异端。
+    """
+    from neurova.api import endpoints as ep
+    from neurova.api.endpoints import governance as gov
+
+    class _Sentinel:
+        agent_id = "a1"
+
+    # 生产形态：app_state 是 dict，注册表在 ["agents"] 下
+    monkeypatch.setattr(
+        ep, "_app_state", {"agents": {"a1": _Sentinel(), "default": _Sentinel()}}
+    )
+
+    resolved = gov._get_agent("a1")
+    assert isinstance(resolved, _Sentinel), (
+        f"治理端点解析不到已注册的 agent（得到 {resolved!r}）"
+        "⇒ 批准后无人执行，用户看到的『已批准』是空的"
+    )
+
+    # 同源的另一半语义也必须保住：指名而不在池中 → None，**不回落**给默认 agent。
+    # 回落等于把批准/拒绝动作装进别人的技能库与别人的工作目录（工单 011 的病根）。
+    assert gov._get_agent("ghost") is None, (
+        "指名的 agent 不在池中却拿到了替代品 ⇒ 单源只借了一半语义，回落仍在偷换主体"
+    )
+    # 未指名（老审批单 agent_id 为空）→ 落 default，与 get_agent_instance 同规则
+    assert isinstance(gov._get_agent(""), _Sentinel), "空 agent_id 应落到 default 而非 None"
