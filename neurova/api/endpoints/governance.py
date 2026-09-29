@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
+from neurova.security.approval_relay import hasApprovalWaiter
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
 
@@ -148,6 +150,50 @@ async def get_approval_detail(request: Request, request_id: str, _admin: Any = D
     return {"code": 0, "data": {"request": req.to_dict()}}
 
 
+def _deliverApprovalOutcome(agent: Any, metadata: Dict[str, Any], tool_name: str,
+                            result: Any) -> bool:
+    """把带外批准的执行终态投进会话的晚到通路；返回是否真的投出去了。
+
+    三条纪律：
+    - 成败判据**不自持**，走 `ToolExecutor._result_is_success`（全仓唯一判据），
+      在这里重推一遍就是造第二份定义。
+    - 投递目标是 `agent.tool_executor.tool_coordinator` —— 必须是 agent 自己那个
+      实例。`ChatPipeline.tool_executor` 是 `agent.tool_executor` 的 property，
+      换一个 executor 就等于投进一个没人排水的 coordinator（静默丢单）。
+    - 没有回投地址（A 之前创建的老审批单、或带外手工建的请求）要**明说**无法回投，
+      静默丢弃正是本片在修的病；再拿静默丢弃去"修"静默丢弃没有意义。
+    """
+    coordinator = getattr(getattr(agent, "tool_executor", None), "tool_coordinator", None)
+    if coordinator is None:
+        logger.warning("审批重放无法回投：agent 未装配 tool_coordinator（工具 %s）", tool_name)
+        return False
+
+    executor = getattr(agent, "tool_executor", None)
+    judge = getattr(executor, "_result_is_success", None)
+    success = bool(judge(result)) if callable(judge) else bool(
+        isinstance(result, dict) and result.get("success")
+    )
+    error = None
+    if not success and isinstance(result, dict):
+        error = str(result.get("error") or result.get("message") or "")[:400] or "执行失败"
+
+    coordinator.recordApprovalOutcome(
+        tool_name,
+        metadata.get("tool_call_id"),
+        success=success,
+        session_id=metadata.get("session_id"),
+        result=result if success else None,
+        error=error,
+    )
+    if not metadata.get("tool_call_id"):
+        logger.warning(
+            "审批重放结果已投递但缺回投地址（tool_call_id 缺失，会话 %r）："
+            "模型侧只能看到工具名，配不上是哪一次调用",
+            metadata.get("session_id"),
+        )
+    return True
+
+
 @router.post("/approvals/{request_id}/approve")
 async def approve_and_execute(request: Request, request_id: str,
                               body: ApprovalActionRequest, _admin: Any = Depends(_governance_admin_dep)):
@@ -199,9 +245,23 @@ async def approve_and_execute(request: Request, request_id: str,
 
     from neurova.tool_executor import ToolExecutor
 
+    # G5-B/C：有人在等（咽喉仍阻塞在本次调用上）→ **不在这里重放**。
+    # 咽喉醒来后会在完整管线里执行（钩子/超时/审计/大输出折叠一条不缺）；
+    # 端点再放一次就是同一条命令跑两遍——对 exec_command 这类工具是正确性问题。
+    if hasApprovalWaiter(request_id):
+        logger.info("审批 %s 由等待中的原调用执行，端点不重放", request_id)
+        return {
+            "code": 0,
+            "data": {"approved": True, "executed": False, "resumed_in_turn": True},
+        }
+
     executor = ToolExecutor(agent)
     result = await executor._execute_single_tool(tool_name, params, skip_governance=True)
     logger.info("审批 %s 已批准并重放执行: %s", request_id, tool_name)
+
+    # 带外批准（原轮次早已收尾）→ 终态必须回到会话，否则模型那次调用永远停在
+    # 「待用户确认」而工具其实已经跑完。走的是与"超时转后台"同一条晚到通路。
+    _deliverApprovalOutcome(agent, metadata, tool_name, result)
 
     # E3（P2）：MCP 工具 + remember 批准 → 铸造 (server, tool) 粒度持久授权，
     # 后续同名调用免审批直达（命令级 remember 由 ApprovalManager 负责，二者互补）
@@ -230,6 +290,24 @@ async def reject_approval(request: Request, request_id: str,
     if not am.reject_request(request_id, rejected_by=body.approved_by, note=body.note):
         raise HTTPException(status_code=500, detail="拒绝操作失败")
     logger.info("审批 %s 已拒绝", request_id)
+
+    # 拒绝也要有终态：有人在等时中继已把它叫醒（返回 approval_denied）；
+    # 无人等（原轮次已收尾）则与批准同路投递晚到提示，否则模型那次调用
+    # 永远停在「待用户确认」——用户其实已经答复了，只是答复没人送回去。
+    if not hasApprovalWaiter(request_id):
+        agent = _get_agent()
+        reqMeta = (getattr(req, "metadata", None) or {}) if req else {}
+        toolName = str(reqMeta.get("tool_name") or "")
+        coordinator = getattr(getattr(agent, "tool_executor", None), "tool_coordinator", None)
+        if agent is not None and toolName and coordinator is not None:
+            coordinator.recordApprovalOutcome(
+                toolName,
+                reqMeta.get("tool_call_id"),
+                success=False,
+                session_id=reqMeta.get("session_id"),
+                error=f"用户拒绝了该操作: {body.note or '未说明原因'}",
+            )
+
     return {"code": 0, "data": {"approved": False}}
 
 

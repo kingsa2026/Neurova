@@ -44,6 +44,18 @@ _skill_view_var: ContextVar = ContextVar("neurova_turn_skill_view", default=None
 # 与 `_tool_messages_var` 既有的"跨 task 边界共享同一列表对象"契约同形。
 _tool_elapsed_var: ContextVar = ContextVar("neurova_turn_tool_elapsed", default=None)
 
+# 当前正在执行的那一次工具调用的 id（`assistant.tool_calls[].id`）。
+#
+# 为什么要有它：治理判 ASK 时创建的审批记录里只有 tool_name/params，**没有回投地址**——
+# 人工批准后工具在带外真执行了，结果却无处送回，原调用在模型视角永久停在「待确认」。
+# 缺的不是投递代码，是那条记录里根本没法寻址到"哪一次调用"。
+#
+# 与 `_tool_elapsed_var` 的要求**正好相反**，别照着它改成共享对象：耗时是"多个子任务
+# 往同一个轮次累加"，必须共享引用；调用 id 是"每个调用各自的身份"，子任务副本天然正确
+# ——并行批次里 `asyncio.gather` 为每个任务复制上下文，各写各的、互不串台。
+# 把它改成共享对象会让同轮并发调用读到彼此的 id，把审批路由到错误的悬空调用上。
+_tool_call_id_var: ContextVar = ContextVar("neurova_turn_tool_call_id", default=None)
+
 # 技能漏斗账本同理，此前漏了同一根因：`record_turn_skill_funnel` 的
 # "拿不到就建一个再 set"在子任务里建的是子任务自己的列表，父轮次读到空账本
 # （实测：在 create_task 里记一条，父读回 `[]`）。
@@ -301,6 +313,18 @@ def get_turn_reasoning() -> Optional[str]:
     return _reasoning_var.get()
 
 
+def set_turn_tool_call_id(call_id: Optional[str]) -> None:
+    """绑定"当前正在执行哪一次工具调用"（调用侧唯一写入方：`loops/base.py` 的 worker）。
+
+    任务级语义——见 `_tool_call_id_var` 声明处关于"为何不能改成共享对象"的说明。
+    """
+    _tool_call_id_var.set(call_id)
+
+
+def get_turn_tool_call_id() -> Optional[str]:
+    return _tool_call_id_var.get()
+
+
 def reset_turn_tool_messages() -> None:
     """清空本轮工具展示记录（轮次开始时调用；任务上下文内安全）。
 
@@ -473,6 +497,8 @@ __all__ = [
     "get_turn_user_id",
     "set_turn_reasoning",
     "get_turn_reasoning",
+    "set_turn_tool_call_id",
+    "get_turn_tool_call_id",
     "reset_turn_tool_messages",
     "append_turn_tool_messages",
     "get_turn_tool_messages_snapshot",
