@@ -43,9 +43,9 @@ def _get_mcp_server():
 # 每次现取 default agent；导出默认关，无 agent 时清单不含 computer_*）
         def _agent_provider():
             try:
-                from neurova.api.endpoints import get_agent_instance
+                from neurova.api.endpoints import defaultAgentId, get_agent_instance
 
-                return get_agent_instance("default")
+                return get_agent_instance(defaultAgentId())
             except Exception:  # noqa: BLE001
                 return None
 

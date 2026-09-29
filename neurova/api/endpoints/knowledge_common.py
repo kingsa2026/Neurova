@@ -103,7 +103,7 @@ def get_memory_manager(agent_id: str = "default"):
     return getattr(agent, "memory_manager", None)
 
 
-def get_agent(agent_id: str = "default"):
+def get_agent(agent_id: str = ""):
     """获取 Agent 实例（原 knowledge._get_agent）"""
     from neurova.api.endpoints import get_agent_instance
 

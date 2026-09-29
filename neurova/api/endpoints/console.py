@@ -724,7 +724,7 @@ async def post_console_chat(
     tool_messages = []
     agent = None
     try:
-        agent = get_agent_instance(agent_id=body.agent_id or "default")
+        agent = get_agent_instance(agent_id=body.agent_id or "")
         if not agent:
             reply = f"Echo: {body.message}"
     except Exception as e:
@@ -1065,7 +1065,7 @@ async def post_console_chat_review(
     content = (body.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content 不能为空（提供待评审的 diff 或文本）")
-    agent = get_agent_instance(body.agent_id or "default")
+    agent = get_agent_instance(body.agent_id or "")
     if agent is None or getattr(agent, "llm_client", None) is None:
         raise HTTPException(status_code=503, detail="Agent 未就绪")
     from neurova.agent.review import run_review
@@ -1332,7 +1332,7 @@ async def auto_title_chat_session(session_id: str, request: Request,
     # 拿不到 agent 时传 None，生成器回退多模型客户端/截断（绝不 500）。
     llm = None
     try:
-        agent = get_agent_instance(agent_id=agent_id or "default")
+        agent = get_agent_instance(agent_id=agent_id or "")
         llm = getattr(agent, "llm_client", None)
     except Exception:
         llm = None
@@ -1522,7 +1522,7 @@ async def delete_chat_round(session_id: str, timestamp: str, request: Request,
 
     # 记忆清除 + 内存历史同步（best-effort，不改变 session 删除结果）
     try:
-        agent = get_agent_instance(agent_id=agent_id or "default")
+        agent = get_agent_instance(agent_id=agent_id or "")
     except Exception as e:
         logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
         agent = None
@@ -1567,7 +1567,7 @@ def _apply_feedback_to_memory(
     由 MemCore.apply_feedback_to_memories 实现。
     """
     try:
-        agent = get_agent_instance(agent_id=agent_id or "default")
+        agent = get_agent_instance(agent_id=agent_id or "")
     except Exception as e:
         logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
         return
@@ -1693,7 +1693,7 @@ async def post_chat_feedback(
         # （assistant metadata.injected_reflections 留痕，见 turn_context）。
         # like→validated（升最高信任层）；dislike→降置信/转 rejected。best-effort。
         try:
-            _rflx_agent = get_agent_instance(agent_id=agent_id or "default")
+            _rflx_agent = get_agent_instance(agent_id=agent_id or "")
             _verdicts = await _apply_feedback_to_reflections(
                 _rflx_agent, repo, body.session_id, body.timestamp, body.feedback
             )
@@ -1708,7 +1708,7 @@ async def post_chat_feedback(
         # 虚增；负反馈的真实效果已由上方记忆温度 -15 链路承担。best-effort。
         if body.feedback == "like":
             try:
-                _agent = get_agent_instance(agent_id=agent_id or "default")
+                _agent = get_agent_instance(agent_id=agent_id or "")
                 _ledger = getattr(_agent, "intrinsic_motivation", None) if _agent else None
                 if _ledger:
                     _ledger.observe_purpose(
