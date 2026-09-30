@@ -1368,8 +1368,10 @@ $:
             # 逐件点名，缺席即失败（不吞异常）
             # 与 scripts/desktop/win_installer_kit.py 的 TOOLCHAIN 同源同形：
             # 少一件即探测链过、打包链缺（判据错位），故此处不得漏项。
-            # **不含 makensis**：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis
-            # 无任何调用点 —— 列为必需项只会在「装了但不在 PATH」上假红。
+            # **不含 makensis**：它有消费者（打包脚本 resolve_working_nsis() 会
+            # 挑一份实跑能用的种进 tauri 缓存，Issue #342），但可用性判据是
+            # 「逐个候选实跑 /VERSION 自证」，已落在那个函数里；此处再点名是
+            # 第二份判据，且会在「装了但不在 PATH」上假红（choco 不写 PATH、不建 shim）。
             $probes = @("node", "npm", "npx", "cargo", "rustc", "python")
             $missing = @()
             foreach ($p in $probes) {

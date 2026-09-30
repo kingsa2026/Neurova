@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
+import tempfile
 import sys
 import zipfile
 from datetime import datetime
@@ -28,6 +30,13 @@ TAURI_CONF = REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 NSIS_BUNDLE_DIR = REPO / "NeurUI" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
 LOGO_SRC = REPO / "NeurUI" / "public" / "img" / "NEUROVA-LOGO350white.png"
 OUT_DIR = REPO / "dist" / "installer"
+
+# tauri-bundler 的 NSIS 事实源（上游 `crates/tauri-bundler/src/bundle/windows/nsis/mod.rs`）：
+#   NSIS 缓存落点 = <cache>/tauri/NSIS，makensis 只认缓存根下的 `makensis.exe`；
+#   上游用 `env_remove("NSISDIR")` 显式丢弃该变量（mod.rs 第 705 行）——
+#   故「把可用 NSIS 拷到某处、设 NSISDIR 指过去」是**死接线**（实机踩到，2026-09-30）。
+TAURI_NSIS_DIRNAME = "NSIS"          # 缓存根下的 NSIS 目录名（上游 nsis_mod.rs 常量）
+NSIS_CACHE_ENV = "NEUROVA_NSIS_CACHE"  # 覆盖缓存根；不设时按 LOCALAPPDATA 推导
 
 KERNEL_PREFIX = "Neurova_"          # NSIS 产物名前缀（Neurova_<ver>_x64-setup.exe）
 KERNEL_SUFFIX = "-setup.exe"
@@ -45,6 +54,143 @@ def run(cmd: list[str] | str, shell: bool = False, cwd: Path | None = None,
     r = subprocess.run(cmd, shell=shell, cwd=str(cwd or REPO),
                        env={**os.environ, **(env or {})})
     return r.returncode
+
+
+def tauri_nsis_cache_root() -> Path | None:
+    """tauri 的 NSIS 缓存根（`<cache>/tauri`）。
+
+    上游取 `settings.local_tools_directory().map(|d| d.join(".tauri"))
+    .unwrap_or_else(|| dirs::cache_dir().join("tauri"))`。本仓 `tauri.conf.json`
+    未声明 `localToolsDirectory`，故走 `dirs::cache_dir()` —— Windows 上即
+    `%LOCALAPPDATA%`。这与 `tauri_build_env()` 重定向的是**同一个变量**，
+    所以两处必须读同一份推导入参（单一事实源）。
+    """
+    if os.name != "nt":
+        return None
+    base = os.environ.get(NSIS_CACHE_ENV)
+    if base:
+        return Path(base)
+    local = os.environ.get("LOCALAPPDATA", "")
+    if not local:
+        return None
+    return Path(local) / "tauri"
+
+
+def resolve_working_nsis() -> Path | None:
+    """挑一份**实跑验证**能用的 NSIS 工具集，返回其目录（找不到返回 None）。
+
+    为什么必须实跑：实机证据（2026-09-30，节点 orange-connector）——
+    tauri 自带的 nsis-3.11 整树下 makensis（根 stub 与 `Bin\makensis.exe`）
+    都报 `Unable to start child process, error 0x2`（stub 去起
+    `Bin\makensis.exe` 失败），而系统 choco NSIS 3.13 的同一调用返回 `v3.13, exit 0`。
+    「文件在位」与「跑得起来」是两件事 —— 只看文件存在与否的判据分辨不出它。
+
+    逐个候选跑 `makensis /VERSION`，取第一份退出码为 0 的。候选含
+    `NSIS_DIR_CANDIDATES` 与 `%ProgramFiles(x86)%`。全部不可用时返回 None，
+    交回 bundler 响亮失败（不在这里悄悄产残缺包）。
+    """
+    candidates = []
+    env_hint = os.environ.get("NSIS_HOME")
+    if env_hint:
+        candidates.append(Path(env_hint))
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    candidates += [Path(pf86) / "NSIS", Path(pf) / "NSIS"]
+    for cand in candidates:
+        exe = cand / "makensis.exe"
+        if not exe.exists():
+            continue
+        try:
+            r = subprocess.run([str(exe), "/VERSION"], capture_output=True,
+                               text=True, timeout=30)
+        except OSError:
+            continue
+        if r.returncode == 0:
+            log(f"可用 NSIS：{cand}（makensis {r.stdout.strip() or r.stderr.strip()}）")
+            return cand
+        log(f"NSIS 候选不可用（exit {r.returncode}）：{cand}")
+    return None
+
+
+def seed_tauri_nsis_cache() -> None:
+    """构建前把**可实跑**的 NSIS 种进 tauri 的缓存目录。
+
+    根因（实机踩到，2026-09-30，节点 orange-connector）：tauri 把自带
+    nsis-3.11 解到 `<cache>/tauri/NSIS`，随后直接 exec 该目录下的
+    `makensis.exe`；该副本在本机起不来（`error 0x2`），于是整条 tauri build
+    在 bundler 最后一步硬失败：
+
+        Running makensis to produce ...\\bundle\\nsis\\Neurova_1.0.0-beta5_x64-setup.exe
+        Unable to start child process, error 0x2
+        failed to bundle project: `Failed to bundle app with makensis`
+
+    为什么之前几轮修不掉：`NSISDIR` 是**死接线** —— 上游 mod.rs 用
+    `env_remove("NSISDIR")` 显式丢弃它，指哪都没用。缓存目录里的那份才是
+    真正被 exec 的那份，故根修点在**把缓存里那份换掉**，不是给 tauri 指路。
+
+    判据与上游一致（`NSIS_REQUIRED_FILES`）：`makensis.exe` 必须位于缓存根，
+    另需 `Bin/makensis.exe`、`Stubs/*`、`Include/*` 与 `nsis_tauri_utils.dll`
+    插件。本函数把系统 NSIS 整树拷进去补齐前两类；插件不在系统 NSIS 里，
+    从**已存在的 tauri 缓存副本**借（那是 tauri 自己下的、哈希可复核的那一份）。
+
+    找不到可实跑的系统 NSIS 时**原样返回**（不改缓存、不吞失败）——
+    交回 bundler 响亮失败，不在这里悄悄产残缺包（教义第 2 条）。
+    """
+    if os.name != "nt":
+        return
+    root = tauri_nsis_cache_root()
+    if root is None:
+        return
+    good = resolve_working_nsis()
+    if good is None:
+        log("未找到可实跑的系统 NSIS —— 不种子缓存，交回 tauri 响亮失败")
+        return
+    target = root / TAURI_NSIS_DIRNAME
+    if target.exists():
+        # 已是可用副本（makensis 实跑通过）则不动：避免每次构建重拷 ~30MB。
+        probe = target / "makensis.exe"
+        try:
+            r = subprocess.run([str(probe), "/VERSION"], capture_output=True,
+                               text=True, timeout=30)
+        except OSError:
+            r = None
+        if r is not None and r.returncode == 0:
+            log(f"NSIS 缓存已可用，跳过种子：{target}")
+            return
+    # 插件（`nsis_tauri_utils.dll`）不在系统 NSIS 里，只存在于 tauri 的旧缓存副本中。
+    # **必须在删树之前搬走**：它就在即将被 rmtree 的那棵树里 —— 先删后借的结果是
+    # 「插件永远借不到」，而失败形态只是少一个文件，不会有任何红（live-verify 实测踩到：
+    # 路径判据看着都对，复制那一步才 FileNotFoundError）。
+    staged_plugin = None
+    plugin_src = _find_cached_tauri_utils_dll(target)
+    if plugin_src is not None:
+        staged_plugin = Path(tempfile.mkdtemp(prefix="neurova-nsis-")) / plugin_src.name
+        shutil.copy2(plugin_src, staged_plugin)
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(good, target)
+    if staged_plugin is not None:
+        dst = target / "Plugins" / "x86-unicode" / "additional"
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(staged_plugin, dst / "nsis_tauri_utils.dll")
+        log(f"NSIS 插件已补齐：{plugin_src} → {dst}")
+    else:
+        log("未找到可借的 nsis_tauri_utils.dll —— 该件由 tauri 自行下载补齐")
+    log(f"NSIS 缓存已种子：{good} → {target}")
+
+
+def _find_cached_tauri_utils_dll(cache_dir: Path) -> Path | None:
+    """在 tauri 的**旧缓存树**里找现成的 `nsis_tauri_utils.dll`。
+
+    入参是缓存树本身（`<cache>/tauri/NSIS`），不是它的父目录 —— 该件只在树内
+    `Plugins/x86-unicode/additional/` 下，递归范围就是这棵树。
+    """
+    if not cache_dir.is_dir():
+        return None
+    for hit in cache_dir.rglob("nsis_tauri_utils.dll"):
+        if hit.is_file():
+            return hit
+    return None
 
 
 def tauri_build_env() -> dict:
@@ -149,6 +295,9 @@ def build_tauri() -> Path:
         raise RuntimeError("前端构建失败（npm run build:desktop）")
     extra, signed = tauri_signing_args()
     build_tauri.last_signed = signed  # 交回调用点：不签名的产物要点名
+    # 种子 NSIS 缓存必须在 tauri build **之前**：tauri 对缓存只查存在性/哈希，
+    # 我们种进去的可用副本会被它直接用（不再下载、不再解压自带的坏副本）。
+    seed_tauri_nsis_cache()
     log("tauri build（Rust release + NSIS bundle，可能 10 分钟+）…")
     # 传 argv 数组、不经 shell：`--config` 的路径可能含空格，过 shell 会被二次解析
     # （实机踩到引号被剥）。Windows 上 npx 是 npx.cmd，须经 cmd 解析扩展名。
@@ -263,7 +412,6 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
         shell = build_shell(kernel)
         out_path = OUT_DIR / f"Neurova_Setup_{ver}_{stamp}_x64{mark}.exe"
         OUT_DIR.mkdir(parents=True, exist_ok=True)
-        import shutil
         shutil.copy2(shell, out_path)
         size_mb = out_path.stat().st_size / 1048576
         log(f"单文件安装器完成：{out_path}（{size_mb:.0f} MB）")

@@ -213,6 +213,7 @@ def testRequiredToolchainHasNoPhantomEntry():
                     toolchain = tuple(ast.literal_eval(node.value))
     assert toolchain is not None, "未找到 TOOLCHAIN 的字面量定义（不得动态拼装）"
     assert "makensis" not in toolchain, (
-        "makensis 是无消费者的必需项：构建链走 Tauri 自带 NSIS 打包器，"
-        "宿主 makensis 不被任何步骤调用。要求它 = 制造一个永远可红的假要求。"
+        "makensis 不得进必需清单：它的可用性判据（实跑 /VERSION、多候选自证）"
+        "已在 package_installer_zip.py::resolve_working_nsis() 里，"
+        "这里再要求一次 = 第二份判据（且在 choco 不写 PATH 的机器上必然假红）。"
     )

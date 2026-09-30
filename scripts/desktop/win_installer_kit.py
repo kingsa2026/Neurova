@@ -54,12 +54,15 @@ DEFAULT_CLONE = DEFAULT_HOME / "neurova"
 # 构建机必须逐件具备的工具链（缺哪个当场失败，不产来源不明的包）。
 # csc.exe / robocopy 由 Windows 自带，单独探测；其余必须显式点名。
 #
-# **不列 `makensis`**：构建链不调用它。`package_installer_zip.py` 只调仓内打包脚本，
-# NSIS 内核由 **Tauri 自带的 NSIS 打包器**产出（自带 makensis，
-# 落到 `%LOCALAPPDATA%\tauri`），WPF 壳只把内核当 `/resource` 内嵌 —— 全链
-# 没有任何一处 exec 宿主 `makensis`。把无消费者的工具列为必需项，会让探测在
-# 「装了但不在 PATH」（choco 的 NSIS 包不写机器 PATH、不建 shim）上假红，
-# 而补路径兜底只是把「没装」与「装了没用上」继续搅在一起（教义第 2 条）。
+# **仍不列 `makensis`**，但理由变了（Issue #342，2026-09-30 实机踩到）：
+# 它现在**有**消费者 —— `package_installer_zip.py::resolve_working_nsis()` 会在
+# 构建前跑一遍 `makensis /VERSION`，挑一份实跑能用的 NSIS 种进 tauri 缓存
+# （tauri 缓存里自带的那份 nsis-3.11 在本机起不来，报 `error 0x2`）。
+# 之所以仍不做「必需项」：该函数**逐个候选自证**，候选含 `NSIS_HOME`、
+# `%ProgramFiles(x86)%\NSIS`、`%ProgramFiles%\NSIS` —— 命中任一份即可出包，
+# 全都不可用时才原样返回、交回 tauri 响亮失败。在这里再要求 PATH 里有 `makensis`
+# 是第二份判据（且 choco 的 NSIS 包不写机器 PATH、不建 shim，必然假红）。
+# 判据留给真正消费它的那个函数，探测链不重复一份（教义第 6 条）。
 TOOLCHAIN = ("node", "npm", "npx", "cargo", "rustc", "python")
 
 # pip 与 npm 的镜像源：国内打包机上裸连 PyPI / registry.npmjs.org 会慢到不可用，
@@ -180,7 +183,8 @@ def run(cmd, cwd: Path | None = None, env: dict | None = None) -> int:
 
 INSTALL_PS1 = r"""# Neurova Windows 打包机初始化（Issue #332）
 # 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / VS Build Tools(MSVC) / Python
-# 不装 NSIS：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis 无消费者（见 win_installer_kit.py）
+# 装 NSIS：tauri 自带的那份 makensis 在本机起不来（error 0x2），打包脚本
+# 会在构建前挑一份实跑可用的种进 tauri 缓存（见 package_installer_zip.py::resolve_working_nsis）
 # 任一步失败即中止（$ErrorActionPreference = "Stop"），不产来源不明的包。
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -226,6 +230,28 @@ Step "MSVC 生成工具（C++ 编译 tauri 原生部分所需）" {
 Step "Python 3.12" {
   if (Get-Command python -ErrorAction SilentlyContinue) { python -V; return }
   winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
+}
+
+Step "NSIS（tauri 自带那份 makensis 在本机起不来，打包脚本要从这里种缓存）" {
+  # 判据是「实跑能用」，不是「装了」——故这里也跑一次 /VERSION 自证，
+  # 与 package_installer_zip.py::resolve_working_nsis() 的口径同源。
+  $cands = @(
+    (Join-Path ${env:ProgramFiles(x86)} "NSIS"),
+    (Join-Path $env:ProgramFiles "NSIS")
+  )
+  foreach ($c in $cands) {
+    $exe = Join-Path $c "makensis.exe"
+    if (Test-Path $exe) {
+      & $exe /VERSION
+      if ($LASTEXITCODE -eq 0) { Write-Host "[ok] NSIS 可用：$c"; return }
+    }
+  }
+  winget install --id NSIS.NSIS -e --source winget --accept-package-agreements --accept-source-agreements
+  $exe = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
+  if (-not (Test-Path $exe)) { throw "NSIS 安装后仍找不到 makensis.exe（$exe）" }
+  & $exe /VERSION
+  if ($LASTEXITCODE -ne 0) { throw "NSIS 装上了但 makensis /VERSION 失败 —— 不产来源不明的包" }
+  Write-Host "[ok] NSIS 可用"
 }
 
 Write-Host ""
