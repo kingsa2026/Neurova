@@ -118,7 +118,7 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_dom_snapshot": frozenset({"window_title", "max_nodes", "max_depth"}),
     "computer_click_element": frozenset({"index", "runtime_id", "window_title", "button", "generation"}),
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
-    "computer_som_snapshot": frozenset({"max_marks"}),
+    "computer_som_snapshot": frozenset(),
     "computer_click_mark": frozenset({"index", "button"}),
     "computer_ssh_exec": frozenset({"host", "command", "user", "port", "timeout"}),
     "browser_navigate": frozenset({"url", "generation"}),
