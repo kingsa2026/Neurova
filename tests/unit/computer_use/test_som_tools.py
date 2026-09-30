@@ -51,7 +51,9 @@ class TestSomSnapshot:
         assert out["success"] is True
         assert out["count"] >= 2
         assert "annotated_png_b64" not in out, "标注图不进 LLM 结果（只推面板）"
-        assert out["marks"][0]["id"] in {int(k) for k in executor._last_som_id2xy}
+        # 断言走生产访问器而非裸属性名：映射已按会话隔离存起（T-05），
+        # 原来直接读 `executor._last_som_id2xy` 会把"属性改名"误报成"功能坏了"。
+        assert out["marks"][0]["id"] in {int(k) for k in executor._recallSomMarks()}
 
     @pytest.mark.asyncio
     async def test_click_mark_resolves_to_click_chain(self, executor, monkeypatch):
@@ -75,7 +77,7 @@ class TestSomSnapshot:
 
     @pytest.mark.asyncio
     async def test_click_mark_stale_id_refused(self, executor):
-        executor._last_som_id2xy = {"123": [10, 10]}
+        executor._rememberSomMarks({"123": [10, 10]})  # 经生产入口播种，不留只写不读的属性
         out = await executor._execute_computer_click_mark({"index": 999})
         assert out["success"] is False
         assert out.get("refusal_code") == "stale_generation"

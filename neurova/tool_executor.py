@@ -31,6 +31,7 @@ import re
 import shlex
 import sqlite3
 import threading
+from collections import OrderedDict
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -364,6 +365,10 @@ class ToolExecutor:
         Args:
             agent_ref: Agent 实例引用
         """
+
+        # SOM 编号→坐标映射：按会话隔离 + 有界 + RLock（见 _rememberSomMarks）
+        self._somMarksBySession: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._somMarksLock = threading.RLock()
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
         # A-18：ToolEngine 构造为纯内存对象图（dict/RLock/deque + 默认守卫，
@@ -4742,6 +4747,52 @@ class ToolExecutor:
             logger.error("桌面控件赋值失败: %s", e)
             return {"error": f"桌面控件赋值失败: {str(e)}"}
 
+    # SOM 编号→坐标映射的会话隔离（缺陷修正见 _rememberSomMarks docstring）
+    _SOM_MARK_SESSIONS_KEPT = 64      # 有界留存，防长期运行下无界增长
+
+    def _ensureSomMarkStore(self) -> None:
+        """懒建 SOM 映射存储（__new__ 绕过 __init__ 的测试构造兼容）。
+
+        与 `_ensure_gate_runner` 同一条理由：本仓有用例不经 __init__ 造执行器，
+        纯靠 __init__ 建属性会让读写路径抛 AttributeError，而处理器外层的
+        `except Exception` 会把它折成 {"error": ...} —— 于是失败表现是
+        "结果里没有 success"，看着像功能坏了一个键。
+        """
+        if getattr(self, "_somMarksLock", None) is None:
+            self._somMarksLock = threading.RLock()
+        if getattr(self, "_somMarksBySession", None) is None:
+            self._somMarksBySession = OrderedDict()
+
+    def _somSessionKey(self) -> str:
+        """当前会话的 SOM 映射键；无会话上下文时落独立兜底槽，不与他人在共享槽撞。"""
+        from neurova.core.turn_context import get_turn_session_id
+
+        return get_turn_session_id() or "__no_session__"
+
+    def _rememberSomMarks(self, id2xy: Dict[str, Any]) -> None:
+        """按**会话**暂存编号→坐标映射。
+
+        原实现是 `self._last_som_id2xy` 一个裸实例属性：无锁、无会话键，
+        而 ToolExecutor 随 agent 长期存活 ⇒ 两个并发会话各自 som_snapshot 后，
+        后者覆盖前者，于是前一个会话的 computer_click_mark 会按**别人那张图的坐标**
+        点击。SOM 编号本身是按"量化中心+label"散列的确定值，两个会话完全可能
+        拿到同一个 id 却指向不同元素 —— 这不是"点了没反应"，是"点错了还报成功"。
+        与 G1 修掉的"轮次态挂 per-agent 单例"是同一病形。
+        """
+        key = self._somSessionKey()
+        self._ensureSomMarkStore()
+        with self._somMarksLock:
+            self._somMarksBySession[key] = dict(id2xy or {})
+            self._somMarksBySession.move_to_end(key)
+            while len(self._somMarksBySession) > self._SOM_MARK_SESSIONS_KEPT:
+                self._somMarksBySession.popitem(last=False)
+
+    def _recallSomMarks(self) -> Dict[str, Any]:
+        """取回本会话最近一次 SOM 快照的映射（别的会话存的看不到）。"""
+        self._ensureSomMarkStore()
+        with self._somMarksLock:
+            return dict(self._somMarksBySession.get(self._somSessionKey()) or {})
+
     # ── SOM 视觉快照 + 编号点击（R3-1，无 UIA 树桌面的语义中间档）──
 
     async def _execute_computer_som_snapshot(self, params: Dict) -> Dict:
@@ -4760,8 +4811,8 @@ class ToolExecutor:
                 return {"error": "SOM 快照失败：无可用截图后端"}
             marked = await asyncio.to_thread(mark_screenshot, png)
             marks = marked.get("marks") or []
-            # 编号→坐标映射暂存，供 computer_click_mark 解算（同会话最近一次快照）
-            self._last_som_id2xy = marked.get("id2xy") or {}
+            # 编号→坐标映射暂存：按会话隔离（原因见 _rememberSomMarks）
+            self._rememberSomMarks(marked.get("id2xy") or {})
             result = {
                 "success": True,
                 "count": len(marks),
@@ -4789,7 +4840,7 @@ class ToolExecutor:
             from neurova.computer_use import actions, get_computer_use_manager
             from neurova.computer_use import action_result as _ar
 
-            id2xy = getattr(self, "_last_som_id2xy", None) or {}
+            id2xy = self._recallSomMarks()
             mid = str(params.get("index"))
             if mid not in id2xy:
                 return {
