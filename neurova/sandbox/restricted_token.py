@@ -90,6 +90,15 @@ class RestrictedTokenSandbox:
         """本后端真实强制的能力（特权剥离≠severity 枚举语义）。"""
         return frozenset()
 
+    def enforced(self) -> bool:
+        """补齐基类契约（`ExecSandbox.enforced`）：调用方无条件调它，缺了就 AttributeError。
+
+        本后端真实强制的 severity 集合是空——特权剥离不等于隔离档位落实，
+        所以这里**如实返回 False**。结果里的 `sandbox_enforced=True` 只声称
+        "受限令牌生效"（模块头第 16 行已作此区分），不能拿来冒充本问题的答案。
+        """
+        return self.severity in self.enforced_severities
+
     def available(self) -> bool:
         """win32 且 SAFER API 可达（轻探测：不 spawn，仅 API 绑定）。"""
         if os.name != "nt":
