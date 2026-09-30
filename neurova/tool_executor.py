@@ -5110,20 +5110,29 @@ class ToolExecutor:
                 )
             )
             data = result.get("data")
-            if isinstance(data, str):
-                # aria 树按区带折叠，不再头部硬切：头部切法会把 81%–93% 的
-                # 可交互元素整段带走，且留下的前缀几乎全是页头导航。
-                from neurova.computer_use.browser_manager import (
-                    SNAPSHOT_CONTEXT_BUDGET,
-                    foldSnapshotTree,
-                )
+            from neurova.computer_use.browser_manager import (
+                SNAPSHOT_CONTEXT_BUDGET,
+                foldSnapshotTree,
+            )
 
-                fold = foldSnapshotTree(data, SNAPSHOT_CONTEXT_BUDGET)
+            # 两个后端的载荷形状不同（playwright=字符串，camofox=dict）——
+            # 只认 str 会让 camofox 这条首选路由整条绕过字符预算
+            if isinstance(data, str):
+                inner, key = data, None
+            elif isinstance(data, dict) and isinstance(data.get("snapshot"), str):
+                inner, key = data["snapshot"], "snapshot"
+            else:
+                inner, key = None, None
+            if inner is not None:
+                fold = foldSnapshotTree(inner, SNAPSHOT_CONTEXT_BUDGET)
                 if fold.didFold:
-                    result["data"] = fold.text
+                    if key is None:
+                        result["data"] = fold.text
+                    else:
+                        result["data"] = dict(data, **{key: fold.text})
                     result["truncated"] = True
                     # 规模三件：全树多大、共几项、藏了几项。只回布尔会让模型把
-                    # "看到 50 条"读成"页面只有 50 条"。与正文 /folded 计数行同源。
+                    # "看到 50 条"读成"页面只有 50 条"。与正文 /folded 行同源。
                     result["dataCharsTotal"] = fold.charsTotal
                     result["actionableCandidates"] = fold.actionableTotal
                     result["foldedActionableCount"] = fold.hiddenCount

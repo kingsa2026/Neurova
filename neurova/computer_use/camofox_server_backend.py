@@ -282,27 +282,31 @@ class CamofoxServerBackend(BrowserBackend):
                 params={"userId": self._eff_user_id()},
             )
             active = self._active_tab() or {}
-            # R1-5 观察预算：超限裁剪并如实并入 truncated 标记
-            snapshot_text = data.get("snapshot", "")
-            if max_nodes is not None or max_depth is not None:
-                from neurova.computer_use.browser_manager import _trim_snapshot_tree
+            # R1-5 观察预算：与 Playwright 后端共用同一单源（applySnapshotBudget）——
+            # 裁剪读数（行数/可交互项数）随 BrowserResult 一并上报，不只回一个布尔
+            from neurova.computer_use.browser_manager import applySnapshotBudget
 
-                snapshot_text, budget_truncated = _trim_snapshot_tree(
-                    snapshot_text, max_nodes, max_depth
-                )
-            else:
-                budget_truncated = False
+            budget = applySnapshotBudget(
+                data.get("snapshot", ""), max_nodes, max_depth
+            ) if (max_nodes is not None or max_depth is not None) else None
+            snapshot_text = budget.text if budget else data.get("snapshot", "")
+            hiddenNodes = budget.hiddenNodes if budget else 0
+            hiddenActionable = budget.hiddenActionable if budget else 0
+            truncated = bool(data.get("truncated", False)) or bool(budget and budget.truncated)
             return BrowserResult(
                 success=True,
                 data={
                     "snapshot": snapshot_text,
                     "refs_count": data.get("refsCount", 0),
-                    "truncated": bool(data.get("truncated", False)) or budget_truncated,
+                    "truncated": truncated,
                 },
                 url=data.get("url", active.get("url", "")),
                 title=active.get("title", ""),
                 duration_ms=(time.time() - start) * 1000,
                 generation=self._active_generation(),
+                truncated=truncated,
+                hiddenNodes=hiddenNodes,
+                hiddenActionable=hiddenActionable,
             )
         except Exception as e:
             return BrowserResult(

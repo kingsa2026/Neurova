@@ -67,6 +67,11 @@ class BrowserResult:
     generation: Optional[int] = None  # 操作时活动 tab 的代数（agent 回传用于新鲜度校验）
     # R1-2 ActionResult：后端自报投递路径（知识在后端）——action/result.py 据此推导契约
     route: Optional[str] = None
+    # 观察预算（max_nodes/max_depth）裁剪的如实上报：只回布尔不够，要回数量
+    # ——判据与字符预算折叠同源（见 foldSnapshotTree）
+    truncated: bool = False
+    hiddenNodes: int = 0
+    hiddenActionable: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -82,6 +87,11 @@ class BrowserResult:
             d["generation"] = self.generation
         if self.route is not None:
             d["route"] = self.route
+        # 未裁剪时不留字段：每次快照都挂三个零值字段是噪声不是信息
+        if self.truncated:
+            d["truncated"] = True
+            d["hiddenNodes"] = self.hiddenNodes
+            d["hiddenActionable"] = self.hiddenActionable
         return d
 
 
@@ -455,11 +465,10 @@ class PlaywrightBackend(BrowserBackend):
     ) -> BrowserResult:
         """aria 可访问性树快照 —— 结构化观察，代替原始 HTML（省 token、可精确引用）。
 
-        max_nodes/max_depth：观察预算（R1-5），超限裁剪。注意两点实况：
-        ① 不传预算则**不裁剪**（无默认值），整棵树受工具结果字符上限约束；
-        ② 裁剪与否目前**不回传给模型**——BrowserResult 没有 truncated 字段，
-           _trim_snapshot_tree 算出的第二个返回值在此被丢弃。
-           待办（已登记，不静默遗留）：要如实上报需给 BrowserResult 加承载字段。
+        max_nodes/max_depth：观察预算（R1-5），超限裁剪并**如实回传裁掉了多少**
+        （`truncated`/`hiddenNodes`/`hiddenActionable`，两后端同一承载）。
+        不传预算则不裁剪（无默认值），整棵树受工具结果字符预算约束——那一路的上报
+        口径见 `foldSnapshotTree`。
         """
         start_time = time.time()
         stale = self._check_active_generation(generation)
@@ -469,14 +478,17 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             tree = await self._page.locator("html").aria_snapshot()
-            tree, _truncated = _trim_snapshot_tree(tree, max_nodes, max_depth)
+            budget = applySnapshotBudget(tree, max_nodes, max_depth)
             return BrowserResult(
                 success=True,
-                data=tree,
+                data=budget.text,
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
                 generation=self._active_generation(),
+                truncated=budget.truncated,
+                hiddenNodes=budget.hiddenNodes,
+                hiddenActionable=budget.hiddenActionable,
             )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
@@ -817,6 +829,38 @@ def _trim_snapshot_tree(
         lines = lines[:max_nodes]
         truncated = True
     return "\n".join(lines), truncated
+
+
+@dataclass
+class SnapshotBudget:
+    """观察预算裁剪的读数：裁完剩什么、裁了多少行、其中多少是可交互项。
+
+    只回 `truncated` 布尔不够——模型无从知道"看到的 15 行是 191 行里的 15 行"，
+    就会把截断后的骨架当成页面全部。判据口径与字符预算折叠共用同一份
+    （见 `foldSnapshotTree` 与 `_snapshotActionableRoles`）。
+    """
+
+    text: str
+    truncated: bool
+    hiddenNodes: int
+    hiddenActionable: int
+
+
+def applySnapshotBudget(
+    tree: str,
+    max_nodes: Optional[int],
+    max_depth: Optional[int],
+) -> SnapshotBudget:
+    """按 max_nodes/max_depth 裁剪快照并**如实算出被裁掉的量**（两后端共用单源）。
+
+    不传预算 = 不裁剪，原样透传且读数为零。
+    """
+    trimmed, truncated = _trim_snapshot_tree(tree, max_nodes, max_depth)
+    if not truncated:
+        return SnapshotBudget(trimmed, False, 0, 0)
+    hiddenNodes = len(tree.splitlines()) - len(trimmed.splitlines())
+    hiddenActionable = _countActionableLines(tree) - _countActionableLines(trimmed)
+    return SnapshotBudget(trimmed, True, max(hiddenNodes, 0), max(hiddenActionable, 0))
 
 
 SNAPSHOT_CONTEXT_BUDGET = 8000
