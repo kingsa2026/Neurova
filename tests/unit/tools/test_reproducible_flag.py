@@ -28,6 +28,7 @@ EXPECTED_NON_REPRODUCIBLE = {
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_shell", "computer_ssh_exec", "computer_screenshot",
     "browser_click", "browser_click_role", "browser_fill_role",
+    "browser_click_ref", "browser_fill_ref",
     "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）

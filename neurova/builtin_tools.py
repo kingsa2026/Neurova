@@ -474,6 +474,39 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["role", "text"],
         },
     },
+    # ── ref 一等寻址（T-08）：同名元素的唯一出路 ──
+    # 为什么必须有它：`get_by_role` 遇重名是 strict mode 硬失败，而真页的重名率实测 56%
+    # （MDN 一页 618 条可交互行去重后 429）。没有 ref，`smart-click` 的 409 只能把候选
+    # 列出来却动不了；有了它，模型可以照着候选里的 `[eN]` 直接点第 k 个。
+    # D-2：参数面只有 ref/generation（fill 另有 text），不提供 selector/xpath——不给模型
+    # 留一条绕开快照事实去猜选择器的路。
+    "browser_click_ref": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按快照编号定位）——编号表、页面与代次是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【按快照编号点击】点击 browser_dom_snapshot 正文里标了 `[eN]` 的那个元素（如 ref=e3）。用于**同名元素无法靠 role+name 唯一化**的场景——smart-click/browser_click_role 回 409 列出候选时，候选里带的就是 ref。编号只在产出它的那一次快照（同一 generation）内有效：页面一变即失效，会拒绝并要求重新 browser_dom_snapshot。解到的元素会先自证 role+name，对不上（无障碍树序与 DOM 序不一致）时拒绝且不发任何动作，此时改用带名称的 role+name 定位。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string", "description": "快照行尾的编号（形如 e3，必须来自最近一次 browser_dom_snapshot）"},
+                "generation": {"type": "integer", "description": "可选。该快照返回的 generation；跨代即拒绝并提示重新快照"},
+            },
+            "required": ["ref"],
+        },
+    },
+    "browser_fill_ref": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按快照编号写入）——编号表、页面与代次是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【按快照编号输入】在 browser_dom_snapshot 正文里标了 `[eN]` 的输入元素中填写文本。失效、自证与拒绝语义同 browser_click_ref；text 传空串表示清空。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string", "description": "快照行尾的编号（形如 e5，须指向 textbox/searchbox 一类可输入元素）"},
+                "text": {"type": "string", "description": "要填写的文本（空串=清空）"},
+                "generation": {"type": "integer", "description": "可选。该快照返回的 generation；跨代即拒绝并提示重新快照"},
+            },
+            "required": ["ref", "text"],
+        },
+    },
     # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
         # 并行能力声明：语义只读但作用域为共享（yt-dlp 的 YouTube extractor 会把播放器
@@ -1299,6 +1332,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
     "browser_click", "browser_click_role", "browser_fill_role",
+    # ref 寻址族与 role 族同轴：都是对同一页面的突变，重放制造新变更
+    "browser_click_ref", "browser_fill_ref",
     "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
@@ -1532,13 +1567,16 @@ class BuiltinTool:
 
         B3：统一注入 taskNameActive/taskNameComplete 可选参数（执行摘要，
         直连时间轴 UI）；MCP/Skill 外来 schema 不经此处，自然不受影响。
+        注入只落在出口副本上——就地 setdefault 会把展示参数写进
+        `_BUILTIN_SCHEMAS` 这个事实源，之后按参数面判定的消费方读到的都是脏值。
         """
         params = self.parameters
         try:
             if isinstance(params, dict) and params.get("type") == "object":
-                props = params.setdefault("properties", {})
+                props = dict(params.get("properties") or {})
                 for _pn, _pdef in _TASK_NAME_PARAM_DEFS.items():
                     props.setdefault(_pn, dict(_pdef))
+                params = {**params, "properties": props}
         except Exception:  # noqa: BLE001 - 注入失败不阻断工具暴露
             pass
         return {

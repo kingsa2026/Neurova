@@ -42,7 +42,7 @@
 | **T-06** | 快照被硬切时不报丢失量、不接分片续读补救 | 30% 页触发，触发时九成可交互元素不可见 | +30→+214 | 中 | 无 | 入库 `056db20b`；活体 §7.5 ✅ |
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
 | **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | ✅ **D-3 已拍**（§19：范围含浏览器/camofox） | 未开工；**现场证据已量到**（§13.3：`.env` 设了 URL ⇒ `_camofox_enabled=True`，而 `:9377` 实测超时；今天不出故障只因 playwright 恰在选路首位，一旦缺 playwright 就会推进 supervisor 的 autostart=True 拉起分支） |
-| **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | +200 | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | 未开工（D-6 的歧义分支卡在此：候选列得出、动不了） |
+| **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | 预估 +200 / **实测净 +380**（差额去向 §20.4） | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | **本轮落地**（§20）：判据 16 例；活体 ✅（§20.3 真 Chromium——同名两按钮 `e1`→FIRST、`e2`→SECOND，`click_role` 在同名页**实测**撞 strict mode 硬失败）；顺带吃掉两处同根因缺陷（§20.2：权限面 fail-open、序列化回写事实源） |
 | **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click 与 type 均已接通**：type 判据 7 例 + 活体（真 Chromium 真 fill，DOM 回读到写入值；歧义 409 一字未写；按钮目标 404 而非 502；关 tab 502 带具名 marker）。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
@@ -52,9 +52,9 @@
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
-**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 决策后 `T-08` → 回补 T-11 的歧义分支
-（候选列得出、动不了，卡在 🔒 D-1/D-2）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13 → T-08` 已走完；
+**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 回补 T-11 的歧义分支
+（ref 已可用，缺的是把候选的 ref 塞进 409 载荷并让前端/模型据此重发）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
 → `T-14`（🔒 D-7：退役这族测试还是把契约补回来）。
 自主可完成的面至此**全部收口**。
 
@@ -1158,3 +1158,108 @@ navigate success=True
 
 
 
+
+---
+
+## 20. T-08 · ref 一等寻址落地（2026-10-01，含两处由判据牵出的同根因缺陷）
+
+### 20.1 形状（D-1/D-2 的逐字落地）
+
+- **文法单源**：`browser_manager.parseRefLine(line)` 一处定义"`- role "name" [eN]`"的解析，
+  camofox 侧 `_parse_ref_line = parseRefLine` 取别名（判据 `TestSingleSourceGrammar` 反证它不再自带解析器）。
+- **注号**：`annotateSnapshotRefs(tree)` 在预算裁剪**之后**给可动作行插入 `[eN]`，服务端已发过号的行
+  保持原号不动；`(role, name, occurrence)` 记进 per-tab 的 ref 表（`RefTarget`），编号即表键。
+- **生命周期（D-1）**：ref 表与 `generation` 同生死——任何推进代次的动作、导航、切 tab 都
+  `tab.pop("refs", None)`。所以"编号只在产出它的那一次快照内有效"不是文案承诺，是数据结构的事实。
+- **自证**：`click_ref`/`fill_ref` 解到元素后，先取该元素**子树**的 `aria_snapshot()` 比对 role+name，
+  对不上回 `ref-mismatch` 且**一个动作都不发**（无障碍树序与 DOM 序不一致时宁可拒，不点错东西）。
+- **D-2**：参数面只有 `ref`（fill 另有 `text`）与 `generation`，判据直接反证 schema 里不存在
+  selector/xpath/css/query 任何一形——不给模型留"绕开快照事实猜选择器"的路。
+- **五面同批接线**：schema / dispatch / 参数白名单 / 人读标签 / manager facade
+  （`TestToolFaceIsWired` 逐面对账，并要求白名单与 schema properties **逐字相等**）。
+- 无 ref 能力的后端（桌面等）走基类 `ref-not-supported`，点名"改用 role+name 定位"，不静默退化。
+
+### 20.2 判据牵出的两处同根因（都是"新增/改动没跟着登记"，不是本工单正文里的东西）
+
+**① 权限面 fail-open（教义第 2 条 + 第 5 条）**
+`SkillPermissions.allows_tool()` 对**未归类工具**返回 True（"未归类即当平台能力"）。
+新工具只加了 schema 没加归类，后果不是"少一项权限"，而是**把写操作做成关不掉的口子**：
+实测 `browser_click_ref`/`browser_fill_ref` 在 `{system:false, network:false, file:false, model:false}`
+下 `allows_tool → True`，而同面的 `browser_click_role` 是 False。
+红灯：`TestToolFaceIsWired::test_permissionFaceKeepsRefToolsWithTheRoleFamily` → 1 failed；
+绿灯：ref 族进 `_CATEGORY_TOOLS["network"]`（与 role 族同归类），并把"能力面全关仍被放行"这层
+**行为后果**写进判据，不只钉成员表。
+
+**② 序列化回写事实源（出口副本化）**
+`BuiltinTool.to_openai_format()` 注入 `taskNameActive/taskNameComplete` 用的是
+`params.setdefault(...)`，写的是 `_BUILTIN_SCHEMAS[name]["parameters"]` **那个对象本身**。
+于是一次序列化之后，**73 个内置工具**（`type=="object"` 的全部）的事实源参数面都多出两个展示键，
+而按参数面判定的消费方（权限归类、幻影旋钮守卫、白名单对账）读到的是脏值——
+读数取决于"此前有没有人调过序列化"。这就是 §20.5 那条组合命令里 `tests/unit/tools` 先跑、
+我的 ref 判据后跑时会红、单跑却绿的根因（不是顺序依赖的玄学，是可复现的回写）。
+红灯：`tests/unit/tools/test_openai_format_source_immutability.py::test_toOpenaiFormat_leavesTheSchemaSourceUntouched`
+（断言里逐名列出 73 个被污染的工具）→ 1 failed；
+绿灯：注入只落 `{**params, "properties": props}` 的出口副本，同文件另两条锁住
+"模型面仍看得见注入"（防"修"成删功能）与"出口 parameters 不是事实源对象"
+（下游 `orchestrator._build_tools_for_llm` 还要就地补 `type`/`properties`，副本化后它写不到事实源）。
+修复后同判据实测 `grew=0`，`tests/unit/tools/test_task_name_params.py` + `test_tool_schema_contract.py` 未受影响。
+
+### 20.3 活体（真 Chromium、真 Playwright、零 mock；探针即用即删，未落仓）
+
+夹具是两个同名 `<button>Del</button>`（各自把 `<h2>` 改成 FIRST / SECOND）加一个 `textbox "User name"`：
+
+```
+NAVIGATE success=True generation=2
+SNAPSHOT generation=2 正文：
+    - document:
+      - heading "Ref probe" [level=1]
+      - heading "idle" [level=2]
+      - list:
+        - listitem:
+          - button "Del" [e1]
+        - listitem:
+          - button "Del" [e2]
+      - textbox "User name" [e3]
+CLICK_ROLE 同名 -> success=False error='Locator.click: Error: strict mode violation:
+    get_by_role("button", name="Del") resolved to 2 elements: ...'
+CLICK_REF 'zz' 同代（gen=2）-> False 'ref-not-found: zz 不在本代快照的 3 个 ref 里（页面已变化或从未快照）——请先 browser_dom_snapshot 再按新编号操作'
+CLICK_REF 'e9' 同代（gen=2）-> False 'ref-not-found: e9 不在本代快照的 3 个 ref 里…'
+CLICK_REF 'e2' -> True data={'ref': 'e2', 'role': 'button', 'name': 'Del'}   动作后正文 h2=['- heading "SECOND" [level=2]']
+（另一次同夹具复跑：CLICK_REF 'e1' -> True → h2=['- heading "FIRST" [level=2]']）
+代次推进 2 -> 3
+CLICK_REF e1 generation=999 -> False 'target generation 过期（当前 2，传入 999）——页面已变化，快照事实失效，请重新 dom_snapshot'
+复用旧代 e1（传入 3，当前 4）-> False 'target generation 过期（当前 4，传入 3）——…'
+FILL_REF e3 -> True data={'ref': 'e3', 'role': 'textbox', 'name': 'User name'}
+```
+
+三点要说清：
+1. **判别前提是真的**：同名页上 `click_role` 不是"效果不稳"，是 Playwright strict mode **硬失败**——
+   这正是 ref 必须成为一等寻址的理由，也是 D-2 不留选择器回退的理由。
+2. **点到的确实是第 k 个**：判据不读返回体里的 `success`，读的是**页面自己**把 `<h2>` 改成了
+   FIRST 还是 SECOND（回读走下一次快照正文）。
+3. **拒绝的优先级**：跨代先拒（不查表、不发动作），同代才回 `ref-not-found`；`zz`（畸形）与
+   `e9`（越界）在 Playwright 侧同形——编号表就是事实来源，不在表里就是"没有这个事实"。
+
+### 20.4 LOC 与预估差额
+
+净生产码 **+380**（预估 +200）。差额逐条去向：
+`browser_manager.py` +242/−2（文法单源、`RefTarget`、注号、ref 表与失效、两动作 + 解算 + 自证、基类降级）；
+`tool_executor.py` +58（两执行体 + dispatch + 白名单 + 人读标签，五面接线的必要代价）；
+`camofox_server_backend.py` +43/−16（公开 ref 动作 + 代次守卫 + 形状拒绝；−16 是删掉它的第二份解析器）；
+`builtin_tools.py` +39/−1（两条 schema + 重放名单两条 + 依据行 + 出口副本化 5 行）；
+`computer_use/__init__.py` +14（facade）、`skills/permissions.py` +3、`scripts/ci/protected_tests.txt` +2。
+测试码 360 行（`test_ref_addressing_playwright.py` 295 + `test_openai_format_source_immutability.py` 65）不计入。
+
+### 20.5 登记（不在本批处理，静默遗留才是违规）
+
+- **T-17 建议 · 能力面 fail-open 的存量面**：除 ref 族外仍有 **30 个**注册工具未被
+  `_CATEGORY_TOOLS` 归类，其中含写作用域的 `git`、`canvas_add_node/canvas_connect/canvas_remove_node/
+  canvas_run/…`、`write_stdin`、`orchestrate_tools`、`create_skill`。实测这五个在
+  `{system:false, network:false, file:false, model:false}` 下 `allows_tool` 全为 **True**
+  （对照组 `file_read` = False）。这是"声明了关能力面"与"实际能做什么"不一致的存量缺口，
+  归类口径需要拍板（canvas 族算 file 还是 system？`git` 算 system？），故不顺手改。
+- **两后端 ref 错误形态的一处不对称**：camofox 对畸形编号先校形状回 `ref-format`（编号是服务端发的），
+  Playwright 查表回 `ref-not-found`。两者都具名、都可分诊，但**不满足 §15 那族"整句相等"的 parity 口径**。
+  要不要收口成一句，属新决策，未擅自统一。
+- **REST/UI 面尚无 ref 入口**：本轮只接模型面（tool executor）。前端的 409 候选还只列名字不带编号，
+  这是 T-11 歧义分支的正文——有 ref 之后那条链才可能真正"点到用户选的那个"。

@@ -35,6 +35,9 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "browser_navigate", "browser_click", "browser_type", "browser_screenshot",
         "browser_extract_text", "browser_dom_snapshot", "browser_dom_read",
         "browser_click_role", "browser_fill_role",
+        # ref 族与 role 族是同一动作面的两种寻址：漏登记时 allows_tool 的
+        # 「未归类即放行」分支会把它做成关不掉的写操作口子
+        "browser_click_ref", "browser_fill_ref",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },
