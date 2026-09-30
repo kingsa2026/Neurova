@@ -1427,3 +1427,5 @@ tests/unit/sandbox/test_exec_output_decoding.py
 tests/unit/sandbox/test_backend_interface_contract.py
 # T-13 判据（上一批登记时漏了这条；逐文件单跑 7 passed）
 tests/unit/computer_use/test_unavailable_facts_are_triageable.py
+# §19 附带项 smart-type 接通的语义判据（逐文件单跑 7 passed）
+tests/unit/api/test_smart_type_semantics.py

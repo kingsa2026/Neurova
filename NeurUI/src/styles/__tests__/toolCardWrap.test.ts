@@ -121,7 +121,10 @@ describe('工具调用卡换行契约', () => {
       const src = readFileSync(file, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '')
       return /\.nr-tool-(args|result-content|background)\s*[,{]/.test(src)
     })
-    const relative = definitions.map((f) => f.replace(/\\/g, '/').replace(`${SRC}/`, ''))
+    // 分隔符归一必须**两侧都做**：Windows 上 resolve() 给出的 SRC 含反斜杠，
+    // 只归一样本路径会让前缀替换失配、相对路径退化成绝对路径（本机实测该条恒红）。
+    const srcRoot = SRC.replace(/\\/g, '/')
+    const relative = definitions.map((f) => f.replace(/\\/g, '/').replace(`${srcRoot}/`, ''))
     expect(relative).toEqual(['styles/messageRender.css'])
   })
 })
