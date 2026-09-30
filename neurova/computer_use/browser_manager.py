@@ -356,6 +356,22 @@ class PlaywrightBackend(BrowserBackend):
             )
         return None
 
+    def _invalidateActiveTabFacts(self, reason: str) -> None:
+        """使活动 tab 的既有快照事实失效（递增 generation）。
+
+        与 camofox 侧同一语义（`camofox_server_backend.py:396` 注释："交互使快照
+        事实失效"）。此前只有 navigate 递增，而 `click` / `type_text` /
+        `click_role` / `fill_role` 照样校验 generation 却不递增 —— 于是模型
+        "快照 → 点一个会改 DOM 的目标 → 用旧 generation 点下一个"**照样通过**，
+        拿到的是按旧事实定位的点击。判据见
+        `tests/unit/computer_use/test_snapshot_freshness_parity.py`。
+        """
+        tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
+        if tab:
+            tab["generation"] += 1
+            # reason 必须被读：否则它就是一个只写不读的参数（本仓协作红线点名的形态）
+            logger.debug("tab generation 递增(%s) → %s", reason, tab["generation"])
+
     def _active_generation(self) -> Optional[int]:
         tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
         return tab["generation"] if tab else None
@@ -474,6 +490,7 @@ class PlaywrightBackend(BrowserBackend):
                 raise RuntimeError("Not initialized")
             locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
             await locator.click(timeout=10000)
+            self._invalidateActiveTabFacts("click_role")
             return BrowserResult(
                 success=True,
                 route="playwright_role",
@@ -502,6 +519,7 @@ class PlaywrightBackend(BrowserBackend):
                 raise RuntimeError("Not initialized")
             locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
             await locator.fill(text, timeout=10000)
+            self._invalidateActiveTabFacts("fill_role")
             return BrowserResult(
                 success=True,
                 route="playwright_role",
@@ -540,10 +558,7 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.goto(url, wait_until="networkidle")
-            tab = self._tabs.get(self._active_target_id)
-            if tab:
-                # 导航使该 tab 既有快照事实全部失效 → 递增 generation
-                tab["generation"] += 1
+            self._invalidateActiveTabFacts("navigate")
             return BrowserResult(
                 success=True,
                 url=url,
@@ -576,6 +591,7 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.click(selector)
+            self._invalidateActiveTabFacts("click")
             return BrowserResult(
                 success=True,
                 url=self._page.url,
@@ -591,6 +607,7 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.fill(selector, text)
+            self._invalidateActiveTabFacts("type_text")
             return BrowserResult(
                 success=True,
                 url=self._page.url,
