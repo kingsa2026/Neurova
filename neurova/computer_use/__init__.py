@@ -553,6 +553,20 @@ class ComputerUseManager:
             return await bm.fill_role(role, name, text, generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_click_ref(self, ref: str, generation: int = None) -> typing.Any:
+        """按快照 `[eN]` 点击（T-08；ref 只在产出它的那一代快照里有效）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.click_ref(ref, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_fill_ref(self, ref: str, text: str, generation: int = None) -> typing.Any:
+        """按快照 `[eN]` 输入（空串清空）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.fill_ref(ref, text, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()

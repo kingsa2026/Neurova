@@ -41,7 +41,14 @@ class TestPlaywrightAriaSnapshot:
 
         assert isinstance(result, BrowserResult)
         assert result.success is True
-        assert result.data == aria_tree
+        # T-08 起的契约：快照里的每个可交互行都带 `[eN]`，且**同批**存进本 tab 的 ref 表。
+        # 只改文本不存表（或反之）都是断链——模型看得见编号却点不动。
+        assert result.data == '- button "登录" [e1]\n- textbox "用户名" [e2]', result.data
+        table = backend._tabs[backend._active_target_id]["refs"]
+        assert [(r.ref, r.role, r.name, r.occurrence) for r in table.values()] == [
+            ("e1", "button", "登录", 0),
+            ("e2", "textbox", "用户名", 0),
+        ]
         assert result.url == "http://localhost:8100/chat"
         assert result.title == "Neurova"
         page.locator.assert_called_once_with("html")
