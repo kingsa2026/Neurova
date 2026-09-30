@@ -169,6 +169,19 @@ class AppContainerSandbox:
 
         return frozenset({SandboxSeverity.NETWORK_OFF})
 
+    def enforced(self) -> bool:
+        """补齐基类契约：本后端是否真落实**自己声明的那档**隔离。
+
+        此前本类只有 `enforced_severities()` 和 execute 结果里的 `sandbox_enforced`
+        字段，却没有基类声明的 `enforced()`——`code_sandbox.resolveBackend()` 一调就是
+        `AttributeError`（实测：Windows 上 `get_exec_sandbox(NETWORK_OFF)` 正选到本类）。
+        判据不新造口径，只取本模块已有的两个事实：API 绑定可用 + 声明档在真实生效集合内。
+        `severity` 未指定时返回 False——没声称的档位不去谎称已隔离。
+        """
+        from neurova.sandbox.exec_sandbox import SandboxSeverity
+
+        return bool(_DLL.load()) and self.severity in self.enforced_severities()
+
     def _create_profile_fresh(self) -> tuple:
         """一次性创建全新 AppContainer profile（探针实证：Derive 旧 profile
         的 SID 用于 CreateProcess 会 err 2——profile 实体可能已失效，
