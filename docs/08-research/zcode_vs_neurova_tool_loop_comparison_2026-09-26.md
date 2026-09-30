@@ -352,6 +352,47 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 ---
 
+## 5.1 第三次复验（基线 `008a3e2a`，距 §5 又 179 提交 / `neurova/` +6603 −3142）
+
+**结论：G1–G5 全部闭合，G8 处置过半。§5 的"真实剩余 5 条"已失效，以下为当前事实。**
+按本仓惯例保留 §5 原文不改写，本节为增量。
+
+| 缺口 | §5 判定 | 现判 | 落地证据（均为本次亲验） |
+|------|---------|------|------------------------|
+| **G1** | 仍开放 | **已闭合** | 递归归零：`openai_loop.py` 内 `await self._predict_normal(` / `self._predict_stream(` **0 命中**，代之以 `while True:`（`:536`、`:736`）。`self._tool_rounds` 残留 **0 处**；`TurnRunState` 新文件 142 行，三条 loop 全改用（`anthropic_loop.py:54` `TurnRunState.forTurn(`）。`_top_level` 参数已删（仅存无关的 `_split_top_level`）。`assertRoundInvariant` 落 `turn_run_state.py:92` |
+| **G1-D 深度** | — | **已闭合** | `swarm.py:164` `MAX_SUBAGENT_DEPTH` + `:220-224` 超限走 **既有 `_rejection` 通道**（`SUBAGENT_DEPTH_EXCEEDED`）。**实现优于方案**：深度用 `ContextVar`（`:46 _subagentDepthVar`）而非我提议的"塞进 `TurnRunState`"——因为 `spawn` 要跨 `chat()` 边界，state 传不过去 |
+| **G2** | 仍开放（主出口无守卫） | **已闭合** | `base.py:71 evaluateLoopExit` + `LoopExitDecision{done,stop,resume}`，`:85` 注释即方案原话（"ctx 带 `isLoopExit=True`…假完成正是在这里才可被识别"）。**两条路径均调用**：`openai_loop.py:691`、`:1101`。`gates.py:160-168` GoalGate 出口分支。新文件 `loop_goal.py`(93) / `goal_verifier.py`(117) / `sub_session.py`(41) |
+| **G2 goal 闭环** | 只读不写 | **四环齐** | 写：`chat_pipeline.py:619 set_turn_goal(ctx.metadata["goal"])`（= 方案 D-2 的 ①）；读：`base.py:112`；反馈：`set_turn_goal_verdict`（`base.py:117`）+ 续跑计数；再消费：`chat_pipeline.py:2867-2870` 取 goal+verdict。**命名未沿用裸 `_goal`**（方案 RC-2 的冲突警示被采纳） |
+| **G3** | 仍开放 | **已闭合** | `_CONCURRENCY_SAFE_TOOLS` **全仓 0 命中**（方案 M2 要求的"物理消失"达成）。`core/tool_capability.py`：`WriteScope:56`、`isParallelEligible:200`、`planToolBatches` 被 `base.py:399-403` 消费。MCP 能力声明走 server 配置（`_resolveMcpToolCapability`），符合方案 D-4"不默认信任第三方" |
+| **G4** | 成本被我低估 | **已闭合** | `core/cancel_token.py` `CancelToken` 存在。`tool_coordinator.py:225-230` 的注释把方案 RC-2 **原样写进代码**："外层取消对已进 `to_thread` 的调用无效…只有置位令牌才能让 worker 注册的进程杀灭回调真正发出…本层不吞取消"。三态处置 `resolveTimeoutDisposition:154` + `_reapCancelled`，宽限期常量有界。`kill_all` 接进 `api/app.py:1161`（含 `wait_for` 超时），`:1152` 注释直引"实现完整、生产侧零调用方"。`governance.py:64-76` 追加 `cancelled` 键（注明"与上述六键完全同构的决策"）。`_observe_background` 取消分支补投 hint，注释标 **"断链修复（G4-RC6）"** |
+| **G5** | 仍开放 | **已闭合，且比方案更完整** | `security/approval_relay.py`(144) 补上跨请求通路——其文档串记下根因：`register_notification_callback` 生产侧零注册方，`_send_approval_result` 广播的是空列表。咽喉 `tool_executor.py:1726-1756` 真阻塞：**有界** `wait_for(waiter, budget)`（正是方案对参照侧"无限阻塞"硬伤的防範），超时/中断**均注销登记**并给出理由（陈旧登记会让两边都不执行，"比不阻塞更糟的静默丢单"），批准则由本调用在完整管线内执行（`return None` 续跑），拒绝回 `approval_denied` 结构化裁决 |
+| **G8** | 已被机器接管 | **处置过半** | 台账 28 条：**11 已删除 / 13 已接线 / 4 待处置**。物理删除 `cli_tool.py` −414、`tool_logger.py` −286、`unified_registry.py` −238 及其 3 个测试文件。`IterationGate` 双尺度经 `T-04`（Issue #310）收口，`openai_loop.py:196-201` 注释点名"同键两尺度正是被判 `scaled_sparse` 的成因"，GoalGate 改绑独立键 `goal_max_continuations` |
+
+### 仍然开放的（截至 `008a3e2a`）
+
+1. **G7 后半**：主动打 cache marker 仍 **0 命中**（`cache_control`/`prompt_cache`）。前半（停止重排）早已闭合。
+2. **崩溃恢复**：三态 tool part / `declarationIndex` / recovery anchor 形态 **0 命中**（方案优先级表第 8 项，尚未立项）。
+3. **台账 4 条待处置**：`TokenBudgetGate`(consumed/single_source)、`notify_tool_result`、`get_pipeline_observers`(均 consumed)、`ctx_snapshot`(self_loop)——**四条都是存活符号，等的是裁定而非清理**。
+4. **G4 方案文档未入库**：`docs/04-plans/2026-09-26-tool-cancellation-repair-plan.md` 仍是未跟踪状态（`4865e8c6` 只带了 G1–G3 + 本文）。代码里已出现 `G4-RC6` 这样的引用，**文档不在库里会让这个引用悬空**。
+
+### 实现优于本目录方案的两处（引用方案前必读，否则会照做过期建议）
+
+1. **G2**：本目录 `../04-plans/2026-09-26-goal-gate-wiring-repair-plan.md` 把"补一个 `set_goal_gate` 的 caller"当作落地动作。**真实实现走了更好的路**：GoalGate **进默认装配**（`openai_loop.py:212-222`），续跑预算绑独立键 `goal_max_continuations`。
+   ⇒ **`set_goal_gate` 无生产调用方是设计结果，不是断点**——不要去"补 caller"，台账里那条 `no_consumer` 也不该按"未接线"处置。**该方案文档的 §3/§5 相应段落已过期。**
+2. **G5**：本方案 §1/§5 把它记作"ASK 不阻塞"。**真根因更深一层**：审批记录里**没有回投地址**（metadata 只有 tool_name/params/governance），而批准发生在另一个 HTTP 请求里，结果无路送回原调用——所以"阻塞"只是这条断链的表现。
+   ⇒ 只按"加个 await"去修，会造出一个等不到结果的死等。落地是四断点（回投地址 / `approval_relay` 由 manager 首次构造接入 / `approval_wait_seconds` 默认 **0** / 复用 `_pending_hints` 渲裁决），并靠 `hasApprovalWaiter` 保证有人在等时端点**不重放**（防双执行）。
+   **注意**：HTTP 活体三条**尚未验证**（缺本地凭据）——勿以单测全绿替代教义第 4 条。
+3. **G3 的收益判据按本方案 §10.1 执行后为 `no_data`，未否证**（成因是版本差：直方图指标只在较新版本存在，而承载真实流量的实例仍跑改造前代码 ⇒ 序列发不出来；**不可拿合成流量替代**）。
+   一次真实驱动量到 `memory_search` 冷路径 avg **991ms**（热 83ms，**双峰高方差**）——推翻"本地读都是几毫秒、收益可忽略"的早期估法。修正方向：收益按工具分布极不均匀，判据应取**逐工具耗时门槛**（avg/P50 ≥200ms）而非统一频次占比。
+   另记一处**待收新双源**：7 个工具声明 `concurrentSafe: True` 却因 `writeScopes` 含共享作用域被推导判为不可并行（`computer_screenshot`/`computer_dom_snapshot`/`computer_som_snapshot`/`browser_read`/`browser_dom_read`/`canvas_read`/`canvas_list_nodes`）——**行为对，但声明与推导信号相反，只看声明会误判为已并行**。
+
+### 本轮最值得记下的一条方法论
+
+四份方案里我给的**判据与约束被采纳、但落点与根因判断有多处被实现纠正**：深度与 goal 都改用了 `ContextVar`，因为要跨 `chat()` 边界，`TurnRunState` 传不过去；`sub_session.py`(41) 说明 §10 里我"倾向不抽"的那个共享抽象最终被抽了。
+⇒ **方案的价值在判据与约束（哪里必须有守卫、什么必须单源、什么不许另造、默认必须保守），不在我挑的落点、也不在我挑的根因表层。** 下次写方案应把落点明确标为"待实现层决定"，并对每条"根因"追问一次"它又是哪条断链的表现"——本次三处纠正（G2 落点、G5 根因、G3 判据口径）全是这个形状。
+
+---
+
 ## 6. Neurova 领先面（勿妄自菲薄）
 
 1. **工具 → 经验 → 再调用的学习闭环，参照侧完全没有对应物。** 其 `recordToolUsageFromResult`（`runtime/methods/turn-tool-usage.ts`）是纯 SQLite 观测，注释写死"观测失败绝不能改变 Agent 业务语义"——无权重、无退化、无课程生成。本仓有 6~7 路 sink + 硬拦位 + 结晶经验检索。**但需诚实标注：`metacog_gate_enabled` 与肌肉记忆晋升默认关，领先项部分休眠。**
@@ -425,8 +466,9 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 | 4 | 暗示"参照侧单一事实源、本仓多源" | 参照侧双源分列 6 处（§7.2） | 未下钻其声明层即对比 |
 | 5 | 大输出"两套平行落盘机制属双源缺陷" | 已收口为职责切分（成功结果引用化 vs 体量折叠，且成败判据归一） | 取证时点早于该收口 |
 | **6** | **"G2 成本降级为纯接线，只差一个 caller"（§5/§8 第一版）** | **G2 仍开放，且加 caller 不解决问题**：门控只在工具轮求值、主出口无守卫，`agent._goal` 零写入点 | **只看了"能力是否存在"（`GoalGate` 代码完整 ⇒ 乐观），没看"求值点覆盖到哪条分支"。** 教训：判断一条链是否接通，必须从**触发条件所在的分支**反推，而不是从组件齐不齐正推。同类风险见 G6/G7——那两条我判"已闭合"，依据是文件与行号存在，**同样没验到分支覆盖**；已在 §8 保留其闭合判定但标注为待活体自证。 |
-| **8** | **"G4 是唯一必须新造底层能力的一条"**（§8 第一版） | 进程树杀灭、会话终止、取消意图持久化**三件都在仓里且已单源**；真正要新造的只有协作式取消令牌一件，另两处是语义漏判（`cancelled` 未入 `is_policy_denial`、取消不投 hint） | 同一毛病的**第四次**出现（#1 组件齐不齐、#6 分支覆盖、#7 有无实测、#8 能力存在性）：**没查"该能力是否已存在"就按"缺失"定级**。"缺口"与"未接线的已有能力"是两类工单——后者成本低一个量级、评审强度也不该相同 |
 | **7** | **"G1 的风险是栈深度，递归 ≈ 轮数即隐患"（§3.1/§5/§8 第一版）** | **栈深非风险**：实测每轮 2.03 帧、可撑 493 轮，合法上限 100 轮仅占预算 20%，且全仓无 `RecursionError` 痕迹。真实缺陷改为轮次态归属错误 + 子代理无深度上限 + 三份语义漂移。顺带证伪了本方案初稿的子假设"`anthropic_loop` 经公有 `predict_step` 递归 ⇒ 上限恒不触发"（`_top_level=False` 保护有效） | **未测量即定性**——把"结构不优雅"直接写成了"运行风险"。这是本节记录的方法论毛病**第三次**出现（#1 看组件齐不齐、#6 看分支覆盖、#7 有无实测），已固化为纪律：**凡"某机制会失效/会出事"的断言，必须先给出量或找到反证参数** |
+| **8** | **"G4 是唯一必须新造底层能力的一条"**（§8 第一版） | 进程树杀灭、会话终止、取消意图持久化**三件都在仓里且已单源**；真正要新造的只有协作式取消令牌一件，另两处是语义漏判（`cancelled` 未入 `is_policy_denial`、取消不投 hint） | 同一毛病的**第四次**出现（#1 组件齐不齐、#6 分支覆盖、#7 有无实测、#8 能力存在性）：**没查"该能力是否已存在"就按"缺失"定级**。"缺口"与"未接线的已有能力"是两类工单——后者成本低一个量级、评审强度也不该相同 |
+| **9** | **G5 记作"ASK 不阻塞"；G2 方案主张"补一个 `set_goal_gate` caller"** | ① G5 真根因是**审批记录里没有回投地址**（metadata 只有 tool_name/params/governance），"不阻塞"只是断链表现；② 真实实现把 GoalGate **进默认装配**（`openai_loop.py:212-222`），`set_goal_gate` 无调用方是**设计结果而非断点**——已入库方案的 §3/§5 相应段落过期 | 同一毛病的**第五次**出现，形态也升级了：这次不是漏看分支或漏测量，而是**把"某 API 没被调用"直接当成"缺接线"**，没先问"其职责是否已被别处单装配点覆盖"。判据：**符号被判 `no_consumer` 前，先问它的职责是否已由别处覆盖**，再决定补 caller 还是改台账口径 |
 
 ---
 
