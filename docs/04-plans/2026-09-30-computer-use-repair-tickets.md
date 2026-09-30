@@ -902,6 +902,18 @@ UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0' in position 69
 取舍：9 处各写两行而不是抽一个共享模块——这些脚本是被 CI 逐条起进程跑的独立入口，
 跨目录 import 反而脆（`sys.path[0]` 是脚本自己所在目录，不是仓根）。
 
+**但放置位置不能照抄先例**（落地后按 CI 形态复跑才暴露，见 §18）：
+`tests/unit/test_deploy_config_guard.py:94` 用 `importlib.util.spec_from_file_location(...)
++ exec_module` 把门禁脚本**在 pytest 进程内当模块加载**——模块级 reconfigure 改写的不是
+脚本自己的控制台，而是宿主 pytest 的捕获流，连带该文件 13 例红。所以那句必须落在
+`if __name__ == "__main__":` 里：重配控制台是"作为进程运行"的语义，被 import 时就是对宿主动手。
+先例放模块级没事，只因为 `ci_static_gate.py` 不被任何守卫 import——**照抄先例前要先验这个前提**。
+
+配套的读侧同批收口：子进程一旦如实输出 UTF-8，父进程那句不带编码的 `text=True` 就在 cp936
+机器上崩成 `stdout is None`。`test_deploy_config_guard.py` 3 处、`test_perf_gate_contract.py`
+3 处已声明 `encoding="utf-8", errors="replace"`；棘轮基线随之 **109 → 73**
+（`scripts/` 21、`tests/` 40、`neurova/` 0）。
+
 **仍红的 7 例已定性、不属编码族**：全部是"在剥离环境变量的情况下起 node"——
 本机 `node -e "console.log('hi')"` 正常，但门禁测试以最小 env 起 node 时
 node 自己在 `InitializeOncePerProcess` 里断言失败：
@@ -1017,11 +1029,17 @@ execute        -> {"stdout": "沙箱活体·订单42\n", "stderr": "", "exit_cod
 复跑方式：346 条按 120 一块分 3 块，每块一个独立 pytest 进程 + `--continue-on-collection-errors`
 （Windows 的 CreateProcess 命令行上限约 32767 字符，346 条拼不进一条命令，这也是必须分块的硬原因）。
 
-| 块 | 文件数 | 摘要 | 其中本轮我碰过的文件 |
+| 块 | 文件数 | 摘要（`--timeout=300`） | 其中本轮我碰过的文件 |
 |---|---|---|---|
-| 1 | 120 | **无摘要行，exit=1**（进程被杀——按本仓口径"没摘要=没跑完≠零失败"） | **0 个** |
+| 1 | 120 | **15 failed / 1692 passed / 1 skipped，578s** | 3 个（`test_deploy_config_guard.py`、`test_perf_gate_contract.py`、`test_experience_quality_gate.py`） |
 | 2 | 120 | 32 failed / 1316 passed / 6 skipped | 1 个（`test_npc_script_interpreter_reachability.py`） |
 | 3 | 106 | 1 failed / 1297 passed / 2 skipped | 7 个（含 §17 新登记的 6 条与 registration-history） |
+
+⚠️ 块 1 这一格**改过一次**：首轮 runner 用的是 `--timeout=180`，`test_deploy_config_guard`
+单文件就要 ~119s、性能门禁子进程更久，于是进程被墙钟杀掉、**没有摘要**，我据此写了
+"块 1 未验证/被杀"。把墙钟放到 300s 重跑（并落 raw 输出）就出了完整摘要——
+这正是本仓记过的那条："没摘要 ≠ 零失败"，而**"没摘要"本身也可能只是我的超时参数太低**，
+两种死法要分得开才能归因。
 
 ### 这块红里真正确实是我的一条
 
@@ -1062,10 +1080,14 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
   只在整块里红 ⇒ 是**分组/顺序依赖**（本仓标准：整目录跑与抽文件单跑给出不同集合，
   不能据此判非确定性——我一开始就这么写错了，按上面的同命令三连跑改正）。
   该文件与本轮无 import 关系，红为预存；分组依赖这条留给其归属方查。
-- **块 1 被杀**：该块 120 个文件里本轮我碰过的为 **0 个**（逐名比对 `git diff --name-only 4e6fb7f8..HEAD`
-  与块内文件集合），所以不是我引入；但**它到底死在哪个文件没有读数**——我的 runner 只留了摘要行、
-  没留原始 stdout，这是取证设计上的缺陷（只验"有没有摘要"，没验"停在哪"），下一步要补的
-  就是让 runner 落 raw 输出并打最后一行进度标记。**块 1 因此处于"未验证"状态，不等于绿。**
+- **块 1 的 15 例里，13 例确实是我的**（这条推翻本节初稿的归因）：初稿写"块 1 内我碰过的文件为
+  0 个"，那是**拿测试文件名去比对**——而我改的 `scripts/ci/*.py` 是被这些测试当**被测对象**
+  调用的，不在测试文件清单里，比对法漏了它。让 runner 落 raw 输出、`--timeout=300` 重跑拿到
+  完整摘要后，再按 A/B（三个脚本退回 `f899df20^` 内容、跑同一条命令、还原 sha256+cmp 双校验）
+  定死：现值 15 failed vs 旧值 2 failed，13 例全在 `test_deploy_config_guard.py`。
+  根因与修法见 §15 末（模块级 reconfigure 撞上"脚本被进程内加载" + 父进程读子进程不带编码）。
+  修完：`test_deploy_config_guard` 全绿；perf / experience 各留 1 例，与旧值同形 ⇒ 预存。
+  **教训**：归因不能只比"测试文件名"，还要算上"被测脚本"——我这次差点把 13 例真回归写成"非我引入"。
 
 
 

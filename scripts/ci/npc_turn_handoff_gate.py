@@ -59,18 +59,11 @@ import json
 import os
 import sys
 
-# 控制台码页编不出本脚本的字形（⚠️/🛑/→ 在中文 Windows 的 cp936 下即抛
-# UnicodeEncodeError）时，「给出结论」这一步会先把门禁自己打死。
-# 同仓先例：scripts/ci_static_gate.py 用的是这两行。
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 
 #: 工作区自证所用的临时文件名（写完即删，不是任何判据的落点）。
 #: 它与流水线的其它环节没有约定关系——保留仅为让自证可被人眼核对。
 PROBE_MARKER_FILE = ".npc-workspace-probe"
-
 
 def resolveWorkspaceRoot(env: dict) -> str:
     """工作区根：环境变量给定，未给定返回空串。"""
@@ -304,6 +297,13 @@ process.exit(main(process.argv.slice(2)));
 
 
 if __name__ == "__main__":
+    # 只在作为进程运行时重配控制台：本文件会被 `test_deploy_config_guard.py` 之类
+    # 用 importlib 在 pytest 进程内加载，模块级 reconfigure 等于改宿主进程的捕获流。
+    # 中文 Windows 的 cp936 编不出 ⚠️/🛑/→，`print` 会抛 UnicodeEncodeError 把门禁自己打死
+    # （Linux CI 看不见这条）。同仓先例 scripts/ci_static_gate.py 是模块级——它不被 import。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     # node 分支的入口**不在这里**：`node <本文件>.py` 到不了这一行。
     # node 按扩展名解析模块，遇到 `.py` 在解析阶段就以
     # `ERR_UNKNOWN_FILE_EXTENSION` 退出（构建 cnb-9cc-1k34ff3t1 实测 rc=1），
