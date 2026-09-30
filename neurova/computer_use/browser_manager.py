@@ -478,6 +478,14 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             tree = await self._page.locator("html").aria_snapshot()
+            if not (tree or "").strip():
+                # 空正文是"没拿到事实"，不是"页面上什么都没有"——两者必须可分诊
+                return BrowserResult(
+                    success=False,
+                    error=EMPTY_SNAPSHOT_ERROR,
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
             budget = applySnapshotBudget(tree, max_nodes, max_depth)
             return BrowserResult(
                 success=True,
@@ -864,6 +872,16 @@ def applySnapshotBudget(
 
 
 SNAPSHOT_CONTEXT_BUDGET = 8000
+
+# 空快照的可分诊标记：消费方按它判断"未取得任何页面事实"，而不是去匹配中文措辞。
+# 为什么要在产出侧失败：调用方各补一次 `if not data` 就是把症状挪到下游，新消费点必漏；
+# 且必须与"页面确实没有可交互元素"分开——后者是成功的观察，判成故障就是过度捕获。
+EMPTY_SNAPSHOT_MARKER = "snapshot-empty"
+
+EMPTY_SNAPSHOT_ERROR = (
+    f"{EMPTY_SNAPSHOT_MARKER}: aria 快照为空，未取得任何页面事实"
+    "（无活动 tab、页面未加载或渲染未完成）——请先 browser_navigate"
+)
 
 # 全树取样条数上限：对"能塞进预算的最大条数"做二分。不取固定值是因为真实页面的
 # 区带极碎（活体取证 MDN 一页 566 个区带、最大区带仅 9 项），按区带分配预算会直接爆表，
