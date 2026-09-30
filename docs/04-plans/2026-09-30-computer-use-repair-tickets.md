@@ -48,10 +48,12 @@
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | `smart-type` 归属待定 | **部分**：click 已接；`smart_type` 等 4 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
+| **T-14** | 浏览器/爬虫集成测试 25 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出**（§14）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
 
 **批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
 **剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 决策后 `T-08` → 回补 T-11 的歧义分支
-（候选列得出、动不了，卡在 🔒 D-1/D-2）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）。
+（候选列得出、动不了，卡在 🔒 D-1/D-2）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
+→ `T-14`（🔒 D-7：退役这族测试还是把契约补回来）。
 自主可完成的面至此**全部收口**。
 
 **T-02 必须最先**：它是守卫，T-03/T-04/T-05 都在改这三张表覆盖的面；先有守卫，后面的改动才会被拦住而不是被绕过。
@@ -737,5 +739,69 @@ generation 校验、两个状态必须可区分、camofox **整句相等**的 pa
 **manager 层另两处英文抛出未动**（`browser_manager.py:1187/1192`
 `Browser backend not available` / `Failed to initialize backend`）：那属"能力可用性"口径，
 正是被 🔒 D-3 锁住的 T-07（带 owner 的三态探测）要统一承载的面，本轮不越权先改一半。
+
+---
+
+## 14. T-14 · 一族常驻红测试断言的是从未实现的设计（🔒 D-7，本轮量完未处置）
+
+### 触发：补 T-05/T-12 活体时顺手跑的邻域回归
+
+`tests/integration/` 的浏览器块出红，为判"是不是我改的"逐条对过活代码后发现：**这族红的根因
+与本轮无关，而是同一份从未落地（或已退役）的设计留下的 25 例常驻红**。全集实测：
+
+```
+25 failed, 4 passed in 2.00s
+  tests/integration/test_browser_automation.py            2 例
+  tests/integration/test_browser_manager_integration.py   5 例
+  tests/integration/test_computer_use_browser_integration.py  14 例
+  tests/integration/test_scrapling_spider.py              4 例
+```
+
+### 判据（逐条问活代码，不问测试的意图）
+
+```
+BrowserManager.__init__ 形参 = ['self', 'config']  → 有无 config_path：False
+BrowserManager 有无 _backend_configs：False
+BrowserManager 有无 _compress_snapshot：False
+browser_manager 模块有无 HAS_SCRAPELY（测试 patch 的名）：False
+browser_manager 模块有无 HAS_SCRAPLING（真实名）：True
+ScraplingSpiderTool 有无 default_concurrency/obey_robots：False/False
+run_spider 源码里是否读取 concurrency：False；domain_delay：False；obey_robots：False
+_resolve_backend 形参名 = ['self', 'preferred']   ← 测试把它当 URL 路由器用
+```
+
+三条独立子族，同一根因（**测试照一份不存在的设计写**）：
+
+1. **YAML 后端路由**：`BrowserManager(config_path=…)`、`_backend_configs`、
+   `_resolve_backend("https://…")` 按 URL pattern 选后端——三项在活代码里都没有
+   （`_resolve_backend` 收的是**后端名**，`_load_config` 只看 `HAS_*` 与环境变量）。此族 **19 例**。
+2. **快照压缩**：`_compress_snapshot` / `test_browser_snapshot_returns_compressed_tree` 断言的是
+   头部压缩那套；该面已由 `foldSnapshotTree` 单源取代（T-06），属**退役未撤测**。**2 例**。
+3. **爬虫工具**：`run_spider` 从不读 `concurrency`/`domain_delay`/`obey_robots` ⇒ `create_spider(**kwargs)`
+   是**只写不读的幻影旋钮**（与 T-04 同族），其中 `obey_robots` 从未生效意味着抓取默认**不受 robots.txt
+   约束**——这条是合规面，不是测试面。另 `@patch('…HAS_SCRAPELY')` patch 一个不存在的名字，
+   那 2 例从未跑到断言就先 AttributeError，即**这文件从写下起就没绿过**。**4 例**。
+4. **零断言的 print 脚本混在测试根里**：`test_browser_automation.py` 两个"用例"通篇 `print`、
+   没有一条断言（`test_routing_logic` 只把期望与实际打印出来对比，不判失败），且是 `async def`
+   而未标 `pytest.mark.asyncio`——在 `asyncio: mode=Mode.STRICT` 下直接判红。
+   按 `AGENTS.md` §4"临时验证脚本即用即删，不留 `tests/`"，这 2 例本不该存在。**2 例**。
+   合计 19 + 2 + 4 + 2 = 25，与实测数一致。
+
+### 为什么它今天还没炸
+
+CI 不跑这族文件：`.cnb.yml:162` 的被测集是 `grep -v '^#' scripts/ci/protected_tests.txt`
+（现 1315 条）逐行拼出来的，而这四个文件名在该清单里**零命中**。于是红只在本地全量出现——
+但它每次都要求人肉证明"不是我改的"（本轮就付了这笔成本，见提交说明里的因果排除段）。
+
+### 🔒 D-7 要拍的板（不可逆点在两侧）
+
+- **甲 · 退役**：删掉或重写为活契约（约 −260 行）。代价：丢掉这份设计意图的记录，
+  且"YAML 路由"若将来要做，得重写判据。
+- **乙 · 补契约**：实现 URL-pattern 路由与爬虫旋钮语义（约 +400 行，含 `obey_robots` 真生效）。
+  代价：改变抓取行为（robots 一旦生效，现有爬虫任务的取数面会收窄），属产品口径。
+- 我的倾向：**②③按甲处理**（压缩面已被 fold 取代，爬虫旋钮要么真生效要么删掉，不留只写不读），
+  **①按乙另立单**——YAML 路由与 T-07 的"带 owner 的三态探测"是同一张能力表，
+  分开做会造出第二份事实源（教义第 6 条）。但**这句话要你来说**。
+
 
 
