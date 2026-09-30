@@ -519,3 +519,28 @@ grep -rn "vision_available" neurova/ ; grep -n 'pop("image_base64")\|_emit_compu
 - [ ] 净 LOC 去向写在 commit 正文；超出本工单估计数值须说明差在哪
 - [ ] `git commit --only -- <显式路径>`，未用 `git add -A`
 - [ ] 遇到 🔒 决策点：已停下提问，未自行拍板
+
+---
+
+## 13. 决策追加（2026-09-30 拍板，本轮未动工）
+
+**D-5 · `visual-parse` 退役**（端点 + 请求模型 + 前端 `visualParse` 封装 + 11 份 locale 同批改）。
+理由不是"没人调用"，而是它与 `computer_som_snapshot` 是**同一能力的第二条入口**；
+且检测器的注入缝已在 `som.mark_screenshot(png, detector=...)` 里留好
+（`som.default_detector` 注释明写"真实检测器就绪后以 `detector=` 替换，上层零改动"），
+退役不丢任何将来接真检测器的路径。净 LOC 为负。
+
+**D-6 · `smart-click` 立项为新能力**（自然语言目标 → 元素），不视为"补断线"。
+拆两片，顺序不可颠倒：
+
+- **T-10 语义解析器（依赖 T-08 的 ref）**：只在**当前快照事实**里解析，不猜选择器——
+  与 `browser_dom_snapshot` 的既有纪律同向。第一片**不需要新模型**：
+  对 role+name 候选做归一化匹配 → 唯一命中直接产出**动作**；多命中回
+  `ambiguous` + 候选 ref 列表（不是回错的那一个）。歧义率是真数据：
+  MDN 一页 618 条可交互行去重后 429，**56% 卷入重名**。
+- **T-11 接通与撤谎**：实现落地后撤掉 `smart-click` 的 501 拒绝，
+  并把前端 `computer.ts` 的载荷从 `{agent_id,x,y}` 改为 `{target}`（现 422 缺 `target`）。
+  **在此之前 §2.6 的"422 未消除"仍成立**，不要提前改前端掩盖它。
+
+依赖关系：T-08（ref 一等寻址）→ T-10 → T-11。理由：`get_by_role` 遇重名是
+`strict mode violation` 硬失败，没有 ref 的语义解析只能停在"找到候选但动不了"。
