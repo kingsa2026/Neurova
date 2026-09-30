@@ -1,24 +1,48 @@
 # G4 修正方案 —— 工具取消、超时处置与进程生命周期
 
-> ## ⚠️ 状态更新（2026-09-30 补入仓库 · 状态逐条核实至 `ecfba316`）
+> ## ⚠️ 状态更新（2026-09-30 补入仓库 · 状态逐条核实至 `008a3e2a`）
 >
 > **本文是 G4 的立项与判据来源，并非现状描述。** 此前只以 Issue #288 附件形态存在；
 > 本次补入仓库，闭合「对标文档 §5 G4 行 → 本文」的引用（补入前该引用悬空，
-> 由 `tests/unit/test_active_layer_refs_guard.py` 拦下）。
+> 由 `tests/unit/test_active_layer_refs_guard.py` 拦下；生产代码里早已出现
+> `G4-RC6` 这样的引用——文档不入库该引用即悬空）。
 >
-> 正文保留立项原文，六个根因的落地状态如下（逐条核实，非读提交标题）：
+> 正文保留立项原文，六个根因的落地状态如下（逐条核实到求值点与默认装配点，非读提交标题）：
 >
 > | 缺口 | 现状 |
 > |---|---|
-> | RC-1 超时一刀切 | 已闭合：`TimeoutDisposition` 三态（`core/tool_capability.py:79`），缺省 `BACKGROUND` ⇒ 不声明即与改前逐字节同行为；四类进程型工具声明 `KILL`（`builtin_tools.py:360`/`905`/`950`/`974`） |
-> | RC-2 `to_thread` 外部不可取消 | 已闭合：协作令牌 `core/cancel_token.py`；杀灭回调生产注册三处（`shell_sessions.py:117`、`execution_layers/__init__.py:250`、`tool_executor.py:3864`） |
+> | RC-1 超时一刀切 | 已闭合：`TimeoutDisposition` 三态（`core/tool_capability.py:79`），分派在 `resolveTimeoutDisposition:154`（未声明一律 `BACKGROUND` ⇒ 不声明即与改前逐字节同行为），`KILL` 分支 `:243`；四类进程型工具声明 `KILL`（`builtin_tools.py:360` `computer_shell`、`:905` `git`、`:950` `run_code`、`:974` `exec_command`，**恰为本文 D-3 点名的四类**，每处注释都写了"为何放弃即须终止"） |
+> | RC-2 `to_thread` 外部不可取消 | 已闭合：协作令牌 `core/cancel_token.py`。**本文的核心判断成立且被原样写进代码**——`tool_coordinator.py:225-230` 注释："外层取消对已进 `to_thread` 的调用无效…只有置位令牌才能让 worker 注册的进程杀灭回调真正发出…本层不吞取消"。杀灭回调生产注册三处（`shell_sessions.py:117`、`execution_layers/__init__.py:250`、`tool_executor.py:3864`） |
 > | RC-3 进程树杀灭原语 | 已闭合：收口为模块级单源 `killProcessTree` / `spawnKwargsForKill`（`sandbox/exec_sandbox.py`），主工具路复用 |
-> | RC-4 `kill_all` 零调用方 | 已闭合：接进 `api/app.py` 关停钩子；台账判据类由机器算为 `consumed` |
-> | RC-5 取消计为工具失败 | 已闭合：单源判定 `is_policy_denial` 认 `cancelled`（`security/governance.py:76`） |
-> | RC-6 取消终态不回反馈环 | 已闭合：取消分支补投 `_pending_hints`（`tool_coordinator.py:341` 起） |
+> | RC-4 `kill_all` 零调用方 | 已闭合：接进 `api/app.py:1161`（`asyncio.wait_for(..., AGENT_SHUTDOWN_TIMEOUT)`），`:1152` 注释直引"实现完整、生产侧**零调用方**"；台账判据类由机器算为 `consumed` |
+> | RC-5 取消计为工具失败 | 已闭合：单源判定 `is_policy_denial` 认 `cancelled`（`security/governance.py:64-76`），注明"与上述六键完全同构的**决策**" |
+> | RC-6 取消终态不回反馈环 | 已闭合：`_observe_background` 取消分支补投 `_pending_hints`（`tool_coordinator.py:341` 起），注释标 **"断链修复（G4-RC6）"** |
 >
 > 落地提交 `e1959626`（Issue #288 / MR #291），另含两处本文未提的同类根修
 > （N-1 `LocalExecutor.exec` 阻塞事件循环；N-2 进程未自成团时按组杀灭会命中宿主）。
+>
+> **决策点裁决**：D-1 引入令牌 ✅；D-2 默认保守 ✅；D-3 恰好四类 ✅；**D-4 用户停止也杀进程 ✅**；D-6 hint ✅。
+>
+> **三处实现优于本文，后来者勿照本文落点施工**：
+>
+> 1. **D-5 令牌载体**：本文说"进 `TurnRunState`"，实际走 `ContextVar`——与 G2 的目标写入同因：
+>    取消要跨 `chat()` / 线程池边界，`TurnRunState` 传不过去。
+>    **⇒ 两案在这条上犯的是同一个错：把"轮级生命周期"等同于"必须显式传参"。**
+> 2. **`WriteScope` 缺省比本文更保守**：本文默认 `{SESSION}`，实现取 `{SHARED}`
+>    （`tool_capability.py:76`，"状态不明即按会互相干扰处理"）⇒ 未声明工具默认既不可并行、
+>    也不被误判为无作用域。
+> 3. **收尸宽限期有单源**：本文只写"沿用同一数值来源"，实现落成 `exec_sandbox.KILL_GRACE_S`
+>    为单源 + `KILL_GRACE_FALLBACK_S = 5.0` 仅作导入失败镜像（`tool_coordinator.py:25-27`），
+>    并注释点明"数值单源在 `exec_sandbox`"。
+>
+> **口径更正**：G2 方案顶部状态表把本文这条记作"已闭合：`TimeoutDisposition.ABORT` 返回
+> cancelled 形态"。这只说了一半——`ABORT` 不碰进程，**真正止住"子进程继续跑"的是 `KILL`
+> 分支 + 进程树杀灭**（RC-3）。按那条口径去理解会以为进程问题已解决。
+>
+> **遗留未验项**：验收线 §8 第 1/2 条的活体证明（真起 `sleep 120` 后证进程树消失、用户停止同证）
+> 未观测到证据。单测覆盖已有（`tests/unit/tools/test_tool_cancellation.py` 447 行），
+> **但教义第 4 条不接受"单测全绿"替代活体**。
+>
 > 正文行号对准 `c55e1f37`，引用前请对准当前 `HEAD` 复核。
 
 > 立项时间：2026-09-26 · 取证基线：`c55e1f37` · 关联缺口：对标文档 §5 G4
