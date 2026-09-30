@@ -25,19 +25,21 @@ UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 60785
 
 ## 判据取向
 
-- **平台无关**：不靠"找一台 GBK 机器"复现，而是把 `locale.getpreferredencoding` 毒成
-  `ascii` 再跑真扫描器——本机 173 条中文路径必然触发，Linux 上同样成立。
-- **棘轮只降不升**：全仓按 AST 数出 **109 处 / 59 个文件**（含生产码 12 处：
-  `camofox_supervisor` 3、`env_check` 2、`image_pipeline/docker_builder` 6、
-  `sandbox/exec_sandbox` 1）。一次改 109 处不是本单的范围，但**新增一处必须红**。
-- 正反对照都要有：注入一条能被数到（判据不是空转），声明了 encoding 的不被数到
+- **跨机器恒定的是静态档**：按 AST 数落点（全仓棘轮 + `neurova/` 零基线）。
+  行为档（真跑扫描器）只在**本机码页与 git 输出的 UTF-8 不一致**时才红——
+  它是"这台机器上的现场证据"，不是跨机器的守卫，别把它当后者用。
+  ⚠️ 本文件初版曾把 `test_trackedFiles...` 写成"毒 `locale.getpreferredencoding`
+  证明平台无关"，那是**错的**：`text=True` 的默认编码在 `io.TextIOWrapper` 的 C 层决定，
+  Python 层 monkeypatch 影响不到它（实测：换成 `"ascii"` 后 GBK 字节照样被解开）。
+  要跨机器咬住解码分支，得喂 `0xFF` 这类在所有相关码页下都非法的字节——
+  该写法落在 `tests/unit/core/test_proc_text.py` 与 `tests/unit/sandbox/test_exec_output_decoding.py`。
+- **正反对照都要有**：注入一条能被数到（判据不是空转），声明了 encoding 的不被数到
   （判据不是把所有 text=True 一棍子打死）。
 """
 
 from __future__ import annotations
 
 import ast
-import locale
 import os
 import pathlib
 
@@ -45,9 +47,13 @@ import pytest
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-# 只降不升的基线（2026-09-30 现场数出：109 处 / 59 个文件）。
-# 往下调时请在提交说明里点名修掉了哪些落点。
-_BASELINE_MAX_SITES = 109
+# 只降不升的基线。当前 79 = 首轮量出 109，减去本批清掉的 30 处：
+#   生产码 12（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1，改走
+#   `neurova.core.proc_text`）；
+#   读 git 输出的 CI 守卫与其测试 18（test_protected_subset_registration_history 6、
+#   test_npc_runtime_budget 5、test_npc_script_interpreter_reachability 7）。
+# 再往下调时请在提交说明里点名修掉了哪些落点。
+_BASELINE_MAX_SITES = 79
 
 _SKIP_PREFIX = (".venv/", "NeurUI/node_modules/", "build/", "dist/")
 _SKIP_PARTS = ("/__pycache__/", "src-tauri", "/target/")
@@ -115,16 +121,15 @@ def _relativeToRoot(path: pathlib.Path) -> str:
 
 
 class TestScannerIsNotLocaleDependent:
-    """行为判据：文档扫描器在非 UTF-8 码页的机器上必须照样出数。"""
+    """行为判据：文档扫描器在本机码页下必须照样出数（本机现场证据，见模块头的限定）。"""
 
-    def test_trackedFilesSurvivesPoisonedLocale(self, monkeypatch):
+    def test_trackedFilesReturnsFilesOnThisMachine(self):
         scanner = pytest.importorskip("scripts.scan_docs_refs")
-        # 毒掉码页而不是换机器：ascii 解不动 173 条中文路径里的任何一条
-        monkeypatch.setattr(locale, "getpreferredencoding", lambda *a, **k: "ascii")
         files = scanner.trackedFiles()
-        assert files, "非 UTF-8 码页下扫描器取不到入库文件清单——台账事实源在该机器上是死的"
+        assert files, "扫描器取不到入库文件清单——台账事实源是死的"
         assert any(any(ord(ch) > 127 for ch in f) for f in files), (
-            "夹具前提不成立：本仓已入库路径里没有非 ASCII 名，本判据在该环境无判别性"
+            "夹具前提不成立：本仓已入库路径里没有非 ASCII 名，"
+            "本判据在该环境无判别性（判别性由静态档承担）"
         )
 
     def test_docsScannerCallSitesDeclareEncoding(self):
@@ -141,8 +146,20 @@ class TestRatchet:
         hits = sitesWithoutEncoding(PROJECT_ROOT)
         assert len(hits) <= _BASELINE_MAX_SITES, (
             f"未声明编码的子进程文本读点从 {_BASELINE_MAX_SITES} 涨到 {len(hits)}——"
-            "新增一处就多一台机器上的假红。请给 subprocess 传 encoding=\"utf-8\""
-            "（外来命令再加 errors=\"replace\"）"
+            "新增一处就多一台机器上的假红。请改用 `neurova.core.proc_text.runText`"
+        )
+
+    def test_productionPackageHasZeroSuchSites(self):
+        """零基线档：`neurova/` 是**跑在用户机器上**的代码，不能留任何一处看机器脸色的读点。
+
+        这与上面的全仓棘轮是两档：工具/脚本/测试可以带历史基线慢慢清，
+        生产包不行——一次 GBK 机器上的解码失败就是线上故障，且形态是
+        `stdout is None`（异常被 reader 线程吞掉），排查者根本找不到根因。
+        """
+        hits = sitesWithoutEncoding(PROJECT_ROOT / "neurova")
+        assert not hits, (
+            "生产码里出现了未声明编码的子进程文本读点（请走 neurova.core.proc_text.runText）："
+            f"{hits}"
         )
 
     def test_injectedSiteIsCounted(self, tmp_path):

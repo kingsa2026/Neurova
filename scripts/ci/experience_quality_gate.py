@@ -41,6 +41,13 @@ import logging
 import re
 import sqlite3
 import sys
+
+# 控制台码页编不出本脚本的字形（⚠️/🛑/→ 在中文 Windows 的 cp936 下即抛
+# UnicodeEncodeError）时，「给出结论」这一步会先把门禁自己打死。
+# 同仓先例：scripts/ci_static_gate.py 用的是这两行。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List

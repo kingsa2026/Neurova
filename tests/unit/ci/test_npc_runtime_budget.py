@@ -269,7 +269,7 @@ class TestBudgetScriptIsExecutedByTheBuild:
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
         )
         assert proc.returncode == 0, (
             f"量尺在缺变量时未能以 0 退出（它是决策输入，不是判据）:\n"
@@ -312,7 +312,7 @@ class TestPredicateExitServesTheRelay:
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--predicate"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
         )
         assert proc.returncode == 0, proc.stderr
         return proc.stdout.strip()
@@ -361,7 +361,7 @@ class TestVerdictsAreFalsifiable:
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--json"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
         )
         assert proc.returncode == 0, proc.stderr
         return json.loads(proc.stdout)
@@ -405,7 +405,7 @@ class TestVerdictsAreFalsifiable:
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
         proc = subprocess.run(
             ["sh", str(bridge), "scripts/ci/npc_runtime_budget.py", "--json"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         reading = json.loads(proc.stdout)
@@ -542,7 +542,7 @@ class TestRoleAdmissionIsPinnedBeforeTheAgent:
         env.update(env_extra)
         if argv is None:
             argv = [sys.executable, str(ADMISSION_SCRIPT)]
-        return subprocess.run(argv, capture_output=True, text=True,
+        return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
                               cwd=str(PROJECT_ROOT), env=env, timeout=60)
 
     def test_in_and_out_of_roster_are_both_falsifiable(self, roles):
