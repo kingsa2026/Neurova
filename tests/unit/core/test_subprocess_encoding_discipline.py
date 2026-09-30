@@ -45,6 +45,8 @@ import pathlib
 
 import pytest
 
+from tests import ast_scan
+
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 # 只降不升的基线。当前 79 = 首轮量出 109，减去本批清掉的 30 处：
@@ -87,7 +89,10 @@ def sitesWithoutEncoding(root: pathlib.Path) -> list:
         if rel == _selfPath():
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            # 一次性解析入口（同仓共享源）：本判据只扫一遍，不留常驻语法树。
+            # 私有 `ast.parse` + 全仓枚举正是 `test_ci_ast_scan_budget_guard.py`
+            # 常驻拦的形状——我自己刚被它点过一次，教训写在这里。
+            tree = ast_scan.transientTree(path)
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):

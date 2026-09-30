@@ -61,6 +61,7 @@ import pytest
 from fastapi import HTTPException
 
 from neurova.api.endpoints import computer as computer_ep
+from tests import ast_scan
 
 ENDPOINT_DIR = pathlib.Path(computer_ep.__file__).parent
 
@@ -157,10 +158,12 @@ class TestSweepSameContract:
     def _offenders(rootDir: pathlib.Path) -> list:
         hits = []
         for py in sorted(rootDir.rglob("*.py")):
-            text = py.read_text(encoding="utf-8", errors="replace")
             try:
-                tree = ast.parse(text)
-            except SyntaxError:
+                # 走共享的一次性解析入口：本判据只扫一遍，不留常驻语法树
+                # （保留型缓存的收益只在重复扫时成立，成本却每次扫都付，
+                # 且由 `tests/unit/test_ci_ast_scan_budget_guard.py` 常驻拦）
+                tree = ast_scan.transientTree(py)
+            except (SyntaxError, UnicodeDecodeError, OSError):
                 # 解析不来的文件不许让守卫无声跳过
                 hits.append(f"{py.name}:Unparseable")
                 continue
