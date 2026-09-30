@@ -112,3 +112,40 @@ def testSigningOverrideIsPassedAsFileNotInlineJson():
         "内联 JSON 覆盖过 shell 会丢引号 —— 必须落文件传路径"
     )
     assert "write_text" in src, "签名覆盖应写成临时 json 文件"
+
+
+def testBuildRedirectsLocalAppDataOffSystemProfile():
+    """构建前必须把 LOCALAPPDATA 挪出 systemprofile（实机踩到的 0xC0000135）。
+
+    实机证据（2026-09-30，节点 orange-connector，whoami=nt authority\\system）：
+    自托管 Runner 以 SYSTEM 身份跑，`%LOCALAPPDATA%` 落在
+    `C:\\WINDOWS\\system32\\config\\systemprofile\\AppData\\Local`。Tauri 的 NSIS 打包器
+    把自带 makensis 解到那里，**该位置的可执行文件加载不了**：
+
+        tauri\\NSIS\\Bin\\makensis.exe  → 0xC0000135 (STATUS_DLL_NOT_FOUND)
+        同一份字节拷到 D:\\ci-localappdata\\tauri\\NSIS\\Bin → v3.13 正常
+        系统 choco NSIS（C:\\Program Files (x86)\\NSIS）→ v3.13 正常
+
+    于是 `tauri build` 在 bundler 最后一步报
+    `Unable to start child process, error 0x2` / `Failed to bundle app with makensis`，
+    看着像 NSIS 缺失或脚本有错，根因却是**缓存目录选在了不可执行的位置**。
+
+    根修：构建前把 `LOCALAPPDATA` 指到一个普通目录（Tauri 据此决定 NSIS 缓存落点）。
+    """
+    import ast
+
+    src = _src()
+    tree = ast.parse(src)
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert "tauri_build_env" in funcs, (
+        "缺 tauri_build_env()：SYSTEM 身份的 Runner 会让 Tauri 的 NSIS 落到 "
+        "systemprofile，那是可执行文件加载不了的位置（0xC0000135）"
+    )
+    helper_src = ast.unparse(funcs["tauri_build_env"])
+    assert "LOCALAPPDATA" in helper_src, "helper 必须改 LOCALAPPDATA"
+    assert "systemprofile" in helper_src, "必须点名 systemprofile 这个根因"
+    # 接线判据：`tauri build` 那条调用必须真带上 env（只定义不接线 = 死码）。
+    body = ast.unparse(funcs["build_tauri"])
+    assert "tauri_build_env()" in body, (
+        "tauri_build_env() 没接进 build_tauri 的调用 —— 定义了却没用（死码）"
+    )
