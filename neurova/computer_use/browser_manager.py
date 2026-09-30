@@ -937,6 +937,35 @@ def _countActionableLines(text: str) -> int:
     return sum(1 for ln in text.splitlines() if _ariaRoleToken(ln) in roles)
 
 
+def _accessibleName(line: str) -> str:
+    """取 aria 行的 accessible name：'<缩进>- <role> \"名\" …' 里第一段引号内容。"""
+    s = line.strip()
+    first = s.find('"')
+    if first < 0:
+        return ""
+    second = s.find('"', first + 1)
+    return s[first + 1:second] if second > first else ""
+
+
+def snapshotActionableCandidates(tree: str) -> List[Any]:
+    """从快照事实里取出可交互候选面（role + accessible name）。
+
+    语义目标解析（`target_resolver`）的输入必须来自这里——另写一份 aria 解析
+    就是第二套口径，快照与解析会各自漂移。
+    """
+    from neurova.computer_use.target_resolver import Candidate
+
+    roles = _snapshotActionableRoles()
+    out: List[Any] = []
+    for ln in (tree or "").splitlines():
+        if _ariaRoleToken(ln) not in roles:
+            continue
+        name = _accessibleName(ln)
+        if name:
+            out.append(Candidate(_ariaRoleToken(ln) or "", name))
+    return out
+
+
 def foldSnapshotTree(
     tree: str,
     budget: int = SNAPSHOT_CONTEXT_BUDGET,

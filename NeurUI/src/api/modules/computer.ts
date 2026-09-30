@@ -52,9 +52,9 @@ export function extractPage(agentId: string) {
   return api.post<ApiResponse<unknown>>(`${BASE}/browser/extract`, { agent_id: agentId })
 }
 
-/** Smart-click at coordinates using AI element detection. */
-export function smartClick(agentId: string, x: number, y: number) {
-  return api.post<ApiResponse<{ success: boolean }>>(`${BASE}/smart-click`, { agent_id: agentId, x, y })
+/** Semantic click: resolve the target against current snapshot facts on the server. */
+export function smartClick(target: string) {
+  return api.post<ApiResponse<{ success: boolean; matched: { role: string; name: string } }>>(`${BASE}/smart-click`, { target })
 }
 
 /** Execute a shell command on the agent's machine. */
