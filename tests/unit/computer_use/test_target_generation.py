@@ -176,17 +176,23 @@ class TestGenerationFreshness:
 
     @pytest.mark.asyncio
     async def test_snapshot_result_carries_generation_for_roundtrip(self):
-        """快照/操作结果必须带回当前 generation，agent 才能回传做新鲜度校验"""
+        """快照/操作结果必须带回当前 generation，agent 才能回传做新鲜度校验
+
+        断言值随 T-03 一起改：本用例此前写的是 `click.generation == 5`，等于把
+        "role 点击不使快照事实失效"这个缺陷固化进测试 —— 与 camofox 侧相反
+        （它推进），也让"快照 → 改 DOM 的动作 → 拿旧 g 再点下一个"能被静默接受。
+        现在交互与导航同语义地推进，回传链的每一环都拿到当刻真值。
+        """
         backend = _seed_backend({"t1": (5, "https://a.com")})
 
         snap = await backend.dom_snapshot()
         assert snap.generation == 5
 
         click = await backend.click_role("button", name="x")
-        assert click.generation == 5
+        assert click.generation == 6  # 交互使快照事实失效
 
-        nav = await backend.navigate("https://a.com/p2", generation=5)
-        assert nav.generation == 6  # 导航后的新代数
+        nav = await backend.navigate("https://a.com/p2", generation=6)
+        assert nav.generation == 7  # 导航后的新代数
 
     @pytest.mark.asyncio
     async def test_role_ops_target_active_tab(self):
