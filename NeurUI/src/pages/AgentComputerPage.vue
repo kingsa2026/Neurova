@@ -64,7 +64,6 @@
             </div>
             <div class="action-grid-row">
               <GlassButton variant="ghost" size="sm" @click="smartClick">{{ t('computer.smartClick') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="visualParse">{{ t('computer.visualParse') }}</GlassButton>
             </div>
           </div>
         </GlassCard>
@@ -98,7 +97,6 @@ import {
   navigate,
   extractPage,
   smartClick as smartClickApi,
-  visualParse as visualParseApi,
   shell,
 } from '@/api/modules/computer'
 import GlassCard from '@/components/GlassCard.vue'
@@ -197,13 +195,6 @@ const smartClick = async () => {
     await smartClickApi(agentId, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
-}
-
-const visualParse = async () => {
-  try {
-    const res: any = await visualParseApi(agentId)
-    message.info(JSON.stringify(res?.data ?? res))
   } catch { message.error(t('common.error')) }
 }
 

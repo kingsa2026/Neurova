@@ -92,11 +92,6 @@ class FileWriteRequest(BaseModel):
     encoding: str = "utf-8"
 
 
-class VisualParseRequest(BaseModel):
-    screenshot: typing.Optional[str] = None  # base64
-    detect_elements: bool = True
-
-
 class SmartClickRequest(BaseModel):
     target: str  # e.g. "登录按钮"
     screenshot: typing.Optional[str] = None
@@ -480,13 +475,6 @@ def _refuseUnimplemented(feature: str, previousLie: str) -> typing.NoReturn:
         status_code=501,
         detail=f"{feature}未实现（原以 {previousLie} 形态谎报成功）",
     )
-
-
-@router.post("/visual-parse")
-async def visual_parse(body: VisualParseRequest):
-    """视觉解析：截图 + UI 元素检测"""
-    _log_action("visual_parse", {"detect_elements": body.detect_elements})
-    _refuseUnimplemented("视觉解析（UI 元素检测）", "code 0 + elements 恒空")
 
 
 @router.post("/smart-click")

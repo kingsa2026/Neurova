@@ -1804,7 +1804,6 @@ export default {
     fileWrite: '파일 쓰기',
     browser: '브라우저',
     smartClick: '스마트 클릭',
-    visualParse: '시각 분석',
     up: '위',
     down: '아래',
     left: '왼쪽',

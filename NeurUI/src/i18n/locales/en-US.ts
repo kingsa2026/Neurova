@@ -1806,7 +1806,6 @@ export default {
     fileWrite: 'Write File',
     browser: 'Browser',
     smartClick: 'Smart Click',
-    visualParse: 'Visual Parsing',
     up: 'Up',
     down: 'Down',
     left: 'Left',

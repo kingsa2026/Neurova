@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'Запись файла',
     browser: 'Браузер',
     smartClick: 'Умный клик',
-    visualParse: 'Визуальный парсинг',
     up: 'Вверх',
     down: 'Вниз',
     left: 'Влево',

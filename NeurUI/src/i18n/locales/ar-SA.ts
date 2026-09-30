@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'كتابة ملف',
     browser: 'المتصفح',
     smartClick: 'النقر الذكي',
-    visualParse: 'التحليل البصري',
     up: 'أعلى',
     down: 'أسفل',
     left: 'يسار',
