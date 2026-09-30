@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'Escribir archivo',
     browser: 'Navegador',
     smartClick: 'Clic inteligente',
-    visualParse: 'Análisis visual',
     up: 'Arriba',
     down: 'Abajo',
     left: 'Izquierda',

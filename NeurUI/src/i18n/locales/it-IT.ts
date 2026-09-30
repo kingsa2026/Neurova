@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'Scrivi file',
     browser: 'Browser',
     smartClick: 'Clic intelligente',
-    visualParse: 'Analisi visiva',
     up: 'Su',
     down: 'Giù',
     left: 'Sinistra',

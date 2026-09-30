@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'फ़ाइल लिखें',
     browser: 'ब्राउज़र',
     smartClick: 'स्मार्ट क्लिक',
-    visualParse: 'दृश्य विश्लेषण',
     up: 'ऊपर',
     down: 'नीचे',
     left: 'बाएं',

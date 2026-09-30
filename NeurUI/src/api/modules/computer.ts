@@ -57,11 +57,6 @@ export function smartClick(agentId: string, x: number, y: number) {
   return api.post<ApiResponse<{ success: boolean }>>(`${BASE}/smart-click`, { agent_id: agentId, x, y })
 }
 
-/** Parse the agent's current screen visually. */
-export function visualParse(agentId: string) {
-  return api.post<ApiResponse<unknown>>(`${BASE}/visual-parse`, { agent_id: agentId })
-}
-
 /** Execute a shell command on the agent's machine. */
 export function shell(agentId: string, command: string) {
   return api.post<ApiResponse<ShellResult>>(`${BASE}/shell`, { agent_id: agentId, command })

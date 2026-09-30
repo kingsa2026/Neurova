@@ -1804,7 +1804,6 @@ export default {
     fileWrite: 'ファイル書き込み',
     browser: 'ブラウザ',
     smartClick: 'スマートクリック',
-    visualParse: 'ビジュアル解析',
     up: '上',
     down: '下',
     left: '左',
