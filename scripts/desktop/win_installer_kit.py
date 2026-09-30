@@ -53,7 +53,14 @@ DEFAULT_CLONE = DEFAULT_HOME / "neurova"
 
 # 构建机必须逐件具备的工具链（缺哪个当场失败，不产来源不明的包）。
 # csc.exe / robocopy 由 Windows 自带，单独探测；其余必须显式点名。
-TOOLCHAIN = ("node", "npm", "npx", "cargo", "rustc", "makensis", "python")
+#
+# **不列 `makensis`**：构建链不调用它。`package_installer_zip.py` 只调仓内打包脚本，
+# NSIS 内核由 **Tauri 自带的 NSIS 打包器**产出（自带 makensis，
+# 落到 `%LOCALAPPDATA%\tauri`），WPF 壳只把内核当 `/resource` 内嵌 —— 全链
+# 没有任何一处 exec 宿主 `makensis`。把无消费者的工具列为必需项，会让探测在
+# 「装了但不在 PATH」（choco 的 NSIS 包不写机器 PATH、不建 shim）上假红，
+# 而补路径兜底只是把「没装」与「装了没用上」继续搅在一起（教义第 2 条）。
+TOOLCHAIN = ("node", "npm", "npx", "cargo", "rustc", "python")
 
 # pip 与 npm 的镜像源：国内打包机上裸连 PyPI / registry.npmjs.org 会慢到不可用，
 # 且失败形态是「挂住」而不是报错。这里显式走国内镜像，来源与 .npmrc / pip 一致。
@@ -96,6 +103,43 @@ def csc_path() -> Path | None:
     return None
 
 
+def refresh_machine_path() -> None:
+    """把**机器/用户级** PATH 合并进本进程（自托管环境里必须做）。
+
+    为什么需要它（2026-09-30 实机踩到，节点 orange-connector）：CNB 自托管 Runner
+    以**服务**形态常驻，其进程环境在服务启动那一刻定型。此后用 `choco install
+    python312` 往机器 PATH（`HKLM\\SYSTEM\\...\\Environment`）写的新条目，正在跑的
+    Runner **读不到** —— 只有重启服务才会重读。于是出现分裂事实：
+
+        C:\\Python312\\python.exe        在盘上（机器 PATH 里也有这一条）
+        Get-Command python              MISSING
+
+    失败形态是「工具链缺席：python」——看着像整机没装，人会去重装、换机器，
+    打一场打不赢的仗，而根因只是环境没继承。
+
+    **单一定义**：刷新逻辑落在 `scripts/desktop/refresh_machine_path.ps1`，与
+    `.cnb.yml` 各 stage 的 dot-source 是同一份（教义第 6 条）。本函数调它并把
+    合并结果取回本进程环境 —— 不在 Python 里另写一份 winreg 版本（那会是第二份
+    定义：改一处漏一处，而两处都不会红）。非 Windows 为 no-op。
+    """
+    if os.name != "nt":
+        return
+    helper = REPO / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    if not helper.exists():
+        raise RuntimeError(f"PATH 刷新 helper 缺席：{helper}")
+    # 让 helper 在子进程里跑一遍、回读它合并后的 PATH（helper 打印的只是段数）。
+    probe = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+         f'. "{helper}"; [Environment]::GetEnvironmentVariable("Path", "Process")'],
+        capture_output=True, text=True,
+    )
+    if probe.returncode != 0:
+        raise RuntimeError(f"PATH 刷新失败：{probe.stderr.strip()}")
+    merged = probe.stdout.strip().splitlines()[-1]
+    os.environ["PATH"] = merged
+    log(f"PATH 已合并机器/用户级条目（{merged.count(';') + 1} 段）")
+
+
 def probe_toolchain() -> list[str]:
     """逐件点名工具链。
 
@@ -135,7 +179,8 @@ def run(cmd, cwd: Path | None = None, env: dict | None = None) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 
 INSTALL_PS1 = r"""# Neurova Windows 打包机初始化（Issue #332）
-# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / NSIS / VS Build Tools(MSVC) / Python
+# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / VS Build Tools(MSVC) / Python
+# 不装 NSIS：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis 无消费者（见 win_installer_kit.py）
 # 任一步失败即中止（$ErrorActionPreference = "Stop"），不产来源不明的包。
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -176,11 +221,6 @@ Step "MSVC 生成工具（C++ 编译 tauri 原生部分所需）" {
   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget `
     --accept-package-agreements --accept-source-agreements `
     --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-}
-
-Step "NSIS" {
-  if (Get-Command makensis -ErrorAction SilentlyContinue) { makensis /VERSION; return }
-  winget install --id NSIS.NSIS -e --source winget --accept-package-agreements --accept-source-agreements
 }
 
 Step "Python 3.12" {
@@ -252,6 +292,8 @@ def cmd_run(args) -> int:
     ver = product_version()
     log(f"版本事实源 = {ver}（读自 NeurUI/src-tauri/tauri.conf.json）")
 
+    # 先刷新 PATH 再探测：自托管 Runner 的进程环境是冻结的（见 refresh_machine_path 注释）
+    refresh_machine_path()
     probe_toolchain()  # 缺席即抛（判据与动作都在函数里，调用点不重复一份）
     log("工具链自证 PASSED")
 
@@ -274,9 +316,10 @@ def cmd_run(args) -> int:
 
 def newest_installer(repo: Path) -> Path:
     out = repo / "dist" / "installer"
-    cands = sorted(out.glob("Neurova_Setup_*_x64.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # 通配容下 _unsigned 标记（证书缺席时产物名带该后缀，见 package_installer_zip.py）
+    cands = sorted(out.glob("Neurova_Setup_*_x64*.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not cands:
-        raise RuntimeError(f"产物缺席：{out} 下没有 Neurova_Setup_*_x64.exe")
+        raise RuntimeError(f"产物缺席：{out} 下没有 Neurova_Setup_*_x64*.exe")
     return cands[0]
 
 

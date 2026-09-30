@@ -1347,6 +1347,11 @@ $:
         - name: 环境自证（Windows 宿主机 + 工具链点名）
           script: |
             $ErrorActionPreference = "Stop"
+
+            # 先把机器 PATH 刷新进本进程。**每个用到工具链的 stage 都要做**：
+            # stage 各自独立起进程、环境不跨 stage 继承（见 helper 头注释）。
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
+
             # 先把"这是 Windows 宿主"钉死：自托管节点脚本默认走 PowerShell，
             # `ver` 是 cmd 内建命令，须经 cmd /c 调用（实测口径见官方文档）。
             cmd /c ver
@@ -1361,7 +1366,11 @@ $:
             Write-Host "[env] csc=$csc"
 
             # 逐件点名，缺席即失败（不吞异常）
-            $probes = @("node", "npm", "cargo", "rustc", "makensis", "python")
+            # 与 scripts/desktop/win_installer_kit.py 的 TOOLCHAIN 同源同形：
+            # 少一件即探测链过、打包链缺（判据错位），故此处不得漏项。
+            # **不含 makensis**：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis
+            # 无任何调用点 —— 列为必需项只会在「装了但不在 PATH」上假红。
+            $probes = @("node", "npm", "npx", "cargo", "rustc", "python")
             $missing = @()
             foreach ($p in $probes) {
               $cmd = Get-Command $p -ErrorAction SilentlyContinue
@@ -1373,39 +1382,37 @@ $:
             }
             Write-Host "[env] PASSED"
 
-        # ── 1. 前端依赖 + 桌面构建 ────────────────────────────────────────────
-        - name: 前端依赖（npm ci）+ vite build:desktop
+        # ── 1. 前端依赖（npm ci）──────────────────────────────────────────────
+        # 只装依赖；前端构建（build:desktop）归打包脚本，理由见第 3 段注释。
+        - name: 前端依赖（npm ci）
           script: |
             $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE\NeurUI"
             npm ci
             if ($LASTEXITCODE -ne 0) { throw "npm ci 失败" }
-            npm run build:desktop
-            if ($LASTEXITCODE -ne 0) { throw "前端构建失败（npm run build:desktop）" }
 
         # ── 2. 后端资源暂存（路线 B：源码+配置+模型空壳）─────────────────────
         - name: 后端资源暂存（bundle_backend）
           script: |
             $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE"
             python scripts/desktop/bundle_backend.py
             if ($LASTEXITCODE -ne 0) { throw "bundle_backend 失败" }
 
-        # ── 3. NSIS 内核（tauri build 原生 Windows 路径）─────────────────────
-        - name: tauri build（NSIS 内核，原生 Windows）
+        # ── 3. 内核 + 壳 + 单文件安装器（一站，仓内唯一打包脚本）──────────────
+        # 构建链只有一处定义（教义第 6 条）：前端构建、tauri build（含签名注入）、
+        # WPF 壳编译、单文件组包都在 `package_installer_zip.py` 里。
+        # 早先流水线自己 `npx tauri build` 再 `--skip-tauri` 跑壳 —— 那正是两份定义：
+        # 打包脚本里刚加的签名注入（tauri_signing_args）根本不在这条链上，tauri 仍按
+        # 产品配置写死的指纹签名，在没有该证书的机器上硬失败（实机踩到）。
+        - name: 内核 + WPF 壳 + 单文件安装器（package_installer_zip）
           script: |
             $ErrorActionPreference = "Stop"
-            Set-Location "$env:CNB_BUILD_WORKSPACE\NeurUI"
-            npx tauri build
-            if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
-
-        # ── 4. WPF 自定义界面壳（内嵌内核 → 单文件安装器）────────────────────
-        # 复用仓内唯一打包脚本，不在此手抄第二份构建命令（教义第 6 条）。
-        - name: WPF 壳 + 单文件安装器（package_installer_zip，--skip-tauri）
-          script: |
-            $ErrorActionPreference = "Stop"
+            . "$env:CNB_BUILD_WORKSPACE\scripts\desktop\refresh_machine_path.ps1"
             Set-Location "$env:CNB_BUILD_WORKSPACE"
-            python scripts/desktop/package_installer_zip.py --skip-tauri
+            python scripts/desktop/package_installer_zip.py
             if ($LASTEXITCODE -ne 0) { throw "打包失败（package_installer_zip.py）" }
 
         # ── 5. 产物结构自证：1011 条以上的 install 目录 + sha256 落盘 ─────────
@@ -1414,9 +1421,12 @@ $:
           script: |
             $ErrorActionPreference = "Stop"
             Set-Location "$env:CNB_BUILD_WORKSPACE"
-            $exe = Get-ChildItem "dist\installer\Neurova_Setup_*_x64.exe" |
+            # 通配要容下 _unsigned 标记（证书缺席时产物名带该后缀，见打包脚本）
+            $exe = Get-ChildItem "dist\installer\Neurova_Setup_*_x64*.exe" |
                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($null -eq $exe) { throw "产物缺席：dist\installer\Neurova_Setup_*_x64.exe" }
+            if ($null -eq $exe) { throw "产物缺席：dist\installer\Neurova_Setup_*_x64*.exe" }
+            $isUnsigned = $exe.Name -match "_unsigned"
+            Write-Host "[artifact] signed=$(-not $isUnsigned)"
             $sizeMb = [math]::Round($exe.Length / 1MB, 1)
             # 体积红线：beta4 自定义界面版 477MB 量级；内核内嵌后不得塌成空壳
             if ($exe.Length -lt 300MB) {

@@ -140,3 +140,79 @@ def testArtifactSizeFloorAndChecksumAreEnforced():
         "必须校验体积红线并落 sha256 校验文件"
     assert re.search(r"raise RuntimeError\(f?\"?产物体积异常偏小", src), \
         "体积低于红线必须抛错，不得只打印警告"
+
+
+def testKitRefreshesMachinePathBeforeProbe():
+    """打包机脚本也要刷新机器 PATH —— 与流水线同一根因（Issue #332 实机踩到）。
+
+    实机证据（2026-09-30，节点 orange-connector）：Runner 以服务常驻，进程环境在
+    服务启动那刻冻结。此后 `choco install python312` / `nsis` 写进机器 PATH 的条目
+    读不到 —— `python.exe` 与 `makensis.exe` 都在盘上，`Get-Command` 却 MISSING。
+
+    人手工在打包机上跑 `install` 之后**重开 PowerShell 才生效**（脚本结尾就是这么
+    提示的），但 `run` 一旦被自动化调用（本仓流水线、或任何 CI 包装），就落在冻结的
+    环境里。故 `run` 的工具链探测之前必须自行合并机器/用户 PATH —— 与 `.cnb.yml`
+    的同名修法同源（教义第 5 条：同一根因全命中点扫荡）。
+    """
+    src = _kit_source()
+    # 判据看「有没有去读机器级 PATH」，不绑定语言习语：本脚本是 Python，
+    # 走 winreg 读 HKLM\...\Environment 才是自然写法；`.cnb.yml` 那边是
+    # PowerShell，用 GetEnvironmentVariable —— 两处同根因、不同形态，
+    # 把判据写成某一种习语的字面量会在另一边假红（实测踩过）。
+    assert "refresh_machine_path" in src, (
+        "缺机器 PATH 刷新入口函数：工具链探测会读到冻结的进程环境，"
+        "后装的 python/makensis 在盘上却查不到"
+    )
+    # 读机器级注册表这件事收口在 helper 里（单一定义，见 refresh_machine_path 注释）：
+    # 本脚本是调用方，不另写一份 winreg 版本。
+    helper = _REPO / "scripts" / "desktop" / "refresh_machine_path.ps1"
+    assert helper.exists(), "PATH 刷新 helper 缺席：scripts/desktop/refresh_machine_path.ps1"
+    helper_src = helper.read_text(encoding="utf-8")
+    assert 'GetEnvironmentVariable("Path", "Machine")' in helper_src, (
+        "刷新必须真去读机器级注册表 PATH，而不是只读进程环境凑数"
+    )
+    assert "refresh_machine_path.ps1" in src, "本脚本必须调用该 helper（不另写第二份定义）"
+    funcs = _functions()
+    assert "refresh_machine_path" in funcs, "刷新必须独立成函数，调用点不各写一份"
+    # 必须发生在探测之前：run 里 refresh 调用点先于 probe_toolchain 调用点。
+    run_src = src[src.find("def cmd_run"):src.find("def newest_installer")]
+    assert run_src.find("refresh_machine_path()") != -1, "cmd_run 里没有刷新调用"
+    assert run_src.find("refresh_machine_path()") < run_src.find("probe_toolchain()"), (
+        "刷新必须在工具链探测之前 —— 探测读的就是刷新后的 PATH"
+    )
+
+
+def testRequiredToolchainHasNoPhantomEntry():
+    """工具链清单里不得有「没有消费者」的条目（Issue #332 实机踩到）。
+
+    实机证据（2026-09-30，节点 orange-connector）：`makensis` 被列进必需工具链、
+    流水线逐件点名，而它在盘上**且不在 PATH**（choco 的 NSIS 包不写机器 PATH、
+    也不建 shim）—— 于是探测在 `makensis` 上响亮失败。
+
+    但构建链**根本不调用 `makensis`**：`package_installer_zip.py` 只调 `npx tauri build`，
+    NSIS 内核由 Tauri 自己的 NSIS 打包器（自带 makensis，落到 `%LOCALAPPDATA%\\tauri`）
+    产出；WPF 壳只把内核当 `/resource` 内嵌。grep 全链（`*.py`/`*.cmd`/`*.ps1`/`*.nsi`
+    的调用点）没有任何一处 exec `makensis`。
+
+    即：这是一个**只声明、无消费者**的必需项 —— 按「功能与升级改造」红线，只写不读的
+    配置属断点，必须删除而不是给它补路径兜底（补兜底 = consumer-only guard，
+    把「工具没装」与「装了但没用上」两个事实继续搅在一起）。
+
+    判据：必需清单里每个工具都必须能在构建链里找到调用点，或属 Windows 自带件
+    （`csc.exe`/`robocopy`）。Tauri 自带的 NSIS 打包器不需要宿主 `makensis`。
+    """
+    funcs = _functions()
+    assert "TOOLCHAIN" in _kit_source(), "工具链清单必须存在于脚本里"
+    # 从 AST 取 TOOLCHAIN 的字面量（不靠正则猜）
+    tree = _kit_ast()
+    toolchain: tuple[str, ...] | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "TOOLCHAIN":
+                    toolchain = tuple(ast.literal_eval(node.value))
+    assert toolchain is not None, "未找到 TOOLCHAIN 的字面量定义（不得动态拼装）"
+    assert "makensis" not in toolchain, (
+        "makensis 是无消费者的必需项：构建链走 Tauri 自带 NSIS 打包器，"
+        "宿主 makensis 不被任何步骤调用。要求它 = 制造一个永远可红的假要求。"
+    )
