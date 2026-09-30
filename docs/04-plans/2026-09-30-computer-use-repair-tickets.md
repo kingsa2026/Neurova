@@ -49,6 +49,7 @@
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 | **T-14** | 浏览器/爬虫集成测试 25 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出**（§14）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
+| **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 1 处 + 棘轮；余 109 处待清 | 中 | 无 | **本轮落地**（§15）：扫描器改按字节取 + 主线程解码 + 查 rc；新守卫 5 例（毒码页行为判据 + 只降不升棘轮 + 正反对照）。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed** |
 
 **批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
 **剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 决策后 `T-08` → 回补 T-11 的歧义分支
@@ -802,6 +803,60 @@ CI 不跑这族文件：`.cnb.yml:162` 的被测集是 `grep -v '^#' scripts/ci/
 - 我的倾向：**②③按甲处理**（压缩面已被 fold 取代，爬虫旋钮要么真生效要么删掉，不留只写不读），
   **①按乙另立单**——YAML 路由与 T-07 的"带 owner 的三态探测"是同一张能力表，
   分开做会造出第二份事实源（教义第 6 条）。但**这句话要你来说**。
+
+---
+
+## 15. T-15 · 子进程文本不落编码 = 机器码页决定成败（本轮已落地第一处 + 棘轮）
+
+### 病灶与它的真实形状
+
+`subprocess.run(..., text=True)` 不声明 `encoding` 时按 `locale.getpreferredencoding()` 解码——
+中文 Windows 上是 **cp936/GBK**。本仓有 173 条 UTF-8 中文入库路径
+（现场复算：`git -c core.quotepath=false ls-files` 共 5064 条，含非 ASCII 者 173），
+GBK 解不动。而**真正的坑不是解码失败本身**，是失败之后的形态：`text=True` 的读取发生在
+子线程，线程里的 `UnicodeDecodeError` 被吞，主线程只拿到 `proc.stdout is None`：
+
+```
+AttributeError: 'NoneType' object has no attribute 'split'
+PytestUnhandledThreadExceptionWarning: Exception in thread Thread-2 (_readerthread)
+UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 60785: illegal multibyte sequence
+```
+
+traceback 指向"这行在切字符串"，与根因毫无关系——顺着它修只会去给 `.split` 加判空
+（正是修复教义第 1 条禁的 consumer-only guard）。
+
+### 它造成的具体损失
+
+`scripts/scan_docs_refs.py` 是文档台账的**事实源**，它一挂，两道守卫整族红：
+本机改前 **13 FAILED + 6 ERROR**，改后 **30 passed**。守卫的作用是拦红，
+而假红的代价是训练人去忽略红——比没有守卫更糟。
+
+### 修法（不是"加个 encoding"）
+
+`trackedFiles()` 改为：按**字节**取、在**主线程**显式解码、并检查 `returncode`；
+分隔用 `ls-files -z`（git 的机器可读 NUL 分隔，顺带免疫文件名里带换行）。
+解码用 `surrogateescape` 而非 `replace`：个别非 UTF-8 文件名要能原样回流去比对路径，
+替换成 U+FFFD 会让台账把它判成"路径不存在"——那是把故障伪装成结论。
+失败要么不发生，要么以"git 取不到清单（rc=…）"这个真实形态发生。
+
+### 全族量级与本轮的边界
+
+AST 数（不按子串，避免注释里的 `text=True` 误判）：**109 处 / 59 个文件**，其中生产码 12 处——
+`neurova/computer_use/camofox_supervisor.py` 3、`neurova/core/env_check.py` 2、
+`neurova/image_pipeline/docker_builder.py` 6、`neurova/sandbox/exec_sandbox.py` 1。
+一次改 109 处不在本单范围（且 `netstat` 这类外来命令的输出码页与 git 不同，得分别定策），
+所以本轮做的是**拦住增量**：`tests/unit/core/test_subprocess_encoding_discipline.py`
+（5 例）——
+
+- **平台无关的行为判据**：把 `locale.getpreferredencoding` 毒成 `ascii` 再跑真扫描器，
+  Linux CI 上同样成立，不需要找一台 GBK 机器；
+- **只降不升的棘轮**：基线 109（改这一处后正好回落到 109，基线与被测同批落位）；
+- **正反对照**：注入一条必须被数到（判据不空转）、声明了 `encoding` 的不被数到
+  （不把 `text=True` 一棍子打死）。
+
+**余下 109 处的处置留给后续**：生产码那 12 处优先（它们跑在用户机器上，
+不是只影响开发者本地），外来命令（`netstat`）按"字节取 + 主线程解码"同法处理。
+
 
 
 

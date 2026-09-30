@@ -68,12 +68,31 @@ VERDICTS = (VERDICT_REACHABLE, VERDICT_MOVED, VERDICT_AMBIGUOUS, VERDICT_DELETED
 
 
 def trackedFiles() -> list:
-    """仓库已入库文件（git ls-files；关掉 quotepath 以免中文名被转义）。"""
+    """仓库已入库文件（git ls-files；关掉 quotepath 以免中文名被转义）。
+
+    两处都不是"顺手加个 encoding"能了事的，根因是**取事实的方式本身**：
+
+    1. `text=True` 不声明编码时按机器 ANSI 码页解码（中文 Windows 是 cp936/GBK），
+       本仓有 173 条 UTF-8 中文入库路径，GBK 解不动；
+    2. 更狠的是解码异常的落点——`text=True` 的读取在**子线程**里做，线程里的
+       UnicodeDecodeError 被吞，主线程只看到 `proc.stdout is None`，于是报的是
+       `'NoneType' object has no attribute 'split'`：故障文本与根因毫无关系，
+       排查者顺着 traceback 只会找到"这行在切字符串"。
+
+    所以这里按字节取、在主线程显式解码、并检查 returncode：
+    失败要么不发生，要么以"git 取不到清单"这个真实形态发生。
+    `-z` 是 git 的机器可读分隔（NUL），顺带免疫文件名里带换行的情形。
+    解码用 surrogateescape 而非 replace：个别非 UTF-8 文件名要能原样回流去比对路径，
+    替换成 U+FFFD 会让台账把它判成"不存在"——那是把故障伪装成结论。
+    """
     proc = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "ls-files"],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
+        cwd=str(PROJECT_ROOT), capture_output=True,
     )
-    return [line for line in proc.stdout.split("\n") if line.strip()]
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        raise RuntimeError(f"git ls-files 取不到入库清单（rc={proc.returncode}）：{detail}")
+    return [p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if p.strip()]
 
 
 def indexByBasename(files: list) -> dict:
@@ -108,7 +127,7 @@ def resolveTarget(ref: str, source: Path, byBasename: dict) -> tuple:
 
 
 def emptyCodeSpans(line: str) -> list:
-    """返回该行中"被清空的引用"位置（反引号 run 的起始下标）。
+    r"""返回该行中"被清空的引用"位置（反引号 run 的起始下标）。
 
     判据：**孤立的反引号 run**——它在整行里找不到同长度的配对 run。
     这条判据同时挡住两类相反的错误：
