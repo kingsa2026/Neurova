@@ -530,9 +530,58 @@ async def smart_click(body: SmartClickRequest):
 
 @router.post("/smart-type")
 async def smart_type(body: SmartTypeRequest):
-    """智能输入：基于语义目标"""
+    """智能输入：把语义目标解析到**当前快照事实里的可输入元素**，唯一命中才写入。
+
+    与 `smart-click` 同一套码位与同一份事实来源（§19 附带项）：不猜 CSS 选择器、
+    不跨快照认句柄。候选面收窄到可输入 role，是为了让"选错了工具"如实表现为
+    404（这个页面上没有可输入的目标），而不是 fill 抛错后的 502。
+    """
     _log_action("smart_type", {"target": body.target, "text_len": len(body.text)})
-    _refuseUnimplemented("语义目标智能输入", "code 0 + found 恒 False")
+    from neurova.computer_use import get_computer_use_manager
+    from neurova.computer_use.browser_manager import snapshotFillableCandidates
+    from neurova.computer_use.target_resolver import resolveTarget
+
+    manager = get_computer_use_manager()
+    snap = await manager.browser_dom_snapshot()
+    if not getattr(snap, "success", False):
+        raise HTTPException(
+            status_code=502,
+            detail=f"无法取得页面快照事实，语义输入未执行：{getattr(snap, 'error', '未知原因')}",
+        )
+    tree = snap.data if isinstance(snap.data, str) else (snap.data or {}).get("snapshot", "")
+    resolution = resolveTarget(body.target, snapshotFillableCandidates(tree))
+    if resolution.state == "ambiguous":
+        listing = "、".join(f"{c.role}「{c.name}」" for c in resolution.candidates[:8])
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"目标「{body.target}」在当前快照里命中 {len(resolution.candidates)} 个可输入元素"
+                f"（{listing}），不代为挑选——请给更具体的目标（带角色说法或唯一名称），"
+                "或改用 browser_dom_snapshot + browser_fill_role 按事实定位"
+            ),
+        )
+    if resolution.state != "resolved":
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"目标「{body.target}」在当前快照事实里无可输入命中"
+                "（先 browser_navigate 打开页面；若目标是按钮/链接，请改用 smart-click）"
+            ),
+        )
+    hit = resolution.candidate
+    result = await manager.browser_fill_role(hit.role, name=hit.name, text=body.text,
+                                             generation=snap.generation)
+    if not getattr(result, "success", False):
+        raise HTTPException(
+            status_code=502,
+            detail=f"已解析到 {hit.role}「{hit.name}」但输入失败：{getattr(result, 'error', '未知原因')}",
+        )
+    return {
+        "success": True,
+        "matched": {"role": hit.role, "name": hit.name},
+        "matchedBy": resolution.matchedBy,
+        "generation": getattr(result, "generation", None) or snap.generation,
+    }
 
 
 @router.get("/status")

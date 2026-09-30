@@ -1804,6 +1804,7 @@ export default {
     fileWrite: 'Scrivi file',
     browser: 'Browser',
     smartClick: 'Clic intelligente',
+    smartType: 'Digitazione intelligente',
     up: 'Su',
     down: 'Giù',
     left: 'Sinistra',

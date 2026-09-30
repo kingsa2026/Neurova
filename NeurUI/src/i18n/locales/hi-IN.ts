@@ -1804,6 +1804,7 @@ export default {
     fileWrite: 'फ़ाइल लिखें',
     browser: 'ब्राउज़र',
     smartClick: 'स्मार्ट क्लिक',
+    smartType: 'स्मार्ट टाइपिंग',
     up: 'ऊपर',
     down: 'नीचे',
     left: 'बाएं',

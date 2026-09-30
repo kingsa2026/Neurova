@@ -1005,6 +1005,33 @@ def snapshotActionableCandidates(tree: str) -> List[Any]:
     return out
 
 
+def _snapshotFillableRoles() -> frozenset:
+    """可输入 role 口径单源（语义输入用）：`fill_role` 只有在这些 role 上才成立。
+
+    为什么不直接复用可交互全集：目标撞上 `button`/`link` 时 Playwright 的 `fill()`
+    必然抛错，于是"选路选错了"被报成"执行失败了（502）"——模型会以为页面坏了，
+    实际是该走 click 而不是 type。收窄之后这种目标如实回 404（快照里没有可输入的它）。
+    口径限定在**可编辑文本控件**（`combobox`/`listbox` 常以下拉实现，fill 不成立，故不列）。
+    """
+    return frozenset({"textbox", "searchbox", "spinbutton"})
+
+
+def snapshotFillableCandidates(tree: str) -> List[Any]:
+    """从快照事实里取"能输入的"候选面。解析口径与 `snapshotActionableCandidates` 同源。"""
+    from neurova.computer_use.target_resolver import Candidate
+
+    roles = _snapshotFillableRoles()
+    out: List[Any] = []
+    for ln in (tree or "").splitlines():
+        token = _ariaRoleToken(ln)
+        if token not in roles:
+            continue
+        name = _accessibleName(ln)
+        if name:
+            out.append(Candidate(token or "", name))
+    return out
+
+
 def foldSnapshotTree(
     tree: str,
     budget: int = SNAPSHOT_CONTEXT_BUDGET,
