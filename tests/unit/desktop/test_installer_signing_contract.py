@@ -149,3 +149,70 @@ def testBuildRedirectsLocalAppDataOffSystemProfile():
     assert "tauri_build_env()" in body, (
         "tauri_build_env() 没接进 build_tauri 的调用 —— 定义了却没用（死码）"
     )
+
+
+# ── tauri 的 NSIS 解析语义（Issue #342 实机踩到，2026-09-30）─────────────────
+# 前一轮的修补把「可用 NSIS」拷到 `D:\ci-nsis-good` 并设 `NSISDIR` 指过去，实机仍报
+#   Unable to start child process, error 0x2
+#   failed to bundle project: `Failed to bundle app with makensis`
+# 日志里 `[pkg] NSIS 取自可用工具链：C:\Program Files (x86)\NSIS → NSISDIR=D:\ci-nsis-good`
+# 明明打出来了 —— 接线没接错，是**上游根本不看这个变量**：
+# `crates/tauri-bundler/src/bundle/windows/nsis/mod.rs` 第 705 行
+#   .env_remove("NSISDIR")
+# 显式把它丢掉。真正被 exec 的是缓存目录里那一份：
+#   nsis_cmd = Command::new(nsis_toolset_path.join("makensis.exe"))   // mod.rs:690
+#   nsis_toolset_path = <cache>/tauri/NSIS                             // mod.rs:84-89
+# 而 `<cache>` 走 `dirs::cache_dir()`（本仓未声明 localToolsDirectory），
+# Windows 上即 `%LOCALAPPDATA%` —— 与 `tauri_build_env()` 重定向的是同一个变量。
+#
+# 于是根修点只有一个：**在 tauri build 之前，把可用 NSIS 种进缓存目录**。
+# 「给 tauri 指路」与「换掉它要 exec 的那份」是两件事，此前修的是前者。
+
+
+def testSeedsTauriNsisCacheInsteadOfSettingNsisDir():
+    """必须种子 tauri 的 NSIS 缓存，且不得再留 `NSISDIR` 死接线。
+
+    判据按**调用链**看结构（不按字面量）：种子函数存在、且真接在 `build_tauri`
+    这条链上；`NSISDIR` 不得作为环境变量出现在活代码里（上游会 env_remove 它 ——
+    留着它是"写了个不存在的意图"，且不会有任何红）。
+    """
+    import ast
+
+    src = _src()
+    tree = ast.parse(src)
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert "seed_tauri_nsis_cache" in funcs, (
+        "缺 seed_tauri_nsis_cache()：tauri 只 exec <cache>/tauri/NSIS/makensis.exe，"
+        "上游 env_remove(\"NSISDIR\") 让「指路」这条路走不通，只能换缓存里那份"
+    )
+    body = ast.unparse(funcs["build_tauri"])
+    assert "seed_tauri_nsis_cache()" in body, (
+        "种子函数没接进 build_tauri —— 定义了却没用（死码），且缓存仍是坏的那份"
+    )
+    # 活代码里不得再出现 NSISDIR（注释里点名根因不算接线）。
+    live = "\n".join(
+        ast.unparse(n) for n in ast.walk(tree)
+        if isinstance(n, (ast.Assign, ast.AnnAssign, ast.Call))
+    )
+    assert "NSISDIR" not in live, (
+        "`NSISDIR` 是死接线：被上游 env_remove 显式丢弃，指哪都没用。"
+        "根修点是种子缓存，不是给 tauri 指路。"
+    )
+
+
+def testNsisCacheRootSharesLocalAppDataWithBuildEnv():
+    """缓存根与 `tauri_build_env()` 必须读**同一份** LOCALAPPDATA 推导。
+
+    上游 `<cache>/tauri` 走 `dirs::cache_dir()`；本仓未声明 localToolsDirectory，
+    Windows 上即 `%LOCALAPPDATA%`。若重定向与实际推导读的不是同一个变量，
+    就会出现「种子种到 A、tauri 去 B 找」的分裂事实 —— 而两边都不会红。
+    """
+    import ast
+
+    tree = ast.parse(_src())
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert "tauri_nsis_cache_root" in funcs, "缺缓存根推导函数（不能只写死在调用点）"
+    root_src = ast.unparse(funcs["tauri_nsis_cache_root"])
+    env_src = ast.unparse(funcs["tauri_build_env"])
+    assert "LOCALAPPDATA" in root_src, "缓存根必须按 LOCALAPPDATA 推导（上游 cache_dir）"
+    assert "LOCALAPPDATA" in env_src, "tauri_build_env 改的就是 LOCALAPPDATA（同一变量）"

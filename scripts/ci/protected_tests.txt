@@ -1396,4 +1396,15 @@ tests/unit/desktop/test_installer_version_single_source.py
 #   守卫钉住可复算：工具链逐件点名且缺席即抛（判据与动作同链，写在探测函数里）、
 #   版本只读 tauri.conf.json 不得写死、构建链与发布链都必须复用仓内既有脚本
 #   （不得手抄第二份）、体积红线与 sha256 必须落在脚本里。
+# Issue #342（实机断裂，2026-09-30）：tauri build 在 bundler 最后一步硬失败 ——
+#     Unable to start child process, error 0x2
+#     failed to bundle project: `Failed to bundle app with makensis`
+#   前三轮修补都打在「给 tauri 指路」上（拷可用 NSIS + 设 NSISDIR），实机全无效：
+#   上游 tauri-bundler 用 `env_remove("NSISDIR")` 显式丢弃该变量（nsis_mod.rs:705），
+#   真正被 exec 的是缓存目录 `<cache>/tauri/NSIS/makensis.exe`（mod.rs:84/690）。
+#   根修点是把缓存里那份换成实跑可用的 —— 判据是 `makensis /VERSION` 退出码，
+#   不是「文件存在」（本机自带那份文件在位却起不来）。
+#   守卫两条（种子函数必须接在 build_tauri 链上 / NSISDIR 死接线必须清除 /
+#   缓存根与 tauri_build_env 必须读同一份 LOCALAPPDATA 推导）。
+tests/unit/desktop/test_installer_signing_contract.py
 tests/unit/desktop/test_win_installer_kit.py
