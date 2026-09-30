@@ -57,6 +57,11 @@ export function smartClick(target: string) {
   return api.post<ApiResponse<{ success: boolean; matched: { role: string; name: string } }>>(`${BASE}/smart-click`, { target })
 }
 
+/** Semantic type: same resolution as smartClick, narrowed to editable fields on the server. */
+export function smartType(target: string, text: string) {
+  return api.post<ApiResponse<{ success: boolean; matched: { role: string; name: string } }>>(`${BASE}/smart-type`, { target, text })
+}
+
 /** Execute a shell command on the agent's machine. */
 export function shell(agentId: string, command: string) {
   return api.post<ApiResponse<ShellResult>>(`${BASE}/shell`, { agent_id: agentId, command })

@@ -1804,6 +1804,7 @@ export default {
     fileWrite: 'كتابة ملف',
     browser: 'المتصفح',
     smartClick: 'النقر الذكي',
+    smartType: 'الكتابة الذكية',
     up: 'أعلى',
     down: 'أسفل',
     left: 'يسار',

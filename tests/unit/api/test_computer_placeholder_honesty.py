@@ -66,17 +66,17 @@ from tests import ast_scan
 ENDPOINT_DIR = pathlib.Path(computer_ep.__file__).parent
 
 # (处理函数名, 该端点原先谎报成功的形态) —— 逐个点名，便于回归时定位是哪一个又躺回去
+# `smart-click`（D-6/T-11）与 `smart-type`（§19 附带项）已接通，判据搬到各自的语义文件：
+# 前者在三态活体读数里，后者在 `test_smart_type_semantics.py`。
 PLACEHOLDER_HANDLERS: list[typing.Tuple[str, str]] = [
-    ("smart_type", "code 0 + found 恒 False"),
     ("browser_extract_links", "code 0 + links 恒空"),
     ("browser_execute_js", 'code 0 + 谎报 "JS executed"'),
     ("browser_scrape", 'code 0 + 谎报 "Scrape complete"'),
 ]
 
-# 各端点的最小合法请求体：只满足必填字段，不猜业务语义
+# 各端点的最小合法请求体：只满足必填字段，不猜业务语义。
+# 只留上面这张表里真有的名字——多留的键是只写不读的断点（`_invoke` 按表取键）。
 _MINIMAL_BODIES = {
-    "smart_click": {"target": "登录按钮"},
-    "smart_type": {"target": "用户名输入框", "text": "abc"},
     "browser_extract_links": {},
     "browser_execute_js": {"script": "1 + 1"},
     "browser_scrape": {"url": "https://example.com"},
