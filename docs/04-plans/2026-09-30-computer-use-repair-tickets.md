@@ -1006,6 +1006,67 @@ execute        -> {"stdout": "沙箱活体·订单42\n", "stderr": "", "exit_cod
 
 改前这条链在 `resolveBackend()` 就抛 AttributeError，压根到不了 execute。
 
+---
+
+## 18. 按 CI 那条 leg 的真实形态复跑 346 条清单（本轮，附归因）
+
+§17 登记之后必须回答的问题是：**"单跑绿 + 这 16 条合跑绿"不等于"在 CI 那条 leg 里绿"**——
+`.cnb.yml:162` 是把整张清单一次传给一个 pytest 进程，顺序与共享进程态都可能改写结果
+（本仓就记着"新增测试的模块层导入会翻红顺序依赖用例"这笔账）。
+
+复跑方式：346 条按 120 一块分 3 块，每块一个独立 pytest 进程 + `--continue-on-collection-errors`
+（Windows 的 CreateProcess 命令行上限约 32767 字符，346 条拼不进一条命令，这也是必须分块的硬原因）。
+
+| 块 | 文件数 | 摘要 | 其中本轮我碰过的文件 |
+|---|---|---|---|
+| 1 | 120 | **无摘要行，exit=1**（进程被杀——按本仓口径"没摘要=没跑完≠零失败"） | **0 个** |
+| 2 | 120 | 32 failed / 1316 passed / 6 skipped | 1 个（`test_npc_script_interpreter_reachability.py`） |
+| 3 | 106 | 1 failed / 1297 passed / 2 skipped | 7 个（含 §17 新登记的 6 条与 registration-history） |
+
+### 这块红里真正确实是我的一条
+
+`tests/unit/test_ci_ast_scan_budget_guard.py` 红，点出**两处**未登记的"全仓枚举 + `ast.parse`"：
+
+```
+tests/unit/api/test_computer_placeholder_honesty.py → TestSweepSameContract.*
+tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 等 6 处
+```
+
+其中 `test_computer_placeholder_honesty.py` 早在 §17 之前就写在仓里，**是我把它登记进 CI 才让
+这条红进入 CI 视野**——登记一个判据，等于把它的全部副作用一起交给 CI，这件事当时没算进去。
+两处都按守卫自己给的一次性入口改掉（`tests/ast_scan.py` 的 `transientTree`，不留常驻语法树），
+守卫本身也是"账本为空"的口径：它明确写了一次性扫描走 `transientTree/transientNodes`，
+而不是"登记一下就能全仓扫"。改后 `ast 预算守卫 + dev-path 守卫 + registration-history 守卫`
+合跑 95 passed；§17 漏登记的 T-13 判据 `test_unavailable_facts_are_triageable.py`（单跑 7 passed）
+同批补入，清单 346 → 347 条、零重复。
+
+### 其余各簇的定性（都带取证方式，不是"应该不是我的"）
+
+- **osv 加固守卫 8 例**：最小窗口原地对照——把 `scripts/ci/osv_audit.py` 退回我改它之前
+  （`f899df20^`）的内容跑同一条命令，**两侧同为 8 failed / 63 passed**，失败集合不变；
+  还原后 sha256 与 `cmp` 双校验一致。失败点指向扫描器二进制路径（`E:\bin\true` 非可执行），
+  与本轮两行 bootstrap 无关。
+- **api 清单守卫 5 例**：机器区与生成器不一致——"后端挂载前缀"文档里是 **0 条**、生成器给 **90 条**，
+  属陈旧的生成区（remedy 由守卫自己印着：`python scripts/generate_api_inventory.py --write`）。
+  与本轮无关（我这轮没动路由；台账文档里也没有退役面的残留）。
+- **`test_scripts_import_bootstrap` 1 例**：offender 全是 `scripts/verify_*.py`、
+  `quick_test_cu.py`、`run_longmeval.py` 一类散落脚本（`import neurova` 前没把仓根进 sys.path），
+  我这轮改的是 `scripts/ci/*`，一个都不在其中。这批脚本本身违反 `AGENTS.md` §4
+  "临时验证脚本即用即删，不留 tests//scripts/"，与 §14 的 ④ 同族。
+- **node 侧 2 例**：本机 node v24 在**剥离 env** 下自身断言失败（`ncrypto::CSPRNG` @ node.cc:1224，
+  而 `node -e` 正常），属"双解释器同读数"在 Windows 上无法以最小 env 验证。
+- **`test_turn_elapsed_accumulation`（evolution/experience）**：块 2 里红 3 例；**同一条命令连跑三次
+  稳定红 2 例**（`test_turn_start_discards_the_previous_round_reading`、
+  `test_parallel_round_is_not_less_than_a_single_call`，三次一字不差）。
+  所以它**不是负载抖动**：多出来的第 3 例 `test_parallel_round_reaches_the_parent_context`
+  只在整块里红 ⇒ 是**分组/顺序依赖**（本仓标准：整目录跑与抽文件单跑给出不同集合，
+  不能据此判非确定性——我一开始就这么写错了，按上面的同命令三连跑改正）。
+  该文件与本轮无 import 关系，红为预存；分组依赖这条留给其归属方查。
+- **块 1 被杀**：该块 120 个文件里本轮我碰过的为 **0 个**（逐名比对 `git diff --name-only 4e6fb7f8..HEAD`
+  与块内文件集合），所以不是我引入；但**它到底死在哪个文件没有读数**——我的 runner 只留了摘要行、
+  没留原始 stdout，这是取证设计上的缺陷（只验"有没有摘要"，没验"停在哪"），下一步要补的
+  就是让 runner 落 raw 输出并打最后一行进度标记。**块 1 因此处于"未验证"状态，不等于绿。**
+
 
 
 
