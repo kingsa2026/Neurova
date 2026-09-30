@@ -63,6 +63,7 @@
               <GlassButton variant="ghost" size="sm" @click="browserExtract">{{ t('computer.extract') }}</GlassButton>
             </div>
             <div class="action-grid-row">
+              <a-input v-model:value="semanticTarget" :placeholder="t('computer.smartClick')" @press-enter="smartClick" />
               <GlassButton variant="ghost" size="sm" @click="smartClick">{{ t('computer.smartClick') }}</GlassButton>
             </div>
           </div>
@@ -118,6 +119,7 @@ const scrollDir = ref('down')
 const scrollAmount = ref(3)
 const browserUrl = ref('')
 const shellCommand = ref('')
+const semanticTarget = ref('')
 const shellOutput = ref('')
 
 const takeScreenshot = async () => {
@@ -191,8 +193,9 @@ const browserExtract = async () => {
 }
 
 const smartClick = async () => {
+  if (!semanticTarget.value.trim()) return
   try {
-    await smartClickApi(agentId, clickX.value, clickY.value)
+    await smartClickApi(semanticTarget.value.trim())
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }

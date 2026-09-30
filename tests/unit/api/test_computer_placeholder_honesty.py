@@ -66,7 +66,6 @@ ENDPOINT_DIR = pathlib.Path(computer_ep.__file__).parent
 
 # (处理函数名, 该端点原先谎报成功的形态) —— 逐个点名，便于回归时定位是哪一个又躺回去
 PLACEHOLDER_HANDLERS: list[typing.Tuple[str, str]] = [
-    ("smart_click", "code 0 + found 恒 False"),
     ("smart_type", "code 0 + found 恒 False"),
     ("browser_extract_links", "code 0 + links 恒空"),
     ("browser_execute_js", 'code 0 + 谎报 "JS executed"'),
