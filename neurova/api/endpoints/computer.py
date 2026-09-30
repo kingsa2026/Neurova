@@ -479,10 +479,53 @@ def _refuseUnimplemented(feature: str, previousLie: str) -> typing.NoReturn:
 
 @router.post("/smart-click")
 async def smart_click(body: SmartClickRequest):
-    """智能点击：基于语义目标"""
+    """智能点击：把语义目标解析到**当前快照事实**，唯一命中才动作。
+
+    不猜 CSS 选择器、不跨快照认句柄（那是 T-08 的 ref 面）。歧义与未命中是两种
+    可分诊的事实，各自一个码——不再把"试过但没找到"和"没实现"混成同一形态。
+    """
     _log_action("smart_click", {"target": body.target})
-    # found 恒 False 与"试过但目标不在"不可区分，正是本拒绝要消灭的形态
-    _refuseUnimplemented("语义目标智能点击", "code 0 + found 恒 False")
+    from neurova.computer_use import get_computer_use_manager
+    from neurova.computer_use.browser_manager import snapshotActionableCandidates
+    from neurova.computer_use.target_resolver import resolveTarget
+
+    manager = get_computer_use_manager()
+    snap = await manager.browser_dom_snapshot()
+    if not getattr(snap, "success", False):
+        raise HTTPException(
+            status_code=502,
+            detail=f"无法取得页面快照事实，语义点击未执行：{getattr(snap, 'error', '未知原因')}",
+        )
+    tree = snap.data if isinstance(snap.data, str) else (snap.data or {}).get("snapshot", "")
+    resolution = resolveTarget(body.target, snapshotActionableCandidates(tree))
+    if resolution.state == "ambiguous":
+        listing = "、".join(f"{c.role}「{c.name}」" for c in resolution.candidates[:8])
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"目标「{body.target}」在当前快照里命中 {len(resolution.candidates)} 个可交互元素"
+                f"（{listing}），不代为挑选——请给更具体的目标（带角色说法或唯一名称），"
+                f"或改用 browser_dom_snapshot + browser_click_role 按事实定位"
+            ),
+        )
+    if resolution.state != "resolved":
+        raise HTTPException(
+            status_code=404,
+            detail=f"目标「{body.target}」在当前快照事实里无可交互命中（先 browser_navigate 打开页面）",
+        )
+    hit = resolution.candidate
+    result = await manager.browser_click_role(hit.role, hit.name, generation=snap.generation)
+    if not getattr(result, "success", False):
+        raise HTTPException(
+            status_code=502,
+            detail=f"已解析到 {hit.role}「{hit.name}」但点击失败：{getattr(result, 'error', '未知原因')}",
+        )
+    return {
+        "success": True,
+        "matched": {"role": hit.role, "name": hit.name},
+        "matchedBy": resolution.matchedBy,
+        "generation": snap.generation,
+    }
 
 
 @router.post("/smart-type")
