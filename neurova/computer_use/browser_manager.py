@@ -19,7 +19,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
 
@@ -817,6 +817,205 @@ def _trim_snapshot_tree(
         lines = lines[:max_nodes]
         truncated = True
     return "\n".join(lines), truncated
+
+
+SNAPSHOT_CONTEXT_BUDGET = 8000
+
+# 全树取样条数上限：对"能塞进预算的最大条数"做二分。不取固定值是因为真实页面的
+# 区带极碎（活体取证 MDN 一页 566 个区带、最大区带仅 9 项），按区带分配预算会直接爆表，
+# 必须把预算分给整棵树。上限只为收敛二分，不是语义值。
+_FOLD_K_CEILING = 1024
+
+# 祖先链只保最近 1 层（直接父行，语义锚点如 listitem/navigation 还在）。
+# 实测取的数（2026-09-30 活体，同预算 8000 下能留下的可交互项数）：
+#   不封顶        维基 22 / HN 29 / MDN 45
+#   封到 1 层     维基 59 / HN 47 / MDN 49   ← 采纳
+#   完全扁平      维基 67 / HN 85 / MDN 60（但丢掉"这个链接在哪个区带"的信息）
+# 深嵌套页里整条祖先链会吃掉大半预算，换来的层级信息密度远低于多留的元素。
+_FOLD_ANCESTRY_DEPTH = 1
+
+
+@dataclass
+class SnapshotFold:
+    """折叠读数 —— 与 `tool_offload.OffloadOutcome` 同形：文本之外必须自带"藏了多少"。
+
+    只回一个布尔等于让模型自己猜规模：活体量测下折叠页的可交互项总数是保留数的
+    10–30 倍，"看到 50 条链接"会被误读成"页面只有 50 条"。
+    """
+
+    text: str                 # 进上下文的折叠后正文
+    hiddenCount: int          # 被折起、未在正文呈现的可交互项数
+    didFold: bool
+    charsTotal: int           # 折叠前整棵 aria 树的字符数
+    actionableTotal: int      # 折叠前可交互项总数（含恒定保留的容器型）
+
+
+# 折叠标记：role 解析下得到 "/folded"，不在可交互集合内 —— 模型看得见"藏了多少"，
+# 却不会把它当成一个可点元素。与 tool_offload._head_tail_preview 的"显式计数"同一口径。
+_FOLD_MARKER_ROLE = "/folded"
+
+
+def _ariaRoleToken(line: str) -> Optional[str]:
+    """aria 快照行首形态：'<缩进>- <role> \"名\" [属性]' → 取 role token。"""
+    stripped = line.strip()
+    if not stripped.startswith("- "):
+        return None
+    token = ""
+    for ch in stripped[2:]:
+        if ch in ' "\'[':
+            break
+        token += ch
+    return token.lower().rstrip(":") or None
+
+
+def _snapshotActionableRoles() -> frozenset:
+    """可交互 role 口径单源：与 role 定位动作（click_role/fill_role）面向的是同一批元素。"""
+    return frozenset({
+        "button", "link", "textbox", "combobox", "checkbox", "radio",
+        "menuitem", "menu", "tab", "option", "searchbox", "slider",
+        "switch", "spinbutton", "listbox", "treeitem", "gridcell",
+    })
+
+
+def _foldLine(indent: int, hiddenByRole: "Dict[str, int]", ancestryElided: bool = False) -> str:
+    total = sum(hiddenByRole.values())
+    detail = "、".join(f"{role}×{n}" for role, n in sorted(hiddenByRole.items()))
+    note = "；已省略祖先层级，正文按扁平呈现" if ancestryElided else ""
+    return (
+        f"{' ' * indent}- {_FOLD_MARKER_ROLE}: 折叠 {total} 项（{detail}）；"
+        f"全文改用 browser_dom_read 续读{note}"
+    )
+
+
+def _countActionableLines(text: str) -> int:
+    """可交互项总数口径单源（容器型也算一项）。"""
+    roles = _snapshotActionableRoles()
+    return sum(1 for ln in text.splitlines() if _ariaRoleToken(ln) in roles)
+
+
+def foldSnapshotTree(
+    tree: str,
+    budget: int = SNAPSHOT_CONTEXT_BUDGET,
+) -> SnapshotFold:
+    """按区带预算折叠 aria 快照，替代头部硬切。
+
+    头部 `tree[:budget]` 的病：真机量测下 3/10 页触发，触发时可交互元素被整段带走
+    81%–93%，且留下的前缀几乎全是页头导航。本函数改为**跨全树等距取样**——
+    把预算分给整棵树的候选元素（含树尾），其余折成一条显式计数行。
+
+    取样条数不固定：二分出"能塞进预算的最大条数"，用满预算。
+
+    返回 `SnapshotFold`（正文、被折项数、是否折叠、折叠前字符数、折叠前可交互项总数）；
+    预算内原样透传并如实标注 `didFold=False`，空串不折叠。
+
+    取舍（有意为之，勿"顺手优化"回去）：折叠保留的元素数可以**少于**头部硬切
+    ——计数行与等距取样要付预算。判据是覆盖整页而非堆数量：硬切留下的是同一区带
+    的连续前缀，模型会误以为页面就只有那些元素。
+    """
+    if not tree:
+        return SnapshotFold("", 0, False, 0, 0)
+    if len(tree) <= budget:
+        return SnapshotFold(tree, 0, False, len(tree), _countActionableLines(tree))
+
+    lines = tree.splitlines()
+    actionable = _snapshotActionableRoles()
+    indentOf = [len(ln) - len(ln.lstrip()) for ln in lines]
+    isAction = [(_ariaRoleToken(ln) in actionable) for ln in lines]
+
+    # 每个可交互行归到它的直接父行（区带）；父行索引 -1 表示树根
+    parent: List[int] = []
+    stack: List[Tuple[int, int]] = []
+    for i, ind in enumerate(indentOf):
+        while stack and stack[-1][0] >= ind:
+            stack.pop()
+        parent.append(stack[-1][1] if stack else -1)
+        stack.append((ind, i))
+
+    # 可交互行分两类：带可交互后代的（menu/grid/listbox 一类）是**容器**，恒定保留
+    # （折掉它连子树一起消失、计数会虚报）；其余是**取样候选**。
+    hasActionChild: set = set()
+    for i, act in enumerate(isAction):
+        if act and parent[i] >= 0:
+            hasActionChild.add(parent[i])
+    containerAct = {i for i in hasActionChild if isAction[i]}
+    items = [i for i, act in enumerate(isAction) if act and i not in containerAct]
+
+    # 每行的子树右边界（选中一条 link 要连带它的 /url 等属性行）
+    subtreeEnd = [len(lines)] * len(lines)
+    openStack: List[Tuple[int, int]] = []
+    for i, ind in enumerate(indentOf):
+        while openStack and openStack[-1][0] >= ind:
+            subtreeEnd[openStack[-1][1]] = i
+            openStack.pop()
+        openStack.append((ind, i))
+
+    def hiddenRolesFor(sel: set) -> "tuple[Dict[str, int], int]":
+        roles: Dict[str, int] = {}
+        for i in items:
+            if i in sel:
+                continue
+            role = _ariaRoleToken(lines[i]) or "元素"
+            roles[role] = roles.get(role, 0) + 1
+        return roles, sum(roles.values())
+
+    def pickSpaced(k: int) -> List[int]:
+        """跨整条候选序列等距取样，首尾都覆盖 —— 头部偏置正是本单要消灭的东西。"""
+        if k <= 0 or not items:
+            return []
+        if k >= len(items):
+            return list(items)
+        if k == 1:
+            return [items[len(items) // 2]]
+        return [items[round(t * (len(items) - 1) / (k - 1))] for t in range(k)]
+
+    def render(sel: set, withAncestry: bool) -> "tuple[str, int]":
+        keep = set(sel) | containerAct
+        elided = not withAncestry
+        if withAncestry:
+            for i in sel:
+                keep.update(range(i + 1, subtreeEnd[i]))
+                p, depth = parent[i], 0
+                while p >= 0 and depth < _FOLD_ANCESTRY_DEPTH:
+                    keep.add(p)
+                    p, depth = parent[p], depth + 1
+                if p >= 0:
+                    elided = True  # 还有更上层的祖先被舍掉
+        roles, hiddenTotal = hiddenRolesFor(sel)
+        out = [lines[i] for i in range(len(lines)) if i in keep]
+        if roles:
+            out.append(_foldLine(0, roles, elided))
+        return "\n".join(out), hiddenTotal
+
+    def largestFitting(withAncestry: bool) -> "Optional[tuple[str, int]]":
+        lo, hi, best = 1, min(len(items), _FOLD_K_CEILING), None
+        if not items or len(render(set(pickSpaced(1)), withAncestry)[0]) > budget:
+            return None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            text, hiddenTotal = render(set(pickSpaced(mid)), withAncestry)
+            if len(text) <= budget:
+                best = (text, hiddenTotal)
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+
+    actionableTotal = len(items) + len(containerAct)
+
+    # 主路径：保结构（祖先链 + 属性子树），树形状对模型定位有用
+    primary = largestFitting(withAncestry=True)
+    if primary is not None:
+        return SnapshotFold(primary[0], primary[1], True, len(tree), actionableTotal)
+
+    # 兜底：单条元素连祖先链都塞不进预算（超深嵌套页）。降级为**扁平可交互清单**，
+    # 丢结构但不丢事实，仍附全局计数行 —— 绝不退化成无痕硬切。
+    flat = largestFitting(withAncestry=False)
+    if flat is not None:
+        return SnapshotFold(flat[0], flat[1], True, len(tree), actionableTotal)
+
+    # 极端：一条元素行自身就超预算 —— 只报"有多少条、都是什么"，不假装内容在里头像话
+    roles, hiddenTotal = hiddenRolesFor(set())
+    return SnapshotFold(_foldLine(0, roles, True), hiddenTotal, True, len(tree), actionableTotal)
 
 
 class BrowserManager:
