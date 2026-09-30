@@ -11,6 +11,7 @@ Docker Builder 深度模块
 """
 
 from neurova.core.logger import get_logger
+from neurova.core.proc_text import runText
 import subprocess
 import threading
 from dataclasses import dataclass, field
@@ -94,10 +95,8 @@ class DockerBuilder:
                 return self._docker_available
 
             try:
-                result = subprocess.run(
+                result = runText(
                     [self._docker_cmd, "--version"],
-                    capture_output=True,
-                    text=True,
                     timeout=10,
                     check=False,
                 )
@@ -216,10 +215,8 @@ class DockerBuilder:
 
             try:
                 # 执行构建
-                result = subprocess.run(
+                result = runText(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=3600,  # 1小时超时
                     check=False,
                 )
@@ -334,10 +331,8 @@ class DockerBuilder:
                 cmd.append(name_filter)
 
             try:
-                result = subprocess.run(
+                result = runText(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=30,
                     check=False,
                 )
@@ -412,10 +407,8 @@ class DockerBuilder:
             cmd.append(image_id)
 
             try:
-                result = subprocess.run(
+                result = runText(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=30,
                     check=False,
                 )
@@ -453,10 +446,8 @@ class DockerBuilder:
             cmd = [self._docker_cmd, "pull", f"{image}:{tag}"]
 
             try:
-                result = subprocess.run(
+                result = runText(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=300,  # 5分钟超时
                     check=False,
                 )
@@ -495,10 +486,8 @@ class DockerBuilder:
             ]
 
             try:
-                result = subprocess.run(
+                result = runText(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=10,
                     check=False,
                 )
