@@ -48,7 +48,7 @@
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | `smart-type` 归属待定 | **部分**：click 已接；`smart_type` 等 4 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
-| **T-14** | 浏览器/爬虫集成测试 25 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出**（§14）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
+| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出并复算**（§14，含 D-5 复核补的 1 例）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
@@ -749,14 +749,15 @@ generation 校验、两个状态必须可区分、camofox **整句相等**的 pa
 ### 触发：补 T-05/T-12 活体时顺手跑的邻域回归
 
 `tests/integration/` 的浏览器块出红，为判"是不是我改的"逐条对过活代码后发现：**这族红的根因
-与本轮无关，而是同一份从未落地（或已退役）的设计留下的 25 例常驻红**。全集实测：
+与本轮无关，而是同一份从未落地（或已退役）的设计留下的 26 例常驻红**。全集实测：
 
 ```
-25 failed, 4 passed in 2.00s
+25 failed, 4 passed in 2.00s（另 1 例同族后补，见下）
   tests/integration/test_browser_automation.py            2 例
   tests/integration/test_browser_manager_integration.py   5 例
   tests/integration/test_computer_use_browser_integration.py  14 例
   tests/integration/test_scrapling_spider.py              4 例
+  tests/integration/test_computer_use_integration.py      1 例 ← D-5 复核时新补，见下 ⑤
 ```
 
 ### 判据（逐条问活代码，不问测试的意图）
@@ -776,7 +777,8 @@ _resolve_backend 形参名 = ['self', 'preferred']   ← 测试把它当 URL 路
 
 1. **YAML 后端路由**：`BrowserManager(config_path=…)`、`_backend_configs`、
    `_resolve_backend("https://…")` 按 URL pattern 选后端——三项在活代码里都没有
-   （`_resolve_backend` 收的是**后端名**，`_load_config` 只看 `HAS_*` 与环境变量）。此族 **19 例**。
+   （`_resolve_backend` 收的是**后端名**，`_load_config` 只看 `HAS_*` 与环境变量）。此族 **17 例**
+   （`test_browser_manager_integration` 4 + `test_computer_use_browser_integration` 13）。
 2. **快照压缩**：`_compress_snapshot` / `test_browser_snapshot_returns_compressed_tree` 断言的是
    头部压缩那套；该面已由 `foldSnapshotTree` 单源取代（T-06），属**退役未撤测**。**2 例**。
 3. **爬虫工具**：`run_spider` 从不读 `concurrency`/`domain_delay`/`obey_robots` ⇒ `create_spider(**kwargs)`
@@ -787,12 +789,26 @@ _resolve_backend 形参名 = ['self', 'preferred']   ← 测试把它当 URL 路
    没有一条断言（`test_routing_logic` 只把期望与实际打印出来对比，不判失败），且是 `async def`
    而未标 `pytest.mark.asyncio`——在 `asyncio: mode=Mode.STRICT` 下直接判红。
    按 `AGENTS.md` §4"临时验证脚本即用即删，不留 `tests/`"，这 2 例本不该存在。**2 例**。
-   合计 19 + 2 + 4 + 2 = 25，与实测数一致。
+   合计 17 + 2 + 4 + 2 + 1 = 26，与实测数一致。
+   ⚠️ 本单初版把它记成"19 + 2 + 4 + 2 = 25"——那是**我自己加的错**（式子本身就等于 27），
+   ① 的 19 是把 ② 的两例从 25 里减了两遍。登记台账里的数必须能被复算，这种错比漏报更坏。
+5. **退役面残名（D-5 复核时补进台账）**：`test_computer_use_integration.py` 也是同类——
+   通篇 `print` 不断言（schema 取不到只打一行 `✗ …: schema 缺失` 就完事），
+   且候选清单里还列着 `computer_visual_parse`（D-5 已退役，生产码现零命中，
+   复算：`grep -rnE "visual_parse|visualParse|VisualParse" neurova/ src/ NeurUI/src` → 0；
+   ⚠️ 复验时**必须带 `-E`**：不带时竖线是字面量，那条命令会"零命中"得毫无意义）。
+   所以它既属"零断言脚本混在测试根"，又带一个退役残名。
+   ⚠️ 别把它和 `tests/unit/tools/test_capability_graph_phase3.py` 混为一谈：那份是
+   `xfail(strict=False)` **显式声明"API 未交付的先写规格验收面"**，reason 里点名了
+   全历史 `-S` 检索零命中与台账章节——那是诚实的挂起态，不是常驻红，也不该被"修绿"。
+   两者的区别就是本单一直在说的：失败要么以诚实形态暴露，要么显式登记为未交付，
+   不可以"看起来在跑"冒充有守卫。
 
 ### 为什么它今天还没炸
 
 CI 不跑这族文件：`.cnb.yml:162` 的被测集是 `grep -v '^#' scripts/ci/protected_tests.txt`
-（现 1315 条）逐行拼出来的，而这四个文件名在该清单里**零命中**。于是红只在本地全量出现——
+（现 **346 个条目**，别拿 `wc -l` 的 1315 当条数——那含注释行）逐行拼出来的，
+而这五个文件名在该清单里**零命中**。于是红只在本地全量出现——
 但它每次都要求人肉证明"不是我改的"（本轮就付了这笔成本，见提交说明里的因果排除段）。
 
 ### 🔒 D-7 要拍的板（不可逆点在两侧）
