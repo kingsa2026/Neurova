@@ -15,7 +15,12 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
-from neurova.computer_use.browser_manager import BrowserBackend, BrowserResult
+from neurova.computer_use.browser_manager import (
+    BROWSER_NOT_STARTED_ERROR,
+    NO_ACTIVE_TAB_ERROR,
+    BrowserBackend,
+    BrowserResult,
+)
 from neurova.core.config import get as env_get
 from neurova.core.logger import get_logger
 
@@ -142,7 +147,7 @@ class CamofoxServerBackend(BrowserBackend):
         外层方法再 catch 一次转 BrowserResult。
         """
         if not self._client:
-            raise RuntimeError("CamofoxServerBackend not initialized")
+            raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
         kwargs: Dict[str, Any] = {}
         if json is not None:
             kwargs["json"] = json
@@ -177,7 +182,7 @@ class CamofoxServerBackend(BrowserBackend):
             return None
         tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
         if not tab:
-            return BrowserResult(success=False, error="无活动浏览器 tab")
+            return BrowserResult(success=False, error=NO_ACTIVE_TAB_ERROR)
         if tab["generation"] != generation:
             return BrowserResult(
                 success=False,
@@ -203,7 +208,7 @@ class CamofoxServerBackend(BrowserBackend):
         if not target_id:
             target_id = self._active_target_id
         if not target_id:
-            return None, BrowserResult(success=False, error="无活动浏览器 tab")
+            return None, BrowserResult(success=False, error=NO_ACTIVE_TAB_ERROR)
         tab = self._tabs.get(target_id)
         if not tab:
             return None, BrowserResult(success=False, error=f"target 不存在: {target_id}")
@@ -536,7 +541,7 @@ class CamofoxServerBackend(BrowserBackend):
         """camofox /screenshot 返回原始 PNG 字节,转 base64 后塞 BrowserResult.screenshot"""
         start = time.time()
         if not self._client:
-            return BrowserResult(success=False, error="not initialized")
+            return BrowserResult(success=False, error=BROWSER_NOT_STARTED_ERROR)
         tab_id, err = await self._resolve_tab_id(None)
         if err:
             return err

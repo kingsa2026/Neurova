@@ -38,7 +38,7 @@
 | **T-02** | 桌面/浏览器工具三张名字清单无一致性守卫 | — | +90（全在测试） | 零（纯守卫） | — | 入库 `b88f36c2`；纯守卫无活体要求 |
 | **T-03** | 快照新鲜度两后端语义分叉（5 vs 1） | T-02 | ≈ +25 | 中 | — | 入库 `5e603c84`；活体 ✅（§13.2：generation 2 到 3，旧值复点被拒） |
 | **T-04** | "只写不读"族：`max_marks`、1200 节点承诺、observe 不吃 generation | T-02 | ≈ **−20** | 低 | 无 | 入库 `26da655b`；活体 §5.6 ✅ |
-| **T-05** | SOM 标记态挂实例：并发会话互相覆盖 | T-02 | +40 | 中 | — | 入库 `34f61007`；**活体欠**（两会话并发验坐标归属） |
+| **T-05** | SOM 标记态挂实例：并发会话互相覆盖 | T-02 | +40 | 中 | — | 入库 `34f61007`；活体 ✅（§13.3：真实截屏+真实检测器，平移 3px 逼出 24 个同 id 撞号，各会话解到自己坐标；变异对照=单槽覆盖时 A 实发 B 的坐标） |
 | **T-06** | 快照被硬切时不报丢失量、不接分片续读补救 | 30% 页触发，触发时九成可交互元素不可见 | +30→+214 | 中 | 无 | 入库 `056db20b`；活体 §7.5 ✅ |
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
 | **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | 🔒 D-3 | 未开工 |
@@ -46,11 +46,13 @@
 | **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | 🔒 D-4 | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | `smart-type` 归属待定 | **部分**：click 已接；`smart_type` 等 4 面仍诚实 501 |
-| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**活体未复现原触发态**——本轮真页面正文 138951 字符正常、about:blank 回 - document 属非空成功，唯初次的「关 tab 后 aria_snapshot 返回空串」未能重现，不冒充活体已验 |
+| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**（§13.3：关掉活动 tab → 502 且 detail 点名"未执行"），但**原"空正文"形态仍未复现**——5 个候选态逐个记了实际读数，`about:blank`/空 html 回 `- document`（非空成功，正确），关 tab 回 Playwright 自带错误；camofox 侧空 `raw_snapshot` 需真容器，仍是本单唯一活体缺口 |
+| **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分)` 已走完；
-**剩余顺序**：补 T-05 活体（需两会话看到不同画面才有判别性）→ T-12 的活体触发态复现；T-03 活体已通过（§13.2）
-→ 决策后 `T-08` → 回补 T-11 的歧义分支 → `T-07` → `T-09`。
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
+**剩余**：T-12 的 camofox 空快照活体（需真容器）→ 决策后 `T-08` → 回补 T-11 的歧义分支
+（候选列得出、动不了，卡在 🔒 D-1/D-2）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）。
+自主可完成的面至此**全部收口**。
 
 **T-02 必须最先**：它是守卫，T-03/T-04/T-05 都在改这三张表覆盖的面；先有守卫，后面的改动才会被拦住而不是被绕过。
 
@@ -603,10 +605,101 @@ navigate success=True url=file:///…
 改 DOM 的 role 动作确实推进了 generation（2 到 3），且过期复点被拒、消息可分诊。
 这正是 T-03 修的分叉（修前 Playwright 侧校验而不推进，同一条序列会照样通过）。
 
-**T-05 未获判别性证据（如实记，不判通过）**：两会话各做一次真 SOM 快照并各点自己编号，
-两次都得到同一坐标（60 个 mark、id 12614、center 1768,1007）。原因是**同一宿主桌面
-产出同一张截图**，两会话的编号表本来就相同——因此该读数无法区分"按会话隔离"与
-"共用单槽"，属**非判别性实验**，不能算作通过。
-坐标归属目前由 `test_som_marks_are_session_scoped.py` 钉住（它断言的是
-"点击实际取到的坐标来自本会话那张图的映射"，两喂不同 mark 集，具判别性）。
-要拿到活体级证据需构造两会话看到**不同画面**（多窗口或沙箱桌面），本单未做到，保持未验状态。
+**T-05（本轮）**：两会话各做一次真 SOM 快照并各点自己编号，两次都得到同一坐标
+（60 个 mark、id 12614、center 1768,1007）。原因是**同一宿主桌面产出同一张截图**，
+两会话的编号表本来就相同——属**非判别性实验**，不能算作通过。
+⚠️ 该轮另有一句是错的：探针报"会话注入点 None"，是我去找了已退役的 `set_session_id`，
+真正的写入口是 `turn_context.set_turn_identity(user_input, session_id, user_id)`
+（`neurova/core/turn_context.py:279`）。判别性活体已由 §13.3 补齐，本段留作失败记录。
+
+### 13.3 T-05 判别性活体 + T-12 触发态复现尝试（2026-09-30，真宿主桌面 / 真 Chromium）
+
+取证口径：全程用**生产检测器** `som.mark_screenshot` 处理**真实截屏字节**，经生产处理函数
+`ToolExecutor._execute_computer_som_snapshot` / `_execute_computer_click_mark` 走完整链路。
+只换掉两处外部依赖：① 截屏来源按当前会话返回不同的真实 PNG 字节；② 像素点击
+`actions.click_screenshot_point` 只记录实际解算出的 `(cx, cy)`、**绝不真点鼠标**。
+会话身份经 `set_turn_identity(..., session_id=...)` 注入，与生产同一条路径。
+
+**① 自然取样（A=真实桌面截屏，B=同一桌面上编号标注已 Overlay 的真实位图）**：
+
+```
+真实检测器读数：A 标记 60 / B 标记 60；id 交集 1，其中同 id 不同坐标 0，仅 A 有 58
+取仅属会话 A 的编号 79493，期望坐标 (1713, 941)
+  [生产形态·会话隔离] A 点 79493 -> 实发坐标 (1713, 941) | refusal=None        → ✓ 解到自己那张图
+  [变异对照·单槽覆盖] A 点 79493 -> 实发坐标 None        | refusal='stale_generation'
+                      err='SOM 编号 79493 不在最近快照中（已过期或未快照）'    → ✗ 未解到 A 的坐标
+```
+
+判别性来自**变异对照**：把会话键改成恒定值（= 修复前的单槽覆盖语义），同一条断言立刻转红，
+且拒绝路径上没有发出任何点击。另一轮自然取样撞到 1 个"同 id 不同坐标"。
+
+**② 确定性逼出最坏形态（B = 同一张真实截屏整体平移 3px 后的真实位图）**：
+
+```
+A 真实截屏 379722B / B 同屏平移3px 379911B；标记 60/60，同 id 不同坐标 24 个
+取撞号 50279：A 图上 (557, 318)，B 图上 (554, 315)
+  [生产形态·按会话存] A 实发 (557, 318) | B 实发 (554, 315) → ✓ 各解各的坐标，隔离生效
+  [变异对照·单槽覆盖] A 实发 (554, 315) | B 实发 (554, 315) → ✗ 跨会话误寻址发生
+                      （A 拿到的 (554, 315) 属于 B 那张图 = 点错元素）
+```
+
+SOM 编号按 `(中心//8, label)` 散列（`som.stable_id`，`_GRID=8`），平移 1–7 像素时多数标记
+仍落在同一量化格 ⇒ 撞号是设计使然而非巧合；该前提由 `tests/unit/computer_use/test_som.py::test_grid_quantization_nearby_same` 钉住。
+这条把 T-05 最怕的形态**在活体上演示了出来**：修复前，会话 A 会按别人那张图的坐标点击。
+如实限定：B 的画面是"真实像素 + 构造位移"，位移本身是为逼出撞号造的条件，不是宿主上自然发生的第二块屏。
+
+**T-12 触发态复现尝试（真 Chromium，5 个候选态逐个记实际读数）**：
+
+```
+[正常页面 example.com]        success=True  dataLen=1075
+[about:blank]                 直读 aria_snapshot -> '- document'   → dom_snapshot success=True dataLen=10（非空成功，正确）
+[data:text/html,<html></html>] 直读 aria_snapshot -> '- document'  → 同上
+[活动 tab 已关闭后]            success=False err='Locator.aria_snapshot: Target page, context or browser has been closed'
+[无活动 tab 时]                success=False err='Not initialized'
+```
+
+**结论：本轮仍未复现"success=True + 空正文"这一原始形态**。§13.1 那次读数出自
+经 `computer.smart_click()` 的更外层路径，而这里直取 `PlaywrightBackend.dom_snapshot`
+的关闭态得到的是 Playwright 自带错误（本就已经诚实）。产出侧的空树拒绝仍保留：
+它是"没拿到事实"与"页面确实没有可交互元素"唯一可分诊的落点，且 `about:blank` 类
+**非空成功**未被误判成故障（反向对照在 `test_empty_snapshot_not_success.py` 里）。
+camofox 侧的 `raw_snapshot` 空值需真容器才能活体，本轮仍以两后端 parity 的单元判据覆盖——**这是 T-12 剩下的活体缺口**。
+
+**502 分支已可达（同轮补测，真 Chromium + 真端点处理函数）**：§13.1 记的"502 没被观测到"
+在 T-12 落地后被补上了——关掉活动 tab 让快照真的取不到：
+
+```
+navigate -> success=True url=file:///…
+  [正对照] 目标='提交订单' -> 200 {'success': True, 'matched': {'role': 'button', …}, 'generation': 2}
+  现有 tab 读数：[{'target_id': 'tab_cf6b9f6e', 'generation': 3, …, 'active': True}]
+  关闭 tab tab_cf6b9f6e -> success=True
+  [关全部 tab 后] 目标='唯一链接' -> 502 无法取得页面快照事实，语义点击未执行：Not initialized
+```
+
+于是量出**同根因的第二批出口**（教义第 5 条）：502 本身诚实，但 detail 里给模型的原因是
+内部英文裸串 `Not initialized`——既不点名"没 tab"还是"后端没起"，也不给下一步动作。
+散落面比预想大（红灯里的 AST 判据一次点出 14 + 4 处）：
+
+| 落点 | 处数 | 原形态 |
+|---|---|---|
+| PlaywrightBackend 各读/动作侧 `if not self._page` | 11 | `RuntimeError("Not initialized")` |
+| PlaywrightBackend `open_target` 无 context | 1 | 同上 |
+| ScraplingBackend `navigate` 无 fetcher | 1 | 同上 |
+| PlaywrightBackend generation 校验无 tab | 1 | `"无活动浏览器 tab"`（有中文无动作） |
+| camofox `_check_active_generation` / `_resolve_tab_id` | 2 | 同上 |
+| camofox `_request` / `screenshot` | 2 | `"CamofoxServerBackend not initialized"`、`"not initialized"` |
+
+三处三种措辞且两处把类名吐给模型，正是双源未收口。**登记并落地为 T-13**：
+单源两个带 marker 的文案 `NO_ACTIVE_TAB_ERROR`（`no-active-tab`）与
+`BROWSER_NOT_STARTED_ERROR`（`browser-not-started`），两后端共用；判据
+`tests/unit/computer_use/test_unavailable_facts_are_triageable.py`（7 例：读侧、动作侧、
+generation 校验、两个状态必须可区分、camofox **整句相等**的 parity、AST 反证英文裸串不得回潮）。
+红灯实证（只加常量、未接线时）7 例全红，其中 AST 那条直接列出 13 个行号；接线后 7 例全绿。
+`tests/unit/computer_use` 块 480 passed / 2 skipped（= 改前 473 + 新增 7）。
+措辞收口后的 502 detail：`… 语义点击未执行：no-active-tab: 无活动浏览器 tab，未取得页面事实——请先 browser_navigate 打开页面（或 browser_open_target 新开 tab）`。
+
+**manager 层另两处英文抛出未动**（`browser_manager.py:1187/1192`
+`Browser backend not available` / `Failed to initialize backend`）：那属"能力可用性"口径，
+正是被 🔒 D-3 锁住的 T-07（带 owner 的三态探测）要统一承载的面，本轮不越权先改一半。
+
+
