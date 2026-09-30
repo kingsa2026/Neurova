@@ -40,9 +40,42 @@ def log(msg: str) -> None:
     print(f"[pkg] {msg}", flush=True)
 
 
-def run(cmd: list[str] | str, shell: bool = False, cwd: Path | None = None) -> int:
-    r = subprocess.run(cmd, shell=shell, cwd=str(cwd or REPO))
+def run(cmd: list[str] | str, shell: bool = False, cwd: Path | None = None,
+        env: dict | None = None) -> int:
+    r = subprocess.run(cmd, shell=shell, cwd=str(cwd or REPO),
+                       env={**os.environ, **(env or {})})
     return r.returncode
+
+
+def tauri_build_env() -> dict:
+    """`tauri build` 的进程环境：把 `LOCALAPPDATA` 挪出 systemprofile。
+
+    实机踩到（2026-09-30，节点 orange-connector，whoami=`nt authority\system`）：
+    自托管 Runner 以 SYSTEM 身份跑，`%LOCALAPPDATA%` 落在
+    `C:\WINDOWS\system32\config\systemprofile\AppData\Local`。Tauri 的 NSIS 打包器
+    把自带 makensis 解到那里 —— 而**该位置的可执行文件加载不了**：
+
+        该位置 makensis.exe                    → 0xC0000135（STATUS_DLL_NOT_FOUND）
+        同一份字节拷到 D:\ci-localappdata\...  → v3.13 正常
+        系统 choco NSIS                        → v3.13 正常
+
+    失败形态是 `Unable to start child process, error 0x2` /
+    `Failed to bundle app with makensis` —— 看着像 NSIS 缺失或脚本有错，
+    根因却是**缓存目录选在了不可执行的位置**。
+
+    根修：把 `LOCALAPPDATA` 指到一个普通目录，Tauri 据此决定 NSIS 缓存落点。
+    只影响本次构建的子进程，不动机器环境。非 Windows 或已指到正常位置时原样返回。
+    """
+    if os.name != "nt":
+        return {}
+    cur = os.environ.get("LOCALAPPDATA", "")
+    if "systemprofile" not in cur.lower():
+        return {}
+    # 与仓内其他构建产物同盘，避开系统盘权限；目录由 Tauri 自行创建子路径。
+    base = Path(os.environ.get("NEUROVA_BUILD_LOCALAPPDATA", r"D:\ci-localappdata"))
+    base.mkdir(parents=True, exist_ok=True)
+    log(f"LOCALAPPDATA 落在 systemprofile（{cur}）—— 重定向到 {base}（该处 exe 加载不了）")
+    return {"LOCALAPPDATA": str(base)}
 
 
 def signing_identity_of_tauri_conf() -> str | None:
@@ -120,7 +153,8 @@ def build_tauri() -> Path:
     # 传 argv 数组、不经 shell：`--config` 的路径可能含空格，过 shell 会被二次解析
     # （实机踩到引号被剥）。Windows 上 npx 是 npx.cmd，须经 cmd 解析扩展名。
     npx = "npx.cmd" if os.name == "nt" else "npx"
-    if run([npx, "tauri", "build", *extra], cwd=REPO / "NeurUI") != 0:
+    if run([npx, "tauri", "build", *extra], cwd=REPO / "NeurUI",
+           env=tauri_build_env()) != 0:
         raise RuntimeError("tauri build 失败")
     return find_kernel()
 
