@@ -286,10 +286,21 @@ class CamofoxServerBackend(BrowserBackend):
             # 裁剪读数（行数/可交互项数）随 BrowserResult 一并上报，不只回一个布尔
             from neurova.computer_use.browser_manager import applySnapshotBudget
 
+            raw_snapshot = data.get("snapshot", "")
+            if not (raw_snapshot or "").strip():
+                # 与 Playwright 后端同一语义：空正文是"没拿到事实"，不是"页面上什么都没有"
+                from neurova.computer_use.browser_manager import EMPTY_SNAPSHOT_ERROR
+
+                return BrowserResult(
+                    success=False,
+                    error=EMPTY_SNAPSHOT_ERROR,
+                    duration_ms=(time.time() - start) * 1000,
+                    generation=self._active_generation(),
+                )
             budget = applySnapshotBudget(
-                data.get("snapshot", ""), max_nodes, max_depth
+                raw_snapshot, max_nodes, max_depth
             ) if (max_nodes is not None or max_depth is not None) else None
-            snapshot_text = budget.text if budget else data.get("snapshot", "")
+            snapshot_text = budget.text if budget else raw_snapshot
             hiddenNodes = budget.hiddenNodes if budget else 0
             hiddenActionable = budget.hiddenActionable if budget else 0
             truncated = bool(data.get("truncated", False)) or bool(budget and budget.truncated)
