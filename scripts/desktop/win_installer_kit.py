@@ -179,7 +179,8 @@ def run(cmd, cwd: Path | None = None, env: dict | None = None) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 
 INSTALL_PS1 = r"""# Neurova Windows 打包机初始化（Issue #332）
-# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / NSIS / VS Build Tools(MSVC) / Python
+# 逐件装齐构建链：git / Node.js 20 / Rust(msvc) / VS Build Tools(MSVC) / Python
+# 不装 NSIS：构建链走 Tauri 自带 NSIS 打包器，宿主 makensis 无消费者（见 win_installer_kit.py）
 # 任一步失败即中止（$ErrorActionPreference = "Stop"），不产来源不明的包。
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
