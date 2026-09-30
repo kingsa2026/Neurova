@@ -41,14 +41,14 @@
 | **T-05** | SOM 标记态挂实例：并发会话互相覆盖 | T-02 | +40 | 中 | — | 入库 `34f61007`；活体 ✅（§13.3：真实截屏+真实检测器，平移 3px 逼出 24 个同 id 撞号，各会话解到自己坐标；变异对照=单槽覆盖时 A 实发 B 的坐标） |
 | **T-06** | 快照被硬切时不报丢失量、不接分片续读补救 | 30% 页触发，触发时九成可交互元素不可见 | +30→+214 | 中 | 无 | 入库 `056db20b`；活体 §7.5 ✅ |
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
-| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | 🔒 D-3 | 未开工；**现场证据已量到**（§13.3：`.env` 设了 URL ⇒ `_camofox_enabled=True`，而 `:9377` 实测超时；今天不出故障只因 playwright 恰在选路首位，一旦缺 playwright 就会推进 supervisor 的 autostart=True 拉起分支） |
-| **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | +200 | **高（改 provider 可见契约）** | 🔒 D-1、D-2 | 未开工（D-6 的歧义分支卡在此：候选列得出、动不了） |
-| **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | 🔒 D-4 | 未开工 |
+| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | ✅ **D-3 已拍**（§19：范围含浏览器/camofox） | 未开工；**现场证据已量到**（§13.3：`.env` 设了 URL ⇒ `_camofox_enabled=True`，而 `:9377` 实测超时；今天不出故障只因 playwright 恰在选路首位，一旦缺 playwright 就会推进 supervisor 的 autostart=True 拉起分支） |
+| **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | +200 | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | 未开工（D-6 的歧义分支卡在此：候选列得出、动不了） |
+| **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
-| **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | `smart-type` 归属待定 | **部分**：click 已接；`smart_type` 等 4 面仍诚实 501 |
+| **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click 与 type 均已接通**：type 判据 7 例 + 活体（真 Chromium 真 fill，DOM 回读到写入值；歧义 409 一字未写；按钮目标 404 而非 502；关 tab 502 带具名 marker）。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
-| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出并复算**（§14，含 D-5 复核补的 1 例）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
+| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | ✅ **D-7 已拍**（§19：补契约） | 未处置；**全集已量出并复算**（§14，含 D-5 复核补的 1 例）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
@@ -1088,6 +1088,71 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
   根因与修法见 §15 末（模块级 reconfigure 撞上"脚本被进程内加载" + 父进程读子进程不带编码）。
   修完：`test_deploy_config_guard` 全绿；perf / experience 各留 1 例，与旧值同形 ⇒ 预存。
   **教训**：归因不能只比"测试文件名"，还要算上"被测脚本"——我这次差点把 13 例真回归写成"非我引入"。
+
+---
+
+## 19. 第二轮拍板（2026-10-01）：五个决策项全部落定，本工单集转入执行
+
+用户口径逐条照录，下表右列是我据其拆出的**可执行含义**（含义若被否认，以左列为准回改）。
+
+| 项 | 拍板 | 落地含义 |
+|---|---|---|
+| **D-1** | ref 生命周期**绑 generation**（同一份快照内有效） | ref 在 `generation` 推进时即刻失效，失效以 `stale_generation` 拒、消息点名"重新快照"；**不**承诺跨快照稳定。与 §13 的 D-1 问法同源，也与 T-03（改 DOM 的动作推进 generation）咬合 |
+| **D-2** | ref **不暴露** selector/xpath 回退 | 解析只从快照事实出发；歧义的出路是"带 ref 重发"或"重新快照"，不是猜选择器。桌面侧"不猜 CSS 选择器"的既有取向因此保持单源 |
+| **D-3** | 能力三态探测**含浏览器 / camofox** | T-07 的探测面覆盖截图/输入/UIA/aria/camofox 五类；`_camofox_enabled` 这类"只看环境变量"的布尔全部改走带 owner 的三态（可用 / 已配置但不可达 / 未配置），manager 层那两处英文抛出（`Browser backend not available` / `Failed to initialize backend`）同批收进该口径 |
+| **D-4** | 截图**进模型上下文：启用** | 子形状未被指定，我按此前给的默认落并在代码注释里标为可改：**分层兜底**（aria/UIA 阶梯失败或 `refusal` 后才给图）+ **成本闸门**=同一轮内至多一次、且仅在感知失败后。若你要"并列/每步给图"，改的是选路开关一处 |
+| **D-7** | T-14 的 26 例：**补契约** | 不是"照测试原文把三份设计都造出来"。逐子族处置：① **YAML 路由 17 例 ⇒ 真实现** `BrowserManager` 的 `config_path`/`_backend_configs`/URL-pattern 选路；② **压缩 2 例 ⇒ 改判到 fold 契约**（压缩面已被 `foldSnapshotTree` 单源取代，复活它就是造第二份事实源，教义第 6 条）；③ **爬虫 4 例 ⇒ 让 kwargs 真生效**，其中 `obey_robots` 默认 True 必须真读 robots.txt（这条是合规面，之前默认抓是缺陷）；④⑤ **零断言 print 脚本 3 例 ⇒ 改写成有断言的判据**，不删（删等于把"这能力存在过"抹掉） |
+| **附带项** | `smart_type` **实现，与 click 统一** | 复用 `target_resolver` 的三态与 `fill_role` 的两后端既有能力；码位与 click 同形（200/409/404/502）。"统一"含：同一份快照事实、同一套 refusal_code、前端载荷同批改 |
+
+**执行序**（依赖决定，不按省事排）：
+
+1. **附带项 `smart_type`** —— 缝都还在（`target_resolver`、`fill_role`、三态码位），最快闭环，先把"相邻两半一个能用一个 501"的不对称消掉；
+2. **T-08 ref 一等寻址**（D-1/D-2 已定形状）→ 回补 **T-11 歧义分支**（现在 409 只列候选不动手，有 ref 才能真正点得到）；
+3. **T-07 能力三态探测**（D-3 定范围）——顺带吃掉 manager 层两处英文抛出；
+4. **T-09 截图进上下文**（D-4 定启用）；
+5. **T-14 补契约**（D-7）——① 的路由与 ③ 的 robots 各自会牵到别面（选路单源、抓取合规），放最后做，避免中途改口径。
+
+每一步都是独立可回退的一批：先红灯（含它自己的正反对照）→ 绿灯 → 活体（教义第 4 条），
+提交说明带读数。凡我在这张表右列写的"落地含义"若与你的意图不符，说一声我以左列原文为准重做。
+
+### 19.1 附带项 `smart-type` 已落地（2026-10-01）
+
+实现口径：与 `smart-click` 共用 `target_resolver` 与同一份快照事实，但候选面收窄到
+**可输入 role**（新增单源 `browser_manager._snapshotFillableRoles()` +
+`snapshotFillableCandidates()`）。收窄的理由是可分诊性：目标撞上 `button`/`link` 时
+Playwright 的 `fill()` 必然抛错，若不收窄就会把"选错了工具"报成 502"执行失败"，
+收窄后如实回 404 并在文案里指向 `smart-click`。
+
+判据 `tests/unit/api/test_smart_type_semantics.py` 7 例：唯一命中 200 且断言的是
+`fill_role` **实收到的 `(role, name, text, generation)`**（不是返回体里写着 success）、
+歧义 409 且 `filled == []`、未命中 404、"页面确实没有可输入元素"404 不是 500、
+取不到事实 502 且 detail 原样带出产出侧 marker、`no-active-tab` 与
+`browser-not-started` 两种原因在 502 里仍可分辨。
+占位清单同批撤面（`PLACEHOLDER_HANDLERS` 4→3、`_MINIMAL_BODIES` 里连 `smart_click` 的
+死键一起清——`_invoke` 只按清单取键，留着就是只写不读）。
+前端同批：`computer.ts` 加 `smartType(target, text)`、页面加一行输入框与按钮
+（目标沿用上一步的语义输入框，不要求填两遍），11 份 locale 同批加 `smartType` 键。
+
+活体（真 Chromium + 真端点处理函数，`tests` 之外自证）：
+
+```
+navigate success=True
+  目标='用户名输入框' -> 200 {'success': True, 'matched': {'role': 'textbox', 'name': '用户名输入框'},
+                              'matchedBy': 'exact', 'generation': 3}
+  真值回读：#u.value = 'alice' → ✓ 写进了被解析到的那个框
+  目标='备注'（两个同名框）-> 409 命中 2 个可输入元素（textbox「备注」、textbox「备注」），不代为挑选
+  歧义后各框的值：before=['alice', '', ''] after=['alice', '', ''] → ✓ 一字未写
+  目标='按钮'（可点不可输入）-> 404 …若目标是按钮/链接，请改用 smart-click
+  目标='根本不存在的框'      -> 404
+  关掉活动 tab 后           -> 502 无法取得页面快照事实，语义输入未执行：no-active-tab: …
+```
+
+顺带清的一条同族假红：`NeurUI/src/styles/__tests__/toolCardWrap.test.ts` 里"契约只有一份定义"
+那条在 Windows 上**恒红**——它只归一样本路径的分隔符，`resolve()` 给的 `SRC` 仍带反斜杠，
+前缀替换失配 ⇒ 相对路径退化成绝对路径。与本轮无关（点名的文件我没碰），按同一族
+"机器决定成败"的口径一并收口；两条判据（CSS 契约 + locale 一致性）现 29 passed，
+`npx --no-install vue-tsc --noEmit` rc=0。`npm run lint` 本机仍跑不了（仓内无 eslint 配置），
+不声称验过。
 
 
 

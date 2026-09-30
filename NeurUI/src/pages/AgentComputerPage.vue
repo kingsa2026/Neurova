@@ -66,6 +66,10 @@
               <a-input v-model:value="semanticTarget" :placeholder="t('computer.smartClick')" @press-enter="smartClick" />
               <GlassButton variant="ghost" size="sm" @click="smartClick">{{ t('computer.smartClick') }}</GlassButton>
             </div>
+            <div class="action-grid-row">
+              <a-input v-model:value="semanticText" :placeholder="t('computer.smartType')" @press-enter="smartType" />
+              <GlassButton variant="ghost" size="sm" @click="smartType">{{ t('computer.smartType') }}</GlassButton>
+            </div>
           </div>
         </GlassCard>
 
@@ -98,6 +102,7 @@ import {
   navigate,
   extractPage,
   smartClick as smartClickApi,
+  smartType as smartTypeApi,
   shell,
 } from '@/api/modules/computer'
 import GlassCard from '@/components/GlassCard.vue'
@@ -120,6 +125,7 @@ const scrollAmount = ref(3)
 const browserUrl = ref('')
 const shellCommand = ref('')
 const semanticTarget = ref('')
+const semanticText = ref('')
 const shellOutput = ref('')
 
 const takeScreenshot = async () => {
@@ -196,6 +202,16 @@ const smartClick = async () => {
   if (!semanticTarget.value.trim()) return
   try {
     await smartClickApi(semanticTarget.value.trim())
+    message.success(t('common.success'))
+    await takeScreenshot()
+  } catch { message.error(t('common.error')) }
+}
+
+const smartType = async () => {
+  // 目标沿用上一步的语义输入框：click 与 type 解析的是同一份快照事实，不该各填一遍
+  if (!semanticTarget.value.trim() || !semanticText.value) return
+  try {
+    await smartTypeApi(semanticTarget.value.trim(), semanticText.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }

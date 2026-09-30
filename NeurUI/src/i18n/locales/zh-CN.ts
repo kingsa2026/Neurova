@@ -1816,6 +1816,7 @@ export default {
     fileWrite: '写文件',
     browser: '浏览器',
     smartClick: '智能点击',
+    smartType: '智能输入',
     up: '上',
     down: '下',
     left: '左',
