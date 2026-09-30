@@ -80,12 +80,6 @@ import re
 import subprocess
 import sys
 
-# 控制台码页编不出本脚本的字形（⚠️/🛑/→ 在中文 Windows 的 cp936 下即抛
-# UnicodeEncodeError）时，「给出结论」这一步会先把门禁自己打死。
-# 同仓先例：scripts/ci_static_gate.py 用的是这两行。
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -228,7 +222,6 @@ VULN_DB_UNREACHABLE = re.compile(
     r"|no offline version of the OSV database)",
     re.IGNORECASE,
 )
-
 
 class ScannerInvocationError(RuntimeError):
     """门禁自己没能把扫描器跑起来（调用侧故障），**不是**扫描器给出的裁决。
@@ -1235,6 +1228,13 @@ def _emitGateSummary(code: int, scanner_line: str = "", targets=()) -> None:
 
 
 if __name__ == "__main__":
+    # 只在作为进程运行时重配控制台：本文件会被 `test_deploy_config_guard.py` 之类
+    # 用 importlib 在 pytest 进程内加载，模块级 reconfigure 等于改宿主进程的捕获流。
+    # 中文 Windows 的 cp936 编不出 ⚠️/🛑/→，`print` 会抛 UnicodeEncodeError 把门禁自己打死
+    # （Linux CI 看不见这条）。同仓先例 scripts/ci_static_gate.py 是模块级——它不被 import。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     _code = main()
     # 非 0 时落一行结构化摘要：本门禁的 0/1/2 三种语义在散行日志里只能人肉读，
     # 一行 JSON 让「基础设施错误率」变成可复算读数（CI 面板可后处理）。

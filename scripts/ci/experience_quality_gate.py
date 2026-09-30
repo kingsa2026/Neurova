@@ -42,12 +42,6 @@ import re
 import sqlite3
 import sys
 
-# 控制台码页编不出本脚本的字形（⚠️/🛑/→ 在中文 Windows 的 cp936 下即抛
-# UnicodeEncodeError）时，「给出结论」这一步会先把门禁自己打死。
-# 同仓先例：scripts/ci_static_gate.py 用的是这两行。
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -91,7 +85,6 @@ _TURN_KEYS = (
 # 单条回合的限长窗口：与 `PatternCrystallizer.observe` 自身保存的 `context[:200]`
 # 同宽——窗口之外对闸门不可见，留在冻结语料里只是把整篇对话正文抄进仓库。
 USER_INPUT_WINDOW = 200
-
 
 class CorpusError(RuntimeError):
     """语料本身不可用（缺文件/来源不明/混入合成句）——按基础设施错误退出 2。"""
@@ -642,4 +635,11 @@ def main(argv: List[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # 只在作为进程运行时重配控制台：本文件会被 `test_deploy_config_guard.py` 之类
+    # 用 importlib 在 pytest 进程内加载，模块级 reconfigure 等于改宿主进程的捕获流。
+    # 中文 Windows 的 cp936 编不出 ⚠️/🛑/→，`print` 会抛 UnicodeEncodeError 把门禁自己打死
+    # （Linux CI 看不见这条）。同仓先例 scripts/ci_static_gate.py 是模块级——它不被 import。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

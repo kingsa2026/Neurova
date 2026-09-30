@@ -81,7 +81,7 @@ class TestGateScriptExists:
         proc = subprocess.run(
             [sys.executable, str(GATE), "--json"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             timeout=300,
         )
@@ -375,7 +375,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
             # 那是选择器语义、不是本判据要钉的形态。
             [sys.executable, "-m", "pytest", str(Path(__file__)), "-q", "--no-header", "-p", "no:cacheprovider"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=env,
             timeout=120,
@@ -415,7 +415,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", str(scratch), "-q", "--no-header", "-p", "no:cacheprovider"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=env,
             timeout=120,
