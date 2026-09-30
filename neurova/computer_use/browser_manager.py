@@ -354,7 +354,7 @@ class PlaywrightBackend(BrowserBackend):
             return None
         tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
         if not tab:
-            return BrowserResult(success=False, error="无活动浏览器 tab")
+            return BrowserResult(success=False, error=NO_ACTIVE_TAB_ERROR)
         if tab["generation"] != generation:
             return BrowserResult(
                 success=False,
@@ -391,7 +391,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._context:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
             page = await self._context.new_page()
             info = self._register_tab(page)
             if url:
@@ -476,7 +476,7 @@ class PlaywrightBackend(BrowserBackend):
             return stale
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             tree = await self._page.locator("html").aria_snapshot()
             if not (tree or "").strip():
                 # 空正文是"没拿到事实"，不是"页面上什么都没有"——两者必须可分诊
@@ -511,7 +511,7 @@ class PlaywrightBackend(BrowserBackend):
             return stale
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
             await locator.click(timeout=10000)
             self._invalidateActiveTabFacts("click_role")
@@ -540,7 +540,7 @@ class PlaywrightBackend(BrowserBackend):
             return stale
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
             await locator.fill(text, timeout=10000)
             self._invalidateActiveTabFacts("fill_role")
@@ -580,7 +580,7 @@ class PlaywrightBackend(BrowserBackend):
             return stale
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             await self._page.goto(url, wait_until="networkidle")
             self._invalidateActiveTabFacts("navigate")
             return BrowserResult(
@@ -597,7 +597,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             screenshot_bytes = await self._page.screenshot()
             return BrowserResult(
                 success=True,
@@ -613,7 +613,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             await self._page.click(selector)
             self._invalidateActiveTabFacts("click")
             return BrowserResult(
@@ -629,7 +629,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             await self._page.fill(selector, text)
             self._invalidateActiveTabFacts("type_text")
             return BrowserResult(
@@ -645,7 +645,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             text = await self._page.evaluate("() => document.body.innerText")
             return BrowserResult(
                 success=True,
@@ -661,7 +661,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             links = await self._page.evaluate("""
                 () => Array.from(document.querySelectorAll('a[href]')).map(a => ({text: a.innerText, href: a.href}))
             """)
@@ -679,7 +679,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             result = await self._page.evaluate(script)
             return BrowserResult(
                 success=True,
@@ -695,7 +695,7 @@ class PlaywrightBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._page:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
             content = await self._page.content()
             return BrowserResult(
                 success=True,
@@ -750,7 +750,7 @@ class ScraplingBackend(BrowserBackend):
         start_time = time.time()
         try:
             if not self._fetcher:
-                raise RuntimeError("Not initialized")
+                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
             self._current_page = self._fetcher.get(url)
             return BrowserResult(
                 success=True,
@@ -881,6 +881,27 @@ EMPTY_SNAPSHOT_MARKER = "snapshot-empty"
 EMPTY_SNAPSHOT_ERROR = (
     f"{EMPTY_SNAPSHOT_MARKER}: aria 快照为空，未取得任何页面事实"
     "（无活动 tab、页面未加载或渲染未完成）——请先 browser_navigate"
+)
+
+# "取不到事实"的两个不同状态，各一个带 marker 的单源文案（两后端共用）。
+# 拆成两个而不是一个，是因为模型的下一步动作不同：没 tab 该去开页面，
+# 后端没起来则重试动作也不成立——合成一句就是把两种病写成同一种。
+# 此前这里散落 14 处措辞（Playwright 11 处 `RuntimeError("Not initialized")`、
+# open_target 与 Scrapling 各 1 处同款、generation 校验 1 处只说"无活动浏览器 tab"），
+# camofox 另有 4 处（含 `"CamofoxServerBackend not initialized"` 把类名吐给模型）。
+# 一路经 502 detail 直接到达模型（活体取证见工单集 §13.3）。
+NO_ACTIVE_TAB_MARKER = "no-active-tab"
+BROWSER_NOT_STARTED_MARKER = "browser-not-started"
+
+NO_ACTIVE_TAB_ERROR = (
+    f"{NO_ACTIVE_TAB_MARKER}: 无活动浏览器 tab，未取得页面事实"
+    "——请先 browser_navigate 打开页面（或 browser_open_target 新开 tab）"
+)
+
+BROWSER_NOT_STARTED_ERROR = (
+    f"{BROWSER_NOT_STARTED_MARKER}: 浏览器后端尚未初始化或已关闭"
+    "——首次 browser_navigate 会触发初始化；仍为此形态说明该后端当前不可用，"
+    "请改用其他工具或按能力不可用上报，勿重复同一动作"
 )
 
 # 全树取样条数上限：对"能塞进预算的最大条数"做二分。不取固定值是因为真实页面的
