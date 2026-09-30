@@ -455,7 +455,11 @@ class PlaywrightBackend(BrowserBackend):
     ) -> BrowserResult:
         """aria 可访问性树快照 —— 结构化观察，代替原始 HTML（省 token、可精确引用）。
 
-        max_nodes/max_depth：观察预算（R1-5），超限裁剪并如实标注 truncated。
+        max_nodes/max_depth：观察预算（R1-5），超限裁剪。注意两点实况：
+        ① 不传预算则**不裁剪**（无默认值），整棵树受工具结果字符上限约束；
+        ② 裁剪与否目前**不回传给模型**——BrowserResult 没有 truncated 字段，
+           _trim_snapshot_tree 算出的第二个返回值在此被丢弃。
+           待办（已登记，不静默遗留）：要如实上报需给 BrowserResult 加承载字段。
         """
         start_time = time.time()
         stale = self._check_active_generation(generation)
