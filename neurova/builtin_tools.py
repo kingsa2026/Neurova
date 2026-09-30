@@ -300,7 +300,6 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "max_marks": {"type": "integer", "description": "可选。最多标注区域数", "minimum": 1},
             },
             "required": [],
         },
@@ -435,13 +434,13 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "browser_dom_snapshot": {
         # 并行能力声明：语义只读但作用域为共享（aria 快照读同一浏览器实例的当前页与代次游标）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。可见长页面/长列表快照不完整时，可调大 max_nodes/max_depth 预算（默认节点 1200/深度 32）。",
+        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。不带 max_nodes/max_depth 时**不做节点/深度裁剪**（无默认预算），整棵 aria 树受工具结果字符上限约束；长页面/长列表可按需显式给预算。",
         "parameters": {
             "type": "object",
             "properties": {
                 "generation": {"type": "integer", "description": "可选。持有的页面代数；页面已变化时返回过期错误提示重新快照"},
-                "max_nodes": {"type": "integer", "description": "可选。最多渲染的快照节点数（默认 1200；长列表/表格可调大）", "minimum": 1},
-                "max_depth": {"type": "integer", "description": "可选。快照树最大深度（默认 32）", "minimum": 1},
+                "max_nodes": {"type": "integer", "description": "可选。最多保留的快照节点数；**不传则不裁剪**（无默认值）", "minimum": 1},
+                "max_depth": {"type": "integer", "description": "可选。快照树最大深度；**不传则不限深度**（无默认值）", "minimum": 1},
             },
             "required": [],
         },
