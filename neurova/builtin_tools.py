@@ -434,7 +434,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "browser_dom_snapshot": {
         # 并行能力声明：语义只读但作用域为共享（aria 快照读同一浏览器实例的当前页与代次游标）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。不带 max_nodes/max_depth 时**不做节点/深度裁剪**（无默认预算），整棵 aria 树受工具结果字符上限约束；长页面/长列表可按需显式给预算。",
+        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。不带 max_nodes/max_depth 时**不做节点/深度裁剪**（无默认预算），整棵 aria 树受工具结果字符上限约束；长页面/长列表可按需显式给预算。【超限后的实况】超过字符上限时不再头部硬切，而是**跨全树等距折叠**：保留的元素代表整页而非页头导航，被折起来的项数以正文 `/folded` 计数行与 foldedActionableCount/actionableCandidates/dataCharsTotal 三个字段如实上报，不要按「快照里没出现」推断页面没有该元素。需要完整 aria 正文时改用 browser_dom_read 分片续读（本工具面向交互定位，不保证含全部元素）。",
         "parameters": {
             "type": "object",
             "properties": {

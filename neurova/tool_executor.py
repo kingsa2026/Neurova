@@ -5083,9 +5083,11 @@ class ToolExecutor:
             raw = await manager.browser_extract_text()
             result = self._normalize_browser_result(raw)
             data = result.get("data")
-            if isinstance(data, str) and len(data) > 8000:
-                # 超长正文截断后再进 LLM 上下文
-                result["data"] = data[:8000] + "…[已截断]"
+            from neurova.computer_use.browser_manager import SNAPSHOT_CONTEXT_BUDGET
+
+            if isinstance(data, str) and len(data) > SNAPSHOT_CONTEXT_BUDGET:
+                # 正文不是树、无可折结构，仍按同一口径切（预算单源见 SNAPSHOT_CONTEXT_BUDGET）
+                result["data"] = data[:SNAPSHOT_CONTEXT_BUDGET] + "…[已截断]"
                 result["truncated"] = True
             await self._emit_computer_event("browser_extract_text", params, result)
             return result
@@ -5108,10 +5110,23 @@ class ToolExecutor:
                 )
             )
             data = result.get("data")
-            if isinstance(data, str) and len(data) > 8000:
-                # 超长 aria 树截断后再进 LLM 上下文
-                result["data"] = data[:8000] + "…[已截断]"
-                result["truncated"] = True
+            if isinstance(data, str):
+                # aria 树按区带折叠，不再头部硬切：头部切法会把 81%–93% 的
+                # 可交互元素整段带走，且留下的前缀几乎全是页头导航。
+                from neurova.computer_use.browser_manager import (
+                    SNAPSHOT_CONTEXT_BUDGET,
+                    foldSnapshotTree,
+                )
+
+                fold = foldSnapshotTree(data, SNAPSHOT_CONTEXT_BUDGET)
+                if fold.didFold:
+                    result["data"] = fold.text
+                    result["truncated"] = True
+                    # 规模三件：全树多大、共几项、藏了几项。只回布尔会让模型把
+                    # "看到 50 条"读成"页面只有 50 条"。与正文 /folded 计数行同源。
+                    result["dataCharsTotal"] = fold.charsTotal
+                    result["actionableCandidates"] = fold.actionableTotal
+                    result["foldedActionableCount"] = fold.hiddenCount
             await self._emit_computer_event("browser_dom_snapshot", params, result)
             return result
         except Exception as e:
