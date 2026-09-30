@@ -53,7 +53,7 @@ inrepo = [p for p in sorted(ever - now) if (PROJECT_ROOT / p).exists()]
 
 from __future__ import annotations
 
-import subprocess
+from neurova.core.proc_text import runText
 from pathlib import Path
 
 import pytest
@@ -84,9 +84,9 @@ def _requireCompleteHistory(repo) -> None:
     故在取历史前先把前提钉成硬判据：不成立就**响亮失败**并点名修复方式，
     不静默用假历史作答（该前提下算出来的读数，与"没有登记过"无法区分）。
     """
-    shallow = subprocess.run(
+    shallow = runText(
         ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        cwd=str(repo), timeout=60,
     ).stdout.strip()
     if shallow == "true":
         raise AssertionError(
@@ -112,10 +112,10 @@ def _listedEver() -> set:
     于是"只在合并里发生"的那次删除看不见。
     """
     _requireCompleteHistory(PROJECT_ROOT)
-    shas = subprocess.run(
+    shas = runText(
         ["git", "log", "--full-history", "--format=%H", "--",
          "scripts/ci/protected_tests.txt"],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=180,
+        cwd=str(PROJECT_ROOT), timeout=180,
     ).stdout.split()
     if not shas:
         raise AssertionError(
@@ -124,10 +124,11 @@ def _listedEver() -> set:
             "故响亮失败而不是静默放行（教义第 2 条）。"
         )
     # 一次进程批量取回各提交的清单全文（逐提交起进程会拖慢同一 CI 会话）。
-    batch = subprocess.run(
+    batch = runText(
         ["git", "cat-file", "--batch"],
-        input="\n".join(f"{sha}:scripts/ci/protected_tests.txt" for sha in shas),
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=180,
+        input="\n".join(f"{sha}:scripts/ci/protected_tests.txt" for sha in shas)
+        .encode("utf-8"),
+        cwd=str(PROJECT_ROOT), timeout=180,
     ).stdout
     found = set()
     for line in batch.splitlines():
@@ -238,22 +239,19 @@ def test_guard_itself_is_registered():
 
 def _makeShallowClone(into) -> "Path":
     """在临时目录里造一个**真**浅仓库（depth 1），不 mock git。"""
-    src = subprocess.run(
-        ["git", "init", "-q", str(into / "seed")],
-        capture_output=True, text=True, timeout=60,
+    src = runText(
+        ["git", "init", "-q", str(into / "seed")], timeout=60,
     )
     assert src.returncode == 0, src.stderr
     (into / "seed" / "f.txt").write_text("x", encoding="utf-8")
     for cmd in (["add", "-A"],
                 ["-c", "user.email=t@t", "-c", "user.name=t",
                  "-c", "commit.gpgsign=false", "commit", "-qm", "seed"]):
-        r = subprocess.run(["git", *cmd], cwd=str(into / "seed"),
-                           capture_output=True, text=True, timeout=60)
+        r = runText(["git", *cmd], cwd=str(into / "seed"), timeout=60)
         assert r.returncode == 0, r.stderr
-    r = subprocess.run(
+    r = runText(
         ["git", "clone", "-q", "--depth", "1",
-         (into / "seed").as_uri(), str(into / "shallow")],
-        capture_output=True, text=True, timeout=180,
+         (into / "seed").as_uri(), str(into / "shallow")], timeout=180,
     )
     assert r.returncode == 0, r.stderr
     return into / "shallow"

@@ -231,12 +231,12 @@ class TestGateScriptRunsOnBothInterpreters:
             for flag in ([], ["--json"]):
                 python_run = subprocess.run(
                     [sys.executable, str(GATE_SCRIPT), *flag],
-                    capture_output=True, text=True, cwd=str(tmp_path),
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 node_run = subprocess.run(
                     [node, str(node_script), *flag],
-                    capture_output=True, text=True, cwd=str(tmp_path),
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 assert python_run.returncode == node_run.returncode, (
@@ -260,7 +260,7 @@ class TestGateScriptRunsOnBothInterpreters:
         node_script.write_text(match.group(1) + "\n", encoding="utf-8")
         result = subprocess.run(
             [node, str(node_script), "--json"],
-            capture_output=True, text=True, cwd=str(tmp_path),
+            capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
             env={"PATH": "/usr/bin:/bin"}, timeout=60,
         )
         assert result.returncode == 1, (
@@ -389,12 +389,12 @@ class TestNodeDispatchReallyWorks:
             for flag in ([], ["--json"]):
                 python_run = subprocess.run(
                     [sys.executable, str(GATE_SCRIPT), *flag],
-                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 node_run = subprocess.run(
                     [shell, "-c", f"{node_command} {' '.join(flag)}"],
-                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 assert node_run.returncode == python_run.returncode, (
@@ -420,7 +420,7 @@ class TestNodeDispatchReallyWorks:
             pytest.skip("本环境无 node")
         result = subprocess.run(
             [node, str(GATE_SCRIPT), "--json"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
             env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": "/tmp"}, timeout=60,
         )
         assert result.returncode != 0, (
@@ -570,7 +570,7 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
         env.update(env_extra or {})
         return subprocess.run(
             [self._shell(), "-c", command], cwd=str(workspace), env=env,
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, encoding="utf-8", timeout=180,
         )
 
     @classmethod
