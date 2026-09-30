@@ -49,13 +49,16 @@ from tests import ast_scan
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-# 只降不升的基线。当前 79 = 首轮量出 109，减去本批清掉的 30 处：
+# 只降不升的基线。当前 73 = 首轮量出 109，减去本批清掉的 36 处：
 #   生产码 12（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1，改走
 #   `neurova.core.proc_text`）；
-#   读 git 输出的 CI 守卫与其测试 18（test_protected_subset_registration_history 6、
-#   test_npc_runtime_budget 5、test_npc_script_interpreter_reachability 7）。
+#   读 git 输出 / 读门禁子进程的守卫与其测试 24（test_protected_subset_registration_history 6、
+#   test_npc_runtime_budget 5、test_npc_script_interpreter_reachability 7、
+#   test_deploy_config_guard 3、test_perf_gate_contract 3）。
+# ⚠️ 后两组不是"顺手清的"：deploy/perf 那两个守卫的红是我为门禁加 stdout UTF-8 重配
+#    **暴露出来**的——子进程如实输出 UTF-8 后，父进程那句 `text=True` 不带编码就崩。
 # 再往下调时请在提交说明里点名修掉了哪些落点。
-_BASELINE_MAX_SITES = 79
+_BASELINE_MAX_SITES = 73
 
 _SKIP_PREFIX = (".venv/", "NeurUI/node_modules/", "build/", "dist/")
 _SKIP_PARTS = ("/__pycache__/", "src-tauri", "/target/")
