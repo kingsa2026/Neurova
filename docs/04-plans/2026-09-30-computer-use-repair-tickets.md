@@ -58,7 +58,13 @@
 2. **前后端契约不匹配，调用必失败**：`NeurUI/src/api/modules/computer.ts:56-58` 的 `smartClick(agentId, x, y)` 发 `{agent_id, x, y}`；
    后端 `SmartClickRequest`（`computer.py:100-103`）字段是 **`target: str`（必填）** 与 `screenshot`，**没有 `x`/`y`**。
    Pydantic 缺必填字段 ⇒ **恒 422**。`visualParse`（`:61-63`）发 `{agent_id}`，后端字段全可选 ⇒ 能通，但通到的是占位。
-3. **有文案无消费**：`smartClick`/`visualParse` 在 `src/` 下**无任何组件调用方**，却已铺满 11 份 locale（如 `NeurUI/src/i18n/locales/de-DE.ts:1806-1807`）。
+3. **有消费方，但其唯一效果是报错**（⚠️ 本条原写"无任何组件调用方"，**是错的**，
+   2026-09-30 复核纠正）：`NeurUI/src/pages/AgentComputerPage.vue` 上确有按钮
+   （`@click="visualParse"`，该页在 `src/router/index.ts:213` 注册可达），处理函数是
+   `message.info(JSON.stringify(res?.data ?? res))`——而端点恒 501，所以它今天唯一能给的
+   就是一个错误提示。原判错误的成因很具体：那次检索用了 `| head -8`，`.vue` 的命中
+   被自己截断吃掉了。**教训：建立"不存在"这类全称结论的检索，一律不得截断输出。**
+   文案铺满 11 份 locale（如 `NeurUI/src/i18n/locales/de-DE.ts:1806-1807`）。
 
 ### 判据（红灯，先写）
 
@@ -111,8 +117,10 @@ POST /api/v1/computer/smart-click {"agent_id":"agent_a","x":10,"y":20}
   -> 422 {"detail":[{"type":"missing","loc":["body","target"],"msg":"Field required",...}]}
 ```
 
-且 `smartClick`/`visualParse` 现经全仓检索**只有定义行 + 11 份 locale，无任何组件调用方**
-（检索已排除 `.mimosa` 快照目录，避免假命中）。即 §2 现象第 3 条仍然成立，
+且 `smartClick`/`visualParse` 现经全仓检索：`smartClick` **只有定义行 + 11 份 locale，无组件调用方**；
+`visualParse` 则**有**一个页面上的按钮在调（见 §2 现象第 3 条的纠正），只是端点恒 501 使该按钮
+只能报错。检索已排除 `.mimosa` 快照目录（那里全是插件基线，会造成假命中），
+且**不再用 `head` 截断**——上一版就是截断导致的误判。即 §2 现象第 3 条仍然成立，
 它归 **T-01b** 的 🔒 决定：退役封装连同 locale 同批改，还是把载荷改成 `target` 语义面。
 后端侧的谎报已闭环，前端侧的死面未动。
 

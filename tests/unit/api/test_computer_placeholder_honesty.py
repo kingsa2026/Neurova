@@ -19,12 +19,19 @@
 - `api/endpoints/knowledge_integration.py:215` 「知识学习闭环未实现（原谎报 completed）」
 - `api/endpoints/personality_router.py:102` 同型
 
-**为何取 501 而非"删壳"**（`test_growth_constitution_persistence.py:111` 那条
-"零消费方直接 404"的先例不适用于此）：六个路由已登记进路由鉴权基线
-`docs/s08_route_auth_baseline_2026-09-11.txt:641-658`，删路由要牵动基线重算，
-而基线是共享工作树里的在途文件；且 `smartClick`/`visualParse` 已有前端封装与
-11 份 i18n 文案（UI 意图在、实现不在），与 `personality/evolve` 的
-"有 FE 按钮但 TODO"同形。故**保留路由，只把响应换成诚实形态**。
+**为何当时取 501、现在其中一条改判退役**（`test_growth_constitution_persistence.py:111`
+那条"零消费方直接 404"的先例当时不适用）：六个路由已登记进路由鉴权基线
+`docs/s08_route_auth_baseline_2026-09-11.txt:641-658`，且 `smartClick`/`visualParse`
+已有前端封装与 11 份 i18n 文案（UI 意图在、实现不在），与 `personality/evolve` 的
+"有 FE 按钮但 TODO"同形——故当时**一律保留路由，只把响应换成诚实形态**。
+
+2026-09-30 按 D-5 复核后对 `visual-parse` 改判：它与 `computer_som_snapshot` 是
+**同一能力的两条入口**（检测器注入缝在 `som.mark_screenshot(png, detector=...)`），
+属修复教义第 6 条该收口的双源，故整条退役（端点 + 模型 + 前端封装 + 11 份 locale），
+守卫见 `test_visual_parse_retirement.py`。其余五条仍取 501：它们各自的能力面**没有**
+第二份实现可收，撤壳就等于撤意图。`smart-click` 按 D-6 走 T-08→T-10→T-11 接通。
+那份带日期的鉴权基线是 2026-09-11 的一次性快照（无活守卫校验），**不改写历史快照**，
+此处按事实记其已漂移一行。
 
 ## 放大视角（教义第 5 条）
 
@@ -59,7 +66,6 @@ ENDPOINT_DIR = pathlib.Path(computer_ep.__file__).parent
 
 # (处理函数名, 该端点原先谎报成功的形态) —— 逐个点名，便于回归时定位是哪一个又躺回去
 PLACEHOLDER_HANDLERS: list[typing.Tuple[str, str]] = [
-    ("visual_parse", "code 0 + elements 恒空"),
     ("smart_click", "code 0 + found 恒 False"),
     ("smart_type", "code 0 + found 恒 False"),
     ("browser_extract_links", "code 0 + links 恒空"),
@@ -69,7 +75,6 @@ PLACEHOLDER_HANDLERS: list[typing.Tuple[str, str]] = [
 
 # 各端点的最小合法请求体：只满足必填字段，不猜业务语义
 _MINIMAL_BODIES = {
-    "visual_parse": {},
     "smart_click": {"target": "登录按钮"},
     "smart_type": {"target": "用户名输入框", "text": "abc"},
     "browser_extract_links": {},
