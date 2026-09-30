@@ -1408,3 +1408,20 @@ tests/unit/desktop/test_installer_version_single_source.py
 #   缓存根与 tauri_build_env 必须读同一份 LOCALAPPDATA 推导）。
 tests/unit/desktop/test_installer_signing_contract.py
 tests/unit/desktop/test_win_installer_kit.py
+# 电脑操控面修正工单集（T-02…T-16）判据：逐文件单跑确定全绿（2026-09-30 复跑记录）
+tests/unit/computer_use/test_snapshot_fold_replaces_chop.py
+tests/unit/computer_use/test_snapshot_truncation_honesty.py
+tests/unit/computer_use/test_snapshot_budget_honesty.py
+tests/unit/computer_use/test_empty_snapshot_not_success.py
+tests/unit/computer_use/test_semantic_target_resolution.py
+tests/unit/computer_use/test_som_marks_are_session_scoped.py
+tests/unit/computer_use/test_snapshot_freshness_parity.py
+tests/unit/computer_use/test_target_generation.py
+tests/unit/computer_use/test_camofox_server_backend.py
+tests/unit/computer_use/test_computer_tool_faces_reconcile.py
+tests/unit/api/test_computer_placeholder_honesty.py
+tests/unit/api/test_visual_parse_retirement.py
+tests/unit/core/test_subprocess_encoding_discipline.py
+tests/unit/core/test_proc_text.py
+tests/unit/sandbox/test_exec_output_decoding.py
+tests/unit/sandbox/test_backend_interface_contract.py

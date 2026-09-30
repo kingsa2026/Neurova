@@ -49,7 +49,8 @@
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 | **T-14** | 浏览器/爬虫集成测试 25 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | 🔒 **D-7** | 未处置；**全集已量出**（§14）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
-| **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 1 处 + 棘轮；余 109 处待清 | 中 | 无 | **本轮落地**（§15）：扫描器改按字节取 + 主线程解码 + 查 rc；新守卫 5 例（毒码页行为判据 + 只降不升棘轮 + 正反对照）。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed** |
+| **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
+| **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
 **批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
 **剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 决策后 `T-08` → 回补 T-11 的歧义分支
@@ -845,17 +846,150 @@ AST 数（不按子串，避免注释里的 `text=True` 误判）：**109 处 / 
 `neurova/computer_use/camofox_supervisor.py` 3、`neurova/core/env_check.py` 2、
 `neurova/image_pipeline/docker_builder.py` 6、`neurova/sandbox/exec_sandbox.py` 1。
 一次改 109 处不在本单范围（且 `netstat` 这类外来命令的输出码页与 git 不同，得分别定策），
-所以本轮做的是**拦住增量**：`tests/unit/core/test_subprocess_encoding_discipline.py`
-（5 例）——
+所以本轮做的是**拦住增量**：判据（`tests/unit/core/test_subprocess_encoding_discipline.py`）——
 
-- **平台无关的行为判据**：把 `locale.getpreferredencoding` 毒成 `ascii` 再跑真扫描器，
-  Linux CI 上同样成立，不需要找一台 GBK 机器；
-- **只降不升的棘轮**：基线 109（改这一处后正好回落到 109，基线与被测同批落位）；
+- **跨机器恒定的那一档是静态的**：按 AST 数落点（全仓棘轮 + `neurova/` 零基线档）。
+  ⚠️ 本单初版把行为判据写成"毒 `locale.getpreferredencoding` 成 ascii，Linux 上也成立"，
+  **那是错的**：`text=True` 的默认编码在 `io.TextIOWrapper` 的 C 层决定，Python 层
+  monkeypatch 那个函数影响不到它（实测：改成 `"ascii"` 后，GBK 字节照样被按 cp936 解开）。
+  行为判据因此只在"本机码页 ≠ 生产者码页"时才红——它是本机现场证据，不是跨机器守卫；
+- **要跨机器咬住解码分支，喂 `0xFF`**：它在 utf-8、cp936/GBK、ascii 下都是非法起始字节
+  （latin-1 例外，本机与 CI 都不是）。实测本机：`b"\xff\xfe"` → `UnicodeDecodeError` 且
+  `stdout is None`；UTF-8 中文在这台 GBK 机器上同样 `None`。该写法落在
+  `tests/unit/core/test_proc_text.py` 与 `tests/unit/sandbox/test_exec_output_decoding.py`；
 - **正反对照**：注入一条必须被数到（判据不空转）、声明了 `encoding` 的不被数到
   （不把 `text=True` 一棍子打死）。
 
-**余下 109 处的处置留给后续**：生产码那 12 处优先（它们跑在用户机器上，
-不是只影响开发者本地），外来命令（`netstat`）按"字节取 + 主线程解码"同法处理。
+**生产码 12 处已同批清掉**（建 `neurova.core.proc_text.runText/decodeChild` 单源入口后接入）：
+`image_pipeline/docker_builder.py` 6、`computer_use/camofox_supervisor.py` 3、
+`core/env_check.py` 2、`sandbox/exec_sandbox.py` 1——`neurova/` 现处于**零基线档**，
+再加一处即红。同批又清掉**读 git 输出的守卫与其测试** 18 处
+（`test_protected_subset_registration_history` 6、`test_npc_runtime_budget` 5、
+`test_npc_script_interpreter_reachability` 7；前者原先 3 例 `AttributeError:
+'NoneType' object has no attribute 'splitlines'` 就是这个根因，现已 7 passed）。
+棘轮基线随之 **109 → 79**（`scripts/` 21、`tests/` 46、其余在 deploy/data/docs）。
+
+### 同族的另一侧：写控制台也按码页走（本批一并撞出）
+
+把读侧修好后，`tests/unit/ci` 里 1 例反而新红：子进程正常输出 UTF-8 了，
+**测试自己**用 `text=True` 不带编码去读，拿到 `stdout is None`——失败被顶高了一层，
+恰好证明读侧的修法是对的。同轮还量出写侧的独立形态：`scripts/ci/npc_runtime_budget.py`
+在没有平台下发预算时会打 `⚠️`，而**中文 Windows 的 cp936 编不出这个字形**，
+`print` 直接 `UnicodeEncodeError` 把门禁自己打死（Linux CI 永远看不见）：
+
+```
+UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0' in position 69
+```
+
+按同仓既有先例（`scripts/ci_static_gate.py:37` 的那两行）给 `scripts/ci/` 下
+**9 个**会打非 GBK 字形的入口脚本补了 `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")`。
+取舍：9 处各写两行而不是抽一个共享模块——这些脚本是被 CI 逐条起进程跑的独立入口，
+跨目录 import 反而脆（`sys.path[0]` 是脚本自己所在目录，不是仓根）。
+
+**仍红的 7 例已定性、不属编码族**：全部是"在剥离环境变量的情况下起 node"——
+本机 `node -e "console.log('hi')"` 正常，但门禁测试以最小 env 起 node 时
+node 自己在 `InitializeOncePerProcess` 里断言失败：
+
+```
+#  Assertion failed: ncrypto::CSPRNG(nullptr, 0)   at src\node.cc:1224
+```
+
+即"双解释器同读数"这条判据在 Windows 上无法以最小 env 验证，属 node/环境层，
+留作后续单独诊断（不在本工单集内，未动实现）。
+
+---
+
+## 17. 本批判据此前**没进 CI**（已补 16 条）
+
+`AGENTS.md` §4 写明"CI 的被测子集就是 `scripts/ci/protected_tests.txt`"，清单头也写着维护方式
+是"每完成一项，把它的测试文件加进来"。逐条查下来，本工单集从 T-02 到 T-16 写的判据
+**一条都不在清单上**——意味着这些守卫只在开发者本机响，合进主线后 CI 并不会跑它们。
+这正是本单反复在说的"注册无消费者的模块"形态，只不过消费者本该是 CI。
+
+处置：把本批 16 个判据文件**逐个单跑**确证全绿后补入清单（"只收逐文件单跑确定全绿的"这条
+规矩不能破，见 `AGENTS.md` §4）。补入前每个文件单独跑一次的读数（摘要）：
+
+```
+绿  test_snapshot_fold_replaces_chop 20 passed      绿  test_snapshot_truncation_honesty 10 passed
+绿  test_snapshot_budget_honesty 9 passed           绿  test_empty_snapshot_not_success 10 passed
+绿  test_semantic_target_resolution 10 passed       绿  test_som_marks_are_session_scoped 5 passed
+绿  test_snapshot_freshness_parity 14 passed        绿  test_target_generation 18 passed
+绿  test_camofox_server_backend 37 passed/2 skipped 绿  test_computer_tool_faces_reconcile 6 passed
+绿  test_computer_placeholder_honesty 15 passed     绿  test_visual_parse_retirement 8 passed
+绿  test_subprocess_encoding_discipline 6 passed    绿  test_proc_text 10 passed
+绿  test_exec_output_decoding 3 passed              绿  test_backend_interface_contract 4 passed
+```
+
+补入后，钉这份清单自身的三条守卫仍全绿（`test_dev_path_and_runtime_dep_guards`、
+`test_ci_parity_guard`、`test_protected_subset_registration_history` 7 passed）——
+后者正是拦住"清单被静默删行"的那道，新增方向一并验过。
+
+
+一处判据上的取舍值得记下：`docker inspect --format` 这类**把输出当数据**的调用，
+降级成 U+FFFD 会让解析静默拿到错值，比崩更坏；但入口默认仍是 `replace`，
+因为本缺陷的可见形态是 `None`（整条结果丢掉）而不是"个别字符可读性差"。
+需要严格性的调用方传 `errors="strict"`——`runText` 支持，本批未强制。
+
+---
+
+## 16. T-16 · 沙箱后端漏实现 `enforced()`（本轮落地，扫荡时抓到的第二条链）
+
+### 怎么撞上的
+
+改完 T-15 的 `exec_sandbox.py` 后跑 `tests/unit/sandbox` 验收，9 例红。逐条看 traceback，
+红点不在我改的行上，而在 `code_sandbox.py:198`：
+
+```
+选中后端 = AppContainerSandbox | backend_name = appcontainer | 有 enforced 方法 = False
+AttributeError: 'AppContainerSandbox' object has no attribute 'enforced'
+```
+
+`ExecSandbox` 声明了 `enforced()`（P1-7 诚实化：后端必须自报"是否真落实了声明的隔离"），
+而 `AppContainerSandbox` **不继承基类**、靠鸭子类型冒充接口，唯独漏了这一个方法。
+本机 `get_exec_sandbox(NETWORK_OFF)` 正正选到它 ⇒ **代码执行工具在装了 AppContainer API 的
+Windows 机器上是崩的**；Linux CI 选不到这个后端，所以这条崩链门禁永远看不见。
+病形与 T-15 完全一致：**结果由机器决定，守卫只在一台机器上跑**。
+
+### 修法（按教义第 5 条扫荡，不按"修被点名的那一条"）
+
+判据不做成"给 AppContainer 补个测试"——它自动发现所有定义了 `backend_name` 的后端类，
+逐个查接口面（`backend_name/available/enforced/execute`）。第一次跑就点到**第二个**漏项：
+
+```
+沙箱后端缺接口成员 {'RestrictedTokenSandbox': ('enforced',)}
+```
+
+于是两个后端一起补，且各自的 `enforced()` 都只读本模块**已有**的事实，不新造口径：
+
+- `AppContainerSandbox`：`_DLL.load()` 且 `severity ∈ enforced_severities()`；
+  `severity` 未指定 ⇒ False（没声称的档位不谎称已落实）。
+- `RestrictedTokenSandbox`：`severity ∈ enforced_severities`（该集合是空 frozenset）⇒ **如实 False**。
+  它结果里的 `sandbox_enforced=True` 只声称"受限令牌生效"（模块头第 16 行早作了此区分），
+  拿它冒充"隔离档位已落实"就是把未知说成事实。
+
+### 连带纠正的一条撒谎文案
+
+`resolveBackend()` 的 `reason` 原先硬编码"平台后端无内核隔离 → 自报 enforced=False"。
+补齐契约后 AppContainer 如实回 `True`，那句话就和字段互相矛盾——**是补契约这一步把假话暴露出来的**。
+改成跟着值走（`enforced` 为真时另给一句），避免同一状态存在第二份事实源。
+
+### 实测
+
+- 判据：`tests/unit/sandbox/test_backend_interface_contract.py` 4 例（自动发现非空的前提对照、
+  全员接口、注入缺方法的后端必须被点出的正对照、`RestrictedToken`/未指定 severity 的诚实 False）；
+- 回归：`tests/unit/sandbox` 由 **9 failed → 56 passed**；与 `tests/unit/computer_use` 合跑
+  **536 passed / 3 skipped**；
+- 活体（本机 Windows，真 AppContainer 内执行）：
+
+```
+resolveBackend -> {"backend": "appcontainer", "enforced": true, "severity": "network_off",
+                  "reason": "Docker 不可用，平台后端自报已落实该档隔离"}
+execute        -> {"stdout": "沙箱活体·订单42\n", "stderr": "", "exit_code": 0,
+                  "backend": "appcontainer", "enforced": true, "timed_out": false, "duration_ms": 32.52}
+```
+
+改前这条链在 `resolveBackend()` 就抛 AttributeError，压根到不了 execute。
+
 
 
 
