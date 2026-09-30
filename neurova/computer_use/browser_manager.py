@@ -13,6 +13,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 from neurova.core.logger import get_logger
 import threading
 import time
@@ -252,6 +253,100 @@ class ScraplingSpiderTool:
         return False
 
 
+@dataclass(frozen=True)
+class RefTarget:
+    """一个 ref 在本代快照里指向什么：role + accessible name + **同名序号**。
+
+    `occurrence` 是同名同 role 元素之间的第几个（0 起），不是全表序号——Playwright 的回解
+    只能落 `get_by_role(role, name=...).nth(occurrence)`，用全表序号会指错元素。
+    """
+
+    ref: str
+    role: str
+    name: Optional[str]
+    occurrence: int
+
+
+def parseRefLine(line: str) -> Optional[Tuple[str, Optional[str], str]]:
+    """解析一行 `- role 'name' [eN]` → (role, name|None, "N")；非 ref 行返回 None。
+
+    快照行的语法（全仓唯一一份；camofox 侧原私有的同款解析器已并到这里）：
+    `- button 'Login' [e3]` / `- button "Login" [e3]` / `- button Login [e3]`（裸名）
+    / `- textbox [e5]:`（无名）。引号样式不限、含引号括号的 name 不失配。
+    """
+    s = line.strip()
+    if not s.startswith("- "):
+        return None
+    m = re.search(r"\[e(\d+)\]", s)
+    if not m:
+        return None
+    rest = s[2:m.start()].strip()
+    role, _, name = rest.partition(" ")
+    name = name.strip()
+    if len(name) >= 2 and name[0] in "\"'" and name[-1] == name[0]:
+        name = name[1:-1]
+    else:
+        name = name.strip("'\"")
+    return role, (name or None), m.group(1)
+
+
+def annotateSnapshotRefs(tree: str) -> Tuple[str, List[RefTarget]]:
+    """给快照里的可交互行编号（`[eN]`），并产出与之同序的 ref 表。
+
+    为什么 Playwright 侧要自己编号：`aria_snapshot()` 不返回任何句柄，而模型需要一个
+    "能指到第几个同名元素"的入口——没有它，56% 卷入重名的可交互行就永远只能报歧义。
+
+    已带 `[eN]` 的行（camofox 服务端算好的）**原样保留、不重新编号**：再归一一次就是
+    把服务端给的号改掉，两侧对不上。
+
+    行尾冒号（`- checkbox:`、`- listitem:` 这类"有子节点"的写法）必须在冒号**之前**插入，
+    否则改坏了 aria 树的形状。
+    """
+    roles = _snapshotActionableRoles()
+    lines = (tree or "").split("\n")
+    out: List[str] = []
+    refs: List[RefTarget] = []
+    seen: Dict[Tuple[str, Optional[str]], int] = {}
+    nextNum = 1
+    for raw in lines:
+        line = raw.rstrip("\r")
+        trailing = raw[len(line):]  # 被剥掉的 \r，原样回贴
+        parsed = parseRefLine(line)
+        role = None
+        if parsed:
+            role, name, num = parsed
+            stripped = line
+            refs.append(RefTarget(f"e{num}", role, name, _bumpOccurrence(seen, role, name)))
+        else:
+            token = _ariaRoleToken(line)
+            if token in roles:
+                role = token
+                name = _accessibleName(line) or None
+                num = str(nextNum)
+                nextNum += 1
+                refs.append(RefTarget(f"e{num}", role, name, _bumpOccurrence(seen, role, name)))
+                indent = len(line) - len(line.lstrip())
+                body = line[indent:]
+                suffix = ""
+                if body.endswith(":"):
+                    body, suffix = body[:-1], ":"
+                stripped = f"{' ' * indent}{body} [e{num}]{suffix}"
+            else:
+                stripped = line
+        out.append(stripped + trailing)
+    return "\n".join(out), refs
+
+
+def _bumpOccurrence(seen: dict, role: str, name: Optional[str]) -> int:
+    """返回该 (role, name) 之前出现过几次，并把计数 +1（即 nth 的序号来源）。"""
+    key = (role, name)
+    idx = seen.get(key, 0)
+    seen[key] = idx + 1
+    return idx
+
+
+
+
 class BrowserBackend(ABC):
     """浏览器后端基类"""
 
@@ -316,6 +411,21 @@ class BrowserBackend(ABC):
     async def fill_role(self, role: str, name: Optional[str] = None, text: str = "") -> BrowserResult:
         return BrowserResult(success=False, error=f"{type(self).__name__} does not support role-based fill")
 
+    # ref 寻址（T-08）：同样按"能力裁剪"降级——不支持的后端自动得到诚实的失败结果。
+    # 两后端都实现了它（Playwright 自编号、camofox 用服务端算好的 [eN]），故这里只剩
+    # 第三方/未来后端的兜底位；措辞点名"该后端"而不是含糊的"不支持"。
+    async def click_ref(self, ref: str, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(
+            success=False,
+            error=f"ref-not-supported: {type(self).__name__} 不产出 ref 编号，请用 browser_click_role 按 role+name 定位",
+        )
+
+    async def fill_ref(self, ref: str, text: str = "", generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(
+            success=False,
+            error=f"ref-not-supported: {type(self).__name__} 不产出 ref 编号，请用 browser_fill_role 按 role+name 定位",
+        )
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -367,7 +477,7 @@ class PlaywrightBackend(BrowserBackend):
         return None
 
     def _invalidateActiveTabFacts(self, reason: str) -> None:
-        """使活动 tab 的既有快照事实失效（递增 generation）。
+        """使活动 tab 的既有快照事实失效（递增 generation，并**清掉 ref 表**）。
 
         与 camofox 侧同一语义（`camofox_server_backend.py:396` 注释："交互使快照
         事实失效"）。此前只有 navigate 递增，而 `click` / `type_text` /
@@ -379,6 +489,9 @@ class PlaywrightBackend(BrowserBackend):
         tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
         if tab:
             tab["generation"] += 1
+            # ref 表随代次一起作废：留着旧表，模型拿旧编号 + 新 generation 仍能解到
+            # 一个"名字对得上但位置已变"的元素——D-1 的绑代次承诺就成了一句注释。
+            tab.pop("refs", None)
             # reason 必须被读：否则它就是一个只写不读的参数（本仓协作红线点名的形态）
             logger.debug("tab generation 递增(%s) → %s", reason, tab["generation"])
 
@@ -469,6 +582,9 @@ class PlaywrightBackend(BrowserBackend):
         （`truncated`/`hiddenNodes`/`hiddenActionable`，两后端同一承载）。
         不传预算则不裁剪（无默认值），整棵树受工具结果字符预算约束——那一路的上报
         口径见 `foldSnapshotTree`。
+
+        返回前给可交互行编上 `[eN]` 并把 ref 表按 tab 存下（T-08）：编号在**预算裁剪之后**
+        做，保证"模型看到的行"与"它手里的 ref"是同一批，不会拿着被裁掉的号来点。
         """
         start_time = time.time()
         stale = self._check_active_generation(generation)
@@ -487,9 +603,13 @@ class PlaywrightBackend(BrowserBackend):
                     generation=self._active_generation(),
                 )
             budget = applySnapshotBudget(tree, max_nodes, max_depth)
+            text, refs = annotateSnapshotRefs(budget.text)
+            tab = self._tabs.get(self._active_target_id)
+            if tab is not None:
+                tab["refs"] = {r.ref: r for r in refs}
             return BrowserResult(
                 success=True,
-                data=budget.text,
+                data=text,
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
@@ -500,6 +620,114 @@ class PlaywrightBackend(BrowserBackend):
             )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    # ── ref 一等寻址（T-08；D-1 绑 generation、D-2 不暴露 selector）──
+
+    def _resolveRefTarget(self, ref: str) -> Tuple[Optional[RefTarget], Optional[str]]:
+        """把 ref 解成 (role, name, 同名序号)；解不出时给可分诊的原因，不猜。"""
+        if not self._page:
+            return None, NO_ACTIVE_TAB_ERROR
+        tab = self._tabs.get(self._active_target_id) or {}
+        table = tab.get("refs") or {}
+        target = table.get(str(ref))
+        if target is None:
+            return None, (
+                f"ref-not-found: {ref} 不在本代快照的 {len(table)} 个 ref 里"
+                "（页面已变化或从未快照）——请先 browser_dom_snapshot 再按新编号操作"
+            )
+        return target, None
+
+    def _refLocator(self, page, target: RefTarget):
+        kwargs = {"name": target.name} if target.name is not None else {}
+        return page.get_by_role(target.role, **kwargs).nth(target.occurrence)
+
+    async def _verifyRefTarget(self, page, target: RefTarget) -> Optional[str]:
+        """自证：解到的元素用自己的子树 aria_snapshot 回读，role+name 对不上就拒。
+
+        这是自编号方案唯一的护栏。无障碍树序与 DOM 序在绝大多数页面一致，但**没有规范
+        保证**；一旦错位，`nth(k)` 会指着另一个元素"成功"完成动作——那是点错了还报成功，
+        比拒绝坏得多。宁可让模型重新快照一次。
+        """
+        try:
+            probe = await self._refLocator(page, target).aria_snapshot()
+        except Exception as e:  # noqa: BLE001 - 解不到元素也是自证失败
+            return (
+                f"ref-mismatch: {target.ref} 解不到本代快照里记的 "
+                f"{target.role}「{target.name or '（无名）'}」（{e}）"
+                "——页面结构已变，请重新 browser_dom_snapshot"
+            )
+        first = next((ln for ln in (probe or "").splitlines() if ln.strip()), "")
+        gotRole, gotName = _ariaRoleToken(first), (_accessibleName(first) or None)
+        if gotRole != target.role or gotName != target.name:
+            return (
+                f"ref-mismatch: {target.ref} 记的是 {target.role}「{target.name or '（无名）'}」，"
+                f"解到的却是 {gotRole or '（解出空行）'}「{gotName or '（无名）'}」"
+                "——无障碍树序与 DOM 序不一致，已拒绝且未发出任何动作；"
+                "请重新 browser_dom_snapshot 后用 role+name 定位"
+            )
+        return None
+
+    async def click_ref(self, ref: str, generation: Optional[int] = None) -> BrowserResult:
+        """按 ref 点击：仅在本代快照内有效（D-1），解不到/错位一律拒且不动手。"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        target, why = self._resolveRefTarget(ref)
+        if target is None:
+            return BrowserResult(success=False, error=why,
+                                 duration_ms=(time.time() - start_time) * 1000,
+                                 generation=self._active_generation())
+        try:
+            page = self._page
+            mismatch = await self._verifyRefTarget(page, target)
+            if mismatch:
+                return BrowserResult(success=False, error=mismatch,
+                                     duration_ms=(time.time() - start_time) * 1000,
+                                     generation=self._active_generation())
+            await self._refLocator(page, target).click(timeout=10000)
+            self._invalidateActiveTabFacts("click_ref")
+            return BrowserResult(
+                success=True, route="playwright_ref",
+                data={"ref": target.ref, "role": target.role, "name": target.name},
+                url=page.url, title=await page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e),
+                                 duration_ms=(time.time() - start_time) * 1000)
+
+    async def fill_ref(self, ref: str, text: str = "", generation: Optional[int] = None) -> BrowserResult:
+        """按 ref 写入文本（空串=清空）。同 `click_ref` 的自证与失效语义。"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        target, why = self._resolveRefTarget(ref)
+        if target is None:
+            return BrowserResult(success=False, error=why,
+                                 duration_ms=(time.time() - start_time) * 1000,
+                                 generation=self._active_generation())
+        try:
+            page = self._page
+            mismatch = await self._verifyRefTarget(page, target)
+            if mismatch:
+                return BrowserResult(success=False, error=mismatch,
+                                     duration_ms=(time.time() - start_time) * 1000,
+                                     generation=self._active_generation())
+            await self._refLocator(page, target).fill(text, timeout=10000)
+            self._invalidateActiveTabFacts("fill_ref")
+            return BrowserResult(
+                success=True, route="playwright_ref",
+                data={"ref": target.ref, "role": target.role, "name": target.name},
+                url=page.url, title=await page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e),
+                                 duration_ms=(time.time() - start_time) * 1000)
 
     async def click_role(self, role: str, name: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
         """按 ARIA role + accessible name 定位点击（快照事实驱动，不猜 CSS 选择器）"""
@@ -1401,6 +1629,18 @@ class BrowserManager:
         """按 ARIA role + name 定位输入"""
         b = await self._get_backend(backend)
         return await b.fill_role(role, name, text, generation)
+
+    async def click_ref(self, ref: str, backend: Optional[str] = None,
+                        generation: Optional[int] = None) -> BrowserResult:
+        """按快照里的 `[eN]` 点击（T-08）。代次校验在后端做，绑 generation（D-1）。"""
+        b = await self._get_backend(backend)
+        return await b.click_ref(ref, generation)
+
+    async def fill_ref(self, ref: str, text: str = "", backend: Optional[str] = None,
+                       generation: Optional[int] = None) -> BrowserResult:
+        """按快照里的 `[eN]` 输入（空串清空）。同 `click_ref` 的失效与自证语义。"""
+        b = await self._get_backend(backend)
+        return await b.fill_ref(ref, text, generation)
 
     async def open_target(self, url: Optional[str] = None, backend: Optional[str] = None) -> BrowserResult:
         """新开 tab 并激活"""

@@ -20,6 +20,7 @@ from neurova.computer_use.browser_manager import (
     NO_ACTIVE_TAB_ERROR,
     BrowserBackend,
     BrowserResult,
+    parseRefLine,
 )
 from neurova.core.config import get as env_get
 from neurova.core.logger import get_logger
@@ -400,6 +401,44 @@ class CamofoxServerBackend(BrowserBackend):
             )
         return matches[0], None
 
+    async def click_ref(self, ref: str, generation: Optional[int] = None) -> BrowserResult:
+        """直接按快照里的 `[eN]` 点击（T-08）。ref 由服务端在本 tab 当前快照上解析。
+
+        与 Playwright 后端同契约同码位；代次校验在 Neurova 侧做（D-1：ref 绑 generation）。
+        camofox 不需要自证——编号是它自己算的，元素句柄在服务端与快照同批产生。
+        """
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        bad = self._refShapeRefusal(ref)
+        if bad:
+            return bad
+        return await self._click_ref(str(ref))
+
+    async def fill_ref(self, ref: str, text: str = "", generation: Optional[int] = None) -> BrowserResult:
+        """按 `[eN]` 写入文本（空串清空）。校验口径同 `click_ref`。"""
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        bad = self._refShapeRefusal(ref)
+        if bad:
+            return bad
+        return await self._type_ref(str(ref), text)
+
+    @staticmethod
+    def _refShapeRefusal(ref: str) -> Optional[BrowserResult]:
+        """形状先拒：把 `登录按钮` 这类目标文字当 ref 送来是误用，不该打到服务端。"""
+        if not re.fullmatch(r"e\d+", str(ref or "").strip()):
+            return BrowserResult(
+                success=False,
+                route="camofox_ref",
+                error=(
+                    f"ref-format: {ref!r} 不是快照里的 ref（应为 e+数字，如 e3）——"
+                    "请从 browser_dom_snapshot 正文的 [eN] 取，或直接改用 browser_click_role 按 role+name 定位"
+                ),
+            )
+        return None
+
     async def _click_ref(self, ref: str) -> BrowserResult:
         start = time.time()
         tab_id, err = await self._resolve_tab_id(None)
@@ -665,22 +704,10 @@ class CamofoxServerBackend(BrowserBackend):
 # `- button Login [e3]`（裸名）/ `- textbox [e5]:`（无名）
 # R2-6 加固：逐行解析替代单一正则——引号样式不再限定、含引号/括号的 name
 # 不再静默失配、同 (role, name) 多匹配可被收集而非静默取第一个
-def _parse_ref_line(line: str) -> Optional[Tuple[str, Optional[str], str]]:
-    """解析一行 `- role 'name' [eN]` → (role, name|None, "N")；非 ref 行返回 None"""
-    s = line.strip()
-    if not s.startswith("- "):
-        return None
-    m = re.search(r"\[e(\d+)\]", s)
-    if not m:
-        return None
-    rest = s[2 : m.start()].strip()
-    role, _, name = rest.partition(" ")
-    name = name.strip()
-    if len(name) >= 2 and name[0] in "\"'" and name[-1] == name[0]:
-        name = name[1:-1]
-    else:
-        name = name.strip("'\"")
-    return role, (name or None), m.group(1)
+#
+# 语法解析自 T-08 起并入 browser_manager 的**唯一一份**（Playwright 侧自编号要产出同一
+# 形状的 `[eN]`，两套解析器必然随快照格式演进而漂移）。这里只留同名单源别名。
+_parse_ref_line = parseRefLine
 
 
 def _find_refs_in_yaml(yaml_text: str, role: str, name: Optional[str] = None) -> list:

@@ -79,6 +79,8 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_dom_read",
         "browser_click_role",
         "browser_fill_role",
+        "browser_click_ref",
+        "browser_fill_ref",
     }
 )
 
@@ -131,6 +133,8 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_dom_read": frozenset({"session_id", "offset", "chunk_size"}),
     "browser_click_role": frozenset({"role", "name", "generation"}),
     "browser_fill_role": frozenset({"role", "name", "text", "generation"}),
+    "browser_click_ref": frozenset({"ref", "generation"}),
+    "browser_fill_ref": frozenset({"ref", "text", "generation"}),
 }
 
 _BUTTON_ALIASES = {
@@ -227,6 +231,10 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return f"点击 {params.get('role', '?')}「{params.get('name', '')}」"
     if tool_name == "browser_fill_role":
         return f"在 {params.get('role', '?')}「{params.get('name', '')}」中输入"
+    if tool_name == "browser_click_ref":
+        return f"点击快照编号 {params.get('ref', '?')} 指向的元素"
+    if tool_name == "browser_fill_ref":
+        return f"在快照编号 {params.get('ref', '?')} 指向的元素中输入"
     return tool_name
 
 
@@ -309,6 +317,8 @@ class ToolExecutor:
         "browser_dom_read": "_execute_browser_dom_read",
         "browser_click_role": "_execute_browser_click_role",
         "browser_fill_role": "_execute_browser_fill_role",
+        "browser_click_ref": "_execute_browser_click_ref",
+        "browser_fill_ref": "_execute_browser_fill_ref",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -5213,6 +5223,54 @@ class ToolExecutor:
         except Exception as e:
             logger.error("role 输入失败: %s", e)
             return {"error": f"role 输入失败: {str(e)}"}
+
+    # ── ref 一等寻址执行体（T-08）：参数面只有 ref/generation，没有 selector（D-2）──
+
+    async def _execute_browser_click_ref(self, params: Dict) -> Dict:
+        """按快照 `[eN]` 点击。编号来自最近一次 browser_dom_snapshot，跨代即失效。"""
+        ref = str(params.get("ref") or "").strip()
+        generation = params.get("generation")
+        if not ref:
+            return {"error": "缺少 ref 参数（先调用 browser_dom_snapshot，取快照行尾的 [eN] 编号）"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_click_ref(
+                    ref, generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_click_ref", params, result)
+            return result
+        except Exception as e:
+            logger.error("ref 点击失败: %s", e)
+            return {"error": f"ref 点击失败: {str(e)}"}
+
+    async def _execute_browser_fill_ref(self, params: Dict) -> Dict:
+        """按快照 `[eN]` 输入文本（空串清空）。失效与自证语义同 browser_click_ref。"""
+        ref = str(params.get("ref") or "").strip()
+        text = params.get("text")
+        generation = params.get("generation")
+        if not ref:
+            return {"error": "缺少 ref 参数（先调用 browser_dom_snapshot，取快照行尾的 [eN] 编号）"}
+        if text is None:
+            return {"error": "缺少 text 参数（空串表示清空输入框）"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_fill_ref(
+                    ref, str(text),
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_fill_ref", params, result)
+            return result
+        except Exception as e:
+            logger.error("ref 输入失败: %s", e)
+            return {"error": f"ref 输入失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。
