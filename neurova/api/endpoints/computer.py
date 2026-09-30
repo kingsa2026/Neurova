@@ -466,37 +466,42 @@ async def file_write(body: FileWriteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _refuseUnimplemented(feature: str, previousLie: str) -> typing.NoReturn:
+    """占位端点的统一拒绝形态。
+
+    `AGENTS.md` 修复教义第 2 条禁止把"没实现"写成成功：本函数是唯一的出口，
+    沿用本仓既有口径（`knowledge_integration.py:205`、`:215`、`personality_router.py:102`）
+    ——显式 501 + detail 点名"未实现"与**原先谎报成什么样子**，让调用方与运维可分诊。
+
+    守卫：`tests/unit/api/test_computer_placeholder_honesty.py`
+    （逐端点判据 + 全端点源码扫描，新写一个成功壳即红）。
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=f"{feature}未实现（原以 {previousLie} 形态谎报成功）",
+    )
+
+
 @router.post("/visual-parse")
 async def visual_parse(body: VisualParseRequest):
     """视觉解析：截图 + UI 元素检测"""
     _log_action("visual_parse", {"detect_elements": body.detect_elements})
-    return {
-        "code": 0,
-        "message": "Visual parse (placeholder)",
-        "data": {"elements": [], "screenshot": body.screenshot or ""},
-    }
+    _refuseUnimplemented("视觉解析（UI 元素检测）", "code 0 + elements 恒空")
 
 
 @router.post("/smart-click")
 async def smart_click(body: SmartClickRequest):
     """智能点击：基于语义目标"""
     _log_action("smart_click", {"target": body.target})
-    return {
-        "code": 0,
-        "message": f"Smart click on '{body.target}' (placeholder)",
-        "data": {"target": body.target, "found": False},
-    }
+    # found 恒 False 与"试过但目标不在"不可区分，正是本拒绝要消灭的形态
+    _refuseUnimplemented("语义目标智能点击", "code 0 + found 恒 False")
 
 
 @router.post("/smart-type")
 async def smart_type(body: SmartTypeRequest):
     """智能输入：基于语义目标"""
     _log_action("smart_type", {"target": body.target, "text_len": len(body.text)})
-    return {
-        "code": 0,
-        "message": f"Smart type into '{body.target}' (placeholder)",
-        "data": {"target": body.target, "found": False},
-    }
+    _refuseUnimplemented("语义目标智能输入", "code 0 + found 恒 False")
 
 
 @router.get("/status")
@@ -678,7 +683,7 @@ async def browser_extract_links(
     """浏览器提取链接"""
     _with_browser_identity(current_user)
     _log_action("browser_extract_links", {"selector": body.selector})
-    return {"code": 0, "message": "Links extracted (placeholder)", "data": {"links": [], "selector": body.selector}}
+    _refuseUnimplemented("浏览器链接提取", "code 0 + links 恒空")
 
 
 @router.post("/browser/execute-js")
@@ -689,11 +694,7 @@ async def browser_execute_js(
     """浏览器执行 JavaScript"""
     _with_browser_identity(current_user)
     _log_action("browser_execute_js", {"script_len": len(body.script)})
-    return {
-        "code": 0,
-        "message": "JS executed (placeholder)",
-        "data": {"result": None, "script_length": len(body.script)},
-    }
+    _refuseUnimplemented("浏览器 JS 执行", 'code 0 + 谎报 "JS executed"')
 
 
 @router.post("/browser/snapshot")
@@ -789,4 +790,4 @@ async def browser_scrape(
     """浏览器抓取（支持自适应解析）"""
     _with_browser_identity(current_user)
     _log_action("browser_scrape", {"url": body.url})
-    return {"code": 0, "message": "Scrape complete (placeholder)", "data": {"url": body.url, "data": {}}}
+    _refuseUnimplemented("网页自适应抓取", 'code 0 + 谎报 "Scrape complete"')
