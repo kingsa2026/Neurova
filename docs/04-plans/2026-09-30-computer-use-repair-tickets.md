@@ -41,16 +41,16 @@
 | **T-05** | SOM 标记态挂实例：并发会话互相覆盖 | T-02 | +40 | 中 | — | 入库 `34f61007`；活体 ✅（§13.3：真实截屏+真实检测器，平移 3px 逼出 24 个同 id 撞号，各会话解到自己坐标；变异对照=单槽覆盖时 A 实发 B 的坐标） |
 | **T-06** | 快照被硬切时不报丢失量、不接分片续读补救 | 30% 页触发，触发时九成可交互元素不可见 | +30→+214 | 中 | 无 | 入库 `056db20b`；活体 §7.5 ✅ |
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
-| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | 🔒 D-3 | 未开工 |
+| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | 🔒 D-3 | 未开工；**现场证据已量到**（§13.3：`.env` 设了 URL ⇒ `_camofox_enabled=True`，而 `:9377` 实测超时；今天不出故障只因 playwright 恰在选路首位，一旦缺 playwright 就会推进 supervisor 的 autostart=True 拉起分支） |
 | **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | +200 | **高（改 provider 可见契约）** | 🔒 D-1、D-2 | 未开工（D-6 的歧义分支卡在此：候选列得出、动不了） |
 | **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | 🔒 D-4 | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | `smart-type` 归属待定 | **部分**：click 已接；`smart_type` 等 4 面仍诚实 501 |
-| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**（§13.3：关掉活动 tab → 502 且 detail 点名"未执行"），但**原"空正文"形态仍未复现**——5 个候选态逐个记了实际读数，`about:blank`/空 html 回 `- document`（非空成功，正确），关 tab 回 Playwright 自带错误；camofox 侧空 `raw_snapshot` 需真容器，仍是本单唯一活体缺口 |
+| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 
 **批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13` 已走完；
-**剩余**：T-12 的 camofox 空快照活体（需真容器）→ 决策后 `T-08` → 回补 T-11 的歧义分支
+**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 决策后 `T-08` → 回补 T-11 的歧义分支
 （候选列得出、动不了，卡在 🔒 D-1/D-2）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）。
 自主可完成的面至此**全部收口**。
 
@@ -664,6 +664,42 @@ SOM 编号按 `(中心//8, label)` 散列（`som.stable_id`，`_GRID=8`），平
 它是"没拿到事实"与"页面确实没有可交互元素"唯一可分诊的落点，且 `about:blank` 类
 **非空成功**未被误判成故障（反向对照在 `test_empty_snapshot_not_success.py` 里）。
 camofox 侧的 `raw_snapshot` 空值需真容器才能活体，本轮仍以两后端 parity 的单元判据覆盖——**这是 T-12 剩下的活体缺口**。
+
+**该缺口已按可得范围闭合（同轮，真 HTTP 传输 + 契约桩容器）**：本机没有 camofox 服务
+（`:9377` 实测连接超时），所以不能拿"真容器"活体；改起一个**按本仓既有 camofox 契约**
+（`GET /health`、`POST /tabs`、`GET /tabs/<id>/snapshot`）的本地 HTTP 桩，用生产后端的
+**真 httpx socket** 驱动完整链路——真传输、真 JSON 解析、真 tab 注册，只有对端是桩：
+
+```
+契约桩起在 http://127.0.0.1:59221
+initialize()（真 GET /health）-> True
+navigate（真 POST /tabs）-> success=True target 注册=['tab_62ea4c70'] generation=1
+[正对照 非空 snapshot] success=True data.snapshot 长度=159
+[空 snapshot] success=False err='snapshot-empty: aria 快照为空，未取得任何页面事实（…）——请先 browser_navigate'
+判定：✓ camofox 侧空正文在产出侧即被点名拒绝
+[空 snapshot 后继续动作] success=False err='snapshot-empty: …'   ← 拒绝路径上不再按旧事实动作
+```
+
+**仍不具备的那半**：真实容器的字段/错误形态未被证明（装它需要用户授权全局 npm 包）。
+T-12 的口径因此改为"**两后端产出侧语义已在真传输上证实；真容器行为待授权后补**"。
+
+顺带量到 **T-07（🔒 D-3）的现场证据**——"能力可用"今天是一个只看环境变量、从不探测的布尔：
+
+```
+已按 app.py 同法加载 .env
+NEUROVA_CAMOFOX_URL = 'http://localhost:9377'
+:9377 实测：连接失败：TimeoutError: timed out
+manager._camofox_enabled = True        ← 只看变量在不在，不看服务在不在
+manager._backends 键 = ['playwright']
+_resolve_backend(None) = 'playwright'  camofox_active()=False
+```
+
+今天它没造成故障，**只因 playwright 恰好装着**：`_resolve_backend`（`browser_manager.py:1163`）
+的次序是 playwright > camofox > scrapling，camofox 永不被选中。一旦某部署缺 playwright，
+这个"声称可用"的布尔就会把选择推到 camofox，再进 `initialize()` 的 supervisor 拉起分支——
+`camofox_supervisor.py:73` 的 `NEUROVA_CAMOFOX_AUTOSTART` **默认为 True**，于是会去起一个第三方服务。
+这条链正是 D-3 要的"带 owner 的三态探测"要拦住的东西（可用 / 已配置但不可达 / 未配置），
+本轮只登记读数、不动实现；`initialize()` 我也刻意没调用，原因同上（会真去拉服务）。
 
 **502 分支已可达（同轮补测，真 Chromium + 真端点处理函数）**：§13.1 记的"502 没被观测到"
 在 T-12 落地后被补上了——关掉活动 tab 让快照真的取不到：
