@@ -15,6 +15,25 @@
 > | G8 台账 | 15 条已处置，1 条为反向控制条目（标签口径 nit） |
 >
 > 引用本文行号前请对准当前 `HEAD` 复核——正文写于 `c55e1f37`，此后 loop/tool 轴有 138 个提交。
+>
+> **上表未覆盖的三处（2026-09-30 对 `008a3e2a` 复验时补，均为本文的真实不足）**：
+>
+> 1. **本文 §4.4 会留下一个洞，实现时被发现并修掉**。§4.4 只要求"`maxContinuations` 与
+>    `max_rounds` 绑两个不同配置键"——照做会把 `GoalGate.max_rounds` 的**类字面量 15**
+>    （`gates.py` 原值，装配路径不传它 ⇒ **不受任何配置键管辖**）原样保留：
+>    实测 `max_loop_rounds` 配到 200 时，门控仍在第 15 轮以"goal 模式轮次预算耗尽（15）"
+>    先开火，工具轮预算形同虚设（Issue #268）。现解是新增 `goal_round_budget` 且**默认 `None` = 跟随**
+>    `max_loop_rounds`、仅在显式设值时偏离。⇒ 单源约束的正确形态不是"一个阈值一个键"，
+>    而是"**同一尺度的东西不许各自固化**"。
+> 2. **本文 §9 的"总开关默认 `false` 灰度"被否决**。实现取 `goal_verification_enabled: True`，
+>    理由原文值得留档："默认关等于接了线不通电——本片修的正是'假完成无人拦'，关着就等于没修"。
+>    成本边界改由**目标是否存在**守住（无目标 ⇒ 零判定调用，即本文 D-4），
+>    开关只作运营侧成本闸，且已登记进台账（不留只写不读的配置）。
+>    ⇒ 我在成本类决策上一贯偏保守，这次保守会直接抵消修复效果。**默认值要跟的是"这片修的是什么"，不是"怎样最省"**。
+> 3. **本文 §4.1 的落点（`agent.sessionGoal` / `agent.setLoopGoal()`）未被采用**。
+>    实际写面是 `core/turn_context.set_turn_goal()` + `agent/loop_goal.normalizeGoal()` 归一（ContextVar）。
+>    与 G1 子代理深度同因：目标要跨 `chat()` 边界，而 `TurnRunState` 传不过去。
+>    **决策点 D-1（仅会话态不建表）、D-2（`ctx.metadata["goal"]` 入口）、D-4、D-5（上限 2）均按本文采纳。**
 
 
 > 立项时间：2026-09-26 · 取证基线：`c55e1f37` · 关联缺口：对标文档 §5 G2
@@ -127,6 +146,10 @@ neurova/agent/loops/openai_loop.py:678    "goal": getattr(self.agent, "_goal", N
 ## 4. 设计
 
 ### 4.1 事实源与写入面
+
+> **【落点已过期】** 本小节的 `agent.sessionGoal` / `agent.setLoopGoal()` 未被采用。
+> 实际写面 = `core/turn_context.set_turn_goal()`，归一由 `agent/loop_goal.normalizeGoal()` 单源负责
+> （ContextVar，因目标要跨 `chat()` 边界）。**判据部分（不复用裸 `_goal`、frozen、非法输入返 `None` 不猜）全部有效。**
 
 单一事实源定为 **`agent.sessionGoal`**（新增，帕斯卡/驼峰按 `AGENTS.md` 命名法；
 **不复用 `_goal` 裸名**，避开 §1 RC-2 的心跳 goal 冲突）。
@@ -371,7 +394,7 @@ verdict 三处落地，缺一即验收不通过：
 | 判据本身坏掉 | 验收链静默失效 | §4.3 第 3 条：`parse_ok=False` 不拦截但**必须**发观测；§8.4 台账用例拦阈值失明 |
 
 **回退路径**：C2 起每片独立可回退。总开关 `agent_limits_settings.goal_verification_enabled`
-（默认 **false**，灰度到具体 agent 再放开）——注意这条开关本身要进台账登记，
+（~~默认 **false**，灰度到具体 agent 再放开~~ **【已过期：实现取 `True`】**，理由见顶部状态更新第 2 条——默认关会让本片等于没修；注意这条开关本身要进台账登记，
 否则又造出"只写不读的配置"。
 
 ---
