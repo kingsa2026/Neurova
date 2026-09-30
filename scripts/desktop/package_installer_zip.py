@@ -24,6 +24,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 WPF_DIR = REPO / "NeurUI" / "src-tauri" / "installer-wpf"
+TAURI_CONF = REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 NSIS_BUNDLE_DIR = REPO / "NeurUI" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
 LOGO_SRC = REPO / "NeurUI" / "public" / "img" / "NEUROVA-LOGO350white.png"
 OUT_DIR = REPO / "dist" / "installer"
@@ -39,9 +40,106 @@ def log(msg: str) -> None:
     print(f"[pkg] {msg}", flush=True)
 
 
-def run(cmd: list[str] | str, shell: bool = False, cwd: Path | None = None) -> int:
-    r = subprocess.run(cmd, shell=shell, cwd=str(cwd or REPO))
+def run(cmd: list[str] | str, shell: bool = False, cwd: Path | None = None,
+        env: dict | None = None) -> int:
+    r = subprocess.run(cmd, shell=shell, cwd=str(cwd or REPO),
+                       env={**os.environ, **(env or {})})
     return r.returncode
+
+
+def tauri_build_env() -> dict:
+    """`tauri build` 的进程环境：把 `LOCALAPPDATA` 挪出 systemprofile。
+
+    实机踩到（2026-09-30，节点 orange-connector，whoami=`nt authority\system`）：
+    自托管 Runner 以 SYSTEM 身份跑，`%LOCALAPPDATA%` 落在
+    `C:\WINDOWS\system32\config\systemprofile\AppData\Local`。Tauri 的 NSIS 打包器
+    把自带 makensis 解到那里 —— 而**该位置的可执行文件加载不了**：
+
+        该位置 makensis.exe                    → 0xC0000135（STATUS_DLL_NOT_FOUND）
+        同一份字节拷到 D:\ci-localappdata\...  → v3.13 正常
+        系统 choco NSIS                        → v3.13 正常
+
+    失败形态是 `Unable to start child process, error 0x2` /
+    `Failed to bundle app with makensis` —— 看着像 NSIS 缺失或脚本有错，
+    根因却是**缓存目录选在了不可执行的位置**。
+
+    根修：把 `LOCALAPPDATA` 指到一个普通目录，Tauri 据此决定 NSIS 缓存落点。
+    只影响本次构建的子进程，不动机器环境。非 Windows 或已指到正常位置时原样返回。
+    """
+    if os.name != "nt":
+        return {}
+    cur = os.environ.get("LOCALAPPDATA", "")
+    if "systemprofile" not in cur.lower():
+        return {}
+    # 与仓内其他构建产物同盘，避开系统盘权限；目录由 Tauri 自行创建子路径。
+    base = Path(os.environ.get("NEUROVA_BUILD_LOCALAPPDATA", r"D:\ci-localappdata"))
+    base.mkdir(parents=True, exist_ok=True)
+    log(f"LOCALAPPDATA 落在 systemprofile（{cur}）—— 重定向到 {base}（该处 exe 加载不了）")
+    return {"LOCALAPPDATA": str(base)}
+
+
+def signing_identity_of_tauri_conf() -> str | None:
+    """产品配置里的签名事实源：`bundle.windows.certificateThumbprint`。
+
+    只**读**不算 —— 换机器的问题在打包侧解决，不在这里抹掉指纹
+    （有证书的机器仍要按它签）。
+    """
+    import json
+
+    conf = json.loads(TAURI_CONF.read_text(encoding="utf-8"))
+    return conf.get("bundle", {}).get("windows", {}).get("certificateThumbprint")
+
+
+def cert_is_in_store(thumbprint: str) -> bool:
+    """本机证书库里有没有这枚（含私钥的）证书。
+
+    为什么必须查：指纹写死在产品配置里，而私钥不进仓 —— 换一台构建机时
+    `tauri build` 会在签名这一步硬失败（Rust 侧早已编译成功），
+    失败形态与「代码有 bug」一模一样，根因却是环境依赖。故构建前先问一句
+    「这台机器签得动吗」，把判断放在打包侧。
+    """
+    if os.name != "nt":
+        return False
+    ps = (
+        "try { "
+        f"$c = Get-Item -Path Cert:\\CurrentUser\\My\\{thumbprint},"
+        f"Cert:\\LocalMachine\\My\\{thumbprint} -ErrorAction Stop; "
+        "if ($c) { exit 0 } else { exit 1 } } catch { exit 1 }"
+    )
+    r = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, text=True,
+    )
+    return r.returncode == 0
+
+
+def tauri_signing_args() -> tuple[list[str], bool]:
+    """返回（`tauri build` 的附加参数, 本机是否真能签名）。
+
+    证书在位 → 不加参数，按产品配置签；证书缺席 → 经 `--config` 覆盖成不签，
+    并把「本产物未签名」这一事实**交回调用点去点名**（不静默弱化）。
+    """
+    thumb = signing_identity_of_tauri_conf()
+    if thumb and cert_is_in_store(thumb):
+        log(f"签名证书在位（{thumb}），按产品配置签名")
+        return [], True
+    if not thumb:
+        log("产品配置未声明签名指纹，本次构建不签名")
+        return [], False
+    log(f"签名证书缺席（{thumb} 不在本机证书库），本次构建不签名 —— 产物将显式标注")
+    # 覆盖成 null = 不签；只在本次构建生效，不改产品配置。
+    #
+    # **落文件传路径，不内联 JSON**：`--config '{...}'` 经 shell 会把引号剥掉，
+    # tauri 收到 `{bundle:{windows:{...}}}` 报 `key must be a string`
+    # （实机踩到，2026-09-30）。结构化数据不进命令行是根本，不是加转义。
+    import json
+
+    override = Path(os.environ.get("TEMP", ".")) / "neurova-unsigned-bundle.json"
+    override.write_text(
+        json.dumps({"bundle": {"windows": {"certificateThumbprint": None}}}),
+        encoding="utf-8",
+    )
+    return ["--config", str(override)], False
 
 
 def build_tauri() -> Path:
@@ -49,10 +147,19 @@ def build_tauri() -> Path:
     log("前端构建（vite build，desktop 环境）…")
     if run("npm run build:desktop", shell=True, cwd=REPO / "NeurUI") != 0:
         raise RuntimeError("前端构建失败（npm run build:desktop）")
+    extra, signed = tauri_signing_args()
+    build_tauri.last_signed = signed  # 交回调用点：不签名的产物要点名
     log("tauri build（Rust release + NSIS bundle，可能 10 分钟+）…")
-    if run("npx tauri build", shell=True, cwd=REPO / "NeurUI") != 0:
+    # 传 argv 数组、不经 shell：`--config` 的路径可能含空格，过 shell 会被二次解析
+    # （实机踩到引号被剥）。Windows 上 npx 是 npx.cmd，须经 cmd 解析扩展名。
+    npx = "npx.cmd" if os.name == "nt" else "npx"
+    if run([npx, "tauri", "build", *extra], cwd=REPO / "NeurUI",
+           env=tauri_build_env()) != 0:
         raise RuntimeError("tauri build 失败")
     return find_kernel()
+
+
+build_tauri.last_signed = False
 
 
 def find_kernel() -> Path:
@@ -131,13 +238,19 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
 
     ver = version_of(kernel)
     stamp = datetime.now().strftime("%Y%m%d")
+    # 不签名的产物必须在**文件名**上被点名：悄悄少签名是表面抹除（教义第 2 条），
+    # 而名字是分发链上唯一跟着包走、人一眼能看到的标记。
+    signed = getattr(build_tauri, "last_signed", False) if not skip_tauri else None
+    mark = "" if signed is not False else "_unsigned"
+    if signed is False:
+        log("产物未签名（证书不在本机证书库）—— 文件名带 _unsigned 标记，分发时如实告知")
 
     if legacy_zip:
         # legacy：三文件 zip，内核可独立双击安装
         shell = build_shell(None)
         if not LOGO_SRC.exists():
             raise RuntimeError(f"Logo 缺失：{LOGO_SRC}")
-        out_path = OUT_DIR / f"Neurova_Installer_{ver}_{stamp}_x64.zip"
+        out_path = OUT_DIR / f"Neurova_Installer_{ver}_{stamp}_x64{mark}.zip"
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             zf.write(shell, SHELL_NAME)
@@ -148,7 +261,7 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
     else:
         # 默认：单文件 exe（QQ 式向导，内核内嵌）
         shell = build_shell(kernel)
-        out_path = OUT_DIR / f"Neurova_Setup_{ver}_{stamp}_x64.exe"
+        out_path = OUT_DIR / f"Neurova_Setup_{ver}_{stamp}_x64{mark}.exe"
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         import shutil
         shutil.copy2(shell, out_path)
