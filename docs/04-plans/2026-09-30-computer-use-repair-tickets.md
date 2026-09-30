@@ -552,3 +552,30 @@ grep -rn "vision_available" neurova/ ; grep -n 'pop("image_base64")\|_emit_compu
 
 依赖关系：T-08（ref 一等寻址）→ T-10 → T-11。理由：`get_by_role` 遇重名是
 `strict mode violation` 硬失败，没有 ref 的语义解析只能停在"找到候选但动不了"。
+
+### 13.1 D-6 第一片活体证据（2026-09-30，真 Chromium + 真端点处理函数）
+
+取证法说明（口径要摆正）：9527 上那个后端是本轮提交**之前**起的进程，打它证明不了新代码；
+重启他人实例我不做。故在进程内驱动真 Chromium、经生产管理器 `get_computer_use_manager()`
+调真处理函数 `computer.smart_click()`——浏览器、快照、点击链都是真的，
+**缺的只是 socket 层**，这一区分如实记下。
+
+fixture：3 个同名 `删除` 按钮 + `提交订单` + `唯一链接`。
+
+```
+navigate success=True url=file:///…
+目标='唯一链接'  -> 200 {'success': True, 'matched': {'role': 'link', 'name': '唯一链接'}, 'matchedBy': 'exact', 'generation': 2}
+目标='订单'      -> 200 {'success': True, 'matched': {'role': 'button', 'name': '提交订单'}, 'matchedBy': 'partial', 'generation': 3}
+目标='删除'      -> 409 目标「删除」在当前快照里命中 3 个可交互元素（button「删除」×3），不代为挑选——请给更具体的目标…
+目标='报名按钮'  -> 404 目标「报名按钮」在当前快照事实里无可交互命中（先 browser_navigate 打开页面）
+```
+
+两点副产品证据：`订单` 那次 `generation` 从 2 进到 3，说明唯一命中确实走到了
+"动作使快照事实失效"那条链（T-03 的成果在本单被反向用到）；歧义时 409 的 detail
+**逐条列出候选**而不是回一个数字，模型可据此换目标或换工具。
+
+**未覆盖分支（不以绿冒充）**：`502`（快照取不到时报"未执行"）这次**没被观测到**——
+关掉活动 tab 后 `browser_dom_snapshot()` 仍回 `success=True` 且正文为空，于是落到了 404。
+这暴露的是另一个问题：**空快照被当成成功快照**，与 T-06b 修掉的"静默裁剪"同族
+（快照面把"没拿到事实"和"页面确实没有可交互元素"混成同一形态）。登记为 **T-12**：
+`dom_snapshot` 需区分"空树"与"取不到"，取不到时不得回 `success=True`。
