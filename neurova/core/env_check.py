@@ -28,6 +28,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from neurova.core.data_root import get_data_root
+from neurova.core.proc_text import runText
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +135,12 @@ def _verify_authenticode(exe: Path) -> bool:
     签名无效/校验失败一律拒绝执行（供应链防线）。
     """
     try:
-        r = subprocess.run(
+        r = runText(
             [
                 "powershell", "-NoProfile", "-Command",
                 "(Get-AuthenticodeSignature -FilePath '%s').Status -eq 'Valid'"
                 % exe,
             ],
-            capture_output=True,
-            text=True,
             timeout=60,
         )
     except (OSError, subprocess.SubprocessError):
@@ -157,10 +156,8 @@ def _run_elevated_installer(exe: Path) -> int:
         "-Verb RunAs -Wait -PassThru; exit $p.ExitCode"
     ).format(exe=str(exe))
     try:
-        r = subprocess.run(
+        r = runText(
             ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True,
-            text=True,
             timeout=600,
         )
     except (OSError, subprocess.SubprocessError) as e:

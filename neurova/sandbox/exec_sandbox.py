@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.proc_text import decodeChild
 
 logger = get_logger(__name__)
 
@@ -158,7 +159,6 @@ class ExecSandbox:
                 shell=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 cwd=cwd,
                 env=env,
                 **self._spawn_kwargs(),
@@ -176,8 +176,8 @@ class ExecSandbox:
             return {
                 **base,
                 "success": proc.returncode == 0,
-                "output": stdout or "",
-                "error": stderr or "",
+                "output": decodeChild(stdout),
+                "error": decodeChild(stderr),
                 "return_code": proc.returncode,
             }
         except subprocess.TimeoutExpired:
@@ -191,7 +191,7 @@ class ExecSandbox:
             return {
                 **base,
                 "success": False,
-                "output": stdout or "",
+                "output": decodeChild(stdout),
                 "error": f"Command timed out after {timeout} seconds",
                 "return_code": -1,
             }

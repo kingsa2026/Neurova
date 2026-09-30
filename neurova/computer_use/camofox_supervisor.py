@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.core.proc_text import runText
+
 import httpx
 
 from neurova.core.config import get as env_get, get_int as env_int, get_bool as env_bool
@@ -404,9 +406,8 @@ class CamofoxSupervisor:
                     "Select-Object ProcessId, ParentProcessId | "
                     "Format-Table -HideTableHeaders -AutoSize"
                 )
-                out = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", ps_cmd],
-                    capture_output=True, text=True, timeout=15,
+                out = runText(
+                    ["powershell", "-NoProfile", "-Command", ps_cmd], timeout=15,
                 )
                 children: Dict[int, List[int]] = {}
                 for line in (out.stdout or "").splitlines():
@@ -424,9 +425,8 @@ class CamofoxSupervisor:
                             queue.append(child)
             else:
                 # POSIX:ps -eo pid,ppid
-                out = subprocess.run(
-                    ["ps", "-eo", "pid,ppid"],
-                    capture_output=True, text=True, timeout=10,
+                out = runText(
+                    ["ps", "-eo", "pid,ppid"], timeout=10,
                 )
                 children = {}
                 for line in out.stdout.splitlines()[1:]:
@@ -450,9 +450,8 @@ class CamofoxSupervisor:
         for pid in pids:
             try:
                 logger.info("taskkill /F /PID %s", pid)
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True, text=True, timeout=5,
+                runText(
+                    ["taskkill", "/F", "/PID", str(pid)], timeout=5,
                 )
             except Exception as e:
                 logger.debug("taskkill %s 失败(可能已死): %s", pid, e)
