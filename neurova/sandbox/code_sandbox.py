@@ -193,11 +193,18 @@ class CodeSandboxSession:
 
         severity = SandboxSeverity.NETWORK_OFF
         platform_backend = get_exec_sandbox(severity)
+        enforced = platform_backend.enforced()
         return {
             "backend": platform_backend.backend_name(),
-            "enforced": platform_backend.enforced(),
+            "enforced": enforced,
             "severity": severity,
-            "reason": "Docker 不可用且平台后端无内核隔离 → 自报 enforced=False",
+            # 文案必须跟着值走：原先硬写"自报 enforced=False"，而后端如实回 True 时
+            # 这句话就成了替机器撒谎的第二个事实源（补齐 enforced() 的同一批里撞出来的）
+            "reason": (
+                "Docker 不可用，平台后端自报已落实该档隔离"
+                if enforced
+                else "Docker 不可用且平台后端无内核隔离 → 自报 enforced=False"
+            ),
         }
 
     def workspace(self) -> Path:
