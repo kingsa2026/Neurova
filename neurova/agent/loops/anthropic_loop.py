@@ -247,12 +247,54 @@ class AnthropicLoop(BaseAgentLoop):
             "display_number": 1,
         }
 
+    def _attachPerceptionImage(self, request_params: Dict) -> Dict:
+        """把本轮暂存的截图挂到**这一次请求**的副本上（T-09 · 🔒Q-3 拍"与 OpenAI 环同形"）。
+
+        改前这条环只服务它自己的原生 computer 工具内容块（`_execute_computer_tool` 里那个
+        `{"type":"image",…}`），不经轮级槽——于是走 Anthropic 服务商时槽被生产者填、
+        装配侧无人消费，能力"尚未生效"却只记在散文里。
+
+        闸门与归一化由 `perception_gate` 单源持有，本处只做 Anthropic 的内容块形状：
+        两环各留一份三闸，迟早漂移成"某条环给图、另一条不给"的分裂读数。
+        副本同理——`request_params["messages"]` 跨轮活，图挂上去就是进历史。
+        """
+        import base64
+
+        from neurova.agent.loops import perception_gate
+
+        offer = perception_gate.claimTurnPerception()
+        if offer is None:
+            return request_params
+
+        messages = [dict(m) for m in request_params.get("messages") or []]
+        target = next((m for m in reversed(messages)
+                       if isinstance(m, dict) and m.get("role") == "user"), None)
+        if target is None:
+            return request_params
+        existing = target.get("content")
+        blocks = ([dict(b) for b in existing if isinstance(b, dict)]
+                  if isinstance(existing, list) else
+                  ([{"type": "text", "text": existing}] if existing else []))
+        blocks.append({"type": "text", "text": perception_gate.PERCEPTION_INSTRUCTION_TEXT})
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": offer["mime"],
+                "data": base64.b64encode(offer["bytes"]).decode("ascii"),
+            },
+        })
+        target["content"] = blocks
+        sent = {**request_params, "messages": messages}
+        perception_gate.commitTurnPerception(self.agent, offer)
+        return sent
+
     async def _predict_anthropic(self, request_params: Dict) -> LLMResponse:
         """
         调用 Anthropic API 进行预测
         """
         # 使用 llm_client 调用 (假设它支持 Anthropic)
-        response = await self.llm_client.chat(**request_params)
+        response = await self.llm_client.chat(**self._attachPerceptionImage(request_params))
         return response
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:

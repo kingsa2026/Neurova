@@ -2139,4 +2139,98 @@ E     {'capabilities': [], 'probe_source': 'probed', 'probed_at': '2026-10-01T20
 测试 **+118** 行（新判据文件），不计入净 LOC。**修的是我自己上一批改动**把它暴露出来的
 既有缺陷——§30 让实测档真能读到结论之后，这条误判才第一次显形；这正是"放大视角"该付的账。
 
+---
+
+## 32. Q-3 落地 · Anthropic 环同形装配，闸门收成一份（2026-10-01，拍板＝同形）
+
+### 32.1 为什么"同形"必须连带抽单源
+
+§24.5 记的形状是：Anthropic 环那条图片通路是它自己的原生 computer 工具内容块
+（`anthropic_loop.py:320` 那个 `{"type":"image","source":…}`），不经我们的轮级槽与闸门——
+走 Anthropic 服务商时**槽被生产者填、装配侧无人消费**，能力在那条路上"尚未生效"，
+而这事只活在散文里。
+
+拍板选同形装配后，最容易写坏的地方是"照抄一份三闸过去"：两环各有一份闸门，
+迟早漂移成"某条环给图、另一条不给"的分裂读数（教义第 6 条）。所以本批把
+**闸门 + 归一化 + 指令文案 + 事件留痕**抽到新模块
+[`neurova/agent/loops/perception_gate.py`](../../neurova/agent/loops/perception_gate.py)
+单源持有，两条环各自只剩"切片形状"那一层：
+
+| 环节 | 归属 |
+|---|---|
+| 三闸（缺口 / `vision` 读数 available / 本轮至多一张） | `perception_gate.claimTurnPerception()` |
+| `normalize_image_for_llm` 降采样（挡 413）、失败**不消费槽** | 同上（`peek` 与 `commit` 分家） |
+| 指令文案与 `perception_image` 事件字段 | `PERCEPTION_INSTRUCTION_TEXT` / `commitTurnPerception()` |
+| OpenAI 的 `image_url` data URL 切片 | `openai_loop._imageUrlPart` |
+| Anthropic 的 `{"type":"image","source":{...}}` 内容块 | `anthropic_loop._attachPerceptionImage` |
+| 只挂**副本**、原始 `messages` 一字不改 | 两环各自装配 |
+
+装配点接在真发送口上：`_predict_anthropic` → `llm_client.chat(**self._attachPerceptionImage(...))`。
+
+### 32.2 判据 15 例（先红后绿）
+
+**有效红与承重都由变异实测**（基线 27 passed：新 15 例 + §24 那 12 例）：
+
+| 变异（临时改生产码，跑完立刻还原） | 实际转红 | 说明 |
+|---|---|---|
+| M1 `_predict_anthropic` 退回 `chat(**request_params)` | **恰 1 红** `TestSendPointIsWired::test_predictAnthropicSendsAttachedCopyAndKeepsOriginalIntact` | 装配接在真发送口上这件事被钉住 |
+| M2 共享闸门里摘掉缺口闸（`if False and not gapTools`） | **3 红**：Anthropic 的 noGap 例 + parity 表 `noGap` 行 + **§24 那条 OpenAI 侧 noGap 例** | 一条闸门改坏两环同时响 ⇒ 闸门确实只有一份 |
+| M3 让 OpenAI 环绕过共享闸门自判一份 | **10 红**：parity 表 4 行 + `test_loopsHaveNoGateOfTheirOwn` + OpenAI 侧 5 条闸门例 | 谁偷偷自带闸门，当场被抓 |
+
+三个变异全部由仓外备份 + `sha256sum -c` 逐个还原校验（三个文件全 OK），还原后 27 passed 复现。
+
+早先那轮"生产码未动时"的红里混着 6 条 `TypeError: 'bool' object is not subscriptable`——
+**那不是有效红**，是我 parity 判据自身写错的形状（见 32.3）；有效红是缺方法/缺模块那两类。
+本轮没有再回去复测一次"只缺生产码"的纯红计数，所以不写那个数——承重以上表三次变异为准。
+
+转绿：新文件 [`tests/unit/agent/test_perception_image_anthropic_parity.py`](../../tests/unit/agent/test_perception_image_anthropic_parity.py)
+**15 passed**（独立单跑复现一次），且 §24 那 12 例 OpenAI 侧判据**一字未改照样全绿**——
+这就是"抽单源没改变既有行为"的证据。承重条目：
+
+- 形状侧：内容块 `source.type=base64`、`media_type=image/png`，字节**用 PIL 真解一次**确认是 PNG
+  （假字节只会撞进异常分支，主路径就没走）；原始 `messages` 逐字未变且不含 base64；
+- 判定侧：无缺口不给 / 三种非 available 读数都不给 / 同轮至多一张 / 给了就在事件面留痕；
+- **parity 表**：六条场景（缺口+available、无缺口、unknown、not-configured、
+  configured-unreachable、本轮已给过）各自从**同一初态**起跑，断言两环"是否给出图"逐条相等；
+- **单源锁**：把 `perception_gate.claimTurnPerception` 打桩成"不放行"，两环都必须不给图——
+  哪条环偷偷自带一份闸门，这条当场红。
+
+### 32.3 我自己先写错的一版判据（记下来）
+
+parity 表初版在同一条环里连着跑两环装配：第一次装配会把图**消费掉**并把本轮计数加一，
+于是第二次必然不给，测出来的"分叉"是闸门 ③ 而不是两环一致性。改成"每条场景各自
+从重新种槽开始跑"才是真的 parity。另外那版还写了 `_run()` 返回 `bool` 却被下标取用
+（`TypeError: 'bool' object is not subscriptable`），一并修掉。
+
+### 32.4 回归与登记
+
+- `tests/unit/agent` + `tests/unit/computer_use` 合跑：**1876 passed / 13 skipped / 4 failed**，
+  4 条红是既有集合里的老面孔（`test_zeroHitSearch_recordsGap` + goal-gate 三条），
+  §31.3 那条时序敏感红本次未出现。
+- 新判据文件与 CI 登记同批（`git add` 后入 `scripts/ci/protected_tests.txt`，清单 **457 条**）；
+  新生产模块 `perception_gate.py` 同批入跟踪。
+- `ruff check` 四文件通过。
+
+### 32.5 LOC（生产净 **+98**，逐条去向）
+
+**订正**：本节初版写的是"净 −22"，那是我按"搬走等于抵消"估的，没去数——实测三文件
+`+145/−47 = 净 +98`。分量与去向（按 `tokenize` 逐行数过）：
+
+| 文件 | 净 | 里面是什么 |
+|---|---|---|
+| `perception_gate.py`（新） | **+89** | **代码本体只有 22 行**；其余是 docstring 47 + 注释 3 + 空行 19——单源口径（三闸为什么是这个顺序、`peek`/`commit` 为什么分家、指令为什么只活在本次请求）必须写全，否则下一个人还是会各抄一份闸门 |
+| `anthropic_loop.py` | **+42** | 装配本体（找最后一条 user、副本、内容块形状）+ "为什么同形必须副本、为什么闸门不许有两份"的理由 |
+| `openai_loop.py` | **−33** | 原内联三闸 + 归一化 + 事件留痕搬走；`_imageUrlPart` 换成从归一化字节切片 |
+
+判定与归一化的**逻辑总量没有变成两份**：openai 那份（−33）落到 gate 的 22 行代码里，
+新增的实质代码只有 Anthropic 环的形状装配。净正的部分基本是口径文字——
+按 `AGENTS.md` 第 2 条，为正必须逐条列明去向，这里就是去向。
+测试 **+291** 行（新判据文件）不计入。
+
+### 32.6 活体边界（不许当已验）
+
+本批验到的是"两环同判据、Anthropic 环把合法 PNG 挂上请求副本"。**没验到**的是
+"走 Anthropic 服务商的真模型真收到这张图"——那需要该环上的真凭据与真会话，
+与 §31.4 登记的 OpenAI 兼容环缺口同类。签收线仍是工单 U-02（见 §31.4 的候选实测）。
+
 

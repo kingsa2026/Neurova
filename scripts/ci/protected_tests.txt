@@ -1445,3 +1445,5 @@ tests/integration/test_computer_use_browser_integration.py
 tests/integration/test_camofox_contract_stub_transport.py
 # Q-2 落地时活体撞出的缺陷：探测"下不了结论"不许写成"实测不支持图"（逐文件单跑 4 passed）
 tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py
+# Q-3：Anthropic 环与 OpenAI 环共用一份感知闸门（逐文件单跑 15 passed；三个变异对照各自咬住）
+tests/unit/agent/test_perception_image_anthropic_parity.py
