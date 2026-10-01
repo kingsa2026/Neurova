@@ -302,7 +302,12 @@ if __name__ == "__main__":
     # 中文 Windows 的 cp936 编不出 ⚠️/🛑/→，`print` 会抛 UnicodeEncodeError 把门禁自己打死
     # （Linux CI 看不见这条）。同仓先例 scripts/ci_static_gate.py 是模块级——它不被 import。
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        # `newline="\n"`：读数里**只准出现 LF**。不钉死的话，Windows 上文本流会把
+        # '\n' 写成 os.linesep（CRLF），而 node 分支恒写 LF —— 同一判据的两个身体
+        # 吐出的字节不同，逐字比的 parity 判据在 Windows 上就恒假红
+        # （实测 python 773B/CR=9 对 node 764B/CR=0，归一后相同，工单集 §39/§40）。
+        # 修在生产侧而不是判据侧归一：读数长什么样不该由宿主 OS 决定。
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", newline="\n")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     # node 分支的入口**不在这里**：`node <本文件>.py` 到不了这一行。
     # node 按扩展名解析模块，遇到 `.py` 在解析阶段就以
