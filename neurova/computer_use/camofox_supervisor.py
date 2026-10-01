@@ -74,6 +74,12 @@ class CamofoxSupervisor:
             if cfg.get("autostart") is not None
             else env_bool("NEUROVA_CAMOFOX_AUTOSTART", True)
         )
+        # 「显式」只认宿主真写过这个开关：配置文件里有 autostart 键，或环境变量非空。
+        # 默认值 True **不算**显式——把默认当授权，等于让 agent 的首次浏览器调用
+        # 去决定要不要拉起一个本仓不验证的外部服务（owner 归 host）。
+        self._autostartExplicit: bool = self._autostart and bool(
+            cfg.get("autostart") is not None or env_get("NEUROVA_CAMOFOX_AUTOSTART", "")
+        )
         self._enabled: bool = bool(
             cfg.get("enabled")
             if cfg.get("enabled") is not None
@@ -114,6 +120,15 @@ class CamofoxSupervisor:
         return self._process.pid if self.is_running else None
 
     # ── 启动入口 ──
+
+    def autostartExplicit(self) -> bool:
+        """外部服务是否由宿主**显式**授权自动拉起（`NEUROVA_CAMOFOX_AUTOSTART` 的默认值不算）。
+
+        读侧给两处消费者：`CamofoxServerBackend.initialize()` 决定要不要问 supervisor，
+        以及 `BrowserManager` 选路决定要不要把动作交给 camofox。默认 True 仍保留在
+        `_autostart` 上——那是"宿主选择自己拉起时，怎么拉"的口径，不是"由谁决定去拉"的授权。
+        """
+        return self._autostartExplicit
 
     async def ensure_started(self) -> bool:
         if not self._enabled:
