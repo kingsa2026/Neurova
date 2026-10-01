@@ -1766,3 +1766,12 @@ FAILED ...::test_configuredCamofoxIsProbedEvenWhenPlaywrightOutranksIt
 **已全部走完**：T-01…T-16 无待施工项。两项**验收未合**仍挂在台账上，且各自卡外部条件：
 T-09 的"模型真收到这张图"（要真 vision 模型的工具轮）、T-12 的"真实容器自身字段形态"
 （要授权装第三方全局包）。
+
+**收尾方案已出**（2026-10-01）：[`docs/specs/2026-10-01-computer-use-perception-closure.md`](../specs/2026-10-01-computer-use-perception-closure.md)
+——U-01…U-10 逐条带判据/复跑/否证条件，全部复用既有接缝不新建；三个待拍点 Q-1（T-12 走真容器
+还是定终态）、Q-2（`_probeVision` 能力名收口何时动）、Q-3（Anthropic 环同形与否）。
+规划时顺带量到一条**新的实测事实**：`_probeVision` 的"实测"档问缓存里的 `"vision"`
+（`capability_state.py:251`），而全仓唯一写入方用的是 `CAP_SUPPORTS_MULTIMODAL = "supports_multimodal"`
+（`model_capability_cache.py:31`，写入点 `provider_manager.py:1756`）⇒ **该档结构性不可达**，
+docstring 里"实测 > 声明"的证据次序今天只有声明档在生效。登记在该文 U-05，
+是否当场修由 U-01 的读数决定（不在本批顺手改）。
