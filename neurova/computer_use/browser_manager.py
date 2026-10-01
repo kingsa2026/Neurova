@@ -1687,6 +1687,16 @@ class BrowserManager:
             return "scrapling"
         raise RuntimeError("没有可用的浏览器后端（在册表为空，Playwright 与 Scrapling 都没导入成功）")
 
+    def camofoxConfigured(self) -> bool:
+        """配置面问题：camofox 这条后端**启用**了吗（不看它在选路里排第几）。
+
+        与 `camofox_active()` 是两个谓词，别互相顶替：后者答"这次动作会不会真的
+        以携带登录态的 profile 对外"（playwright 在册时为 False），前者只答配没配。
+        拿授权门当配置读侧，会让能力面在"配了但被 playwright 挡住"的机器上永远
+        报 `not-configured`，于是那次真 `/health` 探测从来不会发生。
+        """
+        return bool(self._camofox_enabled)
+
     def camofox_active(self) -> bool:
         """R3-4 附身授权门判据：本次 browser_* 是否会走携带登录态的 camofox
         profile。默认优先级 playwright > camofox，故仅当 camofox 启用且无
