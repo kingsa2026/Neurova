@@ -249,6 +249,46 @@ class TestGateScriptRunsOnBothInterpreters:
                     f"python={python_run.stdout!r}\nnode={node_run.stdout!r}"
                 )
 
+    #: 带 node 孪生实现的 CI 脚本：同一条判据的两个身体，读数的字节必须由**脚本自己**定，
+    #: 不许由宿主 OS 定。逐名取自本仓在册事实（`run_gate_under_node.sh` 的孪生面）。
+    DUAL_RUNTIME_SCRIPTS = (
+        "scripts/ci/npc_turn_handoff_gate.py",
+        "scripts/ci/npc_role_admission.py",
+        "scripts/ci/npc_runtime_budget.py",
+    )
+
+    @pytest.mark.parametrize("script", DUAL_RUNTIME_SCRIPTS)
+    def test_python_branch_line_endings_are_host_independent(self, tmp_path, script):
+        """python 分支的 stdout 必须吐 LF——同一判据的字节不许由宿主 OS 决定。
+
+        两条实现是同一条 parity 判据的两个身体，而 parity 是**逐字节**比的
+        （见上条 `test_node_and_python_readings_are_identical`）。Windows 上
+        `sys.stdout` 文本流默认把 '\n' 写成 `os.linesep`（CRLF），node 恒写 LF，
+        实测 python 分支 773 B / CR=9、node 分支 764 B / CR=0，归一行尾后逐字节相同
+        （工单集 §39）。⇒ 分叉在生产侧，也只能在生产侧修：把 parity 判据改成
+        "比前先归一行尾"，等于把这条平台依赖永久放行，还顺手把判据的严格度也抹了。
+        """
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        proc = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / script)],
+            capture_output=True, cwd=str(tmp_path), timeout=120,
+            env={**os.environ, "CNB": "1", "CI": "true",
+                 "CNB_BUILD_WORKSPACE": str(workspace)},
+        )
+        assert proc.returncode == 0, (
+            f"{script} 未以 0 退出：\n"
+            + proc.stdout.decode("utf-8", "replace")
+            + proc.stderr.decode("utf-8", "replace")
+        )
+        # 前提提出证：读数必须真产出，否则"没有 CR"会在一条空 stdout 上空转成绿灯
+        assert len(proc.stdout) > 0, f"{script} 一条读数都没吐"
+        crCount = proc.stdout.count(b"\r")
+        assert crCount == 0, (
+            f"{script} 的 python 分支吐了 {crCount} 个 CR 字节：同一判据在 Windows 与 Linux 上"
+            "字节不同，而 node 孪生恒写 LF ⇒ 逐字比对的双运行时 parity 判据在 Windows 恒假红"
+        )
+
     def test_missing_workspace_still_fails_loudly(self, tmp_path):
         """缺落点必须响亮判红：换 node 跑也不例外（不得降级成静默绿灯）。"""
         node = shutil.which("node")
