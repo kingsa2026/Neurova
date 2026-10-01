@@ -569,37 +569,18 @@ class OpenAILoop(BaseAgentLoop):
     def _attachPerceptionImage(self, request_params: Dict) -> Dict:
         """把本轮暂存的截图挂到**这一次请求**的副本上（T-09 · D-4）。
 
-        三道闸门同时成立才给图，缺一不可：
-
-        ① 本轮有**具名感知缺口**（快照类工具失败——空 aria 树对已渲染文档不可能成立）；
-           文本事实够用时就走文本，这是"分层兜底"而不是"每步喂图"。
-        ② 视觉能力读数为 `available`（T-07 的 `capability_state` 单源；
-           `unknown`/`not-configured` 都不给——为一个不知道支不支持图的模型付 base64）。
-        ③ 本轮还没给过（`MAX_PERCEPTION_IMAGES_PER_TURN`）。
+        三道闸门与图片归一化都在 `perception_gate` 单源持有，本处只做 OpenAI 的切片形状：
+        两环各写一份闸门，迟早漂移成"某条环给图、另一条不给"的分裂读数。
 
         为什么必须交副本：`request_params["messages"]` 是**跨轮活**的列表，
         每轮就地 `extend/append`。图直接挂上去就等于进历史，正是 2026-09-09
         图片串台事故的形状（历史里遗留"请结合图片回答"，后续文本轮无图可依）。
         指令与图同生命周期：都只活在这一次请求里。
         """
-        from neurova.core import turn_context as _tc
+        from neurova.agent.loops import perception_gate
 
-        if _tc.turnPerceptionGivenCount() >= _tc.MAX_PERCEPTION_IMAGES_PER_TURN:
-            return request_params
-        gapTools = _tc.turnPerceptionGapTools()
-        if not gapTools:
-            return request_params
-        from neurova.computer_use.capability_state import CAP_AVAILABLE, reading
-
-        if reading("vision").state != CAP_AVAILABLE:
-            return request_params
-        image = _tc.peekTurnPerceptionImage()
-        if not image:
-            return request_params
-
-        part = self._imageUrlPart(image)
-        if part is None:
-            # 归一化没成就不消费这张图：闸门不该自己饿死后面真需要的轮
+        offer = perception_gate.claimTurnPerception()
+        if offer is None:
             return request_params
 
         messages = [dict(m) for m in request_params.get("messages") or []]
@@ -612,35 +593,21 @@ class OpenAILoop(BaseAgentLoop):
             {"type": "text", "text": existing or ""}]
         target["content"] = [
             *textParts,
-            {"type": "text", "text": "[本轮附上的图片是屏幕/页面的当前实际画面，"
-                                     "上一轮的结构化快照没拿到事实，请结合图片继续]"},
-            part,
+            {"type": "text", "text": perception_gate.PERCEPTION_INSTRUCTION_TEXT},
+            self._imageUrlPart(offer),
         ]
         sent = {**request_params, "messages": messages}
-        taken = _tc.takeTurnPerceptionImage()
-        self.agent.append_tool_event({
-            "type": "perception_image",
-            "gapTool": gapTools[-1],
-            "imageTool": (taken or {}).get("toolName", ""),
-            "reason": "快照类感知具名失败，且本轮尚未附过图",
-        })
+        perception_gate.commitTurnPerception(self.agent, offer)
         return sent
 
     @staticmethod
-    def _imageUrlPart(image: Dict) -> Optional[Dict]:
-        """base64 → OpenAI `image_url` 切片；超闸门的图先降采样（挡 provider 413）。"""
+    def _imageUrlPart(offer: Dict) -> Dict:
+        """闸门归一化好的字节 → OpenAI `image_url` 切片（降采样已在闸门里挡过 413）。"""
         import base64
 
-        try:
-            from neurova.attachment_parser import normalize_image_for_llm
-
-            raw = base64.b64decode(image.get("base64") or "")
-            data, mime = normalize_image_for_llm(raw, image.get("mime") or "image/png")
-            return {"type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}}
-        except Exception as e:  # noqa: BLE001 - 挂不上图就让这一轮照旧走文本事实
-            logger.warning("感知截图装配失败（本轮不附图）: %s", e)
-            return None
+        return {"type": "image_url",
+                "image_url": {"url": f"data:{offer['mime']};base64,"
+                               f"{base64.b64encode(offer['bytes']).decode('ascii')}"}}
 
     async def _chatNormalWithDegrade(self, request_params: Dict, state: TurnRunState) -> LLMResponse:
         """模型往返 + 工具型 400 的无工具降级重试（单轮内，不叠帧）。"""
