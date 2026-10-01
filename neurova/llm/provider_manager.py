@@ -1731,12 +1731,16 @@ class LLMProviderManager(Module):
         try:
             from datetime import datetime as _dt
 
+            # 能力名必须过 capability_names 单源出口：ProviderCapability 是 (str, Enum)
+            # mixin，`str(member)` 吐的是 `ProviderCapability.VISION` 类名形态，
+            # 用 [str(c) ...] 会让"探测明明回了自己的图"这一条恒不成立。
+            from neurova.llm.providers.types import capability_names
+
             with self._config_lock:
                 metadata = dict(provider.model_metadata or {})
                 entry = dict(metadata.get(model_id, {}) or {})
-                caps = [str(c) for c in (entry.get("capabilities") or [])]
-                result_caps = [str(c) for c in (result.capabilities or [])]
-                vision = "vision" in result_caps
+                caps = capability_names(entry.get("capabilities") or [])
+                vision = "vision" in capability_names(result.capabilities or [])
                 if vision and "vision" not in caps:
                     caps = [*caps, "vision"]
                 elif not vision and "vision" in caps and result.metadata.get("probe_detail") == "media_rejected":

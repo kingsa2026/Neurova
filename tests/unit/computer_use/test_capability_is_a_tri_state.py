@@ -253,12 +253,17 @@ def test_visionReadingNeverInventsEvidence(monkeypatch):
 
 
 def test_visionAvailableComesFromEvidenceNotTheOldLiteral(monkeypatch):
-    """`vision_available` 由读数派生：实测说支持才是 True。"""
+    """`vision_available` 由读数派生：实测说支持才是 True。
+
+    夹具形状按**事实源**（用户配置里 `model_metadata[*]["capabilities"]` 实测 866 条全是 list，
+    0 条 dict —— `capability_names()` 是那条字段的单源出口）。本条初版替它造的是 dict 形状，
+    等于照着一个没有生产者会写的形状自证；Q-2 落地时一并纠正。
+    """
     from neurova.llm.provider_manager import LLMProviderManager
     from neurova.llm.model_capability_cache import ModelCapabilityCache
 
     class _Meta:
-        model_metadata = {"m-vision": {"capabilities": {"vision": True}}}
+        model_metadata = {"m-vision": {"capabilities": ["vision"]}}
 
     monkeypatch.setattr(LLMProviderManager, "get_active_model",
                         lambda self: {"provider_id": "probe", "model": "m-vision",
@@ -268,3 +273,109 @@ def test_visionAvailableComesFromEvidenceNotTheOldLiteral(monkeypatch):
                         lambda self, key, cap, default=None: default, raising=False)
     r = cs.reading("vision", refresh=True)
     assert r.state == cs.CAP_AVAILABLE and r.usable(), r.asDict()
+
+
+def _learnViaProductionWriter(supported: bool, capabilityArg):
+    """用**生产写侧**把探测结论落进元数据与进程级缓存，返回那个 provider 对象。
+
+    能力名与形状都由写侧决定，本判据不挑名字——挑了就等于让替身跟着实现一起错
+    （工单集 §26.4 的教训）。只把落盘 `_save_config` 摘掉，不碰用户目录。
+    """
+    import threading
+
+    from neurova.llm.provider_manager import LLMProviderManager
+    from neurova.llm.providers.types import ProbeResult
+
+    class _Provider:
+        def __init__(self):
+            self.id = "probe"
+            self.default_model = "m-learned"
+            self.model_metadata: dict = {}
+
+    class _WriterSelf:
+        _config_lock = threading.RLock()
+
+        def _save_config(self) -> None:
+            return None
+
+    provider = _Provider()
+    result = ProbeResult(
+        model_id="m-learned",
+        supported=supported,
+        capabilities=capabilityArg,
+        metadata={} if supported else {"probe_detail": "media_rejected"},
+    )
+    LLMProviderManager._persist_probe_result(_WriterSelf(), provider, "m-learned", result)
+    return provider
+
+
+def _pointActiveModelAt(monkeypatch, provider) -> None:
+    from neurova.llm.provider_manager import LLMProviderManager
+
+    monkeypatch.setattr(LLMProviderManager, "get_active_model",
+                        lambda self: {"provider_id": provider.id, "model": "m-learned",
+                                      "provider_name": "p", "base_url": ""}, raising=False)
+    monkeypatch.setattr(LLMProviderManager, "get_default_provider",
+                        lambda self: provider, raising=False)
+
+
+def test_probeResultFromEnumProviderBecomesReadableDeclaration(monkeypatch):
+    """探测回枚举成员时，写侧存的必须仍是可读的小写名 —— 清空缓存后声明档要能开门。
+
+    咬住的形状：`_persist_probe_result` 早先用 `[str(c) for c in capabilities]`，而
+    `ProviderCapability` 是 (str, Enum) mixin，`str()` 吐的是 `ProviderCapability.VISION`
+    类名形态 ⇒ `"vision" in [...]` 恒 False，探测成功却把结论写没了。
+    """
+    from neurova.llm.model_capability_cache import reset_capability_cache
+    from neurova.llm.providers.types import ProviderCapability
+
+    reset_capability_cache()
+    provider = _learnViaProductionWriter(True, [ProviderCapability.VISION])
+    reset_capability_cache()          # 只留声明档，验写侧存的形状
+    _pointActiveModelAt(monkeypatch, provider)
+    try:
+        r = cs.reading("vision", refresh=True)
+        assert r.state == cs.CAP_AVAILABLE, r.asDict()
+        assert "声明" in r.reason, r.asDict()
+    finally:
+        reset_capability_cache()
+
+
+def test_learnedYesOpensVisionAxisEvenWhenDeclarationFaceIsBlank(monkeypatch):
+    """实测档必须读得到缓存里那条 True：两表面会分叉（配置裁剪/换模型时元数据重铺，缓存仍在）。
+
+    咬住的形状：能力轴问缓存用的名字与唯一写入方学的名字不同源 ⇒ 这一档结构性不可达，
+    docstring 写的"实测 > 声明"证据次序名不副实。
+    """
+    from neurova.llm.model_capability_cache import reset_capability_cache
+
+    reset_capability_cache()
+    provider = _learnViaProductionWriter(True, ["vision"])
+    provider.model_metadata = {}      # 声明面抹平，只剩实测
+    _pointActiveModelAt(monkeypatch, provider)
+    try:
+        r = cs.reading("vision", refresh=True)
+        assert r.state == cs.CAP_AVAILABLE, r.asDict()
+        assert "实测" in r.reason, r.asDict()
+    finally:
+        reset_capability_cache()
+
+
+def test_measuredRejectionIsNotDowngradedToUnknown(monkeypatch):
+    """探测实测"不支持图" ⇒ 必须报 configured-unreachable，不许退回"没证据"。
+
+    写侧在 supported=False 时不会把 vision 写进 capabilities，声明面因此本就是空的；
+    这时唯一的事实是缓存里那条 False。读不到它就等于把已证伪的结论当未知，
+    下一轮还会再付一次探测，而 T-09 的门也会因"unknown 不给图"反复悬着。
+    """
+    from neurova.llm.model_capability_cache import reset_capability_cache
+
+    reset_capability_cache()
+    provider = _learnViaProductionWriter(False, [])
+    _pointActiveModelAt(monkeypatch, provider)
+    try:
+        r = cs.reading("vision", refresh=True)
+        assert r.state == cs.CAP_CONFIGURED_UNREACHABLE, r.asDict()
+        assert "实测" in r.reason, r.asDict()
+    finally:
+        reset_capability_cache()
