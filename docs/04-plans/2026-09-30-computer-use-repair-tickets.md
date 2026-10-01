@@ -2064,4 +2064,79 @@ mine 样本1: 失败     mine 样本2: 未失败
 5 条失败与 2 个 error 全在改前既有集合内（4 条 agent 域 + llm 那条 token 公式 + cost_tracking 两个 error）。
 `ruff check` 三个文件通过。
 
+---
+
+## 31. U-01 真探测跑到一半，撞出"下不了结论被写成实测否证"（2026-10-01，已根修）
+
+### 31.1 活体读数（真服务商，非 mock）
+
+对**当前活跃模型**走生产探测口 `LLMProviderManager._probe_model_multimodal_real`：
+
+```
+provider=modelscope  model=moonshotai/Kimi-K2.6:DashScope   耗时 0.13s
+supported=false  capabilities=[]
+probe_source = "inconclusive"
+probe_detail   = "HTTP 400: Model id : moonshotai/Kimi-K2.6 , has no provider supported"
+```
+
+`openai_provider.py:488` 明确把限频/网络/网关类错误标成 **inconclusive（下不了结论）**。
+但 `_persist_probe_result` 不看这个标记，照样盖 `probe_source="probed"`、
+`learn(supports_multimodal=False)` 并落盘。两条后果：
+
+1. `maybe_probe_multimodal` 见 `probe_source=="probed"` 就**不再重探** ⇒ 一次 400 变成永久结论；
+2. §30 刚修好的实测档读到那条 False，`capabilities.vision` 当场报成
+   `configured-unreachable｜实测（学习型缓存）… supports_multimodal=False` ——
+   **T-09 的附图闸门基于一个从没成立过的测量关闭**。这正是 T-12 打的同一形状：
+   "没拿到事实"被当成"事实是没有"。
+
+### 31.2 修法与判据（先红后绿）
+
+`_persist_probe_result` 在拿锁**之前**判 `metadata.probe_source == "inconclusive"` ⇒
+不写元数据、不学结论、不落盘，只 log 一行"留待下次重探"。真否证仍走原路
+（`probe_detail == "media_rejected"` 才允许摘 `vision` 并学 False）。
+
+新判据 [`tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py`](../../tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py)
+4 例，喂给写侧的就是生产 provider 会回的三种形状，断言元数据与缓存的**实际状态**（不 mock 探测函数）：
+
+```
+红灯原文（生产码未动时）
+E   AssertionError: 下不了结论却盖了 probed——后台探测从此不再重探：
+E     {'capabilities': [], 'probe_source': 'probed', 'probed_at': '2026-10-01T20:40:44'}
+========================= 1 failed, 3 passed in 0.95s =========================
+```
+转绿后与 §30 那 15 例合跑 **19 passed**；4 例中另 3 例是锁（正证照旧写 probed+学 True、
+`media_rejected` 才摘 vision、已有标记不被抹）——它们在改前就绿，作用是防止这次修法写反。
+判据文件与 CI 登记同批（`protected_tests.txt` 456 条）。
+
+### 31.3 我这次探测污染了用户配置，已按原样清掉
+
+真探测会经 `_save_config` 写 `~/.neurova/config/providers.json`（不在仓内）。修好后我撤掉了
+自己这次写回的三项，`modelscope:moonshotai/Kimi-K2.6:DashScope` 恢复成探测前的"无元数据条目"：
+
+```
+修复前 = {capabilities: [], probe_source: "probed", probed_at: "2026-10-01T20:36:51"}
+修复后 = 条目不存在     vision 读数 = unknown（"既无实测也无声明——需要跑一次多模态探测才能定"）
+```
+
+### 31.4 U-02 仍卡在"这台机器上没有可用 vision 通道"（如实登记，不算已验）
+
+逐个真探了配置里声明支持图的候选，四个服务商的真实返回：
+
+| 候选 | 返回 |
+|---|---|
+| `modelscope:moonshotai/Kimi-K2.6:DashScope`（活跃） | HTTP 400 `has no provider supported`（网关没这个模型的路由） |
+| `github-models:gpt-4o` | HTTP 200 但正文 `text/plain` 非 JSON（解码不了响应） |
+| `aliyun-bailian:gpt-4o-mini` | HTTP 401 `You didn't provide an API key` |
+| `volcano-coding-cn:doubao-1.5-vision-pro-250328` | HTTP 404 `The requested model does not support the coding plan feature` |
+
+⇒ U-01 的"顶到 available"和 U-02 的工具轮签收**都需要一个真能收图的服务商凭据**，
+本机现有配置里没有一个通。这不是代码缺口，是外部凭据缺口；等用户给可用的 vision
+模型（或把某个候选的 key 补上）我再接着跑，不在这里用替身冒充签收。
+
+### 31.5 LOC
+
+生产 **+11**（`provider_manager.py`：inconclusive 早退 + 为什么必须早退的口径）。
+测试 **+118** 行（新判据文件），不计入净 LOC。**修的是我自己上一批改动**把它暴露出来的
+既有缺陷——§30 让实测档真能读到结论之后，这条误判才第一次显形；这正是"放大视角"该付的账。
+
 

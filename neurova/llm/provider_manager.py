@@ -1731,6 +1731,19 @@ class LLMProviderManager(Module):
         try:
             from datetime import datetime as _dt
 
+            # 探测**下不了结论**时什么都不写。`openai_provider.py:488` 把限频/网络/网关类
+            # 错误标成 inconclusive，这类返回不能证明模型不支持图——把它盖成
+            # probe_source="probed" 会让 maybe_probe_multimodal 从此不再重探（一次 400
+            # 变成永久结论），learn(False) 又让 capability_state 的实测档据此关闭 T-09 的
+            # 附图闸门。"没拿到事实"不等于"事实是没有"，与 T-12 同源。
+            probeMeta = result.metadata or {}
+            if probeMeta.get("probe_source") == "inconclusive":
+                logger.info(
+                    "多模态探测对 %s 下不了结论（%s）——不写标记、不学结论，留待下次重探",
+                    model_id, str(probeMeta.get("probe_detail") or "")[:120],
+                )
+                return
+
             # 能力名必须过 capability_names 单源出口：ProviderCapability 是 (str, Enum)
             # mixin，`str(member)` 吐的是 `ProviderCapability.VISION` 类名形态，
             # 用 [str(c) ...] 会让"探测明明回了自己的图"这一条恒不成立。

@@ -1443,3 +1443,5 @@ tests/integration/test_computer_use_browser_integration.py
 # T-12 收尾 U-07：camofox 产出侧语义在**真 httpx socket**上的守卫（逐文件单跑 7 passed；
 # 三个变异对照各自咬住预期条目，摘掉空正文拒绝分支时红形即 T-12 的原始谎报）
 tests/integration/test_camofox_contract_stub_transport.py
+# Q-2 落地时活体撞出的缺陷：探测"下不了结论"不许写成"实测不支持图"（逐文件单跑 4 passed）
+tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py
