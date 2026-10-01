@@ -430,18 +430,32 @@ class MultiModelLLMClient:
             )
         return models
 
+    def _dropProviderClients(self, provider_id: str) -> int:
+        """摘掉该 provider 已缓存的 ModelClient（必须持 `_init_lock` 调用）。
+
+        键形如 `provider_id/model`，前缀匹配带斜杠以防 `gpt` 命中 `gpt-mini/x`。
+        """
+        keysToRemove = [
+            key for key in self._clients if key.startswith(f"{provider_id}/")
+        ]
+        for key in keysToRemove:
+            del self._clients[key]
+        return len(keysToRemove)
+
     def refresh_provider(self, provider_id: str) -> bool:
         """刷新服务商客户端"""
         provider = self._provider_manager.get_provider(provider_id)
         if not provider:
             logger.warning("Provider %s not found", provider_id)
+            # 配置里已经没有它了，缓存里的客户端必须一起走：原实现只 warn 就 return，
+            # 删掉 provider 之后运行态还能往它发请求（工单集 §41 实测复现）。
+            with self._init_lock:
+                self._dropProviderClients(provider_id)
             return False
 
         # 移除旧客户端
         with self._init_lock:
-            keys_to_remove = [k for k in self._clients.keys() if k.startswith(f"{provider_id}/")]
-            for key in keys_to_remove:
-                del self._clients[key]
+            self._dropProviderClients(provider_id)
 
             # 重新初始化
             if provider.enabled and provider.api_key:
@@ -1487,9 +1501,35 @@ def scope_for_owner(owner_user_id: Optional[str]) -> Optional[str]:
     return f"user:{owner_user_id}"
 
 
+def refreshProviderClients(provider_id: str) -> int:
+    """provider 配置变更后，让**所有已注册 scope** 的该 provider 客户端重建。
+
+    为什么不是"刷 admin 那一份"：`ModelClient` 里烘的是建请求时解析好的 `LLMConfig`
+    （compat 声明、api_key、base_url 全在内）。只刷一个 scope，其余 scope 的实例会继续
+    用旧配置——而 compat 声明恰恰是"这台网关收不收这个键"的 wire 契约，声明改了不生效
+    等于没声明（实测：声明写进 providers.json 后，缓存客户端的 `compat.supports_tools`
+    仍是旧值，手工 refresh 才翻，工单集 §41）。
+
+    返回被重建的实例数（0 = 当前没有该 provider 的活客户端，通常是还没人或已换 key）。
+    """
+    with MultiModelLLMClient._lock:
+        instances = [MultiModelLLMClient._instance, *MultiModelLLMClient._instances.values()]
+    refreshed = 0
+    for instance in instances:
+        if instance is None:
+            continue
+        try:
+            instance.refresh_provider(provider_id)
+            refreshed += 1
+        except Exception as e:  # noqa: BLE001 - 配置已保存，重建失败不该改写本次结果
+            logger.warning("Provider %s 运行态客户端重建失败（scope 实例）: %s", provider_id, e)
+    return refreshed
+
+
 __all__ = [
     "MultiModelLLMClient",
     "get_multi_model_client",
     "reset_multi_model_client",
+    "refreshProviderClients",
     "scope_for_owner",
 ]
