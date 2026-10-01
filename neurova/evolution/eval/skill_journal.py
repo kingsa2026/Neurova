@@ -21,6 +21,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from neurova.core.git_runner import commit_message, run_git
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.history_ledger import sanitize_key
 
@@ -51,15 +52,10 @@ class SkillJournal:
     # ── git 基础设施 ──
 
     def _git(self, *args: str, stdin: Optional[str] = None) -> subprocess.CompletedProcess:
-        env = dict(__import__("os").environ)
-        env.update(_IDENTITY)
-        # 二进制 stdin 自行编码：Windows 文本模式会把 '\n' 翻译成 '\r\n'，
-        # 污染 mktree 的路径条目（实测路径变成 "s1.txt\r"）
-        input_bytes = stdin.encode("utf-8") if stdin is not None else None
-        proc = subprocess.run(
-            ["git", "--git-dir", str(self._dir), *args],
-            input=input_bytes, capture_output=True, timeout=_TIMEOUT, env=env,
-        )
+        """transport 委托 neurova.core.git_runner（Windows 三坑的单源防线：
+        二进制 transport / str stdin utf-8 编码）。这里只做 str 输出适配。"""
+        proc = run_git(*args, git_dir=str(self._dir), stdin=stdin, timeout=_TIMEOUT,
+                       env_extra=_IDENTITY)
         return subprocess.CompletedProcess(
             proc.args, proc.returncode,
             stdout=proc.stdout.decode("utf-8", "replace"),
@@ -106,14 +102,14 @@ class SkillJournal:
                     return None
                 # subject 与 body 之间必须空行——git 的 %s 会把首个空行前的
                 # 所有行折叠成一行 subject（无空行则 body 并入 subject）
-                message = (f"evolution: {skill_id} {proposal_id}\n\n"
-                           f"{json.dumps(evidence or {}, ensure_ascii=False)}")
-                # message 走 stdin：Windows 下 -m 参数内嵌换行会被命令行
-                # 传参空格化（subject/body 合并成一行，解析即错）
+                # message 走 stdin + subject/body 空行规范（坑 2/3 的单源
+                # 防线见 neurova.core.git_runner）
                 cmd = ["commit-tree", tree.stdout.strip()]
                 if parent:
                     cmd += ["-p", parent]
-                commit = self._git(*cmd, stdin=message)
+                commit = self._git(*cmd, stdin=commit_message(
+                    f"evolution: {skill_id} {proposal_id}",
+                    json.dumps(evidence or {}, ensure_ascii=False)))
                 if commit.returncode != 0:
                     logger.debug("commit-tree 失败: %s", commit.stderr[:120])
                     return None
