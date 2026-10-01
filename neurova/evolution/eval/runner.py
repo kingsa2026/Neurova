@@ -30,6 +30,17 @@ _EPS = 1e-9
 _MAX_FAILURES = 3
 
 
+def _redact_eval_error(e: Exception) -> str:
+    """P2-9：单例异常文本脱敏截断——会进 JudgeFailure.feedback → 变异器
+    prompt 面，凭据/密钥形态内容不得外泄。脱敏器自身故障时只留异常类型。"""
+    try:
+        from neurova.skills.evolution_inputs_guard import redact_secrets
+
+        return redact_secrets(f"eval_error:{type(e).__name__}: {e}")[:160]
+    except Exception:  # noqa: BLE001 - 脱敏器故障不外泄原文
+        return f"eval_error:{type(e).__name__}"[:160]
+
+
 class _JudgeLike(Protocol):
     async def score(self, *, task_input: str, expected_behavior: str, output: str,
                     skill_text: str, **kw) -> Any: ...
@@ -72,6 +83,9 @@ class EvolutionRunResult:
     # P1-7a 多变体：本轮配置与实际被评测的候选总数（审计面）。
     variants_per_round: int = 1
     candidates_evaluated: int = 0
+    # P2-9 missing 记 0：本轮单用例评测异常数（0 分占满分母，运行不中断）。
+    # 与 judge_unavailable（判分基础设施不可用）诚实分开。
+    eval_errors: int = 0
 
     @property
     def improvement(self) -> float:
@@ -108,6 +122,7 @@ class EvolutionRunResult:
             "cost_change": round(self.cost_change, 4),
             "variants_per_round": self.variants_per_round,
             "candidates_evaluated": self.candidates_evaluated,
+            "eval_errors": self.eval_errors,
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -160,6 +175,7 @@ class SkillEvolutionRunner:
         # P1-4 编辑历史台账：None = 不启用；注入后逐候选落账并把最近记录
         # 回喂变异器（已证伪假设禁止重画）。
         self._ledger = ledger
+        self._run_eval_errors = 0  # P2-9：run() 开始时清零，全轮累加
 
     # ── 内部:变异 ──
 
@@ -225,29 +241,38 @@ class SkillEvolutionRunner:
 
     async def _score_example(
         self, skill_text: str, ex: EvalExample, artifact_type: str
-    ) -> tuple[float, str, str]:
-        """返回 (composite, agent 输出, judge 反馈文本)。
+    ) -> tuple[float, str, str, bool]:
+        """返回 (composite, agent 输出, judge 反馈文本, 是否单例失败)。
 
-        execution traces to understand WHY things fail);丢掉它变异退化成盲改。
+        P2-9 missing 记 0：单例执行/判分异常 → 0 分占满分母、运行不中断；
+        异常文本脱敏截断后进 feedback（会到变异器 prompt 面）。0.0 是诚实
+        记分不是中性分——防"评测崩了但剩余用例分高"的幸存者偏差。
         """
-        output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
+        try:
+            output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
+        except Exception as e:  # noqa: BLE001 - 单例失败记 0（BaseException 不经此路）
+            return 0.0, "", _redact_eval_error(e), True
         max_size = (
             self.config.max_tool_desc_size
             if artifact_type == "tool_description"
             else self.config.max_skill_size
         )
-        score = await self._call_judge(
-            task_input=ex.task_input,
-            expected_behavior=ex.expected_behavior,
-            output=output,
-            skill_text=skill_text,
-            artifact_size=len(skill_text),
-            max_size=max_size,
-        )
+        try:
+            score = await self._call_judge(
+                task_input=ex.task_input,
+                expected_behavior=ex.expected_behavior,
+                output=output,
+                skill_text=skill_text,
+                artifact_size=len(skill_text),
+                max_size=max_size,
+            )
+        except Exception as e:  # noqa: BLE001 - 单例判分失败记 0
+            return 0.0, str(output or ""), _redact_eval_error(e), True
         return (
             float(getattr(score, "composite", score)),
             output,
             str(getattr(score, "feedback", "") or ""),
+            False,
         )
 
     async def _evaluate(
@@ -256,9 +281,12 @@ class SkillEvolutionRunner:
         if not examples:
             return 0.0, []
         details: list[tuple[EvalExample, float, str, str]] = []
+        eval_errors = 0
         for ex in examples:
-            score, output, feedback = await self._score_example(skill_text, ex, artifact_type)
+            score, output, feedback, failed = await self._score_example(skill_text, ex, artifact_type)
+            eval_errors += int(failed)
             details.append((ex, score, output, feedback))
+        self._run_eval_errors += eval_errors
         avg = sum(s for _, s, _, _ in details) / len(details)
         return avg, details
 
@@ -376,6 +404,7 @@ class SkillEvolutionRunner:
         ledger_key: str = "",
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
+        self._run_eval_errors = 0  # P2-9：本轮清零（探针路径有独立语义，不计入）
 
         if not dataset or not dataset.all_examples:
             result.rejected = True
@@ -558,6 +587,7 @@ class SkillEvolutionRunner:
 
         heldout 永不参与接受/拒绝判定、变异失败采样或逐轮评测——否则
         它会被搜索过程自适应消耗，退化成第二个判据集。"""
+        result.eval_errors = self._run_eval_errors  # P2-9：结果面外露单例失败数
         if not dataset.heldout:
             return
         result.heldout_before = await self._evaluate_avg(
