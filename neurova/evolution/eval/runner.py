@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol
@@ -68,6 +69,9 @@ class EvolutionRunResult:
     cost_baseline: int = 0
     cost_candidate: int = 0
     cost_change: float = 0.0
+    # P1-7a 多变体：本轮配置与实际被评测的候选总数（审计面）。
+    variants_per_round: int = 1
+    candidates_evaluated: int = 0
 
     @property
     def improvement(self) -> float:
@@ -102,6 +106,8 @@ class EvolutionRunResult:
             "cost_baseline": self.cost_baseline,
             "cost_candidate": self.cost_candidate,
             "cost_change": round(self.cost_change, 4),
+            "variants_per_round": self.variants_per_round,
+            "candidates_evaluated": self.candidates_evaluated,
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -256,6 +262,97 @@ class SkillEvolutionRunner:
         avg = sum(s for _, s, _, _ in details) / len(details)
         return avg, details
 
+    async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
+                                       artifact_type: str) -> list[JudgeFailure]:
+        """全量失败用例按得分升序（P1-7a 分片采样的数据源）。"""
+        _, details = await self._evaluate(skill_text, examples, artifact_type)
+        return [
+            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
+            for ex, score, output, feedback in sorted(details, key=lambda d: d[1])
+        ]
+
+    async def _multi_variant_round(
+        self, *, best_text: str, best_score: float, baseline_text: str,
+        dataset: EvalDataset, tune: list[EvalExample], artifact_type: str,
+        ledger_key: str, leak_markers: Optional[frozenset], result: EvolutionRunResult,
+    ) -> Optional[tuple[str, float, Optional[int]]]:
+        """P1-7a：一轮多变体并行搜索。
+
+        各候选拿失败严重度轮转分片（不重叠），过闸（约束/泄漏）后并行评测
+        tune 集，tune 分 argmax（严格大于才替换——平分保持先到，确定性）。
+        台账逐候选入账，仅 argmax 胜者记 accepted=True（其余 variant_lost）。
+        返回 (胜者文本, 分数, 台账 seq)——无幸存/无胜者返回 None。
+        """
+        m = result.variants_per_round
+        failures_all = await self._collect_failures_sorted(best_text, dataset.val or tune, artifact_type)
+        # 轮转分片：严重度打散到各候选；空分片回退全量（无失败时的清晰化变异）
+        shards = [failures_all[v::m] if failures_all[v::m] else failures_all
+                  for v in range(m)]
+
+        history = None
+        if self._ledger is not None and ledger_key:
+            history = self._ledger.recent(ledger_key)
+        mutated = await asyncio.gather(*[
+            self._mutate(best_text, artifact_type, shard, history=history)
+            for shard in shards
+        ])
+
+        survivors: list[tuple[str, list[JudgeFailure]]] = []
+        seen = {best_text}
+        for shard, cand in zip(shards, mutated):
+            if not cand or cand in seen:
+                continue
+            seen.add(cand)
+            if self._constraints is not None:
+                checks = self._constraints.validate(cand, artifact_type, baseline_text=baseline_text)
+                failed = [c.name for c in checks if not c.passed]
+                if failed:
+                    result.constraint_failures.extend(failed)
+                    logger.debug("多变体候选被约束闸拒绝: %s", failed)
+                    self._ledger_append(ledger_key, artifact_type, shard,
+                                        accepted=False,
+                                        reject_reason=f"constraints:{','.join(failed)}",
+                                        constraint_failures=result.constraint_failures)
+                    continue
+            if self._leak_critic is not None:
+                verdict = await self._leak_critic.review(
+                    candidate_text=cand, baseline_text=baseline_text, markers=leak_markers)
+                if verdict.leaked:
+                    result.constraint_failures.append(f"leak:{verdict.category}")
+                    self._ledger_append(ledger_key, artifact_type, shard,
+                                        accepted=False,
+                                        reject_reason=f"leak:{verdict.category}",
+                                        constraint_failures=result.constraint_failures)
+                    continue
+            survivors.append((cand, shard))
+
+        if not survivors:
+            return None
+        result.candidates_evaluated += len(survivors)
+        result.iterations_run += len(survivors)
+        scores = await asyncio.gather(*[
+            self._evaluate_avg(cand, tune, artifact_type) for cand, _ in survivors
+        ])
+        survivors_scores = list(zip(survivors, scores))
+
+        # 先定 argmax 胜者（严格大于才替换——平分保持先到，确定性），
+        # 再逐候选入账：只有最终胜者记 accepted=True（超越本轮基线才算）
+        winner_idx: Optional[int] = None
+        for idx, (_cand, score) in enumerate(survivors_scores):
+            if score > best_score + _EPS and (
+                    winner_idx is None or score > survivors_scores[winner_idx][1] + _EPS):
+                winner_idx = idx
+        winner: Optional[tuple[str, float, Optional[int]]] = None
+        for idx, ((cand, shard), score) in enumerate(survivors_scores):
+            is_winner = winner_idx == idx
+            seq = self._ledger_append(ledger_key, artifact_type, shard,
+                                      accepted=is_winner,
+                                      reject_reason="" if is_winner else "variant_lost",
+                                      delta_train=score - best_score)
+            if is_winner:
+                winner = (cand, score, seq)
+        return winner
+
     async def _collect_failures(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
     ) -> list[JudgeFailure]:
@@ -315,10 +412,26 @@ class SkillEvolutionRunner:
 
         best_text, best_score = baseline_text, result.train_before
         best_seq: Optional[int] = None
-        leak_markers: Optional[frozenset] = None  # P0-3：按数据集懒提取，一次缓存
+        # P0-3：泄漏标记按数据集只提取一次（多路候选共享同一标记集）
+        leak_markers: Optional[frozenset] = None
+        if self._leak_critic is not None:
+            leak_markers = self._leak_critic.build_markers(dataset)
+        result.variants_per_round = max(1, int(self.config.variants_per_round))
         n_iters = self.config.iterations if iterations is None else iterations
 
         for _ in range(max(0, n_iters)):
+            # P1-7a：多变体并行轮（失败子集分片 → 并行变异/评测 → argmax）
+            if result.variants_per_round > 1:
+                won = await self._multi_variant_round(
+                    best_text=best_text, best_score=best_score,
+                    baseline_text=baseline_text, dataset=dataset, tune=tune,
+                    artifact_type=artifact_type, ledger_key=ledger_key,
+                    leak_markers=leak_markers, result=result,
+                )
+                if won is not None:
+                    best_text, best_score, best_seq = won
+                continue
+
             failures = await self._collect_failures(best_text, dataset.val or tune, artifact_type)
             # P1-4：最近编辑历史回喂变异器（已证伪假设禁止重画）
             history = None
@@ -342,8 +455,6 @@ class SkillEvolutionRunner:
 
             # P0-3 泄漏审查：评测前拦截背题/退化候选（宁漏勿误杀）。
             if self._leak_critic is not None:
-                if leak_markers is None:
-                    leak_markers = self._leak_critic.build_markers(dataset)
                 verdict = await self._leak_critic.review(
                     candidate_text=candidate, baseline_text=baseline_text,
                     markers=leak_markers)
@@ -358,6 +469,7 @@ class SkillEvolutionRunner:
                     continue
 
             result.iterations_run += 1
+            result.candidates_evaluated += 1
             score = await self._evaluate_avg(candidate, tune, artifact_type)
             improved = score > best_score + _EPS
             seq = self._ledger_append(ledger_key, artifact_type, failures,

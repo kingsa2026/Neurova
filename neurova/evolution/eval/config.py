@@ -24,6 +24,10 @@ class EvolutionConfig:
 
     # ── 优化参数 ──
     iterations: int = 10
+    # 每轮并行的变异候选数（P1-7a，RRSI 对齐）：>1 时各候选拿不同的失败
+    # 子集分片，过闸后并行评测、tune 分 argmax（平分保持先到）。
+    # 默认 1 = 单线 lineage，行为与旧版逐字节一致。
+    variants_per_round: int = 1
     # 留出集提升低于该值视为"无真实增益",保留基线。
     # P0 堵漏（2026-09-17）：原默认 0.0 + 判据 `after <= before + min + eps`，
     # judge 不可用时前后同为中性 0.5 → 浮点相等使 `<=` 为假 → **零增益被放行**。
