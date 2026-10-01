@@ -2900,6 +2900,54 @@ class PostChatPipeline:
         except Exception as lc_err:
             logger.debug("技能生命周期扫描跳过: %s", lc_err)
 
+        # P1-6 增益维度剪枝提案：编辑历史连续被拒 × 零正贡献 × 未受保护
+        # 三证合取才产退役计划——只产提案入既有待审仓，绝不自动执行
+        # （审批面在 skill_pool_api 的 consolidation 计划通道）。
+        try:
+            from neurova.evolution.evolution_settings import load_settings as _load_prune_settings
+            from neurova.evolution.evolution_yield_prune import (
+                propose_evolution_prune_candidates,
+            )
+            from neurova.evolution.eval.service import SkillEvolutionService as _PruneEvoSvc
+            from neurova.evolution.skill_consolidator import ConsolidationPlanStore
+            from neurova.evolution.skill_experience import get_skill_experience_store
+            from neurova.skills.skill_service import SkillService as _PruneSvc
+
+            _prune_settings = _load_prune_settings()
+            if _prune_settings.lifecycle_sweep:
+                _prune_agent_id = getattr(self._agt.config, "agent_id", "default")
+                _prune_svc = _PruneSvc(agent_id=_prune_agent_id)
+                _prune_exp = get_skill_experience_store()
+
+                def _prune_usage(skill_id: str) -> dict:
+                    return _prune_exp.get_usage(skill_id)
+
+                def _prune_protected(skill_id: str) -> bool:
+                    try:
+                        info = _prune_svc.get_skill_info(skill_id) or {}
+                        usage = info.get("usage") or {}
+                        if usage.get("pinned"):
+                            return True
+                        config = (info.get("manifest") or {}).get("config") or {}
+                        return bool(config.get("pinned"))
+                    except Exception:  # noqa: BLE001 - 查不清视为受保护
+                        return True
+
+                _prune_plans = propose_evolution_prune_candidates(
+                    ledger=_PruneEvoSvc(_prune_agent_id).ledger,
+                    usage_fn=_prune_usage,
+                    is_protected_fn=_prune_protected,
+                    plan_store=ConsolidationPlanStore(_prune_svc.skills_dir),
+                )
+                if _prune_plans:
+                    logger.info(
+                        "增益剪枝提案: %d 条待审（%s）",
+                        len(_prune_plans),
+                        ",".join(p["umbrella"] for p in _prune_plans[:5]),
+                    )
+        except Exception as prune_err:
+            logger.debug("增益剪枝提案跳过: %s", prune_err)
+
         # 结晶候选 LLM 裁决：规则预筛过的候选在此
         # 批量做可复用性裁决——仅当有待审候选时才消耗一次 LLM 调用（天然
         # 低频）；LLM 不可用时候选留队等下轮（48h 超龄自动放行，不丢数据）。
