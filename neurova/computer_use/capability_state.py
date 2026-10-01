@@ -197,9 +197,9 @@ def _probeCamofox(_manager=None) -> CapabilityReading:
     except Exception as e:  # noqa: BLE001
         return CapabilityReading("camofox", CAP_CONFIGURED_UNREACHABLE, OWNER_HOST,
                                  f"浏览器管理器不可用：{type(e).__name__}: {e}")
-    if not manager.camofox_active():
+    if not manager.camofoxConfigured():
         url = os.environ.get("NEUROVA_CAMOFOX_URL") or ""
-        why = (f"URL 已设（{url}）但 camofox 未启用（配置里 enabled 关闭）"
+        why = (f"URL 已设（{url}）但 camofox 未启用（配置里 enabled 关闭或缺 httpx）"
                if url else "NEUROVA_CAMOFOX_URL 未设且配置未启用")
         return CapabilityReading("camofox", CAP_NOT_CONFIGURED, OWNER_OPERATOR, why)
     url = manager.camofoxBaseUrl()
