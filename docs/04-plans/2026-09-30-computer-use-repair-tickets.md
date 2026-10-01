@@ -41,7 +41,7 @@
 | **T-05** | SOM 标记态挂实例：并发会话互相覆盖 | T-02 | +40 | 中 | — | 入库 `34f61007`；活体 ✅（§13.3：真实截屏+真实检测器，平移 3px 逼出 24 个同 id 撞号，各会话解到自己坐标；变异对照=单槽覆盖时 A 实发 B 的坐标） |
 | **T-06** | 快照被硬切时不报丢失量、不接分片续读补救 | 30% 页触发，触发时九成可交互元素不可见 | +30→+214 | 中 | 无 | 入库 `056db20b`；活体 §7.5 ✅ |
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
-| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | +150 | 中 | ✅ **D-3 已拍**（§19：范围含浏览器/camofox） | 未开工；**现场证据已量到**（§13.3：`.env` 设了 URL ⇒ `_camofox_enabled=True`，而 `:9377` 实测超时；今天不出故障只因 playwright 恰在选路首位，一旦缺 playwright 就会推进 supervisor 的 autostart=True 拉起分支） |
+| **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | 预估 +150 / **实测净 +352**（差额去向 §22.5） | 中 | ✅ **D-3 已拍**（§19 范围含浏览器/camofox；§22 补拍执行口径=缓存 + TTL + 显式失效、vision 走真探测） | **本轮落地**（§22）：六轴三态 + owner + `requiresRestart` 单源；`/status`、`/doctor` 的旧布尔全部改为派生，三处英文抛出改走 refusal 原文；判据 12 例（含真连不上地址的判别性对照）；活体 ✅ |
 | **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | 预估 +200 / **实测净 +380**（差额去向 §20.4） | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | **本轮落地**（§20）：判据 16 例；活体 ✅（§20.3 真 Chromium——同名两按钮 `e1`→FIRST、`e2`→SECOND，`click_role` 在同名页**实测**撞 strict mode 硬失败）；顺带吃掉两处同根因缺陷（§20.2：权限面 fail-open、序列化回写事实源） |
 | **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
@@ -52,12 +52,15 @@
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支)` 已走完；
-**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
-→ `T-14`（🔒 D-7：退役这族测试还是把契约补回来）。
-本行原写"自主可完成的面至此全部收口"，那是**过度声称**：它与上列四条"剩余"自相矛盾，
-且当时 T-11 的歧义分支确实未接。按 §21 的实际进度改成：**不依赖新拍板的面已全部走完；
-余下每条各挂着一个未拍的决策（D-3/D-4/D-7）或一项需授权的外部条件（装第三方全局包）。**
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07` 已走完；
+**剩余**：`T-09`（D-4 已拍"启用"，子形状按 §19 默认落）→ `T-14`（D-7 已拍"补契约"，四个子族逐条施工）
+→ T-12 的"真实容器自身字段形态"（唯一还卡外部条件的一条：装第三方全局包需授权）。
+
+本行历史上错过两次，都记在这里免得再犯：
+① 原写"自主可完成的面至此全部收口"，与同段"剩余"自相矛盾，且当时 T-11 的歧义分支确实未接；
+② 改判成"余下每条各挂着一个未拍的决策（D-3/D-4/D-7）"也不准——D-3 已在 §22 补拍完、
+D-4/D-7 在 §19 就拍了。**现在的准确说法是：决策面已全部有答案，余下两条是施工量，
+一条是外部授权。**
 
 **T-02 必须最先**：它是守卫，T-03/T-04/T-05 都在改这三张表覆盖的面；先有守卫，后面的改动才会被拦住而不是被绕过。
 
@@ -1358,3 +1361,103 @@ E CLICK e1 -> generation=4      F 页面回读 h2 = '- heading "FIRST" [level=2]
 - **本批前端改动未经浏览器实测**：该页在 `get_current_user` 之后，本会话没有可用凭据，
   也没有起 dev server 跑通登录→歧义→选号→重发的整条 UI 路。已验的是类型面与单测面，
   **不声称界面行为验过**。
+
+---
+
+## 22. T-07 · 能力可用性升成带 owner 的三态读数（2026-10-01）
+
+### 22.1 改前的形状（三条都是实测，不是推断）
+
+| 面 | 旧形态 | 为什么是缺陷 |
+|---|---|---|
+| camofox | `_camofox_enabled` 只看 `NEUROVA_CAMOFOX_URL` 非空 / 配置 `enabled` | §13.3 现场量到：URL 设了而 `:9377` 超时，布尔仍是 True；默认优先级 playwright 在前才没出故障 |
+| `/status` | `"vision_available": False` 字面量，全仓零消费方 | 只写不读 + 谎报；真事实源（provider 模型档案 / 学习型能力缓存）一直存在却没被接 |
+| `/doctor` | `self._screenshot_backend == "PIL"`、自己调 `input_available()` | 与 `/status` 同一事实的**第二份定义**，探测口径一改两侧分叉（教义第 6 条） |
+| 后端起不来 | 三处英文裸串 `No browser backend available` / `Browser backend not available: {name}` / `Failed to initialize backend: {name}` | 与 T-13 同源：模型只知道"坏了"，不知道该找谁 |
+
+### 22.2 落成的形状
+
+新事实源 `neurova/computer_use/capability_state.py`：六条轴（`screenshot` / `input` / `uia` /
+`aria` / `camofox` / `vision`），每条给 `state` + `owner` + `reason` + `requiresRestart`。
+
+- 状态词表四个，**每个都对应一种相反的自救动作**：`available`、`configured-unreachable`
+  （配了但连不上/通道被拦）、`not-configured`（没装、没配、非 Windows）、`unknown`
+  （配置到位但既无声明也无实测——只有 vision 用得上；把"没证据"报成"不可用"会让 T-09 的
+  门永久关闭，而真探一次要真发一张图，不该在 `/status` 里付费）。
+- `owner` 三档：`host`（装依赖/开权限）、`operator`（起服务/改配置）、`agent`（重试或换路）。
+- **懒执行 + 缓存 + 显式失效**（用户 2026-10-01 拍的口径）：`CAPABILITY_TTL_SECONDS=5.0`，
+  `invalidate(*axes)` 在后端注册/配置变更/动作失败处作废，`/status?refresh=true` 走强探；
+  缓存按装配点分键（`_cacheKey(name, manager)`），一份替身的读数不得冒充另一份。
+- 探针只**消费**既有事实源，不自建第二套：`manager.screenshotBackend()` /
+  `inputProbe()` / `uiaProbe()`（三者都是新公共读侧，取代端点直接摸 `_screenshot_backend` 私有字段）、
+  `desktop_uia.availabilityDetail()`（`is_available()` 现在是它的派生）、
+  `BrowserManager.get_status()` 的在册后端表、`get_provider_manager()` 的 `model_metadata`
+  与 `ModelCapabilityCache`（**不接** `llm/providers/capability_cache.py`——那份 docstring 明写
+  "生产零消费方"，且有 `test_capability_cache_single_source.py` 常驻拦新接入）。
+- `/status` 与 `/doctor` 的旧布尔全部改为**从同一读数派生**，`capabilities` 面原样交出。
+- 三处英文抛出改走 `BrowserManager._capabilityRefusal()`，其文本就是
+  `CapabilityReading.refusal()`，源码级反证判据拦回潮。
+
+### 22.3 判据（12 例）
+
+`tests/unit/computer_use/test_capability_is_a_tri_state.py` 逐文件单跑 12 passed，已进
+`scripts/ci/protected_tests.txt`。要点不是"有没有这个键"，而是**读数分不分得开**：
+
+- 判别性正对照用**真连不上的地址** `http://127.0.0.1:1` 走真实探测口，
+  而不是把 `camofoxReachable` mock 成想要的结果——被 mock 掉的判据不咬人；
+  同一夹具下"未配置"与"配了但死了"必须给出两个不同的 `state`。
+- 缓存三态锁：TTL 内两次读只付一次探；`refresh=True` 绕缓存；`invalidate()` 后重探。
+- 装配点锁：`/status` 必须把它自己那份 manager 交给探测层
+  （这条抓到过我一次真回归——初版 `/status` 绕开 `_get_manager()` 去探真机器，
+  `test_status_input_broken_means_desktop_unavailable` 当场转红）。
+- 单源锁：`is_available() is availabilityDetail()["available"]`；
+  `/doctor` 的三个布尔与 `capabilities` 必须由 `probeAll` 派生。
+- 反证锁：未编号/无证据时不得凭空造读数；旧英文串不得出现在源码里。
+
+红灯的取证方式与另两单不同，须如实记：**本单是先把实现写完再写判据的**，
+违反 §0 第 3 条"先红后绿"。补救办法是按本文件既有的最小窗口回退法补出红：
+把 4 个跟踪生产文件 + 2 个被同批改动的测试回退到 `HEAD`、新模块移出工作树，
+跑同一份判据 —— `collected 0 items / 1 error`（`ModuleNotFoundError: capability_state`），
+且 `HEAD` 侧源码里 `"vision_available": False` 与 `No browser backend available` 各命中 1 处；
+窗口结束按 sha256 逐文件校验还原（7 个文件全 OK）。
+这条偏离的补偿措施是：判据里每条都带判别性对照与反向锁，红形态可被复跑证伪。
+
+### 22.4 活体（真机真探测，`refresh=True`）
+
+```
+screenshot  available              owner=agent     截图后端=PIL
+input       available              owner=agent     pyautogui.position() 可执行
+uia         available              owner=agent     uiautomation 可导入且平台匹配
+aria        available              owner=agent     可产出 aria 快照的后端：playwright
+camofox     not-configured         owner=operator  NEUROVA_CAMOFOX_URL 未设且配置未启用
+vision      unknown                owner=operator  moonshotai/Kimi-K2.6:DashScope 既无实测也无声明
+                                                  ——需要跑一次多模态探测才能定
+对照①（camofox_active=True + base_url=http://127.0.0.1:1，真发请求）：
+  configured-unreachable  owner=operator
+  "已配置 http://127.0.0.1:1 但不可达：ReadTimeout: timed out——起 camofox-browser 服务后重探，无需重启本进程"
+对照②（camofox_active=False）：not-configured —— 与①给出的是两个不同 state，不是同一布尔
+后端全清后 `_get_backend()`：
+  capability-aria-not-configured: 没有任何浏览器后端在册（Playwright/Scrapling 都未导入成功）
+  ——装依赖后重探（owner=host，可重探或改配置后重探）｜本次要用的后端=（无）（…）
+```
+`/status` 的 `vision_available` 现在是 `unknown` 的派生值（`false`），
+与旧的常量 `False` 同字面却**不同事实**：`capabilities.vision.state` 把"没证据"如实带出，
+T-09 的门据此开合，而不是照一个字面量永久关着。
+
+### 22.5 LOC 与预估差额（估 +150，实测净 +352）
+
+`capability_state.py` 新建 316 行（含 40 行口径说明——它是这条面的唯一出处）；
+`computer_use/__init__.py` +60/−15（三个公共探测口 + doctor 改派生）；
+`browser_manager.py` +32/−4（`_capabilityRefusal` + `camofoxBaseUrl` + 三处抛出改写）；
+`desktop_uia.py` +20/−7（`availabilityDetail` 成单源，`is_available` 变派生）；
+`api/endpoints/computer.py` +28/−17（`/status` 消费读数 + `refresh` 参数）；清单 +1。
+测试码 265 行 + 两处既有测试同批改写（`test_status_doctor.py`、`test_desktop_uia.py`）不计入。
+
+### 22.6 登记
+
+- `capabilities` 面的消费方目前是 API 客户端与两条常驻判据；**前端没有 `/computer/status` 的调用**
+  （`NeurUI/src/api/modules/computer.ts` 里没有 status 封装），所以没有顺手造一个状态面板。
+  T-09 是它的下一个真消费方（视觉门据此开合）。
+- 本轮**没有**给 `aria` 做"真起一个浏览器再探"的探测：在册后端表就是 playwright 的导入探测结果，
+  再探一次要付启动成本且与 §22.2 的缓存口径重复。若将来要区分"能导入但启动失败"，
+  加的是 `aria` 的第四态读数而不是新布尔。

@@ -649,19 +649,29 @@ async def smart_type(body: SmartTypeRequest):
 
 
 @router.get("/status")
-async def get_status():
-    """查询 Computer Use 服务状态（R0-4：截图/输入/UIA 能力拆分真实探测）"""
-    screenshot_available = False
-    input_available = False
-    uia_available = False
-    browser_backends: typing.List[str] = []
+async def get_status(refresh: bool = False):
+    """查询 Computer Use 服务状态（T-07：能力面升成三态读数，旧布尔改为派生值）。
+
+    旧形态的病：`vision_available` 是常量 `False`（全仓无消费方，纯谎报），
+    而 camofox 那一类只看环境变量——配置指向的服务连不上也报"已启用"。
+    现在六条轴（截图/输入/UIA/aria/camofox/视觉）各给 `state`+`owner`+`reason`，
+    旧键仍在，但由同一份读数派生，不再各自探一遍。
+    `refresh=true` 绕过 TTL 强探；默认读缓存，免得前端轮询反复付网络与系统调用的钱。
+    """
+    from neurova.computer_use import capability_state
+
+    # 桌面三轴走本端点自己的装配点：判据替身"外部世界"，不绕过装配点
     try:
-        manager = _get_manager()
-        screenshot_available = getattr(manager, "_screenshot_backend", "basic") != "basic"
-        input_available = bool(manager.input_available())
-        uia_available = bool(manager.uia_available())
-    except Exception as e:
-        logger.warning("探测桌面能力失败: %s", e)
+        desktopManager = _get_manager()
+    except Exception as e:  # noqa: BLE001 - 管理器起不来也是一种能力读数，交给探测层报
+        logger.warning("取桌面管理器失败: %s", e)
+        desktopManager = None
+    capabilities = capability_state.probeAll(refresh=refresh, manager=desktopManager)
+
+    def usable(axis: str) -> bool:
+        return capabilities[axis]["state"] == capability_state.CAP_AVAILABLE
+
+    browser_backends: typing.List[str] = []
     try:
         from neurova.computer_use.browser_manager import get_browser_manager
 
@@ -674,13 +684,14 @@ async def get_status():
         "message": "success",
         "data": {
             # desktop_available 语义收紧：截图+输入都可用才算（旧键保留向后兼容）
-            "desktop_available": screenshot_available and input_available,
-            "screenshot_available": screenshot_available,
-            "input_available": input_available,
-            "uia_available": uia_available,
+            "desktop_available": usable("screenshot") and usable("input"),
+            "screenshot_available": usable("screenshot"),
+            "input_available": usable("input"),
+            "uia_available": usable("uia"),
             "browser_available": bool(browser_backends),
             "browser_backends": browser_backends,
-            "vision_available": False,
+            "vision_available": usable("vision"),
+            "capabilities": capabilities,
             "actions_logged": len(_action_log),
             "browser_url": _browser_state.get("url"),
         },

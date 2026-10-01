@@ -214,37 +214,82 @@ class ComputerUseManager:
         screen_x, screen_y = self.convert_screenshot_point(px, py)
         return self.click(screen_x, screen_y, button)
 
+    def inputProbe(self) -> typing.Tuple[bool, str, str]:
+        """输入能力的真探 + 状态 + 具名原因（T-07 单源）。
+
+        布尔把两种**处置相反**的故障压成一个：pyautogui 没装（装依赖）与
+        装了但打不开输入通道（无交互桌面/安全策略拦截，装什么都没用）。
+        """
+        from neurova.computer_use.capability_state import (
+            CAP_AVAILABLE,
+            CAP_CONFIGURED_UNREACHABLE,
+            CAP_NOT_CONFIGURED,
+        )
+
+        try:
+            import pyautogui
+        except Exception as e:  # noqa: BLE001
+            return False, CAP_NOT_CONFIGURED, f"pyautogui 不可导入：{type(e).__name__}: {e}"
+        try:
+            pyautogui.position()
+        except Exception as e:  # noqa: BLE001
+            return False, CAP_CONFIGURED_UNREACHABLE, (
+                f"pyautogui 已装但输入通道打不开：{type(e).__name__}: {e}"
+                "（无交互桌面或被安全策略拦截；NEUROVA_ALLOW_GLOBAL_INPUT 由启动环境给，改了要重启本进程）")
+        return True, CAP_AVAILABLE, "pyautogui.position() 可执行"
+
     def input_available(self) -> bool:
         """输入能力真实探测（R0-4）：pyautogui 可导入且 position() 可执行。
 
         截图后端可用不代表能点击/键入——/status 与 /doctor 据此拆分上报。
         """
-        try:
-            import pyautogui
+        return bool(self.inputProbe()[0])
 
-            pyautogui.position()
-            return True
-        except Exception as e:
-            logger.debug("输入能力不可用: %s", e)
-            return False
+    def screenshotBackend(self) -> str:
+        """截图后端名（`PIL` / `basic`…）：/status 与能力面读这一处，不再摸私有字段。"""
+        return str(getattr(self, "_screenshot_backend", "basic"))
+
+    def uiaProbe(self) -> typing.Tuple[str, str]:
+        """桌面 UIA 语义层的 (状态, 原因)（T-07 单源，R1-1）。"""
+        from neurova.computer_use.capability_state import CAP_AVAILABLE
+
+        try:
+            from neurova.computer_use.desktop_uia import availabilityDetail
+
+            detail = availabilityDetail()
+        except Exception as e:  # noqa: BLE001 - 探测点起不来就是"配了但拿不到"
+            from neurova.computer_use.capability_state import CAP_CONFIGURED_UNREACHABLE
+
+            return CAP_CONFIGURED_UNREACHABLE, f"UIA 探测点不可用：{type(e).__name__}: {e}"
+        state = CAP_AVAILABLE if detail["available"] else detail["state"]
+        return state, str(detail["reason"])
 
     def uia_available(self) -> bool:
         """桌面 UIA 语义层可用性（R1-1 desktop_uia；未落地/非 Windows 返回 False）"""
-        try:
-            from neurova.computer_use.desktop_uia import is_available
+        from neurova.computer_use.capability_state import CAP_AVAILABLE
 
-            return bool(is_available())
-        except Exception:
-            return False
+        return self.uiaProbe()[0] == CAP_AVAILABLE
 
     def doctor_report(self) -> typing.Dict[str, typing.Any]:
-        """能力自检逐项报告（/doctor 数据源）"""
+        """能力自检逐项报告（/doctor 数据源）。
+
+        三项能力一律从 `capability_state` 的读数派生：本方法自己再判一次 import
+        就是同一事实的第二份定义，探测口径一改两侧就会分叉（T-07 收口）。
+        """
+        from neurova.computer_use import capability_state as caps
+
+        capabilities = caps.probeAll(manager=self)
+
+        def usable(axis: str) -> bool:
+            return capabilities[axis]["state"] == caps.CAP_AVAILABLE
+
         return {
-            "pillow": self._screenshot_backend == "PIL",
-            "pyautogui_input": self.input_available(),
-            "uia": self.uia_available(),
+            "pillow": usable("screenshot"),
+            "pyautogui_input": usable("input"),
+            "uia": usable("uia"),
             "dpi_aware": bool(self.dpi_aware),
             "screen_metadata": self.screen_metadata(),
+            "capabilities": capabilities,
         }
 
     def _get_browser_manager(self):

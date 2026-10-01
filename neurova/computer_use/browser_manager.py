@@ -1435,7 +1435,7 @@ class BrowserManager:
             return "camofox"
         if "scrapling" in self._backends:
             return "scrapling"
-        raise RuntimeError("No browser backend available")
+        raise RuntimeError("没有可用的浏览器后端（在册表为空，Playwright 与 Scrapling 都没导入成功）")
 
     def camofox_active(self) -> bool:
         """R3-4 附身授权门判据：本次 browser_* 是否会走携带登录态的 camofox
@@ -1443,21 +1443,49 @@ class BrowserManager:
         playwright 兜底时，动作才真正以用户身份对外——此时需显式授权。"""
         return bool(self._camofox_enabled) and "playwright" not in self._backends
 
+    def camofoxBaseUrl(self) -> str:
+        """camofox 的 base_url 单源读法：有在册实例就用它的，否则按后端同口径算。"""
+        for backend in self._user_camofox_backends.values():
+            url = getattr(backend, "_base_url", "")
+            if url:
+                return str(url)
+        from neurova.computer_use.camofox_server_backend import DEFAULT_CAMOFOX_URL
+
+        cfg = (self._config or {}).get("camofox") or {}
+        return str(cfg.get("base_url") or os.environ.get("NEUROVA_CAMOFOX_URL") or DEFAULT_CAMOFOX_URL)
+
+    def _capabilityRefusal(self, name: Optional[str], context: str) -> str:
+        """后端起不来时给出的**三态**拒绝原文（T-07）。
+
+        原先这里是三处英文裸串（`No browser backend available` /
+        `Browser backend not available: x` / `Failed to initialize backend: x`）——
+        模型读到只知道"坏了"，不知道是"没装"还是"装了但连不上"，也就不知道该找谁。
+        状态与 owner 由 `capability_state` 单源给，本处不手抄口径。
+        """
+        from neurova.computer_use import capability_state
+
+        axis = "camofox" if name == "camofox" else "aria"
+        capability_state.invalidate(axis)
+        return f"{capability_state.reading(axis).refusal()}｜本次要用的后端={name or '（无）'}（{context}）"
+
     async def _get_backend(self, backend_name: Optional[str] = None) -> BrowserBackend:
         """获取并初始化后端(camofox 按 user 池化,其它共享)"""
-        name = self._resolve_backend(backend_name)
+        try:
+            name = self._resolve_backend(backend_name)
+        except RuntimeError as e:
+            raise RuntimeError(self._capabilityRefusal(backend_name, str(e))) from e
         with self._lock:
             if name == "camofox" and self._camofox_enabled:
                 backend = self._get_or_create_user_camofox_backend()
             else:
                 backend = self._backends.get(name)
                 if backend is None:
-                    raise RuntimeError(f"Browser backend not available: {name}")
+                    raise RuntimeError(self._capabilityRefusal(name, "在册表里没有这个后端"))
 
         if not backend._initialized:
             success = await backend.initialize()
             if not success:
-                raise RuntimeError(f"Failed to initialize backend: {name}")
+                raise RuntimeError(self._capabilityRefusal(name, "initialize() 返回失败"))
 
         self._active_backend = backend
         return backend
