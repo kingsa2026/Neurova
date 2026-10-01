@@ -84,6 +84,20 @@ COMPUTER_USE_TOOLS = frozenset(
     }
 )
 
+# T-09 感知缺口由哪几条工具判定：**空正文对它不可能成立**。
+#
+# 已渲染文档必有 aria 根，所以这三条一旦失败就是"没拿到事实"，值得为其付一张图；
+# `browser_extract_text` / `browser_dom_read` 的空正文**可能**是页面的合法读数
+# （空白页、游标到尾），把它们算进缺口就会为合法的"没有"反复付截图成本。
+# 同一条划线口径见工单集 §19 与 `test_unavailable_facts_are_triageable`。
+_PERCEPTION_SNAPSHOT_TOOLS = frozenset(
+    {
+        "computer_dom_snapshot",
+        "computer_som_snapshot",
+        "browser_dom_snapshot",
+    }
+)
+
 # R0-3：成功动作后自动补拍刷新截图。
 #
 # 成员资格从**工具自己的声明**投影（`interactive_desktop`），不在这里持手写名单：
@@ -4934,7 +4948,22 @@ class ToolExecutor:
         通过 SessionSyncManager 推送到会话 WS，驱动聊天页分屏面板；
         广播失败静默处理，绝不影响工具执行主流程。
         terminal={command,stdout,stderr} 时前端渲染终端视图（SSH/shell 窗口）。
+
+        本函数同时是 **T-09 的生产者接缝**：截图进本轮的感知槽、快照类工具的
+        具名失败标成感知缺口。这两笔账必须打在 WS 前置守卫**之前**——
+        模型侧要不要图与前端在不在完全无关，早退就会把图丢掉。
         """
+        from neurova.core.turn_context import (
+            markTurnPerceptionGap,
+            offerTurnPerceptionImage,
+        )
+
+        if screenshot_base64:
+            offerTurnPerceptionImage(screenshot_base64, tool_name)
+        if isinstance(result, dict) and tool_name in _PERCEPTION_SNAPSHOT_TOOLS \
+                and not result.get("success"):
+            markTurnPerceptionGap(tool_name)
+
         if tool_name not in COMPUTER_USE_TOOLS:
             return
         session_id = getattr(self._agent, "current_session_id", None)

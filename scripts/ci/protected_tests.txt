@@ -1434,3 +1434,4 @@ tests/unit/tools/test_openai_format_source_immutability.py
 tests/unit/api/test_smart_ambiguity_carries_refs.py
 tests/unit/computer_use/test_capability_is_a_tri_state.py
 tests/unit/tools/test_browser_result_normalization_keeps_named_cause.py
+tests/unit/agent/test_perception_image_enters_request_once.py

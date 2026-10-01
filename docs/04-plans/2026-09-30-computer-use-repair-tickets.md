@@ -43,7 +43,7 @@
 | **T-06b** | 节点/深度预算静默裁剪 + camofox 整条绕过字符预算 | 同一根因三条出口 | +57 | 低 | 无 | 入库 `cf6ac06b`；活体 §5.7 ✅ |
 | **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | 预估 +150 / **实测净 +352**（差额去向 §22.5） | 中 | ✅ **D-3 已拍**（§19 范围含浏览器/camofox；§22 补拍执行口径=缓存 + TTL + 显式失效、vision 走真探测） | **本轮落地**（§22）：六轴三态 + owner + `requiresRestart` 单源；`/status`、`/doctor` 的旧布尔全部改为派生，三处英文抛出改走 refusal 原文；判据 12 例（含真连不上地址的判别性对照）；活体 ✅ |
 | **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | 预估 +200 / **实测净 +380**（差额去向 §20.4） | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | **本轮落地**（§20）：判据 16 例；活体 ✅（§20.3 真 Chromium——同名两按钮 `e1`→FIRST、`e2`→SECOND，`click_role` 在同名页**实测**撞 strict mode 硬失败）；顺带吃掉两处同根因缺陷（§20.2：权限面 fail-open、序列化回写事实源） |
-| **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | 未接线，但**接缝已全部取证**（§23：六个现状事实 + 四步施工面 + 反向锁清单）；前置的"摘图留痕 `has_image`"与能力门 `capabilities.vision` 已随 `3216e9ba`/`0e0c7e80` 落地。卡在活体门槛：必须跑真 vision 模型的一轮工具环 |
+| **T-09** | 截图从不进模型上下文 | — | 预估 +120 / **实测净 +214**（去向 §24.4） | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | **本轮接线完成**（§24）：轮级共享槽 + 生产者接缝（在 WS 守卫前落账）+ 三闸装配只挂请求副本；判据 12 例先红后绿；活体 ✅ 到"请求副本里带一张可解码成合法 PNG 的 data URL，原始 messages 一字未变"。**唯一未证**：provider/模型真收到（本会话无凭据、未起后端）；Anthropic 环未同形（§24.5） |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
@@ -52,15 +52,16 @@
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07` 已走完；
-**剩余**：`T-09`（D-4 已拍"启用"，子形状按 §19 默认落）→ `T-14`（D-7 已拍"补契约"，四个子族逐条施工）
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07 → T-09` 已走完；
+**剩余**：`T-14`（D-7 已拍"补契约"，四个子族逐条施工，是本集最后一单施工量）
 → T-12 的"真实容器自身字段形态"（唯一还卡外部条件的一条：装第三方全局包需授权）。
+T-09 虽已接线，但**验收未合**：provider/模型真收到这一跳要一次真 vision 模型的工具轮才能签掉（§24.3）。
 
 本行历史上错过两次，都记在这里免得再犯：
 ① 原写"自主可完成的面至此全部收口"，与同段"剩余"自相矛盾，且当时 T-11 的歧义分支确实未接；
 ② 改判成"余下每条各挂着一个未拍的决策（D-3/D-4/D-7）"也不准——D-3 已在 §22 补拍完、
-D-4/D-7 在 §19 就拍了。**现在的准确说法是：决策面已全部有答案，余下两条是施工量，
-一条是外部授权。**
+D-4/D-7 在 §19 就拍了。**现在的准确说法是：决策面已全部有答案；剩一单施工量（T-14）、
+一项外部授权（T-12 的真容器），外加 T-09 那一跳尚未被真模型签收。**
 
 **T-02 必须最先**：它是守卫，T-03/T-04/T-05 都在改这三张表覆盖的面；先有守卫，后面的改动才会被拦住而不是被绕过。
 
@@ -1520,3 +1521,83 @@ D-4 拍的是"启用"，§19 记的子形状是"分层兜底 + 同一轮至多�
 （真后端 + 真服务商 + 能读图的模型），本会话没有可用凭据、也没起后端；
 按教义第 4 条不能用单测全绿替代。在证不了的地方停手，比留下"图进了请求但没人证明模型收到过"
 这种半接线更有价值。上面的接缝地图已把不确定性消掉，开工时不需要再重新找点。
+
+---
+
+## 24. T-09 · 截图进模型上下文已接线（2026-10-01，按 §23 施工面执行）
+
+§23 的三段全部落地，形状与拍板一致：**分层兜底 + 一轮至多一张 + 只在具名感知缺口之后**。
+
+### 24.1 三段接缝
+
+1. **轮级槽（生产者侧）** `core/turn_context.py`：`PerceptionImageSlot`（`payload` /
+   `gapTools` / `given`）+ `offerTurnPerceptionImage` / `markTurnPerceptionGap` /
+   `peekTurnPerceptionImage` / `takeTurnPerceptionImage` / `resetTurnPerceptionImage`。
+   必须**轮首换绑共享对象**而不是不可变值：截图在 `asyncio.to_thread` 子任务里产出，
+   子任务 `ContextVar.set()` 落不到父轮次——与 `TurnElapsedAccumulator` 当初踩过的是同一件事，
+   判据用真子任务跑这一条，不靠手工往父上下文塞。
+   `peek` 与 `take` 分家：装配层要先确认图片能归一化成功再决定消费，
+   否则"取走了却挂不上"会把本轮后面真需要图的机会饿掉。
+2. **生产者接缝 = `_emit_computer_event`**（4 处产图调用都经这里），且账必须打在
+   WS 前置守卫（`tool_name in COMPUTER_USE_TOOLS` / `session_id`）**之前**——
+   模型要不要图与前端在不在无关。缺口判定集合 `_PERCEPTION_SNAPSHOT_TOOLS` 只含
+   `computer_dom_snapshot` / `computer_som_snapshot` / `browser_dom_snapshot`：
+   空 aria 树对已渲染文档不可能成立；`browser_extract_text` / `browser_dom_read` 的
+   空正文可能是合法读数，算进缺口就是为合法的"没有"反复付截图成本。
+3. **装配闸门 + 副本** `openai_loop._attachPerceptionImage`：三闸（缺口 /
+   `capability_state.reading("vision")` 为 available / `given < MAX`）全开才挂图，
+   挂到**新交的 messages 副本**上（找最后一条 user 消息，与 `_apply_vision_attachments`
+   同形），图与"请结合图片继续"的指令同生命周期；发出后记一条
+   `perception_image` 事件（`gapTool` + `imageTool` + 理由）——静默兜底最难查。
+   三个发送点全部接上：非流式两处 `chat(**…)`、流式一处先落 `outbound` 局部变量
+   再取 `["messages"]`（同一轮里被调两遍就会白吃两张）。
+
+### 24.2 判据（12 例，先红后绿）
+
+红灯原文（本单顺序写对了，红在实现之前）：
+```
+ERROR tests/unit/agent/test_perception_image_enters_request_once.py
+  AttributeError: module 'neurova.core.turn_context' has no attribute 'resetTurnPerceptionImage'
+```
+绿灯 12 passed（逐文件单跑，已进 `protected_tests.txt`）。承重条目：
+`request_params["messages"]` 逐字未变（副本语义）、同轮第二次不给、
+无缺口不给、三种非 available 读数都不给、子任务的 offer 父轮次取得到、
+reset 换绑后上轮不残留、emit 在无 session 时仍进槽、缺口由具名失败标出。
+
+### 24.3 活体（真机真链路，`refresh` 全真）
+
+```
+真失败: success=False error=target generation 过期（当前 1，传入 100）——请重新 dom_snapshot
+缺口集合（由产出侧具名失败标出）= ['browser_dom_snapshot']
+真截图进槽: bytes=371634 peek=True                     （本机真 ImageGrab，结果体里无 base64）
+真读数 unknown 下放行? False                            （成本闸门在真配置上生效）
+闸门全开: image_url 数=1 真 PNG 解码=('PNG', 371634) given=1
+事件面=[{"type":"perception_image","gapTool":"browser_dom_snapshot",
+         "imageTool":"computer_screenshot","reason":"快照类感知具名失败，且本轮尚未附过图"}]
+同轮第二次附图? False；reset 后 缺口=[] 图=False given=0
+原始 rp 未被改写: True
+```
+
+**未证的一跳说清楚**：provider/模型真收到并读懂这张图，本会话没有可用凭据、
+也没起真后端，所以**没跑过**。上面验到的是"发出去的请求副本里带着一张能被解码成
+合法 PNG 的 data URL，且原始 messages 一个字节没变"。这一跳需要一次真 vision 模型的
+工具轮才算验收完成。
+
+### 24.4 LOC（估 +120，实测净 +214）
+
+`core/turn_context.py` +106（槽 + 六个入口 + 轮首换绑两处 + 口径注释——
+共享对象而非不可变值的原因是实测踩过的坑，值得写全）；
+`agent/loops/openai_loop.py` +82/−3（闸门 + 副本装配 + 三个发送点）；
+`tool_executor.py` +29（生产者接缝 + 缺口集合 + WS 守卫顺序的理由）。
+测试码 218 行不计入。
+
+### 24.5 登记
+
+- **Anthropic 环未同形**：`agent/loops/anthropic_loop.py` 那条图片通路是它自己的
+  `computer_handler.screenshot()` 原生 computer 工具（不经我们的槽与闸门），
+  不是同一件事的第二个实现点。走 Anthropic provider 时，槽会被填而装配侧无人消费
+  ——轮级对象随轮换绑，不泄漏、不付费，只是该能力在那条路上**尚未生效**。
+  要补的是同一个 `_attachPerceptionImage` 形状，不在本批顺手改（两环请求形状不同）。
+- `has_image` 痕迹（`3216e9ba`）本轮成了缺口的间接凭据，但装配侧读的是槽的
+  `payload`/`gapTools`，不是 `has_image`——两处的口径不同别混读：
+  `has_image` 回答"这次结果本来有没有图"，槽回答"本轮还有没有可交给模型的图"。
