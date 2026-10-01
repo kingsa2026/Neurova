@@ -2638,6 +2638,8 @@ U-04（§37）、U-05/U-06（§30/§32）。附带产出：一条真缺陷（413
       逐文件连跑三次 1.85s / 1.82s / 1.85s 稳定
 全仓收集面：pytest tests --co → 21,171 collected，**0 collection error**
             （此前这一条是全仓唯一一条收集错误）
+批内混跑：tests/unit/security/ + tests/unit/ci/ + agent/test_tool_pipeline 同进程跑，
+          我的 9 条照样 passed —— 进册前先验它不被别人的全局态带红
 ```
 
 判据进 CI：登记 `scripts/ci/protected_tests.txt`（有效条目 365 → **366**）。登记当场被
@@ -2651,7 +2653,41 @@ U-04（§37）、U-05/U-06（§30/§32）。附带产出：一条真缺陷（413
 - `tests/unit/security/` 目录里 **1 failed + 13 errors** 与本文件无关：排除本文件重跑，
   失败名集合逐行相同（`test_governance_integration::test_safe_echo_via_shell_succeeds`
   与 `test_auth_comprehensive` 那 13 条），属预存红，不在本单处置。
-- `tests/unit/ci/ + tracked + wallclock 台账` 合跑 6 failed，仍全是 §18 那族
-  node 剥离 env 自断（`ncrypto::CSPRNG`），与本单无因果。
+- `tests/unit/ci/ + tracked + wallclock 台账` 合跑 6 failed：其中 5 条确属 §18 那族
+  node 剥离 env 自断（`ncrypto::CSPRNG`），**第 6 条不是**——我当时把它一并写成"同族预存红"，
+  归因未核实，实测订正与另立的工单建议见 **§39**。
 - **净 LOC：生产 0**；测试 +11/−3（本文件）与台账结论 +9（`test_clock_caliber_ledger.py`），
   测试码不计入 LOC 账。CI 清单 +2 行（注释 + 路径）。
+## 39. 订正 §38.4 那条未核实的归因：第 6 条红不是 node 崩溃族，是 Windows 行尾（2026-10-01）
+
+**我写错了什么**：§38.4 与提交说明里那句"`tests/unit/ci/` 那 6 failed 仍全是 §18 那族
+node 剥离 env 自断（`ncrypto::CSPRNG`）"——**只有 5 条成立**。第 6 条
+`test_npc_pipeline_time_budget.py::TestRelayPredicateIsNotCarriedByAnExportChannel::test_both_interpreter_branches_emit_the_same_reading`
+的失败原文是 `assert 2 == 1`，与 CSPRNG 无关。我当时按"同族"归档而没有逐条看失败体，
+这正是 `feedback-verified-attribution` 点名的毛病：**把未核实的因果写成实测**。
+
+**实测（同一门禁脚本，两个解释器分支各跑一次，比原始字节）**：
+
+```
+python 分支  bytes=773  CR=9  LF=9        ← Windows 文本模式把 '\n' 写成 '\r\n'
+node   分支  bytes=764  CR=0  LF=9        ← node 原样写 '\n'
+逐字节相同: False
+行尾归一后相同(CRLF→LF): True
+首个差异偏移: 72                          ← 正落在第一个行尾上
+```
+
+⇒ 两个分支的**读数内容完全一致**，分叉只在行尾符。那条判据原文要求"逐字一致（判据分叉即双源）"，
+它比的是 stdout 原始串，于是在 Windows 上**只要 node 在场就恒红**——
+这是判据自身的口径缺陷（把行尾风格当成了事实差异），不是产品里的双源。
+
+**与本批无因果，且可自证**：`git diff --name-only HEAD~2..HEAD` 里没有
+`scripts/ci/npc_turn_handoff_gate.py`、`scripts/ci/run_gate_under_node.sh`，也没有
+`tests/unit/ci/test_npc_pipeline_time_budget.py`——本批一笔都没碰这条链。
+另注：`_run_gate_capture_stdout` 传的是**完整 env**（`dict(os.environ, CNB="1", CI="true")`），
+所以它根本不走 §18 那条"剥离 env 后 node 自断"的路径；两条红的机制不同，之前被我混成一族。
+
+**处置**：登记为 **T-19 建议**，不在本单顺手改——根修是那条判据在比对前归一行尾
+（`out.replace("\r\n", "\n")` 之后再比集合），契约"两个运行时读数一致"与行尾风格无关；
+但它属 NPC 流水线判据面、与本批零重叠，动它会把两件事塞进一笔提交。
+**同时提醒**：`§18` 里"node 侧 2 例 ⇒ 双解释器同读数这条判据在 Windows 上无法以最小 env 验证"
+那句，对本条而言归因也不准确（它不是最小 env，是行尾）——复核那条时别照抄。
