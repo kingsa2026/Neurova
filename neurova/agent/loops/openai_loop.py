@@ -566,15 +566,91 @@ class OpenAILoop(BaseAgentLoop):
 
         return await self._advanceNormalRound(request_params, state, response, tool_calls, reasoning_content)
 
+    def _attachPerceptionImage(self, request_params: Dict) -> Dict:
+        """把本轮暂存的截图挂到**这一次请求**的副本上（T-09 · D-4）。
+
+        三道闸门同时成立才给图，缺一不可：
+
+        ① 本轮有**具名感知缺口**（快照类工具失败——空 aria 树对已渲染文档不可能成立）；
+           文本事实够用时就走文本，这是"分层兜底"而不是"每步喂图"。
+        ② 视觉能力读数为 `available`（T-07 的 `capability_state` 单源；
+           `unknown`/`not-configured` 都不给——为一个不知道支不支持图的模型付 base64）。
+        ③ 本轮还没给过（`MAX_PERCEPTION_IMAGES_PER_TURN`）。
+
+        为什么必须交副本：`request_params["messages"]` 是**跨轮活**的列表，
+        每轮就地 `extend/append`。图直接挂上去就等于进历史，正是 2026-09-09
+        图片串台事故的形状（历史里遗留"请结合图片回答"，后续文本轮无图可依）。
+        指令与图同生命周期：都只活在这一次请求里。
+        """
+        from neurova.core import turn_context as _tc
+
+        if _tc.turnPerceptionGivenCount() >= _tc.MAX_PERCEPTION_IMAGES_PER_TURN:
+            return request_params
+        gapTools = _tc.turnPerceptionGapTools()
+        if not gapTools:
+            return request_params
+        from neurova.computer_use.capability_state import CAP_AVAILABLE, reading
+
+        if reading("vision").state != CAP_AVAILABLE:
+            return request_params
+        image = _tc.peekTurnPerceptionImage()
+        if not image:
+            return request_params
+
+        part = self._imageUrlPart(image)
+        if part is None:
+            # 归一化没成就不消费这张图：闸门不该自己饿死后面真需要的轮
+            return request_params
+
+        messages = [dict(m) for m in request_params.get("messages") or []]
+        target = next((m for m in reversed(messages)
+                       if isinstance(m, dict) and m.get("role") == "user"), None)
+        if target is None:
+            return request_params
+        existing = target.get("content")
+        textParts = existing if isinstance(existing, list) else [
+            {"type": "text", "text": existing or ""}]
+        target["content"] = [
+            *textParts,
+            {"type": "text", "text": "[本轮附上的图片是屏幕/页面的当前实际画面，"
+                                     "上一轮的结构化快照没拿到事实，请结合图片继续]"},
+            part,
+        ]
+        sent = {**request_params, "messages": messages}
+        taken = _tc.takeTurnPerceptionImage()
+        self.agent.append_tool_event({
+            "type": "perception_image",
+            "gapTool": gapTools[-1],
+            "imageTool": (taken or {}).get("toolName", ""),
+            "reason": "快照类感知具名失败，且本轮尚未附过图",
+        })
+        return sent
+
+    @staticmethod
+    def _imageUrlPart(image: Dict) -> Optional[Dict]:
+        """base64 → OpenAI `image_url` 切片；超闸门的图先降采样（挡 provider 413）。"""
+        import base64
+
+        try:
+            from neurova.attachment_parser import normalize_image_for_llm
+
+            raw = base64.b64decode(image.get("base64") or "")
+            data, mime = normalize_image_for_llm(raw, image.get("mime") or "image/png")
+            return {"type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}}
+        except Exception as e:  # noqa: BLE001 - 挂不上图就让这一轮照旧走文本事实
+            logger.warning("感知截图装配失败（本轮不附图）: %s", e)
+            return None
+
     async def _chatNormalWithDegrade(self, request_params: Dict, state: TurnRunState) -> LLMResponse:
         """模型往返 + 工具型 400 的无工具降级重试（单轮内，不叠帧）。"""
         try:
-            return await self.llm_client.chat(**request_params)
+            return await self.llm_client.chat(**self._attachPerceptionImage(request_params))
         except Exception as e:
             if not (request_params.get("tools") and self._is_tools_rejected_error(str(e))):
                 raise
             self._dropToolsForDegrade(request_params, state, str(e))
-            return await self.llm_client.chat(**request_params)
+            return await self.llm_client.chat(**self._attachPerceptionImage(request_params))
 
     async def _advanceNormalRound(
         self,
@@ -938,7 +1014,10 @@ class OpenAILoop(BaseAgentLoop):
             k: v for k, v in request_params.items()
             if k not in ("messages", "stream", "_length_empty_retried", "_overflowRetried")
         }
-        async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
+        # T-09：截图只挂这一次请求的副本（闸门与 `_attachPerceptionImage` 同源），
+        # 取一次算一次，先落局部变量避免同一轮里被调用两遍而白吃两张图
+        outbound = self._attachPerceptionImage(request_params)
+        async for chunk in self.llm_client.chat_stream(outbound["messages"], **stream_kwargs):
             if isinstance(chunk, dict):
                 if chunk.get("retry_status"):
                     # 429 重试/切换过程事件：转成 typed

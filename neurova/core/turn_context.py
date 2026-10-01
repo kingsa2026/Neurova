@@ -165,6 +165,101 @@ def _elapsed_accumulator() -> TurnElapsedAccumulator:
     return accumulator
 
 
+# ── 本轮可交给模型的截图（T-09 · D-4）────────────────────────────
+#
+# 为什么又是一个"共享对象"而不是不可变值：截图在 `asyncio.to_thread` /
+# `asyncio.gather` 的子任务里产出（ImageGrab 是阻塞调用），而消费方是父轮次的
+# 请求装配点。子任务 `ContextVar.set()` 只改它自己那份副本，父轮次读不到——
+# 与 `TurnElapsedAccumulator` 当初踩过的是同一件事（那里的实测记录在声明处）。
+#
+# 为什么不把图直接留在工具结果里：`request_params["messages"]` 是跨轮活的列表，
+# base64 一旦进去就等于进历史（2026-09-09 图片串台事故）。槽是**请求级旁路**：
+# 装配时只挂到当轮副本上，取一次即清。
+_perception_image_var: ContextVar = ContextVar("neurova_turn_perception_image", default=None)
+
+MAX_PERCEPTION_IMAGES_PER_TURN = 1
+
+
+class PerceptionImageSlot:
+    """一轮内的截图暂存 + 感知缺口 + 已发张数（三者同生死，才拼得出该不该给图）。"""
+
+    __slots__ = ("payload", "gapTools", "given")
+
+    def __init__(self) -> None:
+        self.payload: Optional[Dict[str, Any]] = None
+        #: 哪些感知工具在本轮报过**具名**缺口（顺序保留，最后一个才是当轮真正卡住的那条）
+        self.gapTools: List[str] = []
+        #: 已随请求发出的张数——成本闸门读它，"一轮至多一张"因此是可验证的事实而非文案
+        self.given = 0
+
+    def offer(self, base64Image: str, toolName: str, mime: str = "image/png") -> None:
+        if not base64Image:
+            return
+        # 后产的图覆盖先产的：模型该看到的是"现在"这屏，不是本轮第一屏
+        self.payload = {"base64": base64Image, "toolName": toolName, "mime": mime}
+
+    def markGap(self, toolName: str) -> None:
+        if toolName and toolName not in self.gapTools:
+            self.gapTools.append(toolName)
+
+    def take(self) -> Optional[Dict[str, Any]]:
+        """取走即清并计数：没取走就不该计数，取走两次就该拿到 None。"""
+        payload, self.payload = self.payload, None
+        if payload is not None:
+            self.given += 1
+        return payload
+
+
+def _perception_slot() -> PerceptionImageSlot:
+    slot = _perception_image_var.get()
+    if not isinstance(slot, PerceptionImageSlot):
+        slot = PerceptionImageSlot()
+        _perception_image_var.set(slot)
+    return slot
+
+
+def offerTurnPerceptionImage(base64Image: str, toolName: str, mime: str = "image/png") -> None:
+    """生产者侧唯一写入口（`ToolExecutor._emit_computer_event` 的截图分支）。"""
+    _perception_slot().offer(base64Image, toolName, mime)
+
+
+def markTurnPerceptionGap(toolName: str) -> None:
+    """感知缺口由**产出侧的具名失败**标记，不让装配层猜"这轮大概没看清"。"""
+    _perception_slot().markGap(toolName)
+
+
+def takeTurnPerceptionImage() -> Optional[Dict[str, Any]]:
+    """装配侧一次性取图（取走即清，并计入本轮已发张数）。"""
+    return _perception_slot().take()
+
+
+def peekTurnPerceptionImage() -> Optional[Dict[str, Any]]:
+    """不消费的窥视：装配层要先确认图片能正常归一化，再决定消不消费这张图。
+
+    没有它就得"先 take 再判断"——归一化失败时图已被吃掉，本轮后面真需要图时
+    反而没图可给（闸门自己把资源饿死）。
+    """
+    slot = _perception_image_var.get()
+    return slot.payload if isinstance(slot, PerceptionImageSlot) else None
+
+
+def turnPerceptionGivenCount() -> int:
+    slot = _perception_image_var.get()
+    return slot.given if isinstance(slot, PerceptionImageSlot) else 0
+
+
+def turnPerceptionGapTools() -> List[str]:
+    slot = _perception_image_var.get()
+    return list(slot.gapTools) if isinstance(slot, PerceptionImageSlot) else []
+
+
+def resetTurnPerceptionImage() -> None:
+    """轮首**换绑新对象**（不清零旧对象）：并行轮的子任务在轮首之后才创建，
+    沿用旧对象会把上一轮的图与缺口续进本轮——和耗时累加器同款纪律。
+    """
+    _perception_image_var.set(PerceptionImageSlot())
+
+
 def _begin_skill_funnel_turn() -> List[Dict[str, Any]]:
     """轮首开局：换绑本轮漏斗账本对象，并把它作为"当前轮账本"。
 
@@ -336,6 +431,7 @@ def reset_turn_tool_messages() -> None:
     # 被本轮续累（并行轮的子任务在轮首之后才创建，沿用旧列表即续写旧账）。
     _begin_skill_funnel_turn()
     reset_turn_tool_elapsed()
+    resetTurnPerceptionImage()
     # 取消令牌同款**换新对象**：复位已置位的令牌会让本轮首个进程注册的杀灭
     # 回调被上一轮的取消理由立即兑现——新任务被上一轮的取消杀掉。
     from neurova.core.cancel_token import resetTurnCancelToken
@@ -484,6 +580,7 @@ def clear_turn_state() -> None:
             var.set(None)
     _goal_continuations_var.set(0)
     reset_turn_tool_elapsed()
+    resetTurnPerceptionImage()
     _begin_skill_funnel_turn()
     with _turn_count_lock:
         _session_turn_counts.clear()
@@ -516,6 +613,15 @@ __all__ = [
     "has_turn_tool_measurement",
     "get_turn_tool_elapsed_measurement",
     "reset_turn_tool_elapsed",
+    "PerceptionImageSlot",
+    "offerTurnPerceptionImage",
+    "markTurnPerceptionGap",
+    "takeTurnPerceptionImage",
+    "peekTurnPerceptionImage",
+    "turnPerceptionGivenCount",
+    "turnPerceptionGapTools",
+    "resetTurnPerceptionImage",
+    "MAX_PERCEPTION_IMAGES_PER_TURN",
     "set_turn_injected_reflections",
     "get_turn_injected_reflections",
     "set_turn_goal",
