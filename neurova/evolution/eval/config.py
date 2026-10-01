@@ -43,6 +43,16 @@ class EvolutionConfig:
     # bench gain 低于 -tolerance 即拒绝变体(无论技能分多高)
     bench_tolerance: float = 0.02
 
+    # ── 评测噪声地板（RRSI 对齐：接受阈值 = max(min_improvement, δ)）──
+    # δ>0 表示已校准（历史校准产物回填或注入 NoiseBand 时的兜底来源）。
+    # 0 = 未校准，判据回退 min_improvement——默认行为与旧版逐字节一致。
+    noise_band_delta: float = 0.0
+    # service 侧自动校准：对同一基线重复评测的次数。默认 0 = 不自动校准
+    # （评测预算不变）；生产可显式调高（≥2 才会触发校准）。
+    noise_repeats: int = 0
+    # 校准置信系数：δ = noise_z × sd(重复评测得分)，z=2 ≈ 97.5% 单侧置信。
+    noise_z: float = 2.0
+
     # ── 评测集 ──
     eval_dataset_size: int = 20
     train_ratio: float = 0.5

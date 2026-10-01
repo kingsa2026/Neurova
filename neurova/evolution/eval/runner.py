@@ -16,8 +16,9 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from neurova.core.logger import get_logger
+from neurova.evolution.eval.calibration import NoiseBand
 from neurova.evolution.eval.config import EvolutionConfig
-from neurova.evolution.eval.dataset import EvalDataset, EvalExample
+from neurova.evolution.eval.dataset import EvalDataset, EvalExample, evaluation_split
 from neurova.evolution.eval.mutator import JudgeFailure
 
 logger = get_logger(__name__)
@@ -54,6 +55,10 @@ class EvolutionRunResult:
     # 两种情形下对外完全同形——门内的诚实标注必须外露到结果面。
     bench_neutral: bool = False
     bench_neutral_reason: str = ""
+    # P0-1 噪声地板：本轮接受判据的实效阈值 = max(min_improvement, δ)，
+    # noise_band 为空 dict 表示未校准（δ=0，行为与旧版一致）。
+    accept_threshold: float = 0.0
+    noise_band: dict = field(default_factory=dict)
 
     @property
     def improvement(self) -> float:
@@ -76,6 +81,8 @@ class EvolutionRunResult:
             "bench_gain": round(self.bench_gain, 4),
             "bench_neutral": self.bench_neutral,
             "bench_neutral_reason": self.bench_neutral_reason,
+            "accept_threshold": round(self.accept_threshold, 6),
+            "noise_band": dict(self.noise_band),
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -205,6 +212,7 @@ class SkillEvolutionRunner:
         artifact_type: str,
         dataset: EvalDataset,
         iterations: Optional[int] = None,
+        noise_band: Optional[NoiseBand] = None,
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
 
@@ -213,10 +221,22 @@ class SkillEvolutionRunner:
             result.reject_reason = "empty_dataset"
             return result
 
-        holdout = dataset.holdout or dataset.val or dataset.train
+        holdout = evaluation_split(dataset)
         tune = dataset.train + dataset.val
         if not tune:
             tune = holdout
+
+        # P0-1 噪声地板：接受阈值 = max(min_improvement, δ)。δ 来源优先级：
+        # 注入的 NoiseBand（service 校准产物）> config.noise_band_delta（历史校准
+        # 回填）> 无（未校准，行为与旧版一致）。
+        band = noise_band
+        if band is None and self.config.noise_band_delta > 0:
+            band = NoiseBand(delta=self.config.noise_band_delta, sd_null=0.0,
+                             z=self.config.noise_z, method="config", n_repeats=0)
+        accept_threshold = max(self.config.min_improvement,
+                               band.delta if band is not None else 0.0)
+        result.accept_threshold = round(accept_threshold, 6)
+        result.noise_band = band.to_dict() if band is not None else {}
 
         # P0 判分可用性前置：judge 全线不可用时，"before/after 都是中性 0.5"
         # 曾被当成"零增益通过"。先探针，不可用直接判 judge_unavailable。
@@ -263,8 +283,9 @@ class SkillEvolutionRunner:
             return result
 
         # ── 判定 2:无实质增益 → 保留基线 ──
-        # （min_improvement 默认已是正数 0.01：零增益不再因浮点相等而放行）
-        if result.holdout_after <= result.holdout_before + self.config.min_improvement + _EPS:
+        # 阈值 = max(min_improvement, δ)：δ>0（已校准）时，评测噪声内的
+        # "增益"不被当成真提升（P0-1 噪声地板）；未校准时即 min_improvement。
+        if result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
             result.rejected = True
             result.reject_reason = "no_improvement"
             result.deployed_text = baseline_text

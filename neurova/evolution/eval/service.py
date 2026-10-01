@@ -185,9 +185,17 @@ class SkillEvolutionService:
             result.reject_reason = "disabled"
             return result, None
 
+        # P0-1 噪声地板：noise_repeats>1 时对同一基线自动校准 δ（按数据集
+        # 指纹缓存，同一批用例不重复花评测预算）；校准失败诚实降级为无带
+        # （判据回退 min_improvement），不阻断进化本身。
+        noise_band = None
+        if cfg.noise_repeats > 1:
+            noise_band = await self._noise_band_for(cfg, runner, dataset, artifact_type,
+                                                    baseline_text=skill_text)
+
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
-            dataset=dataset, iterations=iterations,
+            dataset=dataset, iterations=iterations, noise_band=noise_band,
         )
         self._persist_run(skill_id, artifact_type, result)
 
@@ -211,6 +219,41 @@ class SkillEvolutionService:
                 self.agent_id, skill_id, result.holdout_before, result.holdout_after,
             )
         return result, proposal
+
+    # ── P0-1 噪声校准 ──
+
+    async def _noise_band_for(self, cfg: EvolutionConfig, runner: Any,
+                              dataset: EvalDataset, artifact_type: str,
+                              *, baseline_text: str):
+        """按数据集指纹缓存校准噪声带；评测集选取与 runner 终审同源
+        （evaluation_split 单一事实源）。"""
+        from neurova.evolution.eval.calibration import (
+            calibrate_noise_band,
+            dataset_fingerprint,
+            load_cached_band,
+            save_cached_band,
+        )
+        from neurova.evolution.eval.dataset import evaluation_split
+
+        split = evaluation_split(dataset)
+        if not split:
+            return None
+        fingerprint = dataset_fingerprint(split)
+        cache_path = self._dir / "calibration.json"
+        cached = load_cached_band(cache_path, fingerprint)
+        if cached is not None:
+            return cached
+        try:
+            band = await calibrate_noise_band(
+                baseline_text=baseline_text, artifact_type=artifact_type,
+                examples=split, evaluate_fn=runner._evaluate_avg,
+                z=cfg.noise_z, repeats=cfg.noise_repeats,
+            )
+        except Exception as e:  # noqa: BLE001 - 校准失败不造证据，诚实降级为无带
+            logger.debug("噪声带校准失败, 判据回退 min_improvement: %s", e)
+            return None
+        save_cached_band(cache_path, fingerprint, band)
+        return band
 
     # ── 提案审批(人工闭环终点)──
 
