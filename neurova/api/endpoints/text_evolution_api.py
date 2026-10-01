@@ -10,6 +10,7 @@
   GET   /skills/{agent_id}/usage       技能生命周期与用量汇总
   POST  /skills/{agent_id}/sweep       立即执行一次生命周期扫描(admin)
   POST  /skills/{agent_id}/evolve      对指定技能跑一次文本进化(admin)
+  POST  /skills/{agent_id}/ab          双臂试评:基线 vs 候选正文对照(admin)
   GET   /skills/{agent_id}/proposals   进化提案列表(pending/approved/rejected)
   POST  /skills/{agent_id}/proposals/{proposal_id}/approve   批准→写回技能(admin)
   POST  /skills/{agent_id}/proposals/{proposal_id}/reject    拒绝(admin)
@@ -194,6 +195,66 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
             "proposal": proposal.to_dict() if proposal else None,
         },
     }
+
+
+class ABRequest(BaseModel):
+    skill_id: str
+    candidate_text: str = Field(min_length=1)
+    dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
+
+
+@router.post("/skills/{agent_id}/ab", dependencies=[Depends(_admin_dep)])
+async def ab_compare_texts(body: ABRequest, agent_id: str,
+                           user: Dict[str, Any] = Depends(get_current_user)):
+    """双臂试评(admin)：基线正文 vs 候选正文，同任务集同判分器对照。
+
+    任务集优先 heldout（P0-2 真留出集，未被搜索消耗）。**只读评测**——
+    不产提案、不写技能、不入台账；审批人在 decide 前对候选做干净集核验。
+    """
+    from neurova.evolution.eval.config import EvolutionConfig
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    svc = _skill_service(agent_id)
+    info = svc.get_skill_info(body.skill_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"技能不存在: {body.skill_id}")
+    if not body.candidate_text.strip():
+        raise HTTPException(status_code=422, detail="candidate_text 不能为空白")
+    cfg = dict((info.get("manifest") or {}).get("config") or {})
+    skill_text = str(cfg.get("context_template") or info.get("description") or "")
+    if not skill_text.strip():
+        raise HTTPException(status_code=422, detail="技能正文为空,无双臂基线")
+    if body.candidate_text.strip() == skill_text.strip():
+        raise HTTPException(status_code=422, detail="候选正文与基线相同,无双臂差异")
+
+    settings = _load_settings_safe()
+    from neurova.evolution.eval.dataset import EvalDataset
+    from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
+
+    service = SkillEvolutionService(agent_id)
+    config = EvolutionConfig(
+        judge_model=settings.judge_model, optimizer_model=settings.optimizer_model
+    )
+    dataset: Optional[EvalDataset] = None
+    if body.dataset_source == "auto":
+        dataset = await service.build_dataset(body.skill_id, skill_text)
+    elif body.dataset_source == "synthetic":
+        dataset = await SyntheticDatasetBuilder(config).generate(skill_text, "skill")
+    if body.dataset_source in ("golden", "mined"):
+        dataset = await service.build_dataset(
+            body.skill_id, skill_text, source=body.dataset_source
+        )
+    if not dataset or not dataset.all_examples:
+        raise HTTPException(
+            status_code=422,
+            detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
+        )
+
+    report = await service.ab_compare(
+        baseline_text=skill_text, candidate_text=body.candidate_text,
+        dataset=dataset, config=config,
+    )
+    return {"code": 0, "data": report}
 
 
 def _load_settings_safe():
