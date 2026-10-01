@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.core.git_runner import run_git
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -68,12 +69,11 @@ class CheckpointRepository:
     # ── git 进程封装 ──
 
     def _git(self, *args: str, input_bytes: Optional[bytes] = None) -> bytes:
-        proc = subprocess.run(
-            ["git", "--git-dir", str(self.git_dir), *args],
-            capture_output=True,
-            input=input_bytes,
-            timeout=30,
-        )
+        # transport 委托 neurova.core.git_runner（Windows 三坑的单源防线：
+        # 二进制 transport——文本模式的 CRLF 翻译会污染 tree 条目与 blob）。
+        # bytes 进出保持不变：blob 内容可能是二进制，禁止 transport 层强转。
+        proc = run_git(*args, git_dir=str(self.git_dir),
+                       stdin=input_bytes, timeout=30)
         if proc.returncode != 0:
             # git show-ref 在空仓库（无任何 ref）返回 1——语义上等同无输出
             if args[0] == "show-ref":
@@ -105,10 +105,12 @@ class CheckpointRepository:
         return out.decode("ascii").strip()
 
     def commit_tree(self, tree_sha: str, message: str, parent: Optional[str] = None) -> str:
-        args = ["commit-tree", tree_sha, "-m", message]
+        # 坑 2 防线：message 走 stdin——'-m' 内嵌换行在 Windows 命令行
+        # 传参时被空格化（多行 message 会合并成一行）
+        args = ["commit-tree", tree_sha]
         if parent:
             args.extend(["-p", parent])
-        out = self._git(*args)
+        out = self._git(*args, input_bytes=message.encode("utf-8"))
         return out.decode("ascii").strip()
 
     def update_ref(self, ref: str, commit_sha: str) -> None:
