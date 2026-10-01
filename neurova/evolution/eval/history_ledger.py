@@ -140,7 +140,8 @@ class EvolutionLedger:
 
     @staticmethod
     def render_for_prompt(records: list[dict]) -> str:
-        """渲染变异器提示段：已证伪假设禁止重画；已生效假设避免无谓重复。
+        """渲染变异器提示段：已证伪假设禁止重画；已生效假设避免无谓重复；
+        连续无接受时追加探索指令（P2-8）。
         空记录（或只有墙标记）返回空串——提示词与旧版同形。"""
         real = [r for r in records if r.get("hypothesis")]
         wall = sum(r.get("gate_wall", 0) for r in records if "gate_wall" in r)
@@ -160,4 +161,27 @@ class EvolutionLedger:
                 lines.append(f"- [{r.get('ts', '')}] {r['hypothesis']}")
         if wall:
             lines.append(f"另有 {wall} 条候选被闸门连续拒绝（摘要略）。")
+        directive = exploration_directive(real)
+        if directive:
+            lines.append(directive)
         return "\n".join(lines)
+
+
+def exploration_directive(records: list[dict], *, stall_window: int = 5) -> str:
+    """P2-8：最近 stall_window 条真实记录无一 accepted → 探索指令段。
+
+    与收敛降频互补：backoff 管频率（收敛后少跑），本指令管方向（跑的
+    时候换打法）。墙标记（gate_wall）不是真实记录——不触发也不占窗口。
+    无 stall 返回空串（提示词与旧版逐字节一致）。
+    """
+    real = [r for r in records if r.get("hypothesis")]
+    window = real[-stall_window:]
+    if len(window) < stall_window or any(r.get("accepted") for r in window):
+        return ""
+    tried = "；".join(str(r["hypothesis"])[:60] for r in window[-4:])
+    return (
+        f"【探索指令】已连续 {stall_window} 轮没有任何候选被接受——"
+        "停止在同一路径上重试。请换一条**未用过的变异轴**"
+        "（结构重组 / 示例增补 / 流程重排 / 约束收紧 / 语气校准），"
+        f"并与历史假设显著不同。已试过的假设：{tried}"
+    )
