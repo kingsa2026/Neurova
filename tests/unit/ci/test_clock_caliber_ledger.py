@@ -59,6 +59,14 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "该文件曾经的墙钟**上界**（响应路径不付旁路代价）已改为结构不变量，"
         "见 test_ci_wallclock_assertion_ledger.CONVERTED_TO_INVARIANT。",
     ),
+    "tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py": (
+        ("wallClock",),
+        "这份文件**自己不计时**：perf_counter / monotonic 两个词只出现在两处——"
+        "被 AST 扫描的生产源码里的时钟名单常量，以及它断言的判据文本里。"
+        "它守的是反向口径：咽喉喂给轮级耗时聚合的时长绑定**必须**是单调系，"
+        "出现 time.time() 差值即判红（Windows 墙钟 15.6ms 粒度会把快工具量成假的 0.0，"
+        "见工单集 §34）。台账口径按扫描结果记 wallClock，是因为扫描只认单调系符号名。",
+    ),
     "tests/unit/context/test_context_pool_retention_contract.py": (
         ("wallClock",),
         "同机 A/B **比值**：同一进程内先量池规模小的尾段 1000 条 add，再量池规模"
