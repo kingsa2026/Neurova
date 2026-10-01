@@ -48,12 +48,12 @@
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
-| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | ✅ **D-7 已拍**（§19：补契约） | 未处置；**全集已量出并复算**（§14，含 D-5 复核补的 1 例）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
+| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | 拍板估 +400 / **实测净 +285**（§25.5） | 中（含合规面） | ✅ **D-7 已拍**（§19：补契约）＋ 🔒 **§25.4 新增待拍**（B/C 两族超出 D-7 覆盖） | **26 例降到 10 例**（§25）：① 配置面与 URL 选路、③ 爬虫三旋钮真生效（含 `obey_robots` fail-closed）、②④⑤ 按活契约改判/改写；**四个文件 28 例全绿并已进 CI 被测集**（原来"红只在本地出现、次要人肉解释"就此收口）。余 10 例在 §25.4，含本轮新量出的五条事实（print 脚本从未跑到断言、会真点真实桌面、`BrowserSupervisor` 是零实例化死类、`CamofoxAdapter` 不存在、复算命令会扫进工具备份） |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
 **批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07 → T-09` 已走完；
-**剩余**：`T-14`（D-7 已拍"补契约"，四个子族逐条施工，是本集最后一单施工量）
+**剩余**：`T-14` 的收尾 10 例（§25.4 的 B/C 两族超出 D-7 拍板覆盖，要重拍；本集最后一笔）
 → T-12 的"真实容器自身字段形态"（唯一还卡外部条件的一条：装第三方全局包需授权）。
 T-09 虽已接线，但**验收未合**：provider/模型真收到这一跳要一次真 vision 模型的工具轮才能签掉（§24.3）。
 
@@ -1601,3 +1601,93 @@ reset 换绑后上轮不残留、emit 在无 session 时仍进槽、缺口由具
 - `has_image` 痕迹（`3216e9ba`）本轮成了缺口的间接凭据，但装配侧读的是槽的
   `payload`/`gapTools`，不是 `has_image`——两处的口径不同别混读：
   `has_image` 回答"这次结果本来有没有图"，槽回答"本轮还有没有可交给模型的图"。
+
+---
+
+## 25. T-14 · 补契约执行到拍板覆盖边界（2026-10-01）
+
+### 25.1 结果读数（可复算）
+
+这族常驻红从 **26 例降到 10 例**。四个文件现全绿并已登记进 CI 被测集
+（逐文件单跑实测：`test_browser_automation` 5、`test_browser_manager_integration` 7、
+`test_scrapling_spider` 12、`test_computer_use_integration` 4，共 28 例）；
+余下 10 例全部集中在 `test_computer_use_browser_integration.py`，原因见 25.3——
+**它们要求的东西不在 D-7 拍板的覆盖范围内，需要重拍**。
+
+复算命令：
+`.venv/Scripts/python.exe -m pytest -q tests/integration/test_browser_automation.py tests/integration/test_browser_manager_integration.py tests/integration/test_computer_use_browser_integration.py tests/integration/test_scrapling_spider.py tests/integration/test_computer_use_integration.py`
+
+### 25.2 已按拍板做完的三族
+
+- **① YAML 配置面（补实现）**：`BrowserManager(config_path=…)` 真读 YAML（默认配置 ← 文件 ← 显式
+  config 逐层覆盖）、`_backend_configs`（声明面）与 `_backends`（可用面）分列、
+  `_routeForUrl()` 按有序 `routing.rules` 选路、`_resolve_backend()` 兼容两类入参（后端名 / 含 `://` 的 URL）。
+  配置路径贯通到 facade（`ComputerUseManager(config_path=…)` → `get_computer_use_manager` →
+  `get_browser_manager`），否则它就是只写不读的字段。坏 YAML / 缺 PyYAML / 顶层非 mapping
+  各自留具名原因在 `configLoadError()`，不静默回落成"没配过"。
+- **② 压缩面（改判，不复活）**：`_compress_snapshot` 从未存在于 `BrowserManager`——它只在
+  `BrowserSupervisor`（CDP 桥）上以 `(str)->str` 截断形态存在。改判成两条防回潮判据：
+  `BrowserManager` 不得再长第二个压缩实现，且那个 CDP 截断的入参必须是 `str`
+  （一旦被改成吃 dict 树，快照就退回已被否证的头部硬切）。
+- **③ 爬虫 kwargs（补实现，含合规面）**：三个旋钮现在都有读者——
+  `concurrency` = 跨域并行上限（Semaphore），`domain_delay` = 域内相邻请求间隔（域内一律串行，
+  否则 delay 是空话），`obey_robots` = 抓取前真取 robots.txt 判定。
+  判定口径分三档且不静默：`robots.txt` 404 = 无限制放行；**取不到 = fail-closed 拒绝**
+  （不知道限制就别抓）；解析失败 = 拒绝并点名。非法旋钮值（`concurrency="abc"`/`0`/负 delay/空
+  `start_urls`）一律 ValueError 点名，不悄悄改成默认值。`run_spider` 顺带不再阻塞事件循环
+  （抓取经 `to_thread`）。
+  `create_spider` 仍返回 spider_id（`run/stop/resume` 都按它寻址），生效值由新读侧
+  `spiderConfig(spider_id)` 给出——测试原先断言"返回对象带 `.name`"，那与 id 寻址契约相反，
+  按活契约改判。
+- **④⑤ print 脚本（改写成有断言，未删）**：见 25.3 第 1 条，改写过程中量到这两个脚本
+  **一次都没真正跑过任何断言**。
+
+### 25.3 本轮新量出的五条事实（它们改变了拍板的前提）
+
+1. **`ComputerUseManager` 没有 `get_status()`**。那份 print 脚本第 1 步调它 → 抛
+   `AttributeError` → 被 `except` 打成一行"✗ 初始化失败"后 `return` ⇒ 它的第 2–6 步
+   （Agent 初始化、schema 检查、工具列表、ToolRouter、真点击/真键入）**从未执行过**。
+   一份看起来覆盖六件事的脚本，守卫数一直是零。
+2. **那两个脚本还会产生真实副作用**：`test_browser_automation` 真导航公网与 `localhost:8080`
+   并执行 JS；`test_computer_use_integration` 第 6 步真调 `computer_click`/`computer_type`
+   ——会移动真实光标、往真实焦点窗口打字。**这种形状绝不能进 CI 被测集**，
+   所以 ④⑤ 的改写方向只能是"无副作用的契约判据"，不是"给旧断言补实现"。
+3. **`BrowserSupervisor` 类存在但全仓零实例化**，且构造需要 `ws_url`（一条从未接通的 CDP
+   WebSocket 通道）。测试要的 `manager._supervisor` 不是"补个属性"，是接通这条死通道。
+4. **`CamofoxAdapter` 类不存在**（全仓 0 命中）。测试要的 `manager._camofox_adapter` 是造一个
+   与现有 `CamofoxSupervisor` 平行的新抽象。
+5. **§14 的复算命令会把工具自己的会话备份扫进来**：按台账原命令复算退役名得 **67 命中**，
+   全部落在 `NeurUI/src/.mimosa/hook-state/**.source`（hook 备份快照，非源码）。排除后
+   生产码/前端源码为 **0**，D-5 的退役结论不变。复算口径此后须带
+   `--include=*.py --include=*.ts --include=*.vue | grep -v .mimosa`。
+
+### 25.4 余下 10 例：请重拍（🔒 新增，不在 D-7 覆盖内）
+
+全部在 `test_computer_use_browser_integration.py`，两条独立子族：
+
+- **B · 组件与状态面（5 例）**：`manager._supervisor` / `_camofox_adapter` /
+  `get_status()["components"]` / `["dependencies"]` / `capabilities["browser_supervisor"]`。
+  它们断言的抽象按 25.3 第 3、4 条要么是需要新通道才能持有的死类，要么根本不存在。
+  三条路：① 真接通 CDP supervisor + 造 CamofoxAdapter（把死通道接活，产品面扩张）；
+  ② 改判到现有单源（`capability_state` 六轴 + `BrowserManager.get_status` 真实键），
+  组件表并入 T-07 那张能力表；③ 按甲退役这 5 例。
+  **我推荐 ②**——它与 §14 当初的判断同源："组件在不在"与"能力可不可用"是同一张表，
+  再造一份就是教义第 6 条禁的第二份事实源；而 T-07 已经把那张表建好了。
+- **C · 旧契约与 mock 自证（5 例）**：`browser_navigate("test_agent", url)`（手工传 agent_id，
+  正是教义第 3 条点名的绕过装配点写法）、`result["status"]`（生产是 `BrowserResult.success`）、
+  `browser_screenshot(..., selector="#main")`（与 D-2"不暴露 selector/xpath"相反）、
+  以及通篇 `mock 返回三项 → 断言三项` 的自证形状。
+  这些断言的契约是 T-01/D-2 之前那一版，改判后会与既有真判据完全重复 ⇒ 实际等于退役。
+  **要拍的是"退役这 5 例"还是"保留为 xfail 并写明是被哪一笔决策撤掉的"**
+  （后者参照 `test_capability_graph_phase3.py` 的诚实挂起态形态）。
+
+### 25.5 LOC 与纪律自记
+
+生产净 **+285**（拍板乙案估 +400）：`browser_manager.py` +277/−21（配置面 + 选路 + 爬虫编排），
+`computer_use/__init__.py` +37/−8（config_path 贯通 + 单例 reset 补全），清单 +4。
+测试码为三个既有文件的就地改写（28 例）。
+
+纪律自记一条：本轮 ③ 的 6 例新判据是**实现先写、判据后补**，违反 §0 第 3 条。
+补证方式同 §22：把 2 个生产文件回退 `HEAD`、判据原样跑 → **15 failed**（③ 的 6 例全红、
+① 的 4 例红、② 红），还原后 sha256 逐文件校验通过。也就是说这些判据被证明会咬，
+但顺序仍然错了，记在这里免得自我豁免。

@@ -1435,3 +1435,7 @@ tests/unit/api/test_smart_ambiguity_carries_refs.py
 tests/unit/computer_use/test_capability_is_a_tri_state.py
 tests/unit/tools/test_browser_result_normalization_keeps_named_cause.py
 tests/unit/agent/test_perception_image_enters_request_once.py
+tests/integration/test_browser_automation.py
+tests/integration/test_browser_manager_integration.py
+tests/integration/test_scrapling_spider.py
+tests/integration/test_computer_use_integration.py
