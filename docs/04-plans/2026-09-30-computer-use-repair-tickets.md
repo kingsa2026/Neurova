@@ -2233,4 +2233,74 @@ parity 表初版在同一条环里连着跑两环装配：第一次装配会把�
 "走 Anthropic 服务商的真模型真收到这张图"——那需要该环上的真凭据与真会话，
 与 §31.4 登记的 OpenAI 兼容环缺口同类。签收线仍是工单 U-02（见 §31.4 的候选实测）。
 
+---
+
+## 33. U-01 的真拦路虎：多模态探测图自己就解不开（2026-10-01，已修）
+
+### 33.1 现场链条
+
+用户给出可用候选 **商汤 `sensetime:kimi-k3`** 后走生产探测口真探，第一次回的是：
+
+```
+HTTP 400: invalid image base64 content     →  probe_source = "inconclusive"
+```
+
+网关嫌的是**我们发出去的探测图**。量它：`OpenAIProvider._IMAGE_PROBE_PNG_BASE64`
+解出 **208 字节**，`raw[:8]` 是合法 PNG 签名，但 `PIL.Image.open()` 直接
+`UnidentifiedImageError: cannot identify image file` —— 内联那段 base64 的 chunk 结构是坏的。
+
+后果不是"某次探测失败"，而是**vision 能力在这条链上永远量不出来**：任何严格校验媒体的
+网关都只能给 `inconclusive`，§30 刚接上的实测档因此永远拿不到东西，T-09 的附图闸门开不了。
+这条也是 §31.4 那张"四个候选全不通"表里 `github-models`/`volcano` 之外的第三种真相。
+
+### 33.2 修法与判据（先红后绿）
+
+不内联字节，改**现造**：`_redProbeSquareBase64(edge=32)` 用 `zlib` + `struct` 拼
+IHDR/IDAT/IEND 三段、CRC 正确、8bit truecolor 纯红图（不引新依赖，PIL 只做判据侧校验）。
+
+新判据 [`tests/unit/llm/test_image_probe_fixture_is_real_png.py`](../../tests/unit/llm/test_image_probe_fixture_is_real_png.py)
+2 例，红灯原文（生产码未动时）：
+
+```
+E   PIL.UnidentifiedImageError: cannot identify image file <_io.BytesIO object ...>
+FAILED ::test_probeImageFixtureIsADecodableRedSquare
+FAILED ::test_probeRequestPutsADecodableImageOnTheWire
+============================== 2 failed in 1.00s ==============================
+```
+
+第 2 例断的是**线上形状**：把 `aiohttp` 那层替掉（外部慢操作），取生产代码真发出去的
+`data URL`，解它、开它、验 32×32，并确认图文同一段（问的不是另一张图）。
+转绿：**2 passed**；`tests/unit/llm` 整块 688 passed / 1 failed（那条 token 公式是既有红）。
+
+### 33.3 活体三连（同一条链，修前 → 修后）
+
+```
+修前   probe_detail = "HTTP 400: invalid image base64 content"   probe_source = inconclusive
+修后a  probe_detail = "HTTP 429: inference exceeds tpm/rpm limit" probe_source = inconclusive
+       该模型元数据 capabilities=['text']、probe_source=None —— §31 的修法当场生效：
+       限频不被写成"实测不支持图"
+修后b supported = True, probe_source = probed, probe_answer = "red"
+```
+
+⇒ 坏图消失、请求进到模型层；`kimi-k3` 经该网关**真收图**（答出红色）。
+U-01 的通道由此打通，剩下的只是配额节奏；U-02 的工具轮签收见 §33.5。
+
+### 33.4 同根因扫荡到的第二份探测图（登记，本批不并）
+
+`neurova/llm/providers/capability_detector.py:61` 另内联一张 **1×1** 探测图。
+实测它能解码（`PNG (1, 1)`），不是同一个故障；但"探测图"这个概念在仓里有了第二份定义
+（尺寸、颜色、提问、判定口径都不同）。并成一份要同时改那族的判据口径，
+**本批不动**，登记在此；下次碰 `capability_detector` 时一并收（教义第 6 条）。
+
+### 33.5 LOC 与回归
+
+生产 **+25/−7**（净 **+18**；`openai_provider.py`：生成函数 + 替换内联坏 blob）。
+测试 **+111** 行不计入。新判据与 CI 登记同批（清单 **458 条**）。`tests/unit/llm` 688 passed；
+失败集合与 §32.4 同（那条 token 公式是既有红）。
+
+**U-02 还差什么**（写清不含糊）：探测口已能证明"真模型收到并读懂我们生成的图"，
+但**没证**"OpenAI 环 `_attachPerceptionImage` 生成的那张请求副本被真模型读懂"。
+这一步要把活跃模型切到 `sensetime:kimi-k3`（写用户配置、跑完切回），
+再走真截图 → 真具名缺口 → 装配 → 真服务商，才算 §24.3 那一跳闭合。
+
 

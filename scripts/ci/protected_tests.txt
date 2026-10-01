@@ -1447,3 +1447,5 @@ tests/integration/test_camofox_contract_stub_transport.py
 tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py
 # Q-3：Anthropic 环与 OpenAI 环共用一份感知闸门（逐文件单跑 15 passed；三个变异对照各自咬住）
 tests/unit/agent/test_perception_image_anthropic_parity.py
+# U-01 的拦路虎：多模态探测图自己解不开（原内联 blob chunk 结构坏）。逐文件单跑 2 passed
+tests/unit/llm/test_image_probe_fixture_is_real_png.py

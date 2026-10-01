@@ -80,13 +80,15 @@
 - 否证条件：激活后 `model_metadata[<model>].capabilities` 里没有 `vision` 且读数仍 `unknown`
   ⇒ 触发 U-05；若连 `model_metadata` 都不被 `_persist_probe_result`（`provider_manager.py:1724` 起）
   写回，则这条链的后台探测根本没落地，升级为独立缺陷单，**不在 T-09 里顺手兜**。
-- **⏸ 实测过一半（2026-10-01，工单集 §31）**：真探测跑通了，但**这台机器上没有任何可用
-  vision 通道**——活跃模型回 HTTP 400 网关无路由，`github-models:gpt-4o` 回非 JSON 正文，
-  `aliyun-bailian` 回 401 没 key，`volcano-coding-cn` 回 404 coding plan 不支持。
-  ⇒ U-01/U-02 等用户给可用凭据；**不用替身冒充签收**。
-  顺带这次真跑撞出一条真缺陷并已根修（§31.2）：`_persist_probe_result` 把
-  `probe_source="inconclusive"`（下不了结论）当实测否证写死——盖 `probed` 后
-  `maybe_probe_multimodal` 不再重探，而修好的实测档会据此永久关闭 T-09 的门。
+- **⏸→✅ 通道已打通（2026-10-01，工单集 §33）**：本条原先记的"本机没有任何可用 vision 通道"
+  **一半是我们自己的错**——多模态探测图（内联 base64）签名合法却过不了解码器，严格网关只会回
+  `400 invalid image base64 content`，任何模型都探不成。修成 `zlib`+`struct` 现造的 32×32 纯红图后，
+  用户给的候选 `sensetime:kimi-k3` 真探测回 **`supported=True / probe_answer="red"`**；
+  中途一次限频（429）按 §31 的修法如实**没有**被写成"不支持图"。
+  ⇒ U-01 具备条件（切活跃模型即可）；**U-02 仍未跑**：要的是
+  `_attachPerceptionImage` 生成的那张副本被真模型读懂，不是探针图。
+  其余三个候选的实测（github-models 非 JSON 正文 / aliyun 无 key / volcano coding-plan 不支持）
+  仍成立，只是不再等于"没有可用通道"。
 
 **U-02 · 真 vision 模型的一轮工具环签收这张图（承重）**
 - 判据：夹具页面把文本事实**刻意做成不可得**（本地 HTML 里用 `<canvas>` 画一段随机短语，
