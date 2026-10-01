@@ -45,15 +45,36 @@ class EvalExample:
 
 @dataclass
 class EvalDataset:
-    """train/val/holdout 三集划分。"""
+    """train/val/holdout 三集划分 + heldout 真留出报告集。
+
+    holdout 是接受判据的组成部分（会被搜索过程反复比较）；
+    heldout 只做最终验收证据，永不参与判定——防自适应污染。
+    """
 
     train: list[EvalExample] = field(default_factory=list)
     val: list[EvalExample] = field(default_factory=list)
     holdout: list[EvalExample] = field(default_factory=list)
+    heldout: list[EvalExample] = field(default_factory=list)
 
     @property
     def all_examples(self) -> list[EvalExample]:
-        return self.train + self.val + self.holdout
+        return self.train + self.val + self.holdout + self.heldout
+
+    def carve_heldout(self, heldout_ratio: float) -> "EvalDataset":
+        """从 holdout 尾部按比例划出真留出报告集（确定性，不改原对象）。
+
+        heldout_ratio<=0 或 holdout 不足 2 条时原样返回（保证 holdout
+        至少保留 1 条继续充当判据）。
+        """
+        if heldout_ratio <= 0 or len(self.holdout) < 2:
+            return self
+        n_held = max(1, int(len(self.holdout) * heldout_ratio))
+        n_held = min(n_held, len(self.holdout) - 1)
+        return EvalDataset(
+            train=list(self.train), val=list(self.val),
+            holdout=list(self.holdout[:-n_held]),
+            heldout=list(self.holdout[-n_held:]),
+        )
 
     @classmethod
     def split(
@@ -61,8 +82,13 @@ class EvalDataset:
         examples: list[EvalExample],
         ratios: tuple[float, float, float] = (0.5, 0.25, 0.25),
         seed: int = 42,
+        heldout_ratio: float = 0.0,
     ) -> "EvalDataset":
-        """按比例切分;固定种子可复现。保证不丢样本(小集也不丢)。"""
+        """按比例切分;固定种子可复现。保证不丢样本(小集也不丢)。
+
+        heldout_ratio>0 时从 val+holdout 之外的剩余尾（holdout 末尾）按
+        比例划出真留出报告集；默认 0 = 与旧三集切分逐元素一致。
+        """
         items = list(examples)
         if not items:
             return cls()
@@ -78,12 +104,18 @@ class EvalDataset:
         train = items[:n_train]
         val = items[n_train : n_train + n_val]
         holdout = items[n_train + n_val :]
-        return cls(train=train, val=val, holdout=holdout)
+        ds = cls(train=train, val=val, holdout=holdout)
+        if heldout_ratio > 0:
+            ds = ds.carve_heldout(heldout_ratio)
+        return ds
 
     def save(self, path: Path) -> None:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        for name, split in (("train", self.train), ("val", self.val), ("holdout", self.holdout)):
+        for name, split in (("train", self.train), ("val", self.val),
+                            ("holdout", self.holdout), ("heldout", self.heldout)):
+            if name == "heldout" and not split:
+                continue  # 空 heldout 不落盘：旧三键目录字节兼容
             with open(path / f"{name}.jsonl", "w", encoding="utf-8") as f:
                 for ex in split:
                     f.write(json.dumps(ex.to_dict(), ensure_ascii=False) + "\n")
@@ -92,7 +124,7 @@ class EvalDataset:
     def load(cls, path: Path) -> "EvalDataset":
         path = Path(path)
         ds = cls()
-        for name in ("train", "val", "holdout"):
+        for name in ("train", "val", "holdout", "heldout"):
             split_file = path / f"{name}.jsonl"
             if not split_file.exists():
                 continue
