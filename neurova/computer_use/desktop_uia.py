@@ -34,16 +34,29 @@ def _global_input_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def availabilityDetail() -> dict:
+    """UIA 可用性的**唯一**判定点：布尔由它派生，状态与具名原因一并给出（T-07）。
+
+    分成 `not-configured`（非 Windows / 缺库）而不是笼统 False——两者的自救动作相反：
+    一个是"这台机器本就没有"，一个是"装 `uiautomation`"。
+    """
+    from neurova.computer_use.capability_state import CAP_AVAILABLE, CAP_NOT_CONFIGURED
+
+    if os.name != "nt":
+        return {"available": False, "state": CAP_NOT_CONFIGURED, "platform": os.name,
+                "reason": f"UIA 只在 Windows 侧有意义（当前 os.name={os.name!r}）"}
+    try:
+        import uiautomation  # noqa: F401
+    except Exception as e:  # noqa: BLE001 - 缺库是读数，不是崩溃
+        return {"available": False, "state": CAP_NOT_CONFIGURED, "platform": os.name,
+                "reason": f"缺 uiautomation 库：{type(e).__name__}: {e}"}
+    return {"available": True, "state": CAP_AVAILABLE, "platform": os.name,
+            "reason": "uiautomation 可导入且平台匹配"}
+
+
 def is_available() -> bool:
     """平台 + 库可用性探测（/status、/doctor 消费；任何环境不抛异常）"""
-    try:
-        if os.name != "nt":
-            return False
-        import uiautomation  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return bool(availabilityDetail()["available"])
 
 
 class DesktopUIAManager:

@@ -277,10 +277,20 @@ class TestAvailability:
         assert desktop_uia.is_available() in (True, False)
 
     def test_manager_uia_available_uses_module_probe(self, monkeypatch):
+        """manager 的 uia 布尔必须走模块级探测点（T-07 后走 `availabilityDetail`，
+        `is_available()` 自己也是它的派生），不许在 manager 里再判一次 import。"""
         from neurova.computer_use import ComputerUseManager
+        from neurova.computer_use.capability_state import CAP_AVAILABLE, CAP_NOT_CONFIGURED
 
-        monkeypatch.setattr(desktop_uia, "is_available", lambda: True)
+        monkeypatch.setattr(desktop_uia, "availabilityDetail", lambda: {
+            "available": True, "state": CAP_AVAILABLE, "platform": "nt", "reason": "可导入"})
         manager = ComputerUseManager()
         assert manager.uia_available() is True
-        monkeypatch.setattr(desktop_uia, "is_available", lambda: False)
+        assert manager.uiaProbe() == (CAP_AVAILABLE, "可导入")
+        monkeypatch.setattr(desktop_uia, "availabilityDetail", lambda: {
+            "available": False, "state": CAP_NOT_CONFIGURED, "platform": "posix",
+            "reason": "UIA 只在 Windows 侧有意义"})
         assert manager.uia_available() is False
+        assert manager.uiaProbe()[0] == CAP_NOT_CONFIGURED
+        # 布尔与状态同源：is_available() 就是 detail["available"]，两处不许分叉
+        assert desktop_uia.is_available() is desktop_uia.availabilityDetail()["available"]

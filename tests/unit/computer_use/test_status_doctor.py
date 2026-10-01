@@ -56,10 +56,14 @@ class TestManagerProbes:
 class TestStatusEndpoint:
     @pytest.fixture
     def fake_manager(self):
+        from neurova.computer_use.capability_state import CAP_AVAILABLE
+
         manager = MagicMock()
-        manager._screenshot_backend = "PIL"
-        manager.input_available.return_value = True
-        manager.uia_available.return_value = True
+        # T-07 后 /status 读的是三个公共探测口（screenshotBackend/inputProbe/uiaProbe），
+        # 不再摸 `_screenshot_backend` 私有字段，也不再只看 input_available() 布尔
+        manager.screenshotBackend.return_value = "PIL"
+        manager.inputProbe.return_value = (True, CAP_AVAILABLE, "pyautogui.position() 可执行")
+        manager.uiaProbe.return_value = (CAP_AVAILABLE, "uiautomation 可导入且平台匹配")
         manager.dpi_aware = True
         manager.screen_metadata.return_value = {
             "virtual_origin": (0, 0),
@@ -86,7 +90,8 @@ class TestStatusEndpoint:
         """核心回归：截图可用但输入能力废 → desktop_available 必须为 False"""
         from neurova.api.endpoints import computer as computer_api
 
-        fake_manager.input_available.return_value = False
+        fake_manager.inputProbe.return_value = (
+            False, "configured-unreachable", "pyautogui 已装但输入通道打不开：没有交互桌面")
         monkeypatch.setattr(computer_api, "_get_manager", lambda: fake_manager)
         resp = await computer_api.get_status()
         data = resp["data"]
