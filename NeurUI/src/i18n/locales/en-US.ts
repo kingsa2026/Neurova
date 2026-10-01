@@ -1807,6 +1807,7 @@ export default {
     browser: 'Browser',
     smartClick: 'Smart Click',
     smartType: 'Smart Type',
+    semanticRef: 'Snapshot ref (e2 after ambiguity)',
     up: 'Up',
     down: 'Down',
     left: 'Left',

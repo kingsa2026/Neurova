@@ -290,6 +290,15 @@ def parseRefLine(line: str) -> Optional[Tuple[str, Optional[str], str]]:
     return role, (name or None), m.group(1)
 
 
+def refFromLine(line: str) -> Optional[str]:
+    """一行的对外 ref 形态（`e7`），无编号时 None。
+
+    与 `parseRefLine` 同一份文法——候选面要带编号时读这一处，不再各自正则一遍。
+    """
+    parsed = parseRefLine(line)
+    return f"e{parsed[2]}" if parsed else None
+
+
 def annotateSnapshotRefs(tree: str) -> Tuple[str, List[RefTarget]]:
     """给快照里的可交互行编号（`[eN]`），并产出与之同序的 ref 表。
 
@@ -1225,11 +1234,12 @@ def snapshotActionableCandidates(tree: str) -> List[Any]:
     roles = _snapshotActionableRoles()
     out: List[Any] = []
     for ln in (tree or "").splitlines():
-        if _ariaRoleToken(ln) not in roles:
+        role = _ariaRoleToken(ln)
+        if role not in roles:
             continue
         name = _accessibleName(ln)
         if name:
-            out.append(Candidate(_ariaRoleToken(ln) or "", name))
+            out.append(Candidate(role or "", name, refFromLine(ln)))
     return out
 
 
@@ -1256,7 +1266,7 @@ def snapshotFillableCandidates(tree: str) -> List[Any]:
             continue
         name = _accessibleName(ln)
         if name:
-            out.append(Candidate(token or "", name))
+            out.append(Candidate(token or "", name, refFromLine(ln)))
     return out
 
 
