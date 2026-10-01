@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
@@ -132,6 +133,7 @@ class SkillEvolutionRunner:
         bench_gate: Optional[Callable[[str, str], float]] = None,
         constraints: Any = None,
         leak_critic: Any = None,
+        ledger: Any = None,
     ):
         self.config = config
         self.judge = judge
@@ -142,20 +144,59 @@ class SkillEvolutionRunner:
         # P0-3 泄漏审查：None = 不启用（行为与旧版一致）；注入 LeakCritic 后
         # 候选在约束闸之后、评测之前过闸，命中即跳过并留审计标记。
         self._leak_critic = leak_critic
+        # P1-4 编辑历史台账：None = 不启用；注入后逐候选落账并把最近记录
+        # 回喂变异器（已证伪假设禁止重画）。
+        self._ledger = ledger
 
     # ── 内部:变异 ──
 
     async def _mutate(self, artifact_text: str, artifact_type: str,
-                      failures: list[JudgeFailure]) -> str:
+                      failures: list[JudgeFailure],
+                      history: Optional[list[dict]] = None) -> str:
         if self._mutate_fn is not None:
+            # 旧签名注入的 mutate（不收 history）不传新 kwarg——装配契约不漂移
+            kwargs: dict[str, Any] = {}
+            if history:
+                try:
+                    if "history" in inspect.signature(self._mutate_fn).parameters:
+                        kwargs["history"] = history
+                except (TypeError, ValueError):
+                    pass
             return await self._mutate_fn(
-                artifact_text=artifact_text, artifact_type=artifact_type, failures=failures
+                artifact_text=artifact_text, artifact_type=artifact_type, failures=failures,
+                **kwargs
             )
         from neurova.evolution.eval.mutator import ReflectiveMutator
 
         return await ReflectiveMutator(self.config).mutate(
-            artifact_text=artifact_text, artifact_type=artifact_type, failures=failures
+            artifact_text=artifact_text, artifact_type=artifact_type, failures=failures,
+            history=history,
         )
+
+    def _ledger_append(self, ledger_key: str, artifact_type: str,
+                       failures: list[JudgeFailure], *, accepted: bool,
+                       reject_reason: str = "", delta_train: Optional[float] = None,
+                       constraint_failures: Optional[list[str]] = None) -> Optional[int]:
+        """P1-4：逐候选结局入账（含被闸拒绝的）。台账故障按既有审计面惯例
+        只捕 OSError（磁盘问题不阻断进化，其他缺陷如实上抛）。"""
+        if self._ledger is None or not ledger_key:
+            return None
+        worst = min((f.score for f in failures), default=None)
+        try:
+            return self._ledger.append(ledger_key, {
+                "artifact_type": artifact_type,
+                "hypothesis": ("; ".join((f.feedback or "")[:80] for f in failures[:3])
+                               or "(无失败反馈的清晰化变异)")[:200],
+                "failures_digest": f"n={len(failures)};worst={worst}",
+                "delta_train": None if delta_train is None else round(delta_train, 6),
+                "delta_holdout": None,
+                "accepted": accepted,
+                "reject_reason": reject_reason,
+                "constraint_failures": list(constraint_failures or []),
+            })
+        except OSError as e:
+            logger.debug("编辑历史台账写入失败: %s", e)
+            return None
 
     # ── 内部:评测 ──
 
@@ -228,6 +269,7 @@ class SkillEvolutionRunner:
         dataset: EvalDataset,
         iterations: Optional[int] = None,
         noise_band: Optional[NoiseBand] = None,
+        ledger_key: str = "",
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
 
@@ -265,12 +307,17 @@ class SkillEvolutionRunner:
         result.train_before = await self._evaluate_avg(baseline_text, tune, artifact_type)
 
         best_text, best_score = baseline_text, result.train_before
+        best_seq: Optional[int] = None
         leak_markers: Optional[frozenset] = None  # P0-3：按数据集懒提取，一次缓存
         n_iters = self.config.iterations if iterations is None else iterations
 
         for _ in range(max(0, n_iters)):
             failures = await self._collect_failures(best_text, dataset.val or tune, artifact_type)
-            candidate = await self._mutate(best_text, artifact_type, failures)
+            # P1-4：最近编辑历史回喂变异器（已证伪假设禁止重画）
+            history = None
+            if self._ledger is not None and ledger_key:
+                history = self._ledger.recent(ledger_key)
+            candidate = await self._mutate(best_text, artifact_type, failures, history=history)
             if not candidate or candidate == best_text:
                 continue
 
@@ -280,6 +327,10 @@ class SkillEvolutionRunner:
                 if failed:
                     result.constraint_failures.extend(failed)
                     logger.debug("候选被约束闸拒绝: %s", failed)
+                    self._ledger_append(ledger_key, artifact_type, failures,
+                                        accepted=False,
+                                        reject_reason=f"constraints:{','.join(failed)}",
+                                        constraint_failures=result.constraint_failures)
                     continue
 
             # P0-3 泄漏审查：评测前拦截背题/退化候选（宁漏勿误杀）。
@@ -293,16 +344,33 @@ class SkillEvolutionRunner:
                     result.constraint_failures.append(f"leak:{verdict.category}")
                     logger.debug("候选被泄漏闸拒绝(%s): %s",
                                  verdict.category, verdict.evidence[:100])
+                    self._ledger_append(ledger_key, artifact_type, failures,
+                                        accepted=False,
+                                        reject_reason=f"leak:{verdict.category}",
+                                        constraint_failures=result.constraint_failures)
                     continue
 
             result.iterations_run += 1
             score = await self._evaluate_avg(candidate, tune, artifact_type)
-            if score > best_score + _EPS:
+            improved = score > best_score + _EPS
+            seq = self._ledger_append(ledger_key, artifact_type, failures,
+                                      accepted=improved,
+                                      delta_train=score - best_score)
+            if improved:
                 best_text, best_score = candidate, score
+                best_seq = seq
 
         result.train_best = best_score
         result.holdout_after = await self._evaluate_avg(best_text, holdout, artifact_type)
         result.deployed_text = best_text
+        # P1-4：胜者在留出集上的实测差回填其台账记录（无论最终接受与否，
+        # 这都是该假设的诚实证据）
+        if self._ledger is not None and ledger_key and best_seq is not None:
+            try:
+                self._ledger.patch(ledger_key, best_seq,
+                                   {"delta_holdout": round(result.improvement, 6)})
+            except OSError as e:
+                logger.debug("编辑历史台账回填失败: %s", e)
 
         # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
         if result.holdout_after < result.holdout_before - _EPS:

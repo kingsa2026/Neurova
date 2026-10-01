@@ -76,8 +76,14 @@ class ReflectiveMutator:
         artifact_text: str,
         artifact_type: str,
         failures: list[JudgeFailure],
+        history: Optional[list[dict]] = None,
     ) -> str:
-        """基于失败反馈生成定向改进后的文本;失败时返回原文。"""
+        """基于失败反馈生成定向改进后的文本;失败时返回原文。
+
+        history（P1-4）：EvolutionLedger.recent() 的候选结局记录——已实测
+        无效的假设渲染进提示段禁止重画；None/空列表时提示词与旧版逐字节
+        一致。
+        """
         budget = self._size_budget(artifact_type)
 
         if failures:
@@ -99,6 +105,13 @@ class ReflectiveMutator:
                 f"以下是一个 {artifact_type} 的当前正文。请在保持核心意图的前提下,"
                 f"让它更清晰、更可执行。\n\n【当前正文】\n{artifact_text}"
             )
+
+        if history:
+            from neurova.evolution.eval.history_ledger import EvolutionLedger
+
+            history_block = EvolutionLedger.render_for_prompt(history)
+            if history_block:
+                instruction += f"\n\n{history_block}"
 
         instruction += f"\n\n【长度预算】修改后的正文不得超过 {budget} 个字符。"
 
