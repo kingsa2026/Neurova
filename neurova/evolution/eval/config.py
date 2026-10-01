@@ -43,6 +43,14 @@ class EvolutionConfig:
     # bench gain 低于 -tolerance 即拒绝变体(无论技能分多高)
     bench_tolerance: float = 0.02
 
+    # ── 成本规则（P1-5，RRSI 对齐）──
+    # ΔC ≤ β0 + β1·ΔS：候选文本相对基线的长度变化率（成本代理）不得超过
+    # 免费额度 β0 加上"每单位实测增益可购买的预算 β1·ΔS"——微增益配大膨胀
+    # 的候选被拒。判据位于留出集判定之后（先证明有真增益，再谈值不值）。
+    cost_rule_enabled: bool = True
+    cost_beta0: float = 0.10
+    cost_beta1: float = 44.5
+
     # ── 泄漏审查（P0-3，评测前 critic）──
     # 确定性预检（背题标记/退化 no-op）恒开；LLM 六类审查默认关——
     # 打开后每次候选审查多一次 LLM 调用，故障时诚实降级不误杀。
