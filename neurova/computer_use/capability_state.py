@@ -246,15 +246,22 @@ def _probeVision(_manager=None) -> CapabilityReading:
     model = str(active.get("model") or "")
     key = f"{active.get('provider_id')}:{model}"
     try:
-        from neurova.llm.model_capability_cache import ModelCapabilityCache
+        from neurova.llm.model_capability_cache import (
+            CAP_SUPPORTS_MULTIMODAL,
+            ModelCapabilityCache,
+        )
 
-        learned = ModelCapabilityCache.get_instance().get(key, "vision")
+        # 能力名用写入方那个常量，不写字面量 "vision"：全仓唯一写侧是
+        # `provider_manager._persist_probe_result`，它 learn 的是 CAP_SUPPORTS_MULTIMODAL。
+        # 名字不同源时这一档**永远取不到东西**——docstring 写的"实测 > 声明"就成了空话，
+        # 探测证伪过的模型也会被报成"没证据"。
+        learned = ModelCapabilityCache.get_instance().get(key, CAP_SUPPORTS_MULTIMODAL)
     except Exception:  # noqa: BLE001 - 缓存读不到就退回声明
         learned = None
     if learned is not None:
         state = CAP_AVAILABLE if learned else CAP_CONFIGURED_UNREACHABLE
         return CapabilityReading("vision", state, OWNER_AGENT,
-                                 f"实测（学习型缓存）{key} vision={learned}")
+                                 f"实测（学习型缓存）{key} supports_multimodal={learned}")
     declared = _declaredVision(active)
     if declared is True:
         return CapabilityReading("vision", CAP_AVAILABLE, OWNER_AGENT, f"provider 声明 {model} 支持图")
@@ -266,21 +273,30 @@ def _probeVision(_manager=None) -> CapabilityReading:
 
 
 def _declaredVision(active: typing.Dict[str, typing.Any]) -> typing.Optional[bool]:
-    """从 provider 的模型档案里取声明；取不到返回 None（绝不猜）。"""
+    """从 provider 的模型档案里取声明；取不到返回 None（绝不猜）。
+
+    `model_metadata[*]["capabilities"]` 的形状单源是**小写名列表**（用户配置里现场复算
+    866 条全是 list、0 条 dict），一切读取必须过 `capability_names()`。本函数初版按 dict 读
+    （`caps.get("vision")`），碰上列表就抛 AttributeError 被下面的 except 吞成"没有证据"
+    ⇒ 探测写回的声明档一条也读不到，`unknown` 从此常驻。
+    """
     try:
         from neurova.llm.provider_manager import get_provider_manager
+        from neurova.llm.providers.types import capability_names
 
         provider = get_provider_manager().get_default_provider()
         if provider is None:
             return None
         meta = (provider.model_metadata or {}).get(str(active.get("model") or "")) or {}
-        caps = meta.get("capabilities") or {}
+        # 顶层显式布尔优先：那是人对这个模型下过的判断，可以直接证伪。
         for key in ("vision", "image", "supports_vision"):
-            if key in caps:
-                return bool(caps.get(key))
             if key in meta:
                 return bool(meta.get(key))
-        modalities = meta.get("input_modalities") or caps.get("input_modalities") or []
+        names = capability_names(meta.get("capabilities") or [])
+        if "vision" in names or "image" in names:
+            return True
+        # 列表里"没有 vision"证明不了什么（清单可能只是没写全）⇒ 留给 input_modalities 或 None
+        modalities = meta.get("input_modalities") or []
         if modalities:
             return any(str(m).lower() in ("image", "vision") for m in modalities)
     except Exception:  # noqa: BLE001 - 声明面缺字段是"没有证据"，不是错误

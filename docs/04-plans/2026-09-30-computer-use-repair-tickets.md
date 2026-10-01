@@ -1776,6 +1776,10 @@ docstring 里"实测 > 声明"的证据次序今天只有声明档在生效。�
 两个名字缓存都取到 `null`、`model_metadata` 该模型条目为空 `{}`。
 登记在该文 U-05，是否当场修由 U-01 的读数决定（不在本批顺手改）。
 
+> **订正（同日 §30）**：上面那句"今天只有声明档在生效"**不成立**。现场复算后是三个命中点
+> 叠着（声明档按 dict 读、列表形状必抛；写侧用 `str(member)` 判定、回枚举成员时恒 False；
+> 实测档名字不同源），一次成功探测**打不开** T-09 的门。U-05 已在 §30 落地。
+
 ---
 
 ## 27. U-07 落地 · camofox 产出侧语义升成**真传输入库守卫**（2026-10-01）
@@ -1986,5 +1990,78 @@ initialize_结果                 = false      耗时 3.97s
 分支同走"不可达"，但读数不再是 ECONNREFUSED，换机器就可能变。固定用 `http://127.0.0.1:1`。
 另外断言"没去拉进程"时别写 `spy.calls == []`：`_request()` 每次成功请求都会打
 `record_activity()`（刷 idle 计时，合法），要写 `"ensure_started" not in spy.calls`。
+
+---
+
+## 30. Q-2 落地 · vision 轴读不到探测结论：**三个命中点**（2026-10-01，U-05 收口）
+
+### 30.1 原判断错了一半，实测把形状量出来才发现
+
+§26.6 记的那条只说对了一半："实测档读的名字与写侧不同源"确实成立，但我当时补了一句
+**"今天只有声明档在生效"——这句是错的**。现场复算：
+
+| 取证 | 读数 |
+|---|---|
+| 用户配置 `providers.json` 里 `model_metadata[*]["capabilities"]` 的形状 | **866 条全是 list，0 条 dict**（只统计类型，不打印内容） |
+| `_declaredVision` 对该字段的读法 | `caps.get("vision")` —— 列表没有 `.get` ⇒ `AttributeError` 被 except 吞成 None |
+| `str(ProviderCapability.VISION)`（(str, Enum) mixin） | `'ProviderCapability.VISION'`，`.value` 才是 `vision` |
+| `_persist_probe_result` 的判定 | `"vision" in [str(c) for c in result.capabilities]` ⇒ provider 回枚举成员时恒 False |
+
+⇒ 三处叠起来，**一次成功探测根本打不开 T-09 的门**：写侧可能把结论写没了，声明档读的是
+不存在的形状，实测档名字不同源。U-05 不是"一行换名"，是同根因的三个命中点（教义第 5 条）。
+
+### 30.2 判据（先红后绿）与一处自纠
+
+红灯原文（生产码未动时）：
+```
+FAILED ::test_visionAvailableComesFromEvidenceNotTheOldLiteral
+FAILED ::test_probeResultFromEnumProviderBecomesReadableDeclaration
+FAILED ::test_learnedYesOpensVisionAxisEvenWhenDeclarationFaceIsBlank
+FAILED ::test_measuredRejectionIsNotDowngradedToUnknown
+======================== 4 failed, 11 passed in 4.44s ========================
+```
+转绿：**15 passed**。三条新判据都**走生产写侧** `_persist_probe_result` 产出能力名与形状，
+替身不挑名字（§26.4 的教训：替身跟着实现一起错就永远测不出来）。
+
+**自纠一条**：`test_visionAvailableComesFromEvidenceNotTheOldLiteral` 初版夹具把声明面写成
+`{"capabilities": {"vision": True}}` —— dict 形状没有任何生产者会写（30.1 实测 0 条），
+等于照着一个假形状自证。改成列表形状后它当场转红，成为本批第 4 条红灯。
+
+### 30.3 那条红不是本批引入的：`test_turn_writes_elapsed_and_structure_key`
+
+四块合跑（agent+llm+models+switch）出现 mine=8 / HEAD=7 的差，唯一差项就是它，各两个样本看着像我的。
+换最小配对（该文件 + llm 块）再各取两样本，**方向反了**：
+
+```
+HEAD 样本1: 未失败   HEAD 样本2: 失败
+mine 样本1: 失败     mine 样本2: 未失败
+```
+
+⇒ 这条断言（`execution_time > 0`）两侧都随机翻，属**顺序/计时敏感**，不计入本批新增红；
+本批最后一次全域合跑（2657 passed）它也不在失败集合里。**未处置**：它的期望形态把"耗时非零"
+编码成了对时序的依赖，与本仓 `test_ci_wallclock_assertion_ledger.py` 记的那族同源，
+另开工单处理，不在这里顺手改判据。
+
+### 30.4 实操错误（记下来，别再付一次）
+
+做 30.3 的二分对照时，我把仓外还原备份 `tmp_bak2/` 在改动**尚未提交**时就删了；
+下一轮对照把两个生产文件写回 HEAD 后无从还原 —— 结果这批改动的三个命中点全部重写了一遍。
+订正：**对照实验的还原备份必须活到 commit 之后**；共享工作树里就地回退法的前提是
+"随时能原样贴回去"，删备份等于把可逆操作变成不可逆。
+
+### 30.5 LOC（生产净 **+20**，逐条去向）
+
+- `capability_state.py` **+24/−8**：实测档改用写侧常量 `CAP_SUPPORTS_MULTIMODAL`（含为什么不许写字面量）；
+  `_declaredVision` 改走 `capability_names()` 单源出口，顶层显式布尔优先、列表只证"有"不证"没有"。
+- `provider_manager.py` **+7/−3**：`_persist_probe_result` 的两处 `[str(c) ...]` 改 `capability_names()`，
+  import 移到锁外。
+- 测试 **+113/−2** 不计入：三条新判据 + 生产写侧调用 helper + 修正那条 dict 夹具。
+
+### 30.6 回归
+
+`tests/unit/computer_use` + `tests/unit/agent` + `tests/unit/llm` + `tests/unit/models`
++ 六个 `tests/integration/` 合跑：**2657 passed / 20 skipped / 5 failed / 2 errors**，
+5 条失败与 2 个 error 全在改前既有集合内（4 条 agent 域 + llm 那条 token 公式 + cost_tracking 两个 error）。
+`ruff check` 三个文件通过。
 
 
