@@ -4886,13 +4886,20 @@ class ToolExecutor:
 
         R1-2：后端自报 route 的结果自动附加 action_result 封闭契约
         （成功→confirmed，失败→精确拒绝码）；无 route 的历史路径不附加（不编造）。
+
+        三种输入形态必须走**互斥**分支：原实现是 `if dict` 后接 `if None / else`，
+        dict 没有 `to_dict()`，于是前面那一段的处理被 else 整段覆盖成
+        "浏览器返回格式未知"——产出侧的具名原因被吞、成功读数被翻成失败。
         """
         if isinstance(result, dict):
             normalized = dict(result)
-            normalized.pop("image_base64", None)
+            # 摘大对象、留痕迹：图本身走请求级旁路（绝不入历史），但感知门要能判断
+            # "这一次到底有没有图"，所以摘掉时要留下 has_image。
+            if normalized.pop("image_base64", None):
+                normalized["has_image"] = True
             if normalized.get("error"):
                 normalized["success"] = False
-        if result is None:
+        elif result is None:
             normalized = {"success": False, "error": "浏览器管理器不可用"}
         else:
             to_dict = getattr(result, "to_dict", None)
@@ -4900,7 +4907,8 @@ class ToolExecutor:
                 normalized = {"success": False, "error": "浏览器返回格式未知"}
             else:
                 normalized = dict(to_dict())
-                normalized.pop("has_screenshot", None)
+                if normalized.pop("has_screenshot", None):
+                    normalized["has_image"] = True
                 if not normalized.get("success") and not normalized.get("error"):
                     normalized["error"] = "浏览器操作失败"
         try:
