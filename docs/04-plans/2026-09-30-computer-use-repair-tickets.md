@@ -48,14 +48,14 @@
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
-| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | 拍板估 +400 / **实测净 +285**（§25.5） | 中（含合规面） | ✅ **D-7 已拍**（§19：补契约）＋ 🔒 **§25.4 新增待拍**（B/C 两族超出 D-7 覆盖） | **26 例降到 10 例**（§25）：① 配置面与 URL 选路、③ 爬虫三旋钮真生效（含 `obey_robots` fail-closed）、②④⑤ 按活契约改判/改写；**四个文件 28 例全绿并已进 CI 被测集**（原来"红只在本地出现、次要人肉解释"就此收口）。余 10 例在 §25.4，含本轮新量出的五条事实（print 脚本从未跑到断言、会真点真实桌面、`BrowserSupervisor` 是零实例化死类、`CamofoxAdapter` 不存在、复算命令会扫进工具备份） |
+| **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | 拍板估 +400 / **实测净 +299**（§25.5 + §26.5） | 中（含合规面） | ✅ **D-7 已拍**（§19 补契约；§25.4 的 B/C 两族已按建议处置） | **26 例常驻红 → 0**（§25/§26）：① 配置面与 URL 选路、③ 爬虫三旋钮真生效（`obey_robots` fail-closed）、② B/C 按活契约改判/退役 + 签名反向锁；**五个文件 40 例全绿并全部登记进 CI 被测集**（454 条），"红只在本地出现、次次要人肉解释"归零。收尾探针另抓出一个真缺陷：camofox 的**配置面谓词**与**授权门**混用，导致那次真 `/health` 探测在 playwright 在册的机器上从不发生（§26.4） |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07 → T-09` 已走完；
-**剩余**：`T-14` 的收尾 10 例（§25.4 的 B/C 两族超出 D-7 拍板覆盖，要重拍；本集最后一笔）
-→ T-12 的"真实容器自身字段形态"（唯一还卡外部条件的一条：装第三方全局包需授权）。
-T-09 虽已接线，但**验收未合**：provider/模型真收到这一跳要一次真 vision 模型的工具轮才能签掉（§24.3）。
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支) → T-07 → T-09 → T-14` 已走完；
+**剩余施工项：无**（§26.6）。仍挂着的是**两笔验收**，各自卡外部条件而非决策：
+T-09 的"模型真收到这张图"（要一次真 vision 模型的工具轮，§24.3）
+与 T-12 的"真实容器自身字段形态"（要授权装第三方全局包，§13.3）。
 
 本行历史上错过两次，都记在这里免得再犯：
 ① 原写"自主可完成的面至此全部收口"，与同段"剩余"自相矛盾，且当时 T-11 的歧义分支确实未接；
@@ -1691,3 +1691,78 @@ reset 换绑后上轮不残留、emit 在无 session 时仍进槽、缺口由具
 补证方式同 §22：把 2 个生产文件回退 `HEAD`、判据原样跑 → **15 failed**（③ 的 6 例全红、
 ① 的 4 例红、② 红），还原后 sha256 逐文件校验通过。也就是说这些判据被证明会咬，
 但顺序仍然错了，记在这里免得自我豁免。
+
+---
+
+## 26. T-14 收尾 · 26 例常驻红清零（2026-10-01，§25.4 两族按建议处置）
+
+### 26.1 读数
+
+`tests/integration/` 这族现在 **40 例全绿、0 红**（逐文件单跑实测：
+`test_browser_automation` 5、`test_browser_manager_integration` 7、
+`test_computer_use_browser_integration` 13、`test_scrapling_spider` 12、
+`test_computer_use_integration` 4）。五个文件**全部登记进 `scripts/ci/protected_tests.txt`**
+（清单 454 条）——§14 说的"红只在本地全量出现，却次次要人肉解释"这笔反复成本至此归零。
+合跑回归：`tests/unit/computer_use` + 上述五文件 **549 passed / 0 failed**。
+
+### 26.2 B 族（组件与状态面）：并进 T-07 那张表，不造第二份
+
+原 4 例要的 `components` / `dependencies` / `_supervisor` / `_camofox_adapter`，
+按 §25.3 实测分别是"虚构门面"和"零实例化死类"。采纳的处置是**改判 + 反向锁**：
+
+- `test_browserManagerGrowsNoSecondComponentTable`：`BrowserManager` 上不得长出
+  `_camofox_adapter`/`_supervisor`，`get_status()` 里不得再有 `components`/`dependencies`
+  ——组件可见性只有 `capability_state` 一张表（教义第 6 条）。
+- `test_ariaAxisMatchesTheRegisteredBackends`：aria 轴的可用性必须与在册后端表同口径。
+- `test_unconfiguredCamofoxCannotArmTheImpersonationGate` + else 分支：
+  能力面与授权门**互不打架**，且配了 URL 的机器上具名原因必须带地址（防空转）。
+- `test_managerFailureBecomesAReadingInsteadOfAnException`：原 `status_without_browser`
+  的真实意图留在能力面上——拿不到浏览器管理器要落成 `configured-unreachable` 读数，不是崩。
+- facade 侧的贯通补了一条正证 `testFacadeActuallyHandsThePathDownToBrowserManager`：
+  配置路径停在 facade 上的话，YAML 对后端行为毫无影响（只写不读）。
+
+### 26.3 C 族（旧契约与 mock 自证）：退役 + 签名反向锁
+
+`agent_id` 手工传参（T-01 撤，教义第 3 条点名）、`selector=`（D-2 相反）、
+`result["status"]`（生产是 `BrowserResult.success`）、以及 `mock 返回三项 → 断言三项`
+的自证形状，**都不会被重新实现**，所以不挂 `xfail`（xfail 的语义是"将来要绿"）。
+退役后留三条真拦得住的回潮锁：
+`test_browserActionsTakeNoAgentArgument`、`test_refAddressingStillExposesNoSelectorPath`、
+`test_facadeScreenshotTakesNoUrlOrSelector`（生产签名 `browser_screenshot()` 无入参）。
+
+### 26.4 探针顺手抓出的一个真缺陷（camofox 两个谓词混用）
+
+写 else 分支时强制配一个 camofox 走真探，结果能力面报 `not-configured`。根因：
+`capability_state._probeCamofox` 拿**授权门** `camofox_active()`（"这次动作会不会真以
+用户身份对外"，playwright 在册时恒 False）当**配置面谓词**（"camofox 启没启用"）用。
+后果不是读数难看，是**那次真 `/health` 探测在这类机器上从来不会发生**——
+正是 §13.3 量的那个现场形态（`.env` 设了 URL、`:9377` 超时、playwright 恰在选路首位）。
+
+修法：新增公共读侧 `BrowserManager.camofoxConfigured()`，能力轴改问它；
+`camofox_active()` 保持授权门语义不变（两者定义与不合并的理由写在方法上）。
+判据 `test_configuredCamofoxIsProbedEvenWhenPlaywrightOutranksIt` 钉住这条分界。
+
+**同族消费者扫荡**：`test_capability_is_a_tri_state.py` 原先替身的是 `camofox_active`——
+替身跟着实现一起错，所以它永远测不出这种混用；两处改到 `camofoxConfigured`，
+并在 docstring 里写明为什么必须替身配置面谓词。
+
+取证（新判据不是绿着编的）：只把 `capability_state.py` 回退 HEAD 再跑该条 →
+```
+AssertionError: {'state': 'not-configured', ...}
+assert 'not-configured' == 'configured-unreachable'
+FAILED ...::test_configuredCamofoxIsProbedEvenWhenPlaywrightOutranksIt
+```
+还原后 sha256 校验 OK。
+
+### 26.5 LOC
+
+生产净 **+14**：`browser_manager.py` +11（`camofoxConfigured()` 及其"为什么不与授权门合并"的
+理由注释）、`capability_state.py` +3/−3（换谓词 + 未配置文案补 httpx 一档）。
+测试码为 `test_computer_use_browser_integration.py` 整文件重写（13 例真判据替换 15 例
+其中 10 例断言虚构门面）+ 两个既有判据文件的同批跟改。
+
+### 26.6 本工单集状态
+
+**已全部走完**：T-01…T-16 无待施工项。两项**验收未合**仍挂在台账上，且各自卡外部条件：
+T-09 的"模型真收到这张图"（要真 vision 模型的工具轮）、T-12 的"真实容器自身字段形态"
+（要授权装第三方全局包）。

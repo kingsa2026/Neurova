@@ -48,11 +48,16 @@ def test_everyAxisGivesAFiniteStateWithOwnerAndReason():
 
 
 def test_camofoxConfiguredButUnreachableIsNotReportedAsEnabled(monkeypatch):
-    """判别前提：只看配置的旧口径会把"连不上"读成"已启用"。"""
+    """判别前提：只看配置的旧口径会把"连不上"读成"已启用"。
+
+    这里替身的是 `camofoxConfigured`（配置面谓词）而不是 `camofox_active`（授权门）：
+    探针一旦读错谓词，替身跟着错就永远测不出来——同文件那条 integration 判据
+    （playwright 在册 + 配了 camofox）才抓得住这种混用。
+    """
     from neurova.computer_use.browser_manager import BrowserManager
 
     mgr = BrowserManager(config={})
-    monkeypatch.setattr(mgr, "camofox_active", lambda: True)
+    monkeypatch.setattr(mgr, "camofoxConfigured", lambda: True)
     monkeypatch.setattr(mgr, "camofoxBaseUrl", lambda: "http://127.0.0.1:1")
     monkeypatch.setattr(cs, "_browserManager", lambda: mgr)
 
@@ -68,7 +73,7 @@ def test_camofoxNotConfiguredIsADifferentAnswerThanUnreachable(monkeypatch):
     from neurova.computer_use.browser_manager import BrowserManager
 
     mgr = BrowserManager(config={})
-    monkeypatch.setattr(mgr, "camofox_active", lambda: False)
+    monkeypatch.setattr(mgr, "camofoxConfigured", lambda: False)
     monkeypatch.setattr(cs, "_browserManager", lambda: mgr)
     r = cs.reading("camofox", refresh=True)
     assert r.state == cs.CAP_NOT_CONFIGURED, r.asDict()
