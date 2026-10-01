@@ -1805,6 +1805,7 @@ export default {
     browser: 'Browser',
     smartClick: 'Intelligenter Klick',
     smartType: 'Intelligente Eingabe',
+    semanticRef: 'Snapshot-Ref (nach Ambivalenz z. B. e2)',
     up: 'Nach oben',
     down: 'Nach unten',
     left: 'Links',

@@ -52,14 +52,19 @@ export function extractPage(agentId: string) {
   return api.post<ApiResponse<unknown>>(`${BASE}/browser/extract`, { agent_id: agentId })
 }
 
-/** Semantic click: resolve the target against current snapshot facts on the server. */
-export function smartClick(target: string) {
-  return api.post<ApiResponse<{ success: boolean; matched: { role: string; name: string } }>>(`${BASE}/smart-click`, { target })
+/** Semantic click: resolve the target against current snapshot facts on the server.
+ *  `ref` is the second addressing entry: after a 409 the response lists the ambiguous
+ *  candidates with their snapshot-bound ids (e1/e2...), and resending with one of them
+ *  clicks exactly that element. */
+export function smartClick(target: string, ref = '') {
+  return api.post<ApiResponse<{ success: boolean; matched: { role?: string; name?: string; ref?: string } }>>(
+    `${BASE}/smart-click`, { target, ref })
 }
 
-/** Semantic type: same resolution as smartClick, narrowed to editable fields on the server. */
-export function smartType(target: string, text: string) {
-  return api.post<ApiResponse<{ success: boolean; matched: { role: string; name: string } }>>(`${BASE}/smart-type`, { target, text })
+/** Semantic type: same resolution and same ref escape hatch as smartClick. */
+export function smartType(target: string, text: string, ref = '') {
+  return api.post<ApiResponse<{ success: boolean; matched: { role?: string; name?: string; ref?: string } }>>(
+    `${BASE}/smart-type`, { target, text, ref })
 }
 
 /** Execute a shell command on the agent's machine. */

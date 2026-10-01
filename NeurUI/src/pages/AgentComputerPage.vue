@@ -70,6 +70,9 @@
               <a-input v-model:value="semanticText" :placeholder="t('computer.smartType')" @press-enter="smartType" />
               <GlassButton variant="ghost" size="sm" @click="smartType">{{ t('computer.smartType') }}</GlassButton>
             </div>
+            <div class="action-grid-row">
+              <a-input v-model:value="semanticRef" :placeholder="t('computer.semanticRef')" />
+            </div>
           </div>
         </GlassCard>
 
@@ -126,7 +129,12 @@ const browserUrl = ref('')
 const shellCommand = ref('')
 const semanticTarget = ref('')
 const semanticText = ref('')
+const semanticRef = ref('')
 const shellOutput = ref('')
+
+/** 服务端已把"为什么没成"逐条写进 detail（409 带候选编号、502 带产出侧 marker），
+ *  前端再抹成一句通用文案就等于把那半条链掐了。 */
+const failWith = (e: any) => message.error(e?.response?.data?.detail || t('common.error'))
 
 const takeScreenshot = async () => {
   screenshotLoading.value = true
@@ -134,8 +142,8 @@ const takeScreenshot = async () => {
     const res: any = await screenshot(agentId)
     const data = res?.data ?? res ?? {}
     screenshotUrl.value = data.url || data.image || (data.base64 ? `data:image/png;base64,${data.base64}` : '')
-  } catch {
-    message.error(t('common.error'))
+  } catch (e) {
+    failWith(e)
   } finally {
     screenshotLoading.value = false
   }
@@ -156,7 +164,7 @@ const doClick = async () => {
     await click(agentId, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const doType = async () => {
@@ -165,7 +173,7 @@ const doType = async () => {
     await computerType(agentId, typeText.value)
     message.success(t('common.success'))
     typeText.value = ''
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const doScroll = async () => {
@@ -173,7 +181,7 @@ const doScroll = async () => {
     await scroll(agentId, scrollDir.value, scrollAmount.value)
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const browserNavigate = async () => {
@@ -182,7 +190,7 @@ const browserNavigate = async () => {
     await navigate(agentId, browserUrl.value)
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const browserScreenshot = async () => { await takeScreenshot() }
@@ -195,26 +203,30 @@ const browserExtract = async () => {
   try {
     const res: any = await extractPage(agentId)
     message.info(JSON.stringify(res?.data ?? res))
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const smartClick = async () => {
-  if (!semanticTarget.value.trim()) return
+  // 编号与目标二选一：409 之后照清单里的 [eN] 填编号重发，就是"点我选的那一个"
+  if (!semanticTarget.value.trim() && !semanticRef.value.trim()) return
   try {
-    await smartClickApi(semanticTarget.value.trim())
+    await smartClickApi(semanticTarget.value.trim(), semanticRef.value.trim())
+    semanticRef.value = ''  // 编号绑本次快照，动作一成就作废——留着只会撞上 ref-not-found
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const smartType = async () => {
   // 目标沿用上一步的语义输入框：click 与 type 解析的是同一份快照事实，不该各填一遍
-  if (!semanticTarget.value.trim() || !semanticText.value) return
+  if (!semanticText.value) return
+  if (!semanticTarget.value.trim() && !semanticRef.value.trim()) return
   try {
-    await smartTypeApi(semanticTarget.value.trim(), semanticText.value)
+    await smartTypeApi(semanticTarget.value.trim(), semanticText.value, semanticRef.value.trim())
+    semanticRef.value = ''
     message.success(t('common.success'))
     await takeScreenshot()
-  } catch { message.error(t('common.error')) }
+  } catch (e) { failWith(e) }
 }
 
 const executeShell = async () => {

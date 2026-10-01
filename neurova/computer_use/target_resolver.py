@@ -30,10 +30,16 @@ _ROLE_WORDS: typing.Dict[str, str] = {
 
 @dataclass(frozen=True)
 class Candidate:
-    """一个可交互事实：来自快照的 role + accessible name。"""
+    """一个可交互事实：来自快照的 role + accessible name +（有编号时）本次快照的 ref。
+
+    `ref` 是歧义出路的一半：两个同名同 role 的候选光靠 role+name 永远动不了手，
+    只有带着产出它们的那次快照的编号，调用方选完才真点得到（T-08/D-1）。
+    未编号的快照（老形态、无 ref 能力后端）留 None——文案据此决定要不要提 ref。
+    """
 
     role: str
     name: str
+    ref: typing.Optional[str] = None
 
 
 @dataclass

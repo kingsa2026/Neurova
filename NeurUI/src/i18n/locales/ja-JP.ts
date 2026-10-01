@@ -1805,6 +1805,7 @@ export default {
     browser: 'ブラウザ',
     smartClick: 'スマートクリック',
     smartType: 'スマート入力',
+    semanticRef: 'スナップショット番号（曖昧時は e2 を入力）',
     up: '上',
     down: '下',
     left: '左',

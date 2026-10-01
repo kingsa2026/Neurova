@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from neurova.api.auth import get_current_user
 
@@ -93,14 +93,28 @@ class FileWriteRequest(BaseModel):
 
 
 class SmartClickRequest(BaseModel):
-    target: str  # e.g. "登录按钮"
+    target: str = ""  # e.g. "登录按钮"
+    ref: typing.Optional[str] = None  # 歧义后照 409 里的编号重发时带；与 target 二选一
     screenshot: typing.Optional[str] = None
+
+    @model_validator(mode="after")
+    def _requireOneAddressing(self) -> "SmartClickRequest":
+        if not (self.target or "").strip() and not (self.ref or "").strip():
+            raise ValueError("target 与 ref 至少给一个：前者按语义解析、后者按本次快照的编号")
+        return self
 
 
 class SmartTypeRequest(BaseModel):
-    target: str  # e.g. "用户名输入框"
+    target: str = ""  # e.g. "用户名输入框"
     text: str
+    ref: typing.Optional[str] = None  # 同上：歧义后照编号重发
     screenshot: typing.Optional[str] = None
+
+    @model_validator(mode="after")
+    def _requireOneAddressing(self) -> "SmartTypeRequest":
+        if not (self.target or "").strip() and not (self.ref or "").strip():
+            raise ValueError("target 与 ref 至少给一个：前者按语义解析、后者按本次快照的编号")
+        return self
 
 
 class BrowserNavigateRequest(BaseModel):
@@ -477,19 +491,71 @@ def _refuseUnimplemented(feature: str, previousLie: str) -> typing.NoReturn:
     )
 
 
+def _ambiguityDetail(*, word: str, target: str, candidates, refTool: str, plainTool: str) -> str:
+    """歧义文案的单源装配：候选带编号时给出可用的出路，没编号时不许空头承诺。
+
+    D-6 第一片只回 `role「name」`——同名同 role 的两个候选照这份清单再发一次
+    `target`，得到的还是同一个 409，等于"列得出、动不了"。T-08 之后候选带得上本次
+    快照的 ref，歧义才真有出口：选一个把编号带回来。
+    """
+    listing = "、".join(
+        f"{c.role}「{c.name}」" + (f"[{c.ref}]" if getattr(c, "ref", None) else "")
+        for c in candidates[:8]
+    )
+    head = (
+        f"目标「{target}」在当前快照里命中 {len(candidates)} 个{word}元素"
+        f"（{listing}），不代为挑选——"
+    )
+    if candidates and all(getattr(c, "ref", None) for c in candidates):
+        return head + (
+            f'选一个把它的编号放进 ref 字段重发本端点（例如 ref="{candidates[-1].ref}"，'
+            f"示例刻意取末位候选，免得读数偏向第一个）；模型侧改用 {refTool} 传同一个编号"
+        )
+    return head + (
+        "请给更具体的目标（带角色说法或唯一名称），"
+        f"或改用 browser_dom_snapshot + {plainTool} 按事实定位"
+    )
+
+
+def _refActionResult(result, *, verb: str, ref: str) -> dict:
+    """按编号动作的响应装配：失败必须原样带出产出侧的具名原因，不许改写成一坨。"""
+    if not getattr(result, "success", False):
+        raise HTTPException(
+            status_code=502,
+            detail=f"按编号 ref={ref} {verb}未执行：{getattr(result, 'error', '未知原因')}",
+        )
+    data = getattr(result, "data", None)
+    matched = {"ref": ref}
+    if isinstance(data, dict):
+        for key in ("role", "name"):
+            if data.get(key) is not None:
+                matched[key] = data[key]
+    return {
+        "success": True,
+        "matched": matched,
+        "matchedBy": "ref",
+        "generation": getattr(result, "generation", None),
+    }
+
+
 @router.post("/smart-click")
 async def smart_click(body: SmartClickRequest):
     """智能点击：把语义目标解析到**当前快照事实**，唯一命中才动作。
 
-    不猜 CSS 选择器、不跨快照认句柄（那是 T-08 的 ref 面）。歧义与未命中是两种
-    可分诊的事实，各自一个码——不再把"试过但没找到"和"没实现"混成同一形态。
+    两条寻址入口：`target` 走语义解析（唯一命中才动），`ref` 走 T-08 的编号
+    （歧义后照 409 给出的编号重发）。编号不配一次快照——`generation=None`，
+    页面若已变，编号表随之作废，由产出侧回 `ref-not-found`/代次过期。
     """
-    _log_action("smart_click", {"target": body.target})
+    _log_action("smart_click", {"target": body.target, "ref": body.ref})
     from neurova.computer_use import get_computer_use_manager
     from neurova.computer_use.browser_manager import snapshotActionableCandidates
     from neurova.computer_use.target_resolver import resolveTarget
 
     manager = get_computer_use_manager()
+    ref = (body.ref or "").strip()
+    if ref:
+        return _refActionResult(
+            await manager.browser_click_ref(ref), verb="点击", ref=ref)
     snap = await manager.browser_dom_snapshot()
     if not getattr(snap, "success", False):
         raise HTTPException(
@@ -499,14 +565,11 @@ async def smart_click(body: SmartClickRequest):
     tree = snap.data if isinstance(snap.data, str) else (snap.data or {}).get("snapshot", "")
     resolution = resolveTarget(body.target, snapshotActionableCandidates(tree))
     if resolution.state == "ambiguous":
-        listing = "、".join(f"{c.role}「{c.name}」" for c in resolution.candidates[:8])
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"目标「{body.target}」在当前快照里命中 {len(resolution.candidates)} 个可交互元素"
-                f"（{listing}），不代为挑选——请给更具体的目标（带角色说法或唯一名称），"
-                f"或改用 browser_dom_snapshot + browser_click_role 按事实定位"
-            ),
+            detail=_ambiguityDetail(
+                word="可交互", target=body.target, candidates=resolution.candidates,
+                refTool="browser_click_ref", plainTool="browser_click_role"),
         )
     if resolution.state != "resolved":
         raise HTTPException(
@@ -532,16 +595,20 @@ async def smart_click(body: SmartClickRequest):
 async def smart_type(body: SmartTypeRequest):
     """智能输入：把语义目标解析到**当前快照事实里的可输入元素**，唯一命中才写入。
 
-    与 `smart-click` 同一套码位与同一份事实来源（§19 附带项）：不猜 CSS 选择器、
-    不跨快照认句柄。候选面收窄到可输入 role，是为了让"选错了工具"如实表现为
+    与 `smart-click` 同一套码位、同一份事实来源、同一条 ref 出路（§19 附带项 + §20）。
+    候选面收窄到可输入 role，是为了让"选错了工具"如实表现为
     404（这个页面上没有可输入的目标），而不是 fill 抛错后的 502。
     """
-    _log_action("smart_type", {"target": body.target, "text_len": len(body.text)})
+    _log_action("smart_type", {"target": body.target, "text_len": len(body.text), "ref": body.ref})
     from neurova.computer_use import get_computer_use_manager
     from neurova.computer_use.browser_manager import snapshotFillableCandidates
     from neurova.computer_use.target_resolver import resolveTarget
 
     manager = get_computer_use_manager()
+    ref = (body.ref or "").strip()
+    if ref:
+        return _refActionResult(
+            await manager.browser_fill_ref(ref, body.text), verb="输入", ref=ref)
     snap = await manager.browser_dom_snapshot()
     if not getattr(snap, "success", False):
         raise HTTPException(
@@ -551,14 +618,11 @@ async def smart_type(body: SmartTypeRequest):
     tree = snap.data if isinstance(snap.data, str) else (snap.data or {}).get("snapshot", "")
     resolution = resolveTarget(body.target, snapshotFillableCandidates(tree))
     if resolution.state == "ambiguous":
-        listing = "、".join(f"{c.role}「{c.name}」" for c in resolution.candidates[:8])
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"目标「{body.target}」在当前快照里命中 {len(resolution.candidates)} 个可输入元素"
-                f"（{listing}），不代为挑选——请给更具体的目标（带角色说法或唯一名称），"
-                "或改用 browser_dom_snapshot + browser_fill_role 按事实定位"
-            ),
+            detail=_ambiguityDetail(
+                word="可输入", target=body.target, candidates=resolution.candidates,
+                refTool="browser_fill_ref", plainTool="browser_fill_role"),
         )
     if resolution.state != "resolved":
         raise HTTPException(

@@ -1805,6 +1805,7 @@ export default {
     browser: 'Browser',
     smartClick: 'Clic intelligente',
     smartType: 'Digitazione intelligente',
+    semanticRef: 'Ref dello snapshot (es. e2 dopo ambiguità)',
     up: 'Su',
     down: 'Giù',
     left: 'Sinistra',

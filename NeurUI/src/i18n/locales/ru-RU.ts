@@ -1805,6 +1805,7 @@ export default {
     browser: 'Браузер',
     smartClick: 'Умный клик',
     smartType: 'Умный ввод',
+    semanticRef: 'Номер снимка (напр. e2 при неоднозначности)',
     up: 'Вверх',
     down: 'Вниз',
     left: 'Влево',
