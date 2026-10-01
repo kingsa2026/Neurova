@@ -2303,4 +2303,21 @@ U-01 的通道由此打通，剩下的只是配额节奏；U-02 的工具轮签�
 这一步要把活跃模型切到 `sensetime:kimi-k3`（写用户配置、跑完切回），
 再走真截图 → 真具名缺口 → 装配 → 真服务商，才算 §24.3 那一跳闭合。
 
+### 33.6 U-02 实跑记录（2026-10-01：闸门行为与配额边界都对，卡在 TPM/RPM）
+
+按上面的路线真跑两次，跑完把配置**还原**（复核读数：活跃模型仍是
+`modelscope / moonshotai/Kimi-K2.6:DashScope`，`默认服务商` 同原值）：
+
+| 步骤 | 实际发生 |
+|---|---|
+| 只调 `activate_model("sensetime","kimi-k3")` | 返回 True，但 `get_active_model()` 不变——它读的是**全局默认服务商**的 `default_model`。第一次因此**闸门没开**，`image_parts=0`。这是真实行为，不是失败：读数不 available 就不该给图 |
+| 补 `set_default_provider("sensetime")` 后 | 能力轴正确改口：`reason = "kimi-k3 既无实测也无声明——需要跑一次多模态探测才能定"`（不再拿旧模型的名字说话） |
+| 生产探测 + 写回，连试 3 次（间隔 12s） | **三次全回 `HTTP 429: inference exceeds tpm/rpm limit`** ⇒ 无结论 ⇒ 闸门维持关闭，U-02 未合 |
+| 429 之后复核 `sensetime:kimi-k3` 元数据 | `capabilities=['text']`、`probe_source=None`、无 `probed_at` —— **§31 的修法在真限流下当场生效**：限频没被写成"实测不支持图"，也不会把后台探测永久短路 |
+| 真浏览器侧的中间产物（第一跑） | navigate success / generation=2、真截图 base64 长 19616、真造出过期代次 → 产出侧具名失败 `target generation 过期（当前 2，传入 101）`、缺口集合 `['browser_dom_snapshot']` —— 生产者与缺口面都在真链路上成立 |
+
+⇒ U-02 的**唯一 remaining 障碍是那个账号的推理配额**（§33.3 已有一次 `supported=True /
+probe_answer="red"` 的成功，说明图与链路本身通了）。等配额窗口再跑同一条脚本即可，
+不需要改代码。探针即用即删，未落仓；`/e` 下临时文件已清。
+
 
