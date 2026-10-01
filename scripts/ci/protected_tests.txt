@@ -1451,3 +1451,5 @@ tests/unit/agent/test_perception_image_anthropic_parity.py
 tests/unit/llm/test_image_probe_fixture_is_real_png.py
 # §34：工具耗时的量具必须是单调钟（execution_time 的 0.0 是"量不出来"不是"快"）。逐文件单跑 3 passed
 tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py
+# §37：413 闸门必须兑现——旧实现单趟编码实测出 3,169,770 B / 3,205,312 B 仍超 3MB。逐文件单跑 4 passed
+tests/unit/test_image_payload_gate_is_honored.py

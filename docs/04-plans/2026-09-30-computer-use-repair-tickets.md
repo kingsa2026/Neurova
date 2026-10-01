@@ -2448,3 +2448,152 @@ probe_answer="red"` 的成功，说明图与链路本身通了）。等配额窗
 不需要改代码。探针即用即删，未落仓；`/e` 下临时文件已清。
 
 
+## 36. U-03 串台反向锁 ✅ —— 同 session 三轮：无图轮拿不到只进过像素的事实（2026-10-01）
+
+§35 收了「图进得去」，spec 的 U-03 要收的是反面：**图没进去的时候，历史里不许留图**。
+这正是 2026-09-09 图片串台事故的形状——base64 或「请结合图片回答」那条指令被写进跨轮的
+`messages`，后续纯文本轮就拿着一条无图可依的指令继续走。
+
+### 36.1 三轮同 session 的设计（第三轮不是多余）
+
+只有反向锁会有假阴：模型在无图轮答不出第二个事实，可能因为**它从来没读到过**，
+而不是因为图没进历史。所以固定成 有图轮 → 无图轮 → 正对照轮，且第三轮问的就是第二轮答不出的那个事实：
+
+| 轮 | 闸门条件 | 请求侧读数 | 模型答复 | 判据 |
+|---|---|---|---|---|
+| ① 有图 | 真缺口 `browser_dom_snapshot` + 真截图 | `image_parts=1`、`given=1`、原始 `messages` 未变 | `5CGBQEA`＝画布上方黑色大字（命中） | 图确实进了这一次请求 |
+| ② 无图 | 轮首 `reset`，无缺口、无截图 | `image_parts=0`、`given=0`、**轮①那段 base64 不在请求里**、`PERCEPTION_INSTRUCTION_TEXT` 既不在请求也不在历史 | 「看不到」 | 反向锁本体 |
+| ③ 正对照 | 重新造真缺口 + 重新真截图 | `image_parts=1`、`given=1` | `T27CE7C`＝画布右下角紫色小字（命中） | ②的「不知道」是**信息真的没留**，不是读不到 |
+
+DOM 里没有这两个 token：探针字段 `dom_has_token_a=false`（轮①那个 token 在快照 JSON 全文零命中），
+第二个 token 与它同由 `<canvas>` 画出、HTML 里没有对应文本。所以②的失败不可能来自「文本事实里也没有」。
+
+第二口径复核（不靠装配层的自我报告）：服务商回报的 `usage.prompt_tokens` ——
+轮① 1360 / 轮② 328 / 轮③ 1729。无图轮掉到纯文本量级，与 `image_parts=0` 互证。
+
+### 36.2 一条必须写清的边界
+
+轮①模型把 `5CGBQEA` **说出口了**，那句话作为文本留在历史里——这是对话记忆，不是图片残留：
+base64 与指令文案都没续进轮②，而轮②问的是它从未说出、只存在于像素的第二个 token。
+判据因此取「从未被说出的像素事实」，而不是「任何图里的内容」；后者会把正常的多轮记忆误判成串台。
+
+⇒ **U-03 闭合，`imageRef` 间接引用不进本仓**（spec §7 那条「只有真复现串台才启用」的启用条件未被触发）。
+探针即用即删（`C:/Users/xccoo/neurova_probe/` 下），跑完活跃模型已复核回
+`modelscope / moonshotai/Kimi-K2.6:DashScope`。净 LOC：生产 0、测试 0。
+
+## 37. U-04 · 413 防线量到底：闸门**没兑现**，已在单源根修（2026-10-01）
+
+U-04 的判据是「用一张超过降采样闸门的截图触发装配，请求成功返回而非被拒 413」。
+先量了两条真截图生产者在这台机器上到底能长到多大，结果这条判据把闸门自身量出了洞。
+
+### 37.1 先量 ceiling（零服务商往返）
+
+| 生产者 | 真字节 | 闸门 3,145,728 B | 结论 |
+|---|---|---|---|
+| `browser_screenshot`（headless 默认视口 1280×720，逐像素噪声＝最坏熵） | 2,774,142 | 88.2% | **够不到闸门** |
+| `browser_screenshot`（普通页面） | 16,652 | 0.5% | 差两个数量级 |
+| `computer_screenshot`（真机整屏 1920×1080，两次实测） | 397,737 / 234,712 | 12.6% / 7.5% | 桌面内容压得动 |
+
+`PlaywrightBackend.initialize()` 建 context 时不设 `viewport`（生产用默认 1280×720），
+所以感知这条口的截图字节上限是**视口熵**决定的，最长边不过 1280——闸门 3MB 在它上面
+几乎不会触发（余量仅 371,586 B）。这既是「防线在此口空转」的实证，也意味着
+闸门真正服务的对象是**更大的图**（附件上传的照片、更高分辨率的屏）。
+
+### 37.2 拿真超闸门载荷走完生产链
+
+载荷：PIL 现造的 RGBA 2048×2048 逐像素噪声 PNG（14,252,443 B，可解码、带 alpha），
+经**生产生产者接缝** `ToolExecutor._emit_computer_event(..., screenshot_base64=…)` 入感知槽，
+缺口由真 `browser_dom_snapshot` 的过期代次造出（`target generation 过期（当前 2，传入 101）`），
+装配走生产的 `openai_loop._attachPerceptionImage`，服务商是 `sensetime:kimi-k3`：
+
+```
+image_parts=1  given=1  params_untouched=True
+出网字节 1,815,819（≤ 闸门）  mime=image/png（alpha 保住）  b64=2,421,092  缩到 12.74%
+provider_success=True（无 413）  latency=19.49s  prompt_tokens=1122
+模型答复 = "ZDPZRUT" —— 与图里那串随机 token 逐字相同（命中）
+```
+
+同一脚本在**改之前**还有一跑（载荷换成 RGB 2600×1700 噪声，11,100,864 B）：旧实现出
+JPEG 1,409,385 B、服务商受理、模型读出 `P3TZLB9`。**旧实现不是全废**——长边**超过**尺寸帽
+时那一趟缩放够用；洞出在另外两条形状上（长边恰好等于尺寸帽、以及带 alpha），见 §37.3。
+
+### 37.3 附测把 docstring 证伪了：单趟编码进不了限
+
+`normalize_image_for_llm` 的注释写着「降采样 + 重编码，**直到 base64 载荷进限**」。
+本地做最坏情况（同上噪声图，纯本地、无服务商）：
+
+| 输入 | 旧实现输出 | 闸门 | |
+|---|---|---|---|
+| RGB 2048×2048 噪声 PNG 13,276,976 B | **JPEG 3,169,770 B** | 3,145,728 | **超 24,042 B** |
+| RGBA 1000×800 噪声 PNG（原始即超闸门） | **PNG 3,205,312 B** | 3,145,728 | **超 59,584 B** |
+
+红灯原文（`tests/unit/test_image_payload_gate_is_honored.py`，改前）：
+
+```
+E   AssertionError: 归一化后仍超闸门：3169770 B > 3145728 B        ← JPEG 分支
+E   AssertionError: 归一化后仍超闸门：3205312 B > 3145728 B        ← 带 alpha 的 PNG 分支
+2 failed, 2 passed in 2.47s
+```
+
+根因不是阈值选错，而是**实现只做了一趟**：长边恰好等于尺寸帽时 `scale < 1` 不成立，
+尺寸没动；而高熵内容在 JPEG q85 / PNG-optimize 下压不动。闸门要的是结果，不是「努力过」——
+超限的图照样发出去，413 照旧打死整轮。这条缺陷之所以活着，是因为**这道 2026-09-09 之后立的
+防线此前一条直接判据都没有**（只有两处消费方各自间接路过它）。
+
+### 37.4 根修在单源，不在装配层
+
+按 spec U-04 的否证条件处置：「属闸门口径缺陷，改闸门单源不改装配」。`attachment_parser.py` 里
+把一次编码换成**有界尺寸阶梯**（`_PAYLOAD_SHRINK_STEP=0.75`、`_PAYLOAD_MIN_LONG_EDGE=256`、
+`_PAYLOAD_MAX_ROUNDS=10`），逐档缩到进限为止；带 alpha 的图**不靠抹掉透明通道换体积**
+（抹了就不是用户看到的那张图），透明图继续走 PNG 分支、由阶梯解决体积。触底仍不进限时交
+最小的一版而非超限的原件。
+
+同根因扫荡（教义第 5 条）：`normalize_image_for_llm` 全仓只有两个消费方——附件注入
+`chat_pipeline.py:1559` 与感知截图 `perception_gate.py:86`，一处修两处盖；grep 无第二份
+「quality=85 / 尺寸帽」的平行降采样实现，不新造口径（教义第 6 条）。
+
+### 37.5 实测读数与 LOC
+
+- 红灯 → 绿灯：`2 failed, 2 passed` → `4 passed`（逐文件两次复跑 2.25s / 2.24s 稳定）。
+- 消费方面无回归：`test_image_payload_gate_is_honored + test_attachment_parser +
+  test_chat_attachment_inject + test_attachment_handle_injection +
+  test_perception_image_enters_request_once + test_perception_image_anthropic_parity`
+  合跑 **68 passed**。
+- 修后再走一次真链（§37.2 那组读数就是修后的）：14,252,443 → 1,815,819，服务商受理且模型读出 token。
+- **净 LOC：生产 +35**（`attachment_parser.py` +51/−16）。去向逐条：① 尺寸阶梯循环与其
+  有界常量 +18；② `_resizeToLongEdge()`（把原先内联的等比缩抽取成可复用一步）+9；
+  ③ `_encodeWithinPayload()`（两条分支编码收口 + 失败回 None 交同一降级口径）+12；
+  ④ 三条「为什么一趟不够」的实测说明 +6；⑤ 删掉原内联的单趟缩放/分支 −10。测试 +104（不计入）。
+- 新判据已 `git add` 后同批登记 `scripts/ci/protected_tests.txt`（有效条目 364 → 365）。
+- CI 家族读数：`tests/unit/ci/ + test_dev_path_and_runtime_dep_guards +
+  test_ci_wallclock_assertion_ledger` = **309 passed / 6 failed**，6 条全在
+  `test_npc_script_interpreter_reachability.py`——本机 node v24 在剥离 env 下自身断言失败
+  （`ncrypto::CSPRNG(nullptr, 0)` @ node.cc:1224，退出码 134），本工单集 §18 早已登记为预存红，
+  与本批无因果（那条链跑的是 `scripts/ci/npc_turn_handoff_*`，不 import 图像路径）。
+
+### 37.6 一次被我自己撞出来的夹具坑（记下来）
+
+§37.2 的第一跑用 `ImageDraw.text` 的**默认位图字体**画 token：降采样到 864 后字高只剩几个像素，
+模型答 `causae`（`hit=False`）。那不是闸门缺陷，是夹具不自证——判据要求「图里的事实读得出」，
+就得让它在尺寸帽下仍可读。改用 260px 矢量字体重跑才拿到 §37.2 的命中。**否证方向搞反的跑法
+不进判据，只进这一节。**
+
+### 37.7 跑族时顺手撞见的两条预存红（都不是本批引入，已 A/B 排除）
+
+- `tests/unit/security/test_tool_circuit_breaker.py` **收集期 ImportError**：
+  `cannot import name 'reset_pipeline_observers' from 'neurova.agent.tool_pipeline'`。
+  `git show HEAD:neurova/agent/tool_pipeline.py` 里这个名字**只出现在第 15 行的文档字符串**，
+  没有定义；该文件也不在 `scripts/ci/protected_tests.txt` 里（`grep` 零命中），所以 CI 没被打断，
+  但这条判据在 HEAD 上从未跑过。属另一条链（工具熔断观测面），登记不处置。
+- `tests/unit/test_neuron_api_registration.py::test_neuron_in_endpoint_modules`：单独跑同红
+  （`assert "neurova.api.endpoints.neuron" in source` 那条），与本批零文件重叠
+  （本批只动 `attachment_parser` / 新判据 / CI 清单 / 两份文档）。
+
+合跑读数：`tests/unit -k "docs or ticket or ledger or registration"` =
+**721 passed / 1 failed / 1 collection error**，两条即上列，均预存。
+
+### 37.8 工单集状态
+
+T-09 的 spec 收尾项 U-01…U-06 至此**全部有实测结论**：U-01/U-02（§35）、U-03（§36）、
+U-04（§37）、U-05/U-06（§30/§32）。附带产出：一条真缺陷（413 闸门未兑现）已根修并入库为判据。
+仍开着的：T-18 建议（采样参数值域收敛）、§34.5 那条他人夹具红。
