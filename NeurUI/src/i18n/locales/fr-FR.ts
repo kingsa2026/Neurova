@@ -1805,6 +1805,7 @@ export default {
     browser: 'Navigateur',
     smartClick: 'Clic intelligent',
     smartType: 'Saisie intelligente',
+    semanticRef: 'Réf. instantané (ex. e2 après ambiguïté)',
     up: 'Haut',
     down: 'Bas',
     left: 'Gauche',

@@ -45,18 +45,19 @@
 | **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | 预估 +200 / **实测净 +380**（差额去向 §20.4） | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | **本轮落地**（§20）：判据 16 例；活体 ✅（§20.3 真 Chromium——同名两按钮 `e1`→FIRST、`e2`→SECOND，`click_role` 在同名页**实测**撞 strict mode 硬失败）；顺带吃掉两处同根因缺陷（§20.2：权限面 fail-open、序列化回写事实源） |
 | **T-09** | 截图从不进模型上下文 | — | +120 | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | 未开工 |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
-| **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click 与 type 均已接通**：type 判据 7 例 + 活体（真 Chromium 真 fill，DOM 回读到写入值；歧义 409 一字未写；按钮目标 404 而非 502；关 tab 502 带具名 marker）。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
+| **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 | **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | −260 ～ +400（取决于处置） | 中（含合规面） | ✅ **D-7 已拍**（§19：补契约） | 未处置；**全集已量出并复算**（§14，含 D-5 复核补的 1 例）。CI 不跑这族文件，红只在本地全量出现，却次次要人肉解释 |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
 | **T-16** | 沙箱后端漏实现 `enforced()` ⇒ Windows 上代码执行工具直接崩，Linux CI 看不见 | T-15 | +28（含判据） | 低 | 无 | **本轮落地**（§16）：`AppContainerSandbox`、`RestrictedTokenSandbox` 两个后端补齐契约（扫荡时抓到第二个，只修被点名的那个会留崩链）；接口完整性判据 4 例（自动发现后端 + 正对照）；`resolveBackend` 的 reason 文案同批改回"跟着值走"。沙箱块 **9 failed → 56 passed**，真机活体 `exit_code=0 / backend=appcontainer / enforced=true` |
 
-**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10/T-11(部分) → T-13 → T-08` 已走完；
-**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ 回补 T-11 的歧义分支
-（ref 已可用，缺的是把候选的 ref 塞进 409 载荷并让前端/模型据此重发）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
+**批次实况**：`T-02 → T-01 → T-03 → T-04 → T-05 → T-06 → T-06b → T-10 → T-13 → T-08 → T-11(含歧义分支)` 已走完；
+**剩余**：T-12 的"真实容器自身字段形态"（需授权装第三方全局包）→ `T-07`（🔒 D-3，含 manager 层两处英文抛出收口）→ `T-09`（🔒 D-4）
 → `T-14`（🔒 D-7：退役这族测试还是把契约补回来）。
-自主可完成的面至此**全部收口**。
+本行原写"自主可完成的面至此全部收口"，那是**过度声称**：它与上列四条"剩余"自相矛盾，
+且当时 T-11 的歧义分支确实未接。按 §21 的实际进度改成：**不依赖新拍板的面已全部走完；
+余下每条各挂着一个未拍的决策（D-3/D-4/D-7）或一项需授权的外部条件（装第三方全局包）。**
 
 **T-02 必须最先**：它是守卫，T-03/T-04/T-05 都在改这三张表覆盖的面；先有守卫，后面的改动才会被拦住而不是被绕过。
 
@@ -1263,3 +1264,97 @@ FILL_REF e3 -> True data={'ref': 'e3', 'role': 'textbox', 'name': 'User name'}
   要不要收口成一句，属新决策，未擅自统一。
 - **REST/UI 面尚无 ref 入口**：本轮只接模型面（tool executor）。前端的 409 候选还只列名字不带编号，
   这是 T-11 歧义分支的正文——有 ref 之后那条链才可能真正"点到用户选的那个"。
+
+---
+
+## 21. T-11 · 歧义分支接通（2026-10-01）：409 交出编号，选完真点得到
+
+### 21.1 形状
+
+D-6 第一片的 409 只回 `role「name」`——**同名同 role 的候选照这份清单再发一次 `target`，
+得到的还是同一个 409**。T-08 之后歧义才真有出口，本批把它接上：
+
+- 候选面带上编号：`Candidate` 加 `ref` 字段，值由**同一份文法**读出
+  （新增 `browser_manager.refFromLine(line)`，内部就是 `parseRefLine`，不另起正则）。
+- 歧义文案抽成一处 `_ambiguityDetail(...)`：原先 `smart-click` 与 `smart-type`
+  **各抄一份措辞**，是教义第 6 条点名的第二份定义；现在两端只差 `word` 与两个工具名。
+- 两条寻址入口：`target`（语义解析，唯一命中才动）与 `ref`（本次快照的编号），
+  请求模型上以校验器要求**至少给一个**——空 body 走到解析层只会吐一句没有信息量的 404。
+- 编号路径**不再付一次全页快照**（`generation=None`）：编号表随代次作废，
+  页面变了由产出侧回 `ref-not-found`。这正是 T-08 省账的收益落在这条链上的位置。
+- 示例编号取**末位候选**而非第一个：文案里给样例容易把读数带偏，判据钉住这一点
+  （`ref="e2"` 必须是本代真实存在的编号）。
+- 无编号时不许空头承诺：候选来自未编号的树时文案退回 role+name 指引，
+  不出现 `ref` 字样（反向锁 `test_unannotatedTreeDoesNotPromiseARefPath`）。
+
+### 21.2 判据（10 例，红 → 绿）
+
+红灯原文（8 条红，2 条反向锁本来即绿）：
+```
+FAILED ...::test_ambiguous_lists_eachCandidateRef[smart_click-...]   assert 'e1' in '…textbox「备注」…'
+FAILED ...::test_ambiguous_lists_eachCandidateRef[smart_type-...]
+FAILED ...::test_ambiguous_names_theRefResendPath[smart_click]
+FAILED ...::test_ambiguous_names_theRefResendPath[smart_type]
+FAILED ...::test_click_with_ref_calls_the_ref_path_only
+FAILED ...::test_type_with_ref_fills_thatRefWith_text
+FAILED ...::test_stale_ref_surfaces_theProducerNamedFailure   assert 409 == 502
+FAILED ...::test_ref_alone_is_accepted_without_a_target
+```
+绿灯：`tests/unit/api/test_smart_ambiguity_carries_refs.py` 10 passed（逐文件单跑，已进
+`protected_tests.txt`）；同批 `test_smart_type_semantics.py` 7 例、`test_semantic_target_resolution.py`
+全部未受影响；`test_computer_placeholder_honesty.py` 的最小合法请求体仍成立。
+断言口径仍是"实收参数"：`byRef == [("click", "e2", None)]` 且 `byRole == []`——
+带 ref 却又跑解析链、或点了另一个元素，都会红。
+
+### 21.3 活体（真 Chromium + 真端点处理函数，零 mock；探针即用即删）
+
+夹具三个同名 `<button>Note`（各自把 `<h2>` 改成 FIRST/SECOND/THIRD）：
+```
+A 409 候选 = button「Note」[e1]、button「Note」[e2]、button「Note」[e3]
+B CLICK e3 -> generation=3  matched={'ref': 'e3', 'role': 'button', 'name': 'Note'}
+C 复用旧编号 e1（B 之后、中间不快照）-> 502
+    detail=按编号 ref=e1 点击未执行：ref-not-found: e1 不在本代快照的 0 个 ref 里
+           （页面已变化或从未快照）——请先 browser_dom_snapshot 再按新编号操作
+D 新快照编号 = ['[e1]', '[e2]', '[e3]']
+E CLICK e1 -> generation=4      F 页面回读 h2 = '- heading "FIRST" [level=2]'
+```
+输入侧另一次同夹具：409 列 `textbox「Memo」[e3] / [e4]` → `ref="e4"` 写入后
+页面 `<h3>` 回读 `wrote-by-ref#2`（第二个框的 `oninput` 才追加 `#2`）→ 写进了**选定的那一个**。
+
+取证教训两条，都记下来避免重踩：
+1. 第一次探针把"复用旧编号"读成了缺陷，实际是**我的回读快照把编号表重建了**；
+   失效检查必须紧接动作之后、中间一次快照都不许取。C 行按这个顺序重跑才拿到真读数。
+2. "0 个 ref" 这个数量读数本身就是 D-1 的自证——不是文案说作废，是表已空。
+
+### 21.4 前端同批（载荷对齐 + 把具名原因让人看见）
+
+- `computer.ts`：`smartClick(target, ref='')`、`smartType(target, text, ref='')`。
+- `AgentComputerPage.vue`：加一行编号输入；动作成功后**清空**编号（编号绑本次快照，
+  留着只会撞 `ref-not-found`）；目标与编号二选一才发请求。
+- 同一条根因在本页有 **8 个命中点**（`catch { message.error(t('common.error')) }`）：
+  后端已经把 409 候选、502 的产出侧 marker 逐条写进 `detail`，前端抹成一句通用文案
+  等于把那半条链掐了。统一改为 `failWith(e)`（读 `e?.response?.data?.detail`，
+  取不到才回落通用文案）。
+- i18n：`computer.semanticRef` 键 11 份 locale 同批补，逐份复核为 UTF-8 原文（非转写）。
+
+### 21.5 LOC 与实测面
+
+净生产码 **+108**：`api/endpoints/computer.py` +85/−21、`browser_manager.py` +13/−3、
+`target_resolver.py` +7/−1、`protected_tests.txt` +1；前端 `computer.ts` +11/−6、
+页面 +25/−13、locale +11×1。测试码 187 行不计入。
+`npx --no-install vue-tsc --noEmit` rc=0；`npm run test` **1911 passed**。
+
+### 21.6 登记（不在本批处理）
+
+- **`npm run test` 里那条文件级红不是本批引入**：
+  `src/tests/duplicate-function-inventory.guard.test.ts` 因
+  `scripts-qa/duplicate-function-audit.mjs:1` 的 `#!/usr/bin/env node` 在 vitest 的
+  转换管线下报 `SyntaxError: Invalid or unexpected token`（`node --check` 与
+  `node --input-type=module -e import(...)` 都通过，20 个导出可见 ⇒ 是 shebang 与
+  打包器的组合，不是代码错误）。该文件与它的导入面本批一行未动，落在 `bdda0ba1`。
+- **`tests/unit/api` + `tests/unit/tools` 组合下 `test_mcp_catalog::test_catalog_list_endpoint_requires_auth` 红**：
+  按"原地只回退我改的 3 个跟踪文件"做 A/B（sha256 往返校验后还原），HEAD 内容同组合
+  **同样红** ⇒ 预存跨文件态污染（auth 依赖被前序用例改走），非本批引入；单跑 15 passed。
+- **本批前端改动未经浏览器实测**：该页在 `get_current_user` 之后，本会话没有可用凭据，
+  也没有起 dev server 跑通登录→歧义→选号→重发的整条 UI 路。已验的是类型面与单测面，
+  **不声称界面行为验过**。

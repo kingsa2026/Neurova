@@ -1805,6 +1805,7 @@ export default {
     browser: 'المتصفح',
     smartClick: 'النقر الذكي',
     smartType: 'الكتابة الذكية',
+    semanticRef: 'رقم اللقطة (مثلًا e2 عند الغموض)',
     up: 'أعلى',
     down: 'أسفل',
     left: 'يسار',

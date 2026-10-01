@@ -1805,6 +1805,7 @@ export default {
     browser: 'ब्राउज़र',
     smartClick: 'स्मार्ट क्लिक',
     smartType: 'स्मार्ट टाइपिंग',
+    semanticRef: 'स्नैपशॉट संदर्भ (अस्पष्ट होने पर e2)',
     up: 'ऊपर',
     down: 'नीचे',
     left: 'बाएं',

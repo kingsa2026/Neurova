@@ -1431,3 +1431,4 @@ tests/unit/computer_use/test_unavailable_facts_are_triageable.py
 tests/unit/api/test_smart_type_semantics.py
 tests/unit/computer_use/test_ref_addressing_playwright.py
 tests/unit/tools/test_openai_format_source_immutability.py
+tests/unit/api/test_smart_ambiguity_carries_refs.py

@@ -1805,6 +1805,7 @@ export default {
     browser: 'Navegador',
     smartClick: 'Clic inteligente',
     smartType: 'Escritura inteligente',
+    semanticRef: 'Ref. de instantánea (p. ej. e2 tras ambigüedad)',
     up: 'Arriba',
     down: 'Abajo',
     left: 'Izquierda',
