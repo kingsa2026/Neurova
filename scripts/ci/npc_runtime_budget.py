@@ -352,6 +352,9 @@ if __name__ == "__main__":
     # 中文 Windows 的 cp936 编不出 ⚠️/🛑/→，`print` 会抛 UnicodeEncodeError 把门禁自己打死
     # （Linux CI 看不见这条）。同仓先例 scripts/ci_static_gate.py 是模块级——它不被 import。
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        # `newline="\n"`：读数只准出现 LF。不钉死则 Windows 上文本流把 '\n' 写成
+        # os.linesep（CRLF），而本文件的 node 孪生实现恒写 LF —— 同一条判据的两个身体
+        # 吐出不同字节，逐字比的双运行时 parity 判据在 Windows 上恒假红（工单集 §39/§40）。
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", newline="\n")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))

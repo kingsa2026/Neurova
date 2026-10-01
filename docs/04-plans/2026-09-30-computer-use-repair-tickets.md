@@ -2658,6 +2658,7 @@ U-04（§37）、U-05/U-06（§30/§32）。附带产出：一条真缺陷（413
   归因未核实，实测订正与另立的工单建议见 **§39**。
 - **净 LOC：生产 0**；测试 +11/−3（本文件）与台账结论 +9（`test_clock_caliber_ledger.py`），
   测试码不计入 LOC 账。CI 清单 +2 行（注释 + 路径）。
+
 ## 39. 订正 §38.4 那条未核实的归因：第 6 条红不是 node 崩溃族，是 Windows 行尾（2026-10-01）
 
 **我写错了什么**：§38.4 与提交说明里那句"`tests/unit/ci/` 那 6 failed 仍全是 §18 那族
@@ -2691,3 +2692,61 @@ node   分支  bytes=764  CR=0  LF=9        ← node 原样写 '\n'
 但它属 NPC 流水线判据面、与本批零重叠，动它会把两件事塞进一笔提交。
 **同时提醒**：`§18` 里"node 侧 2 例 ⇒ 双解释器同读数这条判据在 Windows 上无法以最小 env 验证"
 那句，对本条而言归因也不准确（它不是最小 env，是行尾）——复核那条时别照抄。
+
+> **T-19 已修（同一日，用户点名采纳）＝ §40**。上面"根修是判据侧归一行尾"这个方向**被实测否证**：
+> 真根因在生产侧，修法也必须在生产侧——判据侧归一等于把平台依赖永久留在产品里。
+
+## 40. T-19 根修 ✅：读数行尾由脚本自己钉死，不由宿主 OS 决定（2026-10-01）
+
+### 40.1 为什么不在判据侧归一行尾
+
+§39 原计划"比对前 `replace(\"\r\n\", \"\n\")`"。这条路当场被我自己的判据否证：
+仓内**另一条**双运行时 parity 判据（`test_npc_script_interpreter_reachability.py:247`）用的是
+`subprocess(text=True)` 的**隐式换行归一**口径，而 `test_npc_pipeline_time_budget.py:597` 手工
+`bytes.decode()` 保留 `\r`——同一条契约在仓内已经存在两份口径。若我再往判据侧补第三份归一，
+就是教义第 6 条禁的平行体系；更要紧的是：**门禁读数长什么样，本来就该由门禁脚本决定**。
+python 分支吐 CRLF、node 孪生吐 LF，分叉在**生产侧**，修在消费侧只是把病灶换个地方继续活着。
+
+### 40.2 生产侧一处参数，三个兄弟命中点
+
+`scripts/ci/npc_*` 里带 node 孪生实现的脚本共三个，`__main__` 内各自 reconfigure stdout，
+都缺 `newline="\n"` ⇒ 同一根因三个命中点（教义第 5 条）。逐名实测 CR 字节（改前）：
+
+| 脚本 | 改前 python 分支 stdout | CR 字节 |
+|---|---|---|
+| `npc_turn_handoff_gate.py` | 773 B | **9** |
+| `npc_role_admission.py` | 101 B | **1** |
+| `npc_runtime_budget.py` | 317 B | **4** |
+
+改法同为 `sys.stdout.reconfigure(encoding="utf-8", errors="replace", newline="\n")`
+（stderr 不动：它不是 parity 比对面，且已按 §15 的编码口径处理）。
+
+### 40.3 红→绿与承重证明
+
+```
+红灯（新判据，改前）：python 分支吐了 9 个 CR 字节 … assert 9 == 0     1 failed
+绿灯（改后）        ：test_python_branch_line_endings_are_host_independent
+                     [gate] [role_admission] [runtime_budget]          3 passed
+T-19 主体          ：test_npc_pipeline_time_budget::test_both_interpreter_branches_emit_the_same_reading
+                     改前 assert 2 == 1 → 改后 1 passed
+变异对照（承重）    ：摘掉 gate 的 newline="\n" → 新判据与 parity **两条同时转红**
+                     （assert 9 == 0 / assert 2 == 1），sha256 校验逐字节回基线后 3 passed
+族面读数           ：tests/unit/ci/ 改前 6 failed → 改后 **5 failed / 260 passed**，
+                     少的那一条正是 T-19；余 5 条逐条看过失败体，全是 §18 的
+                     node 剥离 env 自断（`ncrypto::CSPRNG` @ node.cc:1224），与本单无因果
+自有套件回归       ：test_npc_runtime_budget + test_npc_handoff_role_continuity +
+                     test_npc_auto_continue_wiring = 48 passed
+```
+
+新判据覆盖三个脚本靠 `DUAL_RUNTIME_SCRIPTS` 逐名参数化，并带**前提提出证**
+（先断言 stdout 非空）——否则"没有 CR"会在一条空输出上空转成绿灯。
+该文件本就在 `protected_tests.txt` 在册，新判据自动进 CI；它不含进程内计时口径，
+`test_no_unledgered_process_clock` 复跑仍绿（260 passed 里含它）。
+
+### 40.4 净 LOC
+
+- `scripts/ci/npc_turn_handoff_gate.py` **+6/−1**、`npc_role_admission.py` **+4/−1**、
+  `npc_runtime_budget.py` **+4/−1**：实际代码各 1 行（`newline="\n"` 实参），
+  其余全是"为什么钉死行尾、为什么不在判据侧归一"的口径说明。
+  **CI 生产脚本净 +12**，逐条去向即上三行；测试 +41（不计入 LOC 账）。
+- 台账：§39 的处置段加了"已修＝§40"的显式覆盖块（不改写原文）。
