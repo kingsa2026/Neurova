@@ -480,8 +480,20 @@ class AutoSkillImprover(PersistedStateMixin):
                     )
                     for r in records_by_skill.get(proposal.skill_id, [])
                 ]
+                # P1-4：该技能的编辑历史回喂——已实测无效的假设禁止重画
+                history = None
+                try:
+                    from neurova.core.data_root import get_data_root
+                    from neurova.evolution.eval.history_ledger import EvolutionLedger
+
+                    history = EvolutionLedger(
+                        get_data_root() / "evolution" / "history"
+                    ).recent(proposal.skill_id)
+                except Exception as ledger_err:  # noqa: BLE001 - 台账不可读不阻断提案
+                    logger.debug("编辑历史读取失败 %s: %s", proposal.skill_id, ledger_err)
                 improved = await mutator.mutate(
-                    artifact_text=skill_text, artifact_type="skill", failures=failures
+                    artifact_text=skill_text, artifact_type="skill", failures=failures,
+                    history=history,
                 )
                 if improved and improved != skill_text:
                     proposal.changes = {**proposal.changes, "improved_text": improved}
