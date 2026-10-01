@@ -16,8 +16,16 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from neurova.computer_use import ComputerUseManager, get_computer_use_manager
-from neurova.computer_use.browser_manager import BrowserManager, get_browser_manager
+from neurova.computer_use import (
+    ComputerUseManager,
+    get_computer_use_manager,
+    reset_computer_use_manager,
+)
+from neurova.computer_use.browser_manager import (
+    BrowserManager,
+    get_browser_manager,
+    reset_browser_manager,
+)
 
 
 class TestComputerUseManagerBrowserIntegration:
@@ -25,6 +33,9 @@ class TestComputerUseManagerBrowserIntegration:
     
     def test_computer_use_manager_initialization_with_config_path(self):
         """测试 ComputerUseManager 使用配置路径初始化"""
+        # 单例语义下"首次构造决定配置"，所以每例都从真 reset 入口起步；
+        # 原来这里赋的是 `_global_computer_use_manager`（生产无此名），reset 从未生效。
+        reset_computer_use_manager()
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             config = {
                 "backends": {
@@ -39,17 +50,18 @@ class TestComputerUseManagerBrowserIntegration:
             assert manager._config_path == config_path
         finally:
             os.unlink(config_path)
+            reset_computer_use_manager()
     
     def test_computer_use_manager_initialization_without_config_path(self):
         """测试 ComputerUseManager 不使用配置路径初始化"""
+        reset_computer_use_manager()
         manager = ComputerUseManager()
         assert manager._config_path is None
+        reset_computer_use_manager()
     
     def test_get_computer_use_manager_with_config_path(self):
         """测试获取全局 ComputerUseManager 实例（带配置路径）"""
-        # 重置全局实例
-        import neurova.computer_use
-        neurova.computer_use._global_computer_use_manager = None
+        reset_computer_use_manager()
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             config = {"backends": {"playwright": {"headless": True}}}
@@ -66,7 +78,7 @@ class TestComputerUseManagerBrowserIntegration:
             assert manager is manager2
         finally:
             os.unlink(config_path)
-            neurova.computer_use._global_computer_use_manager = None
+            reset_computer_use_manager()
     
     def test_computer_use_manager_browser_manager_integration(self):
         """测试 ComputerUseManager 与 BrowserManager 的集成"""

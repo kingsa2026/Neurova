@@ -98,17 +98,28 @@ class ComputerUseManager:
 
     _instance: typing.Optional["ComputerUseManager"] = None
 
-    def __new__(cls, config: typing.Dict[str, typing.Any] = None):
+    def __new__(
+        cls,
+        config: typing.Dict[str, typing.Any] = None,
+        config_path: typing.Optional[str] = None,
+    ):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, config: typing.Dict[str, typing.Any] = None):
+    def __init__(
+        self,
+        config: typing.Dict[str, typing.Any] = None,
+        config_path: typing.Optional[str] = None,
+    ):
         if self._initialized:
             return
 
         self._config = config or {}
+        #: 后端配置文件路径，透传给 `BrowserManager`（不存了就没人读 = 断点）。
+        #: 单例语义下它只在首次构造时确定，后续传入被忽略是设计而非缺陷。
+        self._config_path = config_path
         self._browser_manager = None
         self._screenshot_backend = None
         self.dpi_aware = False
@@ -293,12 +304,17 @@ class ComputerUseManager:
         }
 
     def _get_browser_manager(self):
-        """获取浏览器管理器"""
+        """获取浏览器管理器
+
+        把本轮配置面的 `config_path` 透传下去：配置路径若在 facade 存着却没人交给
+        `BrowserManager`，它就是只写不读的字段（AGENTS.md §2 点名的断点）。
+        """
         if self._browser_manager is None:
             try:
                 from neurova.computer_use.browser_manager import get_browser_manager
 
-                self._browser_manager = get_browser_manager()
+                self._browser_manager = get_browser_manager(
+                    config_path=getattr(self, "_config_path", None))
             except ImportError:
                 logger.warning("浏览器管理器不可用")
         return self._browser_manager
@@ -644,18 +660,31 @@ def get_active_remote_desktop() -> typing.Any:
     return _active_remote_desktop.get()
 
 
-def get_computer_use_manager(config: typing.Dict[str, typing.Any] = None) -> ComputerUseManager:
-    """获取 ComputerUseManager 单例；若上下文绑定了远程会话则返回其代理。"""
+def get_computer_use_manager(
+    config: typing.Dict[str, typing.Any] = None,
+    config_path: typing.Optional[str] = None,
+) -> ComputerUseManager:
+    """获取 ComputerUseManager 单例；若上下文绑定了远程会话则返回其代理。
+
+    `config_path` 同 `config`：仅首次创建生效（单例语义）。远程代理不接受重配——
+    它属于会话，不属于本进程的配置面。
+    """
     remote = _active_remote_desktop.get()
     if remote is not None:
         return remote
     global _manager
     if _manager is None:
-        _manager = ComputerUseManager(config)
+        _manager = ComputerUseManager(config, config_path)
     return _manager
 
 
 def reset_computer_use_manager() -> None:
-    """重置（用于测试）"""
+    """重置（用于测试）。
+
+    模块引用与类级单例**必须一起清**：只清 `_manager` 时 `ComputerUseManager._instance`
+    还活着，下一次构造走 `__new__` 拿到的仍是旧实例、`__init__` 又因 `_initialized`
+    早退——"重置后重建"这件事根本不成立，配置类判据会拿到上一例留下的实例。
+    """
     global _manager
     _manager = None
+    ComputerUseManager._instance = None

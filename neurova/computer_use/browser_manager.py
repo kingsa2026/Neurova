@@ -202,20 +202,119 @@ class BrowserSupervisor:
             self._ws = None
 
 
+#: 爬虫旋钮的默认值。`obey_robots` 默认 True 是**合规取向**，不是保守装饰：
+#: 它一旦不生效，抓取就是"对外说遵守、实际不看 robots.txt"。
+DEFAULT_SPIDER_CONFIG: Dict[str, Any] = {
+    "default_concurrency": 5,
+    "default_domain_delay": 1.0,
+    "obey_robots": True,
+}
+
+
 class ScraplingSpiderTool:
-    """"""
+    """Scrapling 爬虫编排：按域分组抓取，三个旋钮都真有读者。
+
+    `create_spider` 收的 kwargs 曾被原样存进记录却无人读（只写不读的幻影旋钮），
+    而 `obey_robots` 从未生效意味着默认口径下抓取不受 robots.txt 约束——那是合规
+    缺陷不是测试缺陷。现在 `run_spider` 逐条读生效值：并发 = 跨域并行上限（Semaphore），
+    域内一律串行以让 `domain_delay` 有意义（域内并行会让 delay 变成空话），
+    `obey_robots` = 抓取前真取 robots.txt 并判定。
+    """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._spiders: Dict[str, Any] = {}
+        spider = self._config.get("spider") or {}
+        self.default_concurrency = int(
+            spider.get("default_concurrency", DEFAULT_SPIDER_CONFIG["default_concurrency"]))
+        self.default_domain_delay = float(
+            spider.get("default_domain_delay", DEFAULT_SPIDER_CONFIG["default_domain_delay"]))
+        self.obey_robots = bool(
+            spider.get("obey_robots", DEFAULT_SPIDER_CONFIG["obey_robots"]))
 
     def create_spider(self, name: str, start_urls: List[str], **kwargs) -> str:
+        """登记一次抓取任务，返回 spider_id（`run/stop/resume` 都按它寻址）。
+
+        生效值在这里定稿：kwargs 缺项落工具默认，显式传入的非法值不静默改写类型，
+        直接点名——把 `concurrency="abc"` 变成 5 会让调用方以为自己的设置生效了。
+        """
         if not HAS_SCRAPLING:
             raise RuntimeError("Scrapling not available")
+        if not start_urls:
+            raise ValueError("start_urls 为空：没有目标的爬虫不该被登记")
 
-        spider_id = f"spider_{name}_{int(time.time())}"
-        self._spiders[spider_id] = {"name": name, "start_urls": start_urls, "status": "created", **kwargs}
+        try:
+            concurrency = int(kwargs.get("concurrency", self.default_concurrency))
+            domain_delay = float(kwargs.get("domain_delay", self.default_domain_delay))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"爬虫旋钮取值非法: {e}") from e
+        if concurrency < 1:
+            raise ValueError(f"concurrency 至少为 1（得到 {concurrency}）")
+        if domain_delay < 0:
+            raise ValueError(f"domain_delay 不能为负（得到 {domain_delay}）")
+
+        obey_robots = bool(kwargs.get("obey_robots", self.obey_robots))
+        spider_id = f"spider_{name}_{int(time.time() * 1000)}_{len(self._spiders)}"
+        self._spiders[spider_id] = {
+            "spider_id": spider_id,
+            "name": name,
+            "start_urls": list(start_urls),
+            "status": "created",
+            "concurrency": concurrency,
+            "domain_delay": domain_delay,
+            "obey_robots": obey_robots,
+        }
         return spider_id
+
+    def spiderConfig(self, spider_id: str) -> Optional[Dict[str, Any]]:
+        """已登记任务的**生效值**（读侧）：调用方据此确认自己的 kwargs 落到哪了。"""
+        spider = self._spiders.get(spider_id)
+        return dict(spider) if spider else None
+
+    async def _fetchPage(self, url: str) -> str:
+        """取一页正文。独立成方法是为了让判据能替身"外部世界"而不绕过编排逻辑。"""
+        page = await asyncio.to_thread(scrapling.fetchers.Fetcher().get, url)
+        return (getattr(page, "text", None) or "")[:1000]
+
+    async def _fetchRobots(self, origin: str) -> Tuple[Optional[str], str]:
+        """取 `robots.txt` 文本，返回 `(文本, 具名状态)`。
+
+        状态是判据不是风格：404（没有这个文件）与"取不到"在合规上是两件事——
+        前者标准语义是"无限制"，后者必须 fail-closed（不知道限制就别抓）。
+        """
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                response = await client.get(f"{origin}/robots.txt")
+            if response.status_code == 404:
+                return None, "absent"
+            if response.status_code >= 400:
+                return None, f"http_{response.status_code}"
+            return response.text, "ok"
+        except Exception as e:  # noqa: BLE001 - 取不到即无法判定，交调用方 fail-closed
+            return None, f"unreachable: {type(e).__name__}: {e}"
+
+    async def _allowedByRobots(self, url: str, userAgent: str = "*") -> Tuple[bool, str]:
+        """robots.txt 判定。返回 `(允许?, 依据)`。"""
+        import urllib.parse as _up
+        from urllib import robotparser
+
+        parsed = _up.urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        text, state = await self._fetchRobots(origin)
+        if state == "absent":
+            return True, "robots.txt 不存在（无限制）"
+        if text is None:
+            return False, f"robots.txt 取不到（{state}），无法判定是否允许 → 拒绝抓取"
+        parser = robotparser.RobotFileParser()
+        try:
+            parser.parse(text.splitlines())
+        except Exception as e:  # noqa: BLE001 - 解析不了就不知道限制
+            return False, f"robots.txt 解析失败: {type(e).__name__}: {e}"
+        if parser.can_fetch(userAgent, url):
+            return True, "robots.txt 允许"
+        return False, "robots.txt 禁止该 URL"
 
     async def run_spider(self, spider_id: str) -> BrowserResult:
         start_time = time.time()
@@ -225,20 +324,47 @@ class ScraplingSpiderTool:
         spider = self._spiders[spider_id]
         spider["status"] = "running"
 
-        try:
-            results = []
-            for url in spider["start_urls"]:
-                try:
-                    page = scrapling.fetchers.Fetcher().get(url)
-                    results.append({"url": url, "text": page.text[:1000] if page.text else ""})
-                except Exception as e:
-                    results.append({"url": url, "error": str(e)})
+        # 按域分组：域内串行（domain_delay 才有意义），跨域并发（concurrency 是上限）
+        from urllib.parse import urlparse as _urlparse
 
+        groups: Dict[str, List[str]] = {}
+        for url in spider["start_urls"]:
+            origin = _urlparse(url).netloc or url
+            groups.setdefault(origin, []).append(url)
+
+        semaphore = asyncio.Semaphore(max(1, int(spider["concurrency"])))
+        delay = float(spider["domain_delay"])
+        obey = bool(spider["obey_robots"])
+
+        async def runGroup(origin: str, urls: List[str]) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            async with semaphore:
+                for index, url in enumerate(urls):
+                    if index and delay > 0:
+                        await asyncio.sleep(delay)
+                    if obey:
+                        allowed, why = await self._allowedByRobots(url)
+                        if not allowed:
+                            out.append({"url": url, "skipped": True, "reason": f"obey_robots: {why}"})
+                            continue
+                    try:
+                        text = await self._fetchPage(url)
+                        out.append({"url": url, "text": text})
+                    except Exception as e:  # noqa: BLE001 - 单 URL 失败不拖垮整轮
+                        out.append({"url": url, "error": str(e)})
+            return out
+
+        try:
+            chunks = await asyncio.gather(*(
+                runGroup(origin, urls) for origin, urls in groups.items()))
+            results = [item for chunk in chunks for item in chunk]
             spider["status"] = "completed"
-            return BrowserResult(success=True, data=results, duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True, data=results, duration_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             spider["status"] = "failed"
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     def stop_spider(self, spider_id: str) -> bool:
         if spider_id in self._spiders:
@@ -1395,20 +1521,111 @@ def foldSnapshotTree(
     return SnapshotFold(_foldLine(0, roles, True), hiddenTotal, True, len(tree), actionableTotal)
 
 
-class BrowserManager:
-    """浏览器管理器"""
+DEFAULT_BROWSER_CONFIG: Dict[str, Any] = {
+    "backends": {
+        "playwright": {"type": "local", "headless": True},
+        "scrapling": {"type": "local"},
+    },
+}
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self._config = config or {}
+
+def loadBackendConfigFile(path: str) -> Tuple[Dict[str, Any], Optional[str]]:
+    """读后端配置 YAML，返回 `(配置, 具名错误)`；出错时配置为 `{}`。
+
+    失败必须叫得出名字（缺库 / 文件不存在 / 顶层不是 mapping / 语法错）：调用方要把它
+    落成可分诊的状态读数，而不是"看起来悄悄用了默认配置"。空文件不算错误——它确实
+    表示"没有覆盖项"。
+    """
+    try:
+        import yaml
+    except ImportError:
+        return {}, "缺 PyYAML，config_path 无法解析"
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+    except FileNotFoundError:
+        return {}, f"配置文件不存在: {path}"
+    except OSError as e:
+        return {}, f"配置文件读取出错: {type(e).__name__}: {e}"
+    except yaml.YAMLError as e:
+        return {}, f"YAML 语法错误: {e}"
+    if loaded is None:
+        return {}, None
+    if not isinstance(loaded, dict):
+        return {}, f"配置顶层不是 mapping（得到 {type(loaded).__name__}）"
+    return loaded, None
+
+
+def _deepMerge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """mapping 递归合并、其它类型整体替换；不改传入对象（默认表是模块级共享的）。"""
+    out = dict(base)
+    for key, value in (override or {}).items():
+        current = out.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            out[key] = _deepMerge(current, value)
+        elif isinstance(value, dict):
+            out[key] = dict(value)
+        else:
+            out[key] = value
+    return out
+
+
+class BrowserManager:
+    """浏览器管理器
+
+    配置面分两张表，合表就造出第二份事实源（教义第 6 条）：`_backend_configs` 是
+    **配置文件声明**要提供哪些后端（`backends` 段），`_backends` 是**这台机器真能用**的
+    （由 `HAS_*` 探测决定）。声明了却不可用不是配置错误，而是 T-07 三态里的
+    `configured-unreachable`——所以两张表都留着、各答各的问题，可用性一律问
+    `capability_state`，不在这里再造第三个布尔。
+    """
+
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        config_path: Optional[str] = None,
+    ):
+        self._config_path = config_path
+        self._config = self._mergedConfig(config, config_path)
+        self._backend_configs: Dict[str, Any] = dict(self._config.get("backends") or {})
         self._backends: Dict[str, BrowserBackend] = {}
         self._user_camofox_backends: Dict[str, BrowserBackend] = {}  # 三层隔离:按 userId 池化
         self._camofox_enabled: bool = False  # 由 _load_config 设置
         self._active_backend: Optional[BrowserBackend] = None
-        self._spider_tool = ScraplingSpiderTool(config)
+        self._spider_tool = ScraplingSpiderTool(self._config)
         self._dialog_handler = DialogHandler()
         self._lock = threading.RLock()  # 池化场景下必须——保护 _user_camofox_backends
         self._load_config()
         logger.info("BrowserManager initialized")
+
+    def _mergedConfig(
+        self, config: Optional[Dict[str, Any]], config_path: Optional[str]
+    ) -> Dict[str, Any]:
+        """默认配置 ← YAML 文件 ← 显式 config，逐层覆盖；读不到文件留痕不静默。
+
+        静默回落会把"配置文件写坏了"伪装成"没配过"——运维对这两件事的处置完全不同。
+        这里保留默认配置继续跑（manager 是进程级单例，构造期抛错会把整个电脑操控面
+        一起带走），但把原因记进 `_configLoadError`，由状态面读得到。
+        """
+        merged: Dict[str, Any] = {
+            key: (dict(value) if isinstance(value, dict) else value)
+            for key, value in DEFAULT_BROWSER_CONFIG.items()
+        }
+        self._configLoadError: Optional[str] = None
+        if config_path:
+            loaded, error = loadBackendConfigFile(config_path)
+            if error:
+                self._configLoadError = error
+                logger.warning("浏览器后端配置未生效（%s）: %s", config_path, error)
+            else:
+                merged = _deepMerge(merged, loaded)
+        if isinstance(config, dict):
+            merged = _deepMerge(merged, config)
+        return merged
+
+    def configLoadError(self) -> Optional[str]:
+        """配置文件读不通时的具名原因（正常加载则 None）。"""
+        return getattr(self, "_configLoadError", None)
 
     def _load_config(self) -> None:
         """加载配置"""
@@ -1425,8 +1642,41 @@ class BrowserManager:
         ):
             self._camofox_enabled = True
 
+    def _routeForUrl(self, url: str) -> Optional[str]:
+        """按 `routing.rules` 给目标 URL 选后端；无命中返回 None（回落默认优先级链）。
+
+        规则**有序**：第一条命中即生效——把特例写在前面是配置文件的常规写法。
+        pattern 取 `re.search` 语义（`localhost|127\\.0\\.0\\.1` 这类写法）。
+        坏正则跳过并 warning：一条笔误不该炸掉整条选路，也不该静默失效。
+        """
+        rules = ((self._config or {}).get("routing") or {}).get("rules") or []
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            pattern, backend = rule.get("pattern"), rule.get("backend")
+            if not pattern or not backend:
+                continue
+            try:
+                if re.search(str(pattern), url):
+                    return str(backend)
+            except re.error as e:
+                logger.warning("routing.rules 的 pattern %r 不是合法正则，跳过该条: %s", pattern, e)
+        return None
+
     def _resolve_backend(self, preferred: Optional[str] = None) -> str:
-        """解析要使用的后端"""
+        """解析要使用的后端。
+
+        `preferred` 有两类入参，这是事实不是风格：调用方既可能指名"用哪个后端"
+        （`browser_*` 工具透传的 backend 名），也可能只给了**要去哪儿**（目标 URL）。
+        含 `://` 即按 URL 处理——后端名里不可能出现它，所以判别不会两义。
+        URL 未命中任何规则时回到默认优先级链而不是报错：路由表是可选增强，
+        没写过规则的系统必须照旧工作。
+        """
+        if preferred and "://" in preferred:
+            routed = self._routeForUrl(preferred)
+            if routed:
+                return routed
+            preferred = None
         if preferred and preferred in self._backends:
             return preferred
         if "playwright" in self._backends:
@@ -1794,13 +2044,19 @@ _manager_instance: Optional[BrowserManager] = None
 _manager_lock = threading.Lock()
 
 
-def get_browser_manager(config: Optional[Dict[str, Any]] = None) -> BrowserManager:
-    """获取全局 BrowserManager 实例"""
+def get_browser_manager(
+    config: Optional[Dict[str, Any]] = None, config_path: Optional[str] = None
+) -> BrowserManager:
+    """获取全局 BrowserManager 实例。
+
+    `config_path` 与 `config` 一样**只在首次创建时生效**（单例语义）：后到的路径
+    不会改写已加载的配置，否则会出现"路径换了、后端没换"的分裂读数。
+    """
     global _manager_instance
     if _manager_instance is None:
         with _manager_lock:
             if _manager_instance is None:
-                _manager_instance = BrowserManager(config=config)
+                _manager_instance = BrowserManager(config=config, config_path=config_path)
     return _manager_instance
 
 
