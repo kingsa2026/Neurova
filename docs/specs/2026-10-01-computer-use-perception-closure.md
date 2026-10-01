@@ -80,6 +80,13 @@
 - 否证条件：激活后 `model_metadata[<model>].capabilities` 里没有 `vision` 且读数仍 `unknown`
   ⇒ 触发 U-05；若连 `model_metadata` 都不被 `_persist_probe_result`（`provider_manager.py:1724` 起）
   写回，则这条链的后台探测根本没落地，升级为独立缺陷单，**不在 T-09 里顺手兜**。
+- **⏸ 实测过一半（2026-10-01，工单集 §31）**：真探测跑通了，但**这台机器上没有任何可用
+  vision 通道**——活跃模型回 HTTP 400 网关无路由，`github-models:gpt-4o` 回非 JSON 正文，
+  `aliyun-bailian` 回 401 没 key，`volcano-coding-cn` 回 404 coding plan 不支持。
+  ⇒ U-01/U-02 等用户给可用凭据；**不用替身冒充签收**。
+  顺带这次真跑撞出一条真缺陷并已根修（§31.2）：`_persist_probe_result` 把
+  `probe_source="inconclusive"`（下不了结论）当实测否证写死——盖 `probed` 后
+  `maybe_probe_multimodal` 不再重探，而修好的实测档会据此永久关闭 T-09 的门。
 
 **U-02 · 真 vision 模型的一轮工具环签收这张图（承重）**
 - 判据：夹具页面把文本事实**刻意做成不可得**（本地 HTML 里用 `<canvas>` 画一段随机短语，
