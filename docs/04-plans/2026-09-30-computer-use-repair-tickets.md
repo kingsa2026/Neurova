@@ -2750,3 +2750,103 @@ T-19 主体          ：test_npc_pipeline_time_budget::test_both_interpreter_bra
   其余全是"为什么钉死行尾、为什么不在判据侧归一"的口径说明。
   **CI 生产脚本净 +12**，逐条去向即上三行；测试 +41（不计入 LOC 账）。
 - 台账：§39 的处置段加了"已修＝§40"的显式覆盖块（不改写原文）。
+
+## 41. T-18 前置 · compat 声明位接通 —— 从"只有源码能声明"到"配置能声明且当场生效"（2026-10-02）
+
+### 41.1 为什么先做这片
+
+`resolve_compat` 优先级最高的那层（"ProviderConfig 显式声明"）**其实不可达**：消费侧一直按这个契约读
+（`multi_model_client.py:304` 传 `compat_dict=getattr(provider, "compat_dict", None)`），但
+`ProviderConfig`（`provider_manager.py:364`）逐字段核过**没有这个字段**，用户配置里 34 个 provider 行
+`compat_dict` 命中 0。于是"显式声明优先于静态表"只是文档——撞上一台新的低容忍网关，唯一出路是
+改代码加 `PROVIDER_COMPAT` 行再发版。
+
+### 41.2 甲案的前置读数：网关线契约五例（raw POST，零 SDK）
+
+| 请求体里的采样键 | 状态 | 网关回执 |
+|---|---|---|
+| 只 `temperature=0.7` | 400 | `field Temperature invalid, only 1 is allowed for this model` |
+| 只 `top_p=1.0` | 400 | `field TopP invalid, only 0.95 is allowed for this model` |
+| 生产全键（0.7 / 1.0 / 两个 penalty=0.0） | 400 | 先拒 Temperature |
+| **两键都不发** | **200** | 受理 ⇒ "不发"这条路成立 |
+| 钉死值 1 + 0.95（正对照） | 429 | 配额窗；§35 曾以生产同形载荷拿到 200 |
+
+第二口径：§35 那次 200 用的就是带两个 penalty 的生产载荷 ⇒ **必拒面精确到 temperature/top_p 两键**，
+penalty 键这家网关受理。（先前我说过"429 说明参数过了"——**没证成**：429 与校验的先后次序今天仍未知，
+所以只有"两键都不发 → 200"这条是硬读数。）
+
+### 41.3 接通的五段，每段一条判据
+
+1. **字段**：`ProviderConfig.compat_dict`（默认空 dict）。`to_dict()` 走 `asdict`、`from_dict()` 按
+   `fields(cls)` 白名单过滤 ⇒ 声明能进 `providers.json` 也读得回来，重启不丢。
+2. **写侧**：`update_provider(compat_dict=…)` 在**进锁前**校验键名，未登记的 `ValueError` 点名并给出
+   可用键；拒绝时不半写（内存与磁盘都不动）。
+3. **校验单源**：`knownCompatKeys()` / `unknownCompatKeys()` 落在 `provider_compat`——写侧与 `merged`
+   问的是同一件事，各写一份迟早漂成"一边拒、一边放过"。
+4. **端点**：`UpdateProviderRequest.compat` 字段 **+ 真转发**；`ValueError` → **400**（原来被兜底
+   `except Exception` 抹成 500，把调用方的拼写错误报成服务端故障）；再加一条守卫：请求模型的字段
+   要么被转发，要么进"豁免 + 理由"台账。
+5. **运行态**：`refreshProviderClients(provider_id)` 扫**全部已注册 scope** 的实例，update/delete
+   成功后各调一次。
+
+### 41.4 同根因的另外三个命中点（一并闭环，不是扩面）
+
+- **`usage_collection` 只接了一半**：P1-13 声称"manager + API 两处透传"，实测端点从没把它放进
+  `update_kwargs` ⇒ 请求模型有字段但转发不到，唯一开启方式仍是手编 JSON。判据钉住转发。
+- **删掉 provider 后还能被路由**：`refresh_provider` 在"provider 查不到"时只 warn 就 return，
+  **不清缓存**；探针读数 `client after delete (no manual refresh): True`。修法落在 `refresh_provider`
+  自己身上（查不到就摘掉该 provider 的客户端），所有调用方一起受益，不在端点里补第二份清法。
+- **"写完不生效"是实测不是推测**：`before=True → 声明写入后仍 True → refresh 后 False`。
+  声明只到磁盘就等于要求运维重启进程，那不算接完；跨 scope 一起扫（只刷一个 scope 会把别的 scope
+  留在旧配置上）。
+
+### 41.5 红→绿、A/B 与读数
+
+```
+红灯（生产改动前逐条红，理由各不相同）：
+  ProviderConfig.__init__() got an unexpected keyword argument 'compat_dict'
+  LLMProviderManager.update_provider() got an unexpected keyword argument 'compat_dict'
+  assert 'supports_toolss' in ''            （merged 静默吞未知键）
+  AttributeError: 'UpdateProviderRequest' object has no attribute 'compat'
+  assert {} == {'supports_tools': False}    （端点不转发）
+  assert 500 == 400 / assert True is False / 删后 ModelClient 仍在
+绿灯：tests/unit/llm/test_provider_compat_declaration.py = 15 passed（三次 1.66 / 1.67 / 1.71s）
+同选择集 A/B（tests/unit/{llm,api,channels,tools} + tests/llm/test_provider_compat.py）：
+  只有 HEAD 红：14 条，全部来自本批新判据
+  只有本批红：**0 条** ⇒ 零回归
+  两边都红：23 条预存（含 test_provider_tool_path 的 token parity 849≠1648；另做过一次最小窗口
+  A/B：回退本批生产文件后同红）
+CI 家族：tests/unit/ci/ = 5 failed / 313 passed，5 条全在
+  `test_npc_script_interpreter_reachability.py`（§18 node 剥离 env 自断）；
+  §40 修掉的 `test_npc_pipeline_time_budget` 已不在红名单里
+登记：`protected_tests.txt` 有效条目 366 → **367**（新判据先 `git add` 再同批登记；该文件不含
+  进程内计时口径，时钟台账与墙钟台账两道守卫复跑仍绿）
+lint：ruff 五个文件 All checks passed（第一版 `-> "LLMProviderManager"` 触发 F821，已去掉）
+```
+
+### 41.6 净 LOC：生产 **+147**（新增 152 / 删 5），逐条去向
+
+按"空行 / `#` 注释 / 其余"三分实测（difflib 对 `git show HEAD:` 逐文件比）：
+
+- `neurova/llm/provider_compat.py` **+37/−1**（空 7 · 注释 4 · 其余 26）：两个校验函数 +
+  `merged` 未知键点名块（实现 ≈11 行）+ 模块 logger 接入，其余是"为什么不许静默过滤"的口径说明。
+- `neurova/llm/provider_manager.py` **+23/−0**（空 2 · 注释 9 · 其余 12）：字段 1 行、写侧校验块
+  实现 ≈9 行、赋值 2 行。
+- `neurova/llm/multi_model_client.py` **+43/−3**（空 6 · 注释 2 · 其余 35）：`_dropProviderClients`
+  实现 ≈3、`refresh_provider` "查不到就摘缓存" ≈5、`refreshProviderClients` ≈8、`__all__` 1。
+- `neurova/api/endpoints/provider.py` **+49/−1**（空 4 · 注释 14 · 其余 31）：请求模型字段、两处转发、
+  `ValueError`→400、`except HTTPException: raise`、`_refreshRuntimeProviderClients` 实现 ≈2、
+  update/delete 各一次调用。
+- **新增函数的实现语句合计 ≈17 行**（AST 剥掉 docstring 正文 / `#` 注释 / 空行后实测），
+  上面"其余"列里其余部分是各函数 docstring 的正文。测试 +364、CI 清单 +2、台账不计入。
+
+### 41.7 本片**没有**做的事（别记成 T-18 已修）
+
+1. `ProviderCompat` 里**还没有采样键的声明字段**——T-18 的主体（咽喉处按声明剔掉 `temperature`/`top_p`）
+   未落地；本片只把"能不能声明、声明了生不生效"接通。下一片才动 `_build_request_params`。
+2. **维度错位未解**：钉死值是 per-model（kimi-k3 = 1 / 0.95），compat 是 per-provider/host/protocol。
+   两条出路都在：给 compat 加 per-model 侧写，或走 §40 的乙案（把网关回执里点名的合法值学进
+   `ModelCapabilityCache`——它天生 per-model、带 TTL，且已有"下不了结论不许写成否证"的先例）。
+3. 后台/UI 没有 compat 编辑面（当前只有 API 与手编 `providers.json`）；`name` 字段仍不转发，
+   已进豁免台账并写明理由（重命名面未接，不在本片范围）。
+4. sensetime 其余 9 个带 `supported_sampling_parameters` 名单的模型是否同样钉值：**未测**。

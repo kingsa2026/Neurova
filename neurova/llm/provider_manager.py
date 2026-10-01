@@ -388,6 +388,12 @@ class ProviderConfig:
     # 服务商级读超时覆盖（秒）：思考模型经缓冲型网关的流内静默可达数分钟，
     # 个别服务商需单独放宽/收紧；None=走 LLMConfig 默认（读 300s/建连 15s）
     timeout: Optional[int] = None
+    # compat 显式声明（字段名 = ProviderCompat 的字段）。消费侧一直按这个契约读
+    # （multi_model_client 传 `compat_dict=getattr(provider, "compat_dict", None)`），
+    # 但字段此前**不存在** ⇒ resolve_compat 的最高层恒为 None，"显式声明优先于静态表"
+    # 只是文档；撞上新的低容忍网关只能改代码加 PROVIDER_COMPAT 行再发版。
+    # 键名由 update_provider 校验（unknown 键拒绝），手改配置由 merged 点名后忽略。
+    compat_dict: Dict[str, Any] = field(default_factory=dict)
     priority: int = 0
     is_builtin: bool = False
     icon: Optional[str] = None
@@ -690,8 +696,22 @@ class LLMProviderManager(Module):
         base_url: Optional[str] = None,
         description: Optional[str] = None,
         usage_collection: Optional[bool] = None,
+        compat_dict: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """更新服务商配置"""
+        # 校验放在进锁之前：不认识键名就拒绝，既不半写配置也不碰磁盘。
+        # 静默接受拼错的开关 = 声明被吞，与"没声明"长得一样（provider_compat 里
+        # knownCompatKeys/unknownCompatKeys 是这个判断的唯一出处）。
+        if compat_dict is not None:
+            from neurova.llm.provider_compat import knownCompatKeys, unknownCompatKeys
+
+            unknownKeys = unknownCompatKeys(compat_dict)
+            if unknownKeys:
+                raise ValueError(
+                    "compat 声明含未登记的键 %s；可用键 = %s"
+                    % ("/".join(unknownKeys), "/".join(knownCompatKeys()))
+                )
+
         with self._config_lock:
             if provider_id not in self._providers:
                 logger.warning("Provider %s not found", provider_id)
@@ -726,6 +746,9 @@ class LLMProviderManager(Module):
             # P1-13 断链修复: 真账单采集开关经 API 可达（复审断点②）
             if usage_collection is not None:
                 provider.usage_collection = usage_collection
+            # compat 声明位落地：读到什么就写什么（键名已在校验处过单源）
+            if compat_dict is not None:
+                provider.compat_dict = dict(compat_dict)
 
             provider.updated_at = datetime.now().isoformat()
 

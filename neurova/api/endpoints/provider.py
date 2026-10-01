@@ -67,6 +67,12 @@ class UpdateProviderRequest(BaseModel):
     # P1-13 断链修复: 真账单采集开关（None=不改动；true=开启该 provider 的
     # 后台账单拉取，/stats/provider-usage 才会采集它）
     usage_collection: Optional[bool] = Field(default=None, description="真账单采集开关")
+    # compat 显式声明位（键名 = ProviderCompat 字段）。此前只有代码里的静态表能声明，
+    # 撞上一台新的低容忍网关要发版；现在 providers.json / 本端点都能写。
+    # 拼错的键名由 manager 拒绝、本端点转成 400 点名（不许兜底成 500）。
+    compat: Optional[Dict[str, Any]] = Field(
+        default=None, description="provider 兼容开关显式声明（ProviderCompat 字段名）"
+    )
 
 
 class ActivateModelRequest(BaseModel):
@@ -114,6 +120,25 @@ def _model_to_json(model) -> Dict[str, Any]:
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+def _refreshRuntimeProviderClients(provider_id: str) -> None:
+    """provider 配置改完，让运行态客户端跟着重建。
+
+    为什么需要：`ModelClient` 里烘的是建请求时解析好的 `LLMConfig`（compat 声明、
+    api_key、base_url 全在内），而 `update_provider` 过去只失效 manager 侧的 provider
+    实例缓存（L-05）。实测：compat 声明经 API 写进 `providers.json` 后，缓存客户端的
+    `compat.supports_tools` 不变，手工 refresh 才翻（工单集 §41）——声明只到磁盘就等于
+    要求运维重启进程，那不算接完。跨 scope 的清扫在
+    `multi_model_client.refreshProviderClients` 单源做，本函数只管"改完就刷"。
+    重建失败不改写"配置已保存"这个事实，只在日志点名。
+    """
+    try:
+        from neurova.llm.multi_model_client import refreshProviderClients
+
+        refreshProviderClients(provider_id)
+    except Exception as e:  # noqa: BLE001 - 重建失败不影响本次更新结果
+        logger.warning("Provider %s 运行态客户端重建失败（配置已保存）: %s", provider_id, e)
 
 
 def _get_provider_manager(current_user: Optional[Dict[str, Any]] = None):
@@ -357,6 +382,14 @@ async def update_provider(
                 update_kwargs["base_url"] = body.base_url
             if body.api_key is not None:
                 update_kwargs["api_key"] = body.api_key
+            # 曾经这里只手写 base_url/api_key/models：`usage_collection` 加了请求模型字段
+            # 却没进来（P1-13 的"API 可达"其实只到了一半），compat 同理。逐键手写就是
+            # 会漏键——新加的声明位一律显式转发（守卫判据见
+            # tests/unit/llm/test_provider_compat_declaration.py::TestApiReachable）。
+            if body.usage_collection is not None:
+                update_kwargs["usage_collection"] = body.usage_collection
+            if body.compat is not None:
+                update_kwargs["compat_dict"] = body.compat
 
             # 如果有 add_model 指令，先获取当前 models 再合并
             if add_model_id:
@@ -368,9 +401,17 @@ async def update_provider(
                         update_kwargs["models"] = models
                         logger.info(f"Added model '{add_model_id}' to provider '{provider_id}'")
 
-            success = provider_manager.update_provider(**update_kwargs)
+            try:
+                success = provider_manager.update_provider(**update_kwargs)
+            except ValueError as e:
+                # 声明写错键名是调用方错误，不是服务端故障：400 + 原文点名可用键，
+                # 不许被下面的兜底 except 抹成 500（那样运维只会看到"更新失败"）。
+                logger.warning("Provider %s compat 声明被拒绝: %s", provider_id, e)
+                raise HTTPException(status_code=400, detail=str(e))
 
             if success:
+                # 配置已落盘；运行态客户端必须跟着换，否则声明要重启进程才生效
+                _refreshRuntimeProviderClients(provider_id)
                 # 读取更新后的配置（使用公共 API 而非私有属性）
                 provider = None
                 if hasattr(provider_manager, "get_provider"):
@@ -390,6 +431,11 @@ async def update_provider(
                     name="Unknown",
                     status="updated",
                 )
+    except HTTPException:
+        # 400（声明位拒绝）等已定性的状态码必须原样出去；被下面的兜底 except
+        # 抓走会变成 500 + "Failed to update provider"，把调用方的拼写错误
+        # 报成服务端故障（同文件 create_provider 已是这个形态）。
+        raise
     except Exception as e:
         logger.error(f"Update provider error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update provider: {str(e)}")
@@ -414,6 +460,8 @@ async def delete_provider(
         if hasattr(provider_manager, "remove_provider"):
             success = provider_manager.remove_provider(provider_id)
             if success:
+                # 删除也得扫运行态：只删配置行的话，缓存里的 ModelClient 还能被路由
+                _refreshRuntimeProviderClients(provider_id)
                 return {"code": 0, "message": f"Provider '{provider_id}' deleted"}
     except Exception as e:
         logger.error(f"Delete provider error: {e}", exc_info=True)

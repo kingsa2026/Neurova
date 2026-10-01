@@ -1455,3 +1455,5 @@ tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py
 tests/unit/test_image_payload_gate_is_honored.py
 # §38：熔断器九条判据自五段框架退役起收集期 ImportError、从未进 CI。逐文件单跑 9 passed
 tests/unit/security/test_tool_circuit_breaker.py
+# §41：compat 声明位必须可达（字段→持久化→写侧→端点转发→运行态刷新），拼错键名不许静默。逐文件单跑 15 passed
+tests/unit/llm/test_provider_compat_declaration.py
