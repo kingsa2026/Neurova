@@ -21,6 +21,7 @@ from neurova.core.logger import get_logger
 from neurova.evolution.eval.calibration import NoiseBand
 from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample, evaluation_split
+from neurova.evolution.eval.history_ledger import attribution_hit_rate
 from neurova.evolution.eval.mutator import JudgeFailure
 
 logger = get_logger(__name__)
@@ -205,18 +206,24 @@ class SkillEvolutionRunner:
     def _ledger_append(self, ledger_key: str, artifact_type: str,
                        failures: list[JudgeFailure], *, accepted: bool,
                        reject_reason: str = "", delta_train: Optional[float] = None,
-                       constraint_failures: Optional[list[str]] = None) -> Optional[int]:
-        """P1-4：逐候选结局入账（含被闸拒绝的）。台账故障按既有审计面惯例
-        只捕 OSError（磁盘问题不阻断进化，其他缺陷如实上抛）。"""
+                       constraint_failures: Optional[list[str]] = None,
+                       cand_details: Optional[list] = None,
+                       base_scores: Optional[dict] = None) -> Optional[int]:
+        """P1-4：逐候选结局入账（含被闸拒绝的）。P2-10：候选的预测面
+        （失败任务集）随记录入账，评测后有 details 时 patch 归因。
+        台账故障按既有审计面惯例只捕 OSError（磁盘问题不阻断进化，
+        其他缺陷如实上抛）。"""
         if self._ledger is None or not ledger_key:
             return None
         worst = min((f.score for f in failures), default=None)
+        predicted = [f.task_input[:80] for f in failures[:6]]
         try:
-            return self._ledger.append(ledger_key, {
+            seq = self._ledger.append(ledger_key, {
                 "artifact_type": artifact_type,
                 "hypothesis": ("; ".join((f.feedback or "")[:80] for f in failures[:3])
                                or "(无失败反馈的清晰化变异)")[:200],
                 "failures_digest": f"n={len(failures)};worst={worst}",
+                "predicted_tasks": predicted,
                 "delta_train": None if delta_train is None else round(delta_train, 6),
                 "delta_holdout": None,
                 "accepted": accepted,
@@ -226,6 +233,16 @@ class SkillEvolutionRunner:
         except OSError as e:
             logger.debug("编辑历史台账写入失败: %s", e)
             return None
+        # P2-10：评测后有 per-task 分数 → 归因（命中率/未预测回归）回填
+        if cand_details is not None and base_scores is not None and seq is not None:
+            attr = attribution_hit_rate(
+                predicted=predicted, base_scores=base_scores,
+                cand_scores={ex.task_input: s for ex, s, _o, _f in cand_details})
+            try:
+                self._ledger.patch(ledger_key, seq, {"attribution": attr})
+            except OSError as e:
+                logger.debug("归因回填失败: %s", e)
+        return seq
 
     # ── 内部:评测 ──
 
@@ -303,6 +320,7 @@ class SkillEvolutionRunner:
         self, *, best_text: str, best_score: float, baseline_text: str,
         dataset: EvalDataset, tune: list[EvalExample], artifact_type: str,
         ledger_key: str, leak_markers: Optional[frozenset], result: EvolutionRunResult,
+        base_scores: Optional[dict] = None,
     ) -> Optional[tuple[str, float, Optional[int]]]:
         """P1-7a：一轮多变体并行搜索。
 
@@ -358,25 +376,31 @@ class SkillEvolutionRunner:
             return None
         result.candidates_evaluated += len(survivors)
         result.iterations_run += len(survivors)
-        scores = await asyncio.gather(*[
-            self._evaluate_avg(cand, tune, artifact_type) for cand, _ in survivors
+        evaluated = await asyncio.gather(*[
+            self._evaluate(cand, tune, artifact_type) for cand, _ in survivors
         ])
-        survivors_scores = list(zip(survivors, scores))
+        # P2-10：并行路径同样携带 per-task 详情做归因
+        survivors_scores = [
+            ((cand, shard), avg, details)
+            for ((cand, shard), (avg, details)) in zip(survivors, evaluated)
+        ]
 
         # 先定 argmax 胜者（严格大于才替换——平分保持先到，确定性），
         # 再逐候选入账：只有最终胜者记 accepted=True（超越本轮基线才算）
         winner_idx: Optional[int] = None
-        for idx, (_cand, score) in enumerate(survivors_scores):
+        for idx, (_survivor, _avg, _details) in enumerate(survivors_scores):
+            score = survivors_scores[idx][1]
             if score > best_score + _EPS and (
                     winner_idx is None or score > survivors_scores[winner_idx][1] + _EPS):
                 winner_idx = idx
         winner: Optional[tuple[str, float, Optional[int]]] = None
-        for idx, ((cand, shard), score) in enumerate(survivors_scores):
+        for idx, ((cand, shard), score, cand_details) in enumerate(survivors_scores):
             is_winner = winner_idx == idx
             seq = self._ledger_append(ledger_key, artifact_type, shard,
                                       accepted=is_winner,
                                       reject_reason="" if is_winner else "variant_lost",
-                                      delta_train=score - best_score)
+                                      delta_train=score - best_score,
+                                      cand_details=cand_details, base_scores=base_scores)
             if is_winner:
                 winner = (cand, score, seq)
         return winner
@@ -437,7 +461,9 @@ class SkillEvolutionRunner:
             return result
 
         result.holdout_before = await self._evaluate_avg(baseline_text, holdout, artifact_type)
-        result.train_before = await self._evaluate_avg(baseline_text, tune, artifact_type)
+        result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
+        # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
+        base_scores = {ex.task_input: score for ex, score, _o, _f in train_details}
 
         best_text, best_score = baseline_text, result.train_before
         best_seq: Optional[int] = None
@@ -456,6 +482,7 @@ class SkillEvolutionRunner:
                     baseline_text=baseline_text, dataset=dataset, tune=tune,
                     artifact_type=artifact_type, ledger_key=ledger_key,
                     leak_markers=leak_markers, result=result,
+                    base_scores=base_scores,
                 )
                 if won is not None:
                     best_text, best_score, best_seq = won
@@ -499,11 +526,12 @@ class SkillEvolutionRunner:
 
             result.iterations_run += 1
             result.candidates_evaluated += 1
-            score = await self._evaluate_avg(candidate, tune, artifact_type)
+            score, cand_details = await self._evaluate(candidate, tune, artifact_type)
             improved = score > best_score + _EPS
             seq = self._ledger_append(ledger_key, artifact_type, failures,
                                       accepted=improved,
-                                      delta_train=score - best_score)
+                                      delta_train=score - best_score,
+                                      cand_details=cand_details, base_scores=base_scores)
             if improved:
                 best_text, best_score = candidate, score
                 best_seq = seq
