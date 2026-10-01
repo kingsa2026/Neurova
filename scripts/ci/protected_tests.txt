@@ -1453,3 +1453,5 @@ tests/unit/llm/test_image_probe_fixture_is_real_png.py
 tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py
 # §37：413 闸门必须兑现——旧实现单趟编码实测出 3,169,770 B / 3,205,312 B 仍超 3MB。逐文件单跑 4 passed
 tests/unit/test_image_payload_gate_is_honored.py
+# §38：熔断器九条判据自五段框架退役起收集期 ImportError、从未进 CI。逐文件单跑 9 passed
+tests/unit/security/test_tool_circuit_breaker.py
