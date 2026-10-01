@@ -14,13 +14,21 @@ from unittest.mock import Mock
 
 from neurova.security.monotonic_guard import GuardVerdict, get_monotonic_guards, reset_monotonic_guards
 from neurova.security.governance import GovernanceDecision, GovernancePolicy, reset_governance
-from neurova.agent.tool_pipeline import get_pipeline_observers, reset_pipeline_observers
+from neurova.agent.tool_pipeline import get_pipeline_observers
 
 
 class TestToolCircuitBreaker(unittest.TestCase):
+    """清注册表走**在役**入口 `get_pipeline_observers().clear()`。
+
+    退役批（T-09 死码处置）删了 `reset_pipeline_observers` 并同批改了
+    `tests/unit/agent/test_tool_pipeline.py`，唯独漏了这里——本文件从那次起
+    收集期就 ImportError，九条判据一条都没跑过。回填一个生产零调用的重置函数
+    既会撞 `test_frame_symbols_are_gone`，也是给测试专留第二份清理口径。
+    """
+
     def setUp(self):
         reset_monotonic_guards()
-        reset_pipeline_observers()
+        get_pipeline_observers().clear()
         reset_governance()
         from neurova.security import tool_circuit_breaker as mod
 
@@ -29,7 +37,7 @@ class TestToolCircuitBreaker(unittest.TestCase):
 
     def tearDown(self):
         reset_monotonic_guards()
-        reset_pipeline_observers()
+        get_pipeline_observers().clear()
         reset_governance()
         self.mod.uninstall_tool_circuit_breaker(force=True)
 

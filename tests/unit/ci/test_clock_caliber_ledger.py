@@ -67,6 +67,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "出现 time.time() 差值即判红（Windows 墙钟 15.6ms 粒度会把快工具量成假的 0.0，"
         "见工单集 §34）。台账口径按扫描结果记 wallClock，是因为扫描只认单调系符号名。",
     ),
+    "tests/unit/security/test_tool_circuit_breaker.py": (
+        ("wallClock",),
+        "唯一一处单调钟是**轮询换状态**，不是量时长：半开恢复的 `recovery_timeout=0.05` "
+        "在 Windows 上 `time.sleep` 粒度会短于请求值，故用 "
+        "`deadline = time.monotonic() + 1.0` 轮 `get_state().value == \"half_open\"`，"
+        "断言的是**状态迁移**（closed→open→half_open→closed）而非任何耗时上下界。"
+        "1.0s 是轮询的上限护栏（到点就断言失败），负载再高也只会让它如实红，"
+        "不会把结构契约编码成墙钟阈值——与本台账 WALLCLOCK 上界那一族不同形态。",
+    ),
     "tests/unit/context/test_context_pool_retention_contract.py": (
         ("wallClock",),
         "同机 A/B **比值**：同一进程内先量池规模小的尾段 1000 条 add，再量池规模"

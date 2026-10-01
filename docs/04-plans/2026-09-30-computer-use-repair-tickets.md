@@ -2584,7 +2584,8 @@ E   AssertionError: 归一化后仍超闸门：3205312 B > 3145728 B        ← 
   `cannot import name 'reset_pipeline_observers' from 'neurova.agent.tool_pipeline'`。
   `git show HEAD:neurova/agent/tool_pipeline.py` 里这个名字**只出现在第 15 行的文档字符串**，
   没有定义；该文件也不在 `scripts/ci/protected_tests.txt` 里（`grep` 零命中），所以 CI 没被打断，
-  但这条判据在 HEAD 上从未跑过。属另一条链（工具熔断观测面），登记不处置。
+  但这条判据在 HEAD 上从未跑过。**登记当批判为"另一条链、不处置"——下一批就按 §38 根修了**
+  （根因是退役批漏改第二个命中点，不是"某个安全模块暂时没写完"）。
 - `tests/unit/test_neuron_api_registration.py::test_neuron_in_endpoint_modules`：单独跑同红
   （`assert "neurova.api.endpoints.neuron" in source` 那条），与本批零文件重叠
   （本批只动 `attachment_parser` / 新判据 / CI 清单 / 两份文档）。
@@ -2597,3 +2598,60 @@ E   AssertionError: 归一化后仍超闸门：3205312 B > 3145728 B        ← 
 T-09 的 spec 收尾项 U-01…U-06 至此**全部有实测结论**：U-01/U-02（§35）、U-03（§36）、
 U-04（§37）、U-05/U-06（§30/§32）。附带产出：一条真缺陷（413 闸门未兑现）已根修并入库为判据。
 仍开着的：T-18 建议（采样参数值域收敛）、§34.5 那条他人夹具红。
+## 38. §37.7 那条收集期 ImportError 已根修 —— 熔断器九条判据复活并进 CI（2026-10-01）
+
+### 38.1 根因不是"测试写错了"，是退役批漏了一个命中点
+
+`reset_pipeline_observers` 是**被故意删掉**的：五段流水线框架在 T-09 死码处置批整段退场
+（`tool_pipeline.py:14-18` 的"已退场的部分"逐名列了它，依据是机器事实——四段注册入口生产侧全仓零调用）。
+同一批**确实**按教义第 5 条扫过消费方，`tests/unit/agent/test_tool_pipeline.py` 被改成走注册表
+自己的 `clear()`，还留了两条锁：
+
+- `test_frame_symbols_are_gone` 逐名断言 `hasattr(tp, "reset_pipeline_observers") is False`
+  ——**回填一个生产零调用的重置函数，会当场把这条判据撞红**；
+- `TestObserverGateway.setUp` 的注释写明为什么改走 `clear()`："不再为测试专门保留一个生产零调用的重置函数"。
+
+漏的是**第二个命中点** `tests/unit/security/test_tool_circuit_breaker.py`：第 17 行仍
+`import ... reset_pipeline_observers`，加上 setUp/tearDown 两处调用。后果不是"某条断言红"，
+而是**整个文件在收集期就 ImportError**，九条熔断语义（默认不安装零行为变化、install 幂等、
+策略性拒绝不计为后端故障、熔断打开→guard DENY、半开恢复）**一条都没跑过**。
+它又不在 `scripts/ci/protected_tests.txt` 里，于是 CI 也从不叫——两道沉默叠在一起才让它活到今天。
+
+### 38.2 修法在根因处，不往生产码回填
+
+改指**仍在役**的单源清理入口：`get_pipeline_observers().clear()`（与 `test_tool_pipeline.py` 同形）。
+不新建第二个重置函数——那是给测试专留的平行口径（教义第 6 条），且直接撞 §38.1 那条反向锁。
+
+同根因扫荡（七个退役符号逐名 `grep neurova/ tests/ scripts/`）：
+`ToolExecutionPipeline` / `PipelineConfig` / `PipelineGuardAdapter` / `ToolExecutionStep` /
+`PipelineReject` / `reset_pipeline_observers` / `ToolExecutionContext`——除文档叙述与守卫自己的
+名单常量外，**真实代码命中点只有这一处**。`ToolExecutionContext` 在 `tool_execution_manager.py`
+是**另一个同名且在役的符号**（ADR 0009/0010 那条链），不是残留，别顺手"清"掉它。
+
+### 38.3 红→绿与收集面读数
+
+```
+改前：ERROR tests/unit/security/test_tool_circuit_breaker.py
+      ImportError: cannot import name 'reset_pipeline_observers' from 'neurova.agent.tool_pipeline'
+      （no tests collected —— 九条判据一条没跑）
+改后：collected 9 items → 9 passed in 1.95s
+      逐文件连跑三次 1.85s / 1.82s / 1.85s 稳定
+全仓收集面：pytest tests --co → 21,171 collected，**0 collection error**
+            （此前这一条是全仓唯一一条收集错误）
+```
+
+判据进 CI：登记 `scripts/ci/protected_tests.txt`（有效条目 365 → **366**）。登记当场被
+`test_clock_caliber_ledger.py::test_no_unledgered_process_clock` 咬红——这文件用
+`time.monotonic()` 做半开恢复的**轮询截止**（Windows `time.sleep` 粒度短于请求值，轮询换状态而非硬睡），
+必须补台账结论。**这不是新故障，是 §34.4 那条既有约束在生效**：进册即要求逐文件时钟口径结论。
+补完后 `test_clock_caliber_ledger + test_ci_wallclock_assertion_ledger` = 24 passed。
+
+### 38.4 A/B 与净 LOC
+
+- `tests/unit/security/` 目录里 **1 failed + 13 errors** 与本文件无关：排除本文件重跑，
+  失败名集合逐行相同（`test_governance_integration::test_safe_echo_via_shell_succeeds`
+  与 `test_auth_comprehensive` 那 13 条），属预存红，不在本单处置。
+- `tests/unit/ci/ + tracked + wallclock 台账` 合跑 6 failed，仍全是 §18 那族
+  node 剥离 env 自断（`ncrypto::CSPRNG`），与本单无因果。
+- **净 LOC：生产 0**；测试 +11/−3（本文件）与台账结论 +9（`test_clock_caliber_ledger.py`），
+  测试码不计入 LOC 账。CI 清单 +2 行（注释 + 路径）。
