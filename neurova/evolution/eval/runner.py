@@ -64,6 +64,10 @@ class EvolutionRunResult:
     # 这些字段永不反向影响 rejected/reject_reason/deployed_text。
     heldout_before: float = 0.0
     heldout_after: float = 0.0
+    # P1-5 成本规则：基线/候选文本长度与相对变化率（0.0 = 规则未启用）。
+    cost_baseline: int = 0
+    cost_candidate: int = 0
+    cost_change: float = 0.0
 
     @property
     def improvement(self) -> float:
@@ -95,6 +99,9 @@ class EvolutionRunResult:
             "heldout_before": round(self.heldout_before, 4),
             "heldout_after": round(self.heldout_after, 4),
             "heldout_improvement": round(self.heldout_improvement, 4),
+            "cost_baseline": self.cost_baseline,
+            "cost_candidate": self.cost_candidate,
+            "cost_change": round(self.cost_change, 4),
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -389,6 +396,24 @@ class SkillEvolutionRunner:
             result.deployed_text = baseline_text
             await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
+
+        # ── 判定 2.5:成本规则（P1-5）──
+        # ΔC ≤ β0 + β1·ΔS：涨的成本必须由实测增益买单。文本臂成本代理 =
+        # 长度变化率（零 LLM、可复现）；执行器将来提供 token usage 时可无缝
+        # 替换代理（字段已留）。基线为空串时 ΔC 记 0（无从比较即不判）。
+        if self.config.cost_rule_enabled:
+            result.cost_baseline = len(result.baseline_text)
+            result.cost_candidate = len(best_text)
+            if result.cost_baseline > 0:
+                delta_c = (result.cost_candidate - result.cost_baseline) / result.cost_baseline
+                result.cost_change = delta_c
+                budget = self.config.cost_beta0 + self.config.cost_beta1 * result.improvement
+                if delta_c > budget:
+                    result.rejected = True
+                    result.reject_reason = "cost_rule_failed"
+                    result.deployed_text = baseline_text
+                    await self._attach_heldout_evidence(result, dataset, artifact_type)
+                    return result
 
         # ── 判定 3:benchmark 回归门(技能分涨但 bench 回退 → 拒绝)──
         if self._bench_gate is not None:
