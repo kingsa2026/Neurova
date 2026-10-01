@@ -1255,7 +1255,11 @@ class ToolExecutor:
         Returns:
             执行结果
         """
-        start = time.time()
+        # 时长用单调钟：`time.time()` 在 Windows 上粒度约 15.6ms，进程内快工具整次调用
+        # 落在同一个 tick 里，差值恰好 0.0——而轮级累加器仍会记成"本轮测到过"，
+        # 于是落库的 execution_time 交出**假的测量值**（判据 >0 于是变成时钟跨不跨界的抽奖）。
+        # 本文件其余 `time.time()` 是时间戳用途（过期、TTL），不属这条链，保持不动。
+        start = time.perf_counter()
         success = False
         result = None
         tool_source = "unknown"
@@ -1404,7 +1408,7 @@ class ToolExecutor:
             return result
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
-            elapsed = time.time() - start
+            elapsed = time.perf_counter() - start
             # 工单 009：elapsed 此前只喂钩子，"经验落库的 execution_time"没有来源
             # （生产库 103 行 nonNULL 0/103）。咽喉是唯一知道真实耗时的地方，
             # 故在此累加到轮级聚合，由 post-chat 读走。
