@@ -58,6 +58,10 @@ class EvolutionConfig:
     train_ratio: float = 0.5
     val_ratio: float = 0.25
     holdout_ratio: float = 0.25
+    # 真留出报告集占比（P0-2 holdout 防污染）：>0 且数据集无 heldout 时，
+    # service 从 holdout 尾部按此比例划出 heldout——只做验收证据，永不参与
+    # 接受/拒绝判定。默认 0 = 不划，行为与旧版一致；生产建议 0.15。
+    heldout_ratio: float = 0.0
     seed: int = 42
 
     # ── 优化期间快速打分(省钱):judge 只对 val 集跑,训练集用重叠代理 ──

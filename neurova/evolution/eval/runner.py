@@ -59,10 +59,18 @@ class EvolutionRunResult:
     # noise_band 为空 dict 表示未校准（δ=0，行为与旧版一致）。
     accept_threshold: float = 0.0
     noise_band: dict = field(default_factory=dict)
+    # P0-2 holdout 防污染：heldout 集只做验收证据（0.0 = 本轮无 heldout 集）。
+    # 这些字段永不反向影响 rejected/reject_reason/deployed_text。
+    heldout_before: float = 0.0
+    heldout_after: float = 0.0
 
     @property
     def improvement(self) -> float:
         return self.holdout_after - self.holdout_before
+
+    @property
+    def heldout_improvement(self) -> float:
+        return self.heldout_after - self.heldout_before
 
     @property
     def changed(self) -> bool:
@@ -83,6 +91,9 @@ class EvolutionRunResult:
             "bench_neutral_reason": self.bench_neutral_reason,
             "accept_threshold": round(self.accept_threshold, 6),
             "noise_band": dict(self.noise_band),
+            "heldout_before": round(self.heldout_before, 4),
+            "heldout_after": round(self.heldout_after, 4),
+            "heldout_improvement": round(self.heldout_improvement, 4),
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -280,6 +291,7 @@ class SkillEvolutionRunner:
             result.rejected = True
             result.reject_reason = "holdout_regression"
             result.deployed_text = baseline_text
+            await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
 
         # ── 判定 2:无实质增益 → 保留基线 ──
@@ -289,6 +301,7 @@ class SkillEvolutionRunner:
             result.rejected = True
             result.reject_reason = "no_improvement"
             result.deployed_text = baseline_text
+            await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
 
         # ── 判定 3:benchmark 回归门(技能分涨但 bench 回退 → 拒绝)──
@@ -309,9 +322,25 @@ class SkillEvolutionRunner:
                 result.rejected = True
                 result.reject_reason = "bench_regression"
                 result.deployed_text = baseline_text
+                await self._attach_heldout_evidence(result, dataset, artifact_type)
                 return result
 
+        await self._attach_heldout_evidence(result, dataset, artifact_type)
         return result
+
+    async def _attach_heldout_evidence(self, result: EvolutionRunResult,
+                                       dataset: EvalDataset, artifact_type: str) -> None:
+        """P0-2 holdout 防污染：在最终判定**之后**对 heldout 集评测基线与
+        部署文本各一次，只写报告字段。
+
+        heldout 永不参与接受/拒绝判定、变异失败采样或逐轮评测——否则
+        它会被搜索过程自适应消耗，退化成第二个判据集。"""
+        if not dataset.heldout:
+            return
+        result.heldout_before = await self._evaluate_avg(
+            result.baseline_text, dataset.heldout, artifact_type)
+        result.heldout_after = await self._evaluate_avg(
+            result.deployed_text, dataset.heldout, artifact_type)
 
     async def _evaluate_avg(self, skill_text: str, examples: list[EvalExample],
                             artifact_type: str) -> float:

@@ -80,6 +80,11 @@ class EvolutionProposal:
     status: str = STATUS_PENDING
     holdout_before: float = 0.0
     holdout_after: float = 0.0
+    # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
+    # 提案的可接受性仍由 runner 的 selection 判据决定。
+    heldout_before: float = 0.0
+    heldout_after: float = 0.0
+    heldout_improvement: float = 0.0
     iterations_run: int = 0
     created_at: str = ""
     decided_at: str = ""
@@ -171,6 +176,11 @@ class SkillEvolutionService:
             result.reject_reason = "empty_dataset"
             return result, None
 
+        # P0-2 holdout 防污染：配置了 heldout_ratio 且数据集没有真留出集时，
+        # 从 holdout 尾部划出（确定性）。heldout 只做验收证据，不参与判定。
+        if cfg.heldout_ratio > 0 and not dataset.heldout:
+            dataset = dataset.carve_heldout(cfg.heldout_ratio)
+
         from neurova.evolution.eval.factory import make_skill_evolution_runner
 
         runner = make_skill_evolution_runner(
@@ -210,6 +220,9 @@ class SkillEvolutionService:
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),
                 holdout_after=round(result.holdout_after, 4),
+                heldout_before=round(result.heldout_before, 4),
+                heldout_after=round(result.heldout_after, 4),
+                heldout_improvement=round(result.heldout_improvement, 4),
                 iterations_run=result.iterations_run,
                 created_at=datetime.now(UTC).isoformat(),
             )
