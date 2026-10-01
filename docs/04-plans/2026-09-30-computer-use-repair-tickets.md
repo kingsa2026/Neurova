@@ -1852,7 +1852,10 @@ U-08（真容器字段形态）、U-09（真容器错误形态）随支路 A 一
 现在这条不成立：本机与 §13.3 实测均为 `HAS_PLAYWRIGHT=True ⇒ _backends=['playwright']`，
 选路优先级 playwright > camofox > scrapling，camofox **永不被选中**。
 
-### 28.3 🔒 Q-4 · 定终态牵出的活口子：**选路不查能力读数，autostart 因此仍可被触发**
+### 28.3 ✅ Q-4（原 🔒，已拍乙）· 定终态牵出的活口子：**选路不查能力读数，autostart 因此仍可被触发**
+
+落地记录见 **§29**（2026-10-01 同批：选路查读数 + 默认不代宿主拉起，活体证实零子进程）。
+以下保留的是拍板前的取证原文。
 
 拍板"真容器不在验收面内"之后，本批按教义第 5 条扫同根因命中点，量到一条**未闭环的链**
 （它是 §13.3 当年点名要 D-3 拦住的东西，T-07 落了读数、这条链上还没有消费方）：
@@ -1896,5 +1899,92 @@ camofox，所以它属**潜伏**而非现行故障。命中需三条同时为真
 生产 **0**。纯文档：工单表 T-12 行、§26.6 状态、本节，以及 spec 的 Q-1 结果 / U-08-U-10 状态 /
 新增 Q-4 待拍行。守卫复跑（docs 族 + 工单集族 + CI 族共 10 个文件合跑）：
 **163 passed / 1 skipped / 0 failed（18.70s）**。
+
+---
+
+## 29. Q-4 落地 · 选路查能力读数 + 默认不再代宿主拉起外部服务（2026-10-01，拍板＝乙）
+
+### 29.1 改的三处，以及为什么**没**改默认值
+
+拍的是乙：`NEUROVA_CAMOFOX_AUTOSTART` 的默认 True **保留**——它回答的是"宿主决定自己拉起时
+怎么拉"，不是"由谁决定去拉"。真正把断点接上的三处：
+
+| 落点 | 改动 | 为什么落在这里 |
+|---|---|---|
+| `camofox_supervisor.py` | 新增 `_autostartExplicit` 与读侧 `autostartExplicit()`：**显式**只认"配置文件写过这个键"或"环境变量真存在"，默认值不算 | 拉起授权的口径归 supervisor 自己所有（教义第 6 条），别让调用方各自猜 env |
+| `camofox_server_backend.initialize()` | health 失败分支先问 `autostartExplicit()`；没显式开过就 `return False`，**连问都不问 supervisor** | 这是 `ensure_started()` 在全仓**唯一**的生产调用点——不在这里拦，别处拦都等于把这条路变成死码 |
+| `browser_manager._get_backend()` | 选路命中 camofox 时先查 `capability_state.reading("camofox")`：`usable()` 放行，宿主显式开过 autostart 放行，否则 `raise _capabilityRefusal(...)` | §28.3 那条"只写不读"的断点在此闭环：T-07 那张表**第一次**成为选路上的真消费方；且拒绝走 `camofoxReachable`（1.5s + TTL 缓存），不再每次撞 30s 握手超时 |
+
+拒绝文案点名"谁能修"：`…（owner=operator，可重探或改配置后重探）｜本次要用的后端=camofox
+（选路命中 camofox 但探不到服务；宿主未显式开启 NEUROVA_CAMOFOX_AUTOSTART，
+本进程不会代它拉起外部服务）`。
+
+### 29.2 红灯原文（先红后绿，两条都为预期原因红）
+
+```
+E   assert 'ensure_started' not in ['ensure_started']
+FAILED ...::TestCamofoxRealSocketContract::test_defaultAutostartNeverAsksSupervisorOnHealthFailure
+FAILED ...::TestAssemblyRefusesUnreachableCamofox::test_unreachableCamofoxRefusedAtAssemblyWithoutAskingSupervisor
+======================== 2 failed, 8 passed in 18.99s ========================
+```
+
+**同批改期望值的那条**（拍板时写进 §28.3 的连带，不静默翻语义）：原
+`test_unreachableHealthStaysUnreadyAndAsksSupervisorOnce` 拆成两条——
+`test_defaultAutostartNeverAsksSupervisorOnHealthFailure`（默认：**不问**）与
+`test_explicitAutostartStillAsksSupervisorOnce`（显式开过：照旧问一次，防这条路被修成死码）。
+
+### 29.3 绿灯与域内回归
+
+- 该判据文件 **10 passed**（7 → 10）；`scripts/ci/protected_tests.txt` 里那条登记不变。
+- `tests/unit/computer_use` + 六个 `tests/integration/` 合跑：**559 passed / 2 skipped / 0 failed（64.28s）**
+  （§27.3 的 556 + 本批新增 3 条）。
+- `ruff check` 四个文件 All checks passed。
+
+### 29.4 活体（真 supervisor、真配置地址、**零替身**）——一个进程都没被拉起
+
+用 `.env` 里的真 `NEUROVA_CAMOFOX_URL=http://localhost:9377`（本机该服务没起）：
+
+```
+autostart(生效值)               = true      ← 默认值按拍板保留
+autostartExplicit(宿主授权)      = false
+initialize_结果                 = false      耗时 3.97s
+拉起后子进程 = {process: null, managed: false}     子进程_最终 = {process: null, pid: null, is_running: false}
+能力读数_camofox = {state: configured-unreachable, owner: operator,
+                    reason: 已配置 http://localhost:9377 但不可达：ReadTimeout: timed out——起服务后重探}
+装配点拒绝原文 = capability-camofox-configured-unreachable: …｜本次要用的后端=camofox（…不会代它拉起外部服务）
+显式设置 NEUROVA_CAMOFOX_AUTOSTART=true 后 autostartExplicit() = true   ← 只看标志，未真去拉进程
+```
+
+`process/pid/managed` 三个读数就是"没起外部服务"的直接证据；探针即用即删，未落仓。
+
+### 29.5 共享工作树归因：多出的那条红**不是**本批改的
+
+`tests/unit/api + tests/unit/tools` 合跑第一次出 **23** 条红，比 HEAD 内容版多一条
+`test_media_frontend_contract.py::test_batch_delete_reports_succeeded_and_failed`。处置：
+
+1. 把本批三个生产文件按 `git show HEAD:<path>` 就地回退（先仓外备份 + sha256），跑同组合 → **22 条**；
+2. 还原三个文件，sha256 逐个校验 OK；
+3. 同组合用本批代码复跑两次 → **22 条**，且与 HEAD 版失败名集合 **逐行相同**（`diff` 空）；
+4. 该单独跑 → **6 passed**。
+⇒ 属该测试自身的顺序/残留敏感（它断言 `media_module._media_store` 全局表与磁盘 rglob 结果），
+不计入本批回归；也**不是**新判据文件带来的（它不在 api/tools 这两块里）。
+
+### 29.6 LOC（生产净 **+50**，逐条去向）
+
+- `browser_manager.py` **+27**：`_requireCamofoxSelectable()` 守卫本体与"为什么落在这里/
+  两种放行条件"的理由，加 `_get_backend()` 的两行接线。
+- `camofox_supervisor.py` **+15**：`_autostartExplicit` 计算与 `autostartExplicit()` 读侧
+  （含"默认 True 不算宿主授权"的口径说明）。
+- `camofox_server_backend.py` **+11/−3**：health 失败分支的显式授权闸门；日志原文里
+  "尝试 supervisor 拉起"这句在默认路径上已不成立，一并改掉。
+- 测试 **+111/−13**（净 +98）不计入：新增装配点两例、拆改 supervisor 期望值两条、`_deadPortUrl()`
+  改确定连不通地址、supervisor 替身补 `autostartExplicit()`。
+
+### 29.7 一处踩过的坑（写下来免得重付）
+
+`_deadPortUrl()` 最初写成"占一个临时端口再释放"。本机实测那个端口被系统代理接走并回 **502**——
+分支同走"不可达"，但读数不再是 ECONNREFUSED，换机器就可能变。固定用 `http://127.0.0.1:1`。
+另外断言"没去拉进程"时别写 `spy.calls == []`：`_request()` 每次成功请求都会打
+`record_activity()`（刷 idle 计时，合法），要写 `"ensure_started" not in spy.calls`。
 
 
