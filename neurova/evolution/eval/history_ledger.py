@@ -154,6 +154,11 @@ class EvolutionLedger:
             lines.append("已实测无效——**禁止重复提出**同类假设：")
             for r in falsified[-8:]:
                 why = f"（拒绝原因: {r['reject_reason']}）" if r.get("reject_reason") else ""
+                attr = r.get("attribution") or {}
+                if isinstance(attr, dict) and attr.get("hit_rate") is not None:
+                    hits = len(attr.get("hits") or [])
+                    total = round(hits / attr["hit_rate"]) if attr["hit_rate"] else 0
+                    why += f"（命中率 {hits}/{total}）"
                 lines.append(f"- [{r.get('ts', '')}] {r['hypothesis']}{why}")
         if accepted:
             lines.append("已生效（勿做无谓回退）：")
@@ -165,6 +170,29 @@ class EvolutionLedger:
         if directive:
             lines.append(directive)
         return "\n".join(lines)
+
+
+def attribution_hit_rate(*, predicted: list[str],
+                         base_scores: dict, cand_scores: dict,
+                         eps: float = 1e-9) -> dict:
+    """P2-10：predicted_affected 归因——预测面的任务是否真的上升。
+
+    predicted = 候选声明要修复的失败任务（task_input）；base/cand =
+    同批任务上原始基线与候选的得分。空预测诚实返回 hit_rate=None
+    （没声明就没有命中率）。归因只进证据面，不改 accept/reject 判据。
+    """
+    hits = [t for t in predicted
+            if t in base_scores and t in cand_scores
+            and cand_scores[t] > base_scores[t] + eps]
+    regressions = [t for t in base_scores
+                   if t in cand_scores and t not in predicted
+                   and cand_scores[t] < base_scores[t] - eps]
+    hit_rate = (len(hits) / len(predicted)) if predicted else None
+    return {
+        "hit_rate": None if hit_rate is None else round(hit_rate, 4),
+        "hits": hits[:12],
+        "unpredicted_regressions": sorted(regressions)[:12],
+    }
 
 
 def exploration_directive(records: list[dict], *, stall_window: int = 5) -> str:
