@@ -102,6 +102,16 @@ class SkillEvolutionService:
         self._proposals_file = self._dir / "proposals.json"
         self._runs_dir = self._dir / "runs"
         self._history_ledger = None  # P1-4：懒创建
+        self._skill_journal = None  # P2-11：懒创建
+
+    @property
+    def journal(self):
+        """P2-11 技能正文日志仓（journal.git）——批准即 commit 的可追溯链。"""
+        if self._skill_journal is None:
+            from neurova.evolution.eval.skill_journal import SkillJournal
+
+            self._skill_journal = SkillJournal(self._dir / "journal.git")
+        return self._skill_journal
 
     @property
     def ledger(self):
@@ -361,11 +371,30 @@ class SkillEvolutionService:
                 if not ok:
                     return False
                 target["status"] = STATUS_APPROVED
+                self._journal_append(target)  # P2-11：批准即 commit（失败降级不阻断）
             else:
                 target["status"] = STATUS_REJECTED
             target["decided_at"] = datetime.now(UTC).isoformat()
             self._write_proposals(items)
             return True
+
+    def _journal_append(self, target: dict) -> None:
+        """P2-11：批准即提交——正文变更进 per-agent git 日志仓。git 缺失
+        或失败诚实降级（journal.append 返回 None），审批主链不受损。"""
+        try:
+            self.journal.append(
+                skill_id=str(target.get("skill_id") or ""),
+                before=str(target.get("baseline_text") or ""),
+                after=str(target.get("improved_text") or ""),
+                proposal_id=str(target.get("proposal_id") or ""),
+                evidence={
+                    "holdout_before": target.get("holdout_before"),
+                    "holdout_after": target.get("holdout_after"),
+                    "heldout_improvement": target.get("heldout_improvement"),
+                },
+            )
+        except Exception as e:  # noqa: BLE001 - 日志仓故障不阻断审批主链
+            logger.debug("技能日志仓写入失败: %s", e)
 
     def _apply_to_skill(self, proposal: dict, registry: Any) -> bool:
         from neurova.skills.skill_service import SkillService
