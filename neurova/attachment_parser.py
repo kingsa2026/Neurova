@@ -291,13 +291,46 @@ def _extract_html(data: bytes) -> str:
 
 LLM_IMAGE_MAX_PAYLOAD_BYTES = 3 * 1024 * 1024   # base64 前的原始字节闸门（3MB）
 LLM_IMAGE_MAX_DIMENSION = 2048                  # 降采样长边上限
+# 闸门靠阶梯兑现，不靠一趟编码：实测 2048×2048 高熵图 JPEG q85 出 3,169,770 B、
+# 1000×800 RGBA 噪声 PNG 出 3,205,312 B，两者**都超闸门**——尺寸帽对已经等于帽的图
+# 不做任何事，而 JPEG/PNG 在噪声内容上压不动。超限的图照发出去就是 413。
+_PAYLOAD_SHRINK_STEP = 0.75                     # 每轮长边乘它
+_PAYLOAD_MIN_LONG_EDGE = 256                    # 触底：再小就读不清画面事实
+_PAYLOAD_MAX_ROUNDS = 10                        # 有界循环，不给 CPU 无底洞
+
+
+def _resizeToLongEdge(img, longEdge: int):
+    """等比缩到长边 = longEdge；本就不比它长则原样返回（不做无谓重采样）。"""
+    current = max(img.size)
+    if current <= longEdge:
+        return img
+    scale = longEdge / current
+    return img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))))
+
+
+def _encodeWithinPayload(img, keepAlpha: bool) -> Optional[Tuple[bytes, str]]:
+    """无 alpha → JPEG q85；有 alpha → PNG 保透明。
+
+    透明通道不为体积让路：抹掉 alpha 会让前端拿到的图与用户看到的不是同一张，
+    而体积问题本来就该由尺寸阶梯解决。编码失败（模式不支持等）回 None 交调用方收。
+    """
+    out = io.BytesIO()
+    try:
+        if keepAlpha:
+            img.save(out, "PNG", optimize=True)
+            return out.getvalue(), "image/png"
+        img.convert("RGB").save(out, "JPEG", quality=85)
+        return out.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001 - 交给外层同一降级口径
+        return None
 
 
 def normalize_image_for_llm(data: bytes, mime_type: str = "image/png") -> Tuple[bytes, str]:
-    """把图像归一化到 LLM 可接受的载荷尺寸。
+    """把图像归一化到 LLM 可接受的载荷尺寸——**闸门要的是结果，不是"努力过"**。
 
-    返回 (bytes, mime)：原始字节已超阈值时降采样重编码（无 alpha 通道 → JPEG，
-    有 alpha → PNG 保透明）；未超限或解码失败时原样返回。
+    返回 (bytes, mime)：原始字节超阈值时沿尺寸阶梯逐档缩放重编码，直到进限或触底；
+    未超限或解码失败时原样返回。触底后交最小的一版（仍是努力过的最小字节），
+    而不是超限的原件——发出去至少有机会不被 413 打死整轮。
     """
     if len(data) <= LLM_IMAGE_MAX_PAYLOAD_BYTES:
         return data, mime_type
@@ -306,20 +339,22 @@ def normalize_image_for_llm(data: bytes, mime_type: str = "image/png") -> Tuple[
 
         img = Image.open(io.BytesIO(data))
         img.load()
-        # 长边超限才缩放；等比缩到上限内
-        scale = LLM_IMAGE_MAX_DIMENSION / max(img.size)
-        if scale < 1:
-            img = img.resize(
-                (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
-            )
-        has_alpha = img.mode in ("RGBA", "LA", "PA") or (
+        hasAlpha = img.mode in ("RGBA", "LA", "PA") or (
             img.mode == "P" and "transparency" in img.info
         )
-        out = io.BytesIO()
-        if has_alpha:
-            img.save(out, "PNG", optimize=True)
-            return out.getvalue(), "image/png"
-        img.convert("RGB").save(out, "JPEG", quality=85)
-        return out.getvalue(), "image/jpeg"
+        best: Tuple[bytes, str] = (data, mime_type)
+        longEdge = min(max(img.size), LLM_IMAGE_MAX_DIMENSION)
+        for _round in range(_PAYLOAD_MAX_ROUNDS):
+            encoded = _encodeWithinPayload(_resizeToLongEdge(img, longEdge), hasAlpha)
+            if encoded is None:
+                break
+            if len(encoded[0]) < len(best[0]):
+                best = encoded
+            if len(best[0]) <= LLM_IMAGE_MAX_PAYLOAD_BYTES:
+                return best
+            if longEdge <= _PAYLOAD_MIN_LONG_EDGE:
+                break
+            longEdge = max(_PAYLOAD_MIN_LONG_EDGE, round(longEdge * _PAYLOAD_SHRINK_STEP))
+        return best
     except Exception:
         return data, mime_type
