@@ -99,17 +99,26 @@ class GitHubPushSkill(Skill):
                 execution_time=time.time() - start_time,
             )
 
-    async def _run_git_command(self, command: List[str], check_output: bool = True) -> Dict[str, Any]:
+    async def _run_git_command(self, command: List[str], check_output: bool = True,
+                               stdin_text: Optional[str] = None) -> Dict[str, Any]:
         """执行 Git 命令"""
         try:
             self.logger.info("执行 Git 命令: %s", ' '.join(command))
 
             # 使用 asyncio.create_subprocess_exec 在异步环境中执行
+            # stdin_text: 多行内容（如 commit message）必须走 stdin——
+            # Windows 命令行传参会把 '-m' 内嵌换行空格化（坑 2 单源防线
+            # 见 neurova/core/git_runner.py）
             process = await asyncio.create_subprocess_exec(
-                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=str(self.repo_path)
+                *command,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
+                cwd=str(self.repo_path)
             )
 
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await process.communicate(
+                input=stdin_text.encode("utf-8") if stdin_text is not None else None
+            )
 
             result = {
                 "command": " ".join(command),
@@ -213,8 +222,10 @@ class GitHubPushSkill(Skill):
                 execution_time=0.0,
             )
 
-        # 执行提交
-        result = await self._run_git_command(["git", "commit", "-m", message])
+        # 执行提交：message 走 stdin（'-F -'）——'-m' 内嵌换行在 Windows
+        # 命令行传参时被空格化，多行提交信息会合并成一行
+        result = await self._run_git_command(["git", "commit", "-F", "-"],
+                                             stdin_text=message)
 
         if result["success"]:
             # 获取提交哈希
