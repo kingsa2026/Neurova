@@ -28,6 +28,10 @@ from dataclasses import dataclass, replace
 from typing import Optional
 from urllib.parse import urlparse
 
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass(frozen=True)
 class ProviderCompat:
@@ -76,9 +80,21 @@ class ProviderCompat:
         return self._REASONING_EFFORT_MAP.get((thinking_effort or "").strip().lower())
 
     def merged(self, overrides: Optional[dict]) -> "ProviderCompat":
-        """显式声明覆盖静态表（字段级合并）。"""
+        """显式声明覆盖静态表（字段级合并）。
+
+        未登记的键**点名后忽略**：静默过滤会让"写错一个字母的声明"和"没有声明"
+        长得一模一样——运维照着文档加了 `supports_toolss`，实际啥也没变，
+        且无人报错。这里给出手改配置路径的最后一条读数（写侧另有拒绝）。
+        """
         if not overrides:
             return self
+        unknown = unknownCompatKeys(overrides)
+        if unknown:
+            logger.warning(
+                "not_supported: compat 声明含未登记的键 %s（可用键 %s）——已忽略",
+                "/".join(unknown),
+                "/".join(knownCompatKeys()),
+            )
         valid = {f for f in self.__dataclass_fields__ if f in overrides}
         if not valid:
             return self
@@ -163,6 +179,26 @@ def resolve_compat(
     for layer in layers:
         compat = compat.merged({f: getattr(layer, f) for f in layer.__dataclass_fields__})
     return compat.merged(compat_dict)
+
+
+# ── 声明面校验单源 ────────────────────────────────────────────────────────
+# 写侧（provider_manager.update_provider）与合并侧（ProviderCompat.merged）问的是
+# 同一件事："这个键名存不存在"。两处各写一份 `__dataclass_fields__` 推导迟早漂成
+# 不同答案（一边拒、一边放过），故收成一个出口（教义第 6 条）。
+def knownCompatKeys() -> list:
+    """compat 可声明的键名（唯一事实源 = ProviderCompat 的字段）。"""
+    return sorted(
+        name for name in ProviderCompat.__dataclass_fields__
+        if not name.startswith("_")
+    )
+
+
+def unknownCompatKeys(overrides: Optional[dict]) -> list:
+    """声明里不认识 ProviderCompat 的键，排序返回（空表 = 声明全认得）。"""
+    if not overrides:
+        return []
+    known = set(knownCompatKeys())
+    return sorted(str(key) for key in overrides if key not in known)
 
 
 def dropUnsupportedToolKeys(
