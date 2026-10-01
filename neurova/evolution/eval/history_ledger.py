@@ -23,8 +23,9 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# gate 拒绝的 reject_reason 前缀（约束闸与泄漏闸）
-_GATE_PREFIXES = ("constraints:", "leak:")
+# gate 拒绝的 reject_reason 前缀（约束闸与泄漏闸）——剪枝/归因等判读面
+# 共用此口径：闸拒绝是"提案质量问题"，与"实测无增益"是两种证据。
+GATE_REASON_PREFIXES = ("constraints:", "leak:")
 # abort 墙保留条数（对齐 rrsi history.render 的"墙只留最近几条"语义）
 _GATE_WALL_KEEP = 4
 _KEY_SAFE = re.compile(r"[^\w.-]")
@@ -99,6 +100,17 @@ class EvolutionLedger:
 
     # ── 消费面 ──
 
+    def keys(self) -> list[str]:
+        """已记账的业务键（文件名 stem；非法字符已被安全化折叠）。"""
+        try:
+            return sorted(p.stem for p in self._dir.glob("*.jsonl"))
+        except OSError:
+            return []
+
+    def tail(self, key: str, n: int) -> list[dict]:
+        """最近 n 条原始记录——不做墙压缩（剪枝/归因等判读面用）。"""
+        return self._read(key)[-max(0, int(n)):]
+
     def recent(self, key: str, n: int = 12) -> list[dict]:
         """最近 n 条记录；其中任何超过保留额的连续 gate 拒绝墙压缩为
         最近 4 条 + 汇总标记 {"gate_wall": 墙长}（紧跟在被压缩墙之后）。"""
@@ -118,7 +130,7 @@ class EvolutionLedger:
             run = []
 
         for r in records:
-            if r.get("accepted") is False and str(r.get("reject_reason", "")).startswith(_GATE_PREFIXES):
+            if r.get("accepted") is False and str(r.get("reject_reason", "")).startswith(GATE_REASON_PREFIXES):
                 run.append(r)
             else:
                 _flush_run()
