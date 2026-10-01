@@ -101,6 +101,17 @@ class SkillEvolutionService:
         self._dir = Path(base_dir) if base_dir else get_data_root() / "agents" / str(agent_id) / "evolution"
         self._proposals_file = self._dir / "proposals.json"
         self._runs_dir = self._dir / "runs"
+        self._history_ledger = None  # P1-4：懒创建
+
+    @property
+    def ledger(self):
+        """P1-4 编辑历史台账（history/<skill>.jsonl）——runner 逐候选记账 +
+        变异器回喂已证伪假设的数据源。"""
+        if self._history_ledger is None:
+            from neurova.evolution.eval.history_ledger import EvolutionLedger
+
+            self._history_ledger = EvolutionLedger(self._dir / "history")
+        return self._history_ledger
 
     # ── 评测集三级回退 ──
 
@@ -189,6 +200,7 @@ class SkillEvolutionService:
             judge=judge,
             mutate=mutate,
             bench_gate=bench_gate,
+            ledger=self.ledger,
         )
         if runner is None:  # factory 与上面双保险
             result.rejected = True
@@ -206,6 +218,7 @@ class SkillEvolutionService:
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
             dataset=dataset, iterations=iterations, noise_band=noise_band,
+            ledger_key=skill_id,
         )
         self._persist_run(skill_id, artifact_type, result)
 

@@ -32,12 +32,14 @@ def make_skill_evolution_runner(
     judge: Optional[Any] = None,
     llm_call: Optional[Any] = None,
     mutate: Optional[Any] = None,
+    ledger: Optional[Any] = None,
 ) -> Optional["SkillEvolutionRunner"]:
     """装配默认 runner;总开关关闭时返回 None(调用方走既有路径)。
 
     judge/llm_call:默认走 llm_router;测试可注入假判分器/假 LLM 通道。
     mutate:注入即替换 ReflectiveMutator(默认 None → runner 内自建)。
     bench_gate 缺省时接 RSI eval_harness 门(见 bench_gate.py 的诚实边界)。
+    ledger:P1-4 编辑历史台账(None = 不记账不回喂)。
     """
     if not text_evolution_enabled():
         logger.debug("NEUROVA_TEXT_EVOLUTION 未开启, 不装配文本进化 runner")
@@ -66,4 +68,6 @@ def make_skill_evolution_runner(
         # P0-3 泄漏审查：确定性预检恒开，LLM 层按配置（默认关）。
         leak_critic=LeakCritic(llm_review=cfg.leak_llm_review, llm_call=llm_call,
                                model=cfg.optimizer_model),
+        # P1-4 编辑历史台账
+        ledger=ledger,
     )
