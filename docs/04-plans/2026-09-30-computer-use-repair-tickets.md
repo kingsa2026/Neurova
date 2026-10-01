@@ -2040,7 +2040,83 @@ mine 样本1: 失败     mine 样本2: 未失败
 ⇒ 这条断言（`execution_time > 0`）两侧都随机翻，属**顺序/计时敏感**，不计入本批新增红；
 本批最后一次全域合跑（2657 passed）它也不在失败集合里。**未处置**：它的期望形态把"耗时非零"
 编码成了对时序的依赖，与本仓 `test_ci_wallclock_assertion_ledger.py` 记的那族同源，
-另开工单处理，不在这里顺手改判据。
+另开工单处理，不在这里顺手改判据。**→ 已由 §34 根修（量具换单调钟），这条判据保持原样不再放宽。**
+
+---
+
+## 34. §31.3 那条随机红的根因是量具：`execution_time` 换单调钟（2026-10-01，用户点处置）
+
+### 34.1 形状
+
+写侧在咽喉：`tool_executor.py` 的 `start = time.time()` / `elapsed = time.time() - start`，
+差值喂给轮级累加器 `add_turn_tool_elapsed()`，再由 `post_chat_pipeline.py:1784`
+经 `get_turn_tool_elapsed_measurement()` 落进 `execution_time` 列。
+
+Windows 上 `time.time()` 粒度约 **15.6ms**：进程内快工具整次调用落在同一个 tick 里
+⇒ 差值恰好 `0.0`。而累加器照样 `samples += 1`，三态里"测没测到"说"测到了"、
+"测到多少"交出 **假的 0.0**。所以 `> 0` 这条判据不是在挑判据的毛病，
+**它一直在如实报告"这台机器的量具量不出来"**——之前两侧随机翻，就是"这次调用跨没跨 tick 边界"。
+
+同一条列上工单 016 刚定过"0.0 是合法读数不得折成 NULL"，那次修的是读侧折叠；
+本单修的是写侧量具，两回事，别混成一件。
+
+### 34.2 判据（结构两条确定性红 + 三态一条）
+
+新守卫 [`tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py`](../../tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py)，
+按 AST 只查"喂给 `add_turn_tool_elapsed` 的那个函数"里的时长绑定：
+
+```
+E   AssertionError: 工具耗时的时长绑定走了墙钟差值 time.time()……命中点（绑定名, 时钟, 行号）：[(['start'], …)]
+E   AssertionError: 咽喉里没有任何单调时钟的时长绑定——计时被删了
+========================= 2 failed, 1 passed in 1.86s =========================
+```
+转绿 **3 passed**。两条正向守卫刻意配对：一条禁墙钟，另一条**要求确实存在单调绑定**——
+否则"把计时整段删掉"也算修好了，那会让该列退回 NULL，"跑了多久"再度无人测量（工单 009 的原点）。
+第三条钉住三态本身（未测→None；`add(0.0)` 即"测到过"且原样交出；多次相加）。
+
+### 34.3 稳定性证据（这才是要的东西）
+
+原来随机翻脸的配对（`test_tool_loop_funnel_probes.py` + `tests/unit/llm`）换钟后**连跑 4 次**：
+
+```
+第1次: 红数=1 含funnel=0     第2次: 红数=1 含funnel=0
+第3次: 红数=1 含funnel=0     第4次: 红数=1 含funnel=0
+唯一红项：llm/test_provider_tool_path.py::…test_openai_formula_consistent_with_native（既有红）
+```
+⇒ 判据一字未改（不放宽 `> 0`），红不再出现。对比 §31.3 采样时"两侧各翻一次"。
+
+### 34.4 范围边界：只改咽喉这一处；台账该登记就得登记
+
+`neurova/` 里 `time.time() - ` 命中 **403 处**，绝大多数是 uptime/TTL/最近活跃——
+那是"当前时刻的差值"，墙钟正当，**全仓禁墙钟就是误伤**。本单只管"喂给轮级耗时聚合"的那一处，
+守卫范围就写死在那个函数内（AST 只扫调用 `add_turn_tool_elapsed` 的那个函数体）。
+
+**我原本打算"独立落 `tests/unit/tools/`、不进 `CLOCK_LEDGER`"，这个判断被守卫当场否掉**：
+`test_clock_caliber_ledger.py::test_no_unledgered_process_clock` 的口径是
+"受保护子集里**逐文件**给结论"，新判据文件一登记进 CI 就落在它的扫描面里
+（`perf_counter`/`monotonic` 两个符号名即命中 wallClock）。已按规矩补登记一条结论，
+说明这份文件自己不计时、那些符号名只出现在被扫描的名单常量与断言文本里。
+同时另一条 `TestProtectedSubsetEntriesAreTracked` 也红了——判据文件先 `git add`
+再登记才对，两处都是"登记与文件同批"的既有纪律（记忆 [[project-docs-registration-guards]]）。
+
+### 34.5 顺带撞见的另一条红——A/B 过，不是本批
+
+`tests/unit/agent/test_computer_browser_tools.py::TestComputerActionBroadcast::test_broadcast_on_desktop_action`：
+`OSError: [Errno 22] Invalid argument: "...neurova-guest-<MagicMock name='mock._current_user_id' …>-d0a6cb.wsb"`
+——guest 工作区路径里嵌进了 MagicMock 的 repr（Windows 目录名不允许 `<>`）。
+把它单独跑、以及**只回退 `tool_executor.py` 到 HEAD 再跑**，两次都同样红
+（`1 failed, 4 passed`，回退后 sha256 校验还原 OK）⇒ **与换钟无关**，是别处的夹具/在途改动，
+登记在此不处置（不碰别人的在途域）。
+
+### 34.6 LOC 与回归
+
+生产 **+6/−2**（净 +4：咽喉两行换钟 + 为什么必须换的量具说明）。测试 **+115** 行不计入，
+另给 `CLOCK_LEDGER` 补一条结论（34.4）。
+`tests/unit/tools` + `tests/unit/agent` + `tests/unit/computer_use` 合跑 3016 passed / 7 failed，
+其中 6 条是既有集合（tools 2 + agent 4），第 7 条即 34.5 那条，已 A/B 排除本批。
+两条台账守卫（`test_clock_caliber_ledger` / `TestProtectedSubsetEntriesAreTracked`）
+首跑各红一条、补登记后转绿：合跑 47 passed。`ruff` 通过；判据与 CI 登记同批（清单 **459 条**）。
+§31.3 的"未处置"指针已改成"由 §34 根修、判据一字未放宽"。
 
 ### 30.4 实操错误（记下来，别再付一次）
 

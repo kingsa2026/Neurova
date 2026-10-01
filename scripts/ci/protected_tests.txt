@@ -1449,3 +1449,5 @@ tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py
 tests/unit/agent/test_perception_image_anthropic_parity.py
 # U-01 的拦路虎：多模态探测图自己解不开（原内联 blob chunk 结构坏）。逐文件单跑 2 passed
 tests/unit/llm/test_image_probe_fixture_is_real_png.py
+# §34：工具耗时的量具必须是单调钟（execution_time 的 0.0 是"量不出来"不是"快"）。逐文件单跑 3 passed
+tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py
