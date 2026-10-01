@@ -108,6 +108,15 @@ class EvalDataset:
         return ds
 
 
+def evaluation_split(dataset: "EvalDataset") -> list[EvalExample]:
+    """接受判据用的评测集选取（单一事实源）：holdout 优先，依次回退 val/train。
+
+    runner 的留出终审与 service 的噪声校准都必须经此函数取集，
+    保证两处口径永远一致。
+    """
+    return dataset.holdout or dataset.val or dataset.train
+
+
 def dataset_dir_for(name: str, base: Optional[Path] = None) -> Path:
     """评测集落盘目录:data/evolution/datasets/<name>/。"""
     root = callerPath(base or os.environ.get("NEUROVA_EVAL_DATASETS_DIR"), "evolution/datasets")
