@@ -281,6 +281,51 @@ class SkillEvolutionService:
         save_cached_band(cache_path, fingerprint, band)
         return band
 
+    # ── P1-7b 双臂试评 ──
+
+    async def ab_compare(self, *, baseline_text: str, candidate_text: str,
+                         dataset: EvalDataset, config: EvolutionConfig,
+                         agent: Any = None, judge: Any = None) -> dict:
+        """双臂试评：两份正文在同一任务集上、同判分器对照。
+
+        任务集：heldout 优先（P0-2 真留出集，未被搜索过程消耗），否则
+        判据集（evaluation_split）。**只读评测**——不产提案、不改技能、
+        不入台账，供审批人在 decide 之前对候选做干净集核验。
+        """
+        from neurova.evolution.eval.dataset import evaluation_split
+
+        split = dataset.heldout or evaluation_split(dataset)
+        if not split:
+            return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
+                    "candidate_avg": 0.0, "delta": 0.0, "per_task": []}
+        if judge is None:
+            from neurova.evolution.eval.fitness import LLMJudge
+
+            judge = LLMJudge(config)
+        from neurova.evolution.eval.runner import SkillEvolutionRunner
+
+        runner = SkillEvolutionRunner(
+            config, judge=judge,
+            agent=agent or SimulatedAgent(model=config.judge_model),
+        )
+        # 同包装配：复用 runner 的评测路径（judge 适配/执行器注入同源），
+        # 禁止另写第二套打分。
+        baseline_avg, baseline_details = await runner._evaluate(baseline_text, split, "skill")
+        candidate_avg, candidate_details = await runner._evaluate(candidate_text, split, "skill")
+        per_task = [
+            {"task_input": ex.task_input,
+             "baseline": round(float(b), 4), "candidate": round(float(c), 4)}
+            for (ex, b, _o, _f), (_ex2, c, _o2, _f2) in zip(baseline_details, candidate_details)
+        ]
+        return {
+            "task_split": "heldout" if dataset.heldout else "selection",
+            "n": len(split),
+            "baseline_avg": round(float(baseline_avg), 4),
+            "candidate_avg": round(float(candidate_avg), 4),
+            "delta": round(float(candidate_avg - baseline_avg), 4),
+            "per_task": per_task,
+        }
+
     # ── 提案审批(人工闭环终点)──
 
     def list_proposals(self, status: Optional[str] = None) -> list[dict]:
