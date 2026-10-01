@@ -269,6 +269,10 @@ class SkillEvolutionService:
         cached = load_cached_band(cache_path, fingerprint)
         if cached is not None:
             return cached
+        # P2-9 语义修正：判分不可用时不校准不缓存——给死 judge 做的校准
+        # 是伪证据（全 0 分的 sd=0 会被当成"确定性评测"）。
+        if not await runner._judge_available(baseline_text, split, artifact_type):
+            return None
         try:
             band = await calibrate_noise_band(
                 baseline_text=baseline_text, artifact_type=artifact_type,
@@ -277,6 +281,10 @@ class SkillEvolutionService:
             )
         except Exception as e:  # noqa: BLE001 - 校准失败不造证据，诚实降级为无带
             logger.debug("噪声带校准失败, 判据回退 min_improvement: %s", e)
+            return None
+        # 校准期出现单例失败（P2-9 记 0）→ 得分被污染、δ 不可信，不缓存不使用
+        if getattr(runner, "_run_eval_errors", 0):
+            logger.debug("校准期出现单例评测失败, 丢弃本次噪声带")
             return None
         save_cached_band(cache_path, fingerprint, band)
         return band
