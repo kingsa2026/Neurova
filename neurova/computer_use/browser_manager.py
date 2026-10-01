@@ -1714,6 +1714,31 @@ class BrowserManager:
         cfg = (self._config or {}).get("camofox") or {}
         return str(cfg.get("base_url") or os.environ.get("NEUROVA_CAMOFOX_URL") or DEFAULT_CAMOFOX_URL)
 
+    def _requireCamofoxSelectable(self, name: str) -> None:
+        """选路命中 camofox 时先问能力读数——不可达就具名拒绝，不代宿主去拉起外部服务。
+
+        改前的形状：`_resolve_backend` 只看配置位 `_camofox_enabled`，于是"配了 URL 但
+        服务没起"会一路走到 `initialize()` 的 supervisor 分支，而那里的
+        `NEUROVA_CAMOFOX_AUTOSTART` 默认为 True。能力面（T-07）早就报得出
+        `configured-unreachable`，选路上却没有消费方——只写不读就是断点（教义第 6 条）。
+
+        放行有两种：探到了服务（`available`），或宿主**显式**开过 autostart
+        （那条拉起是它自己要的，不是默认值给的）。两者都没有时给出的文案点名了
+        唯一能修的人与那个开关名。
+        """
+        from neurova.computer_use import capability_state
+        from neurova.computer_use.camofox_supervisor import get_camofox_supervisor
+
+        if capability_state.reading("camofox").usable():
+            return
+        if get_camofox_supervisor().autostartExplicit():
+            return
+        raise RuntimeError(self._capabilityRefusal(
+            name,
+            "选路命中 camofox 但探不到服务；宿主未显式开启 NEUROVA_CAMOFOX_AUTOSTART，"
+            "本进程不会代它拉起外部服务",
+        ))
+
     def _capabilityRefusal(self, name: Optional[str], context: str) -> str:
         """后端起不来时给出的**三态**拒绝原文（T-07）。
 
@@ -1734,6 +1759,8 @@ class BrowserManager:
             name = self._resolve_backend(backend_name)
         except RuntimeError as e:
             raise RuntimeError(self._capabilityRefusal(backend_name, str(e))) from e
+        if name == "camofox":
+            self._requireCamofoxSelectable(name)
         with self._lock:
             if name == "camofox" and self._camofox_enabled:
                 backend = self._get_or_create_user_camofox_backend()

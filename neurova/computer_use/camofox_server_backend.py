@@ -98,13 +98,21 @@ class CamofoxServerBackend(BrowserBackend):
             self._initialized = True
             return True
         except Exception as e:
-            logger.warning("camofox-browser 直连 health 失败(%s): %s——尝试 supervisor 拉起", self._base_url, e)
+            logger.warning("camofox-browser 直连 health 失败(%s): %s", self._base_url, e)
             self._client = None
-            # 尝试 supervisor 拉起(autostart=true 时才会真启动)
+            # 尝试 supervisor 拉起——但**只在宿主显式开过 autostart 时**去问它。
+            # `NEUROVA_CAMOFOX_AUTOSTART` 默认为 True，把那个默认当授权，就等于让
+            # agent 的首次浏览器调用决定去拉起一个本仓不验证的外部服务（owner 归 host）。
             try:
                 from neurova.computer_use.camofox_supervisor import get_camofox_supervisor
 
-                if not await get_camofox_supervisor().ensure_started():
+                supervisor = get_camofox_supervisor()
+                if not supervisor.autostartExplicit():
+                    logger.info(
+                        "camofox 不可达且宿主未显式开启 NEUROVA_CAMOFOX_AUTOSTART——不起外部服务"
+                    )
+                    return False
+                if not await supervisor.ensure_started():
                     logger.error("supervisor 拉起 camofox-browser 失败")
                     return False
             except Exception as sp_e:
