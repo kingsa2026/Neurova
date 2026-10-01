@@ -46,7 +46,7 @@
 | **T-09** | 截图从不进模型上下文 | — | 预估 +120 / **实测净 +214**（去向 §24.4） | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改） | **本轮接线完成**（§24）：轮级共享槽 + 生产者接缝（在 WS 守卫前落账）+ 三闸装配只挂请求副本；判据 12 例先红后绿；活体 ✅ 到"请求副本里带一张可解码成合法 PNG 的 data URL，原始 messages 一字未变"。**唯一未证**：provider/模型真收到（本会话无凭据、未起后端）；Anthropic 环未同形（§24.5） |
 | **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 `96eb6e58`；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
-| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**、**camofox 那条口在真 HTTP 传输 + 契约桩上 ✅**（§13.3，正对照 159 字符 / 空正文回 `snapshot-empty` 且拒绝路径不再按旧事实动作）；Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包） |
+| **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | 无 | 入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**；**camofox 那条口已在真 HTTP 传输上取**，且已从散文升为**入库守卫 + 进 CI**（§27：7 例，三个变异对照各自咬住预期条目，M1 摘掉拒绝分支时红形即本单的原始谎报形态）。Playwright 侧原"空正文"形态 5 个候选态均未复现。唯一未证：真实容器自身的字段与错误形态（装它需授权第三方全局包，见 U-08/U-09） |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
 | **T-14** | 浏览器/爬虫集成测试 26 例常驻红：断言的是从未实现的设计 | — | 拍板估 +400 / **实测净 +299**（§25.5 + §26.5） | 中（含合规面） | ✅ **D-7 已拍**（§19 补契约；§25.4 的 B/C 两族已按建议处置） | **26 例常驻红 → 0**（§25/§26）：① 配置面与 URL 选路、③ 爬虫三旋钮真生效（`obey_robots` fail-closed）、② B/C 按活契约改判/退役 + 签名反向锁；**五个文件 40 例全绿并全部登记进 CI 被测集**（454 条），"红只在本地出现、次次要人肉解释"归零。收尾探针另抓出一个真缺陷：camofox 的**配置面谓词**与**授权门**混用，导致那次真 `/health` 探测在 playwright 在册的机器上从不发生（§26.4） |
 | **T-15** | 子进程文本读取不落 encoding ⇒ 机器 ANSI 码页决定成败，文档守卫族整族假红 | — | 已修 13 处 + 棘轮；余 97 处待清 | 中 | 无 | **本轮落地**（§15）：`neurova.core.proc_text.runText/decodeChild` 单源入口，**生产码 12 处全部改走它**（docker_builder 6、camofox_supervisor 3、env_check 2、exec_sandbox 1）+ 文档扫描器 1 处；棘轮基线 109→**97**，`neurova/` 另设**零基线档**。本机实测该守卫族 **13 FAILED + 6 ERROR → 30 passed**；沙箱活体证明 UTF-8 输出不再被吞成空串 |
@@ -1773,5 +1773,58 @@ T-09 的"模型真收到这张图"（要真 vision 模型的工具轮）、T-12 
 规划时顺带量到一条**新的实测事实**：`_probeVision` 的"实测"档问缓存里的 `"vision"`
 （`capability_state.py:251`），而全仓唯一写入方用的是 `CAP_SUPPORTS_MULTIMODAL = "supports_multimodal"`
 （`model_capability_cache.py:31`，写入点 `provider_manager.py:1756`）⇒ **该档结构性不可达**，
-docstring 里"实测 > 声明"的证据次序今天只有声明档在生效。登记在该文 U-05，
-是否当场修由 U-01 的读数决定（不在本批顺手改）。
+docstring 里"实测 > 声明"的证据次序今天只有声明档在生效。本机实测佐证：`vision=unknown`、
+两个名字缓存都取到 `null`、`model_metadata` 该模型条目为空 `{}`。
+登记在该文 U-05，是否当场修由 U-01 的读数决定（不在本批顺手改）。
+
+---
+
+## 27. U-07 落地 · camofox 产出侧语义升成**真传输入库守卫**（2026-10-01）
+
+### 27.1 补的是哪一格断链
+
+§13.3 那次"真 HTTP 传输 + 契约桩"跑通之后，**证据只活在散文里**——探针即用即删，没进仓、
+没进 CI。而入库的那批 camofox 判据（`test_empty_snapshot_not_success.py::TestCamofoxParity`）
+经 `_make_backend`（`test_camofox_server_backend.py:37`）把 `b._client` 整个换成 MagicMock，
+**连 httpx 对象都不是真的**。于是新增
+[`tests/integration/test_camofox_contract_stub_transport.py`](../../tests/integration/test_camofox_contract_stub_transport.py)
+（7 例）：仓内起最小 HTTP 服务做对端，真 `httpx.AsyncClient`、真 TCP 连接、真 JSON 编解码、
+真 tab 注册，只有服务本身是桩。supervisor **全程替身**——真实现会拉起外部服务，
+测试里一次 `ensure_started` 都不许发生（正例显式断言这一点）。
+
+### 27.2 判据与三个变异对照（这文件不是绿着编的）
+
+首跑 7 passed（它守的是**既有**正确行为，属纯守卫，同 T-02；判据的承重由变异证明）：
+
+| 变异（临时改生产码，改后立刻还原） | 实际转红条目 | 红形 |
+|---|---|---|
+| M1 `dom_snapshot` 空正文分支前置 `False and`（= 摘掉拒绝） | **恰 3 红**：`test_blankSnapshotFailsWithNamedMarkerNotEmptySuccess` 两参 + `test_actionAfterBlankSnapshotSendsNoClickToContainer` | `assert True is False` / `BrowserResult(success=True, data={'snapshot': '', 'refs_count': 2, …})` —— **T-12 的原始谎报形态在真 socket 上被复现** |
+| M2 `tab_id = data.get("targetId") or ""`（摘掉 `tabId` 读点） | **恰 1 红**：`test_navigateBindsContainerTabIdToFollowingRequests` | 后续快照打到 `/tabs//snapshot`，tab 绑定断言当场咬住 |
+| M3 supervisor 拉不起来时 `return True`（谎报就绪） | **恰 1 红**：`test_unreachableHealthStaysUnreadyAndAsksSupervisorOnce` | 期望 `initialize() is False`，实回 True |
+
+还原法：仓外备份 + 每步 `sha256sum -c` 校验（基线 `8678ba6f…` 三次比对全 OK），
+还原后 `git status -- neurova/` 为空 ⇒ 生产码零改动、也没踩到别人的在途改动。
+
+### 27.3 回归、登记，以及一次**未复现**的超时
+
+- `tests/unit/computer_use` 单块：**508 passed / 2 skipped / 0 failed**。
+- 与六个 `tests/integration/` 文件合跑：**556 passed / 0 failed（59.30s）**。
+- 如实记：首次合跑撞到一次 `test_computer_param_no_phantom_knobs` 的 30s per-test timeout
+  （那条守卫逐个读 `.py` 取参数命中数，冷缓存下最慢）。**同命令复跑未复现**；
+  本轮不把它解释成"没问题"，若后续再出现即单开条目处理。
+- CI 登记：新文件进 `scripts/ci/protected_tests.txt`（清单 **455 条**）。
+  登记与文件**同批**——先 `git add` 该文件再登记，否则
+  `test_dev_path_and_runtime_dep_guards.py::TestProtectedSubsetEntriesAreTracked` 当场红。
+  三条 CI 守卫合跑 71 passed / 1 skipped。`ruff check` 该文件 All checks passed。
+
+### 27.4 边界：这判据**不**证明什么
+
+桩的响应形状按 `camofox_server_backend` 自家读点（`tabId` / `snapshot` / `refsCount` /
+`truncated` / `url`）声明，所以它证的是"**我们对契约的解释在真传输上自洽**"，
+**不是"真实服务就返回这个形状"**。后者仍是 §26.6 挂着的 T-12 唯一未合验收（U-08/U-09，
+需授权起外部服务）。这句话写在判据文件的模块 docstring 里——删掉它就会有人把它当活体。
+
+### 27.5 LOC
+
+生产 **0**（未动一行实现，只动过又还原用于变异对照）。测试 +232 行，不计入净 LOC。
+
