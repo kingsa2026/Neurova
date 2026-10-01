@@ -43,6 +43,11 @@ class EvolutionConfig:
     # bench gain 低于 -tolerance 即拒绝变体(无论技能分多高)
     bench_tolerance: float = 0.02
 
+    # ── 泄漏审查（P0-3，评测前 critic）──
+    # 确定性预检（背题标记/退化 no-op）恒开；LLM 六类审查默认关——
+    # 打开后每次候选审查多一次 LLM 调用，故障时诚实降级不误杀。
+    leak_llm_review: bool = False
+
     # ── 评测噪声地板（RRSI 对齐：接受阈值 = max(min_improvement, δ)）──
     # δ>0 表示已校准（历史校准产物回填或注入 NoiseBand 时的兜底来源）。
     # 0 = 未校准，判据回退 min_improvement——默认行为与旧版逐字节一致。
