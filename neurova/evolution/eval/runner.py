@@ -131,6 +131,7 @@ class SkillEvolutionRunner:
         mutate: Optional[Callable[..., Awaitable[str]]] = None,
         bench_gate: Optional[Callable[[str, str], float]] = None,
         constraints: Any = None,
+        leak_critic: Any = None,
     ):
         self.config = config
         self.judge = judge
@@ -138,6 +139,9 @@ class SkillEvolutionRunner:
         self._mutate_fn = mutate
         self._bench_gate = bench_gate
         self._constraints = constraints
+        # P0-3 泄漏审查：None = 不启用（行为与旧版一致）；注入 LeakCritic 后
+        # 候选在约束闸之后、评测之前过闸，命中即跳过并留审计标记。
+        self._leak_critic = leak_critic
 
     # ── 内部:变异 ──
 
@@ -261,6 +265,7 @@ class SkillEvolutionRunner:
         result.train_before = await self._evaluate_avg(baseline_text, tune, artifact_type)
 
         best_text, best_score = baseline_text, result.train_before
+        leak_markers: Optional[frozenset] = None  # P0-3：按数据集懒提取，一次缓存
         n_iters = self.config.iterations if iterations is None else iterations
 
         for _ in range(max(0, n_iters)):
@@ -275,6 +280,19 @@ class SkillEvolutionRunner:
                 if failed:
                     result.constraint_failures.extend(failed)
                     logger.debug("候选被约束闸拒绝: %s", failed)
+                    continue
+
+            # P0-3 泄漏审查：评测前拦截背题/退化候选（宁漏勿误杀）。
+            if self._leak_critic is not None:
+                if leak_markers is None:
+                    leak_markers = self._leak_critic.build_markers(dataset)
+                verdict = await self._leak_critic.review(
+                    candidate_text=candidate, baseline_text=baseline_text,
+                    markers=leak_markers)
+                if verdict.leaked:
+                    result.constraint_failures.append(f"leak:{verdict.category}")
+                    logger.debug("候选被泄漏闸拒绝(%s): %s",
+                                 verdict.category, verdict.evidence[:100])
                     continue
 
             result.iterations_run += 1

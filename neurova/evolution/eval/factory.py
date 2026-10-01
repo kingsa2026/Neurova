@@ -44,6 +44,7 @@ def make_skill_evolution_runner(
         return None
     from neurova.evolution.eval.constraints import ConstraintValidator
     from neurova.evolution.eval.fitness import LLMJudge
+    from neurova.evolution.eval.leak_critic import LeakCritic
     from neurova.evolution.eval.runner import SkillEvolutionRunner
 
     cfg = config or EvolutionConfig()
@@ -62,4 +63,7 @@ def make_skill_evolution_runner(
         mutate=mutate,
         bench_gate=bench_gate,
         constraints=ConstraintValidator(cfg) if with_constraints else None,
+        # P0-3 泄漏审查：确定性预检恒开，LLM 层按配置（默认关）。
+        leak_critic=LeakCritic(llm_review=cfg.leak_llm_review, llm_call=llm_call,
+                               model=cfg.optimizer_model),
     )
