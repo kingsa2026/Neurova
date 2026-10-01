@@ -28,6 +28,29 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+def _redProbeSquareBase64(edge: int = 32) -> str:
+    """现造一张 edge×edge **纯红** PNG 的 base64（多模态探测图）。
+
+    为什么不用内联字符串：原先那段 base64 有合法 PNG 签名却过不了解码器（chunk 结构坏），
+    严格校验媒体的网关直接回 `400 invalid image base64 content`，于是**所有**真探测都
+    只能给出 `inconclusive`——vision 能力实测不出，依赖该读数的闸门永远开不了。
+    用 zlib+struct 现拼不引新依赖：IHDR/IDAT/IEND 三段齐、CRC 正确，8bit truecolor。
+    """
+    import base64
+    import struct
+    import zlib
+
+    def _chunk(kind: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+
+    row = b"\x00" + (b"\xff\x00\x00" * edge)          # 每行：filter=0 + 纯红像素
+    ihdr = struct.pack(">IIBBBBB", edge, edge, 8, 2, 0, 0, 0)  # 8bit truecolor
+    png = (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
+           + _chunk(b"IDAT", zlib.compress(row * edge, 9)) + _chunk(b"IEND", b""))
+    return base64.b64encode(png).decode("ascii")
+
+
 class OpenAIProvider(BaseProvider):
     """
     OpenAI API Compatible Provider
@@ -533,13 +556,8 @@ class OpenAIProvider(BaseProvider):
             },
         )
 
-    # 32x32 纯红 PNG（约 96 字节，探测成本可忽略）
-    _IMAGE_PROBE_PNG_BASE64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GOqjAAAAAXNSR0IArs4c6QAAABxpRE9YAAAAAgAAAAAAAACw"
-        "AAAAAQAAAADtDZoWAAAAAmJLR0QA/v2C1wAAABl0RVh0U29mdHdhcmUAdXBzY2FsZSBpbWFnZccAaPAAAAAZdEVY"
-        "dENyZWF0aW9uIFRpbWUAMjAvMDEvMDbT2hveAAAAHHRFWHRTb2Z0d2FyZQBSYXN0ZXJiYW5rIHNjb3BlyhR3FwAA"
-        "AABJRU5ErkJggg=="
-    )
+    # 32x32 纯红 PNG（现造，约百来字节，探测成本可忽略）——见 `_redProbeSquareBase64`
+    _IMAGE_PROBE_PNG_BASE64 = _redProbeSquareBase64()
     _IMAGE_PROBE_PROMPT = "What is the single dominant color of this image? Reply with ONLY the color name."
 
     # 媒体拒绝关键词（请求被明确拒绝 → 判不支持）
