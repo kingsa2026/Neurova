@@ -25,16 +25,35 @@
 没配就是默认链。把它照原样实现会造出与配置面并存的第二套选路口径，故只做反向锁。
 """
 
+import pytest
+
 from neurova.computer_use.browser_manager import BrowserManager, BrowserResult
 
 
-def testUrlArgIsNeverEchoedBackAsABackendName():
+@pytest.fixture
+def registeredManager(monkeypatch):
+    """造一个**后端在册表确定**的 manager，不随本机装了哪些可选依赖而变。
+
+    `_backends` 由 `HAS_PLAYWRIGHT` / `HAS_SCRAPLING` 的真实探测填成，
+    而这两个包**不在 CI 薄锁里**（`requirements-ci.txt` 明写刻意排除 playwright）。
+    于是"在册表为空"是 CI 的常态而非异常——把机器状态当判据前提，
+    本机绿、CI 红，且红得与判据主题无关。这里把探测位钉成 True，
+    判据讨论的是**选路口径**，它不该取决于这台机器恰好装了什么。
+    """
+    from neurova.computer_use import browser_manager as bm
+
+    monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", True)
+    monkeypatch.setattr(bm, "HAS_SCRAPLING", True)
+    return lambda **kwargs: BrowserManager(**kwargs)
+
+
+def testUrlArgIsNeverEchoedBackAsABackendName(registeredManager):
     """路由的反向锁：入参是 URL 时，返回值只能是后端名。
 
     把 URL 原样当后端名返回是最坏的一种错——调用方拿到一个"看着像名字"的值，
     下一跳才在 `_get_backend` 处炸，故障点离根因隔了一层。
     """
-    manager = BrowserManager(config={})
+    manager = registeredManager(config={})
     resolved = manager._resolve_backend("https://example.com/app/dashboard")
     assert "://" not in resolved, resolved
     assert resolved in set(manager._backends) | {"camofox"}, \
