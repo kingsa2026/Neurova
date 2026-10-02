@@ -257,6 +257,73 @@ async def get_token_usage(request: Request):
     }
 
 
+def _sessionMessages(agent_id: str, session_id: str) -> List[Dict[str, Any]]:
+    """取单个会话的全部历史消息（供时长/活跃日口径用）。
+
+    仓库实现可能不带 `get_history`（抽象基类之外的替身），且读单会话失败
+    不应该拖垮整张看板——返回空列表，调用方按「无消息」处理。
+    """
+    if not session_id:
+        return []
+    try:
+        from neurova.session_repository import get_session_repository
+
+        repo = get_session_repository()
+        reader = getattr(repo, "get_history", None)
+        if reader is None:
+            return []
+        return list(reader(agent_id, session_id) or [])
+    except Exception:  # noqa: BLE001 — 单会话读取失败不影响主看板
+        return []
+
+
+def _messageSpanSeconds(messages: List[Dict[str, Any]]) -> int:
+    """会话内**消息时间戳**的跨度（最后一条 - 第一条），无消息或不足两条 → 0。
+
+    为什么不用 `updated_at - created_at`：会话文件的 `created_at` 是**该会话首次
+    产生消息**的时刻，`updated_at` 是**最后一次活动**的时刻——两者之差是会话的
+    「跨醒时长」（用户挂着页面过夜、整日不关就是这个数），不是「聊天时长」。
+    2026-10-02 截图实证：空库下该口径给出「最长聊天时长 11.1 小时」
+    （09:00 建会 → 20:06 最后一条消息），与「累计 Token 0」自相矛盾。
+
+    时间戳解析失败/缺失的消息直接跳过（诚实统计：不拿 0 冒充极短会话）。
+    """
+    stamps: List[datetime] = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        raw = str(m.get("timestamp") or "").strip()
+        if not raw:
+            continue
+        try:
+            stamps.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+        except ValueError:
+            continue
+    if len(stamps) < 2:
+        return 0
+    return max(0, int((max(stamps) - min(stamps)).total_seconds()))
+
+
+def _messageActivityDates(messages: List[Dict[str, Any]]) -> set:
+    """会话内**有消息的那些天**（消息时间戳的日期）。
+
+    为什么不取 `created_at[:10]`：那是「建会日」。用建会日当活跃日，
+    「11 天前建过一个会话」会被算成「连续活跃 11 天」，与 token 是否为 0
+    无关——这正是截图里「累计 Token 0 / 当前连续 11 天」的自相矛盾。
+    """
+    days = set()
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        raw = str(m.get("timestamp") or "").strip()
+        if len(raw) < 10:
+            continue
+        day = raw[:10]
+        if day[:4].isdigit() and day[4] == "-":
+            days.add(day)
+    return days
+
+
 def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
     """空库零态（契约完整，绝不 500）：summary 全 0、heatmap 连续窗口全 0。"""
     today = date.today()
@@ -354,12 +421,19 @@ async def get_usage_overview(
         total = history.total(user_id=user_id)
         peak = history.peak_daily(user_id=user_id)
 
-        # 活跃日期集 = token 日期 ∪ 会话创建日期（聊天但无 token 的日子也算活跃）
+        # 活跃日期集 = token 日期 ∪ **会话有消息的那些天**。
+        # 会话消息时间戳是「这天有没有真的聊过」的唯一事实源；`created_at`
+        # 只是建会时刻，拿它当活跃日会把「N 天前建过一个会话」算成「连续 N 天」。
         active_dates = {r["usage_date"] for r in daily}
+        longest_session_seconds = 0
         for s in sessions:
-            created = str(s.get("created_at") or "")[:10]
-            if len(created) == 10 and created[:4].isdigit():
-                active_dates.add(created)
+            agent_id = str(s.get("agent_id") or "")
+            session_id = str(s.get("session_id") or "")
+            messages = _sessionMessages(agent_id, session_id)
+            active_dates |= _messageActivityDates(messages)
+            longest_session_seconds = max(
+                longest_session_seconds, _messageSpanSeconds(messages)
+            )
         current_streak, longest_streak = compute_streaks(active_dates, today)
 
         cache_summary: Dict[str, Any] = {}
@@ -367,18 +441,6 @@ async def get_usage_overview(
             cache_summary = history.cache_totals(user_id=user_id)
         except Exception:  # noqa: BLE001 — cache 汇总失败不影响主看板
             cache_summary = {}
-
-        longest_session_seconds = 0
-        for s in sessions:
-            try:
-                created = str(s.get("created_at") or "").replace("T", " ")
-                updated = str(s.get("updated_at") or "").replace("T", " ")
-                if not created or not updated:
-                    continue
-                delta = datetime.fromisoformat(updated) - datetime.fromisoformat(created)
-                longest_session_seconds = max(longest_session_seconds, int(delta.total_seconds()))
-            except Exception:
-                continue
 
         return {
             "scope": scope,
