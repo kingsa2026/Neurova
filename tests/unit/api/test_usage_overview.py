@@ -144,28 +144,63 @@ class TestScope:
 
 class TestLongestSession:
     @pytest.mark.asyncio
-    async def test_longest_session_seconds_from_sessions(self, monkeypatch):
+    async def test_longest_session_seconds_is_message_span(self, monkeypatch):
+        """会话时长 = 消息时间戳跨度（最后一条 - 第一条），不是 updated-created。
+
+        旧口径取 `updated_at - created_at`，那是会话「跨醒时长」——用户挂着
+        页面过夜时能给出 11 小时，而当天实际只聊了 5 分钟。口径修正见
+        tests/unit/api/test_usage_overview_truthful_kpi.py。
+        """
         _record("u1", days_ago=0, tokens=10)
         sessions = [
             {
                 "user_id": "u1",
+                "agent_id": "a1",
+                "session_id": "s1",
+                # 建会到收工跨 1 小时，但真实消息只跨 5 分钟
                 "created_at": "2026-09-01T10:00:00",
-                "updated_at": "2026-09-01T10:05:00",  # 300s
+                "updated_at": "2026-09-01T11:00:00",
+                "messages": [
+                    {"role": "user", "timestamp": "2026-09-01T10:00:00"},
+                    {"role": "assistant", "timestamp": "2026-09-01T10:05:00"},
+                ],
             },
             {
                 "user_id": "u1",
+                "agent_id": "a1",
+                "session_id": "s2",
                 "created_at": "2026-09-02T08:00:00",
-                "updated_at": "2026-09-02T08:01:30",  # 90s
+                "updated_at": "2026-09-02T09:00:00",
+                "messages": [
+                    {"role": "user", "timestamp": "2026-09-02T08:00:00"},
+                    {"role": "assistant", "timestamp": "2026-09-02T08:01:30"},
+                ],
             },
             {
                 "user_id": "u2",
+                "agent_id": "a1",
+                "session_id": "s3",
                 "created_at": "2026-09-02T08:00:00",
-                "updated_at": "2026-09-02T09:00:00",  # 3600s（用户隔离下不可见）
+                "updated_at": "2026-09-02T09:00:00",
+                "messages": [
+                    {"role": "user", "timestamp": "2026-09-02T08:00:00"},
+                    {"role": "assistant", "timestamp": "2026-09-02T09:00:00"},
+                ],  # 3600s，但属 u2，用户隔离下不可见
             },
         ]
+
+        class _Repo:
+            def list_sessions(self, user_id="", agent_id=""):
+                return [s for s in sessions if not user_id or s["user_id"] == user_id]
+
+            def get_history(self, agent_id, session_id, max_messages=0):
+                for s in sessions:
+                    if s["agent_id"] == agent_id and s["session_id"] == session_id:
+                        return list(s["messages"])
+                return []
+
         monkeypatch.setattr(
-            "neurova.session_repository.get_session_repository",
-            lambda: SimpleNamespace(list_sessions=lambda user_id="", agent_id="": [s for s in sessions if not user_id or s["user_id"] == user_id]),
+            "neurova.session_repository.get_session_repository", lambda: _Repo()
         )
         res = await stats_endpoint.get_usage_overview(
             MagicMock(), days=7, trend_days=7, current_user={"user_id": "u1"}
