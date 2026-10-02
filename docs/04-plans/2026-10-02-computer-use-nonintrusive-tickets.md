@@ -205,11 +205,37 @@ T-08 ← RS 会话池（档 C，本轮不开工）
 
 ## 3. 收口清单（做完必须逐项打钩，防断点遗留）
 
-- [ ] `channel`/`plane`/顶层 `command`/`streamId`/`exitCode` 五键**全仓零出现**（防双源回流）
+- [x] `channel`/`plane`/顶层 `command`/`streamId`/`exitCode` 五键**全仓零出现**
+      （W1-T01 键位级守卫在位，已入 `protected_tests.txt`；只扫带引号字面量会漏
+      `channel?: string` 这种类型声明形态，判据已按变异实测升级）
 - [ ] `ROUTES`/`DELIVERIES` 每个值都有产出点且有映射（无空值、无自由文本通道名）
-- [ ] `NEUROVA_ALLOW_GLOBAL_INPUT` env 闸退役，`global_input` 只经审批面放行
-- [ ] `AGENT_COMMAND` 有生产者与消费者（死枚举接活守卫在位）
-- [ ] 终端态的"非 PTY"限制在 description 与面板两处都可见
+      —— **映射半边已成守卫，产出半边未完成**：`shell` 等 W1-T03、`atspi`/`xdotool` 等 W1-T06。
+      即当前这三个新值正是 W1-T06 判据里禁止的那种"词表可用但永不产出"的空值，
+      本批刻意保留（词表先收口可防设计稿那四键回流），但**不许当成已交付**——
+      若 W1-T03/W1-T06 最终不做，必须回头摘掉对应值，不许留空词表。
+- [ ] `NEUROVA_ALLOW_GLOBAL_INPUT` env 闸退役，`global_input` 只经审批面放行（W1-T04）
+- [ ] `AGENT_COMMAND` 有生产者与消费者（死枚举接活守卫在位）（W1-T05）
+- [ ] 终端态的"非 PTY"限制在 description 与面板两处都可见（W1-T03）
 - [ ] 档 B 各条在提交说明与台账中显式标注"未做真机活体"，不以单测全绿冒充端到端
-- [ ] 新判据逐文件跑绿后同批进 `scripts/ci/protected_tests.txt`；若新增耗时断言，
-      时钟/墙钟台账需**新登**（该台账现无 computer-use 条目）
+- [x] 新判据逐文件跑绿后同批进 `scripts/ci/protected_tests.txt`（W1-T01/T-01b 四个文件已登）；
+      本批未新增耗时断言，故时钟/墙钟台账无需新登（三道登记守卫 57 passed 为证）
+- [ ] dock 渲染的浏览器内肉眼验收（W1-T01 以组件级判据 `actionBadgeText` + 模板接线代替，
+      **未声称已在浏览器里看过**）
+
+## 4. 本批取证顺手撞见的相邻断点（登记，不在本批顺手修）
+
+1. **`NeurUI/package.json` 的 `lint` 脚本不可用**：命令调 `eslint`，但 eslint 既不在
+   `dependencies`/`devDependencies`，也不在 `node_modules/.bin`，实跑报
+   "eslint 不是内部或外部命令"。而 `AGENTS.md` 第 4 节把 `npm run lint` 列为前端必跑三项之一
+   ——即该纪律项在本机**一直无法满足**，且失败形态是 shell 层报错，容易被当成环境问题跳过。
+   处置需另拍：补依赖并全量过一遍既有代码（会翻红一大片，属独立决定），
+   或如实把该项从纪律里摘掉。**不在本批顺手改**（会动 lock 与既有代码面）。
+2. `tests/unit/api` + `agent/test_computer_browser_tools.py` + `integration/test_computer_use_integration.py`
+   共 **20 条预存红**（W1-T01 做过 HEAD 回退 A/B，失败集合逐行相同 ⇒ 非本批引入）。
+   大头：`test_transfers_wave_h4` 8 条、`test_files_store_persistence` 4 条、
+   `test_route_mount_contract_guard` 3 条；广播那条是 MagicMock 冒充 user_id 拼进 Windows
+   路径的 `<>` 非法字符（`sandbox_provider.py:91` 写 `.wsb` 时 OSError）。
+3. `NeurUI/src/tests/duplicate-function-inventory.guard.test.ts` 收集期 SyntaxError（套件级 ERROR，
+   "no tests"），`node --check` 过、不引用本批任何文件 ⇒ 预存。属 Issue #192 守卫域，未顺手修。
+4. `desktop_uia.py:443-468` `post_click` 保真度缺口（rect 中心 + `sleep(0.02)` 硬编码、
+   无 move/hover/拖拽/时延参数）→ 已列为 **W1-T06b**，不静默隐藏。
