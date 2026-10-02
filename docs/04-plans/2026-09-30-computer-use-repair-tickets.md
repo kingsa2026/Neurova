@@ -3006,6 +3006,10 @@ FAILED ×12  E  TypeError: LLMClient.__init__() got an unexpected keyword argume
 
 ### 42.7 本片**没有**做的事
 
+> **2026-10-02 下午覆盖**：本节 3/4/5/6 四条已由 §43 用 10 模型 × 4 键矩阵结案（其中 5 判为
+> "已覆盖·非断点"、4 判为"明确不做"并给出实测收益 107ms/模型/进程），1/2 两条保留。
+> 原文按留痕纪律不改写，逐条依据看 §43.2。
+
 1. **另两家协议客户端未接**：`anthropic_client.py:108/181`、`gemini_client.py:98/158`
    各自发 `temperature`，但仓里没有这两家的"字段被钉死"回执样本；没有实测方言就写解析器
    是猜。登记为待接面，不是已覆盖。
@@ -3051,3 +3055,83 @@ CI 清单有效条目数 `grep -vc '^#\|^$' scripts/ci/protected_tests.txt` 实�
 登记同批过的三道守卫（`TestProtectedSubsetEntriesAreTracked` + `test_clock_caliber_ledger` +
 `test_ci_wallclock_assertion_ledger`）合跑 **38 passed**。新判据文件不含
 `perf_counter|monotonic|time_ns|thread_time` 任一符号（实测计数 0），故时钟台账无需新增结论。
+
+---
+
+## 43. §42.7 逐条结案 —— 10 模型 × 4 键的钉死矩阵，与三条"不做"的实测依据（2026-10-02 下午）
+
+§42.7 留了六条"本片没做的事"。本轮不写生产码，先把其中**能用读数结案的**全部结案，
+剩下的按 `no_consumer 三问` 与 `measure-benefit` 各自定性质——避免"登记过"被读成"还欠着"。
+
+### 43.1 取值口径（刻意走生产客户端，不走直连）
+
+对 sensetime 在册 10 个模型各发**一次** `LLMClient.chat()`，四个采样键全部给非默认值
+（`temperature=0.7, top_p=0.8, frequency_penalty=0.5, presence_penalty=0.5`）。
+理由：命中钉子时生产链自己"学一颗、摘一颗、重发"，所以**一次调用就能把这个模型身上所有
+被钉死的采样键逐个枚举出来**；反过来，若 400 点名的是我们摘不动的键（`max_tokens` 之类），
+异常会直接逃出——那正是 §42.7-3 从"有意的边界"变成"真缺口"的判据。
+
+| 模型 | 学到的钉子 | 判定 |
+|---|---|---|
+| kimi-k3 | `{frequency_penalty, presence_penalty, temperature, top_p}` **全四键** | 钉死（四键全钉） |
+| deepseek-flash | 无（4 次尝试每次带满四键，零 400） | 四键都过校验，末次撞 429 |
+| deepseek-v4-flash | 无 | 四键全受理并出词 |
+| deepseek-v4-pro | 无（1 次 429 退避后出词） | 同上 |
+| glm-5.2 | 无 | 同上 |
+| sensenova-6.8-flash-lite | 无 | 同上 |
+| deepseek-v4.1-flash | — | 403 `model is not available in the current token plan`（与 A2 同） |
+| sensenova-6.7-flash-lite / u1-fast / u1.5-lite | — | 404 `model is not found`（与 A2 同） |
+
+两条顺产量到的硬读数（下一轮取证可以直接用，不必再验）：
+
+1. **参数校验先于配额检查**。kimi-k3 的四条 400 与第五条 429 落在同一个 100ms 窗口里，
+   即"配额已耗尽"照旧拦不住"参数不合法先被拒"。⇒ 以后 **429 而不是 400 就是"这组键过了校验"**
+   的合法证据（A2 那轮的 B/D 回 400 而 C/F 回 429 也是同一机制）。
+2. **网关按固定顺序逐个拒**：`frequency_penalty → presence_penalty → temperature → top_p`，
+   四次被拒请求合计 **107ms**（14:03:55,723 → 55,830），第五次（四键全摘）才进推理队列。
+
+### 43.2 §42.7 六条的处置
+
+| 条目 | 处置 | 依据 |
+|---|---|---|
+| 1 anthropic / gemini 未接 | **保留待接**，不动码 | 缺的不是实现是**样本**：这两家没有一条"字段被钉死"的一手回执。Anthropic 官方对 `temperature` 无钉死先例，为假想方言写解析器正是 §42.0 刚否证过的思路（那次是拿维度猜、这次是拿文案猜）。摘键面 `dropLearnedSamplingParams` 与协议无关，等样本到了是两行的事。 |
+| 2 只学键名不学合法值 | **保持**，代价已被读数抹平 | kimi-k3 四键全钉 ⇒ 对这类模型"改发钉死值"与"不发"是**同一事实的两种写法**；而值语法解析要吃进 `only 1 is allowed` 的文案形态，钉死顺序读数（§43.1）说明它一次只肯吐一个键，扩解析面换不到任何额外能力。 |
+| 3 `max_tokens` 类钉子不摘 | **判为边界成立**（原来是推测） | 10 个模型每个都被我们随发 `max_tokens`（生产还会被 `clamp_max_tokens` 改写），`max_tokens_named_anywhere = []` ⇒ 没有任何一个模型点过它。缺口若出现，异常会原样逃出并被这条矩阵抓到，判据面已就位。 |
+| 4 学习态无持久化 / 无可视化面 | **明确不做**，收益已量出 | 不持久化的代价 = **每个模型每个进程 4 次被拒请求 + 107ms，且用户看不到**（`_createCompletion` 内部自愈，外层只计一次成功）。要持久化就得往 `provider.model_metadata` 镜像一份，随即引来一类新故障：**上游放宽钉子后，落盘的旧结论会永久压制这个旋钮**（进程级缓存有 TTL 会自愈，metadata 没有）。用 107ms 换一类"过期事实不失效"的坑，不划算。<br>同轮被量的还有第二个设想"no-op 默认值干脆不发"（`top_p=1.0`、penalties `0.0` 在协议上是恒等值）：它能抹掉首 call 那两次被拒 ≈ 50ms，代价是新加一条**跨网关不可验证**的语义（没有一手源保证各网关对"缺 top_p"与"top_p=1"处理一致），并要把刚立的反向控制判据"未学习模型必须照发全部采样键"改口径。⇒ 同样不做。 |
+| 5 `provider_id` 缺省桶会并键 | **判为已覆盖·非断点**（原文口径过高） | 全仓 `LLMClient(` 构造点只有两处生产命中点：`multi_model_client.py:329`（已带 `provider_id=provider.id`）与 `model_adapter/registry.py:64`。后者落在一条**从写下起不可能成功**的路径上：`GenericAdapter.generate` 调 `client.generate(...)`，而 `LLMClient` 根本没有 `generate`（`grep -c "def generate"` = 0），且那里 `LLMConfig(model=...)` 不带 api_key ⇒ `_init_client` 先失败。⇒ 缺省桶在生产不可达，"跨端点同名模型并键"是我没量可达性就写下的担心。它反过来牵出 T-20（§43.4）。 |
+| 6 penalties 钉死性未测、4 个不可判模型未测 | **已测完**，无需扩面 | 唯一钉死的模型把四个键**全钉**了 ⇒ `SAMPLING_PARAM_KEYS` 在册名单恰好覆盖全部实测命中面，扩面无收益。4 个"不可判"模型的不可判原因是**不可用**（403 不在 plan / 404 不存在），不是参数面；在它们被开通之前这条读数拿不到，别再为它排队。 |
+
+### 43.3 探针自己的两条口径缺陷（更正留痕，原始读数不改）
+
+1. `t18_keys.py` 的 `summary` 把 `pinned_keys_by_model` 建在 `judged = outcome != "rate_limited"` 上，
+   于是**把最重要的一行（kimi-k3）滤掉了**：它的四颗钉子全部学到，只是最后那次合法请求撞了 429
+   被判成 `rate_limited`。表里那一条是从**逐行读数**直接取的，不是从 summary 取的。
+   教训：summary 的过滤条件按"整模型成功"划，而本轮的判据是"钉子在 400 里已经点完名"——
+   **聚合口径与被测量不是一回事，聚合前先问这句 filter 会不会把待测事实滤走**。
+   同族第二次（本轮上午）：用子串"钉死"统计学习告警，把 DEBUG 摘键行也算进去了。
+2. 同一份 summary 里 `penalty_pinned_anywhere = []` 也是同一个缺陷的下游产物（kimi-k3 被滤掉 ⇒
+   penalties 看起来无人钉）。**一条 filter 错会让两个字段同时假阳**，别分头"修数字"。
+
+### 43.4 顺带发现，登记为 **T-20 建议**（本轮不动码）
+
+`neurova/cognitive_layers/model_adapter/` 整块是**预置未接线且一接就坏**：
+
+- `agent_core.py:902/911` 把 `find_adapter(model_name)` 的结果赋给 `a.model_adapter`，
+  全仓**没有任何调用方**读它跑 `.generate()` / `.stream_generate()`（`grep -rn "model_adapter"` 未截断实测：
+  赋值 2 处、端点里是另一份名单、其余命中全在测试的导入与注册表断言里）。
+- 兜底的 `GenericAdapter` 一旦被调即失败两处：`client.generate(...)`（`LLMClient` 无此方法）
+  与构造时不给 api_key（`_init_client` 失败 → `self.client is None`）。
+- `/v1/model-adapter` 端点（`api/endpoints/model_adapter.py`）服务的是文件内硬编码的 `_ADAPTERS`
+  字面量名单，**与注册表无关** ⇒ "有哪些适配器"目前有两份互不相干的事实源，而 `tests/unit/test_audit_regressions.py`
+  钉的是注册表那份。
+
+按 `no_consumer 三问` 定性质：第 1 问（职责已由别处单装配点覆盖？）否——路由层 `MultiModelLLMClient`
+覆盖的是**协议分派**，不是"模型适配器"这套抽象；第 2 问（预置未接线的正确抽象？）部分成立——
+base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。⇒ 处置只能是**二选一**：
+接线（改 `GenericAdapter` 走 `chat()` + 给它配 provider 凭据来源，并把端点 `_ADAPTERS` 收口到注册表）
+或整块退役（净 LOC 为负）。**这条要人拍，不在采样单里顺手改。**
+
+### 43.5 本轮净 LOC：生产 **0** / 测试 **0** / 文档 +§43
+
+无生产改动 ⇒ 不动 `protected_tests.txt`、不动时钟台账。探针（`t18_keys.py` 与读数 JSON）
+全部落在仓外，即用即删，未落仓。
