@@ -29,6 +29,9 @@ CAP_NEEDS_REASONING_CONTENT = "needs_reasoning_content"
 CAP_REJECTS_MEDIA = "rejects_media"
 CAP_REJECTS_AUDIO = "rejects_audio"
 CAP_SUPPORTS_MULTIMODAL = "supports_multimodal"
+# 网关把某个采样值钉死后回执点名的键集合（frozenset[str]），消费方在
+# `llm/sampling_receipt.py`——见工单集 §42。
+CAP_REJECTED_SAMPLING_PARAMS = "rejected_sampling_params"
 
 
 class _CacheEntry:

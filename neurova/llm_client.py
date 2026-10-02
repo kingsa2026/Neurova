@@ -169,15 +169,30 @@ class LLMClient:
     包含错误重试、流式输出、Token 计数等功能。
     """
 
-    def __init__(self, config: LLMConfig, preset: Optional[Dict] = None):
+    # 提供方标识的类级缺省（唯一字面量）：`__new__` 直构的实例（协议分派测试、
+    # 鸭子替身路径）不跑 `__init__`，也必须满足 `_capabilityKey()` 的读面。
+    # 缺省写成类属性而不是 init 参数默认值，是为了让"这个属性一定存在"成为类不变量。
+    provider_id = "openai-compatible"
+
+    def __init__(
+        self,
+        config: LLMConfig,
+        preset: Optional[Dict] = None,
+        provider_id: Optional[str] = None,
+    ):
         """
         初始化 LLM 客户端
 
         Args:
             config: LLM 配置
             preset: 预设配置（可选）
+            provider_id: 提供方标识，与两个原生客户端同名同义；模型级能力
+                （如网关把某个采样值钉死）按 `provider_id:model` 记账。
+                不传则留在类级缺省桶里（只服务于不经路由层构造的调用方）
         """
         self.config = config
+        if provider_id:
+            self.provider_id = provider_id
         self.logger = get_logger(__name__)
 
         # 应用预设配置
@@ -212,6 +227,14 @@ class LLMClient:
             return True  # 无声明 → OpenAI 协议默认行为（存量等价）
         return bool(getattr(compat, "include_stream_usage", True))
 
+    def _capabilityKey(self) -> str:
+        """模型级能力缓存键，与 `capability_state` 同一口径 `provider_id:model`。
+
+        走方法而非 init 快照：`update_config`/`switch_preset` 会就地改
+        `config.model`，冻结在 init 上的键会在换模型后指向错的模型。
+        """
+        return f"{self.provider_id}:{self.config.model}"
+
     def _build_request_params(
         self, messages: List[Dict[str, str]], stream: bool = False, **kwargs
     ) -> Dict[str, Any]:
@@ -238,6 +261,14 @@ class LLMClient:
         }
         if stream:
             params["stream"] = True
+            # 根因修复 (2026-09-02)：OpenAI 协议流式默认不回传 usage，必须显式请求
+            # include_usage——否则 chunk.usage 恒 None，上层 token 记账/成本统计永远 0
+            # （dashboard Token/调用为 0 的根因）。P0-2 compat 开关：声明不支持的网关
+            # （sensetime 实测恒空）跳过。
+            # 落位在 model/messages 旁边、采样摘键面**之前**：放进函数尾部会造出一个
+            # "咽喉发了却未被登记"的键；两个流式调用点原本各写一遍，现收敛到这一个组装点。
+            if self._compat_include_stream_usage():
+                params["stream_options"] = {"include_usage": True}
 
         # 工具面（Issue #177）：能力声明单源在 cfg.compat，逐键挑选不再漏键。
         # 原实现只转发了 tools —— tool_choice 全链路空转（openai_loop:281 写了它，
@@ -280,7 +311,53 @@ class LLMClient:
                 if thinking_enabled and thinking_budget:
                     params["thinking_budget"] = int(thinking_budget)
 
+        # T-18：本模型被网关回执点名"某个采样值钉死"过的，这里不再代发那一个键。
+        # 与 compat 声明面是互补两轴：声明是运维已知的事实，这里是实测学到的事实；
+        # 按 per-model 生效，同 provider 下别的模型照发（A2 实测 5/6 受理 0.7，
+        # 一刀切按 provider 摘会把这些模型的旋钮白白拆掉）。
+        from neurova.llm.sampling_receipt import dropLearnedSamplingParams
+
+        dropLearnedSamplingParams(
+            params,
+            self._capabilityKey(),
+            getattr(self, "logger", None) or _logger,
+            where="LLMClient._build_request_params",
+        )
+
         return params
+
+    def _createCompletion(self, client, params: Dict[str, Any]):
+        """发送 chat/completions，命中"采样值被钉死"的回执时学一次并摘键重发。
+
+        循环上界由 `learnRejectedParam` 的终止条件给出：只有该键**确实还在本次
+        请求里**才重发，每轮 params 严格变小，因此不会转圈；认不出回执或
+        键已摘过即原样上抛，交回外层既有的错误归一与统计。
+        """
+        from neurova.llm.sampling_receipt import learnRejectedParam
+
+        while True:
+            try:
+                return client.chat.completions.create(**params)
+            except Exception as e:
+                if not learnRejectedParam(
+                    e, params, self._capabilityKey(), self.logger,
+                    where="LLMClient._createCompletion",
+                ):
+                    raise
+
+    async def _createCompletionAsync(self, client, params: Dict[str, Any]):
+        """`_createCompletion` 的异步对偶——回执解析与学习态读写共用同一单源。"""
+        from neurova.llm.sampling_receipt import learnRejectedParam
+
+        while True:
+            try:
+                return await client.chat.completions.create(**params)
+            except Exception as e:
+                if not learnRejectedParam(
+                    e, params, self._capabilityKey(), self.logger,
+                    where="LLMClient._createCompletionAsync",
+                ):
+                    raise
 
     def _httpx_timeout(self):
         """读/写等待与建连分离（openai SDK 接受 httpx.Timeout 实例）：
@@ -369,8 +446,8 @@ class LLMClient:
             kwargs.pop("stream", None)
             params = self._build_request_params(messages, stream=False, **kwargs)
 
-            # 调用 API
-            response = self.client.chat.completions.create(**params)
+            # 调用 API（T-18：网关钉死采样值时按回执摘键重发，见 _createCompletion）
+            response = self._createCompletion(self.client, params)
 
             # 解析响应
             choice = response.choices[0]
@@ -450,18 +527,11 @@ class LLMClient:
         start_time = time.time()
 
         try:
-            # 构建请求参数（公共组装：stream/tools/reasoning_effort 等）
+            # 构建请求参数（公共组装：stream/tools/reasoning_effort/stream_options 等）
             params = self._build_request_params(messages, stream=True, **kwargs)
 
-            # 根因修复 (2026-09-02): OpenAI 协议流式默认不回传 usage，
-            # 必须显式请求 include_usage——否则 chunk.usage 恒 None，
-            # 上层 token 记账/成本统计永远 0（dashboard Token/调用为 0 的根因）。
-            # P0-2 compat 开关：声明不支持的网关（sensetime 实测恒空）跳过。
-            if self._compat_include_stream_usage():
-                params["stream_options"] = {"include_usage": True}
-
-            # 调用流式 API
-            stream = self.client.chat.completions.create(**params)
+            # 调用流式 API（T-18：与 chat() 同一回执摘键面）
+            stream = self._createCompletion(self.client, params)
 
             # 流式计费累加器：OpenAI 兼容协议 usage 多在末 chunk（choices 为空）到达，
             # 部分网关放在带 choices 的 chunk；两处都捕获，循环结束后一次性记账。
@@ -581,18 +651,13 @@ class LLMClient:
         start_time = time.time()
 
         try:
-            # 构建请求参数（公共组装：stream/tools/reasoning_effort 等）
+            # 构建请求参数（公共组装：stream/tools/reasoning_effort/stream_options 等）
             params = self._build_request_params(messages, stream=True, **kwargs)
 
-            # 根因修复 (2026-09-02): 流式 usage 回传必须显式请求（见同步流式处注释）。
-            # P0-2 compat 开关：声明不支持的网关跳过（与同步流式同表消费）。
-            if self._compat_include_stream_usage():
-                params["stream_options"] = {"include_usage": True}
-
-            # 调用流式 API
+            # 调用流式 API（T-18：与同步两处同一回执摘键面）
             # P1 修复: 原实现误用同步 self.client，返回的同步 Stream 无法 `async for`，
             # 导致每次异步流式调用都 TypeError；必须用 async_client 并 await。
-            stream = await self.async_client.chat.completions.create(**params)
+            stream = await self._createCompletionAsync(self.async_client, params)
 
             # 流式计费累加器（与同步流式同策略：末 chunk 一次性记账）
             billed_usage: Dict[str, int] = {}

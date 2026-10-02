@@ -2,7 +2,7 @@
 
 背景： §3 P0-2。
 per-provider 兼容逻辑从散落 if 分支收编为 ProviderCompat 描述表；
-请求构造（llm_client 两处 stream_options）声明式消费 cfg.compat。
+请求构造（llm_client 咽喉一处 stream_options）声明式消费 cfg.compat。
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class TestProviderCompatTable(unittest.TestCase):
 
 
 class TestLLMClientCompatWiring(unittest.TestCase):
-    """LLMClient 请求构造声明式消费 cfg.compat（两处 stream_options）。"""
+    """LLMClient 请求构造声明式消费 cfg.compat（咽喉一处 stream_options）。"""
 
     def _client(self, compat: ProviderCompat):
         from neurova.llm_client import LLMClient, LLMConfig
@@ -138,9 +138,11 @@ class TestModelClientCreationWiring(unittest.TestCase):
         real_llm_client_cls = mmc.LLMClient
 
         class SpyClient(real_llm_client_cls):
-            def __init__(self, config, preset=None):
+            # 形参用 **extra 透传：替身只借"捕获 config.compat"这一件事，
+            # 把生产构造签名逐字抄进替身，等于给签名加了第二处定义。
+            def __init__(self, config, preset=None, **extra):
                 captured_cfg["compat"] = config.compat
-                super().__init__(config, preset)
+                super().__init__(config, preset, **extra)
 
         with patch.object(mmc, "LLMClient", SpyClient):
             mc = mgr._create_model_client(provider, "sensechat-5")

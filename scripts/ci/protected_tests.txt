@@ -1457,3 +1457,5 @@ tests/unit/test_image_payload_gate_is_honored.py
 tests/unit/security/test_tool_circuit_breaker.py
 # §41：compat 声明位必须可达（字段→持久化→写侧→端点转发→运行态刷新），拼错键名不许静默。逐文件单跑 15 passed
 tests/unit/llm/test_provider_compat_declaration.py
+# §42：采样值被网关钉死必须按回执学（per-model 摘键+有界重发），认不出不许盲重试。逐文件单跑 17 passed
+tests/unit/llm/test_sampling_pin_receipt.py
