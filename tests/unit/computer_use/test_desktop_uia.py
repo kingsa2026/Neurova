@@ -294,3 +294,114 @@ class TestAvailability:
         assert manager.uiaProbe()[0] == CAP_NOT_CONFIGURED
         # 布尔与状态同源：is_available() 就是 detail["available"]，两处不许分叉
         assert desktop_uia.is_available() is desktop_uia.availabilityDetail()["available"]
+
+
+class _RectLike:
+    def __init__(self, left, top, right, bottom):
+        self.left, self.top, self.right, self.bottom = left, top, right, bottom
+
+
+class _LiveShapeControl:
+    """照 2026-10-02 活体取到的**真实控件形状**构造。
+
+    该库的 Control 只暴露 `Get*Pattern()`，不暴露任何 `Is*PatternAvailable`
+    （实测 `dir(auto.Control)` 里 Available 一族为空，而真按钮上 `GetInvokePattern()`
+    返回 InvokePattern）。旧探测写的正是后者，于是恒判不可用。
+    `has_invoke=False` 表达另一种真实形态：window 类控件上连 `GetInvokePattern`
+    这个成员都不存在（活体读数 "getter absent"）。
+    """
+
+    def __init__(
+        self,
+        control_type="ButtonControl",
+        name="ProbeButton",
+        *,
+        has_invoke=True,
+        invoke_raises=None,
+        value_pattern=None,
+        has_legacy=True,
+    ):
+        self.ControlTypeName = control_type
+        self.Name = name
+        self.IsEnabled = True
+        self.HasKeyboardFocus = False
+        self.BoundingRectangle = _RectLike(10, 20, 90, 50)
+        self.NativeWindowHandle = 133716
+        if has_invoke:
+            def getInvokePattern():
+                if invoke_raises is not None:
+                    raise invoke_raises
+                return object()
+
+            self.GetInvokePattern = getInvokePattern
+        if has_legacy:
+            self.GetLegacyIAccessiblePattern = lambda: object()
+        if value_pattern is not None:
+            def getValuePattern():
+                return value_pattern
+
+            self.GetValuePattern = getValuePattern
+
+    def GetRuntimeId(self):
+        return [42, 1, 7]
+
+
+class _ValuePatternLike:
+    def __init__(self, value):
+        self.Value = value
+
+
+class TestLiveControlShapeDiscovery:
+    """五轴 pattern 可用性必须由**真取用**得出（T-01 活体抓出的根因）
+
+    `FakeUIABackend` 直接注入 `invokable=True` 的 element dict，替生产码回答了
+    "探测得到吗"这个问题，于是"真控件 → flag"这一跳从未被测过，五轴恒 False 潜伏至今：
+    五级链 ①②③④ 级永不可达，桌面点击全部掉到 app_post，`set_value` 恒 refused
+    ——把用户推向"开 env 放开全局键入"（抢焦点）那条路。
+    """
+
+    def setup_method(self):
+        self.backend = desktop_uia.UiautomationBackend()
+
+    def test_invoke_is_discovered_on_a_real_button(self):
+        info = self.backend._element_info(_LiveShapeControl())
+        assert info["invokable"] is True
+
+    def test_legacy_default_is_discovered(self):
+        info = self.backend._element_info(_LiveShapeControl())
+        assert info["legacy_default"] is True
+
+    def test_value_pattern_makes_element_settable_and_reads_value(self):
+        """settable 与 value 是同根因的第二处命中点（`:544` 也写了那个不存在的 API）。"""
+        info = self.backend._element_info(
+            _LiveShapeControl(
+                control_type="EditControl",
+                name="ProbeField",
+                has_invoke=False,
+                has_legacy=False,
+                value_pattern=_ValuePatternLike("t01-live-verify"),
+            )
+        )
+        assert info["settable"] is True
+        assert info["value"] == "t01-live-verify"
+
+    def test_control_without_the_getter_is_not_supported_and_does_not_raise(self):
+        info = self.backend._element_info(
+            _LiveShapeControl(control_type="WindowControl", name="ProbeWindow", has_invoke=False)
+        )
+        assert info["invokable"] is False
+        assert info["legacy_default"] is True
+
+    def test_probe_failure_is_not_disguised_as_unsupported(self, monkeypatch):
+        """探测本身炸（COM 调用失败）≠ 控件不支持：必须留话，不得静默塌成 False。"""
+        seen = []
+        monkeypatch.setattr(
+            desktop_uia.logger,
+            "warning",
+            lambda msg, *args, **kw: seen.append(str(msg) % args if args else str(msg)),
+        )
+        info = self.backend._element_info(
+            _LiveShapeControl(invoke_raises=RuntimeError("com call failed"))
+        )
+        assert info["invokable"] is False
+        assert seen, "pattern 探测失败被静默当作'控件不支持'（教义第 2 条禁止的谎报形态）"
