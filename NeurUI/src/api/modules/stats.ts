@@ -82,6 +82,15 @@ export interface UsageOverviewModelTotal {
   calls: number
 }
 
+/** P1-8 按模型延迟分位（仅统计 duration_ms > 0 的调用；无数据为空数组）。 */
+export interface UsageOverviewLatencyStat {
+  model: string
+  calls: number
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+}
+
 /** 使用统计总览（/stats/usage-overview）。 */
 export interface UsageOverview {
   scope?: 'user' | 'global'
@@ -102,6 +111,8 @@ export interface UsageOverview {
   heatmap: UsageOverviewHeatmapDay[]
   trends: UsageOverviewTrendPoint[]
   by_model: UsageOverviewModelTotal[]
+  /** P1-8：按模型延迟 p50/p95/max（缺延迟数据为空数组） */
+  latency_stats?: UsageOverviewLatencyStat[]
 }
 
 // ---------------------------------------------------------------------------
