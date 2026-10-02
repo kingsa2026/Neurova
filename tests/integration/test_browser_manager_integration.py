@@ -73,8 +73,19 @@ class TestBrowserManagerConfig:
 class TestBrowserManagerRouting:
     """测试 BrowserManager 路由功能"""
     
-    def test_resolve_backend_with_config_rules(self, tmp_path):
-        """测试根据配置规则解析后端"""
+    def test_resolve_backend_with_config_rules(self, tmp_path, monkeypatch):
+        """测试根据配置规则解析后端。
+
+        在册表由 `HAS_PLAYWRIGHT`/`HAS_SCRAPLING` 的真实探测填成，而 playwright
+        **不在 CI 薄锁里**（`requirements-ci.txt` 明写刻意排除），于是"在册表为空"
+        是 CI 常态。本条的主题是**配置规则优先于默认链**，那就把探测位钉死，
+        别让结论取决于这台机器恰好装了什么——否则本机绿、CI 红，红得与主题无关。
+        """
+        from neurova.computer_use import browser_manager as bm
+
+        monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", True)
+        monkeypatch.setattr(bm, "HAS_SCRAPLING", True)
+
         config_content = {
             "routing": {
                 "rules": [
@@ -105,7 +116,8 @@ class TestBrowserManagerRouting:
         # 测试路由规则
         assert manager._resolve_backend("http://localhost:3000") == "agent-browser"
         assert manager._resolve_backend("https://example.cloudflare.com") == "scrapling-stealthy"
-        assert manager._resolve_backend("https://example.com") == "playwright"  # 默认
+        # 默认链首位是 playwright（`_resolve_backend` 的优先级链，非启发式）
+        assert manager._resolve_backend("https://example.com") == "playwright"
 
 
 class TestBrowserManagerBackends:
