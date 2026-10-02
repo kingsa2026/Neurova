@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  actionBadgeText,
   createComputerPanel,
   describeComputerAction,
   isComputerTool,
@@ -188,6 +189,62 @@ describe('createComputerPanel', () => {
     expect(panel.state.actions[1].refusalCode).toBe('ref_not_found')
   })
 
+  it('T-01 delivery 与 evidence 落到条目（后台通道可证伪的前提）', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_click_element',
+      params: { index: 0 },
+      success: true,
+      action_result: {
+        route: 'app_post',
+        effect: 'confirmed',
+        delivery: 'background',
+        evidence: ['delivery_ack'],
+      },
+    })
+    const entry = panel.state.actions[0]
+    expect(entry.route).toBe('app_post')
+    // 现状：extractActionResult 只抽 route/effect/refusal_code，delivery 与 evidence
+    // 到了前端被丢弃——"有没有碰用户桌面"在 dock 上不可见
+    expect(entry.delivery).toBe('background')
+    expect(entry.evidence).toEqual(['delivery_ack'])
+  })
+
+  it('T-01 escalation 点名"为何跳到下一级"不得被丢弃', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_click_element',
+      params: { index: 0 },
+      success: false,
+      error: '后台不可投',
+      action_result: {
+        route: 'uia',
+        effect: 'refused',
+        refusal_code: 'background_unavailable',
+        escalation: { target: 'pixel', reason: 'route_unavailable' },
+      },
+    })
+    expect(panel.state.actions[0].escalation).toEqual({
+      target: 'pixel',
+      reason: 'route_unavailable',
+    })
+  })
+
+  it('T-01 缺字段时不伪造：delivery/evidence  absent 即 undefined', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_click',
+      params: { x: 1, y: 1 },
+      success: true,
+      action_result: { route: 'uia', effect: 'unverifiable' },
+    })
+    const entry = panel.state.actions[0]
+    expect(entry.route).toBe('uia')
+    expect(entry.delivery).toBeUndefined()
+    expect(entry.evidence).toBeUndefined()
+    expect(entry.escalation).toBeUndefined()
+  })
+
   it('R2-5 新桌面工具生成可读摘要', () => {
     expect(describeComputerAction('computer_dom_snapshot', {})).toContain('桌面')
     expect(describeComputerAction('computer_click_element', { index: 3 })).toContain('3')
@@ -197,6 +254,46 @@ describe('createComputerPanel', () => {
   it('SSH 工具生成含 host 与命令的摘要', () => {
     expect(describeComputerAction('computer_ssh_exec', { host: '10.0.0.5', command: 'uptime' })).toContain('10.0.0.5')
     expect(describeComputerAction('computer_ssh_exec', { host: 'h', command: 'uptime' })).toContain('uptime')
+  })
+})
+
+describe('T-01 投递事实徽标', () => {
+  it('成功动作串起 route·delivery·effect，有证据才带 ✓', () => {
+    expect(
+      actionBadgeText({
+        route: 'app_post',
+        delivery: 'background',
+        effect: 'confirmed',
+        evidence: ['delivery_ack'],
+      }),
+    ).toBe('app_post·background·confirmed ✓')
+  })
+
+  it('foreground 必须可见——它就是"动了真实输入设备"的信号', () => {
+    expect(
+      actionBadgeText({ route: 'global_input', delivery: 'foreground', effect: 'confirmed' }),
+    ).toContain('foreground')
+  })
+
+  it('无证据不得带 ✓（suspected_noop 是不被伪装的那一档）', () => {
+    expect(
+      actionBadgeText({ route: 'xdotool', delivery: 'background', effect: 'suspected_noop' }),
+    ).toBe('xdotool·background·suspected_noop')
+  })
+
+  it('refused 显示精确拒绝码并点名跳级去向', () => {
+    expect(
+      actionBadgeText({
+        effect: 'refused',
+        refusalCode: 'background_unavailable',
+        escalation: { target: 'pixel', reason: 'route_unavailable' },
+      }),
+    ).toBe('background_unavailable→pixel')
+  })
+
+  it('缺字段不伪造：只有 effect 时不硬拼分隔符', () => {
+    expect(actionBadgeText({ effect: 'unverifiable' })).toBe('unverifiable')
+    expect(actionBadgeText({})).toBe('')
   })
 })
 

@@ -19,17 +19,25 @@ from typing import Any, Dict, List, Optional
 
 ROUTES = frozenset(
     {
-        "accessibility",     # AX/UIA 语义动作
+        "accessibility",     # AX/UIA 语义动作（macOS AXUIElement PerformAction）
         "uia",               # Windows UI Automation 语义（Invoke/Value/...）
         "app_post",          # 消息直投目标窗口（PostMessage，不抢焦点）
         "global_input",      # 全局指针/键盘（会移动真实光标、抢前台）
+        "atspi",             # Linux AT-SPI2 doAction（UIA 的 Linux 等价物，不动光标）
+        "xdotool",           # X11 定窗合成事件投递（Wayland 下不可用）
+        "shell",             # CLI 命令通道（不经任何输入设备，天然无抢占）
         "playwright_role",   # Playwright get_by_role 定位交互
         "camofox_ref",       # camofox [eN] ref 定位交互
         "dom",               # DOM 层导航/求值
-        "remote",            # 远程会话平面（RS 批次预留）
+        "remote",            # 远程会话平面（隔离虚拟屏，RS 批次）
     }
 )
-DELIVERIES = frozenset({"background", "foreground", "not_applicable"})
+# background=用户桌面后台投递；foreground=夺真实输入设备；
+# isolated_plane=隔离平面内执行（用户桌面纹丝不动，画面源是虚拟平面）；
+# not_applicable=未投递（refused）或该动作根本不涉及投递平面（如 shell）。
+DELIVERIES = frozenset(
+    {"background", "foreground", "isolated_plane", "not_applicable"}
+)
 EFFECTS = frozenset({"confirmed", "partial", "unverifiable", "suspected_noop", "refused"})
 EVIDENCE_KINDS = frozenset(
     {

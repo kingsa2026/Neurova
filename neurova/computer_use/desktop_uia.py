@@ -6,11 +6,10 @@
 - click_element：五级递降链，语义动作优先、全局输入必须 env 门控——
     Invoke → Toggle → ExpandCollapse → LegacyIAccessible.DoDefaultAction
     → PostMessage 直投（app_post，不抢焦点）
-    → 全局 SendInput（仅 NEUROVA_ALLOW_GLOBAL_INPUT=1；会动真实光标）
+    → 全局输入投递（pyautogui；仅 NEUROVA_ALLOW_GLOBAL_INPUT=1，会动真实光标、抢前台）
 - set_value：UIA ValuePattern 优先（可读回 → value_readback 证据）→ 门控键入兜底
 
-所有动作结果携带 ActionResult 封闭契约（action_result.py）；拒绝码 vocabulary
-与浏览器侧共用。参考实现
+所有动作结果携带 ActionResult 封闭契约（action_result.py）；拒绝码词表与浏览器侧共用。
 """
 
 import os
@@ -334,6 +333,19 @@ class UiautomationBackend:
     """真实后端：uiautomation 库（Windows）。所有 API 调用逐级守卫，
     任何异常都退化为 False/None → 由 Manager 转成精确拒绝码。"""
 
+    # pattern 可用性一律以**真取用**得出。该库的 Control 上不存在 IsXxxPatternAvailable
+    # 一族（2026-10-02 活体实测 `dir(auto.Control)` 里 Available 为空、真按钮上
+    # `GetInvokePattern()` 返回 InvokePattern），旧写法 `getattr(ctrl, "Is…", None)`
+    # 恒得 None → 五轴恒 False → 语义级投递永不被选中，点击全落到 app_post、
+    # set_value 恒 refused。
+    _PATTERN_GETTERS = {
+        "settable": "GetValuePattern",
+        "invokable": "GetInvokePattern",
+        "togglable": "GetTogglePattern",
+        "expandable": "GetExpandCollapsePattern",
+        "legacy_default": "GetLegacyIAccessiblePattern",
+    }
+
     _MOUSE_FLAGS = {"left": 0x0001, "right": 0x0002, "middle": 0x0010}
     _MOUSE_MSGS = {
         "left": (0x0201, 0x0202),    # WM_LBUTTONDOWN / UP
@@ -540,12 +552,18 @@ class UiautomationBackend:
             except Exception:
                 rect = None
 
+            patterns = {
+                field: self._probePattern(ctrl, getter)
+                for field, getter in self._PATTERN_GETTERS.items()
+            }
             value = None
-            try:
-                if ctrl.IsValuePatternAvailable():
+            if patterns["settable"]:
+                try:
                     value = ctrl.GetValuePattern().Value
-            except Exception:
-                value = None
+                except Exception as e:  # noqa: BLE001 - 取到 pattern 不等于读得到值
+                    logger.warning(
+                        "UIA ValuePattern 读值失败 (%s): %s", getattr(ctrl, "Name", "?"), e
+                    )
 
             runtime_id = None
             try:
@@ -560,11 +578,7 @@ class UiautomationBackend:
                 "enabled": bool(getattr(ctrl, "IsEnabled", True)),
                 "value": value,
                 "focused": bool(getattr(ctrl, "HasKeyboardFocus", False)),
-                "settable": self._flag(ctrl, "IsValuePatternAvailable"),
-                "invokable": self._flag(ctrl, "IsInvokePatternAvailable"),
-                "togglable": self._flag(ctrl, "IsTogglePatternAvailable"),
-                "expandable": self._flag(ctrl, "IsExpandCollapsePatternAvailable"),
-                "legacy_default": self._flag(ctrl, "IsLegacyIAccessiblePatternAvailable"),
+                **patterns,
                 "runtime_id": runtime_id,
                 "hwnd": self._safe_hwnd(ctrl),
                 "_control": ctrl,
@@ -573,11 +587,21 @@ class UiautomationBackend:
             return None
 
     @staticmethod
-    def _flag(ctrl: Any, method_name: str) -> bool:
+    def _probePattern(ctrl: Any, getter_name: str) -> bool:
+        """pattern 可用性 = 真取用的结果，三种情形分开记账。"""
+        getter = getattr(ctrl, getter_name, None)
+        if getter is None:
+            # 该控件类型压根不暴露这个口（活体：WindowControl 上没有 GetInvokePattern）
+            return False
         try:
-            method = getattr(ctrl, method_name, None)
-            return bool(method()) if callable(method) else False
-        except Exception:
+            return getter() is not None
+        except NotImplementedError:
+            return False  # 控件明确声明不支持
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "UIA pattern 探测失败 %s：%s —— 记为不可投，但这不等于控件不支持",
+                getter_name, e,
+            )
             return False
 
     @staticmethod
