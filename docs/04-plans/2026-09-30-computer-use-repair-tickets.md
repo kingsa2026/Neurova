@@ -3114,6 +3114,11 @@ CI 清单有效条目数 `grep -vc '^#\|^$' scripts/ci/protected_tests.txt` 实�
 
 ### 43.4 顺带发现，登记为 **T-20 建议**（本轮不动码）
 
+> **2026-10-02 下午覆盖**：T-20 已裁决为**退役**，施工单与落账清单见
+> [`2026-10-02-model-adapter-retirement-plan.md`](2026-10-02-model-adapter-retirement-plan.md)
+> （§0 前置事实 13 条 + S0–S9 十步 + 落账 14 项 + 停手条件 5 条）。其中"12 条族前缀要不要搬"
+> 一问由实跑 `infer_capabilities()` 六族读数否证为**不搬**；本节原文按留痕纪律不改。
+
 `neurova/cognitive_layers/model_adapter/` 整块是**预置未接线且一接就坏**：
 
 - `agent_core.py:902/911` 把 `find_adapter(model_name)` 的结果赋给 `a.model_adapter`，
