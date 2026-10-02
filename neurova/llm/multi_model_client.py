@@ -326,7 +326,10 @@ class MultiModelLLMClient:
 
                 client = GeminiNativeClient(config, provider_id=provider.id)
             else:
-                client = LLMClient(config)
+                # provider_id 三家客户端同规格传入：模型级能力（T-18 的采样钉子
+                # 回执）按 `provider_id:model` 记账，缺了它就把不同提供方的
+                # 同名模型并成一条学习态。
+                client = LLMClient(config, provider_id=provider.id)
             model_client = ModelClient(client=client, provider=provider, model=model)
             self._clients[client_key] = model_client
             return model_client

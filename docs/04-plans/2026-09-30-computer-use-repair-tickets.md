@@ -2850,3 +2850,204 @@ lint：ruff 五个文件 All checks passed（第一版 `-> "LLMProviderManager"`
 3. 后台/UI 没有 compat 编辑面（当前只有 API 与手编 `providers.json`）；`name` 字段仍不转发，
    已进豁免台账并写明理由（重命名面未接，不在本片范围）。
 4. sensetime 其余 9 个带 `supported_sampling_parameters` 名单的模型是否同样钉值：**未测**。
+   （2026-10-02 覆盖：已由 §42 的 A2 量测给出读数，见 §42.1。）
+
+---
+
+## 42. T-18 主体 · 采样值钉死的回执学习闭环 —— 甲案被读数否证，落乙案（2026-10-02）
+
+### 42.0 先记账：§41.7-2 留的"两条出路"，本轮由实测裁决了其中一条
+
+§41 收口时把维度错位写成"两条出路都在"：给 compat 加 per-model 侧写，或把网关回执点名的
+键学进 `ModelCapabilityCache`。本轮先把**甲案（按 provider 声明"这个网关不发采样键"）**
+放到真读数上过了一遍，结果它不成立，于是落乙案。
+
+**A2 量测**（2026-10-02，sensetime 在册 10 个模型，各发 `temperature=0.7, max_tokens=1`，
+只认 400/200，429 退避重试；正对照 = kimi-k3 必 400，它不 400 就是探针自己坏了）：
+
+| 读数 | 模型 |
+|---|---|
+| 钉死（400 `only 1 is allowed`） | kimi-k3 **1 个** |
+| 受理 0.7（200） | deepseek-flash、deepseek-v4-flash、deepseek-v4-pro、glm-5.2、sensenova-6.8-flash-lite **5 个** |
+| 不可判（非参数面拒答） | deepseek-v4.1-flash（403 不在当前 token plan）、sensenova-6.7-flash-lite / sensenova-u1-fast / sensenova-u1.5-lite（404 模型不存在） **4 个** |
+
+正对照命中 ✓。`provider_level_declared_would_harm = 5` ⇒ **按 provider 一刀切会把 5 个
+明确受理 0.7 的模型的旋钮白白拆掉**，甲案否证；而这 5 条里没有任何一条能从
+provider/host/protocol 三个维度上推出来。
+
+**否证边界**（别把这条读数用过头）：200 只证明"网关不拒这个值"，不证明"网关按这个值解码"
+（静默 clamp 与照发在单点观测上不可分）；但无论哪种，"摘键"都拿走了一个当前不报错的旋钮，
+误伤判断不依赖这个区分。429/403/404 那四条不构成"受理"也不构成"钉死"，是**没拿到事实**。
+
+### 42.1 落点（三处，全在既有单源上扩面，不新造平行体系）
+
+1. **新模块 `neurova/llm/sampling_receipt.py`**：`SAMPLING_PARAM_KEYS` 单源在册
+   （temperature / top_p / frequency_penalty / presence_penalty；`max_tokens` 有意不在册），
+   回执别名表由在册键**去分隔符归一后派生**（`TopP` → `top_p`），不另立第二份名单；
+   `rejectedSamplingParam()` 认不出或字段不在册一律 `None`；
+   `dropLearnedSamplingParams()` 供装配处消费；`learnRejectedParam()` 供发送处消费。
+2. **能力缓存加一个键**：`CAP_REJECTED_SAMPLING_PARAMS`（值 = `frozenset[str]`），
+   沿用 `provider_id:model` 口径与 86400s TTL —— 它天生 per-model，正是 A2 读数要求的维度。
+3. **`LLMClient` 接线**：`provider_id`（与两个原生客户端同名同义，**类级缺省**而不只是
+   init 参数默认，见 §42.3）+ `_capabilityKey()` + 咽喉 `_build_request_params` 按学习态摘键 +
+   `_createCompletion` / `_createCompletionAsync` 命中回执时"学一次、摘键、重发"。
+   `multi_model_client._create_client` 的 openai 分支补传 `provider_id=provider.id`
+   （另两家本来就传）。
+
+摘键而不是改发网关点名的合法值：`E_两键都不发 → 200`（§42.4 复测）与"改发 1/0.95"
+对最终解码等价，但后者要把 `only 1 is allowed` 继续解析成数值，把耦合从字段名扩到值语法。
+
+摘键循环的**有界性**由写侧条件给出：只有该键确实还在本次请求里才重发，每轮 `params`
+严格变小 —— 所以不需要计数器，也不会转圈（`test_retryIsBoundedWhenTheKeyIsAlreadyGone` 钉它）。
+
+### 42.2 顺带收掉的第二处定义：`stream_options` 从两个调用点搬进咽喉
+
+`stream_options` 原先在 `chat_stream` / `chat_stream_async` 各写一遍（同一 compat 开关、
+同一值），咽喉里根本没有它。搬进 `_build_request_params` 的 `if stream:` 分支后：
+两处调用点删掉重复块，`net` 因此为负的一段就是这里；本轮新增的"咽喉发的键必须
+在册或点名豁免"判据（`test_everySamplingKeyTheThroatSendsIsUnderDiscipline`）
+也正是靠这条把流式与
+非流式两条组装一起扫掉。
+
+### 42.3 自己引入的一条红，以及它的根因形态
+
+`tests/llm/test_provider_compat.py::TestModelClientCreationWiring` 当场翻红：
+替身 `SpyClient` 把生产构造签名**逐字抄了一遍**（`__init__(self, config, preset=None)`），
+`provider_id` 一传即 `TypeError`，`_create_client` 的 fail-soft 把它吞成 `None`，
+于是 `assertIsNotNone` 红。根修在替身侧改 `**extra` 透传——把签名抄进替身等于给签名
+加了第二处定义（修复教义第 6 条），签名合法演进时它必然先炸在替身而不是炸在生产。
+命中点扫荡：全仓 `LLMClient` 子类/替身只有这一处（`grep -rn 'class .*(.*LLMClient)' neurova/ tests/`）。
+
+同类坑第二条，记下来免得再付：`tests/unit/llm/{test_thinking_control,test_provider_tool_path}`
+用 `object.__new__(LLMClient)` 直构实例、不跑 `__init__`，我第一版把 `provider_id` 只写成
+init 参数默认值，于是 9 条判据红在 `AttributeError: no attribute 'provider_id'`。
+**根修不是给这三行加 `getattr` 兜底**（那正是修复教义第 1 条点名的 consumer-only guard），
+而是把缺省升成**类属性**，让"这个属性一定存在"成为类不变量——`__new__` 直构也满足。
+
+### 42.4 红绿灯实测
+
+红灯首跑（HEAD 无任何生产改动）：收集期 `ImportError: cannot import name
+'CAP_REJECTED_SAMPLING_PARAMS'` —— 按纪律这**不算红灯**，它只证明抽象尚不存在。
+建好模块与常量后二跑，12 条真红、5 条绿（绿的正是刚实现的纯解析单元）：
+
+```
+FAILED ×12  E  TypeError: LLMClient.__init__() got an unexpected keyword argument 'provider_id'
+======================== 12 failed, 5 passed in 1.16s =========================
+```
+
+绿灯：`tests/unit/llm/test_sampling_pin_receipt.py` **17 passed**。
+
+变异承重（一次一个具名生产变异，回退后逐轮复跑全绿；备份 `C:/Users/xccoo/t18_bak/`
+活到本笔提交之后才删）：
+
+| 变异 | 红数 | 被咬住的判据 |
+|---|---|---|
+| M1 学习态恒视为空（摘读侧接线） | 4 | DropsOnlyThatKey / secondCallNeverSends / twoPinnedKeys / learnedKeySurvives |
+| M2 只摘 `chat()` 的重发接线 | 5 | pinnedModelLearnsOnFirstFailure / secondCall / twoPinnedKeys / learnedKeySurvives / retryIsBounded |
+| M3 只摘 `chat_stream()` 的重发接线 | 1 | test_streamAppliesTheSameReceipt |
+| M4 认不出回执时瞎猜 temperature（塞回盲重试） | 1 | test_fieldOutsideSamplingKeysIsNotGuessed |
+| M5 学到错的 capability 名下（写侧脱靶） | 4 | 同 M2 去掉 retryIsBounded |
+| M6 学习态降成 provider 级（丢 per-model 维度） | 3 | DropsOnlyThatKey / pinnedModelLearns / twoPinnedKeys |
+
+6/6 全部承重。**M4 只有 1 红、不是预期的 3 红**，读数如实记在这里：
+`test_unrelatedGatewayMessageYieldsNoVerdict` 与 `test_unrelatedBadRequestIsNotRetried`
+用的文案（`Model id … has no provider supported`）压根不含 `field X invalid` 形态，
+在 `_PINNED_FIELD.search` 处就返回 `None` 了，我的 `or 'temperature'` 变异够不到它们——
+即"无关 400 不重发"这条判据咬的是**正则门**，M4 咬的是**在册名单门**，两道门各有一条判据。
+
+### 42.5 活体自证（真商汤网关，两轮）
+
+第一轮 `t18_live.py`（`sensetime / kimi-k3`，读数 `C:/Users/xccoo/t18_live.json`）：
+
+| 步骤 | 读数 |
+|---|---|
+| 正对照：直连照发 `temperature=0.7, top_p=1.0` | **400** `field Temperature invalid, only 1 is allowed for this model`（钉子此刻是活的） |
+| 反面对照：同模型摘掉两键直连 | **200** |
+| 生产 `LLMClient.chat()` 第一次 | 返回 **"你好"**；窗口内两条学习告警：先 temperature 后 top_p —— **网关逐个拒，同一次用户请求内两颗钉子都学进并重发到位** |
+| 学习态 | `sensetime:kimi-k3 → {temperature, top_p}`（不是我预期的只有 temperature，如实记） |
+| 第二次 `chat()` | 返回 "你好"；窗口内**零条** `已学进能力缓存并摘键重发` |
+| 对照模型 deepseek-flash | **429 退避 4 次仍限频 ⇒ 该腿不可判**，不写成成功也不写成失败 |
+| 本轮 429 次数 | 6 |
+
+第一轮探针自身的口径缺陷（更正留痕，不改上面的原始读数）：我用子串"钉死"统计
+"新增学习告警"，而咽喉的 DEBUG 摘键行文案是"按回执学习态摘掉**被钉死**的采样键"，
+于是 `second_call` 的 3 次 DEBUG 被误计成 3 条告警，`second_call_no_new_pin_warning`
+伪报 False。原文日志里那一窗口没有任何 WARNING 级学习行——判据本身没坏，是计数词选错了。
+
+第二轮 `t18_live2.py`（按 WARNING 精确文案计数，并把"不误伤"拆成零配额读数）：
+
+| 判据 | 读数 |
+|---|---|
+| 钉死模型装配面（已学过） | `temperature_sent=False, top_p_sent=False` ✓ |
+| 受理模型装配面（从未学过） | `temperature_sent=True, top_p_sent=True`，`learned_for_it=[]` ✓ |
+| 真调用钉死模型一次 | 返回 "你好"，`learn_warnings=0`，`assembly_drops=1` —— **一发到位，没有再撞 400** |
+| 受理模型直连补测 | 仍 429 ⇒ 该腿沿用 A2 的 200 读数，不算本轮新增证据 |
+
+取址环境的坑（本机，与被测代码无关）：Windows 系统代理注册表指向未运行的
+`127.0.0.1:7890`，openai SDK 底下的 httpx 会去撞它并报 `Cannot connect to host 127.0.0.1:7890`；
+探针进程内设 `NO_PROXY=token.sensenova.cn` 才取得到真读数。`aiohttp` 默认 `trust_env=False`
+不受影响——这也是 A2 那轮直连能跑通、而客户端首轮撞墙的原因。
+
+### 42.6 净 LOC：生产 **+185**（新增 207 / 删 22），逐条去向
+
+按"空行 / `#` 注释 / 其余"三分实测（difflib 对 `git show HEAD:` 逐文件比）：
+
+- `neurova/llm/sampling_receipt.py` **+114/−0**（空 20 · 注释 6 · 其余 88）：
+  四个函数 + 一个归一helper 的**实现行合计 33**（AST 剥 docstring/注释/空行后实测），
+  其余是"为什么只认在册键""为什么不改发合法值""为什么有界"三条口径说明。
+- `neurova/llm_client.py` **+86/−21**（空 10 · 注释 18 · 其余 58）：
+  `_capabilityKey` 1 行、`_createCompletion` 10 行、`_createCompletionAsync` 10 行 = **实现行 21**；
+  另有 init 签名与类属性 3 行、咽喉摘键调用 6 行、三个发送点各 1 行、
+  `stream_options` 搬进咽喉 +4 / 两处调用点删重复 −8（§42.2）。
+- `neurova/llm/model_capability_cache.py` **+3/−0**（注释 2 · 其余 1）：一个能力键常量。
+- `neurova/llm/multi_model_client.py` **+4/−1**（注释 3 · 其余 1）：openai 分支补传 provider_id。
+- 测试 **+364**（17 例）；`tests/llm/test_provider_compat.py` 另改 2 处（替身 `**extra` 透传、
+  两处"两处 stream_options"的过期描述订正为"咽喉一处"）。CI 清单 +2 行。台账不计入。
+
+### 42.7 本片**没有**做的事
+
+1. **另两家协议客户端未接**：`anthropic_client.py:108/181`、`gemini_client.py:98/158`
+   各自发 `temperature`，但仓里没有这两家的"字段被钉死"回执样本；没有实测方言就写解析器
+   是猜。登记为待接面，不是已覆盖。
+2. **只学"哪个键被钉死"，不学"合法值是多少"**：摘键与改发对最终解码等价（§42.5 反面对照），
+   代价是该模型上这个旋钮对客户端永久失效；若将来要按钉死值改发，需把解析从字段名扩到值语法。
+3. `max_tokens` 这类"非采样键被钉死"不摘（在册名单有意排除）：摘 `max_tokens` 改的是输出预算语义。
+4. **学习态无可视化面**：只有日志与进程级缓存；进程重启即重新学一轮，TTL 86400s 只在进程内有效。
+   后台/UI 里既看不见"这个模型当前被摘了哪些键"，也没有手动清除入口。
+5. `provider_id` 缺省桶 `openai-compatible`：不经路由层构造的客户端
+   （`cognitive_layers/model_adapter/registry.py:64`）共用这一个桶，
+   跨端点同名模型会并键。路由层路径（生产主路）不受影响。
+6. A2 只量了 `temperature=0.7` 单点：penalties 两个键的钉死性、以及 4 个"不可判"模型
+   的真态度，都没有读数。
+
+### 42.8 全量单测红名单归因（共享工作树，A/B 实测）
+
+`tests/unit` 全量（`-p no:randomly --continue-on-collection-errors -rf --timeout=300`）：
+
+```
+= 90 failed, 19633 passed, 95 skipped, 25 xfailed, 210 warnings, 19 errors in 1869.70s (0:31:09) =
+```
+
+42 个文件有红，绝大多数与本单无关。收窄办法是**按被测面筛，不按猜筛**：对 42 个失败文件
+的源码扫我改动过的符号面（`llm_client` / `multi_model_client` / `LLMClient` /
+`MultiModelLLMClient` / `record_llm_cost` / `stream_options` / `capability_cache` /
+`sampling` / `provider_compat`），命中 4 个文件；其余 38 个文件的失败路径压根不经过本单改动面。
+
+对这 4 个文件做原地最小窗口 A/B（生产三件写回 `git show HEAD:`、新模块摘除；测试保持原样）：
+
+| 态 | 读数 |
+|---|---|
+| A：我的生产改动**不在** | 5 failed, 105 passed |
+| B：我的生产改动**在** | 5 failed, 105 passed |
+| 差集 | 双向皆空 ⇒ **本单零新增红** |
+
+A/B 恢复走"仓外备份 + 逐字节 sha 校验 + 立刻复跑判据"（§42.4 的同一条纪律），
+失败名单逐条相同：`test_singleton_convergence[memory_field]`、
+`test_provider_tool_path::test_openai_formula_consistent_with_native`（§41 前已 A/B 过的 token parity 预存红）、
+`test_tool_bugs_v2` 两条、`test_tool_parallelism_readout::test_boundaryToolIsNotForcedIntoEitherSide`
+—— 均为他人在途改动或既有预存红，不在本单处置范围。
+
+CI 清单有效条目数 `grep -vc '^#\|^$' scripts/ci/protected_tests.txt` 实测 **368**；
+登记同批过的三道守卫（`TestProtectedSubsetEntriesAreTracked` + `test_clock_caliber_ledger` +
+`test_ci_wallclock_assertion_ledger`）合跑 **38 passed**。新判据文件不含
+`perf_counter|monotonic|time_ns|thread_time` 任一符号（实测计数 0），故时钟台账无需新增结论。
