@@ -51,6 +51,13 @@ def _facts() -> dict:
     return {str(row["symbol"]): row for row in ledger.facts()}
 
 
+def _ledgerSource() -> str:
+    return io.open(
+        PROJECT_ROOT / "scripts" / "ci" / "tool_loop_deadline_ledger.py",
+        encoding="utf-8",
+    ).read()
+
+
 class TestJudgeIsMachineComputed:
     """判据类由机器算、台账照抄：两者不一致即判据口径漂移。"""
 
@@ -369,3 +376,115 @@ class TestLedgerRegistrationIsDeferredToT10:
         with pytest.raises(AssertionError):
             assert ledger.JUDGE_NO_CONSUMER == ledger.JUDGE_CONSUMED
         assert ledger.inProductionScope("neurova/agent/gates.py") is True
+
+
+class TestSingleSourceScanIsLinearAndCached:
+    """`_singleSourceDerivations` 的取数成本必须有界（本判据根因 = CI 单红超时）。
+
+    根因：该函数对**每个文件**先 `ast.walk(tree)` 找函数节点，再对**每个函数**
+    重新 `ast.walk(node)` 扫子树——内层遍历把外层已走过的节点又走一遍，
+    嵌套函数被反复重访（实测 1.59M 节点里有 1.46M 是重复访问，≈92% 白干）。
+    再叠加 `facts()` → `thresholdAxis()` → `_ctorBindings()` 每个登记符号各调一次
+    （28 次全程重扫 1032 个生产文件），总节点访问量冲到 9.5M。
+
+    单独跑（无覆盖率）约 9s，尚在 30s 全局阈值内；但 `--cov` 对每次 AST 遍历
+    都挂行跟踪，同一路径实测 24.8s，CI 的 2 核 runner 上即翻过 30s 被判超时。
+    故本判据钉的不是"耗时多少秒"（那随机器漂移），而是**根因形态**：
+    两件事——单趟遍历、结果缓存。
+    """
+
+    def test_subtreeIsNotRewalked(self, monkeypatch):
+        """取数只允许单趟遍历：函数节点不得触发第二次子树 walk。"""
+        import ast as ast_module
+
+        walksPerNode = []
+        realWalk = ast_module.walk
+
+        def countingWalk(node):
+            walksPerNode.append(1)
+            return realWalk(node)
+
+        # 只观察本功能的取数：清缓存后单跑一次，统计 walk 调用次数。
+        monkeypatch.setattr(ledger.ast if hasattr(ledger, "ast") else ast_module,
+                            "walk", countingWalk, raising=False)
+        ledger._singleSourceDerivations.cache_clear() if hasattr(
+            ledger._singleSourceDerivations, "cache_clear"
+        ) else None
+
+        files = [
+            path for path in ledger.PRODUCTION_ROOT.rglob("*.py")
+            if "__pycache__" not in path.parts
+        ]
+        try:
+            ledger._singleSourceDerivations()
+        finally:
+            monkeypatch.undo()
+
+        # 允许每个文件一趟树的 walk；重复子树遍历会让次数显著越过文件数。
+        # 取 1.5 倍作余量（实现若略改结构也不至于误杀），但落在"每函数再走一遍"
+        # 的形态上必然爆掉——那正是根因。
+        assert len(walksPerNode) <= len(files) * 1.5, (
+            f"`_singleSourceDerivations` 对 {len(files)} 个文件发起了 "
+            f"{len(walksPerNode)} 次 ast.walk——内层按函数重走子树，"
+            "单趟遍历的线性口径已被打破（CI 超时的根因）"
+        )
+
+    def test_repeatedTakeIsCached(self):
+        """同一进程内重复取数必须命中缓存（`facts()` 每个符号各调一次）。"""
+        assert hasattr(ledger._singleSourceDerivations, "cache_clear"), (
+            "`_singleSourceDerivations` 未挂缓存——`facts()` 会为每个登记符号"
+            "重扫全部生产文件，取数成本随符号数线性叠加"
+        )
+        ledger._singleSourceDerivations.cache_clear()
+        first = ledger._singleSourceDerivations()
+        second = ledger._singleSourceDerivations()
+        assert first is second, "重复取数未命中缓存：每次都重新全仓扫描"
+
+    def test_readingsSurviveTheRewrite(self):
+        """根修不得改变取数结果：判据口径是单一事实源，只许更快。"""
+        ledger._singleSourceDerivations.cache_clear()
+        derivations = ledger._singleSourceDerivations()
+        assert derivations.get("resolveToolRoundBudget") == "max_loop_rounds", (
+            "单源派生点读数在优化后丢失——那是判据口径漂移，不是提速：\n  "
+            + repr({k: v for k, v in derivations.items() if "Round" in k})
+        )
+
+
+class TestLedgerHasNoShadowedDefinitions:
+    """台账脚本不得有同名定义互相遮蔽（修复教义第 6 条）。
+
+    根因：本文件曾并存两份 `_singleSourceDerivations` / `_DERIVATION_PREFIXES` /
+    `_derivationCallKey` / `_ctorBindings`——后一份静默遮蔽前一份，于是"改了一处、
+    生效的是另一处"。这类第二份定义不会报错，只会让根修落在死码上，故必须机器钉住。
+    """
+
+    def test_noDuplicateTopLevelDefinitions(self):
+        import ast as ast_module
+        import collections
+
+        src = _ledgerSource()
+        tree = ast_module.parse(src)
+        names = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast_module.FunctionDef, ast_module.AsyncFunctionDef, ast_module.ClassDef))
+        ]
+        duplicates = {name: count for name, count in collections.Counter(names).items() if count > 1}
+        assert not duplicates, (
+            f"台账脚本存在同名顶层定义（后者静默遮蔽前者，根修会落在死码上）：{duplicates}"
+        )
+
+    def test_noDuplicateModuleLevelConstants(self):
+        import ast as ast_module
+        import collections
+
+        src = _ledgerSource()
+        tree = ast_module.parse(src)
+        names: list = []
+        for node in tree.body:
+            if isinstance(node, ast_module.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast_module.Name):
+                        names.append(target.id)
+        duplicates = {name: count for name, count in collections.Counter(names).items() if count > 1}
+        assert not duplicates, f"台账脚本存在同名模块级常量定义：{duplicates}"
