@@ -15,8 +15,10 @@
 ## 本文件自带的两条对照
 
 - 正对照：注入一个假的 `visualParse` 前端封装，扫描判据必须报出来——否则"绿"不可信。
-- 负对照：`NeurUI/src/i18n/locales/.mimosa/` 下的 IDE 钩子基线快照里含历史文案，
-  **不得**算作命中（那 54 处假命中正是本判据初版的坑）。
+- 负对照：工具产物目录（`.mimosa` 这类 IDE 钩子基线快照）里的历史文案**不得**算作命中
+  ——那 54 处假命中正是本判据初版的坑。该目录**从不入库**（`.gitignore` 的 `.*/` 整类排除），
+  故对照在临时树上合成该形态：判据钉的是"排除谓词真的在排除"，而不是"这台机器上恰好
+  留着某个编辑器的缓存"。初版直接 `rglob` 本机目录，CI 干净检出下必然红。
 """
 
 from __future__ import annotations
@@ -33,10 +35,15 @@ _FRONTEND_MODULE = REPO / "NeurUI" / "src" / "api" / "modules" / "computer.ts"
 _LOCALE_DIR = REPO / "NeurUI" / "src" / "i18n" / "locales"
 
 
-def _liveLocaleFiles() -> list:
-    """真实 locale 文件：排除插件基线快照目录（`.mimosa`）与备份。"""
+def _liveLocaleFiles(root: pathlib.Path = None) -> list:
+    """真实 locale 文件：排除工具产物快照目录（`.mimosa` 这类）与备份。
+
+    `root` 可注入：负对照要在临时树上合成产物目录来证排除谓词真的生效，
+    不能在空集合上恒真（该目录从不入库）。
+    """
+    root = root if root is not None else _LOCALE_DIR
     return sorted(
-        p for p in _LOCALE_DIR.rglob("*.ts")
+        p for p in root.rglob("*.ts")
         if ".mimosa" not in p.parts and not p.name.endswith((".bak", ".orig"))
     )
 
@@ -74,12 +81,28 @@ class TestFrontendSurfaceGone:
         ]
         assert not offenders, f"11 份 locale 未同批改：[n] {[o.split(chr(92))[-1] for o in offenders]}"
 
-    def test_pluginBaselineIsNotCounted(self):
-        """负对照：插件快照目录里确有历史文案，但不得进入判定面。"""
-        snapshots = [p for p in _LOCALE_DIR.rglob("*") if ".mimosa" in p.parts and p.is_file()]
-        hits = [p for p in snapshots if "visualParse" in p.read_text(encoding="utf-8", errors="replace")]
-        assert hits, "插件基线里已无历史文案，本负对照失去意义，须换判据"
-        assert not [p for p in _liveLocaleFiles() if p in hits], "判定面把插件快照算进来了"
+    def test_pluginBaselineIsNotCounted(self, tmp_path):
+        """负对照：工具产物快照里确有历史文案，但不得进入判定面。
+
+        合成该形态而不是扫本机目录——`.mimosa` 属 `.*/` 整类不入库，
+        CI 干净检出下没有它，扫本机等于把"这台机器留过某个编辑器的缓存"
+        当成判据前提（初版就是这样在 CI 上必然红）。临时树里同时放
+        `zh-CN.ts`（真源）与 `.mimosa/`（产物副本），排除谓词必须只挑前者。
+        """
+        (tmp_path / "zh-CN.ts").write_text(
+            "export const a = { visualParse: 'x' }\n", encoding="utf-8")
+        snapshots = tmp_path / ".mimosa" / "hook-state"
+        snapshots.mkdir(parents=True)
+        (snapshots / "zh-CN.ts").write_text("visualParse\n", encoding="utf-8")
+        (snapshots / "zh-CN.ts.source").write_text("visualParse\n", encoding="utf-8")
+
+        allFiles = [p for p in tmp_path.rglob("*") if ".mimosa" in p.parts and p.is_file()]
+        hits = [p for p in allFiles if "visualParse" in p.read_text(encoding="utf-8", errors="replace")]
+        assert hits, "合成树里没有历史文案，本负对照失去意义，须换判据"
+
+        picked = _liveLocaleFiles(tmp_path)
+        assert [p.name for p in picked] == ["zh-CN.ts"], (
+            f"排除谓词没有只挑真源：{[str(p.relative_to(tmp_path)) for p in picked]}")
 
 
 class TestCompanionLedgersAgree:

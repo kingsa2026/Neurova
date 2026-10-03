@@ -105,6 +105,10 @@ function mockOverview(overrides: Record<string, any> = {}) {
       { model: 'm1', tokens: 17000, calls: 20 },
       { model: 'm2', tokens: 1456, calls: 10 },
     ],
+    latency_stats: [
+      { model: 'm1', calls: 20, p50_ms: 800, p95_ms: 1500, max_ms: 2400 },
+      { model: 'm2', calls: 10, p50_ms: 120, p95_ms: 260, max_ms: 400 },
+    ],
     ...overrides,
   }
 }
@@ -159,6 +163,24 @@ describe('UsageStatsPage', () => {
     await wrapper.find('.a-radio-button[data-value="30"]').trigger('click')
     await flushPromises()
     expect(getUsageOverview).toHaveBeenLastCalledWith(expect.objectContaining({ trend_days: 30 }))
+  })
+
+  it('renders per-model latency percentiles (P1-8 contract consumer)', async () => {
+    // 后端算了 p50/p95/max 并写进 usage-overview，此前前端零消费——
+    // 契约字段悬空。此用例钉住这条线接上了。
+    vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const table = wrapper.find('.nr-latency-table')
+    expect(table.exists()).toBe(true)
+    const rows = wrapper.findAll('.nr-latency-row')
+    // 表头 + 两个模型
+    expect(rows.length).toBe(3)
+    expect(table.text()).toContain('m1')
+    expect(table.text()).toContain('800ms')
+    expect(table.text()).toContain('1.50s')
   })
 
   it('shows empty state instead of crashing on zero data', async () => {
