@@ -29,7 +29,7 @@ class MockAdapter(ChannelAdapter):
         self._connected = False
 
     async def send_message(self, chat_id: str, content: str, message_type: str = "text", **kwargs) -> str:
-        return f"msg_{channel_type}"
+        return f"msg_{self.channel_type}"
 
 
 @unittest.skipIf(not HAS_CHANNEL_MANAGER, "ChannelManager not available")
