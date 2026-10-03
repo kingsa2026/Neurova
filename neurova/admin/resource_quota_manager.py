@@ -71,6 +71,11 @@ class ResourceUsage:
     collab_project_count: int = 0
     api_call_count: int = 0
     concurrent_session_count: int = 0
+    # 「每日」三个计数器（llm_call_count / llm_token_count / api_call_count）
+    # 的结算窗口 = 自然日 YYYY-MM-DD；空串 = 尚未结算，视为新窗口。
+    # 必需是 dataclass 字段：旧实现的锚点 `_last_reset` 不是字段，from_dict 即丢，
+    # 跨天结算根本无从判定，且它按「距今 86400 秒」滚动判定——不是每日语义。
+    daily_window: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -86,14 +91,21 @@ class ResourceUsage:
         self.api_call_count = 0
 
     def check_daily_reset(self, now: Optional[datetime.datetime] = None) -> bool:
-        last = getattr(self, "_last_reset", None)
-        if now is None:
-            now = datetime.datetime.now(datetime.timezone.utc)
-        if last is None or (now - last).total_seconds() >= 86400:
-            self.reset_daily_usage()
-            self._last_reset = now
-            return True
-        return False
+        """本副本的「每日」计数是否还在今天；不在则归零并把窗口改到今天。
+
+        返回是否发生了结算——调用方（管理器）据此决定是否落盘。
+        为什么由管理器落盘：值对象是账本副本，归零只发生在副本上等于没结算
+        （重启后计数原样复活）。
+        为什么按自然日、不按「距今 86400 秒」滚动：额度字段的名字就是
+        `max_llm_calls_per_day`——「每日配额」的语义是自然日，滚动窗口会让
+        昨天下午用满的用户今天上午仍被拒。
+        """
+        today = (now or datetime.datetime.now()).date().isoformat()
+        if self.daily_window == today:
+            return False
+        self.reset_daily_usage()
+        self.daily_window = today
+        return True
 
 
 class ResourceQuotaManager:
@@ -133,16 +145,27 @@ class ResourceQuotaManager:
         self._save()
 
     def _peek_usage(self, user_id: str, group_type: str = "user") -> ResourceUsage:
+        """取账本副本，副本一律先做自然日结算（有变更即落盘）。
+
+        结算点收口在这里与 `_get_or_create_usage` 两处：判定（_check）、
+        消费（try_consume）、记账（_add）、报表（get_quota_status）四条路径
+        全部经由这两个函数取数，不再逐点补结算。
+        未入账的新副本不落盘——「查一下」不该给用户凭空建一条记录。
+        """
         existing = self._usage.get(user_id)
-        if existing is not None:
-            return ResourceUsage.from_dict(existing)
-        return ResourceUsage(user_id=user_id, group_type=group_type)
+        if existing is None:
+            return ResourceUsage(user_id=user_id, group_type=group_type)
+        usage = ResourceUsage.from_dict(existing)
+        if usage.check_daily_reset():
+            self._persist(usage)
+        return usage
 
     def _get_or_create_usage(self, user_id: str, group_type: str = "user") -> ResourceUsage:
-        existing = self._usage.get(user_id)
-        if existing is not None:
-            return ResourceUsage.from_dict(existing)
+        """同 `_peek_usage`；缺记录则先建一条（新建记录也先落窗口标记再落盘）。"""
+        if user_id in self._usage:
+            return self._peek_usage(user_id, group_type)
         usage = ResourceUsage(user_id=user_id, group_type=group_type)
+        usage.check_daily_reset()
         self._persist(usage)
         return usage
 
@@ -301,8 +324,8 @@ class ResourceQuotaManager:
     def list_users_near_limits(self, threshold: float = 0.8) -> List[Dict[str, Any]]:
         with self._lock:
             results: List[Dict[str, Any]] = []
-            for user_id, payload in self._usage.items():
-                usage = ResourceUsage.from_dict(payload)
+            for user_id in list(self._usage.keys()):
+                usage = self._peek_usage(user_id)
                 quota = self.get_user_quota(user_id, group_type=usage.group_type)
                 ratios: Dict[str, float] = {}
                 for usage_field, limit_field in _USAGE_TO_LIMIT.items():
@@ -350,13 +373,13 @@ class ResourceQuotaManager:
 
     def get_all_usage(self) -> Dict[str, Dict[str, Any]]:
         with self._lock:
-            return {uid: ResourceUsage.from_dict(data).to_dict() for uid, data in self._usage.items()}
+            return {uid: self._peek_usage(uid).to_dict() for uid in list(self._usage.keys())}
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:
             totals = {f: 0 for f in _USAGE_TO_LIMIT.keys()}
-            for data in self._usage.values():
-                u = ResourceUsage.from_dict(data)
+            for uid in list(self._usage.keys()):
+                u = self._peek_usage(uid)
                 for f in totals:
                     totals[f] += int(getattr(u, f, 0))
             return {
