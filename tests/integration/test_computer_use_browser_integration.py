@@ -153,12 +153,19 @@ class TestComponentVisibilityHasOneOwner:
         能力轴曾拿授权门 `camofox_active()` 当"配没配"用：playwright 在册时它是 False，
         于是"配了 camofox"的机器上这条轴永远报 `not-configured`，那次真 `/health` 探测
         根本不会发生（§13.3 现场量的正是这个形态：URL 设了而 `:9377` 超时）。
+
+        本条的前提是"playwright 在册且排在选路首位"，而 playwright **不在 CI 薄锁里**
+        （`requirements-ci.txt` 明写刻意排除），靠本机探测会直接前提不成立。
+        故按 §25.4 已验证的口径把探测位钉死——判据讨论的是**两个谓词的分界**，
+        不该取决于这台机器恰好装了什么。
         """
+        from neurova.computer_use import browser_manager as bm
         from neurova.computer_use import capability_state as cs
 
+        monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", True)
         manager = BrowserManager(config={})
         assert "playwright" in manager.get_status()["available_backends"], (
-            "前提变了：这台机器没有 playwright 在册，本条要的另一半无从判起")
+            "钉死探测位后在册表理应含 playwright——装配点没接通")
         monkeypatch.setattr(manager, "camofoxConfigured", lambda: True)
         monkeypatch.setattr(manager, "camofoxBaseUrl", lambda: "http://127.0.0.1:1")
         monkeypatch.setattr(cs, "_browserManager", lambda: manager)

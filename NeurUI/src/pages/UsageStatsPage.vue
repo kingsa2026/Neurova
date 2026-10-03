@@ -77,6 +77,24 @@
           </a-tag>
         </div>
       </GlassCard>
+
+      <!-- P1-8 按模型延迟分位（无 duration_ms 数据时恒空 → 卡片隐藏） -->
+      <GlassCard v-if="latencyStats.length" :title="t('usageStats.latencyByModel')" variant="default" :radius="20">
+        <div class="nr-latency-table">
+          <div class="nr-latency-row nr-latency-head">
+            <span>{{ t('usageStats.latencyCalls') }}</span>
+            <span>{{ t('usageStats.latencyP50') }}</span>
+            <span>{{ t('usageStats.latencyP95') }}</span>
+            <span>{{ t('usageStats.latencyMax') }}</span>
+          </div>
+          <div v-for="row in latencyStats" :key="row.model" class="nr-latency-row">
+            <span class="nr-latency-model">{{ row.model }} · {{ row.calls }}</span>
+            <span>{{ formatLatency(row.p50_ms) }}</span>
+            <span>{{ formatLatency(row.p95_ms) }}</span>
+            <span>{{ formatLatency(row.max_ms) }}</span>
+          </div>
+        </div>
+      </GlassCard>
     </a-spin>
   </div>
 </template>
@@ -149,6 +167,14 @@ function aigcSpark(kind: string): number[] {
     .map(r => r.items || r.calls)
 }
 
+/** P1-8 按模型延迟分位（后端已算，此前前端零消费——契约字段悬空） */
+const latencyStats = computed(() => overview.value.latency_stats ?? [])
+
+function formatLatency(ms: number): string {
+  if (!ms) return '—'
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`
+}
+
 /** 每日 token 序列（KPI spark 用） */
 const heatDays = computed<UsageOverviewHeatmapDay[]>(() => overview.value.heatmap ?? [])
 const sparkDaily = computed(() => heatDays.value.map((d) => d.tokens))
@@ -177,6 +203,18 @@ function buildHeatCells(days: UsageOverviewHeatmapDay[]): [number, number, numbe
     const week = Math.round((dt.getTime() - first.getTime()) / 86_400_000 / 7)
     const dayIdx = (dt.getDay() + 6) % 7 // Mon=0 .. Sun=6
     return [week, dayIdx, d.tokens]
+  })
+}
+
+/** 热力图 x 轴刻度：每周序 → 该周首日（周一）的 MM-DD。 */
+function heatWeekLabels(days: UsageOverviewHeatmapDay[], cells: [number, number, number][]): string[] {
+  const totalWeeks = Math.max(...cells.map((c) => c[0])) + 1
+  const first = new Date(`${days[0]!.date}T00:00:00`)
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7))
+  return Array.from({ length: totalWeeks }, (_, i) => {
+    const d = new Date(first.getTime())
+    d.setDate(d.getDate() + i * 7)
+    return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })
 }
 
@@ -216,8 +254,10 @@ const heatmapOption = computed(() => {
         return `${day.date ?? ''}<br/>${value.toLocaleString()} tokens · ${day.calls ?? 0} calls`
       },
     },
-    grid: { left: 40, right: 16, top: 16, bottom: 24 },
-    xAxis: { type: 'category', data: Array.from({ length: Math.max(...cells.map((c) => c[0])) + 1 }, (_, i) => i), axisLabel: { color: '#94a3b8', show: false } },
+    // x 轴 = 周序，但**必须有日期刻度**：此前 axisLabel.show=false，
+    // 365 天窗口渲染成一条没有任何日期参照的空白长条（截图里的灰带）。
+    // 刻度取每周首日的 MM-DD，间隔抽稀到 ≤12 个，避免糊成一片。
+    xAxis: { type: 'category', data: heatWeekLabels(days, cells), axisLabel: { color: '#94a3b8', interval: Math.max(0, Math.ceil((Math.max(...cells.map((c) => c[0])) + 1) / 12) - 1), fontSize: 10 } },
     yAxis: { type: 'category', data: yLabels, axisLabel: { color: '#94a3b8' } },
     visualMap: {
       show: false,
@@ -400,5 +440,37 @@ onMounted(fetchData)
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.nr-latency-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nr-latency-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--nr-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.nr-latency-row:not(.nr-latency-head):nth-child(odd) {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.nr-latency-head {
+  font-weight: 600;
+  color: var(--nr-text-primary, #e2e8f0);
+}
+
+.nr-latency-model {
+  color: var(--nr-text-primary, #e2e8f0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

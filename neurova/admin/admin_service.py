@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from neurova.admin.resource_quota_manager import (
+    get_resource_quota_manager,
+)
 
 logger = get_logger(__name__)
 
@@ -66,22 +69,6 @@ class UserBackup:
         )
 
 
-class ResourceQuotaManager:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._usage: Dict[str, Dict[str, int]] = {}
-        self._limits: Dict[str, Dict[str, int]] = {}
-
-    def check(self, user_id: str, resource: str) -> bool:
-        return True
-
-    def record(self, user_id: str, resource: str, amount: int = 1) -> None:
-        bucket = self._usage.setdefault(user_id, {})
-        bucket[resource] = bucket.get(resource, 0) + int(amount)
-
-    def get_usage(self, user_id: str) -> Dict[str, int]:
-        return dict(self._usage.get(user_id, {}))
-
-
 class AdminService:
     def __init__(self, storage_dir: str) -> None:
         self._dir = Path(storage_dir)
@@ -95,8 +82,22 @@ class AdminService:
         self._backups: Dict[str, Dict[str, Any]] = {}
         self._groups: Dict[str, Dict[str, Any]] = {"default": {"name": "default", "members": []}}
         self._lock = threading.RLock()
-        self._quota = ResourceQuotaManager()
+        # 单一事实源：配额账本只有一本（`resource_quota_manager` 的进程级单例）。
+        # 此处原有一个同名 stub 类（只有 check/record/get_usage 三个方法、无
+        # increment_*），AdminService 装的是它，而桌面端与 neurflow 各写一本账，
+        # 且按 `neurova.admin.__init__` 的导出调真 API 得到 AttributeError。
+        # 该 stub 已删除，改从真管理器导入。
+        self._quota = get_resource_quota_manager()
         self._load()
+
+    @property
+    def quotaManager(self):
+        """配额账本的读取点（唯一一本，见上方装配注释）。
+
+        公开属性而非私有字段：写得进、读得出，才不是断点——
+        `get_quota_status()` 是给运维看的报表入口，这里是给同进程代码看的句柄。
+        """
+        return self._quota
 
     def _load(self) -> None:
         for path, target in (
@@ -182,7 +183,6 @@ class AdminService:
             members = grp.setdefault("members", [])
             if uid not in members:
                 members.append(uid)
-            self._quota.record(uid, "user_created", 1)
             self._save()
             return dict(user)
 
