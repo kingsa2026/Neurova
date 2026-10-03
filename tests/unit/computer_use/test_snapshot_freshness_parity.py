@@ -204,10 +204,6 @@ class TestGenerationParityContract:
                         return True
             return False
         return False
-        assert snapshotBackends <= set(CONTRACT_BACKENDS), (
-            f"实现了 dom_snapshot 却不受新鲜度判据约束的后端: "
-            f"{sorted(snapshotBackends - set(CONTRACT_BACKENDS))}"
-        )
 
     @pytest.mark.parametrize("action", sorted(SNAPSHOT_MUTATING_ACTIONS))
     def test_actionAdvancesGenerationIdenticallyAcrossBackends(self, action: str):

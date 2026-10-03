@@ -193,6 +193,23 @@ class TestInterpreterIsProbedBeforeUse:
         )
 
 
+#: 夹具工作区的在册角色名。子进程显式注入同名 `CNB_NPC_NAME` —— 若继承运行者的
+#: 会话变量（跑本测试的人/机器人自己的角色名），判据就由"谁在跑"决定，而非由脚本决定。
+SEEDED_ROLE_NAME = "codebuddy"
+
+
+def _seedWorkspaceSettings(workspace: Path) -> None:
+    """把角色名单事实源铺进夹具工作区，使落点是可用构建工作区。
+
+    只铺 `npc.roles` 一项——被测脚本只读它，多铺等于把夹具做成第二份配置样例。
+    """
+    config = workspace / ".cnb"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "settings.yml").write_text(
+        f"npc:\n  roles:\n    - name: {SEEDED_ROLE_NAME}\n", encoding="utf-8"
+    )
+
+
 class TestGateScriptRunsOnBothInterpreters:
     """C. 门禁脚本必须双运行时可用，且两个分支逐字等价。"""
 
@@ -270,10 +287,16 @@ class TestGateScriptRunsOnBothInterpreters:
         """
         workspace = tmp_path / "ws"
         workspace.mkdir()
+        # 工作区必须是一份**可用**的构建落点，不是空目录：`npc_role_admission.py`
+        # 的角色名单事实源是工作区内的 `.cnb/settings.yml`，读不到即响亮判红
+        # （那是它该有的行为——名单读不到时「在不在册」没有答案）。夹具落点给空，
+        # 就变成「拿一条会正当判红的脚本去测行尾」，红的是夹具不是判据。
+        _seedWorkspaceSettings(workspace)
         proc = subprocess.run(
             [sys.executable, str(PROJECT_ROOT / script)],
             capture_output=True, cwd=str(tmp_path), timeout=120,
             env={**os.environ, "CNB": "1", "CI": "true",
+                 "CNB_NPC_NAME": SEEDED_ROLE_NAME,
                  "CNB_BUILD_WORKSPACE": str(workspace)},
         )
         assert proc.returncode == 0, (

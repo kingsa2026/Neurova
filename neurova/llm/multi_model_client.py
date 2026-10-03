@@ -695,6 +695,13 @@ class MultiModelLLMClient:
                 "provider": "mock",
             }
 
+        # 配额闸口：判定 + 记账同一次原子操作，额度用尽直接拒绝，不触达上游。
+        # 闸口在 failover 之前——配额是「这次请求能不能发」的前置条件，
+        # 不是「哪个模型能发」的候选选择。
+        quota_denied = _consume_llm_quota()
+        if quota_denied is not None:
+            return quota_denied
+
         # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
         # 2026-09-07 根因修复（audit P2-12A）：排除集原挂全局单例，并发请求互踩
         # （A 已失败模型被 B 重试/B 继承 A 排除集提前无候选）；改请求局部变量
@@ -958,6 +965,13 @@ class MultiModelLLMClient:
                 ),
                 tool_calls=None, finish_reason="stop",
             )
+            return
+
+        # 配额闸口：与 chat() 同源——前端主流量全走流式，闸口只装在
+        # 非流式路径上等于没装（审计 P0-C2 的同类缺口，见下方限流注释）。
+        quota_denied = _consume_llm_quota()
+        if quota_denied is not None:
+            yield _instream_error_dict(RuntimeError(quota_denied["error"]))
             return
 
         client = self._get_client_for_request(model, provider_id)
@@ -1349,6 +1363,61 @@ _multi_model_client: Optional[MultiModelLLMClient] = None
 # NEUROVA_LLM_MOCK=1 时 chat/chat_stream 在 provider 解析之前返回 canned
 # 响应（无 Key/无网络可跑通全链路：e2e/CI/本地演示）。信封与真实路径同形。
 MOCK_ENV_FLAG = "NEUROVA_LLM_MOCK"
+
+
+def get_quota_manager():
+    """配额管理器（可选依赖；不可用返回 None）。
+
+    单一事实源是 `neurova.admin.resource_quota_manager` 的进程级单例——
+    此前该模块自带一个同名 stub 类，与真管理器各写一本账（已收口）。
+    """
+    try:
+        from neurova.admin.resource_quota_manager import get_resource_quota_manager
+
+        return get_resource_quota_manager()
+    except Exception:  # noqa: BLE001 — 配额后端不可用不阻断对话
+        return None
+
+
+def _consume_llm_quota() -> Optional[Dict[str, Any]]:
+    """LLM 调用的配额闸口：**先判定、再记账**，额度用尽即拒绝。
+
+    返回 None 表示放行；返回字典即拒绝信封（调用方原样返回，不触达上游）。
+
+    为什么必须在这里：`resource_quota_manager` 有 40+ 个 check/increment/
+    try_consume 方法，此前生产代码零调用点——判定自己算得出 allowed=False，
+    但没人去问它，于是记账照记、额度照超，「配额」只是个数。
+    记账用同一个原子操作 `try_consume`（判定与自增同锁内完成），
+    避免 check-then-act 在并发下超发。
+
+    缺口设计：无请求身份（CLI / 桌面端直调）时不施加配额——配额是
+    按 user_id 记账的，没有身份就没有账本可判，静默放行而非拦死。
+    """
+    from neurova.core.identity_context import get_request_user_id
+
+    user_id = get_request_user_id()
+    if not user_id:
+        return None
+    try:
+        manager = get_quota_manager()
+        if manager is None:
+            return None
+        allowed = manager.try_consume(user_id, "llm_call_count", "max_llm_calls_per_day")
+    except Exception as e:  # noqa: BLE001 — 配额后端故障不得阻断对话
+        logger.debug("LLM 配额判定跳过（后端异常）: %s", e)
+        return None
+    if allowed:
+        return None
+    status = manager.check_llm_call_quota(user_id)
+    return {
+        "success": False,
+        "error": (
+            f"LLM 调用配额已用尽: {status.get('current')}/{status.get('limit')}"
+            f"（max_llm_calls_per_day）"
+        ),
+        "model": "",
+        "provider": "",
+    }
 
 
 def _get_429_retry_config() -> Dict[str, Any]:
