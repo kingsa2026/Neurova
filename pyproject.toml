@@ -154,15 +154,13 @@ include = [
 select = ["E9", "F821"]
 
 [tool.ruff.lint.per-file-ignores]
-# F821 存量技术债（建门禁时清点，逐个销账后删除对应行）：
-# - neurflow_api.py：用户并行工作中的 _WEBHOOK_RATE_LIMITERS
-# - test_memory_stream/test_console_api 等：from x import * 星号导入误报
-# - test_minimal_coverage/test_auth_system 等：缺 json/pytest 导入（潜伏）
-"neurova/api/endpoints/neurflow_api.py" = ["F821"]
-"tests/integration/test_memory_stream.py" = ["F821"]
-"tests/test_api/test_console_api.py" = ["F821"]
+# F821 唯一幸存豁免（逐条销账后只剩这一行）。
+#
+# 该行是**真误报**而非藏起来的缺陷，故以诚实形态留一条带依据的豁免：
+# AgentLLMClient 只出现在**字符串前向引用**注解里，实体在 setUp 内导入
+# （agent_core → agent/__init__ → agent_core 循环导入，模块级导入即崩）。
+# 即：ruff 看不到局部导入，符号在被注解的那一刻尚未绑定，但运行期确实存在。
+# 其余七条历史豁免（neurflow_api / test_memory_stream / test_console_api /
+# test_channel_manager / test_plugins_modules / test_auth_system /
+# test_minimal_coverage）已逐条根修或删净，本清单不留死行。
 "tests/unit/agent/test_agent_llm_error_logging.py" = ["F821"]
-"tests/unit/channels/test_channel_manager.py" = ["F821"]
-"tests/unit/core/test_plugins_modules.py" = ["F821"]
-"tests/unit/security/test_auth_system.py" = ["F821"]
-"tests/unit/test_minimal_coverage.py" = ["F821"]
