@@ -70,12 +70,6 @@ def client(app):
 
 
 @pytest.fixture
-def tracker():
-    """创建任务追踪器实例"""
-    return TaskTracker()
-
-
-@pytest.fixture
 def sample_metadata():
     """示例元数据"""
     return {

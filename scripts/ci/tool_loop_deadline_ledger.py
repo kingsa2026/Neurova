@@ -576,6 +576,7 @@ def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
     return tuple(bindings)
 
 
+@functools.lru_cache(maxsize=None)
 def _singleSourceDerivations() -> Dict[str, str]:
     """单源派生点：`{函数名: 它读的配置键}`（全生产侧扫一遍，不在此手抄键名）。
 
@@ -591,6 +592,14 @@ def _singleSourceDerivations() -> Dict[str, str]:
 
     取法：函数体内出现 `get_effective_limits()[<键>]` 或 `limits[<键>]` 形态即记
     `函数名 → 键`。同名函数只认同一个键（同一函数读两个键属异常，取首个并保留事实）。
+
+    **单趟遍历**：每个文件只走一趟 `ast.walk`，把节点取出后先列出函数区间表
+    `(名, 起, 止)`，再把每个 `Subscript` 按行号归属到包含它的函数。早期写法在**每个
+    函数节点上再 `ast.walk(node)` 扫一遍子树**，把外层已走过的节点又走一遍
+    （实测 1.59M 节点里 1.46M 是重复访问）；叠加 `facts()` 对 28 个登记符号各调一次
+    本函数，节点访问量冲到 9.5M，带覆盖率时同一路径 9s → 24.8s，CI 的 2 核 runner
+    上越过 30s 超时判死。`lru_cache` 让同进程内的重复取数不再重扫——读数只依赖
+    AST 事实，缓存不引入漂移。
     """
     findings: Dict[str, str] = {}
     for path in PRODUCTION_ROOT.rglob("*.py"):
@@ -601,119 +610,29 @@ def _singleSourceDerivations() -> Dict[str, str]:
             tree = _parsed(rel)
         except (SyntaxError, OSError):
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Subscript):
-                    found = _SUBSCRIPT_KEY.search(ast.unparse(sub))
-                    if found:
-                        findings.setdefault(node.name, found.group(1))
-    return findings
-
-
-#: 单源派生点的取数口径：**函数体内直接读到了配置键下标**（`…[<键>]`）的取值函数。
-#:
-#: 判据落在"它体内有没有读配置键"上，而不是函数名——名字是约定，体内读数才是事实。
-#: 只按名字认会漏掉 `_goalRoundBudget` 这类不以固定前缀命名的派生点；只按"任意调用"
-#: 认则会把 `spec.get("goal")` 这类普通取值也当成绑定（实测它会从无关模块抓来
-#: `access_count` 当配置键，于是每个关键字参数都报一个假绑定，轴值随之失真）。
-#:
-#: 两道过滤合起来：函数名以 `resolve` 起头**或**体内直接读到配置键下标，二者取一。
-_DERIVATION_PREFIXES = ("resolve", "_goal", "_effective")
-
-
-def _derivationCallKey(expr: str, derivations: Dict[str, str]) -> Optional[str]:
-    """表达式是否是「调用某单源派生点」的形态；是则返回它读的配置键。
-
-    两种写法都认（都要求该函数体内确实读了配置键下标，见 `_singleSourceDerivations`）：
-
-        self.resolveToolRoundBudget()      实例/类方法派生点
-        self._goalRoundBudget(limits)      私有派生点（可带实参）
-    """
-    for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", expr):
-        name = match.group(1)
-        if not name.startswith(_DERIVATION_PREFIXES):
+        # 单趟：节点取出后复用，先列函数区间表再归属 Subscript。
+        # `ast.walk` 是**广度优先**、节点行号不单调，故作用域只能按区间查，
+        # 不能靠"行号越过末尾即弹栈"在线判定。
+        nodes = list(ast.walk(tree))
+        scopes = [
+            (node.name, node.lineno, node.end_lineno or node.lineno)
+            for node in nodes
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        if not scopes:
             continue
-        key = derivations.get(name)
-        if key:
-            return key
-    return None
-
-
-def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
-    """生产侧构造该门控时，阈值参数的绑定表达式（含从哪个配置键取）。"""
-    bindings: List[Dict[str, object]] = []
-    derivations = _singleSourceDerivations()
-    for ref in ast_scan.sourceRefsUnder(PRODUCTION_ROOT, hints=(symbol,)):
-        rel = ast_scan.relativeToRepo(ref.path)
-        for node in ast.walk(_parsed(rel)):
-            if not isinstance(node, ast.Call):
+        for node in nodes:
+            if not isinstance(node, ast.Subscript):
                 continue
-            func = node.func
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-            if name != symbol:
+            found = _SUBSCRIPT_KEY.search(ast.unparse(node))
+            if not found:
                 continue
-            for keyword in node.keywords:
-                expr = ast.unparse(keyword.value)
-                found = _SUBSCRIPT_KEY.search(expr)
-                if found:
-                    bindings.append({
-                        "param": keyword.arg or "",
-                        "expr": expr,
-                        "config_key": found.group(1),
-                        "file": rel,
-                        "line": node.lineno,
-                    })
-                    continue
-                # 写法②：绑到单源派生点（函数体内读配置键）。收口后这是唯一形态，
-                # 不认它等于把收口判成"无来源"。
-                key = _derivationCallKey(expr, derivations)
-                if key:
-                    bindings.append({
-                        "param": keyword.arg or "",
-                        "expr": expr,
-                        "config_key": key,
-                        "via": "single_source_derivation",
-                        "file": rel,
-                        "line": node.lineno,
-                    })
-    return tuple(bindings)
-
-
-def _singleSourceDerivations() -> Dict[str, str]:
-    """单源派生点：`{函数名: 它读的配置键}`（全生产侧扫一遍，不在此手抄键名）。
-
-    **为什么需要它**：阈值参数绑到配置单源有两种正确写法——
-    ① 构造处直接下标 `IterationGate(max_rounds=limits["max_loop_rounds"])`；
-    ② 构造处调**唯一的派生点** `IterationGate(max_rounds=self.resolveToolRoundBudget())`，
-       而那个函数体内才是下标。
-
-    写法②正是 T-04 的收口形态（尺度只有一处派生，守卫与门控同取它）。只看①会把
-    收口后的绑定算成"无来源"（轴值退成 `unbound`），于是**收口本身被判成违规**——
-    那是判据在替旧形态背书。故这里按 AST 取出"某函数读了哪个配置键"，供
-    `_ctorBindings` 把写法②认成绑定。
-
-    取法：函数体内出现 `get_effective_limits()[<键>]` 或 `limits[<键>]` 形态即记
-    `函数名 → 键`。同名函数只认同一个键（同一函数读两个键属异常，取首个并保留事实）。
-    """
-    findings: Dict[str, str] = {}
-    for path in PRODUCTION_ROOT.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        rel = ast_scan.relativeToRepo(path)
-        try:
-            tree = _parsed(rel)
-        except (SyntaxError, OSError):
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Subscript):
-                    found = _SUBSCRIPT_KEY.search(ast.unparse(sub))
-                    if found:
-                        findings.setdefault(node.name, found.group(1))
+            # 归属**所有**包含该行的函数（含外层），与"按子树取数"的原始口径一致：
+            # 一个下标既属于最内层函数，也属于包住它的每个函数，`setdefault` 保首个。
+            # 只取最内层会让嵌套函数的读数丢失外层名（同一事实两种口径必然漂移）。
+            for name, start, end in scopes:
+                if start <= node.lineno <= end:
+                    findings.setdefault(name, found.group(1))
     return findings
 
 
