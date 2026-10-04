@@ -409,6 +409,21 @@ onMounted(() => {
   agentStore.loadWorkflowAgents?.()
 })
 
+// 全局切换器（MainLayout 的 AgentSwitcher，autoNavigate 默认 false）只写
+// agentStore.currentAgentId、不产生路由变化 —— 本页若只认路由，全局切换后
+// 屏幕就停在旧 agent（2026-10-04 用户报告）。身份的**写入口**仍唯一（路由，
+// 见 switchAgent）：store 的用户切换也经由同一入口落地——推路由 → agentId
+// 变 → 上面的 watch 触发取数。prev 为空是 loadAgents 的自动兜底选中
+// （见 agents.ts），不是用户切换，不得据此改写 URL，否则分享链接/刷新后
+// 会被强行带去兜底 agent。
+watch(
+  () => agentStore.currentAgentId,
+  (next, prev) => {
+    if (!next || !prev || next === agentId.value) return
+    router.push({ name: 'AgentChannel', params: { agentId: next } })
+  },
+)
+
 // 身份变化即取数：`agentId` 源自路由，故首挂载与后续 URL 变化（选择器、前进后退、
 // 外部跳转）走**同一条**取数路径 —— 不必也不许再写第二处 fetchConfigs 调用，
 // 否则两条路各自演化，"切换后看到的是谁的配置"就没人能一眼答出。
