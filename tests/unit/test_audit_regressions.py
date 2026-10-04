@@ -5,66 +5,7 @@
 每个测试类对应一个已定位的根因，注释中说明缺陷现象。
 """
 
-import importlib
-
 import pytest
-
-
-class TestToolCallDefaultId:
-    """缺陷：ToolCall 的默认 id 用 `f"call_{id(self)}"` 生成。
-
-    类体作用域不参与闭包，default_factory 执行时 `self` 未定义 →
-    NameError。该数据结构贯穿整个 function calling 链路，
-    任何未显式传 id 的构造都会崩溃。
-    """
-
-    def test_creating_tool_call_without_id_does_not_raise(self):
-        from neurova.cognitive_layers.model_adapter.base import ToolCall
-
-        call = ToolCall(function_name="memory_search")
-        assert call.id.startswith("call_")
-
-    def test_generated_ids_are_unique(self):
-        from neurova.cognitive_layers.model_adapter.base import ToolCall
-
-        ids = {ToolCall(function_name="f").id for _ in range(50)}
-        assert len(ids) == 50
-
-    def test_explicit_id_is_preserved(self):
-        from neurova.cognitive_layers.model_adapter.base import ToolCall
-
-        assert ToolCall(id="explicit-1", function_name="f").id == "explicit-1"
-
-
-class TestModelAdapterRegistry:
-    """缺陷1：pydantic v2 下 `_clients` 未用 PrivateAttr 声明，
-    __init__ 赋值抛 "object has no field '_clients'"。
-
-    缺陷2：builtin.py 调用的 `register_adapter_pattern()` 在 registry 中
-    从未实现，导致整个 model_adapter.builtin 模块无法导入。
-    """
-
-    def test_builtin_module_imports(self):
-        assert importlib.import_module("neurova.cognitive_layers.model_adapter.builtin")
-
-    def test_register_adapter_pattern_exists(self):
-        from neurova.cognitive_layers.model_adapter.registry import get_model_adapter_registry
-
-        registry = get_model_adapter_registry()
-        assert callable(getattr(registry, "register_adapter_pattern", None))
-
-    def test_builtin_adapters_are_registered(self):
-        from neurova.cognitive_layers.model_adapter.registry import get_model_adapter_registry
-
-        names = {a["name"] for a in get_model_adapter_registry().list_adapters()}
-        assert names, "内置适配器应完成注册"
-
-    def test_model_routes_to_expected_adapter(self):
-        from neurova.cognitive_layers.model_adapter.registry import get_model_adapter_registry
-
-        registry = get_model_adapter_registry()
-        # 未知模型必须回落到 generic，而不是抛异常
-        assert registry.find_adapter("totally-unknown-model-xyz") is not None
 
 
 class TestMemoryLayerExports:

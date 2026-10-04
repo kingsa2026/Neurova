@@ -121,7 +121,6 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 - `growth_layer/` — 成长分析
 - `memory_layer/` — 记忆层核心 (安全/向量/冲突/缓存/工作记忆)
 - `meta_cognition_layer/` — 元认知
-- `model_adapter/` — 模型适配器
 
 ### 进化系统 (`neurova/evolution/`)
 

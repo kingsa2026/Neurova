@@ -117,20 +117,20 @@ history 追加、指标只降不升）——不更新就当场红，红是对的
 
 ## 3. 落账清单（执行时逐条勾）
 
-- [ ] S0 判据新增，改前 3 红 1 绿的读数原文留存
-- [ ] S1 台账预存红名单留存
-- [ ] `neurova/cognitive_layers/model_adapter/` 四件已 `git rm`
-- [ ] `agent_core.py` 三行赋值已删；尺寸棘轮基线已按其机制更新并复跑
-- [ ] `api/endpoints/model_adapter.py` 已 `git rm`；挂载表行已删；直挂点核查读数=仅表驱动
-- [ ] `test_audit_regressions.py` 两类已删、文件仍逐文件全绿、仍在 `protected_tests.txt:4`
-- [ ] 前端 `model-adapter.ts` / barrel 行 / vitest 块三处已删；`npm run test` 与 `vue-tsc` 对基线
-- [ ] `docs/09-dev-progress/api_inventory.md` 由生成器重生成，未手改
-- [ ] 结构性文档 4 处已改；7 份日期快照未动（列名留证）
-- [ ] `protected_tests.txt` 已登记 S0 判据；登记三道守卫合跑读数原文留存
-- [ ] `tests/unit` 失败名集合差为空
-- [ ] 活体三条读数留存（404 / 主链路一轮 / 族推断仍具体）
-- [ ] 工单集 §44 记裁决与执行结果；本单净 LOC 逐条去向写进提交说明
-- [ ] 探针与还原备份活到提交之后才删（记忆 feedback-keep-restore-backups-until-commit）
+- [x] S0 判据新增，改前 3 红 1 绿的读数原文留存（3 failed + 6 passed；§44.1）
+- [x] S1 台账预存红名单留存（实测为 ∅：工单立项时的 5 条预存红已被 c84d9fda 根修；§44.1）
+- [x] `neurova/cognitive_layers/model_adapter/` 四件已 `git rm`
+- [x] `agent_core.py` 三行赋值已删（装配段整块 −13 行）；尺寸棘轮基线已按其机制更新并复跑（17 passed）
+- [x] `api/endpoints/model_adapter.py` 已 `git rm`；挂载表行已删；直挂点核查读数=仅表驱动
+- [x] `test_audit_regressions.py` 两类已删、文件仍逐文件全绿（15 passed）、仍在 `protected_tests.txt:4`
+- [x] 前端 `model-adapter.ts` / barrel 行 / vitest 块三处已删；`npm run test` 与 `vue-tsc` 对基线（失败 2 条 A/B 实证预存；vue-tsc 零报错）
+- [x] `docs/09-dev-progress/api_inventory.md` 由生成器重生成（删除后 `--write`，−4/+2），未手改
+- [x] 结构性文档 4 处已改；7 份日期快照未动（列名留证）
+- [x] `protected_tests.txt` 已登记 S0 判据；登记三道守卫合跑读数原文留存（57 passed）
+- [x] `tests/unit` 失败名集合差为空（T-20 引入的 3 类红全部闭环后与 HEAD 态逐名相同；skills/computer_use 未跑完的理由见 §44.2）
+- [ ] 活体三条读数留存（404 / 主链路一轮 / 族推断仍具体）——**2/3**：404 三条与族推断读数已留 §44.3；主链路真调用待凭据由人当场给
+- [x] 工单集 §44 记裁决与执行结果；本单净 LOC 逐条去向写进提交说明
+- [x] 探针与还原备份活到提交之后才删（记忆 feedback-keep-restore-backups-until-commit）
 
 ## 4. 停手条件
 

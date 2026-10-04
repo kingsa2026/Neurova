@@ -45,8 +45,7 @@ Neurova/
 │   ├── emotion_context_layer/        # 情感上下文注入 (17种情感分类)
 │   ├── growth_layer/                 # 成长分析
 │   ├── memory_layer/                 # 记忆层核心 (安全/向量/冲突/缓存/工作记忆)
-│   ├── meta_cognition_layer/         # 元认知
-│   └── model_adapter/                # 模型适配器
+│   └── meta_cognition_layer/         # 元认知
 │
 ├── neurova/evolution/                # 进化系统
 │   ├── pattern_miner.py              # 序列模式挖掘
@@ -207,7 +206,6 @@ Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
 - `growth_layer/` — 成长分析
 - `memory_layer/` — 记忆层核心 (安全/向量/冲突/缓存/工作记忆)
 - `meta_cognition_layer/` — 元认知
-- `model_adapter/` — 模型适配器
 
 ### 进化系统 (`neurova/evolution/`)
 - **PatternMiner** — 序列模式挖掘

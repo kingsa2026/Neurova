@@ -14,7 +14,6 @@ import api from '@/api'
 import * as runtime from '@/api/modules/runtime'
 import * as image from '@/api/modules/image'
 import * as builder from '@/api/modules/builder'
-import * as modelAdapter from '@/api/modules/model-adapter'
 import * as contextApi from '@/api/modules/context'
 import * as agentEnhancement from '@/api/modules/agent-enhancement'
 import * as agentCommunication from '@/api/modules/agent-communication'
@@ -129,26 +128,6 @@ describe('builder API', () => {
   it('getBuiltAgents calls GET /builder/agents', async () => {
     await builder.getBuiltAgents()
     expect(mockGet).toHaveBeenCalledWith('/builder/agents')
-  })
-})
-
-// ===========================================================================
-// model-adapter.ts
-// ===========================================================================
-describe('model-adapter API', () => {
-  it('getAdapters calls GET /model-adapter', async () => {
-    await modelAdapter.getAdapters()
-    expect(mockGet).toHaveBeenCalledWith('/model-adapter')
-  })
-
-  it('getAdapter calls GET /model-adapter/{id}', async () => {
-    await modelAdapter.getAdapter('openai')
-    expect(mockGet).toHaveBeenCalledWith('/model-adapter/openai')
-  })
-
-  it('matchModel calls POST /model-adapter/match', async () => {
-    await modelAdapter.matchModel('gpt-4o')
-    expect(mockPost).toHaveBeenCalledWith('/model-adapter/match', { model: 'gpt-4o' })
   })
 })
 

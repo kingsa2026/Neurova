@@ -42,6 +42,18 @@
       "agent_class_methods": 57,
       "agent_class_property_accessors": 17,
       "agent_class_non_property_methods": 40
+    },
+    {
+      "phase": "T-20 model_adapter 退役",
+      "date": "2026-10-04",
+      "description": "model_adapter 整块退役（施工单 docs/04-plans/2026-10-02-model-adapter-retirement-plan.md）：删除 Agent 装配段里 a.model_adapter 的赋值与 builtin 导入/注册表查找（预置未接线、全仓零消费方、一调即炸），能力面由 llm/capability_detector.py 单源承接。净减 13 行（2103 < 2116），无新增装配体。",
+      "agent_core_lines": 2103,
+      "subsystem_container_lines": 543,
+      "subsystem_container_methods": 16,
+      "agent_class_lines": 1117,
+      "agent_class_methods": 57,
+      "agent_class_property_accessors": 17,
+      "agent_class_non_property_methods": 40
     }
   ]
 }

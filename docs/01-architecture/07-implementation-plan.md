@@ -32,8 +32,7 @@ neurova/
 │   │   ├── memory_layer/         # 记忆层核心 (多维分类, 见 ADR 0018)
 │   │   ├── emotion_context_layer/ # 情感上下文注入
 │   │   ├── growth_layer/         # 成长分析
-│   │   ├── meta_cognition_layer/ # 元认知
-│   │   └── model_adapter/        # 模型适配器
+│   │   └── meta_cognition_layer/ # 元认知
 │   ├── llm/                      # LLM 模块 (6+ 提供商)
 │   │   ├── llm_router.py         # 多模态自适应路由器
 │   │   ├── multi_model_client.py # 多模型统一客户端
