@@ -96,7 +96,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import {
   screenshot,
   click,
@@ -108,13 +107,17 @@ import {
   smartType as smartTypeApi,
   shell,
 } from '@/api/modules/computer'
+import { useAgentPage } from '@/composables/useAgentPage'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
-const route = useRoute()
-const agentId = route.params.agentId as string
+const { agentId } = useAgentPage({
+  // 全局切换器换人 → 重新截取新 agent 的画面（页面主体即该 agent 的屏幕；
+  // T-21 同根因扫荡，工单集 §45.2）
+  onAgentChange: () => { takeScreenshot() },
+})
 
 const screenshotLoading = ref(false)
 const shellLoading = ref(false)
@@ -139,7 +142,7 @@ const failWith = (e: any) => message.error(e?.response?.data?.detail || t('commo
 const takeScreenshot = async () => {
   screenshotLoading.value = true
   try {
-    const res: any = await screenshot(agentId)
+    const res: any = await screenshot(agentId.value)
     const data = res?.data ?? res ?? {}
     screenshotUrl.value = data.url || data.image || (data.base64 ? `data:image/png;base64,${data.base64}` : '')
   } catch (e) {
@@ -161,7 +164,7 @@ const onScreenshotClick = (e: MouseEvent) => {
 
 const doClick = async () => {
   try {
-    await click(agentId, clickX.value, clickY.value)
+    await click(agentId.value, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch (e) { failWith(e) }
@@ -170,7 +173,7 @@ const doClick = async () => {
 const doType = async () => {
   if (!typeText.value) return
   try {
-    await computerType(agentId, typeText.value)
+    await computerType(agentId.value, typeText.value)
     message.success(t('common.success'))
     typeText.value = ''
   } catch (e) { failWith(e) }
@@ -178,7 +181,7 @@ const doType = async () => {
 
 const doScroll = async () => {
   try {
-    await scroll(agentId, scrollDir.value, scrollAmount.value)
+    await scroll(agentId.value, scrollDir.value, scrollAmount.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch (e) { failWith(e) }
@@ -187,7 +190,7 @@ const doScroll = async () => {
 const browserNavigate = async () => {
   if (!browserUrl.value) return
   try {
-    await navigate(agentId, browserUrl.value)
+    await navigate(agentId.value, browserUrl.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch (e) { failWith(e) }
@@ -201,7 +204,7 @@ const browserType = async () => { await doType() }
 
 const browserExtract = async () => {
   try {
-    const res: any = await extractPage(agentId)
+    const res: any = await extractPage(agentId.value)
     message.info(JSON.stringify(res?.data ?? res))
   } catch (e) { failWith(e) }
 }
@@ -233,7 +236,7 @@ const executeShell = async () => {
   if (!shellCommand.value) return
   shellLoading.value = true
   try {
-    const res: any = await shell(agentId, shellCommand.value)
+    const res: any = await shell(agentId.value, shellCommand.value)
     const data = res?.data ?? res ?? {}
     shellOutput.value = data.output ?? data.result ?? JSON.stringify(data, null, 2)
     shellCommand.value = ''
