@@ -249,7 +249,7 @@ describe('DashboardPage', () => {
     const tokenCard = wrapper.find('.nr-stat-card--link')
     expect(tokenCard.exists()).toBe(true)
     await tokenCard.trigger('click')
-    expect(routerPush).toHaveBeenCalledWith('/usage-stats')
+    expect(routerPush).toHaveBeenCalledWith('/analytics?tab=tokens')
   })
 
   it('renders grid cards through the real GlassCard shell (glass backdrop regression)', async () => {

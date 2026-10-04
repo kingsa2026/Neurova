@@ -1,8 +1,9 @@
 /**
- * StatsPage — 真实统计契约防回归测试（2026-09-02）
+ * SystemOverviewSection — 系统概览节防回归测试（2026-09-02 原 StatsPage 契约，
+ * 2026-10-05 随六页整合迁入：/stats 页退役，概览 Tab 成为 /analytics 的
+ * SystemOverviewSection，admin 门禁内嵌于节内，测试近原样跟随。）
  *
- * 背景：/stats 后端曾为部分 stub（overview 恒 0、/usage TODO、export 不存在），
- * 且契约与前端 stats.ts 类型错位。本测试锁定：
+ * 本测试锁定：
  * 1. admin 渲染 overview 真实 KPI 卡 + 每 agent 统计表
  * 2. 非 admin 显示权限门（admin-gate），不渲染内容
  * 3. 趋势条按天序列渲染
@@ -33,7 +34,7 @@ vi.mock('@/api/modules/analytics', () => ({
   getErrorAnalytics: vi.fn(),
 }))
 
-import StatsPage from '@/pages/StatsPage.vue'
+import SystemOverviewSection from '@/pages/analytics/SystemOverviewSection.vue'
 import { statsApi } from '@/api/modules'
 import { getPerformanceAnalytics, getBehaviorAnalytics, getErrorAnalytics } from '@/api/modules/analytics'
 
@@ -85,10 +86,10 @@ const stubs = {
 
 function mountPage() {
   const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': messages } })
-  return mount(StatsPage, { global: { plugins: [i18n], stubs } })
+  return mount(SystemOverviewSection, { global: { plugins: [i18n], stubs } })
 }
 
-describe('StatsPage', () => {
+describe('SystemOverviewSection', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
