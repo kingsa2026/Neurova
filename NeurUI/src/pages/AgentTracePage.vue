@@ -99,7 +99,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import { listTraces, getTraceStats, getTraceDetail } from '@/api/modules/trace'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -108,15 +107,20 @@ import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { message } from 'ant-design-vue'
 import { formatTimestampText } from '@/utils/displayText'
 import { traceStatusTagColor } from '@/utils/traceStatus'
+import { useAgentPage } from '@/composables/useAgentPage'
 
 const { t } = useI18n()
-const route = useRoute()
-const agentId = route.params.agentId as string
+const { agentId } = useAgentPage({
+  // 全局切换器（AgentSwitcher，autoNavigate 默认 false）只写 store 不动路由，
+  // router-view 的 :key 也不重挂载——身份不跟随 store 就永远停在旧 agent
+  // （T-21 同根因扫荡，工单集 §45.2）。换人即重拉链路与统计。
+  onAgentChange: () => { fetchTraces() },
+})
 
-const debugTabs = [
-  { labelKey: 'nav.trace', to: `/agent/${agentId}/trace` },
-  { labelKey: 'nav.trajectory', to: `/agent/${agentId}/trajectory` },
-]
+const debugTabs = computed(() => [
+  { labelKey: 'nav.trace', to: `/agent/${agentId.value}/trace` },
+  { labelKey: 'nav.trajectory', to: `/agent/${agentId.value}/trajectory` },
+])
 
 const loading = ref(false)
 const traces = ref<any[]>([])
@@ -145,8 +149,8 @@ const fetchTraces = async () => {
   loading.value = true
   try {
     const [traceRes, statsRes]: any[] = await Promise.all([
-      listTraces(agentId),
-      getTraceStats(agentId),
+      listTraces(agentId.value),
+      getTraceStats(agentId.value),
     ])
     const td = traceRes?.data ?? traceRes ?? {}
     traces.value = td.items ?? td.traces ?? (Array.isArray(td) ? td : [])

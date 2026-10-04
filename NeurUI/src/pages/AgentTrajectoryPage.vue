@@ -71,10 +71,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import { listTraces, getTraceDetail, exportTrace as exportTraceApi } from '@/api/modules/trace'
+import { useAgentPage } from '@/composables/useAgentPage'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentPageTabs from '@/components/AgentPageTabs.vue'
@@ -83,13 +83,15 @@ import { formatTimestampText } from '@/utils/displayText'
 import { traceStatusTagColor } from '@/utils/traceStatus'
 
 const { t } = useI18n()
-const route = useRoute()
-const agentId = route.params.agentId as string
+const { agentId } = useAgentPage({
+  // 全局切换器换人即重拉轨迹（同 AgentTracePage，T-21 同根因扫荡）
+  onAgentChange: () => { fetchTraces() },
+})
 
-const debugTabs = [
-  { labelKey: 'nav.trace', to: `/agent/${agentId}/trace` },
-  { labelKey: 'nav.trajectory', to: `/agent/${agentId}/trajectory` },
-]
+const debugTabs = computed(() => [
+  { labelKey: 'nav.trace', to: `/agent/${agentId.value}/trace` },
+  { labelKey: 'nav.trajectory', to: `/agent/${agentId.value}/trajectory` },
+])
 
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -107,7 +109,7 @@ const eventColor = (type: string) => {
 const fetchTraces = async () => {
   loading.value = true
   try {
-    const res: any = await listTraces(agentId)
+    const res: any = await listTraces(agentId.value)
     const data = res?.data ?? res ?? {}
     traces.value = data.items ?? data.traces ?? (Array.isArray(data) ? data : [])
   } catch {

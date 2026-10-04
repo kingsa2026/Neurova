@@ -3230,7 +3230,7 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
   9 passed；全量 vitest 1913 passed / 1 failed（canvasEdgesStyle，A/B 预存）；
   `vue-tsc --noEmit` 零报错。
 
-### 45.2 同根因剩余命中点登记（本轮不动码，待工单）
+### 45.2 同根因剩余命中点登记（~~本轮不动码，待工单~~ → 已于 §45.5 全部销账）
 
 `route.params.agentId` 直读、无 store 订阅的还有四页——全局切换 agent 后数据
 停在旧 agent（点击侧栏导航即自愈，症状较轻）：
@@ -3244,6 +3244,8 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
 
 四页的 `agentId` 是非响应式 const，换 composable 的 ref 需逐处核对模板与请求
 参数的 `.value`——属独立小工单，不在本单顺手改（教义第 5 条：登记留痕，不许静默遗留）。
+
+> **2026-10-04 晚销账**：四页已同批改造，见 §45.5。
 
 ### 45.3 更正与补修（同日稍晚，用户截图反馈"没修好"）
 
@@ -3289,3 +3291,22 @@ store → 全局切换永远够不着它。修法：订阅 `agentStore.currentAg
   预存）；vue-tsc 零报错。
 - 留痕：`channel.viewDefaultAgent` i18n 键退役后暂留 11 语言包（删除需全语言
   同批，另行处理）；AgentChannelPage 的页内选择器未在本裁决范围内，保留。
+
+### 45.5 §45.2 四页销账——useAgentPage 同批改造（2026-10-04 晚）
+
+`AgentTracePage` / `AgentTrajectoryPage` / `AgentFirewallPage` / `AgentComputerPage`
+四页同一形态（`route.params.agentId` 非响应式解构 + 仅 onMounted 取数），同批换
+`useAgentPage` 既有机制：
+
+- **Trace / Trajectory**：`onAgentChange → fetchTraces()`（链路+统计 / 轨迹重取）；
+  `debugTabs` 面包屑由非响应式 const 改 computed（否则模板里永远渲染首挂载身份）。
+- **Computer**：`onAgentChange → takeScreenshot()`（页面主体即该 agent 的屏幕画面，
+  换人即重截）；七处动作调用（截屏/点击/输入/滚动/导航/抽取/终端）逐处补 `.value`。
+- **Firewall**：读侧端点是全局的（`/firewall/*` 无 agent 维度），无按 agent 重取的
+  数据——只采用身份跟随（展示标签与写侧目标 `/agents/{agentId}/firewall/*` 换人），
+  不挂重取回调；三处写侧 URL 逐处补 `.value`。
+
+先红后绿：四页各新增 `*.agentStoreSync.test.ts`（初挂载按路由身份 + 全局切换跟随，
+修前各 1红1绿、共 4红），修后 **8 passed**；全量 vitest 1924 passed / 1 failed
+（canvasEdgesStyle 预存）；vue-tsc 零报错。四页的 `useRoute` 导入与 `const route`
+随之摘除（无其它消费）。
