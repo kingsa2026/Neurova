@@ -71,7 +71,6 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
       { to: '/monitor', labelKey: 'nav.monitor', icon: MonitorOutlined },
       { to: '/health', labelKey: 'nav.health', icon: HeartOutlined },
       { to: '/logs', labelKey: 'nav.logs', icon: FileTextOutlined },
-      { to: '/stats', labelKey: 'nav.stats', icon: BarChartOutlined },
     ],
   },
   {

@@ -42,7 +42,7 @@
           :spark-data="card.spark"
           :class="{ 'nr-stat-card--link': card.key === 'tokens' }"
           :title="card.key === 'tokens' ? t('dashboard.usageStatsEntry') : undefined"
-          @click="card.key === 'tokens' && router.push('/usage-stats')"
+          @click="card.key === 'tokens' && router.push('/analytics?tab=tokens')"
         />
       </div>
     </a-spin>

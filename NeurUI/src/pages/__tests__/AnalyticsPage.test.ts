@@ -14,6 +14,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
+vi.mock('vue-router', () => ({
+  // 容器读 route.query.tab 做 ?tab= 深链；断言用例经 useRoute 替身注入
+  useRoute: () => ({ query: routeQuery }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
+const routeQuery: Record<string, string> = {}
 vi.mock('@/api/modules/analytics', () => ({
   getUsageAnalytics: vi.fn(),
   getPerformanceAnalytics: vi.fn(),
@@ -32,7 +38,8 @@ const messages = {
     totalCalls: 'API 调用',
     totalAgents: '智能体总数',
   },
-  system: { analytics: '数据分析', usage: '用量', performance: '性能', errors: '错误' },
+  system: { analytics: '数据分析', usage: '用量', performance: '性能', errors: '错误', overview: '概览' },
+  usageStats: { title: 'Token 活动' },
   analytics: {
     day: '日', week: '周', month: '月',
     usageOverTime: '使用趋势',
@@ -46,6 +53,9 @@ const messages = {
 }
 
 const stubs = {
+  KeepAlive: { template: '<div><slot/></div>' },
+  SystemOverviewSection: { template: '<div class="overview-section-stub"/>' },
+  TokenActivitySection: { template: '<div class="token-section-stub"/>' },
   GlassPanel: { props: ['variant', 'padding', 'radius'], template: '<div class="glass-panel"><slot/></div>' },
   GlassButton: { props: ['variant', 'size', 'loading'], template: '<button class="glass-btn"><slot/></button>' },
   GlassStatCard: { props: ['label', 'value'], template: '<div class="glass-stat"><span class="stat-label">{{ label }}</span><span class="stat-value">{{ value }}</span></div>' },
@@ -70,6 +80,7 @@ function mountPage() {
 describe('AnalyticsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeQuery.tab = ''
   })
 
   it('usage tab renders real aggregates from backend contract', async () => {
@@ -178,5 +189,27 @@ describe('AnalyticsPage', () => {
     expect(getErrorAnalytics).toHaveBeenCalledWith({ period: 'week' })
     expect(wrapper.text()).toContain('总错误数')
     expect(wrapper.text()).toContain('p-openai')
+  })
+
+  // ── 六页整合契约（工单集 §46）：?tab= 深链 + 新 Tab 惰性挂载 ──
+  it('?tab= 深链决定初始 Tab：tokens 落地即挂载 Token 活动节（KeepAlive 惰性取数）', async () => {
+    routeQuery.tab = 'tokens'
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // token 节挂载即自取（其自身测试文件钉取数契约），容器四 Tab 的 API 不应被拉
+    expect(wrapper.find('.token-section-stub').exists()).toBe(true)
+    expect(getUsageAnalytics).not.toHaveBeenCalled()
+    routeQuery.tab = ''
+  })
+
+  it('overview Tab 惰性挂载系统概览节；容器 fetchAll 对其空转', async () => {
+    routeQuery.tab = 'overview'
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.overview-section-stub').exists()).toBe(true)
+    expect(getUsageAnalytics).not.toHaveBeenCalled()
+    routeQuery.tab = ''
   })
 })

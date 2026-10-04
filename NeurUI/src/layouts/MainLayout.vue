@@ -203,9 +203,6 @@
       <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed" v-if="can('/notifications')">
         <template #icon><BellOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/usage-stats" :label="t('nav.usageStats')" :collapsed="appStore.sidebarCollapsed" v-if="can('/usage-stats')">
-        <template #icon><LineChartOutlined /></template>
-      </GlassNavItem>
       <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed" v-if="can('/analytics')">
         <template #icon><BarChartOutlined /></template>
       </GlassNavItem>
@@ -345,7 +342,7 @@ import {
   DesktopOutlined, ControlOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  CoffeeOutlined, HistoryOutlined, LineChartOutlined, BarChartOutlined,
+  CoffeeOutlined, HistoryOutlined, BarChartOutlined,
   UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
   BookOutlined, AppstoreOutlined, RocketOutlined, NodeIndexOutlined,
   TeamOutlined, ProjectOutlined, BranchesOutlined, BgColorsOutlined,

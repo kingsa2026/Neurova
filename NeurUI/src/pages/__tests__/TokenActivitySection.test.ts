@@ -1,8 +1,10 @@
 /**
- * UsageStatsPage — Token 持久化使用统计看板防回归测试（2026-09-03）
+ * TokenActivitySection — Token 持久化使用统计看板防回归测试（2026-09-03，
+ * 2026-10-05 随六页整合迁入：原 /usage-stats 独立页（UsageStatsPage）整体迁入
+ * /analytics 统一入口的「Token 活动」Tab，测试近原样跟随，判据不变。）
  *
  * 背景：token 记账原为进程内内存单例、重启归零。持久化历史（usage_history SQLite）
- * 上线后，本页从 /v1/stats/usage-overview 拉取：KPI 卡（累计/峰值/最长会话时长/
+ * 上线后，本节从 /v1/stats/usage-overview 拉取：KPI 卡（累计/峰值/最长会话时长/
  * 连续天数）+ Token 活动热力图（echarts heatmap）+ 按模型每日趋势折线。
  *
  * 契约（防回归）：
@@ -19,10 +21,13 @@ vi.mock('@/api/modules/stats', () => ({
   getUsageOverview: vi.fn(),
   getProviderUsage: vi.fn(),
 }))
+vi.mock('@/api/modules/generation', () => ({
+  getGenerationUsage: vi.fn().mockResolvedValue({ data: { daily: [], totals: [], days: 30 } }),
+}))
 
 import { getProviderUsage } from '@/api/modules/stats'
 
-import UsageStatsPage from '@/pages/UsageStatsPage.vue'
+import TokenActivitySection from '@/pages/analytics/TokenActivitySection.vue'
 import { getUsageOverview } from '@/api/modules/stats'
 
 const messages = {
@@ -115,10 +120,10 @@ function mockOverview(overrides: Record<string, any> = {}) {
 
 function mountPage() {
   const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': messages } })
-  return mount(UsageStatsPage, { global: { plugins: [i18n], stubs } })
+  return mount(TokenActivitySection, { global: { plugins: [i18n], stubs } })
 }
 
-describe('UsageStatsPage', () => {
+describe('TokenActivitySection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
@@ -130,7 +135,6 @@ describe('UsageStatsPage', () => {
     await flushPromises()
 
     const text = wrapper.text()
-    expect(text).toContain('使用统计')
     expect(text).toContain('累计 Token 数')
     expect(text).toContain('123.5K') // 123456 → K 缩写
     expect(text).toContain('峰值 Token 数')
@@ -210,7 +214,7 @@ describe('UsageStatsPage', () => {
   })
 })
 
-describe('UsageStatsPage provider 账单卡（P1-13）', () => {
+describe('TokenActivitySection provider 账单卡（P1-13）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
