@@ -335,16 +335,18 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import { request } from '@/api'
+import { useAgentPage } from '@/composables/useAgentPage'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import { message } from 'ant-design-vue'
 import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
-const route = useRoute()
-const agentId = route.params.agentId as string
+const { agentId } = useAgentPage()
+// 读侧端点是全局的（/firewall/*，无 agent 维度），无按 agent 重取的数据；
+// 身份跟随 store 只影响写侧目标（规则增删改走 /agents/{agentId}/firewall/*）
+// 与展示标签（T-21 同根因扫荡，工单集 §45.2）。
 
 // --- State ---
 const activeTab = ref('l0_gateway')
@@ -579,7 +581,7 @@ const saveRule = async () => {
   saving.value = true
   try {
     if (editingRule.value) {
-      await request.put(`/agents/${agentId}/firewall/rules/${editingRule.value.id}`, ruleForm.value)
+      await request.put(`/agents/${agentId.value}/firewall/rules/${editingRule.value.id}`, ruleForm.value)
     } else {
       await request.post(`/firewall/rules`, ruleForm.value)
     }
@@ -597,7 +599,7 @@ const saveRule = async () => {
 
 const toggleRule = async (id: string, active: boolean) => {
   try {
-    await request.put(`/agents/${agentId}/firewall/rules/${id}`, { active })
+    await request.put(`/agents/${agentId.value}/firewall/rules/${id}`, { active })
     message.success(t('common.success'))
     await fetchAllRules()
     await fetchStats()
@@ -608,7 +610,7 @@ const toggleRule = async (id: string, active: boolean) => {
 
 const deleteRule = async (id: string) => {
   try {
-    await request.delete(`/agents/${agentId}/firewall/rules/${id}`)
+    await request.delete(`/agents/${agentId.value}/firewall/rules/${id}`)
     message.success(t('common.success'))
     await fetchAllRules()
     await fetchStats()
