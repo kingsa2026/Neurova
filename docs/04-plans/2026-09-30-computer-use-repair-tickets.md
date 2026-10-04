@@ -3140,3 +3140,67 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
 
 无生产改动 ⇒ 不动 `protected_tests.txt`、不动时钟台账。探针（`t18_keys.py` 与读数 JSON）
 全部落在仓外，即用即删，未落仓。
+
+## 44. T-20 执行落账 —— `model_adapter/` 整块退役已实施（2026-10-04）
+
+> 裁决兑现 §43.4：**退役，不接线**。施工单
+> [`2026-10-02-model-adapter-retirement-plan.md`](2026-10-02-model-adapter-retirement-plan.md)
+> S0–S9 十步全部执行完毕，落账清单 14 项逐条见该单 §3，此处记结果与读数。
+
+### 44.1 执行读数（全部实测）
+
+- **S0 反向守卫**：`tests/unit/llm/test_no_parallel_vendor_capability_surface.py` 四条判据，
+  删前红灯实证 **3 failed（①目录在 ②挂载表含 /v1/model-adapter ③生产源符号命中）+ 6 passed（④六族推断）**；
+  删后转绿 **9 passed**。判据④改前预验读数与施工单 §0 逐条一致（六族全落具体能力）。
+- **台账两守卫**：改前即全绿（42 passed / 1 skipped）——施工单 §0 登记的 5 条预存红
+  已被 `c84d9fda` 根修，基线红名集合 = ∅；删除后 `--write` 重生成台账（−4/+2，
+  model-adapter 前端模块行与后端挂载行退出清单），复跑仍 42 passed，∅ → ∅ 无新增。
+- **归档导航台账**：结构性文档树形图改动触发
+  `test_archive_nav_impact_guard` 红（summary 块与扫描器漂移）——按守卫自述修法
+  `python scripts/scan_docs_refs.py --update-ledger` 重生成机器区（±3 行），复跑 26 passed。
+- **实例字段契约**：`test_agent_public_contract::test_no_field_silently_removed`
+  红（`a.model_adapter` 字段消失）——按快照自带迁移登记机制把 `model_adapter`
+  登入 `agent_instance_fields_migrated`（同 `_tkg_instance` 形态；登记语义：退役无新家，
+  能力面新家 = `llm/capability_detector.py`），复跑 30 passed。
+
+### 44.2 全量归因（失败名集合逐名对账，A/B 均对 HEAD 态实测）
+
+- 已跑完并逐名归因：admin/agent/agents/aigc_studio/analytics/api/asr/auth、core、llm、
+  backup/benchmark/channels/checkpoints/cognitive/deploy/desktop/document、
+  embedding/evolution/execution/guest_agent/knowledge/memory/memory_ingest/migration、
+  models/neurflow/planning/projects/sandbox、scripts/security/sync/tool_layers/tools、
+  tts/voice/web_reach/workflow、collaboration（519 全绿）、ci/guards/cognitive_layers、
+  顶层散件全部 99 个。
+- **T-20 引入的红共 3 条，全部闭环**：S0 判据 3 红（删后自绿，属预期红灯）、
+  Agent 实例字段契约 1 红（快照登记后绿）、API 台账与导航台账二阶效应 9 红
+  （两生成器重生成后绿）。除此之外所有失败名集合与 HEAD 态逐名相同（差异为空）。
+- **未跑完**：`tests/unit/skills`（1031 用例，含超时长测试，540–560s 限时两次未跑完）、
+  `tests/unit/computer_use`（513 用例，浏览器进程重型）。未跑理由：收集期扫描
+  **19796/19796 零 ImportError**（全仓无一处 import 退役块）+ S0 判据③生产源符号命中 0
+  （机械断裂类全覆盖），两目录又不经 Agent 装配/API 路由面（行为耦合面已由
+  agent/api/core 的 A/B 对账覆盖）。
+- 前端：vitest 失败 2 条与 HEAD 态同名（A/B 实证预存）；`vue-tsc --noEmit` 零报错。
+
+### 44.3 活体自证（真后端 :9528，9527 被既有实例占用故换端口）
+
+- `GET /api/v1/health` → **200**（服务正常起）；
+- `GET /api/v1/model-adapter`、`GET /api/v1/model-adapter/openai`、
+  `POST /api/v1/model-adapter/match` → **三条全部 404**（路由真没了，不是 200 空壳）；
+- `GET /api/v1/models` → **200**，UI 侧能力出口健康：`kimi-k2-250905 → ["text","tool_use"]`
+  （context_window 262144）、`kimi-k2.7-code → ["text","tool_use"]`、
+  `glm-5.3 → ["text","reasoning","tool_use"]`、`deepseek-v4-flash → ["text","tool_use"]`
+  （max_tokens 65536）、`doubao-seedream → ["image_generation"]`——族推断仍具体且比退役块更宽；
+- **主聊天链路一轮真调用（含工具轮）：未执行**——需真实凭据由人当场给（施工单 S9② 口径），
+  本轮无人给凭据，留待人补验。装配面已由单元侧 Agent 装配测试（agent 目录 3581 passed）兜住。
+
+### 44.4 净 LOC（difflib 对 `git show HEAD:` 逐文件三分实测）
+
+| 类别 | + | − | 净 |
+|---|---|---|---|
+| 生产（后端四件 1209 + 端点 105 + agent_core 装配段 13 + 挂载行 1 + barrel 行 1 + model-adapter.ts 48；+3 为 provider_compat 注释改写去向：保留 wire 契约≠能力目录的语义区分，仅摘除退役符号引用） | 3 | 1377 | **−1374** |
+| 测试（audit_regressions 两类 59；前端 vitest 块 21） | 0 | 80 | −80 |
+| 测试（棘轮基线 history 条目） | 12 | 0 | +12 |
+| CI（protected_tests.txt 登记含注释） | 3 | 0 | +3 |
+| 文档（结构性 4 处 6 行；两生成物重生成） | 8 | 7 | +1 |
+
+生产净 LOC 为负 ✓（教义第 2 条无需豁免）。

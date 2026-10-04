@@ -1459,3 +1459,6 @@ tests/unit/security/test_tool_circuit_breaker.py
 tests/unit/llm/test_provider_compat_declaration.py
 # §42：采样值被网关钉死必须按回执学（per-model 摘键+有界重发），认不出不许盲重试。逐文件单跑 17 passed
 tests/unit/llm/test_sampling_pin_receipt.py
+# T-20：model_adapter 整块退役的反向守卫——退役块不得复活、挂载表不得回流、生产源不得再引用其符号，
+# 且现役族表对六族模型仍推断出具体能力（防"退役把能力面删薄了"）。逐文件单跑 9 passed
+tests/unit/llm/test_no_parallel_vendor_capability_surface.py
