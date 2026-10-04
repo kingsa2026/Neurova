@@ -3244,3 +3244,22 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
 
 四页的 `agentId` 是非响应式 const，换 composable 的 ref 需逐处核对模板与请求
 参数的 `.value`——属独立小工单，不在本单顺手改（教义第 5 条：登记留痕，不许静默遗留）。
+
+### 45.3 更正与补修（同日稍晚，用户截图反馈"没修好"）
+
+用户截图显示：全局切换器已在 kai，页内下拉停在 Neurova——**报告页实为
+`ChannelIntegrationPage.vue`（消息渠道，路由 /channels，标题"消息渠道"）**，
+§45.1 把"报告页"归到 AgentChannelPage 是按文案"渠道管理"误配的（
+`nav.channels` 一个标签挂了三个渠道页入口）。§45.1 修复的两页仍是同根因
+真命中点（改动保留），但非用户所见页。
+
+**报告页根因**（与前两页同类但形态不同）：页面不占路由，`agentId` 是纯本地
+`ref('default')`（ChannelIntegrationPage.vue:351），既无路由参数可推、也不订阅
+store → 全局切换永远够不着它。修法：订阅 `agentStore.currentAgentId`，用户切换
+（prev 非空且异于当前值）时写回 ref 并走页内既有的 `onAgentChange()` 同一条重取
+路径——身份写入口仍唯一（页内下拉）。prev=null 的自动兜底选中不改落地视图。
+
+先红后绿：新增 `ChannelIntegrationPage.agentStoreSync.test.ts`（修前 1红2绿：
+切换后下拉仍 'default'、列表不重取；兜底/同值两条守卫绿），修后 3 passed；
+本页既有六套 18 passed；全量 vitest 1916 passed / 1 failed（canvasEdgesStyle
+预存）；vue-tsc 零报错。
