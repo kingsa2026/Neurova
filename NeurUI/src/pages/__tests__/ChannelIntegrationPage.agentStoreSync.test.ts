@@ -5,18 +5,18 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { VueWrapper } from '@vue/test-utils'
 
 /**
- * 系统渠道页（消息渠道，/channels）·全局 agent 切换联动契约。
+ * 系统渠道页（消息渠道，/channels）·身份契约：**只显示当前 agent，不提供切换**。
  *
- * 缺陷（2026-10-04 用户截图取证）：侧栏全局切换器已切到 kai，本页内嵌的
- * agent 下拉仍停在 Neurova、列表仍是 Neurova 的渠道。根因：本页 agentId 是
- * 纯本地 `ref('default')`——不接路由（/channels 无 agentId 参数）、不订阅
- * store，全局切换器（AgentSwitcher autoNavigate 默认 false）只写
- * `agentStore.currentAgentId`，本页永远收不到。
+ * 演进（2026-10-04 用户裁决）：本页曾有页内 agent 下拉（本地 ref + onAgentChange
+ * 重取），先修过"不随全局切换刷新"，随后用户裁决**取消页内切换**——身份单源绑定
+ * `agentStore.currentAgentId`（'default' 兜底），页面只显示当前 agent 名称，
+ * 全局切换器换人时列表跟随重取。
  *
- * 修复契约：本页不占路由，页内下拉（v-model + onAgentChange）就是身份写入口；
- * store 的用户切换经**同一入口**落地——写回 agentId 并走 onAgentChange() 重取。
- * 守卫边界：store 的**自动兜底选中**（loadAgents 对空 currentAgentId 的默认
- * 选中，prev=null）不是用户切换，不得据此改写视图——页面落地视图仍是 default。
+ * 钉四件事：
+ * 1. 页面不再渲染 agent 下拉（切换面整体退役，含"查看默认智能体"按钮）；
+ * 2. 显示当前 agent 的**名字**（store 里找得到时用 name，不是裸 id）；
+ * 3. 全局切换 → 列表按新 agent 重取（经 onAgentChange 同一条路径）；
+ * 4. store 未决时落地 default 视图（显示"默认智能体"并按 default 取数）。
  */
 
 vi.mock('@/api', () => ({
@@ -66,6 +66,7 @@ const messages = {
       getQrcode: '获取二维码', scanHint: '提示', scanAuthSuccess: '成功', scanExpired: '过期',
       scanFailed: '失败', wecomMode: '模式', wecomModeAibot: '机器人', wecomModeEnterprise: '企业',
       noConfigsForAgent: '{agent} 名下暂无配置', migrateSuccess: '', migrateEmpty: '',
+      viewDefaultAgent: '查看默认智能体', migrateLegacyChannels: '迁移存量配置',
     },
     settings: { negativeScreen: '负一屏推送' },
     negativeScreen: {
@@ -87,24 +88,15 @@ const messages = {
   },
 }
 
-const agentSelectStub = {
-  props: ['options', 'value'],
-  emits: ['update:value', 'change'],
-  template: `<select class="agent-select" :value="value"
-    @change="$emit('update:value', $event.target.value); $emit('change', $event.target.value)">
-    <option v-for="opt in (options || [])" :key="String(opt.value)" :value="String(opt.value)">{{ opt.label }}</option>
-  </select>`,
-}
-
-let wrapper: VueWrapper | null = null
-
 function mountPage(): VueWrapper {
   const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages })
-  wrapper = mount(ChannelIntegrationPage, {
+  return mount(ChannelIntegrationPage, {
     global: {
       plugins: [i18n],
       stubs: {
-        'a-select': agentSelectStub,
+        // a-select 假体带 data-stub 标记：页面弹层关闭时唯一的 a-select 就是
+        // agent 选择器，"不再渲染切换下拉"= 该标记计数为 0（表单下拉都在弹层里）。
+        'a-select': { props: ['value', 'options'], template: '<select data-stub="a-select"/>' },
         'a-spin': { template: '<div><slot/></div>' },
         'a-tag': { template: '<span><slot/></span>' },
         'a-empty': { props: ['description'], template: '<div class="ant-empty">{{ description }}</div>' },
@@ -120,21 +112,11 @@ function mountPage(): VueWrapper {
       },
     },
   })
-  return wrapper
 }
 
-function currentSelectValue(): string {
-  return ((wrapper?.find('select.agent-select').element as HTMLSelectElement) ?? { value: '' }).value
-}
-
-function listCalls(): number {
-  return (listChannelConfigs as unknown as { mock: { calls: unknown[][] } }).mock.calls.length
-}
-
-describe('ChannelIntegrationPage — 全局 agent 切换联动', () => {
+describe('ChannelIntegrationPage — 只显示当前 agent（无切换）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    wrapper = null
     vi.clearAllMocks()
     ;(api.get as unknown as { mockImplementation: (fn: (url: string) => Promise<unknown>) => void })
       .mockImplementation((url: string) => {
@@ -148,46 +130,57 @@ describe('ChannelIntegrationPage — 全局 agent 切换联动', () => {
     ;(getNegativeScreenConfig as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({ enabled: false })
     ;(getPushStatistics as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({ code: 0, data: {} })
   })
-  afterEach(() => {
-    wrapper?.unmount()
-    wrapper = null
-    document.body.innerHTML = ''
+  afterEach(() => { document.body.innerHTML = '' })
+
+  it('页面不再渲染 agent 切换下拉，也没有 switch-to-default 按钮', () => {
+    const w = mountPage()
+    expect(w.findAll('[data-stub="a-select"]').length).toBe(0)
+    expect(w.find('[data-testid="switch-to-default"]').exists()).toBe(false)
   })
 
-  it('store 自动兜底选中（prev=null）不改落地视图——仍停在 default', async () => {
+  it('冷挂载：loadAgents 自动兜底选中后，页面跟随显示该 agent 并按其取数', async () => {
     mountPage()
     await flushPromises()
 
-    expect(currentSelectValue()).toBe('default')
+    // store 自动兜底选中第一个 agent（agents.ts 既有行为），身份单源绑定后页面跟随。
+    // listChannelConfigs 在 loadConfigs 的 schema await 边界之后才发——兜底此时已
+    // 落定，故首枪即带选中身份（无 'default' 空转枪）；若兜底竞态晚于取数，
+    // watch 会补一枪同身份重取，两次读数一致。
+    expect(listChannelConfigs).toHaveBeenLastCalledWith('216fb777')
+  })
+
+  it('agents 为空（store 保持未决）→ 落地 default 视图：显示"默认智能体"', async () => {
+    ;(api.get as unknown as { mockImplementation: (fn: (url: string) => Promise<unknown>) => void })
+      .mockImplementation((url: string) => {
+        if (url === '/agents') return Promise.resolve({ data: [] })
+        return Promise.resolve({ data: [] })
+      })
+    const w = mountPage()
+    await flushPromises()
+
+    expect(w.find('[data-testid="current-agent-name"]').text()).toBe('默认智能体')
+    expect(listChannelConfigs).toHaveBeenCalledWith('default')
     expect(listChannelConfigs).toHaveBeenCalledTimes(1)
   })
 
-  it('全局切换器换 agent → 页内下拉跟随，列表按新 agent 重取', async () => {
-    mountPage()
-    await flushPromises()
-    expect(listChannelConfigs).toHaveBeenCalledWith('default')
-
+  it('显示当前 agent 的名字（store 里找 name，不是裸 id）', async () => {
+    const w = mountPage()
     const store = useAgentStore()
     store.setCurrentAgent('kai')
     await flushPromises()
 
-    expect(currentSelectValue()).toBe('kai')
-    expect(listChannelConfigs).toHaveBeenCalledWith('kai')
+    expect(w.find('[data-testid="current-agent-name"]').text()).toBe('凯')
   })
 
-  it('页内已选中的 agent 与全局切换同值 → 不重复取数', async () => {
+  it('全局切换器换 agent → 名称跟随，列表按新 agent 重取', async () => {
     const w = mountPage()
     await flushPromises()
-    // 页内路径：手动选 kai（走 onAgentChange 同一条重取路径）
-    await w.find('select.agent-select').setValue('kai')
-    await flushPromises()
-    expect(listChannelConfigs).toHaveBeenLastCalledWith('kai')
-    const callsAfterManual = listCalls()
 
     const store = useAgentStore()
     store.setCurrentAgent('kai')
     await flushPromises()
 
-    expect(listCalls()).toBe(callsAfterManual)
+    expect(w.find('[data-testid="current-agent-name"]').text()).toBe('凯')
+    expect(listChannelConfigs).toHaveBeenCalledWith('kai')
   })
 })
