@@ -50,7 +50,13 @@ import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 
 const { t } = useI18n()
-const { agentId } = useAgentPage()
+// 全局切换器只写 store 不动路由（AgentSwitcher autoNavigate 默认 false），
+// 本页组件被 router-view 的 :key 缓存——agentId 虽随 store 变化，列表却不会
+// 自己重取（2026-10-04 与渠道管理页同一缺陷的兄弟命中点）。接 composable
+// 既有的 onAgentChange 回调（MemoryPage 同款模式），身份变化即重取。
+const { agentId } = useAgentPage({
+  onAgentChange: () => { fetchSharings() },
+})
 
 const channelTabs = computed(() => [
   { labelKey: 'nav.agentchannel', to: `/agent/${agentId.value}/channel` },

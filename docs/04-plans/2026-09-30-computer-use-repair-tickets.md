@@ -3204,3 +3204,43 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
 | 文档（结构性 4 处 6 行；两生成物重生成） | 8 | 7 | +1 |
 
 生产净 LOC 为负 ✓（教义第 2 条无需豁免）。
+
+## 45. T-21 · 前端"渠道页不随全局 agent 切换刷新"——已修两页，四页同根因登记（2026-10-04）
+
+> 用户报告：渠道管理页不随 agent 切换改变。根因：MainLayout 的
+> `AgentSwitcher` 未配 `autoNavigate`（默认 false）也不处理 `@select`，
+> 切换只写 `agentStore.currentAgentId`、**不产生路由变化**；而布局的
+> router-view 带 `:key="route.path"`，路由不变 = 组件不重挂载。
+> 于是所有"只认路由、不订阅 store"的 agent 域页面在全局切换后屏幕停在旧 agent。
+
+### 45.1 已修（同批红→绿）
+
+- **AgentChannelPage（渠道管理，报告页）**：接 store→路由桥——
+  `watch(currentAgentId, (next, prev))`，用户切换（prev 非空且异于路由身份）时
+  `router.push` 到新 agent，让既有 `watch(agentId)` 单点触发取数；身份写入口
+  仍唯一（路由，与页内选择器 `switchAgent` 同一条通路）。守卫边界：store 的
+  **自动兜底选中**（loadAgents 对空 currentAgentId 的默认选中，prev=null）不算
+  用户切换，不改写 URL——否则分享链接/刷新后被强行带去兜底 agent。
+- **ContextChannelPage（渠道共享，兄弟命中点）**：走 useAgentPage 但取数只挂
+  onMounted；接 `onAgentChange` 回调重取（MemoryPage 同款既有模式）。
+- 先红后绿：新增 `AgentChannelPage.agentStoreSync.test.ts`（删前 1红2绿：切换
+  既不推路由也不取数；守卫边界两条绿）与
+  `ContextChannelPage.agentStoreSync.test.ts`（删前 1红1绿），修后 **5 passed**；
+  既有回归 AgentChannelPage×5 套 14 passed、ContextChannelPage/useAgentPage
+  9 passed；全量 vitest 1913 passed / 1 failed（canvasEdgesStyle，A/B 预存）；
+  `vue-tsc --noEmit` 零报错。
+
+### 45.2 同根因剩余命中点登记（本轮不动码，待工单）
+
+`route.params.agentId` 直读、无 store 订阅的还有四页——全局切换 agent 后数据
+停在旧 agent（点击侧栏导航即自愈，症状较轻）：
+
+| 页面 | 现状 | 修法指引 |
+|---|---|---|
+| `AgentTracePage.vue:114` | `const agentId = route.params.agentId`（非响应式解构）+ 仅 onMounted | 换 `useAgentPage({ onAgentChange })` |
+| `AgentTrajectoryPage.vue` | 同上形态 | 同上 |
+| `AgentFirewallPage.vue` | 同上形态 | 同上 |
+| `AgentComputerPage.vue:117` | 同上形态 | 同上 |
+
+四页的 `agentId` 是非响应式 const，换 composable 的 ref 需逐处核对模板与请求
+参数的 `.value`——属独立小工单，不在本单顺手改（教义第 5 条：登记留痕，不许静默遗留）。
