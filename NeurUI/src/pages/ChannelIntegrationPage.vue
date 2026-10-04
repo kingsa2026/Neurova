@@ -3,8 +3,8 @@
     <!-- Header -->
     <div class="nr-ci-header">
       <div class="nr-ci-title-row">
-      <span class="nr-ci-agent-chip" data-testid="current-agent-name">{{ currentAgentName }}</span>
         <h2>{{ t('channel.integration') }}</h2>
+        <span class="nr-ci-agent-chip" data-testid="current-agent-name">{{ currentAgentName }}</span>
         <!-- B4-a：机器人身份冲突检测（多渠道复用同一凭据会串回调） -->
         <GlassButton variant="ghost" size="sm" @click="runConflictCheck">
           {{ t('channel.conflictCheck') }}
