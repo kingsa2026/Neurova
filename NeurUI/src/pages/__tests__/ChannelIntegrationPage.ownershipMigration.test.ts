@@ -36,6 +36,7 @@ vi.mock('@/api/modules/negative-screen', () => ({
 
 import { api } from '@/api'
 import { listChannelConfigs, migrateAgentChannelConfigs } from '@/api/modules/channel-configs'
+import { useAgentStore } from '@/stores/agents'
 import ChannelIntegrationPage from '../ChannelIntegrationPage.vue'
 import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 import zhCN from '@/i18n/locales/zh-CN'
@@ -77,7 +78,9 @@ function mountPage() {
 }
 
 async function pickAgent(wrapper: ReturnType<typeof mountPage>, value: string) {
-  await wrapper.find('.agent-select').setValue(value)
+  // 身份已单源绑定 store（页内切换退役，2026-10-04）：setCurrentAgent 等价全局切换
+  void wrapper
+  useAgentStore().setCurrentAgent(value)
   await flushPromises()
 }
 

@@ -42,14 +42,25 @@ vi.mock('@/api/modules/negative-screen', () => ({
   deleteNegativeScreenConfig: vi.fn().mockResolvedValue({}),
   getPushStatistics: vi.fn().mockResolvedValue({ code: 0, data: {} }),
 }))
-vi.mock('@/stores/agents', () => ({
-  useAgentStore: () => ({
-    agentOptions: [{ label: '凯蒂', value: '216fb777' }],
-    loadAgents: vi.fn(),
-    loadWorkflowAgents: vi.fn(),
-  }),
-}))
+vi.mock('@/stores/agents', async () => {
+  // 身份已单源绑定 store（页内切换退役，2026-10-04）：替身须用 reactive 包裹——
+  // 真 Pinia store 实例会解包 ref，普通对象属性访问拿到的是 RefImpl 本体，
+  // 页面的 computed 会把整个 ref 当成身份值（踩过：传给后端的是 ref 不是字符串）。
+  const { ref, reactive } = await import('vue')
+  const currentAgentId = ref<string | null>(null)
+  return {
+    useAgentStore: () => reactive({
+      agentOptions: [{ label: '凯蒂', value: '216fb777' }],
+      agents: [{ id: '216fb777', name: '凯蒂', status: 'active' }],
+      currentAgentId,
+      setCurrentAgent: (id: string | null) => { currentAgentId.value = id },
+      loadAgents: vi.fn(),
+      loadWorkflowAgents: vi.fn(),
+    }),
+  }
+})
 
+import { useAgentStore } from '@/stores/agents'
 import ChannelIntegrationPage from '../ChannelIntegrationPage.vue'
 
 const messages = {
@@ -109,6 +120,8 @@ function mountPage() {
 describe('ChannelIntegrationPage — 管理面动作带 agent 身份', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // mock 替身允许复位为 null（真 store 的 currentAgentId 无 null 语义）
+    ;(useAgentStore() as { setCurrentAgent: (id: string | null) => void }).setCurrentAgent(null)
     vi.clearAllMocks()
     spies.restartChannelAdapter.mockResolvedValue({ code: 0, data: { success: true } })
     spies.clearChannelQueue.mockResolvedValue({ code: 0, data: { cleared: 0 } })
@@ -119,7 +132,7 @@ describe('ChannelIntegrationPage — 管理面动作带 agent 身份', () => {
   it('重启渠道时把当前 agent 身份发给后端', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('.agent-select').setValue('216fb777')
+    useAgentStore().setCurrentAgent('216fb777')
     await flushPromises()
 
     const btn = wrapper.findAll('button').find((b) => b.text().includes('重启') || b.text().includes('restart'))
@@ -134,7 +147,7 @@ describe('ChannelIntegrationPage — 管理面动作带 agent 身份', () => {
   it('清空队列时把当前 agent 身份发给后端', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('.agent-select').setValue('216fb777')
+    useAgentStore().setCurrentAgent('216fb777')
     await flushPromises()
 
     // 清空队列在配置弹窗的 footer 里（Teleport 到 body），故先经未激活 chip 打开弹窗

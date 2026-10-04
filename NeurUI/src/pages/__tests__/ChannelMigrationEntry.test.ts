@@ -23,8 +23,9 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
 
-// 系统页的 agent 身份来自选择器（选项由 agents store 提供）：`/agents` 必须给出
-// 真实名单，否则选择器空 → 选中值落成空串 → 拿空身份去请求，测试会掩盖真实缺陷。
+// 系统页的 agent 身份已单源绑定 store（页内切换退役，2026-10-04）；Agent 渠道页
+// 仍有页内选择器。两页身份驱动方式不同，pickAgent 按下拉是否存在分派；
+// `/agents` 仍须给出真实名单（store 自动兜底选中消费它）。
 vi.mock('@/api', () => ({
   api: {
     get: vi.fn((url: string) => Promise.resolve(
@@ -54,6 +55,7 @@ vi.mock('@/api/modules/negative-screen', () => ({
   getPushStatistics: vi.fn().mockResolvedValue({ code: 0, data: {} }),
 }))
 
+import { useAgentStore } from '@/stores/agents'
 import { listChannelConfigs, migrateAgentChannelConfigs } from '@/api/modules/channel-configs'
 import AgentChannelPage from '../AgentChannelPage.vue'
 import ChannelIntegrationPage from '../ChannelIntegrationPage.vue'
@@ -89,7 +91,15 @@ function mountPage(component: unknown) {
 }
 
 async function pickAgent(wrapper: ReturnType<typeof mountPage>, value: string) {
-  await wrapper.find('.agent-select').setValue(value)
+  const select = wrapper.find('.agent-select')
+  if (select.exists()) {
+    // Agent 渠道页：页内选择器仍在（推路由改身份）
+    await select.setValue(value)
+  } else {
+    // 系统渠道页：身份单源绑定 store（页内切换退役，2026-10-04），
+    // setCurrentAgent 等价全局切换器换人
+    useAgentStore().setCurrentAgent(value)
+  }
   await flushPromises()
 }
 

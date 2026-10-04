@@ -3263,3 +3263,29 @@ store → 全局切换永远够不着它。修法：订阅 `agentStore.currentAg
 切换后下拉仍 'default'、列表不重取；兜底/同值两条守卫绿），修后 3 passed；
 本页既有六套 18 passed；全量 vitest 1916 passed / 1 failed（canvasEdgesStyle
 预存）；vue-tsc 零报错。
+
+### 45.4 同日再裁决：消息渠道页**取消页内切换**，仅显示当前 agent（用户口径）
+
+§45.3 修完"跟随全局切换"后，用户进一步裁决：页内 agent 下拉整个退役——身份
+单源绑定 `agentStore.currentAgentId`（'default' 兜底），标题旁只读徽标显示
+当前 agent 名字（store 里找 name，找不到回落 id）。切换面整体退役：
+
+- `ChannelIntegrationPage.vue`：a-select 选择器 → `current-agent-name` 徽标；
+  `agentSelectOptions`/`buildAgentSelectOptions` 导入/`switchToDefaultAgent`
+  函数与"查看默认智能体"按钮（switch-to-default）一并删除；取数触发收口为
+  `watch(agentId) → onAgentChange()` 单点（上一单的 store watch 被此形态取代）。
+- 冷挂载时序：`loadConfigs` 在 schema await 边界后才发 `listChannelConfigs`，
+  loadAgents 的自动兜底选中此时已落定 → 首枪即带选中身份，无 'default' 空转枪；
+  竞态反向（兜底晚于取数）时 watch 补一枪同身份重取，读数一致。
+- 测试面：新增 `ChannelIntegrationPage.agentStoreSync.test.ts` 重写为四判据
+  （无下拉/无切换按钮、兜底跟随、名字显示、全局切换跟随重取），修前 4 全红；
+  `agentSelect.test.ts` 整文件退役（钉的选项映射随选择器消失）；
+  emptyAttribution/mgmtAgentScope 的 store 替身升级为 **reactive 包裹**
+  （真 Pinia 实例解包 ref，普通对象属性访问拿到 RefImpl 本体——页面 computed
+  会把 ref 当身份值传给后端，mock 语义必须与 Pinia 对齐）+ beforeEach 复位
+  （模块级 ref 跨用例泄漏）；ChannelMigrationEntry 的 pickAgent 按页分派
+  （AgentChannelPage 走下拉、系统页走 store）。
+- 回归：本页六套 21 passed；全量 vitest 1916 passed / 1 failed（canvasEdgesStyle
+  预存）；vue-tsc 零报错。
+- 留痕：`channel.viewDefaultAgent` i18n 键退役后暂留 11 语言包（删除需全语言
+  同批，另行处理）；AgentChannelPage 的页内选择器未在本裁决范围内，保留。

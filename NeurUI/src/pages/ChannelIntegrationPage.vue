@@ -3,9 +3,7 @@
     <!-- Header -->
     <div class="nr-ci-header">
       <div class="nr-ci-title-row">
-      <a-select v-model:value="agentId" size="small" style="width: 200px; margin-left: 12px"
-        :options="agentSelectOptions"
-        @change="onAgentChange" />
+      <span class="nr-ci-agent-chip" data-testid="current-agent-name">{{ currentAgentName }}</span>
         <h2>{{ t('channel.integration') }}</h2>
         <!-- B4-a：机器人身份冲突检测（多渠道复用同一凭据会串回调） -->
         <GlassButton variant="ghost" size="sm" @click="runConflictCheck">
@@ -169,8 +167,6 @@
           @click="showMigration = true">
           {{ t('channel.migrateLegacyChannels') }}
         </GlassButton>
-        <GlassButton size="sm" variant="secondary" data-testid="switch-to-default"
-          @click="switchToDefaultAgent">{{ t('channel.viewDefaultAgent') }}</GlassButton>
       </div>
       <ChannelMigrationDialog :open="showMigration" :target-agent-id="agentId"
         @close="showMigration = false" @migrated="onMigrated" />
@@ -340,27 +336,25 @@ import {
   type FieldSchema, type ChannelCatalogItem,
 } from '@/config/channelFields'
 import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
-import { buildAgentSelectOptions } from '@/config/agentOptions'
 
 type ChannelItem = ChannelCatalogItem
 
 const { t } = useI18n()
 const agentStore = useAgentStore()
 
-// agent 隔离（Phase C）：渠道配置按 agent 归属视图；'default' 为默认 agent
-const agentId = ref<string>('default')
+// agent 隔离（Phase C → 2026-10-04 用户裁决收口）：本页**不再提供切换**，
+// 身份单源绑定全局当前 agent（'default' 兜底）——页内下拉已退役，
+// 全局切换器换人即本页换人，列表由 agentId 的 watch 单点重取。
+const agentId = computed<string>(() => agentStore.currentAgentId || 'default')
 
+// 标题旁只读徽标：显示当前 agent 的名字（store 里找 name，找不到回落 id）。
+const currentAgentName = computed<string>(() => {
+  if (agentId.value === 'default') return t('channel.defaultAgent')
+  return agentStore.agents.find((a) => a.id === agentId.value)?.name || agentId.value
+})
 
 // ─── 字段表与卡片目录：共享模块单一来源（agent 隔离 Phase C） ───
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
-
-// agent 身份的唯一组装点：`config/agentOptions.ts`（Agent 渠道页共用同一份）。
-// 本页与 Agent 渠道页曾各写一份同样的错映射（读 o.id/o.name，而 store 契约是
-// {label, value}）—— 两页共享字段目录却没共享选择器映射，故收口到单源。
-const agentSelectOptions = computed(() => [
-  { value: 'default', label: t('channel.defaultAgent') },
-  ...buildAgentSelectOptions(agentStore.agentOptions),
-])
 
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
 
@@ -465,38 +459,22 @@ async function toggleNegativeScreen(ch: ChannelItem) {
 }
 
 function onAgentChange() {
-  // 切换 agent：清缓存视图并重拉该 agent 的渠道配置
+  // 身份变化：清缓存视图并重拉该 agent 的渠道配置
   savedExtras.value = {}
   loadConfigs()
 }
 
-// 全局切换器（MainLayout 的 AgentSwitcher，autoNavigate 默认 false）只写
-// agentStore.currentAgentId、不产生路由变化；本页不占路由（/channels 无
-// agentId 参数），agentId 是纯本地 ref——不订阅 store 的话，全局切换后
-// 页内下拉与列表都停在旧 agent（2026-10-04 用户截图取证）。
-// 本页身份的写入口是**页内下拉**（v-model + onAgentChange）：store 的用户
-// 切换经同一入口落地——写回 ref 并走 onAgentChange() 重取，不另开第二条
-// 取数路径。prev=null 是 loadAgents 的自动兜底选中（见 agents.ts），
-// 不是用户切换，不得据此改写落地视图。
-watch(
-  () => agentStore.currentAgentId,
-  (next, prev) => {
-    if (!next || !prev || next === agentId.value) return
-    agentId.value = next
-    onAgentChange()
-  },
-)
+// 身份单源绑定 store（见 agentId 注释）：全局切换器换人 → agentId computed 变
+// → 这里单点触发重取。冷挂载时 loadAgents 的自动兜底选中也会让 computed 从
+// 'default' 翻到选中 agent，同样走这条路径（首枪在 onMounted，兜底翻正是第二次，
+// 属 store 异步决议的已知代价）。
+watch(agentId, () => { onAgentChange() })
 
 /** 空态归因只在"确实可能是别人的配置"时给，且判据是**已存配置行数为 0**。 */
 const showEmptyAttribution = computed(
   () => agentId.value !== 'default' && !loadingConfigs.value && !accessDenied.value
     && Object.keys(savedExtras.value).length === 0,
 )
-
-function switchToDefaultAgent() {
-  agentId.value = 'default'
-  onAgentChange()
-}
 
 /** 弹层回报迁移成功：重取本视图，并按服务端的返回点名搬了哪些。 */
 async function onMigrated(payload: { from: string; to: string; channels: string[] }) {
@@ -786,6 +764,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 当前 agent 只读徽标（页内切换已退役，身份单源绑定全局） */
+.nr-ci-agent-chip {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--nr-bg-surface);
+  color: var(--nr-text-secondary);
+  white-space: nowrap;
 }
 
 .nr-ci-title-row h2 {

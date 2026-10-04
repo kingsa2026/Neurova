@@ -48,16 +48,27 @@ vi.mock('@/api/modules/negative-screen', () => ({
   deleteNegativeScreenConfig: vi.fn().mockResolvedValue({}),
   getPushStatistics: vi.fn().mockResolvedValue({ code: 0, data: {} }),
 }))
-vi.mock('@/stores/agents', () => ({
-  useAgentStore: () => ({
-    agentOptions: [{ label: '凯蒂', value: '216fb777' }],
-    loadAgents: vi.fn(),
-    loadWorkflowAgents: vi.fn(),
-  }),
-}))
+vi.mock('@/stores/agents', async () => {
+  // 身份已单源绑定 store（页内切换退役，2026-10-04）：替身须用 reactive 包裹——
+  // 真 Pinia store 实例会解包 ref，普通对象属性访问拿到的是 RefImpl 本体，
+  // 页面的 computed 会把整个 ref 当成身份值（踩过：传给后端的是 ref 不是字符串）。
+  const { ref, reactive } = await import('vue')
+  const currentAgentId = ref<string | null>(null)
+  return {
+    useAgentStore: () => reactive({
+      agentOptions: [{ label: '凯蒂', value: '216fb777' }],
+      agents: [{ id: '216fb777', name: '凯蒂', status: 'active' }],
+      currentAgentId,
+      setCurrentAgent: (id: string | null) => { currentAgentId.value = id },
+      loadAgents: vi.fn(),
+      loadWorkflowAgents: vi.fn(),
+    }),
+  }
+})
 
 // 用**真语言包**而不是手写桩：桩里补了键而真语言包漏了也照样绿。
 import zhCN from '@/i18n/locales/zh-CN'
+import { useAgentStore } from '@/stores/agents'
 import ChannelIntegrationPage from '../ChannelIntegrationPage.vue'
 
 function mountPage() {
@@ -90,35 +101,23 @@ function mountPage() {
 describe('ChannelIntegrationPage — 空态可归因', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // mock 替身允许复位为 null（真 store 的 currentAgentId 无 null 语义）
+    ;(useAgentStore() as { setCurrentAgent: (id: string | null) => void }).setCurrentAgent(null)
     vi.clearAllMocks()
     spies.listChannelConfigs.mockResolvedValue([])
   })
   afterEach(() => { document.body.innerHTML = '' })
 
-  it('切到非 default agent 且取数为空时，给出点名说明与切回入口', async () => {
+  it('切到非 default agent 且取数为空时，给出点名说明', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    await wrapper.find('.agent-select').setValue('216fb777')
+    useAgentStore().setCurrentAgent('216fb777')
     await flushPromises()
 
     const hint = wrapper.find('[data-testid="empty-attribution"]')
     expect(hint.exists(), '空态没有归因说明——用户只能读成"配置全没了"').toBe(true)
     expect(hint.text()).toContain('216fb777')
-    expect(wrapper.find('[data-testid="switch-to-default"]').exists()).toBe(true)
-  })
-
-  it('切回入口把用户带回默认视图并重新取数', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-    await wrapper.find('.agent-select').setValue('216fb777')
-    await flushPromises()
-    spies.listChannelConfigs.mockClear()
-
-    await wrapper.find('[data-testid="switch-to-default"]').trigger('click')
-    await flushPromises()
-
-    expect(spies.listChannelConfigs).toHaveBeenCalledWith('default')
   })
 
   it('反向控制：该 agent 有配置时不出现空态归因', async () => {
@@ -127,7 +126,7 @@ describe('ChannelIntegrationPage — 空态可归因', () => {
     ])
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('.agent-select').setValue('216fb777')
+    useAgentStore().setCurrentAgent('216fb777')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="empty-attribution"]').exists()).toBe(false)
