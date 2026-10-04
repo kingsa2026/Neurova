@@ -10,6 +10,13 @@
     </div>
 
     <a-tabs v-model:activeKey="activeTab" @change="fetchAll">
+      <!-- Overview tab（原 /stats 页的系统级统计；admin 门禁内嵌于 section） -->
+      <a-tab-pane key="overview" :tab="t('system.overview')">
+        <KeepAlive>
+          <SystemOverviewSection v-if="activeTab === 'overview'" />
+        </KeepAlive>
+      </a-tab-pane>
+
       <!-- Usage tab -->
       <a-tab-pane key="usage" :tab="t('system.usage')">
         <a-spin :spinning="loading">
@@ -41,6 +48,13 @@
             />
           </GlassCard>
         </a-spin>
+      </a-tab-pane>
+
+      <!-- Token activity tab（原 /usage-stats 页整体迁入；KeepAlive 保持状态、按 Tab 惰性挂载取数） -->
+      <a-tab-pane key="tokens" :tab="t('usageStats.title')">
+        <KeepAlive>
+          <TokenActivitySection v-if="activeTab === 'tokens'" />
+        </KeepAlive>
       </a-tab-pane>
 
       <!-- Performance tab -->
@@ -106,18 +120,46 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+// 六页整合的统一分析入口（工单集 §46）：本容器承载六 Tab——
+// 概览(原 /stats，admin)/用量/Token 活动(原 /usage-stats)/性能/行为/错误。
+// 性能/行为/错误此前与 /stats 逐行重复，现只保留这一份实现。
+// ?tab= 深链：/stats → ?tab=overview、/usage-stats → ?tab=tokens 的重定向落地页。
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import { message } from 'ant-design-vue'
 import * as analyticsApi from '@/api/modules/analytics'
+import SystemOverviewSection from './analytics/SystemOverviewSection.vue'
+import TokenActivitySection from './analytics/TokenActivitySection.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
-const activeTab = ref('usage')
+const TAB_KEYS = ['overview', 'usage', 'tokens', 'performance', 'behavior', 'errors'] as const
+type TabKey = (typeof TAB_KEYS)[number]
+
+function tabFromQuery(v: unknown): TabKey {
+  return typeof v === 'string' && (TAB_KEYS as readonly string[]).includes(v) ? (v as TabKey) : 'usage'
+}
+
+const activeTab = ref<TabKey>(tabFromQuery(route.query.tab))
 const timeRange = ref('week')
 const loading = ref(false)
+
+// ?tab= 深链双向同步：query 变化（重定向/手改 URL）驱动 Tab；切 Tab 写回 query
+// （replace 不产生历史噪音；同值短路防循环）。
+watch(() => route.query.tab, (v) => {
+  const next = tabFromQuery(v)
+  if (next !== activeTab.value) activeTab.value = next
+})
+watch(activeTab, (v) => {
+  if (route.query.tab !== v) {
+    router.replace({ query: { ...route.query, tab: v } })
+  }
+})
 
 const usageData = ref<Record<string, any>>({})
 // B3-2：按 agent 用量（/analytics/usage by_agent 携带 tokens/calls）
@@ -146,6 +188,10 @@ const errorColumns = computed(() => [
 ])
 
 const fetchAll = async () => {
+  // overview/tokens 两个 Tab 的数据由各自的 section 自取（挂载即拉、KeepAlive 保状态），
+  // 容器的 fetchAll 只管自己拥有的四个 Tab——a-tabs @change 对这两 Tab 是无害空转。
+  if (!(TAB_KEYS as readonly string[]).includes(activeTab.value)
+    || activeTab.value === 'overview' || activeTab.value === 'tokens') return
   loading.value = true
   try {
     const params = { period: timeRange.value }

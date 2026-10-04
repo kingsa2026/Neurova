@@ -77,7 +77,7 @@ const LEAF_ROUTES = TOP_NAV_CATEGORIES.flatMap(c =>
 )
 
 describe('TopNavMenu 用户组过滤', () => {
-  it('无限制用户：4 组全部渲染（快捷入口 + 16 个菜单项）', () => {
+  it('无限制用户：4 组全部渲染（快捷入口 + 15 个菜单项）', () => {
     mockUser = { username: 'u1', role: 'user', allowed_modules: [] }
     const wrapper = mountMenu()
     const links = wrapper.findAll('.topnav-link').map(a => a.attributes('data-to'))

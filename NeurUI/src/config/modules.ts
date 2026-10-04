@@ -38,7 +38,6 @@ const TOP_MODULES: ModuleItem[] = [
   { key: '/monitor', labelKey: 'monitor' },
   { key: '/health', labelKey: 'health' },
   { key: '/logs', labelKey: 'logs' },
-  { key: '/stats', labelKey: 'stats' },
   { key: '/settings', labelKey: 'settings' },
   { key: '/settings/voice-transcription', labelKey: 'voiceTranscription' },
   { key: '/memory/settings', labelKey: 'memorySettings' },
@@ -84,8 +83,12 @@ const USER_MODULES: ModuleItem[] = [
   { key: '/collaboration', labelKey: 'collaboration' },
   { key: '/channels', labelKey: 'channels' },
   { key: '/notifications', labelKey: 'notifications' },
-  { key: '/usage-stats', labelKey: 'usageStats' },
+  // '/usage-stats' 已退役（并入 /analytics，工单集 §46）：存量用户组里勾过的
+  // '/usage-stats' 授权经 matchModule 精确匹配不再命中任何路由，属无害残留。
   { key: '/analytics', labelKey: 'analytics' },
+  // '/cost' 此前缺席权限目录：侧栏用 can('/cost') 设门，受限用户组勾不到、
+  // 实际沦为 admin-only（六页整合盘点发现的真缺口，本次补登记）。
+  { key: '/cost', labelKey: 'cost' },
   { key: '/memory/search-settings', labelKey: 'searchSettings' },
 ]
 

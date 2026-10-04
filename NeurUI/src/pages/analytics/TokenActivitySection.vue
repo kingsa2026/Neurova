@@ -1,8 +1,7 @@
 <template>
   <div class="nr-usage-stats">
-    <!-- Header: title + scope tag + time range -->
-    <div class="nr-usage-header">
-      <h2 class="nr-usage-title">{{ t('usageStats.title') }}</h2>
+    <!-- 工具行：scope 标签 + 时间范围 + 刷新（页级标题由容器 /analytics 提供） -->
+    <div class="nr-usage-toolbar-row">
       <div class="nr-usage-toolbar">
         <a-tag v-if="scopeLabel" color="blue">{{ scopeLabel }}</a-tag>
         <a-radio-group v-model:value="trendDays" button-style="solid" size="small">
@@ -100,6 +99,9 @@
 </template>
 
 <script setup lang="ts">
+// 原 /usage-stats 独立页（UsageStatsPage）整体迁入 /analytics 统一入口的
+// 「Token 活动」Tab（六页整合，工单集 §46）。行为零变化：数据口径、副路径
+// 静默降级、热力图三视图均保持原实现；仅页级大标题让位给容器。
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
@@ -346,24 +348,12 @@ onMounted(fetchData)
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 4px;
+  padding: 4px 0;
 }
 
-.nr-usage-header {
+.nr-usage-toolbar-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.nr-usage-title {
-  font-family: var(--nr-font-display);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--nr-text-primary);
-  letter-spacing: -0.03em;
-  margin: 0;
+  justify-content: flex-end;
 }
 
 .nr-usage-toolbar {

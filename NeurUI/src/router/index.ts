@@ -409,14 +409,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/SandboxPage.vue'),
       },
       {
+        // /stats 已并入 /analytics 统一入口（六页整合，工单集 §46）：旧 URL 重定向保书签
         path: 'stats',
-        name: 'Stats',
-        component: () => import('@/pages/StatsPage.vue'),
+        redirect: { name: 'Analytics', query: { tab: 'overview' } },
       },
       {
+        // /usage-stats 已并入 /analytics（Token 活动 Tab）：旧 URL 重定向保书签
         path: 'usage-stats',
-        name: 'UsageStats',
-        component: () => import('@/pages/UsageStatsPage.vue'),
+        redirect: { name: 'Analytics', query: { tab: 'tokens' } },
       },
       {
         path: 'monitor',

@@ -3310,3 +3310,53 @@ store → 全局切换永远够不着它。修法：订阅 `agentStore.currentAg
 修前各 1红1绿、共 4红），修后 **8 passed**；全量 vitest 1924 passed / 1 failed
 （canvasEdgesStyle 预存）；vue-tsc 零报错。四页的 `useRoute` 导入与 `const route`
 随之摘除（无其它消费）。
+
+## 46. 六页整合：6 路由 → 4，/analytics 统一分析入口（2026-10-05）
+
+> 用户指令：合理规划、功能去重、统一入口，整合 /dashboard /analytics /cost
+> /usage-stats /monitor /stats。经双 Explore 盘点（入口面 + 功能数据面）后
+> 方案获批实施。
+
+### 46.1 盘点硬事实（去重依据）
+
+- **StatsPage ≡ AnalyticsPage 三 Tab 逐行同构**：性能/行为/错误三 Tab 消费同一套
+  `/analytics/*` API（getPerformanceAnalytics/getBehaviorAnalytics/getErrorAnalytics），
+  模板与列定义近乎复制；差异仅 Stats 多概览 Tab（getSystemStats/getAgentStats+
+  JSON 导出+admin 门禁）、Analytics 多用量 Tab（getUsageAnalytics）。StatsPage
+  还无视当前 Tab 一次全拉三个 API（坏模式）。
+- **Token 用量四页四源**：/stats/token-usage（Dashboard）、/analytics/usage
+  （Analytics）、/stats（Stats）、/stats/usage-overview（UsageStats）；cache 命中率
+  双源双键；同款自绘 CSS 柱状图三页复制。
+- **/cost 权限缺口（真 bug）**：modules.ts 漏登记 '/cost' 而侧栏 can('/cost') 设门
+  → 受限用户组实际 admin-only。
+- **Dashboard 是 8 类入口的应用主页**（登录落地/404 兜底/品牌点击/面包屑根），职能
+  为行动枢纽；Cost（预算/rollup）、Monitor（10s 轮询+告警处置）为独立域。
+
+### 46.2 目标形态与实施
+
+**6 → 4**：/dashboard（主页，token 卡入口改 /analytics?tab=tokens）、
+/analytics（统一分析入口，六 Tab：概览(admin)/用量/Token 活动/性能/行为/错误）、
+/cost（保留独立，补权限登记）、/monitor（保留独立）；/stats、/usage-stats 退役
+→ redirect（/stats→?tab=overview、/usage-stats→?tab=tokens，保书签）。
+
+- **S1 路由**：router/index.ts 两条组件路由改 redirect；
+- **S2 合并页**：AnalyticsPage 容器化——六 Tab + `?tab=` 深链双向同步
+  （router.replace 防历史噪音、同值短路防循环）+ fetchAll 对 overview/tokens
+  空转守卫；`pages/analytics/TokenActivitySection.vue`（原 UsageStatsPage 476 行
+  近原样迁入，行为零变化）、`pages/analytics/SystemOverviewSection.vue`（原 Stats
+  概览 Tab + admin 门禁内嵌 + JSON 导出）两个深模块节，KeepAlive + v-if 惰性挂载
+  （挂载即自取，切回不重复取数）；
+- **S3 导航与权限**：MainLayout 删「使用统计」项（LineChartOutlined 导入随删）、
+  navigation.ts opsMonitor 组删「统计」项、modules.ts 删 '/stats'/'/usage-stats'
+  条目并补 '/cost'；
+- **S4 测试**：TokenActivitySection.test.ts（8 例近原样迁自 UsageStatsPage.test）、
+  SystemOverviewSection.test.ts（2 例迁自 StatsPage.test）、AnalyticsPage.test
+  才 5→7（补 vue-router mock + ?tab= 深链两判据：tokens 落地即挂载节且容器 API
+  不拉、overview 惰性挂载）；agentSelect 同款退役：UsageStatsPage/StatsPage 两页
+  与两测试文件 git rm；DashboardPage.test 期望路径更新；TopNavMenu.moduleFilter
+  标题计数 16→15（LEAF_ROUTES 从活导航派生，断言自动跟随）。
+
+### 46.3 回归读数
+
+四改造文件先行 25 passed；全量 vitest **1924 passed / 1 failed**（canvasEdgesStyle
+预存，与基线同名）；vue-tsc --noEmit 零报错。净 LOC 见提交说明（show --stat）。
