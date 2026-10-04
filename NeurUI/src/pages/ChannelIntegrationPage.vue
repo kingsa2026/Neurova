@@ -323,7 +323,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, type ChannelIngressStats } from '@/api/modules/channel-configs'
@@ -469,6 +469,23 @@ function onAgentChange() {
   savedExtras.value = {}
   loadConfigs()
 }
+
+// 全局切换器（MainLayout 的 AgentSwitcher，autoNavigate 默认 false）只写
+// agentStore.currentAgentId、不产生路由变化；本页不占路由（/channels 无
+// agentId 参数），agentId 是纯本地 ref——不订阅 store 的话，全局切换后
+// 页内下拉与列表都停在旧 agent（2026-10-04 用户截图取证）。
+// 本页身份的写入口是**页内下拉**（v-model + onAgentChange）：store 的用户
+// 切换经同一入口落地——写回 ref 并走 onAgentChange() 重取，不另开第二条
+// 取数路径。prev=null 是 loadAgents 的自动兜底选中（见 agents.ts），
+// 不是用户切换，不得据此改写落地视图。
+watch(
+  () => agentStore.currentAgentId,
+  (next, prev) => {
+    if (!next || !prev || next === agentId.value) return
+    agentId.value = next
+    onAgentChange()
+  },
+)
 
 /** 空态归因只在"确实可能是别人的配置"时给，且判据是**已存配置行数为 0**。 */
 const showEmptyAttribution = computed(
