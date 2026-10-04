@@ -61,9 +61,9 @@ class ProviderCompat:
     supports_thinking_toggle: bool = False
 
     # ── 工具面（Issue #177）──────────────────────────────────────────────
-    # 「这条请求端点收不收工具键」是 **wire 契约**，与
-    # `AdapterCapabilities.supports_tool_choice`（「这个模型自身具备什么能力」，
-    # 逐模型设值、面向适配器目录展示）**不是同一件事**，故不合并：真正的缺口
+    # 「这条请求端点收不收工具键」是 **wire 契约**，与能力目录的
+    # `tool_use`（「这个模型自身具备什么能力」，逐模型推断、面向能力目录
+    # 展示）**不是同一件事**，故不合并：真正的缺口
     # 是前者（原生协议不承载工具），后者既有的能力目录语义保持原样。
     #
     # supports_tools=False 时，tools / tool_choice 一律不进请求体，并留一行

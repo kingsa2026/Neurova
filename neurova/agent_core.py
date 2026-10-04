@@ -899,19 +899,6 @@ class SubSystemContainer:
         except Exception as _re:
             logger.warning("Agent %s: 恢复持久化技能失败: %s", a.config.name, _re)
 
-        a.model_adapter = None
-        try:
-            # 导入 builtin 触发内置适配器模式注册（import 侧 register_builtin_adapters）；
-            # find_adapter 按正则匹配最佳适配器（不存在 get_adapter 方法）。
-            import neurova.cognitive_layers.model_adapter.builtin  # noqa: F401
-            from neurova.cognitive_layers.model_adapter import get_model_adapter_registry
-
-            model_name = a.config.llm_config.model if a.config.llm_config else ""
-            model_name = model_name or "deepseek-v4-flash"
-            a.model_adapter = get_model_adapter_registry().find_adapter(model_name)
-        except Exception as e:
-            logger.warning("模型适配器初始化失败: %s", e)
-
         a.tool_orchestrator = None
         try:
             a.tool_orchestrator = ToolOrchestrator()
