@@ -448,6 +448,7 @@ async def get_current_user(
 
 
 _SERVICE_TOKEN_HEADER = "X-Service-Token"
+_API_KEY_HEADER = "X-API-Key"
 
 
 def service_token_matches(provided: str) -> bool:
@@ -485,6 +486,54 @@ async def get_current_user_or_service(
             "auth_source": "service_token",
         }
     return await get_current_user(credentials)
+
+
+async def get_current_user_or_api_key(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Dict[str, Any]:
+    """FastAPI 依赖：JWT 优先，无 JWT 时接受外部 Agent API 密钥（凭证合一）。
+
+    与 `get_current_user_or_service` 同族同规则：两类凭证**都不成立**才 401，
+    绝不回落到 default 身份——外部 Agent 通信域的所有隔离键（user_id / agent_id）
+    都以这份返回为准；端点里再解一次 header 就会与之同求异解（那正是 `bearer` 与
+    `Bearer` 把同一枚凭证分进两个租户的成因）。
+
+    密钥真相源只有一个：`api_key_manager.APIKeyManager`（持久化 + DCL 单例）。
+    端点不得自持第二份密钥表——本域原来那张进程内 `_api_keys` 就是这么退役的。
+    """
+    if credentials:
+        # 有 Bearer 就按 Bearer 判：有效则用，无效/过期由 get_current_user 直接 401。
+        # 不做"JWT 失败再试密钥"的静默降级——那等于把一条坏凭证换成另一份身份。
+        return await get_current_user(credentials)
+
+    rawKey = (request.headers.get(_API_KEY_HEADER) or "").strip()
+    if rawKey:
+        from neurova.api.api_key_manager import get_api_key_manager
+
+        apiKey = get_api_key_manager().validate_key(rawKey)
+        if apiKey is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid, revoked or expired API key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return {
+            "user_id": apiKey.user_id,
+            "username": f"apikey:{apiKey.name}",
+            "role": "user",
+            # 密钥只绑定到 user 一层，第二层按 `_user_identity` 的既有口径回退同一身份
+            "neuser_id": apiKey.user_id,
+            "agent_id": apiKey.agent_id,
+            "key_id": apiKey.key_id,
+            "auth_source": "api_key",
+        }
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def get_optional_user(

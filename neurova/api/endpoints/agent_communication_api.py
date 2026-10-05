@@ -9,19 +9,20 @@ Agent 外部通信 API 端点（简化版）
 5. 用户隔离（所有操作都验证用户权限）
 
 多用户隔离机制:
-- 所有API端点经路由级 `Depends(get_current_user)` 一道门验 JWT 身份（单源）
+- 所有API端点经路由级 `get_current_user_or_api_key` 一道门验身份：JWT 优先，无 JWT 时
+  用 `X-API-Key`（真相源 `APIKeyManager`，持久化）；两者都不成立 → 401，不回落 default
 - 每个用户只能访问自己的Agent通信资源
-- API密钥绑定到特定用户和Agent；**密钥目前不是可登录凭证**，只是被签发/吊销的数据
+- API密钥绑定到特定用户和Agent；撤销或过期即刻被那道门拒认
 """
 
-import hashlib
 from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from neurova.api.auth import get_current_user
+from neurova.api.api_key_manager import get_api_key_manager
+from neurova.api.auth import get_current_user_or_api_key
 from neurova.api.external_agent_protocol import (
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
@@ -33,7 +34,7 @@ from neurova.api.external_agent_protocol import (
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
-router = APIRouter(dependencies=[Depends(get_current_user)],)
+router = APIRouter(dependencies=[Depends(get_current_user_or_api_key)],)
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +94,12 @@ class SendMessageRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # In-Memory Store
 # ---------------------------------------------------------------------------
+#
+# 只放"本次进程内的会话态"（握手记录、消息、外部 Agent 在线态）。
+# **密钥不在这里**：签发/存储/验证统一走 `api_key_manager.APIKeyManager`
+# （持久化 + DCL 单例），原来这张进程内 `_api_keys` 与其 `_generate_api_key` /
+# `_hash_api_key` 已按教义第 7 条退役——凭证的存储面与认证面必须是同一份东西。
 
-_api_keys: Dict[str, Dict[str, Any]] = {}
 _handshakes: Dict[str, Dict[str, Any]] = {}
 _messages: List[Dict[str, Any]] = []
 _external_agents: Dict[str, Dict[str, Any]] = {}
@@ -105,26 +110,15 @@ _external_agents: Dict[str, Dict[str, Any]] = {}
 # ---------------------------------------------------------------------------
 
 
-def _generate_api_key() -> str:
-    """生成API密钥"""
-    return f"nk_{uuid.uuid4().hex}"
-
-
-def _hash_api_key(key: str) -> str:
-    """哈希API密钥"""
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
-# 身份解析单源：本域**不再自己解 Authorization**。路由级
-# `APIRouter(dependencies=[Depends(get_current_user)])` 是唯一那道门，端点直接复用它的返回值
-# （FastAPI 按请求缓存依赖结果，一处解析两处共享）。
-# 原来这里还有第二份解析：`authorization.startswith("Bearer ")` 大小写敏感，而 HTTPBearer
-# 不敏感——同一枚合法 token 用 `bearer` 送出能过门、却在这份解析里落到 default 租户，
+# 身份解析单源：本域**不再自己解 Authorization，也不再自己认密钥**。
+# 路由级 `APIRouter(dependencies=[Depends(get_current_user_or_api_key)])` 是唯一那道门
+# （JWT 优先，其次经 APIKeyManager 验密钥；两者都不成立才 401，绝不回落 default 身份），
+# 端点直接复用它的返回值——FastAPI 按请求缓存依赖结果，一处解析两处共享。
+#
+# 这里曾有第二份解析：`authorization.startswith("Bearer ")` 大小写敏感，而 HTTPBearer
+# 不敏感——同一枚合法 token 用 `bearer` 送出能过门、却在那份解析里落到 default 租户，
 # 实测这样签发的密钥在正常列表里直接看不见（红灯与取证见
 # tests/unit/api/test_agent_communication_identity.py）。
-# 其中 api-key 认证分支本就不可达（门先拦 401）且全仓零消费者，一并退役；
-# `nk_` 密钥仍作为**数据**被签发/列举/吊销，"外部 Agent 拿它当登录凭证"是尚未拍板的能力
-# ——要做得改路由级那道门，而不是在本域再开第二条解析路径。
 
 
 def _externalQuotaRules(auth: Dict[str, Any]) -> Dict[str, Any]:
@@ -147,59 +141,63 @@ def _externalQuotaRules(auth: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/api-keys", response_model=GenerateAPIKeyResponse)
 async def generate_api_key(
     body: GenerateAPIKeyRequest,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
-    """生成新的API密钥"""
-    key_id = str(uuid.uuid4())
-    api_key = _generate_api_key()
-    now = time.time()
+    """签发 API 密钥：写进唯一真相源 `APIKeyManager`（持久化、可被那道门验证）。
 
-    expires_at = None
-    if body.expires_in_days:
-        expires_at = now + body.expires_in_days * 86400
-
-    key_info = {
-        "key_id": key_id,
-        "key_hash": _hash_api_key(api_key),
-        "name": body.name,
-        "agent_id": body.agent_id,
-        "user_id": auth.get("user_id", "default"),
-        "permissions": body.permissions,
-        "revoked": False,
-        "created_at": now,
-        "expires_at": expires_at,
-    }
-    _api_keys[key_id] = key_info
+    本域原来那张进程内 `_api_keys` 已退役——它既没有验证消费方，又随进程重启失效；
+    而凭证与存储必须同源，否则"能签发"和"能认证"读写的不是同一份东西。
+    注意管理器自带 `default_expiry_days`（未显式传 expires_in_days 时按 365 天过期），
+    这是选定那份的既有策略，不是本批新加的约束。
+    """
+    manager = get_api_key_manager()
+    rawKey, apiKey = manager.generate_key(
+        agent_id=body.agent_id,
+        user_id=auth.get("user_id", "default"),
+        name=body.name,
+        permissions=list(body.permissions),
+        expires_in_days=body.expires_in_days,
+    )
 
     return GenerateAPIKeyResponse(
-        key_id=key_id,
-        api_key=api_key,
-        name=body.name,
-        agent_id=body.agent_id,
-        permissions=body.permissions,
-        created_at=now,
-        expires_at=expires_at,
+        key_id=apiKey.key_id,
+        api_key=rawKey,
+        name=apiKey.name,
+        agent_id=apiKey.agent_id,
+        permissions=list(apiKey.permissions),
+        created_at=float(apiKey.created_at),
+        expires_at=float(apiKey.expires_at) if apiKey.expires_at else None,
     )
+
+
+def _requireOwnedKey(manager, keyId: str, userId: str):
+    """按 key_id 取回并校验归属：不存在 404，非本人 403（沿用既有对外语义）"""
+    apiKey = manager.get_key_by_id(keyId)
+    if not apiKey:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if apiKey.user_id != userId:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return apiKey
 
 
 @router.get("/api-keys")
 async def get_api_keys(
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """获取Agent的所有API密钥"""
     user_id = auth.get("user_id", "default")
     keys = [
         {
-            "key_id": k["key_id"],
-            "name": k["name"],
-            "agent_id": k["agent_id"],
-            "permissions": k["permissions"],
-            "revoked": k.get("revoked", False),
-            "created_at": k["created_at"],
-            "expires_at": k.get("expires_at"),
+            "key_id": k.key_id,
+            "name": k.name,
+            "agent_id": k.agent_id,
+            "permissions": list(k.permissions),
+            # 管理器用 is_active 表达状态，对外契约仍是 revoked（前端类型不改）
+            "revoked": not k.is_active,
+            "created_at": float(k.created_at),
+            "expires_at": float(k.expires_at) if k.expires_at else None,
         }
-        for k in _api_keys.values()
-        if k.get("user_id") == user_id
+        for k in get_api_key_manager().get_user_keys(user_id)
     ]
     return {"code": 0, "data": {"api_keys": keys}}
 
@@ -208,19 +206,12 @@ async def get_api_keys(
 async def update_api_key(
     key_id: str,
     body: UpdateAPIKeyRequest,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """更新API密钥信息"""
-    key_info = _api_keys.get(key_id)
-    if not key_info:
-        raise HTTPException(status_code=404, detail="API key not found")
-    if key_info.get("user_id") != auth.get("user_id"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    if body.name is not None:
-        key_info["name"] = body.name
-    if body.permissions is not None:
-        key_info["permissions"] = body.permissions
+    manager = get_api_key_manager()
+    _requireOwnedKey(manager, key_id, auth.get("user_id"))
+    manager.update_key(key_id, name=body.name, permissions=body.permissions)
 
     return {"code": 0, "message": "API key updated"}
 
@@ -228,32 +219,26 @@ async def update_api_key(
 @router.post("/api-keys/{key_id}/revoke")
 async def revoke_api_key(
     key_id: str,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
-    """撤销API密钥"""
-    key_info = _api_keys.get(key_id)
-    if not key_info:
-        raise HTTPException(status_code=404, detail="API key not found")
-    if key_info.get("user_id") != auth.get("user_id"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    """撤销API密钥（撤销后那道门立即拒认这把键）"""
+    manager = get_api_key_manager()
+    _requireOwnedKey(manager, key_id, auth.get("user_id"))
+    manager.revoke_key(key_id)
 
-    key_info["revoked"] = True
     return {"code": 0, "message": "API key revoked"}
 
 
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """删除API密钥"""
-    key_info = _api_keys.get(key_id)
-    if not key_info:
-        raise HTTPException(status_code=404, detail="API key not found")
-    if key_info.get("user_id") != auth.get("user_id"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    manager = get_api_key_manager()
+    _requireOwnedKey(manager, key_id, auth.get("user_id"))
+    manager.delete_key(key_id)
 
-    del _api_keys[key_id]
     return {"code": 0, "message": "API key deleted"}
 
 
@@ -265,7 +250,7 @@ async def delete_api_key(
 @router.post("/handshake")
 async def handshake(
     body: HandshakeRequestModel,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """握手协议端点"""
     accepted, reason = validateProtocolVersion(body.supported_versions)
@@ -324,7 +309,7 @@ async def handshake(
 @router.post("/messages/send")
 async def send_message(
     body: SendMessageRequest,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """发送消息"""
     ok, size = validateMessageSize(body.content)
@@ -381,7 +366,7 @@ async def send_message(
 async def get_messages(
     agent_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """获取消息列表"""
     user_id = auth.get("user_id", "default")
@@ -398,7 +383,7 @@ async def get_messages(
 
 @router.get("/external-agents")
 async def list_external_agents(
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """列出外部Agent"""
     user_id = auth.get("user_id", "default")
@@ -414,7 +399,7 @@ async def list_external_agents(
 @router.post("/external-agents")
 async def register_external_agent(
     body: HandshakeRequestModel,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """注册外部Agent"""
     now = time.time()
@@ -432,7 +417,7 @@ async def register_external_agent(
 @router.get("/external-agents/{agent_id}/status")
 async def get_agent_status(
     agent_id: str,
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """获取Agent状态"""
     agent = _external_agents.get(agent_id)
@@ -453,7 +438,7 @@ async def get_agent_status(
 
 @router.get("/routing/stats")
 async def get_routing_stats(
-    auth: Dict[str, Any] = Depends(get_current_user),
+    auth: Dict[str, Any] = Depends(get_current_user_or_api_key),
 ):
     """获取路由统计信息"""
     user_id = auth.get("user_id", "default")
@@ -464,6 +449,6 @@ async def get_routing_stats(
         "data": {
             "total_messages": len(user_messages),
             "external_agents": len([a for a in _external_agents.values() if a.get("user_id") == user_id]),
-            "api_keys": len([k for k in _api_keys.values() if k.get("user_id") == user_id]),
+            "api_keys": len(get_api_key_manager().get_user_keys(user_id)),
         },
     }
