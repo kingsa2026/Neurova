@@ -32,9 +32,14 @@ from neurova.api.auth import create_access_token
 from neurova.api.endpoints import agent_communication_api as comm
 
 KEY_BASE = "/api/v1/agent-communication/api-keys"
-TOKEN = create_access_token(
-    {"sub": "ext-alice", "username": "ext-alice", "role": "user", "neuser_id": "ne-ext-alice"}
-)
+
+
+def _token() -> str:
+    """用例内签发：JWT 密钥在同进程里会被别的用例轮换（模块导入期签的 token
+    到那时已经验不过），签早了就是"谁先跑谁决定结果"的耦合。"""
+    return create_access_token(
+        {"sub": "ext-alice", "username": "ext-alice", "role": "user", "neuser_id": "ne-ext-alice"}
+    )
 
 
 def _gate():
@@ -51,7 +56,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _bearer(scheme: str = "Bearer") -> dict:
-    return {"Authorization": f"{scheme} {TOKEN}"}
+    return {"Authorization": f"{scheme} {_token()}"}
 
 
 def _mint(client, name: str, agent_id: str) -> dict:
