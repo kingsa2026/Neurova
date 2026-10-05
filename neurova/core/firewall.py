@@ -23,13 +23,27 @@ from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
+#: 速率限制的渠道维度。internal 沿用既有额度档；externalAgent 是外部 Agent 接入
+#: （API Key / 握手 / 消息投递）专用档——其批量同步量级远高于人用交互，不能同人用额度。
+CHANNEL_INTERNAL = "internal"
+CHANNEL_EXTERNAL_AGENT = "externalAgent"
+
+#: 被限流后回给客户端的重试等待秒数，与分钟窗口对齐；执行点与额度同源，故写在这里。
+RATE_LIMIT_RETRY_AFTER_SECONDS = 60
+
 
 @dataclass
 class GlobalRuleSet:
     """全局规则集（admin 默认）"""
 
-    rate_limit_per_minute: int = 60
-    rate_limit_per_hour: int = 1000
+    # internal 档不是"文档里的默认值"，而是全站唯一限流执行点当前在跑的额度：
+    # RateLimitMiddleware 此前把 120/分 硬编码在 add_middleware 调用里，firewall 里
+    # 那个 60 从来没有调用方。收口到本文件时若沿用 60，等于把人用流量当场收紧一半。
+    # 小时档取 120×60，使小时闸在今天不会先于分钟闸生效（中间件从无小时上限）。
+    rate_limit_per_minute: int = 120
+    rate_limit_per_hour: int = 7200
+    external_rate_limit_per_minute: int = 300
+    external_rate_limit_per_hour: int = 20000
     allowed_ips: List[str] = field(default_factory=list)
     blocked_ips: List[str] = field(default_factory=list)
     max_input_length: int = 10000
@@ -68,6 +82,8 @@ class GlobalRuleSet:
         return {
             "rate_limit_per_minute": self.rate_limit_per_minute,
             "rate_limit_per_hour": self.rate_limit_per_hour,
+            "external_rate_limit_per_minute": self.external_rate_limit_per_minute,
+            "external_rate_limit_per_hour": self.external_rate_limit_per_hour,
             "allowed_ips": self.allowed_ips,
             "blocked_ips": self.blocked_ips,
             "max_input_length": self.max_input_length,
@@ -226,18 +242,27 @@ class AgentFirewall:
         rules = self._user_rules.get(user_id)
         return rules.agent_isolation if rules else True
 
-    def check_rate_limit(self, user_id: str) -> Tuple[bool, str]:
+    def check_rate_limit(self, user_id: str, channel: str = CHANNEL_INTERNAL) -> Tuple[bool, str]:
         """
         检查速率限制
+
+        计数键带渠道前缀，使外部 Agent 流量与人用流量互不扣额；键域仍是 user_id
+        （同一用户下的多个外部 Agent 共享一份额度，这是有意语义）。
 
         Returns:
             (是否允许, 拒绝原因)
         """
         now = time.time()
-        minute_key = (user_id, f"min_{int(now // 60)}")
-        hour_key = (user_id, f"hour_{int(now // 3600)}")
+        minute_key = (user_id, f"{channel}:min_{int(now // 60)}")
+        hour_key = (user_id, f"{channel}:hour_{int(now // 3600)}")
 
         effective = self.get_effective_rules(user_id)
+        if channel == CHANNEL_EXTERNAL_AGENT:
+            per_minute = effective["external_rate_limit_per_minute"]
+            per_hour = effective["external_rate_limit_per_hour"]
+        else:
+            per_minute = effective["rate_limit_per_minute"]
+            per_hour = effective["rate_limit_per_hour"]
 
         with self._lock:
             # 清理旧计数器
@@ -245,13 +270,13 @@ class AgentFirewall:
 
             # 检查每分钟限制
             min_count = self._rate_counters.get(minute_key, 0)
-            if min_count >= effective["rate_limit_per_minute"]:
-                return False, "Rate limit exceeded (per minute)"
+            if min_count >= per_minute:
+                return False, f"Rate limit exceeded (per minute, channel={channel})"
 
             # 检查每小时限制
             hour_count = self._rate_counters.get(hour_key, 0)
-            if hour_count >= effective["rate_limit_per_hour"]:
-                return False, "Rate limit exceeded (per hour)"
+            if hour_count >= per_hour:
+                return False, f"Rate limit exceeded (per hour, channel={channel})"
 
             # 增加计数
             self._rate_counters[minute_key] = min_count + 1
@@ -260,11 +285,22 @@ class AgentFirewall:
         return True, ""
 
     def _cleanup_counters(self, now: float) -> None:
-        """清理过期的速率计数器"""
-        cutoff_min = f"min_{int(now // 60) - 2}"
-        cutoff_hour = f"hour_{int(now // 3600) - 2}"
-        to_delete = [key for key in self._rate_counters if key[1] < cutoff_min or key[1] < cutoff_hour]
-        for key in to_delete:
+        """清理过期的速率计数器（只保留当前与上一个窗口）"""
+        minute_index = int(now // 60)
+        hour_index = int(now // 3600)
+        stale = []
+        for key in self._rate_counters:
+            window = key[1]
+            kind, _, raw_index = window.rpartition("_")
+            if not raw_index.isdigit():
+                stale.append(key)
+                continue
+            index = int(raw_index)
+            if kind.endswith(":min") and index < minute_index - 1:
+                stale.append(key)
+            elif kind.endswith(":hour") and index < hour_index - 1:
+                stale.append(key)
+        for key in stale:
             del self._rate_counters[key]
 
     def check_ip_access(self, ip: str, user_id: str = "") -> Tuple[bool, str]:

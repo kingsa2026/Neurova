@@ -22,6 +22,14 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from neurova.api.auth import get_current_user
+from neurova.api.external_agent_protocol import (
+    MAX_MESSAGE_BYTES,
+    PROTOCOL_VERSION,
+    deriveAgentStatus,
+    negotiationMode,
+    validateMessageSize,
+    validateProtocolVersion,
+)
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
@@ -68,6 +76,9 @@ class HandshakeRequestModel(BaseModel):
     agent_name: str = Field(..., description="外部Agent名称")
     capabilities: List[str] = Field(default_factory=list, description="能力列表")
     callback_url: Optional[str] = Field(default=None, description="回调URL")
+    supported_versions: Optional[List[str]] = Field(
+        default=None, description="客户端声明的协议版本；缺省按 legacy 放行"
+    )
 
 
 class SendMessageRequest(BaseModel):
@@ -137,6 +148,18 @@ def _verify_api_key_or_token(
 
     # 默认用户（开发模式）
     return {"user_id": "default", "agent_id": "default", "auth_type": "default"}
+
+
+def _externalQuotaRules(auth: Dict[str, Any]) -> Dict[str, Any]:
+    """只读取生效规则供握手回显，**不做拦截**。
+
+    限流的唯一执行点是 `RateLimitMiddleware`，它在 handler 之前就已拦下超限请求；
+    端点里再查一次额度永远轮不到触发，属"接了不生效"的断点。回显仍取自 firewall，
+    保证客户端读到的上限与中间件真正执行的是同一个数。
+    """
+    from neurova.core.firewall import get_firewall
+
+    return get_firewall().get_effective_rules(auth.get("user_id", "default"))
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +291,12 @@ async def handshake(
     auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
 ):
     """握手协议端点"""
+    accepted, reason = validateProtocolVersion(body.supported_versions)
+    if not accepted:
+        raise HTTPException(status_code=400, detail=reason)
+
+    externalRules = _externalQuotaRules(auth)
+
     handshake_id = str(uuid.uuid4())
     now = time.time()
 
@@ -291,7 +320,6 @@ async def handshake(
         "callback_url": body.callback_url,
         "user_id": auth.get("user_id", "default"),
         "last_seen": now,
-        "status": "online",
     }
 
     return {
@@ -301,6 +329,12 @@ async def handshake(
             "status": "completed",
             "server_agent_id": "neurova",
             "server_capabilities": ["chat", "memory", "tools", "skills"],
+            "server_protocol_version": PROTOCOL_VERSION,
+            "protocol_negotiation": negotiationMode(body.supported_versions),
+            # 回显与拦截同源：这两个值就是本端点接下来真的会执行的判据，
+            # 不是被退役模块那种"回显了但从不拦"的谎报。
+            "max_message_bytes": MAX_MESSAGE_BYTES,
+            "rate_limit_per_minute": externalRules["external_rate_limit_per_minute"],
         },
     }
 
@@ -316,6 +350,13 @@ async def send_message(
     auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
 ):
     """发送消息"""
+    ok, size = validateMessageSize(body.content)
+    if not ok:
+        raise HTTPException(
+            status_code=413,
+            detail=f"消息内容超限: {size} 字节（上限 {MAX_MESSAGE_BYTES} 字节）",
+        )
+
     message_id = str(uuid.uuid4())
     now = time.time()
 
@@ -342,6 +383,12 @@ async def send_message(
             message["status"] = "delivered"
     except Exception as e:
         logger.warning("Failed to deliver message via agent: %s", e)
+
+    # 投递被受理即为活动证据：刷新目标 Agent 的 last_seen。
+    # 没有这个写入点，超时判定会把所有 Agent 集体判成离线（现役只在握手/注册时写）。
+    target = _external_agents.get(body.target_agent_id)
+    if target is not None and target.get("user_id") == auth.get("user_id", "default"):
+        target["last_seen"] = now
 
     return {
         "code": 0,
@@ -378,7 +425,12 @@ async def list_external_agents(
 ):
     """列出外部Agent"""
     user_id = auth.get("user_id", "default")
-    agents = [a for a in _external_agents.values() if a.get("user_id") == user_id]
+    now = time.time()
+    agents = [
+        {**agent, "status": deriveAgentStatus(agent.get("last_seen"), now)}
+        for agent in _external_agents.values()
+        if agent.get("user_id") == user_id
+    ]
     return {"code": 0, "data": {"agents": agents}}
 
 
@@ -396,7 +448,6 @@ async def register_external_agent(
         "callback_url": body.callback_url,
         "user_id": auth.get("user_id", "default"),
         "last_seen": now,
-        "status": "registered",
     }
     return {"code": 0, "message": f"External agent '{body.agent_id}' registered"}
 
@@ -417,7 +468,7 @@ async def get_agent_status(
         "code": 0,
         "data": {
             "agent_id": agent_id,
-            "status": agent.get("status", "unknown"),
+            "status": deriveAgentStatus(agent.get("last_seen"), time.time()),
             "last_seen": agent.get("last_seen", 0),
         },
     }

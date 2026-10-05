@@ -95,52 +95,61 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """速率限制中间件"""
+#: 外部 Agent 接入面的路径前缀。必须等于注册表里
+#: `("neurova.api.endpoints.agent_communication_api", "/v1/agent-communication", ...)`
+#: 一行加上 `/api` 根前缀后的实际挂载名——改挂载名时两处同批，否则外部渠道会静默
+#: 退回内部档（额度变严，且没有任何报错）。
+EXTERNAL_AGENT_PATH_PREFIX = "/api/v1/agent-communication"
 
-    def __init__(self, app: ASGIApp, requests_per_minute: int = 60):
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """全站**唯一**的速率限制执行点。
+
+    它在 handler 之前拦截，因此端点内不得再查一次额度——那永远轮不到触发，
+    属"接了不生效"的断点（本中间件此前按 client IP 硬编码 120/分，端点级检查
+    正是在它之后才可达）。额度取自 `core.firewall`（唯一事实源），按路径分渠道：
+    外部 Agent 接入面走 externalAgent 档，其余走 internal 档。
+
+    配额键优先用已解析出的身份，否则回退 client IP。不在这里另起一套 JWT 解析——
+    那会成为仓内第三条凭证路径（`api/auth.py`、`api/deps.py`、memory 域旁路已足鉴）。
+    """
+
+    def __init__(self, app: ASGIApp, limiter=None):
         super().__init__(app)
-        self.requests_per_minute = requests_per_minute
-        self._requests: dict = {}  # IP -> [timestamps]
-        self._cleanup_interval = 60
-        self._last_cleanup = time.time()
+        self._limiter = limiter
+
+    def _resolveLimiter(self):
+        if self._limiter is None:
+            from neurova.core.firewall import get_firewall
+
+            self._limiter = get_firewall()
+        return self._limiter
 
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "unknown"
-        now = time.time()
+        from neurova.core.firewall import (
+            CHANNEL_EXTERNAL_AGENT,
+            CHANNEL_INTERNAL,
+            RATE_LIMIT_RETRY_AFTER_SECONDS,
+        )
 
-        # 清理过期记录
-        if now - self._last_cleanup > self._cleanup_interval:
-            self._cleanup_old_requests(now)
-            self._last_cleanup = now
+        channel = (
+            CHANNEL_EXTERNAL_AGENT
+            if request.url.path.startswith(EXTERNAL_AGENT_PATH_PREFIX)
+            else CHANNEL_INTERNAL
+        )
+        quotaKey = getattr(request.state, "user_id", None) or (
+            request.client.host if request.client else "unknown"
+        )
 
-        # 检查速率
-        if client_ip not in self._requests:
-            self._requests[client_ip] = []
-
-        # 移除超过1分钟的记录
-        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < 60]
-
-        if len(self._requests[client_ip]) >= self.requests_per_minute:
+        allowed, reason = self._resolveLimiter().check_rate_limit(quotaKey, channel)
+        if not allowed:
             return JSONResponse(
                 status_code=429,
-                content={"code": 4290, "message": "Rate limit exceeded"},
+                content={"code": 4290, "message": reason},
+                headers={"Retry-After": str(RATE_LIMIT_RETRY_AFTER_SECONDS)},
             )
 
-        self._requests[client_ip].append(now)
-
-        response = await call_next(request)
-        return response
-
-    def _cleanup_old_requests(self, now: float):
-        """清理过期的请求记录"""
-        expired_ips = []
-        for ip, timestamps in self._requests.items():
-            self._requests[ip] = [t for t in timestamps if now - t < 60]
-            if not self._requests[ip]:
-                expired_ips.append(ip)
-        for ip in expired_ips:
-            del self._requests[ip]
+        return await call_next(request)
 
 
 # 兜底默认值：开发端口 + Tauri v2 桌面壳 WebView origin
@@ -222,8 +231,8 @@ def setup_middleware(app: FastAPI) -> None:
     # 日志
     app.add_middleware(LoggingMiddleware)
 
-    # 速率限制
-    app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
+    # 速率限制（全站唯一执行点；额度取自 core.firewall，不再在此硬编码）
+    app.add_middleware(RateLimitMiddleware)
 
     # 全局鉴权白名单 (BUG AUDIT S-08 收口)：默认 off 完全惰性；
     # NEUROVA_GLOBAL_AUTH=shadow 记录匿名访问取证 / enforce 白名单外强制凭证。
