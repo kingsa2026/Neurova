@@ -48,15 +48,12 @@ def client(monkeypatch):
     app.include_router(comm.router)
     # Depends 在模块导入时就把函数对象绑进了路由，monkeypatch 模块属性换不掉它——
     # 必须走 FastAPI 的 dependency_overrides，否则请求会撞 401「Not authenticated」。
+    # 本域只剩这一道身份门（`_verify_api_key_or_token` 那条第二解析已退役），
+    # 所以只需覆盖这一处；路由级 dependency 与各端点参数共享同一份缓存结果。
     app.dependency_overrides[comm.get_current_user] = lambda: {
         "user_id": "u1",
         "role": "user",
         "username": "u1",
-    }
-    app.dependency_overrides[comm._verify_api_key_or_token] = lambda: {
-        "user_id": "u1",
-        "agent_id": "a1",
-        "auth_type": "api_key",
     }
     return TestClient(app)
 
