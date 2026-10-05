@@ -1803,12 +1803,32 @@ class MemoryManager:
                 return mem.to_dict()
             return None
 
-    def update_memory(self, memory_id: str, **kwargs) -> bool:
-        """更新记忆"""
+    def update_memory(self, memory_id: str, *, agent_wide: bool = False, **kwargs) -> bool:
+        """更新记忆
+
+        审计修复补齐（P1-6 同规则）：`get_memory`/`forget` 早在 2026-08-30 就加了归属
+        校验，本方法漏了——同一个 manager 实例按 agent 持有**全部用户**的记忆，
+        知道 id 就能改内容（取证见 audit-reports/memory-isolation-2026-10-05.md 图证
+        [2]/[3]）。现与兄弟方法同规则：第 1 层 agent 恒校验，第 2、3 层 neuser/user
+        默认校验，`agent_wide=True` 是既有的管理页/系统作业口径。
+        """
         # Bug 5 修复：加 RLock 保护，避免并发 forget 导致 _memories.get 返回 None 后继续操作
         with self._lock:
             mem = self._memories.get(memory_id)
             if not mem:
+                return False
+            if mem.agent_id != self._agent_id or (
+                not agent_wide
+                and (
+                    mem.neuser_id != self._eff_neuser_id()
+                    or mem.user_id != self._eff_user_id()
+                )
+            ):
+                logger.warning(
+                    "拒绝越权更新记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s) agent_wide=%s",
+                    memory_id, mem.agent_id, mem.neuser_id, mem.user_id,
+                    self._agent_id, self._eff_neuser_id(), self._eff_user_id(), agent_wide,
+                )
                 return False
             # 内容门索引跟随（011）：门键只由内容 + 阶段决定，故只在这两类字段
             # 被改写时同步，并在改动发生**前**取旧键。

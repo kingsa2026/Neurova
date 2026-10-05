@@ -16,7 +16,6 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     _get_request_id,
-    _get_user_ids_from_token,
     get_memory_manager,
     logger,
     router,
@@ -47,16 +46,13 @@ class UpdateUserProfileRequest(BaseModel):
 async def get_self_model(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取Agent的自我模型（持久身份、价值观、能力等）
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         self_model = manager.get_self_model()
         return success_response(
             data=self_model,
@@ -75,16 +71,13 @@ async def update_self_model(
     request: UpdateSelfModelRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     更新Agent的自我模型
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         updates = {}
         if request.narrative_identity is not None:
             updates["narrative_identity"] = request.narrative_identity
@@ -117,16 +110,13 @@ async def get_user_profile(
     user_id: str,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取特定用户的画像
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, token_user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, neuser_id, token_user_id)
+        manager = get_memory_manager(agent_id, user)
         profile = manager.get_user_profile(user_id)
         return success_response(
             data=profile or {"message": "用户画像不存在"},
@@ -146,16 +136,13 @@ async def update_user_profile(
     request: UpdateUserProfileRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     更新特定用户的画像
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, token_user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, neuser_id, token_user_id)
+        manager = get_memory_manager(agent_id, user)
         updates = {}
         if request.preferences is not None:
             updates["preferences"] = request.preferences

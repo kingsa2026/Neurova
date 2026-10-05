@@ -102,6 +102,13 @@ def _require_memory_manager(request: Request):
     与 `/v1/memory` 走同一函数：既保证 agent 解析口径一致，也保证
     `set_request_scope` 请求作用域注入生效（跨用户隔离不能靠端点自觉）。
 
+    已知缺陷（本篇登记未修，见 audit-reports/memory-isolation-2026-10-05.md）：
+    `request.state.user` 全仓**无人写入**（grep `state.user =` 零命中），所以这里
+    永远取到 None，作用域恒回落 default。本模块因此只能按 agent-wide 口径运作
+    （其 get/forget 早已如此），下面三处 update_memory 显式传 agent_wide=True
+    与该口径对齐——不是放宽，是把"事实上是 agent-wide"写成事实源。
+    真正的修法是给这些端点接上 `Depends(get_current_user_or_default)`。
+
     取不到时**显式 503**，绝不静默回落到任何进程内副本 —— 假成功比报错更有害。
     """
     from neurova.api.endpoints.memory.base import get_memory_manager
@@ -203,7 +210,7 @@ async def strengthen_memory(
     before = float(before_raw) if isinstance(before_raw, (int, float)) else 50.0
     after = min(IMPORTANCE_MAX, before + boost * IMPORTANCE_SCALE)
 
-    if not manager.update_memory(memory_id, importance=after):
+    if not manager.update_memory(memory_id, agent_wide=True, importance=after):
         logger.warning("strengthen 落库失败: id=%s", memory_id)
         raise _notFound(memory_id)
 
@@ -281,7 +288,7 @@ async def batch_memory_operation(
                 before_raw = existing.get("importance")
                 before = float(before_raw) if isinstance(before_raw, (int, float)) else 50.0
                 after = min(IMPORTANCE_MAX, before + boost * IMPORTANCE_SCALE)
-                if not manager.update_memory(memory_id, importance=after):
+                if not manager.update_memory(memory_id, agent_wide=True, importance=after):
                     errors.append({"memory_id": memory_id, "error": "Update failed"})
                     continue
                 results.append({"memory_id": memory_id, "operation": "strengthen", "success": True})
@@ -417,13 +424,13 @@ async def import_memories(
                 if body.merge_mode == "merge":
                     merged = dict(payload)
                     merged.pop("content", None)  # 合并只补缺，不改写正文
-                    if not manager.update_memory(str(existing_id), **merged):
+                    if not manager.update_memory(str(existing_id), agent_wide=True, **merged):
                         errors.append(f"[{index}] {existing_id} 合并失败")
                         continue
                     updated += 1
                     continue
                 if body.merge_mode == "overwrite":
-                    if not manager.update_memory(str(existing_id), **payload):
+                    if not manager.update_memory(str(existing_id), agent_wide=True, **payload):
                         errors.append(f"[{index}] {existing_id} 覆盖失败")
                         continue
                     updated += 1
