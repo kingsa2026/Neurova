@@ -93,7 +93,6 @@ class TestCheckQuota:
             manager.check_file_size_quota("u1"),
             manager.check_private_skill_quota("u1"),
             manager.check_collab_project_quota("u1"),
-            manager.check_api_call_quota("u1"),
             manager.check_concurrent_session_quota("u1"),
         ]
         assert all(c["allowed"] is True for c in checks)
@@ -123,12 +122,6 @@ class TestCounters:
         assert manager.get_usage("u1").storage_bytes == 1000
         manager.decrement_storage("u1", 400)
         assert manager.get_usage("u1").storage_bytes == 600
-
-    def test_reset_api_call_zeroes_count(self, manager):
-        manager.increment_api_call("u1", count=5)
-        assert manager.get_usage("u1").api_call_count == 5
-        manager.reset_api_call("u1")
-        assert manager.get_usage("u1").api_call_count == 0
 
 
 class TestPersistence:

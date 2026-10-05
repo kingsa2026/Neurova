@@ -386,13 +386,19 @@ class TestA6ApprovalManagerSingleton:
             assert call.args or call.kwargs, "直接 ApprovalManager(...) 构造 = split-brain"
 
     def test_workspace_consistency(self):
-        """单例 workspace 以首次初始化为准，tool_executor 消费方与 agent 持有同一存储。"""
+        """单例落点唯一：tool_executor 消费方与 agent 必须指向同一份存储。
+
+        原断言 `get_approval_manager(".") is get_approval_manager("/other")` 只证明了
+        "实例唯一"，却把 bug 的症状当成了规格——路径参数存在时，**落点**由首个调用方
+        钉死，实例一本而账本两本。本批把该参数从工厂签名移除，故改断"同实例且同落点"。
+        """
         import neurova.security.approval_manager as am_mod
 
         am_mod._approval_manager = None
-        m1 = am_mod.get_approval_manager(workspace_path=".")
-        m2 = am_mod.get_approval_manager(workspace_path="/other")
+        m1 = am_mod.get_approval_manager()
+        m2 = am_mod.get_approval_manager()
         assert m1 is m2
+        assert m1._db_path == m2._db_path
 
 
 # ═══════════════════════════════════════════════════════════════

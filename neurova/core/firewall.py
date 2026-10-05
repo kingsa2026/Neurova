@@ -138,6 +138,11 @@ class AgentFirewall:
         # 速率限制计数器: (user_id, window_start) -> count
         self._rate_counters: Dict[Tuple[str, str], int] = {}
 
+        # 组档位 resolver（由 API 层装配注入；core 不 import auth，避免成环）
+        self._rateQuotaResolver = None
+        self._rateQuotaTtlSeconds = 60.0
+        self._rateQuotaCache: Dict[str, Tuple[Optional[int], float]] = {}
+
         # 编译敏感输出正则
         self._sensitive_patterns = [re.compile(p, re.IGNORECASE) for p in self._global_rules.sensitive_output_patterns]
 
@@ -242,12 +247,50 @@ class AgentFirewall:
         rules = self._user_rules.get(user_id)
         return rules.agent_isolation if rules else True
 
+    def setRateQuotaResolver(self, resolver, ttlSeconds: float = 60.0) -> None:
+        """注入"用户 → 每分钟额度"的解析器（组档位由 API 层提供）。
+
+        core 不 import auth（会成环），故只接受注入。结果带 TTL 缓存——限流在每请求
+        路径上，不能每次都查库。
+        """
+        self._rateQuotaResolver = resolver
+        self._rateQuotaTtlSeconds = ttlSeconds
+
+    def _groupRateFor(self, user_id: str) -> Optional[int]:
+        resolver = self._rateQuotaResolver
+        if resolver is None or not user_id:
+            return None
+
+        now = time.time()
+        with self._lock:
+            hit = self._rateQuotaCache.get(user_id)
+            if hit and hit[1] > now:
+                return hit[0]
+
+        try:
+            rate = resolver(user_id)
+        except Exception as e:  # 解析器炸了不得拒请求
+            logger.warning("额度解析器异常，回落默认档: %s", e)
+            rate = None
+
+        with self._lock:
+            if len(self._rateQuotaCache) > 4096:
+                self._rateQuotaCache = {
+                    key: value for key, value in self._rateQuotaCache.items() if value[1] > now
+                }
+            self._rateQuotaCache[user_id] = (rate, now + self._rateQuotaTtlSeconds)
+
+        return rate
+
     def check_rate_limit(self, user_id: str, channel: str = CHANNEL_INTERNAL) -> Tuple[bool, str]:
         """
         检查速率限制
 
         计数键带渠道前缀，使外部 Agent 流量与人用流量互不扣额；键域仍是 user_id
         （同一用户下的多个外部 Agent 共享一份额度，这是有意语义）。
+
+        internal 渠道优先用组档位（取最宽）；解析不到才回落全局默认。externalAgent
+        渠道不受用户组影响——那是接入面容量决策，不是用户权益。
 
         Returns:
             (是否允许, 拒绝原因)
@@ -263,6 +306,11 @@ class AgentFirewall:
         else:
             per_minute = effective["rate_limit_per_minute"]
             per_hour = effective["rate_limit_per_hour"]
+            groupRate = self._groupRateFor(user_id)
+            if groupRate:
+                per_minute = groupRate
+                # 组档只定义分钟值；小时闸按 60 倍折算，使其不会先于分钟闸生效。
+                per_hour = groupRate * 60
 
         with self._lock:
             # 清理旧计数器
