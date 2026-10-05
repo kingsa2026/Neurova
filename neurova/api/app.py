@@ -60,6 +60,9 @@ class AppState:
         self.voice_engines: Dict[str, Any] = {}  # engine_type -> VoiceEngine instance
         self.sleep_manager = None
         self.shutdown_guard = None
+        # MCP bootstrap 后台任务的句柄：关停时要靠它把任务收敛掉，否则在关停之后
+        # 才建出的会话已经没有关的窗口（只写不读的属性即断点，见教义 §2）
+        self.mcp_bootstrap_task = None
         self.start_time: float = time.time()
         self.config: Dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -925,8 +928,9 @@ async def _on_startup(app_state: AppState) -> None:
         logger.debug("VoiceAdapter registration skipped: %s", e)
 
     # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（后台任务，不阻塞
-    # 就绪；完成后补挂到已存在 agent 的 ToolRouter）
-    _schedule_mcp_bootstrap(app_state)
+    # 就绪；完成后补挂到已存在 agent 的 ToolRouter）。任务句柄存进 app_state：
+    # 关停时先收敛它再关会话，否则在关停之后才建出的会话已经没有关的窗口。
+    app_state.mcp_bootstrap_task = _schedule_mcp_bootstrap(app_state)
 
     # 渠道启动装配（2026-09-13 agent 隔离 Phase B）：按持久化配置逐 agent 重建适配器连接
     _schedule_channel_bootstrap(app_state)
@@ -1163,6 +1167,34 @@ async def _on_shutdown(app_state: AppState) -> None:
         logger.warning("shell 会话终止超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT)
     except Exception as e:  # noqa: BLE001 - 会话收敛失败不阻断关停
         logger.warning("shell 会话终止失败: %s", e)
+
+    # 先收敛 MCP bootstrap 后台任务：关停之后才建出的会话已经没有关的窗口，只能留给
+    # portal 取消——而 stdio 会话的取消不收敛，这正是 thread.join() 卡死的因。
+    bootstrapTask = app_state.mcp_bootstrap_task
+    if bootstrapTask is not None and not bootstrapTask.done():
+        bootstrapTask.cancel()
+        try:
+            await asyncio.wait_for(bootstrapTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("MCP bootstrap 任务已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning("MCP bootstrap 任务取消超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT)
+        except Exception as e:  # noqa: BLE001 - 任务内部已 fail-soft，此处只收结果
+            logger.debug("MCP bootstrap 任务收尾异常: %s", e)
+
+    # 关停 MCP 会话（stdio 子进程 + AsyncExitStack）。此前生产侧**零调用方**：
+    # 会话只能靠 anyio 在 portal 退出时取消，而 stdio reader 阻塞在子进程管道上、
+    # 取消不收敛，于是承载 app 的线程永不结束——TestClient 反复进出 lifespan 时
+    # 表现为 `thread.join()` 卡死，真进程表现为 npx 子进程泄漏。
+    try:
+        from neurova.tool_layers.mcp_bootstrap import shutdown_mcp
+
+        await asyncio.wait_for(shutdown_mcp(), timeout=AGENT_SHUTDOWN_TIMEOUT)
+        logger.info("MCP sessions shut down")
+    except asyncio.TimeoutError:
+        logger.warning("MCP sessions shutdown timed out after %.1fs; skipping", AGENT_SHUTDOWN_TIMEOUT)
+    except Exception as e:  # noqa: BLE001 - 会话收敛失败不阻断关停
+        logger.warning("MCP sessions shutdown error: %s", e)
 
     # 关闭 camofox-browser 子进程(supervisor 拉起的)并清理临时痕迹
     try:
