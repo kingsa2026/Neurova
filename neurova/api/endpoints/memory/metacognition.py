@@ -17,7 +17,6 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     _get_request_id,
-    _get_user_ids_from_token,
     get_memory_manager,
     logger,
     router,
@@ -93,15 +92,12 @@ async def meta_reflect(
 async def meta_optimize(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     执行元认知系统优化
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_optimize()
         return success_response(
@@ -120,15 +116,12 @@ async def meta_optimize(
 async def meta_evolve_skills(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     执行技能进化分析
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_evolve_skills()
         return success_response(
@@ -152,15 +145,12 @@ async def meta_evolve_skills(
 async def meta_get_health(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取元认知系统健康报告
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_get_health_report()
         return success_response(
@@ -179,15 +169,12 @@ async def meta_get_health(
 async def meta_get_reflection(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取元认知系统反思报告
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_get_reflection_report()
         return success_response(
@@ -211,13 +198,12 @@ async def meta_get_reflection(
 async def meta_should_monitor(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     检查当前是否需要执行监控
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_monitor()
         return success_response(
@@ -236,13 +222,12 @@ async def meta_should_monitor(
 async def meta_should_reflect(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     检查当前是否需要执行反思
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_reflect()
         return success_response(
@@ -261,13 +246,12 @@ async def meta_should_reflect(
 async def meta_should_optimize(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     检查当前是否需要执行优化
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_optimize()
         return success_response(
@@ -286,13 +270,12 @@ async def meta_should_optimize(
 async def meta_should_evolve(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     检查当前是否需要执行技能进化
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_evolve_skills()
         return success_response(
@@ -318,13 +301,12 @@ async def meta_get_all_skills(
     category: Optional[str] = None,
     status: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取所有技能，支持按分类和状态筛选
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         skills = manager.meta_get_all_skills(category=category, status=status)
 
@@ -347,13 +329,12 @@ async def meta_get_all_skills(
 async def meta_get_skill_stats(
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取技能系统统计信息
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         stats = manager.meta_get_skill_stats()
 
@@ -374,13 +355,12 @@ async def meta_generate_skill(
     request: AutoGenerateSkillRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     根据描述自动生成新技能
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         skill = manager.meta_generate_skill(request.description, category=request.category)
 
@@ -401,13 +381,12 @@ async def meta_match_skills(
     request: MatchSkillsRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     根据查询内容匹配合适的技能
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-        user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         matched = manager.meta_match_skills(request.query, top_k=request.top_k)
 

@@ -17,7 +17,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI
@@ -59,19 +58,18 @@ class TestMemoryUpdateEndpoint:
     def test_put_updates_content_and_returns_entry(self, monkeypatch):
         mem = Memory(id="m1", agent_id="a1", content="old", metadata={})
 
-        class _Storage:
-            def get(self, mid):
-                return mem.to_dict() if mid == "m1" else None
-
         class _Mgr:
-            storage = _Storage()
-
             def update_memory(self, mid, **kw):
                 if mid != "m1":
                     return False
                 if "content" in kw:
                     mem.content = kw["content"]
                 return True
+
+            def get_memory(self, mid):
+                # 端点的读回口已从 `storage.get`（全仓零写入方）改到
+                # `manager.get_memory`（带 P1-6 归属校验），桩随之改这份契约
+                return mem.to_dict() if mid == "m1" else None
 
         client = _client(memory_router, "/mem")
         monkeypatch.setattr(memory_crud, "get_memory_manager", lambda aid, u: _Mgr())
@@ -81,10 +79,11 @@ class TestMemoryUpdateEndpoint:
 
     def test_put_missing_returns_404(self, monkeypatch):
         class _Mgr:
-            storage = Mock(get=Mock(return_value=None))
-
             def update_memory(self, mid, **kw):
                 return False
+
+            def get_memory(self, mid):
+                return None
 
         client = _client(memory_router, "/mem")
         monkeypatch.setattr(memory_crud, "get_memory_manager", lambda aid, u: _Mgr())
@@ -93,9 +92,10 @@ class TestMemoryUpdateEndpoint:
 
     def test_put_empty_body_is_422(self, monkeypatch):
         class _Mgr:
-            storage = Mock()
-
             def update_memory(self, mid, **kw):  # pragma: no cover - 不应到达
+                raise AssertionError("空 body 不得触达 manager")
+
+            def get_memory(self, mid):  # pragma: no cover - 不应到达
                 raise AssertionError("空 body 不得触达 manager")
 
         client = _client(memory_router, "/mem")

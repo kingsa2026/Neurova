@@ -16,7 +16,6 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     _get_request_id,
-    _get_user_ids_from_token,
     get_memory_manager,
     logger,
     router,
@@ -62,7 +61,7 @@ async def add_temporal_fact(
     request: AddTemporalFactRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     添加时序事实到知识图谱
@@ -70,9 +69,7 @@ async def add_temporal_fact(
     用于记录具有时间维度的实体属性变化
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         fact_id = manager.tkg_add_fact(
             # 显式映射：请求字段名 → 权威字段名。空值由委托层报错，不静默写空行。
             subject=request.entity,
@@ -106,7 +103,7 @@ async def query_temporal_facts(
     request: QueryTemporalRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     查询时序知识图谱中的事实
@@ -114,9 +111,7 @@ async def query_temporal_facts(
     支持按实体、关系、时间范围进行查询
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         facts = manager.tkg_query(
             entity=request.entity,
             relation=request.relation,
@@ -147,15 +142,13 @@ async def get_temporal_history(
     relation: str,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取指定实体关系的事实演变历史
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         history = manager.tkg_get_history(
             entity=entity,
             relation=relation,
@@ -183,15 +176,13 @@ async def get_temporal_history(
 async def get_tkg_stats(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取时序知识图谱统计信息
     """
     try:
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         stats = manager.tkg_get_stats()
 
         return success_response(

@@ -30,35 +30,13 @@ def _get_request_id(req: Optional[Request]) -> Optional[str]:
     return getattr(req.state, "request_id", None) if req else None
 
 
-def resolve_user(user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """将可选用户解析为有效用户(未认证时返回默认用户)"""
-    return user or {"user_id": "default", "username": "default", "role": "user"}
-
-
-def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
-    """从请求的 Token 中提取 neuser_id 和 user_id
-
-    尝试从 Authorization header 解析 JWT token 中的用户标识，
-    如果解析失败则返回默认值。
-    """
-    neuser_id = "default"
-    user_id = "default"
-
-    if req:
-        try:
-            auth_header = req.headers.get("Authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-                from neurova.api.auth import verify_access_token
-
-                payload = verify_access_token(token)
-                if payload:
-                    neuser_id = payload.get("neuser_id", "default")
-                    user_id = payload.get("user_id", payload.get("sub", "default"))
-        except Exception:
-            pass  # Token 解析失败时使用默认值
-
-    return neuser_id, user_id
+# 身份解析只有一个来源：端点参数上的
+# `user: Dict[str, Any] = Depends(get_current_user_or_default)`。
+# 此前这里另有一份 `_get_user_ids_from_token(req)`——手工剥 Bearer 头再直调
+# `verify_access_token`，与 `auth.py:_user_identity()` 构成同一问题的两份答案
+# （存量 token 无 neuser_id 声明时依赖回退 sub、旁路给 "default"，图证见
+# audit-reports/memory-isolation-2026-10-05.md [D]），且 except 静默吞异常。
+# 旁路与同样零调用方的 `resolve_user()` 一并删除（教义第 6 条）。
 
 
 # ============================================================
