@@ -362,8 +362,8 @@
 19. **懒建单例缺 DCL+RLock（§3 违规面）** ✅ —— `collaboration` 侧 15+ 处裸判 None 无锁；auth 侧 4 份用 Lock 非 RLock；`get_flow_orchestrator:846` 无锁；`manager.py` 17 个 `_ensure_*` 不在锁内；`channels/manager.py:81` 懒建单例同样缺 DCL。
 20. **`neurova/expected` 与同批的 `missing`** ✅ —— 均为 0 字节重定向残留，由 `98b5422a`「清理临时文件」引入（该提交还删了 471 行的 `missing_files.txt`）。
 21. **后台任务句柄丢弃 → 关停无法收敛（已修 `b5f80e9c`）** ✅ —— `_schedule_mcp_bootstrap`(`api/app.py:765`) 起的 stdio 会话，`MCPToolClient.disconnect_all`(`tool_layers/mcp_client.py:240`) **生产侧零调用方**（同批还发现 `execution_engine/mcp_manager.py:395` 的第二份 `disconnect_all` 同样零调用方，属 §3-A7 面）；portal 只能取消，而 stdio reader 取消不收敛 → `thread.join()` 永久阻塞，真进程侧是 npx 子进程泄漏。同根因第二命中点：`bootstrap_mcp` 的 `_bootstrapped` 只写不读，重复 startup 顶掉活会话。**修法**：关停先收敛任务再关会话（注册表 + 进程单例两个发现口），`_bootstrapped` 转为被读。
-22. **`POST /api/v1/health/recover` 假成功** ◑ —— `endpoints/health.py:179-187` 写 `# TODO: 实现恢复逻辑` 却回 `success: true` + `"Recovery triggered"`；全仓除该测试文件外零消费者（NeurUI/NeurovaHarmony 零命中）。按第 2 条应改诚实 `not_supported` 或退役，**属产品决策，未动**。
-23. **响应模型不接受的字段被静默丢弃** ◑ —— `endpoints/health.py:88-92` 给无 `message` 字段的 `HealthStatusResponse` 传 `message="Health checker not available"`，pydantic v2 默认 `extra='ignore'` → 降级原因不可观测，调用方只见 `status:"unknown"`。
+22. **`POST /api/v1/health/recover` 假成功（已修 `212d855c`）** ✅ —— `endpoints/health.py:179-187` 写 `# TODO: 实现恢复逻辑` 却回 `success: true` + `"Recovery triggered"`；全仓除该测试文件外零消费者（NeurUI/NeurovaHarmony 零命中）。已收成显式 501 + 点名原因（路由保留），并同批删掉失去消费者的 `RecoveryResponse` 与本就零引用的 `RegisterCheckRequest`。
+23. **响应模型不接受的字段被静默丢弃（已修 `d8f86dcd`）** ✅ —— `endpoints/health.py:88-92` 给无 `message` 字段的 `HealthStatusResponse` 传 `message="Health checker not available"`，pydantic v2 默认 `extra='ignore'` → 降级原因不可观测，调用方只见 `status:"unknown"`。字段已补进模型（与同文件 `CheckResultResponse.message` 同名同默认值，不另造口径）。
 24. **进程级 agents 表是跨用例耦合面** ◑ —— `enhanced_memory_search_api.py:24` 自陈"唯一事实源是 `get_app_state()['agents']`"（`request.app.state.agents` 生产恒空），于是任何跑真实 startup 的用例都会把一个真 agent 写进该表，把同进程后续 18 条（nerf 11 + semantic-search 7）带倒。本轮在新用例内按原样回填所动全局以自证隔离；**表本身的单源化/用例隔离属预存脆弱面，未放宽**。
 25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。
 
@@ -424,6 +424,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `f4776229` | 协调层集成测试按现状重塑（两条死导入使整目录无法收集） | §6-16 幽灵测试一类的补面 |
 | `b5f80e9c` | MCP 会话关停根修（§6-21），integration 由 162s/含击杀 → 66s/零击杀 | §6-21 新增并已闭环 |
 | `587c57f6` | `/health` 集成用例改打真实挂载路径、四值放宽断言收成单一状态码 | §6-22 留档未处理 |
+| `212d855c` | `/v1/health/recover` 假成功收成显式 501，删 `RecoveryResponse` + 零引用的 `RegisterCheckRequest`（生产净 -15） | §6-22 闭环 |
+| `d8f86dcd` | `/v1/health` 降级原因补进响应模型（原被 pydantic `extra ignore` 丢弃，生产净 +4） | §6-23 闭环 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
