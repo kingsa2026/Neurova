@@ -41,14 +41,12 @@ class TestResourceUsage:
         usage = ResourceUsage("user-1")
         usage.llm_call_count = 100
         usage.llm_token_count = 5000
-        usage.api_call_count = 200
         
         # 重置
         usage.reset_daily_usage()
         
         assert usage.llm_call_count == 0
         assert usage.llm_token_count == 0
-        assert usage.api_call_count == 0
 
     def test_check_daily_reset(self, tmp_path):
         """测试检查是否需要重置每日使用量（实现 check_daily_reset 在 manager 上）"""
@@ -83,7 +81,6 @@ class TestResourceUsage:
             "storage_bytes": 500.0,
             "llm_call_count": 100,
             "llm_token_count": 5000,
-            "api_call_count": 200,
             "concurrent_sessions": 2,
             "team_member_count": 5,
             "collab_project_count": 3,

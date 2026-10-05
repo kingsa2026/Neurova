@@ -12,6 +12,7 @@ FastAPI 中间件集合
 
 from neurova.core import config
 from neurova.core.logger import get_logger
+import threading
 import time
 import uuid
 
@@ -114,9 +115,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     那会成为仓内第三条凭证路径（`api/auth.py`、`api/deps.py`、memory 域旁路已足鉴）。
     """
 
-    def __init__(self, app: ASGIApp, limiter=None):
+    def __init__(self, app: ASGIApp, limiter=None, identityTtlSeconds: float = 60.0):
         super().__init__(app)
         self._limiter = limiter
+        self._identityTtlSeconds = identityTtlSeconds
+        self._identityCache: dict = {}
+        self._identityLock = threading.RLock()
 
     def _resolveLimiter(self):
         if self._limiter is None:
@@ -124,6 +128,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             self._limiter = get_firewall()
         return self._limiter
+
+    def _quotaKey(self, request: Request) -> str:
+        """配额键：已解析出的登录名，否则回退 client IP。
+
+        必须用 username 而不是 user_id：组归属查的是登录名，而 token 里的
+        user_id/neuser_id 是数字账号 id，喂错即静默查不到组（档位形同未接）。
+        身份解析复用 global_auth 那份公开契约，不在这里另起一条凭证路径。
+        """
+        headers = dict(request.headers)
+        credential = headers.get("authorization") or headers.get("x-service-token") or ""
+        if not credential:
+            return request.client.host if request.client else "unknown"
+
+        now = time.time()
+        with self._identityLock:
+            hit = self._identityCache.get(credential)
+            if hit and hit[1] > now:
+                return hit[0] or (request.client.host if request.client else "unknown")
+
+        from neurova.api.global_auth import authenticateRequest
+
+        identity = authenticateRequest(headers)
+        username = identity.get("username") if identity else None
+        if username in (None, "unknown"):
+            username = None
+
+        with self._identityLock:
+            if len(self._identityCache) > 4096:
+                self._identityCache = {
+                    key: value for key, value in self._identityCache.items() if value[1] > now
+                }
+            self._identityCache[credential] = (username, now + self._identityTtlSeconds)
+
+        return username or (request.client.host if request.client else "unknown")
 
     async def dispatch(self, request: Request, call_next):
         from neurova.core.firewall import (
@@ -137,11 +175,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if request.url.path.startswith(EXTERNAL_AGENT_PATH_PREFIX)
             else CHANNEL_INTERNAL
         )
-        quotaKey = getattr(request.state, "user_id", None) or (
-            request.client.host if request.client else "unknown"
-        )
 
-        allowed, reason = self._resolveLimiter().check_rate_limit(quotaKey, channel)
+        allowed, reason = self._resolveLimiter().check_rate_limit(
+            self._quotaKey(request), channel
+        )
         if not allowed:
             return JSONResponse(
                 status_code=429,
@@ -230,6 +267,13 @@ def setup_middleware(app: FastAPI) -> None:
 
     # 日志
     app.add_middleware(LoggingMiddleware)
+
+    # 限流额度唯一事实源 = core.firewall；组档位（人用渠道）在此装配注入，
+    # 因为 core 不能 import auth（user_group_model 反向依赖 core.logger/data_root）。
+    from neurova.api.group_rate_quota import groupRatePerMinute
+    from neurova.core.firewall import get_firewall
+
+    get_firewall().setRateQuotaResolver(groupRatePerMinute)
 
     # 速率限制（全站唯一执行点；额度取自 core.firewall，不再在此硬编码）
     app.add_middleware(RateLimitMiddleware)
