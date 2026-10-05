@@ -9,9 +9,9 @@ Agent 外部通信 API 端点（简化版）
 5. 用户隔离（所有操作都验证用户权限）
 
 多用户隔离机制:
-- 所有API端点都需要验证用户身份（JWT Token或API Key）
+- 所有API端点经路由级 `Depends(get_current_user)` 一道门验 JWT 身份（单源）
 - 每个用户只能访问自己的Agent通信资源
-- API密钥绑定到特定用户和Agent
+- API密钥绑定到特定用户和Agent；**密钥目前不是可登录凭证**，只是被签发/吊销的数据
 """
 
 import hashlib
@@ -20,7 +20,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from neurova.api.auth import get_current_user
 from neurova.api.external_agent_protocol import (
     MAX_MESSAGE_BYTES,
@@ -115,39 +115,16 @@ def _hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def _verify_api_key_or_token(
-    authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None),
-) -> Dict[str, Any]:
-    """验证API密钥或JWT Token"""
-    # 优先使用JWT Token
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization[7:]
-        try:
-            from neurova.api.auth import verify_token
-
-            payload = verify_token(token)
-            return {"user_id": payload.get("sub", "default"), "auth_type": "jwt"}
-        except Exception:
-            pass
-
-    # 尝试API Key
-    if x_api_key:
-        key_hash = _hash_api_key(x_api_key)
-        for key_id, key_info in _api_keys.items():
-            if key_info.get("key_hash") == key_hash:
-                if key_info.get("revoked"):
-                    raise HTTPException(status_code=401, detail="API key revoked")
-                if key_info.get("expires_at") and key_info["expires_at"] < time.time():
-                    raise HTTPException(status_code=401, detail="API key expired")
-                return {
-                    "user_id": key_info.get("user_id", "default"),
-                    "agent_id": key_info.get("agent_id", "default"),
-                    "auth_type": "api_key",
-                }
-
-    # 默认用户（开发模式）
-    return {"user_id": "default", "agent_id": "default", "auth_type": "default"}
+# 身份解析单源：本域**不再自己解 Authorization**。路由级
+# `APIRouter(dependencies=[Depends(get_current_user)])` 是唯一那道门，端点直接复用它的返回值
+# （FastAPI 按请求缓存依赖结果，一处解析两处共享）。
+# 原来这里还有第二份解析：`authorization.startswith("Bearer ")` 大小写敏感，而 HTTPBearer
+# 不敏感——同一枚合法 token 用 `bearer` 送出能过门、却在这份解析里落到 default 租户，
+# 实测这样签发的密钥在正常列表里直接看不见（红灯与取证见
+# tests/unit/api/test_agent_communication_identity.py）。
+# 其中 api-key 认证分支本就不可达（门先拦 401）且全仓零消费者，一并退役；
+# `nk_` 密钥仍作为**数据**被签发/列举/吊销，"外部 Agent 拿它当登录凭证"是尚未拍板的能力
+# ——要做得改路由级那道门，而不是在本域再开第二条解析路径。
 
 
 def _externalQuotaRules(auth: Dict[str, Any]) -> Dict[str, Any]:
@@ -170,7 +147,7 @@ def _externalQuotaRules(auth: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/api-keys", response_model=GenerateAPIKeyResponse)
 async def generate_api_key(
     body: GenerateAPIKeyRequest,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """生成新的API密钥"""
     key_id = str(uuid.uuid4())
@@ -207,7 +184,7 @@ async def generate_api_key(
 
 @router.get("/api-keys")
 async def get_api_keys(
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取Agent的所有API密钥"""
     user_id = auth.get("user_id", "default")
@@ -231,7 +208,7 @@ async def get_api_keys(
 async def update_api_key(
     key_id: str,
     body: UpdateAPIKeyRequest,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """更新API密钥信息"""
     key_info = _api_keys.get(key_id)
@@ -251,7 +228,7 @@ async def update_api_key(
 @router.post("/api-keys/{key_id}/revoke")
 async def revoke_api_key(
     key_id: str,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """撤销API密钥"""
     key_info = _api_keys.get(key_id)
@@ -267,7 +244,7 @@ async def revoke_api_key(
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """删除API密钥"""
     key_info = _api_keys.get(key_id)
@@ -288,7 +265,7 @@ async def delete_api_key(
 @router.post("/handshake")
 async def handshake(
     body: HandshakeRequestModel,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """握手协议端点"""
     accepted, reason = validateProtocolVersion(body.supported_versions)
@@ -347,7 +324,7 @@ async def handshake(
 @router.post("/messages/send")
 async def send_message(
     body: SendMessageRequest,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """发送消息"""
     ok, size = validateMessageSize(body.content)
@@ -404,7 +381,7 @@ async def send_message(
 async def get_messages(
     agent_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取消息列表"""
     user_id = auth.get("user_id", "default")
@@ -421,7 +398,7 @@ async def get_messages(
 
 @router.get("/external-agents")
 async def list_external_agents(
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """列出外部Agent"""
     user_id = auth.get("user_id", "default")
@@ -437,7 +414,7 @@ async def list_external_agents(
 @router.post("/external-agents")
 async def register_external_agent(
     body: HandshakeRequestModel,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """注册外部Agent"""
     now = time.time()
@@ -455,7 +432,7 @@ async def register_external_agent(
 @router.get("/external-agents/{agent_id}/status")
 async def get_agent_status(
     agent_id: str,
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取Agent状态"""
     agent = _external_agents.get(agent_id)
@@ -476,7 +453,7 @@ async def get_agent_status(
 
 @router.get("/routing/stats")
 async def get_routing_stats(
-    auth: Dict[str, Any] = Depends(_verify_api_key_or_token),
+    auth: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取路由统计信息"""
     user_id = auth.get("user_id", "default")
