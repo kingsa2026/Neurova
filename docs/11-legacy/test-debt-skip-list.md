@@ -35,7 +35,7 @@
 |---|---|---|---|
 | `tests/unit/admin/test_resource_quota_manager.py` | 37 | 构造签名/配额 API 全变 | ✅ FIXED（23 passed） |
 | `tests/unit/skills/test_skill_registry_comprehensive.py` | 47 | 被 skill_system split-brain 阻塞 | ✅ FIXED（17 passed，先修生产后重写） |
-| `tests/unit/api/test_communication_protocol_comprehensive.py` | 45 | 握手协议签名变更 | ⏳ TODO |
+| `tests/unit/api/test_communication_protocol_comprehensive.py` | 45 | 握手协议签名变更 | 🗑 随被测模块退役（2026-10-05，communication_protocol.py 已删；判据迁至 `test_external_agent_protocol.py` / `test_agent_communication_protocol_wiring.py` / `test_firewall_external_channel_quota.py`） |
 | `tests/unit/core/test_analytics_models.py` | 42 | 数据类字段/枚举/帮助方法变更 | ✅ FIXED（21 passed） |
 | `tests/unit/core/test_shared_config.py` | 36 | 配置结构/访问器/提供商数据变更 | ✅ FIXED（26 passed，并修复 config_path 未归一化 Path 的生产 bug） |
 | `tests/unit/core/test_startup_manager.py` | 35 | register_module 签名/生命周期 API 变更 | ✅ FIXED（12 passed，并修复 ModuleInfo.state 不同步的生产 bug） |
