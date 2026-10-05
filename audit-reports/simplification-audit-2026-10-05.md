@@ -427,6 +427,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `212d855c` | `/v1/health/recover` 假成功收成显式 501，删 `RecoveryResponse` + 零引用的 `RegisterCheckRequest`（生产净 -15） | §6-22 闭环 |
 | `d8f86dcd` | `/v1/health` 降级原因补进响应模型（原被 pydantic `extra ignore` 丢弃，生产净 +4） | §6-23 闭环 |
 | `63e8ae8e` | memory 域身份单源化 + 三条 by-id 路由回到归属校验（生产净 **-64**；§9 序 3 缺陷批的 memory 条） | §6-1 闭环，含一处守卫改判 |
+| `806c6f38` | agent_communication 第二份身份解析退役（`bearer` 大小写把同一枚凭证分进两个租户） | §6-1 第二命中点 |
+| `c1c6c221` | 路由级门改为 JWT 与密钥合一，agent 域密钥并入 `APIKeyManager`（净 +34） | §6-1 能力缺口按拍板闭合 |
+| `cf684596` | firewall 未知规则键先验后写、点名拒绝；合法键名单源取 dataclass 字段（净 +22） | 假成功族：静默 no-op 却报成功 |
+| `7842ecb9` | 开放平台密钥归属改取那道门（`request.state.user_id` 全仓无人写入 → 全员同落 anonymous 桶，互相可撤） | 与 §6-1 同根因第三命中点 |
+| `94af885f` | 开放平台私有密钥存储并入 `APIKeyManager`，三项机制（原子写/创建幂等/tombstone）先补短再合并后退役（净 +83） | 教义第 7 条：密钥实现三合一 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
