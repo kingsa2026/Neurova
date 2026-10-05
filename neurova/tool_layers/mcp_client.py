@@ -700,6 +700,14 @@ def get_mcp_client(user_id: typing.Optional[str] = None) -> MCPToolClient:
     return _mcp_client_instance
 
 
+def peek_mcp_client() -> typing.Optional[MCPToolClient]:
+    """已存在的进程单例；未创建则返回 None。
+
+    关停与自检用——这些场景**不得**为了检查而把单例建出来（建了就是又开一份会话面）。
+    """
+    return _mcp_client_instance
+
+
 def reset_mcp_client() -> None:
     """重置单例（测试用）"""
     global _mcp_client_instance
