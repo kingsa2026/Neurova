@@ -300,6 +300,7 @@ A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integrati
 | `cf684596` | `firewall.update_global_rules` / `update_user_rules` 未知键先验后写、点名拒绝；配置装载遇未知键改 WARNING 留痕；合法键名单源取 dataclass 字段 | §八末尾那条 |
 | `7842ecb9` | 开放平台密钥归属改取路由级门的返回值——`request.state.user_id` **全仓无人写入**，导致所有用户的密钥同落 `anonymous` 桶：互相可见、按他人 key_id 即可撤销 | 与 `get_memory_manager` 身份旁落同根因 |
 | `94af885f` | 开放平台私有密钥存储并入 `APIKeyManager`：原子写、创建幂等 + 意图指纹、撤销 tombstone 三项机制并入选定实现，七端点改指它，私有存储与三份辅助函数退役 | §八"三合一前提"闭环 |
+| `04c4a42e` | 记忆增强端点身份改取路由级门的返回值，7 处变更调用收回归属校验，既有测试伪造 `request.state.user` 的中间件同批去除 | 本域同根因第三命中点（详见 §十） |
 
 三处判据值得留字：
 
@@ -316,8 +317,66 @@ A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integrati
 `getattr(request.state, "user", None)`（同样无人写入），故该模块作用域恒 default、
 其 get/forget 一直是 agent-wide 口径。把身份接上去会让这些端点立刻开始拒绝跨用户操作，
 属功能语义变更，需单独判定后再改（改法与 §九第 2 行同型）。
+**→ 已于同日落地，见 §十（commit `04c4a42e`）；本段留作当时的判断记录。**
 
 复验口径：开放平台两套 + 外部 Agent 两套 + 管理器 S-19 防抖回归 **37 passed**；
 真 app 活体九步全绿（`nrv_` 前缀、幂等重放不再吐明文、两条账各自独立、
 撤销后列表归零、同请求重放 409）；A/B `tests/unit/api`+`tests/integration`
 122→123，唯一差集是 `test_media_frontend_contract` 那条预存顺序耦合 flake（单跑两次均绿）。
+
+---
+
+## 十、同根因第三命中点收口：记忆增强端点（commit `04c4a42e`）
+
+§九 末段留档的那条"同族未收紧"已在本批落地，同根因链至此三命中点全部闭环
+（`memory/` 域 → `agent_communication_api.py` → `openplatform_keys.py` → `memory_enhancement.py`）。
+
+**现行面（复算过，不是引用旧行号）**：`_require_memory_manager()` 读
+`getattr(request.state, "user", None)`，而该字段全仓无写入方——本批现复算
+`grep -rn 'state.user' neurova/` 除本模块 docstring 外零命中、
+`grep -rn 'state.user =' neurova/` 零命中。作用域因此恒回落 default，六条端点的
+**变更**调用又全部显式带 `agent_wide=True`（把三层隔离的第 2、3 层关掉），于是任何
+登录用户按 memory_id 都能软删/硬删/改写他人记忆。
+
+**它为什么长期不现形**：既有 `tests/unit/api/test_memory_enhancement_real_manager.py`
+的 fixture 挂了 `@app.middleware("http")` 自己往 `request.state.user` 塞值。
+测试替生产把那个没人写的字段补上，绿灯因此自证的是"伪造身份下的行为"。
+本批删除该伪造，并在守卫里钉住它不得复活（`test_existingFixtureForgeryIsGone`）。
+这是教义第 3 条"禁止绕过生产装配点"的一个具体形态：**伪造身份字段 = 绕过身份来源**。
+
+**改法与判据**（与 §六、§九第 2 行同型，不新造口径）：
+
+| 面 | 处置 |
+|---|---|
+| 身份 | 改取路由级 `Depends(get_current_user)` 的返回值；六条端点各补该依赖参数 |
+| 变更（7 处） | forget 软删 ×2、forget 硬删 ×1、update_memory ×4（strengthen / batch / import-merge / import-overwrite）收回归属校验 |
+| 读（3 处） | 存在性预检 `get_memory`、`get_stats`、`get_memories` 保持 agent-wide |
+| 取不到 manager | 仍显式 503，不回落任何进程内副本 |
+
+读侧保留 agent-wide 的理由与 §六 那条"可见性不外溢成处置权"完全一致，未放宽也未收紧。
+
+**证据**：红灯 4 条（生产文件单独 stash、只留新测试，`4 failed, 2 passed`；
+第 5 条红对着未改的既有测试文件跑出）→ 绿灯两文件 13 passed，连同 memory 域三条守卫共 33 passed。
+活体走的是真 uvicorn + 真 `create_app` + 真 JWT + 隔离 `NEUROVA_DATA_DIR`：
+修复前 bob 跨用户 forget 返回 200 且 alice 复读 `stage=forgotten`（记忆真被他人销毁）、
+批量返回 "Processed 1 memories, 0 errors"；修复后 404 / 401 / 批量 0 条，
+alice 本人 strengthen 与 forget 仍 200 且落库可见。
+A/B：`tests/unit/api` 15 failed ↔ 15 failed 逐行一致（passed 2036→2042 即本批 6 条守卫），
+`tests/integration` ERROR 集 15↔15 一致，FAILED 唯一差集为预存墙钟抖动
+`test_outbox_expired_event`（单跑 1 passed）。新增失败 0。
+守卫已入 `scripts/ci/protected_tests.txt`（转绿后方入，逐文件单跑 6 passed）。
+
+**两点判据值得留字**：
+
+1. **路由级门已存在 ≠ 端点拿得到身份**。`APIRouter(dependencies=[Depends(get_current_user)])`
+   只执行不返回，端点若要身份必须自己声明同名依赖（FastAPI 每请求缓存依赖结果，
+   不会双跑）。前两批的归属旁落都是栽在"门在、值没接过来"，而不是"没有门"。
+2. **反证守卫要钉代码形态，不钉词**。本模块与测试的注释里都会写出那个字段名
+   （为了说明它为什么不能用），`assert "state.user" not in src` 会自己把自己钉红；
+   改钉 `getattr(request.state, "user"` 与 `request.state.user =` 两种代码形态后
+   才既咬得住复活、又不被 prose 触发。
+
+**同批未做、留档**：本批只把本守卫入 CI 子集；§六/§七/§八/§九 落地的
+`test_memory_update_ownership.py`、`test_memory_route_authorization.py`、
+`test_agent_communication_identity.py`、`test_openplatform_key_ownership.py`
+仍在子集外（都逐文件单跑全绿）。是否整批收编属 CI 时长口径，未擅自扩大。
