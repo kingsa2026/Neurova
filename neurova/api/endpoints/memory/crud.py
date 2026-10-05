@@ -20,7 +20,6 @@ from .base import (
     AddMemoryRequest,
     UpdateMemoryRequest,
     _get_request_id,
-    _get_user_ids_from_token,
     get_memory_manager,
     logger,
     memory_to_dict,
@@ -231,27 +230,25 @@ async def get_memory(
     memory_id: str,
     agent_id: Optional[str] = None,
     req: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取指定记忆的详细信息
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
+        manager = get_memory_manager(agent_id, user)
 
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
-
-        # BUG-40: 使用 storage.get 替代搜索，提高效率
-        memory_data = manager.storage.get(memory_id)
+        # 读路径走 manager.get_memory：归属校验（P1-6）就在那一处收口。
+        # 原写法 `manager.storage.get(memory_id)` 读的 `MemoryManager._storage`
+        # 全仓零写入方，于是这条详情路由对归属者也恒 404，且绕过校验构成
+        # "按 id 匿名读任意记录"的潜伏面（取证见
+        # audit-reports/memory-isolation-2026-10-05.md）。
+        memory_data = manager.get_memory(memory_id)
         if not memory_data:
             raise APIError.not_found(f"记忆不存在: {memory_id}")
 
-        from neurova.cognitive_layers.memory_layer.models import Memory
-
-        target = Memory.from_dict(memory_data)
-
         return success_response(
-            data=memory_to_dict(target),
+            data=memory_to_dict(memory_data),
             message="获取成功",
             request_id=_get_request_id(req),
         )
@@ -331,11 +328,10 @@ async def update_memory(
         if not manager.update_memory(memory_id, **payload):
             raise APIError.not_found(f"记忆不存在: {memory_id}")
 
-        updated = manager.storage.get(memory_id)
-        from neurova.cognitive_layers.memory_layer.models import Memory
+        updated = manager.get_memory(memory_id)
 
         return success_response(
-            data=memory_to_dict(Memory.from_dict(updated)) if updated else None,
+            data=memory_to_dict(updated) if updated else None,
             message="更新成功",
             request_id=_get_request_id(None),
         )
@@ -359,7 +355,10 @@ async def delete_memory(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        success = manager.forget(memory_id, agent_wide=True)
+        # 不再传 agent_wide=True：那会把三层隔离的第 2、3 层显式关掉，
+        # 于是知道 id 的人（含无凭证请求）都能"遗忘"他人记忆。管理页口径若需要，
+        # 另开带 role 门的显式端点。
+        success = manager.forget(memory_id)
 
         if not success:
             raise APIError.not_found(f"记忆不存在: {memory_id}")

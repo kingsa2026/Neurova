@@ -16,7 +16,6 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     _get_request_id,
-    _get_user_ids_from_token,
     get_memory_manager,
     logger,
     router,
@@ -66,16 +65,13 @@ async def add_wm_turn(
     request: AddTurnRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     添加对话轮次到工作记忆
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         manager.wm_add_turn(request.role, request.content, request.metadata)
 
         return success_response(
@@ -96,16 +92,13 @@ async def get_wm_context(
     use_folded: Optional[bool] = Query(default=True, description="是否使用折叠状态"),
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取当前工作记忆上下文
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         context = manager.wm_get_context(max_turns, use_folded)
 
         return success_response(
@@ -125,16 +118,13 @@ async def compress_turn(
     request: CompressTurnRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     压缩单轮对话内容
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         compressed = manager.wm_compress_turn(request.content)
 
         return success_response(
@@ -154,16 +144,13 @@ async def cache_wm_plan(
     request: CachePlanRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     缓存执行计划到工作记忆
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         plan_id = manager.wm_cache_plan(request.task_description, request.steps, request.task_type, request.context)
 
         return success_response(
@@ -183,16 +170,13 @@ async def retrieve_wm_plan(
     request: RetrievePlanRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     从工作记忆检索相似的执行计划
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         plans = manager.wm_retrieve_plan(request.task_description, request.task_type, request.top_k)
 
         return success_response(
@@ -212,16 +196,13 @@ async def record_plan_result(
     request: RecordPlanResultRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     记录计划执行结果
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         manager.wm_record_plan_result(request.plan_id, request.success)
 
         return success_response(
@@ -240,16 +221,13 @@ async def record_plan_result(
 async def get_wm_stats(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取工作记忆的统计信息
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         stats = manager.wm_get_stats()
 
         return success_response(
@@ -268,16 +246,13 @@ async def get_wm_stats(
 async def clear_wm(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     清空当前工作记忆
     """
     try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+        manager = get_memory_manager(agent_id, user)
         manager.wm_clear()
 
         return success_response(
