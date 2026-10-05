@@ -33,8 +33,10 @@ def test_agent_init():
     print("=== 测试2: 测试 Agent 初始化 ===")
     from neurova.agent_core import Agent, AgentConfig
     from pathlib import Path
-    
-    workspace = Path('neurova/agents/kai/workspace')
+    import tempfile
+
+    # 落点走临时目录：硬编码 `neurova/agents/...` 会往源码树里长出运行时工作区
+    workspace = Path(tempfile.mkdtemp())
     config = AgentConfig(
         name='凯',
         agent_id='kai',

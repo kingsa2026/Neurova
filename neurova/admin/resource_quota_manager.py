@@ -38,7 +38,6 @@ DEFAULT_LIMITS: Dict[str, int] = {
     "max_file_size_bytes": 100 * 1024 * 1024,
     "max_private_skills": 20,
     "max_collab_projects": 5,
-    "max_api_calls_per_minute": 60,
     "max_concurrent_sessions": 5,
 }
 
@@ -52,7 +51,6 @@ _USAGE_TO_LIMIT: Dict[str, str] = {
     "file_size_bytes": "max_file_size_bytes",
     "private_skill_count": "max_private_skills",
     "collab_project_count": "max_collab_projects",
-    "api_call_count": "max_api_calls_per_minute",
     "concurrent_session_count": "max_concurrent_sessions",
 }
 
@@ -69,9 +67,8 @@ class ResourceUsage:
     file_size_bytes: int = 0
     private_skill_count: int = 0
     collab_project_count: int = 0
-    api_call_count: int = 0
     concurrent_session_count: int = 0
-    # 「每日」三个计数器（llm_call_count / llm_token_count / api_call_count）
+    # 「每日」两个计数器（llm_call_count / llm_token_count）
     # 的结算窗口 = 自然日 YYYY-MM-DD；空串 = 尚未结算，视为新窗口。
     # 必需是 dataclass 字段：旧实现的锚点 `_last_reset` 不是字段，from_dict 即丢，
     # 跨天结算根本无从判定，且它按「距今 86400 秒」滚动判定——不是每日语义。
@@ -88,7 +85,6 @@ class ResourceUsage:
     def reset_daily_usage(self) -> None:
         self.llm_call_count = 0
         self.llm_token_count = 0
-        self.api_call_count = 0
 
     def check_daily_reset(self, now: Optional[datetime.datetime] = None) -> bool:
         """本副本的「每日」计数是否还在今天；不在则归零并把窗口改到今天。
@@ -240,10 +236,6 @@ class ResourceQuotaManager:
         with self._lock:
             return self._check(user_id, "collab_project_count", "max_collab_projects")
 
-    def check_api_call_quota(self, user_id: str) -> Dict[str, Any]:
-        with self._lock:
-            return self._check(user_id, "api_call_count", "max_api_calls_per_minute")
-
     def check_concurrent_session_quota(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
             return self._check(user_id, "concurrent_session_count", "max_concurrent_sessions")
@@ -288,16 +280,6 @@ class ResourceQuotaManager:
 
     def decrement_private_skill_count(self, user_id: str) -> None:
         self._add(user_id, "private_skill_count", -1, floor=0)
-
-    def increment_api_call(self, user_id: str, count: int = 1) -> None:
-        self._add(user_id, "api_call_count", count, floor=0)
-
-    def reset_api_call(self, user_id: str) -> None:
-        self._add(user_id, "api_call_count", 0)
-        with self._lock:
-            usage = self._get_or_create_usage(user_id)
-            usage.api_call_count = 0
-            self._persist(usage)
 
     def increment_concurrent_session(self, user_id: str) -> None:
         self._add(user_id, "concurrent_session_count", 1)

@@ -17,7 +17,6 @@ class TestResourceUsageDataclass:
             file_size_bytes=1_000_000,
             private_skill_count=1,
             collab_project_count=0,
-            api_call_count=42,
             concurrent_session_count=1,
         )
         d = u.to_dict()
@@ -27,7 +26,6 @@ class TestResourceUsageDataclass:
         u2 = ResourceUsage.from_dict(d)
         assert u2.user_id == "u_1"
         assert u2.agent_count == 2
-        assert u2.api_call_count == 42
 
     def test_defaults_zero(self):
         from neurova.admin.resource_quota_manager import ResourceUsage

@@ -177,10 +177,10 @@ class Agent(ChatRuntimeMixin, TurnStateMixin, ModelSwitchMixin,
 ### Phase 4 — 记忆/认知装配残部 → `SubSystemContainer.init_memory`（策略 A，~173 行）
 
 - **迁出**：`_init_memory_modules`(62)、`_init_cognitive_graph`(92)、`_update_memory_temperature`(19)
-- **注意**：这三个方法**已被 `SubSystemContainer` 调用**（agent_core 576/584 行）；且 `_init_memory_modules` **被多个测试 patch**（`test_agent_chat_tracer_bullet.py`、`test_agent_neuHebb_integration.py`、`test_agent_minimal.py`、`test_data_flow_closed_loop.py`）
+- **注意**：这三个方法**已被 `SubSystemContainer` 调用**（agent_core 576/584 行）；且 `_init_memory_modules` **被多个测试 patch**（`test_agent_chat_tracer_bullet.py`、`test_agent_neuHebb_integration.py`、`test_data_flow_closed_loop.py`）
 - **手法**：逻辑移入 container 的 `init_memory` 域；Agent 上**保留同名转发方法**（patch 靠 `patch.object(Agent, ...)` 与 `patch('neurova.agent_core.Agent._init_memory_modules')`，MRO 命中即可）
-- **风险**：中高（装配顺序敏感 + patch 面广）→ 建议拆分后立刻跑 `tests/integration/test_agent_minimal.py`
-- **验收**：`tests/unit/agent/`、`tests/integration/test_agent_minimal.py`、`test_data_flow_closed_loop.py`
+- **风险**：中高（装配顺序敏感 + patch 面广）→ 建议拆分后立刻跑 `tests/unit/agent/`（原列为验收步骤的 `tests/integration/test_agent_minimal.py` 是 0 用例、顶层 `sys.exit` 的手工冒烟脚本，pytest 一收集就执行，已退役）
+- **验收**：`tests/unit/agent/`、`test_data_flow_closed_loop.py`
 
 ### Phase 5 — 循环检测包装层（策略 A，~12 行）
 

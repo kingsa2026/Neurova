@@ -102,7 +102,7 @@ class GlobalAuthMiddleware:
             return
 
         headers = _headers_dict(scope)
-        identity = _authenticate(headers)
+        identity = authenticateRequest(headers)
         if identity is not None:
             await self.app(scope, receive, send)
             return
@@ -147,10 +147,12 @@ def _headers_dict(scope) -> Dict[str, str]:
     return out
 
 
-def _authenticate(headers: Dict[str, str]) -> Optional[Dict]:
+def authenticateRequest(headers: Dict[str, str]) -> Optional[Dict]:
     """验证 Bearer JWT 或 X-Service-Token；有效返回身份，无效/缺失返回 None。
 
     复用 neurova.api.auth 契约（单一事实源），不在本模块重复实现。
+    公开契约：限流中间件也走这一份取身份——每请求只允许存在一条凭证解析路径，
+    再开一份就会重演 deps/auth/memory 三套 JWT 并存的口径分叉。
     """
     # 延迟导入：auth.py 较重，仅 enforce/shadow 校验时加载
     from neurova.api.auth import verify_access_token, service_token_matches

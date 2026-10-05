@@ -888,15 +888,28 @@ def _mirror_approval_notification(kind: str, payload: Dict[str, Any]) -> None:
         )
 
 
-def get_approval_manager(
-    workspace_path: str = ".", approval_level: ApprovalLevel = ApprovalLevel.SMART
-) -> ApprovalManager:
-    """获取全局审批管理器"""
+def get_approval_manager(approval_level: ApprovalLevel = ApprovalLevel.SMART) -> ApprovalManager:
+    """获取全局审批管理器。
+
+    落点唯一且从数据根解析：本工厂此前收 `workspace_path="."`，而进程级单例意味着
+    "谁先初始化谁的落点算数"——9 个调用点吃 CWD 默认（仓根 `.approval/`）、
+    `agent_core` 传 agent 工作区，同一份审批状态因此有两处物理存储且互为不可见。
+    路径参数已从签名移除：留着它，下一次又会被人顺手传成别的值。
+
+    实际落点 = `<数据根>/approval/.approval/{approvals.db,requests.json}`——内层
+    `.approval/` 由构造器按"工作区"约定拼接（类仍可被测试注入任意临时目录作为
+    workspace），改内层会连带破坏那些以 tmp 为工作区的用例。
+    """
     global _approval_manager
     if _approval_manager is None:
         with _am_lock:
             if _approval_manager is None:
-                manager = ApprovalManager(workspace_path, approval_level)
+                from neurova.core.data_root import dataPath
+
+                manager = ApprovalManager(
+                    str(dataPath("approval")),
+                    approval_level,
+                )
                 # G5-C：先接中继再暴露单例——否则第一条审批可能在"广播无人订阅"的
                 # 窗口里被批准，等待方永远醒不来（表现为会话卡到超时，而非报错）。
                 from neurova.security.approval_relay import installApprovalRelay

@@ -118,3 +118,57 @@ def test_quota_key_falls_back_to_client_ip_without_identity(app_with_limiter):
     client.get("/api/v1/notes/ping")
     keys = [call[0] for call in limiter.calls]
     assert keys == ["testclient"], "无身份时必须回退到 IP，不得塌缩成共享默认桶"
+
+
+def test_authenticated_username_becomes_the_quota_key(app_with_limiter, tmp_path, monkeypatch):
+    """带 Bearer 时必须按 username 计额。
+
+    组档（如访客 30/分）只有绑到用户身上才成立；键停在 IP 上，档位就还是装饰。
+    取 username 而非 user_id：`get_groups_for_user` 收的是登录名，而 token 里的
+    user_id/neuser_id 是数字账号 id（auth.py:258-263），喂错即静默查不到组。
+    """
+    app, limiter = app_with_limiter
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
+    from neurova.api.auth import create_access_token
+
+    token = create_access_token(
+        {"sub": "7", "username": "guest-alice", "user_id": "7", "neuser_id": "7", "role": "user"}
+    )
+    client = TestClient(app)
+
+    client.get("/api/v1/notes/ping", headers={"Authorization": f"Bearer {token}"})
+
+    keys = [call[0] for call in limiter.calls]
+    assert keys == ["guest-alice"], keys
+
+
+def test_identity_is_cached_within_ttl(app_with_limiter, tmp_path, monkeypatch):
+    """限流在每请求路径上，不能每次都做一遍 JWT 校验。"""
+    app, limiter = app_with_limiter
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
+    from neurova.api import auth as api_auth
+    from neurova.api.auth import create_access_token
+
+    token = create_access_token({"sub": "7", "username": "u-cache", "role": "user"})
+    checks = []
+    realVerify = api_auth.verify_access_token
+
+    def countingVerify(t):
+        checks.append(t)
+        return realVerify(t)
+
+    monkeypatch.setattr(api_auth, "verify_access_token", countingVerify)
+
+    client = TestClient(app)
+    for _ in range(3):
+        client.get("/api/v1/notes/ping", headers={"Authorization": f"Bearer {token}"})
+
+    assert len(checks) == 1, f"3 次请求解析了 {len(checks)} 次"
+
+
+def test_identity_resolver_is_single_sourced(app_with_limiter):
+    """身份解析不得再开第二份：限流层复用 global_auth 那份公开契约。"""
+    from neurova.api import global_auth
+
+    assert hasattr(global_auth, "authenticateRequest")
+    assert not hasattr(global_auth, "_authenticate"), "私有旧名须随公开化一并退掉"

@@ -733,10 +733,9 @@ class SubSystemContainer:
             # 审计 A6：必须走 get_approval_manager 单例工厂——原代码直接 new
             # 出第二个实例，与 tool_executor/API 消费的全局单例形成 split-brain
             # （两套 .approval 存储，审批状态互不可见）。
-            a.approval_manager = get_approval_manager(
-                workspace_path=str(a.config.workspace_path),
-                approval_level=ApprovalLevel.SMART,
-            )
+            # 落点同样收口：本处曾传 agent 工作区，而其余 9 个调用点吃 CWD 默认，
+            # 于是"实例唯一"了但"落点"仍取决于谁先初始化。工厂已不再收路径。
+            a.approval_manager = get_approval_manager(approval_level=ApprovalLevel.SMART)
         except Exception as e:
             logger.warning("审批管理器初始化失败: %s", e)
 
