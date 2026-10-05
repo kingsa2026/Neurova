@@ -203,3 +203,31 @@ GET/PUT 读回改走 `manager.get_memory`，DELETE 不再传 `agent_wide=True`�
 [8] bob DELETE -> 404       [9] 匿名 DELETE -> 404   （修复前：均 200）
 [11] alice 自己 PUT -> 200 data='ALICE-自己改的'      （修复前回显恒 null）
 ```
+
+---
+
+## 七、同根因第二命中点：外部 Agent 通信域（已扫荡，commit `806c6f38`）
+
+教义第 5 条要求点名一条断链后扫同契约的全部落点。本域原登记的说法是
+"`agent_communication_api.py` Bearer 解析异常被 `pass` 吞掉后一路落到 default 放行"——
+**可达性说重了，此处更正**：该 router 有路由级 `APIRouter(dependencies=[Depends(get_current_user)])`，
+实测无凭证与无效 token 都先被拦成 401。真正现行的是另一条同契约分叉：
+
+- `HTTPBearer` 对 scheme 大小写不敏感，`bearer <jwt>` 能过门；
+- 端点级第二份解析写 `authorization.startswith("Bearer ")`，认不下小写 → 落到
+  `{"user_id": "default"}`；
+- `auth["user_id"]` 是本域 api-keys / handshakes / external agents / messages 的**分区键**。
+
+活体证据（隔离数据根 + 真 create_app）：小写 `bearer` 签发的密钥在正常 `Bearer` 列表里
+不可见；单源化后同一探针两把密钥归到同一租户（`names=['k-a','k-b']`）。
+
+处置：删掉端点级 `_verify_api_key_or_token`，10 个端点复用路由级那道门的解析结果
+（FastAPI 按请求缓存，一处解析两处共享）；同批退役**不可达**的 api-key 认证分支
+（门先拦 401，且 `X-API-Key` 在本域零消费者——NeurUI 那处是 provider 出网配置、
+`channels/websocket.py` 是渠道自有鉴权头）与无人读取的 `auth_type` 字段。生产净 −23，
+A/B `tests/unit/api`+`tests/integration` 失败集合 137↔137 逐行一致。
+
+**留待产品裁的一条能力缺口**：`nk_` 密钥仍被签发/列举/吊销，但**不是可登录凭证**。
+若要外部 Agent 拿密钥登录，正确做法是改路由级那道门（"JWT 或 密钥"合一），
+而不是在本域再开第二条解析路径。本批把这一点写进模块 docstring，
+不再让"JWT Token或API Key"悬空承诺。
