@@ -59,14 +59,9 @@ def client(manager, monkeypatch):
 
     app = FastAPI()
 
-    @app.middleware("http")
-    async def _inject_user(request, call_next):
-        request.state.user = {
-            "neuser_id": "neuser-under-test",
-            "user_id": "user-under-test",
-        }
-        return await call_next(request)
-
+    # 身份只经真实依赖注入。原先这里挂了一个 `@app.middleware("http")` 往
+    # `request.state.user` 塞值——那个字段生产侧没人写，测试替生产把它补上，
+    # 于是"跨用户可变更"的洞在绿灯下长期不现形（见 test_memory_enhancement_ownership.py）。
     app.include_router(memory_enhancement.router, prefix="/v1/memory-enhancement")
     app.dependency_overrides[get_current_user] = lambda: {
         "username": "tester",

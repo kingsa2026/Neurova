@@ -96,25 +96,27 @@ class MemoryCategory(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _require_memory_manager(request: Request):
+def _require_memory_manager(user: Optional[Dict[str, Any]]):
     """取真 MemoryManager —— 唯一装配点，禁用影子兜底。
 
     与 `/v1/memory` 走同一函数：既保证 agent 解析口径一致，也保证
     `set_request_scope` 请求作用域注入生效（跨用户隔离不能靠端点自觉）。
 
-    已知缺陷（本篇登记未修，见 audit-reports/memory-isolation-2026-10-05.md）：
-    `request.state.user` 全仓**无人写入**（grep `state.user =` 零命中），所以这里
-    永远取到 None，作用域恒回落 default。本模块因此只能按 agent-wide 口径运作
-    （其 get/forget 早已如此），下面三处 update_memory 显式传 agent_wide=True
-    与该口径对齐——不是放宽，是把"事实上是 agent-wide"写成事实源。
-    真正的修法是给这些端点接上 `Depends(get_current_user_or_default)`。
+    身份入参来自路由级那道 `Depends(get_current_user)` 的返回值。这里原先读的是
+    `request.state.user`——**全仓没有任何地方写那个字段**（中间件只写
+    `state.request_id`），于是作用域恒回落 default，本模块所有变更端点事实上都在
+    跨用户操作（`audit-reports/memory-isolation-2026-10-05.md` §九 记的同根因第三
+    命中点；既有那份测试还用中间件伪造 `request.state.user` 把它遮住了，已一并去除）。
+
+    口径与 memory 域一致：管理页的**可见性**（列表/统计/导出/存在性预检）按 agent
+    全量，变更（forget / strengthen / batch / import 合并）一律走归属校验。
 
     取不到时**显式 503**，绝不静默回落到任何进程内副本 —— 假成功比报错更有害。
     """
     from neurova.api.endpoints.memory.base import get_memory_manager
 
     try:
-        manager = get_memory_manager(None, getattr(request.state, "user", None))
+        manager = get_memory_manager(None, user)
     except APIError as exc:
         raise HTTPException(
             status_code=503,
@@ -163,16 +165,17 @@ async def forget_memory(
     request: Request,
     memory_id: str,
     body: ForgetMemoryRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """遗忘记忆 - 真库软删（lifecycle_stage → forgotten）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
 
     # 先按管理页口径确认存在，以便区分"不存在"与"落库失败"
     existing = manager.get_memory(memory_id, agent_wide=True)
     if not existing:
         raise _notFound(memory_id)
 
-    if not manager.forget(memory_id, soft=True, agent_wide=True):
+    if not manager.forget(memory_id, soft=True):
         # 存在却在归属校验处被拒 = 越权，对外与不存在同口径，不泄漏归属信息
         logger.warning("forget 被拒绝（归属校验）: id=%s", memory_id)
         raise _notFound(memory_id)
@@ -196,9 +199,10 @@ async def strengthen_memory(
     request: Request,
     memory_id: str,
     body: StrengthenMemoryRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """强化记忆 - 真库抬高 importance（0-100 量纲）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
 
     existing = manager.get_memory(memory_id, agent_wide=True)
     if not existing:
@@ -210,7 +214,7 @@ async def strengthen_memory(
     before = float(before_raw) if isinstance(before_raw, (int, float)) else 50.0
     after = min(IMPORTANCE_MAX, before + boost * IMPORTANCE_SCALE)
 
-    if not manager.update_memory(memory_id, agent_wide=True, importance=after):
+    if not manager.update_memory(memory_id, importance=after):
         logger.warning("strengthen 落库失败: id=%s", memory_id)
         raise _notFound(memory_id)
 
@@ -227,9 +231,12 @@ async def strengthen_memory(
 
 
 @router.get("/categories", response_model=List[MemoryCategory])
-async def get_memory_categories(request: Request):
+async def get_memory_categories(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取记忆分类列表 —— 真库只读聚合（与 /v1/memory/stats 同源读数）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
 
     stats = manager.get_stats(agent_wide=True)
     by_category: Dict[str, int] = stats.get("by_category") or {}
@@ -262,9 +269,10 @@ async def get_memory_categories(request: Request):
 async def batch_memory_operation(
     request: Request,
     body: BatchMemoryOperationRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """批量操作记忆 —— 逐条落真库，失败逐条点名（不回退影子副本）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
     request_id = _get_request_id(request)
 
     results = []
@@ -273,7 +281,7 @@ async def batch_memory_operation(
     for memory_id in body.memory_ids:
         try:
             if body.operation == "forget":
-                if not manager.forget(memory_id, soft=True, agent_wide=True):
+                if not manager.forget(memory_id, soft=True):
                     errors.append({"memory_id": memory_id, "error": "Not found"})
                     continue
                 results.append({"memory_id": memory_id, "operation": "forget", "success": True})
@@ -288,13 +296,13 @@ async def batch_memory_operation(
                 before_raw = existing.get("importance")
                 before = float(before_raw) if isinstance(before_raw, (int, float)) else 50.0
                 after = min(IMPORTANCE_MAX, before + boost * IMPORTANCE_SCALE)
-                if not manager.update_memory(memory_id, agent_wide=True, importance=after):
+                if not manager.update_memory(memory_id, importance=after):
                     errors.append({"memory_id": memory_id, "error": "Update failed"})
                     continue
                 results.append({"memory_id": memory_id, "operation": "strengthen", "success": True})
 
             elif body.operation == "delete":
-                if not manager.forget(memory_id, soft=False, agent_wide=True):
+                if not manager.forget(memory_id, soft=False):
                     errors.append({"memory_id": memory_id, "error": "Not found"})
                     continue
                 results.append({"memory_id": memory_id, "operation": "delete", "success": True})
@@ -323,12 +331,13 @@ async def batch_memory_operation(
 @router.get("/export")
 async def export_memories(
     request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
     format: str = Query(default="json", description="导出格式: json/csv"),
     category: Optional[str] = Query(default=None, description="按分类筛选"),
     min_importance: Optional[float] = Query(default=None, description="最小重要性"),
 ):
     """导出记忆数据 —— 回读真库（读路径与 /v1/memory 同源）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
     request_id = _get_request_id(request)
 
     memories = manager.get_memories(category=category, agent_wide=True, limit=10000)
@@ -381,9 +390,10 @@ async def export_memories(
 async def import_memories(
     request: Request,
     body: ImportMemoriesRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """导入记忆数据 —— 经真 manager 写入路径落库（写入闭环）"""
-    manager = _require_memory_manager(request)
+    manager = _require_memory_manager(user)
     request_id = _get_request_id(request)
 
     imported = 0
@@ -424,13 +434,13 @@ async def import_memories(
                 if body.merge_mode == "merge":
                     merged = dict(payload)
                     merged.pop("content", None)  # 合并只补缺，不改写正文
-                    if not manager.update_memory(str(existing_id), agent_wide=True, **merged):
+                    if not manager.update_memory(str(existing_id), **merged):
                         errors.append(f"[{index}] {existing_id} 合并失败")
                         continue
                     updated += 1
                     continue
                 if body.merge_mode == "overwrite":
-                    if not manager.update_memory(str(existing_id), agent_wide=True, **payload):
+                    if not manager.update_memory(str(existing_id), **payload):
                         errors.append(f"[{index}] {existing_id} 覆盖失败")
                         continue
                     updated += 1
