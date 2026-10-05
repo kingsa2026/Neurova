@@ -1462,3 +1462,7 @@ tests/unit/llm/test_sampling_pin_receipt.py
 # T-20：model_adapter 整块退役的反向守卫——退役块不得复活、挂载表不得回流、生产源不得再引用其符号，
 # 且现役族表对六族模型仍推断出具体能力（防"退役把能力面删薄了"）。逐文件单跑 9 passed
 tests/unit/llm/test_no_parallel_vendor_capability_surface.py
+# 记忆域身份批（同根因第三命中点）：记忆增强端点的跨用户变更必须被归属校验拒绝，
+# 且身份只能来自那道门的返回值——既有测试曾用中间件伪造 request.state.user 把洞遮住。
+# 逐文件单跑 6 passed
+tests/unit/api/test_memory_enhancement_ownership.py
