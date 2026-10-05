@@ -32,6 +32,10 @@ class HealthStatusResponse(BaseModel):
     checks_count: int = 0
     healthy_count: int = 0
     unhealthy_count: int = 0
+    # 降级原因（与 CheckResultResponse 同字段名）。此前 `get_health_status` 已经在传
+    # `message=`，而模型没这个字段 → pydantic 默认 extra ignore 静默丢弃，调用方只看到
+    # status:"unknown"，分不清"检查器缺席"与"没注册任何检查"。
+    message: str = ""
 
 
 class CheckResultResponse(BaseModel):
