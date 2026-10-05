@@ -52,6 +52,14 @@ class TestHealthEndpoint:
         assert response.status_code == 200, response.text
         assert response.json()["status"], response.text
 
+    def test_recover_is_not_a_fake_success(self, client):
+        """`trigger_recovery` 自陈 `# TODO: 实现恢复逻辑`，却回 `success: true` +
+        `"Recovery triggered"`——调用方被告知恢复已发生，实际什么都没做（教义第 2 条
+        禁止的假成功）。未实现须以显式 501 + 点名原因暴露。"""
+        response = client.post("/api/v1/health/recover")
+        assert response.status_code == 501, response.text
+        assert "未实现" in response.json()["detail"], response.text
+
     def test_legacyBarePathsAreNotMounted(self, client):
         """挂载点单源反证：健康检查只经 `ENDPOINT_MODULES` 挂在 `/api/v1/health`。
         裸 `/health/checks` 一旦可达，说明 `app.py` 那组旁路 include_router 又长回来了

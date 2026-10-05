@@ -8,7 +8,7 @@ from __future__ import annotations
 - GET /v1/health/checks - 获取所有检查项
 - GET /v1/health/checks/{name} - 获取单个检查结果
 - POST /v1/health/checks/{name}/run - 手动执行检查
-- POST /v1/health/recover - 触发恢复
+- POST /v1/health/recover - 未实现，显式 501（见 trigger_recovery）
 - GET /v1/health/report - 获取详细健康报告
 """
 
@@ -53,24 +53,6 @@ class HealthReportResponse(BaseModel):
     healthy_count: int
     unhealthy_count: int
     timestamp: float
-
-
-class RecoveryResponse(BaseModel):
-    """恢复响应"""
-
-    success: bool
-    message: str
-    actions_taken: List[str] = []
-
-
-class RegisterCheckRequest(BaseModel):
-    """注册检查请求"""
-
-    name: str
-    check_type: str = "custom"
-    description: str = ""
-    timeout: float = 5.0
-    critical: bool = False
 
 
 def _get_health_checker():
@@ -176,12 +158,15 @@ async def get_health_report():
     return HealthReportResponse(**report)
 
 
-@router.post("/recover", response_model=RecoveryResponse)
+@router.post("/recover")
 async def trigger_recovery():
-    """触发系统恢复"""
-    # TODO: 实现恢复逻辑
-    return RecoveryResponse(
-        success=True,
-        message="Recovery triggered",
-        actions_taken=["No automatic recovery actions configured"],
+    """系统恢复未实现——以显式 501 点名，不再回 `success: true`。
+
+    原实现自陈 `# TODO: 实现恢复逻辑`，却返回 `success=True` + `"Recovery triggered"`
+    + `actions_taken=["No automatic recovery actions configured"]`：调用方被告知恢复
+    已发生，实际零动作（教义第 2 条禁止的假成功）。路由保留，将来实现落地即转 200。
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="系统恢复逻辑未实现：本端点无任何自动恢复动作，不返回假成功",
     )
