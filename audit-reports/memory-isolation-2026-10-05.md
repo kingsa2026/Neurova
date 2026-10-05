@@ -231,3 +231,62 @@ A/B `tests/unit/api`+`tests/integration` 失败集合 137↔137 逐行一致。
 若要外部 Agent 拿密钥登录，正确做法是改路由级那道门（"JWT 或 密钥"合一），
 而不是在本域再开第二条解析路径。本批把这一点写进模块 docstring，
 不再让"JWT Token或API Key"悬空承诺。
+
+> 该缺口已于同日按用户拍板闭合，见下面 §八。
+
+---
+
+## 八、凭证合一与密钥真相源收口（教义第 7 条流程记录，commit `c1c6c221`）
+
+用户拍板：门改为 JWT 与密钥合一，真相源 = `APIKeyManager`。第 7 条要求"先比后合"，
+按固定顺序留证。
+
+**① 对比优劣**（仓内当时有三处承担"签发一枚可撤销 API 密钥"）：
+
+- `agent_communication_api._api_keys` —— 进程内存字典；无验证消费方（那条分支被路由级
+  门先拦）；字段是 `APIKeyManager` 的子集（`revoked` ≡ `not is_active`）；
+  不可替代之处：**无**；重启即全体失效。
+- `api_key_manager.APIKeyManager` —— JSON 落盘（`callerPath` 走数据根）、DCL + RLock
+  单例、`atexit` flush、S-19 防抖落盘且有回归测试；方法面完整
+  （generate/validate/get_user_keys/get_agent_keys/update/revoke/delete）。
+- `openplatform_keys.py` —— 独立 JSON 落盘、原子写（temp + `os.replace`）、
+  创建幂等（`creation_request_id` + 意图指纹）、撤销 tombstone 防同请求重放复活。
+
+**② 取长补短**：`(1)` 并入 `(2)`——它没有 `(2)` 缺的能力，故不搬任何东西。
+`(3)` **本轮不动**：它带着 `(2)` 没有的三项能力（原子写 / 创建幂等 / 撤销 tombstone），
+按第 7 条"不许不比较就删掉弱者"，它不是弱者；要三合一必须先把这三项补进选定的那份。
+此前提登记在此，另因 `docs/资源型修复登记台账_2026-09-11.md` 明写"先定开放平台密钥真相源"，
+属未拍板事项。
+
+**③ 接通**：门 `get_current_user_or_api_key`（`auth.py`，与
+`get_current_user_or_service` 同族同规则：先 JWT，其次 `validate_key`，两者都不成立才
+401，**不回落 default**）；本域 15 处端点与路由级门全改指它；api-keys 的签发/列表/更新/
+撤销/删除与 `/routing/stats` 的密钥计数都改读真相源。
+
+**④ 退役清理**：删 `_api_keys` / `_generate_api_key` / `_hash_api_key` 与随之无用的
+`hashlib` 导入；docstring 不再声称"密钥目前不是可登录凭证"。
+
+行为变化两条，都写进了代码注释：
+
+- 密钥串不再有 `nk_` 前缀（管理器用 `secrets.token_urlsafe(36)`，key_id 前缀 `ak_`）；
+  前端只按字段展示，不依赖前缀（grep `nk_` 于 NeurUI 零命中）。
+- 未显式传 `expires_in_days` 的密钥按管理器的 `default_expiry_days=365` 过期，
+  而旧内存表是"永不过期"。这是选定那份的既有策略，不是本批新加的约束。
+
+证据：红灯 5 条（合一门不存在、`X-API-Key` 401、撤销后仍可用、单例重建后失效、
+内存表仍在）；域内测试 27 passed；变异复验——把 `/routing/stats` 的读侧改回旧表即
+`NameError` 让守卫变红（这条守卫正是我第一版漏改该处之后补的）；活体链路：
+
+```
+[1] JWT 签发 -> key_id=ak_faa72... expires_at=1822755742（365 天默认）
+[2] 只用密钥握手 -> 200        [3] 只用密钥发消息 -> 200
+    from_agent_id=['ext-agent-7'] user_id=['alice']   ← 密钥绑定的 agent 真正进入隔离键
+[4] 只用密钥读路由统计 -> 200 api_keys=1               ← 读写同源
+[5] api_keys.json 落盘 True   [6] 单例重建后同密钥仍 200（等价重启不失效）
+[7] JWT 撤销 -> 200           [8] 撤销后用该密钥 -> 401 "Invalid, revoked or expired API key"
+[9] 盘上状态 -> [{'id':'ak_faa72','is_active': False}]
+```
+
+A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integration`
+122 failed / 2486 passed ↔ 同数，失败集合逐行一致。生产净 +34（复用既有管理器，
+而非再造一份；去向见提交说明）。
