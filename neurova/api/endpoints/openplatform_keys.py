@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.logger import get_logger
@@ -125,10 +125,6 @@ def _find_by_request_id(uid: str, request_id: str) -> typing.Optional[dict]:
     return None
 
 
-def _get_uid(request) -> str:
-    return getattr(request.state, "user_id", "anonymous")
-
-
 def _hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
@@ -139,9 +135,13 @@ def _gen_key() -> tuple:
 
 
 @router.get("/")
-async def list_api_keys(request: Request, page: int = 1, size: int = 20):
+async def list_api_keys(
+    page: int = 1, size: int = 20,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         keys = [k for k in _KEYS_STORE.values() if k.get("user_id") == uid and not k.get("revoked")]
     keys.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -154,9 +154,13 @@ async def list_api_keys(request: Request, page: int = 1, size: int = 20):
 
 
 @router.post("/")
-async def create_api_key(body: CreateApiKeyRequest, request: Request):
+async def create_api_key(
+    body: CreateApiKeyRequest,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         # 幂等分支：同 creation_request_id 重放
         if body.creation_request_id:
@@ -200,9 +204,13 @@ async def create_api_key(body: CreateApiKeyRequest, request: Request):
 
 
 @router.get("/{key_id}")
-async def get_api_key(key_id: str, request: Request):
+async def get_api_key(
+    key_id: str,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         k = _KEYS_STORE.get(key_id)
     if not k or k.get("user_id") != uid:
@@ -211,9 +219,13 @@ async def get_api_key(key_id: str, request: Request):
 
 
 @router.put("/{key_id}")
-async def update_api_key(key_id: str, body: UpdateApiKeyRequest, request: Request):
+async def update_api_key(
+    key_id: str, body: UpdateApiKeyRequest,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         k = _KEYS_STORE.get(key_id)
         if not k or k.get("user_id") != uid:
@@ -230,9 +242,13 @@ async def update_api_key(key_id: str, body: UpdateApiKeyRequest, request: Reques
 
 
 @router.post("/{key_id}/revoke")
-async def revoke_api_key(key_id: str, request: Request):
+async def revoke_api_key(
+    key_id: str,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         k = _KEYS_STORE.get(key_id)
         if not k or k.get("user_id") != uid:
@@ -245,9 +261,13 @@ async def revoke_api_key(key_id: str, request: Request):
 
 
 @router.delete("/{key_id}")
-async def delete_api_key(key_id: str, request: Request):
+async def delete_api_key(
+    key_id: str,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         k = _KEYS_STORE.get(key_id)
         if not k or k.get("user_id") != uid:
@@ -262,9 +282,13 @@ async def delete_api_key(key_id: str, request: Request):
 
 
 @router.get("/{key_id}/usage")
-async def get_key_usage(key_id: str, request: Request):
+async def get_key_usage(
+    key_id: str,
+    user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     _ensure_loaded()
-    uid = _get_uid(request)
+    # 身份只来自路由级那道门的返回值（`request.state.user_id` 全仓无人写入）
+    uid = user.get("user_id", "")
     with _STORE_LOCK:
         k = _KEYS_STORE.get(key_id)
     if not k or k.get("user_id") != uid:
