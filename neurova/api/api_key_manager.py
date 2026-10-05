@@ -13,6 +13,7 @@ Agent API密钥管理模块
 import atexit
 import hashlib
 import json
+import os
 import secrets
 import threading
 import time
@@ -48,6 +49,14 @@ class APIKey:
     rate_limit: int = 1000
     metadata: Dict[str, Any] = field(default_factory=dict)
     key_prefix: str = ""  # 前8位，用于显示
+    # 以下五项自 openplatform_keys 的私有存储并入（教义第 7 条"取长补短"）：
+    # 那一份实现带这三样本管理器没有的机制——原子写、创建幂等、撤销 tombstone，
+    # 并入后两套密钥共用同一份实现，仓内不再各存一本账。
+    description: str = ""
+    usage_count: int = 0
+    creation_request_id: Optional[str] = None  # 客户端幂等键
+    intent_hash: str = ""  # 创建意图指纹（同幂等键不同意图 = 409）
+    revoked_at: Any = None
 
     def __post_init__(self):
         if isinstance(self.permissions, str):
@@ -101,6 +110,11 @@ class APIKey:
             "last_used_at": self._to_iso(self.last_used_at),
             "is_active": self.is_active,
             "metadata": self.metadata,
+            "description": self.description,
+            "usage_count": self.usage_count,
+            "creation_request_id": self.creation_request_id,
+            "intent_hash": self.intent_hash,
+            "revoked_at": self._to_iso(self.revoked_at),
         }
 
     @classmethod
@@ -110,11 +124,15 @@ class APIKey:
             "key_id", "agent_id", "user_id", "key_hash", "key_prefix", "name",
             "permissions", "rate_limit", "created_at", "expires_at",
             "last_used_at", "is_active", "metadata",
+            "description", "usage_count", "creation_request_id", "intent_hash",
+            "revoked_at",
         }
         filtered = {k: v for k, v in data.items() if k in known}
         filtered["created_at"] = cls._parse_time(filtered.get("created_at")) or time.time()
         filtered["expires_at"] = cls._parse_time(filtered.get("expires_at"))
         filtered["last_used_at"] = cls._parse_time(filtered.get("last_used_at"))
+        if "revoked_at" in filtered:
+            filtered["revoked_at"] = cls._parse_time(filtered["revoked_at"])
         return cls(**filtered)
 
 
@@ -130,7 +148,7 @@ class APIKeyManager:
     # S-19：validate_key 高频命中时每次全量 JSON 重写会放大 IO，改为脏标记 + 防抖。
     SAVE_DEBOUNCE_SECONDS = 30.0
 
-    def __init__(self, storage_path: Optional[Path] = None, key_length: int = 36, default_expiry_days: int = 365):
+    def __init__(self, storage_path: Optional[Path] = None, key_length: int = 36, default_expiry_days: int = 365, key_namespace: str = ""):
         """
         初始化API密钥管理器
 
@@ -138,10 +156,13 @@ class APIKeyManager:
             storage_path: 存储路径
             key_length: 密钥长度
             default_expiry_days: 默认过期天数
+            key_namespace: 密钥明文前缀（开放平台用 `nrv_`，agent 域留空）。
+                同一份实现按命名空间分区，不为区分产品线再写第二本密钥账。
         """
         self.storage_path = callerPath(storage_path, "api_keys.json")
         self.key_length = key_length
         self.default_expiry_days = default_expiry_days
+        self.key_namespace = key_namespace
 
         # 密钥存储
         self._keys: Dict[str, APIKey] = {}  # key_id -> APIKey
@@ -164,20 +185,74 @@ class APIKeyManager:
         logger.info("APIKeyManager 初始化，存储路径: %s", self.storage_path)
 
     def _load_keys(self):
-        """从存储加载密钥"""
+        """从存储加载密钥
+
+        两种形状都读：`{"keys": [...]}`（本管理器的写法）与**扁平 dict**
+        （openplatform_keys 私有存储的历史形状）。合并实现后部署侧已有的
+        `openplatform_keys.json` 不得变成孤儿文件——那等于把用户已发的密钥读丢。
+        损坏文件先备份留证再空载，禁止静默清空（教义第 2 条）。
+        """
         try:
-            if self.storage_path.exists():
+            if not self.storage_path.exists():
+                return
+            try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                backup = self.storage_path.with_name(
+                    f"{self.storage_path.name}.corrupt-{int(time.time())}"
+                )
+                try:
+                    self.storage_path.replace(backup)
+                    logger.error("API 密钥库损坏，已备份 %s 后空载: %s", backup, e)
+                except OSError:
+                    logger.error("API 密钥库损坏且备份失败: %s", e)
+                return
 
-                for key_data in data.get("keys", []):
+            if isinstance(data, dict) and "keys" in data:
+                records = data.get("keys") or []
+            else:
+                # 扁平形状：{key_id: {...}}；老记录缺 key_id 用其字典键补齐，
+                # 缺 agent_id（开放平台密钥本就没有 agent）用归属者占位
+                records = [
+                    {
+                        **value,
+                        "key_id": value.get("key_id") or key_name,
+                        "agent_id": value.get("agent_id") or value.get("user_id", ""),
+                    }
+                    for key_name, value in (data or {}).items()
+                    if isinstance(value, dict)
+                ]
+
+            for key_data in records:
+                # 逐条容错：一条坏记录不得把整库读丢（原实现是整段 try 包住，
+                # 任何一条抛异常就退回"零把密钥"，且只有一行 ERROR 可查）
+                try:
                     api_key = APIKey.from_dict(key_data)
-                    self._keys[api_key.key_id] = api_key
-                    self._key_hash_index[api_key.key_hash] = api_key.key_id
+                except Exception as e:  # noqa: BLE001 - 单条损坏不影响其余装载
+                    logger.error(
+                        "跳过无法解析的密钥记录 %s: %s", key_data.get("key_id") if isinstance(key_data, dict) else "?", e
+                    )
+                    continue
+                self._keys[api_key.key_id] = api_key
+                self._key_hash_index[api_key.key_hash] = api_key.key_id
 
-                logger.info("加载了 %s 个API密钥", len(self._keys))
+            logger.info("加载了 %s 个API密钥", len(self._keys))
         except Exception as e:
             logger.error("加载API密钥失败: %s", e)
+
+    def find_by_creation_request_id(self, user_id: str, request_id: str) -> Optional[APIKey]:
+        """按 (用户, 幂等键) 找回既有密钥——供端点判"重放 / 意图冲突 / tombstone"。
+
+        幂等决策属 HTTP 语义，留在端点；存储层只负责把这一份事实如实给出。
+        """
+        if not request_id:
+            return None
+        with self._lock:
+            for api_key in self._keys.values():
+                if api_key.user_id == user_id and api_key.creation_request_id == request_id:
+                    return api_key
+        return None
 
     def _save_keys(self):
         """保存密钥到存储"""
@@ -188,9 +263,12 @@ class APIKeyManager:
             # 准备数据
             data = {"keys": [key.to_dict() for key in self._keys.values()], "updated_at": time.time()}
 
-            # 写入文件
-            with open(self.storage_path, "w", encoding="utf-8") as f:
+            # 原子写：temp + os.replace（自 openplatform_keys 并入）。
+            # 直接覆盖写进程被中断会留下半截 JSON，下次启动就是"密钥全丢"。
+            tmp = self.storage_path.with_name(self.storage_path.name + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.storage_path)
 
             # 全量落盘完成，脏状态复位（S-19）
             self._dirty = False
@@ -245,6 +323,9 @@ class APIKeyManager:
         permissions: List[str],
         expires_in_days: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        description: str = "",
+        creation_request_id: Optional[str] = None,
+        intent_hash: str = "",
     ) -> Tuple[str, APIKey]:
         """
         生成API密钥
@@ -256,13 +337,17 @@ class APIKeyManager:
             permissions: 权限列表
             expires_in_days: 过期天数
             metadata: 元数据
+            description: 用途说明（开放平台口径）
+            creation_request_id: 客户端幂等键（重放由端点判 409/回放，见
+                `find_by_creation_request_id`）
+            intent_hash: 创建意图指纹，用于识破"同幂等键换意图"
 
         Returns:
             (原始密钥, APIKey对象)
         """
         with self._lock:
-            # 生成随机密钥
-            raw_key = secrets.token_urlsafe(self.key_length)
+            # 生成随机密钥（带命名空间前缀时，前缀即产品线标识）
+            raw_key = f"{self.key_namespace}{secrets.token_urlsafe(self.key_length)}"
 
             # 计算哈希
             key_hash = self._hash_key(raw_key)
@@ -290,6 +375,9 @@ class APIKeyManager:
                 created_at=time.time(),
                 expires_at=expires_at,
                 metadata=metadata,
+                description=description,
+                creation_request_id=creation_request_id,
+                intent_hash=intent_hash,
             )
 
             # 存储
@@ -336,6 +424,7 @@ class APIKeyManager:
 
             # 更新使用时间（S-19：仅内存态 + 脏标记，防抖落盘，不再每次全量重写 JSON）
             api_key.touch()
+            api_key.usage_count += 1
             self._schedule_save()
 
             return api_key
@@ -385,6 +474,8 @@ class APIKeyManager:
         name: Optional[str] = None,
         permissions: Optional[List[str]] = None,
         expires_at: Optional[float] = None,
+        is_active: Optional[bool] = None,
+        description: Optional[str] = None,
     ) -> Optional[APIKey]:
         """
         更新密钥
@@ -394,6 +485,8 @@ class APIKeyManager:
             name: 新名称
             permissions: 新权限
             expires_at: 新过期时间
+            is_active: 启用/停用（开放平台的 enabled 口径落在这里）
+            description: 新用途说明
 
         Returns:
             更新后的APIKey对象
@@ -411,6 +504,12 @@ class APIKeyManager:
 
             if expires_at is not None:
                 api_key.expires_at = expires_at
+
+            if is_active is not None:
+                api_key.is_active = bool(is_active)
+
+            if description is not None:
+                api_key.description = description
 
             self._save_keys()
 
@@ -433,6 +532,9 @@ class APIKeyManager:
                 return False
 
             api_key.is_active = False
+            # tombstone 留痕：撤销时间入档，行保留不物理删——物理删会让同一幂等键的
+            # 重放绕过"已撤销不得复活"这道检查（自 openplatform_keys 并入）
+            api_key.revoked_at = time.time()
             self._save_keys()
 
             logger.info("撤销API密钥: %s", key_id)
