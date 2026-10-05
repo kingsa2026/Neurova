@@ -160,8 +160,12 @@ class AgentFirewall:
                     data = json.load(f)
                 if "global" in data:
                     for k, v in data["global"].items():
-                        if hasattr(self._global_rules, k):
+                        # 合法键单源取 dataclass 字段：hasattr 会把方法与属性一并算作
+                        # 合法，且未知键过去被无声丢弃（改动静默 no-op 却报成功）。
+                        if k in GlobalRuleSet.__dataclass_fields__:
                             setattr(self._global_rules, k, v)
+                        else:
+                            logger.warning("防火墙配置含未知全局键，已忽略: %s", k)
                 if "users" in data:
                     for uid, udata in data["users"].items():
                         self._user_rules[uid] = UserRuleSet(user_id=uid, **udata)
@@ -192,11 +196,24 @@ class AgentFirewall:
         return self._global_rules.to_dict()
 
     def update_global_rules(self, updates: Dict[str, Any]) -> None:
-        """更新全局规则"""
+        """更新全局规则
+
+        先验后写：`updates` 里只要有一个未知键就整条拒绝（ValueError），不出现
+        "半生效 + 报成功"。此前这里是 `if hasattr` 逐个筛——未知键被无声丢弃，
+        函数照样落盘返回，REST 层紧接着记 "Global firewall rules updated"。
+        我接外部渠道额度时给的正是一个当时不存在的键名，低额度注入就这样 no-op 了。
+
+        合法键名单源 = `GlobalRuleSet` 的 dataclass 字段，不另立第二份清单。
+        """
+        unknown = sorted(k for k in updates if k not in GlobalRuleSet.__dataclass_fields__)
+        if unknown:
+            raise ValueError(
+                f"未知的全局规则键: {unknown}；合法键名取自 GlobalRuleSet 字段"
+            )
+
         with self._lock:
             for k, v in updates.items():
-                if hasattr(self._global_rules, k):
-                    setattr(self._global_rules, k, v)
+                setattr(self._global_rules, k, v)
             self._save_global()
             logger.info("Global firewall rules updated")
 
@@ -206,14 +223,19 @@ class AgentFirewall:
         return rules.to_dict() if rules else {}
 
     def update_user_rules(self, user_id: str, updates: Dict[str, Any]) -> None:
-        """更新用户规则"""
+        """更新用户规则（与 `update_global_rules` 同规则：先验后写，未知键点名拒绝）"""
+        unknown = sorted(k for k in updates if k not in UserRuleSet.__dataclass_fields__)
+        if unknown:
+            raise ValueError(
+                f"未知的用户规则键: {unknown}；合法键名取自 UserRuleSet 字段"
+            )
+
         with self._lock:
             if user_id not in self._user_rules:
                 self._user_rules[user_id] = UserRuleSet(user_id=user_id)
             rules = self._user_rules[user_id]
             for k, v in updates.items():
-                if hasattr(rules, k):
-                    setattr(rules, k, v)
+                setattr(rules, k, v)
             self._save_user(user_id)
 
     def get_effective_rules(self, user_id: str) -> Dict[str, Any]:
