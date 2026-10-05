@@ -341,7 +341,7 @@
 
 ## 6. 审计中发现的缺陷（不属简化，按教义第 1/2 条不得顺手改掉）
 
-1. **memory 域 fail-open JWT 旁路** ✅ —— `endpoints/memory/base.py:38-59` 手工剥 Bearer 头 + 直调 `verify_access_token`，except Exception: pass 后返回 ("default","default")。**实调点 35 处、横跨 6 个文件**（crud/metacognition/profile/tkg/working_memory），比初报面广。令牌解析失败即静默回落到**跨用户共享的 default 身份**。
+1. **memory 域身份旁路** ✅ —— `endpoints/memory/base.py:38-61` 手工剥 Bearer 头 + 直调 `verify_access_token`，except Exception: pass。**调用点 29 处**、横跨 5 个文件（crud 1 / metacognition 12 / profile 4 / tkg 4 / working_memory 8），初报"35 处"是原文出现数（29 调用 + 5 导入 + 1 定义），此处更正。回落面也比初报窄：带无效/过期 token 的请求早在 S-10 就被 `get_current_user_or_default` 挡成 401（`auth.py:541-556`），真问题是**与 `_user_identity()` 口径分叉**（存量 token 第二层键被写成 default）与 14 个**无鉴权依赖**端点。**更硬的三条越权面（PUT 无归属校验、DELETE 传 `agent_wide=True` 关掉两层、GET 读零写入的存储且无依赖）见 [`memory-isolation-2026-10-05.md`](memory-isolation-2026-10-05.md)，含图证与红灯清单。**
 2. **`self._logger` 幻影引用破坏回滚** ✅ —— `evolution/rsi/integration_manager.py:383/449` 用类内不存在的 `self._logger`（只有模块级 `logger:13`）。`:383` 位于 `:386` 回滚 setattr **之前**，抛出的 AttributeError 被 `:394` 吞掉 → "优化回执落盘失败时不回滚"，与注释承诺的安全语义正好相反。
 3. **匿名可达的空转上报端点** ✅ —— `api/app.py:614 POST /api/v1/frontend/errors` 在 `global_auth.py:48` 白名单内，收 JSON 后只 `logger.warning` 便返回 `{"status": "logged"}`，**从不调 error_logger**；客户端被告知"已记录"而实际未存，体未见长度上限。
 4. **现役链读内存假存根** ✅ —— `notifications.py:83/117` 读 `enhanced_users_api.py:73` 的 `_users_store = {}`。
@@ -402,7 +402,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 |---|---|---|---|
 | 1 | 全仓 38 处 try-pass 死块一类清扫；`git rm neurova/expected` | -152 | 各包 import 冒烟 + `tests/unit/core` |
 | 2 | 空壳退役：`utils`/`capabilities`/`builder`/`storage/covers`（20 图零写零读） | -8 + 1.3M 资源 | 目录存在性守卫 |
-| 3 | **缺陷批**：§6-1 memory fail-open、§6-2 回滚幻影、§6-5 缺 await、§6-4 存根断链 | ≈0 | **优先级高于一切简化**；每条先立红灯（跨用户隔离、落盘失败须回滚、碰撞须拒） |
+| 3 | **缺陷批**：§6-1 memory 越权面、§6-2 回滚幻影、§6-5 缺 await、§6-4 存根断链 | ≈0 | **优先级高于一切简化**；每条先立红灯（跨用户隔离、落盘失败须回滚、碰撞须拒）。§6-1 已拆出图证与五条红灯，见 [`memory-isolation-2026-10-05.md`](memory-isolation-2026-10-05.md) |
 | 4 | A 档"骨架恢复引入且从未接线"批：`llm/client.py`、`config_resolver`、`config_console`、`context_cache`、`context_persistence`、`voice_adapter`、顶层 `context.py`、`collaborate/{models,template}` | ≈2400 | 同批改 `test_refactor_imports.py` 兼容钉与两处 docs 悬空指向 |
 | 5 | A 档"换代残留"批（cognitive_layers 八件 + 三套 plan_orchestrator + 三套 ConfigManager） | ≈4200 | 逐条核 `protected_tests.txt`；**先裁睡眠三套归属**（A9 与 B5 有耦合） |
 | 6 | A 档"消费方被摘后残留"批：`plugins`、`media`、`language`、`cognitive` | ≈2700 | pyyaml 守卫须**改指**而非删 |
