@@ -361,6 +361,11 @@
 18. **安全实现里的假成功与弱加密** ✅ —— `emotion_adapter.py:46-82` ImportError 兜底成恒返 neutral/0.0 的 SimpleAnalyzer；`mcp_manager.py:248/259` 的 sse/http"连接"是自陈简化、`:213` Popen 绕开 shell 拒绝门；`secret_store_clean.py:79-103` 重复密钥流 XOR 且无 MAC。
 19. **懒建单例缺 DCL+RLock（§3 违规面）** ✅ —— `collaboration` 侧 15+ 处裸判 None 无锁；auth 侧 4 份用 Lock 非 RLock；`get_flow_orchestrator:846` 无锁；`manager.py` 17 个 `_ensure_*` 不在锁内；`channels/manager.py:81` 懒建单例同样缺 DCL。
 20. **`neurova/expected` 与同批的 `missing`** ✅ —— 均为 0 字节重定向残留，由 `98b5422a`「清理临时文件」引入（该提交还删了 471 行的 `missing_files.txt`）。
+21. **后台任务句柄丢弃 → 关停无法收敛（已修 `b5f80e9c`）** ✅ —— `_schedule_mcp_bootstrap`(`api/app.py:765`) 起的 stdio 会话，`MCPToolClient.disconnect_all`(`tool_layers/mcp_client.py:240`) **生产侧零调用方**（同批还发现 `execution_engine/mcp_manager.py:395` 的第二份 `disconnect_all` 同样零调用方，属 §3-A7 面）；portal 只能取消，而 stdio reader 取消不收敛 → `thread.join()` 永久阻塞，真进程侧是 npx 子进程泄漏。同根因第二命中点：`bootstrap_mcp` 的 `_bootstrapped` 只写不读，重复 startup 顶掉活会话。**修法**：关停先收敛任务再关会话（注册表 + 进程单例两个发现口），`_bootstrapped` 转为被读。
+22. **`POST /api/v1/health/recover` 假成功** ◑ —— `endpoints/health.py:179-187` 写 `# TODO: 实现恢复逻辑` 却回 `success: true` + `"Recovery triggered"`；全仓除该测试文件外零消费者（NeurUI/NeurovaHarmony 零命中）。按第 2 条应改诚实 `not_supported` 或退役，**属产品决策，未动**。
+23. **响应模型不接受的字段被静默丢弃** ◑ —— `endpoints/health.py:88-92` 给无 `message` 字段的 `HealthStatusResponse` 传 `message="Health checker not available"`，pydantic v2 默认 `extra='ignore'` → 降级原因不可观测，调用方只见 `status:"unknown"`。
+24. **进程级 agents 表是跨用例耦合面** ◑ —— `enhanced_memory_search_api.py:24` 自陈"唯一事实源是 `get_app_state()['agents']`"（`request.app.state.agents` 生产恒空），于是任何跑真实 startup 的用例都会把一个真 agent 写进该表，把同进程后续 18 条（nerf 11 + semantic-search 7）带倒。本轮在新用例内按原样回填所动全局以自证隔离；**表本身的单源化/用例隔离属预存脆弱面，未放宽**。
+25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -409,6 +414,18 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | — | **B 档 14 组需人裁** | ≈13,000 | **不列入任何删除批次**。需产品逐项裁"要不要这个能力"：要则接线，不要则连同文档与测试显式退役并改规则 |
 
 净 LOC 纪律：任一批次使总 LOC 为正（如 §10 外迁、C2 接线），须在提交说明逐条列明去向；测试代码不计入。
+
+### 9.1 已落地（审计之后的批次，按 commit 追）
+
+| commit | 内容 | 与本报告的关系 |
+|---|---|---|
+| `c34db0b4` | 外部 Agent 协议判据层落地并退役 `communication_protocol.py`（生产净 -466） | §3-A 档一条 + §5 平行判据收口 |
+| `dd97134c` | 审批账本与"每分钟额度"各收成一份（生产净 +132，去向逐条列明） | §5 共性三/四（并行额度源、双账本路径） |
+| `f4776229` | 协调层集成测试按现状重塑（两条死导入使整目录无法收集） | §6-16 幽灵测试一类的补面 |
+| `b5f80e9c` | MCP 会话关停根修（§6-21），integration 由 162s/含击杀 → 66s/零击杀 | §6-21 新增并已闭环 |
+| `587c57f6` | `/health` 集成用例改打真实挂载路径、四值放宽断言收成单一状态码 | §6-22 留档未处理 |
+
+上表未覆盖的序 1—11 仍按原序待点单。
 
 ## 10. 工作树状态
 
