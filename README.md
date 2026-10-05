@@ -2198,7 +2198,7 @@ Neurova/
 
 | 核心文档 | 内容 |
 |---------|------|
-| **[纪律与约定（最高优先级）](AGENTS.md)** | 修复教义 6 条 / 协作红线（中文交流 / 原创性 / 命名法 / 闭环）/ 代码规约 / 测试纪律 |
+| **[纪律与约定（最高优先级）](AGENTS.md)** | 核心原则 6 条 / 修复教义 7 条 / 协作红线（中文交流 / 原创性 / 命名法 / 闭环）/ 代码规约 / 测试纪律 |
 | [docs/CONTEXT.md](docs/CONTEXT.md) | 项目上下文文档（完整架构概览） |
 | [docs/03-user-guide/PRODUCT_GUIDE.md](docs/03-user-guide/PRODUCT_GUIDE.md) | 产品使用指南 |
 | [docs/02-api/API_REFERENCE.md](docs/02-api/API_REFERENCE.md) | API 参考文档（82 端点模块） |
