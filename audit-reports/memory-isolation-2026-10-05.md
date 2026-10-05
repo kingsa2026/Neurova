@@ -132,7 +132,8 @@ profile 4 / tkg 4 / working_memory 8）。
 一个批次能同时关掉 1/2/3/4/5：
 
 1. **删掉 `_get_user_ids_from_token` 整条旁路**，29 处调用点一律改用端点已从
-   `Depends(get_current_user_or_default)` 拿到的 `user`；缺依赖的 14 个端点补上依赖。
+   `Depends(get_current_user_or_default)` 拿到的 `user`；结构扫描实测 16 条路由无鉴权依赖
+   （初稿"14"是一条不严谨正则的产物），其中走旁路的 13 条补上依赖，另 3 条不取租户数据。
    身份解析单源（第 6 条），分叉与静默吞异常一起消失。
 2. **`manager.update_memory` 补归属校验**，与 `get_memory`/`forget` 同规则（P1-6 的补齐）。
 3. **DELETE 端点不再传 `agent_wide=True`**；管理页口径若要保留，另开显式管理端点并加 role 门。
@@ -160,3 +161,45 @@ profile 4 / tkg 4 / working_memory 8）。
   即：**本缺陷的实际暴露前提是默认 off**。是否把 memory 前缀纳入 enforce
   属产品/运维决策，未在本篇裁定。
 - 探针跑在隔离数据根，未与用户正在运行的 9527 实例交互。
+
+---
+
+## 六、落地情况（第四节那一批已实施，commit `63e8ae8e`）
+
+修法五项全部落地，生产净 **−64**：旁路 `_get_user_ids_from_token` 与死码 `resolve_user`
+删除，29 处调用点改为端点既有的 `user`（`profile.py` 两处三位置参 TypeError 同批消失），
+13 个缺依赖端点补上 `Depends(get_current_user_or_default)`，`update_memory` 补归属校验，
+GET/PUT 读回改走 `manager.get_memory`，DELETE 不再传 `agent_wide=True`。
+
+实施中新发现并登记两条（不在原清单）：
+
+1. **`request.state.user` 全仓无人写入** —— `memory_enhancement.py:110` 的
+   `_require_memory_manager` 正是从它取身份，于是该模块的作用域恒回落 default，
+   它的 get/forget 一直是 agent-wide 口径。本批只把 4 处 `update_memory` 显式写成
+   `agent_wide=True` 与既有口径对齐（不是放宽，是把事实写成事实源），
+   真正的修法是给这些端点接上依赖——**留待下一批**。
+2. **依赖参数名两套并存** —— 同包内 crud/metacognition/eki/emotion/pending/questions/
+   visibility 用 `user`，tkg/profile/working_memory 用 `current_user`。统一成 `user`
+   （包内多数）；改名前的第一次试跑就在 16 处踩出 `NameError: name 'user' is not defined`
+   ——这个坑本身就是"同一个概念两个名字"的代价。
+
+守卫改判一处（需要用户复核）：`tests/unit/api/test_memory_api_agent_wide.py` 原先把
+"列表/统计/高温/固化/删除都透传 agent_wide=True"钉成契约，其理由是**可见性**
+（登录用户 scope 不该把他人记忆从管理页抹掉）。删除不属于可见性理由能覆盖的范围，
+故本批把读侧保持 agent-wide、删侧收回归属校验，并把该守卫改为
+`test_delete_does_not_pass_agent_wide`。若产品确实要"管理页可跨用户删除"，
+正确形态是另开带 role 门的显式端点。
+
+复验口径：`tests/unit/api`+`tests/unit/cognitive_layers`+`tests/cognitive_layers`+
+`tests/test_memory` 27 失败 ↔ 27 失败逐行一致；`tests/integration`+`tests/api`
+新增失败 0（唯一差集是 `test_outbox_expired_event` 预存抖动反向翻转）；
+内存相关单测 + 新集成用例 94 passed。活体矩阵（隔离数据根 + 真 create_app）：
+
+```
+[2] alice 本人 GET -> 200 content='ALICE-原内容'     （修复前：404）
+[3] bob 跨用户 GET -> 404   [4] 匿名 GET -> 404
+[5] bob PUT -> 404          [6] 匿名 PUT -> 404      （修复前：均 200 且内容真被改）
+[7] alice 复读 content='ALICE-原内容'                （未被篡改）
+[8] bob DELETE -> 404       [9] 匿名 DELETE -> 404   （修复前：均 200）
+[11] alice 自己 PUT -> 200 data='ALICE-自己改的'      （修复前回显恒 null）
+```
