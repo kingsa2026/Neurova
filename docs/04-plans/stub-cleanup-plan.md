@@ -138,7 +138,9 @@
 - `computer_use/vision_lite.py`
 - `computer_use/vision_basic.py`
 - `computer_use/vision.py`
-- `api/communication_protocol.py`
+- ~~`api/communication_protocol.py`~~ ✅ 已退役（2026-10-05）：版本协商/载荷上限/在线态派生
+  抽为 `api/external_agent_protocol.py`，限流改接 `core/firewall` 的 externalAgent 档，
+  由 `endpoints/agent_communication_api.py` 消费；专用测试两份随文件一并退。
 - `api/api_key_manager.py`
 - `benchmark/__init__.py`
 - `auth.py` (根级)

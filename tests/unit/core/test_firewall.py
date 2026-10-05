@@ -21,7 +21,11 @@ class TestGlobalRuleSet:
 
         assert isinstance(rules.blocked_paths, list)
         assert len(rules.blocked_paths) > 0
-        assert rules.rate_limit_per_minute == 60
+        # 120 而非 60：这是 RateLimitMiddleware 此前硬编码在 add_middleware 调用里、
+        # 真正在执行的额度。限流收口到 firewall 后若保留那个从未被调用过的 60，
+        # 等于把人用流量当场收紧一半。
+        assert rules.rate_limit_per_minute == 120
+        assert rules.rate_limit_per_hour == 7200
         assert rules.max_input_length == 10000
         assert isinstance(rules.sensitive_output_patterns, list)
         assert isinstance(rules.llm_trust_domains, list)
