@@ -20,6 +20,21 @@ Issue #68 追加要求：项目配置中必须写明
 - `.cnb/settings.yml` 每个 NPC 角色 prompt（被 @ 即加载）
 - `/AGENTS.md`（引用方认定的权威文件，必须真实存在且可入库）
 - `CONTRIBUTING.md` 测试纪律节（人类贡献者入口）
+
+## 为什么判据从四条扩到六条，并另列核心原则六条（2026-10-05）
+
+工程要求的完整口径是「核心原则六条 + 修复教义六条」。实测漂移形态有两种，
+本守卫都要咬住：
+
+- **少列**：`CONTRIBUTING.md` 只抄了修复教义的前四条，第 5 条 live-verify 与
+  第 6 条 单一事实源在人类入口缺失——贡献者从该文件读不到这两条，
+  与"权威文件写了就等于写了"是同一类断点。
+- **只在一条通道里有**：核心原则六条此前只存在于 `.cnb/settings.yml` 的角色
+  prompt（NPC 被 @ 才加载），`/AGENTS.md` 与 `CONTRIBUTING.md` 一字未提。
+  按 §0 三落点同步纪律，只有一条通道必达的要求换一次入口即失效。
+
+判据用关键词命中而非整段逐字比对：三落点的行文本来不同（人设用第二人称、
+AGENTS.md 用条款体、CONTRIBUTING.md 用列表体），逐字比对会逼出第四份手抄。
 """
 import io
 import re
@@ -37,12 +52,25 @@ SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 CONTRIBUTING = PROJECT_ROOT / "CONTRIBUTING.md"
 GITIGNORE = PROJECT_ROOT / ".gitignore"
 
-# 纪律四要点 → 判定关键词（任一缺失即判要求没写全）
+# 纪律六要点 → 判定关键词（任一缺失即判要求没写全）
 REQUIRED_POINTS = {
     "TDD 红绿灯": ("红绿灯",),
     "放大视角": ("放大视角",),
     "修根因": ("根因",),
     "禁止抹除/规避表面报错": ("抹除",),
+    "live-verify 真实链路自证": ("live-verify", "真实链路"),
+    "单一事实源": ("单一事实源",),
+    "同功能实现先比后合再退役": ("取长补短",),
+}
+
+# 核心原则六条 → 判定关键词（动手与作答基线，与修复纪律并列的工程要求）
+CORE_PRINCIPLE_POINTS = {
+    "先理解再动手": ("先理解再动手",),
+    "结论先行": ("结论先行",),
+    "简洁表达": ("简洁表达",),
+    "基于事实": ("基于事实",),
+    "尊重仓库规范": ("尊重仓库规范",),
+    "知识库作答": ("知识库作答",),
 }
 
 
@@ -50,11 +78,16 @@ def _read(path: Path) -> str:
     return io.open(path, encoding="utf-8").read()
 
 
+def _missing(text: str, spec: dict) -> list:
+    return [point for point, keys in spec.items() if not any(k in text for k in keys)]
+
+
 def _missing_points(text: str) -> list:
-    return [
-        point for point, keys in REQUIRED_POINTS.items()
-        if not any(k in text for k in keys)
-    ]
+    return _missing(text, REQUIRED_POINTS)
+
+
+def _missing_core_principles(text: str) -> list:
+    return _missing(text, CORE_PRINCIPLE_POINTS)
 
 
 @pytest.fixture(scope="module")
@@ -80,7 +113,23 @@ class TestNpcConfigCarriesDiscipline:
         assert not bad, (
             "NPC 角色 prompt 未写明修复纪律（被 @ 时该角色不会知道这条要求）:\n  "
             + "\n  ".join(bad)
-            + "\n四要点：TDD 红绿灯 / 放大视角 / 修根因 / 禁止抹除或规避表面报错。"
+            + "\n七要点：TDD 红绿灯 / 修根因 / 放大视角 / 禁止抹除或规避表面报错 / "
+            "live-verify / 单一事实源 / 同功能实现先比后合再退役。"
+        )
+
+    def test_every_role_prompt_states_core_principles(self, roles):
+        bad = []
+        for role in roles:
+            name = (role or {}).get("name")
+            prompt = (role or {}).get("prompt") or ""
+            missing = _missing_core_principles(prompt)
+            if missing:
+                bad.append(f"{name}: 缺 {missing}")
+        assert not bad, (
+            "NPC 角色 prompt 未写明核心原则（被 @ 时该角色不会知道这条要求）:\n  "
+            + "\n  ".join(bad)
+            + "\n六条：先理解再动手 / 结论先行 / 简洁表达 / 基于事实 / "
+            "尊重仓库规范 / 知识库作答。"
         )
 
 
@@ -180,6 +229,41 @@ class TestAgentsDocIsAuthoritative:
         missing = _missing_points(text)
         assert not missing, f"/AGENTS.md 未写明: {missing}"
 
+    def test_agents_md_states_core_principles(self):
+        text = _read(AGENTS)
+        missing = _missing_core_principles(text)
+        assert not missing, (
+            f"/AGENTS.md 未写明核心原则: {missing}\n"
+            "权威文件缺一条，NPC 通道里那条就是平行体系的第二份定义（教义第 6 条）。"
+        )
+
+    def test_agents_md_cited_section_numbers_intact(self):
+        """章节编号被全仓按 `AGENTS.md §N` 引用，重编号即制造悬空引用。
+
+        反向钉住：新增章节只允许追加或落为不编号的引言节；把 §1 之后的节
+        顺移一位，本条先红——因为 `.cnb/settings.yml`（6 处「第 2 节」）、
+        `neurova/context/orchestrator.py`、`scripts/ci/npc_branch_cleanup.py`
+        等引用方不会跟着改。
+        """
+        text = _read(AGENTS)
+        cited = {
+            "0": "无人值守",
+            "1": "修复教义",
+            "2": "协作红线",
+            "3": "代码规约",
+            "4": "测试纪律",
+            "5": "提交纪律",
+            "6": "安全",
+        }
+        missing = [
+            f"## {n}. {title}" for n, title in cited.items()
+            if f"## {n}. {title}" not in text
+        ]
+        assert not missing, (
+            f"/AGENTS.md 被引用的章节编号发生位移，缺: {missing}\n"
+            "引用面现读数：grep -rn 'AGENTS.md §' .（含「第 N 节」写法）"
+        )
+
     def test_agents_md_has_numbered_repair_doctrine(self):
         """引用方按"修复教义第 N 条"编号引用，编号缺位则引用继续悬空。"""
         text = _read(AGENTS)
@@ -202,6 +286,24 @@ class TestContributingCarriesDiscipline:
         text = _read(CONTRIBUTING)
         assert "红绿灯" in text, (
             "CONTRIBUTING.md 测试纪律节未写 TDD 红绿灯——贡献者入口看不到这条要求。"
+        )
+
+    def test_contributing_states_all_six_points(self):
+        """人类入口少抄一条 = 该条对贡献者不存在（实测：曾只抄前四条）。"""
+        text = _read(CONTRIBUTING)
+        missing = _missing_points(text)
+        assert not missing, (
+            f"CONTRIBUTING.md 修复纪律节未写明: {missing}\n"
+            "AGENTS.md 有六条，入口只列四条就是手抄漂移；补齐或改为整节引用，"
+            "不许留半份。"
+        )
+
+    def test_contributing_states_core_principles(self):
+        text = _read(CONTRIBUTING)
+        missing = _missing_core_principles(text)
+        assert not missing, (
+            f"CONTRIBUTING.md 未写明核心原则: {missing}\n"
+            "工程要求的动手与作答基线，人类贡献者入口同样必达。"
         )
 
 
