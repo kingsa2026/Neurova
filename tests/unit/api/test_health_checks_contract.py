@@ -74,6 +74,25 @@ class TestHealthChecksContract:
         assert response.json()["check_type"] == "dependency"
 
 
+class TestHealthStatusDegradationIsObservable:
+    """checker 缺席的降级面：原因必须能被子列化出来，不能被模型静默丢弃"""
+
+    def test_reason_survives_when_checker_missing(self, monkeypatch):
+        """`health.py:88-92` 给没有 `message` 字段的 `HealthStatusResponse` 传
+        `message="Health checker not available"`，pydantic v2 默认 `extra='ignore'`
+        直接丢掉 → 调用方只看到 `status:"unknown"`，分不清"检查器缺席"与"没注册任何检查"。"""
+        app = FastAPI()
+        app.include_router(health_router, prefix="/health")
+        from neurova.api.endpoints import health as health_mod
+
+        monkeypatch.setattr(health_mod, "_get_health_checker", lambda: None)
+
+        response = TestClient(app).get("/health")
+
+        assert response.status_code == 200, response.text
+        assert response.json().get("message") == "Health checker not available", response.text
+
+
 class TestHealthCheckResultCarriesCheckType:
     """core 层：结果对象应携带产生它的检查的类型"""
 
