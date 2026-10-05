@@ -341,7 +341,7 @@
 
 ## 6. 审计中发现的缺陷（不属简化，按教义第 1/2 条不得顺手改掉）
 
-1. **memory 域身份旁路** ✅ —— `endpoints/memory/base.py:38-61` 手工剥 Bearer 头 + 直调 `verify_access_token`，except Exception: pass。**调用点 29 处**、横跨 5 个文件（crud 1 / metacognition 12 / profile 4 / tkg 4 / working_memory 8），初报"35 处"是原文出现数（29 调用 + 5 导入 + 1 定义），此处更正。回落面也比初报窄：带无效/过期 token 的请求早在 S-10 就被 `get_current_user_or_default` 挡成 401（`auth.py:541-556`），真问题是**与 `_user_identity()` 口径分叉**（存量 token 第二层键被写成 default）与 14 个**无鉴权依赖**端点。**更硬的三条越权面（PUT 无归属校验、DELETE 传 `agent_wide=True` 关掉两层、GET 读零写入的存储且无依赖）见 [`memory-isolation-2026-10-05.md`](memory-isolation-2026-10-05.md)，含图证与红灯清单。**
+1. **memory 域身份旁路（已修 `63e8ae8e`）** ✅ —— `endpoints/memory/base.py:38-61` 手工剥 Bearer 头 + 直调 `verify_access_token`，except Exception: pass。**调用点 29 处**、横跨 5 个文件（crud 1 / metacognition 12 / profile 4 / tkg 4 / working_memory 8），初报"35 处"是原文出现数（29 调用 + 5 导入 + 1 定义），此处更正。回落面也比初报窄：带无效/过期 token 的请求早在 S-10 就被 `get_current_user_or_default` 挡成 401（`auth.py:541-556`），真问题是**与 `_user_identity()` 口径分叉**（存量 token 第二层键被写成 default）。无鉴权依赖的路由按结构扫描实测为 **16 条**（初报"14"来自一条不严谨的正则草稿）：其中 13 条同时走旁路（本批已补依赖并单源化），另 3 条（`/emotion/types`、`/{agent_id}/metacognition`、`/{agent_id}/metacognition/stats`）不取租户数据，判据外留档。**三条更硬的现行越权面（PUT 无归属校验、DELETE 传 `agent_wide=True` 关掉两层、GET 读零写入的存储且无依赖）已同批根修，图证、A/B 与一处守卫改判说明见 [`memory-isolation-2026-10-05.md`](memory-isolation-2026-10-05.md) §六。**
 2. **`self._logger` 幻影引用破坏回滚** ✅ —— `evolution/rsi/integration_manager.py:383/449` 用类内不存在的 `self._logger`（只有模块级 `logger:13`）。`:383` 位于 `:386` 回滚 setattr **之前**，抛出的 AttributeError 被 `:394` 吞掉 → "优化回执落盘失败时不回滚"，与注释承诺的安全语义正好相反。
 3. **匿名可达的空转上报端点** ✅ —— `api/app.py:614 POST /api/v1/frontend/errors` 在 `global_auth.py:48` 白名单内，收 JSON 后只 `logger.warning` 便返回 `{"status": "logged"}`，**从不调 error_logger**；客户端被告知"已记录"而实际未存，体未见长度上限。
 4. **现役链读内存假存根** ✅ —— `notifications.py:83/117` 读 `enhanced_users_api.py:73` 的 `_users_store = {}`。
@@ -426,6 +426,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `587c57f6` | `/health` 集成用例改打真实挂载路径、四值放宽断言收成单一状态码 | §6-22 留档未处理 |
 | `212d855c` | `/v1/health/recover` 假成功收成显式 501，删 `RecoveryResponse` + 零引用的 `RegisterCheckRequest`（生产净 -15） | §6-22 闭环 |
 | `d8f86dcd` | `/v1/health` 降级原因补进响应模型（原被 pydantic `extra ignore` 丢弃，生产净 +4） | §6-23 闭环 |
+| `63e8ae8e` | memory 域身份单源化 + 三条 by-id 路由回到归属校验（生产净 **-64**；§9 序 3 缺陷批的 memory 条） | §6-1 闭环，含一处守卫改判 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
