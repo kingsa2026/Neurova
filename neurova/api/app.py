@@ -1235,6 +1235,15 @@ def create_app(
     """
     global _app_state, _app_instance
 
+    # Proactor accept 守护（启动层装配）：Windows 上客户端在 accept 完成的瞬间
+    # 异常断开（RST）会让 CPython 把监听套接字整只关掉（WinError 64/995，
+    # 实测 2026-10-06 17:51 logs/server.log——进程存活但拒绝一切新连接）。
+    # 所有 uvicorn 服务入口都汇经 create_app，在此统一装配一次即可；幂等，
+    # 非 Windows 无操作。
+    from neurova.core.proactor_accept_guard import installProactorAcceptGuard
+
+    installProactorAcceptGuard()
+
     # 单例模式（审计 P2-H6：检查在锁内完成——原锁外 check-then-act 模式
     # 脆弱；CPython 下良性但不应依赖实现细节）
     with _state_lock:
