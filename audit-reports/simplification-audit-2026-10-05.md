@@ -365,7 +365,9 @@
 22. **`POST /api/v1/health/recover` 假成功（已修 `212d855c`）** ✅ —— `endpoints/health.py:179-187` 写 `# TODO: 实现恢复逻辑` 却回 `success: true` + `"Recovery triggered"`；全仓除该测试文件外零消费者（NeurUI/NeurovaHarmony 零命中）。已收成显式 501 + 点名原因（路由保留），并同批删掉失去消费者的 `RecoveryResponse` 与本就零引用的 `RegisterCheckRequest`。
 23. **响应模型不接受的字段被静默丢弃（已修 `d8f86dcd`）** ✅ —— `endpoints/health.py:88-92` 给无 `message` 字段的 `HealthStatusResponse` 传 `message="Health checker not available"`，pydantic v2 默认 `extra='ignore'` → 降级原因不可观测，调用方只见 `status:"unknown"`。字段已补进模型（与同文件 `CheckResultResponse.message` 同名同默认值，不另造口径）。
 24. **进程级 agents 表是跨用例耦合面** ◑ —— `enhanced_memory_search_api.py:24` 自陈"唯一事实源是 `get_app_state()['agents']`"（`request.app.state.agents` 生产恒空），于是任何跑真实 startup 的用例都会把一个真 agent 写进该表，把同进程后续 18 条（nerf 11 + semantic-search 7）带倒。本轮在新用例内按原样回填所动全局以自证隔离；**表本身的单源化/用例隔离属预存脆弱面，未放宽**。
-25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。
+25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。后续单跑三次全绿，目录跑时仍偶发翻转。
+26. **落盘锚点接受非路径对象并在进程 CWD 静默建塔（已修 `a9170fa9`）** ✅ —— `MagicMock` 实现了 `__fspath__`，故 `Path(mock)` 能过类型检查、其 repr 被 Windows 拆成相对目录，随后 `mkdir(parents=True)` + 写盘**全部成功**，只在 `except OSError` 留一行 debug；仓库根实际长出过 `MagicMock/SkillService().skills_dir/<id>/.lifecycle_state.json`。同契约三命中点（`skill_lifecycle.run_sweep_if_due`、`ConsolidationPlanStore.__init__`、`SkillService.__init__`）现统一收到 `data_root.require_data_path`。**读码新发现**：判据必须落在**公开入口**——放在 `_state_file()` 那层会被 `_load_last_run` 的 `except ValueError` 吞成 "last=0"，非法路径照样落盘。
+27. **跑测卫生三件（本批取证时发现，均预存）** ◑ —— ① `tests/unit/evolution/eval/`（`test_heldout_isolation.py`、`test_history_*`）挂死，30s 全局 timeout 直接 kill 整场，该目录跑不通只能逐文件；② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR 触发 `Interrupted: 1 error during collection`，使 `pytest tests/` 整仓无法起跑；③ `tests/unit/planning/__pycache__/__init__.cpython-312.pyc` 处于**被跟踪**态，跑一次测试即产生 diff——与 AGENTS.md §4"跑测产物不得被放行"相冲（`TestProtectedSubsetEntriesAreTracked` 只双向钉条目，未覆盖此类历史入库 .pyc）。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -432,6 +434,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `cf684596` | firewall 未知规则键先验后写、点名拒绝；合法键名单源取 dataclass 字段（净 +22） | 假成功族：静默 no-op 却报成功 |
 | `7842ecb9` | 开放平台密钥归属改取那道门（`request.state.user_id` 全仓无人写入 → 全员同落 anonymous 桶，互相可撤） | 与 §6-1 同根因第三命中点 |
 | `94af885f` | 开放平台私有密钥存储并入 `APIKeyManager`，三项机制（原子写/创建幂等/tombstone）先补短再合并后退役（净 +83） | 教义第 7 条：密钥实现三合一 |
+| `04c4a42e` | 记忆增强端点身份回到那道门、7 处变更收回归属校验，并去除既有测试伪造 `request.state.user` 的中间件（净 +10） | §6-1 同根因第三命中点，详见 memory-isolation §十 |
+| `a9170fa9` | 落盘锚点收成绝对路径单源（`data_root.require_data_path` 接三处：sweep 入口 / 计划仓 / 服务构造），mock 与相对串不再于进程 CWD 静默建塔（净 +32） | §6-26 新增并根修 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
