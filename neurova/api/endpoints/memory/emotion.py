@@ -228,7 +228,9 @@ async def get_memories_by_emotion(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        memories = manager.get_memories_by_emotion(emotion=emotion_type, limit=limit)
+        memories = manager.get_memories_by_emotion(
+            emotion=emotion_type, limit=limit, min_intensity=min_score
+        )
 
         return success_response(
             data={
