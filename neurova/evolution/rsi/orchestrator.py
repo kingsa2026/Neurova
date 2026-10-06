@@ -500,6 +500,9 @@ class RSIOrchestrator:
         if roi_readout is not None:
             self.metrics.record_metric(RSIMetrics.RSI_CONVERGENCE_ROI, float(roi_readout))
         self._refresh_experience_metrics()
+        # §6-4(2026-10-06):规范指标快照追加进观测审计流(时序留痕;
+        # 未挂载零 IO,失败只记日志——观测面故障不阻断迭代)
+        self._persist_metrics_snapshot()
 
         # 7. P0-A3 + 工单 009：自动通道失效（失明/发散/振荡下行/真 ROI 非正）时
         # 升级给 SelfImprovementProposer。roi 一并进判据，否则"花了成本零产出"
@@ -591,6 +594,16 @@ class RSIOrchestrator:
             "phase_verdict": phase_verdict,
             "metrics": self.metrics.get_dashboard_data(),
         }
+
+    def _persist_metrics_snapshot(self) -> None:
+        """§6-4:规范指标快照落盘(挂载点见 result_summary.attach_persistence)。"""
+        try:
+            from .result_summary import record_metrics_snapshot
+
+            record_metrics_snapshot(
+                self.metrics.get_dashboard_data(), agent_id=self.agent_id)
+        except Exception as e:  # noqa: BLE001 - 观测面故障不阻断迭代
+            logger.debug("指标快照落盘失败: %s", e)
 
     def _persist_rsi_phase(self, new_phase: int) -> bool:
         """把自动晋升的结论写回治理设置（工单 005）。
