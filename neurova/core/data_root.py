@@ -48,6 +48,23 @@ def get_data_root() -> Path:
     return target
 
 
+def require_data_path(value, what: str = "数据路径") -> Path:
+    """落盘锚点必须是绝对路径 —— 判据与 `get_data_root()` 同源，只此一处。
+
+    为什么要在**消费入口**挡：`MagicMock` 实现了 `__fspath__`，`Path(mock)` 因此能过
+    类型检查，把它的 repr（`<MagicMock name='SkillService().skills_dir' id='...'>`）
+    拆成相对目录；后续 `mkdir(parents=True)` 就在**进程 CWD 静默建塔写盘**，只在
+    `except OSError` 里留一行 debug。相对字符串是同一根因的另一副面孔。
+    """
+    target = Path(value).expanduser()
+    if not target.is_absolute():
+        raise ValueError(
+            "%s 必须是绝对路径，收到 %r——相对路径会让数据落点随进程 CWD 漂移，"
+            "这正是散落污染的成因。" % (what, value)
+        )
+    return target
+
+
 def get_agent_data_dir(agent_id: str = "") -> Path:
     """单个 agent 的数据目录（agent_id 空值回落 default）。
 
