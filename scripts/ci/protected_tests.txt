@@ -1466,3 +1466,7 @@ tests/unit/llm/test_no_parallel_vendor_capability_surface.py
 # 且身份只能来自那道门的返回值——既有测试曾用中间件伪造 request.state.user 把洞遮住。
 # 逐文件单跑 6 passed
 tests/unit/api/test_memory_enhancement_ownership.py
+# 落盘锚点契约：skills_dir 非绝对（MagicMock 的 __fspath__ / 相对串）必须显式拒绝，
+# 且拒绝前不得在进程 CWD 建塔写盘（仓库根曾出现 MagicMock/…/.lifecycle_state.json）。
+# 逐文件单跑 7 passed
+tests/unit/evolution/test_skills_dir_absolute_anchor.py

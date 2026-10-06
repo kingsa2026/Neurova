@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
+from neurova.core.data_root import require_data_path
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -191,11 +192,17 @@ def run_sweep_if_due(
     """到期才扫并更新状态;未到期返回 None。
 
     全新安装的首个 tick 绝不动技能库。
+
+    `skills_dir` 在入口即收口为绝对路径锚点：判据取自 `data_root.require_data_path`
+    （与 `NEUROVA_DATA_DIR` 同一口径），非绝对一律显式 ValueError。放在**这里**而不是
+    `_state_file()`，是因为 `_load_last_run` 的 `except ValueError` 会把那里的拒绝吞成
+    "last=0"，于是非法路径照样被 seed 落盘。
     """
+    skills_dir = require_data_path(skills_dir, "skills_dir（生命周期状态落盘锚点）")
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    last = _load_last_run(Path(skills_dir))
+    last = _load_last_run(skills_dir)
     if last == 0:
-        _save_last_run(Path(skills_dir), now_ms)
+        _save_last_run(skills_dir, now_ms)
         logger.debug("生命周期扫描首次 seed, 延迟一个周期")
         return None
     if now_ms - last < interval_hours * 3_600_000:

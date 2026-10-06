@@ -25,6 +25,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from neurova.core.data_root import require_data_path
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -398,9 +399,15 @@ class ConsolidationPlanStore:
     """合并计划落盘仓：待审批件（非技能库改动），有界 + 原子写。"""
 
     def __init__(self, skills_dir, filename: str = ".consolidation_plans.json"):
-        from pathlib import Path
+        """锚点在构造处收口：`skills_dir` 必须是绝对路径。
 
-        self.path = Path(skills_dir) / filename
+        本仓有 6 个生产调用点把 `service.skills_dir` 直接递进来。真 `SkillService`
+        取 `get_data_root()`（恒绝对），所以非绝对值只可能是外部注入（mock / 手传相对
+        串）——那种情况下原先是 `upsert` 里 `mkdir(parents=True)` 在进程 CWD 静默建塔
+        写盘，只在 `except OSError` 留一行 debug。判据与 `run_sweep_if_due` 同一处
+        （`data_root.require_data_path`），不在本模块另抄一份。
+        """
+        self.path = require_data_path(skills_dir, "skills_dir（合并计划落盘锚点）") / filename
 
     def load(self) -> list[dict]:
         import json
