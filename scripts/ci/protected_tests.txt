@@ -1470,3 +1470,7 @@ tests/unit/api/test_memory_enhancement_ownership.py
 # 且拒绝前不得在进程 CWD 建塔写盘（仓库根曾出现 MagicMock/…/.lifecycle_state.json）。
 # 逐文件单跑 7 passed
 tests/unit/evolution/test_skills_dir_absolute_anchor.py
+# 仓库根污染守卫：逐用例快照根目录顶层条目，新增即红并点名肇事用例。
+# 判据走行为（子进程探针真造污染），不钉 pytest 内部属性——pytest 9 已把夹具对象换成
+# FixtureFunctionDefinition，钉属性下次升级即碎。逐文件单跑 4 passed（约 12s，含 3 次嵌套跑测探针）
+tests/unit/test_repo_root_pollution_guard.py
