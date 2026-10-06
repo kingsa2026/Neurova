@@ -64,6 +64,23 @@ def _carries_no_evidence(signals: Dict[str, Any]) -> bool:
     return isinstance(verdict, dict) and verdict.get("state") == GateVerdict.STATE_UNEVIDENCED
 
 
+def _e2e_gain_from_evals(eval_before: Any, eval_after: Any) -> Optional[float]:
+    """P1-2:e2e 标尺的并列增益读数。
+
+    两侧都 ``measured`` 才有值;任一侧缺读数/未量出 → None —— 诚实三态,
+    不得兜底 0.0(与 gain 的 evidence 门同一口径)。
+    """
+    before = eval_before.get("e2e") if isinstance(eval_before, dict) else None
+    after = eval_after.get("e2e") if isinstance(eval_after, dict) else None
+    if not (isinstance(before, dict) and isinstance(after, dict)):
+        return None
+    if before.get("state") != "measured" or after.get("state") != "measured":
+        return None
+    b, a = before.get("score"), after.get("score")
+    if b is None or a is None:
+        return None
+    return round(float(a) - float(b), 6)
+
 
 def _ratchet_candidates_from_settings() -> list:
     """棘轮每轮候选数从 evolution_settings 读(§6-3 收口 2026-10-06)。
@@ -237,12 +254,25 @@ class RSIOrchestrator:
             self._last_eval_outcome = None
             return self._measure_performance_from_signals()
 
+        # P1-2(2026-10-06):端到端任务标尺与 harness 分数**并列呈报**——
+        # 重放工具窗口的真实结局流,量"历史成功工具在排名中的对齐度"。
+        # 它是观测面不是判据:不参与 gain 计算与回滚判定。
+        e2e: Optional[Dict[str, Any]] = None
+        try:
+            from .task_yardstick import measure_tool_selection
+
+            e2e = measure_tool_selection(
+                self.integration_manager._systems.get("tool_memory"))
+        except Exception as e2e_err:  # noqa: BLE001 - 标尺故障不影响主度量
+            logger.debug("端到端任务标尺测量失败: %s", e2e_err)
+
         self._last_eval_outcome = {
             "score": outcome.get("score"),
             "state": outcome.get("state"),
             "evidenced_cases": outcome.get("evidenced_cases"),
             "blind_cases": outcome.get("blind_cases"),
             "cases": outcome["cases"],
+            "e2e": e2e,
         }
         if outcome.get("score") is None:
             # 度量失明：给出信号估算值供日志与降级读数使用，
@@ -341,6 +371,11 @@ class RSIOrchestrator:
         attempted = False
         gain_evidenced = False
         gain = 0.0
+        # eval 读数随分支赋值,但返回体无条件引用——必须在此初始化,
+        # 否则"候选过闸却全部应用失败"(applied_count==0)一路 NameError
+        # (潜伏崩溃,test_task_yardstick.py 随 P1-2 同批钉住)。
+        eval_before: Optional[Dict[str, Any]] = None
+        eval_after: Optional[Dict[str, Any]] = None
         # 回滚判据要读 roi：取**本轮记数之前**的成本核算读数（本轮增益还没进
         # 历史，判的是"走到这一步为止"的累积读数）。没有成本记录 → None，
         # 判据按"没测到"处理，不塞 0。
@@ -548,6 +583,8 @@ class RSIOrchestrator:
             "applied_count": applied_count,
             "gain": gain,
             "eval": {"before": eval_before, "after": eval_after},
+            # P1-2:e2e 标尺增益(并列读数;任一侧未量出即 None,不折算 0)
+            "e2e_gain": _e2e_gain_from_evals(eval_before, eval_after),
             "escalation": escalation,
             "phase_advanced": phase_advanced,
             "phase_persisted": phase_persisted,
