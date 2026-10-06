@@ -61,7 +61,7 @@ async def list_pending_memories(
         raise
     except Exception as e:
         logger.exception("待确认记忆清单失败: %s", e)
-        raise APIError(ErrorCodes.INTERNAL, f"待确认记忆清单失败: {str(e)}") from e
+        raise APIError(ErrorCodes.INTERNAL_ERROR, f"待确认记忆清单失败: {str(e)}") from e
 
 
 @router.get("/pending/decisions", summary="待确认记忆裁决历史")
@@ -84,7 +84,7 @@ async def list_pending_decisions(
         raise
     except Exception as e:
         logger.exception("裁决历史查询失败: %s", e)
-        raise APIError(ErrorCodes.INTERNAL, f"裁决历史查询失败: {str(e)}") from e
+        raise APIError(ErrorCodes.INTERNAL_ERROR, f"裁决历史查询失败: {str(e)}") from e
 
 
 @router.post("/pending/{pending_id}/confirm", summary="确认记忆入主库")
