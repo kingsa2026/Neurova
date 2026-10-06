@@ -793,7 +793,6 @@ class SubSystemContainer:
             except Exception as e:
                 logger.warning("统一进化引擎初始化失败: %s", e)
 
-        a.evolution_engine = a.evolution  # 向后兼容别名
         a.pattern_miner = None
         a.genetic_engine = None
         if a.evolution:

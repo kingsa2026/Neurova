@@ -355,7 +355,7 @@ class TestActivatedModulesThreadSafety:
     """验证 3 个激活模块都有 threading.RLock 保护共享可变状态。
 
     AGENTS.md 规定：threading.RLock 用于共享状态。
-    对照组：pool_service.py:70, market_importer.py:100, evolution_engine.py:99 都有 RLock。
+    对照组：pool_service.py:70, market_importer.py:100 都有 RLock。
 
     增强断言：不只验证 RLock 字段存在，还要验证至少有一个方法用 `with self._lock:` 实际使用。
     """
