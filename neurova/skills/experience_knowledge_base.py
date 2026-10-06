@@ -35,6 +35,47 @@ from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
+# experience_records 列定义的唯一定义处：建表与迁移重建共用同一段 DDL。
+# 重建**必须**经它走 `CREATE TABLE (...)` + 逐列拷贝——`CREATE TABLE AS SELECT`
+# 生成的表不带任何约束，`id` 会丢掉 PRIMARY KEY AUTOINCREMENT（NULL id 事故根因）。
+_RECORDS_COLUMNS_DDL = """
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill_name TEXT NOT NULL,
+    context TEXT,           -- JSON
+    result TEXT,            -- JSON (NULL 允许)
+    success INTEGER,  -- 1/0/NULL（NULL = 本轮无客观回执，未测量）
+    timestamp TEXT,
+    feedback TEXT,
+    agent_id TEXT,
+    session_id TEXT,
+    execution_time REAL,
+    confidence_score REAL,
+    tags TEXT,              -- JSON array
+    created_at TEXT
+"""
+
+# 迁移补列（011/006/008/015/001）的唯一定义处：存量表 ALTER 补列与迁移重建
+# 共用同一份。canonical 建表不含这些列（新库由建表后紧跟的补列循环补上），
+# 重建拷贝时必须一并带上，否则补列在重建后凭空消失。
+_RECORDS_MIGRATION_COLUMNS: Tuple[Tuple[str, str], ...] = (
+    ("content_key", "TEXT"),
+    ("seen_count", "INTEGER NOT NULL DEFAULT 1"),
+    ("injected_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_injected_at", "TEXT"),
+    ("adoption_outcome", "TEXT"),
+    # 工单 008：形成侧第三态升成一等列（此前挤在 tags 字符串里）
+    ("evidence_state", "TEXT NOT NULL DEFAULT 'evidenced'"),
+    # 工单 015：人工处置态。与采纳证据**分列**——`adoption_outcome` 记的是
+    # "这条经验被执行后客观成没成"，人说的话不能写进那一格（否则 007 的排序
+    # 与 008 的读数一起吃到的就不再是证据）。NULL = 未处置。
+    ("operator_disposition", "TEXT"),
+    # 工单 001：逐字可核结论。与 `evidence_state`（本轮有没有服务端票据）
+    # 和 `adoption_outcome`（被采纳后成没成）**三轴正交**——三者挤进任何
+    # 一栏，那一栏的读数就不再指它原本指的东西。
+    # 存量行回填 `unchecked`：它们写入时本闸还不存在，宣称"核过了"是假的。
+    ("verifiability_state", "TEXT NOT NULL DEFAULT 'unchecked'"),
+)
+
 
 # 默认数据库路径（相对项目根目录的 data 目录）
 def defaultDbPath() -> str:
@@ -135,23 +176,7 @@ class ExperienceKnowledgeBase:
         with self._lock:
             cur = self._conn.cursor()
             cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS experience_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    skill_name TEXT NOT NULL,
-                    context TEXT,           -- JSON
-                    result TEXT,            -- JSON (NULL 允许)
-                    success INTEGER,  -- 1/0/NULL（NULL = 本轮无客观回执，未测量）
-                    timestamp TEXT,
-                    feedback TEXT,
-                    agent_id TEXT,
-                    session_id TEXT,
-                    execution_time REAL,
-                    confidence_score REAL,
-                    tags TEXT,              -- JSON array
-                    created_at TEXT
-                )
-                """
+                f"CREATE TABLE IF NOT EXISTS experience_records ({_RECORDS_COLUMNS_DDL})"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_exp_skill ON experience_records(skill_name)"
@@ -173,23 +198,64 @@ class ExperienceKnowledgeBase:
         `NULL` 只表示"尚未回填"——回填语句只扫 NULL 行，故不会每启动重扫一遍。
         """
         cur = self._conn.cursor()
-        cols = {row[1] for row in cur.execute("PRAGMA table_info(experience_records)")}
-        if "content_key" not in cols:
-            cur.execute("ALTER TABLE experience_records ADD COLUMN content_key TEXT")
-        # 工单 004：`success` 从 NOT NULL 放开为可空——"未测量"必须有自己的取值，
-        # 不许折叠成 0（那正是把"没测到"演成"失败"的病灶）。老库按 SQLite 惯例
-        # 重建列：建新表 → 拷数据 → 换名，全程幂等（notnull=0 时跳过）。
         info = {row[1]: row for row in cur.execute("PRAGMA table_info(experience_records)")}
-        if info.get("success") and info["success"][3]:
-            cur.execute("PRAGMA foreign_keys=off")
+        # 幂等补列（011/006/008/015/001）。先补齐再谈重建：重建要逐列拷贝，
+        # 列表必须以补完后的表为准。
+        for column, ddl in _RECORDS_MIGRATION_COLUMNS:
+            if column not in info:
+                cur.execute(f"ALTER TABLE experience_records ADD COLUMN {column} {ddl}")
+        if "evidence_state" not in info:
+            # 存量行按 002 的 tags 标记回填，避免历史数据在新列上失真
             cur.execute(
-                "CREATE TABLE experience_records_migrating AS SELECT * FROM experience_records"
+                "UPDATE experience_records SET evidence_state = 'unevidenced' "
+                "WHERE tags LIKE '%unevidenced%'"
+            )
+
+        # 工单 004：`success` 从 NOT NULL 放开为可空——"未测量"必须有自己的取值，
+        # 不许折叠成 0（那正是把"没测到"演成"失败"的病灶）。
+        # 重建判据含第二支：`id` 丢主键。历史上本函数曾用
+        # `CREATE TABLE ... AS SELECT *` 重建，该语句生成的表**不带任何约束**，
+        # id 退化成普通列，而 INSERT 不写 id → 新行 id 落 NULL →
+        # `str(row["id"])` 产出 "None" 发给前端，DELETE 时 `int("None")` 400。
+        # 已损坏的库必须在首次连接时自愈。重建一律走 `_RECORDS_COLUMNS_DDL`
+        # （含 `id INTEGER PRIMARY KEY AUTOINCREMENT`）+ 逐列拷贝：
+        # 旧行带 id 的保留原 id，NULL id 的由主键自动补发。
+        info = {row[1]: row for row in cur.execute("PRAGMA table_info(experience_records)")}
+        successStillNotNull = info.get("success") is not None and info["success"][3]
+        idPk = info["id"][5] if "id" in info else 0
+        if successStillNotNull or idPk != 1:
+            cur.execute("PRAGMA foreign_keys=off")
+            cur.execute("DROP TABLE IF EXISTS experience_records_migrating")
+            migrationDdl = ", ".join(f"{name} {ddl}" for name, ddl in _RECORDS_MIGRATION_COLUMNS)
+            cur.execute(
+                f"CREATE TABLE experience_records_migrating "
+                f"({_RECORDS_COLUMNS_DDL}, {migrationDdl})"
+            )
+            canonical_cols = [
+                row[1] for row in cur.execute("PRAGMA table_info(experience_records_migrating)")
+            ]
+            existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(experience_records)")}
+            # 被旧迁移损坏的表里，NOT NULL DEFAULT 列（seen_count 等）可能存着
+            # NULL——约束随 AS SELECT 一起丢了。拷贝时按列默认值收口，否则带
+            # 约束的新表拒绝收留这些行，自愈永远完不成。
+            defaults = dict(_RECORDS_MIGRATION_COLUMNS)
+            selectExprs = []
+            selectExprTargets = []
+            for col in canonical_cols:
+                if col not in existing_cols:
+                    continue
+                ddl = defaults.get(col, "")
+                if "NOT NULL DEFAULT" in ddl:
+                    selectExprs.append(f"COALESCE({col}, {ddl.split('DEFAULT', 1)[1].strip()}) AS {col}")
+                else:
+                    selectExprs.append(col)
+                selectExprTargets.append(col)
+            cur.execute(
+                f"INSERT INTO experience_records_migrating ({', '.join(selectExprTargets)}) "
+                f"SELECT {', '.join(selectExprs)} FROM experience_records"
             )
             cur.execute("DROP TABLE experience_records")
-            cur.execute(
-                "CREATE TABLE experience_records AS SELECT * FROM experience_records_migrating"
-            )
-            cur.execute("DROP TABLE experience_records_migrating")
+            cur.execute("ALTER TABLE experience_records_migrating RENAME TO experience_records")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_exp_skill ON experience_records(skill_name)"
             )
@@ -197,37 +263,6 @@ class ExperienceKnowledgeBase:
                 "CREATE INDEX IF NOT EXISTS idx_exp_success ON experience_records(success)"
             )
             cur.execute("PRAGMA foreign_keys=on")
-        if "seen_count" not in cols:
-            cur.execute(
-                "ALTER TABLE experience_records ADD COLUMN seen_count INTEGER NOT NULL DEFAULT 1"
-            )
-        # 工单 006 回写通路：命中次数 / 最近使用 / 采纳后结果。
-        # adoption_outcome 三值 success|failure|unevidenced，NULL 专用于"从未回写"
-        # （D1：不能把"没证据"和"没发生过"混成同一个值）
-        for column, ddl in (
-            ("injected_count", "INTEGER NOT NULL DEFAULT 0"),
-            ("last_injected_at", "TEXT"),
-            ("adoption_outcome", "TEXT"),
-            # 工单 008：形成侧第三态升成一等列（此前挤在 tags 字符串里）
-            ("evidence_state", "TEXT NOT NULL DEFAULT 'evidenced'"),
-            # 工单 015：人工处置态。与采纳证据**分列**——`adoption_outcome` 记的是
-            # "这条经验被执行后客观成没成"，人说的话不能写进那一格（否则 007 的排序
-            # 与 008 的读数一起吃到的就不再是证据）。NULL = 未处置。
-            ("operator_disposition", "TEXT"),
-            # 工单 001：逐字可核结论。与 `evidence_state`（本轮有没有服务端票据）
-            # 和 `adoption_outcome`（被采纳后成没成）**三轴正交**——三者挤进任何
-            # 一栏，那一栏的读数就不再指它原本指的东西。
-            # 存量行回填 `unchecked`：它们写入时本闸还不存在，宣称"核过了"是假的。
-            ("verifiability_state", "TEXT NOT NULL DEFAULT 'unchecked'"),
-        ):
-            if column not in cols:
-                cur.execute(f"ALTER TABLE experience_records ADD COLUMN {column} {ddl}")
-        if "evidence_state" not in cols:
-            # 存量行按 002 的 tags 标记回填，避免历史数据在新列上失真
-            cur.execute(
-                "UPDATE experience_records SET evidence_state = 'unevidenced' "
-                "WHERE tags LIKE '%unevidenced%'"
-            )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exp_content ON experience_records"
             "(agent_id, skill_name, success, content_key)"

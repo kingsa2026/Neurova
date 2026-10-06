@@ -31,6 +31,12 @@ export interface ComputerActionEntry {
   effect?: string
   /** R1-2 ActionResult 契约：精确拒绝码（refused 时） */
   refusalCode?: string
+  /** T-01 ActionResult 契约：投递平面（background/foreground/isolated_plane/not_applicable） */
+  delivery?: string
+  /** T-01 ActionResult 契约：验证证据（有则面板给"已验证"档，无则明示未验证） */
+  evidence?: string[]
+  /** T-01 ActionResult 契约：跳级去向（refused 时点名"为何降级到下一级"） */
+  escalation?: Record<string, string>
   /** SSH/shell 终端负载（命令 + 输出），面板渲染成终端窗口 */
   terminal?: { command: string; stdout: string; stderr: string; host?: string; exit?: number }
 }
@@ -131,17 +137,62 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
 
 let entrySeq = 0
 
-/** R2-5 ActionResult 契约字段抽取（payload.action_result → 条目展示字段） */
-function extractActionResult(payload: Record<string, any>):
-  | { route?: string; effect?: string; refusalCode?: string }
-  | undefined {
+/** R1-2/T-01 ActionResult 契约落到条目展示字段的形状 */
+interface ActionResultFields {
+  route?: string
+  effect?: string
+  refusalCode?: string
+  delivery?: string
+  evidence?: string[]
+  escalation?: Record<string, string>
+}
+
+/** R2-5/T-01 ActionResult 契约字段抽取（payload.action_result → 条目展示字段）
+ *
+ * `delivery`/`evidence`/`escalation` 后端一直在产出并整体透传，此前只抽三键
+ * 等于把"走哪条通道、有没有碰用户桌面、为何跳到下一级"在 dock 上抹掉了——
+ * 无抢占这件事本来就该在这儿被看见。
+ */
+function extractActionResult(payload: Record<string, any>): ActionResultFields | undefined {
   const ar = payload.action_result
   if (!ar || typeof ar !== 'object') return undefined
-  const out: { route?: string; effect?: string; refusalCode?: string } = {}
+  const out: ActionResultFields = {}
   if (typeof ar.route === 'string') out.route = ar.route
   if (typeof ar.effect === 'string') out.effect = ar.effect
   if (typeof ar.refusal_code === 'string') out.refusalCode = ar.refusal_code
-  return out.route || out.effect || out.refusalCode ? out : undefined
+  if (typeof ar.delivery === 'string') out.delivery = ar.delivery
+  if (Array.isArray(ar.evidence)) {
+    out.evidence = ar.evidence.filter((kind: unknown) => typeof kind === 'string')
+  }
+  if (ar.escalation && typeof ar.escalation === 'object' && !Array.isArray(ar.escalation)) {
+    out.escalation = ar.escalation as Record<string, string>
+  }
+  const hasAny =
+    out.route || out.effect || out.refusalCode || out.delivery || out.evidence || out.escalation
+  return hasAny ? out : undefined
+}
+
+/** T-01 投递事实徽标文本：一行呈现"走了哪条通道 / 有没有碰真实输入设备 / 是否被验证"。
+ *
+ * 无抢占不是口号——`delivery=foreground` 就意味着动了用户的光标键盘，
+ * `evidence` 为空则代表"投递了但没验证手段"。这一行是该事实在 dock 上唯一可被证伪处。
+ */
+export function actionBadgeText(
+  entry: Pick<
+    ComputerActionEntry,
+    'route' | 'delivery' | 'effect' | 'refusalCode' | 'evidence' | 'escalation'
+  >,
+): string {
+  if (entry.effect === 'refused') {
+    const code = entry.refusalCode ?? ''
+    const to = entry.escalation?.target
+    return to ? (code ? `${code}→${to}` : `→${to}`) : code
+  }
+  const head = [entry.route, entry.delivery, entry.effect]
+    .filter((part): part is string => !!part)
+    .join('·')
+  if (!head) return ''
+  return entry.evidence && entry.evidence.length > 0 ? `${head} ✓` : head
 }
 
 export function createComputerPanel(maxActions = 50): ComputerPanelApi {
