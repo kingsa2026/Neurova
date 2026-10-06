@@ -8,101 +8,30 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = get_logger(__name__)
 
-# HTTP Bearer scheme
-# 批次3（AIGC 产物鉴权）：<img>/<audio>/<a download> 等资源标签无法携带
-# Authorization 头。在凭证方案层扩展 ?access_token= 回退（头凭证优先，无头
-# 无参行为不变），get_current_user 签名与全部既有 dependency_overrides 契约
-# 零改动。
-class BearerOrQuery(HTTPBearer):
-    async def __call__(self, request: Request) -> Optional[HTTPAuthorizationCredentials]:  # type: ignore[override]
-        creds = await super().__call__(request)
-        if creds:
-            return creds
-        token = request.query_params.get("access_token")
-        if token:
-            return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        return None
-
-
-security = BearerOrQuery(auto_error=False)
-
-# 模块级导入（避免重复导入）
-from neurova.api.auth import verify_access_token, _user_identity
+# 身份推导只有一处实现：`neurova/api/auth.py`。
+#
+# 本模块曾是第二份 `get_current_user` / `get_optional_user` 的所在地（同名不同体，
+# 且凭证来源比 auth 那份多一条 `?access_token=`）。两份并存的真实代价不是重复代码，
+# 而是 `dependency_overrides[auth.get_current_user]` 打在用本模块那份的端点上**静默不生效**
+# ——测试会表现为"守卫没咬住"，比红更危险。现已收口为：auth 里两个**不同名**的入口
+# （严格头 / 可回退查询参数），这里按各自语义再导出，旧名保留以免无谓搅动 21 个消费方。
+#
+# 为什么两种策略不合成一份：`<img>`/`<audio>`/`<a download>` 资源标签发不出 Authorization
+# 头，产物预览与下载只能走查询参数；而 token 进 URL 会落进访问日志与浏览器历史，
+# 所以放行面按端点显式选择，不为"少一个函数"把 `?access_token=` 推广到 84 个严格端点。
+from neurova.api.auth import (  # noqa: F401  （再导出：消费方按旧路径导入）
+    get_current_userWithQueryToken as get_current_user,
+    get_optional_userWithQueryToken as get_optional_user,
+)
 from neurova.api.endpoints import get_app_state
 
 
-async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> Dict[str, Any]:
-    """
-    FastAPI 依赖：获取当前认证用户
-
-    凭证来源：Authorization Bearer 头优先；?access_token= 查询参数回退
-    （批次3，见 BearerOrQuery——资源标签场景无法带头的既有拒绝行为不变）。
-
-    Args:
-        credentials: HTTP Bearer 凭证
-
-    Returns:
-        用户信息字典
-
-    Raises:
-        HTTPException: 认证失败
-    """
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    token = credentials.credentials
-
-    try:
-        payload = verify_access_token(token)
-    except Exception as e:
-        logger.warning("Token verification failed: %s", e)
-        payload = None
-
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return _user_identity(payload)
 
 
-async def get_optional_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> Optional[Dict[str, Any]]:
-    """
-    FastAPI 依赖：获取可选的认证用户
 
-    Args:
-        credentials: HTTP Bearer 凭证
-
-    Returns:
-        用户信息字典或 None
-    """
-    if not credentials:
-        return None
-
-    token = credentials.credentials
-    try:
-        payload = verify_access_token(token)
-    except Exception:
-        return None
-
-    if not payload:
-        return None
-
-    return _user_identity(payload)
 
 
 def get_agent_instance(agent_id: str = ""):
