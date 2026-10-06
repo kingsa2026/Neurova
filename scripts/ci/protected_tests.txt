@@ -1521,3 +1521,8 @@ tests/unit/test_session_landing_guard.py
 # 判据本体在 scripts/ci/audit_ledger_commit_guard.py；本单先自造悬空 commit 证明扫描器咬得住，
 # 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。逐文件单跑 3 passed（约 8s，含全 HEAD 索引）
 tests/unit/test_audit_ledger_commit_guard.py
+# tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
+# （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
+# 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。
+# 逐文件单跑 3 passed（约 4s，含 3 次子进程探针）
+tests/unit/test_manual_scripts_are_not_collectible.py
