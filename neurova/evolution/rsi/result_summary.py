@@ -26,16 +26,29 @@
 没产出。所以响应里给的是最近一次已完成摘要（``turn`` 标明归属轮次、
 ``stale`` 标明是否非本轮），而不是阻塞等待（会把尾延迟加回来）或编造数据。
 
-存储是**进程内**的（有界表，插入序淘汰）：重启后到下一次 RSI 迭代前摘要为空。
-观测字段只回答"最近一轮 RSI 做了什么"，不承担持久化职责。
+存储默认**进程内**;§6-4(2026-10-06)起支持**挂载持久化**:摘要随记录追加
+进 jsonl 审计流(env ``NEUROVA_EVOLUTION_RSI_SUMMARIES`` 重定位,默认
+``data/evolution/rsi_summaries.jsonl``),``attach_persistence`` 在启动时
+按 (agent, session) 恢复最新摘要——重启后到下一次 RSI 迭代前响应面不再为空。
+同一审计流还接收每轮迭代的**规范指标快照**(时序留痕)。落盘失败只记日志,
+内存读数不受影响(观测面故障不阻断进化);未挂载时零 IO(与
+PersistedStateMixin 同约定)。
 """
 
 from __future__ import annotations
 
+import json
+import os
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 响应面摘要的字段集合（唯一契约，测试与推送面都引用它）
 RSI_SUMMARY_FIELDS: Tuple[str, ...] = (
@@ -58,8 +71,100 @@ MEASURE_STATES: Tuple[str, ...] = (
 # 会话级摘要表的有界上限：只保最近 N 个 (agent, session)，防长进程无界增长
 _MAX_TRACKED_SESSIONS = 1024
 
+# 审计流压实阈值:超过 _COMPACT_MAX 行时只保留最近 _COMPACT_KEEP 行
+_COMPACT_MAX = 2000
+_COMPACT_KEEP = 1000
+
 _summaries: "OrderedDict[Tuple[str, str], Dict[str, Any]]" = OrderedDict()
 _lock = threading.RLock()
+_persist_path: Optional[Path] = None
+
+ENV_SUMMARIES_PATH = "NEUROVA_EVOLUTION_RSI_SUMMARIES"
+
+
+def default_rsi_summaries_path() -> Path:
+    """审计流默认落点(env 可重定位;测试用 env 指到临时目录)。"""
+    from neurova.core.data_root import get_data_root
+
+    return Path(os.environ.get(
+        ENV_SUMMARIES_PATH, get_data_root() / "evolution" / "rsi_summaries.jsonl"))
+
+
+def _append_record(payload: Dict[str, Any]) -> bool:
+    """追加一行进审计流;未挂载零 IO,失败只记日志(观测面故障不阻断进化)。"""
+    if _persist_path is None:
+        return False
+    try:
+        line = json.dumps(payload, ensure_ascii=False, default=str)
+        with open(_persist_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        return True
+    except OSError as e:
+        logger.debug("RSI 观测审计流写入失败(%s): %s", _persist_path, e)
+        return False
+
+
+def _compact_if_needed(target: Path) -> None:
+    """审计流有界:超过 _COMPACT_MAX 行时原子重写为最近 _COMPACT_KEEP 行。"""
+    if not target.exists():
+        return
+    text = target.read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) <= _COMPACT_MAX:
+        return
+    kept = lines[-_COMPACT_KEEP:]
+    tmp = target.with_suffix(".jsonl.tmp")
+    tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+
+
+def _restore(target: Path) -> None:
+    """从审计流恢复摘要:同一 (agent, session) 文件序在后者胜。坏行跳过。"""
+    if not target.exists():
+        return
+    restored: "OrderedDict[Tuple[str, str], Dict[str, Any]]" = OrderedDict()
+    for line in target.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict) or record.get("type") not in (None, "summary"):
+            continue
+        summary = record.get("summary")
+        if not isinstance(summary, dict):
+            continue
+        key = (str(record.get("agent_id") or "default"),
+               str(record.get("session_id") or "default"))
+        restored[key] = {"summary": summary, "turn": record.get("turn")}
+        while len(restored) >= _MAX_TRACKED_SESSIONS:
+            for stale in list(restored)[: _MAX_TRACKED_SESSIONS // 2]:
+                restored.pop(stale, None)
+    with _lock:
+        _summaries.clear()
+        _summaries.update(restored)
+
+
+def attach_persistence(path: Optional[Path] = None) -> bool:
+    """挂载观测审计流并恢复历史摘要(启动时调用;重复挂载 = 重新恢复)。"""
+    global _persist_path
+    target = Path(path) if path is not None else default_rsi_summaries_path()
+    try:
+        _compact_if_needed(target)
+        _restore(target)
+    except OSError as e:
+        logger.warning("RSI 摘要持久化挂载失败,保持内存模式: %s", e)
+        return False
+    _persist_path = target
+    return True
+
+
+def detach_persistence() -> None:
+    """摘除挂载(测试/隔离用);内存表不受影响。"""
+    global _persist_path
+    _persist_path = None
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -187,6 +292,15 @@ def record_rsi_summary(
             for stale in list(_summaries)[: _MAX_TRACKED_SESSIONS // 2]:
                 _summaries.pop(stale, None)
         _summaries[key] = {"summary": summary, "turn": _as_int(turn) if turn is not None else None}
+        # §6-4:摘要随记录追加进审计流(未挂载零 IO;失败 soft)
+        _append_record({
+            "type": "summary",
+            "agent_id": key[0],
+            "session_id": key[1],
+            "turn": _summaries[key]["turn"],
+            "summary": summary,
+            "ts": round(time.time(), 3),
+        })
         return dict(_summaries[key])
 
 
@@ -215,6 +329,21 @@ def get_latest_rsi_summary(
     return payload
 
 
+def record_metrics_snapshot(metrics: Any, agent_id: Any = None) -> bool:
+    """把规范指标快照追加进观测审计流(§6-4 时序留痕)。
+
+    未挂载返回 False(零 IO);落盘失败 soft(False + 日志)。
+    """
+    if not isinstance(metrics, Mapping):
+        return False
+    return _append_record({
+        "type": "metrics",
+        "agent_id": str(agent_id or "default"),
+        "metrics": dict(metrics),
+        "ts": round(time.time(), 3),
+    })
+
+
 def clear_rsi_summaries() -> None:
     """清空摘要表（测试/setup-teardown 用）。"""
     with _lock:
@@ -230,5 +359,9 @@ __all__ = [
     "summarize_rsi_result",
     "record_rsi_summary",
     "get_latest_rsi_summary",
+    "record_metrics_snapshot",
+    "attach_persistence",
+    "detach_persistence",
+    "default_rsi_summaries_path",
     "clear_rsi_summaries",
 ]
