@@ -342,13 +342,13 @@
 ## 6. 审计中发现的缺陷（不属简化，按教义第 1/2 条不得顺手改掉）
 
 1. **memory 域身份旁路（已修 `63e8ae8e`）** ✅ —— `endpoints/memory/base.py:38-61` 手工剥 Bearer 头 + 直调 `verify_access_token`，except Exception: pass。**调用点 29 处**、横跨 5 个文件（crud 1 / metacognition 12 / profile 4 / tkg 4 / working_memory 8），初报"35 处"是原文出现数（29 调用 + 5 导入 + 1 定义），此处更正。回落面也比初报窄：带无效/过期 token 的请求早在 S-10 就被 `get_current_user_or_default` 挡成 401（`auth.py:541-556`），真问题是**与 `_user_identity()` 口径分叉**（存量 token 第二层键被写成 default）。无鉴权依赖的路由按结构扫描实测为 **16 条**（初报"14"来自一条不严谨的正则草稿）：其中 13 条同时走旁路（本批已补依赖并单源化），另 3 条（`/emotion/types`、`/{agent_id}/metacognition`、`/{agent_id}/metacognition/stats`）不取租户数据，判据外留档。**三条更硬的现行越权面（PUT 无归属校验、DELETE 传 `agent_wide=True` 关掉两层、GET 读零写入的存储且无依赖）已同批根修，图证、A/B 与一处守卫改判说明见 [`memory-isolation-2026-10-05.md`](memory-isolation-2026-10-05.md) §六。**
-2. **`self._logger` 幻影引用破坏回滚** ✅ —— `evolution/rsi/integration_manager.py:383/449` 用类内不存在的 `self._logger`（只有模块级 `logger:13`）。`:383` 位于 `:386` 回滚 setattr **之前**，抛出的 AttributeError 被 `:394` 吞掉 → "优化回执落盘失败时不回滚"，与注释承诺的安全语义正好相反。
+2. **`self._logger` 幻影引用破坏回滚（已修 `bf32ec98`）** ✅ —— `evolution/rsi/integration_manager.py:383/449` 用类内不存在的 `self._logger`（只有模块级 `logger:13`）。`:383` 位于 `:386` 回滚 setattr **之前**，抛出的 AttributeError 被 `:394` 吞掉 → "优化回执落盘失败时不回滚"，与注释承诺的安全语义相反。**按第 5 条全命中点扫荡**：AST 扫全仓 `self._logger` 取用点共 **151 处**，逐处判"所在类是否沿继承链定义过它"，幻影**只有本类这两处**（asr/、`core/base_module`、`context/injector` 等都有定义）。活体在真 RSI 管线上对照：修复前"回执写失败"分支 `{"applied": false, "decay_rate": 0.05}`（报失败却不撤效果），修复后 `decay_rate: 0.01`。**未顺手改的一处语义**：遗产分支（`debt_ledger=None`）写失败时仍返回 True——反向闸票面只针对带账本的场景，改成"任何写失败都走安全侧"会让配置错路径的优化整体失败，属口径变更。
 3. **匿名可达的空转上报端点** ✅ —— `api/app.py:614 POST /api/v1/frontend/errors` 在 `global_auth.py:48` 白名单内，收 JSON 后只 `logger.warning` 便返回 `{"status": "logged"}`，**从不调 error_logger**；客户端被告知"已记录"而实际未存，体未见长度上限。
 4. **现役链读内存假存根** ✅ —— `notifications.py:83/117` 读 `enhanced_users_api.py:73` 的 `_users_store = {}`。
-5. **让位规则整条支路从未执行** ✅ —— `coordination_decorators.py:99` 调 `get_glance_yield_checker()` 漏 await，而工厂在 `glance_yield_rules.py:444` 确为 async def → 拿到协程对象，"操作碰撞即拒"实际空转。
+5. **让位规则整条支路从未执行（已修 `49326f6d`）** ✅ —— `coordination_decorators.py:99` 调 `get_glance_yield_checker()` 漏 await，而工厂在 `glance_yield_rules.py:444` 确为 async def → 拿到协程对象，"操作碰撞即拒"实际空转。**本条原记两处，复扫实为四处**（同契约还有 `reset_glance_yield_checker`）：除 `:99`/`:271` 外，`coordination_api.py:111` 是**最危险的一副面孔**——协程被创建后丢弃、零异常，端点照常 200 `{"status":"reset"}` 而什么都没重置；活体对照（真 uvicorn + 生产挂载 `register_endpoint_routers` 89/89 + curl）修复前 register→`registered_agents:1` → reset→**仍 1** + 日志 `RuntimeWarning: coroutine was never awaited`，修复后 → **0**、警告 0 条。**第四处 `agent/turn_coordinator.py:52` 未修**：它的 `__init__` 是同步的（无从 await），紧接一行调 `GlanceYieldChecker` 全类不存在的 `initialize()`，且 `get_turn_coordinator` 生产侧零消费者（`tests/e2e/test_phase4_integration.py` 2 条预存失败即此）——补 await 只让它换个地方红，真正的处置是"接线 or 连同测试退役"，属产品裁决；判据里以"文件名→期望命中数 1"双向钉住（新增命中即红，修好了不摘表也红）。附带一条可达性事实：`coordination_decorators` 全模块**生产零导入**，所以 §6-5 说的"支路从未执行"比漏 await 更深一层——是被摘链的模块。
 6. **假委托 + API 签名断裂** ✅ —— `memory_layer/manager.py:2882/2889/2999/3005/3040/3045`（部分恒 return True）；`memory/profile.py:130/169` 传 user_id 位置参、`metacognition.py:329/412` 传 category=/top_k=，manager 形参不接受 → 必抛 TypeError，被 except Exception 折成 500；`models.py:133 UserProfile` 生产零引用。
 7. **LM Studio 卡片恒灰** ✅ —— 见 B13：豁免分支不可达，无 key 时落到 `provider_manager.py:1326 return False`。
-8. **依赖缺失仍返回成功** ◑ —— `channels/discord.py:255`、`qclaw.py:316`、`qclaw_service.py:77`；同形态在 `websocket.py:421` 已根修，按第 5 条应同批扫荡。**2026-10-06 复测三处仍是现行形态**：`REQUESTS_AVAILABLE` 为假时 discord 回一个 mock `message_id`、qclaw 回 `{"success": True, "message_id": "mock_media_…"}`、qclaw_service 回 `{"valid": True, "qclaw_user_id": "mock_user_…"}`——只 `logger.warning("模拟模式…")`，调用方无从分辨真假。
+8. **依赖缺失仍返回成功** ◑ —— `channels/discord.py:255`、`qclaw.py:316`、`qclaw_service.py:77`；同形态在 `websocket.py:421` 已根修，按第 5 条应同批扫荡。**2026-10-06 复测三处仍是现行形态**：`REQUESTS_AVAILABLE` 为假时 discord 回一个 mock `message_id`、qclaw 回 `{"success": True, "message_id": "mock_media_…"}`、qclaw_service 回 `{"valid": True, "qclaw_user_id": "mock_user_…"}`——只 `logger.warning("模拟模式…")`，调用方无从分辨真假。**已于 `347bc581` 全族扫荡**：按第 5 条 AST 复扫实为 **26 处 / 10 文件**（不止三处），四类契约分别收成 False / None / None / 该文件已有的失败结构，并删掉同分支里的假状态写入（`_initialized = True`、mock token 进 `token_cache`、iLink 无操作却递增回复配额）。**判据按语义分类**：`telegram_api_client` / `wechat_auth` / `qqbot` 的 `_api_request` 返回的也是字典，但那是 `ok:False` / `errcode:-1` / `retcode:1` 的诚实失败，一个字都不动——第一版判据用 `ast.unparse(key)` 比键名，字符串键带引号回来，把 `{"success": True}` 也当失败放过（命中数 23 与人工 26 不符才暴露）。先例是 `test_b3_sip_honest_no_fakesuccess.py`（同口径）。活体最有说服力的一条不用构造：本机 venv 真没装 paho，`MQTT_AVAILABLE` 现值 False，修复前 `authenticate() -> True` 且 `_initialized -> True` 而 `_client` 从未存在，修复后 `-> False`。
 9. **崩溃后无人接管** ✅ —— `recovery/` 的 sentinel 异常关机标记与按 agent_id 恢复记忆今日零承载；正常关停有人、崩掉没人管（`self.shutdown_guard` 全仓唯一出现处即 `app.py:62` 赋 None）。
 10. **睡眠周期绕过装配点改私有字段且竞态未消** ◑ —— `manager.py:3908-3969` 靠"存旧值→改 `module._consolidation_threshold`→finally 还原"实现；`sleep_module.py:264/267` 读该字段时并不持锁（锁在 `:253-255` 已释放）。
 11. **只写不读的配置面** ◑ —— `cognitive_layers/settings_config.py` 有 16 个 ParamSchema 自标"【预留】…修改暂不生效"，`activation.*`(7)、`auto_context.*`(2)、`graph.time_decay`、`vector_search.*`(3) 全域零读取方；同类还有 `AdaptiveToolWeights.lifecycle_state`（写盘但 load 从不回填）与 `total_latency`（只随 JSON 往返）。删须同步 i18n 11 语言 desc_key。
@@ -379,17 +379,22 @@
     **C 已修 `bcbb5f69`**：会话归属判据在 `console.py` 写了 5 份（helper 本体 + `_find_session_target` + delete/rename/auto-title 各一份），收口为一处。
     **B 更正我自己的判断**：我先前把"console 面校验会话属主、chat.py `/history` 只校验 agent 归属"记成现行越权面。新加的矩阵守卫实测**推翻**了它——bob 用真身份从 6 条会话端点碰 alice 的会话，修复前就已经全部 403；而 `chat.py` 那条要成立需要"同一 agent 的两个不同用户都能过 `can_access_agent`"，该判据是 admin 全量 / owner 匹配 / 无主仅 admin，普通用户不可达。所以它只是**口径不一致 + 纵深不足**，不是漏洞；是否让 agent 属主读到他人会话属产品语义，未擅动。（同 §七 教训：代码里有分叉 ≠ 请求能走到它。）
     **D 已修 `e040304d`**：`save_message()` 建新记录写死 `user_id=""` 且无入参，两个生产写方都无法声明归属——console 的 fork 只靠"先 create 再 save"的顺序侥幸，`room_store` 则恒产出共享会话。修法：加 `user_id` 关键字参数、既有属主只回填不覆盖、**生产调用点必须显式声明**由源码守卫钉。判据形态换过一次：先做"必填无默认"，实测要拉 24 个不建模归属的测试调用点填噪声，遂改为"带缺省 + 生产侧显式（源码守卫）"。
-    **本轮新登记的债**（两笔，均已在同批后续闭合）：`auth.py:415` 与 `deps.py:38` 是**两份同名不同体的 `get_current_user`**（后者额外接受 `?access_token=` 查询参数），console 用 deps 那份——它让 `dependency_overrides` 打错对象时静默失效（本轮就这么红过一次），合并属全仓鉴权口径，需单开一批 → **已修 `b1e18dfc`**（推导合一、两种凭证策略改叫两个名字、deps 收成带理由的再导出）。`tests/unit/test_session_round_ops.py` 单跑 7 failed（history 混入 98 条额外消息，疑跨用例共享会话目录），预存、与本批无关 → **已修 `9495f1db`**，真因是 chdir 隔离不了 `dataLanding` 落点，用例一直在读写仓库真实 `data/sessions/`；**同一根因的其余命中点转 §6-29**。
-29. **`monkeypatch.chdir` 隔离不了 `dataLanding` 落点——同一根因的命中点全量清点（`9495f1db` 修一处，其余登记待点单）** ——
+    **本轮新登记的债**（两笔，均已在同批后续闭合）：`auth.py:415` 与 `deps.py:38` 是**两份同名不同体的 `get_current_user`**（后者额外接受 `?access_token=` 查询参数），console 用 deps 那份——它让 `dependency_overrides` 打错对象时静默失效（本轮就这么红过一次），合并属全仓鉴权口径，需单开一批 → **已修 `b77d9b24`**（推导合一、两种凭证策略改叫两个名字、deps 收成带理由的再导出）。`tests/unit/test_session_round_ops.py` 单跑 7 failed（history 混入 98 条额外消息，疑跨用例共享会话目录），预存、与本批无关 → **已修 `fb7801be`**，真因是 chdir 隔离不了 `dataLanding` 落点，用例一直在读写仓库真实 `data/sessions/`；**同一根因的其余命中点转 §6-29**。
+29. **`monkeypatch.chdir` 隔离不了 `dataLanding` 落点——同一根因的命中点全量清点（`fb7801be` 修一处，其余登记待点单）** ——
     根因不在用例，在两次收口的时间差：`session_manager.py:205-207` 的落点解析是「显式入参 > `NEUROVA_SESSIONS_DIR` > `dataLanding("sessions")`」，第三档**与进程 CWD 无关**（`c2cb809c` 2026-09-22「运行期落点全量锚定数据根」把原兜底裸相对名 `"sessions"` 收进数据根，方向正是 §6-26 的锚点纪律）。凡此前靠 chdir 隔离会话目录的用例，前提在同日即失效——它们读写的是**仓库真实 `data/sessions/`**。`tests/unit/test_session_archive.py:24` 的 docstring 还写着"SessionManager 的 sessions/ 是 CWD 相对"，该句现为假。
     **取证方法换过一次（这是本条最该记的）**：先用"跑前后 `find | sort` 集合差"，`test_session_archive` 报 `added=0 removed=0`，看着像干净；改用 mtime + 全树 md5 聚合复测，同一次运行**动了 15 个真实文件**（把 `kai/`、`default/` 下的会话移进移出 `archived/`）。集合差只能看见新增/消失，**看不见原地改写与等量搬移**——凡判据是"数据根有没有被写"，必须取内容指纹，不能取文件清单。
     实测（逐文件单跑，判据 = 跑前后 `data/sessions` 全树 md5 是否变化）：
-    - `tests/unit/test_session_round_ops.py`：chdir 假前提 → 修前 6 passed / 7 failed 且每次 +1 真实文件；`9495f1db` 改 env 注入口后 **13 passed、md5 不变**。
+    - `tests/unit/test_session_round_ops.py`：chdir 假前提 → 修前 6 passed / 7 failed 且每次 +1 真实文件；`fb7801be` 改 env 注入口后 **13 passed、md5 不变**。
     - `tests/unit/test_session_archive.py`：chdir 假前提 → **4 failed / 4 passed（预存）**，真实 store 被搬移 15 个文件。该文件最后一次改动是 `4a3c9380`(09-04)，早于 `c2cb809c`(09-22)，与本会话所有 commit 无关。
     - `tests/unit/agent/test_p3_p4_refactor.py:252`：**零隔离**直接 `SessionManager().create_session(agent_id="a1", user_id="u1")`，单跑 6 passed / 7 skipped——**全绿却在真实数据根建会话**，md5 变化。它同时证伪一件事：§6-27 ④ 的仓库根污染守卫只盯仓库顶层条目，`data/` 内部它看不见。
     - `core/test_session_manager.py`(31 passed)、`core/test_session_manager_json_safety.py`(6)、`core/test_session_assistant_metadata.py`(5)、`agent/test_history_write_fence.py`(16)：md5 不变，不污染真实盘，但隔离手段是 patch 私有方法 `_get_session_dir` / 直改私有字段 `_sessions_dir`——第 3 条明禁的"绕过生产装配点"，今天能过只因为那两个内部口恰好是唯一读路径，生产侧新增一条不经它们的解析就静默失效。
     - `memory/test_memory_loop_fixes.py`(8 passed)、`tools/test_shell_sessions.py`：不写真实盘（后者是 `ShellSessionManager`，与本契约无关——顺带记一次伪命中：`grep "SessionManager()"` 会把 `ShellSessionManager()` 一起捞进来，**"18 个文件未隔离"的最初估计就是这么来的，实测按精确类名 + 行为判据复算是 3 个真命中**）。
-    **候选（未动，按此序性价比）**：① `test_session_archive` 4 条 + `test_p3_p4_refactor:252` 一处，同形改成 `NEUROVA_SESSIONS_DIR` + 单例复位（即 `9495f1db` 的形态）；② 上面四个 patch 内部口的改走同一 env 注入口；③ 一条守卫「跑测期间 `data/sessions` 内容指纹不得变化」，与仓库根守卫互补，成本同量级（现测 listdir 0.10 ms，md5 全树聚合每次约 0.2 s）。
+    **候选（未动，按此序性价比）**：① `test_session_archive` 4 条 + `test_p3_p4_refactor:252` 一处，同形改成 `NEUROVA_SESSIONS_DIR` + 单例复位（即 `fb7801be` 的形态）；② 上面四个 patch 内部口的改走同一 env 注入口；③ 一条守卫「跑测期间 `data/sessions` 内容指纹不得变化」，与仓库根守卫互补，成本同量级（现测 listdir 0.10 ms，md5 全树聚合每次约 0.2 s）。
+    **已于 `abfe6d6b` 全数闭环，且实测命中面比本条估的 3 处大**：接守卫后按引用面跑 41 个文件，被点名的是 **8 个文件**——除上面列的，另发现 `api/test_session_summary_{cache,sidecar}.py` 与 `test_session_count_and_console_bound.py` 把 `NEUROVA_SESSIONS_DIR` 设成**相对值** `"sessions"` 并配 chdir（断言里还散布 `Path("sessions")` 字面量），其注释自称"相对路径才不毒化后续依赖 CWD 的测试"——那条依赖正是本条登记的假前提，`fb7801be` 之后它不再保护任何人。
+    **收口形态是两层而不是一条守卫**（候选③按实测改了设计）：目录内容判据要么每用例取全树指纹（实测 4.71ms/次 → 每用例 2 次，全仓 2.1 万条 +200s），要么退化成清单集合差（看不见原地改写与等量搬移）。改为 ① `tests/conftest.py::_isolateSessionsLanding`——落点**默认**隔离（先只有守卫时，被点名的 16 条 ERROR 全是"起真 app"的用例：单例在每条用例里被重新构造，逐条补 env 属第 1 条禁的 consumer-side 打补丁；同手法仓内先例 `_isolate_agent_workspaces_root`）+ ② `_guardSessionLandingIsIsolated`——收尾守卫钉**装配点**，挡"显式改回真实库"。只留默认值一句 setenv 就能穿透，只留守卫每条用例都要自己补，故两条都要。
+    取证中踩到两条通用坑（都进了 docstring）：**autouse 夹具按建立逆序拆除，不显式声明依赖时守卫会跑在隔离夹具的复位之后，`_instance` 已是 None，判据永远看不见肇事者**（本批哑火两次，靠临时 MARK 抛出 + 打印 `sys.modules` 才定位）；`tests/manual/*.py` 在**导入期**改 `os.environ`，它们不匹配 `test_*.py` 故默认不被收集，但被显式列进命令行时 env 会传给整个进程——实测掩盖过一次守卫（带上 manual 时 0 ERROR，摘掉后 16 ERROR）。
+    复验：41 文件收口前 45 errors → **413 passed**；`test_session_archive` 4 failed/4 passed → **8 passed**；`tests/unit/api`+`core` A/B **32↔32 逐行一致**；整场跑测前后 `data/sessions` 全树 md5 不变。
+31. **`tests/manual/*.py` 在导入期改进程环境** ◑（`abfe6d6b` 取证时发现，未处理）—— 这类脚本在模块顶层 `os.environ.setdefault("NEUROVA_DATA_DIR", tempfile.mkdtemp())`。默认收集不到（文件名不匹配 `test_*.py`），一旦被显式列进 pytest 命令行，就把该 env 带进整个进程，**任何依赖数据根判据的守卫都会被无声掩盖**（本批实测掩盖过一次落点守卫）。候选处置：把这些脚本改成 `if __name__ == "__main__"` 自持环境，或给它们独立的运行入口（`tests/runners/`），不与 pytest 收集面混在一起。
     **取证自证**：本条测量两次让 `a1` 下生成 `session_b6dab8cc_*`、`session_49ed4370_*`，均已即删，文件数回到 98；`_summary_index.json` 被运行重写过，留有这两条幽灵键——按 `session_manager.py:1870`「索引键集 ≠ 目录指纹键集即整份作废重建」，下次读取自愈（此为读码所见，未再实测触发自愈以免又写一次真实盘）。
 30. **2026-10-06 对既有登记的复测更正（回答"还欠什么"时逐条重跑，不沿用旧值）** ——
     - **§6-5 命中点漏了一条**：`coordination_decorators.py` 调 `get_glance_yield_checker()` 漏 `await` 的实测有 **两处**（`:99` 与 `:271`），本条原先只记 `:99`——即第 5 条要求的"全命中点扫荡"当时没扫完，仍是欠账。
@@ -475,8 +480,12 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `bcbb5f69` | 会话归属判据在 `console.py` 的 5 份写法收口为 `_check_session_ownership` 一处（生产净 **-8**） | §6-28 的 C |
 | `e040304d` | `save_message()` 加 `user_id` 关键字参数、既有属主只回填不覆盖，生产调用点须显式声明归属由源码守卫钉（生产净 **+23**）；`room_store` 显式声明共享 | §6-28 的 D |
 | `a9126ce5` `dd9c4ffa` | 上述两批守卫进受保护子集（逐文件单跑确定全绿后才登记） | §6-28 判据接线 |
-| `b1e18dfc` | 身份门收成一份推导（`_identityFromCredentialsOr401` / `_identityFromCredentialsOrNone`），两种凭证策略**改叫两个名字**（`get_current_user` 严格 / `...WithQueryToken` 可查询参数），`deps.py` 收成带理由的再导出（生产净 **-17**：`auth +54 / deps -71`）。**记账更正**：该 commit 正文写的是"生产净 -38"，按 `git show --numstat` 复算实为 **-17**——错在把 `deps` 的删除行数当成了净数 | §6-28 登记的债 ① |
-| `9495f1db` | `test_session_round_ops` 的隔离从 chdir 改为 `NEUROVA_SESSIONS_DIR` + 单例复位，并在 fixture 内断言落点确为 tmp 目录（生产净 0，测试净 +10）；6 passed/7 failed → **13 passed**，真实 `data/sessions` 内容指纹不再变化 | §6-28 登记的债 ②，命中点清点转 §6-29 |
+| `b77d9b24` | 身份门收成一份推导（`_identityFromCredentialsOr401` / `_identityFromCredentialsOrNone`），两种凭证策略**改叫两个名字**（`get_current_user` 严格 / `...WithQueryToken` 可查询参数），`deps.py` 收成带理由的再导出（生产净 **-17**：`auth +54 / deps -71`）。**记账更正**：该 commit 正文写的是"生产净 -38"，按 `git show --numstat` 复算实为 **-17**——错在把 `deps` 的删除行数当成了净数 | §6-28 登记的债 ① |
+| `fb7801be` | `test_session_round_ops` 的隔离从 chdir 改为 `NEUROVA_SESSIONS_DIR` + 单例复位，并在 fixture 内断言落点确为 tmp 目录（生产净 0，测试净 +10）；6 passed/7 failed → **13 passed**，真实 `data/sessions` 内容指纹不再变化 | §6-28 登记的债 ②，命中点清点转 §6-29 |
+| `bf32ec98` | RSI 回执落盘失败终于真回滚：`self._logger` 幻影引用（全仓 151 处取用中仅这 2 处是幻影）把 `:386` 的 `setattr` 撤回短路成死码，调用方收 `False` 而系统留着新值；判据含全仓 AST 扫防同形回流（生产净 **0**） | §6-2 闭环，附一条未顺手改的遗产分支口径 |
+| `49326f6d` | 让位规则的协程工厂处处 await（生产净 **0**）。第四命中点在**已挂载端点**上：`POST /coordination/yield-checker/reset` 零异常零效果地回 `{"status":"reset"}`——最安静的一类假成功；`agent/turn_coordinator.py` 那处按"文件名→期望命中数"双向钉入台账（零生产消费者 + 调不存在的 `initialize()`，属接线/退役待裁） | §6-5 闭环（命中点由 2 复扫为 4） |
+| `347bc581` | 渠道域"依赖缺失却报成功"全族扫荡：**26 处 / 10 文件**（原报告记 3 处），四类契约分别收成 False / None / None / 该文件已有的失败结构，并删假状态写入与 2 处随之失去用处的 `import time`（生产净 **-9**）。三处本就是诚实失败结构的（`ok:False`/`errcode:-1`/`retcode:1`）按语义放行未动 | §6-8 闭环 |
+| `abfe6d6b` | 会话落点两层判据收口：conftest 默认隔离（`_isolateSessionsLanding`，同 `_isolate_agent_workspaces_root` 手法）+ 收尾守卫挡显式改回真实库；8 个测试文件的 chdir/patch 私有方法/相对 env 全部改走单一通道，重复定义收回一处（生产净 0，测试/CI +202）。41 文件 45 errors → **413 passed**，`test_session_archive` 4 failed → 8 passed，api+core A/B 32↔32 逐行一致 | §6-29 闭环，并新增 §6-31 一条环境掩盖面 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
@@ -491,4 +500,17 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 执行事故与两次子代理失稳（返回无关内容 / 撞 maxTurns）已记于 §1；安全能力矩阵改由主会话自算，见 §3-B1。
 
 **§9.1 各落地批次的当下工作树复测（2026-10-06，本轮登记结束时取）**：`git status` 仅本报告为 modified；工作树另有五项**非本会话产生**的在途改动——`docs/INDEX.md`(M) + `docs/08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`(??)（同一次外部对标登记）、`config/evolution_settings.json`(??)、`.zcodeignore`(??)、`models/tts/moss-nano/{.gitattributes(M),configuration.json(??)}`，一律未处置、未卷入提交。
-本会话两笔债的 commit（`b1e18dfc`、`9495f1db`）为 `origin/main..HEAD` 的全部内容，**尚未推送**。
+**2026-10-07 台账 commit 号失效与回写（并发会话重写历史所致）**：本文件原引 73 个 commit 号，
+用 `git merge-base --is-ancestor <h> HEAD` 复核发现 **4 个已不可达**——对象仍在 `.git` 里，
+所以 `git cat-file -e` 依旧成功，**只查"对象是否存在"发现不了重写，必须查可达性**。
+`9495f1db→fb7801be`、`0fb8fed2→bf32ec98`、`942150e9→49326f6d`、`b1e18dfc→b77d9b24`，
+成因是另一会话在并发提交之后做了 rebase/merge（`7285c66d` 已在历史中）。回写前两件事逐条验过：
+标题映射**唯一**（无歧义），且 `git show --numstat` 两侧**逐行一致**——只凭标题相同就替换，
+遇到"同题重做"会张冠李戴。教训入档：并发会话会改写历史，**commit 号不是稳定标识**，
+每批落地后应复跑一次可达性检查；引用优先"标题 + 文件集"，号只作辅助。
+（同批另记：本会话后续三批的号在写入时已按重写后的历史核对可达性。）
+
+**推送状态更正**：本节原写"本会话各 commit 尚未推送"——现已不成立。并发会话在 rebase/merge
+之后把它们推上了 `origin/main`（`git branch -r --contains` 逐一验过：`b77d9b24`/`fb7801be`/
+`bf32ec98`/`49326f6d`/`347bc581` 均已在远端），当前 `origin/main..HEAD` 只剩 `abfe6d6b` 一条。
+本会话自身**未执行过任何 push**；远端前进是并发会话所为。
