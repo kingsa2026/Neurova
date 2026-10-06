@@ -367,7 +367,13 @@
 24. **进程级 agents 表是跨用例耦合面** ◑ —— `enhanced_memory_search_api.py:24` 自陈"唯一事实源是 `get_app_state()['agents']`"（`request.app.state.agents` 生产恒空），于是任何跑真实 startup 的用例都会把一个真 agent 写进该表，把同进程后续 18 条（nerf 11 + semantic-search 7）带倒。本轮在新用例内按原样回填所动全局以自证隔离；**表本身的单源化/用例隔离属预存脆弱面，未放宽**。
 25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。后续单跑三次全绿，目录跑时仍偶发翻转。
 26. **落盘锚点接受非路径对象并在进程 CWD 静默建塔（已修 `a9170fa9`）** ✅ —— `MagicMock` 实现了 `__fspath__`，故 `Path(mock)` 能过类型检查、其 repr 被 Windows 拆成相对目录，随后 `mkdir(parents=True)` + 写盘**全部成功**，只在 `except OSError` 留一行 debug；仓库根实际长出过 `MagicMock/SkillService().skills_dir/<id>/.lifecycle_state.json`。同契约三命中点（`skill_lifecycle.run_sweep_if_due`、`ConsolidationPlanStore.__init__`、`SkillService.__init__`）现统一收到 `data_root.require_data_path`。**读码新发现**：判据必须落在**公开入口**——放在 `_state_file()` 那层会被 `_load_last_run` 的 `except ValueError` 吞成 "last=0"，非法路径照样落盘。**另记一条治理教训**：`.gitignore:380` 的 `/MagicMock/` 与 `git log` 表明该症状至少复发三次（`84260bb4` 2026-06-08 排除、`dd03d67c` 2026-09-02「根目录二次清理 — git rm … 垃圾 + gitignore 防再生」、2026-10-04 再现），三次都停在"清理 + 忽略"，从未查落点为何漂到 CWD——按教义第 2 条，"防再生"的 ignore 是把失败改写成静默，本条是首次根修；规则保留只为防误提交，不再充当止痛。
-27. **跑测卫生三件（本批取证时发现，均预存）** ◑→部分已闭 —— ① `tests/unit/evolution/eval/`（`test_heldout_isolation.py`、`test_history_*`）挂死，30s 全局 timeout 直接 kill 整场，该目录跑不通只能逐文件；② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR 触发 `Interrupted: 1 error during collection`，使 `pytest tests/` 整仓无法起跑；③ `tests/unit/planning/__pycache__/__init__.cpython-312.pyc` 处于**被跟踪**态，跑一次测试即产生 diff——与 AGENTS.md §4"跑测产物不得被放行"相冲（`TestProtectedSubsetEntriesAreTracked` 只双向钉条目，未覆盖此类历史入库 .pyc）。**④ 同批新增的收口（`9df526b9`）**：`tests/conftest.py` 里 autouse 逐用例快照仓库根顶层条目，新增即红并点名肇事用例——它拦的是"下一次换个模块再漏"，与 §6-26 的具体根修互补；①②③ 仍待各自另批处理。
+27. **跑测卫生三件（本批取证时发现，均预存）—— 三件已全部根修** ✅ ——
+    ① `tests/unit/evolution/eval/` 挂死（`ea1da5ae`）：真因不在 runner 也不是死循环，而是三个文件传 `agent=None`，`service.py:209/327` 的 `agent or SimulatedAgent(...)` 回落成**真** LLM 客户端——**用例在发真实请求、花真实配额**，被判 `rate_limited` 后进入"≤10 次 × 间隔 10s"等待，远超 30s 用例预算被 thread 方法击杀，连累整目录。修法：目录级出站闸 + `offlineAgent`（8 处 `agent=None` 逐方法替换）。闸必须抛 **BaseException 子类**——`SimulatedAgent.run` 外层 `except Exception` 会把 AssertionError 吞成空回复，普通断言等于哑闸。
+    ①附：同根因第四处 `tests/llm/test_instream_error_encoding.py`（故意喂 429 却没免等待）按 `_sleep_for_retry` docstring 预留的桩注入点收口；揭盖后 6 条全绿，说明挂死背后没藏别的缺陷。
+    ② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR（`ce74616b`）：模块顶层 `from neurova.agents.seen_boundary import ...`，该包本仓不存在 → `Interrupted: 1 error during collection` 使 `pytest tests/` **一条都不跑**。第 7 条比后判退役：全文 0 个 `def test`、三个基准方法**全都**依赖两个已退役模块、全仓零消费者、现役能力另有真用例在跑。修后全仓收集 `21292 tests collected` 零错误。
+    ③ `tests/unit/planning/__pycache__/*.pyc` 被跟踪（`5193a885`）：**gitignore 规则对已跟踪文件不生效**——`dd5b00be`(08-30) 批量提交带入，`472a0180`(09-22) 才补 `tests/**/__pycache__/`，规则本身没错，这两个是规则之前的既成事实，于是每次跑测稳定产生一条无关 diff，污染 `git status` 与 A/B 判据。`git rm --cached` + 新增 `test_no_run_product_is_tracked`（取 `git ls-files` 而非磁盘形态：磁盘上的 pyc 是正常产物，仓库里的才是债）。
+    ④ 同批新增的全局收口（`9df526b9`）：`tests/conftest.py` 里 autouse 逐用例快照仓库根顶层条目，新增即红并点名肇事用例，与 §6-26 的具体根修互补。
+    **仍存疑、未处理**：429 等待重试的最坏叠加时长（10 次 × 封顶 120s）在生产里没有全局 deadline，只有"重试次数"上界——是否要给整条请求加墙钟预算属产品口径，未擅动。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -437,6 +443,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `04c4a42e` | 记忆增强端点身份回到那道门、7 处变更收回归属校验，并去除既有测试伪造 `request.state.user` 的中间件（净 +10） | §6-1 同根因第三命中点，详见 memory-isolation §十 |
 | `a9170fa9` | 落盘锚点收成绝对路径单源（`data_root.require_data_path` 接三处：sweep 入口 / 计划仓 / 服务构造），mock 与相对串不再于进程 CWD 静默建塔（净 +32） | §6-26 新增并根修 |
 | `9df526b9` | 仓库根污染守卫接线：autouse 逐用例快照顶层条目、新增即红并点名肇事用例（生产净 0，测试基建 +153） | §6-27 的 ④ 收口，与 §6-26 根修互补 |
+| `ce74616b` | 退役不可加载的多智能体基准台架（0 用例 / 三方法全依赖已退役模块 / 零消费者），解开的却是 `pytest tests/` 整仓的锁；另加全仓收集零错误守卫（不进 CI 子集，避免 +60s） | §6-27 的 ② |
+| `5193a885` | 取消跟踪两个历史 .pyc，并新增「被跟踪产物」清点判据（取 git ls-files 而非磁盘形态） | §6-27 的 ③ |
+| `ea1da5ae` | 根修 eval 目录挂死：`agent=None` 回落真 LLM 客户端（用例在发真请求、花配额）；目录级出站闸（须抛 BaseException 才不被 except Exception 吞）+ 8 处注入离线 agent，另收同类第四处 429 真等待 | §6-27 的 ① 与附项 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
