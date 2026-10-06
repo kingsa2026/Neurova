@@ -108,7 +108,7 @@ async def unregister_agent(
 @router.post("/yield-checker/reset")
 async def reset_yield_checker_endpoint():
     """重置 Yield Checker（仅用于测试）"""
-    reset_glance_yield_checker()
+    await reset_glance_yield_checker()
     logger.info("Reset yield checker")
     return {"status": "reset"}
 
