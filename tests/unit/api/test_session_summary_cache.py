@@ -13,7 +13,6 @@ SessionManager 为进程级单例，fixture 直接清空缓存隔离跨测试残
 
 import json
 import threading
-from pathlib import Path
 
 import pytest
 
@@ -21,22 +20,17 @@ from neurova.session_manager import SessionManager
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
-    # CWD 隔离 + 相对 sessions 目录：与 test_session_round_ops 的单例共存
-    # 姿势一致。重指派单例 _sessions_dir 为绝对路径会毒化依赖
-    # chdir + 相对 sessions/ 的其他测试（预存干扰，session_count 文件同款），
-    # 故此处用相对路径 + 退出时恢复原指向。
-    monkeypatch.chdir(tmp_path)
+def repo(tmp_path):
+    """落点由 `tests/conftest.py::_isolateSessionsLanding` 默认隔离（全仓唯一定义）。"""
     (tmp_path / "sessions").mkdir(exist_ok=True)
-    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", "sessions")
     mgr = SessionManager()
-    original_dir = mgr._sessions_dir
-    mgr._sessions_dir = Path("sessions")  # 已初始化单例不再读 env，显式对齐
+    assert mgr._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % mgr._sessions_dir
+    )
     # 单例跨测试复用：清掉上一测试残留的缓存条目
     mgr._summary_cache.clear()
     mgr._feedback_cache.clear()
     yield mgr
-    mgr._sessions_dir = original_dir
 
 
 class TestSummaryCache:

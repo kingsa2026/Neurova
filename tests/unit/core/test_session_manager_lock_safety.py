@@ -34,6 +34,7 @@ from neurova.session_manager import SessionManager
 # ── Fixtures ────────────────────────────────────────────
 
 
+
 @pytest.fixture
 def fresh_manager(tmp_path: Path) -> SessionManager:
     """创建非单例 SessionManager, sessions_dir 指向 tmp_path.

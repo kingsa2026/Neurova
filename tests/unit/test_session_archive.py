@@ -20,13 +20,19 @@ from neurova.session_manager import SessionManager
 
 
 @pytest.fixture()
-def sm(tmp_path, monkeypatch):
-    """CWD 指向 tmp_path（SessionManager 的 sessions/ 是 CWD 相对），重置单例。"""
-    monkeypatch.chdir(tmp_path)
-    SessionManager._instance = None
+def sm(tmp_path):
+    """真单例；落点由 `tests/conftest.py::_isolateSessionsLanding` 默认隔离（全仓唯一定义）。
+
+    原实现是 `monkeypatch.chdir(tmp_path)`，docstring 还写着"SessionManager 的
+    sessions/ 是 CWD 相对"——那句自 `c2cb809c`(09-22) 起就是假的：落点第三档是
+    `dataLanding("sessions")`，与进程 CWD 无关，于是这 4 条用例一直在读写仓库真实
+    data/sessions 并因此必现失败（§6-29 的第二个命中点）。
+    """
     manager = SessionManager()
+    assert manager._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % manager._sessions_dir
+    )
     yield manager
-    SessionManager._instance = None
 
 
 def _seed_session(sm: SessionManager, agent_id: str, session_id: str, dates: list[str], user_id: str = "u1"):

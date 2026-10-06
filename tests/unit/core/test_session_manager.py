@@ -24,18 +24,14 @@ from neurova.session_manager import (
 # 辅助函数
 # ---------------------------------------------------------------------------
 
+
 def _make_manager(tmp_path: Path) -> SessionManager:
-    """创建 SessionManager 并 patch _get_session_dir 指向 tmp_path。"""
-    mgr = SessionManager()
-
-    # 直接替换实例属性（不通过 __get__ 绑定，避免 bound method 额外传 self）
-    def _fake_dir(agent_id_arg):
-        d = tmp_path / "agents" / agent_id_arg / "session"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    mgr._get_session_dir = _fake_dir
-    return mgr
+    """真单例 + 已隔离的落点（落点由上面的注入口决定，不再 patch 私有方法）。"""
+    manager = SessionManager()
+    assert manager._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % manager._sessions_dir
+    )
+    return manager
 
 
 # ======================================================
@@ -114,7 +110,7 @@ class TestAddAndGetSession:
         mgr = _make_manager(tmp_path)
         key = mgr.add_message("agent_a", "sess_01", "hi", "hello")
         # 检查文件是否存在
-        session_dir = tmp_path / "agents" / "agent_a" / "session"
+        session_dir = tmp_path / "sessions" / "agent_a"
         files = list(session_dir.glob("session_sess_01_*.json"))
         assert len(files) == 1
 
@@ -260,7 +256,7 @@ class TestListSessions:
         mgr = _make_manager(tmp_path)
         mgr.add_message("agent_a", "sess_multi_day", "hi", "hello")
         # 手动模拟另一个日期的文件
-        session_dir = tmp_path / "agents" / "agent_a" / "session"
+        session_dir = tmp_path / "sessions" / "agent_a"
         # 再写入一个不同日期的文件
         fake_path = session_dir / "session_sess_multi_day_2099-12-31.json"
         fake_data = {
@@ -291,7 +287,7 @@ class TestDeleteSession:
     def test_delete_session_removes_file(self, tmp_path):
         mgr = _make_manager(tmp_path)
         mgr.add_message("agent_a", "sess_del", "hi", "hello")
-        session_dir = tmp_path / "agents" / "agent_a" / "session"
+        session_dir = tmp_path / "sessions" / "agent_a"
         files_before = list(session_dir.glob("session_sess_del_*.json"))
         assert len(files_before) == 1
         mgr.delete_session("agent_a", "sess_del")
