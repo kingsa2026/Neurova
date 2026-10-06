@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from neurova.api.deps import get_current_user, get_optional_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.api.endpoints import get_app_state
 from neurova.core.logger import get_logger
 
@@ -172,11 +173,17 @@ async def get_system_info(request: Request):
         return {"error": str(e)}
 
 
-@router.get("/agents")
-async def get_agents_stats(request: Request):
-    """获取 Agent 统计（每 agent 会话/消息真实，无粒度源字段诚实 0）"""
-    _get_request_id(request)
+def _agentStatsRows(callerId: str) -> list:
+    """每 agent 会话/消息聚合 —— `/agents` 与 `/export` 共用的唯一实现。
 
+    为什么必须是函数而不是"`/export` 去 await `get_agents_stats`"：那样等于把端点当
+    普通函数复用，FastAPI 不会解析 `Depends` 默认值，`user` 拿到的是 Depends 对象，
+    分桶入参永远取不到调用者（本批给端点补上身份依赖后，`/export` 立即降级成空聚合）。
+    绕过生产装配点复用端点是根因，所以两侧共用这个纯函数（教义第 6 条：一份实现）。
+
+    `callerId` 口径与首页一致：按调用者过滤，空属主的记录仍对所有人可见
+    （`SessionManager._collect_summaries` 的既有规则，本批不改）。
+    """
     from neurova.session_repository import get_session_repository
 
     try:
@@ -188,7 +195,7 @@ async def get_agents_stats(request: Request):
     # 会话一次性扫描并按 agent 分组（真实摘要含 agent_id/total_messages）
     per_agent: Dict[str, Dict[str, int]] = {}
     try:
-        sessions = get_session_repository().list_sessions()
+        sessions = get_session_repository().list_sessions(user_id=callerId)
         for s in sessions:
             aid = str(s.get("agent_id") or "default")
             bucket = per_agent.setdefault(aid, {"conversations": 0, "messages": 0})
@@ -217,6 +224,22 @@ async def get_agents_stats(request: Request):
             }
         )
     return results
+
+
+@router.get("/agents")
+async def get_agents_stats(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """获取 Agent 统计（每 agent 会话/消息真实，无粒度源字段诚实 0）
+
+    分桶口径与首页一致：会话摘要按调用者 `user_id` 过滤，空属主仍对所有人可见。
+    用 `get_current_user_or_default` 而不是 `get_current_user`——本端点此前**一道门都
+    没有**、匿名可达，补硬门会把既有匿名调用方打断；回落 default 桶既保住可用性，
+    又不再把全体用户的会话聚合给单个人看。
+    """
+    _get_request_id(request)
+    return _agentStatsRows(str((user or {}).get("user_id") or ""))
 
 
 @router.get("/token-usage")
@@ -518,8 +541,16 @@ async def get_provider_usage(
 
 
 @router.get("/export")
-async def export_stats(request: Request):
-    """导出统计汇总（JSON blob，供前端导出按钮下载）"""
+async def export_stats(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """导出统计汇总（JSON blob，供前端导出按钮下载）
+
+    agents 段与 `/agents` 同源同口径：同一个 `_agentStatsRows`、同一个调用者分桶。
+    原先这里 `await get_agents_stats(request)` 复用端点函数——依赖不会被解析，
+    等于把"端点能跑"误当成"函数能复用"。
+    """
     _get_request_id(request)
 
     from neurova.core.usage_accounting import get_usage_accounting
@@ -527,7 +558,7 @@ async def export_stats(request: Request):
     try:
         overview = _build_overview()
         trends = _build_trends()
-        agents = await get_agents_stats(request)
+        agents = _agentStatsRows(str((user or {}).get("user_id") or ""))
         accounting = get_usage_accounting().snapshot()
         return {
             "exported_at": time.time(),

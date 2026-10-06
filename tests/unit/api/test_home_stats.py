@@ -50,6 +50,31 @@ class FakeMemoryManager:
         return self._count
 
 
+class HomeCall:
+    """经**真 router** 调 home 端点，身份走 dependency_overrides。
+
+    原写法把端点当普通函数调并手传 MagicMock 当 request：FastAPI 不会解析 Depends
+    默认值，端点新增的身份参数因此拿到 Depends 对象——正是 AGENTS.md §3 禁的
+    "绕过生产装配点"。改起真装配后，身份链与线上一致，测试仍可保留 async 壳。
+    """
+
+    @staticmethod
+    def get(path: str, params: dict | None = None) -> dict:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from neurova.api.auth import get_current_user
+
+        app = FastAPI()
+        app.include_router(home.router, prefix="/api/v1")
+        app.dependency_overrides[get_current_user] = lambda: {
+            "user_id": "alice", "username": "alice", "role": "user", "neuser_id": "ne-alice",
+        }
+        resp = TestClient(app).get(path, params=params or {})
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+
 class TestHomeDataRealStats:
     """/home/data 统计必须来自真实数据源而非硬编码 0。"""
 
@@ -72,7 +97,7 @@ class TestHomeDataRealStats:
             lambda: 65,
         )
 
-        res = await home.get_home_data(MagicMock())
+        res = HomeCall.get("/api/v1/home/data")
 
         stats = res["stats"]
         assert stats["agent_count"] == 2
@@ -90,7 +115,7 @@ class TestHomeDataRealStats:
             "neurova.cognitive_layers.memory_layer.manager.get_memory_manager",
             lambda *a, **kw: FakeMemoryManager(42),
         )
-        res = await home.get_home_data(MagicMock())
+        res = HomeCall.get("/api/v1/home/data")
         assert res["stats"]["memory_count"] == 42
 
     @pytest.mark.asyncio
@@ -104,7 +129,7 @@ class TestHomeDataRealStats:
         monkeypatch.setattr("neurova.session_repository.get_session_repository", boom)
         monkeypatch.setattr("neurova.cognitive_layers.memory_layer.manager.get_memory_manager", boom)
         monkeypatch.setattr("neurova.api.endpoints.home._sum_agent_persist_counts", lambda: (_ for _ in ()).throw(RuntimeError("persist scan down")))
-        res = await home.get_home_data(MagicMock())
+        res = HomeCall.get("/api/v1/home/data")
         assert res["stats"]["conversation_count"] == 0
         assert res["stats"]["memory_count"] == 0
 
@@ -182,8 +207,8 @@ class TestHomeTrendsRealAggregation:
             "neurova.session_repository.get_session_repository",
             lambda: FakeSessionRepo(sessions),
         )
-        res1 = await home.get_home_trends(MagicMock(), days=7)
-        res2 = await home.get_home_trends(MagicMock(), days=7)
+        res1 = HomeCall.get("/api/v1/home/trends", {"days": 7})
+        res2 = HomeCall.get("/api/v1/home/trends", {"days": 7})
         assert res1 == res2, "trends 必须是确定性数据，不允许 random 伪造"
 
     @pytest.mark.asyncio
@@ -194,7 +219,7 @@ class TestHomeTrendsRealAggregation:
             "neurova.session_repository.get_session_repository",
             lambda: FakeSessionRepo(sessions),
         )
-        res = await home.get_home_trends(MagicMock(), days=7)
+        res = HomeCall.get("/api/v1/home/trends", {"days": 7})
 
         labels = res["conversation_trend"]["labels"]
         assert len(labels) == 7
@@ -213,6 +238,6 @@ class TestHomeTrendsRealAggregation:
             "neurova.session_repository.get_session_repository",
             lambda: FakeSessionRepo(self._sessions()),
         )
-        res = await home.get_home_trends(MagicMock(), days=7)
+        res = HomeCall.get("/api/v1/home/trends", {"days": 7})
         assert res["token_trend"]["data"] == []
         assert res["llm_trend"]["data"] == []
