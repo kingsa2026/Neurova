@@ -123,6 +123,32 @@ class TestSystemStatsReal:
         assert res["overview"]["tokens"] == 0
 
 
+class StatsCall:
+    """经**真 router** 调 stats 端点，身份走 dependency_overrides。
+
+    原写法 `await stats_endpoint.get_agents_stats(MagicMock())` 把端点当普通函数复用，
+    FastAPI 不解析 Depends 默认值——本批给端点补了身份依赖后，这条路径拿到的是
+    Depends 对象而非用户字典。`/export` 在生产里也曾这样直调 `/agents` 的端点函数，
+    现两侧共用 `_agentStatsRows`，测试也随之走真装配。
+    """
+
+    @staticmethod
+    def get(path: str) -> object:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from neurova.api.auth import get_current_user_or_default
+
+        app = FastAPI()
+        app.include_router(stats_endpoint.router, prefix="/api/v1/stats")
+        app.dependency_overrides[get_current_user_or_default] = lambda: {
+            "user_id": "alice", "username": "alice", "role": "user", "neuser_id": "ne-alice",
+        }
+        resp = TestClient(app).get(path)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+
 class TestAgentStatsReal:
     """/stats/agents 按 agent 真实聚合会话；无粒度源字段诚实为 0。"""
 
@@ -130,7 +156,7 @@ class TestAgentStatsReal:
     async def test_agents_aggregate_sessions_per_agent(self, monkeypatch):
         _patch_sources(monkeypatch)
 
-        res = await stats_endpoint.get_agents_stats(MagicMock())
+        res = StatsCall.get("/api/v1/stats/agents")
 
         by_id = {a["id"]: a for a in res}
         assert set(by_id) == {"default", "alt"}
@@ -153,7 +179,7 @@ class TestExportEndpoint:
     async def test_export_contains_real_aggregates(self, monkeypatch):
         _patch_sources(monkeypatch)
 
-        res = await stats_endpoint.export_stats(MagicMock())
+        res = StatsCall.get("/api/v1/stats/export")
 
         assert res["overview"]["conversations"] == 3
         assert res["overview"]["memories"] == 65
