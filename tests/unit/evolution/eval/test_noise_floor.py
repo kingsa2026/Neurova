@@ -205,7 +205,7 @@ class TestServiceWiring:
         return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
 
     @pytest.mark.asyncio
-    async def test_service_calibrates_when_repeats_gt_one(self, tmp_path, monkeypatch):
+    async def test_service_calibrates_when_repeats_gt_one(self, tmp_path, monkeypatch, offlineAgent):
         """noise_repeats>1：service 自动校准并落指纹缓存。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
@@ -214,14 +214,14 @@ class TestServiceWiring:
         cfg = EvolutionConfig(noise_repeats=2)
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds(),
-            agent=None, judge=self._judge, mutate=_mutate_appends_improved, config=cfg,
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved, config=cfg,
         )
         assert not result.rejected
         assert (tmp_path / "evo" / "calibration.json").exists()
         assert result.noise_band.get("method") == "repeated_baseline_evals"
 
     @pytest.mark.asyncio
-    async def test_service_default_skips_calibration(self, tmp_path, monkeypatch):
+    async def test_service_default_skips_calibration(self, tmp_path, monkeypatch, offlineAgent):
         """默认 noise_repeats=0：不花校准预算，无缓存文件，行为与旧版一致。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
@@ -229,14 +229,14 @@ class TestServiceWiring:
         svc = SkillEvolutionService("agent-y", base_dir=tmp_path / "evo")
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds(),
-            agent=None, judge=self._judge, mutate=_mutate_appends_improved,
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
         )
         assert not result.rejected
         assert not (tmp_path / "evo" / "calibration.json").exists()
         assert result.noise_band == {}
 
     @pytest.mark.asyncio
-    async def test_calibration_failure_degrades_honestly(self, tmp_path, monkeypatch):
+    async def test_calibration_failure_degrades_honestly(self, tmp_path, monkeypatch, offlineAgent):
         """校准失败（judge 故障）→ 无带（回退 min_improvement），进化走既有
         judge_unavailable 拒绝语义，不因校准产生新异常形态。"""
 
@@ -251,7 +251,7 @@ class TestServiceWiring:
         cfg = EvolutionConfig(noise_repeats=2)
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds(),
-            agent=None, judge=_BrokenJudge(), mutate=_mutate_appends_improved, config=cfg,
+            agent=offlineAgent, judge=_BrokenJudge(), mutate=_mutate_appends_improved, config=cfg,
         )
         assert result.judge_available is False
         assert result.rejected and result.reject_reason == "judge_unavailable"

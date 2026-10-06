@@ -246,7 +246,7 @@ class TestServiceAndImproverWiring:
         return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
 
     @pytest.mark.asyncio
-    async def test_service_records_to_ledger(self, tmp_path, monkeypatch):
+    async def test_service_records_to_ledger(self, tmp_path, monkeypatch, offlineAgent):
         """service.evolve 自动携带 ledger：候选结局落 history/<skill>.jsonl。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
@@ -257,14 +257,14 @@ class TestServiceAndImproverWiring:
             return artifact_text + "\nIMPROVED"
 
         await svc.evolve(skill_id="s1", skill_text=BASELINE, dataset=_ds(),
-                         agent=None, judge=self._judge, mutate=mutate)
+                         agent=offlineAgent, judge=self._judge, mutate=mutate)
         ledger_file = tmp_path / "evo" / "history" / "s1.jsonl"
         assert ledger_file.exists()
         records = [json.loads(line) for line in ledger_file.read_text(encoding="utf-8").splitlines()]
         assert records and all("hypothesis" in r for r in records)
 
     @pytest.mark.asyncio
-    async def test_service_legacy_mutate_signature_still_works(self, tmp_path, monkeypatch):
+    async def test_service_legacy_mutate_signature_still_works(self, tmp_path, monkeypatch, offlineAgent):
         """旧签名 mutate（不收 history kwarg）注入时 runner 不得传 history。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
@@ -275,7 +275,7 @@ class TestServiceAndImproverWiring:
             return artifact_text + "\nIMPROVED"
 
         result, _ = await svc.evolve(skill_id="s1", skill_text=BASELINE, dataset=_ds(),
-                                     agent=None, judge=self._judge, mutate=legacy_mutate)
+                                     agent=offlineAgent, judge=self._judge, mutate=legacy_mutate)
         assert not result.rejected
 
     @pytest.mark.asyncio
