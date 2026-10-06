@@ -82,6 +82,73 @@ class TestAttach:
         assert r is result and "action_result" in r
 
 
+class TestNonIntrusiveVocabulary:
+    """T-01 无抢占通道扩值（设计稿 §0.3 映射表）
+
+    通道名一律收口进 `route`/`delivery`，**不新造 channel/plane 键**——
+    词表扩值即够，越界仍由 build() 抛住。
+    """
+
+    def test_cli_and_cross_platform_routes_buildable(self):
+        for route in ("shell", "atspi", "xdotool"):
+            r = ar.build(
+                route, "confirmed", delivery="not_applicable", evidence=["delivery_ack"]
+            )
+            assert r["route"] == route
+
+    def test_isolated_plane_delivery_buildable(self):
+        r = ar.confirmed("remote", "isolated_plane", ["screenshot_diff"])
+        assert r["delivery"] == "isolated_plane"
+
+    def test_expanding_vocabulary_does_not_loosen_invariant(self):
+        """扩值不得顺手放宽不变式：refused 的 delivery 检查必须仍咬合。
+
+        断言的是**错在哪一条**——扩值前失败于"delivery 越界"（值没进词表），
+        扩值后必须失败于"refused 不得声明 delivery"（不变式生效）。
+        只写 pytest.raises 会两种都通过，等于没判。
+        """
+        with pytest.raises(ActionResultError, match="不得声明 delivery"):
+            ar.build(
+                "uia",
+                "refused",
+                delivery="isolated_plane",
+                refusal_code="background_unavailable",
+            )
+
+
+class TestNonIntrusiveVocabulary:
+    """T-01 无抢占通道扩值（设计稿 §0.3 映射表）
+
+    通道名一律收口进 `route`/`delivery`，**不新造 channel/plane 键**——
+    词表扩值即够，越界仍由 build() 抛住。
+    """
+
+    def test_cli_and_cross_platform_routes_buildable(self):
+        for route in ("shell", "atspi", "xdotool"):
+            r = ar.build(
+                route, "confirmed", delivery="not_applicable", evidence=["delivery_ack"]
+            )
+            assert r["route"] == route
+
+    def test_isolated_plane_delivery_buildable(self):
+        r = ar.confirmed("remote", "isolated_plane", ["screenshot_diff"])
+        assert r["delivery"] == "isolated_plane"
+
+    def test_expanding_vocabulary_does_not_loosen_invariant(self):
+        """扩值不得顺手放宽不变式：refused 的 delivery 检查必须仍咬合。
+
+        断言的是**错在哪一条**——扩值前失败于"delivery 越界"（值还没进词表），
+        扩值后必须失败于"refused 不得声明 delivery"（不变式本身）。
+        """
+        with pytest.raises(ActionResultError, match="不得声明 delivery"):
+            ar.build(
+                "uia",
+                "refused",
+                delivery="isolated_plane",
+                refusal_code="background_unavailable",
+            )
+
+
 class TestBrowserDerivation:
     """BrowserResult → ActionResult 的推导映射（_normalize_browser_result 消费）"""
 
