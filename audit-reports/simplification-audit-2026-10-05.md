@@ -391,6 +391,12 @@
     - `memory/test_memory_loop_fixes.py`(8 passed)、`tools/test_shell_sessions.py`：不写真实盘（后者是 `ShellSessionManager`，与本契约无关——顺带记一次伪命中：`grep "SessionManager()"` 会把 `ShellSessionManager()` 一起捞进来，**"18 个文件未隔离"的最初估计就是这么来的，实测按精确类名 + 行为判据复算是 3 个真命中**）。
     **候选（未动，按此序性价比）**：① `test_session_archive` 4 条 + `test_p3_p4_refactor:252` 一处，同形改成 `NEUROVA_SESSIONS_DIR` + 单例复位（即 `9495f1db` 的形态）；② 上面四个 patch 内部口的改走同一 env 注入口；③ 一条守卫「跑测期间 `data/sessions` 内容指纹不得变化」，与仓库根守卫互补，成本同量级（现测 listdir 0.10 ms，md5 全树聚合每次约 0.2 s）。
     **取证自证**：本条测量两次让 `a1` 下生成 `session_b6dab8cc_*`、`session_49ed4370_*`，均已即删，文件数回到 98；`_summary_index.json` 被运行重写过，留有这两条幽灵键——按 `session_manager.py:1870`「索引键集 ≠ 目录指纹键集即整份作废重建」，下次读取自愈（此为读码所见，未再实测触发自愈以免又写一次真实盘）。
+30. **2026-10-06 对既有登记的复测更正（回答"还欠什么"时逐条重跑，不沿用旧值）** ——
+    - **§6-5 命中点漏了一条**：`coordination_decorators.py` 调 `get_glance_yield_checker()` 漏 `await` 的实测有 **两处**（`:99` 与 `:271`），本条原先只记 `:99`——即第 5 条要求的"全命中点扫荡"当时没扫完，仍是欠账。
+    - **§6-20 现状已变**：`neurova/expected`（0 字节）仍在（`Oct 4 01:04`），`neurova/missing` 已不在。所以序 1 的那句"`git rm neurova/expected`"仍待办，但"两件"的表述要按一件读。
+    - **§6-16 四件命中里有一件正被在途改动删除**：`tests/unit/skills/test_skills_evolution_engine.py` 此刻是工作树 `D` 状态（同批还删了 `neurova/skills/evolution_engine.py`，并带来 `evolution/`、`skills/` 一大批 M/??），**未提交即未交付**，不计入已修；`test_skill_security.py` 仍在（17 行、0 用例）。
+    - **仍现行确认未修**（逐条 grep 复算）：§6-2 `integration_manager.py:383/449` 的 `self._logger` 幻影引用（回滚路径仍被 `except` 吞）；§6-4 `notifications.py:85/119` 仍读 `enhanced_users_api._users_store = {}`（`:73` 空字典原样）；§6-8 三条"依赖缺失仍返回成功"（见该条新记的实测返回值）。
+    - **本轮自己造成的台账缺陷已修**：§6-27 的 ①②③④ 曾被排到 §6-28 之后（排版串号，会让读者误归因），以纯行序置换修正并断言置换前后行多重集相等。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
