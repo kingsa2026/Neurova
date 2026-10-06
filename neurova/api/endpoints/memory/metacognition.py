@@ -23,13 +23,6 @@ from .base import (
 )
 
 
-class AutoGenerateSkillRequest(BaseModel):
-    """自动生成技能请求"""
-
-    description: str = Field(..., min_length=1, max_length=2000, description="技能描述")
-    category: Optional[str] = Field(default=None, description="技能分类")
-
-
 class MatchSkillsRequest(BaseModel):
     """匹配技能请求"""
 
@@ -348,32 +341,6 @@ async def meta_get_skill_stats(
     except Exception as e:
         logger.exception("获取技能统计失败: %s", e)
         raise APIError.internal(f"获取技能统计失败: {str(e)}")
-
-
-@router.post("/meta/skills/generate", summary="自动生成技能")
-async def meta_generate_skill(
-    request: AutoGenerateSkillRequest,
-    agent_id: Optional[str] = None,
-    req: Request = None,
-    user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """
-    根据描述自动生成新技能
-    """
-    try:
-        manager = get_memory_manager(agent_id, user)
-        skill = manager.meta_generate_skill(request.description, category=request.category)
-
-        return success_response(
-            data=skill,
-            message="技能生成成功",
-            request_id=_get_request_id(req),
-        )
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception("生成技能失败: %s", e)
-        raise APIError.internal(f"生成技能失败: {str(e)}")
 
 
 @router.post("/meta/skills/match", summary="匹配技能")

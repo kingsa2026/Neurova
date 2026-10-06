@@ -251,13 +251,6 @@ export interface EKIMemoryStrength {
   factors: Record<string, number>
 }
 
-export interface EKIReinforcement {
-  memory_id: string
-  content: string
-  score: number
-  recommendation: string
-}
-
 // ---------------------------------------------------------------------------
 // Working Memory Types
 // ---------------------------------------------------------------------------
@@ -302,23 +295,6 @@ export interface UserProfile {
   interaction_patterns: Record<string, unknown>
   conversation_style: string
   knowledge_level: string
-}
-
-// ---------------------------------------------------------------------------
-// Emotion Analysis (under memory/memories/emotion)
-// ---------------------------------------------------------------------------
-
-export interface QuestionQueueStats {
-  pending_count: number
-  total_asked: number
-  avg_per_day: number
-}
-
-export interface PendingQuestion {
-  id: string
-  question: string
-  answer?: string
-  created_at: string
 }
 
 // ---------------------------------------------------------------------------
@@ -626,11 +602,6 @@ export function processEKITask(agentId: string, data: { task_embedding: number[]
   return api.post<ApiResponse<Record<string, unknown>>>(`${EKI_BASE}/process`, data, { params: { agent_id: agentId } })
 }
 
-/** Get reinforcement recommendations. */
-export function getEKIReinforcement(agentId: string, topK = 10) {
-  return api.get<ApiResponse<EKIReinforcement[]>>(`${EKI_BASE}/reinforce`, { params: { agent_id: agentId, top_k: topK } })
-}
-
 /** Predict memory decay over time. */
 export function predictEKIDecay(agentId: string, memoryId: string, horizon = 7) {
   return api.get<ApiResponse<EKIDecayPrediction>>(`${EKI_BASE}/decay/${memoryId}`, { params: { agent_id: agentId, horizon } })
@@ -727,11 +698,6 @@ export function getMetaSkillStats(agentId: string) {
   return api.get<ApiResponse<Record<string, unknown>>>(`${META_BASE}/skills/stats`, { params: { agent_id: agentId } })
 }
 
-/** Auto-generate a skill. */
-export function generateMetaSkill(agentId: string, description: string, category?: string) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${META_BASE}/skills/generate`, { description, category }, { params: { agent_id: agentId } })
-}
-
 /** Match skills to query. */
 export function matchMetaSkills(agentId: string, query: string, topK = 5) {
   return api.post<ApiResponse<Record<string, unknown>[]>>(`${META_BASE}/skills/match`, { query, top_k: topK }, { params: { agent_id: agentId } })
@@ -759,27 +725,6 @@ export function getUserProfile(userId: string, agentId: string) {
 /** Update user profile. */
 export function updateUserProfile(userId: string, agentId: string, data: Partial<UserProfile>) {
   return api.put<ApiResponse<UserProfile>>(`${BASE}/users/${userId}/profile`, data, { params: { agent_id: agentId } })
-}
-
-// ---------------------------------------------------------------------------
-// Question Queue  (prefix: /memory/questions)
-// ---------------------------------------------------------------------------
-
-const QUESTIONS_BASE = '/memory/questions'
-
-/** Get pending questions. */
-export function getPendingQuestions(agentId: string, limit = 20) {
-  return api.get<ApiResponse<PendingQuestion[]>>(`${QUESTIONS_BASE}/pending`, { params: { agent_id: agentId, limit } })
-}
-
-/** Mark a question as asked. */
-export function askQuestion(agentId: string, question: string, answer?: string) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${QUESTIONS_BASE}/ask`, { question, answer }, { params: { agent_id: agentId } })
-}
-
-/** Get question queue statistics. */
-export function getQuestionStats(agentId: string) {
-  return api.get<ApiResponse<QuestionQueueStats>>(`${QUESTIONS_BASE}/stats`, { params: { agent_id: agentId } })
 }
 
 // ---------------------------------------------------------------------------
