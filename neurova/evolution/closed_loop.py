@@ -864,6 +864,15 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
                 logger.info("进化作业队列恢复 %d 条超时租约", recovered)
     except Exception:  # noqa: BLE001 - 队列恢复失败不阻断启动
         logger.warning("进化作业队列恢复失败", exc_info=True)
+
+    # §6-4(2026-10-06) 观测面持久化:响应面摘要跨重启恢复 + 指标时序审计流挂载
+    try:
+        from neurova.evolution.rsi import result_summary as _rs_module
+
+        if _rs_module.attach_persistence():
+            logger.info("RSI 观测面审计流已挂载: %s", _rs_module.default_rsi_summaries_path())
+    except Exception:  # noqa: BLE001 - 观测面装配失败不阻断启动
+        logger.warning("RSI 观测面持久化装配失败", exc_info=True)
     return restored
 
 

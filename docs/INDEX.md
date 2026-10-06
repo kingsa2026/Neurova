@@ -138,6 +138,7 @@
 `agent-memory-cutting-edge-research-2026.md`、`funasr-vs-moss-audio-comparison.md`、
 `moss-audio-completeness-check.md`、`neurova_skill_vs_meta_skill_comparison.md`、
 [`08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md`](08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md)（外部编码代理工具调用与迭代循环对标，含 G1–G8 缺口复验与本文自我更正记录）
+[`08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)（外部 RSI 框架与 Neurova 演进系统代码级对比：十维加权评分 7.9 vs 6.7、习得点清单与本仓待修点登记，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
