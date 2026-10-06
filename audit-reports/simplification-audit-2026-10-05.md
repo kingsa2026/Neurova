@@ -373,13 +373,24 @@
     **C 已修 `bcbb5f69`**：会话归属判据在 `console.py` 写了 5 份（helper 本体 + `_find_session_target` + delete/rename/auto-title 各一份），收口为一处。
     **B 更正我自己的判断**：我先前把"console 面校验会话属主、chat.py `/history` 只校验 agent 归属"记成现行越权面。新加的矩阵守卫实测**推翻**了它——bob 用真身份从 6 条会话端点碰 alice 的会话，修复前就已经全部 403；而 `chat.py` 那条要成立需要"同一 agent 的两个不同用户都能过 `can_access_agent`"，该判据是 admin 全量 / owner 匹配 / 无主仅 admin，普通用户不可达。所以它只是**口径不一致 + 纵深不足**，不是漏洞；是否让 agent 属主读到他人会话属产品语义，未擅动。（同 §七 教训：代码里有分叉 ≠ 请求能走到它。）
     **D 已修 `e040304d`**：`save_message()` 建新记录写死 `user_id=""` 且无入参，两个生产写方都无法声明归属——console 的 fork 只靠"先 create 再 save"的顺序侥幸，`room_store` 则恒产出共享会话。修法：加 `user_id` 关键字参数、既有属主只回填不覆盖、**生产调用点必须显式声明**由源码守卫钉。判据形态换过一次：先做"必填无默认"，实测要拉 24 个不建模归属的测试调用点填噪声，遂改为"带缺省 + 生产侧显式（源码守卫）"。
-    **本轮新登记的债**：`auth.py:415` 与 `deps.py:38` 是**两份同名不同体的 `get_current_user`**（后者额外接受 `?access_token=` 查询参数），console 用 deps 那份——它让 `dependency_overrides` 打错对象时静默失效（本轮就这么红过一次），合并属全仓鉴权口径，需单开一批。`tests/unit/test_session_round_ops.py` 单跑 7 failed（history 混入 98 条额外消息，疑跨用例共享会话目录），预存、与本批无关。
+    **本轮新登记的债**（两笔，均已在同批后续闭合）：`auth.py:415` 与 `deps.py:38` 是**两份同名不同体的 `get_current_user`**（后者额外接受 `?access_token=` 查询参数），console 用 deps 那份——它让 `dependency_overrides` 打错对象时静默失效（本轮就这么红过一次），合并属全仓鉴权口径，需单开一批 → **已修 `b1e18dfc`**（推导合一、两种凭证策略改叫两个名字、deps 收成带理由的再导出）。`tests/unit/test_session_round_ops.py` 单跑 7 failed（history 混入 98 条额外消息，疑跨用例共享会话目录），预存、与本批无关 → **已修 `9495f1db`**，真因是 chdir 隔离不了 `dataLanding` 落点，用例一直在读写仓库真实 `data/sessions/`；**同一根因的其余命中点转 §6-29**。
     ① `tests/unit/evolution/eval/` 挂死（`ea1da5ae`）：真因不在 runner 也不是死循环，而是三个文件传 `agent=None`，`service.py:209/327` 的 `agent or SimulatedAgent(...)` 回落成**真** LLM 客户端——**用例在发真实请求、花真实配额**，被判 `rate_limited` 后进入"≤10 次 × 间隔 10s"等待，远超 30s 用例预算被 thread 方法击杀，连累整目录。修法：目录级出站闸 + `offlineAgent`（8 处 `agent=None` 逐方法替换）。闸必须抛 **BaseException 子类**——`SimulatedAgent.run` 外层 `except Exception` 会把 AssertionError 吞成空回复，普通断言等于哑闸。
     ①附：同根因第四处 `tests/llm/test_instream_error_encoding.py`（故意喂 429 却没免等待）按 `_sleep_for_retry` docstring 预留的桩注入点收口；揭盖后 6 条全绿，说明挂死背后没藏别的缺陷。
     ② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR（`ce74616b`）：模块顶层 `from neurova.agents.seen_boundary import ...`，该包本仓不存在 → `Interrupted: 1 error during collection` 使 `pytest tests/` **一条都不跑**。第 7 条比后判退役：全文 0 个 `def test`、三个基准方法**全都**依赖两个已退役模块、全仓零消费者、现役能力另有真用例在跑。修后全仓收集 `21292 tests collected` 零错误。
     ③ `tests/unit/planning/__pycache__/*.pyc` 被跟踪（首次尝试 `5193a885` **未真正交付**，`2c681e17` 才收口）：**gitignore 规则对已跟踪文件不生效**——`dd5b00be`(08-30) 批量提交带入，`472a0180`(09-22) 才补 `tests/**/__pycache__/`，规则本身没错，这两个是规则之前的既成事实，于是每次跑测稳定产生一条无关 diff，污染 `git status` 与 A/B 判据。`git rm --cached` + 新增 `test_no_run_product_is_tracked`（取 `git ls-files` 而非磁盘形态：磁盘上的 pyc 是正常产物，仓库里的才是债）。**这一条我自己踩了命令坑**：`git commit --only -- <path>` 按**工作树内容**提交该路径，与 `--cached`（磁盘保留）叠加后，删除被在盘同名文件覆盖回去，那次 commit 实际是一次 `Bin 149 -> 149` 的内容更新；提交后复跑守卫转红才暴露——删除类改动的正确形态是"状态进索引 + 不带路径的 `git commit`（只提交索引）"，且绿灯必须在落库之后复取（教义第 4 条）。
     ④ 同批新增的全局收口（`9df526b9`）：`tests/conftest.py` 里 autouse 逐用例快照仓库根顶层条目，新增即红并点名肇事用例，与 §6-26 的具体根修互补。
     **仍存疑、未处理**：429 等待重试的最坏叠加时长（10 次 × 封顶 120s）在生产里没有全局 deadline，只有"重试次数"上界——是否要给整条请求加墙钟预算属产品口径，未擅动。
+29. **`monkeypatch.chdir` 隔离不了 `dataLanding` 落点——同一根因的命中点全量清点（`9495f1db` 修一处，其余登记待点单）** ——
+    根因不在用例，在两次收口的时间差：`session_manager.py:205-207` 的落点解析是「显式入参 > `NEUROVA_SESSIONS_DIR` > `dataLanding("sessions")`」，第三档**与进程 CWD 无关**（`c2cb809c` 2026-09-22「运行期落点全量锚定数据根」把原兜底裸相对名 `"sessions"` 收进数据根，方向正是 §6-26 的锚点纪律）。凡此前靠 chdir 隔离会话目录的用例，前提在同日即失效——它们读写的是**仓库真实 `data/sessions/`**。`tests/unit/test_session_archive.py:24` 的 docstring 还写着"SessionManager 的 sessions/ 是 CWD 相对"，该句现为假。
+    **取证方法换过一次（这是本条最该记的）**：先用"跑前后 `find | sort` 集合差"，`test_session_archive` 报 `added=0 removed=0`，看着像干净；改用 mtime + 全树 md5 聚合复测，同一次运行**动了 15 个真实文件**（把 `kai/`、`default/` 下的会话移进移出 `archived/`）。集合差只能看见新增/消失，**看不见原地改写与等量搬移**——凡判据是"数据根有没有被写"，必须取内容指纹，不能取文件清单。
+    实测（逐文件单跑，判据 = 跑前后 `data/sessions` 全树 md5 是否变化）：
+    - `tests/unit/test_session_round_ops.py`：chdir 假前提 → 修前 6 passed / 7 failed 且每次 +1 真实文件；`9495f1db` 改 env 注入口后 **13 passed、md5 不变**。
+    - `tests/unit/test_session_archive.py`：chdir 假前提 → **4 failed / 4 passed（预存）**，真实 store 被搬移 15 个文件。该文件最后一次改动是 `4a3c9380`(09-04)，早于 `c2cb809c`(09-22)，与本会话所有 commit 无关。
+    - `tests/unit/agent/test_p3_p4_refactor.py:252`：**零隔离**直接 `SessionManager().create_session(agent_id="a1", user_id="u1")`，单跑 6 passed / 7 skipped——**全绿却在真实数据根建会话**，md5 变化。它同时证伪一件事：§6-27 ④ 的仓库根污染守卫只盯仓库顶层条目，`data/` 内部它看不见。
+    - `core/test_session_manager.py`(31 passed)、`core/test_session_manager_json_safety.py`(6)、`core/test_session_assistant_metadata.py`(5)、`agent/test_history_write_fence.py`(16)：md5 不变，不污染真实盘，但隔离手段是 patch 私有方法 `_get_session_dir` / 直改私有字段 `_sessions_dir`——第 3 条明禁的"绕过生产装配点"，今天能过只因为那两个内部口恰好是唯一读路径，生产侧新增一条不经它们的解析就静默失效。
+    - `memory/test_memory_loop_fixes.py`(8 passed)、`tools/test_shell_sessions.py`：不写真实盘（后者是 `ShellSessionManager`，与本契约无关——顺带记一次伪命中：`grep "SessionManager()"` 会把 `ShellSessionManager()` 一起捞进来，**"18 个文件未隔离"的最初估计就是这么来的，实测按精确类名 + 行为判据复算是 3 个真命中**）。
+    **候选（未动，按此序性价比）**：① `test_session_archive` 4 条 + `test_p3_p4_refactor:252` 一处，同形改成 `NEUROVA_SESSIONS_DIR` + 单例复位（即 `9495f1db` 的形态）；② 上面四个 patch 内部口的改走同一 env 注入口；③ 一条守卫「跑测期间 `data/sessions` 内容指纹不得变化」，与仓库根守卫互补，成本同量级（现测 listdir 0.10 ms，md5 全树聚合每次约 0.2 s）。
+    **取证自证**：本条测量两次让 `a1` 下生成 `session_b6dab8cc_*`、`session_49ed4370_*`，均已即删，文件数回到 98；`_summary_index.json` 被运行重写过，留有这两条幽灵键——按 `session_manager.py:1870`「索引键集 ≠ 目录指纹键集即整份作废重建」，下次读取自愈（此为读码所见，未再实测触发自愈以免又写一次真实盘）。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -454,6 +465,12 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `ea1da5ae` | 根修 eval 目录挂死：`agent=None` 回落真 LLM 客户端（用例在发真请求、花配额）；目录级出站闸（须抛 BaseException 才不被 except Exception 吞）+ 8 处注入离线 agent，另收同类第四处 429 真等待 | §6-27 的 ① 与附项 |
 | `2c681e17` | 真正取消跟踪那两个 .pyc（状态进索引 + 不带路径的 commit 只提交索引）；由守卫在提交后复跑时抓出上一次交付是假的 | §6-27 的 ③ 闭合 |
 | `2c1008e6` | §6-27 三件收口登记 + 记一条「单元测试一直在花真实 API 配额」 | §6-27 |
+| `ed015dcb` | 首页会话数/按天趋势与 `/stats/agents` 按调用者分桶（生产净 **+50**）；`/export` 不再把端点当普通函数 `await`，两侧共用 `_agentStatsRows(callerId)` | §6-28 的 A |
+| `bcbb5f69` | 会话归属判据在 `console.py` 的 5 份写法收口为 `_check_session_ownership` 一处（生产净 **-8**） | §6-28 的 C |
+| `e040304d` | `save_message()` 加 `user_id` 关键字参数、既有属主只回填不覆盖，生产调用点须显式声明归属由源码守卫钉（生产净 **+23**）；`room_store` 显式声明共享 | §6-28 的 D |
+| `a9126ce5` `dd9c4ffa` | 上述两批守卫进受保护子集（逐文件单跑确定全绿后才登记） | §6-28 判据接线 |
+| `b1e18dfc` | 身份门收成一份推导（`_identityFromCredentialsOr401` / `_identityFromCredentialsOrNone`），两种凭证策略**改叫两个名字**（`get_current_user` 严格 / `...WithQueryToken` 可查询参数），`deps.py` 收成带理由的再导出（生产净 **-17**：`auth +54 / deps -71`）。**记账更正**：该 commit 正文写的是"生产净 -38"，按 `git show --numstat` 复算实为 **-17**——错在把 `deps` 的删除行数当成了净数 | §6-28 登记的债 ① |
+| `9495f1db` | `test_session_round_ops` 的隔离从 chdir 改为 `NEUROVA_SESSIONS_DIR` + 单例复位，并在 fixture 内断言落点确为 tmp 目录（生产净 0，测试净 +10）；6 passed/7 failed → **13 passed**，真实 `data/sessions` 内容指纹不再变化 | §6-28 登记的债 ②，命中点清点转 §6-29 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
@@ -466,3 +483,6 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 提交本文件时须按 AGENTS.md §5 用 `git commit --only -- <paths>`，**严禁 `git add -A`** 把它们卷入。
 
 执行事故与两次子代理失稳（返回无关内容 / 撞 maxTurns）已记于 §1；安全能力矩阵改由主会话自算，见 §3-B1。
+
+**§9.1 各落地批次的当下工作树复测（2026-10-06，本轮登记结束时取）**：`git status` 仅本报告为 modified；工作树另有五项**非本会话产生**的在途改动——`docs/INDEX.md`(M) + `docs/08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`(??)（同一次外部对标登记）、`config/evolution_settings.json`(??)、`.zcodeignore`(??)、`models/tts/moss-nano/{.gitattributes(M),configuration.json(??)}`，一律未处置、未卷入提交。
+本会话两笔债的 commit（`b1e18dfc`、`9495f1db`）为 `origin/main..HEAD` 的全部内容，**尚未推送**。
