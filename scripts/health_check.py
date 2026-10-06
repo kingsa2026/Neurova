@@ -63,48 +63,47 @@ def wait_for_server(
     """
     start = time.time()
     attempt = 0
-    log_mtime = _get_log_mtime()
-    
+    # 判死基线 = 本次启动前日志的真实字节长度（读内容所得，非 stat）。
+    # 不用 mtime/size 元数据：Windows 上追加写入后元数据可见性有秒级延迟
+    # （实测 append 后 getmtime 连续 2 秒返回旧值），而文件读取始终实时。
+    log_cursor = _get_log_byte_length()
+
     while time.time() - start < timeout:
         attempt += 1
         elapsed = int(time.time() - start)
-        
+
         # 健康检查（权威信号）—— 优先于日志检查
         if health_check(port):
             return True
-        
+
         # 日志检查（辅助信号）—— 仅在健康检查失败时检查
-        # 仅检查本次启动后写入的日志（忽略陈旧日志）
-        if check_log and os.path.exists(LOG_FILE):
-            try:
-                current_mtime = os.path.getmtime(LOG_FILE)
-                # log_mtime is None 表示日志文件在启动前不存在（新建），此时任何内容都值得检查
-                log_is_new = log_mtime is None
-                log_was_updated = log_mtime is not None and current_mtime > log_mtime
-                if log_is_new or log_was_updated:
-                    with open(LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                        # 仅检测真正的启动失败，忽略网络重试等非致命错误
-                        # 致命标志: "Server failed to start", Python Traceback, "启动失败"
-                        # 非致命(忽略): HuggingFace/网络重试 (WinError, Retry, huggingface_hub)
-                        fatal_markers = [
-                            'Server failed to start',
-                            'Traceback (most recent call last)',
-                            '启动失败',
-                        ]
-                        has_fatal = any(marker in content for marker in fatal_markers)
-                        if has_fatal:
-                            lines = content.strip().split('\n')
-                            fatal_lines = [l for l in lines if any(m in l for m in fatal_markers)]
-                            if fatal_lines:
-                                print(f"\n  [ERROR] 服务器启动失败！")
-                                print("  " + "-" * 50)
-                                for line in lines[-20:]:
-                                    print(f"  {line}")
-                                print("  " + "-" * 50)
-                                return False
-            except Exception:
-                pass
+        # 只把基线之后追加的字节当"本次启动的证据"：共享 server.log 为
+        # append 模式保留历史轮次取证（见 start.start_backend），历史轮次的
+        # Traceback/启动失败不是本次启动的失败证据，全文件检索会把每次重启
+        # 都误判成启动失败（2026-10-06 实测：当天 17:51 的 WinError 64
+        # traceback 让之后每次重启数秒内误报，启动器 rc=1，服务实则健康）。
+        if check_log:
+            fresh_content, log_cursor = _read_log_since(log_cursor)
+            if fresh_content:
+                # 仅检测真正的启动失败，忽略网络重试等非致命错误
+                # 致命标志: "Server failed to start", Python Traceback, "启动失败"
+                # 非致命(忽略): HuggingFace/网络重试 (WinError, Retry, huggingface_hub)
+                fatal_markers = [
+                    'Server failed to start',
+                    'Traceback (most recent call last)',
+                    '启动失败',
+                ]
+                has_fatal = any(marker in fresh_content for marker in fatal_markers)
+                if has_fatal:
+                    lines = fresh_content.strip().split('\n')
+                    fatal_lines = [l for l in lines if any(m in l for m in fatal_markers)]
+                    if fatal_lines:
+                        print(f"\n  [ERROR] 服务器启动失败！")
+                        print("  " + "-" * 50)
+                        for line in lines[-20:]:
+                            print(f"  {line}")
+                        print("  " + "-" * 50)
+                        return False
         
         # 进度回调
         if on_progress:
@@ -132,19 +131,43 @@ def wait_for_server(
     return False
 
 
-def _get_log_mtime() -> Optional[float]:
+def _get_log_byte_length() -> Optional[int]:
     """
-    获取日志文件的修改时间（调用时刻的快照）
-    
-    Returns:
-        Optional[float]: 日志文件修改时间戳，不存在则返回 None
+    以真实读取为准获取日志当前字节长度（判死基线）
+
+    不依赖 stat 元数据：Windows 上 append 后的 mtime/size 可见性有秒级延迟，
+    读取内容始终实时。文件不存在返回 None（之后新建的文件其全部内容都算
+    本次启动新增）。
     """
     try:
         if os.path.exists(LOG_FILE):
-            return os.path.getmtime(LOG_FILE)
+            with open(LOG_FILE, "rb") as f:
+                return len(f.read())
     except Exception:
         pass
     return None
+
+
+def _read_log_since(cursor: Optional[int]):
+    """
+    读取日志 cursor 之后追加的字节，返回 (文本, 新长度)
+
+    - cursor 为 None：启动前文件不存在，当前全部内容算本次新增；
+    - 当前长度小于 cursor：日志被轮转/截断，当前全部内容算本次新增；
+    - 文件不存在：返回 (None, None)，基线保持不变。
+    """
+    try:
+        if not os.path.exists(LOG_FILE):
+            return None, None
+        with open(LOG_FILE, "rb") as f:
+            data = f.read()
+    except Exception:
+        return None, None
+    if cursor is not None and len(data) >= cursor:
+        fresh = data[cursor:]
+        return fresh.decode("utf-8", errors="ignore"), cursor + len(fresh)
+    # cursor 为 None（启动前文件不存在）或长度回缩（轮转/截断）：全部算新增
+    return data.decode("utf-8", errors="ignore"), len(data)
 
 
 def check_server_ready(port: Optional[int] = None) -> dict:
