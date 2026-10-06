@@ -394,7 +394,10 @@
     **收口形态是两层而不是一条守卫**（候选③按实测改了设计）：目录内容判据要么每用例取全树指纹（实测 4.71ms/次 → 每用例 2 次，全仓 2.1 万条 +200s），要么退化成清单集合差（看不见原地改写与等量搬移）。改为 ① `tests/conftest.py::_isolateSessionsLanding`——落点**默认**隔离（先只有守卫时，被点名的 16 条 ERROR 全是"起真 app"的用例：单例在每条用例里被重新构造，逐条补 env 属第 1 条禁的 consumer-side 打补丁；同手法仓内先例 `_isolate_agent_workspaces_root`）+ ② `_guardSessionLandingIsIsolated`——收尾守卫钉**装配点**，挡"显式改回真实库"。只留默认值一句 setenv 就能穿透，只留守卫每条用例都要自己补，故两条都要。
     取证中踩到两条通用坑（都进了 docstring）：**autouse 夹具按建立逆序拆除，不显式声明依赖时守卫会跑在隔离夹具的复位之后，`_instance` 已是 None，判据永远看不见肇事者**（本批哑火两次，靠临时 MARK 抛出 + 打印 `sys.modules` 才定位）；`tests/manual/*.py` 在**导入期**改 `os.environ`，它们不匹配 `test_*.py` 故默认不被收集，但被显式列进命令行时 env 会传给整个进程——实测掩盖过一次守卫（带上 manual 时 0 ERROR，摘掉后 16 ERROR）。
     复验：41 文件收口前 45 errors → **413 passed**；`test_session_archive` 4 failed/4 passed → **8 passed**；`tests/unit/api`+`core` A/B **32↔32 逐行一致**；整场跑测前后 `data/sessions` 全树 md5 不变。
-31. **`tests/manual/*.py` 在导入期改进程环境** ◑（`abfe6d6b` 取证时发现，未处理）—— 这类脚本在模块顶层 `os.environ.setdefault("NEUROVA_DATA_DIR", tempfile.mkdtemp())`。默认收集不到（文件名不匹配 `test_*.py`），一旦被显式列进 pytest 命令行，就把该 env 带进整个进程，**任何依赖数据根判据的守卫都会被无声掩盖**（本批实测掩盖过一次落点守卫）。候选处置：把这些脚本改成 `if __name__ == "__main__"` 自持环境，或给它们独立的运行入口（`tests/runners/`），不与 pytest 收集面混在一起。
+31. **`tests/manual/*.py` 在导入期改写进程环境（已修 `4ef87e3d`）** ✅ —— 实测 **21 个文件 / 27 处**在模块顶层写 env（如 `os.environ.setdefault("NEUROVA_DATA_DIR", tempfile.mkdtemp())`）。默认收集不到（名字不匹配 `pyproject` 的 `python_files`），但一旦被显式列进命令行就把变量带进**整个跑测进程**，此后所有依赖数据根/落点的判据被无声掩盖。不是推测：接 §6-29 落点守卫时同一条 41 文件选择集，带上 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR——差点把“守卫不咬”当成“没有欠账”。
+    修法拦在**收集之前**：`tests/manual/conftest.py::pytest_configure` 显式拒绝并给出正确调用方式（`python tests/manual/<name>.py`）。直觉方案 `collect_ignore_glob` / `pytest_ignore_collect` **实测对命令行直给的路径在 pytest 9 都不生效**，而收集即导入，钩子回来时 env 已改完。第二处坑：路径比较须用 `Path`，Windows 下 `str(path)` 带反斜杠，字符串 "tests/manual" 永不匹配（第一版就此静默失效）。
+    三道判据（`tests/unit/test_manual_scripts_are_not_collectible.py`，红→绿实证：修复前探针 `LEAK= 1` 且退出码 0，修复后退出码 4 且读不到标记）：默认收集防线（口径**从 pyproject 现值读**，不另抄 glob）、显式点名被拒且同进程读不到污染（探针故意用**匹配收集口径**的文件名，证明拦截不靠“名字碰巧不被收集”）、整目录同样拒。
+    **仍留的口子（须人裁）**：这 21 个脚本自身的导入期写 env 形态没动——作为脚本直跑它必须先于 `import neurova` 生效。彻底收口要么把它们移出测试树（`tests/runners/`？AGENTS.md §2 只规定“测试用例统一落 tests/”，脚本算不算用例未定），要么逐个改成 `__main__` 内的显式 setup（21 文件、回归风险高）。本批选择堵住被误用的通道，不重写脚本。
     **取证自证**：本条测量两次让 `a1` 下生成 `session_b6dab8cc_*`、`session_49ed4370_*`，均已即删，文件数回到 98；`_summary_index.json` 被运行重写过，留有这两条幽灵键——按 `session_manager.py:1870`「索引键集 ≠ 目录指纹键集即整份作废重建」，下次读取自愈（此为读码所见，未再实测触发自愈以免又写一次真实盘）。
 30. **2026-10-06 对既有登记的复测更正（回答"还欠什么"时逐条重跑，不沿用旧值）** ——
     - **§6-5 命中点漏了一条**：`coordination_decorators.py` 调 `get_glance_yield_checker()` 漏 `await` 的实测有 **两处**（`:99` 与 `:271`），本条原先只记 `:99`——即第 5 条要求的"全命中点扫荡"当时没扫完，仍是欠账。
@@ -486,6 +489,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `49326f6d` | 让位规则的协程工厂处处 await（生产净 **0**）。第四命中点在**已挂载端点**上：`POST /coordination/yield-checker/reset` 零异常零效果地回 `{"status":"reset"}`——最安静的一类假成功；`agent/turn_coordinator.py` 那处按"文件名→期望命中数"双向钉入台账（零生产消费者 + 调不存在的 `initialize()`，属接线/退役待裁） | §6-5 闭环（命中点由 2 复扫为 4） |
 | `347bc581` | 渠道域"依赖缺失却报成功"全族扫荡：**26 处 / 10 文件**（原报告记 3 处），四类契约分别收成 False / None / None / 该文件已有的失败结构，并删假状态写入与 2 处随之失去用处的 `import time`（生产净 **-9**）。三处本就是诚实失败结构的（`ok:False`/`errcode:-1`/`retcode:1`）按语义放行未动 | §6-8 闭环 |
 | `abfe6d6b` | 会话落点两层判据收口：conftest 默认隔离（`_isolateSessionsLanding`，同 `_isolate_agent_workspaces_root` 手法）+ 收尾守卫挡显式改回真实库；8 个测试文件的 chdir/patch 私有方法/相对 env 全部改走单一通道，重复定义收回一处（生产净 0，测试/CI +202）。41 文件 45 errors → **413 passed**，`test_session_archive` 4 failed → 8 passed，api+core A/B 32↔32 逐行一致 | §6-29 闭环，并新增 §6-31 一条环境掩盖面 |
+| `a31851e2` | 台账 commit 号可达性守卫：`scripts/ci/audit_ledger_commit_guard.py`（判据 `merge-base --is-ancestor`，替代号须"标题唯一 + numstat 逐行一致"才给）+ 三判据测试，其中用 `git commit-tree` 现造悬空 commit 自证扫描器咬得住；常驻判定红→绿端到端演过一遍（塞入失效号即红、还原即绿）（生产 0，脚本+测试 +229） | 本报告"号会再次静默失效"的口子闭环（见 §10 回写记录） |
+| `4ef87e3d` | `tests/manual/` 脚本拒在收集之前（`pytest_configure`；`collect_ignore*` 对显式路径实测无效）+ 三道判据，默认收集口径从 pyproject 现值读（生产 0，+155）。全仓收集 **21440、零错误** | §6-31 闭环，脚本自身形态未动（留人裁） |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
@@ -507,7 +512,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 成因是另一会话在并发提交之后做了 rebase/merge（`7285c66d` 已在历史中）。回写前两件事逐条验过：
 标题映射**唯一**（无歧义），且 `git show --numstat` 两侧**逐行一致**——只凭标题相同就替换，
 遇到"同题重做"会张冠李戴。教训入档：并发会话会改写历史，**commit 号不是稳定标识**，
-每批落地后应复跑一次可达性检查；引用优先"标题 + 文件集"，号只作辅助。
+每批落地后应复跑一次可达性检查；引用优先
+这条已接成常驻守卫（`a31851e2`）：`scripts/ci/audit_ledger_commit_guard.py` +
+`tests/unit/test_audit_ledger_commit_guard.py`，台账里任何号一旦不可达即红；替代号仍须
+标题唯一且 numstat 逐行一致才给，不给则留空要求人工判定。
+"标题 + 文件集"，号只作辅助。
 （同批另记：本会话后续三批的号在写入时已按重写后的历史核对可达性。）
 
 **推送状态更正**：本节原写"本会话各 commit 尚未推送"——现已不成立。并发会话在 rebase/merge
