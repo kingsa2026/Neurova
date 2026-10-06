@@ -1036,7 +1036,10 @@ class MemoryManager:
         # classification_context 作为引擎的元数据（如 {"emotion": "joy"} 走情感亲和）。
         auto_classify: bool = False,
         classification_context: Optional[Dict[str, Any]] = None,
-        # 其余控制参数(留 kwargs): auto_analyze_emotion
+        # 显式入参而不是留在 kwargs：这是 AddMemoryRequest 对外的开关
+        # （`api/endpoints/memory/base.py`），此前无人读取=声明与行为分叉。
+        # 默认 True 与收口前的实际行为一致（自动标注一直在跑）。
+        auto_analyze_emotion: bool = True,
         **kwargs,
     ) -> str:
         """存储一条记忆
@@ -1262,7 +1265,7 @@ class MemoryManager:
                 self._persist_memory(mem)
 
             # 自动情感标注（如果 content 包含情感关键词）
-            if self._emotion_module and not emotion:
+            if self._emotion_module and not emotion and auto_analyze_emotion:
                 try:
                     emotion_state = self._emotion_module.analyze_text_emotion(content)
                     if emotion_state and emotion_state.primary_emotion.value != "neutral":
@@ -3495,8 +3498,13 @@ class MemoryManager:
 
     # ────── Advanced Features (情感检索/痕迹记忆等, 委托到对应模块) ──────
 
-    def get_memories_by_emotion(self, emotion: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """获取带有特定情感的记忆"""
+    def get_memories_by_emotion(self, emotion: str, limit: int = 10,
+                               min_intensity: float = 0.3) -> List[Dict[str, Any]]:
+        """获取带有特定情感的记忆
+
+        `min_intensity` 默认 0.3 = 收口前写死的那一版读数，不改变既有口径；
+        调用方（HTTP 面的 `min_score`）显式给值时才放宽/收紧。
+        """
         if not self._emotion_module:
             return []
 
@@ -3509,7 +3517,7 @@ class MemoryManager:
 
         memory_ids = self._emotion_module.get_emotional_memories(
             emotion_type=emotion_type,
-            min_intensity=0.3,
+            min_intensity=min_intensity,
             limit=limit,
         )
 
