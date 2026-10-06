@@ -32,6 +32,17 @@ from neurova.evolution.tool_lifecycle import ToolLifecycleManager, ToolLifecycle
 logger = get_logger(__name__)
 
 
+def _default_rsi_iteration_interval() -> float:
+    """经验/事件触发 RSI 迭代的节流窗口(§6-3 收口 2026-10-06)。
+
+    原为硬编码 60.0;现从 evolution_settings.rsi_event_throttle_seconds 读,
+    合法性(float、非负)由 load_settings 的类型收敛统一保证。
+    """
+    from neurova.evolution.evolution_settings import load_settings
+
+    return max(0.0, float(load_settings().rsi_event_throttle_seconds))
+
+
 @dataclass
 class ToolWeight:
     """工具权重数据"""
@@ -373,8 +384,10 @@ class EvolutionOrchestrator:
         self.rsi_orchestrator = rsi_orchestrator
 
         # RSI 迭代节流: 避免每条经验都触发全量进化(默认 60s 一次)
+        # §6-3 收口(2026-10-06):秒数从 evolution_settings.
+        # rsi_event_throttle_seconds 读,默认与原硬编码一致
         self._last_rsi_iteration_at: float = 0.0
-        self._rsi_iteration_interval: float = 60.0
+        self._rsi_iteration_interval: float = _default_rsi_iteration_interval()
         self._rsi_iteration_count: int = 0
 
         # 工具注册表
