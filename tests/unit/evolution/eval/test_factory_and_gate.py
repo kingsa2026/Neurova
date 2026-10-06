@@ -89,8 +89,13 @@ class TestEvalHarnessGate:
 
 
 class TestFactory:
-    def test_disabled_by_default_returns_none(self, monkeypatch):
+    def test_disabled_by_default_returns_none(self, tmp_path, monkeypatch):
+        """配置双源都要隔离:env 显式值删除之外,设置文件必须重定位——
+        否则工作树的真实 config/evolution_settings.json(text_evolution: true)
+        会经 text_evolution_enabled() 的文件分支漏进来(2026-10-07 实测恒挂)。"""
         monkeypatch.delenv("NEUROVA_TEXT_EVOLUTION", raising=False)
+        monkeypatch.setenv("NEUROVA_EVOLUTION_SETTINGS",
+                           str(tmp_path / "absent_settings.json"))
         assert make_skill_evolution_runner() is None
 
     def test_enabled_returns_wired_runner(self, monkeypatch):
