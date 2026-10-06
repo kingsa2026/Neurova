@@ -11,7 +11,7 @@ class _FakeRepo:
     def __init__(self):
         self.saved = []
 
-    def save_message(self, agent_id, session_id, role, content, metadata=None):
+    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
         self.saved.append({
             "agent_id": agent_id, "session_id": session_id, "role": role,
             "content": content, "metadata": metadata or {}, "timestamp": 1,

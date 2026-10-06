@@ -1776,6 +1776,9 @@ async def fork_chat_session(
             role=str(msg.get("role", "user")),
             content=str(msg.get("content", "")),
             metadata=(msg.get("metadata") or None) or None,
+            # 属主随写声明：原先只靠上一行 create_session(user_id=…) 建好带属主的文件
+            # 才没丢——顺序依赖不是契约（见 test_session_writer_declares_owner.py）
+            user_id=user_id,
         )
 
     return {

@@ -1262,10 +1262,16 @@ class SessionManager(SessionRepository):
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        user_id: str = "",
     ) -> bool:
         """保存单条消息到 session（不要求 user+assistant 配对）。
 
         与现有 add_message（配对写入）共存：本方法供 SessionRepository 接口使用。
+
+        属主口径（本批收口）：`user_id` 必填、无默认值——新建记录按它落盘，
+        既有记录**只在属主为空时回填**，绝不把已有属主改成别人
+        （`import_session_messages` 同一判据：归属一旦落盘就是只读事实）。
         """
         date = datetime.now().strftime("%Y-%m-%d")
         file_path = self._get_session_file(agent_id, session_id, date)
@@ -1295,11 +1301,14 @@ class SessionManager(SessionRepository):
                     "updated_at": now,
                     "total_messages": 1,
                     "title": "新对话",
-                    "user_id": "",
+                    "user_id": str(user_id or ""),
                 }
             else:
                 if "messages" not in session_data:
                     session_data["messages"] = []
+                # 既有属主只回填、不覆盖：把别人已声明的属主改掉等于静默放宽可见范围
+                if user_id and not session_data.get("user_id"):
+                    session_data["user_id"] = str(user_id)
                 session_data["messages"].append(msg)
                 session_data["updated_at"] = now
                 session_data["total_messages"] = len(session_data["messages"])
