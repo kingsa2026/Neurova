@@ -21,6 +21,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 MOE_STATE_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaMoeState-"))
 os.environ.setdefault("NEUROVA_MOE_INDEX_STATE_DIR", str(MOE_STATE_SESSION_DIR))
 
+# 仓库根（污染守卫的快照对象）：conftest 在 tests/ 下，parents[1] 即根。
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.fixture(scope="session")
 def moe_state_session_dir() -> Path:
@@ -135,6 +138,31 @@ def _isolate_agent_workspaces_root(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agentWorkspaces")
     )
+
+
+@pytest.fixture(autouse=True)
+def _guardRepoRootAgainstPollution():
+    """单条用例执行前后，仓库根顶层条目不得新增——新增即红并点名该用例。
+
+    为什么逐用例而不是整场：`MagicMock/…/.lifecycle_state.json` 这类泄漏在本仓复发过
+    三次（`84260bb4`、`dd03d67c`"根目录二次清理 + gitignore 防再生"、2026-10-04 再现），
+    每次都只能"清理 + 忽略"，因为整场快照给不出肇事用例；`.gitignore:380` 的
+    `/MagicMock/` 更让它对 `git status` 彻底隐身。判据全文见
+    `tests/unit/test_repo_root_pollution_guard.py` 与
+    `audit-reports/simplification-audit-2026-10-05.md` §6-26/27。
+
+    成本实测：单次 listdir 0.10ms，每条用例 2 次（3000 条约 0.6s）。
+    不设例外名单——放行任何一个"会写根目录"的用例，就重演"用 ignore 当止痛"。
+    """
+    before = set(os.listdir(REPO_ROOT))
+    yield
+    added = sorted(set(os.listdir(REPO_ROOT)) - before)
+    if added:
+        raise AssertionError(
+            "本条用例在仓库根新增了顶层条目 %s（进程 CWD=%s）——落盘路径必须由 "
+            "core/data_root 的锚点或 tmp_path 推导，不得相对进程 CWD 写仓库根。"
+            % (added, os.getcwd())
+        )
 
 
 @pytest.fixture
