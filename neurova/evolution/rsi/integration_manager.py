@@ -380,7 +380,7 @@ class RSIIntegrationManager:
                 if debt_ledger is not None and not written:
                     # 丢行语义（003 M1）：回执没落盘 ⇒ 本笔动作不得回执成功，
                     # 否则反向闸可以靠"把账写丢"绕过（安全侧优先）。
-                    self._logger.warning(
+                    logger.warning(
                         "回执未落盘，撤销本次优化并拒回执成功: %s", parameter_path,
                     )
                     setattr(system, param_name, old_value)
@@ -446,7 +446,7 @@ class RSIIntegrationManager:
                 f.write(_json.dumps(receipt, ensure_ascii=False) + chr(10))
             return True
         except Exception as e:
-            self._logger.warning("优化回执写入失败: %s", e)
+            logger.warning("优化回执写入失败: %s", e)
             return False
 
     def get_system_status(self) -> Dict[str, Any]:
