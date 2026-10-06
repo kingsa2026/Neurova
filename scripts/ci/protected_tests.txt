@@ -1483,3 +1483,16 @@ tests/unit/api/test_session_counts_are_user_scoped.py
 tests/unit/api/test_session_ownership_single_source.py
 # 会话写入口能声明属主 + 生产侧调用点必须显式写 user_id=（含反向证明）。逐文件单跑 5 passed
 tests/unit/session/test_session_writer_declares_owner.py
+# 无抢占 CUA × dock 可观测性批次 · T-01（2026-10-02 工单集；本批 T- 编号空间独立于
+# 09-30 电脑操控面批次的 T-01…T-20 与 Issue #90 的 T-03b/T-07/T-09）：通道名收口进 action_result 词表，投递事实（delivery/evidence/
+# escalation）必须打到面板。逐文件单跑 23 passed / 20 passed。三条守卫各做过变异对照：
+# 摘掉设计稿 §0.3 的 xdotool 行→映射守卫红；在前端 interface 塞 `channel?: string`→键位守卫红
+# （该变异首轮**漏检**，据此把判据从"带引号字面量"升级为"键位级"，因第二份词表正是从类型声明长出来的）；
+# docstring 仍自称 SendInput（实现是 pyautogui）→诚实性守卫红。
+tests/unit/computer_use/test_route_vocabulary_is_single_source.py
+tests/unit/computer_use/test_action_result.py
+# 同批次 T-01b：UIA pattern 可用性必须由真取用得出。该库 Control 上没有 IsXxxPatternAvailable 一族
+# （活体取证），旧探测恒判 False ⇒ 五级链前四级永不可达、语义输入恒 refused。逐文件单跑 24 passed。
+# 判据夹具照活体形状构造（只给 Get*Pattern、不给 Is*Available）——既有 FakeUIABackend 直接注入
+# flag 值，替生产码回答了"探测得到吗"，所以这一跳此前从未被测过。
+tests/unit/computer_use/test_desktop_uia.py

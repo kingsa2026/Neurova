@@ -12,6 +12,7 @@ import UiIcon from '@/components/UiIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import type { ComputerPanelState } from '@/composables/useComputerPanel'
+import { actionBadgeText } from '@/composables/useComputerPanel'
 import { screenshot as apiScreenshot, click as apiClick, navigate as apiNavigate, shell as apiShell } from '@/api/modules/computer'
 
 const props = defineProps<{
@@ -187,14 +188,15 @@ async function doRunCommand() {
               {{ entry.summary }}
               <template v-if="entry.error"> · {{ entry.error }}</template>
             </span>
-            <!-- R2-5 ActionResult 契约徽标：投递路径/效果；refused 显示精确拒绝码 -->
+            <!-- R2-5/T-01 ActionResult 契约徽标：route·delivery·effect（有验证证据才带 ✓）；
+                 refused 显示精确拒绝码与跳级去向。文本单源出自 actionBadgeText，模板不再各拼一份 -->
             <span
-              v-if="entry.route"
+              v-if="entry.route || entry.delivery || entry.effect"
               class="cu-badge"
               :class="{ refused: entry.effect === 'refused', unverified: entry.effect === 'unverifiable' }"
               :title="t('computerPanel.actionResultHint')"
             >
-              {{ entry.effect === 'refused' ? entry.refusalCode : `${entry.route}·${entry.effect}` }}
+              {{ actionBadgeText(entry) }}
             </span>
             <span class="cu-log-status">{{ entry.success ? '✓' : '✗' }}</span>
           </div>
