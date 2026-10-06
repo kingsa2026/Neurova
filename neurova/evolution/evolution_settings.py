@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 import os
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from neurova.core.logger import get_logger
 
@@ -42,6 +42,41 @@ class EvolutionSettings:
     # LLM 模型覆写(空=用路由默认)
     judge_model: str = ""
     optimizer_model: str = ""
+    # ── RSI 运行参数(§6-3 收口 2026-10-06:原三处硬编码入配置,默认值
+    #    与原字面量逐字一致,零行为漂移)──
+    # 经验/事件触发 RSI 迭代的节流窗口(秒)
+    rsi_event_throttle_seconds: float = 60.0
+    # backoff(收敛/度量失明)降频巡检窗口:每 N 轮巡检一次
+    rsi_backoff_every_turns: int = 20
+    # 递归棘轮每轮候选数(粗筛→中筛→细筛,轮数=len)
+    rsi_ratchet_candidates: List[int] = field(default_factory=lambda: [50, 10, 3])
+
+
+def _coerce_rsi_knobs(data: Dict[str, Any], defaults: Dict[str, Any]) -> None:
+    """RSI 运行参数收敛(load_settings / update_settings 共用一处)。
+
+    坏值回默认、候选数抬正、列表整组收敛——脏配置不得阻断进化装配,
+    也不得静默截半(一个坏元素=整组回默认,诚实优于猜测)。
+    """
+    try:
+        data["rsi_event_throttle_seconds"] = max(0.0, float(data["rsi_event_throttle_seconds"]))
+    except (TypeError, ValueError):
+        data["rsi_event_throttle_seconds"] = defaults["rsi_event_throttle_seconds"]
+    try:
+        backoff = int(data["rsi_backoff_every_turns"])
+    except (TypeError, ValueError):
+        backoff = 0
+    data["rsi_backoff_every_turns"] = (
+        backoff if backoff >= 1 else defaults["rsi_backoff_every_turns"])
+    raw_candidates = data.get("rsi_ratchet_candidates")
+    parsed: list = []
+    if isinstance(raw_candidates, (list, tuple)):
+        try:
+            parsed = [max(1, int(x)) for x in raw_candidates]
+        except (TypeError, ValueError):
+            parsed = []
+    data["rsi_ratchet_candidates"] = (
+        parsed[:8] if parsed else list(defaults["rsi_ratchet_candidates"]))
 
 
 def _defaults() -> Dict[str, Any]:
@@ -60,6 +95,7 @@ def load_settings() -> EvolutionSettings:
                         raw[k] = data[k]
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("进化设置读取失败, 使用默认: %s", e)
+    _coerce_rsi_knobs(raw, _defaults())
     try:
         return EvolutionSettings(**raw)
     except TypeError as e:
@@ -106,6 +142,7 @@ def update_settings(**patch: Any) -> EvolutionSettings:
             data["lifecycle_interval_hours"] = defaults["lifecycle_interval_hours"]
         for k in ("judge_model", "optimizer_model"):
             data[k] = str(data[k] or "")
+        _coerce_rsi_knobs(data, defaults)
         settings = EvolutionSettings(**data)
         save_settings(settings)
         return settings

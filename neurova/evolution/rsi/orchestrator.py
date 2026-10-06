@@ -64,6 +64,18 @@ def _carries_no_evidence(signals: Dict[str, Any]) -> bool:
     return isinstance(verdict, dict) and verdict.get("state") == GateVerdict.STATE_UNEVIDENCED
 
 
+
+def _ratchet_candidates_from_settings() -> list:
+    """棘轮每轮候选数从 evolution_settings 读(§6-3 收口 2026-10-06)。
+
+    原为硬编码 [50,10,3];合法性(正整数、非空、有界)由 load_settings 的
+    类型收敛统一保证,这里不再兜第二层默认(单一事实源)。
+    """
+    from neurova.evolution.evolution_settings import load_settings
+
+    return list(load_settings().rsi_ratchet_candidates)
+
+
 class RSIOrchestrator:
     """
     RSI 编排器 - 协调递归自我改进的完整流程
@@ -155,9 +167,12 @@ class RSIOrchestrator:
 
         # 创建递归棘轮剪枝器（P0-A1 修复：接入核心算法）
         # 用于在多个候选优化方案中通过"粗筛→中筛→细筛"选出最优
+        # §6-3：候选数/轮数来自 evolution_settings（rsi_ratchet_candidates，
+        # 默认 [50,10,3] 与原硬编码一致）
+        candidates = _ratchet_candidates_from_settings()
         self.pruner = RecursiveRatchetPruner(
-            rounds=3,
-            candidates_per_round=[50, 10, 3],
+            rounds=len(candidates),
+            candidates_per_round=candidates,
         )
 
         # P0-A3 修复：接入 SelfImprovementProposer

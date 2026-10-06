@@ -90,18 +90,26 @@ def _run_turns(pipe, turns):
     return outcomes
 
 
-def test_backoff_still_runs_on_the_patrol_window():
-    """降频不是终止：60 轮里必须按窗口被重新量过，且第 60 轮仍在跑。"""
-    from neurova.post_chat_pipeline import _RSI_BACKOFF_EVERY_TURNS
+def test_backoff_still_runs_on_the_patrol_window(tmp_path, monkeypatch):
+    """降频不是终止：60 轮里必须按窗口被重新量过，且第 60 轮仍在跑。
+
+    §6-3（2026-10-06）：窗口值从 evolution_settings.rsi_backoff_every_turns
+    读——这里落一份窗口=10 的配置文件，顺带钉住"派发层消费的是文件值"，
+    而非模块字面量。
+    """
+    import json
+
+    settings = tmp_path / "evolution_settings.json"
+    settings.write_text(json.dumps({"rsi_backoff_every_turns": 10}), encoding="utf-8")
+    monkeypatch.setenv("NEUROVA_EVOLUTION_SETTINGS", str(settings))
 
     rsi = _BackoffRSI(_Cadence("backoff", "measurement_blind", "窗口 20 轮内有效测量 0 轮"))
     pipe = _make_pipe(rsi)
 
     outcomes = _run_turns(pipe, 60)
 
-    assert rsi.runs == 60 // _RSI_BACKOFF_EVERY_TURNS, (
-        f"backoff 下 60 轮跑了 {rsi.runs} 次：既不是每轮全跑，也不是每 "
-        f"{_RSI_BACKOFF_EVERY_TURNS} 轮巡检一次")
+    assert rsi.runs == 60 // 10, (
+        f"backoff 下 60 轮跑了 {rsi.runs} 次：既不是每轮全跑，也不是每 10 轮巡检一次")
     assert outcomes[-1] is not None, "第 60 轮必须在跑"
 
 

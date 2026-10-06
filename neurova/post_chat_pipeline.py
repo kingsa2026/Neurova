@@ -82,10 +82,17 @@ def _noteRewardGuardSkip(tool_name: str, channel: str) -> None:
     except Exception:  # noqa: BLE001 - 观测缺失不得让后处理步骤整体失败
         logger.debug("反哺禁令计数写入失败", exc_info=True)
 
-# RSI 降频巡检窗口（工单 008）：收敛或度量失明时，每 N 轮仍跑一次。
-# 取 20 与收敛窗口（convergence_analyzer.window_size 默认 20）同量级 ——
-# 一个窗口的证据过期之后就重新量一次，而不是永久停机。
-_RSI_BACKOFF_EVERY_TURNS = 20
+def _rsi_backoff_every_turns() -> int:
+    """RSI 降频巡检窗口（工单 008）：收敛或度量失明时，每 N 轮仍跑一次。
+
+    §6-3 收口（2026-10-06）：原硬编码 20 与收敛窗口（convergence_analyzer.
+    window_size 默认 20）同量级——一个窗口的证据过期之后就重新量一次，
+    而不是永久停机。N 现从 evolution_settings.rsi_backoff_every_turns 读
+    （默认仍是 20）。仅在 backoff 分支被求值（or 短路），常态零开销。
+    """
+    from neurova.evolution.evolution_settings import load_settings
+
+    return max(1, int(load_settings().rsi_backoff_every_turns))
 
 
 def _landedEvidenceRows(stepResults: List[Any], memoryManager: Any) -> List[Dict[str, Any]]:
@@ -3076,7 +3083,8 @@ class PostChatPipeline:
 
             cadence = rsi.iteration_cadence()
             turn = _turn_count()
-            due = cadence.mode != "backoff" or turn % _RSI_BACKOFF_EVERY_TURNS == 0
+            backoff_every = _rsi_backoff_every_turns()
+            due = cadence.mode != "backoff" or turn % backoff_every == 0
 
             if due:
                 # A-13: run_iteration 含 SQLite 读写/参数寻优（同步重活），
@@ -3124,12 +3132,12 @@ class PostChatPipeline:
                         status=StepStatus.SKIPPED,
                         message=(
                             f"RSI 降频巡检（判据 {cadence.basis}：{cadence.evidence}；"
-                            f"每 {_RSI_BACKOFF_EVERY_TURNS} 轮跑一次，当前轮次 {turn} 不在窗口）"
+                            f"每 {backoff_every} 轮跑一次，当前轮次 {turn} 不在窗口）"
                         ),
                         duration_ms=(time.time() - start_time) * 1000,
                         data={"cadence": cadence.mode, "basis": cadence.basis,
                               "evidence": cadence.evidence, "turn": turn,
-                              "backoff_every": _RSI_BACKOFF_EVERY_TURNS},
+                              "backoff_every": backoff_every},
                     )
                 )
         except Exception as e:
