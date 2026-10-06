@@ -53,8 +53,8 @@ class WeChatMessagingMixin:
             return False
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[企微模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return True
+            logger.warning("企业微信消息未发出: requests 未安装")
+            return False
 
         try:
             if self.adapter.kf_mode:
@@ -148,9 +148,8 @@ class WeChatMessagingMixin:
             return False
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[iLink 模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            a._reply_counts[session_key] = reply_count + 1
-            return True
+            logger.warning("iLink 消息未发出: requests 未安装")
+            return False
 
         try:
             url = f"{a.ILINK_API_BASE}/message/send"
@@ -186,8 +185,8 @@ class WeChatMessagingMixin:
             return False
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[公众号模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return True
+            logger.warning("微信公众号消息未发出: requests 未安装")
+            return False
 
         try:
             url = f"{a.WECHAT_OA_API_BASE}/cgi-bin/message/custom/send"

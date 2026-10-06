@@ -138,8 +138,8 @@ class TelegramAdapter(
 
     def _verify_token(self) -> bool:
         if not REQUESTS_AVAILABLE:
-            self._initialized = True
-            return True
+            logger.warning("Telegram 无法校验 Token: requests 未安装")
+            return False
 
         try:
             data = self._api_request("GET", f"/bot{self.bot_token}/getMe")

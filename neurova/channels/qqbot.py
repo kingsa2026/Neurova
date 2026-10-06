@@ -147,8 +147,8 @@ class QQBotAdapter(ChannelAdapter):
     def _verify_connection(self) -> bool:
         """验证QQ Bot连接"""
         if not REQUESTS_AVAILABLE:
-            self._initialized = True
-            return True
+            logging.warning("QQ Bot 无法验证连接: requests 未安装")
+            return False
 
         try:
             # 测试获取机器人信息
@@ -287,8 +287,8 @@ class QQBotAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[QQ Bot模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return message.message_id
+            logging.warning("QQ Bot 消息未发出: requests 未安装")
+            return None
 
         try:
             # 根据chat_id判断是私聊还是群聊
@@ -544,8 +544,8 @@ class QQBotAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[QQ Bot模拟] 上传文件: %s", file_path)
-            return f"模拟_file_id_{file_path}"
+            logging.warning("QQ Bot 文件未上传: requests 未安装")
+            return None
 
         try:
             with open(file_path, "rb") as f:

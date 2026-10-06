@@ -150,8 +150,8 @@ class DiscordAdapter(ChannelAdapter):
     def _verify_token(self) -> bool:
         """验证 Bot Token 是否有效"""
         if not REQUESTS_AVAILABLE:
-            self._initialized = True
-            return True
+            logging.warning("Discord 无法校验 Token: requests 未安装，认证结果不可知")
+            return False
 
         try:
             url = f"{self.API_BASE}/users/@me"
@@ -252,8 +252,8 @@ class DiscordAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[Discord模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return message.message_id
+            logging.warning("Discord 消息未发出: requests 未安装")
+            return None
 
         try:
             # 根据chat_id判断是私聊还是频道消息

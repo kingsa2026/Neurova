@@ -59,8 +59,8 @@ class WeChatAuthMixin:
         """刷新企业微信 access_token"""
         a = self.adapter
         if not REQUESTS_AVAILABLE:
-            a._wecom_initialized = True
-            return True
+            logger.warning("企业微信无法刷新 access_token: requests 未安装")
+            return False
 
         try:
             url = f"{a.WECOM_API_BASE}/cgi-bin/gettoken"
@@ -207,8 +207,8 @@ class WeChatAuthMixin:
         """验证 iLink Token 是否有效"""
         a = self.adapter
         if not REQUESTS_AVAILABLE:
-            a._ilink_initialized = True
-            return True
+            logger.warning("iLink 无法校验 Token: requests 未安装")
+            return False
 
         try:
             url = f"{a.ILINK_API_BASE}/auth/verify"
@@ -265,8 +265,8 @@ class WeChatAuthMixin:
         """刷新微信公众号 access_token"""
         a = self.adapter
         if not REQUESTS_AVAILABLE:
-            a._official_initialized = True
-            return True
+            logger.warning("微信公众号无法刷新 access_token: requests 未安装")
+            return False
 
         try:
             payload = {
