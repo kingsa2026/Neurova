@@ -367,7 +367,7 @@
 24. **进程级 agents 表是跨用例耦合面** ◑ —— `enhanced_memory_search_api.py:24` 自陈"唯一事实源是 `get_app_state()['agents']`"（`request.app.state.agents` 生产恒空），于是任何跑真实 startup 的用例都会把一个真 agent 写进该表，把同进程后续 18 条（nerf 11 + semantic-search 7）带倒。本轮在新用例内按原样回填所动全局以自证隔离；**表本身的单源化/用例隔离属预存脆弱面，未放宽**。
 25. **时间边界抖动** ◑ —— `tests/integration/collaboration/test_phase3_intelligence.py::TestEdgeCases::test_outbox_expired_event` 以 `expiration_ttl=0` 撞墙钟，连跑 5 次 2 负，与本轮改动无关（A/B 逐行核过），登记备查。后续单跑三次全绿，目录跑时仍偶发翻转。
 26. **落盘锚点接受非路径对象并在进程 CWD 静默建塔（已修 `a9170fa9`）** ✅ —— `MagicMock` 实现了 `__fspath__`，故 `Path(mock)` 能过类型检查、其 repr 被 Windows 拆成相对目录，随后 `mkdir(parents=True)` + 写盘**全部成功**，只在 `except OSError` 留一行 debug；仓库根实际长出过 `MagicMock/SkillService().skills_dir/<id>/.lifecycle_state.json`。同契约三命中点（`skill_lifecycle.run_sweep_if_due`、`ConsolidationPlanStore.__init__`、`SkillService.__init__`）现统一收到 `data_root.require_data_path`。**读码新发现**：判据必须落在**公开入口**——放在 `_state_file()` 那层会被 `_load_last_run` 的 `except ValueError` 吞成 "last=0"，非法路径照样落盘。**另记一条治理教训**：`.gitignore:380` 的 `/MagicMock/` 与 `git log` 表明该症状至少复发三次（`84260bb4` 2026-06-08 排除、`dd03d67c` 2026-09-02「根目录二次清理 — git rm … 垃圾 + gitignore 防再生」、2026-10-04 再现），三次都停在"清理 + 忽略"，从未查落点为何漂到 CWD——按教义第 2 条，"防再生"的 ignore 是把失败改写成静默，本条是首次根修；规则保留只为防误提交，不再充当止痛。
-27. **跑测卫生三件（本批取证时发现，均预存）** ◑ —— ① `tests/unit/evolution/eval/`（`test_heldout_isolation.py`、`test_history_*`）挂死，30s 全局 timeout 直接 kill 整场，该目录跑不通只能逐文件；② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR 触发 `Interrupted: 1 error during collection`，使 `pytest tests/` 整仓无法起跑；③ `tests/unit/planning/__pycache__/__init__.cpython-312.pyc` 处于**被跟踪**态，跑一次测试即产生 diff——与 AGENTS.md §4"跑测产物不得被放行"相冲（`TestProtectedSubsetEntriesAreTracked` 只双向钉条目，未覆盖此类历史入库 .pyc）。
+27. **跑测卫生三件（本批取证时发现，均预存）** ◑→部分已闭 —— ① `tests/unit/evolution/eval/`（`test_heldout_isolation.py`、`test_history_*`）挂死，30s 全局 timeout 直接 kill 整场，该目录跑不通只能逐文件；② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR 触发 `Interrupted: 1 error during collection`，使 `pytest tests/` 整仓无法起跑；③ `tests/unit/planning/__pycache__/__init__.cpython-312.pyc` 处于**被跟踪**态，跑一次测试即产生 diff——与 AGENTS.md §4"跑测产物不得被放行"相冲（`TestProtectedSubsetEntriesAreTracked` 只双向钉条目，未覆盖此类历史入库 .pyc）。**④ 同批新增的收口（`9df526b9`）**：`tests/conftest.py` 里 autouse 逐用例快照仓库根顶层条目，新增即红并点名肇事用例——它拦的是"下一次换个模块再漏"，与 §6-26 的具体根修互补；①②③ 仍待各自另批处理。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -436,6 +436,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `94af885f` | 开放平台私有密钥存储并入 `APIKeyManager`，三项机制（原子写/创建幂等/tombstone）先补短再合并后退役（净 +83） | 教义第 7 条：密钥实现三合一 |
 | `04c4a42e` | 记忆增强端点身份回到那道门、7 处变更收回归属校验，并去除既有测试伪造 `request.state.user` 的中间件（净 +10） | §6-1 同根因第三命中点，详见 memory-isolation §十 |
 | `a9170fa9` | 落盘锚点收成绝对路径单源（`data_root.require_data_path` 接三处：sweep 入口 / 计划仓 / 服务构造），mock 与相对串不再于进程 CWD 静默建塔（净 +32） | §6-26 新增并根修 |
+| `9df526b9` | 仓库根污染守卫接线：autouse 逐用例快照顶层条目、新增即红并点名肇事用例（生产净 0，测试基建 +153） | §6-27 的 ④ 收口，与 §6-26 根修互补 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
