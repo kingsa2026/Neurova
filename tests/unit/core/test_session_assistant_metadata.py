@@ -22,16 +22,13 @@ from pathlib import Path
 from neurova.session_manager import SessionManager
 
 
+
 def _make_manager(tmp_path: Path) -> SessionManager:
-    mgr = SessionManager()
-
-    def _fake_dir(agent_id_arg):
-        d = tmp_path / "agents" / agent_id_arg / "session"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    mgr._get_session_dir = _fake_dir
-    return mgr
+    manager = SessionManager()
+    assert manager._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % manager._sessions_dir
+    )
+    return manager
 
 
 class TestAssistantMetadataPersist:
@@ -97,7 +94,7 @@ class TestAssistantMetadataPersist:
             "agent_a", "sess_rs_05", "q", "a",
             assistant_metadata={"reasoning_content": "归档后可见"},
         )
-        session_dir = tmp_path / "agents" / "agent_a" / "session"
+        session_dir = tmp_path / "sessions" / "agent_a"
         files = list(session_dir.glob("session_sess_rs_05_*.json"))
         assert len(files) == 1
         data = json.loads(files[0].read_text(encoding="utf-8"))

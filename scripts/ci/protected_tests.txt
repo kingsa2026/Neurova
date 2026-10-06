@@ -1513,3 +1513,7 @@ tests/unit/collaboration/test_glance_yield_await_sites.py
 # 必须按该函数自己的契约返回失败值并点名缺哪个依赖；三处本就是失败结构的（telegram/wechat_auth/qqbot
 # 的 _api_request）由判据按语义放行而不是按类型误伤。逐文件单跑 6 passed（约 2.2s）
 tests/unit/channels/test_missing_dependency_honest_failure.py
+# 会话落点两层判据：默认隔离（conftest 单源）+ 收尾守卫（挡显式改回真实库）。
+# 探针全走子进程行为，不读 pytest 内部属性；顺序坑记在夹具 docstring（teardown 逆序，
+# 不显式声明依赖时守卫会在复位之后才跑，永远看不见肇事者）。逐文件单跑 4 passed（约 12s）
+tests/unit/test_session_landing_guard.py

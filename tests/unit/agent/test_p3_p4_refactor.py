@@ -239,8 +239,12 @@ class TestP4ChannelsIntegration:
         assert found is not None
         assert found.global_user_id == identity.global_user_id
 
-    def test_session_manager_works(self):
+    def test_session_manager_works(self, tmp_path):
         """验证 SessionManager 正常工作
+
+        原实现什么都不设，
+        于是这条全绿的用例一直在往仓库真实 data/sessions 建会话（§6-29 第三个命中点，
+        仓库根污染守卫看不见 data/ 内部）。
 
         注: SessionManager.get_or_create_session 不存在。
         新 API: create_session(agent_id, user_id, title) 返回 session_id (str),
@@ -249,7 +253,11 @@ class TestP4ChannelsIntegration:
         """
         from neurova.channels import SessionManager
 
+        # 落点由 tests/conftest.py::_isolateSessionsLanding 默认隔离（全仓唯一定义）
         mgr = SessionManager()
+        assert mgr._sessions_dir == tmp_path / "sessions", (
+            "会话落点没被隔离，会写进仓库真实 data/sessions：%s" % mgr._sessions_dir
+        )
         session_id = mgr.create_session(agent_id="a1", user_id="u1")
         assert session_id is not None
         assert len(session_id) > 0
