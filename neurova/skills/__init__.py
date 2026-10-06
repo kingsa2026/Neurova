@@ -7,7 +7,6 @@ Skills System 1.0.0 - 技能系统
 - models.py: 数据模型 (SkillInfo, SkillSource, etc.)
 - pool_service.py: 公共池服务 (SkillPoolService)
 - skill_service.py: Agent 技能服务 (SkillService)
-- evolution_engine.py: 技能进化引擎 (SkillsEvolutionEngine)
 - experience_caller.py: 经验调用系统 (ExperienceCaller)
 ...
 """
@@ -109,11 +108,6 @@ try:
     pass
 except ImportError as _e:
     _logger.debug("skills.auto_skill_improver 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.evolution_engine 模块未可用: %s", _e)
 
 try:
     from neurova.skills.hub_client import SkillHubClient, RemoteSkill, SkillSource
