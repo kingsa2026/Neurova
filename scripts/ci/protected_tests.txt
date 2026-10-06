@@ -1478,3 +1478,8 @@ tests/unit/test_repo_root_pollution_guard.py
 # 跨租户计数即红。同批把 test_home_stats / test_stats_real 的"直调端点函数"改为经真 router。
 # 逐文件单跑 6 passed
 tests/unit/api/test_session_counts_are_user_scoped.py
+# 会话归属判据单源 + 各端点同解矩阵（bob 从 6 条会话端点碰 alice 的会话一律 403；
+# 空属主共享会话仍可达；归属者自己照常可改可删）。逐文件单跑 9 passed
+tests/unit/api/test_session_ownership_single_source.py
+# 会话写入口能声明属主 + 生产侧调用点必须显式写 user_id=（含反向证明）。逐文件单跑 5 passed
+tests/unit/session/test_session_writer_declares_owner.py
