@@ -197,9 +197,11 @@ class TestManagerAutoTagging(unittest.TestCase):
         )
 
     def _remember(self, mgr, content):
+        # 不再传 auto_analyze_emotion=False：本类两条用例断言的正是"自动打标生效/
+        # 中性不打标"，把开关关掉等于自己把自己的被测路径关掉（此前该开关无人读取，
+        # 所以这个矛盾参数一直没暴露）。
         return mgr.remember(
             content,
-            auto_analyze_emotion=False,
             auto_classify=False,
         )
 
