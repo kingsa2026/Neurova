@@ -1496,3 +1496,7 @@ tests/unit/computer_use/test_action_result.py
 # 判据夹具照活体形状构造（只给 Get*Pattern、不给 Is*Available）——既有 FakeUIABackend 直接注入
 # flag 值，替生产码回答了"探测得到吗"，所以这一跳此前从未被测过。
 tests/unit/computer_use/test_desktop_uia.py
+# 身份门单源：全仓只有一份 token→身份推导；两种凭证策略必须叫两个名字
+# （同名不同体会让 dependency_overrides 打到另一个对象上静默失效——比红更危险）。
+# 逐文件单跑 7 passed
+tests/unit/api/test_identity_gate_single_source.py

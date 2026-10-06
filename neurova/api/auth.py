@@ -33,6 +33,26 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 security = HTTPBearer(auto_error=False)
 
 
+class BearerOrQuery(HTTPBearer):
+    """头凭证优先，无头时回退 `?access_token=`（批次 3：AIGC 产物资源标签场景）。
+
+    原先住在 `api/deps.py`。它与 `get_current_user` 的两份并存实现一起收口到本模块，
+    因为"凭证从哪儿来"与"身份怎么推导"必须同处一地才看得清放行面。
+    """
+
+    async def __call__(self, request: Request) -> Optional[HTTPAuthorizationCredentials]:  # type: ignore[override]
+        creds = await super().__call__(request)
+        if creds:
+            return creds
+        token = request.query_params.get("access_token")
+        if token:
+            return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        return None
+
+
+securityWithQuery = BearerOrQuery(auto_error=False)
+
+
 class AuthError(Exception):
     """认证错误"""
 
@@ -412,20 +432,15 @@ def verify_password(password: str, hashed: str) -> bool:
     return base64.b64encode(dk).decode() == dk_b64
 
 
-async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+def _identityFromCredentialsOr401(
+    credentials: Optional[HTTPAuthorizationCredentials],
 ) -> Dict[str, Any]:
-    """
-    FastAPI 依赖：获取当前认证用户
+    """凭证 → 身份字典（**唯一实现**）；缺失或无效一律显式 401。
 
-    Args:
-        credentials: HTTP Bearer 凭证
-
-    Returns:
-        用户信息字典
-
-    Raises:
-        HTTPException: 认证失败
+    单一事实源的缘由：`api/deps.py` 曾有第二份同体逻辑（同名 `get_current_user`），
+    两份对"有凭证但无效"的处置迟早漂移，且 override 打错对象时静默失效。
+    `verify_access_token` 实测只 `return None` 从不抛（见 `verify_token`），
+    所以这里不加 `except Exception` 兜底——加了就是"该显式失败却被吞"的形状。
     """
     if not credentials:
         raise HTTPException(
@@ -434,17 +449,66 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
-    payload = verify_access_token(token)
-
+    payload = verify_access_token(credentials.credentials)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
     return _user_identity(payload)
+
+
+def _identityFromCredentialsOrNone(
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> Optional[Dict[str, Any]]:
+    """凭证 → 身份字典或 None（可选门的唯一实现）。
+
+    与严格门的共同点是"坏凭证绝不换到身份"；差别只在**无凭证**：这里返回 None，
+    而 `get_current_user_or_default` 返回共享的 default 租户。三者语义各不同，
+    所以是三个入口共用两个推导函数，而不是三份推导。
+    """
+    if not credentials:
+        return None
+    payload = verify_access_token(credentials.credentials)
+    if not payload:
+        return None
+    return _user_identity(payload)
+
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Dict[str, Any]:
+    """
+    FastAPI 依赖：获取当前认证用户（**只认 Authorization: Bearer**）
+
+    Returns:
+        用户信息字典
+
+    Raises:
+        HTTPException: 认证失败
+    """
+    return _identityFromCredentialsOr401(credentials)
+
+
+async def get_current_userWithQueryToken(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(securityWithQuery),
+) -> Dict[str, Any]:
+    """同上，但凭证来源多一条：无头时回退 `?access_token=`。
+
+    为什么不把它并成一份：`<img>`/`<audio>`/`<a download>` 等资源标签发不出
+    Authorization 头，产物预览与下载只能走查询参数；但 token 进 URL 会落进访问日志
+    与浏览器历史，所以放行面要**按端点显式选择**，不能因为"少写一个函数"就把它
+    推广到全部 84 个用严格版的端点（那是放宽安全面）。
+    名字必须与严格版不同——本仓曾有两份**同名不同体**的 get_current_user
+    （auth 与 deps），结果 `dependency_overrides` 打到另一个对象上会静默失效，
+    守卫"看起来没咬住"其实是替换没生效。判据见
+    `tests/unit/api/test_identity_gate_single_source.py`。
+
+    Raises:
+        HTTPException: 认证失败
+    """
+    return _identityFromCredentialsOr401(credentials)
 
 
 _SERVICE_TOKEN_HEADER = "X-Service-Token"
@@ -539,25 +603,15 @@ async def get_current_user_or_api_key(
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Optional[Dict[str, Any]]:
-    """
-    FastAPI 依赖：获取可选的认证用户
+    """FastAPI 依赖：获取可选的认证用户（只认头）；未认证或凭证无效返回 None。"""
+    return _identityFromCredentialsOrNone(credentials)
 
-    Args:
-        credentials: HTTP Bearer 凭证
 
-    Returns:
-        用户信息字典，未认证返回 None
-    """
-    if not credentials:
-        return None
-
-    token = credentials.credentials
-    payload = verify_access_token(token)
-
-    if not payload:
-        return None
-
-    return _user_identity(payload)
+async def get_optional_userWithQueryToken(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(securityWithQuery),
+) -> Optional[Dict[str, Any]]:
+    """同 `get_optional_user`，但无头时回退 `?access_token=`（资源标签场景）。"""
+    return _identityFromCredentialsOrNone(credentials)
 
 
 _DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user", "neuser_id": "default"}
