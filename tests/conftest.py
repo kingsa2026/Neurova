@@ -141,6 +141,28 @@ def _isolate_agent_workspaces_root(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolateSessionsLanding(_isolate_session_manager_singletons, tmp_path, monkeypatch):
+    """会话落点默认隔离到本用例的 tmp 目录（根修，而非逐条用例补 env）。
+
+    为什么必须收在默认值上：`SessionManager` 是类级单例，落点在**首次构造**时定死，
+    而本文件的 `_isolate_session_manager_singletons` 每条用例后把 `_instance` 置 None
+    ——于是任何起真 app 的用例（TestClient → startup → console 链路）都会在自己那一条里
+    重新构造单例，落点取到 `dataLanding("sessions")`，即仓库真实会话库。实测被落点守卫
+    点名 16 条、跨 7 个文件（console_run_ledger / mcp_session_shutdown / agent_*_persistence /
+    load_saved_agents / home_stats / console_chat_ops）。逐条补 env 是 consumer-side 打补丁，
+    默认值收口才是第 1 条要的上游修；同手法本仓已有先例 `_isolate_agent_workspaces_root`。
+
+    收尾守卫 `_guardSessionLandingIsIsolated` 仍留着，兜住"显式把落点改回真实库"的写法。
+    """
+    from neurova.session_manager import SessionManager
+
+    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
+    SessionManager._instance = None
+    yield
+    SessionManager._instance = None
+
+
+@pytest.fixture(autouse=True)
 def _guardRepoRootAgainstPollution():
     """单条用例执行前后，仓库根顶层条目不得新增——新增即红并点名该用例。
 
@@ -162,6 +184,47 @@ def _guardRepoRootAgainstPollution():
             "本条用例在仓库根新增了顶层条目 %s（进程 CWD=%s）——落盘路径必须由 "
             "core/data_root 的锚点或 tmp_path 推导，不得相对进程 CWD 写仓库根。"
             % (added, os.getcwd())
+        )
+
+
+@pytest.fixture(autouse=True)
+def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
+    """用例结束时，`SessionManager` 单例不得指向仓库真实会话库。
+
+    成因（§6-29）：`session_manager.py:205-207` 的落点第三档是 `dataLanding("sessions")`
+    ——与进程 CWD 无关（`c2cb809c` 2026-09-22 收的口径）。于是历史上靠
+    `monkeypatch.chdir(tmp_path)` 隔离会话目录的用例前提当场失效：它们读写的是仓库
+    `data/sessions/`。`test_session_round_ops` 因此读到真实累计消息（6 passed/7 failed），
+    `agent/test_p3_p4_refactor` 更是在全绿中往真实库建会话。
+
+    为什么钉**装配点**而不是钉目录内容：目录内容判据要么每条用例取全树指纹（实测 99 文件
+    4.71ms/次 → 每用例 9.4ms，全仓 2.1 万条 +200s），要么退化成 listdir 集合差——后者看不见
+    原地改写与等量搬移（本条取证时就这么漏过一回：`test_session_archive` 报 added=0，
+    实为搬动 15 个真实文件）。装配点判据 O(1)、逐用例归因，且**读写两侧都管**——读到真实
+    数据同样是跨用例串味，不只是写脏用户库。
+
+    分层职责：默认隔离（`_isolateSessionsLanding`）挡"没设"，本守卫挡"设错"——
+    显式把落点改回仓库真实库的写法在这里红。只留默认值时一句 setenv 就能穿透，
+    只留守卫时起真 app 的每条用例都得自己补 env。不设例外名单。
+
+    形参 `_isolateSessionsLanding` 不是摆设：夹具按建立的逆序拆除，**不显式声明
+    依赖时本守卫会在复位之后才跑，那时单例已被置 None，判据永远看不见肇事者**（实测就这么
+    哑过一次）。声明依赖把顺序钉死。
+    """
+    yield
+    module = sys.modules.get("neurova.session_manager")
+    if module is None:
+        return
+    manager = getattr(module.SessionManager, "_instance", None)
+    if manager is None:
+        return
+    landing = Path(str(manager._sessions_dir)).resolve()
+    if landing == (REPO_ROOT / "data" / "sessions").resolve():
+        raise AssertionError(
+            "本条用例让 SessionManager 单例落在仓库真实会话库 %s——读会把真实累计数据当用例数据，"
+            "写会写用户数据根。隔离只有一条通道：monkeypatch.setenv("
+            "\"NEUROVA_SESSIONS_DIR\", str(tmp_path / \"sessions\")) 并把 "
+            "SessionManager._instance 置 None（见 9495f1db）。" % landing
         )
 
 

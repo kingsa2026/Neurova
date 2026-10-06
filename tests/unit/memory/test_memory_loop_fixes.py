@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 
+
 # ═══════════════════════════════════════════════════════════
 # B2: 温度衰减系统（当前契约：manager.update_memory_temperature）
 # ═══════════════════════════════════════════════════════════

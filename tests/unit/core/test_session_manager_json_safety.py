@@ -26,17 +26,14 @@ from neurova.session_manager import SessionManager
 # 辅助函数（与 test_session_manager.py 保持一致的 tmp 目录隔离模式）
 # ---------------------------------------------------------------------------
 
+
 def _make_manager(tmp_path: Path) -> SessionManager:
-    """创建 SessionManager 并 patch _get_session_dir 指向 tmp_path。"""
-    mgr = SessionManager()
-
-    def _fake_dir(agent_id_arg):
-        d = tmp_path / "agents" / agent_id_arg / "session"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    mgr._get_session_dir = _fake_dir
-    return mgr
+    """真单例 + 已隔离落点（与 test_session_manager.py 同形）。"""
+    manager = SessionManager()
+    assert manager._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % manager._sessions_dir
+    )
+    return manager
 
 
 def _console_style_metadata() -> dict:

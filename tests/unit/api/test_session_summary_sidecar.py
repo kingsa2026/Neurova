@@ -29,15 +29,14 @@ import pytest
 from neurova.session_manager import SessionManager
 
 
+
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
-    """隔离姿势与 test_session_count_and_console_bound 一致：
-    chdir + 相对 sessions/ 目录（单例 _sessions_dir 天然跟随 CWD）。"""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", "sessions")
-    (tmp_path / "sessions").mkdir(exist_ok=True)
+def repo(tmp_path):
+    """落点由 `tests/conftest.py::_isolateSessionsLanding` 默认隔离（全仓唯一定义），这里只清类级缓存。"""
     mgr = SessionManager()
-    monkeypatch.setattr(mgr, "_sessions_dir", Path("sessions"), raising=False)
+    assert mgr._sessions_dir == tmp_path / "sessions", (
+        "会话落点没被隔离，会读写仓库真实 data/sessions：%s" % mgr._sessions_dir
+    )
     # 单例跨测试复用：清掉上一测试残留的缓存条目
     mgr._summary_cache.clear()
     mgr._feedback_cache.clear()
@@ -46,8 +45,17 @@ def repo(tmp_path, monkeypatch):
     yield mgr
 
 
+def _sessionsRoot() -> Path:
+    """落点由 conftest 的 `_isolateSessionsLanding` 决定，从单例自取——不再写 CWD 相对字面量。
+
+    原实现把 `_sessionsRoot()` 散布在断言与写盘辅助里，靠 fixture 的 chdir 才指对；
+    那正是 §6-29 记的同一件事：落点绑在进程 CWD 上。
+    """
+    return SessionManager._instance._sessions_dir
+
+
 def _sidecar_path(agent_id: str) -> Path:
-    return Path("sessions") / (agent_id or "default") / "_summary_index.json"
+    return _sessionsRoot() / (agent_id or "default") / "_summary_index.json"
 
 
 def _count_session_parses(repo, monkeypatch):
@@ -86,7 +94,7 @@ def _assert_index_scan_parity(repo, **kw):
 def _write_external_session(agent_id: str, sid: str, title: str = "外来",
                             date: str = "2026-01-01", user_id: str = "",
                             messages=None) -> Path:
-    d = Path("sessions") / agent_id
+    d = _sessionsRoot() / agent_id
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"session_{sid}_{date}.json"
     p.write_text(json.dumps({
@@ -243,7 +251,7 @@ class TestSidecarSelfHealing:
         _write_external_session("ea", "extx", title="外来会话", user_id="u1")
         assert {s["session_id"] for s in repo.list_sessions(agent_id="ea")} == {sid, "extx"}
 
-        (Path("sessions") / "ea" / "session_extx_2026-01-01.json").unlink()
+        (_sessionsRoot() / "ea" / "session_extx_2026-01-01.json").unlink()
         assert {s["session_id"] for s in repo.list_sessions(agent_id="ea")} == {sid}
 
     def test_external_modification_detected_by_fingerprint(self, repo):
@@ -251,7 +259,7 @@ class TestSidecarSelfHealing:
         sid = repo.create_session("fp", user_id="u1")
         assert repo.list_sessions(agent_id="fp")[0]["title"] == "新对话"
 
-        f = next((Path("sessions") / "fp").glob(f"session_{sid}_*.json"))
+        f = next((_sessionsRoot() / "fp").glob(f"session_{sid}_*.json"))
         data = json.loads(f.read_text(encoding="utf-8"))
         data["title"] = "外部改名"
         f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
