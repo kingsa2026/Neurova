@@ -264,35 +264,6 @@ async def process_eki_task(
         raise APIError.internal(f"EKI任务处理失败: {str(e)}")
 
 
-@router.get("/eki/reinforce", summary="获取强化推荐")
-async def get_reinforcement_recommendations(
-    top_k: int = 10,
-    agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """
-    获取EKI推荐需要强化的记忆
-    """
-    try:
-        manager = get_memory_manager(agent_id, user)
-        recommendations = manager.eki_get_reinforcement_recommendations(top_k=top_k)
-
-        return success_response(
-            data={
-                "count": len(recommendations),
-                "recommendations": recommendations,
-            },
-            message="获取成功",
-            request_id=_get_request_id(None),
-        )
-
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception("获取强化推荐失败: %s", e)
-        raise APIError.internal(f"获取强化推荐失败: {str(e)}")
-
-
 @router.get("/eki/decay/{memory_id}", summary="预测记忆衰减")
 async def predict_memory_decay(
     memory_id: str,
