@@ -61,10 +61,11 @@ def _tool_entries(call_id="call_a1", tool_name="file_read", with_call_side_id=Tr
 
 
 def _seed(sm, entries, session_id="s-t10b", agent_id="a-t10b"):
-    sm.save_message(agent_id, session_id, "user", "读一下 a.txt")
+    sm.save_message(agent_id, session_id, "user", "读一下 a.txt", user_id="u-1")
     sm.save_message(
         agent_id, session_id, "assistant", "已读取",
         metadata={"tool_calls": entries},
+        user_id="u-1",
     )
     return agent_id, session_id
 

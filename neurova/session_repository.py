@@ -47,8 +47,16 @@ class SessionRepository(ABC):
         role: str,
         content: str,
         metadata: Optional[Dict] = None,
+        *,
+        user_id: str = "",
     ) -> bool:
-        """保存单条消息到会话。"""
+        """保存单条消息到会话。
+
+        `user_id` 是关键字参数，缺省 `""` = 共享会话。默认值只为兼容既有测试夹具
+        （它们不建模归属）而存在；**生产代码必须显式声明**，这条由
+        `tests/unit/session/test_session_writer_declares_owner.py` 的源码守卫钉住
+        ——判据落在"谁可能写出无属主会话"上，而不是给全部调用点强加噪声。
+        """
 
     @abstractmethod
     def get_history(self, agent_id: str, session_id: str, max_messages: int = 0) -> List[Dict]:
