@@ -667,6 +667,33 @@ class TestProtectedSubsetEntriesAreTracked:
             "再 `git add` 入库。"
         )
 
+    def test_no_run_product_is_tracked(self):
+        """被跟踪的跑测产物清点——`.gitignore` 的规则**管不到已跟踪文件**。
+
+        上面那条只证"新产生的缓存会被忽略"。真实缺口是另一头：
+        `dd5b00be`(2026-08-30) 批量提交时把 `tests/unit/planning/__pycache__/*.pyc`
+        一起带进了库，`472a0180`(2026-09-22) 才补上 `tests/**/__pycache__/` 规则——
+        规则对已跟踪路径不生效，于是这两个 pyc 从此"每次跑测即被改写"，
+        `git status` 常驻一条与任何改动无关的 diff，而 A/B 与"工作树干净"判据都被它污染。
+
+        判据取被跟踪清单而不是磁盘形态：磁盘上的 pyc 是正常产物，仓库里的才是债。
+        """
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git")
+        proc = self._git("ls-files", "-z")
+        assert proc.returncode == 0, f"git ls-files 失败：{proc.stderr[:200]}"
+        tracked = [p for p in proc.stdout.split("\0") if p]
+        offenders = sorted(
+            p
+            for p in tracked
+            if p.endswith(".pyc") or "__pycache__/" in p or p.endswith((".pyo", ".pyd"))
+        )
+        assert not offenders, (
+            "跑测产物被 git 跟踪，跑一次测试即产生 diff（`.gitignore` 对已跟踪文件不生效）。"
+            "修复：`git rm --cached <路径>` 取消跟踪，让既有的 `tests/**/__pycache__/` "
+            "规则接管：\n  " + "\n  ".join(offenders)
+        )
+
     @pytest.mark.parametrize("rel", CANARY_NAMES)
     def test_test_root_names_are_not_swallowed_by_adhoc_globs(self, rel):
         """测试根下的正当文件名不得被「临时脚本通配」吞掉。
