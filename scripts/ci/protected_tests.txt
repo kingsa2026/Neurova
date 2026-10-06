@@ -1500,3 +1500,7 @@ tests/unit/computer_use/test_desktop_uia.py
 # （同名不同体会让 dependency_overrides 打到另一个对象上静默失效——比红更危险）。
 # 逐文件单跑 7 passed
 tests/unit/api/test_identity_gate_single_source.py
+# RSI 回执落盘失败必须真回滚：幻影 self._logger 把回滚那行 setattr 短路成死码，调用方收到
+# False 而系统留着新值。判据含全仓 AST 扫（现值 151 处取用，仅本类两处幻影；修后应为 0）。
+# 逐文件单跑 3 passed（约 5s，含全仓 ast 解析）
+tests/unit/evolution/test_rsi_receipt_rollback.py
