@@ -88,8 +88,9 @@ class TestDeterministicPrecheck:
         assert "leak:degenerate_noop" in result.constraint_failures
 
     def test_build_markers_scope(self):
-        """标记只来自 expected_behavior（判据答案面）：CJK 连串切 4-gram、
-        英数字≥5 整词；task_input 只取 CJK≥6 切片。宁漏勿误杀。"""
+        """标记契约（P1-1 修正 2026-10-06）：expected_behavior CJK 4-gram、
+        task_input CJK 6-gram；字母文本不再收整词（常见词 markdown/summary
+        曾是标记 = 误杀面），改收 8 词组切片并 casefold 存储。宁漏勿误杀。"""
         from neurova.evolution.eval.leak_critic import LeakCritic
 
         ds = EvalDataset(train=[EvalExample(
@@ -97,8 +98,8 @@ class TestDeterministicPrecheck:
             expected_behavior="输出 markdown 表格 summary",
         )])
         markers = LeakCritic().build_markers(ds)
-        # 英数字整词进入标记集
-        assert "markdown" in markers and "summary" in markers
+        # 字母常见整词不再是标记（旧契约的误杀面）
+        assert "markdown" not in markers and "summary" not in markers
         # expected_behavior 中长度不足 4 的中文碎片不成标记
         assert "输出" not in markers and "表格" not in markers
         # task_input 的长中文串按 6-gram 进入（背题面）
@@ -192,6 +193,65 @@ class TestLLMReviewLayer:
         verdict = await critic.review(candidate_text=BASELINE + " 改进",
                                       baseline_text=BASELINE, markers=frozenset())
         assert not verdict.leaked and calls["n"] == 0
+
+
+class TestEnglishPhraseMarkers:
+    """P1-1（2026-10-06）：字母文本的标记契约修正。
+
+    旧契约两处缺陷：
+    1. task_input 只取 CJK≥6 切片——英文/字母任务题干完全没有确定性标记，
+       英文任务的题干回填在默认（llm_review=False）下畅通无阻；
+    2. expected_behavior 的英数字整词≥5 即成标记——rubric 里的常见词
+       （markdown/summary/result）被当判别标记，合法候选一提这些词就被
+       误杀为背题（宁漏勿误杀被反转成宁误杀）。
+    新契约：字母文本按 8 词组切片（区分性短语才成标记），匹配大小写不敏感。
+    """
+
+    EN_TASK = "Configure the database connection pool for the PostgreSQL replica"
+    EN_SHINGLE = "configure the database connection pool for the postgresql"
+
+    @pytest.mark.asyncio
+    async def test_english_task_input_phrase_copy_rejected(self):
+        """英文题干的 8 词组片段被候选回填 → 确定性拒绝（旧版零标记漏放）。"""
+        from neurova.evolution.eval.leak_critic import LeakCritic
+
+        ds = EvalDataset(train=[EvalExample(
+            task_input=self.EN_TASK, expected_behavior="连接成功且延迟低于阈值")])
+        critic = LeakCritic()
+        markers = critic.build_markers(ds)
+        assert self.EN_SHINGLE in markers
+        verdict = await critic.review(
+            candidate_text=f"技能正文…提示：先 {self.EN_TASK}，再验证。",
+            baseline_text=BASELINE, markers=markers)
+        assert verdict.leaked and verdict.category == "task_specialization"
+
+    @pytest.mark.asyncio
+    async def test_english_phrase_match_case_insensitive(self):
+        """候选换大小写回填英文题干仍被抓（匹配大小写不敏感）。"""
+        from neurova.evolution.eval.leak_critic import LeakCritic
+
+        ds = EvalDataset(train=[EvalExample(
+            task_input=self.EN_TASK, expected_behavior="延迟低于阈值")])
+        markers = LeakCritic().build_markers(ds)
+        verdict = await LeakCritic().review(
+            candidate_text=f"正文… 先 {self.EN_TASK.upper()} 再验证 …尾注",
+            baseline_text=BASELINE, markers=markers)
+        assert verdict.leaked
+
+    @pytest.mark.asyncio
+    async def test_rubric_common_word_not_a_marker(self):
+        """rubric 里的常见整词不再是标记——合法候选提到它不得被误杀。"""
+        from neurova.evolution.eval.leak_critic import LeakCritic
+
+        ds = EvalDataset(train=[EvalExample(
+            task_input="导出上周数据", expected_behavior="输出 markdown 表格 summary")])
+        critic = LeakCritic()
+        markers = critic.build_markers(ds)
+        assert "markdown" not in markers and "summary" not in markers
+        verdict = await critic.review(
+            candidate_text=BASELINE + "\nIMPROVED 输出改为 markdown 格式并附 summary 列。",
+            baseline_text=BASELINE, markers=markers)
+        assert not verdict.leaked, f"常见词误杀: {verdict.category} {verdict.evidence}"
 
 
 class TestRunnerWiring:

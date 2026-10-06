@@ -42,10 +42,15 @@ _LLM_UNAVAILABLE = "llm_review_unavailable"
 
 _ALNUM_RUN = re.compile(r"[A-Za-z0-9_]+")
 _CJK_RUN = re.compile(r"[\u4e00-\u9fff]+")
-# 标记切片长度：CJK 4-gram / task_input 6-gram / 英数字整词≥5
+# 标记切片长度：expected_behavior CJK 4-gram / task_input CJK 6-gram /
+# 字母文本 8 词组（P1-1 2026-10-06：整词≥5 的旧契约把 rubric 常见词
+# （markdown/summary/result）当判别标记，合法候选一提即被误杀——宁漏勿误杀
+# 被反转成宁误杀；且 task_input 的字母文本完全无标记，英文题干回填在默认
+# 配置（llm_review=False）下畅通。改法与泄漏语义对齐：只有区分性短语成标记，
+# 存储即 casefold，review 大小写不敏感。
 _CJK_SHINGLE = 4
 _TASK_SHINGLE = 6
-_MIN_ALNUM = 5
+_WORD_SHINGLE = 8
 
 _PROMPT_TMPL = """你是自我进化回路里的泄漏审查员。下面是一段候选技能文本
 （由变异器从基线改写而来，评测用例来自同一使用者的历史会话）。请在花评测
@@ -98,30 +103,38 @@ class LeakCritic:
         """从评测集提取判别性标记。
 
         expected_behavior 是判据答案面，候选正文不应与之逐字重合；
-        task_input 只取长 CJK 切片（题目原文回填也是背题）。
+        task_input 是题干面，长片段回填也是背题。字母文本（两侧都收）
+        按 8 词组切片——只有区分性短语成标记，整词常见词不成（防误杀）。
+        标记统一 casefold 存储，review 端做大小写不敏感包含判断。
         标记集只在闸内使用，不落盘进任何产物（防泄漏面扩大）。
         """
         markers: set[str] = set()
         for ex in getattr(dataset, "all_examples", []) or []:
-            for run in _CJK_RUN.findall(ex.expected_behavior or ""):
+            expected = ex.expected_behavior or ""
+            task = ex.task_input or ""
+            for run in _CJK_RUN.findall(expected):
                 if len(run) >= _CJK_SHINGLE:
                     markers.update(run[i:i + _CJK_SHINGLE]
                                    for i in range(len(run) - _CJK_SHINGLE + 1))
-            markers.update(m for m in _ALNUM_RUN.findall(ex.expected_behavior or "")
-                           if len(m) >= _MIN_ALNUM)
-            for run in _CJK_RUN.findall(ex.task_input or ""):
+            for run in _CJK_RUN.findall(task):
                 if len(run) >= _TASK_SHINGLE:
                     markers.update(run[i:i + _TASK_SHINGLE]
                                    for i in range(len(run) - _TASK_SHINGLE + 1))
+            for text in (expected, task):
+                words = [w.casefold() for w in _ALNUM_RUN.findall(text)]
+                for i in range(len(words) - _WORD_SHINGLE + 1):
+                    markers.add(" ".join(words[i:i + _WORD_SHINGLE]))
         return frozenset(markers)
 
     # ── 审查入口 ──
 
     async def review(self, *, candidate_text: str, baseline_text: str,
                      markers: frozenset[str] = frozenset()) -> LeakVerdict:
-        # 第一层：确定性预检（零 LLM，宁漏勿误杀）
+        # 第一层：确定性预检（零 LLM，宁漏勿误杀）。
+        # 标记已 casefold 存储 → 包含判断对大小写不敏感。
+        folded = candidate_text.casefold()
         for m in markers:
-            if m in candidate_text:
+            if m in folded:
                 return LeakVerdict(leaked=True, category="task_specialization",
                                    evidence=m[:200])
         if _normalize_text(candidate_text) == _normalize_text(baseline_text):
