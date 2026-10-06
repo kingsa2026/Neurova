@@ -20,14 +20,24 @@ from neurova.session_manager import SessionManager
 
 @pytest.fixture()
 def sm(tmp_path, monkeypatch):
-    """隔离 CWD 的 SessionManager（sessions/ 目录相对 CWD）。
+    """隔离到 tmp 的 SessionManager——走既定注入口 `NEUROVA_SESSIONS_DIR`。
 
-    SessionManager 是单例，__init__ 只在首个用例的 tmp_path 创建过
-    sessions/ 目录；后续用例 chdir 到新 tmp_path 后需手动补建父目录。
+    原先靠 `monkeypatch.chdir(tmp_path)` + 手建 `sessions/` 目录隔离，前提是
+    "落点是相对 CWD 的裸名 sessions"。那个前提已在 `session_manager.py:203-207`
+    被改掉（兜底换成 `dataLanding("sessions")`，与 CWD 无关），于是 chdir 不再隔离，
+    本文件的用例**直接把 Q1/A1 写进了仓库真实 data/sessions/**（实测留下
+    `data/sessions/a1/session_s1_2026-10-06.json`），既污染真实会话库，也让后跑的用例
+    读到前面用例与真实数据的残留消息——这就是 7 条"history 多出上百条消息"的来源。
+    单例本身由 `tests/conftest.py` 的 `_isolate_session_manager_singletons` 每用例复位。
     """
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "sessions").mkdir(exist_ok=True)
-    return SessionManager()
+    sessionsDir = tmp_path / "sessions"
+    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(sessionsDir))
+    SessionManager._instance = None
+    manager = SessionManager()
+    assert manager._sessions_dir == sessionsDir, (
+        f"会话落点没被隔离，会写进真实数据根：{manager._sessions_dir}"
+    )
+    return manager
 
 
 def _add_round(sm, agent_id, session_id, q, a, date=None, metadata=None):
