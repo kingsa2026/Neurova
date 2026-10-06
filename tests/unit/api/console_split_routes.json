@@ -160,7 +160,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -175,7 +175,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -183,7 +183,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -242,7 +242,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -257,7 +257,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -265,7 +265,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -307,7 +307,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -322,7 +322,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -330,7 +330,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -372,7 +372,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -387,7 +387,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -395,7 +395,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -437,7 +437,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -452,7 +452,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -460,7 +460,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -508,7 +508,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -523,7 +523,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -531,7 +531,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -567,7 +567,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -582,7 +582,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -590,7 +590,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -632,7 +632,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -647,7 +647,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -655,7 +655,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -720,7 +720,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -735,7 +735,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -743,7 +743,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -785,7 +785,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -800,7 +800,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -808,7 +808,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -850,7 +850,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -865,7 +865,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -873,7 +873,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -915,7 +915,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -930,7 +930,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -938,7 +938,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1001,7 +1001,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1016,7 +1016,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1024,7 +1024,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1066,7 +1066,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1081,7 +1081,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1089,7 +1089,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1131,7 +1131,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1146,7 +1146,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1154,7 +1154,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1217,7 +1217,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1232,7 +1232,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1240,7 +1240,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1288,7 +1288,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1303,7 +1303,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1311,7 +1311,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1401,7 +1401,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1416,7 +1416,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1424,7 +1424,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1504,7 +1504,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1519,7 +1519,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1527,7 +1527,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1594,7 +1594,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1609,7 +1609,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1617,7 +1617,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1653,7 +1653,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1680,7 +1680,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1688,7 +1688,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1730,7 +1730,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1745,7 +1745,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1753,7 +1753,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1789,7 +1789,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1804,7 +1804,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1812,7 +1812,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1848,7 +1848,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1863,7 +1863,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1871,7 +1871,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1907,7 +1907,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -1922,7 +1922,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -1930,7 +1930,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -1993,7 +1993,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.get_current_user",
+                "name": "neurova.api.auth.get_current_userWithQueryToken",
                 "closure": []
               },
               "name": "user",
@@ -2001,7 +2001,7 @@
               "children": [
                 {
                   "call": {
-                    "name": "neurova.api.deps.BearerOrQuery",
+                    "name": "neurova.api.auth.BearerOrQuery",
                     "closure": []
                   },
                   "name": "credentials",
@@ -2060,7 +2060,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.get_current_user",
+                "name": "neurova.api.auth.get_current_userWithQueryToken",
                 "closure": []
               },
               "name": "user",
@@ -2068,7 +2068,7 @@
               "children": [
                 {
                   "call": {
-                    "name": "neurova.api.deps.BearerOrQuery",
+                    "name": "neurova.api.auth.BearerOrQuery",
                     "closure": []
                   },
                   "name": "credentials",
@@ -2163,7 +2163,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.get_current_user",
+                "name": "neurova.api.auth.get_current_userWithQueryToken",
                 "closure": []
               },
               "name": "user",
@@ -2171,7 +2171,7 @@
               "children": [
                 {
                   "call": {
-                    "name": "neurova.api.deps.BearerOrQuery",
+                    "name": "neurova.api.auth.BearerOrQuery",
                     "closure": []
                   },
                   "name": "credentials",
@@ -2252,7 +2252,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -2267,7 +2267,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -2275,7 +2275,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
@@ -2344,7 +2344,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.get_current_user",
+                "name": "neurova.api.auth.get_current_userWithQueryToken",
                 "closure": []
               },
               "name": "user",
@@ -2352,7 +2352,7 @@
               "children": [
                 {
                   "call": {
-                    "name": "neurova.api.deps.BearerOrQuery",
+                    "name": "neurova.api.auth.BearerOrQuery",
                     "closure": []
                   },
                   "name": "credentials",
@@ -2390,7 +2390,7 @@
         "annotation": "typing.Dict[str, typing.Any]",
         "default": {
           "dependency": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "use_cache": true
@@ -2405,7 +2405,7 @@
       "children": [
         {
           "call": {
-            "name": "neurova.api.deps.get_current_user",
+            "name": "neurova.api.auth.get_current_userWithQueryToken",
             "closure": []
           },
           "name": "current_user",
@@ -2413,7 +2413,7 @@
           "children": [
             {
               "call": {
-                "name": "neurova.api.deps.BearerOrQuery",
+                "name": "neurova.api.auth.BearerOrQuery",
                 "closure": []
               },
               "name": "credentials",
