@@ -211,7 +211,7 @@ def run_sweep_if_due(
         service, now_ms=now_ms,
         stale_after_days=stale_after_days, archive_after_days=archive_after_days,
     )
-    _save_last_run(Path(skills_dir), now_ms)
+    _save_last_run(skills_dir, now_ms)
     logger.info(
         "技能生命周期扫描: stale=%d archived=%d reactivated=%d",
         counts["marked_stale"], counts["archived"], counts["reactivated"],
