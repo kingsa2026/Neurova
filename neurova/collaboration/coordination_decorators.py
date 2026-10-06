@@ -96,7 +96,7 @@ def glance_yield_check(
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            yield_checker = get_glance_yield_checker()
+            yield_checker = await get_glance_yield_checker()
 
             # Get agent_id from context (could be passed in kwargs or extracted)
             agent_id = kwargs.get("agent_id", "unknown")
@@ -268,7 +268,7 @@ async def coordination_middleware(
 
     try:
         # Create yield checker
-        yield_checker = get_glance_yield_checker()
+        yield_checker = await get_glance_yield_checker()
 
         # Check yield rules
         decision = yield_checker.check_yield_rules(

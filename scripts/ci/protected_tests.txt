@@ -1504,3 +1504,8 @@ tests/unit/api/test_identity_gate_single_source.py
 # False 而系统留着新值。判据含全仓 AST 扫（现值 151 处取用，仅本类两处幻影；修后应为 0）。
 # 逐文件单跑 3 passed（约 5s，含全仓 ast 解析）
 tests/unit/evolution/test_rsi_receipt_rollback.py
+# 让位规则的协程工厂必须处处 await（§6-5 全命中点）：端点漏 await 时零异常零效果——回 {"status":"reset"}
+# 却什么都没重置，是全仓最安静的一类假成功。判据含全仓调用点扫描 + 台账双向咬合
+# （agent/turn_coordinator.py 那处零消费者且调不存在的 initialize()，属接线/退役待裁，按期望数钉住）。
+# 逐文件单跑 3 passed（约 2.4s）
+tests/unit/collaboration/test_glance_yield_await_sites.py
