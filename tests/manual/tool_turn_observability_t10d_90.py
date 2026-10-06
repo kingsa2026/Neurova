@@ -152,7 +152,7 @@ async def main() -> int:
     # 每次运行用独立目录：复用同目录会让上一次的落盘被本次读到（判据读数漂移）。
     manager._sessions_dir = Path(tempfile.mkdtemp(prefix="t10d_live_")) / "sessions"
     manager._sessions_dir.mkdir(parents=True, exist_ok=True)
-    manager.save_message("a-live-t10d", "s-live", "user", "读一下 a.txt")
+    manager.save_message("a-live-t10d", "s-live", "user", "读一下 a.txt", user_id="u-live")
     manager.save_message(
         "a-live-t10d", "s-live", "assistant", "已读取",
         metadata={"tool_calls": [
@@ -161,6 +161,7 @@ async def main() -> int:
             {"type": "tool_result", "tool_name": "read_file", "tool_call_id": "call_ks",
              "result": "hello", "success": True},
         ]},
+        user_id="u-live",
     )
     os.environ["NEUROVA_TOOL_TURN_VIEW"] = "0"
     off = manager.get_recent_model_context(agent_id="a-live-t10d", session_id="s-live")

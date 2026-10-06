@@ -47,6 +47,9 @@ class RoomStore:
             role=_ROLE_BY_SENDER.get(sender_type, "assistant"),
             content=content,
             metadata=metadata,
+            # 房间按设计多人可见，所以"共享"是**显式决定**而非默认产物：
+            # 参与者由房间成员关系裁决，不由会话属主裁决。写信人留在 metadata.sender_id。
+            user_id="",
         )
         return {"room_id": room_id, "sender_type": sender_type, "sender_id": sender_id, "content": content}
 

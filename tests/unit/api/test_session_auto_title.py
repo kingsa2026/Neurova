@@ -50,7 +50,7 @@ class _FakeRepo(SessionRepository):
     def create_session(self, agent_id, user_id="", title=""):
         raise NotImplementedError
 
-    def save_message(self, agent_id, session_id, role, content, metadata=None):
+    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
         raise NotImplementedError
 
     def delete_session(self, agent_id, session_id):

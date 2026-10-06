@@ -48,7 +48,8 @@ class FakeRepo:
         self.created.append({"agent_id": agent_id, "user_id": user_id, "title": title})
         return f"fork-{len(self.created)}"
 
-    def save_message(self, agent_id="", session_id="", role="", content="", metadata=None):
+    def save_message(self, agent_id="", session_id="", role="", content="", metadata=None,
+                       *, user_id=""):
         self.saved.append({"session_id": session_id, "role": role, "content": content, "metadata": metadata})
         return True
 
