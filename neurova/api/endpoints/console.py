@@ -1288,9 +1288,7 @@ async def delete_chat_session(session_id: str, request: Request,
         raise HTTPException(status_code=404, detail="Session not found")
     # user_id 校验口径不变: 空 user_id (None 或 "") 视为"共享"，允许任何已认证用户删除
     # （修复 "看得到删不掉" 死锁）
-    target_user_id = target.get("user_id") or ""
-    if target_user_id and user_id and target_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    _check_session_ownership(target, user_id)
     agent_id = target.get("agent_id", "")
     repo.delete_session(agent_id=agent_id, session_id=session_id)
     return {"code": 0, "message": "Session deleted"}
@@ -1311,9 +1309,7 @@ async def auto_title_chat_session(session_id: str, request: Request,
     target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target.get("user_id") or ""
-    if target_user_id and user_id and target_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    _check_session_ownership(target, user_id)
     agent_id = target.get("agent_id", "")
 
     messages = repo.get_history(agent_id=agent_id, session_id=session_id)
@@ -1448,9 +1444,7 @@ async def rename_chat_session(session_id: str, body: RenameSessionRequest, reque
     target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target.get("user_id") or ""
-    if target_user_id and user_id and target_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    _check_session_ownership(target, user_id)
     agent_id = target.get("agent_id", "")
     new_title = body.title.strip() or target.get("title", "新对话")
     repo.rename_session(agent_id=agent_id, session_id=session_id, title=new_title)
@@ -1470,9 +1464,7 @@ def _find_session_target(repo, session_id: str, user_id: str) -> Dict[str, Any]:
     target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target.get("user_id") or ""
-    if target_user_id and user_id and target_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    _check_session_ownership(target, user_id)
     return target
 
 
