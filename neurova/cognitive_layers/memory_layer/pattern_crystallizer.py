@@ -116,6 +116,12 @@ class PatternCrystallizer:
         # 待裁决队列的有界上限与"已丢弃多少"计数（工单 005：静默丢候选 = 观察面失明）
         self._max_pending = 20
         self.pending_dropped = 0
+        # 入库泄漏闸（P1-1，2026-10-07）：gate(sample_context) -> Optional[str]，
+        # None=放行。判定逻辑与语料在 evolution 层（eval_corpus），经注入进入
+        # 本模块——层序不倒置。缺席（None）=行为与历史逐字节一致；被闸拦截的
+        # 候选计数 gate_rejected，诚实留痕。
+        self._ingestion_gate: Any = None
+        self.gate_rejected = 0
         self._load_buffer_state()
 
         logger.info("PatternCrystallizer 初始化完成 (llm_gate=%s)", self._llm_gate)
@@ -331,12 +337,31 @@ class PatternCrystallizer:
         )
         return len(dropped)
 
-    def _store_candidate(self, candidate: Dict[str, Any]) -> None:
-        """按候选构造 PATTERN 节点写入存储引擎并通知进化编排器。"""
+    def _store_candidate(self, candidate: Dict[str, Any]) -> bool:
+        """按候选构造 PATTERN 节点写入存储引擎并通知进化编排器。
+
+        返回 False = 被入库泄漏闸拦截（P1-1）：结晶文本携带评测题干/判据
+        原文，入库后经上下文注入回流，后续评测分被记忆化推高（背题的
+        入库面入口）。拦截计数 gate_rejected 与告警日志诚实留痕。
+        """
         key = candidate["key"]
         primary_tool = candidate["primary_tool"]
         rate = candidate["rate"]
         sample_ctx = candidate.get("sample_context", "")[:80]
+
+        gate = self._ingestion_gate
+        if gate is not None:
+            try:
+                hit = gate(sample_ctx)
+            except Exception as gate_err:  # noqa: BLE001 - 闸故障不静默：告警后放行（宁漏勿误杀）
+                logger.warning("结晶入库闸故障，候选 '%s' 放行: %s", key, gate_err)
+                hit = None
+            if hit is not None:
+                self.gate_rejected += 1
+                logger.warning(
+                    "结晶候选被入库泄漏闸拦截: '%s' (%s) — 累计 %d",
+                    key, str(hit)[:120], self.gate_rejected)
+                return False
         node = UnifiedMemoryNode(
             content=(
                 f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate * 100:.0f}%"
@@ -379,6 +404,7 @@ class PatternCrystallizer:
                 )
             except Exception as e:
                 logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
+        return True
 
     # ── 混合信号层：待裁决队列管理 ──
 
@@ -490,7 +516,7 @@ class PatternCrystallizer:
     def confirm_pending(self, verdicts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """按裁决结果处置待审候选：approved → 写库并通知；否则丢弃。"""
         by_key = {v["key"]: v for v in verdicts if isinstance(v, dict) and v.get("key")}
-        approved = rejected = 0
+        approved = rejected = gate_rejected = 0
         kept: List[Dict[str, Any]] = []
         for candidate in self._pending:
             verdict = by_key.get(candidate["key"])
@@ -498,14 +524,27 @@ class PatternCrystallizer:
                 kept.append(candidate)  # 未裁决（LLM 漏判）→ 留队等下轮
                 continue
             if verdict.get("approved"):
-                self._store_candidate(candidate)
-                approved += 1
+                if self._store_candidate(candidate):
+                    approved += 1
+                else:
+                    # LLM 批准但被入库泄漏闸拦下——与 LLM 否决分开记账
+                    gate_rejected += 1
             else:
                 rejected += 1
                 logger.info("结晶候选被 LLM 否决: '%s' (%s)", candidate["key"], verdict.get("reason", ""))
         self._pending = kept
         self._save_buffer_state()
-        return {"reviewed": len(by_key), "approved": approved, "rejected": rejected, "skipped": len(kept)}
+        return {"reviewed": len(by_key), "approved": approved, "rejected": rejected,
+                "skipped": len(kept), "gate_rejected": gate_rejected}
+
+    def attach_ingestion_gate(self, gate: Any) -> None:
+        """挂载入库泄漏闸（P1-1）：gate(sample_context) -> Optional[str]。
+
+        None=放行。判定逻辑与语料工件在 evolution 层（eval_corpus，经
+        post_chat 复盘通道幂等挂载），本模块只持注入的 callable——
+        cognitive_layers 不反向依赖 evolution，层序不倒置。
+        """
+        self._ingestion_gate = gate
 
 
     def reap_stale_patterns(

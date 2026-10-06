@@ -251,9 +251,14 @@
 
 先红后绿:3 条新测试实测红(英文题干零标记漏放×2、常见词误杀×1),修后 `tests/unit/evolution/` 1412 过(唯一失败为预存环境项,A/B 自证)。钉住旧契约的 `test_build_markers_scope` 按新契约更新,理由如上。
 
-### B.2 §5 P1-1 的"结晶入库闸"子项:层序受阻,登记不动
+### B.2 §5 P1-1 的"结晶入库闸"子项:**2026-10-07 已落地**
 
-结晶器(`cognitive_layers/memory_layer/pattern_crystallizer.py`)处于更低层,现行依赖方向是 evolution → cognitive_layers;给结晶入库加"vs 评测集语料"的确定性闸需要反向依赖 evolution.eval(层序倒置)。且评测集是按运行构建的(golden→挖掘→合成),没有稳定语料工件可供结晶期消费。**登记不落地**,待评测语料有持久工件后再立项。
+原登记的层序受阻(结晶器在 cognitive_layers 低层,评测语料无持久工件)以两个动作解除:
+
+1. **语料工件**:`neurova/evolution/eval/eval_corpus.py`——eval service 每次物化评测集(golden/挖掘/合成)经 `build_dataset` 统一出口合并去重落盘(`data/agents/<id>/evolution/eval_corpus.json`,env `NEUROVA_EVOLUTION_EVAL_CORPUS` 重定位,有界 256 条)。
+2. **注入式闸**:判定逻辑与语料留在 evolution 层(`deterministic_leak_check` 单一事实源,从 leak_critic 抽出、`review` 与结晶闸同源复用,教义第 7 条),经 `attach_ingestion_gate` 注入结晶器——cognitive_layers 零反向依赖。咽喉 `_store_candidate`(LLM 裁决后与治理直写两条路径唯一共同落点)改判返回值,拦截计数 `gate_rejected`,`confirm_pending` 账目单列 `gate_rejected`。挂载点在 post_chat 复盘通道(agent_id 在手,幂等);检查对象是会原文入库的 `sample_context`。
+3. 诚实边界:无语料=无围栏(宁漏勿误杀);闸故障告警后放行;已知窗口=治理显式关闸(`crystallization_llm_gate_enabled=false`)且首评之前的直写候选不过闸。
+4. 红绿实测 10 用例;evolution 套件 1447 过 0 失败(cognitive 套件 11 失败与 evolution 5 error 经 stash A/B 双向自证为预存,与本批无关)。
 
 ### B.3 §6 各项落地状态
 

@@ -2960,6 +2960,23 @@ class PostChatPipeline:
         # 低频）；LLM 不可用时候选留队等下轮（48h 超龄自动放行，不丢数据）。
         # 注意：不挂在 _step_extract_conversation_rules——该步有 LLM 成本闸
         # 默认关，挂在那里裁决在默认配置下永不运行（复核抓出的断点）。
+        # P1-1（2026-10-07）：结晶入库泄漏闸随复盘通道幂等挂载（agent_id 在
+        # 手，语料工件在 eval_corpus）——候选入库前按评测题面做确定性求交，
+        # 题干/判据原文不得经结晶回流污染后续评测。判定逻辑在 evolution 层，
+        # 经注入进入结晶器，层序不倒置。
+        try:
+            _gate_agent = str(getattr(getattr(self._agt, "config", None),
+                                      "agent_id", "") or "default")
+            _gate_crystallizer = getattr(self._agt, "crystallizer", None)
+            if _gate_crystallizer is not None:
+                from neurova.evolution.eval.eval_corpus import (
+                    attach_crystallization_leak_gate,
+                )
+
+                attach_crystallization_leak_gate(_gate_crystallizer, _gate_agent)
+        except Exception as _gate_err:
+            logger.debug("结晶入库闸挂载失败（本次不过闸）: %s", _gate_err)
+
         try:
             _crystallizer = getattr(self._agt, "crystallizer", None)
             if (

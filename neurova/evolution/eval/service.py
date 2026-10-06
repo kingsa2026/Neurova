@@ -138,6 +138,27 @@ class SkillEvolutionService:
         source: str = "auto",
         messages: Optional[list[dict[str, Any]]] = None,
     ) -> Optional[EvalDataset]:
+        """golden → 会话挖掘 → 合成;全空返回 None。
+
+        物化成功即喂结晶入库闸的语料工件（P1-1）：入库围栏与评测消费
+        同一份题面——评测集长什么样，围栏就守什么。
+        """
+        ds = await self._build_dataset_inner(
+            skill_id, skill_text, source=source, messages=messages)
+        if ds is not None and ds.all_examples:
+            from neurova.evolution.eval.eval_corpus import update_eval_corpus
+
+            update_eval_corpus(self.agent_id, ds)
+        return ds
+
+    async def _build_dataset_inner(
+        self,
+        skill_id: str,
+        skill_text: str,
+        *,
+        source: str = "auto",
+        messages: Optional[list[dict[str, Any]]] = None,
+    ) -> Optional[EvalDataset]:
         """golden → 会话挖掘 → 合成;全空返回 None。"""
         if source in ("auto", "golden"):
             ds = self._golden_dataset(skill_id)
