@@ -332,6 +332,18 @@ class AdaptiveToolWeights:
 
         return sorted(tool_names, key=sort_key, reverse=True)
 
+    def outcome_streams(self) -> Dict[str, List[Tuple[float, bool]]]:
+        """滑动窗口只读快照(P1-2 端到端标尺的数据面):tool -> [(ts, ok)]。
+
+        窗口本就随 save() 持久化(tool_weights.json,单一事实源);
+        此处只补只读取数,不新增存储。
+        """
+        with self._lock:
+            return {
+                name: [(float(ts), bool(ok)) for ts, ok in w.window]
+                for name, w in self._weights.items()
+            }
+
 
 from neurova.evolution.experience_feedback import ExperienceFeedback
 from neurova.evolution.genetic_engine import ToolGeneticEngine
