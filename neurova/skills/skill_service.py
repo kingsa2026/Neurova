@@ -19,7 +19,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from neurova.core.data_root import get_data_root
+from neurova.core.data_root import get_data_root, require_data_path
 
 # 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
@@ -122,7 +122,10 @@ class SkillService:
         """
         self.agent_id = agent_id
         if skills_dir:
-            self.skills_dir = Path(skills_dir)
+            # 锚点在此收口（生产方）：本类下游有两个落盘消费方
+            # （`skill_lifecycle.run_sweep_if_due`、`ConsolidationPlanStore`），
+            # 相对串会让状态文件跟着进程 CWD 跑，构造期的 mkdir 还会直接在 CWD 建目录。
+            self.skills_dir = require_data_path(skills_dir, "SkillService(skills_dir=…)")
         else:
             self.skills_dir = get_data_root() / "agents" / str(agent_id) / "skills"
         self.manifest_path = self.skills_dir / "manifest.json"
