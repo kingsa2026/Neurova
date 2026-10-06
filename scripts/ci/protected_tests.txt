@@ -1509,3 +1509,7 @@ tests/unit/evolution/test_rsi_receipt_rollback.py
 # （agent/turn_coordinator.py 那处零消费者且调不存在的 initialize()，属接线/退役待裁，按期望数钉住）。
 # 逐文件单跑 3 passed（约 2.4s）
 tests/unit/collaboration/test_glance_yield_await_sites.py
+# 渠道域"依赖缺失却报成功"全族（§6-8，实测 26 处/10 文件）：if not X_AVAILABLE 分支不得产出真值/成功结构，
+# 必须按该函数自己的契约返回失败值并点名缺哪个依赖；三处本就是失败结构的（telegram/wechat_auth/qqbot
+# 的 _api_request）由判据按语义放行而不是按类型误伤。逐文件单跑 6 passed（约 2.2s）
+tests/unit/channels/test_missing_dependency_honest_failure.py

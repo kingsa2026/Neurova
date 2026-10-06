@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 from neurova.core.logger import get_logger
 import tempfile
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -71,8 +70,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[企微模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
-            return f"mock_media_id_{int(time.time())}"
+            logger.warning("企业微信媒体未上传: requests 未安装")
+            return None
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
@@ -132,8 +131,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[公众号模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
-            return f"mock_official_media_id_{int(time.time())}"
+            logger.warning("微信公众号媒体未上传: requests 未安装")
+            return None
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
@@ -173,8 +172,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[iLink 模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
-            return f"mock_ilink_media_id_{int(time.time())}"
+            logger.warning("iLink 媒体未上传: requests 未安装")
+            return None
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
@@ -232,8 +231,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[企微模拟] 下载媒体: %s", media_id)
-            return b"mock_media_data"
+            logger.warning("企业微信媒体未下载: requests 未安装")
+            return None
 
         try:
             a = self.adapter
@@ -282,8 +281,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[公众号模拟] 下载媒体: %s", media_id)
-            return b"mock_official_media_data"
+            logger.warning("微信公众号媒体未下载: requests 未安装")
+            return None
 
         try:
             a = self.adapter
@@ -324,8 +323,8 @@ class WeChatMediaMixin:
             return None
 
         if not REQUESTS_AVAILABLE:
-            logger.info("[iLink 模拟] 下载媒体: %s", media_id)
-            return b"mock_ilink_media_data"
+            logger.warning("iLink 媒体未下载: requests 未安装")
+            return None
 
         try:
             url = f"{a.ILINK_API_BASE}/media/get"

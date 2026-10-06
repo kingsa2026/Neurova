@@ -313,9 +313,8 @@ class QClawAdapter(ChannelAdapter):
         # 调用 QClaw 服务发送媒体消息
         # 注意：这里需要根据 QClaw API 的实际实现调整
         if not REQUESTS_AVAILABLE:
-            # 模拟模式
-            logger.warning("模拟模式：模拟发送媒体消息成功")
-            return {"success": True, "message_id": f"mock_media_{int(time.time())}"}
+            logger.warning("QClaw 媒体消息未发送: requests 未安装")
+            return {"success": False, "error": "requests 未安装，媒体消息未发送"}
 
         try:
             # 获取 access_token

@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import logging
 from neurova.core.logger import get_logger
-import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -74,9 +73,8 @@ class QClawService:
             - error: 错误信息（如果无效）
         """
         if not REQUESTS_AVAILABLE:
-            # 模拟模式：假设凭证有效
-            logger.warning("模拟模式：假设 QClaw 凭证有效")
-            return {"valid": True, "qclaw_user_id": f"mock_user_{app_id[:8]}", "error": None}
+            logger.warning("无法校验 QClaw 凭证: requests 未安装")
+            return {"valid": False, "qclaw_user_id": None, "error": "requests 未安装，凭证未校验"}
 
         try:
             # 调用 QClaw 网关校验接口（根据实际API调整）
@@ -126,10 +124,8 @@ class QClawService:
                 return cached["token"]
 
         if not REQUESTS_AVAILABLE:
-            # 模拟模式
-            mock_token = f"mock_token_{app_id[:8]}_{int(time.time())}"
-            self.token_cache[app_id] = {"token": mock_token, "expires_at": datetime.now() + timedelta(hours=2)}
-            return mock_token
+            logger.warning("无法获取 QClaw accessToken: requests 未安装")
+            return None
 
         try:
             # 调用 QClaw 网关获取 accessToken（根据实际API调整）
@@ -188,9 +184,8 @@ class QClawService:
             return {"success": False, "error": "获取 accessToken 失败"}
 
         if not REQUESTS_AVAILABLE:
-            # 模拟模式
-            logger.warning("模拟模式：模拟发送消息成功")
-            return {"success": True, "message_id": f"mock_msg_{int(time.time())}"}
+            logger.warning("QClaw 消息未发送: requests 未安装")
+            return {"success": False, "error": "requests 未安装，消息未发送"}
 
         try:
             # 调用 QClaw 消息发送接口（根据实际API调整）

@@ -194,8 +194,8 @@ class QQAdapter(ChannelAdapter):
     def _fetch_access_token(self) -> bool:
         """通过官方 getAppAccessToken 接口换取 access_token（有效期约 7200 秒）"""
         if not REQUESTS_AVAILABLE:
-            self._initialized = True
-            return True
+            logging.warning("QQ 无法换取 access_token: requests 未安装")
+            return False
 
         try:
             resp = requests.post(
@@ -224,7 +224,8 @@ class QQAdapter(ChannelAdapter):
     def _verify_connection(self) -> bool:
         """通过 GET /gateway/bot 验证凭证与连通性（官方 WebSocket 网关接口）"""
         if not REQUESTS_AVAILABLE:
-            return True
+            logging.warning("QQ 无法验证连接: requests 未安装")
+            return False
 
         try:
             resp = requests.get(
@@ -313,8 +314,8 @@ class QQAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[QQ模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return message.message_id
+            logging.warning("QQ 消息未发出: requests 未安装")
+            return None
 
         if not message.chat_id or not self._validate_resource_id(message.chat_id):
             logging.error("QQ消息发送失败: chat_id 缺失或含非法字符")
