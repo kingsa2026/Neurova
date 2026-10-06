@@ -1517,3 +1517,7 @@ tests/unit/channels/test_missing_dependency_honest_failure.py
 # 探针全走子进程行为，不读 pytest 内部属性；顺序坑记在夹具 docstring（teardown 逆序，
 # 不显式声明依赖时守卫会在复位之后才跑，永远看不见肇事者）。逐文件单跑 4 passed（约 12s）
 tests/unit/test_session_landing_guard.py
+# 审计台账 commit 号必须可达 HEAD（并发会话 rebase/merge 会让号静默失效，而 cat-file 仍返回成功）。
+# 判据本体在 scripts/ci/audit_ledger_commit_guard.py；本单先自造悬空 commit 证明扫描器咬得住，
+# 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。逐文件单跑 3 passed（约 8s，含全 HEAD 索引）
+tests/unit/test_audit_ledger_commit_guard.py
