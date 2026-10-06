@@ -53,7 +53,17 @@ class TestInStreamErrorEncoding(unittest.TestCase):
         return manager
 
     def _stream_one(self, manager, chunks, exc=None):
-        """驱动 chat_stream 到第一个错误 dict 并返回它。"""
+        """驱动 chat_stream 到第一个错误 dict 并返回它。
+
+        这里的 `exc` 特意用 `LLMRateLimitError`（"429 Too Many Requests" 经
+        `_classify_error` 判为 rate_limited），于是走 `multi_model_client.py:1178-1194`
+        的"同模型等待重试 ≤10 次 × 间隔 10s"——本用例要证的是**错误编码进流**，
+        不是重试节律，不打桩就会真睡 100s+，被 30s 全局 timeout 连整个 run 一起击杀。
+        `_sleep_for_retry` 的 docstring 正是为此留的测试桩注入点，这里按它给的口子免等待。
+        """
+
+        async def _noWait(*args, **kwargs):
+            return None
 
         async def _fake_stream(messages, **kwargs):
             for c in chunks:
@@ -67,7 +77,8 @@ class TestInStreamErrorEncoding(unittest.TestCase):
         client.model = "gpt-test"
         client.provider = MagicMock(id="test-provider")
         manager._get_client_for_request = MagicMock(return_value=client)
-        chunks_out = list(asyncio.run(_collect(manager.chat_stream([{"role": "user", "content": "hi"}]))))
+        with patch.object(MultiModelLLMClient, "_sleep_for_retry", _noWait):
+            chunks_out = list(asyncio.run(_collect(manager.chat_stream([{"role": "user", "content": "hi"}]))))
         return chunks_out
 
     def test_midstream_exception_yields_error_dict_with_type(self):
