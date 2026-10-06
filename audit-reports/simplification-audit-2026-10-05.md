@@ -371,7 +371,7 @@
     ① `tests/unit/evolution/eval/` 挂死（`ea1da5ae`）：真因不在 runner 也不是死循环，而是三个文件传 `agent=None`，`service.py:209/327` 的 `agent or SimulatedAgent(...)` 回落成**真** LLM 客户端——**用例在发真实请求、花真实配额**，被判 `rate_limited` 后进入"≤10 次 × 间隔 10s"等待，远超 30s 用例预算被 thread 方法击杀，连累整目录。修法：目录级出站闸 + `offlineAgent`（8 处 `agent=None` 逐方法替换）。闸必须抛 **BaseException 子类**——`SimulatedAgent.run` 外层 `except Exception` 会把 AssertionError 吞成空回复，普通断言等于哑闸。
     ①附：同根因第四处 `tests/llm/test_instream_error_encoding.py`（故意喂 429 却没免等待）按 `_sleep_for_retry` docstring 预留的桩注入点收口；揭盖后 6 条全绿，说明挂死背后没藏别的缺陷。
     ② `tests/benchmarks/test_multi_agent_coordination.py` 收集期 ERROR（`ce74616b`）：模块顶层 `from neurova.agents.seen_boundary import ...`，该包本仓不存在 → `Interrupted: 1 error during collection` 使 `pytest tests/` **一条都不跑**。第 7 条比后判退役：全文 0 个 `def test`、三个基准方法**全都**依赖两个已退役模块、全仓零消费者、现役能力另有真用例在跑。修后全仓收集 `21292 tests collected` 零错误。
-    ③ `tests/unit/planning/__pycache__/*.pyc` 被跟踪（`5193a885`）：**gitignore 规则对已跟踪文件不生效**——`dd5b00be`(08-30) 批量提交带入，`472a0180`(09-22) 才补 `tests/**/__pycache__/`，规则本身没错，这两个是规则之前的既成事实，于是每次跑测稳定产生一条无关 diff，污染 `git status` 与 A/B 判据。`git rm --cached` + 新增 `test_no_run_product_is_tracked`（取 `git ls-files` 而非磁盘形态：磁盘上的 pyc 是正常产物，仓库里的才是债）。
+    ③ `tests/unit/planning/__pycache__/*.pyc` 被跟踪（首次尝试 `5193a885` **未真正交付**，`2c681e17` 才收口）：**gitignore 规则对已跟踪文件不生效**——`dd5b00be`(08-30) 批量提交带入，`472a0180`(09-22) 才补 `tests/**/__pycache__/`，规则本身没错，这两个是规则之前的既成事实，于是每次跑测稳定产生一条无关 diff，污染 `git status` 与 A/B 判据。`git rm --cached` + 新增 `test_no_run_product_is_tracked`（取 `git ls-files` 而非磁盘形态：磁盘上的 pyc 是正常产物，仓库里的才是债）。**这一条我自己踩了命令坑**：`git commit --only -- <path>` 按**工作树内容**提交该路径，与 `--cached`（磁盘保留）叠加后，删除被在盘同名文件覆盖回去，那次 commit 实际是一次 `Bin 149 -> 149` 的内容更新；提交后复跑守卫转红才暴露——删除类改动的正确形态是"状态进索引 + 不带路径的 `git commit`（只提交索引）"，且绿灯必须在落库之后复取（教义第 4 条）。
     ④ 同批新增的全局收口（`9df526b9`）：`tests/conftest.py` 里 autouse 逐用例快照仓库根顶层条目，新增即红并点名肇事用例，与 §6-26 的具体根修互补。
     **仍存疑、未处理**：429 等待重试的最坏叠加时长（10 次 × 封顶 120s）在生产里没有全局 deadline，只有"重试次数"上界——是否要给整条请求加墙钟预算属产品口径，未擅动。
 
@@ -444,8 +444,10 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `a9170fa9` | 落盘锚点收成绝对路径单源（`data_root.require_data_path` 接三处：sweep 入口 / 计划仓 / 服务构造），mock 与相对串不再于进程 CWD 静默建塔（净 +32） | §6-26 新增并根修 |
 | `9df526b9` | 仓库根污染守卫接线：autouse 逐用例快照顶层条目、新增即红并点名肇事用例（生产净 0，测试基建 +153） | §6-27 的 ④ 收口，与 §6-26 根修互补 |
 | `ce74616b` | 退役不可加载的多智能体基准台架（0 用例 / 三方法全依赖已退役模块 / 零消费者），解开的却是 `pytest tests/` 整仓的锁；另加全仓收集零错误守卫（不进 CI 子集，避免 +60s） | §6-27 的 ② |
-| `5193a885` | 取消跟踪两个历史 .pyc，并新增「被跟踪产物」清点判据（取 git ls-files 而非磁盘形态） | §6-27 的 ③ |
+| `5193a885` | 新增「被跟踪产物」清点判据（取 git ls-files 而非磁盘形态）；同批想取消跟踪两个 .pyc，但被 `git commit --only` 的工作树语义抵消，**未真正交付** | §6-27 的 ③ 未闭合的一面 |
 | `ea1da5ae` | 根修 eval 目录挂死：`agent=None` 回落真 LLM 客户端（用例在发真请求、花配额）；目录级出站闸（须抛 BaseException 才不被 except Exception 吞）+ 8 处注入离线 agent，另收同类第四处 429 真等待 | §6-27 的 ① 与附项 |
+| `2c681e17` | 真正取消跟踪那两个 .pyc（状态进索引 + 不带路径的 commit 只提交索引）；由守卫在提交后复跑时抓出上一次交付是假的 | §6-27 的 ③ 闭合 |
+| `2c1008e6` | §6-27 三件收口登记 + 记一条「单元测试一直在花真实 API 配额」 | §6-27 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
