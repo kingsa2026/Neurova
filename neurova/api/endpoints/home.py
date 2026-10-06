@@ -41,14 +41,19 @@ def _get_app_state(request: Request) -> Any:
     return get_app_state()
 
 
-def _real_conversation_count() -> int:
-    """真实会话总数（会话仓库扫描，异常回退 0）。"""
+def _real_conversation_count(user_id: str = "") -> int:
+    """真实会话总数（会话仓库扫描，异常回退 0）。
+
+    `user_id` 是分桶入参：首页是**每个登录用户各自的面板**，不带属主过滤就会把
+    全体用户的会话数报给任何一个人（审计 `tests/unit/api/test_session_counts_are_user_scoped.py`）。
+    空属主的会话按既有规则对所有人可见，这条口径不在这里改。
+    """
     try:
         from neurova.session_repository import get_session_repository
 
         # RES-P1-4：count_sessions 走文件名去重零解析快路径——
         # 旧 len(list_sessions()) 为取个数而加载全部历史消息
-        return int(get_session_repository().count_sessions())
+        return int(get_session_repository().count_sessions(user_id=user_id))
     except Exception:
         return 0
 
@@ -173,14 +178,17 @@ def _parse_day(created_at: Any) -> Optional[str]:
         return None
 
 
-def _aggregate_daily(days: int) -> Dict[str, list]:
+def _aggregate_daily(days: int, user_id: str = "") -> Dict[str, list]:
     """会话按天聚合（确定性）。
 
     返回与 days 等长的每日活跃 agent 数 / 会话数 / 消息数。
+
+    `user_id` 透传给 `list_sessions`——趋势图同样是用户各自的面板，
+    不带过滤就是跨租户聚合。
     """
     from neurova.session_repository import get_session_repository
 
-    sessions = get_session_repository().list_sessions()
+    sessions = get_session_repository().list_sessions(user_id=user_id)
 
     first = datetime.now() - timedelta(days=days - 1)
     labels = [(first + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
@@ -211,11 +219,17 @@ def _aggregate_daily(days: int) -> Dict[str, list]:
 
 
 @router.get("/home/data")
-async def get_home_data(request: Request):
+async def get_home_data(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取首页汇总数据（真实统计）"""
     try:
         # 尝试从实际模块获取数据
         app_state = _get_app_state(request)
+        # 路由级那道门只执行不返回值，端点要身份必须自己声明同名依赖——
+        # 否则这里拿不到调用者，计数就只能是全体的（本仓身份批同一条坑）。
+        callerId = str((user or {}).get("user_id") or "")
 
         # 获取 agent 数量（从 app_state["agents"] 字典统计）
         agent_count = 0
@@ -229,13 +243,13 @@ async def get_home_data(request: Request):
         return {
             "welcome_message": "欢迎使用 Neurova",
             "quick_stats": {
-                "total_conversations": _real_conversation_count(),
+                "total_conversations": _real_conversation_count(callerId),
                 "total_memories": _real_memory_count(),
                 "total_skills": 0,
             },
             "stats": {
                 "agent_count": agent_count,
-                "conversation_count": _real_conversation_count(),
+                "conversation_count": _real_conversation_count(callerId),
                 "memory_count": _real_memory_count(),
                 "token_consumption": token_stats["tokens"],
                 "plugin_count": 0,
@@ -296,14 +310,19 @@ async def get_home_data(request: Request):
 
 
 @router.get("/home/trends")
-async def get_home_trends(request: Request, days: int = Query(default=7, ge=1, le=90)):
+async def get_home_trends(
+    request: Request,
+    days: int = Query(default=7, ge=1, le=90),
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取 7 天活跃趋势（会话真实按天聚合，确定性输出）
 
     token/llm 无日维度历史源（记账器仅进程累计）→ data 返回空数组，
     绝不使用随机数/示例数据伪造。
     """
+    callerId = str((user or {}).get("user_id") or "")
     try:
-        agg = _aggregate_daily(days)
+        agg = _aggregate_daily(days, callerId)
         labels = agg["labels"]
         empty = {"labels": labels, "data": []}
 
