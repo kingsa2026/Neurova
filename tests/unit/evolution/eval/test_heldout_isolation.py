@@ -175,14 +175,14 @@ class TestServiceHeldout:
         return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
 
     @pytest.mark.asyncio
-    async def test_proposal_carries_heldout_evidence(self, tmp_path, monkeypatch):
+    async def test_proposal_carries_heldout_evidence(self, tmp_path, monkeypatch, offlineAgent):
         from neurova.evolution.eval.service import SkillEvolutionService
 
         monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
         svc = SkillEvolutionService("agent-x", base_dir=tmp_path / "evo")
         result, proposal = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds_with_heldout(),
-            agent=None, judge=self._judge, mutate=_mutate_appends_improved,
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
         )
         assert proposal is not None
         assert proposal.heldout_before == pytest.approx(result.heldout_before)
@@ -191,7 +191,7 @@ class TestServiceHeldout:
         assert "heldout_improvement" in d
 
     @pytest.mark.asyncio
-    async def test_service_carves_heldout_when_ratio_set(self, tmp_path, monkeypatch):
+    async def test_service_carves_heldout_when_ratio_set(self, tmp_path, monkeypatch, offlineAgent):
         """heldout_ratio>0 且数据集无 heldout → service 从 holdout 尾部自动划出。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
@@ -205,14 +205,14 @@ class TestServiceHeldout:
         cfg = EvolutionConfig(heldout_ratio=0.5)
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=three_way,
-            agent=None, judge=self._judge, mutate=_mutate_appends_improved, config=cfg,
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved, config=cfg,
         )
         # heldout 被划出并评测（judge 基线 0.2）→ 证据字段非零
         assert result.heldout_before == pytest.approx(0.2)
         assert result.heldout_after == pytest.approx(0.9)
 
     @pytest.mark.asyncio
-    async def test_service_default_no_carve(self, tmp_path, monkeypatch):
+    async def test_service_default_no_carve(self, tmp_path, monkeypatch, offlineAgent):
         from neurova.evolution.eval.service import SkillEvolutionService
 
         monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
@@ -223,6 +223,6 @@ class TestServiceHeldout:
         )
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=three_way,
-            agent=None, judge=self._judge, mutate=_mutate_appends_improved,
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
         )
         assert result.heldout_before == 0.0  # 默认 heldout_ratio=0，不划不测
