@@ -157,10 +157,8 @@ class MQTTAdapter(ChannelAdapter):
     def _init_connection(self) -> bool:
         """初始化 MQTT 连接"""
         if not MQTT_AVAILABLE:
-            logging.warning("paho-mqtt 未安装，MQTT 模式不可用")
-            logging.info("安装命令: pip install paho-mqtt")
-            self._initialized = True  # 模拟初始化
-            return True
+            logging.warning("paho-mqtt 未安装，MQTT 连接未建立（安装命令: pip install paho-mqtt）")
+            return False
 
         try:
             # 创建 MQTT 客户端
