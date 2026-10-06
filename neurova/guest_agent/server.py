@@ -44,6 +44,12 @@ def _make_auth(token: Optional[str]):
 def create_app(manager: Any = None, uia_manager: Any = None, token: Optional[str] = None) -> FastAPI:
     """构建 guest agent ASGI 应用。manager/uia_manager 注入便于测试
     （默认真机 ComputerUseManager / DesktopUIAManager）。"""
+    # Proactor accept 守护：同 neurova/api/app.py::create_app 的装配理由
+    # （WinError 64/995 瞬时失败重挂监听，防一次客户端 RST 拆掉监听）。幂等。
+    from neurova.core.proactor_accept_guard import installProactorAcceptGuard
+
+    installProactorAcceptGuard()
+
     app = FastAPI(title="neurova-guest-agent")
     auth = _make_auth(token)
 
