@@ -80,6 +80,23 @@ async def get_settings_schema(
     }
 
 
+# 字面路由必须先于参数化路由注册（FastAPI 按注册顺序匹配，同 `crud.py` 的
+# `/{memory_id}` 纪律）。此前 `/settings/export` 声明在 `/settings/{section}` 之后，
+# 于是导出请求被当成 section="export" 判成 404，端点定义存在却永远打不到。
+@router.get("/settings/export")
+async def export_memory_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """导出当前配置为 JSON — 登录用户可读"""
+    from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
+    cfg = _get()
+    return {
+        "code": 0,
+        "message": "success",
+        "data": cfg.get_all(),
+    }
+
+
 @router.get("/settings/{section}")
 async def get_settings_section(
     section: str,
@@ -139,20 +156,6 @@ async def reset_memory_settings(
     return {
         "code": 0,
         "message": "Settings reset to defaults",
-        "data": cfg.get_all(),
-    }
-
-
-@router.get("/settings/export")
-async def export_memory_settings(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """导出当前配置为 JSON — 登录用户可读"""
-    from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
-    cfg = _get()
-    return {
-        "code": 0,
-        "message": "success",
         "data": cfg.get_all(),
     }
 
