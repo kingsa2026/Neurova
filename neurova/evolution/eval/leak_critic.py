@@ -88,6 +88,24 @@ def _normalize_text(text: str) -> str:
     return "".join(ch.lower() for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
 
 
+def deterministic_leak_check(candidate_text: str, baseline_text: str,
+                             markers: frozenset[str] = frozenset()) -> Optional[LeakVerdict]:
+    """确定性预检（零 LLM，单一事实源——review 与结晶入库闸 eval_corpus 共用）。
+
+    标记命中 → task_specialization；规范化后与基线相同 → degenerate_noop；
+    否则 None（进入下一层/放行）。标记已 casefold 存储，匹配大小写不敏感。
+    """
+    folded = candidate_text.casefold()
+    for m in markers:
+        if m in folded:
+            return LeakVerdict(leaked=True, category="task_specialization",
+                               evidence=m[:200])
+    if _normalize_text(candidate_text) == _normalize_text(baseline_text):
+        return LeakVerdict(leaked=True, category="degenerate_noop",
+                           evidence="规范化后与基线相同")
+    return None
+
+
 class LeakCritic:
     """两层泄漏闸：确定性预检（必开）+ LLM 审查（可选）。"""
 
@@ -130,16 +148,11 @@ class LeakCritic:
 
     async def review(self, *, candidate_text: str, baseline_text: str,
                      markers: frozenset[str] = frozenset()) -> LeakVerdict:
-        # 第一层：确定性预检（零 LLM，宁漏勿误杀）。
-        # 标记已 casefold 存储 → 包含判断对大小写不敏感。
-        folded = candidate_text.casefold()
-        for m in markers:
-            if m in folded:
-                return LeakVerdict(leaked=True, category="task_specialization",
-                                   evidence=m[:200])
-        if _normalize_text(candidate_text) == _normalize_text(baseline_text):
-            return LeakVerdict(leaked=True, category="degenerate_noop",
-                               evidence="规范化后与基线相同")
+        # 第一层：确定性预检（零 LLM，宁漏勿误杀）——实现单源于
+        # deterministic_leak_check（结晶入库闸 eval_corpus 同源复用）
+        hit = deterministic_leak_check(candidate_text, baseline_text, markers)
+        if hit is not None:
+            return hit
         # 第二层：LLM 六类审查（默认关）
         if not self._llm_review:
             return LeakVerdict(leaked=False)
