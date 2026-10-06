@@ -133,7 +133,7 @@ class SkillService:
         self._logger = get_logger(__name__)
         # AGENTS.md 规定：threading.RLock 用于共享状态
         # 保护 _skills / _save_manifest 在并发安装/卸载下的原子性
-        # 对照：pool_service.py:70, market_importer.py:100, evolution_engine.py:99
+        # 对照：pool_service.py:70, market_importer.py:100
         from neurova.skills.creation_governance import EvidenceStore
 
         self.creation_evidence = EvidenceStore(self.skills_dir, agent_id)

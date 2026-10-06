@@ -512,23 +512,6 @@ class TestIntegrationWithAgent:
             assert result.success is True
             mock_generate.assert_called_once_with(requirement)
 
-    @pytest.mark.asyncio
-    async def test_evolution_engine_uses_prompt_optimizer(self):
-        """测试进化引擎使用提示优化器"""
-        from neurova.skills.evolution_engine import EvolutionEngine
-        
-        engine = Mock(spec=EvolutionEngine)
-        engine.prompt_optimizer = PromptOptimizer()
-        
-        # 模拟进化过程中的提示优化
-        with patch.object(engine.prompt_optimizer, 'optimize_prompt', new_callable=AsyncMock) as mock_optimize:
-            mock_optimize.return_value = Mock(success=True, optimized_prompt="优化后的提示")
-            
-            result = await engine.prompt_optimizer.optimize_prompt("原始提示", Mock())
-            
-            assert result.success is True
-            mock_optimize.assert_called_once()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
