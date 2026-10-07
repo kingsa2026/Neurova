@@ -45,6 +45,9 @@ class BaseModule(ABC):
         **kwargs,
     ):
         self._config = config or {}
+        # 总线在调用时现取（见 `_resolveEventBus`），不在构造期冻结：绑死之后，
+        # 任何"重置全局单例"的动作（测试隔离、重启装配）都会让已建模块永远
+        # 对着一条没人读的总线发事件——正是本文件过去恒走 None 分支的形态。
         self._event_bus = event_bus
         self._state = ModuleState.UNINITIALIZED
         self._state_manager = None
@@ -79,15 +82,15 @@ class BaseModule(ABC):
         self._logger.debug("State changed: %s -> %s", old_state.value, new_state.value)
 
         # 发送状态变更事件
-        if self._event_bus:
-            self._event_bus.emit(
-                "module.state_changed",
-                {
-                    "module_id": self.MODULE_ID,
-                    "old_state": old_state.value,
-                    "new_state": new_state.value,
-                },
-            )
+        self._resolveEventBus().publish(
+            "module.state_changed",
+            {
+                "module_id": self.MODULE_ID,
+                "old_state": old_state.value,
+                "new_state": new_state.value,
+            },
+            source=self.MODULE_ID,
+        )
 
     def get_state(self) -> ModuleState:
         """获取模块状态"""
@@ -109,16 +112,43 @@ class BaseModule(ABC):
         """记录错误日志"""
         self._logger.error(message)
 
+    def _resolveEventBus(self):
+        """广播落点：注入优先，未注入回落到 `core/event_bus` 的唯一全局入口。
+
+        原形态是 `event_bus=None` + `if self._event_bus:`，而全仓**没有任何一处**传非
+        None（`idle_tracker.py:91`、`provider_manager.py:509` 都只是形参转发），于是
+        `initialize/start/stop`(:144-177) 的每一次状态变更与 `idle_tracker.py:602` 的
+        `phase.changed` 都只写在日志里，总线上一片空白——而
+        `api/endpoints/logs.py:72` 读的恰是这条总线，写了没人读、读了恒为空，两头断点。
+        每次调用现取（不冻结在构造期）与 `_settings_path()` 同一口径：绑死会让
+        "重置全局单例"之后的模块对着一条已退役的总线发事件。
+        """
+        if self._event_bus is not None:
+            return self._event_bus
+        from neurova.core.event_bus import get_event_bus
+
+        return get_event_bus()
+
+    def subscribe_event(self, event_name: str, handler) -> None:
+        """订阅事件——基类唯一的订阅入口。
+
+        此前 `BaseModule` 只有 `emit_event` 没有订阅面，于是
+        `context/injector.py:36-69` 的降级替身给自己配了一套私有 `_event_handlers`
+        （第三份总线，且 handler 异常被 `except Exception: pass` 吞掉）。订阅能力
+        收在基类这一份，子类不再自带平行实现。
+        """
+        self._resolveEventBus().subscribe(event_name, handler, module_name=self.MODULE_ID)
+
     def emit_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
-        """发送事件"""
-        if self._event_bus:
-            self._event_bus.emit(
-                event_type,
-                {
-                    "module_id": self.MODULE_ID,
-                    **(data or {}),
-                },
-            )
+        """发送事件（载荷必带 `module_id`——订阅者据此归因，缺它事件就是无主的）"""
+        self._resolveEventBus().publish(
+            event_type,
+            {
+                "module_id": self.MODULE_ID,
+                **(data or {}),
+            },
+            source=self.MODULE_ID,
+        )
 
     @abstractmethod
     def on_initialize(self) -> None:
