@@ -359,7 +359,7 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 | 缺口 | §5 判定 | 现判 | 落地证据（均为本次亲验） |
 |------|---------|------|------------------------|
-| **G1** | 仍开放 | **已闭合** | 递归归零：`openai_loop.py` 内 `await self._predict_normal(` / `self._predict_stream(` **0 命中**，代之以 `while True:`（`:536`、`:736`）。`self._tool_rounds` 残留 **0 处**；`TurnRunState` 新文件 142 行，三条 loop 全改用（`anthropic_loop.py:54` `TurnRunState.forTurn(`）。`_top_level` 参数已删（仅存无关的 `_split_top_level`）。`assertRoundInvariant` 落 `turn_run_state.py:92` |
+| **G1** | 仍开放 | **已闭合** | 递归归零：`openai_loop.py` 内 `await self._predict_normal(` / `self._predict_stream(` **0 命中**〔**2026-10-01 复跑更正**：前一个模式确为 0，后一个模式实为 **1 命中**（`:500` 入口一次性分派，非轮内重入）⇒ 本行"已闭合"判定不变，但原句读数与其复验命令作废，见 §9 #10 与 §10〕，代之以 `while True:`（`:536`、`:736`）。`self._tool_rounds` 残留 **0 处**；`TurnRunState` 新文件 142 行，三条 loop 全改用（`anthropic_loop.py:54` `TurnRunState.forTurn(`）。`_top_level` 参数已删（仅存无关的 `_split_top_level`）。`assertRoundInvariant` 落 `turn_run_state.py:92` |
 | **G1-D 深度** | — | **已闭合** | `swarm.py:164` `MAX_SUBAGENT_DEPTH` + `:220-224` 超限走 **既有 `_rejection` 通道**（`SUBAGENT_DEPTH_EXCEEDED`）。**实现优于方案**：深度用 `ContextVar`（`:46 _subagentDepthVar`）而非我提议的"塞进 `TurnRunState`"——因为 `spawn` 要跨 `chat()` 边界，state 传不过去 |
 | **G2** | 仍开放（主出口无守卫） | **已闭合** | `base.py:71 evaluateLoopExit` + `LoopExitDecision{done,stop,resume}`，`:85` 注释即方案原话（"ctx 带 `isLoopExit=True`…假完成正是在这里才可被识别"）。**两条路径均调用**：`openai_loop.py:691`、`:1101`。`gates.py:160-168` GoalGate 出口分支。新文件 `loop_goal.py`(93) / `goal_verifier.py`(117) / `sub_session.py`(41) |
 | **G2 goal 闭环** | 只读不写 | **四环齐** | 写：`chat_pipeline.py:619 set_turn_goal(ctx.metadata["goal"])`（= 方案 D-2 的 ①）；读：`base.py:112`；反馈：`set_turn_goal_verdict`（`base.py:117`）+ 续跑计数；再消费：`chat_pipeline.py:2867-2870` 取 goal+verdict。**命名未沿用裸 `_goal`**（方案 RC-2 的冲突警示被采纳） |
@@ -469,6 +469,7 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 | **7** | **"G1 的风险是栈深度，递归 ≈ 轮数即隐患"（§3.1/§5/§8 第一版）** | **栈深非风险**：实测每轮 2.03 帧、可撑 493 轮，合法上限 100 轮仅占预算 20%，且全仓无 `RecursionError` 痕迹。真实缺陷改为轮次态归属错误 + 子代理无深度上限 + 三份语义漂移。顺带证伪了本方案初稿的子假设"`anthropic_loop` 经公有 `predict_step` 递归 ⇒ 上限恒不触发"（`_top_level=False` 保护有效） | **未测量即定性**——把"结构不优雅"直接写成了"运行风险"。这是本节记录的方法论毛病**第三次**出现（#1 看组件齐不齐、#6 看分支覆盖、#7 有无实测），已固化为纪律：**凡"某机制会失效/会出事"的断言，必须先给出量或找到反证参数** |
 | **8** | **"G4 是唯一必须新造底层能力的一条"**（§8 第一版） | 进程树杀灭、会话终止、取消意图持久化**三件都在仓里且已单源**；真正要新造的只有协作式取消令牌一件，另两处是语义漏判（`cancelled` 未入 `is_policy_denial`、取消不投 hint） | 同一毛病的**第四次**出现（#1 组件齐不齐、#6 分支覆盖、#7 有无实测、#8 能力存在性）：**没查"该能力是否已存在"就按"缺失"定级**。"缺口"与"未接线的已有能力"是两类工单——后者成本低一个量级、评审强度也不该相同 |
 | **9** | **G5 记作"ASK 不阻塞"；G2 方案主张"补一个 `set_goal_gate` caller"** | ① G5 真根因是**审批记录里没有回投地址**（metadata 只有 tool_name/params/governance），"不阻塞"只是断链表现；② 真实实现把 GoalGate **进默认装配**（`openai_loop.py:212-222`），`set_goal_gate` 无调用方是**设计结果而非断点**——已入库方案的 §3/§5 相应段落过期 | 同一毛病的**第五次**出现，形态也升级了：这次不是漏看分支或漏测量，而是**把"某 API 没被调用"直接当成"缺接线"**，没先问"其职责是否已被别处单装配点覆盖"。判据：**符号被判 `no_consumer` 前，先问它的职责是否已由别处覆盖**，再决定补 caller 还是改台账口径 |
+| **10** | **§5.1 记"递归归零：`openai_loop.py` 内 `await self._predict_normal(` / `self._predict_stream(` 0 命中"** | 2026-10-01 按同一范围复跑：第一个模式确为 **0 命中**，第二个模式实为 **1 命中**（`:500  return self._predict_stream(request_params, state)`）。该处是**入口的一次性分派**、不在轮内，其正上方注释正是 G1 迭代化的落点声明"此处不再重入整条循环——重入会让'这一轮'多一层栈帧"。⇒ **G1"已闭合"的判定不变**，但支撑它的那句读数与 §10 那条复验命令都不成立 | **复验命令在结构上匹配不到它要证的那一行**：§10 写的是 `_predict_stream(request_params)`，真代码带 `state` 实参，所以该命令**恒返回 0**——一个被用来"证明递归已消"的零读数，出自一条**即便递归仍在也照样返回零**的命令。这是本节方法论毛病的第六种形态（#1 组件齐不齐、#2 人算可达性、#6 分支覆盖、#7 有无实测、#8 能力存在性、#9 no_consumer 口径），新增形态为：**用失配或被截断的检索建立否定性结论**。规矩：任何服务于"没有/不存在"的检索，先用一条**已知会命中**的样本做正对照（本次即把 `:500` 喂回修正后的模式，必须命中才认这个读数）。 |
 
 ---
 
@@ -487,7 +488,10 @@ sed -n '157,237p' zcode-ref/apps/zcode-cli/packages/core/src/runtime/methods/tur
 
 # —— Neurova 侧缺口逐条复验（对准 c55e1f37）——
 grep -n "use_parallel\|is_concurrency_safe" neurova/agent/loops/base.py       # G3
-grep -n "await self._predict_normal\|_predict_stream(request_params)" neurova/agent/loops/openai_loop.py  # G1
+# G1 轮内重入是否归零（2026-10-01 修正此条，见 §9 #10：旧式 `_predict_stream(request_params)` 匹配不到带 `state` 实参的真行，恒得 0，即"递归仍在也返回 0"，不能作证据）
+grep -nE "self\._predict_(stream|normal)\(" neurova/agent/loops/openai_loop.py   # → 实测 1 命中 `:500`，系入口一次性分派（其上注释："此处不再重入整条循环"），非轮内重入
+grep -n "while True:" neurova/agent/loops/openai_loop.py   # → 实测 `:536`、`:736` 两处迭代循环
+# 正对照（必须先跑）：上面那条模式必须命中 `:500`，命中不到说明模式又失配了，其"零读数"不可信
 grep -n "class GoalGate" neurova/agent/gates.py; grep -n "def set_goal_gate" neurova/agent/loops/openai_loop.py  # G2
 sed -n '1646,1662p' neurova/tool_executor.py                                   # G5
 grep -rn "cache_control\|prompt_cache" --include=*.py neurova/ | grep -v test   # G7 剩余半条
