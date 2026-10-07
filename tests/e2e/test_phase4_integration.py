@@ -50,92 +50,105 @@ class TestCostTrackingIntegration:
 # ============================================================================
 
 class TestTurnCoordination:
-    """Test turn coordination integration"""
-    
-    @pytest.mark.asyncio
-    async def test_turn_coordinator_singleton(self):
-        """Test TurnCoordinator is singleton"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        coordinator1 = get_turn_coordinator()
-        coordinator2 = get_turn_coordinator()
-        
-        assert coordinator2 is coordinator1
-    
-    @pytest.mark.asyncio
-    async def test_turn_coordinator_initialization(self):
-        """Test TurnCoordinator initialization"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        coordinator = get_turn_coordinator()
-        stats = coordinator.get_stats()
-        
-        assert stats["total_turns"] == 0
-        assert stats["successful_turns"] == 0
-        assert stats["yielded_turns"] == 0
-    
-    @pytest.mark.asyncio
-    async def test_yield_rules_registration(self):
-        """Test agent registration in yield rules"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        coordinator = get_turn_coordinator()
-        
-        # Register agents
-        coordinator.yield_checker.register_agent("agent_1", "gpt-4")
-        coordinator.yield_checker.register_agent("agent_2", "gpt-3.5")
-        
-        # Check if registered
-        assert "agent_1" in coordinator.yield_checker._agent_models
-        assert "agent_2" in coordinator.yield_checker._agent_models
-    
-    @pytest.mark.asyncio
-    async def test_operation_collision_detection(self):
-        """Test operation collision detection"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        coordinator = get_turn_coordinator()
-        
-        # Register agent
-        coordinator.yield_checker.register_agent("agent_1", "gpt-4")
-        
-        # Start operation
-        op_hash = "test_operation_1"
-        coordinator.yield_checker.record_operation_start("agent_1", op_hash)
-        
-        # Check collision
-        decision = coordinator.yield_checker.check_yield_rules(
-            agent_id="agent_1",
-            model_name="gpt-4",
-            proposed_operations=[op_hash],
+    """让位闸端到端：真裁决器单例 + 真进程内 await，走回合入口该走的那条路。
+
+    用例之间先 `await reset_glance_yield_checker()`——这是生产重置入口
+    （`/api/coordination/yield-checker/reset` 走的就是它），不是测试自造的旁路。
+    """
+
+    @staticmethod
+    async def _freshChecker():
+        from neurova.collaboration.glance_yield_rules import (
+            get_glance_yield_checker,
+            reset_glance_yield_checker,
         )
-        
-        # Should detect collision (any of the three reasons)
-        assert decision.should_yield is True
-        assert decision.reason.value in [
-            "collision_detected",
-            "deterministic_spacing",
-            "concurrent_agent",
-        ]
-        
-        # Complete operation
-        coordinator.yield_checker.record_operation_complete(
-            "agent_1", op_hash, success=True
+
+        await reset_glance_yield_checker()
+        return await get_glance_yield_checker()
+
+    @pytest.mark.asyncio
+    async def test_first_turn_proceeds_and_occupies_exactly_one_slot(self):
+        """放行一个回合只占一格，且把操作标识回带给调用方（挂起时要按它记账）。"""
+        from neurova.agent.turn_coordinator import requestYieldGate
+
+        checker = await self._freshChecker()
+
+        outcome = await requestYieldGate(
+            agentId="e2e-agent", modelName="gpt-4", sessionId="sess-e2e", userInput="你好"
         )
-        
-        # Wait for spawn interval (2 seconds)
-        import time
-        time.sleep(2.5)
-        
-        # No longer should yield (operation completed + wait time passed)
-        decision = coordinator.yield_checker.check_yield_rules(
-            agent_id="agent_1",
-            model_name="gpt-4",
-            proposed_operations=[op_hash],
+
+        assert outcome.proceeded is True
+        assert outcome.attempts == 1
+        assert checker.get_stats()["active_per_model"] == {"gpt-4": 1}, (
+            f"占位与放行不一致：{checker.get_stats()['active_per_model']}"
         )
-        
-        # Should NOT yield anymore
-        assert decision.should_yield is False
+        assert outcome.operation, "操作标识为空——挂起时无法向台账交代是哪个回合"
+
+    @pytest.mark.asyncio
+    async def test_repeated_turns_never_exhaust_the_model_quota(self):
+        """连开 8 个回合不该把自己模型的额度吃光（旧记账判一次加一次，第 7 次起恒让位）。"""
+        from neurova.agent.turn_coordinator import requestYieldGate
+
+        checker = await self._freshChecker()
+
+        for _ in range(8):
+            outcome = await requestYieldGate(
+                agentId="e2e-loopy", modelName="gpt-4", sessionId="s", userInput="继续"
+            )
+            assert outcome.proceeded is True, "同一 Agent 反复问就把额度占满——查询当成了开工"
+            checker.record_operation_complete("e2e-loopy", outcome.operation, success=True)
+
+    @pytest.mark.asyncio
+    async def test_persistent_yield_parks_after_bounded_waiting(self, monkeypatch):
+        """冷却不会自愈时：等满预算（10 次 × 20s）就挂起，并带着原因回来。"""
+        import asyncio
+
+        from neurova.agent.turn_coordinator import requestYieldGate
+        from neurova.collaboration.glance_yield_rules import GlanceYieldChecker
+
+        checker = await self._freshChecker()
+        monkeypatch.setattr(GlanceYieldChecker, "DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS", 10 ** 6)
+        checker.trigger_rate_limit("e2e-parked")
+        slept = []
+
+        async def fakeSleep(seconds):
+            slept.append(seconds)
+
+        monkeypatch.setattr(asyncio, "sleep", fakeSleep)
+
+        outcome = await requestYieldGate(
+            agentId="e2e-parked", modelName="gpt-4", sessionId="s", userInput="继续"
+        )
+
+        assert outcome.shouldPark is True
+        assert outcome.attempts == 11 and len(slept) == 10
+        assert sum(slept) <= 200.0 and max(slept) <= 20.0
+        assert outcome.parkReason, "挂起必须带原因"
+
+    @pytest.mark.asyncio
+    async def test_occupationIsReleasedOnCompletion(self):
+        """完成即还槽——否则跑够 6 个回合之后该模型永久满员。"""
+        from neurova.agent.turn_coordinator import requestYieldGate
+
+        checker = await self._freshChecker()
+
+        for index in range(checker.DEFAULT_MAX_CONCURRENT_AGENTS):
+            outcome = await requestYieldGate(
+                agentId=f"e2e-{index}",
+                modelName="gpt-4",
+                sessionId="s",
+                userInput=f"第 {index} 个回合",
+            )
+            assert outcome.proceeded is True
+            checker.record_operation_complete(f"e2e-{index}", outcome.operation, success=True)
+
+        late = await requestYieldGate(
+            agentId="e2e-late", modelName="gpt-4", sessionId="s", userInput="迟到"
+        )
+        assert late.proceeded is True, (
+            f"每个回合都正常完成了，第 7 个仍被挡下（active="
+            f"{checker.get_stats()['active_per_model']}）——释放路径没接回计数"
+        )
 
 
 # ============================================================================
@@ -241,13 +254,15 @@ class TestFullWorkflow:
     @pytest.mark.asyncio
     async def test_complete_workflow_basic(self):
         """Test basic complete workflow"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
+        from neurova.agent.turn_coordinator import requestYieldGate
         from neurova.agent.model_selector import get_smart_model_selector
-        
-        # Step 1: Register agents
-        coordinator = get_turn_coordinator()
-        coordinator.yield_checker.register_agent("agent_1", "gpt-4")
-        coordinator.yield_checker.register_agent("agent_2", "gpt-3.5")
+
+        # Step 1: 两个 Agent 各过一个真回合入口的让位闸
+        for agentId, model in (("agent_1", "gpt-4"), ("agent_2", "gpt-3.5")):
+            outcome = await requestYieldGate(
+                agentId=agentId, modelName=model, sessionId="sess-wf", userInput="What is AI?"
+            )
+            assert outcome.proceeded is True
         
         # Step 3: Select models
         selector = get_smart_model_selector()
@@ -270,37 +285,41 @@ class TestFullWorkflow:
     
     @pytest.mark.asyncio
     async def test_multi_agent_coordination(self):
-        """Test multi-agent coordination"""
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        # Get coordinator
-        coordinator = get_turn_coordinator()
-        
-        # Register two agents on SAME model (to detect collision)
-        coordinator.yield_checker.register_agent("agent_1", "gpt-4")
-        coordinator.yield_checker.register_agent("agent_2", "gpt-4")
-        
-        # Agent 1 starts operation
-        op_hash = "operation_1"
-        coordinator.yield_checker.record_operation_start("agent_1", op_hash)
-        
-        # Agent 2 tries same operation
-        decision = coordinator.yield_checker.check_yield_rules(
-            agent_id="agent_2",
-            model_name="gpt-3.5",
-            proposed_operations=[op_hash],
+        """两个 Agent 抢同一模型：占满之后后来者必须被让位，释放后又能过。"""
+        from neurova.agent.turn_coordinator import requestYieldGate
+        from neurova.collaboration.glance_yield_rules import reset_glance_yield_checker
+
+        await reset_glance_yield_checker()
+        from neurova.collaboration.glance_yield_rules import get_glance_yield_checker
+
+        checker = await get_glance_yield_checker()
+        limit = checker.DEFAULT_MAX_CONCURRENT_AGENTS
+        running = []
+
+        for index in range(limit):
+            outcome = await requestYieldGate(
+                agentId=f"ma-{index}",
+                modelName="gpt-4",
+                sessionId="sess-ma",
+                userInput=f"任务 {index}",
+            )
+            assert outcome.proceeded is True
+            running.append((f"ma-{index}", outcome.operation))
+
+        # 闸自身会重试等待；这里只看一次判据结论，不把等待的时间算进断言
+        decision = checker.check_yield_rules(
+            agent_id="ma-late",
+            model_name="gpt-4",
+            proposed_operations=["op-late"],
+            conversation_id="sess-ma",
         )
-        
-        # Should detect collision (any of the three reasons)
-        assert decision.should_yield is True
-        assert decision.reason.value in [
-            "collision_detected",
-            "deterministic_spacing",
-            "concurrent_agent",
-        ]
-        
-        # Clean up
-        coordinator.yield_checker.record_operation_complete("agent_1", op_hash, success=True)
+        assert decision.should_yield is True and decision.reason.value == "concurrent_agent", (
+            f"占满 {limit} 个操作后后来者却没被挡下：{decision}"
+        )
+
+        for agentId, operation in running:
+            checker.record_operation_complete(agentId, operation, success=True)
+        assert checker.get_stats()["active_per_model"].get("gpt-4", 0) == 0
 
 
 # ============================================================================
@@ -334,30 +353,32 @@ class TestPerformance:
     
     @pytest.mark.asyncio
     async def test_coordination_overhead(self):
-        """Test coordination overhead is minimal"""
+        """放行路径的闸开销必须可忽略——它每回合都要跑，不能变成新的慢点。"""
+        import asyncio
         import time
-        
-        from neurova.agent.turn_coordinator import get_turn_coordinator
-        
-        # Register agent
-        coordinator = get_turn_coordinator()
-        coordinator.yield_checker.register_agent("perf_agent", "gpt-4")
-        
-        # Time operations
-        start = time.time()
-        
-        for _ in range(5):
-            decision = coordinator.yield_checker.check_yield_rules(
-                agent_id="perf_agent",
-                model_name="gpt-4",
-                proposed_operations=["test_op"],
+
+        from neurova.agent.turn_coordinator import requestYieldGate
+        from neurova.collaboration.glance_yield_rules import reset_glance_yield_checker
+
+        await reset_glance_yield_checker()
+        await requestYieldGate(
+            agentId="perf_agent", modelName="gpt-4", sessionId="s", userInput="warm"
+        )
+
+        start = time.perf_counter()
+        for index in range(5):
+            # 每个回合用不同 agent：Layer 3 的生成间距（500ms）会因"同一 agent 连开两回合"
+            # 而合法地让闸等一次，那是节流不是开销——测开销要把它排除掉。
+            outcome = await requestYieldGate(
+                agentId=f"perf-{index}", modelName="gpt-4", sessionId="s", userInput=f"op-{index}"
             )
-        
-        elapsed = time.time() - start
-        
-        # Should be fast
-        avg_time = elapsed / 5
-        assert avg_time < 0.01, f"Avg coordination time {avg_time}s is too high"
+            assert outcome.proceeded is True and outcome.attempts == 1, (
+                f"无竞争场景下闸却等了（attempts={outcome.attempts}, "
+                f"waited={outcome.waitedSeconds}）——判据链上有别的东西在挡"
+            )
+        avgTime = (time.perf_counter() - start) / 5
+
+        assert avgTime < 0.01, f"闸的平均开销 {avgTime:.6f}s 过高（每回合都要付）"
 
 
 # ============================================================================

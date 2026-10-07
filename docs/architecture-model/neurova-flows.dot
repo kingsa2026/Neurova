@@ -111,8 +111,8 @@ digraph NeurovaFlows {
         tc [label="turn_coordinator\ncheck_and_execute_turn() [turn_coordinator.py:67]\nget_turn_coordinator() 零调用方 [:324]", fillcolor="#e7f5ff"];
         crdt [label="crdt/ RGA + 文档\nPython 侧零消费者\n前端唯一引用已注释且用 any 顶替\n[NeurUI/src/stores/collaboration.optimized.ts:21,25]", fillcolor="#e7f5ff"];
         cmgr [label="computer_manager 单例 [:493-506]\n仅被未注册的 computer_api 消费", fillcolor="#e7f5ff"];
-        cd [label="coordination_decorators.py\n全仓零引用", fillcolor="#e7f5ff"];
-    }
+        cd [label="coordination_decorators.py
+已退役：让位执行体收成一份（agent/turn_coordinator.requestYieldGate）", fillcolor="#d3f9d8"];    }
 
     s2 -> tc [label="设计意图，实际未接线", style=dotted, color="#1c7ed6"];
     cmgr -> cd [style=invis];

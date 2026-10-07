@@ -132,8 +132,11 @@ digraph NeurovaDependencies {
 
         cb1 [label="neurova/collaboration/ (62 文件)\n运行时协作 + neurflow 引擎 (48 文件)\n__init__.py:15 只导出 CollaborationIsolationManager\n:21-24 为 try: pass 死码\n→ 7 个新模块全部未进 __init__，靠绝对路径直连"];
         cb2 [label="neurova/collaborate/ (7 文件)\nCollaborationTemplate / TemplateManager\n[__init__.py:8-11]"];
-        iso [label="孤岛（工作树未跟踪）\ncoordination_decorators.py  0 引用\nturn_coordinator.py:324      0 调用方\nmodel_selector.py:175       仅 e2e 引用\ncrdt/                       0 消费者", fillcolor="#ffe3e3"];
-    }
+        iso [label="孤岛（工作树未跟踪）
+coordination_decorators.py  已退役（P2-8，功能并入让位闸）
+turn_coordinator.py:133      让位闸本体，尚未接入 chat_pipeline
+model_selector.py:175       仅 e2e 引用
+crdt/                       0 消费者", fillcolor="#ffe3e3"];    }
     cb1 -> cb2 [label="无继承 / 无导入", color="#862e9c", style=dashed];
     ssc -> cb1 [label="装配"];
     iso -> cb1 [label="归属本域但未接线", style=dotted, color="#868e96"];
