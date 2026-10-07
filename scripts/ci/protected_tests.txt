@@ -1563,3 +1563,11 @@ tests/unit/api/test_notificationsEnumerateRealUsers.py
 # str(e) 吐给匿名调用方，载荷无任何上限；sink 侧还把写失败吞成 return 0、日志目录在导入期定死。
 # 额度不在此另造一套：RateLimitMiddleware 全局按 client IP 拦（活体第 121 发即 429）。逐文件单跑 5 passed
 tests/unit/api/test_frontendErrorIngest.py
+# P1-6：记忆段的 token↔字符换算只剩一份口径。原状是同一个类里两套话——预算**记账**
+# 用 `_count_tokens`（其 docstring 明写"统一入口，禁止就地近似"），预算**裁剪**却按
+# `TokenBudget.chinese_ratio=1.5` 固定系数裁字符，另有第三个系数 `chars_per_token=1.5`
+# 的零调用方 `_truncate_text`。同一入口过 orchestrator:1759 的活体实测：4000 tok 预算下
+# 中文只填 58%（2341 tok）、英文只填 10%（403 tok），且两者裁出的字符数一模一样（2677）。
+# 判据取行为（占用率 ≥85% 且不越界）+ AST 防回流（系数属性与退役实现不得复活）。
+# 逐文件单跑 4 passed
+tests/unit/context/test_memoryFoldBudgetParity.py

@@ -151,11 +151,11 @@ total += len(content) // 4
 
 | 层 | 文件:行 | 问题 | 假设 |
 |----|---------|------|------|
-| 1 | `neurova/context/injector.py:757-768` | _count_tokens 使用 chinese_ratio=1.5, english_ratio=0.25 | 可能来自 TokenBudget 配置 |
+| 1 | ~~`neurova/context/injector.py:757-768`~~ | **已收口**（2026-10-07）：`_count_tokens` 早先就已单一口径；本轮把残留的第二套折算（记忆行按 `budget / chinese_ratio` 就地裁字符）一并改掉，见 `injector._foldMemoryLineToBudget` | — |
 | 2 | ~~`neurova/context_pool.py:801-826`~~ | **已退役**（B6-10）：`ContextPoolUtils.estimate_tokens` 是 `token_estimator.estimate_tokens` 的第二份入口，已删净 | — |
 | 3 | `neurova/context_compressor.py:58-67` | Message.estimate_tokens 使用中文字符*2 + 英文单词*1 | 不同的估算策略 |
 | 4 | `neurova/context_compressor.py:271,611,634` | len() // 4 粗略估算 | 简化实现，精度最低 |
-| 5 | `neurova/context/models.py:37-42` | TokenBudget 定义 chinese_ratio=1.5, english_ratio=0.25 | 配置源 |
+| 5 | ~~`neurova/context/models.py:37-42`~~ | **已删净**（2026-10-07）：`TokenBudget` 不再定义 `chinese_ratio` / `english_ratio`，配置源这一格并入唯一口径 `context/token_estimator.estimate_tokens`；由 `tests/unit/context/test_memoryFoldBudgetParity.py` 反向钉住（属性重建即红） | — |
 
 ## 影响分析
 

@@ -28,12 +28,20 @@ from typing import Dict, List, Tuple
 class TestContextInjectorHelpers(unittest.TestCase):
     """测试 UnContextInjector 辅助方法"""
 
-    def test_token_count_chinese_ratio(self):
-        """测试中文token比例"""
+    def test_token_conversion_has_single_source(self):
+        """token↔字符换算只剩一份口径：预算模型不再自带比例系数。
+
+        原断言 `chinese_ratio == 1.5 / english_ratio == 0.25` 是在钉第二套换算：
+        记忆裁剪用它、预算记账用 `estimate_tokens`，两套口径互不相认（实测中文只填到
+        预算 66%、英文约 10%）。收口后裁剪也走统一估算器，判据见
+        `tests/unit/context/test_memoryFoldBudgetParity.py`。
+        """
         from neurova.context import TokenBudget
+
         budget = TokenBudget()
-        self.assertEqual(budget.chinese_ratio, 1.5)
-        self.assertEqual(budget.english_ratio, 0.25)
+        self.assertFalse(hasattr(budget, "chinese_ratio"))
+        self.assertFalse(hasattr(budget, "english_ratio"))
+        self.assertGreater(budget.memories, 0)
 
     def test_context_priority_enum(self):
         """测试优先级枚举"""
