@@ -611,6 +611,12 @@
     ① **两笔子集登记的行数各写反一行**：`750395e2` 正文写"+3（判据说明注释 3 行）"，`git show --numstat` 实测 **+4**；`047e58af` 正文写"+4（注释 3 行 + 条目 1 行）"，实测 **+3**。已在 `6ca9b4e5` 正文更正一次，本条是台账侧的第二处，供引用者以现号为准。
     ② **一次"把别人的在途行署在自己名下"的违规已自纠**：E 批子集登记的第一笔用 `--only -- scripts/ci/protected_tests.txt` 提交，而该文件当时同时含有并发会话新写的 C2/C3 两格（19 行）——`--only` 是按**工作树内容**提交给定路径，路径是共享清单类文件时它不区分作者。后果与 §6-63 更正① 是同一风险的反向发生：那两格从并发会话自己的 `git diff` 里消失，它们的收尾会误以为已经入库，而 `git log -S` 在两个词上都会指向我的 commit。处置：`git reset --soft` 退掉那笔、19 行原样退回工作树（现为它们的未提交在途改动）、重做为只含本批 +3 的 `57a108f5`。新增纪律：**凡给共享清单文件做登记，提交前先 `git diff --numstat -- <该文件>` 核对差异恰等于本批自己要加的行数**；不等就先把别人的部分退回工作树。A 批的 `281d15c9` 已按此执行（实测 4/0 才提交）。
     ③ 上述被 `reset` 掉的那笔**已不在 HEAD 历史里**，故本台账刻意不写它的号——写进去就是一条会被可达性守卫判红的悬空引用（`scripts/ci/audit_ledger_commit_guard.py` 的判据是 `git merge-base --is-ancestor`，`git cat-file -e` 证明不了它还在历史里）。
+76. **真 key 复验 A 批报出的新格：Anthropic 协议转换做了两处，OpenAI 兼容网关上的 claude 因此 400（需人裁修法）** 🔴 —— §6-71 交付时如实标注了"未证真供应商流式形状"。用户给了真 key 后复验（`tests/manual/anthropicLoop_realProvider.py`，真 `AgentLLMClient` 走路由层，不塞私有字段），两段读数：
+    - **① AMD 真网关（`DeepSeek-V4.1-Flash`，OpenAILoop）全绿**：真 `tool_calls` 增量被正确合并、工具经真咽喉执行、`tool_result` 让出且历史配对齐备（`让出=['call_05c371581cd74561b4bd954f'] 已回放=同值 assistant 声明=同值`），B 批与共用流式契约在真 provider 上成立。
+    - **② OpenRouter `anthropic/claude-3.5-sonnet`（AnthropicLoop）回 400**：`invalid_literal tools[0].type expected "function"`。这**同时是 §6-71 的交付证据**——错误由 `_predict_stream` 内的 `_raise_for_error_dict` 抛出，说明流式分支真走到了、不再回退 legacy；也是新缺陷：环在 `_build_request` 里自带 `_convert_messages_to_anthropic`/`_convert_tools_to_anthropic`，而路由层在 `provider_kind == "anthropic"` 时**已经**经 `AnthropicNativeClient` 转一次（`multi_model_client.py:313-321`，配套 `providers/protocol_thinking.py`、`providers/tool_transport.py:48` 的注释也承认"调用方可能已按目标协议转好"）。同一份协议转换两处各做一遍：OpenAI 兼容网关（openrouter 的 claude 路由）收到 Anthropic 形态 tools 直接 400；真 anthropic-kind provider 则依赖客户端容忍预转形状。
+    **两种处置**：A 把转换收口到路由层一处（`_build_request` 改交 OpenAI 形态，退役环内两个 `_convert_*`）——代价是 `computer_use` 工具形态要一并搬到 provider 层，且 `test_tool_bugs_v3::TestA3AnthropicLoopToolRole`、`test_perception_image_anthropic_parity`、`test_provider_tool_path:390` 三条判据钉的就是环内转换，须按教义第 7 条把断言搬到新落点而不是删；B 把 AnthropicLoop 的注册正则收窄到"仅 anthropic-kind provider"——便宜，但那是把"谁该用这条环"的判定推给模型名字，OpenRouter 上 `anthropic/*` 这类合法路由会继续坏。**建议 A**（B 只是换一种沉默），但触及 computer-use 回装形状，需拍板。
+
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
