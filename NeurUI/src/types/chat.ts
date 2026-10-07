@@ -58,7 +58,7 @@ export interface ChatMessage {
    * reset 时半截回复已清空。流式恢复（content/reasoning/done/error）即清除。
    */
   retryNotice?: {
-    phase: 'waiting' | 'switched' | 'exhausted'
+    phase: 'waiting' | 'switched' | 'exhausted' | 'yield_wait'
     retry?: number
     maxRetries?: number
     /** waiting 时的总等待秒数（前端按 receivedAt 本地倒数） */
@@ -67,6 +67,16 @@ export interface ChatMessage {
     failCount?: number
     maxSwitches?: number
     model?: string
+  }
+  /**
+   * 让位闸等不到额度、本轮已挂起等人工续跑（P2-8）。SSE `parked` 事件写入；
+   * `runId` 是**唯一续跑凭据**——会话属主或管理员点"续跑"时回传给后端。
+   */
+  parkedNotice?: {
+    runId: string
+    reason: string
+    attempts?: number
+    waitedSeconds?: number
   }
 }
 

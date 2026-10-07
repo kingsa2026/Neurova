@@ -62,10 +62,25 @@ describe('F-08 重试中止同样视为发送失败', () => {
   })
 })
 
-describe('F-10 AbortController 唯一归属 readStream', () => {
-  it('sendMessage 不再预建 AbortController（防孤儿控制器）', () => {
-    const occurrences = source.match(/new AbortController\(\)/g) ?? []
-    expect(occurrences).toHaveLength(1)
+describe('F-10 AbortController 唯一归属读流处', () => {
+  // 病灶是"外层预建一个、内层再建一个把前者盖成孤儿"，不是"全文件只能有一个控制器"。
+  // P2-8 的续跑是**第二条独立流**，自带控制器才是对的——所以判据改打成
+  // "每条流式取数各建各的、且同处消费自己的 signal"，而不是数总数。
+  it('sendMessage 主体不在 readStream 之外预建控制器（孤儿根因仍在防）', () => {
+    const send = blockAfter('async function sendMessage() {')
+    const read = blockAfter('const readStream = async')
+    expect(send).not.toBe('')
+    expect(read).toContain('new AbortController()')
+    const inRead = (read.match(/new AbortController\(\)/g) ?? []).length
+    const inSend = (send.match(/new AbortController\(\)/g) ?? []).length
+    expect(inSend - inRead).toBe(0)
+  })
+
+  it('续跑流自带控制器并把 signal 交给自己的 fetch（不借用主流控制器）', () => {
+    const resume = blockAfter('async function resumeParkedTurn(')
+    expect(resume).not.toBe('')
+    expect(resume).toContain('new AbortController()')
+    expect(resume).toContain('signal: controller.signal')
   })
 
   it('fetch 仍消费 abortController.signal（stop/切会话 abort 语义保留）', () => {
