@@ -85,6 +85,12 @@ class TestImportSafety:
         assert TemperatureEngine is not None
 
     def test_import_event_bus(self):
-        """EventBus 可导入（前次会话修复的线程安全模块）"""
-        from neurova.cognitive_layers.memory_layer.bus_event import EventBus
+        """EventBus 可导入（线程安全模块）
+
+        改判说明（2026-10-08 A3a，§6-12 总线合一）：原导入的是
+        `memory_layer/bus_event.py` 里那份第二实现，它已按教义第 7 条退役
+        （每 manager 自建私有实例、对外出口零调用方）。行为主张"总线可用"不变，
+        落点改指仓内唯一实现。
+        """
+        from neurova.core.event_bus import EventBus
         assert EventBus is not None

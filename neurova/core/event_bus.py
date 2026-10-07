@@ -73,6 +73,12 @@ class EventBus:
         # 资源修复: 异步事件队列有界(默认 4096), 满时丢弃并告警而非无界堆积
         self._async_queue_max = 4096
         self._async_queue_full_dropped = 0
+        # §6-49: 异步订阅者在没有队列的上下文里被 publish 跳过，原形态是
+        # `if self._async_queue: 入队` 然后无条件 `continue`——不执行、不计数、不打日志，
+        # 于是"接了订阅"与"收得到事件"之间多出一条静默丢数据的路。计数器 + 节流告警
+        # 把它变成可读事实（读数由 `droppedAsyncCount()` 提供）。
+        self._published = 0
+        self._async_no_queue_dropped = 0
         logger.info("EventBus initialized")
 
     def start(self) -> None:
@@ -182,6 +188,10 @@ class EventBus:
 
         results = []
         with self._lock:
+            # 计数必须在锁内：`+=` 是读-改-写三步，GIL 不保证跨字节码原子。
+            # 退役那份总线原本就这么做（`test_concurrent_emit_count_accurate` 就是
+            # 钉它的——把计数挪到锁外会静默丢次数，20 线程 × 200 发实测会少几十到几百）。
+            self._published += 1
             subs = list(self._subscribers.get(event_name, []))
 
         to_remove = []
@@ -192,12 +202,27 @@ class EventBus:
                     try:
                         self._async_queue.put_nowait((sub, event))
                     except asyncio.QueueFull:
-                        self._async_queue_full_dropped += 1
-                        if self._async_queue_full_dropped in (1, 100, 1000, 10000):
+                        with self._lock:
+                            self._async_queue_full_dropped += 1
+                            snapshotFull = self._async_queue_full_dropped
+                        if snapshotFull in (1, 100, 1000, 10000):
                             logger.warning(
                                 "EventBus 异步队列已满, 已丢弃 %s 个事件(生产慢于消费)",
-                                self._async_queue_full_dropped,
+                                snapshotFull,
                             )
+                else:
+                    # §6-49: 没有队列（总线在未运行循环的上下文里创建/启动）时，异步
+                    # 订阅者收不到这一发。必须留痕——否则"订上了"会被读成"收得到"。
+                    with self._lock:
+                        self._async_no_queue_dropped += 1
+                        snapshotNoQueue = self._async_no_queue_dropped
+                    if snapshotNoQueue in (1, 100, 1000, 10000):
+                        logger.warning(
+                            "EventBus 无异步队列(未在运行中的事件循环里 start)，"
+                            "已跳过 %s 个异步订阅者投递: %s",
+                            snapshotNoQueue,
+                            event_name,
+                        )
                 continue
             try:
                 result = sub.handler(event)
@@ -314,6 +339,14 @@ class EventBus:
         """获取总订阅数"""
         with self._lock:
             return sum(len(subs) for subs in self._subscribers.values())
+
+    def publishedCount(self) -> int:
+        """本实例累计 publish 次数（`get_stats()` 一类读数面的取数口）"""
+        return self._published
+
+    def droppedAsyncCount(self) -> int:
+        """异步订阅者投递被跳过的累计次数（§6-49：无队列 + 队列满两种形态都计入）"""
+        return self._async_no_queue_dropped + self._async_queue_full_dropped
 
 
 # 全局单例
