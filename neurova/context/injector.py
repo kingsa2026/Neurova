@@ -12,7 +12,6 @@ from __future__ import annotations
 """
 
 import datetime as dt
-import logging
 from neurova.core.logger import get_logger
 import time
 from collections import OrderedDict
@@ -24,49 +23,7 @@ from .token_estimator import estimate_tokens as estimate_text_tokens
 # 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
 from .envelope import compress_envelope, build_envelope, build_time_block, build_system_time_hint
 
-# BaseModule 可能不可用（当 neurova.core 只有 .pyc 文件时），提供降级方案
-try:
-    from neurova.core.base_module import BaseModule
-
-    _BASE_MODULE_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    _BASE_MODULE_AVAILABLE = False
-    _Event = None
-
-    class BaseModule:
-        """BaseModule 降级替代品 — 提供基本的日志和事件接口"""
-
-        MODULE_ID = ""
-        MODULE_NAME = ""
-        MODULE_VERSION = ""
-
-        def __init__(self, module_id="", name="", version="", description="", dependencies=None, **kwargs):
-            self._module_id = module_id
-            self._module_name = name
-            self._module_version = version
-            # 原代码写成 _logging（下划线前缀），模块中只有 logging，
-            # 一旦 BaseModule 走降级分支就会 NameError。
-            self._logger = logging.getLogger(f"neurova.{module_id}" if module_id else __name__)
-            self._event_handlers = {}
-
-        def log_info(self, msg, data=None):
-            self._logger.info(msg)
-
-        def log_warning(self, msg, data=None):
-            self._logger.warning(msg)
-
-        def log_error(self, msg, data=None):
-            self._logger.error(msg)
-
-        def subscribe_event(self, event_name, handler):
-            self._event_handlers.setdefault(event_name, []).append(handler)
-
-        def emit_event(self, event_name, data=None):
-            for handler in self._event_handlers.get(event_name, []):
-                try:
-                    handler(data)
-                except Exception:
-                    pass
+from neurova.core.base_module import BaseModule
 
 
 try:
@@ -221,8 +178,14 @@ class UnifiedContextInjector(BaseModule):
         """
         return self._lastCompressionRatio
 
-    async def on_initialize(self) -> None:
-        """初始化钩子"""
+    # 三个钩子原先声明成 `async def` 却**体内零 await**，而 `BaseModule.initialize/
+    # start/stop` 是同步 API（:143/:157/:171 直接调用，不 await）——协程被创建后丢弃，
+    # 钩子一次都没执行（实测 initialize() 后 `get_subscribers('context.build')` 为 0，
+    # 并留下 `RuntimeWarning: coroutine ... was never awaited`）。修法取"去掉误标的
+    # async"，不把同步生命周期改造成异步框架：那会为 3 个无 await 的钩子新造第二套
+    # 执行模型（教义第 6 条），且调用方全在同步路径上。
+    def on_initialize(self) -> None:
+        """初始化钩子：把三个 context.* 请求面挂到唯一总线上"""
         self.log_info("UnifiedContextInjector 初始化中...")
 
         self.subscribe_event("context.build", self._handle_build_request)
@@ -235,11 +198,11 @@ class UnifiedContextInjector(BaseModule):
             f"enable_cache={self._enable_cache}, enable_compression={self._enable_compression})"
         )
 
-    async def on_start(self) -> None:
+    def on_start(self) -> None:
         """启动钩子"""
         self.log_info("UnifiedContextInjector 启动")
 
-    async def on_stop(self) -> None:
+    def on_stop(self) -> None:
         """停止钩子"""
         self._flush_cache()
         self.log_info("UnifiedContextInjector 停止")
