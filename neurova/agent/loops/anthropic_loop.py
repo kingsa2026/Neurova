@@ -35,56 +35,270 @@ class AnthropicLoop(BaseAgentLoop):
     async def predict_step(
         self, messages: List[Dict], tools: Optional[List[Dict]] = None, computer_handler: Optional[Any] = None, **kwargs
     ) -> Any:
-        """
-        执行一步预测 (Anthropic 格式)
+        """一次 chat 调用的驱动入口（Anthropic 格式）。
+
+        `stream=True` 时**必须返回异步生成器**——消费点
+        `chat_pipeline._call_loop_stream` 拿到它就 `async for`。改前这里把 `**kwargs`
+        整个吞掉、只返回 `LLMResponse`，于是 claude 系每次流式都在消费点抛
+        `TypeError: 'LLMResponse' object is not async iterable`，被
+        `chat_pipeline.py:2377-2389` 判成"Loop 实现错误"而回退 legacy；legacy 又不传
+        tools——原生 function-calling、门控、主出口判定、邮箱排空、工具事件对 claude
+        一并失效，只剩文本正则那条通道（A 批根修）。
 
         参数:
-            messages: 对话历史 (OpenAI 格式，需要转换为 Anthropic 格式)
+            messages: 对话历史 (OpenAI 格式，逐轮转成 Anthropic 形态)
             tools: 可用工具列表
             computer_handler: Computer Use 处理器 (可选)
-            **kwargs: 额外参数
+            **kwargs: `stream` 等
 
         返回:
-            LLMResponse 对象
+            流式：异步生成器（事件形状与 `OpenAILoop` 同一契约）；非流式：LLMResponse
         """
-        # 轮次态随本次调用构造、逐轮传递：原先挂在实例上，同一 agent 上两个会话
-        # 交叠时后进入者会改写前者的轮次计数（与 OpenAILoop 同一根因，Issue #268）。
-        # 构造走 `forTurn`（切片 C 唯一签发点）：记录创建者指纹，交叉使用可自证。
-        _config = getattr(self.agent, "config", None)
+        # 轮次态与门控执行器都按本轮构造、逐轮传递（Issue #268：loop 是 per-agent
+        # 单例，实例态会让交叠会话互踩）；装配单点在基类，两条环共用同一份门清单。
+        runner = self._buildGateRunner()
+        self._gate_runner = runner
         state = TurnRunState.forTurn(
-            agentId=str(
-                getattr(_config, "agent_id", None) or getattr(_config, "name", None) or ""
-            ),
+            agentId=self._agentFingerprint(),
+            roundUserKey=self._fingerprintUserMessage(messages),
+            gateRunner=runner,
             maxToolRounds=resolveToolRoundBudget(),
         )
+        # `_round_usage` 与目标续跑计数都是"本轮"语义：不重置就跨请求累计，
+        # TokenBudgetGate 第二轮即掐死回复（OpenAI 环 2026-09-07 的同一回归教训）。
+        self.agent._round_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+        from neurova.core import turn_context
+
+        turn_context.reset_turn_goal_continuations()
+
+        drive = {"tools": tools, "computer_handler": computer_handler}
+        if kwargs.get("stream"):
+            return self._predict_stream(messages, drive, state)
+        return await self._predict_normal(messages, drive, state)
+
+    async def _predict_normal(self, messages: List[Dict], drive: Dict, state: TurnRunState) -> LLMResponse:
+        """非流式工具环：一次往返 → 执行 → **回放** → 再判定要不要开下一轮。
+
+        与 `OpenAILoop._advanceNormalRound` 同一条规则（B 批）：轮次上限与门控只裁定
+        「要不要再问一次模型」，不裁定「模型这一轮声明的调用要不要有下文」。改前这里
+        的上限判定摆在执行**之前**，被终止那一轮的调用既没跑也没回环；而主出口
+        （模型不再调工具）从未求值过门控——`gateRunnerForExit` 在基类恒回 None，
+        GoalGate 的目标验收对 claude 一律缺席。
+        """
+        from neurova.agent.gates import StopAction as _SA
+        from neurova.agent.loops.base import LOOP_CONTINUE, evaluateLoopExit
+
         while True:
             state.assertRoundInvariant()
             response = await self._predict_anthropic(
-                await self._build_request(tools, computer_handler, messages)
+                await self._build_request(drive["tools"], drive["computer_handler"], messages)
             )
+            self._accumulateRoundUsage(getattr(response, "usage", None) or {})
+
             if not response.tool_calls:
+                decision = await evaluateLoopExit(
+                    self,
+                    reply=getattr(response, "content", "") or "",
+                    roundUsage=getattr(self.agent, "_round_usage", None) or {},
+                    toolRound=state.toolRounds,
+                    roundSignature=state.exitSignature(),
+                )
+                if decision.action == LOOP_CONTINUE:
+                    # 出口续跑仍属本轮：state 继续传递，就地开下一轮（不递归重建）
+                    messages.append({"role": "user", "content": decision.continuation_prompt})
+                    continue
+                if decision.action != "done":
+                    logger.warning(
+                        "Anthropic 主出口门控 %s 终止: %s", decision.gate_name, decision.reason
+                    )
                 return response
 
             state.toolRounds += 1
-            if state.toolRounds > state.maxToolRounds:
-                logger.warning(
-                    "Anthropic 工具调用轮次超过上限 (%s)，终止工具循环", state.toolRounds
-                )
-                return response
-            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), state.toolRounds)
+            logger.info(
+                "LLM returned %s tool calls (round %s)", len(response.tool_calls), state.toolRounds
+            )
 
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
 
-            # 将工具结果添加到 messages——连同声明这些调用的 assistant 消息：
+            # 执行即回放——连同声明这些调用的 assistant 消息：
             # _convert_messages_to_anthropic 靠它产出 tool_use 块，缺块时
             # tool_result 没有前置声明，协议判为非法（与 OpenAI 侧同一根因）
+            _round_reasoning = getattr(response, "reasoning_content", None) or ""
             messages.extend(
                 self.buildToolRoundMessages(
                     response.tool_calls,
                     tool_messages,
                     assistantText=getattr(response, "content", "") or "",
+                    reasoningText=(
+                        _round_reasoning if self._shouldReplayReasoning(_round_reasoning) else None
+                    ),
                 )
             )
+
+            if state.gatedRound != state.toolRounds:
+                state.gatedRound = state.toolRounds
+                _gd = state.gateRunner.on_round_end(state.gateContext(
+                    self._toolSignatures(response.tool_calls),
+                    round_reply=getattr(response, "content", "") or "",
+                    round_usage=getattr(self.agent, "_round_usage", None) or {},
+                    goal=self.resolveTurnGoal() or {},
+                ))
+                if _gd is not None and _gd.action == _SA.TERMINATE:
+                    logger.warning(
+                        "门控 %s 终止 Anthropic 非流式循环: %s", _gd.gate_name, _gd.reason
+                    )
+                    return response
+                if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
+                    messages.append({"role": "user", "content": _gd.continuation_prompt})
+                    logger.info(
+                        "门控 %s 软干预（Anthropic 非流式）: %s", _gd.gate_name, _gd.reason
+                    )
+
+    async def _predict_stream(self, messages: List[Dict], drive: Dict, state: TurnRunState):
+        """流式工具环（异步生成器）：逐 token 让出 + 分片合并 tool_calls + 判定后置。
+
+        事件契约与 `OpenAILoop._predict_stream` 一致：`content`/`reasoning`/
+        `tool_call`/`tool_result`/`gate_terminate`/`done`，且整条流**恰好一个 done**
+        （多个会让消费方重复收尾）。工具轮结束让出哨兵后由本层 `while` 开下一轮，
+        不递归自调用——叠帧会把"参数是否传全"的机会再留一遍（Issue #268 切片 B 的理由）。
+        """
+        from neurova.agent.gates import StopAction as _SA
+        from neurova.agent.loops.base import LOOP_CONTINUE, LOOP_DONE, evaluateLoopExit
+
+        while True:
+            state.assertRoundInvariant()
+            reply_parts: List[str] = []
+            reasoning_parts: List[str] = []
+            pending_tool_calls: List[Dict] = []
+            finish_reason = None
+
+            request_params = await self._build_request(
+                drive["tools"], drive["computer_handler"], messages
+            )
+            async for chunk in self.llm_client.chat_stream(
+                **self._attachPerceptionImage(request_params)
+            ):
+                if isinstance(chunk, dict):
+                    # 错误 dict 必须分类上抛：认不出的错误会被 chat_pipeline 当成
+                    # "Loop 实现错误"回退 legacy，再撞同一个坏模型（时有时无的形态）
+                    if chunk.get("error"):
+                        raise self._raise_for_error_dict(chunk)
+                    continue
+                text = getattr(chunk, "content", "") or ""
+                if text:
+                    reply_parts.append(text)
+                    yield {"type": "content", "data": text}
+                rtext = getattr(chunk, "reasoning_content", None)
+                if rtext:
+                    reasoning_parts.append(rtext)
+                    yield {"type": "reasoning", "data": rtext}
+                self._accumulateRoundUsage(getattr(chunk, "usage", None) or {})
+                for tc_delta in getattr(chunk, "tool_calls", None) or []:
+                    self._merge_tool_call_delta(pending_tool_calls, tc_delta)
+                if getattr(chunk, "finish_reason", None):
+                    finish_reason = chunk.finish_reason
+
+            round_reply = "".join(reply_parts)
+
+            if not pending_tool_calls:
+                decision = await evaluateLoopExit(
+                    self,
+                    reply=round_reply,
+                    roundUsage=getattr(self.agent, "_round_usage", None) or {},
+                    toolRound=state.toolRounds,
+                    roundSignature=state.exitSignature(),
+                )
+                if decision.action == LOOP_CONTINUE:
+                    messages.append({"role": "user", "content": decision.continuation_prompt})
+                    yield {"type": "reasoning", "data": decision.continuation_prompt}
+                    continue
+                if decision.action != LOOP_DONE:
+                    # 不静默：reasoning 是前端会显示的既有通道，正文照常随 done 交出
+                    yield {
+                        "type": "gate_terminate",
+                        "reason": decision.reason,
+                        "gate": decision.gate_name,
+                    }
+                    yield {"type": "reasoning", "data": f"已停止继续尝试：{decision.reason}"}
+                yield {
+                    "type": "done",
+                    "reply": round_reply,
+                    "finish_reason": finish_reason,
+                    "usage": getattr(self.agent, "_round_usage", None) or {},
+                }
+                return
+
+            state.toolRounds += 1
+            logger.info(
+                "LLM returned %s tool calls (stream round %s)",
+                len(pending_tool_calls), state.toolRounds,
+            )
+            for tc in pending_tool_calls:
+                yield {"type": "tool_call", "data": tc}
+
+            tool_messages = await self.handle_tool_calls(pending_tool_calls, messages)
+            for tm in tool_messages:
+                yield {"type": "tool_result", "data": tm}
+
+            # 执行即回放：其后的判定只决定要不要开下一轮（与 OpenAI 环同一规则）
+            _round_reasoning = "".join(reasoning_parts)
+            messages.extend(
+                self.buildToolRoundMessages(
+                    pending_tool_calls,
+                    tool_messages,
+                    assistantText=round_reply,
+                    reasoningText=(
+                        _round_reasoning if self._shouldReplayReasoning(_round_reasoning) else None
+                    ),
+                )
+            )
+
+            current_calls = [
+                ((tc.get("function") or {}).get("name", ""),
+                 (tc.get("function") or {}).get("arguments", ""))
+                for tc in pending_tool_calls
+            ]
+            stagnant = self._assess_stagnation(state, round_reply, current_calls)
+            state.roundReplies.append(round_reply)
+            state.lastRoundCalls = current_calls
+
+            if state.gatedRound != state.toolRounds:
+                state.gatedRound = state.toolRounds
+                _gd = state.gateRunner.on_round_end(state.gateContext(
+                    self._toolSignatures(pending_tool_calls),
+                    round_reply=round_reply,
+                    round_usage=getattr(self.agent, "_round_usage", None) or {},
+                    goal=self.resolveTurnGoal() or {},
+                ))
+                if _gd is not None and _gd.action == _SA.TERMINATE:
+                    logger.warning("门控 %s 终止 Anthropic 流式循环: %s", _gd.gate_name, _gd.reason)
+                    yield {"type": "gate_terminate", "reason": _gd.reason, "gate": _gd.gate_name}
+                    return
+                if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
+                    messages.append({"role": "user", "content": _gd.continuation_prompt})
+                    yield {"type": "reasoning", "data": _gd.continuation_prompt}
+
+            if stagnant:
+                state.stagnationCount += 1
+                if state.stagnationCount >= 2:
+                    logger.warning(
+                        "连续 %s 轮停滞（重复响应/调用），终止工具循环", state.stagnationCount
+                    )
+                    yield {
+                        "type": "reasoning",
+                        "data": "检测到连续重复的响应，已停止工具循环，避免无效重试。",
+                    }
+                    return
+                messages.append({
+                    "role": "user",
+                    "content": "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。",
+                })
+            else:
+                state.stagnationCount = 0
 
     async def _build_request(self, tools, computer_handler, messages) -> Dict:
         """构造一次 Anthropic 请求参数（含 tools 与 computer 工具）。"""
