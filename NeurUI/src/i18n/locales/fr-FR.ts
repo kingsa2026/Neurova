@@ -2300,6 +2300,8 @@ export default {
     llmRetryIntervalHint: "Secondes d'attente entre les réessais ; l'en-tête Retry-After du serveur prime",
     llmRetryWaitCap: 'Attente max par tentative (secondes)',
     llmRetryWaitCapHint: "Plafond d'attente d'une tentative afin qu'un Retry-After excessif ne bloque pas la conversation",
+    llmRetryWaitBudget: 'Budget d’attente cumulé (secondes)',
+    llmRetryWaitBudgetHint: 'Attente maximale cumulée par requête dès le premier 429 (changements de modèle inclus) ; une fois épuisé, la requête échoue honnêtement au lieu d’attendre en silence',
     llmRetryMaxSwitches: 'Tolérance de bascule (modèles)',
     llmRetryMaxSwitchesHint: "Le tour ne se termine qu'après ce nombre de modèles échoués consécutifs ; toute sortie réussie remet le compteur à zéro",
     advanced: 'Avancé',

@@ -2322,6 +2322,8 @@ export default {
     llmRetryIntervalHint: '每次重试之间的等待秒数；服务端返回 Retry-After 时优先采用',
     llmRetryWaitCap: '单次等待上限（秒）',
     llmRetryWaitCapHint: '单次重试等待的封顶秒数，防止超长 Retry-After 挂住对话',
+    llmRetryWaitBudget: '累计等待预算（秒）',
+    llmRetryWaitBudgetHint: '一条请求从首次 429 起最多累计等待的秒数（含换模型后的等待）；到点即诚实失败，不再静默续等',
     llmRetryMaxSwitches: '切换容错模型数',
     llmRetryMaxSwitchesHint: '连续失败模型数达到该值才终止本轮；期间任一模型成功出过内容则计数归零',
     advanced: '高级',

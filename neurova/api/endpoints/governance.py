@@ -712,18 +712,24 @@ async def get_llm_retry_settings(admin=Depends(_governance_admin_dep)):
     return {"code": 0, "data": get_effective_llm_retry_settings()}
 
 
+from neurova.security.llm_retry_settings import MAX_BUDGET, MIN_BUDGET
+
+
 class LlmRetrySettingsUpdate(BaseModel):
     """LLM 429 重试设置更新
 
     max_retries：同模型最大等待重试次数；interval：重试间隔秒（服务端
     Retry-After 优先）；wait_cap：单次等待封顶秒；max_switches：连续失败
-    模型容错数（任一模型成功出内容即归零重计）。
+    模型容错数（任一模型成功出内容即归零重计）；wait_budget：**累计等待预算**
+    秒（跨同模型重试与跨模型切换共享，超了不再睡、按既有路径诚实失败）。
     """
 
     max_retries: Optional[int] = Field(None, ge=0, le=50)
     interval: Optional[float] = Field(None, ge=1.0, le=600.0)
     wait_cap: Optional[float] = Field(None, ge=1.0, le=3600.0)
     max_switches: Optional[int] = Field(None, ge=1, le=20)
+    # 区间取自单源常量，不在这里再抄一遍数字（抄了就会与 DEFAULTS 夹紧口径分叉）
+    wait_budget: Optional[float] = Field(None, ge=MIN_BUDGET, le=MAX_BUDGET)
 
 
 @router.put("/llm-retry")

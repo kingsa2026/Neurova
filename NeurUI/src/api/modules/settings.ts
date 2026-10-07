@@ -210,6 +210,8 @@ export interface LlmRetrySettings {
   wait_cap: number
   /** 连续失败模型容错数（任一模型成功出内容即归零重计） */
   max_switches: number
+  /** 累计等待预算秒（一条请求从首次 429 起最多累计等多久，含换模型后的等待） */
+  wait_budget: number
 }
 
 export function getLlmRetrySettings() {

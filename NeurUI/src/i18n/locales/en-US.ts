@@ -2312,6 +2312,8 @@ export default {
     llmRetryIntervalHint: 'Seconds to wait between retries; the server Retry-After header takes precedence',
     llmRetryWaitCap: 'Max wait per attempt (seconds)',
     llmRetryWaitCapHint: 'Cap for a single retry wait so an oversized Retry-After cannot hang the conversation',
+    llmRetryWaitBudget: 'Total wait budget (seconds)',
+    llmRetryWaitBudgetHint: 'Maximum cumulative wait for one request after the first 429 (model switches included); once spent the request fails honestly instead of waiting silently',
     llmRetryMaxSwitches: 'Failover tolerance (models)',
     llmRetryMaxSwitchesHint: 'The turn ends only after this many consecutive failed models; any successful model output resets the counter',
     advanced: 'Advanced',

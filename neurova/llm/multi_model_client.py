@@ -713,6 +713,12 @@ class MultiModelLLMClient:
 
         client = self._get_client_for_request(model, provider_id)
         last_result: Dict[str, Any] = {"success": False, "error": "No client available"}
+        # 429 累计等待预算（P3-11 拍板：≤10 次、每次 20s、累计 ≤200s，与让位闸同口径）。
+        # 必须挂在**整条请求**上而不是每个候选上：原形态每个候选各带一份 10 次预算，
+        # 5 个候选最坏 5×10×120s≈2 小时，用户端只是一直转圈且没有任何一格宣告过尽头。
+        # 口径是"累计等待"，不含请求自身耗时（那由 read timeout 侧管，见
+        # tests/unit/llm/test_llm_read_timeout_split.py），两处各扣一次会把同一笔账算两遍。
+        waitedSeconds = 0.0
         for _attempt in range(max_attempts):
             if not client:
                 return last_result
@@ -725,8 +731,8 @@ class MultiModelLLMClient:
             # 认证/参数/上下文溢出/内容安全换模型无意义，不切换
             error_kind = self._classify_error(result.get("error") or "")
 # 429 先同模型等待重试（默认 ≤10 次、间隔
-# 10s、单次封顶 120s；非流式信封不携带 Retry-After 头，按间隔等待），
-# 耗尽才走跨模型回退。重试直调绕过熔断（见 _chat_with_retry），
+# 20s、单次封顶 120s、整条请求累计封顶 wait_budget；非流式信封不携带 Retry-After 头，
+# 按间隔等待），耗尽才走跨模型回退。重试直调绕过熔断（见 _chat_with_retry），
 # 每次重试前清除自身 429 暂停
             if error_kind == "rate_limited":
                 cfg = _get_429_retry_config()
@@ -734,7 +740,17 @@ class MultiModelLLMClient:
 
                 _limiter = get_shared_limiter()
                 for _retry in range(cfg["max_retries"]):
-                    await self._sleep_for_retry(min(cfg["interval"], cfg["cap"]))
+                    wait = min(cfg["interval"], cfg["cap"])
+                    if waitedSeconds + wait > cfg["wait_budget"]:
+                        logger.warning(
+                            "429 累计等待预算已用尽（%.1fs / %.1fs），本候选不再等第 %d 发"
+                            "（%s）——按既有路径换模型或诚实失败",
+                            waitedSeconds, cfg["wait_budget"], _retry + 1,
+                            client.model or "unknown",
+                        )
+                        break
+                    waitedSeconds += wait
+                    await self._sleep_for_retry(wait)
                     _limiter.clear_pause(client.model or "unknown")
                     result = await self._chat_single_attempt(
                         client, messages, bypass_guard=True, **kwargs
@@ -998,6 +1014,8 @@ class MultiModelLLMClient:
         cfg = _get_429_retry_config()
         retry_no = 0
         fail_count = 0
+        # 整条流的累计等待预算（同 chat()，P3-11 拍板 ≤200s）：跨模型切换不重置。
+        waitedSeconds = 0.0
         switch_count = 0
         yielded_any = False
         switched_models: set = set()
@@ -1176,22 +1194,32 @@ class MultiModelLLMClient:
                 if yielded_any:
                     fail_count = 0  # "链接成功"归零重计（本尝试吐过内容）
                 if error_kind == "rate_limited" and retry_no < cfg["max_retries"]:
-                    retry_no += 1
                     wait = min(retry_after if retry_after is not None else cfg["interval"], cfg["cap"])
-                    payload: Dict[str, Any] = dict(
-                        phase="waiting", retry=retry_no, max_retries=cfg["max_retries"],
-                        wait_seconds=wait, model=model_key, provider=client.provider.id,
-                        reason=error_kind,
-                    )
-                    if yielded_any:
-                        payload["reset"] = True  # 半截回复作废，消费方清空后重来
-                    yield {"retry_status": payload}
-                    await self._sleep_for_retry(wait)
-                    # 主动重试清除自身暂停：重试流量 = 每隔 wait 一次的温和请求，
-                    # 其余并发调用方仍受各自暂停/闸门约束（连续计数保留升级语义）
-                    limiter.clear_pause(model_key)
-                    yielded_any = False
-                    continue
+                    if waitedSeconds + wait > cfg["wait_budget"]:
+                        # 不再睡：交回下面的切换/耗尽路径，用户拿到的是诚实终态
+                        # （switched 或 exhausted + 流内错误），不是"永远在等"。
+                        logger.warning(
+                            "429 累计等待预算已用尽（%.1fs / %.1fs），%s 不再等第 %d 发"
+                            "——走换模型/耗尽终态",
+                            waitedSeconds, cfg["wait_budget"], model_key, retry_no + 1,
+                        )
+                    else:
+                        retry_no += 1
+                        waitedSeconds += wait
+                        payload: Dict[str, Any] = dict(
+                            phase="waiting", retry=retry_no, max_retries=cfg["max_retries"],
+                            wait_seconds=wait, model=model_key, provider=client.provider.id,
+                            reason=error_kind,
+                        )
+                        if yielded_any:
+                            payload["reset"] = True  # 半截回复作废，消费方清空后重来
+                        yield {"retry_status": payload}
+                        await self._sleep_for_retry(wait)
+                        # 主动重试清除自身暂停：重试流量 = 每隔 wait 一次的温和请求，
+                        # 其余并发调用方仍受各自暂停/闸门约束（连续计数保留升级语义）
+                        limiter.clear_pause(model_key)
+                        yielded_any = False
+                        continue
                 fail_count += 1  # 本模型被放弃，计入连续失败链
                 if (
                     error_kind in ("rate_limited", "transient", "model_not_found")
@@ -1435,6 +1463,7 @@ def _get_429_retry_config() -> Dict[str, Any]:
             "interval": float(s["interval"]),
             "cap": float(s["wait_cap"]),
             "max_switches": int(s["max_switches"]),
+            "wait_budget": float(s["wait_budget"]),
         }
     except Exception:  # noqa: BLE001 - 持久层缺失/损坏时退回纯 env 口径
         def _num(key: str, default):
@@ -1450,9 +1479,10 @@ def _get_429_retry_config() -> Dict[str, Any]:
 
         return {
             "max_retries": max(0, _num("NEUROVA_LLM_429_MAX_RETRIES", 10)),
-            "interval": max(1.0, _num("NEUROVA_LLM_429_RETRY_INTERVAL", 10.0)),
+            "interval": max(1.0, _num("NEUROVA_LLM_429_RETRY_INTERVAL", 20.0)),
             "cap": max(1.0, _num("NEUROVA_LLM_429_WAIT_CAP", 120.0)),
             "max_switches": max(1, _num("NEUROVA_LLM_MAX_SWITCHES", 5)),
+            "wait_budget": max(1.0, _num("NEUROVA_LLM_429_WAIT_BUDGET", 200.0)),
         }
 
 

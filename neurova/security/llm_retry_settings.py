@@ -29,15 +29,23 @@ _LOCK = threading.Lock()
 
 DEFAULTS: Dict[str, Any] = {
     "max_retries": 10,     # 同模型最大等待重试次数
-    "interval": 10.0,      # 重试间隔秒（服务端 Retry-After 优先于该间隔）
+    # 拍板口径（P3-11，2026-10-08）：与让位闸同一条数——≤10 次、每次 20s、累计 ≤200s。
+    # 原值 interval=10s 与闸不同口径，同一轮里两处等待节奏各说各话。
+    "interval": 20.0,      # 重试间隔秒（服务端 Retry-After 优先于该间隔）
     "wait_cap": 120.0,     # 单次等待封顶秒（防超长 Retry-After 挂死整轮）
     "max_switches": 5,     # 连续失败模型容错数（任一模型成功出内容即归零）
+    # 累计**等待**预算（秒），跨同模型重试与跨模型切换共享：一条请求从第一次 429
+    # 起总共最多等这么久，超了就不再睡、按既有路径诚实失败/换模型。
+    # 口径写明是"累计等待"而非"全链路墙钟"——请求本身的耗时由 read timeout 那侧管
+    # （tests/unit/llm/test_llm_read_timeout_split.py），这里不重复计，否则同一笔账两处扣。
+    "wait_budget": 200.0,
 }
 
 MIN_RETRIES, MAX_RETRIES = 0, 50
 MIN_INTERVAL, MAX_INTERVAL = 1.0, 600.0
 MIN_CAP, MAX_CAP = 1.0, 3600.0
 MIN_SWITCHES, MAX_SWITCHES = 1, 20
+MIN_BUDGET, MAX_BUDGET = 1.0, 3600.0
 
 
 def settings_path() -> Path:
@@ -118,9 +126,13 @@ def get_effective_llm_retry_settings() -> Dict[str, Any]:
     env_switches = _env_int("NEUROVA_LLM_MAX_SWITCHES")
     if env_switches is not None:
         settings["max_switches"] = env_switches
+    env_budget = _env_float("NEUROVA_LLM_429_WAIT_BUDGET")
+    if env_budget is not None:
+        settings["wait_budget"] = env_budget
 
     settings["max_retries"] = max(MIN_RETRIES, min(MAX_RETRIES, int(settings["max_retries"])))
     settings["interval"] = max(MIN_INTERVAL, min(MAX_INTERVAL, float(settings["interval"])))
     settings["wait_cap"] = max(MIN_CAP, min(MAX_CAP, float(settings["wait_cap"])))
     settings["max_switches"] = max(MIN_SWITCHES, min(MAX_SWITCHES, int(settings["max_switches"])))
+    settings["wait_budget"] = max(MIN_BUDGET, min(MAX_BUDGET, float(settings["wait_budget"])))
     return settings
