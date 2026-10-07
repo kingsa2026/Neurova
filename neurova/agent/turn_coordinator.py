@@ -27,12 +27,15 @@ import asyncio
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import FrozenSet, Optional
+from typing import Awaitable, Callable, FrozenSet, Optional
 
 from neurova.collaboration.glance_yield_rules import YieldReason, get_glance_yield_checker
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 每次入睡前的通知口：闸不假设调用方拿它干什么（续租、进度事件都是调用方的事）
+WaitObserver = Callable[..., Awaitable[None]]
 
 DEFAULT_YIELD_MAX_ATTEMPTS = 10
 DEFAULT_YIELD_CAP_SECONDS = 20.0
@@ -137,6 +140,7 @@ async def requestYieldGate(
     sessionId: str = "",
     userInput: str = "",
     policy: Optional[YieldWaitPolicy] = None,
+    onWait: Optional[WaitObserver] = None,
 ) -> YieldGateOutcome:
     """回合开跑前的让位闸。
 
@@ -145,6 +149,11 @@ async def requestYieldGate(
 
     不在这里落库、不在这里发事件：挂起态属于 run 台账（`core/agent_run_store`），
     由调用方按结论去写——闸只管判，别既当裁判又记账。
+
+    `onWait` 是每次真正入睡前的通知口（续租/进度都属调用方的职责，闸不认识它们）。
+    为什么必须有这个口：默认预算 10×20s=200s 远超 run 租约 90s，调用方若不能在
+    **每次入睡之前**续租，等待期就会被 `reconcile_stale` 误杀成 failed——错误看上去
+    像"模型挂了"，实际是被自己的等待预算饿死。
 
     Raises:
         任何来自裁决器的异常都原样向上抛（闸不吞异常；降级与否由调用方决定并留痕）。
@@ -211,6 +220,8 @@ async def requestYieldGate(
             max(float(decision.wait_time_seconds or 0.0), MIN_WAIT_SECONDS),
             resolved.capSeconds,
         )
+        if onWait is not None:
+            await onWait(attempt=attempts, waitSeconds=waitSeconds, reason=reason)
         await asyncio.sleep(waitSeconds)
         waited += waitSeconds
 

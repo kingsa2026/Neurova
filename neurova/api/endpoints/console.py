@@ -22,6 +22,11 @@ from pydantic import BaseModel
 from typing import Any, Dict, Optional
 
 from neurova.api.deps import get_current_user, require_admin
+from neurova.agent.turn_coordinator import (
+    reportTurnOutcome,
+    requestYieldGate,
+    yieldWaitPolicy,
+)
 from neurova.api.endpoints import get_agent_instance
 from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
 from neurova.api.endpoints.sse_items import ItemEventMapper
@@ -247,9 +252,19 @@ class _AgentRunLedger:
 
     HEARTBEAT_SECONDS = 5.0
 
-    def __init__(self, session_id: str, user_id: str, agent_id: str, message: str):
+    def __init__(
+        self,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+        message: str,
+        run_id: typing.Optional[str] = None,
+    ):
         self.session_id = session_id
         self._args = (session_id, user_id, agent_id, message)
+        # 续跑通道：给定 run_id 就**复用该行**，不再 intake——否则一个挂起过的
+        # 回合会在库里长出第二个身份，"这条到底跑没跑过"就读不准了。
+        self._preset_run_id = run_id
         self.run_id: typing.Optional[str] = None
         self.rejected = False
         self._store = None
@@ -264,7 +279,10 @@ class _AgentRunLedger:
             if not _ars.run_gate_enabled():
                 return []
             store = _ars.get_agent_run_store()
-            run_id = await asyncio.to_thread(store.intake, *self._args)
+            if self._preset_run_id is None:
+                run_id = await asyncio.to_thread(store.intake, *self._args)
+            else:
+                run_id = self._preset_run_id
             self._owner = _ars.OWNER_IDENTITY
             wait_max = float(os.environ.get("NEUROVA_RUN_QUEUE_WAIT") or 120.0)
             deadline = time.monotonic() + wait_max
@@ -304,18 +322,39 @@ class _AgentRunLedger:
             self.run_id = None
             return []
 
-    async def heartbeat(self) -> None:
-        """续租（内部 5s 节流；主循环每轮调用，空闲时 15s ping 分支保底）。"""
+    async def heartbeat(self, force: bool = False) -> None:
+        """续租（内部 5s 节流；主循环每轮调用，空闲时 15s ping 分支保底）。
+
+        `force=True` 供让位等待期使用：那种等待按拍板可长到 200s，节流会让
+        整段等待一次租都不续，`reconcile_stale` 便把这条 run 误杀成 failed。
+        """
         if self.run_id is None:
             return
         now = time.monotonic()
-        if now - self._last_hb < self.HEARTBEAT_SECONDS:
+        if not force and now - self._last_hb < self.HEARTBEAT_SECONDS:
             return
         self._last_hb = now
         try:
             await asyncio.to_thread(self._store.heartbeat, self.run_id, self._owner)
         except Exception:  # noqa: BLE001 - 续租失败下轮再试，reconcile 兜底
             logger.debug("AgentRun 台账心跳失败（忽略）", exc_info=True)
+
+    async def parkTurn(self, parkReason: str, payload: Dict[str, Any]) -> bool:
+        """闸判"该挂起"时由执行体调用：running → parked，载荷入库供人工续跑。
+
+        台账没接上（被关掉、或这一行不在自己手里）时回 False——调用方必须
+        如实报错，**不能**只发一个"已挂起"：没落库的挂起没有任何人能续，
+        那就是 §6-5 那条链最擅长犯的"回一个好看的假状态"。
+        """
+        if self.run_id is None or self._store is None:
+            return False
+        try:
+            return await asyncio.to_thread(
+                self._store.park, self.run_id, self._owner, parkReason, payload
+            )
+        except Exception:  # noqa: BLE001 - 台账写挂起失败要让调用方知道（不静默转成功）
+            logger.warning("AgentRun 台账挂起写入失败", exc_info=True)
+            return False
 
     def attach(self, task: "asyncio.Task") -> None:
         if self.run_id is not None:
@@ -332,6 +371,10 @@ class _AgentRunLedger:
                 status, error_type = "failed", "chat_error"
             else:
                 res = task.result() if isinstance(task.result(), dict) else {}
+                if res.get("parked"):
+                    # 这一行已由 parkTurn 转成 parked（非终态，等人续跑）；
+                    # 回调再写终态就等于把"等人"抹成"已结束"
+                    return
                 if res.get("stopped"):
                     status, error_type = "cancelled", "user_stopped"
                 elif res.get("error"):
@@ -350,6 +393,55 @@ class _AgentRunLedger:
             threading.Thread(target=_fin, daemon=True).start()
         except Exception:  # noqa: BLE001
             logger.warning("AgentRun 台账收敛失败（忽略）", exc_info=True)
+
+
+# ── 挂起回合的载荷与续跑取行 ─────────────────────────────────────
+# 写侧（parkTurn 的 payload）与读侧（resume 端点重建请求）共用同一份字段表——
+# 两边各抄一遍字段名，就是"续跑时丢了思考预算/附件"这类错的第一来源。
+_TURN_PAYLOAD_FIELDS = (
+    "message",
+    "agent_id",
+    "model",
+    "thinking_effort",
+    "thinking_enabled",
+    "thinking_budget",
+    "file_ids",
+    "client_timestamp",
+)
+
+
+def _turnResumePayload(body: ChatRequest, session_id: str, agent_id: str) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {name: getattr(body, name, None) for name in _TURN_PAYLOAD_FIELDS}
+    payload["session_id"] = session_id
+    payload["agent_id"] = agent_id or payload.get("agent_id")
+    payload["stream"] = True
+    return payload
+
+
+def _turnRequestFromPayload(payload: Dict[str, Any]) -> ChatRequest:
+    data: Dict[str, Any] = {name: payload.get(name) for name in _TURN_PAYLOAD_FIELDS}
+    data["session_id"] = payload.get("session_id")
+    data["stream"] = True
+    return ChatRequest(**data)
+
+
+async def _requireRunRow(run_id: str) -> Dict[str, Any]:
+    """按 run_id 取行；台账关着或行不存在都如实失败（不返回 None 让上层猜）。"""
+    from neurova.core import agent_run_store as _ars
+
+    if not _ars.run_gate_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="run 台账已关闭（NEUROVA_RUN_GATE=off），挂起/续跑能力随之不可用",
+        )
+    row = await asyncio.to_thread(_ars.get_agent_run_store().get, run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"未找到 run {run_id!r}")
+    return row
+
+
+def _isAdminIdentity(current_user: Any) -> bool:
+    return isinstance(current_user, dict) and current_user.get("role") == "admin"
 
 
 def _call_key(name: str, arguments: str) -> str:
@@ -663,14 +755,26 @@ async def post_console_chat(
     body: ChatRequest,
     request: Request,
     current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+    resume_run_id: str = "",
 ):
-    """流式聊天接口（SSE）"""
+    """流式聊天接口（SSE）
+
+    `resume_run_id` 只由 `/chat/resume` 端点在服务端填入（不是请求体字段，客户端
+    无从伪造）：它让续跑复用台账里的原行，并以**原回合属主**的身份执行。
+    """
     # R-3: 附件归属用 JWT 用户身份（与 /files/upload 一致）。
     # _get_user_id(request, current_user) 读 request.state.user_id——中间件从未注入，
     # 恒为 "anonymous"，导致 attach_files 找不到属主文件。
     user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request, current_user)
     repo = get_session_repository()
     agent_id = getattr(body, "agent_id", "") or ""
+
+    if resume_run_id:
+        runRow = await _requireRunRow(resume_run_id)
+        # 管理员有"点续跑"的权限，没有把这一轮改成"以管理员身份执行"的权力：
+        # 记忆/画像/用量都会跟着 user_id 走，跟着点击者走就是接线顺手造出的越权面。
+        user_id = str(runRow.get("user_id", "") or "") or user_id
+        agent_id = str(runRow.get("agent_id", "") or "") or agent_id
 
     # 会话 ID：客户端传入或新建
     if body.session_id:
@@ -760,7 +864,13 @@ async def post_console_chat(
 
 # run 先落库（queued）再执行，同 session
 # 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
-            ledger = _AgentRunLedger(session_id, user_id, agent_id, body.message or "")
+            ledger = _AgentRunLedger(
+                session_id,
+                user_id,
+                agent_id,
+                body.message or "",
+                run_id=resume_run_id or None,
+            )
             live_events: typing.List[Dict[str, Any]] = []
             for event in await ledger.acquire():
                 live_events.append(event)
@@ -801,8 +911,67 @@ async def post_console_chat(
             if body.client_timestamp:
                 metadata["client_timestamp"] = body.client_timestamp
 
+            async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
+                """等待期的一次心跳 + 一次进度播报（闸在睡之前调它）。
+
+                复用既有 `retry` 事件形态而不是新造一种：前端已按倒计时渲染它，
+                再开一个"等待中"状态面就是第三份平行口径。`source` 用来区分
+                429 退避与让位退避，不改既有字段含义。
+                """
+                await ledger.heartbeat(force=True)
+                _emit(
+                    "retry",
+                    {
+                        "phase": "yield_wait",
+                        "source": "glance_yield",
+                        "retry": attempt,
+                        "max_retries": yieldWaitPolicy().maxAttempts,
+                        "wait_seconds": round(float(waitSeconds), 2),
+                        "reason": reason,
+                        "model": str(getattr(body, "model", "") or ""),
+                        "session_id": session_id,
+                    },
+                )
+
             async def run_chat():
+                gateOutcome = None
+                turnSucceeded = False
                 try:
+                    # P2-8：回合入口的让位闸。闸只判不记账——落库/发事件都归台账。
+                    # 放在本任务内而不是生成器里，是为了让等待期间消费循环照常
+                    # 心跳与播报（生成器一旦 await 住，整条流就哑了）。
+                    gateOutcome = await requestYieldGate(
+                        agentId=agent_id,
+                        modelName=str(getattr(body, "model", "") or ""),
+                        sessionId=session_id,
+                        userInput=body.message or "",
+                        onWait=_gateWaitNotice,
+                    )
+                    if gateOutcome.shouldPark:
+                        parked = await ledger.parkTurn(
+                            gateOutcome.parkReason,
+                            _turnResumePayload(body, session_id, agent_id),
+                        )
+                        if not parked:
+                            # 没落库的"挂起"没人能续，那就是假状态——如实报错
+                            return {
+                                "text": "",
+                                "reasoning": None,
+                                "tool_messages": [],
+                                "error": (
+                                    f"让位闸判定挂起（原因 {gateOutcome.parkReason}），"
+                                    "但 run 台账未能落库，本轮已中止且无续跑入口"
+                                ),
+                            }
+                        return {
+                            "text": "",
+                            "reasoning": None,
+                            "tool_messages": [],
+                            "parked": True,
+                            "park_reason": gateOutcome.parkReason,
+                            "park_attempts": gateOutcome.attempts,
+                            "park_waited_seconds": round(gateOutcome.waitedSeconds, 2),
+                        }
                     response = await agent.chat(
                         body.message,
                         stream=True,
@@ -831,11 +1000,13 @@ async def post_console_chat(
                     except Exception:  # noqa: BLE001 — usage 事件失败不影响本轮
                         pass
                     if isinstance(response, dict):
+                        turnSucceeded = True
                         return {
                             "text": response.get("text", str(response)),
                             "reasoning": response.get("reasoning"),
                             "tool_messages": response.get("tool_messages", []) or [],
                         }
+                    turnSucceeded = True
                     return {"text": str(response), "reasoning": None, "tool_messages": []}
                 except Exception as e:
                     logger.warning("Console chat error: %s", e, exc_info=True)
@@ -844,6 +1015,13 @@ async def post_console_chat(
                     return {"text": f"Error: {str(e)}", "reasoning": None,
                             "tool_messages": [], "error": str(e)}
                 finally:
+                    if gateOutcome is not None and gateOutcome.proceeded:
+                        # 回填 pacing 统计（Layer 3 节律的判据来源）。这里失败只点名
+                        # 不改写本轮结果——本轮成败已经定了，统计回执不该反过来翻案
+                        try:
+                            await reportTurnOutcome(outcome=gateOutcome, success=turnSucceeded)
+                        except Exception:  # noqa: BLE001
+                            logger.warning("让位闸回执失败（不影响本轮结果）", exc_info=True)
                     # 通知消费循环：本轮事件已全部产生
                     queue.put_nowait(_EMIT_DONE)
 
@@ -1024,6 +1202,19 @@ async def post_console_chat(
                     flush_events.append(stopped_event)
                     yield f"data: {json.dumps(stopped_event, ensure_ascii=False)}\n\n"
 
+                # P2-8：让位闸等不到额度的显式挂起事件。带 run_id——那是唯一续跑凭据。
+                if result.get("parked"):
+                    parked_event = {
+                        "type": "parked",
+                        "session_id": session_id,
+                        "run_id": ledger.run_id,
+                        "reason": str(result.get("park_reason", "")),
+                        "attempts": int(result.get("park_attempts", 0)),
+                        "waited_seconds": float(result.get("park_waited_seconds", 0.0)),
+                    }
+                    flush_events.append(parked_event)
+                    yield f"data: {json.dumps(parked_event, ensure_ascii=False)}\n\n"
+
                 # P1-1/P1-2：flush 阶段 item 事件（done 收口未闭合 item）+ 时间线
                 _flush_done = {"type": "done", "session_id": session_id}
                 flush_item_events = _item_events(flush_events + [_flush_done])
@@ -1143,6 +1334,107 @@ async def post_console_chat_stop(
         "code": 0,
         "message": "Chat stopped" if stopped else "No running task",
         "data": {"session_id": session_id, "stopped": stopped > 0},
+    }
+
+
+@router.post("/chat/resume")
+async def post_console_chat_resume(
+    run_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """人工续跑一条 parked 回合（拍板权限＝该回合属主 + 管理员）。
+
+    这里**不另起第二条流式实现**：把行翻回 queued 后直接委托 `/chat` 的同一个
+    处理协程，并带上 `resume_run_id` 复用原行。回合入口因此只有一处，闸也只问一次。
+    """
+    from neurova.core import agent_run_store as _ars
+
+    user_id = _get_user_id(request, current_user)
+    row = await _requireRunRow(run_id)
+    if not _isAdminIdentity(current_user):
+        # 身份先判、状态后判：反过来会让陌生账号先拿到 409（等于确认这条 run 存在
+        # 且已结束），归属面就漏了一格
+        _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+    if row.get("status") != _ars.PARKED_STATUS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {run_id!r} 当前是 {row.get('status')}，不是 parked，无可续跑的挂起回合",
+        )
+
+    rawPayload = row.get("resume_payload") or ""
+    try:
+        payload = json.loads(rawPayload) if rawPayload else None
+    except json.JSONDecodeError:
+        payload = None
+    if not isinstance(payload, dict) or not str(payload.get("message", "")).strip():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"run {run_id!r} 处于 parked 但没有可用载荷（旧行或台账缺口），"
+                "无法续跑——请让用户重发这一条"
+            ),
+        )
+
+    flipped = await asyncio.to_thread(_ars.get_agent_run_store().takeForResume, run_id)
+    if flipped is None:
+        # 并发点续跑：另一发已经把它取走了。这里必须拒，不能把同一回合跑两遍
+        raise HTTPException(status_code=409, detail=f"run {run_id!r} 已被取走或不再处于 parked")
+
+    return await post_console_chat(
+        body=_turnRequestFromPayload(payload),
+        request=request,
+        current_user=current_user,
+        resume_run_id=run_id,
+    )
+
+
+@router.get("/chat/runs")
+async def get_console_chat_runs(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=200),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """回合台账的读面：SSE 是一次性的，刷新或重启后"这条正等人续跑"必须还能查到。
+
+    只回状态与原因，不回消息内容——`resume_payload` 里是用户原文，它只在行确实
+    挂着时存在于库里，且这个列表端点不是取回原文的地方。
+    """
+    from neurova.core import agent_run_store as _ars
+
+    if not _ars.run_gate_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="run 台账已关闭（NEUROVA_RUN_GATE=off），无 run 读面",
+        )
+    user_id = _get_user_id(request, current_user)
+    rows = await asyncio.to_thread(_ars.get_agent_run_store().list_runs, session_id, limit)
+    if not _isAdminIdentity(current_user):
+        # 归属判定只许一处实现（教义第 6 条）：逐行交给会话那条同一谓词
+        # `_check_session_ownership`，这里不再本地重写比较式
+        for row in rows:
+            _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "session_id": session_id,
+            "runs": [
+                {
+                    "run_id": r.get("run_id"),
+                    "status": r.get("status"),
+                    "park_reason": r.get("park_reason") or "",
+                    "error_type": r.get("error_type") or "",
+                    "attempt": int(r.get("attempt") or 0),
+                    "cancel_requested": bool(r.get("cancel_requested")),
+                    "created_at": r.get("created_at"),
+                    "started_at": r.get("started_at"),
+                    "finished_at": r.get("finished_at"),
+                }
+                for r in rows
+            ],
+        },
     }
 
 

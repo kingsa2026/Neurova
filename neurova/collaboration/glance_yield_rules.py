@@ -226,6 +226,13 @@ class GlanceYieldChecker:
 
     def _check_model_pin(self, agent_id: str, model_name: str) -> YieldDecision:
         """Layer 1: Validate model pin"""
+        if not (model_name or "").strip():
+            # 未归因的回合**不建立 pin，也不判漂移**。默认路径就这样：前端没选
+            # 模型时不传 model（`ChatPage.vue` 的 `selectedModel.value || undefined`），
+            # 把空串钉成 pin 后，用户一选手动模型就撞上 MODEL_PIN_VIOLATION——而那
+            # 是闸里唯一"等多久都不会自愈"的原因，第一次判定就直接挂起。
+            return YieldDecision(should_yield=False)
+
         if agent_id not in self._agent_pins:
             # First time - set pin
             self.register_agent(agent_id, model_name)

@@ -17,13 +17,17 @@
     启动时存在 running 行即证明其 owner 进程已死——这是"重启丢在途"的
     根治第一步：run 事实不再随内存消失，幽灵行不再永驻。
 
-边界（如实，勿超读）：本模块**不提供跨重启的执行续跑**——run 任务活在
-API 进程内，属其全家桶形态
-Neurova 不引入）。收敛后的 run 在会话历史里如实可见；SSE 重放缓冲仍是
-内存有界结构。
+  - park / takeForResume：**parked 是非终态**，专门给"让位闸等不到额度"的回合。
+    它与上面两条相反，是**故意活过重启**的——重启后收敛只能把它原样留着，
+    人工点"续跑"时由唯一回合入口拿载荷重跑（`api/endpoints/console.py`）。
+
+边界（如实，勿超读）：本模块**不自动**跨重启续跑——parked 行等着，但没人替它
+执行；执行仍只在有人（会话属主或管理员）打续跑端点时发生（单进程形态下不引入
+后台轮询，那会造出一条无人管的执行路径）。SSE 重放缓冲仍是内存有界结构。
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import threading
@@ -64,7 +68,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_runs_one_running
 """
 register_migration(1, _SCHEMA, domain="agent_runs")
 
+
+def _migrateToV2(conn: sqlite3.Connection) -> None:
+    """v2：给 `parked`（挂起等人工续跑）补它需要的两列。
+
+    - `park_reason`：为什么挂起。人要点"续跑"，得先看得见卡在哪。
+    - `resume_payload`：待跑回合的请求载荷。这条**不是**消息的第二份真相——
+      用户原文要到 `ChatPipeline._step_save_session` 才落进会话，而挂起发生在
+      那之前，此刻除了这里没有任何地方存着这一轮，不落就等于"续跑"无从谈起。
+      写终态即清空（见 `finish`），不让原文在库里长期滞留。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    for name, decl in (("park_reason", "TEXT"), ("resume_payload", "TEXT")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {decl}")
+
+
+register_migration(2, _migrateToV2, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+
+# 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
+# `reconcile_at_startup` 不收敛它，且 park 时松开 owner 栅栏、退出单活槽。
+PARKED_STATUS = "parked"
+NON_TERMINAL_STATUSES = ("queued", "running", PARKED_STATUS)
 
 # 进程 identity：owner 栅栏的比较基准
 OWNER_IDENTITY = f"p{os.getpid()}-{uuid.uuid4().hex[:8]}"
@@ -178,7 +205,8 @@ class AgentRunStore:
             raise ValueError(f"finish 需要终态，收到 {status!r}（合法: {TERMINAL_STATUSES}）")
         with self._lock, self._conn:
             cur = self._conn.execute(
-                "UPDATE agent_runs SET status=?, error_type=?, finished_at=?"
+                "UPDATE agent_runs SET status=?, error_type=?, finished_at=?,"
+                " resume_payload=NULL"
                 " WHERE run_id=? AND owner=? AND status='running'",
                 (status, error_type, time.time(), run_id, owner),
             )
@@ -188,14 +216,18 @@ class AgentRunStore:
         """持久取消意图：running 行优先返回；同 session 全部 queued 行一并
         打标（P1-#8 排队中可停——等待方在晋升轮询中消费该意图自行收尾）。
 
+        parked 行**直接落终态**：它按定义没有执行体，只打一个意图标记就会留下
+        一条"用户已叫停、却永远还挂在等人续跑"的行——既读不懂也清不掉。
+
         重放幂等：已打标行重复打标无害，返回值恒为本 session 最老的活跃/
-        排队行（无则 None，调用方保持旧语义）。
+        排队/挂起行（无则 None，调用方保持旧语义）。
         """
         with self._lock, self._conn:
             rows = self._conn.execute(
                 "SELECT run_id, status FROM agent_runs"
-                " WHERE session_id=? AND status IN ('running','queued') ORDER BY seq",
-                (session_id,),
+                " WHERE session_id=? AND status IN ('running','queued',?)"
+                " ORDER BY seq",
+                (session_id, PARKED_STATUS),
             ).fetchall()
             if not rows:
                 return None
@@ -203,6 +235,12 @@ class AgentRunStore:
                 "UPDATE agent_runs SET cancel_requested=1"
                 " WHERE session_id=? AND status IN ('running','queued')",
                 (session_id,),
+            )
+            self._conn.execute(
+                "UPDATE agent_runs SET status='cancelled', error_type=?,"
+                " finished_at=?, resume_payload=NULL, owner='', lease_expires_at=0"
+                " WHERE session_id=? AND status=?",
+                ("user_stopped_while_parked", time.time(), session_id, PARKED_STATUS),
             )
             return rows[0]["run_id"]
 
@@ -215,6 +253,59 @@ class AgentRunStore:
                 (reason, time.time(), run_id),
             )
             return cur.rowcount == 1
+
+    def park(
+        self,
+        run_id: str,
+        owner: str,
+        parkReason: str,
+        payload: Any = None,
+    ) -> bool:
+        """running → parked（挂起等人工续跑）。
+
+        owner 栅栏保留在 WHERE 上（只有当前执行者能挂起自己那一轮），但写完后
+        **松开 owner 并清零租约**：留着 owner 就仍占着同 session 单活槽，
+        `claim_next` 的 `NOT EXISTS (… 'running')` 会把整个会话永久挡住——
+        连"续跑"都发不出去；租约继续跑也会被 `reconcile_stale` 误杀成 failed。
+        """
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE agent_runs SET status=?, park_reason=?, resume_payload=?,"
+                " owner='', lease_expires_at=0, heartbeat_at=0"
+                " WHERE run_id=? AND owner=? AND status='running'",
+                (
+                    PARKED_STATUS,
+                    parkReason,
+                    json.dumps(payload if payload is not None else {}, ensure_ascii=False),
+                    run_id,
+                    owner,
+                ),
+            )
+            return cur.rowcount == 1
+
+    def takeForResume(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """把 parked 行交还给回合入口（翻回 queued），返回**翻转前**的行。
+
+        载荷列在换手时即清空：调用方拿到了它，库里就不该再留第二份原文；
+        若这一轮再次挂起，`park` 会重新写入当时的载荷。
+
+        非 parked 一律 None：running 被取走＝同一轮双执行；终态行已跑过。
+        `seq` 不变，所以它仍排在会话队列最前——这一轮本来就先提交。
+        """
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE run_id=? AND status=?",
+                (run_id, PARKED_STATUS),
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "UPDATE agent_runs SET status='queued', cancel_requested=0,"
+                " resume_payload=NULL"
+                " WHERE run_id=? AND status=?",
+                (run_id, PARKED_STATUS),
+            )
+        return dict(row)
 
     # ------------------------------------------------------------------
     # 查询
@@ -268,7 +359,8 @@ class AgentRunStore:
 
     def stats(self) -> Dict[str, int]:
         with self._lock:
-            counts = {s: 0 for s in ("running", "queued", "terminal")}
+            # parked 必须单列：把它折进 terminal 就等于把"等人续跑"读成"已结束"
+            counts = {s: 0 for s in ("running", "queued", PARKED_STATUS, "terminal")}
             for status, n in self._conn.execute(
                 "SELECT status, COUNT(*) FROM agent_runs GROUP BY status"
             ).fetchall():
@@ -283,6 +375,10 @@ class AgentRunStore:
         """启动收敛：单进程模型（app.py workers=1）下，启动时仍为 running
         的行必然来自已死进程 → failed(process_died)；遗留 queued →
         cancelled(server_restart)（其等待方 SSE 连接已随进程消失）。
+
+        parked **原样留着**：它是"等人"而不是"在跑"，把它收敛掉就等于一次重启
+        之后人工再也没东西可续——这条能力的全部意义正是活过进程。数量必须打进
+        日志：否则运维只看得到"什么都没发生"，而库里挂着 N 条待办。
         """
         now = time.time()
         with self._lock, self._conn:
@@ -292,6 +388,9 @@ class AgentRunStore:
             queued = self._conn.execute(
                 "SELECT run_id, session_id FROM agent_runs WHERE status='queued'"
             ).fetchall()
+            parked = self._conn.execute(
+                "SELECT COUNT(*) FROM agent_runs WHERE status=?", (PARKED_STATUS,)
+            ).fetchone()[0]
             self._conn.execute(
                 "UPDATE agent_runs SET status='failed', error_type='process_died',"
                 " finished_at=? WHERE status='running'",
@@ -301,6 +400,10 @@ class AgentRunStore:
                 "UPDATE agent_runs SET status='cancelled', error_type='server_restart',"
                 " finished_at=? WHERE status='queued'",
                 (now,),
+            )
+        if parked:
+            logger.warning(
+                "AgentRun 启动对账：%d 条 parked 原样保留（等人工续跑，不自动执行）", int(parked)
             )
         if dead or queued:
             logger.warning(

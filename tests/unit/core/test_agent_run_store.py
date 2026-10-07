@@ -173,7 +173,8 @@ def test_stats_and_wal(store):
     store.claim_next("s1", "w1")
     store.intake("s1", "u", "a", "2")
     st = store.stats()
-    assert st == {"running": 1, "queued": 1, "terminal": 0}
+    # `parked` 必须在计数里单列（P2-8）：折进 terminal 就把"等人续跑"读成"已结束"
+    assert st == {"running": 1, "queued": 1, "parked": 0, "terminal": 0}
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
 
