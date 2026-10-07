@@ -118,15 +118,28 @@ async def delete_project(pid: str, current_user: Dict[str, Any] = Depends(get_cu
 
 
 def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
+    """一次请求 = 一行台账 = 一个生命周期拥有者。
+
+    `work` 收本次的 run id：需要写中间读数的服务把终态写回**这一行**，而不是另起一行。
+    改前外层建一行、服务内部再建一行，前端只 poll 外层那条，而 `GET /projects/{pid}`
+    的 runs 投影里同 kind 并排两行——读侧无从判断哪条代表这次请求（E 批 §闭环审计）。
+    """
     run = store.add_run({"project_id": pid, "kind": kind})
 
     async def _wrapper():
         try:
-            result = await work()
+            result = await work(run["id"])
             import json as _json
-            store.update_run(run["id"], {"status": "done", "detail_json": _json.dumps(
-                result if isinstance(result, (dict, list)) else {"result": str(result)},
-                ensure_ascii=False, default=str)})
+            # 服务被交回这一行的归属时，它自己写终态与产出读数（含 `done_with_fallback`
+            # 这种「带病完成」与回退成因）。wrapper 只在它没结掉时补一份，**绝不覆盖**：
+            # 改前这里无条件写 `{"status": "done", detail: 返回值}`，于是服务标好的
+            # done_with_fallback 被压成 done、detail 里的成因被返回值抹掉，
+            # 一行台账只剩状态字（E 批活体抓出）。
+            row = store.get_run(run["id"]) or {}
+            if row.get("status") == "running":
+                store.update_run(run["id"], {"status": "done", "detail_json": _json.dumps(
+                    result if isinstance(result, (dict, list)) else {"result": str(result)},
+                    ensure_ascii=False, default=str)})
         except Exception as e:  # noqa: BLE001
             logger.exception("studio 后台任务失败(%s)", kind)
             store.update_run(run["id"], {"status": "failed", "error": str(e)[:500]})
@@ -148,7 +161,8 @@ async def split_script(pid: str, body: Dict[str, Any] = Body(...),
     model = body.get("model")
 
     return _spawn_run(store, pid, "script",
-                      lambda: services.split_script(store, pid, content, model=model))
+                      lambda runId: services.split_script(
+                          store, pid, content, model=model, run_id=runId))
 
 
 @router.post("/episodes/{eid}/extract")
@@ -156,7 +170,8 @@ async def extract_assets(eid: str, current_user: Dict[str, Any] = Depends(get_cu
     store = get_store()
     project, ep = _episode_with_project(store, eid, current_user)
     return _spawn_run(store, project["id"], "extract",
-                      lambda: services.extract_assets(store, project["id"], eid))
+                      lambda runId: services.extract_assets(
+                          store, project["id"], eid, run_id=runId))
 
 
 @router.post("/episodes/{eid}/storyboards")
@@ -166,7 +181,8 @@ async def break_storyboards(eid: str, body: Optional[Dict[str, Any]] = Body(defa
     project, _ep = _episode_with_project(store, eid, current_user)
     force = bool((body or {}).get("force"))
     return _spawn_run(store, project["id"], "storyboard",
-                      lambda: services.break_storyboards(store, project["id"], eid, force=force))
+                      lambda runId: services.break_storyboards(
+                          store, project["id"], eid, force=force, run_id=runId))
 
 
 @router.post("/episodes/{eid}/generate-images")
@@ -178,9 +194,9 @@ async def generate_images(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     model = str((body or {}).get("model") or "")
     provider_id = str((body or {}).get("provider_id") or "")
     return _spawn_run(store, project["id"], "images",
-                      lambda: services.generate_shot_images(store, project["id"], eid,
-                                                            provider=provider, model=model,
-                                                            provider_id=provider_id))
+                      lambda _runId: services.generate_shot_images(store, project["id"], eid,
+                                                                   provider=provider, model=model,
+                                                                   provider_id=provider_id))
 
 
 @router.post("/episodes/{eid}/generate-videos")
@@ -190,7 +206,7 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     project, _ep = _episode_with_project(store, eid, current_user)
     b = body or {}
     return _spawn_run(store, project["id"], "videos",
-                      lambda: services.generate_shot_videos(
+                      lambda _runId: services.generate_shot_videos(
                           store, project["id"], eid,
                           provider=str(b.get("provider") or "wan"),
                           model=str(b.get("model") or ""),
@@ -207,7 +223,7 @@ async def narration(eid: str, body: Optional[Dict[str, Any]] = Body(default=None
     project, _ep = _episode_with_project(store, eid, current_user)
     voice = str((body or {}).get("voice") or "default")
     return _spawn_run(store, project["id"], "narration",
-                      lambda: services.synthesize_narration(store, project["id"], eid, voice=voice))
+                      lambda _runId: services.synthesize_narration(store, project["id"], eid, voice=voice))
 
 
 @router.post("/projects/{pid}/assets/images")
@@ -219,7 +235,7 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
     provider = str(b.get("provider") or "ark")
     ids = [str(i) for i in (b.get("ids") or [])] or None
     return _spawn_run(store, pid, "asset_images",
-                      lambda: services.generate_asset_images(
+                      lambda _runId: services.generate_asset_images(
                           store, pid, provider=provider, ids=ids,
                           model=str(b.get("model") or ""),
                           provider_id=str(b.get("provider_id") or "")))
@@ -325,11 +341,11 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
     provider_id = str(b.get("provider_id") or "")
 
     if stage == "video":
-        work = lambda: services.generate_shot_videos(  # noqa: E731
+        work = lambda _runId: services.generate_shot_videos(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
             provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid])
     else:
-        work = lambda: services.generate_shot_images(  # noqa: E731
+        work = lambda _runId: services.generate_shot_images(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
             provider_id=provider_id, shot_ids=[sid])
     return _spawn_run(store, project["id"], f"retry_{stage}", work)

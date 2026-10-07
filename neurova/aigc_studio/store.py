@@ -15,6 +15,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import get_data_root
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 def defaultDbPath() -> Path:
     """默认库落点：数据根下的 `aigc_studio.db`（原值按 PROJECT_ROOT 拼，是第二份根）。"""
@@ -128,6 +131,33 @@ class StudioStore:
                 self._conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
                 self._conn.commit()
+        self._convergeLeftoverRuns()
+
+    def _convergeLeftoverRuns(self) -> None:
+        """启动收敛：构造时仍为 running 的 runs 行只可能来自已死进程。
+
+        studio 长任务的执行体是 `asyncio.create_task` 挂在**进程内**（studio_api.py 的
+        `_tasks`），进程没了就再没人写它的终态；`status` 建表默认 `'running'`，于是
+        每次重启都留下一批"永远在跑"的幽灵行——前端 `useStudioRun` 轮满 10 分钟返回
+        null，用户看到超时，库里那条仍是 running。`agent_runs` 有 `reconcile_at_startup`
+        的对偶，runs 表此前没有，本方法补上（两张表各管一类任务，不是第二份口径）。
+        """
+        with self._lock:
+            leftover = self._conn.execute(
+                "SELECT id FROM runs WHERE status='running'").fetchall()
+            if not leftover:
+                return
+            self._conn.execute(
+                "UPDATE runs SET status='failed',"
+                " error='process_died（服务重启，后台任务不续跑）', updated_at=?"
+                " WHERE status='running'",
+                (_now(),),
+            )
+            self._conn.commit()
+        logger.warning(
+            "Studio 启动收敛: %d 条 running→failed(process_died)，id=%s",
+            len(leftover), [r["id"] for r in leftover][:20],
+        )
 
     # ── 内部 ────────────────────────────────────────────────────────────
 
@@ -308,6 +338,10 @@ class StudioStore:
     def list_runs(self, pid: str) -> List[Dict[str, Any]]:
         return self._fetch_all(
             "SELECT * FROM runs WHERE project_id=? ORDER BY created_at DESC", (pid,))
+
+    def get_run(self, rid: str) -> Optional[Dict[str, Any]]:
+        """按 id 取一行台账（wrapper 判「这一行是否已被服务自己结掉」的读面）。"""
+        return self._fetch_one("SELECT * FROM runs WHERE id=?", (rid,))
 
     def close(self) -> None:
         with self._lock:

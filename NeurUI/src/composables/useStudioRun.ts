@@ -7,6 +7,14 @@ import { getProject, type StudioRun } from '@/api/modules/studio'
 const POLL_MS = 2500
 const MAX_WAIT_MS = 10 * 60 * 1000
 
+/**
+ * 终态集合：与生产侧写入点同源——`done`/`failed` 由 studio_api 的 wrapper 落
+ * （`_spawn_run`），`done_with_fallback` 由 services 的抽取步落
+ * （neurova/aigc_studio/services.py 的 `extract_assets`）。
+ * 少认一个，前端就把一条已完成的任务一直 poll 到 10 分钟超时。
+ */
+const TERMINAL_STATUSES = new Set(['done', 'done_with_fallback', 'failed'])
+
 export async function waitStudioRun(
   pid: string,
   runId: string,
@@ -20,7 +28,7 @@ export async function waitStudioRun(
       const runs: StudioRun[] = res?.data?.runs ?? []
       const run = runs.find((r) => r.id === runId) ?? null
       opts.onTick?.(run)
-      if (run && (run.status === 'done' || run.status === 'failed')) return run
+      if (run && TERMINAL_STATUSES.has(run.status)) return run
     } catch {
       /* 网络抖动继续轮 */
     }
