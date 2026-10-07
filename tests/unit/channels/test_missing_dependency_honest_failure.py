@@ -17,9 +17,9 @@
 from __future__ import annotations
 
 import ast
-import io
 import logging
 import os
+import pathlib
 
 import pytest
 
@@ -29,6 +29,7 @@ import neurova.channels.qclaw_service as qclaw_service_module
 from neurova.channels.discord import DiscordAdapter
 from neurova.channels.mqtt import MQTTAdapter
 from neurova.channels.qclaw_service import QClawService
+from tests import ast_scan
 
 
 def _channelsRoot() -> str:
@@ -90,7 +91,10 @@ def testDependencyMissingBranchNeverReturnsSuccessValue():
         if not name.endswith(".py"):
             continue
         path = os.path.join(root, name)
-        tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
+        # 本条只扫一遍、不留常驻语法树，故走共享的一次性入口
+        # （`tests/unit/test_ci_ast_scan_budget_guard.py` 常驻拦「私有全仓解析」：
+        # 判据成本不得随代码总量涨）。
+        tree = ast_scan.transientTree(pathlib.Path(path))
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

@@ -21,6 +21,7 @@ import pathlib
 import pytest
 
 import neurova.cognitive_layers.memory_layer.security as security
+from tests import ast_scan
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -81,16 +82,18 @@ def testCipherChainHasZeroCallersAndThatIsPinned():
     """
     expectedCallers = 0
     hits = []
-    for path in (REPO_ROOT / "neurova").rglob("*.py"):
+    # 本判据只扫一遍、不留常驻语法树，故走共享的一次性入口；顺带吃文本预筛——
+    # 两个方法名都没出现的文件不可能有调用点（`tests/unit/test_ci_ast_scan_budget_guard.py`
+    # 常驻拦「私有 rglob + ast.parse」的全仓扫描：判据成本不得随代码总量涨）。
+    hints = ast_scan.textHints("encrypt_sensitive_content", "decrypt_sensitive_content")
+    for path, node in ast_scan.transientNodes(REPO_ROOT / "neurova", hints=hints):
         if path.name == "security.py":
             continue  # 定义所在文件本身
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in {
-                "encrypt_sensitive_content",
-                "decrypt_sensitive_content",
-            }:
-                hits.append(str(path.relative_to(REPO_ROOT)))
+        if isinstance(node, ast.Attribute) and node.attr in {
+            "encrypt_sensitive_content",
+            "decrypt_sensitive_content",
+        }:
+            hits.append(str(path.relative_to(REPO_ROOT)))
 
     assert len(hits) == expectedCallers, (
         f"敏感内容加解密的调用点数从 {expectedCallers} 变成 {len(hits)}：{sorted(set(hits))}。"

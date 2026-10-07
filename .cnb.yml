@@ -275,13 +275,21 @@ main:
         - name: install pip-audit
           script: python -m pip install pip-audit
           timeout: 15m
+        # pip-audit 经 scripts/ci/pip_audit_gate.py 调用（Issue #354）：
+        # 直调 `python -m pip_audit` 时，pypi.org 的一次 15s 读超时就是阻塞红灯
+        # （实测构建 cnb-tec-1k4b4771b 的 stage-2：`Read timed out (read timeout=15)`
+        # / `Finished, code: 1`），而那次红与提交内容一个字的关系都没有。
+        # 包装脚本换 `--vulnerability-service osv`（一次批量查询取代每包一次往返）、
+        # 给足单次查询超时、并**只对基础设施错误重试**——「找到漏洞」立即判红，
+        # 绝不重试。退出码语义与 scripts/ci/osv_audit.py 同源（0/1/2）。
+        # 判据见 tests/unit/test_pip_audit_gate.py。
         - name: audit CI locked set
-          script: python -m pip_audit -r requirements-ci.lock --progress-spinner off
+          script: python scripts/ci/pip_audit_gate.py -r requirements-ci.lock
           timeout: 20m
         - name: audit full runtime locked set
           # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
           # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
-          script: python -m pip_audit -r requirements-full.lock --progress-spinner off
+          script: python scripts/ci/pip_audit_gate.py -r requirements-full.lock
           timeout: 20m
         - name: prefetch OSV offline databases (best effort)
           # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
