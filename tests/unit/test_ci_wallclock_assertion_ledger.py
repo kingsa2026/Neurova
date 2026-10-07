@@ -624,7 +624,15 @@ class TestConvertedSitesStayStructural:
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
-    "tests/e2e/test_phase4_integration.py": 2,
+    # `tests/e2e/test_phase4_integration.py` 的 `test_coordination_overhead`
+    # （`avgTime < 0.01`）已**销账**（原登记 2 处 → 现 1 处）：`78abaa2e` 把该用例
+    # 从"直接问裁决器 5 次"改成"过 5 个真回合入口"，量的是 `requestYieldGate` 的
+    # 平均开销；那正是**放行路径的闸开销**这条机时契约本身，墙钟不可替代
+    # （它的结构面由同文件 `attempts == 1` 与 `proceeded is True` 两侧钉住）。
+    # 同文件的 `test_cost_tracking_speed` 仍留墙钟（10 次纯算术 < 1.0s）。
+    # 键还在，只是计数随判据结构变化重新给结论——不是"沉默地少登记一条"：
+    # 任何一处新增的墙钟上界都会让本表的分布比对重新判红。
+    "tests/e2e/test_phase4_integration.py": 1,
     # `tests/integration/test_multi_agent_coordination.py` 已**销账**（原登记 1 处）：
     # `f4776229` 把那条性能用例（`avg_latency_ms < 1.0`）的读数改成按
     # `iterations` 常量折算，`wallclockBounds` 因阈值由常量算术得出而不再判为
