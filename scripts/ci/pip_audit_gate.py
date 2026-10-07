@@ -60,11 +60,32 @@ import time
 #: 为什么按形态而不按退出码：pip-audit 对「有漏洞」与「查不到」都给 1
 #: （实测：ReadTimeout 与 Found N known vulnerabilities 同为 exit 1），
 #: 按码重试等于把「真有漏洞」也重试三遍，最后照旧判红——只是慢了。
+#:
+#: **`Could not connect` 这一条不是补出来的措辞，是漏掉的形态。** 实测（本次
+#: 构建 `cnb-qr5-1k4bor0bt` 的 `audit CI locked set`）：pip-audit 的服务层把
+#: requests 的连接异常收成自家 `ConnectionError`，`_cli` 只印两行——
+#:
+#:     ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed
+#:     ERROR:pip_audit._cli:Tip: your network may be blocking this service. …
+#:
+#: 前几版判据盯的是 requests/urllib3 的**异常类名与底层措辞**
+#: （`ReadTimeout` / `Read timed out` / `Failed to resolve` / `Name or service
+#: not known`），而这一条出口把它们全吃掉了，只剩「连不上」这句自述——于是
+#: `isInfrastructureFailure` 返回 False，门禁把它读成「裁决已成立」直接退 1，
+#: 一次网络抖动就成了阻塞红灯，与提交内容一个字的关系都没有。
+#: 根因是「形态清单以库的内部类名为锚」，不是「少列了一条」——故清单按
+#: **裁决通路是否可用**这件事收口（`Could not connect` / `blocking this service`），
+#: 并保留底层措辞作为冗余证据（网络栈换实现时仍认得出来）。
 INFRASTRUCTURE_PATTERNS = (
+    # 裁决通路不可用：pip-audit 自己的自述（服务名与实现无关，跨 osv/pypi 都印）。
+    re.compile(r"Could not connect", re.IGNORECASE),
+    re.compile(r"blocking this service", re.IGNORECASE),
+    # 底层网络栈措辞（连不上/超时/解析不了的具体形态）。
     re.compile(r"ReadTimeout|ConnectTimeout|TimeoutError", re.IGNORECASE),
     re.compile(r"ConnectionError|ConnectionResetError", re.IGNORECASE),
     re.compile(r"Read timed out|timed out", re.IGNORECASE),
     re.compile(r"Temporary failure in name resolution|Name or service not known", re.IGNORECASE),
+    re.compile(r"Failed to resolve", re.IGNORECASE),
     re.compile(r"SSL(?:Error)?|CERTIFICATE_VERIFY_FAILED", re.IGNORECASE),
     re.compile(r"503 Service Unavailable|502 Bad Gateway|504 Gateway Time-out"),
     re.compile(r"RemoteDisconnected", re.IGNORECASE),

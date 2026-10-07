@@ -152,6 +152,12 @@ class TestVerdictSemantics:
             "socket.gaierror: Temporary failure in name resolution",
             "ConnectionResetError: [Errno 104] Connection reset by peer",
             "HTTPError: 503 Service Unavailable",
+            # 构建 cnb-qr5-1k4bor0bt 的 dependency-audit 腿实测原文：pip-audit 的
+            # `OsvService` 把 requests 的连接异常收成自家 `ConnectionError`，
+            # 打给 `_cli` 后印成这两行（逐字取自本次 CI 日志）。
+            "ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed\n"
+            "ERROR:pip_audit._cli:Tip: your network may be blocking this service. "
+            "Try another service with `-s SERVICE`",
         ],
     )
     def test_infrastructure_forms_are_retryable(self, gate, output):
@@ -187,6 +193,22 @@ class TestVerdictSemantics:
     def test_clean_exit_is_never_a_failure(self, gate):
         assert not gate.isInfrastructureFailure(0, "No known vulnerabilities found")
 
+    def test_connection_advice_does_not_outrank_a_real_verdict(self, gate):
+        """反向控制：连接失败建议**不得**压过一条已成立的裁决。
+
+        两形态混流是真实场景（重试会把上一轮输出累积进同一段文本）：
+        `_cli` 的提示句与 `Found N` 裁决同时出现时，判据只认后者。
+        """
+        mixed = (
+            "ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed\n"
+            "ERROR:pip_audit._cli:Tip: your network may be blocking this service. "
+            "Try another service with `-s SERVICE`\n"
+            "Found 1 known vulnerability in 1 package"
+        )
+        assert not gate.isInfrastructureFailure(1, mixed), (
+            "连接建议句压过了已成立的裁决——重试一条已成立的裁决是空转"
+        )
+
 
 class TestExitCodeVocabularyMatchesTheOsvGate:
     """退出码语义与 `scripts/ci/osv_audit.py` 同源（不新造第二套词汇）。"""
@@ -220,6 +242,32 @@ class TestExitCodeVocabularyMatchesTheOsvGate:
         assert gate.main() == 1
         assert len(calls) == 1, (
             f"「找到漏洞」被重试了 {len(calls)} 次——重试一条已成立的裁决是空转"
+        )
+
+    def test_connection_failure_recovers_with_retry(self, gate, monkeypatch):
+        """CI 实测形态走完整 `main()`：抖动一次 → 第二次拿到裁决 → 退出 0。
+
+        这条钉的是**行为**而不只是分类函数：构建 `cnb-qr5-1k4bor0bt` 的红，
+        成因就是第一次调用撞上 OSV 连接失败、被当成「裁决已成立」直接判红，
+        于是第二次机会根本不存在。修后必须能救回这一轮。
+        """
+        sequence = [
+            (1, "ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed\n"
+                "ERROR:pip_audit._cli:Tip: your network may be blocking this service. "
+                "Try another service with `-s SERVICE`"),
+            (0, "No known vulnerabilities found"),
+        ]
+
+        def fakeRunOnce(*_a, **_k):
+            return sequence.pop(0)
+
+        monkeypatch.setattr(gate, "runOnce", fakeRunOnce)
+        monkeypatch.setattr(gate, "RETRY_BACKOFF", 0.0)
+        monkeypatch.setattr(sys, "argv", [str(GATE), "-r", "requirements-ci.lock",
+                                          "--attempts", "3"])
+        assert gate.main() == 0, (
+            "OSV 连接失败没被判成基础设施错误——它直接退了 1（裁决已成立），"
+            "于是这一次网络抖动就是阻塞红灯，而它与提交内容无关"
         )
 
     def test_transient_failure_recovers_with_retry(self, gate, monkeypatch):
