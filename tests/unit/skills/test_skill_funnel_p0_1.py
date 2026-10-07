@@ -223,7 +223,7 @@ async def test_execute_skill_records_applied_success():
     from neurova.tool_executor import ToolExecutor
 
     registry = _make_registry(_make_skill())
-    registry.execute_skill.return_value = SkillResult(success=True, output="ok")
+    registry.execute_skill.return_value = SkillResult(success=True, data="ok")
     agent = MagicMock()
     agent._skill_registry = registry
 

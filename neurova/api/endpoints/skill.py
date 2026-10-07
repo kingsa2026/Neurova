@@ -436,9 +436,11 @@ async def execute_skill(
             if asyncio.iscoroutine(call_result):
                 call_result = await call_result
             skill_result = call_result
-            output = getattr(skill_result, "output", None)
+            # 注册表与桥接层返回的是运行时 SkillResult（data 形状）；executor 层
+            # 的 output 在 ExecutorBackedSkill 里已转成 data，此处读 output 恒为 None。
+            output = getattr(skill_result, "data", None)
             if output is None and isinstance(skill_result, dict):
-                output = skill_result.get("output")
+                output = skill_result.get("data")
             ok = getattr(skill_result, "success", True)
             if not ok:
                 return SkillExecuteResponse(

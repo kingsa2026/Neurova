@@ -1526,3 +1526,16 @@ tests/unit/test_audit_ledger_commit_guard.py
 # 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。
 # 逐文件单跑 3 passed（约 4s，含 3 次子进程探针）
 tests/unit/test_manual_scripts_are_not_collectible.py
+# 技能符号只许一条取用路径（§9 序 8 四体收口）：顶层影子文件被同名包遮蔽时，取符号靠
+# importlib 反射 + sys.modules 别名 + 占位类，同一批符号在一个进程里长出三份 Skill 类，
+# isinstance 分支静默走错路。判据按"门面所发==运行时返回"取证，含源级反射加载防回流
+# （仓内另有正当 spec_from_file_location 落点，判据只锁 skill_system）。逐文件单跑 6 passed
+tests/unit/skills/test_skillSymbolSingleCarrier.py
+# github_push 曾另开一条反射后门自取基类（第二个 cache key），其 SkillResult 与注册表
+# 返回的那份不同一——`isinstance(create_github_push_skill(), Skill)` 实测为 False。
+# 判据锁对象同一性 + 无第二次 exec，搬家后仍成立（不锁符号来自哪个文件）。逐文件单跑 3 passed
+tests/unit/skills/test_github_push_single_symbol_source.py
+# 技能执行端点降级分支读的是 output 字段，而注册表/桥接返回 data 形状——恒 None 后回
+# {"status":"ok"}：success=True 配一份编造的空载荷，评测台架拿不到技能真正产出的东西。
+# 判据用真注册表 + 真 Skill 走完整链路，前缀取自挂载注册表本身。逐文件单跑 1 passed
+tests/unit/api/test_skillExecuteFallbackCarriesPayload.py

@@ -1,9 +1,10 @@
 """SkillRegistry 单元测试（对齐 ADR 0011 规范实现）。
 
-前置：neurova/skill_system/__init__.py 的 __getattr__ 已补上 "Skill" 分支，
-使 `from neurova.skill_system import Skill` 不再回退为无方法的占位类。
+前置：`from neurova.skill_system import Skill` 经包门面静态 re-export
+`neurova/skill_system/core.py` 的规范实现（2026-10-07 起不再有 `__getattr__`
+延迟代理与 standalone 反射加载）。
 
-真实 API（neurova/skill_system.py 的 class A，经包 __getattr__ 以 standalone 模块加载）：
+真实 API（neurova/skill_system/core.py 的 class A）：
     SkillRegistry(runtime_manager=None)
     register(skill)                     # 按 skill.name 存储，skill.add_event_handler
     skills -> Dict[str, Skill]
@@ -13,6 +14,7 @@
     add_event_handler / register_event_callback(event_type, handler)
 
 SkillResult 字段：success / data / error / metadata / execution_time。
+（executor 层另有 output 形状，由 ExecutorBackedSkill 在桥接处转成 data。）
 """
 
 import pytest
@@ -22,7 +24,7 @@ from neurova.skill_system import Skill, SkillEvent, SkillRegistry, SkillResult
 
 class _EchoSkill(Skill):
     async def execute(self, params, context=None):
-        return SkillResult(success=True, output={"echo": params})
+        return SkillResult(success=True, data={"echo": params})
 
 
 class _BoomSkill(Skill):
@@ -115,7 +117,7 @@ class TestExecuteSkill:
         registry.register(_EchoSkill("demo"))
         result = await registry.execute_skill("demo", {"x": 1})
         assert result.success is True
-        assert result.output == {"echo": {"x": 1}}
+        assert result.data == {"echo": {"x": 1}}
 
     @pytest.mark.asyncio
     async def test_execute_missing_skill_fails(self, registry):

@@ -16,7 +16,6 @@ TDD 测试:工具调用链路遗漏断点修复(第二批)
   缺 await,对 coroutine 迭代会抛 TypeError。
 """
 
-import importlib.util
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -26,16 +25,9 @@ from tests.repo_paths import repo_str
 
 
 
-# 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
-# (与 skill_system/__init__.py 的 _get_skill_module 加载方式一致)
-_SPEC = importlib.util.spec_from_file_location(
-    "neurova_skill_system_standalone_for_test",
-    repo_str("neurova/skill_system.py"),
-)
-_MOD = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MOD)
-SkillRegistry = _MOD.SkillRegistry
-Skill = _MOD.Skill
+# 规范实现载体在包内 `skill_system/core.py`（顶层同名文件被同名包遮蔽期间的
+# 按路径反射加载，已随搬家一并退役）
+from neurova.skill_system.core import Skill, SkillRegistry
 
 
 # ──────────────────────────────────────────────────────────────────

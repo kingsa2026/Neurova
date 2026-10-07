@@ -27,7 +27,7 @@ Neurova/
 │   ├── router.py                     # 消息路由器
 │   ├── llm_client.py                 # LLM 客户端
 │   ├── builtin_tools.py              # 内置工具注册器
-│   ├── skill_system.py               # 技能系统
+│   ├── skill_system/                 # 技能系统（core.py 规范实现 + 静态门面）
 │   └── ... (更多核心模块)
 │
 ├── neurova/agent/                    # Agent 深度模块
