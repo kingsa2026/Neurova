@@ -4,8 +4,11 @@
 工厂（`glance_yield_rules.py:444/455`），漏 `await` 就拿到 coroutine 对象——调用其方法即
 AttributeError，整条支路从未执行过。本文件把该契约的所有命中点一次钉住。
 
-命中点清点不是照抄报告：报告记了两处（`coordination_decorators.py:99/271`），
-按第 5 条复扫后实为四处，第四处在**已挂载、真能打进**的端点上（`coordination_api.py:111`）。
+命中点清点不是照抄报告：报告记了两处（`coordination_decorators.py:99/271`），按第 5 条复扫后
+实为四处，第四处在**已挂载、真能打进**的端点上（`coordination_api.py:111`）。
+两处装饰器命中点随该文件退役（P2-8 把同功能两份实现收成一份，见
+`tests/unit/collaboration/test_yieldGateWaitPolicy.py`）；本文件因此只剩"全仓处处 await"这一条
+正向判据 + 端点真重置那一条行为判据。
 """
 
 from __future__ import annotations
@@ -19,15 +22,13 @@ import pytest
 
 _GLANCE_FACTORIES = ("get_glance_yield_checker", "reset_glance_yield_checker")
 
-# 命中点台账：`agent/turn_coordinator.py` 的漏 await **不在本批修**，理由是它不是"改一个
-# await 就能活"的形态——它的 `__init__` 是同步的（协程工厂无从 await），且紧接的一行调的是
-# `GlanceYieldChecker` 全类根本不存在的 `initialize()`（现值 AttributeError 于 :53）。
-# 全仓 grep 证其在生产侧零消费者（`get_turn_coordinator` 只被测试引用），所以正确处置是
-# "接线 or 连同测试退役"的产品裁决，而不是我顺手补个 await 装作闭环。
-# 本表按"文件名 → 期望命中数"钉住：新增命中即红，把它修好了不摘表也红（双向咬合）。
-_UNWIRED_REGISTER = {
-    os.path.join("agent", "turn_coordinator.py"): 1,
-}
+# 命中点台账：曾登记 `agent/turn_coordinator.py: 1`——那处不是"补个 await 就能活"，它的
+# `__init__` 是同步的（协程工厂无从 await），紧接一行还调 `GlanceYieldChecker` 全类不存在
+# 的 `initialize()`，且 `get_turn_coordinator` 生产侧零消费者。按拍板（"接线"）处置后，
+# 那套照着不存在的 Agent 接口（`agent.execute_turn()`/`agent.id`）写的想象实现整体退役，
+# 现在的执行体是 `agent/turn_coordinator.py` 的让位闸，协程工厂处处 await。
+# 台账因此归零：留空表而不是删掉判据——新增未 await 的调用点仍当场红。
+_UNWIRED_REGISTER: dict = {}
 
 
 def _neurovaRoot() -> str:
@@ -101,24 +102,35 @@ def testYieldCheckerResetEndpointActuallyResets(tmp_path):
     )
 
 
-def testGlanceYieldDecoratorRunsItsRuleBranch():
-    """`@glance_yield_check` 装饰的调用必须真的过让位判据，而不是当场 AttributeError。"""
-    from neurova.collaboration.coordination_decorators import glance_yield_check
-    from neurova.collaboration.glance_yield_rules import get_glance_yield_checker
+def testYieldCheckerCheckEndpointAnswersWithTheRealDecision():
+    """`POST /yield-checker/check` 必须真的把判据回出来，而不是 500。
 
-    @glance_yield_check(model_name="gpt-test")
-    async def heavy(agent_id: str = "alice-decorator") -> str:
-        return "done"
+    活体撞出来的：端点手写四个字段时多写了一个 `backoff_round`——`YieldDecision` 全类
+    没有这个字段（全仓仅此一处提到它），于是**唯一在生产里被调的让位端点每次必 500**。
+    装配噪声先排掉：这里直接挂真 router、走真 TestClient，不打鉴权（全局模式默认 off）。
+    """
+    import pytest
+    from fastapi.testclient import TestClient
 
-    checker = asyncio.run(get_glance_yield_checker())
-    before = int(checker.get_stats()["registered_agents"])
+    fastapi = pytest.importorskip("fastapi")
+    from neurova.api.endpoints import coordination_api
 
-    outcome = asyncio.run(heavy())
+    app = fastapi.FastAPI()
+    app.include_router(coordination_api.router, prefix="/api")
+    client = TestClient(app)
 
-    assert outcome == "done"
-    after = int(checker.get_stats()["registered_agents"])
-    assert after == before + 1, (
-        "装饰器没有把这次操作登记进让位判据（registered_agents %d→%d）——"
-        "漏 await 时 `check_yield_rules` 就在 coroutine 对象上 AttributeError，整条支路到不了。"
-        % (before, after)
+    response = client.post(
+        "/api/coordination/yield-checker/check",
+        params={
+            "agent_id": "endpoint-agent",
+            "model_name": "gpt-endpoint",
+            "proposed_operations": ["op-1"],
+        },
     )
+
+    assert response.status_code == 200, (
+        f"端点回 {response.status_code}：{response.text[:200]}"
+    )
+    body = response.json()
+    assert set(body) >= {"should_yield", "reason", "wait_time_seconds"}, body
+    assert body["should_yield"] is False, "全新 agent 第一次问判据不该被让位挡下"

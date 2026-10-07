@@ -85,12 +85,9 @@ async def check_yield_rules(
         conversation_id=conversation_id,
     )
     
-    return {
-        "should_yield": decision.should_yield,
-        "reason": decision.reason.value if decision.reason else None,
-        "wait_time_seconds": decision.wait_time_seconds,
-        "backoff_round": decision.backoff_round,
-    }
+    # 序列化只走 `YieldDecision.to_dict()` 这一份：端点原先手抄四个字段并多写了一个
+    # `backoff_round`（该字段全类不存在，全仓也只有这一行提到它）——于是这个端点每次 500。
+    return decision.to_dict()
 
 
 @router.post("/yield-checker/unregister-agent")

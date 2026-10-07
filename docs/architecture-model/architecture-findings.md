@@ -33,7 +33,7 @@ Pipeline → 深度模块 + `agent_ref`）成立且有 ADR 与守卫支撑；但
 | 情感中枢引擎 | `emotion_context_layer`（memory_layer 中唯一急切装配项 `manager.py:217`） | 已实现 |
 | CogArch 认知架构 | `cognitive_layers/` 138 文件，其中 memory_layer 占 118（86%） | 已实现但重心失衡 |
 | 持续进化 / RSI | `evolution/`（eval / rsi / skill_\*）；事件+启动触发，**无调度器** | 已实现 |
-| **多 Agent 团队协作** | `turn_coordinator.py` 已写好 yield/outbox 规则，但 `get_turn_coordinator()` **零调用方**，未接入 `chat_pipeline` | **能力主张与运行时之间存在缺口** |
+| **多 Agent 团队协作** | 让位执行体已收成一份并可测（`turn_coordinator.requestYieldGate`，P2-8）；同功能的第二份实现 `coordination_decorators.py` 已退役；但闸**仍未接入 `chat_pipeline`**，挂起/人工续跑待落地 | **缺口收窄但未闭合**：并发额度记账已修（旧形态查询即占位、永不释放），回合内强制让位仍差最后一段 |
 | ToolMemory 肌肉记忆 | `tool_layers/` + `chat_pipeline.py:671` Step0.5 工具记忆检查 | 已实现 |
 | 工具系统 / Computer Use | `tool_executor.py`（5159 行）+ `computer_use/` + `skills/` | 已实现 |
 | 贝叶斯 EKI 优化器 | `cognitive_layers/` 内 | 已实现 |
