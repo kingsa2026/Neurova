@@ -14,16 +14,22 @@ from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-# 默认错误日志目录（可被各函数 log_dir 参数覆盖）
-_DEFAULT_LOG_DIR = get_data_root() / "error_logs"
-
 # 锁
 _lock = threading.Lock()
 
 
+def _defaultLogDir() -> Path:
+    """默认错误日志目录。
+
+    刻意不在模块导入期求值：`get_data_root()` 每次调用都重读 `NEUROVA_DATA_DIR`，
+    而导入期绑定会让换数据根（桌面部署、测试隔离、换启动目录）后仍写回旧目录。
+    """
+    return get_data_root() / "error_logs"
+
+
 def _resolve_log_file(log_dir: Optional[str] = None) -> Path:
-    """解析日志文件路径（log_dir 注入优先，默认 data/error_logs/all_errors.log）"""
-    directory = Path(log_dir) if log_dir else _DEFAULT_LOG_DIR
+    """解析日志文件路径（log_dir 注入优先，默认 <数据根>/error_logs/all_errors.log）"""
+    directory = Path(log_dir) if log_dir else _defaultLogDir()
     return directory / "all_errors.log"
 
 
@@ -72,42 +78,41 @@ def write_frontend_errors(
 
     Returns:
         写入的条目数
+
+    Raises:
+        写盘异常原样抛出——这里曾 `except → return 0`，调用方分不清"没东西可写"与
+        "写失败"，于是"已记录"这句谎话有了藏身之处。
     """
     if not errors:
         return 0
 
     with _lock:
-        try:
-            log_file = _resolve_log_file(log_dir)
-            timestamp = datetime.datetime.now().isoformat()
+        log_file = _resolve_log_file(log_dir)
+        timestamp = datetime.datetime.now().isoformat()
 
-            entries = []
-            for error in errors:
-                entries.append(
-                    {
-                        "source": "frontend",
-                        "level": "ERROR",
-                        "timestamp": error.get("timestamp", timestamp),
-                        "type": error.get("type", "unknown"),
-                        "message": error.get("message", ""),
-                        "stack": error.get("stack", ""),
-                        "url": error.get("url", ""),
-                        "line": error.get("line"),
-                        "column": error.get("column"),
-                        "component": error.get("componentName", ""),
-                        "user_agent": error.get("userAgent", ""),
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "metadata": metadata or {},
-                    }
-                )
+        entries = []
+        for error in errors:
+            entries.append(
+                {
+                    "source": "frontend",
+                    "level": "ERROR",
+                    "timestamp": error.get("timestamp", timestamp),
+                    "type": error.get("type", "unknown"),
+                    "message": error.get("message", ""),
+                    "stack": error.get("stack", ""),
+                    "url": error.get("url", ""),
+                    "line": error.get("line"),
+                    "column": error.get("column"),
+                    "component": error.get("componentName", ""),
+                    "user_agent": error.get("userAgent", ""),
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "metadata": metadata or {},
+                }
+            )
 
-            _append_entries(log_file, entries)
-            return len(entries)
-
-        except Exception as e:
-            logger.error("写入前端错误日志失败: %s", e)
-            return 0
+        _append_entries(log_file, entries)
+        return len(entries)
 
 
 def read_all_errors(

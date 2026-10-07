@@ -612,19 +612,72 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
 
 
 def _register_frontend_error_log(app: FastAPI) -> None:
-    """注册前端错误日志收集端点"""
+    """注册前端错误日志收集端点。
+
+    这个面在 `global_auth` 白名单里（匿名写入是设计决定），所以两件事必须成立：
+    ① **状态与事实一致**——只有真写进 JSONL 才回 `logged`（原实现只 `logger.warning`
+    就回 "logged"，客户端被告知已记录而实际什么都没存）；② **限量**——否则任何人都能
+    把这个日志文件撑爆。额度不在此另造一套：全链路唯一的限流执行点是
+    `RateLimitMiddleware`（匿名请求按 client IP 记额），这里只做载荷体量/条数上限。
+    归属只认服务端解析出的身份（`authenticateRequest`，与限流同一份），载荷里的
+    `user_id` 一类字段进不了日志。
+    """
+    import json
+
+    from fastapi import HTTPException
+
+    from neurova import error_logger as _errorLogger
+    from neurova.api.global_auth import authenticateRequest as _authenticateRequest
+
+    maxBodyBytes = 256 * 1024
+    maxEntries = 50
+    maxFieldChars = 8000
+    truncatableFields = ("type", "message", "stack", "url", "userAgent", "componentName")
 
     @app.post("/api/v1/frontend/errors")
     async def log_frontend_error(request: Request):
+        raw = await request.body()
+        if len(raw) > maxBodyBytes:
+            raise HTTPException(status_code=413, detail=f"payload exceeds {maxBodyBytes} bytes")
         try:
-            body = await request.json()
-            logger.warning(
-                f"Frontend error: {body.get('message', 'unknown')}",
-                extra={"frontend_error": body},
+            payload = json.loads(raw) if raw else None
+        except Exception:  # noqa: BLE001 - 客户端错误，不回显解析器细节
+            raise HTTPException(status_code=400, detail="body must be valid JSON") from None
+
+        errors = payload if isinstance(payload, list) else [payload]
+        if not errors or not all(isinstance(item, dict) for item in errors):
+            raise HTTPException(status_code=422, detail="body must be an error object or a list of them")
+        if len(errors) > maxEntries:
+            raise HTTPException(status_code=422, detail=f"too many entries (max {maxEntries})")
+
+        entries = []
+        for item in errors:
+            entry = dict(item)
+            entry.pop("timestamp", None)  # 落盘时间由服务端定，不接受客户端回填
+            for field in truncatableFields:
+                value = entry.get(field)
+                if isinstance(value, str) and len(value) > maxFieldChars:
+                    entry[field] = value[:maxFieldChars]
+                    entry["truncated"] = True  # 截断留痕，不静默改数据
+            entries.append(entry)
+
+        identity = _authenticateRequest(dict(request.headers)) or {}
+        try:
+            written = _errorLogger.write_frontend_errors(
+                entries,
+                user_id=identity.get("user_id"),
+                metadata={"client_ip": request.client.host if request.client else "unknown"},
             )
-            return {"status": "logged"}
-        except Exception as e:
-            return {"status": "error", "detail": str(e)}
+        except Exception as exc:  # noqa: BLE001 - 内部异常文本不回给匿名调用方
+            logger.error("前端错误上报落盘失败: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="error log write failed") from None
+
+        if written != len(entries):
+            logger.error("前端错误上报少写：期望 %d 实得 %d", len(entries), written)
+            raise HTTPException(status_code=500, detail="error log write incomplete")
+
+        logger.warning("前端错误上报已落盘: %d 条", written)
+        return {"status": "logged", "count": written}
 
 
 def _register_metrics_endpoint(app: FastAPI) -> None:
