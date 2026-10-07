@@ -406,6 +406,25 @@
     - **仍现行确认未修**（逐条 grep 复算）：§6-2 `integration_manager.py:383/449` 的 `self._logger` 幻影引用（回滚路径仍被 `except` 吞）；§6-4 `notifications.py:85/119` 仍读 `enhanced_users_api._users_store = {}`（`:73` 空字典原样）；§6-8 三条"依赖缺失仍返回成功"（见该条新记的实测返回值）。
     - **本轮自己造成的台账缺陷已修**：§6-27 的 ①②③④ 曾被排到 §6-28 之后（排版串号，会让读者误归因），以纯行序置换修正并断言置换前后行多重集相等。
 
+32. **env 重定位的落点直接喂 `Path`——空串键把审计流指到进程 CWD（已修 `98e07c70`）** ✅ ——
+   `Path(os.environ.get(K, default))` 有个不显然的语义：**第二参只在键缺失时生效**，键被设成
+   空串时它返回 `""`，`Path("")` 即进程 CWD。`rsi/result_summary.py:89` 就是这样：空串 env 让
+   `attach_persistence` 去 `open('.')`，OSError 被自己的 `except` 吞成"保持内存模式"——运维以为挂了盘，
+   其实一条没写。同文件另一副面孔是相对 env 值跟着启动目录漂。改走 `resolveDataPath`（绝对放行、
+   相对归数据根）。第二处 `evolution/evolution_settings.py:29` 的默认值 `"config/evolution_settings.json"`
+   也是相对字面量——**仓库根那个未跟踪的 `config/evolution_settings.json` 就是它写出来的**；默认值改锚
+   `repoRoot()/config`（与同目录 `cors.json` 同一口径，位置零变动、不迁移既有配置），显式 env 值按
+   `callerPath` 原样承载（与 `governance_settings` 同口径，测试隔离靠这条）。
+   **判据自身的盲点一并补**：`test_runtime_landing_root` 认 `Path(config.get("NEUROVA_.._UPLOADS", "相对名"))`
+   的前提是**键名带路径语义**；而 env 名不含 PATH/DIR、键又是变量间接引用时两个条件都不满足，静默漏过
+   （第二处就是这么活下来的）。扩展为"外层是 Path/open/mkdir 这类路径语境时，兜底字面量本身即证据"，
+   并加反向断言守住边界（`os.environ.get(_MODE_KEY, 'debug')` 这类非落点调用不得被误伤）；扩完全仓
+   1000+ 文件只新增命中 1 处，正是 evolution_settings——不是撒网式误报。教训形态：**判据修的是代码，
+   但判据自己也会漏**，每扩一次判据都要同时写一条"它必须抓到这个形状"的反证。
+   附带一条口径统一：`_ENV_OVERRIDE_KEY` → `ENV_OVERRIDE_KEY`，对齐同职能的 `ENV_SUMMARIES_PATH`/`RECEIPTS_ENV`。
+   **记账更正（我自己又犯过一次）**：`98e07c70` 提交说明写"生产净 +8（+13/-5）"，`git show --numstat`
+   复算实为 **+17**（evolution_settings +11、result_summary +6）——错因是把两个文件的行数粗加成了净值。
+   提交已入库不可改写，以复算值为准；这条与上一轮 "-38 应为 -17" 是同一个病：**净 LOC 只能逐文件 numstat 复算**。
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
@@ -491,6 +510,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `abfe6d6b` | 会话落点两层判据收口：conftest 默认隔离（`_isolateSessionsLanding`，同 `_isolate_agent_workspaces_root` 手法）+ 收尾守卫挡显式改回真实库；8 个测试文件的 chdir/patch 私有方法/相对 env 全部改走单一通道，重复定义收回一处（生产净 0，测试/CI +202）。41 文件 45 errors → **413 passed**，`test_session_archive` 4 failed → 8 passed，api+core A/B 32↔32 逐行一致 | §6-29 闭环，并新增 §6-31 一条环境掩盖面 |
 | `a31851e2` | 台账 commit 号可达性守卫：`scripts/ci/audit_ledger_commit_guard.py`（判据 `merge-base --is-ancestor`，替代号须"标题唯一 + numstat 逐行一致"才给）+ 三判据测试，其中用 `git commit-tree` 现造悬空 commit 自证扫描器咬得住；常驻判定红→绿端到端演过一遍（塞入失效号即红、还原即绿）（生产 0，脚本+测试 +229） | 本报告"号会再次静默失效"的口子闭环（见 §10 回写记录） |
 | `4ef87e3d` | `tests/manual/` 脚本拒在收集之前（`pytest_configure`；`collect_ignore*` 对显式路径实测无效）+ 三道判据，默认收集口径从 pyproject 现值读（生产 0，+155）。全仓收集 **21440、零错误** | §6-31 闭环，脚本自身形态未动（留人裁） |
+| `98e07c70` | env 重定位落点走锚点：空串 env 曾让 RSI 审计流指到进程 CWD（`Path("")`==CWD，OSError 又被吞成"内存模式"），管理配置默认值不再按 CWD 解析（改锚 `repoRoot()/config`，位置零变动）；**并补判据盲点**——键名不带路径语义时 `Path(os.environ.get(变量, "相对名"))` 静默漏过，扩展后加反向断言守住不误伤（生产净 **+17**：evolution_settings +11 / result_summary +6；测试 +102）。HEAD 上的常驻守卫红已消 | §6-32 新增并闭环；§6-26 锚点契约第四、五命中点 |
 
 上表未覆盖的序 1—11 仍按原序待点单。
 
