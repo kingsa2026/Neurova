@@ -43,18 +43,17 @@ def app(tmp_path, monkeypatch):
     from neurova.skills.market_submissions import reset_market_submission_store
 
     reset_market_submission_store()
-    import neurova.api.endpoints.enhanced_users_api as users_api
+    # 管理员必须是真账号：通知枚举只走 UserModel/users.db（与身份链同一事实源），
+    # 过去注入 enhanced_users_api._users_store 是在假契约上自证通过。
+    from tests.unit.api._realAccountFixture import seedAccounts
 
-    monkeypatch.setattr(
-        users_api,
-        "_users_store",
-        {"a9": {"role": "admin", "username": "admin"}, "u1": {"role": "user", "username": "alice"}},
-        raising=False,
+    seeded = seedAccounts(
+        monkeypatch, tmp_path, accounts=(("admin", "admin"), ("alice", "user"))
     )
     a = FastAPI()
     a.include_router(marketplace.router, prefix=BASE)
     with TestClient(a, raise_server_exceptions=False) as c:
-        yield a, c
+        yield a, c, seeded
     reset_market_store()
     reset_market_submission_store()
     notif_module.reset_notification_manager()
@@ -85,7 +84,7 @@ def _submit(c, **overrides):
 
 class TestSkillSubmission:
     def test_submit_creates_pending_and_notifies_admin(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "user")
         resp = _submit(c)
         assert resp.status_code == 200, resp.text
@@ -94,14 +93,14 @@ class TestSkillSubmission:
         assert body["data"]["submitted_by"] == "u1"
         assert body["data"]["submitted_by_name"] == "alice"
 
-        admin_notes = _notifications_for("a9")
+        admin_notes = _notifications_for(seeded["admin"])
         assert any(
             n.notification_type == "skill_review" and n.data.get("skill_id") == "my-tool"
             for n in admin_notes
         ), "用户提交技能后管理员必须收到 skill_review 通知"
 
     def test_submissions_list_admin_only(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "user")
         _submit(c)
         _auth(c, "admin")
@@ -115,7 +114,7 @@ class TestSkillSubmission:
         assert c.get(f"{BASE}/skill-submissions").status_code == 403
 
     def test_review_approve_publishes_and_notifies(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "user")
         sub_id = _submit(c).json()["data"]["id"]
 
@@ -133,7 +132,7 @@ class TestSkillSubmission:
         assert notes and notes[0].data.get("approve") is True, "通过后提交者必须收到回执"
 
     def test_review_reject_does_not_publish(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "user")
         sub_id = _submit(c).json()["data"]["id"]
 
@@ -149,7 +148,7 @@ class TestSkillSubmission:
         assert any("README" in (n.message or "") for n in notes)
 
     def test_duplicate_skill_id_conflict(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "user")
         assert _submit(c).status_code == 200
         assert _submit(c).status_code == 409, "重复 skill_id 提交须 409"
@@ -161,14 +160,14 @@ class TestSkillSubmission:
         assert _submit(c, skill_id="taken").status_code == 409
 
     def test_unauthenticated_submit_401(self, app):
-        _a, c = app
+        _a, c, seeded = app
         c.app.dependency_overrides.pop(get_current_user, None)
         assert _submit(c).status_code == 401
 
 
 class TestMarketUpdateNotify:
     def test_version_update_notification_reaches_unified_endpoint(self, app):
-        _a, c = app
+        _a, c, seeded = app
         _auth(c, "admin")
         r = c.put(
             f"{BASE}/skills/web-search", json={"version": "9.9.9"}
@@ -176,9 +175,10 @@ class TestMarketUpdateNotify:
         assert r.status_code == 200, r.text
 
         _auth(c, "user")
-        resp = c.get("/api/v1/notifications") if False else None
-        # 走统一通知管理器断言（端点契约由 test_notifications_service 覆盖）
-        notes = _notifications_for("u1")
+        # 走统一通知管理器断言（端点契约由 test_notifications_service 覆盖）。
+        # 收件人必须是**真账号 id**——notify_all_users 现在枚举 users.db，
+        # 拿旧注入字典里的 "u1" 去查，查到的是不存在的人。
+        notes = _notifications_for(seeded["alice"])
         assert any(
             n.notification_type == "market_update" and n.data.get("skill_id") == "web-search"
             for n in notes
