@@ -276,6 +276,33 @@ async def websocket_sync(
 # ---------------------------------------------------------------------------
 
 
+def _callerUserId(current_user: Dict[str, Any]) -> str:
+    """调用者身份只取 **token 主体**。
+
+    与本文件已修的 S-03 两处同形（`create_session` 的 `owner_id`、WS 的
+    `payload.get("neuser_id")`）：`user_id` 一旦还能由客户端指定，"归属校验"就
+    只是把调用者自报的键拿来比对——等于没有校验。
+    """
+    return str(current_user.get("user_id") or "anonymous")
+
+
+def _requireSessionOwnership(session, current_user: Dict[str, Any]) -> None:
+    """会话归属比对——**转交** console 那份唯一实现，本文件不写比较式。
+
+    为什么不在这里 `if session.user_id != caller`：那句比较在仓内已经有一份
+    （`console.py:_check_session_ownership`，含"空属主=共享"这条既有语义）。
+    复制一份到 sync 面，两条链就会各自漂移——而漂移的方向是**放宽**，
+    因为 sync 面的会话由 `chat_pipeline.py:558` 用 chat 的 `ctx.session_id`
+    注册，两边共用同一个 id 命名空间，本该同解。
+    """
+    from neurova.api.endpoints.console import _check_session_ownership
+
+    _check_session_ownership(
+        {"user_id": getattr(session, "user_id", "") or ""},
+        _callerUserId(current_user),
+    )
+
+
 @router.post("/sessions", response_model=SessionResponse)
 async def create_session(
     body: CreateSessionRequest, current_user: Dict[str, Any] = Depends(get_current_user)
@@ -296,12 +323,14 @@ async def create_session(
 async def get_session(
     session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """获取会话信息"""
+    """获取会话信息（S-03 补全：归属取 token 主体，比对转交唯一实现）"""
     manager = get_session_sync_manager()
     session = manager.get_session(session_id)
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    _requireSessionOwnership(session, current_user)
 
     return SessionResponse(**session.to_dict())
 
@@ -310,12 +339,14 @@ async def get_session(
 async def get_session_history(
     session_id: str, limit: int = 100, current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """获取会话历史"""
+    """获取会话历史（S-03 补全：这里返回的是**消息正文**，原来任何登录用户可读任何人）"""
     manager = get_session_sync_manager()
     session = manager.get_session(session_id)
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    _requireSessionOwnership(session, current_user)
 
     history = session.get_history(limit=limit)
 
@@ -330,12 +361,18 @@ async def send_message(
     发送消息（REST 降级方案）
 
     当 WebSocket 不可用时，可以使用此端点发送消息。
+
+    S-03 补全：这一条原来不只是"读得到"，而是**写进他人会话并推送到其活动通道**
+    （`broadcast_event` 会把事件下发给该会话所有已注册通道），所以归属校验必须
+    排在广播之前。
     """
     manager = get_session_sync_manager()
     session = manager.get_session(session_id)
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    _requireSessionOwnership(session, current_user)
 
     # 创建事件
     event = SessionEvent(
@@ -352,9 +389,22 @@ async def send_message(
 
 
 @router.delete("/sessions/{session_id}")
-async def end_session(session_id: str):
-    """结束会话"""
+async def end_session(
+    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """结束会话
+
+    S-03 补全：原来**连身份依赖都没有**。`NEUROVA_GLOBAL_AUTH` 未设置时
+    `get_global_auth_mode()` 回落 `MODE_OFF`，全局兜底中间件不在路上，
+    于是这是一个匿名可达的破坏面——任何人都能结束任何人的会话。
+    """
     manager = get_session_sync_manager()
+    session = manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _requireSessionOwnership(session, current_user)
 
     if not manager.end_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
@@ -363,10 +413,24 @@ async def end_session(session_id: str):
 
 
 @router.get("/sessions")
-async def list_sessions(user_id: Optional[str] = None, agent_id: Optional[str] = None, status: Optional[str] = None):
-    """列出会话"""
+async def list_sessions(
+    agent_id: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """列出会话（S-03 补全）。
+
+    原来既无身份依赖，又把 `user_id` 做成**调用方可指定的查询参数**——两者合起来
+    等于"匿名按用户名拉取任意用户的整张会话表"。现在过滤器由 token 主体给出，
+    不再接受外部传入：`user_id` 这个查询参数被删除而不是"保留但校验"，因为
+    "校验你能不能看别人的" 需要的角色口径在本仓只有一处定义
+    （`agent_access.can_access_agent` 里的 admin 分支），此处不新造第二份
+    （管理员全量可见若确有需要，是另一次把那份角色口径接进来的改动，已登记台账）。
+    """
     manager = get_session_sync_manager()
-    sessions = manager.list_sessions(user_id=user_id, agent_id=agent_id, status=status)
+    sessions = manager.list_sessions(
+        user_id=_callerUserId(current_user), agent_id=agent_id, status=status
+    )
 
     return {"total": len(sessions), "sessions": [s.to_dict() for s in sessions]}
 
@@ -379,11 +443,27 @@ async def get_statistics():
 
 
 @router.get("/connections")
-async def get_connections():
-    """获取活跃 WebSocket 连接信息"""
+async def get_connections(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取活跃 WebSocket 连接信息
+
+    S-03 补全：原来匿名可枚举**所有在线会话的 session_id**——那既是隐私面，
+    也是其余四条端点的 id 来源（拿到 id 就能打 `/sessions/{id}/history`）。
+
+    过滤走 `manager.list_sessions(user_id=...)` 那一道**已有的**归属过滤，
+    不在本文件写比较式：写出来就是第二份口径，而且换个变量名去比（拿局部变量
+    `caller` 之类）还能绕过"只数归属比较那一句"的守卫——本仓加那条守卫的理由
+    正是这个。
+    `_ws_connections` 里有、但不在调用者会话清单里的连接**不列出**：
+    宁可少给一条运维读数，不给外人一个 id。
+    """
+    caller = _callerUserId(current_user)
+    manager = get_session_sync_manager()
+    ownedIds = {s.session_id for s in manager.list_sessions(user_id=caller)}
     connections = []
 
     for session_id, conns in _ws_connections.items():
+        if session_id not in ownedIds:
+            continue
         for conn in conns:
             connections.append(
                 {
