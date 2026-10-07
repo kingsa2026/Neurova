@@ -16,13 +16,13 @@
 | `NeurUI/src/api/modules/agent-communication.ts` | `/agent-communication` | 是 | 1 |
 | `NeurUI/src/api/modules/agent-enhancement.ts` | `/agent-enhancement` | 是 | 1 |
 | `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 是 | 1 |
-| `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 4 |
+| `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 3 |
 | `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
 | `NeurUI/src/api/modules/builder.ts` | `/builder` | 是 | 1 |
-| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 13 |
+| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 14 |
 | `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
-| `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 2 |
+| `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 3 |
 | `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 7 |
 | `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
 | `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
@@ -69,7 +69,7 @@
 | `NeurUI/src/api/modules/teams.ts` | `/teams` | 是 | 2 |
 | `NeurUI/src/api/modules/text-evolution.ts` | `/evolution` | **否** | 2 |
 | `NeurUI/src/api/modules/tool-layers.ts` | `/tool-layers` | 是 | 2 |
-| `NeurUI/src/api/modules/trace.ts` | `/trace` | 是 | 2 |
+| `NeurUI/src/api/modules/trace.ts` | `/trace` | 是 | 4 |
 | `NeurUI/src/api/modules/webhooks.ts` | `/webhooks` | 是 | 1 |
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
