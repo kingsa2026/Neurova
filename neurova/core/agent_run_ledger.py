@@ -150,7 +150,8 @@ class AgentRunLedger:
         """续租（内部 5s 节流；主循环每轮调用，空闲时 15s ping 分支保底）。
 
         `force=True` 供让位等待期使用：那种等待按拍板可长到 200s，节流会让整段等待
-        一次租都不续，`reconcile_stale` 便把这条 run 误杀成 failed。
+        一次租都不续，`reconcile_stale` 便把这条 run 误杀成 failed。扫描已是现役周期
+        任务（app lifespan 起，间隔 = 租约/3），所以"等待期不续租"不再是理论风险。
         """
         if self.run_id is None:
             return

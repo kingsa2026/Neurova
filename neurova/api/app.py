@@ -1096,6 +1096,15 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("生成任务恢复轮询启动失败: %s", e)
 
+    # AgentRun 租约过期周期扫描：启动收敛只管「重启过」的遗留行，进程活着而某轮
+    # 工作卡死的 run 靠这条才收敛（否则 heartbeat/lease 只写不读）
+    try:
+        from neurova.core.agent_run_store import startStaleSweep
+
+        startStaleSweep()
+    except Exception as e:
+        logger.warning("AgentRun 租约扫描启动失败: %s", e)
+
     # 批次4：内置短剧一键成片模板种子入工作流库（幂等；AIGC 页实例化消费）
     try:
         from neurova.collaboration.neurflow.storage import NeurflowStorage
@@ -1171,6 +1180,14 @@ async def _on_shutdown(app_state: AppState) -> None:
         await stop_generation_recovery()
     except Exception as e:
         logger.warning("generation recovery shutdown error: %s", e)
+
+    # 停止 AgentRun 租约扫描：不显式收敛的常驻 task 会让退出路径走满超时
+    try:
+        from neurova.core.agent_run_store import stopStaleSweep
+
+        await stopStaleSweep()
+    except Exception as e:
+        logger.warning("AgentRun 租约扫描停止异常: %s", e)
 
     # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:
