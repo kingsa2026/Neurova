@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .models import AgentRole, TaskStep, TemplateType, WorkflowDefinition
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -357,17 +358,16 @@ class TemplateManager:
 _global_template_manager: Optional[TemplateManager] = None
 
 
+@lazySingleton("_global_template_manager")
 def get_template_manager() -> TemplateManager:
-    """获取全局模板管理器"""
-    global _global_template_manager
-    if _global_template_manager is None:
-        _global_template_manager = TemplateManager()
-        # 注册预设模板
-        try:
-            from .preset_templates import PRESET_TEMPLATES
+    """获取全局模板管理器（判空与构造由 `core.lazy_singleton` 的双检锁护住）"""
+    manager = TemplateManager()
+    # 注册预设模板
+    try:
+        from .preset_templates import PRESET_TEMPLATES
 
-            for template in PRESET_TEMPLATES:
-                _global_template_manager.register_template(template)
-        except ImportError:
-            logger.warning("预设模板模块未找到，跳过预设模板注册")
-    return _global_template_manager
+        for template in PRESET_TEMPLATES:
+            manager.register_template(template)
+    except ImportError:
+        logger.warning("预设模板模块未找到，跳过预设模板注册")
+    return manager

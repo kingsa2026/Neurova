@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -573,8 +574,6 @@ class RBACManager:
 _rbac_manager: Optional[RBACManager] = None
 
 
+@lazySingleton("_rbac_manager")
 def get_rbac_manager(db_path: Optional[str] = None) -> RBACManager:
-    global _rbac_manager
-    if _rbac_manager is None:
-        _rbac_manager = RBACManager(db_path)
-    return _rbac_manager
+    return RBACManager(db_path)

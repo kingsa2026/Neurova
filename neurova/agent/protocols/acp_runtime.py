@@ -31,6 +31,7 @@ from neurova.agent.protocols.message_protocol import (
     DeadLetterReason,
     MessageType,
 )
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -272,11 +273,9 @@ def _schedule_async_handler(coro, original: AgentMessage, on_done: Callable) -> 
 _acp_runtime_instance: Optional[ACPRuntime] = None
 
 
+@lazySingleton("_acp_runtime_instance")
 def get_acp_runtime() -> ACPRuntime:
-    global _acp_runtime_instance
-    if _acp_runtime_instance is None:
-        _acp_runtime_instance = ACPRuntime()
-    return _acp_runtime_instance
+    return ACPRuntime()
 
 
 def reset_acp_runtime() -> None:

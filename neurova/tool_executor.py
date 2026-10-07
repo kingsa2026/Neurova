@@ -16,6 +16,7 @@ ToolExecutor — 统一工具执行器
 import ast
 import asyncio
 import json
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.builtin_tools import get_builtin_tool_params
 from neurova.collaboration.canvas_ops import (
     CanvasOpError,
@@ -252,18 +253,17 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     return tool_name
 
 
+@lazySingleton("_ToolEngine")
 def _get_tool_engine_class():
-    """延迟导入 ToolEngine 类"""
-    global _TOOL_ENGINE_AVAILABLE, _ToolEngine
-    if _ToolEngine is None:
-        try:
-            from neurova.execution_engine.tool_engine import ToolEngine
-
-            _ToolEngine = ToolEngine
-            _TOOL_ENGINE_AVAILABLE = True
-        except ImportError:
-            _TOOL_ENGINE_AVAILABLE = False
-    return _ToolEngine
+    """延迟导入 ToolEngine 类（不可用时返回 None，下次照旧重试）"""
+    global _TOOL_ENGINE_AVAILABLE
+    try:
+        from neurova.execution_engine.tool_engine import ToolEngine
+    except ImportError:
+        _TOOL_ENGINE_AVAILABLE = False
+        return None
+    _TOOL_ENGINE_AVAILABLE = True
+    return ToolEngine
 
 
 def _get_approval_manager():

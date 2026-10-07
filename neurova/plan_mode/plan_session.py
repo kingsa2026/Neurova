@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.plan_mode.errors import PlanError, PlanDocError, PlanLLMError, PlanStateError
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -373,12 +374,10 @@ class PlanSessionManager:
 _manager_singleton: Optional[PlanSessionManager] = None
 
 
+@lazySingleton("_manager_singleton")
 def get_plan_session_manager() -> PlanSessionManager:
     """进程级单例（惰性创建）。"""
-    global _manager_singleton
-    if _manager_singleton is None:
-        _manager_singleton = PlanSessionManager()
-    return _manager_singleton
+    return PlanSessionManager()
 
 
 def reset_plan_session_manager() -> None:

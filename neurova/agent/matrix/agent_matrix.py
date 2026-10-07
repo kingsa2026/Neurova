@@ -18,6 +18,7 @@ from ..protocols.capability_discovery import (
     CapabilityLevel,
     get_capability_discovery,
 )
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -554,9 +555,7 @@ class MatrixRenderer:
 _global_matrix: Optional[AgentMatrix] = None
 
 
+@lazySingleton("_global_matrix")
 def get_agent_matrix() -> AgentMatrix:
     """获取全局能力矩阵"""
-    global _global_matrix
-    if _global_matrix is None:
-        _global_matrix = AgentMatrix()
-    return _global_matrix
+    return AgentMatrix()

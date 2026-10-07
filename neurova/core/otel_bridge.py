@@ -26,6 +26,7 @@ import threading
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -265,12 +266,10 @@ class _NeurflowOtelBridge:
 _neurflow_bridge: Optional[_NeurflowOtelBridge] = None
 
 
+@lazySingleton("_neurflow_bridge")
 def get_neurflow_bridge() -> _NeurflowOtelBridge:
     """neurflow 事件桥单例（事件订阅方）"""
-    global _neurflow_bridge
-    if _neurflow_bridge is None:
-        _neurflow_bridge = _NeurflowOtelBridge()
-    return _neurflow_bridge
+    return _NeurflowOtelBridge()
 
 
 # ── 装配 / 卸载 ───────────────────────────────────────────────

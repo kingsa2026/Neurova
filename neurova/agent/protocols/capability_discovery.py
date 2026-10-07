@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
+from neurova.core.lazy_singleton import lazySingleton
 
 
 logger = get_logger(__name__)
@@ -442,9 +443,7 @@ class CapabilityDiscovery:
 _global_discovery: Optional[CapabilityDiscovery] = None
 
 
+@lazySingleton("_global_discovery")
 def get_capability_discovery() -> CapabilityDiscovery:
     """获取全局能力发现服务"""
-    global _global_discovery
-    if _global_discovery is None:
-        _global_discovery = CapabilityDiscovery()
-    return _global_discovery
+    return CapabilityDiscovery()

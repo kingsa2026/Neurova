@@ -8,6 +8,7 @@ from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -400,12 +401,10 @@ class VariableResolver:
 _variable_resolver: Optional[VariableResolver] = None
 
 
+@lazySingleton("_variable_resolver")
 def get_variable_resolver() -> VariableResolver:
     """获取变量解析器单例"""
-    global _variable_resolver
-    if _variable_resolver is None:
-        _variable_resolver = VariableResolver()
-    return _variable_resolver
+    return VariableResolver()
 
 
 __all__ = ["ResolutionContext", "ResolvedValue", "VariableResolver", "get_variable_resolver"]

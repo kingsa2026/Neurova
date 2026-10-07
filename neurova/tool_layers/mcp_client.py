@@ -19,6 +19,7 @@ import threading
 import typing
 
 from neurova.tool_layers.mcp_config import validate_mcp_server_config
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -692,12 +693,10 @@ class MCPToolClient:
 _mcp_client_instance: typing.Optional[MCPToolClient] = None
 
 
+@lazySingleton("_mcp_client_instance")
 def get_mcp_client(user_id: typing.Optional[str] = None) -> MCPToolClient:
     """获取进程级 MCP 客户端单例（neurflow 等模块的统一入口）"""
-    global _mcp_client_instance
-    if _mcp_client_instance is None:
-        _mcp_client_instance = MCPToolClient(user_id=user_id)
-    return _mcp_client_instance
+    return MCPToolClient(user_id=user_id)
 
 
 def peek_mcp_client() -> typing.Optional[MCPToolClient]:

@@ -19,6 +19,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -493,6 +494,8 @@ class MediaStorageConfigManager:
 
 # 全局实例
 _config_manager: Optional[MediaStorageConfigManager] = None
+# 懒建单例的双检锁（AGENTS.md §3）
+_configManagerLock = threading.RLock()
 
 
 def get_media_storage_config(agent_id: str) -> MediaStorageConfig:
@@ -508,19 +511,18 @@ def get_media_storage_config(agent_id: str) -> MediaStorageConfig:
     global _config_manager
 
     if _config_manager is None:
-        _config_manager = MediaStorageConfigManager()
+        with _configManagerLock:
+            if _config_manager is None:
+                _config_manager = MediaStorageConfigManager()
 
     return _config_manager.get_config(agent_id)
 
 
+@lazySingleton("_config_manager")
 def get_media_storage_config_manager() -> MediaStorageConfigManager:
     """获取媒体存储配置管理器"""
-    global _config_manager
 
-    if _config_manager is None:
-        _config_manager = MediaStorageConfigManager()
-
-    return _config_manager
+    return MediaStorageConfigManager()
 
 
 def reset_media_storage_config_manager() -> None:

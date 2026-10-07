@@ -16,6 +16,7 @@ Neurflow 工作流模板
 from typing import Dict, List, Optional
 
 from ..models import WorkflowDefinition
+from neurova.core.lazy_singleton import lazySingleton
 
 
 class TemplateRegistry:
@@ -114,14 +115,11 @@ def seed_short_drama_template(storage) -> bool:
         return False
 
 
+@lazySingleton("_template_registry_instance")
 def get_template_registry() -> TemplateRegistry:
     """获取模板注册表单例"""
-    global _template_registry_instance
 
-    if _template_registry_instance is None:
-        _template_registry_instance = TemplateRegistry()
-
-    return _template_registry_instance
+    return TemplateRegistry()
 
 
 def reset_template_registry() -> None:

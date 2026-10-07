@@ -16,6 +16,7 @@ from neurova.sync.session_sync_manager import (
     SessionSyncManager,
     get_session_sync_manager,
 )
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -58,11 +59,9 @@ class RoomBus:
 _bus: Optional[RoomBus] = None
 
 
+@lazySingleton("_bus")
 def get_room_bus() -> RoomBus:
-    global _bus
-    if _bus is None:
-        _bus = RoomBus()
-    return _bus
+    return RoomBus()
 
 
 def reset_room_bus() -> None:

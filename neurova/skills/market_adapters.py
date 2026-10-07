@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -584,6 +585,7 @@ class SkillMarketRegistry:
 _global_registry: Optional[SkillMarketRegistry] = None
 
 
+@lazySingleton("_global_registry")
 def get_market_registry() -> SkillMarketRegistry:
     """
     获取全局市场注册表
@@ -591,10 +593,7 @@ def get_market_registry() -> SkillMarketRegistry:
     Returns:
         SkillMarketRegistry: 全局注册表实例
     """
-    global _global_registry
-    if _global_registry is None:
-        _global_registry = SkillMarketRegistry()
-    return _global_registry
+    return SkillMarketRegistry()
 
 
 # 需要导入 json 模块

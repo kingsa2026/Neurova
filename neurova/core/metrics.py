@@ -33,6 +33,7 @@ from prometheus_client import (
     Gauge,
     Histogram,
 )
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -741,12 +742,10 @@ def observe_capability_gap(kinds) -> None:
     get_metrics().observe_capability_gap(kinds)
 
 
+@lazySingleton("_metrics")
 def get_metrics() -> _Metrics:
     """进程级单例（重复调用返回同实例，防 prometheus 重复注册）。"""
-    global _metrics
-    if _metrics is None:
-        _metrics = _Metrics()
-    return _metrics
+    return _Metrics()
 
 
 def record_db_connection_created(db_path: str) -> None:

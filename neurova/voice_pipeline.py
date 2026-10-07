@@ -17,6 +17,7 @@ from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -317,12 +318,10 @@ class UnifiedVoicePipeline:
 _pipeline_instance: Optional[UnifiedVoicePipeline] = None
 
 
+@lazySingleton("_pipeline_instance")
 def get_voice_pipeline() -> UnifiedVoicePipeline:
     """获取 UnifiedVoicePipeline 单例"""
-    global _pipeline_instance
-    if _pipeline_instance is None:
-        _pipeline_instance = UnifiedVoicePipeline()
-    return _pipeline_instance
+    return UnifiedVoicePipeline()
 
 
 def reset_voice_pipeline():

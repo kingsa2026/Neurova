@@ -23,6 +23,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 if TYPE_CHECKING:
     from .store_connections import StoreCredentials
@@ -620,11 +621,9 @@ def _parse_size(size: str):
 _image_gen_instance: Optional[ImageGenClient] = None
 
 
+@lazySingleton("_image_gen_instance")
 def get_image_gen_client() -> ImageGenClient:
-    global _image_gen_instance
-    if _image_gen_instance is None:
-        _image_gen_instance = ImageGenClient()
-    return _image_gen_instance
+    return ImageGenClient()
 
 
 def reset_image_gen_client() -> None:
@@ -645,11 +644,9 @@ async def _sleep(seconds: float) -> None:
 _video_gen_instance: Optional[VideoGenClient] = None
 
 
+@lazySingleton("_video_gen_instance")
 def get_video_gen_client() -> VideoGenClient:
-    global _video_gen_instance
-    if _video_gen_instance is None:
-        _video_gen_instance = VideoGenClient()
-    return _video_gen_instance
+    return VideoGenClient()
 
 
 def reset_video_gen_client() -> None:
@@ -665,11 +662,9 @@ def reset_video_gen_client() -> None:
 _amazon_sp_instance: Optional[AmazonSPAPIClient] = None
 
 
+@lazySingleton("_amazon_sp_instance")
 def get_amazon_sp_client() -> AmazonSPAPIClient:
-    global _amazon_sp_instance
-    if _amazon_sp_instance is None:
-        _amazon_sp_instance = AmazonSPAPIClient()
-    return _amazon_sp_instance
+    return AmazonSPAPIClient()
 
 
 def reset_amazon_sp_client() -> None:
@@ -685,11 +680,9 @@ def reset_amazon_sp_client() -> None:
 _amazon_ads_instance: Optional[AmazonAdsClient] = None
 
 
+@lazySingleton("_amazon_ads_instance")
 def get_amazon_ads_client() -> AmazonAdsClient:
-    global _amazon_ads_instance
-    if _amazon_ads_instance is None:
-        _amazon_ads_instance = AmazonAdsClient()
-    return _amazon_ads_instance
+    return AmazonAdsClient()
 
 
 def reset_amazon_ads_client() -> None:
@@ -1344,11 +1337,9 @@ class CommercePlatformClient:
 _commerce_instance: Optional[CommercePlatformClient] = None
 
 
+@lazySingleton("_commerce_instance")
 def get_commerce_platform_client() -> CommercePlatformClient:
-    global _commerce_instance
-    if _commerce_instance is None:
-        _commerce_instance = CommercePlatformClient()
-    return _commerce_instance
+    return CommercePlatformClient()
 
 
 def reset_commerce_platform_client() -> None:
@@ -1406,11 +1397,9 @@ class PublishPlatformClient:
 _publish_instance: Optional[PublishPlatformClient] = None
 
 
+@lazySingleton("_publish_instance")
 def get_publish_platform_client() -> PublishPlatformClient:
-    global _publish_instance
-    if _publish_instance is None:
-        _publish_instance = PublishPlatformClient()
-    return _publish_instance
+    return PublishPlatformClient()
 
 
 def reset_publish_platform_client() -> None:

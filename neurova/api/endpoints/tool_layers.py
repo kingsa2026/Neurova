@@ -26,6 +26,7 @@ from neurova.api.auth import get_current_user
 from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
 from neurova.security.url_guard import assert_public_url
 from neurova.tool_layers.mcp_config import validate_mcp_server_config
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -37,12 +38,10 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 _tool_engine: Optional[ToolEngine] = None
 
 
+@lazySingleton("_tool_engine")
 def get_tool_engine() -> ToolEngine:
     """获取 ToolEngine 单例"""
-    global _tool_engine
-    if _tool_engine is None:
-        _tool_engine = ToolEngine()
-    return _tool_engine
+    return ToolEngine()
 
 
 class MCPServerInfo(BaseModel):

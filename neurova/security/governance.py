@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.sandbox.exec_sandbox import SandboxSeverity, execute_in_sandbox
 from neurova.security.shell_normalization import normalize_posix_line_continuations
 from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEngine
@@ -610,16 +611,14 @@ def _default_whitelist_path() -> Path:
     return Path.home() / ".neurova" / "config" / "governance_whitelist.json"
 
 
+@lazySingleton("_governance_instance")
 def get_governance() -> GovernancePolicy:
-    global _governance_instance
-    if _governance_instance is None:
-        # 产品语义: 高风险操作默认询问用户（弹窗确认），而非静默沙箱。
-        # 库级默认（ask_on_high=False）保持沙箱语义，供测试/嵌入场景使用。
-        _governance_instance = GovernancePolicy(
-            whitelist_path=_default_whitelist_path(),
-            ask_on_high=True,
-        )
-    return _governance_instance
+    # 产品语义: 高风险操作默认询问用户（弹窗确认），而非静默沙箱。
+    # 库级默认（ask_on_high=False）保持沙箱语义，供测试/嵌入场景使用。
+    return GovernancePolicy(
+        whitelist_path=_default_whitelist_path(),
+        ask_on_high=True,
+    )
 
 
 def reset_governance() -> None:

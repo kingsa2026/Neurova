@@ -6,6 +6,7 @@
 
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -226,6 +227,7 @@ class EmotionAnalyzerAdapter:
 _adapter: Optional[EmotionAnalyzerAdapter] = None
 
 
+@lazySingleton("_adapter")
 def get_emotion_analyzer(use_legacy: bool = False) -> EmotionAnalyzerAdapter:
     """
     获取情感分析器（工厂函数）
@@ -236,9 +238,4 @@ def get_emotion_analyzer(use_legacy: bool = False) -> EmotionAnalyzerAdapter:
     Returns:
         情感分析器适配器
     """
-    global _adapter
-
-    if _adapter is None:
-        _adapter = EmotionAnalyzerAdapter(use_legacy=use_legacy)
-
-    return _adapter
+    return EmotionAnalyzerAdapter(use_legacy=use_legacy)

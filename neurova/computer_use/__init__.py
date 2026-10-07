@@ -14,7 +14,9 @@ Computer Use 能力 v1.0.0-beta1 - 浏览器自动化增强版（集成 browser-
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 import contextvars
+import threading
 import os
 import typing
 
@@ -97,6 +99,8 @@ class ComputerUseManager:
     """计算机使用管理器 - 整合桌面操作、文件操作和浏览器操作"""
 
     _instance: typing.Optional["ComputerUseManager"] = None
+    # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    _instanceLock = threading.RLock()
 
     def __new__(
         cls,
@@ -104,8 +108,10 @@ class ComputerUseManager:
         config_path: typing.Optional[str] = None,
     ):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instanceLock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(
@@ -660,6 +666,14 @@ def get_active_remote_desktop() -> typing.Any:
     return _active_remote_desktop.get()
 
 
+@lazySingleton("_manager")
+def _computerUseManagerInstance(
+    config: typing.Dict[str, typing.Any] = None,
+    config_path: typing.Optional[str] = None,
+) -> "ComputerUseManager":
+    return ComputerUseManager(config, config_path)
+
+
 def get_computer_use_manager(
     config: typing.Dict[str, typing.Any] = None,
     config_path: typing.Optional[str] = None,
@@ -672,10 +686,7 @@ def get_computer_use_manager(
     remote = _active_remote_desktop.get()
     if remote is not None:
         return remote
-    global _manager
-    if _manager is None:
-        _manager = ComputerUseManager(config, config_path)
-    return _manager
+    return _computerUseManagerInstance(config, config_path)
 
 
 def reset_computer_use_manager() -> None:

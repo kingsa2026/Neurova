@@ -85,12 +85,16 @@ class LLMRouter:
     """
 
     _instance: Optional["LLMRouter"] = None
+    # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    _instanceLock = threading.RLock()
 
     def __new__(cls) -> "LLMRouter":
         """单例模式"""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instanceLock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):

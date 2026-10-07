@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -120,11 +121,9 @@ class ComfyUIClient:
 _comfyui_client_instance: Optional[ComfyUIClient] = None
 
 
+@lazySingleton("_comfyui_client_instance")
 def get_comfyui_client() -> ComfyUIClient:
-    global _comfyui_client_instance
-    if _comfyui_client_instance is None:
-        _comfyui_client_instance = ComfyUIClient()
-    return _comfyui_client_instance
+    return ComfyUIClient()
 
 
 def reset_comfyui_client() -> None:

@@ -39,6 +39,7 @@ from neurova.api.auth import (
 from neurova.auth.invitation_code import InvitationCodeModel
 from neurova.auth.user_model import UserModel
 from neurova.auth.verification_code import VerificationCodeModel, VerificationType
+from neurova.core.lazy_singleton import lazySingleton
 
 # Token 黑名单（生产环境应使用 Redis 或数据库）
 # BUG AUDIT S-21: 原 set 只增不减、无界增长 → 改为 token -> 过期时间戳 dict，
@@ -80,28 +81,22 @@ _verification_code_model: Optional[VerificationCodeModel] = None
 _invitation_code_model: Optional[InvitationCodeModel] = None
 
 
+@lazySingleton("_user_model")
 def _get_user_model() -> UserModel:
     """获取用户模型实例"""
-    global _user_model
-    if _user_model is None:
-        _user_model = UserModel()
-    return _user_model
+    return UserModel()
 
 
+@lazySingleton("_verification_code_model")
 def _get_verification_code_model() -> VerificationCodeModel:
     """获取验证码模型实例"""
-    global _verification_code_model
-    if _verification_code_model is None:
-        _verification_code_model = VerificationCodeModel()
-    return _verification_code_model
+    return VerificationCodeModel()
 
 
+@lazySingleton("_invitation_code_model")
 def _get_invitation_code_model() -> InvitationCodeModel:
     """获取邀请码模型实例"""
-    global _invitation_code_model
-    if _invitation_code_model is None:
-        _invitation_code_model = InvitationCodeModel()
-    return _invitation_code_model
+    return InvitationCodeModel()
 
 
 class LoginRequest(BaseModel):

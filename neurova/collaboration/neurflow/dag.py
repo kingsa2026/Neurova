@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 from .models import WorkflowEdge, WorkflowNode
+from neurova.core.lazy_singleton import lazySingleton
 
 
 @dataclass
@@ -293,12 +294,10 @@ class DAGValidator:
 _dag_validator: Optional[DAGValidator] = None
 
 
+@lazySingleton("_dag_validator")
 def get_dag_validator() -> DAGValidator:
     """获取 DAG 验证器单例"""
-    global _dag_validator
-    if _dag_validator is None:
-        _dag_validator = DAGValidator()
-    return _dag_validator
+    return DAGValidator()
 
 
 __all__ = [
