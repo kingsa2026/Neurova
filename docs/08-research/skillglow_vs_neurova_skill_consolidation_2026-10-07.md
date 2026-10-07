@@ -54,7 +54,7 @@
 | P1-2 | 整合计划召回预检 + **全自动 commit gate**(治理开关默认开,fail-closed 多检) | `skill_consolidator` + `skill_injection.routing_sanity_check` + `governance_settings` | 本轮 |
 | P1-3 | 去实例化压缩纪律:结晶 LLM 裁决与经验重建提示词增加"适用条件+核心过程+失败模式,剥除任务特定常数"判据 | `pattern_crystallizer.review_pending_with_llm` + `skill_experience` 组合路径 | 本轮 |
 | P2-5 | `ConsolidationPlanStore` 溢出留痕计数(对齐工单 016 口径) | 同文件 | 本轮 |
-| P2-4 | 文本进化接受阈值加无技能锚/历史最优锚(A = max(V⋆, V_ns) − ε) | `eval/runner` accept_threshold 组装处 | 登记 |
+| P2-4 | 锚定地板:接受判据加 A = max(历史最优留出, 无技能基线) − accept_threshold;台账补记绝对留出分作锚的历史来源(自然预热,不造第二份账本) | `eval/runner` 判定 2.2 + `eval/service.best_anchor_from_ledger` + `EvolutionConfig.anchor_floor_enabled` | 本轮 |
 | P3 | 语义族第二计划源(嵌入多视图+LLM 成对判,只产计划进审批) | consolidator 第二来源 | 登记 |
 | — | 规则修订登记 | 本文 §0 + `skill_consolidator` 模块文档 + `skill_review_gate` 覆盖清单注记 | 本轮 |
 

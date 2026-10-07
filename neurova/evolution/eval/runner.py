@@ -29,6 +29,8 @@ logger = get_logger(__name__)
 _EPS = 1e-9
 # 每轮反射分析取评分最低的用例数(控制 LLM 成本)
 _MAX_FAILURES = 3
+# 无技能臂文本(P2-4 锚定地板):空正文 = "不带该技能"的第一性下限
+_NO_SKILL_TEXT = ""
 
 
 def _redact_eval_error(e: Exception) -> str:
@@ -87,6 +89,13 @@ class EvolutionRunResult:
     # P2-9 missing 记 0：本轮单用例评测异常数（0 分占满分母，运行不中断）。
     # 与 judge_unavailable（判分基础设施不可用）诚实分开。
     eval_errors: int = 0
+    # P2-4 锚定地板（2026-10-07）：A = max(历史最优留出, 无技能基线)。
+    # anchor_evaluated=False 表示本轮未启用/未触发（关锚或候选未过基线门），
+    # 0.0 是"没量"不是"量出为零"——与 metrics 面"缺席≠0"同口径。
+    anchor_best: float = 0.0
+    anchor_no_skill: float = 0.0
+    anchor_floor: float = 0.0
+    anchor_evaluated: bool = False
 
     @property
     def improvement(self) -> float:
@@ -124,6 +133,10 @@ class EvolutionRunResult:
             "variants_per_round": self.variants_per_round,
             "candidates_evaluated": self.candidates_evaluated,
             "eval_errors": self.eval_errors,
+            "anchor_best": round(self.anchor_best, 6),
+            "anchor_no_skill": round(self.anchor_no_skill, 6),
+            "anchor_floor": round(self.anchor_floor, 6),
+            "anchor_evaluated": self.anchor_evaluated,
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -426,6 +439,7 @@ class SkillEvolutionRunner:
         iterations: Optional[int] = None,
         noise_band: Optional[NoiseBand] = None,
         ledger_key: str = "",
+        anchor_best: Optional[float] = None,
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
         self._run_eval_errors = 0  # P2-9：本轮清零（探针路径有独立语义，不计入）
@@ -544,7 +558,9 @@ class SkillEvolutionRunner:
         if self._ledger is not None and ledger_key and best_seq is not None:
             try:
                 self._ledger.patch(ledger_key, best_seq,
-                                   {"delta_holdout": round(result.improvement, 6)})
+                                   {"delta_holdout": round(result.improvement, 6),
+                                    # P2-4:绝对留出分入账——历史最优锚的数据源
+                                    "holdout_after": round(result.holdout_after, 6)})
             except OSError as e:
                 logger.debug("编辑历史台账回填失败: %s", e)
 
@@ -565,6 +581,28 @@ class SkillEvolutionRunner:
             result.deployed_text = baseline_text
             await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
+
+        # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
+        # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算
+        # 真增益——候选必须达到 A − accept_threshold 才可部署,信用不归因于
+        # 退化。无技能留出只在候选过基线门后评(成本有界:每通过轮 +1 次留出
+        # 评测);本次额外评测不计入 iterations_run(它是度量不是候选)。
+        if self.config.anchor_floor_enabled:
+            no_skill = await self._evaluate_avg(_NO_SKILL_TEXT, holdout, artifact_type)
+            result.anchor_no_skill = round(no_skill, 6)
+            anchors = [v for v in (anchor_best, no_skill) if v is not None]
+            if anchors:
+                anchor_floor = max(anchors)
+                result.anchor_evaluated = True
+                if anchor_best is not None:
+                    result.anchor_best = round(anchor_best, 6)
+                result.anchor_floor = round(anchor_floor, 6)
+                if result.holdout_after < anchor_floor - accept_threshold - _EPS:
+                    result.rejected = True
+                    result.reject_reason = "anchor_unreached"
+                    result.deployed_text = baseline_text
+                    await self._attach_heldout_evidence(result, dataset, artifact_type)
+                    return result
 
         # ── 判定 2.5:成本规则（P1-5）──
         # ΔC ≤ β0 + β1·ΔS：涨的成本必须由实测增益买单。文本臂成本代理 =
