@@ -1,7 +1,7 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "deepseek-v4-flash",
+  "model": "deepseek-v4.1-flash",
   "provider": "sensetime",
   "temperature": 0.7,
   "personality": "",
