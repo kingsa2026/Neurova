@@ -491,8 +491,14 @@ class SkillScanner:
     """技能扫描器"""
 
     def __init__(self, workspace_path: str = ".", cache_ttl: float = 3600.0):
+        from neurova.core.data_root import dataLanding
+
         self._workspace_path = Path(workspace_path)
-        self._config_dir = self._workspace_path / ".skill_scanner"
+        # 落点归数据根（与 `WhitelistManager` 的 `dataLanding("whitelist.json")` 同源）。
+        # 原实现是 `self._workspace_path / ".skill_scanner"`，而 `workspace_path` 的
+        # 默认值是 `"."`——相对进程 CWD，于是"扫描器建目录"这件事在仓库根建塔写盘，
+        # 落点随 CWD 漂移（构造期定死，逐条用例补 env 治不了）。
+        self._config_dir = dataLanding("skillScanner")
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
         self.policy: ScanPolicy = ScanPolicy.WARN

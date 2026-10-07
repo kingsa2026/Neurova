@@ -1641,3 +1641,8 @@ tests/unit/channels/test_channelTurnRunLedger.py
 # 只许一处、三入口必须都 import 那份唯一实现。
 # 逐文件单跑 7 passed
 tests/unit/api/test_v1ChatRunLedger.py
+# Issue #354：pip-audit 一律经包装脚本调用，且「网络抖动」与「裁决已成立」必须可分辨
+# （直调时 pypi.org 的一次 15s 读超时 = 阻塞红灯，实测构建 cnb-tec-1k4b4771b 的 stage-2，
+# 与提交内容无关）。含两侧配置的反向锁、拼命令契约、以及重试语义的注入自证。
+# 逐文件单跑 19 passed
+tests/unit/test_pip_audit_gate.py

@@ -78,12 +78,20 @@ _PARENT_FIXTURES = (
 )
 
 
-def _run_pytest(args):
-    """在子进程里跑 pytest（不污染当前会话的 collection cache / tmpdir）。"""
+def _run_pytest(args, cache_dir=None):
+    """在子进程里跑 pytest（不污染当前会话的 collection cache / tmpdir）。
+
+    `cache_dir` 显式传给 `-p no:cacheprovider` 之外的落点：子进程 cwd 是仓库根，
+    默认 `cacheprovider` 会在仓库根建 `.pytest_cache/`，被
+    `_guardRepoRootAgainstPollution` 点名（受保护子集实跑该条即此形态）。
+    传 `None` 即关掉 cacheprovider——本文件的判据（fixture 解析、收集数）
+    与收集缓存无关，关掉不影响任何断言，且不再往仓库根写盘。
+    """
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
+    argv = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args]
     return subprocess.run(
-        [sys.executable, "-m", "pytest", *args],
+        argv,
         cwd=str(PROJECT_ROOT),
         env=env,
         capture_output=True,

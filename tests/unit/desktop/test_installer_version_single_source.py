@@ -24,6 +24,7 @@ _SHELL = _REPO / "NeurUI" / "src-tauri" / "installer-wpf" / "MainWindow.cs"
 _TAURI_CONF = _REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 _PKG = _REPO / "NeurUI" / "package.json"
 _NSI = _REPO / "NeurUI" / "src-tauri" / "nsis" / "installer.nsi"
+_LOCK = _REPO / "NeurUI" / "package-lock.json"
 
 # 形如 v1.0.0 / 1.0.0-beta5 的版本字面量
 _VERSION_LITERAL = re.compile(r'v?1\.0\.0(?:-[\w.]+)?')
@@ -56,6 +57,24 @@ def testVersionFactsAgreeAcrossSources():
     pkg_ver = json.loads(_PKG.read_text(encoding="utf-8"))["version"]
     assert tauri_ver == pkg_ver, (
         f"版本事实源分叉：tauri.conf.json={tauri_ver} / package.json={pkg_ver}"
+    )
+
+
+def testLockfileCarriesSameVersionAsPackageJson():
+    """lock 的版本字段也必须跟随 package.json（第三份副本，曾被漏掉）。
+
+    实测断裂：2026-09-29 的 d0f6170d 把 package.json / tauri.conf.json 提到
+    `1.0.0-beta5`，但 `package-lock.json` 的两处 `version` 停在 `1.0.0-beta2`
+    —— 一份只写不读的副本，npm 不报错、CI 不报红，只有重生成锁时才被顺带抹平。
+    本条把它钉住：lock 的两处 version（顶层与 `packages[""]`）必须等于 package.json。
+    """
+    pkg_ver = json.loads(_PKG.read_text(encoding="utf-8"))["version"]
+    lock = json.loads(_LOCK.read_text(encoding="utf-8"))
+    lock_ver = lock["version"]
+    root_ver = lock["packages"][""]["version"]
+    assert lock_ver == pkg_ver and root_ver == pkg_ver, (
+        "package-lock.json 的版本字段与 package.json 分叉（第三份版本副本漂移）："
+        f"package.json={pkg_ver} / lock.version={lock_ver} / lock.packages[''].version={root_ver}"
     )
 
 
