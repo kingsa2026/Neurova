@@ -2300,6 +2300,8 @@ export default {
     llmRetryIntervalHint: '재시도 사이 대기 시간(초). 서버가 Retry-After를 보내면 해당 값 우선',
     llmRetryWaitCap: '1회 대기 상한(초)',
     llmRetryWaitCapHint: '1회 재시도 대기 상한(초). 과도한 Retry-After로 대화가 멈추는 것을 방지합니다',
+    llmRetryWaitBudget: '누적 대기 예산(초)',
+    llmRetryWaitBudgetHint: '첫 429 이후 한 요청이 누적 대기 가능한 최대 초(모델 전환 포함). 소진하면 침묵해 기다리지 않고 정직하게 실패합니다',
     llmRetryMaxSwitches: '전환 허용 모델 수',
     llmRetryMaxSwitchesHint: '연속 실패 모델 수가 이 값에 도달하면 라운드 종료. 중간에 성공하면 카운트가 초기화됩니다',
     advanced: '고급',

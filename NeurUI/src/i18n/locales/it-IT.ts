@@ -2300,6 +2300,8 @@ export default {
     llmRetryIntervalHint: "Secondi di attesa tra i tentativi; l'header Retry-After del server ha la precedenza",
     llmRetryWaitCap: 'Attesa massima per tentativo (secondi)',
     llmRetryWaitCapHint: 'Limite di attesa di un tentativo affinché un Retry-After eccessivo non blocchi la conversazione',
+    llmRetryWaitBudget: 'Budget di attesa cumulato (s)',
+    llmRetryWaitBudgetHint: 'Attesa massima cumulata per richiesta dal primo 429 (cambiamenti di modello inclusi); una volta esaurito, la richiesta fallisce in modo trasparente invece di attendere in silenzio',
     llmRetryMaxSwitches: 'Tolleranza di passaggio (modelli)',
     llmRetryMaxSwitchesHint: 'Il turno termina solo dopo questo numero di modelli falliti consecutivi; qualsiasi output riusato azzera il contatore',
     advanced: 'Avanzate',

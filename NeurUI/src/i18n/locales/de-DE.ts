@@ -2300,6 +2300,8 @@ export default {
     llmRetryIntervalHint: 'Sekunden zwischen Wiederholungen; der Retry-After-Header des Servers hat Vorrang',
     llmRetryWaitCap: 'Max. Wartezeit pro Versuch (Sekunden)',
     llmRetryWaitCapHint: 'Obergrenze der Wartezeit eines Versuchs, damit ein übermäßiger Retry-After die Unterhaltung nicht blockiert',
+    llmRetryWaitBudget: 'Kumulierte Wartezeit (Sekunden)',
+    llmRetryWaitBudgetHint: 'Maximale summierte Wartezeit pro Anfrage ab dem ersten 429 (inklusive Modellwechsel); danach bricht die Anfrage ehrlich ab, statt schweigend zu warten',
     llmRetryMaxSwitches: 'Umschalttoleranz (Modelle)',
     llmRetryMaxSwitchesHint: 'Der Zug endet erst nach so vielen hintereinander fehlgeschlagenen Modellen; jede erfolgreiche Ausgabe setzt den Zähler zurück',
     advanced: 'Erweitert',

@@ -2300,6 +2300,8 @@ export default {
     llmRetryIntervalHint: '再試行の間の待機秒数。サーバーが Retry-After を返した場合はそちらを優先',
     llmRetryWaitCap: '1 回の待機上限（秒）',
     llmRetryWaitCapHint: '1 回の再試行待機の上限秒数。過大な Retry-After で会話が固まるのを防ぎます',
+    llmRetryWaitBudget: '累計待機予算（秒）',
+    llmRetryWaitBudgetHint: '最初の 429 以降に 1 リクエストが累計で待機できる上限秒数（モデル切替を含む）。使い切った場合は黙って待たず正直に失敗します',
     llmRetryMaxSwitches: '切り替え許容モデル数',
     llmRetryMaxSwitchesHint: '連続で失敗したモデル数がこの値に達した時点で終了。途中で成功が出たらカウントはリセットされます',
     advanced: '詳細',
