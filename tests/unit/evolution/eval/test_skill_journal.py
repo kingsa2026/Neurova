@@ -97,7 +97,7 @@ class TestDecideHook:
         return SkillEvolutionService("a1", base_dir=tmp_path / "evo")
 
     def test_approve_appends_journal(self, svc, tmp_path):
-        ok = svc.decide("evo_x1", approve=True)
+        ok = svc.decide("evo_x1", approve=True, approver="tester")
         assert ok
         items = SkillJournal(tmp_path / "evo" / "journal.git").history("s1")
         assert len(items) == 1

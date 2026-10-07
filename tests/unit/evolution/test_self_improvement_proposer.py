@@ -107,9 +107,10 @@ class TestProposalStatus:
     """测试提案状态枚举"""
 
     def test_status_values(self):
-        """测试状态值完整性"""
+        """测试状态值完整性（§6-2 阶段①：枚举收口到提案生命周期契约，
+        死状态 APPROVED 退役——从未有转移产出它，批准即生效是原子决定）"""
         assert ProposalStatus.PENDING == "pending"
-        assert ProposalStatus.APPROVED == "approved"
+        assert not hasattr(ProposalStatus, "APPROVED")
         assert ProposalStatus.REJECTED == "rejected"
         assert ProposalStatus.APPLIED == "applied"
         assert ProposalStatus.ROLLED_BACK == "rolled_back"

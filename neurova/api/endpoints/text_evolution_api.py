@@ -306,10 +306,18 @@ async def get_evolution_proposal_detail(agent_id: str, proposal_id: str,
 @router.post("/skills/{agent_id}/proposals/{proposal_id}/approve", dependencies=[Depends(_admin_dep)])
 async def approve_evolution_proposal(agent_id: str, proposal_id: str,
                                      user: Dict[str, Any] = Depends(get_current_user)):
-    """批准 → 进化文本写回技能正文(唯一变更点)。"""
+    """批准 → 进化文本写回技能正文(唯一变更点)。
+
+    审批人取认证身份传入（§6-2 阶段①）：决策可归因，缺失即 400。
+    """
     from neurova.evolution.eval.service import SkillEvolutionService
 
-    ok = SkillEvolutionService(agent_id).decide(proposal_id, approve=True)
+    try:
+        ok = SkillEvolutionService(agent_id).decide(
+            proposal_id, approve=True,
+            approver=str(user.get("username") or ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not ok:
         raise HTTPException(status_code=404, detail="提案不存在或已处理")
     return {"code": 0, "data": {"approved": True}}
@@ -320,7 +328,9 @@ async def reject_evolution_proposal(agent_id: str, proposal_id: str,
                                     user: Dict[str, Any] = Depends(get_current_user)):
     from neurova.evolution.eval.service import SkillEvolutionService
 
-    ok = SkillEvolutionService(agent_id).decide(proposal_id, approve=False)
+    ok = SkillEvolutionService(agent_id).decide(
+        proposal_id, approve=False,
+        approver=str(user.get("username") or ""))
     if not ok:
         raise HTTPException(status_code=404, detail="提案不存在或已处理")
     return {"code": 0, "data": {"rejected": True}}

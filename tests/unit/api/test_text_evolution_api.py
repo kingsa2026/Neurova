@@ -127,8 +127,9 @@ class TestProposalEndpoints:
         calls = []
         monkeypatch.setattr(svc_mod.SkillEvolutionService, "__init__",
                             lambda self, agent_id, base_dir=None: None)
+        # §6-2 阶段①：decide 带审批人归因（approve 缺审批人 = 400）
         monkeypatch.setattr(svc_mod.SkillEvolutionService, "decide",
-                            lambda self, pid, approve, registry=None: calls.append((pid, approve)) or True)
+                            lambda self, pid, approve, registry=None, approver="": calls.append((pid, approve)) or True)
         assert client.post(f"{BASE}/skills/a1/proposals/evo_x1/approve").status_code == 200
         assert client.post(f"{BASE}/skills/a1/proposals/evo_x1/reject").status_code == 200
         assert calls == [("evo_x1", True), ("evo_x1", False)]
@@ -139,7 +140,7 @@ class TestProposalEndpoints:
         monkeypatch.setattr(svc_mod.SkillEvolutionService, "__init__",
                             lambda self, agent_id, base_dir=None: None)
         monkeypatch.setattr(svc_mod.SkillEvolutionService, "decide",
-                            lambda self, pid, approve, registry=None: False)
+                            lambda self, pid, approve, registry=None, approver="": False)
         assert client.post(f"{BASE}/skills/a1/proposals/ghost/approve").status_code == 404
 
     def test_list_rejects_bad_status(self, client):
