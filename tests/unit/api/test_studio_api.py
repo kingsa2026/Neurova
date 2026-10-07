@@ -56,7 +56,9 @@ class TestBackgroundRuns:
     def test_script_launches_run_with_injected_llm(self, client, monkeypatch):
         from neurova.aigc_studio import services as svc
 
-        async def fake_split(store, pid, content, llm=None, model=None):
+        async def fake_split(store, pid, content, llm=None, model=None, run_id=None):
+            # `run_id` 是端点传下来的那一行台账（E 批：一次请求一行，服务写回它而不是
+            # 另起一行）；本替身不自己写终态，由 _spawn_run 的 wrapper 落
             return store.add_episode(pid, {"number": 1, "title": "注入集", "content": content})
 
         monkeypatch.setattr(svc, "split_script", fake_split)
