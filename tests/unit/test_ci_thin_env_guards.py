@@ -265,3 +265,55 @@ class TestRemovedPackagesStayRemoved:
             if self._IMPORT_PATTERN.search(path.read_text(encoding="utf-8")):
                 offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
         assert not offenders, f"已摘除包的 import 引用复发: {offenders}"
+
+
+class TestWebReachImportsWithoutItsOptionalDeps:
+    """`neurova.web_reach` 的公开入口必须在**没有 playwright** 的薄环境里可导入。
+
+    实测断裂（PR #354 pipeline-3，与 2026-09-17 那批同源）：`browser_read.py`
+    顶层 `from playwright.async_api import async_playwright`，而 playwright 只在
+    requirements.txt、**不在** requirements-ci.txt / requirements-ci.lock。于是
+    `neurova.web_reach.__init__` → browser_read → playwright 整条链在 CI 薄环境
+    崩掉：受保护子集里 `tests/unit/skills/test_github_push_single_symbol_source.py`
+    经 `neurova.skills.builtin` 走到这里，收集期即
+    `ModuleNotFoundError: No module named 'playwright'`（4734 条收集只跑出 1 error）。
+
+    该文件 docstring 本已承诺"未安装时返回明确引导错误，不影响其他 web_reach 工具"
+    ——顶层裸 import 恰恰让这句承诺失效。
+
+    判据取"真导入 + 真调用"而不是扫源码形态：只有真的把 playwright 从可见路径里
+    摘掉再看它能不能导入，才咬得住"跳过巡检 ≠ 能导入"这个盲区。用子进程隔离，
+    不污染本进程的 sys.modules。
+    """
+
+    _PROBE = (
+        "import sys\n"
+        "class _Blocker:\n"
+        "    def find_module(self, name, path=None):\n"
+        "        return self if name.split('.')[0] in ('playwright',) else None\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('playwright',):\n"
+        "            raise ModuleNotFoundError('No module named %r' % name, name=name)\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, _Blocker())\n"
+        "import neurova.web_reach as wr\n"
+        "assert callable(wr.browser_read), 'browser_read 不可调用'\n"
+        "r = wr.browser_read('https://example.com')\n"
+        "assert r.get('success') is False, r\n"
+        "assert 'playwright' in str(r.get('error', '')), r\n"
+        "print('OK')\n"
+    )
+
+    def test_webReachImportsAndDegradesWithoutPlaywright(self):
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, "-c", self._PROBE],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(PROJECT_ROOT),
+        )
+        assert proc.returncode == 0 and "OK" in proc.stdout, (
+            "playwright 缺席时 `neurova.web_reach` 无法导入——可选依赖又在模块顶层裸 import 了。\n"
+            "CI 精简环境（requirements-ci.lock）不含 playwright，整条导入链会在收集期崩：\n"
+            f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+        )

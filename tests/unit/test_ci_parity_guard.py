@@ -85,10 +85,17 @@ EXPECTED_CORE_COMMANDS = {
         "python -m pip install -r requirements-ci.lock",
     ],
     "dependency-audit": [
-        "python -m pip_audit -r requirements-ci.lock",
+        # Issue #354：pip-audit 一律经 scripts/ci/pip_audit_gate.py 调用。
+        # 直调 `python -m pip_audit` 时 pypi.org 的一次 15s 读超时就是阻塞红灯
+        # （实测构建 cnb-tec-1k4b4771b 的 stage-2），而那次红与提交内容无关。
+        # 包装脚本换 `--vulnerability-service osv`（一次批量查询取代每包一次往返）、
+        # 给足单次查询超时、**只对基础设施错误重试**（「找到漏洞」立即判红），
+        # 退出码语义与 scripts/ci/osv_audit.py 同源（0/1/2）。
+        # 判据（含「不得退回直调」的反向锁）见 tests/unit/test_pip_audit_gate.py。
+        "python scripts/ci/pip_audit_gate.py -r requirements-ci.lock",
         # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
         # curl_cffi/onnxruntime/transformers/playwright/paramiko 等运行时包
-        "python -m pip_audit -r requirements-full.lock",
+        "python scripts/ci/pip_audit_gate.py -r requirements-full.lock",
         # 非 pip 依赖树（Issue #56 残留边界）：Tauri Cargo.lock（Rust crates）
         # + tools/npx-runtime 锁（运行时 `npx -y` 现拉的包）。pip-audit 与
         # npm audit 都看不到它们，此前完全无人审计。
