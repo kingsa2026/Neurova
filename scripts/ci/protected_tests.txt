@@ -213,6 +213,9 @@ tests/unit/agent/test_tool_round_protocol_pairing.py
 #   不得否决这一轮的下文——上限/门控 TERMINATE/停滞三条出口都要已回放，并行批一个执行体
 #   抛异常不得掀掉同批其余结果
 tests/unit/agent/test_tool_round_history_on_early_exit.py
+# 晚到工具终态的会话栅栏（2026-10-08 长任务闭环审计 C 批）：归属必须盖在「转后台那一刻」，
+#   排干必须按会话取——B 会话不得读走 A 会话的工具正文；无归属终态点名拒绝而非广播
+tests/unit/agent/test_pending_hints_session_fence.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
