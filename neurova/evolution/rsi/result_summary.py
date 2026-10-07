@@ -83,11 +83,17 @@ ENV_SUMMARIES_PATH = "NEUROVA_EVOLUTION_RSI_SUMMARIES"
 
 
 def default_rsi_summaries_path() -> Path:
-    """审计流默认落点(env 可重定位;测试用 env 指到临时目录)。"""
-    from neurova.core.data_root import get_data_root
+    """审计流默认落点(env 可重定位;测试用 env 指到临时目录)。
 
-    return Path(os.environ.get(
-        ENV_SUMMARIES_PATH, get_data_root() / "evolution" / "rsi_summaries.jsonl"))
+    走 `resolveDataPath` 而不是把 env 值直接喂 `Path`：`os.environ.get(K, default)`
+    在 K 被设成**空串**时返回 `""`（`Path("")` 即进程 CWD），设成**相对名**时落点跟着
+    启动目录漂——两处都是 §6-26/§6-29 那条"换个工作目录就换个库"的同一根因。
+    绝对值原样放行，注入临时目录的测试隔离不受影响。
+    """
+    from neurova.core.data_root import resolveDataPath
+
+    return resolveDataPath(os.environ.get(ENV_SUMMARIES_PATH)
+                           or "evolution" + "/" + "rsi_summaries.jsonl")
 
 
 def _append_record(payload: Dict[str, Any]) -> bool:
