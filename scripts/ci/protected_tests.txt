@@ -1646,3 +1646,17 @@ tests/unit/api/test_v1ChatRunLedger.py
 # 与提交内容无关）。含两侧配置的反向锁、拼命令契约、以及重试语义的注入自证。
 # 逐文件单跑 19 passed
 tests/unit/test_pip_audit_gate.py
+# A 轮（§6-12 缺陷①）：BaseModule 的广播承诺必须真兑现。三条形态各钉一格——
+# 未注入时回落唯一全局入口（原形态 `_event_bus=None` + `if self._event_bus:` 恒假，
+# 全仓无一处传非 None，生命周期事件一次都没发出，而 /api/v1/logs 读的就是这条总线）、
+# 注入时不得同时污染全局（两份事实源）、载荷必带 module_id（无主事件无法归因）。
+# 反向守卫判 AST 调用形态（`self._event_bus.emit(`），不钉词——本仓 EventBus 只有 publish。
+# 逐文件单跑 4 passed
+tests/unit/core/test_eventBusWiringFromBaseModule.py
+# A 轮（§6-12 缺陷② + §6-5 家族的类级命中点）：`async def` 的生命周期钩子被同步
+# `initialize()` 调用即协程丢弃，injector 三条 context.* 订阅恒为 0。判据五条：钩子跑完
+# 订阅真在总线上、initialize→start→stop 全链不空转、全仓反向守卫"async 声明 + 体内零
+# await"归因到 file:line（判形态不钉名，防同类回流）、订阅入口只在基类一份、
+# injector 不得再自带第二份 BaseModule（含其吞异常的私有 handlers）。
+# 逐文件单跑 6 passed
+tests/unit/context/test_injectorLifecycleHooksNeverRan.py
