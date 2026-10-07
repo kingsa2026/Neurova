@@ -224,7 +224,8 @@ class TestExitCodeVocabularyMatchesTheOsvGate:
             1, "requests.exceptions.ReadTimeout: Read timed out"))
         monkeypatch.setattr(gate, "RETRY_BACKOFF", 0.0)
         monkeypatch.setattr(sys, "argv", [str(GATE), "-r", "requirements-ci.lock",
-                                          "--attempts", "2"])
+                                          "--attempts", "2",
+                                          "--verdict-channel", "live"])
         assert gate.main() == 2, "重试耗尽应退 2（基础设施错误），不得退 0 或 1"
 
     def test_established_verdict_exits_one_without_retry(self, gate, monkeypatch):
@@ -238,7 +239,8 @@ class TestExitCodeVocabularyMatchesTheOsvGate:
         monkeypatch.setattr(gate, "runOnce", fakeRunOnce)
         monkeypatch.setattr(gate, "RETRY_BACKOFF", 0.0)
         monkeypatch.setattr(sys, "argv", [str(GATE), "-r", "requirements-ci.lock",
-                                          "--attempts", "3"])
+                                          "--attempts", "3",
+                                          "--verdict-channel", "live"])
         assert gate.main() == 1
         assert len(calls) == 1, (
             f"「找到漏洞」被重试了 {len(calls)} 次——重试一条已成立的裁决是空转"
@@ -264,7 +266,8 @@ class TestExitCodeVocabularyMatchesTheOsvGate:
         monkeypatch.setattr(gate, "runOnce", fakeRunOnce)
         monkeypatch.setattr(gate, "RETRY_BACKOFF", 0.0)
         monkeypatch.setattr(sys, "argv", [str(GATE), "-r", "requirements-ci.lock",
-                                          "--attempts", "3"])
+                                          "--attempts", "3",
+                                          "--verdict-channel", "live"])
         assert gate.main() == 0, (
             "OSV 连接失败没被判成基础设施错误——它直接退了 1（裁决已成立），"
             "于是这一次网络抖动就是阻塞红灯，而它与提交内容无关"
@@ -283,5 +286,123 @@ class TestExitCodeVocabularyMatchesTheOsvGate:
         monkeypatch.setattr(gate, "runOnce", fakeRunOnce)
         monkeypatch.setattr(gate, "RETRY_BACKOFF", 0.0)
         monkeypatch.setattr(sys, "argv", [str(GATE), "-r", "requirements-ci.lock",
-                                          "--attempts", "3"])
+                                          "--attempts", "3",
+                                          "--verdict-channel", "live"])
         assert gate.main() == 0
+
+
+class TestVerdictChannelDoesNotDependOnLiveOsv:
+    """裁决通路必须有离线分支（Issue #357）。
+
+    ## 为什么要有这道守卫
+
+    构建 `cnb-a99-1k4bpgeim` 的 dependency-audit 腿红在
+    `audit full runtime locked set`（`requirements-full.lock`）：
+
+        ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed
+        [pip-audit] ⚠️ 第 1 次为基础设施错误（裁决未成立），5s 后重试（共 3 次）
+        [pip-audit] ❌ requirements-full.lock: 3 次尝试均未取得裁决……
+        Finished, code: 2
+
+    上一条修复（`ae48d45b`）只把这条红的**定性**改诚实了：它不再冒充
+    「裁决已成立」，而是响亮地说「本轮没查成」。但它**没有拆掉那条外部依赖**
+    ——`api.osv.dev` 一旦在 runner 上被拦，门禁依旧阻塞合并，而它与提交内容
+    一个字的关系都没有。同一构建里 `requirements-ci.lock`（85 包）过了、
+    `requirements-full.lock`（169 包）没过，正是因为后者要发 169 次 POST，
+    长链路上必然撞上一次抖动。
+
+    ## 修法：把 Python 锁这一路也接上**离线裁决通路**
+
+    同仓 `scripts/ci/osv_audit.py` 早在 2026-09-22 就用离线库消灭过同形形态
+    （其顶栏「裁决不依赖远端可实时到达」一节），A/B 实测：把 `api.osv.dev`
+    解析到必挂 IP + 清空缓存 → 线上口径 3/3 红、离线口径 3/3 全绿。
+    Python 这一路当时漏在体系外，本单补齐：
+
+    * 离线库落点与 OSV 那一路**同一份缓存**（`~/.cache/osv-scalibr/PyPI/all.zip`），
+      CI 两侧已挂的卷直接复用，不新造第二套缓存口径（AGENTS.md 修复教义第 6 条）；
+    * 裁决通路收口在一处：缓存齐 → 走离线库（不再依赖 `api.osv.dev`）；
+      缓存不齐 → 回退直连并**点名缺哪一份**；
+    * 放行标准不变：允许清单仍是 `scripts/ci/osv-allowlist.toml`，
+      退出码语义仍是 0/1/2。
+
+    本守卫钉四件事（缺一条即红）：
+
+    1. 门禁脚本暴露 `resolveVerdictChannel()`，且它按**缓存是否齐备**给不同结论；
+    2. 离线分支的命令**不含**任何指向 `api.osv.dev` 的实时查询；
+    3. 两侧 CI 配置都声明了 PyPI 离线库的预取步骤；
+    4. 缓存不齐时回退直连**并点名**（不许静默直连、也不许静默判红）。
+    """
+
+    def test_gate_exposes_a_verdict_channel_resolver(self, gate):
+        assert hasattr(gate, "resolveVerdictChannel"), (
+            "pip_audit_gate.py 没有裁决通路解析入口——Python 锁这一路仍只能直连 "
+            "api.osv.dev，一次网络抖动就是阻塞红灯（本单要消灭的形态）"
+        )
+
+    def test_offline_channel_is_chosen_when_cache_is_present(self, gate, tmp_path, monkeypatch):
+        """缓存齐 → 走离线；且离线命令不查远端。"""
+        cache_root = tmp_path / "osv-scalibr"
+        (cache_root / "PyPI").mkdir(parents=True)
+        (cache_root / "PyPI" / "all.zip").write_bytes(b"stub")
+        monkeypatch.setattr(gate, "OSV_DB_CACHE", cache_root)
+
+        offline, problems = gate.resolveVerdictChannel()
+        assert offline is True, (
+            f"离线库在场却仍选了直连通路（问题清单：{problems}）——"
+            "裁决又绑回 api.osv.dev 的实时可达性"
+        )
+        assert problems == []
+
+        command = gate.buildOfflineCommand("requirements-ci.lock", binary="/tmp/osv-scanner")
+        joined = " ".join(command)
+        assert "api.osv.dev" not in joined, f"离线命令里仍有实时查询地址: {joined}"
+        assert "--offline" in command and "--offline-vulnerabilities" in command, (
+            f"离线命令缺成对的离线 flag（缺一即退 127，反而伪装成基础设施故障）: {joined}"
+        )
+
+    def test_live_fallback_names_what_is_missing(self, gate, tmp_path, monkeypatch):
+        """缓存不齐 → 回退直连，**并点名缺哪一份**（不许静默回退）。"""
+        cache_root = tmp_path / "osv-scalibr-empty"
+        monkeypatch.setattr(gate, "OSV_DB_CACHE", cache_root)
+
+        offline, problems = gate.resolveVerdictChannel()
+        assert offline is False, "缓存缺失却仍判「可走离线」——离线命令会退 127"
+        assert problems, "缓存缺失却没有任何问题清单——回退是静默的，读日志的人无从自查"
+        assert any("PyPI" in item for item in problems), (
+            f"问题清单没点名缺的是哪个生态的库: {problems}"
+        )
+
+    def test_cache_root_is_the_same_source_as_the_osv_gate(self, gate):
+        """离线库落点必须与 `osv_audit.py` **同值**——不新造第二套缓存口径。
+
+        两处各写一份 `~/.cache/osv-scalibr` 就是第二份定义（教义第 6 条）：
+        预取落到 A 处、门禁读 B 处时，门禁会报「离线库缺失」，而库其实就在旁边。
+        判据直接比对两个模块的常量，而不是在注释里声称一致。
+        """
+        osv = gate._scannerModule()
+        assert Path(gate.OSV_DB_CACHE) == Path(osv.OSV_DB_CACHE), (
+            f"缓存落点分叉：pip_audit_gate={gate.OSV_DB_CACHE} "
+            f"osv_audit={osv.OSV_DB_CACHE}"
+        )
+
+    def test_pypi_is_declared_in_the_shared_offline_scope(self, gate):
+        """PyPI 生态必须登记在 `osv_audit.py` 的 `OFFLINE_DB_SCOPE` 里。
+
+        预取侧按这张表推「要下哪些生态的库」，门禁侧按 `OFFLINE_ECOSYSTEM` 读。
+        两处各写一份就会「预取到 A、门禁读 B」。
+        """
+        osv = gate._scannerModule()
+        scopes = set(osv.OFFLINE_DB_SCOPE.values())
+        assert gate.OFFLINE_ECOSYSTEM in scopes, (
+            f"离线库归属表里没有 {gate.OFFLINE_ECOSYSTEM}——预取不会为它落库，"
+            f"而门禁却在等它（现存生态：{sorted(scopes)}）"
+        )
+
+    def test_both_sides_prefetch_the_pypi_offline_database(self):
+        """两侧 CI 都必须声明 PyPI 离线库预取——否则离线通路永远空转。"""
+        for path in (CNB, GHW):
+            text = io.open(path, encoding="utf-8").read()
+            assert "PyPI" in text, (
+                f"{path.name} 未声明 PyPI 离线库——Python 锁这一路的离线通路永远空转，"
+                "门禁照旧绑在 api.osv.dev 的实时可达性上"
+            )

@@ -39,20 +39,42 @@
 **退出码 2 不是「通过」**：它响亮说出「本轮没查成」，与「查了、没有漏洞」在日志里
 可分辨。这与本仓门禁的一贯纪律一致：不许把「跑不起来」当成「没问题」。
 
+## 修法第二段（Issue #357）：裁决通路改绑离线库
+
+第一段（Issue #354）把「一次读超时」从红灯变成可重试，但**裁决通路仍只有直连
+`api.osv.dev` 一条**——`169` 包的全量锁就是 169 次 POST，长链路上必然撞上抖动。
+构建 `cnb-a99-1k4bpgeim` 的红即此：同一构建里 85 包的 `requirements-ci.lock` 过了、
+169 包的 `requirements-full.lock` 撞上连接失败，3 次重试耗尽后按基础设施错误退 2
+——定性诚实了，但仍然**阻塞合并**，而它与提交内容一个字的关系都没有。
+
+故裁决通路收口为与 `osv_audit.py` 同形的 `resolveVerdictChannel()`：
+
+* 离线库在场（`~/.cache/osv-scalibr/PyPI/all.zip`，与 OSV 那一路**同一份缓存**）
+  → 走离线口径（OSV-Scanner `--offline --offline-vulnerabilities`），
+  裁决**不再依赖任何远端**；
+* 离线库不在场 → 回退直连 pip-audit，并**点名缺哪一份**（可读、可复算）。
+
+`--verdict-channel` 只在自证时显式钉住一条口径，CI 用默认的 `auto`。
+
 ## 用法
 
     python scripts/ci/pip_audit_gate.py -r requirements-ci.lock
     python scripts/ci/pip_audit_gate.py -r requirements-full.lock
     python scripts/ci/pip_audit_gate.py -r requirements-full.lock --attempts 5
+    # 自证：显式钉住一条口径（CI 不用）
+    python scripts/ci/pip_audit_gate.py -r requirements-full.lock --verdict-channel offline
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 #: 基础设施错误的**命名证据**（pip-audit 在裁决通路不可用时印在输出里的形态）。
 #: 只认这些形态重试；其余非 0 一律按「裁决已成立」处理，立即判红。
@@ -111,6 +133,155 @@ DEFAULT_TIMEOUT = 60
 #: 重试退避基数（秒）：第 n 次重试前等 `RETRY_BACKOFF * 2**(n-1)`。
 RETRY_BACKOFF = 5.0
 
+# ── 离线裁决通路：让 Python 锁的裁决不再绑在 api.osv.dev 的实时可达性上 ────────
+#
+# 为什么必须补这一段（Issue #357）：本门禁此前的**唯一**裁决通路是
+# `python -m pip_audit --vulnerability-service osv`，即对每包各发一次 POST 到
+# `api.osv.dev`。169 包的全量锁就是 169 次往返，长链路上必然撞上抖动，而
+# `api.osv.dev` 在 runner 上被拦时，门禁只能按基础设施错误退出 2 —— 那仍是
+# **阻塞红灯**，与提交内容一个字的关系都没有。
+#
+# 实证（构建 `cnb-a99-1k4bpgeim` 的 `audit full runtime locked set`，同一构建里
+# 85 包的 `requirements-ci.lock` 过了、169 包的 `requirements-full.lock` 没过）：
+#
+#     ERROR:pip_audit._cli:Could not connect to OSV's vulnerability feed
+#     [pip-audit] ⚠️ 第 1 次为基础设施错误（裁决未成立），5s 后重试（共 3 次）
+#     [pip-audit] ❌ requirements-full.lock: 3 次尝试均未取得裁决……
+#
+# 修法与同仓 `scripts/ci/osv_audit.py` **同源**（其顶栏「裁决不依赖远端可实时到达」
+# 一节，2026-09-22 A/B 实测：`api.osv.dev` 指到必挂 IP + 清空缓存 → 线上口径
+# 3/3 红、离线口径 3/3 全绿）：改走 OSV-Scanner 的**离线漏洞库**
+# （`--offline --offline-vulnerabilities`）。判据来源与 OSV 那一路是**同一份
+# `PyPI/all.zip`**，CI 两侧已挂的 `~/.cache/osv-scalibr` 卷直接复用——不新造
+# 第二套缓存口径（AGENTS.md 修复教义第 6 条）。
+#
+# 实测（本机，同一份缓存）：
+#   * `requirements-ci.lock`  → `found 85 packages`，离线退 0
+#   * `requirements-full.lock`→ `found 169 packages`，离线退 0（零网络）
+#   * `urllib3==1.26.0`      → 离线报出 24 条命中（判据未退化）
+#   * 反向控制：直连口径在同一份全量锁上**解析失败**（`cuda-toolkit` 是本地
+#     wheel，deps.dev 解析不到）→ 离线口径反而更可信
+
+#: 离线漏洞库缓存落点。与 `scripts/ci/osv_audit.py` 的 `OSV_DB_CACHE` **同值**：
+#: 两侧共用同一份卷，不新造第二套缓存口径（改一处须改另一处，由守卫逐字校验）。
+OSV_DB_CACHE = Path.home() / ".cache" / "osv-scalibr"
+
+#: 本门禁只关心 PyPI 这一个生态的离线库（`osv_audit.py` 管 crates.io / npm）。
+OFFLINE_ECOSYSTEM = "PyPI"
+
+#: OSV-Scanner 的离线 flag。**必须成对**：只给 `--offline` 而不给
+#: `--offline-vulnerabilities` 时扫描器退回「查本地缓存」，缓存缺失时报
+#: `no offline version of the OSV database is available` 并退 127——
+#: 那正是本门禁要消灭的形态（127 与「命令不成形」同码同形）。
+OFFLINE_FLAGS = ("--offline", "--offline-vulnerabilities")
+
+#: OSV-Scanner 比对 requirements 文件时**按文件名认解析器**：实测
+#: `requirements.txt` / `requirements-ci.txt` 都被认出，
+#: 而 `requirements-ci.lock` 报
+#: `could not determine extractor suitable to this file`。
+#: 故离线通路把锁文件暂存成 `<原名>.txt` 副本再交给扫描器——只改文件名，
+#: 内容逐字不动，包数对账口径因此可复算（实测 85 / 169 与 `==` 行数一致）。
+#: 暂存实现**只有一处**：`osv_audit.scannerReadableAlias()`（预取与门禁共用），
+#: 本脚本不另抄一份，避免「预取改名规则」与「扫描改名规则」分叉。
+
+
+def offlineDatabaseProblems() -> list:
+    """离线库是否已备齐，返回问题清单（空 = 可走离线）。
+
+    判据是**文件在场**，不是「下载过」——与 `osv_audit.py` 的
+    `offlineDatabaseProblems()` 同口径：过期库仍好过一个不可达的库，
+    过期只漏报新公告，不可达会让门禁在「网络抖动」与「真有漏洞」之间无从分辨。
+    """
+    db = OSV_DB_CACHE / OFFLINE_ECOSYSTEM / "all.zip"
+    if not db.is_file():
+        return [f"离线库缺失: {db}（生态 {OFFLINE_ECOSYSTEM}）"]
+    return []
+
+
+def resolveVerdictChannel() -> tuple:
+    """单源决定本次裁决走离线库还是直连，返回 `(用离线吗, 问题清单)`。
+
+    与 `osv_audit.py` 的 `resolveVerdictChannel()` 同形：缓存齐 → 走离线
+    （不再依赖 `api.osv.dev`）；缓存不齐 → **回退直连并点名缺哪一份**。
+
+    为什么回退而不判红：预取是 best-effort（CI 里 `|| true`），门禁若要求
+    「缓存必须齐」，就把一条**允许失败**的前置步骤变成了红灯来源，而那与
+    「真有未允许漏洞」在合并流程里长得一样——读日志的人仍只能重跑，
+    正是本单要消灭的形态。
+    """
+    problems = offlineDatabaseProblems()
+    return (not problems), problems
+
+
+def _scannerModule():
+    """按路径加载同目录的 `osv_audit.py`（它与本脚本同为 CI 脚本，不是包内模块）。
+
+    复用而不重写：OSV-Scanner 的下载、SHA256 指纹校验、绝对路径归一、
+    平台判定都已在那边落定，这里再抄一份就是第二份实现（教义第 6/7 条）。
+    """
+    path = Path(__file__).resolve().parent / "osv_audit.py"
+    spec = importlib.util.spec_from_file_location("osv_audit_shared_by_pip_gate", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def resolveScannerBinary() -> Path:
+    """拿到可执行的 OSV-Scanner 绝对路径（下载 / 指纹校验都在 `osv_audit.py`）。
+
+    解析顺序与 `osv_audit._resolve_scanner()` 同源：先认 `OSV_SCANNER_BIN`，
+    再走官方 release 下载并核对 SHA256。复用而不重写——二进制指纹表、
+    平台判定、绝对路径归一都已在那边落定（教义第 6/7 条）。
+    """
+    return _scannerModule()._resolve_scanner()
+
+
+def buildOfflineCommand(requirement: str, binary: str = "") -> list:
+    """拼出一次**离线**扫描调用（判据来源是本地 `PyPI/all.zip`）。
+
+    与 `buildCommand()` 是一对：`buildCommand` 是直连口径（pip-audit → api.osv.dev），
+    本函数是离线口径（OSV-Scanner → 本地库）。两条口径的裁决词汇同源（0/1/2）。
+
+    `binary` 留空时现取（会触发下载/指纹校验，需网络）；自证场景传入固定路径，
+    这样「命令形态」这件事能在不起扫描器的前提下被单独钉住。
+    """
+    return [
+        binary or str(resolveScannerBinary()), "scan", "source",
+        "--lockfile", requirement,
+        "--format", "json",
+        *OFFLINE_FLAGS,
+    ]
+
+
+def runOfflineOnce(requirement: str) -> tuple:
+    """跑一次离线扫描，返回 `(退出码, 合并输出)`。
+
+    锁文件先**暂存成 `<原名>.txt`**：扫描器按文件名认解析器，`.lock` 认不出
+    （实测报 `could not determine extractor suitable to this file`）。
+    只改名字、内容逐字不动，且暂存副本随临时目录一并清理。
+    """
+    with tempfile.TemporaryDirectory(prefix="pip-audit-offline-") as stage:
+        staged = _scannerModule().scannerReadableAlias(Path(requirement), Path(stage))
+        cmd = buildOfflineCommand(str(staged))
+        print(f"[pip-audit] (离线库) $ {' '.join(cmd)}", flush=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    merged = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    print(merged, flush=True)
+    return proc.returncode, merged
+
+
+def isOfflineInfrastructureFailure(returncode: int, output: str) -> bool:
+    """离线口径下「没查成」的形态。
+
+    离线时不该出现网络错误；真出现只有一种解释：扫描器二进制没能下载/执行，
+    或本地库损坏。故**非契约码**（0/1 之外的任何码）一律按基础设施错误收口，
+    并沿用同一套形态清单点名。这与 `osv_audit.py` 的 `CONTRACT_EXIT_CODES`
+    同口径（那边是 `(0, 1, 65)`，这边没有入参错误这一路，故为 `(0, 1)`）。
+    """
+    if returncode in (0, 1):
+        return False
+    return True
+
 
 def isInfrastructureFailure(returncode: int, output: str) -> bool:
     """这次非 0 退出是「没查成」还是「查成了、有漏洞」？
@@ -156,17 +327,44 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                         help=f"pip-audit 的 socket 超时秒数（默认 {DEFAULT_TIMEOUT}；"
                              "pip-audit 自身默认 15s，与「一次批量查询」的耗时不相称）")
+    parser.add_argument("--verdict-channel", choices=("auto", "offline", "live"),
+                        default="auto",
+                        help="裁决通路：auto = 缓存齐走离线、不齐回退直连（CI 用法）；"
+                             "offline/live 供自证显式钉住一条口径，不由 CI 使用")
     args = parser.parse_args()
 
-    last_code = 2
-    last_output = ""
+    # 裁决通路单源决定（与 osv_audit.py 的 resolveVerdictChannel 同形）：
+    # 离线库在场 → 离线口径（不依赖 api.osv.dev）；不在场 → 直连口径并点名缺哪一份。
+    # `--verdict-channel` 只在自证时收窄范围，不改「自动」这条默认路径的判据。
+    offline, problems = resolveVerdictChannel()
+    if args.verdict_channel == "live":
+        offline, problems = False, ["显式指定直连口径（--verdict-channel live，自证用）"]
+    elif args.verdict_channel == "offline" and not offline:
+        print(f"[pip-audit] ❌ 显式要求离线口径，但离线库缺失（{problems}）",
+              file=sys.stderr, flush=True)
+        return 2
+    if offline:
+        print(
+            f"[pip-audit] 裁决通路: 离线库（{OSV_DB_CACHE / OFFLINE_ECOSYSTEM / 'all.zip'}，"
+            "不依赖 api.osv.dev）",
+            flush=True,
+        )
+        runner = lambda: runOfflineOnce(args.requirement)  # noqa: E731
+        failedOnInfra = isOfflineInfrastructureFailure
+    else:
+        for item in problems:
+            print(f"[pip-audit] ⚠️ 离线库未备齐，回退直连 api.osv.dev：{item}",
+                  file=sys.stderr, flush=True)
+        print("[pip-audit] 裁决通路: 直连 api.osv.dev", flush=True)
+        runner = lambda: runOnce(args.requirement, args.timeout)  # noqa: E731
+        failedOnInfra = isInfrastructureFailure
+
     for attempt in range(1, max(1, args.attempts) + 1):
-        code, output = runOnce(args.requirement, args.timeout)
-        last_code, last_output = code, output
+        code, output = runner()
         if code == 0:
             print(f"[pip-audit] ✅ {args.requirement}: 无未允许的已知漏洞", flush=True)
             return 0
-        if not isInfrastructureFailure(code, output):
+        if not failedOnInfra(code, output):
             # 裁决已成立（有漏洞，或不是可重试的基础设施形态）：立即判红，不重试。
             print(
                 f"[pip-audit] ❌ {args.requirement}: 裁决已成立（退出码 {code}），不重试。\n"
@@ -187,8 +385,10 @@ def main() -> int:
     print(
         f"[pip-audit] ❌ {args.requirement}: {args.attempts} 次尝试均未取得裁决——"
         "按**基础设施错误**收口（退出码 2，不是「无漏洞」，也不是「发现漏洞」）。\n"
-        "  自查顺序：① 漏洞库数据源可达性（osv 服务走 api.osv.dev）；"
-        "② 锁文件是否可读；③ 本轮输出末段的原始报错。",
+        "  自查顺序：① 离线库是否已预取（"
+        f"{OSV_DB_CACHE / OFFLINE_ECOSYSTEM / 'all.zip'}）；"
+        "② 直连口径下再看漏洞库数据源可达性（api.osv.dev）；"
+        "③ 锁文件是否可读；④ 本轮输出末段的原始报错。",
         file=sys.stderr, flush=True)
     return 2
 
