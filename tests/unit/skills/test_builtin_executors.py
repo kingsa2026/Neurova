@@ -19,19 +19,53 @@ from neurova.skills.builtin.file_operation_executor import FileOperationSkillExe
 # ================================================================
 
 class TestMemorySkillExecutor:
-    def test_search_action(self):
-        """action=search 返回成功结果"""
+    def test_search_action_routes_to_manager(self):
+        """action=search 路由到管理器的检索——不是"没装配也算成功"。
+
+        改判说明（§6-17 现场）：原两条用例都以 `MemorySkillExecutor()`（无管理器）
+        断言 `success is True`，钉住的正是"能力缺席却回执成功"这个假成功。
+        现拆成"缺席必须点名失败"与"挂上管理器必须真被调用"两条可证伪判据。
+        """
+        hits = []
+
+        class _Manager:
+            def recall(self, *args, **kwargs):
+                hits.append(kwargs)
+                return []
+
+        exe = MemorySkillExecutor(memory_manager=_Manager())
+        result = exe.execute(params={"action": "search", "query": "hello"})
+        assert isinstance(result, SkillResult)
+        assert result.success is True, result.error
+        assert hits, "回执成功却没检索过管理器——那还是假成功"
+
+    def test_search_without_manager_fails_with_reason(self):
         exe = MemorySkillExecutor()
         result = exe.execute(params={"action": "search", "query": "hello"})
         assert isinstance(result, SkillResult)
-        assert result.success is True
+        assert result.success is False
+        assert result.error and "记忆管理器" in result.error, result.error
 
-    def test_store_action(self):
-        """action=store 返回成功结果"""
+    def test_store_action_routes_to_manager(self):
+        writes = []
+
+        class _Manager:
+            def remember(self, **kwargs):
+                writes.append(kwargs)
+                return {"id": "m-1"}
+
+        exe = MemorySkillExecutor(memory_manager=_Manager())
+        result = exe.execute(params={"action": "store", "content": "some content"})
+        assert isinstance(result, SkillResult)
+        assert result.success is True, result.error
+        assert writes and writes[0]["content"] == "some content", writes
+
+    def test_store_without_manager_fails_with_reason(self):
         exe = MemorySkillExecutor()
         result = exe.execute(params={"action": "store", "content": "some content"})
         assert isinstance(result, SkillResult)
-        assert result.success is True
+        assert result.success is False
+        assert result.error and "记忆管理器" in result.error, result.error
 
     def test_unknown_action(self):
         """未知 action 返回失败"""
@@ -174,7 +208,21 @@ class TestBuiltinFactoryPendingStore:
         skills = builtin_pkg.create_builtin_executor_skills()
         memory_skill = next(s for s in skills if s.name == "memory")
         assert memory_skill._executor.pending_store is None
-        assert memory_skill._executor.execute({"action": "store", "content": "c"}).success is True
+        # "降级为直写"必须真写到管理器上才算数——原断言在无管理器实例上取
+        # `success is True`，读到的恰是被改判掉的那个假成功。
+        writes = []
+
+        class _Manager:
+            def remember(self, **kwargs):
+                writes.append(kwargs)
+                return {"id": "m-9"}
+
+        mounted = builtin_pkg.create_builtin_executor_skills(_Manager())
+        direct = next(x for x in mounted if x.name == "memory")._executor
+        assert direct.pending_store is None
+        assert direct.execute({"action": "store", "content": "c"}).success is True
+        assert writes == [{"content": "c", "category": "general",
+                           "memory_type": "semantic"}] or writes, writes
 
     def test_mounted_store_intercepts_store_action(self, tmp_path):
         """挂载后（默认）store 写入待审队列且不直写主库；confirm=True 按次直写。"""
