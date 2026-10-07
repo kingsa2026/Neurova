@@ -1125,6 +1125,10 @@ class ContextOrchestrator:
                 show_empathy=getattr(self._agent.config, "show_empathy", True),
                 metacog_agent_id=_metacog_id if isinstance(_metacog_id, str) and _metacog_id else None,
             )
+            # 生命周期要在唯一的装配点跑一遍：`on_initialize` 承载三条 context.* 订阅，
+            # 不调它，注入器就只是"构造出来了但请求面没人接"的半成品（本批之前即使
+            # 去掉 async 误标也仍是这形态——全仓无人调 initialize()）。
+            unified_injector.initialize()
             logger.info("Agent %s: UnifiedContextInjector 已启用 (16K tokens)", self.config.name)
 
         # 创建上下文构建器（如果有 unified_injector 则使用增强模式）

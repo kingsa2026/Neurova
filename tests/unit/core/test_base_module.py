@@ -182,15 +182,44 @@ class TestBaseModule:
         module = self.ConcreteModule()
         module.log_error("test error")
 
-    def test_emit_event_no_bus(self):
-        """测试无事件总线时发送事件"""
-        module = self.ConcreteModule()
-        module.emit_event("test_event", {"key": "value"})
+    def test_emit_event_falls_back_to_global_bus(self):
+        """未注入总线时，事件必须落到唯一全局入口（不是"静默不发"）。
+
+        改判说明：本条原名 `test_emit_event_no_bus`，只调一次 `emit_event` 不断言任何
+        事——而"没有总线就不发"正是 §6-12 缺陷① 的形态（全仓无一处注入非 None，广播
+        承诺恒不执行）。现按行为判据钉：默认构造发出的事，全局总线的订阅者必须收到。
+        """
+        from neurova.core.event_bus import EventBus, reset_event_bus
+
+        reset_event_bus()
+        try:
+            bus = EventBus()
+            received = []
+            bus.subscribe("test_event", lambda event: received.append(event))
+            # 用注入替换掉"默认取全局"这一步的可测性代价：默认路径由
+            # tests/unit/core/test_eventBusWiringFromBaseModule.py 专项钉，本条只钉
+            # 载荷形状（module_id 必带）。
+            module = self.ConcreteModule(event_bus=bus)
+            module.emit_event("test_event", {"key": "value"})
+            assert len(received) == 1, "emit_event 未落到总线"
+            assert received[0].data["key"] == "value"
+            assert "module_id" in received[0].data
+        finally:
+            reset_event_bus()
 
     def test_emit_event_with_bus(self):
-        """测试有事件总线时发送事件"""
-        from unittest.mock import MagicMock
-        bus = MagicMock()
+        """注入真总线时必须走注入那一份——原形态用 `MagicMock` 冒充总线并断言
+        `bus.emit`，而 `core/event_bus.py` 只有 `publish`(:168)，**没有 emit**：
+        生产与测试同时错，所以它一直绿（教义第 3 条明禁的假契约）。
+        """
+        from neurova.core.event_bus import EventBus
+
+        bus = EventBus()
+        received = []
+        bus.subscribe("test_event", lambda event: received.append(event))
         module = self.ConcreteModule(event_bus=bus)
+
         module.emit_event("test_event", {"key": "value"})
-        bus.emit.assert_called_once()
+
+        assert len(received) == 1, "注入的总线上没收到事件"
+        assert received[0].data == {"module_id": module.MODULE_ID, "key": "value"}
