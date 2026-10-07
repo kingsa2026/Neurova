@@ -171,6 +171,29 @@ class SkillExperienceStore(PersistedStateMixin):
         with self._lock:
             return list(self._records.get(skill_id, []))
 
+    def migrate_records(self, from_skill_id: str, to_skill_id: str) -> int:
+        """吸收合并账本迁移（P1-1，2026-10-07）：from 的 applied 记录重键到 to。
+
+        这些记录在被吸收技能上已是生效史（applied/已审），迁移不是新主张——
+        因此不走待审队列，直接进 to 的 applied 记录；同内容去重（to 已有的
+        不重复搬）。返回迁移条数；账本迁移失败由调用方留痕（不阻断归档）。
+        """
+        moved = 0
+        with self._lock:
+            records = self._records.pop(from_skill_id, [])
+            bucket = self._records.setdefault(to_skill_id, [])
+            existing = {r.content for r in bucket}
+            for record in records:
+                if record.content in existing:
+                    continue
+                record.skill_id = to_skill_id
+                bucket.append(record)
+                moved += 1
+        if moved:
+            self._maybe_persist()
+            logger.info("经验账本迁移: %s → %s 共 %d 条", from_skill_id, to_skill_id, moved)
+        return moved
+
     # ── 待审批队列（C10 治理收紧）──
 
     def list_pending_experiences(self, skill_id: Optional[str] = None) -> List[SkillExperienceRecord]:

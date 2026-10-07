@@ -41,6 +41,11 @@ DEFAULTS: Dict[str, Any] = {
     # 工单 015 收口的两个裸 env。默认值＝收口前的现网默认，不顺手改口径
     "crystallization_llm_gate_enabled": True,  # 结晶 LLM 裁决闸（关=候选直写存储引擎）
     "skill_auto_retire_enabled": False,  # 技能自动淘汰（关=只上报候选不执行禁用）
+    # 整合全自动 commit gate（2026-10-07 规则修订：用户指令"全自动替代人工审批"）。
+    # gate 为确定性多检 fail-closed（召回预检+结构身份门槛，任一检不过仍留人工），
+    # 动作=归档可逆+账本迁移+留痕；关=回退人工审批面。规则修订登记：
+    # docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0
+    "consolidation_auto_commit_enabled": True,
     # 压缩经济性判据（关=沿用"必然装不下就等比缩小"的既有行为，现网零变更）
     "compression_economics_enabled": False,
     # G5-D：治理判 ASK 时，执行咽喉阻塞等待人工裁决的上界（秒）。

@@ -1,15 +1,21 @@
-"""技能库巩固(umbrella)— 识别可合并技能簇,产出合并**计划**(纯计划,零变更)。
+"""技能库巩固(umbrella)— 识别可合并技能簇,产出合并计划并按治理模式执行。
 
-哲学收窄为两段:
-  - **本模块是确定性计划段**(零 LLM):按**结构身份**聚类(工具序列/参数/
-    业务意图,见 `find_structural_clusters`),选出 umbrella,产出
-    ConsolidationPlan 列表;**绝不直接改技能库**;
-  - 执行段走既有审批面(skill_review_gate / skill_pool_api consolidation 审批),
-    由人/审批流拍板后才真正合并归档。
+治理模式(2026-10-07 规则修订,登记于
+docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0):
+  - 默认(consolidation_auto_commit_enabled=false):**纯计划段**——本模块
+    零 LLM 产出计划,执行走审批面(skill_pool_api /consolidation/*),由人拍板;
+  - 全自动(开关=true,2026-10-07 用户指令):计划过**确定性 commit gate**
+    (`auto_commit_gate_issues`——召回预检 + 结构身份门槛,fail-closed:任一检
+    不过仍留人工)即自动执行 `ConsolidationApproval.approve`,decided_by=
+    "auto_commit_gate" 全程留痕。此为对"绝不自动合并"旧哲学的显式修订:
+    整合动作=归档可逆+预检确定性+账本迁移,风险量级低于新技能生成
+    (后者维持评审闸不变)。
 
+共同语义:
   - 只归档不删除,可恢复;
   - "一个宽 umbrella + 标注小节"优于"N 个窄兄弟";
-  - 包完整性:吸收 references/ 必须重新编目(执行段责任,计划里标注)。
+  - 包完整性:吸收 references/ 须重新编目(执行段责任,计划里标注);
+  - 吸收时被吸收技能的 applied 经验重键到 umbrella(P1-1,教训不冷启动)。
 
 P1 收口(2026-09-17):**聚类口径从"名字前缀"换成"结构身份"**。
 旧实现只按名字前缀聚簇,于是"同一工具序列、名字形态不同"的一批
@@ -408,6 +414,8 @@ class ConsolidationPlanStore:
         （`data_root.require_data_path`），不在本模块另抄一份。
         """
         self.path = require_data_path(skills_dir, "skills_dir（合并计划落盘锚点）") / filename
+        # 工单 016 口径：溢出必须留痕计数，不许静默丢（2026-10-07 对齐）
+        self.overflow_dropped = 0
 
     def load(self) -> list[dict]:
         import json
@@ -419,7 +427,11 @@ class ConsolidationPlanStore:
         return items if isinstance(items, list) else []
 
     def upsert(self, plans: list[dict], limit: int = 50) -> list[dict]:
-        """按 umbrella 覆盖式登记（同一簇重复规划不叠加），有界保留。"""
+        """按 umbrella 覆盖式登记（同一簇重复规划不叠加），有界保留。
+
+        有界截断的溢出计数进 `overflow_dropped` 并告警——静默丢计划等于
+        观察面失明（对齐 skill_experience/结晶器的工单 016 口径）。
+        """
         import json
         import os
 
@@ -427,7 +439,16 @@ class ConsolidationPlanStore:
         for plan in plans:
             if isinstance(plan, dict) and plan.get("umbrella"):
                 by_umbrella[plan["umbrella"]] = {**plan, "status": plan.get("status", "pending")}
-        items = list(by_umbrella.values())[-limit:]
+        items = list(by_umbrella.values())
+        overflow = len(items) - limit
+        if overflow > 0:
+            self.overflow_dropped += overflow
+            dropped = [p.get("umbrella") for p in items[:overflow]]
+            logger.warning(
+                "合并计划仓超上界 %d，丢弃最旧 %d 条（累计 %d）: %s",
+                limit, overflow, self.overflow_dropped, dropped,
+            )
+            items = items[-limit:]
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".json.tmp")
@@ -437,12 +458,20 @@ class ConsolidationPlanStore:
             logger.debug("合并计划落盘失败: %s", e)
         return items
 
-    def decide(self, umbrella: str, approve: bool) -> bool:
+    def decide(self, umbrella: str, approve: bool,
+               decided_by: str = "", gate_issues: Optional[list] = None) -> bool:
+        from datetime import datetime, timezone
+
         items = self.load()
         hit = False
         for item in items:
             if item.get("umbrella") == umbrella and item.get("status") == "pending":
                 item["status"] = "approved" if approve else "rejected"
+                if decided_by:
+                    item["decided_by"] = str(decided_by)
+                item["decided_at"] = datetime.now(timezone.utc).isoformat()
+                # 审计面统一形态：过闸=空表，留人工=预检读数
+                item["gate_issues"] = list(gate_issues or [])
                 hit = True
         if hit:
             self.upsert(items)
@@ -450,30 +479,140 @@ class ConsolidationPlanStore:
 
 
 class ConsolidationApproval:
-    """合并审批执行器（审批面调用；计划 → 归档被吸收技能 + 留痕）。
+    """合并审批执行器（审批面调用；计划 → 归档被吸收技能 + 账本迁移 + 留痕）。
 
     语义选择：**归档不删除**（本模块设计契约"只归档不删除，可恢复"），
     被吸收成员转 archived 并由生命周期摘除，umbrella 保留可命中。绝不在此
     生成新技能正文——正文级改写走文本进化通道（有标尺）。
+    吸收时被吸收技能的 applied 经验重键到 umbrella（P1-1，2026-10-07）：
+    教训随家族走，umbrella 不冷启动重新学习。
     """
 
     def __init__(self, service, store: Optional[ConsolidationPlanStore] = None):
         self.service = service
         self.store = store
 
-    def approve(self, umbrella: str, absorbed: list) -> dict:
-        archived, failed = [], []
+    def approve(self, umbrella: str, absorbed: list,
+                decided_by: str = "human") -> dict:
+        archived, failed, migrated = [], [], {}
         for skill_id in absorbed:
             try:
                 result = self.service.archive_skill(skill_id)
             except Exception as e:  # noqa: BLE001 - 单个失败不阻断其余（可重试）
                 result = {"success": False, "error": str(e)}
             (archived if result.get("success") else failed).append(skill_id)
-        if self.store is not None and not failed:
-            self.store.decide(umbrella, approve=True)
-        return {"umbrella": umbrella, "archived": archived, "failed": failed}
+            if result.get("success"):
+                try:
+                    from neurova.evolution.skill_experience import (
+                        get_skill_experience_store,
+                    )
 
-    def reject(self, umbrella: str, absorbed: list) -> dict:
+                    moved = get_skill_experience_store().migrate_records(
+                        skill_id, umbrella)
+                    if moved:
+                        migrated[skill_id] = moved
+                except Exception as e:  # noqa: BLE001 - 账本迁移失败不阻断归档（可重试）
+                    logger.warning("经验账本迁移失败 %s → %s: %s", skill_id, umbrella, e)
+        if self.store is not None and not failed:
+            self.store.decide(umbrella, approve=True, decided_by=decided_by)
+        return {"umbrella": umbrella, "archived": archived, "failed": failed,
+                "migrated_experiences": migrated, "decided_by": decided_by}
+
+    def reject(self, umbrella: str, absorbed: list,
+               decided_by: str = "human") -> dict:
         if self.store is not None:
-            self.store.decide(umbrella, approve=False)
-        return {"umbrella": umbrella, "rejected": list(absorbed)}
+            self.store.decide(umbrella, approve=False, decided_by=decided_by)
+        return {"umbrella": umbrella, "rejected": list(absorbed),
+                "decided_by": decided_by}
+
+
+def auto_commit_gate_issues(service, plan: dict) -> list:
+    """全自动 commit gate 的确定性预检(P1-2/SkillGLoW 对比落地,零 LLM)。
+
+    fail-closed 多检——任一不过即留人工:
+    1. basis=="name_prefix"(无结构身份的兜底簇)永不自动提交;
+    2. umbrella 必须真实存在且描述非空(死种子不吞并别人);
+    3. 召回预检:umbrella 的名述必须能召回每个被吸收成员的技能名
+       (复用 routing_sanity_check 的正例召回判据,单一事实源)——
+       这正是 SkillGLoW 自认"修好一个弄坏另一个"失败模式的审批前拦截。
+    """
+    issues: list = []
+    umbrella = str(plan.get("umbrella") or "")
+    absorbed = [str(a) for a in (plan.get("absorbed") or [])]
+    if plan.get("basis") == "name_prefix":
+        issues.append("name_prefix 兜底簇无结构身份可依,留人工裁决")
+    detail = {}
+    try:
+        detail = service.get_skill_info(umbrella) or {}
+    except Exception as e:  # noqa: BLE001
+        issues.append(f"umbrella 详情读取失败: {e}")
+        detail = {}
+    if not detail:
+        issues.append(f"umbrella 不存在: {umbrella}")
+        return issues
+
+    from neurova.skills.skill_injection import routing_sanity_check
+
+    positives = []
+    for sid in absorbed:
+        info = {}
+        try:
+            info = service.get_skill_info(sid) or {}
+        except Exception as e:  # noqa: BLE001
+            issues.append(f"被吸收成员 {sid} 详情读取失败: {e}")
+        positives.append(str(info.get("name") or sid))
+    issues.extend(routing_sanity_check(
+        str(detail.get("name") or umbrella),
+        str(detail.get("description") or ""),
+        positive_queries=positives,
+    ))
+    return issues
+
+
+def consolidation_auto_commit_enabled() -> bool:
+    """全自动 commit gate 开关(治理设置;env NEUROVA_CONSOLIDATION_AUTO_COMMIT
+    逃生门)。默认开 = 2026-10-07 用户指令"全自动 commit gate 替代人工审批"
+    的规则修订;关 = 回退人工审批面。"""
+    from neurova.security.governance_settings import resolve_flag
+
+    return resolve_flag(
+        "consolidation_auto_commit_enabled", "NEUROVA_CONSOLIDATION_AUTO_COMMIT")
+
+
+def maybe_auto_commit(service, store: ConsolidationPlanStore,
+                      plans: list) -> list:
+    """对 pending 计划跑全自动 commit gate:过闸即执行,不过留人工。
+
+    Returns: 审计列表 [{umbrella, decision, gate_issues|result}]。
+    """
+    audits: list = []
+    if not consolidation_auto_commit_enabled():
+        return audits
+    for plan in plans:
+        if not isinstance(plan, dict) or plan.get("status") != "pending":
+            continue
+        umbrella = str(plan.get("umbrella") or "")
+        if not umbrella:
+            continue
+        issues = auto_commit_gate_issues(service, plan)
+        if issues:
+            # 不过闸不改状态（留人工），但把预检读数挂回计划留痕
+            items = store.load()
+            for item in items:
+                if item.get("umbrella") == umbrella:
+                    item["gate_issues"] = issues
+            store.upsert(items)
+            audits.append({"umbrella": umbrella, "decision": "held_for_human",
+                           "gate_issues": issues})
+            logger.info("整合计划 %s 未过自动 commit gate,留人工: %s", umbrella, issues)
+            continue
+        result = ConsolidationApproval(service, store).approve(
+            umbrella, list(plan.get("absorbed") or []),
+            decided_by="auto_commit_gate")
+        audits.append({"umbrella": umbrella, "decision": "auto_committed",
+                       "gate_issues": [], "result": result})
+        logger.info(
+            "整合计划 %s 过自动 commit gate,已执行(archived=%s, migrated=%s)",
+            umbrella, result.get("archived"), result.get("migrated_experiences"),
+        )
+    return audits
