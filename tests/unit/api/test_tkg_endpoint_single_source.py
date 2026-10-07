@@ -12,6 +12,7 @@
 """
 
 from __future__ import annotations
+from tests.auth_headers import bearerHeaders
 
 import os
 
@@ -69,7 +70,7 @@ def client(manager):
     # 端点直接调用模块级 `get_memory_manager`（不是 Depends），所以补丁打在它的
     # 模块命名空间上——注入隔离 manager，不碰应用全局状态。
     with patch.object(tkgModule, "get_memory_manager", lambda *a, **k: manager):
-        yield TestClient(app, raise_server_exceptions=False)
+        yield TestClient(app, raise_server_exceptions=False, headers=bearerHeaders("u1"))
 
 
 class TestFactsLandInTheSingleAuthority:
