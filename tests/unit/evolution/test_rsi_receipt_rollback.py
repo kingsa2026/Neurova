@@ -9,13 +9,14 @@ NameError 在 `except Exception` 之前抛出，回滚那行 `setattr` 于是永
 from __future__ import annotations
 
 import ast
-import io
 import os
+import pathlib
 
 import pytest
 
 from neurova.evolution.rsi.debt_ledger import RsiDebtLedger
 from neurova.evolution.rsi.integration_manager import RSIIntegrationManager
+from tests import ast_scan
 from tests.unit.evolution.conftest import ProbeSystem
 
 TOOL_MEMORY_PARAMS = {
@@ -91,27 +92,26 @@ def _phantomLoggerSites(repoRoot: str):
     """全仓扫 `self._logger` 取用点，返回"所在类未定义（含沿继承链）"的位置。"""
     defines, assigns, usages = {}, set(), []
 
-    for root, dirs, files in os.walk(repoRoot):
-        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".venv", "node_modules")]
-        for name in files:
-            if not name.endswith(".py"):
+    # 本条只扫一遍、不留常驻语法树，故走共享的一次性入口；顺带吃文本预筛——
+    # 连 `_logger` 都没出现的文件不可能有取用点（`tests/unit/test_ci_ast_scan_budget_guard.py`
+    # 常驻拦「私有全仓 rglob + ast.parse」：判据成本不得随代码总量涨）。
+    for ref in ast_scan.sourceRefsUnder(pathlib.Path(repoRoot), hints=("_logger",)):
+        path = str(ref.path)
+        try:
+            tree = ast_scan.transientTree(ref.path)
+        except (SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
                 continue
-            path = os.path.join(root, name)
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-            except (SyntaxError, ValueError):
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef):
-                    continue
-                defines[node.name] = [ast.unparse(b).split(".")[-1] for b in node.bases]
-                for sub in ast.walk(node):
-                    if (isinstance(sub, ast.Attribute) and sub.attr == "_logger"
-                            and isinstance(sub.value, ast.Name) and sub.value.id == "self"):
-                        if isinstance(sub.ctx, ast.Store):
-                            assigns.add(node.name)
-                        else:
-                            usages.append((path, sub.lineno, node.name))
+            defines[node.name] = [ast.unparse(b).split(".")[-1] for b in node.bases]
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Attribute) and sub.attr == "_logger"
+                        and isinstance(sub.value, ast.Name) and sub.value.id == "self"):
+                    if isinstance(sub.ctx, ast.Store):
+                        assigns.add(node.name)
+                    else:
+                        usages.append((path, sub.lineno, node.name))
 
     def definedInChain(className, seen):
         if className in seen:
