@@ -1660,3 +1660,31 @@ tests/unit/core/test_eventBusWiringFromBaseModule.py
 # injector 不得再自带第二份 BaseModule（含其吞异常的私有 handlers）。
 # 逐文件单跑 6 passed
 tests/unit/context/test_injectorLifecycleHooksNeverRan.py
+# A 轮（§6-12 总线合一）：同一功能在仓内只剩一份实现被消费。四条形态各钉一格——
+# 全仓 `class EventBus` 定义归一（原状两份平行实现，且 `memory_layer/manager.py:185`
+# 是每个 manager 自建**私有总线**、其出口 :832 零调用方，所以 MEMORY_* 不是"发了没人订"，
+# 是发在一条别人拿不到的总线上；`get_stats()` :2115-2116 读的两个数也因此恒等于私有实例）、
+# 记忆写入必须抵达共享总线、统计读数与共享总线同源、反向守卫按 AST 钉死
+# "manager 不得再自建总线实例"。另钉 §6-49：async 订阅者在无异步队列时不得静默丢弃
+# （要么执行、要么计为丢弃，两侧都不发生即丢数据）。逐文件单跑 5 passed
+tests/unit/cognitive_layers/test_memoryBusSingleSource.py
+# A 轮收口格：记忆写入要能在**现役 HTTP 读面**上看到——`/api/v1/logs` 读的就是共享总线的
+# 事件日志（前端 `NeurUI/src/api/modules/system-logs.ts` 在用），只证"发出去了"不算闭环。
+# 如实记：本批一度想把事件接到"清注入器上下文缓存"，实测 `cache_entry`/`get_cached_entry`
+# **全仓零调用方**（那张 LRU 既不写也不读），接上去绿灯会亮、闭环并不存在，故撤回该形态，
+# 该格改登记为产品裁决项（台账 §6-51）。逐文件单跑 2 passed
+tests/unit/cognitive_layers/test_memoryEventsReachLogsEndpoint.py
+# 前置守卫修复：跨文件 AST 判据的扫描面必须剪掉第三方树。实测本仓根下 35965 个 .py 里
+# **32711 个来自 `.venv`/`node_modules`**，文本预筛要先把每个文件读一遍 → 全量读 49.68s
+# 越过 pyproject 全局 `timeout = 30`，整个 `tests/unit/cognitive_layers/` 在开发机上不可跑
+# （同一判据在仓外精简 worktree 只 5.87s 通过——绿灯取决于本机装了什么，与 §6-43 同族）。
+# 四条：扫描面不含第三方；`neurova/ tests/ scripts/` 仍全覆盖且总量 >1000（防"排除"
+# 写成"什么都不扫"）；预筛结果不混入第三方；往 `neurova/` 种探针文件必须仍被扫到。
+# 逐文件单跑 4 passed
+tests/unit/test_astScanThirdPartyPrune.py
+# P3-11（B1）：429 的拍板口径与"累计预算"这一格。值层——interval=20s、wait_budget=200s
+# 必须由单源 DEFAULTS 给出，env 可覆盖，治理面 PUT 收这一格，前端类型与设置页也必须有
+# （**四格同现**，少一格就是"能配但看不见/读不到"的断点）；行为层——把 max_retries 调到 50、
+# 两个候选都恒 429 时，整条流累计等待必须 ≤ 预算且必须给出诚实终态（原状每个候选各带一份
+# 预算，5 候选最坏 ≈2 小时，且没有任何一格宣告过尽头）。逐文件单跑 6 passed
+tests/unit/llm/test_llm429WaitBudget.py
