@@ -27,12 +27,22 @@ from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
 from neurova.evolution.eval.dataset import EvalDataset, dataset_dir_for
 from neurova.evolution.eval.runner import EvolutionRunResult
+from neurova.evolution.proposal_lifecycle import (
+    ProposalStatus,
+    ProposalTransitionError,
+    assert_can_decide,
+    normalize_legacy_status,
+    require_approver,
+)
 
 logger = get_logger(__name__)
 
-STATUS_PENDING = "pending"
-STATUS_APPROVED = "approved"
-STATUS_REJECTED = "rejected"
+# 状态字面量收口到提案生命周期契约（§6-2 阶段①，单一事实源）。
+# 历史行的 "approved"（批准即生效）在读路径归一为规范值 "applied"；
+# STATUS_APPROVED 随死状态退役——批准是原子决定，终态即 applied。
+STATUS_PENDING = ProposalStatus.PENDING.value
+STATUS_APPLIED = ProposalStatus.APPLIED.value
+STATUS_REJECTED = ProposalStatus.REJECTED.value
 
 class SimulatedAgent:
     """技能→输出的模拟执行器。
@@ -374,27 +384,44 @@ class SkillEvolutionService:
             return []
         if not isinstance(items, list):
             return []
+        # 历史行 "approved" 读路径归一为规范值 "applied"（§6-2 阶段①；
+        # 下一次 decide 落盘时整表落规范值）
+        items = [{**p, "status": normalize_legacy_status(p.get("status"))}
+                 for p in items if isinstance(p, dict)]
         if status:
             return [p for p in items if p.get("status") == status]
         return items
 
-    def decide(self, proposal_id: str, approve: bool, registry: Any = None) -> bool:
-        """批准=写回技能正文并持久化;拒绝=只改状态。**唯一变更点在此**。"""
+    def decide(self, proposal_id: str, approve: bool, registry: Any = None,
+               approver: str = "") -> bool:
+        """批准=写回技能正文并持久化;拒绝=只改状态。**唯一变更点在此**。
+
+        审批语义单源于提案生命周期契约（§6-2 阶段①）：仅 PENDING 可被决定
+        （assert_can_decide）；批准必须记录非空审批人（require_approver）——
+        决策可归因，此前文本臂缺这层（API 拿到认证身份却没传进 decide）。
+        """
         self._dir.mkdir(parents=True, exist_ok=True)
         lock_path = self._proposals_file.with_suffix(".lock")
         with lock_path.open("a+"):
             items = self.list_proposals()
             target = next((p for p in items if p.get("proposal_id") == proposal_id), None)
-            if target is None or target.get("status") != STATUS_PENDING:
+            if target is None:
+                return False
+            try:
+                assert_can_decide(target.get("status", ""))
+            except ProposalTransitionError:
                 return False
             if approve:
+                approver = require_approver(approver, action="批准提案")
                 ok = self._apply_to_skill(target, registry)
                 if not ok:
                     return False
-                target["status"] = STATUS_APPROVED
+                target["status"] = STATUS_APPLIED
                 self._journal_append(target)  # P2-11：批准即 commit（失败降级不阻断）
             else:
                 target["status"] = STATUS_REJECTED
+            if approver.strip():
+                target["decided_by"] = approver.strip()
             target["decided_at"] = datetime.now(UTC).isoformat()
             self._write_proposals(items)
             return True

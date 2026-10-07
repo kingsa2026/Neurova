@@ -107,11 +107,13 @@ class TestEvolveFlow:
                        description=None, **kw: fake_update_auto_skill(
                            sid, version, config, name, description,
                            enforce_quality=kw.get("enforce_quality")))
-            ok = svc.decide("evo_test", approve=True)
+            ok = svc.decide("evo_test", approve=True, approver="tester")
         assert ok
         assert applied["config"]["context_template"] == "BASE+IMPROVED"
         assert applied["version"] == "1.0.1"
-        assert svc.list_proposals()[0]["status"] == "approved"
+        # §6-2 阶段①：规范终态是 applied（原子决定），且决策可归因
+        assert svc.list_proposals()[0]["status"] == "applied"
+        assert svc.list_proposals()[0]["decided_by"] == "tester"
 
     @pytest.mark.asyncio
     async def test_proposal_reject_keeps_skill(self, svc):

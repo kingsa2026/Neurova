@@ -286,4 +286,4 @@
 
 **P2-5 更正为无消费方**:`finish_reason` 仅在响应实体与个别 adapter 透传,无截断处理;agent 侧无会被重试等待污染的预算时钟。两个习得细节(诚实计时、截断修复)**在本仓没有落地消费面**,按"不注册无消费者模块"纪律登记不实施。触发再评估条件:文本进化执行器接真 LLM 并引入墙钟预算,或引入 JSON 动作循环。
 
-**§6-2 评估结论(登记,不执行)**:两套提案仓(text evolution `proposals.json` vs RSI `proposals/<id>.json`)的重叠在**审批生命周期壳**(pending/approve/reject/rollback),payload 与审批面本就异构(文本变体 vs manifest/action/patch 三型)。整体收口 = 统一提案生命周期契约 + 迁移两套 API + 前端配合,属多日重构且当前无消费者拉力。分阶段方案登记:①先统一状态机与审批语义的单一事实源(共享契约模块);②再迁移持久层;③最后合并 API 面。触发条件:任一侧需要新提案类型时优先走统一壳。
+- **§6-2 评估结论 → 阶段①已落地(2026-10-07)**:两套提案仓的重叠在**审批生命周期壳**。阶段①以 `neurova/evolution/proposal_lifecycle.py` 收口为单一事实源——规范四态(PENDING/REJECTED/APPLIED/ROLLED_BACK,两臂批准均为原子决定)、转移合法性(`assert_can_decide`/`assert_can_rollback`)、审批归因(`require_approver`)统一;两仓接通:RSI 枚举改引契约类(死状态 APPROVED 退役——从未有转移产出它)、文本臂补上缺失的审批人归因(API 认证身份传入 decide,缺失即 400,历史行 "approved" 读路径归一为 "applied"),前端 TS 类型同步。红绿实测 14 用例(契约 9 + 接线 5),连带测试同步 4 文件;evolution+api 全量 3518 过,16 失败 + 8 错误经两轮 stash A/B 双向自证为预存。阶段②(持久层合并)与③(API 面合并)维持登记,触发条件不变。
