@@ -754,6 +754,11 @@ tests/unit/context/test_ttl_reclaim_and_session_identity.py
 #   同时恢复；③ 落到 direct 必须可见（get_context_health()["turn_identity"] 有
 #   计数与 last_key，首次 warning 点名）；④ 放大视角：`get_token_budget()` 的
 #   会话快照也改读同一份回落链（原先读构造期初值，生产恒 None → 串会话读数）。
+# ⚠ 本清单口径"逐文件单跑确定全绿"在这一条上**当前不成立**（HEAD 实测 1 failed / 7 passed，
+#   干净数据根单跑同样红）：红的 `test_two_direct_sessions_do_not_share_fold_summary` 断言
+#   "单聊 B 不得见 A 的内容"，而 `orchestrator.py:1487-1489` 把"单聊仍跨普通会话召回"写成
+#   设计——判据与口径互相矛盾，已按 §6-40（台账）登记待裁。在它裁定前，A/B 请把这一条
+#   当**基线既有失败**看待，不要记成后批的回归。
 tests/unit/context/test_turn_identity_wiring.py
 
 # Issue #81 复核：设计 §6 三条硬规则点名的**包层守卫**漏登记（14 文件 / 197 用例）。
