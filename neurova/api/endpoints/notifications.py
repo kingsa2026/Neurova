@@ -77,20 +77,38 @@ def notify_user(
         logger.warning("notify_user failed (user=%s): %s", user_id, exc)
 
 
-def _admin_user_ids() -> List[str]:
-    """枚举注册管理员 id（enhanced_users_api._users_store）。"""
-    try:
-        from neurova.api.endpoints import enhanced_users_api
+def _enumerateAccountIds(role: Optional[str] = None) -> List[str]:
+    """枚举真实账号 id——与身份链同一事实源（`auth/user_model.UserModel`，JWT 的
+    `sub`/`user_id` 就是这里的账号 id）。
 
-        store = getattr(enhanced_users_api, "_users_store", None) or {}
-        return [
-            str(uid)
-            for uid, info in store.items()
-            if isinstance(info, dict) and info.get("role") == "admin"
-        ]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enumerate admin users failed: %s", exc)
-        return []
+    原实现读 `enhanced_users_api._users_store`：那是一个**从不播种的进程内字典**，
+    于是"通知管理员"永远枚举到空集、全体落进 default 共享桶——既没送达真管理员，又把
+    管理员可见内容放进跨租户可读的面。分页取（默认 limit=100 会把第 101 个账号静默丢掉）。
+    """
+    ids: List[str] = []
+    limit, offset = 200, 0
+    try:
+        from neurova.auth.user_model import UserModel
+
+        model = UserModel()
+        while True:
+            page = model.list_users(limit=limit, offset=offset, role=role, status="active") or []
+            ids.extend(str(user.id) for user in page if getattr(user, "id", None) is not None)
+            if len(page) < limit:
+                break
+            offset += limit
+    except Exception as exc:  # noqa: BLE001 - 通知不阻断业务，但降级必须点名
+        logger.error(
+            "枚举账号失败（role=%s），通知将落进 default 桶——管理员/用户可能漏收: %s",
+            role,
+            exc,
+        )
+    return ids
+
+
+def _admin_user_ids() -> List[str]:
+    """枚举注册管理员 id（真实账号源）。"""
+    return _enumerateAccountIds(role="admin")
 
 
 def notify_admins(
@@ -113,14 +131,7 @@ def notify_all_users(
     data: Optional[Dict[str, Any]] = None,
 ) -> int:
     """给所有注册用户发通知；无注册用户时兜底 default。"""
-    try:
-        from neurova.api.endpoints import enhanced_users_api
-
-        store = getattr(enhanced_users_api, "_users_store", None) or {}
-        target_ids = [str(uid) for uid in store.keys()]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enumerate users failed: %s", exc)
-        target_ids = []
+    target_ids = _enumerateAccountIds()
     if not target_ids:
         target_ids = ["default"]
     for uid in target_ids:

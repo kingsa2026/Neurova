@@ -1553,3 +1553,8 @@ tests/unit/memory/test_memoryCipherFailFast.py
 # NEUROVA_DATA_DIR 不生效，实测把账号写进仓内真库）+ 默认弱口令打印到 stdout + 失败仍以 0 退出。
 # 探针跑真子进程且 cwd 故意不同于数据根，使"CWD 落点"与"锚点落点"一眼可分。逐文件单跑 6 passed
 tests/unit/test_adminBootstrapLanding.py
+# P1-4：通知的管理员/全员枚举必须取真账号源。`notifications.py` 曾读 enhanced_users_api
+# .users_store——那份字典从不播种，于是 notify_admins 永远枚举到空集、全体落进 default
+# 共享桶（既没送达真管理员，又把管理员可见内容放进跨租户可读面）。判据含"零账号才兜底
+# default"与 AST 形态的防回流（附注入自证）。逐文件单跑 6 passed
+tests/unit/api/test_notificationsEnumerateRealUsers.py
