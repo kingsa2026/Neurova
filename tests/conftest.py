@@ -21,6 +21,22 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 MOE_STATE_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaMoeState-"))
 os.environ.setdefault("NEUROVA_MOE_INDEX_STATE_DIR", str(MOE_STATE_SESSION_DIR))
 
+# 数据根——**导入期**兜底（与上面 MoE 同形，且必须在任何 `neurova.*` 被 import 之前）。
+#
+# `core/data_root.get_data_root()` 的兜底是**仓库内** `data/`；而多个模块把它写在
+# **模块级**（`library_service._BASE_DIR = get_data_root()`、`skill_service` 的默认落点
+# 等），即 import 那一刻就把仓库根冻进常量，之后注入 env 一律看不见。
+# 于是「构造一个默认落点的生产对象」在仓库根建塔写盘：受保护子集实跑 4 条
+# ERROR（`data` / `.skill_scanner` / `.agents` / `__pycache__`）全此形态，
+# 由 `_guardRepoRootAgainstPollution` 逐条点名。
+#
+# 为什么钉在这里而不是 per-test fixture：落点多数是**构造期/import 期**定死的，
+# per-test 的 monkeypatch 来得太晚（那正是 `_isolate_agent_workspaces_root` 与
+# `_isolateSessionsLanding` 对"构造期定死"无可奈何的同一形态）。收在导入期才覆盖
+# 全量装配点，也随子进程 env 继承下去；生产默认仍是仓库 `data/`，本行不改任何默认值。
+DATA_ROOT_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaDataRoot-"))
+os.environ.setdefault("NEUROVA_DATA_DIR", str(DATA_ROOT_SESSION_DIR))
+
 # 仓库根（污染守卫的快照对象）：conftest 在 tests/ 下，parents[1] 即根。
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

@@ -625,7 +625,11 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
     "tests/e2e/test_phase4_integration.py": 2,
-    "tests/integration/test_multi_agent_coordination.py": 1,
+    # `tests/integration/test_multi_agent_coordination.py` 已**销账**（原登记 1 处）：
+    # `f4776229` 把那条性能用例（`avg_latency_ms < 1.0`）的读数改成按
+    # `iterations` 常量折算，`wallclockBounds` 因阈值由常量算术得出而不再判为
+    # 墙钟上界——该文件的墙钟上界归零，键从本表消失（不是"沉默地少登记一条"：
+    # 任何新增的墙钟上界都会让本表的分布比对重新判红）。
     "tests/performance/test_context_pool_load.py": 1,
     "tests/unit/agent/test_b7_worker_occupancy.py": 2,
     "tests/unit/agent/test_post_chat_pipeline_tdd.py": 1,

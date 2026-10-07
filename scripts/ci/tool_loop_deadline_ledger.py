@@ -576,9 +576,17 @@ def _ctorBindings(symbol: str) -> Tuple[Dict[str, object], ...]:
     return tuple(bindings)
 
 
+#: 单源派生点的**命名契约**：只有读配置键、且名字落在本前缀上的取值函数才被
+#: 认作"阈值参数的绑定来源"。收窄到前缀而不是"任意函数调用"，是因为后者会把
+#: `spec.get("goal")` 这类普通取值也算成绑定——实测它会从无关模块抓来
+#: `access_count` 当配置键，于是 `_ctorBindings` 对**每个**关键字参数都报一个
+#: 假绑定，轴值随之失真。宁可少认（退回 unbound，红着让人看见）不可乱认。
+_DERIVATION_PREFIXES = ("resolve",)
+
+
 @functools.lru_cache(maxsize=None)
 def _singleSourceDerivations() -> Dict[str, str]:
-    """单源派生点：`{函数名: 它读的配置键}`（全生产侧扫一遍，不在此手抄键名）。
+    """单源派生点：`{函数名: 它读的配置键}`（扫生产侧，不在此手抄键名）。
 
     **为什么需要它**：阈值参数绑到配置单源有两种正确写法——
     ① 构造处直接下标 `IterationGate(max_rounds=limits["max_loop_rounds"])`；
@@ -590,24 +598,35 @@ def _singleSourceDerivations() -> Dict[str, str]:
     那是判据在替旧形态背书。故这里按 AST 取出"某函数读了哪个配置键"，供
     `_ctorBindings` 把写法②认成绑定。
 
-    取法：函数体内出现 `get_effective_limits()[<键>]` 或 `limits[<键>]` 形态即记
-    `函数名 → 键`。同名函数只认同一个键（同一函数读两个键属异常，取首个并保留事实）。
+    取法：函数体内出现 `limits[<键>]` 形态即记 `函数名 → 键`。同名函数只认同一个
+    键（同一函数读两个键属异常，取首个并保留事实）。
 
-    **单趟遍历**：每个文件只走一趟 `ast.walk`，把节点取出后先列出函数区间表
-    `(名, 起, 止)`，再把每个 `Subscript` 按行号归属到包含它的函数。早期写法在**每个
-    函数节点上再 `ast.walk(node)` 扫一遍子树**，把外层已走过的节点又走一遍
-    （实测 1.59M 节点里 1.46M 是重复访问）；叠加 `facts()` 对 28 个登记符号各调一次
-    本函数，节点访问量冲到 9.5M，带覆盖率时同一路径 9s → 24.8s，CI 的 2 核 runner
-    上越过 30s 超时判死。`lru_cache` 让同进程内的重复取数不再重扫——读数只依赖
-    AST 事实，缓存不引入漂移。
+    **扫描面收窄到消费面**（CI 超时的根因修复）：本函数的**唯一消费方**是
+    `_derivationCallKey()`，而它只认 `_DERIVATION_PREFIXES`（`resolve` 前缀）的
+    函数名——`_ctorBindings()` 交进来的表达式是 `self.resolveToolRoundBudget()`
+    这类调用形态。故本函数只可能被查到前缀名，其余 1500+ 条函数→键映射**一生无人读**。
+
+    早期实现把整棵生产树走完、为**每个**含下标的函数建条目：实测 1.58M 节点、
+    1540 条映射，其中消费面只有 14 条。带 `--cov` 时每次 AST 遍历都挂行跟踪，
+    本机 4.5s → 7.9s，CI 的 2 核 runner 上叠加受保护子集同进程负载即越过 30s
+    超时判死（本判据根因 = CI 单红超时）。
+
+    两处收窄，都不改变消费面读数：
+
+    1. **文本预筛**：函数名以 `resolve` 起头 ⇒ 文本必含 `resolve`；不含它的文件
+       不可能有派生点。走 `ast_scan.sourceRefsUnder(hints=...)` 这一唯一共享入口
+       （`AGENTS.md` 第 6 条：不新造平行体系），解析面 1030 → 195 个文件。
+    2. **建条目时按前缀过滤**：只登记 `_DERIVATION_PREFIXES` 前缀的函数，不再为
+       全仓每个含下标的函数建一条无人读的映射。
+
+    判据自证：前缀过滤是**充分条件**的收窄，不是放宽——被过滤掉的名字在
+    `_derivationCallKey()` 里首行即被 `startswith` 挡掉，读数不可能因它而变
+    （`tests/unit/tools/test_tool_loop_deadline_ledger.py` 按消费面逐条反证）。
     """
     findings: Dict[str, str] = {}
-    for path in PRODUCTION_ROOT.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        rel = ast_scan.relativeToRepo(path)
+    for ref in ast_scan.sourceRefsUnder(PRODUCTION_ROOT, hints=_DERIVATION_PREFIXES):
         try:
-            tree = _parsed(rel)
+            tree = _parsed(ast_scan.relativeToRepo(ref.path))
         except (SyntaxError, OSError):
             continue
         # 单趟：节点取出后复用，先列函数区间表再归属 Subscript。
@@ -618,6 +637,7 @@ def _singleSourceDerivations() -> Dict[str, str]:
             (node.name, node.lineno, node.end_lineno or node.lineno)
             for node in nodes
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith(_DERIVATION_PREFIXES)
         ]
         if not scopes:
             continue
@@ -634,14 +654,6 @@ def _singleSourceDerivations() -> Dict[str, str]:
                 if start <= node.lineno <= end:
                     findings.setdefault(name, found.group(1))
     return findings
-
-
-#: 单源派生点的**命名契约**：只有读配置键、且名字落在本前缀上的取值函数才被
-#: 认作"阈值参数的绑定来源"。收窄到前缀而不是"任意函数调用"，是因为后者会把
-#: `spec.get("goal")` 这类普通取值也算成绑定——实测它会从无关模块抓来
-#: `access_count` 当配置键，于是 `_ctorBindings` 对**每个**关键字参数都报一个
-#: 假绑定，轴值随之失真。宁可少认（退回 unbound，红着让人看见）不可乱认。
-_DERIVATION_PREFIXES = ("resolve",)
 
 
 def _derivationCallKey(expr: str, derivations: Dict[str, str]) -> Optional[str]:

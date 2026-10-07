@@ -23,8 +23,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict
 
-from playwright.async_api import async_playwright
-
 from neurova.core.logger import get_logger
 from neurova.core.read_sessions import get_read_session_store
 from neurova.web_reach.reach import _assert_public_host, _error, _ok
@@ -111,6 +109,11 @@ async def _browser_read_async(url: str, timeout: float) -> Dict[str, Any]:
     相比 networkidle（广告轮询/长连接易超时）和 domcontentloaded（SPA 水合不足）
     更均衡——实测通过维基百科（富内容）与 Vue.js 文档（SPA 水合后渲染）。
     """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        raise RuntimeError("playwright 未安装——先运行 pip install playwright") from e
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         try:
