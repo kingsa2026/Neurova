@@ -31,6 +31,11 @@ from neurova.notifications import manager as mem
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_NOTIFICATIONS_PATH", str(tmp_path / "notifications.json"))
     monkeypatch.setenv("NEUROVA_SCHEDULER_STORE", str(tmp_path / "scheduler_tasks.json"))
+    # 这些用例断言"无注册管理员时兜底 default"，前提是账号宇宙为空；不隔离就会读到
+    # 仓内 data/users.db（里面有真 admin），通知发给真人而不是 default。
+    from tests.unit.api._realAccountFixture import isolateNoAccounts
+
+    isolateNoAccounts(monkeypatch, tmp_path)
     mem.reset_notification_manager()
     # 重置调度器单例（类级 __new__ 单例 + 模块级 _global_scheduler）
     saved_inst = sched_mod.AgentScheduler._instance

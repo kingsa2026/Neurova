@@ -116,14 +116,11 @@ class TestPersistence:
 class TestFacade:
     def test_notify_user_and_admins(self, api, monkeypatch):
         client, app, tmp = api
-        # 枚举管理员来源：_users_store
-        import neurova.api.endpoints.enhanced_users_api as users_api
+        # 管理员必须是真的账号：通知枚举只走 UserModel/users.db（与身份链同一事实源）
+        from tests.unit.api._realAccountFixture import seedAccounts
 
-        monkeypatch.setattr(
-            users_api,
-            "_users_store",
-            {"a9": {"role": "admin", "username": "admin"}, "u1": {"role": "user", "username": "alice"}},
-        )
+        seeded = seedAccounts(monkeypatch, tmp, accounts=(("admin", "admin"),))
+
         notif_module.notify_user("u1", "给用户", "hello", "info")
         notif_module.notify_admins("给管理员", "review please", "kb_review", data={"x": 1})
 
@@ -131,13 +128,15 @@ class TestFacade:
         titles = {i["title"] for i in items}
         assert "给用户" in titles
         mgr = notif_module.get_notification_manager()
-        admin_titles = {n.title for n in mgr.get_user_notifications("a9", limit=50)}
+        admin_titles = {n.title for n in mgr.get_user_notifications(seeded["admin"], limit=50)}
         assert "给管理员" in admin_titles, "管理员应收到通知"
 
     def test_notify_admins_falls_back_to_default(self, api, monkeypatch):
-        import neurova.api.endpoints.enhanced_users_api as users_api
+        """零账号部署（全新单机）才走 default 兜底——账号宇宙必须钉住为空。"""
+        _client, _app, tmp = api
+        from tests.unit.api._realAccountFixture import isolateNoAccounts
 
-        monkeypatch.setattr(users_api, "_users_store", {}, raising=False)
+        isolateNoAccounts(monkeypatch, tmp)
         notif_module.notify_admins("无admin兜底", "m", "info")
         mgr = notif_module.get_notification_manager()
         assert mgr.get_unread_count("default") == 1, "无注册管理员时兜底 default（单机模式）"
