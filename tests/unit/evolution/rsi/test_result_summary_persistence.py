@@ -126,3 +126,42 @@ class TestMetricsSnapshot:
         lines = path.read_text(encoding="utf-8").strip().splitlines()
         assert lines, "指标快照未落盘"
         assert any(json.loads(l).get("type") == "metrics" for l in lines)
+
+
+class TestSummariesLandingAnchor:
+    """审计流落点必须由数据根推导——env 值与兜底名都不得直接进 `Path`。
+
+    原写法 `Path(os.environ.get(ENV, get_data_root() / ...))` 有两个洞：
+    env 被设成**空串**时 `get` 返回 `""` 而不走默认值，`Path("")` 即进程 CWD；
+    env 被设成**相对名**时落点跟着启动目录漂（§6-26/§6-29 同一根因）。
+    """
+
+    def test_unsetEnvLandsUnderDataRoot(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NEUROVA_EVOLUTION_RSI_SUMMARIES", raising=False)
+        monkeypatch.chdir(tmp_path)          # 换 CWD 证明不漂
+        from neurova.core.data_root import get_data_root
+        target = rs.default_rsi_summaries_path()
+        assert target == get_data_root() / "evolution" / "rsi_summaries.jsonl", target
+        assert target.is_absolute(), target
+
+    def test_emptyEnvDoesNotFallBackToProcessCwd(self, monkeypatch):
+        """`os.environ.get(K, default)` 遇空串返回 ""，`Path("")` 就是进程 CWD。"""
+        monkeypatch.setenv("NEUROVA_EVOLUTION_RSI_SUMMARIES", "")
+        target = rs.default_rsi_summaries_path()
+        assert target != type(target)("."), "空串 env 让审计流落到进程 CWD：%s" % target
+        assert target.is_absolute() and str(target) != ".", target
+
+    def test_relativeEnvLandsUnderDataRootNotCwd(self, tmp_path, monkeypatch):
+        """相对值归数据根：运维写相对名不意味着"跟着启动目录漂"。"""
+        monkeypatch.setenv("NEUROVA_EVOLUTION_RSI_SUMMARIES", "rsi_custom.jsonl")
+        monkeypatch.chdir(tmp_path)
+        target = rs.default_rsi_summaries_path()
+        assert target.is_absolute(), "env 相对值未经数据根归一：%s" % target
+        assert tmp_path not in target.parents and target.parent != tmp_path, target
+        assert target.name == "rsi_custom.jsonl", target
+
+    def test_absoluteEnvIsHonoredVerbatim(self, tmp_path, monkeypatch):
+        """显式绝对路径（测试隔离与部署重定位都用它）必须原样生效。"""
+        wanted = tmp_path / "elsewhere" / "stream.jsonl"
+        monkeypatch.setenv("NEUROVA_EVOLUTION_RSI_SUMMARIES", str(wanted))
+        assert rs.default_rsi_summaries_path() == wanted
