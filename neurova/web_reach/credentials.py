@@ -1,8 +1,9 @@
 """社交平台凭据按用户分桶（三层隔离遗留项修复）。
 
 设计：
-- 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经 SimpleCipher 加密
-  落盘（明文不落磁盘）；加密 keyfile 首次生成后持久（重启稳定）
+- 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经认证加密落盘
+  （`secret_store_clean` 复用 `providers.secret_store` 的 AES-256-GCM 口径，明文不落磁盘）；
+  加密 keyfile 首次生成后持久（重启稳定）
 - agent-reach Config 的 config_path 可指向用户桶（user_config_path）——
   上游以 HOME/config_path 作为凭据隔离边界（官方姿势）
 - 与全局配置的关系：不做全局 fallback。凭据一律按归属桶存取，

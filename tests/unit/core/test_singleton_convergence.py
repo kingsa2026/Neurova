@@ -22,10 +22,12 @@ import pytest
 NEUROVA_ROOT = Path(__file__).resolve().parents[3] / "neurova"
 
 # 高危清单：构造有副作用/持有资源 + 并发热路径
+# （2026-10-07 本清单少一项：`secret_store_clean.get_secret_store()` 已退役——它无参
+# 构造用的是**随机临时密钥**，写出的密文下个进程解不开，且解不开时会被下一次保存静默
+# 抹掉；全仓零消费者，DCL 修得再标准也救不了"存进去就取不回"，故按断点删除而非加锁。）
 HIGH_RISK_SINGLETONS = [
     ("neurova/llm/multi_model_client.py", "get_multi_model_client"),
     ("neurova/cognitive_layers/memory_layer/semantic_search.py", "get_semantic_search"),
-    ("neurova/llm/providers/secret_store_clean.py", "get_secret_store"),
     ("neurova/security/neu_token_manager.py", "get_neu_token_manager"),
     ("neurova/shared_core/execution_engine.py", "get_execution_engine"),
     ("neurova/shared_core/infrastructure.py", "get_infrastructure_manager"),
