@@ -110,6 +110,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.evolution.proposal_lifecycle import (
+    ProposalStatus,
+    ProposalTransitionError,
+    assert_can_decide,
+    assert_can_rollback,
+    require_approver,
+)
 from neurova.evolution.rsi.deployment_controller import RSIDeploymentController
 from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
 from neurova.skills.market_registry import (
@@ -142,18 +149,9 @@ class ProposalType(str, Enum):
     PR_PATCH = "pr_patch"
 
 
-class ProposalStatus(str, Enum):
-    """提案状态
-
-    状态机：PENDING → APPROVED → APPLIED → (可选 ROLLED_BACK)
-                  ↘ REJECTED
-    """
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    APPLIED = "applied"
-    ROLLED_BACK = "rolled_back"
+# ProposalStatus 收口到提案生命周期契约（§6-2 阶段①）：单一事实源。
+# 历史上的瞬态 APPROVED 从未被任何转移产出（见 approve_and_apply 注释），
+# 属死状态，随收口退役——本模块不再自带第二份枚举。
 
 
 # ────── 每种提案类型的默认风险级别 ──────
@@ -706,8 +704,10 @@ class SelfImprovementProposer:
             if proposal is None:
                 return ApplyResult(success=False, error=f"proposal not found: {proposal_id}")
 
-            # 2. 状态机守卫：仅 PENDING 可被批准应用
-            if proposal.status != ProposalStatus.PENDING:
+            # 2. 状态机守卫：仅 PENDING 可被批准应用（合法性单源于生命周期契约）
+            try:
+                assert_can_decide(proposal.status.value)
+            except ProposalTransitionError:
                 return ApplyResult(
                     success=False,
                     proposal=proposal,
@@ -717,8 +717,10 @@ class SelfImprovementProposer:
                     ),
                 )
 
-            # 3. 检查 approver 非空（人类评审 gate）
-            if not approver or not approver.strip():
+            # 3. 检查 approver 非空（人类评审 gate；归因语义单源于契约）
+            try:
+                approver = require_approver(approver, action="批准应用提案")
+            except ValueError:
                 return ApplyResult(
                     success=False,
                     proposal=proposal,
@@ -807,8 +809,10 @@ class SelfImprovementProposer:
             if proposal is None:
                 return False
 
-            # 状态机守卫：仅 PENDING 可被拒绝
-            if proposal.status != ProposalStatus.PENDING:
+            # 状态机守卫：仅 PENDING 可被拒绝（合法性单源于生命周期契约）
+            try:
+                assert_can_decide(proposal.status.value)
+            except ProposalTransitionError:
                 logger.warning(
                     "拒绝提案失败 %s：当前状态 %s，期望 PENDING",
                     proposal_id,
@@ -856,8 +860,10 @@ class SelfImprovementProposer:
                     success=False, proposal_id=proposal_id, error="proposal not found"
                 )
 
-            # 2. 状态机守卫：仅 APPLIED 可被回滚
-            if proposal.status != ProposalStatus.APPLIED:
+            # 2. 状态机守卫：仅 APPLIED 可被回滚（合法性单源于生命周期契约）
+            try:
+                assert_can_rollback(proposal.status.value)
+            except ProposalTransitionError:
                 return RollbackResult(
                     success=False,
                     proposal_id=proposal_id,

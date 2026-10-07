@@ -55,7 +55,7 @@ export interface EvolutionProposal {
   proposal_id: string
   skill_id: string
   artifact_type: string
-  status: 'pending' | 'approved' | 'rejected' | string
+  status: 'pending' | 'applied' | 'rejected' | string
   holdout_before: number
   holdout_after: number
   iterations_run: number
