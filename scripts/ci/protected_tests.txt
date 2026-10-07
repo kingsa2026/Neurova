@@ -1716,3 +1716,22 @@ tests/unit/api/test_memoryWriteIdentityGate.py
 # "没带凭证"与"凭证无效"，教义第 2 条）；非 401 的状态码一字不改——403/404/409 的自救动作
 # 各不相同，在这里统一加话术就是替别人编理由。逐文件单跑 4 passed
 tests/unit/test_cliFourOhOneSelfRescueHint.py
+# C2（§6-57 前置）：`/v1/chat/history` 两条端点**从来没工作过**——它们调
+# `agent.get_conversation_history()`/`clear_conversation_history()`，而这两个名字全仓
+# 只出现在那四行里、没有任何实现（`git log --all -S` 零命中，来源 `7835c367` 的 pyc
+# 骨架恢复）。于是 GET 对任何人恒回空表、DELETE 恒回 `code:0 "History cleared"` 却一点
+# 没清。判据钉三件事：接上唯一实现后**归属者真能读到自己那条消息**（原状是空表，
+# 所以这条红在行为上而非 import 层）；两个面读同一会话必须给出同一批内容、外人返回码
+# 必须相等（`test_session_ownership_single_source.py` 的 docstring 早就主张"同解"，
+# 矩阵里却只有 console 面六条——本文件补上 chat 面那一半）；DELETE 必须显式 501 而不是
+# 假成功，**且 501 之后消息一条没少**（证"做不到"是真的）。逐文件单跑 11 passed
+tests/unit/api/test_chatHistorySingleSource.py
+# C3：`/api/v1/sync` 会话面的身份与归属。六格里三条原本**连身份依赖都没有**
+# （`DELETE /sessions/{id}`、`GET /sessions`、`GET /connections`），而
+# `NEUROVA_GLOBAL_AUTH` 未设时全局兜底为 MODE_OFF，所以那是真匿名可达——匿名能结束
+# 任意会话、能按 `?user_id=` 拉任意用户的整张会话表。归属比对接的是 `console.py`
+# 那份唯一实现（本文件不许内联比较式，也不许换个变量名绕过守卫；`/connections`
+# 走 `manager.list_sessions(user_id=...)` 那道已有过滤）。两条反证不可省：属主四条
+# 必须照常 200（收紧不许把正主挡在门外）；`/connections` 那条必须**先往生产表挂一条
+# 真连接**——`_ws_connections` 为空时"没泄露"是恒真的假绿。逐文件单跑 15 passed
+tests/unit/sync/test_sessionSyncRestOwnershipGate.py
