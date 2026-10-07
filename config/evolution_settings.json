@@ -1,0 +1,7 @@
+{
+  "text_evolution": true,
+  "lifecycle_sweep": true,
+  "lifecycle_interval_hours": 24,
+  "judge_model": "",
+  "optimizer_model": ""
+}

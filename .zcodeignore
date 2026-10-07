@@ -1,0 +1,517 @@
+# ==================== 通用排除 ====================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+develop-eggs/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+# 前端 vitest --coverage 产物（HTML 报告，勿入库）
+NeurUI/coverage/
+
+# 调试和临时文件
+# 注意：勿用 *_check*.py 这类通配——会吞掉合法测试文件（如 test_health_checks_contract.py，
+# 2026-09-05 踩坑：/tests/ 整目录 ignore 已于 09-04 移除，这里不能 reintroduce 变体）
+_debug*.py
+_diag*.py
+_check*.py
+_verify*.py
+_patch*.py
+*_debug*.py
+*_diag*.py
+*_verify*.py
+*_patch*.py
+debug*.py
+diag*.py
+check*.py
+verify*.py
+patch*.py
+
+# 日志和输出文件
+*.log
+*_output.txt
+*_error.txt
+*_debug.txt
+*_log.txt
+server_*.txt
+backend_*.txt
+frontend_*.txt
+test_*.txt
+
+# 配置和令牌文件
+.neurova_token.json
+token.txt
+_cfg.json
+
+# 临时脚本
+quick_*.py
+simple_*.py
+reset_*.py
+fix_*.py
+migrate_*.py
+cleanup_*.py
+run_*.py
+upload_*.py
+
+# 测试输出
+pytest_output.txt
+test_output.txt
+test_err.txt
+import_error.txt
+
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# 例外：依赖审计覆盖面所需的锁文件必须入库（Issue #56）
+#   全局忽略 package-lock.json 是为了不把"本地随手 npm i"的产物带进仓库；
+#   但下面这份是**门禁的输入**（scripts/ci/osv_audit.py 扫它），
+#   不入库则运行时 npx 包的漏洞永远无人可见——这正是 #56 要收的口。
+!NeurUI/package-lock.json
+!tools/npx-runtime/package-lock.json
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 环境变量（敏感信息！）
+.env
+.env.*
+!.env.example
+
+# 日志
+*.log
+logs/
+
+# 构建产物
+*.tar.gz
+*.whl
+
+# 编辑器临时文件
+*.bak
+*.tmp
+*.backup
+
+# ==================== 隐藏目录（全部排除） ====================
+.*/
+# 但保留 .github/（GitHub Actions 工作流必须入库）
+!.github/
+!.github/**
+# 但保留 .clinerules/（Cline 工作区规则必须入库，否则协作者/CI 拿不到系统提示词规则）
+!.clinerules/
+!.clinerules/**
+# 但保留 .cnb/（CNB 流水线与自定义 NPC 角色定义必须入库，否则平台读不到配置）
+!.cnb/
+!.cnb/**
+# 但保留 .ide/（云原生开发环境定义必须入库：平台从 git 取 `.ide/Dockerfile`
+# 构建开发环境，不入库等于"本地声明了一份、别人点按钮拿到平台默认镜像"）
+!.ide/
+!.ide/**
+
+# ==================== 根目录临时文件 ====================
+
+# 根目录临时脚本（仅根目录）
+/_*.py
+/cleanup_redundant.py
+/debug_backend.py
+/debug_import.py
+/demo_closed_loop.py
+/demo_optimization.py
+/diagnose_post_issue.py
+/example_agent_with_tts.py
+/example_channel_tts.py
+/fix_app_py.py
+/fix_centroids.py
+/fix_centroids2.py
+/fix_chatpage.py
+/fix_experts.py
+/longmeval_simple.py
+/migrate_pickle_to_json.py
+/neurova_test.py
+/patch_agent_core.py
+/patch_mem_core.py
+/patch_moe_closure.py
+/quick_test_cu.py
+/reset_admin.py
+/reset_admin_password.py
+/run_audit_tests.py
+/simple_audit.py
+/test_import.py
+/test_simple.py
+/check_admin.py
+/check_agent.py
+/check_and_start.py
+/check_error.py
+/check_import.py
+/check_imports.py
+/final_check.py
+/run_longmeval.py
+/compare_local_remote.py
+/create_next_version.py
+/create_release.py
+/execute_github_release.py
+/github_auto_release.py
+/github_operations.py
+/create_github_release.py
+/test_jwt_fix.py
+/test_chat_pipeline_basic.py
+/test_crystallized_simple.py
+/test_edge_tts_direct.py
+/test_login_api.py
+/test_memory_retrieval_integration.py
+/test_minimal.py
+/test_moss_tts.py
+/test_resolution_context_injection.py
+/test_tool_execution_integration.py
+/test_tts_init.py
+
+# 临时文本输出（仅根目录）
+/*_output*.txt
+/*_err*.txt
+/*_error*.txt
+/*_log*.txt
+/*_debug*.txt
+/*_stderr*.txt
+/*_stdout*.txt
+
+# 临时HTML/JS（仅根目录）
+/debug_*.html
+/debug_*.js
+/BROWSER_TEST.js
+/neurova-dataflow-breakpoints.html
+/neurova-dataflow-diagram.html
+/neurova-dependency-diagram*.html
+/risk-mitigation-plan.html
+
+# 临时脚本（仅根目录）
+/*.ps1
+/*.bat
+# 入口脚本非临时件：曾被 /*.bat 误杀致克隆/打包丢失（同 credentials* 误杀案）
+!start.bat
+!restart.bat
+
+# 临时报告
+/*_REPORT*.json
+/*_REPORT*.md
+/*_COVERAGE*.md
+/*_AUDIT*.md
+/*_SUMMARY*.md
+
+# 根目录临时md文件（排除项目入口文档）
+/*.md
+!README.md
+!CONTRIBUTING.md
+!SECURITY.md
+# AGENTS.md：AI 指令文件 + 修复教义事实源，被全仓 90+ 处编号引用，
+# 曾被本规则吞掉导致"引用遍地、文件不在库"（克隆/CI 上纪律凭空消失）。
+# 守卫：tests/unit/test_repair_discipline_guard.py
+!AGENTS.md
+
+# 敏感信息
+.neurova_token.json
+token.txt
+*.token.json
+*.pem
+
+# 其他临时文件
+/nul
+/backup_*.zip
+/test_skill*.zip
+/chat.py
+/chat.py.bak
+/_cfg.json
+/agent_chat_src.txt
+/TEST_AGENT_FORM.md
+
+# ==================== 排除的目录 ====================
+
+# 临时/生成/测试目录
+/code_patches/
+/embedding/
+/examples/
+/flow-kb-sdk/
+/generated_skills/
+/helm/
+/logs/
+/MagicMock/
+/memory/
+/mklink/
+/node_modules/
+/other/
+/security/
+/sessions/
+/storage/
+/temp/
+/thought-retriever-src/
+/trajectories/
+/uploads/
+
+# Agent 工作区
+/agents/
+
+# 备份/补丁/其他
+/backups/
+/backup_test_files/
+
+# 部署
+/deploy/
+
+# Web 官方网站文件夹（仅根目录）
+/web/
+
+# 数据和存储
+/data/
+/neurova/data/
+/neurova/static/
+/neurova/tests/
+/neurova/agents/
+/neurova/projects/
+/neurova/.test_deps/
+# tests/ 正式测试目录必须入库（历史上整目录忽略导致 809 个测试文件漏跟踪，
+# 只能 git add -f 补救——2026-09-04 已改为只忽略根级临时脚本）
+/backup_reports/
+
+# neurova/memory 只排除数据文件，保留脚本
+/neurova/memory/data/
+*.db
+*.db-shm
+*.db-wal
+
+# 文档构建
+
+# ==================== LLM 配置（敏感信息） ====================
+llm_config*
+provider_config*
+*.llm.json
+api_keys*
+credentials*
+*_secret*
+secret_*.json
+
+# ==================== 允许的特殊文件 ====================
+!.gitignore
+!README.md
+!requirements*.txt
+!docker-compose*.yml
+!Dockerfile
+!Makefile
+!LICENSE
+
+# ==================== 会话临时产物（不入库） ====================
+/_em.txt
+/_mp.txt
+/_mp2.txt
+/_r1.txt
+/_r2.txt
+/evil.py
+/weather_xuchang.py
+/pdd_api.js
+/pdd_docjs.js
+/pdd_search.js
+/ai_news_*.html
+/data-flow-diagram.html
+/data-flow-detailed.html
+/_i18n_scan/
+/NeurUI/src/i18n/locales_bak_canvas/
+/.jd_api.json
+/.tmp_kb_import.txt
+
+# ==================== 专项收纳目录豁免 ====================
+# scripts/diagnostics/ 统一收纳的临时定位/检查脚本需纳入版本控制，
+# 豁免上方未锚定的任意层级规则（check*.py / *_check*.py / *_patch*.py / fix_*.py 等）。
+!scripts/diagnostics/*.py
+
+# ==================== 运行时/调试临时文件 ====================
+# SSE 抓包等诊断输出（youtube/webreach 调试残留）
+/*_sse.txt
+/*_sse2.txt
+# Agent 工作区运行时数据
+/agent_workspaces/
+# 临时 token 文件
+/.tmp_token.txt
+/weather_xuchang.py
+
+# 根目录运行残片（2026-09 清理后防再生）
+*_sse.txt
+_r*.txt
+_em.txt
+_mp*.txt
+_cfg.json
+test_api_output.wav
+
+# 桌面壳（Tauri）签名密钥与产物（src-tauri 自带 /target 忽略）
+*.pfx
+desktop/*.pfx
+# 后端全量打包 stage（1.6GB，构建脚本 scripts/desktop/bundle_backend.py 生成）
+NeurUI/src-tauri/resources/backend/
+NeurUI/src-tauri/resources/_python-*
+# 路线 B 首启下载在开发态的后端根即仓库根：runtime/ 是 Python/Node 下载目标，
+# 下载状态文件是每次启动改写的运行态，都不入库
+/runtime/
+/.download_status.json
+
+# ==================== 根目录杂物防再生（2026-09-02 二次清理） ====================
+# stash 事故复活过的根级临时测试脚本/产物，统一规范到 tests/ 分类目录
+/test_*.py
+/test_*.wav
+/.tmp_*
+/.neurova_token.json
+/MagicMock/
+
+# 本地模型权重（运行时下载/生成，不入 git）
+models/**/*.data
+
+# 测试隔离会话/轨迹运行时产物（防再生）
+/sessions-test-quarantine/
+
+# 根级 pyc 恢复/分析临时脚本与产物（防再生，2026-09-05）
+/analyze_*.py
+/batch_*.py
+/smart_restore.py
+/count_skeleton_files.py
+/*_analysis.txt
+/*_files.txt
+/batch_analysis.txt
+/tour-*.json
+
+# 安装器 WPF 壳构建产物（体积 400MB+ 超 GitHub 100MB 限制，构建可再生）
+NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
+
+# 运行期生成的安全/补丁文件（开发机根目录，不应入库）
+.jwt_secret
+.agents/
+
+# 污染清空 / 断言归正的一次性归档（`.pre-purge-*` / `.pre-regrade-*`）：
+# 库本体被 *.db 挡住，归档副本名挂库名之后就不在规则里了——单独补一条，
+# 否则每次运维动作都会在 git status 里留下一堆 68MB 的归档。
+*.db.pre-purge-*
+*.db.pre-regrade-*
+*.db-wal.pre-purge-*
+*.db-shm.pre-purge-*
+
+# 一次性迁移工具的操作产物（渲染核对截图，可再生，不入库）
+# 工具本体 scripts/import_kai_to_neurova.py 与它的回归 tests/unit/migration/ 已入库：
+# 私有方言来源（记忆库/快照/笔记）只有它管，产品入口是 scripts/ingest_memory.py。
+/docs/05-reports/kai-import-render-verify-*.png
+agent_workspaces/kai/
+
+# 审计事故 2026-09-10：stash 误弹恢复暂存区（含 6 月旧 WIP 快照副本 361 文件，
+# 审计后删除；不入库、不进工作区）
+.stash-recovery-20260910/
+
+# UIAutomation/pywinauto 调试日志垃圾件（desktop_uia 开发运行时落根目录）
+@AutomationLog.txt
+
+# 工具执行日志默认落根目录的运行时垃圾（tool_logger；测试/默认配置会生成）
+/tool_execution.jsonl
+
+# 编辑器/代理本地规则配置，不入库
+.clinerules/
+
+# 研究参考仓库克隆（ulab-uiuc/Thought-Retriever，本地留档）：gitlink 无 .gitmodules 系误提交，干净检出即坏；目录整体不跟踪
+thought-retriever-src/
+
+# 第三方产品参考克隆（本地留档）：与 thought-retriever-src 同策略，目录整体不入库
+cumora/
+
+# ==================== 唯一测试根豁免（2026-09-22） ====================
+# 上方「调试和临时文件」「临时脚本」两节是**未锚定**的通配（check*.py /
+# verify*.py / *_patch*.py / debug*.py / run_*.py / fix_*.py …）。它们本意是排除
+# 开发机随手丢的临时脚本，却会连 `tests/` 下的合法测试文件一起吞掉。
+#
+# 2026-09-22 实锤：新增守卫 tests/unit/desktop/test_rust_vendor_patch_guard.py
+# 命中 `*_patch*.py`，提交后仓库里根本没有该文件，而 scripts/ci/protected_tests.txt
+# 已收录它——CI 的 unit-tests 以 `ERROR: file or directory not found` 退出 4
+# （收集 0 项）。本机单跑全绿、CI 全红，是最难察觉的一类断链。
+#
+# 故为唯一测试根加豁免：tests/ 下的一切视为候选入库内容。
+# 随后只把**跑测产物**与**敏感件**重新挡在门外——这几行是该清单的唯一出处，
+# 行为由 tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+# TestProtectedSubsetEntriesAreTracked 双向钉住（正当名不得被吞 / 产物不得放行）。
+!tests/**
+# 跑测缓存与覆盖产物
+tests/**/__pycache__/
+tests/**/*.py[cod]
+tests/**/.pytest_cache/
+tests/**/htmlcov/
+tests/**/.coverage
+# 隐藏目录（补齐上方 `.*/` 在测试根内的语义）
+tests/**/.*/
+# 构建产物
+tests/**/dist/
+tests/**/build/
+tests/**/*.egg-info/
+tests/**/*.so
+tests/**/*.whl
+tests/**/*.tar.gz
+# 跑测落库/日志（运行期数据不入库；测试夹具应写 tmp_path）
+tests/**/*.db
+tests/**/*.db-shm
+tests/**/*.db-wal
+tests/**/*.log
+tests/**/logs/
+# 编辑器临时件
+tests/**/*.bak
+tests/**/*.tmp
+tests/**/*.backup
+# 敏感件：豁免不能给密钥开出通道
+tests/**/*.pem
+tests/**/*.pfx
+tests/**/*.token.json
+tests/**/credentials*
+tests/**/*_secret*
+tests/**/secret_*.json
+tests/**/api_keys*
+tests/**/llm_config*
+tests/**/provider_config*
+tests/**/*.llm.json
+tests/**/*.env
+tests/**/.env
+tests/**/.env.*
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+site-packages/
+coverage/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.dist-info/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
