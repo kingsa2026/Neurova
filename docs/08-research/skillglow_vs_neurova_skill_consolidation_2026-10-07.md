@@ -55,7 +55,7 @@
 | P1-3 | 去实例化压缩纪律:结晶 LLM 裁决与经验重建提示词增加"适用条件+核心过程+失败模式,剥除任务特定常数"判据 | `pattern_crystallizer.review_pending_with_llm` + `skill_experience` 组合路径 | 本轮 |
 | P2-5 | `ConsolidationPlanStore` 溢出留痕计数(对齐工单 016 口径) | 同文件 | 本轮 |
 | P2-4 | 锚定地板:接受判据加 A = max(历史最优留出, 无技能基线) − accept_threshold;台账补记绝对留出分作锚的历史来源(自然预热,不造第二份账本) | `eval/runner` 判定 2.2 + `eval/service.best_anchor_from_ledger` + `EvolutionConfig.anchor_floor_enabled` | 本轮 |
-| P3 | 语义族第二计划源(嵌入多视图+LLM 成对判,只产计划进审批) | consolidator 第二来源 | 登记 |
+| P3 | 语义族第二计划源:`plan_from_semantics`(名述嵌入余弦、种子中心贪心防单链;只对结构计划未认领成员聚簇,basis=semantic 永不自动提交,引擎不可用诚实降级)。LLM 成对判登记为后续精化——零 LLM 计划段哲学不变,精度由人工审批兜底 | `skill_consolidator.plan_from_semantics` + `governance_settings.consolidation_semantic_plans_enabled` | 本轮 |
 | — | 规则修订登记 | 本文 §0 + `skill_consolidator` 模块文档 + `skill_review_gate` 覆盖清单注记 | 本轮 |
 
 **明确不引入**:每轮全量重推库(基准循环专属,生产常驻不可负担且毁审计链);全自动 gate 推广到新技能生成(评审闸维持);fail-closed 检索替代"零命中回退全量"(两域各自适配)。
