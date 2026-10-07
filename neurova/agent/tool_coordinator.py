@@ -351,8 +351,8 @@ class ToolCoordinator:
             entry["success"] = False
             entry["error"] = "cancelled"
             # 断链修复（G4-RC6）：取消分支此前既不投 hint 也不记日志，`finally`
-            # 只把 entry 移入 `_completed`。于是 `get_background_status` 查得到
-            # "cancelled"，而下一轮 LLM 与用户**永远收不到这条终态**——一个已经
+            # 只把 entry 移入 `_completed`。于是终态查得到、
+            # 而下一轮 LLM 与用户**永远收不到这条终态**——一个已经
             # 转后台的工具被取消后凭空消失。终态必须回到反馈环。
             self._queueHint({
                 "task_id": task_id,
@@ -378,7 +378,8 @@ class ToolCoordinator:
             entry["task"] = None
             # A-20：断开对观察者自身的强引用（entry 随后移入 _completed 留存）
             entry["observer"] = None
-            # 资源修复: 移入有界留存(供 get_background_status 查询近 200 条终态)
+            # 资源修复: 移入有界留存——活动字典只留运行中任务，超时任务条目
+            # 不再只增不减（留存本身没有查询口，是纯内存上界，见 `_MAX_COMPLETED`）
             self._background.pop(task_id, None)
             self._completed[task_id] = entry
             while len(self._completed) > self._MAX_COMPLETED:
@@ -452,15 +453,3 @@ class ToolCoordinator:
                 held.append(hint)
         self._pending_hints = held
         return mine
-
-    def get_background_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """查询后台任务状态（运行中/已完成/未知）。"""
-        entry = self._background.get(task_id) or self._completed.get(task_id)
-        if entry is None:
-            return None
-        return {
-            "task_id": task_id,
-            "tool_name": entry["tool_name"],
-            "running": entry["task"] is not None,
-            "success": entry["success"],
-        }
