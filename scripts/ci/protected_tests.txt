@@ -216,6 +216,9 @@ tests/unit/agent/test_tool_round_history_on_early_exit.py
 # 晚到工具终态的会话栅栏（2026-10-08 长任务闭环审计 C 批）：归属必须盖在「转后台那一刻」，
 #   排干必须按会话取——B 会话不得读走 A 会话的工具正文；无归属终态点名拒绝而非广播
 tests/unit/agent/test_pending_hints_session_fence.py
+# 租约过期收敛的运行期驱动（2026-10-08 长任务闭环审计 D 批）：heartbeat/lease 写了必须
+#   有人读——lifespan 起停成对、间隔由租约派生、只咬过期 running，新鲜租约与 parked 不得误杀
+tests/unit/core/test_agentRunStaleReconcileWiring.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
