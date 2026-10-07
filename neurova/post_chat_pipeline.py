@@ -2879,6 +2879,7 @@ class PostChatPipeline:
         # consolidation_auto_commit_enabled 默认开，关=回退纯人工审批。
         try:
             from neurova.evolution.skill_consolidator import (
+                consolidation_semantic_plans_enabled,
                 maybe_auto_commit,
                 plan_from_service,
             )
@@ -2886,6 +2887,7 @@ class PostChatPipeline:
 
             _c_svc = _CSvc(agent_id=str(getattr(self._agt.config, "agent_id", "default") or "default"))
             _c_plans = plan_from_service(_c_svc)
+            _claimed = {m for p in _c_plans for m in ([p.umbrella] + list(p.absorbed))}
             if _c_plans:
                 _store = _consolidation_plan_store(_c_svc.skills_dir)
                 _store.upsert([p.to_dict() for p in _c_plans])
@@ -2896,6 +2898,18 @@ class PostChatPipeline:
                         "🤖 整合自动 commit gate: %s",
                         [(a["umbrella"], a["decision"]) for a in _auto],
                     )
+            # P3 语义族第二计划源：只对结构计划未认领的成员聚"同目的、异序列"
+            # 族（嵌入余弦，零 LLM，引擎不可用诚实降级）；basis=semantic 永不
+            # 自动提交，只进人工审批面。开关 consolidation_semantic_plans_enabled
+            # 默认开，关=只跑结构族源。
+            if consolidation_semantic_plans_enabled():
+                from neurova.evolution.skill_consolidator import plan_from_semantics
+
+                _s_plans = plan_from_semantics(_c_svc, exclude=_claimed)
+                if _s_plans:
+                    _store = _consolidation_plan_store(_c_svc.skills_dir)
+                    _store.upsert([p.to_dict() for p in _s_plans])
+                    logger.info("🧩 语义族合并计划: %d 簇（仅人工审批）", len(_s_plans))
         except Exception as _ce:
             logger.debug("技能合并计划生成跳过: %s", _ce)
 
