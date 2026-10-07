@@ -59,8 +59,15 @@ digraph NeurovaRisks {
 
         R5 [label="R5  巨型文件无守卫\n行数棘轮只压在 agent_core.py(2159)\n而 tool_executor.py 5159 / memory_layer\n/manager.py 3266 / post_chat_pipeline.py 3068\n/ chat_pipeline.py 2626 / neurflow/builtin.py 2455\nprovider_manager 2161 / orchestrator 2122\n全部无守卫 → 只守住 1 个，放过 8 个更大的", fillcolor="#d0ebff"];
 
-        R8 [label="R8  未接线孤岛（断点）\nturn_coordinator 未接入 chat_pipeline\n[:324 零调用方] → 协调层未闭环\ncoordination_decorators.py 0 引用\ncrdt/ Python 0 消费者、前端引用已注释\ncomputer_manager 仅服务未注册端点\nmodel_selector 仅 e2e 引用\nllm/{adapters,registry,interfaces,sandbox} 孤岛", fillcolor="#d0ebff"];
-
+        R8 [label="R8  未接线孤岛（断点）
+让位执行体已收成一份并有判据 [P2-8]
+但闸仍未接入 chat_pipeline
+→ 协调层闭环剩最后一段（挂起/人工续跑）
+coordination_decorators.py 已退役
+crdt/ Python 0 消费者、前端引用已注释
+computer_manager 仅服务未注册端点
+model_selector 仅 e2e 引用
+llm/{adapters,registry,interfaces,sandbox} 孤岛", fillcolor="#d0ebff"];
         R11 [label="R11  核心子系统整片不在版本控制\ndb/ models/ crdt/ llm/adapters|registry\n|sandbox|interfaces/ experiments/\ncollaboration/ 7 文件、api/endpoints/ 7 端点\nStorage/zero_downtime_migration.py\n全部未跟踪 → 主线架构有一部分不可复现", fillcolor="#d0ebff"];
 
         R11b [label="R11-衍生  CI 依赖未跟踪文件\ncost-guards.yml 与 CODEOWNERS 均未跟踪\n→ 当前 CI 与 CODEOWNERS 是纸面存在\n且 cost-guards 用 node:18\n而 compose 用 node:20", fillcolor="#d0ebff"];

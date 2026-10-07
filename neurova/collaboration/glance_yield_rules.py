@@ -82,13 +82,19 @@ class GlanceYieldChecker:
     DEFAULT_TRIAGE_CONCURRENT_LIMIT = 8
     DEFAULT_WAKE_DEBOUNCE_MS = 2500  # 2.5 seconds
     DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60
+    # 占用槽位的租约上限：崩在半路、没走到 record_operation_complete 的操作
+    # 不能永久占位（同一形态在 `core/agent_run_store` 用 lease + 启动 reconcile 兜）
+    ACTIVE_OP_LEASE_SECONDS = 600.0
 
     def __init__(self):
         # Layer 1: Model pins
         self._agent_pins: Dict[str, AgentModelPin] = {}
 
         # Layer 2: Concurrency tracking
-        self._active_agents: Dict[str, int] = {}  # model_name -> count
+        # model_name -> {agent_id: (operation_hash, startedAt)}
+        # 计数由这张表**派生**，不再单独维护一个 int——占位与释放都只有一条路径，
+        # 才不会"查询即占用"（旧形态：判一次加一次，唯一减点在 unregister）。
+        self._activeOps: Dict[str, Dict[str, tuple]] = {}
 
         # Layer 3: Spacing and pacing
         self._last_spawn_time: Dict[str, float] = {}  # agent_id -> timestamp
@@ -133,13 +139,33 @@ class GlanceYieldChecker:
 
         logger.info(f"Registered agent {agent_id} with model {model_name}")
 
-    def unregister_agent(self, agent_id: str) -> None:
-        """Unregister agent"""
-        if agent_id in self._agent_pins:
-            model_name = self._agent_pins[agent_id].model_name
+    def _occupiedModel(self, agent_id: str) -> str:
+        """该 agent 占的是哪个模型桶；没有 pin 时落 "unknown"（与 complete 侧同口径）。"""
+        pin = self._agent_pins.get(agent_id)
+        return pin.model_name if pin else "unknown"
 
-            if model_name in self._active_agents:
-                self._active_agents[model_name] = max(0, self._active_agents[model_name] - 1)
+    def _reapExpiredOps(self) -> int:
+        """回收超过租约的占位。返回回收条数。"""
+        deadline = time.time() - self.ACTIVE_OP_LEASE_SECONDS
+        reaped = 0
+        for model_name in list(self._activeOps):
+            slots = self._activeOps[model_name]
+            for agent_id, (_op, startedAt) in list(slots.items()):
+                if startedAt < deadline:
+                    slots.pop(agent_id, None)
+                    reaped += 1
+            if not slots:
+                self._activeOps.pop(model_name, None)
+        if reaped:
+            logger.warning("让位并发槽按租约回收 %d 个占位（未走到 complete 的操作）", reaped)
+        return reaped
+
+    def unregister_agent(self, agent_id: str) -> None:
+        """Unregister agent —— 同时释放它占着的并发槽。"""
+        if agent_id in self._agent_pins:
+            for slots in self._activeOps.values():
+                slots.pop(agent_id, None)
+            self._activeOps = {m: s for m, s in self._activeOps.items() if s}
 
             del self._agent_pins[agent_id]
 
@@ -228,14 +254,17 @@ class GlanceYieldChecker:
         agent_id: str,
         model_name: str,
     ) -> YieldDecision:
-        """Layer 2: Check big-brain concurrency cap"""
-        # Get current count for this model
-        current_count = self._active_agents.get(model_name, 0)
+        """Layer 2: Check big-brain concurrency cap
 
-        # If under limit, temporarily increment to simulate this agent becoming active
+        **纯读**：查询不改变占用。占用只由 `record_operation_start` 发生、
+        只由 `record_operation_complete`/`unregister_agent`/租约到期释放。
+        旧形态在这里 `+1`（"temporarily increment"），而那个临时值从来没有被减回去
+        ——同一个 Agent 问 6 次就把该模型额度占满，之后所有同模型 Agent 恒让位。
+        """
+        self._reapExpiredOps()
+        current_count = len(self._activeOps.get(model_name, {}))
+
         if current_count < self.DEFAULT_MAX_CONCURRENT_AGENTS:
-            # First agent proceeds (no yield)
-            self._active_agents[model_name] = current_count + 1
             return YieldDecision(should_yield=False)
 
         # Limit exceeded - second and subsequent agents must yield
@@ -375,8 +404,24 @@ class GlanceYieldChecker:
         return YieldDecision(should_yield=False)
 
     def record_operation_start(self, agent_id: str, operation_hash: str) -> None:
-        """Record operation start time"""
+        """开工：记间距时间戳，并占一个并发槽（同一 agent 幂等——只占一格）。"""
         self._last_spawn_time[agent_id] = time.time()
+        pin = self._agent_pins.get(agent_id)
+        if pin is None:
+            # 归因不到模型就**不占槽**：硬塞进一个 "unknown" 桶，会让毫不相干的
+            # 调用方共用同一份额度——那正是本批在修的"挤进同一个桶"形态。
+            logger.warning(
+                "record_operation_start 无 pin，无法归因到模型，本次不占并发槽：agent=%s",
+                agent_id,
+            )
+            return
+        model_name = pin.model_name
+        slots = self._activeOps.setdefault(model_name, {})
+        if agent_id not in slots:
+            slots[agent_id] = (operation_hash, time.time())
+        else:
+            existingOp, startedAt = slots[agent_id]
+            slots[agent_id] = (existingOp, startedAt)
 
     def record_operation_complete(
         self,
@@ -385,10 +430,11 @@ class GlanceYieldChecker:
         success: bool,
     ) -> None:
         """Record operation completion and update pacing stats"""
-        model_name = self._agent_pins.get(agent_id, AgentModelPin(
-            agent_id=agent_id,
-            model_name="unknown",
-        )).model_name
+        model_name = self._occupiedModel(agent_id)
+        if model_name in self._activeOps:
+            self._activeOps[model_name].pop(agent_id, None)
+            if not self._activeOps[model_name]:
+                self._activeOps.pop(model_name, None)
 
         stats = self._pacing_stats.setdefault(model_name, {
             "total_ops": 0,
@@ -429,9 +475,10 @@ class GlanceYieldChecker:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get checker statistics"""
+        self._reapExpiredOps()
         return {
             "registered_agents": len(self._agent_pins),
-            "active_per_model": dict(self._active_agents),
+            "active_per_model": {m: len(s) for m, s in self._activeOps.items()},
             "pacing_stats": dict(self._pacing_stats),
             "triage_cache_size": len(self._triage_cache),
             **self._stats,

@@ -85,7 +85,7 @@
     { "id": "risk.hotspot", "label": "R5 巨型文件无守卫", "type": "risk", "state": "current", "confidence": "high", "sourceRefs": ["neurova/tool_executor.py:220", "docs/CONTEXT.md:26-33"] },
     { "id": "risk.docdrift", "label": "R6 文档与代码规模漂移", "type": "risk", "state": "current", "confidence": "high", "sourceRefs": ["docs/CONTEXT.md:13", "README.md:1413", "README.md:1428", "AGENTS.md:44"] },
     { "id": "risk.contractbreak", "label": "R7 前后端前缀契约断裂", "type": "risk", "state": "current", "confidence": "high", "sourceRefs": ["NeurUI/src/api/index.ts:77", "neurova/api/app.py:560", "neurova/api/app.py:564"] },
-    { "id": "risk.orphan", "label": "R8 未接线孤岛子系统", "type": "risk", "state": "current", "confidence": "high", "sourceRefs": ["neurova/agent/turn_coordinator.py:324", "neurova/collaboration/coordination_decorators.py", "neurova/crdt/core.py"] },
+    { "id": "risk.orphan", "label": "R8 未接线孤岛子系统", "type": "risk", "state": "partial", "confidence": "high", "sourceRefs": ["neurova/agent/turn_coordinator.py:133", "neurova/crdt/core.py"] },
     { "id": "risk.docfork", "label": "R9 架构文档目录分叉", "type": "risk", "state": "current", "confidence": "high", "sourceRefs": ["docs/01-architecture", "docs/architecture", "docs/adr"] }
   ],
 
