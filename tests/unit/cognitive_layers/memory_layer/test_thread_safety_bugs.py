@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from neurova.cognitive_layers.memory_layer.bus_event import EventBus, MemoryEvent
+from neurova.core.event_bus import EventBus
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 
@@ -182,7 +182,7 @@ class TestBug6EventBusLockProtection:
 
             def worker():
                 try:
-                    bus.on("test_event", lambda e: None)
+                    bus.subscribe("test_event", lambda e: None)
                 finally:
                     completed.set()
 
@@ -213,7 +213,7 @@ class TestBug6EventBusLockProtection:
             pytest.fail("EventBus 没有 _lock 属性 — Bug 6 未修复")
 
         handler = lambda e: None
-        bus.on("test_event", handler)
+        bus.subscribe("test_event", handler)
 
         bus._lock.acquire()
         try:
@@ -221,7 +221,7 @@ class TestBug6EventBusLockProtection:
 
             def worker():
                 try:
-                    bus.off("test_event", handler)
+                    bus.unsubscribe("test_event", handler)
                 finally:
                     completed.set()
 
@@ -245,7 +245,7 @@ class TestBug6EventBusLockProtection:
     def test_emit_acquires_lock_for_count(self):
         """emit() 应获取锁保护 _emit_count 修改"""
         bus = EventBus()
-        bus.on("test_event", lambda e: None)
+        bus.subscribe("test_event", lambda e: None)
 
         if not hasattr(bus, "_lock"):
             pytest.fail("EventBus 没有 _lock 属性 — Bug 6 未修复")
@@ -254,11 +254,9 @@ class TestBug6EventBusLockProtection:
         try:
             completed = threading.Event()
 
-            event = MemoryEvent(type="test_event", source="test", payload={})
-
             def worker():
                 try:
-                    bus.emit(event)
+                    bus.publish("test_event", {}, source="test")
                 finally:
                     completed.set()
 
@@ -267,12 +265,12 @@ class TestBug6EventBusLockProtection:
 
             completed.wait(timeout=0.5)
             assert not completed.is_set(), (
-                "emit() 未获取 _lock 保护 _emit_count — worker 未阻塞"
+                "publish() 未获取 _lock 保护计数与日志 — worker 未阻塞"
             )
 
             bus._lock.release()
             completed.wait(timeout=2.0)
-            assert completed.is_set(), "emit() 获取锁后 worker 未完成"
+            assert completed.is_set(), "publish() 获取锁后 worker 未完成"
         finally:
             try:
                 bus._lock.release()
@@ -280,7 +278,7 @@ class TestBug6EventBusLockProtection:
                 pass
 
         t.join(timeout=1.0)
-        assert bus.emit_count == 1
+        assert bus.publishedCount() == 1
 
     def test_emit_does_not_deadlock_with_recursive_handler(self):
         """emit() 不应在持锁状态下调用 handler（避免递归 emit 死锁）
@@ -293,21 +291,20 @@ class TestBug6EventBusLockProtection:
         if not hasattr(bus, "_lock"):
             pytest.fail("EventBus 没有 _lock 属性 — Bug 6 未修复")
 
-        recursive_event = MemoryEvent(type="recursive", source="test", payload={})
+        recursive_event_name = "recursive"
         call_log = []
 
         def recursive_handler(e):
             call_log.append("handler")
-            # 第一次调用时递归 emit 一次
+            # 第一次调用时递归 publish 一次
             if len(call_log) == 1:
-                nested_event = MemoryEvent(type="nested", source="test", payload={})
-                bus.emit(nested_event)
+                bus.publish("nested", {}, source="test")
 
-        bus.on("recursive", recursive_handler)
-        bus.on("nested", lambda e: call_log.append("nested"))
+        bus.subscribe("recursive", recursive_handler)
+        bus.subscribe("nested", lambda e: call_log.append("nested"))
 
         # 不应死锁
-        bus.emit(recursive_event)
+        bus.publish(recursive_event_name, {}, source="test")
 
         # 两个 handler 都应被调用
         assert "handler" in call_log
@@ -329,7 +326,7 @@ class TestBug6EventBusLockProtection:
 
         def register(idx):
             barrier.wait()  # 所有线程同时启动
-            bus.on(event_type, lambda e, i=idx: None)
+            bus.subscribe(event_type, lambda e, i=idx: None)
 
         threads = [threading.Thread(target=register, args=(i,)) for i in range(N)]
         for t in threads:
@@ -337,20 +334,19 @@ class TestBug6EventBusLockProtection:
         for t in threads:
             t.join(timeout=5.0)
 
-        actual = bus.handler_count(event_type)
+        actual = len(bus.get_subscribers(event_type))
         assert actual == N, (
             f"丢失 handler 注册: 期望 {N}, 实际 {actual}（丢失 {N - actual} 个）"
         )
 
     def test_concurrent_emit_count_accurate(self):
-        """高并发 emit() 后 _emit_count 应准确（压力测试）"""
+        """高并发 publish() 后发布计数应准确（压力测试）"""
         bus = EventBus()
-        bus.on("count_test", lambda e: None)
+        bus.subscribe("count_test", lambda e: None)
 
         if not hasattr(bus, "_lock"):
             pytest.fail("EventBus 没有 _lock 属性 — Bug 6 未修复")
 
-        event = MemoryEvent(type="count_test", source="test", payload={})
         N_THREADS = 20
         N_EMITS_PER_THREAD = 200
         barrier = threading.Barrier(N_THREADS)
@@ -358,7 +354,7 @@ class TestBug6EventBusLockProtection:
         def emitter():
             barrier.wait()
             for _ in range(N_EMITS_PER_THREAD):
-                bus.emit(event)
+                bus.publish("count_test", {}, source="test")
 
         threads = [threading.Thread(target=emitter) for _ in range(N_THREADS)]
         for t in threads:
@@ -367,7 +363,7 @@ class TestBug6EventBusLockProtection:
             t.join(timeout=10.0)
 
         expected = N_THREADS * N_EMITS_PER_THREAD
-        actual = bus.emit_count
+        actual = bus.publishedCount()
         assert actual == expected, (
-            f"_emit_count 不准确: 期望 {expected}, 实际 {actual}（丢失 {expected - actual} 次）"
+            f"publishedCount 不准确: 期望 {expected}, 实际 {actual}（丢失 {expected - actual} 次）"
         )

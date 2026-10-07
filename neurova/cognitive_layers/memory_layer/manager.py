@@ -35,9 +35,9 @@ from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
-    EventBus,
-    MemoryEvent,
+    MemoryEventName,
 )
+from neurova.core.event_bus import get_event_bus
 from neurova.cognitive_layers.memory_layer.models import (
     EmotionType,
     LifecycleStage,
@@ -182,7 +182,9 @@ class MemoryManager:
         self._neuser_id = neuser_id
         self._user_id = user_id
         self._enable_buffer = enable_buffer
-        self._bus = EventBus()
+        # 事件不再发进私有总线实例（§6-12）：投递走共享单例 `get_event_bus()`，
+        # 这里只留本 manager 自己的发射计数，供 `get_stats()` 的 `bus_events` 读。
+        self._memoryEventsPublished = 0
         self._started = False
 
         # 内部存储（简易实现，子模块可覆盖）
@@ -827,9 +829,20 @@ class MemoryManager:
 
     # ────── Properties ──────
 
-    @property
-    def bus(self) -> EventBus:
-        return self._bus
+    def _publishMemoryEvent(self, eventName: str, payload: Dict[str, Any]) -> None:
+        """记忆域事件的唯一投递口：走共享总线，本地计数供 `get_stats()` 读。
+
+        原形态是每个 manager 在构造期各自 new 一条私有总线实例，五处投递全发在外部
+        拿不到的对象上（其出口 `bus` 属性零调用方）。所以 §6-12 记的"只发不订"实情是
+        **订阅方根本订不到**，不是没人想订。
+        """
+        self._memoryEventsPublished += 1
+        get_event_bus().publish(eventName, payload, source="memory_manager")
+
+    def _memoryBusHandlerCount(self) -> int:
+        """共享总线上对本域事件名的订阅者总数（读数按常量表全量取，新增名不会漏计）"""
+        bus = get_event_bus()
+        return sum(len(bus.get_subscribers(n)) for n in MemoryEventName.ALL)
 
     @property
     def storage(self):
@@ -1276,12 +1289,9 @@ class MemoryManager:
                     logger.warning("自动情感标注失败（记忆 %s）: %s", mem_id, e)
 
             # 发射事件
-            self._bus.emit(
-                MemoryEvent(
-                    type=MemoryEvent.MEMORY_CREATED,
-                    source="memory_manager",
-                    payload={"memory_id": mem_id, "content": content, "category": category},
-                )
+            self._publishMemoryEvent(
+                MemoryEventName.MEMORY_CREATED,
+                {"memory_id": mem_id, "content": content, "category": category},
             )
 
             # NEURON: 提取依赖关系到依赖图谱
@@ -1427,12 +1437,9 @@ class MemoryManager:
                 else:
                     self.persist_memory_batch(touched)
             for m in touched:
-                self._bus.emit(
-                    MemoryEvent(
-                        type=MemoryEvent.MEMORY_ACCESSED,
-                        source="memory_manager",
-                        payload={"memory_id": m.id, "temperature": m.temperature},
-                    )
+                self._publishMemoryEvent(
+                    MemoryEventName.MEMORY_ACCESSED,
+                    {"memory_id": m.id, "temperature": m.temperature},
                 )
 
             return [m.to_dict() for m in results[:limit]]
@@ -1796,12 +1803,9 @@ class MemoryManager:
                 mem = None
             if mem:
                 mem.touch()
-                self._bus.emit(
-                    MemoryEvent(
-                        type=MemoryEvent.MEMORY_ACCESSED,
-                        source="memory_manager",
-                        payload={"memory_id": mem.id},
-                    )
+                self._publishMemoryEvent(
+                    MemoryEventName.MEMORY_ACCESSED,
+                    {"memory_id": mem.id},
                 )
                 return mem.to_dict()
             return None
@@ -1886,13 +1890,10 @@ class MemoryManager:
             self._memories[memory_id] = mem
             if gate_follows:
                 self._sync_content_index(mem, gate_old_key)
-        # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
-        self._bus.emit(
-            MemoryEvent(
-                type=MemoryEvent.MEMORY_UPDATED,
-                source="memory_manager",
-                payload={"memory_id": memory_id},
-            )
+        # 事件投递在锁外执行，避免持锁调用 handler 导致递归死锁
+        self._publishMemoryEvent(
+            MemoryEventName.MEMORY_UPDATED,
+            {"memory_id": memory_id},
         )
         return True
 
@@ -1928,13 +1929,10 @@ class MemoryManager:
                 self._drop_from_recall_indexes(memory_id)
                 self._delete_persisted_memory(memory_id)  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
-        # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
-        self._bus.emit(
-            MemoryEvent(
-                type=MemoryEvent.MEMORY_DELETED,
-                source="memory_manager",
-                payload={"memory_id": memory_id, "soft": soft},
-            )
+        # 事件投递在锁外执行，避免持锁调用 handler 导致递归死锁
+        self._publishMemoryEvent(
+            MemoryEventName.MEMORY_DELETED,
+            {"memory_id": memory_id, "soft": soft},
         )
         return True
 
@@ -2112,8 +2110,8 @@ class MemoryManager:
                 "total_memories": len(base),
                 "remember_count": self._stats["remember_count"],
                 "recall_count": self._stats["recall_count"],
-                "bus_events": self._bus.emit_count,
-                "bus_handlers": self._bus.handler_count(),
+                "bus_events": self._memoryEventsPublished,
+                "bus_handlers": self._memoryBusHandlerCount(),
                 # 分类闭环读数（0 是正常态；auto_classified_count 为 0 表示
                 # 自动分类没有被任何写入路径使用）
                 "by_category": by_category,
