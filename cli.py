@@ -401,14 +401,25 @@ class CliError(Exception):
     """API 业务错误（可读中文消息）。"""
 
 
+#: 401 的可自救动作。只在 CLI 侧补，不改服务端文案：后端那条 `detail` 是通用
+#: HTTP 语义，写给浏览器用户看；REPL 用户看不到登录框，需要的是命令名。
+_LOGIN_HINT_401 = "（未认证或凭证已失效：输入 /login 重新登录，或启动时带 --username/--password）"
+
+
 def _error_message(status_code: int, body: Any) -> str:
     """从响应体提取可读错误消息：信封 code/message 或 FastAPI detail。"""
+    message = None
     if isinstance(body, dict):
         if body.get("message") and "code" in body:
-            return f"[{body.get('code')}] {body['message']}"
-        if isinstance(body.get("detail"), str):
-            return body["detail"]
-    return f"HTTP {status_code}"
+            message = f"[{body.get('code')}] {body['message']}"
+        elif isinstance(body.get("detail"), str):
+            message = body["detail"]
+    if message is None:
+        message = f"HTTP {status_code}"
+    if status_code == 401:
+        # 服务端原文保留在前（抹掉就分不清"没带凭证"与"凭证无效"），自救动作附在后
+        message = f"{message}{_LOGIN_HINT_401}"
+    return message
 
 
 # ==================== 客户端 ====================

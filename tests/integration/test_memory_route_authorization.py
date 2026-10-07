@@ -13,8 +13,12 @@
 装配口径：router、鉴权依赖、`get_memory_manager`、`MemoryManager` 全是生产实现。
 只把 `neurova.api.app.get_app_state` 换成一个供出该 manager 的桩状态——不为绕过
 装配点，而是不把整个 app 的启动与其单例/落库副作用拖进每条用例；被测面仍是端点本身。
-身份一律经 `dependency_overrides` 注入真依赖的返回位（`Depends` 在导入期已绑函数对象，
-换模块属性无效）。
+
+身份口径 2026-10-08 换过一次（P3-12 C1）：原来经 `dependency_overrides` 注入返回位，
+现在改签**生产同一个函数产出的真 JWT**。原因是写侧门挂在
+`APIRouter(dependencies=[Depends(requireIdentityForWrites)])` 上，它判的是**请求有没有
+凭证**，不看被 override 的那个函数——override 只能替掉处理器级的身份解析，替不掉路由级
+的凭证检查，于是旧夹具全部 401。换成真 token 反而把整条凭证链纳进覆盖范围。
 """
 
 import types
@@ -28,9 +32,11 @@ from neurova.api import auth as auth_mod
 from neurova.api.endpoints.memory import router as memoryRouter
 from neurova.api.error_handlers import register_error_handlers
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests.auth_headers import bearerHeaders
 
-ALICE = {"user_id": "alice", "username": "alice", "role": "user", "neuser_id": "ne-alice"}
-BOB = {"user_id": "bob", "username": "bob", "role": "user", "neuser_id": "ne-bob"}
+#: 真 JWT 的请求头；不带 headers 即匿名
+ALICE_HDR = bearerHeaders("alice")
+BOB_HDR = bearerHeaders("bob")
 
 
 @pytest.fixture
@@ -53,17 +59,9 @@ def client(manager, monkeypatch):
     return TestClient(app)
 
 
-def _asUser(client, identity: typing.Optional[dict]):
-    """identity=None 表示不注入——走真依赖，无凭证即回落 default 用户"""
-    if identity is None:
-        client.app.dependency_overrides.pop(auth_mod.get_current_user_or_default, None)
-    else:
-        client.app.dependency_overrides[auth_mod.get_current_user_or_default] = lambda: identity
-
-
 def _createAsAlice(client) -> str:
-    _asUser(client, ALICE)
-    r = client.post("/api/v1/memory", json={"content": "ALICE-原内容", "auto_classify": False})
+    r = client.post("/api/v1/memory", json={"content": "ALICE-原内容", "auto_classify": False},
+                    headers=ALICE_HDR)
     assert r.status_code == 200, r.text
     return r.json()["data"]["memory_id"]
 
@@ -73,7 +71,7 @@ class TestMemoryRouteAuthorization:
         """GET /{id} 必须真能读到（现读零写入的 storage → 恒 404）"""
         memoryId = _createAsAlice(client)
 
-        r = client.get(f"/api/v1/memory/{memoryId}")
+        r = client.get(f"/api/v1/memory/{memoryId}", headers=ALICE_HDR)
 
         assert r.status_code == 200, f"归属者读自己的记忆详情应 200，实得 {r.status_code}: {r.text}"
         assert r.json()["data"]["content"] == "ALICE-原内容", r.text
@@ -81,44 +79,43 @@ class TestMemoryRouteAuthorization:
     def test_otherUserCannotUpdate(self, client):
         memoryId = _createAsAlice(client)
 
-        _asUser(client, BOB)
-        r = client.put(f"/api/v1/memory/{memoryId}", json={"content": "TAMPERED-by-bob"})
+        r = client.put(f"/api/v1/memory/{memoryId}", json={"content": "TAMPERED-by-bob"},
+                       headers=BOB_HDR)
 
         assert r.status_code == 404, f"他人 PUT 应视同不存在，实得 {r.status_code}: {r.text}"
-        _asUser(client, ALICE)
-        assert client.get(f"/api/v1/memory/{memoryId}").json()["data"]["content"] == "ALICE-原内容"
+        r = client.get(f"/api/v1/memory/{memoryId}", headers=ALICE_HDR)
+        assert r.json()["data"]["content"] == "ALICE-原内容"
 
     def test_anonymousCannotUpdate(self, client):
-        """无凭证请求回落 default 租户，同样不得改动 alice 的记忆"""
+        """C1 后匿名写**根本进不到租户判定**：路由级写门先 401。
+
+        原来是回落 default 租户再被归属校验拦成 404——两道门任一道塌了都只剩 404，
+        现在两道门各自可核实：这条钉 401，`testEveryMemoryWriteRouteRejectsAnonymous` 钉覆盖面。
+        """
         memoryId = _createAsAlice(client)
 
-        _asUser(client, None)
         r = client.put(f"/api/v1/memory/{memoryId}", json={"content": "TAMPERED-by-anon"})
 
-        assert r.status_code == 404, f"匿名 PUT 应被拒，实得 {r.status_code}: {r.text}"
-        _asUser(client, ALICE)
-        assert client.get(f"/api/v1/memory/{memoryId}").json()["data"]["content"] == "ALICE-原内容"
+        assert r.status_code == 401, f"匿名 PUT 应被写门拒绝，实得 {r.status_code}: {r.text}"
+        r = client.get(f"/api/v1/memory/{memoryId}", headers=ALICE_HDR)
+        assert r.json()["data"]["content"] == "ALICE-原内容"
 
     def test_otherUserCannotDelete(self, client):
         memoryId = _createAsAlice(client)
 
-        _asUser(client, BOB)
-        r = client.delete(f"/api/v1/memory/{memoryId}")
+        r = client.delete(f"/api/v1/memory/{memoryId}", headers=BOB_HDR)
 
         assert r.status_code == 404, f"他人 DELETE 应视同不存在，实得 {r.status_code}: {r.text}"
-        _asUser(client, ALICE)
-        assert client.get(f"/api/v1/memory/{memoryId}").status_code == 200
+        assert client.get(f"/api/v1/memory/{memoryId}", headers=ALICE_HDR).status_code == 200
 
     def test_anonymousCannotDelete(self, client):
         """`agent_wide=True` 把第 2、3 层关掉，于是匿名也能"遗忘"他人记忆"""
         memoryId = _createAsAlice(client)
 
-        _asUser(client, None)
         r = client.delete(f"/api/v1/memory/{memoryId}")
 
-        assert r.status_code == 404, f"匿名 DELETE 应被拒，实得 {r.status_code}: {r.text}"
-        _asUser(client, ALICE)
-        assert client.get(f"/api/v1/memory/{memoryId}").status_code == 200
+        assert r.status_code == 401, f"匿名 DELETE 应被写门拒绝，实得 {r.status_code}: {r.text}"
+        assert client.get(f"/api/v1/memory/{memoryId}", headers=ALICE_HDR).status_code == 200
 
 
 class TestMemoryIdentityIsSingleSource:

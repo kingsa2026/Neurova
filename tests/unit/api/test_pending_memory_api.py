@@ -7,6 +7,7 @@
 - GET  /pending/decisions    → 裁决历史（仅 admin）
 """
 
+from tests.auth_headers import bearerHeaders
 import os
 from unittest.mock import MagicMock, patch
 
@@ -40,7 +41,7 @@ def api(tmp_path, monkeypatch):
     register_error_handlers(app)
     holder = {"user": dict(ALICE)}
     app.dependency_overrides[memory_auth.get_current_user_or_default] = lambda: holder["user"]
-    client = TestClient(app)
+    client = TestClient(app, headers=bearerHeaders("1"))
     return client, holder, store, mm
 
 

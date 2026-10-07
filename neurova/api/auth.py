@@ -633,6 +633,47 @@ def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+_READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+async def requireIdentityForWrites(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Dict[str, Any]:
+    """写类请求必须**带凭证**；读类请求原样放行（匿名读仍只见 default 桶）。
+
+    为什么挂在这一处而不是逐个 handler 上：政策 2026-10-06 定的是"匿名共享 default 桶
+    可以，但租户键必须是 user_id"——那是**读**侧语义。写侧沿用同一条回落等于把
+    "共享桶"当成"无人看守的桶"：任何访客都能往同一个 `default` 租户里增删改，
+    事后既无从对账也无从撤销（§6-1 身份批修的是"跨租户越权"，这一格是同一条链上
+    "匿名可写"的另一半）。
+
+    形态上刻意不做"依赖严格门本体"：路由级依赖对 GET 也会解析，那样会把政策要留的
+    匿名读一起打死；凭证→身份这一步也不自解，直接调 `get_current_user` 用的同一份
+    `_identityFromCredentialsOr401`，只是**只对写类方法**调用它。
+    """
+    if request.method in _READ_ONLY_METHODS:
+        return _DEFAULT_USER.copy()
+    return _identityFromCredentialsOr401(credentials)
+
+
+#: **记忆面**允许出现的身份门名字（唯一清单，且刻意是闭集）。
+#: 判据 `tests/unit/api/test_memoryWriteIdentityGate.py` 双向钉：清单里的名字必须
+#: 真实存在，memory 包实际 import 的门必须都在清单内——第五道门自己长出来时会红。
+#:
+#: 为什么只有两道：政策 2026-10-06 记的是"读侧匿名可落 default 桶"（→
+#: `get_current_user_or_default`）与"租户键必须是 user_id"（→ 严格门
+#: `get_current_user`，写侧由 `requireIdentityForWrites` 复用它那份解析）。
+#: 其余门（`WithQueryToken` / `or_api_key` / `or_service`）在全仓各有其用，
+#: 但**记忆面一条都不该用**：查询串凭证会把 token 落进 URL 与访问日志，而
+#: `X-Service-Token` 那条经 `semantic_search_api.py:114` 读记忆语料是**另一个面**
+#: 的口径（登记在台账，不在本清单内）。
+MEMORY_IDENTITY_GATES = (
+    "get_current_user",
+    "get_current_user_or_default",
+)
+
+
 async def get_current_user_or_default(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
@@ -645,6 +686,11 @@ async def get_current_user_or_default(
     过期/伪造/黑名单者变成共享 default 用户串改数据。现区分两种情况:
     - 完全无凭证 → 保留 _DEFAULT_USER 回落（桌面首启/登录前流程依赖）;
     - 有凭证但无效 → 401（与 get_current_user 同契约）。
+
+    2026-10-08 记一格边界（P3-12 拍板"跨租户不可读"）：上面那条"无凭证回落 default"
+    只对**读**成立。写类请求走 `requireIdentityForWrites`（同一条凭证链、同一份
+    `_identityFromCredentialsOr401`），因为"共享 default 桶"不等于"无人看守的桶"——
+    匿名写等于任何人都能改同一份数据，只是没人能对账。
     """
     if not credentials:
         return _DEFAULT_USER.copy()

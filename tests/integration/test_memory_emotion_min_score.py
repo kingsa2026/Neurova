@@ -20,7 +20,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from neurova.api import auth as auth_mod
 from neurova.api.endpoints.memory import router as memoryRouter
 from neurova.api.error_handlers import register_error_handlers
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
@@ -28,8 +27,11 @@ from neurova.cognitive_layers.memory_layer.modules.emotion_module import (
     EmotionState,
     EmotionType,
 )
+from tests.auth_headers import bearerHeaders
 
-ALICE = {"user_id": "alice", "username": "alice", "role": "user", "neuser_id": "ne-alice"}
+# C1（P3-12，2026-10-08）：写类请求的路由级门判的是「有没有凭证」，
+# dependency_overrides 替不掉它；改签生产同一个函数产出的真 JWT，身份由凭证解析出来。
+ALICE_HDR = bearerHeaders("alice")
 
 
 @pytest.fixture
@@ -47,12 +49,12 @@ def client(manager, monkeypatch):
     register_error_handlers(app)
     app.include_router(memoryRouter, prefix="/api/v1/memory")
     testClient = TestClient(app)
-    testClient.app.dependency_overrides[auth_mod.get_current_user_or_default] = lambda: ALICE
     return testClient
 
 
 def _create(client, content: str) -> str:
-    r = client.post("/api/v1/memory", json={"content": content, "auto_classify": False})
+    r = client.post("/api/v1/memory", json={"content": content, "auto_classify": False},
+                    headers=ALICE_HDR)
     assert r.status_code == 200, r.text
     return r.json()["data"]["memory_id"]
 

@@ -1692,3 +1692,18 @@ tests/unit/test_astScanThirdPartyPrune.py
 # 两个候选都恒 429 时，整条流累计等待必须 ≤ 预算且必须给出诚实终态（原状每个候选各带一份
 # 预算，5 候选最坏 ≈2 小时，且没有任何一格宣告过尽头）。逐文件单跑 6 passed
 tests/unit/llm/test_llm429WaitBudget.py
+# P3-12（C1）：记忆面**写侧**必须有可验证身份。门挂在 `memory/base.py` 的那一个
+# `APIRouter(dependencies=[...])` 上（11 个子模块共用同一个 router），所以判据取**路由矩阵**
+# 形态而不是逐个 handler：31 条写路由逐条匿名打一遍，一条放行即红（实测原状 30 条写路由
+# 30 条全放行，`POST /markdown` 回 422、`PUT /eki/enable` 回 500——都是"进到 handler 却没人
+# 看守"的形态）；读侧 34 条匿名仍须可达（2026-10-06 政策的 default 桶语义，不许被打死）；
+# 门名单收成闭集 `MEMORY_IDENTITY_GATES`，且按 **(import 来源, 名字)** 比而不是只比名字——
+# `api/deps.get_current_user` 是 `WithQueryToken` 的再导出，同名不同体，只比名字会放过它。
+# 逐文件单跑 4 passed
+tests/unit/api/test_memoryWriteIdentityGate.py
+# C1 的配套格：写侧收口后 CLI 第一次会对 `/memory save`、`/knowledge add` 这类命令回 401。
+# 后端那句 `detail` 是通用 HTTP 文案（写给浏览器用户），REPL 用户看不到登录框就等于死路。
+# 钉两件事：401 必须附可执行动作（/login），且**服务端原文保留在前**（抹掉就分不清
+# "没带凭证"与"凭证无效"，教义第 2 条）；非 401 的状态码一字不改——403/404/409 的自救动作
+# 各不相同，在这里统一加话术就是替别人编理由。逐文件单跑 4 passed
+tests/unit/test_cliFourOhOneSelfRescueHint.py
