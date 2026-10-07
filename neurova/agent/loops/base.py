@@ -409,11 +409,11 @@ class BaseAgentLoop(ABC):
         for batch in batches:
             if batch.parallel:
                 batch_outcomes = await asyncio.gather(
-                    *(self._execute_tool_call_worker(tc) for _, tc in batch.items)
+                    *(self._executeToolCallUnit(tc) for _, tc in batch.items)
                 )
             else:
                 batch_outcomes = [
-                    await self._execute_tool_call_worker(tc) for _, tc in batch.items
+                    await self._executeToolCallUnit(tc) for _, tc in batch.items
                 ]
             outcomes.extend(batch_outcomes)
 
@@ -449,6 +449,55 @@ class BaseAgentLoop(ABC):
             logger.debug("子代理邮箱排空失败(忽略)", exc_info=True)
 
         return new_messages
+
+    async def _executeToolCallUnit(self, tool_call: Dict) -> tuple:
+        """单条调用的**配对结果单元**：无论如何都要换回一条 tool 结果。
+
+        工具本身的失败已由执行咽喉转成失败正文回环（`native_tool_dispatch`）；这里
+        管的是执行链自己炸掉的那一类（溢出分层、能力解析、记账）——那种调用若不
+        补一条下文，`asyncio.gather` 会把同批其它已就绪的结果一起掀掉并整批上抛，
+        本轮工具白跑，最后由上游回退 legacy 兜住（教义第 1 条点名的 consumer-side
+        兜底形态）。不吞异常：如实回传失败正文并 warning 带栈。
+
+        只捕 `Exception`：取消是 `BaseException`，用户停止必须原样上抛，本层不截。
+        """
+        try:
+            return await self._execute_tool_call_worker(tool_call)
+        except Exception as exc:  # noqa: BLE001 - 转成协议要求的配对结果，不是消失
+            toolName = (tool_call.get("function") or {}).get("name", "unknown_tool")
+            logger.warning(
+                "工具 %s 的执行链异常（已回环为失败结果，同批其余调用不受牵连）: %s",
+                toolName, exc, exc_info=True,
+            )
+            return self._failedToolOutcome(tool_call, exc)
+
+    def _failedToolOutcome(self, tool_call: Dict, exc: BaseException) -> tuple:
+        """为一条没有下文的生产调用合成诚实的失败结果（协议仍配对）。"""
+        from neurova.agent import native_tool_dispatch as _native_dispatch
+
+        toolName = (tool_call.get("function") or {}).get("name", "unknown_tool")
+        callId = resolveCallId(tool_call)
+        errorText = f"工具 {toolName} 执行链异常: {exc}"
+        content = _safe_json_dumps(
+            _native_dispatch.buildFailureToolBody(errorText, None)
+        )
+        toolMsg = {
+            "role": "tool",
+            "tool_call_id": callId,
+            "name": toolName,
+            "content": content,
+        }
+        records = [
+            {
+                "type": "tool_result",
+                "tool_name": toolName,
+                "tool_call_id": callId,
+                "result": errorText,
+                "success": False,
+                "timestamp": datetime.now().isoformat(),
+            }
+        ]
+        return toolMsg, records
 
     async def _execute_tool_call_worker(self, tool_call: Dict) -> tuple:
         """单条工具调用执行（P1-2 抽取，顺序无关的纯执行单元）。
