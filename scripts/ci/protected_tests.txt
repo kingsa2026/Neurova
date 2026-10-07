@@ -226,6 +226,9 @@ tests/unit/core/test_agentRunStaleReconcileWiring.py
 # Studio 长任务台账收口（2026-10-08 长任务闭环审计 E 批）：一次请求=一行=一个生命周期拥有者，
 #   重启遗留 running 必须有对偶收敛，wrapper 不得覆盖服务已写的终态与回退成因
 tests/unit/api/test_studioRunLedgerSingleSource.py
+# Studio runs 状态词汇表单源（§6-72 第二格）：写侧不得再写字面量，且前后端两份终态集合
+#   必须逐元素相等——生产新增一种终态而读侧漏认，长任务就会被轮询到超时
+tests/unit/api/test_studioRunStatusVocabulary.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
