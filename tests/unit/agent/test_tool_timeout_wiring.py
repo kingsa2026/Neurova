@@ -54,6 +54,10 @@ class TestTimeoutOffloadWiring:
             return {"late": True}, True, "builtin"
 
         executor = _make_executor(slow_core)
+        # 晚到终态按会话归属分流（C 批栅栏）：按生产入口登记本轮身份
+        from neurova.core.turn_context import set_turn_identity
+
+        set_turn_identity("搜一下", "sess_timeout_wiring", "u1")
         result = await executor._execute_single_tool("web_search", {"query": "x"}, skip_governance=True)
 
         assert result["status"] == "background"
@@ -62,7 +66,7 @@ class TestTimeoutOffloadWiring:
         # 后台任务继续跑完 → hint 落地
         hints = []
         for _ in range(50):
-            hints = executor.tool_coordinator.pop_pending_hints()
+            hints = executor.tool_coordinator.pop_pending_hints("sess_timeout_wiring")
             if hints:
                 break
             await asyncio.sleep(0.05)

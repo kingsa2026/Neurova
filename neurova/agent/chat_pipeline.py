@@ -2238,7 +2238,7 @@ class ChatPipeline:
         try:
             _coordinator = getattr(self.tool_executor, "tool_coordinator", None)
             if _coordinator:
-                for _hint in _coordinator.pop_pending_hints():
+                for _hint in _coordinator.pop_pending_hints(ctx.session_id):
                     _outcome = (
                         str(_hint.get("result"))[:800]
                         if _hint.get("success")
