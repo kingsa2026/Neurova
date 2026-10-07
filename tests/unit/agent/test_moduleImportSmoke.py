@@ -1,9 +1,18 @@
-"""
-闭环完整性验证测试
+# -*- coding: utf-8 -*-
+"""模块可导入性 smoke（原名 test_closed_loop_verification.py，2026-10-08 按实改名的）
 
-验证 CLOSED_LOOP_ANALYSIS.md 中提到的闭环是否正常工作。
-使用 TDD 方法：先写测试，再验证。
+**这里验的不是闭环**。原名"闭环完整性验证"与内容不符：十条用例做的是
+"import 一堆模块 + 构造几个管理器 + 断言没抛 ImportError"，即最小装配 smoke；
+它证明不到任何一条"写入→读取→反馈"链在路上（那类判据见
+test_tool_round_history_on_early_exit / test_pending_hints_session_fence /
+test_agentRunStaleReconcileWiring / test_studioRunLedgerSingleSource）。
+
+为什么要改名而不是删：import 检查本身有效（try/import/pytest.fail 会真红），
+且它守的是 evolution/skills/cognitive_layers 那几个包的重构后回归；
+留着错名字的危害是**误导下一轮审计**——让人以为"闭环已有验证"。
+登记处：audit-reports/simplification-audit-2026-10-05.md 的 §6-73。
 """
+
 
 import pytest
 import sys
