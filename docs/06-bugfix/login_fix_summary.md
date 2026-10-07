@@ -23,6 +23,13 @@ pip install PyJWT>=2.8.0
 - 角色: `admin`
 - 状态: `active`
 
+> **2026-10-07 更新（勿再照本节执行）**：上述默认口令**已退役**——它连同本行文档一起公开在
+> 仓库里，任何按本节操作的部署都等于给全网一个已知密码的管理员账号。现形态：口令必须由
+> 环境变量 `NEUROVA_ADMIN_PASSWORD` 注入（强度沿用 `PasswordHasher.is_password_strong`），
+> 脚本不再内置默认值、不再回显口令、失败以非零退出，落点也改走数据根锚点
+> （原先写死 `db_path="data/users.db"`，设了 `NEUROVA_DATA_DIR` 的部署跑完拿不到账号）。
+> 判据：`tests/unit/test_adminBootstrapLanding.py`。已有部署若建过这个账号，请改密或删号。
+
 ### 3. 重启后端服务器
 - 停止现有 Python 进程
 - 重新启动 `start_server.py`

@@ -2,13 +2,11 @@
 记忆安全与隐私 - 敏感信息检测、加密存储、被遗忘权
 """
 
-import base64
 import datetime
 import hashlib
 from neurova.core.logger import get_logger
 import os
 import re
-import secrets
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,7 +16,7 @@ from .models import Memory
 
 # 可选依赖处理
 try:
-    from cryptography.fernet import Fernet, InvalidToken
+    from cryptography.fernet import Fernet
 
     HAS_CRYPTOGRAPHY = True
 except ImportError:
@@ -34,8 +32,12 @@ def _load_or_create_encryption_key() -> str:
 
     旧实现当 encryption_key 未配置时每次进程生成新随机密钥 → 重启后已加密记忆
     无法解密（解密静默返回空串，记忆"消失"）。现改为从持久化文件读取（不存在则
-    生成符合 Fernet 规范的密钥并 0600 保存），两类加密器均可复用。
+    生成符合 Fernet 规范的密钥并 0600 保存）。
     """
+    if not HAS_CRYPTOGRAPHY:
+        raise RuntimeError(
+            "cryptography 库未安装，无法产出可持久的 Fernet 密钥 — run: pip install cryptography"
+        )
     try:
         # 原实现读一个全仓不存在的 `config.DATA_DIR`，再兜底到裸相对名 `"data"`
         # ——换个启动目录就换一份加密密钥，旧记忆解密静默返回空串（"记忆消失"）。
@@ -49,8 +51,8 @@ def _load_or_create_encryption_key() -> str:
                 existing = _f.read().strip()
             if existing:
                 return existing
-        # 生成符合 Fernet 规范的密钥（32 url-safe base64 字节），Fernet 与回退 XOR 均可使用
-        new_key = Fernet.generate_key().decode() if HAS_CRYPTOGRAPHY else secrets.token_hex(32)
+        # 生成符合 Fernet 规范的密钥（32 url-safe base64 字节）
+        new_key = Fernet.generate_key().decode()
         with open(key_path, "w", encoding="utf-8") as _f:
             _f.write(new_key)
         try:
@@ -59,8 +61,12 @@ def _load_or_create_encryption_key() -> str:
             pass
         return new_key
     except Exception as e:
-        logger.warning("持久化记忆加密密钥失败，回退到内存随机密钥（重启将失效）: %s", e)
-        return secrets.token_hex(32)
+        # M-12 的另一半：发一把"重启即失效"的临时钥匙，等于亲手制造下一次"记忆消失"，
+        # 只 warning 一句就继续跑是把故障挪到更远的地方。宁可当场不起。
+        logger.error("记忆加密密钥无法持久化，拒绝使用一次性临时密钥: %s", e)
+        raise RuntimeError(
+            f"记忆加密密钥未能写入数据根（拒绝回退到重启即失效的临时密钥）: {e}"
+        ) from e
 
 
 # ────── Enums ──────
@@ -222,50 +228,6 @@ _BUILTIN_PATTERNS: List[SensitivePattern] = [
 # ────── 加密工具 ──────
 
 
-class _FallbackCipher:
-    """回退加密器（当 cryptography 库不可用时使用）"""
-
-    def __init__(self, key: Optional[str] = None):
-        self._key = key or os.urandom(32).hex()
-        self._key_bytes = hashlib.sha256(self._key.encode()).digest()
-
-    def encrypt(self, data: str) -> str:
-        """简单加密（Base64 + XOR）"""
-        if not data:
-            return ""
-
-        key_bytes = self._key_bytes
-        data_bytes = data.encode("utf-8")
-
-        # XOR 加密
-        encrypted = bytearray()
-        for i, byte in enumerate(data_bytes):
-            encrypted.append(byte ^ key_bytes[i % len(key_bytes)])
-
-        # Base64 编码
-        return base64.b64encode(encrypted).decode("ascii")
-
-    def decrypt(self, encrypted_data: str) -> str:
-        """简单解密"""
-        if not encrypted_data:
-            return ""
-
-        try:
-            # Base64 解码
-            encrypted_bytes = base64.b64decode(encrypted_data)
-
-            key_bytes = self._key_bytes
-            decrypted = bytearray()
-
-            for i, byte in enumerate(encrypted_bytes):
-                decrypted.append(byte ^ key_bytes[i % len(key_bytes)])
-
-            return decrypted.decode("utf-8")
-        except Exception as e:
-            logger.error("解密失败: %s", e)
-            return ""
-
-
 class _FernetCipher:
     """Fernet 加密器"""
 
@@ -283,31 +245,24 @@ class _FernetCipher:
         self._fernet = Fernet(self._key)
 
     def encrypt(self, data: str) -> str:
-        """Fernet 加密"""
+        """Fernet 加密——失败即抛出，不返回空串。
+
+        返回空串等于落一条"加密成功的空记忆"：写侧看不出坏，读侧再也取不回来。
+        """
         if not data:
             return ""
 
-        try:
-            encrypted = self._fernet.encrypt(data.encode("utf-8"))
-            return encrypted.decode("ascii")
-        except Exception as e:
-            logger.error("Fernet加密失败: %s", e)
-            return ""
+        return self._fernet.encrypt(data.encode("utf-8")).decode("ascii")
 
     def decrypt(self, encrypted_data: str) -> str:
-        """Fernet 解密"""
+        """Fernet 解密——失败点名，不把"解不开"改写成"这条记忆没内容"。"""
         if not encrypted_data:
             return ""
 
         try:
-            decrypted = self._fernet.decrypt(encrypted_data.encode("ascii"))
-            return decrypted.decode("utf-8")
-        except InvalidToken:
-            logger.error("解密失败：无效的令牌或密钥")
-            return ""
-        except Exception as e:
-            logger.error("Fernet解密失败: %s", e)
-            return ""
+            return self._fernet.decrypt(encrypted_data.encode("ascii")).decode("utf-8")
+        except Exception as exc:
+            raise ValueError(f"Fernet 解密失败（令牌或密钥不匹配）: {exc}") from exc
 
 
 # ────── 主类 ──────
@@ -356,15 +311,17 @@ class MemorySecurity:
         method = self._config.default_encryption
 
         if method == EncryptionMethod.FERNET:
-            try:
-                # BUG AUDIT M-12: 未配置密钥时不再每次随机生成（重启后旧密文无法
-                # 解密 → 记忆"消失"），改从持久化文件读取稳定密钥。
-                key = self._config.encryption_key or _load_or_create_encryption_key()
-                return _FernetCipher(key)
-            except ImportError:
-                logger.warning("cryptography 库未安装，使用回退加密器")
-                fb_key = self._config.encryption_key or _load_or_create_encryption_key()
-                return _FallbackCipher(fb_key)
+            if not HAS_CRYPTOGRAPHY:
+                # 与 `llm/providers/secret_store.py` 同口径：依赖缺失就点名拒绝，
+                # 不换新一把弱钥匙继续写"看起来加密了"的内容。
+                raise RuntimeError(
+                    "cryptography 库未安装，无法初始化记忆加密 "
+                    "(EncryptionMethod.FERNET) — run: pip install cryptography"
+                )
+            # BUG AUDIT M-12: 未配置密钥时不再每次随机生成（重启后旧密文无法解密
+            # → 记忆"消失"），改从持久化文件读取稳定密钥。
+            key = self._config.encryption_key or _load_or_create_encryption_key()
+            return _FernetCipher(key)
         elif method == EncryptionMethod.HASH:
             # 哈希不需要加密器
             return None
@@ -489,7 +446,7 @@ class MemorySecurity:
             masked = self._mask_content(content)
             return (masked, EncryptionMethod.MASK.value)
 
-        # Fernet 或回退加密
+        # Fernet 加密（失败即抛出，见 _FernetCipher）
         if self._cipher:
             encrypted = self._cipher.encrypt(content)
             return (encrypted, use_method.value)
@@ -525,7 +482,7 @@ class MemorySecurity:
             logger.warning("掩码处理无法完全还原")
             return encrypted_content
 
-        # Fernet 或回退解密
+        # Fernet 解密（失败即点名，不再返回空串）
         if self._cipher:
             return self._cipher.decrypt(encrypted_content)
 
