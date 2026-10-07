@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -436,6 +437,96 @@ class AgentRunStore:
                     (now, now),
                 )
         return [{"run_id": r, "session_id": s} for r, s in rows]
+
+
+# ------------------------------------------------------------------
+# 运行期驱动：租约过期扫描（2026-10-08 闭环审计 D 批）
+#
+# `reconcile_stale` 早就写好了，但全仓只有测试在调它——生产侧没有驱动者，于是
+# `heartbeat_at`/`lease_expires_at` 变成「每轮都写、没人读来做判定」的字段：
+# 进程活着而某一轮的工作卡死时，那条 run 永远停在 running，只有重启才会被
+# `reconcile_at_startup` 顺手收敛。启动收敛管「重启过」，这条管「还在跑的过程」，
+# 两者不重叠。间隔由租约派生而不是另写一个数：扫描必须比租约密，否则「过期」到
+# 「被读」之间的窗口比租约本身还长；也比心跳疏，不把 SQLite 写成第二个心跳源。
+# ------------------------------------------------------------------
+
+#: 扫描间隔下限（秒）。租约很短时（测试用 2s）不至于把库打成筛子。
+SWEEP_INTERVAL_MIN_S = 5.0
+
+_sweepTask = None
+_sweepLock = threading.Lock()
+
+
+def staleSweepIntervalSeconds(store: "AgentRunStore") -> float:
+    """扫描间隔的唯一派生点：租约 / 3，下限 `SWEEP_INTERVAL_MIN_S`。"""
+    return max(SWEEP_INTERVAL_MIN_S, float(store.lease_seconds) / 3.0)
+
+
+def sweepStaleOnce(store: "AgentRunStore") -> List[Dict[str, Any]]:
+    """跑一轮过期收敛，并把收敛结果点名进日志（运维看得见"收了几条"）。"""
+    converged = store.reconcile_stale()
+    if converged:
+        logger.warning(
+            "AgentRun 租约过期收敛: %d 条 running→failed(process_died)，run_id=%s",
+            len(converged),
+            [c["run_id"] for c in converged],
+        )
+    return converged
+
+
+async def _staleSweepLoop(store: "AgentRunStore", intervalSeconds: float) -> None:
+    """周期扫描。收敛失败永不阻断对话——台账接线层一贯 fail-open（见 `run_gate_enabled`）。"""
+    while True:
+        await asyncio.sleep(intervalSeconds)
+        try:
+            sweepStaleOnce(store)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - 扫描异常只记，不把主流程带下水
+            logger.warning("AgentRun 租约过期扫描异常（下一轮再试）: %s", e)
+
+
+def startStaleSweep() -> bool:
+    """起周期扫描（幂等）。没有运行中事件循环时如实返回 False，不自建第二份循环。"""
+    global _sweepTask
+    with _sweepLock:
+        if _sweepTask is not None and not _sweepTask.done():
+            return False
+        store = get_agent_run_store()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("AgentRun 租约扫描未启动：当前线程没有运行中的事件循环")
+            return False
+        _sweepTask = loop.create_task(
+            _staleSweepLoop(store, staleSweepIntervalSeconds(store))
+        )
+        logger.info(
+            "AgentRun 租约过期扫描已启动：每 %.1fs 一轮（租约 %.0fs）",
+            staleSweepIntervalSeconds(store), store.lease_seconds,
+        )
+        return True
+
+
+async def stopStaleSweep() -> None:
+    """停周期扫描并等它真的退出。
+
+    必须收敛：常驻 task 不结束会让 `TestClient.__exit__` 的 join 挂住（本仓实测过的
+    teardown 陷阱），也让真进程退出走满超时。可重复调用。
+    """
+    global _sweepTask
+    with _sweepLock:
+        task = _sweepTask
+        _sweepTask = None
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:  # noqa: BLE001 - 退出路径不因扫描异常而中断
+        logger.warning("AgentRun 租约扫描退出时异常: %s", e)
 
 
 # ── 单例工厂（全项目 get_*/reset_* 惯例）────────────────────────────
