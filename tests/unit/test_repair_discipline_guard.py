@@ -21,15 +21,16 @@ Issue #68 追加要求：项目配置中必须写明
 - `/AGENTS.md`（引用方认定的权威文件，必须真实存在且可入库）
 - `CONTRIBUTING.md` 测试纪律节（人类贡献者入口）
 
-## 为什么判据从四条扩到六条，并另列核心原则六条（2026-10-05）
+## 为什么判据要按条款逐条咬合（2026-10-05 起，条数以本文件的两张表为准）
 
-工程要求的完整口径是「核心原则六条 + 修复教义六条」。实测漂移形态有两种，
+工程要求的完整口径以本文件 CORE_PRINCIPLE_POINTS 与 REQUIRED_POINTS 两张表为准
+（文档里不手抄条数）。实测漂移形态有两种，
 本守卫都要咬住：
 
 - **少列**：`CONTRIBUTING.md` 只抄了修复教义的前四条，第 5 条 live-verify 与
   第 6 条 单一事实源在人类入口缺失——贡献者从该文件读不到这两条，
   与"权威文件写了就等于写了"是同一类断点。
-- **只在一条通道里有**：核心原则六条此前只存在于 `.cnb/settings.yml` 的角色
+- **只在一条通道里有**：核心原则此前只存在于 `.cnb/settings.yml` 的角色
   prompt（NPC 被 @ 才加载），`/AGENTS.md` 与 `CONTRIBUTING.md` 一字未提。
   按 §0 三落点同步纪律，只有一条通道必达的要求换一次入口即失效。
 
@@ -52,7 +53,7 @@ SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 CONTRIBUTING = PROJECT_ROOT / "CONTRIBUTING.md"
 GITIGNORE = PROJECT_ROOT / ".gitignore"
 
-# 纪律六要点 → 判定关键词（任一缺失即判要求没写全）
+# 修复教义条款 → 判定关键词（任一缺失即判要求没写全；条数以本表为准）
 REQUIRED_POINTS = {
     "TDD 红绿灯": ("红绿灯",),
     "放大视角": ("放大视角",),
@@ -63,7 +64,7 @@ REQUIRED_POINTS = {
     "同功能实现先比后合再退役": ("取长补短",),
 }
 
-# 核心原则六条 → 判定关键词（动手与作答基线，与修复纪律并列的工程要求）
+# 核心原则 → 判定关键词（动手与作答基线，与修复纪律并列的工程要求）
 CORE_PRINCIPLE_POINTS = {
     "先理解再动手": ("先理解再动手",),
     "结论先行": ("结论先行",),
@@ -71,6 +72,8 @@ CORE_PRINCIPLE_POINTS = {
     "基于事实": ("基于事实",),
     "尊重仓库规范": ("尊重仓库规范",),
     "知识库作答": ("知识库作答",),
+    "未接线/零调用须带影响面": ("零调用",),
+    "待拍板问题须给决策影响面": ("待拍板",),
 }
 
 
@@ -113,8 +116,8 @@ class TestNpcConfigCarriesDiscipline:
         assert not bad, (
             "NPC 角色 prompt 未写明修复纪律（被 @ 时该角色不会知道这条要求）:\n  "
             + "\n  ".join(bad)
-            + "\n七要点：TDD 红绿灯 / 修根因 / 放大视角 / 禁止抹除或规避表面报错 / "
-            "live-verify / 单一事实源 / 同功能实现先比后合再退役。"
+            + "\n应覆盖要点（以 REQUIRED_POINTS 为准，不在此手抄条数）："
+            + " / ".join(REQUIRED_POINTS) + "。"
         )
 
     def test_every_role_prompt_states_core_principles(self, roles):
@@ -128,8 +131,8 @@ class TestNpcConfigCarriesDiscipline:
         assert not bad, (
             "NPC 角色 prompt 未写明核心原则（被 @ 时该角色不会知道这条要求）:\n  "
             + "\n  ".join(bad)
-            + "\n六条：先理解再动手 / 结论先行 / 简洁表达 / 基于事实 / "
-            "尊重仓库规范 / 知识库作答。"
+            + "\n应覆盖条款（以 CORE_PRINCIPLE_POINTS 为准，不在此手抄条数）："
+            + " / ".join(CORE_PRINCIPLE_POINTS) + "。"
         )
 
 
@@ -288,13 +291,13 @@ class TestContributingCarriesDiscipline:
             "CONTRIBUTING.md 测试纪律节未写 TDD 红绿灯——贡献者入口看不到这条要求。"
         )
 
-    def test_contributing_states_all_six_points(self):
+    def test_contributing_states_allDoctrinePoints(self):
         """人类入口少抄一条 = 该条对贡献者不存在（实测：曾只抄前四条）。"""
         text = _read(CONTRIBUTING)
         missing = _missing_points(text)
         assert not missing, (
             f"CONTRIBUTING.md 修复纪律节未写明: {missing}\n"
-            "AGENTS.md 有六条，入口只列四条就是手抄漂移；补齐或改为整节引用，"
+            "AGENTS.md 列全了条款，入口只列前四条就是手抄漂移；补齐或改为整节引用，"
             "不许留半份。"
         )
 
