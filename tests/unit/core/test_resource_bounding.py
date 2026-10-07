@@ -80,7 +80,23 @@ class TestToolCoordinatorBounded(unittest.TestCase):
         c = asyncio.run(_run())
         self.assertNotIn("bg_1", c._background, "完成的任务必须从活动字典移除")
         self.assertIn("bg_1", c._completed, "完成的任务移入有界留存")
-        self.assertTrue(c.get_background_status("bg_1")["success"])
+        # 读的是留存本身：`get_background_status` 已退役（全仓无生产调用方——它宣称的
+        # "可主动轮询后台任务"这条能力从来没接上，模型侧只靠 `_pending_hints` 注入），
+        # 判据不该依赖一个没有消费者的查询口。
+        self.assertTrue(c._completed["bg_1"]["success"])
+
+    def test_backgroundStatusQueryDoorStaysRetired(self):
+        """反向钉住退役：不留"看着能查、其实无人调用"的第二扇门。
+
+        重新引入的合法前提是**同时**接上生产消费者（模型可调用面或运维读数面）——
+        那时应把本判据改成钉那条链的咬合，而不是就地删掉本条。
+        """
+        from neurova.agent.tool_coordinator import ToolCoordinator
+
+        self.assertFalse(
+            hasattr(ToolCoordinator, "get_background_status"),
+            "查询口回来了但仍无生产消费者：写了不读的形态复现",
+        )
 
     def test_completed_bounded(self):
         from neurova.agent.tool_coordinator import ToolCoordinator
@@ -99,7 +115,7 @@ class TestToolCoordinatorBounded(unittest.TestCase):
 
         c = asyncio.run(_run())
         self.assertLessEqual(len(c._completed), 2, "留存超上限必须淘汰最老")
-        self.assertIsNone(c.get_background_status("bg_0"), "最老条目应被淘汰")
+        self.assertNotIn("bg_0", c._completed, "最老条目应被淘汰")
 
 
 async def _succeed():
