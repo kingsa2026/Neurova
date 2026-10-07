@@ -35,6 +35,13 @@ class EvolutionConfig:
     # （judge_unavailable），不再依赖 0.0/0.5 这种边界相等。
     min_improvement: float = 0.01
 
+    # ── 锚定地板（P2-4，SkillGLoW 对比 2026-10-07）──
+    # A = max(历史最优留出, 无技能基线)：候选只赢过**正在退化的现役基线**不算
+    # 真增益，必须达到 A − accept_threshold 才可部署（信用不归因于退化）。
+    # 无技能留出只在候选过基线门后评测（成本有界）。关 = 沿用旧语义
+    # （只对比当前基线，不花无技能臂预算）。
+    anchor_floor_enabled: bool = True
+
     # ── 约束闸──
     max_skill_size: int = 15_000
     max_tool_desc_size: int = 500

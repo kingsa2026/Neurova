@@ -44,6 +44,17 @@ STATUS_PENDING = ProposalStatus.PENDING.value
 STATUS_APPLIED = ProposalStatus.APPLIED.value
 STATUS_REJECTED = ProposalStatus.REJECTED.value
 
+
+def best_anchor_from_ledger(entries: Optional[list[dict]]) -> Optional[float]:
+    """历史最优留出分（P2-4 锚定地板）：台账里各次运行的绝对 holdout_after 最大值。
+
+    台账自 2026-10-07 起记录绝对留出分（runner 端 patch）；旧条目无此键、
+    参与不了锚——锚随台账自然预热，不另造第二份历史账本。
+    """
+    values = [e.get("holdout_after") for e in (entries or [])
+              if isinstance(e, dict) and isinstance(e.get("holdout_after"), (int, float))]
+    return max(values) if values else None
+
 class SimulatedAgent:
     """技能→输出的模拟执行器。
 
@@ -256,10 +267,15 @@ class SkillEvolutionService:
             noise_band = await self._noise_band_for(cfg, runner, dataset, artifact_type,
                                                     baseline_text=skill_text)
 
+        # P2-4 历史最优锚：台账里本技能各次运行的绝对留出分最大值
+        # （锚随台账预热；无记录 = None = 本轮只有无技能锚参与）
+        anchor_best = best_anchor_from_ledger(
+            self.ledger.recent(skill_id)) if cfg.anchor_floor_enabled else None
+
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
             dataset=dataset, iterations=iterations, noise_band=noise_band,
-            ledger_key=skill_id,
+            ledger_key=skill_id, anchor_best=anchor_best,
         )
         self._persist_run(skill_id, artifact_type, result)
 
