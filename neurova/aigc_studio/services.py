@@ -19,6 +19,7 @@ from neurova.aigc_studio.llm import (
     EXTRACTOR, PROMPT_GENERATOR, SCRIPT_REWRITER, STORYBOARD_BREAKER,
     call_llm, extract_json,
 )
+from neurova.aigc_studio.store import RUN_DONE, RUN_DONE_WITH_FALLBACK
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -81,7 +82,7 @@ async def split_script(store, pid: str, novel_text: str,
         }))
         fallback_reason = fallback_reason or "LLM 输出不可解析"
     store.update_run(rid, {
-        "status": "done",
+        "status": RUN_DONE,
         "detail_json": json.dumps({"episodes": len(eps), "fallback": fallback_reason,
                                     "chars": len(novel_text or "")},
                                   ensure_ascii=False),
@@ -159,7 +160,7 @@ async def extract_assets(store, pid: str, eid: str,
         added["props_added"] += 1
 
     store.update_run(rid, {
-        "status": "done" if not err else "done_with_fallback",
+        "status": RUN_DONE if not err else RUN_DONE_WITH_FALLBACK,
         "detail_json": json.dumps({**added, "error": err}, ensure_ascii=False),
     })
     return added
@@ -219,7 +220,7 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                 "status": "pending",
             }))
     store.update_run(rid, {
-        "status": "done", "detail_json": json.dumps({"shots": len(shots)})})
+        "status": RUN_DONE, "detail_json": json.dumps({"shots": len(shots)})})
     return shots
 
 
