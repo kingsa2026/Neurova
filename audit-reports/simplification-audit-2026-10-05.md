@@ -432,10 +432,23 @@
    **记账更正（我自己又犯过一次）**：`98e07c70` 提交说明写"生产净 +8（+13/-5）"，`git show --numstat`
    复算实为 **+17**（evolution_settings +11、result_summary +6）——错因是把两个文件的行数粗加成了净值。
    提交已入库不可改写，以复算值为准；这条与上一轮 "-38 应为 -17" 是同一个病：**净 LOC 只能逐文件 numstat 复算**。
-33. **台账号引导脚本绕过数据根（活体取证时实证，未修）** 🔴 —— `create_admin_user.py:17` 写死 `UserModel(db_path="data/users.db")`，**CWD 相对字面量**，`NEUROVA_DATA_DIR` 完全不生效：本轮为活体自证把一个 admin 账号写进了仓内真库（临时数据根里反而没有）。已按 `id+username+role+created_at` 四条件精确删除该行（其余用户未动，`login_logs` 无关联条目）。定性：这与 §6-26/§6-29/§6-32 同族（落点必须走锚点），但它在**仓根脚本**里，`test_runtime_landing_root` 的扫描面是 `neurova/`，判据够不到——属"判据覆盖面"缺口而非新缺陷形态。修法需人裁：改锚 `resolveDataPath("users.db")` 会让脚本从"操作 dev 库"变成"操作当前数据根"，语义变了（该脚本还是 `docs` 里推荐的初始化入口之一）；同时它把弱口令 `"Admin23@"` 硬编码并打印到 stdout，属安全面，不并入简化批顺手改。
+33. **台账号引导脚本绕过数据根（活体取证时实证，未修）** 🔴 —— `create_admin_user.py:17` 写死 `UserModel(db_path="data/users.db")`，**CWD 相对字面量**，`NEUROVA_DATA_DIR` 完全不生效：本轮为活体自证把一个 admin 账号写进了仓内真库（临时数据根里反而没有）。已按 `id+username+role+created_at` 四条件精确删除该行（其余用户未动，`login_logs` 无关联条目）。定性：这与 §6-26/§6-29/§6-32 同族（落点必须走锚点），但它在**仓根脚本**里，`test_runtime_landing_root` 的扫描面是 `neurova/`，判据够不到——属"判据覆盖面"缺口而非新缺陷形态。    **按核心原则第 8 条补决策影响面**：
+    - 接线后实现什么：脚本改走 `resolveDataPath()`/`get_data_root()` 锚点后，语义从"操作仓内 dev 库"变成"操作**当前数据根**"——桌面部署与 dev 部署各建各的账号，设了 `NEUROVA_DATA_DIR` 的部署首启就能拿到可用账号。
+    - 数据从哪来到哪去：脚本 → `auth/user_model.UserModel(db_path=…)` → `<数据根>/users.db`（bcrypt 口令哈希）；读侧是 `api/endpoints/auth.py` 登录链（本批活体即凭此发 JWT）。
+    - 影响面覆盖哪些模块：`create_admin_user.py` 本体、`docs/` 里指向它的初始化指引，以及**同形态的其它仓根脚本**——须先扫 `db_path="data/…"` 这类硬路径，命中点同批改（§5），否则修一条又留一片。
+    - 不接线留下什么：重定位部署继续"脚本报成功、账号在别处"，并继续往仓内 dev 库写垃圾行。
+    - 代价与不可逆点：改锚本身可逆（脚本无迁移语义）。真正的坑是它把弱口令 `"Admin23@"` 硬编码并打印到 stdout——**只改锚等于把一枚公开口令的 admin 从 dev 库搬进用户真实数据根**，是把问题搬大不是修好。所以"改锚"与"口令改为交互/环境注入"必须同批；后者改变调用方式（不再能无人值守一行跑），会影响 CI 与文档里的既有用法，这一层需产品拍板。
 
 34. **同族降级门：`memory_layer/security.py:_FallbackCipher`（登记未修）** 🔴 —— `:365-367` 在 `_FernetCipher` 抛 ImportError 时只 `logger.warning("cryptography 库未安装，使用回退加密器")` 就换用**重复密钥流 XOR**（`:243/261`，与 P0-3 刚退役的形态同族），且其 `decrypt()` 失败时 `return ""`（把解码失败改写成"这条记忆没内容"）。与 §6-8 渠道族是同一口径问题的密码学版：依赖缺失该 fail-fast 点名（`providers/secret_store.py:40-49` 已是本仓正确范例），不该降级成弱密文继续写盘。**未顺手改的原因是要先取证**：这一格的存量是**记忆库**（不是凭据桶），删降级门之前必须先答"有没有部署真在没装 cryptography 的机器上写过 XOR 记忆、今天还读不读得回"——`cryptography>=41.0` 在 `requirements.txt:88` 是声明依赖，实测本机可导入，所以降级支路今天不可达；但历史落库若存在，直接摘门会把那些记忆变成 `""`。处置需人裁：① 保留只读 legacy 解码再摘写路径（同 P0-3 形态，代价是要先找到存量库并证明可读回）；② 或确认全仓无 XOR 存量，直接 fail-fast。
+    **按核心原则第 8 条补决策影响面**：
+    - 接线后实现什么：依赖缺失时**拒绝初始化并点名**（照 `providers/secret_store.py:40-49` 的 HAS_CRYPTO 范例），不再产出"可被密钥流复用推懂"的伪加密记忆；同时把 `decrypt` 失败 `return ""` 改成抛出——今天那个空串正是把"解不开"改写成"这条记忆没内容"。
+    - 数据从哪来到哪去：`MemorySecurity._init_cipher` → `encrypt/decrypt` → 记忆正文列（`neurova/memory/__init__.py:108` 是该模块唯一入口，读侧即敏感记忆的召回与展示）。
+    - 影响面覆盖哪些模块：`cognitive_layers/memory_layer/security.py` 本体 + 其唯一调用方 `memory/__init__.py` + **所有已经用这条路径落库的记忆行**。
+    - 选项①（留只读 legacy）代价：先要跨部署取证"这台机器的记忆库里有没有 XOR 存量"——探测法现成（无前缀 base64、XOR 后能 UTF-8 解开的行即为候选），成本是一次真实数据根的读扫描；好处是零断读风险。
+    - 选项②（直接 fail-fast）代价：零代码成本、口径最干净；但若真存在 XOR 存量，那些记忆从"显示为空"变成"当场报错"。**不可逆点评估：没有**——密文仍在盘上、只是不再被静默当成空内容，改回①即可恢复；换来的是"坏数据第一次真正被看见"。
+    - 不接线留下什么：任何一台没装 `cryptography` 的机器继续静默写入弱密文，且失败面被空串抹平，排查者拿不到任何信号。
 35. **跑测会在仓内数据根创建 `data/web_reach_credentials/`（空目录）** 🔴 —— 实测发生于 A/B 期间（目录时间戳与跑测窗口一致，仓内 `data/` 未被 git 跟踪也无 ignore 规则覆盖该子目录名）。成因是 `web_reach/credentials.py:63` 的 `callerPath(base_dir, "web_reach_credentials")` 在构造时即 `mkdir`，而 `tests/conftest.py` 的落点隔离只覆盖了会话（`_isolateSessionsLanding`）与 `agent_workspaces`（`_isolate_agent_workspaces_root`）两格——凭据桶这格没进清单，于是每条起真 app 的用例都在真实数据根留一个空目录。属 §6-29 同一族的**隔离清单缺口**（那次补的是会话，这次是凭据），修法是在 conftest 补同款夹具；登记不顺手改：本轮改动面已含凭据存储，再叠一层共享测试基建改动会让 A/B 归因变浑。
+    **按核心原则第 7 条补影响面（这不是"死码"，是隔离清单缺一格）**：接线后实现什么——每条用例的凭据桶落进该用例自己的 `tmp_path`，跑测不再往真实数据根留目录，且"凭据按用户分桶"的语义在测试里第一次真的被隔离（今天多个用例共用仓内 `default` 桶，互相可见）。数据从哪来到哪去——夹具写 `NEUROVA_DATA_DIR`/显式 `base_dir` → `web_reach/credentials.py:63` 的 `callerPath(...)` → `<数据根>/web_reach_credentials/<uid>/`；消费方是 `api/endpoints/settings.py` 六处 REST、`computer_use/{ssh_runner,rdp_provider}.py`、`web_reach/reach.py`。影响面覆盖哪些模块——`tests/conftest.py`（共享基建，全仓 2.1 万条用例都经过它）+ 现有那批凭据/SSH 用例。不接线留下什么——仓内数据根继续长空目录，且任何真去读写凭据桶的用例仍在共享状态上互串（形态与 §6-29 会话落点一致，那次的病灶也是"看着隔离、其实共用"）。改的代价与不可逆点——无不可逆；风险是若有用例**依赖**真实桶路径会当场红，因此须跑宽域（api+web_reach+computer_use）而非只跑本地那一个文件。
 36. **敏感件防火墙会吞掉正当测试文件名（本批实测撞上一次）** 🔴 —— `.gitignore:483` 的 `tests/**/*_secret*`（同族 `*.pem`/`credentials*`/`api_keys*`/`.env`，由 `472a0180` 立）把新判据 `test_secretStoreCleanAuthenticated.py` 判成不可跟踪；把它登进 `scripts/ci/protected_tests.txt` 之后 `TestProtectedSubsetEntriesAreTracked` 立刻红，才暴露"文件名撞上防火墙"。改判方向是**给测试改名**（`test_credentialCipherDiscipline.py`）而不是放宽防火墙——豁免通道一旦按"这是个测试"开出，密钥文件也能顺着同一口径进来（AGENTS.md §6）。留给后续一条口径：新测试文件名带 `secret/credentials/api_key/env` 字样前，先 `git check-ignore -v` 一次；这条不是缺陷本身，是踩它的成本。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
