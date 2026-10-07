@@ -20,6 +20,8 @@ from typing import Any, Dict, Optional
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import ast_scan
+
 from neurova.api.app import create_app
 from neurova.collaboration.glance_yield_rules import GlanceYieldChecker
 from neurova.core import agent_run_store as ars
@@ -233,18 +235,38 @@ class TestLedgerImplementationIsSingleSource:
                 f"{relPath} 没有改用那份唯一实现"
             )
 
+    @staticmethod
+    def _callSitesNamed(source: str, name: str):
+        """源码里调用名为 `name` 的落点行号（`f(...)` 与 `x.f(...)` 同收）。
+
+        与 `ast_scan.callSites` 同一份 AST 判据，只多收**裸名**形态——本判据要钉的
+        正是单源模块里那处裸名调用，而 `callSites` 只认属性调用，用它会把真命中
+        读成零命中，判据退化成恒真的空断言（教义第 2 条不允许）。
+        判定口径（哪些算调用、哪些不算）仍只有 ast.Call 一处，不新造平行体系。
+        """
+        return [
+            node.lineno
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and name in (getattr(node.func, "id", None), getattr(node.func, "attr", None))
+        ]
+
     def testAdmissionHelperIsNotReimplementedAnywhere(self):
-        """不许有第二份"问闸→挂起→落库"：全仓 `requestYieldGate` 的调用点只许在单源模块里。"""
-        callers = []
-        for path in _REPO.glob("neurova/**/*.py"):
-            rel = path.relative_to(_REPO).as_posix()
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    fn = node.func
-                    name = getattr(fn, "id", None) or getattr(fn, "attr", None)
-                    if name == "requestYieldGate":
-                        callers.append(f"{rel}:{node.lineno}")
-        assert callers == ["neurova/core/agent_run_ledger.py"] or all(
-            c.startswith("neurova/core/agent_run_ledger.py") for c in callers
-        ), f"闸口调用点长出第二处：{callers}"
+        """不许有第二份"问闸→挂起→落库"：全仓 `requestYieldGate` 的调用点只许在单源模块里。
+
+        取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+        不私有 `rglob + glob`：那条写法把判据成本绑在代码总量上——本用例原先单次
+        全仓扫一遍 `neurova/`，与受保护子集其余文件共享机器时必偶发红
+        （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的就是这处）。
+        预筛词就是符号本身，是判据的充分条件：连 `requestYieldGate` 字样都没有的
+        文件不可能有它的调用点，解析量从**代码总量**降到**命中面**。
+        """
+        hits = []
+        for ref in ast_scan.sourceRefsUnder(
+            ast_scan.PRODUCTION_ROOT, ".py", ast_scan.textHints("requestYieldGate")
+        ):
+            for lineno in self._callSitesNamed(ref.code, "requestYieldGate"):
+                hits.append(f"{ast_scan.relativeToRepo(ref.path)}:{lineno}")
+        assert hits == ["neurova/core/agent_run_ledger.py:241"], (
+            f"闸口调用点从单源模块搬走了或长出第二处：{hits}"
+        )
