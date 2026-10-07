@@ -136,7 +136,8 @@ def _isolate(monkeypatch):
 class TestRetryConfig:
     def test_defaults(self):
         cfg = _get_429_retry_config()
-        assert cfg == {"max_retries": 10, "interval": 10.0, "cap": 120.0, "max_switches": 5}
+        assert cfg == {"max_retries": 10, "interval": 20.0, "cap": 120.0, "max_switches": 5,
+                      "wait_budget": 200.0}
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("NEUROVA_LLM_429_MAX_RETRIES", "3")
@@ -144,11 +145,12 @@ class TestRetryConfig:
         monkeypatch.setenv("NEUROVA_LLM_429_WAIT_CAP", "60")
         monkeypatch.setenv("NEUROVA_LLM_MAX_SWITCHES", "2")
         cfg = _get_429_retry_config()
-        assert cfg == {"max_retries": 3, "interval": 2.5, "cap": 60.0, "max_switches": 2}
+        assert cfg == {"max_retries": 3, "interval": 2.5, "cap": 60.0, "max_switches": 2,
+                      "wait_budget": 200.0}
 
     def test_invalid_env_falls_back(self, monkeypatch):
         monkeypatch.setenv("NEUROVA_LLM_429_RETRY_INTERVAL", "abc")
-        assert _get_429_retry_config()["interval"] == 10.0
+        assert _get_429_retry_config()["interval"] == 20.0
 
 
 class TestLimiterClearPause:
@@ -180,12 +182,12 @@ class TestChatStreamSameModelRetry:
         assert [c.content for c in chunks] == ["你", "好"]
         assert errors == []
         assert len(inner.calls) == 2  # 失败一次 + 重试成功
-        assert mmc._sleeps == [10.0]  # 默认间隔 10s
+        assert mmc._sleeps == [20.0]  # 拍板默认间隔 20s
         assert len(statuses) == 1
         s = statuses[0]
         assert s["phase"] == "waiting"
         assert s["retry"] == 1 and s["max_retries"] == 10
-        assert s["wait_seconds"] == 10.0
+        assert s["wait_seconds"] == 20.0
         assert s["model"] == "model-a"
         assert s["reason"] == "rate_limited"
         assert "reset" not in s  # 未吐过内容，无需重置
@@ -225,7 +227,7 @@ class TestChatStreamSameModelRetry:
 
         assert [c.content for c in chunks] == ["ok"]
         assert errors == []
-        assert mmc._sleeps == [10.0]
+        assert mmc._sleeps == [20.0]
         assert statuses[0]["phase"] == "waiting"
 
     @pytest.mark.asyncio
@@ -238,7 +240,7 @@ class TestChatStreamSameModelRetry:
 
         assert [c.content for c in chunks] == ["部分", "全"]
         assert errors == []
-        assert mmc._sleeps == [10.0]
+        assert mmc._sleeps == [20.0]
         assert statuses[0]["phase"] == "waiting"
         assert statuses[0]["reset"] is True  # 半截内容已吐，必须重置
 
@@ -259,7 +261,7 @@ class TestChatStreamFailover:
         assert [c.content for c in chunks] == ["b-ok"]
         assert errors == []
         assert len(inner_a.calls) == 3
-        assert mmc._sleeps == [10.0, 10.0]
+        assert mmc._sleeps == [20.0, 20.0]
         # 上下文连续：候选模型收到同一份 messages
         assert inner_b.calls[0] == messages
         switched = [s for s in statuses if s["phase"] == "switched"]
@@ -285,7 +287,7 @@ class TestChatStreamFailover:
         assert len(errors) == 1
         assert errors[0]["error_type"] == "rate_limited"
         assert len(inner_a.calls) == 2 and len(inner_b.calls) == 2
-        assert mmc._sleeps == [10.0, 10.0]
+        assert mmc._sleeps == [20.0, 20.0]
         switched = [s for s in statuses if s["phase"] == "switched"]
         assert len(switched) == 1  # A→B 一次切换
         exhausted = [s for s in statuses if s["phase"] == "exhausted"]
@@ -374,7 +376,7 @@ class TestChatNonStream429:
 
         assert result["success"] is True
         assert len(inner.calls) == 4
-        assert mmc._sleeps == [10.0]
+        assert mmc._sleeps == [20.0]
 
     @pytest.mark.asyncio
     async def test_429_budget_bypasses_circuit_breaker(self):
