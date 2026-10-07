@@ -1539,3 +1539,8 @@ tests/unit/skills/test_github_push_single_symbol_source.py
 # {"status":"ok"}：success=True 配一份编造的空载荷，评测台架拿不到技能真正产出的东西。
 # 判据用真注册表 + 真 Skill 走完整链路，前缀取自挂载注册表本身。逐文件单跑 1 passed
 tests/unit/api/test_skillExecuteFallbackCarriesPayload.py
+# 凭据存储必须是认证加密，且失败的读不得把存量抹掉（P0-3）：`secret_store_clean` 的重复密钥流
+# XOR（keystream=sha256(key) 循环）既无完整性（篡改一位只解出垃圾并当明文交给 SSH/社交凭据），
+# 又会"解不开→只 warning→下次保存按内存重写"静默丢凭据；写侧现走仓内唯一 AES-GCM 口径。
+# 判据含存量 XOR 读回、读到即升级、升级失败不动盘、缺依赖不降级。逐文件单跑 8 passed
+tests/unit/llm/test_credentialCipherDiscipline.py
