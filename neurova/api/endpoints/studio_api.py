@@ -15,7 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from neurova.aigc_studio import services
 from neurova.aigc_studio.llm import call_llm  # noqa: F401 — 测试可 monkeypatch services 层
-from neurova.aigc_studio.store import get_store
+from neurova.aigc_studio.store import get_store, RUN_DONE, RUN_FAILED, RUN_RUNNING
 from neurova.api.deps import get_current_user
 from neurova.core.logger import get_logger
 
@@ -136,13 +136,13 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
             # done_with_fallback 被压成 done、detail 里的成因被返回值抹掉，
             # 一行台账只剩状态字（E 批活体抓出）。
             row = store.get_run(run["id"]) or {}
-            if row.get("status") == "running":
-                store.update_run(run["id"], {"status": "done", "detail_json": _json.dumps(
+            if row.get("status") == RUN_RUNNING:
+                store.update_run(run["id"], {"status": RUN_DONE, "detail_json": _json.dumps(
                     result if isinstance(result, (dict, list)) else {"result": str(result)},
                     ensure_ascii=False, default=str)})
         except Exception as e:  # noqa: BLE001
             logger.exception("studio 后台任务失败(%s)", kind)
-            store.update_run(run["id"], {"status": "failed", "error": str(e)[:500]})
+            store.update_run(run["id"], {"status": RUN_FAILED, "error": str(e)[:500]})
 
     task = asyncio.create_task(_wrapper())
     _tasks.add(task)
