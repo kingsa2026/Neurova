@@ -101,6 +101,19 @@ _TABLES = {
     "storyboards", "assets", "merges", "runs",
 }
 
+# ── runs 状态词汇表（唯一出处）─────────────────────────────────────────
+# 长任务的成败口径散在三个文件里写过四份字面量（`done`/`failed` 在端点 wrapper、
+# `done`/`done_with_fallback` 在服务层、`running` 在建表默认与收敛里），
+# 而前端要认出终态才知道何时停止轮询——同一契约的第二份定义就是这样长出来的
+# （E 批 §6-80 的第四格正是"生产有第三种终态、读侧只认两种"）。判据见
+# `tests/unit/api/test_studioRunStatusVocabulary.py`。
+RUN_RUNNING = "running"
+RUN_DONE = "done"
+RUN_DONE_WITH_FALLBACK = "done_with_fallback"
+RUN_FAILED = "failed"
+#: 终态集合：轮询侧只认这个，非终态才继续等
+RUN_TERMINAL_STATUSES = frozenset({RUN_DONE, RUN_DONE_WITH_FALLBACK, RUN_FAILED})
+
 
 def _now() -> float:
     return time.time()
@@ -144,14 +157,12 @@ class StudioStore:
         """
         with self._lock:
             leftover = self._conn.execute(
-                "SELECT id FROM runs WHERE status='running'").fetchall()
+                "SELECT id FROM runs WHERE status=?", (RUN_RUNNING,)).fetchall()
             if not leftover:
                 return
             self._conn.execute(
-                "UPDATE runs SET status='failed',"
-                " error='process_died（服务重启，后台任务不续跑）', updated_at=?"
-                " WHERE status='running'",
-                (_now(),),
+                "UPDATE runs SET status=?, error=?, updated_at=? WHERE status=?",
+                (RUN_FAILED, "process_died（服务重启，后台任务不续跑）", _now(), RUN_RUNNING),
             )
             self._conn.commit()
         logger.warning(
