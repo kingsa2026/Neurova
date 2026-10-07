@@ -265,6 +265,12 @@ class BaseAgentLoop(ABC):
         """
         self.agent = agent
         self.llm_client = agent.llm_client
+        # 门控装配的三份轮级态：goal 规格、追加门控规格、本轮执行器。
+        # 全部 loop 共用这一处初始化——此前它们只活在 OpenAILoop.__init__ 里，
+        # 于是 AnthropicLoop 连门控执行器都没有（`gateRunnerForExit` 恒回 None）。
+        self._goal_gate_spec = None
+        self._extra_gate_specs: List[Any] = []
+        self._gate_runner = self._buildGateRunner()
 
     # ── 目标验收链（G2 出口求值）的共享接入点 ──────────────────────────
 
@@ -314,9 +320,317 @@ class BaseAgentLoop(ABC):
 
         return f":exit:{get_turn_goal_continuations()}"
 
+    # ── 门控装配（两条环的唯一实现点）──────────────────────────────────
+    #
+    # 上移自 `OpenAILoop`：门清单与预算属于"环怎么停"这件事，不属于某一家供应商。
+    # 留在 OpenAI 侧时，Anthropic 环既没有 IterationGate 也没有 DoomLoopGate/
+    # TokenBudgetGate，基类 `gateRunnerForExit` 恒回 None，`evaluateLoopExit` 于是
+    # 对 claude 退化成"正常收口"——同一份配置键读出两套停止行为，且没有任何东西报红。
+
+    @staticmethod
+    def _load_agent_limits() -> dict:
+        """读取 Agent 运行限制设置（token_budget/max_loop_rounds）。
+
+        失败时回退内置默认（100000/20），不阻断 Loop 构造。
+        """
+        try:
+            from neurova.security.agent_limits_settings import get_effective_limits
+
+            return get_effective_limits()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取 agent limits 失败，使用默认: %s", e)
+            return {
+                "token_budget": 100000,
+                "max_loop_rounds": 20,
+                "goal_max_continuations": 2,
+            }
+
+    def _buildGateRunner(self):
+        """门控装配的唯一实现点（`__init__` 与懒初始化路径同调它）。
+
+        GoalGate 绑定 `goal_max_continuations`——**独立配置键**，与工具轮预算
+        不共享尺度来源（同键两尺度正是 IterationGate 被判 scaled_sparse 的成因）。
+        """
+        from neurova.agent.gates import (
+            DoomLoopGate,
+            GateRunner,
+            GoalGate,
+            IterationGate,
+            TokenBudgetGate,
+        )
+        from neurova.agent.loops.turn_run_state import resolveToolRoundBudget
+
+        limits = self._load_agent_limits()
+        # G2：GoalGate 默认进装配；`set_goal_gate` 只登记**规格**，不再持有第二份
+        # 装配路径——规格与默认装配同在这一个构造点成型。
+        # 轮次预算一律走 `_goalRoundBudget()`（配置单源 `goal_round_budget`）：
+        # 默认装配路径也必须传它，否则 GoalGate 回落到 gates.py 的类字面量，
+        # 上限再次不受任何配置键管辖。
+        spec = getattr(self, "_goal_gate_spec", None)
+        goal_gate = (
+            self._buildGoalGate()
+            if spec
+            else GoalGate(
+                maxContinuations=limits["goal_max_continuations"],
+                max_rounds=self._goalRoundBudget(limits),
+            )
+        )
+        return GateRunner([
+            DoomLoopGate(),
+            # T-04：门控阈值与轮内守卫同取一处派生，不再各读一遍配置键的不同尺度。
+            IterationGate(max_rounds=resolveToolRoundBudget()),
+            TokenBudgetGate(max_tokens=limits["token_budget"]),
+            goal_gate,
+            *list(getattr(self, "_extra_gate_specs", None) or []),
+        ])
+
+    def buildGateRunner(self):
+        """本轮门控执行器——由 `_buildGateRunner`（装配单点）构造，转调它。
+
+        每轮一份而不是实例一份：`DoomLoopGate` 的滑动窗口与中断计数是**会话级**
+        状态，挂在单例 loop 上会让两个会话互相把对方的正常调用判成重复（Issue #268）。
+        """
+        return self._buildGateRunner()
+
+    def _buildGoalGate(self):
+        from neurova.agent.gates import GoalGate
+
+        spec = getattr(self, "_goal_gate_spec", None) or {}
+        return GoalGate(
+            goal=spec.get("goal") or {},
+            completion_check=spec.get("completion_check"),
+            max_rounds=self._goalRoundBudget(),
+        )
+
+    def _goalRoundBudget(self, limits: Optional[dict] = None) -> int:
+        """GoalGate 的轮次预算——单源取 `goal_round_budget`（跟随 max_loop_rounds）。
+
+        `set_goal_gate(max_rounds=...)` 是**显式覆盖**，优先级高于配置；缺省（None）
+        时一律回配置单源，不再留一份字面量默认值与之构成两处落点。
+        """
+        spec = getattr(self, "_goal_gate_spec", None) or {}
+        override = spec.get("max_rounds")
+        if override is not None:
+            return int(override)
+        values = limits if limits is not None else self._load_agent_limits()
+        return int(values["goal_round_budget"])
+
+    def registerGate(self, gate: Any) -> None:
+        """登记**追加门控规格**（替换为门控实例，由装配单点每轮成型）。
+
+        门控执行器每轮一份，故"给本轮追加一个门控"只能登记规格：直接往持久引用
+        `_gate_runner` 上 `add_gate` 会被下一轮重建抹掉，是"只写不读"的断点形态。
+        """
+        if not hasattr(self, "_extra_gate_specs") or self._extra_gate_specs is None:
+            self._extra_gate_specs: List[Any] = []
+        self._extra_gate_specs.append(gate)
+
+    def set_goal_gate(
+        self, goal: Dict[str, Any], completion_check=None, max_rounds: Optional[int] = None
+    ) -> None:
+        """goal 模式：登记 GoalGate 规格（目标达成判定 + 轮次预算）。
+
+        只登记规格，不在两条环里各持一份装配路径（教义第 6 条）。
+        """
+        self._goal_gate_spec = {
+            "goal": goal,
+            "completion_check": completion_check,
+            "max_rounds": max_rounds,
+        }
+
+    def _ensure_gate_runner(self) -> None:
+        """懒初始化门控执行器（__new__ 绕过 __init__ 的测试构造兼容）。"""
+        if getattr(self, "_gate_runner", None) is None:
+            self._gate_runner = self._buildGateRunner()
+
     def gateRunnerForExit(self) -> Any:
-        """主出口使用的门控执行器；子类未装配门控时返回 None（求值退化为正常收口）。"""
-        return None
+        """主出口使用的门控执行器（与工具轮同一个实例、同一份门控集合）。"""
+        self._ensure_gate_runner()
+        return getattr(self, "_gate_runner", None)
+
+    # ── 轮级指纹（死循环签名的主体）────────────────────────────────────
+
+    def _agentFingerprint(self) -> str:
+        """创建者指纹（Issue #268 切片 C）：优先 agent_id，退到 name——两者皆无则空串。"""
+        config = getattr(self.agent, "config", None)
+        return str(
+            getattr(config, "agent_id", None)
+            or getattr(config, "name", None)
+            or ""
+        )
+
+    @staticmethod
+    def _fingerprintUserMessage(messages: List[Dict]) -> str:
+        """本轮用户消息指纹：死循环签名绑定真实用户请求。
+
+        新的用户消息 → 新指纹 → 跨轮的同名工具调用永不误判死循环；
+        同一轮内重复相同调用（真死循环）仍然触发。
+        """
+        import hashlib as _hashlib
+
+        last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+        return _hashlib.md5(
+            str(last_user.get("content") or "").encode("utf-8")
+        ).hexdigest()[:12]
+
+    @staticmethod
+    def _merge_tool_call_delta(pending: List[Dict], delta: Dict) -> None:
+        """按 index 合并流式 tool_calls 分片（两家 provider 同一形态）。
+
+        兼容流式响应中一次工具调用被拆到多个 chunk：首片携带 id/name，
+        后续片段 id/name 为 None、仅递增 arguments 文本。chat_stream 透传 delta
+        的 index 字段，据此定位合并位置；无 index 时退化为追加新条目。
+        """
+        fn = delta.get("function") or {}
+        index = delta.get("index")
+        if index is None or index >= len(pending):
+            pending.append(
+                {
+                    "id": delta.get("id"),
+                    "type": delta.get("type") or "function",
+                    "function": {
+                        "name": fn.get("name") or "",
+                        "arguments": fn.get("arguments") or "",
+                    },
+                }
+            )
+            return
+        entry = pending[index]
+        if delta.get("id"):
+            entry["id"] = delta["id"]
+        if fn.get("name"):
+            entry["function"]["name"] = (entry["function"].get("name") or "") + fn["name"]
+        if fn.get("arguments"):
+            entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn["arguments"]
+
+
+    @staticmethod
+    def _raise_for_error_dict(chunk: Dict) -> Exception:
+        """把流式错误 dict 转成分类异常（error_type 优先，缺省按消息内容兜底分类）。
+
+        实测缺陷：商汤 404 "model route not found" 曾以裸 RuntimeError 抛出，
+        chat_pipeline 的供应商错误守卫认不出它 → 错误地 fallback 到 legacy
+        再撞同一个坏模型（429/200 抽签，用户表现为"回复时有时无"）。
+        """
+        from neurova.llm_client import (
+            LLMConnectionError,
+            LLMAuthError,
+            LLMBadRequestError,
+            LLMRateLimitError,
+            LLMServiceUnavailableError,
+            TokenLimitExceeded,
+        )
+
+        raw = str(chunk.get("error") or "")
+        message = f"LLM 流式调用失败: {chunk.get('error')}"
+        error_type = str(chunk.get("error_type") or "")
+        # 键为五类标准错误（error_mapping ErrorCategory.value，multi_model_client
+        # 流内错误编码铁律 P0-1 的生产端）；旧四键保留兼容历史 dict。
+        mapping = {
+            "rate_limited": LLMRateLimitError,
+            "rate_limit": LLMRateLimitError,
+            "service_unavailable": LLMServiceUnavailableError,
+            "connection_failed": LLMConnectionError,
+            "connection": LLMConnectionError,
+            "auth_failed": LLMAuthError,
+            "auth": LLMAuthError,
+            "bad_request": LLMBadRequestError,
+            "token_limit": TokenLimitExceeded,
+        }
+        cls = mapping.get(error_type)
+        if cls is None:
+            # error_type 缺失时按 HTTP 语义兜底分类（供应商 404 模型不存在
+            # 属请求构造错误，重试/换 fallback 路径无意义）
+            low = raw.lower()
+            if "404" in low or "not found" in low or "not_found" in low:
+                cls = LLMBadRequestError
+            elif "429" in low or "rate limit" in low or "too many requests" in low:
+                cls = LLMRateLimitError
+            elif "401" in low or "403" in low or "unauthorized" in low or "forbidden" in low:
+                cls = LLMAuthError
+        if cls is not None:
+            return cls(message)
+        return RuntimeError(message)
+
+    @staticmethod
+    def _toolSignatures(tool_calls: List[Dict]) -> str:
+        """本轮调用签名（死循环门的比对主体）——单源一处拼法。
+
+        `LLMResponse.tool_calls` 契约是 List[Dict]：llm_client 已把 SDK 对象转成 dict，
+        执行链也按 dict 访问。属性式访问（`tc.name`）会在 dict 上抛 AttributeError 并
+        让整轮回退 legacy、工具环丢失（2026-09-14 飞书事故），故这里只做 dict 取值。
+        参数截 64 字符是既有口径（长参数不影响"同一调用重复了没有"的判定）。
+        """
+        return "|".join(
+            f"{(tc.get('function') or {}).get('name', '')}:"
+            f"{str((tc.get('function') or {}).get('arguments', ''))[:64]}"
+            for tc in tool_calls
+        )
+
+    def _shouldReplayReasoning(self, reasoning: str) -> bool:
+        """思考链是否随工具轮回放——默认关（`NEUROVA_REASONING_REPLAY=1` 开）+ 能力门。
+
+        上移单源的理由：这条判定原来在 `OpenAILoop` 的流式与非流式两处各内联一遍，
+        Anthropic 环要用就只能再抄第三遍；而"哪些 provider 禁止回传 reasoning_content"
+        是一件事实在，两处漂移时不会有任何东西报红（教义第 6 条）。
+        """
+        if not reasoning:
+            return False
+        try:
+            from neurova.agent.loops.reasoning_replay import should_replay_reasoning
+
+            return should_replay_reasoning(
+                str(getattr(self.agent.config, "llm_model", "") or "")
+            )
+        except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
+            logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
+            return False
+
+    def _accumulateRoundUsage(self, usage: Optional[Dict]) -> None:
+        """把一次往返的 usage 累进**本轮**预算口 `agent._round_usage`。
+
+        TokenBudgetGate 只读这一个数；不累计的那条环等于该闸永不触发（写了不读的反面：
+        读了不写）。键集合与 `OpenAILoop` 一致，不新造第三份形状。
+        """
+        if not usage:
+            return
+        try:
+            prev = getattr(self.agent, "_round_usage", None) or {}
+            self.agent._round_usage = {
+                "prompt_tokens": int(prev.get("prompt_tokens", 0)) + int(usage.get("prompt_tokens", 0)),
+                "completion_tokens": int(prev.get("completion_tokens", 0)) + int(usage.get("completion_tokens", 0)),
+                "total_tokens": int(prev.get("total_tokens", 0)) + int(usage.get("total_tokens", 0)),
+            }
+        except (TypeError, ValueError):  # noqa: BLE001 - usage 形状异常不阻断回复
+            logger.debug("usage 累计跳过（形状异常）: %r", usage)
+
+    def _assess_stagnation(
+        self, state: Any, round_reply: str, current_calls: List[tuple]
+    ) -> bool:
+        """判定本轮是否停滞：内容与上一轮高度相似，或工具调用签名完全重复。
+
+        历史回复与上一轮签名从 `state` 取——它们属于本次调用，不属于 loop 实例
+        （挂实例时交叠会话会互相污染，Issue #268）。
+
+        空回复（纯工具轮）不参与内容停滞判定，避免误伤只调工具不说话的正常轮次。
+        """
+        try:
+            from neurova.agent_loop_detection import calculate_similarity
+        except ImportError:  # pragma: no cover - 模块缺失时退化为仅签名判定
+            calculate_similarity = None
+
+        previous_calls = state.lastRoundCalls
+        previous_replies = [r for r in state.roundReplies if r]
+        if round_reply and previous_replies:
+            if calculate_similarity is not None:
+                for prev in previous_replies[-2:]:
+                    if calculate_similarity(round_reply, prev) >= 0.8:
+                        return True
+            elif round_reply in previous_replies:
+                return True
+        if current_calls and current_calls == previous_calls:
+            return True
+        return False
 
     @abstractmethod
     async def predict_step(self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs) -> Any:
@@ -326,10 +640,14 @@ class BaseAgentLoop(ABC):
         参数:
             messages: 对话历史
             tools: 可用工具列表 (OpenAI Schema 格式)
-            **kwargs: 额外参数
+            **kwargs: 额外参数；**`stream=True` 时必须返回异步生成器**，逐事件产出
+            `{"type": "content"|"reasoning"|"tool_call"|"tool_result"|"done", ...}`。
+            这条契约的消费点是 `chat_pipeline._call_loop_stream`（`async for`），
+            返回 `LLMResponse` 会在那里 TypeError 并整轮回退 legacy——判据见
+            `tests/unit/agent/test_anthropicLoopStreamContract.py`。
 
         返回:
-            LLMResponse 对象或原始响应
+            流式：异步生成器；非流式：LLMResponse 对象
         """
         # A-11：abstractmethod 只在实例化时拦截；动态构造/热加载等绕过 ABC
         # 检查的路径会落到这里——必须显式抛错，不得静默返回 None（空回复）

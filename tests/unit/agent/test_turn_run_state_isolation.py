@@ -292,10 +292,28 @@ class TestAnthropicLoopStateOwnership:
 
         chat = _AlwaysToolCalls()
         loop = self._make_loop(chat)
-        asyncio.run(loop.predict_step([{"role": "user", "content": "hi"}], []))
-        assert chat.calls == expected + 1, (
-            f"配置 max_loop_rounds=2 时 Anthropic 侧应停在第 {expected + 1} 次调用，"
-            f"实际 {chat.calls} 次（硬编码上限 10 的形态）"
+        msgs = [{"role": "user", "content": "hi"}]
+        asyncio.run(loop.predict_step(msgs, []))
+        # 期望值 = 预算本身，不再 +1：2026-10-08 A 批把 Anthropic 侧那份
+        # `toolRounds > maxToolRounds` 轮内守卫删掉了。它与 `IterationGate` 同取一个数
+        # （T-04 收口的结果），门控在 `>= max` 那一轮先开火，守卫那一档在生产上不可达；
+        # 旧用例的 `expected + 1` 量的正是"两处执法错开一格"这个形态，留着等于替
+        # 第二份定义背书（教义第 6 条）。现在执法单点是 IterationGate。
+        assert chat.calls == expected, (
+            f"配置 max_loop_rounds={expected} 时 Anthropic 侧应恰好问 {expected} 次，"
+            f"实际 {chat.calls} 次——上限执法点又分叉了"
+        )
+        # 同批补的不变量（B 批规则的 Anthropic 侧）：被终止那一轮的调用也得有下文。
+        # 改前守卫在 `handle_tool_calls` **之前** return，模型声明了调用却永远收不到回应。
+        declared = [
+            c.get("id")
+            for m in msgs
+            if m.get("role") == "assistant" and m.get("tool_calls")
+            for c in m["tool_calls"]
+        ]
+        results = [m.get("tool_call_id") for m in msgs if m.get("role") == "tool"]
+        assert declared and set(declared) == set(results), (
+            f"声明过的调用与回环的结果不配对：declared={declared} results={results}"
         )
 
     def test_concurrentTurnDoesNotRewriteOtherTurnCounter(self):
