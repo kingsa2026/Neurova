@@ -389,8 +389,13 @@ class TestSingleSourceScanIsLinearAndCached:
 
     单独跑（无覆盖率）约 9s，尚在 30s 全局阈值内；但 `--cov` 对每次 AST 遍历
     都挂行跟踪，同一路径实测 24.8s，CI 的 2 核 runner 上即翻过 30s 被判超时。
-    故本判据钉的不是"耗时多少秒"（那随机器漂移），而是**根因形态**：
-    两件事——单趟遍历、结果缓存。
+    故本判据钉的不是"耗时多少秒"（那随机器漂移），而是**根因形态**。
+
+    **第二轮**（2026-10-03 构建 `cnb-7l9-1k3vmrra7` 实测）：「单趟 + 缓存」两条
+    都已满足，CI 仍超时——因为真正的量纲不是"几趟"，而是**扫了多大面**。旧实现把
+    全生产树（1030 文件 / 1.58M 节点）走完，为**每个**含下标的函数建条目（1540 条），
+    而消费方 `_derivationCallKey()` 只认 `resolve` 前缀名——消费面只有 14 条，
+    其余 1526 条**一生无人读**。故本片补第三条判据：扫描面必须收窄到消费面。
     """
 
     def test_subtreeIsNotRewalked(self, monkeypatch):
@@ -447,6 +452,48 @@ class TestSingleSourceScanIsLinearAndCached:
         assert derivations.get("resolveToolRoundBudget") == "max_loop_rounds", (
             "单源派生点读数在优化后丢失——那是判据口径漂移，不是提速：\n  "
             + repr({k: v for k, v in derivations.items() if "Round" in k})
+        )
+
+    def test_scanSurfaceIsNarrowedToTheConsumptionSurface(self):
+        """扫描面必须收窄到消费面：条目名一律落在 `_DERIVATION_PREFIXES` 上。
+
+        根因（`cnb-7l9-1k3vmrra7`）：旧实现为**全仓每个含下标的函数**建条目
+        （实测 1540 条），消费方只认 `resolve` 前缀——1526 条无人读的映射，
+        代价却是整棵生产树（1.58M 节点）走一遍。CI 上带 `--cov` 即越过 30s。
+
+        判据钉的是**每条映射都必须可能被消费**：名字不以消费前缀起头的条目，
+        在 `_derivationCallKey()` 里首行就被 `startswith` 挡掉——它不可能是读数，
+        只能是与代码总量成正比的空转。这条同时把"预筛是否真的生效"钉住：
+        预筛若失效，全仓非 `resolve` 文件会被重新纳入，条目数立刻爆回去。
+        """
+        ledger._singleSourceDerivations.cache_clear()
+        derivations = ledger._singleSourceDerivations()
+        unconsumable = sorted(
+            name for name in derivations
+            if not name.startswith(ledger._DERIVATION_PREFIXES)
+        )
+        assert not unconsumable, (
+            f"取数里混进了 {len(unconsumable)} 条**消费方永不可能读到**的映射"
+            f"（消费前缀 {ledger._DERIVATION_PREFIXES}）：{unconsumable[:10]}\n"
+            "——扫描面未收窄到消费面，取数成本重新与代码总量挂钩（CI 超时根因）"
+        )
+
+    def test_prefilterActuallyShrinksTheParseSurface(self):
+        """文本预筛必须真的少解析文件：否则条目数会随代码总量线性涨回去。"""
+        from tests import ast_scan
+
+        total = len(ast_scan.sourceRefsUnder(
+            ledger.PRODUCTION_ROOT, suffix=".py"))
+        scanned = len(ast_scan.sourceRefsUnder(
+            ledger.PRODUCTION_ROOT, suffix=".py",
+            hints=ledger._DERIVATION_PREFIXES))
+        assert scanned < total, (
+            f"预筛未生效：生产根 {total} 个文件全被纳入解析面。"
+            "函数名以消费前缀起头 ⇒ 文本必含它，不含它的文件不可能有派生点。"
+        )
+        assert scanned * 2 <= total, (
+            f"预筛面 {scanned}/{total} 过宽——预期不超过半数。"
+            "预筛失效时取数成本重新随代码总量增长（CI 超时根因）"
         )
 
 
