@@ -1604,3 +1604,25 @@ tests/unit/collaboration/test_yieldGateWaitPolicy.py
 # 另钉死"归因不到模型就不占槽"（塞进公共 unknown 桶就是本批在修的形态换个位置复发）。
 # 逐文件单跑 4 passed
 tests/unit/collaboration/test_yieldConcurrencySlots.py
+# P2-8 第二批：`parked` 是**非终态**，它的全部意义就是"活过进程、等人点续跑"。
+# 三条最容易回流的形态各钉一格：① `reconcile_at_startup` 顺手把它收敛掉（重启即
+# 变成 failed，人工再没东西可点）；② park 时不松开 owner/租约（`claim_next` 的
+# `NOT EXISTS(status='running')` 会把整个会话永久挡住，连续跑都发不出去）；
+# ③ `stats()` 把未知状态折进 terminal（"等人"被读成"已结束"）。另钉续跑必须复用
+# 原行（seq 不变才还在队头，`intake` 第二条就是同一回合两个身份）、载荷换手即清空、
+# 存量 v1 库经生产装配点原地补列。
+# 逐文件单跑 9 passed
+tests/unit/core/test_agentRunStoreParkedStatus.py
+# 让位闸接进**真回合入口**（HTTP 面，不是直调闸）：§6-5 断的正是"闸写好了没人问"，
+# 而上一批活体量出只测 `check_yield_rules()` 永远看不见端点级缺陷（§6-44）。判据含
+# 恰好问一次、超限那轮真没跑（agent 零调用）、等待期每次入睡前续租（预算 200s > 租约
+# 90s）、parked+done 立即收尾、属主/管理员续跑复用原行、**管理员不得把执行身份换成自己**、
+# 陌生 403/匿名 401，以及"身份先判、状态后判"的判序（否则终态行向陌生账号确认存在性）。
+# 逐文件单跑 8 passed
+tests/unit/api/test_consoleYieldGateWiring.py
+# 未归因回合不得建立空串 pin：前端默认不传 model（`ChatPage.vue` 的
+# `selectedModel.value || undefined`），把空串钉成 pin 后，用户一选手动模型就撞上
+# `MODEL_PIN_VIOLATION`——那是闸里唯一"等多久都不自愈"的原因，第一次判定就挂起。
+# 反向一格同时钉住"跳过空归因 ≠ 取消归因"：第一次带真模型仍必须钉上，漂移判据才有效。
+# 逐文件单跑 3 passed
+tests/unit/collaboration/test_yieldGateModelAttribution.py
