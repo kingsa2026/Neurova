@@ -221,13 +221,17 @@ jobs:
           path: ~/.cache/osv-scalibr
           key: osv-scalibr-${{ runner.os }}
 
+      # pip-audit 经 scripts/ci/pip_audit_gate.py 调用（Issue #354）：直调
+      # `python -m pip_audit` 时 pypi.org 的一次 15s 读超时就是阻塞红灯，而那次红
+      # 与提交内容无关。包装脚本换 `--vulnerability-service osv`、给足单次查询超时、
+      # 并只对基础设施错误重试。与 cnb 侧命令逐字一致（test_ci_parity_guard.py 守）。
       - name: Audit CI locked set
-        run: python -m pip_audit -r requirements-ci.lock --progress-spinner off
+        run: python scripts/ci/pip_audit_gate.py -r requirements-ci.lock
 
       - name: Audit full runtime locked set
         # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
         # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
-        run: python -m pip_audit -r requirements-full.lock --progress-spinner off
+        run: python scripts/ci/pip_audit_gate.py -r requirements-full.lock
 
       - name: Prefetch OSV offline databases (best effort)
         # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
