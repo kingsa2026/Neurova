@@ -1626,3 +1626,18 @@ tests/unit/api/test_consoleYieldGateWiring.py
 # 反向一格同时钉住"跳过空归因 ≠ 取消归因"：第一次带真模型仍必须钉上，漂移判据才有效。
 # 逐文件单跑 3 passed
 tests/unit/collaboration/test_yieldGateModelAttribution.py
+# P2-8 第三批（§6-46）：渠道入站回合也要问闸、也要落账。三条缺失形态各钉一格：
+# 正常回合没 run 行（不可审计、不可取消、重启即失忆）；额度已满时照样打到 LLM
+# （限额语义从"全局"降级成"网页面自己那一份"）；挂起行属主若写成渠道 sender 的
+# open_id，属主在控制台里就看不到这条，"去网页点续跑"变成空话。另钉台账故障不得
+# 吞掉渠道应答（与网页那条 fail-open 同契约）。
+# 逐文件单跑 4 passed
+tests/unit/channels/test_channelTurnRunLedger.py
+# P2-8 第三批：两条公开 API 入口 + "实现只许一份"的结构守卫。最硬的一条是**假成功**：
+# `/v1/chat` 超限那一轮原本回 `{"code":0,"message":"success","data":{"reply":…}}`——
+# 没跑的一轮被报成答完了（§6-8 那族形态的另一副面孔），现按各面本来的样子回 parked。
+# 载荷带 `entry` 故续跑回到原入口重建（按网页请求体重建会静默丢掉 temperature/max_tokens，
+# 那是另一轮对话不是重跑）。结构三条钉单源：台账类不得住回 console、闸口调用点全仓
+# 只许一处、三入口必须都 import 那份唯一实现。
+# 逐文件单跑 7 passed
+tests/unit/api/test_v1ChatRunLedger.py
