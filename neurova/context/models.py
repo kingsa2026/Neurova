@@ -56,13 +56,10 @@ class TokenBudget:
     experience_knowledge: int = 1500
     emotion_context: int = 500
 
-    @property
-    def chinese_ratio(self) -> float:
-        return 1.5
-
-    @property
-    def english_ratio(self) -> float:
-        return 0.25
+    # token↔字符换算不在此定义：唯一口径是
+    # `neurova.context.token_estimator.estimate_tokens`（见 injector._count_tokens）。
+    # 原来的 chinese_ratio/english_ratio 两个固定系数已收口删除——它们在预算记账之外
+    # 造了第二套换算，实测把记忆折叠空置到预算的 66%（中文）/ 10%（英文）。
 
 
 @dataclass

@@ -630,10 +630,11 @@ class UnifiedContextInjector(BaseModule):
             if total_tokens + mem_tokens > budget:
                 # 尝试压缩这条记忆
                 if len(lines) == 0:
-                    # 第一条记忆就超预算，截断
-                    truncated = content[: int(budget / self._token_budget.chinese_ratio)]
-                    lines.append(f"- {truncated}... [已截断]")
-                    total_tokens += self._count_tokens(lines[-1])
+                    # 第一条记忆就超预算，整行裁进预算（含前缀与标记，见 _foldMemoryLineToBudget）
+                    folded = self._foldMemoryLineToBudget(content, budget)
+                    if folded:
+                        lines.append(folded)
+                        total_tokens += self._count_tokens(folded)
                 break
 
             # 构建记忆行
@@ -1009,15 +1010,35 @@ class UnifiedContextInjector(BaseModule):
             logger.warning("Envelope compression failed, dropping envelope: %s", e)
             return "", history, 1.0
 
-    def _truncate_text(self, text: str, max_tokens: int) -> str:
-        """截断文本到指定 token 数"""
-        chars_per_token = 1.5
-        max_chars = int(max_tokens * chars_per_token)
+    _MEMORY_LINE_MARKER = " ... [已截断]"
 
-        if len(text) <= max_chars:
-            return text
+    def _foldMemoryLineToBudget(self, text: str, max_tokens: int) -> str:
+        """把一条记忆裁成一行上下文，前缀与截断标记的开销都算在预算内。
 
-        return text[:max_chars] + "\n...[已截断]"
+        两条纪律：① 换算口径只有 `_count_tokens` → `estimate_text_tokens` 一份（其
+        docstring 就写着"禁止就地近似"），不再另设字符/token 系数；② 二分时量的是
+        **整行**而非分量相加——估算器不可加（实测 `est("- ")+est(正文) ≠ est(整行)`），
+        按分量预留会刚好越界。
+        """
+        if not text or max_tokens <= 0:
+            return ""
+
+        def renderLine(kept: int) -> str:
+            body = text[:kept]
+            return f"- {body}" + (self._MEMORY_LINE_MARKER if kept < len(text) else "")
+
+        wholeLine = renderLine(len(text))
+        if self._count_tokens(wholeLine) <= max_tokens:
+            return wholeLine
+
+        low, high = 0, len(text)
+        while low < high:
+            mid = (low + high + 1) // 2
+            if self._count_tokens(renderLine(mid)) <= max_tokens:
+                low = mid
+            else:
+                high = mid - 1
+        return renderLine(low) if low > 0 else ""
 
     def _count_tokens(self, text: str) -> int:
         """估算 Token 数（统一入口，禁止就地近似）"""
