@@ -99,6 +99,16 @@
               <span class="nr-retry-notice-icon"><UiIcon name="radar" :size="13" /></span>
               <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
             </div>
+            <!-- P2-8：让位闸等不到额度 → 本轮挂起，run_id 是唯一续跑凭据 -->
+            <div v-if="msg.parkedNotice" class="nr-parked-notice">
+              <span class="nr-parked-notice-label">{{ t('chat.turnParked') }}</span>
+              <button
+                class="nr-parked-resume"
+                type="button"
+                :disabled="msg.streaming"
+                @click="resumeParkedTurn(msg)"
+              >{{ t('chat.resumeRun') }}</button>
+            </div>
 
             <!-- 过程渲染（步骤时间轴 + legacy 推理/工具兜底）统一抽至 MessageSteps 组件 -->
             <MessageSteps
@@ -791,6 +801,35 @@ function clearRetryNotice(msg: ChatMessage): void {
   }
 }
 
+/**
+ * SSE → 事件对象流的唯一解析处（`data:` 行、`[DONE]`、半行缓冲都在这里）。
+ * 抽成一处是因为续跑（P2-8 `parked` → `/chat/resume`）也要读同一条流：
+ * 解析器写两份，后端换一种帧写法时只会坏掉其中一份。
+ */
+async function* sseJsonEvents(response: Response): AsyncGenerator<Record<string, any>> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('No response body')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (!data || data === '[DONE]') continue
+      try {
+        yield JSON.parse(data)
+      } catch {
+        // Non-JSON line, skip
+      }
+    }
+  }
+}
+
 /** 提示条文案：等待倒计时 / 已切换模型 / 全部耗尽，i18n 组装。 */
 function retryNoticeText(msg: ChatMessage): string {
   const n = msg.retryNotice
@@ -806,6 +845,12 @@ function retryNoticeText(msg: ChatMessage): string {
       count: n.failCount ?? 0,
       total: n.maxSwitches ?? 0,
     })
+  }
+  if (n.phase === 'yield_wait') {
+    // 让位闸退避（同一额度/并发/冷却面，与 429 区分开来说法）
+    const elapsed = n.receivedAt ? Math.floor((retryTickNow.value - n.receivedAt) / 1000) : 0
+    const remain = Math.max(0, Math.round((n.remainingSeconds ?? 0) - elapsed))
+    return t('chat.retryYieldWait', { retry: n.retry ?? 0, max: n.maxRetries ?? 0, seconds: remain })
   }
   return t('chat.retryExhausted', { count: n.failCount ?? 0 })
 }
@@ -1370,33 +1415,9 @@ async function sendMessage() {
         throw new Error(errBody || `HTTP ${response.status}`)
       }
 
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('No response body')
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (!data || data === '[DONE]') continue
-
-          try {
-            const event = JSON.parse(data)
-            receivedSeq[0] += 1
-            processSSEEvent(event, streamingMsg)
-          } catch {
-            // Non-JSON line, skip
-          }
-        }
+      for await (const event of sseJsonEvents(response)) {
+        receivedSeq[0] += 1
+        processSSEEvent(event, streamingMsg)
         scrollToBottom()
       }
     } finally {
@@ -1675,6 +1696,26 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       msg.content += `\n\n_(${t('chat.stoppedByUser')})_`
       break
 
+    case 'parked': {
+      // P2-8：让位闸等不到额度，本轮**没跑**并已落库挂起。run_id 是唯一续跑凭据。
+      const runId = String(event.run_id || '')
+      msg.streaming = false
+      clearRetryNotice(msg)
+      if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
+      if (!runId) {
+        // 没有凭据就没有续跑入口——如实报错，不留一个点了没反应的"已挂起"标签
+        msg.content += `\n\n**Error:** ${t('chat.parkedMissingRunId')}`
+        break
+      }
+      msg.parkedNotice = {
+        runId,
+        reason: String(event.reason || ''),
+        attempts: Number(event.attempts || 0),
+        waitedSeconds: Number(event.waited_seconds || 0),
+      }
+      break
+    }
+
     case 'retry': {
       // 429 限流重试/切换：reset=半截回复作废；
       // 写入倒计时提示条（等待期间每秒本地倒数，流式恢复即清除）
@@ -1752,6 +1793,50 @@ function stopStreaming() {
   else abortController?.abort()
   stopStreamTTS()
   chatStore.setStreaming(false)
+}
+
+/**
+ * P2-8：续跑一条挂起的回合（让位闸等不到额度、已落库 parked 的那一轮）。
+ * 输出继续写进**同一条气泡**——用户看到的仍是那一问的答复，不是在另起一轮。
+ */
+async function resumeParkedTurn(msg: ChatMessage): Promise<void> {
+  const notice = msg.parkedNotice
+  const sid = activeStreamSessionId || currentSessionId.value || ''
+  if (!notice || !sid || msg.streaming) return
+
+  const controller = new AbortController()
+  claimChatStream({ sessionId: sid, roundKey: `resume-${notice.runId}`, controller })
+  msg.parkedNotice = undefined
+  msg.streaming = true
+  chatStore.setStreaming(true)
+  try {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    const response = await fetch(
+      `${baseUrl}/console/chat/resume?run_id=${encodeURIComponent(notice.runId)}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${secureStorage.get('auth_token') || ''}` },
+        signal: controller.signal,
+      },
+    )
+    if (!response.ok) {
+      // 后端点名过的原因（403/409/503）必须透出：续跑失败只说"失败了"没法定位
+      const detail = await response.text()
+      throw new Error(detail || `HTTP ${response.status}`)
+    }
+    for await (const event of sseJsonEvents(response)) {
+      processSSEEvent(event, msg)
+      scrollToBottom()
+    }
+  } catch (err: any) {
+    if (err?.name !== 'AbortError') {
+      msg.content += `\n\n**Error:** ${err?.message || t('chat.resumeFailed')}`
+    }
+  } finally {
+    releaseChatStream(sid)
+    msg.streaming = false
+    chatStore.setStreaming(false)
+  }
 }
 
 /**
@@ -2993,6 +3078,39 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #d2994a;
   white-space: nowrap;
+}
+
+/* P2-8：挂起提示条（等人工续跑）。颜色一律走令牌，不硬编码色值。 */
+.nr-parked-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  margin: 0 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--nr-warning);
+  max-width: 100%;
+}
+
+.nr-parked-notice-label {
+  font-size: 12px;
+  color: var(--nr-warning);
+  white-space: nowrap;
+}
+
+.nr-parked-resume {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--nr-warning);
+  color: var(--nr-warning);
+  background: transparent;
+  cursor: pointer;
+}
+
+.nr-parked-resume:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 扫光：一条高光从左到右掠过状态条；仅流式期间存在（v-if 随 streaming 消失） */
