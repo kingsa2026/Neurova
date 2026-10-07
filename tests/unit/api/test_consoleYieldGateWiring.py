@@ -155,9 +155,14 @@ def _parkATurn(makeClient, runStore, yieldChecker, session_id: str):
 
 
 def testTurnEntryConsultsYieldGateExactlyOnce(makeClient, runStore, yieldChecker, monkeypatch):
-    """没让位时也要问一次——"接了但从不问"和"没接"在行为上无法区分，必须钉住。"""
+    """没让位时也要问一次——"接了但从不问"和"没接"在行为上无法区分，必须钉住。
+
+    间谍打在 `core.agent_run_ledger` 的那一处闸口调用上（第三批起，四个入口共用
+    同一份准入实现，闸口不再住在 console 里）——**行为主张没变**：网页回合入口
+    恰好问一次、参数取真源。
+    """
+    import neurova.core.agent_run_ledger as ledgerMod
     from neurova.agent import turn_coordinator as gate_mod
-    from neurova.api.endpoints import console as console_mod
 
     calls: List[Dict[str, Any]] = []
     realGate = gate_mod.requestYieldGate
@@ -166,7 +171,7 @@ def testTurnEntryConsultsYieldGateExactlyOnce(makeClient, runStore, yieldChecker
         calls.append(dict(kwargs))
         return await realGate(**kwargs)
 
-    monkeypatch.setattr(console_mod, "requestYieldGate", spy)
+    monkeypatch.setattr(ledgerMod, "requestYieldGate", spy)
     resp, agent = _postChat(makeClient, "g-once", "normal-turn")
 
     assert resp.status_code == 200
@@ -204,10 +209,10 @@ def testWaitingRenewsLeaseEveryAttempt(makeClient, runStore, yieldChecker, monke
         return realHeartbeat(self, run_id, owner)
 
     monkeypatch.setattr(ars.AgentRunStore, "heartbeat", spyHeartbeat)
-    from neurova.api.endpoints.console import _AgentRunLedger
+    from neurova.core.agent_run_ledger import AgentRunLedger  # 第三批起台账住在 core（四入口共用）
 
     # 反证前提：节流窗口还在（否则本判据退化成"每轮都续"的平凡断言）
-    assert _AgentRunLedger.HEARTBEAT_SECONDS >= 5.0
+    assert AgentRunLedger.HEARTBEAT_SECONDS >= 5.0
 
     run_id, sseBody = _parkATurn(makeClient, runStore, yieldChecker, "g-lease")
 
