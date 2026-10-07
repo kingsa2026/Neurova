@@ -1587,3 +1587,20 @@ tests/unit/context/test_memoryFoldBudgetParity.py
 # **只降不升棘轮**钉住（那格属 §6-19 后续批次，本批不放宽也不冒充已清）。
 # 逐文件单跑 6 passed
 tests/unit/core/test_lazySingletonDcl.py
+# P2-8 第一批：让位闸的等待预算与非阻塞纪律。三条打在现状行为上的红：端点
+# `POST /coordination/yield-checker/check` 每次必 500（手抄字段时多写了 `YieldDecision`
+# 上根本不存在的 `backoff_round`，全仓仅此一行提到它）；被摘链的那份装饰器实现用
+# `time.sleep` 在协程里等让位（实测等待期其它协程走 0 拍 = 一个 Agent 让位睡掉整条事件循环）；
+# 身份取 `kwargs.get("agent_id","unknown")`（实测注册进 ['unknown','unknown']，所有 Agent
+# 挤同一份额度）。闸的预算按拍板钉：≤10 次重试、单次 ≤20s、总 ≤200s，不可自愈的原因
+# （模型漂移）一次判定就挂起不白等；策略值每次调用现读 env（导入期绑死＝"改了没生效"）。
+# 逐文件单跑 9 passed
+tests/unit/collaboration/test_yieldGateWaitPolicy.py
+# P2-8 第一批的前置根因：并发额度记账。旧形态 Layer 2 **判一次加一次**，而全类没有减点
+# （唯一减点 unregister_agent 生产侧无人调），同一 Agent 问 6 次就把该模型 6 格永久占满，
+# 此后同模型全部恒让位——让位闸一旦接进回合链，10 次重试就能把自己模型锁死。活体在基线树
+# 上直接看到现场：5 发 check 全 500，而 stats 里 active_per_model={"gpt-live": 5}。
+# 收口成"查询纯读、start 占位（同 agent 幂等）、complete 还位、超时租约回收"，
+# 另钉死"归因不到模型就不占槽"（塞进公共 unknown 桶就是本批在修的形态换个位置复发）。
+# 逐文件单跑 4 passed
+tests/unit/collaboration/test_yieldConcurrencySlots.py
