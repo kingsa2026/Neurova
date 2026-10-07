@@ -511,6 +511,21 @@
 51. **注入器"上下文缓存"与记忆流水账都是零写零读的面（A3b 接线时当场验出，需人裁）** 🔴 —— 本批原计划把 MEMORY_UPDATED/DELETED 接去"清 `UnifiedContextInjector` 的上下文缓存"，读码后发现接无可接：`cache_entry`(:1103) 与 `get_cached_entry`(:1115) **全仓零调用方**（`neurova/` 与 `tests/` 都无人调，实测 grep），那张 LRU `_cache`(:135) 既不写也不读，`on_stop` 里 `_flush_cache()` 清的是一张恒空的表。接上去**判据会绿、闭环并不存在**（教义第 2 条禁止的表面抹除），故撤回该形态，改为钉"记忆写入须能在现役 HTTP 读面 `/api/v1/logs` 上看到"（`logs.py:72/106` 走 `get_event_log()`，前端 `NeurUI/src/api/modules/system-logs.ts:29` + `config/navigation.ts:73` 真在用）。同族第二格：`memory_layer/memory_stream.py` 的 `record_event/record/get_stream/get_recent/get_stats/export_json` 一整套"事件→账本"面，除模块内自己的单例工厂 `:227` 外**零生产实例化、零读取方**。两条都是"模块是对的、缺的是消费方"（§3-C 档形态），要则接线（缓存须真被 `build_context` 使用、账本须有读面）、不要则连同其测试与 i18n 一并退役——**删即失去"上下文装配可缓存"这项能力**（本仓唯一实装），按 dead-code 流程一律走人裁，不在简化批次里当可删项。
 52. **惰性导出判据的前提符号已被退役（HEAD 常驻红，改判需人裁）** 🔴 —— `tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py::test_lazy_attribute_access_still_works` 在 HEAD 就红（基线仓外 worktree 与本树**两侧同红**，非本批引入）：断言 `from neurova.cognitive_layers.memory_layer import MemoryFieldConfig` 可用，而 `class MemoryFieldConfig` 在 `0c333a76`（温度衰减双实现收敛 + 清退 5 组死码）里已整体不存在，包 `__init__` 也不导出。这不是产品缺陷，是**判据陈旧**——但"惰性导出契约还该不该覆盖 memory_field 那组符号"等于替该能力做存续裁决（同文件另两条 `test_import_submodule_does_not_load_torch`、`test_missing_torch_fail_soft` 是真在防 torch 白拉 +176MB 的活判据，必须留）。故不擅自改判到别的符号：按 §6-40 的既有处置形态，就地当基线既有失败对待、A/B 时不计回归，改判方向由人裁（改判到现役符号 / 连同那一条断言一起退役）。
 53. **跑测会在仓内真会话落点改写真实用户文件（§6-29/§6-35/§6-41 同族的又一格）** 🔴 —— A/B 期间实测：`data/sessions/kai/session_kai-dialog-20260509_2026-10-08.json` 与同目录 `_summary_index.json` 的 mtime 落在跑测窗口内（01:28-01:30），`data/sessions` 文件数 207 → 208。**不是我本批的判据写的**：单跑本批新增的 `test_memoryEventsReachLogsEndpoint.py`（启真 `create_app()`）前后，`data/sessions/kai/_summary_index.json` md5 仍 `60f9e0ae94983eb9f68e24aa0f51cbc9`、文件数仍 208、`data/` 近 3 分钟无改动，故锁定来源是大选择集里既有套件。根因与 §6-41 同形：`tests/conftest.py:38` 的 `setdefault("NEUROVA_DATA_DIR", DATA_ROOT_SESSION_DIR)` 把默认数据根就设在**仓内**，`_isolateSessionsLanding`(:160) 只覆盖 SessionManager 构造期这一条路径，真实 agent 目录（`kai`/`yi_ling`）被启动链按别的取数口写入。后果比"脏仓库"更硬：**改写了真实用户的会话文件**（`kai` 是本仓在用的人）。修法是把这类落点也收进 conftest 隔离夹具（同 §6-29 已成立的两层形态：默认隔离 + 收尾守卫），或在装配期钉死"测试进程不得写仓内真会话根"；本轮只登记（改共享夹具会让本批 A/B 归因变浑，与 §6-35/§6-41 同一取舍）。
+    **2026-10-08 实测更正（本条的根因判断不成立，D1 的删除前提随之作废）**：上面那句
+    "`tests/conftest.py:38` 把默认数据根就设在**仓内**"是**读错代码**——现值
+    `DATA_ROOT_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaDataRoot-"))`（:37），
+    `setdefault` 注入的是**系统临时目录**，生产默认仍是仓库 `data/` 但测试进程拿不到它。
+    落点实验复算：对 `data/` 全树取 (mtime_ns, md5) 指纹（3054 个文件）→ 跑
+    `tests/unit/session + tests/unit/core/test_session_manager.py + tests/integration`
+    （628 条，含会话落点那一族）→ 复取指纹，**changed = 0**。
+    即：现行套件不写仓内 `data/`；本条原先描述的"跑测改写真实用户会话文件"这一机制
+    **没有复现**，那条 01:28-01:30 的 mtime 变动因此是**未归因**事件（同一窗口内并发会话
+    在跑真 app 与其活体探针，`agent_workspaces/kai/...` 同时被改动是旁证），
+    不能记在跑测头上。**登记的教训**：一条"根因"如果只在 mtime 窗口上成立、
+    没有做过 before/after 内容指纹复算，就必须标成未证实——本条正是这么补的，
+    而它原本的写法（"根因与 §6-41 同形"）把猜测当成了结论。
+    **由此 D1 的处置改向**：见 §6-65（那些文件绝大多数是**未跟踪且 gitignore** 的真实
+    用户数据与历史存档，删除不可恢复；分类不能靠文件名，须逐族取证后由人裁定）。
 54. **角色门与严格门共用两份身份解析（C1 想顺手收口时当场撞红，需人裁）** 🔴 —— C1 要把"记忆面只留两个门"坐实，`memory_settings_api.py` 的读侧门从 `api/deps.get_current_user` 换成 `api/auth.get_current_user` 后，同一文件三条写端点全塌：`require_admin()` → `deps.py:280 require_role()` 内部 `Depends(get_current_user)` 指的就是 **`deps` 那份**（`WithQueryToken` 的再导出），`dependency_overrides` 按对象生效，于是 6 条既有判据当场 401。也就是说"只留两个门"要真成立，必须把**角色门的身份源一起收口**。代价实测：`require_admin`/`require_role` 全仓 **73 处命中**、约 **20 个测试文件** override 的是 `deps` 路径（`grep -rln "from neurova.api.deps import.*get_current_user" tests/`），且收口后这些端点不再接受 `?access_token=`（浏览器下载类链路要先清点）。两条处置各自成立的条件：**A** 收口 `require_role` 到严格门（安全面收窄：token 不再进 URL 与访问日志；一次改动 73 处，A/B 面极宽）；**B** 维持双源并把"记忆面允许的门"闭集判据的作用域写死在 `endpoints/memory/` 包内（现判据就是这个口径，`memory-share-groups`/`memory-timeline` 那两个零调用方入口不受影响）。本批按 B 落地并**回退了那一次 swap**，不静默遗留故登记于此；A 何时做需人裁（它与 §9 序 11「鉴权 7 定义单源化」是同一条链，不宜拆着做）。
 55. **HEAD 自带两条红：`_FakeMemoryManager` 落后于被测端点契约** 🔴 —— `tests/test_api/test_memory_route_shadowing.py::test_get_memory_detail_returns_200` 与 `::test_get_unknown_memory_returns_structured_404` 在 HEAD 即红（仓外基线 worktree 与本树**两侧同红**，非 C1 引入）：`crud.py:259` 走 `manager.get_memory(...)`，而该文件的替身 `_FakeMemoryManager`(:61) 只实现了 `storage.get()`，报 `'_FakeMemoryManager' object has no attribute 'get_memory'`。形态与 §6-52 同族但成因不同——那条是**前提符号被退役**（判据陈旧），这条是**替身没跟着生产契约走**（判据仍有效、夹具过期）。修法很小（替身补一个 `get_memory()`），但它是别人批次的遗留且与本批根因无关，按教义第 5 条"同根因扫荡"的边界不混入 C1，登记待处置。
 56. **常驻守卫 HEAD 红：`tests/manual` 新脚本写死开发机绝对路径** 🔴 —— `test_dev_path_and_runtime_dep_guards.py::TestNoHardcodedDevMachinePaths::test_no_dev_repo_path_in_tests` 现红，命中两条：`tests/manual/pending_hints_session_fence_live.py:19` 与 `tests/manual/tool_round_replay_limit_exit.py:15`，均在 docstring 的"一条命令复现"里写了 `PYTHONPATH="E:/项目/Neurova"`。来源不是本审计会话（`git log` 归到并发会话的 `8d9a459e`/`1cc26b47`）。守卫要防的正是这件事：脚本换机器/换 checkout 路径即不可复现。修法是把复现行改成相对写法或走 `tests/repo_paths.py` 的 `REPO_ROOT` 派生；本批未代改他人判据，登记以免无人认领。
@@ -525,6 +540,42 @@
 64. **子进程文本捕获不显式指定 encoding：全仓 61 处命中，其中一处使守卫从未运行（✅ 第 2 格已闭环 `aff4ec6b`，余 60 处需人裁）** 🔴 —— `subprocess.run(..., capture_output=True, text=True)` 不给 `encoding` 时，父进程按 `locale.getpreferredencoding()`（本机 **cp936**）解子进程写的 UTF-8 字节。实测三种形态，危险度递增：① 输出全 ASCII → 侥幸没事；② 全仓收集那一发 1.65MB 输出 → `proc.stdout` 被**静默置成 None**，`proc.stdout + proc.stderr` 当场 `TypeError`（同一调用改回 bytes 模式立刻拿到 1648378 字节的正常输出——坏在解码层，不在子进程）；③ 非 ASCII 恰好能凑成合法 cp936 序列 → **不报错，内容被替换**，断言照跑、读的是脏文本。
     第 ② 态把 `tests/unit/core/test_whole_repo_collection_errors.py` 的两条主断言变成 **2 ERROR at setup**，也就是「全仓收集零错误」这条守卫**从来没咬过**；文件里唯一真跑起来的是最便宜的那条反证（造死导入文件必须被点名），于是它一直维持着「这个文件是活的」的假象。修法与新增的运行性前置判据见 `aff4ec6b`；修后实测 `4 passed in 63.76s`，全仓 **21690 条、零 ERROR collecting、rc=0**——收集卫生本身是好的，坏的只是看门那双眼睛。
     同根因第 1 格是今天早些时候的 `test_pip_audit_gate`（Windows 上红，同样是子进程 stdout=None、GBK 解码失败）。AST 复扫谓词取「`Call(func=Attribute(subprocess.run / check_output / Popen))` 且带 `text` 或 `universal_newlines` 且有捕获、但关键字里没有 `encoding`」，全仓 **61 处**：`tests/` 35、`scripts/` 21、`neurova/` 5。**本批只修被证明「判据从未运行」的那一格**，余 60 处不盲扫的原因：逐处补上 encoding 后，凡断言里比中文/绝对路径的都可能从「假绿」翻成「真红」，那是另一轮改动面与另一轮 A/B 归因，混进来会让本批说不清「红是哪一条带来的」。**待裁的两种处置**：A 按目录分批扫净（建议先 `scripts/ci/` 与 `neurova/`——那两处是产品与 CI 路径，脏文本会直接进判定）；B 加一条只降不升的形状棘轮（新落点必须带 encoding，基线 60 条冻结），先止住增长再逐批消化。两者不冲突，B 的成本低得多。
+
+65. **`data/sessions` 历史件清理（D1）——删除前提已随 §6-53 更正而作废，改为人裁** 🔴 —— 原计划"只删探针族 ≈25 个 + 同批处理索引/时间线指向 + 加防再生判据"，三件事逐一复算后都不成立或已成立：
+    ① **不可恢复**：`git ls-files data/sessions` 为 **0**，且 `.gitignore:284` 的 `/data/` 整目录豁免——这些文件既不在版本控制里也没有暂存副本，删掉就是真没了。本仓第一条纪律（不可逆动作先取证再确认）在这里直接适用。
+    ② **动它们的理由没了**：登记时的依据是 §6-53"跑测改写真实用户会话文件"，而该条根因已被实测否证（conftest 注的是系统临时目录；628 条用例前后 `data/` 全树 3054 个文件 (mtime_ns, md5) 指纹 **changed=0**）。也就是说这些是**历史存量**，不是持续在生成的垃圾。
+    ③ **防再生判据早已在场**：`tests/conftest.py::_guardSessionLandingIsIsolated` + `tests/unit/test_session_landing_guard.py` 钉的是**装配点**（单例 `_sessions_dir == <repo>/data/sessions` 即红），取向正是"目录内容判据不可用，要么太贵、要么退化成看不见原地改写的清单差集"。②的那次指纹实验等于给这把锁做了一回来复验，无需再造第二条。
+    现存 208 个文件的分布（按文件名形态，只读统计，未处置；计数取自本轮目录实测）：
+    - **形态可判定为探针/夹具残留：共 31 件**。① agent 目录名就是探针名的五个目录
+      `elapsed-probe-01/`(4)、`loop-probe-01/`(4)、`loop-probe-cli/`(4)、`test-agent/`(1)、
+      `test_agent/`(1) 合计 **14 件**，会话 id 直接写着 `elapsed-probe`/`probe-session`/
+      `probe-cli`；② `default/` 里非影子的 **8 件**（`shared-sid`、`sess-bob`、`sess-d2`
+      各 1 + `led-c{1,2,3,5,6}.jsonl` 5）；③ `kai/` 里像夹具字面量的 **9 件**
+      （`sess-<单字母>` 7 + `test-kai-model` 1 + `shared-sid` 1）。
+    - **不可由文件名判定，须逐族取证**：`kai/session_kai-dialog-*` 47 件（真人长期对话，
+      跨 2026-05→10）、`kai/session_kai-legacy-*` 约 40 件、`kai/session_kai-history-*`
+      11 件（像是导入的历史）、`yi_ling/session_auto-<hex>` 50 件（`auto-` 前缀既可能是
+      渠道自动建会话的正常产物，也可能是某批探针）、`a1/session_<uuid8>` 10 件。
+    - **易被漏掉的一处连带**：每个 agent 目录下还有 `_summary_index.json` 与
+      `_timeline/*.jsonl` 两类影子文件，按 id 指回主文件。删主文件不删影子，就是 §6-29
+      记过的"FTS 影子行与主表脱节"同形问题——真要清理必须同批处理指向，
+      不能只删 `session_*.json`。
+    **建议**：① 若要清，先只动那 **31 件**（且先复制到仓外归档再删，给一次反悔窗口），
+    `kai-dialog`/`kai-legacy`/`kai-history`/`yi_ling auto-*` 一律不动；② 或者就地不动，
+    只把这条标成"已知存量、不再生成"。两种都比"按名字猜着删 208 件"好。
+    **这一条不执行，等人裁**——理由见上面 ①②③：不可恢复、动它的依据已被否证、
+    防再生另有在着的装配点判据。
+66. **`tests/manual/` 收集拦截层不该退役（E1 的前提被推翻）** 🟡 —— 原计划把约 21 份活体脚本改成"不在模块顶层改 `os.environ`"，然后**退役** `tests/manual/conftest.py` 的两道拦截。读码与复算后前提不成立，三条：
+    ① 拦截层不是 consumer-side guard，而是**收集期根修**。这些脚本的正确形态是"直跑"（`python tests/manual/<name>.py`），必须在 `import neurova` **之前**改环境；被 pytest 导入就是事故——变量带进整个跑测进程，无声掩盖一切依赖数据根的判据（本仓实测掩盖过一次会话落点守卫）。把"事故"的成因归到脚本、然后去掉拦截，等于把防护换成运气。
+    ② 两道拦截各堵一条路径，且第二道是被实测逼出来的：默认收集靠 `python_files = ["test_*"]` 挡；**显式点名**时 `pytest_ignore_collect` 在 pytest 9 对命令行直接给出的路径**不生效**（实测仍被收集，而收集即导入，钩子回来已太晚），所以必须在 `pytest_configure`（收集之前）`UsageError` 拒绝。退役它，`pytest tests/manual/x.py` 就重新变成污染全进程的入口。
+    ③ 就算脚本全部改造完，仍要靠"导入顺序"这件事本身——顺序错了照样污染，而拦截层是唯一**不依赖脚本自觉**的那道。文件里还留着一条已踩的坑："比较一律用 `Path`，Windows 下 `str(path)` 带反斜杠，字符串 `tests/manual` 永不匹配"。
+    **改判后的 E 档实际待办**只剩一件，且与退役无关：**止住增长**。AST 复算"模块顶层
+    （含顶层 `if`/`try` 体内）改 `os.environ` 或调 `setdefault/update`"的现值是
+    **22 份文件 / 32 处**——比 `tests/manual/conftest.py` docstring 自记的"21 个文件 27 处"
+    **多 1 份 5 处**，即那条口径本身已经漂了（这正是本仓反复要求的"计数型描述落库前本轮
+    自己量一遍"）。要加的是对**新增**脚本的只降不升棘轮（新脚本出现顶层 env 改写即判红，
+    并提示走 `_liveVerifyIsolation` 的单点），而不是回头改老脚本。
+    另外 E2 那一格（其余导入期 env 族 + 棘轮）与 §6-64 的 60 处 encoding 命中是**同一次机械改动面**，建议并批处理，见该条的 A/B 两种处置。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -635,7 +686,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `aff4ec6b` | D2 改判后的实际产出：`test_whole_repo_collection_errors.py` 的两条主断言**此前从未运行**——`_collect` 用 `text=True` 而不显式给 `encoding`，父进程按 cp936 解子进程的 UTF-8 字节，全仓那一发把 `proc.stdout` 静默置成 None ⇒ `proc.stdout + proc.stderr` 抛 `TypeError` ⇒ 2 ERROR at setup；而文件里唯一真跑起来的是最便宜的那条反证，于是长期顶着"这个守卫在守着"的假象。修法两侧钉死（`encoding="utf-8", errors="replace"`——replace 是刻意的：宁可看见 U+FFFD 也不要整条流换回 None 或让守卫炸）。新增一条**运行性前置判据**先证"捕获层本身可信"；走法上避开了一个坑：最初用"模块顶层 print 中文"做证据，实测**不行**——收集期 print 被子 pytest 的捕获层吞掉，与编码口径无关也会缺席，那样判据分不出"解码坏了"和"根本没打出来"；改为让子进程取一个**路径含中文**的目标，pytest 会把该路径原样打进它自己的 stdout。去掉 encoding 参数后这条复现的正是生产那条错的原文。修后 `4 passed in 63.76s`，全仓 **21690 条、零 ERROR collecting、rc=0**（收集卫生本身是好的，坏的只是看门那双眼睛）。A/B（仓外只读 worktree @ 6ca9b4e5，`tests/unit/core`）本树 9 ↔ 基线 11，**仅本树红 0 条**；基线独有 2 条即本文件那两条（修后转绿），即本批产出本身。测试基建 +47/−2，生产零改动 | D2 结论**改判**：本文件**不入 CI 子集**。理由不是"超 30s 全局 timeout"（每条断言带 `@pytest.mark.timeout(480+)`，单文件跑不被杀），而是 60s+ 的 CI 时长成本——`ce74616b` 当初写的就是这个，本轮复算（63.63s / 21690 条）后维持原处置，只把实测数与"它此前根本没在跑"补进文件说明与本台账；新增 §6-64（同根因全仓 **61 处**命中：`tests/` 35、`scripts/` 21、`neurova/` 5；余 60 处待裁 A 分批扫净 / B 只降不升棘轮） |
 
 
-上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 的"只留两个门"没做完**：角色门 `require_role` 仍指 `deps` 那份解析，收口它要动 73 处命中，已登记 §6-54 待裁（与 §9 序 11 同一条链，不宜拆着做）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、**§6-54（角色门与严格门双身份源，73 处命中）**、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（`tests/manual` 新脚本写死开发机绝对路径使常驻守卫红）、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64 余 60 处（子进程文本捕获未显式 encoding；A 分批扫净 / B 只降不升棘轮，两者不冲突且 B 便宜得多）**、RSI 遗产分支成功语义、属主读会话、`data/sessions` 历史垃圾件；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
+上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 的"只留两个门"没做完**：角色门 `require_role` 仍指 `deps` 那份解析，收口它要动 73 处命中，已登记 §6-54 待裁（与 §9 序 11 同一条链，不宜拆着做）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、**§6-54（角色门与严格门双身份源，73 处命中）**、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（`tests/manual` 新脚本写死开发机绝对路径使常驻守卫红）、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64 余 60 处（子进程文本捕获未显式 encoding；A 分批扫净 / B 只降不升棘轮，两者不冲突且 B 便宜得多）**、RSI 遗产分支成功语义、属主读会话、**§6-65（`data/sessions` 历史件删除——依据已否证、文件不可恢复，只列清单不动手）**、**§6-66（`tests/manual` 收集拦截层：E1 原计划"退役它"的前提被推翻，实际待办只剩对新增脚本的只降不升棘轮）**；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
 
 ## 10. 工作树状态
 
