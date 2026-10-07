@@ -310,27 +310,18 @@ def _entry_fact(entry: dict, detail: dict) -> dict:
     }
 
 
-def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> list[ConsolidationPlan]:
-    """从 SkillService 读真实技能库与账本，产出合并计划。
+def _collect_service_facts(service) -> tuple:
+    """从 SkillService 读真实技能库与账本（结构/语义两源共用）：返回 (stats, facts)。
 
-    P1 收口（2026-09-17）：**聚簇口径换成结构身份**（`find_structural_clusters`）。
-
-    旧实现的失效不在"选谁当 umbrella"，而在**聚谁**：只按名字前缀聚，于是
-    P1-1 已判定的"同一技能被封装成多条"（同序列、异名形态：
-    `skill_<fp16>` / `genetic_<tools>` / `synth_*`）**聚不到同一簇**——重复被
-    判出来了、却合并不了，能力天花板停在名字层。现在按工具序列族聚类，
-    并如实标注本簇是"同一业务身份的真重复"还是"同序列不同业务的跨意图收编"。
-
-    与 `plan({name: description})` 的差别：umbrella 用**质量账本**选，而不是
-    描述长度；成员质量来自 usage/funnel。
+    库不可读 → ({}, {})——调用方按"无计划"处理，绝不猜。
     """
-    stats: dict[str, dict] = {}
-    facts: dict[str, dict] = {}
+    stats: dict = {}
+    facts: dict = {}
     try:
         entries = service.list_skills()
     except Exception as e:  # noqa: BLE001 - 库不可读即无计划（绝不猜）
         logger.debug("技能库读取失败，合并计划为空: %s", e)
-        return []
+        return stats, facts
     for entry in entries:
         skill_id = str(entry.get("id") or "")
         if not skill_id:
@@ -354,6 +345,26 @@ def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> 
         stats[skill_id] = {**merged, "usage": merged.get("usage") or {},
                            "funnel": funnel or {}}
         facts[skill_id] = _entry_fact(entry, detail)
+    return stats, facts
+
+
+def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> list[ConsolidationPlan]:
+    """从 SkillService 读真实技能库与账本，产出合并计划。
+
+    P1 收口（2026-09-17）：**聚簇口径换成结构身份**（`find_structural_clusters`）。
+
+    旧实现的失效不在"选谁当 umbrella"，而在**聚谁**：只按名字前缀聚，于是
+    P1-1 已判定的"同一技能被封装成多条"（同序列、异名形态：
+    `skill_<fp16>` / `genetic_<tools>` / `synth_*`）**聚不到同一簇**——重复被
+    判出来了、却合并不了，能力天花板停在名字层。现在按工具序列族聚类，
+    并如实标注本簇是"同一业务身份的真重复"还是"同序列不同业务的跨意图收编"。
+
+    与 `plan({name: description})` 的差别：umbrella 用**质量账本**选，而不是
+    描述长度；成员质量来自 usage/funnel。
+    """
+    stats, facts = _collect_service_facts(service)
+    if not facts:
+        return []
 
     plans: list[ConsolidationPlan] = []
     claimed: set[str] = set()
@@ -379,6 +390,111 @@ def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> 
                 intents={m: cluster.intents.get(m, "") for m in members},
             )
         )
+    return plans
+
+
+# ── P3 语义族第二计划源（2026-10-07，SkillGLoW 对比）──────────────────
+
+_DEFAULT_SEMANTIC_THRESHOLD = 0.82
+
+
+def semantic_family_clusters(
+    vectors: dict, threshold: float, exclude: Optional[set] = None
+) -> list:
+    """按名述嵌入余弦聚"同目的、异序列"族(种子中心贪心,防单链漂移)。
+
+    确定性:成员按名排序后依次作种子,吸收与种子相似 ≥threshold 的未认领
+    成员——不做对链式合并(那会把"相似链"两端拉进同族)。
+    """
+    from neurova.skills.skill_semantics import _cosine
+
+    names = sorted(n for n in vectors if n not in (exclude or set()))
+    claimed: set = set()
+    clusters: list = []
+    for seed in names:
+        if seed in claimed:
+            continue
+        members = [seed]
+        for other in names:
+            if other == seed or other in claimed:
+                continue
+            if _cosine(vectors[seed], vectors[other]) >= threshold:
+                members.append(other)
+        if len(members) >= 2:
+            claimed.update(members)
+            clusters.append(sorted(members))
+    return clusters
+
+
+def plan_from_semantics(
+    service,
+    exclude: Optional[set] = None,
+    *,
+    vector_cache: Optional[Any] = None,
+    threshold: float = _DEFAULT_SEMANTIC_THRESHOLD,
+) -> list[ConsolidationPlan]:
+    """语义族第二计划源(P3,SkillGLoW 对比):聚"同目的、异序列"的语义同义族。
+
+    - 结构族(工具序列)仍是主判据且先产先占成员:调用方把结构计划已认领的
+      成员传进 `exclude`,本源只聚剩余技能——两源不抢同一成员;
+    - 零 LLM:嵌入来自本地 bge ONNX(skill_semantics,带缓存);引擎不可用
+      → 空列表诚实降级(结构源是常备路径);
+    - basis="semantic" 的计划**永不自动提交**(auto_commit_gate_issues 拦):
+      跨序列收编风险高于结构族,只进人工审批面。
+    """
+    from types import SimpleNamespace
+
+    from neurova.skills.creation_governance import fingerprint
+    from neurova.skills.skill_semantics import SkillVectorCache
+
+    exclude = set(exclude or ())
+    stats, facts = _collect_service_facts(service)
+    candidates = {sid: fact for sid, fact in facts.items() if sid not in exclude}
+    if len(candidates) < 2:
+        return []
+
+    cache = vector_cache or SkillVectorCache()
+    skill_objs = {
+        sid: SimpleNamespace(
+            name=sid,
+            description=str(fact.get("description") or fact.get("purpose") or ""),
+        )
+        for sid, fact in candidates.items()
+    }
+    vectors = cache.vectors_for(skill_objs)
+    if not vectors:
+        logger.debug("语义族计划:嵌入向量不可用,诚实降级(结构源是常备路径)")
+        return []
+
+    plans: list[ConsolidationPlan] = []
+    for members in semantic_family_clusters(vectors, threshold, exclude):
+        umbrella = max(members, key=lambda m: (_quality_of(stats.get(m)), m))
+        absorbed = [m for m in members if m != umbrella]
+        if not absorbed:
+            continue
+        plans.append(
+            ConsolidationPlan(
+                umbrella=umbrella,
+                absorbed=absorbed,
+                reason=(
+                    f"语义同族:{len(members)} 个条目名述嵌入高度相似(≥{threshold:.2f})"
+                    f"但工具序列不同——可能是\"同一目的、不同实现路径\"的语义同义重复,"
+                    f"收敛为「{umbrella}」;跨序列收编风险高于结构族,留人工确认后合并"
+                ),
+                needs_reference_rehoming=True,
+                quality={m: _quality_of(stats.get(m)) for m in members},
+                basis="semantic",
+                structure="",
+                intents={
+                    m: fingerprint(
+                        facts[m].get("tool_sequence"),
+                        facts[m].get("purpose") or facts[m].get("description") or "")
+                    or ""
+                    for m in members
+                },
+            )
+        )
+    plans.sort(key=lambda p: (-len(p.absorbed) - 1, p.umbrella))
     return plans
 
 
@@ -541,6 +657,8 @@ def auto_commit_gate_issues(service, plan: dict) -> list:
     absorbed = [str(a) for a in (plan.get("absorbed") or [])]
     if plan.get("basis") == "name_prefix":
         issues.append("name_prefix 兜底簇无结构身份可依,留人工裁决")
+    if plan.get("basis") == "semantic":
+        issues.append("语义族计划是跨序列收编(工具序列不同),风险高于结构族,留人工裁决")
     detail = {}
     try:
         detail = service.get_skill_info(umbrella) or {}
@@ -577,6 +695,16 @@ def consolidation_auto_commit_enabled() -> bool:
 
     return resolve_flag(
         "consolidation_auto_commit_enabled", "NEUROVA_CONSOLIDATION_AUTO_COMMIT")
+
+
+def consolidation_semantic_plans_enabled() -> bool:
+    """语义族第二计划源开关(治理设置;env NEUROVA_CONSOLIDATION_SEMANTIC_PLANS
+    逃生门)。默认开:计划只进人工审批面、永不自动提交,成本为本地嵌入
+    (带缓存)。关 = 只跑结构族计划源。"""
+    from neurova.security.governance_settings import resolve_flag
+
+    return resolve_flag(
+        "consolidation_semantic_plans_enabled", "NEUROVA_CONSOLIDATION_SEMANTIC_PLANS")
 
 
 def maybe_auto_commit(service, store: ConsolidationPlanStore,

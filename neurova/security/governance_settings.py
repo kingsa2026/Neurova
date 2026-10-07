@@ -46,6 +46,9 @@ DEFAULTS: Dict[str, Any] = {
     # 动作=归档可逆+账本迁移+留痕；关=回退人工审批面。规则修订登记：
     # docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0
     "consolidation_auto_commit_enabled": True,
+    # 语义族第二计划源（P3，2026-10-07）：按名述嵌入聚"同目的、异序列"族，
+    # 只产计划进人工审批面（basis=semantic 永不自动提交）。关 = 只跑结构族源。
+    "consolidation_semantic_plans_enabled": True,
     # 压缩经济性判据（关=沿用"必然装不下就等比缩小"的既有行为，现网零变更）
     "compression_economics_enabled": False,
     # G5-D：治理判 ASK 时，执行咽喉阻塞等待人工裁决的上界（秒）。
