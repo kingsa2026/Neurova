@@ -24,6 +24,23 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _cleanupProbeRealLanding(realSessions):
+    """删掉探针**刻意**建出的 `<repo>/data/sessions`，并逐级回收空祖先。
+
+    只在目录为空（探针没往里写过会话）时删；非空说明有真实数据，
+    宁可留着让人看见也不静默删（这里不吞异常的另一面）。
+    回收上限是 `<repo>/data`：再往上不是本探针建的，不碰。
+    """
+    try:
+        if realSessions.is_dir() and not any(realSessions.iterdir()):
+            realSessions.rmdir()
+        dataDir = realSessions.parent
+        if dataDir == REPO_ROOT / "data" and dataDir.is_dir() and not any(dataDir.iterdir()):
+            dataDir.rmdir()
+    except OSError:
+        pass
+
+
 def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     """子进程跑一条临时探针用例（用完即删）。
 
@@ -35,6 +52,11 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     probeEnv = copy.deepcopy(os.environ)
     probeEnv.pop("NEUROVA_SESSIONS_DIR", None)
     probeFile = REPO_ROOT / "tests" / "unit" / fileName
+    # 探针会**刻意**把落点设回"仓库真实会话库"（这正是它要证的事），
+    # 子进程构造 SessionManager 时 `mkdir` 便会在仓库根建出 `data/sessions/`。
+    # 父进程的 `_guardRepoRootAgainstPollution` 会因此点名本用例——故探针退出后
+    # 把这次**刻意的**落点收干净（只在它确实是探针建的空目录时删）。
+    realSessions = REPO_ROOT / "data" / "sessions"
     try:
         probeFile.write_text(textwrap.dedent(body), encoding="utf-8")
         proc = subprocess.run(
@@ -54,6 +76,7 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
         return out
     finally:
         probeFile.unlink(missing_ok=True)
+        _cleanupProbeRealLanding(realSessions)
 
 
 def test_bareSessionManagerIsIsolatedByDefault():

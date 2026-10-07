@@ -41,11 +41,15 @@ class TestSkillHubClientActivated:
             f"期望 SkillHubClient 实例，实际 {type(mgr.importer).__name__}"
         )
 
-    def test_market_importer_not_stub(self):
+    def test_market_importer_not_stub(self, tmp_path):
         """MarketImporter 的 search_skills 不应返回硬编码数据。"""
         from neurova.skills.market_importer import MarketImporter
 
-        importer = MarketImporter(skills_dir=Path(".agents/skills"))
+        # 落点必须由 tmp_path 推导，不得相对进程 CWD——`Path(".agents/skills")`
+        # 会在仓库根建塔写盘，被 `_guardRepoRootAgainstPollution` 点名
+        # （受保护子集实跑该条即此形态）。本用例只断言「不是硬编码 stub」，
+        # 与落点位置无关，故改 tmp_path 不影响判据。
+        importer = MarketImporter(skills_dir=tmp_path / "agents" / "skills")
         results = importer.search_skills("test_query")
 
         # stub 返回固定的 2 条硬编码结果；真实实现不应有固定长度

@@ -54,13 +54,24 @@ _INSTALL_SRC = _read(_INSTALL)
 
 
 def _install_module():
-    """按文件路径加载 install.py（仓库根不在测试 sys.path 时也能引导）。"""
+    """按文件路径加载 install.py（仓库根不在测试 sys.path 时也能引导）。
+
+    `spec_from_file_location` 的 loader 默认把 `.pyc` 写在**源文件旁**，即仓库根的
+    `__pycache__/`——由 `tests/conftest.py` 的 `_guardRepoRootAgainstPollution`
+    逐条点名（受保护子集实跑本文件即此形态：`__pycache__/install.cpython-*.pyc`）。
+    故此处局部关掉字节码写盘：本函数只取模块对象做断言，`.pyc` 与判据无关。
+    """
     root = str(_REPO)
     if root not in sys.path:
         sys.path.insert(0, root)
     spec = importlib.util.spec_from_file_location("neurova_install_entry", _INSTALL)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    _prev = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = _prev
     return mod
 
 

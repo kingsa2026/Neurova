@@ -3,13 +3,15 @@ Neurova 统一启动脚本测试
 测试 start.py 中的核心逻辑
 """
 
-import sys
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# `start` 由同目录 conftest.py 经 importlib 预加载并登记进 `sys.modules`，
+# 故这里**不再**往 `sys.path` 塞仓库根——那条路径会让 `start.py` 的字节码缓存
+# 落进仓库根，被 `_guardRepoRootAgainstPollution` 点名（受保护子集实跑该条
+# 即此形态）。`sys` 仍被下面的用例用（monkeypatch 解释器相关断言）。
+import sys  # noqa: F401
 
 import pytest
 

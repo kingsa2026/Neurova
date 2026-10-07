@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
+from neurova.core.data_root import get_data_root
 
 
 @pytest.fixture
@@ -148,7 +150,11 @@ class TestDbPathEnvOverride:
         ekb_mod.reset_experience_knowledge_base()
         try:
             db = ekb_mod.get_experience_knowledge_base()
+            # 判据取**数据根锚点**而非路径里是否恰好含字面量 "data"：后者是脆口径——
+            # 数据根可由 `NEUROVA_DATA_DIR` 注入（tests/conftest.py 的导入期隔离，
+            # 落点形如 `neurovaDataRoot-*/`，不含 "data" 子串），而判据要证的
+            # 是"回落到数据根"这一事实，与目录名拼写无关（教义第 6 条：事实源唯一）。
             assert str(db._db_path).endswith("experience_knowledge.db")
-            assert "data" in str(db._db_path)
+            assert Path(db._db_path).parent == get_data_root()
         finally:
             ekb_mod.reset_experience_knowledge_base()
