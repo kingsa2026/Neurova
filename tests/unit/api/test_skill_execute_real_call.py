@@ -33,7 +33,7 @@ def test_execute_skill_behavior_calls_registry():
     import asyncio
     from fastapi import Request
     from neurova.api.endpoints import skill as skill_module
-    from neurova.skills.executor import SkillResult
+    from neurova.skill_system import SkillResult
 
     # 构造 mock manifest
     mock_manifest = MagicMock()
@@ -47,7 +47,7 @@ def test_execute_skill_behavior_calls_registry():
     # 构造 mock registry
     mock_registry = MagicMock()
     mock_registry.list_skills.return_value = [mock_manifest]
-    mock_registry.execute_skill = AsyncMock(return_value=SkillResult(success=True, output={"result": "ok"}))
+    mock_registry.execute_skill = AsyncMock(return_value=SkillResult(success=True, data={"result": "ok"}))
 
     with patch("neurova.skills.get_skill_registry", return_value=mock_registry):
         # mock _get_agent 返回 None（agent 不可用）
@@ -63,11 +63,11 @@ def test_execute_skill_behavior_calls_registry():
 
 
 def test_execute_skill_behavior_returns_real_result():
-    """C3.4: 行为验证 — execute_skill 应返回真实 SkillResult 的 output"""
+    """C3.4: 行为验证 — execute_skill 应透出真实 SkillResult 的 data"""
     import asyncio
     from fastapi import Request
     from neurova.api.endpoints import skill as skill_module
-    from neurova.skills.executor import SkillResult
+    from neurova.skill_system import SkillResult
 
     mock_manifest = MagicMock()
     mock_manifest.id = "test_skill"
@@ -81,7 +81,7 @@ def test_execute_skill_behavior_returns_real_result():
     mock_registry.list_skills.return_value = [mock_manifest]
     expected_output = {"computed": 42}
     mock_registry.execute_skill = AsyncMock(
-        return_value=SkillResult(success=True, output=expected_output)
+        return_value=SkillResult(success=True, data=expected_output)
     )
 
     with patch("neurova.skills.get_skill_registry", return_value=mock_registry):
@@ -90,7 +90,7 @@ def test_execute_skill_behavior_returns_real_result():
             request.state.request_id = "test"
             result = asyncio.run(skill_module.execute_skill(request, "test_skill"))
             assert result.result == expected_output, \
-                f"应返回真实 SkillResult.output，期望 {expected_output}，实际 {result.result}"
+                f"应返回真实 SkillResult.data，期望 {expected_output}，实际 {result.result}"
 
 
 def test_execute_skill_behavior_handles_failure():
@@ -98,7 +98,7 @@ def test_execute_skill_behavior_handles_failure():
     import asyncio
     from fastapi import Request
     from neurova.api.endpoints import skill as skill_module
-    from neurova.skills.executor import SkillResult
+    from neurova.skill_system import SkillResult
 
     mock_manifest = MagicMock()
     mock_manifest.id = "test_skill"

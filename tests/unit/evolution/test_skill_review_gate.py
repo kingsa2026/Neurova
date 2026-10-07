@@ -89,7 +89,7 @@ class GeneticGateTest(unittest.TestCase):
         self.assertFalse(registry.set_skill_enabled.__self__ is None)  # registry 完好
         skill = registry.get_skill("genetic_search_tool_file_tool")
         self.assertIsNotNone(skill)
-        from neurova.skill_system_module_standalone import SkillStatus
+        from neurova.skill_system import SkillStatus
 
         self.assertEqual(skill.status, SkillStatus.INACTIVE, "评审闸开启：遗传产物注册即禁用")
 
@@ -109,7 +109,7 @@ class GeneticGateTest(unittest.TestCase):
             self.seed(gen)
             self.assertEqual(gen.register_to_skill_registry(registry, self.service), 1)
         skill = registry.get_skill("genetic_search_tool_file_tool")
-        from neurova.skill_system_module_standalone import SkillStatus
+        from neurova.skill_system import SkillStatus
 
         self.assertEqual(skill.status, SkillStatus.ACTIVE)
 

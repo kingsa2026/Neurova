@@ -208,7 +208,7 @@ def test_real_collector_finish_approve_registration(tmp_path, monkeypatch):
     from neurova.skills.creation_governance import begin_task, record_tool_execution, finish_task
     from neurova.evolution.skill_encapsulation import AutoSkillBuilder
     from neurova.skill_system import SkillRegistry
-    from neurova.skill_system_module_standalone import SkillStatus
+    from neurova.skill_system import SkillStatus
     service = service_at(tmp_path)
     monkeypatch.setattr("neurova.skills.skill_service.SkillService", lambda **kw: service)
     monkeypatch.setenv("NEUROVA_SKILL_REVIEW_GATE", "1")
@@ -357,7 +357,7 @@ def test_review_state_survives_restart_and_duplicate_publish(tmp_path, monkeypat
     assert restarted.enable_skill("review")["success"]
     assert publish_automatic(service_at(tmp_path), registry, manifest)["duplicate"]
     assert service_at(tmp_path).get_skill_info("review")["enabled"] is True
-    from neurova.skill_system_module_standalone import SkillStatus
+    from neurova.skill_system import SkillStatus
     assert registry.get_skill("review").status == SkillStatus.ACTIVE
 
 

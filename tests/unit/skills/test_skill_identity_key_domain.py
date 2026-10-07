@@ -42,8 +42,8 @@ class _EchoSkill(Skill):
     async def execute(self, params, context=None):
         from neurova.skill_system import SkillResult
 
-        # 字段名用 SkillResult 的真实契约（output，不是 data）
-        return SkillResult(success=True, output={"echo": dict(params or {})})
+        # 字段名用运行时 SkillResult 的真实契约（data，不是 executor 层的 output）
+        return SkillResult(success=True, data={"echo": dict(params or {})})
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ async def test_execute_skill_accepts_identity(registry):
     result = await registry.execute_skill(IDENTITY, {"q": 1})
 
     assert result.success is True, f"按身份执行被当成技能不存在：{result.error}"
-    assert result.output == {"echo": {"q": 1}}
+    assert result.data == {"echo": {"q": 1}}
 
 
 def test_unregister_by_identity_removes_both_forms(registry):

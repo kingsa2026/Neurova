@@ -12,7 +12,6 @@ TDD 原则: 一次一个测试 → 一次一个实现 → 重复。
 """
 
 import re
-import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
@@ -111,14 +110,9 @@ class TestSilentExceptReplacedWithLoggerException:
 # 候选 2: _unpack_skill helper 提取
 # ──────────────────────────────────────────────────────────────────
 
-# 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
-_SPEC = importlib.util.spec_from_file_location(
-    "neurova_skill_system_standalone_for_arch_test",
-    repo_str("neurova/skill_system.py"),
-)
-_MOD = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MOD)
-Skill = _MOD.Skill
+# 规范实现载体就在包内 `skill_system/core.py`——直接导入即可（此前顶层同名文件
+# 被包遮蔽，只能按路径反射加载）
+from neurova.skill_system.core import Skill
 
 
 class TestUnpackSkillHelper:
@@ -233,7 +227,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_defined_in_skill_system(self):
         """neurova/skill_system.py 应定义 SkillRegistryProtocol。"""
         src = open(
-            repo_str("neurova/skill_system.py"),
+            repo_str("neurova/skill_system/core.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -249,7 +243,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_skills_attribute(self):
         """Protocol 应声明 skills: Dict[str, Skill] 接口。"""
         src = open(
-            repo_str("neurova/skill_system.py"),
+            repo_str("neurova/skill_system/core.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -268,7 +262,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_register_and_register_skill(self):
         """Protocol 应声明 register 和 register_skill 两个方法接口。"""
         src = open(
-            repo_str("neurova/skill_system.py"),
+            repo_str("neurova/skill_system/core.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -289,7 +283,7 @@ class TestSkillRegistryProtocol:
     def test_protocol_declares_list_skills_and_execute_skill(self):
         """Protocol 应声明 list_skills 和 execute_skill 接口。"""
         src = open(
-            repo_str("neurova/skill_system.py"),
+            repo_str("neurova/skill_system/core.py"),
             encoding="utf-8",
         ).read()
         src_no_comments = re.sub(r'#.*', '', src)
@@ -309,15 +303,8 @@ class TestSkillRegistryProtocol:
 
     def test_class_a_satisfies_protocol(self):
         """类 A SkillRegistry 应满足 SkillRegistryProtocol 接口。"""
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "neurova_skill_system_for_protocol_test",
-            repo_str("neurova/skill_system.py"),
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        SkillRegistryClassA = mod.SkillRegistry
-        Protocol = mod.SkillRegistryProtocol
+        from neurova.skill_system.core import SkillRegistry as SkillRegistryClassA
+
         instance = SkillRegistryClassA.__new__(SkillRegistryClassA)
         instance._skills = {}
         # 验证所有 Protocol 方法都存在
@@ -328,8 +315,7 @@ class TestSkillRegistryProtocol:
 
     def test_protocol_exported_from_skill_system_package(self):
         """SkillRegistryProtocol 应从 neurova.skill_system 包可导入。"""
-        # 由于 neurova/skill_system.py 被 neurova/skill_system/ 包遮蔽,
-        # 需确认 Protocol 通过 __init__.py 或 __getattr__ 导出
+        # 规范实现载体在 neurova/skill_system/core.py，经包门面静态导出
         src = open(
             repo_str("neurova/skill_system/__init__.py"),
             encoding="utf-8",

@@ -19,9 +19,9 @@ digraph NeurovaRisks {
         label="S 级 — 已在源码中证实的正确性缺陷";
         style="rounded"; color="#c92a2a"; fontsize=13; labeljust=l;
 
-        R1 [label="R1  包/模块同名遮蔽（根因）\nneurova/skill_system.py 32KB 规范实现\n被同名目录 neurova/skill_system/ 永久遮蔽\nimport 只会命中包（实测已验证）\n→ 靠 __getattr__ + spec_from_file_location\n  + sys.modules 别名 + 占位类 四层兜底\n[neurova/skill_system/__init__.py:190-223,264]\n[neurova/skill_system.py:43]", fillcolor="#ffc9c9"];
+        R1 [label="R1  包/模块同名遮蔽（根因）〔已消解 2026-10-07〕\n规范实现载体已从 neurova/skill_system.py\n搬入包内 neurova/skill_system/core.py\n→ 四层兜底（__getattr__ 代理 / importlib 反射\n  / sys.modules 别名 / 占位类）全部删除\n门面只剩静态 re-export\n判据常驻 tests/unit/skills/\ntest_skillSymbolSingleCarrier.py", fillcolor="#d3f9d8"];
 
-        R1b [label="R1-衍生  幽灵模块名\nneurova.skill_system_module_standalone\n磁盘上不存在（已 find 确证）\n顶层 import 它 [:264] 只因为\n同文件 :239 先触发 __getattr__ 注入别名\n→ 加载顺序耦合，重排即 ImportError", fillcolor="#ffc9c9"];
+        R1b [label="R1-衍生  幽灵模块名〔已消解 2026-10-07〕\nneurova.skill_system_module_standalone 随搬家消失\n加载顺序耦合（顶层 import 幽灵名）不再存在\n公共契约快照同步为 core 路径\n生产/测试两侧反射加载落点已清零", fillcolor="#d3f9d8"];
 
         R10 [label="R10  大小写导入地雷\nmigration_api.py:11 导入小写\nneurova.storage.*，git 记录为大写 Storage/\n→ Windows 可跑，Linux/镜像必 ImportError\n本地无法复现（大小写不敏感 FS）", fillcolor="#ffc9c9"];
 
@@ -92,7 +92,7 @@ digraph NeurovaRisks {
         style="rounded"; color="#2b8a3e"; fontsize=13; labeljust=l;
 
         F1 [label="F1  先止血静默失效\n路由注册 ImportError 升级为启动失败\n或加路由快照断言进 CI\n（否则 F2/F3 无法验证）", fillcolor="#d3f9d8"];
-        F2 [label="F2  消除 R1 根因\nskill_system.py 改名或把包内规范实现上提\n删除 __getattr__ 四层兜底与幽灵模块名\n判据：直接 import 即可拿到 SkillRegistry", fillcolor="#d3f9d8"];
+        F2 [label="F2  消除 R1 根因〔已落地 2026-10-07〕\nskill_system.py 搬入包内 core.py\n删除 __getattr__ 四层兜底与幽灵模块名\n判据达成：直接 import 即拿到 SkillRegistry", fillcolor="#d3f9d8"];
         F3 [label="F3  闭合成本链路\n把 throttle_if_needed 接入 LLM 调用主路径并使其拦停\n装饰器 ImportError 改为快速失败\n补齐 10 处未覆盖调用点", fillcolor="#d3f9d8"];
         F4 [label="F4  对齐前后端前缀契约\n统一到 /api/v1，去掉 .catch 静默\napi/computer.ts 回归单一 axios 实例", fillcolor="#d3f9d8"];
         F5 [label="F5  把 R11 未跟踪核心纳入版本控制\n否则后续所有守卫与图都不可复现", fillcolor="#d3f9d8"];

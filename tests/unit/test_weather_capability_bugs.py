@@ -16,9 +16,7 @@
   - 提示词策略：改为正向引导（保留 memory_search 限制，去掉"回复无法获取"）
 """
 
-import importlib.util
 import inspect
-import sys
 from pathlib import Path
 
 import pytest
@@ -173,21 +171,16 @@ class TestW3SkillSystemCompatMissing:
 # W-4: WebSearchSkill._search_web 是 stub
 # ═══════════════════════════════════════════════════════════════
 
-def _load_standalone_skill_system():
-    """绕过 neurova.skill_system 包名遮蔽，按文件加载 skill_system.py 单文件模块。
+def _runtimeSkillSystem():
+    """运行时技能系统模块（规范实现所在）。
 
-    镜像 skill_system/__init__.py:91-107 的加载策略。
+    此前这里用 importlib 按路径反射加载顶层 skill_system.py，镜像包门面的
+    standalone 加载策略；门面转静态 re-export 后，直接取 `neurova.skill_system.core`
+    ——取到的必须与生产代码拿到的是同一份对象，否则测的是另一份实现。
     """
-    cache_key = "neurova.skill_system_module_standalone_for_test"
-    if cache_key in sys.modules:
-        return sys.modules[cache_key]
-    mod_path = NEUROVA_DIR / "skill_system.py"
-    assert mod_path.exists(), f"skill_system.py 单文件模块必须存在: {mod_path}"
-    spec = importlib.util.spec_from_file_location(cache_key, str(mod_path))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[cache_key] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    from neurova.skill_system import core
+
+    return core
 
 
 class TestW4WebSearchSkillStub:
@@ -197,7 +190,7 @@ class TestW4WebSearchSkillStub:
         """方法体不应只是 `return []` 单语句（允许 guard 中的 return [] 与 docstring 提及）"""
         import ast
 
-        mod = _load_standalone_skill_system()
+        mod = _runtimeSkillSystem()
         src = inspect.getsource(mod.WebSearchSkill._search_web)
         tree = ast.parse(src.lstrip())
         func = tree.body[0]
@@ -226,7 +219,7 @@ class TestW4WebSearchSkillStub:
         )
 
     def test_search_web_has_real_implementation(self):
-        mod = _load_standalone_skill_system()
+        mod = _runtimeSkillSystem()
         src = inspect.getsource(mod.WebSearchSkill._search_web)
         # 真实实现应包含网络请求或委托调用标记
         implementation_markers = [

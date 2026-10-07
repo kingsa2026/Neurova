@@ -77,7 +77,7 @@
     "_rebuild_loop_locked": "(self, model_name: str) -> bool",
     "process_multimodal": "(self, content: str, media_type: str, model: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> str",
     "router": "(self) -> Optional[neurova.router.MessageRouter]",
-    "skill_registry": "(self) -> Optional[neurova.skill_system_module_standalone.SkillRegistry]",
+    "skill_registry": "(self) -> Optional[neurova.skill_system.core.SkillRegistry]",
     "skill_manifest_provider": "(self) -> 'SkillManifestProvider'",
     "get_skill_manifest": "(self) -> list",
     "load_skill": "(self, skill_id: str, factory=None)",

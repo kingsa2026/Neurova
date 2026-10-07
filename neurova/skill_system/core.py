@@ -19,13 +19,17 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checka
 logger = get_logger(__name__)
 
 
-class SkillStatus(Enum):
-    """Skill 状态"""
+class SkillStatus(str, Enum):
+    """Skill 状态（单一事实源）。
+
+    继承 str 是取长：`status == "active"` 的既有读法与枚举读法同时成立——
+    桥接层历史上直接写裸串 `"active"`，收口后不能反过来打断读方。
+    成员只留被消费的 ACTIVE/INACTIVE；LOADING/ERROR/DEPRECATED/BETA/EXPERIMENTAL
+    在仓内零读取点，按断点删除。
+    """
 
     ACTIVE = "active"
     INACTIVE = "inactive"
-    LOADING = "loading"
-    ERROR = "error"
 
 
 @dataclass
@@ -635,8 +639,6 @@ class SkillRegistry:
         skill = self._lookup(skill_name)
         if skill is None:
             return False
-        from neurova.skill_system_module_standalone import SkillStatus
-
         skill.status = SkillStatus.ACTIVE if enabled else SkillStatus.INACTIVE
         return True
 

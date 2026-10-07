@@ -90,13 +90,12 @@ class TestRegistryAgreesWithTheScript:
 
     def test_recount_reads_the_registry_without_building_it(self):
         """观测面读数口只读已创建的注册表（抓指标不造对象）。"""
-        from neurova import skill_system
+        from neurova.skill_system import core as runtimeModule
+        from neurova.skill_system import registered_collision_count
 
-        standalone = skill_system.__getattr__("registered_collision_count")
-        module = __import__("sys").modules["neurova.skill_system_module_standalone"]
-        original = module._skill_registry_singleton
-        module._skill_registry_singleton = None
+        original = runtimeModule._skill_registry_singleton
+        runtimeModule._skill_registry_singleton = None
         try:
-            assert standalone() == 0
+            assert registered_collision_count() == 0
         finally:
-            module._skill_registry_singleton = original
+            runtimeModule._skill_registry_singleton = original

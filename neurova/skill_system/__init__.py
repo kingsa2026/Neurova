@@ -1,303 +1,38 @@
 """
-Neurova 技能系统
+Neurova 技能系统 —— 单一事实源门面
 
-功能:
-1. 技能注册和管理（SkillRegistry 规范实现）
-2. 内置技能装配（create_default_skills）
+实现载体在 `neurova/skill_system/core.py`（ADR 0011 的规范 SkillRegistry，
+原为顶层 `neurova/skill_system.py`，2026-10-07 搬入包内以消解"同名包遮蔽同名
+文件"这一根病灶：只要两者并存，`import neurova.skill_system` 永不到达该文件，
+所有取用都只能靠 importlib 按路径反射回来，同一批符号就会长出多条取用路径）。
+
+本文件只做静态 re-export，不再有任何 `__getattr__` 延迟代理、反射加载或占位降级类。
+
 （原"技能池管理/推送/隔离"由 skill_pool_manager 孤岛承担，2026-09-15 退役——
-零生产调用方；三层库设计吸收其词汇，。）
+零生产调用方；三层库设计吸收其词汇。）
 """
 
-import importlib.util
-from neurova.core.logger import get_logger
-import sys
-from typing import Any, Optional
-
-logger = get_logger(__name__)
-
-
-def _get_skill_module(module_name: str) -> Optional[Any]:
-    """
-    动态加载 neurova.skill_system 模块
-
-    Args:
-        module_name: 模块名称
-
-    Returns:
-        模块对象或 None
-    """
-    try:
-        # 尝试直接导入
-        if module_name in sys.modules:
-            return sys.modules[module_name]
-
-        # 动态导入
-        module = importlib.import_module(module_name)
-        return module
-
-    except ImportError as e:
-        logger.warning("Failed to import module %s: %s", module_name, e)
-        return None
-    except Exception as e:
-        logger.error("Error loading module %s: %s", module_name, e)
-        return None
-
-
-def __getattr__(name: str) -> Any:
-    """
-    模块级别的 __getattr__，用于延迟加载
-
-    Args:
-        name: 属性名称
-
-    Returns:
-        属性值
-
-    Raises:
-        AttributeError: 属性不存在
-    """
-    # 导入核心类
-    if name == "SkillResult":
-        # 2026-09-08 断链修复：github_push/skill.py 等调用方经
-        # `from neurova.skill_system import SkillResult` 取类，旧路径落到
-        # 遮蔽文件里的独立定义（≠ skills.executor 规范类）→ 双类 split-brain。
-        # 统一代理到规范 SkillResult。
-        from neurova.skills.executor import SkillResult
-
-        return SkillResult
-    # SkillEvent 不在此代理：skills.events 门面反向 from neurova.skill_system
-    # import SkillEvent——在此引 events 会循环导入（partially initialized）。
-    # SkillEvent 走下方 standalone 加载分支，与 events 门面同源同对象。
-    # （原 SkillPoolManager/SkillPoolType/SkillVisibility/SkillMetadata 四代理
-    # 随孤岛退役移除，2026-09-15——零生产调用方，词汇由三层技能库设计吸收。）
-    elif name == "SkillStatus":
-        # SkillStatus 枚举
-        from enum import Enum
-
-        class SkillStatus(str, Enum):
-            """技能状态枚举"""
-
-            ACTIVE = "active"
-            INACTIVE = "inactive"
-            DEPRECATED = "deprecated"
-            BETA = "beta"
-            EXPERIMENTAL = "experimental"
-
-        return SkillStatus
-    elif name == "create_default_skills":
-        # 使用 importlib 从被遮蔽的模块加载，避免递归
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].create_default_skills
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.create_default_skills
-    elif name == "registered_collision_count":
-        # 观测面读数口（工单 006）：与 get_skill_registry 同源同对象，
-        # 但**不创建**注册表——/metrics 抓取时不得为读数造对象。
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].registered_collision_count
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.registered_collision_count
-    elif name == "get_skill_registry":
-        # 候选: 从被遮蔽的 skill_system.py 加载单例工厂。
-        # 生产代码（neurflow/node_registry.py、adapters.py）依赖
-        # `from neurova.skill_system import get_skill_registry`，此前未在代理中
-        # 暴露，导致导入失败；与 create_default_skills/SkillRegistry 复用同一
-        # standalone 模块缓存。
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].get_skill_registry
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.get_skill_registry
-    elif name == "SkillRegistryProtocol":
-        # 候选 1: 从被遮蔽的 skill_system.py 加载 Protocol(架构深化)
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].SkillRegistryProtocol
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.SkillRegistryProtocol
-    elif name == "SkillRegistry":
-        # ADR 0011: 从被遮蔽的 skill_system.py 加载规范 SkillRegistry（class A）。
-        # 复用与 SkillRegistryProtocol / create_default_skills 相同的 standalone
-        # 模块缓存，避免重复 exec。class A 的 register(skill) 单参、skills 返回
-        # Dict[str, Skill]、无 __len__，是唯一规范实现。
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].SkillRegistry
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.SkillRegistry
-    elif name == "SkillEvent":
-        # 事件类型常量与注册回调所需的 SkillEvent，同样从被遮蔽的
-        # skill_system.py 加载，复用同一 standalone 模块缓存。
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].SkillEvent
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.SkillEvent
-    elif name == "ToolSequenceSkill":
-        # 技能执行体解释器：manifest.tool_sequence → 多步可执行技能
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].ToolSequenceSkill
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.ToolSequenceSkill
-    elif name == "Skill":
-        # ADR 0011: 从被遮蔽的 skill_system.py 加载规范 Skill 基类，复用同一
-        # standalone 模块缓存。此前 __getattr__ 缺少 "Skill" 分支，导致本文件底部
-        # `from neurova.skill_system import Skill` 导入失败、回退为无方法的占位类，
-        # 使 SkillRegistry.register() 里 skill.add_event_handler() 抛 AttributeError。
-        import importlib.util as _iu
-        import os as _os
-        import sys as _sys
-        _cache_key = "neurova.skill_system_module_standalone"
-        if _cache_key in _sys.modules:
-            return _sys.modules[_cache_key].Skill
-        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
-        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
-        _mod = _iu.module_from_spec(_spec)
-        _sys.modules[_cache_key] = _mod
-        try:
-            _spec.loader.exec_module(_mod)
-        except Exception:
-            _sys.modules.pop(_cache_key, None)
-            raise
-        return _mod.Skill
-    else:
-        raise AttributeError(f"module 'neurova.skill_system' has no attribute '{name}'")
-
-
-# 导入 create_default_skills（向后兼容）
-try:
-    from neurova.skill_system import create_default_skills
-except ImportError as e:
-    logger.warning("Failed to import create_default_skills: %s", e)
-
-# （原"向后兼容"导入 SkillPoolManager/SkillMetadata/SkillPoolType/SkillVisibility
-# 块随孤岛退役删除，2026-09-15。）
-
-# 导入 Skill 类（从被遮蔽的 skill_system.py 模块导入，避免占位降级）
-try:
-    from neurova.skill_system import Skill
-
-    _ = Skill  # 复用 standalone 模块中的规范 Skill 类
-except ImportError as e:
-    logger.debug("Skill 从 skill_system 导入失败，使用占位: %s", e)
-
-    class Skill:  # type: ignore[no-redef]
-        def __init__(self, name, description=""):
-            self.name = name
-            self.description = description
-
-
-class SkillResult:
-    def __init__(self, success=True, data=None, error=None, execution_time=0.0):
-        self.success = success
-        self.data = data
-        self.error = error
-        self.execution_time = execution_time
-
-
-# 2026-09-08 断链修复：模块顶层直连定义的 SkillResult 与 __getattr__ 代理分支
-# 并存时，顶层定义优先于延迟加载——调用方拿到的是本地类而非
-# neurova.skills.executor 规范类（双类 split-brain，守卫测试实测不同一）。
-# 删除顶层定义、顶层直接 re-export 规范类，保证两条路径同源。
-from neurova.skills.executor import SkillResult as SkillResult  # noqa: E402,F811
-from neurova.skill_system_module_standalone import Skill as Skill  # noqa: E402,F811
-
-
-class SkillInfo:
-    def __init__(self, name, description="", status=None):
-        self.name = name
-        self.description = description
-        self.status = status
-
+from neurova.skill_system.core import (
+    Skill,
+    SkillEvent,
+    SkillRegistry,
+    SkillRegistryProtocol,
+    SkillResult,
+    SkillStatus,
+    ToolSequenceSkill,
+    create_default_skills,
+    get_skill_registry,
+    registered_collision_count,
+)
 
 __all__ = [
-    "SkillStatus",
     "Skill",
-    "SkillResult",
-    "SkillInfo",
-    "SkillRegistry",
     "SkillEvent",
-    "_get_skill_module",
+    "SkillRegistry",
+    "SkillRegistryProtocol",
+    "SkillResult",
+    "SkillStatus",
+    "ToolSequenceSkill",
     "create_default_skills",
     "get_skill_registry",
     "registered_collision_count",

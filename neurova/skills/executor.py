@@ -15,6 +15,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+# 运行层符号单一事实源：注册表与 agent 热路径读的是 core 那份（data 形状）。
+# executor 层的 SkillResult(output=...) 只服务 executor 内部，两者在桥接处显式转换。
+from neurova.skill_system.core import Skill as _RuntimeSkill
+from neurova.skill_system.core import SkillResult as _SkillResult
+
 
 @dataclass
 class SkillResult:
@@ -68,52 +73,19 @@ class BaseSkillExecutor(SkillExecutor):
         return f"{self.__class__.__name__}(skill_id={self.skill_id!r}, skill_name={self.skill_name!r})"
 
 
-@dataclass
-class _SkillInfo:
-    """最小 SkillInfo，兼容 SkillRegistry.list_skills() 的访问方式。"""
-
-    name: str
-    description: str = ""
-    status: str = "active"
-
-
-@dataclass
-class _SkillResult:
-    """最小 SkillResult，暴露 success / data / error / metadata 供调用方使用。"""
-
-    success: bool = True
-    data: Any = None
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    execution_time: float = 0.0
-
-
-class ExecutorBackedSkill:
+class ExecutorBackedSkill(_RuntimeSkill):
     """将同步 BaseSkillExecutor 桥接为可被 SkillRegistry 调用的异步 Skill。
 
-    设计要点（规避项目内的模块遮蔽 bug）：
-    - neurova/skill_system 同时存在「包」与「文件」两份定义，import 解析到
-      包 __init__.py，而该 __init__ 在 from skill_pool_manager import Skill
-      失败后会回退为一个**占位 Skill**（仅有 name/description，缺少 execute），
-      继承该占位类的适配器因此在 register()/execute 上抛 AttributeError。
-    - 因此本适配器**不继承**被遮蔽的占位 Skill，而是自包含实现
-      SkillRegistry 实际依赖的接口：name、get_info、异步 execute。
-      这样无论 Skill 基类如何被遮蔽都能正常注册与执行。
-
+    - 继承运行时 Skill 基类：`SkillRegistry.register_skill()` 的
+      `isinstance(manifest, Skill)` 分支据此才走得到正确入口；
     - execute() 在线程池中运行同步 executor，避免阻塞事件循环；
-    - 将 executor.SkillResult(output=...) 转换为 _SkillResult(data=...)。
+    - 把 executor 层的 SkillResult(output=...) 转成运行层的
+      SkillResult(data=...)——后者才是注册表与 agent 热路径读的那份。
     """
 
     def __init__(self, executor: "BaseSkillExecutor"):
+        super().__init__(executor.skill_id, executor.skill_name)
         self._executor = executor
-        self.name = executor.skill_id
-        self.description = executor.skill_name
-        self.status = "active"
-
-    def get_info(self) -> _SkillInfo:
-        return _SkillInfo(
-            name=self.name, description=self.description, status=self.status
-        )
 
     def _get_parameters(self) -> Dict[str, Any]:
         """获取该技能的工具参数 Schema（OpenAI function calling 格式）。

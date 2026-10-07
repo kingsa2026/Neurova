@@ -48,7 +48,11 @@
 
 ## References
 
-- 实现：`neurova/skill_system.py:337`（规范）、`neurova/skills/registry.py`（re-export）
+- 实现：`neurova/skill_system/core.py`（规范，class A）
+  、`neurova/skills/registry.py`（re-export）
+  —— 2026-10-07 载体位置更新：原顶层 `neurova/skill_system.py` 与同名包并存时被
+  永久遮蔽，只能靠包 `__getattr__` + importlib 反射取用；文件已搬入包内 `core.py`，
+  门面改为纯静态 re-export。**决策未变**（class A 仍是唯一规范实现），仅落点变了。
 - Bug 编号：H10（两个 SkillRegistry API 不兼容）、H2（orchestrator 绕过 _unpack_skill）、H12（空 registry falsy 检查）
 - 相关 ADR：无前序（首次定义）
 - 审计证据：工具层 zoom-out 审计（2026-07-09）
