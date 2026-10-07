@@ -120,13 +120,15 @@ class MemorySkillExecutor(BaseSkillExecutor):
         limit = int(params.get("limit", 10))
 
         if self.memory_manager is None:
-            # 无记忆管理器：降级返回空结果（与 MemorySkill 语义一致）
+            # 缺席的能力不得伪装成"查过了、没有结果"——空集与不可用必须是两个态
+            # （与本仓 `success` 三态口径一致；"真没命中"由下面的检索分支返回空集）。
             return SkillResult(
-                success=True,
-                output=[],
+                success=False,
+                error="记忆检索不可用：本技能未装配记忆管理器（memory_manager is None）",
                 metadata={
                     "action": "search",
                     "query": query,
+                    "degraded": True,
                     "execution_time": time.time() - start_time,
                 },
             )
@@ -226,12 +228,14 @@ class MemorySkillExecutor(BaseSkillExecutor):
                 )
 
         if self.memory_manager is None:
-            # 无记忆管理器：降级返回成功标记（语义与 MemorySkill 一致）
+            # 能力缺席 ⇒ 显式失败。原回 `{"stored": True, "degraded": True}` 是假成功：
+            # 调用方读 success 与 output["stored"]，`degraded` 只是附注，而一条都没写。
             return SkillResult(
-                success=True,
-                output={"stored": True, "degraded": True},
+                success=False,
+                error="记忆未存储：本技能未装配记忆管理器（memory_manager is None）",
                 metadata={
                     "action": "store",
+                    "degraded": True,
                     "execution_time": time.time() - start_time,
                 },
             )
