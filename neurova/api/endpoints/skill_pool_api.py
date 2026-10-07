@@ -765,7 +765,9 @@ async def approve_consolidation(
     plan = _pending_consolidation_plan(agent_id, umbrella)
     service = _pool_service(agent_id)
     store = ConsolidationPlanStore(service.skills_dir)
-    result = ConsolidationApproval(service, store).approve(umbrella, plan.get("absorbed") or [])
+    result = ConsolidationApproval(service, store).approve(
+        umbrella, plan.get("absorbed") or [],
+        decided_by=str(current_user.get("username") or "human"))
     return {"code": 0, "data": result}
 
 
@@ -786,7 +788,9 @@ async def reject_consolidation(
     plan = _pending_consolidation_plan(agent_id, umbrella)
     service = _pool_service(agent_id)
     store = ConsolidationPlanStore(service.skills_dir)
-    result = ConsolidationApproval(service, store).reject(umbrella, plan.get("absorbed") or [])
+    result = ConsolidationApproval(service, store).reject(
+        umbrella, plan.get("absorbed") or [],
+        decided_by=str(current_user.get("username") or "human"))
     return {"code": 0, "data": result}
 
 
