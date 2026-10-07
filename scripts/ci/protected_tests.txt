@@ -219,6 +219,9 @@ tests/unit/agent/test_pending_hints_session_fence.py
 # 租约过期收敛的运行期驱动（2026-10-08 长任务闭环审计 D 批）：heartbeat/lease 写了必须
 #   有人读——lifespan 起停成对、间隔由租约派生、只咬过期 running，新鲜租约与 parked 不得误杀
 tests/unit/core/test_agentRunStaleReconcileWiring.py
+# Studio 长任务台账收口（2026-10-08 长任务闭环审计 E 批）：一次请求=一行=一个生命周期拥有者，
+#   重启遗留 running 必须有对偶收敛，wrapper 不得覆盖服务已写的终态与回退成因
+tests/unit/api/test_studioRunLedgerSingleSource.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
