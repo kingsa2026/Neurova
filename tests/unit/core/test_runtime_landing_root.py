@@ -156,7 +156,7 @@ def _isCwdRelativeLiteral(value) -> bool:
     return bool(_REL_LITERAL.match(value))
 
 
-def _cwdLiteralsIn(node) -> list:
+def _cwdLiteralsIn(node, pathTyped: bool = False) -> list:
     """落点参数里的 CWD 相对字面量。
 
     `Path('x')` 是直白形状；`Path(cfg or 'x')` 与 `Path('a' if y else 'b')`
@@ -173,17 +173,21 @@ def _cwdLiteralsIn(node) -> list:
             if isinstance(branch, ast.Constant) and _isCwdRelativeLiteral(branch.value):
                 found.append(branch)
     # `Path(cfg.get("<KEY>", "<相对名>"))`：没配就用相对名，同样是落点。
-    # 只认键名带落点语义的，不误伤 `cfg.get("host", "127.0.0.1")` 那类普通配置。
+    # 键名带落点语义时一律认；**当外层调用本身就是 Path/open/mkdir 这类路径语境时，
+    # 兜底字面量足以下判断**——否则 `Path(os.environ.get(_ENV_OVERRIDE_KEY, "config/x.json"))`
+    # 这种"键名放在常量里、env 名不含 PATH 字样"的写法会静默漏过（实测漏过一处，
+    # 仓库根 `config/evolution_settings.json` 就是这么被写出来的）。
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and node.func.attr == "get" and len(node.args) >= 2:
         key, fallback = node.args[0], node.args[1]
         receiver = ast.unparse(node.func.value)
-        if (isinstance(key, ast.Constant) and isinstance(key.value, str)
-                and any(mark in key.value.upper()
-                        for mark in ("PATH", "DIR", "FILE", "UPLOAD", "LOG", "STORE"))
-                and any(mark in receiver for mark in ("config", "environ"))
-                and isinstance(fallback, ast.Constant)
-                and _isCwdRelativeLiteral(fallback.value)):
+        pathishKey = (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                      and any(mark in key.value.upper()
+                              for mark in ("PATH", "DIR", "FILE", "UPLOAD", "LOG", "STORE")))
+        fromEnvOrConfig = any(mark in receiver for mark in ("config", "environ"))
+        literalFallback = (isinstance(fallback, ast.Constant)
+                           and _isCwdRelativeLiteral(fallback.value))
+        if literalFallback and ((pathishKey and fromEnvOrConfig) or (pathTyped and fromEnvOrConfig)):
             found.append(fallback)
     return found
 
@@ -297,7 +301,9 @@ def _cwdLandingsIn(path: Path) -> list:
             for index in _landingArgs(node):
                 if index >= len(node.args):
                     continue
-                for literal in _cwdLiteralsIn(node.args[index]):
+                for literal in _cwdLiteralsIn(
+                        node.args[index],
+                        pathTyped=kind in ("Path", "PurePath", "open", "mkdir", "makedirs")):
                     if id(literal) not in docstrings:
                         hits.append((literal.lineno, "%s(%r)" % (kind, literal.value)))
 
@@ -372,17 +378,26 @@ class TestNoCwdRelativeRuntimeLanding:
             "O = Path('SystemRoot')\n"
             "P = Path(config.get('NEUROVA_CONSOLE_UPLOADS', 'uploads/console'))\n"
             "Q = Path(config.get('NEUROVA_LOG_FILE', 'logs/neurova.log'))\n"
-            "R = config.get('host', '127.0.0.1')\n",
+            "R = config.get('host', '127.0.0.1')\n"
+            # 真实漏过的形状：env 名不含路径语义、键 yet 存在常量里（间接引用），
+            # 光靠键名启发式抓不到——必须由"落点调用里的兜底字面量"这一条接住。
+            "S = Path(os.environ.get(_ENV_OVERRIDE_KEY, 'config/evolution_settings.json'))\n"
+            # 反向：非落点调用里的 env 兜底不得被误伤
+            "T = os.environ.get(_MODE_KEY, 'debug')\n",
             encoding="utf-8",
         )
         reasons = [r for _, r in _cwdLandingsIn(probe)]
-        assert len(reasons) == 8, "扫描器漏认或误伤：%s" % reasons
+        assert len(reasons) == 9, "扫描器漏认或误伤：%s" % reasons
         assert not any("get_data_root" in r or "parents[" in r for r in reasons), \
             "已锚定的落点被误判"
         assert not any("%Y" in r or "SystemRoot" in r for r in reasons), \
             "时钟格式与环境根被误判成落点"
         assert not any("127.0.0.1" in r for r in reasons), \
             "普通配置兜底（host/port 等）被误判成落点"
+        assert any("evolution_settings.json" in r for r in reasons), \
+            "env 名不带路径语义、键藏在常量里的形状没被抓到（判据盲点）"
+        assert not any("'debug'" in r for r in reasons), \
+            "非落点调用的 env 兜底被误判成落点——扩展判据时必须守住这条"
 
 
 class TestConstructorsDoNotTouchCwd:
@@ -479,6 +494,54 @@ class TestConstructorsDoNotTouchCwd:
 
         security._load_or_create_encryption_key()
         assert self._leaked(elsewhere) == [], "记忆加密密钥仍落在 CWD"
+
+    def test_rsiSummaryStreamLandsUnderDataRoot(self, elsewhere):
+        """RSI 观测审计流：env 未设/设空/设相对名，都不得跟着 CWD 走。
+
+        原写法 `Path(os.environ.get(K, get_data_root()/...))` 在 K 被设成空串时
+        返回 `""`，`Path("")` 就是进程 CWD——`attach_persistence` 会静默退化内存模式。
+        """
+        import os
+
+        from neurova.core.data_root import get_data_root
+        from neurova.evolution.rsi import result_summary as rs
+
+        envKey = rs.ENV_SUMMARIES_PATH
+        for value in (None, "", "custom_rsi.jsonl"):
+            if value is None:
+                os.environ.pop(envKey, None)
+                expected = get_data_root() / "evolution" / "rsi_summaries.jsonl"
+            elif value == "":
+                os.environ[envKey] = ""
+                expected = get_data_root() / "evolution" / "rsi_summaries.jsonl"
+            else:
+                os.environ[envKey] = value
+                expected = get_data_root() / value
+            assert rs.default_rsi_summaries_path() == expected, \
+                "env=%r 时审计流落点漂到 CWD" % value
+        os.environ.pop(envKey, None)
+        assert self._leaked(elsewhere) == [], "RSI 审计流在 CWD 落了东西"
+
+    def test_evolutionSettingsLandUnderRepoRootConfig(self, elsewhere):
+        """管理侧配置默认锚仓库根 `config/`——与同目录 `cors.json` 同一落点口径。
+
+        原默认值是把 `"config/evolution_settings.json"` 直接喂 `Path`，按进程 CWD 解析；
+        仓库根那个未跟踪的 `config/evolution_settings.json` 就是这么被写出来的。
+        """
+        import os
+
+        from neurova.core.data_root import repoRoot
+        from neurova.evolution.evolution_settings import ENV_OVERRIDE_KEY, _settings_path
+
+        assert _settings_path() == repoRoot() / "config" / "evolution_settings.json"
+        os.environ[ENV_OVERRIDE_KEY] = "elsewhere_settings.json"
+        try:
+            # 显式相对值按 callerPath 语义原样承载（与 governance_settings 同口径），
+            # 但默认值不再受 CWD 影响
+            assert _settings_path() == Path("elsewhere_settings.json")
+        finally:
+            os.environ.pop(ENV_OVERRIDE_KEY, None)
+        assert self._leaked(elsewhere) == [], "进化配置在 CWD 落了东西"
 
 
 class TestLegacyLandingIsAdopted:

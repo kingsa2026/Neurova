@@ -16,17 +16,28 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
+from neurova.core.data_root import callerPath, repoRoot
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-_ENV_OVERRIDE_KEY = "NEUROVA_EVOLUTION_SETTINGS"
+ENV_OVERRIDE_KEY = "NEUROVA_EVOLUTION_SETTINGS"
 _lock = threading.RLock()
 
 
 def _settings_path() -> Path:
-    """动态解析(测试可 monkeypatch env;import 时冻结会让隔离测试互踩)。"""
-    return Path(os.environ.get(_ENV_OVERRIDE_KEY, "config/evolution_settings.json"))
+    """动态解析(测试可 monkeypatch env;import 时冻结会让隔离测试互踩)。
+
+    默认锚**仓库根 config/**——与同目录的 `cors.json` 同一落点口径（那边按 `__file__`
+    上溯，本处用 `repoRoot()`，都是"随代码走的资产"）。原先直接把
+    `"config/evolution_settings.json"` 喂给 `Path`，是按**进程 CWD** 解析的：换个目录启动
+    就把管理配置写到别处，实测仓库根确实被这样写出过一个 `config/evolution_settings.json`。
+    env 显式给值时原样承载（`callerPath` 的既定语义，测试隔离靠这条）。
+    """
+    custom = os.environ.get(ENV_OVERRIDE_KEY)
+    if custom:
+        return callerPath(custom)
+    return repoRoot() / "config" / "evolution_settings.json"
 
 
 @dataclass
