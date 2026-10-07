@@ -2,6 +2,7 @@
 """审计修复⑩：pending confirm 端点动作必须经 remember_fn 在 store.confirm
 锁内执行（失败保持 pending 的设计契约），而非端点先执行后标记。"""
 
+from tests.auth_headers import bearerHeaders
 import os
 import tempfile
 
@@ -66,7 +67,7 @@ def env(monkeypatch):
         "user_id": "u1",
         "role": "admin",
     }
-    client = TestClient(app)
+    client = TestClient(app, headers=bearerHeaders("u1"))
     return store, manager, ctx, client
 
 

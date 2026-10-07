@@ -23,7 +23,12 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
+from tests.auth_headers import bearerHeaders
 from tests.route_table import mountedLeafRoutes
+
+# C1（P3-12，2026-10-08）后写类请求必须有凭证；本文件测的是路由匹配与错误语义，
+# 身份不是被测面，但 DELETE 不带凭证会在路由级写门就 401，压根进不到被测的 handler。
+WRITE_HDR = bearerHeaders("shadowing-probe")
 
 
 # ============================================================
@@ -223,7 +228,7 @@ def test_get_self_model_returns_200(env):
 
 def test_delete_wm_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == 0
     assert agent.memory_manager.cleared is True
@@ -258,7 +263,7 @@ def test_get_memory_detail_returns_200(env):
 
 def test_delete_memory_detail_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 200, resp.text
     assert "mem-2" not in agent.memory_manager._store
 
@@ -279,6 +284,6 @@ def test_get_unknown_memory_returns_structured_404(env):
 
 def test_delete_unknown_memory_returns_structured_404(env):
     client, _ = env
-    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == ErrorCodes.NOT_FOUND
