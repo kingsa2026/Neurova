@@ -42,11 +42,16 @@ def _aspect_token(aspect: str) -> str:
 
 async def split_script(store, pid: str, novel_text: str,
                        llm: Optional[Callable[[str, str], Awaitable[str]]] = None,
-                       model: Optional[str] = None) -> List[Dict[str, Any]]:
-    """小说/故事 → 分集剧本（LLM；坏输出回退原文单集，不中断）。"""
+                       model: Optional[str] = None,
+                       run_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """小说/故事 → 分集剧本（LLM；坏输出回退原文单集，不中断）。
+
+    `run_id`：经 `/studio` 端点发起时由 `_spawn_run` 传入本次请求那行台账——终态写回
+    那一行，不再另起一行（一次请求两行同 kind，读侧无从判断哪条代表这次请求）。
+    单独复用本服务（脚本/测试/将来别的入口）时不传，仍自建一行。
+    """
     llm = llm or call_llm
-    run = store.add_run({"project_id": pid, "kind": "script",
-                         "detail_json": json.dumps({"chars": len(novel_text or "")})})
+    rid = run_id or store.add_run({"project_id": pid, "kind": "script"})["id"]
     prompt = (
         "请把下面的小说拆解为分集拍摄脚本（按剧情自然分集）。\n\n"
         f"原文：\n{novel_text[:12000]}"
@@ -75,9 +80,10 @@ async def split_script(store, pid: str, novel_text: str,
             "synopsis": "", "status": "draft",
         }))
         fallback_reason = fallback_reason or "LLM 输出不可解析"
-    store.update_run(run["id"], {
+    store.update_run(rid, {
         "status": "done",
-        "detail_json": json.dumps({"episodes": len(eps), "fallback": fallback_reason},
+        "detail_json": json.dumps({"episodes": len(eps), "fallback": fallback_reason,
+                                    "chars": len(novel_text or "")},
                                   ensure_ascii=False),
     })
     return eps
@@ -88,11 +94,15 @@ async def split_script(store, pid: str, novel_text: str,
 
 async def extract_assets(store, pid: str, eid: str,
                          llm: Optional[Callable[[str, str], Awaitable[str]]] = None,
+                         run_id: Optional[str] = None,
                          ) -> Dict[str, Any]:
-    """剧本 → 角色/场景/道具抽取；同名人跳过。"""
+    """剧本 → 角色/场景/道具抽取；同名人跳过。
+
+    `run_id` 语义同 `split_script`：端点发起时写回请求那一行，单独复用时自建。
+    """
     llm = llm or call_llm
     ep = store.get_episode(eid) or {}
-    run = store.add_run({"project_id": pid, "kind": "extract"})
+    rid = run_id or store.add_run({"project_id": pid, "kind": "extract"})["id"]
     prompt = f"剧本（第{ep.get('number', 1)}集《{ep.get('title', '')}》）：\n{str(ep.get('content') or '')[:8000]}"
     added = {"characters_added": 0, "scenes_added": 0, "props_added": 0,
              "characters_skipped": 0, "scenes_skipped": 0, "props_skipped": 0}
@@ -148,7 +158,7 @@ async def extract_assets(store, pid: str, eid: str,
                              "description": str(item.get("description") or "")})
         added["props_added"] += 1
 
-    store.update_run(run["id"], {
+    store.update_run(rid, {
         "status": "done" if not err else "done_with_fallback",
         "detail_json": json.dumps({**added, "error": err}, ensure_ascii=False),
     })
@@ -160,13 +170,17 @@ async def extract_assets(store, pid: str, eid: str,
 
 async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                             llm: Optional[Callable[[str, str], Awaitable[str]]] = None,
+                            run_id: Optional[str] = None,
                             ) -> List[Dict[str, Any]]:
-    """分集剧本 → 分镜镜头（含角色/道具名→资产 id 映射，供 @mention 参考注入）。"""
+    """分集剧本 → 分镜镜头（含角色/道具名→资产 id 映射，供 @mention 参考注入）。
+
+    `run_id` 语义同 `split_script`。
+    """
     llm = llm or call_llm
     if store.list_storyboards(eid) and not force:
         return store.list_storyboards(eid)
     ep = store.get_episode(eid) or {}
-    run = store.add_run({"project_id": pid, "kind": "storyboard"})
+    rid = run_id or store.add_run({"project_id": pid, "kind": "storyboard"})["id"]
     chars = {c["name"]: c for c in store.list_characters(pid)}
     props = {p["name"]: p for p in store.list_props(pid)}
     prompt = (
@@ -204,7 +218,7 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                 "characters": char_ids, "props": prop_ids,
                 "status": "pending",
             }))
-    store.update_run(run["id"], {
+    store.update_run(rid, {
         "status": "done", "detail_json": json.dumps({"shots": len(shots)})})
     return shots
 
