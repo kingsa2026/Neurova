@@ -209,6 +209,10 @@ tests/unit/agent/test_tool_loop_funnel_probes.py
 # 工具轮协议配对（2026-09-26 kai/sensetime 400 根因）：续写请求必须带 assistant(tool_calls)，
 #   孤儿 tool 结果被严格网关判 400001；三条命中点（流式/非流式/Anthropic）同源单点构造
 tests/unit/agent/test_tool_round_protocol_pairing.py
+# 工具轮回放闭环（2026-10-08 长任务闭环审计 B 批）：终止判定只裁定要不要开下一轮，
+#   不得否决这一轮的下文——上限/门控 TERMINATE/停滞三条出口都要已回放，并行批一个执行体
+#   抛异常不得掀掉同批其余结果
+tests/unit/agent/test_tool_round_history_on_early_exit.py
 tests/unit/evolution/experience/test_success_three_state.py
 tests/unit/evolution/experience/test_ticket_context_observability.py
 tests/unit/evolution/experience/test_muscle_memory_param_shape.py
