@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from neurova.core.data_root import require_data_path
 from neurova.core.logger import get_logger
