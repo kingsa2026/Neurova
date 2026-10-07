@@ -20,6 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -382,12 +383,10 @@ class StateManager:
 _global_state_manager: typing.Optional[StateManager] = None
 
 
+@lazySingleton("_global_state_manager")
 def get_state_manager() -> StateManager:
     """获取全局状态管理器"""
-    global _global_state_manager
-    if _global_state_manager is None:
-        _global_state_manager = StateManager()
-    return _global_state_manager
+    return StateManager()
 
 
 def reset_state_manager() -> None:

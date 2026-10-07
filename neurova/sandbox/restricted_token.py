@@ -26,6 +26,7 @@ import time
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -250,8 +251,6 @@ class RestrictedTokenSandbox:
 _restricted_instance: Optional[RestrictedTokenSandbox] = None
 
 
+@lazySingleton("_restricted_instance")
 def get_restricted_token_sandbox() -> RestrictedTokenSandbox:
-    global _restricted_instance
-    if _restricted_instance is None:
-        _restricted_instance = RestrictedTokenSandbox()
-    return _restricted_instance
+    return RestrictedTokenSandbox()

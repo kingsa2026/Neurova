@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
 import yaml
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -792,6 +793,7 @@ class PluginManager:
 _global_plugin_manager: Optional[PluginManager] = None
 
 
+@lazySingleton("_global_plugin_manager")
 def get_plugin_manager(plugin_dir: Optional[str] = None) -> PluginManager:
     """
     获取全局插件管理器
@@ -802,10 +804,7 @@ def get_plugin_manager(plugin_dir: Optional[str] = None) -> PluginManager:
     Returns:
         PluginManager: 全局插件管理器实例
     """
-    global _global_plugin_manager
-    if _global_plugin_manager is None:
-        _global_plugin_manager = PluginManager(plugin_dir)
-    return _global_plugin_manager
+    return PluginManager(plugin_dir)
 
 
 def reset_plugin_manager():

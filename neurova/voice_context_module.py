@@ -15,6 +15,7 @@ VoiceContextModule — 语音上下文集成深度模块
 from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -283,12 +284,10 @@ class VoiceContextModule:
 _voice_context_module_instance: Optional[VoiceContextModule] = None
 
 
+@lazySingleton("_voice_context_module_instance")
 def get_voice_context_module() -> VoiceContextModule:
     """获取 VoiceContextModule 单例"""
-    global _voice_context_module_instance
-    if _voice_context_module_instance is None:
-        _voice_context_module_instance = VoiceContextModule()
-    return _voice_context_module_instance
+    return VoiceContextModule()
 
 
 def reset_voice_context_module():

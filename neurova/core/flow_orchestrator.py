@@ -13,6 +13,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -843,12 +844,10 @@ class FlowOrchestrator:
 _global_flow_orchestrator: Optional[FlowOrchestrator] = None
 
 
+@lazySingleton("_global_flow_orchestrator")
 def get_flow_orchestrator() -> FlowOrchestrator:
     """获取全局 FlowOrchestrator 单例"""
-    global _global_flow_orchestrator
-    if _global_flow_orchestrator is None:
-        _global_flow_orchestrator = FlowOrchestrator()
-    return _global_flow_orchestrator
+    return FlowOrchestrator()
 
 
 def process_conversation_flow(

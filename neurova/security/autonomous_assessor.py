@@ -13,6 +13,7 @@ import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -540,6 +541,7 @@ class AutonomousSkillSecurityAssessor:
 _assessor: Optional[AutonomousSkillSecurityAssessor] = None
 
 
+@lazySingleton("_assessor")
 def get_autonomous_assessor() -> AutonomousSkillSecurityAssessor:
     """
     获取自主技能安全评估器实例（单例模式）
@@ -547,10 +549,7 @@ def get_autonomous_assessor() -> AutonomousSkillSecurityAssessor:
     Returns:
         AutonomousSkillSecurityAssessor实例
     """
-    global _assessor
-    if _assessor is None:
-        _assessor = AutonomousSkillSecurityAssessor()
-    return _assessor
+    return AutonomousSkillSecurityAssessor()
 
 
 def reset_autonomous_assessor():

@@ -16,6 +16,7 @@ from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -367,6 +368,7 @@ class PluginLifecycleManager:
 _global_lifecycle_manager: Optional[PluginLifecycleManager] = None
 
 
+@lazySingleton("_global_lifecycle_manager")
 def get_lifecycle_manager() -> PluginLifecycleManager:
     """
     获取全局生命周期管理器
@@ -374,10 +376,7 @@ def get_lifecycle_manager() -> PluginLifecycleManager:
     Returns:
         PluginLifecycleManager: 全局生命周期管理器实例
     """
-    global _global_lifecycle_manager
-    if _global_lifecycle_manager is None:
-        _global_lifecycle_manager = PluginLifecycleManager()
-    return _global_lifecycle_manager
+    return PluginLifecycleManager()
 
 
 def reset_lifecycle_manager():

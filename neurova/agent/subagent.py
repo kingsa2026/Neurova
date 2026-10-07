@@ -21,6 +21,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +149,9 @@ class SubAgentManager:
 _subagent_manager_instance: Optional[SubAgentManager] = None
 
 
+@lazySingleton("_subagent_manager_instance")
 def get_subagent_manager() -> SubAgentManager:
-    global _subagent_manager_instance
-    if _subagent_manager_instance is None:
-        _subagent_manager_instance = SubAgentManager()
-    return _subagent_manager_instance
+    return SubAgentManager()
 
 
 def reset_subagent_manager() -> None:

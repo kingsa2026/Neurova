@@ -17,6 +17,7 @@ ChatPipeline — 对话流程管线
 """
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
@@ -142,18 +143,21 @@ def _active_memory_enabled() -> bool:
 _PAST_SEEKING_PATTERN = None
 
 
-def _is_past_seeking(text: str) -> bool:
-    """确定性回溯型提问判据（无 LLM 成本）：时间回溯词 + 疑问/回忆意图。"""
+@lazySingleton("_PAST_SEEKING_PATTERN")
+def _compilePastSeekingPattern():
+    """回溯型提问的正则（首次用到才编译，避开导入期成本）。"""
     import re as _re
 
-    global _PAST_SEEKING_PATTERN
-    if _PAST_SEEKING_PATTERN is None:
-        _PAST_SEEKING_PATTERN = _re.compile(
-            "昨天|上次|之前|以前|上周|上个月|去年|历史|记得|聊过|说过|提到|"
-            + "last time|previously|remember|yesterday|earlier|past",
-            _re.IGNORECASE,
-        )
-    return bool(_PAST_SEEKING_PATTERN.search(text or ""))
+    return _re.compile(
+        "昨天|上次|之前|以前|上周|上个月|去年|历史|记得|聊过|说过|提到|"
+        + "last time|previously|remember|yesterday|earlier|past",
+        _re.IGNORECASE,
+    )
+
+
+def _is_past_seeking(text: str) -> bool:
+    """确定性回溯型提问判据（无 LLM 成本）：时间回溯词 + 疑问/回忆意图。"""
+    return bool(_compilePastSeekingPattern().search(text or ""))
 
 
 @dataclass

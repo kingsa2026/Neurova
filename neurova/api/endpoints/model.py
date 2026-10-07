@@ -19,6 +19,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Reques
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_optional_user, get_current_user
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,22 +33,18 @@ _downloader = None  # 惰性初始化（测试注入点）
 _service = None
 
 
+@lazySingleton("_downloader")
 def _get_downloader():
-    global _downloader
-    if _downloader is None:
-        from neurova.tts.model_downloader import get_model_downloader
+    from neurova.tts.model_downloader import get_model_downloader
 
-        _downloader = get_model_downloader()
-    return _downloader
+    return get_model_downloader()
 
 
+@lazySingleton("_service")
 def _get_service():
-    global _service
-    if _service is None:
-        from neurova.tts.download_service import ModelDownloadService
+    from neurova.tts.download_service import ModelDownloadService
 
-        _service = ModelDownloadService(downloader=_get_downloader())
-    return _service
+    return ModelDownloadService(downloader=_get_downloader())
 
 # canonical 能力词表(与 capability_detector.CAPABILITY_ORDER 核心六类对齐)
 _VALID_CAPABILITIES = frozenset(

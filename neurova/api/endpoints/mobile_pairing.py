@@ -17,6 +17,8 @@ import asyncio
 import hashlib
 import hmac
 import json
+import threading
+
 from neurova.core import config
 from neurova.core.logger import get_logger
 import secrets
@@ -297,6 +299,8 @@ class MobileConnectionManager:
     """移动设备 WebSocket 连接管理器"""
 
     _instance: Optional["MobileConnectionManager"] = None
+    # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    _instanceLock = threading.RLock()
 
     def __init__(self):
         if MobileConnectionManager._instance is not None:
@@ -307,7 +311,9 @@ class MobileConnectionManager:
     @classmethod
     def get_instance(cls) -> "MobileConnectionManager":
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instanceLock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     async def connect(self, websocket: WebSocket, user_id: str, connection_id: str) -> bool:

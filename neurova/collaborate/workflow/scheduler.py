@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .models import FlowContext, ScheduledTask
 from neurova.core.data_root import dataPath
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -343,13 +344,12 @@ def _on_scheduler_task_event(event_data: Dict[str, Any]) -> None:
         logger.warning("调度事件通知镜像失败 (%s): %s", et, e)
 
 
+@lazySingleton("_global_scheduler")
 def get_scheduler() -> AgentScheduler:
     """获取全局调度器（创建时注册通知桥；单例创建路径天然幂等，不叠加 handler）"""
-    global _global_scheduler
-    if _global_scheduler is None:
-        _global_scheduler = AgentScheduler()
-        _global_scheduler.add_event_handler(_on_scheduler_task_event)
-    return _global_scheduler
+    scheduler = AgentScheduler()
+    scheduler.add_event_handler(_on_scheduler_task_event)
+    return scheduler
 
 
 def register_action_handlers(scheduler: "AgentScheduler", agent_resolver=None) -> None:

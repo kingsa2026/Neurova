@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -868,6 +869,7 @@ def registered_collision_count() -> int:
     return int(getattr(_skill_registry_singleton, "_name_collision_count", 0) or 0)
 
 
+@lazySingleton("_skill_registry_singleton")
 def get_skill_registry(memory_manager=None) -> "SkillRegistry":
     """获取全局 SkillRegistry 单例。
 
@@ -875,7 +877,4 @@ def get_skill_registry(memory_manager=None) -> "SkillRegistry":
     `from neurova.skill_system import get_skill_registry` 获取默认注册表。
     首次调用时惰性创建；后续调用（无论是否传 memory_manager）返回同一实例。
     """
-    global _skill_registry_singleton
-    if _skill_registry_singleton is None:
-        _skill_registry_singleton = create_default_skills(memory_manager)
-    return _skill_registry_singleton
+    return create_default_skills(memory_manager)

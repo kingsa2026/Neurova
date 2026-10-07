@@ -30,6 +30,7 @@ from neurova.llm.generators import protocols as protocols
 from neurova.llm.generators.base import GenerationConfig, GenerationResult, GeneratorType
 from neurova.llm.generators.protocols import ProtocolCredentials
 from neurova.core.data_root import get_data_root
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -465,20 +466,16 @@ _get_image_adapter: Optional[LegacyBytesAdapter] = None
 _get_video_adapter: Optional[LegacyBytesAdapter] = None
 
 
+@lazySingleton("_get_image_adapter")
 def get_image_generator() -> LegacyBytesAdapter:
     """旧工厂兼容：文生图 bytes 适配器。"""
-    global _get_image_adapter
-    if _get_image_adapter is None:
-        _get_image_adapter = LegacyBytesAdapter(GeneratorType.TEXT_TO_IMAGE)
-    return _get_image_adapter
+    return LegacyBytesAdapter(GeneratorType.TEXT_TO_IMAGE)
 
 
+@lazySingleton("_get_video_adapter")
 def get_video_generator() -> LegacyBytesAdapter:
     """旧工厂兼容：文生视频 bytes 适配器。"""
-    global _get_video_adapter
-    if _get_video_adapter is None:
-        _get_video_adapter = LegacyBytesAdapter(GeneratorType.TEXT_TO_VIDEO)
-    return _get_video_adapter
+    return LegacyBytesAdapter(GeneratorType.TEXT_TO_VIDEO)
 
 
 def reset_legacy_adapters() -> None:

@@ -24,6 +24,7 @@ from .models import (
 from .node_registry import get_node_registry
 from .safe_eval import safe_eval_condition
 from .variable_resolver import ResolutionContext, get_variable_resolver
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -1449,12 +1450,10 @@ class WorkflowExecutor:
 _workflow_executor: Optional[WorkflowExecutor] = None
 
 
+@lazySingleton("_workflow_executor")
 def get_workflow_executor() -> WorkflowExecutor:
     """获取工作流执行器单例"""
-    global _workflow_executor
-    if _workflow_executor is None:
-        _workflow_executor = WorkflowExecutor()
-    return _workflow_executor
+    return WorkflowExecutor()
 
 
 __all__ = ["ExecutionStatus", "ExecutionEventType", "ExecutionEvent", "WorkflowExecutor", "get_workflow_executor"]

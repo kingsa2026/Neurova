@@ -27,6 +27,7 @@ from enum import Enum
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -716,6 +717,7 @@ class AuditLogger:
 _audit_logger: Optional[AuditLogger] = None
 
 
+@lazySingleton("_audit_logger")
 def get_audit_logger(db_path: Optional[str] = None) -> AuditLogger:
     """
     获取审计日志管理器单例
@@ -726,10 +728,7 @@ def get_audit_logger(db_path: Optional[str] = None) -> AuditLogger:
     Returns:
         AuditLogger: 审计日志管理器实例
     """
-    global _audit_logger
-    if _audit_logger is None:
-        _audit_logger = AuditLogger(db_path)
-    return _audit_logger
+    return AuditLogger(db_path)
 
 
 def log_audit(

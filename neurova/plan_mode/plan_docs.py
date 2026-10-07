@@ -24,6 +24,7 @@ _NAME_RE = re.compile(r"^\d{8}-\d{6}-[^/\\]+\.md$")
 _WIN_RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 from neurova.plan_mode.errors import PlanDocError, PlanDocNotFound  # noqa: E402
+from neurova.core.lazy_singleton import lazySingleton
 
 
 def _workspace_base() -> Path:
@@ -125,12 +126,10 @@ class PlanDocStore:
 _doc_store_singleton: Optional[PlanDocStore] = None
 
 
+@lazySingleton("_doc_store_singleton")
 def get_plan_doc_store() -> PlanDocStore:
     """进程级单例（惰性创建）。"""
-    global _doc_store_singleton
-    if _doc_store_singleton is None:
-        _doc_store_singleton = PlanDocStore()
-    return _doc_store_singleton
+    return PlanDocStore()
 
 
 def reset_plan_doc_store() -> None:

@@ -20,6 +20,7 @@ Benefits:
 import threading
 from collections import defaultdict, deque
 from typing import Any, Callable, Dict, List, Optional, Set
+from neurova.core.lazy_singleton import lazySingleton
 
 
 class InitializationManager:
@@ -383,6 +384,7 @@ def create_initialization_manager(lazy: bool = False) -> InitializationManager:
 _default_manager: Optional[InitializationManager] = None
 
 
+@lazySingleton("_default_manager")
 def get_initialization_manager(lazy: bool = False) -> InitializationManager:
     """Get or create the default InitializationManager.
 
@@ -392,10 +394,7 @@ def get_initialization_manager(lazy: bool = False) -> InitializationManager:
     Returns:
         InitializationManager instance
     """
-    global _default_manager
-    if _default_manager is None:
-        _default_manager = InitializationManager(lazy=lazy)
-    return _default_manager
+    return InitializationManager(lazy=lazy)
 
 
 def reset_initialization_manager() -> None:

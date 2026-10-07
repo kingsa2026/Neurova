@@ -22,6 +22,7 @@ from collections import OrderedDict, deque
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -148,11 +149,9 @@ class ExecutionEventRecorder:
 _recorder: Optional[ExecutionEventRecorder] = None
 
 
+@lazySingleton("_recorder")
 def get_execution_event_recorder() -> ExecutionEventRecorder:
-    global _recorder
-    if _recorder is None:
-        _recorder = ExecutionEventRecorder()
-    return _recorder
+    return ExecutionEventRecorder()
 
 
 def reset_execution_event_recorder() -> None:

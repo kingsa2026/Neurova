@@ -11,6 +11,7 @@ from __future__ import annotations
 """
 
 import asyncio
+import threading
 from neurova.core.logger import get_logger
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
@@ -20,6 +21,7 @@ from neurova.channels.base import (
     ChannelMessage,
 )
 from neurova.core.data_root import callerPath
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -27,17 +29,16 @@ logger = get_logger(__name__)
 _session_sync_manager = None
 
 
+@lazySingleton("_session_sync_manager")
 def _get_session_sync_manager():
-    """获取 SessionSyncManager 单例（延迟导入）"""
-    global _session_sync_manager
-    if _session_sync_manager is None:
-        try:
-            from neurova.sync.session_sync_manager import get_session_sync_manager
+    """获取 SessionSyncManager 单例（延迟导入；拿不到时返回 None，下次照旧重试）"""
+    try:
+        from neurova.sync.session_sync_manager import get_session_sync_manager
 
-            _session_sync_manager = get_session_sync_manager()
-        except Exception as e:
-            logger.debug("SessionSyncManager not available: %s", e)
-    return _session_sync_manager
+        return get_session_sync_manager()
+    except Exception as e:
+        logger.debug("SessionSyncManager not available: %s", e)
+        return None
 
 
 # ============================================================
@@ -65,6 +66,9 @@ class ChannelManager:
     """
 
     _instance: Optional["ChannelManager"] = None
+    _instanceLock = threading.RLock()
+    # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    _instanceLock = threading.RLock()
 
     def __init__(self):
         if ChannelManager._instance is not None:
@@ -81,7 +85,9 @@ class ChannelManager:
     @classmethod
     def get_instance(cls) -> "ChannelManager":
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instanceLock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     # ============================================================

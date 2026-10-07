@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -23,15 +24,14 @@ logger = get_logger(__name__)
 _scanner: Optional[Any] = None
 
 
+@lazySingleton("_scanner")
 def _get_scanner():
     """懒加载共享 SkillScanner（DENY 策略——安装是信任边界）。"""
-    global _scanner
-    if _scanner is None:
-        from neurova.security.skill_scanner import ScanPolicy, SkillScanner
+    from neurova.security.skill_scanner import ScanPolicy, SkillScanner
 
-        _scanner = SkillScanner(workspace_path=".")
-        _scanner.policy = ScanPolicy.DENY
-    return _scanner
+    scanner = SkillScanner(workspace_path=".")
+    scanner.policy = ScanPolicy.DENY
+    return scanner
 
 
 def reset_install_gate_scanner() -> None:

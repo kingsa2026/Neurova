@@ -28,6 +28,7 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -723,11 +724,9 @@ class SwarmManager:
 _swarm_manager_instance: Optional[SwarmManager] = None
 
 
+@lazySingleton("_swarm_manager_instance")
 def get_swarm_manager() -> SwarmManager:
-    global _swarm_manager_instance
-    if _swarm_manager_instance is None:
-        _swarm_manager_instance = SwarmManager()
-    return _swarm_manager_instance
+    return SwarmManager()
 
 
 def reset_swarm_manager() -> None:

@@ -12,6 +12,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from .models import TriggerType, WorkflowTrigger
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,10 @@ _manager: Optional["TriggerManager"] = None
 _bootstrapped = False
 
 
+@lazySingleton("_manager")
 def get_trigger_manager() -> "TriggerManager":
     """全局 TriggerManager 单例（惰性创建，scheduler 可后置注入）。"""
-    global _manager
-    if _manager is None:
-        _manager = TriggerManager()
-    return _manager
+    return TriggerManager()
 
 
 def set_trigger_scheduler(scheduler: Any) -> None:

@@ -6,6 +6,8 @@
 
 import json
 import re
+import threading
+
 from neurova.core.logger import get_logger
 from neurova.core.trace_context import clear_trace_id, set_trace_id
 from collections import defaultdict
@@ -50,11 +52,15 @@ class TrajectoryRecorder:
     """
 
     _instance = None
+    # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    _instanceLock = threading.RLock()
     _initialized = False
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._instanceLock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):

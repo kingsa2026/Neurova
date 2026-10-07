@@ -18,6 +18,7 @@ from __future__ import annotations
 import time
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Tuple
+from neurova.core.lazy_singleton import lazySingleton
 
 # 检查函数签名：无参数，返回 (成功: bool, 消息: str)
 CheckFunc = Callable[[], Tuple[bool, str]]
@@ -240,9 +241,7 @@ class HealthChecker:
 _health_checker_instance: Optional[HealthChecker] = None
 
 
+@lazySingleton("_health_checker_instance")
 def get_health_checker() -> HealthChecker:
     """获取全局健康检查器单例"""
-    global _health_checker_instance
-    if _health_checker_instance is None:
-        _health_checker_instance = HealthChecker()
-    return _health_checker_instance
+    return HealthChecker()

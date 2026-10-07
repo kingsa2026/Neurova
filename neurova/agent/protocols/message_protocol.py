@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -390,9 +391,7 @@ class MessageSerializer:
 _global_message_queue: Optional[MessageQueue] = None
 
 
+@lazySingleton("_global_message_queue")
 def get_message_queue() -> MessageQueue:
     """获取全局消息队列"""
-    global _global_message_queue
-    if _global_message_queue is None:
-        _global_message_queue = MessageQueue()
-    return _global_message_queue
+    return MessageQueue()

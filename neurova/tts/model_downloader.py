@@ -7,6 +7,7 @@ Model Downloader - 模型自动下载器
 import logging
 
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.tts.model_integrity import find_altered_files, verify_model
 import os
 from dataclasses import dataclass
@@ -497,16 +498,15 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+@lazySingleton("_downloader")
 def get_model_downloader(base_dir: str = None) -> ModelDownloader:
     """获取全局 ModelDownloader 实例
 
     Args:
         base_dir: 模型存储的基础目录。如果为 None，则自动使用项目根目录。
+            单例语义下只有首次调用的目录生效。
     """
-    global _downloader
-    if _downloader is None:
-        if base_dir is None:
-            # 自动检测项目根目录：从 neurova/tts/model_downloader.py 向上两级
-            base_dir = Path(__file__).parent.parent.parent.resolve()
-        _downloader = ModelDownloader(base_dir=base_dir)
-    return _downloader
+    if base_dir is None:
+        # 自动检测项目根目录：从 neurova/tts/model_downloader.py 向上两级
+        base_dir = Path(__file__).parent.parent.parent.resolve()
+    return ModelDownloader(base_dir=base_dir)

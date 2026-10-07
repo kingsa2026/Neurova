@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..models import AgentRole, TaskStep, WorkflowDefinition
 from .models import FlowContext, FlowEvent, FlowPhase
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -333,9 +334,7 @@ class FlowOrchestrator:
 _global_orchestrator: Optional[FlowOrchestrator] = None
 
 
+@lazySingleton("_global_orchestrator")
 def get_orchestrator() -> FlowOrchestrator:
     """获取全局编排器"""
-    global _global_orchestrator
-    if _global_orchestrator is None:
-        _global_orchestrator = FlowOrchestrator()
-    return _global_orchestrator
+    return FlowOrchestrator()

@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -456,6 +457,7 @@ class CrystallizedExperienceManager:
 _default_manager: Optional[CrystallizedExperienceManager] = None
 
 
+@lazySingleton("_default_manager")
 def get_crystallized_experience_manager(
     crystallizer: Optional[CrystallizerProtocol] = None,
     memory_manager: Optional[Any] = None,
@@ -470,13 +472,10 @@ def get_crystallized_experience_manager(
     Returns:
         单例实例
     """
-    global _default_manager
-    if _default_manager is None:
-        _default_manager = CrystallizedExperienceManager(
+    return CrystallizedExperienceManager(
             crystallizer=crystallizer,
             memory_manager=memory_manager,
         )
-    return _default_manager
 
 
 def reset_crystallized_experience_manager() -> None:
