@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -411,12 +412,10 @@ class MCPManager:
 _manager: typing.Optional[MCPManager] = None
 
 
+@lazySingleton("_manager")
 def get_mcp_manager(config_path: str = None) -> MCPManager:
     """获取 MCPManager 单例"""
-    global _manager
-    if _manager is None:
-        _manager = MCPManager(config_path)
-    return _manager
+    return MCPManager(config_path)
 
 
 def reset_mcp_manager() -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from neurova.session_repository import SessionRepository, get_session_repository
+from neurova.core.lazy_singleton import lazySingleton
 
 # sender_type → SessionRepository 的 role 取值
 _ROLE_BY_SENDER = {"user": "user", "agent": "assistant", "system": "system"}
@@ -73,11 +74,9 @@ class RoomStore:
 _store: Optional[RoomStore] = None
 
 
+@lazySingleton("_store")
 def get_room_store() -> RoomStore:
-    global _store
-    if _store is None:
-        _store = RoomStore()
-    return _store
+    return RoomStore()
 
 
 def reset_room_store() -> None:

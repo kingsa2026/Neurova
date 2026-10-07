@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .message_protocol import AgentMessage, DeadLetterMessage, DeadLetterReason
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -344,9 +345,7 @@ class DeadLetterQueue:
 _global_dlq: Optional[DeadLetterQueue] = None
 
 
+@lazySingleton("_global_dlq")
 def get_dead_letter_queue() -> DeadLetterQueue:
     """获取全局死信队列"""
-    global _global_dlq
-    if _global_dlq is None:
-        _global_dlq = DeadLetterQueue()
-    return _global_dlq
+    return DeadLetterQueue()

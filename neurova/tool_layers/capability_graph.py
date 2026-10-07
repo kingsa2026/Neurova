@@ -9,6 +9,7 @@ Tool Capability Graph v1.0.0 — 工具能力关系图
 隔离层级: 与 ToolRouter 平级，通过能力图适配器集成
 """
 
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
 import re
 import threading
@@ -61,8 +62,12 @@ _META_RETRIEVAL_NAMES = frozenset({
     "recall_context_span",
     "discover_skills",
 })
+#: 名单缓存槽（`_metaRetrievalRoster` 的落点）。必须在此显式声明：
+#: 只在函数里 `global` 一下，模块字典里就没有这个名字。
+_META_RETRIEVAL_ROSTER: typing.Optional[frozenset] = None
 
 
+@lazySingleton("_META_RETRIEVAL_ROSTER")
 def _metaRetrievalRoster() -> frozenset:
     """元检索名单的**单源**取值点（含控制工具）。
 
@@ -71,16 +76,13 @@ def _metaRetrievalRoster() -> frozenset:
     本函数只是把它并进来。两侧漂移由测试咬合
     （`test_rosterCoversControlTools`），不靠人工同步。
     """
-    global _META_RETRIEVAL_ROSTER
-    if _META_RETRIEVAL_ROSTER is None:
-        try:
-            from neurova.context.tool_search import CONTROL_TOOL_NAMES
+    try:
+        from neurova.context.tool_search import CONTROL_TOOL_NAMES
 
-            controls = frozenset(CONTROL_TOOL_NAMES)
-        except Exception:  # noqa: BLE001 - 控制工具面缺席不得让判断整体失败
-            controls = frozenset()
-        _META_RETRIEVAL_ROSTER = _META_RETRIEVAL_NAMES | controls
-    return _META_RETRIEVAL_ROSTER
+        controls = frozenset(CONTROL_TOOL_NAMES)
+    except Exception:  # noqa: BLE001 - 控制工具面缺席不得让判断整体失败
+        controls = frozenset()
+    return _META_RETRIEVAL_NAMES | controls
 
 
 _META_RETRIEVAL_ROSTER: typing.Optional[frozenset] = None

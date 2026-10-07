@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import threading
 
+from neurova.core.lazy_singleton import lazySingleton
+
 
 # ============================================================================
 # Enums
@@ -423,13 +425,12 @@ class BudgetService:
 _budget_service: Optional[BudgetService] = None
 
 
+@lazySingleton("_budget_service")
 def get_budget_service() -> BudgetService:
     """Get global budget service instance"""
-    global _budget_service
-    if _budget_service is None:
-        _budget_service = BudgetService()
-        _budget_service.initialize()
-    return _budget_service
+    service = BudgetService()
+    service.initialize()
+    return service
 
 
 def reset_budget_service():

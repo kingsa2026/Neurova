@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import logging
 from neurova.core.logger import get_logger
+from neurova.core.lazy_singleton import lazySingleton
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -299,15 +300,9 @@ class QClawService:
 _qclaw_service_instance: Optional[QClawService] = None
 
 
+@lazySingleton("_qclaw_service_instance")
 def get_qclaw_service() -> QClawService:
-    """
-    获取 QClaw 服务单例
-
-    Returns:
-        QClawService 实例
-    """
-    global _qclaw_service_instance
-    if _qclaw_service_instance is None:
-        _qclaw_service_instance = QClawService()
-        logger.info("创建 QClaw 服务单例")
-    return _qclaw_service_instance
+    """获取 QClaw 服务单例（首次创建记一行，之后走缓存）"""
+    service = QClawService()
+    logger.info("创建 QClaw 服务单例")
+    return service

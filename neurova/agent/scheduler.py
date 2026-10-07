@@ -30,6 +30,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from neurova.core.data_root import callerPath
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -1485,12 +1486,10 @@ class TaskScheduler:
 _scheduler_instance: Optional[TaskScheduler] = None
 
 
+@lazySingleton("_scheduler_instance")
 def get_scheduler() -> TaskScheduler:
     """获取任务调度器单例"""
-    global _scheduler_instance
-    if _scheduler_instance is None:
-        _scheduler_instance = TaskScheduler()
-    return _scheduler_instance
+    return TaskScheduler()
 
 
 def init_scheduler() -> TaskScheduler:

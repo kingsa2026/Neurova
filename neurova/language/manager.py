@@ -25,6 +25,7 @@ from neurova.language.models import (
     UserLanguagePreference,
 )
 from neurova.core.data_root import callerPath
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -518,12 +519,10 @@ class LanguageManager:
 _language_manager: Optional[LanguageManager] = None
 
 
+@lazySingleton("_language_manager")
 def get_language_manager() -> LanguageManager:
     """获取全局 language 管理器实例"""
-    global _language_manager
-    if _language_manager is None:
-        _language_manager = LanguageManager()
-    return _language_manager
+    return LanguageManager()
 
 
 def init_language(data_dir: Optional[str] = None, default_language: Language = Language.CHINESE) -> LanguageManager:

@@ -14,6 +14,7 @@ from neurova.core.logger import get_logger
 from neurova.collaboration.room_bus import RoomBus, get_room_bus
 from neurova.collaboration.room_store import RoomStore, get_room_store
 from neurova.sync.session_sync_manager import EventType
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -174,11 +175,9 @@ class RoomTurnRouter:
 _router: Optional[RoomTurnRouter] = None
 
 
+@lazySingleton("_router")
 def get_room_turn_router() -> RoomTurnRouter:
-    global _router
-    if _router is None:
-        _router = RoomTurnRouter()
-    return _router
+    return RoomTurnRouter()
 
 
 def reset_room_turn_router() -> None:

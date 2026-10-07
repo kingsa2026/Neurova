@@ -26,6 +26,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from neurova.core.data_root import get_data_root
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
 
@@ -323,11 +324,9 @@ class CanvasStore:
 _canvas_store_instance: Optional[CanvasStore] = None
 
 
+@lazySingleton("_canvas_store_instance")
 def get_canvas_store() -> CanvasStore:
-    global _canvas_store_instance
-    if _canvas_store_instance is None:
-        _canvas_store_instance = CanvasStore()
-    return _canvas_store_instance
+    return CanvasStore()
 
 
 def reset_canvas_store() -> None:

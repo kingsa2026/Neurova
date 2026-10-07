@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import get_data_root
+from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -283,11 +284,9 @@ class EvolutionJobQueue:
 _queue_singleton: Optional[EvolutionJobQueue] = None
 
 
+@lazySingleton("_queue_singleton")
 def get_evolution_job_queue(db_path: Optional[Path] = None) -> EvolutionJobQueue:
-    global _queue_singleton
-    if _queue_singleton is None:
-        _queue_singleton = EvolutionJobQueue(db_path=db_path)
-    return _queue_singleton
+    return EvolutionJobQueue(db_path=db_path)
 
 
 def reset_evolution_job_queue() -> None:
