@@ -1544,3 +1544,12 @@ tests/unit/api/test_skillExecuteFallbackCarriesPayload.py
 # 又会"解不开→只 warning→下次保存按内存重写"静默丢凭据；写侧现走仓内唯一 AES-GCM 口径。
 # 判据含存量 XOR 读回、读到即升级、升级失败不动盘、缺依赖不降级。逐文件单跑 8 passed
 tests/unit/llm/test_credentialCipherDiscipline.py
+# 记忆层加密的降级门必须 fail-fast（§6-34）：cryptography 缺失时原实现只 warning 就换成
+# 重复密钥流 XOR，且 encrypt/decrypt 把失败改写成空串——写侧落一条"加密成功的空记忆"，
+# 读侧让记忆看起来"没内容"。取证：三版 git grep 证这条链从未被调用方走过（零调用点由本文件
+# 第 5 条判据钉成会红的账）。逐文件单跑 5 passed
+tests/unit/memory/test_memoryCipherFailFast.py
+# admin 引导脚本的落点与口令（§6-33）：原脚本写死 db_path="data/users.db"（CWD 相对字面量，
+# NEUROVA_DATA_DIR 不生效，实测把账号写进仓内真库）+ 默认弱口令打印到 stdout + 失败仍以 0 退出。
+# 探针跑真子进程且 cwd 故意不同于数据根，使"CWD 落点"与"锚点落点"一眼可分。逐文件单跑 6 passed
+tests/unit/test_adminBootstrapLanding.py
