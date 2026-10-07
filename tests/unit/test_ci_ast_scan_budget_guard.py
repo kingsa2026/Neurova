@@ -349,6 +349,59 @@ def _repoWideAstScans(source: str) -> list:
     return sorted(set(hits))
 
 
+#: 会**物化整片节点元组**的入口：语义是「跨判据复用同一份语法树 + 同一份节点表」。
+#:
+#: 与 `_cachedParse` / `_cachedNodes` 的区别是**要不要一次拿全节点**：
+#: 前者（本名单）返回 `(path, node)` 清单，调用方为了一次判据把整棵树的每个
+#: 节点都取出来；后者只编译/展开一棵树，消费方按需 `ast.walk` 自己那一棵。
+#:
+#: 为什么只钉这一对：`_cachedParse` / `_cachedNodes` 在本仓有**一批正当用法**
+#: （`test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing` 的
+#: 落点判据……），它们的 docstring 逐条写明「同进程里其余守卫共享这份预算」——
+#: 把它们一并禁掉就是拿判据打正当设计（假阳性会训练人忽略门禁）。
+#: 而 `walkedModules` / `parsedModules` 在一次判据里物化全量节点，没有可比的
+#: 正当面：要复用就该像上面那样共享 `_cachedParse`，要一次性就该走
+#: `transientNodes`。
+MATERIALIZING_ENTRIES = frozenset({"walkedModules", "parsedModules"})
+
+
+def _oneShotRetainingScanHits(source: str) -> list:
+    """文件里「用了物化全量节点的保留型入口」的落点（函数名，模块级记 `<模块级>`）。
+
+    靶点：`walkedModules` / `parsedModules` 返回 `(路径, 节点)` 清单，调用方
+    为一次判据把整棵树的每个节点都取出来并让它们留在会话里。实测全仓
+    `neurova/` + 同一组文本预筛：
+
+    | 入口 | 节点数 | 扫描 | RSS 增量 | 常驻节点表 |
+    |---|---|---|---|---|
+    | `walkedModules`（物化） | 912141 | 1.68s | +282MB | 有 |
+    | `transientNodes`（一次性） | 912141 | 1.46s | +0MB | 无 |
+
+    纯静态判定：只看调用了哪个入口名。不判「扫了几个文件」——那在不读运行时的
+    前提下不可判定，而入口的**物化语义**是当场可判的事实。
+    """
+    tree = ast.parse(source)
+    units, _byFunction = _scanUnits(tree)
+    hits = []
+    for label, body, _shadow in units:
+        found = set()
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else (
+                    func.id if isinstance(func, ast.Name) else "")
+                if name in MATERIALIZING_ENTRIES:
+                    found.add(name)
+            stack.extend(ast.iter_child_nodes(node))
+        if found:
+            hits.append(label)
+    return sorted(set(hits))
+
+
 class TestNoUnprefilteredRepoWideScan:
     """受保护子集里的全仓 AST 扫描归零：判据不得与代码总量捆绑。"""
 
@@ -392,6 +445,97 @@ class TestNoUnprefilteredRepoWideScan:
                 live[rel] = hits
         stale = sorted(set(REPO_WIDE_SCAN_LEDGER) - set(live))
         assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
+
+
+class TestOneShotCallsUseTheTransientEntry:
+    """不得用**物化全量节点**的保留型入口（`walkedModules` / `parsedModules`）。
+
+    根因（`cnb-a99-1k4bpgeim` 的 unit-tests 腿实测）：受保护子集里
+    `tests/unit/api/test_context_build_token_count_caliber.py::test_production_has_no_len_split_token_count`
+    走的是**保留型**入口 `ast_scan.walkedModules(...)`。它确实是共享预算
+    （故上一类判据看不见它），但保留型入口的语义是「跨判据复用同一份语法树」，
+    而这条判据**只扫一次**——保留的收益不存在，成本却全额留下。
+
+    实测（本机，`neurova/` 全仓 + 同一组文本预筛）：
+
+    | 入口 | 节点数 | 扫描 | RSS 增量 | 常驻树 |
+    |---|---|---|---|---|
+    | `walkedModules`（保留型） | 912141 | 1.68s | **+282MB** | 379 棵 |
+    | `transientNodes`（一次性） | 912141 | 1.46s | +0MB | 0 棵 |
+
+    282MB 常驻 AST 在 4800 条用例同进程的会话里，把这条判据的墙钟从本机 2.36s
+    推到 CI 的 30s 之上——`pytest-timeout` 报的是超时，而真因是它替整个会话
+    养着一片不再被任何人读的语法树。这与 `Issue #148`「代码总量被编码成时间上界」
+    同根，只是账单记在**内存/GC** 上。
+
+    判据按**结构**（用了哪个入口）而不是秒数：秒数会随机器漂移，而「一次性扫描
+    走保留型入口」是一个当场可判的事实。
+    """
+
+    #: 保留型入口：语义是「跨判据复用」，只在会重复扫时成立。
+    RETAINING_ENTRIES = frozenset({"walkedModules", "parsedModules", "_cachedParse",
+                                   "_cachedNodes"})
+
+    def test_no_one_shot_criteria_materialize_the_whole_node_tuple(self):
+        offenders = []
+        for rel in protectedFiles():
+            path = PROJECT_ROOT / rel
+            if not path.is_file() or not rel.endswith(".py"):
+                continue
+            try:
+                source = io.open(path, encoding="utf-8", errors="ignore").read()
+            except OSError:
+                continue
+            hits = _oneShotRetainingScanHits(source)
+            if hits:
+                offenders.append(f"{rel} → {hits}")
+        assert not offenders, (
+            "受保护子集里用了物化全量节点的保留型入口（`walkedModules` / "
+            "`parsedModules`）——一次判据把整棵树的每个节点都留在会话里:\n  "
+            + "\n  ".join(sorted(offenders))
+            + "\n修法：只扫一次的走一次性入口 `transientTree` / `transientNodes`"
+            "（吃同一份文本预筛、同样不留常驻树）；会重复扫的才用 `nodeScan` /"
+            " `callSites` 一族。实测全仓 912141 节点：保留型 +282MB / 一次性 +0MB。"
+        )
+
+    def test_detector_is_not_vacuous(self):
+        """反向控制：检出器真的分得清两类入口（否则上面那条恒真）。"""
+        retaining = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.walkedModules(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        transient = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.transientNodes(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(retaining), (
+            "保留型入口没被报出——上面那条判据是空的"
+        )
+        assert _oneShotRetainingScanHits(transient) == [], (
+            f"一次性入口被误报：{_oneShotRetainingScanHits(transient)}"
+            "（把推荐修法报红，等于逼人绕开它）"
+        )
+
+    def test_cross_criterion_retaining_entries_are_not_banned(self):
+        """跨判据共享的保留型入口**不是**禁品（不得一刀切报红）。
+
+        本仓有一批正当用法：`test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing`
+        的落点判据，都以 `sourceRefsUnder` 取文本 + `_cachedParse` 取树，docstring 写明
+        「同进程里其余守卫共享这份预算」。判据若把它们一并禁掉，就是拿判据打正当设计。
+        """
+        legit = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.nodeScan(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(legit) == [], (
+            f"保留型预算的正常用法被误报：{_oneShotRetainingScanHits(legit)}"
+        )
 
 
 class TestDetectionSurfaceCoversHelpersNotJustTestNames:
