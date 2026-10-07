@@ -2151,8 +2151,14 @@ async def list_console_running_tasks(
     返回 per-session 注册的 asyncio 任务（kind/started_at/duration），
     供前端后台任务面板分组展示与取消操作联动 POST /console/chat/stop。
     审计 2026-09-11 P0-3：补鉴权（原实现匿名泄露全部会话任务面）。
+
+    `run_ledger` 是**持久台账**的四档计数：进程内快照只看得见"这个进程还在跑的任务"，
+    而 `AgentRunStore.stats()` 早就算好了 running/queued/parked/terminal 却全仓无人取——
+    运维面板因此看不到"库里还挂着几条待办"，尤其是重启后那些被收敛成终态的行。
+    parked 单列不可折进 terminal：那是"等人续跑"，报成"已结束"就是把待办说成完成。
     """
     _ = request
+    from neurova.core.agent_run_store import get_agent_run_store
     from neurova.core.task_tracker import get_task_tracker
 
     tasks = get_task_tracker().snapshot_async_tasks()
@@ -2162,5 +2168,6 @@ async def list_console_running_tasks(
         "data": {
             "tasks": tasks,
             "total": len(tasks),
+            "run_ledger": get_agent_run_store().stats(),
         },
     }
