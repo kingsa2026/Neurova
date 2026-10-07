@@ -235,6 +235,10 @@ class TestA20ObserverStrongReference:
     async def test_observer_task_strongly_referenced_while_running(self):
         """转后台后观察者任务必须被强引用（entry['observer']），收尾自行清理。"""
         coordinator = ToolCoordinator()
+        # 晚到终态按会话归属分流（C 批栅栏），测试要按生产入口登记本轮身份
+        from neurova.core.turn_context import set_turn_identity
+
+        set_turn_identity("搜一下", "sess_a20", "u1")
 
         async def slow():
             await asyncio.sleep(0.3)
@@ -258,7 +262,7 @@ class TestA20ObserverStrongReference:
         assert coordinator._background.get(task_id) is None
         assert coordinator._completed[task_id]["task"] is None
         assert coordinator._completed[task_id]["observer"] is None
-        hints = coordinator.pop_pending_hints()
+        hints = coordinator.pop_pending_hints("sess_a20")
         assert any(h["task_id"] == task_id and h["success"] for h in hints)
 
     @pytest.mark.asyncio
@@ -266,7 +270,10 @@ class TestA20ObserverStrongReference:
         """丢弃调用方引用并强制 GC 后，观察者仍完成并把结果推入 pending hints。"""
         import gc
 
+        from neurova.core.turn_context import set_turn_identity
+
         coordinator = ToolCoordinator()
+        set_turn_identity("搜一下", "sess_a20b", "u1")
 
         async def slow():
             await asyncio.sleep(0.25)
@@ -282,7 +289,7 @@ class TestA20ObserverStrongReference:
 
         assert not observer.cancelled()
         assert observer.done()
-        hints = coordinator.pop_pending_hints()
+        hints = coordinator.pop_pending_hints("sess_a20b")
         assert any(h["task_id"] == task_id and h["success"] for h in hints), (
             "A-20: 观察者被 GC 吞掉时 hints 永不投递——强引用缺失"
         )

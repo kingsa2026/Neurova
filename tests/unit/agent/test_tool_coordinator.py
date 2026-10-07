@@ -26,6 +26,19 @@ def _parallelEligible(tool_name: str) -> bool:
     return isParallelEligible(resolveToolCapability(tool_name))
 
 
+_SESSION_ID = "sess_tool_coordinator"
+
+
+@pytest.fixture(autouse=True)
+def _turnSession():
+    """晚到终态按会话归属分流（C 批栅栏）：本文件的用例都扮演「发起那一轮」，
+    归属经生产单源 `set_turn_identity` 登记，不往协调器私有字段里塞。"""
+    from neurova.core.turn_context import set_turn_identity
+
+    set_turn_identity("跑一下", _SESSION_ID, "u1")
+    yield
+
+
 class TestTimeoutRegistry:
     def test_known_tool_uses_registered_timeout(self):
         assert get_tool_timeout("web_search") == 30
@@ -62,7 +75,7 @@ class TestCoordinatorOffload:
 
         result = await coordinator.run_with_timeout("memory_search", fast, timeout=2.0)
         assert result == {"ok": True}
-        assert coordinator.pop_pending_hints() == []
+        assert coordinator.pop_pending_hints(_SESSION_ID) == []
 
     @pytest.mark.asyncio
     async def test_timeout_offloads_to_background(self):
@@ -117,7 +130,7 @@ class TestCoordinatorOffload:
 
         hints = []
         for _ in range(50):
-            hints = coordinator.pop_pending_hints()
+            hints = coordinator.pop_pending_hints(_SESSION_ID)
             if hints:
                 break
             await asyncio.sleep(0.05)
@@ -126,7 +139,7 @@ class TestCoordinatorOffload:
         assert hints[0]["task_id"] == task_id
         assert hints[0]["tool_name"] == "web_search"
         assert "late result" in str(hints[0]["result"])
-        assert coordinator.pop_pending_hints() == []  # 取走即清空
+        assert coordinator.pop_pending_hints(_SESSION_ID) == []  # 取走即清空
 
     @pytest.mark.asyncio
     async def test_background_error_recorded_as_failed_hint(self):
@@ -141,7 +154,7 @@ class TestCoordinatorOffload:
 
         hints = []
         for _ in range(50):
-            hints = coordinator.pop_pending_hints()
+            hints = coordinator.pop_pending_hints(_SESSION_ID)
             if hints:
                 break
             await asyncio.sleep(0.05)
@@ -165,7 +178,7 @@ class TestCoordinatorOffload:
 
         hints = []
         for _ in range(50):
-            hints = coordinator.pop_pending_hints()
+            hints = coordinator.pop_pending_hints(_SESSION_ID)
             if hints:
                 break
             await asyncio.sleep(0.05)
