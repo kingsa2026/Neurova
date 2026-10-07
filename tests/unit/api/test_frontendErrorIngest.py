@@ -69,13 +69,13 @@ def testInternalFailureDoesNotEchoDetailToAnonymousCaller(tmp_path, monkeypatch)
     client = _client(tmp_path, monkeypatch)
 
     def _boom(*args, **kwargs):
-        raise RuntimeError("traceback-ish /E:/项目/Neurova/data/... internal path")
+        raise RuntimeError("internal sink detail: /var/lib/neurova/error_logs/... refused")
 
     monkeypatch.setattr(errLog, "write_frontend_errors", _boom)
     resp = client.post(ROUTE, json={"message": "x"})
 
     assert resp.status_code == 500, f"{resp.status_code} {resp.text}"
-    assert "internal path" not in resp.text, "把内部异常原样回给匿名调用方 = 信息外泄"
+    assert "refused" not in resp.text, "把内部异常原样回给匿名调用方 = 信息外泄"
 
 
 def testPayloadLimitsEnforced(tmp_path, monkeypatch):
