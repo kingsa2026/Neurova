@@ -2871,11 +2871,17 @@ class PostChatPipeline:
         except Exception as mtn_err:
             logger.debug("技能经验维护跳过: %s", mtn_err)
 
-        # 重复技能合并计划（P1-2 接线）：前缀簇 + umbrella 质量选取，
-        # **只产计划**——执行走审批面（skill_pool_api /consolidation/*）。
-        # 绝不自动合并：合并是"改行为/改技能库结构"的产物，与评审闸同一哲学。
+        # 重复技能合并计划（P1-2 接线）：结构身份簇 + umbrella 质量选取。
+        # 治理模式（2026-10-07 规则修订，见
+        # docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0）：
+        # 计划落仓后过**全自动 commit gate**（确定性召回预检+结构身份门槛，
+        # fail-closed：任一检不过仍留人工审批面）；开关
+        # consolidation_auto_commit_enabled 默认开，关=回退纯人工审批。
         try:
-            from neurova.evolution.skill_consolidator import plan_from_service
+            from neurova.evolution.skill_consolidator import (
+                maybe_auto_commit,
+                plan_from_service,
+            )
             from neurova.skills.skill_service import SkillService as _CSvc
 
             _c_svc = _CSvc(agent_id=str(getattr(self._agt.config, "agent_id", "default") or "default"))
@@ -2884,6 +2890,12 @@ class PostChatPipeline:
                 _store = _consolidation_plan_store(_c_svc.skills_dir)
                 _store.upsert([p.to_dict() for p in _c_plans])
                 logger.info("🧩 技能合并计划: %d 簇（待审批）", len(_c_plans))
+                _auto = maybe_auto_commit(_c_svc, _store, _store.load())
+                if _auto:
+                    logger.info(
+                        "🤖 整合自动 commit gate: %s",
+                        [(a["umbrella"], a["decision"]) for a in _auto],
+                    )
         except Exception as _ce:
             logger.debug("技能合并计划生成跳过: %s", _ce)
 
