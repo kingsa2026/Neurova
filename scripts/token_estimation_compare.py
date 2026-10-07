@@ -17,11 +17,13 @@ from neurova.context.token_estimator import estimate_tokens as estimate_text_tok
 
 def count_tokens_injector(text: str) -> int:
     """
-    模拟 injector.py 的 _count_tokens 方法
-    
-    使用 TokenBudget 的默认值:
+    旧口径对照组（**已从 injector 退役**，见 `context/models.py` 的注记）
+
+    原 TokenBudget 的两个固定系数:
     - chinese_ratio = 1.5
     - english_ratio = 0.25
+    现役唯一口径是 `token_estimator.estimate_tokens`；本函数只留作对比基准，
+    不再是注入器的实际算法。
     """
     if not text:
         return 0
@@ -30,8 +32,8 @@ def count_tokens_injector(text: str) -> int:
     other_chars = len(text) - chinese_chars
     
     return int(
-        chinese_chars * 1.5 +  # TokenBudget.chinese_ratio
-        other_chars * 0.25     # TokenBudget.english_ratio
+        chinese_chars * 1.5 +  # 历史系数（原 TokenBudget.chinese_ratio，已退役）
+        other_chars * 0.25     # 历史系数（原 TokenBudget.english_ratio，已退役）
     )
 
 
@@ -122,7 +124,7 @@ def main():
     
     # 问题诊断
     print("\n问题诊断:")
-    print("1. injector.py: 使用 chinese_ratio=1.5, english_ratio=0.25")
+    print("1. 旧 injector 口径: chinese_ratio=1.5, english_ratio=0.25（已退役，现走 estimate_tokens）")
     print("2. context_pool.py: 使用中文字符*1.5 + 英文单词*0.25")
     print("4. len() // 4: 粗略估算，不区分语言")
     
