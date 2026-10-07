@@ -2,8 +2,8 @@
 A9-A10 测试：验证 skill_system 僵尸文件和死代码清理
 
 TDD vertical slices:
-1. test_skill_system_py_file_removed — A9.1: neurova/skill_system.py 僵尸文件被删除
-2. test_skill_result_exported_from_skill_system — A9.2: skill_system 导出 SkillResult
+1. test_skillSystemCarrierResolvesInsidePackage — A9.1: 规范实现载体在包内 core.py
+2. test_skillResultExportedIsRuntimeContract — A9.2: 门面导出的 SkillResult 即运行时返回的那份
 3. test_compat_module_exists — A9.3: skill_system.compat 子模块存在并导出 OpenAISchemaAdapter
 4. test_pool_service_py_file_removed — A10.1: neurova/skills/pool_service.py 死代码被删除
 """
@@ -11,38 +11,34 @@ TDD vertical slices:
 from pathlib import Path
 
 
-def test_skill_system_py_standalone_loadable():
-    """A9.1（2026-09-08 架构甄别后改写）：skill_system.py 是 ADR 0011 的
-    规范实现载体（SkillRegistry/get_skill_registry/create_default_skills），
-    由 skill_system/__init__ 经 spec_from_file_location 有意加载为
-    neurova.skill_system_module_standalone——不再是"僵尸"，而是生产依赖
-    （mcp_server_api/marketplace/skill/neurflow 四端点取 get_skill_registry）。
-    守卫锁定：文件必须存在且经 standalone 缓存键可加载。"""
-    skill_system_py = Path(__file__).parent.parent.parent.parent / "neurova" / "skill_system.py"
-    assert skill_system_py.exists(), (
-        f"standalone 载体 {skill_system_py} 不存在——get_skill_registry 加载链断裂"
-    )
-    from neurova.skill_system import get_skill_registry
-    assert callable(get_skill_registry)
+def test_skillSystemCarrierResolvesInsidePackage():
+    """A9.1（2026-10-07 搬家后改写）：ADR 0011 规范实现的载体在包内 `core.py`。
 
-
-def test_skill_result_exported_from_skill_system():
-    """A9.2: skill_system 应导出 SkillResult
-
-    根因：github_push/skill.py:39 调用 `from neurova.skill_system import Skill, SkillResult`，
-    但 SkillResult 不在 skill_system/__init__.py 的 __all__ 中，也不在 __getattr__ 代理分支中，
-    导致运行时 AttributeError。
+    原守卫锁"顶层 skill_system.py 必须存在并可被反射加载"——那是遮蔽 bug 的
+    产物，不是架构决策。现按**导入解析结果**判：门面所发工厂必须来自包内模块，
+    影子文件是否回流由 test_skillSymbolSingleCarrier 锁（两条守卫不重复取证）。
     """
-    import sys
-    for mod_name in list(sys.modules.keys()):
-        if mod_name == "neurova.skill_system":
-            del sys.modules[mod_name]
+    from neurova.skill_system import core, get_skill_registry
 
+    assert callable(get_skill_registry), "get_skill_registry 装配链断裂"
+    carrier = Path(core.__file__).resolve()
+    assert (carrier.parent.name, carrier.name) == ("skill_system", "core.py"), (
+        f"规范实现载体不在包内：{carrier}"
+    )
+
+
+def test_skillResultExportedIsRuntimeContract():
+    """A9.2 改判：门面导出的 SkillResult 必须是注册表实际返回的那一份。
+
+    原判把 `skills/executor.py:SkillResult`（output 形状）钉成规范，而注册表与
+    agent 热路径（`agent/loops/base.py` 读 `.data`）返回的是运行时 data 形状——
+    名实分叉期间，端点降级分支 `getattr(result, "output")` 恒为 None。
+    """
     from neurova.skill_system import SkillResult
-    from neurova.skills.executor import SkillResult as RealSkillResult
+    from neurova.skill_system.core import SkillResult as RuntimeSkillResult
 
-    assert SkillResult is RealSkillResult, (
-        "skill_system.SkillResult 应等于 neurova.skills.executor.SkillResult"
+    assert SkillResult is RuntimeSkillResult, (
+        "门面名 SkillResult 与运行时返回的类不同一——同一符号又分叉出两条契约"
     )
 
 

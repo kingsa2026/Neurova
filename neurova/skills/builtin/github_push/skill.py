@@ -14,29 +14,12 @@ GitHub Push Skill - Neurova GitHub 推送技能
 """
 
 import asyncio
-import importlib.util
-from neurova.core.logger import get_logger
-# 动态导入 Skill 类，避免包和模块冲突
-import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# 直接导入模块文件
-skill_system_module_path = Path(__file__).parent.parent.parent.parent / "skill_system.py"
-if skill_system_module_path.exists():
-    # 动态加载模块
-    spec = importlib.util.spec_from_file_location("neurova.skill_system_module", skill_system_module_path)
-    skill_system_module = importlib.util.module_from_spec(spec)
-    sys.modules["neurova.skill_system_module"] = skill_system_module
-    spec.loader.exec_module(skill_system_module)
-
-    Skill = skill_system_module.Skill
-    SkillResult = skill_system_module.SkillResult
-    SkillStatus = skill_system_module.SkillStatus
-else:
-    # 如果模块文件不存在，从包导入
-    from neurova.skill_system import Skill, SkillResult
+from neurova.core.logger import get_logger
+from neurova.skill_system import Skill, SkillResult
 
 
 class GitHubPushSkill(Skill):

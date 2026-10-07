@@ -77,7 +77,7 @@ class TestSandboxRootSingleSource:
         "neurova/tool_executor.py": (
             1, "咽喉自身实现（`execute_skill_tool` 是唯一执行缝），保留",
         ),
-        "neurova/skill_system.py": (
+        "neurova/skill_system/core.py": (
             3, "注册表实现本体 + 隔离执行的两条降级回退（RuntimeManager 缺席/隔离执行异常），保留",
         ),
         "neurova/tool_layers/tool_router.py": (

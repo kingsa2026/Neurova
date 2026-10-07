@@ -62,18 +62,17 @@ class TestNameCollisionCounterIsReadable:
 
     def test_no_registry_means_no_lazy_creation(self):
         """抓指标绝不懒建：尚未装配注册表 ⇒ 读数 0，不得顺手建一个。"""
-        from neurova import skill_system
+        from neurova.skill_system import core as runtimeModule
+        from neurova.skill_system import registered_collision_count
 
-        standalone = skill_system.__getattr__("registered_collision_count")
-        module = __import__("sys").modules["neurova.skill_system_module_standalone"]
-        original = module._skill_registry_singleton
-        module._skill_registry_singleton = None
+        original = runtimeModule._skill_registry_singleton
+        runtimeModule._skill_registry_singleton = None
         try:
-            assert standalone() == 0
+            assert registered_collision_count() == 0
             get_metrics().observe_chain_integrity()
-            assert module._skill_registry_singleton is None, "抓指标懒建了技能注册表"
+            assert runtimeModule._skill_registry_singleton is None, "抓指标懒建了技能注册表"
         finally:
-            module._skill_registry_singleton = original
+            runtimeModule._skill_registry_singleton = original
 
 
 class TestScrapeWiring:

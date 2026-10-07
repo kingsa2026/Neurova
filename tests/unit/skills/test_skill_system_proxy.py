@@ -6,7 +6,7 @@ TDD vertical slices:
 2. test_skill_proxied_to_skills_models — from neurova.skill_system import Skill 返回真实 Skill（非占位）
 3. test_skill_event_proxied — from neurova.skill_system import SkillEvent 等于 neurova.skills.events.SkillEvent
 4. test_create_default_skills_proxied_to_skills — neurova.skill_system.create_default_skills 返回套2 SkillRegistry
-5. test_no_importlib_workaround — skill_system/__init__.py 源码不含 importlib.util.spec_from_file_location
+5. test_facadeIsStaticReexport — skill_system/__init__.py 无 __getattr__ 延迟代理
 """
 
 import importlib
@@ -89,21 +89,24 @@ def test_create_default_skills_proxied_to_skills():
     assert hasattr(registry, "register_event_callback"), "套2 SkillRegistry 应有 register_event_callback 方法"
 
 
-def test_standalone_loader_targets_exist():
-    """2026-09-08 架构甄别后改写：ADR 0011 保留 spec_from_file_location 加载
-    standalone 载体（skill_system.py，规范 SkillRegistry 实现所在）——
-    该路线被架构决策确认；守卫锁定加载目标必须存在（否则静默降级）。"""
-    init_path = Path(__file__).parent.parent.parent.parent / "neurova" / "skill_system" / "__init__.py"
-    assert init_path.exists(), f"skill_system/__init__.py 不存在于 {init_path}"
+def test_facadeIsStaticReexport():
+    """门面必须是纯 re-export：不定义任何符号，也不留 `__getattr__` 延迟代理。
 
-    content = init_path.read_text(encoding="utf-8")
-    assert "spec_from_file_location" in content, (
-        "standalone 加载链（spec_from_file_location）应保留——get_skill_registry 依赖"
+    2026-09-08 该守卫锁的是相反方向（standalone 反射加载链必须存在），因为顶层
+    同名文件被同名包遮蔽；影子文件搬进包内后遮蔽不再存在，反射加载与占位降级
+    两类 workaround 同时失去理由。反射加载的防回流由 test_skillSymbolSingleCarrier
+    负责，本条按 AST 判"门面不自带定义"，不受注释措辞影响。
+    """
+    import ast
+
+    init_path = Path(__file__).resolve().parents[3] / "neurova" / "skill_system" / "__init__.py"
+    tree = ast.parse(init_path.read_text(encoding="utf-8"))
+    defined = sorted(
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
     )
-    standalone = init_path.parent.parent / "skill_system.py"
-    assert standalone.exists(), (
-        f"standalone 载体 {standalone} 不存在——spec_from_file_location 目标断裂"
-    )
+    assert not defined, f"门面文件不得自带任何定义（只允许 re-export）：{defined}"
 
 
 def test_skill_registry_proxied():
