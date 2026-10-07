@@ -24,10 +24,56 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.core.agent_run_ledger import (
+    ENTRY_V1CHAT,
+    ENTRY_V1CHAT_STREAM,
+    AgentRunLedger,
+    reportAdmissionOutcome,
+    requestTurnAdmission,
+    resumeTurnIdentity,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def turnPayloadForV1(body: Any, *, entry: str, sessionId: str) -> Dict[str, Any]:
+    """parked 回合的待跑载荷（写侧）。字段名与读侧 `turnRequestFromPayload` 同源。"""
+    return {
+        "entry": entry,
+        "message": body.message,
+        "agent_id": body.agent_id,
+        "session_id": sessionId,
+        "model": body.model,
+        "temperature": body.temperature,
+        "max_tokens": body.max_tokens,
+        "metadata": body.metadata or {},
+    }
+
+
+def turnRequestFromPayload(payload: Dict[str, Any]) -> Any:
+    """按载荷重建**本入口自己的**请求模型（续跑按 entry 回到原入口，参数不丢）。"""
+    fields = {
+        key: payload.get(key)
+        for key in ("message", "agent_id", "session_id", "model", "temperature", "max_tokens", "metadata")
+    }
+    cls = ChatStreamRequest if payload.get("entry") == ENTRY_V1CHAT_STREAM else ChatRequest
+    return cls(**fields)
+
+
+def preflightRejectionMessage(events) -> Optional[str]:
+    """台账在晋升前就把这一轮挡下时（排队超时 / 等待期被取消）的诚实说明。
+
+    非流式面没有事件流可发，只能把这些预检事件翻成一个如实的失败响应——
+    不能继续跑完然后回 success（那是 §6-8 那族"依赖不满足仍报成功"的同形病灶）。
+    """
+    for event in events or []:
+        if event.get("type") == "error":
+            return str(event.get("message") or "排队等待超时")
+        if event.get("type") == "stopped":
+            return "该回合在排队期间被取消"
+    return None
 
 
 class ChatRequest(BaseModel):
@@ -138,9 +184,54 @@ async def get_tts_audio(
     return FileResponse(path=audio_file, media_type="audio/wav", filename=filename)
 
 
+async def _finishV1Turn(*, ledger: AgentRunLedger, admission, error: Optional[str]) -> None:
+    """落终态 + 回填 pacing（两条 v1 入口共用，与网页那条走同一份台账实现）。
+
+    挂起那一支直接返回：行已在 parked，这里再写终态就是把"等人续跑"抹成"已结束"。
+    """
+    if admission is not None and admission.parked:
+        return
+    ledger.settleResult({"error": error} if error else {})
+    if admission is not None and admission.allowed:
+        await reportAdmissionOutcome(admission, success=not error)
+
+
+def _parkedResponse(runId: str, reason: str, *, agentId: str, sessionId: str, requestId: str) -> Dict[str, Any]:
+    """挂起按它本来的样子回：`message` 不是 success，但请求确实被受理并留了凭据。"""
+    return {
+        "code": 0,
+        "message": "parked",
+        "data": {
+            "status": "parked",
+            "run_id": runId,
+            "reason": reason,
+            "agent_id": agentId,
+            "session_id": sessionId,
+            "resume_via": f"/api/v1/console/chat/resume?run_id={runId}",
+        },
+        "request_id": requestId,
+    }
+
+
+def _failure(code: int, message: str, requestId: str, httpStatus: int = 400) -> JSONResponse:
+    return JSONResponse(
+        status_code=httpStatus,
+        content={"code": code, "message": message, "request_id": requestId},
+    )
+
+
 @router.post("")
-async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """普通对话"""
+async def chat(
+    request: Request,
+    body: ChatRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    resume_run_id: str = "",
+):
+    """普通对话
+
+    `resume_run_id` 只由续跑端点在服务端填入（不是请求体字段），它让重跑复用台账原行，
+    并以**原回合属主**的身份执行。
+    """
     request_id = _get_request_id(request)
 
     # 权限检查
@@ -167,6 +258,28 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
             },
         )
 
+    sessionId = body.session_id or ""
+    if resume_run_id:
+        from neurova.core import agent_run_store as _ars
+
+        row = await asyncio.to_thread(_ars.get_agent_run_store().get, resume_run_id) or {}
+        # 续跑执行身份＝原回合属主（推导单源在 core，四入口共用这一份）
+        user_id, ownerAgentId = resumeTurnIdentity(row, user_id, body.agent_id)
+        body.agent_id = ownerAgentId or body.agent_id
+
+    ledger = AgentRunLedger(
+        sessionId, user_id, body.agent_id, body.message, run_id=resume_run_id or None
+    )
+    # 没有 session_id 的调用方在这一律不记账：凭空造一个共享泳道会让这些请求互相
+    # 排队（今天它们根本不排队），那是接线造出来的新阻塞面。代价是这类请求
+    # 挂起时无处落库，只能如实回 503（见下）。
+    preflight = await ledger.acquire() if sessionId else []
+    rejected = preflightRejectionMessage(preflight)
+    if rejected:
+        return _failure(4009, rejected, request_id, httpStatus=409)
+
+    admission = None
+    turnError: Optional[str] = None
     try:
         # Bug V2-3 修复:不强制传 {"history": []} 给 agent。
         # 原代码 `body.metadata if "history" in body.metadata else {"history": []}`
@@ -178,6 +291,27 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
         call_metadata["user_id"] = user_id
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
+
+        # P2-8 §6-46：这条公开 API 与网页面共用同一份模型额度，也就必须问同一道闸
+        admission = await requestTurnAdmission(
+            ledger=ledger,
+            agentId=body.agent_id,
+            modelName=body.model or "",
+            sessionId=sessionId,
+            userInput=body.message,
+            payload=turnPayloadForV1(body, entry=ENTRY_V1CHAT, sessionId=sessionId),
+        )
+        if not admission.allowed:
+            if admission.parked:
+                return _parkedResponse(
+                    admission.runId, admission.parkReason,
+                    agentId=body.agent_id, sessionId=sessionId, requestId=request_id,
+                )
+            turnError = (
+                "让位闸判定挂起（原因 %s），但无法落库成可续跑的挂起行（请求缺 session_id"
+                " 或台账未开），本轮已中止" % (admission.parkReason or "unspecified")
+            )
+            return _failure(4008, turnError, request_id, httpStatus=503)
 
         # 调用 Agent 的 chat 方法
         response = await agent.chat(
@@ -221,6 +355,7 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
         }
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
+        turnError = str(e)
         return JSONResponse(
             status_code=500,
             content={
@@ -229,13 +364,21 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
                 "request_id": request_id,
             },
         )
+    finally:
+        await _finishV1Turn(ledger=ledger, admission=admission, error=turnError)
 
 
 @router.post("/stream")
 async def chat_stream(
-    request: Request, body: ChatStreamRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: Request,
+    body: ChatStreamRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    resume_run_id: str = "",
 ):
-    """流式对话 SSE"""
+    """流式对话 SSE
+
+    `resume_run_id` 只由续跑端点在服务端填入：复用台账原行，并按原回合属主身份执行。
+    """
     request_id = _get_request_id(request)
 
     # 权限检查
@@ -262,6 +405,18 @@ async def chat_stream(
             },
         )
 
+    sessionId = body.session_id or ""
+    if resume_run_id:
+        from neurova.core import agent_run_store as _ars
+
+        row = await asyncio.to_thread(_ars.get_agent_run_store().get, resume_run_id) or {}
+        user_id, ownerAgentId = resumeTurnIdentity(row, user_id, body.agent_id)
+        body.agent_id = ownerAgentId or body.agent_id
+
+    ledger = AgentRunLedger(
+        sessionId, user_id, body.agent_id, body.message, run_id=resume_run_id or None
+    )
+
     # 审计 P0-C1/C4：真流式改造——原实现恒走"agent.chat() 全量返回再吐一块"
     # 的假流式（首字节延迟=全响应时长，且无心跳易被网关掐断）。现对齐
     # console.py /chat 的 emitter→队列模式：agent.chat(stream=True) 后台执行，
@@ -272,6 +427,7 @@ async def chat_stream(
     async def event_generator():
         """SSE 事件生成器（真流式）"""
         audio_url = None
+        admission = None
         queue: asyncio.Queue = asyncio.Queue()
 
         def _emit(kind, data):
@@ -286,15 +442,63 @@ async def chat_stream(
         # 429 重试/切换倒计时事件转发（管线 retry_status → SSE retry）
         call_metadata["emit_status_events"] = True
 
+        async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
+            # 等待预算（默认 10×20s）远超租约 90s：每次入睡前强制续租，并把进度
+            # 转成既有 retry 事件（不新造状态面）
+            await ledger.heartbeat(force=True)
+            _emit("retry", {
+                "type": "retry",
+                "phase": "yield_wait",
+                "source": "glance_yield",
+                "retry": attempt,
+                "wait_seconds": round(float(waitSeconds), 2),
+                "reason": reason,
+                "model": body.model or "",
+            })
+
         async def run_chat():
+            nonlocal admission
+            turnSucceeded = False
             try:
-                return await agent.chat(
+                admission = await requestTurnAdmission(
+                    ledger=ledger,
+                    agentId=body.agent_id,
+                    modelName=body.model or "",
+                    sessionId=sessionId,
+                    userInput=body.message,
+                    payload=turnPayloadForV1(body, entry=ENTRY_V1CHAT_STREAM, sessionId=sessionId),
+                    onWait=_gateWaitNotice,
+                )
+                if not admission.allowed:
+                    if admission.parked:
+                        return {
+                            "parked": True,
+                            "park_reason": admission.parkReason,
+                            "run_id": admission.runId,
+                            "attempts": admission.attempts,
+                            "waited_seconds": round(admission.waitedSeconds, 2),
+                        }
+                    return {
+                        "error": (
+                            "让位闸判定挂起（原因 %s），但无法落库成可续跑的挂起行"
+                            "（请求缺 session_id 或台账未开），本轮已中止"
+                            % (admission.parkReason or "unspecified")
+                        )
+                    }
+                response = await agent.chat(
                     user_input=body.message,
                     stream=True,
                     session_id=body.session_id,
                     metadata=call_metadata,
                 )
+                turnSucceeded = True
+                return response
             finally:
+                if admission is not None and admission.allowed and not admission.parked:
+                    try:
+                        await reportAdmissionOutcome(admission, success=turnSucceeded)
+                    except Exception:  # noqa: BLE001 - 统计回执不翻案本轮结果
+                        logger.warning("让位闸回执失败（不影响本轮结果）", exc_info=True)
                 # 通知消费循环：本轮事件已全部产生
                 queue.put_nowait(_EMIT_DONE)
 
@@ -303,6 +507,16 @@ async def chat_stream(
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
 
+            # P2-8 §6-46：先落库再执行；排队进度/超时/被取消都以同一条 SSE 上的
+            # 具名事件如实透出（rejected 时台账已补发收尾事件）
+            for event in await ledger.acquire():
+                yield (
+                    f"event: {event.get('type')}\n"
+                    f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                )
+            if ledger.rejected:
+                return
+
             task = asyncio.create_task(run_chat())
             # RES-P2-2：注册任务表（对齐 console.py）——带 session_id 的轮次
             # 可被 /console/chat/stop 真取消；完成后由 tracker 自动摘除
@@ -310,8 +524,12 @@ async def chat_stream(
                 from neurova.core.task_tracker import get_task_tracker
 
                 get_task_tracker().register_async_task(body.session_id, task, kind="chat")
+            # 台账终态单点收敛：task 完成回调（生成器早退/断线也不丢终态）
+            ledger.attach(task)
             seen_content = False
             while True:
+                # 台账心跳（内部 5s 节流；空闲 15s 的 ping 分支会顺带把它推动）
+                await ledger.heartbeat()
                 try:
                     item = await asyncio.wait_for(queue.get(), timeout=15.0)
                 except asyncio.TimeoutError:
@@ -334,6 +552,19 @@ async def chat_stream(
             # 整轮结束后取 chat() 返回值：TTS audio 产物 + 兜底文本
             response = await task
             reply_text = ""
+            if isinstance(response, dict) and response.get("parked"):
+                # P2-8：闸判挂起且已落库——这一轮没跑，流以 parked+done 收尾
+                parkedPayload = {k: v for k, v in response.items() if k != "parked"}
+                parkedPayload["type"] = "parked"
+                yield f"event: parked\ndata: {json.dumps(parkedPayload, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
+                return
+            if isinstance(response, dict) and response.get("error"):
+                # 没落库的"挂起"没有续跑入口，只能如实报失败，不能静默 done
+                errPayload = {"type": "error", "error": response["error"]}
+                yield f"event: error\ndata: {json.dumps(errPayload, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
+                return
             if isinstance(response, dict):
                 reply_text = response.get("text", "")
                 audio_url = _tts_audio_http_url(response.get("audio_path"), body.agent_id)

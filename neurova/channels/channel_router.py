@@ -8,6 +8,8 @@
 与 `resolve_session_scope_id`，用**一个**常驻 handler 打通：
 
   入站 ChannelMessage →（agent_id 来自装配期 metadata）→ get_agent_instance(agent_id)
+  → **run 台账登记 + 让位闸准入**（P2-8 §6-46：与网页/API 入口共用 `core/agent_run_ledger`
+     那一份实现；等不到额度就把这一轮挂起成 parked，回一条带 run_id 的诚实回执）
   → agent.chat(user_input, session_id=resolve_session_scope_id(msg),
      metadata={user_id=发送者, source_channel=渠道, role=user})
   → 返回回复文本 → manager._dispatch_message 自动 send_message 回发到该渠道该会话。
@@ -25,6 +27,13 @@ from neurova.channels.base import ChannelMessage
 from neurova.channels.group_leadership import (
     get_group_leadership_arbiter,
     get_group_leadership_config,
+)
+from neurova.core.agent_run_ledger import (
+    ENTRY_CHANNEL,
+    AgentRunLedger,
+    parkReceiptText,
+    reportAdmissionOutcome,
+    requestTurnAdmission,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +66,19 @@ def _flag(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
     return bool(value)
+
+
+async def _reportAdmission(admission) -> None:
+    """回填 pacing 统计（Layer 3 间距/节律的判据来源）。
+
+    失败只点名不抛出：这一轮的回复已经发出去了，统计回执不该把答完的回合翻成失败。
+    """
+    if admission is None or not admission.allowed:
+        return
+    try:
+        await reportAdmissionOutcome(admission, success=True)
+    except Exception:  # noqa: BLE001
+        logger.warning("ChannelRouter: 让位闸回执失败（不影响本轮）", exc_info=True)
 
 
 def _detect_sender_is_bot(message: ChannelMessage) -> bool:
@@ -149,12 +171,55 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # getattr(agent, "owner_user_id") 恒 None，渠道会话归属链自
         # 2026-09 断链设计起从未生效（save_to_session 落"共享可见"）。
         owner = str(getattr(getattr(agent, "config", None), "owner_user_id", "") or "") or None
+        # P2-8 §6-46：渠道回合与网页面共用同一份模型额度，也就必须问同一道闸、
+        # 落同一本账。台账/闸口/续跑身份的执行体只有 `core/agent_run_ledger` 一处实现。
+        # 会话属主＝agent 属主（渠道会话本就落在他名下，`session_title` 上方已设），
+        # 所以挂起回执里"去网页控制台点续跑"是真能做到的。
+        ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
         try:
             set_request_user_id(owner)
-            resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)
-        except Exception:
-            logger.exception("ChannelRouter: agent.chat 失败（channel=%s agent=%s）", message.channel_type, agent_id)
-            return None
+            preflight = await ledger.acquire()
+            if ledger.rejected:
+                # 排队期被 /chat/stop 取消，或排队超时：如实回一句，不静默吞掉
+                notice = next(
+                    (str(e.get("message") or "") for e in preflight if e.get("type") == "error"),
+                    "该回合在排队期间被取消",
+                )
+                return [notice]
+
+            admission = await requestTurnAdmission(
+                ledger=ledger,
+                agentId=agent_id,
+                modelName="",  # 渠道不指定模型：未归因回合仍受并发/间距/限流各层约束
+                sessionId=session_id,
+                userInput=content,
+                payload={
+                    "entry": ENTRY_CHANNEL,
+                    "message": content,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "model": None,
+                    "stream": False,
+                },
+            )
+            if not admission.allowed:
+                if admission.ledgerFailed:
+                    # 没落库的"挂起"没人能续——按假状态处理比按成功处理更安全，但必须点名
+                    return [
+                        f"本轮未能执行（让位原因 {admission.parkReason or 'unspecified'}），"
+                        "且挂起未能落库，请重发"
+                    ]
+                return [parkReceiptText(admission, resumableWhere="请在网页控制台该会话里点「续跑」")]
+
+            try:
+                resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)
+            except Exception:
+                logger.exception("ChannelRouter: agent.chat 失败（channel=%s agent=%s）", message.channel_type, agent_id)
+                ledger.settleResult({"error": "chat_error"})
+                await _reportAdmission(admission)
+                return None
+            ledger.settleResult(resp if isinstance(resp, dict) else {})
+            await _reportAdmission(admission)
         finally:
             clear_request_user_id()
         if isinstance(resp, dict):
