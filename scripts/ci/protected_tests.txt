@@ -1576,15 +1576,6 @@ tests/unit/api/test_frontendErrorIngest.py
 # 判据取行为（占用率 ≥85% 且不越界）+ AST 防回流（系数属性与退役实现不得复活）。
 # 逐文件单跑 4 passed
 tests/unit/context/test_memoryFoldBudgetParity.py
-# P2-7：懒建单例的双检锁。实测原状是 74 处模块全局 `if _x is None: _x = X()` 与 5 处
-# `cls._instance` 同形**完全不带锁**——并发首访各建一份，后写的覆盖先建的，先建那份带着
-# 已注册的回调/已开的连接被静默丢弃（单线程测试永远看不见）。唯一实现落
-# `core/lazy_singleton.lazySingleton`（缓存名写错会在装饰期 ValueError——写错=每次重建，
-# 正是本批要消灭的故障，不能留到运行时静默退化）。判据三层：并发探针（barrier 强制构造
-# 重叠，修前 8 次构造、修后 1 次）、全仓 AST 扫"裸判空即建"归零、以及 DCL 用非可重入
-# Lock 的 165 处只降不升棘轮（那格属 §6-19 后续批次，不在此放宽）。
-# 逐文件单跑 6 passed
-tests/unit/core/test_lazySingletonDcl.py
 # P2-7：懒建单例的判空必须是双检锁。实测原状有 **74 处模块全局** `if _x is None: _x = X()`
 # 与 **5 处 `cls._instance` 同形完全不带锁**——并发首访各建一份，后写的把先建的覆盖掉，
 # 先建那份连同已注册的回调/已开的连接被静默丢弃（单线程测试永远看不见这一类）。
