@@ -305,6 +305,16 @@ class StudioStore:
         return self._fetch_all(
             "SELECT * FROM storyboards WHERE episode_id=? ORDER BY number", (eid,))
 
+    def listEpisodeIdsWithRunningVideos(self) -> List[str]:
+        """有"在跑的视频"的分集 id（去重）。
+
+        服务端收口驱动器用它自己找活干——此前这件事只有 HTTP 投影在做，于是
+        "有没有人来看"决定了"任务算不算跑完"。
+        """
+        return [r["episode_id"] for r in self._fetch_all(
+            "SELECT DISTINCT episode_id FROM storyboards"
+            " WHERE video_status='running' AND ledger_task_id <> ''")]
+
     def update_storyboard(self, sid: str, fields: Dict[str, Any]) -> None:
         row = dict(fields)
         if "characters" in row:

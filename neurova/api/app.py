@@ -1105,6 +1105,15 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("AgentRun 租约扫描启动失败: %s", e)
 
+    # Studio 视频收口周期驱动器：账本由 recovery 收敛，镜头行必须有人回写它——
+    # 改前这件事只发生在 GET /episodes/{eid} 的投影里，等于"有人来看任务才算跑完"
+    try:
+        from neurova.aigc_studio.video_reconcile import startReconcileSweep
+
+        startReconcileSweep()
+    except Exception as e:
+        logger.warning("Studio 视频收口驱动器启动失败: %s", e)
+
     # 批次4：内置短剧一键成片模板种子入工作流库（幂等；AIGC 页实例化消费）
     try:
         from neurova.collaboration.neurflow.storage import NeurflowStorage
@@ -1188,6 +1197,14 @@ async def _on_shutdown(app_state: AppState) -> None:
         await stopStaleSweep()
     except Exception as e:
         logger.warning("AgentRun 租约扫描停止异常: %s", e)
+
+    # 停止 Studio 视频收口驱动器：与上面同一条纪律——启停必须成对
+    try:
+        from neurova.aigc_studio.video_reconcile import stopReconcileSweep
+
+        stopReconcileSweep()
+    except Exception as e:
+        logger.warning("Studio 视频收口驱动器停止异常: %s", e)
 
     # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:
