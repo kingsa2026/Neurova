@@ -13,6 +13,16 @@
 这里不放"已知会写根目录"的例外名单——一旦开口就重演"用 ignore 当止痛"。
 真需要在根目录落东西的合法流程（构建产物等）应显式改 CWD 或走数据根锚点，
 而不是让守卫闭嘴。
+
+探针自己的落点（`83dad089`，2026-10-09）：本文件的探针一度把临时用例写进**共享**
+`tests/unit/`、又以 `cwd=REPO_ROOT` 起子进程，于是子进程建的顶层垃圾目录也落在共享仓库根。
+`finally` 抹掉后本会话看不出错，但同一工作树里另一条并发会话会把它记给**自己的**无辜用例
+（实测：§6-9 批的宽域 A/B 里 `test_candidate_statistics_come_from_real_prune_history`
+的 teardown 报出 `zzPollutionProbeJunk`）。现改为在仓外 detached git worktree 里跑探针，
+整模块共用一棵树，并由 `test_probeWritesStayOutOfTheSharedWorkingTree` 以轮询线程钉住
+"共享根与共享 tests/unit 全程无痕"——判据走过程观测，事后检查会被 `finally` 抹平。
+另：该笔提交正文写的净 LOC `+85/-16` 是估算，按 `git diff --numstat` 实数为 **112/8**，
+在此勘误（本仓先例：不改历史，另笔落字）。
 """
 
 import os
