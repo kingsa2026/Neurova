@@ -26,12 +26,23 @@ class _SplitJudge:
     async def score(self, *, task_input, expected_behavior, output, skill_text, **kw):
         table = self._candidate if MARKER in skill_text else self._base
         value = table.get(task_input, 0.0)
+        # feedback 非空：台账的 `hypothesis` 由失败反馈拼成，Task 4 要拿它去核提示词
         return FitnessScore(correctness=value, procedure_following=value,
-                            conciseness=value, feedback="")
+                            conciseness=value, feedback=f"缺执行步骤:{task_input}")
 
 
 class _EchoAgent:
+    """回显执行器；`candidateFailOn` 让候选侧某例执行抛错——模拟「这一例没量出来」。"""
+
+    def __init__(self, failOn=(), candidateFailOn=()):
+        self._fail = set(failOn)
+        self._candidateFail = set(candidateFailOn)
+
     async def run(self, *, skill_text, task_input):
+        if task_input in self._fail:
+            raise RuntimeError("probe: 该用例执行失败")
+        if task_input in self._candidateFail and MARKER in skill_text:
+            raise RuntimeError("probe: 候选侧该用例执行失败")
         return f"out::{skill_text}"
 
 
@@ -93,3 +104,54 @@ class TestRejectedRunFlipsLedgerOutcome:
         assert result.reject_reason != "case_regression", result.reject_reason
         accepted = [r for r in ledger.tail("s2", 10) if r.get("accepted")]
         assert len(accepted) == 1, "确有部署发生时，台账必须有且只有一条被部署记录"
+
+
+class TestNoFabricatedLedgerOutcome:
+    """Task 3：终态回写不许凭空造行，也不许把「没量出来」写成质量结论。"""
+
+    @pytest.mark.asyncio
+    async def testEarlyRejectionsWriteNoLedgerRow(self, tmp_path):
+        """候选前的两处早退（空数据集 / 判分不可用）没有胜者行——造一行即伪造结局。"""
+        ledger = EvolutionLedger(tmp_path / "history")
+        runner = _runner(ledger, BASE_SCORES, CANDIDATE_SCORES, EvolutionConfig())
+
+        empty = await runner.run(
+            baseline_text=BASELINE, dataset=EvalDataset(train=[], val=[], holdout=[]),
+            artifact_type="skill", ledger_key="s-empty")
+        assert empty.reject_reason == "empty_dataset", empty.reject_reason
+        assert ledger.tail("s-empty", 5) == [], "空数据集不该有结局行"
+
+        class _BrokenJudge:
+            """判分基础设施不可用：探针自身故障按既有口径保守判不可用。"""
+
+            async def score(self, **kw):
+                raise RuntimeError("probe: 判分器不可用")
+
+        broken = SkillEvolutionRunner(
+            EvolutionConfig(), judge=_BrokenJudge(), agent=_EchoAgent(),
+            mutate=_markerMutate, ledger=ledger)
+        result = await broken.run(
+            baseline_text=BASELINE, dataset=_dataset(["a"]),
+            artifact_type="skill", ledger_key="s-judge")
+        assert result.reject_reason == "judge_unavailable", result.reject_reason
+        assert ledger.tail("s-judge", 5) == [], "判分没跑起来就没有结局可记"
+
+    @pytest.mark.asyncio
+    async def testUnevidencedOnlyRejectionIsNotRecordedAsCaseRegression(self, tmp_path):
+        """只有「未量出」而没有实测退化时门不主张：台账不得出现 case_regression 那一行。"""
+        ledger = EvolutionLedger(tmp_path / "history")
+        runner = SkillEvolutionRunner(
+            EvolutionConfig(iterations=1, min_improvement=0.0, case_regression_allowance=0),
+            judge=_SplitJudge({"a": 0.4, "b": 0.4}, {"a": 0.9, "b": 0.9}),
+            agent=_EchoAgent(candidateFailOn=("b",)),
+            mutate=_markerMutate, ledger=ledger)
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b"]),
+            artifact_type="skill", ledger_key="s-unev")
+
+        assert result.unevidencedCases == ["b"], result.unevidencedCases
+        assert result.caseRegressions == []
+        assert result.reject_reason != "case_regression", result.reject_reason
+        rows = ledger.tail("s-unev", 10)
+        assert not [r for r in rows if r.get("reject_reason") == "case_regression"], (
+            f"器械故障被写成了质量结论: {rows}")
