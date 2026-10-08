@@ -1777,3 +1777,15 @@ tests/unit/api/test_roleGateIdentitySourceIsStrict.py
 # 防谓词宽到把正确写法算进基线、把棘轮稀释成噪声。降了会**红着提示收基线**，
 # 不让"悄悄比基线好"变成"再没人回来核"。逐文件单跑 9 passed in 6.19s
 tests/unit/ci/test_subprocessTextEncodingRatchet.py
+# §6-66 的实际待办：`tests/manual/` 脚本"模块顶层改进程 env"的只降不升棘轮。
+# 上一轮把 E 档判成"改造脚本 + 退役收集拦截层"，读码后推翻：拦截层是**收集期根修**
+# （脚本必须在 `import neurova` 之前改环境，被收集即导入即把变量带进整个跑测进程，
+# 实测掩盖过一次会话落点守卫），退役它等于把防护换成运气。于是待办收缩为"别让它继续长"。
+# 基线本轮 AST 实测 **20 文件 / 25 处**（只数顶层，不进函数/类/lambda 体）。
+# 一段自纠留着有用：第一版谓词用 `ast.walk` 从顶层语句直接下钻，把函数体内的
+# `os.environ[...] = ` 也算了进去，量成 24/32，差点据此在台账里判
+# `tests/manual/conftest.py` 自记的"21 文件 27 处"已漂——是本文件自己的反向断言
+# `test_functionLevelEnvWriteIsNotCounted` 抓回来的。三条防空转各有分工：
+# 覆盖性（目录在、脚本数 >50）、注入探针（真种一个违规脚本必须被数到）、
+# 反向断言（函数体内改 env 不算）。逐文件单跑 6 passed
+tests/unit/ci/test_manualScriptsEnvMutationRatchet.py
