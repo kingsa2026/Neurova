@@ -5,7 +5,7 @@
 - `NEUROVA_GENERATION_RETENTION_DAYS` 默认 **0=关闭**——开启权在用户；
 - 仅删「账本终态（done/failed）+ 超期 + local_path 位于产物目录内」的文件；
   **账本行永不删**（历史面板据 local_path 存在性显示已过期态）；
-- Studio 库（storyboards/characters/assets/episodes/merges）在引用的路径一律
+- Studio 库（storyboards/characters/scenes/props/episodes/merges）在引用的路径一律
   保护；Studio 库读取失败 → 整轮放弃（宁可不清，不冒删用在产物之险）；
 - 纯账本驱动：产物目录里无账本记录的文件不碰；
 - 启动后台任务执行（与 ffmpeg bootstrap 同款不阻塞；同步文件 IO 走
@@ -30,10 +30,13 @@ ENV_DAYS = "NEUROVA_GENERATION_RETENTION_DAYS"
 _TERMINAL = ("done", "failed")
 
 # Studio 库中代表"产物被引用"的 (表, 列) 组合
+# 三份 `image_path`（角色定妆图 / 场景参考图 / 道具参考图）都在镜头生成时被
+# `resolveShotContinuity` 作为参考图读取，漏一条就是删掉还在用的参考件。
 _REF_COLUMNS = [
     ("storyboards", "first_frame_path"), ("storyboards", "end_frame_path"),
     ("storyboards", "video_path"), ("storyboards", "audio_path"),
-    ("characters", "image_path"), ("assets", "ref_path"),
+    ("characters", "image_path"), ("scenes", "image_path"),
+    ("props", "image_path"),
     ("episodes", "video_path"), ("episodes", "subtitle_path"),
     ("merges", "output_path"),
 ]
