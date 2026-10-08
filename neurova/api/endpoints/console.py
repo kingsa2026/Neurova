@@ -1309,6 +1309,9 @@ async def get_console_chat_runs(
                     "error_type": r.get("error_type") or "",
                     "subagent_id": r.get("subagent_id") or "",
                     "agent_id": r.get("agent_id") or "",
+                    # 窗口标题要显示"这条子任务在做什么"——digest 就是 intake 时存的 task 摘要，
+                    # 缺它的话刷新后小窗只剩一个 id，回读等于没回读
+                    "task": r.get("message_digest") or "",
                     "attempt": int(r.get("attempt") or 0),
                     "cancel_requested": bool(r.get("cancel_requested")),
                     "created_at": r.get("created_at"),

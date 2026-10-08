@@ -459,7 +459,7 @@ import { formatFileSize, getFileCategory, getFileIcon } from '@/utils/fileKind'
 import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
 import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
-import { useSubAgentWindows } from '@/composables/useSubAgentWindows'
+import { useSubAgentWindows, restoreSubAgentWindows } from '@/composables/useSubAgentWindows'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
 import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
@@ -2500,7 +2500,12 @@ watch(agentId, (newId, oldId) => {
 
 // P2-15（审计 2026-09-11）：会话切换回收子 Agent 浮窗（模块级单例跨会话残留）。
 // 浮窗状态不随会话持久化，切换后旧窗不再有事件流入，一律整栈回收。
-watch(currentSessionId, () => clearSubAgentWindows())
+watch(currentSessionId, async (sid) => {
+  clearSubAgentWindows()
+  // §6-78 L 条：回收之后从台账读面把这条会话派出的子任务捡回来——
+  // 改前切会话/刷新即整栈清零，而运行中的子任务其实还在跑，只是界面再也看不见它
+  await restoreSubAgentWindows(sid ?? '', () => currentSessionId.value === sid)
+}, { immediate: true })   // 刷新进页面时 currentSessionId 已有值，不等它也就不回读
 
 onMounted(() => {
   loadSessions()
