@@ -14,6 +14,12 @@ from neurova.evolution.eval.fitness import FitnessScore
 from neurova.evolution.eval.history_ledger import GATE_REASON_PREFIXES
 from neurova.evolution.eval.runner import SkillEvolutionRunner, _caseRegressionReadout
 
+# 走 `service.evolve` 的那条判据会第一次拉起 jieba（约束闸的语义相似度面，
+# `constraints.py:190`），而在 coverage 下 jieba 冷启动实测 37.5s——超全局 30s 的
+# 线程法 timeout 会把整场门禁打断（两次带 --cov 的受保护子集跑都在同一格断）。
+# 放宽按仓内既有标法（模块级 pytestmark），数值给实测的 3 倍余量。
+pytestmark = pytest.mark.timeout(120)
+
 
 # 基线要够长：service 装配路径带约束闸（growth_limit / semantic_similarity），
 # 正文太短则"任何追加"都超增长上限，候选压根走不到评测（先例
