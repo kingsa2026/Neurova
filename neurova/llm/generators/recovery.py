@@ -32,6 +32,9 @@ from neurova.llm.generators.runtime import (
     resolve_generation_creds,
 )
 from neurova.llm.generators.task_ledger import (
+    TASK_FAILED,
+    TASK_RUNNING,
+    TASK_SUCCEEDED,
     GenerationTaskLedger,
     TaskRecord,
     get_generation_task_ledger,
@@ -57,33 +60,33 @@ async def settle_video_record(record: TaskRecord, ledger: Optional[GenerationTas
     try:
         result = await protocols.poll_video(creds, record.remote_task_id, record.poll_url)
     except Exception as e:  # noqa: BLE001
-        result = {"status": "failed", "error": str(e)[:300]}
+        result = {"status": TASK_FAILED, "error": str(e)[:300]}
 
-    status = str(result.get("status") or "running")
-    if status == "succeeded":
+    status = str(result.get("status") or TASK_RUNNING)
+    if status == TASK_SUCCEEDED:
         video_url = result.get("video_url") or ""
         if video_url.startswith("http"):
             try:
                 path = await persist_media(video_url, "video", record.task_id, 0)
-                ledger.update(record.task_id, status="succeeded", result_url=video_url,
+                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url,
                               local_path=path)
                 _record_video_usage(record, "success")
-                return {"status": "succeeded", "url": local_url_for(path)}
+                return {"status": TASK_SUCCEEDED, "url": local_url_for(path)}
             except Exception as e:  # noqa: BLE001 — 下载失败仍回成功+远端 URL（可能已过期）
-                ledger.update(record.task_id, status="succeeded", result_url=video_url)
+                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url)
                 _record_video_usage(record, "success")
-                return {"status": "succeeded", "url": video_url,
+                return {"status": TASK_SUCCEEDED, "url": video_url,
                         "warning": f"本地化失败: {str(e)[:200]}"}
-        ledger.update(record.task_id, status="succeeded", result_url=video_url)
+        ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url)
         _record_video_usage(record, "success")
-        return {"status": "succeeded", "url": video_url}
-    if status == "failed":
+        return {"status": TASK_SUCCEEDED, "url": video_url}
+    if status == TASK_FAILED:
         err = str(result.get("error") or "")[:300]
-        ledger.update(record.task_id, status="failed", error=err)
+        ledger.update(record.task_id, status=TASK_FAILED, error=err)
         _record_video_usage(record, "failed")
-        return {"status": "failed", "error": err}
-    ledger.update(record.task_id, status="running")
-    return {"status": "running"}
+        return {"status": TASK_FAILED, "error": err}
+    ledger.update(record.task_id, status=TASK_RUNNING)
+    return {"status": TASK_RUNNING}
 
 
 def _record_video_usage(record: TaskRecord, status: str) -> None:

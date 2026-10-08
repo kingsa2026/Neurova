@@ -4,8 +4,9 @@
 契约：
 - NEUROVA_GENERATION_RETENTION_DAYS 默认 0=关闭（保守；用户拍板不激进）；
 - 仅删「账本终态 + 超期 + 路径在产物目录内」的文件；**账本行永不删**
-  （历史面板据此显示已过期态）；
-- 引用完整性：Studio 库（storyboards/characters/assets/episodes/merges）
+  （历史面板据此显示已过期态）；终态判定引用 `task_ledger.TASK_TERMINAL_STATUSES`
+  单源，不在本地抄集合（§6-78 E 条）；
+- 引用完整性：Studio 库（storyboards/characters/scenes/props/episodes/merges）
   在引用的路径一律保护；Studio 库读取失败 → 本轮整体放弃（宁可不清，
   不冒删用在产物之险）；
 - 产物目录之外的路径拒删（安全守卫）；
@@ -19,6 +20,7 @@ import sqlite3
 import pytest
 
 from neurova.llm.generators import retention as rt
+from neurova.llm.generators import task_ledger as tl
 from neurova.llm.generators.task_ledger import GenerationTaskLedger, TaskRecord
 
 pytestmark = pytest.mark.timeout(60)
@@ -38,7 +40,11 @@ def out_dir(tmp_path):
     return d
 
 
-def _rec(led, task_id, path, status="done", age_days=10):
+def _rec(led, task_id, path, status=tl.TASK_SUCCEEDED, age_days=10):
+    """夹具词值必须取**账本真值**（`task_ledger` 单源）——改前默认写 `"done"`，
+    而 `done` 是账本里不存在的状态（成功态由 `recovery` 写 `succeeded`）：
+    11 档判据一起对着假状态测，于是清理逻辑在生产形态下从未清过成功件，
+    这套测试却全绿（§6-78 E 条）。"""
     return led.add(TaskRecord(
         kind="image", task_id=task_id, status=status, local_path=path,
         submitted_at=rt_time(age_days), updated_at=rt_time(age_days)))
@@ -84,7 +90,7 @@ class TestPurge:
     def test_non_terminal_status_not_deleted(self, ledger, out_dir):
         f = out_dir / "running.png"
         f.write_bytes(b"X")
-        _rec(ledger, "t4", str(f), status="running")
+        _rec(ledger, "t4", str(f), status=tl.TASK_RUNNING)
         stats = rt.purge_expired_files(ledger, referenced=set(), days=7, out_dir=out_dir)
         assert stats["deleted"] == 0 and f.exists()
 
