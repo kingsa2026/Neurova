@@ -1820,3 +1820,9 @@ tests/unit/aigc_studio/test_videoReconcileNeedsNoReader.py
 # 声明面的同批判据在本文件已在册的
 # tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProviderChatModelDepsDeclaredForRuntime。
 tests/unit/api/test_model_connection_contract.py
+# §8 前置 3 呈现账单源（对照报告 docs/08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md）
+# 前者钉"呈现→派发→执行→完成"四级同账且轮级去重、cold 臂不计数、视图分支按库路由；
+# 后者钉呈现只剩一处定义（退役 times_presented）且生产写入点数死为 1——双源复发即红。
+# 逐文件单跑：19 passed / 4 passed（落库后复取）。
+tests/unit/evolution/test_funnelPresentationAccounting.py
+tests/unit/evolution/test_singlePresentationAccountGuard.py
