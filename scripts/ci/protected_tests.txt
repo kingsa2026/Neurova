@@ -1866,3 +1866,14 @@ tests/unit/agent/test_swarmTerminalStateOnTimeoutAndCancel.py
 # `swarm.py` 不得出现本地 INSERT/UPDATE agent_runs（AST + 反向对照，防"扫空即全绿"）；
 # STARTED 事件必须带 status。逐文件单跑两次各 11 passed
 tests/unit/core/test_subagentRunsInLedger.py
+
+# H2-3 · ①④② 三格（§6-86）：这两档锁的是长任务的「一行台账、一个归属、一次判定」。
+# ④ 句柄按 run_id 进 task_tracker（模块级裸 set 只能防 GC，找不回任何一条任务；
+#    被取消的 run 也必须落终态而不是永久 running）；
+# ① 四个批量服务自己结算那一行——一批里有失败/被阻断就是 done_with_fallback 并点名条数，
+#    不许 wrapper 把它兜成干净的 done（§6-70 第③格的残留面）；一次请求只留一行该 kind。
+# ② 「未结束」只按 RUN_TERMINAL_STATUSES 判一次，禁 `==/!= RUN_RUNNING` 式窄比较
+#    （今天等价，属防漂移收口；判据与反向对照同格写明不是活 bug）。
+# 逐文件单跑两次各 7 / 6 passed
+tests/unit/api/test_studioRunHandleRegistry.py
+tests/unit/aigc_studio/test_batchRunsSettleOwnRow.py
