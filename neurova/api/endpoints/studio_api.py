@@ -284,7 +284,7 @@ async def update_episode(eid: str, body: Dict[str, Any] = Body(...),
     store = get_store()
     _project, _ep = _episode_with_project(store, eid, current_user)
     fields = {k: v for k, v in body.items()
-              if k in ("title", "content", "synopsis", "status", "duration")}
+              if k in ("title", "content", "synopsis", "status")}
     store.update_episode(eid, fields)
     return {"code": 0, "data": {"episode": store.get_episode(eid)}}
 
@@ -297,8 +297,8 @@ async def add_storyboard_manual(eid: str, body: Dict[str, Any] = Body(...),
     store = get_store()
     _project, ep = _episode_with_project(store, eid, current_user)
     keep = ("number", "title", "description", "image_prompt", "video_prompt",
-            "narration", "camera", "movement", "atmosphere", "bgm_prompt",
-            "sound_effect", "duration", "characters", "props", "scene_id",
+            "narration", "camera", "movement", "atmosphere",
+            "duration", "characters", "props", "scene_id",
             "first_frame_path", "end_frame_path")
     row = {k: v for k, v in body.items() if k in keep}
     if not any(str(row.get(k) or "").strip() for k in ("description", "image_prompt", "video_prompt")):
@@ -319,7 +319,7 @@ async def update_storyboard(sid: str, body: Dict[str, Any] = Body(...),
     _episode_with_project(store, sb["episode_id"], current_user)
     fields = {k: v for k, v in body.items() if k in (
         "title", "description", "image_prompt", "video_prompt", "narration",
-        "camera", "movement", "atmosphere", "bgm_prompt", "sound_effect",
+        "camera", "movement", "atmosphere",
         "duration", "characters", "props", "scene_id",
         "first_frame_path", "end_frame_path")}
     store.update_storyboard(sid, fields)
