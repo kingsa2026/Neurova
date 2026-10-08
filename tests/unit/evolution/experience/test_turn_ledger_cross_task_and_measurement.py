@@ -84,7 +84,7 @@ class TestSkillFunnelSurvivesTheTaskBoundary:
         )
         assert rows == [
             {"skill_id": "demo-skill", "applied": True, "ok": True,
-             "pool": "agent", "owner_key": ""}
+             "pool": "agent", "owner_key": "", "stage": "dispatch"}
         ], (
             "子任务里的技能派发记录没进父轮次账本："
             f"父读到 {rows!r}——整本漏斗账本会丢"
@@ -115,7 +115,7 @@ class TestSkillFunnelSurvivesTheTaskBoundary:
         rows = asyncio.run(scenario())
         assert rows == [
             {"skill_id": "cold-parent", "applied": True, "ok": True,
-             "pool": "agent", "owner_key": ""}
+             "pool": "agent", "owner_key": "", "stage": "dispatch"}
         ], (
             "写入方在父上下文未绑账本时于子任务内自建列表，父轮次读到空账本："
             f"父读到 {rows!r}"
