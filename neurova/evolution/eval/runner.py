@@ -59,6 +59,10 @@ class EvolutionRunResult:
     deployed_text: str = ""
     holdout_before: float = 0.0
     holdout_after: float = 0.0
+    # 留出侧例级读数（§8 前置 1）：{task_input: {baseline, candidate,
+    # baseline_failed, candidate_failed}}。均分照旧，明细只是不再被丢掉——
+    # 「谁被改坏了」这类判据读的是例级，集级均值会把一条撞坏被另一条涨幅抵掉。
+    holdout_case_scores: dict = field(default_factory=dict)
     train_before: float = 0.0
     train_best: float = 0.0
     iterations_run: int = 0
@@ -115,6 +119,7 @@ class EvolutionRunResult:
             "reject_reason": self.reject_reason,
             "holdout_before": round(self.holdout_before, 4),
             "holdout_after": round(self.holdout_after, 4),
+            "holdout_cases": dict(self.holdout_case_scores),
             "improvement": round(self.improvement, 4),
             "train_before": round(self.train_before, 4),
             "train_best": round(self.train_best, 4),
@@ -480,7 +485,13 @@ class SkillEvolutionRunner:
             result.reject_reason = "judge_unavailable"
             return result
 
-        result.holdout_before = await self._evaluate_avg(baseline_text, holdout, artifact_type)
+        holdoutBeforeAvg, holdoutBeforeDetails = await self._evaluate(
+            baseline_text, holdout, artifact_type)
+        result.holdout_before = holdoutBeforeAvg
+        holdoutBaseScores = {
+            ex.task_input: (score, failed)
+            for ex, score, _o, _f, failed in holdoutBeforeDetails
+        }
         result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
         # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
         base_scores = {ex.task_input: score for ex, score, _o, _f, _failed in train_details}
@@ -557,7 +568,23 @@ class SkillEvolutionRunner:
                 best_seq = seq
 
         result.train_best = best_score
-        result.holdout_after = await self._evaluate_avg(best_text, holdout, artifact_type)
+        holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
+            best_text, holdout, artifact_type)
+        result.holdout_after = holdoutAfterAvg
+        holdoutCandScores = {
+            ex.task_input: (score, failed)
+            for ex, score, _o, _f, failed in holdoutAfterDetails
+        }
+        result.holdout_case_scores = {
+            task: {
+                "baseline": holdoutBaseScores[task][0],
+                "candidate": holdoutCandScores[task][0],
+                "baseline_failed": holdoutBaseScores[task][1],
+                "candidate_failed": holdoutCandScores[task][1],
+            }
+            for task in holdoutCandScores
+            if task in holdoutBaseScores
+        }
         result.deployed_text = best_text
         # P1-4：胜者在留出集上的实测差回填其台账记录（无论最终接受与否，
         # 这都是该假设的诚实证据）
