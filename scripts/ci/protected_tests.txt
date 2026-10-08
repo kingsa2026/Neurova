@@ -1841,3 +1841,10 @@ tests/unit/aigc_studio/test_crossEpisodeContinuity.py
 # 扫描面按 import 现场反推（不手抄清单），两格各带反向对照防"扫空即全绿"。
 # 逐文件单跑两次各 21 passed
 tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py
+
+# H2-4 · G 条 视频规格绑进镜头行（§6-83）：这一档锁的是「这条镜头用哪档规格提交的，
+# 必须写下去有人读」。判据打在跨调用链的行为上——整集首发传 720p 时实际发出的与库里落的
+# 是同一枚；单镜重试**不传任何规格**时，提交的仍是这一镜当初的值（改前落回服务层默认 1080p，
+# 用户点「重试」被悄悄换尺寸）；兜底口径只许 services 一处，端点重述 `"1080p"` 这类字面量即红
+# （AST 判 + 反向对照，防「扫空即全绿」）；旧库缺列须被幂等补回。逐文件单跑两次各 8 passed
+tests/unit/aigc_studio/test_retryInheritsShotSpec.py
