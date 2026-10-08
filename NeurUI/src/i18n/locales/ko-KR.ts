@@ -3706,6 +3706,9 @@ studio: {
   runPartial: '작업이 일부 문제로 완료됨: {detail}',
   runPartialFailed: '{n}개 실패',
   runPartialBlocked: '{n}개 차단됨',
+  stopRun: '작업 중지',
+  runCancelled: '작업이 중지됨',
+  runCancelQueued: '중지 요청됨: 현재 단계만 마무리되고 계속되지 않음',
   retryStarted: '재시도 시작',
 },
 

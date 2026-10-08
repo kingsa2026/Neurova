@@ -46,6 +46,7 @@ vi.mock('@/api/modules/studio', () => ({
   updateAsset: vi.fn(),
   mergeEpisode: vi.fn(),
   addStoryboardManually: vi.fn(),
+  cancelStudioRun: vi.fn(),
 }))
 vi.mock('ant-design-vue', () => ({
   // warning 是真 API 的一员（antd message 有 warning），补齐才不至于把"组件没调它"
@@ -58,7 +59,7 @@ import { message } from 'ant-design-vue'
 import { waitStudioRun } from '@/composables/useStudioRun'
 import {
   getProject, getEpisode, runSplitScript, retryStoryboard, updateStoryboard, mergeEpisode,
-  runGenerateImages, runGenerateVideos, runAssetImages,
+  runGenerateImages, runGenerateVideos, runAssetImages, cancelStudioRun,
 } from '@/api/modules/studio'
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
@@ -117,6 +118,7 @@ describe('StudioProjectPage', () => {
   const retryMock = retryStoryboard as unknown as ReturnType<typeof vi.fn>
   const updateSbMock = updateStoryboard as unknown as ReturnType<typeof vi.fn>
   const mergeMock = mergeEpisode as unknown as ReturnType<typeof vi.fn>
+  const cancelRunMock = cancelStudioRun as unknown as ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -206,6 +208,40 @@ describe('StudioProjectPage', () => {
     expect(text).toContain('雨夜对峙')
     expect(text).toContain('林凡（青年男，黑色风衣）推门而入，冷色调')
     expect(text).toContain('实际注入提示词')
+  })
+
+  it('长任务在跑时记着它的 run_id，停止按钮把两个读数分开播报（取消四件套的前端那一件）', async () => {
+    let release: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((res) => { release = res }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const running = vm.track('images', 'run_live')
+    await flushPromises()
+    // 意图与句柄都在服务端收敛，前端只负责"知道现在跑的是哪一条"并把它交出去
+    expect(vm.activeRuns.images).toBe('run_live')
+    expect(wrapper.text()).toContain('停止任务')
+
+    cancelRunMock.mockResolvedValue({ data: { run_id: 'run_live', cancel_requested: true, tasks_cancelled: 1, status: 'running' } })
+    await vm.cancelActiveRun()
+    expect(cancelRunMock).toHaveBeenCalledWith('run_live')
+    expect(message.success).toHaveBeenCalledWith('任务已停止')
+    expect(message.info).not.toHaveBeenCalled()
+
+    // 第二档：句柄不在（服务重启过）时只报"已请求停止"，不许宣称已停止
+    cancelRunMock.mockResolvedValue({ data: { run_id: 'run_live', cancel_requested: true, tasks_cancelled: 0, status: 'running' } })
+    await vm.cancelActiveRun()
+    expect(message.success).toHaveBeenCalledTimes(1)
+    expect(message.info).toHaveBeenCalledWith(expect.stringContaining('已请求停止'))
+
+    release({ id: 'run_live', status: 'cancelled', detail_json: '{}', error: 'task_cancelled（执行体在 await 点被打断）' })
+    await running
+    expect(vm.activeRuns.images).toBeUndefined()
+    // cancelled 既不是"完成"也不是"失败"
+    expect(message.success).not.toHaveBeenCalledWith('任务完成')
+    expect(message.error).not.toHaveBeenCalled()
   })
 
   it('单镜重试 stage=image 走 retryStoryboard', async () => {

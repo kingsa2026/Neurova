@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'कार्य कुछ समस्याओं के साथ पूर्ण: {detail}',
   runPartialFailed: '{n} विफल',
   runPartialBlocked: '{n} अवरुद्ध',
+  stopRun: 'कार्य रोकें',
+  runCancelled: 'कार्य रोक दिया गया',
+  runCancelQueued: 'रोक अनुरोध दर्ज: वर्तमान चरण समाप्त होगा, आगे नहीं चलेगा',
   retryStarted: 'पुनःप्रयास शुरू',
 },
 

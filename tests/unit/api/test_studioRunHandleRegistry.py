@@ -14,7 +14,8 @@
 
 判据（缺一条这条链就是断的）：
 1. 跑起来的 run 能在注册表里**按 run_id 找回句柄**，kind 带出是哪一类长任务；
-2. 对它请求停止 → 任务被取消、`CancelledError` 不被吞、台账行落 `failed` 且点名成因
+2. 对它请求停止 → 任务被取消、`CancelledError` 不被吞、台账行落 `cancelled` 且点名成因
+   （`task_cancelled`；2026-10-09 起，改前落 `failed`，见 §6-91 的改判说明）
    （改前：行停在 running，且没有任何地方能取消它）；
 3. 正常跑完的 run 自动从注册表移除（不留残条目，这是 TaskTracker 自带的 done 回调）；
 4. `studio_api.py` 里不得再存在"模块级裸 set 持任务"的形态（AST 判 + **反向对照**）。
@@ -116,7 +117,7 @@ class TestHandlesAreFindable:
 
 class TestCancelHasAnHonestLanding:
     @pytest.mark.asyncio
-    async def test_stop_request_cancels_and_lands_failed_with_cause(self, store, tracker):
+    async def test_stop_request_cancels_and_lands_cancelled_with_cause(self, store, tracker):
         from neurova.api.endpoints import studio_api
 
         pid = store.create_project(owner_user_id="u1", title="取消")["id"]
@@ -130,10 +131,13 @@ class TestCancelHasAnHonestLanding:
         await asyncio.sleep(0.1)
 
         row = store.get_run(runId)
-        assert row["status"] == "failed", (
+        # 2026-10-09 改判：本批给 runs 加了 `cancelled` 终态（§6-91），句柄被打断落的就是它。
+        # 改前这格断的是 `failed` + `run_cancelled`——那是"至少别永久 running"的中间形态，
+        # 把"人让它停的"记成"它自己崩了"；两件事的排查方向完全不同。
+        assert row["status"] == "cancelled", (
             f"被取消的 run 停在 {row['status']!r}——CancelledError 不被 except Exception 捕获，"
             "行就成了永远在跑的幽灵（前端轮满 10 分钟才报超时）")
-        assert "run_cancelled" in (row["error"] or ""), row["error"]
+        assert "task_cancelled" in (row["error"] or ""), row["error"]
         gate.set()
 
 
