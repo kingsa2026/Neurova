@@ -82,13 +82,16 @@ class TestBackgroundRuns:
         seen = {}
 
         async def fake_images(store, pid, eid, provider="openai", model="",
-                              provider_id="", shot_ids=None):
+                              provider_id="", shot_ids=None, run_id=""):
             seen["images"] = (model, provider_id)
             return {"done": 1, "failed": 0, "skipped_no_prompt": 0}
 
+        # 形参表必须跟真服务同形：H2-3 ① 之后端点会透传 run_id，
+        # 而 resolution/duration 的兜底口径已收口到 services 一处（§6-78 G 条）——
+        # 替身里再抄一份 "1080p"/5 就是让判据对着一个生产已不存在的签名打分
         async def fake_videos(store, pid, eid, provider="wan", model="",
-                              resolution="1080p", duration=5, owner_user_id="",
-                              provider_id="", shot_ids=None):
+                              resolution="", duration=None, owner_user_id="",
+                              provider_id="", shot_ids=None, run_id=""):
             seen["videos"] = (model, provider_id)
             return {"submitted": 1, "skipped": 0, "failed": 0}
 
@@ -104,7 +107,10 @@ class TestBackgroundRuns:
         assert r.status_code == 200
         for _ in range(50):
             runs = client.store.list_runs(pid)
-            if len(runs) >= 2 and all(x["status"] in ("done", "failed") for x in runs):
+            # 终态判据取 store 那份单源：手抄 ("done","failed") 会漏掉
+            # `done_with_fallback`（§6-72 G1 立单源时正是为了不再各抄一份）
+            from neurova.aigc_studio.store import RUN_TERMINAL_STATUSES
+            if len(runs) >= 2 and all(x["status"] in RUN_TERMINAL_STATUSES for x in runs):
                 break
         assert seen.get("images") == ("flux.1", "prov-x")
         assert seen.get("videos") == ("seedance-2-0", "prov-y")
