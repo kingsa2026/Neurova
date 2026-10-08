@@ -13,7 +13,10 @@
 先冻结、后续按目录分批消化）。当场把 38 个文件一起改，会让"哪条红是哪一个文件带来的"
 无法归因，且部分判据在补上 encoding 后会从"假绿"翻成"真红"——那是另一轮改动面。
 
-基线口径（本轮实测，不抄旧数）：**38 个文件 / 60 处**。
+基线口径（本轮实测，不抄旧数）：**37 个文件 / 59 处**。
+（2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
+ 子进程文本捕获全部钉上显式 `encoding="utf-8"` 而清零，该文件从基线摘除——
+ 摘除而不是留 0：日后它再长出一处，`BASELINE.get(f, 0)` 会让棘轮当场红。）
 判定形态是**逐文件计数**而不是全局总数：
 - 某文件站点数**上升**或**新文件出现** → 红（增长被止住，这是本判据的全部目的）；
 - 站点数**下降** → 允许，但本文件会**红着提示"基线该收了"**，逼一次显式改基线，
@@ -47,7 +50,7 @@ CAPTURE_FUNCS = ("run", "check_output", "check_call", "call", "Popen",
 #: 扫描根。刻意含 `tests/`：判据自己的空转就发生在测试侧。
 SCAN_ROOTS = ("neurova", "scripts", "tests")
 
-#: 冻结基线（本轮实测：38 文件 / 60 站点）。只准降不准升。
+#: 冻结基线（本轮实测：37 文件 / 59 站点）。只准降不准升。
 BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
@@ -81,7 +84,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/test_api_inventory_freshness_guard.py": 1,
     "tests/unit/test_pip_audit_gate.py": 1,
     "tests/unit/test_pytest_runner_guards.py": 1,
-    "tests/unit/test_repo_root_pollution_guard.py": 1,
     "tests/unit/test_session_landing_guard.py": 1,
     "tests/unit/test_start_script.py": 2,
     "tests/unit/tools/test_git_tool.py": 1,

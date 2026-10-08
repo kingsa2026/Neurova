@@ -57,7 +57,8 @@ def _acquireProbeRoot() -> tuple[Path, Path]:
     root = staging / "tree"
     subprocess.run(
         ["git", "worktree", "add", "--detach", str(root), "HEAD"],
-        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True, timeout=180,
+        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=180,
     )
     # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
     # 探针就该测**工作树这一份**，否则改坏了也照样绿。
@@ -69,6 +70,7 @@ def _releaseProbeRoot(staging: Path, root: Path) -> None:
     subprocess.run(
         ["git", "worktree", "remove", "--force", str(root)],
         cwd=str(REPO_ROOT), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     shutil.rmtree(staging, ignore_errors=True)
 
@@ -89,6 +91,9 @@ def _runPytestProbe(root: Path, fileName: str, body: str, expectGreen: bool) -> 
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=180,
         )
         out = proc.stdout + proc.stderr
