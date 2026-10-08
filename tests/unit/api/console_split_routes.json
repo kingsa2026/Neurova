@@ -509,6 +509,12 @@
         "default": "annotation=int required=False default=20 alias='limit' json_schema_extra={} metadata=[Ge(ge=1), Le(le=200)]"
       },
       {
+        "name": "scope",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "annotation": "builtins.str",
+        "default": "annotation=str required=False default='turns' alias='scope' json_schema_extra={} metadata=[_PydanticGeneralMetadata(pattern='^(turns|subagents)$')]"
+      },
+      {
         "name": "current_user",
         "kind": "POSITIONAL_OR_KEYWORD",
         "annotation": "typing.Dict[str, typing.Any]",

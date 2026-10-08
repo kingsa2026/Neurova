@@ -1266,6 +1266,7 @@ async def get_console_chat_runs(
     session_id: str,
     request: Request,
     limit: int = Query(default=20, ge=1, le=200),
+    scope: str = Query(default="turns", pattern="^(turns|subagents)$"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """回合台账的读面：SSE 是一次性的，刷新或重启后"这条正等人续跑"必须还能查到。
@@ -1281,7 +1282,14 @@ async def get_console_chat_runs(
             detail="run 台账已关闭（NEUROVA_RUN_GATE=off），无 run 读面",
         )
     user_id = _get_user_id(request, current_user)
-    rows = await asyncio.to_thread(_ars.get_agent_run_store().list_runs, session_id, limit)
+    # scope=subagents 查的是"这次对话派出去的子任务"（键是发起者会话），与
+    # scope=turns 的"这个会话跑过哪些回合"（键是该会话自己）是两条不同的问法；
+    # 同一张表、同一个读面，不另开一条子任务端点（§6-78 L 条）。
+    if scope == "subagents":
+        rows = await asyncio.to_thread(
+            _ars.get_agent_run_store().list_subagent_runs, session_id, limit)
+    else:
+        rows = await asyncio.to_thread(_ars.get_agent_run_store().list_runs, session_id, limit)
     if not _isAdminIdentity(current_user):
         # 归属判定只许一处实现（教义第 6 条）：逐行交给会话那条同一谓词
         # `_check_session_ownership`，这里不再本地重写比较式
@@ -1292,12 +1300,15 @@ async def get_console_chat_runs(
         "message": "success",
         "data": {
             "session_id": session_id,
+            "scope": scope,
             "runs": [
                 {
                     "run_id": r.get("run_id"),
                     "status": r.get("status"),
                     "park_reason": r.get("park_reason") or "",
                     "error_type": r.get("error_type") or "",
+                    "subagent_id": r.get("subagent_id") or "",
+                    "agent_id": r.get("agent_id") or "",
                     "attempt": int(r.get("attempt") or 0),
                     "cancel_requested": bool(r.get("cancel_requested")),
                     "created_at": r.get("created_at"),
