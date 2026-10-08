@@ -26,6 +26,13 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 视频规格的**唯一兜底口径**（§6-78 G 条）。改前的形态：端点整集支路写一遍
+# `or "1080p"`、服务层签名又写一遍 `resolution="1080p"`，而单镜重试支路一个都不传——
+# 同一镜头「重试」就悄悄换了尺寸。现规矩：镜头行 `video_resolution` 记着用过的规格，
+# 提交时写、重试时读回；这两个常量只在**行内也没有值**时才生效（改造前的存量镜头）。
+DEFAULT_VIDEO_RESOLUTION = "1080p"
+DEFAULT_VIDEO_DURATION_S = 5
+
 # 图像服务商 → 实测协议 hint（与 drama_nodes._SCENE_PROTOCOLS 对齐的本地小表）
 _PROVIDER_HINTS = {
     "openai": "openai_compat",
@@ -468,14 +475,16 @@ def _record_usage(kind: str, ok: int, failed: int, user_id: str) -> None:
 
 
 async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
-                               model: str = "", resolution: str = "1080p",
-                               duration: int = 5, owner_user_id: str = "",
+                               model: str = "", resolution: str = "",
+                               duration: Optional[int] = None, owner_user_id: str = "",
                                provider_id: str = "",
                                shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
     """逐镜 i2v 提交（首帧为参考）→ 账本 batch_key=episode 关联 → 恢复循环收口。
 
     视频侧只读氛围一项：画面与场景由首帧承载，运镜文本再拼一遍场景提示词是第二份口径。
     provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
+    resolution/duration 留空即**继承镜头行上那次提交用过的规格**（单镜重试不传就是这一支），
+    行内也没有才落服务层兜底——保证「重试这一镜」换的只是内容，不是尺寸。
     """
     from neurova.llm.generators.protocols import submit_video
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
@@ -515,6 +524,12 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
         atmosphere = str(sb.get("atmosphere") or "").strip()
         if atmosphere:
             vprompt = f"{vprompt}, {atmosphere}"
+        # 规格优先级：调用方显式值 > 镜头行留痕（单镜重试走这一支，继承自己当初的规格）
+        # > 服务层唯一兜底。尺寸不写回行内，下次重试就无从继承。
+        effResolution = (str(resolution or "").strip()
+                         or str(sb.get("video_resolution") or "").strip()
+                         or DEFAULT_VIDEO_RESOLUTION)
+        effDuration = int(sb.get("duration") or duration or DEFAULT_VIDEO_DURATION_S)
         try:
             creds = _resolve_creds(hint, model, provider_id)
             from neurova.llm.generators.protocols import ProtocolCredentials
@@ -523,8 +538,8 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                 api_key=creds.api_key, base_url=creds.base_url or default_base,
                 model=creds.model or model, protocol=hint)
             submitted = await submit_video(
-                creds, vprompt, duration=int(sb.get("duration") or duration),
-                resolution=resolution,
+                creds, vprompt, duration=effDuration,
+                resolution=effResolution,
                 ref_images=[frame],
                 # A1：镜头尾帧（存在才透传；WAN 无通道进 ignored_params，
                 # Seedance first+last 插值）
@@ -542,7 +557,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             ))
             store.update_storyboard(sb["id"], {
                 "video_status": "running", "ledger_task_id": record.task_id,
-                "error": ""})
+                "video_resolution": effResolution, "error": ""})
             stats["submitted"] += 1
         except Exception as e:  # noqa: BLE001
             logger.warning("分镜视频提交失败(%s): %s", sb["id"], e)
