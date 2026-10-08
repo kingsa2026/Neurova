@@ -151,3 +151,28 @@ class TestUnkeyedBagIsRetired:
         assert _moduleLevelBareSets("seen = set()\n\n\ndef f(x):\n    seen.add(x)\n") == ["seen"]
         # 合法形态：普通集合不当句柄袋用（没被 .add 走过就不算）
         assert _moduleLevelBareSets("words = set()\n\n\ndef f():\n    return len(words)\n") == []
+
+
+class TestUnfinishedIsJudgedOnce:
+    """H2-3 ②：「这一行还没结束」只许按终态集合判一次，不留窄比较的第二份定义。
+
+    如实记一句：这一格**不是活 bug**——runs 表当前取值域里外层行只会是
+    `running → 终态`，`== RUN_RUNNING` 与 `not in RUN_TERMINAL_STATUSES` 今天行为等价。
+    它是防漂移收口：等有人写入第三种非终态值（或 wrapper 换个状态判断）那天，
+    窄比较会静默漏判，而 `RUN_TERMINAL_STATUSES` 已是写侧与读侧共同的单源。
+    """
+
+    def _narrowComparisons(self, src: str) -> list[str]:
+        return [f"line {i}: {line.strip()}" for i, line in enumerate(src.splitlines(), 1)
+                if "== RUN_RUNNING" in line or "!= RUN_RUNNING" in line]
+
+    def test_wrapper_uses_the_terminal_set_not_a_single_value(self):
+        src = _API_FILE.read_text(encoding="utf-8")
+        assert not self._narrowComparisons(src), \
+            f"studio_api 又写了单值窄比较：{self._narrowComparisons(src)}"
+
+    def test_reverse_control_catches_a_narrow_comparison(self):
+        assert self._narrowComparisons("if row.get('status') == RUN_RUNNING:\n    pass\n")
+        assert self._narrowComparisons("while x != RUN_RUNNING:\n    pass\n")
+        assert not self._narrowComparisons(
+            "if row.get('status') not in RUN_TERMINAL_STATUSES:\n    pass\n")

@@ -34,6 +34,30 @@ DEFAULT_VIDEO_RESOLUTION = "1080p"
 DEFAULT_VIDEO_DURATION_S = 5
 
 # 图像服务商 → 实测协议 hint（与 drama_nodes._SCENE_PROTOCOLS 对齐的本地小表）
+
+def _settleRun(store, rid: str, stats: dict, label: str) -> None:
+    """把一次批量长任务的统计结算成台账终态（唯一一处口径）。
+
+    改前这四个批量服务不碰自己那一行，终态由 `_spawn_run` 的 wrapper 兜底写成 `done`
+    ——一批里有几镜被阻断、几镜提交失败，台账上仍是一行干净的 done，读侧无从知道
+    它没跑完（§6-70 第③格对这四个服务的残留）。
+    `skipped*`（没提示词、没文本可合成）是设计内的跳过，不算带病。
+    """
+    import json as _json
+
+    failed = int(stats.get("failed") or 0)
+    blocked = sum(int(v or 0) for k, v in stats.items() if k.startswith("blocked_"))
+    causes = []
+    if failed:
+        causes.append(f"{failed} 项{label}失败")
+    if blocked:
+        causes.append(f"{blocked} 项被阻断（成因见对应行 error）")
+    status = RUN_DONE_WITH_FALLBACK if causes else RUN_DONE
+    store.update_run(rid, {
+        "status": status,
+        "detail_json": _json.dumps(stats, ensure_ascii=False),
+        "error": "；".join(causes)})
+
 _PROVIDER_HINTS = {
     "openai": "openai_compat",
     "wanx": "dashscope",
@@ -396,7 +420,8 @@ def resolveShotContinuity(store, pid: str, sb: Dict[str, Any]) -> Dict[str, Any]
 async def generate_shot_images(store, pid: str, eid: str,
                                provider: str = "openai", model: str = "",
                                provider_id: str = "",
-                               shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
+                               shot_ids: Optional[List[str]] = None,
+                               run_id: str = "") -> Dict[str, int]:
     """逐镜首帧（跨集资产连续性注入 + 风格/画幅项目锁；单镜失败诚实标注不中断）。
 
     提示词构成：本镜 `image_prompt` → 场景定妆提示词/灯光 → 氛围 → 道具描述 →
@@ -415,6 +440,7 @@ async def generate_shot_images(store, pid: str, eid: str,
     fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
     hint = _hint_for_provider("image", provider_id, model, fallback)
     stats = {"done": 0, "failed": 0, "skipped_no_prompt": 0, "blocked_no_asset": 0}
+    rid = run_id or store.add_run({"project_id": pid, "kind": "images"})["id"]
     for sb in store.list_storyboards(eid):
         if shot_ids and sb["id"] not in shot_ids:
             continue
@@ -457,6 +483,7 @@ async def generate_shot_images(store, pid: str, eid: str,
             stats["failed"] += 1
     _record_usage("image", stats.get("done", 0), stats.get("failed", 0),
                   project.get("owner_user_id", ""))
+    _settleRun(store, rid, stats, "首帧")
     return stats
 
 
@@ -478,7 +505,8 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                                model: str = "", resolution: str = "",
                                duration: Optional[int] = None, owner_user_id: str = "",
                                provider_id: str = "",
-                               shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
+                               shot_ids: Optional[List[str]] = None,
+                               run_id: str = "") -> Dict[str, int]:
     """逐镜 i2v 提交（首帧为参考）→ 账本 batch_key=episode 关联 → 恢复循环收口。
 
     视频侧只读氛围一项：画面与场景由首帧承载，运镜文本再拼一遍场景提示词是第二份口径。
@@ -500,6 +528,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
     hint = _hint_for_provider("video", provider_id, model, fallback)
     default_base = _BASES.get(hint, _BASES["wan"])
     stats = {"submitted": 0, "skipped": 0, "failed": 0, "blocked_no_frame": 0}
+    rid = run_id or store.add_run({"project_id": pid, "kind": "videos"})["id"]
     for sb in store.list_storyboards(eid):
         if shot_ids and sb["id"] not in shot_ids:
             continue
@@ -565,12 +594,14 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                 "video_status": "failed", "error": str(e)[:200]})
             stats["failed"] += 1
     _record_usage("video", stats.get("submitted", 0), stats.get("failed", 0), "")
+    _settleRun(store, rid, stats, "视频")
     return stats
 
 
 async def generate_asset_images(store, pid: str, provider: str = "ark",
                                 ids: Optional[List[str]] = None,
-                                model: str = "", provider_id: str = "") -> Dict[str, Any]:
+                                model: str = "", provider_id: str = "",
+                                run_id: str = "") -> Dict[str, Any]:
     """资产定妆图（seed 的单一事实源是库里的 `seed_value`：读回复用，缺省才派生并落库；
     单资产失败可重试）。
 
@@ -585,6 +616,7 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
     fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
     hint = _hint_for_provider("image", provider_id, model, fallback)
     stats = {"done": 0, "failed": 0}
+    rid = run_id or store.add_run({"project_id": pid, "kind": "asset_images"})["id"]
     for c in store.list_characters(pid):
         if ids and c["id"] not in ids:
             continue
@@ -613,12 +645,15 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
             store.update_asset_row("characters", c["id"], {
                 "status": "failed"})
             stats["failed"] += 1
+    _settleRun(store, rid, stats, "定妆图")
     return stats
 
 
-async def synthesize_narration(store, pid: str, eid: str, voice: str = "default") -> Dict[str, int]:
+async def synthesize_narration(store, pid: str, eid: str, voice: str = "default",
+                                run_id: str = "") -> Dict[str, int]:
     """逐镜旁白 TTS（VoiceEngine/TTSManager 双通道，产物落 data/generations）。"""
     stats = {"done": 0, "failed": 0, "skipped": 0}
+    rid = run_id or store.add_run({"project_id": pid, "kind": "narration"})["id"]
     for sb in store.list_storyboards(eid):
         text = (sb.get("narration") or "").strip()
         if not text:
@@ -631,6 +666,7 @@ async def synthesize_narration(store, pid: str, eid: str, voice: str = "default"
         except Exception as e:  # noqa: BLE001
             logger.warning("旁白合成失败(%s): %s", sb["id"], e)
             stats["failed"] += 1
+    _settleRun(store, rid, stats, "旁白")
     return stats
 
 
