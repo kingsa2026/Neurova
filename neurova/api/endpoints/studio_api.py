@@ -24,7 +24,9 @@ logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-_tasks: set = set()  # 后台任务强引用（与 neurflow _background_tasks 同法）
+# 后台任务的句柄登记在 `core/task_tracker`（按 run_id 找得回，取消/停机才有落点）。
+# 改前这里是模块级 `_tasks: set = set()`——无键强引用只能防 GC，
+# 谁也找不回任何一条任务（§6-78 H2-3 的第四格）。
 
 
 def _uid(user: Dict[str, Any]) -> str:
@@ -141,13 +143,24 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
                 store.update_run(run["id"], {"status": RUN_DONE, "detail_json": _json.dumps(
                     result if isinstance(result, (dict, list)) else {"result": str(result)},
                     ensure_ascii=False, default=str)})
+        except asyncio.CancelledError:
+            # 取消不是"没发生"：`CancelledError` 继承 `BaseException`，下面那条
+            # `except Exception` 抓不到它——被停掉的 run 会永久停在 running，
+            # 前端轮满 10 分钟才报超时。写终态、点名成因，然后照常上抛。
+            store.update_run(run["id"], {
+                "status": RUN_FAILED,
+                "error": "run_cancelled（服务或用户停止了这条长任务，产物可能不完整）"})
+            raise
         except Exception as e:  # noqa: BLE001
             logger.exception("studio 后台任务失败(%s)", kind)
             store.update_run(run["id"], {"status": RUN_FAILED, "error": str(e)[:500]})
 
     task = asyncio.create_task(_wrapper())
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    # 句柄进注册表（键=run_id）：取消端点与停机排空都要能按这条 run 找回它的 Task。
+    # 不自己再存一份 set——仓内 `task_tracker` 已是那份注册表（教义第 6 条）。
+    from neurova.core.task_tracker import get_task_tracker
+
+    get_task_tracker().register_async_task(run["id"], task, kind=f"studio:{kind}")
     return {"code": 0, "data": {"run_id": run["id"], "status": "started"}}
 
 
