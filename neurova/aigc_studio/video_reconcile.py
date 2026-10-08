@@ -54,7 +54,7 @@ def reconcileEpisode(store, eid: str) -> typing.List[typing.Dict[str, typing.Any
             sb["video_status"] = "failed"
             sb["error"] = DANGLING_TASK_ERROR
             continue
-        if task.status == "succeeded":
+        if task.status == _ledger_mod.TASK_SUCCEEDED:
             path = task.local_path or ""
             if not path:
                 # 本地化失败但远端 URL 还在：`done` + 空 `video_path` 会让前端既不渲染
@@ -70,7 +70,7 @@ def reconcileEpisode(store, eid: str) -> typing.List[typing.Dict[str, typing.Any
                 "status": "video_ready", "error": ""})
             sb["video_status"] = "done"
             sb["video_path"] = path
-        elif task.status == "failed":
+        elif task.status == _ledger_mod.TASK_FAILED:
             store.update_storyboard(sb["id"], {
                 "video_status": "failed", "error": (task.error or "")[:200]})
             sb["video_status"] = "failed"
