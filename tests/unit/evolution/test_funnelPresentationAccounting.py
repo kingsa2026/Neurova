@@ -201,3 +201,60 @@ def testPresentationsPersistAndSurfaceOnReadFacets(tmp_path):
     manifest = json.loads((tmp_path / "skills" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["sk_a"]["usage"]["presentations"] == 3
     assert service.get_skill_usage("sk_a")["presentations"] == 3
+
+
+# ── 读侧：三态判据与 RSI 状态面 ──────────────────────────────
+
+
+class _NullHost:
+    """缺席占位宿主：类级声明 rsi_placeholder（与 integration_manager 的占位判据
+    对齐）。不用 MagicMock 冒充业务对象——MagicMock().get("success") 恒真。"""
+    rsi_placeholder = True
+
+
+def testVerdictUnevidencedWhenNothingPresented():
+    from neurova.evolution.skill_experience import presentationFunnelVerdict
+
+    verdict = presentationFunnelVerdict([{"presentations": 0, "selections": 0}])
+    assert verdict.state == "unevidenced"
+    assert str(verdict.reason).strip(), "unevidenced 必须说得出为什么没量到"
+
+
+def testVerdictFailsWhenFunnelBreaksAtFirstStage():
+    """有呈现零派发 = 漏斗在第一节就断，这是"注入没人用"的可见形态。"""
+    from neurova.evolution.skill_experience import presentationFunnelVerdict
+
+    verdict = presentationFunnelVerdict([{"presentations": 4, "selections": 0}])
+    assert verdict.state == "failed"
+    assert verdict.evidence["presentations"] == 4
+
+
+def testVerdictPassesWhenPresentationsConvert():
+    from neurova.evolution.skill_experience import presentationFunnelVerdict
+
+    verdict = presentationFunnelVerdict(
+        [{"presentations": 4, "selections": 1}, {"presentations": 0, "selections": 0}]
+    )
+    assert verdict.state == "passed"
+    assert verdict.evidence["selections"] == 1
+
+
+def testVerdictIsNotFoldedWhenRowsMissing():
+    """空读数不得折叠成 passed（无证据 ≠ 没问题）。"""
+    from neurova.evolution.skill_experience import presentationFunnelVerdict
+
+    assert presentationFunnelVerdict([]).state == "unevidenced"
+    assert presentationFunnelVerdict(None).state == "unevidenced"
+
+
+def testStatusSurfaceCarriesPresentationFunnel():
+    """断点条款：写了没人读即红——状态面必须有这一格。"""
+    from neurova.evolution.rsi.orchestrator import RSIOrchestrator
+
+    orchestrator = RSIOrchestrator(
+        sleep_system=_NullHost(), emotion_system=_NullHost(),
+        experience_system=_NullHost(), tool_memory_system=_NullHost(),
+    )
+    status = orchestrator.get_status()
+    assert "presentation_funnel" in status
+    assert status["presentation_funnel"]["state"] in ("passed", "failed", "unevidenced")
