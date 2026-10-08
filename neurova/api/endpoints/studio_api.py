@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from neurova.aigc_studio import services
 from neurova.aigc_studio.llm import call_llm  # noqa: F401 — 测试可 monkeypatch services 层
 from neurova.aigc_studio.store import get_store, RUN_DONE, RUN_FAILED, RUN_RUNNING
+from neurova.aigc_studio.video_reconcile import reconcileEpisode
 from neurova.api.deps import get_current_user
 from neurova.core.logger import get_logger
 
@@ -244,37 +245,13 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
 # ── episodes / storyboards 读与编辑 ───────────────────────────────────────
 
 
-def _backfill_video_status(store, eid: str) -> List[Dict[str, Any]]:
-    """从任务账本回填镜头视频状态（recovery 循环收口 ledger → 此处只读投影）。"""
-    from neurova.llm.generators.task_ledger import get_generation_task_ledger
-    from neurova.llm.generators.runtime import local_url_for
-
-    led = get_generation_task_ledger()
-    shots = store.list_storyboards(eid)
-    for sb in shots:
-        if sb.get("video_status") == "running" and sb.get("ledger_task_id"):
-            task = led.get(sb["ledger_task_id"])
-            if task is None:
-                continue
-            if task.status == "succeeded":
-                path = task.local_path or ""
-                store.update_storyboard(sb["id"], {
-                    "video_status": "done", "video_path": path,
-                    "status": "video_ready" if path else sb["status"], "error": ""})
-                sb["video_status"] = "done"
-                sb["video_path"] = path
-            elif task.status == "failed":
-                store.update_storyboard(sb["id"], {
-                    "video_status": "failed", "error": task.error[:200]})
-                sb["video_status"] = "failed"
-    return shots
-
-
 @router.get("/episodes/{eid}")
 async def get_episode(eid: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     store = get_store()
     _project, ep = _episode_with_project(store, eid, current_user)
-    shots = _backfill_video_status(store, eid)
+    # 映射本体在 `aigc_studio/video_reconcile.py`（服务端驱动器与这条投影共用一份）。
+    # 端点里再写一遍就是第二份实现：驱动器与页面迟早给出两种镜头状态（§6-78 A 条）。
+    shots = reconcileEpisode(store, eid)
     return {"code": 0, "data": {"episode": ep, "storyboards": shots}}
 
 
