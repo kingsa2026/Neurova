@@ -1856,3 +1856,13 @@ tests/unit/aigc_studio/test_retryInheritsShotSpec.py
 # `spawn_subagent` 那份读数（不另造 600）；状态字面量比较与字面量默认值两类 AST 各带反向对照。
 # 逐文件单跑两次各 11 passed
 tests/unit/agent/test_swarmTerminalStateOnTimeoutAndCancel.py
+
+# H2-6 · L 条 子任务进 run 台账与状态面出口（§6-85）：这一档锁的是「写下去真有人读、
+# 且读得到活过重启的那一份」。判据打在行为上——派生一条子任务后台账**确有该行**且
+# `subagent_id`/`parent_session_id` 两个键成对；超时与取消在台账里分别是
+# failed/subagent_timeout 与 cancelled/subagent_cancelled；换新 store 实例（等价进程重启）
+# 仍读得到（内存 `_runs` 给不了的那一半，也是"刷新一下就没了"的成因）；HTTP 出口
+# `?scope=subagents` 带出并投出前端要用的键，关闸诚实 503、陌生账号 403；
+# `swarm.py` 不得出现本地 INSERT/UPDATE agent_runs（AST + 反向对照，防"扫空即全绿"）；
+# STARTED 事件必须带 status。逐文件单跑两次各 11 passed
+tests/unit/core/test_subagentRunsInLedger.py
