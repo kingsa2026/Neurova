@@ -155,3 +155,58 @@ class TestNoFabricatedLedgerOutcome:
         rows = ledger.tail("s-unev", 10)
         assert not [r for r in rows if r.get("reject_reason") == "case_regression"], (
             f"器械故障被写成了质量结论: {rows}")
+
+
+class TestDownstreamReadersSeeTheTruth:
+    """Task 4：三个既有读方（提示词 / 探索指令 / 产出剪枝）不再被假阳性骗。"""
+
+    async def _fiveRejectedRuns(self, ledger, key):
+        for _ in range(5):
+            runner = _runner(
+                ledger, BASE_SCORES, CANDIDATE_SCORES,
+                EvolutionConfig(iterations=1, min_improvement=0.0,
+                                case_regression_allowance=0))
+            result = await runner.run(
+                baseline_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
+                artifact_type="skill", ledger_key=key)
+            assert result.reject_reason == "case_regression", result.reject_reason
+        return ledger.tail(key, 10)
+
+    @pytest.mark.asyncio
+    async def testRejectedRunNoLongerRenderedAsInEffect(self, tmp_path):
+        ledger = EvolutionLedger(tmp_path / "history")
+        await self._fiveRejectedRuns(ledger, "s1")
+        prompt = ledger.render_for_prompt(ledger.recent("s1", 12))
+
+        assert "已生效" not in prompt, prompt
+        assert "禁止重复提出" in prompt, prompt
+        assert "缺执行步骤" in prompt, prompt
+
+    @pytest.mark.asyncio
+    async def testStallDirectiveFiresAfterAllRejectedRuns(self, tmp_path):
+        from neurova.evolution.eval.history_ledger import exploration_directive
+
+        ledger = EvolutionLedger(tmp_path / "history")
+        rows = await self._fiveRejectedRuns(ledger, "s1")
+        directive = exploration_directive([r for r in rows if r.get("hypothesis")])
+
+        assert "探索指令" in directive, f"全被拒的运行不该再抑制换轴指令: {directive}"
+
+    @pytest.mark.asyncio
+    async def testPruneNoLongerSkipsNeverDeployedSkill(self, tmp_path):
+        from neurova.evolution.evolution_yield_prune import (
+            propose_evolution_prune_candidates,
+        )
+        from neurova.evolution.skill_consolidator import ConsolidationPlanStore
+
+        ledger = EvolutionLedger(tmp_path / "history")
+        await self._fiveRejectedRuns(ledger, "sk-yield")
+
+        plans = propose_evolution_prune_candidates(
+            ledger=ledger,
+            usage_fn=lambda sid: {"times_used": 2, "positive": 0, "negative": 0},
+            is_protected_fn=lambda sid: False,
+            plan_store=ConsolidationPlanStore(tmp_path / "skills"),
+        )
+        assert [p["umbrella"] for p in plans] == ["sk-yield"], (
+            "从未部署过任何东西的技能不该再被假 accepted 挡在剪枝判据之外")
