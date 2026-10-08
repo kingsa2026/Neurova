@@ -15,7 +15,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from neurova.aigc_studio import services
 from neurova.aigc_studio.llm import call_llm  # noqa: F401 — 测试可 monkeypatch services 层
-from neurova.aigc_studio.store import get_store, RUN_DONE, RUN_FAILED, RUN_RUNNING
+from neurova.aigc_studio.store import (
+    get_store, RUN_DONE, RUN_FAILED, RUN_TERMINAL_STATUSES,
+)
 from neurova.aigc_studio.video_reconcile import reconcileEpisode
 from neurova.api.deps import get_current_user
 from neurova.core.logger import get_logger
@@ -139,7 +141,10 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
             # done_with_fallback 被压成 done、detail 里的成因被返回值抹掉，
             # 一行台账只剩状态字（E 批活体抓出）。
             row = store.get_run(run["id"]) or {}
-            if row.get("status") == RUN_RUNNING:
+            # 「未结束」只按终态集合判——写一份  的窄比较，就是给
+            # 同一个口径留第二份定义（今天取值域里两者等价，等有人写入第三种
+            # 非终态值那天才会静默漏判）；集合与写侧同源（§6-78 G1 的 RUN_* 表）。
+            if row.get("status") not in RUN_TERMINAL_STATUSES:
                 store.update_run(run["id"], {"status": RUN_DONE, "detail_json": _json.dumps(
                     result if isinstance(result, (dict, list)) else {"result": str(result)},
                     ensure_ascii=False, default=str)})
@@ -208,9 +213,10 @@ async def generate_images(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     model = str((body or {}).get("model") or "")
     provider_id = str((body or {}).get("provider_id") or "")
     return _spawn_run(store, project["id"], "images",
-                      lambda _runId: services.generate_shot_images(store, project["id"], eid,
+                      lambda runId: services.generate_shot_images(store, project["id"], eid,
                                                                    provider=provider, model=model,
-                                                                   provider_id=provider_id))
+                                                                   provider_id=provider_id,
+                                                                   run_id=runId))
 
 
 @router.post("/episodes/{eid}/generate-videos")
@@ -220,7 +226,7 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     project, _ep = _episode_with_project(store, eid, current_user)
     b = body or {}
     return _spawn_run(store, project["id"], "videos",
-                      lambda _runId: services.generate_shot_videos(
+                      lambda runId: services.generate_shot_videos(
                           store, project["id"], eid,
                           provider=str(b.get("provider") or "wan"),
                           model=str(b.get("model") or ""),
@@ -228,7 +234,8 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
                           # 缺省即不重述：兜底口径只在 services 一处（§6-78 G 条）
                           resolution=str(b.get("resolution") or ""),
                           duration=b.get("duration"),
-                          owner_user_id=_uid(current_user)))
+                          owner_user_id=_uid(current_user),
+                          run_id=runId))
 
 
 @router.post("/episodes/{eid}/narration")
@@ -238,7 +245,8 @@ async def narration(eid: str, body: Optional[Dict[str, Any]] = Body(default=None
     project, _ep = _episode_with_project(store, eid, current_user)
     voice = str((body or {}).get("voice") or "default")
     return _spawn_run(store, project["id"], "narration",
-                      lambda _runId: services.synthesize_narration(store, project["id"], eid, voice=voice))
+                      lambda runId: services.synthesize_narration(store, project["id"], eid,
+                                                                   voice=voice, run_id=runId))
 
 
 @router.post("/projects/{pid}/assets/images")
@@ -250,10 +258,11 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
     provider = str(b.get("provider") or "ark")
     ids = [str(i) for i in (b.get("ids") or [])] or None
     return _spawn_run(store, pid, "asset_images",
-                      lambda _runId: services.generate_asset_images(
+                      lambda runId: services.generate_asset_images(
                           store, pid, provider=provider, ids=ids,
                           model=str(b.get("model") or ""),
-                          provider_id=str(b.get("provider_id") or "")))
+                          provider_id=str(b.get("provider_id") or ""),
+                          run_id=runId))
 
 
 # ── episodes / storyboards 读与编辑 ───────────────────────────────────────
@@ -333,13 +342,14 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
     provider_id = str(b.get("provider_id") or "")
 
     if stage == "video":
-        work = lambda _runId: services.generate_shot_videos(  # noqa: E731
+        work = lambda runId: services.generate_shot_videos(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid])
+            provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid],
+            run_id=runId)
     else:
-        work = lambda _runId: services.generate_shot_images(  # noqa: E731
+        work = lambda runId: services.generate_shot_images(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            provider_id=provider_id, shot_ids=[sid])
+            provider_id=provider_id, shot_ids=[sid], run_id=runId)
     return _spawn_run(store, project["id"], f"retry_{stage}", work)
 
 
