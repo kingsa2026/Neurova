@@ -12,7 +12,7 @@ from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample
 from neurova.evolution.eval.fitness import FitnessScore
 from neurova.evolution.eval.history_ledger import GATE_REASON_PREFIXES
-from neurova.evolution.eval.runner import SkillEvolutionRunner
+from neurova.evolution.eval.runner import SkillEvolutionRunner, _caseRegressionReadout
 
 
 # 基线要够长：service 装配路径带约束闸（growth_limit / semantic_similarity），
@@ -157,4 +157,85 @@ class TestHoldoutSideYieldsPerCaseReadouts:
         readout = result.holdout_case_scores["b"]
         assert readout["baseline_failed"] is True and readout["candidate_failed"] is True
         assert readout["baseline"] == 0.0
+
+
+class TestCaseRegressionGate:
+    """Task 3：留出集均值涨了不算过关——撞坏的既有用例数过容忍度即拒。
+
+    容忍度一律**测试显式传参**，不依赖 `EvolutionConfig` 默认值（那等于把
+    默认值钉成契约）。
+    """
+
+    @pytest.mark.asyncio
+    async def testGateRejectsWhenCaseCountOverAllowance(self):
+        runner = _runner(
+            {"a": 0.4, "b": 0.4, "c": 0.4},
+            EvolutionConfig(case_regression_allowance=0, min_improvement=0.0),
+            candidateScores={"a": 0.9, "b": 0.9, "c": 0.1},
+        )
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
+            artifact_type="skill", iterations=1)
+
+        assert result.rejected is True
+        assert result.reject_reason == "case_regression"
+        assert result.caseRegressions == ["c"]
+        assert result.unevidencedCases == []
+        assert result.caseAllowance == 0
+        assert result.deployed_text == result.baseline_text, "拒绝必须复位基线"
+        # 集级均值确实是涨的——这道门拦的正是被均值吞掉的那一类候选
+        assert result.holdout_after > result.holdout_before
+
+    @pytest.mark.asyncio
+    async def testAllowancePermitsBoundedRegression(self):
+        runner = _runner(
+            {"a": 0.4, "b": 0.4, "c": 0.4},
+            EvolutionConfig(case_regression_allowance=1, min_improvement=0.0),
+            candidateScores={"a": 1.0, "b": 0.9, "c": 0.1},
+        )
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
+            artifact_type="skill", iterations=1)
+
+        assert result.reject_reason != "case_regression", result.reject_reason
+        assert result.caseRegressions == ["c"]
+        assert result.caseAllowance == 1
+
+    @pytest.mark.asyncio
+    async def testUnevidencedCaseIsNotCountedAsRegression(self):
+        """单例判分崩了（任一侧 failed）落"未量出"：既不判退化，也不判没退化。"""
+        runner = _runner(
+            {"a": 0.4, "b": 0.4},
+            EvolutionConfig(case_regression_allowance=0, min_improvement=0.0),
+            agent=_EchoAgent(candidateFailOn=("b",)),
+            candidateScores={"a": 0.9, "b": 0.9},
+        )
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b"]),
+            artifact_type="skill", iterations=1)
+
+        assert result.unevidencedCases == ["b"]
+        assert result.caseRegressions == []
+        assert result.reject_reason != "case_regression", result.reject_reason
+
+    def testReadoutIsSilentWhenNothingMeasured(self):
+        """一条都没量到 → 门不主张，交由既有均值/失明判据处置。"""
+        assert _caseRegressionReadout({}) == ([], [])
+
+    def testReadoutSeparatesUnevidencedFromRegression(self):
+        """纯函数级反证：仅一侧没量出也算未量出，不得凭另一侧的读数判退化。"""
+        caseScores = {
+            "regressed": {"baseline": 0.6, "candidate": 0.1,
+                          "baseline_failed": False, "candidate_failed": False},
+            "halfMeasured": {"baseline": 0.6, "candidate": 0.0,
+                             "baseline_failed": False, "candidate_failed": True},
+            "held": {"baseline": 0.3, "candidate": 0.9,
+                     "baseline_failed": False, "candidate_failed": False},
+        }
+        assert _caseRegressionReadout(caseScores) == (["regressed"], ["halfMeasured"])
+
+    def testCaseRegressionIsNotCompressedIntoGateWall(self):
+        """`case_regression` 不属约束/泄漏前缀：它是一次**实测否决**，
+        不是"提案质量问题"——被压进拒绝墙会让变异器误读成该换方向。"""
+        assert not "case_regression".startswith(GATE_REASON_PREFIXES)
 
