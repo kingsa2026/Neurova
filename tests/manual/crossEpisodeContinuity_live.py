@@ -22,8 +22,9 @@
    「有产物」；
 6. 全程不写仓内真实 `data/`（指纹前后一致）。
 
-一条命令复现：
-PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/crossEpisodeContinuity_live.py
+一条命令复现（机器无关串，不写死开发机绝对路径——否则给常驻守卫
+`TestNoHardcodedDevMachinePaths` 新增一格 offender）：
+PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/crossEpisodeContinuity_live.py
 
 如实记一句：本层不证 `recovery.py` 对上游的轮询正确性，也不证前端页面渲染
 （`StudioProjectPage.vue` 的错误展示另有页面测试）。
