@@ -848,6 +848,12 @@
     - **按类收而不是一文件一删**：新守卫判"0 字节 + 无扩展名的普通文件"这一类在包树与仓根一层都为空集；现扫同类只此一件，所以不需要存量豁免表。四档里两档是**反向对照**（造一枚 `expected` 必须被抓到，且 `__init__.py`/`empty.txt` 这类有后缀的合法空文件不得误伤；仓根那半另配一格，防"扫描面为空即绿"），外加一格"git 索引里不得再留着它"——工作树删了而索引没删就是假退役（本仓 §6-65 那格的教训形态）。
     - **红→绿与 A/B**：红 2 条（`包树里出现 0 字节无后缀文件…['expected']`、`仍在 git 索引里：['neurova/expected']`）→ 绿 4 passed。A/B 按该序项自己规定的验证面（各包 import 冒烟 + `tests/unit/core`，HEAD worktree 现建、严格串行）：基线 **9 failed/2039 passed/1 skipped** ↔ 本树同数，FAILED **集合**零差 → AB_PASS；那 9 条两侧同红属 HEAD 预存（`test_singleton_convergence` 一格、`test_steer_endpoint_registered`、`test_no_workspace_falls_back_data_dir` 等），不认领。生产净 **0**（删的文件本身没有一行代码）。
 
+93. **进化运行审计面 `runs/*.json` 只写不读：例级门拒掉的那些运行目前没有读者（前半 ✅ 闭环 `a0ec975b`，判据 `f3bd0b2e`/`bcde3ed4`、入子集 `cc52e7a7`；后半 🟡 需人裁）** —— 来源是对照报告 §6-9（§8 前置 1 落地时新发现）。复算后本条真正的缺陷不在"人看不见审计文件"，而在**台账在向反馈回路说谎**：胜者行早在评测期写成 `accepted=is_winner`，六处终局拒绝各抄四行且都不回写它，于是被例级门拒掉的候选在台账里仍是 `accepted=True`，被三个既有读方按"已生效"理解（`history_ledger.py:163-166` 提示词段、`:207` stall 换轴指令被抑制、`evolution_yield_prune.py:51` 零产出技能被挡在剪枝判据外）。修法是一个 `rejectRun(reason)` 出口 + 胜者行翻 `accepted=False`/带 `reject_reason`，另开 `round_winner` 一格保留"本轮 tune argmax"（`accepted` 从此只表**被部署**，一格一义）。红在落地前取到（`已生效（勿做无谓回退）` 连渲染四条，而实际部署自始至终是基线），活体读盘证 `accepted=False / reject_reason='case_regression' / round_winner=True` 真落进 jsonl。**后半**：`_persist_run:501-505` 写的 `runs/*.json` 全仓零读方，而提案只在未拒时产出（`service.py:287`），故"门逐条拦了谁"要下钻仍无出口——补 GET 端点属新建通道，本批票面禁止，二选一需人裁。
+
+94. **`tests/performance/test_perf_gate_contract.py` 的烧 CPU 基元在 Windows 上语义失效（🟡 本地门禁不可复跑；CI/Linux 不受影响）** —— 该文件的注入全部形如 `deadline = time.thread_time() + x; while time.thread_time() < deadline: pass`。本机（Windows 10.0.26200）实测 `time.thread_time()` 以 **~15.6ms 为粒度**推进：目标 0.1ms 的一次自旋实跑 15.625ms，多调用点累计后整文件 `--timeout=180` 单跑 6 分钟仍不收敛，而默认 `timeout=30` 会把整场受保护子集当场打断（本轮两次全量都在同一位置断）。该文件自 `030a2b9f`（10-01）未再改动，非本批引入。两条出路都要人裁：改计时基元（`monotonic` 兜底或按量子给下限，会改变自证强度）或按平台跳该格。
+
+    - **同批全量门禁的取数记录（2026-10-09，CI 原口径 `--cov --cov-fail-under=60`，548 文件）**：`5055 passed / 35 failed / 41 errors`，coverage **86.74%**（达标线 60%）。其中 34 格 `ERROR` 是 `fixture '…' not found`，出错簇单独复跑 **386 passed** 不复现 ⇒ 并发会话在这 17 分钟内动了同一工作树，本批不认领；`test_consoleYieldGateWiring`、`test_pip_audit_gate` 两格在**干净 HEAD worktree** 里同样红 ⇒ main 自带常驻红格，非本批引入。本批四枚判据文件（呈现账两枚、例级门两枚）在失败面**零命中**。
+
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
