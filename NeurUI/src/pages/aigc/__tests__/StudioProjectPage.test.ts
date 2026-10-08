@@ -70,7 +70,7 @@ const DETAIL = {
     thumbnail: '', created_at: 0, updated_at: 0,
   },
   episodes: [
-    { id: 'e1', project_id: 'p1', number: 1, title: '受辱', content: '客厅夜', synopsis: '', status: 'draft', duration: 0, video_path: '', subtitle_path: '' },
+    { id: 'e1', project_id: 'p1', number: 1, title: '受辱', content: '客厅夜', synopsis: '', status: 'draft', video_path: '', subtitle_path: '' },
   ],
   characters: [
     { id: 'c1', project_id: 'p1', name: '林凡', role: 'protagonist', description: '', appearance: '青年男', styling: '', personality: '', final_prompt: '', image_path: '', seed_value: '', status: 'pending' },
@@ -81,9 +81,9 @@ const DETAIL = {
 const SHOT = {
   id: 's1', episode_id: 'e1', number: 1, title: '', description: '主角推门',
   image_prompt: 'man enters', video_prompt: '推门', narration: '他回来了', camera: '中景',
-  movement: '固定', atmosphere: '', bgm_prompt: '', sound_effect: '', duration: 3,
+  movement: '固定', atmosphere: '', duration: 3,
   characters_json: '[]', props_json: '[]', first_frame_path: '', injected_prompt: '',
-  video_path: '', video_status: 'pending', ledger_task_id: '', subtitle_path: '',
+  video_path: '', video_status: 'pending', ledger_task_id: '',
   audio_path: '', status: 'pending', error: '',
 }
 

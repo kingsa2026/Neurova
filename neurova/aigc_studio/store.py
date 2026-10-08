@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS projects(
 CREATE TABLE IF NOT EXISTS episodes(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
   number INTEGER DEFAULT 1, title TEXT DEFAULT '', content TEXT DEFAULT '',
-  synopsis TEXT DEFAULT '', status TEXT DEFAULT 'draft', duration REAL DEFAULT 0,
+  synopsis TEXT DEFAULT '', status TEXT DEFAULT 'draft',
   video_path TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
   created_at REAL, updated_at REAL
 );
@@ -63,14 +63,14 @@ CREATE TABLE IF NOT EXISTS storyboards(
   number INTEGER DEFAULT 1, title TEXT DEFAULT '', description TEXT DEFAULT '',
   image_prompt TEXT DEFAULT '', video_prompt TEXT DEFAULT '',
   narration TEXT DEFAULT '', camera TEXT DEFAULT '', movement TEXT DEFAULT '',
-  atmosphere TEXT DEFAULT '', bgm_prompt TEXT DEFAULT '', sound_effect TEXT DEFAULT '',
+  atmosphere TEXT DEFAULT '',
   duration REAL DEFAULT 3,
   characters_json TEXT DEFAULT '[]', props_json TEXT DEFAULT '[]',
   first_frame_path TEXT DEFAULT '', end_frame_path TEXT DEFAULT '',
   injected_prompt TEXT DEFAULT '',
   video_path TEXT DEFAULT '', video_status TEXT DEFAULT 'pending',
   video_resolution TEXT DEFAULT '',
-  ledger_task_id TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
+  ledger_task_id TEXT DEFAULT '',
   audio_path TEXT DEFAULT '',
   status TEXT DEFAULT 'pending', error TEXT DEFAULT '',
   created_at REAL, updated_at REAL
@@ -136,6 +136,9 @@ class StudioStore:
         # `storyboards.video_resolution`＝这条镜头实际用哪档规格提交的留痕（§6-78 G 条）。
         # 写侧在 `services.generate_shot_videos` 提交成功时落值，读侧是单镜重试——
         # 缺了它，「重试」只能落回服务层默认，等于背着用户换规格。
+        # 退役列（`storyboards.bgm_prompt`/`sound_effect`/`subtitle_path`、`episodes.duration`，
+        # §6-90）只从**定义面**摘除，旧库里的残留列不 DROP：那两列可能有人工编辑过的内容，
+        # 删列不可逆；新代码一侧不写、不读、白名单不收，判据里另有一格证旧库照跑。
         for table, col in (("storyboards", "end_frame_path"),
                            ("storyboards", "video_resolution"),
                            ("merges", "warning")):
