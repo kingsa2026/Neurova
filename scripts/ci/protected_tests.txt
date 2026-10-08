@@ -1901,6 +1901,15 @@ tests/unit/aigc_studio/test_runFallbackOutcomeSingleSource.py
 # 逐文件单跑两次同读数 18 passed（`3b26acbe` 落库之后复取）
 tests/unit/api/test_studioRunCancel.py
 
+# §9 序 1 收口（`8a1bb9e9`）：包根/仓根的 0 字节"重定向残留"文件防再生
+# 来历：`neurova/expected` 由 `98b5422a`「清理临时文件」以 0 字节引入（同笔还有仓根 `missing`
+#   与删掉的 471 行 `missing_files.txt`），形态是 shell 把命令名当成了重定向目标。
+# 判据按**类**收：0 字节 + 无扩展名的普通文件一律不许存在（`__init__.py` 有后缀不在射程内），
+# 含两格反向对照（造一枚必须抓到；仓根那半单独配对照，防"扫描面为空即绿"）
+# 与一格"git 索引里不得再留着它"（工作树删了而索引没删＝假退役）。
+# 逐文件单跑两次同读数 4 passed（`8a1bb9e9` 落库之后复取）
+tests/unit/test_zeroByteResidueGuard.py
+
 # H2-7 ③（`977f16cb`）：四列只写不读退役后的防再生面（§6-90）
 # ① `bgm_prompt`/`sound_effect` 全仓唯一，可按名禁绝（schema / 拆解写入 / LLM 提示词索求 /
 #    两个白名单 / TS 类型面）；`subtitle_path`、`duration` **同名跨活表**，必须按 (表, 列) 对判——
