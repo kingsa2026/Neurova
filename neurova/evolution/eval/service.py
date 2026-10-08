@@ -380,7 +380,7 @@ class SkillEvolutionService:
         per_task = [
             {"task_input": ex.task_input,
              "baseline": round(float(b), 4), "candidate": round(float(c), 4)}
-            for (ex, b, _o, _f), (_ex2, c, _o2, _f2) in zip(baseline_details, candidate_details)
+            for (ex, b, _o, _f, _bf), (_ex2, c, _o2, _f2, _cf) in zip(baseline_details, candidate_details)
         ]
         return {
             "task_split": "heldout" if dataset.heldout else "selection",
