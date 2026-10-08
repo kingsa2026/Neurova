@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS storyboards(
   first_frame_path TEXT DEFAULT '', end_frame_path TEXT DEFAULT '',
   injected_prompt TEXT DEFAULT '',
   video_path TEXT DEFAULT '', video_status TEXT DEFAULT 'pending',
+  video_resolution TEXT DEFAULT '',
   ledger_task_id TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
   audio_path TEXT DEFAULT '',
   status TEXT DEFAULT 'pending', error TEXT DEFAULT '',
@@ -132,7 +133,12 @@ class StudioStore:
         self._conn.commit()
         # A1/A5：既有库幂等补列（旧版表缺新列——PRAGMA 探测，
         # 不依赖异常吞 duplicate：重复执行安全）
-        for table, col in (("storyboards", "end_frame_path"), ("merges", "warning")):
+        # `storyboards.video_resolution`＝这条镜头实际用哪档规格提交的留痕（§6-78 G 条）。
+        # 写侧在 `services.generate_shot_videos` 提交成功时落值，读侧是单镜重试——
+        # 缺了它，「重试」只能落回服务层默认，等于背着用户换规格。
+        for table, col in (("storyboards", "end_frame_path"),
+                           ("storyboards", "video_resolution"),
+                           ("merges", "warning")):
             cols = {r["name"] for r in self._conn.execute(
                 f"PRAGMA table_info({table})").fetchall()}
             if col not in cols:
