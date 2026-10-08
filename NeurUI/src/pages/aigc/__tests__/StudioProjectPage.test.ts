@@ -20,9 +20,15 @@ vi.mock('@/utils/security', () => ({
 }))
 vi.mock('@/api/modules/models', () => ({ listModels: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/api/modules/files', () => ({ uploadFile: vi.fn() }))
-vi.mock('@/composables/useStudioRun', () => ({
-  waitStudioRun: vi.fn().mockResolvedValue({ id: 'r1', status: 'done', project_id: 'p1', kind: 'script', detail_json: '{}', error: '' }),
-}))
+vi.mock('@/composables/useStudioRun', async (importOriginal) => {
+  // 只替掉轮询本体，`describeRunOutcome` 必须用真件：这条测的就是"页面有没有把读数交给
+  // 真格式化函数"，连它一起 mock 掉即自证空转。
+  const actual = await importOriginal<typeof import('@/composables/useStudioRun')>()
+  return {
+    ...actual,
+    waitStudioRun: vi.fn().mockResolvedValue({ id: 'r1', status: 'done', project_id: 'p1', kind: 'script', detail_json: '{}', error: '' }),
+  }
+})
 
 vi.mock('@/api/modules/studio', () => ({
   getProject: vi.fn(),
@@ -42,10 +48,13 @@ vi.mock('@/api/modules/studio', () => ({
   addStoryboardManually: vi.fn(),
 }))
 vi.mock('ant-design-vue', () => ({
-  message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  // warning 是真 API 的一员（antd message 有 warning），补齐才不至于把"组件没调它"
+  // 这一行为红误报成"mock 少一个键"的类型错。
+  message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 import StudioProjectPage from '@/pages/aigc/StudioProjectPage.vue'
+import { message } from 'ant-design-vue'
 import { waitStudioRun } from '@/composables/useStudioRun'
 import {
   getProject, getEpisode, runSplitScript, retryStoryboard, updateStoryboard, mergeEpisode,
@@ -140,6 +149,26 @@ describe('StudioProjectPage', () => {
     expect(runSplitMock).toHaveBeenCalledWith('p1', '三年之期已到', undefined)
     expect(waitStudioRun).toHaveBeenCalledWith('p1', 'r1')
     expect(getProjectMock).toHaveBeenCalled()
+  })
+
+  it('带病完成落警示条并点名条数（detail_json 的读数有真读者）', async () => {
+    // §6-87：改前这条走的是 message.success('任务完成')——服务端写的条数在界面上等于没写
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'r1', status: 'done_with_fallback', project_id: 'p1', kind: 'videos',
+      detail_json: '{"submitted":4,"fallback_failed":1,"fallback_blocked":2,"fallback":""}',
+      error: '',
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.novel = '三年之期已到'
+    await vm.splitScript()
+    await flushPromises()
+    const warned = (message.warning as unknown as ReturnType<typeof vi.fn>).mock.calls.flat()
+    expect(warned.join('')).toContain('任务带病完成')
+    expect(warned.join('')).toContain('1 项失败')
+    expect(warned.join('')).toContain('2 项被阻断')
+    expect(message.success).not.toHaveBeenCalled()
   })
 
   it('Phase03 镜头卡片渲染 + 保存透传 @角色映射', async () => {

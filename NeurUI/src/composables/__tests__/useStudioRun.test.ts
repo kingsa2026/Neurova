@@ -15,11 +15,12 @@ vi.mock('@/api/modules/studio', () => ({
 }))
 
 import { waitStudioRun } from '@/composables/useStudioRun'
+import * as useStudioRunModule from '@/composables/useStudioRun'
 
-function runOf(id: string, status: string) {
+function runOf(id: string, status: string, detailJson = '{}', error = '') {
   return {
     id, project_id: 'p1', kind: 'extract', status,
-    detail_json: '{}', error: '', created_at: 0, updated_at: 0,
+    detail_json: detailJson, error, created_at: 0, updated_at: 0,
   }
 }
 
@@ -62,5 +63,56 @@ describe('waitStudioRun 终态集合与生产写入点同源', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/**
+ * H2-7 ①：`detail_json` 的带病读数必须有真读者（§6-87）。
+ *
+ * 改前 `track()` 只看 `status`，`done_with_fallback` 走的是 success 那一支——服务端写进去的
+ * 条数与成因在界面上等于没写。这里用 stub 翻译函数把「取了哪些键」钉成可断言的读数，
+ * 键名必须与结算侧的契约一致（Python 侧有跨语言判据咬合 `useStudioRun.ts` 的 `facts.*`）。
+ */
+describe('describeRunOutcome 把结算契约读成人能看的一句话', () => {
+  const tStub = (key: string, named?: Record<string, unknown>) => `${key}|${named?.n ?? ''}`
+  const reader = () => (useStudioRunModule as any).describeRunOutcome as
+    ((run: any, t: typeof tStub) => string) | undefined
+
+  it('读者存在（改前 detail_json 只写不读）', () => {
+    expect(typeof reader()).toBe('function')
+  })
+
+  it('带病计数按契约键取，不自己重算 blocked_*', () => {
+    const out = reader()!({
+      ...runOf('r', 'done_with_fallback', '{"submitted":4,"failed":2,"blocked_no_frame":1,"fallback_failed":2,"fallback_blocked":1,"fallback":""}'),
+    }, tStub)
+    expect(out).toContain('studio.runPartialFailed|2')
+    expect(out).toContain('studio.runPartialBlocked|1')
+  })
+
+  it('纯成因（无计数）也随行给出', () => {
+    const out = reader()!({
+      ...runOf('r', 'done_with_fallback', '{"episodes":1,"fallback":"LLM 输出不可解析"}'),
+    }, tStub)
+    expect(out).toContain('LLM 输出不可解析')
+    expect(out).not.toContain('runPartialFailed')
+  })
+
+  it('干净完成不产出任何带病文案', () => {
+    const out = reader()!({
+      ...runOf('r', 'done', '{"done":3,"fallback_failed":0,"fallback_blocked":0,"fallback":""}'),
+    }, tStub)
+    expect(out).toBe('')
+  })
+
+  it('历史行只有 error 文本时退回它；detail_json 坏 JSON 不炸', () => {
+    const legacy = reader()!({
+      ...runOf('r', 'done_with_fallback', '{}', '1 项被阻断'),
+    }, tStub)
+    expect(legacy).toBe('1 项被阻断')
+    const broken = reader()!({
+      ...runOf('r', 'done_with_fallback', '{不是 JSON', ''),
+    }, tStub)
+    expect(typeof broken).toBe('string')
   })
 })

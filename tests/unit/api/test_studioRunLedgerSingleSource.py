@@ -161,8 +161,8 @@ class TestOneRowPerRequest:
             f"带病完成被 wrapper 改写成干净完成：{terminal['status']}"
         )
         detail = json.loads(terminal["detail_json"] or "{}")
-        assert "429" in str(detail.get("error", "")), (
-            f"回退成因不在账上：{detail}"
+        assert "429" in str(detail.get("fallback", "")), (
+            f"回退成因不在账上（成因键已收成单值 `fallback`）：{detail}"
         )
 
 

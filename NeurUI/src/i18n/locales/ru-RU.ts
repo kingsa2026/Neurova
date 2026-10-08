@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'Нечего экспортировать',
   runDone: 'Задача выполнена',
   runTimeout: 'Таймаут задачи',
+  runPartial: 'Задача выполнена со сбоями: {detail}',
+  runPartialFailed: '{n} сбоев',
+  runPartialBlocked: '{n} заблокировано',
   retryStarted: 'Повтор запущен',
 },
 
