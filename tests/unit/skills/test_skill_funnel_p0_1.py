@@ -34,7 +34,8 @@ def test_funnel_completed():
     entries = [{"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""}]
     updates = compute_skill_funnel_update(entries, task_completed=True)
     assert updates == {
-        "s1": {"selections": 1, "applications": 1, "completions": 1, "fallbacks": 0}
+        "s1": {"presentations": 0, "selections": 1, "applications": 1,
+               "completions": 1, "fallbacks": 0}
     }
 
 
@@ -61,7 +62,8 @@ def test_funnel_unapplied_selection_only():
     entries = [{"skill_id": "s1", "applied": False, "ok": False}]
     updates = compute_skill_funnel_update(entries, task_completed=True)
     assert updates["s1"] == {
-        "selections": 1, "applications": 0, "completions": 0, "fallbacks": 0
+        "presentations": 0, "selections": 1, "applications": 0,
+        "completions": 0, "fallbacks": 0
     }
 
 
@@ -75,7 +77,8 @@ def test_funnel_aggregates_same_skill():
     ]
     updates = compute_skill_funnel_update(entries, task_completed=True)
     assert updates["s1"] == {
-        "selections": 2, "applications": 2, "completions": 1, "fallbacks": 1
+        "presentations": 0, "selections": 2, "applications": 2,
+        "completions": 1, "fallbacks": 1
     }
     assert updates["s2"]["selections"] == 1
     assert "" not in updates
