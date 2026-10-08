@@ -36,7 +36,13 @@
 1. **读数键必须存在于生产键域**：扫 `tests/` 与 `scripts/` 下所有
    `get_context_health()[...]` / `["<key>"]` 常量索引，键必须能在
    `_emptyContextHealth()` 的单点定义里找到。
-2. **落点由生产单点推导**：`tests/manual/` 下不得出现 `"data"` 目录字面量拼路径。
+2. **落点由生产单点推导**：`tests/manual/` 下不得出现「把 `data` 当路径段拼出来、
+   并交给存储入口（开库/写）」的形态。判定按**代码形态 + 用途**两维取形（AST，
+   不是文本正则）：文本正则既抓不到 pathlib 的 `X / "data"`，又会把
+   `"".join(e.get("data"))` 这种**协议字段名**判成落点（2026-10-08 起的那格常驻红
+   就是它）；而只读取仓内 `data/` 做**指纹对照**的锚点属第三种用途，不判红
+   ——`isolatedDataRoot()` 已把 `NEUROVA_DATA_DIR` 注到临时根，生产单点表达不出
+   「工作树里那个真 data 目录」，所以它不是第二份落点定义。
 3. **构造生产持久对象的脚本必须注入数据根**：脚本里出现
    `Agent(` / `AgentConfig(` / `ContextOrchestrator(` / `ContextPool(` /
    `EvictionLedgerDB(` / `SessionManager(` 之一、即把持落点，则必须显式
@@ -88,6 +94,129 @@ _ISOLATION_HELPER = "_liveVerifyIsolation"
 def _injectsDataRoot(text: str) -> bool:
     """脚本是否把数据根交给单点（注入口字面量 或 隔离单点模块）。"""
     return _DATA_ROOT_ENV in text or _ISOLATION_HELPER in text
+
+
+#: 存储入口：路径被交给这些调用，才是「拿自己拼出来的落点开库/写」。
+#: 只读取（`exists`/`rglob`/`stat`/`relative_to`）**不在内** —— 活体脚本要读仓内真
+#: `data/` 做**指纹对照**以自证没写脏生产库；而 `isolatedDataRoot()` 已把
+#: `NEUROVA_DATA_DIR` 注到临时根，生产单点在脚本里**表达不出**「工作树里那个真
+#: data 目录」这个语义，所以那份锚点不是「第二份落点定义」。
+_STORAGE_SINKS = frozenset({
+    "connect", "require_data_path", "open", "write_text", "write_bytes",
+    "mkdir", "makedirs", "touch", "remove", "unlink", "rename", "replace",
+    "copy", "copyfile", "copytree", "move",
+})
+
+#: 路径型 join 的接收者。假红的来源正是这里要区分开的东西：`"".join(...)` 是
+#: **字符串** join，它拼的是流式事件的协议字段 `data`，与磁盘落点无关。
+_PATH_JOIN_RECEIVERS = frozenset({"os", "posixpath", "ntpath", "pathlib", "Path"})
+
+#: 被抄的第二份落点里那段目录名（生产侧 `core/data_root.py` 是它的唯一出处）。
+_DATA_SEGMENT = "data"
+
+
+def _joinReceiverRoot(node: ast.AST) -> str | None:
+    """属性链最左端的名字；字面量接收者（`""`、`f""`）返回 None —— 那不是路径拼接。"""
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        return cur.id
+    if isinstance(cur, ast.Call) and isinstance(cur.func, ast.Name):
+        return cur.func.id
+    return None
+
+
+def _isDataSegment(node: ast.AST) -> bool:
+    """一个字面量是不是恰好那个目录段（`"data"`）。"""
+    return isinstance(node, ast.Constant) and node.value == _DATA_SEGMENT
+
+
+def _buildsDataLayout(node: ast.AST) -> bool:
+    """子树里是否出现「把 `data` 当路径段拼进去」的形态。
+
+    认三种：路径型 `join(..., "data", ...)` / `joinpath("data")`、pathlib 的
+    `X / "data"`、以及形如 `"data/x.db"`、`"...<sep>data<sep>..."` 的相对路径串。
+    故意**不**按文本扫 `join(` —— 那会把字符串 join 与协议字段名一起卷进来。
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
+            args = list(sub.args) + [kw.value for kw in sub.keywords if kw.value is not None]
+            if sub.func.attr == "join" and (
+                    _joinReceiverRoot(sub.func.value) in _PATH_JOIN_RECEIVERS):
+                if any(_isDataSegment(a) for a in args):
+                    return True
+            elif sub.func.attr == "joinpath" and any(_isDataSegment(a) for a in args):
+                return True
+        elif isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Div):
+            if _isDataSegment(sub.left) or _isDataSegment(sub.right):
+                return True
+        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            norm = sub.value.replace("\\", "/")
+            if (norm.startswith(f"{_DATA_SEGMENT}/")
+                    or f"/{_DATA_SEGMENT}/" in norm
+                    or norm.endswith(f"/{_DATA_SEGMENT}")):
+                return True
+    return False
+
+
+def _replicatesDataRootLayout(tree: ast.AST) -> bool:
+    """脚本是否**另拼了一份 `data/` 落点并把它交给了存储入口**。
+
+    谓词只许这一处（本文件原先在整目录扫描与反向控制里各写了一遍同一正则，
+    两份会漂 —— 漂的方向永远是「判据以为自己在防，实际防的是另一件事」）。
+
+    用途这一维不可省：只看「有没有拼 `data`」会把 10 份活体脚本的只读指纹锚点
+    一起误伤；只看 `join(` 文本又既抓不到 pathlib 形态、又把协议字段名判成落点。
+    """
+    assigned: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and _buildsDataLayout(node.value) for t in node.targets):
+            assigned.update(t.id for t in node.targets if isinstance(t, ast.Name))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        isSink = (isinstance(func, ast.Attribute) and func.attr in _STORAGE_SINKS) or (
+            isinstance(func, ast.Name) and func.id in _STORAGE_SINKS)
+        if not isSink:
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name) and sub.id in assigned:
+                return True
+            if _buildsDataLayout(sub):
+                return True
+    return False
+
+
+def _treeOfSample(tmp_path: Path, source: str) -> ast.AST:
+    """样本落成临时文件后走**共享的一次性解析入口**。
+
+    本文件不许出现私有 `ast.parse`：枚举 + 私有解析是
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 判红的形态。
+    """
+    sample = tmp_path / "layoutSample.py"
+    sample.write_text(source, encoding="utf-8")
+    return ast_scan.transientTree(sample)
+
+
+#: 已知存量：判据从「文本正则」换成「AST + 用途」后**第一次显形**的真断点
+#: （2026-10-09 登记，台账 §6-87）。`seed_memory_pair_relocation_290.py:50` 手拼
+#: 旧锚点前像 `legacy_root / "neurova" / "memory" / "data"` 再 `mkdir`，而生产侧
+#: 有这一件事的单点 `core/data_root.py:190 legacyLanding(*legacyParts)`
+#: （该脚本 `:54` 已把 `data_root.repoRoot` 打到假根，走的正是单点解析那条路）。
+#: 它不是本轮的误伤对象：与只读指纹锚点不同，这里是**拼出来去 mkdir 落点**，
+#: 且同一件事在仓内已有唯一出处。
+#: 本表**双向咬合**（见 `testKnownLayoutOffendersAreStillReallyMatched`）：
+#: 新增命中即红；把它修好了不摘表也红。
+_KNOWN_LAYOUT_OFFENDERS = ("seed_memory_pair_relocation_290.py",)
+
+
+def _layoutOffenders() -> list[Path]:
+    return [p for p in _manualScripts()
+            if _replicatesDataRootLayout(ast_scan.transientTree(p))]
 
 
 def _healthKeyDomain() -> set[str]:
@@ -167,21 +296,109 @@ def testStaleReadoutKeyIsRejected():
 
 
 def testManualScriptsDoNotReplicateDataRootLayout():
-    offenders: list[str] = []
-    for path in _manualScripts():
-        text = path.read_text(encoding="utf-8")
-        if re.search(r'join\([^)]*[\'"]data[\'"]', text):
-            offenders.append(str(path.relative_to(PROJECT_ROOT)))
-    assert not offenders, (
-        "以下脚本自己拼了 `data/` 落点 —— 落点推导的唯一单点是 `core/data_root.py`，"
-        "脚本抄第二份就会与生产打开的库不是同一个文件：\n  " + "\n  ".join(offenders)
+    unexpected = [str(p.relative_to(PROJECT_ROOT)) for p in _layoutOffenders()
+                  if p.name not in _KNOWN_LAYOUT_OFFENDERS]
+    assert not unexpected, (
+        "以下脚本自己拼了 `data/` 落点并把它交给存储入口（开库/写）—— 落点推导的唯一"
+        "单点是 `core/data_root.py`，脚本抄第二份就会与生产打开的库不是同一个文件：\n  "
+        + "\n  ".join(unexpected)
+        + "\n（已知存量另见 `_KNOWN_LAYOUT_OFFENDERS`，双向咬合，不静默放行）"
     )
 
 
-def testDataRootLiteralIsDetected():
-    """反向控制：把落点字面量塞进一份样本，判定必须翻转。"""
-    sample = 'dbPath = os.path.join(cwd, "data", "context_ledger", "x.db")\n'
-    assert re.search(r'join\([^)]*[\'"]data[\'"]', sample), "反向控制失效：判据抓不到该形态"
+def testKnownLayoutOffendersAreStillReallyMatched():
+    """例外表双向咬合：新增命中由主判据拦，**修好了不摘表也拦**。
+
+    少了这一格，存量表就成了永久豁免 —— 那正是「豁免通道一开就有人顺同一口径进来」
+    的形态。同时它反证主判据不是空转：表里那条今天必须仍被真抓到。
+    """
+    for name in _KNOWN_LAYOUT_OFFENDERS:
+        path = MANUAL_ROOT / name
+        assert path.is_file(), f"存量表指向的文件已不在：{name} —— 改判或摘表，别留悬空条目"
+        assert _replicatesDataRootLayout(ast_scan.transientTree(path)), (
+            f"{name} 已不再命中判据（说明它被修好了）——"
+            "把名字从 `_KNOWN_LAYOUT_OFFENDERS` 摘掉再提交，别让表替不存在的事背书"
+        )
+
+
+def testDataRootLiteralIsDetected(tmp_path):
+    """反向控制：`join` 形态拼出的库路径进了开库调用，判定必须翻转。
+
+    样本带 sink 是必需的：本判据按**用途**取形（见 `_replicatesDataRootLayout`），
+    不带存储入口的拼法（只读对照）属另一件事，有专门的负向控制钉住。
+    """
+    sample = ('dbPath = os.path.join(cwd, "data", "context_ledger", "x.db")\n'
+              "conn = sqlite3.connect(dbPath)\n")
+    assert _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), \
+        "反向控制失效：判据抓不到该形态"
+
+
+def testDataRootOpenedViaPathlibIsDetected(tmp_path):
+    """反向控制：pathlib `/ "data"` 拼出的库路径**进了开库调用**，必须判红。
+
+    这条抓的是本判据的**覆盖缺口**：谓词只认 `join(` 形态，于是 docstring 里
+    「形态二 · 数据根推导被脚本抄了第二份」换个写法就静默放过——判据以为在防，
+    实际防的是另一件事。
+    """
+    sample = (
+        'dbPath = PROJECT_ROOT / "data" / "agent_runs.db"\n'
+        "conn = sqlite3.connect(dbPath)\n"
+    )
+    assert _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), (
+        "pathlib 形态的落点拼接没被判红（覆盖缺口）"
+    )
+
+
+def testProtocolFieldJoinIsNotMistakenForDataRoot(tmp_path):
+    """反向控制（负向）：`"".join(...)` 取的是协议字段 `data`，不是落点，不得判红。
+
+    本仓 2026-10-08 起这一格常驻红就是它：`anthropicLoop_realProvider.py` 拼流式
+    事件文本 `e.get("data", "")` 被当成「脚本自拼 data/ 落点」。守卫钉的该是代码形态，
+    不是字面量本身——`data` 在别的域里是同名词值。
+    """
+    sample = (
+        'reply = "".join(\n'
+        '    e.get("data", "") for e in events if e.get("type") == "content"\n'
+        ")\n"
+    )
+    assert not _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), (
+        "字符串 join 的协议字段名被当成 `data/` 落点（假红）"
+    )
+
+
+def testReadOnlyFingerprintAnchorIsNotMistakenForDataRoot(tmp_path):
+    """反向控制（负向）：只读取仓内 `data/` 做**指纹对照**（证本轮没写脏生产库）不是违规。
+
+    要说清为什么它不算「第二份落点定义」：`dataPath()` 那类单点走的是
+    `NEUROVA_DATA_DIR`，而活体脚本一进来就把它注到临时根（`isolatedDataRoot()`），
+    于是单点在脚本里**表达不出**「仓库工作树里那个真 data 目录」这个语义。
+    判据要拦的是「拼出来去开库/写」，不是「拼出来读一下看有没有被写」。
+    """
+    sample = (
+        'REPO_DATA_DIR = PROJECT_ROOT / "data"\n'
+        'for p in REPO_DATA_DIR.rglob("*"):\n'
+        "    p.stat()\n"
+    )
+    assert not _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), (
+        "只读指纹对照锚点被判成落点拼接（会把 10 份活体脚本一并误伤）"
+    )
+
+
+def testInlineLayoutInSinkArgumentIsDetected(tmp_path):
+    """反向控制：不赋变量、直接把落点拼进存储入口，也必须判红（数据流不止走变量名）。"""
+    sample = ("import sqlite3\n"
+              'conn = sqlite3.connect(os.path.join(root, "data", "agent_runs.db"))\n')
+    assert _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), (
+        "内联形态的落点拼接没被判红"
+    )
+
+
+def testStringLiteralRelativePathIsDetected(tmp_path):
+    """反向控制：直接写相对路径串 `"data/x.db"` 进 `open`，也必须判红。"""
+    sample = 'handle = open("data/context_ledger/x.db", "w")\n'
+    assert _replicatesDataRootLayout(_treeOfSample(tmp_path, sample)), (
+        '相对路径串形态没被判红'
+    )
 
 
 # ───────────────────────── 判据 3：注入数据根 ─────────────────────────
