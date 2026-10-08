@@ -53,8 +53,8 @@ def client(env, monkeypatch):
     # 离线判分：按正文标记给分（基线 0.2 / 含"改进版" 0.9）
     async def fake_evaluate(self, skill_text, examples, artifact_type):
         score = 0.9 if "改进版" in skill_text else 0.2
-        details = [(ex, score, "", "") for ex in examples]
-        return sum(s for _, s, _, _ in details) / len(details), details
+        details = [(ex, score, "", "", False) for ex in examples]
+        return sum(s for _ex, s, _o, _f, _failed in details) / len(details), details
 
     monkeypatch.setattr(SkillEvolutionRunner, "_evaluate", fake_evaluate)
 
@@ -136,7 +136,7 @@ class TestAbCompareService:
 
         async def fake_evaluate(self, skill_text, examples, artifact_type):
             score = 0.9 if "改进版" in skill_text else 0.2
-            return score, [(ex, score, "", "") for ex in examples]
+            return score, [(ex, score, "", "", False) for ex in examples]
 
         monkeypatch.setattr(SkillEvolutionRunner, "_evaluate", fake_evaluate)
         report = await svc.ab_compare(baseline_text="旧", candidate_text="新改进版",

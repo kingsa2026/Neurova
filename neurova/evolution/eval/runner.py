@@ -250,7 +250,7 @@ class SkillEvolutionRunner:
         if cand_details is not None and base_scores is not None and seq is not None:
             attr = attribution_hit_rate(
                 predicted=predicted, base_scores=base_scores,
-                cand_scores={ex.task_input: s for ex, s, _o, _f in cand_details})
+                cand_scores={ex.task_input: s for ex, s, _o, _f, _failed in cand_details})
             try:
                 self._ledger.patch(ledger_key, seq, {"attribution": attr})
             except OSError as e:
@@ -307,17 +307,23 @@ class SkillEvolutionRunner:
 
     async def _evaluate(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
-    ) -> tuple[float, list[tuple[EvalExample, float, str, str]]]:
+    ) -> tuple[float, list[tuple[EvalExample, float, str, str, bool]]]:
+        """返回 (均分, 明细)。明细第 5 位 `failed` = 该单例执行或判分是否异常。
+
+        带着它而不是只带 0.0：均分里 0.0 与"真考砸"同值，集合层判据可以忍，
+        一旦拿它做**例级**判据（谁退化了）就会把器械故障写成质量结论——
+        三态契约在集合层面已折叠过一次，不许在单例层面再折一次。
+        """
         if not examples:
             return 0.0, []
-        details: list[tuple[EvalExample, float, str, str]] = []
+        details: list[tuple[EvalExample, float, str, str, bool]] = []
         eval_errors = 0
         for ex in examples:
             score, output, feedback, failed = await self._score_example(skill_text, ex, artifact_type)
             eval_errors += int(failed)
-            details.append((ex, score, output, feedback))
+            details.append((ex, score, output, feedback, failed))
         self._run_eval_errors += eval_errors
-        avg = sum(s for _, s, _, _ in details) / len(details)
+        avg = sum(score for _ex, score, _o, _f, _failed in details) / len(details)
         return avg, details
 
     async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
@@ -326,7 +332,7 @@ class SkillEvolutionRunner:
         _, details = await self._evaluate(skill_text, examples, artifact_type)
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback in sorted(details, key=lambda d: d[1])
+            for ex, score, output, feedback, _failed in sorted(details, key=lambda d: d[1])
         ]
 
     async def _multi_variant_round(
@@ -425,7 +431,7 @@ class SkillEvolutionRunner:
         worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback in worst
+            for ex, score, output, feedback, _failed in worst
         ]
 
     # ── 主循环 ──
@@ -477,7 +483,7 @@ class SkillEvolutionRunner:
         result.holdout_before = await self._evaluate_avg(baseline_text, holdout, artifact_type)
         result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
         # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
-        base_scores = {ex.task_input: score for ex, score, _o, _f in train_details}
+        base_scores = {ex.task_input: score for ex, score, _o, _f, _failed in train_details}
 
         best_text, best_score = baseline_text, result.train_before
         best_seq: Optional[int] = None
