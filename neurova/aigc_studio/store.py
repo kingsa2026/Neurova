@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS merges(
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL,
   status TEXT DEFAULT 'running', detail_json TEXT DEFAULT '{}', error TEXT DEFAULT '',
+  cancel_requested INTEGER DEFAULT 0,
   created_at REAL, updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_ep_project ON episodes(project_id);
@@ -107,8 +108,12 @@ RUN_RUNNING = "running"
 RUN_DONE = "done"
 RUN_DONE_WITH_FALLBACK = "done_with_fallback"
 RUN_FAILED = "failed"
+#: 用户叫停的终态。与 `failed` 是两件事：一个是"人让它停的"，一个是"它自己崩了"；
+#: 混写等于把取消记成故障——按失败率排查时会去查一条根本没坏的任务（§6-91）。
+RUN_CANCELLED = "cancelled"
 #: 终态集合：轮询侧只认这个，非终态才继续等
-RUN_TERMINAL_STATUSES = frozenset({RUN_DONE, RUN_DONE_WITH_FALLBACK, RUN_FAILED})
+RUN_TERMINAL_STATUSES = frozenset(
+    {RUN_DONE, RUN_DONE_WITH_FALLBACK, RUN_FAILED, RUN_CANCELLED})
 
 
 def _now() -> float:
@@ -139,39 +144,53 @@ class StudioStore:
         # 退役列（`storyboards.bgm_prompt`/`sound_effect`/`subtitle_path`、`episodes.duration`，
         # §6-90）只从**定义面**摘除，旧库里的残留列不 DROP：那两列可能有人工编辑过的内容，
         # 删列不可逆；新代码一侧不写、不读、白名单不收，判据里另有一格证旧库照跑。
-        for table, col in (("storyboards", "end_frame_path"),
-                           ("storyboards", "video_resolution"),
-                           ("merges", "warning")):
+        for table, col, ddl in (
+                ("storyboards", "end_frame_path", "TEXT DEFAULT ''"),
+                ("storyboards", "video_resolution", "TEXT DEFAULT ''"),
+                ("merges", "warning", "TEXT DEFAULT ''"),
+                ("runs", "cancel_requested", "INTEGER DEFAULT 0")):
             cols = {r["name"] for r in self._conn.execute(
                 f"PRAGMA table_info({table})").fetchall()}
             if col not in cols:
-                self._conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
                 self._conn.commit()
         self._convergeLeftoverRuns()
 
     def _convergeLeftoverRuns(self) -> None:
         """启动收敛：构造时仍为 running 的 runs 行只可能来自已死进程。
 
-        studio 长任务的执行体是 `asyncio.create_task` 挂在**进程内**（studio_api.py 的
-        `_tasks`），进程没了就再没人写它的终态；`status` 建表默认 `'running'`，于是
+        studio 长任务的执行体是 `asyncio.create_task` 挂在**进程内**（句柄登记在
+        `core/task_tracker`），进程没了就再没人写它的终态；`status` 建表默认 `'running'`，于是
         每次重启都留下一批"永远在跑"的幽灵行——前端 `useStudioRun` 轮满 10 分钟返回
         null，用户看到超时，库里那条仍是 running。`agent_runs` 有 `reconcile_at_startup`
         的对偶，runs 表此前没有，本方法补上（两张表各管一类任务，不是第二份口径）。
+
+        收尾分两档：**叫过停的行收 `cancelled`**，没收过才收 `failed(process_died)`。
+        合成一档就把"人让它停的"记成"它自己死了"——而这条意图本来就存在库里，
+        重启之后正是靠它把终态说对的。
         """
         with self._lock:
             leftover = self._conn.execute(
-                "SELECT id FROM runs WHERE status=?", (RUN_RUNNING,)).fetchall()
+                "SELECT id, cancel_requested FROM runs WHERE status=?",
+                (RUN_RUNNING,)).fetchall()
             if not leftover:
                 return
             self._conn.execute(
-                "UPDATE runs SET status=?, error=?, updated_at=? WHERE status=?",
-                (RUN_FAILED, "process_died（服务重启，后台任务不续跑）", _now(), RUN_RUNNING),
-            )
+                "UPDATE runs SET status=?, error=?, updated_at=?"
+                " WHERE status=? AND cancel_requested=1",
+                (RUN_CANCELLED, "user_cancelled（重启前已请求停止，执行体随进程一起没了）",
+                 _now(), RUN_RUNNING))
+            self._conn.execute(
+                "UPDATE runs SET status=?, error=?, updated_at=?"
+                " WHERE status=? AND cancel_requested=0",
+                (RUN_FAILED, "process_died（服务重启，后台任务不续跑）", _now(), RUN_RUNNING))
             self._conn.commit()
         logger.warning(
-            "Studio 启动收敛: %d 条 running→failed(process_died)，id=%s",
-            len(leftover), [r["id"] for r in leftover][:20],
+            "Studio 启动收敛: %d 条 running 收尾（cancelled=%d failed=%d），id=%s",
+            len(leftover),
+            sum(1 for r in leftover if r["cancel_requested"]),
+            sum(1 for r in leftover if not r["cancel_requested"]),
+            [r["id"] for r in leftover][:20],
         )
 
     # ── 内部 ────────────────────────────────────────────────────────────
@@ -354,6 +373,29 @@ class StudioStore:
     def get_run(self, rid: str) -> Optional[Dict[str, Any]]:
         """按 id 取一行台账（wrapper 判「这一行是否已被服务自己结掉」的读面）。"""
         return self._fetch_one("SELECT * FROM runs WHERE id=?", (rid,))
+
+    def requestCancel(self, rid: str) -> bool:
+        """落一条**持久**的停止意图；行已终态则拒绝（返回 False）。
+
+        为什么不直接把行写成 `cancelled`：执行体在进程内，从"点了停"到"真停下来"之间
+        还有正在跑的那一步。此刻就写终态等于在事情没发生前先说它发生了，而执行体随后
+        又会写一次——两次写谁赢只看时序。所以这里只落意图，终态由两个消费者之一写：
+        服务自己的分片检查点（`services.guardCancel`），或 wrapper 收到的
+        `CancelledError`（`Task.cancel()` 那条路）。与 `agent_runs` 的取消同一双轨形态
+        （持久意图 + 内存句柄），两张表各管一类任务，不是第二份口径。
+        """
+        placeholders = ",".join("?" * len(RUN_TERMINAL_STATUSES))
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"UPDATE runs SET cancel_requested=1, updated_at=? "
+                f"WHERE id=? AND status NOT IN ({placeholders})",
+                [_now(), rid, *sorted(RUN_TERMINAL_STATUSES)])
+            return cur.rowcount > 0
+
+    def cancelRequested(self, rid: str) -> bool:
+        """检查点读的那一枪：这一行被叫停了吗。"""
+        row = self._fetch_one("SELECT cancel_requested FROM runs WHERE id=?", (rid,))
+        return bool(row and row["cancel_requested"])
 
     def close(self) -> None:
         with self._lock:

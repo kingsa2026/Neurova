@@ -16,7 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from neurova.aigc_studio import services
 from neurova.aigc_studio.llm import call_llm  # noqa: F401 — 测试可 monkeypatch services 层
 from neurova.aigc_studio.store import (
-    get_store, RUN_DONE, RUN_FAILED, RUN_TERMINAL_STATUSES,
+    get_store, RUN_CANCELLED, RUN_DONE, RUN_FAILED, RUN_TERMINAL_STATUSES,
 )
 from neurova.aigc_studio.video_reconcile import reconcileEpisode
 from neurova.api.deps import get_current_user
@@ -128,6 +128,13 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
     `work` 收本次的 run id：需要写中间读数的服务把终态写回**这一行**，而不是另起一行。
     改前外层建一行、服务内部再建一行，前端只 poll 外层那条，而 `GET /projects/{pid}`
     的 runs 投影里同 kind 并排两行——读侧无从判断哪条代表这次请求（E 批 §闭环审计）。
+
+    取消的两条路都收在这里，落到**同一个**终态 `cancelled`（§6-91）：
+    - 服务在分片检查点读到停止意图 → 抛 `services.RunCancelled`；
+    - 端点直接 `Task.cancel()`（整段 await、没有检查点）→ `CancelledError`，
+      写完终态**必须原样上抛**，吞掉它等于破坏 asyncio 的取消语义。
+    改前第二条落的是 `failed` + `run_cancelled`——那是"至少别永久 running"的中间形态，
+    把"人让它停的"记成"它自己崩了"，按失败率排查时会去查一条根本没坏的任务。
     """
     run = store.add_run({"project_id": pid, "kind": kind})
 
@@ -148,13 +155,18 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
                 store.update_run(run["id"], {"status": RUN_DONE, "detail_json": _json.dumps(
                     result if isinstance(result, (dict, list)) else {"result": str(result)},
                     ensure_ascii=False, default=str)})
+        except services.RunCancelled as e:
+            logger.info("studio 长任务在检查点收尾(%s): %s", kind, e)
+            store.update_run(run["id"], {"status": RUN_CANCELLED, "error": str(e)[:500]})
         except asyncio.CancelledError:
             # 取消不是"没发生"：`CancelledError` 继承 `BaseException`，下面那条
             # `except Exception` 抓不到它——被停掉的 run 会永久停在 running，
             # 前端轮满 10 分钟才报超时。写终态、点名成因，然后照常上抛。
+            logger.info("studio 长任务句柄被打断(%s)，run=%s", kind, run["id"])
             store.update_run(run["id"], {
-                "status": RUN_FAILED,
-                "error": "run_cancelled（服务或用户停止了这条长任务，产物可能不完整）"})
+                "status": RUN_CANCELLED,
+                "error": "task_cancelled（执行体在 await 点被打断，未完成的分片不再续跑，"
+                         "产物可能不完整）"})
             raise
         except Exception as e:  # noqa: BLE001
             logger.exception("studio 后台任务失败(%s)", kind)
@@ -167,6 +179,41 @@ def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
 
     get_task_tracker().register_async_task(run["id"], task, kind=f"studio:{kind}")
     return {"code": 0, "data": {"run_id": run["id"], "status": "started"}}
+
+
+@router.post("/runs/{rid}/cancel")
+async def cancel_run(rid: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """请求停止一条长任务：先落持久意图，再打断本进程的句柄。
+
+    顺序是刻意的：**先判归属、再判状态、最后才写**。反过来会让陌生账号先拿到 409
+    （等于确认这条 run 存在且未结束），归属面就漏了一格——与 console 侧续跑端点同一条
+    纪律。
+
+    读数如实分开：`cancel_requested` 是"意图已落库"，`tasks_cancelled` 是"本进程真
+    打断了几个句柄"。行挂着而句柄不在（进程重启过）时后者为 0——那不叫失败，剩下的
+    那一步由服务检查点或启动收敛收尾；但端点不许据此宣称"已停止"。
+    """
+    store = get_store()
+    run = store.get_run(rid)
+    if run is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    _owned_project(store, run["project_id"], current_user)
+    if run["status"] in RUN_TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {rid} 已是终态 {run['status']}，无可停止的长任务")
+
+    requested = store.requestCancel(rid)
+    from neurova.core.task_tracker import get_task_tracker
+
+    cancelledHandles = get_task_tracker().request_session_stop(rid)
+    row = store.get_run(rid) or {}
+    return {"code": 0, "data": {
+        "run_id": rid,
+        "cancel_requested": requested,
+        "tasks_cancelled": cancelledHandles,
+        "status": row.get("status"),
+    }}
 
 
 @router.post("/projects/{pid}/script")

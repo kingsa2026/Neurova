@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'Aufgabe mit Störungen abgeschlossen: {detail}',
   runPartialFailed: '{n} fehlgeschlagen',
   runPartialBlocked: '{n} blockiert',
+  stopRun: 'Aufgabe stoppen',
+  runCancelled: 'Aufgabe gestoppt',
+  runCancelQueued: 'Stopp angefordert: der aktuelle Schritt wird beendet, dann nichts weiter',
   retryStarted: 'Wiederholung gestartet',
 },
 

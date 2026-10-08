@@ -48,6 +48,23 @@ describe('waitStudioRun 终态集合与生产写入点同源', () => {
     }
   })
 
+  it('cancelled 是终态，且不被当成失败（取消四件套的读侧那一半）', async () => {
+    // 生产写侧现在两条停止路都收在 `cancelled`（服务检查点的 RunCancelled 与 Task.cancel）。
+    // 读侧少认这一档，用户点了停之后前端仍一路 poll 到 10 分钟然后报"超时"——
+    // 那是把"已按你说的停了"报成"失败了"。
+    vi.useFakeTimers()
+    try {
+      getProject.mockResolvedValue({ data: { runs: [runOf('run_c', 'cancelled')] } })
+      const pending = waitStudioRun('p1', 'run_c')
+      await vi.advanceTimersByTimeAsync(0)
+      const settled = await Promise.race([pending, Promise.resolve('STILL_POLLING')])
+      expect(settled).not.toBe('STILL_POLLING')
+      expect((settled as any)?.status).toBe('cancelled')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('running 不提前收：继续轮询而不是当成终态返回', async () => {
     vi.useFakeTimers()
     try {

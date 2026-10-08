@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'Tarea completada con incidencias: {detail}',
   runPartialFailed: '{n} fallidas',
   runPartialBlocked: '{n} bloqueadas',
+  stopRun: 'Detener tarea',
+  runCancelled: 'Tarea detenida',
+  runCancelQueued: 'Parada solicitada: termina el paso actual y no continúa',
   retryStarted: 'Reintento iniciado',
 },
 

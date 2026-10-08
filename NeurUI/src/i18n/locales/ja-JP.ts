@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'タスクは一部異常で完了：{detail}',
   runPartialFailed: '{n} 件失敗',
   runPartialBlocked: '{n} 件ブロック',
+  stopRun: 'タスクを停止',
+  runCancelled: 'タスクを停止しました',
+  runCancelQueued: '停止を依頼済み：現在のステップ完了後は続行しません',
   retryStarted: '再試行を開始',
 },
 

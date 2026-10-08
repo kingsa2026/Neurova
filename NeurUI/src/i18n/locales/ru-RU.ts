@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'Задача выполнена со сбоями: {detail}',
   runPartialFailed: '{n} сбоев',
   runPartialBlocked: '{n} заблокировано',
+  stopRun: 'Остановить задачу',
+  runCancelled: 'Задача остановлена',
+  runCancelQueued: 'Запрошена остановка: текущий шаг завершится, дальше не пойдёт',
   retryStarted: 'Повтор запущен',
 },
 
