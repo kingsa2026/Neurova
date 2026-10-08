@@ -3702,6 +3702,9 @@ studio: {
   noExport: '내보낼 내용 없음',
   runDone: '작업 완료',
   runTimeout: '작업 시간 초과',
+  runPartial: '작업이 일부 문제로 완료됨: {detail}',
+  runPartialFailed: '{n}개 실패',
+  runPartialBlocked: '{n}개 차단됨',
   retryStarted: '재시도 시작',
 },
 

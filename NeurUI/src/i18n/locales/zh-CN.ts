@@ -3626,6 +3626,9 @@ studio: {
   noExport: '暂无可导出内容',
   runDone: '任务完成',
   runTimeout: '任务超时',
+  runPartial: '任务带病完成：{detail}',
+  runPartialFailed: '{n} 项失败',
+  runPartialBlocked: '{n} 项被阻断',
   retryStarted: '重试任务已启动',
 },
 

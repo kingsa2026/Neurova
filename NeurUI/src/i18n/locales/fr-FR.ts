@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'Rien à exporter',
   runDone: 'Tâche terminée',
   runTimeout: 'Tâche expirée',
+  runPartial: 'Tâche terminée avec incidents : {detail}',
+  runPartialFailed: '{n} en échec',
+  runPartialBlocked: '{n} bloqués',
   retryStarted: 'Nouvelle tentative lancée',
 },
 

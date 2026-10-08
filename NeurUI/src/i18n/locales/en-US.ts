@@ -3705,6 +3705,9 @@ studio: {
   noExport: 'Nothing to export yet',
   runDone: 'Task done',
   runTimeout: 'Task timed out',
+  runPartial: 'Task finished with issues: {detail}',
+  runPartialFailed: '{n} failed',
+  runPartialBlocked: '{n} blocked',
   retryStarted: 'Retry task started',
 },
 

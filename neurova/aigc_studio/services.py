@@ -36,26 +36,35 @@ DEFAULT_VIDEO_DURATION_S = 5
 # 图像服务商 → 实测协议 hint（与 drama_nodes._SCENE_PROTOCOLS 对齐的本地小表）
 
 def _settleRun(store, rid: str, stats: dict, label: str) -> None:
-    """把一次批量长任务的统计结算成台账终态（唯一一处口径）。
+    """一次批量/编排长任务的**终态与读数唯一结算点**（同一口径不许有第二处）。
 
-    改前这四个批量服务不碰自己那一行，终态由 `_spawn_run` 的 wrapper 兜底写成 `done`
-    ——一批里有几镜被阻断、几镜提交失败，台账上仍是一行干净的 done，读侧无从知道
-    它没跑完（§6-70 第③格对这四个服务的残留）。
+    改前四个批量服务不碰自己那一行，终态由 `_spawn_run` 的 wrapper 兜底写成 `done`
+    ——一批里有几镜被阻断、几镜提交失败，台账上仍是一行干净的 done（§6-70 第③格）。
+    另三个 LLM 编排服务虽写自己那一行，却各写各的终态：`split_script` 把回退成因写进
+    `detail_json` 仍无条件 `RUN_DONE`，`break_storyboards` 的异常只在 logger 里过一遍后
+    落 `RUN_DONE` + `{"shots": 0}`——带病完成被压平成成功（§6-78 J 条 2026-10-09 更正）。
     `skipped*`（没提示词、没文本可合成）是设计内的跳过，不算带病。
+    随账写下的三个固定键是给读侧的契约：判带病用的那两个数在这里算出，前端只取用不重算
+    （`blocked_*` 的归并抄第二遍就是两份口径，跨语言判据按键名咬合）。
     """
     import json as _json
 
     failed = int(stats.get("failed") or 0)
     blocked = sum(int(v or 0) for k, v in stats.items() if k.startswith("blocked_"))
+    cause = str(stats.get("fallback") or "")
     causes = []
     if failed:
         causes.append(f"{failed} 项{label}失败")
     if blocked:
         causes.append(f"{blocked} 项被阻断（成因见对应行 error）")
+    if cause:
+        causes.append(cause)
     status = RUN_DONE_WITH_FALLBACK if causes else RUN_DONE
     store.update_run(rid, {
         "status": status,
-        "detail_json": _json.dumps(stats, ensure_ascii=False),
+        "detail_json": _json.dumps({**stats, "fallback_failed": failed,
+                                     "fallback_blocked": blocked, "fallback": cause},
+                                   ensure_ascii=False),
         "error": "；".join(causes)})
 
 _PROVIDER_HINTS = {
@@ -114,12 +123,8 @@ async def split_script(store, pid: str, novel_text: str,
             "synopsis": "", "status": "draft",
         }))
         fallback_reason = fallback_reason or "LLM 输出不可解析"
-    store.update_run(rid, {
-        "status": RUN_DONE,
-        "detail_json": json.dumps({"episodes": len(eps), "fallback": fallback_reason,
-                                    "chars": len(novel_text or "")},
-                                  ensure_ascii=False),
-    })
+    _settleRun(store, rid, {"episodes": len(eps), "chars": len(novel_text or ""),
+                            "fallback": fallback_reason}, "分集")
     return eps
 
 
@@ -192,10 +197,7 @@ async def extract_assets(store, pid: str, eid: str,
                              "description": str(item.get("description") or "")})
         added["props_added"] += 1
 
-    store.update_run(rid, {
-        "status": RUN_DONE if not err else RUN_DONE_WITH_FALLBACK,
-        "detail_json": json.dumps({**added, "error": err}, ensure_ascii=False),
-    })
+    _settleRun(store, rid, {**added, "fallback": err}, "资产")
     return added
 
 
@@ -246,11 +248,12 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
         f"\n剧本：\n{str(ep.get('content') or '')[:8000]}"
     )
     shots: List[Dict[str, Any]] = []
+    err = ""
     try:
         parsed = extract_json(await llm(prompt, STORYBOARD_BREAKER), "array")
     except Exception as e:  # noqa: BLE001
         logger.warning("分镜拆解 LLM 失败: %s", e)
-        parsed = None
+        parsed, err = None, str(e)[:200]
     if isinstance(parsed, list):
         for i, item in enumerate(parsed, 1):
             if not isinstance(item, dict):
@@ -278,8 +281,7 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                                           str(item.get("scene_time") or "").strip()),
                 "status": "pending",
             }))
-    store.update_run(rid, {
-        "status": RUN_DONE, "detail_json": json.dumps({"shots": len(shots)})})
+    _settleRun(store, rid, {"shots": len(shots), "fallback": err}, "分镜")
     return shots
 
 

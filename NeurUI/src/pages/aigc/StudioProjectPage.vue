@@ -19,7 +19,7 @@ import {
   retryStoryboard, updateAsset, updateEpisode, updateStoryboard,
   type ProjectDetail, type StudioEpisode, type StudioStoryboard,
 } from '@/api/modules/studio'
-import { waitStudioRun } from '@/composables/useStudioRun'
+import { waitStudioRun, describeRunOutcome } from '@/composables/useStudioRun'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { uploadFile } from '@/api/modules/files'
 import { withFileToken } from '@/utils/genFiles'
@@ -79,7 +79,10 @@ async function track(kind: string, runId: string) {
     const run = await waitStudioRun(pid, runId)
     if (!run) message.error(t('studio.runTimeout'))
     else if (run.status === 'failed') message.error(run.error || t('aigc.generateError'))
-    else message.success(t('studio.runDone'))
+    else if (run.status === 'done_with_fallback') {
+      // 带病完成不能报「任务完成」：条数与成因由结算侧写进 detail_json，这里取用（§6-87）
+      message.warning(t('studio.runPartial', { detail: describeRunOutcome(run, t) }))
+    } else message.success(t('studio.runDone'))
   } finally {
     busy.value = { ...busy.value, [kind]: false }
     await loadDetail()

@@ -91,7 +91,11 @@ class TestServiceSettlesItsOwnRow:
             f"有镜头被阻断，台账行却是干净的 {row['status']!r}——带病完成被压平成成功，"
             "读侧无从知道这批没跑完（§6-70 第③格的残留面）")
         assert "1" in (row["error"] or ""), row["error"]
-        assert json.loads(row["detail_json"])["blocked_no_frame"] == 1
+        detail = json.loads(row["detail_json"])
+        assert detail["blocked_no_frame"] == 1
+        # H2-7 ①：判带病用的两个数必须以固定键随行——读侧不许自己重算 blocked_* 之和
+        assert detail["fallback_blocked"] == stats["blocked_no_frame"], detail
+        assert detail["fallback_failed"] == stats["failed"], detail
 
     @pytest.mark.asyncio
     async def test_all_success_lands_plain_done_with_no_error(self, store, tmp_path, monkeypatch):
@@ -133,6 +137,8 @@ class TestServiceSettlesItsOwnRow:
         assert stats["failed"] >= 1, stats
         assert row["status"] == "done_with_fallback", (
             f"定妆图全失败却被记成 {row['status']!r}：同一根因不能只修视频那一个")
+        assert json.loads(row["detail_json"])["fallback_failed"] == stats["failed"], (
+            "带病计数与决定这格终态的那个数必须同源，读侧才能不重算")
 
 
 class TestOneRequestOneRow:
