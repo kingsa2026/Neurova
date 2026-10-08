@@ -30,7 +30,6 @@ export interface StudioEpisode {
   content: string
   synopsis: string
   status: string
-  duration: number
   video_path: string
   subtitle_path: string
   shot_count?: number
@@ -89,8 +88,6 @@ export interface StudioStoryboard {
   camera: string
   movement: string
   atmosphere: string
-  bgm_prompt: string
-  sound_effect: string
   duration: number
   characters_json: string
   props_json: string
@@ -103,7 +100,6 @@ export interface StudioStoryboard {
   /** 这条镜头实际用哪档规格提交的留痕；单镜重试不传规格时由服务端读回它（§6-78 G 条） */
   video_resolution: string
   ledger_task_id: string
-  subtitle_path: string
   audio_path: string
   status: string
   error: string
