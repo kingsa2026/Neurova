@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'Nulla da esportare',
   runDone: 'Attività completata',
   runTimeout: 'Timeout attività',
+  runPartial: 'Attività completata con anomalie: {detail}',
+  runPartialFailed: '{n} fallite',
+  runPartialBlocked: '{n} bloccate',
   retryStarted: 'Riprova avviata',
 },
 

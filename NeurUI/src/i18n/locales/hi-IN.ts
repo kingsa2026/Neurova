@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'निर्यात हेतु कुछ नहीं',
   runDone: 'कार्य पूर्ण',
   runTimeout: 'कार्य समय-बाह्य',
+  runPartial: 'कार्य कुछ समस्याओं के साथ पूर्ण: {detail}',
+  runPartialFailed: '{n} विफल',
+  runPartialBlocked: '{n} अवरुद्ध',
   retryStarted: 'पुनःप्रयास शुरू',
 },
 

@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'لا شيء للتصدير',
   runDone: 'اكتملت المهمة',
   runTimeout: 'انتهت مدة المهمة',
+  runPartial: 'اكتملت المهمة مع مشكلات: {detail}',
+  runPartialFailed: '{n} فشل',
+  runPartialBlocked: '{n} محجوب',
   retryStarted: 'بدأت إعادة المحاولة',
 },
 

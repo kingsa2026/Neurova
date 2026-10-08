@@ -3702,6 +3702,9 @@ studio: {
   noExport: '書き出し対象なし',
   runDone: 'タスク完了',
   runTimeout: 'タスクタイムアウト',
+  runPartial: 'タスクは一部異常で完了：{detail}',
+  runPartialFailed: '{n} 件失敗',
+  runPartialBlocked: '{n} 件ブロック',
   retryStarted: '再試行を開始',
 },
 

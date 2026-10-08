@@ -3702,6 +3702,9 @@ studio: {
   noExport: 'Nichts zu exportieren',
   runDone: 'Aufgabe erledigt',
   runTimeout: 'Zeitüberschreitung',
+  runPartial: 'Aufgabe mit Störungen abgeschlossen: {detail}',
+  runPartialFailed: '{n} fehlgeschlagen',
+  runPartialBlocked: '{n} blockiert',
   retryStarted: 'Wiederholung gestartet',
 },
 
