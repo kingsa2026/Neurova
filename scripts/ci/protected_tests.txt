@@ -1764,3 +1764,16 @@ tests/unit/api/test_agentRunStatusVocabularyParity.py
 # 不比函数名：本仓两次栽在"同名不同体、override 打到另一份静默失效"上。
 # 逐文件单跑 8 passed
 tests/unit/api/test_roleGateIdentitySourceIsStrict.py
+# §6-64 的 B 处置：子进程**文本模式捕获**必须显式写 encoding，否则父进程按本机 locale
+# （开发机 cp936）解子进程的 UTF-8 字节。三种坏法按危险度递增：全 ASCII 侥幸没事 /
+# 大输出把 `proc.stdout` **静默置成 None**（同调用改回 bytes 模式立刻拿回 1.65MB 正常输出）/
+# 非 ASCII 恰好凑成合法 cp936 序列时**不报错但内容被替换**——最后一态里判据照跑、读的是脏文本。
+# 已经有一格因此让守卫从未运行（`test_whole_repo_collection_errors.py` 两条主断言
+# 2 ERROR at setup，`aff4ec6b` 修的），所以这条增长必须被拦住。
+# 形态是**逐文件只降不升棘轮**，基线本轮实测 38 文件 / 60 站点（不是抄旧数）；
+# 三条配套判据各防一种空转：① 扫描根覆盖性断言（写错 `parents[N]` 会把根指到 `tests/`，
+# 首跑即被它抓成"三个根各 0 个文件"）；② 注入探针真落一个违规文件，证棘轮咬得住；
+# ③ 三条反向断言钉住**不该**判的形态（`capture_output=True` 不带 text 拿到是 bytes），
+# 防谓词宽到把正确写法算进基线、把棘轮稀释成噪声。降了会**红着提示收基线**，
+# 不让"悄悄比基线好"变成"再没人回来核"。逐文件单跑 9 passed in 6.19s
+tests/unit/ci/test_subprocessTextEncodingRatchet.py
