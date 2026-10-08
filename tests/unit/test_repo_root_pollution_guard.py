@@ -19,8 +19,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
+import threading
+import time
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,20 +34,49 @@ def _topLevelEntries() -> set:
     return set(os.listdir(REPO_ROOT))
 
 
-def _runPytestProbe(fileName: str, body: str, expectGreen: bool) -> str:
-    """在子进程里跑一条临时探针用例，返回其输出（探针即用完即删）。
+def _acquireProbeRoot() -> tuple[Path, Path]:
+    """给探针一棵**自己独占**的仓库根：仓外 detached git worktree。
+
+    为什么必须是整棵树而不是临时目录里摆几个文件：`tests/conftest.py` 的
+    `REPO_ROOT = Path(__file__).resolve().parents[1]` 是按文件位置推的，子进程在
+    worktree 里跑时，守卫快照的就是那棵树自己——机制原样跑到，共享工作树零痕迹。
+    拼最小目录树要么复刻 conftest（第二份事实源），要么缺 `neurova/` 与
+    `pyproject.toml` 的 addopts 让探针测的不再是同一套装配。
+    """
+    staging = Path(tempfile.mkdtemp(prefix="neurovaProbeRoot-"))
+    root = staging / "tree"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(root), "HEAD"],
+        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True, timeout=180,
+    )
+    # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
+    # 探针就该测**工作树这一份**，否则改坏了也照样绿。
+    shutil.copy2(REPO_ROOT / "tests" / "conftest.py", root / "tests" / "conftest.py")
+    return staging, root
+
+
+def _releaseProbeRoot(staging: Path, root: Path) -> None:
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(root)],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+    shutil.rmtree(staging, ignore_errors=True)
+
+
+def _runPytestProbe(root: Path, fileName: str, body: str, expectGreen: bool) -> str:
+    """在探针独占的仓库根里跑一条临时用例，返回其输出（树由 `probeRoot` 夹具统一弃）。
 
     判据全走**行为**而不是读 pytest 内部属性：pytest 9 把夹具对象换成了
     `FixtureFunctionDefinition`，钉 `_pytestfixturefunction.autouse` 这类写法
     下次升级即碎，而且"属性存在"本身也证明不了守卫咬得住。
     """
-    probeFile = REPO_ROOT / "tests" / "unit" / fileName
+    probeFile = root / "tests" / "unit" / fileName
+    probeFile.write_text(textwrap.dedent(body), encoding="utf-8")
     try:
-        probeFile.write_text(textwrap.dedent(body), encoding="utf-8")
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", f"tests/unit/{fileName}",
              "-p", "no:cacheprovider", "-q", "--tb=short"],
-            cwd=str(REPO_ROOT),
+            cwd=str(root),
             capture_output=True,
             text=True,
             timeout=180,
@@ -57,9 +91,25 @@ def _runPytestProbe(fileName: str, body: str, expectGreen: bool) -> str:
         probeFile.unlink(missing_ok=True)
 
 
-def test_guardIsARegisteredFixture():
+@pytest.fixture(scope="module")
+def probeRoot():
+    """本模块共用一棵探针仓库根。
+
+    每条探针都新建/删除一次 worktree 的实测成本约 12s（整树检出），四条就是 48s——
+    树里没有跨探针状态需要隔离（每条探针写的是自己那份临时用例文件，`finally` 即删），
+    所以按模块建一次即可。
+    """
+    staging, root = _acquireProbeRoot()
+    try:
+        yield root
+    finally:
+        _releaseProbeRoot(staging, root)
+
+
+def test_guardIsARegisteredFixture(probeRoot):
     """夹具必须真注册（能按名请求到），否则守卫只是文件里的一段文字。"""
     out = _runPytestProbe(
+        probeRoot,
         "testFixtureRegistrationProbe.py",
         """
         def test_guardCanBeRequestedByName(_guardRepoRootAgainstPollution):
@@ -84,7 +134,7 @@ def test_mockShapedEntriesAreNotSittingInTheRepoRoot():
     assert offenders == [], f"仓库根存在 mock 形态的污染目录：{offenders}——它们被 .gitignore 隐着，git status 看不见"
 
 
-def test_guardFiresPerTestAndNamesTheOffender(tmp_path):
+def test_guardFiresPerTestAndNamesTheOffender(probeRoot, tmp_path):
     """端到端三条一起证：autouse 生效、作用域是逐用例、报错点名条目与肇事用例。
 
     作用域判据藏在这里：整场（session）作用域的夹具只会在收尾时算总账，
@@ -96,6 +146,7 @@ def test_guardFiresPerTestAndNamesTheOffender(tmp_path):
     assert not junkDir.exists(), "上一次探测残留会污染快照基线"
     try:
         out = _runPytestProbe(
+            probeRoot,
             "test_pollutionProbe.py",
             f"""
             from pathlib import Path
@@ -113,9 +164,10 @@ def test_guardFiresPerTestAndNamesTheOffender(tmp_path):
     assert "test_polluteRepoRoot" in out, f"报错没点名肇事用例（作用域不是逐用例）：{out[-500:]}"
 
 
-def test_cleanTestDoesNotTripTheGuard():
+def test_cleanTestDoesNotTripTheGuard(probeRoot):
     """反证另一半：不落根目录的用例必须照常绿——守卫不能靠误伤逼人摘掉它。"""
     _runPytestProbe(
+        probeRoot,
         "test_cleanProbe.py",
         """
         def test_nothingWritten():
@@ -123,3 +175,55 @@ def test_cleanTestDoesNotTripTheGuard():
         """,
         expectGreen=True,
     )
+
+
+def test_probeWritesStayOutOfTheSharedWorkingTree(probeRoot):
+    """探针的落点必须是它自己独占的仓库根，不是全机共享的那棵工作树。
+
+    这条盯的是**并发会话**的故障形态：探针在共享 `tests/unit/` 里落一个临时用例、
+    又在共享仓库根建一个顶层垃圾目录，二者都在本会话结束后被 `finally` 抹掉——
+    本会话的守卫因此看不出错。但另一条正在同一工作树里跑测的会话，其逐用例守卫
+    会把这两个痕迹记到**它自己那条无辜用例**的账上（实测 2026-10-09：
+    宽域 A/B 里 `test_candidate_statistics_come_from_real_prune_history` 的 teardown
+    报出 `zzPollutionProbeJunk`，肇事者压根不是它）。守卫本身是对的，
+    错在探针拿共享树当自己的实验台。
+
+    判据走**过程观测**而不是事后检查：`finally` 会删掉痕迹，跑完再看永远干净。
+    """
+    junkName = "zzConcurrentProbeJunk"
+    probeFileName = "test_sharedTreeProbe.py"
+    probePath = REPO_ROOT / "tests" / "unit" / probeFileName
+    junkPath = REPO_ROOT / junkName
+    appeared = {"junk": False, "probeFile": False}
+    stop = threading.Event()
+
+    def _watch():
+        while not stop.is_set():
+            if junkPath.exists():
+                appeared["junk"] = True
+            if probePath.exists():
+                appeared["probeFile"] = True
+            time.sleep(0.005)
+
+    watcher = threading.Thread(target=_watch, daemon=True)
+    watcher.start()
+    try:
+        _runPytestProbe(
+            probeRoot,
+            probeFileName,
+            f"""
+            from pathlib import Path
+
+            def test_polluteForObservation():
+                (Path(__file__).resolve().parents[2] / "{junkName}").mkdir()
+                assert True
+            """,
+            expectGreen=False,
+        )
+    finally:
+        stop.set()
+        watcher.join(timeout=5)
+        shutil.rmtree(junkPath, ignore_errors=True)
+
+    assert not appeared["junk"], "探针在共享仓库根建了顶层目录——并发会话的守卫会把它记给无辜用例"
+    assert not appeared["probeFile"], "探针把临时用例写进了共享 tests/unit——并发会话可能收集到它"
