@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: '終了フレームを変更',
   endFrameNote: '初終フレーム補間対応チャンネル（Seedance/VEO）のみ有効。既定のWANでは無視項目として記録',
   imagePrompt: '画像プロンプト',
+  injectedPrompt: '注入済みプロンプト',
   mentionHint: "{'@'} でキャラ選択",
   videoPrompt: '動画プロンプト',
   camera: '景別',

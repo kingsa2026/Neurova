@@ -458,6 +458,7 @@ defineExpose({
           <div v-for="sb in storyboards" :key="sb.id" class="studio-shot-card">
             <div class="studio-shot-head">
               <span class="studio-shot-no">#{{ sb.number }}</span>
+              <span v-if="sb.title" class="studio-shot-no">{{ sb.title }}</span>
               <a-tag :color="sb.status === 'video_ready' ? 'success' : sb.status === 'failed' ? 'error' : 'default'">
                 {{ sb.status }}<template v-if="sb.video_status && sb.video_status !== 'pending'">/video:{{ sb.video_status }}</template>
               </a-tag>
@@ -486,6 +487,12 @@ defineExpose({
                   @update:model-value="(v: string) => (sb.image_prompt = v)"
                   @refs="(refs: any[]) => saveShot(sb, refs)"
                 />
+                <!-- 首帧生成时 @角色/道具/场景被注入后的成品提示词（services.py 唯一写点）：
+                     回看它才知道模型实际收到什么，改前这列写了没人读。 -->
+                <div v-if="sb.injected_prompt" class="studio-shot-injected">
+                  <div class="studio-shot-field-label">{{ t('studio.injectedPrompt') }}</div>
+                  <div class="studio-shot-injected-text">{{ sb.injected_prompt }}</div>
+                </div>
                 <div class="studio-shot-field-label">{{ t('studio.videoPrompt') }}</div>
                 <a-textarea v-model:value="sb.video_prompt" :rows="2" />
                 <div class="studio-shot-row">

@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: '종료 프레임 교체',
   endFrameNote: '처음/마지막 프레임 보간 지원 채널(Seedance/VEO)만 적용되며 기본 WAN에서는 무시 항목으로 기록됩니다',
   imagePrompt: '이미지 프롬프트',
+  injectedPrompt: '주입된 프롬프트',
   mentionHint: "{'@'} 로 캐릭터 선택",
   videoPrompt: '영상 프롬프트',
   camera: '샷',

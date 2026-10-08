@@ -3689,6 +3689,7 @@ studio: {
   replaceEndFrame: 'Replace end frame',
   endFrameNote: 'Only honored by first+last-frame channels (Seedance/VEO); recorded as ignored on the default WAN',
   imagePrompt: 'Image prompt',
+  injectedPrompt: 'Injected prompt',
   mentionHint: "type {'@'} for characters",
   videoPrompt: 'Video prompt',
   camera: 'Shot',

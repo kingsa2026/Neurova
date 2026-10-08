@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: 'अंतिम फ़्रेम बदलें',
   endFrameNote: 'केवल पहला+अंतिम फ़्रेम इंटरपोलेशन वाले चैनल (Seedance/VEO) इसे अपनाते हैं; डि़फ़ॉल्ट WAN पर उपेक्षित के रूप में दर्ज',
   imagePrompt: 'इमेज प्रॉम्प्ट',
+  injectedPrompt: 'सन्निहित प्रॉम्प्ट',
   mentionHint: "पात्रों के लिए {'@'} लिखें",
   videoPrompt: 'वीडियो प्रॉम्प्ट',
   camera: 'शॉट',

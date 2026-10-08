@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: 'Remplacer l\'image finale',
   endFrameNote: 'Honoré uniquement par les canaux à interpolation première/dernière image (Seedance/VEO) ; ignoré sur le WAN par défaut',
   imagePrompt: 'Prompt image',
+  injectedPrompt: 'Prompt injecté',
   mentionHint: "tapez {'@'} pour les personnages",
   videoPrompt: 'Prompt vidéo',
   camera: 'Plan',

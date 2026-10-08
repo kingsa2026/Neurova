@@ -3610,6 +3610,7 @@ studio: {
   replaceEndFrame: '更换尾帧',
   endFrameNote: '仅支持首尾帧插值的通道（Seedance/VEO）生效；当前默认 WAN 通道将记为忽略项',
   imagePrompt: '画面提示词',
+  injectedPrompt: '实际注入提示词',
   mentionHint: "输入 {'@'} 选角色",
   videoPrompt: '镜头提示词',
   camera: '景别',
