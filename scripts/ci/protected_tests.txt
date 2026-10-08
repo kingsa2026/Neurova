@@ -1891,6 +1891,16 @@ tests/unit/aigc_studio/test_batchRunsSettleOwnRow.py
 # 逐文件单跑 11 passed
 tests/unit/aigc_studio/test_runFallbackOutcomeSingleSource.py
 
+# Studio 取消四件套（`3b26acbe`，§6-91）：四件缺一件都是假取消
+# ① 持久意图 `runs.cancel_requested`（只有内存句柄的话，重启后"叫过停"这件事就消失了）；
+# ② 真句柄可按 run id 找回（④ 已落的那两档在本文件里同绿，留作整体不拆的防回归）；
+# ③ 收敛单点：检查点 `RunCancelled` 与 `Task.cancel()` 两条路都落 `cancelled`，
+#    `failed` 不许冒充"用户叫停"（④ 那格按实况改判，断言强度未降）；
+# ④ 读侧同源：TS `TERMINAL_STATUSES` 与 Python `RUN_TERMINAL_STATUSES` 的相等关系
+#    由 `test_studioRunStatusVocabulary.py` 双向咬（本批中途它正是红的，证明守卫在咬合）。
+# 逐文件单跑两次同读数 18 passed（`3b26acbe` 落库之后复取）
+tests/unit/api/test_studioRunCancel.py
+
 # H2-7 ③（`977f16cb`）：四列只写不读退役后的防再生面（§6-90）
 # ① `bgm_prompt`/`sound_effect` 全仓唯一，可按名禁绝（schema / 拆解写入 / LLM 提示词索求 /
 #    两个白名单 / TS 类型面）；`subtitle_path`、`duration` **同名跨活表**，必须按 (表, 列) 对判——
