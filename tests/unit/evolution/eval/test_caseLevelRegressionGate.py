@@ -122,3 +122,39 @@ class TestEvaluateDetailsCarryFailedFlag:
             BASELINE, _examples(["a", "b"]), "skill")
         assert [f.task_input for f in failures] == ["b", "a"]
 
+
+class TestHoldoutSideYieldsPerCaseReadouts:
+    """Task 2：留出侧拿到两侧例级读数，均值语义零漂移。
+
+    留出两次评测由 `_evaluate_avg` 改走同一条 `_evaluate`——评测次数不变，
+    只是明细不再被当场丢掉。判据要读的是**例级**，均值照旧对外。
+    """
+
+    @pytest.mark.asyncio
+    async def testHoldoutCarriesBothSidesPerCase(self):
+        runner = _runner({"a": 0.4, "b": 0.8}, EvolutionConfig(iterations=1))
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b"]),
+            artifact_type="skill", iterations=1)
+
+        assert sorted(result.holdout_case_scores) == ["a", "b"]
+        assert result.holdout_case_scores["a"] == {
+            "baseline": 0.4, "candidate": 0.4,
+            "baseline_failed": False, "candidate_failed": False}
+        # 明细与均分同源：均值仍是这两条例级读数的算术平均（零行为漂移）
+        assert result.holdout_before == pytest.approx(0.6)
+        assert result.holdout_after == pytest.approx(0.6)
+
+    @pytest.mark.asyncio
+    async def testFailedHoldoutCaseRidesAlongAsFlagNotSilentZero(self):
+        """留出侧「这一例没量出来」必须带得出来，不得只留 0.0 让下游猜。"""
+        runner = _runner({"a": 0.4, "b": 0.8}, EvolutionConfig(iterations=1),
+                         agent=_EchoAgent(failOn=("b",)))
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b"]),
+            artifact_type="skill", iterations=1)
+
+        readout = result.holdout_case_scores["b"]
+        assert readout["baseline_failed"] is True and readout["candidate_failed"] is True
+        assert readout["baseline"] == 0.0
+
