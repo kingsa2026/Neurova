@@ -1811,3 +1811,12 @@ tests/unit/llm/test_anthropic_native_client.py
 # 第一版按字面量计数被证伪为假红，因为提交侧本就有权写 running）；lifespan 成对挂点
 # 存在且没顶掉 D 批那条租约扫描钩子。逐文件单跑 8 passed
 tests/unit/aigc_studio/test_videoReconcileNeedsNoReader.py
+
+# §6-79 模型管理「测试模型连接」链的常驻面：这一档锁的是「六个 provider 的
+# create_chat_model 真能产出实例」。改前它先红在 ImportError（langchain 系从未进
+# requirements.txt），补依赖后又红在 TypeError: got multiple values for keyword
+# argument（get_llm_config 的字典本就含 api_key/base_url/model，调用处再显式传一遍）。
+# 两端点都是模型管理可达路径，CI 不跑等于回归静默放行。逐文件单跑 27 passed（两次同读数）。
+# 声明面的同批判据在本文件已在册的
+# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProviderChatModelDepsDeclaredForRuntime。
+tests/unit/api/test_model_connection_contract.py

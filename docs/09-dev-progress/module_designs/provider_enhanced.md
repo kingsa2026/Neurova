@@ -490,14 +490,20 @@ if breaker.can_execute():
 
 ### 6.1 外部依赖
 
-| 依赖包 | 版本 | 用途 |
-|--------|------|------|
-| aiohttp | >=3.8.0 | 异步 HTTP 请求 |
-| cryptography | >=41.0.0 | 密钥加密存储 |
-| langchain-openai | >=0.1.0 | OpenAI 聊天模型 |
-| langchain-anthropic | >=0.1.0 | Anthropic 聊天模型 |
-| langchain-google-genai | >=0.1.0 | Gemini 聊天模型 |
-| langchain-community | >=0.1.0 | Ollama 聊天模型 |
+| 依赖包 | 用途 |
+|--------|------|
+| aiohttp | 异步 HTTP 请求 |
+| cryptography | 密钥加密存储 |
+| langchain-openai | OpenAI 兼容聊天模型（含 LM Studio / OpenRouter） |
+| langchain-anthropic | Anthropic 聊天模型 |
+| langchain-google-genai | Gemini 聊天模型 |
+| langchain-ollama | Ollama 聊天模型 |
+
+> 版本区间**不在本表维护**：依赖单一事实源是 `requirements.txt`（Dockerfile 与
+> install.py 都装它，两份锁由它编译），此处再抄一份区间必然漂移。本表只留
+> 「哪个包供哪种模型」的映射。原表把 Ollama 写成 `langchain-community` 已更正——
+> 代码 import 的是 `langchain_ollama`（`ollama_provider.py:22-26`），
+> 而 `langchain_community` 那份模块级 import 全仓只写不读，2026-10-08 已摘除。
 
 ### 6.2 内部依赖
 

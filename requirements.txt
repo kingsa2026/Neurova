@@ -21,6 +21,19 @@ python-multipart>=0.0.6
 # LLM Providers
 openai>=3.9.0
 anthropic>=0.8.0
+# provider 聊天模型构造面（neurova/llm/providers/*_provider.py 的 create_chat_model）。
+# 此前四件在代码里被 import、却在声明面零出现：模块级 try/except 把
+# ChatOpenAI/ChatAnthropic/ChatOllama/ChatGoogleGenerativeAI 静默置 None，
+# 模型管理「测试模型连接」整链恒报「langchain_openai 未安装，无法创建模型实例」
+# （2026-10-08 报障；守卫 tests/unit/test_dev_path_and_runtime_dep_guards.py::
+# TestProviderChatModelDepsDeclaredForRuntime，覆盖面由 import 现场反扫得出）。
+# 版本下限按本仓已锁的 openai==3.14.1 / anthropic==1.6.0 / pydantic==2.13.5 实测可
+# 共解（langchain-openai 1.x 要 openai>=2.45,<4；langchain-anthropic 1.x 要
+# anthropic<2），不会把 multi_model_client 的现役原生通道拽回旧主版本。
+langchain-openai>=1.0
+langchain-anthropic>=1.0
+langchain-ollama>=1.0
+langchain-google-genai>=4.0
 
 # 中文分词（知识库 FTS/BM25 通道真分词，缺席自动回退 n-gram）
 jieba>=0.42.1

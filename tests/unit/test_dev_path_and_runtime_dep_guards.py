@@ -161,6 +161,96 @@ class TestMcpSdkDeclaredForRuntime:
         )
 
 
+class TestProviderChatModelDepsDeclaredForRuntime:
+    """provider 聊天模型链依赖的 langchain 系包，必须在生产安装路径上声明。
+
+    实锤（2026-10-08 模型管理「测试模型连接」报错「langchain_openai 未安装，
+    无法创建模型实例」）：`neurova/llm/providers/*.py` 用模块级 try/except 惰性
+    import `langchain_openai` 等，而 requirements.txt —— Dockerfile 与 install.py
+    **唯一**安装的清单 —— 一条都没写，两份锁里也没有 pin。于是按清单装完的环境
+    里这些名字恒为 None，`create_chat_model` 抛 ImportError，五个 provider 的
+    模型级连接检查整链失效：症状在 UI，根因在声明面。
+
+    与上面 MCP 那条同形，但覆盖面是**从 import 现场扫出来的、不是手抄的**：
+    新增一个 `langchain_*` 依赖却漏声明，本守卫直接红，不依赖有人记得补表。
+    """
+
+    PROVIDERS_DIR = PROJECT_ROOT / "neurova" / "llm" / "providers"
+
+    def _importedLangchainDists(self) -> set:
+        """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。"""
+        dists = set()
+        for path in sorted(self.PROVIDERS_DIR.glob("*.py")):
+            tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    top = (node.module or "").split(".")[0]
+                elif isinstance(node, ast.Import):
+                    top = (node.names[0].name or "").split(".")[0]
+                else:
+                    continue
+                if top.startswith("langchain"):
+                    dists.add(top.lower().replace("_", "-"))
+        return dists
+
+    def test_scan_itself_finds_the_chain(self):
+        """判据必须真扫到东西——扫空等于守卫静默不跑（本文件第 1 条的老根因）。"""
+        assert self._importedLangchainDists(), (
+            f"未在 {self.PROVIDERS_DIR} 扫到任何 langchain import；"
+            "本类的其余断言会因此恒真，请先确认扫描面还是活的。"
+        )
+
+    def test_declared_in_runtime_requirements(self):
+        lines = io.open(PROJECT_ROOT / "requirements.txt", encoding="utf-8").read().splitlines()
+        declared = {
+            re.split(r"[>=<!;~]", l.strip())[0].strip().lower().replace("_", "-")
+            for l in lines
+            if l.split("#", 1)[0].strip() and not l.strip().startswith("-")
+        }
+        missing = sorted(self._importedLangchainDists() - declared)
+        assert not missing, (
+            f"requirements.txt 未声明 {missing}——生产（Dockerfile:25 / install.py "
+            "都装这份）装上后 providers 的 ChatOpenAI/ChatAnthropic/ChatOllama/"
+            "ChatGoogleGenerativeAI 全为 None，模型管理「测试模型连接」整链报"
+            "『未安装』。"
+        )
+
+    def test_pinned_in_full_runtime_lock(self):
+        lock = io.open(PROJECT_ROOT / "requirements-full.lock", encoding="utf-8").read()
+        unpinned = [d for d in sorted(self._importedLangchainDists())
+                    if not re.search(rf"(?m)^{re.escape(d)}==", lock)]
+        assert not unpinned, (
+            f"requirements-full.lock 缺 {unpinned} 的 pin——dependency-audit 与"
+            "开发镜像都以全量锁为准，锁里没有则声明等于没声明。\n"
+            "修复：uv pip compile --universal requirements.txt -o requirements-full.lock --no-upgrade"
+        )
+
+    def test_ci_declarations_agree(self):
+        """CI 薄环境同样要声明，否则薄环境里这条链的判据静默失败。"""
+        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        ci_lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        for dist in sorted(self._importedLangchainDists()):
+            assert re.search(rf"(?m)^\s*{re.escape(dist)}\s*[><=!~]", ci), (
+                f"requirements-ci.txt 缺 {dist} 声明——CI 装的是 requirements-ci.lock，"
+                "薄环境里 provider 聊天模型面的测试会静默走 None 分支。"
+            )
+            assert re.search(rf"(?m)^{re.escape(dist)}==", ci_lock), (
+                f"requirements-ci.lock 缺 {dist} pin——声明了没重编等于没装。\n"
+                "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            )
+
+    def test_absence_is_not_registered_as_graceful_optional(self):
+        """langchain 缺席是**功能全断**，不得进 KNOWN_OPTIONAL_DEPS 让巡检闭嘴。"""
+        gate = io.open(PROJECT_ROOT / "scripts" / "ci_static_gate.py", encoding="utf-8").read()
+        table = gate.split("KNOWN_OPTIONAL_DEPS = {", 1)[1].split("}", 1)[0]
+        registered = set(re.findall(r'"([a-zA-Z_0-9]+)"', table))
+        hits = sorted({d.replace("-", "_") for d in self._importedLangchainDists()} & registered)
+        assert not hits, (
+            f"{hits} 被登记为可优雅降级的可选依赖——它的缺席会让模型级连接检查"
+            "恒报『未安装』，属于必须显式声明的运行时依赖（同 mcp 先例）。"
+        )
+
+
 class TestProtectedGuardsUseNoExternalBinaries:
     """受保护子集里的守卫不得依赖 CI 镜像未提供的外部二进制。
 
