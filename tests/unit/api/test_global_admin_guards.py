@@ -31,6 +31,7 @@ from neurova.api.endpoints import (
     enhanced_memory_search_api,
 )
 from neurova.api.deps import get_current_user
+from tests.auth_headers import overrideIdentity
 
 MOCK_USER = {"user_id": "test_user", "username": "testuser", "role": "user"}
 MOCK_ADMIN = {"user_id": "admin_user", "username": "adminuser", "role": "admin"}
@@ -68,7 +69,7 @@ def anon(app):
 @pytest.fixture
 def user_client(app):
     with TestClient(app) as c:
-        app.dependency_overrides[get_current_user] = lambda: MOCK_USER
+        overrideIdentity(app, MOCK_USER)
         yield c
     app.dependency_overrides.clear()
 
@@ -76,7 +77,7 @@ def user_client(app):
 @pytest.fixture
 def admin_client(app):
     with TestClient(app) as c:
-        app.dependency_overrides[get_current_user] = lambda: MOCK_ADMIN
+        overrideIdentity(app, MOCK_ADMIN)
         yield c
     app.dependency_overrides.clear()
 

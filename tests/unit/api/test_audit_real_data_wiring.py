@@ -33,6 +33,7 @@ from neurova.security.audit_logger import (
     AuditLogger,
     AuditSeverity,
 )
+from tests.auth_headers import overrideIdentity
 
 MOCK_ADMIN = {"user_id": "a1", "username": "admin1", "role": "admin"}
 
@@ -73,7 +74,7 @@ def seeded_logger(tmp_path, monkeypatch):
 def admin_client(seeded_logger):
     app = FastAPI()
     app.include_router(audit.router, prefix="/api/v1/audit")
-    app.dependency_overrides[get_current_user] = lambda: MOCK_ADMIN
+    overrideIdentity(app, MOCK_ADMIN)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()

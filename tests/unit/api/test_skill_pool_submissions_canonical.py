@@ -18,6 +18,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_01
 from neurova.api.endpoints import skill_pool_api
 from neurova.api.deps import get_current_user
 from neurova.skills.market_store import get_market_store, reset_market_store
+from tests.auth_headers import overrideIdentity
 
 USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
 ADMIN = {"user_id": "a9", "username": "admin", "role": "admin", "neuser_id": "a9"}
@@ -59,7 +60,7 @@ def app(tmp_path, monkeypatch):
 
 def _auth(c, role):
     user = ADMIN if role == "admin" else USER
-    c.app.dependency_overrides[get_current_user] = lambda: user
+    overrideIdentity(c.app, user)
     return c
 
 
@@ -134,6 +135,6 @@ class TestCanonicalPermissionGate:
 
     def test_submit_401_for_anonymous(self, app):
         _, c = app
-        c.app.dependency_overrides[get_current_user] = self._no_auth
+        overrideIdentity(c.app, self._no_auth)
         resp = c.post(f"{BASE}/skills/submit", json={"skill_id": "my-tool", "name": "My Tool"})
         assert resp.status_code == 401, resp.text
