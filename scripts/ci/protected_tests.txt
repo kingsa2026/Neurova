@@ -1826,6 +1826,8 @@ tests/unit/api/test_model_connection_contract.py
 # 逐文件单跑：19 passed / 4 passed（落库后复取）。
 tests/unit/evolution/test_funnelPresentationAccounting.py
 tests/unit/evolution/test_singlePresentationAccountGuard.py
+# 例级不退化门：留出侧例级读数 + 撞坏既有用例即拒（§8 前置 1）
+tests/unit/evolution/eval/test_caseLevelRegressionGate.py
 
 # C1 跨集资产连续性（§6-78 的 H 条 + I 条）：这一档锁的是"引用了就必须取到，取不到
 # 就不许发请求"。判据打在行为上——实际发出的提示词含场景定妆词/灯光/氛围/道具描述、
