@@ -182,6 +182,7 @@
 - [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
 - [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
 - [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
+- [2026-10-08-前置3-技能呈现账收口实施方案.md](../04-plans/2026-10-08-前置3-技能呈现账收口实施方案.md) — 技能「呈现→派发」漏斗补最上游一级（对照报告 §8 前置 3：三份账并存 + `times_presented` 零写入零消费，呈现账收口到 manifest 漏斗单源）
 
 **CI / NPC 口径**：
 
@@ -242,6 +243,8 @@
 - [agent-memory-cutting-edge-research-2026.md](../08-research/agent-memory-cutting-edge-research-2026.md) — Agent 记忆前沿研究
 - [agent_memory_consciousness_research_20260511.md](../08-research/agent_memory_consciousness_research_20260511.md) — 记忆与意识调研
 - [neurova_memory_consciousness_enhancement_20260511.md](../08-research/neurova_memory_consciousness_enhancement_20260511.md) — 记忆意识增强方案
+- [rsiagent_vs_neurova_rsi_comparison_2026-10-06.md](../08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md) — 与外部 RSIAgent 的 RSI 代码级对比（竞品/外部对标）
+- [designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md](../08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md) — 与 Designer-RSI 论文（arXiv:2609.22086）的程序性记忆对照（竞品/外部对标）
 
 ### 09-dev-progress 开发进展
 
