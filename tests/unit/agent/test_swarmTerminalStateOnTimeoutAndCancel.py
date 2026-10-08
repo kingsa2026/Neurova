@@ -41,8 +41,6 @@ import pytest
 
 from neurova.agent.swarm import reset_swarm_manager, get_swarm_manager
 
-pytestmark = pytest.mark.asyncio
-
 SWARM_FILE = "neurova/agent/swarm.py"
 REPO = Path(__file__).resolve().parents[3]
 
@@ -92,6 +90,7 @@ async def _awaitTerminal(swarm, sid, deadlineS=3.0):
 class TestTimeoutLandsTerminal:
     """判据 1/2：挂死的子任务必须有到点落终态的那一半。"""
 
+    @pytest.mark.asyncio
     async def test_hung_chat_fails_by_budget_naming_the_cause(self, swarm, monkeypatch):
         monkeypatch.setenv(BUDGET_ENV, "0.2")
         agent = _agent(hang=True)
@@ -105,6 +104,7 @@ class TestTimeoutLandsTerminal:
         assert "0.2" in record["error"], (
             f"失败成因没点名预算读数，运维无从判断该调哪个数：{record['error']!r}")
 
+    @pytest.mark.asyncio
     async def test_slots_are_reclaimed_so_the_gate_reopens(self, swarm, monkeypatch):
         """K 条最硬的那格：5 条卡死曾让蜂群整体不可用，且拒案指向永不发生的完成。"""
         monkeypatch.setenv(BUDGET_ENV, "0.3")
@@ -128,6 +128,7 @@ class TestTimeoutLandsTerminal:
             "5 条卡死件都已落终态，广度闸仍拒——槽位没被真正释放")
         assert reopened["subagent_id"]
 
+    @pytest.mark.asyncio
     async def test_real_failure_still_fails_and_success_still_completes(
             self, swarm, monkeypatch):
         """对照格：别把修复做成「全都失败」。"""
@@ -146,6 +147,7 @@ class TestTimeoutLandsTerminal:
 class TestCancellationIsTerminalButNotSwallowed:
     """判据 3：取消要落终态，也要照常上抛——吞掉取消是教义第 2 条的禁物。"""
 
+    @pytest.mark.asyncio
     async def test_cancel_marks_terminal_and_propagates(self, swarm, monkeypatch):
         monkeypatch.setenv(BUDGET_ENV, "30")
         agent = _agent(hang=True)
@@ -188,6 +190,7 @@ class TestBudgetIsNotASecondNumber:
         assert SwarmManager._effectiveRuntimeBudget() == 7.0, (
             "env 只在 import 期读一次的话，运行期调不动，判据也就测不到真分支")
 
+    @pytest.mark.asyncio
     async def test_rejection_message_cites_the_same_budget(self, swarm, monkeypatch):
         """闸文案承诺「等待完成」时，必须把上界一并给出——否则 LLM 只能傻等。"""
         monkeypatch.setenv(BUDGET_ENV, "0.4")
