@@ -35,6 +35,14 @@ class EvolutionConfig:
     # （judge_unavailable），不再依赖 0.0/0.5 这种边界相等。
     min_improvement: float = 0.01
 
+    # ── 例级不退化门（§8 前置 1，对照 Designer-RSI 的 matched replay gate）──
+    # 留出集均值涨了不算过关：一条用例被改坏，可以被另一条的涨幅抵掉。
+    # 撞坏的既有单例数超过该容忍度即拒（拒绝理由 `case_regression`）。
+    # 默认 1 —— 留出集小时单例判分抖动会直接转成拒绝（noise_repeats 默认 0，
+    # 未自动校准），故留一条缓冲；收紧到 0 即等价"一条都不许丢"。
+    # 判分失败的单例不计入退化（落 unevidencedCases），也不因此放行。
+    case_regression_allowance: int = 1
+
     # ── 锚定地板（P2-4，SkillGLoW 对比 2026-10-07）──
     # A = max(历史最优留出, 无技能基线)：候选只赢过**正在退化的现役基线**不算
     # 真增益，必须达到 A − accept_threshold 才可部署（信用不归因于退化）。
