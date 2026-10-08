@@ -87,6 +87,28 @@ def _migrateToV2(conn: sqlite3.Connection) -> None:
 
 register_migration(2, _migrateToV2, domain="agent_runs")
 
+
+def _migrateToV3(conn: sqlite3.Connection) -> None:
+    """v3：给蜂群子任务补两个**成对的键**（§6-78 L 条 / §6-85）。
+
+    改前的形态：子任务在台账里连一行都没有；而 `subagent_id` 与 `member_session_id`
+    是两枚各自生成的 uuid，台账按 `session_id` 索引，连手工 JOIN 的键都不成对。
+    - `subagent_id`：台账行 ↔ 蜂群 run 的配对键（前端小窗与 `subagent_status` 都用它对齐）；
+    - `parent_session_id`：**发起者**的聊天会话。子任务自己的会话键是 member 那条
+      （台账的会话列归它），要按"我这次对话派出去了哪些子任务"回读，必须有这一列——
+      没有它，出口只能返回空，用户看到的还是「刷新一下就没了」。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    for name, decl in (("subagent_id", "TEXT NOT NULL DEFAULT ''"),
+                       ("parent_session_id", "TEXT NOT NULL DEFAULT ''")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {decl}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_parent ON agent_runs(parent_session_id, seq)")
+
+
+register_migration(3, _migrateToV3, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 # 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
@@ -133,16 +155,23 @@ class AgentRunStore:
     # ------------------------------------------------------------------
 
     def intake(
-        self, session_id: str, user_id: str = "", agent_id: str = "", message: str = ""
+        self, session_id: str, user_id: str = "", agent_id: str = "", message: str = "",
+        subagent_id: str = "", parent_session_id: str = "",
     ) -> str:
-        """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。"""
+        """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。
+
+        `subagent_id`/`parent_session_id` 只由蜂群记账路径填（见
+        `agent_run_ledger.openSubagentRun`）；回合入口留空，语义与改前一致。
+        """
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         now = time.time()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO agent_runs (run_id, session_id, user_id, agent_id,"
-                " message_digest, status, created_at) VALUES (?,?,?,?,?,'queued',?)",
-                (run_id, session_id, user_id, agent_id, (message or "")[:200], now),
+                " subagent_id, parent_session_id,"
+                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,'queued',?)",
+                (run_id, session_id, user_id, agent_id, subagent_id, parent_session_id,
+                 (message or "")[:200], now),
             )
         return run_id
 
@@ -355,6 +384,21 @@ class AgentRunStore:
             rows = self._conn.execute(
                 "SELECT * FROM agent_runs WHERE session_id=? ORDER BY seq DESC LIMIT ?",
                 (session_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_subagent_runs(self, parent_session_id: str,
+                           limit: int = 20) -> List[Dict[str, Any]]:
+        """按**发起者会话**列出它派出的子任务行（§6-78 L 条的读面）。
+
+        与 `list_runs` 分开的理由是键不同：那条查的是"这个会话里跑过哪些回合"，
+        这条查的是"这次对话派出去了哪些子任务"——子任务自己的会话键是 member 那条。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE parent_session_id=?"
+                " ORDER BY seq DESC LIMIT ?",
+                (parent_session_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
