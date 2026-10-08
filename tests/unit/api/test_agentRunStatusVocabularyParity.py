@@ -73,3 +73,51 @@ def _runReadFaceSource() -> str:
     rest = source[start + len(marker):]
     nxt = re.search(r'^@router\.', rest, re.MULTILINE)
     return rest[: nxt.start()] if nxt else rest
+
+
+# ── §6-78 L 条（H2-6）：台账状态 → 前端窗口态，也只许一处映射 ──
+_WINDOWS = _REPO / "NeurUI" / "src" / "composables" / "useSubAgentWindows.ts"
+_MAP_NAME = "LEDGER_TO_WINDOW_STATUS"
+
+
+def _windowMapBody() -> str:
+    """取出那张映射的整块文本（按**声明行**定位，再从 brace 配平数到块尾）。
+
+    锚点必须是 `export const LEDGER_TO_WINDOW_STATUS`：文件里这个名字也出现在
+    注释与使用点上，只按裸名字定位会框到别的对象字面量。
+    """
+    source = _WINDOWS.read_text(encoding="utf-8")
+    declared = source.index("export const " + _MAP_NAME)
+    openAt = source.index("{", declared)
+    depth = 0
+    for i in range(openAt, len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[openAt:i + 1]
+    raise AssertionError(_MAP_NAME + " 的映射块没闭合")
+
+
+def _windowMapKeys() -> set:
+    return set(re.findall(r"([A-Za-z_][A-Za-z_0-9]*)\s*:", _windowMapBody()))
+
+
+def test_windowStatusMapCoversExactlyTheStoreVocabulary():
+    """映射的键必须**恰好等于**台账词值表。少一个是"后端加了态而窗口永远转圈"，
+    多一个是"窗口认一个台账里不存在的状态"——§6-82 那格幻影词值的 frontend 版。"""
+    keys = _windowMapKeys()
+    vocabulary = set(ars.TERMINAL_STATUSES) | set(ars.NON_TERMINAL_STATUSES)
+    assert keys == vocabulary, (
+        f"前端映射认的词值 {sorted(keys)} 与台账词值表 {sorted(vocabulary)} 不一致")
+
+
+def test_windowMapValuesStayInsideTheUiVocabulary():
+    """映射的值只能取窗口自己那三个 UI 态；而 error_type 那一列是另一套口径，
+    不许混进状态映射里（否则"失败"与"超时失败"在界面上长成两个新状态）。"""
+    body = _windowMapBody()
+    values = set(re.findall(r":\s*'([a-z_]+)'", body))
+    assert values <= {"running", "completed", "failed"}, values
+    assert "subagent_timeout" not in body and "subagent_cancelled" not in body, (
+        "状态映射里混进了 error_type 词值")
