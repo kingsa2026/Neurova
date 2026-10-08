@@ -75,6 +75,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BYTECODE_CACHE_SESSION_DIR = tempfile.mkdtemp(prefix="neurovaBytecodeCache-")
 sys.pycache_prefix = BYTECODE_CACHE_SESSION_DIR
 
+# 会话启动回收钩子——**注册点必须在本文件**。pytest 只从 conftest / 已注册插件的
+# 模块命名空间收集钩子函数；同名函数写在普通模块（`tests/temp_reclaim.py`）里永远不会
+# 被调用。2026-09-21 那版守卫就是这么带着"已落地"的标签零执行了三周——当时 18 条判据
+# 全是把 stub session 手工喂给钩子，测得到"被调用时管用"，测不到"有没有人调用它"。
+# 反证由 tests/unit/core/test_temp_reclaim.py::test_pytestInvokesTheHookWithoutAHandCall
+# 承担：真起一个子会话，锁主确证死亡的残留目录若活过整轮会话即红。
+# 位置在 `sys.pycache_prefix` 之后：那一项必须在首次 import 前生效，本行是一次 import。
+from tests.temp_reclaim import pytest_sessionstart  # noqa: F401
+
 
 @pytest.fixture(scope="session")
 def moe_state_session_dir() -> Path:

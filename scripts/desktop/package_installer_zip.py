@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -25,6 +26,14 @@ from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
+
+# 磁盘余量闸——阈值不在这里，只在 disk_headroom.MIN_FREE_GB 一处。
+# 按路径装载而非包导入：`scripts/desktop` 没有 `__init__.py`，而本文件既可能被
+# 直接 `python scripts/desktop/package_installer_zip.py` 跑，也可能被别的脚本 import。
+_gateSpec = importlib.util.spec_from_file_location(
+    "disk_headroom", Path(__file__).resolve().parent / "disk_headroom.py")
+disk_headroom = importlib.util.module_from_spec(_gateSpec)
+_gateSpec.loader.exec_module(disk_headroom)
 WPF_DIR = REPO / "NeurUI" / "src-tauri" / "installer-wpf"
 TAURI_CONF = REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 NSIS_BUNDLE_DIR = REPO / "NeurUI" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
@@ -290,6 +299,8 @@ def tauri_signing_args() -> tuple[list[str], bool]:
 
 def build_tauri() -> Path:
     """npm run build:desktop + npx tauri build，返回 NSIS 产物路径。"""
+    # 闸在任何写盘动作之前：CI 自托管节点的脚本直接跑在宿主机上，盘写穿了不会有人替我们喊
+    disk_headroom.assertHeadroom(disk_headroom.DEFAULT_PROBE_PATHS)
     log("前端构建（vite build，desktop 环境）…")
     if run("npm run build:desktop", shell=True, cwd=REPO / "NeurUI") != 0:
         raise RuntimeError("前端构建失败（npm run build:desktop）")
