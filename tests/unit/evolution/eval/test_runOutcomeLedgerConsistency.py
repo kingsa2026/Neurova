@@ -12,6 +12,10 @@ from neurova.evolution.eval.fitness import FitnessScore
 from neurova.evolution.eval.history_ledger import EvolutionLedger
 from neurova.evolution.eval.runner import SkillEvolutionRunner
 
+# 同上：`_fiveRejectedRuns` 与两条真台账判据都经 `service.evolve` 装配，
+# coverage 下首次拉起 jieba 的成本实测 37.5s，超全局 30s timeout。
+pytestmark = pytest.mark.timeout(120)
+
 MARKER = "IMPROVED"
 BASELINE = "基础技能正文。" + "补充说明文字用于满足增长闸的基线长度要求。" * 2
 
