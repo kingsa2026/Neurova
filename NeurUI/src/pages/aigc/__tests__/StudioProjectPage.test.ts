@@ -2,7 +2,7 @@
  * StudioProjectPage（R4/R5 四 Phase 向导）契约：
  * 进度导轨、拆解触发（runs 轮询）、镜头保存/单镜重试、导出双形态（成片/连播）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import zhCN from '@/i18n/locales/zh-CN'
@@ -251,5 +251,79 @@ describe('StudioProjectPage', () => {
     await vm.doMerge()
     await flushPromises()
     expect(wrapper.find('.slideshow-stub').exists()).toBe(true)
+  })
+})
+
+/**
+ * §6-78 F 条：Phase03 视频刷新定时器的**启停必须同源**。
+ *
+ * 改前的三格都是同一件事的三个断面——「停表」没有入口，只有「读到 running 才起表」：
+ * ① `loadStoryboards` 失败分支把列表清空却不重判启停 → 无数据可停时 5s 表继续无限打 GET；
+ * ② `switchPhase` 不停表 → 镜头卡片已被 `v-if` 摘掉，页面仍在后台每 5s 拉一次整集；
+ * ③ `retryShot` 不走 `track()` 而是发一次性 `setTimeout(3000)` → 提交发生在服务端后台任务里，
+ *    3s 时读到的常是旧态，`running` 永不成立，周期表根本不启，直到用户手动切一次 phase 才复活。
+ */
+describe('Phase03 视频刷新定时器（H2-4 · F 条）', () => {
+  const getProjectMock = getProject as unknown as ReturnType<typeof vi.fn>
+  const getEpisodeMock = getEpisode as unknown as ReturnType<typeof vi.fn>
+  const retryMock = retryStoryboard as unknown as ReturnType<typeof vi.fn>
+  const waitMock = waitStudioRun as unknown as ReturnType<typeof vi.fn>
+
+  const RUNNING_SHOT = { ...SHOT, video_status: 'running' }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    getProjectMock.mockResolvedValue({ code: 0, data: DETAIL })
+    getEpisodeMock.mockResolvedValue({
+      code: 0, data: { episode: DETAIL.episodes[0], storyboards: [RUNNING_SHOT] },
+    })
+    retryMock.mockResolvedValue({ code: 0, data: { run_id: 'r2' } })
+    waitMock.mockResolvedValue({ id: 'r2', status: 'done', detail_json: '{}', error: '' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('读失败即停表：列表被清空后不再无限打 GET', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(getEpisodeMock.mock.calls.length).toBeGreaterThan(0)
+
+    getEpisodeMock.mockRejectedValue(new Error('网络中断'))
+    await vi.advanceTimersByTimeAsync(5000)   // 触发起表的那一跳，走失败分支
+    const afterFailure = getEpisodeMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(20000)   // 若没停表，这里会再打 4 次
+    expect(getEpisodeMock.mock.calls.length).toBe(afterFailure)
+    expect((wrapper.vm as any).storyboards).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('离开工作台即停表：卡片已摘掉就不该还在后台拉整集', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.switchPhase('export')
+    const afterLeave = getEpisodeMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(getEpisodeMock.mock.calls.length).toBe(afterLeave)
+    wrapper.unmount()
+  })
+
+  it('单镜重试走 track 轮询，定时器由真状态决定而非 3s 盲刷', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const before = getEpisodeMock.mock.calls.length
+    const vm = wrapper.vm as any
+    await vm.retryShot(RUNNING_SHOT, 'video')
+    await flushPromises()
+
+    // 重试的 run 必须交回同一个轮询入口（改前这里根本没有 track）
+    expect(waitMock).toHaveBeenCalledWith('p1', 'r2')
+    // 重读后镜头仍是 running → 周期表应当是活的（改前只有那一次性 3s）
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(getEpisodeMock.mock.calls.length).toBeGreaterThan(before)
+    wrapper.unmount()
   })
 })
