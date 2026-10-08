@@ -127,14 +127,16 @@ class TestReferenceCollector:
         ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
         store.update_episode(ep["id"], {"video_path": str(db.parent / "ep.mp4")})
         store.add_character(p["id"], {"name": "c", "image_path": str(db.parent / "c.png")})
-        store.add_asset({"project_id": p["id"], "kind": "character", "name": "c",
-                         "ref_path": str(db.parent / "a.png")})
+        store.add_scene(p["id"], {"location": "客厅", "image_path": str(db.parent / "s.png")})
+        store.add_prop(p["id"], {"name": "请柬", "image_path": str(db.parent / "p.png")})
         store.close()
         refs = rt.collect_referenced_paths(db_path=str(db))
         assert refs is not None
         assert str(db.parent / "ep.mp4") in refs
         assert str(db.parent / "c.png") in refs
-        assert str(db.parent / "a.png") in refs
+        # 场景/道具参考图与定妆图同为一镜引用的产物：漏一条就是删掉还在用的参考件
+        assert str(db.parent / "s.png") in refs
+        assert str(db.parent / "p.png") in refs
 
     def test_missing_db_is_safe_empty(self, tmp_path):
         # 从未建库 = Studio 无产物可引用，set() 安全

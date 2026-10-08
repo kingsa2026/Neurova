@@ -3,8 +3,10 @@
 
 生成通道全部复用批次0/1 单源
 （llm.generators.protocols + runtime + task_ledger + recovery 循环）：
-- 图像：generate_image + @角色参考图注入 + 风格/画幅项目锁注入
-- 视频：submit_video 提交 → 账本 batch_key=episode 关联 → 恢复循环收口本地化
+- 图像：generate_image + 跨集连续性读数（角色定妆图/场景提示词与参考图/氛围/道具描述）
+  注入 + 风格/画幅项目锁注入；引用取不到即标 failed 点名成因，不发请求
+- 视频：首帧在盘才提交（缺帧即 failed，i2v 不静默退化成 t2v）→ submit_video →
+  账本 batch_key=episode 关联 → 恢复循环收口本地化
 - 合并：有 FFmpeg 真拼接；无则 slideshow manifest（诚实降级，与 drama 节点同策略）
 所有 LLM/生成函数支持注入 fake llm（网络零依赖单测）。
 """
@@ -169,6 +171,23 @@ async def extract_assets(store, pid: str, eid: str,
 # ── Phase 03：分镜拆解 ────────────────────────────────────────────────────
 
 
+def _matchSceneId(scenes: Dict[str, Dict[str, Any]], byLocation: Dict[str, List[str]],
+                  location: str, timeOfDay: str) -> str:
+    """镜头声明的场景 → 项目级场景行 id。
+
+    先按 (location, time) 精确命中（`extract_assets` 的去重键就是这一对）；时间不合
+    或缺失时，只在该地点全项目唯一才认——多义就不落，宁缺勿错地把不相干时段的定妆
+    喂进这一镜。
+    """
+    if not location:
+        return ""
+    row = scenes.get(f"{location}|{timeOfDay}")
+    if row:
+        return str(row["id"])
+    candidates = byLocation.get(location) or []
+    return str(candidates[0]) if len(candidates) == 1 else ""
+
+
 async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                             llm: Optional[Callable[[str, str], Awaitable[str]]] = None,
                             run_id: Optional[str] = None,
@@ -184,9 +203,15 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
     rid = run_id or store.add_run({"project_id": pid, "kind": "storyboard"})["id"]
     chars = {c["name"]: c for c in store.list_characters(pid)}
     props = {p["name"]: p for p in store.list_props(pid)}
+    # 场景按 (location, time) 定位——`extract_assets` 就以此为去重键，同一场景跨集只有一行
+    scenes = {f"{s['location']}|{s['time']}": s for s in store.list_scenes(pid)}
+    sceneByName: Dict[str, List[str]] = {}
+    for key, row in scenes.items():
+        sceneByName.setdefault(key.split("|", 1)[0], []).append(row["id"])
     prompt = (
         f"为第{ep.get('number', 1)}集《{ep.get('title', '')}》拆出分镜。"
-        f"可用角色：{list(chars)}；可用场景：{[s['location'] for s in store.list_scenes(pid)]}。"
+        f"可用角色：{list(chars)}；可用场景（location|time，scene 与 scene_time 须原样取自这里）："
+        f"{list(scenes)}。"
         f"\n剧本：\n{str(ep.get('content') or '')[:8000]}"
     )
     shots: List[Dict[str, Any]] = []
@@ -217,6 +242,9 @@ async def break_storyboards(store, pid: str, eid: str, force: bool = False,
                 "sound_effect": str(item.get("sound_effect") or ""),
                 "duration": float(item.get("duration") or 3),
                 "characters": char_ids, "props": prop_ids,
+                "scene_id": _matchSceneId(scenes, sceneByName,
+                                          str(item.get("scene") or "").strip(),
+                                          str(item.get("scene_time") or "").strip()),
                 "status": "pending",
             }))
     store.update_run(rid, {
@@ -283,12 +311,89 @@ def _inject_style(prompt: str, project: Dict[str, Any]) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def _jsonEntries(raw: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+    return [e for e in (raw or []) if isinstance(e, dict)]
+
+
+def resolveShotContinuity(store, pid: str, sb: Dict[str, Any]) -> Dict[str, Any]:
+    """这一镜引用的项目级资产（角色/场景/道具）——跨集连续性的**读数面**。
+
+    返回 `{"blocked": 成因串, "parts": 提示词增量, "refs": 参考图路径}`；`blocked` 非空
+    即调用侧不得发出请求。
+
+    闸只咬「引用了却取不到」，两种形态分开：
+    - 出场角色的定妆图是 **i2v 身份前置**——缺定妆、行已删、文件不在盘都阻断并点名，
+      因为静默丢参考图出的是与全集其他镜头不同的另一张脸（花钱买一个必歪的结果）；
+    - 场景/道具的参考图是**可选锚**——列上为空则略过，但非空却不在盘属断链，同样阻断。
+    """
+    chars = {c["id"]: c for c in store.list_characters(pid)}
+    scenes = {s["id"]: s for s in store.list_scenes(pid)}
+    props = {p["id"]: p for p in store.list_props(pid)}
+    blocked: List[str] = []
+    parts: List[str] = []
+    refs: List[str] = []
+
+    def _useReference(path: str, label: str) -> None:
+        if not path:
+            return
+        if Path(path).is_file():
+            refs.append(path)
+        else:
+            blocked.append(f"{label}参考图文件不在盘：{path}")
+
+    for entry in _jsonEntries(sb.get("characters_json")):
+        name = str(entry.get("name") or entry.get("id") or "未命名角色")
+        row = chars.get(str(entry.get("id") or ""))
+        if row is None:
+            blocked.append(f"引用角色《{name}》已不在项目资产（重新抽取资产或改该镜出场角色）")
+            continue
+        portrait = str(row.get("image_path") or "")
+        if not portrait:
+            blocked.append(f"引用角色《{name}》无定妆图（先跑「资产定妆」再重跑该镜）")
+        else:
+            _useReference(portrait, f"角色《{name}》")
+
+    scene_id = str(sb.get("scene_id") or "")
+    if scene_id:
+        scene = scenes.get(scene_id)
+        if scene is None:
+            blocked.append(f"scene_id={scene_id} 指向的场景不在项目资产")
+        else:
+            for key in ("final_prompt", "prompt", "lighting"):
+                value = str(scene.get(key) or "").strip()
+                if value:
+                    parts.append(value)
+            _useReference(str(scene.get("image_path") or ""),
+                          f"场景《{scene.get('location') or scene_id}》")
+
+    atmosphere = str(sb.get("atmosphere") or "").strip()
+    if atmosphere:
+        parts.append(atmosphere)
+
+    for entry in _jsonEntries(sb.get("props_json")):
+        name = str(entry.get("name") or entry.get("id") or "")
+        row = props.get(str(entry.get("id") or "")) or {}
+        descriptor = str(row.get("final_prompt") or row.get("description") or name).strip()
+        if descriptor:
+            parts.append(descriptor)
+        _useReference(str(row.get("image_path") or ""), f"道具《{descriptor or name}》")
+
+    return {"blocked": "；".join(dict.fromkeys(blocked)), "parts": parts, "refs": refs}
+
+
 async def generate_shot_images(store, pid: str, eid: str,
                                provider: str = "openai", model: str = "",
                                provider_id: str = "",
                                shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
-    """逐镜首帧（@角色参考图注入 + 风格/画幅项目锁；单镜失败诚实标注不中断）。
+    """逐镜首帧（跨集资产连续性注入 + 风格/画幅项目锁；单镜失败诚实标注不中断）。
 
+    提示词构成：本镜 `image_prompt` → 场景定妆提示词/灯光 → 氛围 → 道具描述 →
+    项目风格 + 画幅（`resolveShotContinuity` 给前三项）。
     shot_ids：仅重跑指定镜头（Phase03 单镜重试）；None = 整集。
     provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
     """
@@ -302,8 +407,7 @@ async def generate_shot_images(store, pid: str, eid: str,
         model, provider_id = _auto_route("image")
     fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
     hint = _hint_for_provider("image", provider_id, model, fallback)
-    stats = {"done": 0, "failed": 0, "skipped_no_prompt": 0}
-    chars = {c["id"]: c for c in store.list_characters(pid)}
+    stats = {"done": 0, "failed": 0, "skipped_no_prompt": 0, "blocked_no_asset": 0}
     for sb in store.list_storyboards(eid):
         if shot_ids and sb["id"] not in shot_ids:
             continue
@@ -314,10 +418,18 @@ async def generate_shot_images(store, pid: str, eid: str,
             store.update_storyboard(sb["id"], {
                 "status": "failed", "error": "无画面提示词（image_prompt/description 均为空）"})
             continue
-        injected = _inject_style(base_prompt, project)
-        refs = [chars[c["id"]]["image_path"]
-                for c in (json.loads(sb.get("characters_json") or "[]"))
-                if c.get("id") in chars and chars[c["id"]].get("image_path")]
+        continuity = resolveShotContinuity(store, pid, sb)
+        if continuity["blocked"]:
+            # 引用取不到就不发请求：静默丢参考图换来的是另一张脸/另一个场景，
+            # 且没有任何读数能告诉用户这一镜坏了（教义第 2 条的诚实形态）。
+            stats["failed"] += 1
+            stats["blocked_no_asset"] += 1
+            store.update_storyboard(sb["id"], {
+                "status": "failed", "error": continuity["blocked"][:200]})
+            continue
+        injected = _inject_style(
+            ", ".join(p for p in [base_prompt, *continuity["parts"]] if p), project)
+        refs = continuity["refs"]
         store.update_storyboard(sb["id"], {"injected_prompt": injected})
         try:
             creds = _resolve_creds(hint, model, provider_id)
@@ -362,6 +474,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                                shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
     """逐镜 i2v 提交（首帧为参考）→ 账本 batch_key=episode 关联 → 恢复循环收口。
 
+    视频侧只读氛围一项：画面与场景由首帧承载，运镜文本再拼一遍场景提示词是第二份口径。
     provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
     """
     from neurova.llm.generators.protocols import submit_video
@@ -377,7 +490,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
         str(provider or "").lower(), "wan")
     hint = _hint_for_provider("video", provider_id, model, fallback)
     default_base = _BASES.get(hint, _BASES["wan"])
-    stats = {"submitted": 0, "skipped": 0, "failed": 0}
+    stats = {"submitted": 0, "skipped": 0, "failed": 0, "blocked_no_frame": 0}
     for sb in store.list_storyboards(eid):
         if shot_ids and sb["id"] not in shot_ids:
             continue
@@ -389,6 +502,19 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
         if sb.get("video_status") == "running":
             stats["skipped"] += 1
             continue
+        if not frame or not Path(frame).is_file():
+            # 缺首帧仍提交 = i2v 静默退化成 t2v 并写 running：产出一段与本集画面
+            # 无关的片子，账本与镜头面都看不出它坏了。
+            stats["failed"] += 1
+            stats["blocked_no_frame"] += 1
+            reason = ("该镜尚无首帧产物（先生成首帧再提交视频）" if not frame
+                      else f"首帧文件不在盘：{frame}")
+            store.update_storyboard(sb["id"], {"video_status": "failed",
+                                               "error": reason[:200]})
+            continue
+        atmosphere = str(sb.get("atmosphere") or "").strip()
+        if atmosphere:
+            vprompt = f"{vprompt}, {atmosphere}"
         try:
             creds = _resolve_creds(hint, model, provider_id)
             from neurova.llm.generators.protocols import ProtocolCredentials
@@ -399,7 +525,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             submitted = await submit_video(
                 creds, vprompt, duration=int(sb.get("duration") or duration),
                 resolution=resolution,
-                ref_images=[frame] if frame and Path(frame).is_file() else [],
+                ref_images=[frame],
                 # A1：镜头尾帧（存在才透传；WAN 无通道进 ignored_params，
                 # Seedance first+last 插值）
                 last_frame=(sb.get("end_frame_path") or None))
@@ -430,7 +556,8 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
 async def generate_asset_images(store, pid: str, provider: str = "ark",
                                 ids: Optional[List[str]] = None,
                                 model: str = "", provider_id: str = "") -> Dict[str, Any]:
-    """资产定妆图（同角色复用 seed_value 保一致性；单资产失败可重试）。
+    """资产定妆图（seed 的单一事实源是库里的 `seed_value`：读回复用，缺省才派生并落库；
+    单资产失败可重试）。
 
     模型口径与 Phase03 首帧一致：显式 model+provider_id 或 auto 能力路由。
     """
@@ -452,8 +579,11 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
         try:
             creds = _resolve_creds(hint, model, provider_id)
             import zlib
-            # 稳定 seed：同一资产恒定（跨进程可复现）
-            seed = zlib.crc32(c["id"].encode("utf-8")) % (10 ** 8)
+            # 定妆 seed 以库中 `seed_value` 为准（写了要有人读）；库里没有才按资产 id
+            # 派生一枚稳定的并落库——同一资产重跑恒定，跨进程可复现。
+            stored = str(c.get("seed_value") or "").strip()
+            seed = int(stored) if stored.lstrip("-").isdigit() else \
+                zlib.crc32(c["id"].encode("utf-8")) % (10 ** 8)
             result = await generate_image(creds, _inject_style(prompt, project),
                                           size="1024x1024", n=1, seed=seed)
             remote = [u for u in (result.get("images") or []) if u]
@@ -462,9 +592,6 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
             path = await persist_media(remote[0], "image", f"asset_{c['id']}", 0)
             store.update_asset_row("characters", c["id"], {
                 "image_path": path, "seed_value": str(seed), "status": "ready"})
-            store.add_asset({"project_id": pid, "kind": "character",
-                             "name": c["name"], "ref_path": path,
-                             "meta": {"asset_id": c["id"], "seed": seed}})
             stats["done"] += 1
         except Exception as e:  # noqa: BLE001
             logger.warning("资产定妆失败(%s): %s", c["id"], e)
