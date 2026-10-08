@@ -150,3 +150,54 @@ def testCatalogSectionViewBranchRoutesProvenance():
         ]
     finally:
         reset_turn_skill_view(token)
+
+
+# ── 归因与落盘：compute_skill_funnel_update / record_skill_funnel ──
+
+
+from neurova.skills.skill_service import compute_skill_funnel_update  # noqa: E402
+
+
+def testPresentedEntryCountsSeparatelyFromSelection():
+    """呈现条目只加 presentations，不得冒领 selection。"""
+    entries = [
+        {"skill_id": "sk_a", "applied": False, "ok": False, "stage": "presented"},
+        {"skill_id": "sk_a", "applied": True, "ok": True, "stage": "dispatch"},
+    ]
+    delta = compute_skill_funnel_update(entries, task_completed=True)["sk_a"]
+    assert delta["presentations"] == 1 and delta["selections"] == 1
+    assert delta["applications"] == 1 and delta["completions"] == 1
+
+
+def testLegacyEntriesWithoutStageStillCountAsSelection():
+    """历史条目无 stage 键：仍按派发计，presentations 为 0（零行为漂移）。"""
+    delta = compute_skill_funnel_update(
+        [{"skill_id": "sk_b", "applied": True, "ok": False}], task_completed=True)["sk_b"]
+    assert delta["selections"] == 1 and delta["presentations"] == 0
+    assert delta["fallbacks"] == 1  # 执行失败但本轮完成 → 兜底，不给 completion
+
+
+def testTaskCompletionDoesNotAffectPresentations():
+    delta = compute_skill_funnel_update(
+        [{"skill_id": "sk_c", "applied": False, "ok": False, "stage": "presented"}],
+        task_completed=False)["sk_c"]
+    assert delta["presentations"] == 1 and delta["selections"] == 0
+
+
+def testPresentationsPersistAndSurfaceOnReadFacets(tmp_path):
+    """落盘与读数面都要携带 presentations——写穿 manifest 后必须在读口可见。
+
+    只写不读正是本票要修的缺陷，读数面漏接等于再造一次断点。
+    """
+    import json
+
+    from tests.unit.skills.creation_helpers import register_proven_skill
+    from neurova.skills.skill_service import SkillService
+
+    service = SkillService(agent_id="presq3", skills_dir=str(tmp_path / "skills"))
+    register_proven_skill(service, "sk_a", name="sk_a", description="d")
+    assert service.record_skill_funnel("sk_a", presentations=3, selections=1,
+                                       applications=1, completions=1)
+    manifest = json.loads((tmp_path / "skills" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["sk_a"]["usage"]["presentations"] == 3
+    assert service.get_skill_usage("sk_a")["presentations"] == 3
