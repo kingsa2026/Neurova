@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.auth_headers import overrideIdentity
 
 
 # 模拟 NeurovaRecallEngine
@@ -78,9 +79,9 @@ def client(mock_app):
     from neurova.api.endpoints.enhanced_memory_search_api import router
     from neurova.api.deps import get_current_user
     mock_app.include_router(router, prefix="/v1/enhanced-memory-search")
-    mock_app.dependency_overrides[get_current_user] = lambda: {
+    overrideIdentity(mock_app, {
         "user_id": "admin_user", "username": "adminuser", "role": "admin",
-    }
+    })
     return TestClient(mock_app)
 
 

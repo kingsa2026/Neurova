@@ -26,6 +26,17 @@ from neurova.api.auth import (  # noqa: F401  （再导出：消费方按旧路�
     get_current_userWithQueryToken as get_current_user,
     get_optional_userWithQueryToken as get_optional_user,
 )
+# 角色门的取源**单列一份**，不走上面那条再导出。
+# 上面那句 `get_current_userWithQueryToken as get_current_user` 是给 19 个端点文件按旧路径
+# 导入用的，其中 `generation`/`console_files`/`workspace_files` 这些**资源标签**端点确实要
+# 吃 `?access_token=`（`<img>`/`<a download>` 发不出 Authorization 头）。
+# 但角色门不是资源标签端点：`require_admin()/require_role()` 全仓 21 个文件在用，
+# 它们内部 `Depends(get_current_user)` 一旦指向"可回退查询参数"那份，
+# **每一个特权端点就都默认接受 URL 里的凭证**。
+# 普通用户的串贴进工单只泄露他自己；管理员的串贴出去泄露的是全站管理权——
+# 而 token 会落进反向代理与 uvicorn 的访问日志、浏览器历史、Referer。
+# 判据 `tests/unit/api/test_roleGateIdentitySourceIsStrict.py`（§6-54）。
+from neurova.api.auth import get_current_user as strictIdentityGate
 from neurova.api.endpoints import get_app_state
 
 
@@ -277,7 +288,7 @@ def require_role(required_role: str):
     """
 
     async def check_role(
-        user: Dict[str, Any] = Depends(get_current_user),
+        user: Dict[str, Any] = Depends(strictIdentityGate),
     ) -> Dict[str, Any]:
         user_role = user.get("role", "user")
         if user_role != required_role and user_role != "admin":
