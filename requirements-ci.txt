@@ -33,6 +33,15 @@ pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
 # LLM Providers
 openai>=3.9.0
 anthropic>=0.8.0
+# provider 聊天模型构造面（requirements.txt 同四件，理由见那边的注释）。CI 薄环境
+# 必须同样装上：本仓的模型连接契约判据
+# （tests/unit/api/test_model_connection_contract.py::TestProviderChatModelChainIntact）
+# 走真实 provider 工厂与真实 langchain 类，缺席即红——不是"跳过"。
+# 四件均为纯 Python、不拉 torch，不属本文件刻意排除的重依赖之列。
+langchain-openai>=1.0
+langchain-anthropic>=1.0
+langchain-ollama>=1.0
+langchain-google-genai>=4.0
 
 # Utilities
 python-dotenv>=1.0.0

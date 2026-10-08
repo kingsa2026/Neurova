@@ -238,6 +238,101 @@ class TestOpenAIModelConnectionReal:
 
 
 # ---------------------------------------------------------------------------
+# 回归守卫（2026-10-08）：create_chat_model 链的两处失效
+#
+# 用户可见症状是模型管理「测试模型连接」恒报「langchain_openai 未安装，无法创建
+# 模型实例」。根因链有两环，本类各钉一条，缺一不可：
+#
+#   1) 依赖缺口 —— langchain-openai/anthropic/google-genai/ollama 从未写进
+#      依赖单一事实源 requirements.txt（也不在任何锁里），生产与本地按清单装完
+#      必缺 → 模块级 try/except 把 ChatOpenAI 置 None → create_chat_model 抛
+#      ImportError。同形态先例见 tests/unit/test_dev_path_and_runtime_dep_guards.py
+#      的 TestMcpSdkDeclaredForRuntime（Issue #62）。
+#   2) 构造签名冲突 —— 补上声明后同链立刻暴露第二环：六处 create_chat_model 把
+#      get_llm_config() 返回值里**已含**的 model/api_key/base_url 再显式传一遍，
+#      Python 在进 pydantic 之前即 TypeError: got multiple values for keyword
+#      argument；且该字典还塞着 provider_id/provider_type/model_id/provider
+#      这些非 langchain 字段。
+#
+# 判据只锁「这条链能真正产出一个模型实例」。**构造成功不等于连通**：这五个
+# provider 的模型级验证仍是本地构造（verification 如实为 unverified），与本文件
+# 顶部契约第 1 条要求的真实请求差一整段；该缺口已登记台账，不得把本判据当作
+# 「模型级连接测试已真实化」的证据。
+# ---------------------------------------------------------------------------
+
+# (工厂导入路径, 工厂名, 位置参数) —— 用各 provider 自己的便捷函数构造，
+# 不手工拼 provider_type/阈值，避开「绕过生产装配点」的假绿。
+_CHAT_MODEL_FACTORIES = (
+    ("neurova.llm.providers.openai_provider", "create_openai_provider", ("sk-test-1234567890",)),
+    ("neurova.llm.providers.openrouter_provider", "create_openrouter_provider", ("sk-or-test",)),
+    ("neurova.llm.providers.anthropic_provider", "create_anthropic_provider", ("sk-ant-test",)),
+    ("neurova.llm.providers.gemini_provider", "create_gemini_provider", ("gck-test",)),
+    ("neurova.llm.providers.lm_studio_provider", "create_lm_studio_provider", ()),
+    ("neurova.llm.providers.ollama_provider", "create_ollama_provider", ()),
+)
+
+# check_model_connection 委托给 create_chat_model 的 provider（openai 已迁真实
+# HTTP 探测，不在此列——它走网络，判据落上面 TestOpenAIModelConnectionReal）。
+_LC_DELEGATING_MODULES = (
+    "neurova.llm.providers.openrouter_provider",
+    "neurova.llm.providers.anthropic_provider",
+    "neurova.llm.providers.gemini_provider",
+    "neurova.llm.providers.lm_studio_provider",
+    "neurova.llm.providers.ollama_provider",
+)
+
+_CHAT_MODEL_CASE_IDS = [m.rsplit(".", 1)[-1] for m, _, _ in _CHAT_MODEL_FACTORIES]
+
+
+def _make_chat_model_provider(import_path: str, factory_name: str, args):
+    import importlib
+
+    provider = getattr(importlib.import_module(import_path), factory_name)(*args)
+    # 构造不发网络请求，但 base_url 一律钉到不可路由域名：万一某 provider 的
+    # 构造期偷偷拨号，判据要红成超时而不是绿成「碰巧连上了」。
+    provider.base_url = "http://127.0.0.1:1/v1"
+    return provider
+
+
+class TestProviderChatModelChainIntact:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "import_path,factory_name,args", _CHAT_MODEL_FACTORIES, ids=_CHAT_MODEL_CASE_IDS
+    )
+    async def test_create_chat_model_yields_instance(self, import_path, factory_name, args):
+        """无依赖缺口、无重复关键字实参：构造必须真产出实例。"""
+        provider = _make_chat_model_provider(import_path, factory_name, args)
+
+        instance = await provider.create_chat_model("probe-model")
+
+        assert instance is not None, f"{import_path} 未产出模型实例"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("module_name", _LC_DELEGATING_MODULES)
+    async def test_model_connection_free_of_dependency_and_signature_failure(self, module_name):
+        """用户可见面：这五个 provider 的模型级连接检查不再报「未安装」。"""
+        import importlib
+
+        factory_name = {
+            "neurova.llm.providers.openrouter_provider": "create_openrouter_provider",
+            "neurova.llm.providers.anthropic_provider": "create_anthropic_provider",
+            "neurova.llm.providers.gemini_provider": "create_gemini_provider",
+            "neurova.llm.providers.lm_studio_provider": "create_lm_studio_provider",
+            "neurova.llm.providers.ollama_provider": "create_ollama_provider",
+        }[module_name]
+        args = () if factory_name in ("create_lm_studio_provider", "create_ollama_provider") else ("sk-test-1234567890",)
+        provider = _make_chat_model_provider(module_name, factory_name, args)
+
+        result = await provider.check_model_connection("probe-model")
+
+        for forbidden in ("未安装", "multiple values for keyword argument", "unexpected keyword"):
+            assert forbidden not in result.error, (
+                f"{module_name} 模型级连接检查仍带失效签名 {forbidden!r}: {result.error}"
+            )
+        assert result.success is True, f"{module_name} 连接检查应成功: {result.error}"
+
+
+# ---------------------------------------------------------------------------
 # 管理器层：分类 + 持久化
 # ---------------------------------------------------------------------------
 
