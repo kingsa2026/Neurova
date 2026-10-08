@@ -1789,3 +1789,18 @@ tests/unit/ci/test_subprocessTextEncodingRatchet.py
 # 覆盖性（目录在、脚本数 >50）、注入探针（真种一个违规脚本必须被数到）、
 # 反向断言（函数体内改 env 不算）。逐文件单跑 6 passed
 tests/unit/ci/test_manualScriptsEnvMutationRatchet.py
+
+# §6-76 修法 A 的常驻面：Anthropic 协议转换只许 provider 层一处。三条反证不可省——
+# 环内两个 `_convert_*` 回来即红（第二份定义又长出来）；`_build_request` 交出非 OpenAI
+# 形态即红；线协议版本串出现在任一环里即红。红自证原文见 `c9edf408` 正文（把 5 个生产
+# 文件 stash 掉复跑，本文件 4 条全红）。逐文件单跑 4 passed
+tests/unit/agent/test_protocolConversionSingleSource.py
+# §6-77 的常驻面：流式 usage 有 dict 与 SDK 对象两种进料（`llm_client.py:554` 承认
+# 原样透传），归一只许在基类一次。改回 `usage.get(...)` 即 3 档 AttributeError 红；
+# OpenAI 环里再拼一遍第二轮计数即 `test_openai_loop_delegates_instead_of_inlining` 红。
+# 逐文件单跑 5 passed
+tests/unit/agent/test_roundUsageShapeSingleSource.py
+# provider 层请求体的行为面（工具轮/多结果合并/坏参数/image_url/computer 描述符）。
+# 这 6 档是修法 A 的"搬过来"证据：删掉 `toAnthropicMessages` 的任一分支都落到行为断言上，
+# 不会退化成 ImportError。逐文件单跑 14 passed
+tests/unit/llm/test_anthropic_native_client.py
