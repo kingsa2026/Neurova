@@ -1890,3 +1890,14 @@ tests/unit/aigc_studio/test_batchRunsSettleOwnRow.py
 # ③ 结构守卫按 AST 取形（`update_run(` 带 status 键、且不在 `_settleRun` 体内即红）+ 反向对照。
 # 逐文件单跑 11 passed
 tests/unit/aigc_studio/test_runFallbackOutcomeSingleSource.py
+
+# H2-7 ③（`977f16cb`）：四列只写不读退役后的防再生面（§6-90）
+# ① `bgm_prompt`/`sound_effect` 全仓唯一，可按名禁绝（schema / 拆解写入 / LLM 提示词索求 /
+#    两个白名单 / TS 类型面）；`subtitle_path`、`duration` **同名跨活表**，必须按 (表, 列) 对判——
+#    episodes.subtitle_path 与 storyboards.duration 是活列，按名禁绝即删断字幕链路与视频规格；
+# ② 对照格：在役列（atmosphere/injected_prompt/video_resolution/first_frame_path…）必须仍齐全，
+#    防"扫描面扫空即全绿"与删过头；
+# ③ 守卫取形为 AST + 去注释（注释里写"某列已退役"是正当文档，不是使用），并配双向反证：
+#    提到不算、真用必须算。
+# 逐文件单跑两次同读数 16 passed（`977f16cb` 落库之后复取）
+tests/unit/aigc_studio/test_retiredShotColumns.py
