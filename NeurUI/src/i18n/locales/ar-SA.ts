@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: 'استبدال الإطار الأخير',
   endFrameNote: 'يُطبَّق فقط على القنوات الداعمة لاستكمال الإطار الأول والأخير (Seedance/VEO)؛ وفي WAN الافتراضي يُسجَّل كعنصر مُتجاهَل',
   imagePrompt: 'موجه الصورة',
+  injectedPrompt: 'الموجه المحقون',
   mentionHint: "اكتب {'@'} للشخصيات",
   videoPrompt: 'موجه الفيديو',
   camera: 'لقطة',
