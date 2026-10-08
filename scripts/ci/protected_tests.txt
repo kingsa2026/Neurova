@@ -1848,3 +1848,11 @@ tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py
 # 用户点「重试」被悄悄换尺寸）；兜底口径只许 services 一处，端点重述 `"1080p"` 这类字面量即红
 # （AST 判 + 反向对照，防「扫空即全绿」）；旧库缺列须被幂等补回。逐文件单跑两次各 8 passed
 tests/unit/aigc_studio/test_retryInheritsShotSpec.py
+
+# H2-5 · K 条 蜂群子任务终态与派生槽（§6-84）：这一档锁的是「任何退出路径都必须落终态」。
+# 判据打在真事件循环的行为上——挂死的子任务到运行窗口即 `failed` 并点名 subagent_timeout 与
+# 秒数；5 条占满被拒后，它们各自收尾、广度闸**自己重开**（改前 5 条卡死即蜂群整体不可用）；
+# 取消落终态且 CancelledError 照常上抛（吞取消是教义第 2 条禁物）；窗口默认值必须等于工具层
+# `spawn_subagent` 那份读数（不另造 600）；状态字面量比较与字面量默认值两类 AST 各带反向对照。
+# 逐文件单跑两次各 11 passed
+tests/unit/agent/test_swarmTerminalStateOnTimeoutAndCancel.py
