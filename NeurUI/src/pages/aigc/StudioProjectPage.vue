@@ -137,22 +137,29 @@ async function uploadAssetImage(c: { id: string; image_path?: string }) {
 const storyboards = ref<StudioStoryboard[]>([])
 
 async function loadStoryboards() {
-  if (!currentEid.value) { storyboards.value = []; return }
+  if (!currentEid.value) { storyboards.value = []; ensureVideoRefresh(); return }
   try {
     const res: any = await getEpisode(currentEid.value)
     storyboards.value = res?.data?.storyboards ?? []
-    ensureVideoRefresh()
   } catch { storyboards.value = [] }
+  // 成败都要重判启停：失败分支只清空列表不停表，5s 表就会无限打 GET（§6-78 F 条①）
+  ensureVideoRefresh()
 }
 
-/** 任一镜头视频 running → 5s 自动刷新（账本投影回填） */
-function ensureVideoRefresh() {
-  const running = storyboards.value.some((s) => s.video_status === 'running')
-  if (running && !videoRefreshTimer) {
-    videoRefreshTimer = setInterval(() => { void loadStoryboards() }, 5000)
-  } else if (!running && videoRefreshTimer) {
+/** 定时器唯一的停表口（`videoRefreshTimer` 只在这一处被清） */
+function stopVideoRefresh() {
+  if (videoRefreshTimer) {
     clearInterval(videoRefreshTimer)
     videoRefreshTimer = null
+  }
+}
+
+/** 任一镜头视频 running → 5s 自动刷新（账本投影回填）；启停同一个入口判同一份状态 */
+function ensureVideoRefresh() {
+  const running = storyboards.value.some((s) => s.video_status === 'running')
+  if (!running) { stopVideoRefresh(); return }
+  if (!videoRefreshTimer) {
+    videoRefreshTimer = setInterval(() => { void loadStoryboards() }, 5000)
   }
 }
 
@@ -244,9 +251,12 @@ async function genNarration() {
 }
 
 async function retryShot(sb: StudioStoryboard, stage: 'image' | 'video') {
-  await retryStoryboard(sb.id, { stage, ...(stage === 'image' ? imgParams() : vdParams()) })
+  const res: any = await retryStoryboard(sb.id, { stage, ...(stage === 'image' ? imgParams() : vdParams()) })
   message.success(t('studio.retryStarted'))
-  setTimeout(() => { void loadStoryboards() }, 3000)
+  // 与其它长任务同一个入口：等 run 收口后再读镜头面。改前是发一次 setTimeout(3000)——
+  // 提交落在服务端后台任务里，3s 时读到的常是旧态，running 永不成立、周期表根本不启（§6-78 F 条③）
+  await track(`retry_${stage}`, res?.data?.run_id || '')
+  await loadStoryboards()
 }
 
 const mentionCandidates = computed(() =>
@@ -303,6 +313,8 @@ const composedUrl = computed(() => mergeResult.value?.url || '')
 function switchPhase(p: Phase) {
   phase.value = p
   if (p === 'workbench') void loadStoryboards()
+  // 离开工作台时镜头卡片已被 v-if 摘掉，表却还在后台每 5s 拉一次整集（§6-78 F 条②）
+  else stopVideoRefresh()
   if (p === 'export') mergeResult.value = null
 }
 
@@ -316,7 +328,7 @@ onMounted(async () => {
   await loadStoryboards()
 })
 onUnmounted(() => {
-  if (videoRefreshTimer) clearInterval(videoRefreshTimer)
+  stopVideoRefresh()
 })
 
 defineExpose({
