@@ -1879,3 +1879,12 @@ tests/unit/core/test_subagentRunsInLedger.py
 # 逐文件单跑两次各 7 / 6 passed
 tests/unit/api/test_studioRunHandleRegistry.py
 tests/unit/aigc_studio/test_batchRunsSettleOwnRow.py
+
+# H2-7 ①（`fb3c967c`）：带病完成的读数收成一处结算口径，并给它一个真读者（§6-78 J 条更正 → §6-88）
+# ① 三个 LLM 编排服务不许再手写 runs 终态——`split_script` 的回退、`break_storyboards` 的整步失败
+#    改前都落干净 `done`（后者还是 `{"shots": 0}`，一镜没拆出来也算成功）；成因文本收成单键 `fallback`；
+# ② `_settleRun` 恒写三键 fallback_failed/fallback_blocked/fallback 作为给读侧的契约，
+#    前端 `describeRunOutcome` 按同名键取数（跨语言按键名咬合：改键名即红，不再静默读不到）；
+# ③ 结构守卫按 AST 取形（`update_run(` 带 status 键、且不在 `_settleRun` 体内即红）+ 反向对照。
+# 逐文件单跑 11 passed
+tests/unit/aigc_studio/test_runFallbackOutcomeSingleSource.py
