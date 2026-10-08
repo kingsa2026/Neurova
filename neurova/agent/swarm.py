@@ -82,6 +82,11 @@ SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 #: 运行窗口预算的覆盖入口；**默认值不写在蜂群里**，取 `tool_coordinator` 的
 #: `spawn_subagent` 那份读数（同一件事只许有一个尺度，见 `_effectiveRuntimeBudget`）
 SUBAGENT_BUDGET_ENV = "NEUROVA_SWARM_SUBAGENT_BUDGET_SEC"
+# 收尾成因的常量由台账侧持有（`agent_run_ledger`），swarm 只引用不自造第二份：
+# 台账的 error_type 与这里的 cause 必须是同一批词值。
+from neurova.core.agent_run_ledger import (
+    SUBAGENT_CAUSE_CANCELLED, SUBAGENT_CAUSE_TIMEOUT,
+)
 
 
 @dataclass
@@ -103,6 +108,9 @@ class SubAgentRun:
     # Windows 文件名安全。
     member_session_id: str = ""
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
+    # 收尾成因（见 `agent_run_ledger.SUBAGENT_CAUSE_*`）：台账的 error_type 由它翻出来，
+    # 不靠嗅探 error 文本——那正是「同一件事两份口径」的下一种形态。
+    cause: str = "" 
     report: str = ""
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
@@ -608,6 +616,18 @@ class SwarmManager:
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
         run.status = SUBAGENT_RUNNING
+        # 台账记账（§6-78 L 条）：写侧仍只在 `agent_run_ledger` 那一处，这里只调用。
+        from neurova.core.agent_run_ledger import closeSubagentRun, openSubagentRun
+
+        ledgerRunId = openSubagentRun(
+            memberSessionId=run.member_session_id,
+            subagentId=run.subagent_id,
+            parentSessionId=run.session_id or "",
+            userId=str(getattr(initiator_agent, "current_user_id", "")
+                       or getattr(initiator_agent, "owner_user_id", "") or ""),
+            agentId=run.agent_id,
+            task=run.task,
+        )
         await self._broadcast(
             run,
             "subagent_started",
@@ -616,6 +636,9 @@ class SwarmManager:
                 "agent_id": run.agent_id,
                 "agent_name": run.agent_name,
                 "task": run.task,
+                # 事件必须带事实：改前载荷没有 status，前端只能自己写死 'running'——
+                # 那一刻后端确实是 running，但竞态/重放时前端无从校准，只能猜。
+                "status": run.status,
                 "origin": run.origin,
                 "depth": run.depth,
                 "node_id": run.node_id,
@@ -670,6 +693,7 @@ class SwarmManager:
                     timeout=budget,
                 )
             except asyncio.TimeoutError:
+                run.cause = SUBAGENT_CAUSE_TIMEOUT
                 raise RuntimeError(
                     f"subagent_timeout（运行窗口 {budget:g}s 内未返回，已放弃这条子任务；"
                     f"尺度来自工具层 spawn_subagent 超时，可用 {SUBAGENT_BUDGET_ENV} 调整）"
@@ -688,6 +712,7 @@ class SwarmManager:
             # 现写终态、释放槽位，然后**照常上抛**：吞掉取消既是教义第 2 条的禁物，
             # 也会让 asyncio 的取消语义失真（外层以为没被取消）。
             run.status = SUBAGENT_FAILED
+            run.cause = SUBAGENT_CAUSE_CANCELLED
             run.error = ("subagent_cancelled（父任务被取消，子任务未跑完；"
                          "派生槽已释放，可直接重派）")
             run.finished_at = time.time()
@@ -698,6 +723,9 @@ class SwarmManager:
             run.error = str(e)
             run.finished_at = time.time()
         finally:
+            # 台账终态与蜂群终态同一个落点：`completed`/`failed`/超时/取消都从这里收尾，
+            # 缺一条就在台账里留一行永久 running 的幽灵（L 条的另一副面孔）。
+            closeSubagentRun(ledgerRunId, run.status, run.cause)
             reset_subagent_depth(depth_token)
 
         await self._broadcast(
