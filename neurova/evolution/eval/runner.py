@@ -118,10 +118,24 @@ class EvolutionRunResult:
     def changed(self) -> bool:
         return self.deployed_text != self.baseline_text
 
+    def caseGateReadout(self) -> dict:
+        """例级不退化门的读数格（唯一构造点：审计面与提案面都取这里）。
+
+        与 `holdout_*` 均分分格写——读的人要能一眼看出"均值过关、例级没过关"
+        是两件事，而不是把一个被均值吞掉的退化混进增益数字里。
+        """
+        return {
+            "allowance": self.caseAllowance,
+            "regressions": list(self.caseRegressions),
+            "unevidenced": list(self.unevidencedCases),
+        }
+
     def to_dict(self) -> dict:
         return {
             "rejected": self.rejected,
             "reject_reason": self.reject_reason,
+            # 紧跟 reject_reason：理由写着 case_regression 时，读数就在隔壁一格
+            "case_gate": self.caseGateReadout(),
             "holdout_before": round(self.holdout_before, 4),
             "holdout_after": round(self.holdout_after, 4),
             "holdout_cases": dict(self.holdout_case_scores),

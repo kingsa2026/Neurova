@@ -239,3 +239,53 @@ class TestCaseRegressionGate:
         不是"提案质量问题"——被压进拒绝墙会让变异器误读成该换方向。"""
         assert not "case_regression".startswith(GATE_REASON_PREFIXES)
 
+
+class TestCaseGateReadoutSurface:
+    """Task 4：§2 断点条款——门拦没拦必须看得见，不许只写在内存里。
+
+    两个现役读点：判定链拒绝走 `run` 审计落盘面（`to_dict`），门放行但撞坏了
+    用例走提案详情面（`EvolutionProposal` → 既有 `GET .../proposals/{id}` 读口）。
+    """
+
+    @pytest.mark.asyncio
+    async def testRejectedRunReadoutCarriesCaseGate(self):
+        runner = _runner(
+            {"a": 0.4, "b": 0.4, "c": 0.4},
+            EvolutionConfig(case_regression_allowance=0, min_improvement=0.0,
+                            iterations=1),
+            candidateScores={"a": 0.9, "b": 0.9, "c": 0.1},
+        )
+        result = await runner.run(
+            baseline_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
+            artifact_type="skill", iterations=1)
+        readout = result.to_dict()
+
+        assert readout["case_gate"] == {
+            "allowance": 0, "regressions": ["c"], "unevidenced": []}
+        # 读的人要一眼看出"均值过关、例级没过关"是两件事
+        assert readout["reject_reason"] == "case_regression"
+        assert readout["holdout_after"] > readout["holdout_before"]
+
+    @pytest.mark.asyncio
+    async def testProposalDetailCarriesCaseGate(self, tmp_path, monkeypatch):
+        """容忍度内的退化照样出提案——但审批人必须看见撞坏了哪一条。"""
+        from neurova.evolution.eval.service import SkillEvolutionService
+
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        monkeypatch.setenv("NEUROVA_EVOLUTION_SETTINGS", str(tmp_path / "settings.json"))
+        svc = SkillEvolutionService("gate-agent", base_dir=tmp_path / "evo")
+
+        _result, proposal = await svc.evolve(
+            skill_id="s1", skill_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
+            agent=_EchoAgent(),
+            config=EvolutionConfig(iterations=1, min_improvement=0.0,
+                                   case_regression_allowance=1),
+            judge=_ScoringJudge({"a": 0.4, "b": 0.4, "c": 0.4},
+                                {"a": 1.0, "b": 0.9, "c": 0.1}),
+            mutate=_markerMutate,
+        )
+        assert proposal is not None, _result.reject_reason
+
+        stored = svc.list_proposals()
+        assert stored[0]["case_gate"] == {
+            "allowance": 1, "regressions": ["c"], "unevidenced": []}
