@@ -411,15 +411,6 @@ class OpenAILoop(BaseAgentLoop):
         perception_gate.commitTurnPerception(self.agent, offer)
         return sent
 
-    @staticmethod
-    def _imageUrlPart(offer: Dict) -> Dict:
-        """闸门归一化好的字节 → OpenAI `image_url` 切片（降采样已在闸门里挡过 413）。"""
-        import base64
-
-        return {"type": "image_url",
-                "image_url": {"url": f"data:{offer['mime']};base64,"
-                               f"{base64.b64encode(offer['bytes']).decode('ascii')}"}}
-
     async def _chatNormalWithDegrade(self, request_params: Dict, state: TurnRunState) -> LLMResponse:
         """模型往返 + 工具型 400 的无工具降级重试（单轮内，不叠帧）。"""
         try:
@@ -771,7 +762,7 @@ class OpenAILoop(BaseAgentLoop):
         reasoning_parts: List[str] = []
         pending_tool_calls: List[Dict] = []
         finish_reason = ""
-        # P2-4d：流式 usage 聚合（OpenAI 流式 usage 在最后一 chunk 携带全量）
+        # P2-4d：流式 usage 的**存在性**记录（聚合本体在基类 `_accumulateRoundUsage`）
         round_usage = None
 
         # 内部控制标志不透传 LLM 链路（_build_request_params 虽忽略未知键，
@@ -804,20 +795,14 @@ class OpenAILoop(BaseAgentLoop):
                 reply_parts.append(content)
                 yield {"type": "content", "data": content}
             if getattr(chunk, "usage", None):
-                u = chunk.usage
-                round_usage = {
-                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
-                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
-                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
-                }
-                # 2026-09-07 根因修复（audit P2-8）：agent._round_usage 全仓无
-                # 写入方 → TokenBudgetGate 恒死门；从流式 usage 聚合写入
-                prev = getattr(self.agent, "_round_usage", None) or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                self.agent._round_usage = {
-                    "prompt_tokens": prev.get("prompt_tokens", 0) + round_usage["prompt_tokens"],
-                    "completion_tokens": prev.get("completion_tokens", 0) + round_usage["completion_tokens"],
-                    "total_tokens": prev.get("total_tokens", 0) + round_usage["total_tokens"],
-                }
+                # 2026-09-07 根因修复（audit P2-8）：agent._round_usage 全仓无写入方
+                # → TokenBudgetGate 恒死门；从流式 usage 聚合写入。形状归一与累加都只在
+                # 基类 `_accumulateRoundUsage` 那一份里做（§6-77）——环内再拼一遍就是
+                # 第二份实现，两份迟早漂移成"某条环的预算闸恒不触发"。
+                # `round_usage` 只是**存在性旗标 + 读数转引**：网关没回用量时 done 事件
+                # 交 None（"没读数"），与"读数为 0"是两件事，既有判据钉的就是这个区别。
+                self._accumulateRoundUsage(chunk.usage)
+                round_usage = getattr(self.agent, "_round_usage", None) or {}
             rtext = getattr(chunk, "reasoning_content", None)
             if rtext:
                 reasoning_parts.append(rtext)
@@ -976,6 +961,10 @@ class OpenAILoop(BaseAgentLoop):
             "type": "done",
             "reply": "".join(reply_parts),
             "finish_reason": finish_reason,
+            # done 的用量读数与门控、预算闸同源（`agent._round_usage` 的转引，见上方
+            # 聚合点）。改前这里是"最后一个带 usage 的 chunk"自己拼的那份，与那两处
+            # 不同源——多次回传 usage 的网关下，同一轮会给出两个不同的数（§6-77 命中点）。
+            # 没收到任何 usage 时仍是 None："没有读数"不等于"读数为 0"。
             "usage": round_usage,
         }
 

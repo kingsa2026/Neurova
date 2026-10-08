@@ -12,7 +12,8 @@
 
 ## 判据口径
 
-- 形状各环断言各自的（Anthropic 内容块是 `{"type":"image","source":{"type":"base64",…}}`）；
+- 形状**两环同一份**（OpenAI `image_url` 切片）：§6-76 修法 A 把协议转换收口到
+  provider 层后，环侧不再各产一种形状，"同形"从"闸门同判据"升到"载荷同形状"；
 - 图用真 PNG 字节：装配口过 `normalize_image_for_llm`，假字节只会撞进异常分支；
 - 断言的是发出去的**参数**与原始 `messages` 是否被改写，不是替身被调了几次。
 """
@@ -66,11 +67,11 @@ def _openaiParams() -> dict:
 
 
 def _anthropicParams() -> dict:
-    return {
-        "system": "你是 Neurova",
-        "messages": [{"role": "user", "content": [{"type": "text", "text": "点一下登录按钮"}]}],
-        "tools": [],
-    }
+    """§6-76 修法 A 后本环交 OpenAI 形态：历史里不再有 `system` 顶层键与内容块数组。
+
+    装配口拿到的是"还没转码的那一侧"的形状，两家 provider 的差别归 provider 层。
+    """
+    return {"messages": [{"role": "user", "content": "点一下登录按钮"}], "tools": []}
 
 
 def _available():
@@ -87,16 +88,12 @@ def _blockedReading(state: str):
         "vision", state, capability_state.OWNER_OPERATOR, "判据造的状态")
 
 
-def _imageBlocks(params: dict) -> list:
-    parts = []
-    for msg in params.get("messages") or []:
-        content = msg.get("content")
-        if isinstance(content, list):
-            parts += [c for c in content if isinstance(c, dict) and c.get("type") == "image"]
-    return parts
+def _imageParts(params: dict) -> list:
+    """两环共用的取图口：轮历史只有一种形状（OpenAI `image_url`）。
 
-
-def _openaiImageParts(params: dict) -> list:
+    §6-76 修法 A 之前这里是两个 helper（Anthropic 内容块 / OpenAI image_url 各断言各自
+    的）——"同一能力两种形状"正是被收掉的那一格。
+    """
     parts = []
     for msg in params.get("messages") or []:
         content = msg.get("content")
@@ -126,11 +123,11 @@ class TestAnthropicAssembly:
         sent = _anthropicLoop()._attachPerceptionImage(params)
 
         assert sent is not params, "必须交副本——原 messages 是跨轮活的那份"
-        blocks = _imageBlocks(sent)
+        blocks = _imageParts(sent)
         assert len(blocks) == 1, f"该挂一张，实际挂了 {len(blocks)} 张"
-        source = blocks[0]["source"]
-        assert source["type"] == "base64" and source["media_type"] == "image/png"
-        assert Image.open(io.BytesIO(base64.b64decode(source["data"]))).format == "PNG", \
+        url = blocks[0]["image_url"]["url"]
+        assert url.startswith("data:image/png;base64,"), f"形状已与 OpenAI 环合一：{url[:32]}"
+        assert Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).format == "PNG", \
             "挂上去的字节解不开成 PNG：装配口没走归一化"
         assert params["messages"] == before, "原始 messages 被改写 = base64 进历史"
         assert FAKE_PNG not in repr(params["messages"])
@@ -145,7 +142,7 @@ class TestAnthropicAssembly:
 
         sent = _anthropicLoop()._attachPerceptionImage(_anthropicParams())
 
-        assert not _imageBlocks(sent), "没缺口也附图 = 这条环没闸门"
+        assert not _imageParts(sent), "没缺口也附图 = 这条环没闸门"
         assert tc.turnPerceptionGivenCount() == 0
         assert tc.takeTurnPerceptionImage() is not None, "没给出去就不该把图偷消费掉"
 
@@ -160,8 +157,8 @@ class TestAnthropicAssembly:
         first = loop._attachPerceptionImage(_anthropicParams())
         second = loop._attachPerceptionImage(_anthropicParams())
 
-        assert len(_imageBlocks(first)) == 1
-        assert not _imageBlocks(second), "同轮放了第二张图，成本闸门在这条环上失效"
+        assert len(_imageParts(first)) == 1
+        assert not _imageParts(second), "同轮放了第二张图，成本闸门在这条环上失效"
         assert tc.turnPerceptionGivenCount() == 1
 
     @pytest.mark.parametrize("blockedState", ["not-configured", "unknown", "configured-unreachable"])
@@ -175,7 +172,7 @@ class TestAnthropicAssembly:
 
         sent = _anthropicLoop()._attachPerceptionImage(_anthropicParams())
 
-        assert not _imageBlocks(sent), f"{blockedState} 也附图，闸门形同虚设"
+        assert not _imageParts(sent), f"{blockedState} 也附图，闸门形同虚设"
         assert tc.turnPerceptionGivenCount() == 0
 
     def test_whyIsRecordedOnTheEventSurface(self, monkeypatch):
@@ -260,8 +257,8 @@ class TestOneGateForBothLoops:
         tc.offerTurnPerceptionImage(FAKE_PNG, "computer_screenshot")
         tc.markTurnPerceptionGap("browser_dom_snapshot")
 
-        assert not _openaiImageParts(_openaiLoop()._attachPerceptionImage(_openaiParams()))
-        assert not _imageBlocks(_anthropicLoop()._attachPerceptionImage(_anthropicParams()))
+        assert not _imageParts(_openaiLoop()._attachPerceptionImage(_openaiParams()))
+        assert not _imageParts(_anthropicLoop()._attachPerceptionImage(_anthropicParams()))
 
 
 class TestSendPointIsWired:
@@ -286,6 +283,6 @@ class TestSendPointIsWired:
 
         asyncio.run(loop._predict_anthropic(params))
 
-        assert len(_imageBlocks(captured)) == 1, "发送口没接上装配——闸门改了但没人调"
-        assert not _imageBlocks(params), "原始 request_params 被就地改写"
+        assert len(_imageParts(captured)) == 1, "发送口没接上装配——闸门改了但没人调"
+        assert not _imageParts(params), "原始 request_params 被就地改写"
         assert FAKE_PNG not in repr(params["messages"])

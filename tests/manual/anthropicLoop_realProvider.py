@@ -200,11 +200,14 @@ def main() -> int:
         r2 = asyncio.run(drive(AnthropicLoop, "② OpenRouter claude（A 批流式分支）", "openrouter", claudeModel))
         r2Failed = None
     except Exception as exc:  # noqa: BLE001 - 第 2 段的真缺陷要原文暴露，不掩盖也不中断第 1 段的取证
-        r2, r2Failed = "provider-400", exc
+        import traceback
+
+        r2, r2Failed = "second-leg-failed", f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
 
     print(f"\n读数汇总：AMD={r1}  Anthropic={r2}")
     if r2Failed is not None:
-        print(f"第 2 段未通过（协议转换两处各做一遍，见模块 docstring 登记的台账格）：{r2Failed}")
+        # 不替故障猜成因：只打异常类型与原文栈，成因回台账对格
+        print(f"第 2 段未通过：{r2Failed}")
         return 1
     print("REAL-PROVIDER VERIFY PASSED")
     return 0

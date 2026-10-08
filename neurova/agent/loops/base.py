@@ -474,6 +474,20 @@ class BaseAgentLoop(ABC):
         ).hexdigest()[:12]
 
     @staticmethod
+    def _imageUrlPart(offer: Dict) -> Dict:
+        """闸门归一化好的字节 → OpenAI `image_url` 切片（降采样已在闸门里挡过 413）。
+
+        两条环共用这一份：轮历史只有一种形状（OpenAI 形态），线协议形状归 provider 层。
+        此前它在 `OpenAILoop` 上、`AnthropicLoop` 自产 Anthropic 内容块，同一能力两份
+        形状就是 §6-76 收口的对象。
+        """
+        import base64
+
+        return {"type": "image_url",
+                "image_url": {"url": f"data:{offer['mime']};base64,"
+                               f"{base64.b64encode(offer['bytes']).decode('ascii')}"}}
+
+    @staticmethod
     def _merge_tool_call_delta(pending: List[Dict], delta: Dict) -> None:
         """按 index 合并流式 tool_calls 分片（两家 provider 同一形态）。
 
@@ -586,20 +600,27 @@ class BaseAgentLoop(ABC):
             logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
             return False
 
-    def _accumulateRoundUsage(self, usage: Optional[Dict]) -> None:
+    def _accumulateRoundUsage(self, usage: Any) -> None:
         """把一次往返的 usage 累进**本轮**预算口 `agent._round_usage`。
 
         TokenBudgetGate 只读这一个数；不累计的那条环等于该闸永不触发（写了不读的反面：
         读了不写）。键集合与 `OpenAILoop` 一致，不新造第三份形状。
+
+        进料有**两种形状**且都由生产路径给出：`LLMResponse.usage` 声明是 dict，而流式
+        有一批 chunk 是原样透传的 SDK 对象（`llm_client.py:554` 的注释承认这一点）。
+        归一只在这里做一次——此前 `OpenAILoop` 自带一份 `getattr` 归一、基类这份只认
+        `.get()`，于是 Anthropic 环遇真网关的 SDK usage 直接抛 `AttributeError`
+        （§6-77，H1 的 OpenRouter 活体实测）。
         """
         if not usage:
             return
+        read = usage.get if isinstance(usage, dict) else lambda key, default=0: getattr(usage, key, default)
         try:
             prev = getattr(self.agent, "_round_usage", None) or {}
             self.agent._round_usage = {
-                "prompt_tokens": int(prev.get("prompt_tokens", 0)) + int(usage.get("prompt_tokens", 0)),
-                "completion_tokens": int(prev.get("completion_tokens", 0)) + int(usage.get("completion_tokens", 0)),
-                "total_tokens": int(prev.get("total_tokens", 0)) + int(usage.get("total_tokens", 0)),
+                "prompt_tokens": int(prev.get("prompt_tokens", 0)) + int(read("prompt_tokens", 0) or 0),
+                "completion_tokens": int(prev.get("completion_tokens", 0)) + int(read("completion_tokens", 0) or 0),
+                "total_tokens": int(prev.get("total_tokens", 0)) + int(read("total_tokens", 0) or 0),
             }
         except (TypeError, ValueError):  # noqa: BLE001 - usage 形状异常不阻断回复
             logger.debug("usage 累计跳过（形状异常）: %r", usage)
