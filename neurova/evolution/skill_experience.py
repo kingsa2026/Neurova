@@ -5,8 +5,11 @@ evolutions.json 分离模型：
 - **经验与定义分离**：进化经验作为 applied 记录存本库，立即生效（组合进
   技能描述，LLM 下一轮工具面即可见）；技能定义基线保持纯净
   （skill.config["base_description"]），随时可回溯。
-- **usage_stats**：times_presented / times_used / positive / negative 四计数，
+- **usage_stats**：times_used / positive / negative 三计数，
   是技能级自动淘汰的数据依据（此前技能"只生不死"——只有工具级遗忘曲线）。
+  **呈现计数不在本库**：唯一账本是轮次技能漏斗（`turn_context`）经 post-chat flush
+  写穿的 manifest `usage.presentations`（§8 前置 3 收口——同一格不得有第二份定义，
+  由 tests/unit/evolution/test_singlePresentationAccountGuard.py 钉住）。
 - **定期重建**：未合并 applied 记录攒够阈值 → 重建技能定义（先归档、
   可回滚）。重建语义是"持久化压缩"而非行为变更——重建前后有效文本
   一致（合并进定义的记录不再重复注入）。
@@ -82,7 +85,7 @@ class SkillExperienceStore(PersistedStateMixin):
         self._pending_dropped: int = 0
         # 进过待审队列的累计条数（判据用它区分"没压力"与"没测过"）
         self._pending_offered: int = 0
-        # skill_id -> {times_presented, times_used, positive, negative}
+        # skill_id -> {times_used, positive, negative}
         self._usage: Dict[str, Dict[str, Any]] = {}
         # skill_id -> 归档列表（重建/回滚前的定义快照，有界）
         self._archives: Dict[str, List[Dict[str, Any]]] = {}
@@ -247,10 +250,16 @@ class SkillExperienceStore(PersistedStateMixin):
             base = str(getattr(skill, "description", "") or "")
             config["base_description"] = base
 
-        with self._lock:
-            unmerged = [r for r in self._records.get(skill_id, []) if not r.merged]
-        skill.description = self.compose_effective_description(skill_id, base_description=base)
-        logger.debug("技能 %s 经验已生效（%d 条未合并）", skill_id, len(unmerged))
+        # 组合只算一次：此前这里先在锁内取一遍 unmerged 只为打印条数，
+        # 紧接着 compose_effective_description 再取一遍同一份——同一事实两次扫描。
+        # 条数仍由既有单源读口 pending_rebuild() 提供（维护入口与重建判据都用它），
+        # 这里只留"较基线是否真的扩展了"这一条本函数才有的信息。
+        composed = self.compose_effective_description(skill_id, base_description=base)
+        skill.description = composed
+        logger.debug(
+            "技能 %s 经验已生效（组合文本%s扩展）",
+            skill_id, "较基线" if composed != base else "未较基线",
+        )
         return True
 
     def compose_effective_description(
@@ -272,7 +281,7 @@ class SkillExperienceStore(PersistedStateMixin):
         with self._lock:
             usage = self._usage.setdefault(
                 skill_id,
-                {"times_presented": 0, "times_used": 0, "positive": 0, "negative": 0},
+                {"times_used": 0, "positive": 0, "negative": 0},
             )
             usage["times_used"] = int(usage.get("times_used", 0)) + 1
             if success:
@@ -285,7 +294,6 @@ class SkillExperienceStore(PersistedStateMixin):
         with self._lock:
             usage = self._usage.get(skill_id, {})
         return {
-            "times_presented": int(usage.get("times_presented", 0)),
             "times_used": int(usage.get("times_used", 0)),
             "positive": int(usage.get("positive", 0)),
             "negative": int(usage.get("negative", 0)),
