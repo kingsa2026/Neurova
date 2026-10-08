@@ -9,7 +9,12 @@
  * 5. 非 subagent 事件返回 false 交还调用方分派。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { useSubAgentWindows } from '@/composables/useSubAgentWindows'
+const apiGet = vi.fn()
+vi.mock('@/api', () => ({ api: { get: (...args: any[]) => apiGet(...args) } }))
+
+import {
+  useSubAgentWindows, restoreSubAgentWindows, LEDGER_TO_WINDOW_STATUS,
+} from '@/composables/useSubAgentWindows'
 
 const { subAgentWindows, handleSubAgentSyncEvent, clearSubAgentWindows } = useSubAgentWindows()
 
@@ -98,5 +103,77 @@ describe('useSubAgentWindows（P2-15）', () => {
     expect(handleSubAgentSyncEvent(evt('computer_action', { action: 'click' }))).toBe(false)
     expect(handleSubAgentSyncEvent(evt('subagent_chunk', { subagent_id: 'ghost', data: 'x' }))).toBe(true)
     expect(Object.keys(subAgentWindows.value)).toHaveLength(0)
+  })
+})
+
+
+/**
+ * §6-78 L 条（H2-6）：状态面回读与"事件带事实"。
+ *
+ * 三条契约——① STARTED 带上 status 时，前端用它（经唯一那处映射），不再自造；
+ * ② 回读走台账读面 `scope=subagents`，状态映射只有 LEDGER_TO_WINDOW_STATUS 一处；
+ * ③ 读面故障只留痕，**不拿空列表冒充"这条会话没派过子任务"**（那是把"读不到"
+ *    写成"没有"，与本仓反复登记的假成功同族）。
+ */
+describe('useSubAgentWindows 状态面回读（H2-6 · §6-78 L 条）', () => {
+  beforeEach(() => {
+    apiGet.mockReset()
+    clearSubAgentWindows()
+  })
+
+  it('STARTED 带 status 时用事件的事实（经唯一映射），不带时才落默认', () => {
+    // 事件说 running → running；说 queued（后端若先扩态）→ 映射成 UI 的 running，
+    // 而不是把未知词值原样塞进界面状态
+    handleSubAgentSyncEvent(evt('subagent_started', {
+      subagent_id: 'q1', agent_name: '搜索', task: 't', status: 'queued',
+    }))
+    expect(subAgentWindows.value.q1.status).toBe('running')
+    expect(LEDGER_TO_WINDOW_STATUS.queued).toBe('running')
+
+    handleSubAgentSyncEvent(evt('subagent_started', {
+      subagent_id: 'q2', agent_name: '搜索', task: 't',
+    }))
+    expect(subAgentWindows.value.q2.status).toBe('running')
+
+    // 反向：事件带着 completed 进来时，前端不得自顾自显示 running
+    handleSubAgentSyncEvent(evt('subagent_started', {
+      subagent_id: 'q3', agent_name: '搜索', task: 't', status: 'completed',
+    }))
+    expect(subAgentWindows.value.q3.status).toBe('completed')
+  })
+
+  it('回读走台账读面，状态与成因都按那唯一一处映射落进窗口', async () => {
+    apiGet.mockResolvedValue({ data: { runs: [
+      { subagent_id: 'r1', agent_id: 'researcher', status: 'running', task: '在跑的', error_type: '' },
+      { subagent_id: 'r2', agent_id: 'writer', status: 'failed', task: '超时那条', error_type: 'subagent_timeout' },
+      { subagent_id: 'r3', agent_id: 'writer', status: 'cancelled', task: '被取消', error_type: 'subagent_cancelled' },
+    ] } })
+    await restoreSubAgentWindows('sess-1')
+    expect(apiGet).toHaveBeenCalledWith('/console/chat/runs', {
+      params: { session_id: 'sess-1', scope: 'subagents' },
+    })
+    expect(subAgentWindows.value.r1.status).toBe('running')
+    expect(subAgentWindows.value.r1.task).toBe('在跑的')
+    expect(subAgentWindows.value.r2.status).toBe('failed')
+    expect(subAgentWindows.value.r2.error).toBe('subagent_timeout')
+    expect(subAgentWindows.value.r3.status).toBe(LEDGER_TO_WINDOW_STATUS.cancelled)
+  })
+
+  it('读面故障只留痕：不拿空窗口冒充"这条会话没派过子任务"', async () => {
+    apiGet.mockRejectedValue(new Error('503 run 台账已关闭'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await restoreSubAgentWindows('sess-2')
+    expect(Object.keys(subAgentWindows.value)).toEqual([])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('切会话后过期的回填不写进当前视图', async () => {
+    apiGet.mockResolvedValue({ data: { runs: [{ subagent_id: 'x', agent_id: 'a', status: 'running', task: 't' }] } })
+    await restoreSubAgentWindows('sess-3', () => true)
+    expect(subAgentWindows.value.x).toBeTruthy()
+    clearSubAgentWindows()
+    await restoreSubAgentWindows('sess-3', () => false)
+    expect(Object.keys(subAgentWindows.value)).toEqual([])
   })
 })

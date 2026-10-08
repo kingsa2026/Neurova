@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { api } from '@/api'
 import type { SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
 
 /**
@@ -45,7 +46,10 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       task: p.task || '',
       bodyText: '',
       chunkCount: 0,
-      status: 'running',
+      // 状态取自事件本身（改前这里硬编码 'running'：那一刻后端确实是 running，
+      // 但事件不带事实，竞态或重放时前端只能一直猜）。词值到 UI 态的翻译只有
+      // LEDGER_TO_WINDOW_STATUS 一处——事件先于后端扩态也不会渲染成未定义态。
+      status: LEDGER_TO_WINDOW_STATUS[String(p.status ?? '')] ?? 'running',
       report: '',
     }
   } else if (event.event_type === 'subagent_chunk') {
@@ -88,6 +92,74 @@ function closeSubAgentWindow(subagentId: string): void {
 function clearSubAgentWindows(): void {
   recycleTimers.clear()
   subAgentWindows.value = {}
+}
+
+/**
+ * 台账状态 → 窗口状态（唯一一处映射）。词值表与后端 `agent_run_store` 对齐，
+ * 对齐由 `tests/unit/api/test_agentRunStatusVocabularyParity.py` 钉住——
+ * 后端加一个状态而这里没跟上，就是"窗口永远转圈"或"悄悄标完成"的下一场事故。
+ */
+export const LEDGER_TO_WINDOW_STATUS: Record<string, SubAgentWindowState['status']> = {
+  queued: 'running',
+  running: 'running',
+  parked: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'failed',
+}
+
+/**
+ * 从 run 台账读面回填浮窗栈（§6-78 L 条：刷新/重启后子任务历史必须还在）。
+ *
+ * 数据源是 `GET /console/chat/runs?scope=subagents`——即"这次对话派出去了哪些子任务"，
+ * 与 `loadParkedRuns` 同一条读面、同一套归属判定，不另开第二条查询口。
+ * 读面故障（含 `NEUROVA_RUN_GATE=off` 的 503）只留痕不回填：**绝不拿空列表冒充"没派过**"。
+ */
+export async function restoreSubAgentWindows(
+  sessionId: string,
+  isActive: () => boolean = () => true,
+): Promise<void> {
+  if (!sessionId) return
+  let runs: any[]
+  try {
+    const res: any = await api.get('/console/chat/runs', {
+      params: { session_id: sessionId, scope: 'subagents' },
+    })
+    runs = res?.data?.runs ?? res?.runs ?? []
+  } catch (e) {
+    console.warn('[subagent] 台账读面不可用，浮窗不回填（不拿空列表冒充没有历史）:', e)
+    return
+  }
+  // 过期响应不写当前视图：切会话后上一条 fetch 才回来的话，会把旧会话的子任务
+  // 摆到新会话的浮窗里（与 ChatPage.loadParkedRuns 同一条纪律）
+  if (!isActive()) return
+  for (const row of runs) {
+    const sid: string = row?.subagent_id
+    if (!sid) continue
+    clearRecycleTimer(sid)
+    const status = LEDGER_TO_WINDOW_STATUS[String(row?.status ?? '')] ?? 'running'
+    subAgentWindows.value[sid] = {
+      subagentId: sid,
+      agentName: row?.agent_id || sid,
+      task: row?.task || '',
+      bodyText: '',
+      chunkCount: 0,
+      status,
+      report: '',
+      error: row?.error_type || null,
+    }
+    if (status !== 'running') {
+      recycleTimers.set(
+        sid,
+        setTimeout(() => {
+          recycleTimers.delete(sid)
+          if (subAgentWindows.value[sid]?.status !== 'running') {
+            delete subAgentWindows.value[sid]
+          }
+        }, COMPLETED_TTL_MS),
+      )
+    }
+  }
 }
 
 export function useSubAgentWindows() {
