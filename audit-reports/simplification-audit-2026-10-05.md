@@ -622,6 +622,27 @@
     - **① AMD 真网关（`DeepSeek-V4.1-Flash`，OpenAILoop）全绿**：真 `tool_calls` 增量被正确合并、工具经真咽喉执行、`tool_result` 让出且历史配对齐备（`让出=['call_05c371581cd74561b4bd954f'] 已回放=同值 assistant 声明=同值`），B 批与共用流式契约在真 provider 上成立。
     - **② OpenRouter `anthropic/claude-3.5-sonnet`（AnthropicLoop）回 400**：`invalid_literal tools[0].type expected "function"`。这**同时是 §6-71 的交付证据**——错误由 `_predict_stream` 内的 `_raise_for_error_dict` 抛出，说明流式分支真走到了、不再回退 legacy；也是新缺陷：环在 `_build_request` 里自带 `_convert_messages_to_anthropic`/`_convert_tools_to_anthropic`，而路由层在 `provider_kind == "anthropic"` 时**已经**经 `AnthropicNativeClient` 转一次（`multi_model_client.py:313-321`，配套 `providers/protocol_thinking.py`、`providers/tool_transport.py:48` 的注释也承认"调用方可能已按目标协议转好"）。同一份协议转换两处各做一遍：OpenAI 兼容网关（openrouter 的 claude 路由）收到 Anthropic 形态 tools 直接 400；真 anthropic-kind provider 则依赖客户端容忍预转形状。
     **两种处置**：A 把转换收口到路由层一处（`_build_request` 改交 OpenAI 形态，退役环内两个 `_convert_*`）——代价是 `computer_use` 工具形态要一并搬到 provider 层，且 `test_tool_bugs_v3::TestA3AnthropicLoopToolRole`、`test_perception_image_anthropic_parity`、`test_provider_tool_path:390` 三条判据钉的就是环内转换，须按教义第 7 条把断言搬到新落点而不是删；B 把 AnthropicLoop 的注册正则收窄到"仅 anthropic-kind provider"——便宜，但那是把"谁该用这条环"的判定推给模型名字，OpenRouter 上 `anthropic/*` 这类合法路由会继续坏。**建议 A**（B 只是换一种沉默），但触及 computer-use 回装形状，需拍板。
+    - **拍板前补一次复算（逐条读码所得）：原记代价两处偏轻、一支前提不成立**——
+      ① "搬到 provider 层"不是搬家而是**补一份能力**：路由层 `build_anthropic_body()`
+      （`anthropic_client.py:55`）对消息只做 `str(content)` 且**只保留 user/assistant 轮**，
+      `role == "tool"` 与 `assistant.tool_calls` 在它那儿直接消失；环内那份
+      `_convert_messages_to_anthropic`（`anthropic_loop.py:315`，docstring 自己记着"Bug A-3 修复"）
+      才是把 tool 结果并成 `tool_result` 块、把 tool_calls 并成 `tool_use` 块的那一份。
+      所以在 anthropic-kind 真链路上**环内转换目前是承重的**：只删不搬，原生函数调用整条哑掉。
+      这把修法 A 的成本从"改两处调用点"抬到"在 provider 层实装块级消息装配"。
+      ② "B 收窄到仅 anthropic-kind"这一支**按现签名做不到**：`find_agent_loop(model_name)`
+      （`registry.py:56`）与它的两个调用点（`loop_manager.py:161`/`:232`）只拿到模型名，
+      没有 provider_kind 入参；要"按 kind 判"得先扩签名，那已不是"收窄正则"而是改选环口径。
+      ③ 400 的成因据此改写：注册式是 `claude-.*|anthropic/.*`（`anthropic_loop.py:607`），
+      OpenRouter 的模型 id 字面就是 `anthropic/claude-3.5-sonnet`，于是**一条 OpenAI 兼容传输
+      被模型名选进了 Anthropic 环**，环把 tools 预转成 `input_schema` 再交给 OpenAI 兼容网关
+      ⇒ `invalid_literal tools[0].type expected "function"`。真根因是**两个口径没对齐**：
+      环按模型名选、协议按 `provider.provider` 选（`multi_model_client.py:319`）。
+      因此待裁空间是**三选一**：A 收口到路由层（含 ① 的实装，最根上但最贵）；
+      B 让选环看 provider_kind（含 ② 的扩签名，环内转换留着给 anthropic-kind 用，
+      双定义仍在但只对同一种传输）；C 只把 `anthropic/.*` 这一支从注册式里去掉
+      （最便宜，修好 OpenRouter 这一类；但 ①② 的口径错配还在，且真 anthropic-kind 若模型 id
+      只带 `anthropic/` 前缀会落回 OpenAILoop）。
 
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
