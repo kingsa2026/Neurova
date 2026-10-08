@@ -125,8 +125,8 @@ class AnthropicLoop(BaseAgentLoop):
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
 
             # 执行即回放——连同声明这些调用的 assistant 消息：
-            # _convert_messages_to_anthropic 靠它产出 tool_use 块，缺块时
-            # tool_result 没有前置声明，协议判为非法（与 OpenAI 侧同一根因）
+            # provider 层要按 assistant.tool_calls 产 tool_use 块，缺声明时
+            # tool_result 没有前置配对，协议判非法（与 OpenAI 侧同一根因）
             _round_reasoning = getattr(response, "reasoning_content", None) or ""
             messages.extend(
                 self.buildToolRoundMessages(
@@ -301,160 +301,41 @@ class AnthropicLoop(BaseAgentLoop):
                 state.stagnationCount = 0
 
     async def _build_request(self, tools, computer_handler, messages) -> Dict:
-        """构造一次 Anthropic 请求参数（含 tools 与 computer 工具）。"""
-        request_params: Dict[str, Any] = {
-            "messages": self._convert_messages_to_anthropic(messages),
-        }
+        """构造一次请求参数——**交的是 OpenAI 形态**，线形状只在 provider 层转一次。
+
+        §6-76 修法 A：这里此前自带 `_convert_messages_to_anthropic` /
+        `_convert_tools_to_anthropic`，与路由层 `build_anthropic_body` 是同一件事的两处
+        实现。后果两条都实测过：走 OpenAI 兼容网关（OpenRouter 的 `anthropic/*` 路由）
+        时预转的 tools 被校验判 400 `invalid_literal tools[0].type expected "function"`；
+        走真 anthropic-kind 时预转好的内容块又被路由层 `str(content)` 拍平成 Python
+        repr 字面量。收口后本环不再认识任何线协议形状。
+        """
+        request_params: Dict[str, Any] = {"messages": list(messages)}
         if tools:
-            request_params["tools"] = self._convert_tools_to_anthropic(tools)
+            request_params["tools"] = list(tools)
         if computer_handler:
-            computer_tool = await self._build_computer_tool(computer_handler)
+            computer_tool = await self._buildComputerToolDescriptor(computer_handler)
             request_params.setdefault("tools", []).append(computer_tool)
         return request_params
 
-    def _convert_messages_to_anthropic(self, messages: List[Dict]) -> List[Dict]:
+    async def _buildComputerToolDescriptor(self, computer_handler) -> Dict:
+        """computer 能力只交**协议中立描述符**（分辨率这类能力参数）。
+
+        `computer_<版本串>` 是 Anthropic 的线协议细节，由 `tool_transport` 那一处拼；
+        写在本环里就等于把"哪版协议"的知识复制进 Agent 层。
         """
-        将 OpenAI 格式 messages 转换为 Anthropic 格式
-
-        OpenAI: [{"role": "user", "content": "Hello"}]
-        Anthropic: [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]
-
-        Bug A-3 修复 [HIGH]: 原代码不处理 "tool" role 和 assistant 的 tool_calls，
-        导致 Anthropic API 拒绝请求或行为未定义。
-
-        修复:
-        1. "tool" role → "user" role + tool_result content block
-           （Anthropic 要求 tool result 作为 user message 的 content block）
-        2. assistant 的 tool_calls → tool_use content block
-           （Anthropic 要求 tool use 作为 assistant message 的 content block）
-        3. 连续的 tool result 合并到同一个 user message
-           （Anthropic 要求 tool result 必须紧跟在 assistant tool_use 之后，
-            多个 tool result 应合并为一个 user message 的多个 content block）
-        """
-        import json as _json
-
-        anthropic_messages = []
-
-        for msg in messages:
-            role = msg["role"]
-            content = msg.get("content")
-
-            # Bug A-3 修复 1: "tool" role → "user" role + tool_result block
-            if role == "tool":
-                tool_call_id = msg.get("tool_call_id", "")
-                tool_content = content if isinstance(content, str) else _json.dumps(content)
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": tool_content,
-                }
-                # 合并到前一个 user message（如果它是 tool_result 容器）
-                if (
-                    anthropic_messages
-                    and anthropic_messages[-1]["role"] == "user"
-                    and isinstance(anthropic_messages[-1]["content"], list)
-                    and any(
-                        isinstance(c, dict) and c.get("type") == "tool_result"
-                        for c in anthropic_messages[-1]["content"]
-                    )
-                ):
-                    anthropic_messages[-1]["content"].append(tool_result_block)
-                else:
-                    anthropic_messages.append(
-                        {"role": "user", "content": [tool_result_block]}
-                    )
-                continue
-
-            # 转换 role
-            if role == "assistant":
-                ant_role = "assistant"
-            elif role == "user":
-                ant_role = "user"
-            elif role == "system":
-                # Anthropic 使用 "system" 参数，而不是 messages
-                continue
-            else:
-                ant_role = role
-
-            # Bug A-3 修复 2: assistant 的 tool_calls → tool_use block
-            ant_content = []
-            if isinstance(content, str):
-                if content:
-                    ant_content.append({"type": "text", "text": content})
-            elif isinstance(content, list):
-                ant_content = content  # 已经是正确格式
-            elif content is None:
-                pass  # assistant 只有 tool_calls 时 content 为 None
-
-            # 转换 tool_calls → tool_use block
-            tool_calls = msg.get("tool_calls")
-            if tool_calls and ant_role == "assistant":
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    args_str = func.get("arguments", "{}")
-                    try:
-                        args_dict = _json.loads(args_str) if isinstance(args_str, str) else args_str
-                    except (_json.JSONDecodeError, TypeError):
-                        args_dict = {"raw": args_str}
-                    ant_content.append(
-                        {
-                            "type": "tool_use",
-                            "id": tc.get("id", ""),
-                            "name": func.get("name", ""),
-                            "input": args_dict,
-                        }
-                    )
-
-            # 确保 content 不为空（Anthropic 要求 content 非空）
-            if not ant_content:
-                ant_content = [{"type": "text", "text": ""}]
-
-            anthropic_messages.append({"role": ant_role, "content": ant_content})
-
-        return anthropic_messages
-
-    def _convert_tools_to_anthropic(self, tools: List[Dict]) -> List[Dict]:
-        """
-        将 OpenAI Tool Schema 转换为 Anthropic 格式
-
-        OpenAI: {"type": "function", "function": {"name": ..., "parameters": ...}}
-        Anthropic: {"name": ..., "description": ..., "input_schema": ...}
-        """
-        ant_tools = []
-
-        for tool in tools:
-            if tool.get("type") == "function":
-                func = tool["function"]
-                ant_tools.append(
-                    {
-                        "name": func["name"],
-                        "description": func.get("description", ""),
-                        "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-                    }
-                )
-
-        return ant_tools
-
-    async def _build_computer_tool(self, computer_handler) -> Dict:
-        """
-        构建 Anthropic computer 工具
-
-        返回 Anthropic 格式的 computer 工具定义
-        """
-        # 获取屏幕分辨率
         try:
             width, height = await computer_handler.get_dimensions()
         except Exception:
             width, height = 1024, 768
 
-        # 获取环境
         try:
             await computer_handler.get_environment()
         except Exception:
             pass
 
         return {
-            "type": "computer_20241022",
+            "type": "computer",
             "name": "computer",
             "display_width_px": width,
             "display_height_px": height,
@@ -464,16 +345,14 @@ class AnthropicLoop(BaseAgentLoop):
     def _attachPerceptionImage(self, request_params: Dict) -> Dict:
         """把本轮暂存的截图挂到**这一次请求**的副本上（T-09 · 🔒Q-3 拍"与 OpenAI 环同形"）。
 
-        改前这条环只服务它自己的原生 computer 工具内容块（`_execute_computer_tool` 里那个
-        `{"type":"image",…}`），不经轮级槽——于是走 Anthropic 服务商时槽被生产者填、
-        装配侧无人消费，能力"尚未生效"却只记在散文里。
+        两环现在交同一个形状：OpenAI 的 `image_url` 切片，由 `_imageUrlPart` 单源产出，
+        Anthropic 的 `image` 源块归 provider 层。改前两环各产一种形状，而本环那份
+        （`{"type":"image","source":…}`）还要再经一次路由层拍平——"同一条能力两份形状"
+        正是 §6-76 收口的对象。
 
-        闸门与归一化由 `perception_gate` 单源持有，本处只做 Anthropic 的内容块形状：
-        两环各留一份三闸，迟早漂移成"某条环给图、另一条不给"的分裂读数。
-        副本同理——`request_params["messages"]` 跨轮活，图挂上去就是进历史。
+        闸门与归一化由 `perception_gate` 单源持有，本处只管挂载位置；副本同理——
+        `request_params["messages"]` 跨轮活，图挂上去就是进历史。
         """
-        import base64
-
         from neurova.agent.loops import perception_gate
 
         offer = perception_gate.claimTurnPerception()
@@ -490,14 +369,7 @@ class AnthropicLoop(BaseAgentLoop):
                   if isinstance(existing, list) else
                   ([{"type": "text", "text": existing}] if existing else []))
         blocks.append({"type": "text", "text": perception_gate.PERCEPTION_INSTRUCTION_TEXT})
-        blocks.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": offer["mime"],
-                "data": base64.b64encode(offer["bytes"]).decode("ascii"),
-            },
-        })
+        blocks.append(self._imageUrlPart(offer))
         target["content"] = blocks
         sent = {**request_params, "messages": messages}
         perception_gate.commitTurnPerception(self.agent, offer)

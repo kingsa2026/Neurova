@@ -52,6 +52,131 @@ def anthropic_endpoint_url(base_url: str) -> str:
     return f"{base}/v1/messages"
 
 
+def _imageBlockFromUrl(url: str) -> typing.Optional[dict]:
+    """OpenAI `image_url.url` → Anthropic `image` 源块。
+
+    `data:<media>;base64,<payload>` 拆成 source 三元组；其余形态按远程 URL 交。
+    """
+    if not url:
+        return None
+    if url.startswith("data:"):
+        header, _, payload = url.partition(",")
+        media_type = header[5:].split(";")[0].strip() or "image/png"
+        return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": payload}}
+    return {"type": "image", "source": {"type": "url", "url": url}}
+
+
+def _contentBlocks(content: typing.Any) -> list:
+    """一条消息的 content → Anthropic 内容块。
+
+    三种进料都认：纯文本、OpenAI 多模态数组（`text` / `image_url`）、以及已是 Anthropic
+    数组的历史调用方。这里**不许**用 `str(content)` 收口——拍平后模型收到的是 Python
+    repr 字面量，块里的图与工具声明一并变成噪声（本轮实测到的形态）。
+    """
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content else []
+    if content is None:
+        return []  # assistant 只声明工具时 content 为 None，别把 None 拍成 "None"
+    if not isinstance(content, list):
+        text = str(content)
+        return [{"type": "text", "text": text}] if text else []
+
+    blocks: list = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        kind = part.get("type")
+        if kind == "text":
+            text = str(part.get("text") or "")
+            if text:
+                blocks.append({"type": "text", "text": text})
+        elif kind == "image_url":
+            block = _imageBlockFromUrl(str((part.get("image_url") or {}).get("url") or ""))
+            if block is not None:
+                blocks.append(block)
+        elif kind in ("image", "tool_result", "tool_use", "document"):
+            blocks.append(dict(part))  # 已是线形状，原样收下不再转一遍
+    return blocks
+
+
+def _toolUseBlocks(tool_calls: typing.Any) -> list:
+    """OpenAI `assistant.tool_calls` → Anthropic `tool_use` 块。
+
+    `input` 必须是对象：坏 JSON 参数诚实落成 `{"raw": 原文}`，不抛异常也不静默丢调用
+    （与 `ToolCallParser` 侧同一口径——解析失败要看得见，不能装作没有这次调用）。
+    """
+    blocks: list = []
+    for call in tool_calls or []:
+        if not isinstance(call, dict):
+            continue
+        func = call.get("function") or {}
+        args = func.get("arguments", "{}")
+        try:
+            parsed = json.loads(args) if isinstance(args, str) else args
+        except (ValueError, TypeError):
+            parsed = {"raw": args}
+        if not isinstance(parsed, dict):
+            parsed = {"value": parsed}
+        blocks.append({
+            "type": "tool_use",
+            "id": str(call.get("id") or ""),
+            "name": str(func.get("name") or ""),
+            "input": parsed,
+        })
+    return blocks
+
+
+def toAnthropicMessages(messages: typing.List[dict]) -> typing.List[dict]:
+    """OpenAI 形态 messages → Anthropic `messages`（system 由调用方另抽顶层字段）。
+
+    §6-76 修法 A：协议转换的**唯一落点**在 provider 层。此前 `AnthropicLoop` 自带一份
+    同名转换，于是同一份请求被转两遍——环转成内容块后，这里又把 `content` 拍成
+    `str(...)`，模型收到的是 repr 字面量；而走 OpenAI 兼容网关时环内那份预转直接让
+    校验回 400。两处只能留一处，且留下的这处必须认 OpenAI 形态（三家客户端共用的中间语言）。
+
+    三条 Anthropic 硬约束在此实现（缺一即请求被判非法）：
+    1. `tool` 角色的结果挂到 **user** 轮；
+    2. `tool_result` 必须紧随声明它的 assistant `tool_use`；
+    3. 同批多个结果合进**同一条** user 消息的多个块。
+    """
+    out: list = []
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "")
+        content = msg.get("content")
+        if role == "system":
+            continue
+
+        if role == "tool":
+            result = {
+                "type": "tool_result",
+                "tool_use_id": str(msg.get("tool_call_id") or ""),
+                "content": content if isinstance(content, str) else json.dumps(
+                    content if content is not None else "", ensure_ascii=False),
+            }
+            tail = out[-1] if out else None
+            tailBlocks = tail.get("content") if isinstance(tail, dict) else None
+            if (
+                isinstance(tailBlocks, list)
+                and tail.get("role") == "user"
+                and tailBlocks
+                and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in tailBlocks)
+            ):
+                tailBlocks.append(result)
+            else:
+                out.append({"role": "user", "content": [result]})
+            continue
+
+        blocks = _contentBlocks(content)
+        if role == "assistant":
+            blocks.extend(_toolUseBlocks(msg.get("tool_calls")))
+        if role not in ("user", "assistant"):
+            continue  # Anthropic 只认这两种轮；别的原样送上去必被判非法，不如点名不送
+        out.append({"role": role, "content": blocks or [{"type": "text", "text": ""}]})
+    return out
+
+
 def build_anthropic_body(
     messages: typing.List[dict],
     model: str,
@@ -72,18 +197,17 @@ def build_anthropic_body(
       使原生链路上的函数调用能力消失（Issue #177）
     """
     system_parts: list = []
-    convo: list = []
+    turnMessages: list = []
     for msg in messages or []:
-        role = str(msg.get("role") or "")
-        content = msg.get("content")
-        if content is None:
+        if not isinstance(msg, dict):
             continue
-        if role == "system":
+        if str(msg.get("role") or "") == "system":
+            content = msg.get("content")
             if isinstance(content, str) and content.strip():
                 system_parts.append(content)
             continue
-        if role in ("user", "assistant"):
-            convo.append({"role": role, "content": str(content)})
+        turnMessages.append(msg)
+    convo = toAnthropicMessages(turnMessages)
 
     body: dict = {
         "model": model,
