@@ -1833,3 +1833,11 @@ tests/unit/evolution/test_singlePresentationAccountGuard.py
 # 静默退化成 t2v 写 running、0 字节回包不落盘不返回路径、seed 以库中 seed_value 为
 # 准读回复用。逐文件单跑两次各 20 passed
 tests/unit/aigc_studio/test_crossEpisodeContinuity.py
+
+# H2-2 · E 条 任务账本终态词汇单源（§6-82）：这一档锁的是"写侧落的词值读侧必须认得"。
+# 判据打在跨边界行为上——真 recovery/真端点收口出的成功件，喂给真 retention 一轮必须
+# 被删（改前 _TERMINAL=("done","failed") 认不出 succeeded，清理逻辑整轮空转且不打日志）；
+# 被 Studio 引用的产物保留、账本行永不删；终态/活跃集合只许 task_ledger 一份定义，
+# 扫描面按 import 现场反推（不手抄清单），两格各带反向对照防"扫空即全绿"。
+# 逐文件单跑两次各 21 passed
+tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py
