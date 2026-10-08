@@ -634,23 +634,37 @@ class SkillEvolutionRunner:
             except OSError as e:
                 logger.debug("编辑历史台账回填失败: %s", e)
 
-        # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
-        if result.holdout_after < result.holdout_before - _EPS:
+        # ── 终局拒绝的唯一出口 ──
+        async def rejectRun(reason: str) -> EvolutionRunResult:
+            """落理由、复位部署正文、把台账结局改回「未部署」、附 heldout 证据后返回。
+
+            台账里 `accepted` 在这里被钉成**「该假设被部署」**，不是「它在本轮 tune 上赢了」——
+            后者由 `round_winner` 单独占一格。此前六处判据各抄四行且都不回写台账，胜者行早在
+            评测期就写成 accepted=True，于是被拒的运行在三个读方（变异器提示词「已生效勿回退」、
+            stall 探索指令、产出剪枝）眼里仍是一条成功记录（§6-9）。
+            """
             result.rejected = True
-            result.reject_reason = "holdout_regression"
+            result.reject_reason = reason
             result.deployed_text = baseline_text
+            if self._ledger is not None and ledger_key and best_seq is not None:
+                try:
+                    self._ledger.patch(ledger_key, best_seq,
+                                       {"accepted": False, "reject_reason": reason,
+                                        "round_winner": True})
+                except OSError as e:
+                    logger.debug("运行终态回写台账失败: %s", e)
             await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
+
+        # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
+        if result.holdout_after < result.holdout_before - _EPS:
+            return await rejectRun("holdout_regression")
 
         # ── 判定 2:无实质增益 → 保留基线 ──
         # 阈值 = max(min_improvement, δ)：δ>0（已校准）时，评测噪声内的
         # "增益"不被当成真提升（P0-1 噪声地板）；未校准时即 min_improvement。
         if result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
-            result.rejected = True
-            result.reject_reason = "no_improvement"
-            result.deployed_text = baseline_text
-            await self._attach_heldout_evidence(result, dataset, artifact_type)
-            return result
+            return await rejectRun("no_improvement")
 
         # ── 判定 2.1:例级不退化门（§8 前置 1）──
         # 均值的性质决定的：一条用例被改坏，可以被另一条的涨幅抵掉。这道门只看
@@ -662,11 +676,7 @@ class SkillEvolutionRunner:
         result.caseRegressions = caseRegressions
         result.unevidencedCases = unevidencedCases
         if len(caseRegressions) > result.caseAllowance:
-            result.rejected = True
-            result.reject_reason = "case_regression"
-            result.deployed_text = baseline_text
-            await self._attach_heldout_evidence(result, dataset, artifact_type)
-            return result
+            return await rejectRun("case_regression")
 
         # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
         # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算
@@ -684,11 +694,7 @@ class SkillEvolutionRunner:
                     result.anchor_best = round(anchor_best, 6)
                 result.anchor_floor = round(anchor_floor, 6)
                 if result.holdout_after < anchor_floor - accept_threshold - _EPS:
-                    result.rejected = True
-                    result.reject_reason = "anchor_unreached"
-                    result.deployed_text = baseline_text
-                    await self._attach_heldout_evidence(result, dataset, artifact_type)
-                    return result
+                    return await rejectRun("anchor_unreached")
 
         # ── 判定 2.5:成本规则（P1-5）──
         # ΔC ≤ β0 + β1·ΔS：涨的成本必须由实测增益买单。文本臂成本代理 =
@@ -702,11 +708,7 @@ class SkillEvolutionRunner:
                 result.cost_change = delta_c
                 budget = self.config.cost_beta0 + self.config.cost_beta1 * result.improvement
                 if delta_c > budget:
-                    result.rejected = True
-                    result.reject_reason = "cost_rule_failed"
-                    result.deployed_text = baseline_text
-                    await self._attach_heldout_evidence(result, dataset, artifact_type)
-                    return result
+                    return await rejectRun("cost_rule_failed")
 
         # ── 判定 3:benchmark 回归门(技能分涨但 bench 回退 → 拒绝)──
         if self._bench_gate is not None:
@@ -723,11 +725,7 @@ class SkillEvolutionRunner:
             result.bench_neutral = bool(getattr(self._bench_gate, "neutral", False))
             result.bench_neutral_reason = str(getattr(self._bench_gate, "neutral_reason", "") or "")
             if gain < -self.config.bench_tolerance:
-                result.rejected = True
-                result.reject_reason = "bench_regression"
-                result.deployed_text = baseline_text
-                await self._attach_heldout_evidence(result, dataset, artifact_type)
-                return result
+                return await rejectRun("bench_regression")
 
         await self._attach_heldout_evidence(result, dataset, artifact_type)
         return result
