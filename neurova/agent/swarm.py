@@ -62,6 +62,28 @@ def reset_subagent_depth(token) -> None:
     _subagentDepthVar.reset(token)
 
 
+# ── 子任务状态词汇的唯一出处（§6-78 K 条）──────────────────────────
+# 改前这六个词值散在本文件六处（dataclass 默认、返回投影、list_active、
+# _count_active、_evict_finished_runs、归档判定），**没有一份定义**：计数说
+# pending/running 是「运行中」，逐出说 completed/failed 是「结束」，两条各自手抄——
+# 于是一条停在 running 的卡死件既不算「可逐出」也永远算「占槽」，5 条就把蜂群锁死。
+# 现两处集合由同一份词值导出，互斥且并起来覆盖整个状态域（判据钉这条）。
+SUBAGENT_PENDING = "pending"
+SUBAGENT_RUNNING = "running"
+SUBAGENT_COMPLETED = "completed"
+SUBAGENT_FAILED = "failed"
+SUBAGENT_STATUSES = frozenset(
+    {SUBAGENT_PENDING, SUBAGENT_RUNNING, SUBAGENT_COMPLETED, SUBAGENT_FAILED})
+#: 仍占着派生槽、且永不逐出的状态
+SUBAGENT_ACTIVE_STATUSES = frozenset({SUBAGENT_PENDING, SUBAGENT_RUNNING})
+#: 已收尾的状态——既释放槽位，也进 _evict_finished_runs 的逐出面
+SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
+
+#: 运行窗口预算的覆盖入口；**默认值不写在蜂群里**，取 `tool_coordinator` 的
+#: `spawn_subagent` 那份读数（同一件事只许有一个尺度，见 `_effectiveRuntimeBudget`）
+SUBAGENT_BUDGET_ENV = "NEUROVA_SWARM_SUBAGENT_BUDGET_SEC"
+
+
 @dataclass
 class SubAgentRun:
     """一次子 Agent 运行的状态记录"""
@@ -80,7 +102,7 @@ class SubAgentRun:
     # 完全复用单 agent 会话存储/历史恢复/usage 记账——不建第二套管线。
     # Windows 文件名安全。
     member_session_id: str = ""
-    status: str = "pending"  # pending | running | completed | failed
+    status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     report: str = ""
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
@@ -230,10 +252,14 @@ class SwarmManager:
 
         active_children = self._count_active()
         if active_children >= self.MAX_ACTIVE_CHILDREN:
+            # 文案承诺「等待完成」就必须给出上界，否则调用方（LLM）只能无限等——
+            # K 条里那 5 条卡死件根本不会完成。上界与执行侧取同一份读数，不重抄数字。
             return self._rejection(
                 "MAX_ACTIVE_CHILDREN",
                 f"运行中的子 Agent 已达硬限 {self.MAX_ACTIVE_CHILDREN}——"
-                "请等待现有子任务完成（subagent_status 查询）后再派生",
+                f"每条子任务最长 {self._effectiveRuntimeBudget():g}s 内必落终态"
+                "（完成/失败/超时/取消都收尾并释放槽位），"
+                "请用 subagent_status 查询后再派生",
                 active_children=active_children,
             )
 
@@ -319,7 +345,7 @@ class SwarmManager:
                 "agent_id": run.agent_id,
                 "agent_name": run.agent_name,
                 "member_session_id": run.member_session_id,
-                "status": "pending",
+                "status": SUBAGENT_PENDING,
                 "background": True,
                 "hint": "使用 subagent_status 工具查询执行结果",
                 **quota,
@@ -354,7 +380,7 @@ class SwarmManager:
     def list_active(self) -> List[Dict[str, Any]]:
         """列出未结束的子 Agent 运行"""
         with self._lock:
-            runs = [r for r in self._runs.values() if r.status in ("pending", "running")]
+            runs = [r for r in self._runs.values() if r.status in SUBAGENT_ACTIVE_STATUSES]
         return [r.to_dict() for r in runs]
 
     def list_all(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -378,10 +404,39 @@ class SwarmManager:
         except Exception:  # noqa: BLE001 - 设置不可读走常量兜底，不阻断派生
             return self.MAX_SUBAGENT_DEPTH
 
+    @classmethod
+    def _effectiveRuntimeBudget(cls) -> float:
+        """一条子任务的运行窗口（秒）。**默认值不在蜂群自己手里**。
+
+        仓内早已为这条链声明过尺度：`tool_coordinator.TOOL_TIMEOUTS_S["spawn_subagent"]
+        = 600.0`（2026-09-10 蜂群超时排查落表，注释写明「前台 spawn 子任务动辄数分钟，
+        60s 默认=必然转后台」）。改前的形态是：工具层 600s 就放弃等待，而 run 本身
+        可以永远停在 `running`——两份口径的差正是 K 条的死锁来源。现两处读同一份数。
+
+        `SUBAGENT_BUDGET_ENV` 可覆盖（运维调参与判据注入用），**每次调用现取**，
+        不像 import 期烤死那样会让运行期调不动。取不到那份工具表读数时回落到
+        工具层默认（`TOOL_DEFAULT_TIMEOUT_S`），仍不另造数字。
+        """
+        raw = (os.environ.get(SUBAGENT_BUDGET_ENV) or "").strip()
+        if raw:
+            try:
+                return max(0.1, float(raw))
+            except ValueError:
+                logger.warning("Swarm: %s=%r 不是数字，回落工具层窗口读数",
+                               SUBAGENT_BUDGET_ENV, raw)
+        try:
+            from neurova.agent.tool_coordinator import get_tool_timeout
+
+            return float(get_tool_timeout("spawn_subagent"))
+        except Exception:  # noqa: BLE001 - 工具层不可用不阻断派生，用其默认尺度
+            from neurova.agent.tool_coordinator import TOOL_DEFAULT_TIMEOUT_S
+
+            return float(TOOL_DEFAULT_TIMEOUT_S)
+
     def _count_active(self) -> int:
-        """运行中（pending/running）派生数（含后台任务）。"""
+        """运行中（`SUBAGENT_ACTIVE_STATUSES`）派生数（含后台任务）。"""
         with self._lock:
-            return sum(1 for r in self._runs.values() if r.status in ("pending", "running"))
+            return sum(1 for r in self._runs.values() if r.status in SUBAGENT_ACTIVE_STATUSES)
 
     def _quota_snapshot(self) -> Dict[str, Any]:
         """配额闭环快照。"""
@@ -483,7 +538,7 @@ class SwarmManager:
     def _evict_finished_runs(self) -> None:
         """逐出超出保留上限的最旧已完成 run（调用方须持有 _lock）"""
         finished = [
-            r for r in self._runs.values() if r.status in ("completed", "failed")
+            r for r in self._runs.values() if r.status in SUBAGENT_FINISHED_STATUSES
         ]
         overflow = len(finished) - self.MAX_FINISHED_RUNS
         if overflow <= 0:
@@ -552,7 +607,7 @@ class SwarmManager:
         stream: bool,
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
-        run.status = "running"
+        run.status = SUBAGENT_RUNNING
         await self._broadcast(
             run,
             "subagent_started",
@@ -599,23 +654,47 @@ class SwarmManager:
             # stream=True（2026-09-10 蜂群超时排查）：非流式的读超时是"整段
             # 生成总窗口"，思考型子 agent 生成整份报告超窗即 ReadTimeout；
             # 流式按字节间隙计且静默看门狗/小窗实时流（SUBAGENT_CHUNK）全部依赖它
-            response = await agent.chat(
-                run.task,
-                stream=True,
-                session_id=run.member_session_id,
-                metadata=spawn_metadata,
-            )
+            #
+            # K 条根修：流式把"整段总窗口"交给了调用方，而 `multi_model_client` 的
+            # 静默看门狗**只留 WARNING 不中止**——上游停滞死流时这条 run 永久停在
+            # running，既逐不出去也永远占着派生槽。故在此加一条与工具层同源的总闸。
+            budget = self._effectiveRuntimeBudget()
+            try:
+                response = await asyncio.wait_for(
+                    agent.chat(
+                        run.task,
+                        stream=True,
+                        session_id=run.member_session_id,
+                        metadata=spawn_metadata,
+                    ),
+                    timeout=budget,
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"subagent_timeout（运行窗口 {budget:g}s 内未返回，已放弃这条子任务；"
+                    f"尺度来自工具层 spawn_subagent 超时，可用 {SUBAGENT_BUDGET_ENV} 调整）"
+                ) from None
             report = self._extract_text(response)
             # P3：非流式遗留路径 LLM 失败不抛异常而是返回 "[LLM Error] ..." 文本
             # ——不得当正常报告标 completed（流式路径失败走异常分支天然 failed）
             if report.startswith("[LLM Error]"):
                 raise RuntimeError(report)
             run.report = report
-            run.status = "completed"
+            run.status = SUBAGENT_COMPLETED
             run.finished_at = time.time()
+        except asyncio.CancelledError:
+            # 取消不是「没发生」：`CancelledError` 继承 `BaseException`，改前那一条
+            # `except Exception` 抓不到它——run 就永久停在 running，槽位被占死（K 条）。
+            # 现写终态、释放槽位，然后**照常上抛**：吞掉取消既是教义第 2 条的禁物，
+            # 也会让 asyncio 的取消语义失真（外层以为没被取消）。
+            run.status = SUBAGENT_FAILED
+            run.error = ("subagent_cancelled（父任务被取消，子任务未跑完；"
+                         "派生槽已释放，可直接重派）")
+            run.finished_at = time.time()
+            raise
         except Exception as e:  # noqa: BLE001 - 子 Agent 故障隔离
             logger.warning("Swarm: 子 Agent %s 执行失败: %s", run.subagent_id, e)
-            run.status = "failed"
+            run.status = SUBAGENT_FAILED
             run.error = str(e)
             run.finished_at = time.time()
         finally:
@@ -702,7 +781,7 @@ class SwarmManager:
 
     def _archive_to_pool(self, initiator_agent: Optional[Any], run: SubAgentRun) -> None:
         """双通道之池归档：子 Agent 报告进入发起者的上下文池（活水，按需召回）"""
-        if initiator_agent is None or run.status != "completed" or not run.report:
+        if initiator_agent is None or run.status != SUBAGENT_COMPLETED or not run.report:
             return
         try:
             from neurova.context_pool import ContextInput, ContextSource
