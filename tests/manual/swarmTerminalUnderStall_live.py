@@ -47,7 +47,6 @@ from tests.manual._liveVerifyIsolation import isolatedDataRoot
 DATA_ROOT = isolatedDataRoot()
 REPO_DATA_DIR = PROJECT_ROOT / "data"
 BUDGET_ENV = "NEUROVA_SWARM_SUBAGENT_BUDGET_SEC"
-os.environ[BUDGET_ENV] = os.environ.get(BUDGET_ENV, "0.3")
 
 
 def fingerprintDataDir():
@@ -93,6 +92,9 @@ async def main_async() -> int:
     )
     from neurova.agent.tool_coordinator import get_tool_timeout
 
+    # 兜底必须在函数体内：写在模块顶层会被 tests/manual 的只降不升棘轮拦下
+    # （顶层改 env 在被显式点名时 import 即污染整个跑测进程），同族形态见 swarmLedgerSurface_live.py
+    os.environ.setdefault(BUDGET_ENV, "0.3")
     failures: list[str] = []
     before, nBefore = fingerprintDataDir()
     swarm = get_swarm_manager()
