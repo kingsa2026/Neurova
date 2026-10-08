@@ -184,6 +184,30 @@ describe('StudioProjectPage', () => {
     expect(args[1].characters).toEqual([{ name: '林凡', id: 'c1' }])
   })
 
+  it('镜头面读出 title 与注入后的成品提示词（injected_prompt 有读者）', async () => {
+    // §6-89：`injected_prompt` 由首帧生成时写进行（services.py 唯一写点），改前全仓零读者
+    // ——@角色注入后到底喂给模型什么，事后一行都回看不了；`title` 同形（拆解写入，镜头卡只渲染 description）。
+    getEpisodeMock.mockResolvedValue({
+      code: 0,
+      data: {
+        episode: DETAIL.episodes[0],
+        storyboards: [{
+          ...SHOT, title: '雨夜对峙', image_prompt: 'man enters',
+          injected_prompt: '林凡（青年男，黑色风衣）推门而入，冷色调',
+        }],
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.switchPhase('workbench')
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('雨夜对峙')
+    expect(text).toContain('林凡（青年男，黑色风衣）推门而入，冷色调')
+    expect(text).toContain('实际注入提示词')
+  })
+
   it('单镜重试 stage=image 走 retryStoryboard', async () => {
     const wrapper = mountPage()
     await flushPromises()

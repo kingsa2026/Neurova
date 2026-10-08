@@ -3686,6 +3686,7 @@ studio: {
   replaceEndFrame: 'Reemplazar fotograma final',
   endFrameNote: 'Solo se aplica en canales con interpolación primer/último fotograma (Seedance/VEO); en el WAN predeterminado se registra como ignorado',
   imagePrompt: 'Prompt de imagen',
+  injectedPrompt: 'Prompt inyectado',
   mentionHint: "escribe {'@'} para personajes",
   videoPrompt: 'Prompt de video',
   camera: 'Plano',
