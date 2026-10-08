@@ -117,6 +117,7 @@ def render_skill_catalog(
     max_lines: int = 30,
     user_input: str = "",
     trust_lookup: Optional[Callable[[str], Optional[str]]] = None,
+    on_present: Optional[Callable[[str], None]] = None,
 ) -> str:
     """技能清单渲染。
 
@@ -127,12 +128,14 @@ def render_skill_catalog(
       技能仅在**传入 user_input 时**过滤（常驻目录调用 user_input="" →
       字节稳定，尊重 build_context "system 会话内恒定"设计；工具面侧按
       真实轮次输入做 paths 门）
+    - on_present：对每个**进入目录文本**的技能名回调一次（呈现漏斗记账用；
+      None 不记，被 max_lines 裁掉的不记——没进 prompt 就不算呈现）
     """
     skills = getattr(registry, "skills", None) or {}
     if not skills:
         return ""
 
-    lines: List[str] = []
+    lines: List[tuple] = []
     hidden = 0
     for name, s in skills.items():
         cfg = getattr(s, "config", None)
@@ -147,7 +150,7 @@ def render_skill_catalog(
         # P0-2 消费面：进化产物未晋升前对模型软标注
         if trust_lookup is not None and trust_lookup(name) == "provisional":
             line += " (provisional)"
-        lines.append(line)
+        lines.append((name, line))
 
     total = len(lines)
     if total == 0:
@@ -155,8 +158,12 @@ def render_skill_catalog(
     if total > max_lines:
         hidden = total - max_lines
         lines = lines[:max_lines]
+    # 呈现记账：只对**真进了目录文本**的技能上报——被 max_lines 裁掉的没进 prompt
+    if on_present is not None:
+        for name, _line in lines:
+            on_present(name)
 
-    text = "\n".join(lines)
+    text = "\n".join(line for _name, line in lines)
     if hidden:
         text += f"\n（还有 {hidden} 个技能未列出，可用 $技能名 显式调用）"
     if len(text) <= max_chars:

@@ -2673,6 +2673,22 @@ class ContextOrchestrator:
         try:
             from neurova.skills.skill_injection import render_skill_catalog
 
+            def _onPresent(name: str, view=None) -> None:
+                """目录渲染回调：只记呈现账，故障不得改变目录输出。
+
+                账本归轮次技能漏斗单源（turn_context），此处只是写入方之一；
+                呈现与派发的归因在 post-chat flush（compute_skill_funnel_update）。
+                """
+                try:
+                    from neurova.core.turn_context import recordTurnSkillPresentation
+
+                    pool, owner = ("agent", "")
+                    if view is not None:
+                        pool, owner = view.provenance_for(name)
+                    recordTurnSkillPresentation(name, pool=pool, owner_key=owner)
+                except Exception:  # noqa: BLE001 - 记账故障不影响 prompt 装配
+                    pass
+
             budget = int(getattr(self.config, "skill_catalog_budget_chars", 8000) or 8000)
 
             # Wave H-W2：轮级可见视图在场 → 目录源 = 三库合并视图（trust 软
@@ -2686,7 +2702,8 @@ class ContextOrchestrator:
                 _view = None
             if _view is not None:
                 catalog = render_skill_catalog(
-                    _view.registry_view(), max_chars=budget, trust_lookup=_view.trust_for
+                    _view.registry_view(), max_chars=budget, trust_lookup=_view.trust_for,
+                    on_present=lambda n: _onPresent(n, _view),
                 )
                 if catalog:
                     return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
@@ -2709,7 +2726,8 @@ class ContextOrchestrator:
                 _trust = None
 
             catalog = render_skill_catalog(
-                self.skill_registry, max_chars=budget, trust_lookup=_trust
+                self.skill_registry, max_chars=budget, trust_lookup=_trust,
+                on_present=_onPresent,
             )
             if catalog:
                 return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
