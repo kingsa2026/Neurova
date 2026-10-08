@@ -212,8 +212,9 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
                           provider=str(b.get("provider") or "wan"),
                           model=str(b.get("model") or ""),
                           provider_id=str(b.get("provider_id") or ""),
-                          resolution=str(b.get("resolution") or "1080p"),
-                          duration=int(b.get("duration") or 5),
+                          # 缺省即不重述：兜底口径只在 services 一处（§6-78 G 条）
+                          resolution=str(b.get("resolution") or ""),
+                          duration=b.get("duration"),
                           owner_user_id=_uid(current_user)))
 
 

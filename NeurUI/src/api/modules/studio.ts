@@ -100,6 +100,8 @@ export interface StudioStoryboard {
   injected_prompt: string
   video_path: string
   video_status: string
+  /** 这条镜头实际用哪档规格提交的留痕；单镜重试不传规格时由服务端读回它（§6-78 G 条） */
+  video_resolution: string
   ledger_task_id: string
   subtitle_path: string
   audio_path: string
