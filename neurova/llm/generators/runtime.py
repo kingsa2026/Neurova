@@ -213,6 +213,10 @@ async def persist_media(
 ) -> str:
     """结果 URL 临时有效 → 立即下载本地化（data/generations/）。
 
+    空回包（0 字节）**不落盘、不返回路径**：这里落的是全仓唯一的产物落盘点，
+    一旦把空件当成功交回去，上游（Studio 镜头面、REST 台账、恢复循环、PDF 图块）
+    就一律记成"有产物"，而文件永远打不开。
+
     out_dir=None 时落到模块级 GENERATION_OUTPUT_DIR；端点包装层传入自身模块全局
     （tests/api/test_generation_security.py 的 monkeypatch 契约保持）。
     """
@@ -228,22 +232,25 @@ async def persist_media(
         header, _, payload = url_or_data.partition(",")
         ext = "png" if "image" in header else ("mp4" if "video" in header else "bin")
         path = out_dir_path / f"{safe_name}_{index}.{ext}"
-        path.write_bytes(_b64.b64decode(payload))
-        return str(path)
-    # P1-7：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建端点），
-    # 下载前必须过全局出网校验，防 SSRF 打内网/云元数据。
-    from neurova.security.governance import check_outbound_url
+        content = _b64.b64decode(payload)
+    else:
+        # P1-7：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建端点），
+        # 下载前必须过全局出网校验，防 SSRF 打内网/云元数据。
+        from neurova.security.governance import check_outbound_url
 
-    check_outbound_url(url_or_data)
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-        async with session.get(url_or_data) as resp:
-            if resp.status >= 400:
-                raise RuntimeError(f"产物下载失败 HTTP {resp.status}")
-            content_type = resp.headers.get("content-type", "")
-            ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-                   "video/mp4": "mp4"}.get(content_type.split(";")[0], "bin")
-            path = out_dir_path / f"{safe_name}_{index}.{ext}"
-            path.write_bytes(await resp.read())
+        check_outbound_url(url_or_data)
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+            async with session.get(url_or_data) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"产物下载失败 HTTP {resp.status}")
+                content_type = resp.headers.get("content-type", "")
+                ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+                       "video/mp4": "mp4"}.get(content_type.split(";")[0], "bin")
+                path = out_dir_path / f"{safe_name}_{index}.{ext}"
+                content = await resp.read()
+    if not content:
+        raise RuntimeError(f"产物为空（0 字节），不落盘：{str(url_or_data)[:120]}")
+    path.write_bytes(content)
     return str(path)
 
 

@@ -297,7 +297,8 @@ async def update_storyboard(sid: str, body: Dict[str, Any] = Body(...),
     fields = {k: v for k, v in body.items() if k in (
         "title", "description", "image_prompt", "video_prompt", "narration",
         "camera", "movement", "atmosphere", "bgm_prompt", "sound_effect",
-        "duration", "characters", "props", "first_frame_path", "end_frame_path")}
+        "duration", "characters", "props", "scene_id",
+        "first_frame_path", "end_frame_path")}
     store.update_storyboard(sid, fields)
     return {"code": 0, "data": {"storyboard": store.get_storyboard(sid)}}
 

@@ -2,7 +2,7 @@
 """R3：aigc_studio（创作专区后端域）核心契约。
 
 仅功能对齐，实现全部自研）
-- store：9 表 SQLite（WAL）+ 属主隔离（deny 与不存在同构 404 语义由 API 层做）；
+- store：8 表 SQLite（WAL）+ 属主隔离（deny 与不存在同构 404 语义由 API 层做）；
 - llm.extract_json：LLM 输出的稳健 JSON 抽取（对象/数组、坏输出返回 None 不炸）；
 - services：分集拆解→资产抽取（去重）→分镜→批量首帧（@角色参考图 + 风格/画幅
   项目锁注入）→i2v 提交（账本 batch_key 关联，恢复循环收口）→合并（FFmpeg
@@ -254,7 +254,12 @@ class TestVideoSubmit:
         monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
         p = _project(store)
         ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
-        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp"})
+        frame = tmp_path / "f.png"
+        frame.write_bytes(b"F")
+        # 首帧在盘是本用例的前置（C1 后缺首帧不提交，i2v 不再静默退化），
+        # 判据仍是「全默认不选模型」这条路的路由结果。
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp",
+                                        "first_frame_path": str(frame)})
         await services.generate_shot_videos(store, p["id"], ep["id"])  # 全默认不选模型
         hint, model, pid = seen["args"]
         assert pid == "prov-seed" and model == "seedance-2-0"
@@ -606,7 +611,11 @@ class TestModelRouting:
         monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
         p = _project(store)
         ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
-        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp"})
+        frame = tmp_path / "f.png"
+        frame.write_bytes(b"F")
+        # 首帧在盘是 C1 后的提交前置；本用例判据是 auto 路由不可得时的 hint 回落。
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp",
+                                        "first_frame_path": str(frame)})
         await services.generate_shot_videos(store, p["id"], ep["id"], provider="wan")
         assert seen["args"][0] == "wan"
         assert seen["args"][2] is None

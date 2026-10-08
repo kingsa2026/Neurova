@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """aigc_studio 存储层（R3）：SQLite WAL + 属主隔离。
 
-实现自研），按复用裁剪为 9 表
+实现自研），按复用裁剪为 8 表
 服务商配置复用 Neurova provider 管理、任务队列复用 task_ledger、
 关联关系（角色/道具 ↔ 集/分镜）以 JSON 数组列承载而非 link 表（本地单库形态）。
 """
@@ -74,11 +74,6 @@ CREATE TABLE IF NOT EXISTS storyboards(
   status TEXT DEFAULT 'pending', error TEXT DEFAULT '',
   created_at REAL, updated_at REAL
 );
-CREATE TABLE IF NOT EXISTS assets(
-  id TEXT PRIMARY KEY, project_id TEXT DEFAULT '', kind TEXT NOT NULL,
-  name TEXT DEFAULT '', ref_path TEXT DEFAULT '', meta_json TEXT DEFAULT '{}',
-  created_at REAL
-);
 CREATE TABLE IF NOT EXISTS merges(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, episode_id TEXT NOT NULL,
   mode TEXT DEFAULT '', status TEXT DEFAULT 'pending',
@@ -98,7 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_owner ON projects(owner_user_id);
 
 _TABLES = {
     "projects", "episodes", "characters", "scenes", "props",
-    "storyboards", "assets", "merges", "runs",
+    "storyboards", "merges", "runs",
 }
 
 # ── runs 状态词汇表（唯一出处）─────────────────────────────────────────
@@ -323,20 +318,7 @@ class StudioStore:
             row["props_json"] = json.dumps(row.pop("props") or [], ensure_ascii=False)
         self._update("storyboards", sid, row)
 
-    # ── assets 库 / merges / runs ───────────────────────────────────────
-
-    def add_asset(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        row = dict(data)
-        if "meta" in row:
-            row["meta_json"] = json.dumps(row.pop("meta") or {}, ensure_ascii=False)
-        return self._insert("assets", "ast", row)
-
-    def list_assets(self, pid: str = "") -> List[Dict[str, Any]]:
-        if pid:
-            return self._fetch_all(
-                "SELECT * FROM assets WHERE project_id=? OR project_id='' ORDER BY created_at DESC",
-                (pid,))
-        return self._fetch_all("SELECT * FROM assets ORDER BY created_at DESC")
+    # ── merges / runs ───────────────────────────────────────────────────
 
     def add_merge(self, data: Dict[str, Any]) -> Dict[str, Any]:
         row = dict(data)
