@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.auth_headers import overrideIdentity
 
 
 @pytest.fixture()
@@ -39,7 +40,7 @@ def authed_client(client):
     def fake_admin():
         return {"username": "admin", "role": "admin"}
 
-    client.app.dependency_overrides[get_current_user] = fake_admin
+    overrideIdentity(client.app, fake_admin)
     yield client
     client.app.dependency_overrides.clear()
 

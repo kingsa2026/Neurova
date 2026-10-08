@@ -18,6 +18,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_s18_0123456
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import console as console_module
+from tests.auth_headers import overrideIdentity
 
 MOCK_USER = {"user_id": "u1", "username": "user1", "role": "user", "neuser_id": "u1"}
 MOCK_ADMIN = {"user_id": "a1", "username": "admin1", "role": "admin", "neuser_id": "a1"}
@@ -39,7 +40,7 @@ def anon(app):
 @pytest.fixture()
 def user_client(app):
     with TestClient(app, raise_server_exceptions=False) as c:
-        app.dependency_overrides[get_current_user] = lambda: MOCK_USER
+        overrideIdentity(app, MOCK_USER)
         yield c
     app.dependency_overrides.clear()
 
@@ -47,7 +48,7 @@ def user_client(app):
 @pytest.fixture()
 def admin_client(app):
     with TestClient(app, raise_server_exceptions=False) as c:
-        app.dependency_overrides[get_current_user] = lambda: MOCK_ADMIN
+        overrideIdentity(app, MOCK_ADMIN)
         yield c
     app.dependency_overrides.clear()
 

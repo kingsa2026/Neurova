@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.endpoints import governance as gov_module
 from neurova.security import agent_limits_settings as limits_mod
+from tests.auth_headers import overrideIdentity
 
 
 @pytest.fixture
@@ -25,9 +26,9 @@ def client(monkeypatch, tmp_path):
 
     app = FastAPI()
     app.include_router(gov_module.router, prefix="/api/v1/governance")
-    app.dependency_overrides[get_current_user] = lambda: {
+    overrideIdentity(app, {
         "user_id": "admin1", "role": "admin",
-    }
+    })
     return TestClient(app)
 
 
