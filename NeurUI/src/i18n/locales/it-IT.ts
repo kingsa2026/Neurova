@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'Attività completata con anomalie: {detail}',
   runPartialFailed: '{n} fallite',
   runPartialBlocked: '{n} bloccate',
+  stopRun: 'Ferma attività',
+  runCancelled: 'Attività fermata',
+  runCancelQueued: 'Arresto richiesto: il passaggio corrente termina, poi nulla oltre',
   retryStarted: 'Riprova avviata',
 },
 

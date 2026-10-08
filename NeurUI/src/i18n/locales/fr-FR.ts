@@ -3706,6 +3706,9 @@ studio: {
   runPartial: 'Tâche terminée avec incidents : {detail}',
   runPartialFailed: '{n} en échec',
   runPartialBlocked: '{n} bloqués',
+  stopRun: 'Arrêter la tâche',
+  runCancelled: 'Tâche arrêtée',
+  runCancelQueued: 'Arrêt demandé : la phase en cours se termine, rien ne suit',
   retryStarted: 'Nouvelle tentative lancée',
 },
 

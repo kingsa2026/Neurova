@@ -80,6 +80,26 @@ def _aspect_token(aspect: str) -> str:
     return str(aspect or "9:16").split()[0]
 
 
+class RunCancelled(Exception):
+    """长任务在检查点读到「用户已叫停」。
+
+    用专用类型而不是复用 `CancelledError`：服务体内到处是隔离单镜失败的
+    `except Exception`（这是对的——一镜崩了不该掀掉整集），复用通用异常会被那些兜底
+    吃掉，"取消"就静默变成了"这一镜失败了"。wrapper 认得这个类型，落 `cancelled` 终态。
+    """
+
+
+def guardCancel(store, run_id: Optional[str]) -> None:
+    """可分片长任务的取消检查点：读到停止意图就抛 `RunCancelled`。
+
+    只在**分片边界**放（逐镜/逐资产/逐旁白循环体的开头）——一步生图几十秒，打断它既
+    不现实也不安全；但边界之后绝不许再开新的一镜，否则"停止"就成了摆设。
+    没有 run id（服务被单独复用：脚本、测试、别的入口）时直接放行，不查库。
+    """
+    if run_id and store and store.cancelRequested(run_id):
+        raise RunCancelled(f"run {run_id} 已被用户请求停止（剩余分片不再续跑）")
+
+
 # ── Phase 01：剧本拆解 ────────────────────────────────────────────────────
 
 
@@ -442,6 +462,7 @@ async def generate_shot_images(store, pid: str, eid: str,
     stats = {"done": 0, "failed": 0, "skipped_no_prompt": 0, "blocked_no_asset": 0}
     rid = run_id or store.add_run({"project_id": pid, "kind": "images"})["id"]
     for sb in store.list_storyboards(eid):
+        guardCancel(store, rid)
         if shot_ids and sb["id"] not in shot_ids:
             continue
         base_prompt = sb.get("image_prompt") or sb.get("description") or ""
@@ -530,6 +551,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
     stats = {"submitted": 0, "skipped": 0, "failed": 0, "blocked_no_frame": 0}
     rid = run_id or store.add_run({"project_id": pid, "kind": "videos"})["id"]
     for sb in store.list_storyboards(eid):
+        guardCancel(store, rid)
         if shot_ids and sb["id"] not in shot_ids:
             continue
         vprompt = (sb.get("video_prompt") or sb.get("description") or "").strip()
@@ -618,6 +640,7 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
     stats = {"done": 0, "failed": 0}
     rid = run_id or store.add_run({"project_id": pid, "kind": "asset_images"})["id"]
     for c in store.list_characters(pid):
+        guardCancel(store, rid)
         if ids and c["id"] not in ids:
             continue
         prompt = (c.get("final_prompt") or
@@ -655,6 +678,7 @@ async def synthesize_narration(store, pid: str, eid: str, voice: str = "default"
     stats = {"done": 0, "failed": 0, "skipped": 0}
     rid = run_id or store.add_run({"project_id": pid, "kind": "narration"})["id"]
     for sb in store.list_storyboards(eid):
+        guardCancel(store, rid)
         text = (sb.get("narration") or "").strip()
         if not text:
             stats["skipped"] += 1

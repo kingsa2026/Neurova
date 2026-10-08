@@ -9,11 +9,15 @@ const MAX_WAIT_MS = 10 * 60 * 1000
 
 /**
  * 终态集合：与生产侧写入点同源——`done`/`failed` 由 studio_api 的 wrapper 落
- * （`_spawn_run`），`done_with_fallback` 由 services 的抽取步落
- * （neurova/aigc_studio/services.py 的 `extract_assets`）。
- * 少认一个，前端就把一条已完成的任务一直 poll 到 10 分钟超时。
+ * （`_spawn_run`），`done_with_fallback` 由 services 的批量结算落（`_settleRun`），
+ * `cancelled` 由同一条 wrapper 在两条停止路径上收口（服务检查点的 `RunCancelled`
+ * 与 `Task.cancel()`）。少认一个，前端就把一条已完成/已按用户意思停掉的任务
+ * 一直 poll 到 10 分钟超时。
+ *
+ * 这份集合与 Python 侧 `RUN_TERMINAL_STATUSES` 的相等关系由判据双向钉住
+ * （tests/unit/api/test_studioRunStatusVocabulary.py）——前端拿不到后端常量。
  */
-const TERMINAL_STATUSES = new Set(['done', 'done_with_fallback', 'failed'])
+const TERMINAL_STATUSES = new Set(['done', 'done_with_fallback', 'failed', 'cancelled'])
 
 type Translate = (key: string, named?: Record<string, unknown>) => string
 

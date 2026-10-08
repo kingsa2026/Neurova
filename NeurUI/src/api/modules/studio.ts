@@ -169,6 +169,23 @@ export function deleteProject(pid: string) {
 
 export interface RunAccepted { run_id: string; status: string }
 
+/**
+ * 停止一条长任务的读数（取消四件套）。两个字段说的是不同的事，UI 必须分开显示：
+ * `cancel_requested` 是"意图已落库"，`tasks_cancelled` 是"本进程真打断了几个句柄"。
+ * 行挂着而句柄不在（服务重启过）时后者为 0——那不叫失败，剩下的收尾由服务检查点
+ * 或启动收敛完成；但界面不许据此宣称"已停止"。
+ */
+export interface RunCancelResult {
+  run_id: string
+  cancel_requested: boolean
+  tasks_cancelled: number
+  status: string
+}
+
+export function cancelStudioRun(rid: string) {
+  return api.post<ApiResponse<RunCancelResult>>(`${BASE}/runs/${rid}/cancel`)
+}
+
 export function runSplitScript(pid: string, content: string, model?: string) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/projects/${pid}/script`, { content, model })
 }

@@ -13,7 +13,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
-  addStoryboardManually, getEpisode, getProject,
+  addStoryboardManually, cancelStudioRun, getEpisode, getProject,
   runAssetImages, runExtract, runGenerateImages, runGenerateVideos,
   runNarration, runSplitScript, runStoryboards,
   retryStoryboard, updateAsset, updateEpisode, updateStoryboard,
@@ -73,19 +73,53 @@ async function loadDetail() {
   }
 }
 
+/** 在跑的长任务：kind → run_id。停止按钮取的就是这一格，收尾即摘。 */
+const activeRuns = ref<Record<string, string>>({})
+const stoppingRun = ref(false)
+const runningRunId = computed(() => Object.values(activeRuns.value)[0] ?? '')
+
 async function track(kind: string, runId: string) {
   busy.value = { ...busy.value, [kind]: true }
+  activeRuns.value = { ...activeRuns.value, [kind]: runId }
   try {
     const run = await waitStudioRun(pid, runId)
     if (!run) message.error(t('studio.runTimeout'))
     else if (run.status === 'failed') message.error(run.error || t('aigc.generateError'))
+    else if (run.status === 'cancelled') message.info(run.error || t('studio.runCancelled'))
     else if (run.status === 'done_with_fallback') {
       // 带病完成不能报「任务完成」：条数与成因由结算侧写进 detail_json，这里取用（§6-87）
       message.warning(t('studio.runPartial', { detail: describeRunOutcome(run, t) }))
     } else message.success(t('studio.runDone'))
   } finally {
     busy.value = { ...busy.value, [kind]: false }
+    const rest = { ...activeRuns.value }
+    delete rest[kind]
+    activeRuns.value = rest
     await loadDetail()
+  }
+}
+
+/**
+ * 停止当前长任务（取消四件套的前端那一件）。
+ *
+ * 两个读数分开播报：`tasks_cancelled > 0` 才是"本进程的句柄真被打断"；只有意图落库时
+ * （服务重启过、句柄不在）说"已停止"就是把没发生的事说成发生了，那条只报"已请求停止，
+ * 剩余步骤不再续跑"。后端点名过的原因（404 归属/不存在、409 已终态）必须透出，
+ * 只说"失败了"没法定位。
+ */
+async function cancelActiveRun() {
+  const runId = runningRunId.value
+  if (!runId || stoppingRun.value) return
+  stoppingRun.value = true
+  try {
+    const res: any = await cancelStudioRun(runId)
+    const data = res?.data ?? {}
+    if (Number(data.tasks_cancelled) > 0) message.success(t('studio.runCancelled'))
+    else message.info(t('studio.runCancelQueued'))
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || t('aigc.generateError'))
+  } finally {
+    stoppingRun.value = false
   }
 }
 
@@ -336,6 +370,7 @@ onUnmounted(() => {
 
 defineExpose({
   phase, detail, episodes, characters, storyboards, currentEid, busy,
+  activeRuns, runningRunId, stoppingRun, cancelActiveRun, track,
   novel, scriptModel, imgModel, vdModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
@@ -356,6 +391,11 @@ defineExpose({
         <a-tag>{{ detail.project.aspect_ratio }}</a-tag>
         <a-tag color="cyan">{{ detail.project.style }}</a-tag>
       </span>
+      <!-- 长任务的停止入口：只在有一条在跑时出现（条件是 activeRuns 非空，而不是 phase 匹配
+           ——拆解/批量出图/旁白任一步都要能停，按钮常驻但点了没用比看不见入口更糟）-->
+      <GlassButton v-if="runningRunId" size="sm" :loading="stoppingRun" @click="cancelActiveRun">
+        {{ t('studio.stopRun') }}
+      </GlassButton>
     </div>
 
     <div class="studio-body">
