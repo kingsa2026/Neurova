@@ -100,6 +100,11 @@ class EvolutionRunResult:
     anchor_no_skill: float = 0.0
     anchor_floor: float = 0.0
     anchor_evaluated: bool = False
+    # 例级不退化门（§8 前置 1）：本轮拦没拦、拦了哪几条、几条没量出来。
+    # 0.0/空在这里不是"没量"而是"量了且无事"——未量出的条目单独占一格。
+    caseRegressions: list[str] = field(default_factory=list)
+    unevidencedCases: list[str] = field(default_factory=list)
+    caseAllowance: int = 0
 
     @property
     def improvement(self) -> float:
@@ -157,6 +162,24 @@ class _DefaultAgent:
 
     async def run(self, *, skill_text: str, task_input: str) -> str:
         return skill_text
+
+
+def _caseRegressionReadout(caseScores: dict) -> tuple[list[str], list[str]]:
+    """留出例级读数 → (退化用例, 未量出用例)。
+
+    退化 = 两侧都量到了，且候选分严格低于基线分（差值过 _EPS）。
+    未量出 = 任一侧判分失败——这种条目**两个方向都不记账**：
+    把它算成退化是拿器械故障当质量结论，算成没退化是把没测到当通过。
+    """
+    regressions: list[str] = []
+    unevidenced: list[str] = []
+    for task, readout in (caseScores or {}).items():
+        if readout["baseline_failed"] or readout["candidate_failed"]:
+            unevidenced.append(task)
+            continue
+        if readout["candidate"] < readout["baseline"] - _EPS:
+            regressions.append(task)
+    return regressions, unevidenced
 
 
 class SkillEvolutionRunner:
@@ -611,6 +634,22 @@ class SkillEvolutionRunner:
         if result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
             result.rejected = True
             result.reject_reason = "no_improvement"
+            result.deployed_text = baseline_text
+            await self._attach_heldout_evidence(result, dataset, artifact_type)
+            return result
+
+        # ── 判定 2.1:例级不退化门（§8 前置 1）──
+        # 均值的性质决定的：一条用例被改坏，可以被另一条的涨幅抵掉。这道门只看
+        # "有多少既有用例从可用变成了不可用"，与增益幅度无关。判分未量出的
+        # 单例两个方向都不记账（落 unevidencedCases），既不救它也不杀它。
+        caseRegressions, unevidencedCases = _caseRegressionReadout(
+            result.holdout_case_scores)
+        result.caseAllowance = max(0, int(self.config.case_regression_allowance))
+        result.caseRegressions = caseRegressions
+        result.unevidencedCases = unevidencedCases
+        if len(caseRegressions) > result.caseAllowance:
+            result.rejected = True
+            result.reject_reason = "case_regression"
             result.deployed_text = baseline_text
             await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
