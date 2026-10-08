@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -107,6 +107,10 @@ class EvolutionProposal:
     heldout_after: float = 0.0
     heldout_improvement: float = 0.0
     iterations_run: int = 0
+    # 例级不退化门读数（§8 前置 1）：容忍度内的退化照样出提案，但审批人必须
+    # 看见"均值涨了而这条用例被改坏了"。形状只由 runner 侧 caseGateReadout()
+    # 定义一处，此处只搬运不另算。
+    case_gate: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -294,6 +298,7 @@ class SkillEvolutionService:
                 heldout_after=round(result.heldout_after, 4),
                 heldout_improvement=round(result.heldout_improvement, 4),
                 iterations_run=result.iterations_run,
+                case_gate=result.caseGateReadout(),
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
