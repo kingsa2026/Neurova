@@ -1742,3 +1742,14 @@ tests/unit/api/test_chatHistorySingleSource.py
 # 必须照常 200（收紧不许把正主挡在门外）；`/connections` 那条必须**先往生产表挂一条
 # 真连接**——`_ws_connections` 为空时"没泄露"是恒真的假绿。逐文件单跑 15 passed
 tests/unit/sync/test_sessionSyncRestOwnershipGate.py
+
+# P3-14 G3（台账 §6-72 第六格：`AgentRunStore.stats()` 零调用方）——`/console/tasks`
+# 的 `run_ledger` 读数。播种走真状态机（intake/claim/park），判据咬两格：字段在不在、
+# running/queued/parked 三档计数对不对。刻意不并 terminal：把 parked 折进终态就把
+# "等人续跑"说成"已结束"。逐文件单跑 2 passed
+tests/unit/api/test_consoleRunLedgerReadout.py
+# P3-14 G4（台账 §6-72 第五格：`GET /console/chat/runs` 无读侧）——前端续跑入口认的
+# 是字面量 `'parked'` 与 `run_id`/`park_reason` 三个键。后端改名或少投一个字段不会报错，
+# 只会让按钮静默不再出现（本仓反复登记的假绿形态）。变异自证：把 `PARKED_STATUS`
+# 临时改成 `"halted"` 即 2 failed。逐文件单跑 3 passed
+tests/unit/api/test_agentRunStatusVocabularyParity.py
