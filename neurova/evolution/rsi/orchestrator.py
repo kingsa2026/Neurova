@@ -1184,6 +1184,8 @@ class RSIOrchestrator:
                 - rollback_history: 真实回滚留痕（工单 004 的数据源）
                 - experience_channel: 改进回流通道判据（工单 016：待审队列有界，
                   溢出丢了改进必须看得见，不得静默）
+                - presentation_funnel: 呈现→派发漏斗三态读数（§8 前置 3 的读侧；
+                  技能进了 prompt 却没被点名，必须在这一格看得见）
                 - metrics: 规范指标 + 告警 + 经验族视图
         """
         convergence = self.convergence_analyzer.analyze_convergence()
@@ -1214,6 +1216,9 @@ class RSIOrchestrator:
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
             "experience_channel": experience_channel,
+            # 呈现漏斗读数（§8 前置 3 的读侧）：写侧在技能目录渲染 →
+            # 轮次账本 → manifest 漏斗；只写不读是 AGENTS.md §2 点名的断点。
+            "presentation_funnel": _readPresentationFunnel(self.agent_id),
             "metrics": self.metrics.get_dashboard_data(),
             # 能力缺口读数（T-03 的读侧）：写侧在 `agent/capability_gap` →
             # `agent/gap_metric_channel`，读侧在此 —— 只写不读是断点
@@ -1286,6 +1291,28 @@ def parameter_host_classes() -> Dict[str, type]:
     except Exception as e:  # noqa: BLE001
         logger.debug("context 宿主类不可导入: %s", e)
     return hosts
+
+
+def _readPresentationFunnel(agent_id: str) -> Dict[str, Any]:
+    """呈现→派发漏斗读数（§8 前置 3 的读侧；只搬运读数，判据不在此处另算一套）。
+
+    取数走 `SkillService.get_skill_usage` 这一份规范读数口（它已携带
+    presentations），不直读 manifest usage——同一格不得有第二个取数口。
+    函数级 import：让"读侧未接线"退化为空读数而不是 ImportError。
+    """
+    from neurova.evolution.skill_experience import presentationFunnelVerdict
+
+    try:
+        from neurova.skills.skill_service import SkillService
+
+        service = SkillService(agent_id=agent_id)
+        rows = [
+            service.get_skill_usage(skill_id)
+            for skill_id, _info in service.iter_skills()
+        ]
+    except Exception as e:  # noqa: BLE001 - 读数不可用如实落 unevidenced，不折叠成 0
+        return GateVerdict.unevidenced(f"呈现漏斗读数不可用: {e}").to_dict()
+    return presentationFunnelVerdict(rows).to_dict()
 
 
 def _readRewardGuardMetrics() -> Dict[str, Any]:
