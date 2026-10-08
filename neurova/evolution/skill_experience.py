@@ -591,6 +591,39 @@ class SkillExperienceStore(PersistedStateMixin):
             )
 
 
+# ────── 呈现漏斗判据（§8 前置 3 的读侧）──────
+
+
+def presentationFunnelVerdict(usageRows: Optional[List[Dict[str, Any]]]) -> GateVerdict:
+    """呈现→派发漏斗判据。三态不是布尔：没量到不许报"没压力"。
+
+    - `unevidenced`：累计呈现为 0 —— 技能目录未注入、或账本刚上线还没跑出读数，
+      这既不是"没问题"也不是"有问题"；
+    - `failed`：有呈现而零派发 —— 技能进了 prompt 却没人点名，漏斗在第一节就断；
+    - `passed`：呈现与派发都有读数。
+
+    输入是各技能的规范漏斗读数（含 presentations/selections 两键），由调用方取数
+    注入——本函数不碰存储、不取数，保持可单测；转化率按读数即时算，
+    不在落盘面预置一个没人读的派生率。
+    """
+    rows = usageRows or []
+    presentations = sum(int(r.get("presentations", 0) or 0) for r in rows)
+    selections = sum(int(r.get("selections", 0) or 0) for r in rows)
+    if presentations == 0:
+        return GateVerdict.unevidenced(
+            "无呈现读数（技能目录未注入，或账本尚未记录呈现）"
+        )
+    evidence = {"presentations": presentations, "selections": selections,
+                "skills": len(rows)}
+    if selections == 0:
+        return GateVerdict.failed(
+            f"呈现 {presentations} 次而派发 0 次——漏斗在第一节就断", evidence=evidence
+        )
+    return GateVerdict.passed(
+        f"呈现 {presentations} 次、派发 {selections} 次", evidence=evidence
+    )
+
+
 # ────── 维护入口（post_chat RSI 步每轮调用）──────
 
 
