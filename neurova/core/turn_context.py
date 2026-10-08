@@ -469,11 +469,16 @@ def record_turn_skill_funnel(
     ok: bool,
     pool: str = "agent",
     owner_key: str = "",
+    stage: str = "dispatch",
 ) -> None:
     """记一条本轮技能派发：applied=是否真正进入执行，ok=执行是否成功。
 
     Wave H-W1 三层库：pool/owner_key 记录命中的副本所在库（agent 库默认，
-    与既有调用零差异），flush 据此路由回写各库账本。"""
+    与既有调用零差异），flush 据此路由回写各库账本。
+
+    `stage` 区分同一本账里的两类条目：`dispatch`（执行咽喉记的派发）与
+    `presented`（技能目录记的呈现）。二者判据不同——呈现条目只说明"进了
+    prompt"，不得冒领 selection（那要求模型真的点名了）。"""
     _skill_funnel_ledger().append(
         {
             "skill_id": skill_id,
@@ -481,7 +486,25 @@ def record_turn_skill_funnel(
             "ok": bool(ok),
             "pool": str(pool or "agent"),
             "owner_key": str(owner_key or ""),
+            "stage": str(stage or "dispatch"),
         }
+    )
+
+
+def recordTurnSkillPresentation(
+    skill_id: str, pool: str = "agent", owner_key: str = ""
+) -> None:
+    """记一条本轮技能呈现：技能行进进了 prompt 技能目录即算，与是否被派发无关。
+
+    轮级去重——目录段由 `build_context` 与 `build_system_prompt` 两条路径共用
+    同一个单源 helper，逐次累加会把一轮读成两轮。"""
+    ledger = _skill_funnel_ledger()
+    for item in ledger:
+        if item.get("stage") == "presented" and item.get("skill_id") == skill_id:
+            return
+    record_turn_skill_funnel(
+        skill_id, applied=False, ok=False, pool=pool, owner_key=owner_key,
+        stage="presented",
     )
 
 
@@ -600,6 +623,7 @@ __all__ = [
     "append_turn_tool_messages",
     "get_turn_tool_messages_snapshot",
     "record_turn_skill_funnel",
+    "recordTurnSkillPresentation",
     "get_turn_skill_funnel",
     "set_turn_skill_view",
     "reset_turn_skill_view",
