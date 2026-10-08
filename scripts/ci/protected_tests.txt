@@ -1804,3 +1804,10 @@ tests/unit/agent/test_roundUsageShapeSingleSource.py
 # 这 6 档是修法 A 的"搬过来"证据：删掉 `toAnthropicMessages` 的任一分支都落到行为断言上，
 # 不会退化成 ImportError。逐文件单跑 14 passed
 tests/unit/llm/test_anthropic_native_client.py
+
+# H2-1a 补链（§6-78 A/C）：视频收口不许再依赖"有人来 GET 投影"。判据三件事——
+# 服务端驱动器在**零 HTTP 请求**下把镜头行从 running 收敛成 done（含悬空账本诚实
+# 落 failed）；映射只在 `aigc_studio/video_reconcile.py` 一处（**按 import 归属判**，
+# 第一版按字面量计数被证伪为假红，因为提交侧本就有权写 running）；lifespan 成对挂点
+# 存在且没顶掉 D 批那条租约扫描钩子。逐文件单跑 8 passed
+tests/unit/aigc_studio/test_videoReconcileNeedsNoReader.py
