@@ -10,6 +10,11 @@
 数据流：tool_executor.execute_skill_tool 写轮次账本（turn_context ContextVar，
 P0-B1 并发契约）→ PostChatPipeline 回合收尾读账本+任务完成口径 → SkillService
 record_skill_funnel 写穿 manifest usage（与 C11 use_count 同层，不替代）。
+
+账本条目的 `stage` 键区分两类来源：`dispatch`（执行咽喉记的派发，本文件的
+既有判据全部作用在它身上）与 `presented`（技能目录记的呈现，判据见
+`tests/unit/evolution/test_funnelPresentationAccounting.py`）。**无 `stage` 键的
+历史条目必须仍按派发计**——那是本文件多条裸 dict 用例守的向后兼容面。
 """
 
 import json
@@ -166,8 +171,10 @@ def test_turn_funnel_record_and_snapshot():
     turn_context.record_turn_skill_funnel("s1", applied=True, ok=False)
     snap = turn_context.get_turn_skill_funnel()
     assert snap == [
-        {"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""},
-        {"skill_id": "s1", "applied": True, "ok": False, "pool": "agent", "owner_key": ""},
+        {"skill_id": "s1", "applied": True, "ok": True, "pool": "agent",
+         "owner_key": "", "stage": "dispatch"},
+        {"skill_id": "s1", "applied": True, "ok": False, "pool": "agent",
+         "owner_key": "", "stage": "dispatch"},
     ]
     # 快照是副本，改不污染
     snap.clear()
@@ -232,7 +239,8 @@ async def test_execute_skill_records_applied_success():
     assert result.get("success") is True
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": True, "pool": "agent", "owner_key": ""}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": True,
+                        "pool": "agent", "owner_key": "", "stage": "dispatch"}]
 
 
 @pytest.mark.asyncio
@@ -251,7 +259,8 @@ async def test_execute_skill_records_applied_failure():
     await executor.execute_skill_tool("deploy_helper", {})
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False, "pool": "agent", "owner_key": ""}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False,
+                        "pool": "agent", "owner_key": "", "stage": "dispatch"}]
 
 
 @pytest.mark.asyncio
@@ -270,7 +279,8 @@ async def test_execute_skill_records_selection_without_apply():
     assert "error" in result
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": False, "ok": False, "pool": "agent", "owner_key": ""}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": False, "ok": False,
+                        "pool": "agent", "owner_key": "", "stage": "dispatch"}]
 
 
 @pytest.mark.asyncio
@@ -289,7 +299,8 @@ async def test_execute_skill_exception_records_applied_failure():
     await executor.execute_skill_tool("deploy_helper", {})
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False, "pool": "agent", "owner_key": ""}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False,
+                        "pool": "agent", "owner_key": "", "stage": "dispatch"}]
 
 
 @pytest.mark.asyncio
