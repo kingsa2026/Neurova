@@ -1927,8 +1927,10 @@ tests/unit/test_zeroByteResidueGuard.py
 tests/unit/aigc_studio/test_retiredShotColumns.py
 
 # 制片导出改真后台 run（`6c6b9cbd`，§6-94）：导出与其余长任务同源收口的常驻面
-# ① 阻塞段不许回到循环里：concat/BGM 混音/字幕烧录三级与 `resolve_ffmpeg_path` 的
-#    `-version` 探测都须在 `asyncio.to_thread` 下跑。判据取"协程心跳有没有推进"这个
+# ① 阻塞段不许回到循环里：concat/BGM 混音/字幕烧录三级都须在 `asyncio.to_thread` 下跑
+#    （`46c0f99e` 更正此处原述：`resolve_ffmpeg_path()` 不做子进程探测，只有 stat +
+#     `shutil.which`，实测 0.02–0.1ms，那一发 offload 已撤；跑 `-version` 的是
+#     `_verify_binary`，其 offload 见下面 §6-99 那格）。判据取"协程心跳有没有推进"这个
 #    行为数，不测字符串存在；并先断言阻塞替身被调用（清单降级支路不碰 FFmpeg，
 #    没进被测分支时心跳读数不作数——这是防"空集即绿"那一格）；
 # ② 导出自结算自己那一行：`done` / `done_with_fallback`（降级或带 warning 须点名成因）
@@ -1939,7 +1941,7 @@ tests/unit/aigc_studio/test_retiredShotColumns.py
 # 逐文件单跑两次同读数 8 passed（`6c6b9cbd` 落库之后复取）
 tests/unit/aigc_studio/test_mergeAsBackgroundRun.py
 
-# 协程内裸调阻塞子进程·同根余格（`46c0f99e`，§6-98）：两枚行为判据 + 一枚形态棘轮
+# 协程内裸调阻塞子进程·同根余格（`46c0f99e`，§6-99）：两枚行为判据 + 一枚形态棘轮
 # 行为面（形态守卫看不见的正是这一类）：
 # ① `neurflow/drama_nodes.py` 的 compose 节点——concat 收进同步段后经 `to_thread` 跑，
 #    判据取"协程心跳推进数"，并先断言子进程替身被调用（走降级支路时心跳读数不作数）；
