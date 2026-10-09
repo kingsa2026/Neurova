@@ -2179,7 +2179,7 @@ tests/unit/core/test_config_manager.py
 tests/unit/core/test_config_manager_comprehensive.py
 tests/unit/core/test_config_manager_persistence.py
 
-# 台账格号唯一性守卫：一天之内撞号七次之后，把"现取现用"钉成一条红（`cd7722d`，§6-126 的副作用面）
+# 台账格号唯一性守卫：一天之内撞号七次之后，把"现取现用"钉成一条红（`cd7e722d`，§6-126 的副作用面）
 # 要守的是**同号双格**（共享工作树里多会话同日追加同一份台账，号次靠人脑记 max+1）：
 # 两个读者各自引用同一号却读到不同内容，后来人无从发现——比错号更难查。
 # 三条都可失败：格号唯一 / 扫描面下限 100 格（防"正则或路径变了、扫到半空所以永远绿"）/
