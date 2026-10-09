@@ -33,6 +33,7 @@ class VerificationType(Enum):
     LOGIN = "login"  # 登录验证码
     CHANGE_EMAIL = "change_email"  # 更改邮箱验证码
     TWO_FACTOR = "two_factor"  # 两步验证
+    BIND_CHANNEL = "bind_channel"  # 渠道身份绑定（工单 2026-10-10 ②：码只接这一套，不另造）
 
 
 @dataclass
