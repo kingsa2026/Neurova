@@ -2065,3 +2065,17 @@ tests/unit/voice/test_voiceEngineBridgeRetired.py
 # 两格是反空转装置：启动格必须真读到 WARN / 真读到"无分叉"，因为整段巡检被 fail-open
 # 吞掉时表现就是"什么都没报"，只断"没有 WARN"会空转绿。
 tests/unit/knowledge/test_projectionHonesty.py
+
+# A9 memory_layer 换代残留退役四件 + 两件未裁留下（`494f7fa6`，§6-113）
+# 复算改了两处旧述：A9 点名六件实为 1850 行（非 ≈2460）；六件的**生产与测试消费者都是 0**，
+# 删下来带不走任何覆盖。本批删 `search_mixin`(346，六个检索入口全硬返 `[]`)、
+# `dream_mixin`(257，现役在 `sleep.py:205` + REST `api/endpoints/sleep.py`)、
+# `explainability_storage_mixin`(294，现役走 `manager.py:4006 → modules/explainability_module.py`)、
+# `modules/storage_module`(206，"未注入即 warning + 返 None"的静默失败门面)。
+# 两件按需人裁**留在案上**，并被一格**反向存在断言**钉住：`relation_mixin`(400) 的
+# graph_density/most_connected 与 `forgetting_recovery_storage_mixin`(347) 的 30 天清理 +
+# recovery_rate 统计全仓唯一，台账写的"已有替代"一处语义不等价（relation_module 只到
+# depth-1 且按复合键去重）、一处指错文件（forgetting_recovery_module 是间隔复习）——
+# **替代存在 ≠ 替代等价**，未裁不许顺手删，要删先改这条判据（改判据必改台账，即留痕）。
+# 逐文件单跑两次同读数 6 passed（`494f7fa6` 落库之后复取）
+tests/unit/cognitive_layers/test_memoryLayerGenerationResidue.py

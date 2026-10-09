@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""A9 memory_layer 换代残留：四件已退役，两件按需人裁留在案上（§6-110；§9 序 5 复算）。
+"""A9 memory_layer 换代残留：四件已退役，两件按需人裁留在案上（§6-113；§9 序 5 复算）。
 
 台账原判（§3-A9）「`memory_layer/` 换代残留 ≈2460 行，判定：删」。本轮复算改了两处：
 ① **体量不对**——A9 点名的六个文件实为 1850 行，凑到 2460 得把未点名的 `explainability.py`(646)
@@ -113,7 +113,7 @@ def test_pendingRulingsAreStillUnruled():
     """需人裁的两件：仍在位（未裁不许删）且仍零消费者（不许偷偷接线后再裁）。
 
     这是一格**反向存在断言**——与"防再生"相反，它防的是"裁决还没下，代码先没了"。
-    裁下来之后要动这条判据，就得同时改台账 §6-110：那笔改动本身就是留痕。
+    裁下来之后要动这条判据，就得同时改台账 §6-113：那笔改动本身就是留痕。
     """
     still_there = [rel for rel in PENDING.values() if (LAYER / rel).is_file()]
     assert sorted(still_there) == sorted(PENDING.values()), (
