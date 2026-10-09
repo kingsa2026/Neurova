@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""§6-110 活体验证：投影只铺权威接纳的东西，rebuild 真的按权威换新。
+"""§6-114 活体验证：投影只铺权威接纳的东西，rebuild 真的按权威换新。
 
 两段，各证一件事：
 
@@ -37,11 +37,16 @@ def _record(name, value):
 
 def _readRealLibrary() -> dict:
     """A 段：只读。连库用 mode=ro，绝不让 sqlite 顺手把文件建出来。"""
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+    from neurova.core.data_root import dataPath
     from neurova.cognitive_layers.knowledge_graph.manager import KnowledgeGraphManager
     from neurova.knowledge.graph_bridge import projectionDrift
 
-    db = Path("data/knowledge/knowledge_facts.db")
-    graphDir = Path("agent_workspaces/default/knowledge_graph")
+    # 落点一律走单源解析器：`core/data_root.py` 与 `core/agent_workspaces.py`。
+    # 脚本自己拼第二份 `data/knowledge/...`，读的就可能不是生产那张库（守卫：
+    # `tests/unit/ci/test_manual_live_verify_contract.py::testManualScriptsDoNotReplicateDataRootLayout`）。
+    db = Path(dataPath("knowledge", "knowledge_facts.db"))
+    graphDir = get_agent_workspaces_root() / "default" / "knowledge_graph"
     if not db.exists() or not graphDir.exists():
         return {"available": False}
     conn = sqlite3.connect("file:%s?mode=ro" % db.resolve().as_posix(), uri=True)
