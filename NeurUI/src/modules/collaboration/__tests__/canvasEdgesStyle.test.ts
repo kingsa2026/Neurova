@@ -10,10 +10,15 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+// 行尾归一后再做文本比对：本仓在 Windows 上以 CRLF 检出（git 的 core.autocrlf），
+// 而下面那枚锚点写的是 `'</div>\n\n        <!-- 缩放控制栏'`——LF 字面量在 CRLF 的
+// 工作树里永远 indexOf 不到，于是这一格在 Linux 绿、在 Windows 恒红，红的却不是
+// 画布结构（判据绑了机器形态，与台账 §6-96 那条同一族，只是这里绑的是行尾）。
+// 该格要守的是"悬浮层在 transform 容器之外"这一**次序**，与行尾字节无关。
 const vueSrc = readFileSync(
   resolve(process.cwd(), 'src/modules/collaboration/CanvasDesignerPage.vue'),
   'utf-8',
-)
+).replace(/\r\n/g, '\n')
 
 describe('canvas-edges overflow contract', () => {
   it('.canvas-edges 规则必须声明 overflow: visible', () => {
