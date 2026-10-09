@@ -1971,3 +1971,9 @@ tests/unit/ci/test_asyncBlockingSubprocessRatchet.py
 # ⑦ 边界回归：§6-78 D 条那半（没得救时诚实 `failed`，不写 done + 空路径）不许漂。
 # 逐文件单跑两次同读数 9 passed（`2f815f2a` 落库之后复取）
 tests/unit/aigc_studio/test_salvageRemoteArtifactBeforePayingAgain.py
+
+# 批次 K2（§6-100）：条目擦除必须逐面取不回正文——?purge=true 曾只删条目行，
+# 权威事实/断言正文/活动信封/向量分片/投影 description 五处副本仍在，且端点不读
+# 返回值就报"已删除"。判据两类：副本取不回（行为），以及断言链与 statement_hash
+# 原样保留 + 巡检仍绿（拦"顺手硬删断言行"那种改法）。
+tests/unit/knowledge/test_entry_erasure_faces.py
