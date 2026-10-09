@@ -2090,3 +2090,25 @@ tests/unit/cognitive_layers/test_memoryLayerGenerationResidue.py
 # 以为这套能力在线。判据里含一格 404 校准与一格 sys.modules 装载断言，防"仪器坏了"式假绿。
 # 逐文件单跑两次同读数 6 passed（`e78bf45b` 落库之后复取）
 tests/unit/shared_core/test_sharedCoreOrchestratorRetired.py
+
+# 投影必须是权威的派生物，不是模型输出的副本（`e073e76c`，§6-114）
+# 抽取侧的建边循环此前完全不看权威：未登记的谓词类型在图上落成 relation="custom" 的边，
+# 与真事实同形、而检索链永远读不到它——§6-106 在真库量到的 orphan_relations 52 就是这么来的。
+# 四格各守一跳：无据边不进图、有据边必须进图、有据节点不许被"过修"顺手摘掉、
+# rebuild 按权威摘净存量并报 pruned_edges/pruned_nodes（不报数的清理等于"看起来什么都没发生"）。
+# 判"点据"的口径写在判据里（点看权威主体，不看是否参与关系）——这一改是对 §6-106 那句
+# "33 个无据节点"的自我更正；口径若再动会同时打红 test_graph_types_as_data 四格，
+# 那五格是既有判据把过修拦住的实证，别当回归改回去。
+# 逐文件单跑两次同读数 4 passed（4.83s/5.21s，`e073e76c` 落库之后复取）
+tests/unit/knowledge/test_projectionFollowsAuthority.py
+
+# 运行时会话注册表的隔离：进过 app lifespan 的用例不许把 agents 留在进程全局里（`8dd01728`，§6-118）
+# `api/app.py` startup 经 set_app_state 写 `neurova.api.endpoints._app_state`，关停不回收。
+# 生产无所谓，测试会话里它就是跨用例的隐形分支：下游自建 FastAPI app 的用例在
+# `knowledge_ingestion._resolve_runtime_agents` 处读到上一个用例的运行时 agent，
+# 实测咬红三格（导入路由改去取 get_knowledge_repository 撞存储围栏⇒500；检索改走真 agent
+# 的空数据面⇒results 为空）。修复放目录级 conftest 的快照/复原，不在受害者侧加判空。
+# 两格按源码顺序跑：第一格证"漏的来源真实存在"（否则第二格只是没人写过所以没人还），
+# 第二格证夹具真的还了——把 conftest.py 挪出目录即翻红。
+# 逐文件单跑两次同读数 2 passed（8.66s/9.19s，`8dd01728` 落库之后复取）
+tests/unit/knowledge/test_appStateIsolation.py
