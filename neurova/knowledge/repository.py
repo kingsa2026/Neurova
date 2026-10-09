@@ -1126,26 +1126,163 @@ class KnowledgeRepository:
                     return True
         return False
 
-    def purge_knowledge(self, agent_id: str, knowledge_id: str) -> bool:
-        """物理删除（显式清除通道：违规内容清理等）。墓碑与正文一并清除。"""
+    def purge_knowledge(self, agent_id: str, knowledge_id: str,
+                        reason: str = "") -> Dict[str, Any]:
+        """条目擦除喉：让一个条目在所有存储面留下的正文都取不回来（批次 K2 / 断点 N2）。
+
+        原先这里只清条目行与墓碑再回一个 bool，而 `?purge=true` 对外承诺的是
+        "物理删除整条（清除违规内容的显式通道）"（`knowledge_core.py:418`）。同一条
+        内容的正文其实还留在五处：权威事实行的 `content`/`object_term`、断言的
+        `statement_text`、活动信封的 `inputs_json`、向量分片里的 `content[:2000]`、
+        投影节点的 `description`。端点又不读那个 bool，于是"只删了一处"被报成
+        "已删除"。现在逐面动作、逐面回执，回执五态见 `foundation/erasure.py`。
+
+        次序是**副本先清、条目行后删**：条目行是唯一还能把这件事重试一遍的入口
+        （`find_item` 查得到才谈得上再擦一次），先删条目再删副本，中途失败就只剩下
+        一个无人认领也无人能再认领的残局。
+
+        软删不走这里——`delete_knowledge` 的语义是"下架但保住属主数据"，
+        正文留在账上是**有意**的，别拿擦除冒充它。
+        """
+        faces: Dict[str, Any] = dict(self._eraseAuthorityCopies(knowledge_id, reason))
+
+        def _blocked() -> bool:
+            return any(str(f.get("state")) == "failed" for f in faces.values())
+
+        for face, action in (("vectors", lambda: self._eraseVectorCopy(knowledge_id)),
+                             ("projection", lambda: self._eraseProjectionCopy(knowledge_id)),
+                             ("entry", lambda: self._eraseEntryRow(agent_id, knowledge_id,
+                                                                    reason))):
+            faces[face] = ({"state": "not_attempted", "count": 0,
+                            "detail": "前面有面失败，本轮不推进"}
+                           if _blocked() else action())
+        complete = not _blocked()
+        if not complete:
+            logger.error("条目擦除未完成 %s：%s", knowledge_id,
+                         {k: v.get("state") for k, v in faces.items()
+                          if v.get("state") in ("failed", "not_attempted")})
+        return {"knowledge_id": knowledge_id, "faces": faces,
+                "complete": complete, "reason": reason}
+
+    def _eraseAuthorityCopies(self, knowledgeId: str, reason: str) -> Dict[str, Any]:
+        """权威库那一侧交棒给擦除喉——DELETE 只许有那一份实现。"""
+        from neurova.knowledge.foundation.erasure import EntryErasure
+
+        names = ("facts", "assertions", "derivations", "conflicts", "subjects", "activities")
+        store = KnowledgeFactStore(self._narrative_db_path)
+        try:
+            return EntryErasure(store).eraseEntry(knowledgeId, reason=reason)
+        except Exception as e:  # noqa: BLE001 - 擦除失败必须点名，不能折成"删好了"
+            logger.error("权威库条目擦除失败 %s: %s", knowledgeId, e)
+            return {n: {"state": "failed", "count": 0, "detail": str(e)} for n in names}
+        finally:
+            store.close()
+
+    def _eraseVectorCopy(self, knowledgeId: str) -> Dict[str, Any]:
+        try:
+            from neurova.knowledge.vector_index import get_knowledge_vector_index
+
+            index = get_knowledge_vector_index()
+        except Exception as e:  # noqa: BLE001 - 引擎没配起来是"这一面无副本可删"，不是失败
+            return {"state": "unavailable", "count": 0, "detail": str(e)}
+        try:
+            dropped = index.dropEntry(knowledgeId)
+        except Exception as e:  # noqa: BLE001
+            return {"state": "failed", "count": 0, "detail": str(e)}
+        if not dropped.get("records"):
+            return {"state": "absent", "count": 0, "files": dropped.get("files", 0)}
+        return {"state": "erased", "count": dropped["records"],
+                "files": dropped.get("files", 0)}
+
+    def _eraseProjectionCopy(self, knowledgeId: str) -> Dict[str, Any]:
+        """投影节点的正文副本：独认领的连节点带边删掉，被别人也在用的只摘 description。
+
+        只摘不删是因为 `label` 是身份消解后共享的实体名——另一个条目还在用它，
+        删节点会把别人的图画出一个洞。共享节点留下的 `label` 要在回执里说清（
+        `shared_kept`），别让"投影已擦"被读成"投影里一个字都不剩"。
+        """
+        try:
+            from neurova.cognitive_layers.knowledge_graph.manager import (
+                get_knowledge_graph_manager,
+            )
+
+            manager = get_knowledge_graph_manager()
+        except Exception as e:  # noqa: BLE001
+            return {"state": "unavailable", "count": 0, "detail": str(e)}
+        with self._lock:
+            claimedByOthers = self._nodeIdsClaimedByOthers(knowledgeId)
+            # `find_item` 回的是 (agent_id, item) 两元组——当 dict 用会一路 AttributeError
+            found = self.find_item(knowledgeId)
+            claimed = set(str(n) for n in ((found[1].get("graph_node_ids") or [])
+                                           if found else []))
+        candidates = set(manager.nodesForSourceKnowledge(knowledgeId)) | claimed
+        deleted = scrubbed = 0
+        for nodeId in candidates:
+            node = manager.get_node(nodeId)
+            if node is None:
+                continue
+            if nodeId in claimedByOthers:
+                props = dict(node.properties or {})
+                if "description" not in props:
+                    continue
+                props.pop("description")
+                manager.update_node(nodeId, properties=props)
+                scrubbed += 1
+                continue
+            if manager.delete_node(nodeId):
+                deleted += 1
+        if not (deleted or scrubbed):
+            return {"state": "absent", "count": 0}
+        state = "erased" if deleted else "redacted"
+        return {"state": state, "count": deleted + scrubbed,
+                "nodes_deleted": deleted, "shared_kept": scrubbed}
+
+    def _nodeIdsClaimedByOthers(self, knowledgeId: str) -> set:
+        """除本条目外，仍在被其它条目认领的投影节点 id。调用方须持 `self._lock`。"""
+        claimed: set = set()
+        for items in self._items.values():
+            for it in items:
+                if str(it.get("knowledge_id", "")) == knowledgeId:
+                    continue
+                claimed |= {str(n) for n in (it.get("graph_node_ids") or [])}
+        return claimed
+
+    def _pruneEntryConflicts(self, knowledgeId: str) -> int:
+        """同值冲突账本里不许挂着已擦除条目的 id——挂着就是"待审项指向空气"。"""
+        dropped = 0
+        for conflict_id in [cid for cid, rec in self._conflicts.items()
+                            if knowledgeId in (str(rec.get("old_id", "")),
+                                               str(rec.get("new_id", "")))]:
+            del self._conflicts[conflict_id]
+            dropped += 1
+        if dropped:
+            self._save_conflicts()
+        return dropped
+
+    def _eraseEntryRow(self, agent_id: str, knowledge_id: str,
+                       reason: str) -> Dict[str, Any]:
+        """条目层与墓碑：叙述行经 `_save()` 落到 `knowledge_narratives`，正文唯一副本在此。"""
         with self._lock:
             items = self._items.get(agent_id, [])
             for idx, item in enumerate(items):
                 if item.get("knowledge_id") == knowledge_id:
                     del items[idx]
                     self._tombstones.pop(knowledge_id, None)
+                    pruned = self._pruneEntryConflicts(knowledge_id)
                     # 条目与墓碑都没了，治理行必须跟着退场——否则它成为"活着却无人认领"
                     self._syncEntryGovernance()
                     self._save()
                     self._save_tombstones()
                     self._record_index_op("remove", knowledge_id)
-                    return True
-        # 不在主存储也可能躺在墓碑里（已被软删过）
-        if knowledge_id in self._tombstones:
-            del self._tombstones[knowledge_id]
-            self._save_tombstones()
-            return True
-        return False
+                    return {"state": "erased", "count": 1, "conflicts_pruned": pruned}
+            if knowledge_id in self._tombstones:
+                del self._tombstones[knowledge_id]
+                pruned = self._pruneEntryConflicts(knowledge_id)
+                self._save_tombstones()
+                return {"state": "erased", "count": 1, "from": "tombstone",
+                        "conflicts_pruned": pruned}
+            return {"state": "absent", "count": 0,
+                    "conflicts_pruned": self._pruneEntryConflicts(knowledge_id)}
 
     def restore_knowledge(self, knowledge_id: str) -> bool:
         """从墓碑复活条目（普通复活不带 supersede 链）。活着/不存在返回 False。"""

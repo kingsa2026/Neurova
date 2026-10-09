@@ -154,6 +154,17 @@ _SCHEMA_V5 = """
 ALTER TABLE knowledge_facts ADD COLUMN record_kind TEXT NOT NULL DEFAULT 'triple';
 """
 
+# 批次 K2（断点 N2）：条目被物理清除时，断言行不能跟着删——它是审计链上的一跳，
+# 删行会让 `seq` 出空洞、`ActivityDigestChain.verify` 判"链被削过"，巡检面从此常红。
+# 所以擦除的落点是**正文置空 + 这一栏打标记**：摘要吃 `statement_hash` 不吃
+# `statement_text`，改写正文不动任何一跳。"曾是链上跳"与"现在还在主张"是两件事，
+# 置信度按独立来源数聚合，必须只数后者——来源数里留一条已经不存在的说法，
+# 等于让死者替活人抬轿。
+_SCHEMA_V13 = """
+ALTER TABLE knowledge_assertions ADD COLUMN erased_at TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_assertion_erased ON knowledge_assertions(erased_at, fact_id);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -493,7 +504,7 @@ class KnowledgeFactStore:
         是判定结论，不能被"后来多了一条断言"这种输入变化抹掉。
         """
         fact = self.fact(factId)
-        verdict = _AGGREGATOR.aggregate(fact, self.assertions(factId))
+        verdict = _AGGREGATOR.aggregate(fact, self.liveAssertions(factId))
         evidenceState = verdict["evidence_state"] if fact.get("evidence_state") == "unevidenced" \
             else None
         self.setConfidence(factId, verdict["confidence"], evidenceState)
@@ -760,6 +771,20 @@ class KnowledgeFactStore:
             rows = self._conn.execute(
                 "SELECT * FROM knowledge_assertions WHERE fact_id = ?"
                 " ORDER BY asserted_at, assertion_id",
+                (factId,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def liveAssertions(self, factId: str) -> List[Dict[str, Any]]:
+        """只回仍在主张这行的断言——已擦除的那跳留在链上，但不再是一个来源。
+
+        与 `assertions()` 分开，是因为两批读者要的是不同的东西：溯源面必须看得见
+        "谁曾经主张过"（擦除不是遗忘的借口），而置信度聚合数的是"现在有几路在说"。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM knowledge_assertions WHERE fact_id = ?"
+                " AND erased_at = '' ORDER BY asserted_at, assertion_id",
                 (factId,),
             ).fetchall()
         return [dict(row) for row in rows]
