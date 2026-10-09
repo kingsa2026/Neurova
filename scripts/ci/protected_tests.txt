@@ -2021,3 +2021,14 @@ tests/unit/test_codelessModuleGuard.py
 # 反证三格（整路哑掉必红 / 基线自比必拒 / 无基线必回 unevidenced 而非 pass）、
 # 跑门不许碰生产知识库目录。
 tests/unit/knowledge/test_retrievalGateFloor.py
+
+# 第二座上下文缓存退役防再生（`54cc8ba2`，§6-107）：§9 序 4 复算改判的常驻面
+# 改判理由（原登 §6-104"需人裁：唯一实装"，复算后不成立）：现役已有同职实装——
+# `context_pool.py:1469-1485`（键 `isolation_key:model`，`_cache_version` 失效）＋
+# `orchestrator.py:903-937` 折叠摘要缓存槽；跨重启持久化归 `eviction_ledger_db.py`
+# （SQLite WAL+FTS5、`context_ledger` v1/v2/v3）。且这座**默认参数下构造即 TypeError**
+# （`context_cache.py:138` 少传必填 `data_dir`，而 `:139` 只捕 ImportError）。
+# 判据按**被导入的名字**判而不是按文件位置判（防换目录复活）；反向对照钉住现役池缓存
+# 与 §6-51 那座注入器 `_cache` 仍在——本批删的是第二座，不许顺手把唯一实装带走。
+# 逐文件单跑两次同读数 5 passed（`54cc8ba2` 落库之后复取）
+tests/unit/context/test_secondCacheFaceRetired.py
