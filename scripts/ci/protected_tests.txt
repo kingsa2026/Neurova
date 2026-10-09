@@ -2178,3 +2178,26 @@ tests/unit/core/test_config.py
 tests/unit/core/test_config_manager.py
 tests/unit/core/test_config_manager_comprehensive.py
 tests/unit/core/test_config_manager_persistence.py
+
+# 台账格号唯一性守卫：一天之内撞号七次之后，把"现取现用"钉成一条红（`cd7722d`，§6-126 的副作用面）
+# 要守的是**同号双格**（共享工作树里多会话同日追加同一份台账，号次靠人脑记 max+1）：
+# 两个读者各自引用同一号却读到不同内容，后来人无从发现——比错号更难查。
+# 三条都可失败：格号唯一 / 扫描面下限 100 格（防"正则或路径变了、扫到半空所以永远绿"）/
+# 反空转对照（重复必须被点名、正常文本不误报）。
+# 逐文件单跑两次同读数 4 passed（2.16s/1.69s）
+tests/unit/ci/test_auditLedgerNumbering.py
+
+# memory_layer 的 torch 依赖防回归：按 2026-10-10 实况改对的那三条（`8702f2be`，§6-52 闭环、§6-126）
+# 原三条里两条随 `memory_field.py` 退役（`0c333a76`）而失效，且形态不同：一条红（前提已死）、
+# 一条**恒绿**（符号缺失本来就抛 AttributeError，与 torch 无关 ⇒ 不可能失败）。
+# 恒绿比红更坏——它让人以为 H1 仍被守。现行三条都可失败：运行时不拉 torch /
+# 退役面不许复活（反向存在断言）/ 包内静态零 `import torch`（含函数内惰性写法）。
+# 逐文件单跑两次同读数 4 passed（1.98s/2.02s）
+tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py
+
+# 记忆读路径的替身必须跟得上端点契约（`77f4ec60`，§6-55 闭环）
+# 两格红的根因是替身落后：端点读 `manager.get_memory(...)`（真身 `memory_manager.py:1788`），
+# 替身没有 ⇒ 落进 `except Exception` ⇒ 404 壳里装 500 的话。登记进常驻面，
+# 是为了"契约再演进时，替身没跟上要当场红"，而不是等下一轮跑整目录才发现。
+# 逐文件单跑两次同读数 12 passed（2.31s/2.28s）
+tests/test_api/test_memory_route_shadowing.py
