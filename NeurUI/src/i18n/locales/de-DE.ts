@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n} blockiert',
   stopRun: 'Aufgabe stoppen',
   stopRunN: '{n} laufende Aufgaben stoppen',
-  runCancelled: 'Aufgabe gestoppt',
-  runCancelQueued: 'Stopp angefordert: der aktuelle Schritt wird beendet, dann nichts weiter',
+  runCancelled: 'Aufgabe gestoppt (die aktuelle Aufnahme läuft beim Anbieter weiter; Ergebnisse können eintreffen)',
+  runCancelQueued: 'Stopp angefordert: der aktuelle Schritt wird beendet, dann nichts weiter (beim Anbieter eingereichte Aufgaben werden nicht zurückgerufen)',
   retryStarted: 'Wiederholung gestartet',
 },
 

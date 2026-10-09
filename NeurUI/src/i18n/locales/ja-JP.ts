@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n} 件ブロック',
   stopRun: 'タスクを停止',
   stopRunN: '実行中のタスク {n} 件を停止',
-  runCancelled: 'タスクを停止しました',
-  runCancelQueued: '停止を依頼済み：現在のステップ完了後は続行しません',
+  runCancelled: 'タスクを停止しました（現在のショットは先方で走り切り、成果物が戻ることがあります）',
+  runCancelQueued: '停止を依頼済み：現在のステップ完了後は続行しません（先方に送信済みのタスクは取り消せません）',
   retryStarted: '再試行を開始',
 },
 
