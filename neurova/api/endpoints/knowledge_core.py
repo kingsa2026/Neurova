@@ -264,6 +264,42 @@ async def get_foundation_integrity(
     return ActivityDigestChain(get_knowledge_fact_store()).verify()
 
 
+@router.post("/foundation/expiry")
+async def run_foundation_expiry(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """把已到期的事实推进为 `expired`，并撤销以它们为前提的推导结论（批次 K1 / 断点 N1）。
+
+    为什么要有这个端点而不是让 `expireDueFacts()` 继续等着：底座的生命周期注释写着
+    "状态是唯一权威……到期靠显式调用推进，不起后台线程"，而那句"显式调用"在全仓
+    没有落点——于是它下面那段"前提到期⇒撤销其推导"的级联运行期不可达。读侧另有
+    `searchableFacts` 的时钟兜底，直接检索看不出问题，漏的是派生面：由带窗口前提推出的
+    结论行不带窗口（推导器不填 `validUntil`），永远进不了到期候选。
+
+    与 `/foundation/integrity` 同族，但那条只读、这一条**会写**：整库状态迁移不是租户级
+    动作，所以只有管理员能按。这里给 403 而不是 404 同构——不存在"别人的资源"，
+    只存在"普通人不该有这个开关"，装作没有反而让人以为试错姿势不对。
+
+    幂等：只推进 `status='active'` 且已过 `valid_until` 的行，第二次跑回 0；
+    重复跑不重复写活动账，这是它敢被启动路径调一次的前提。
+    """
+    from neurova.api.endpoints.knowledge_common import get_request_id
+
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="到期收敛是整库动作，仅管理员可触发")
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    expired = int(get_knowledge_fact_store().expireDueFacts())
+    return {
+        "code": 0,
+        "message": "Expired facts advanced: %d" % expired,
+        "data": {"expired": expired},
+        "request_id": get_request_id(request),
+    }
+
+
 @router.get("/facts/{fact_id}/lineage")
 async def get_fact_lineage(
     request: Request,
