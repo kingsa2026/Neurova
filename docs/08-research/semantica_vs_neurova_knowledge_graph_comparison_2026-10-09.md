@@ -439,17 +439,23 @@ AGE 1,343 三行即约 4,259 行是同职能的平行实现，按 §7 单看即�
 
 ---
 
-### N7 · 「写了要有人读」的第二半在真库一例都没有：注入账与采纳回执全零（🟡 登记，本文未定责）
+### N7 · 「写了要有人读」的第二半在真库一例都没有：注入账与采纳回执全零（✅ 2026-10-10 定责闭环 `ad22beae`/§6-124：注入接缝活着，采纳写面全仓零调用点）
 - 本仓事实（2026-10-10 只读复算，`mode=ro` 连库，401 条事实）：`injected_count` **401/401 为 0**、
   `adoption_outcome` 与 `latest_adoption_outcome` **401/401 为 NULL**；`usageMetrics`
   （`knowledge_facts.py:573-582`）因此报 `never_injected_share=1.0`、`outcome_written=0`。
-- 三个候选解释，本文**一个都没排除**，故只登记不下结论：
-  ① 这条检索路在生产今天没被走到——图检索分支默认**是开的**（`graph_walk.py:30-46`，
-  `NEUROVA_KB_GRAPH_RETRIEVER` 未设即 `enabled=True`），接入点在 `chat_pipeline.py:308-325`；
-  ② 走到了但每轮 `walkFromQuery` 零锚点（`graph_walk.py:76` 按「查询里提到的主体」起走，
-  问句与术语表不重叠就一条也不走）；③ 写点没生效——但 `GraphFactWalker.factStore` 属性确实存在
-  （`graph_walk.py:60-63`，注释明写就是为回写注入账留的），`_recordInjection`
-  （`graph_retriever_adapter.py:55-61`）拿得到库句柄，所以这一支只能在活体里判。
+- **定责已完成（2026-10-10，`ad22beae`/台账 §6-124；活体 `tests/manual/graphInjectionWritebackLive.py`）**，
+  结论是**这一句里混着两件不同的事**，必须拆开：
+  ① **注入账（图路）接缝是活的**——把真库整份拷进临时根后走真接缝：按锚点判据构造的问句出
+  8 hops、`GraphRetrieverAdapter.retrieve` 回 8 hits、落账 fact 数 0→8、`last_injected_at` 带时间戳；
+  两格反证（零锚点不涨、遮掉 `factStore` 不涨）证明数的就是那条写路径。
+  所以真库那个 0 只能由**"这条路没被走到"或"真问句撞不到链中段锚点"**解释——212 个主体标签全是
+  文档标题形态（平均 9.94 字），`hop>=2` 还要"既是别人客体、又是自己主体"的中段命中，撞上是偶发。
+  ② **采纳回执是真断点**——AST 复算 `neurova/` 全树，`recordAdoption` 的**生产调用点 = 0**：
+  列在、`usageMetrics.outcome_written` 在数、原语有单测，就是没人写 ⇒ `outcome_written=0` 是
+  **结构性必然**，不是"还没人采纳"。三条路（接：需新造"采纳"信号且与现有 skill/EKI 反馈语义不等价；
+  摘：把这一维如实标未接线，推荐先做；留：§2 点名的断点）**待人裁**，本批一律未动生产代码。
+  另记：注入写点共三处——图路默认开（`graph_retriever_adapter.py:47`），知识路两处在默认关的
+  `NEUROVA_KB_FACT_SURFACE` 闸后（`memory_retrieval_chain.py:381/395`，011 被推翻后关着，**有意**）。
 - 为什么单列：§2 断点条款管的是「只写不读」，而这一格是**读写面齐备、真库零样本**——比只写不读
   更隐蔽，因为只有去数一遍计数才会露馅。定责要一次活体（真 `create_app()` + 真 agent 回合 +
   一条能命中锚点的查询），看 hops 与 `recordInjection` 是否落账；那是另一批的工单，不属本文。
