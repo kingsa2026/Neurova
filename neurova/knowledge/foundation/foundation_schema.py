@@ -20,6 +20,7 @@ from .knowledge_facts import (
     _SCHEMA_V2,
     _SCHEMA_V3,
     _SCHEMA_V5,
+    _SCHEMA_V13,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -41,6 +42,8 @@ _STEPS: List[tuple] = [
     (11, _SCHEMA_V11),
     # v12：谓词值域可按类别声明（`range_kinds`）——`is_a` 的客体合法性随类型表增长自动跟随
     (12, _SCHEMA_V12),
+    # v13：条目擦除的落点（批次 K2）——断言行留在链上，正文置空并打 `erased_at` 标记
+    (13, _SCHEMA_V13),
 ]
 
 _registered = False
