@@ -47,6 +47,7 @@ vi.mock('@/api/modules/studio', () => ({
   mergeEpisode: vi.fn(),
   addStoryboardManually: vi.fn(),
   cancelStudioRun: vi.fn(),
+  getMerge: vi.fn(),
 }))
 vi.mock('ant-design-vue', () => ({
   // warning 是真 API 的一员（antd message 有 warning），补齐才不至于把"组件没调它"
@@ -59,7 +60,7 @@ import { message } from 'ant-design-vue'
 import { waitStudioRun } from '@/composables/useStudioRun'
 import {
   getProject, getEpisode, runSplitScript, retryStoryboard, updateStoryboard, mergeEpisode,
-  runGenerateImages, runGenerateVideos, runAssetImages, cancelStudioRun,
+  runGenerateImages, runGenerateVideos, runAssetImages, cancelStudioRun, getMerge,
 } from '@/api/modules/studio'
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
@@ -119,6 +120,7 @@ describe('StudioProjectPage', () => {
   const updateSbMock = updateStoryboard as unknown as ReturnType<typeof vi.fn>
   const mergeMock = mergeEpisode as unknown as ReturnType<typeof vi.fn>
   const cancelRunMock = cancelStudioRun as unknown as ReturnType<typeof vi.fn>
+  const getMergeMock = getMerge as unknown as ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -371,15 +373,21 @@ describe('StudioProjectPage', () => {
     expect(mergeMock).toHaveBeenCalledWith(expect.any(String), { bgm_path: 'uploads/bg.mp3' })
   })
 
-  it('Phase04 导出：成片 URL 与连播清单双形态', async () => {
-    mergeMock.mockResolvedValue({
-      code: 0,
-      data: {
-        ok: true, composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4',
+  it('Phase04 导出走后台 run：poll 终态后从 merges 行取明细，成片与连播双形态', async () => {
+    // §6-94：改前 `POST /merge` 同步返回整包结果，导出既进不了 runs 台账、也没有停止入口；
+    // 现在端点只回 run_id，状态与成因在 run 行的 detail_json，产物明细仍以 merges 表为唯一事实源。
+    mergeMock.mockResolvedValue({ code: 0, data: { run_id: 'run_m', status: 'started' } })
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'run_m', status: 'done', project_id: 'p1', kind: 'merge', error: '',
+      detail_json: JSON.stringify({
+        composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4',
+        merge_id: 'm1', subtitle_burned: false, bgm_mixed: false,
         // A5：诚实降级标注（无中文字体不假烧录，warning 原文上屏）
-        subtitle_burned: false, warning: '本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）',
-        merge: { id: 'm1' }, items: [],
-      },
+        fallback: '本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）',
+      }),
+    })
+    getMergeMock.mockResolvedValue({
+      code: 0, data: { merge: { id: 'm1', mode: 'ffmpeg_concat', items_json: '[]' } },
     })
     const wrapper = mountPage()
     await flushPromises()
@@ -387,15 +395,30 @@ describe('StudioProjectPage', () => {
     vm.switchPhase('export')
     await vm.doMerge()
     await flushPromises()
+    expect(waitStudioRun).toHaveBeenCalledWith('p1', 'run_m')
+    expect(getMergeMock).toHaveBeenCalledWith('m1')
     expect(vm.composedUrl).toBe('/api/v1/generation/files/m1.mp4')
     expect(wrapper.html()).toContain('access_token=tok')
     expect(wrapper.find('.studio-merge-warn').text()).toContain('中文字体')
 
-    mergeMock.mockResolvedValue({
+    // 连播清单形态：降级由 run 行说话，明细来自 merges 行
+    mergeMock.mockResolvedValue({ code: 0, data: { run_id: 'run_m2', status: 'started' } })
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'run_m2', status: 'done_with_fallback', project_id: 'p1', kind: 'merge', error: '',
+      detail_json: JSON.stringify({
+        composed: false, mode: 'slideshow_manifest', url: '', merge_id: 'm2',
+        fallback: '本机无 FFmpeg，输出连播清单',
+      }),
+    })
+    getMergeMock.mockResolvedValue({
       code: 0,
       data: {
-        ok: true, composed: false, mode: 'slideshow_manifest', merge: { id: 'm2' },
-        items: [{ index: 1, shot: 1, image: '/f/a.png', audio: '', video: '', text: '他回来了' }],
+        merge: {
+          id: 'm2', mode: 'slideshow_manifest',
+          items_json: JSON.stringify([{
+            index: 1, shot: 1, image: '/f/a.png', audio: '', video: '', text: '他回来了',
+          }]),
+        },
       },
     })
     await vm.doMerge()
