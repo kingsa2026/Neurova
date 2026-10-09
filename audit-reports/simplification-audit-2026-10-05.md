@@ -1331,6 +1331,12 @@
     - **红→绿→红自证→A/B→活体**：改指后红 `1 failed/39 passed`，红在 `test_load_logs_warning_not_error_on_corrupt_json`（`assert False where False = logger.warning.called`）——与 §6-119 预判的唯一非超集格子对上；绿灯 `45 passed`，连同既有 config 档并跑 `83 passed`。红自证＝保留新判据、只还原生产侧（`checkout HEAD -- config.py` ＋放回 `config_manager.py`）⇒ 四格翻红（`test_retiredFileIsGone`、`test_kvConfigManagerIsSingleSource`、`test_livePlanningFacesUntouched`、warning 那格）；还原后 `cp` 回快照，SHA256 `2d8ad18e…` 逐字节一致。A/B（HEAD 仓外 worktree 铺入本批五档；selection＝`tests/unit/core` ＋ `test_project_management` ＋ `test_security_integration`）：基线 **15 failed/2034 passed** ↔ 本树 **10 failed/2039 passed**，集合差**只有删除项、无新增**；其中 1 条基线独有红 `test_session_list_order.py::test_unsorted_sessions_newest_first` 在新建 worktree 红、本树绿，本批改动面碰不到会话排序，判为 fresh-worktree 数据态差异、**不认领为本批功劳**（§6-113 同族）。活体 `tests/manual/kvConfigMerge_live.py` 用**真 logging handler** 收 `LogRecord` 而不是 mock 断级别：落盘字节 `{'merged_key': 'merged_value', 'number': 42}`；反向对照（完好文件再 load 告警 0 条，否则"有 warning"可被任何杂记凑满）；损坏件 load ⇒ warning 1 条 "Config load degraded, keeping current values (…)"、error 0 条、内存 `keep_me` 未丢；写盘失败 ⇒ error 1 条（WinError 183）不崩；`create_app()` 真启动后 `/api/v1/health` ⇒ 200（改的是被 9 个生产文件读着的模块）。
     - **净 LOC**（`git diff HEAD --numstat` 实测后落字）：生产池 **−110** ＝ 简单版 0/118 ＋ `config.py` 10/2；判据池 +298/−185 ＝ 四档 17/23＋54/96＋34/27＋50/39 ＋ 新单源判据 143/0；活体池 +132/0；基建池 +16/0（五档入子集＝1 空行 + 10 行说明 + 5 条路径）。
     - **未闭、留在案上（不静默遗留）**：`config.py:445` 那句注释仍写"未来若接入统一配置管理器（ConfigManager）时只需修改此处"，而其下 `get/get_int/get_bool/get_list` 到今天是 `os.environ` 直读，生产 9 个文件用的就是这条 env 路。**合并 KV 实现 ≠ 把它接进这 9 处**——接线要动 9 个生产文件的取值口径，属新能力工作，本批不顺手做。分层版自身也仍是**零生产消费者**（`get_config_manager()` 零调用）：E-2 之后它从"两份里的一份"变成"唯一一份"，但"要不要真接进生产路"这个产品判断没有被本批回答；若日后裁"接"，本批那 39 格与单源判据可直接复用。
+    - **记账更正（第八次"先落字后取数"，这次落在自己的落地笔上）**：`625022d5` 正文写"文档池
+      +33/−5"，实测是 **+20/−5**（台账 18/3 ＋ 两份判据/活体文件各 1/1）。根因不是忘了取数，而是
+      **取数取在了旧 HEAD 上**——那次 `git diff --numstat` 量的是"我的文件 vs 让号之前的 HEAD"，
+      其中 12 行差异在他们 `9ab75441` 落库后已经不存在了。共享树上落字前的 numstat 必须在
+      `git checkout HEAD -- <该文件>` 之后重取一次，旧读数一律作废（与 §6-116 末格、`fe5155f4`
+      正文同族：那两处讲的是"放回快照后要再对账自己的行"，这处是"对账用的基线本身会移动"）。
 
 126. **本轮把三条 HEAD 常驻红销掉，并登记一处"把故障读成不存在"的异常折叠（✅ 销账 `77f4ec60`/`8702f2be` + 前端两道门复测；🟡 折叠那格待裁）** 🔴
 
