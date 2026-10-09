@@ -3707,6 +3707,7 @@ studio: {
   runPartialFailed: '{n} fehlgeschlagen',
   runPartialBlocked: '{n} blockiert',
   stopRun: 'Aufgabe stoppen',
+  stopRunN: '{n} laufende Aufgaben stoppen',
   runCancelled: 'Aufgabe gestoppt',
   runCancelQueued: 'Stopp angefordert: der aktuelle Schritt wird beendet, dann nichts weiter',
   retryStarted: 'Wiederholung gestartet',

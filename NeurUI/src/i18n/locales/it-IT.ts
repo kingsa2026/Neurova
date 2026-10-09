@@ -3707,6 +3707,7 @@ studio: {
   runPartialFailed: '{n} fallite',
   runPartialBlocked: '{n} bloccate',
   stopRun: 'Ferma attività',
+  stopRunN: 'Ferma {n} attività in corso',
   runCancelled: 'Attività fermata',
   runCancelQueued: 'Arresto richiesto: il passaggio corrente termina, poi nulla oltre',
   retryStarted: 'Riprova avviata',
