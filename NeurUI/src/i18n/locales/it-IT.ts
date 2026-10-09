@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n} bloccate',
   stopRun: 'Ferma attività',
   stopRunN: 'Ferma {n} attività in corso',
-  runCancelled: 'Attività fermata',
-  runCancelQueued: 'Arresto richiesto: il passaggio corrente termina, poi nulla oltre',
+  runCancelled: 'Attività fermata (la ripresa corrente continua dal provider; i risultati possono arrivare)',
+  runCancelQueued: 'Arresto richiesto: il passaggio corrente termina, poi nulla oltre (le attività già inviate al provider non vengono richiamate)',
   retryStarted: 'Riprova avviata',
 },
 

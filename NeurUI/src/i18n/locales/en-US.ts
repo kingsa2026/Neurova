@@ -3711,8 +3711,8 @@ studio: {
   runPartialBlocked: '{n} blocked',
   stopRun: 'Stop task',
   stopRunN: 'Stop {n} running tasks',
-  runCancelled: 'Task stopped',
-  runCancelQueued: 'Stop requested: the current step finishes, then nothing further',
+  runCancelled: 'Task stopped (the current shot still finishes remotely; results may come back)',
+  runCancelQueued: 'Stop requested: the current step finishes, then nothing further (tasks already submitted remotely are not recalled)',
   retryStarted: 'Retry task started',
 },
 

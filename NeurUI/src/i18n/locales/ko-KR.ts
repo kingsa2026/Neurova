@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n}개 차단됨',
   stopRun: '작업 중지',
   stopRunN: '실행 중인 작업 {n}개 중지',
-  runCancelled: '작업이 중지됨',
-  runCancelQueued: '중지 요청됨: 현재 단계만 마무리되고 계속되지 않음',
+  runCancelled: '작업이 중지됨 (현재 샷은 제공자 측에서 계속 실되며 결과가 돌아올 수 있음)',
+  runCancelQueued: '중지 요청됨: 현재 단계만 마무리되고 계속되지 않음 (제공자에게 제출된 작업은 회수되지 않음)',
   retryStarted: '재시도 시작',
 },
 
