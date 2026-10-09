@@ -1049,6 +1049,39 @@
     - **净 LOC**：生产池 **+135/−22 净 113**（`graph_bridge.py +55/−1`、`manager.py +49/−21`、`app.py +23`、`knowledge_graph_api.py +8`）；测试/活体池 **+370/−0 净 370**（判据 221 + 活体 149）。为正的理由：三条都是"此前无人能读到的状态"要变成读数，无老实现可退役；唯一删除项就是那段 `except Exception: logger.error` 本身。
     - **未覆盖面**：① rebuild 不清无据节点（如上，需另裁）；② 启动巡检只在真开机时跑一次，长驻进程期间的漂移仍要靠按需 `authority-drift`；③ 备份件与 `%TEMP%` 里的 A/B worktree 未清，机器清理即失。
 
+110. **模块级遮蔽重名定义：写了两遍的函数，测试全绿、先写那份是死码（✅ 本批清两处，守卫入库 `tests/unit/ci/test_moduleTopLevelShadowing.py`）** —— 立"双臂试评"批时想把来源标注抽成辅助函数，脚本按 `def 名字` 定位锚点，抓到同文件里 `isRealAgentTrajectoryExecutor` **有两个定义**。
+
+    - **来历与形状**：前一份（`service.py:91`）是 Task 1 落第一版能力判据时写下的（读 `realAgentTrajectory` 旗标），后一份（`:141`）是随后改用"`agent_ref` + 显式声明"结构推导时**新插入的同名函数**——我当时的预期是"替换"，实际是**并存**。Python 的顶层重名是后定义覆盖前定义，`import` 拿到的是后者，于是：测试全绿、行为正是想要的，而前一份连同它独占的判定口径静静躺在文件里，读代码的人会以为这里有两条规则。**这类死码不会被任何现有门禁抓到**（尺寸棘轮管行数、覆盖率管被执行、`pyflakes` 类工具默认不报顶层重名）。
+    - **同一次全仓扫描另抓到一处既存同类**（`llm/providers/multimodal_prober.py:104/365` 的 `_is_media_keyword_error`，两版判定关键词集不同，先写的连同其独占常量 `MEDIA_ERROR_KEYWORDS` 从不生效）。两处一并删除；删前核对：现生效那份在后，删前者＝行为零变化。
+    - **守卫判据（三格）**：生产包内不得有顶层重名 def/class（实扫 1029 文件，现值空集）；**反空转**——造一枚重名模块必须被抓到；**反误伤**——类内同名方法与函数内嵌套 def 不得报。另钉一条"扫描面收缩到 0 个文件即红"：这条守卫在开发期就先抓住了我自己（`parents[2]` 少数一层，扫了个空目录，若无此格就会变成一条永远绿的假门禁）。
+    - **判据可迁移的口径**：凡"我把 A 改成了 B"的替换型改动，先确认旧 A 是不是**被删了**而不是被**留在原地**——遮蔽、双写、影子默认值都是同一族静默失效。
+
+
+111. **双臂试评端点自落地即零消费者：审批人从来看不到双臂读数（✅ 本批接线闭环，判据入子集）** —— 做 Task 4 时按 AGENTS.md §2 复算"executor_kind 写了给谁读"，顺带把整条端点的消费面查了一遍。
+
+    - **实状（复算证据，非推测）**：`POST /skills/{agent_id}/ab`（`text_evolution_api.py:206`）后端产出 `task_split/n/baseline_avg/candidate_avg/delta/per_task` 六个键，而前端 `NeurUI/src/api/modules/text-evolution.ts` **没有对应函数**、契约测试逐条钉路径的清单里也没有 `/ab`、全 `NeurUI/src` grep `per_task|baseline_avg|candidate_avg|双臂` 零命中。⇒ 这个端点从落地起就是**只写不读**：报告存在，没人看；这也意味着票面 Task 4 若只加 `executor_kind` 就是往一个孤儿面上再添一个孤儿字段。
+    - **处置（接线，不退役）**：补 `abCompareSkills()` + 2 格 HTTP 契约测试 + 提案详情里"双臂核验"两栏（各带来源标签）+ 15 个 i18n 键 ×11 语言。理由：这个端点是 §8 前置 2 唯一能把"真轨迹差"摆到审批人面前的面，退役它等于把刚接上的能力再摘掉。
+    - **两条装配口径（写进判据）**：拿不到 agent ⇒ 409 点名原因并给出回退项；技能名组不出 `$mention` ⇒ 422。**都不许静默回落成模拟面**——回落后的报告看起来完全正常，而"这一份候选在真回合下如何"恰恰是审批要的那格信息。
+    - **一处自我分叉（实测翻车后收口）**：来源标注我先写成"端点也推一遍"，真臂随即被端点改标成 `simulated`——端点手上只有"我发了什么"，没有 service 真正 resolve 出的那个对象。收成单一事实源：标注只在 `ab_compare` 里紧邻 resolve 那一行由能力判据给出，端点与前端只搬运；前端按**报告里的**标签决定进哪栏，与请求参数不符时显式报错而不是静默取其一。教训与 §6-109 同族：**同一个事实有两个推导处，早晚会互相说假**。
+    - **常驻判据**：`tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py` 7 格 + 端点扩写 4 格；其中一格让替身 agent 在 `chat` 内回读当轮覆盖槽，断四回合读数为 `[BASELINE, BASELINE, CANDIDATE, CANDIDATE]` 且请求结束后槽为 `None`——这把 §6-97 那条"探针问错对象"的病，从读数面升级成了会红的门禁。
+
+
+112. **前端两处常驻红：同名函数盘点守卫套件加载失败 + 画布悬浮层断言（🟡 本批不认领，待裁修法）** —— 全量 `npx vitest run` 实测 `2 failed | 247 passed | 2 skipped`。
+
+    - **归因（用反证做死，不是"看起来无关"）**：把本批 14 个前端文件整体挪开、还原成纯 HEAD 内容复跑同样两个文件 ⇒ 依旧 2 failed（且失败签名一致）。故与本批无关，属 main 自带。
+    - **形态一（更要命）**：`src/tests/duplicate-function-inventory.guard.test.ts` 是**套件级加载失败**（`SyntaxError: Invalid or unexpected token`，0 条用例被执行）。同一次 `node` 直跑其导入的 `scripts-qa/duplicate-function-audit.mjs` 完全正常（实跑 A=0/B=9/C=96），⇒ 报错出在 vitest/esbuild 的转换链上而非源码本身。这条守卫自己坏了，就等于"同名函数 A 类清零"这件事**今天没人守**——而且它以 0 条用例的形态混在 `247 passed` 里，只看测试数会以为前端是绿的。
+    - **形态二**：`src/modules/collaboration/__tests__/canvasEdgesStyle.test.ts` 的"悬浮层（提示行/缩放栏/小地图）位于 transform 容器之外"一格断言失败，读的是画布 vue 源码文本位置；该文件与画布源码本批均未触碰。
+    - **形态三（同一族的第三条：规则里 prescribed 的门禁今天不存在）**：AGENTS.md §4 要求前端跑
+      `npm run lint`，但 `NeurUI/package.json` 的 lint 脚本是 `eslint . --ext ...`（ESLint 8 的
+      传统配置形态），而仓库根与 `NeurUI/` 都**没有** `eslint.config.*` 也没有 `.eslintrc*`，
+      eslint 也不在依赖清单里 ⇒ 实跑直接 `ESLint couldn't find an eslint.config.* file`。
+      "规定有这道门"与"这道门跑不起来"同时成立，且不会被任何 CI 抓到——与本格前两同族：
+      **声称的门禁不咬合**，只是这次假在规则文档与工具链之间，而不是假在代码里。
+      待裁：补 flat config + 依赖并把 lint 入 CI，或把 §4 那行改成实际存在的命令（改规则也算收口）。
+
+    - **待裁**：形态一要么钉死 esbuild/vitest 版本口径（把 `.mjs` 纳入 `server.deps` 直读），要么把该守卫的扫描器改成 vitest 无关的 node 脚本 + CI 腿；两者都涉及前端工具链口径，不该由一个后端批次单方面定。本批只把"它会以 0 用例形态混在通过数里"这件事落进台账。
+
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
