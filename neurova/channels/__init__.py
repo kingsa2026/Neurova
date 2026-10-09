@@ -38,6 +38,12 @@ except ImportError as _e:
     UserIdentity = None
 
 try:
+    from neurova.channels.user_identity import UserIdentityManager
+except ImportError as _e:
+    _logger.debug("channels.user_identity 未可用: %s", _e)
+    UserIdentityManager = None
+
+try:
     from neurova.channels.manager import ChannelManager, get_channel_manager
 except ImportError as _e:
     _logger.debug("channels.manager 未可用: %s", _e)
@@ -95,4 +101,5 @@ __all__ = [
     "SessionRecord",
     "get_session_manager",
     "UserIdentity",
+    "UserIdentityManager",
 ]
