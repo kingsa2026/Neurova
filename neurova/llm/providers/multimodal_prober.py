@@ -78,41 +78,6 @@ AUDIO_MODEL_KEYWORDS = (
 VIDEO_MODEL_KEYWORDS = ("video", "sora", "moviegen")
 
 
-MEDIA_ERROR_KEYWORDS = (
-    "image",
-    "vision",
-    "multimodal",
-    "media",
-    "picture",
-    "photo",
-    "audio",
-    "speech",
-    "voice",
-    "video",
-    "attachment",
-    "unsupported",
-    "not supported",
-    "cannot process",
-    "invalid content type",
-    "binary",
-    "base64",
-    "mime",
-    "data uri",
-)
-
-
-def _is_media_keyword_error(message: Any) -> bool:
-    if message is None:
-        return False
-    try:
-        text = str(message).lower()
-    except Exception:
-        return False
-    if not text:
-        return False
-    return any(keyword in text for keyword in MEDIA_ERROR_KEYWORDS)
-
-
 @dataclass
 class ProbeRecord:
     id: str = field(default_factory=lambda: _new_id("probe_"))
