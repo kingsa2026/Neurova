@@ -2112,3 +2112,13 @@ tests/unit/knowledge/test_projectionFollowsAuthority.py
 # 第二格证夹具真的还了——把 conftest.py 挪出目录即翻红。
 # 逐文件单跑两次同读数 2 passed（8.66s/9.19s，`8dd01728` 落库之后复取）
 tests/unit/knowledge/test_appStateIsolation.py
+
+# singleton 收敛网：条目在位性 + DCL 结构 + 并发首访单次构造（`89575a9d`，§6-116）
+# 这份档此前**不在子集里**，正是它能红 18 天没人管的直接原因：一条指向 2026-09-21 已退役
+# 文件（`memory_layer/memory_field.py`，`0c333a76`）的手抄条目让 `FileNotFoundError` 挂在
+# 参数化格上恒红，同档其余 9 格真 DCL 检查被这层"已知红"噪声一起淹掉。根因不是漏删一行
+# 清单，而是**判据从不检查自己的前提**——清单是手抄快照，实现退役时条目不会自动跟；同坑
+# 两个月内踩两次（另一条 2026-10-07 的 `secret_store_clean` 补记就在文件里）。现新增两格：
+# 每条必须指向在位文件与在位模块级工厂，另加一格反向对照（探测器对"文件缺失""符号缺失"
+# 两种形态都必须报警，对真正在位的条目不得误伤）。逐文件单跑两次同读数 19 passed（落库前后）。
+tests/unit/core/test_singleton_convergence.py
