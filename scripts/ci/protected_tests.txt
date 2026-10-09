@@ -1925,3 +1925,16 @@ tests/unit/test_zeroByteResidueGuard.py
 #    提到不算、真用必须算。
 # 逐文件单跑两次同读数 16 passed（`977f16cb` 落库之后复取）
 tests/unit/aigc_studio/test_retiredShotColumns.py
+
+# 制片导出改真后台 run（`6c6b9cbd`，§6-94）：导出与其余长任务同源收口的常驻面
+# ① 阻塞段不许回到循环里：concat/BGM 混音/字幕烧录三级与 `resolve_ffmpeg_path` 的
+#    `-version` 探测都须在 `asyncio.to_thread` 下跑。判据取"协程心跳有没有推进"这个
+#    行为数，不测字符串存在；并先断言阻塞替身被调用（清单降级支路不碰 FFmpeg，
+#    没进被测分支时心跳读数不作数——这是防"空集即绿"那一格）；
+# ② 导出自结算自己那一行：`done` / `done_with_fallback`（降级或带 warning 须点名成因）
+#    读得到，无就绪产物落 `failed` 而非 200 + `ok=False` 的假清单；
+# ③ 级间取消检查点：意图落库后不再开下一级；
+# ④ 端点契约：`POST /episodes/{eid}/merge` 只回 run_id（回整包即导出又回到台账外），
+#    `GET /projects/{pid}` 投影里看得见导出进度，`GET /merges/{mid}` 的属主门与 404 同源。
+# 逐文件单跑两次同读数 8 passed（`6c6b9cbd` 落库之后复取）
+tests/unit/aigc_studio/test_mergeAsBackgroundRun.py
