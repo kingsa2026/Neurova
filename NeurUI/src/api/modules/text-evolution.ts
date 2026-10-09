@@ -137,3 +137,39 @@ export function rejectProposal(agentId: string, proposalId: string) {
     `${BASE}/skills/${agentId}/proposals/${proposalId}/reject`,
   )
 }
+
+// ---------------------------------------------------------------------------
+// 双臂试评（P1-7b）：同一真留出集上对照基线正文与候选正文，只读评测。
+// `executor_kind` 是这一路的**来源标注**：模拟面（单轮 chat，零工具零上下文）与
+// 真 agent 轨迹面量的是不同的事，UI 必须分栏显示，不许合并成一个数字。
+// ---------------------------------------------------------------------------
+
+export type ArmExecutorKind = 'simulated' | 'real_agent'
+
+export interface AbArmTaskRow {
+  task_input: string
+  baseline: number
+  candidate: number
+}
+
+export interface AbReportData {
+  task_split: 'heldout' | 'selection' | 'none' | string
+  n: number
+  baseline_avg: number
+  candidate_avg: number
+  delta: number
+  per_task: AbArmTaskRow[]
+  executor_kind: ArmExecutorKind
+}
+
+export function abCompareSkills(
+  agentId: string,
+  payload: {
+    skill_id: string
+    candidate_text: string
+    dataset_source?: 'auto' | 'golden' | 'mined' | 'synthetic'
+    real_trajectory?: boolean
+  },
+) {
+  return api.post<ApiResponse<AbReportData>>(`${BASE}/skills/${agentId}/ab`, payload)
+}

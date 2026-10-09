@@ -88,24 +88,6 @@ class SimulatedAgent:
             return ""
         return str(result.get("response") or "").strip()
 
-def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
-    """这道能力问的是"**执行判据的那一步是否真跑 agent 回合**"（§8 前置 2）。
-
-    为什么必须有这一格：能力**不能写成常量旗标**——旗标会在实装被摘掉之后继续说真，
-    而那比"没做实"更糟（下游有理由继续信任这条判据）。这里的能力由**结构推导**：
-    一个真轨迹执行器必须持有 `agent_ref`（AGENTS.md §3 的深模块注入约定）并显式声明
-    自己跑真回合，两者缺一即回 False。评测用的替身不带这两样，因此天然不被误认为真轨迹。
-
-    读方是 `rsi/automation_prerequisites.probeRealTrajectoryExecutor`——它问的必须是
-    **生产装配点实际拿到的执行器**（`resolveEvolutionExecutor`），不是 runner 的离线兜底
-    `_DefaultAgent`：换掉兜底就能把旗标翻真，那是弱保护（台账 §6-97 记的口径缺陷）。
-    """
-    if executor is None:
-        return False
-    if not bool(getattr(executor, "realAgentTrajectory", False)):
-        return False
-    return getattr(executor, "agent_ref", None) is not None
-
 
 def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
     """生产装配路径的执行器**唯一出处**。
@@ -423,10 +405,17 @@ class SkillEvolutionService:
         """
         from neurova.evolution.eval.dataset import evaluation_split
 
+        # 执行面先resolve：kind 必须由**真正拿去执行的那个对象**推导，两条返回路径
+        # 都要带——模拟面与真轨迹面的数字混成一栏时，审批人会拿模拟分当线上证据，
+        # 不可逆的是解释而不是数据。
+        executor = resolveEvolutionExecutor(agent, config=config)
+        kind = "real_agent" if isRealAgentTrajectoryExecutor(executor) else "simulated"
+
         split = dataset.heldout or evaluation_split(dataset)
         if not split:
             return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
-                    "candidate_avg": 0.0, "delta": 0.0, "per_task": []}
+                    "candidate_avg": 0.0, "delta": 0.0, "per_task": [],
+                    "executor_kind": kind}
         if judge is None:
             from neurova.evolution.eval.fitness import LLMJudge
 
@@ -435,7 +424,7 @@ class SkillEvolutionService:
 
         runner = SkillEvolutionRunner(
             config, judge=judge,
-            agent=resolveEvolutionExecutor(agent, config=config),
+            agent=executor,
         )
         # 同包装配：复用 runner 的评测路径（judge 适配/执行器注入同源），
         # 禁止另写第二套打分。
@@ -453,6 +442,7 @@ class SkillEvolutionService:
             "candidate_avg": round(float(candidate_avg), 4),
             "delta": round(float(candidate_avg - baseline_avg), 4),
             "per_task": per_task,
+            "executor_kind": kind,
         }
 
     # ── 提案审批(人工闭环终点)──

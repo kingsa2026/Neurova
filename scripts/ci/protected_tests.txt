@@ -38,6 +38,10 @@ tests/unit/skills/test_body_clear_is_gated.py
 # 读到臂 B 的正文）。判据钉"各得其所 / 复位不泄漏 / 未设槽逐字节照旧"，并覆盖
 # 同契约第二命中点（SKILL.md 型技能经**工具返回**进模型的那条路）。
 tests/unit/skills/test_turnSkillTextOverride.py
+# 双臂试评的真 agent 执行器与「执行面来源」外露（票面 Task 4）：kind 必须由真正被拿去
+# 执行的那个对象推导——端点自己再猜一遍实测翻过车（真臂被改标成 simulated）。真臂必须
+# 经 agent.chat(save_memory=False) 且本轮带着自己那一臂的候选正文。
+tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
