@@ -1830,6 +1830,11 @@ tests/unit/evolution/test_singlePresentationAccountGuard.py
 tests/unit/evolution/eval/test_caseLevelRegressionGate.py
 # 运行终态回写台账：被拒的运行不得留着「已生效」，未量出不写成退化（§6-9）
 tests/unit/evolution/eval/test_runOutcomeLedgerConsistency.py
+# §8 四条自动化前置落成晋升判据：前置未满足 ⇒ 自动执行档硬否决并点名哪一条；
+# 读数面另有反谎（旗标=探针）与反空转（摘掉实装必须报假）两档，外加一格
+# "测试脚手架还在吗"的守卫——脚手架被静默摘掉会红这一格，而不是红 44 格无主墙。
+tests/unit/evolution/rsi/test_automationPrerequisiteGate.py
+tests/unit/evolution/rsi/test_automationPrerequisiteScaffold.py
 
 # C1 跨集资产连续性（§6-78 的 H 条 + I 条）：这一档锁的是"引用了就必须取到，取不到
 # 就不许发请求"。判据打在行为上——实际发出的提示词含场景定妆词/灯光/氛围/道具描述、

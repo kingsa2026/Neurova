@@ -197,9 +197,19 @@ def _automationPrerequisitesHeldForEvidenceAxes(monkeypatch):
     from neurova.evolution.rsi import deployment_controller as controllerModule
     from neurova.evolution.rsi.gate_verdict import GateVerdict
 
+    # `raising=False` 是实测逼出来的：接缝被改名/摘掉时，这里原本逐条抛
+    # AttributeError —— 受保护子集实测**1553 条 error 全是同一句**，把真正的信号埋掉。
+    # 夹具本身不响：控制器读不到桩就会走真实前置 ⇒ 依赖它的既有用例自己红。
+    # **两条别重走的弯路**（都在摘掉接缝的工作树里实测过）：把"接缝还在吗"写成会话级
+    # autouse 夹具 ⇒ 整场每条用例都 ERROR（228 条同句），只是换了报错文字；写成
+    # `hasattr(controllerModule, …)` 的普通用例 ⇒ 恒真，因为 `raising=False` 的 setattr
+    # 本来就会在模块上造出这个名字，检查者与被检查者同手。真正钉住"摘掉实装仍要红"的是
+    # `tests/unit/evolution/rsi/test_automationPrerequisiteGate.py::TestControllerCarriesThePrerequisiteCell`
+    # （同名夹具遮蔽后测未桩掉的否决），实测红 2 格、无错误墙。
     monkeypatch.setattr(
         controllerModule, "automationPrerequisiteVerdict",
-        lambda *args, **kwargs: GateVerdict.passed("测试脚手架：前置按齐备处理"))
+        lambda *args, **kwargs: GateVerdict.passed("测试脚手架：前置按齐备处理"),
+        raising=False)
 
 
 @pytest.fixture(autouse=True)
