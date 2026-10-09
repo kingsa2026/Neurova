@@ -154,3 +154,63 @@ class TestEvolveFlow:
         payload = json.loads(runs[0].read_text(encoding="utf-8"))
         assert payload["skill_id"] == "s1"
         assert "holdout_before" in payload
+
+    @pytest.mark.asyncio
+    async def test_runAuditIsLinkedToItsProposal(self, tmp_path, monkeypatch):
+        """§6-95 后半：审计文件要有读者——提案记录带着 `run_id` 指回它（台账原话"只写不读"）。
+
+        取的是**现有提案详情面**这条既有的读路径，不新建端点：提案 = 审批人已经在看的
+        东西，运行 = 它是凭什么分数出来的。落盘侧不写关联键，读侧就永远只能靠文件名猜。
+        """
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        service = SkillEvolutionService("agent-link", base_dir=tmp_path / "evo")
+        monkeypatch.setattr(
+            "neurova.evolution.eval.runner.SkillEvolutionRunner._call_judge",
+            lambda self, **kw: _judge(**kw),
+        )
+        result, proposal = await service.evolve(
+            skill_id="s1", skill_text=BASELINE, dataset=_ds(),
+            agent=_FakeAgent(), judge=_judge, mutate=_mutate, bench_gate=None,
+            config=EvolutionConfig(iterations=1, min_improvement=0.0),
+        )
+        assert proposal is not None, result.reject_reason
+        runId = proposal.to_dict()["run_id"]
+        assert runId, "提案没带 run_id ⇒ 详情面取不到运行，审计文件仍是只写不读"
+        onDisk = json.loads(
+            (tmp_path / "evo" / "runs" / f"{runId}.json").read_text(encoding="utf-8"))
+        assert onDisk["run_id"] == runId, "文件名与文件内的 run_id 两份口径会漂移"
+        assert service.readRun(runId) == onDisk, "读侧取回的内容与落盘不一致"
+        # 详情面（前端 `EvolutionRunAudit`）要读的那几个键，必须由**生产写侧**真的写出来。
+        # 用 dataclass 字段名去造夹具会假绿：线上名是 `holdout_cases`，字段名才是
+        # `holdout_case_scores`——按字段名写死断言，面板读一个不存在的键也不会红。
+        assert {"at", "run_id", "holdout_cases", "judge_available"} <= set(onDisk), sorted(onDisk)
+
+    @pytest.mark.asyncio
+    async def test_readRunRefusesForeignPaths(self, tmp_path, monkeypatch):
+        """读侧只认自己那批文件名——`run_id` 来自磁盘上的记录，不能当路径拼。"""
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        service = SkillEvolutionService("agent-safe", base_dir=tmp_path / "evo")
+        (tmp_path / "evo" / "runs").mkdir(parents=True)
+        (tmp_path / "evo" / "secret.json").write_text('{"leak": true}', encoding="utf-8")
+        for foreign in ("", "../secret", "run_../secret", "/etc/passwd",
+                        "run_x/../../secret", "secret.json"):
+            assert service.readRun(foreign) is None, f"`{foreign}` 竟被读成运行记录"
+        assert service.readRun(None) is None, "None 必须按读不到处理，而不是抛"
+
+    @pytest.mark.asyncio
+    async def test_readRunDistinguishesMissingFileFromEmptyId(self, tmp_path, monkeypatch):
+        """"这条运行记录不见了"与"这一轮根本没落运行"是两件事，读侧不得混成一个 None 了事。
+
+        混成一件事时，端点只能二选一：要么谎报"没有运行"，要么静默省略——两种都把
+        审计面的缺失洗成"看起来正常"（教义第 2 条禁止的降级形态）。
+        """
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        service = SkillEvolutionService("agent-state", base_dir=tmp_path / "evo")
+        assert service.runLookup("")[0] == "none_recorded"
+        assert service.runLookup("run_20260101T000000_abc123")[0] == "missing"
+        (tmp_path / "evo" / "runs").mkdir(parents=True)
+        (tmp_path / "evo" / "runs" / "run_20260101T000000_abc123.json").write_text(
+            '{"run_id": "run_20260101T000000_abc123"}', encoding="utf-8")
+        state, payload = service.runLookup("run_20260101T000000_abc123")
+        assert state == "attached" and payload["run_id"] == "run_20260101T000000_abc123"
+

@@ -329,11 +329,25 @@ async def list_evolution_proposals(
 @router.get("/skills/{agent_id}/proposals/{proposal_id}")
 async def get_evolution_proposal_detail(agent_id: str, proposal_id: str,
                                         user: Dict[str, Any] = Depends(get_current_user)):
+    """提案详情：正文 + 那次进化的审计运行（§6-95 后半给 `runs/*.json` 接上的读者）。
+
+    刻意走这条**既有**详情面而不是新建端点：审批人点开提案时本来就要取一次详情，
+    运行记录挂在这里等于"决策时看得见证据"，而不是再多一个没人调的通道
+    （台账 §6-111 记的就是"落了零消费者的读数"那种形态）。
+    一条如实边界：**被门拒掉的候选不产提案**，所以这条读路径天然只覆盖"出了提案的那些
+    运行"；「门逐条拦了谁」那一半仍无出口（属另一裁，见台账 §6-95 后半）。
+    """
     from neurova.evolution.eval.service import SkillEvolutionService
 
-    for p in SkillEvolutionService(agent_id).list_proposals():
+    service = SkillEvolutionService(agent_id)
+    for p in service.list_proposals():
         if p.get("proposal_id") == proposal_id:
-            return {"code": 0, "data": p}
+            runState, runPayload = service.runLookup(str(p.get("run_id") or ""))
+            return {"code": 0, "data": {
+                **p,
+                "evolution_run": runPayload,
+                "evolution_run_status": runState,
+            }}
     raise HTTPException(status_code=404, detail=f"提案不存在: {proposal_id}")
 
 

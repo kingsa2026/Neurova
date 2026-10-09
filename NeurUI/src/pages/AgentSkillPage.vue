@@ -373,6 +373,16 @@
           {{ t('skillEvo.holdout') }}: {{ proposalDetail.holdout_before }} →
           {{ proposalDetail.holdout_after }}
         </p>
+        <!-- 那次进化的审计运行（runs/*.json 的读者；§6-95 后半）。三态各自出声：
+             取回了 ⇒ 逐例读数；文件不见了 / 本轮未记 ⇒ 点名，不静默省略。 -->
+        <p v-if="auditRunState === 'attached'" class="proposal-metric">
+          {{ t('skillEvo.auditRun') }} · {{ auditRun?.at }} ·
+          {{ t('skillEvo.auditRunCases') }}:
+          <span v-for="(reading, task) in auditRunCases" :key="task">
+            {{ task }} {{ reading.baseline }}→{{ reading.candidate }}{{ reading.candidate_failed ? '✗' : '' }}
+          </span>
+        </p>
+        <p v-if="auditRunNote" class="proposal-metric">{{ auditRunNote }}</p>
         <a-row :gutter="12">
           <a-col :span="12">
             <div class="evo-diff-title">{{ t('skillEvo.baseline') }}</div>
@@ -648,6 +658,21 @@ const proposalsLoading = ref(false)
 const proposals = ref<ProposalSummary[]>([])
 const proposalDetail = ref<EvolutionProposal | null>(null)
 const detailVisible = ref(false)
+
+// §6-95 后半：那次进化的审计运行在详情面被读出来。三态各自出声——
+// 取回了 ⇒ 逐例读数；`missing` ⇒ 明说"文件取不回"；`none_recorded` ⇒ 明说"本轮未记"。
+// 静默省略等于把审计面的缺失洗成"看起来没有这回事"，审批人无从分辨。
+const auditRunState = computed(() => proposalDetail.value?.evolution_run_status ?? '')
+const auditRun = computed(() => proposalDetail.value?.evolution_run ?? null)
+const auditRunCases = computed(() => auditRun.value?.holdout_cases ?? {})
+const auditRunNote = computed(() => {
+  if (auditRunState.value === 'missing') return t('skillEvo.auditRunMissing')
+  if (auditRunState.value === 'none_recorded') return t('skillEvo.auditRunNoneRecorded')
+  if (auditRunState.value === 'attached' && auditRun.value?.judge_available === false) {
+    return t('skillEvo.auditRunJudgeDown')
+  }
+  return ''
+})
 
 // 双臂核验：模拟面与真 agent 轨迹面各占一栏，永不合并成一个数字——
 // 两个面量的是不同的事，混标会让审批人拿模拟分当线上证据（不可逆的是解释）。

@@ -65,6 +65,12 @@ tests/unit/agent/test_processMessageUnifiedEntry.py
 #   通道按声明名认而不是按局部名认——`identity_context.py` 里有一条同样叫 `_user_id_var`
 #   却声明 `neurova_request_user_id` 的并行通道，按局部名匹配会把它的正常写点报成违规。
 tests/unit/agent/test_turnIdentitySingleSource.py
+# §6-95 后半：`runs/*.json` 从"只写不读"接上读者——提案带着 `run_id` 指回那次运行，
+#   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
+#   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
+#   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
+tests/unit/evolution/eval/test_service_closed_loop.py
+tests/unit/api/test_text_evolution_api.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
 tests/unit/core/test_shared_thread_pool_reuse.py
 # Issue #55 P1：缓存收敛（删死代码 performance.py + 能力缓存单一事实源）
