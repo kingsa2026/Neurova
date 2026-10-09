@@ -1954,3 +1954,16 @@ tests/unit/aigc_studio/test_mergeAsBackgroundRun.py
 tests/unit/neurflow/test_dramaComposeOffloadsTheLoop.py
 tests/unit/core/test_ffmpegBootstrapOffloadsTheLoop.py
 tests/unit/ci/test_asyncBlockingSubprocessRatchet.py
+
+# 账本 result_url 的读者：提交前先抢救远端产物（`2f815f2a`，§6-100）
+# 判据钉的是"别再为同一单付两次"这条链，缺任何一环产物就白丢或白花钱：
+# ① 账本 `succeeded` 且有远端件而本地没落地 → `persist_media` 收到的正是那条 URL，
+#    服务商提交边界**一次都不该被调**；② 镜头行与账本行同时补 `local_path`（只写一边，
+#    下一次收口仍按另一边判它"没本地化"）；③ 拉不回/没得救 → 照原路提交，不许静默丢镜；
+# ④ `data:` 内联件同样在射程内（只认 `http` 就把"本地从未落过盘"那一类留在门外，
+#    首版即栽在这上面，补了一格红才放宽）；⑤ 读数走 `fallback` 这一族键——前端
+#    `describeRunOutcome` 已读它，另造新键等于同一件事的第二处定义；
+# ⑥ 抢救实装全仓只许一处（AST 钉名，防 services 里再抄一份）；
+# ⑦ 边界回归：§6-78 D 条那半（没得救时诚实 `failed`，不写 done + 空路径）不许漂。
+# 逐文件单跑两次同读数 9 passed（`2f815f2a` 落库之后复取）
+tests/unit/aigc_studio/test_salvageRemoteArtifactBeforePayingAgain.py
