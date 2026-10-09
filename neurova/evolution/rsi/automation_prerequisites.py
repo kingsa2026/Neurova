@@ -10,14 +10,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import fields
 from typing import Any, Callable, Dict, Optional
 
 from .gate_verdict import GateVerdict
-
-#: 用于探默认执行器是否还在回显的技能正文（无中文，避免探针自身受码页影响）
-PROBE_ECHO_TEXT = "prerequisite-probe-skill-text"
 
 
 def _fieldNames(cls: Any) -> frozenset:
@@ -96,32 +92,23 @@ def probeFailClosedOnMissingEvidence() -> bool:
 def probeRealTrajectoryExecutor() -> bool:
     """前置 2：判据执行面与线上行为同域（真 agent 轨迹）。
 
-    今天的实情是 runner 的默认执行器把技能正文原样回显 ⇒ 不满足。
-    本探针要 await，而控制器是同步入口、可能被 async 端点调起——在已运行的事件循环里
-    `asyncio.run` 会直接抛，所以那种情形回落到"未满足"（宁可挡住晋升，不假装量到），
-    声明与事实的分歧由 `test_realTrajectoryFlagIsFalseWhileDefaultExecutorStillEchoes`
-    在 CI 里钉住。默认执行器被摘掉/换成真跑之后，本探针自然翻真，无需改这里。
+    问的对象必须是**生产装配点实际拿到的执行器**（`service.resolveEvolutionExecutor`），
+    不是 runner 的库层离线兜底 `_DefaultAgent`。旧口径问的是兜底是否回显，于是"换个桩把
+    兜底改得不回显"就能把旗标刷真，而两条评测路径用的仍是单轮模拟面——弱保护，
+    台账 §6-97 记的就是这一处。改问接缝之后，兜底怎么动都不影响读数。
+
+    能力本身也不许写成旗标：由 `isRealAgentTrajectoryExecutor` 从结构推导
+    （持有 `agent_ref` + 显式声明跑真回合，缺一即 False）。探针因此是同步的，
+    不再需要"事件循环已在跑"的回落分支。
     """
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        return False
+        from neurova.evolution.eval.service import (
+            isRealAgentTrajectoryExecutor, resolveEvolutionExecutor,
+        )
 
-    from neurova.evolution.eval.runner import _DefaultAgent
-
-    async def _echoes() -> bool:
-        output = await _DefaultAgent().run(skill_text=PROBE_ECHO_TEXT, task_input="probe-task")
-        return str(output) == PROBE_ECHO_TEXT
-
-    try:
-        echoed = asyncio.run(_echoes())
-    except RuntimeError:  # 事件循环在别处起着：不猜，按未满足处理
+        return isRealAgentTrajectoryExecutor(resolveEvolutionExecutor(None))
+    except Exception:  # noqa: BLE001 - 量不到就按未满足，宁可挡住晋升不假装量到
         return False
-    except Exception:  # noqa: BLE001 - 默认执行器都不存在了，谈不上"真轨迹已接"
-        return False
-    return not echoed
 
 
 #: 四条前置的登记表（唯一出处）。reason 只在**不满足**时给人看的落点。
@@ -134,7 +121,7 @@ _REGISTRY: Dict[str, Dict[str, Any]] = {
     "realTrajectoryExecutor": {
         "title": "判据执行面与线上行为同域（真 agent 轨迹）",
         "probe": probeRealTrajectoryExecutor,
-        "unmetReason": "评测默认执行器仍在回显技能正文，留出分与线上行为不同域（§8 前置 2）",
+        "unmetReason": "生产装配点拿到的执行器不跑真 agent 回合，留出分与线上行为不同域（§8 前置 2）",
     },
     "presentationLedger": {
         "title": "呈现与采纳可分离计数",
