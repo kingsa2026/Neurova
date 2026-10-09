@@ -2162,3 +2162,19 @@ tests/unit/knowledge/test_usage_writeback_foundation.py
 # 另含域隔离、单字标签不匹配、未命中问句走空等 11 格，全部单跑确定全绿。
 # 逐文件单跑两次同读数 12 passed（5.81s/5.34s）
 tests/integration/test_graph_retriever_in_chain.py
+
+# 批 E：通用 KV 配置器合一 + load 侧 warning/error 分级并入（`9146989c`，§6-125）
+# 两份同职实现（分层版 `core/config.py:60` 354 行、简单版 `core/config_manager.py` 118 行）
+# **都零生产消费者**——`get_config_manager()` 全仓零调用，grep 到的同名命中全是同名词不同物
+# （`agent_config.py:438`、`negative_screen_settings.py:84`）。按教义第 7 条比后合到超集那份：
+# 简单版的 `clear()` 不并（零消费者＝没需求的 API，不因为"原来有"就搬家），但它 load 侧的
+# **warning-vs-error 分级**是真长处——读不到/损坏属可降级（沿用内存现有配置），一律 error 会把
+# 一次回落报成事故；写盘失败才是数据丢失，必须 error。分级并入 `config.py::load`，这四档 KV
+# 单测同步改指分层版（39 格；另摘 1 格 `test_clear` 随实现走、1 格只断"模块有 logger 属性"的
+# 形状检查——它不证任何行为）。第五档是"别再长出第二份"的单源判据，含探测器反向对照。
+# 逐文件单跑落库前后同读数：单源 5 passed、四档 KV 与既有 config 档并跑 83 passed。
+tests/unit/core/test_kvConfigSingleSource.py
+tests/unit/core/test_config.py
+tests/unit/core/test_config_manager.py
+tests/unit/core/test_config_manager_comprehensive.py
+tests/unit/core/test_config_manager_persistence.py
