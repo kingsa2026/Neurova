@@ -2044,3 +2044,11 @@ tests/unit/context/test_secondCacheFaceRetired.py
 # TestVoicePerformanceMonitoring/TestVoiceAdapterLifecycleCompleteness）不许被顺手带走。
 # 逐文件单跑两次同读数 5 passed（`29aa879a` 落库之后复取）
 tests/unit/voice/test_voiceEngineBridgeRetired.py
+
+# 批次 风险1-3（§6-109）：投影面的三处"读数说假话"。① `_save` 曾把落盘失败吞成
+# code:0 success（真库 rebuild 期间实测 3 次 WinError 5 而无人知道）——现由 persist()
+# 回执 + 端点 500 收口；② `projectionDrift` 只比关系，看不见带条目正文摘要的无据
+# 孤立节点（真库现存 33 个），现补四个节点维度计数；③ 启动一次性巡检"只报不修"。
+# 两格是反空转装置：启动格必须真读到 WARN / 真读到"无分叉"，因为整段巡检被 fail-open
+# 吞掉时表现就是"什么都没报"，只断"没有 WARN"会空转绿。
+tests/unit/knowledge/test_projectionHonesty.py
