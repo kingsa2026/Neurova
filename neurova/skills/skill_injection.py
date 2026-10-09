@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.core import turn_context
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,7 +46,15 @@ def parse_skill_mentions(text: str) -> List[str]:
 
 
 def _skill_doc_text(skill: Any) -> str:
-    """鸭子类型取技能指令体全文：doc_text → skill_dir/SKILL.md → description。"""
+    """鸭子类型取技能指令体全文：轮级候选覆盖 → doc_text → skill_dir/SKILL.md → description。
+
+    覆盖槽排在**最前**：双臂试评要给候选正文打分，读的是同一份管线代码——
+    排在 doc_text 之后就等于评测跑的是线上那份正文（假同域）。
+    """
+    override = turn_context.get_turn_skill_text_override(
+        str(getattr(skill, "name", "") or getattr(skill, "skill_id", "") or ""))
+    if override is not None:
+        return override
     doc = getattr(skill, "doc_text", None)
     if isinstance(doc, str) and doc.strip():
         return doc
