@@ -1687,3 +1687,46 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **本批已做的（只登记不放宽）**：`a46c25bc` 的判据把 ④ 那格钉成"渠道 meta 里不得出现
       `user_id` 键"——今天它是本格的成因，也是现状边界。谁要按 (乙) 修，会先被这一格拦住并要求
       连同本格一起改，而不是让隔离语义在无声中换向。
+
+127. **§6-123 已裁：渠道发送者按平台 `user_id` 隔离 + 需绑定机制 + 群聊与同渠道多用户要额外标记（🔵 实施中，判据 ④ 待按此改判）** —— 用户 2026-10-10 拍板取 (乙)，并加了两条新要求：
+
+    - **裁定原文（三条）**：① 渠道发送者应当遵循 userID 隔离机制（即不再把所有人塞进 `"default"`）；
+      ② 要有**绑定机制**——不同渠道的发送者可绑定到同一个平台 userID（经绑定码或前端 UI）；
+      ③ 还有另一层问题：**同一渠道里不同用户、以及群聊**的记忆需要额外标记。
+    - **开工前的实状复算（决定"接续哪里、别另造第二套"）**：
+      - `neurova/channels/models.py:98-124` 的 `UserIdentity`（`user_id`/`channel`/`channel_user_id`/
+        `mobile_device_id`/`metadata`）**正是这张绑定表的形状，但从未实装管理器**——
+        `tests/unit/agent/test_p3_p4_refactor.py:219-228` 整格 skip，理由写着"`UserIdentityManager`
+        从未在 `neurova.channels` 实现"，且它断言的 `identity.global_user_id` 这个属性**在现有 dataclass 上不存在**
+        （先声明、后无人实装、连测试也是按想象中的字段写的）。⇒ 本格应当把它补齐，而不是再造第二张绑定表。
+      - 既有"绑定"面三类，都不同职：`api/endpoints/mobile_pairing.py:102-104` 是**设备↔用户**配对码
+        （6 位 CSPRNG、TTL 300s、**纯内存 dict、重启即丢**）；`auth/qclaw_binding_model.py:109-123` 是
+        **外部应用凭据↔用户**（唯一真持久化的 binding 表）；`auth/verification_code.py:31-34` 是
+        注册/改密/登录/换邮四种码（sqlite 持久化，但无"绑定"型）。⇒ 新增渠道身份绑定必须说明它接哪一张。
+      - 记忆隔离键 `cognitive_layers/memory_layer/isolation.py:48-64` 是 `{agent_id}:{neuser_id}:{user_id}`
+        （两侧缺省都是 `"default"`），而作用域**只从 JWT 依赖写入**（`api/deps.py:118-125`、
+        `api/endpoints/memory/base.py:211-212`）⇒ 渠道路径上没人写过它，所有发送者共用 `(default, default)`。
+      - "额外标记"已有半套但不同职：`collaboration/memory_scope.py:16-44` 只有 `direct` 与 `room:<id>` 两值，
+        写入在 `post_chat_pipeline.py:1151-1159` 且**门在 `metadata["turn_origin"] == "collaboration"`**——
+        `channel_router.py:140` 只发 `human`/`bot_peer` ⇒ 渠道群聊今天全被标成 `direct`。
+        会话侧倒是有分组：`channels/manager.py:686-703` 按 `chat_id`（群共享）或 `chat_id:sender_id`
+        （`share_session_in_group` 关掉时）分 scope，但**没有 `chat_type` 分支**，群与私聊只靠 chat_id 隐含区分。
+      - 技能库那条 `ch:{渠道}:{发送者}` 独立键（`skills/skill_visibility.py:138-161`，闭集
+        `_SYSTEM_IDENTITIES:31` 含 `""/default/system/anonymous/unknown`）**不会**进记忆列——
+        这正是 §6-123 那句"同一轮两套身份并存"的机制成因。
+    - **与旧方案的关系**：`docs/渠道agent隔离改造计划_2026-09-13.md` 做的是"每 agent 各配各的 bot"
+      （多实例、会话物理隔离、配置级身份冲突 409），与"发送者↔平台账号"不同职，不冲突也不复用其结论；
+      本格的会话 scope 键要沿它已定的 `{agent_id}:{chat_id}` 口径，不另起一套。
+    - **四点已全部拍定（2026-10-10，工单 `docs/04-plans/2026-10-10-渠道身份绑定与群聊记忆分账实施方案.md`）**：
+      ① 未绑定发送者落**渠道专属命名空间** `ch:{渠道}:{发送者}`（沿用 `skill_visibility.py:138-161` 既有口径），
+      绑定后"提升"只改今后写入的归属、历史双读不合并；② 绑定接续 `channels/models.py:98` 那张
+      已声明未实装的 `UserIdentity`（补 `UserIdentityManager` + sqlite 表），码接
+      `auth/verification_code.py` 新增 `VerificationType.BIND_CHANNEL` —— **不接** `mobile_pairing`
+      （设备↔用户、纯内存 dict、重启即丢）；③ 绑定作用域取 **agent 级**（唯一键
+      `(agent_id, channel_type, channel_user_id)`，与推荐项不同 —— 代价是同一渠道用户在 N 个 agent 下要绑 N 次，
+      自助流程必须把 agent 上下文带进码里，否则跨 agent 串用）；④ 群＝共享作用域
+      `chgrp:{渠道}:{chat_id}`、私聊＝个人作用域，写入门从"仅 collaboration"改按 `chat_type` 判。
+    - **本格实施时必须同步改判 §6-121 判据 ④**（"渠道 meta 不得出现 `user_id` 键" → "必须出现且值只能来自
+      服务端解析单点"）——那是**按裁定的改判，不是放宽**，两态读数与理由要写进提交正文与本格。
+      一条本方案不解决、只标记的边界：群共享作用域意味着**同群成员可见彼此沉淀的群记忆**，
+      这是 ④ 的直接后果，须在 UI 与文档写清，不得只做成技术默认值。
