@@ -535,6 +535,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
     resolution/duration 留空即**继承镜头行上那次提交用过的规格**（单镜重试不传就是这一支），
     行内也没有才落服务层兜底——保证「重试这一镜」换的只是内容，不是尺寸。
     """
+    from neurova.aigc_studio.video_reconcile import salvageLocalFromLedger
     from neurova.llm.generators.protocols import submit_video
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
@@ -548,7 +549,8 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
         str(provider or "").lower(), "wan")
     hint = _hint_for_provider("video", provider_id, model, fallback)
     default_base = _BASES.get(hint, _BASES["wan"])
-    stats = {"submitted": 0, "skipped": 0, "failed": 0, "blocked_no_frame": 0}
+    stats = {"submitted": 0, "skipped": 0, "failed": 0, "blocked_no_frame": 0,
+             "recovered": 0}
     rid = run_id or store.add_run({"project_id": pid, "kind": "videos"})["id"]
     for sb in store.list_storyboards(eid):
         guardCancel(store, rid)
@@ -561,6 +563,11 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             continue
         if sb.get("video_status") == "running":
             stats["skipped"] += 1
+            continue
+        # 花钱之前先抢救：账本里那条任务已 `succeeded`、远端 URL 还在而本地没件时，
+        # 把它拉回来记 `done`，不再重复提交（§6-99）。拉不回则照原路提交，一字不改。
+        if await salvageLocalFromLedger(store, sb):
+            stats["recovered"] = stats.get("recovered", 0) + 1
             continue
         if not frame or not Path(frame).is_file():
             # 缺首帧仍提交 = i2v 静默退化成 t2v 并写 running：产出一段与本集画面
@@ -616,6 +623,11 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                 "video_status": "failed", "error": str(e)[:200]})
             stats["failed"] += 1
     _record_usage("video", stats.get("submitted", 0), stats.get("failed", 0), "")
+    if stats["recovered"]:
+        # 读数走 `fallback` 这一族键（前端 `describeRunOutcome` 已读它）——另造一枚新键
+        # 就是同一件事的第二处口径，且前端不认得的键等于没写（§6-99）。
+        stats["fallback"] = (f"{stats['recovered']} 项视频由账本里的远端产物抢救回本地，"
+                             "未向服务商重复提交")
     _settleRun(store, rid, stats, "视频")
     return stats
 
