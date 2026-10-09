@@ -1834,6 +1834,10 @@ tests/unit/evolution/test_singlePresentationAccountGuard.py
 tests/unit/evolution/eval/test_caseLevelRegressionGate.py
 # 运行终态回写台账：被拒的运行不得留着「已生效」，未量出不写成退化（§6-9）
 tests/unit/evolution/eval/test_runOutcomeLedgerConsistency.py
+# 生产装配路径的执行器必须来自同一接缝（evolve 与 ab_compare 过去各写一遍回落，
+# 已实测过一次代价：agent=None 落到真多模型客户端，真花配额并把整目录跑测挂死）。
+# 另两档钉"真轨迹能力由结构推导、不许写成旗标"——它是 §8 前置 2 探针的唯一读方。
+tests/unit/evolution/eval/test_evolutionExecutorSingleSource.py
 # §8 四条自动化前置落成晋升判据：前置未满足 ⇒ 自动执行档硬否决并点名哪一条；
 # 读数面另有反谎（旗标=探针）与反空转（摘掉实装必须报假）两档，外加一格
 # "测试脚手架还在吗"的守卫——脚手架被静默摘掉会红这一格，而不是红 44 格无主墙。
