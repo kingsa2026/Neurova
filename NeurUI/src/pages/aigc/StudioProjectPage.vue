@@ -17,9 +17,10 @@ import {
   runAssetImages, runExtract, runGenerateImages, runGenerateVideos,
   runNarration, runSplitScript, runStoryboards,
   retryStoryboard, updateAsset, updateEpisode, updateStoryboard,
-  type ProjectDetail, type StudioEpisode, type StudioStoryboard,
+  getMerge, type ProjectDetail, type StudioEpisode,
+  type StudioRun, type StudioStoryboard,
 } from '@/api/modules/studio'
-import { waitStudioRun, describeRunOutcome } from '@/composables/useStudioRun'
+import { waitStudioRun, describeRunOutcome, parseRunDetail } from '@/composables/useStudioRun'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { uploadFile } from '@/api/modules/files'
 import { withFileToken } from '@/utils/genFiles'
@@ -81,11 +82,12 @@ const stoppingRun = ref(false)
 const activeRunIds = computed(() => Object.values(activeRuns.value))
 const runningCount = computed(() => activeRunIds.value.length)
 
-async function track(kind: string, runId: string) {
+async function track(kind: string, runId: string): Promise<StudioRun | null> {
   busy.value = { ...busy.value, [kind]: true }
   activeRuns.value = { ...activeRuns.value, [kind]: runId }
+  let run: StudioRun | null = null
   try {
-    const run = await waitStudioRun(pid, runId)
+    run = await waitStudioRun(pid, runId)
     if (!run) message.error(t('studio.runTimeout'))
     else if (run.status === 'failed') message.error(run.error || t('aigc.generateError'))
     else if (run.status === 'cancelled') message.info(run.error || t('studio.runCancelled'))
@@ -93,6 +95,7 @@ async function track(kind: string, runId: string) {
       // 带病完成不能报「任务完成」：条数与成因由结算侧写进 detail_json，这里取用（§6-87）
       message.warning(t('studio.runPartial', { detail: describeRunOutcome(run, t) }))
     } else message.success(t('studio.runDone'))
+    return run
   } finally {
     busy.value = { ...busy.value, [kind]: false }
     const rest = { ...activeRuns.value }
@@ -329,10 +332,34 @@ async function uploadBgm() {
 async function doMerge() {
   if (!currentEid.value) return
   try {
-    const res: any = await mergeEpisode(currentEid.value,
+    const accepted: any = await mergeEpisode(currentEid.value,
       bgmPath.value ? { bgm_path: bgmPath.value } : undefined)
-    mergeResult.value = res?.data ?? null
-    if (res?.code === -1) message.error(res?.data?.error || t('aigc.generateError'))
+    const runId = accepted?.data?.run_id
+    if (!runId) {
+      message.error(t('aigc.generateError'))
+      return
+    }
+    // 导出现在是后台 run：能停（顶部停止按钮覆盖所有在跑的 kind）、能查（runs 投影）。
+    // 产物明细仍以 `merges` 表为唯一事实源，所以 poll 到终态后再取那一行，
+    // 不把 items 塞进 detail_json 造成第二份表示。
+    const run = await track('merge', runId)
+    if (!run || run.status === 'failed' || run.status === 'cancelled') return
+    const detail = parseRunDetail(run)
+    const mid = String(detail.merge_id || '')
+    if (!mid) return
+    const row = (await getMerge(mid))?.data?.merge
+    if (!row) return
+    mergeResult.value = {
+      ok: true,
+      composed: Boolean(detail.composed),
+      mode: String(detail.mode || row.mode || ''),
+      url: String(detail.url || ''),
+      subtitle_burned: Boolean(detail.subtitle_burned),
+      bgm_mixed: Boolean(detail.bgm_mixed),
+      warning: String(detail.fallback || ''),
+      merge: row,
+      items: JSON.parse(row.items_json || '[]'),
+    }
   } catch {
     message.error(t('aigc.generateError'))
   }

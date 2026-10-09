@@ -21,6 +21,16 @@ const TERMINAL_STATUSES = new Set(['done', 'done_with_fallback', 'failed', 'canc
 
 type Translate = (key: string, named?: Record<string, unknown>) => string
 
+/** 台账行 `detail_json` 的唯一解析口：坏 JSON 按"无读数"处理，不让状态面报错。 */
+export function parseRunDetail(run: StudioRun): Record<string, unknown> {
+  try {
+    return JSON.parse(run.detail_json || '{}') as Record<string, unknown>
+  } catch {
+    /* 半截 JSON 不该让状态面炸，按无读数处理 */
+  }
+  return {}
+}
+
 /**
  * 把台账行里的批量读数说成人能看的一句（`detail_json` 的读侧）。
  *
@@ -30,12 +40,7 @@ type Translate = (key: string, named?: Record<string, unknown>) => string
  * 老行没有这些键，退回台账自身的成因文本（`error`），不让警示条空转。
  */
 export function describeRunOutcome(run: StudioRun, t: Translate): string {
-  let facts: Record<string, unknown> = {}
-  try {
-    facts = JSON.parse(run.detail_json || '{}') as Record<string, unknown>
-  } catch {
-    /* 半截 JSON 不该让状态面报错，按无读数处理 */
-  }
+  const facts = parseRunDetail(run)
   const parts: string[] = []
   const failed = Number(facts.fallback_failed) || 0
   const blocked = Number(facts.fallback_blocked) || 0

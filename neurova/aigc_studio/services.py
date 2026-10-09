@@ -742,18 +742,93 @@ def build_srt(shots: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _ffmpegExportStage(store, run_id: str, ffmpeg: str, videos: List[str],
+                       out_path: Path, bgm_path: str, subtitle_path: str) -> Dict[str, Any]:
+    """concat → A3 BGM 混音 → A5 字幕烧录：**整段都是阻塞子进程，必须在别的线程里跑**。
+
+    改前这一段直接在 `async def` 里 `subprocess.run(timeout=600)`——合片期间事件循环
+    不获调度，同进程内 chat 流式、其它长任务的轮询与终态回调、recovery 定时任务全部排队，
+    而日志零异常（§6-93）。
+    取消检查点放在每一级**之前**：叫停后不再开下一级；一级内部那几十秒打不断，是设计如此
+    （打断一次生图/编码既不现实也不安全）。
+    库里那一行由调用侧写：线程里不碰 sqlite 连接。
+    """
+    import subprocess
+    import tempfile
+
+    from neurova.core.ffmpeg import burn_subtitles, has_cjk_font, mix_bgm, probe_has_audio
+
+    guardCancel(store, run_id)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
+                                     encoding="utf-8") as lf:
+        for v in videos:
+            lf.write("file '" + str(v).replace("'", "'\\''") + "'\n")
+        list_file = lf.name
+    cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+           "-c", "copy", str(out_path)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=600, check=False)
+    finally:
+        Path(list_file).unlink(missing_ok=True)
+    if proc.returncode != 0 or not Path(out_path).is_file():
+        return {"ok": False,
+                "error": "FFmpeg 失败: "
+                         + (proc.stderr or b"")[-200:].decode(errors="ignore")}
+
+    final, mixed, burned, warning = Path(out_path), False, False, ""
+    if bgm_path:
+        guardCancel(store, run_id)
+        bgm_file = Path(bgm_path)
+        if bgm_file.is_file():
+            mix_path = final.with_name(final.stem + "_bgm.mp4")
+            ok, err = mix_bgm(ffmpeg, str(final), str(bgm_file), str(mix_path),
+                              has_audio=probe_has_audio(ffmpeg, str(final)))
+            if ok:
+                mixed, final = True, mix_path
+            else:
+                warning = f"BGM 混音失败，输出无 BGM 成片：{err}"
+        else:
+            warning = "BGM 文件不存在，已跳过混音"
+    if subtitle_path:
+        guardCancel(store, run_id)
+        if not has_cjk_font():
+            warning = ((warning + "；") if warning else "") + \
+                "本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）"
+        else:
+            sub_path = final.with_name(final.stem + "_sub.mp4")
+            ok, err = burn_subtitles(ffmpeg, str(final), subtitle_path, str(sub_path))
+            if ok:
+                burned, final = True, sub_path
+            else:
+                warning = ((warning + "；") if warning else "") + \
+                    f"字幕烧录失败，输出无字幕成片：{err}"
+    return {"ok": True, "path": str(final), "mixed": mixed, "burned": burned,
+            "warning": warning}
+
+
 async def merge_episode(store, pid: str, eid: str,
-                        bgm_path: str = "") -> Dict[str, Any]:
+                        bgm_path: str = "", run_id: str = "") -> Dict[str, Any]:
     """制片导出：FFmpeg 真拼接（有二进制且镜头有视频）→ mp4；否则连播清单 manifest。
 
     bgm_path（A3）：用户提供的循环乐轨（本地音频文件），concat 后第二级混音；
     有字幕时第三级烧录（-c:a copy 保留混音轨）。BGM 生成协议无实测服务商，
-    维持台账 blocked——本函数只做真混音，不假生成。"""
+    维持台账 blocked——本函数只做真混音，不假生成。
+
+    `run_id`：经端点发起时由 `_spawn_run` 传入本次那一行台账——导出**自己结算自己那一行**
+    （真出片 `done`、降级/带 warning `done_with_fallback`、叫停 `cancelled`），
+    所以导出进度与成因第一次在 `GET /projects/{pid}` 的 runs 投影里读得到（§6-94）。
+    单独复用本服务（脚本/测试/别的入口）时不传，仍自建一行。
+    无就绪产物是**失败**不是降级：直接抛，让 wrapper 落 `failed`——旧形态回 200 +
+    `ok=False`，前端只会显示"已输出连播清单"而清单里一条素材都没有。
+    """
+    import asyncio
+
     from neurova.core.ffmpeg import resolve_ffmpeg_path
     from neurova.llm.generators.runtime import (
         GENERATION_OUTPUT_DIR, local_url_for, persist_bytes,
     )
 
+    rid = run_id or store.add_run({"project_id": pid, "kind": "merge"})["id"]
     shots = store.list_storyboards(eid)
     # 字幕文件先落（两种模式都需要）
     srt = build_srt(shots)
@@ -773,88 +848,53 @@ async def merge_episode(store, pid: str, eid: str,
 
     videos = [sb.get("video_path") for sb in shots if sb.get("video_path")
               and Path(sb["video_path"]).is_file()]
-    ffmpeg = resolve_ffmpeg_path()
-    if ffmpeg and len(videos) >= 1:
+    if not (any(videos) or any(sb.get("first_frame_path") or sb.get("audio_path")
+                               for sb in shots)):
+        raise ValueError("无就绪产物（镜头未生成图/音/视频）")
+    # `-version` 探测同样是阻塞子进程：一并挪出循环，别只挪最长那一段
+    ffmpeg = await asyncio.to_thread(resolve_ffmpeg_path)
+    degraded = ""
+    if ffmpeg and videos:
+        out_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}.mp4"
         try:
-            import subprocess
-            import tempfile
-
-            out_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}.mp4"
-            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
-                                             encoding="utf-8") as lf:
-                for v in videos:
-                    lf.write("file '" + str(v).replace("'", "'\\''") + "'\n")
-                list_file = lf.name
-            cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file,
-                   "-c", "copy", str(out_path)]
-            proc = subprocess.run(cmd, capture_output=True, timeout=600, check=False)
-            Path(list_file).unlink(missing_ok=True)
-            if proc.returncode == 0 and out_path.is_file():
-                # 三级流水线：concat → A3 BGM 混音 → A5 字幕烧录。
-                # 每级失败回退上一级产物 + warning 留痕，不中断交付。
-                from neurova.core.ffmpeg import (
-                    burn_subtitles, has_cjk_font, mix_bgm, probe_has_audio,
-                )
-
-                burned, mixed, warning = False, False, ""
-                final_path = out_path
-                if bgm_path:
-                    bgm_file = Path(bgm_path)
-                    if bgm_file.is_file():
-                        mix_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}_bgm.mp4"
-                        ok, err = mix_bgm(ffmpeg, str(final_path), str(bgm_file),
-                                          str(mix_path),
-                                          has_audio=probe_has_audio(ffmpeg, str(final_path)))
-                        if ok:
-                            mixed, final_path = True, mix_path
-                        else:
-                            warning = f"BGM 混音失败，输出无 BGM 成片：{err}"
-                    else:
-                        warning = "BGM 文件不存在，已跳过混音"
-                if subtitle_path:
-                    if not has_cjk_font():
-                        warning = ((warning + "；") if warning else "") +                             "本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）"
-                    else:
-                        sub_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}_sub.mp4"
-                        ok, err = burn_subtitles(ffmpeg, str(final_path),
-                                                 subtitle_path, str(sub_path))
-                        if ok:
-                            burned, final_path = True, sub_path
-                        else:
-                            warning = ((warning + "；") if warning else "") +                                 f"字幕烧录失败，输出无字幕成片：{err}"
-                merge = store.add_merge({
-                    "project_id": pid, "episode_id": eid, "mode": "ffmpeg_concat",
-                    "status": "done", "output_path": str(final_path),
-                    "output_url": local_url_for(str(final_path)), "items": items,
-                    "warning": warning,
-                })
-                store.update_episode(eid, {"video_path": str(final_path),
-                                           "status": "exported"})
-                return {"ok": True, "composed": True, "mode": "ffmpeg_concat",
-                        "url": merge["output_url"], "merge": merge, "items": items,
-                        "subtitle_burned": burned, "bgm_mixed": mixed,
-                        "warning": warning}
-            err = f"FFmpeg 失败: {(proc.stderr or b'')[-200:].decode(errors='ignore')}"
-        except Exception as e:  # noqa: BLE001
-            err = f"FFmpeg 异常: {str(e)[:200]}"
-        logger.warning("%s（降级连播清单）", err)
-
-    has_material = any(videos) or any(
-        sb.get("first_frame_path") or sb.get("audio_path") for sb in shots)
-    if not has_material:
-        merge = store.add_merge({
-            "project_id": pid, "episode_id": eid, "mode": "none",
-            "status": "failed", "error": "无就绪产物（镜头未生成图/音/视频）",
-            "items": items})
-        return {"ok": False, "composed": False, "mode": "none",
-                "error": "无就绪产物（镜头未生成图/音/视频）",
-                "merge": merge, "items": items, "subtitle_burned": False,
-                "bgm_mixed": False, "warning": ""}
+            stage = await asyncio.to_thread(
+                _ffmpegExportStage, store, rid, ffmpeg, videos, out_path,
+                bgm_path, subtitle_path)
+        except RunCancelled:
+            raise
+        except Exception as e:  # noqa: BLE001 - FFmpeg 异常降级连播清单，不中断交付
+            stage = {"ok": False, "error": f"FFmpeg 异常: {str(e)[:200]}"}
+        if stage.get("ok"):
+            merge = store.add_merge({
+                "project_id": pid, "episode_id": eid, "mode": "ffmpeg_concat",
+                "status": "done", "output_path": stage["path"],
+                "output_url": local_url_for(stage["path"]), "items": items,
+                "warning": stage["warning"],
+            })
+            store.update_episode(eid, {"video_path": stage["path"], "status": "exported"})
+            result = {"ok": True, "composed": True, "mode": "ffmpeg_concat",
+                      "url": merge["output_url"], "merge": merge, "items": items,
+                      "subtitle_burned": stage["burned"], "bgm_mixed": stage["mixed"],
+                      "warning": stage["warning"]}
+            _settleRun(store, rid, {"composed": True, "mode": "ffmpeg_concat",
+                                     "url": result["url"], "merge_id": merge["id"],
+                                     "subtitle_burned": stage["burned"],
+                                     "bgm_mixed": stage["mixed"],
+                                     "fallback": stage["warning"]}, "导出")
+            return result
+        degraded = str(stage.get("error") or "FFmpeg 未产出文件")
+        logger.warning("%s（降级连播清单）", degraded)
+    else:
+        degraded = "本机无 FFmpeg，输出连播清单"
 
     merge = store.add_merge({
         "project_id": pid, "episode_id": eid, "mode": "slideshow_manifest",
-        "status": "manifest", "error": "" if ffmpeg else "本机无 FFmpeg，输出连播清单",
-        "items": items})
+        "status": "manifest", "error": degraded, "items": items})
+    _settleRun(store, rid, {"composed": False, "mode": "slideshow_manifest",
+                             "url": "", "merge_id": merge["id"],
+                             "subtitle_burned": False, "bgm_mixed": False,
+                             "fallback": degraded}, "导出")
     return {"ok": True, "composed": False, "mode": "slideshow_manifest",
             "merge": merge, "items": items,
-            "error": "", "subtitle_burned": False, "bgm_mixed": False, "warning": ""}
+            "error": "", "subtitle_burned": False, "bgm_mixed": False,
+            "warning": degraded}

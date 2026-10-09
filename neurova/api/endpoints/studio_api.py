@@ -406,15 +406,18 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
 @router.post("/episodes/{eid}/merge")
 async def merge(eid: str, body: Optional[Dict[str, Any]] = Body(default=None),
                 current_user: Dict[str, Any] = Depends(get_current_user)):
-    """合并导出同步执行（本地 FFmpeg 拼接或连播清单，秒级）。
+    """制片导出：后台执行并落一行 kind=merge 台账，立即返回 run_id。
 
-    body.bgm_path（A3）：用户已上传的 BGM 音频本地路径，参与二级混音。"""
+    改前是同步 `await services.merge_episode(...)`：不建台账行、不登记句柄，所以
+    导出既停不掉也查不到——`runs` 里根本没有它，带病完成（降级连播清单、无字体不烧字幕、
+    混音失败）那套读数对导出完全不适用（§6-94）。产物明细仍以 `merges` 表为唯一事实源，
+    前端 poll 到终态后用 `GET /merges/{mid}` 取 items，不把 items 塞进 `detail_json`。"""
     store = get_store()
     project, _ep = _episode_with_project(store, eid, current_user)
-    res = await services.merge_episode(store, project["id"], eid,
-                                       bgm_path=str((body or {}).get("bgm_path") or ""))
-    code = 0 if res.get("ok") else -1
-    return {"code": code, "data": res}
+    bgm_path = str((body or {}).get("bgm_path") or "")
+    return _spawn_run(store, project["id"], "merge",
+                      lambda runId: services.merge_episode(
+                          store, project["id"], eid, bgm_path=bgm_path, run_id=runId))
 
 
 @router.get("/merges/{mid}")
