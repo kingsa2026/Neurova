@@ -37,6 +37,10 @@ tests/unit/skills/test_body_clear_is_gated.py
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
 tests/unit/agent/test_post_chat_p0_latency_observability.py
+# 评测/只读轮（save_memory=False）不得写技能漏斗账本、不得触发 RSI 迭代（票面 2026-10-09 D3）。
+# 判据打在整条 process() 的外部可观察写入上——缺陷在派发层（两步没接到 save_memory），
+# 只测步骤内部会绿在"今天根本走不到的分支"上。第三格是反证：正常轮必须照写。
+tests/unit/agent/test_evalTurnsSkipFunnelAndRsi.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
 tests/unit/core/test_shared_thread_pool_reuse.py
 # Issue #55 P1：缓存收敛（删死代码 performance.py + 能力缓存单一事实源）
