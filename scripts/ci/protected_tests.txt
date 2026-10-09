@@ -33,6 +33,11 @@ tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 tests/unit/evolution/eval/test_bench_gate_honest_neutrality.py
 # Issue #46 收口：「清空生效正文」在带工具序列/编辑链两形态下也必须被拦
 tests/unit/skills/test_body_clear_is_gated.py
+# 轮级候选正文覆盖槽（§8 前置 2 双臂试评执行面，票面 2026-10-09 Task 2）：
+# 今天唯一的办法是原地改 registry 里的 `doc_text`（全局态，两臂并发即串——实测臂 A
+# 读到臂 B 的正文）。判据钉"各得其所 / 复位不泄漏 / 未设槽逐字节照旧"，并覆盖
+# 同契约第二命中点（SKILL.md 型技能经**工具返回**进模型的那条路）。
+tests/unit/skills/test_turnSkillTextOverride.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
