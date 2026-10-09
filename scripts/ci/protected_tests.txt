@@ -59,6 +59,12 @@ tests/unit/agent/test_evalTurnsSkipFunnelAndRsi.py
 # 反向那格钉住 Router 上不得再长出消息工厂——复活它能让本文件全绿，但"怎么造一条消息"
 # 就有了第二处定义。
 tests/unit/agent/test_processMessageUnifiedEntry.py
+# §6-98 后半（用户 2026-10-10 裁「不接线，钉住单一来源」）：轮身份按 **ContextVar 声明名**
+#   逐条只有台账里那些写方；`set_turn_identity` 生产侧只被 `TurnState.set_request_identity`
+#   调起；`process_message` 带 sender 走传输面但不得改写已进入的轮身份（行为格）。
+#   通道按声明名认而不是按局部名认——`identity_context.py` 里有一条同样叫 `_user_id_var`
+#   却声明 `neurova_request_user_id` 的并行通道，按局部名匹配会把它的正常写点报成违规。
+tests/unit/agent/test_turnIdentitySingleSource.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
 tests/unit/core/test_shared_thread_pool_reuse.py
 # Issue #55 P1：缓存收敛（删死代码 performance.py + 能力缓存单一事实源）
