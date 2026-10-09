@@ -624,7 +624,13 @@ class TestConvertedSitesStayStructural:
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
-    "tests/e2e/test_phase4_integration.py": 2,
+    # 原登记 2 处：`78abaa2e` 重写该文件时，多智能体协调那条延迟上界
+    # （`assert avg_time < 0.01, "Avg coordination time"`）随其用例一起退役，只剩
+    # 让位闸那条开销上界。实测分布比对自该笔起长期报
+    # `新增或变化: {'tests/e2e/test_phase4_integration.py': 1}`——是**台账数字滞后于
+    # 实况**，不是新增判据；被登记的那一半已无主体可量。此处按实况销账到 1，
+    # 任何一处重新长出来的墙钟上界仍会让比对判红。
+    "tests/e2e/test_phase4_integration.py": 1,
     # `tests/integration/test_multi_agent_coordination.py` 已**销账**（原登记 1 处）：
     # `f4776229` 把那条性能用例（`avg_latency_ms < 1.0`）的读数改成按
     # `iterations` 常量折算，`wallclockBounds` 因阈值由常量算术得出而不再判为
