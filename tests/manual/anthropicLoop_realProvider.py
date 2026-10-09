@@ -21,7 +21,7 @@
 `400 invalid_literal: tools[0].type expected "function"`。修法是把协议转换收口到
 路由层一处（登记为台账新格，未拍板前不改）。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/anthropicLoop_realProvider.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/anthropicLoop_realProvider.py
 """
 from __future__ import annotations
 

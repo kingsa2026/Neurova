@@ -15,7 +15,7 @@
 4. 关闭后不遗留仍在跑的 task（否则 TestClient teardown 会被不收敛的 task 拖住）。
 
 一条命令复现：
-PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/videoReconcile_noReader_live.py
+PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/videoReconcile_noReader_live.py
 
 如实记一句：本层证「lifespan 接线 → 周期驱动 → 镜头行回写」这段在路上，**不证**
 `recovery.py` 对上游服务商的轮询正确性（那是账本侧，已有 §6-78 E 条另计）。

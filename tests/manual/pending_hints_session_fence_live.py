@@ -16,7 +16,7 @@
 全程在同一个事件循环里跑：后台任务的生命周期属于发起它的那个 loop，跨 `asyncio.run`
 它根本不会继续，读数就会假空。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/pending_hints_session_fence_live.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/pending_hints_session_fence_live.py
 
 如实记一句：本层证「执行咽喉→协调器→按会话排干」这段闭合，**不证** console HTTP 端点
 ——注入点是 `chat_pipeline._step_llm_call` 里的那几行，由

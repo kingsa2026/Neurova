@@ -12,7 +12,7 @@
 判据：`iteration` 门控开火终止后，**终止那一轮**的 tool_call_id 必须
 ①已随 `tool_result` 事件让出、②进了取证记录、③落进会话台账、④被下一轮读回。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/tool_round_replay_limit_exit.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/tool_round_replay_limit_exit.py
 """
 from __future__ import annotations
 

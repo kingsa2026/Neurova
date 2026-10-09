@@ -16,7 +16,7 @@
    failed + process_died 成因，而不是永远"在跑"；
 4. 仓内 `data/` 未被写入。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/studioRunLedger_live.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/studioRunLedger_live.py
 
 如实记一句：本层证「端点 → 后台任务 → 台账行 → 读侧投影」与「重启对账 → 读侧可见」
 两段闭合，不证视频子账（`video_status` + 生成任务账本）——那条已有 recovery 轮询覆盖。
