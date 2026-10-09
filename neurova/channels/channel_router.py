@@ -134,6 +134,20 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # §6-127 裁定 ①/③：渠道发送者"这一轮是谁"由绑定表解析（agent 级作用域），未绑定
+        # 退到渠道专属命名空间 `ch:{渠道}:{发送者}`——不再落 default 共享桶（那正是 §6-123 的
+        # 成因）。`user_id` 在这里**只产生一次**，下游 `chat_pipeline._init_agent_state` 照旧读
+        # metadata；解析单点若多出一处，两条通道就会给同一个人算出两个身份。
+        from neurova.channels.user_identity import UserIdentityManager
+
+        turnIdentity = UserIdentityManager().resolveTurnIdentity(
+            agent_id, message.channel_type, str(meta["channel_user_id"]))
+        meta["user_id"] = turnIdentity["user_id"]
+        meta["identity_bound"] = turnIdentity["bound"]
+        # 记忆三层隔离键是 (neuser_id, user_id) 一对（`api/deps.py:118-125` 从 JWT 成对取）；
+        # 只带一个键名过去会复现不出控制台写入的那把键，等于同一个人两份记忆。
+        meta["memory_scope"] = {"neuser_id": turnIdentity["neuser_id"],
+                                "user_id": turnIdentity["user_id"]}
         # 可信轮次来源（任务2 actionability 门控地基）：默认 human——人类/未标注一律
         # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
         sender_is_bot = _detect_sender_is_bot(message)
@@ -178,6 +192,12 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
         try:
             set_request_user_id(owner)
+            # 会话落盘归 agent 属主（上一行），记忆/工具隔离归解析出的发送者身份（这一行）
+            # ——两者本就不同职，是 §6-127 裁定 ④登记过的**声明式分叉**，不是漂了。
+            memoryManager = getattr(agent, "memory_manager", None)
+            if memoryManager is not None and hasattr(memoryManager, "set_request_scope"):
+                memoryManager.set_request_scope(
+                    neuser_id=turnIdentity["neuser_id"], user_id=turnIdentity["user_id"])
             preflight = await ledger.acquire()
             if ledger.rejected:
                 # 排队期被 /chat/stop 取消，或排队超时：如实回一句，不静默吞掉

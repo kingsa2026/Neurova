@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS channel_user_bindings (
     channel_type TEXT NOT NULL,
     channel_user_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
+    neuser_id TEXT,
     display_name TEXT,
     bound_by TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -112,9 +113,15 @@ class UserIdentityManager:
         channelUserId: str,
         userId: str,
         *,
+        neuserId: Optional[str] = None,
         displayName: Optional[str] = None,
         boundBy: str = "",
     ) -> Dict[str, Any]:
+        """`neuserId` 缺省取 `userId`，但绑定入口应当把登录态的两个 id 都传进来。
+
+        记忆隔离键是 `{agent}:{neuser_id}:{user_id}` 两元组（`api/deps.py:118-125` 从 JWT 成对取），
+        只存一个就复现不出控制台写入的那个键：渠道侧读起来会变成"同一个人两份记忆"。
+        """
         """把一个渠道发送者绑到平台账号；同 `(agent, 渠道, 发送者)` 再绑即换主（覆盖并刷新时间）。
 
         空 `userId` 与缺省身份一律拒：那等于把渠道发送者塞回 `default` 共享桶——
@@ -140,17 +147,19 @@ class UserIdentityManager:
             conn.execute(
                 """
                 INSERT INTO channel_user_bindings
-                    (agent_id, channel_type, channel_user_id, user_id, display_name,
-                     bound_by, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                    (agent_id, channel_type, channel_user_id, user_id, neuser_id,
+                     display_name, bound_by, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                 ON CONFLICT(agent_id, channel_type, channel_user_id) DO UPDATE SET
                     user_id = excluded.user_id,
+                    neuser_id = excluded.neuser_id,
                     display_name = excluded.display_name,
                     bound_by = excluded.bound_by,
                     status = 'active',
                     updated_at = excluded.updated_at
                 """,
-                (agentId, channelType, channelUserId, userId, displayName, boundBy, now, now),
+                (agentId, channelType, channelUserId, userId, neuserId or userId,
+                 displayName, boundBy, now, now),
             )
             conn.commit()
         return {
@@ -158,6 +167,7 @@ class UserIdentityManager:
             "channel_type": channelType,
             "channel_user_id": channelUserId,
             "user_id": userId,
+            "neuser_id": neuserId or userId,
             "display_name": displayName,
             "bound_by": boundBy,
             "status": "active",
@@ -189,10 +199,37 @@ class UserIdentityManager:
             ).fetchone()
         return str(row["user_id"]) if row else None
 
+    def resolveTurnIdentity(
+        self, agentId: str, channelType: str, channelUserId: str
+    ) -> Dict[str, str]:
+        """渠道路径唯一的"这一轮是谁"出口：已绑→平台账号对，未绑→渠道专属命名空间。
+
+        两条都不留空：未绑定时返回 `ch:{渠道}:{发送者}` 而不是 `"default"`——把所有人
+        塞进一个桶正是 §6-123 的成因。绑定后的"提升"只改**今后**写入的归属，历史仍留在
+        原命名空间（合并搬迁不可逆，未裁不做）。
+        """
+        bound = self.resolveBinding(agentId, channelType, channelUserId)
+        if bound:
+            return {"user_id": bound["user_id"], "neuser_id": bound["neuser_id"],
+                    "bound": "true"}
+        namespace = self.channelNamespace(channelType, channelUserId)
+        return {"user_id": namespace, "neuser_id": namespace, "bound": "false"}
+
+    def resolveBinding(self, agentId: str, channelType: str,
+                       channelUserId: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._getConn().execute(
+                "SELECT user_id, neuser_id, display_name, bound_by FROM channel_user_bindings"
+                " WHERE agent_id=? AND channel_type=? AND channel_user_id=?"
+                " AND status='active'",
+                (str(agentId), str(channelType), str(channelUserId)),
+            ).fetchone()
+        return dict(row) if row else None
+
     def listBindings(self, agentId: str) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._getConn().execute(
-                "SELECT agent_id, channel_type, channel_user_id, user_id, display_name,"
+                "SELECT agent_id, channel_type, channel_user_id, user_id, neuser_id, display_name,"
                 " bound_by, status, created_at, updated_at FROM channel_user_bindings"
                 " WHERE agent_id=? ORDER BY updated_at DESC",
                 (str(agentId),),

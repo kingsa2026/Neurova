@@ -71,6 +71,11 @@ tests/unit/agent/test_turnIdentitySingleSource.py
 #   刻意不写"两读数必须相等"：复算证明渠道入口是**声明过的分叉**（request=会话属主，
 #   轮身份落缺省）——那条恒假判据会把正确代码报成缺陷，也逼不出 §6-123 这个真问题。
 tests/unit/agent/test_requestUserIdEntryConsistency.py
+# 工单 2026-10-10 批 1/批 2：渠道身份绑定存储（agent 级唯一键、解绑留痕、拒绑非个人身份、
+# 命名空间与技能库同形）＋ 渠道路径按绑定表解析轮身份（未绑定→ch: 命名空间、
+# 记忆作用域成对下发）。批 2 同时改判了上一格的 ④，理由写在该判据文件与 §6-127。
+tests/unit/channels/test_channelIdentityBindingStore.py
+tests/unit/channels/test_channel_router.py
 # §6-95 后半：`runs/*.json` 从"只写不读"接上读者——提案带着 `run_id` 指回那次运行，
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
