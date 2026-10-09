@@ -94,6 +94,15 @@ class _FakeMemoryManager:
     def get_stats(self, **kwargs):
         return {"total_memories": len(self._store)}
 
+    def get_memory(self, memory_id, **kwargs):  # agent_wide 口径透传（接口演进同步）
+        """与真实 `MemoryManager.get_memory`（`manager.py:1788`）同契约：命中回 dict、未命中回 None。
+
+        端点 `crud.py:246/331` 与 `pending.py:124` 都读这一处——P1-6 的归属校验也收口在那里，
+        所以替身缺这个方法时，被测端点会走进 `except Exception` 分支、把"读不到"
+        报成 `7002 获取记忆失败`（404 壳里装 500 的话），两格就此常红：红的是替身，不是契约。
+        """
+        return self._store.get(memory_id)
+
     def get_self_model(self):
         return {"persona": "tester"}
 
