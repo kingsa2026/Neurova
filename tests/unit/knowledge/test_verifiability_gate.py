@@ -51,15 +51,18 @@ class TestSharedGateIsSingleSource:
         pattern = re.compile(r"^(?:async )?def find_violations\s*\(", re.MULTILINE)
         hits = []
         for path in root.rglob("*.py"):
-            text = str(path).replace("\\", "/")
-            if any(skip in text for skip in ("/.venv/", "/.stash/", "src-tauri", "/node_modules/")):
+            # 记录形与比较形必须是同一个东西：这里此前用 `str(relative_to(root))` 收
+            # **平台原生**分隔符，却拿 POSIX 字面量比较——Windows 上恒红，
+            # 于是"共享位只剩一处"这条守卫在 Windows 上从来没在判过事。
+            rel = path.relative_to(root).as_posix()
+            if any(skip in rel for skip in (".venv/", ".stash/", "src-tauri", "node_modules/")):
                 continue
             try:
                 body = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
             if pattern.search(body):
-                hits.append(str(path.relative_to(root)))
+                hits.append(rel)
 
         assert hits == ["neurova/knowledge/verifiability.py"], (
             "find_violations 定义处应恰为共享位一处，实测：%s" % hits
