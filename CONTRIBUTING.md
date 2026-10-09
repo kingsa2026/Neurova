@@ -66,7 +66,9 @@ python start.py --check
 - 正式测试放 `tests/unit|integration|e2e|performance/` 对应层级；临时验证脚本即用即删，不留仓库。
 - 跑测试用项目解释器 `.venv/Scripts/python.exe -m pytest`（系统 Python 与项目依赖不一致）。
 - 已知预存失败基线见 `docs/04-plans/` 各计划文档"预存失败 stash 实证"节——**预存失败不算回归，新增失败才算**；提交前用 `git stash push <files> && pytest && git stash pop` 做 A/B 验证。
-- 前端：`npm run test`（vitest）、`npm run lint`、`npx vue-tsc --noEmit`（CI 同款检查）。
+- 前端实跑门两道：`npm run test`（vitest）与 `npx vue-tsc --noEmit`（CI 同款检查）。
+  `npm run lint` **目前跑不了**（仓内无 eslint 配置、eslint 不在依赖清单），故不列为验收项；
+  恢复这道门属另批（补 flat config + 依赖并接入 CI），详见 `AGENTS.md` §4 与台账 §6-112。
 
 ## 代码规约
 
