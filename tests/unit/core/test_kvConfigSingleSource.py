@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""通用 KV 配置器只剩一份实现（§6-123；§9 序 5 批 E，用户裁 E-2）。
+"""通用 KV 配置器只剩一份实现（§6-125；§9 序 5 批 E，用户裁 E-2）。
 
 仓内原有两份通用 KV 配置器：`core/config.py:60`（分层版 354 行）与 `core/config_manager.py:21`
 （简单版 118 行）。**两份的生产 import 复算都是 0**——`get_config_manager()`（`config.py:424`）
