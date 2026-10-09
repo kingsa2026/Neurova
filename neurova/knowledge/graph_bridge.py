@@ -538,10 +538,16 @@ def _projectionRelations(graph: Any) -> List[Dict[str, str]]:
 
 def projectionDrift(agentId: str, graph: Any, store: Any,
                     termRegistry: Any = None) -> Dict[str, Any]:
-    """权威与投影的关系差集：缺的（权威有投影无）与孤儿（投影有权威无）。
+    """权威与投影的差集：关系两向（缺的/孤儿）+ **节点维度的无据残留**。
 
     只报不计分、不自动修：分叉是**运维读数**，修由 `rebuildProjectionFromAuthority`
     显式做——顺手修掉就等于把报出与处置混成一件事，读的人再也看不到曾经分叉过。
+
+    节点这一维是 §6-106 补的：此前只比关系，真库清账后 drift 回"missing 0 / orphan 0"，
+    而投影里实际还留着 33 个无邻居的孤立节点、**个个带 `description`（条目正文前 200 字）**。
+    同一份读数里 `nodes`（rebuild 报的是"按权威铺出来的节点数"）与投影总节点数也不同名
+    却同城，读的人必然把 145 当成 178——所以这里把三个数分开摆明。
+    判"无据"的口径与 rebuild 的删除口径对齐：标签不在权威关系两端、且没有任何邻居。
     """
     authority = _authorityRelations(store, agentId, termRegistry)
     projection = _projectionRelations(graph)
@@ -551,13 +557,56 @@ def projectionDrift(agentId: str, graph: Any, store: Any,
 
     held = {_key(r) for r in projection}
     known = {_key(r) for r in authority}
+    wantedLabels = {r["source"] for r in authority} | {r["target"] for r in authority}
+    unbacked = [
+        {"label": node.label,
+         "has_body": bool((node.properties or {}).get("description"))}
+        for node in graph._nodes.values()
+        if node.label not in wantedLabels and not graph.get_neighbors(node.node_id)
+    ]
     return {
         "agent_id": agentId,
         "authority_relations": len(authority),
         "projection_relations": len(projection),
         "missing_relations": [r for r in authority if _key(r) not in held],
         "orphan_relations": [r for r in projection if _key(r) not in known],
+        "authority_nodes": len(wantedLabels),
+        "projection_nodes": len(graph._nodes),
+        "unbacked_nodes": unbacked,
+        "unbacked_nodes_with_body": sum(1 for u in unbacked if u["has_body"]),
     }
+
+
+def driftFindingsForAllAgents(store: Any) -> List[Dict[str, Any]]:
+    """扫一遍所有带投影目录的 agent，回**有分叉**的那些（启动只报不修用它）。
+
+    枚举口径不另起一份：目录根走 `agent_workspaces` 单源，管理器走 per-agent
+    工厂——与端点 `_get_kg_manager` 之外的那条 fallback 同一个构造点。
+    目录名不合 agent_id 规则的脏目录跳过而非抛：那不是图谱故障，是工作区里
+    多了个陌生文件夹，把它算成"投影漂移"会污染读数。
+    """
+    from neurova.cognitive_layers.knowledge_graph.manager import (
+        get_agent_knowledge_graph_manager,
+    )
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    root = get_agent_workspaces_root()
+    findings: List[Dict[str, Any]] = []
+    if not root.exists():
+        return findings
+    for child in sorted(root.iterdir()):
+        if not (child / "knowledge_graph").is_dir():
+            continue
+        try:
+            graph = get_agent_knowledge_graph_manager(child.name)
+            drift = projectionDrift(child.name, graph, store)
+        except Exception as e:  # noqa: BLE001 - 一个 agent 读不动不许带停启动
+            logger.warning("投影一致性读数跳过 agent %s: %s", child.name, e)
+            continue
+        if (drift["missing_relations"] or drift["orphan_relations"]
+                or drift["unbacked_nodes"]):
+            findings.append(drift)
+    return findings
 
 
 def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
@@ -605,5 +654,10 @@ def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
         if graph.add_edge(source_id=sourceId, target_id=targetId,
                           relation_type=rel["relation"]) is not None:
             edges += 1
+    persist = graph.persist()
     return {"agent_id": agentId, "nodes": len(nodeIds), "edges": edges,
+            # `nodes` 是"按权威铺出来的节点数"，`projection_nodes` 是投影里的总节点数：
+            # 两个数同城不同名，摆在一起才不会被人读成一个（§6-106）
+            "projection_nodes": len(graph._nodes),
+            "persist": persist,
             "drift": projectionDrift(agentId, graph, store, termRegistry)}
