@@ -292,3 +292,73 @@ async def test_session_owned_by_agent_owner_via_request_context(manager):
     assert seen["req_user"] == "admin-77"
     # chat 结束后清除，不污染后续
     assert get_request_user_id() in (None, "")
+
+
+class _ScopeSpy:
+    """承载 memory_manager 的最小替身：只记录 set_request_scope 的成对入参。"""
+
+    def __init__(self):
+        self.scopes = []
+
+    def set_request_scope(self, neuser_id=None, user_id=None):
+        self.scopes.append((neuser_id, user_id))
+
+
+def _bindManager(tmp_path):
+    from neurova.channels.user_identity import UserIdentityManager
+
+    UserIdentityManager.resetInstance()
+    return UserIdentityManager(str(tmp_path / "bindings.db"))
+
+
+@pytest.mark.asyncio
+async def test_unboundSenderGetsChannelNamespaceNotDefault(manager, tmp_path):
+    """§6-127 裁定 ①：未绑定的渠道发送者落 `ch:{渠道}:{发送者}`，不再进 default 共享桶。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("ok")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    manager.add_message_handler(handler, priority=50)
+
+    await manager._dispatch_message(_msg("你好", sender="ou_55"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["user_id"] == "ch:feishu:ou_55", meta
+    assert meta["identity_bound"] == "false", meta
+    assert agent.memory_manager.scopes == [("ch:feishu:ou_55", "ch:feishu:ou_55")]
+
+
+@pytest.mark.asyncio
+async def test_boundSenderUsesPlatformAccountAndScopePair(manager, tmp_path):
+    """已绑定 → 轮身份是平台账号，且记忆作用域成对下发（少一个键就复现不出控制台那把键）。"""
+    mgr = _bindManager(tmp_path)
+    mgr.bindIdentity("default", "feishu", "ou_55", "u-alice", neuserId="ne-u1",
+                     boundBy="admin")
+    agent = FakeAgent("ok")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    manager.add_message_handler(handler, priority=50)
+
+    await manager._dispatch_message(_msg("你好", sender="ou_55"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["identity_bound"] == "true", meta
+    assert meta["user_id"] == "u-alice", meta
+    assert meta["channel_user_id"] == "ou_55", "渠道原身份仍要留着（来源展示/群内 @ 用它）"
+    assert agent.memory_manager.scopes == [("ne-u1", "u-alice")]
+
+
+@pytest.mark.asyncio
+async def test_bindingIsScopedPerAgentOnTheChannelPath(manager, tmp_path):
+    """裁定 ③＝agent 级：换 agent 不认这条绑定，各自算各自的身份。"""
+    mgr = _bindManager(tmp_path)
+    mgr.bindIdentity("a1", "feishu", "ou_55", "u-alice", neuserId="ne-u1")
+    for agentId, expected in (("a1", "u-alice"), ("default", "ch:feishu:ou_55")):
+        agent = FakeAgent("ok")
+        agent.memory_manager = _ScopeSpy()
+        handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+        manager._message_handlers = [h for h in manager._message_handlers
+                                     if getattr(h, "__name__", "") != "<lambda>"]
+        manager.add_message_handler(handler, priority=50)
+        await manager._dispatch_message(_msg("你好", sender="ou_55", agent_id=agentId))
+        assert agent.calls[0]["metadata"]["user_id"] == expected, (agentId, agent.calls)

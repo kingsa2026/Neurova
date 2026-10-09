@@ -80,8 +80,9 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
     "neurova/channels/channel_router.py": {
         "kind": "noTurnWrite",
         "requestSource": "agent.config.owner_user_id（渠道会话落盘归属）",
-        "turnSource": "该入口不写轮身份；其 meta 不带 user_id 键 ⇒ 轮身份落缺省 default（§6-123）",
-        "metaLacksUserId": True,
+        "turnSource": "批 2 起：meta['user_id'] 由 UserIdentityManager.resolveTurnIdentity 单点产出"
+                      "（已绑→平台账号对，未绑→ch:{渠道}:{发送者}）",
+        "resolvedVia": "resolveTurnIdentity",
     },
     "neurova/api/endpoints/computer.py": {
         "kind": "noTurnWrite",
@@ -196,8 +197,12 @@ def turnSideSources(tree: ast.AST) -> List[str]:
     return out
 
 
-def dictKeysOfTheFunctionThatWrites(tree: ast.AST) -> List[str]:
-    """写 request 通道的那个函数里所有 dict 字面量的字符串键（④ 的靶）。"""
+def metaKeysOfTheWriterFunction(tree: ast.AST) -> List[str]:
+    """写 request 通道的那个函数里，metadata 的键名来源（④ 的靶）。
+
+    两种形态都要收：dict 字面量的键，和 `meta["x"] = ...` 的下标赋值。只认前者会造
+    **假绿**——批 2 之后渠道路径正是用下标赋值写 `user_id`，dict 字面量里仍然没有它。
+    """
     parents = _parents(tree)
     keys: List[str] = []
     for call in _callsNamed(tree, REQUEST_WRITERS):
@@ -206,10 +211,49 @@ def dictKeysOfTheFunctionThatWrites(tree: ast.AST) -> List[str]:
             continue
         for node in ast.walk(holder):
             if isinstance(node, ast.Dict):
-                for key in node.keys:
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                        keys.append(key.value)
+                keys += [k.value for k in node.keys
+                         if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if (isinstance(target, ast.Subscript)
+                            and isinstance(target.slice, ast.Constant)
+                            and isinstance(target.slice.value, str)):
+                        keys.append(target.slice.value)
     return keys
+
+
+def _originOf(expr: ast.AST, scope: ast.AST, depth: int = 0) -> str:
+    """这条值"来自哪个出口"：直接调用、或**本函数内**由那个调用赋来的局部变量（一层）。
+
+    只追一层是为了不重造数据流引擎，同时允许
+    `turnIdentity = resolveTurnIdentity(...)` 之后 `meta["user_id"] = turnIdentity["user_id"]`
+    这种等价写法——判的是"值只可能来自那个出口"，不是语法形状。跨函数传值不在本判据射程内
+    （真要绕过，走参数注入即可；那种改法必然要动别处，由 §6-121 的写方清单那一格兜住）。
+    """
+    called = {_calleeName(c) for c in ast.walk(expr) if isinstance(c, ast.Call)}
+    if "resolveTurnIdentity" in called:
+        return "resolveTurnIdentity"
+    if depth < 2 and isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
+        for node in ast.walk(scope):
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == expr.value.id
+                            for t in node.targets)):
+                return _originOf(node.value, scope, depth + 1)
+    return _calleeName(expr) if isinstance(expr, ast.Call) else type(expr).__name__
+
+
+def userIdAssignments(tree: ast.AST) -> List[str]:
+    """`meta["user_id"] = …` 的值来源（④ 要求它只能是解析单点）。"""
+    out: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if (isinstance(target, ast.Subscript)
+                    and isinstance(target.slice, ast.Constant)
+                    and target.slice.value == "user_id"):
+                out.append(_originOf(node.value, tree))
+    return out
 
 
 def productionSources() -> Dict[str, ast.AST]:
@@ -303,14 +347,25 @@ class TestDeclaredKindsMatchCode:
                 "「这一格的 request 侧是从那条通道派生的」这句已经不是事实了"
             )
 
-    def test_channelEntryStillLeavesTheTurnSideWithoutAUserId(self):
-        """④ 渠道那格额外钉死"meta 不带 `user_id` 键"——§6-123 那条后果的成因。"""
+    def test_channelUserIdComesOnlyFromTheResolutionPoint(self):
+        """④（批 2 改判）：渠道 meta 的 `user_id` **必须**存在，且只能是解析单点给的。
+
+        改判理由（§6-127 裁定 ①/③，不是放宽）：本格原形态是"meta 里不得出现 `user_id` 键"，
+        因为那时渠道路径没人解析、轮身份一律落 `"default"`（§6-123 的成因）。批 2 接上
+        `UserIdentityManager.resolveTurnIdentity` 之后，"没有这个键"反而成了缺陷——
+        所以现在要求：键在、值只来自那一个调用、且不来自报文自带字段（否则外部可冒充平台账号）。
+        """
         rel = "neurova/channels/channel_router.py"
-        keys = dictKeysOfTheFunctionThatWrites(productionSources()[rel])
-        assert "user_id" not in keys, (
-            f"{rel} 往 metadata 里加了 `user_id` 键：渠道对话的轮身份不再落缺省，"
-            "§6-123 那句「外部发送者共享 default 隔离域」的实状被改写——"
-            "先去看那一格再动这里（并把本表的 metaLacksUserId 一并改掉）"
+        tree = productionSources()[rel]
+        entry = ENTRY_POINTS[rel]
+        assert "user_id" in metaKeysOfTheWriterFunction(tree), (
+            f"{rel} 不再往 meta 写 `user_id` ⇒ 渠道发送者退回 default 共享桶，"
+            "§6-127 裁定 ①被推翻"
+        )
+        assert userIdAssignments(tree) == [entry["resolvedVia"]], (
+            f"{rel} 的 meta['user_id'] 来源是 {userIdAssignments(tree)}，"
+            f"只允许 {entry['resolvedVia']!r} 一个出口——两处产出身份，"
+            "两条通道就会给同一个人算出两个身份"
         )
 
 
@@ -356,8 +411,12 @@ class TestTheComparatorsAreNotVacuous:
         assert requestSideSources(synthetic) == turnSideSources(synthetic), (
             "同一个键的两种写法判不出同形——② 两头失真"
         )
-        assert "user_id" in dictKeysOfTheFunctionThatWrites(synthetic), (
-            "dict 键收集器看不见 meta 里的 `user_id`——④ 恒真"
+        assert "user_id" in metaKeysOfTheWriterFunction(synthetic), (
+            "键收集器看不见 meta 里的 `user_id`——④ 恒真"
+        )
+        assigned = ast.parse("def f(meta):\n    meta['user_id'] = resolveTurnIdentity(1)\n")
+        assert userIdAssignments(assigned) == ["resolveTurnIdentity"], (
+            "下标赋值的来源抽不出来——④ 会被随手赋值绕过"
         )
         assert not _callsNamed(synthetic, ("get_request_user_id",)), (
             "对不存在的读取口误报命中——③ 的派生说法会被假证明"
