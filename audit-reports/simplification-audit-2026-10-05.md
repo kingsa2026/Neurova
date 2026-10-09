@@ -1553,14 +1553,40 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **判据**：`TestImportBudgetKeepsWallClock::test_ownTreePathJoinedWithNativeSeparatorIsNotASideEffect` —— 造一个真在 import 期 `open(os.path.join('/proc','stat'))` 的模块，要求 `sideEffects == []`。这条**按平台自适应**：POSIX 上那文件存在且真被读，靠地盘豁免放行；Windows 上它不存在，靠同一豁免放行。红灯原文（HEAD 实况）：`AssertionError: 地盘路径被点成 import 期重活: ['open:/proc\\stat']`。
     - **同族复算**：全文件只有这一处分隔符敏感的前缀比对（另一处 `startswith(_PROBE_MARKER)` 与路径无关）。与本卷 §6-118 记的"守卫记平台原生分隔符却比 POSIX 字面量＝本机恒红从不判事"同族，方向相反（这次是判据写 `/`、机器给 `\`）。
 
-121. **`neurova_request_user_id` 是"本轮哪个用户"的第二条通道：不与轮身份共变量，但同语义、另一批、需人裁** 🟡 —— 落 §6-98 后半（取「不接线，钉住单一来源」）时，判据第一版把它误报成"轮身份被旁路直写"，顺着这条误报复算出来的真事实。
+121. **`neurova_request_user_id` 是"本轮哪个用户"的第二条通道：不与轮身份共变量，但同语义；(a) 档判据 ✅ 闭环 `a46c25bc`，(b) 合并仍 🟡 需人裁** —— 落 §6-98 后半（取「不接线，钉住单一来源」）时，判据第一版把它误报成"轮身份被旁路直写"，顺着这条误报复算出来的真事实。
 
-    - **两条通道各自的读写面**（`grep` + `import` 复算，不是名字推断）：
-      - 轮身份 `neurova_turn_user_id`（`core/turn_context.py:27` 声明）——写：唯一入口 `set_turn_identity`，生产侧只被 `agent/turn_state.py:119 TurnState.set_request_identity` 调起；读：`get_turn_user_id`，消费方是工具层三层隔离与蜂群事件广播那一族。
-      - 并行通道 `neurova_request_user_id`（`core/identity_context.py:18` 声明，**局部名同样叫 `_user_id_var`**）——写三处：`agent/chat_pipeline.py:477`（取 `ctx.metadata['user_id']`）、`api/endpoints/computer.py:729`、`channels/channel_router.py:180`；读两处：`computer_use/browser_manager.py:1790`（落 `or "default"` 兜底）、`computer_use/camofox_server_backend.py:79`。它的 docstring 自陈"不复用 MemoryManager._scope_var，隔离关注点分离"。
-    - **接线后实现什么、不接线留下什么**（AGENTS.md §7 要求）：合并成一条通道 ⇒ "浏览器/计算机使用按哪个用户开 profile"与"记忆/工具按哪个用户隔离"从此同一份事实，`chat_pipeline` 少一次双写，`browser_manager` 的 `or "default"` 兜底可收到唯一一处。不接线留下的风险是**两处会漂**：任一入口只写其中一条时，用户会看到"记忆按 A 用户隔离、浏览器 profile 按 B 用户开"，且没有任何判据会红（今天这两条通道各自都有单一来源守卫，但它们**之间**的一致性无人守）。
-    - **为何不在本批改**：合并要动按用户隔离的语义（三处写方的取值口径不一：`ctx.metadata` / 端点参数 / 渠道 owner），属另一根因、另一裁；本笔只把两条通道**作为独立通道各自逐条登记**进 `tests/unit/agent/test_turnIdentitySingleSource.py` 的 `WRITERS` 台账——多一处写点即红、新增第五条身份类 ContextVar 即红，先把"别再长第三条"钉住，合并与否留人裁。
-    - **可裁的三档**（代价各不同，供拍板）：**(a) 保持两条 + 补一枚一致性判据**（同一轮内两个读数不同即红；只加判据不动语义，最便宜，但双写仍在）；**(b) 合并到轮身份**（`identity_context` 退役，`browser_manager`/`camofox` 改读 `get_turn_user_id`；单一事实源到位，代价是三处写方的取值口径必须统一到 `set_turn_identity` 的入参，且 `or "default"` 兜底语义要在合并处交代清楚）；**(c) 反向合并**（把用户身份统一收进 `request_user_id`，动 `turn_state` 门面与工具层三层隔离的读面，改动面最大）。推荐 **(a) 先落判据、(b) 另批做**——先让漂移可见，再动隔离语义。
+    - **两处按实况更正（都记下来，因为它们各代表一种会复发的错）**：
+      ① **写方不是三处而是五处**。本格初版记"三处生产写方"，是 `grep … | head -15` 把命中面**截断**了——
+      补出来的是 `tool_executor.py:2229`（把轮身份读数转写进 request 通道）与
+      `tool_layers/mcp_server.py:192`（同一条通道自读自写，给 MCP 执行链透传）。这次是**新判据自己抓出来的**
+      （① 那格要求写方集合与登记表逐条相等，首跑即红），不是有人又 grep 了一遍。
+      ② **"同一轮两读数必须相等"这句（本格 (a) 档原话）被证伪**。五处入口的取值来源各不相同，
+      其中两处是**刻意的分叉**：`channel_router` 的 request 侧是 `agent.config.owner_user_id`（会话落盘归属），
+      而它交给轮身份的 metadata 里根本没有 `user_id` 键（⇒ 见 §6-123）；`computer.py` 那条压根不跑对话轮。
+      照原话写判据，就是把一条恒假断言当守卫、并让渠道那格当场红。
+    - **实际落地的判据**（`tests/unit/agent/test_requestUserIdEntryConsistency.py`，8 格，**一条生产代码未动**）：
+      ① 写方文件集合与登记表逐条相等（多一格即红——漂移正是从"多一个入口没人对照"开始）；
+      ② 声明 `sameSource` 的入口，两处写入点的来源表达式必须**逐字同形**，比较时剥掉
+      `or None`/`or "default"` 这类缺省补皮（不剥会把正确的代码报成分叉）；
+      ③ 声明"不写轮身份"的入口必须真的没有轮身份写入点，且声称的派生链要在**被调的那个方法自己的函数体里**成立
+      （第一版把跨方法的取值链判成"脱节"，是假红）；读取的三种形态——调用 / 属性 / `getattr(x, "名称", …)`
+      的第二位置实参——都收进检出器，`_agent_identity` 走的正是第三种；
+      ④ 渠道那格额外钉死"meta 不带 `user_id` 键"，即 §6-123 的成因；谁加上就逼他先去看那一格。
+      判据自身两处首跑红（上面 ①② 两条更正就是它抓出来的）与 8 格里的四台检出器反证，一并算作它活了。
+    - **两条通道各自的读写面（复算后的实状）**：轮身份 `neurova_turn_user_id`（`core/turn_context.py:27`）
+      写方唯一（`set_turn_identity` ← `turn_state.py:119`），读方是工具层三层隔离那一族；
+      并行通道 `neurova_request_user_id`（`core/identity_context.py:18`，**局部名同样叫 `_user_id_var`**）
+      写方五处（见表上五行）、读方两处（`browser_manager.py:1790` 落 `or "default"` 兜底、
+      `camofox_server_backend.py:79`）。它的 docstring 自陈"不复用 MemoryManager._scope_var，隔离关注点分离"。
+    - **接线后实现什么、不接线留下什么**（AGENTS.md §7 要求）：合并成一条通道 ⇒ "浏览器/计算机使用按哪个用户开 profile"
+      与"记忆/工具按哪个用户隔离"同一份事实，`chat_pipeline` 少一次双写，`browser_manager` 的 `or "default"`
+      兜底可收到唯一一处。不接线留下的风险是**两处会漂**：任一入口只写其中一条时，用户会看到"记忆按 A 用户隔离、
+      浏览器 profile 按 B 用户开"——**这一条现在有人守了**（②③ 两格），但**声明过分叉的那两格仍是有意的不同值**，
+      合并不等于把它们拉平。
+    - **仍待裁的是 (b) 合并**：`identity_context` 退役、`browser_manager`/`camofox` 改读 `get_turn_user_id`，
+      代价是五处写方的取值口径必须统一到 `set_turn_identity` 的入参，而其中渠道与 computer 两格**今天就没有轮身份侧的对应值**
+      （先裁 §6-123，否则合并会把"缺省 default"当用户身份带进记忆隔离）；`or "default"` 兜底语义要在合并处交代清楚。
+      (c) 反向合并（把用户身份收进 `request_user_id`）改动面最大，动 `turn_state` 门面与三层隔离读面。
 
 122. **本轮 A/B 顺带抓出 main 自带两处常驻红，逐条按实况销账（✅ `5dbae982`、`35649409`）** 🟡 —— 都是 §6-96 那批做宽域 A/B 时撞上的，与本批内容无关；归因一律用**仓外 HEAD worktree 现建基线**复算，不靠"看起来预存"。
 
@@ -1568,3 +1594,30 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **`test_dev_path_and_runtime_dep_guards.py::test_no_dev_repo_path_in_tests`**：`tests/manual/` 七份活体脚本的"一条命令复现"里写死 `PYTHONPATH="E:/项目/Neurova"`——这道守卫拦的正是"换台机器 FileNotFoundError、活体自证静默不跑"，而它自己长期是红的。改法取自仓内既有合规写法（`batchRunFallbackLedger_live.py`、`crossEpisodeContinuity_live.py` 已用"机器无关串"），统一成 `PYTHONPATH="$(git rev-parse --show-toplevel)"`，七份逐文件断言旧串恰出现一次再替换，行尾未动（每份 numstat 均 1/1）。**交叉引用 §6-117**：那一格由并发会话登记，它复核时这七份还是他人未提交段，本会话动手时工作树是干净态、守卫仍报 7 处 offender，故由本会话落库 `35649409`；两边读到的不是同一时刻的实状，这条正是"复核实状要在落笔那一刻做"的注脚。
     - **不认领的机器侧红（登记不修）**：`tests/unit/ci/test_npc_script_interpreter_reachability.py` 5 格在本机必红——node 在 Git Bash 下启动即崩（`Assertion failed: ncrypto::CSPRNG(nullptr, 0)`，退码 134）。在 `30534ac5` 的干净 worktree 里同签名复现（5 failed / 25 passed），属本机工具链而非仓内代码；本批一律不认领。另有一次 wide-run 里 `test_moduleTopLevelShadowing` ERROR、`testManualScriptsDoNotReplicateDataRootLayout` failed，单跑与 HEAD worktree 跑均全绿 ⇒ 并发会话在扫描中途动工作树的选段级抖动，同样不认领、也不谎称"复现不了所以不存在"。
     - **自记两笔"先落字后取数"（本卷第九、第十次）**：`44289d53` 正文把新判据文件写成 386 行、实测 380，且把同轮另一笔的 `test_ci_wallclock_assertion_ledger.py 7/1` 也列进了那笔的 numstat 表（该文件不在那笔的 `--only` 路径里）；`9624a73b` 正文写成 421 行、实测 491。两次都是**数已经取到了、写正文时凭首稿印象落字**。修正办法沿用本卷既有那条（凡手写数字，落笔那一刻重新取数），本格的读数全部直接抄自 `git diff HEAD --numstat` 输出。
+
+123. **渠道对话的轮身份落缺省 `default`：外部发送者在技能私库有自己的键，在记忆/审计/治理那一族却没有（🟡 需人裁）** 🔴 —— §6-121 的 (a) 档落判据时逐入口复算五处写方的取值来源，抓出来的不对称。不是推测，两侧代码都在。
+
+    - **实状（逐处 file:line 复核）**：`channels/channel_router.py:126-136` 造的 `meta` 里有
+      `channel_user_id`（发送者 open_id/群）、`chat_id`、`role`、`source_channel`，**没有 `user_id` 键**；
+      而 `agent/chat_pipeline.py:613` 写轮身份取的是 `(ctx.metadata or {}).get("user_id")`
+      ⇒ 渠道轮的 `user_id` 是 None，`set_turn_identity` 按既有语义落 **"default"**
+      （`core/turn_context.py:386`）。同一处代码随后给技能库装配的却是另一个键：
+      `:632 resolve_user_key(user_id=…, channel_user_id=…)` → `ch:{渠道}:{发送者}`
+      （`skills/skill_visibility.py:138-153` 明写"渠道外部身份优先"）。
+    - **于是同一轮里两套身份并存**：技能私库按"渠道发送者"分，而读轮身份的那一族把所有人当同一个人——
+      `tool_executor.py:524`（三层隔离：治理裁决/审批请求/审计日志）、`:5407`、
+      `post_chat_pipeline.py:1067`（回合产物归属）、`agent/swarm.py:626`（蜂群事件 userId）、
+      `mcp_server.py:153/187`（MCP 调用归属）。这些消费点全都只认 `user_id`，拿不到 `channel_user_id`。
+    - **两种读法都成立，所以要人裁**：**(甲) 这是设计**——渠道发送者不是平台账号，本就不该有个人记忆库、
+      也不该被当成审计主体；那"技能私库给它独立键"就是不一致的那一侧，应把 `resolve_user_key` 的
+      渠道分支收口掉（或让技能视图也退回 default），并把"渠道轮无审计主体"写进文档与判据。
+      **(乙) 这是漏接**——外部发送者的对话内容会落进同一 agent 的 `default` 记忆/产物域，
+      不同发送者互相可见（技能库分开了恰恰说明设计上是想分开的）；那正确修法是让 `channel_router`
+      把身份同时以轮身份能读的形态传出（一个键、一处装配），并把"渠道轮的隔离主体"钉成判据。
+    - **为什么不顺手修**：(乙) 的修法要同时动 metadata 契约（`user_id` 现在是**平台账号专用**，
+      直接塞 open_id 进 `user_id` 会把渠道发送者冒充成账号主体，治理与审计会拿它去查不存在的用户）
+      与所有只读 `user_id` 的消费点；(甲) 则要退役一处已在生产的渠道分支。两者都不是"补个判据"的量级，
+      且方向由产品语义决定（渠道对话到底算不算个人记忆）——教义第 1 条要求先定性质再修根因。
+    - **本批已做的（只登记不放宽）**：`a46c25bc` 的判据把 ④ 那格钉成"渠道 meta 里不得出现
+      `user_id` 键"——今天它是本格的成因，也是现状边界。谁要按 (乙) 修，会先被这一格拦住并要求
+      连同本格一起改，而不是让隔离语义在无声中换向。
