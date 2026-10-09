@@ -110,7 +110,11 @@ async def _download_to(url: str, dest: Path) -> bool:
 
 
 def _verify_binary(path: Path) -> bool:
-    """下载件真实校验：-version 可执行且返回 0，否则视为无效。"""
+    """下载件真实校验：-version 可执行且返回 0，否则视为无效。
+
+    阻塞子进程（`timeout=20`，本机实测 42–45ms）——从 `async def` 里调它要过
+    `asyncio.to_thread`，否则校验期间整个事件循环停摆（§6-98）。
+    """
     try:
         proc = subprocess.run([str(path), "-version"], capture_output=True, timeout=20, check=False)
         return proc.returncode == 0
@@ -152,7 +156,7 @@ async def ensure_ffmpeg() -> str:
                 target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
             except OSError:
                 pass
-            if _verify_binary(target):
+            if await asyncio.to_thread(_verify_binary, target):
                 size_mb = target.stat().st_size / (1 << 20)
                 logger.info("FFmpeg 下载完成并通过校验：%s（%.1f MB）", target, size_mb)
                 return str(target)

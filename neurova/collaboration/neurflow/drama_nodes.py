@@ -890,6 +890,36 @@ async def exec_subtitle_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
     }
 
 
+def _concatLocalClips(ffmpeg: str, local_files: List[str], out_path: Path) -> "tuple[bool, str]":
+    """concat 一级：写清单文件 → 跑 ffmpeg → 收产物。**整段是阻塞子进程（上限 300s）**。
+
+    改前这一发在 `async def exec_video_compose` 里裸调 `subprocess.run`——合成期间
+    事件循环不获调度，同进程的 chat 流式与别的长任务轮询全部排队，日志零异常
+    （§6-93 的 B 档命中点，与 Studio 导出那发同根因，`6c6b9cbd` 只收了导出那一侧）。
+    所以它留在同步函数里，由调用侧 `await asyncio.to_thread(...)` 执行。
+    返回 (是否出片, 失败成因尾巴)；节点的状态与读数由调用侧写。
+    """
+    import subprocess
+    import tempfile as _tf
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with _tf.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as lf:
+        for f in local_files:
+            lf.write("file '" + str(f).replace("'", "'\\''") + "'\n")
+        list_file = lf.name
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+             "-c", "copy", str(out_path)],
+            capture_output=True, timeout=300, check=False,
+        )
+    finally:
+        Path(list_file).unlink(missing_ok=True)
+    if proc.returncode != 0 or not out_path.is_file():
+        return False, (proc.stderr or b"")[-200:].decode(errors="ignore")
+    return True, ""
+
+
 async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """视频合成执行器（批次4：禁假文件名根修）
 
@@ -931,23 +961,12 @@ async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
     ffmpeg = resolve_ffmpeg_path(str(config.get("ffmpeg_path") or ""))
     if ffmpeg and local_files:
         try:
-            import subprocess
-            import tempfile as _tf
+            import asyncio
 
-            out_dir = Path(_GEN_OUTPUT_DIR)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"compose_{int(time.time() * 1000)}.mp4"
-            with _tf.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as lf:
-                for f in local_files:
-                    lf.write("file '" + str(f).replace("'", "'\\''") + "'\n")
-                list_file = lf.name
-            proc = subprocess.run(
-                [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file,
-                 "-c", "copy", str(out_path)],
-                capture_output=True, timeout=300, check=False,
-            )
-            Path(list_file).unlink(missing_ok=True)
-            if proc.returncode == 0 and out_path.is_file():
+            out_path = Path(_GEN_OUTPUT_DIR) / f"compose_{int(time.time() * 1000)}.mp4"
+            ok, errTail = await asyncio.to_thread(
+                _concatLocalClips, ffmpeg, local_files, out_path)
+            if ok:
                 from neurova.llm.generators.runtime import local_url_for
 
                 return {
@@ -962,7 +981,7 @@ async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
                         "resolution": resolution,
                     },
                 }
-            degrade = f"FFmpeg 合成失败: {(proc.stderr or b'')[-200:].decode(errors='ignore')}"
+            degrade = f"FFmpeg 合成失败: {errTail}"
         except Exception as e:  # noqa: BLE001 — 失败落到诚实降级，不伪造成功
             degrade = f"FFmpeg 合成异常: {str(e)[:200]}"
         logger.warning("%s", degrade)

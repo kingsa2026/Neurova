@@ -851,8 +851,9 @@ async def merge_episode(store, pid: str, eid: str,
     if not (any(videos) or any(sb.get("first_frame_path") or sb.get("audio_path")
                                for sb in shots)):
         raise ValueError("无就绪产物（镜头未生成图/音/视频）")
-    # `-version` 探测同样是阻塞子进程：一并挪出循环，别只挪最长那一段
-    ffmpeg = await asyncio.to_thread(resolve_ffmpeg_path)
+    # 解析口只做 stat + PATH 扫描（实测 0.02–0.1ms，**不跑子进程**），不必挪出循环；
+    # 占死循环的是下面那三级子进程。`-version` 在 `_verify_binary` 里，属引导链另一处。
+    ffmpeg = resolve_ffmpeg_path()
     degraded = ""
     if ffmpeg and videos:
         out_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}.mp4"
