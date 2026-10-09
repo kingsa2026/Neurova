@@ -42,6 +42,10 @@ tests/unit/skills/test_turnSkillTextOverride.py
 # 执行的那个对象推导——端点自己再猜一遍实测翻过车（真臂被改标成 simulated）。真臂必须
 # 经 agent.chat(save_memory=False) 且本轮带着自己那一臂的候选正文。
 tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py
+# 模块级重名定义＝被后一份静默遮蔽的死码：本仓一次接缝重构里把同一函数写了两遍，
+# 测试全绿（覆盖关系恰好留下想要的那份）。反空转那格造一枚重名模块必须被抓到，
+# 扫描面收缩到 0 个文件也当场红——"路径写错→零文件→全绿"是最常见的假门禁。
+tests/unit/ci/test_moduleTopLevelShadowing.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
