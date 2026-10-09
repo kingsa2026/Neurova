@@ -2032,3 +2032,15 @@ tests/unit/knowledge/test_retrievalGateFloor.py
 # 与 §6-51 那座注入器 `_cache` 仍在——本批删的是第二座，不许顺手把唯一实装带走。
 # 逐文件单跑两次同读数 5 passed（`54cc8ba2` 落库之后复取）
 tests/unit/context/test_secondCacheFaceRetired.py
+
+# 语音引擎桥退役防再生（`29aa879a`，§6-108）：§9 序 4 复算改判的第二格
+# 这座桥不参与渠道语音链路（入站真 ASR 在 `channels/voice_precheck.py:43-84`，
+# 出站走 TwiML；它生产侧 import 实测为 0），其分派职责现役由 `voice_engine.py:71
+# process()` 内部完成；给它作证的格是"名字可导入/工厂能 new"式恒真断言。
+# 本批的难点不在删桥，而在**混合测试文件按格摘、不按文件删**：`voice_memory_bridge`
+# 是活的（`agent_core.py:706-717` 构造、`agent_shutdown.py:87-90` 收尾），
+# 所以判据里有两档反向对照——活面必须仍在位（渠道适配器 + 引擎分派 + 记忆桥装配），
+# 以及五个活覆盖类（TestVoiceMemoryBridge*/TestAgentShutdown/TestVoiceAdapterRegistration/
+# TestVoicePerformanceMonitoring/TestVoiceAdapterLifecycleCompleteness）不许被顺手带走。
+# 逐文件单跑两次同读数 5 passed（`29aa879a` 落库之后复取）
+tests/unit/voice/test_voiceEngineBridgeRetired.py
