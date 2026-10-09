@@ -145,3 +145,110 @@ class TestAbCompareService:
         assert report["n"] == 2
         assert report["delta"] == pytest.approx(0.7)
         assert not (tmp_path / "evo" / "proposals.json").exists()
+
+
+class _AgentStub:
+    """真 agent 替身：留下 chat 收到的参数，以及**当时**本轮覆盖槽的读数。"""
+
+    def __init__(self):
+        self.calls = []
+        self.overrideSeen = []
+
+    async def chat(self, user_input, **kwargs):
+        from neurova.core import turn_context
+
+        self.calls.append({"user_input": user_input, **kwargs})
+        self.overrideSeen.append(turn_context.get_turn_skill_text_override("s1"))
+        return {"text": f"out::{user_input}", "audio_path": None, "audio_data": None}
+
+
+class TestAbExecutorFace:
+    """执行面来源必须一路到 HTTP 之外（票面 Task 4：写了必须有人读，且不靠端点自己猜）。"""
+
+    def test_simulatedArmIsLabelledOnTheWire(self, client):
+        r = client.post(f"{BASE}/skills/a1/ab",
+                        json={"skill_id": SKILL_ID, "candidate_text": CANDIDATE})
+        assert r.status_code == 200
+        assert r.json()["data"]["executor_kind"] == "simulated", r.json()
+
+    def test_realArmRunsWithTheAgent(self, env, monkeypatch):
+        """真臂：端点在装配点注入执行器，评测回合真经过 agent.chat(save_memory=False)。"""
+        import neurova.api.endpoints as endpoints
+        import neurova.evolution.eval.fitness as fitness
+        import neurova.skills.skill_service as ss
+
+        agent = _AgentStub()
+        monkeypatch.setattr(endpoints, "get_agent_instance",
+                            lambda agent_id="": agent, raising=False)
+        monkeypatch.setattr(ss.SkillService, "get_skill_info",
+                            lambda self, sid: {
+                                "name": "s1",
+                                "manifest": {"config": {"context_template": BASELINE}},
+                                "description": "",
+                            })
+
+        async def fakeScore(self, **kw):
+            from neurova.evolution.eval.fitness import FitnessScore
+
+            value = 0.9 if "改进版" in kw.get("skill_text", "") else 0.2
+            return FitnessScore(correctness=value, procedure_following=value,
+                                conciseness=value, feedback="")
+
+        monkeypatch.setattr(fitness.LLMJudge, "score", fakeScore, raising=False)
+
+        app = FastAPI()
+        app.include_router(api.router, prefix=BASE)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            c.app.dependency_overrides[get_current_user] = lambda: USER
+            c.app.dependency_overrides[api._admin_dep] = lambda: ADMIN
+            r = c.post(f"{BASE}/skills/a1/ab",
+                       json={"skill_id": SKILL_ID, "candidate_text": CANDIDATE,
+                             "real_trajectory": True})
+
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["executor_kind"] == "real_agent", data
+        assert agent.calls, "真臂根本没跑 agent 回合"
+        assert {call.get("save_memory") for call in agent.calls} == {False}, agent.calls
+        assert all("$s1" in call["user_input"] for call in agent.calls), agent.calls
+
+        # 票面 Task 5 Step 5 的活体格：候选正文**经覆盖槽经到 agent 那一侧**，
+        # 且两臂各拿自己那一份（基线臂读基线正文、候选臂读候选正文），
+        # 请求结束后本轮不再有残留覆盖。
+        from neurova.core import turn_context
+
+        assert agent.overrideSeen == [BASELINE, BASELINE, CANDIDATE, CANDIDATE], agent.overrideSeen
+        assert turn_context.get_turn_skill_text_override("s1") is None, (
+            "回合结束后覆盖槽没复位，正文会续进下一轮")
+
+    def test_realArmRefusedWhenAgentMissing(self, client, monkeypatch):
+        """拿不到 agent ⇒ 409 点名原因；**绝不静默回落成模拟面**（教义第 2 条）。"""
+        import neurova.api.endpoints as endpoints
+
+        monkeypatch.setattr(endpoints, "get_agent_instance",
+                            lambda agent_id="": None, raising=False)
+        r = client.post(f"{BASE}/skills/a1/ab",
+                        json={"skill_id": SKILL_ID, "candidate_text": CANDIDATE,
+                              "real_trajectory": True})
+        assert r.status_code == 409, r.text
+        assert "不在线" in r.json()["detail"], r.json()
+
+    def test_realArmRefusedWhenSkillNameCannotBeMentioned(self, client, monkeypatch):
+        """名字组不出 $mention ⇒ 候选正文进不了本轮 ⇒ 两臂同文的假 0 差，必须当场拒。"""
+        import neurova.api.endpoints as endpoints
+        import neurova.skills.skill_service as ss
+
+        monkeypatch.setattr(endpoints, "get_agent_instance",
+                            lambda agent_id="": _AgentStub(), raising=False)
+        monkeypatch.setattr(ss.SkillService, "get_skill_info",
+                            lambda self, sid: {
+                                "name": "web search",
+                                "manifest": {"config": {"context_template": BASELINE}},
+                                "description": "",
+                            })
+        r = client.post(f"{BASE}/skills/a1/ab",
+                        json={"skill_id": SKILL_ID, "candidate_text": CANDIDATE,
+                              "real_trajectory": True})
+        assert r.status_code == 422, r.text
+        assert "mention" in r.json()["detail"], r.json()
+

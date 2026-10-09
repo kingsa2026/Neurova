@@ -96,6 +96,7 @@ describe('text-evolution 模块 HTTP 契约（路径不得含 /v1 前缀）', ()
     await evolution.getProposal('kai', 'p1')
     await evolution.approveProposal('kai', 'p1')
     await evolution.rejectProposal('kai', 'p1')
+    await evolution.abCompareSkills('kai', { skill_id: 's1', candidate_text: '新正文' })
     const paths = [
       ...apiMock.get.mock.calls,
       ...apiMock.post.mock.calls,
@@ -106,5 +107,25 @@ describe('text-evolution 模块 HTTP 契约（路径不得含 /v1 前缀）', ()
       expect(p).toMatch(/^\/evolution/)
       expect(p).not.toContain('/v1')
     }
+  })
+
+  it('abCompareSkills → POST /evolution/skills/{agentId}/ab', async () => {
+    await evolution.abCompareSkills('kai', { skill_id: 's1', candidate_text: '新正文' })
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/evolution/skills/kai/ab',
+      { skill_id: 's1', candidate_text: '新正文' },
+    )
+  })
+
+  it('真臂必须显式带 real_trajectory；不带时不得被当成真轨迹面', async () => {
+    await evolution.abCompareSkills('kai', {
+      skill_id: 's1', candidate_text: '新正文', real_trajectory: true,
+    })
+    const realBody = apiMock.post.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(realBody.real_trajectory).toBe(true)
+
+    await evolution.abCompareSkills('kai', { skill_id: 's1', candidate_text: '新正文' })
+    const plainBody = apiMock.post.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(plainBody.real_trajectory).toBeUndefined()
   })
 })
