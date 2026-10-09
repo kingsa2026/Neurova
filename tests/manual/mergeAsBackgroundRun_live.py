@@ -51,20 +51,25 @@ USER = {"user_id": "u-merge", "role": "admin"}
 CLIP_COUNT = 2
 CLIP_SECONDS = 15
 
-# 用真二进制，但不让 lifespan 去下载（不开外网、不花钱）
-os.environ.setdefault("NEUROVA_FFMPEG_AUTODOWNLOAD", "0")
+# 用真二进制，但不让 lifespan 去下载（不开外网、不花钱）。
+# 两条 env 写在函数体内，不放模块顶层：`tests/unit/ci/test_manualScriptsEnvMutationRatchet.py`
+# 守的正是"顶层写 env ⇒ 脚本被 pytest 收集即把变量带进整场跑测进程"这一形态。
 FFMPEG = ""
-for _cand in (REPO_DATA_DIR / "tools" / "ffmpeg" / "ffmpeg.exe",
-              REPO_DATA_DIR / "tools" / "ffmpeg" / "ffmpeg"):
-    if _cand.is_file():
-        FFMPEG = str(_cand)
-        break
-if not FFMPEG:
+
+
+def _useRealFfmpeg() -> str:
+    os.environ["NEUROVA_FFMPEG_AUTODOWNLOAD"] = "0"
+    for cand in (REPO_DATA_DIR / "tools" / "ffmpeg" / "ffmpeg.exe",
+                 REPO_DATA_DIR / "tools" / "ffmpeg" / "ffmpeg"):
+        if cand.is_file():
+            os.environ["NEUROVA_FFMPEG_PATH"] = str(cand)
+            return str(cand)
     import shutil
 
-    FFMPEG = shutil.which("ffmpeg") or ""
-if FFMPEG:
-    os.environ["NEUROVA_FFMPEG_PATH"] = FFMPEG
+    found = shutil.which("ffmpeg") or ""
+    if found:
+        os.environ["NEUROVA_FFMPEG_PATH"] = found
+    return found
 
 
 def fingerprintDataDir():
@@ -115,6 +120,9 @@ def waitTerminal(store, rid: str, seconds: float = 240.0):
 
 def main() -> int:
     import json
+
+    global FFMPEG
+    FFMPEG = _useRealFfmpeg()
 
     from fastapi.responses import JSONResponse
     from fastapi.testclient import TestClient
