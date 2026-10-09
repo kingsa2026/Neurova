@@ -1,0 +1,127 @@
+{
+  "_comment": [
+    "批次 K3：检索回归门的合成语料。为什么不用真库——真库 36 条全是 private、",
+    "属主只有一个，把它们的标题与正文导出进仓等于把用户私有语料交出去；",
+    "而只活在某人机器上的一个运行时文件里的基线，别人 clone 下来评测集为空、CI 永绿，",
+    "N3 那条「没有地板」实际没闭。所以门必须落在一份可入库、可复现、跨机器同读数的语料上。",
+    "语料形状按第一次真库跑的读数反推：真库标签为空，自动标注 30 例里 29 例走 title_literal、",
+    "1 例走 category，`tag` 口径 0 例——那样的『基线』只证明管路通，不证明检索准。",
+    "本夹具刻意给齐 tags 与 category，三种口径都要产例，判据里有一格钉这件事。"
+  ],
+  "agent_id": "default",
+  "owner_user_id": "gate-user",
+  "items": [
+    {
+      "knowledge_id": "kb-gw-001",
+      "title": "网关限流的滑动窗口算法",
+      "content": "网关按滑动窗口统计每分钟请求数，窗口粒度为一秒，超限返回 429 并带重试提示。",
+      "category": "infra",
+      "tags": ["限流", "网关"]
+    },
+    {
+      "knowledge_id": "kb-gw-002",
+      "title": "连接池的空闲回收周期",
+      "content": "数据库连接池里空闲超过五分钟的连接会被回收，回收前先检查是否有未提交事务。",
+      "category": "infra",
+      "tags": ["连接池", "回收"]
+    },
+    {
+      "knowledge_id": "kb-obs-001",
+      "title": "指标上报的采样率约定",
+      "content": "高基数指标按百分之一采样上报，低基数指标全量上报，采样率可按路由覆盖。",
+      "category": "observability",
+      "tags": ["指标", "采样"]
+    },
+    {
+      "knowledge_id": "kb-obs-002",
+      "title": "分布式追踪的上下文传播",
+      "content": "追踪上下文通过 traceparent 头跨服务传播，网关在入口生成根 span，缺失时新建而非丢弃。",
+      "category": "observability",
+      "tags": ["追踪", "网关"]
+    },
+    {
+      "knowledge_id": "kb-sec-001",
+      "title": "令牌签发的有效期与轮换",
+      "content": "访问令牌默认十五分钟有效，刷新令牌七天，密钥每九十天轮换一次并保留上一把验旧签。",
+      "category": "security",
+      "tags": ["令牌", "轮换"]
+    },
+    {
+      "knowledge_id": "kb-sec-002",
+      "title": "静态加密的密钥分层",
+      "content": "数据密钥加密行级内容，主密钥加密数据密钥，主密钥只存在于凭据管理器且不落盘。",
+      "category": "security",
+      "tags": ["加密", "密钥"]
+    },
+    {
+      "knowledge_id": "kb-data-001",
+      "title": "宽表分区的按月切法",
+      "content": "事件宽表按月分区，冷分区压缩归档到对象存储，查询跨分区时必须带时间上下界。",
+      "category": "data",
+      "tags": ["分区", "归档"]
+    },
+    {
+      "knowledge_id": "kb-data-002",
+      "title": "增量同步的水位线机制",
+      "content": "同步任务记录水位线游标，失败后从游标续拉而不是重跑全量，游标推进与写入同事务。",
+      "category": "data",
+      "tags": ["同步", "游标"]
+    },
+    {
+      "knowledge_id": "kb-ui-001",
+      "title": "暗色主题的令牌覆盖顺序",
+      "content": "暗色模式先读覆盖层再回落到基础令牌，硬编码色值会在契约测试里被判失败。",
+      "category": "frontend",
+      "tags": ["主题", "令牌"]
+    },
+    {
+      "knowledge_id": "kb-ui-002",
+      "title": "长列表的虚拟滚动阈值",
+      "content": "超过两百行的列表启用虚拟滚动，行高固定为四十八，动态行高需显式声明否则退化为全渲染。",
+      "category": "frontend",
+      "tags": ["列表", "滚动"]
+    },
+    {
+      "knowledge_id": "kb-ops-001",
+      "title": "灰度发布的按租户放量",
+      "content": "新特性先对白名单租户放量，观察两小时错误率与延迟分位，达标后逐步扩大到全量。",
+      "category": "operations",
+      "tags": ["灰度", "放量"]
+    },
+    {
+      "knowledge_id": "kb-ops-002",
+      "title": "回滚窗口的保留策略",
+      "content": "每次发布保留上一个不可变制品标签，回滚窗口七天，过期标签由清理任务批量摘除。",
+      "category": "operations",
+      "tags": ["回滚", "制品"]
+    },
+    {
+      "knowledge_id": "kb-model-001",
+      "title": "向量维度变更的重建代价",
+      "content": "更换嵌入模型会改变向量维度，索引必须整体重建，增量写入在维度不齐时退回全量。",
+      "category": "ml",
+      "tags": ["向量", "索引"]
+    },
+    {
+      "knowledge_id": "kb-model-002",
+      "title": "召回精排的两段式打分",
+      "content": "粗排按融合秩取前五十，精排叠加模型打分后截断到十，两段各自可独立关掉做消融。",
+      "category": "ml",
+      "tags": ["召回", "精排"]
+    },
+    {
+      "knowledge_id": "kb-mem-001",
+      "title": "记忆巩固的睡眠整理窗口",
+      "content": "低峰期把当日高频记忆压缩为摘要并写回巩固层，原始轮次保留引用句柄供溯源。",
+      "category": "memory",
+      "tags": ["巩固", "摘要"]
+    },
+    {
+      "knowledge_id": "kb-mem-002",
+      "title": "遗忘曲线的衰减参数标定",
+      "content": "衰减率按召回命中率在线标定，命中为空的条目加速降级，被引用一次即重置计时。",
+      "category": "memory",
+      "tags": ["遗忘", "衰减"]
+    }
+  ]
+}
