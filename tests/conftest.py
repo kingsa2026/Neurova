@@ -179,6 +179,30 @@ def _isolateSessionsLanding(_isolate_session_manager_singletons, tmp_path, monke
 
 
 @pytest.fixture(autouse=True)
+def _automationPrerequisitesHeldForEvidenceAxes(monkeypatch):
+    """§8 自动化前置在测试里默认"齐备"，好让其它证据轴的判据仍然可达。
+
+    为什么要有这一枚：晋升判据新增一道**结构性前置**（未满足即硬否决并点名），
+    它在链首短路返回。不桩掉它，44 格在测"无回滚天数 / roi / 收敛结论 / 经验质量"
+    的既有用例根本走不到自己那条轴——它们的断言与新前置无关，却被它一并挡在门外。
+
+    这与 `tests/unit/evolution/conftest.py` 设计约束第 1 条（禁止私赋阶段、
+    禁止伪造证据值"把缺陷洗成绿色"）**不冲突**：本夹具不伪造任何读数，
+    它桩的是一条结构性能力读数，且：
+      · 真值与桩的分工由 `tests/unit/evolution/rsi/test_automationPrerequisiteGate.py`
+        反向钉住——该模块用**同名夹具**遮蔽本夹具，测的是未桩掉的真实否决；
+      · 本夹具存在性有守卫（同文件 `test_scaffoldFixtureExistsAndIsOptOutable`），
+        被静默摘掉时那里会红，不会变成一堵无主红墙。
+    """
+    from neurova.evolution.rsi import deployment_controller as controllerModule
+    from neurova.evolution.rsi.gate_verdict import GateVerdict
+
+    monkeypatch.setattr(
+        controllerModule, "automationPrerequisiteVerdict",
+        lambda *args, **kwargs: GateVerdict.passed("测试脚手架：前置按齐备处理"))
+
+
+@pytest.fixture(autouse=True)
 def _guardRepoRootAgainstPollution():
     """单条用例执行前后，仓库根顶层条目不得新增——新增即红并点名该用例。
 
