@@ -65,6 +65,12 @@ tests/unit/agent/test_processMessageUnifiedEntry.py
 #   通道按声明名认而不是按局部名认——`identity_context.py` 里有一条同样叫 `_user_id_var`
 #   却声明 `neurova_request_user_id` 的并行通道，按局部名匹配会把它的正常写点报成违规。
 tests/unit/agent/test_turnIdentitySingleSource.py
+# §6-121 的 (a) 档（用户 2026-10-10 裁「先补判据、合并另批」）：两条"本轮哪个用户"通道之间的
+#   一致性来源。表与代码逐条对账——写方清单多一格即红；声明"同读一个来源"的入口两处表达式
+#   必须同形（剥掉 `or None`/`or "default"` 缺省补皮）；声明"不写轮身份"的入口必须真的不写。
+#   刻意不写"两读数必须相等"：复算证明渠道入口是**声明过的分叉**（request=会话属主，
+#   轮身份落缺省）——那条恒假判据会把正确代码报成缺陷，也逼不出 §6-123 这个真问题。
+tests/unit/agent/test_requestUserIdEntryConsistency.py
 # §6-95 后半：`runs/*.json` 从"只写不读"接上读者——提案带着 `run_id` 指回那次运行，
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
