@@ -2007,3 +2007,12 @@ tests/unit/knowledge/test_expiryHasRealTrigger.py
 # tmp 里造一枚零语句模块必须抓到。外加扫描根覆盖性格。
 # 逐文件单跑两次同读数 4 passed（`eec9d649` 落库之后复取）
 tests/unit/test_codelessModuleGuard.py
+
+# 批次 K3（§6-105）：检索质量自此有一层地板。台架此前"有表有端点、从未跑过"，
+# 于是改检索权重/hop 上限/读面开关都不会有任何东西变红。硬判据落在逐案 newly_unhit
+# 而非平均 recall——jieba 缺失会静默回退 n-gram、嵌入模型可用性随机器而变，
+# 平均值是环境函数，"原本命中的现在一条不剩"才是管路断了。
+# 另钉三件：三口径标注都得产例（真库那次是 29/1/0，只剩标题直取一条腿）、
+# 反证三格（整路哑掉必红 / 基线自比必拒 / 无基线必回 unevidenced 而非 pass）、
+# 跑门不许碰生产知识库目录。
+tests/unit/knowledge/test_retrievalGateFloor.py
