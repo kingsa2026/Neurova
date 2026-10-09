@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""`shared_core/plan_orchestrator.py`(453) 已退役，且门面不许再声称它（§6-114；§9 序 5 批 D）。
+"""`shared_core/plan_orchestrator.py`(453) 已退役，且门面不许再声称它（§6-115；§9 序 5 批 D）。
 
 复算依据（台账 §3-A 与 §9 序 5 原把三套 plan_orchestrator 当"同职三套、删其二"，实测不是）：
 
@@ -13,7 +13,7 @@
   与 `tests/execution_engine/test_execution_*.py`）。
 - 另两套**不在本批**：`core/plan_orchestrator.py`(654) 唯一实装 `RetryPolicy` + `adjust_plan`
   反馈改策略，`execution_engine/plan_orchestrator.py`(633) 唯一实装完整步骤状态机与真重试
-  （`:397`）——各有一格"全仓唯一"，按教义第 7 条须先裁再动（§6-114 末列着）。
+  （`:397`）——各有一格"全仓唯一"，按教义第 7 条须先裁再动（§6-115 末列着）。
 
 为什么要单独钉**门面陈述**：`shared_core/__init__.py` 的 docstring 把
 `SharedPlanOrchestrator` 列为"共用任务编排器（小脑）"，而它**并不导入也不导出**任何东西
