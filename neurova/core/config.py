@@ -320,10 +320,18 @@ class ConfigManager:
         try:
             with open(load_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.load_from_dict(data, ConfigLevel.APPLICATION)
-            logger.info("Config loaded from %s", load_path)
+        except (json.JSONDecodeError, OSError) as e:
+            # 分级口径并自退役的 `core/config_manager.py`（教义第 7 条的取长补短）：读不到或
+            # 读坏了只是"这次没拿到文件里的值"，内存里现有配置原样留着，属可降级；一律记
+            # error 会把一次回落报成事故。判据：test_config_manager_persistence.py
+            logger.warning("Config load degraded, keeping current values (%s): %s", load_path, e)
+            return
         except Exception as e:
             logger.error("Failed to load config: %s", e)
+            return
+
+        self.load_from_dict(data, ConfigLevel.APPLICATION)
+        logger.info("Config loaded from %s", load_path)
 
     def load_from_dict(self, data: Dict[str, Any], level: ConfigLevel = ConfigLevel.APPLICATION) -> None:
         """
