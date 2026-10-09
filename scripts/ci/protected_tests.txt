@@ -1977,3 +1977,13 @@ tests/unit/aigc_studio/test_salvageRemoteArtifactBeforePayingAgain.py
 # 返回值就报"已删除"。判据两类：副本取不回（行为），以及断言链与 statement_hash
 # 原样保留 + 巡检仍绿（拦"顺手硬删断言行"那种改法）。
 tests/unit/knowledge/test_entry_erasure_faces.py
+
+# 零模块空壳包防再生（`a83f2364`，§6-102）：§9 序 2 的常驻面
+# 空壳 ＝ `__init__.py` 只有 docstring **且** 整个子树再无别的模块。留着它的代价不是占地方，
+# 而是让 `import neurova.xxx` 看起来"这里有一个子系统"，而实际什么都不会发生。
+# 谓词必须两个条件同时成立——首版只看"子树里没有别的 .py"，误伤了把实现写在
+# `__init__.py` 里的 `execution_layers`(706 行) 与 `skill`(45 行)：形态相同，实质相反。
+# 四档判据：现网为空集 ＋ 造一枚空壳必须抓到（含"加纯数据子目录不许洗白"）
+# ＋ 有真模块的包不得误伤（拿上面那两个现网实例当反证）＋ 扫描根覆盖性（防空集假绿）。
+# 逐文件单跑两次同读数 4 passed（`a83f2364` 落库之后复取）
+tests/unit/test_emptyShellPackageGuard.py
