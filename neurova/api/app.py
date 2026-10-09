@@ -867,6 +867,20 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as _ingress_err:  # noqa: BLE001
             logger.warning("知识摄取排水循环启动失败（忽略）: %s", _ingress_err)
 
+    # 知识底座到期收敛——给"到期"这条生命周期迁移接上真触发点（批次 K1 / 断点 N1）。
+    # `expireDueFacts()` 自工单 008 起就是"状态是生命周期唯一权威"那句话的执行体，
+    # 但全仓零调用点，于是它下面那段"前提到期⇒撤销其推导结论"运行期不可达；
+    # 读侧有 `searchableFacts` 的时钟兜底所以直接检索看不出，漏的是派生面。
+    # 一次性收敛、不起循环（底座注释明写"不起后台线程"）；走 `to_thread`——它是同步
+    # SQLite 写，裸调会把启动事件循环占住（§6-93/§6-99 同族故障，日志零异常那种）。
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        _expired = await asyncio.to_thread(get_knowledge_fact_store().expireDueFacts)
+        logger.info("知识底座到期收敛：推进 %d 行 active→expired，并撤销其推导结论", _expired)
+    except Exception as _expiry_err:  # noqa: BLE001 - 收敛故障不阻断启动，但必须点名
+        logger.warning("知识底座到期收敛失败（到期行暂由读侧时钟闸兜住）: %s", _expiry_err)
+
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
     if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
