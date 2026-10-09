@@ -1432,6 +1432,52 @@
     - **序 6 的可执行余量（按本轮复算改对）**：可径退役 ≈ **2764 行**（plugins 2206 ＋ `media/manager.py` 184 ＋ `cognitive/orchestrator.py` 376）；转需人裁 **1397 行**（`media/config.py` 531 ＋ `language/` 866）；判据不可删 **21 行**（`cognitive/__init__.py`）。原登记 ≈2700 全删的口径作废。
     - **本轮未动一行代码**：按技能边界只出档案。执行删除时需同批改指 pyyaml 契约出处、连带处置 `api_router` 整模块面、交代 docs 七处、并让 `test_runtime_landing_root` 那格在被删包上不留悬空引用（本档把它写成需人裁正是为了不误伤它）。
 
+129. **复核 §6-128（序 6 四包复算）：体量认同，两处判定按"无替代不判删"改回，另补一条未登记的常驻红（✅ 复核闭环，本批仍未动一行代码）** 🔴
+    —— 与 §6-128 同日、同一目标（`plugins`/`media`/`language`/`cognitive`），我用技能流程独立跑了一遍：
+    AST 消费者普查、反向守卫前置、九类伪命中排除、四条 git 配方。下面只写**分歧与新增证据**，
+    相同处不重复（体量 4203 行、四包生产侧包外 import 全 0、事件归属 `7835c367` 三处一致 ✅ 双算通过）。
+
+    - **改一：`plugins/`(2206) 从"判删成立"改回"需人裁"**。§6-128 自己已经写对了事实——现役端点
+      `api/endpoints/plugin.py` 不 import 本包、`_PLUGINS:37` 是进程内字典、`install:153` 只写字典、
+      `load/unload/enable/disable` 只翻 `loaded`/`status` 布尔、`get_plugin_modules` 恒返 `[]`、
+      market 两格标 `[预留]`——但结论落在"可径退役"上。按本仓退役判据，"零消费者 + 替代不成立"
+      **不构成删除理由**，只构成"从未接线"。关键差别在这条实测：
+      `plugin_manager.py:377-384` 是**全仓唯一**能把 manifest 变成可执行插件的实现
+      （`importlib.util.spec_from_file_location` + `sys.modules[spec.name]` 注册 + `exec_module`，
+      另有依赖反查 `:540/562` 与拓扑加载序 `:580`）；`plugin_manifest.py` 另有 semver 解析/比较
+      （`:20,41,68-116`）、跨版本兼容判定 `:124`、约束表达式 `>=/</~` 与 `satisfies()` `:136,157,187`、
+      权限枚举 8 项 `:245`。端点那份一样都没有。⇒ 删掉的不是"残留"，是"第三方插件体系"这件事本身。
+      **决策影响面**：接线＝把 `plugin.py` 的 install/load/enable 改指本包（数据从 `manifest.json`
+      来、进 `sys.modules`、去向是插件自带 router；影响端点 8 条 + 需补 `include_router` 挂载，
+      不可逆点是"允许插件注册 HTTP 路由与执行命令"这项权限面就此打开）；
+      删＝显式承认不做插件体系，连带退役 `tests/unit/{test_base_plugin,test_plugin_manifest}.py`、
+      `tests/unit/core/test_plugins_modules.py` 与 `docs/06-plugin-cli-system.md` 七处示例（§6-128 已数过）；
+      留＝§2 点名的"注册无消费者"断点。三条都需要人拍，本批不代拍。
+    - **改二：`media/manager.py`(184) 不能算"可径删"**。§6-128 判它"与端点重叠可删"。重叠是真的
+      （索引 CRUD、JSON 落点），但**两项能力端点没有**：`manager.py:65,74` 的 sha256 `checksum`
+      与 `:76,101,128,140` 的软删除 `is_deleted`/回收站语义——我对 `api/endpoints/media.py` 全文
+      grep `checksum|is_deleted|sha256` **零命中**。而端点那份在另一些面上确实更强（真字节落盘、
+      分块累计限流、路径穿越守卫、RFC 6266 头），所以这是**双向差集**，不是"弱者退役"：
+      按教义第 7 条要"先比、再取长补短、再退役"，取长补短这一跳没做就不能摘。
+      **来历另有一处必须记下**：这条"曾被消费"是**假接线**——端点历史上确有
+      `from neurova.media import MediaManager; MediaManager.get_instance()`（`7835c367` 起），
+      而 `MediaManager` **从来没有 `get_instance`**（本类只有 `__init__` 与模块级工厂
+      `get_media_manager:178`），调用必然抛 AttributeError 并被外层 `except Exception` 吞掉，
+      该段由 `15eb32f4`(2026-09-11) 删除。⇒ 档案里"曾被接进活链路"的证据要降到"从未真接过"。
+    - **补一条未登记的常驻红（HEAD 今天仍红，且不在子集）**：
+      `tests/language/test_language_models.py::TestUserLanguagePreference::test_can_instantiate`
+      传 `language="en"`，而 `models.py:196` 的字段名是 `primary_language`（配对的是
+      `secondary_languages`/`fallback_language`，`to_dict`/`from_dict` 也都按真名走）⇒ 本会话复跑
+      `1 failed / 9 passed`（整目录复跑时同一条也是唯一红），`grep -c "tests/language"
+      protected_tests.txt` = 0，§6-128 亦未记。**这是"测试发明了契约里没有的键名"**，
+      与 §6-55（替身落后于契约）同族、与 §6-116（手抄条目指向已退役实现）同族。
+      修法一行的事，但 `language/`(869) 本身已被两批复算判为需人裁（全仓唯一后端
+      语言偏好/翻译审批/覆盖率实装），所以**先裁模块去留再决定要不要把这条测试修绿**——
+      否则可能白修。登记在此，不静默遗留。
+    - **本批净 LOC**：生产池 **+0/−0**，测试池 **+0/−0**——纯复核，只改档案。
+      与 §6-128 一致的部分不再重复；两份复算并存不是双源：§6-128 是执行档案，本格是**判定分歧与新增证据**，
+      落地时以"分歧已解决的那一版"为准（plugins/media 两格待裁，language 那格红的处置随裁决定）。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
