@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""活体自证（§6-123 · 序 5 批 E）：KV 配置器合并到分层版后，真读写与真启动都照旧。
+"""活体自证（§6-125 · 序 5 批 E）：KV 配置器合并到分层版后，真读写与真启动都照旧。
 
 单元测试那批用 `patch(...logger)` 断级别，本脚本换成**真 logging**：在 `neurova.core.config`
 的 logger 上挂 handler，收真实产生的 LogRecord——mock 断的是"调用发生在谁身上"，真 handler
