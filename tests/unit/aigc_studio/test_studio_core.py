@@ -298,10 +298,12 @@ class TestMerge:
         monkeypatch.setattr(shutil, "which", lambda x: "/usr/bin/ffmpeg")
         p = _project(store)
         ep = store.add_episode(p["id"], {"number": 1, "title": "e1"})
-        # 没有任何产物 → 诚实报错，不假合成
-        res = await services.merge_episode(store, p["id"], ep["id"])
-        assert res["ok"] is False
-        assert "无就绪产物" in res["error"]
+        # 没有任何产物 → 诚实报错，不假合成。
+        # 2026-10-09 改判（§6-94）：形态从"返回 ok=False"改成**抛异常**——导出现在是后台
+        # run，返回值不再直达前端，只有抛出去才让 wrapper 落 `failed`；
+        # 留在 done/done_with_fallback 上，导出面板就会显示"已输出连播清单"而清单是空的。
+        with pytest.raises(ValueError, match="无就绪产物"):
+            await services.merge_episode(store, p["id"], ep["id"])
 
 
 class TestA1LastFrame:

@@ -150,8 +150,17 @@ class TestEpisodeProjection:
 
 
 class TestMergeEndpoint:
-    def test_merge_sync_manifest(self, client, tmp_path, monkeypatch):
+    def test_merge_is_a_background_run(self, client, tmp_path, monkeypatch):
+        """§6-94 改判：导出不再同步返回整包结果。
+
+        改前 `POST /merge` 直接把 `{ok, composed, mode, items, merge…}` 回给调用方，
+        于是导出既进不了 runs 台账（停不掉、查不到、带病完成读数对它完全不适用），
+        又在协程里同步跑 FFmpeg（事件循环停摆，见 §6-93）。现在端点只回 run_id。
+        """
+        import asyncio
         import shutil
+
+        from neurova.aigc_studio import services
 
         monkeypatch.setattr(shutil, "which", lambda x: None)
         pid = client.post("/api/v1/studio/projects", json={"title": "T"}).json()["data"]["project"]["id"]
@@ -162,13 +171,22 @@ class TestMergeEndpoint:
                                                "first_frame_path": str(f)})
         r = client.post(f"/api/v1/studio/episodes/{ep['id']}/merge")
         assert r.status_code == 200
-        data = r.json()["data"]
-        assert data["mode"] in ("slideshow_manifest", "ffmpeg_concat")
-        assert data["items"][0]["text"] == "旁白"
-        m = client.get(f"/api/v1/studio/merges/{data['merge']['id']}")
+        accepted = r.json()["data"]
+        assert accepted.get("run_id") and accepted.get("status") == "started", accepted
+        rows = [x for x in client.store.list_runs(pid) if x["kind"] == "merge"]
+        assert [x["id"] for x in rows] == [accepted["run_id"]], (
+            f"一次导出在 runs 里留下 {len(rows)} 行，或外层那行不是端点回给前端的那行：{rows}")
+
+        # 交付物本身：这条 fixture 的 TestClient 不带上下文（每个请求各起一个 portal，
+        # 后台任务当场被 cancel），所以终态判据在 test_mergeAsBackgroundRun.py（那里循环是活的）；
+        # 这里直接跑一次服务，保住"items 有旁白 / merges 行可查 / SRT 挂到分集"这三格原证据。
+        res = asyncio.run(services.merge_episode(client.store, pid, ep["id"]))
+        assert res["mode"] in ("slideshow_manifest", "ffmpeg_concat")
+        assert res["items"][0]["text"] == "旁白"
+        m = client.get(f"/api/v1/studio/merges/{res['merge']['id']}")
         assert m.status_code == 200
         # 字幕 SRT 已生成并挂到分集
-        assert json.loads(client.store.get_merge(data["merge"]["id"])["items_json"])[0]["text"] == "旁白"
+        assert json.loads(client.store.get_merge(res["merge"]["id"])["items_json"])[0]["text"] == "旁白"
         assert client.store.get_episode(ep["id"])["subtitle_path"].endswith(".srt")
 
 
