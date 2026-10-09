@@ -881,6 +881,29 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _expiry_err:  # noqa: BLE001 - 收敛故障不阻断启动，但必须点名
         logger.warning("知识底座到期收敛失败（到期行暂由读侧时钟闸兜住）: %s", _expiry_err)
 
+    # 知识投影↔权威一致性读数（风险 3：用户 2026-10-09 裁定"接启动、只报不修"）。
+    # 只读投影 JSON 与底座库，不写任何文件——修仍走 projection/rebuild，把"报出"与
+    # "顺手修掉"混成一件事，读的人就再也看不到曾经分叉过。走 to_thread 与上面的
+    # 到期收敛同一口径：读盘 + 建 per-agent 管理器都是同步活，裸调会占住启动循环
+    # （§6-93/§6-99 那一族"日志零异常的共享停摆"就是这么来的）。
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+        from neurova.knowledge.graph_bridge import driftFindingsForAllAgents
+
+        _drift = await asyncio.to_thread(
+            driftFindingsForAllAgents, get_knowledge_fact_store())
+        for _d in _drift:
+            logger.warning(
+                "知识投影与权威分叉 agent=%s：缺关系 %d、孤儿关系 %d、无据节点 %d"
+                "（其中 %d 个带条目正文摘要）；修请走 knowledge-graph/{agent_id}/knowledge-graph/projection/rebuild",
+                _d["agent_id"], len(_d["missing_relations"]), len(_d["orphan_relations"]),
+                len(_d["unbacked_nodes"]), _d["unbacked_nodes_with_body"])
+        if not _drift:
+            logger.info("知识投影与权威一致性巡检：无分叉")
+    except Exception as _drift_err:  # noqa: BLE001 - 读数故障不阻断启动，但必须点名
+        logger.warning("知识投影一致性读数失败（本轮没有巡检读数，不是没有分叉）: %s",
+                       _drift_err)
+
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
     if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
