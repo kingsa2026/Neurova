@@ -117,6 +117,9 @@ const messages = {
     abKindReal: '真轨迹面', abMetricN: '任务数', abMetricBaseline: '基线',
     abMetricCandidate: '候选', abMetricDelta: '差', abTaskCol: '任务', abFailed: '核验失败',
     abKindMismatch: '执行面与所选不符', abNoCandidate: '无候选正文',
+    auditRun: '进化审计运行', auditRunCases: '留出侧逐例读数',
+    auditRunJudgeDown: '判分不可用：本轮任何增益都不可信',
+    auditRunMissing: '运行记录不见了', auditRunNoneRecorded: '本轮未落运行记录',
   },
 }
 
@@ -265,5 +268,80 @@ describe('AgentSkillPage — 双臂核验两栏', () => {
     await flushPromises()
     expect((wrapper.vm as any).abError).toContain('不在线')
     expect(wrapper.text()).toContain('不在线')
+  })
+})
+
+/**
+ * 提案详情把那次进化的审计运行读出来（§6-95 后半：`runs/*.json` 此前只写不读）。
+ *
+ * 三态必须**各自出声**：取回了 ⇒ 逐例读数；提案带着 run_id 而文件不见了 ⇒ 明说；
+ * 本轮压根没记 ⇒ 也明说。静默省略等于把审计面的缺失洗成"看起来没这回事"。
+ */
+describe('AgentSkillPage — 提案详情读那次审计运行', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    apiMock.getAgentSkills.mockResolvedValue([])
+    apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [] })
+    evolutionMock.getLifecycleUsage.mockResolvedValue({ data: { counts: {}, skills: [] } })
+    evolutionMock.getEvolutionSettings.mockResolvedValue({ data: {} })
+    evolutionMock.listProposals.mockResolvedValue({ data: [] })
+  })
+
+  const withRun = (over: Record<string, unknown>) => ({
+    ...PROPOSAL,
+    run_id: 'run_20261010T040000_abc123',
+    evolution_run: {
+      run_id: 'run_20261010T040000_abc123',
+      at: '2026-10-10T04:00:00+00:00',
+      skill_id: 's1',
+      artifact_type: 'skill',
+      iterations_run: 3,
+      holdout_before: 0.4,
+      holdout_after: 0.6,
+      judge_available: true,
+      // 线上键名（`EvolutionRunResult.to_dict()`），不是 dataclass 字段名。
+      holdout_cases: {
+        HELD0: { baseline: 0.2, candidate: 0.3 },
+        HELD1: { baseline: 0.2, candidate: 0.9 },
+      },
+    },
+    evolution_run_status: 'attached',
+    ...over,
+  })
+
+  it('取回运行时把留出侧逐例读数摆在审批人面前', async () => {
+    const wrapper = await openDetail(withRun({}))
+    const text = wrapper.text()
+    expect(text).toContain('进化审计运行')
+    expect(text).toContain('留出侧逐例读数')
+    // 均分之外的那一半：HELD0 只涨了一点、HELD1 涨得多——集级均值会把两者混成一个数
+    expect(text).toContain('HELD0')
+    expect(text).toContain('0.2→0.3')
+    expect(text).toContain('HELD1')
+  })
+
+  it('提案带 run_id 而文件取不回时点名"不见了"，且不编出逐例读数', async () => {
+    const wrapper = await openDetail(withRun({ evolution_run: null, evolution_run_status: 'missing' }))
+    const text = wrapper.text()
+    expect(text).toContain('运行记录不见了')
+    expect(text).not.toContain('留出侧逐例读数')
+    expect(text).not.toContain('HELD0')
+  })
+
+  it('本轮未落运行记录时说成"未落记录"，不与"文件不见了"混成一句', async () => {
+    const wrapper = await openDetail(withRun({ run_id: '', evolution_run: null, evolution_run_status: 'none_recorded' }))
+    const text = wrapper.text()
+    expect(text).toContain('本轮未落运行记录')
+    expect(text).not.toContain('运行记录不见了')
+  })
+
+  it('判分不可用时明说本轮增益不可信', async () => {
+    const wrapper = await openDetail(withRun({
+      evolution_run: {
+        ...withRun({}).evolution_run,
+        judge_available: false,
+      },
+    }))
+    expect(wrapper.text()).toContain('判分不可用')
   })
 })

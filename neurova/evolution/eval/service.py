@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -129,6 +130,11 @@ def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
     return bool(declares()) if callable(declares) else False
 
 
+#: `_persist_run` 生成的运行 id 形态：`run_` + 时间戳(数字与 T) + `_` + 6 位十六进制。
+#: 读侧按它拒掉一切带分隔符/`..`/绝对路径的输入（见 `SkillEvolutionService.readRun`）。
+_RUN_ID_PATTERN = re.compile(r"^run_[0-9A-Za-z_]+$")
+
+
 @dataclass
 class EvolutionProposal:
     """一条待审进化提案(永不自动应用)。"""
@@ -140,6 +146,10 @@ class EvolutionProposal:
     baseline_text: str
     improved_text: str
     status: str = STATUS_PENDING
+    # §6-95 后半：这条提案凭哪一次运行出街。审计文件此前只写不读（`_persist_run` 落
+    # `runs/*.json`，全仓零读方），关联键落在这里，详情端点才有一条既有的读路径可走
+    # ——不新建端点，也不靠文件名猜。改动之前落盘的旧记录没有这一键（空串 = 当轮未记）。
+    run_id: str = ""
     holdout_before: float = 0.0
     holdout_after: float = 0.0
     # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
@@ -166,7 +176,6 @@ class SkillEvolutionService:
         # 显式 base_dir 就是进化目录本身；缺省才按数据根推出 agents/<id>/evolution
         self._dir = Path(base_dir) if base_dir else get_data_root() / "agents" / str(agent_id) / "evolution"
         self._proposals_file = self._dir / "proposals.json"
-        self._runs_dir = self._dir / "runs"
         self._history_ledger = None  # P1-4：懒创建
         self._skill_journal = None  # P2-11：懒创建
 
@@ -322,7 +331,7 @@ class SkillEvolutionService:
             dataset=dataset, iterations=iterations, noise_band=noise_band,
             ledger_key=skill_id, anchor_best=anchor_best,
         )
-        self._persist_run(skill_id, artifact_type, result)
+        run_id = self._persist_run(skill_id, artifact_type, result)
 
         proposal: Optional[EvolutionProposal] = None
         if not result.rejected and result.changed:
@@ -331,6 +340,7 @@ class SkillEvolutionService:
                 agent_id=self.agent_id,
                 skill_id=skill_id,
                 artifact_type=artifact_type,
+                run_id=run_id,
                 baseline_text=skill_text,
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),
@@ -545,17 +555,67 @@ class SkillEvolutionService:
 
     # ── 审计落盘 ──
 
-    def _persist_run(self, skill_id: str, artifact_type: str, result: EvolutionRunResult) -> None:
+    def _persist_run(self, skill_id: str, artifact_type: str,
+                     result: EvolutionRunResult) -> str:
+        """落一次运行的审计文件，回它的 `run_id`（写失败回空串，不假造一个 id）。
+
+        返回 id 而不是 None：提案要能指回这次运行（§6-95 后半）。"文件没落成"与
+        "落成了但没人知道它的名字"是两件事——前者必须让提案侧记成空串，否则详情面会
+        拿着一个不存在的 id 报"运行不见了"，把写侧的失败洗成读侧的失败。
+        """
         try:
-            self._runs_dir.mkdir(parents=True, exist_ok=True)
+            runsDir = self._runsDir()
+            runsDir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+            runId = f"run_{ts}_{uuid.uuid4().hex[:6]}"
             payload = {"skill_id": skill_id, "artifact_type": artifact_type,
-                       "at": datetime.now(UTC).isoformat(), **result.to_dict()}
-            (self._runs_dir / f"run_{ts}_{uuid.uuid4().hex[:6]}.json").write_text(
+                       "at": datetime.now(UTC).isoformat(),
+                       "run_id": runId, **result.to_dict()}
+            (runsDir / f"{runId}.json").write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            return runId
         except OSError as e:
             logger.debug("进化运行审计落盘失败: %s", e)
+            return ""
+
+    # ── 审计运行的读面（§6-95 后半：runs/*.json 从"只写不读"接上读者）──
+
+    def _runsDir(self) -> Path:
+        """运行审计目录的唯一出处（写侧与读侧共用，不各拼一份）。"""
+        return Path(self._dir) / "runs"
+
+    def runLookup(self, run_id: str) -> tuple[str, Optional[dict]]:
+        """一次取数回两件事：`(状态, 内容)`——详情面据此出声，不静默省略。
+
+        - `none_recorded`：提案没带 run_id（改动之前的旧记录，或那次落盘失败）；
+        - `missing`：带了 id 但文件不在（被清、被搬，或 id 形态根本不合法）；
+        - `attached`：取回了内容。
+
+        为什么要有这一层而不是让 `readRun` 只回一个 None：把"当轮没记"与"记录不见了"
+        混成同一个读数，详情面就只能在谎报与沉默之间选一个——教义第 2 条禁止的形态。
+        状态与内容同处一出（而不是两个方法各读一遍），是为了让这两件事不可能互相矛盾。
+        """
+        if not run_id:
+            return "none_recorded", None
+        payload = self.readRun(run_id)
+        return ("attached", payload) if payload is not None else ("missing", None)
+
+    def readRun(self, run_id: str) -> Optional[dict]:
+        """按 id 取回一次运行的审计内容；取不到回 None（不抛、不猜）。
+
+        `run_id` 来自磁盘上的提案记录，等于来自外部输入 ⇒ 只认本仓自己生成的文件名
+        形态（`run_` + 字母数字）：路径分隔符、`..`、绝对路径一律拒读。这一跳不校验
+        就等于给提案文件开一个"读仓内任意 json"的入口。
+        """
+        if not isinstance(run_id, str) or not _RUN_ID_PATTERN.match(run_id):
+            return None
+        try:
+            payload = json.loads(
+                (self._runsDir() / f"{run_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def _append_proposal(self, proposal: EvolutionProposal) -> None:
         items = self.list_proposals()
