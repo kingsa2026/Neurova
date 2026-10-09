@@ -88,6 +88,65 @@ class SimulatedAgent:
             return ""
         return str(result.get("response") or "").strip()
 
+def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
+    """这道能力问的是"**执行判据的那一步是否真跑 agent 回合**"（§8 前置 2）。
+
+    为什么必须有这一格：能力**不能写成常量旗标**——旗标会在实装被摘掉之后继续说真，
+    而那比"没做实"更糟（下游有理由继续信任这条判据）。这里的能力由**结构推导**：
+    一个真轨迹执行器必须持有 `agent_ref`（AGENTS.md §3 的深模块注入约定）并显式声明
+    自己跑真回合，两者缺一即回 False。评测用的替身不带这两样，因此天然不被误认为真轨迹。
+
+    读方是 `rsi/automation_prerequisites.probeRealTrajectoryExecutor`——它问的必须是
+    **生产装配点实际拿到的执行器**（`resolveEvolutionExecutor`），不是 runner 的离线兜底
+    `_DefaultAgent`：换掉兜底就能把旗标翻真，那是弱保护（台账 §6-97 记的口径缺陷）。
+    """
+    if executor is None:
+        return False
+    if not bool(getattr(executor, "realAgentTrajectory", False)):
+        return False
+    return getattr(executor, "agent_ref", None) is not None
+
+
+def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
+    """生产装配路径的执行器**唯一出处**。
+
+    为什么要收成一处：`evolve()` 与 `ab_compare()` 过去各写一遍
+    `agent or SimulatedAgent(model=...)`——同一条回落存在两份定义（教义第 6 条）。
+    后果不是难看，是**改不动**：接真轨迹时只会改到其中一条，另一条静默留在旧语义上，
+    而两条路径都自称"评测"。历史代价本仓已实测过一次：`agent=None` 的回落会接上
+    **真**多模型客户端，三个用例因此真花 LLM 配额并把整目录跑测挂死
+    （来历见 `tests/unit/evolution/eval/conftest.py` 首段）。
+
+    本函数只回答"装配时用什么执行器"。`SkillEvolutionRunner` 自己的离线兜底
+    （`runner._DefaultAgent`）不动——那是直接构造对象时的库层默认，不是装配路径；
+    §8 前置 2 的探针问的必须是这里，不是那里。
+    """
+    if agent is not None:
+        return agent
+    cfg = config or EvolutionConfig()
+    return SimulatedAgent(model=cfg.judge_model)
+
+
+def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
+    """这道能力问的是"**执行判据的那一步是否真跑 agent 回合**"（§8 前置 2）。
+
+    能力**不许写成常量旗标**：旗标会在实装被摘掉之后继续说真，而那比"没做实"更糟——
+    下游有理由继续信任这条判据。所以这里由**结构**推导：真轨迹执行器必须既持有
+    `agent_ref`（AGENTS.md §3 的深模块注入约定），又显式声明自己跑真回合；缺一即 False。
+    评测替身与 `SimulatedAgent`/`_DefaultAgent` 都不带这两样，因此不会被误认成同域。
+
+    唯一读方是 `rsi/automation_prerequisites.probeRealTrajectoryExecutor`，它问的必须是
+    **生产装配点实际拿到的执行器**（`resolveEvolutionExecutor`），不是 runner 的离线兜底
+    `_DefaultAgent`——换掉兜底就把旗标翻真，那是弱保护（台账 §6-97 记的这处口径缺陷）。
+    """
+    if executor is None:
+        return False
+    if not getattr(executor, "agent_ref", None):
+        return False
+    declares = getattr(executor, "declaresRealAgentTrajectory", None)
+    return bool(declares()) if callable(declares) else False
+
+
 @dataclass
 class EvolutionProposal:
     """一条待审进化提案(永不自动应用)。"""
@@ -252,7 +311,7 @@ class SkillEvolutionService:
 
         runner = make_skill_evolution_runner(
             cfg,
-            agent=agent or SimulatedAgent(model=cfg.judge_model),
+            agent=resolveEvolutionExecutor(agent, config=cfg),
             judge=judge,
             mutate=mutate,
             bench_gate=bench_gate,
@@ -376,7 +435,7 @@ class SkillEvolutionService:
 
         runner = SkillEvolutionRunner(
             config, judge=judge,
-            agent=agent or SimulatedAgent(model=config.judge_model),
+            agent=resolveEvolutionExecutor(agent, config=config),
         )
         # 同包装配：复用 runner 的评测路径（judge 适配/执行器注入同源），
         # 禁止另写第二套打分。
