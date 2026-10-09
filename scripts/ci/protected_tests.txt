@@ -1993,3 +1993,13 @@ tests/unit/test_emptyShellPackageGuard.py
 # 又被读侧时钟闸兜得看不出问题，所以只有"派生结论是否退场"这一格会红。判据含一台
 # 反空转装置（断言启动路径确实调到收敛），防止只加端点不改启动也能把上面那格演绿。
 tests/unit/knowledge/test_expiryHasRealTrigger.py
+
+# 零语句模块防再生（`eec9d649`，§6-103）：§9 序 4 复算的常驻面
+# 判据＝「非 `__init__.py` 且除 docstring 外没有任何语句」。这类文件不会报错，
+# 只会骗人：按名字 grep 命中、按名字 import 不炸，而它什么都不做——
+# 「兼容性」只有在确实还有人从旧路径导入时才成立，零消费者的兼容层就是结构壳。
+# 反向对照三档：`__init__.py` 不在射程（现网 12 个 docstring-only 包标记不得误伤，
+# 首版只看"除 docstring 外无语句"就会把它们全判违规）；有一行代码的模块不误伤；
+# tmp 里造一枚零语句模块必须抓到。外加扫描根覆盖性格。
+# 逐文件单跑两次同读数 4 passed（`eec9d649` 落库之后复取）
+tests/unit/test_codelessModuleGuard.py
