@@ -112,7 +112,8 @@
   且产物不经过证据闸；专用测试 `tests/skill/*` 同步移除
 
 ### 2.11 其他 STUB_CHAIN
-- `shared_core/plan_orchestrator.py`
+- ~~`shared_core/plan_orchestrator.py`~~ —— 已删除（2026-10-09 序 5 批 D，台账 §6-114）：四个
+  handler 只回名字字典、一次 LLM/工具调用都不发，生产与测试两侧 import 复算均为 0
 - `shared_core/infrastructure.py`
 - `shared_core/execution_engine.py`
 - `plugins/plugin_manifest.py`
