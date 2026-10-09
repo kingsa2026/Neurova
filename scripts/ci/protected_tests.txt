@@ -2137,3 +2137,22 @@ tests/unit/knowledge/test_appStateIsolation.py
 # 每条必须指向在位文件与在位模块级工厂，另加一格反向对照（探测器对"文件缺失""符号缺失"
 # 两种形态都必须报警，对真正在位的条目不得误伤）。逐文件单跑两次同读数 19 passed（落库前后）。
 tests/unit/core/test_singleton_convergence.py
+
+# 使用与采纳回流的账面：注入计数 + 采纳写面"仍未接线"的反向存在断言（`ad22beae`，§6-124）
+# 两半分开守，因为它们的"零"含义完全不同：注入账的零是**没走到/没锚点**（活体在真库拷贝上证过
+# 接缝活着：8 hops → 8 个 fact 落账、时间戳齐），而采纳回执的零是**结构性的**——`recordAdoption`
+# 全仓零生产调用点，列在、`usageMetrics.outcome_written` 在数、原语有测试，就是没人写。
+# 因此常驻的这两格是：① 调用点必须仍为 0（有人接线即红，红的那一刻就是该改判据与台账的时刻，
+# 不许留一条恒 0 的读数被当成"知识没被采纳"来读）；② 反空转——探测器必须抓得住人造调用点，
+# 且不得把定义与 docstring 数成调用（判"零调用"按节点形态判，不按文本数）。
+# 逐文件单跑两次同读数 15 passed（8.11s/8.38s，`ad22beae` 落库之后复取）
+tests/unit/knowledge/test_usage_writeback_foundation.py
+
+# 图检索这条支路的"命中即回流"接缝（既有判据，本轮补登记，`ad22beae`/§6-124 的活体所本）
+# `test_adapterShapeAndInjectionFeedback` 断的是**真接缝**：真 `GraphFactWalker` + 真
+# `GraphRetrieverAdapter.retrieve`，末端 fact 的 `injected_count` 必须 ==1，注释原话
+# "图命中也要回流，否则用量账缺一条路"。这条此前一直不在子集里——所以 §6-124 的活体读数
+# 只在一次脚本里存在过，跑完就没了；登记之后它才成为会红的常驻判据。
+# 另含域隔离、单字标签不匹配、未命中问句走空等 11 格，全部单跑确定全绿。
+# 逐文件单跑两次同读数 12 passed（5.81s/5.34s）
+tests/integration/test_graph_retriever_in_chain.py
