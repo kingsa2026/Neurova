@@ -1006,6 +1006,17 @@
     - **净 LOC**：生产池 **+43/−0 净 43**（`compareAgainstBaseline` 一处）；测试/夹具/活体池 **+468/−0 净 468**（判据 123 + 跑法单点 101 + 语料 127 + 基线 28 + 活体 89）。数字为 `git diff HEAD --numstat` 现值。为正的理由：本批前"退步了没有"这一问无人能答。
     - **未覆盖面（登记）**：① `unhit_rate 0.2` 是夹具侧现状而非达标线，其中 `category` 口径的 expected 是整类条目、`top_k=5` 天然吃不满，两类成因混在一起，不能直接读成"检索差两成"——要压它得先分因，属另一批；② `compareAgainstBaseline` 的读者目前只有受保护子集里那扇门（REST 面未接：GET 不该跑一轮写评测，`run()` 会往 runs/findings 落行）；③ 真库基线只存在于本机的 `knowledge_evaluation.db`，仓内不复制其读数（隐私口径），换机器后真库那一份需重跑 `retrievalBaselineLive.py`；④ 同一批对比里的 §5-N4（权威/投影漂移只能按需探）与 N6（抽取侧 domain/range 门强度）**仍未点单**。
 
+106. **K4 权威↔投影清账（✅ 一次性动作完成，用户裁定"不接运行期"）+ 复算新抓出三格（🟡 未点单）** —— 来源 `docs/08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md` §5-N4 与 §5-N6；用户 2026-10-09 在"清账 / 清账+接运行期 / 退役投影"三选中取**第一项**。
+
+    - **量之前先纠一次读数**：第一版我用 `get_knowledge_graph_manager()` 取投影，它经 `callerPath(storage_dir, "knowledge_graph")` 按**调用方模块**推落点，在临时脚本里没有固定调用目录，于是解析成空路径、报 **0 节点 / 0 边**——差点把"投影整个是空的"记进台账。显式 `KnowledgeGraphManager(storage_dir="agent_workspaces/default/knowledge_graph")` 重量才是真值。**判据/探针问错对象**比问错问题更隐蔽：它给的是一个自洽的错数。
+    - **清账前实测**：投影 178 节点 / 175 边，`projectionDrift` 回 `authority_relations 115 / projection_relations 167 / missing_relations 0 / orphan_relations 52`——**缺账为零、有账无据 52 条**，属 B-09 之前"先写投影后立权威"的遗留。前置安全检查：投影目录**无 `merges.json`**、权威侧 `merged_into` 与别名均 0 行、`knowledge_graph_api.py` **无手工建点建边路由**（POST 只有 resolution/run、reviews/resolve、backfill、projection/rebuild）⇒ 重建不会毁掉人工成果。
+    - **动作**：整目录先备份到仓外（`%TEMP%/nv_K4_backup_20261009T132505Z`），再走**生产端点** `POST /api/v1/knowledge-graph/default/knowledge-graph/projection/rebuild`（真 `create_app()` + 真 admin JWT，不直调函数）。首跑回 **400 未取证**（同进程内我先开了三个未关闭的投影管理器，疑与下面的句柄占用同源）；二跑回 200。**磁盘终态逐格核对**（因见下述吞异常）：`nodes.json` 178 条、`edges.json` 115 条，全新进程再读一次 drift 得 `missing 0 / orphan 0 / authority 115 == projection 115`。这两个投影文件不在 git 跟踪态（运行时数据），故仓内无脏文件，还原路径就是那份仓外备份。
+    - **新抓出格 ①（🟡 探针口径比名字窄）**：`projectionDrift` 只比**关系**，看不见节点侧残留。清账后仍有 **33 个无邻居的孤立节点**，且**个个带 `description`**（条目正文前 200 字）。所以 `missing/orphan = 0` 不等于"图上没有无据内容"——端点回的 `nodes:145` 是它按权威铺出来的节点数，不是投影总节点数（178），两者之差正是这 33 个。修法要么给 drift 加节点维度读数，要么让 rebuild 也摘无据节点，二者都需先定"无据节点该不该留"（旧视图可能靠它们保持位置），**未点单**。
+    - **新抓出格 ②（🔴 假成功，教义第 2 条禁物）**：`KnowledgeGraphManager._save`（`manager.py:317-339`）是 `except Exception: logger.error(...)`——本次重建期间实测出现 **3 次** `[WinError 5] 拒绝访问`（`nodes.json.tmp → nodes.json` 改名被拒，Windows 上同目录有其它句柄时是分享违规），而 rebuild 端点**照样回 `code:0 success`**。落盘失败被降级成一条日志，调用方与用户都读不到；这次磁盘终态恰好是对的（后续某次整体写成功），**但这是一个不能被保证的巧合**——我核对磁盘正是因为看见了那三行 ERROR 才去做，若没有那三行，"success" 会被当成结论。修法方向：`_save` 要么抛，要么回状态并由端点逐面回执（与 §6-101 的擦除回执同一形态）。**未点单**（要改一个被多处调用的管理器写盘契约，属需裁的一批）。
+    - **新抓出格 ③（✅ 反向证成 §6-101）**：那 33 个孤立节点的 `source_knowledge_id` 去重 16 个，**逐一对到 `knowledge_narratives` 现存条目，ghost 为 0** ⇒ 投影里不存在"已删条目的正文残影"。这条不是本批做的功能，而是拿历史数据反证 K2 的擦除面在**存量**上没有漏账。
+    - **N6 原判作废**：报告 §5-N6 猜"类型约束只存在于提示词里、`ontology/validation.py` 是否逐条复核未复算"——复算结果是 `ontology_adjudication` 段状态为 **wired**（`admission.py:43`）且**违例当场 raise**（`:345-349` "本体校验未过"），抽取三元组进库前确实过一道能阻断写的门。该格按"已闭合、原判不准"回标，不再列为待确认。
+    - **未覆盖面**：① 用户裁定不接运行期，所以**没有任何东西会在下次漂移时变红**——这一格重新回到"按需探"的原状态，只是账现在是平的；② 400 那一次的具体成因未取证（不假装证过）；③ 备份留在 `%TEMP%`，机器清理即失，如需长期回退路径请另存。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
