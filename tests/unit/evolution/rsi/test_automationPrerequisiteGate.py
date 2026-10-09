@@ -4,8 +4,6 @@
 未满足必须点名而不是折叠成布尔。
 """
 
-import asyncio
-
 import pytest
 
 from neurova.evolution.rsi.deployment_controller import RSIDeploymentController
@@ -86,22 +84,56 @@ def test_failClosedProbeFailsOnZeroThreshold(monkeypatch):
     assert automationPrerequisites()["failClosedOnMissingEvidence"]["probe"]() is False
 
 
-def test_realTrajectoryFlagIsFalseWhileDefaultExecutorStillEchoes():
-    """反谎（声明项）：默认执行器还在回显 ⇒ 这条前置必须写着不满足。
+def test_realTrajectoryFlagFollowsTheProductionAssemblyPoint():
+    """反谎：旗标必须等于"生产装配点实际拿到的执行器"的能力，而不是某个兜底类的形态。
 
-    控制器判据是同步路径、可能跑在已运行的事件循环里，所以运行期探针不能自己
-    `asyncio.run`；本条改为"声明 + 异步反证"，由这一格在测试里把声明钉回事实。
+    旧口径问的是 `runner._DefaultAgent` 是否回显——那是库层离线兜底，生产路径根本不经过它
+    （`service.evolve`/`ab_compare` 走 `resolveEvolutionExecutor`）。台账 §6-97 记过这一点：
+    口径错位时，换个桩就能把旗标刷真，而评测照旧不同域。
     """
-    from neurova.evolution.eval.runner import _DefaultAgent
+    from neurova.evolution.eval.service import (
+        isRealAgentTrajectoryExecutor, resolveEvolutionExecutor,
+    )
 
-    async def _echoes():
-        agent = _DefaultAgent()
-        return await agent.run(skill_text="正文原文", task_input="任务") == "正文原文"
+    executor = resolveEvolutionExecutor(None)
+    assert isRealAgentTrajectoryExecutor(executor) is False
+    assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is False, (
+        "生产回落仍是单轮模拟面，前置 2 却写了满足")
 
-    echoes = asyncio.run(_echoes())
-    item = automationPrerequisites()["realTrajectoryExecutor"]
-    assert item["satisfied"] is False, "默认执行器仍回显，旗标却写了真"
-    assert echoes is True
+
+def test_swappingTheOfflineFallbackDoesNotFlipTheFlag(monkeypatch):
+    """反空转（本批的**行为红**）：把库层兜底改成不回显，旗标必须**纹丝不动**。
+
+    这一格就是旧探针的失效现场：旧口径读 `_DefaultAgent` 是否回显，改它即翻真；
+    新口径只认接缝给出的生产执行器，兜底怎么换都不算。
+    """
+    from neurova.evolution.eval import runner as evalRunner
+
+    async def _notEchoing(self, *, skill_text, task_input):
+        return "已经不回显了"
+
+    monkeypatch.setattr(evalRunner._DefaultAgent, "run", _notEchoing)
+    assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is False, (
+        "旗标跟着离线兜底动了——它问的还是兜底，不是生产装配点")
+
+
+def test_flagTurnsTrueOnlyWhenTheSeamYieldsARealTrajectoryExecutor(monkeypatch):
+    """反 false-negative：接缝真给出跑真回合的执行器时，这条前置必须翻真。
+
+    只有上一条没有这一条，可以靠"把探针改成恒 False"糊过去——那是把判据调松。
+    """
+    from neurova.evolution.eval import service as evalService
+
+    class _RealExecutor:
+        agent_ref = object()
+
+        def declaresRealAgentTrajectory(self):
+            return True
+
+    monkeypatch.setattr(evalService, "resolveEvolutionExecutor",
+                        lambda agent=None, *, config=None: _RealExecutor(), raising=False)
+    assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is True, (
+        "真轨迹执行器接上了却量不到——前置 2 就永远关不上")
 
 
 def test_unmetPrerequisiteIsNamedNotSilent():
