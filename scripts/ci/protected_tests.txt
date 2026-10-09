@@ -2079,3 +2079,14 @@ tests/unit/knowledge/test_projectionHonesty.py
 # **替代存在 ≠ 替代等价**，未裁不许顺手删，要删先改这条判据（改判据必改台账，即留痕）。
 # 逐文件单跑两次同读数 6 passed（`494f7fa6` 落库之后复取）
 tests/unit/cognitive_layers/test_memoryLayerGenerationResidue.py
+
+# 序 5 批 D：shared_core 桩编排器退役 + 门面名实分离改正（`e78bf45b`，§6-115）
+# 三套 plan_orchestrator 的生产 import 复算全是 0——现役规划面根本不在它们身上（agent 走
+# `planning/planning_tool.py`，HTTP 走 `plan_mode` → `/api/v1/plans`）。本批只摘唯一的纯桩：
+# 四个 handler 回名字字典、一次调用都不发。另两套各有"全仓唯一"格子（`core` 的 RetryPolicy +
+# adjust_plan、`execution_engine` 的步骤状态机与真重试），属需人裁，被一格**反向存在断言**
+# 钉住在位。第二格专管门面：`shared_core/__init__.py` 曾把 SharedPlanOrchestrator 列为在役
+# "小脑"而正文只剩一句空注释——"文档声称有、代码没有"比空文件更坏，按 docstring 找的人会
+# 以为这套能力在线。判据里含一格 404 校准与一格 sys.modules 装载断言，防"仪器坏了"式假绿。
+# 逐文件单跑两次同读数 6 passed（`e78bf45b` 落库之后复取）
+tests/unit/shared_core/test_sharedCoreOrchestratorRetired.py
