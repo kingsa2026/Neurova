@@ -128,16 +128,25 @@ _code_ext = tuple(_payload["codeExt"])
 
 # 解释器自身的地盘（标准库 / site-packages / 前缀 / 虚拟设备）不算重活：
 # import 期在那里读 `.py` 之外的东西（如 dist-info）是解释器本职。
+def _normTree(p):
+    # 分隔符必须归一：Windows 上 `os.path.join("/proc", "stat")` 得到 `/proc\stat`，
+    # 而 `sys.prefix` 一族本就全反斜杠。只按 `/` 比前缀会把整片地盘豁免打穿，
+    # 于是第三方 import 期的正常动作被点成本仓的重活——实测门禁在该平台恒红
+    # （`failures: import-budget … ['open:/proc\\stat']`），红与本仓代码无关。
+    return p.replace("\\", "/").rstrip("/")
+
 _own_trees = set()
 for _key in ("stdlib", "platstdlib", "purelib", "platlib"):
     _path = sysconfig.get_paths().get(_key)
     if _path:
-        _own_trees.add(_path)
-_own_trees.update({sys.prefix, sys.base_prefix, getattr(sys, "exec_prefix", sys.prefix)})
+        _own_trees.add(_normTree(_path))
+_own_trees.update(_normTree(p) for p in (
+    sys.prefix, sys.base_prefix, getattr(sys, "exec_prefix", sys.prefix)))
 _own_trees.update({"/proc", "/sys", "/dev"})
 
 def _isOwnTree(path):
-    return any(path == tree or path.startswith(tree.rstrip("/") + "/") for tree in _own_trees)
+    norm = _normTree(path)
+    return any(norm == tree or norm.startswith(tree + "/") for tree in _own_trees)
 
 _events = []
 

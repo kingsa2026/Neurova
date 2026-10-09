@@ -46,10 +46,17 @@ CLOCK_LEDGER: Dict[str, tuple] = {
     "tests/performance/test_perf_gate_contract.py": (
         ("threadCpu", "wallClock"),
         "门禁自检套件：判分面的取数口（measureThreadCpu）必须走本线程 CPU 时钟，"
-        "「等待不进判分」正是这套件在守的契约；墙钟只出现在冷 import 探针一处，"
-        "它量的是「用户为首轮对话实际等了多久」（首轮延迟），属可留墙钟的命中点，"
-        "由 TestImportBudgetKeepsWallClock 单独钉住。判分时钟被换回墙钟时，"
-        "本套件实测 7 条转红（2026-09-25 变异自证）。",
+        "「等待不进判分」正是这套件在守的契约；墙钟只出现在两处——冷 import 探针"
+        "（量「用户为首轮对话实际等了多久」，属可留墙钟的命中点，由 "
+        "TestImportBudgetKeepsWallClock 单独钉住），以及 threadTimeQuantumMs 里给"
+        "「实测时钟推进粒度」封顶（§6-96）：那一处读的正是墙上过了多久，"
+        "不进任何判值。判分时钟被换回墙钟时，本套件实测 7 条转红（2026-09-25 变异自证）。",
+    ),
+    "tests/unit/ci/test_subQuantumSpinClockGate.py": (
+        ("threadCpu",),
+        "本守卫自身：thread_time 字样全在**被检对象**里——AST 检出器认的就是这个符号，"
+        "加上跳过理由文本要复述实测粒度。它自己不测时钟：粒度取自契约模块的 "
+        "CPU_QUANTUM_MS 现值（import 那一侧才量一次），本文件无任何计时读数。",
     ),
     "tests/unit/agent/test_post_chat_p0_latency_observability.py": (
         ("wallClock",),
