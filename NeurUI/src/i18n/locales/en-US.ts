@@ -3710,6 +3710,7 @@ studio: {
   runPartialFailed: '{n} failed',
   runPartialBlocked: '{n} blocked',
   stopRun: 'Stop task',
+  stopRunN: 'Stop {n} running tasks',
   runCancelled: 'Task stopped',
   runCancelQueued: 'Stop requested: the current step finishes, then nothing further',
   retryStarted: 'Retry task started',

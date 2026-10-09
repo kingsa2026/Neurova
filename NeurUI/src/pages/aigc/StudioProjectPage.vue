@@ -76,7 +76,10 @@ async function loadDetail() {
 /** 在跑的长任务：kind → run_id。停止按钮取的就是这一格，收尾即摘。 */
 const activeRuns = ref<Record<string, string>>({})
 const stoppingRun = ref(false)
-const runningRunId = computed(() => Object.values(activeRuns.value)[0] ?? '')
+// 并发跑两类长任务是允许的（各按钮的 busy 键不同）：按钮必须把**全部**在跑的停掉，
+// 而不是取第一条——那等于"点了停没反应"（§6-91 未覆盖面④）。
+const activeRunIds = computed(() => Object.values(activeRuns.value))
+const runningCount = computed(() => activeRunIds.value.length)
 
 async function track(kind: string, runId: string) {
   busy.value = { ...busy.value, [kind]: true }
@@ -108,16 +111,17 @@ async function track(kind: string, runId: string) {
  * 只说"失败了"没法定位。
  */
 async function cancelActiveRun() {
-  const runId = runningRunId.value
-  if (!runId || stoppingRun.value) return
+  const runIds = activeRunIds.value
+  if (!runIds.length || stoppingRun.value) return
   stoppingRun.value = true
   try {
-    const res: any = await cancelStudioRun(runId)
-    const data = res?.data ?? {}
-    if (Number(data.tasks_cancelled) > 0) message.success(t('studio.runCancelled'))
+    const results = await Promise.allSettled(runIds.map((rid) => cancelStudioRun(rid)))
+    const interrupted = results.filter(
+      (r) => r.status === 'fulfilled' && Number((r.value as any)?.data?.tasks_cancelled) > 0).length
+    if (interrupted > 0) message.success(t('studio.runCancelled'))
     else message.info(t('studio.runCancelQueued'))
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || t('aigc.generateError'))
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+    if (failed) message.error(failed.reason?.response?.data?.detail || t('aigc.generateError'))
   } finally {
     stoppingRun.value = false
   }
@@ -370,7 +374,7 @@ onUnmounted(() => {
 
 defineExpose({
   phase, detail, episodes, characters, storyboards, currentEid, busy,
-  activeRuns, runningRunId, stoppingRun, cancelActiveRun, track,
+  activeRuns, activeRunIds, runningCount, stoppingRun, cancelActiveRun, track,
   novel, scriptModel, imgModel, vdModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
@@ -391,10 +395,11 @@ defineExpose({
         <a-tag>{{ detail.project.aspect_ratio }}</a-tag>
         <a-tag color="cyan">{{ detail.project.style }}</a-tag>
       </span>
-      <!-- 长任务的停止入口：只在有一条在跑时出现（条件是 activeRuns 非空，而不是 phase 匹配
-           ——拆解/批量出图/旁白任一步都要能停，按钮常驻但点了没用比看不见入口更糟）-->
-      <GlassButton v-if="runningRunId" size="sm" :loading="stoppingRun" @click="cancelActiveRun">
-        {{ t('studio.stopRun') }}
+      <!-- 长任务的停止入口：只在有任务在跑时出现（条件是 activeRuns 非空，而不是 phase 匹配
+           ——拆解/批量出图/旁白任一步都要能停，按钮常驻但点了没用比看不见入口更糟）。
+           多条并发时如实报条数：一次点击停掉全部，不让用户猜"停的是哪一条"。 -->
+      <GlassButton v-if="runningCount" size="sm" :loading="stoppingRun" @click="cancelActiveRun">
+        {{ runningCount > 1 ? t('studio.stopRunN', { n: runningCount }) : t('studio.stopRun') }}
       </GlassButton>
     </div>
 

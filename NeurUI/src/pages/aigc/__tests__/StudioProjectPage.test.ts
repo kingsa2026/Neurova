@@ -244,6 +244,38 @@ describe('StudioProjectPage', () => {
     expect(message.error).not.toHaveBeenCalled()
   })
 
+  it('并发跑两条长任务时，停止按钮把两条都停并如实报条数（不再只停第一条）', async () => {
+    // §6-91 未覆盖面④：`activeRuns` 是 kind→run_id 的表，而按钮取的是 `Object.values()[0]`
+    // ——用户并发点了「批量首帧」+「批量视频」时，一次点击只停其中一条且不说是哪条，
+    // 这就是"点了停没反应"的误判源头。
+    let settleA: (v: any) => void = () => {}
+    let settleB: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(() => new Promise((res) => { settleA = res }))
+      .mockImplementationOnce(() => new Promise((res) => { settleB = res }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const a = vm.track('images', 'run_a')
+    const b = vm.track('videos', 'run_b')
+    await flushPromises()
+
+    expect(Object.keys(vm.activeRuns)).toEqual(['images', 'videos'])
+    expect(wrapper.text()).toContain('停止 2 条在跑的任务')
+
+    cancelRunMock.mockResolvedValue({
+      data: { cancel_requested: true, tasks_cancelled: 1, status: 'running' },
+    })
+    await vm.cancelActiveRun()
+    expect(cancelRunMock.mock.calls.map((c: any[]) => c[0]).sort()).toEqual(['run_a', 'run_b'])
+    expect(message.success).toHaveBeenCalledWith('任务已停止')
+
+    settleA({ id: 'run_a', status: 'cancelled', detail_json: '{}', error: '' })
+    settleB({ id: 'run_b', status: 'cancelled', detail_json: '{}', error: '' })
+    await Promise.all([a, b])
+    expect(vm.activeRuns).toEqual({})
+  })
+
   it('单镜重试 stage=image 走 retryStoryboard', async () => {
     const wrapper = mountPage()
     await flushPromises()
