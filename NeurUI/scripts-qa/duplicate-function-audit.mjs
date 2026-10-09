@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * 跨文件同名函数定义盘点（可复跑口径，Issue #192 待办项收口）。
  *
@@ -35,6 +34,11 @@
  *      `split(` 不算），即判为耦合页面局部状态 —— 闭包捕获本组件作用域符号的
  *      同名函数不是可复用纯函数，收口前必须先把它参数化。
  *
+ * 唯一调用形态是 `node <本文件>`（见下「用法」），故**刻意不带 `#!/usr/bin/env node`**：
+ * vitest 的转换管线会把首行 shebang 留在包装后模块的中间，于是 import 本文件的那条守卫
+ * 会以 `SyntaxError: Invalid or unexpected token` **整档 0 条用例**失败——「同名函数 A 类
+ * 清零」这道门从此不咬合，却以 0 的形态混在通过数里（台账 §6-112 形态一）。防再生判据见
+ * `src/tests/scriptsQaImportable.guard.test.ts`。
  * 用法：
  *   node scripts-qa/duplicate-function-audit.mjs                     # 人读分档清单
  *   node scripts-qa/duplicate-function-audit.mjs --json              # 机器可读计数
