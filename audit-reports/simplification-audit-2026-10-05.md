@@ -938,6 +938,11 @@
     - **活体（`tests/manual/entryErasureLive.py`；真 `create_app()`+`TestClient`+真 JWT（`create_access_token`）+真咽喉+真投影/向量单例，数据根走 `_liveVerifyIsolation.isolatedDataRoot()` 单点，抽取面用 `graph_bridge` 自带的 `llm_call` 注入位、不替业务对象）逐格读数**：擦除前 facts/assertions/activities/entry/vectors/projection **六面全 FOUND**、检索命中 1；`DELETE ?purge=true` → 200，回执 `{assertions:redacted, facts:erased, derivations:erased, conflicts:absent, subjects:erased, activities:redacted, vectors:erased, projection:erased, entry:erased}` `complete=True`；擦除后六面全 gone、检索命中 0、`ActivityDigestChain.verify` ok=True（链上 2 行、2 条断言带擦除标记）→ LIVE-PASS。**反证**：把 `erasure.py` 里 `refs` 那一行退回只拼一份的写法（等价于根修失效），同一份脚本 → 三面 FOUND、回执 facts/assertions/activities 全 `absent`、退出码 1 FAIL；还原后 md5 与备份逐字节一致，仓内 `data/` 两文件 `md5sum -c` 全 OK 未被写入。
     - **常驻守卫复取（落库后）**：`TestNoHardcodedDevMachinePaths` 本树 offender **8 格**、HEAD 基线同 **8 格** → 本批**未新增** offender（该守卫是 §6-56/§6-66 登记的既有常驻红）；`TestProtectedSubsetEntriesAreTracked` 随守卫文件 38 passed；`tests/manual` env 写棘轮与 subprocess 编码棘轮两文件 **15 passed**，新活体脚本未添一格（`isolatedDataRoot()` 走单点、env 不由脚本顶层直接改）。
     - **净 LOC**：生产池 **+572/−21 净 551** ＝ `erasure.py +315`（擦除喉本体）、`repository.py +146/−9`（purge 改为编排喉：向量面/投影面/条目面/冲突账剪枝/`not_attempted` 短路）、`knowledge_facts.py +26/−1`（v13 + `liveAssertions` 单点）、`knowledge_core.py +29/−8`（读回执、失败点名、docstring 与实做对齐）、`vector_index.py +29`、`digest_chain.py +10/−2`、`manager.py +13`、`foundation_schema.py +3`、`credibility.py` 净 0。为正的理由：跨存储擦除这件事此前**从未有实现**，无老代码可退役；"删"在同一提交兑现了 −21（旧 purge 体与旧端点无条件返回）。测试/活体池 +566/−6 净 560（判据 355 + 活体 173 + 三处改判）；子集基建池 **+6**（1 空行 + 4 行说明 + 1 条路径）。
+    - **一处记账勘误（同形态第 6 次复发）**：落账笔 `ed108b18` 正文写"文档/台账池 +50/−16"，
+      `git diff HEAD --numstat` 现值是 **+527/−1**（台账 14、报告首次入库 510、两索引各 1、子集 1/1）。
+      估数的前提是"报告已在册"，而它上一轮只落了工作树与两处索引——**量的是记忆里的分母，不是 numstat**。
+      commit 已入库不改写历史，以本行为准。同批并发会话也在为同一形态做自纠（`e453ae30`），
+      说明失效面在"打字时没等 numstat 出来"而不在测量工具。
     - **未覆盖面（登记，本批不顺手改）**：① 软删 `delete_knowledge` 仍把正文留在条目快照与墓碑里——那是"下架但保住属主数据"的**有意**语义，不是漏，端点文案已与之分开；② 介质前缀集合（`entry:`/`legacy:`/`import:`）目前硬编在 `erasure._CLAIM_PREFIXES` 与 `refs` 两处，将来新增前缀必须同批加，否则新介质上的条目擦不动——这是已知脆弱点，另立判据需先有真实的新前缀写入点，本批不造；③ `shared_kept` 的投影节点保留 `label`（他人也在用的实体名），回执里已点名，不假装"投影一个字都不剩"；④ 同一批对比里抓出的 §5-N1（到期级联不可达）、§5-N3（检索基线从未跑出）、§5-N4（权威/投影漂移只能按需探）**仍未点单**，本报告不代裁。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
