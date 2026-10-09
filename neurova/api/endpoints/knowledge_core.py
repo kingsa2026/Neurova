@@ -415,7 +415,11 @@ async def delete_knowledge(
     - 公共库与私人库是同一份物理数据（submit-public 仅改可见性）。
     - 管理员删除「他人提交的公共条目」→ 默认下架：条目保留、回私有、
       submission 置 rejected——公共库消失，属主私人库保住。
-    - ?purge=true → 物理删除整条（清除违规内容的显式通道）。
+    - ?purge=true → 条目擦除喉：逐面清除该条目留在各存储的正文副本（权威事实行、
+      断言正文、活动信封、向量分片、投影节点、条目行与墓碑），并逐面回执。
+      断言**行**留在审计链上（`seq`/`digest`/`statement_hash` 不动，正文置空并打
+      `erased_at` 标记）——合规删除不以毁掉 `/foundation/integrity` 为代价。
+      任一面失败即回 500 并点名是哪一面，不再无条件报"已删除"。
     - 删除自己的条目（属主或管理员自建）→ 物理删除，语义不变。
     """
     from neurova.api.endpoints.knowledge_common import get_request_id
@@ -446,13 +450,30 @@ async def delete_knowledge(
             }
 
     if purge:
-        repo.purge_knowledge(_agent_id, knowledge_id)
-    else:
-        repo.delete_knowledge(
-            _agent_id,
-            knowledge_id,
-            deleted_by=str(current_user.get("user_id", "")),
-        )
+        receipt = repo.purge_knowledge(
+            _agent_id, knowledge_id,
+            reason="purge by %s" % str(current_user.get("user_id", "")))
+        failed = {name: face for name, face in receipt["faces"].items()
+                  if face.get("state") == "failed"}
+        if failed:
+            # 半删不叫删：把失败面点名交回调用方，别让它读成"已删除"。
+            raise HTTPException(
+                status_code=500,
+                detail={"knowledge_id": knowledge_id, "faces_failed": failed,
+                        "message": "条目擦除未完成，正文仍在下列存储面可读"})
+        return {
+            "code": 0,
+            "message": "Knowledge '%s' erased" % knowledge_id,
+            "data": {"knowledge_id": knowledge_id, "action": "purged",
+                     "erasure": receipt},
+            "request_id": request_id,
+        }
+
+    repo.delete_knowledge(
+        _agent_id,
+        knowledge_id,
+        deleted_by=str(current_user.get("user_id", "")),
+    )
 
     return {
         "code": 0,

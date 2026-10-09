@@ -92,15 +92,38 @@ class TestAdminDeletePublicSubmission:
         assert resp.status_code == 200
 
     def test_purge_true_physically_deletes(self, api):
-        """显式 purge=true 才物理删除。"""
+        """显式 purge=true 走擦除喉：动作如实叫 purged，回执逐面点名（批次 K2）。"""
         client, holder, repo = api
         kid = _create_submitted_public(client, holder)
 
         holder["user"] = dict(ADMIN)
         resp = client.delete(f"{PREFIX}/{kid}", params={"purge": "true"})
         assert resp.status_code == 200
-        assert resp.json()["data"]["action"] == "deleted"
+        data = resp.json()["data"]
+        assert data["action"] == "purged", "动作名必须与实做一致，不能再统称 deleted"
+        assert data["erasure"]["complete"] is True
+        assert data["erasure"]["faces"]["entry"]["state"] == "erased"
         assert repo.get_item("default", kid) is None
+
+    def test_purge_names_failed_faces_instead_of_claiming_success(self, api, monkeypatch):
+        """任一面删不动，就不许把整件事报成成功——旧实现在这里连返回值都不读。"""
+        client, holder, repo = api
+        kid = _create_submitted_public(client, holder)
+        names = ("facts", "assertions", "derivations", "conflicts", "subjects", "activities")
+
+        def _locked(_knowledgeId, _reason):
+            return {n: {"state": "failed", "count": 0, "detail": "底座库被锁住"} for n in names}
+
+        monkeypatch.setattr(repo, "_eraseAuthorityCopies", _locked)
+        holder["user"] = dict(ADMIN)
+
+        resp = client.delete(f"{PREFIX}/{kid}", params={"purge": "true"})
+
+        assert resp.status_code == 500, "擦除没做完却回 200，是假交付"
+        detail = resp.json()["detail"]
+        assert set(detail["faces_failed"]) == set(names)
+        assert repo.get_item("default", kid) is not None, (
+            "副本没清成就先把条目行删了——剩下的残局再没人能重试")
 
     def test_admin_deletes_own_entry_purges(self, api):
         """管理员删除自己创建的条目 → 物理删除（自己的数据）。"""

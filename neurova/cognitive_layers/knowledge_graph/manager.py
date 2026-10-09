@@ -488,6 +488,19 @@ class KnowledgeGraphManager:
             self._save()
             return node
 
+    def nodesForSourceKnowledge(self, knowledge_id: str) -> List[str]:
+        """按来源条目回看投影节点（`graph_bridge` 把 `source_knowledge_id` 写在 properties 上）。
+
+        投影不是权威，但它带得走正文：`graph_bridge.py` 建节点时把
+        `properties.description` 写成条目正文的前 200 字。所以条目被物理清除时，
+        这一面必须跟着清，否则"删掉的违规内容"在图谱视图里仍然一字不差地读得到。
+        """
+        with self._lock:
+            return [
+                node.node_id for node in self._nodes.values()
+                if str((node.properties or {}).get("source_knowledge_id", "")) == knowledge_id
+            ]
+
     def delete_node(self, node_id: str) -> bool:
         """
         删除节点（同时删除相关边）
