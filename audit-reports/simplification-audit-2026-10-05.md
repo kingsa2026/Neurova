@@ -969,6 +969,9 @@
     - **红灯第一版撞的是装配噪声**（记进常驻教训）：围栏比的是**导入期**定死的 `storage_fence.PRODUCTION_STORAGE_DIR`，用例里 `setenv("NEUROVA_DATA_DIR", tmp_path)` 挪不动它，整批 4 ERROR + 1 假红；按围栏自己的指示改成"tmp_path 建实例 + monkeypatch 门面 `get_knowledge_fact_store`"后，5 格才红在行为上（`前提已到期而结论仍是 active`、`启动路径根本没走到到期收敛 / assert []`、端点 `404`）。其中"启动路径根本没走到"那格是**反空转装置**：若有人只加端点不改启动，第一格就会假绿。
     - **绿与 A/B**：判据 5 passed（逐文件单跑，还原 app.py 后第三次仍 5 passed）；宽域 A/B（仓外 HEAD worktree + 铺入本批判据，选择集另含钉 `expireDueFacts` 自身数学的 `test_fact_lifecycle.py` 与 `ontology/test_derivation_retract.py`）基线 **5 failed/65 passed** ↔ 本树 **70 passed**，仅本树红 0。`expireDueFacts` 的 int 返回契约**未动**，免改 4 处既有断言。
     - **活体（`tests/manual/expiryTriggerLive.py`；真 `create_app()` 带真 lifespan、真咽喉、真前向链、真四路读面与多跳走查、真 JWT，数据根走 `isolatedDataRoot()` 单点且不 patch 门面）**：启动前 前提 `active` + 读面含派生 True（缺陷的活体形态）→ 启动后 前提 `expired`、读面残留 []、派生结论 `retracted`、多跳走查 0；第二次运维端点 `(200, {'expired': 0})` 幂等；非管理员 403 → LIVE-PASS。**反证**：把启动那一行单独退回 `_expired = 0`，同一份脚本 FAIL「前提没被推进（仍是 active）——启动触发点没跑；读面还留着派生结论；派生结论未随前提退场；第二次不回 0」，退出码 1；还原后 `app.py` 与备份 md5 逐字节一致（`216e325c…`）。
+    - **一处记账勘误**：登记笔 `c0bb262e` 正文写"净 LOC +26/−6"，而**同一条命令在它之前刚打印出
+      现值 +31/−7**（台账 10、子集 6、报告 15/7）——落字时用的还是打数前的手算。
+      commit 已入库不改写历史，以本行为准。失效面与 §6-102 那笔同形：**读数在场，却没被读**。
     - **边界与未覆盖面（登记）**：① `TestClient(app)` 不进 context manager 时不跑 lifespan，`guest_agent/server.py` 那套独立 app 亦不经过主 `_on_startup`——这类面靠管理员端点或下一次真启动收敛，不假装"任何进程一开就跑"；② 两次触发之间新到期的行仍由读侧时钟闸兜住（该闸职责不同，本批保留不动）；③ 派生结论的窗口本身不继承（那是 ① 的路，按裁定不做）；④ 同一批对比里的 §5-N3（评估台架从未跑出）、§5-N4（权威/投影漂移只能按需探）**仍未点单**。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
