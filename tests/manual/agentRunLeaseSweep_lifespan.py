@@ -12,7 +12,7 @@
 3. 新鲜租约的 running 不被误杀；parked 不被顺手收敛（等人续跑的状态不是死态）；
 4. 关闭后不遗留仍在跑的 task（否则 TestClient teardown 会被不收敛的 task 拖住）。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/agentRunLeaseSweep_lifespan.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/agentRunLeaseSweep_lifespan.py
 
 如实记一句：本层证「lifespan 接线 → 周期驱动 → 库层收敛」这段在路上，**不证** SSE
 端点如何把这条终态投影给前端（那是 console.py 的读侧，属 F 批登记的 §6 另一格）。
