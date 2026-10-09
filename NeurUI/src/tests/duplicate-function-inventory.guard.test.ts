@@ -40,7 +40,11 @@ const LEDGER_PATH = join(
 )
 
 function readLedger(): string {
-  return readFileSync(LEDGER_PATH, 'utf-8')
+  // 行尾归一：台账是脚本 `--write-ledger` 用 `\n` 生成的，而 Windows 上 git 以 CRLF
+  // 检出，逐行 join 出来的期望串与文件字节永远不等 ⇒ 整块比对在 Linux 绿、Windows 恒红。
+  // 这一格要守的是"台账机器段与实跑口径逐组相等"，与行尾字节无关（同 canvasEdgesStyle
+  // 那格同一族：判据绑了机器形态）。
+  return readFileSync(LEDGER_PATH, 'utf-8').replace(/\r\n/g, '\n')
 }
 
 describe('跨文件同名函数盘点', () => {
