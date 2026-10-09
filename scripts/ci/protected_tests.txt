@@ -1938,3 +1938,17 @@ tests/unit/aigc_studio/test_retiredShotColumns.py
 #    `GET /projects/{pid}` 投影里看得见导出进度，`GET /merges/{mid}` 的属主门与 404 同源。
 # 逐文件单跑两次同读数 8 passed（`6c6b9cbd` 落库之后复取）
 tests/unit/aigc_studio/test_mergeAsBackgroundRun.py
+
+# 协程内裸调阻塞子进程·同根余格（`46c0f99e`，§6-98）：两枚行为判据 + 一枚形态棘轮
+# 行为面（形态守卫看不见的正是这一类）：
+# ① `neurflow/drama_nodes.py` 的 compose 节点——concat 收进同步段后经 `to_thread` 跑，
+#    判据取"协程心跳推进数"，并先断言子进程替身被调用（走降级支路时心跳读数不作数）；
+# ② `core/ffmpeg.py` 的 `ensure_ffmpeg()`——`_verify_binary` 那发 `-version`（实测 42–45ms）
+#    在 lifespan 启动阶段同步跑会占死循环，此时服务已在接受请求。
+# 形态面（只降不升棘轮，逐文件冻结基线 4 文件 / 8 处）：
+# ③ 反向对照三格——协程内那发必须抓、同步函数里那发不得误伤、协程内嵌套 def 里那发也要抓；
+#    外加扫描根覆盖性一格，防"扫了个空却报绿"。基线里那 8 处只冻结不认领（判定欠）。
+# 逐文件单跑两次同读数 2 / 2 / 4 passed（`46c0f99e` 落库之后复取）
+tests/unit/neurflow/test_dramaComposeOffloadsTheLoop.py
+tests/unit/core/test_ffmpegBootstrapOffloadsTheLoop.py
+tests/unit/ci/test_asyncBlockingSubprocessRatchet.py
