@@ -77,6 +77,55 @@ def reconcileEpisode(store, eid: str) -> typing.List[typing.Dict[str, typing.Any
     return shots
 
 
+async def salvageLocalFromLedger(store, sb: dict) -> str:
+    """账本说「视频已生成」而本地没件时，先把那条远端产物拉回本地；成功回本地路径。
+
+    这是 `task_ledger` 里那条 `result_url` 在 Studio 一侧的**唯一读者**（§6-99）。
+    改前的形态：`reconcileEpisode` 遇到「`succeeded` 且无 `local_path`」已把镜头诚实
+    改判 `failed`（`0dd80fd0`），可账本里那条 URL 从此无人去取——用户点「重试视频」时
+    `services.generate_shot_videos` 直接再 `submit_video` 一次，**为一单已经付过钱的产物
+    再付一次**；URL 过期后永丢，账面却像什么都没发生过。
+    接法选「花钱之前先抢救」而不是「把外链摆到前端」：远端 URL 本就带有效期，
+    新建一条对外展示面等于把一个不可靠的读数当成交付物。落盘走仓内唯一的产物落盘点
+    `persist_media`（含出网安全闸），不另开下载路径。
+
+    只在「有远端 URL、本地没件、账本已 `succeeded`」这三件齐平时动手；任一件不满足
+    或下载失败都回空串，调用侧照常提交——**拉不回不等于这镜不用管**。
+    镜头行与账本行同时补 `local_path`：只写一边，下一次收口就按另一边判它"没本地化"。
+    """
+    from neurova.llm.generators import task_ledger as _ledger_mod
+    from neurova.llm.generators.runtime import persist_media
+
+    taskId = str(sb.get("ledger_task_id") or "")
+    if not taskId:
+        return ""
+    led = _ledger_mod.get_generation_task_ledger()
+    task = led.get(taskId)
+    if task is None or task.status != _ledger_mod.TASK_SUCCEEDED:
+        return ""
+    url = str(task.result_url or "")
+    # 两种形态都要救：`http…` 要过出网闸下载，`data:` 是 provider 直接回内联件
+    # （`recovery.py:80` 那一支根本不试本地化，`local_path` 恒空）——`persist_media`
+    # 原生吃这两种，只认 http 就把"本地从未落过盘"那一类留在门外。
+    if task.local_path or not (url.startswith("http") or url.startswith("data:")):
+        return ""
+    try:
+        path = await persist_media(url, "video", task.task_id, 0)
+    except Exception as e:  # noqa: BLE001 - 救不回是常事（URL 过期），交回调用侧走提交
+        logger.info("远端产物抢救失败(%s): %s", task.task_id, str(e)[:200])
+        return ""
+    if not path:
+        return ""
+    led.update(task.task_id, local_path=path)
+    store.update_storyboard(sb["id"], {
+        "video_status": "done", "video_path": path,
+        "status": "video_ready", "error": ""})
+    sb["video_status"] = "done"
+    sb["video_path"] = path
+    logger.info("镜头 %s 的产物由账本远端件抢救回本地：%s", sb["id"], path)
+    return path
+
+
 def reconcileRunningEpisodes(store=None) -> int:
     """扫全库"有在跑视频"的分集并逐集收敛；返回被处理的镜头数。"""
     store = store or get_store()
