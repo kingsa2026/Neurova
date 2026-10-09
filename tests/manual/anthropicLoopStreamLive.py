@@ -20,7 +20,7 @@
 4. 被执行的调用在 `ctx.context` 里有配对的 assistant 声明 + tool 结果；
 5. 落盘后下一轮读回能看到该结果（写→读→反馈闭合）。
 
-一条命令复现：PYTHONPATH="E:/项目/Neurova" .venv/Scripts/python.exe tests/manual/anthropicLoopStreamLive.py
+一条命令复现：PYTHONPATH="$(git rev-parse --show-toplevel)" .venv/Scripts/python.exe tests/manual/anthropicLoopStreamLive.py
 """
 from __future__ import annotations
 
