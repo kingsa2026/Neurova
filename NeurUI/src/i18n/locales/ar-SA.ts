@@ -3707,6 +3707,7 @@ studio: {
   runPartialFailed: '{n} فشل',
   runPartialBlocked: '{n} محجوب',
   stopRun: 'إيقاف المهمة',
+  stopRunN: 'إيقاف {n} مهام قيد التشغيل',
   runCancelled: 'تم إيقاف المهمة',
   runCancelQueued: 'تم طلب الإيقاف: تُنهي الخطوة الحالية ولا تستمر',
   retryStarted: 'بدأت إعادة المحاولة',
