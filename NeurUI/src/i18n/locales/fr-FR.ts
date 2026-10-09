@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n} bloqués',
   stopRun: 'Arrêter la tâche',
   stopRunN: 'Arrêter {n} tâches en cours',
-  runCancelled: 'Tâche arrêtée',
-  runCancelQueued: 'Arrêt demandé : la phase en cours se termine, rien ne suit',
+  runCancelled: 'Tâche arrêtée (la prise en cours continue chez le fournisseur ; les résultats peuvent revenir)',
+  runCancelQueued: 'Arrêt demandé : la phase en cours se termine, rien ne suit (les tâches déjà envoyées au fournisseur ne sont pas rappelées)',
   retryStarted: 'Nouvelle tentative lancée',
 },
 

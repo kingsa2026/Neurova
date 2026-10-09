@@ -227,7 +227,7 @@ describe('StudioProjectPage', () => {
     cancelRunMock.mockResolvedValue({ data: { run_id: 'run_live', cancel_requested: true, tasks_cancelled: 1, status: 'running' } })
     await vm.cancelActiveRun()
     expect(cancelRunMock).toHaveBeenCalledWith('run_live')
-    expect(message.success).toHaveBeenCalledWith('任务已停止')
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('任务已停止'))
     expect(message.info).not.toHaveBeenCalled()
 
     // 第二档：句柄不在（服务重启过）时只报"已请求停止"，不许宣称已停止
@@ -268,12 +268,41 @@ describe('StudioProjectPage', () => {
     })
     await vm.cancelActiveRun()
     expect(cancelRunMock.mock.calls.map((c: any[]) => c[0]).sort()).toEqual(['run_a', 'run_b'])
-    expect(message.success).toHaveBeenCalledWith('任务已停止')
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('任务已停止'))
 
     settleA({ id: 'run_a', status: 'cancelled', detail_json: '{}', error: '' })
     settleB({ id: 'run_b', status: 'cancelled', detail_json: '{}', error: '' })
     await Promise.all([a, b])
     expect(vm.activeRuns).toEqual({})
+  })
+
+  it('停止播报交代「对端已提交的任务不撤回」——点了停不等于远端也停', async () => {
+    // 单镜内部那几十秒 await 打不断（设计如此：打断生图请求既不现实也不安全），
+    // 而 i2v 任务早已在服务商侧排队。用户看到的"停止"只覆盖"剩余分片不再续跑"这一半；
+    // 不写清就会让人以为产物不会再回来，进而以为删掉镜头行等于删掉产物。
+    let settle: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation(() => new Promise((res) => { settle = res }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const running = vm.track('videos', 'run_live')
+    await flushPromises()
+
+    cancelRunMock.mockResolvedValue({ data: { cancel_requested: true, tasks_cancelled: 1 } })
+    await vm.cancelActiveRun()
+    const okText = (message.success as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join('')
+    expect(okText).toContain('任务已停止')
+    expect(okText).toContain('对端')
+
+    cancelRunMock.mockResolvedValue({ data: { cancel_requested: true, tasks_cancelled: 0 } })
+    await vm.cancelActiveRun()
+    const queuedText = (message.info as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join('')
+    expect(queuedText).toContain('已请求停止')
+    expect(queuedText).toContain('对端')
+
+    settle({ id: 'run_live', status: 'cancelled', detail_json: '{}', error: '' })
+    await running
   })
 
   it('单镜重试 stage=image 走 retryStoryboard', async () => {

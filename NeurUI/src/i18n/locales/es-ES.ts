@@ -3708,8 +3708,8 @@ studio: {
   runPartialBlocked: '{n} bloqueadas',
   stopRun: 'Detener tarea',
   stopRunN: 'Detener {n} tareas en curso',
-  runCancelled: 'Tarea detenida',
-  runCancelQueued: 'Parada solicitada: termina el paso actual y no continúa',
+  runCancelled: 'Tarea detenida (la toma actual sigue en el proveedor; los resultados pueden volver)',
+  runCancelQueued: 'Parada solicitada: termina el paso actual y no continúa (las tareas ya enviadas al proveedor no se retiran)',
   retryStarted: 'Reintento iniciado',
 },
 

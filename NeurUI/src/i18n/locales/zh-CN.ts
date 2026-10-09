@@ -3632,8 +3632,8 @@ studio: {
   runPartialBlocked: '{n} 项被阻断',
   stopRun: '停止任务',
   stopRunN: '停止 {n} 条在跑的任务',
-  runCancelled: '任务已停止',
-  runCancelQueued: '已请求停止：当前步骤收尾后不再续跑',
+  runCancelled: '任务已停止（当前这一镜仍在对端跑完，产物可能还会回来）',
+  runCancelQueued: '已请求停止：当前步骤收尾后不再续跑（对端已提交的任务不撤回）',
   retryStarted: '重试任务已启动',
 },
 
