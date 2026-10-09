@@ -870,11 +870,43 @@
     - **一处记账勘误（同形态第 5 次复发）**：子集登记笔 `2f549406` 正文写"基建池 +15（1 空行 + 13 行说明 + 1 条路径）"，`git show --numstat` 实测 **+13（1 空行 + 11 行说明 + 1 条路径）**。commit 已入库不改写历史，以本行为准——落笔前跑 numstat 这条纪律我又漏了一次。
     - **未覆盖面（登记，本批不顺手改）**：① **B 档剩下的同根命中**——`collaboration/neurflow/drama_nodes.py:931` 在 `async def exec_video_compose`（`:893`）里同步调 `resolve_ffmpeg_path()`（内含 `subprocess.run(-version, timeout=20)`），`:944-948` 又是 `subprocess.run(concat, timeout=300)`；`core/ffmpeg.py:125 async def ensure_ffmpeg()` 里同步调 `resolve_ffmpeg_path()`（`:132/:134/:142`）并 `_verify_binary`（`:112`，`subprocess.run(timeout=20)`）。（**✅ 2026-10-09 闭环 `46c0f99e`，全文见 §6-99**；括内"`resolve_ffmpeg_path` 内含 `-version`"那句按 §6-93 的同一条更正作废——真实阻塞点是 `drama_nodes.py:944-948` 的 concat 与 `core/ffmpeg.py:112-116` 的 `_verify_binary`，两处都已挪出循环。）两处都是同一条"协程内裸调阻塞子进程"，但分属 neurflow 节点与启动引导链，各自的返回契约不同域，不并入本批。② 前端导出面板的"停止"文案（§6-91 未覆盖面④那批落的 `stopRun`/`stopRunN`）现在**也覆盖 merge 这一条**——文案是 kind 无关的，够用；若要按 kind 点名，就得新建 kind→中文标签映射，与工具条各按钮自身文案构成同一件事的第二处定义，故不做。③ 一级 FFmpeg 内部（几十秒）不可打断，`cancel` 在那段窗口里只落意图列、等边界；"点了停还在转"这段窗口的文案随 §6-91 未覆盖面② 一并交代过了，本批不重复。
 
-95. **进化运行审计面 `runs/*.json` 只写不读：例级门拒掉的那些运行目前没有读者（前半 ✅ 闭环 `a0ec975b`，判据 `f3bd0b2e`/`bcde3ed4`、入子集 `cc52e7a7`；后半 🟡 需人裁）** —— 来源是对照报告 §6-9（§8 前置 1 落地时新发现）。**号次勘误**：本条与下一格原登记为 §6-93/§6-94（`a67a705c`），与并发会话同日入库的 §6-93（`69db6d28`，async 裸调 subprocess）撞号；同号已被 `neurova/aigc_studio/services.py:751` 等工作树在途代码引用，且 commit 已入库不改写历史，故按"先入库者保号"把本批两格顺移为 95/96，`94.` 一号留给那批的导出投影格（✅ 已按此写入，见上一条）。
+95. **进化运行审计面 `runs/*.json` 只写不读：例级门拒掉的那些运行目前没有读者（前半 ✅ 闭环 `a0ec975b`，判据 `f3bd0b2e`/`bcde3ed4`、入子集 `cc52e7a7`；后半 ✅ 闭环 `0b048c7c`，取「接进现有提案面」）** —— 来源是对照报告 §6-9（§8 前置 1 落地时新发现）。**号次勘误**：本条与下一格原登记为 §6-93/§6-94（`a67a705c`），与并发会话同日入库的 §6-93（`69db6d28`，async 裸调 subprocess）撞号；同号已被 `neurova/aigc_studio/services.py:751` 等工作树在途代码引用，且 commit 已入库不改写历史，故按"先入库者保号"把本批两格顺移为 95/96，`94.` 一号留给那批的导出投影格（✅ 已按此写入，见上一条）。
 
     复算后本条真正的缺陷不在"人看不见审计文件"，而在**台账在向反馈回路说谎**：胜者行早在评测期写成 `accepted=is_winner`，六处终局拒绝各抄四行且都不回写它，于是被例级门拒掉的候选在台账里仍是 `accepted=True`，被三个既有读方按"已生效"理解（`history_ledger.py:163-166` 提示词段、`:207` stall 换轴指令被抑制、`evolution_yield_prune.py:51` 零产出技能被挡在剪枝判据外）。修法是一个 `rejectRun(reason)` 出口 + 胜者行翻 `accepted=False`/带 `reject_reason`，另开 `round_winner` 一格保留"本轮 tune argmax"（`accepted` 从此只表**被部署**，一格一义）。红在落地前取到（`已生效（勿做无谓回退）` 连渲染四条，而实际部署自始至终是基线），活体读盘证 `accepted=False / reject_reason='case_regression' / round_winner=True` 真落进 jsonl。**后半**：`_persist_run:501-505` 写的 `runs/*.json` 全仓零读方，而提案只在未拒时产出（`service.py:287`），故"门逐条拦了谁"要下钻仍无出口——补 GET 端点属新建通道，本批票面禁止，二选一需人裁。
 
-96. **`tests/performance/test_perf_gate_contract.py` 的烧 CPU 基元在 Windows 上语义失效（🟡 本地门禁不可复跑；CI/Linux 不受影响）** —— 该文件的注入全部形如 `deadline = time.thread_time() + x; while time.thread_time() < deadline: pass`。本机（Windows 10.0.26200）实测 `time.thread_time()` 以 **~15.6ms 为粒度**推进：目标 0.1ms 的一次自旋实跑 15.625ms，多调用点累计后整文件 `--timeout=180` 单跑 6 分钟仍不收敛，而默认 `timeout=30` 会把整场受保护子集当场打断（本轮两次全量都在同一位置断）。该文件自 `030a2b9f`（10-01）未再改动，非本批引入。两条出路都要人裁：改计时基元（`monotonic` 兜底或按量子给下限，会改变自证强度）或按平台跳该格。
+    - **✅ 后半闭环（2026-10-10 `0b048c7c`，取「接进现有提案面」）**：提案记录带上 `run_id`，
+      `GET /skills/{agent_id}/proposals/{proposal_id}` 按它把运行内容**原样读回**，详情弹窗把留出侧
+      逐例读数与判分可用性摆在审批人面前。读侧三态各自出声（`attached`/`missing`/`none_recorded`），
+      只回一个 None 就等于让调用方在"谎报没记"与"静默省略"之间二选一；`run_id` 来自磁盘记录＝来自
+      外部输入 ⇒ 只认 `run_` + 字母数字的自生形态，`../secret`、`/etc/passwd` 一律拒读。
+      目录收成 `_runsDir()` 单点，写侧读侧共用（教义第 6 条）；`_persist_run` 落盘失败回空串而不假造 id，
+      否则详情面会拿不存在的 id 报"运行不见了"，把写侧失败洗成读侧失败。列表面不夹带运行明细，
+      由 `ProposalSummary` 的 `Omit` 在类型层面锁住。
+    - **所选方案的既定代价（不遮掩）**：**被门拒掉的候选不产提案** ⇒ 这条读路径天然只覆盖"出了提案的
+      那些运行"，「门逐条拦了谁」那一半仍无出口。该边界写进端点 docstring、判据文件与本格，属另一裁；
+      本笔没有偷偷扩大范围去假装它解决了。
+    - **一处自己写出来、被活体抓出的缺陷（值得照抄这条次序）**：前后端第一版都按 dataclass **字段名**
+      `holdout_case_scores` 读，而 `EvolutionRunResult.to_dict()` 的**线上键名**是 `holdout_cases`；
+      Python 侧夹具又照字段名手搓 ⇒ 判据全绿而面板永远空着。是活体跑真写侧时报 `KeyError` 才暴露。
+      补的两格把这类"夹具发明键名"钉死：服务侧按**生产写侧真文件的键集合**核，前端
+      `text-evolution-contract` 逐字段比对 `to_dict()` 的线上键名，另加一格三态跨语言逐字同形
+      （任一侧改名或加一档即红，附"漂移必须被抓到"的反证）。
+    - **读数**：红灯 6 条（`KeyError: 'evolution_run_status'`×3、`KeyError: 'run_id'`、
+      `AttributeError: … no attribute 'readRun' / 'runLookup'`，均非 import/collection 失败）
+      ⇒ 后端 `test_text_evolution_api.py` 18 passed + `test_service_closed_loop.py` 9 passed，与 dev 路径守卫、
+      子集登记史、`test_evolution_ab_endpoint.py` 合跑 84 passed，两份判据入子集；前端两档 27 passed，
+      变异自证（`missing` 分支文案键换掉 ⇒ 1 failed，还原到 sha256 `509e05dc821a1ecc022f9e350c2ff482e87af932c8e8ff2ad1b71d57f9d26a52`）；
+      宽域 `tests/unit/evolution/` 1560 passed / 4 failed，FAILED 集合与本会话第一笔父 commit `30534ac5`
+      的现建基线逐行一致 ⇒ 本批独有失败 0。活体（真写侧 + `create_app` 真路由 + 隔离数据根，探针即用即删）：
+      `run_20261009T203646_4a0e6b.json` 线上键含 `holdout_cases` True、HTTP 200、`evolution_run_status: attached`、
+      详情读回与盘上逐字相等 True、列表面不夹带 True、仓内 `data/` 指纹前后一致 True ⇒ PASS。
+
+96. **`tests/performance/test_perf_gate_contract.py` 的烧 CPU 基元在 Windows 上语义失效（✅ 闭环 `44289d53`，取「按平台跳该格」；新判据 `tests/unit/ci/test_subQuantumSpinClockGate.py` 入子集同笔）** —— 该文件的注入全部形如 `deadline = time.thread_time() + x; while time.thread_time() < deadline: pass`。本机（Windows 10.0.26200）实测 `time.thread_time()` 以 **~15.6ms 为粒度**推进：目标 0.1ms 的一次自旋实跑 15.625ms，多调用点累计后整文件 `--timeout=180` 单跑 6 分钟仍不收敛，而默认 `timeout=30` 会把整场受保护子集当场打断（本轮两次全量都在同一位置断）。该文件自 `030a2b9f`（10-01）未再改动，非本批引入。两条出路都要人裁：改计时基元（`monotonic` 兜底或按量子给下限，会改变自证强度）或按平台跳该格。
+
+    用户 2026-10-10 裁第二项。**实作与裁语有一处偏差，如实记下**：门按**实测时钟推进粒度**成立，不按平台名——`sys.platform == "win32"` 两头失真（不是每台 Windows 都粗，也不是只有 Windows 会粗：低频 tick / 被限流的 Linux 容器同样粗），并把"量子门的条件里不得出现平台名"钉成判据之一。落法：5 处内联自旋收进唯一基元 `spinThreadCpu`（教义第 6 条，基元之外再有 `thread_time` 自旋循环即红），四格挂 `needsFineThreadClock`，只注入**等待**的那格（"等待不进判分"主契约本身）显式豁免、本机照跑。
+    - **本机覆盖代价如实记**：四格里有两格（`bestOfRounds` 的取最小值、首轮一次性成本）在粗粒度机上本也只是慢 1~2 个量子、可留本机跑；一并跳是换取"新增自旋格必被门住"可机械核对，不是它们有缺陷。
+    - **读数**：修前单格 `--timeout=60` ⇒ 63s 撞 `Failed: Timeout`；修后整文件 `24 passed, 4 skipped in 24.08s`，跳过理由复述实测 15.6ms 与"CI/Linux 照跑"。新守卫六格（行为面 1 + 诚实面 3 + 检出器反证 1 + 唯一基元 1），其中行为那格的红灯原文就是子进程里的 `Timeout`。
+    - **修完才第一次看得见的事**：该文件过去从未跑到 `test_script_runs_and_passes`，于是**门禁自己在本机恒红**这件事一直隐身——另立 §6-120。同一轮 A/B 还抓出两条 main 自带常驻红，见 §6-121。
 
     - **同批全量门禁的取数记录（2026-10-09，CI 原口径 `--cov --cov-fail-under=60`，548 文件）**：`5055 passed / 35 failed / 41 errors`，coverage **86.74%**（达标线 60%）。其中 34 格 `ERROR` 是 `fixture '…' not found`，出错簇单独复跑 **386 passed** 不复现 ⇒ 并发会话在这 17 分钟内动了同一工作树，本批不认领；`test_consoleYieldGateWiring`、`test_pip_audit_gate` 两格在**干净 HEAD worktree** 里同样红 ⇒ main 自带常驻红格，非本批引入。本批四枚判据文件（呈现账两枚、例级门两枚）在失败面**零命中**。
 
@@ -894,7 +926,7 @@
     - **10-09 摊开 §7-Q2 影响面时复算出本条自己的判据偏弱——**已修**（同批 Task 1 收接缝 + Task 5 改探针；红在落地前取到：把离线兜底换成不回显的桩，旧口径当场翻真，新口径纹丝不动）**：`probeRealTrajectoryExecutor` 问的是 `_DefaultAgent.run` 是否仍回显（`runner.py:170-177`），而**生产实际注入的是 `SimulatedAgent`**（`service.py:253-256`；`ab_compare` 在 `:379` 又把同一句回落**重写了一遍**，属 §6 双源）。⇒ 只要把 `_DefaultAgent` 换个不回显的桩，旗标就翻真，而评测照旧是单轮模拟面——旧口径给的因此是**弱保护**（方向对、咬合面浅）。现改为问生产接缝：探针读 `resolveEvolutionExecutor(None)` 并经 `isRealAgentTrajectoryExecutor` 从结构推导能力（持有 `agent_ref` + 显式声明跑真回合，缺一即 False），全程不钉类名字符串；`PROBE_ECHO_TEXT` 与探针里的 `asyncio` 随旧实现一并退役。落地票面 `docs/04-plans/2026-10-09-双臂试评接真轨迹-前置2落地实施方案.md`（用户 2026-10-09 裁决：真轨迹只进人工审批前的双臂试评 + 修探针口径；自动轮不调文本进化）。
         - **摊开影响面时顺带纠正的一条前提**：原 Q2 问的是"真轨迹进不进**每轮自动**评测"，实测该前提不成立——`closed_loop.py:654` 的自动闭环只做 RSI 度量与阶段判定，`rsi/orchestrator.py` 全文零 `evolve`/`EvolutionService` 命中，文本进化在生产只有 admin 端点 `text_evolution_api.py:187` 一个入口。真实问法是"人工试评跑不跑真轨迹"，成本也因此从 ~480 真 turn/轮（按 `iterations=10` 逐站点算）降到双臂 ~24 真 turn。
 
-98. **`Agent.process_message` 调一个已被移除的方法——宣称的"统一入口"今天必抛 AttributeError（✅ 闭环 `10724888`，取 (b)；残留半截见末两段）** —— 立"接真 agent 轨迹"票时复算入口取数抓到。`agent_core.py:1688` 写 `self._router.create_message(content=..., sender=...)`，而 `_router` 由 `init_router()`（`:1507-1516`）经 `create_default_router()`（`router.py:514-532`）得到 `MessageRouter`，该类现役方法实测只有 `route/_route_command/_route_skill_request/_route_memory_request/_route_chat/register_handler/register_command_handler/get_route_stats/clear_stats`——**没有 `create_message`**；`tests/unit/core/test_router.py:5-7` 的说明明写该 API 随异步化重构**已移除**（测试自己改用 `Message(content=...)` 直构）。活体复现：`MessageRouter().create_message(...)` ⇒ `AttributeError: 'MessageRouter' object has no attribute 'create_message'`。
+98. **`Agent.process_message` 调一个已被移除的方法——宣称的"统一入口"今天必抛 AttributeError（✅ 闭环 `10724888`，取 (b)；残留半截 ✅ 闭环 `9624a73b`，取「不接线，钉住单一来源」）** —— 立"接真 agent 轨迹"票时复算入口取数抓到。`agent_core.py:1688` 写 `self._router.create_message(content=..., sender=...)`，而 `_router` 由 `init_router()`（`:1507-1516`）经 `create_default_router()`（`router.py:514-532`）得到 `MessageRouter`，该类现役方法实测只有 `route/_route_command/_route_skill_request/_route_memory_request/_route_chat/register_handler/register_command_handler/get_route_stats/clear_stats`——**没有 `create_message`**；`tests/unit/core/test_router.py:5-7` 的说明明写该 API 随异步化重构**已移除**（测试自己改用 `Message(content=...)` 直构）。活体复现：`MessageRouter().create_message(...)` ⇒ `AttributeError: 'MessageRouter' object has no attribute 'create_message'`。
 
     - **影响面**：`agent_core.py:7` 的模块 docstring 至今宣称"提供 process_message 统一入口，所有消息经过 Router 路由"，而全仓唯一消费者是 `evolution/eval/ab_library.py:134`（`make_agent_ab_executor`），其调用方只有测试替身——**这就是那枚真 agent executor 适配器至今只能停在测试侧的直接原因**。HTTP/渠道/控制台三条传输面走的都是 `Agent.chat(...)`（`api/endpoints/chat.py:317/488`），不受该断链影响，所以线上没症状、CI 也没红：一处"文档承诺 ≠ 可调用"的静默断点（AGENTS.md §2 断点条 + 教义第 1 条）。
     - **三档处置（代价与含义各不同，需人拍板）**：**(a) 重新提供 `create_message`** —— 复活已移除 API，与 `test_router.py` 记录的重构方向相冲，且会把"Message 构造"再造成第二处定义；**(b) `process_message` 自己构造 `Message`**（一处改动、保住对外承诺，Router 契约不动）——**推荐**；**(c) 退役 `process_message`** 并同步删掉 `agent_core.py:7` 的宣称与 `ab_library.py:134` 的调用改指 `chat` —— 最省代码，但要承认"外部统一入口"这件事本仓从未真有过，涉及对外语义，不能由修批次的会话单方面判。
@@ -902,6 +934,8 @@
     - **✅ 已闭环（2026-10-09 `10724888`，取推荐档 (b)）**：入口改为自己构造 `Message(content=..., sender_id=sender)`，消息类型识别仍由 `Message.__post_init__` 负责。**(a) 被反向判据钉死**：`MessageRouter` 上不得再长出 `create_message`——复活它能让新判据全绿，却把「怎么造一条消息」变成两处定义（教义第 6 条）。红在落地前取到：HEAD worktree 现建 **3 failed / 1 passed**，三条全部红在 `:1688` 的 `AttributeError`（缺陷现场本身，不是 import/collection 噪声），第 ④ 格改前即绿、记为反向守卫。活体走真 app + 真 `Agent` 实例 + 真 Router：`SUCCESS=True / MESSAGE_TYPE=chat`，且探针调用前 `agent._router is None` ⇒ 连「未初始化 → `init_router()` 真装配」那条支路也一并证到。
     - **本格落地时两处自纠（都值得照抄）**：① 探针第一版把模型桩打在 `MultiModelLLMClient.chat`，下游回了 `[LLM Error] Unknown error` —— 那是**真发起过一次调用并失败**，等于拿配额读判据；改打在真正被调的 `AgentLLMClient.chat`，并以「canned 文本回来了且不含 [LLM Error]」作为没出网的反证。② `agent_core.py` 有尺寸棘轮：注释多写 4 行就被当场拦下，理由挪进本格与测试文件 docstring，改动最终做成等量替换（生产净 0）。
     - **修完仍剩的半截（另案，与本格不同根因）**：`sender` 如今只落到 `Message.sender_id`，而 `_route_chat`（`router.py:353`）只把 `content` 与 `metadata` 交给 `agent.chat` ⇒ **发送者身份到不了下游**。入口通了、身份没接上，属「传输面通了、解析面没人读」那类；接它要动会话归属语义，不在本批范围。
+    - **✅ 该半截已裁并闭环（2026-10-10 `9624a73b`，取「不接线，钉住单一来源」）**：判据 `tests/unit/agent/test_turnIdentitySingleSource.py` 八格——四条身份通道按 **ContextVar 声明名**逐条只有台账里的写方、通道不得在自己模块之外被 `.set()`、每条通道只声明一处（新增第五条即红）、`set_turn_identity` 生产侧只被 `TurnState.set_request_identity` 调起，再加一格行为面：先用 `set_request_identity()` 置入身份，再走 `process_message → _route_chat → chat`，在**被路由那一刻**取读数，验入口带着 sender 而**不改写**轮身份。变异自证在仓外 worktree 里注入"第二条通道 + 第二个调用方"⇒ 3 格转红，注入随 worktree 销毁。
+    - **本格登记时那句"解析面没人读"要更正（复算后）**：`Message.sender_id` 在传输面确有读方（`protocols/message_protocol.py` 的 `to_dict`/回复、`acp_api.py:142`、`channels/*`），不是只写不读的断点——"不接线"这一裁因此不留新断点，该前提本身也被钉成判据（`test_senderIdHasProductionReadersOutsideItsOwnConstruction`：读方清零即红，并先证赋值左侧不被算成读点）。原句把"`_route_chat` 这一跳不读"写成了"全仓没人读"，是**拿一条链路的外推当全局结论**，记下以免下次有人据此判它死码。
 
 
 99. **协程内裸调阻塞子进程·同根余格扫净 + 一枚只降不升棘轮（✅ 闭环 `46c0f99e`，三判据入子集 `1edf33a7`）** 🔴 —— §6-93 的 B 档两处命中（本批开头那两处 `resolve_ffmpeg_path` 相关的表述按 §6-93/§6-94 的就地更正作废）。**号次勘误**：本格与 `46c0f99e`/`1edf33a7` 两笔提交正文原登记为 §6-98，与并发会话同日入库的 §6-98（`agent_core.py:1688` 调已被移除的 `create_message`）撞号；按"先入库者保号"顺移为 §6-99，commit 已入库不改写历史，以本行为准（`scripts/ci/protected_tests.txt` 里那格的旧号也已就地改掉）。同一根因两周内咬了三次，形态又极单纯（协程里直接 `subprocess.run`），而**日志零异常**——按错误率排查一条都查不到。这种故障只有钉成红/绿才拦得住，所以本批除两处根修外配一枚常驻棘轮。
@@ -1069,7 +1103,7 @@
     - **常驻判据**：`tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py` 7 格 + 端点扩写 4 格；其中一格让替身 agent 在 `chat` 内回读当轮覆盖槽，断四回合读数为 `[BASELINE, BASELINE, CANDIDATE, CANDIDATE]` 且请求结束后槽为 `None`——这把 §6-97 那条"探针问错对象"的病，从读数面升级成了会红的门禁。
 
 
-112. **前端两处常驻红：同名函数盘点守卫套件加载失败 + 画布悬浮层断言（🟡 本批不认领，待裁修法）** —— 全量 `npx vitest run` 实测 `2 failed | 247 passed | 2 skipped`。
+112. **前端两处常驻红：同名函数盘点守卫套件加载失败 + 画布悬浮层断言（✅ 三形态全闭环 `e2fed6ba`+`32bcc8fc`，用户 2026-10-10 裁「修两条失效守卫 + 改规则」）** —— 全量 `npx vitest run` 实测 `2 failed | 247 passed | 2 skipped`。
 
     - **归因（用反证做死，不是"看起来无关"）**：把本批 14 个前端文件整体挪开、还原成纯 HEAD 内容复跑同样两个文件 ⇒ 依旧 2 failed（且失败签名一致）。故与本批无关，属 main 自带。
     - **形态一（更要命）**：`src/tests/duplicate-function-inventory.guard.test.ts` 是**套件级加载失败**（`SyntaxError: Invalid or unexpected token`，0 条用例被执行）。同一次 `node` 直跑其导入的 `scripts-qa/duplicate-function-audit.mjs` 完全正常（实跑 A=0/B=9/C=96），⇒ 报错出在 vitest/esbuild 的转换链上而非源码本身。这条守卫自己坏了，就等于"同名函数 A 类清零"这件事**今天没人守**——而且它以 0 条用例的形态混在 `247 passed` 里，只看测试数会以为前端是绿的。
@@ -1081,6 +1115,39 @@
       "规定有这道门"与"这道门跑不起来"同时成立，且不会被任何 CI 抓到——与本格前两同族：
       **声称的门禁不咬合**，只是这次假在规则文档与工具链之间，而不是假在代码里。
       待裁：补 flat config + 依赖并把 lint 入 CI，或把 §4 那行改成实际存在的命令（改规则也算收口）。
+
+    ### 2026-10-10 落账（用户裁「修两条失效守卫 + 改规则」，三形态各自闭环）
+
+    - **形态一的根因比登记时给的那两种都具体**：坏在 `scripts-qa/duplicate-function-audit.mjs:1`
+      的 `#!/usr/bin/env node`。Vite 的转换管线把首行 shebang 留在包装后模块的**中间**，运行时即
+      `SyntaxError: Invalid or unexpected token`。归因用一行 import 的探针文件做死：同一文件的副本
+      去掉首行后 import 成功、20 个导出全可见，而 `node --check` 与 `node --input-type=module -e import(...)`
+      都正常 ⇒ 是"shebang × 打包器"的组合，不是脚本代码。**修在产生非法状态的地方**：摘掉那行——
+      它是"我可直接执行"的宣称，而全仓调用形态只有 `node scripts-qa/…`（脚本自己的用法段、台账、
+      守卫报错提示三处同口径），没有任何消费者。没有改走子进程（那会把"读同一份口径实现"降级成
+      "解析 stdout"），也没有把口径函数搬进 `.ts`（多一份平行实现）。
+    - **摘掉后这道门第一次真跑，6 格里立刻红 2 格——红的是形态二**：两处判据都把**字节级行尾**当成了
+      被守的东西。① `canvasEdgesStyle.test.ts` 的锚点写死 `'</div>\n\n        <!-- 缩放控制栏'`（LF 字面量），
+      ② 同名函数守卫拿 `join('\n')` 生成的台账机器段与文件字节逐字比对；本机 git 以 CRLF 检出 ⇒
+      两格在 Linux 绿、Windows 恒红，而红的既不是画布结构也不是台账一致性。读入侧一次 `\r\n → \n`
+      归一后两格转绿，且**台账内容本身与实跑逐组相等、无需重新生成**——第一次跑通即证它是纯行尾问题。
+      同一根因扫了一遍全仓前端：只有这两处绑了行尾（其余 `indexOf` 锚点都是单行、行尾无关）。
+    - **防再生判据（新档 3 格）** `NeurUI/src/tests/scriptsQaImportable.guard.test.ts`：`scripts-qa/` 下
+      不得有脚本带行首 shebang；`src/**/*.test.*` 里 import 的每个本地 `.mjs/.js` 都不得带（覆盖面跟着
+      实际 import 走，并先断扫描面非空免自己空转）；检出器只对**行首** `#!` 生效。变异自证：把 shebang
+      原样加回 ⇒ 2 failed，按 sha256 还原后 3 passed（`1399d7740d5dd48a9ca9c10c4a956d18f7842c02ef658c54ad14ec89387aa1c0`）。
+      **一条如实边界**（写进文件头）：它只挡 shebang 这一类成因，"套件级失败以 0 用例混进通过数"
+      还有别的形态（模块缺失、顶层抛错、转换链上任何其他失败），vitest 一律报成 0 test——那要在跑测器
+      层面比对"声明用例数 vs 实际执行数"，本层做不到，**不当已解决登记在此**。
+    - **形态三取「改规则」**：`AGENTS.md` §4 与 `CONTRIBUTING.md` 测试纪律节（两处一并，§0 同步纪律）
+      改成只列实跑门 `npm run test` 与 `npx vue-tsc --noEmit`，并写明 lint 跑不起来的事实与恢复它需要的
+      前置（flat config + 依赖 + 入 CI）。**本批刻意不引入 eslint**：那是另一整套决定（装依赖 + 配规则
+      会给全仓 `.vue`/`.ts` 立刻造出一批待修项），与"让规则与实存对齐"不是同一根因。扫描面复核：
+      `.cnb/settings.yml` 六处 NPC prompt 里没有 lint 宣称 ⇒ 无第四处需跟随；历史票面（如
+      `docs/04-plans/2026-09-30-computer-use-repair-tickets.md:113`）是过程档案，不改写。
+    - **读数**：修前 `2 failed | 248 passed | 2 skipped (252 files)`（今天的复算值，比本格登记时多一档文件）
+      ⇒ 修后 `251 passed | 2 skipped (253)`、`1997 passed | 1 skipped | 16 todo`，0 failed；
+      `vue-tsc --noEmit` 两遍干净；`tests/unit/test_repair_discipline_guard.py`（三落点逐条咬合那枚）23 passed。
 
     - **待裁**：形态一要么钉死 esbuild/vitest 版本口径（把 `.mjs` 纳入 `server.deps` 直读），要么把该守卫的扫描器改成 vitest 无关的 node 脚本 + CI 腿；两者都涉及前端工具链口径，不该由一个后端批次单方面定。本批只把"它会以 0 用例形态混在通过数里"这件事落进台账。
 
@@ -1431,3 +1498,27 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 之后把它们推上了 `origin/main`（`git branch -r --contains` 逐一验过：`b77d9b24`/`fb7801be`/
 `bf32ec98`/`49326f6d`/`347bc581` 均已在远端），当前 `origin/main..HEAD` 只剩 `abfe6d6b` 一条。
 本会话自身**未执行过任何 push**；远端前进是并发会话所为。
+
+120. **性能门禁的"解释器地盘"豁免按 POSIX 分隔符比前缀，Windows 上整片失效（✅ 闭环 `44289d53`，判据同笔）** 🔴 —— §6-96 那批把 `tests/performance/test_perf_gate_contract.py` 修到能跑完以后**第一次看得见**的红：该文件此前从未跑到 `test_script_runs_and_passes`，于是"门禁自己在本机恒红"一直隐身。
+
+    - **形态**：`scripts/ci/perf_gate.py` 的 import 探针挂 `sys.addaudithook`，把 import 期开文件的事件按 `_isOwnTree(path)` 豁免"解释器/内核地盘"（stdlib、site-packages、`sys.prefix`、`/proc`、`/sys`、`/dev`）。判据是 `path.startswith(tree.rstrip("/") + "/")` ——**只认 `/`**。Windows 上 `os.path.join("/proc", "stat")` 得 `/proc\stat`，不以前缀 `/proc/` 开头 ⇒ 漏网被点成"import 期做了阻塞型/IO 重活：首轮对话要为它付等待"。而该路径在本机根本不存在，`open()` 必失败、首轮零等待。同一根因把整片豁免打穿：`sys.prefix` 一族本就是 `E:\…\.venv` 全反斜杠，与 `/` 前缀比对永远不成立。
+    - **实测**：`python scripts/ci/perf_gate.py --json` ⇒ `failures: [{check: import-budget, detail: "import neurova.core.metrics 在 import 期做了阻塞型/IO 重活: ['open:/proc\\\\stat']"}]`、退码 1。发起者是 `prometheus_client/process_collector.py:100` 模块级 `PROCESS_COLLECTOR = ProcessCollector()`（第三方 import 期的正常动作），**与本仓代码无关**——红落在本仓的门禁判据上，不在被检对象上。
+    - **修法落在判据自己那侧**（不在消费方补判空）：树比较前两侧都做分隔符归一 `_normTree(p) = p.replace("\\", "/").rstrip("/")`。不是"放宽这条检查"：POSIX 路径里没有 `\`，归一在那一侧是恒等变换，Linux/CI 读数逐字不变（复算：修后 `perf_gate.py` 原口径 `python scripts/ci/perf_gate.py` 退码 0、`failures=[]`，本机也一样）。
+    - **判据**：`TestImportBudgetKeepsWallClock::test_ownTreePathJoinedWithNativeSeparatorIsNotASideEffect` —— 造一个真在 import 期 `open(os.path.join('/proc','stat'))` 的模块，要求 `sideEffects == []`。这条**按平台自适应**：POSIX 上那文件存在且真被读，靠地盘豁免放行；Windows 上它不存在，靠同一豁免放行。红灯原文（HEAD 实况）：`AssertionError: 地盘路径被点成 import 期重活: ['open:/proc\\stat']`。
+    - **同族复算**：全文件只有这一处分隔符敏感的前缀比对（另一处 `startswith(_PROBE_MARKER)` 与路径无关）。与本卷 §6-118 记的"守卫记平台原生分隔符却比 POSIX 字面量＝本机恒红从不判事"同族，方向相反（这次是判据写 `/`、机器给 `\`）。
+
+121. **`neurova_request_user_id` 是"本轮哪个用户"的第二条通道：不与轮身份共变量，但同语义、另一批、需人裁** 🟡 —— 落 §6-98 后半（取「不接线，钉住单一来源」）时，判据第一版把它误报成"轮身份被旁路直写"，顺着这条误报复算出来的真事实。
+
+    - **两条通道各自的读写面**（`grep` + `import` 复算，不是名字推断）：
+      - 轮身份 `neurova_turn_user_id`（`core/turn_context.py:27` 声明）——写：唯一入口 `set_turn_identity`，生产侧只被 `agent/turn_state.py:119 TurnState.set_request_identity` 调起；读：`get_turn_user_id`，消费方是工具层三层隔离与蜂群事件广播那一族。
+      - 并行通道 `neurova_request_user_id`（`core/identity_context.py:18` 声明，**局部名同样叫 `_user_id_var`**）——写三处：`agent/chat_pipeline.py:477`（取 `ctx.metadata['user_id']`）、`api/endpoints/computer.py:729`、`channels/channel_router.py:180`；读两处：`computer_use/browser_manager.py:1790`（落 `or "default"` 兜底）、`computer_use/camofox_server_backend.py:79`。它的 docstring 自陈"不复用 MemoryManager._scope_var，隔离关注点分离"。
+    - **接线后实现什么、不接线留下什么**（AGENTS.md §7 要求）：合并成一条通道 ⇒ "浏览器/计算机使用按哪个用户开 profile"与"记忆/工具按哪个用户隔离"从此同一份事实，`chat_pipeline` 少一次双写，`browser_manager` 的 `or "default"` 兜底可收到唯一一处。不接线留下的风险是**两处会漂**：任一入口只写其中一条时，用户会看到"记忆按 A 用户隔离、浏览器 profile 按 B 用户开"，且没有任何判据会红（今天这两条通道各自都有单一来源守卫，但它们**之间**的一致性无人守）。
+    - **为何不在本批改**：合并要动按用户隔离的语义（三处写方的取值口径不一：`ctx.metadata` / 端点参数 / 渠道 owner），属另一根因、另一裁；本笔只把两条通道**作为独立通道各自逐条登记**进 `tests/unit/agent/test_turnIdentitySingleSource.py` 的 `WRITERS` 台账——多一处写点即红、新增第五条身份类 ContextVar 即红，先把"别再长第三条"钉住，合并与否留人裁。
+    - **可裁的三档**（代价各不同，供拍板）：**(a) 保持两条 + 补一枚一致性判据**（同一轮内两个读数不同即红；只加判据不动语义，最便宜，但双写仍在）；**(b) 合并到轮身份**（`identity_context` 退役，`browser_manager`/`camofox` 改读 `get_turn_user_id`；单一事实源到位，代价是三处写方的取值口径必须统一到 `set_turn_identity` 的入参，且 `or "default"` 兜底语义要在合并处交代清楚）；**(c) 反向合并**（把用户身份统一收进 `request_user_id`，动 `turn_state` 门面与工具层三层隔离的读面，改动面最大）。推荐 **(a) 先落判据、(b) 另批做**——先让漂移可见，再动隔离语义。
+
+122. **本轮 A/B 顺带抓出 main 自带两处常驻红，逐条按实况销账（✅ `5dbae982`、`35649409`）** 🟡 —— 都是 §6-96 那批做宽域 A/B 时撞上的，与本批内容无关；归因一律用**仓外 HEAD worktree 现建基线**复算，不靠"看起来预存"。
+
+    - **`test_ci_wallclock_assertion_ledger.py::test_outside_subset_counts_match`（受保护子集第一行）**：台账登记 `tests/e2e/test_phase4_integration.py` 有 2 处子集外墙钟上界，实测只剩 1 处。复算 `78abaa2e` 的重写：多智能体协调那条延迟上界 `assert avg_time < 0.01, "Avg coordination time"` 随其用例一并删除，只剩让位闸的开销上界 ⇒ **登记数字滞后于实况**，不是新长出判据。按实况销到 1 并在表内写明去向（同文件里 `test_multi_agent_coordination.py`、`test_handle_tool_calls_parallel.py` 两笔销账是先例）；任何重新长出来的墙钟上界仍会让比对判红，故这是销账不是降级。基线侧（`30534ac5` 干净 worktree）同签名复现。
+    - **`test_dev_path_and_runtime_dep_guards.py::test_no_dev_repo_path_in_tests`**：`tests/manual/` 七份活体脚本的"一条命令复现"里写死 `PYTHONPATH="E:/项目/Neurova"`——这道守卫拦的正是"换台机器 FileNotFoundError、活体自证静默不跑"，而它自己长期是红的。改法取自仓内既有合规写法（`batchRunFallbackLedger_live.py`、`crossEpisodeContinuity_live.py` 已用"机器无关串"），统一成 `PYTHONPATH="$(git rev-parse --show-toplevel)"`，七份逐文件断言旧串恰出现一次再替换，行尾未动（每份 numstat 均 1/1）。**交叉引用 §6-117**：那一格由并发会话登记，它复核时这七份还是他人未提交段，本会话动手时工作树是干净态、守卫仍报 7 处 offender，故由本会话落库 `35649409`；两边读到的不是同一时刻的实状，这条正是"复核实状要在落笔那一刻做"的注脚。
+    - **不认领的机器侧红（登记不修）**：`tests/unit/ci/test_npc_script_interpreter_reachability.py` 5 格在本机必红——node 在 Git Bash 下启动即崩（`Assertion failed: ncrypto::CSPRNG(nullptr, 0)`，退码 134）。在 `30534ac5` 的干净 worktree 里同签名复现（5 failed / 25 passed），属本机工具链而非仓内代码；本批一律不认领。另有一次 wide-run 里 `test_moduleTopLevelShadowing` ERROR、`testManualScriptsDoNotReplicateDataRootLayout` failed，单跑与 HEAD worktree 跑均全绿 ⇒ 并发会话在扫描中途动工作树的选段级抖动，同样不认领、也不谎称"复现不了所以不存在"。
+    - **自记两笔"先落字后取数"（本卷第九、第十次）**：`44289d53` 正文把新判据文件写成 386 行、实测 380，且把同轮另一笔的 `test_ci_wallclock_assertion_ledger.py 7/1` 也列进了那笔的 numstat 表（该文件不在那笔的 `--only` 路径里）；`9624a73b` 正文写成 421 行、实测 491。两次都是**数已经取到了、写正文时凭首稿印象落字**。修正办法沿用本卷既有那条（凡手写数字，落笔那一刻重新取数），本格的读数全部直接抄自 `git diff HEAD --numstat` 输出。
