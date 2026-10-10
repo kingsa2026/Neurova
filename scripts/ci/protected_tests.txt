@@ -2235,3 +2235,13 @@ tests/unit/ci/test_noFaultFoldedIntoVerdict.py
 # ④ 反空转：②的探测器对未标注的新引用必须抓到、已标注的不许误报。
 # 逐文件单跑两次同读数 4 passed（2.08s/1.63s）
 tests/unit/plugins/test_pluginSystemRetired.py
+
+# §6-136：睡眠闭环那两处缺陷（门面上当必空转 / 363 行按想象写的测试）的常驻判据（`4d774241`）
+# 五条断言的形状都是"调用面 ⊆ 定义面"与"读面 ⊆ 赋值面"——这两种形态能抓的门面不止睡眠这一处：
+# `IdleTimeTracker.adjust_parameters_based_on_sleep_quality()` 读一个从未赋值的 `self._storage`、
+# 再调一个全仓不存在的统计方法，外面套 catch-all，于是每次必抛必吞必原样返回，而全仓零生产调用方。
+# 第四条带**只降不升的棘轮**：按 import 来源解析后，"对 memory_layer 那只 MemoryStorage 传 db_path="
+# 的落点还剩 17 处 / 5 个文件（生产零命中；另有同名的 `memory.core.storage.MemoryStorage(db_path=)`
+# 属同名词不同物，判据按来源收窄后不误伤它）。新增落点即红，修掉一处就把计数改小。
+# 逐文件单跑落库前后同读数 5 passed。
+tests/unit/core/test_dreamReportSeamIsNotFabricated.py
