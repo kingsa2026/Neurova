@@ -191,30 +191,6 @@ class IdleTimeTracker(BaseModule):
         self._monitor_interval = interval
         self.log_info(f"Monitor interval set to {interval}s")
 
-    def adjust_parameters_based_on_sleep_quality(self) -> Dict[str, Any]:
-        """根据睡眠质量调整参数"""
-        # 简化实现：检查是否有存储的梦境报告统计
-        try:
-            from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
-
-            if isinstance(self._storage, MemoryStorage):
-                stats = self._storage.get_dream_report_stats()
-                if stats:
-                    avg_quality = stats.get("average_quality", 0)
-                    self.log_info(f"Average dream quality: {avg_quality:.2f}")
-                    # 根据质量调整监控间隔
-                    if avg_quality > 0.7:
-                        self._monitor_interval = max(30, self._monitor_interval - 10)
-                    elif avg_quality < 0.3:
-                        self._monitor_interval = min(120, self._monitor_interval + 10)
-        except Exception as e:
-            self.log_debug(f"Could not adjust parameters: {e}")
-
-        return {
-            "monitor_interval": self._monitor_interval,
-            "current_phase": self._current_phase,
-        }
-
     def _on_phase_changed(self, old_phase: str, new_phase: str, event_data: Optional[Dict] = None) -> None:
         """阶段变更回调"""
         if not self._sleep_consolidation:
