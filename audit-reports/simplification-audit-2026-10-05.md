@@ -1689,6 +1689,35 @@
     - **净 LOC**：生产池 **−24**；测试池 **+197/−363**；基建池 +10（判据入子集）。
     - **本批顺带把两处待裁加进案上**：① 若产品要"睡眠质量反馈调监控间隔"这条能力，需新立项把 `SleepConsolidationCoordinator` 的梦境报告接进 `IdleTimeTracker`（本批只摘了谎报的那只手，没造替身）；② 那 17 处 `db_path=` 想象参数分布在两份单测、一份集成、一份性能档与两个 demo 脚本，逐档修属独立批次（棘轮已把它们钉住，不会静默长大）。
 
+137. **渠道身份绑定四批全闭环（生产池 +1125/−96，六笔）；落地时自己欠的三笔记在案上：一次正文读数抄错、一次改枚举漏跑闭集守卫、一次端点自删** 🟡
+    - **六笔的分工**（`git show --numstat` 逐笔复算的生产池读数，只算 `neurova/` 与 `NeurUI/src/` 的非测试路径）：
+      批 1 `5ba177fb`(+252/−0) 只加存储与解析（`channel_user_bindings`，唯一键 `(agent_id, channel_type, channel_user_id)` ⇒ 裁定 ③ 的 agent 级）；
+      批 2 `4f429ee0`(+62/−5) 把渠道路径的"这一轮是谁"收到 `resolveTurnIdentity()` 一个出口（未绑定退 `ch:{渠道}:{发送者}`，不再进 default 共享桶）；
+      批 3 `7567e287`(+112/−26) 群聊走独立共享作用域 `chgrp:{渠道}:{chat_id}`，标签解析收成一个单点（裁定 ④）；
+      批 4a `f003494d`(+288/−8) 码流程 + 控制台面端点；批 4a 复核 `6732f966`(+8/−56) 自删替他人绑那条路；
+      批 4b `df4106e1`(+403/−1) 面板接进渠道页（发码/列表/解绑），15 键 × 11 语言同批对齐。
+      **合计 +1125/−96**——正数全部来自"新能力的第一条用户可走通路径"，逐笔去向写在各自提交正文里。
+    - **三笔自己的账（不靠本格之外的地方记）**：
+      ① **第十一次"先落字后取数"**：`f003494d` 正文写生产池 **+298/−8**，同一屏 numstat 的实读是 **+288/−8**（逐文件相加 142+106+20+9+7+4=288）。分项都抄对了、总数抄错，说明错在"誊完后用心算复核了一遍"。历史正文不改写，以本格为准。
+      ② **改枚举漏跑它的闭集守卫**：批 1 给 `VerificationType` 加 `BIND_CHANNEL` 时没动 `tests/unit/security/test_verification_code.py::TestVerificationType::test_all_values`（那格断言 value 集合**逐字相等**），于是该格自 `5ba177fb` 起常驻红，直到批 4 跑 `tests/unit/security/` 才撞见——根因是批 1 只跑了 channels/agent 两族就提交。口径：**动枚举/常量闭集，必须先跑那组闭集自己的判据**，"看起来只加了一个成员"正是这类守卫存在的理由。修复随 `f003494d` 落（`expected` 加 `"bind_channel"`），A/B 里它是本会话唯一新增红。
+      ③ **端点自删**：批 4a 落完复核，`POST /identity/bindings`（管理员指定账号手工绑）两条都站不住——归属由点面板的人决定（改的是此后写进哪份记忆，不可逆），而替他人绑时 `neuser_id` 只能猜（前端根本拿不到它，`neurova/api/deps.py:118-125` 才是成对键的唯一出处），猜错＝"同一个人两份记忆"。裁定 ①② 说的"绑定码或前端 UI"两条路都是**自助**，所以整条删除（`6732f966`），并随之删掉失去消费者的 `manualBind()`/`boundAccount()` 转发面（§2 断点条款：注册无消费者的入口不留）。负向判据按实测形态写成 **405**（路径在、只禁 POST），不是 404——拿 404 当"入口不存在"的读数会把两种不同事实混成一样，与 §6-126 那条"把故障折成不存在"同族。
+    - **顺带根修一条跨线程常驻连接（本批踩出来的，非本批内容）**：批 4 第一次把 `verification_code` 放到 FastAPI 线程池（网页发码）与渠道事件循环（渠道内消费码）的交叉路径上，端点判据首跑即 500：`SQLite objects created in a thread can only be used in that same thread`。三处常驻连接补 `check_same_thread=False`（`channels/user_identity.py`、`auth/verification_code.py`、`auth/invitation_code.py`——最后那处是同一条根因的扫荡命中点，教义第 5 条），并把它钉成常驻清单上的常驻判据 `tests/unit/core/test_connection_pool_scope_adr0014.py::TestResidentConnectionsAreCrossThread`（21 个文件逐个过 + 一条"sqlite 线程模式须为 SERIALIZAL"的前提格：共享连接不加锁就依赖它，换到别的构建上报红，别让它变成偶发读写错乱）。变异自证：抹掉 `verification_code` 的标志 ⇒ 恰那一格红。
+    - **判据面**：`tests/unit/channels/test_identityBindingFlow.py` 22 格（一次性/不跨 agent/不跨渠道/归属只从码里取/文案与解析同源）、`tests/unit/api/test_channelIdentityBindingEndpoints.py` 9 格（门沿既有归属口径、发码体不含归属、403 与 404 分形、解绑留痕）、`NeurUI/src/components/__tests__/ChannelIdentityPanel.test.ts` 7 格、`NeurUI/src/api/modules/__tests__/channelIdentityBinding-contract.test.ts` 7 格（含与后端路由文件逐字比路径）、`AgentChannelPage.identityPanel.test.ts` 2 格；6 份既有页面判据的 api 桩面同步补三个新导出（桩缺键 ⇒ 面板静默走错误分支、页面判据全绿却没人真取过数）。新判据两文件入 `protected_tests.txt`（逐文件单跑确定全绿）。活体：`tests/manual/channelIdentityBinding_batch4.py` 10 项全 PASS，真实 `data/` 跑前后 `find data -type f | sort | md5sum` 逐字节一致。
+    - **仍开着的四件（都不该被本格读成"已解决"）**：
+      ① 群共享作用域的直接后果——**同群成员可见彼此沉淀的群记忆**（§6-127 ④ 明写要交代的那条边界）：UI 与用户文档里还没有这句话，面板与群作用域是两屏，用户在任一屏都读不到这个后果。**需补文案，属产品可见面。**
+      ② §6-121 (b)「两条用户身份通道合并」：渠道路径现在收进了 `resolveTurnIdentity`，但 `core/identity_context.py`（`neurova_request_user_id`）这条并行通道仍是**独立事实源**，三处写方取值口径不一未动 ⇒ 仍待裁，本批没让它变容易也没让它变难。
+      ③ "按渠道查人"的读面仍未建（`UserIdentityManager.registerUser()`/`boundChannelUsers()` 是批 1 留的存储面，生产侧零消费者）：面板因此只能"给自己发码"，替他人绑定无路。
+      ④ **UI 未在浏览器里实跑**：面板的取数/发码/解绑由 vitest 挂载 + 与后端同源的契约判据 + 端点侧活体三处自证；视觉与交互手感无证据。
+
+138. **受保护子集里有一条常驻红的文件（`test_two_direct_sessions_do_not_share_fold_summary`）：摘要分槽那半是绿的，红的是"同用户跨会话可召回"被写成了串台——两读各自代价不同，需人裁** 🔴
+    - **事实与归因（不靠"看起来预存"）**：`scripts/ci/protected_tests.txt:836` 收着 `tests/unit/context/test_turn_identity_wiring.py`，该条由 `ecbd226a`（Issue #90，"修两个单聊会话共用折叠摘要"）引入。本会话在 `30534ac5`（本会话第一笔的父提交）现建的仓外 worktree 里复跑同一条格 ⇒ **同样红**，故属**预存**，不是批 3/批 4 的作用域改动带进来的。本会话跑 `tests/unit/context/` + `tests/unit/collaboration/` 时撞上：该文件 8 格里 7 绿 1 红。
+    - **失败格的实际形态**（`tests/unit/context/test_turn_identity_wiring.py:156`）：格内两段断言，**前段通过**——`_window_compaction_cache` 里 `sess-one`/`sess-two` 各占一槽（即 `ecbd226a` 要修的"摘要共用"确实修好了）；**后段失败**——B 会话的视图里出现 `[历史回忆] 用户: 量子计算第0条…`，那是 A 会话被折叠后入池的原文。
+    - **两读，修法与代价完全不同**：
+      **甲 · 真缺陷**：旁路"历史回忆"召回没按会话收窄 ⇒ 用户在会话 A 说过的内容被塞进会话 B 的 prompt，属跨会话串台。改法是在 `neurova/context/orchestrator.py:1502` 那条 `filter_by_scope` 之后再按 `session_id` 收窄。代价：直接削掉"跨会话回忆"这条能力，而它是有意的产品承诺——同处注释与 `neurova/collaboration/memory_scope.py:117-118` 都写着折叠原文"可经 [历史回忆] 语义召回（零丢失）"、"单聊/非协作仅见 direct（**仍跨普通会话召回**）"。
+      **乙 · 判据问错了对象**：该格想钉的是"两个单聊会话不共用**折叠摘要**"，但断言写成"B 视图不得出现 A 的任何内容"，把**按设计跨会话共享的召回面**一并算成串台。改法是把断言收窄到摘要本身（`摘要1`/`摘要2` 这类缓存值不得出现在对方视图），召回条目另按它自己的作用域规则判。代价近乎为零，但要显式承认"同一用户同一 agent 的多个单聊彼此可召回"是本仓语义。
+      **本会话推荐乙**，理由：生产代码在两处把"仍跨普通会话召回"写成了明文口径（不是某次疏忽的产物），而该格前段已经把"摘要共用"这真正的缺陷咬住了——把断言放宽到整段视图，等于用一条常驻红替代一条常驻缺陷。**但这条格不是本会话工单的内容**（批 3 裁的是渠道/群的 tag 口径，没裁"direct 作用域是否跨会话共享"），且它由 Issue #90 那批写下，故**登记待裁**、不动。
+    - **另一格账（同一条链上的门禁问题）**：AGENTS.md §3/§4 写 `protected_tests.txt` 只收"逐文件单跑确定全绿"的文件，而这条文件现在带着 1 红在子集里（该条自 `ecbd226a`(2026-09-24) 进子集；**它从哪一笔开始红我没复算到底**，只证到本会话基线 `30534ac5` 与现 HEAD 都红——按 §6-122 的口径，"预存"要说清预存到哪儿为止）。全仓没有任何判据复核过"子集条目当前是否真的全绿"——子集的准入是一次性的、状态是漂移的。是否补一枚门（受保护子集抽样跑 / 全量夜间跑）属 CI 工作，代价是流水线时长，**与 §6-133 那格"0 用例却像覆盖"同族**：门禁看着在，实际不咬。登记为需人裁，不在本批顺手做。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
