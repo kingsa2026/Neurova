@@ -1,5 +1,9 @@
 """
 插件管理 API 端点 - Plugin Management API Endpoints
+
+实况（已退役（2026-10-10 裁定不做插件体系，见台账 §6-131））：本模块是**记账面**——`_PLUGINS` 是进程内字典，install/uninstall 只增删这条记录，`load`/`unload`/`enable`/`disable` 只翻布尔，`/{plugin_id}/modules` 恒回空列表。**没有任何一条路径会 import 或执行插件目录里的代码**（真加载器原在 `neurova/plugins/plugin_manager.py:377-384`，生产侧从未接线，已随裁定删除）。
+把这些布尔读成"插件已生效"是本模块最危险的误读，所以这句话写在这里而不是只写在台账里。
+前端 `NeurUI/src/api/modules/plugins.ts` 消费这组路由，退役加载器不等于退役记账面。
 """
 
 import datetime
