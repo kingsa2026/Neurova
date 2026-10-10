@@ -1148,10 +1148,12 @@ class PostChatPipeline:
             # 使用记忆管理器
             if memory_manager:
                 # 会话作用域打标：协作群轮 → room:<id>；其余 → direct（基线，跨会话共享）。
-                from neurova.collaboration.memory_scope import scope_tag_for_turn
+                from neurova.collaboration.memory_scope import scope_tag_for_turn, turnScopeContext
 
-                _collab = isinstance(metadata, dict) and metadata.get("turn_origin") == "collaboration"
-                _scope = scope_tag_for_turn(collab=_collab, room_id=session_id if _collab else "")
+                # 作用域入参由 `turnScopeContext` 单点给出（写侧/读侧/池打标三处共用一份）：
+                # 三处各推一遍会裂脑——记忆打了 chgrp: 而池 chunk 仍打 direct，群内容反而
+                # 比改前更不可见，且没有任何判据会红（工单 §6-127 批 3）。
+                _scope = scope_tag_for_turn(**turnScopeContext(metadata, session_id))
                 # 保存用户消息记忆
                 user_memory_id = memory_manager.remember(
                     content=f"用户: {user_input}",
