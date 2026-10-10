@@ -2206,3 +2206,21 @@ tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py
 # 是为了"契约再演进时，替身没跟上要当场红"，而不是等下一轮跑整目录才发现。
 # 逐文件单跑两次同读数 12 passed（2.31s/2.28s）
 tests/test_api/test_memory_route_shadowing.py
+
+# 故障不许被折成"没规则/没记录/不存在"——四处已改，三格反向对照钉住修法方向（`a2644539`，§6-126）
+# 三处生产落点同族：`memory/crud.py:260`（异常→MEMORY_NOT_FOUND，404 壳装 500 的话）、
+# `firewall.py:471-476`（故障→`code:0` + 全 0，安全面把"读不到"当"没规则"）、
+# `metacognition.py:428/456`（故障→success_response 空列表/全 0 统计，前端画成"没有"）。
+# 关键是那三格**反向对照**：真查无此条仍须 404、真空数据仍须 200 + 空——
+# 少了它们，"修法"可以退化成"把一切变 500"，那是把两件事折成一件事、只是折朝另一边。
+# 逐文件单跑两次同读数 6 passed（2.03s/2.05s）
+tests/unit/api/test_internalFaultIsNotReportedAsVerdict.py
+
+# 上一形的常驻棘轮：宽 except 里抛 NOT_FOUND 族 / 返回成功信封，基线只降不升（`a2644539`，§6-126）
+# 按 AST 节点判而非文本：第一版启发式把 `multi_model_client.py` 两处误报成命中（分类名字符串
+# `'model_not_found'` 被当成"折成 404"），改成看属性名/`status_code=404` 关键字后才消失——
+# 登记的是逐处分辨后的集合，不是命中数。基线 3 处各带理由（emotion 降级文案本轮未选改、
+# neurflow 状态端点自辩、`auth.py::logout` 把 token 吊销失败吞成登出成功=**存疑待裁**）。
+# 三条：基线与实扫逐条相等（多一格即新增落点、少一格即修好没摘表）、反空转对照、扫描面收缩即红。
+# 逐文件单跑两次同读数 3 passed（14.55s/13.32s）
+tests/unit/ci/test_noFaultFoldedIntoVerdict.py
