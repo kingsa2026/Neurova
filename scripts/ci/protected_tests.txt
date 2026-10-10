@@ -2224,3 +2224,14 @@ tests/unit/api/test_internalFaultIsNotReportedAsVerdict.py
 # 三条：基线与实扫逐条相等（多一格即新增落点、少一格即修好没摘表）、反空转对照、扫描面收缩即红。
 # 逐文件单跑两次同读数 3 passed（14.55s/13.32s）
 tests/unit/ci/test_noFaultFoldedIntoVerdict.py
+
+# 插件体系退役的防再生判据（`e95d3a76`，§6-131）
+# 退役的是"第三方插件装载"这项能力（唯一实装 `plugin_manager.py:377-384`：`spec_from_file_location`
+# + `sys.modules` 注册 + `exec_module`，另有 semver/权限/生命周期钩子），不是无功能残留——
+# 所以复活它需要一次新的裁定，而不是顺手把目录搬回来。四格分别钉：
+# ① 包不得复活；② 架构文档凡引用该路径处必须带"已退役"标注（"文档声称有、代码没有"比空文件更坏，§6-115 教训）；
+# ③ 记账面 `/v1/plugins` 必须仍在役（前端在用）且 docstring 写明"只记账、不加载"——
+#    行为读数用 200 + 404 校准（路由级鉴权依赖先于路径匹配，未鉴权时一切皆 401，形状读数不可信）；
+# ④ 反空转：②的探测器对未标注的新引用必须抓到、已标注的不许误报。
+# 逐文件单跑两次同读数 4 passed（2.08s/1.63s）
+tests/unit/plugins/test_pluginSystemRetired.py
