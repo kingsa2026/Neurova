@@ -13,7 +13,9 @@
 
 2. **代码裸 import 的包没进运行时清单** —— `modelscope`（ModelScope 下载源的
    唯一实现）、`requests`（`channels/feishu_auth.py:12` 模块级）、`PyYAML`
-   （`plugins/plugin_manager.py:26` 模块级）、`comtypes`（Windows SAPI5 TTS）
+   （2026-10-10 前钉在 `plugins/plugin_manager.py:26`，那文件已随 `e95d3a76` 退役；
+   现出处是 `scripts/ci/deploy_config_consistency_check.py:58` 的模块级 import）、
+   `comtypes`（Windows SAPI5 TTS）
    在 requirements.txt 里零声明，干净机器装完即缺。
 
 3. **假成功、真断链** —— 原 `download_asr_model` 只 `mkdir models/asr/funasr`
@@ -144,7 +146,10 @@ class TestRuntimeDepsCoverCodeImports:
     REQUIRED = {
         "modelscope": "neurova/tts/model_downloader.py（ModelScope 下载源唯一实现）",
         "requests": "neurova/channels/feishu_auth.py:12 模块级 import（飞书 API）",
-        "pyyaml": "neurova/plugins/plugin_manager.py:26 模块级 import",
+        "pyyaml": "scripts/ci/deploy_config_consistency_check.py:58 模块级 import"
+                  "（插件体系退役 `e95d3a76` 后，生产侧只剩函数内 fail-soft 惰性 import："
+                  "skills/hub_client.py:695/:714、computer_use/browser_manager.py:1540、"
+                  "evolution/rsi/self_improvement_proposer.py:952——契约不钉在那儿，钉上去即降格为假绿）",
         "comtypes": "neurova/tts/sapi5_tts.py（Windows SAPI5 离线 TTS）",
     }
 
@@ -334,3 +339,48 @@ class TestFrontendInstallMatchesStartContract:
         ):
             assert "npm" in src and '"ci"' in src, f"{who} 未走 npm ci（lock 优先）"
             assert "package-lock.json" in src, f"{who} 未按 lock 存在与否选择 ci/install"
+
+
+class TestOutcomeProjectionsAreTrue:
+    """`REQUIRED` 里写的**出处**本身要真——原先只核声明面，出处指向一个已删除的文件也照样全绿。
+
+    触发形态（2026-10-10 序 6 复算撞见）：`e95d3a76` 把插件体系整批退役后，pyyaml 那条仍写着
+    `neurova/plugins/plugin_manager.py:26 模块级 import`——那个文件已经不存在，而本文件的守卫
+    只查 `requirements.txt` 有没有声明 pyyaml，于是它**绿着说一句不存在的事实**，改动的痕迹
+    与契约的根据就此脱钩。出处不该只是注释，它得能被机器核。
+
+    口径不外扩：`modelscope` / `comtypes` 两条的出处今天是函数内 fail-soft 惰性 import，那是
+    可选引擎包自己的语义（缺席即降级），本类只要求"出处文件在位"；**只有被列为基础依赖的
+    pyyaml** 额外要求出处是模块级裸 import——钉在 fail-soft 上等于把基础依赖契约降格为假绿。
+    """
+
+    # 发行名 ≠ import 名 的那一个；其余两边同名
+    _IMPORT_NAME = {"pyyaml": "yaml"}
+
+    @staticmethod
+    def _outcomePath(why: str) -> Path:
+        head = why.split(":")[0]
+        for sep in ("（", " "):
+            head = head.split(sep)[0]
+        return _REPO / head.strip()
+
+    @staticmethod
+    def _hasModuleLevelImport(path: Path, leaf: str) -> bool:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        return any(isinstance(node, ast.Import)
+                   and any(a.name == leaf or a.name.startswith(leaf + ".") for a in node.names)
+                   for node in tree.body)          # 只看模块级：函数体内的一律不算
+
+    @pytest.mark.parametrize("pkg,why", sorted(TestRuntimeDepsCoverCodeImports.REQUIRED.items()))
+    def test_outcome_file_still_exists(self, pkg, why):
+        assert self._outcomePath(why).is_file(), (
+            f"契约说 {pkg} 的出处是 {why}，可那文件不存在——声明面全绿而事实是假的")
+
+    def test_pyyaml_outcome_is_a_bare_module_level_import(self):
+        why = TestRuntimeDepsCoverCodeImports.REQUIRED["pyyaml"]
+        path = self._outcomePath(why)
+        assert path.is_file(), f"pyyaml 出处不存在：{why}"
+        assert self._hasModuleLevelImport(path, self._IMPORT_NAME["pyyaml"]), (
+            f"pyyaml 出处 {why} 里没有模块级 `import yaml`；基础依赖的契约钉在 fail-soft "
+            "惰性 import 上＝降格为假绿")
+

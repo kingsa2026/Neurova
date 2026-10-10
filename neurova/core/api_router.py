@@ -157,34 +157,6 @@ class APIRouter:
                 logger.error("注销API端点失败: %s", e)
                 return False
 
-    def unregister_plugin_endpoints(self, plugin_name: str) -> int:
-        """
-        注销插件的所有端点
-
-        Args:
-            plugin_name: 插件名称
-
-        Returns:
-            注销的端点数量
-        """
-        with self._lock:
-            if plugin_name not in self._plugin_endpoints:
-                logger.warning("插件不存在: %s", plugin_name)
-                return 0
-
-            # 获取插件端点列表
-            endpoint_keys = self._plugin_endpoints[plugin_name].copy()
-            count = 0
-
-            # 逐个注销
-            for endpoint_key in endpoint_keys:
-                method, path = endpoint_key.split(":", 1)
-                if self.unregister_endpoint(path, method):
-                    count += 1
-
-            logger.info("注销插件 %s 的 %s 个端点", plugin_name, count)
-            return count
-
     def get_endpoint(self, path: str, method: str) -> Optional[APIEndpoint]:
         """
         获取API端点
