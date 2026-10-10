@@ -201,3 +201,36 @@ class TestAdoptionWriteSurfaceIsStillUnwired:
             sites = _adoptionCallSites(tmpPath)
         assert sites == ['writer.py:7'], (
             '探测器没数到那一跳调用（或把定义/docstring 误数成调用）：%s' % sites)
+
+
+class TestAdoptionZeroIsNamedNotSilent:
+    """采纳回执为零时，读数必须自己说清成因（用户 2026-10-10 裁定：如实标「写面未接线」）。
+
+    `outcome_written=0` 有两种成因：底座刚建（还没人用）与**写面从未接线**——
+    后者是实况（AST 复算 `recordAdoption` 生产调用点 = 0，台账 §6-124）。
+    只把 0 摆出来，读的人就会把它当产品结论（"没人采纳这些知识"），
+    而那是拿账面缺失冒充测量结果，与 §6-109 那族"算完不告诉人哪里没成"同形。
+    """
+
+    def test_zeroAdoptionOutcomeNamesTheUnwiredWriter(self, store, facts):
+        metrics = store.usageMetrics()
+
+        assert metrics["outcome_written"] == 0
+        reason = str(metrics.get("missing_reason") or "")
+        assert '未接线' in reason, (
+            '一条回执都没有，读数却没点名成因——只剩一个 0 会被读成「没人采纳」：%r' % metrics)
+        assert 'recordAdoption' in reason, (
+            '要点名到写面本体（哪个方法没有调用点），只写「暂无数据」等于没说：%r' % reason)
+
+    def test_aSingleWrittenOutcomeRetiresTheReason(self, store, facts):
+        """反向对照：一旦真有人写了回执，就不该再挂「未接线」的说明。
+
+        少了这一格，"未接线"会被写成永久文案——那正是把一次性诊断变成假陈述的路。
+        """
+        store.recordInjection([facts[0]])
+        store.recordAdoption(facts[0], 'success')
+
+        metrics = store.usageMetrics()
+        assert metrics["outcome_written"] == 1
+        assert '未接线' not in str(metrics.get("missing_reason") or ''), (
+            '已经有回执了还标未接线：读数会把人引向错误方向：%r' % metrics)

@@ -584,6 +584,17 @@ class KnowledgeFactStore:
             "outcome_success": int(row["ok"] or 0),
             "outcome_failure": int(row["bad"] or 0),
             "outcome_unevidenced": int(row["blind"] or 0),
+            # 一条回执都没有时，读数必须自带成因，不能只留一个 0：
+            # `recordAdoption` 目前在全仓没有生产调用点（AST 复算，台账 §6-124），
+            # 于是这个 0 的两种可能成因里，"没人写过"是当前的实情，"没人采纳"无从判断。
+            # 把账面缺失摆成产品结论，正是 §6-109 那族"算完不告诉人哪里没成"的形态。
+            **({
+                "missing_reason": (
+                    "outcome_written=0：全库没有一条采纳回执。两种成因——写面未接线"
+                    "（`recordAdoption` 目前无生产调用点，见台账 §6-124）或底座尚无采纳事件；"
+                    "在接线之前，这个 0 不可读成「没人采纳」。"
+                )
+            } if int(row["never_written"] or 0) == total else {}),
         }
 
     def searchableFacts(
