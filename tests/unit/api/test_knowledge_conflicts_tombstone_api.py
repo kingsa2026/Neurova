@@ -129,8 +129,10 @@ class TestTombstoneApi:
         kid = client.post(PREFIX, json={"title": "违规", "content": "c"}).json()["knowledge_id"]
         resp = client.delete(f"{PREFIX}/{kid}?purge=true")
         assert resp.status_code == 200
-        # 契约沿用旧值（test_knowledge_unpublish 锁定 action == "deleted"）
-        assert resp.json()["data"]["action"] == "deleted"
+        # purge 走的是擦除回执，动作名与"下架"分两值（§6-101：`purged` vs `deleted`）——
+        # 两者都要逐面如实回执，混成一个词就把"跨存储擦除"降级成"标记下架"。
+        # 普通下架那格仍锁 `deleted`（`test_knowledge_unpublish`），本格不替它改口径。
+        assert resp.json()["data"]["action"] == "purged"
         assert repo.get_item("default", kid) is None
         assert client.get(f"{PREFIX}/deleted").json() == []
 
