@@ -828,13 +828,13 @@ class ContextPool:
         的错配。`turn_scope` 缺失时按 `session_id` 的 `project_` 前缀回溯，
         与 `scope_from_metadata` 同规则（由该函数自身承担，不在此复刻）。
         """
-        from neurova.collaboration.memory_scope import filter_by_scope
+        from neurova.collaboration.memory_scope import filter_by_tag
 
-        turnScope = self.turn_scope or ""
-        collab = turnScope.startswith("room:")
-        roomId = turnScope.split(":", 1)[1] if collab else ""
-        return filter_by_scope(
-            items, lambda c: (getattr(c, "metadata", None) or {}), collab=collab, room_id=roomId
+        # 只认本轮那一个标签：room / chgrp / direct 三种口径的解析收在 `allowed_scopes_for_tag`
+        # 一处。此处原先自带 `startswith("room:")`，接上 chgrp 后会把群归档一律判成非协作，
+        # 于是"写了 chgrp: 却只放 direct"——群内容比改造前更召不回，且不会有任何判据红。
+        return filter_by_tag(
+            items, lambda c: (getattr(c, "metadata", None) or {}), self.turn_scope or ""
         )
 
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
