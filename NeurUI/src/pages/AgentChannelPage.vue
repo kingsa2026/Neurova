@@ -100,6 +100,10 @@
       <a-empty v-else :description="t('channel.noChannels')" />
     </a-spin>
 
+    <!-- 渠道身份绑定（工单 2026-10-10 批 4b）：面板跟在渠道列表之后，因为它的作用域
+         就是"这个 agent 的哪些渠道"——另开一页会让用户在两处看到不同身份视图。 -->
+    <ChannelIdentityPanel :agent-id="agentId" :channel-types="configuredChannelTypes" />
+
     <!-- Config modal（字段表与系统页共享单一来源；负一屏复用专属组件） -->
     <a-modal v-model:open="showModal" :title="`${current?.name} · ${t('channel.configure')}`" :confirm-loading="saving"
       :footer="current?.channelKey === 'negative-screen' ? null : undefined" @ok="saveConfig">
@@ -166,6 +170,7 @@ import {
 import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
+import ChannelIdentityPanel from '@/components/ChannelIdentityPanel.vue'
 import { getNegativeScreenConfig } from '@/api/modules/negative-screen'
 import { useAgentStore } from '@/stores/agents'
 import { buildAgentSelectOptions } from '@/config/agentOptions'
@@ -203,6 +208,11 @@ const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChan
 // 列表布局：已激活大卡面板 / 未激活紧凑小卡面板
 const enabledChannels = computed(() => channels.value.filter((c) => c.enabled))
 const disabledChannels = computed(() => channels.value.filter((c) => !c.enabled))
+// 绑定面板只给**已配置**的渠道：没配 bot 的渠道里根本不会有消息进来，
+// 在那里发码等于发一张永远用不掉的码。
+const configuredChannelTypes = computed<string[]>(() =>
+  Array.from(new Set(channels.value.filter((c) => c.configured).map((c) => c.backendType))),
+)
 function botPrefixOf(ch: AgentChannel): string {
   const extra = savedExtras.value[ch.backendType] || {}
   return typeof extra.bot_prefix === 'string' ? extra.bot_prefix : ''

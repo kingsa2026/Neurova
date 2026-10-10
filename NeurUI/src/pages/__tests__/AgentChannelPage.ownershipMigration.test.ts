@@ -32,6 +32,12 @@ vi.mock('@/api/modules/channel-configs', () => ({
   restartChannelAdapter: vi.fn(),
   clearChannelQueue: vi.fn(),
   checkChannelConflicts: vi.fn(),
+  // 渠道身份绑定面板（工单 2026-10-10 批 4b）：桩面必须跟着真模块面长——
+  // 缺键时面板会静默走进错误分支，页面判据看着全绿却没人真取过数。
+  listChannelIdentityBindings: vi.fn().mockResolvedValue({ bindings: [] }),
+  issueChannelBindingCode: vi.fn().mockResolvedValue({ code: '123456' }),
+  revokeChannelIdentityBinding: vi.fn().mockResolvedValue({ revoked: true }),
+
   listPluginChannelSchemas: vi.fn(),
   getIngressStats: vi.fn(),
 }))
