@@ -1696,8 +1696,11 @@ class ChatPipeline:
             session_context=ctx.session_context,
             voice_context=voice_context,
             citation_registry=ctx.citation_registry,
-            chat_collab=(ctx.metadata or {}).get("turn_origin") == "collaboration",
-            chat_room_id=(ctx.session_id or "") if (ctx.metadata or {}).get("turn_origin") == "collaboration" else "",
+            chat_collab=_scopeCtx["collab"],
+            chat_room_id=_scopeCtx["room_id"],
+            chat_channel_group=_scopeCtx["channel_group"],
+            chat_channel=_scopeCtx["channel"],
+            chat_group_id=_scopeCtx["chat_id"],
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
@@ -1767,10 +1770,10 @@ class ChatPipeline:
         # 提取记忆内容（按会话作用域隔离：单聊只见 direct；群聊见 direct + 本群，群群互不可见）
         from neurova.collaboration.memory_scope import filter_memories_by_scope
 
-        _collab = (ctx.metadata or {}).get("turn_origin") == "collaboration"
-        ctx.relevant_memories = filter_memories_by_scope(
-            result.memories, collab=_collab, room_id=(ctx.session_id or "") if _collab else ""
-        )
+        from neurova.collaboration.memory_scope import turnScopeContext
+
+        _scopeCtx = turnScopeContext(ctx.metadata, ctx.session_id)
+        ctx.relevant_memories = filter_memories_by_scope(result.memories, **_scopeCtx)
 
         # 记录检索统计
         logger.info(

@@ -5,12 +5,15 @@ import asyncio
 
 from neurova.collaboration.memory_scope import (
     DIRECT_SCOPE,
+    allowed_scopes_for_tag,
     allowed_scopes_for_turn,
     filter_memories_by_scope,
     filter_by_scope,
+    filter_by_tag,
     memory_scope,
     scope_from_metadata,
     scope_tag_for_turn,
+    turnScopeContext,
 )
 
 
@@ -128,3 +131,51 @@ def test_filter_by_scope_works_on_pool_chunks():
 
 def test_scope_from_metadata_explicit_wins():
     assert scope_from_metadata({"chat_scope": "direct", "session_id": "project_a"}) == "direct"
+
+
+class TestChannelGroupScope:
+    """渠道群＝共享作用域、私聊＝个人作用域（工单 §6-127 批 3，用户裁定 ④）。
+
+    三条判据各挡一种会静默成立的破坏：群标签没打上（等于全员混在 default）、
+    群轮召回了个人记忆（当着外部第三方念私事）、以及池读侧另写一套标签解析
+    （"写 chgrp: 读 {direct}" ⇒ 群归档永远召不回，且没有任何判据会红）。
+    """
+
+    GROUP = {"turn_origin": "human", "chat_type": "group", "source_channel": "feishu",
+             "chat_id": "oc_grp1", "channel_user_id": "ou_9"}
+    P2P = {"turn_origin": "human", "chat_type": "p2p", "source_channel": "feishu",
+           "chat_id": "ou_9", "channel_user_id": "ou_9"}
+
+    def test_groupTurnTagsChgrpAndPrivateStaysDirect(self):
+        assert scope_tag_for_turn(**turnScopeContext(self.GROUP, "oc_grp1")) == "chgrp:feishu:oc_grp1"
+        assert scope_tag_for_turn(**turnScopeContext(self.P2P, "ou_9")) == DIRECT_SCOPE
+
+    def test_groupTurnDoesNotRecallPersonalMemory(self):
+        """保守口径：群轮只见本群。个人 direct 记忆不得进群回复（与协作房间刻意不同）。"""
+        allowed = allowed_scopes_for_turn(**turnScopeContext(self.GROUP, ""))
+        assert allowed == {"chgrp:feishu:oc_grp1"}, allowed
+        assert DIRECT_SCOPE not in allowed
+        # 协作房间那侧维持原样（同一轮两种来源不得互相带偏）
+        collab = {"turn_origin": "collaboration", "chat_type": "group"}
+        assert allowed_scopes_for_turn(**turnScopeContext(collab, "project_7")) == {
+            DIRECT_SCOPE, "room:project_7"}
+
+    def test_privateTurnCannotSeeAnyGroupScope(self):
+        items = [
+            {"metadata": {"chat_scope": "chgrp:feishu:oc_grp1"}},
+            {"metadata": {"chat_scope": DIRECT_SCOPE}},
+        ]
+        kept = filter_by_tag(items, lambda c: c["metadata"],
+                             scope_tag_for_turn(**turnScopeContext(self.P2P, "ou_9")))
+        assert [k["metadata"]["chat_scope"] for k in kept] == [DIRECT_SCOPE], (
+            "群内容泄进私聊——反方向的泄漏同样不可接受"
+        )
+
+    def test_tagIsTheOnlyThingBothSidesNeed(self):
+        """写侧标签与读侧放行共用一个解析口：加一种标签忘了加规则，这里就红。"""
+        assert allowed_scopes_for_tag("chgrp:telegram:tg_g1") == {"chgrp:telegram:tg_g1"}
+        assert allowed_scopes_for_tag("room:p1") == {DIRECT_SCOPE, "room:p1"}
+        assert allowed_scopes_for_tag("") == {DIRECT_SCOPE}
+        assert allowed_scopes_for_tag("room:") == {DIRECT_SCOPE}, (
+            "空房间 id 的 room: 标签被当成有效房间 ⇒ 所有无 id 的条目互见"
+        )

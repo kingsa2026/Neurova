@@ -101,28 +101,35 @@ class TestRecallScopeGate:
         )
 
     def test_same_judgementAsViewPath(self, tmp_path, monkeypatch):
-        """判据同源：断言召回路径确实经 `memory_scope.filter_by_scope`。
+        """判据同源：召回路径必须经 `memory_scope.allowed_scopes_for_tag`。
 
-        探针打在**事实源函数**上（而非某个模块的属性）：若召回侧自己复刻了一份
-        作用域判定，这个探针就不会被触发——复制规则必然在此暴露。
+        探针打在**事实源函数**上（而非某个模块的属性）：若召回侧自己复刻了一份作用域
+        判定，这个探针就不会被触发——复制规则必然在此暴露。
+        原探针指向 `filter_by_scope`（当时唯一的入口）。批 3 起池侧只需本轮标签，走
+        `filter_by_tag` → 两者最终都汇到 `allowed_scopes_for_tag`，故把探针下移到那一个
+        更深的单点：这既不是放宽（少一层封装反而更严——任何一条不经它的召回路径都会红），
+        也让"标签→允许集"的口径从此只有一处可写。
         """
         from neurova.collaboration import memory_scope
 
-        calls = []
-        original = memory_scope.filter_by_scope
+        tags = []
+        original = memory_scope.allowed_scopes_for_tag
 
-        def countingFilter(items, metadata_of, **kwargs):
-            calls.append(kwargs)
-            return original(items, metadata_of, **kwargs)
+        def countingTag(turn_scope_tag: str):
+            tags.append(turn_scope_tag)
+            return original(turn_scope_tag)
 
         db_path = tmp_path / "gate_src.db"
         _seed(db_path)
         pool = _pool(db_path, session_id="s_direct")
-        monkeypatch.setattr(memory_scope, "filter_by_scope", countingFilter)
+        monkeypatch.setattr(memory_scope, "allowed_scopes_for_tag", countingTag)
 
         pool.recall_evicted(limit=10)
 
-        assert calls, "召回路径没有调用 memory_scope.filter_by_scope（自己复刻了第二份规则）"
+        assert tags, (
+            "召回路径没有经 `allowed_scopes_for_tag`——它复刻了第二份规则，"
+            "于是「写侧打的标」与「读侧放的行」可以各说各话"
+        )
 
     def test_dualSourceDedupStillHolds(self, tmp_path):
         """双源去重不破：内存台账与持久台账同内容只出一条（且仍过闸口）。"""
