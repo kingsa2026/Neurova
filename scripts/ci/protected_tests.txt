@@ -76,6 +76,12 @@ tests/unit/agent/test_requestUserIdEntryConsistency.py
 # 记忆作用域成对下发）。批 2 同时改判了上一格的 ④，理由写在该判据文件与 §6-127。
 tests/unit/channels/test_channelIdentityBindingStore.py
 tests/unit/channels/test_channel_router.py
+# 工单 2026-10-10 批 4：绑定码的流程面（一次性、不跨 agent/渠道、归属只从码里取、
+#   指令不被普通聊天吃掉）＋ 控制台面四端点（发码/列表/手工绑/解绑，门沿既有归属口径）。
+# 端点判据第一次把 `verification_code` 放上跨线程路径，撞出常驻连接缺
+# `check_same_thread=False` 即 500；该前提现由 ADR0014 守卫常驻钉住。
+tests/unit/channels/test_identityBindingFlow.py
+tests/unit/api/test_channelIdentityBindingEndpoints.py
 # §6-95 后半：`runs/*.json` 从"只写不读"接上读者——提案带着 `run_id` 指回那次运行，
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住

@@ -362,3 +362,96 @@ async def test_bindingIsScopedPerAgentOnTheChannelPath(manager, tmp_path):
         manager.add_message_handler(handler, priority=50)
         await manager._dispatch_message(_msg("你好", sender="ou_55", agent_id=agentId))
         assert agent.calls[0]["metadata"]["user_id"] == expected, (agentId, agent.calls)
+
+
+# ── 批 4：渠道内自助绑定（工单 §6-127 裁定 ①②③）──
+#
+# 这四格守的是"绑定这条消息**只**改绑定表"：它不进模型额度、不落运行台账、不写记忆。
+# 若哪天有人把拦截点挪到 ledger 之后，前两条立刻红。
+
+@pytest.fixture
+def codesInMemory(monkeypatch):
+    from neurova.auth.verification_code import VerificationCodeModel
+
+    model = VerificationCodeModel(":memory:")
+    monkeypatch.setattr(
+        "neurova.auth.verification_code.get_verification_code_model", lambda: model)
+    return model
+
+
+class _LedgerSpy:
+    """记录 AgentRunLedger 被构造了几次——绑定消息应当一次都不构造（不占额度账）。"""
+
+    def __init__(self):
+        self.built = []
+
+    def __call__(self, *args, **kwargs):
+        self.built.append(args)
+        raise AssertionError("绑定消息不该构造运行台账")
+
+
+@pytest.mark.asyncio
+async def test_bindCodeIsConsumedWithoutTouchingModelOrLedger(manager, tmp_path, codesInMemory,
+                                                              monkeypatch):
+    """"绑定 <码>" 就地消费：回一句确认，agent 一次都不被调用，台账一次都不构造。"""
+    from neurova.channels.identity_binding import issueBindingCode
+
+    _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    spy = _LedgerSpy()
+    monkeypatch.setattr(channel_router, "AgentRunLedger", spy)
+
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    reply = await handler(_msg(f"绑定 {code}", sender="ou_77"))
+
+    assert reply and "已绑定" in str(reply), reply
+    assert agent.calls == [], "绑定消息不该进模型（既花额度又写记忆）"
+    assert spy.built == [], "绑定消息不该落运行台账"
+
+
+@pytest.mark.asyncio
+async def test_bindCodeFailureRepliesNamedReason(manager, tmp_path, codesInMemory):
+    """没有待确认的码 ⇒ 回话点名原因并指路，而不是把这条消息当对话丢给模型糊过去。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    reply = await handler(_msg("绑定 123456", sender="ou_77"))
+
+    assert reply and "网页控制台" in str(reply), reply
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_boundSenderNextTurnUsesPlatformAccount(manager, tmp_path, codesInMemory):
+    """闭环：码绑上之后，同一发送者的**下一轮**身份就是平台账号（写→读→反馈）。"""
+    from neurova.channels.identity_binding import issueBindingCode
+
+    mgr = _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    agent = FakeAgent("pong")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg(f"绑定 {code}", sender="ou_77"))
+    assert mgr.resolveTurnIdentity("default", "feishu", "ou_77")["bound"] == "true"
+
+    await handler(_msg("刚才说的那些还记得吗", sender="ou_77"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["user_id"] == "u-alice", meta
+    assert agent.memory_manager.scopes == [("ne-1", "u-alice")]
+
+
+@pytest.mark.asyncio
+async def test_chatMentioningBindingStillGoesToAgent(manager, tmp_path, codesInMemory):
+    """聊普通内容时提到"绑定"两个字，不得被当成指令吃掉。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    reply = await handler(_msg("帮我绑定一下账号，怎么弄", sender="ou_77"))
+
+    assert len(agent.calls) == 1, agent.calls
+    assert reply == ["pong"]
