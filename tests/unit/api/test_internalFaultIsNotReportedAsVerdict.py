@@ -9,6 +9,11 @@
 
 每处都配一格**反向对照**（真·无数据仍须 200/404），否则修法只是"把一切变 500"——
 那同样是把两件事折成一件事，只是折朝另一边。
+
+**第五处随教义第 5 条扫荡补上**（`auth.py::logout`，原判据基线里标"存疑"的那一格）：
+它不是"把故障读成不存在"，而是"把撤销失败读成登出成功"——同一根因的**成功侧**形态，
+且内层已有一记正确的 500 被外层 catch-all 吞掉。见
+`TestLogoutDoesNotInvalidateNothingSilently`。
 """
 
 from __future__ import annotations
@@ -104,6 +109,59 @@ class TestFirewallStatsIsNotSilentlyZero:
             % (resp.status_code, resp.text))
         assert resp.json().get("message") != "success", (
             "500 的同时还发成功信封——两件事各说一半，比原来更难查：%r" % resp.text)
+
+
+class TestLogoutDoesNotInvalidateNothingSilently:
+    """`auth.py::logout` 的同族形态，且多一层：**外层 catch-all 把内层那记 500 也吞了**。
+
+    S-12 的修正在函数体内 `raise HTTPException(500)`，注释写着"不得谎报登出成功"；
+    而它外面还套着 `except Exception: return {code:0,'Logged out successfully'}`
+    —— HTTPException 本身是 Exception 的子类，那记 500 **永远到不了客户端**。
+    ⇒ 这是一处"已声明意图却被同函数另一段静默作废"的死修正，安全面。
+    """
+
+    def _client(self):
+        from fastapi import FastAPI
+
+        from neurova.api.endpoints import auth
+
+        app = FastAPI()
+        app.include_router(auth.router, prefix="/v1/auth")
+        register_error_handlers(app)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_blacklistFaultIsNotReportedAsLoggedOut(self, monkeypatch):
+        from neurova.api import auth as global_auth
+
+        def _boom(_token):
+            raise RuntimeError("全局黑名单库不可写")
+
+        monkeypatch.setattr(global_auth, "blacklist_token", _boom, raising=True)
+        resp = self._client().post(
+            "/v1/auth/logout", headers={"Authorization": "Bearer opaque-token-abc"})
+
+        assert resp.status_code == 500, (
+            '撤销失败被折成 "200 Logged out successfully"，客户端据此清本地凭据、'
+            '而服务端 token 仍然有效：%d %s' % (resp.status_code, resp.text))
+
+    def test_logout_succeeds_when_invalidation_works(self, monkeypatch):
+        """反向对照：正常登出仍然是 200，本次改动不许把成功路径一并变成故障。"""
+        from neurova.api import auth as global_auth
+
+        seen = []
+        monkeypatch.setattr(global_auth, "blacklist_token",
+                            lambda token: seen.append(token), raising=True)
+        resp = self._client().post(
+            "/v1/auth/logout", headers={"Authorization": "Bearer opaque-token-xyz"})
+
+        assert resp.status_code == 200, resp.text
+        assert seen == ["opaque-token-xyz"], "200 的同时注册单点没被调用——假绿：%r" % (seen,)
+
+    def test_logout_without_credential_is_still_two_hundred(self):
+        """反向对照第二格：没带凭据时没有可撤销物，幂等成功应当保留（不是每条 200 都是谎报）。"""
+        resp = self._client().post("/v1/auth/logout")
+
+        assert resp.status_code == 200, resp.text
 
 
 class TestMetacognitionReadoutDistinguishesFaultFromEmpty:
