@@ -16,11 +16,9 @@ import pytest
 
 from neurova.channels import identity_binding
 from neurova.channels.identity_binding import (
-    boundAccount,
     consumeBindingCode,
     issueBindingCode,
     listBindings,
-    manualBind,
     parseBindCommand,
     revoke,
 )
@@ -99,7 +97,7 @@ class TestBindingCodeFlow:
         second = consumeBindingCode("a1", "feishu", "ou_8", code)
 
         assert second == {"ok": False, "reason": "code_invalid_or_expired"}, second
-        assert boundAccount("a1", "feishu", "ou_8") is None, "第二次使用不得留下绑定"
+        assert bindings.resolveUserId("a1", "feishu", "ou_8") is None, "第二次使用不得留下绑定"
 
     def test_wrongCodeBindsNobody(self, codes, bindings):
         issueBindingCode("a1", "feishu", "u-alice", neuserId="ne-1")
@@ -107,7 +105,7 @@ class TestBindingCodeFlow:
         outcome = consumeBindingCode("a1", "feishu", "ou_9", "000000")
 
         assert outcome["ok"] is False, outcome
-        assert boundAccount("a1", "feishu", "ou_9") is None
+        assert bindings.resolveUserId("a1", "feishu", "ou_9") is None
 
     def test_expiredCodeIsRefused(self, codes, bindings):
         code = issueBindingCode("a1", "feishu", "u-alice", neuserId="ne-1", ttl=-1)
@@ -121,14 +119,14 @@ class TestBindingCodeFlow:
         code = issueBindingCode("a1", "feishu", "u-alice", neuserId="ne-1")
 
         assert consumeBindingCode("a2", "feishu", "ou_9", code)["ok"] is False
-        assert boundAccount("a2", "feishu", "ou_9") is None
+        assert bindings.resolveUserId("a2", "feishu", "ou_9") is None
         assert consumeBindingCode("a1", "feishu", "ou_9", code)["ok"] is True, "原 agent 仍可用"
 
     def test_codeDoesNotCrossChannel(self, codes, bindings):
         code = issueBindingCode("a1", "feishu", "u-alice", neuserId="ne-1")
 
         assert consumeBindingCode("a1", "telegram", "tg_9", code)["ok"] is False
-        assert boundAccount("a1", "telegram", "tg_9") is None
+        assert bindings.resolveUserId("a1", "telegram", "tg_9") is None
 
     def test_accountComesFromCodeAndChannelIdentityFromSender(self, codes, bindings):
         """安全边界：码里只带"绑成哪个平台账号"，被绑的渠道身份永远是**发消息的那个人**。
@@ -139,8 +137,8 @@ class TestBindingCodeFlow:
 
         consumeBindingCode("a1", "feishu", "ou_intruder", code)
 
-        assert boundAccount("a1", "feishu", "ou_intruder") == "u-alice"
-        assert boundAccount("a1", "feishu", "ou_9") is None, "不该有别人的格子被改写"
+        assert bindings.resolveUserId("a1", "feishu", "ou_intruder") == "u-alice"
+        assert bindings.resolveUserId("a1", "feishu", "ou_9") is None, "不该有别人的格子被改写"
 
     def test_codeWithoutAccountReasonsExplicitly(self, codes):
         """码有效但 metadata 里没有账号 ⇒ 点名 `code_without_account`，不假装绑定成功。
@@ -166,22 +164,20 @@ class TestBindingCodeFlow:
         assert outcome == {"ok": False, "reason": "no_pending_code"}, outcome
 
 
-class TestRevokeAndManual:
-    def test_manualBindRecordsBoundBy(self, codes, bindings):
-        manualBind("a1", "feishu", "ou_9", "u-bob", neuserId="ne-2", boundBy="admin@console")
+class TestRevoke:
+    """解绑走流程层；绑定由码写入。解绑后必须回落渠道命名空间，且留痕。"""
 
-        row = listBindings("a1")[0]
-        assert row["user_id"] == "u-bob"
-        assert row["bound_by"] == "admin@console", "手工绑要留操作者痕迹（与码绑区分开）"
-
-    def testRevokeKeepsTraceAndFallsBackToNamespace(self, codes, bindings):
-        manualBind("a1", "feishu", "ou_9", "u-bob", neuserId="ne-2")
+    def test_revokeAfterCodeKeepsTraceAndFallsBack(self, codes, bindings):
+        code = issueBindingCode("a1", "feishu", "u-bob", neuserId="ne-2")
+        assert consumeBindingCode("a1", "feishu", "ou_9", code)["ok"] is True
 
         assert revoke("a1", "feishu", "ou_9") is True
-        assert boundAccount("a1", "feishu", "ou_9") is None
+        assert bindings.resolveUserId("a1", "feishu", "ou_9") is None
         assert bindings.resolveTurnIdentity("a1", "feishu", "ou_9")["bound"] == "false", (
             "解绑后必须回落到渠道专属命名空间，不是 default 共享桶")
-        assert listBindings("a1")[0]["status"] == "revoked", "留痕：答得出这人以前算谁的"
+        rows = listBindings("a1")
+        assert rows[0]["status"] == "revoked", "留痕：答得出这人以前算谁的"
+        assert rows[0]["bound_by"] == "bind-code", "来源要分得开：码绑 / 面板解"
 
-    def testRevokeUnknownBindingReturnsFalse(self, codes, bindings):
+    def test_revokeUnknownBindingReturnsFalse(self, codes, bindings):
         assert revoke("a1", "feishu", "ou_never") is False
