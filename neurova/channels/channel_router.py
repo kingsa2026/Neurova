@@ -189,6 +189,26 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 落同一本账。台账/闸口/续跑身份的执行体只有 `core/agent_run_ledger` 一处实现。
         # 会话属主＝agent 属主（渠道会话本就落在他名下，`session_title` 上方已设），
         # 所以挂起回执里"去网页控制台点续跑"是真能做到的。
+        # 绑定码就在这条消息里消费掉：它不该进模型额度、不该落运行台账、也不该被当成
+        # 一轮对话写进记忆——它唯一的效果是改写绑定表（下一轮起身份就变了）。
+        from neurova.channels.identity_binding import consumeBindingCode, parseBindCommand
+
+        submittedCode = parseBindCommand(content)
+        if submittedCode:
+            outcome = consumeBindingCode(
+                agent_id, message.channel_type, str(meta["channel_user_id"]), submittedCode)
+            if outcome["ok"]:
+                return (
+                    "已绑定：这个渠道身份今后按你的平台账号隔离记忆与技能库。"
+                    f"（账号 {outcome['user_id']}）"
+                )
+            reasons = {
+                "no_pending_code": "这里没有待确认的绑定码——请先在网页控制台的「渠道身份绑定」里生成。",
+                "code_invalid_or_expired": "绑定码不对或已过期，请重新生成一张。",
+                "code_without_account": "这张码没有记下要绑定的账号，请重新生成。",
+            }
+            return reasons.get(outcome["reason"], "绑定失败，请重试。")
+
         ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
         try:
             set_request_user_id(owner)

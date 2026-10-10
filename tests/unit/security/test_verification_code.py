@@ -26,7 +26,9 @@ class TestVerificationType:
 
     def test_all_values(self):
         values = {v.value for v in VerificationType}
-        expected = {"register", "reset_password", "login", "change_email", "two_factor"}
+        expected = {"register", "reset_password", "login", "change_email", "two_factor",
+                    # 渠道身份绑定码（工单 2026-10-10 裁定 ②：不另造第二套码，接这一张表）
+                    "bind_channel"}
         assert values == expected
 
 

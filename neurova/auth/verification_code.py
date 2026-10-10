@@ -113,7 +113,13 @@ class VerificationCodeModel:
     def _get_conn(self) -> sqlite3.Connection:
         """获取数据库连接"""
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
+            # 常驻连接（与本仓另 21 处同形）必须显式 check_same_thread=False：
+            # 单例在哪条线程上第一次被取用是不可预知的，而 FastAPI 线程池会有多条线程——
+            # 渠道侧发码/验码（`channels/identity_binding`）与网页端点分处不同线程时，
+            # 缺这个标志就是 ProgrammingError → 500（本机实测）。
+            # 串行化依赖 sqlite 编译期线程模式（现值 `sqlite3.threadsafety == 3`，SERIALIZAL）；
+            # 本表每个方法都是"单语句 + 立即 commit"，不跨语句持有事务。
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 

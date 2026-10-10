@@ -118,7 +118,10 @@ class InvitationCodeModel:
     def _get_conn(self) -> sqlite3.Connection:
         """获取数据库连接"""
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
+            # 常驻连接跨线程：与 verification_code 同一条根因（FastAPI 线程池不止一条线程，
+            # 缺这个标志即 ProgrammingError → 500）；串行化依赖 sqlite 线程模式 SERIALIZAL，
+            # 该前提由 tests/unit/core/test_connection_pool_scope_adr0014.py 钉住。
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
