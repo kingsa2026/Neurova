@@ -11,7 +11,8 @@
 
 ② 比 ① 隐蔽：状态码仍是 200，前端与巡检都读不出异常，而"空"恰好是排查时最可信的信号。
 
-基线是**已裁决的存量**（本轮改完 4 处后剩下的 2 处半诚实），只降不升：
+基线是**已裁决的存量**（本轮改完 4 处 + 扫荡补上的 `logout` 之后，剩下 2 处：
+一处半诚实、一处注释明写的有意设计），只降不升：
 修好了必须从表里摘掉（有一格反向咬合），新增落点当场红。
 """
 
@@ -27,16 +28,17 @@ TARGET_ROOT = REPO_ROOT / 'neurova'
 # - `memory/emotion.py::get_emotion_summary`  —— 回 `message="获取成功(降级)"`：半诚实，
 #   用户本轮裁定"改 4 处"未含它（第 4 项"把降级也升成失败"要动前端 200→500，未选）；
 # - `neurflow_api.py::otel_status` —— 状态端点不 500 是注释明写的有意设计，且 data 里带 `error`；
-# - `auth.py::logout` —— 注释自辩"登出幂等所以出错也回成功"。**这条登记为存疑**：
-#   token 吊销失败被吞成"登出成功"是安全面（会话服务端仍有效），与 §6-126 的"空"同族但性质更重，
-#   已在台账 §6-126 另笔登记，等裁"登出是否必须服务端吊销成功才算成功"。
+# - `auth.py::logout` —— **已修，不在本表**：原注释自辩"登出幂等所以出错也回成功"，
+#   而同函数内层 S-12 又 `raise HTTPException(500)` 并写着"不得谎报登出成功"。
+#   HTTPException 是 Exception 的子类 ⇒ 那记 500 被外层 catch-all 吞掉，意图从未生效。
+#   2026-10-10 按教义第 5 条（同根因全命中点扫荡）删掉外层兜底，行为判据见
+#   `tests/unit/api/test_internalFaultIsNotReportedAsVerdict.py::TestLogoutDoesNotInvalidateNothingSilently`。
 # 上一版的启发式还把 `multi_model_client.py` 的两处**误报**成命中（分类名字符串
 # `'model_not_found'` 被当成"折成 404"）——改成按 AST 节点判之后消失；登记前先逐处分辨，
 # 命中数不等于结论。
 KNOWN_BASELINE = {
     'neurova/api/endpoints/memory/emotion.py::get_emotion_summary',
     'neurova/api/endpoints/neurflow_api.py::otel_status',
-    'neurova/api/endpoints/auth.py::logout',
 }
 
 
