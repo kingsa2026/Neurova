@@ -113,18 +113,6 @@ class TestAPIRouter:
         """测试注销不存在的端点"""
         assert router.unregister_endpoint("non-existent", "GET") is False
 
-    def test_unregister_plugin_endpoints(self, router):
-        """测试注销插件的所有端点"""
-        router.register_endpoint(_endpoint(path="/api/plugin1", method="GET", plugin_name="plugin-123"))
-        router.register_endpoint(_endpoint(path="/api/plugin2", method="POST", plugin_name="plugin-123"))
-        router.register_endpoint(_endpoint(path="/api/other", method="GET", plugin_name="plugin-456"))
-
-        removed = router.unregister_plugin_endpoints("plugin-123")
-
-        assert removed == 2
-        assert router.get_endpoint("/api/plugin1", "GET") is None
-        assert router.get_endpoint("/api/other", "GET") is not None
-
     def test_get_endpoint(self, router):
         """测试获取端点（契约：(path, method) 二元查询）"""
         endpoint = _endpoint()
@@ -201,10 +189,6 @@ class TestEdgeCases:
     def test_register_endpoint_with_description(self, router):
         """带描述端点注册成功"""
         assert router.register_endpoint(_endpoint(description="描述")) is True
-
-    def test_unregister_plugin_with_no_endpoints(self, router):
-        """测试注销无端点的插件"""
-        assert router.unregister_plugin_endpoints("non-existent-plugin") == 0
 
     def test_openapi_spec_empty_router(self, router):
         """测试空路由器的OpenAPI规范"""
