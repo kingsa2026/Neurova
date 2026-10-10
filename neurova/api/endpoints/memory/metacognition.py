@@ -12,6 +12,7 @@ from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    ErrorCodes,
     success_response,
 )
 
@@ -427,10 +428,10 @@ async def get_agent_metacognition(
         )
     except Exception as e:
         logger.exception("获取元认知记录失败: %s", e)
-        return success_response(
-            data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
-            request_id=_get_request_id(req),
-        )
+        # 故障不许折成"这个 agent 没有元认知记录"（台账 §6-126）：前端这一栏会因此
+        # 把读面出错画成空列表，而"空"恰恰是排查时最想看到的假信号。7001 不在
+        # `error_handlers` 的码→状态表里 ⇒ 天然 500，与真·无数据（200 + 空）分得开。
+        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"获取元认知记录失败: {str(e)}")
 
 
 @router.get("/{agent_id}/metacognition/stats", summary="获取 Agent 元认知统计")
@@ -455,7 +456,5 @@ async def get_agent_metacognition_stats(
         )
     except Exception as e:
         logger.exception("获取元认知统计失败: %s", e)
-        return success_response(
-            data={"agent_id": agent_id, "total": 0, "by_type": {}},
-            request_id=_get_request_id(req),
-        )
+        # 同上一条：统计读成"全 0"与读面出错是两件事（台账 §6-126）
+        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"获取元认知统计失败: {str(e)}")
