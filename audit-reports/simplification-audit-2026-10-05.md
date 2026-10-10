@@ -1567,7 +1567,7 @@
       同一命令里已经跑了 `wc -l`/`git diff --numstat` 仍按脑内估计写，说明"取数"与"落字"
       之间没有强制次序；对策不是"下次注意"，是把数字交给脚本拼（本批三格表行即由 `--numstat` 现取）。
     - **A/B（同一选择集 `tests/unit/api + tests/unit/knowledge + tests/test_api`，
-      基线 = 本批之前 `0d`… 见正文计算）：** 基线 **19 failed, 3062 passed, 4 skipped, 1 xfailed, 61 warnings, 8 errors in 421.32s (0:07:01)**（红+错 27 条）↔ 退役后本树 **17 failed, 3072 passed, 4 skipped, 1 xfailed, 58 warnings, 8 errors in 350.68s (0:05:50)**（25 条）；**仅本树 0 条**（0 ⇒ 退役未引入回归）；仅基线 2 条（本批退役的 84 例与其红项随之消失）
+      基线 = 本批之前 `0d`… 见正文计算）：** 基线 **19 failed, 3062 passed, 4 skipped, 1 xfailed, 61 warnings, 8 errors in 421.32s (0:07:01)**（红+错 27 条）↔ 退役后本树 **17 failed, 3072 passed, 4 skipped, 1 xfailed, 58 warnings, 8 errors in 350.68s (0:05:50)**（25 条）；**仅本树 0 条**（0 ⇒ 退役未引入回归）；仅基线 2 条＝`test_purge_keeps_physical_channel` 与 `test_allRoutesPresentAfterSplit`，它们是 §6-130 那两笔契约同步（`06d4382d`）修掉的红，**与本批退役无关**——退役的 84 例分布在 `tests/unit/` 与 `tests/unit/core/`，不在这个选择集里，故两侧都不含它们
     - **净 LOC**：生产池 **−2206**（六件整包）＋端点 docstring **+4/−0**；
       测试池 **−1101 + 101**（退役三份专用测试、新增防再生判据一格不剩）；
       文档池 **+21/−11**（六份架构文档 + 一份计划清单）；基建池 **+11/−0**。
