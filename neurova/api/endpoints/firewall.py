@@ -470,8 +470,7 @@ async def get_firewall_stats():
         }
     except Exception as e:
         logger.exception("Error getting firewall stats: %s", e)
-        return {
-            "code": 0,
-            "message": "success",
-            "data": {"total_rules": 0, "active_rules": 0, "blocked_ips": 0, "blocked_paths": 0},
-        }
+        # 上面那段注释刚修过"NameError 被吞 ⇒ 统计永远全 0"，但 except 这一支留了同一形态：
+        # 故障被报成"防火墙没规则"（code:0 + 全 0）。安全面的"没有"必须是测出来的，
+        # 不能是异常折出来的（台账 §6-126；同文件 :440 的 blocked-list 就是显式 500）。
+        raise HTTPException(status_code=500, detail=f"Failed to get firewall stats: {str(e)}")
