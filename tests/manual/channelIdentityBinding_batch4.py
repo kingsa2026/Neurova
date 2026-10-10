@@ -171,11 +171,14 @@ def main() -> int:
             "读": client.get(f"{base}/identity/bindings", params={"agent_id": "default"}).status_code,
             "发码": client.post(f"{base}/identity/bindings/code",
                                 json={"agent_id": "default", "channel_type": "feishu"}).status_code,
-            "手工绑": client.post(f"{base}/identity/bindings", json={
+            "解绑": client.delete(f"{base}/identity/bindings", params={
                 "agent_id": "default", "channel_type": "feishu",
-                "channel_user_id": "ou_x", "user_id": "u2"}).status_code,
+                "channel_user_id": "ou_x"}).status_code,
         }
-        check("[6] 陌生人对 default 的绑定面全 403", set(codes.values()) == {403}, str(codes))
+        check("[6] 陌生人对 default 的绑定面全 403（门在副作用之前）",
+              set(codes.values()) == {403}, str(codes))
+        check("[6b] 且陌生人的解绑没真动到表",
+              UserIdentityManager().resolveUserId("default", "feishu", "ou_x") is None)
 
         # ── [7] 落点：两张表都在隔离根内 ──────────────────────────
         names = sorted(p.name for p in Path(WORK_ROOT).rglob("*.db"))

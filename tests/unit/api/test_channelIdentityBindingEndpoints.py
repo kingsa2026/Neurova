@@ -6,7 +6,7 @@
 1. **归属只能来自登录态**——发码端点即使 body 里带了 `user_id` 也不认（否则任何登录用户
    可把别人的渠道身份挂到第三方账号下，从此读走那个人的记忆归属，不可逆）；
 2. 门沿用本仓既有口径（`default` 无主 ⇒ 仅 admin；有主 ⇒ 属主或 admin），不新造第二道门；
-3. 非管理员手工绑只能绑到**自己**的账号；
+3. **没有"指定账号去绑"的入口**：归属只从登录态取，替他人绑定那条路整体不存在（负向门）；
 4. 路由字面量 `identity/bindings` 不被 `/{channel_type}` 吞掉（§6-126 那条"把故障折成
    不存在"的形态，在这里会以 404 "Channel 'identity' not configured" 出现）。
 
@@ -159,40 +159,28 @@ class TestIssueCode:
         assert r.status_code == 403, r.text
 
 
-class TestManualBindAndRevoke:
-    def test_nonAdminCannotBindSomeoneElsesAccount(self, env):
+class TestRevoke:
+    def test_noRouteBindsSomeoneElsesAccount(self, env):
+        """不存在"指定账号去绑"的入口：`/identity/bindings` 上 POST 不被允许（405）。
+
+        这条是负向门。曾经有过一个手工绑端点（admin 可指定任意账号），它有两个问题：
+        一是把"谁算这个渠道身份的主人"交给点面板的人，二是替他人绑时 `neuser_id`
+        只能靠猜——而记忆隔离键是 `(neuser_id, user_id)` 一对，猜错就是同一个人两份记忆。
+        归属只能来自登录态（发码即本人），所以那条路整体删掉，不复出。
+
+        读数取 **405 而非 404**：这条路径本身在（GET/DELETE 都在），只是不给 POST——
+        拿 404 当"入口不存在"的读数会把"路径存在但不接受此方法"与"路由没了"混成一样，
+        后者才是 §6-126 点名的"把故障折成不存在"。
+        """
         client, app, bindings = env
-        _as(app, OWNER)
+        _as(app, ADMIN)
 
         r = client.post(f"{BASE}/identity/bindings", json={
             "agent_id": "kai", "channel_type": "feishu",
             "channel_user_id": "ou_9", "user_id": "someone-else"})
 
-        assert r.status_code == 403, r.text
-        assert bindings.resolveUserId("kai", "feishu", "ou_9") is None
-
-    def test_nonAdminCanBindOwnAccount(self, env):
-        client, app, bindings = env
-        _as(app, OWNER)
-
-        r = client.post(f"{BASE}/identity/bindings", json={
-            "agent_id": "kai", "channel_type": "feishu",
-            "channel_user_id": "ou_9", "user_id": "u1", "neuser_id": "ne-u1"})
-
-        assert r.status_code == 200, r.text
-        assert bindings.resolveTurnIdentity("kai", "feishu", "ou_9")["user_id"] == "u1"
-        assert r.json()["binding"]["bound_by"] == "console:u1", "手工绑要留操作者"
-
-    def test_bindingToSharedBucketIs400(self, env):
-        """`default`/`anonymous` 这类非个人身份当归属 ⇒ 显式 400，不静默造共享桶（§6-123 成因）。"""
-        client, app, bindings = env
-
-        r = client.post(f"{BASE}/identity/bindings", json={
-            "agent_id": "default", "channel_type": "feishu",
-            "channel_user_id": "ou_9", "user_id": "default"})
-
-        assert r.status_code == 400, r.text
-        assert bindings.listBindings("default") == []
+        assert r.status_code == 405, r.text
+        assert bindings.resolveUserId("kai", "feishu", "ou_9") is None, "被拒的方法不得留下副作用"
 
     def test_revokeRoundTrip(self, env):
         client, app, bindings = env
@@ -208,3 +196,14 @@ class TestManualBindAndRevoke:
         again = client.delete(f"{BASE}/identity/bindings", params={
             "agent_id": "default", "channel_type": "feishu", "channel_user_id": "ou_9"})
         assert again.status_code == 404, again.text
+
+    def test_strangerCannotRevokeForeignAgent(self, env):
+        client, app, bindings = env
+        bindings.bindIdentity("kai", "feishu", "ou_9", "u1", neuserId="ne-u1")
+        _as(app, STRANGER)
+
+        r = client.delete(f"{BASE}/identity/bindings", params={
+            "agent_id": "kai", "channel_type": "feishu", "channel_user_id": "ou_9"})
+
+        assert r.status_code == 403, r.text
+        assert bindings.resolveUserId("kai", "feishu", "ou_9") == "u1", "门在副作用之前"

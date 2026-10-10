@@ -1,4 +1,4 @@
-"""渠道身份绑定的流程层：发码 / 渠道内消费 / 列表 / 手工绑 / 解绑（工单 2026-10-10 批 4）。
+"""渠道身份绑定的流程层：发码 / 渠道内消费 / 列表 / 解绑（工单 2026-10-10 批 4）。
 
 放在 channels 包而不是端点文件里，是因为**两个入口都要走同一套规则**：Web 控制台发码，
 渠道里那条消息消费码。把"码怎么用"抄两份，就会出现"网页发的码渠道认不了"这类无人认领的漂移。
@@ -116,27 +116,12 @@ def listBindings(agentId: str) -> List[Dict[str, Any]]:
     return UserIdentityManager().listBindings(agentId)
 
 
-def manualBind(agentId: str, channelType: str, channelUserId: str, userId: str,
-               *, neuserId: Optional[str] = None, boundBy: str = "") -> Dict[str, Any]:
-    return UserIdentityManager().bindIdentity(
-        agentId, channelType, channelUserId, userId,
-        neuserId=neuserId, boundBy=boundBy or "console",
-    )
-
-
 def revoke(agentId: str, channelType: str, channelUserId: str) -> bool:
     return UserIdentityManager().revokeBinding(agentId, channelType, channelUserId)
 
 
-def boundAccount(agentId: str, channelType: str,
-                 channelUserId: str) -> Optional[str]:
-    """这一格当前绑到谁（未绑定/已解绑 → None，由调用方决定回什么话）。"""
-    return UserIdentityManager().resolveUserId(agentId, channelType, channelUserId)
-
-
 __all__ = [
-    "BIND_COMMAND", "CODE_TTL_SECONDS", "parseBindCommand", "bindCommandText",
-    "issueBindingCode",
-    "consumeBindingCode", "listBindings", "manualBind", "revoke", "boundAccount",
+    "BIND_COMMAND", "CODE_TTL_SECONDS", "CODE_LENGTH", "parseBindCommand",
+    "bindCommandText", "issueBindingCode", "consumeBindingCode", "listBindings", "revoke",
     "targetFor",
 ]
