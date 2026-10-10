@@ -80,7 +80,7 @@ Neurova/
 │       ├── openrouter_provider.py    # OpenRouter 提供商
 │       └── ... (更多提供商)
 │
-├── neurova/plugins/                  # 插件系统
+├── neurova/plugins/                  # 插件系统  <!-- 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） -->
 ├── neurova/skill_system/             # 技能系统
 ├── neurova/skills/                   # 技能实现
 ├── neurova/tts/                      # 语音合成 (Edge TTS / MOSS Nano / Mock)
