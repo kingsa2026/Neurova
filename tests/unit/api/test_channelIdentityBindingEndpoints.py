@@ -1,0 +1,210 @@
+# -*- coding: utf-8 -*-
+"""渠道身份绑定端点判据（工单 2026-10-10 批 4，§6-127 裁定 ①②③）。
+
+守的是四件可被随手改坏的事：
+
+1. **归属只能来自登录态**——发码端点即使 body 里带了 `user_id` 也不认（否则任何登录用户
+   可把别人的渠道身份挂到第三方账号下，从此读走那个人的记忆归属，不可逆）；
+2. 门沿用本仓既有口径（`default` 无主 ⇒ 仅 admin；有主 ⇒ 属主或 admin），不新造第二道门；
+3. 非管理员手工绑只能绑到**自己**的账号；
+4. 路由字面量 `identity/bindings` 不被 `/{channel_type}` 吞掉（§6-126 那条"把故障折成
+   不存在"的形态，在这里会以 404 "Channel 'identity' not configured" 出现）。
+
+绑定表与码表都指到临时库/内存库：判据不写真实 `data/`。
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_identity_binding")
+
+# 注意：override 的键必须是**端点文件实际 Depends 的那个对象**（neurova.api.auth 那份严格门）。
+# `neurova.api.deps.get_current_user` 是同名别名（可回退 ?access_token=），打错对象会静默不生效，
+# 于是判据看着绿、其实整条门没跑（见 tests/unit/api/test_identity_gate_single_source.py）。
+from neurova.api.auth import get_current_user as strictIdentityGate
+from neurova.api.endpoints import set_app_state
+from neurova.api.endpoints import channel_config as cc
+from neurova.channels import identity_binding
+from neurova.channels.user_identity import UserIdentityManager
+
+ADMIN = {"user_id": "root", "username": "root", "role": "admin", "neuser_id": "ne-root"}
+OWNER = {"user_id": "u1", "username": "u1", "role": "user", "neuser_id": "ne-u1"}
+STRANGER = {"user_id": "u2", "username": "u2", "role": "user", "neuser_id": "ne-u2"}
+
+BASE = "/channel-configs"
+
+
+def _agentWithOwner(agent_id, owner):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        agent_id=agent_id,
+        config=SimpleNamespace(owner_user_id=owner, agent_id=agent_id),
+    )
+
+
+@pytest.fixture()
+def env(tmp_path, monkeypatch):
+    from neurova.auth.verification_code import VerificationCodeModel
+
+    codes = VerificationCodeModel(":memory:")
+    monkeypatch.setattr(
+        "neurova.auth.verification_code.get_verification_code_model", lambda: codes)
+
+    UserIdentityManager.resetInstance()
+    bindings = UserIdentityManager(str(tmp_path / "bindings_api.db"))
+
+    set_app_state({"agents": {
+        "default": _agentWithOwner("default", None),
+        "kai": _agentWithOwner("kai", "u1"),
+    }})
+    app = FastAPI()
+    app.include_router(cc.router)
+    app.dependency_overrides[strictIdentityGate] = lambda: dict(ADMIN)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client, app, bindings
+    app.dependency_overrides.clear()
+    set_app_state(None)
+    bindings.close()
+    UserIdentityManager.resetInstance()
+
+
+def _as(app, identity):
+    app.dependency_overrides[strictIdentityGate] = lambda: dict(identity)
+
+
+class TestReadGate:
+    def test_strangerCannotReadDefaultBindings(self, env):
+        client, app, _ = env
+        _as(app, STRANGER)
+
+        r = client.get(f"{BASE}/identity/bindings", params={"agent_id": "default"})
+
+        assert r.status_code == 403, r.text
+        assert "无权" in r.json()["detail"], r.text
+
+    def test_ownerReadsOwnAgent(self, env):
+        client, app, bindings = env
+        bindings.bindIdentity("kai", "feishu", "ou_9", "u1", neuserId="ne-u1", boundBy="admin")
+        _as(app, OWNER)
+
+        r = client.get(f"{BASE}/identity/bindings", params={"agent_id": "kai"})
+
+        assert r.status_code == 200, r.text
+        rows = r.json()["bindings"]
+        assert [row["channel_user_id"] for row in rows] == ["ou_9"], rows
+
+    def testLiteralPathIsNotSwallowedByChannelTypeRoute(self, env):
+        """`identity/bindings` 必须命中绑定端点，而不是被 `/{channel_type}` 折成 404。"""
+        client, app, _ = env
+        _as(app, STRANGER)
+
+        r = client.get(f"{BASE}/identity/bindings")
+
+        detail = str(r.json().get("detail", ""))
+        assert "not configured" not in detail, (r.status_code, detail)
+        assert r.status_code == 403, (r.status_code, r.text)
+
+
+class TestIssueCode:
+    def test_codeCarriesCallerAndRoundTripsThroughChannel(self, env):
+        """网页发码 → 渠道里那句"绑定 XXXX" → 绑定归属＝发码时的登录账号（完整闭环）。"""
+        client, app, bindings = env
+        _as(app, OWNER)
+
+        r = client.post(f"{BASE}/identity/bindings/code",
+                        json={"agent_id": "kai", "channel_type": "feishu"})
+
+        assert r.status_code == 200, r.text
+        payload = r.json()
+        assert len(payload["code"]) == identity_binding.CODE_LENGTH
+        assert identity_binding.parseBindCommand(payload["command"]) == payload["code"], (
+            "端点回给前端的提示语与渠道解析正则不同源")
+
+        outcome = identity_binding.consumeBindingCode(
+            "kai", "feishu", "ou_77", payload["code"])
+
+        assert outcome["ok"] is True, outcome
+        assert bindings.resolveTurnIdentity("kai", "feishu", "ou_77") == {
+            "user_id": "u1", "neuser_id": "ne-u1", "bound": "true"}
+
+    def test_bodyUserIdIsIgnored(self, env):
+        """报文里塞 `user_id` 不改归属——归属只认登录态（否则可把渠道身份挂到别人名下）。"""
+        client, app, bindings = env
+        _as(app, OWNER)
+
+        r = client.post(f"{BASE}/identity/bindings/code", json={
+            "agent_id": "kai", "channel_type": "feishu",
+            "user_id": "victim", "neuser_id": "ne-victim"})
+
+        assert r.status_code == 200, r.text
+        assert r.json()["bound_user_id"] == "u1", r.text
+
+        identity_binding.consumeBindingCode("kai", "feishu", "ou_77", r.json()["code"])
+
+        assert bindings.resolveUserId("kai", "feishu", "ou_77") == "u1"
+        assert "victim" not in str(bindings.listBindings("kai")), bindings.listBindings("kai")
+
+    def test_codeForForeignAgentStillGated(self, env):
+        client, app, _ = env
+        _as(app, STRANGER)
+
+        r = client.post(f"{BASE}/identity/bindings/code",
+                        json={"agent_id": "kai", "channel_type": "feishu"})
+
+        assert r.status_code == 403, r.text
+
+
+class TestManualBindAndRevoke:
+    def test_nonAdminCannotBindSomeoneElsesAccount(self, env):
+        client, app, bindings = env
+        _as(app, OWNER)
+
+        r = client.post(f"{BASE}/identity/bindings", json={
+            "agent_id": "kai", "channel_type": "feishu",
+            "channel_user_id": "ou_9", "user_id": "someone-else"})
+
+        assert r.status_code == 403, r.text
+        assert bindings.resolveUserId("kai", "feishu", "ou_9") is None
+
+    def test_nonAdminCanBindOwnAccount(self, env):
+        client, app, bindings = env
+        _as(app, OWNER)
+
+        r = client.post(f"{BASE}/identity/bindings", json={
+            "agent_id": "kai", "channel_type": "feishu",
+            "channel_user_id": "ou_9", "user_id": "u1", "neuser_id": "ne-u1"})
+
+        assert r.status_code == 200, r.text
+        assert bindings.resolveTurnIdentity("kai", "feishu", "ou_9")["user_id"] == "u1"
+        assert r.json()["binding"]["bound_by"] == "console:u1", "手工绑要留操作者"
+
+    def test_bindingToSharedBucketIs400(self, env):
+        """`default`/`anonymous` 这类非个人身份当归属 ⇒ 显式 400，不静默造共享桶（§6-123 成因）。"""
+        client, app, bindings = env
+
+        r = client.post(f"{BASE}/identity/bindings", json={
+            "agent_id": "default", "channel_type": "feishu",
+            "channel_user_id": "ou_9", "user_id": "default"})
+
+        assert r.status_code == 400, r.text
+        assert bindings.listBindings("default") == []
+
+    def test_revokeRoundTrip(self, env):
+        client, app, bindings = env
+        bindings.bindIdentity("default", "feishu", "ou_9", "root", neuserId="ne-root")
+
+        r = client.delete(f"{BASE}/identity/bindings", params={
+            "agent_id": "default", "channel_type": "feishu", "channel_user_id": "ou_9"})
+
+        assert r.status_code == 200, r.text
+        assert bindings.resolveUserId("default", "feishu", "ou_9") is None
+        assert bindings.listBindings("default")[0]["status"] == "revoked"
+
+        again = client.delete(f"{BASE}/identity/bindings", params={
+            "agent_id": "default", "channel_type": "feishu", "channel_user_id": "ou_9"})
+        assert again.status_code == 404, again.text

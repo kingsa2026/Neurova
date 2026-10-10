@@ -83,7 +83,11 @@ class UserIdentityManager:
 
     def _getConn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(self._dbPath)
+            # 常驻连接跨线程复用：写侧在渠道事件循环（绑定消息），读侧也可能在 API 线程池
+            # （绑定面板）。缺 `check_same_thread=False` 时第二次跨线程取数直接
+            # ProgrammingError → 500，与本仓另外 21 处常驻存储同一形态；所有操作都在
+            # `self._lock`（RLock）里串行，故无需再依赖 sqlite 的线程模式。
+            self._conn = sqlite3.connect(self._dbPath, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
@@ -117,15 +121,14 @@ class UserIdentityManager:
         displayName: Optional[str] = None,
         boundBy: str = "",
     ) -> Dict[str, Any]:
-        """`neuserId` 缺省取 `userId`，但绑定入口应当把登录态的两个 id 都传进来。
-
-        记忆隔离键是 `{agent}:{neuser_id}:{user_id}` 两元组（`api/deps.py:118-125` 从 JWT 成对取），
-        只存一个就复现不出控制台写入的那个键：渠道侧读起来会变成"同一个人两份记忆"。
-        """
         """把一个渠道发送者绑到平台账号；同 `(agent, 渠道, 发送者)` 再绑即换主（覆盖并刷新时间）。
 
         空 `userId` 与缺省身份一律拒：那等于把渠道发送者塞回 `default` 共享桶——
         正是 §6-123 要消掉的那个形态，不能由这张表重新制造。
+
+        `neuserId` 缺省取 `userId`，但绑定入口应当把登录态的两个 id 都传进来：
+        记忆隔离键是 `{agent}:{neuser_id}:{user_id}` 两元组（`api/deps.py:118-125` 从 JWT 成对取），
+        只存一个就复现不出控制台写入的那个键，渠道侧读起来会变成"同一个人两份记忆"。
         """
         agentId = str(agentId or "").strip()
         channelType = str(channelType or "").strip()
