@@ -89,3 +89,64 @@ def test_namespaceMatchesTheSkillLibraryKey(mgr):
         "技能库按一个键分、记忆与审计按另一个键分，等于同一个人两套历史"
     )
     assert mgr.channelNamespace("", "ou_55") == "", "缺渠道时不该拼出一个可用键"
+
+
+# ── 批 6：观察面（"按渠道查人"的读接口所依赖的那一面）──
+
+def testObserveRegistersSenderAndNamespace(mgr):
+    """见到过＝登记一行，命名空间由 `registerUser()` 同一处算出（不在这里再拼一遍）。"""
+    row = mgr.observeSender("a1", "feishu", "ou_9", displayName="张三")
+
+    assert row["namespace"] == "ch:feishu:ou_9"
+    listed = mgr.listObservedSenders("a1")
+    assert [(r["channel_type"], r["channel_user_id"], r["display_name"]) for r in listed] == [
+        ("feishu", "ou_9", "张三")]
+    assert listed[0]["bound_user_id"] is None, "观察不等于绑定（面板得能分清这两件事）"
+
+
+def testReobserveKeepsFirstSeenAndRefreshesName(mgr):
+    """重复观察只推 `last_seen`/显示名——面板要答"什么时候见过"，不能被自己刷掉。"""
+    mgr.observeSender("a1", "feishu", "ou_9", displayName="旧名")
+    first = mgr.listObservedSenders("a1")[0]["first_seen"]
+
+    mgr.observeSender("a1", "feishu", "ou_9", displayName="新名")
+    row = mgr.listObservedSenders("a1")[0]
+
+    assert len(mgr.listObservedSenders("a1")) == 1, "同一格重复观察不得堆成多行"
+    assert row["first_seen"] == first
+    assert row["last_seen"] >= first
+    assert row["display_name"] == "新名"
+
+
+def testObserveCarriesCurrentBinding(mgr):
+    """读面一条 SQL 带出"这格现在绑到谁"：前端不必拿两份数据自己对。"""
+    mgr.observeSender("a1", "feishu", "ou_9")
+    mgr.observeSender("a1", "feishu", "ou_10")
+    mgr.bindIdentity("a1", "feishu", "ou_9", "u-alice", neuserId="ne-1")
+
+    rows = {r["channel_user_id"]: r for r in mgr.listObservedSenders("a1")}
+    assert rows["ou_9"]["bound_user_id"] == "u-alice"
+    assert rows["ou_9"]["bound_neuser_id"] == "ne-1"
+    assert rows["ou_10"]["bound_user_id"] is None
+
+    # 解绑后必须回到"未绑"，而不是把 revoked 行当现役归属带出去
+    mgr.revokeBinding("a1", "feishu", "ou_9")
+    assert mgr.listObservedSenders("a1") and next(
+        r for r in mgr.listObservedSenders("a1") if r["channel_user_id"] == "ou_9"
+    )["bound_user_id"] is None
+
+
+def testObserveFilterByChannelAndAgent(mgr):
+    mgr.observeSender("a1", "feishu", "ou_9")
+    mgr.observeSender("a1", "telegram", "tg_1")
+    mgr.observeSender("a2", "feishu", "ou_other")
+
+    assert [r["channel_user_id"] for r in mgr.listObservedSenders("a1", "feishu")] == ["ou_9"]
+    assert {r["agent_id"] for r in mgr.listObservedSenders("a1")} == {"a1"}, (
+        "观察面按 agent 隔离，与绑定表的 agent 级作用域同口径（裁定 ③）")
+
+
+def testObserveRejectsMissingKeys(mgr):
+    for bad in (("", "feishu", "ou_9"), ("a1", "", "ou_9"), ("a1", "feishu", "  ")):
+        with pytest.raises(ValueError):
+            mgr.observeSender(*bad)
