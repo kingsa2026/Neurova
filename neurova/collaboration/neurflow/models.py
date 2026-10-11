@@ -118,6 +118,9 @@ class NodeDefinition:
     version: str = "1.0.0"
     tags: List[str] = field(default_factory=list)
     deprecated: bool = False
+    # 该节点类型能否被重复执行而不产生额外副作用（发消息/写文件/扣款类一律 False）。
+    # 引擎的节点级重试只在这个标志为 True 时才发生——默认拒绝，安全侧不靠调用方记得声明。
+    idempotent: bool = False
     # ── 自定义节点（source="custom"）扩展字段 ──
     tier: Optional[str] = None  # declarative(L1) | composite(L2) | code(L3)
     executor_body: Optional[Dict[str, Any]] = None  # L1: {template,...} L2: {steps}

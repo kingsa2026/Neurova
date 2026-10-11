@@ -131,6 +131,7 @@ class CustomNodeService:
             version="1.0.0",
             tier=normalized["tier"],
             executor_body=normalized["executor_body"],
+            idempotent=normalized["idempotent"],
             status="active",
             created_by=created_by,
         )
@@ -184,6 +185,8 @@ class CustomNodeService:
             existing.tier = merged["tier"]
         if "executor_body" in spec:
             existing.executor_body = merged["executor_body"]
+        if "idempotent" in spec:
+            existing.idempotent = bool(spec["idempotent"])
         if "form_schema" in spec:
             existing.sub_blocks = self._parse_form_schema(spec["form_schema"])
         if "inputs" in spec:
@@ -387,6 +390,8 @@ class CustomNodeService:
             "sub_blocks": self._parse_form_schema(spec.get("form_schema") or []),
             "inputs": self._parse_ports(spec.get("inputs"), kind="input"),
             "outputs": self._parse_ports(spec.get("outputs"), kind="output"),
+            # 幂等声明：默认 False（不声明＝不重试）。重试是否安全由节点类型的作者判定
+            "idempotent": bool(spec.get("idempotent", False)),
         }
 
     def _parse_form_schema(self, form_schema: Any) -> List[SubBlockConfig]:

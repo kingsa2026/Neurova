@@ -124,6 +124,7 @@ class NeurflowStorage:
                     version TEXT DEFAULT '1.0.0',
                     tags_json TEXT DEFAULT '[]',
                     deprecated INTEGER DEFAULT 0,
+                    idempotent INTEGER DEFAULT 0,
                     tier TEXT,
                     executor_body_json TEXT,
                     status TEXT DEFAULT 'active',
@@ -409,6 +410,11 @@ class NeurflowStorage:
         if "created_by" not in existing:
             self._conn.execute(
                 "ALTER TABLE node_definitions ADD COLUMN created_by TEXT"
+            )
+        # 节点级重试的幂等声明列（旧库补列，默认 0＝不声明＝不重试）
+        if "idempotent" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN idempotent INTEGER DEFAULT 0"
             )
 
     def close(self):
@@ -1136,8 +1142,9 @@ class NeurflowStorage:
                     INSERT OR REPLACE INTO node_definitions 
                     (type, label, icon, category, description, sub_blocks_json,
                      inputs_json, outputs_json, source, source_id, version,
-                     tags_json, deprecated, tier, executor_body_json, status, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tags_json, deprecated, tier, executor_body_json, status, created_by,
+                     idempotent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         node_def.type,
@@ -1159,6 +1166,7 @@ class NeurflowStorage:
                         else None,
                         node_def.status,
                         node_def.created_by,
+                        1 if getattr(node_def, "idempotent", False) else 0,
                     ),
                 )
                 self._conn.commit()
@@ -1288,6 +1296,7 @@ class NeurflowStorage:
             tags=json.loads(row["tags_json"]) if row["tags_json"] else [],
             deprecated=bool(row["deprecated"]),
             tier=row["tier"] if "tier" in columns else None,
+            idempotent=bool(row["idempotent"]) if "idempotent" in columns else False,
             executor_body=json.loads(executor_body_raw) if executor_body_raw else None,
             status=(row["status"] if "status" in columns else None) or "active",
             created_by=row["created_by"] if "created_by" in columns else None,
