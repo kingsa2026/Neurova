@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS channel_observed_senders (
 _DDL_INDEX_OBSERVED = (
     "CREATE INDEX IF NOT EXISTS idx_cos_agent ON channel_observed_senders(agent_id, channel_type)"
 )
+# 清理走 `last_seen` 范围删除；没这条索引时每条入站都要全表扫（观察面是热写侧）。
+_DDL_INDEX_OBSERVED_SEEN = (
+    "CREATE INDEX IF NOT EXISTS idx_cos_last_seen ON channel_observed_senders(last_seen)"
+)
+
+#: 观察行的保留窗口。观察面是"能给谁发绑定码"的候选清单，不是一份需要长期留痕的账
+#: （留痕那部分是绑定表的 `revoked` 行，两回事）。没有窗口时这张表只增不减，
+#: 而读面又固定 `LIMIT 200`——**排在 200 之后的发送者会无声消失**，面板既不说也不报错。
+#: 超出窗口即无人再被观察到（渠道活跃度决定），删的是候选，不是任何归属决定。
+#: 值与被裁的那格读数一起记在台账 §6-148。
+OBSERVED_RETENTION_SECONDS = 90 * 24 * 3600
 
 
 class UserIdentityManager:
@@ -100,6 +111,7 @@ class UserIdentityManager:
             conn.execute(_DDL_INDEX_USER)
             conn.execute(_DDL_OBSERVED)
             conn.execute(_DDL_INDEX_OBSERVED)
+            conn.execute(_DDL_INDEX_OBSERVED_SEEN)
             conn.commit()
 
     def _getConn(self) -> sqlite3.Connection:
@@ -304,6 +316,7 @@ class UserIdentityManager:
                 (agentId, channelType, channelUserId, identity.user_id,
                  displayName, now, now),
             )
+            self._pruneObserved(conn, now)
             conn.commit()
         return {
             "agent_id": agentId,
@@ -312,6 +325,18 @@ class UserIdentityManager:
             "namespace": identity.user_id,
             "display_name": displayName,
         }
+
+    def _pruneObserved(self, conn: sqlite3.Connection, now: float) -> int:
+        """按 `last_seen` 窗口清观察行（每次观察写入顺带跑一次，走 `idx_cos_last_seen`）。
+
+        调用方持锁。清的是**候选清单**，不是归属：绑定表（含 `revoked` 留痕）一行不动。
+        返回删除数只为让判据能正面断言"过期那行真的没了"，而不是"我以为没了"。
+        """
+        cur = conn.execute(
+            "DELETE FROM channel_observed_senders WHERE last_seen < ?",
+            (now - OBSERVED_RETENTION_SECONDS,),
+        )
+        return cur.rowcount or 0
 
     def listObservedSenders(self, agentId: str,
                             channelType: Optional[str] = None) -> List[Dict[str, Any]]:

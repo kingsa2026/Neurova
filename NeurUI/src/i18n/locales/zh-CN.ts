@@ -1478,7 +1478,7 @@ export default {
     identityRevoke: '解绑',
     identityDenied: '无权查看该智能体的渠道身份绑定',
     identityFailed: '请求失败：{reason}',
-    identityObservedTitle: '该智能体各渠道观察到过的发送者（只读——绑定仍要在渠道里发那句带码的消息）',
+    identityObservedTitle: '该智能体各渠道最近 90 天内观察到过的发送者（最多 200 格；只读——绑定仍要在渠道里发那句带码的消息）',
     identityObservedEmpty: '这个智能体的渠道里还没收到过消息',
     identityObservedBoundMe: '已绑到我',
     identityObservedBoundOther: '已绑到 {user}',

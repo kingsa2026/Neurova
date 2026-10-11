@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: '解除',
     identityDenied: 'このエージェントのチャネルIDバインドを表示する権限がありません',
     identityFailed: 'リクエストに失敗しました: {reason}',
-    identityObservedTitle: 'このエージェントが各チャネルで確認した送信者（読み取り専用。バインドはそのチャネルでコード付きメッセージを送信する必要があります）',
+    identityObservedTitle: 'このエージェントが直近 90 日間に確認した送信者（最大 200 件・読み取り専用。バインドはそのチャネルでコード付きメッセージを送信する必要があります）',
     identityObservedEmpty: 'このエージェントのチャネルではまだメッセージを受信していません',
     identityObservedBoundMe: '自分にバインド済み',
     identityObservedBoundOther: '{user} にバインド済み',

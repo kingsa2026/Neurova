@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'Отвязать',
     identityDenied: 'У вас нет прав на просмотр привязок этого агента',
     identityFailed: 'Запрос не выполнен: {reason}',
-    identityObservedTitle: 'Отправители, которых видел этот агент (только чтение: привязка всё так же требует отправить код в том канале)',
+    identityObservedTitle: 'Отправители, которых этот агент видел за последние 90 дней (до 200 строк; только чтение: привязка всё так же требует отправить код в этом канале)',
     identityObservedEmpty: 'Этот агент ещё не получал сообщений в каналах',
     identityObservedBoundMe: 'Привязано ко мне',
     identityObservedBoundOther: 'Привязано к {user}',

@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'Desvincular',
     identityDenied: 'No tienes permiso para ver los vínculos de este agente',
     identityFailed: 'Solicitud fallida: {reason}',
-    identityObservedTitle: 'Remitentes vistos por este agente (solo lectura: vincular sigue exigiendo enviar el código en ese canal)',
+    identityObservedTitle: 'Remitentes vistos por este agente en los últimos 90 días (hasta 200 filas; solo lectura: vincular sigue exigiendo enviar el código en ese canal)',
     identityObservedEmpty: 'Este agente aún no ha recibido mensajes en sus canales',
     identityObservedBoundMe: 'Vinculado a mí',
     identityObservedBoundOther: 'Vinculado a {user}',

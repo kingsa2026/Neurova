@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'हटाएँ',
     identityDenied: 'आप इस एजेंट की चैनल पहचान बाइंडिंग देखने के अधिकारी नहीं हैं',
     identityFailed: 'अनुरोध विफल: {reason}',
-    identityObservedTitle: 'इस एजेंट ने देखे चैनल भेजनेकर्ता (केवल पठन; बाइंडिंग के लिए उस चैनल में कोड वाला संदेश भेजना ही आवश्यक है)',
+    identityObservedTitle: 'इस एजेंट ने पिछले 90 दिनों में देखे चैनल भेजनेकर्ता (अधिकतम 200 पंक्तियाँ; केवल पठन - बाइंडिंग के लिए उस चैनल में कोड वाला संदेश भेजना ही आवश्यक है)',
     identityObservedEmpty: 'इस एजेंट के चैनल में अभी कोई संदेश नहीं आया है',
     identityObservedBoundMe: 'मुझसे बाइंड',
     identityObservedBoundOther: '{user} से बाइंड',

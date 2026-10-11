@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'Entknüpfen',
     identityDenied: 'Du darfst die Verknüpfungen dieses Agenten nicht sehen',
     identityFailed: 'Anfrage fehlgeschlagen: {reason}',
-    identityObservedTitle: 'Von diesem Agent gesehenen Kanal-Absender (schreibgeschützt - Bindung weiterhin per Code-Nachricht in diesem Kanal)',
+    identityObservedTitle: 'Von diesem Agent in den letzten 90 Tagen gesehene Absender (max. 200 Zeilen; schreibgeschützt - Bindung weiterhin per Code-Nachricht in diesem Kanal)',
     identityObservedEmpty: 'Dieser Agent hat noch keine Kanalnachrichten erhalten',
     identityObservedBoundMe: 'Mit mir verknüpft',
     identityObservedBoundOther: 'Mit {user} verknüpft',
