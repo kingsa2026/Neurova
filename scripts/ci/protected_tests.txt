@@ -2298,3 +2298,9 @@ tests/unit/test_plugin_api.py
 # 退役面按构造今天恒绿；它翻红只有一种意思——有人把假流水线又写回来了。
 # 入册前逐文件单跑两次同读数 8 passed（7.64s / 8.36s）。
 tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
+# §6-152 成功路径不得记 ERROR 级日志（建 Agent 端点那枚 DEBUG 残留的防再生面）：
+# 行为面往生产 logger 自己的 handler 链挂临时收集器取数（不 monkeypatch 调用点、不假设 propagate），
+# 真 HTTP 请求后必须零条 ERROR 及以上；防再生面按 AST 扫全生产包，
+# error/exception/critical 且首参字面量带 DEBUG/调试/TEST:/TODO/FIXME/临时 前缀即红（全仓现数只 1 处，已修）。
+# 入册前逐文件单跑两次同读数 4 passed（5.70s / 4.92s）。
+tests/unit/api/test_agentCreateDoesNotLogAtError.py
