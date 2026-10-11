@@ -449,6 +449,14 @@ async def chat_stream(
         call_metadata["event_emitter"] = _emit
         # 429 重试/切换倒计时事件转发（管线 retry_status → SSE retry）
         call_metadata["emit_status_events"] = True
+        # 会话属主（裁定甲，§6-153）：流式此前不写 `user_id`，于是 `mem_core.save_to_session`
+        # 取到空属主，而 `session_manager.py:1650` 的过滤是「空属主不过滤」⇒ **每个登录用户
+        # 的控制台都能看见别人的流式会话标题**。写在 `event_generator` 内、`create_task` 之前：
+        # task 在创建时复制当前上下文，放在端点顶部反而不保证被 `run_chat` 那条 task 看到。
+        call_metadata["user_id"] = user_id
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
 
         async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
             # 等待预算（默认 10×20s）远超租约 90s：每次入睡前强制续租，并把进度
