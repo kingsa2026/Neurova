@@ -870,7 +870,7 @@ class MetricsCollector:
 
 # 单例并发保护：双重检查锁模式
 # 修复 P0-2 (C2)：原 hasattr(get_collector, "_instance") 写法无锁，TOCTOU
-# 模板：neurova/cognitive/orchestrator.py:358-369
+# 模板：neurova/llm/presets.py:258-265
 _collector_singleton: Optional[MetricsCollector] = None
 _collector_lock = threading.Lock()
 

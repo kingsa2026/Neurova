@@ -11,7 +11,7 @@ P0-1 修复测试：ContextPool 并发安全（C1）
 - 修复方案：__init__ 末尾添加 self._lock = threading.RLock()，所有 mutating 方法
   用 with self._lock: 包裹
 
-参考模板：neurova/core/config.py:75、neurova/cognitive/orchestrator.py:358-369
+参考模板：neurova/core/config.py:74（RLock 装配点）、neurova/llm/presets.py:258-265（DCL 单例）
 """
 
 import threading
