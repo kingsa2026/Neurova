@@ -60,7 +60,7 @@
 |----------|------|------|------|
 | **SecretStore** 密钥库 | `neurova/llm/providers/secret_store.py` | `get_secret_store()` → `set/get/has/delete/list_keys` | AES-256-GCM 加密存储所有平台 API Key |
 | **ComfyUIClient 模式** | `neurova/collaboration/neurflow/comfyui_client.py` | `is_available()` + `execute_node()`，httpx 可选依赖 | 外部 API 客户端的**范本**（网络异常隔离为 failed） |
-| **MediaManager** 媒体资产 | `neurova/media/manager.py` | `get_media_manager()`，记录 media_id/media_type/checksum | 保存生成图片/视频产物并登记 |
+| ~~**MediaManager** 媒体资产~~ | ~~`neurova/media/manager.py`~~（**已退役 2026-10-11，台账 §6-139**：生产零消费者；它的 sha256 校验位已并入 `api/endpoints/media.py` 的 `media_index.json`，产物登记的现役落点是端点那份） | `get_media_manager()`，记录 media_id/media_type/checksum | 保存生成图片/视频产物并登记 |
 | **TTSManager** | `neurova/tts/manager.py` | `get_tts_manager()` → `synthesize()` | tts 节点已真实接入 |
 | **ConfigManager** | `neurova/core/config.py` | 环境变量加载（`NEUROVA_*` 前缀） | 读取 host/base_url 等非敏感配置 |
 
