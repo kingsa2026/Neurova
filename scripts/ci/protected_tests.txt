@@ -2260,3 +2260,12 @@ tests/unit/core/test_dreamReportSeamIsNotFabricated.py
 # 逐文件单跑落库前后同读数 9 passed（两档并跑）。
 tests/unit/api/test_mediaChecksumIsRecorded.py
 tests/unit/api/test_mediaManagerFaceRetired.py
+
+# §6-142：TTS 那批"红着的格子"与"会把整轮跑测带崩的写法"一起修（`97953c00`）
+# 两处替身把协程函数换成同步返回 list ⇒ 生产侧 await 抛错被吞、断言永远差两个音色；
+# 一处默认值期望停在 P1-12 之前（`engine` 现为 `auto`）；两处用
+# `patch("pathlib.Path.exists", return_value=True)` 造"模型都在"的假象——那会让被测代码真去
+# `ort.InferenceSession(不存在的路径)`，在装了真 onnxruntime 的机器上是**原生 access violation、
+# 整轮 pytest 直接没了**（宽域 A/B 实测被打断过）。改后主树 22 passed，且在新建 worktree 里
+# 重跑原本会崩的那条路径 31 passed 无崩溃。逐文件单跑落库前后同读数。
+tests/media/test_tts_module.py
