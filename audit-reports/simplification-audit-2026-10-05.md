@@ -1939,6 +1939,49 @@
     - **本会话为何不动手**：同一文件（`api/endpoints/media.py`）与同一能力面正被另一会话按甲方案收尾，
       两边同改只会造出双源；本笔只登记并交裁定。
 
+147. **批 3 留了一个 P0：每次真实对话的上下文构建必抛 NameError（28 格由我造红），乙案执行时实测撞出并根修** 🔴
+    - **事实**：`_step_retrieve_and_build_context` 的五个 `chat_*` 入参读 `_scopeCtx`，而那个变量
+      只在 `_retrieve_memories` 里算（不同函数、不同作用域）⇒ 真实回合走到这里必抛
+      `NameError: name '_scopeCtx' is not defined`，整段上下文构建失败。
+      **A/B 读数**（`tests/unit/agent/` + `tests/unit/channels/`）：`30534ac5` 4 红 →
+      我批 3 之后的 `b8001236` **32 红** → 本批之后 **0 红**。中间那 28 格
+      （`test_agent.py::TestAgentChat::*`、`test_agent_chat_tracer_bullet.py` 一整套）不是预存，
+      是我造的；本档此前把它当"agent 族历史红"记过一次，那是错的。
+    - **为什么拖了 4 个批次**：批 3 的 A/B 只跑了 `evolution/`、`channels/`、`context/+collaboration/`，
+      没跑 `tests/unit/agent/`——**判据覆盖面没跟着改动面走**，红就一直躺在没人跑的那一侧。
+      这与 §6-137②"改枚举只跑用到它的那一族"同族，是本会话第三次犯同一句话（前两次：
+      闭集判据、跨线程常驻连接）。口径落到动作上：**改了哪个模块，A/B 必跑那个模块的判据族**，
+      不能只跑"我新写的判据所在的那一族"。
+    - **修法（教义第 1 条）**：作用域口径在 `_step_retrieve_and_build_context` 开头**单点解析一次**，
+      以参数传给 `_retrieve_memories`。不留"两处各算各的"——那正是本格的成因，且一处漏就是
+      "检索按 A 作用域、编排按 B 作用域"的裂脑。测试侧两处直调私有步的格子同步传参，
+      不改生产签名去迁就桩件。
+    - **同批执行 §6-121 (b) 的乙案**（裁定见 §6-143）：请求级属主改在请求边界写一次
+      （`api/endpoints/chat.py` 与既有 `call_metadata["user_id"] = user_id` 同一变量），
+      `ChatPipeline._execute_steps` 那段双写删除。执行时实测出双写的真实代价：批 2 之后那个值是
+      **发送者**，于是渠道路径 router 写的"会话属主＝agent 属主"在回合内被换掉，而
+      `mem_core.save_to_session:1423-1425` 只读这条通道、`console.py:1404` 的会话列表又按
+      `user_id` 过滤 ⇒ **渠道会话落进一个谁也不匹配的命名空间，控制台看不见**
+      （Issue #290 Wave H-W0 修好的可见性被批 2 静默吃掉）。这一条本档此前没记下，属 §6-137
+      收口账的漏项，一并在此补。
+      判据：写方台账换形（去 `chat_pipeline`、进 `api/endpoints/chat.py`，新 kind
+      `boundaryFeedsTurn` + ②b 钉"边界写 request 通道的来源就是喂轮身份的那个变量"）；
+      `testRequestChannelStaysWithSessionOwnerDuringTurn` 钉回合内属主不被换、发送者身份仍在 meta。
+      `sameSource` 那一格与其 kind 一并撤（乙案之后全仓无任何函数同时写两条通道，留着就是
+      一条永不进的红测试）。变异自证 M1/M2 各只打中自己的格，复原后 34 passed。
+    - **两处顺手修正**：① `_originOf` 对裸局部变量此前一律回 `Name` ⇒ 任何两个 Name 互相相等，
+      同源判据恒真；现回变量名。② 活体脚本 `tests/manual/requestUserIdBoundary_batch9.py`
+      第一版自造 metadata 键名 `"channel"` 使 [3] 恒假（真实判据是 `source_channel` +
+      `chat_type` + `chat_id`），另 `context_orchestrator` 是无 setter 的转发 property、
+      替身要挂在 agent 侧——两个坑都写进脚本注释。现 4 项全 PASS，`data/` 零写入指纹一致。
+    - **顺带记一条与本批无关的既有事实**：`test_chat_pipeline.py` 与 `test_agent.py` 那一族
+      此前红成一排却没进任何"预存失败"清单，说明**本档的"预存"登记只覆盖了我跑过的目录**；
+      未跑过的目录不能推定"没有我的红"。已按上面那条口径落到动作上。
+    - 净 LOC（本批 `582836da`）：生产面 +31/−17（净额 +14 全在注释与一处必要传参）；
+      测试面 +248/−2（含活体脚本 168）。流式路径的属主仍为空（共享口径）——本批刻意不动，
+      它是既有形态、不是本批造成的，登记为待裁："控制台流式对话要不要按用户归属"与
+      "空属主会话对全员可见"是同一件事的两面。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
