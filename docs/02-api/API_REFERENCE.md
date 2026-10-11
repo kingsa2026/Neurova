@@ -81,7 +81,11 @@
 - `POST /analyze` | `POST /edit` | `POST /convert`
 
 ### 18. `/api/v1/media` — `media.py`
-- `POST /upload` | `GET` 列表 | `GET /{id}` | `DELETE /{id}`
+- 写：`POST /save`（表单字段 `media_type` 必填；无 `POST /upload`）｜ `POST /batch-delete`（body `{media_ids, mode}`）｜ `PUT /config` ｜ `POST /cache/clear`
+- 读：`GET /list`（`agent_id`/`media_type`/`search`/`offset`/`limit`）｜ `GET /config` ｜ `GET /{media_id}`（内容）｜ `GET /{media_id}/metadata` ｜ `GET /download/{media_id}` ｜ `GET /stats/{agent_id}` ｜ `GET /memory/{memory_id}` ｜ `GET /storage-path/{media_type}`
+- 回收站（§6-158）：`DELETE /{media_id}?mode=trash` 软删 ｜ `GET /trash` 读面 ｜ `POST /{media_id}/restore` 恢复 ｜ `DELETE /{media_id}?mode=permanent` 彻底删除。**缺省档是 `permanent`**——列表里那个删除按钮至今仍是硬删
+- 认证：路由级 `Depends(get_current_user)`，**无凭证即 401**（实测于 §6-158 的活体第 [8] 项，附录那张表的旧值见其脚注）
+- 字面段（`/trash`、`/list`、`/config`、`/batch-delete`…）必须注册在 `GET /{media_id}` 之前，守卫见 `tests/unit/api/test_media_route_order_guard.py`
 
 ### 19. `/api/v1/knowledge` — `knowledge.py`
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
@@ -286,10 +290,15 @@
 
 | 认证类型 | 模块 |
 |----------|------|
-| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, media, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
+| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
 | **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups |
 | **API Key** | agent-communication |
 | **HTTPBearer** | mobile |
+
+> 脚注（§6-158）：`media` 原先挂在"无需认证"那一行，与实况不符——`media.py:40` 是
+> `APIRouter(dependencies=[Depends(get_current_user)])`，无凭证请求实测回 **401**
+> （活体第 [8] 项）。这张表**没有逐模块复核过**，其余条目同样可能是旧的：本批只按实测改了
+> 自己动过的那一格，不做整表顺手清扫（那需要一次自己的复算与裁定，登记在台账）。
 
 ### 项目统计
 
