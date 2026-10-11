@@ -289,6 +289,14 @@ async def chat(
         call_metadata = body.metadata or {}
         # 隔离注入：服务端身份覆盖客户端自报（kb_builder 等技能据此归属知识条目）
         call_metadata["user_id"] = user_id
+        # 请求级属主（§6-121 (b) 的乙案）：**在请求边界写一次**，不再由管线中途补写。
+        # 原先 `ChatPipeline._execute_steps` 每次回合都按 metadata 里的 user_id 再写一遍这条
+        # 通道，于是渠道路径里"会话属主"（router 写的 owner）在回合内被换成"发送者"——
+        # `mem_core.save_to_session` 只读这条通道，渠道会话因此不再落进属主的控制台。
+        # 两边取的是同一个 `user_id`（上面那行），同源、单点、无第二写方。
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
 
