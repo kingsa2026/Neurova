@@ -1813,6 +1813,51 @@
       ② 产品指南是中文单语，`docs/03-user-guide/i18n/` 那 6 份 README 级多语文档没同步——
       它牵扯的是"用户指南整套转多语要不要做"，不属本笔范围，登记不顺手扩。
 
+143. **§6-121 那句"并行通道读两处"是错的：全仓复算得八处；判据先把读面钉住，合并那条路在实测到的一个前提上不成立，回到人裁** 🔴
+    - **错数怎么来的**：§6-121 登记这条通道时把读面写成"两处（`browser_manager.py`、`camofox_server_backend.py`）"，
+      那个数是用 `computer_use/` 目录筛出来的，不是全仓复算——与 §6-125 那条"`grep | head` 截断命中面"同族。
+      本批用判据自己的探测器（AST，按调用名 `get_request_user_id` 归账）复算，生产侧读点是**八处**，
+      且兜底口径各不相同，说明它们关心的根本不是同一个键：
+      | 读点 | 兜底口径 | 关心的是什么 |
+      |---|---|---|
+      | `computer_use/browser_manager.py::BrowserManager._get_or_create_user_camofox_backend` | `or "default"` | 浏览器 profile / cookie 池按谁分 |
+      | `computer_use/camofox_server_backend.py::CamofoxServerBackend._eff_user_id` | 回落 `backend._user_id` 再 `"default"` | 同上（池化派生值优先） |
+      | `llm/multi_model_client.py::MultiModelLLMClient._chat_single_attempt`、`::chat_stream` | `or "anonymous"` | 模型用量/配额归因 |
+      | `llm/multi_model_client.py::_consume_llm_quota` | 裸取（无兜底） | 同上，另一条扣减路径 |
+      | `mem_core.py::MemCore.save_to_session` | `or ""` | **会话属主**（谁能看见这条会话记录） |
+      | `tool_executor.py::ToolExecutor._execute_computer_ssh_exec` | `or self._agent_identity()[0]` | SSH 工具按谁取凭据 |
+      | `tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id` | `or None` | MCP 侧身份透传 |
+    - **先钉面，再谈裁**：`tests/unit/agent/test_turnIdentitySingleSource.py` 加读方台账
+      `READERS["neurova_request_user_id"]` 与 ⑨ 格（实测与台账逐条相等，**多一处、少一处都红**——
+      退役一条读点同样是口径变更，不许静默发生），并给新探测器补反向自证（两种写法：
+      `from … import get_request_user_id` 与 `identity_context.get_request_user_id()` 都要抓到；
+      函数定义本身不得算作读点）。红自证：往 `neurova/` 放一个临时模块作第九处读点 ⇒ ⑨ 格
+      红且点名 `neurova/_tmp_reader_probe.py::ninthReader`，删掉后 9 passed。
+    - **实测到的阻塞（这才是本格的核心）**：裁定「合并到轮身份」预设两条通道同语义，但有一条路径
+      只有其中一个语义存在——`api/endpoints/computer.py` 全文 **`set_turn_identity` 零命中**
+      （它不跑 agent 回合，只在 `_with_browser_identity()` 里写 `set_request_user_id(user_id)`）。
+      于是网页控制台的浏览器操作若把读点改指 `get_turn_user_id()`，取到的是空 → 落到 `"default"`，
+      **两个控制台用户会共用同一个浏览器 profile（cookie、登录态、tab 互见）**。
+      这不是"收口成单一事实源"，是隐私侧的退让，方向与裁定的目的相反。
+      第二条不易看见的差别：渠道路径这条通道写的是 **owner（会话属主）**，轮身份是 **sender**；
+      合并后 camofox 池会**按陌生发送者开实例**（一个群里的每个人一个 profile），
+      这是隔离增强，也是资源与行为的变更，不能当副产品带过去。
+    - **三条重裁的路（影响面各自摆清）**：
+      **甲 · 全量合并**：八处读点全改指轮身份，五个写方（`chat_pipeline.py:477`、`computer.py:729`、
+      `channel_router.py:221/271`、`tool_executor.py:2229`、`mcp_server.py:192`）统一改设
+      `set_turn_identity`，`identity_context` 退役。代价：REST 类入口（浏览器、MCP）必须先给
+      "请求级轮身份"下定义——等于把"轮"从"一次 agent 对话"扩成"一次请求"；渠道路径浏览器
+      profile 随发送者增长；配额/会话属主/凭据三类关注点被迫共用一个键，兜底口径要逐个重定。
+      **乙 · 只并同源的那半区**：`chat_pipeline` 双写消除（它同时写两条，取数同源），
+      computer_use 两个读点保持从请求通道取；REST/MCP 入口仍设请求通道。代价：两条通道并存不变，
+      但写方从五处降到三处、双写消除，漂移面变小。
+      **丙 · 不合并，判据已把面钉住**：本格的 ⑨ 格 + §6-121(a) 的写方台账已让"新增第三条通道"
+      和"读写面各自漂移"可见。代价：`chat_pipeline` 的双写仍在。
+      **本会话推荐乙 → 丙 之间取乙**，理由：甲要改的不是名字而是"轮"的定义，且其收益（一份事实源）
+      在配额/属主/凭据这三类关注点上并不成立——它们本就该不同键；乙能消掉真实存在的双写，
+      又不动 REST 侧的隐私边界。**甲不在本会话顺手做**，因为它会让"两个用户共用一个浏览器"
+      这种状态出现在一次"清理"里。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
