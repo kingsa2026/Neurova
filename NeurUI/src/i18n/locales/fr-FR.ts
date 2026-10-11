@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'Lié à {user}',
     identityObservedUnbound: 'Non lié',
     identityMineTitle: 'Mes liaisons de canal actuelles',
+    identityGroupScopeNote: 'La mémoire accumulée dans une discussion de groupe est partagée à l\'échelle du groupe : ses membres voient la mémoire de ce groupe. Les discussions directes restent isolées par compte plateforme (ou par identité de canal sans liaison).',
     genericFailure: 'Échec de la requête : {reason}',
     enabledNotConnected: "Activé, non connecté",
     agentChannels: "Configuration des canaux",

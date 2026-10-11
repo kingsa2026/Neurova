@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'Vinculado a {user}',
     identityObservedUnbound: 'Sin vínculo',
     identityMineTitle: 'Mis vínculos de canal actuales',
+    identityGroupScopeNote: 'La memoria acumulada en un chat de grupo se comparte a nivel de grupo: sus miembros ven la memoria de ese grupo. Los chats directos siguen aislados por cuenta de plataforma (o por identidad de canal sin vínculo).',
     genericFailure: 'Solicitud fallida: {reason}',
     enabledNotConnected: "Activado, sin conexión",
     agentChannels: "Configuración de canales",
