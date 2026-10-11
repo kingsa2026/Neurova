@@ -1179,11 +1179,6 @@ async def create_agent(data: Dict[str, Any] = Body(...)):
         if not name or not role:
             raise HTTPException(status_code=400, detail="名称和角色是必填字段")
 
-        import logging
-
-        logger = get_logger(__name__)
-        logger.error("DEBUG: name=%s, role=%s, manager=%s", name, role, manager)
-
         agent = manager.create_agent(name=name, role=role, config=data.get("config", {}), flow_id=data.get("flow_id"))
         from starlette.responses import JSONResponse
 
