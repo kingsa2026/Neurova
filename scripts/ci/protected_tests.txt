@@ -2269,3 +2269,18 @@ tests/unit/api/test_mediaManagerFaceRetired.py
 # 整轮 pytest 直接没了**（宽域 A/B 实测被打断过）。改后主树 22 passed，且在新建 worktree 里
 # 重跑原本会崩的那条路径 31 passed 无崩溃。逐文件单跑落库前后同读数。
 tests/media/test_tts_module.py
+
+# 语言码口径单点化（用户 2026-10-11 裁「`language/` 保留并接进现有语言面」的前置根修，§6-145）
+# 两档钉的是同一件事的两半：`test_language_models.py` 15 格钉**口径与契约**——区域码
+# （`zh-CN`/`zh_CN`/`DE-de`）必须归一到主子标签、不识别返回 None 而不是借 `AUTO` 这个合法值
+# 装作认得、`Translation`/`UserLanguagePreference` 构造即归一（旧 dataclass 不校验，裸串存进去
+# 后 `to_dict()` 当场 AttributeError，而老判据只断"字段回显相等"所以恒绿）、并按 AST 钉
+# 「取主子标签」在语言包里只许有 `normalizeTag` 一处（原缺陷是 `detect_browser_language`
+# 自己那一刀是对的、枚举侧那一份是错的）；`test_language_externalLibraryTags.py` 7 格钉**读写两面
+# 真同源**——按 `zh-CN` 写入不得新长出 `auto` 桶、坏码只跳它自己不许带走整份文件、
+# 拒收时不留半写状态、且**换一个新实例从盘上读回**同一读数（只看内存会放过序列化那一半）。
+# 判据一律按 delta 取（"这一次多出了哪个桶"），不按"库里有没有 zh"取——内置表本就带 zh，
+# 后者是一条恒真断言（本文件第一版就踩过，已记进失效形态清单）。
+# 逐文件单跑落库前后同读数 15 passed / 7 passed。
+tests/language/test_language_models.py
+tests/language/test_language_externalLibraryTags.py
