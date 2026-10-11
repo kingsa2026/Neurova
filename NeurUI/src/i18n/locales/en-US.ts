@@ -1469,7 +1469,7 @@ export default {
     identityRevoke: 'Revoke',
     identityDenied: 'You are not allowed to view this agent\'s channel identity bindings',
     identityFailed: 'Request failed: {reason}',
-    identityObservedTitle: 'Channel senders this agent has seen (read-only - binding still requires sending the coded message in that channel)',
+    identityObservedTitle: 'Channel senders this agent has seen in the last 90 days (up to 200 rows; read-only - binding still requires sending the coded message in that channel)',
     identityObservedEmpty: 'This agent has not received any channel messages yet',
     identityObservedBoundMe: 'Bound to me',
     identityObservedBoundOther: 'Bound to {user}',

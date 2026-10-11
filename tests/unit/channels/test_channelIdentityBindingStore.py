@@ -150,3 +150,77 @@ def testObserveRejectsMissingKeys(mgr):
     for bad in (("", "feishu", "ou_9"), ("a1", "", "ou_9"), ("a1", "feishu", "  ")):
         with pytest.raises(ValueError):
             mgr.observeSender(*bad)
+
+
+# ── 批 10：观察行的保留窗口（裁定「加过期淘汰」）──
+
+def _age(mgr, agentId, channelType, channelUserId, seconds):
+    """把某行观察到时间推到窗口之外（等价于"这人行不通了"）。"""
+    conn = mgr._getConn()
+    conn.execute(
+        "UPDATE channel_observed_senders SET last_seen = last_seen - ?"
+        " WHERE agent_id=? AND channel_type=? AND channel_user_id=?",
+        (seconds + 1, agentId, channelType, channelUserId),
+    )
+    conn.commit()
+
+
+def testStaleObservationIsPrunedFreshOneIsKept(mgr):
+    """过窗的观察行被清，窗口内的留下——面板那 200 格不再被死人占着。"""
+    from neurova.channels.user_identity import OBSERVED_RETENTION_SECONDS
+
+    mgr.observeSender("a1", "feishu", "ou_gone")
+    _age(mgr, "a1", "feishu", "ou_gone", OBSERVED_RETENTION_SECONDS)
+    mgr.observeSender("a1", "feishu", "ou_alive")
+
+    assert [r["channel_user_id"] for r in mgr.listObservedSenders("a1")] == ["ou_alive"], (
+        "清理没跑：观察表只增不减，读面固定 LIMIT 200 会让排在后面的人无声消失")
+
+
+def testPruneNeverTouchesBindings(mgr):
+    """负向格：清的是候选清单，不是归属。绑定表（含 revoked 留痕）一行都不许动。
+
+    这两张表共用同一个库、同一个 manager，清理语句写错作用域就会把"这人以前算谁的"
+    那份留痕一起删掉——那是本仓唯一能回答历史归属的东西。
+    """
+    from neurova.channels.user_identity import OBSERVED_RETENTION_SECONDS
+
+    mgr.observeSender("a1", "feishu", "ou_9")
+    mgr.bindIdentity("a1", "feishu", "ou_9", "u-alice", neuserId="ne-1")
+    mgr.observeSender("a1", "feishu", "ou_stale")
+    _age(mgr, "a1", "feishu", "ou_stale", OBSERVED_RETENTION_SECONDS)
+    mgr.observeSender("a1", "telegram", "tg_new")   # 触发一次清理
+
+    assert mgr.resolveUserId("a1", "feishu", "ou_9") == "u-alice"
+    rows = mgr.listBindings("a1")
+    assert [(r["channel_user_id"], r["status"]) for r in rows] == [("ou_9", "active")], rows
+
+    mgr.revokeBinding("a1", "feishu", "ou_9")
+    mgr.observeSender("a1", "whatsapp", "wa_new", displayName="新_seen")
+    _age(mgr, "a1", "whatsapp", "wa_new", OBSERVED_RETENTION_SECONDS)
+    mgr.observeSender("a1", "whatsapp", "wa_fresh")
+
+    assert [(r["channel_user_id"], r["status"]) for r in mgr.listBindings("a1")] == [
+        ("ou_9", "revoked")], "解绑留痕不得被观察面的清理带走"
+
+
+def testWindowEdgeIsKept(mgr):
+    """窗口边界不越界：只比窗口老一瞬的行必须留下。
+
+    反向控制那一半——清早了就是把还在用的人从面板上抹掉，比不清更难查（无声缺失）。
+    """
+    from neurova.channels.user_identity import OBSERVED_RETENTION_SECONDS
+
+    mgr.observeSender("a1", "feishu", "ou_edge")
+    conn = mgr._getConn()
+    conn.execute(
+        "UPDATE channel_observed_senders SET last_seen = last_seen - ?"
+        " WHERE channel_user_id = 'ou_edge'",
+        (OBSERVED_RETENTION_SECONDS - 60,),
+    )
+    conn.commit()
+
+    mgr.observeSender("a1", "feishu", "ou_trigger")
+
+    assert "ou_edge" in {r["channel_user_id"] for r in mgr.listObservedSenders("a1")}, (
+        "窗口边界被当成过期删掉了——面板会抹掉仍在用的人")
