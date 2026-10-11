@@ -45,12 +45,44 @@ class Language(str, Enum):
     AUTO = "auto"  # 自动检测
 
     @classmethod
+    def normalizeTag(cls, tag: Any) -> Optional["Language"]:
+        """语言码 → 枚举的**唯一口径**；不识别返回 `None`，不替调用方决定兜底。
+
+        仓内实际流通的是带区域后缀的 BCP-47 码（前端 11 份 locale 文件名、
+        `api/endpoints/settings.py` 存的 `"zh-CN"`），所以主子标签归一是必须的一步——
+        这步原本只在 `LanguageManager.detect_browser_language` 里私有一份
+        （`lang.split("-")[0]`），枚举自己反而不认，于是 `zh-CN` 一路落到兜底值。
+        """
+        if isinstance(tag, cls):
+            return tag
+        if tag is None:
+            return None
+
+        text = str(tag).strip().lower().replace("_", "-")
+        if not text:
+            return None
+
+        # 全码优先（`zh-cn` 不是成员，走第二刀）；再取主子标签（`zh-cn` → `zh`）
+        for candidate in (text, text.split("-", 1)[0]):
+            try:
+                return cls(candidate)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
     def from_str(cls, value: str) -> "Language":
-        """从字符串创建"""
-        try:
-            return cls(value.lower())
-        except ValueError:
-            return cls.AUTO
+        """总入口：不识别**当场报错**，不再把未知码折成 `AUTO`。
+
+        原兜底 `except ValueError: return cls.AUTO` 让「我没看懂这个码」与「自动检测」
+        共用一个合法成员值——写进去的外部译文库因此整批落进 `auto` 桶，
+        按 `Language.CHINESE` 永远读不出来（台账 §6-140，教义第 2 条禁「把失败改写成默认值」）。
+        调用方要兜底就显式用自己的默认语言。
+        """
+        normalized = cls.normalizeTag(value)
+        if normalized is None:
+            raise ValueError("无法识别的语言码: %r" % (value,))
+        return normalized
 
     def get_name(self) -> str:
         """获取语言名称"""
@@ -165,6 +197,17 @@ class Translation:
             "metadata": self.metadata,
         }
 
+    def __post_init__(self) -> None:
+        """构造点就把语言码归一成枚举成员——非法状态生产不出来（教义第 1 条）。
+
+        原形态：dataclass 不校验，`Translation(language="zh")` 存进去的是**裸串**，
+        于是 `to_dict()` 里那句 `self.language.value` 当场 AttributeError；
+        而配套测试只断「字段回显相等」，所以它一直是绿的（断形状不断装配，§6-129 同族）。
+        """
+        if isinstance(self.language, Language):
+            return
+        self.language = Language.from_str(str(self.language))
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Translation":
         """从字典创建"""
@@ -227,6 +270,25 @@ class UserLanguagePreference:
             updated_at=data.get("updated_at", time.time()),
             metadata=data.get("metadata", {}),
         )
+
+    def __post_init__(self) -> None:
+        """三个语言字段一律归一成枚举成员。
+
+        现役 UI 与 `app_settings.json` 存的是 `zh-CN` 这一族带区域码的标签；
+        不归一就会与 `Language.ZH` 系比较失配（`get_translation` 那侧比的是 `.value`），
+        于是"选了语言却读不到对应文案"——与 §6-140 那条 `from_str` 静默折成 `AUTO`
+        是同一根因的两个出口。
+        """
+        self.primary_language = Language.from_str(
+            self.primary_language.value if isinstance(self.primary_language, Language)
+            else str(self.primary_language))
+        self.fallback_language = Language.from_str(
+            self.fallback_language.value if isinstance(self.fallback_language, Language)
+            else str(self.fallback_language))
+        self.secondary_languages = [
+            Language.from_str(lang.value if isinstance(lang, Language) else str(lang))
+            for lang in (self.secondary_languages or [])
+        ]
 
     def get_preferred_languages(self) -> List[Language]:
         """获取首选语言列表"""
