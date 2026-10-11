@@ -2231,17 +2231,6 @@ tests/unit/api/test_internalFaultIsNotReportedAsVerdict.py
 # 逐文件单跑两次同读数 3 passed（14.55s/13.32s）
 tests/unit/ci/test_noFaultFoldedIntoVerdict.py
 
-# 插件体系退役的防再生判据（`e95d3a76`，§6-131）
-# 退役的是"第三方插件装载"这项能力（唯一实装 `plugin_manager.py:377-384`：`spec_from_file_location`
-# + `sys.modules` 注册 + `exec_module`，另有 semver/权限/生命周期钩子），不是无功能残留——
-# 所以复活它需要一次新的裁定，而不是顺手把目录搬回来。四格分别钉：
-# ① 包不得复活；② 架构文档凡引用该路径处必须带"已退役"标注（"文档声称有、代码没有"比空文件更坏，§6-115 教训）；
-# ③ 记账面 `/v1/plugins` 必须仍在役（前端在用）且 docstring 写明"只记账、不加载"——
-#    行为读数用 200 + 404 校准（路由级鉴权依赖先于路径匹配，未鉴权时一切皆 401，形状读数不可信）；
-# ④ 反空转：②的探测器对未标注的新引用必须抓到、已标注的不许误报。
-# 逐文件单跑两次同读数 4 passed（2.08s/1.63s）
-tests/unit/plugins/test_pluginSystemRetired.py
-
 # §6-136：睡眠闭环那两处缺陷（门面上当必空转 / 363 行按想象写的测试）的常驻判据（`4d774241`）
 # 五条断言的形状都是"调用面 ⊆ 定义面"与"读面 ⊆ 赋值面"——这两种形态能抓的门面不止睡眠这一处：
 # `IdleTimeTracker.adjust_parameters_based_on_sleep_quality()` 读一个从未赋值的 `self._storage`、
@@ -2284,3 +2273,21 @@ tests/media/test_tts_module.py
 # 逐文件单跑落库前后同读数 15 passed / 7 passed。
 tests/language/test_language_models.py
 tests/language/test_language_externalLibraryTags.py
+
+
+# 插件体系按裁定接回后的常驻判据（用户 2026-10-11 改裁「做插件体系并接线」，§6-150）
+# 上一档 `test_pluginSystemRetired.py`（钉"包不得复活"）随裁定撤销，同批换成钉"接线是真的、边界是真的"：
+# `test_pluginLoadIsReal.py` 21 格——真 exec 自证（插件文件模块级副作用落地）、作者基类按 manifest 构造
+# （历史实现 `plugin_class()` 无参构造必 TypeError，而自带 84 例因 mock 掉装载器全绿）、
+# 装载源必须在插件根内（含先 resolve 再判穿越）、远程源 501 不静默、unload 须摘掉 sys.modules、
+# `_PLUGINS` 内存账本不得再长回来、默认插件根落数据根而非 Path.home()。
+# 另三档是包体自身的契约（`test_plugins_modules.py` 36 / `test_base_plugin.py` 9 / `test_plugin_manifest.py` 41）
+# 与端点 HTTP 契约（`test_plugin_api.py` 12）——其中六格本次按新契约改判：旧格断的是
+# `install_plugin(...) is False` 与 mock 装载器返回 MagicMock 后的 `is True`，
+# 两种形态都证不了任何事（一个折成因、一个证不出执行）。
+# 逐文件单跑落库前同读数 21 / 36 / 9 / 41 / 12 passed。
+tests/unit/plugins/test_pluginLoadIsReal.py
+tests/unit/core/test_plugins_modules.py
+tests/unit/test_base_plugin.py
+tests/unit/test_plugin_manifest.py
+tests/unit/test_plugin_api.py
