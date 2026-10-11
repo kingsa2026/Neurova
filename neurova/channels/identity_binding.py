@@ -116,12 +116,22 @@ def listBindings(agentId: str) -> List[Dict[str, Any]]:
     return UserIdentityManager().listBindings(agentId)
 
 
+def observedSenders(agentId: str, channelType: Optional[str] = None) -> List[Dict[str, Any]]:
+    """面板的"可绑的人从哪来"：观察面 + 每格当前绑到谁（同一条 SQL 带出）。"""
+    return UserIdentityManager().listObservedSenders(agentId, channelType)
+
+
+def myBindings(agentId: str, userId: str) -> List[Dict[str, Any]]:
+    """一个平台账号在该 agent 下绑了哪些渠道身份（裁定 ① 的正向读面）。"""
+    return UserIdentityManager().boundChannelUsers(agentId, userId)
+
+
 def revoke(agentId: str, channelType: str, channelUserId: str) -> bool:
     return UserIdentityManager().revokeBinding(agentId, channelType, channelUserId)
 
 
 __all__ = [
     "BIND_COMMAND", "CODE_TTL_SECONDS", "CODE_LENGTH", "parseBindCommand",
-    "bindCommandText", "issueBindingCode", "consumeBindingCode", "listBindings", "revoke",
-    "targetFor",
+    "bindCommandText", "issueBindingCode", "consumeBindingCode", "listBindings",
+    "observedSenders", "myBindings", "revoke", "targetFor",
 ]

@@ -17,8 +17,11 @@
 2. 渠道里那句"绑定 XXXX"就地消费：不进模型、不落会话；
 3. 线程池里读绑定列表（跨线程读，前一条的写方在另一条线程上）；
 4. 绑定生效后同一发送者的**下一轮**轮身份＝平台账号，记忆作用域成对下发；
-5. 网页解绑 → 渠道下一轮回落 `ch:{渠道}:{发送者}`（不是 default 共享桶）；
-6. 非管理员对无主 `default` 的读面 403（门沿本仓既有口径，未新造）；
+4b/4c. 两张读面（观察到的发送者 / 我的绑定）在**线程池**里读到渠道那条线程写入的行——
+    当初撞出 500 的正是这条跨线程形态，批 6 新加的观察表再走一遍；
+5. 网页解绑 → 渠道下一轮回落 `ch:{渠道}:{发送者}`（不是 default 共享桶），且两张读面同步
+    回到"未绑"（留痕行仍在）；
+6. 非管理员对无主 `default` 的绑定面（读 / 观察 / 我的绑定 / 发码 / 解绑）一律 403；
 7. 两张表都落在隔离数据根内（真实 `data/` 零写入）。
 
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) python tests/manual/channelIdentityBinding_batch4.py`
@@ -149,6 +152,25 @@ def main() -> int:
               and agent.memory_manager.scopes == [("ne-u1", "u1")],
               f"calls={len(agent.calls)} meta={ {k: meta.get(k) for k in ('user_id', 'identity_bound')} }")
 
+        # ── [4b] 观察面（批 6 的读接口）：线程池里读到渠道线程写入的那一行 ──
+        r = client.get(f"{base}/identity/observed", params={"agent_id": "kai"})
+        senders = (r.json().get("senders") or []) if r.status_code == 200 else []
+        mine = next((s for s in senders if s["channel_user_id"] == SENDER), None)
+        check("[4b] 观察面列出该发送者并带出显示名与当前归属",
+              r.status_code == 200 and mine is not None
+              and mine["display_name"] == "飞书用户" and mine["bound_user_id"] == "u1"
+              and mine["namespace"] == f"ch:feishu:{SENDER}",
+              f"{r.status_code} {mine}")
+
+        # ── [4c] 我的绑定（裁定 ① 的正向读面）：服务端算出的"我是谁"，不是报文说的 ──
+        r = client.get(f"{base}/identity/bindings/mine", params={"agent_id": "kai"})
+        body = r.json() if r.status_code == 200 else {}
+        check("[4c] 我的绑定面按登录态返回我名下的渠道身份",
+              r.status_code == 200 and body.get("user_id") == "u1"
+              and [(b["channel_type"], b["channel_user_id"]) for b in body.get("bindings") or []]
+              == [("feishu", SENDER)],
+              f"{r.status_code} {body}")
+
         # ── [5] 网页解绑 → 渠道回落渠道命名空间 ───────────────────
         r = client.delete(f"{base}/identity/bindings",
                           params={"agent_id": "kai", "channel_type": "feishu",
@@ -164,11 +186,23 @@ def main() -> int:
         statuses = [row["status"] for row in (r.json().get("bindings") or [])]
         check("[5c] 解绑留痕（revoked 行仍在，答得出这人以前算谁的）",
               statuses == ["revoked"], str(statuses))
+        r = client.get(f"{base}/identity/bindings/mine", params={"agent_id": "kai"})
+        check("[5d] 解绑后「我的绑定」随之清空（两张读面读的是同一处事实）",
+              r.status_code == 200 and (r.json().get("bindings") or []) == [],
+              str(r.json()))
+        r = client.get(f"{base}/identity/observed", params={"agent_id": "kai"})
+        row = next((s for s in (r.json().get("senders") or [])
+                    if s["channel_user_id"] == SENDER), {})
+        check("[5e] 观察面仍在但归属回到未绑",
+              row.get("bound_user_id") is None, str(row))
 
         # ── [6] 非管理员对无主 default 一律 403 ────────────────────
         app.dependency_overrides[auth_u] = lambda: dict(STRANGER)
         codes = {
             "读": client.get(f"{base}/identity/bindings", params={"agent_id": "default"}).status_code,
+            "观察": client.get(f"{base}/identity/observed", params={"agent_id": "default"}).status_code,
+            "我的绑定": client.get(
+                f"{base}/identity/bindings/mine", params={"agent_id": "default"}).status_code,
             "发码": client.post(f"{base}/identity/bindings/code",
                                 json={"agent_id": "default", "channel_type": "feishu"}).status_code,
             "解绑": client.delete(f"{base}/identity/bindings", params={

@@ -21,7 +21,8 @@ vi.mock('@/api', () => ({
 
 import api from '@/api'
 import {
-  issueChannelBindingCode, listChannelIdentityBindings, revokeChannelIdentityBinding,
+  issueChannelBindingCode, listChannelIdentityBindings, listMyChannelIdentityBindings,
+  listObservedChannelSenders, revokeChannelIdentityBinding,
 } from '@/api/modules/channel-configs'
 
 const get = api.get as unknown as ReturnType<typeof vi.fn>
@@ -58,6 +59,20 @@ describe('请求形状', () => {
       params: { agent_id: 'kai', channel_type: 'feishu', channel_user_id: 'ou_9' },
     })
   })
+
+  it('批 6 两面读接口：观察面可按渠道收窄，"我的绑定"只带 agent', async () => {
+    await listObservedChannelSenders('kai', 'feishu')
+    expect(get).toHaveBeenLastCalledWith(`${BASE}/identity/observed`,
+      { params: { agent_id: 'kai', channel_type: 'feishu' } })
+
+    await listObservedChannelSenders('kai')
+    expect(get).toHaveBeenLastCalledWith(`${BASE}/identity/observed`,
+      { params: { agent_id: 'kai' } })
+
+    await listMyChannelIdentityBindings('kai')
+    expect(get).toHaveBeenLastCalledWith(`${BASE}/identity/bindings/mine`,
+      { params: { agent_id: 'kai' } })
+  })
 })
 
 /**
@@ -73,6 +88,8 @@ describe('与后端路由逐字同形', () => {
     ['列表', 'get', '"/identity/bindings"'],
     ['发码', 'post', '"/identity/bindings/code"'],
     ['解绑', 'delete', '"/identity/bindings"'],
+    ['观察面', 'get', '"/identity/observed"'],
+    ['我的绑定', 'get', '"/identity/bindings/mine"'],
   ])('%s 端点在后端仍在（%s %s）', (_name, method, literal) => {
     expect(backend, `后端 @router.${method}(${literal}) 消失或改名`)
       .toContain(`@router.${method}(${literal}`)
@@ -80,5 +97,11 @@ describe('与后端路由逐字同形', () => {
 
   it('后端不存在"指定账号去绑"的 POST 入口（前端也就无从带 user_id）', () => {
     expect(backend).not.toContain('@router.post("/identity/bindings",')
+  })
+
+  it('观察面在后端也没有写入口（列进面板不等于取得绑定授权）', () => {
+    expect(backend).not.toContain('@router.post("/identity/observed"')
+    expect(backend).not.toContain('@router.put("/identity/observed"')
+    expect(backend).not.toContain('@router.delete("/identity/observed"')
   })
 })

@@ -56,6 +56,32 @@
           </tr>
         </tbody>
       </table>
+
+      <!-- 观察面（批 6）：面板要列出"可绑的人"只有服务端这一面——人在自己那个渠道里
+           抄不到 `ou_xxx`。这里只读：列进这张表不构成任何归属变化，绑定仍只能由
+           那个渠道里那句带码的消息完成（持有证明）。 -->
+      <div class="nr-cid-obs" data-testid="identity-observed">
+        <p class="nr-cid-sub">{{ t('channel.identityObservedTitle') }}</p>
+        <div v-if="observed.length === 0 && !errorText" class="nr-cid-empty"
+             data-testid="identity-observed-empty">{{ t('channel.identityObservedEmpty') }}</div>
+        <ul v-else class="nr-cid-obs-list">
+          <li v-for="row in observed" :key="row.channel_type + ':' + row.channel_user_id"
+              class="nr-cid-obs-row" data-testid="identity-observed-row">
+            <span class="nr-cid-obs-who">{{ row.display_name || row.channel_user_id }}</span>
+            <span class="nr-cid-obs-id">{{ row.channel_type }} · {{ row.channel_user_id }}</span>
+            <a-tag :color="row.bound_user_id ? (isMine(row) ? 'green' : 'orange') : 'default'"
+                   data-testid="identity-observed-state">{{ stateText(row) }}</a-tag>
+          </li>
+        </ul>
+      </div>
+
+      <!-- "我的绑定"取自服务端算出的那一面（响应里带着我这格的 user_id），
+           前端不自拼身份——拼错了按钮就打在最不该动的行上。 -->
+      <div v-if="mine.length > 0" class="nr-cid-mine" data-testid="identity-mine">
+        <span class="nr-cid-sub">{{ t('channel.identityMineTitle') }}</span>
+        <a-tag v-for="b in mine" :key="b.channel_type + b.channel_user_id"
+               data-testid="identity-mine-chip">{{ b.channel_type }} · {{ b.channel_user_id }}</a-tag>
+      </div>
     </a-spin>
   </section>
 </template>
@@ -75,8 +101,9 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GlassButton from '@/components/GlassButton.vue'
 import {
-  issueChannelBindingCode, listChannelIdentityBindings, revokeChannelIdentityBinding,
-  type ChannelBindingCode, type ChannelIdentityBinding,
+  issueChannelBindingCode, listChannelIdentityBindings, listMyChannelIdentityBindings,
+  listObservedChannelSenders, revokeChannelIdentityBinding,
+  type ChannelBindingCode, type ChannelIdentityBinding, type ObservedChannelSender,
 } from '@/api/modules/channel-configs'
 
 const props = defineProps<{ agentId: string; channelTypes: string[] }>()
@@ -86,12 +113,26 @@ const { t } = useI18n()
 const loading = ref(false)
 const issuing = ref(false)
 const rows = ref<ChannelIdentityBinding[]>([])
+const observed = ref<ObservedChannelSender[]>([])
+const mine = ref<{ channel_type: string; channel_user_id: string }[]>([])
+const myUserId = ref('')
 const issued = ref<ChannelBindingCode | null>(null)
 const errorText = ref('')
 const channelType = ref('')
 
 const channelOptions = computed(() => props.channelTypes.map((c) => ({ value: c, label: c })))
 const visibleRows = computed(() => rows.value)
+
+/** "是不是我的"只比服务端给的 user_id，不读前端登录态缓存（两份身份迟早说两种话）。 */
+function isMine(row: ObservedChannelSender): boolean {
+  return !!row.bound_user_id && row.bound_user_id === myUserId.value
+}
+
+function stateText(row: ObservedChannelSender): string {
+  if (!row.bound_user_id) return t('channel.identityObservedUnbound')
+  if (isMine(row)) return t('channel.identityObservedBoundMe')
+  return t('channel.identityObservedBoundOther', { user: row.bound_user_id })
+}
 
 function pickChannel(value: unknown) {
   channelType.value = String(value ?? '')
@@ -102,18 +143,31 @@ function pickChannel(value: unknown) {
 async function load() {
   loading.value = true
   try {
-    const res = await listChannelIdentityBindings(props.agentId)
-    const list = (res as any)?.bindings ?? (res as any)?.data?.bindings ?? []
-    rows.value = Array.isArray(list) ? list : []
+    const [bindingsRes, observedRes, mineRes] = await Promise.all([
+      listChannelIdentityBindings(props.agentId),
+      listObservedChannelSenders(props.agentId),
+      listMyChannelIdentityBindings(props.agentId),
+    ])
+    rows.value = asList((bindingsRes as any)?.bindings ?? (bindingsRes as any)?.data?.bindings)
+    observed.value = asList((observedRes as any)?.senders ?? (observedRes as any)?.data?.senders)
+    const mineBody = (mineRes as any)?.data ?? mineRes
+    mine.value = asList(mineBody?.bindings)
+    myUserId.value = String(mineBody?.user_id ?? '')
     errorText.value = ''
   } catch (e: any) {
     // 403（非属主/非管理员）要说"无权"，不能退化成"还没有绑定"——后者会把
     // 权限问题伪装成空态，用户永远想不到去问属主要权限。
     rows.value = []
+    observed.value = []
+    mine.value = []
     errorText.value = failureText(e)
   } finally {
     loading.value = false
   }
+}
+
+function asList(value: unknown): any[] {
+  return Array.isArray(value) ? value : []
 }
 
 function failureText(e: any): string {
@@ -171,4 +225,13 @@ watch(() => props.agentId, () => { issued.value = null; load() }, { immediate: t
 .nr-cid-table td { padding: 8px; color: var(--nr-text-primary); border-top: 1px solid var(--nr-border-subtle, rgba(255, 255, 255, 0.06)); }
 .nr-cid-table tr.revoked td { opacity: 0.55; }
 .nr-cid-act { text-align: right; }
+.nr-cid-sub { margin: 16px 0 6px; font-size: 12px; color: var(--nr-text-secondary); }
+.nr-cid-obs-list { margin: 0; padding: 0; list-style: none; }
+.nr-cid-obs-row {
+  display: flex; align-items: center; gap: 10px; padding: 6px 0;
+  border-top: 1px solid var(--nr-border-subtle, rgba(255, 255, 255, 0.06)); font-size: 12px;
+}
+.nr-cid-obs-who { color: var(--nr-text-primary); font-weight: 600; }
+.nr-cid-obs-id { color: var(--nr-text-tertiary); }
+.nr-cid-mine { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 </style>

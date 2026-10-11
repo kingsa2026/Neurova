@@ -48,6 +48,25 @@ _DDL_INDEX_USER = (
     "CREATE INDEX IF NOT EXISTS idx_cub_user ON channel_user_bindings(user_id, agent_id)"
 )
 
+# 观察面与绑定面是两件事：绑定行＝"这个渠道身份算谁"的**决定**（可解绑、要留痕），
+# 观察行＝"这个 agent 的这条渠道里见到过谁"（无决定语义，只是面板要能列出可绑的人）。
+# 混进同一张表会让"revoked 留痕"和"见过但没绑"两种状态互相污染。
+_DDL_OBSERVED = """
+CREATE TABLE IF NOT EXISTS channel_observed_senders (
+    agent_id TEXT NOT NULL,
+    channel_type TEXT NOT NULL,
+    channel_user_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    display_name TEXT,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    PRIMARY KEY (agent_id, channel_type, channel_user_id)
+)
+"""
+_DDL_INDEX_OBSERVED = (
+    "CREATE INDEX IF NOT EXISTS idx_cos_agent ON channel_observed_senders(agent_id, channel_type)"
+)
+
 
 class UserIdentityManager:
     """渠道身份绑定的唯一存储（DCL 单例 + `RLock`，与 `qclaw_binding_model` 同形态）。"""
@@ -79,6 +98,8 @@ class UserIdentityManager:
             conn = self._getConn()
             conn.execute(_DDL)
             conn.execute(_DDL_INDEX_USER)
+            conn.execute(_DDL_OBSERVED)
+            conn.execute(_DDL_INDEX_OBSERVED)
             conn.commit()
 
     def _getConn(self) -> sqlite3.Connection:
@@ -248,6 +269,74 @@ class UserIdentityManager:
                 " ORDER BY channel_type, channel_user_id",
                 (str(agentId), str(userId)),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def observeSender(self, agentId: str, channelType: str, channelUserId: str,
+                      displayName: Optional[str] = None) -> Dict[str, Any]:
+        """登记"这个 agent 的这条渠道里见到过这个发送者"（工单批 6，裁定「按渠道查人要建」）。
+
+        写点在渠道路径上（每条入站消息一次），读点是控制台的绑定面板——没有这一面，
+        面板就只能让用户自己抄 `ou_xxx` 这种平台内部 ID，而人抄不到自己的 open_id。
+
+        命名空间走 `registerUser()`（同一出处），不在这里再拼一次 `ch:` 串。
+        重复观察只推进 `last_seen` 与显示名，`first_seen` 不动（面板要能答"什么时候见过"）。
+        """
+        agentId = str(agentId or "").strip()
+        channelType = str(channelType or "").strip()
+        channelUserId = str(channelUserId or "").strip()
+        if not (agentId and channelType and channelUserId):
+            raise ValueError("观察登记需要 agent/渠道/渠道发送者三键")
+        identity = self.registerUser(channelType, channelUserId, displayName)
+
+        now = time.time()
+        with self._lock:
+            conn = self._getConn()
+            conn.execute(
+                """
+                INSERT INTO channel_observed_senders
+                    (agent_id, channel_type, channel_user_id, namespace,
+                     display_name, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id, channel_type, channel_user_id) DO UPDATE SET
+                    display_name = COALESCE(excluded.display_name, display_name),
+                    last_seen = excluded.last_seen
+                """,
+                (agentId, channelType, channelUserId, identity.user_id,
+                 displayName, now, now),
+            )
+            conn.commit()
+        return {
+            "agent_id": agentId,
+            "channel_type": channelType,
+            "channel_user_id": channelUserId,
+            "namespace": identity.user_id,
+            "display_name": displayName,
+        }
+
+    def listObservedSenders(self, agentId: str,
+                            channelType: Optional[str] = None) -> List[Dict[str, Any]]:
+        """该 agent 观察到的渠道发送者，并带出它当前绑到谁（面板据此分"已绑/可绑"）。
+
+        `bound_user_id` 来自同一张绑定表的 active 行——面板不必再猜，也不许前端自己
+        拿两份数据对（对错了就会把已绑的人再摆成"绑给我自己"）。
+        """
+        sql = (
+            "SELECT o.agent_id, o.channel_type, o.channel_user_id, o.namespace,"
+            " o.display_name, o.first_seen, o.last_seen,"
+            " b.user_id AS bound_user_id, b.neuser_id AS bound_neuser_id"
+            " FROM channel_observed_senders o"
+            " LEFT JOIN channel_user_bindings b"
+            " ON b.agent_id = o.agent_id AND b.channel_type = o.channel_type"
+            " AND b.channel_user_id = o.channel_user_id AND b.status = 'active'"
+            " WHERE o.agent_id = ?"
+        )
+        args: List[Any] = [str(agentId)]
+        if channelType:
+            sql += " AND o.channel_type = ?"
+            args.append(str(channelType))
+        sql += " ORDER BY o.last_seen DESC LIMIT 200"
+        with self._lock:
+            rows = self._getConn().execute(sql, tuple(args)).fetchall()
         return [dict(row) for row in rows]
 
     def registerUser(self, channel, channelUserId: str,

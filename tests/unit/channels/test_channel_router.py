@@ -455,3 +455,36 @@ async def test_chatMentioningBindingStillGoesToAgent(manager, tmp_path, codesInM
 
     assert len(agent.calls) == 1, agent.calls
     assert reply == ["pong"]
+
+
+# ── 批 6：观察面写侧（"按渠道查人"的读数从这一行开始长）──
+
+@pytest.mark.asyncio
+async def testInboundMessageRegistersObservedSender(manager, tmp_path):
+    """每条入站都登记发送者：面板要列"可绑的人"只有这一个来源（用户抄不到 open_id）。"""
+    mgr = _bindManager(tmp_path)
+    agent = FakeAgent("ok")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg("你好", sender="ou_77"))
+
+    rows = mgr.listObservedSenders("default")
+    assert [(r["channel_user_id"], r["display_name"]) for r in rows] == [("ou_77", "ou_77")]
+    assert rows[0]["namespace"] == "ch:feishu:ou_77"
+    assert rows[0]["bound_user_id"] is None, "登记不等于绑定"
+
+
+@pytest.mark.asyncio
+async def testBindCodeMessageStillRegistersSender(manager, tmp_path, codesInMemory):
+    """消费绑定码那条消息也要登记——否则"绑上之后"的人反而从观察面消失。"""
+    from neurova.channels.identity_binding import bindCommandText, issueBindingCode
+
+    mgr = _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    agent = FakeAgent("ok")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg(bindCommandText(code), sender="ou_88"))
+
+    row = next(r for r in mgr.listObservedSenders("default") if r["channel_user_id"] == "ou_88")
+    assert row["bound_user_id"] == "u-alice"

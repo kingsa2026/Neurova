@@ -26,6 +26,8 @@ vi.mock('@/api/modules/channel-configs', () => ({
   // 渠道身份绑定面板（工单 2026-10-10 批 4b）：桩面必须跟着真模块面长——
   // 缺键时面板会静默走进错误分支，页面判据看着全绿却没人真取过数。
   listChannelIdentityBindings: vi.fn().mockResolvedValue({ bindings: [] }),
+  listObservedChannelSenders: vi.fn().mockResolvedValue({ senders: [] }),
+  listMyChannelIdentityBindings: vi.fn().mockResolvedValue({ user_id: 'u1', bindings: [] }),
   issueChannelBindingCode: vi.fn().mockResolvedValue({ code: '123456', command: '绑定 123456', expires_in: 600, bound_user_id: 'u1' }),
   revokeChannelIdentityBinding: vi.fn().mockResolvedValue({ revoked: true }),
   getChannelQrcode: vi.fn().mockResolvedValue({ qrcode_img: '', poll_token: '' }),

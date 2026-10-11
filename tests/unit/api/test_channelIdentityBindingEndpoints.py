@@ -207,3 +207,67 @@ class TestRevoke:
 
         assert r.status_code == 403, r.text
         assert bindings.resolveUserId("kai", "feishu", "ou_9") == "u1", "门在副作用之前"
+
+
+class TestObservedReadSurface:
+    """批 6 的两面读接口：观察到的发送者 + 我的绑定。刻意不新增任何写入口。"""
+
+    def test_observed_lists_senders_and_their_current_owner(self, env):
+        client, app, bindings = env
+        bindings.observeSender("kai", "feishu", "ou_9", displayName="张三")
+        bindings.observeSender("kai", "feishu", "ou_10")
+        bindings.bindIdentity("kai", "feishu", "ou_9", "u1", neuserId="ne-u1")
+        _as(app, OWNER)
+
+        r = client.get(f"{BASE}/identity/observed", params={"agent_id": "kai"})
+
+        assert r.status_code == 200, r.text
+        rows = {row["channel_user_id"]: row for row in r.json()["senders"]}
+        assert set(rows) == {"ou_9", "ou_10"}
+        assert rows["ou_9"]["bound_user_id"] == "u1" and rows["ou_9"]["display_name"] == "张三"
+        assert rows["ou_10"]["bound_user_id"] is None
+
+    def test_observed_can_narrow_by_channel(self, env):
+        client, app, bindings = env
+        bindings.observeSender("kai", "feishu", "ou_9")
+        bindings.observeSender("kai", "telegram", "tg_1")
+        _as(app, OWNER)
+
+        r = client.get(f"{BASE}/identity/observed",
+                       params={"agent_id": "kai", "channel_type": "telegram"})
+
+        assert [row["channel_user_id"] for row in r.json()["senders"]] == ["tg_1"]
+
+    def test_observed_is_gated_like_the_rest(self, env):
+        client, app, _ = env
+        _as(app, STRANGER)
+
+        r = client.get(f"{BASE}/identity/observed", params={"agent_id": "default"})
+
+        assert r.status_code == 403, r.text
+
+    def test_listing_observed_grants_no_binding_authority(self, env):
+        """负向门：把某人列进观察面**不产生**归属变化——绑定只有渠道内带码那一条路。"""
+        client, app, bindings = env
+        bindings.observeSender("kai", "feishu", "ou_stranger", displayName="李四")
+        _as(app, ADMIN)
+
+        listed = client.get(f"{BASE}/identity/observed", params={"agent_id": "kai"}).json()["senders"]
+
+        assert [row for row in listed if row["channel_user_id"] == "ou_stranger"]
+        assert bindings.resolveTurnIdentity("kai", "feishu", "ou_stranger")["user_id"] == (
+            "ch:feishu:ou_stranger"), "列进面板就等于改归属，面板就成了越权入口"
+
+    def test_mine_returns_callers_bindings_not_others(self, env):
+        client, app, bindings = env
+        bindings.bindIdentity("kai", "feishu", "ou_9", "u1", neuserId="ne-u1")
+        bindings.bindIdentity("kai", "telegram", "tg_1", "u2", neuserId="ne-u2")
+        _as(app, OWNER)
+
+        r = client.get(f"{BASE}/identity/bindings/mine", params={"agent_id": "kai"})
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["user_id"] == "u1", "读的是登录态，不是报文说的谁"
+        assert [(b["channel_type"], b["channel_user_id"]) for b in body["bindings"]] == [
+            ("feishu", "ou_9")]

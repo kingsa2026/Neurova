@@ -15,10 +15,15 @@ const listChannelIdentityBindings = vi.fn()
 const issueChannelBindingCode = vi.fn()
 const revokeChannelIdentityBinding = vi.fn()
 
+const listObservedChannelSenders = vi.fn().mockResolvedValue({ senders: [] })
+const listMyChannelIdentityBindings = vi.fn().mockResolvedValue({ user_id: 'u1', bindings: [] })
+
 vi.mock('@/api/modules/channel-configs', () => ({
   listChannelIdentityBindings: (...a: unknown[]) => listChannelIdentityBindings(...a),
   issueChannelBindingCode: (...a: unknown[]) => issueChannelBindingCode(...a),
   revokeChannelIdentityBinding: (...a: unknown[]) => revokeChannelIdentityBinding(...a),
+  listObservedChannelSenders: (...a: unknown[]) => listObservedChannelSenders(...a),
+  listMyChannelIdentityBindings: (...a: unknown[]) => listMyChannelIdentityBindings(...a),
 }))
 
 import { mount, flushPromises } from '@vue/test-utils'
@@ -147,6 +152,8 @@ describe('ChannelIdentityPanel — 权限态不伪装成空态', () => {
 
     expect(wrapper.find('[data-testid="identity-error"]').text()).toContain('无权查看')
     expect(wrapper.find('[data-testid="identity-empty"]').exists()).toBe(false)
+    // 观察面同属这一次读取：读不到时也不能摆一句"还没收到过消息"
+    expect(wrapper.find('[data-testid="identity-observed-empty"]').exists()).toBe(false)
   })
 
   it('真的没有绑定时才给空态，且不出错误条', async () => {
@@ -156,5 +163,78 @@ describe('ChannelIdentityPanel — 权限态不伪装成空态', () => {
 
     expect(wrapper.find('[data-testid="identity-empty"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="identity-error"]').exists()).toBe(false)
+  })
+})
+
+describe('ChannelIdentityPanel — 观察面与「我的绑定」（批 6）', () => {
+  const OBSERVED = [
+    { agent_id: 'kai', channel_type: 'feishu', channel_user_id: 'ou_me', namespace: 'ch:feishu:ou_me',
+      display_name: '我自己', first_seen: 1, last_seen: 2, bound_user_id: 'u1', bound_neuser_id: 'ne-u1' },
+    { agent_id: 'kai', channel_type: 'feishu', channel_user_id: 'ou_other', namespace: 'ch:feishu:ou_other',
+      display_name: '李四', first_seen: 1, last_seen: 2, bound_user_id: 'u9', bound_neuser_id: 'ne-u9' },
+    { agent_id: 'kai', channel_type: 'telegram', channel_user_id: 'tg_new', namespace: 'ch:telegram:tg_new',
+      display_name: null, first_seen: 1, last_seen: 2, bound_user_id: null, bound_neuser_id: null },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listChannelIdentityBindings.mockResolvedValue({ bindings: [] })
+    listObservedChannelSenders.mockResolvedValue({ senders: OBSERVED })
+    listMyChannelIdentityBindings.mockResolvedValue({
+      user_id: 'u1', bindings: [{ channel_type: 'feishu', channel_user_id: 'ou_me' }],
+    })
+  })
+
+  it('首屏把三个读面各取一次（观察面与绑定面同属这一屏）', async () => {
+    mountPanel()
+    await flushPromises()
+
+    expect(listChannelIdentityBindings).toHaveBeenCalledWith('kai')
+    expect(listObservedChannelSenders).toHaveBeenCalledWith('kai')
+    expect(listMyChannelIdentityBindings).toHaveBeenCalledWith('kai')
+  })
+
+  it('三态各自出声：未绑 / 已绑到我 / 已绑到他人', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const states = wrapper.findAll('[data-testid="identity-observed-state"]').map((n) => n.text())
+    expect(states).toEqual(['已绑到我', '已绑到 u9', '未绑定'])
+  })
+
+  it('「是不是我的」比的是服务端给的 user_id，不读前端登录态', async () => {
+    listMyChannelIdentityBindings.mockResolvedValue({
+      user_id: 'u9', bindings: [{ channel_type: 'feishu', channel_user_id: 'ou_other' }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const states = wrapper.findAll('[data-testid="identity-observed-state"]').map((n) => n.text())
+    // 同一批观察数据，只换"我是谁"这一处来源 ⇒ 标签必须跟着换
+    expect(states).toEqual(['已绑到 u1', '已绑到我', '未绑定'])
+  })
+
+  it('我的绑定栏只在有绑定时出现', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="identity-mine-chip"]').map((n) => n.text()))
+      .toEqual(['feishu · ou_me'])
+
+    listMyChannelIdentityBindings.mockResolvedValue({ user_id: 'u1', bindings: [] })
+    listChannelIdentityBindings.mockResolvedValue({ bindings: [] })
+    const empty = mountPanel()
+    await flushPromises()
+    expect(empty.find('[data-testid="identity-mine"]').exists()).toBe(false)
+  })
+
+  it('观察面为空时给可归因的空态，而不是隐藏整栏', async () => {
+    listObservedChannelSenders.mockResolvedValue({ senders: [] })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="identity-observed"]').exists(),
+      '观察面整个消失——用户读不到"这里以后会有内容"还是"这功能没接"').toBe(true)
+    expect(wrapper.find('[data-testid="identity-observed-empty"]').text())
+      .toContain('还没收到过消息')
   })
 })
