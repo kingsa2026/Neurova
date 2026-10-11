@@ -608,6 +608,21 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     except Exception as _boot_err:  # noqa: BLE001 - 引导失败不阻断启动
         logger.warning("bootstrap_admin.ini 消费异常（忽略）: %s", _boot_err)
 
+    # 插件 HTTP 面：把运行中的 app 交给挂载单点，并回放「已经过人第二次授权」的插件路由。
+    # 授权落盘在数据根 plugins/permissions.json（人的决定不随进程走），所以这里必须真的重挂一次；
+    # 不接这条，`routes_mounted` 就永远是 false，缺口也就永远不会被发现。
+    # 失败不阻断启动（fail-soft），但成因必须逐条落日志——静默跳过等于静默撤权。
+    try:
+        from neurova.plugins import plugin_route_mount
+
+        plugin_route_mount.setPluginApp(app)
+        _mountOutcome = plugin_route_mount.startupMountPass()
+        if _mountOutcome.get("refused"):
+            logger.warning("插件路由启动重挂：挂载 %s 个，拒挂/跳过 %s（成因见日志）",
+                           _mountOutcome.get("mounted", []), _mountOutcome["refused"])
+    except Exception as _pluginMountErr:  # noqa: BLE001 - 插件面不阻断主栈启动
+        logger.error("插件路由挂载装配异常（忽略，插件 HTTP 面将不可用）: %s", _pluginMountErr)
+
     logger.info("Routes registered")
 
 

@@ -48,7 +48,9 @@ def _writePlugin(root, name, *, body=None, manifest_extra=None):
     pdir = root / name
     pdir.mkdir(parents=True, exist_ok=True)
     manifest = {"name": name, "version": "1.0.0", "description": "probe", "author": "qa",
-                "entry_point": "main.py", "dependencies": [], "permissions": []}
+                "entry_point": "main.py", "dependencies": [],
+                # 键名按 `PluginManifest.from_dict` 的口径写：`permissions` 是一份没人读的装饰
+                "required_permissions": []}
     manifest.update(manifest_extra or {})
     (pdir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (pdir / "main.py").write_text(body or "MARKER = 1\n", encoding="utf-8")
@@ -217,9 +219,11 @@ class TestFailuresAreNamedNotFolded:
             "uninstall 把插件目录也删了——销毁用户文件不在 P1 的授权面里")
 
 
-class TestP1BoundaryIsHonest:
+class TestLoadingDoesNotImplyRoutesAreLive:
     def testDeclaredEndpointsAreReportedAsNotMounted(self, client):
-        """P1 只做装载，不挂路由；读数必须自己说清，别让人以为插件路由已生效。"""
+        """装载 ≠ 对外开面。P2 之后挂载真的存在了，但它是**第二次授权**
+        （`POST /{id}/routes/mount` + 逐项确认），所以装载完的读数仍必须是
+        「没挂」并点名卡在哪一步——否则 `loaded` 又会被读成「已生效」。"""
         _install(client, "routes", body=_BASE_SUBCLASS,
                  manifest_extra={"api_endpoints": [{"method": "GET", "path": "/probe"}]})
         client.post("/api/v1/plugins/routes/enable")

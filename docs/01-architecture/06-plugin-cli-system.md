@@ -102,6 +102,16 @@ class PluginPermission(str, Enum):
     ADMIN = "admin"                    # 管理员权限
 ```
 
+> 这八项**有效力的口径只有一处定义**：`neurova/plugins/plugin_permissions.py` 的
+> `PERMISSION_MODEL`（每档写明授予后放行什么、由哪个框架点强制、属哪一档）。本节只作导读：
+>
+> - `framework_enforced`（`read:events` / `emit:events`）——框架真有中介点，未确认即当场拒；
+> - `disclosed_only`（`http:request` / `read:files` / `write:files` / `network:access`）——
+>   框架拦不住（装载即进程内任意代码执行），授予的含义是"这份声明经人看过并签字"，
+>   外加它参与聚合挂载门与审计留痕，**不是隔离**；
+> - `never_grantable`（`execute:commands` / `admin`）——本批不开放授予；声明这两项之一的插件
+>   可以装载，但因为"声明 ⊆ 已确认"永远做不到，它**永远挂不上 HTTP 路由**。
+
 ### 2.3 插件清单 (PluginManifest)
 
 ```python
@@ -536,8 +546,9 @@ sensitive_patterns = [
   "api_endpoints": [
     {
       "method": "GET",
-      "path": "/api/my-plugin/status",
-      "handler": "get_status"
+      "path": "status",
+      "handler_name": "get_status",
+      "description": "插件自检"
     }
   ],
   "frontend_resources": [
@@ -549,6 +560,11 @@ sensitive_patterns = [
   "license": "MIT"
 }
 ```
+
+> 清单里 `api_endpoints[].path` 写的是**本插件命名空间内的相对路径**（`status` 而不是
+> `/api/my-plugin/status`）：最终路径固定为 `/api/v1/plugin-api/{plugin_id}/{path}`，前缀由框架定。
+> 绝对声明、`..`、带 `?`/`#` 的声明一律被拒（`path_out_of_namespace`），插件压不到核心路由上。
+> handler 键 `handler_name` 与 `handler` 两种拼写在 `APIEndpoint.from_dict` 一处归一。
 
 ### 6.2 插件目录结构
 
@@ -704,10 +720,10 @@ Content-Type: application/json
 
 ### 8.3 安全考虑
 
-1. **插件签名**：验证插件来源和完整性
-2. **权限控制**：限制插件可访问的资源
-3. **沙箱执行**：在隔离环境中运行插件
-4. **审计日志**：记录所有插件操作
+1. **插件签名**：验证插件来源和完整性（**未落地**，属 P3 的供应链校验；今天只接受插件根内的目录，远程源直接 501）
+2. **权限控制**：清单逐项声明、admin 逐项确认，未确认即拒（事件总线两档当场拒；HTTP 面走聚合门）
+3. **装载与挂载边界**：装载源必须在插件根内；插件路由只能落在 `/api/v1/plugin-api/{id}/` 且一律带身份门——**这不是沙箱**，能装载即能在进程内执行任意代码
+4. **审计日志**：授予/撤销与挂载/摘除都进既有审计面（`PERMISSION_CHANGE` / `SECURITY_EVENT`）
 5. **CLI 命令白名单**：只允许安全命令执行
 6. **输出脱敏**：自动过滤敏感信息
 

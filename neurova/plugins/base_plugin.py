@@ -11,6 +11,7 @@ import typing
 from abc import ABC, abstractmethod
 
 from neurova.core.logger import LogLevel
+from neurova.plugins import plugin_permissions
 from neurova.plugins.plugin_manifest import (
     PluginManifest,
     PluginPermission,
@@ -57,11 +58,17 @@ class APIEndpoint:
 
     @classmethod
     def from_dict(cls, data: typing.Dict[str, typing.Any]) -> "APIEndpoint":
-        """从字典创建"""
+        """从字典创建（清单里那份端点声明的唯一入口形状）。
+
+        handler 键同时接受 `handler_name` 与 `handler`：前者是本仓代码一直用的名字，
+        后者是 `docs/01-architecture/06-plugin-cli-system.md` 示例里写的。两种拼写在
+        **这一处**归一（不是两处各认各的，教义第 6 条）；归一之后取不到即
+        `handler_name=""`，由挂载侧按 `handler_missing` 响亮拒绝，不静默跳过。
+        """
         return cls(
             method=data.get("method", "GET"),
             path=data.get("path", ""),
-            handler_name=data.get("handler_name", ""),
+            handler_name=data.get("handler_name") or data.get("handler", ""),
             description=data.get("description", ""),
             tags=data.get("tags", []),
         )
@@ -214,38 +221,47 @@ class BasePlugin(ABC):
         ...
 
     def subscribe(self, event_name: str, handler: typing.Callable) -> None:
-        """订阅事件
+        """订阅事件（须 `read:events` 已被逐项确认）。
 
-        Args:
-            event_name: 事件名称
-            handler: 事件处理函数
+        判定顺序是刻意的：**先过权限门，再看总线在不在**。反过来的话，
+        「忘了给插件设 event_bus」会把一次越权调用降成一条 warning，
+        调用方拿到 None 继续跑（§6-126 那一族：把不同故障折成同一个结论）。
         """
+        self._requirePermission(PluginPermission.READ_EVENTS)
         if self._event_bus:
             self._event_bus.subscribe(event_name, handler)
         else:
             self._logger.warning("事件总线未设置，无法订阅事件: %s", event_name)
 
     def unsubscribe(self, event_name: str, handler: typing.Callable) -> None:
-        """取消订阅事件
-
-        Args:
-            event_name: 事件名称
-            handler: 事件处理函数
-        """
+        """取消订阅事件（同 `read:events`——退订也是对他方事件面的操作）。"""
+        self._requirePermission(PluginPermission.READ_EVENTS)
         if self._event_bus:
             self._event_bus.unsubscribe(event_name, handler)
 
     def publish_event(self, event_name: str, data: typing.Any = None) -> None:
-        """发布事件
-
-        Args:
-            event_name: 事件名称
-            data: 事件数据
-        """
+        """发布事件（须 `emit:events` 已被逐项确认）。"""
+        self._requirePermission(PluginPermission.EMIT_EVENTS)
         if self._event_bus:
             self._event_bus.publish(event_name, data)
         else:
             self._logger.warning("事件总线未设置，无法发布事件: %s", event_name)
+
+    def _requirePermission(self, permission: PluginPermission) -> None:
+        """框架中介点的判定单点：未确认即抛 `PluginError("permission_not_granted")`。
+
+        读的是 `plugin_permissions` 模块属性（不是 import 进来的名字副本），
+        所以测试可以替换 `getPermissionStore` 而不必动文件落点。
+        """
+        if plugin_permissions.permissionIsGranted(self.plugin_id, permission):
+            return
+        from neurova.plugins.plugin_errors import PluginError
+
+        raise PluginError(
+            "permission_not_granted",
+            "插件 %s 未被授予 %s（该权限档位：%s）"
+            % (self.plugin_id, permission.value,
+               plugin_permissions.PERMISSION_MODEL[permission].tier.value))
 
     def log(self, level: LogLevel, message: str, **kwargs) -> None:
         """记录日志
