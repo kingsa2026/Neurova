@@ -47,8 +47,12 @@ class TestLanguageEnum(unittest.TestCase):
         """测试字符串转换"""
         self.assertEqual(Language.from_str("en"), Language.ENGLISH)
         self.assertEqual(Language.from_str("zh"), Language.CHINESE)
-        # 未知语言回退到 AUTO
-        self.assertEqual(Language.from_str("invalid"), Language.AUTO)
+        # 未知语言**不再被折进 AUTO**（台账 §6-140）：`AUTO` 是"自动检测"这个合法成员值，
+        # 原先的兜底让"我没看懂这个码"借它背书，写进译文库的 `zh-CN` 因此落错桶、永远读不回来。
+        self.assertIsNone(Language.normalizeTag("invalid"))
+        self.assertRaises(ValueError, Language.from_str, "invalid")
+        # 区域后缀归一是仓内实际流通口径（前端 11 份 locale、settings 存的就是 `zh-CN`）
+        self.assertEqual(Language.from_str("zh-CN"), Language.CHINESE)
 
     def test_language_auto(self):
         """测试 AUTO 语言"""

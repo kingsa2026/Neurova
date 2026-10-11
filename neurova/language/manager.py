@@ -113,7 +113,7 @@ class LanguageManager:
                 "goodbye": {
                     "zh": "感谢使用，再见！",
                     "en": "Thank you for using Neurova, goodbye!",
-                    "ja": "ご利用ありがとうございまNetherlands、さようなら！",
+                    "ja": "ご利用いただき、ありがとうございました。さようなら！",
                     "ko": "이용해 주셔서 감사합니다, 안녕히 가세요!",
                 },
             },
@@ -198,7 +198,13 @@ class LanguageManager:
             raise
 
     def _apply_external_translations(self, namespace: str, data: Dict[str, Any]) -> None:
-        """应用外部翻译数据"""
+        """应用外部翻译数据。
+
+        单个不识别的语言码**只跳它自己**，并点名到日志——原先它是被折成 `AUTO` 存下
+        （污染库），而 `from_str` 改成会报错之后，若不在此逐条处置，一个坏码就会让
+        整份文件在装载面被丢掉（`_load_translations_from_resource` 抛、外层只 warning），
+        内存里还可能已经写进了半截——那是比污染更难查的第三种形态。
+        """
         if not isinstance(data, dict):
             return
 
@@ -210,52 +216,73 @@ class LanguageManager:
                 self._translations[namespace][key] = {}
 
             for lang_code, value in translations.items():
-                if isinstance(value, str):
-                    language = Language.from_str(lang_code)
-                    translation = Translation(
-                        key=key,
-                        language=language,
-                        value=value,
-                        namespace=namespace,
-                        is_approved=False,  # 外部翻译默认未审批
-                        translator="external",
-                    )
-                    self._translations[namespace][key][language.value] = translation
+                if not isinstance(value, str):
+                    continue
+                language = Language.normalizeTag(lang_code)
+                if language is None:
+                    logger.warning(
+                        "跳过不识别的语言码：namespace=%s key=%s code=%r",
+                        namespace, key, lang_code)
+                    continue
+                translation = Translation(
+                    key=key,
+                    language=language,
+                    value=value,
+                    namespace=namespace,
+                    is_approved=False,  # 外部翻译默认未审批
+                    translator="external",
+                )
+                self._translations[namespace][key][language.value] = translation
 
     def save_external_translations(self, namespace: str, translations: Dict[str, Dict[str, str]]) -> bool:
-        """
-        保存外部翻译
+        """保存外部翻译——**先整批验码，再一起动内存与盘**。
 
-        Args:
-            namespace: 命名空间
-            translations: 翻译数据 {key: {language: value}}
+        两处原缺陷（台账 §6-140）：
 
-        Returns:
-            是否保存成功
+        - 语言码走的是 `from_str` 的旧兜底：`zh-CN` 这类带区域后缀的码（仓内实际流通的那一套）
+          被折成 `AUTO` 存进 `auto` 桶，按 `Language.CHINESE` 永远读不回来；
+        - 循环是"边写内存边转码"，转码一旦失败就被外层 `except Exception` 兜成 False，
+          于是**内存已经半写、文件还没写**，两边从此两套数——比存错桶更难查。
         """
+        normalized: List[tuple] = []
+        rejected: List[tuple] = []
+        for key, lang_translations in (translations or {}).items():
+            if not isinstance(lang_translations, dict):
+                rejected.append((key, "<值不是映射>"))
+                continue
+            for lang_code, value in lang_translations.items():
+                language = Language.normalizeTag(lang_code)
+                if language is None or not isinstance(value, str):
+                    rejected.append((key, lang_code))
+                    continue
+                normalized.append((key, language, value))
+
+        if rejected:
+            logger.warning("译文库整批拒收：namespace=%s，不识别的语言码 %r", namespace, rejected)
+            return False
+
         try:
             with self._lock:
                 # 更新内存中的翻译
                 if namespace not in self._translations:
                     self._translations[namespace] = {}
 
-                for key, lang_translations in translations.items():
+                for key, language, value in normalized:
                     if key not in self._translations[namespace]:
                         self._translations[namespace][key] = {}
 
-                    for lang_code, value in lang_translations.items():
-                        language = Language.from_str(lang_code)
-                        translation = Translation(
-                            key=key,
-                            language=language,
-                            value=value,
-                            namespace=namespace,
-                            is_approved=False,
-                            translator="user",
-                        )
-                        self._translations[namespace][key][language.value] = translation
+                    translation = Translation(
+                        key=key,
+                        language=language,
+                        value=value,
+                        namespace=namespace,
+                        is_approved=False,
+                        translator="user",
+                    )
+                    self._translations[namespace][key][language.value] = translation
 
                 # 保存到文件
+                self.data_dir.mkdir(parents=True, exist_ok=True)
                 file_path = self.data_dir / f"{namespace}.json"
                 with open(file_path, "w", encoding="utf-8") as f:
                     json.dump(translations, f, ensure_ascii=False, indent=2)
@@ -409,20 +436,18 @@ class LanguageManager:
         return sorted(result, key=lambda x: x.value)
 
     def detect_browser_language(self, accept_language: str) -> Language:
-        """
-        检测浏览器语言
+        """检测浏览器语言（Accept-Language 头）。
 
-        Args:
-            accept_language: Accept-Language 头
-
-        Returns:
-            检测到的语言
+        口径不再自己有一份：原先这里私藏一刀 `lang.split("-")[0]`，而枚举侧的 `from_str`
+        反而不认区域码——同一件事两处各写一遍，其中一遍还是错的（教义第 6 条）。
+        现在统一走 `Language.normalizeTag()`，不识别的候选**跳过**，
+        全部不识别时回调用方给的默认语言（不再是枚举的 `AUTO`）。
         """
         if not accept_language:
             return self.default_language
 
         # 解析 Accept-Language 头
-        languages = []
+        candidates: List[tuple] = []
         for part in accept_language.split(","):
             part = part.strip()
             if ";q=" in part:
@@ -434,19 +459,16 @@ class LanguageManager:
             else:
                 lang = part
                 quality = 1.0
-
-            # 提取语言代码
-            lang_code = lang.split("-")[0].lower()
-            languages.append((lang_code, quality))
+            candidates.append((lang.strip(), quality))
 
         # 按质量排序
-        languages.sort(key=lambda x: x[1], reverse=True)
+        candidates.sort(key=lambda x: x[1], reverse=True)
 
         # 查找第一个支持的语言
         available_languages = self.get_available_languages()
-        for lang_code, _ in languages:
-            language = Language.from_str(lang_code)
-            if language in available_languages:
+        for tag, _quality in candidates:
+            language = Language.normalizeTag(tag)
+            if language is not None and language in available_languages:
                 return language
 
         return self.default_language
