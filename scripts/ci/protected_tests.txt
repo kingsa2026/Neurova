@@ -2251,3 +2251,12 @@ tests/unit/plugins/test_pluginSystemRetired.py
 # 属同名词不同物，判据按来源收窄后不误伤它）。新增落点即红，修掉一处就把计数改小。
 # 逐文件单跑落库前后同读数 5 passed。
 tests/unit/core/test_dreamReportSeamIsNotFabricated.py
+
+# 甲方案媒体半区：sha256 校验位与索引锁并进端点后，manager.py(184) 退役（`06c2314b`，§6-140）
+# 判据两档：`test_mediaChecksumIsRecorded.py` 5 格钉"校验位是真哈希、读侧真读盘、篡改必翻 False、
+# 重启不丢、并发上传不丢条目"；`test_mediaManagerFaceRetired.py` 4 格钉"别再长出第二份资产索引"，
+# 并含**反向存在断言**——`media/config.py`（§6-128 判需人裁、被受保护判据真依赖）与校验位那档
+# 判据都必须在位，这波删的是零消费者的 manager，不是仍在役的 config。
+# 逐文件单跑落库前后同读数 9 passed（两档并跑）。
+tests/unit/api/test_mediaChecksumIsRecorded.py
+tests/unit/api/test_mediaManagerFaceRetired.py
