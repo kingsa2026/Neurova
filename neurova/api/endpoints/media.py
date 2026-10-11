@@ -27,7 +27,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -38,6 +38,13 @@ from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
+
+#: `DELETE /{media_id}` 与 `/batch-delete` 共用的两种模式（放在模型之前：`Field(default=…)`
+#: 在建类时求值，常量住得比模型晚就是 NameError）。
+#: **默认是 permanent**——现役页面（`AgentMediaPage`）的「删了就没了」是对用户的既有承诺，
+#: 翻成软删属隐私语义变更，不在 §6-158 那笔裁定的授权内。
+DELETE_MODES = ("trash", "permanent")
+DEFAULT_DELETE_MODE = "permanent"
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +66,9 @@ class BatchDeleteRequest(BaseModel):
     """批量删除请求（F-1 契约对齐：NeurUI batchDeleteMedia）"""
 
     media_ids: List[str] = Field(..., description="要删除的媒体 ID 列表")
+    mode: str = Field(default=DEFAULT_DELETE_MODE,
+                      description="trash＝移入回收站（字节保留）；缺省 permanent＝直接删除"
+                                  "（与单条 DELETE 同一口径，默认档不翻转）")
 
 
 class UpdateConfigRequest(BaseModel):
@@ -155,15 +165,23 @@ def _generate_media_id() -> str:
 
 
 def _storage_root() -> Path:
-    """媒体存储根目录（磁盘内容源的基准路径）。
+    """媒体存储根目录（磁盘内容源的基准路径），**一律返回绝对路径**。
 
-    未配置时落数据根下的 `media_storage/`——原兜底是裸相对名，
-    相对路径按 CWD 解析，换个启动目录已入库的媒体就"找不到"。
+    三种入落点在这里收成一处：未配置 → 数据根下的 `media_storage/`；配置成绝对路径 → 照用；
+    配置成相对名（模块默认值 `"media_storage"` 就是这一形）→ **锚到数据根**，不留给 CWD。
+    原先相对名会一路带到 `is_relative_to()` 那里去比一个绝对路径，于是每次上传都 400
+    「非法的存储路径」（§6-158 的活体跑第一步就撞上，实据与判据见
+    `TestStorageRootIsNeverCwdRelative`）——这一族的既有口径是「运行期落点全量锚定数据根」
+    （`c2cb809c`/`721ef038`），不是在下层加"看着相对就当数据根"的兜底判断。
     """
     from neurova.core.data_root import get_data_root
 
-    configured = _media_config.get("storage_path")
-    return Path(configured) if configured else get_data_root() / "media_storage"
+    root = get_data_root()
+    configured = str(_media_config.get("storage_path") or "").strip()
+    if not configured:
+        return root / "media_storage"
+    candidate = Path(configured)
+    return candidate if candidate.is_absolute() else (root / candidate).resolve()
 
 
 def _media_disk_path(media: Dict[str, Any]) -> Path:
@@ -229,6 +247,77 @@ def _remove_media_entry(media_id: str) -> Optional[Dict[str, Any]]:
         del _media_store[media_id]
         _save_index()
     return media
+
+
+# ---------------------------------------------------------------------------
+# 回收站（§6-158，裁定乙）：软删/读面/恢复/彻底删除四件，默认语义一律不变
+# 模式常量在模块顶部（`DELETE_MODES` / `DEFAULT_DELETE_MODE`），两个删除口共用一份。
+# ---------------------------------------------------------------------------
+
+
+def _isTrashed(record: Dict[str, Any]) -> bool:
+    """回收站行的唯一判据。现役读面（三个列表口径＋三个取物口径）都只看这一处——
+    各处各写一遍 `rec.get("is_deleted")` 就是"漏最后那一处排除"的成因。"""
+    return bool(record.get("is_deleted"))
+
+
+def _liveMedia(media_id: str) -> Optional[Dict[str, Any]]:
+    """按 id 取「不在回收站」的那一行；三个取物口径共用这份单点。"""
+    record = _media_store.get(media_id)
+    if not record or _isTrashed(record):
+        return None
+    return record
+
+
+def _activeMedia() -> List[Dict[str, Any]]:
+    """活条目全集——`/list`、`/stats`、`/memory` 三个列表面从这里取，不再各自 `values()`。"""
+    return [m for m in _media_store.values() if not _isTrashed(m)]
+
+
+def _trashMediaEntry(media_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """移入回收站：只打标记，字节留在盘上（否则"恢复"无从谈起）。
+
+    返回 `(行, 拒因)`；拒因为空即成功。拒因由端点映射成诚实的 4xx，不在这层抛 HTTP 细节。
+    """
+    record = _media_store.get(media_id)
+    if not record:
+        return None, "notFound"
+    if _isTrashed(record):
+        return None, "alreadyTrashed"
+    with _INDEX_LOCK:
+        record["is_deleted"] = True
+        record["deleted_at"] = time.time()
+        _save_index()
+    return record, ""
+
+
+def _restoreMediaEntry(media_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """从回收站恢复：字节必须仍在，否则不许造一条「活但取不到」的记录。"""
+    record = _media_store.get(media_id)
+    if not record:
+        return None, "notFound"
+    if not _isTrashed(record):
+        return None, "notTrashed"
+    if not _media_disk_path(record).is_file():
+        return None, "contentMissing"
+    with _INDEX_LOCK:
+        record["is_deleted"] = False
+        record.pop("deleted_at", None)
+        _save_index()
+    return record, ""
+
+
+_REJECTION_HTTP = {
+    "notFound": (404, "媒体不存在"),
+    "alreadyTrashed": (409, "该条目已在回收站"),
+    "notTrashed": (409, "该条目不在回收站"),
+    "contentMissing": (410, "回收站条目的内容文件已不在盘上，无法恢复"),
+}
+
+
+def _reject(reason: str) -> HTTPException:
+    code, detail = _REJECTION_HTTP[reason]
+    return HTTPException(status_code=code, detail=detail)
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -322,6 +411,9 @@ async def save_media(
         "created_at": now,
         "checksum": digest.hexdigest(),
         "metadata": meta,
+        # 每一行都带这个键，索引里就只有一种形状（缺键行与 False 行两种状态并存时，
+        # 读面的"排除回收站"总会有一处按 falsy 兜过去，看不出它其实管的是两种形态）
+        "is_deleted": False,
     }
 
     with _INDEX_LOCK:
@@ -346,7 +438,7 @@ async def list_media(
     offset: int = Query(default=0),
 ):
     """列出媒体文件（search 后端过滤，total 反映过滤后总数，分页语义不变）。"""
-    media_list = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
+    media_list = [m for m in _activeMedia() if m.get("agent_id") == agent_id]
 
     if media_type:
         media_list = [m for m in media_list if m.get("media_type") == media_type]
@@ -413,15 +505,30 @@ async def update_config(body: UpdateConfigRequest):
 async def batch_delete_media(body: BatchDeleteRequest):
     """批量删除媒体文件（F-1 契约对齐：前端 batchDeleteMedia）。
 
-    逐个删除（磁盘文件 + 元数据），不存在的 ID 记入 failed，不中断整批。
+    逐个处理（不中断整批），模式与单条 `DELETE /{media_id}` 共用 `DELETE_MODES` 那一份口径，
+    缺省同样是 permanent。不存在的 ID 沿用既有 reason 串——前端按它渲染失败清单。
     """
+    if body.mode not in DELETE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的删除模式: {body.mode}（可用：{' / '.join(DELETE_MODES)}）",
+        )
+
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
     for media_id in body.media_ids:
-        if _remove_media_entry(media_id) is not None:
-            succeeded.append(media_id)
+        if body.mode == "trash":
+            media, reason = _trashMediaEntry(media_id)
         else:
-            failed.append({"media_id": media_id, "reason": "media not found"})
+            media, reason = _remove_media_entry(media_id), "notFound"
+        if media is None:
+            failed.append({
+                "media_id": media_id,
+                "reason": "media not found" if reason == "notFound"
+                else _REJECTION_HTTP[reason][1],
+            })
+        else:
+            succeeded.append(media_id)
 
     return {
         "code": 0,
@@ -430,10 +537,37 @@ async def batch_delete_media(body: BatchDeleteRequest):
     }
 
 
+@router.get("/trash")
+async def list_trash(
+    agent_id: Annotated[str, Query(description="Agent ID")] = "default",
+    limit: Annotated[int, Query(le=200)] = 50,
+    offset: int = 0,
+):
+    """回收站读面（§6-158）：软删条目必须**有人能读**，否则又是一处「只写不读」的断点。
+
+    单段字面路由，注册在 `GET /{media_id}` 之前（台账 2026-09-11 ⑤ 的那道锚）。
+    保留策略同日人裁：**永久保留直到用户显式彻底删除**——不设 TTL、不做自动过期，
+    媒体是用户内容，自动删等于替用户决定。
+    """
+    trashed = [m for m in _media_store.values()
+               if _isTrashed(m) and m.get("agent_id") == agent_id]
+    trashed.sort(key=lambda m: m.get("deleted_at", 0), reverse=True)
+
+    return {
+        "code": 0,
+        "data": {
+            "media": trashed[offset: offset + limit],
+            "total": len(trashed),
+            "offset": offset,
+            "limit": limit,
+        },
+    }
+
+
 @router.get("/{media_id}")
 async def get_media(media_id: str):
     """获取媒体文件内容（P1-2: 从磁盘 FileResponse 流式读取，不再驻留内存）"""
-    media = _media_store.get(media_id)
+    media = _liveMedia(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -454,7 +588,7 @@ async def get_media(media_id: str):
 @router.get("/{media_id}/metadata")
 async def get_media_metadata(media_id: str):
     """获取媒体文件元数据（含**真读盘重算**的校验位判定）。"""
-    media = _media_store.get(media_id)
+    media = _liveMedia(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -488,10 +622,25 @@ async def get_media_metadata(media_id: str):
     }
 
 
+@router.post("/{media_id}/restore")
+async def restore_media(media_id: str):
+    """从回收站恢复。字节已不在即 410——不许把"恢复失败"折成 200，
+    留下一条列表里看得见、取字节却 404 的活记录。"""
+    media, reason = _restoreMediaEntry(media_id)
+    if media is None:
+        raise _reject(reason)
+
+    return {
+        "code": 0,
+        "message": f"媒体文件 '{media.get('filename')}' 已恢复",
+        "data": {"media_id": media_id},
+    }
+
+
 @router.get("/download/{media_id}")
 async def download_attachment(media_id: str):
     """直接从附件目录下载文件（用于TTS音频等；P1-2: 磁盘流式读取）"""
-    media = _media_store.get(media_id)
+    media = _liveMedia(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -509,8 +658,38 @@ async def download_attachment(media_id: str):
 
 
 @router.delete("/{media_id}")
-async def delete_media(media_id: str):
-    """删除媒体文件"""
+async def delete_media(
+    media_id: str,
+    mode: Annotated[
+        str,
+        Query(description="trash＝移入回收站（字节保留、可从 /trash 读回）；"
+                          "缺省 permanent＝直接删除（现役页面的既有承诺）"),
+    ] = DEFAULT_DELETE_MODE,
+):
+    """删除媒体文件。模式只认 `DELETE_MODES` 那一份口径：坏档当场 400，
+    既不动盘上字节也不落软删标记（不许兜底成任何一种删除）。
+
+    默认值写成 `Annotated[...] = "permanent"` 而不是 `mode: str = Query(default=...)`：
+    后者把 `Query` 对象当成 Python 缺省值，**直接按函数调用**的既有判据
+    （`test_media_disk_storage.py` 两处）会拿到一个描述对象并撞上"未知模式"——
+    A/B 实测到的本批自伤，形态记在台账 §6-158。
+    """
+    if mode not in DELETE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的删除模式: {mode}（可用：{' / '.join(DELETE_MODES)}）",
+        )
+
+    if mode == "trash":
+        media, reason = _trashMediaEntry(media_id)
+        if media is None:
+            raise _reject(reason)
+        return {
+            "code": 0,
+            "message": f"媒体文件 '{media.get('filename')}' 已移入回收站",
+            "data": {"mode": "trash", "media_id": media_id},
+        }
+
     media = _remove_media_entry(media_id)
     if media is None:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
@@ -529,7 +708,7 @@ async def get_media_stats(agent_id: str):
     故有意不补 GET /stats 单段变体——单段字面路由若新增须注册在 /{media_id}
     之前（守卫见 tests/unit/api/test_media_route_order_guard.py）。
     """
-    agent_media = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
+    agent_media = [m for m in _activeMedia() if m.get("agent_id") == agent_id]
 
     total_files = len(agent_media)
     total_size = sum(m.get("size", 0) for m in agent_media)
@@ -561,7 +740,7 @@ async def get_media_stats(agent_id: str):
 @router.get("/memory/{memory_id}")
 async def get_memory_media(memory_id: str):
     """获取与指定记忆关联的媒体文件"""
-    memory_media = [m for m in _media_store.values() if m.get("memory_id") == memory_id]
+    memory_media = [m for m in _activeMedia() if m.get("memory_id") == memory_id]
 
     return {
         "code": 0,

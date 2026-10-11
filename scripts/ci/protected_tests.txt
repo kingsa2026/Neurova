@@ -2340,3 +2340,14 @@ tests/unit/plugins/test_pluginRoutesAreMounted.py
 # 声明面走真 SQLite 往返（spec → 注册表 → 落库 → 重读），只写不读的新字段在本仓不算实现。
 # 入册前逐文件单跑两次同读数 7 passed（5.45s / 5.04s）。
 tests/unit/collaboration/test_workflowConcurrencyCapAndNodeRetry.py
+# §6-158（工单 2026-10-12 批 13，裁定乙）：媒体软删＋回收站四件，默认一档不许翻。
+# 面一：写口两档（?mode=trash / ?mode=permanent，缺省 permanent＝硬删，坏 mode 当场 400 且不留半成品状态）、
+# 读口 GET /trash（写了必须有人读，且按 agent 分账）、POST /{id}/restore（字节已不在即 410，
+# 不造「活但取不到」的记录）、重启复原（真 _load_index() 读进一份新 store，行仍是 trashed；
+# 另带反向对照钉住"盘上文件已不在即剔行"这条既有巡检不能被关掉来给回收站让路）。
+# 面二：现役六个读面（/list、/stats、/memory 三个列表口径 + /{id}、/download/{id}、/{id}/metadata
+# 三个取物口径）逐一排除回收站行——只排前三个，条目照样能按 id 被捞走。
+# 面三：路由顺序锚 + EXPECTED_ROUTES 同步；另两格审上传前门（存储根不得是 CWD 相对路径，
+# 这是活体跑第一步撞到的既有缺陷，判据在档）。
+# 入册前逐文件单跑两次同读数 21 passed（14.15s / 7.91s）。
+tests/media/test_mediaTrashLifecycle.py
