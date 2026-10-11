@@ -488,3 +488,37 @@ async def testBindCodeMessageStillRegistersSender(manager, tmp_path, codesInMemo
 
     row = next(r for r in mgr.listObservedSenders("default") if r["channel_user_id"] == "ou_88")
     assert row["bound_user_id"] == "u-alice"
+
+
+@pytest.mark.asyncio
+async def testRequestChannelStaysWithSessionOwnerDuringTurn(manager, tmp_path):
+    """§6-121 (b) 乙案的靶：回合内请求通道仍是**会话属主**，不是发送者。
+
+    原先 `ChatPipeline._execute_steps` 每次回合都用 `meta['user_id']`（发送者）再写一遍这条
+    通道，把 router 写的 owner 换掉——而 `mem_core.save_to_session` 只读这一条通道，
+    于是渠道会话落进一个谁也不匹配的命名空间，控制台的会话列表（按 user_id 过滤）
+    看不见它：Issue #290 Wave H-W0 修好的那条可见性被批 2 静默吃掉。
+    """
+    from neurova.core.identity_context import get_request_user_id
+
+    _bindManager(tmp_path)
+    seen = {}
+
+    class OwnerAwareAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(owner_user_id="owner-of-kai", agent_id="default")
+
+        async def chat(self, user_input, session_id=None, metadata=None, **kw):
+            # 这一刻就是 save_to_session / 浏览器 profile 池化的读数时机
+            seen["request_channel"] = get_request_user_id()
+            seen["meta_user_id"] = (metadata or {}).get("user_id")
+            return {"text": "pong"}
+
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: OwnerAwareAgent())
+    await handler(_msg("你好", sender="ou_55"))
+
+    assert seen["request_channel"] == "owner-of-kai", (
+        f"回合内请求通道被换成 {seen['request_channel']!r}——渠道会话将不再属于属主")
+    assert seen["meta_user_id"] == "ch:feishu:ou_55", (
+        "发送者身份仍要走记忆隔离（这一格不许被上面的修复顺手删掉）")

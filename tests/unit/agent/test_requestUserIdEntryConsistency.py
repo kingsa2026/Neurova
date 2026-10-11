@@ -53,13 +53,19 @@ REQUEST_WRITERS = ("set_request_user_id", "clear_request_user_id")
 TURN_WRITER = "set_request_identity"
 
 #: 允许的"这一格为什么不漂"的说法，每一种在下面都有对应的机器检查。
-KINDS = ("sameSource", "derivedFromTurnRead", "sameChannelPassThrough", "noTurnWrite")
+#: `boundaryFeedsTurn`（§6-121 (b) 乙案新增）：入口只在**请求边界**写 request 通道，
+#: 轮身份侧不在此处写，但同一个变量被塞进 metadata、由管线透传给 `set_turn_identity`——
+#: 两侧同源，只是不同函数。原先这种关系由 `sameSource` 那一格（chat_pipeline 一处写两条）
+#: 保证；乙案把那条双写拆掉之后，同源关系搬到了请求边界，kind 必须跟着换了才不假装还在。
+KINDS = ("sameSource", "boundaryFeedsTurn", "derivedFromTurnRead",
+         "sameChannelPassThrough", "noTurnWrite")
 
 ENTRY_POINTS: Dict[str, Dict[str, object]] = {
-    "neurova/agent/chat_pipeline.py": {
-        "kind": "sameSource",
-        "requestSource": "ctx.metadata['user_id']（调用者本人）",
-        "turnSource": "同一表达式经 _init_agent_state 传给 set_request_identity",
+    "neurova/api/endpoints/chat.py": {
+        "kind": "boundaryFeedsTurn",
+        "requestSource": "current_user['user_id']（含续跑原属主，写一次在请求边界）",
+        "turnSource": "同一个 user_id 赋给 call_metadata['user_id']，由管线透传给 set_turn_identity",
+        "feedsVia": "user_id",
     },
     "neurova/tool_executor.py": {
         "kind": "derivedFromTurnRead",
@@ -187,6 +193,17 @@ def requestSideSources(tree: ast.AST) -> List[str]:
     ]
 
 
+def requestWriteOrigins(tree: ast.AST) -> List[str]:
+    """request 写入点参数的**来源名**（②b 用，与 `userIdAssignments` 同一套抽取口径）。
+
+    不能直接拿 `requestSideSources` 的规范化 dump 比：那是给"两侧表达式逐字同形"那种
+    判据用的，而乙案要问的是"这两处取的是不是同一个变量"——两边必须用同一种抽取形态，
+    否则一边是 `Name(...)`、一边是 `user_id`，永不相等，判据就恒红。
+    """
+    return [_originOf(call.args[0], tree) for call in _callsNamed(tree, REQUEST_WRITERS)
+            if call.args]
+
+
 def turnSideSources(tree: ast.AST) -> List[str]:
     """轮身份写入点的 `user_id=` 实参表达式（规范化 dump）。"""
     out: List[str] = []
@@ -239,7 +256,10 @@ def _originOf(expr: ast.AST, scope: ast.AST, depth: int = 0) -> str:
                     and any(isinstance(t, ast.Name) and t.id == expr.value.id
                             for t in node.targets)):
                 return _originOf(node.value, scope, depth + 1)
-    return _calleeName(expr) if isinstance(expr, ast.Call) else type(expr).__name__
+    return _calleeName(expr) if isinstance(expr, ast.Call) else (
+        # 裸局部变量：报**变量名**而不是类型名。②b 要比的就是"这两处取的是同一个变量"，
+        # 回 "Name" 会让任何两个 Name 都互相相等（同源判据恒真）。
+        expr.id if isinstance(expr, ast.Name) else type(expr).__name__)
 
 
 def userIdAssignments(tree: ast.AST) -> List[str]:
@@ -289,36 +309,41 @@ class TestEntryPointsAreDeclared:
             assert entry.get("kind") in KINDS, f"{rel} 的 kind 不在允许集合 {KINDS}"
             if entry["kind"] in ("derivedFromTurnRead", "sameChannelPassThrough"):
                 assert entry.get("readsVia"), f"{rel} 声明了派生却没写经由哪个读取口"
-        assert any(e["kind"] == "sameSource" for e in ENTRY_POINTS.values()), (
+            if entry["kind"] == "boundaryFeedsTurn":
+                assert entry.get("feedsVia"), (
+                    f"{rel} 声明「边界喂轮身份」却没写靠哪个变量把两侧串起来")
+        assert any(e["kind"] in ("sameSource", "boundaryFeedsTurn")
+                   for e in ENTRY_POINTS.values()), (
             "所有入口都声明分叉 ⇒ 两条通道没有任何一处保证同读一个来源，"
             "这张表就从「对齐依据」退化成「分歧登记表」"
         )
 
+    def test_boundaryEntriesFeedBothSidesFromOneVariable(self):
+        """②b 标 `boundaryFeedsTurn` 的入口：request 写入点与喂轮身份的那个变量必须同名。
 
-class TestDeclaredKindsMatchCode:
-    def test_sameSourceEntriesReadTheSameExpression(self):
-        """② 标 `sameSource` 的入口：两处写入点的来源表达式必须逐字同形。"""
+        这正是乙案要守住的东西——把双写拆成"边界写一次 + 同一值喂给轮身份"之后，
+        同源关系不再由一行代码显然成立，而由"两处取的是同一个变量"成立。
+        哪天有人把边界那行改成别的来源（比如从报文里读 user_id），本格立刻红。
+        """
         for rel, entry in ENTRY_POINTS.items():
-            if entry["kind"] != "sameSource":
+            if entry["kind"] != "boundaryFeedsTurn":
                 continue
             tree = productionSources()[rel]
-            request, turn = requestSideSources(tree), turnSideSources(tree)
-            assert len(request) == 1 and len(turn) == 1, (
-                f"{rel} 标 `sameSource` 却不是一个写 request、一个写轮身份"
-                f"（request {len(request)} / turn {len(turn)}）："
-                "多处取值点时本判据无法回答「是不是同一个来源」，请逐点拆开登记"
+            origins = requestWriteOrigins(tree)
+            assert origins == [entry["feedsVia"]], (
+                f"{rel} 写 request 通道的来源是 {origins}，而它声称与轮身份同源的变量是 "
+                f"{entry['feedsVia']!r}——两条通道在此分叉"
             )
-            assert request == turn, (
-                f"{rel} 标 `sameSource` 但两处读的不是同一来源："
-                f"request `{request[0]}` vs turn `{turn[0]}`——同一入口内两侧漂开，"
-                "就是「记忆按 A 用户隔离、浏览器 profile 按 B 用户开」那一型"
+            assert entry["feedsVia"] in userIdAssignments(tree), (
+                f"{rel} 不再把 `{entry['feedsVia']}` 赋给 metadata['user_id']："
+                "边界只写了 request 一侧，轮身份那一侧的来源断了（乙案的同源关系失效）"
             )
 
+
+class TestDeclaredKindsMatchCode:
     def test_otherEntriesDoNotWriteTurnIdentityAndDoReadWhatTheyClaim(self):
-        """③ 非 `sameSource` 的格：不得写轮身份（声明就过期了），且要真读它说的那个口。"""
+        """③ 其余格：不得写轮身份（声明就过期了），且要真读它说的那个口。"""
         for rel, entry in ENTRY_POINTS.items():
-            if entry["kind"] == "sameSource":
-                continue
             tree = productionSources()[rel]
             assert not turnSideSources(tree), (
                 f"{rel} 现在写了轮身份，但表里说它不写——kind 需要重新判定"
