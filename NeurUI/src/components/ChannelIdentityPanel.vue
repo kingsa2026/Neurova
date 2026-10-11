@@ -4,6 +4,10 @@
       <div>
         <h3 class="nr-cid-title">{{ t('channel.identityTitle') }}</h3>
         <p class="nr-cid-desc">{{ t('channel.identityDesc') }}</p>
+        <!-- 群共享作用域是裁定 ④ 的直接后果，必须写在这个面板上（不是只留在代码注释里）：
+             用户若不知道"同一个群的成员会看到彼此在这个群里沉淀的记忆"，
+             就等于把共享当成技术默认值替他做了决定。 -->
+        <p class="nr-cid-scope" data-testid="identity-group-note">{{ t('channel.identityGroupScopeNote') }}</p>
       </div>
       <div class="nr-cid-issue">
         <a-select class="nr-cid-select" data-testid="identity-channel-select" :value="channelType"
@@ -216,6 +220,7 @@ watch(() => props.agentId, () => { issued.value = null; load() }, { immediate: t
 .nr-cid-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .nr-cid-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--nr-text-primary); }
 .nr-cid-desc { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-tertiary); max-width: 60ch; }
+.nr-cid-scope { margin: 6px 0 0; font-size: 12px; color: var(--nr-text-secondary); max-width: 60ch; }
 .nr-cid-issue { display: flex; gap: 8px; align-items: center; }
 .nr-cid-issued { margin: 12px 0 0; font-size: 12px; color: var(--nr-accent, #6366f1); }
 .nr-cid-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-color-danger, #e11d48); }

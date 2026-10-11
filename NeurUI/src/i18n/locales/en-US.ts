@@ -1475,6 +1475,7 @@ export default {
     identityObservedBoundOther: 'Bound to {user}',
     identityObservedUnbound: 'Unbound',
     identityMineTitle: 'My current channel identities',
+    identityGroupScopeNote: 'Memory distilled in a group chat is shared per group: members of the same group can see what each other left in that group. Direct chats stay isolated per platform account (or per channel identity when unbound).',
     genericFailure: 'Request failed: {reason}',
     enabledNotConnected: "Enabled, not connected",
     agentChannels: "Channel Configuration",

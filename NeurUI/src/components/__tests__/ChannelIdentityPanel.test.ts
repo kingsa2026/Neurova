@@ -238,3 +238,21 @@ describe('ChannelIdentityPanel — 观察面与「我的绑定」（批 6）', (
       .toContain('还没收到过消息')
   })
 })
+
+describe('ChannelIdentityPanel — 群共享后果必须写在面板上（裁定 ④）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listChannelIdentityBindings.mockResolvedValue({ bindings: [] })
+    listObservedChannelSenders.mockResolvedValue({ senders: [] })
+  })
+
+  it('那句话在面板里，不是只在代码注释里', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const note = wrapper.find('[data-testid="identity-group-note"]')
+    expect(note.exists(), '群共享作用域的后果没有可见落点——用户只能在出事之后才知道').toBe(true)
+    expect(note.text()).toContain('按群共享')
+    expect(note.text()).toContain('单聊')
+  })
+})

@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'Привязано к {user}',
     identityObservedUnbound: 'Не привязан',
     identityMineTitle: 'Мои текущие привязки каналов',
+    identityGroupScopeNote: 'Память, накопленная в групповом канале, разделяется на уровне группы: её участники видят память друг друга в этой группе. Личные чаты изолированы по аккаунту платформы (или по идентификатору канала, если привязки нет).',
     genericFailure: 'Запрос не выполнен: {reason}',
     enabledNotConnected: "Включён, не подключён",
     agentChannels: "Конфигурация каналов",

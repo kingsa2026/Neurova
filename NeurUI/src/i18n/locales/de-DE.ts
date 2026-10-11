@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'Mit {user} verknüpft',
     identityObservedUnbound: 'Nicht verknüpft',
     identityMineTitle: 'Meine aktuellen Verknüpfungen',
+    identityGroupScopeNote: 'In einer Gruppenunterhaltung angesammeltes Gedächtnis wird gruppenweise geteilt: Mitglieder derselben Gruppe sehen das Gruppen-Gedächtnis. Direkte Chats bleiben pro Plattformkonto (ohne Verknüpfung pro Kanal-Identität) getrennt.',
     genericFailure: 'Anfrage fehlgeschlagen: {reason}',
     enabledNotConnected: "Aktiviert, nicht verbunden",
     agentChannels: "Kanal-Konfiguration",
