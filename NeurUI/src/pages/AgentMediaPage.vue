@@ -8,10 +8,11 @@
           <a-input-search
             v-model:value="searchQuery"
             :placeholder="t('media.searchPlaceholder')"
+            :disabled="trashMode"
             allow-clear
             style="width: 240px"
           />
-          <a-radio-group v-model:value="typeFilter" button-style="solid" size="small">
+          <a-radio-group v-model:value="typeFilter" button-style="solid" size="small" :disabled="trashMode">
             <a-radio-button value="">{{ t('media.all') }}</a-radio-button>
             <a-radio-button value="image">{{ t('media.images') }}</a-radio-button>
             <a-radio-button value="audio">{{ t('media.audio') }}</a-radio-button>
@@ -19,6 +20,10 @@
           </a-radio-group>
         </div>
         <div class="toolbar-actions">
+          <!-- 回收站读面不支持 search/media_type，所以进回收站时把那两个输入禁用而不是留着让人以为生效 -->
+          <GlassButton :variant="trashMode ? 'primary' : 'ghost'" size="sm" @click="toggleTrashMode">
+            {{ trashMode ? t('media.exitTrash') : t('media.trash') }}
+          </GlassButton>
           <a-segmented v-model:value="viewMode" :options="viewOptions" />
           <GlassButton variant="primary" size="sm" @click="triggerUpload">
             {{ t('media.upload') }}
@@ -49,18 +54,31 @@
             <div class="media-card-footer">
               <span class="media-name">{{ item.name }}</span>
               <div class="media-card-actions">
-                <GlassButton variant="ghost" size="sm" @click="downloadMedia(item)">
-                  {{ t('media.download') }}
-                </GlassButton>
-                <GlassButton variant="danger" size="sm" @click="confirmDelete(item)">
-                  {{ t('common.delete') }}
-                </GlassButton>
+                <template v-if="!trashMode">
+                  <GlassButton variant="ghost" size="sm" @click="downloadMedia(item)">
+                    {{ t('media.download') }}
+                  </GlassButton>
+                  <GlassButton variant="ghost" size="sm" @click="confirmTrash(item)">
+                    {{ t('media.moveToTrash') }}
+                  </GlassButton>
+                  <GlassButton variant="danger" size="sm" @click="confirmDelete(item)">
+                    {{ t('common.delete') }}
+                  </GlassButton>
+                </template>
+                <template v-else>
+                  <GlassButton variant="ghost" size="sm" @click="restoreItem(item)">
+                    {{ t('media.restore') }}
+                  </GlassButton>
+                  <GlassButton variant="danger" size="sm" @click="confirmDeleteForever(item)">
+                    {{ t('media.deleteForever') }}
+                  </GlassButton>
+                </template>
               </div>
             </div>
           </GlassCard>
         </div>
         <a-pagination v-if="mediaItems.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="mediaItems.length" size="small" style="margin-top: 16px; text-align: center" />
-        <a-empty v-else :description="t('media.noMedia')" />
+        <a-empty v-else :description="trashMode ? t('media.trashEmpty') : t('media.noMedia')" />
       </template>
 
       <!-- List View -->
@@ -89,19 +107,32 @@
                 {{ formatSize(record.size) }}
               </template>
               <template v-if="column.key === 'created_at'">
-                {{ formatDate(record.created_at) }}
+                {{ formatDate(trashMode ? record.deleted_at : record.created_at) }}
               </template>
               <template v-if="column.key === 'actions'">
                 <a-space>
-                  <GlassButton variant="ghost" size="sm" @click="openDetail(record)">
-                    {{ t('media.detail') }}
-                  </GlassButton>
-                  <GlassButton variant="ghost" size="sm" @click="downloadMedia(record)">
-                    {{ t('media.download') }}
-                  </GlassButton>
-                  <GlassButton variant="danger" size="sm" @click="confirmDelete(record)">
-                    {{ t('common.delete') }}
-                  </GlassButton>
+                  <template v-if="!trashMode">
+                    <GlassButton variant="ghost" size="sm" @click="openDetail(record)">
+                      {{ t('media.detail') }}
+                    </GlassButton>
+                    <GlassButton variant="ghost" size="sm" @click="downloadMedia(record)">
+                      {{ t('media.download') }}
+                    </GlassButton>
+                    <GlassButton variant="ghost" size="sm" @click="confirmTrash(record)">
+                      {{ t('media.moveToTrash') }}
+                    </GlassButton>
+                    <GlassButton variant="danger" size="sm" @click="confirmDelete(record)">
+                      {{ t('common.delete') }}
+                    </GlassButton>
+                  </template>
+                  <template v-else>
+                    <GlassButton variant="ghost" size="sm" @click="restoreItem(record)">
+                      {{ t('media.restore') }}
+                    </GlassButton>
+                    <GlassButton variant="danger" size="sm" @click="confirmDeleteForever(record)">
+                      {{ t('media.deleteForever') }}
+                    </GlassButton>
+                  </template>
                 </a-space>
               </template>
             </template>
@@ -155,6 +186,8 @@ interface MediaItem {
   size?: number
   /** epoch 秒（后端 time.time()） */
   created_at?: number
+  /** 回收站行的删除时刻（epoch 秒）；仅 /trash 读面带出 */
+  deleted_at?: number
 }
 
 const props = defineProps<{ agentId: string }>()
@@ -165,6 +198,8 @@ const loading = ref(false)
 const searchQuery = ref('')
 const typeFilter = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
+/** 回收站开关（§6-158）：true 时读面切到 GET /media/trash，动作列换成「恢复 / 彻底删除」。 */
+const trashMode = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(12)
@@ -194,7 +229,13 @@ const columns = computed(() => [
   { title: t('media.colName'), key: 'name', dataIndex: 'name' },
   { title: t('media.colType'), key: 'type', dataIndex: 'type', width: 100 },
   { title: t('media.colSize'), key: 'size', dataIndex: 'size', width: 100 },
-  { title: t('media.colCreated'), key: 'created_at', dataIndex: 'created_at', width: 160 },
+  // 回收站里那列看的是"什么时候被删"，标题必须跟着换——沿用「创建时间」会把另一个读数贴上旧标签
+  {
+    title: trashMode.value ? t('media.colDeleted') : t('media.colCreated'),
+    key: 'created_at',
+    dataIndex: 'created_at',
+    width: 160,
+  },
   { title: t('media.colActions'), key: 'actions', width: 240 },
 ])
 
@@ -225,6 +266,8 @@ async function resolvePreviewUrl(id: string): Promise<string> {
 
 /** 为列表项按需加载预览 URL（图片缩略图 / 音视频详情播放）。 */
 function loadPreviews() {
+  // 回收站条目经现役内容面必 404（这正是"删掉了"的证据），不要去拉预览
+  if (trashMode.value) return
   for (const item of mediaItems.value) {
     if (item.url) continue
     void resolvePreviewUrl(item.id).then((url) => {
@@ -236,13 +279,15 @@ function loadPreviews() {
 async function fetchMedia() {
   loading.value = true
   try {
-    // F-1 契约对齐：GET /media/list（offset/limit 参数），响应 data.media/total/offset/limit；
-    // 台账 ③：搜索后端化，search 传服务端（匹配 filename/media_id），覆盖未加载条目。
-    const res = await mediaApi.listMedia({
-      agent_id: props.agentId,
-      media_type: typeFilter.value || undefined,
-      search: searchQuery.value.trim() || undefined,
-    })
+    // 库与回收站共用这一处装配：只换读接口（GET /media/list ↔ GET /media/trash），
+    // 映射、分页、失败提示都保持一份，不另起第二条取数路径。
+    const res = trashMode.value
+      ? await mediaApi.listTrash({ agent_id: props.agentId })
+      : await mediaApi.listMedia({
+          agent_id: props.agentId,
+          media_type: typeFilter.value || undefined,
+          search: searchQuery.value.trim() || undefined,
+        })
     const items = res?.data?.media ?? []
     mediaItems.value = items.map((m) => ({
       id: m.media_id,
@@ -251,6 +296,7 @@ async function fetchMedia() {
       url: '',
       size: m.size,
       created_at: m.created_at,
+      deleted_at: m.deleted_at,
     }))
     loadPreviews()
   } catch {
@@ -258,6 +304,19 @@ async function fetchMedia() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 回收站开关。切换即回到第一页并清空预览缓存——两侧的 object URL 不能互串：
+ * 回收站条目经 `GET /media/{id}` 必 404，留着旧缓存会显示成"图还在"。
+ */
+function toggleTrashMode() {
+  trashMode.value = !trashMode.value
+  currentPage.value = 1
+  previewUrls.forEach((url) => URL.revokeObjectURL(url))
+  previewUrls.clear()
+  mediaItems.value = mediaItems.value.map((item) => ({ ...item, url: '' }))
+  void fetchMedia()
 }
 
 /**
@@ -335,6 +394,60 @@ function confirmDelete(item: MediaItem) {
     onOk: async () => {
       try {
         await mediaApi.deleteMedia(item.id)
+        mediaItems.value = mediaItems.value.filter((m) => m.id !== item.id)
+        message.success(t('media.deleteSuccess'))
+      } catch {
+        message.error(t('media.deleteError'))
+      }
+    },
+  })
+}
+
+/** 移入回收站：后端只打标记、字节留盘，条目从现役读面消失并可从 /trash 读回。 */
+function confirmTrash(item: MediaItem) {
+  Modal.confirm({
+    title: t('media.confirmTrash'),
+    content: item.name,
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    onOk: async () => {
+      try {
+        await mediaApi.moveToTrash(item.id)
+        mediaItems.value = mediaItems.value.filter((m) => m.id !== item.id)
+        message.success(t('media.movedToTrash'))
+      } catch {
+        message.error(t('media.trashError'))
+      }
+    },
+  })
+}
+
+async function restoreItem(item: MediaItem) {
+  try {
+    await mediaApi.restoreMedia(item.id)
+    // 恢复后原字节要能被读到，缓存里那条"取不到"必须作废
+    const cached = previewUrls.get(item.id)
+    if (cached) {
+      URL.revokeObjectURL(cached)
+      previewUrls.delete(item.id)
+    }
+    message.success(t('media.restored'))
+    await fetchMedia()
+  } catch {
+    message.error(t('media.restoreError'))
+  }
+}
+
+/** 彻底删除：唯一会真删字节的回收站动作，标题与提示都按"不可恢复"说话。 */
+function confirmDeleteForever(item: MediaItem) {
+  Modal.confirm({
+    title: t('media.confirmDeleteForever'),
+    content: item.name,
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    onOk: async () => {
+      try {
+        await mediaApi.deleteMedia(item.id, 'permanent')
         mediaItems.value = mediaItems.value.filter((m) => m.id !== item.id)
         message.success(t('media.deleteSuccess'))
       } catch {

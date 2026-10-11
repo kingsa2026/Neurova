@@ -5,7 +5,8 @@
  * - listMedia → GET /media/list（offset/limit 参数；响应 data.media/total/offset/limit）；
  * - getMediaInfo → GET /media/{id}/metadata（原 /{id}/info 404）；
  * - downloadMedia → GET /media/download/{id}（原 /{id}/download 404）；
- * - batchDeleteMedia → POST /media/batch-delete，body { media_ids }（原 /batch-delete 404）；
+ * - batchDeleteMedia → POST /media/batch-delete，body { media_ids, mode }（原 /batch-delete 404；
+ *   mode 缺省 permanent，§6-158 起与单条 DELETE 同用一份模式口径）；
  * - saveMedia 必须携带后端必填的 media_type 表单字段（缺省 422）；
  * - getMediaStats 已移除（后端无 /stats?agent_id= 查询参数版本，UI 也无统计展示）。
  *
@@ -135,15 +136,35 @@ describe('详情 / 下载 / 删除（后端真实路由）', () => {
     expect(out).toBe(blob)
   })
 
-  it('deleteMedia 命中 DELETE /media/{id}', async () => {
+  it('deleteMedia 缺省打 DELETE /media/{id}?mode=permanent（默认档＝硬删，承诺不翻）', async () => {
     apiDelete.mockResolvedValue({ code: 0, message: 'ok', data: null })
     await mediaApi.deleteMedia('m1')
-    expect(apiDelete).toHaveBeenCalledWith('/media/m1')
+    expect(apiDelete).toHaveBeenCalledWith('/media/m1?mode=permanent')
+  })
+
+  it('moveToTrash = DELETE /media/{id}?mode=trash（软删要显式说出来，不做缺省翻转）', async () => {
+    apiDelete.mockResolvedValue({ code: 0, message: 'ok', data: null })
+    await mediaApi.moveToTrash('m1')
+    expect(apiDelete).toHaveBeenCalledWith('/media/m1?mode=trash')
+  })
+})
+
+describe('回收站读写面（后端 GET /media/trash 与 POST /media/{id}/restore，§6-158）', () => {
+  it('listTrash 命中 GET /media/trash 并带 agent_id 参数', async () => {
+    apiGet.mockResolvedValue({ code: 0, message: 'ok', data: { media: [], total: 0, offset: 0, limit: 50 } })
+    await mediaApi.listTrash({ agent_id: 'a1' })
+    expect(apiGet).toHaveBeenCalledWith('/media/trash', { params: { agent_id: 'a1' } })
+  })
+
+  it('restoreMedia 命中 POST /media/{id}/restore', async () => {
+    apiPost.mockResolvedValue({ code: 0, message: 'ok', data: { media_id: 'm1' } })
+    await mediaApi.restoreMedia('m1')
+    expect(apiPost).toHaveBeenCalledWith('/media/m1/restore')
   })
 })
 
 describe('batchDeleteMedia（后端 POST /media/batch-delete 契约）', () => {
-  it('以 { media_ids } 为 body 请求 /media/batch-delete，回报 succeeded/failed', async () => {
+  it('以 { media_ids, mode } 为 body 请求 /media/batch-delete，回报 succeeded/failed', async () => {
     const envelope = {
       code: 0,
       message: 'ok',
@@ -153,9 +174,21 @@ describe('batchDeleteMedia（后端 POST /media/batch-delete 契约）', () => {
 
     const res = await mediaApi.batchDeleteMedia(['m1', 'm2'])
 
-    expect(apiPost).toHaveBeenCalledWith('/media/batch-delete', { media_ids: ['m1', 'm2'] })
+    // mode 显式落进 body（缺省 permanent）：批量面与单条 DELETE 共用同一份模式口径，
+    // 不在前端留一个"看不见用的哪档"的隐式默认。
+    expect(apiPost).toHaveBeenCalledWith('/media/batch-delete',
+      { media_ids: ['m1', 'm2'], mode: 'permanent' })
     expect(res.data.succeeded).toEqual(['m1'])
     expect(res.data.failed[0].media_id).toBe('m2')
+  })
+
+  it('batchDeleteMedia(ids, "trash") 把模式原样带上', async () => {
+    apiPost.mockResolvedValue({ code: 0, message: 'ok', data: { succeeded: ['m1'], failed: [] } })
+
+    await mediaApi.batchDeleteMedia(['m1'], 'trash')
+
+    expect(apiPost).toHaveBeenCalledWith('/media/batch-delete',
+      { media_ids: ['m1'], mode: 'trash' })
   })
 })
 
