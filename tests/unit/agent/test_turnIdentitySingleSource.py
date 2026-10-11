@@ -64,6 +64,27 @@ WRITERS: Dict[str, Set[str]] = {
 #: 轮身份三通道（不含那条并行通道）——`set_turn_identity` 只该写这三条。
 TURN_IDENTITY = ("neurova_turn_user_input", "neurova_turn_session_id", "neurova_turn_user_id")
 
+#: 并行通道 `neurova_request_user_id` 的**读方台账**。
+#:
+#: 立账的缘由：§6-121 把这条通道的读面写成"两处（browser_manager / camofox_server_backend）"，
+#: 那条数是用 computer_use 目录筛出来的，不是全仓复算。本文件的探测器实测**八处**，
+#: 且各处的兜底口径不同（`or "default"` / `or "anonymous"` / 回落 `backend._user_id` /
+#: `or self._agent_identity()[0]` / 裸取无兜底）。合并与否必须按真读数裁——
+#: 按名推断裁会把成本归因、会话属主、MCP 身份三条不同的关注点当成"同一个用户键"一起搬走。
+#: 先钉住读面：多一处读点即红（少一处也要红，退役一条读点同样是一次口径变更）。
+READERS: Dict[str, Set[str]] = {
+    "neurova_request_user_id": {
+        "neurova/computer_use/browser_manager.py::BrowserManager._get_or_create_user_camofox_backend",
+        "neurova/computer_use/camofox_server_backend.py::CamofoxServerBackend._eff_user_id",
+        "neurova/llm/multi_model_client.py::MultiModelLLMClient._chat_single_attempt",
+        "neurova/llm/multi_model_client.py::MultiModelLLMClient.chat_stream",
+        "neurova/llm/multi_model_client.py::_consume_llm_quota",
+        "neurova/mem_core.py::MemCore.save_to_session",
+        "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
+        "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
+    },
+}
+
 #: 每条通道变量的**声明所在文件**（一条通道只许一处声明，否则连"是哪条通道"都有两说）。
 DECLARED_IN: Dict[str, str] = {
     "neurova_turn_user_input": "neurova/core/turn_context.py",
@@ -272,6 +293,31 @@ def senderIdReaders(source: str) -> int:
     return senderIdReadersIn(ast.parse(source))
 
 
+def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
+    """读 `get_request_user_id()` 的落点（`file::限定函数名`）。
+
+    并行通道只有写方入账、读方无人登记，是 §6-121 那句"读两处"被算错的根子：
+    实测这条通道上挂着八处生产读点，兜底口径各不相同（`or "default"` /
+    `or "anonymous"` / `or self._agent_identity()[0]` / 裸取）。合并与否要按真读数裁，
+    不能按名字推断裁——所以先把读面钉成台账，多一处读点即红。
+    """
+    parents = _parents(tree)
+    hits: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else (
+            func.attr if isinstance(func, ast.Attribute) else "")
+        if name == "get_request_user_id":
+            hits.append(f"{rel}::{_enclosingFunction(node, parents)}")
+    return hits
+
+
+def requestUserIdReaders(source: str, rel: str) -> List[str]:
+    return requestUserIdReadersIn(ast.parse(source), rel)
+
+
 _scan: Optional[Dict[str, Dict[str, object]]] = None
 
 
@@ -291,10 +337,21 @@ def scanProduction() -> Dict[str, Dict[str, object]]:
                 "writes": identityWritesIn(tree, rel),
                 "callers": setIdentityCallersIn(tree, rel),
                 "readers": senderIdReadersIn(tree),
+                "requestReaders": requestUserIdReadersIn(tree, rel),
                 "declared": declaredVars(tree),
             }
         _scan = out
     return _scan
+
+
+def liveReaderLedger() -> Dict[str, Set[str]]:
+    live: Dict[str, Set[str]] = {name: set() for name in READERS}
+    for entry in scanProduction().values():
+        for hit in entry["requestReaders"]:  # type: ignore[union-attr]
+            channel = "neurova_request_user_id"
+            if channel in live:
+                live[channel].add(hit)
+    return live
 
 
 def liveWriterLedger() -> Dict[str, Set[str]]:
@@ -345,6 +402,21 @@ class TestIdentityChannelsHaveOneWriter:
         assert drifted == [], (
             "身份通道的写方与台账不一致——多一处即第二条写入路径：\n" + "\n".join(drifted)
         )
+
+    def test_requestUserIdReadersMatchTheLedgerExactly(self):
+        """⑨ 并行通道的**读方**逐处入账：多一处、少一处都红。
+
+        立这格的动因是一次算错的读数：§6-121 写这条通道"读两处"，实为八处，
+        且兜底口径各不相同。合并两条"本轮哪个用户"的通道是个隔离语义的决定，
+        必须按真读数做——先把面钉住，别让下一个人在同样一个错数上拍板。
+        少一处也红：退役一条读点是同一次口径变更，不能悄悄发生。
+        """
+        live = liveReaderLedger()
+        drifted = [
+            f"  {name}: 台账 {sorted(READERS[name])} / 实测 {sorted(live[name])}"
+            for name in sorted(READERS) if live[name] != READERS[name]
+        ]
+        assert drifted == [], "并行通道的读方与台账不一致：\n" + "\n".join(drifted)
 
     def test_noIdentityChannelIsWrittenOutsideItsOwningModule(self):
         """② 旁路写点：在自己模块之外直接 `.set()` 一条身份通道即红。"""
@@ -416,6 +488,20 @@ class TestIdentityChannelsHaveOneWriter:
         )
         assert senderIdReaders("def g(m):\n    return m.sender_id\n") == 1, (
             "检出器对真实读点零命中——⑥ 会恒假"
+        )
+        assert set(requestUserIdReaders(
+            "from neurova.core.identity_context import get_request_user_id\n"
+            "def reader():\n    return get_request_user_id() or 'default'\n"
+            "def viaModule():\n"
+            "    from neurova.core import identity_context\n"
+            "    return identity_context.get_request_user_id()\n",
+            "synthetic.py",
+        )) == {"synthetic.py::reader", "synthetic.py::viaModule"}, (
+            "并行通道的读点没被抓出来——读方台账 ⑨ 会空转，第八处读点悄悄长出来无人知道"
+        )
+        assert requestUserIdReaders(
+            "def get_request_user_id():\n    return None\n", "s.py") == [], (
+            "把声明本身当成读点——读方台账会被定义处自己打红"
         )
 
 
