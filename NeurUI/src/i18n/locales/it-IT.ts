@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'Vincolato a {user}',
     identityObservedUnbound: 'Non vincolato',
     identityMineTitle: 'I miei vincoli attuali',
+    identityGroupScopeNote: 'La memoria raccolta in una chat di gruppo è condivisa a livello di gruppo: i membri vedono la memoria di quel gruppo. Le chat dirette restano isolate per account piattaforma (o per identità di canale senza vincolo).',
     genericFailure: 'Richiesta non riuscita: {reason}',
     enabledNotConnected: "Abilitato, non connesso",
     agentChannels: "Configurazione canali",

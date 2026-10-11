@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: 'مربوط بـ{user}',
     identityObservedUnbound: 'غير مربوط',
     identityMineTitle: 'عمليات الربط الحالية لدي',
+    identityGroupScopeNote: 'الذاكرة التي تتجمع في محادثة المجموعة مشتركة على مستوى المجموعة: يرى أعضاء المجموعة ذاتها ذاكرتهم في تلك المجموعة. أما المحادثات المباشرة فتبقى معزولة حسب حساب المنصة (أو هوية القناة دون ربط).',
     genericFailure: 'فشل الطلب: {reason}',
     enabledNotConnected: "مُفعّل غير متصل",
     agentChannels: "إعداد القنوات",

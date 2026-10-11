@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: '{user} にバインド済み',
     identityObservedUnbound: '未バインド',
     identityMineTitle: '現在バインドしているチャネルID',
+    identityGroupScopeNote: 'グループチャットで蓄積された記憶はグループ単位で共有されます。同じグループのメンバーは 互いのグループ内の記憶を閲覧できます。個人チャットはプラットフォームアカウント（未バインド時はチャネルID）単位で隔離されます。',
     genericFailure: 'リクエストに失敗しました: {reason}',
     enabledNotConnected: "有効・未接続",
     agentChannels: "チャネル設定",

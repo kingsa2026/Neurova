@@ -1484,6 +1484,7 @@ export default {
     identityObservedBoundOther: '已绑到 {user}',
     identityObservedUnbound: '未绑定',
     identityMineTitle: '我当前绑定的渠道身份',
+    identityGroupScopeNote: '群聊里沉淀的记忆按群共享：同一个群的成员会看到彼此在这个群里聊出来的记忆。单聊则按各自的平台账号隔离（未绑定时按各自的渠道身份）。',
     genericFailure: '请求失败：{reason}',
     enabledNotConnected: "已启用未连接",
     agentChannels: "渠道配置",

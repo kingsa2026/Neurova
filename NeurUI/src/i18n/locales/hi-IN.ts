@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: '{user} से बाइंड',
     identityObservedUnbound: 'अबाइंड',
     identityMineTitle: 'वर्तमान में मेरे बाइंडिंग',
+    identityGroupScopeNote: 'सामूहिक चैट में बनी मेमोरी समूह स्तर पर साझा होती है: एक ही समूह के सदस्य उस समूह की मेमोरी देख सकते हैं। व्यक्तिगत चैट प्लेटफ़ॉर्म खाते (बाइंड न होने पर चैनल पहचान) के अनुसार पृथक् रहती है।',
     genericFailure: 'अनुरोध विफल: {reason}',
     enabledNotConnected: "सक्रिय, अनुबंधित नहीं",
     agentChannels: "चैनल कॉन्फ़िगरेशन",

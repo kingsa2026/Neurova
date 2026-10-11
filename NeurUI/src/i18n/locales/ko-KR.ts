@@ -1474,6 +1474,7 @@ export default {
     identityObservedBoundOther: '{user}에 바인딩됨',
     identityObservedUnbound: '미바인딩',
     identityMineTitle: '현재 바인딩한 채널 신원',
+    identityGroupScopeNote: '그룹 채팅에 쌓인 기억은 그룹 단위로 공유됩니다. 같은 그룹 구성원은 서로의 그룹 기억을 볼 수 있습니다. 1:1 채팅은 플랫폼 계정(미바인딩 시 채널 신원) 단위로 격리됩니다.',
     genericFailure: '요청 실패: {reason}',
     enabledNotConnected: "활성화, 미연결",
     agentChannels: "채널 구성",
