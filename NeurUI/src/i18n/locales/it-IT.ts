@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'Svincola',
     identityDenied: 'Non hai il permesso di visualizzare i vincoli di questo agente',
     identityFailed: 'Richiesta non riuscita: {reason}',
-    identityObservedTitle: 'Mittenti visti da questo agente (sola lettura: il vincolo richiede ancora l\'invio del codice in quel canale)',
+    identityObservedTitle: 'Mittenti visti da questo agente negli ultimi 90 giorni (fino a 200 righe; sola lettura: il vincolo richiede ancora l\'invio del codice in quel canale)',
     identityObservedEmpty: 'Questo agente non ha ancora ricevuto messaggi dai canali',
     identityObservedBoundMe: 'Vincolato a me',
     identityObservedBoundOther: 'Vincolato a {user}',

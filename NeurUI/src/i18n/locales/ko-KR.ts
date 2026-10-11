@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: '해제',
     identityDenied: '이 에이전트의 채널 신원 바인딩을 볼 권한이 없습니다',
     identityFailed: '요청 실패: {reason}',
-    identityObservedTitle: '이 에이전트가 각 채널에서 확인한 발신자 (읽기 전용 - 바인딩은 해당 채널에서 코드 메시지를 전송해야 합니다)',
+    identityObservedTitle: '이 에이전트가 최근 90일間に 확인한 발신자 (최대 200행; 읽기 전용 - 바인딩은 해당 채널에서 코드 메시지를 전송해야 합니다)',
     identityObservedEmpty: '이 에이전트의 채널에서 아직 메시지를 받지 않았습니다',
     identityObservedBoundMe: '나에게 바인딩됨',
     identityObservedBoundOther: '{user}에 바인딩됨',

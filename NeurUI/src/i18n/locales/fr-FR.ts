@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'Délier',
     identityDenied: 'Vous n\'êtes pas autorisé à consulter les liaisons de cet agent',
     identityFailed: 'Échec de la requête : {reason}',
-    identityObservedTitle: 'Expéditeurs vus par cet agent (lecture seule - la liaison exige toujours d\'envoyer le code dans ce canal)',
+    identityObservedTitle: 'Expéditeurs vus par cet agent au cours des 90 derniers jours (200 lignes max ; lecture seule - la liaison exige toujours d\'envoyer le code dans ce canal)',
     identityObservedEmpty: 'Cet agent n\'a pas encore reçu de messages dans ses canaux',
     identityObservedBoundMe: 'Lié à moi',
     identityObservedBoundOther: 'Lié à {user}',

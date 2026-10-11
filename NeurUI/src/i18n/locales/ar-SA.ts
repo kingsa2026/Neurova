@@ -1468,7 +1468,7 @@ export default {
     identityRevoke: 'إلغاء الربط',
     identityDenied: 'ليست لديك صلاحية عرض عمليات ربط هذا الوكيل',
     identityFailed: 'فشل الطلب: {reason}',
-    identityObservedTitle: 'المرسلون الذين رآهم هذا الوكيل (للقراءة فقط؛ الربط ما زال يستلزم إرسال الرسالة ذات الرمز في تلك القناة)',
+    identityObservedTitle: 'المرسلون الذين رآهم هذا الوكيل خلال 90 يومًا الماضية (حتى 200 صف؛ للقراءة فقط - الربط ما زال يستلزم إرسال الرسالة ذات الرمز في تلك القناة)',
     identityObservedEmpty: 'لم يستلم هذا الوكيل أي رسالة عبر القنوات بعد',
     identityObservedBoundMe: 'مربوط بي',
     identityObservedBoundOther: 'مربوط بـ{user}',
