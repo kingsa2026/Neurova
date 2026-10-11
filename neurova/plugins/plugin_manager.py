@@ -27,25 +27,9 @@ from typing import Any, Dict, List, Optional, Type
 import yaml
 from neurova.core.data_root import dataPath
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.plugins.plugin_errors import PluginError  # noqa: F401  (既有 import 面继续可用)
 
 logger = get_logger(__name__)
-
-
-class PluginError(Exception):
-    """插件操作失败——**成因是结构化字段，不被折成一个布尔**。
-
-    原实现每条路径都是 `except Exception: return False`：调用方拿到 False 却无从知道
-    是"根外路径""缺 manifest""依赖不满足"还是"构造报 TypeError"，而端点那侧只能把
-    这个 False 统一画成"失败"（§6-126 那一族：把不同的故障折成同一个结论）。
-    `reason` 是封闭集合，端点按它映射 HTTP 语义（见 `api/endpoints/plugin.py`）。
-    布尔门面 `install_plugin` / `load_plugin` 保留给批量入口与既有调用方，
-    它们只是本异常的一层薄壳（同一实现，不是第二份口径，教义第 6 条）。
-    """
-
-    def __init__(self, reason: str, detail: str = ""):
-        self.reason = reason
-        self.detail = detail
-        super().__init__("[%s] %s" % (reason, detail))
 
 
 @dataclass
@@ -286,6 +270,7 @@ class PluginManager:
 
         self._plugins[name] = record
         self._manifests[name] = manifest
+        self._lifecycleEvent("after_install", name)
         logger.info("Installed plugin: %s v%s", record.name, record.version)
         return record
 
@@ -304,12 +289,26 @@ class PluginManager:
             return False
 
         try:
+            self._lifecycleEvent("before_uninstall", plugin_name)
+            # 先关 HTTP 面（带审计与授权撤销），再禁用/卸载
+            self._teardownRoutes(plugin_name, note="uninstall")
             # 先禁用和卸载
             if self._plugins[plugin_name].enabled:
                 self.disable_plugin(plugin_name)
 
             if self._plugins[plugin_name].loaded:
                 self.unload_plugin(plugin_name)
+
+            # 人的决定不能留在库里等下一个同名插件白捡：授予与挂载授权同批摘掉。
+            # 落点在 manager 而不是端点——`uninstall_all()` 与任何脚本路径都得同样生效。
+            from neurova.plugins.plugin_permissions import getPermissionStore
+
+            try:
+                getPermissionStore().dropPlugin(plugin_name)
+            except PluginError as exc:
+                if exc.reason != "grants_store_corrupt":
+                    raise
+                logger.error("授予文件读不出（%s）——插件记录已删，孤儿授权需人工复核", exc.detail)
 
             # 删除插件记录
             del self._plugins[plugin_name]
@@ -319,6 +318,7 @@ class PluginManager:
                 del self._modules[plugin_name]
             self._manifests.pop(plugin_name, None)
 
+            self._lifecycleEvent("after_uninstall", plugin_name)
             logger.info("Uninstalled plugin: %s", plugin_name)
             return True
 
@@ -369,8 +369,56 @@ class PluginManager:
         self._modules[plugin_name] = {"module": module, "instance": instance, "class": plugin_class}
         record.loaded = True
         record.load_time = time.time()
+        self._registerDeclaredEndpoints(plugin_name, instance)
+        self._lifecycleEvent("after_load", plugin_name)
         logger.info("Loaded plugin: %s", plugin_name)
         return instance
+
+    def _registerDeclaredEndpoints(self, plugin_name: str, instance: Any) -> List[Dict[str, Any]]:
+        """把清单声明的端点连同**解析出的 handler** 登记进 `PluginAPIRegistry`（唯一存储）。
+
+        这是 P2 挂载侧与「插件自己注册路由」两条路的共同入口：声明在这里一次性收成
+        `PluginEndpoint`（`method/path/handler/…`），挂载侧只从注册器取，不再回头读清单——
+        两处各读一份就是教义第 7 没闭环。
+        解析不出来的声明（handler 名不存在/不可调用）不当 warning 过：登记成
+        `handler=None` 的条目，让挂载侧按 `handler_missing` 响亮拒绝（全有或全无）。
+        """
+        from neurova.plugins.base_plugin import APIEndpoint
+        from neurova.plugins.plugin_api_registry import get_plugin_api_registry
+
+        registry = get_plugin_api_registry()
+        registry.unregister_plugin(plugin_name)
+
+        registered: List[Dict[str, Any]] = []
+        for raw in self.declaredEndpoints(plugin_name):
+            spec = APIEndpoint.from_dict(raw if isinstance(raw, dict) else {})
+            handler = getattr(instance, spec.handler_name, None) if spec.handler_name else None
+            registry.register_route(
+                plugin_id=plugin_name,
+                path=spec.path,
+                method=spec.method or "GET",
+                handler=handler,
+                handler_name=spec.handler_name,
+                description=spec.description,
+                tags=spec.tags,
+                auth_required=bool(raw.get("auth_required", True)) if isinstance(raw, dict) else True,
+            )
+            registered.append({"method": (spec.method or "GET").upper(), "path": spec.path,
+                               "handler_resolved": callable(handler)})
+        return registered
+
+    def declaredPermissionsOf(self, plugin_name: str) -> List[str]:
+        """清单声明的权限值（原样收成字符串）。
+
+        认不出的声明**保留**而不是丢弃：丢弃会让「声明了一个拼错的权限」的插件
+        变成「什么都没声明」，聚合门反而放行——不认识的项没人能确认，留在 pending 里
+        才是安全侧。
+        """
+        out: List[str] = []
+        for item in (self._manifests.get(plugin_name) or {}).get("required_permissions") or []:
+            out.append(item.value if hasattr(item, "value") else str(item))
+        return out
+
 
     def _instantiate(self, plugin_class: Type, plugin_name: str) -> Any:
         """按构造签名实例化——作者基类要 manifest，普通类可以无参。"""
@@ -412,18 +460,74 @@ class PluginManager:
         return self._get_dependents(plugin_name)
 
     def declaredEndpoints(self, plugin_name: str) -> List[Dict[str, Any]]:
-        """插件在清单里声明的 API 端点（P1 只登记读数，不挂进活 app——见 `routesMounted`）。"""
+        """插件在清单里声明的 API 端点原文（挂载用的是注册器里已绑定 handler 的那份）。"""
         raw = self._manifests.get(plugin_name) or {}
         return list(raw.get("api_endpoints") or [])
 
-    @staticmethod
-    def routesMounted() -> tuple:
-        """路由挂载状态的单点读数：P1 恒为「未挂载」并给出成因。
+    def routesMounted(self, plugin_name: str) -> tuple:
+        """该插件的路由挂载实态读数（单点判据在 `plugin_route_mount.mountState`）。
 
-        这条读数存在的意义是**不让 modules 面看起来像已生效**——
-        装载与"插件可注册 HTTP 路由"是两次授权，后者属 P2 的权限门。
+        P1 时这里是恒 `(False, 成因)` 的常量——它存在的意义是不让 `loaded` 被读成
+        「路由已生效」。P2 之后它跟随活 app 的路由表：挂着就 True，没挂就点名卡在哪一步
+        （未授权 / 未确认 / 无 HTTP 栈），因此不再需要「P1/P2」这类阶段说辞。
         """
-        return False, "P1 只接通动态装载；插件声明的端点未挂进运行中的 app（权限门与审计属 P2）"
+        from neurova.plugins import plugin_route_mount
+
+        return plugin_route_mount.mountState(plugin_name)
+
+    def mountedRoutes(self, plugin_name: str) -> List[str]:
+        from neurova.plugins import plugin_route_mount
+
+        return plugin_route_mount.mountedPaths(plugin_name)
+
+    def authEscalationDeclined(self, plugin_name: str) -> List[str]:
+        from neurova.plugins import plugin_route_mount
+
+        return plugin_route_mount.authEscalationDeclined(plugin_name)
+
+    async def startPlugin(self, plugin_name: str) -> bool:
+        """跑 `BasePlugin.initialize()/start()`（作者的四个抽象钩子第一次有调用者）。
+
+        原实现只在 enable/unload 里 `instance.on_enable()` / `on_disable()`——基类上
+        **没有这两个方法**，于是 `hasattr(...)` 恒 False，生命周期从来没跑过；
+        而 `initialize/start/stop/destroy` 是 async，同步的 `load_plugin` 里没法 await，
+        所以整条钩子链是零调用者。挂载动作发生在 async 端点上，是这条链的天然入口。
+        """
+        instance = self.get_module(plugin_name)
+        if instance is None:
+            raise PluginError("entry_not_loaded", "插件未装载，没有实例可启动：%s" % plugin_name)
+        await self._driveLifecycle(instance, "initialize")
+        await self._driveLifecycle(instance, "start")
+        return True
+
+    async def stopPlugin(self, plugin_name: str) -> bool:
+        instance = self.get_module(plugin_name)
+        if instance is None:
+            return False
+        await self._driveLifecycle(instance, "stop")
+        await self._driveLifecycle(instance, "destroy")
+        return True
+
+    @staticmethod
+    async def _driveLifecycle(instance: Any, method: str) -> None:
+        target = getattr(instance, method, None)
+        if target is None:
+            return  # 非 BasePlugin 形态的插件类没有这条钩子：不假装跑过
+        outcome = target()
+        if inspect.isawaitable(outcome):
+            await outcome
+
+    def _lifecycleEvent(self, eventValue: str, plugin_name: str) -> None:
+        """把管理动作投给 `plugin_lifecycle`（此前那份模块在生产侧零调用者）。"""
+        from neurova.plugins.plugin_lifecycle import LifecycleEvent, execute_lifecycle_event
+
+        try:
+            event = LifecycleEvent(eventValue)
+        except ValueError:
+            logger.warning("未登记的生命周期事件 %r——不投" % eventValue)
+            return
+        execute_lifecycle_event(event, plugin_name)
+
 
     def _load_plugin_module(self, record: PluginRecord) -> Optional[Any]:
         """
@@ -507,6 +611,8 @@ class PluginManager:
             return True
 
         try:
+            # 先关 HTTP 面再拆实例：反过来会有一小段「路由还在、handler 背后的模块已被摘掉」
+            self._teardownRoutes(plugin_name, note="unload")
             # 获取插件实例
             if plugin_name in self._modules:
                 instance = self._modules[plugin_name].get("instance")
@@ -519,8 +625,15 @@ class PluginManager:
                 sys.modules.pop("neurova_plugin_%s" % plugin_name, None)
                 del self._modules[plugin_name]
 
+            # handler 绑定的是刚摘掉的那个模块，登记必须同批清（否则下一次挂载
+            # 拿到的是上一次进程里的死对象）
+            from neurova.plugins.plugin_api_registry import get_plugin_api_registry
+
+            get_plugin_api_registry().unregister_plugin(plugin_name)
+
             # 更新记录
             record.loaded = False
+            self._lifecycleEvent("after_unload", plugin_name)
 
             logger.info("Unloaded plugin: %s", plugin_name)
             return True
@@ -528,6 +641,15 @@ class PluginManager:
         except Exception as e:
             logger.error("Failed to unload plugin %s: %s", plugin_name, e)
             return False
+
+    def _teardownRoutes(self, plugin_name: str, *, note: str, actor: str = "") -> int:
+        """把插件的 HTTP 面从活 app 上关干净（无 app / 无挂载时静默 0，不是失败）。"""
+        from neurova.plugins import plugin_route_mount
+
+        mounted, _reason = plugin_route_mount.mountState(plugin_name)
+        if not mounted:
+            return 0
+        return plugin_route_mount.unmountPluginRoutes(plugin_name, actor=actor, note=note)
 
     def enable_plugin(self, plugin_name: str) -> bool:
         """
@@ -564,6 +686,7 @@ class PluginManager:
                 if instance and hasattr(instance, "on_enable"):
                     instance.on_enable()
 
+            self._lifecycleEvent("after_enable", plugin_name)
             logger.info("Enabled plugin: %s", plugin_name)
             return True
 
@@ -601,12 +724,17 @@ class PluginManager:
             # 禁用插件
             record.enabled = False
 
+            # HTTP 面同批关掉：禁用不是读数，是可执行的动作——只翻布尔的话，
+            # 面板显示「已禁用」而流量照旧进得来。
+            self._teardownRoutes(plugin_name, note="disable")
+
             # 如果已加载，调用 on_disable
             if record.loaded and plugin_name in self._modules:
                 instance = self._modules[plugin_name].get("instance")
                 if instance and hasattr(instance, "on_disable"):
                     instance.on_disable()
 
+            self._lifecycleEvent("after_disable", plugin_name)
             logger.info("Disabled plugin: %s", plugin_name)
             return True
 

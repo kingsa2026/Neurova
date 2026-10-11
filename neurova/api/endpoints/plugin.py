@@ -12,9 +12,15 @@ P1 接通的是**装载**，边界写死在这里：
 - 装载源必须在**插件根**（数据根下的 `plugins/`）内。请求方能指定的只有"根里哪个目录"，
   不能指定任意磁盘路径——那等于开放任意代码执行（`PluginManager.resolveInstallSource`）。
 - 远程下载/安装（`https://…`）**未实装**，直接 501 点名，不再像原实现那样落进一条
-  不可达分支后假装失败。供应链校验（源、哈希/签名、权限确认、回滚）属后续批次。
-- 插件在 manifest 里声明的 API 端点**不挂进运行中的 app**：`routes_mounted` 恒为
-  `false` 并带成因。装载与"插件可注册路由"是两次授权，后者要 P2 的权限门与审计先把。
+  不可达分支后假装失败。供应链校验（源、哈希/签名、权限确认、回滚）属 P3。
+- 插件声明的 API 端点**要经第二次授权才挂进运行中的 app**：`POST /{id}/routes/mount`
+  （admin）。门在 `neurova/plugins/plugin_route_mount.py`——enabled + loaded + 清单声明的
+  权限**逐项确认过**（`GET /{id}/permissions` 读还差哪几项），且只落在
+  `/api/v1/plugin-api/{id}/` 命名空间里、一律带身份门。`routes_mounted` 跟随活路由表。
+- 权限授予/撤销与挂载放行都进既有审计面（`log_audit`，`PERMISSION_CHANGE` / `SECURITY_EVENT`），
+  并落盘在数据根 `plugins/permissions.json`——那是人的决定，不能随进程走。
+- ⚠ 这套**不是沙箱**：能装载即能在进程内执行任意代码。这里给的是能力面的准入与留痕，
+  口径见 `plugin_permissions.PERMISSION_MODEL` 的三档（含 `never_grantable` 两项）。
 
 `plugin_id` 就是 manifest 里的 `name`（`PluginManager` 的键）；两者不一致时报 400 而不是静默改名。
 """
@@ -25,8 +31,23 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user
+from neurova.api.deps import require_admin
 from neurova.core.logger import get_logger
-from neurova.plugins.plugin_manager import PluginError, PluginManager, get_plugin_manager
+from neurova.plugins import plugin_permissions, plugin_route_mount
+from neurova.plugins.plugin_manager import PluginError, get_plugin_manager
+from neurova.plugins.plugin_manifest import PluginPermission
+from neurova.plugins.plugin_permissions import PermissionTier, grantablePermissions
+
+
+def getPermissionStore():
+    """授予存储的唯一取用扇——**经模块属性**取，不 import 名字副本。
+
+    直接 `from ... import getPermissionStore` 会在本模块绑死那一份函数对象，
+    测试注入 tmp 存储（以及任何后续的单点替换）就打不到这里，于是出现
+    「端点写的是真数据根、夹具读的是 tmp」两份事实（台账踩坑记录里的同族形态）。
+    """
+    return plugin_permissions.getPermissionStore()
+
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -45,7 +66,26 @@ _REASON_TO_STATUS = {
     "entry_not_loaded": 500,       # 插件自身缺陷（入口缺失/执行报错）
     "no_plugin_class": 500,
     "instantiate_failed": 500,
+    # ── P2：权限门与挂载门面 ──
+    "permission_not_granted": 403,     # 框架中介点上的实时拒绝（事件总线）
+    "permission_not_declared": 400,    # 清单没声明的权限不给授予（防「先授予后声明」）
+    "permission_not_grantable": 403,   # never_grantable 档：要命令面/管理员面的插件
+    "permissions_unconfirmed": 409,    # 聚合门：声明 ⊄ 已确认，还差哪几项写在 detail 里
+    "unknown_permission": 400,
+    "not_granted": 404,                # 撤销一条本来就没有的授予
+    "grants_store_corrupt": 500,       # 授权文件读不出：不静默当「谁都没授予过」
+    "grants_store_unwritable": 500,
+    "audit_write_failed": 500,         # 审计写不进＝变更回滚（权限变更必须可追溯到人）
+    "no_app_context": 500,             # 没有活 HTTP 栈，谈不上挂载
+    "path_out_of_namespace": 400,      # 挂载边界：只能落在插件自己的命名空间
+    "path_conflict": 409,
+    "endpoint_method_invalid": 400,
+    "endpoint_auth_invalid": 400,
+    "handler_missing": 400,            # 声明的 handler 名在插件类上取不到
+    "no_declared_endpoints": 400,
+    "routes_still_live": 500,          # 摘除后活路由表里还有：HTTP 面没真的关掉
 }
+
 
 
 def _statusFor(exc: PluginError) -> int:
@@ -77,7 +117,8 @@ def _pluginView(name: str) -> dict:
     """把一个插件拼成端点读数（唯一形态，供列表/详情/状态复用）。
 
     `status` 由 `enabled` 派生而不是另存一份布尔——原实现两处各写各的，
-    `enabled` 与 `status` 会分叉。
+    `enabled` 与 `status` 会分叉。`routes_mounted` 读的是活 app 的路由表
+    （`plugin_route_mount.mountState`），不是任何布尔字段。
     """
     manager = get_plugin_manager()
     record = manager.get_plugin(name)
@@ -89,10 +130,20 @@ def _pluginView(name: str) -> dict:
     view["status"] = "enabled" if record.enabled else "disabled"
     raw = manager.manifestDict(name)
     view["type"] = raw.get("plugin_type", "custom")
-    mounted, reason = PluginManager.routesMounted()
+    mounted, reason = manager.routesMounted(name)
     view["routes_mounted"] = mounted
     view["routes_reason"] = reason
+    view["mounted_routes"] = manager.mountedRoutes(name)
+    view["auth_escalation_declined"] = manager.authEscalationDeclined(name)
     view["declared_endpoints"] = manager.declaredEndpoints(name)
+
+    store = getPermissionStore()
+    declared = manager.declaredPermissionsOf(name)
+    view["declared_permissions"] = sorted(declared)
+    view["granted_permissions"] = store.grantedFor(name)
+    view["pending_permissions"] = store.pendingFor(name)
+    view["orphaned_permissions"] = store.orphanedFor(name)
+    view["mount_authorized"] = store.mountAuthorized(name)
     return view
 
 
@@ -297,6 +348,127 @@ async def disable_plugin(plugin_id: str):
 
     logger.info("Plugin disabled: %s", plugin_id)
     return {"code": 0, "message": "Plugin disabled", "data": _pluginView(plugin_id)}
+
+
+@router.get("/permissions/model")
+async def get_permission_model():
+    """八项权限的口径表（档位/授予后放行什么/强制点）——管理面渲染「逐项确认」用的就是这一份。
+
+    存在意义是不让前端自己抄一份枚举语义（教义第 6 条）：档位改这里，面板跟着变。
+    """
+    model = plugin_permissions.PERMISSION_MODEL
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "tiers": [t.value for t in PermissionTier],
+            "grantable": grantablePermissions(),
+            "items": [
+                {
+                    "permission": spec.permission.value,
+                    "tier": spec.tier.value,
+                    "unlocks": spec.unlocks,
+                    "enforced_at": spec.enforcedAt or "",
+                }
+                for spec in (model[p] for p in PluginPermission)
+            ],
+        },
+    }
+
+
+@router.get("/{plugin_id}/permissions")
+async def get_plugin_permissions(plugin_id: str):
+    """逐插件的确认状态：声明了什么、确认了什么、还差什么。"""
+    manager = get_plugin_manager()
+    if not manager.has_plugin(plugin_id):
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
+
+    store = getPermissionStore()
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "plugin_id": plugin_id,
+            "declared": sorted(manager.declaredPermissionsOf(plugin_id)),
+            "granted": store.grantedFor(plugin_id),
+            "pending": store.pendingFor(plugin_id),
+            "orphaned": store.orphanedFor(plugin_id),
+            "mount_authorized": store.mountAuthorized(plugin_id),
+            "mount_authorized_by": store.grantedMountActor(plugin_id),
+            "routes_mounted": manager.routesMounted(plugin_id)[0],
+        },
+    }
+
+
+@router.post("/{plugin_id}/permissions/{permission}/grant",
+             dependencies=[Depends(require_admin())])
+async def grant_plugin_permission(plugin_id: str, permission: str,
+                                  user: dict = Depends(get_current_user)):
+    """逐项确认一项**清单里声明过**的权限（admin）。授予落盘并进审计。"""
+    manager = get_plugin_manager()
+    if not manager.has_plugin(plugin_id):
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
+    try:
+        record = getPermissionStore().grant(plugin_id, permission,
+                                            grantedBy=str(user.get("user_id", "")))
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
+    return {"code": 0, "message": "Permission granted",
+            "data": {"plugin_id": plugin_id, "permission": permission, **record}}
+
+
+@router.post("/{plugin_id}/permissions/{permission}/revoke",
+             dependencies=[Depends(require_admin())])
+async def revoke_plugin_permission(plugin_id: str, permission: str,
+                                   user: dict = Depends(get_current_user)):
+    """撤销一项确认，并**当场复核挂载**：门不再过就把路由摘掉，不留「说撤销了、流量照旧」。"""
+    manager = get_plugin_manager()
+    if not manager.has_plugin(plugin_id):
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
+    actor = str(user.get("user_id", ""))
+    try:
+        record = getPermissionStore().revoke(plugin_id, permission, grantedBy=actor)
+        recheck = plugin_route_mount.reevaluateMount(plugin_id, actor=actor)
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
+    return {"code": 0, "message": "Permission revoked",
+            "data": {"plugin_id": plugin_id, "permission": permission,
+                     "mount_reevaluation": recheck, **record}}
+
+
+@router.post("/{plugin_id}/routes/mount", dependencies=[Depends(require_admin())])
+async def mount_plugin_routes(plugin_id: str, user: dict = Depends(get_current_user)):
+    """第二次授权：把这个插件声明的端点挂进运行中的 app（admin）。
+
+    挂之前先 `await startPlugin()`——作者的 `on_initialize/on_start` 钩子在此获得唯一调用者，
+    而钩子里的订阅/发布会过事件权限门（`framework_enforced` 两档）。
+    """
+    manager = get_plugin_manager()
+    if not manager.has_plugin(plugin_id):
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
+    actor = str(user.get("user_id", ""))
+    try:
+        await manager.startPlugin(plugin_id)
+        outcome = plugin_route_mount.mountPluginRoutes(plugin_id, actor=actor)
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
+    return {"code": 0, "message": "Plugin routes mounted", "data": outcome}
+
+
+@router.post("/{plugin_id}/routes/unmount", dependencies=[Depends(require_admin())])
+async def unmount_plugin_routes(plugin_id: str, user: dict = Depends(get_current_user)):
+    """关掉这个插件的 HTTP 面：从活路由表摘除 + 撤销挂载授权 + 审计。"""
+    manager = get_plugin_manager()
+    if not manager.has_plugin(plugin_id):
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
+    try:
+        removed = plugin_route_mount.unmountPluginRoutes(
+            plugin_id, actor=str(user.get("user_id", "")), note="explicit unmount")
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
+    return {"code": 0, "message": "Plugin routes unmounted",
+            "data": {"plugin_id": plugin_id, "removed": removed,
+                     "mount_authorized": getPermissionStore().mountAuthorized(plugin_id)}}
 
 
 @router.get("/market/{market_plugin_id}")
