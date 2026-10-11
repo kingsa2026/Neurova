@@ -27,6 +27,8 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(() => Promise.resolve()) }),
 }))
 const listChannelIdentityBindings = vi.fn().mockResolvedValue({ bindings: [] })
+const listObservedChannelSenders = vi.fn().mockResolvedValue({ senders: [] })
+const listMyChannelIdentityBindings = vi.fn().mockResolvedValue({ user_id: 'u1', bindings: [] })
 vi.mock('@/api/modules/channel-configs', () => ({
   listChannelConfigs: vi.fn().mockResolvedValue([]),
   createChannelConfig: vi.fn().mockResolvedValue({}),
@@ -36,6 +38,8 @@ vi.mock('@/api/modules/channel-configs', () => ({
   listChannelIdentityBindings: (...a: unknown[]) => listChannelIdentityBindings(...a),
   issueChannelBindingCode: vi.fn().mockResolvedValue({ code: '123456' }),
   revokeChannelIdentityBinding: vi.fn().mockResolvedValue({ revoked: true }),
+  listObservedChannelSenders: (...a: unknown[]) => listObservedChannelSenders(...a),
+  listMyChannelIdentityBindings: (...a: unknown[]) => listMyChannelIdentityBindings(...a),
 }))
 vi.mock('@/api/modules/negative-screen', () => ({
   getNegativeScreenConfig: vi.fn().mockResolvedValue({ enabled: false }),

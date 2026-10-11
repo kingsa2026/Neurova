@@ -219,6 +219,42 @@ export function listChannelIdentityBindings(agentId?: string) {
   })
 }
 
+/**
+ * 该 agent 各渠道**观察到过**的发送者（批 6 的读面）。
+ *
+ * 只读。列进这一面**不产生**绑定授权——绑定唯一的写入口仍是渠道里那句带码的消息，
+ * 因为只有发得出消息的人才证明得了"我就是这个渠道身份"。
+ */
+export interface ObservedChannelSender {
+  agent_id: string
+  channel_type: string
+  channel_user_id: string
+  namespace: string
+  display_name?: string | null
+  first_seen: number
+  last_seen: number
+  /** 这格当前的归属；null＝未绑定（不是"绑定失败"）。 */
+  bound_user_id?: string | null
+  bound_neuser_id?: string | null
+}
+
+export function listObservedChannelSenders(agentId?: string, channelType?: string) {
+  return api.get<{ senders: ObservedChannelSender[] }>(`${BASE}/identity/observed`, {
+    params: {
+      ...(agentId ? { agent_id: agentId } : {}),
+      ...(channelType ? { channel_type: channelType } : {}),
+    },
+  })
+}
+
+/** 我这个平台账号在该 agent 下挂了哪些渠道身份（裁定 ① 的正向读面）。 */
+export function listMyChannelIdentityBindings(agentId?: string) {
+  return api.get<{ user_id: string; bindings: { channel_type: string; channel_user_id: string; display_name?: string | null }[] }>(
+    `${BASE}/identity/bindings/mine`,
+    { params: agentId ? { agent_id: agentId } : {} },
+  )
+}
+
 export function issueChannelBindingCode(agentId: string, channelType: string) {
   return api.post<ChannelBindingCode>(`${BASE}/identity/bindings/code`, {
     agent_id: agentId,

@@ -148,6 +148,13 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 只带一个键名过去会复现不出控制台写入的那把键，等于同一个人两份记忆。
         meta["memory_scope"] = {"neuser_id": turnIdentity["neuser_id"],
                                 "user_id": turnIdentity["user_id"]}
+        # 观察面（工单批 6）：每条入站都记下"这个 agent 的这条渠道里见过这个发送者"。
+        # 控制台的绑定面板只能靠这一面列人——人抄不到自己的 `ou_xxx`/`tg_xxx`，
+        # 而发码之前他得先知道"我在飞书里那个身份"是哪一格。写侧就在这一行，读侧是
+        # `GET /channel-configs/identity/observed`。
+        UserIdentityManager().observeSender(
+            agent_id, message.channel_type, str(meta["channel_user_id"]),
+            str(meta.get("channel_name") or "") or None)
         # 可信轮次来源（任务2 actionability 门控地基）：默认 human——人类/未标注一律
         # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
         sender_is_bot = _detect_sender_is_bot(message)
