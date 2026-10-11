@@ -118,13 +118,15 @@
 - `shared_core/execution_engine.py`
 - ~~`plugins/plugin_manifest.py`~~、~~`plugins/plugin_manager.py`~~、
   ~~`plugins/plugin_lifecycle.py`~~、~~`plugins/base_plugin.py`~~、
-  ~~`plugins/plugin_api_registry.py`~~ —— 已整批删除（2026-10-10 用户裁定「不做插件体系」，
-  台账 §6-131，落地 `e95d3a76`）：包 2206 行、生产侧包外 import 复算为 0；
-  删掉的是"第三方插件装载"这项能力（唯一实装在 `plugin_manager.py:377-384` 的
-  `spec_from_file_location` + `exec_module`，另有 semver/权限/生命周期钩子），
-  不是残留——所以走裁定而非走清单。`/v1/plugins` 端点作为记账面保留，
-  其模块 docstring 已写明"只记账、不加载"，防再生判据
-  `tests/unit/plugins/test_pluginSystemRetired.py`
+  ~~`plugins/plugin_api_registry.py`~~ —— **本条已作废**：2026-10-10 裁「不做插件体系」并落地
+  `e95d3a76`（包 2206 行整批删除），同日 2026-10-11 用户改裁「做插件体系并接线」，
+  包体连同其专用测试按历史版本取回、`/v1/plugins` 端点改走真动态装载（落地 `fed108a0`，台账 §6-150）。
+  因此这里不再是"已删除"，而是一段**被推翻的裁定**：留原文与划线的意义在于它记着
+  "删掉的是能力不是残留"这个判断本身没错——错的是那次裁定，不是那次取证。
+  当时那句"唯一实装在 `plugin_manager.py:377-384`"经复算成立，但取回后实测又发现该实现
+  自己也跑不通（`plugin_class()` 无参构造 vs `BasePlugin.__init__(self, manifest)`），
+  已随接线的同一批改掉。防再生判据 `tests/unit/plugins/test_pluginSystemRetired.py`
+  随裁定撤销一并删除，换成钉"装载是真的、边界是真的"的 `test_pluginLoadIsReal.py`
 - `performance.py`
 - `error_logger.py`
 - `shared_config.py`
