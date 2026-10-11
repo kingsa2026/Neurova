@@ -19,9 +19,11 @@ Media Storage API - 媒体存储管理接口
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
+import hashlib
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -77,6 +79,10 @@ _INDEX_FILE = os.environ.get("NEUROVA_MEDIA_INDEX_PATH") or dataPath("media_inde
 _CONFIG_FILE = os.environ.get("NEUROVA_MEDIA_CONFIG_PATH") or dataPath("media_config.json")
 
 _media_store: Dict[str, Dict[str, Any]] = {}
+# 索引的"改 dict + 整份 dump"必须同属一个临界区：否则两路上传并发时，后写那次 dump
+# 用的是先写那次落盘**之前**抓的快照，条目会被静默覆盖掉（§6-139；manager.py 那份原本
+# 有 `self._lock`，端点自持这份此前是裸 dict + 裸 dump）。
+_INDEX_LOCK = threading.RLock()
 _media_config: Dict[str, Any] = {
     "max_file_size": 50 * 1024 * 1024,  # 50MB
     "allowed_types": ["image", "audio", "video", "file"],
@@ -219,11 +225,10 @@ def _remove_media_entry(media_id: str) -> Optional[Dict[str, Any]]:
     except OSError as e:
         logger.warning("删除媒体磁盘文件失败 %s: %s", disk_path, e)
 
-    del _media_store[media_id]
-    _save_index()
+    with _INDEX_LOCK:
+        del _media_store[media_id]
+        _save_index()
     return media
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -273,6 +278,9 @@ async def save_media(
             meta = {"raw_metadata": metadata}
 
     size = 0
+    # 校验位随字节流一起算（分块读已是既有形态，不额外把整份读进内存）：
+    # 产物落盘后要能证明它还是当初那份——这格能力并自退役的 media/manager.py（§6-139）
+    digest = hashlib.sha256()
     try:
         with disk_path.open("wb") as out:
             while True:
@@ -284,6 +292,7 @@ async def save_media(
                     raise HTTPException(
                         status_code=413, detail=f"文件大小超过限制 ({size} > {max_size} bytes)"
                     )
+                digest.update(chunk)
                 out.write(chunk)
     except HTTPException:
         # 超限中断：清掉半写文件后原样抛出
@@ -311,11 +320,13 @@ async def save_media(
         "memory_id": memory_id,
         "storage_path": storage_path,
         "created_at": now,
+        "checksum": digest.hexdigest(),
         "metadata": meta,
     }
 
-    _media_store[media_id] = media_info
-    _save_index()
+    with _INDEX_LOCK:
+        _media_store[media_id] = media_info
+        _save_index()
 
     return {
         "code": 0,
@@ -442,10 +453,24 @@ async def get_media(media_id: str):
 
 @router.get("/{media_id}/metadata")
 async def get_media_metadata(media_id: str):
-    """获取媒体文件元数据"""
+    """获取媒体文件元数据（含**真读盘重算**的校验位判定）。"""
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
+
+    stored = media.get("checksum")
+    disk_path = _media_disk_path(media)
+    checksum_ok: Optional[bool] = None
+    if stored:
+        checksum_ok = False          # 读不到或哈希不符都算不通过，不因缺文件而回 True
+        digest = hashlib.sha256()
+        try:
+            with disk_path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            checksum_ok = digest.hexdigest() == stored
+        except OSError as e:
+            logger.warning("媒体校验读取失败 %s: %s", disk_path, e)
 
     return {
         "code": 0,
@@ -456,6 +481,8 @@ async def get_media_metadata(media_id: str):
             "mime_type": media.get("mime_type"),
             "size": media.get("size"),
             "created_at": media.get("created_at"),
+            "checksum": stored,
+            "checksum_ok": checksum_ok,
             "metadata": media.get("metadata", {}),
         },
     }
