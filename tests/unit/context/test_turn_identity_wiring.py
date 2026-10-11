@@ -131,7 +131,14 @@ class TestWindowCacheKeyReadsTurnIdentity:
 
     @pytest.mark.asyncio
     async def test_two_direct_sessions_do_not_share_fold_summary(self):
-        """探针 P2 形状一转绿：两个普通单聊会话不得共用一条摘要。"""
+        """探针 P2 形状一转绿：两个普通单聊会话不得共用一条摘要。
+
+        断言只钉**摘要**这一件事（台账 §6-138 的裁定：收窄，不放宽）。B 的视图里出现
+        A 会话的 `[历史回忆]` 条目**不算**本格的串台——那是按设计的跨会话语义召回，
+        生产口径写在 `context/orchestrator.py:1389`（"折叠原文可经 [历史回忆] 语义召回
+        （零丢失）"）与 `:1502`（"单聊/非协作仅见 direct（仍跨普通会话召回）"），
+        隔离规则本身由 `collaboration/memory_scope.py` 那族判据守。
+        """
         orch = _orchestrator()
         orch._window_token_budget = 1200
         calls: list = []
@@ -153,7 +160,11 @@ class TestWindowCacheKeyReadsTurnIdentity:
             f"两个单聊会话未分槽，缓存键={sorted(keys)} —— 身份没进装配入口"
         )
         joined = "\n".join(str(m.get("content", "")) for m in view_b)
-        assert "量子计算" not in joined, "单聊 B 的视图注入了单聊 A 的折叠摘要（跨会话串台）"
+        assert "摘要2" in joined, (
+            "B 自己那条摘要没进视图——此刻「没有 A 的摘要」只是因为摘要面整个没跑，"
+            "上一格就成了空转"
+        )
+        assert "摘要1" not in joined, "单聊 B 的视图注入了单聊 A 的折叠摘要（跨会话串台）"
 
     @pytest.mark.asyncio
     async def test_fold_cache_bounded_across_sessions(self):
