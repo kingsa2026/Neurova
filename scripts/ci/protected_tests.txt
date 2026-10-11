@@ -2291,3 +2291,10 @@ tests/unit/core/test_plugins_modules.py
 tests/unit/test_base_plugin.py
 tests/unit/test_plugin_manifest.py
 tests/unit/test_plugin_api.py
+# §6-151 任务编排的单点活路：旧编排器(376) 退役后，这 8 格同时钉两面——
+# 活路面（真 await 注册表解析出的节点执行器、解析不到即 failed 带原因、代理注册表的 capabilities 格、
+# 执行实例 save/get 读写两面）与退役面（旧件不在位、不可 import、无任何代码把它当实现或 DCL 模板引用）。
+# 反向断言那 4 格拦的是「把顶替那条路一起删了来买绿」，以及摘掉本档活路面判据让退役面自动成立。
+# 退役面按构造今天恒绿；它翻红只有一种意思——有人把假流水线又写回来了。
+# 入册前逐文件单跑两次同读数 8 passed（7.64s / 8.36s）。
+tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
