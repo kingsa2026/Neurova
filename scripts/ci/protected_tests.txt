@@ -2304,3 +2304,21 @@ tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
 # error/exception/critical 且首参字面量带 DEBUG/调试/TEST:/TODO/FIXME/临时 前缀即红（全仓现数只 1 处，已修）。
 # 入册前逐文件单跑两次同读数 4 passed（5.70s / 4.92s）。
 tests/unit/api/test_agentCreateDoesNotLogAtError.py
+# §6-153（工单 2026-10-11 批 12，裁定甲 + 教义第 5 条扫荡）：跑回合的入口都得上报属主。
+# 面一（流式）：行为格走真 TestClient，属主由生产写盘路径 MemCore.save_to_session() 自己算
+# （测试不拼 user_id=，替它写就等于审自己的复制品）——回合内 metadata['user_id'] 与请求通道
+# 读数都须是登录用户、报文自报的身份须被服务端覆盖、落盘后本人列表可见而他人不可见；
+# 空属主在 session_manager:1650 是「不过滤」，所以修前不是"没人看得见"而是"人人看得见"，
+# 另带一格反向对照钉住这条口径。形态格按 AST 比 set_request_user_id 与 create_task(run_chat())
+# 的先后（写点必须在 task 创建之前，否则复制上下文的语义把修复变成死码），自带变异对照。
+# 面二（批 9 删管线双写时漏掉的命中点）：/console/chat 与 /console/ws/{client_id} 两条回合
+# 内也须在边界建立属主——为空不止丢会话归属，usage 入账落 anonymous（multi_model_client:876/1156）
+# 且按日 LLM 配额整条不判（:1426 无身份即放行）；再带一格「无效 token 仍 4401 拒且不跑回合」，
+# 防"补属主"被做成"匿名即有人"。
+# 入册前逐文件单跑两次同读数 10 passed（6.15s / 3.89s）。
+tests/unit/api/test_turnBoundaryEstablishesRequestOwner.py
+# §6-148/149 批 11：受保护子集夜间全量跑的读者与流水线判据（拦的是"清单被就地改写来买绿"）：
+# 逐条 verbatim 复读清单、五段 crontab 形状、按文件单跑与超时上限、allowFailure 必须为真
+# （夜跑是用来暴露红的，不是用来把红压平的），另四格反向对照。
+# 入册前逐文件单跑两次同读数 9 passed（1.84s / 1.81s）。
+tests/unit/ci/test_ci_protected_subset_nightly.py

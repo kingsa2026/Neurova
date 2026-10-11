@@ -63,8 +63,18 @@ KINDS = ("sameSource", "boundaryFeedsTurn", "derivedFromTurnRead",
 ENTRY_POINTS: Dict[str, Dict[str, object]] = {
     "neurova/api/endpoints/chat.py": {
         "kind": "boundaryFeedsTurn",
-        "requestSource": "current_user['user_id']（含续跑原属主，写一次在请求边界）",
+        "requestSource": "current_user['user_id']，两处各写一次：非流式 `/chat`（含续跑原属主）"
+                         "与流式 `/chat/stream`（裁定甲，§6-153——流式此前不写 ⇒ 空属主 "
+                         "对全员可见）",
         "turnSource": "同一个 user_id 赋给 call_metadata['user_id']，由管线透传给 set_turn_identity",
+        "feedsVia": "user_id",
+    },
+    "neurova/api/endpoints/console.py": {
+        "kind": "boundaryFeedsTurn",
+        "requestSource": "current_user['user_id']（REST `/chat`）与 JWT `_user_identity()`"
+                         "（`/ws/{client_id}`）；两处都写在跑回合的那条链上、"
+                         "`create_task(run_chat())` 之前",
+        "turnSource": "同一个 user_id 进 metadata['user_id']（dict 字面量），由管线透传给 set_turn_identity",
         "feedsVia": "user_id",
     },
     "neurova/tool_executor.py": {
@@ -276,6 +286,61 @@ def userIdAssignments(tree: ast.AST) -> List[str]:
     return out
 
 
+def metadataUserOrigins(tree: ast.AST) -> List[str]:
+    """metadata 里 `user_id` 这一格的所有取值来源——**两种写法都算**：下标赋值与 dict 字面量。
+
+    为什么 ②b 要用这一份而 ④ 仍用 `userIdAssignments`：`chat.py`/`channel_router.py` 是
+    先建 dict 再 `meta["user_id"] = …`，而 `console.py` 直接在 dict 字面量里写
+    `"user_id": user_id`。②b 问的是"边界那条 request 写入与喂轮身份的是不是同一个变量"，
+    少认一种形态就会把真入口报成"没喂轮身份"（假红）；④ 问的是"渠道路径的 meta 里那一格
+    只许来自解析单点"，它的靶本来就是赋值形，扩成两形会把别处 dict 里的同名字键也算进来
+    （那不是同一件事）。两格各自口径，不并成一份偷懒。
+    """
+    out = list(userIdAssignments(tree))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "user_id":
+                    out.append(_originOf(value, tree))
+    return out
+
+
+def ownerWritesByTurnHandler(tree: ast.AST) -> Dict[str, bool]:
+    """顶层函数里"既取到了登录身份（`Depends` 或自验 token）、又会跑 `agent.chat(...)`"的入口
+    → 它有没有在自己的链上写请求级属主。
+
+    这一格拦的是**登记表漏了一行**这种形态，而不是登记错：批 9 把管线里那段"每轮按
+    `metadata['user_id']` 补写通道"的双写删掉、只在 `api/endpoints/chat.py` 补了边界写点，
+    `console.py` 这条网页主面当场没人写属主——行为断言全绿（它只审已登记的入口），而用量
+    入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条不判
+    （`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
+    （`session_manager:1650` 空属主＝对全员可见）。手抄清单拦不住"没抄上的那一行"，
+    所以这里按形状自己数入口。
+    """
+    out: Dict[str, bool] = {}
+    for fn in tree.body:
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        defaults = [d for d in list(fn.args.defaults) + list(fn.args.kw_defaults)
+                    if d is not None]
+        # 身份来源两种形状都算"取到了人"：`Depends(get_current_user)`（REST），
+        # 以及函数体里自己 `verify_access_token(...)`（WebSocket 没有 Depends 通道）。
+        # 只认 Depends 会把 WS 那条面整个漏在探测器之外——它同样是"已鉴权且跑回合"。
+        resolvesIdentity = (
+            any(isinstance(d, ast.Call) and _calleeName(d) == "Depends" for d in defaults)
+            or any(_calleeName(node) == "verify_access_token"
+                   for node in ast.walk(fn) if isinstance(node, ast.Call))
+        )
+        runsTurn = any(isinstance(node, ast.Call)
+                       and getattr(node.func, "attr", None) == "chat"
+                       and isinstance(node.func.value, ast.Name)
+                       and node.func.value.id == "agent"
+                       for node in ast.walk(fn))
+        if resolvesIdentity and runsTurn:
+            out[fn.name] = bool(_callsNamed(fn, REQUEST_WRITERS))
+    return out
+
+
 def productionSources() -> Dict[str, ast.AST]:
     trees = ast_scan.parsedModules(PRODUCTION)
     assert trees, f"生产扫描面为空（{PRODUCTION}）——本文件会空转"
@@ -319,24 +384,31 @@ class TestEntryPointsAreDeclared:
         )
 
     def test_boundaryEntriesFeedBothSidesFromOneVariable(self):
-        """②b 标 `boundaryFeedsTurn` 的入口：request 写入点与喂轮身份的那个变量必须同名。
+        """②b 标 `boundaryFeedsTurn` 的入口：**每一处** request 写入都只能取那个变量。
 
         这正是乙案要守住的东西——把双写拆成"边界写一次 + 同一值喂给轮身份"之后，
         同源关系不再由一行代码显然成立，而由"两处取的是同一个变量"成立。
-        哪天有人把边界那行改成别的来源（比如从报文里读 user_id），本格立刻红。
+        哪天有人把边界某处改成别的来源（比如从报文里读 `user_id`），本格立刻红。
+
+        一个入口里**多处**写（非流式与流式两条端点同居 `chat.py`）是允许的，但必须逐处
+        同变量——原先断"恰好一处"会在第二处合法写入（流式补属主）时假红，
+        而把判据改成"至少一处对得上就放过"又会漏掉第二处取错值：所以取
+        **非空且集合相等**这一形。
         """
         for rel, entry in ENTRY_POINTS.items():
             if entry["kind"] != "boundaryFeedsTurn":
                 continue
             tree = productionSources()[rel]
             origins = requestWriteOrigins(tree)
-            assert origins == [entry["feedsVia"]], (
-                f"{rel} 写 request 通道的来源是 {origins}，而它声称与轮身份同源的变量是 "
-                f"{entry['feedsVia']!r}——两条通道在此分叉"
+            assert origins and set(origins) == {entry["feedsVia"]}, (
+                f"{rel} 写 request 通道共 {len(origins)} 处，来源 {sorted(set(origins))}；"
+                f"要求每一处都是它声称与轮身份同源的那个变量 {entry['feedsVia']!r}"
+                "——两条通道在此分叉"
             )
-            assert entry["feedsVia"] in userIdAssignments(tree), (
-                f"{rel} 不再把 `{entry['feedsVia']}` 赋给 metadata['user_id']："
-                "边界只写了 request 一侧，轮身份那一侧的来源断了（乙案的同源关系失效）"
+            assert entry["feedsVia"] in metadataUserOrigins(tree), (
+                f"{rel} 不再把 `{entry['feedsVia']}` 交给 metadata 的 `user_id` 那一格"
+                "（赋值形与 dict 字面量形都没取到）：边界只写了 request 一侧，"
+                "轮身份那一侧的来源断了（乙案的同源关系失效）"
             )
 
 
@@ -392,6 +464,53 @@ class TestDeclaredKindsMatchCode:
             f"只允许 {entry['resolvedVia']!r} 一个出口——两处产出身份，"
             "两条通道就会给同一个人算出两个身份"
         )
+
+
+class TestEveryTurnEntryEstablishesTheOwner:
+    """⑤ 凡是"取到登录用户并跑一轮对话"的请求入口，都必须在自己那条链上建立请求级属主。
+
+    与 ①②③④ 的分工：那几格审的是**已登记**的入口之间对不对，本格审的是"有没有入口
+    根本没登记"。成因见 `ownerWritesByTurnHandler` 的文档——批 9 删掉管线双写时漏了
+    `console.py`，全仓判据当时一条都没红。
+    """
+
+    def test_noAuthenticatedTurnEntryLeavesTheOwnerUnset(self):
+        offenders = [
+            f"{rel}::{name}"
+            for rel, tree in productionSources().items()
+            for name, writesOwner in ownerWritesByTurnHandler(tree).items()
+            if not writesOwner
+        ]
+        assert not offenders, (
+            f"这些入口带鉴权依赖、会跑 `agent.chat(...)`，却没在本函数链上写 `set_request_user_id`："
+            f"{offenders}\n"
+            "后果不是「这一轮没有属主」这么轻：usage 记 anonymous、按日配额不判、"
+            "新会话落空属主而对全员可见（`session_manager:1650`）。"
+            "要么在边界写一次（写点须在 create_task 之前），要么说明它确实不该有请求级属主并"
+            "把理由写进本格的例外口径——不许静默留着。"
+        )
+
+    def test_theHandlerDetectorSeesTheEntriesItClaims(self):
+        """反向对照：把 console 两处写点摘掉，探测器必须点名那两个入口——否则 ⑤ 恒绿。
+
+        这一格同时钉住前提本身：`post_console_chat` 确实在"带 Depends 且跑 agent.chat"
+        的集合里。摘掉写点后它才被判成违例，说明 ⑤ 不是靠"入口压根没被数到"买来的绿。
+        """
+        rel = "neurova/api/endpoints/console.py"
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        stripped = source.replace("set_request_user_id(user_id)", "pass")
+        assert stripped != source, "console.py 里没有可摘的写点，本对照不可信"
+
+        found = ownerWritesByTurnHandler(ast.parse(stripped))
+        assert {"post_console_chat", "websocket_console"} <= set(found), (
+            f"探测器没把这两个入口当「跑回合的鉴权端点」：{sorted(found)}——"
+            "⑤ 对它们永远不会红（形状口径失效，不是代码没问题）"
+        )
+        assert found.get("post_console_chat") is False and found.get("websocket_console") is False, (
+            f"写点已摘净却仍判「有写」：{found}——⑤ 是恒真的空守卫"
+        )
+        live = ownerWritesByTurnHandler(productionSources()[rel])
+        assert live and all(live.values()), f"实况面本该全部有写：{live}"
 
 
 class TestTheComparatorsAreNotVacuous:
