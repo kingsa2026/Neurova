@@ -2322,3 +2322,14 @@ tests/unit/api/test_turnBoundaryEstablishesRequestOwner.py
 # （夜跑是用来暴露红的，不是用来把红压平的），另四格反向对照。
 # 入册前逐文件单跑两次同读数 9 passed（1.84s / 1.81s）。
 tests/unit/ci/test_ci_protected_subset_nightly.py
+# §6-155 插件 P2：八项权限逐项确认的口径与效力（档位三态、授予只随声明走、
+# 审计写不进即回滚、坏文件不静默读成"谁都没授予过"），另四格钉事件总线那两个框架强制点
+# ——未授予当场拒、且替身一次都没被碰到（只断"抛了"不够）。
+# 入册前逐文件单跑两次同读数 21 passed（2.70s / 2.23s）。
+tests/unit/plugins/test_pluginPermissionGate.py
+# §6-155 插件 P2 的 HTTP 面：装载与挂载是两次授权。门（未确认/不可授予/命名空间越界/
+# 绝对路径/同路径遮蔽/handler 取不到 ⇒ 整批不挂）、真挂载（请求落到插件方法并执行插件代码、
+# auth_required:false 不采信且可见）、真摘除（显式 unmount、禁用、卸载后活路由表 404 且不留
+# 孤儿授权），再加一格按 AST 扫全包的"每条拒因都有 HTTP 语义、映射表不留死条目"双向判据。
+# 入册前逐文件单跑两次同读数 19 passed（2.88s / 2.72s）。
+tests/unit/plugins/test_pluginRoutesAreMounted.py
