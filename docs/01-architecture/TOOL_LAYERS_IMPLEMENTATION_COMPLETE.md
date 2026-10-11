@@ -172,7 +172,7 @@ result = await client.execute_tool(
 ### 待实现模块（优先级排序）
 1. `neurova/skill_system/` - 技能系统模块
 2. `neurova/skills/` - 技能模块
-3. `neurova/plugins/` - 插件系统模块  <!-- 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） -->
+3. `neurova/plugins/` - 插件系统模块
 4. `neurova/tts/` - TTS 模块
 
 ### 改进方向
