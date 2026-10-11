@@ -2333,3 +2333,10 @@ tests/unit/plugins/test_pluginPermissionGate.py
 # 孤儿授权），再加一格按 AST 扫全包的"每条拒因都有 HTTP 语义、映射表不留死条目"双向判据。
 # 入册前逐文件单跑两次同读数 19 passed（2.88s / 2.72s）。
 tests/unit/plugins/test_pluginRoutesAreMounted.py
+# §6-157 活路补的两格能力：层内并发上限、节点级重试（幂等声明门，默认拒绝）。
+# 并发面两式同档——先断峰值 >1（限流不许把并发压成串行），再断峰值 ≤ 上限（无界 gather 今天读数 12）；
+# 重试面拦三种谎：未声明幂等却重试（副作用节点重试＝重复动作）、重试用尽仍回成功、
+# 被重试吸收的失败先发 node_failed（画布会闪红，"红过"就成了既成事实）；
+# 声明面走真 SQLite 往返（spec → 注册表 → 落库 → 重读），只写不读的新字段在本仓不算实现。
+# 入册前逐文件单跑两次同读数 7 passed（5.45s / 5.04s）。
+tests/unit/collaboration/test_workflowConcurrencyCapAndNodeRetry.py
