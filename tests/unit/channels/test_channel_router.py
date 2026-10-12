@@ -76,7 +76,7 @@ async def test_handler_routes_to_agent_and_returns_reply(manager):
     # session 用 manager 的固定作用域键（agent+渠道+chat）
     assert agent.calls[0]["session_id"] == manager.resolve_session_scope_id(msg)
     md = agent.calls[0]["metadata"]
-    assert md["channel_user_id"] == "ou_9"  # 渠道侧身份入 metadata（会话属主走 ContextVar）
+    assert md["channel_user_id"] == "ou_9"  # 渠道侧身份入 metadata（会话属主另走显式键，§6-163）
     assert md["source_channel"] == "feishu"
 
 
@@ -266,12 +266,14 @@ async def test_dispatch_forwards_reply_kwargs(manager):
 
 
 @pytest.mark.asyncio
-async def test_session_owned_by_agent_owner_via_request_context(manager):
-    """阶段4.1：agent.chat 期间请求上下文 user = agent 属主（会话归管理员）。
+async def testChannelTurnCarriesSenderAndClearsTheChannelAfterwards(manager):
+    """阶段4.1 → §6-163 改判：回合期间通道里是**发送者**；回合结束清槽，不污染下一位。
 
-    Wave H-W0 修正：属主在 agent.config.owner_user_id（真实 Agent 形状）——
-    原测试把 owner 挂在实例属性上，恰好镜像了 channel_router 的读错对象 bug
-    （getattr(agent,"owner_user_id") 恒 None），生产链其实从未生效。
+    本格原形态断的是 `admin-77`（agent 属主）。合并后那条通道只有一个含义（谁在说话），
+    属主那一半改由显式元数据承载——已由
+    `testRequestChannelCarriesTheSenderAndOwnerTravelsExplicitly` 逐格钉住，这里不重复；
+    留下的仍是那条**清槽**不变量：渠道群里甲发送者的身份不许漏进乙的回合
+    （多个渠道共享同一进程，边界写一次就意味着边界也得收一次）。
     """
     from types import SimpleNamespace
 
@@ -289,7 +291,8 @@ async def test_session_owned_by_agent_owner_via_request_context(manager):
 
     handler = channel_router.make_handler(manager, agent_lookup=lambda aid: OwnerAgent())
     await handler(_msg("嗨"))
-    assert seen["req_user"] == "admin-77"
+    assert seen["req_user"] == "ch:feishu:ou_9", (
+        f"回合内通道里不是发送者而是 {seen['req_user']!r}")
     # chat 结束后清除，不污染后续
     assert get_request_user_id() in (None, "")
 
@@ -491,13 +494,16 @@ async def testBindCodeMessageStillRegistersSender(manager, tmp_path, codesInMemo
 
 
 @pytest.mark.asyncio
-async def testRequestChannelStaysWithSessionOwnerDuringTurn(manager, tmp_path):
-    """§6-121 (b) 乙案的靶：回合内请求通道仍是**会话属主**，不是发送者。
+async def testRequestChannelCarriesTheSenderAndOwnerTravelsExplicitly(manager, tmp_path):
+    """§6-163 裁定甲：通道装**发送者**；会话属主改由显式元数据带，不再靠环境捎带。
 
-    原先 `ChatPipeline._execute_steps` 每次回合都用 `meta['user_id']`（发送者）再写一遍这条
-    通道，把 router 写的 owner 换掉——而 `mem_core.save_to_session` 只读这一条通道，
-    于是渠道会话落进一个谁也不匹配的命名空间，控制台的会话列表（按 user_id 过滤）
-    看不见它：Issue #290 Wave H-W0 修好的那条可见性被批 2 静默吃掉。
+    这一格原先钉的是反方向的口径（§6-121 (b) 乙案：回合内通道里必须是属主），因为那时
+    `mem_core.save_to_session` 只读这一条通道——属主不进通道，渠道会话就落进谁也不匹配的
+    命名空间，控制台按 user_id 过滤的会话列表看不见它（Issue #290 Wave H-W0）。
+    合并成一条通道之后那条约束没有消失，只是换了承载：可见性由
+    `meta["session_owner_id"]` 显式给出，落盘取法单点是 `resolveSessionOwner`。
+    所以下面同时断三件事：通道＝发送者（配额/usage/profile 池按谁在说话计）、
+    载体＝发送者（记忆隔离照旧）、属主＝agent 属主（H-W0 那条可见性）。
     """
     from neurova.core.identity_context import get_request_user_id
 
@@ -510,15 +516,65 @@ async def testRequestChannelStaysWithSessionOwnerDuringTurn(manager, tmp_path):
             self.config = SimpleNamespace(owner_user_id="owner-of-kai", agent_id="default")
 
         async def chat(self, user_input, session_id=None, metadata=None, **kw):
-            # 这一刻就是 save_to_session / 浏览器 profile 池化的读数时机
+            # 这一刻就是 resolveSessionOwner / 配额 / 浏览器 profile 池化的读数时机
+            from neurova.post_chat_pipeline import resolveSessionOwner
+
             seen["request_channel"] = get_request_user_id()
             seen["meta_user_id"] = (metadata or {}).get("user_id")
+            seen["session_owner_id"] = (metadata or {}).get("session_owner_id")
+            seen["resolved"] = resolveSessionOwner(metadata)
             return {"text": "pong"}
 
     handler = channel_router.make_handler(manager, agent_lookup=lambda aid: OwnerAwareAgent())
     await handler(_msg("你好", sender="ou_55"))
 
-    assert seen["request_channel"] == "owner-of-kai", (
-        f"回合内请求通道被换成 {seen['request_channel']!r}——渠道会话将不再属于属主")
+    assert seen["request_channel"] == "ch:feishu:ou_55", (
+        f"通道里不是发送者而是 {seen['request_channel']!r}——合并后这条只有一个含义，"
+        "装回属主就等于把群成员的用量与配额记到 agent 主人头上")
     assert seen["meta_user_id"] == "ch:feishu:ou_55", (
-        "发送者身份仍要走记忆隔离（这一格不许被上面的修复顺手删掉）")
+        "发送者身份仍要走记忆隔离（这一格不许被上一格顺手删掉）")
+    assert seen["session_owner_id"] == "owner-of-kai", (
+        f"会话属主没显式带上：{seen['session_owner_id']!r}——H-W0 那条可见性就没人保证了")
+    assert seen["resolved"] == "owner-of-kai", (
+        f"落盘取法拿到的不是属主：{seen['resolved']!r}——渠道会话将出现在发送者而非属主的列表里")
+
+
+@pytest.mark.asyncio
+async def testChannelSessionIsVisibleToTheAgentOwnerNotTheSender(manager, tmp_path):
+    """上一格断的是"取法给对了"，本格断"真落盘之后列表里真看得见"——写了没人读不算修好。
+
+    走的是生产写盘那一行（`MemCore.save_to_session`），测试只负责把 metadata 递过去，
+    不自己拼属主键（那等于把被审的那一行换成复制品）。
+    """
+    from neurova.mem_core import MemCore
+    from neurova.post_chat_pipeline import resolveSessionOwner
+    from neurova.session_manager import SessionManager
+
+    _bindManager(tmp_path)
+    sessions = SessionManager()
+
+    class SavingAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(owner_user_id="owner-of-kai", agent_id="default")
+            self.session_manager = sessions
+
+        async def chat(self, user_input, session_id=None, metadata=None, **kw):
+            MemCore(self).save_to_session(user_input, "pong", session_id=session_id,
+                                          metadata=metadata,
+                                          session_owner=resolveSessionOwner(metadata))
+            return {"text": "pong"}
+
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: SavingAgent())
+    reply = await handler(_msg("帮我看下天气", sender="ou_77"))
+
+    assert reply, "渠道回合根本没落盘——下面的读面断言是空转"
+    sessionId = manager.resolve_session_scope_id(_msg("帮我看下天气", sender="ou_77"))
+    ownerView = [s["session_id"] for s in sessions.list_sessions(agent_id="default",
+                                                                 user_id="owner-of-kai")]
+    senderView = [s["session_id"] for s in sessions.list_sessions(agent_id="default",
+                                                                  user_id="ch:feishu:ou_77")]
+    assert sessionId in ownerView, (
+        f"属主控制台看不见自己 agent 的渠道会话：{ownerView}——H-W0 回退")
+    assert sessionId not in senderView, (
+        f"渠道会话被算到了发送者名下：{senderView}——「谁在说话」与「这条会话归谁」又混成一件事")

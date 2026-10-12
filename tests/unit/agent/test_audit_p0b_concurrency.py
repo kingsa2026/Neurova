@@ -34,15 +34,23 @@ class TestB1TurnStateConcurrency:
         return agent
 
     def test_concurrent_identity_no_crosstalk(self):
-        """两个任务交错 set_request_identity，读取时各自身份完好。"""
+        """两个任务交错写身份与轮次内容，读取时各自完好。
+
+        §6-163 之后身份由**请求通道**给（`set_request_user_id`，边界写一次），轮次内容
+        仍由门面写——所以本格现在同时证明两件事：通道按任务隔离、门面按任务隔离。
+        前者是合并之后新增加的那半：一条通道承担全部消费方，它在并发请求下互踩的
+        代价比原先更大。
+        """
+        from neurova.core.identity_context import set_request_user_id
+
         agent = self._make_agent()
 
         async def request(tag: str):
             agent.set_request_identity(
                 user_input=f"input-{tag}",
                 session_id=f"sess-{tag}",
-                user_id=f"user-{tag}",
             )
+            set_request_user_id(f"user-{tag}")
             # 让出控制权制造交错
             await asyncio.sleep(0.01)
             # 中途另一个请求写入不应污染本任务上下文

@@ -84,7 +84,7 @@ def _agent():
     from neurova.session_manager import get_session_manager
 
     # 与 `chat_pipeline._init_agent_state` 同型的写入：身份走真 property 读面
-    set_turn_identity("查一下北京天气", SESSION_ID, "u1")
+    set_turn_identity("查一下北京天气", SESSION_ID)
     agent.session_manager = get_session_manager()
     agent.memory_agent = MemCore(agent)
     agent._current_user_id = "u1"

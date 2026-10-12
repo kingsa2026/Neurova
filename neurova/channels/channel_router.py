@@ -124,6 +124,11 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             logger.warning("ChannelRouter: agent『%s』不存在，%s 消息未处理", agent_id, message.channel_type)
             return None
         session_id = manager.resolve_session_scope_id(message)
+        # Wave H-W0 修复：owner_user_id 在 agent.config 上——原读
+        # getattr(agent, "owner_user_id") 恒 None，渠道会话归属链自
+        # 2026-09 断链设计起从未生效（save_to_session 落"共享可见"）。
+        # §6-163 之后它**只**用作会话属主（显式元数据），不再进身份通道。
+        owner = str(getattr(getattr(agent, "config", None), "owner_user_id", "") or "") or None
         meta: Dict[str, Any] = {
             # 渠道侧真实身份（open_id/群）记入 metadata 供来源展示/@；会话属主另设
             "channel_user_id": message.sender_id or f"channel_{message.channel_type}",
@@ -148,6 +153,10 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 只带一个键名过去会复现不出控制台写入的那把键，等于同一个人两份记忆。
         meta["memory_scope"] = {"neuser_id": turnIdentity["neuser_id"],
                                 "user_id": turnIdentity["user_id"]}
+        # 会话记录的可见性归 agent 属主（Issue #290 Wave H-W0）。§6-163 把身份合并成一条
+        # "谁在说话"之后，属主**不再靠环境里那条通道捎带**——它是一条显式元数据，
+        # 由 `post_chat_pipeline` 交给 `save_to_session(session_owner=…)`。
+        meta["session_owner_id"] = owner or ""
         # 观察面（工单批 6）：每条入站都记下"这个 agent 的这条渠道里见过这个发送者"。
         # 控制台的绑定面板只能靠这一面列人——人抄不到自己的 `ou_xxx`/`tg_xxx`，
         # 而发码之前他得先知道"我在飞书里那个身份"是哪一格。写侧就在这一行，读侧是
@@ -218,9 +227,11 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
 
         ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
         try:
-            set_request_user_id(owner)
-            # 会话落盘归 agent 属主（上一行），记忆/工具隔离归解析出的发送者身份（这一行）
-            # ——两者本就不同职，是 §6-127 裁定 ④登记过的**声明式分叉**，不是漂了。
+            # 唯一那条身份通道装的是**发送者**（§6-163 裁定甲）：配额、usage、
+            # 浏览器 profile 池、工具三层隔离都按"谁在说话"计。会话记录的可见性
+            # 不走这条通道，走上面的 `meta["session_owner_id"]`——原先"一条装属主、
+            # 一条装发送者"的那处声明式分叉（§6-127 裁定 ④）就此收口成一处显式传参。
+            set_request_user_id(turnIdentity["user_id"])
             memoryManager = getattr(agent, "memory_manager", None)
             if memoryManager is not None and hasattr(memoryManager, "set_request_scope"):
                 memoryManager.set_request_scope(
