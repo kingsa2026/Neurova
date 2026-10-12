@@ -1,5 +1,11 @@
 """
-测试脚本：测试火山引擎编程助手 API 的可用模型
+活体探针：火山引擎编程助手 API 的可用模型（台账 §6-133 分流里判「迁」的一档）
+
+跑法：`PYTHONPATH="$(git rev-parse --show-toplevel)" python tests/manual/volcanoModelPublishProbe.py`
+
+迁的理由：原名 `tests/llm/test_volcano_model.py` 在唯一测试根里却 0 用例（§6-133 那 26 档之一）。
+它要真凭证、真配额、还会读写**真实**配置路径——这类东西按 AGENTS.md §4 就是"临时验证脚本"，
+不该占着测试根的名字。发布前手工验一次的价值保留在这里，`__main__` 防护也保留。
 """
 
 # 说明: 手动验证脚本,非 pytest 用例 —— 顶层执行会读写真实

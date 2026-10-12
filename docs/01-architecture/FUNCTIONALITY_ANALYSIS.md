@@ -387,6 +387,16 @@
 
 ### 6.6 测试覆盖扩展 (7/7 已实现)
 
+> **本表自 2026-09-04 起未再与代码树对账，别再当作现行事实源（2026-10-12 记，台账 §6-162）。**
+> 现场复算：下面 7 行点名的路径**没有一行还在**（`tests/test_api_*.py`、`tests/test_jwt.py`、
+> `tests/test_auth_isolated.py`、`tests/test_auth_direct.py`、`tests/test_cross_channel_context.py`、
+> `tests/test_context_cache_compression.py` 均已不在仓内；`tests/conftest.py` 是唯一的例外）。
+> 其中 `test_jwt.py` 属"名字像覆盖、实则 0 用例"那 26 档，已按裁定分流删除；
+> JWT/登录这两面今天的真判据是 `tests/unit/api/test_api_auth.py`（20 格）、
+> `tests/unit/api/test_jwt_identity_claims.py`（6 格）、
+> `tests/unit/api/test_loginRouteContract.py`（17 格）。
+> 整表逐行重画是一次独立的复算，不在那一批的授权内，登记在台账。
+
 | ID | 模块 | 状态 | 文件/位置 | 备注 |
 |----|------|------|-----------|------|
 | T1 | API 测试 | ✅ 已实现 | `tests/test_api_*.py` (4 个文件) | 标准/直接/异步/快速测试 |
