@@ -26,6 +26,11 @@ from fastapi.responses import FileResponse
 
 from neurova.api.endpoints import media as media_module
 
+# §6-172：`save_media` 的归属改从登录依赖取（原先是可选表单字段、前端从不传 ⇒ 索引里
+# 每条 media 的 user_id 恒为 null）。这几个格子是把 handler 当函数直调，故必须自己
+# 递一份身份——身份层的 `_user_identity` 永远带 user_id，桩件也照这个形状给。
+CALLER = {"user_id": "u1", "username": "u1", "role": "user"}
+
 
 class _FakeUploadFile:
     """分块读取语义与 starlette.UploadFile 对齐：read(size) 至多返回 size 字节。
@@ -69,6 +74,7 @@ def _save(payload: bytes, filename: str = "clip.png", agent_id: str = "a1", medi
             file=_FakeUploadFile(payload, filename=filename),
             media_type=media_type,
             agent_id=agent_id,
+            current_user=CALLER,
         )
     )
 
@@ -114,7 +120,8 @@ def test_save_media_oversize_413_stops_reading_and_cleans_partial(media_env, mon
     fake = _FakeUploadFile(payload)
 
     with pytest.raises(HTTPException) as ei:
-        asyncio.run(media_module.save_media(file=fake, media_type="image", agent_id="a1"))
+        asyncio.run(media_module.save_media(
+            file=fake, media_type="image", agent_id="a1", current_user=CALLER))
 
     assert ei.value.status_code == 413
     assert fake.bytes_served < len(payload), "超限后未停止读取上传流（仍全量消费）"
@@ -189,7 +196,8 @@ def test_save_media_rejects_path_escape(media_env):
     with pytest.raises(HTTPException) as ei:
         asyncio.run(
             media_module.save_media(
-                file=_FakeUploadFile(b"z"), media_type="image", agent_id="../escape"
+                file=_FakeUploadFile(b"z"), media_type="image", agent_id="../escape",
+                current_user=CALLER,
             )
         )
     assert ei.value.status_code == 400
