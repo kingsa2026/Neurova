@@ -84,9 +84,12 @@ TURNS_SHAPE = re.compile(r"^[1-9][0-9]*[kK]?$")
 #: `0` / `1` 这类明显会让 Agent 一轮都跑不完的写法，与耗时上界无关。
 MIN_TURNS = 10
 
-#: 平台单次构建硬上限（2h）。依据：构建 cnb-3k8-1k33gorhr 实测 7293033ms
-#: （≈2h2m）被掐断，在册同类掐断另有 cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等多例。
-BUILD_HARD_LIMIT_SECONDS = 7200
+#: 平台单次构建墙钟上限（现行 4h = Runner 经 `CNB_PIPELINE_MAX_RUN_TIME` 下发值）。
+#: 本环境实测读数 14400000ms（本仓 2026-10-12 构建 cnb-hco-1k4o5mvh2 量尺输出
+#: 「总额 4h00m」）。历史上该值曾为 2h，并留有整批 2h 掐断读数
+#: （cnb-3k8-1k33gorhr 7293033ms、cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等），
+#: 那是当时的 Runner 口径 —— 现行值以量尺读数为准，不在此钉死历史读数。
+BUILD_HARD_LIMIT_SECONDS = 14400
 
 #: 实测单轮均摊耗时（秒）的最大值（掐断读数）：
 #:   cnb-2e8-1k341d9s1：201 轮 / 3191326ms（均摊 15.9s/轮）
@@ -331,11 +334,11 @@ class TestTurnBudget:
         配额必须**高于**实测掐断轮数才是可达的）。
 
         本条的判据分两层，缺一不可：
-        1. 算式本身仍按实测成本给出正确读数（老读数 203 轮不变，可复算）；
+        1. 算式本身仍按实测成本给出正确读数（= 现行墙钟 ÷ 单轮均摊耗时，可复算）；
         2. 该读数**不构成**对现行配额的钳位 —— 现行上限高于它正是期望形态。
         """
-        # 第 1 层：算式读数（老读数不变，改动改的是它与配额的关系）
-        assert spinCeilingReading(35.3) == int(BUILD_HARD_LIMIT_SECONDS / 35.3) == 203
+        # 第 1 层：算式读数（算式不变，随现行墙钟给出；改动改的是它与配额的关系）
+        assert spinCeilingReading(35.3) == int(BUILD_HARD_LIMIT_SECONDS / 35.3) == 407
         assert spinCeilingReading(2.428) > spinCeilingReading(35.3), (
             "单轮越快、一次会话能容纳的轮数应越多 —— 算式方向反了"
         )
@@ -616,7 +619,7 @@ class TestSettingsRoleHygiene:
 # 这些字符串同时是"给 Agent 的行为约束"与"守卫的判据"，
 # 改动任一侧都会让另一侧变红——防后人把纪律删干净后无感回归。
 DURATION_DISCIPLINE_MARKERS = (
-    "单次构建上限 2h",
+    "单次构建上限 4h",
     "禁止 sleep",
     "禁止在单次会话里反复跑全量测试套件",
     "长任务要分段交付",
