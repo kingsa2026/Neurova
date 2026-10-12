@@ -612,7 +612,7 @@ async def generate_pairing(
     )
 
 
-@router.get("/pairing/qrcode/{code}")
+@router.get("/pairing/qrcode/{code}", dependencies=[Depends(_get_current_user_id)])
 async def get_pairing_qrcode(request: Request, code: str):
     """配对二维码（PNG）——渲染只走渠道侧那**唯一一份** segno 实现（§6-172 批 25）。
 
@@ -691,9 +691,16 @@ async def confirm_pairing(request: Request, body: ConfirmPairingRequest):
     )
 
 
-@router.get("/pairing/status/{code}", response_model=PairingStatusResponse)
+@router.get("/pairing/status/{code}", response_model=PairingStatusResponse,
+            dependencies=[Depends(_get_current_user_id)])
 async def get_pairing_status(code: str):
-    """轮询配对状态"""
+    """轮询配对状态——**只给登录本人读**（§6-172 批 28，裁定乙）。
+
+    这两个按码回话的读面原先无门（`s08_route_auth_baseline:787` 整节 `router_deps=[]`）：
+    认码回图/状态、不认回 404，而 6 位配对码是 `_generate_pairing_code` 自陈的**唯一认证凭据**，
+    只有 10^6 个取值——匿名调用方拿它当枚举预言机，探到一个存在的码就能去 `confirm` 它，
+    设备随即挂到别人账号名下。`confirm` 有每 IP 限流，这两个口一个都没有。
+    """
     pairing = _pairing_codes.get(code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Pairing code not found")
