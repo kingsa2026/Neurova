@@ -21,6 +21,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TARGET_ROOT = REPO_ROOT / 'neurova'
 
@@ -87,33 +89,49 @@ def _isWide(handler: ast.ExceptHandler) -> bool:
     return False
 
 
-def _enclosingFunction(tree: ast.AST, node: ast.AST) -> str:
-    """取最近的**外层**函数（按 lineno..end_lineno 区间判，不靠行号先后猜）。"""
-    best = None
-    for cand in ast.walk(tree):
-        if not isinstance(cand, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        end = getattr(cand, 'end_lineno', cand.lineno)
-        if cand.lineno <= node.lineno <= end:
-            if best is None or cand.lineno > best.lineno:
-                best = cand
-    return best.name if best is not None else '<module>'
+def _enclosingFunctionMap(tree: ast.AST) -> dict:
+    """每个 `ExceptHandler` → 最近的**外层**函数名（按 lineno..end_lineno 区间判）。
+
+    一趟 `ast.walk` 建表，而不是"每个宽处理器各走一遍整棵树"：实测 `neurova/`
+    3224 个宽处理器逐个走树要 10.7s（`_enclosingFunction` 的原写法），而全进程
+    4800 条用例同跑时这点成本会把它推过 `pytest-timeout` 的 30s 墙钟——
+    与 `tests/ast_scan` 要治的根因同形：判据的成本不该随代码总量涨。
+    判定口径（区间包含、取最内层）与原实现逐字一致。
+    """
+    functions = [c for c in ast.walk(tree)
+                 if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    mapping = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler):
+            best = None
+            for cand in functions:
+                end = getattr(cand, 'end_lineno', cand.lineno)
+                if cand.lineno <= node.lineno <= end:
+                    if best is None or cand.lineno > best.lineno:
+                        best = cand
+            mapping[node] = best.name if best is not None else '<module>'
+    return mapping
 
 
 def scan(root: pathlib.Path):
+    """子树里「宽 except 把故障折成结论」的落点清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（枚举 + 解析都在预算内），不私有
+    `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    谓词要求 `tree.body` 级别的 `_enclosingFunction` 推导，故取**整棵树**。
+    文本预筛词 `except` 是判据的**充分条件**：宽处理器必然写成 `except ...:`，
+    连这串关键字都没出现的文件不可能命中——它把整树 `ast.walk` 的量级砍掉一截
+    （实测 `neurova/` 1015 文件 → 命中面 720 文件，2.3s vs 23s）。
+    """
     hits = []
-    for path in sorted(root.rglob('*.py')):
-        if '__pycache__' in path.parts:
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
+    for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('except')):
+        path, tree = ref.path, ast.parse(ref.code, filename=str(ref.path))
         rel = path.relative_to(root.parent).as_posix()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ExceptHandler) or not _isWide(node):
+        enclosing = _enclosingFunctionMap(tree)
+        for node, func in enclosing.items():
+            if not _isWide(node):
                 continue
-            func = _enclosingFunction(tree, node)
             if _foldsIntoNotFound(node):
                 hits.append((f'{rel}::{func}', node.lineno, '折成"查无此类"'))
             elif _returnsSuccessPayload(node):
@@ -160,6 +178,6 @@ def testScannerReallyFindsBothShapes(tmp_path):
 
 
 def testTargetRootIsNotEmpty():
-    files = [p for p in TARGET_ROOT.rglob('*.py') if '__pycache__' not in p.parts]
+    files = ast_scan.filesUnder(TARGET_ROOT, '.py')
     assert len(files) > 500, (
         '扫描面只剩 %d 个文件——这条守卫已经在扫半空目录，它的绿不代表任何事' % len(files))

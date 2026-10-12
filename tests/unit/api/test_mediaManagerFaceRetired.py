@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
 TESTS = REPO / "tests"
@@ -30,22 +32,27 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _importers(root: Path) -> list[str]:
+    """子树里仍 import 已退役面的文件清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词是判据的**充分条件**：连退役模块名都没出现的文件不可能 import 它。
+    """
     out = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints(RETIRED)):
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
-        except (SyntaxError, UnicodeDecodeError):
+            tree = ast.parse(ref.code)
+        except SyntaxError:
             continue
         for node in ast.walk(tree):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
             if any(n == RETIRED or n.startswith(RETIRED + ".") for n in names):
                 try:
-                    out.append(p.relative_to(REPO).as_posix())
+                    out.append(ref.path.relative_to(REPO).as_posix())
                 except ValueError:
-                    out.append(p.name)
+                    out.append(ref.path.name)
                 break
     return out
 

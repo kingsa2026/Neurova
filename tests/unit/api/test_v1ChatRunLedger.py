@@ -267,6 +267,16 @@ class TestLedgerImplementationIsSingleSource:
         ):
             for lineno in self._callSitesNamed(ref.code, "requestYieldGate"):
                 hits.append(f"{ast_scan.relativeToRepo(ref.path)}:{lineno}")
-        assert hits == ["neurova/core/agent_run_ledger.py:241"], (
-            f"闸口调用点从单源模块搬走了或长出第二处：{hits}"
+        # 判据是**文件级单源**：闸口调用点一处不多、一处不少地落在台账模块里。
+        # 不钉具体行号——行号会随该模块里任何无关增删漂移（`e10ffc0d` 在文件尾
+        # 追加蜂群记账后，调用点从 241 挪到 242），把「单源」读成「某一行」是
+        # 拿判据打正当改动；但真正要防的形态仍然咬得住：搬到别的模块、或在
+        # 台账模块里长出第二处，都会让下面的集合判断转红。
+        assert hits, "全仓找不到 `requestYieldGate` 的调用点——闸口没被任何入口用上"
+        offenders = [h for h in hits if not h.startswith("neurova/core/agent_run_ledger.py:")]
+        assert not offenders, (
+            f"闸口调用点搬出了单源模块（或长出第二处）：{hits}"
+        )
+        assert len(hits) == 1, (
+            f"闸口调用点长出第二处：{hits}"
         )

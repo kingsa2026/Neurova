@@ -26,6 +26,8 @@ import ast
 import time
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 from neurova.llm.generators import retention as rt
@@ -67,13 +69,27 @@ def _importsTaskLedger(rel: str) -> bool:
 
 
 def _vocabFiles() -> list[str]:
+    """import 了 `task_ledger` 的文件清单（受词汇纪律约束的扫描面）。
+
+    枚举与解析走 tests/ast_scan 的共享预算（`parsedModules` 一次给出
+    `(路径, 语法树)`），不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    """
     found = [_DEF_SITE]
-    for path in sorted((REPO / "neurova").rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
+    for path, tree in ast_scan.parsedModules(REPO / "neurova", ".py"):
         rel = path.relative_to(REPO).as_posix()
-        if rel != _DEF_SITE and _importsTaskLedger(rel):
-            found.append(rel)
+        if rel == _DEF_SITE:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(a.name.endswith("task_ledger") for a in node.names):
+                    found.append(rel)
+                    break
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.endswith("task_ledger") or any(
+                        a.name == "task_ledger" for a in node.names):
+                    found.append(rel)
+                    break
     return sorted(found)
 
 

@@ -28,6 +28,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
@@ -54,12 +56,12 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _trees():
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——后者把
+    # 判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     for root in ROOTS:
-        for p in sorted(root.rglob("*.py")):
-            if "__pycache__" in p.parts:
-                continue
+        for ref in ast_scan.sourceRefsUnder(root, ".py"):
             try:
-                yield p, ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
+                yield ref.path, ast.parse(ref.code)
             except (SyntaxError, UnicodeDecodeError):
                 continue
 
