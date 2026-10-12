@@ -1465,6 +1465,7 @@ export default {
     accessDeniedHint: '仅该智能体的属主或管理员可查看与配置其渠道',
     identityTitle: '渠道身份绑定',
     identityDesc: '绑定后，这个渠道发送者的记忆与技能库按你的平台账号隔离；未绑定的发送者各自落在渠道专属空间。',
+    identityNoConfiguredChannel: '还没有已配置的渠道——请先在上方配好某个渠道的 bot，再来这里发绑定码（没配 bot 的渠道不会有消息进来，码发了也用不掉）。',
     identityIssue: '生成绑定码',
     identityIssuing: '生成中…',
     identityIssued: '绑定码已生成：请在 {seconds} 秒内，在该渠道发送「{command}」（只用一次）',

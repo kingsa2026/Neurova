@@ -1456,6 +1456,7 @@ export default {
     accessDeniedHint: 'Only the agent owner or an administrator can view and configure its channels',
     identityTitle: 'Channel identity binding',
     identityDesc: 'Once bound, this channel sender\'s memory and skills are isolated under your platform account; unbound senders each stay in their own channel-scoped space.',
+    identityNoConfiguredChannel: 'No configured channel yet — configure a bot for one channel above before issuing a binding code (an unconfigured channel receives no messages, so the code could never be used).',
     identityIssue: 'Generate binding code',
     identityIssuing: 'Generating...',
     identityIssued: 'Code created: send "{command}" in that channel within {seconds} seconds (single use).',
