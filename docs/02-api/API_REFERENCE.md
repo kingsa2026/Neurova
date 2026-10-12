@@ -191,6 +191,8 @@
 
 ### 49. `/api/v1/mobile` — `mobile_pairing.py` | 需认证
 - `POST /pairing/generate` | `GET /pairing/qrcode/{code}` | `POST /pairing/confirm` | `GET /pairing/status/{code}` | `GET /pairing/list` | `DELETE /pairing/{id}` | `WS /ws`
+- `WS /ws?code=…`（或 `?token=…`）的消息面：入站 `ping` / `chat:send` / `chat:cancel` / `agent:switch` / `session:list` / `session:create`；出站 `pong`、`chat:chunk`→`chat:done`、`agent:switched`、`session:*`，失败一律回 `type=error` 带 `code`。
+- §6-154（批 17）改到实况的两点：**`chat:send` 此前从未真的跑起来**——调用点按 `content=`/`user_id=` 传参，与 `Agent.chat_stream`/`Agent.chat` 的真签名（`user_input=`/`metadata=`）对不上 ⇒ 必 `TypeError`，又被一条不记日志的 catch-all 转成 `chat_failed`，服务端零痕迹。现在形状接对、回合内建立请求级属主（usage 入账、按日配额、会话归属同 §6-153 的边界口径），并把"取不到 Agent"的两种因由分开回：`agent_not_found`（确实没有）与 `agent_lookup_failed`（查询自己抛了，日志留服务端）。
 
 ---
 
