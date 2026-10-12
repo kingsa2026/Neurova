@@ -313,3 +313,102 @@ def test_reverseProofDetectsAZeroCaseModule(tmp_path):
         "零用例判据要么空转（没抓到 test_script_only.py），要么误报了真用例文件：%s" % found)
 
 
+
+
+#: 已登记的「文件名收不到、内容却是用例」存量（2026-10-12 现取，路径相对 `tests/`）。
+#: 这两档是**另一会话的在途件**（`git status` 里尚未跟踪），本批不代它改名、也不代它裁；
+#: 它们会在自己那批"提交 + 跑 CI"那一刻撞上本档——那正是该撞见它的动作。
+#: 三条出路（与 `_ZERO_CASE_TEST_FILES_BASELINE` 同）：按活的 `python_files` 改名
+#: （`test_` 前缀 + 驼峰其余，例：`test_sessionIdShapeAcrossReadPaths.py`）、
+#: 移出唯一测试根、或作为手工配方落 `tests/manual/`。
+#: **空表是零容忍口径**：任何新增者当场红。本批自己就踩过一次——
+#: 新判据先写成 `testSessionIdShapeAcrossReadPaths.py`，显式给路径跑得全绿、
+#: 目录跑与 CI 却一条都不收（见 `test_reverseProofShowsSuchAFileSilentlyDoesNotRun`）。
+_UNCOLLECTABLE_FILE_BASELINE: set = {
+    "language/testOutOfBoxDefaultLayer.py",
+    "unit/api/testRetiredGlobalLanguageDefault.py",
+}
+
+#: 按设计不参与目录收集的目录（活体配方、退役存档、运行器；AGENTS.md §2 列的结构）。
+_NON_COLLECTED_TEST_DIRS = ("manual", "archive", "runners")
+
+
+def _bearsCases(path: Path, classPatterns: list) -> bool:
+    """文件里有没有"看起来是用例"的模块级定义（函数名或类名以 test/Test 起头）。"""
+    for kind, name in _declaredCases(path, classPatterns):
+        if name.startswith(_CASE_PREFIX) or name.startswith(_CLASS_PREFIX):
+            return True
+    return False
+
+
+def _uncollectableFileNames(root: Path, filePatterns: list, classPatterns: list) -> list:
+    """`root` 下**内容是用例、文件名却不在活的 `python_files` 口径内**的 .py（相对路径逐条）。
+
+    口径来自事实源（`pytestconfig.getini("python_files")`），这里不抄模式；
+    `conftest.py`/`__init__.py` 不是用例容器，`tests/manual|archive/` 按设计只显式跑。
+    """
+    found = []
+    for path in sorted(ast_scan.filesUnder(root)):
+        if path.suffix != ".py" or path.name in ("conftest.py", "__init__.py"):
+            continue
+        # 前导下划线是"辅助件/被别的档点名跑的子进程探针"的既有记号——它不是"以为自己在跑"
+        # 的那种文件。（顺带记一笔：`tests/unit/_diag_*.py` 三档已被跟踪却零引用方，
+        # 属死档候选，另批裁，本档不据它放口径。）
+        if path.name.startswith("_"):
+            continue
+        if any(part in _NON_COLLECTED_TEST_DIRS for part in path.relative_to(root).parts[:-1]):
+            continue
+        if _matchesCollectionPattern(filePatterns, path.name):
+            continue
+        if _bearsCases(path, classPatterns):
+            found.append(path.relative_to(root).as_posix())
+    return found
+
+
+def test_noTestBearingFileHasAnUncollectableFileName(pytestconfig):
+    """按**活的** `python_files` 判定：文件名收不到的用例文件不得留在测试根（存量表只减不增）。
+
+    危害与用例名那一族同源，只是更隐蔽：`pytest tests/unit/session` 这种目录跑**不报错也不失败**，
+    整份文件一条都不跑；而显式 `pytest 那份文件` 又全绿——于是写它的人、看绿的人、
+    和查"这项有没有测"的人都以为它守着了。
+    """
+    offenders = _uncollectableFileNames(
+        _TESTS_DIR, list(pytestconfig.getini("python_files")),
+        list(pytestconfig.getini("python_classes")))
+    unexpected = sorted(set(offenders) - _UNCOLLECTABLE_FILE_BASELINE)
+    stale = sorted(_UNCOLLECTABLE_FILE_BASELINE - set(offenders))
+
+    assert not unexpected, (
+        "这些文件的文件名不在活的 python_files 口径内，内容却写着用例 ⇒ 目录跑与 CI 静默不收：%s\n"
+        "改名为 `test_` 前缀（其余驼峰）、移出测试根、或落 tests/manual/ 并去掉 test_ 前缀"
+        % unexpected)
+    assert not stale, (
+        "存量表里这几条已经不再是「文件名收不到」了，却还留在表里替不存在的事背书：%s —— 摘掉再提交"
+        % stale)
+
+
+def test_reverseProofShowsSuchAFileSilentlyDoesNotRun(tmp_path, pytestconfig):
+    """反向自证：同一份内容，`testFoo.py` 被目录跑静默丢掉、`test_foo.py` 收得到；
+    探测器必须只点名前者，且不得误报没有用例的普通模块。"""
+    (tmp_path / "testFooSilentlySkipped.py").write_text(
+        "def test_one():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "test_fooCollected.py").write_text(
+        "def test_two():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "notesHelper.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    found = _uncollectableFileNames(
+        tmp_path, list(pytestconfig.getini("python_files")),
+        list(pytestconfig.getini("python_classes")))
+    assert found == ["testFooSilentlySkipped.py"], (
+        "探测器要么空转（没抓到 testFooSilentlySkipped.py），要么误报了普通模块：%s" % found)
+
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "-c", str(_PROJECT_ROOT / "pyproject.toml"),
+         "-p", "no:cacheprovider", "--collect-only", "-q", str(tmp_path)],
+        capture_output=True, text=True, cwd=str(tmp_path))
+    listing = collected.stdout
+    assert "test_fooCollected.py" in listing, (
+        f"真收集连合规文件都没收（退出码 {collected.returncode}）：{listing[:400]}")
+    assert "testFooSilentlySkipped" not in listing, (
+        "被 `python_files` 挡掉的文件其实进得来 ⇒ 本档的靶不存在，"
+        "那条「文件名收不到」的判据是在为空转作证：" + listing[:400])
