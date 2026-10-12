@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
 from neurova.context.injector import UnifiedContextInjector
 from neurova.core.base_module import BaseModule
 from neurova.core.event_bus import EventBus
@@ -86,11 +87,9 @@ def testNoAsyncHookWithoutAwaitInBody():
     """
     offenders = []
     root = INJECTOR_PATH.parents[1]
-    for py in root.rglob("*.py"):
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+    # 再出现自带 rglob + ast.parse 的第二份实现）。
+    for py, tree in ast_scan.parsedModules(root):
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             bases = {ast.unparse(b).rsplit(".", 1)[-1] for b in cls.bases}
             if not (bases & {"BaseModule", "MemoryModule"}):
