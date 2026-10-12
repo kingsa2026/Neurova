@@ -399,9 +399,12 @@ def mountState(pluginId: str) -> typing.Tuple[bool, str]:
 def startupMountPass() -> typing.Dict[str, typing.Any]:
     """重启后把「已授权且仍合格」的插件重新挂上：授权是人的决定，不该每次开机重做一遍。
 
-    今天的实态限制（已登记台账）：安装/启用状态本身不跨重启（P1 留下的缺口——插件根可以重新
-    发现，enabled 却是人给的），所以这一遍在新进程里通常无事可做。仍要在启动尾步真接上：
-    不接，这条读数就永远是「没挂」，缺口也就永远不会被发现。
+    §6-164 之后这条读数的实态变了，写清楚免得被误读成 bug：安装与 `enabled` 现在跨重启，
+    但 `loaded` **刻意不跨重启**（用户裁「落盘状态 + 只发现不装载」——P3 的来源白名单与
+    构件完整性校验还没做，开机自动 exec 第三方代码不是便利而是风险）。因此这一遍在**新进程里
+    通常逐条拒挂 `entry_not_loaded`**，那是如实读数：挂载仍然要求管理员在同一进程里
+    先装载、再显式挂载。这一遍仍要在启动尾步真跑：不跑，`routes_mounted` 就永远是 false，
+    而"为什么没挂"也就永远没人看见。
     """
     outcome: typing.Dict[str, typing.Any] = {"mounted": [], "refused": {}}
     if _app is None:

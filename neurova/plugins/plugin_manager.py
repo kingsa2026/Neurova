@@ -25,12 +25,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
 import yaml
+from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
 from neurova.core.data_root import dataPath
 from neurova.skills.skill_install_gate import validate_permissions_for_install
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.plugins.plugin_errors import PluginError  # noqa: F401  (既有 import 面继续可用)
 
 logger = get_logger(__name__)
+
+#: 插件登记状态的落盘文件名，放在**插件根里**（`discover_plugins()` 只把
+#: `iterdir()` 里的**目录**当候选，所以根下的这个文件不会被当成插件）。
+STATE_FILE_NAME = "state.json"
+#: 状态文件版本。读到不认识的版本一律 `PluginError`——把 v2 的结构按 v1 读，
+#: 读出来的会是"没人登记过任何插件"这种看着自洽的空态（§6-159 授权存储同一口径）。
+STATE_STORE_VERSION = 1
 
 
 @dataclass
@@ -111,11 +119,111 @@ class PluginManager:
         self._manifests: Dict[str, Dict[str, Any]] = {}
         self._modules: Dict[str, Any] = {}
         self._lifecycle_manager = None
+        #: 盘上有目录但没登记过的名字——发现与登记是两件事（登记要过安装门），
+        #: 所以这条读数单独给出去而不是塞进 `_plugins`。
+        self._unregistered: List[str] = []
+        #: 状态文件读不出时的成因（`state_store_corrupt` / `state_store_version`），
+        #: 供面板与管理面如实显示"状态没读进来"，而不是把空列表当成"没装过插件"。
+        self.stateLoadError: Optional[str] = None
 
         # 确保插件目录存在
         Path(self._plugin_dir).mkdir(parents=True, exist_ok=True)
 
+        # 登记状态与 enabled 从盘上读回（§6-164：授权早就落盘，状态却没落，
+        # 于是重启后一份说"没装过"、另一份还替它保留着授予）
+        self._loadState()
+        self._scanUnregistered()
+
         logger.info("PluginManager initialized with plugin dir: %s", self._plugin_dir)
+
+    # ---------------------------------------------------------------------------
+    # 登记状态落盘（§6-164，用户裁「落盘状态 + 只发现不装载」）
+    # ---------------------------------------------------------------------------
+
+    def statePath(self) -> Path:
+        """状态文件路径——跟着插件根走，不另起第二根（§6-150 复算过 `Path.home()` 那条）。"""
+        return Path(self._plugin_dir) / STATE_FILE_NAME
+
+    def unregisteredPluginDirs(self) -> List[str]:
+        """磁盘上是插件目录、但从没登记过的名字（只报读数，不代做登记）。"""
+        return sorted(self._unregistered)
+
+    def loadStateOrRaise(self) -> Dict[str, PluginRecord]:
+        """读状态文件并返回记录表。坏文件改名隔离后抛 `state_store_corrupt`，
+        版本不认识抛 `state_store_version`——都是**响亮地拒**，不是安静给一份空表。"""
+        path = self.statePath()
+        if not path.exists():
+            return {}
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            quarantined = quarantine_corrupt_file(path)
+            logger.error("插件状态文件无法解析，已隔离现场 %s：%s", quarantined, e)
+            raise PluginError("state_store_corrupt",
+                              "插件状态文件读不出，已改名隔离：%s（%s）" % (quarantined, e))
+
+        if not isinstance(data, dict) or data.get("version") != STATE_STORE_VERSION:
+            raise PluginError(
+                "state_store_version",
+                "插件状态文件格式版本不认识（现值 %r，期望 %r）——不做自动映射"
+                % (data.get("version") if isinstance(data, dict) else "<非映射>",
+                   STATE_STORE_VERSION))
+
+        records: Dict[str, PluginRecord] = {}
+        for name, entry in (data.get("plugins") or {}).items():
+            if not isinstance(entry, dict):
+                logger.warning("跳过格式不合法的插件状态条目：%r", name)
+                continue
+            record = PluginRecord.from_dict(entry)
+            if not record.name:
+                logger.warning("跳过没有名字的插件状态条目：%r", name)
+                continue
+            if not record.path or not Path(record.path).is_dir():
+                logger.warning("跳过目录已不存在的插件记录：%r（path=%s）——不留幽灵行",
+                               record.name, record.path)
+                continue
+            # **装载是运行期状态**：`loaded` 从盘上复活＝开机自动 exec 第三方代码，
+            # 而 P3（来源白名单 + 构件完整性）未做。这里无论文件里写了什么都清掉。
+            record.loaded = False
+            record.load_time = 0.0
+            records[record.name] = record
+        return records
+
+    def _loadState(self) -> None:
+        try:
+            self._plugins = self.loadStateOrRaise()
+            self.stateLoadError = None
+        except PluginError as exc:
+            self._plugins = {}
+            self.stateLoadError = exc.reason
+            logger.error("插件登记状态未读入（%s）：%s——列表会显示为空，"
+                         "但这不是「这台机器没装过插件」", exc.reason, exc.detail)
+            return
+
+        for name, record in self._plugins.items():
+            manifest = self._load_manifest(Path(record.path)) if record.path else None
+            if manifest:
+                self._manifests[name] = manifest
+
+    def _persistState(self, exclude: Optional[str] = None) -> None:
+        """把当前登记表写盘；`exclude` 用于"先落盘再改内存"的删除路径。
+
+        顺序是刻意的：删除**先写盘**（盘上没这条了）再动内存，反过来会得到
+        "内存说删了、文件里还留着"——重启时那条记录又活回来，比报错更难查。
+        """
+        entries = {name: record.to_dict()
+                   for name, record in self._plugins.items() if name != exclude}
+        payload = {"version": STATE_STORE_VERSION, "plugins": entries}
+        atomic_write_text(self.statePath(), json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _scanUnregistered(self) -> None:
+        try:
+            discovered = self.discover_plugins()
+        except Exception as e:  # 扫描不阻断装配（插件根可能被并发写坏），但要留痕
+            logger.warning("插件根扫描失败，`unregistered` 读数本次不可用：%s", e)
+            return
+        self._unregistered = [r.name for r in discovered if r.name not in self._plugins]
 
     @property
     def plugin_dir(self) -> str:
@@ -290,6 +398,15 @@ class PluginManager:
 
         self._plugins[name] = record
         self._manifests[name] = manifest
+        try:
+            self._persistState()
+        except Exception as e:
+            self._plugins.pop(name, None)
+            self._manifests.pop(name, None)
+            logger.error("插件登记未能落盘（已回滚内存）：%s", e)
+            raise PluginError("state_write_failed",
+                              "插件 %s 已登记但状态文件写失败，内存已回滚：%s" % (name, e))
+        self._unregistered = [n for n in self._unregistered if n != name]
         self._lifecycleEvent("after_install", name)
         logger.info("Installed plugin: %s v%s", record.name, record.version)
         return record
@@ -330,6 +447,9 @@ class PluginManager:
                     raise
                 logger.error("授予文件读不出（%s）——插件记录已删，孤儿授权需人工复核", exc.detail)
 
+            # 先写盘（去掉这条）再删内存：见 `_persistState` 里那条顺序理由
+            self._persistState(exclude=plugin_name)
+
             # 删除插件记录
             del self._plugins[plugin_name]
 
@@ -337,6 +457,7 @@ class PluginManager:
             if plugin_name in self._modules:
                 del self._modules[plugin_name]
             self._manifests.pop(plugin_name, None)
+            self._scanUnregistered()
 
             self._lifecycleEvent("after_uninstall", plugin_name)
             logger.info("Uninstalled plugin: %s", plugin_name)
@@ -715,6 +836,12 @@ class PluginManager:
 
             # 启用插件
             record.enabled = True
+            try:
+                self._persistState()
+            except Exception as e:
+                record.enabled = False
+                logger.error("启用未能落盘（已回滚内存）plugin %s: %s", plugin_name, e)
+                return False
 
             # 如果已加载，调用 on_enable
             if record.loaded and plugin_name in self._modules:
@@ -759,6 +886,12 @@ class PluginManager:
 
             # 禁用插件
             record.enabled = False
+            try:
+                self._persistState()
+            except Exception as e:
+                record.enabled = True
+                logger.error("禁用未能落盘（已回滚内存，HTTP 面未动）plugin %s: %s", plugin_name, e)
+                return False
 
             # HTTP 面同批关掉：禁用不是读数，是可执行的动作——只翻布尔的话，
             # 面板显示「已禁用」而流量照旧进得来。
