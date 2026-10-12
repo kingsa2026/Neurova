@@ -35,6 +35,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests import ast_scan
 
 from neurova.plugins.plugin_manager import PluginError
 
@@ -89,8 +90,9 @@ class TestCapabilityVocabularyIsSourcedNotCopied:
         skills = _skillPermissions()
         keys = set(skills.KNOWN_CAPABILITY_KEYS)
         offenders = []
-        for path in sorted(PLUGIN_PACKAGE.glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        # 枚举与解析走共享预算（含 `__pycache__` 剪枝；只扫一遍）。
+        for path in sorted(ast_scan.filesUnder(PLUGIN_PACKAGE)):
+            tree = ast_scan.transientTree(path)
             for node in ast.walk(tree):
                 literals = {n.value for n in ast.walk(node)
                             if isinstance(n, ast.Constant) and isinstance(n.value, str)}
