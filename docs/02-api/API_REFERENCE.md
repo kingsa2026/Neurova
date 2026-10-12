@@ -52,8 +52,10 @@
 ### 9. `/api/v1/skills` — `skill.py` | 无认证
 - `GET` 列表 | `GET /{id}` 详情 | `POST /{id}/execute` 执行 | `GET /stats` 统计 | `POST /learn` 学习 | `GET /tips` 提示
 
-### 10. `/api/v1/settings` — `settings.py` | 无认证
+### 10. `/api/v1/settings` — `settings.py` | 需认证（写面另加管理员门）
 - `GET/PUT` 系统设置 | `GET/PUT /llm` LLM配置 | `POST /llm/test` 测试
+- 「某个用户默认看什么语言」**不在这一面**（§6-167 退役）：`general.language` 与平铺 `language` 两个键都已摘掉，写它们回 **400 并给出去处**，读它们回 **404**；起点改由 `/api/v1/language/preferences/default`（写面仅管理员）承载
+- 实测（活体 `tests/manual/languageFace_outOfBox_batch167.py` 第 [31]/[32]/[33] 项）：无凭证 `GET /settings` 与 `GET /settings/{key}` 都是 **401**，带凭证读一个不存在的键是 **404**——本行原先写的是「无认证」，与本批动过的那个面不符，按读数改；**附录里其余模块的「无需认证」整表仍未逐模块复核**（§6-158 留的那笔账一寸没变）
 
 ### 11. `/api/v1/logs` — `logs.py` | 无认证
 - `GET` 系统日志 (level, limit, start_time, end_time)
@@ -287,14 +289,17 @@
 ### 76. `/api/v1/language` — `language_api.py` | 需认证（写面另加管理员门）
 - 本人语言偏好：`GET /preferences/mine`（只读，没设过如实回 `configured:false`，不替用户建一条）｜
   `PUT /preferences/mine`（属主**只从登录态取**，请求体 `extra="forbid"`，多写 `user_id` 直接 422）
+- 开箱默认（§6-167 取进来的那一格）：`GET /preferences/default`（登录即可读）｜`PUT /preferences/default`（**仅管理员**）
+  它只作用于**还没自己选过语言的人**，本人一旦选过就以其本人偏好为准；落盘是 `language_preferences.json` 顶层的**可选 `default` 键**——不占 `preferences` 里的用户行（占了就会被读成「这个人做过决定」），也**不抬存储版本**（抬了会让已落盘的按人偏好被自己的版本隔离逻辑改名隔离，那是凭空丢真数据）
+- 读数把两件事分开给：`configured`＝这个人自己做过决定没；`source` ∈ `user`/`out_of_box`/`builtin`＝这条读数是哪个来源给的。来源词汇只在 `LanguageManager.EFFECTIVE_SOURCES` 定义一处（UI 侧那份常量只在 `NeurUI/src/api/modules/language.ts`，判据按文件面钉住）
 - 译文覆盖层：`GET /overlay?language=&namespace=`（含**未审**条目，逐条带 `approved`/`translator`）｜
   `PUT /overlay/{namespace}`（**仅管理员**；`{key: {语言码: 文案}}`，坏语言码整批 400 并点名）
 - 语言码归一只走 `Language.normalizeTag`（本面不写第二刀）；`auto` 不许当首选/回退语言，
   那一层语义由 `auto_detect` 承载（台账 §6-140/§6-145 的同一根因，别在新字段上重建）
 - 偏好落盘：数据根下 `language_preferences.json`（**刻意不放进 `language/` 译文目录**——
   那里每个 `*.json` 都会被当成一个命名空间读进来）；写盘失败回 500 且内存回滚，不谎报已保存
-- 实测：无凭证两个读面均 401、普通用户写面 403（活体 `tests/manual/languageFace_batch14.py`
-  第 [22]/[13] 项，台账 §6-160）
+- 实测：无凭证各读面均 401、普通用户写面 403（活体 `tests/manual/languageFace_batch14.py`
+  第 [22]/[13] 项，台账 §6-160）；`/preferences/default` 那两面同样实测——非管理员写 403、无凭证读 401（活体 `tests/manual/languageFace_outOfBox_batch167.py` 第 [4]/[19] 项，台账 §6-167）
 
 ---
 

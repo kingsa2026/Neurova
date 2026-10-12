@@ -98,6 +98,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "test_round_uses_one_connection_and_one_transaction 钉住（0 次新建连接 + "
         "1 次 BEGIN + 1 次 COMMIT）。",
     ),
+    "tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py": (
+        ("wallClock",),
+        "单调钟在这里是**轮询的护栏**，不是量时长：`_pastTick()` 等的是 `time.time()` "
+        "自己前进一格——本机那个读数的粒度不是 1µs，同一 tick 内写两条会让 "
+        "`last_accessed` 并列，于是淘汰序与 `get_recent` 的排序断言退化成按插入序断"
+        "（§6-162 记过的那枚形态）。`time.monotonic() + 1.0` 只是「到点就如实红」的上限，"
+        "断言的是访问顺序与容量行为，不编码任何耗时上下界；负载再高只会让它自己报"
+        "「本机读数一秒内没前进」，不会假绿。",
+    ),
     "tests/unit/ci/test_clock_caliber_ledger.py": (
         ("threadCpu", "wallClock"),
         "本守卫自身：CLOCK_PATTERNS 的正则字样（thread_time / perf_counter）与被检样例"

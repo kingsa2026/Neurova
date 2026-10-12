@@ -2320,6 +2320,8 @@ export default {
     general: 'Общие',
     generalSettings: 'Общие настройки',
     appName: 'Название приложения',
+    outOfBoxLanguage: 'Язык по умолчанию',
+    outOfBoxLanguageHint: 'Касается только тех, кто ещё сам не выбрал язык; собственный выбор всегда приоритетен. Только для администраторов.',
     security: 'Безопасность',
     securitySettings: 'Настройки безопасности',
     jwtSecret: 'JWT-секрет',

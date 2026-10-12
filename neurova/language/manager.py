@@ -21,7 +21,7 @@ from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.language.models import (
     Language,
@@ -42,6 +42,17 @@ PREFERENCES_FILE_NAME = "language_preferences.json"
 #: 落盘格式版本。读到不认识的版本一律不采信并隔离——半自动映射会把"当初没人签字的决定"
 #: 变成"看起来有人签字过"（与插件授权存储 `STORE_VERSION` 同一口径）。
 PREFERENCES_STORE_VERSION = 1
+#: 存储里那条**开箱默认**的顶层键名（§6-167 取长补短取进来的那一格）。它落在顶层而不是
+#: `preferences` 表里——占一条用户行的话，「多少人设过偏好」会被管理员那一次点击灌大，
+#: 而 `configured` 也会把一个替所有人做的决定报成本人做过的决定。
+#: **新增可选键不抬版本**：抬了就是让今天已落盘的每条按人偏好被上面那段版本隔离逻辑
+#: 改名隔离——那不是兼容，是凭空丢掉真数据。
+DEFAULT_STORE_KEY = "default"
+#: 那条开箱默认在内存里的**保留属主名**（`UserLanguagePreference.user_id` 要求非空，
+#: 而这一格不属于任何具体的人）。它**永远不进 `preferences` 表**——真有个用户叫这名字
+#: 也拿不到那条读数，判据 `testTheDefaultIsNotStoredAsAUserRow` 钉的就是这件事。
+#: HTTP 面要构造那条哨兵偏好时取用本常量，不在自己文件里再抄一遍串（教义第 6 条）。
+OUT_OF_BOX_OWNER = "__defaults__"
 
 
 class LanguageManager:
@@ -50,6 +61,12 @@ class LanguageManager:
 
     负责管理多语言翻译、用户语言偏好和翻译缓存。
     """
+
+    #: 「这个人现在该看哪种语言」这条解析链的**来源词汇，全仓只在这一定义**（教义第 6 条）。
+    #: 三个值各有实义：`user`＝本人显式选过；`out_of_box`＝管理员替还没选的人定的起点；
+    #: `builtin`＝谁都没定，落到枚举级的 last resort。HTTP 面与前端的分支都取这一份，
+    #: 第二处字面量长出来时先漂移的一定是没人对着读的那份（判据按文件面钉住）。
+    EFFECTIVE_SOURCES = ("user", "out_of_box", "builtin")
 
     def __init__(self, data_dir: Optional[str] = None, default_language: Language = Language.CHINESE,
                  preferences_path: Optional[str] = None):
@@ -75,6 +92,10 @@ class LanguageManager:
 
         # 用户语言偏好: {user_id: UserLanguagePreference}
         self._user_preferences: Dict[str, UserLanguagePreference] = {}
+
+        #: 管理员定的「开箱默认」（§6-167 取长补短取进来的那一格）：它**不是**一条用户偏好，
+        #: 所以不占 `_user_preferences` 的任何键，也不进"多少人设过偏好"的计数。
+        self._outOfBoxDefault: Optional[UserLanguagePreference] = None
 
         # 翻译缓存
         self._cache: Dict[str, Dict[str, str]] = {}  # {cache_key: {language: value}}
@@ -473,6 +494,7 @@ class LanguageManager:
             return
 
         loaded = 0
+        self._outOfBoxDefault = self._readDefaultEntry(data.get(DEFAULT_STORE_KEY))
         for key, entry in (data.get("preferences") or {}).items():
             if not isinstance(entry, dict):
                 logger.warning("跳过格式不合法的用户偏好条目：user=%r", key)
@@ -493,12 +515,90 @@ class LanguageManager:
                     loaded, len(data.get("preferences") or {}) - loaded)
 
     def _persist_user_preferences(self) -> None:
-        """把当前全部偏好原子写盘；失败向上抛，由 `set_user_preference` 回滚。"""
-        payload = {
+        """把当前全部偏好原子写盘；失败向上抛，由调用方（按人写入 / 开箱默认写入）回滚。
+
+        `default` 键**只在设过的时候出现**：一条 GET 之后不该凭空长出这格，
+        而"没人定过起点"与"定过但值是 zh"必须是两个能区分的读数。
+        """
+        payload: Dict[str, Any] = {
             "version": PREFERENCES_STORE_VERSION,
             "preferences": {uid: pref.to_dict() for uid, pref in self._user_preferences.items()},
         }
+        if self._outOfBoxDefault is not None:
+            payload[DEFAULT_STORE_KEY] = self._outOfBoxDefault.to_dict()
         atomic_write_text(self.preferences_path, json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _readDefaultEntry(self, raw: Any) -> Optional[UserLanguagePreference]:
+        """把存储顶层那条 `default` 读成一条开箱默认；坏就只跳它自己并点名。
+
+        一条坏默认值不许把整份按人偏好带下水——与 `_load_user_preferences` 里
+        「一个坏码不许毁掉整份文件」是同一条口径（§6-145）。
+        """
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            logger.warning("跳过格式不合法的开箱默认条目（不是对象）：%r", type(raw).__name__)
+            return None
+        try:
+            preference = UserLanguagePreference.from_dict(raw)
+        except Exception as e:
+            logger.warning("跳过不合法的开箱默认条目：%s", e)
+            return None
+        # 存的就是"给所有没选过的人"的那一条，属主名不进 `preferences` 表，所以这里
+        # 只要求它是那条保留名；别的名字说明这份文件被手改过，按不合法跳掉而不是猜。
+        if preference.user_id != OUT_OF_BOX_OWNER:
+            logger.warning("开箱默认条目的属主不是保留名（现值 %r），按不合法跳过",
+                           preference.user_id)
+            return None
+        return preference
+
+    def getOutOfBoxDefault(self) -> Optional[UserLanguagePreference]:
+        """管理员替「还没表达过偏好的人」定的起点；没设过就是 `None`（不冒充成一条决定）。"""
+        with self._lock:
+            return self._outOfBoxDefault
+
+    def setOutOfBoxDefault(self, preference: UserLanguagePreference) -> bool:
+        """写开箱默认：内存与盘同成或同败（与按人偏好那条纪律一寸不差）。
+
+        这一格影响的是**所有还没选过的人**，所以"内存里已经有了、盘上没写成"
+        绝不能被当成保存成功——重启后它就不在了，而管理员已经以为改动生效。
+        """
+        if preference.user_id != OUT_OF_BOX_OWNER:
+            logger.warning("拒绝写入属主不是保留名的开箱默认条目（user_id=%r）",
+                           preference.user_id)
+            return False
+
+        with self._lock:
+            previous = self._outOfBoxDefault
+            self._outOfBoxDefault = preference
+            try:
+                self._persist_user_preferences()
+            except Exception as e:
+                self._outOfBoxDefault = previous
+                logger.error("Failed to persist out-of-box language default: %s", e)
+                return False
+
+            logger.info("开箱语言默认已保存：%s（影响所有未表达过偏好的用户）",
+                        preference.primary_language.value)
+            return True
+
+    def resolvePreference(self, user_id: str) -> Tuple[UserLanguagePreference, str]:
+        """这个人现在该看哪种语言，**以及这个读数是哪个来源给的**。
+
+        解析链三格：本人偏好 → 开箱默认 → 枚举级 last resort。不点名来源就退成"返回一个
+        偏好"，那「管理员设的开箱默认到底生效了没」在生产里不可观测——而这条链在 §6-167
+        之前正是靠不可观测活着的（四份默认值谁都没读过它）。
+        """
+        with self._lock:
+            preference = self._user_preferences.get(user_id)
+            if preference is not None:
+                return preference, self.EFFECTIVE_SOURCES[0]
+            if self._outOfBoxDefault is not None:
+                return self._outOfBoxDefault, self.EFFECTIVE_SOURCES[1]
+            return (UserLanguagePreference(user_id=user_id or OUT_OF_BOX_OWNER,
+                                           primary_language=self.default_language,
+                                           fallback_language=self.default_language),
+                    self.EFFECTIVE_SOURCES[2])
 
     def set_user_preference(self, user_id: str, preference: UserLanguagePreference) -> bool:
         """

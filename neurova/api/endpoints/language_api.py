@@ -106,24 +106,38 @@ class OverlayUpdate(BaseModel):
         ..., description="例如 {\"save\": {\"zh-CN\": \"保存\"}}")
 
 
+#: 来源词汇取自语言层那一定义处，本文件不另抄一遍串（教义第 6 条）——
+#: 抄了就会有第二份，而先漂移的一定是没人对着读的「读数与盘上是不是同一件事」。
+_SOURCE_USER = languageManagerModule.LanguageManager.EFFECTIVE_SOURCES[0]
+_SOURCE_OUT_OF_BOX = languageManagerModule.LanguageManager.EFFECTIVE_SOURCES[1]
+_SOURCE_BUILTIN = languageManagerModule.LanguageManager.EFFECTIVE_SOURCES[2]
+
 #: 「这个用户没设过偏好时该是什么」不另抄一份——就取数据类自己的默认值。
 #: 端点里再写一遍 `Language.ENGLISH` 之类的字面量，就是第二个默认值出处（教义第 6 条），
 #: 而两份默认值漂移时，坏的是"面板显示的"与"存下来的"不是同一件事。
-_DEFAULT_PREFERENCE = UserLanguagePreference(user_id="__defaults__")
+#: 属主哨兵名取语言层那一份常量，不在本文件重抄串。
+_DEFAULT_PREFERENCE = UserLanguagePreference(
+    user_id=languageManagerModule.OUT_OF_BOX_OWNER)
 
 
-def _preferenceView(user_id: str, preference: Optional[UserLanguagePreference]) -> Dict[str, Any]:
-    """把偏好投影成读数；没设过的人拿到的是**数据类自己的默认值**并如实标 default。"""
-    effective = preference or _DEFAULT_PREFERENCE
+def _preferenceView(user_id: str, effective: Optional[UserLanguagePreference],
+                    configured: bool, source: str) -> Dict[str, Any]:
+    """把偏好投影成读数；`configured` 与 `source` 是**两件事**，分开给。
+
+    管理员设过开箱默认之后，没选过语言的人 `configured` 仍是 `False`（那不是他做过的决定），
+    但 `source` 已经是 `out_of_box`（那条决定确实生效在他身上了）。把一个布尔当成另一个用，
+    就是把别人的决定报成本人的决定——§6-160 那条「未审的要如实标未审」是同一族。
+    """
+    shown = effective or _DEFAULT_PREFERENCE
     return {
         "user_id": user_id,
-        "configured": preference is not None,
-        "source": "user" if preference is not None else "default",
-        "primary_language": effective.primary_language.value,
-        "secondary_languages": [lang.value for lang in effective.secondary_languages],
-        "fallback_language": effective.fallback_language.value,
-        "auto_detect": effective.auto_detect,
-        "updated_at": effective.updated_at if preference is not None else None,
+        "configured": configured,
+        "source": source,
+        "primary_language": shown.primary_language.value,
+        "secondary_languages": [lang.value for lang in shown.secondary_languages],
+        "fallback_language": shown.fallback_language.value,
+        "auto_detect": shown.auto_detect,
+        "updated_at": effective.updated_at if configured else None,
     }
 
 
@@ -132,11 +146,89 @@ async def getMyPreference(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """本人的语言偏好（**只读**：没设过就报未设，不替用户建一条，也不落文件）。"""
-    user_id = _userIdOr401(current_user)
-    preference = _manager().get_user_preference(user_id)
+    """本人的语言偏好（**只读**：没设过就报未设，不替用户建一条，也不落文件）。
 
-    return {"code": 0, "message": "success", "data": _preferenceView(user_id, preference)}
+    读数走 `resolvePreference` 那一条链（本人 → 开箱默认 → 枚举级 last resort），
+    所以这里报出的 `primary_language` 是**这个人实际会看到的语言**，`source` 说明是谁给的。
+    """
+    user_id = _userIdOr401(current_user)
+    preference, source = _manager().resolvePreference(user_id)
+
+    return {"code": 0, "message": "success",
+            "data": _preferenceView(user_id, preference, source == _SOURCE_USER, source)}
+
+
+@router.get("/preferences/default")
+async def getOutOfBoxDefault(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """开箱默认（管理员替「还没表达过偏好的人」定的起点）——登录即可读，写面才是管理员。
+
+    读它不必是管理员：每个人都会看到它作用于自己的效果，把读面也关进管理员门里，
+    普通用户就只剩"我的界面不知道为什么是这个语言"这一种读数。
+    """
+    manager = _manager()
+    default = manager.getOutOfBoxDefault()
+
+    return {"code": 0, "message": "success", "data": _preferenceView(
+        languageManagerModule.OUT_OF_BOX_OWNER, default, default is not None,
+        _SOURCE_OUT_OF_BOX if default is not None else _SOURCE_BUILTIN)}
+
+
+@router.put("/preferences/default")
+async def setOutOfBoxDefault(
+    request: Request,
+    body: PreferenceUpdate,
+    current_user: Dict[str, Any] = Depends(require_admin()),
+):
+    """写开箱默认（**仅管理员**）：这条影响的是所有还没选过语言的人。
+
+    门与覆盖层写面同一档（§6-160 那条「普通用户可写＝任意人给所有人的界面改文案」）：
+    语言的起点也一样，不该由任意一个登录用户替所有人定。落盘失败回 500，
+    不拿"内存里已经有了"承诺已保存。
+    """
+    primary = _normalizeTagOr400(body.primary_language, "primary_language")
+    secondary = [_normalizeTagOr400(tag, "secondary_languages")
+                 for tag in body.secondary_languages]
+    fallback = (None if body.fallback_language is None
+                else _normalizeTagOr400(body.fallback_language, "fallback_language"))
+
+    existing = _manager().getOutOfBoxDefault()
+    fallbackLanguage = (
+        fallback if fallback is not None
+        else existing.fallback_language if existing
+        else _DEFAULT_PREFERENCE.fallback_language)
+    autoDetect = (
+        body.auto_detect if body.auto_detect is not None
+        else existing.auto_detect if existing
+        else _DEFAULT_PREFERENCE.auto_detect)
+
+    try:
+        preference = UserLanguagePreference(
+            user_id=languageManagerModule.OUT_OF_BOX_OWNER,
+            primary_language=primary,
+            secondary_languages=secondary,
+            fallback_language=fallbackLanguage,
+            auto_detect=autoDetect,
+            **({"created_at": existing.created_at} if existing else {}),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    view = dict(_preferenceView(languageManagerModule.OUT_OF_BOX_OWNER,
+                                preference, True, _SOURCE_OUT_OF_BOX))
+    view["requested_tag"] = body.primary_language
+
+    if not _manager().setOutOfBoxDefault(preference):
+        raise HTTPException(
+            status_code=500,
+            detail="开箱语言默认未能落盘（内存已回滚）——不拿「内存里已经有了」向管理员"
+                   "承诺已保存：这一格影响的是所有还没选过语言的人")
+
+    logger.info("开箱语言默认已保存：language=%s by=%s",
+                preference.primary_language.value, current_user.get("user_id"))
+    return {"code": 0, "message": "success", "data": view}
 
 
 @router.put("/preferences/mine")
@@ -180,7 +272,7 @@ async def setMyPreference(
         # `auto` 当首选/回退语言会在构造点被拒（`models.py`）——那是 400，不是 500
         raise HTTPException(status_code=400, detail=str(e))
 
-    view = dict(_preferenceView(user_id, preference))
+    view = dict(_preferenceView(user_id, preference, True, _SOURCE_USER))
     view["requested_tag"] = body.primary_language
 
     if not _manager().set_user_preference(user_id, preference):

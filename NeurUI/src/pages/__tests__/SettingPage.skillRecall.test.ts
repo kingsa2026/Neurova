@@ -37,7 +37,13 @@ vi.mock('@/api/modules/settings', () => ({
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ isDark: true, toggleTheme: vi.fn(), setLocale: vi.fn() }) }))
-vi.mock('@/i18n', () => ({ supportedLocales: [{ code: 'zh-CN', flag: '🇨🇳', name: '简体中文' }] }))
+vi.mock('@/i18n', () => ({ supportedLocales: [{ code: 'zh-CN', flag: '🇨🇳', name: '简体中文' }],
+  uiCodeForLanguageTag: (tag: string | null) => (tag === 'zh' ? 'zh-CN' : null) }))
+vi.mock('@/api/modules/language', () => ({
+  LANGUAGE_SOURCE: { user: 'user', outOfBox: 'out_of_box', builtin: 'builtin' },
+  getOutOfBoxLanguageDefault: vi.fn().mockRejectedValue(new Error('skip')),
+  setOutOfBoxLanguageDefault: vi.fn().mockResolvedValue({ data: null }),
+}))
 vi.mock('ant-design-vue', () => ({ message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 
 import SettingPage from '../SettingPage.vue'

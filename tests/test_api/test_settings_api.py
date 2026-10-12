@@ -88,8 +88,14 @@ class TestSettingsAPI:
         assert isinstance(data["settings"], dict)
 
     def test_update_all_settings(self, client: TestClient):
-        """整体更新设置（请求体需为 {"settings": {...}}）"""
-        payload = {"settings": {"theme": "dark", "language": "zh_CN"}}
+        """整体更新设置（请求体需为 {"settings": {...}}）
+
+        原先这一格顺手用 `language: "zh_CN"` 当第二个键——那是四份「默认语言」定义里的
+        一个写口（§6-167 已退役，现在写它会得 400，判据在
+        `tests/unit/api/testRetiredGlobalLanguageDefault.py`）。这里改用一个仍然活着的
+        平铺键，测的仍是"整表更新回 200 且带 settings"这一件事。
+        """
+        payload = {"settings": {"theme": "dark", "auto_save": False}}
         response = client.put("/v1/settings", json=payload)
         assert response.status_code == 200
         result = response.json()
