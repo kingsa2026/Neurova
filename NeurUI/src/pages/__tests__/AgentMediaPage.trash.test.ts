@@ -60,7 +60,12 @@ const stubs = {
     template: `<button class="glass-btn" @click="$emit('click')"><slot /></button>`,
   },
   'a-spin': { template: '<div><slot /></div>' },
-  'a-empty': { template: '<div class="a-empty"><slot /></div>' },
+  'a-empty': {
+    // 文案在 **description 属性**上：旧替身只渲染 slot，等于把这层的实况从 DOM 里抹掉——
+    // "空态和卡片同时印在屏幕上"因此永远测不到（2026-10-13 浏览器实跑抓到）。
+    props: ['description'],
+    template: '<div class="a-empty">{{ description }}</div>',
+  },
   'a-input-search': true,
   'a-radio-group': true,
   'a-radio-button': true,
@@ -81,6 +86,8 @@ const MESSAGES: Record<string, string> = {
   'common.delete': '删除',
   'media.download': '下载',
   'media.detail': '详情',
+  'media.noMedia': '暂无媒体文件',
+  'media.trashEmpty': '回收站是空的',
 }
 
 function envelope(items: { media_id: string; filename: string; is_deleted?: boolean; deleted_at?: number }[]) {
@@ -267,6 +274,67 @@ describe('AgentMediaPage 回收站', () => {
 
     expect(moveToTrashMock).toHaveBeenCalledWith('media-1')
     expect(deleteMediaMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 空态与条目**不得同时在场**（2026-10-13 浏览器实跑抓到；台账 §6-169 之后的 UI 批）。
+ *
+ * 缺陷形状：`<a-empty v-else>` 挂的是分页那格的 `v-if="mediaItems.length > pageSize"`，
+ * 于是条目数落在 1..pageSize 之间时，分页不出现、`v-else` 成立 ⇒ 满屏卡片下面印一句
+ * 「暂无媒体文件」／「回收站是空的」。它要求"判有没有条目"，不是"判要不要分页"。
+ * 四格两向都有牙：有条目时必须为 0 个空态，无条目时必须恰好 1 个且文案对得上——
+ * 只留一侧的话，把条件写反（永远渲染 / 永不渲染）都能骗过它。
+ */
+describe('AgentMediaPage 空态不与条目同屏', () => {
+  const emptyBlocks = (wrapper: ReturnType<typeof mountPage>) => wrapper.findAll('.a-empty')
+
+  it('媒体库有 1 条（不足一页）：不出现空态', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('a.png')
+    expect(emptyBlocks(wrapper), '卡片底下又印了一次「暂无媒体文件」').toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('媒体库为空：出现空态且文案是「暂无媒体文件」', async () => {
+    listMediaMock.mockResolvedValue(envelope([]))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const blocks = emptyBlocks(wrapper)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].text()).toContain(MESSAGES['media.noMedia'])
+    wrapper.unmount()
+  })
+
+  it('回收站有 1 条：不出现空态', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const toggle = buttonsOf(wrapper).find((b) => b.label === MESSAGES['media.trash'])
+    await toggle!.click()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('gone.png')
+    expect(emptyBlocks(wrapper), '回收站里明明有条目，却印了「回收站是空的」').toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('回收站为空：出现空态且文案是「回收站是空的」（不是媒体库那句）', async () => {
+    listTrashMock.mockResolvedValue(envelope([]))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const toggle = buttonsOf(wrapper).find((b) => b.label === MESSAGES['media.trash'])
+    await toggle!.click()
+    await flushPromises()
+
+    const blocks = emptyBlocks(wrapper)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].text()).toContain(MESSAGES['media.trashEmpty'])
     wrapper.unmount()
   })
 })
