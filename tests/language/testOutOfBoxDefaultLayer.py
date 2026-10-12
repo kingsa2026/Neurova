@@ -42,6 +42,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests import ast_scan as astScan
 from neurova.api import auth as authModule
 from neurova.language import manager as languageManagerModule
 from neurova.language.manager import LanguageManager
@@ -101,16 +102,23 @@ def _filesContaining(literal: str, root: Path) -> List[str]:
 
     文本包含会把自己那句断言算进命中面（§6-162 记过的那枚形态），所以只认
     `ast.Constant` 的 str 值；注释与 docstring 里的提到不算定义。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `rglob + ast.parse`
+    会把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟）。
+    `literal` 是判据的**充分条件**——连这个串都没出现的文件不可能命中，
+    故预筛不改变判定，只把解析面收到命中面。判据会重复扫（两格用例各调一次、
+    且 `root` 可能是临时目录），故用保留型 `sourceRefsUnder` + 文本预筛：
+    临时目录那一格的文件同样按内容戳缓存，不重复读盘。
     """
     hits: List[str] = []
-    for path in sorted(root.rglob("*.py")):
+    for ref in astScan.sourceRefsUnder(root, hints=(literal,)):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except Exception:
+            tree = astScan._cachedParse(ref.stamp, ref.code)
+        except SyntaxError:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value == literal:
-                hits.append(path.relative_to(root).as_posix())
+                hits.append(ref.path.relative_to(root).as_posix())
                 break
     return hits
 

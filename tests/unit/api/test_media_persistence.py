@@ -29,7 +29,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(MEDIA, "_INDEX_FILE", str(tmp_path / "media_index.json"))
     monkeypatch.setattr(MEDIA, "_CONFIG_FILE", str(tmp_path / "media_config.json"))
     MEDIA._media_store.clear()
-    MEDIA._media_config["storage_path"] = str(tmp_path / "media_storage")
+    # 与 `test_mediaChecksumIsRecorded` 同形：就地改模块级 `_media_config` 没有回滚，
+    # 会把本文用例的 tmp_path 留给同进程后续媒体判据（§6-158 的
+    # `TestStorageRootIsNeverCwdRelative` 就是这么在整批里红的），故走 monkeypatch。
+    monkeypatch.setitem(MEDIA._media_config, "storage_path", str(tmp_path / "media_storage"))
     app = FastAPI()
     app.include_router(MEDIA.router, prefix="/api/v1/media")
     app.dependency_overrides[get_current_user] = lambda: dict(ADMIN)
