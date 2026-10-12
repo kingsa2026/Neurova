@@ -35,8 +35,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -118,6 +120,31 @@ def _scannerStub(home: Path, tool: str = "echo", body: str = "") -> Path:
     )
     stub.chmod(0o755)
     return stub
+
+
+class _FakeResponse:
+    """`urlopen` 的最小返回体：支持 `with` 与 `read(n)` 分块读契约。
+
+    本守卫要验的是「下载这一段能否在被断流后重试」，故不需要真 HTTP——
+    但**读契约必须同形**：真实现按 `read(1 << 20)` 分块落盘，假体若只给
+    `read()` 就会让被测函数走进另一条分支，"重试"这件事就验不到。
+    """
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            chunk, self._payload = self._payload, b""
+            return chunk
+        chunk, self._payload = self._payload[:size], self._payload[size:]
+        return chunk
 
 
 @pytest.fixture(scope="module")
@@ -1423,3 +1450,100 @@ class TestPrefetchFailureDoesNotBecomeABlockingGate:
         offline, problems = auditModule.resolveVerdictChannel(list(paths.values()), requireOffline=True)
         assert offline is True
         assert problems == []
+
+
+class TestScannerDownloadSurvivesTransientNetwork:
+    """扫描器**下载**这一段也必须对基础设施错误重试（2026-10-12 构建实测）。
+
+    2026-10-12 的 PR #358 构建 `cnb-n3l-1k4o62410` 的 dependency-audit 腿红在
+    最后一步，读数原文：
+
+        $ python scripts/ci/osv_audit.py
+        osv-scanner 下载失败: <urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING]
+        EOF occurred in violation of protocol (_ssl.c:1010)>
+        [osv] 下载 https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64
+        OSV_GATE_SUMMARY {"gate": "osv", "exit": 2, "targets": 2}
+
+    **这条红与本次提交一个字的关系都没有**：下载是一份让"扫描器本体到位"的前置
+    动作（57.5MB，实测同一 URL 本地重跑逐字节对得上指纹），而 GitHub release 的
+    CDN 在一次 57MB 传输里掉一次流是网络抖动，不是判据。修法与
+    `scripts/ci/pip_audit_gate.py` 同源（Issue #354）：**只对基础设施错误重试，
+    「取到了但指纹不符」立即判红、绝不重试**——重试一条已成立的完整性裁决，
+    等于把供应链判据交给重试次数。
+
+    判据真调函数（`_downloadScannerWithRetry`），不比对脚本文本。
+    """
+
+    def test_mid_stream_drop_is_retried_then_succeeds(self, auditModule, tmp_path, monkeypatch):
+        """第一次传输中途断流 → 重试取回 → 指纹通过、返回可用路径。"""
+        payload = b"#!/bin/sh\necho fake-osv-scanner\n"
+        digest = hashlib.sha256(payload).hexdigest()
+        monkeypatch.setitem(auditModule._BINARY_SHA256, "linux_amd64", digest)
+        monkeypatch.setattr(auditModule, "_platform_key", lambda: "linux_amd64")
+        monkeypatch.setattr(auditModule, "_DOWNLOAD_RETRY_BACKOFF", 0.0)
+
+        attempts = {"n": 0}
+
+        def flakyUrlopen(url, timeout=None):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise OSError(
+                    "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
+                )
+            return _FakeResponse(payload)
+
+        monkeypatch.setattr(auditModule.urllib.request, "urlopen", flakyUrlopen)
+
+        dest = auditModule._downloadScannerWithRetry(tmp_path)
+        assert attempts["n"] == 2, "中途断流没有重试——一次网络抖动就是阻塞红灯"
+        assert dest.is_file() and dest.read_bytes() == payload
+        assert os.access(dest, os.X_OK), "取回后没 chmod +x（127 的伪装来源）"
+
+    def test_all_attempts_exhausted_reports_infrastructure_error(self, auditModule, tmp_path, monkeypatch):
+        """每次都断流 → 响亮说出「本轮没取成」，不许伪装成「没问题」。"""
+        monkeypatch.setattr(auditModule, "_platform_key", lambda: "linux_amd64")
+        monkeypatch.setattr(auditModule, "_DOWNLOAD_RETRY_BACKOFF", 0.0)
+        monkeypatch.setattr(auditModule, "_DOWNLOAD_ATTEMPTS", 3)
+
+        attempts = {"n": 0}
+
+        def alwaysDrop(url, timeout=None):
+            attempts["n"] += 1
+            raise OSError("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol")
+
+        monkeypatch.setattr(auditModule.urllib.request, "urlopen", alwaysDrop)
+
+        with pytest.raises(SystemExit) as excinfo:
+            auditModule._downloadScannerWithRetry(tmp_path)
+        assert attempts["n"] == 3, f"未按 _DOWNLOAD_ATTEMPTS 重试：实际 {attempts['n']} 次"
+        assert "下载失败" in str(excinfo.value), "基础设施错误没有被点名"
+
+    def test_fingerprint_mismatch_is_never_retried(self, auditModule, tmp_path, monkeypatch):
+        """取回成功但指纹不符 = 完整性裁决已成立 → 立即判红，不重试。
+
+        回退路径：把指纹校验也放进重试循环 → 转红（那样等于"重试到某次恰好对上"，
+        供应链判据就交给了重试次数）。
+        """
+        monkeypatch.setattr(auditModule, "_platform_key", lambda: "linux_amd64")
+        monkeypatch.setattr(auditModule, "_BINARY_SHA256", {"linux_amd64": "00" * 32})
+        monkeypatch.setattr(auditModule, "_DOWNLOAD_RETRY_BACKOFF", 0.0)
+
+        attempts = {"n": 0}
+
+        def wrongBytes(url, timeout=None):
+            attempts["n"] += 1
+            return _FakeResponse(b"not-the-real-scanner")
+
+        monkeypatch.setattr(auditModule.urllib.request, "urlopen", wrongBytes)
+
+        with pytest.raises(SystemExit) as excinfo:
+            auditModule._downloadScannerWithRetry(tmp_path)
+        assert attempts["n"] == 1, "指纹不符被重试了——完整性裁决被交给重试次数"
+        assert "指纹不符" in str(excinfo.value)
+
+    def test_unknown_platform_still_refuses_to_download(self, auditModule, tmp_path, monkeypatch):
+        """反向控制：未登记平台仍不许下载（这条判据不许被本次收口拆掉）。"""
+        monkeypatch.setattr(auditModule, "_BINARY_SHA256", {})
+        with pytest.raises(SystemExit) as excinfo:
+            auditModule._downloadScannerWithRetry(tmp_path)
+        assert "指纹" in str(excinfo.value)
