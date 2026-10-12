@@ -12,7 +12,6 @@ files_to_fix = [
     'neurova/cognitive_layers/growth_layer/analyzer.py',
     'neurova/cognitive_layers/memory_layer/enhanced_retrieval.py',
     'neurova/cognitive_layers/memory_layer/modules/sleep_module.py',
-    'neurova/core/cognition_orchestrator.py',
     'neurova/core/intrinsic_motivation.py',
     'neurova/core/startup_manager.py',
     'neurova/core/trace_recorder.py',
