@@ -1,14 +1,34 @@
-"""实际对话测试 - 使用真实 LLM"""
+"""活体探针：真 LLM 三轮对话（台账 §6-133 分流里判「迁」的那一档）。
+
+跑法：`PYTHONPATH="$(git rev-parse --show-toplevel)" python tests/manual/liveLlmThreeTurnProbe.py`
+
+迁的理由：它原来叫 `tests/integration/test_live_llm.py`，待在唯一测试根里却**一条用例都不产**
+（§6-133 那 26 档之一）——它本来就是一份要真配额、真模型的手工配方，全程只 print 计数、零断言，
+`pytest` 收集不到它，而任何人 grep 到这个名字都会以为"跨轮对话有回归测试"。
+它唯一的价值是那三步 patch（`_load_identity`/`_init_memory_modules`/`_init_cognitive_graph`）
+的复现顺序，删了就把配方一起丢了。
+
+迁过来就归 `tests/unit/ci/test_manual_live_verify_contract.py` 那条契约管：脚本构造生产持久对象
+（这里 `Agent(...)` 会落会话/记忆存储）却不经隔离单点，未注入时 `get_data_root()` 直接落仓库
+`data/`——所以这里必须在导入任何 `neurova.*` **之前**调 `isolatedDataRoot()`。
+"""
 import sys
 import asyncio
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 
-sys.path.insert(0, '.')
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from neurova.agent_core import Agent, AgentConfig
-from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
-from neurova.agent.crystallized_experience_manager import (
+from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+
+#: 仓内唯一的数据根隔离落点；放在生产模块导入之前（`get_data_root()` 虽按调用时解析，
+#: 编排器与连接池的构造期会立刻取它）。
+isolatedDataRoot()
+
+from neurova.agent_core import Agent, AgentConfig  # noqa: E402
+from neurova.agent.chat_pipeline import ChatPipeline, ChatContext  # noqa: E402
+from neurova.agent.crystallized_experience_manager import (  # noqa: E402
     CrystallizedExperienceManager, RetrievalStatus, CrystallizedExperience, RetrievalResult
 )
 

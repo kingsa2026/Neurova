@@ -257,34 +257,13 @@ def test_reverseProofDetectsAnEmptyTestModule(tmp_path):
 #: 它们仍会在收集期被 import（副作用照跑），只是**一条用例都不产**——于是"这个名字"
 #: 被当成"这项覆盖"。处置（删、迁 `tests/manual/`、或补成真用例）需逐文件裁，
 #: 本表只保证两件事：**不许再长**，且**只能变短**。
-_ZERO_CASE_TEST_FILES_BASELINE = {
-    "auth/test_jwt.py",
-    "auth/test_login_api.py",
-    "integration/test_live_llm.py",
-    "llm/test_volcano_model.py",
-    "test_api/test_api.py",
-    "test_api/test_api_direct.py",
-    "test_api/test_api_shared_graph.py",
-    "test_api/test_endpoints.py",
-    "test_api/test_new_endpoints.py",
-    "test_api/test_server.py",
-    "test_api/test_shared_graph.py",
-    "test_memory/test_real_data.py",
-    "unit/agent/test_agent_collaboration.py",
-    "unit/cognitive/test_conflict_comprehensive.py",
-    "unit/cognitive/test_working_memory_comprehensive.py",
-    "unit/memory/test_memory_isolation.py",
-    "unit/security/test_bug_scanner.py",
-    "unit/security/test_static_code_scanner.py",
-    "unit/skills/test_skill.py",
-    "unit/skills/test_skill_security.py",
-    "unit/test_connection_pool.py",
-    "unit/test_final.py",
-    "unit/test_functionality.py",
-    "unit/test_import_api_endpoints.py",
-    "unit/test_init_order_check.py",
-    "unit/tools/test_builtin_tools.py",
-}
+#: 存量已按用户 2026-10-12 的裁定「乙 · 逐档分流」**清空**（台账 §6-133 → §6-162）：
+#: 26 档去处的逐档依据见那条台账格，这里只留口径本身。
+#: **空表不是"这条判据没内容了"**——它从这一天起是零容忍：任何新的
+#: 「名字像用例集、实则 0 用例」的 `test_*.py` 落进唯一测试根，本档当场红。
+#: 三条出路（按 AGENTS.md §4）：补成真用例、移出测试根、或作为手工配方落 `tests/manual/`
+#: 且**不得**用 `test_` 前缀命名。
+_ZERO_CASE_TEST_FILES_BASELINE: set = set()
 
 
 def _zeroCaseTestFiles(root: Path, functionPatterns: list, classPatterns: list) -> list:
