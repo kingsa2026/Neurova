@@ -43,6 +43,16 @@ vi.mock('@/api/modules/channel-configs', () => ({
   listObservedChannelSenders: (...a: unknown[]) => listObservedChannelSenders(...a),
   listMyChannelIdentityBindings: (...a: unknown[]) => listMyChannelIdentityBindings(...a),
 }))
+// 渠道页现在还挂着移动配对面板（批 29）：这一族只管**接线**，配对语义在
+// `components/__tests__/MobilePairingPanel.test.ts`，这里只钉"它在整页上"。
+const getPairedDevices = vi.fn().mockResolvedValue({ devices: [], total: 0 })
+vi.mock('@/api/modules/mobile', () => ({
+  generatePairing: vi.fn(),
+  getPairingStatus: vi.fn(),
+  getPairedDevices: (...a: unknown[]) => getPairedDevices(...a),
+  revokePairing: vi.fn(),
+  getPairingQrcodeBlob: vi.fn(),
+}))
 vi.mock('@/api/modules/negative-screen', () => ({
   getNegativeScreenConfig: vi.fn().mockResolvedValue({ enabled: false }),
   updateNegativeScreenConfig: vi.fn().mockResolvedValue({}),
@@ -135,5 +145,15 @@ describe('AgentChannelPage — 绑定面板的接线', () => {
     expect(hint.exists(), '整页装配下禁用态仍是一块哑巴').toBe(true)
     expect(hint.text(), '提示必须来自真语言包（手写桩补了键、真包漏了照样白屏）')
       .toContain('还没有已配置的渠道')
+  })
+
+  it('移动配对面板挂在渠道页上（后端修通三批之后，这条链第一次有可达入口）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="mobile-pairing-panel"]').exists(),
+      '配对面板没接进整页——后端再对，用户也还是没有入口（组件对≠接上）').toBe(true)
+    expect(getPairedDevices, '面板首屏就该向服务端取设备列表（屏幕状态来自唯一事实源）')
+      .toHaveBeenCalled()
   })
 })
