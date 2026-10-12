@@ -149,16 +149,18 @@ class TestUserLanguagePreferenceContract:
 
 
 def _dashSplitSites(root):
-    """语言包内**按连字符切标签**的落点：`文件::所属函数`（AST 取节点，不按文本猜）。"""
+    """语言包内**按连字符切标签**的落点：`文件::所属函数`（AST 取节点，不按文本猜）。
+
+    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148：受保护子集里不得
+    再出现自带 `rglob` + `ast.parse` 的第二份实现）。
+    """
     import ast as _ast
     import pathlib
 
+    from tests import ast_scan
+
     sites = []
-    for path in sorted(pathlib.Path(root).rglob("*.py")):
-        try:
-            tree = _ast.parse(path.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
+    for path, tree in ast_scan.parsedModules(pathlib.Path(root)):
         for node in _ast.walk(tree):
             if not (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
                     and node.func.attr == "split"):

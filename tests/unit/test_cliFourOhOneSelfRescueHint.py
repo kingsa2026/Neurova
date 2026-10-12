@@ -12,6 +12,7 @@ C1 把记忆面写类请求收成"必须有可验证身份"后，CLI 上原先�
   在此统一加话术就是替别人编理由。
 """
 
+import importlib
 import sys
 import unittest
 from pathlib import Path
@@ -21,8 +22,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+def _loadCli():
+    """导入仓库根的 `cli`（顶层脚本，不是包）。
+
+    `cli.py` 住在仓库根、本身不是一个包，所以常规 import 会把编译产物写到
+    `__pycache__/cli.*.pyc` —— 那正是仓库根顶层条目，`tests/conftest.py` 的
+    `_guardRepoRootAgainstPollution` 会当场点名肇事用例（2026-10-12 CI 实测报
+    `['__pycache__']`）。写盘已由 `tests/conftest.py` 在导入期统一关掉
+    （`sys.dont_write_bytecode`），本处不再各写一份开关。
+    """
+    return importlib.import_module("cli")
+
+
 class TestFourOhOneSelfRescueHint(unittest.TestCase):
     def test_unauthenticated_401_names_the_login_command(self):
+        _loadCli()
         from cli import _error_message
 
         message = _error_message(401, {"detail": "Not authenticated"})
@@ -31,6 +45,7 @@ class TestFourOhOneSelfRescueHint(unittest.TestCase):
         self.assertIn("/login", message)
 
     def test_invalid_token_401_also_points_at_login(self):
+        _loadCli()
         from cli import _error_message
 
         message = _error_message(401, {"detail": "Invalid or expired token"})
@@ -38,6 +53,7 @@ class TestFourOhOneSelfRescueHint(unittest.TestCase):
         self.assertIn("/login", message)
 
     def test_hint_is_added_once_not_duplicated(self):
+        _loadCli()
         from cli import _error_message
 
         # 信封形态（{code,message}）与 detail 形态都要补，但只能补一次
@@ -45,6 +61,7 @@ class TestFourOhOneSelfRescueHint(unittest.TestCase):
         self.assertEqual(envelope.count("/login"), 1)
 
     def test_other_status_codes_keep_message_untouched(self):
+        _loadCli()
         from cli import _error_message
 
         # 教义第 2 条的反向钉：改错误封装只能加自救入口，不许顺手改写别的码

@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
 from neurova.core.event_bus import get_event_bus, reset_event_bus
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -62,12 +63,13 @@ def manager(tmp_path):
 
 
 def _eventBusDefinitions() -> list:
+    """`EventBus` 类的定义点（枚举与解析走共享预算，文本预筛取类名）。
+
+    本判据在受保护子集里，自带 `rglob` + `ast.parse` 会被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名（Issue #148）。
+    """
     hits = []
-    for py in NEUROVA_ROOT.rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
-        if "class EventBus" not in text:
-            continue
-        tree = ast.parse(text)
+    for py, tree in ast_scan.parsedModules(NEUROVA_ROOT, hints=("class EventBus",)):
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "EventBus":
                 hits.append(f"{py.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")

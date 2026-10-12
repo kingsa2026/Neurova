@@ -27,6 +27,7 @@ import asyncio
 import io
 from pathlib import Path
 
+from tests import ast_scan
 from neurova.agent.tool_coordinator import ToolCoordinator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -159,13 +160,9 @@ class TestProductionConsumerPassesSession:
     def test_noBarePopPendingHintsCallInProduction(self):
         """生产侧每一处排干都必须传会话——空参即那条无栅栏的门。"""
         offenders = []
-        for path in PRODUCTION.rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8").read())
-            except SyntaxError:
-                continue
+        # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
+        # 不得再出现自带 rglob + ast.parse 的第二份实现）。
+        for path, tree in ast_scan.parsedModules(PRODUCTION):
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call)

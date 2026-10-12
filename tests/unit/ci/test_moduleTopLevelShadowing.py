@@ -17,21 +17,22 @@ import collections
 import pathlib
 import textwrap
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
 def _shadowedDefinitions(root: pathlib.Path):
-    """返回 [(文件, 名字, [行号...])]：模块体里出现两次以上的顶层 def/class。"""
+    """返回 [(文件, 名字, [行号...])]：模块体里出现两次以上的顶层 def/class。
+
+    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148：本判据在受保护
+    子集里，自带 `rglob` + `ast.parse` 会被形态门禁点名）。语法错误另有门禁，
+    共享面按同样的口径跳过。
+    """
     findings = []
     scanned = 0
-    for path in sorted(root.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
+    for path, tree in ast_scan.parsedModules(root):
         scanned += 1
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:  # 语法错误另有门禁，这里不重复报
-            continue
         names = [node.name for node in tree.body
                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
         counters = collections.Counter(names)

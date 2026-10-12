@@ -29,29 +29,36 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[2]
 PKG_ROOT = REPO / "neurova"
 pytestmark = pytest.mark.timeout(120)
 
 
-def _hasNoStatement(path: Path) -> bool:
-    """除 docstring / 注释外没有任何语句 ⇒ 这个模块 import 进来什么都不发生。"""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, UnicodeDecodeError):
-        return False
+def _hasNoStatement(tree: ast.AST) -> bool:
+    """除 docstring / 注释外没有任何语句 ⇒ 这个模块 import 进来什么都不发生。
+
+    入参是**已解析的树**：枚举与解析走 `tests/ast_scan.py` 的共享预算
+    （本判据在受保护子集里，自带 `rglob` + `ast.parse` 会被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名）。
+    """
     return not [n for n in tree.body
                 if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
 
 
 def _codelessModules(root: Path) -> list[str]:
-    """`root` 树里的零语句模块（`__init__.py` 除外——空包标记是正常形态）。"""
+    """`root` 树里的零语句模块（`__init__.py` 除外——空包标记是正常形态）。
+
+    判据面只由「扫了哪些文件」决定，故与 `ast_scan.filesUnder` 同源：
+    `__init__.py` 在枚举层就被剔除，剩下的照样逐个判零语句。
+    """
     found = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts or p.name == "__init__.py":
+    for path, tree in ast_scan.parsedModules(root):
+        if path.name == "__init__.py":
             continue
-        if _hasNoStatement(p):
-            found.append(p.relative_to(root).as_posix())
+        if _hasNoStatement(tree):
+            found.append(path.relative_to(root).as_posix())
     return found
 
 
@@ -82,8 +89,8 @@ def test_initMarkersAndRealModulesAreNotFlagged(tmp_path):
     assert _codelessModules(tmp_path) == [], f"误伤：{_codelessModules(tmp_path)}"
 
     # 现网实据：12 个 docstring-only 的 `__init__.py` 全部不在射程内
-    inits = [p for p in PKG_ROOT.rglob("__init__.py")
-             if "__pycache__" not in p.parts and _hasNoStatement(p)]
+    inits = [p for p, tree in ast_scan.parsedModules(PKG_ROOT)
+             if p.name == "__init__.py" and _hasNoStatement(tree)]
     assert len(inits) >= 5, "现网连一个空包标记都没有？扫描面或谓词变了，请复核"
     assert not _codelessModules(PKG_ROOT), (
         f"现网仍有零语句模块（本格与首格同判据，只是这里从反向对照视角看）：{_codelessModules(PKG_ROOT)}")
@@ -91,5 +98,5 @@ def test_initMarkersAndRealModulesAreNotFlagged(tmp_path):
 
 def test_scanRootActuallyCoversTheTree():
     """防"扫描根写错→无事发生却报绿"：覆盖性当场数一遍。"""
-    modules = [p for p in PKG_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
+    modules = ast_scan.filesUnder(PKG_ROOT)
     assert len(modules) > 500, f"扫描根 {PKG_ROOT} 只覆盖 {len(modules)} 个 .py，层级写错了"
