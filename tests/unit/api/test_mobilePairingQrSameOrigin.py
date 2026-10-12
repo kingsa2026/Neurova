@@ -97,6 +97,20 @@ def _generate(c) -> dict:
     return r.json()
 
 
+def _wsRequest(app, host: str = HOST, scheme: str = "http") -> SimpleNamespace:
+    """替框架答两件事：请求的 scheme，与路由表里那条 WS 的路径。
+
+    路径从**真挂载后的 app** 取（批 26 之后 `_build_ws_url` 就是这么要的），
+    测试里不重抄一遍挂载前缀——抄了就成了第二份事实源，也正是这次要修的病。
+    """
+    wsPath = app.router.url_path_for("mobile_websocket")
+    return SimpleNamespace(
+        headers={"host": host},
+        url=SimpleNamespace(scheme=scheme),
+        url_for=lambda name, **params: f"{scheme}://{host}{wsPath}",
+    )
+
+
 class TestQrUrlStaysOnOrigin:
     def test_generated_qr_url_is_same_origin(self, app_client):
         body = _generate(app_client)
@@ -124,9 +138,7 @@ class TestQrUrlStaysOnOrigin:
         """
         body = _generate(app_client)
         code = body["code"]
-        fakeRequest = SimpleNamespace(
-            headers={"host": HOST}, url=SimpleNamespace(scheme="http"))
-        wsUrl = MP._build_ws_url(fakeRequest, code=code)
+        wsUrl = MP._build_ws_url(_wsRequest(app_client.app), code=code)
         expected = base64.b64decode(generate_qrcode_image(wsUrl))
 
         served = app_client.get(_pathOf(body["qr_code_url"])).content
