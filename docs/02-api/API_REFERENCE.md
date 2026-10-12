@@ -52,8 +52,10 @@
 ### 9. `/api/v1/skills` — `skill.py` | 无认证
 - `GET` 列表 | `GET /{id}` 详情 | `POST /{id}/execute` 执行 | `GET /stats` 统计 | `POST /learn` 学习 | `GET /tips` 提示
 
-### 10. `/api/v1/settings` — `settings.py` | 无认证
+### 10. `/api/v1/settings` — `settings.py` | 需认证（写面另加管理员门）
 - `GET/PUT` 系统设置 | `GET/PUT /llm` LLM配置 | `POST /llm/test` 测试
+- 「某个用户默认看什么语言」**不在这一面**（§6-167 退役）：`general.language` 与平铺 `language` 两个键都已摘掉，写它们回 **400 并给出去处**，读它们回 **404**；起点改由 `/api/v1/language/preferences/default`（写面仅管理员）承载
+- 实测（活体 `tests/manual/languageFace_outOfBox_batch167.py` 第 [31]/[32]/[33] 项）：无凭证 `GET /settings` 与 `GET /settings/{key}` 都是 **401**，带凭证读一个不存在的键是 **404**——本行原先写的是「无认证」，与本批动过的那个面不符，按读数改；**附录里其余模块的「无需认证」整表仍未逐模块复核**（§6-158 留的那笔账一寸没变）
 
 ### 11. `/api/v1/logs` — `logs.py` | 无认证
 - `GET` 系统日志 (level, limit, start_time, end_time)
@@ -81,7 +83,11 @@
 - `POST /analyze` | `POST /edit` | `POST /convert`
 
 ### 18. `/api/v1/media` — `media.py`
-- `POST /upload` | `GET` 列表 | `GET /{id}` | `DELETE /{id}`
+- 写：`POST /save`（表单字段 `media_type` 必填；无 `POST /upload`）｜ `POST /batch-delete`（body `{media_ids, mode}`）｜ `PUT /config` ｜ `POST /cache/clear`
+- 读：`GET /list`（`agent_id`/`media_type`/`search`/`offset`/`limit`）｜ `GET /config` ｜ `GET /{media_id}`（内容）｜ `GET /{media_id}/metadata` ｜ `GET /download/{media_id}` ｜ `GET /stats/{agent_id}` ｜ `GET /memory/{memory_id}` ｜ `GET /storage-path/{media_type}`
+- 回收站（§6-158）：`DELETE /{media_id}?mode=trash` 软删 ｜ `GET /trash` 读面 ｜ `POST /{media_id}/restore` 恢复 ｜ `DELETE /{media_id}?mode=permanent` 彻底删除。**缺省档是 `permanent`**——列表里那个删除按钮至今仍是硬删
+- 认证：路由级 `Depends(get_current_user)`，**无凭证即 401**（实测于 §6-158 的活体第 [8] 项，附录那张表的旧值见其脚注）
+- 字面段（`/trash`、`/list`、`/config`、`/batch-delete`…）必须注册在 `GET /{media_id}` 之前，守卫见 `tests/unit/api/test_media_route_order_guard.py`
 
 ### 19. `/api/v1/knowledge` — `knowledge.py`
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
@@ -187,6 +193,8 @@
 
 ### 49. `/api/v1/mobile` — `mobile_pairing.py` | 需认证
 - `POST /pairing/generate` | `GET /pairing/qrcode/{code}` | `POST /pairing/confirm` | `GET /pairing/status/{code}` | `GET /pairing/list` | `DELETE /pairing/{id}` | `WS /ws`
+- `WS /ws?code=…`（或 `?token=…`）的消息面：入站 `ping` / `chat:send` / `chat:cancel` / `agent:switch` / `session:list` / `session:create`；出站 `pong`、`chat:chunk`→`chat:done`、`agent:switched`、`session:*`，失败一律回 `type=error` 带 `code`。
+- §6-154（批 17）改到实况的两点：**`chat:send` 此前从未真的跑起来**——调用点按 `content=`/`user_id=` 传参，与 `Agent.chat_stream`/`Agent.chat` 的真签名（`user_input=`/`metadata=`）对不上 ⇒ 必 `TypeError`，又被一条不记日志的 catch-all 转成 `chat_failed`，服务端零痕迹。现在形状接对、回合内建立请求级属主（usage 入账、按日配额、会话归属同 §6-153 的边界口径），并把"取不到 Agent"的两种因由分开回：`agent_not_found`（确实没有）与 `agent_lookup_failed`（查询自己抛了，日志留服务端）。
 
 ---
 
@@ -278,6 +286,21 @@
 ### 75. `/api/v1/memory-share-groups` — `memory_share_groups.py` | 需认证
 - CRUD + members + `POST /{id}/memories`
 
+### 76. `/api/v1/language` — `language_api.py` | 需认证（写面另加管理员门）
+- 本人语言偏好：`GET /preferences/mine`（只读，没设过如实回 `configured:false`，不替用户建一条）｜
+  `PUT /preferences/mine`（属主**只从登录态取**，请求体 `extra="forbid"`，多写 `user_id` 直接 422）
+- 开箱默认（§6-167 取进来的那一格）：`GET /preferences/default`（登录即可读）｜`PUT /preferences/default`（**仅管理员**）
+  它只作用于**还没自己选过语言的人**，本人一旦选过就以其本人偏好为准；落盘是 `language_preferences.json` 顶层的**可选 `default` 键**——不占 `preferences` 里的用户行（占了就会被读成「这个人做过决定」），也**不抬存储版本**（抬了会让已落盘的按人偏好被自己的版本隔离逻辑改名隔离，那是凭空丢真数据）
+- 读数把两件事分开给：`configured`＝这个人自己做过决定没；`source` ∈ `user`/`out_of_box`/`builtin`＝这条读数是哪个来源给的。来源词汇只在 `LanguageManager.EFFECTIVE_SOURCES` 定义一处（UI 侧那份常量只在 `NeurUI/src/api/modules/language.ts`，判据按文件面钉住）
+- 译文覆盖层：`GET /overlay?language=&namespace=`（含**未审**条目，逐条带 `approved`/`translator`）｜
+  `PUT /overlay/{namespace}`（**仅管理员**；`{key: {语言码: 文案}}`，坏语言码整批 400 并点名）
+- 语言码归一只走 `Language.normalizeTag`（本面不写第二刀）；`auto` 不许当首选/回退语言，
+  那一层语义由 `auto_detect` 承载（台账 §6-140/§6-145 的同一根因，别在新字段上重建）
+- 偏好落盘：数据根下 `language_preferences.json`（**刻意不放进 `language/` 译文目录**——
+  那里每个 `*.json` 都会被当成一个命名空间读进来）；写盘失败回 500 且内存回滚，不谎报已保存
+- 实测：无凭证各读面均 401、普通用户写面 403（活体 `tests/manual/languageFace_batch14.py`
+  第 [22]/[13] 项，台账 §6-160）；`/preferences/default` 那两面同样实测——非管理员写 403、无凭证读 401（活体 `tests/manual/languageFace_outOfBox_batch167.py` 第 [4]/[19] 项，台账 §6-167）
+
 ---
 
 ## 附录
@@ -286,16 +309,24 @@
 
 | 认证类型 | 模块 |
 |----------|------|
-| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, media, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
-| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups |
+| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
+| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups, language（写面另加管理员门） |
 | **API Key** | agent-communication |
 | **HTTPBearer** | mobile |
+
+> 脚注（§6-158）：`media` 原先挂在"无需认证"那一行，与实况不符——`media.py:40` 是
+> `APIRouter(dependencies=[Depends(get_current_user)])`，无凭证请求实测回 **401**
+> （活体第 [8] 项）。这张表**没有逐模块复核过**，其余条目同样可能是旧的：本批只按实测改了
+> 自己动过的那一格，不做整表顺手清扫（那需要一次自己的复算与裁定，登记在台账）。
+>
+> 追加（§6-160）：`language` 这一行是**按实测新加的**，不是照旧表抄的——两个读面无凭证 401、
+> 覆盖层写面对普通用户 403（活体第 [22]/[13] 项）。旧表那张"无需认证"名单至今仍未逐模块复核。
 
 ### 项目统计
 
 | 指标 | 数值 |
 |------|------|
-| 后端API模块 | 75 |
+| 后端API模块 | 76 |
 | 端点总数 | 625+ |
 | GET端点 | ~250 |
 | POST端点 | ~250 |

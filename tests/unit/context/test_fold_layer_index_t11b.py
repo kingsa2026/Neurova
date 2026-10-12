@@ -377,14 +377,14 @@ class TestIndexNodesStayOutOfRelevanceRecall:
 
         orch = _identityOrchestrator()
         try:
-            set_turn_identity("继续", "sess_A", "u1")
+            set_turn_identity("继续", "sess_A")
             await _build(orch, user_input="继续", history=[_longRound(i) for i in range(14)])
-            set_turn_identity("继续", "sess_B", "u1")
+            set_turn_identity("继续", "sess_B")
             await _build(
                 orch, user_input="继续", history=[_longRound(i) for i in range(14, 30)]
             )
         finally:
-            set_turn_identity("", None, None)
+            set_turn_identity("", None)
 
         a_layers = [
             layer["content"]

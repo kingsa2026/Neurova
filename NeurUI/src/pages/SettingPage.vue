@@ -11,16 +11,20 @@
       <!-- General -->
       <a-tab-pane key="general" :tab="t('settings.general')">
         <GlassCard :title="t('settings.generalSettings')">
-          <a-form layout="vertical" :model="general" :rules="{ app_name: [{ required: true, message: t('common.required') }], language: [{ required: true, message: t('common.required') }] }">
+          <a-form layout="vertical" :model="general" :rules="{ app_name: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.appName')">
               <a-input v-model:value="general.app_name" />
             </a-form-item>
-            <a-form-item :label="t('theme.language')">
-              <a-select v-model:value="general.language" style="width: 100%">
+            <!-- 语言的「开箱默认」不再走 `PUT /settings` 的 general 段（§6-167 退役）：
+                 那一格同时是平铺表与 general 段的默认键、却没有任何生产读者。
+                 现在它落在语言层，写面仅管理员，且**只作用于还没自己选过语言的人**。 -->
+            <a-form-item :label="t('settings.outOfBoxLanguage')">
+              <a-select v-model:value="outOfBoxLanguage" style="width: 100%">
                 <a-select-option v-for="loc in supportedLocales" :key="loc.code" :value="loc.code">
                   {{ loc.flag }} {{ loc.name }}
                 </a-select-option>
               </a-select>
+              <p class="governance-hint">{{ t('settings.outOfBoxLanguageHint') }}</p>
             </a-form-item>
             <a-form-item :label="t('theme.appearance')">
               <a-switch v-model:checked="isDark" :checked-children="t('theme.dark')" :un-checked-children="t('theme.light')" @change="onThemeToggle" />
@@ -28,6 +32,7 @@
           </a-form>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('general')">{{ t('common.save') }}</GlassButton>
+            <GlassButton variant="primary" size="sm" :loading="savingDefault" @click="saveLanguageDefault">{{ t('settings.outOfBoxLanguage') }}</GlassButton>
           </template>
         </GlassCard>
       </a-tab-pane>
@@ -348,13 +353,17 @@ import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
-import { supportedLocales } from '@/i18n'
+import { supportedLocales, uiCodeForLanguageTag } from '@/i18n'
+import {
+  getOutOfBoxLanguageDefault,
+  setOutOfBoxLanguageDefault,
+} from '@/api/modules/language'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import CredentialManager from '@/components/settings/CredentialManager.vue'
 import { message } from 'ant-design-vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const authStore = useAuthStore()
 /** 全局系统设置仅管理员可操作; 非管理员不渲染设置表单 */
 const isAdmin = computed(() => authStore.user?.role === 'admin')
@@ -365,7 +374,14 @@ const saving = ref(false)
 const clearingCache = ref(false)
 const isDark = ref(appStore.isDark)
 
-const general = ref({ app_name: 'Neurova', language: locale.value })
+const general = ref({ app_name: 'Neurova' })
+/**
+ * 开箱默认语言（§6-167）：语言层里那条「给还没自己选过语言的人」的起点，
+ * 存 UI 侧的语言码（`zh-CN` 那一族），递出去由后端归一、读回来经
+ * `uiCodeForLanguageTag` 映射回本 UI 有语言包的那些码。
+ */
+const outOfBoxLanguage = ref('')
+const savingDefault = ref(false)
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
 const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
@@ -551,16 +567,47 @@ const saveSection = async (section: string) => {
     const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value, routing: routing.value }
     await updateSettings(section, sectionMap[section])
 
-    if (section === 'general' && general.value.language !== locale.value) {
-      locale.value = general.value.language
-      appStore.setLocale(general.value.language)
-    }
-
+    // 这里原先有一段"保存 general 时顺手把管理员自己的界面语言也切过去"——它删得掉
+    // 是因为那一格本身已经退役（§6-167）。语言的改法只有 store 里那一处
+    // （`appStore.setLocale`：i18n 实例 + 方向 + 覆盖层 + per-user 落盘），
+    // 而管理员替**所有人**定的起点不该顺手变成替**他自己**做的决定。
     message.success(t('common.success'))
   } catch {
     message.error(t('common.error'))
   } finally {
     saving.value = false
+  }
+}
+
+/** 拉当前开箱默认。`configured=false` 时下拉留空（"没人定过起点"与"定过 zh"是两种读数）。 */
+const fetchLanguageDefault = async () => {
+  try {
+    const view = (await getOutOfBoxLanguageDefault()).data
+    outOfBoxLanguage.value = view?.configured
+      ? (uiCodeForLanguageTag(view.primary_language) ?? '')
+      : ''
+  } catch {
+    // 读数取不到就留空并在下一次进页面重试；这里不弹错——这一格不是用户刚做的操作
+  }
+}
+
+/** 写开箱默认（后端仅管理员）。失败必须看得见：它影响的是所有还没选过语言的人。 */
+const saveLanguageDefault = async () => {
+  if (!outOfBoxLanguage.value) {
+    message.error(t('common.required'))
+    return
+  }
+  savingDefault.value = true
+  try {
+    await setOutOfBoxLanguageDefault({
+      primary_language: outOfBoxLanguage.value,
+      auto_detect: false,
+    })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingDefault.value = false
   }
 }
 
@@ -611,6 +658,7 @@ const clearCache = async () => {
 
 onMounted(() => {
   fetchSettings()
+  fetchLanguageDefault()
   fetchGovernance()
   fetchAgentLimits()
   fetchToolOffload()

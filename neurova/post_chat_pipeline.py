@@ -152,6 +152,27 @@ def _conflictsWithLocatableMembers(
     return kept
 
 
+def resolveSessionOwner(metadata: Optional[Dict[str, Any]]) -> str:
+    """会话属主的**唯一**取法（§6-163 裁定甲）——写盘那一侧只从这里拿。
+
+    · 渠道路径：`channel_router` 在 metadata 里显式带 `session_owner_id`。说话的人是群成员，
+      而这条会话要出现在 agent 属主的控制台里（Issue #290 Wave H-W0），两个不同的人不能
+      由同一条通道同时表达。
+    · 其余入口（控制台 / `/v1/chat` / 流式 / 移动端 / 工具与 MCP）：说话人即属主，
+      读那条唯一通道。
+    · 都没有 ⇒ 空串＝共享会话，与 `session_manager` 「空属主不过滤」的既有口径一致。
+
+    这条函数之外，谁都不许再从环境里猜属主（`MemCore.save_to_session` 已改成只收参数）。
+    测试要复用它，而不是自己拼一遍同样的式子——否则被测的那一行就换成了测试的复制品。
+    """
+    if metadata is not None and "session_owner_id" in metadata:
+        return str(metadata.get("session_owner_id") or "")
+
+    from neurova.core.identity_context import get_request_user_id
+
+    return str(get_request_user_id() or "")
+
+
 class StepStatus(str, Enum):
     """步骤执行状态"""
 
@@ -995,6 +1016,8 @@ class PostChatPipeline:
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
 
+            # 会话属主的取法收成这一处函数（§6-163 裁定甲）：渠道路径显式带
+            # `session_owner_id`，其余入口说话人即属主——理由与三种取值见 `resolveSessionOwner`。
             result_session_id = self._agt._save_to_session(
                 user_input,
                 reply,
@@ -1002,6 +1025,7 @@ class PostChatPipeline:
                 metadata,
                 assistant_meta if assistant_meta else None,
                 writer_claim=writer_claim,
+                session_owner=resolveSessionOwner(metadata),
             )
             if not result_session_id:
                 # P1-10 复审修正: 围栏拒绝（陈旧 writer）返回 ""——不能把 "" 当

@@ -75,6 +75,29 @@ describe('useWorkflowRun', () => {
     expect(running.value).toBe(false)
   })
 
+  it('node_retry：被引擎重试吸收的失败不得把节点闪成 failed', async () => {
+    instantiateMock.mockResolvedValue({ workflow: WORKFLOW })
+    requestRunMock.mockResolvedValue({ runId: 'ex_retry', status: 'pending', workflow_id: 'wf_1', events_url: '' })
+    getExecutionMock.mockResolvedValue({
+      execution: { status: 'completed', outputs: { result: 'ok' }, error: null },
+    })
+
+    const { runTemplate, steps } = useWorkflowRun()
+    const promise = runTemplate('t', 'n', {})
+    await vi.waitFor(() => expect(capturedHandler).toBeTruthy())
+
+    capturedHandler!({ type: 'node_started', node_id: 'script', data: {} })
+    capturedHandler!({ type: 'node_retry', node_id: 'script', data: { attempt: 2, error: '瞬时故障' } })
+    expect(steps.value.find((s) => s.id === 'script')?.status).toBe('running')
+
+    capturedHandler!({ type: 'node_completed', node_id: 'script', data: {} })
+    capturedHandler!({ type: 'workflow_completed', node_id: null, data: {} })
+
+    const outcome = await promise
+    expect(outcome.ok).toBe(true)
+    expect(steps.value.find((s) => s.id === 'script')?.status).toBe('success')
+  })
+
   it('workflow_failed：error 诚实回传', async () => {
     instantiateMock.mockResolvedValue({ workflow: WORKFLOW })
     requestRunMock.mockResolvedValue({ runId: 'ex_2', status: 'pending', workflow_id: 'wf_1', events_url: '' })

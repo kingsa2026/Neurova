@@ -1,18 +1,21 @@
 """轮次级请求状态 ContextVar（审计 P0-B1：Agent 单例并发互踩修复）
 
 Agent 是进程级单例（AppState.agents 共享池），轮次级状态原挂在实例属性
-（_current_user_id/_tool_messages_list 等）上——两个用户并发对同一 agent
-发消息时，请求 B 的 set_request_identity 会覆盖请求 A 的身份，A 的回复
-可能带上 B 的归属；工具展示消息也会跨请求串流。
+（`_tool_messages_list` 等）上——两个用户并发对同一 agent 发消息时，
+后一请求的写入会覆盖前一请求的上下文，工具展示消息也会跨请求串流。
 
 本模块把轮次级状态迁到 ContextVar：
 - 值绑定在请求任务/线程上下文，并发请求天然隔离
 - asyncio.to_thread 会拷贝当前 context，同步降级路径同样隔离
-- Agent 的轮次级显式 API（P3-c）读写这里；旧实例属性名经 __getattr__
-  透传兼容（渐进收窄）
+- Agent 的轮次级显式 API（P3-c）读写这里
 
-与 identity_context.py 的分工：那里只管 JWT user_id 的跨层注入；
-这里管 Agent 全部轮次级展示/归属状态。
+**身份不在本模块**（§6-163 裁定甲）：原先这里有一条 `neurova_turn_user_id`，与
+`core/identity_context.py` 的 `neurova_request_user_id` 同答"这一轮是谁"，两处派生
+就是 §6-121 那条"两条通道给同一个人算出两个身份"的成因。合并后身份只有那一条，
+由**请求边界**写（HTTP `/v1/chat`、`/v1/chat/stream`、`console` REST/WS、`mobile_pairing`、
+`computer`、渠道路由、工具与 MCP 侧各自的边界）。
+旧注释里"实例属性名经 `__getattr__` 透传兼容"一句从未落地——全仓没有 `def __getattr__`
+（复算见 §6-163），故删去，不再宣称一条不存在的兼容路径。
 """
 
 from __future__ import annotations
@@ -21,10 +24,13 @@ import threading
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
-# 每个变量 default 取"未设置"安全值；Agent API 层负责兜底语义
+# 每个变量 default 取"未设置"的 None；缺省语义由**消费方**各自定（§6-163）——
+# 门面/读写口里统一兜一层，就是把别人的口径搬到自己身上变成第二个事实源。
 _user_input_var: ContextVar = ContextVar("neurova_turn_user_input", default=None)
 _session_id_var: ContextVar = ContextVar("neurova_turn_session_id", default=None)
-_user_id_var: ContextVar = ContextVar("neurova_turn_user_id", default=None)
+# （§6-163 裁定甲）原先这里有第三条 `neurova_turn_user_id`：与 `core/identity_context.py` 的
+# `neurova_request_user_id` 同答一个问题（"这一轮是谁"），两处派生就是 §6-121 那条老毛病。
+# 身份只留那一条，本模块只管轮次内容（输入/会话/推理/工具…）。
 _reasoning_var: ContextVar = ContextVar("neurova_turn_reasoning", default=None)
 _tool_messages_var: ContextVar = ContextVar("neurova_turn_tool_messages", default=None)
 _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=None)
@@ -378,12 +384,15 @@ _MAX_TRACKED_SESSIONS = 4096
 def set_turn_identity(
     user_input: str,
     session_id: Optional[str] = None,
-    user_id: Optional[str] = None,
 ) -> None:
-    """记录本轮请求级身份（user_id 缺省落 "default" 与原语义一致）。"""
+    """记录本轮的轮次内容（输入与会话号）。
+
+    身份不在这里：§6-163 合并后"这一轮是谁"只有一个出处——
+    `core/identity_context.set_request_user_id()`，由请求边界写（HTTP/WS/渠道各一处）。
+    这个签名里**不许再加回 `user_id`**：加回来就是重新长出第二条通道。
+    """
     _user_input_var.set(user_input)
     _session_id_var.set(session_id)
-    _user_id_var.set(user_id or "default")
 
 
 def set_turn_user_input(value: Optional[str]) -> None:
@@ -398,10 +407,6 @@ def get_turn_user_input() -> Optional[str]:
 
 def get_turn_session_id() -> Optional[str]:
     return _session_id_var.get()
-
-
-def get_turn_user_id() -> Optional[str]:
-    return _user_id_var.get()
 
 
 def set_turn_reasoning(reasoning: Optional[str]) -> None:
@@ -625,7 +630,6 @@ def clear_turn_state() -> None:
     for var in (
         _user_input_var,
         _session_id_var,
-        _user_id_var,
         _reasoning_var,
         _tool_messages_var,
         _tool_events_var,
@@ -653,7 +657,6 @@ __all__ = [
     "set_turn_user_input",
     "get_turn_user_input",
     "get_turn_session_id",
-    "get_turn_user_id",
     "set_turn_reasoning",
     "get_turn_reasoning",
     "set_turn_tool_call_id",

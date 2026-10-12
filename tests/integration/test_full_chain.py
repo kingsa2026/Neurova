@@ -224,7 +224,8 @@ class TestChannelMessageProcessing:
 
     def test_skill_request_routing(self):
         """Skill请求路由 - 需要注入SkillRegistry"""
-        from neurova.skill import create_default_skills
+        # 兼容层 `neurova.skill` 已退役（§6-165）：按生产用的那条路径取用（`agent_core.py:862`）。
+        from neurova.skills import create_default_skills
         registry = create_default_skills()
         router = create_default_router(skill_registry=registry)
         result = router.route(Message(content="帮我搜索天气"))

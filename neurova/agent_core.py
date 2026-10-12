@@ -1870,10 +1870,16 @@ class Agent:
         metadata: Optional[Dict[str, Any]] = None,
         assistant_metadata: Optional[Dict[str, Any]] = None,
         writer_claim=None,
+        session_owner: Optional[str] = None,
     ) -> str:
-        """保存对话到session文件（委托给 MemCore；writer_claim 为 P1-10 围栏凭证）"""
+        """保存对话到session文件（委托给 MemCore；writer_claim 为 P1-10 围栏凭证）
+
+        `session_owner` 是**会话可见性的归属**（§6-163）：由调用方给（取法单点是
+        `post_chat_pipeline.resolveSessionOwner`），不在这条链上从环境猜身份。
+        """
         return self.memory_agent.save_to_session(
-            user_input, reply, session_id, metadata, assistant_metadata, writer_claim=writer_claim
+            user_input, reply, session_id, metadata, assistant_metadata,
+            writer_claim=writer_claim, session_owner=session_owner,
         )
 
     def _update_memory_temperature(self):
@@ -1972,10 +1978,9 @@ class Agent:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
     ) -> None:
-        """记录本轮请求级身份（转发 TurnState；见 turn_state.set_request_identity）。"""
-        self.turn_state.set_request_identity(user_input, session_id, user_id)
+        """记录本轮的轮次内容（转发 TurnState；身份不在此处，见 §6-163）。"""
+        self.turn_state.set_request_identity(user_input, session_id)
 
     @property
     def _current_user_input(self) -> Optional[str]:

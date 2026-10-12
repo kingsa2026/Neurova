@@ -1,8 +1,5 @@
 # Neurova 插件化架构设计文档
 
-> **状态**: ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131）（原状态"设计中"）
-> **说明**: 本文的导入示例与接口约定保留为历史设计记录，对应实装已随裁定删除；重启该能力需先重新拍板。
-
 > 版本: 1.0.0
 > 作者: Neurova 架构团队
 > 日期: 2026-05-08
@@ -186,9 +183,9 @@ Neurova 是一个基于 Flask/FastAPI 的 AI Agent 系统，具备记忆管理�
 | **事件驱动** | 插件间通信仅通过 EventBus，禁止直接方法调用 |
 | **状态隔离** | 每个插件通过 StateManager 管理自己的命名空间状态 |
 | **配置分层** | 插件配置通过 ConfigManager 管理，支持热更新 |
-| **动态注册** | 后端 API 端点由插件在 `on_start` 时动态注册到路由器 |
+| **动态注册** | 后端 API 端点由**清单声明**，装载时连同解析出的 handler 登记进 `PluginAPIRegistry`，再由 admin 的第二次授权（`POST /v1/plugins/{id}/routes/mount`）挂进运行中的 app；插件自己不在 `on_start` 里往路由器塞东西 |
 | **前后端对称** | 前端插件遵循与后端相同的生命周期模型 |
-| **安全沙箱** | 插件权限通过 Manifest 声明，路径访问受限制 |
+| **能力面准入（不是沙箱）** | 权限由清单逐项声明、由 admin 逐项确认后才有效力：事件总线两档是框架强制点，HTTP 面要过聚合门且只能落在 `/api/v1/plugin-api/{id}/` 命名空间内。**动态装载本身就是进程内任意代码执行**，任何"沙箱/隔离"表述都与实态不符（口径单点：`neurova/plugins/plugin_permissions.py:PERMISSION_MODEL`） |
 
 ### 3.3 插件分类体系
 
@@ -239,7 +236,8 @@ class BasePlugin(BaseModule):
     plugin_type: PluginType  # 插件类型
     api_endpoints: List[APIEndpoint]  # 提供的 API 端点
     frontend_resources: List[str]  # 前端静态资源
-    required_permissions: List[PluginPermission]  # 需要的权限
+    permissions: Dict[str, Any]                   # 能力面（键取自 skills 那份词汇，§6-159）
+    framework_surfaces: List[PluginFrameworkSurface]  # 事件总线两档
     
     async def on_initialize(self) -> None:
         """初始化: 注册事件监听器、加载配置"""
@@ -896,7 +894,7 @@ class DynamicAPIRouter:
 # neurova/builtin_plugins/memory/memory_plugin.py
 
 from neurova.plugins.base_plugin import BasePlugin, PluginType
-from neurova.plugins.plugin_manifest import PluginPermission
+from neurova.plugins.plugin_manifest import PluginFrameworkSurface
 from neurova.memory.core.manager import MemoryManager
 
 
@@ -1137,14 +1135,14 @@ plugins/weather-skill/
 
 import httpx
 from neurova.plugins.base_plugin import BasePlugin, PluginType, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginPermission
+from neurova.plugins.plugin_manifest import PluginFrameworkSurface
 
 
 class WeatherSkillPlugin(BasePlugin):
     """天气查询技能"""
     
     plugin_type = PluginType.SKILL
-    required_permissions = [PluginPermission.HTTP_REQUEST]
+    permissions = {"network": True}   # 能力面单点在 skills：词汇 KNOWN_CAPABILITY_KEYS
     
     api_endpoints = [
         APIEndpoint("GET", "/plugins/weather/current", "get_current_weather"),
@@ -1322,7 +1320,7 @@ static/plugins/weather-widget/
 | 风险 | 影响 | 概率 | 应对措施 |
 |------|------|------|----------|
 | 插件版本管理复杂 | 升级困难 | 中 | 语义化版本，依赖约束检查 |
-| 插件安全性 (恶意插件) | 系统被攻击 | 低 | 权限声明 + 路径沙箱 + 代码审计 |
+| 插件安全性 (恶意插件) | 系统被攻击 | 低 | 逐项权限确认 + 装载边界（源必须在插件根内）+ 挂载命名空间与身份门 + 审计留痕；**无沙箱**，远程下载的供应链校验未落地（P3） |
 | 调试困难 (插件化后) | 排查问题耗时 | 中 | 统一日志 + 插件诊断 API |
 
 ---
@@ -1345,7 +1343,7 @@ static/plugins/weather-widget/
 | **可维护性** | 每个插件独立开发、测试、部署 |
 | **灵活性** | 支持运行时加载/卸载，按需启用功能 |
 | **标准化** | 统一接口、事件、状态、配置管理 |
-| **安全性** | 权限声明、路径沙箱、依赖检查 |
+| **安全性** | 逐项权限确认、装载与挂载边界、依赖检查（无沙箱；能力面准入与留痕） |
 
 ### 12.3 关键成功因素
 

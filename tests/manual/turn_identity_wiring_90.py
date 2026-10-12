@@ -75,7 +75,7 @@ def main() -> int:
     orch._window_summarizer = fake_summary
 
     print("2) 单聊会话 A（身份仅经生产单源 set_request_identity 给）")
-    agent.set_request_identity(user_input="继续 A", session_id="sess-live-a", user_id="u1")
+    agent.set_request_identity(user_input="继续 A", session_id="sess-live-a")
     view_a = asyncio.run(_build(orch, user_input="继续 A", history=_long_history("量子计算")))
     key_a = orch._resolve_window_cache_key()
     print(f"   键={key_a!r} 池 session_id={orch.context_pool.session_id!r} 视图 {len(view_a)} 条")
@@ -83,7 +83,7 @@ def main() -> int:
     assert orch.context_pool.session_id == "sess-live-a", "pool.session_id 没随每轮身份"
 
     print("3) 单聊会话 B：必须与 A 分槽，视图不得出现 A 的摘要")
-    agent.set_request_identity(user_input="继续 B", session_id="sess-live-b", user_id="u1")
+    agent.set_request_identity(user_input="继续 B", session_id="sess-live-b")
     view_b = asyncio.run(_build(orch, user_input="继续 B", history=_long_history("火星殖民")))
     keys = sorted(orch._window_compaction_cache)
     joined_b = "\n".join(str(m.get("content", "")) for m in view_b)
@@ -103,7 +103,7 @@ def main() -> int:
     assert md_sessions == {"sess-live-b"}, "条目 metadata 的 session_id 未随每轮身份"
 
     print("5) 协作轮：房间身份优先于每轮 session（作用域只认房间）")
-    agent.set_request_identity(user_input="群聊", session_id="sess-live-plain", user_id="u1")
+    agent.set_request_identity(user_input="群聊", session_id="sess-live-plain")
     asyncio.run(
         _build(
             orch,
@@ -120,7 +120,7 @@ def main() -> int:
     assert (room_chunks[0].metadata or {}).get("chat_scope") == "room:project_roomB"
 
     print("6) 无身份轮必须可见（不静默共用 direct 槽）")
-    agent.set_request_identity(user_input="无身份", session_id=None, user_id="u1")
+    agent.set_request_identity(user_input="无身份", session_id=None)
     orch2 = _agent("t03b-live-clean").context_orchestrator
     asyncio.run(
         _build(

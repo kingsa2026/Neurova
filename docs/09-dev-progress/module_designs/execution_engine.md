@@ -19,7 +19,8 @@
 
 ### 1.2 设计依据
 - NEUROVA_CogArch_2.0.md 第6章
-- 与 `cognitive/orchestrator.py` 对接
+- ~~与 `cognitive/orchestrator.py` 对接~~（2026-10-11：该文件已退役，它自称的任务流水线从不派发；
+  在位的工作流引擎是 `collaboration/neurflow/execution_engine.py`）
 
 ### 1.3 与其他模块的关系
 - **依赖模块**: `neurova/cognitive/`（认知核）
@@ -291,7 +292,7 @@ result = await plan_orchestrator.execute_plan(plan)
 - [x] 5.3 完善 `ToolEngine`（工具引擎/脑干）
 - [x] 5.4 完善 `WorkflowEngine`（工作流引擎/脑干）
 - [x] 5.5 实现 `MCPManager`（MCP协议管理器）
-- [x] 5.6 与 `cognitive/orchestrator.py` 对接
+- [ ] 5.6 与 `cognitive/orchestrator.py` 对接（勾除：从未对接过，该文件已于 2026-10-11 退役 — 勾着等于记着一笔不存在的工作）
 - [x] 5.7 编写单元测试（待完成）
 - [x] 5.8 更新模块设计文档（本文档）
 - [x] 5.9 提交代码审查（待完成）
@@ -429,7 +430,7 @@ async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> 
 - `neurova/execution_engine/agent_colab.py` (已存在)
 - `neurova/execution_engine/execution_monitor.py` (已存在)
 - `neurova/execution_engine/mcp_manager.py` (新建)
-- `neurova/cognitive/orchestrator.py`
+- ~~`neurova/cognitive/orchestrator.py`~~（2026-10-11 退役，从未被本模块 import）
 
 ---
 

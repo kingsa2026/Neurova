@@ -49,7 +49,6 @@ BENIGN_SINGLETONS = [
     ("neurova/collaboration/collaboration_isolation.py", "get_collaboration_manager"),
     ("neurova/core/error_handler.py", "get_error_handler"),
     ("neurova/core/logger.py", "get_log_manager"),
-    ("neurova/execution_engine/plan_orchestrator.py", "get_plan_orchestrator"),
     ("neurova/security/constitution.py", "get_constitution_engine"),
 ]
 

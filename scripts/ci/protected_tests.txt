@@ -2231,17 +2231,6 @@ tests/unit/api/test_internalFaultIsNotReportedAsVerdict.py
 # 逐文件单跑两次同读数 3 passed（14.55s/13.32s）
 tests/unit/ci/test_noFaultFoldedIntoVerdict.py
 
-# 插件体系退役的防再生判据（`e95d3a76`，§6-131）
-# 退役的是"第三方插件装载"这项能力（唯一实装 `plugin_manager.py:377-384`：`spec_from_file_location`
-# + `sys.modules` 注册 + `exec_module`，另有 semver/权限/生命周期钩子），不是无功能残留——
-# 所以复活它需要一次新的裁定，而不是顺手把目录搬回来。四格分别钉：
-# ① 包不得复活；② 架构文档凡引用该路径处必须带"已退役"标注（"文档声称有、代码没有"比空文件更坏，§6-115 教训）；
-# ③ 记账面 `/v1/plugins` 必须仍在役（前端在用）且 docstring 写明"只记账、不加载"——
-#    行为读数用 200 + 404 校准（路由级鉴权依赖先于路径匹配，未鉴权时一切皆 401，形状读数不可信）；
-# ④ 反空转：②的探测器对未标注的新引用必须抓到、已标注的不许误报。
-# 逐文件单跑两次同读数 4 passed（2.08s/1.63s）
-tests/unit/plugins/test_pluginSystemRetired.py
-
 # §6-136：睡眠闭环那两处缺陷（门面上当必空转 / 363 行按想象写的测试）的常驻判据（`4d774241`）
 # 五条断言的形状都是"调用面 ⊆ 定义面"与"读面 ⊆ 赋值面"——这两种形态能抓的门面不止睡眠这一处：
 # `IdleTimeTracker.adjust_parameters_based_on_sleep_quality()` 读一个从未赋值的 `self._storage`、
@@ -2284,3 +2273,231 @@ tests/media/test_tts_module.py
 # 逐文件单跑落库前后同读数 15 passed / 7 passed。
 tests/language/test_language_models.py
 tests/language/test_language_externalLibraryTags.py
+
+# 批 14 裁定乙（§6-160）：语言包从"全仓零生产消费者"接成有读面、有落盘。
+# 两档各钉一半，缺一半都会回到今天这种"写进去了没人读得到"的形态：
+# `test_languageUserPreferencePersistence.py` 17 格钉**偏好真的留得住**——换一个实例(＝重启)
+# 从盘上读回同一个人、默认落点走 `callerPath` 单点且**不在译文 `*.json` glob 目录里**
+# （放里面会长出一条假的命名空间）、读不建文件、写盘失败即内存回滚并回 False（不许拿
+# "内存里已经有了"对用户承诺已保存）、坏文件改名隔离不原地覆盖、一个坏码只跳它自己、
+# `auto` 不许当首选/回退语言（那件事 `auto_detect` 已在承载）；其中一格用桩替
+# `atomic_write_text` 自证那条路真被走，否则"写盘失败"那格是在桩一条没人走的路。
+# `test_languageFaceReadSurface.py` 20 格钉**HTTP 面本身**——属主只从登录态取（体里多写
+# `user_id` 直接拒）、换 token 读不到别人的、无凭证 401 且配一格真 404 校准、
+# 不识别的语言码 400 点名（回 200 空列表会让打错字母的人以为自己那套语言没文案）、
+# 覆盖层读面把 `is_approved=False` 的条目**如实带状态**读出（裁定是不引入审批，
+# 不是把未审说成已审）、内置那条 `get_translation()` 的门一寸没松、写面只认管理员、
+# 拒因经 `LanguageManager.rejectedLanguageTags` 那一份单点（桩掉它读数必须从 400 变 500，
+# 否则 400 是端点自己另写的第二处实现）、命名空间不许变成穿越路径、
+# 另按 AST 钉住"面上不许多写一刀语言码归一"。
+# 逐文件单跑两次同读数 17 passed / 20 passed。
+tests/language/test_languageUserPreferencePersistence.py
+tests/unit/api/test_languageFaceReadSurface.py
+
+
+# 插件体系按裁定接回后的常驻判据（用户 2026-10-11 改裁「做插件体系并接线」，§6-150）
+# 上一档 `test_pluginSystemRetired.py`（钉"包不得复活"）随裁定撤销，同批换成钉"接线是真的、边界是真的"：
+# `test_pluginLoadIsReal.py` 21 格——真 exec 自证（插件文件模块级副作用落地）、作者基类按 manifest 构造
+# （历史实现 `plugin_class()` 无参构造必 TypeError，而自带 84 例因 mock 掉装载器全绿）、
+# 装载源必须在插件根内（含先 resolve 再判穿越）、远程源 501 不静默、unload 须摘掉 sys.modules、
+# `_PLUGINS` 内存账本不得再长回来、默认插件根落数据根而非 Path.home()。
+# 另三档是包体自身的契约（`test_plugins_modules.py` 36 / `test_base_plugin.py` 9 / `test_plugin_manifest.py` 41）
+# 与端点 HTTP 契约（`test_plugin_api.py` 12）——其中六格本次按新契约改判：旧格断的是
+# `install_plugin(...) is False` 与 mock 装载器返回 MagicMock 后的 `is True`，
+# 两种形态都证不了任何事（一个折成因、一个证不出执行）。
+# 逐文件单跑落库前同读数 21 / 36 / 9 / 41 / 12 passed。
+tests/unit/plugins/test_pluginLoadIsReal.py
+tests/unit/core/test_plugins_modules.py
+tests/unit/test_base_plugin.py
+tests/unit/test_plugin_manifest.py
+tests/unit/test_plugin_api.py
+# §6-151 任务编排的单点活路：旧编排器(376) 退役后，这 8 格同时钉两面——
+# 活路面（真 await 注册表解析出的节点执行器、解析不到即 failed 带原因、代理注册表的 capabilities 格、
+# 执行实例 save/get 读写两面）与退役面（旧件不在位、不可 import、无任何代码把它当实现或 DCL 模板引用）。
+# 反向断言那 4 格拦的是「把顶替那条路一起删了来买绿」，以及摘掉本档活路面判据让退役面自动成立。
+# 退役面按构造今天恒绿；它翻红只有一种意思——有人把假流水线又写回来了。
+# 入册前逐文件单跑两次同读数 8 passed（7.64s / 8.36s）。
+tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
+# §6-152 成功路径不得记 ERROR 级日志（建 Agent 端点那枚 DEBUG 残留的防再生面）：
+# 行为面往生产 logger 自己的 handler 链挂临时收集器取数（不 monkeypatch 调用点、不假设 propagate），
+# 真 HTTP 请求后必须零条 ERROR 及以上；防再生面按 AST 扫全生产包，
+# error/exception/critical 且首参字面量带 DEBUG/调试/TEST:/TODO/FIXME/临时 前缀即红（全仓现数只 1 处，已修）。
+# 入册前逐文件单跑两次同读数 4 passed（5.70s / 4.92s）。
+tests/unit/api/test_agentCreateDoesNotLogAtError.py
+# §6-153（工单 2026-10-11 批 12，裁定甲 + 教义第 5 条扫荡）：跑回合的入口都得上报属主。
+# 面一（流式）：行为格走真 TestClient，属主由生产写盘路径 MemCore.save_to_session() 自己算
+# （测试不拼 user_id=，替它写就等于审自己的复制品）——回合内 metadata['user_id'] 与请求通道
+# 读数都须是登录用户、报文自报的身份须被服务端覆盖、落盘后本人列表可见而他人不可见；
+# 空属主在 session_manager:1650 是「不过滤」，所以修前不是"没人看得见"而是"人人看得见"，
+# 另带一格反向对照钉住这条口径。形态格按 AST 比 set_request_user_id 与 create_task(run_chat())
+# 的先后（写点必须在 task 创建之前，否则复制上下文的语义把修复变成死码），自带变异对照。
+# 面二（批 9 删管线双写时漏掉的命中点）：/console/chat 与 /console/ws/{client_id} 两条回合
+# 内也须在边界建立属主——为空不止丢会话归属，usage 入账落 anonymous（multi_model_client:876/1156）
+# 且按日 LLM 配额整条不判（:1426 无身份即放行）；再带一格「无效 token 仍 4401 拒且不跑回合」，
+# 防"补属主"被做成"匿名即有人"。
+# 入册前逐文件单跑两次同读数 10 passed（6.15s / 3.89s）。
+tests/unit/api/test_turnBoundaryEstablishesRequestOwner.py
+# §6-148/149 批 11：受保护子集夜间全量跑的读者与流水线判据（拦的是"清单被就地改写来买绿"）：
+# 逐条 verbatim 复读清单、五段 crontab 形状、按文件单跑与超时上限、allowFailure 必须为真
+# （夜跑是用来暴露红的，不是用来把红压平的），另四格反向对照。
+# 入册前逐文件单跑两次同读数 9 passed（1.84s / 1.81s）。
+tests/unit/ci/test_ci_protected_subset_nightly.py
+# §6-155 → §6-159：授权存储的落盘与审计纪律（授予只随声明走、审计写不进即回滚、
+# 坏文件不静默读成"谁都没授予过"、卸载连授予与挂载授权一起摘掉）。
+# §6-159 收口时本档从 21 格降到 16 格：删掉的 4 格档位模型格（八项枚举与三档口径已退役，
+# 替代判据在 test_pluginPermissionSingleSource.py）与 4 格事件总线格（与 test_base_plugin.py
+# 同题，留那一档更贴生产接缝）——规则一条没少，只是不再两处钉。
+# 入册前逐文件单跑两次同读数 16 passed（3.54s / 2.00s）。
+tests/unit/plugins/test_pluginPermissionGate.py
+# §6-159 词汇单点：能力键必须**取用** `skills/permissions.py:KNOWN_CAPABILITY_KEYS`
+# （一格改那份集合、断插件侧跟着变——不留副本），AST 扫全包拦"再长出一份能力键集合"，
+# 八项枚举与三档口径不得复活（旧值只准被点名成历史，不参与判定），
+# 历史授权文件既不覆写也不自动映射（execute:commands → system 是变宽，只能人重做）。
+# 台账号勘误：`5cb8416b`/`e94720b5` 两笔正文写的 §6-157 是错号（157/158 已被并发会话的
+# 编排器批与媒体批占用），本批实为 §6-159，已提交历史不改写。
+# 入册前逐文件单跑两次同读数 14 passed（1.90s / 1.92s）。
+tests/unit/plugins/test_pluginPermissionSingleSource.py
+# §6-155 的 HTTP 面 + §6-159 的调用面：装载与挂载是两次授权。门（清单必须**显式声明过**
+# permissions——整节缺失即拒，修掉 §6-155 的空真通过；未确认/命名空间越界/绝对路径/
+# 同路径遮蔽/handler 取不到 ⇒ 整批不挂）、真挂载（请求落到插件方法并执行插件代码、
+# auth_required:false 不采信且可见）、**真拦**（挂载时把声明装进 skills 那份作用域：
+# 显式空声明 ⇒ 未声明工具在调用面被拒；声明并确认 network ⇒ 放行而 file 仍拒；
+# 作用域不外泄到请求外）、真摘除（撤销确认当场摘路由；显式 unmount、禁用、卸载后活路由表
+# 404 且不留孤儿授权），另加 AST"拒因↔HTTP 语义"双向闭集与两格反空转（把包装/声明判据
+# 桩掉，对应格必须红——回退生产件会断在 collection error，那种红什么也不证明）。
+# 入册前逐文件单跑两次同读数 24 passed（3.15s / 3.02s）。
+tests/unit/plugins/test_pluginRoutesAreMounted.py
+# 批 16 分流（§6-133 裁定乙 → §6-162）里判「补」的那三面。这三档不是"顺手多写点测试"：
+# 它们对应的旧文件是 26 档 0 用例壳里的三份，而**壳所指的那条性质此前仓内一条判据都没有**。
+# ① `test_loginRouteContract.py` 17 格——`POST /v1/auth/login` 的成功契约今天只有一条会 skip 的
+#    e2e 在守；P0-2 审计修复要求 token 带 `sub`/`neuser_id`/`user_id`（缺了三层隔离第 2 层
+#    永远回退 "default"），这里按**真解码**断这三个字段、断两个失败分支同形（否则登录面
+#    成了"这用户名存不存在"的 oracle）、断失败计数只在用户存在时加、断 `expires_in` 与
+#    token 自己的 exp 互洽。
+# ② `test_neuronSharedGraphHandlers.py` 18 格——钉的是**端点层那份进程级共享图**：
+#    `tests/unit/test_neuron_api_registration.py` 只断路由形状，
+#    `tests/unit/cognitive/test_neuron_components.py` 只断库层，中间这层坏了的形状是
+#    "某个 handler 自己 `DependencyGraph()` 一份私有图"——HTTP 全 200、页面照弹"创建成功"，
+#    而图谱永远不涨。含一格 AST 钉构造点唯一、一格钉取用次数下界（只查一边就看不见另一边）。
+# ③ `test_workingMemoryAugmenterBehaviour.py` 19 格——`WorkingMemoryAugmenter` 在生产路上
+#    （`mem_core.py:725`）而现役判据**全部把它 mock 掉**去断装配；这里测它自己那三条契约
+#    （容量上界、淘汰按 (importance, last_accessed)、cache-miss 与 cached-None 的分别——
+#    后两条正是文件头自陈的 Bug 1/Bug 2 修复，修过却没判据）。
+#    淘汰序吃 `time.time()`，本机粒度会让两条并列 ⇒ 判据按"等时钟真前进取样"，不猜 sleep。
+# 反证五枚逐格命中（去掉 `neuser_id` 声明 / 失败计数不再判用户存在 / 两分支文案分开 /
+# `expires_in` 与 exp 不一致 / 角色写死；读面把失败兜成空成功 / handler 自建私有图；
+# 容量上界失效 / 淘汰按最高重要性 / miss 折成 None），跑完按字节还原并核 MD5 一致。
+# 入册前逐文件单跑两次同读数 17 passed / 18 passed / 19 passed。
+tests/unit/api/test_loginRouteContract.py
+tests/unit/api/test_neuronSharedGraphHandlers.py
+tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py
+# §6-157 活路补的两格能力：层内并发上限、节点级重试（幂等声明门，默认拒绝）。
+# 并发面两式同档——先断峰值 >1（限流不许把并发压成串行），再断峰值 ≤ 上限（无界 gather 今天读数 12）；
+# 重试面拦三种谎：未声明幂等却重试（副作用节点重试＝重复动作）、重试用尽仍回成功、
+# 被重试吸收的失败先发 node_failed（画布会闪红，"红过"就成了既成事实）；
+# 声明面走真 SQLite 往返（spec → 注册表 → 落库 → 重读），只写不读的新字段在本仓不算实现。
+# 入册前逐文件单跑两次同读数 7 passed（5.45s / 5.04s）。
+tests/unit/collaboration/test_workflowConcurrencyCapAndNodeRetry.py
+# §6-158（工单 2026-10-12 批 13，裁定乙）：媒体软删＋回收站四件，默认一档不许翻。
+# 面一：写口两档（?mode=trash / ?mode=permanent，缺省 permanent＝硬删，坏 mode 当场 400 且不留半成品状态）、
+# 读口 GET /trash（写了必须有人读，且按 agent 分账）、POST /{id}/restore（字节已不在即 410，
+# 不造「活但取不到」的记录）、重启复原（真 _load_index() 读进一份新 store，行仍是 trashed；
+# 另带反向对照钉住"盘上文件已不在即剔行"这条既有巡检不能被关掉来给回收站让路）。
+# 面二：现役六个读面（/list、/stats、/memory 三个列表口径 + /{id}、/download/{id}、/{id}/metadata
+# 三个取物口径）逐一排除回收站行——只排前三个，条目照样能按 id 被捞走。
+# 面三：路由顺序锚 + EXPECTED_ROUTES 同步；另两格审上传前门（存储根不得是 CWD 相对路径，
+# 这是活体跑第一步撞到的既有缺陷，判据在档）。
+# 入册前逐文件单跑两次同读数 21 passed（14.15s / 7.91s）。
+tests/media/test_mediaTrashLifecycle.py
+# §6-161（工单 2026-10-12 批 17，§6-154 合修）：移动端 chat:send 的调用形状、请求级属主与不静默的 catch-all。
+# 替身不手抄签名，而是每次被调时按**真 `Agent.chat_stream`/`Agent.chat` 的签名** bind 一遍——
+# 调用点写错参数名（原样 `content=`/`user_id=`）就落在行为断言上（客户端只收到 chat_failed），
+# 而不是落在一份会随生产漂移的签名清单上；两条分支（有/无 chat_stream）各一格。
+# 属主一格读的是被调那一刻的 `get_request_user_id()`，另配一格钉 metadata 与请求通道同源。
+# 防再生面按**整档**扫「把异常转成 ws.send_json 却不记日志」的 catch-all（本文件实数 6 处），
+# 并带一格双侧对照：现码判合规、把日志行摘掉必须至少点到 4 处。
+# 入册前逐文件单跑两次同读数 10 passed（2.73s / 2.52s）。
+tests/unit/api/test_mobilePairingChatSendContract.py
+# §6-166 三套零接线编排器退役的守卫面（比对与并格见 §6-157）。
+# 判据问的不是"这仨文件在不在"这一句形状，而是三件事一起成立：
+# ① 三只不可 import（真取数，不是注释说没了）；② 生产/测试/脚本无任何按路径或模块名的引用
+# ——清单条目与"DCL 模板"注释也算引用，留着就是 §6-116 那种"实现退了条目没跟"的悬空红；
+# ③ 顶替那条活路与本批迁进去的两格（层内 Semaphore 上限、幂等门节点重试）必须在位，
+#   门面也不得再把它列作在役成员（§6-115 的"文档声称有、代码没有"）。
+# 入册前逐文件单跑两次同读数 4 passed（6.32s / 6.26s）。
+tests/unit/core/test_orchestratorTriadRetired.py
+# §6-164 插件登记状态落盘的判据（用户 2026-10-12 裁「落盘状态 + 只发现不装载」）。
+# 判据问的不是"有没有 state.json"这一句形状，而是四件事一起成立：
+# ① 装／启／停／卸四个动作都写盘，删除路径**先写盘再改内存**（反序会得到"内存说删了、
+#   文件里还留着"，重启时那条记录自己活回来）；写不进去即回滚内存并点名 `state_write_failed`。
+# ② 状态文件坏掉不得被读成"这台机器没装过插件"——改名隔离＋响亮 `state_store_corrupt`，
+#   版本不认识一律拒、不自动映射（与 §6-159 授权存储同一口径）。
+# ③ `loaded` 刻意不落盘：读回时无条件清掉盘上残留，装载必须显式发生在本进程内
+#   （P3 的来源白名单与构件完整性未做，开机自动 exec 第三方代码是风险不是便利）。
+# ④ 发现与登记是两件事：盘上有目录但没登记过 ⇒ 只交 `discovered_not_installed` 读数，
+#   不静默登记也不静默装载；列表面另把"没读进来"与"没装过"分开回。
+# 另有两格钉写入面：只经 `core/atomic_io.atomic_write_text` 这一处，且生产码里不得再
+# 出现 `Path.home()` 那类第二落点（§6-150 复算过的那条）。
+# 入册前逐文件单跑两次同读数 14 passed（1.98s / 2.22s）。
+tests/unit/plugins/test_pluginStateSurvivesRestart.py
+# §6-165 兼容 shim `neurova/skill/` 退役的判据（用户 2026-10-12 裁「退役 shim，旧集成档另批分流」）。
+# 判据问的不是"那个文件删了没"，而是三件事一起成立：
+# ① 命名空间真取不到——且必须连**目录**一起判：只删 `__init__.py` 会留下一只隐式
+#   命名空间包，`import neurova.skill` 照样成功，防再生格就此空转（本批复算现场撞上）。
+# ② 全仓（生产/测试/脚本）不再有任何一处按这个命名空间取符号——口径同时收
+#   `from neurova.skill import …` 与 `import neurova.skill`，并按 **AST 形状**而不是文本
+#   包含，免得一档判据把自己那句断言算进命中面（§6-162 记过的那枚形态）。
+# ③ 退役不等于删能力：`Skill`/`ExperienceRecord`/`create_default_skills` 仍在
+#   `neurova.skills` 那条生产本来就在用的路径上取得到，被改指的那条消费方 import
+#   也真的解析成功。
+# 探测器自带**双侧对照**一格：合成样本里两形取用都必须点名，三个真近邻
+# （`neurova.skills`／`neurova.skill_system`／`neurova.skills.models`）一律不得误报。
+# 入册前逐文件单跑两次同读数 8 passed（10.93s / 11.31s）。
+tests/unit/skills/test_skillCompatShimRetired.py
+# §6-163（批 18 裁定甲）身份通道合并的常驻面：一条通道、一处派生、属主显式传参。
+# 入册前逐文件单跑两次同读数 15 passed（13.68s／10.64s）。
+tests/unit/core/test_identityChannelMergedToOneSource.py
+# §6-167 语言面「开箱默认」取长那一半的判据（用户 2026-10-12 裁「先取长补短再退役」）。
+# 判据问的不是"有没有新端点"，而是四件事一起成立：
+# ① 解析链三格（本人偏好 → 开箱默认 → 枚举级 last resort）**并把来源一起交出去**——
+#   不点名来源，「管理员定的起点到底生效了没」在生产里就不可观测，而这条链在收口之前
+#   正是靠不可观测活着的（四份默认值谁都没读过它）。
+# ② `configured` 与 `source` 分开：管理员设过起点之后，没选过的人 `configured` 仍是
+#   `False`（那不是他做过的决定），`source` 已是 `out_of_box`（那条决定确实生效在他身上）。
+# ③ 落盘是顶层**可选** `default` 键：不抬存储版本（抬了会让已落盘的每条按人偏好被自己的
+#   版本隔离逻辑改名隔离＝凭空丢真数据），也不占 `preferences` 里的用户行
+#   （占了就混进"多少人设过偏好"的计数）。写失败双向回滚并回 False。
+# ④ 来源词汇只有一处定义（`LanguageManager.EFFECTIVE_SOURCES`），探测器按 AST 只认
+#   字符串常量并带双侧对照：合成样本两形必点名、三个真近邻不得误报。
+# HTTP 面另钉：写面仅管理员、请求体没有"替他人绑"的口（多写 `user_id` → 422）、
+# 不识别码 400 点名、`auto` 当首选语言是 400 而不是 500、盘没写成回 500 不是 200。
+# 入册前逐文件单跑两次同读数 17 passed（6.27s / 5.63s）。
+tests/language/testOutOfBoxDefaultLayer.py
+# §6-167 退役那一半的判据：全局语言默认从 settings 退净、写面拒收并给出去处。
+# 摘掉默认值**不够**——`PUT /settings` 的 body 是 `Dict[str, Any]` 且无闭集校验
+# （实测旧调用方写 `zh_CN` 这种下划线码也回 200），旧键能被原样写回盘上再被原样回显，
+# 就得到一根**只写不读**的新断链，比退役前更糟。所以三处写口逐一拒（整表 general 段 /
+# 整表平铺键 / 单键 PUT），且拒收必须**先整批校验再落盘**（边校验边写会得到
+# "第 2 项被拒、第 1 项已经写进去了"那种中间态）。
+# 读数侧另钉一条边界：盘上残留的旧键不再回显，但一次 GET **不改写**那个文件——
+# 把读操作变成一次不可逆的"清理别人的盘"是另一类错。
+# 同根因扫荡的第二、三套实现（`settings_manager.get/set_user_language` 与其两处 key 白名单、
+# `user_workspace` 默认配置的 `language`）逐条验真消失；形状扫描收在那四张默认表所在文件上
+# （`language` 这个键名在生产码里还服务于编程语言/播报语种，全仓一刀切会把无关命中算进来），
+# 并配一格变异对照证明它抓得住"把键加回去"。
+# 入册前逐文件单跑两次同读数 15 passed（2.01s / 2.00s）。
+tests/unit/api/testRetiredGlobalLanguageDefault.py
+# §6-168 渠道语音出站（缺口②）两面判据：
+# `test_channelVoiceEgress.py` 12 格——出站形态的**唯一来源**（按 voiceOutMode 赋值形状判，
+# 不按字符串扫，否则 "none" 这类词会既假红又放过）、回合音频必须进回发项（含"文件不在位不得产出语音条"）、
+# 支持侧真收到 voice+file_path（用 inspect.signature().bind 校调用形状，防桩件替坏契约背书）、
+# 不支持侧**必须点名丢弃**（静默丢弃就是本批根修对象）、飞书两跳顺序与 multipart、
+# 以及"声明了能力就必须真调用上传面"的 AST 反查（配反向对照）。
+# `test_feishuMediaUploadIsRealMultipart.py` 5 格——用本地回环真 HTTP 桩验上传的**字节形状**
+# （multipart 还是 JSON）与"文件不在位就不发请求也不返回假 key"；该 Mixin 是孤儿，坏签名从未被调用过。
+# 两档全程 127.0.0.1，不开外网、不花服务商额度。入册前逐文件单跑两次同读数 12 passed / 5 passed。
+tests/unit/channels/test_channelVoiceEgress.py
+tests/unit/channels/test_feishuMediaUploadIsRealMultipart.py
+# §6-163 留案② 取证后立项（批 19）：两条读路必须给出同一个 session_id。
+# 入册前逐文件单跑两次同读数 8 passed（1.55s／1.54s）。
+tests/unit/session/test_sessionIdShapeAcrossReadPaths.py

@@ -11,9 +11,12 @@
   **一次 LLM/工具调用都不发**；`_execute_node:429` 对无 handler 的节点直接标 skipped。
   全仓**零测试**引用它（另两套至少有真行为测试：`tests/unit/core/test_plan_orchestrator.py`
   与 `tests/execution_engine/test_execution_*.py`）。
-- 另两套**不在本批**：`core/plan_orchestrator.py`(654) 唯一实装 `RetryPolicy` + `adjust_plan`
-  反馈改策略，`execution_engine/plan_orchestrator.py`(633) 唯一实装完整步骤状态机与真重试
-  （`:397`）——各有一格"全仓唯一"，按教义第 7 条须先裁再动（§6-115 末列着）。
+- 另两套本批**已随 §6-166 退役**（当时按下不动的理由是"各有一格全仓唯一"：`core` 的
+  `RetryPolicy` + `adjust_plan` 反馈改策略、`execution_engine` 的步骤状态机与真重试）。
+  §6-157 把比对象换成服务路上的活路后逐格复算，两格"唯一"都不成立：`adjust_plan` 实质只有
+  「retry 策略 NONE→LINEAR」而 `ExecutionFeedback` 全仓无写入方、该档自己也从不重试；
+  步骤状态机与重试那格**唯二真缺的能力已并入 `neurflow/execution_engine.py`**
+  （层内 `asyncio.Semaphore` 上限 + 幂等声明门的节点级重试，`f060c2f4`）⇒ 不再是保留理由。
 
 为什么要单独钉**门面陈述**：`shared_core/__init__.py` 的 docstring 把
 `SharedPlanOrchestrator` 列为"共用任务编排器（小脑）"，而它**并不导入也不导出**任何东西
@@ -95,13 +98,19 @@ def test_facadeDoesNotClaimItAnymore():
 
 
 def test_livePlanningFacesUntouched():
-    """反向对照（防删过头）：现役那两条规划面必须还在位。"""
+    """反向对照（防删过头）：现役规划面与并入活路的格子必须还在位。"""
     assert (PKG_ROOT / "planning" / "planning_tool.py").is_file(), "agent 侧规划工具面不见了"
     eps = (PKG_ROOT / "api" / "endpoints" / "__init__.py").read_text(encoding="utf-8")
     assert "plans" in eps, "HTTP 规划面（/v1/plans）的挂载点不见了"
-    # 另两套属"需人裁"，未裁之前不许被本批顺手带走
-    assert (PKG_ROOT / "core" / "plan_orchestrator.py").is_file()
-    assert (PKG_ROOT / "execution_engine" / "plan_orchestrator.py").is_file()
+    # 另两套经 §6-157 逐格比对判为无可取格，已随 §6-166 退役；判据改断"不得复活"
+    assert not (PKG_ROOT / "core" / "plan_orchestrator.py").is_file(), \
+        "未接线的 core 编排器又回到包树里"
+    assert not (PKG_ROOT / "execution_engine" / "plan_orchestrator.py").is_file(), \
+        "未接线的 execution_engine 编排器又回到包树里"
+    # 而顶替它们的格子必须在位（退役不等于丢掉能力）
+    engine = (PKG_ROOT / "collaboration" / "neurflow" / "execution_engine.py").read_text(encoding="utf-8")
+    assert "asyncio.Semaphore" in engine and "_executeNodeWithRetry" in engine, \
+        "并进活路的并发上限/节点重试格子被顺手拆掉了"
 
 
 def test_scannerCatchesARevival(tmp_path):

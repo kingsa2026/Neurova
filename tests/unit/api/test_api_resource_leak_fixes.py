@@ -54,12 +54,18 @@ class _FakeWS:
 
 
 class _StreamAgent:
-    """chat_stream 异步生成器桩；hook 在两次 chunk 之间被调用。"""
+    """chat_stream 异步生成器桩；hook 在两次 chunk 之间被调用。
+
+    形参按 `Agent.chat_stream` 的**真签名**写（`user_input`/`session_id`/`metadata`）。
+    这里原来签的是 `content=`/`user_id=`——与被审调用点同一个错，于是这两格一路"通过"着
+    一条在生产里必抛 `TypeError` 的形状（§6-161 的实据：桩件替坏掉的调用形状背书，
+    真链路上没有任何东西校验过参数名）。
+    """
 
     def __init__(self, hook=None):
         self._hook = hook
 
-    async def chat_stream(self, *, content, session_id, user_id):
+    async def chat_stream(self, user_input, session_id=None, metadata=None, **kwargs):
         yield "c1"
         if self._hook:
             self._hook()

@@ -13,6 +13,7 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+from neurova.channels.voice_egress import VOICE_OUT_NONE
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -132,6 +133,12 @@ class ChannelAdapter(ABC):
     - 调用者只需知道 connect / disconnect / send_message
     - 具体实现处理协议差异、重连、认证等复杂逻辑
     """
+
+    # 语音出站能力（形态唯一定义处：`neurova/channels/voice_egress.py`）。
+    # 默认 none＝该渠道收不了音频 ⇒ 只回文本，并在日志里点名语音被丢弃（不静默）。
+    # 置为 audio_file / voice_bubble 就必须真实现出口——由
+    # tests/unit/channels/test_channelVoiceEgress.py 按 AST 反查"声明即已实现"。
+    voiceOutMode: str = VOICE_OUT_NONE
 
     def __init__(self, config: ChannelConfig):
         self.config = config

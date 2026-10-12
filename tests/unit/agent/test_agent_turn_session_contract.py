@@ -41,5 +41,5 @@ def test_session_id_property_readable(agent):
     """session_id 可读（默认空串），_current_session_id 赋值后属性跟随。"""
     assert getattr(agent, "session_id", None) is not None
     # P0-B1：写入走公有 API（实例属性直写不再是存储位）
-    agent.set_request_identity(user_input="q", session_id="sess-abc", user_id="u")
+    agent.set_request_identity(user_input="q", session_id="sess-abc")
     assert agent.session_id == "sess-abc"

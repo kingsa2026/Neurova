@@ -504,28 +504,28 @@ await complete_task("task_1", {"result": "success"})
 
 ## 8. 集成说明
 
-### 8.1 与 CognitionOrchestrator 集成
+### 8.1 认知处理走的是哪条路
 
-聊天接口 (`POST /console/chat`) 使用 `CognitionOrchestrator` 进行认知处理：
+> **2026-10-12 更正**（台账 §6-166）：本节原先写"聊天接口使用 `CognitionOrchestrator` 进行认知处理"
+> 并给了一段 `from neurova.core.cognition_orchestrator import ...` ＋
+> `async for output in orchestrator.process_thought_cycle(context)` 的示例。两处都不成立：
+> ① `console.py` 从未 import 该模块（复算口径含相对导入与门面再导出）；② 该函数返回
+> `CognitiveCycleResult` 对象，不是异步生成器，`async for` 这个形状从来没跑通过。
+> 那只编排器与另两套同批退役——它的"周期"实测按字符串长度编观察与反思内容并把 `success` 写 True。
 
-```python
-from neurova.core.cognition_orchestrator import (
-    CognitionOrchestrator,
-    CognitiveContext,
-    get_cognition_orchestrator,
-)
+聊天接口 (`POST /console/chat`、`POST /console/chat/stream`) 的实际链路：
 
-orchestrator = get_cognition_orchestrator()
-context = CognitiveContext(
-    user_input="用户消息",
-    session_id="session_id",
-    metadata={},
-)
-
-async for output in orchestrator.process_thought_cycle(context):
-    # 处理认知过程输出
-    pass
+```text
+console.py: get_agent_instance(...) → neurova/agent_core.py
+    ├─ 回合内召回：neurova/agent/chat_pipeline.py（_retrieve_memories 等）
+    ├─ 回合后反思与改进：neurova/agent/post_chat_pipeline.py
+    ├─ 记忆巩固：SleepConsolidation（空闲触发 + 关机 run_sleep_cycle）
+    └─ 后台任务句柄与停止：neurova/core/task_tracker.py
 ```
+
+规划类能力不在这条链上，现役三处：`neurova/planning/planning_tool.py`（agent 工具面）、
+`neurova/plan_mode/` → `/api/v1/plans`（审批后产出 `execute_prompt` 交回聊天链路执行）、
+`neurova/collaboration/neurflow/nl_designer.py`（自然语言生成工作流图）。
 
 ### 8.2 与 WebSocket 集成
 
