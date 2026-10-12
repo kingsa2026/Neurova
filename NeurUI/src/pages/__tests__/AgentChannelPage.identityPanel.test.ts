@@ -6,11 +6,13 @@ import { createPinia, setActivePinia } from 'pinia'
 /**
  * 渠道身份绑定面板挂在渠道页上的接线判据（工单 2026-10-10 批 4b）。
  *
- * 面板自己的语义在 `components/__tests__/ChannelIdentityPanel.test.ts`，这一格只管两件事，
+ * 面板自己的语义在 `components/__tests__/ChannelIdentityPanel.test.ts`，这一格只管三件事，
  * 都是"组件做对了但没接上"才会暴露的形态：
  * 1. 取数按**路由里的 agent**（本页身份的唯一事实源是路由，不是本地 ref）；
  * 2. 发码只列该 agent **已配置**的渠道——没配 bot 的渠道里不会有消息进来，
- *    在那里发码等于发一张永远用不掉的码。
+ *    在那里发码等于发一张永远用不掉的码；
+ * 3. 一台什么都没配的实例上，**整页装配**必须把"为什么点不动"交到用户眼前
+ *    （`configuredChannelTypes` 由页面算出并传下去，组件那侧读不到这一维）。
  */
 
 const routeState = vi.hoisted(() => {
@@ -87,6 +89,10 @@ beforeEach(() => {
   routeState.current.params.agentId = '216fb777'
   vi.clearAllMocks()
   listChannelIdentityBindings.mockResolvedValue({ bindings: [] })
+  // `clearAllMocks()` 清的是调用记录，**不清 `mockResolvedValue`**——上一格喂过 feishu
+  // 就会漏到下一格。这里把"一台什么都没配的实例"钉回默认，谁要非空自己就地覆盖。
+  ;(listChannelConfigs as unknown as { mockResolvedValue: (v: unknown) => void })
+    .mockResolvedValue([])
   ;(api.get as unknown as { mockImplementation: (fn: (url: string) => Promise<unknown>) => void })
     .mockImplementation((url: string) => {
       if (url === '/agents') return Promise.resolve({ data: AGENTS })
@@ -114,5 +120,20 @@ describe('AgentChannelPage — 绑定面板的接线', () => {
     const options = wrapper.find('[data-testid="identity-channel-select"]')
       .findAll('option').map((o) => o.text())
     expect(options).toEqual(['feishu'])
+    // 有得选就不该再解释「为什么不能点」：那句是禁用态的解释，不是常驻说明文
+    expect(wrapper.find('[data-testid="identity-no-configured-channel"]').exists()).toBe(false)
+  })
+
+  it('零已配置渠道 ⇒ 页面组合层就把「为什么点不动」交到用户眼前', async () => {
+    // 夹具默认就是「一台没配任何渠道的实例」——浏览器实跑撞到的正是这一形。
+    // 组件那侧的格子证不了这一维：`configuredChannelTypes` 是**页面**算出来传下去的，
+    // 只有整页装配才走得到「下拉空 + 按钮永久禁用」那条真实路径。
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const hint = wrapper.find('[data-testid="identity-no-configured-channel"]')
+    expect(hint.exists(), '整页装配下禁用态仍是一块哑巴').toBe(true)
+    expect(hint.text(), '提示必须来自真语言包（手写桩补了键、真包漏了照样白屏）')
+      .toContain('还没有已配置的渠道')
   })
 })
