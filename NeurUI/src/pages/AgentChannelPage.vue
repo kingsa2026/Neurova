@@ -104,6 +104,11 @@
          就是"这个 agent 的哪些渠道"——另开一页会让用户在两处看到不同身份视图。 -->
     <ChannelIdentityPanel :agent-id="agentId" :channel-types="configuredChannelTypes" />
 
+    <!-- 移动端配对（工单 2026-10-13 批 29）：与 agent 无关，按**登录账号**分账——
+         后端七个口里六个吃 `_get_current_user_id`，设备列表是"我的账号接了哪些手机"。
+         放在渠道页是因为这里就是"把外部设备/渠道接进来"的落点，文案键也同属 `channel.*`。 -->
+    <MobilePairingPanel />
+
     <!-- Config modal（字段表与系统页共享单一来源；负一屏复用专属组件） -->
     <a-modal v-model:open="showModal" :title="`${current?.name} · ${t('channel.configure')}`" :confirm-loading="saving"
       :footer="current?.channelKey === 'negative-screen' ? null : undefined" @ok="saveConfig">
@@ -171,6 +176,7 @@ import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import ChannelMigrationDialog from '@/components/ChannelMigrationDialog.vue'
 import ChannelIdentityPanel from '@/components/ChannelIdentityPanel.vue'
+import MobilePairingPanel from '@/components/MobilePairingPanel.vue'
 import { getNegativeScreenConfig } from '@/api/modules/negative-screen'
 import { useAgentStore } from '@/stores/agents'
 import { buildAgentSelectOptions } from '@/config/agentOptions'
