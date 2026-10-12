@@ -157,7 +157,10 @@ def test_escalated_proposal_shows_up_in_pending_endpoint(
     proposal_id = result["escalation"]["proposals"][0]
 
     app = FastAPI()
-    from neurova.api.deps import get_current_user
+    # 角色门实际依赖的是 `neurova.api.auth.get_current_user`（见
+    # `deps.require_admin()` → `require_role()` → `Depends(strictIdentityGate)`）。
+    # 覆盖 `deps.get_current_user` 会静默不生效（那是另一份再导出的对象）。
+    from neurova.api.auth import get_current_user
     from neurova.api.endpoints.governance import router
 
     app.include_router(router, prefix="/api/v1/governance")

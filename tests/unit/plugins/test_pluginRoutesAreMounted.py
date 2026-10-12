@@ -19,6 +19,8 @@ P1 留下一句诚实声明并把读数钉成恒 `false`：装载与「插件可
 
 from __future__ import annotations
 
+import ast
+import functools
 import importlib
 import json
 from pathlib import Path
@@ -517,14 +519,24 @@ class TestEveryRefusalHasHttpSemantics:
     注释里提到的名字不算。
     """
 
-    def _reasons(self):
-        import ast
+    @staticmethod
+    @functools.lru_cache(maxsize=None)
+    def _reasons():
+        """成因集合（模块级缓存：本类两格各扫一次同一片树，属会重复扫的正当面）。
+
+        取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `glob + ast.parse`
+        把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟）。
+        `PluginError` 是判据的**充分条件**——连这个符号都没出现的文件不可能抛出它。
+
+        按目录扫，不手抄文件清单：包里没有 `PluginError` 抛点＝没人能授予也没人能挂，
+        那种「扫不到东西」的绿是本判据最危险的失效形态（成因集合为空时下面的格子会红）。
+        """
+        from tests import ast_scan as _astScan
 
         found = set()
-        # 按目录扫，不手抄文件清单：包里没有 `PluginError` 抛点＝没人能授予也没人能挂，
-        # 那种「扫不到东西」的绿是本判据最危险的失效形态（成因集合为空时下面的格子会红）。
-        for path in sorted((PROJECT_ROOT / "neurova" / "plugins").glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for ref in _astScan.sourceRefsUnder(
+                PROJECT_ROOT / "neurova" / "plugins", hints=("PluginError",)):
+            tree = _astScan._cachedParse(ref.stamp, ref.code)
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
