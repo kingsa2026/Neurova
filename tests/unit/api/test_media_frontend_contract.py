@@ -43,7 +43,8 @@ def client(media_env):
 
     app = FastAPI()
     app.include_router(media_module.router, prefix="/v1/media")
-    app.dependency_overrides[get_current_user] = lambda: {"username": "tester"}
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tester", "username": "tester", "role": "user"}
     with TestClient(app) as c:
         yield c
 
