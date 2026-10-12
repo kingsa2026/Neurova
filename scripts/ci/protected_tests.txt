@@ -2367,6 +2367,30 @@ tests/unit/plugins/test_pluginPermissionSingleSource.py
 # 桩掉，对应格必须红——回退生产件会断在 collection error，那种红什么也不证明）。
 # 入册前逐文件单跑两次同读数 24 passed（3.15s / 3.02s）。
 tests/unit/plugins/test_pluginRoutesAreMounted.py
+# 批 16 分流（§6-133 裁定乙 → §6-162）里判「补」的那三面。这三档不是"顺手多写点测试"：
+# 它们对应的旧文件是 26 档 0 用例壳里的三份，而**壳所指的那条性质此前仓内一条判据都没有**。
+# ① `test_loginRouteContract.py` 17 格——`POST /v1/auth/login` 的成功契约今天只有一条会 skip 的
+#    e2e 在守；P0-2 审计修复要求 token 带 `sub`/`neuser_id`/`user_id`（缺了三层隔离第 2 层
+#    永远回退 "default"），这里按**真解码**断这三个字段、断两个失败分支同形（否则登录面
+#    成了"这用户名存不存在"的 oracle）、断失败计数只在用户存在时加、断 `expires_in` 与
+#    token 自己的 exp 互洽。
+# ② `test_neuronSharedGraphHandlers.py` 18 格——钉的是**端点层那份进程级共享图**：
+#    `tests/unit/test_neuron_api_registration.py` 只断路由形状，
+#    `tests/unit/cognitive/test_neuron_components.py` 只断库层，中间这层坏了的形状是
+#    "某个 handler 自己 `DependencyGraph()` 一份私有图"——HTTP 全 200、页面照弹"创建成功"，
+#    而图谱永远不涨。含一格 AST 钉构造点唯一、一格钉取用次数下界（只查一边就看不见另一边）。
+# ③ `test_workingMemoryAugmenterBehaviour.py` 19 格——`WorkingMemoryAugmenter` 在生产路上
+#    （`mem_core.py:725`）而现役判据**全部把它 mock 掉**去断装配；这里测它自己那三条契约
+#    （容量上界、淘汰按 (importance, last_accessed)、cache-miss 与 cached-None 的分别——
+#    后两条正是文件头自陈的 Bug 1/Bug 2 修复，修过却没判据）。
+#    淘汰序吃 `time.time()`，本机粒度会让两条并列 ⇒ 判据按"等时钟真前进取样"，不猜 sleep。
+# 反证五枚逐格命中（去掉 `neuser_id` 声明 / 失败计数不再判用户存在 / 两分支文案分开 /
+# `expires_in` 与 exp 不一致 / 角色写死；读面把失败兜成空成功 / handler 自建私有图；
+# 容量上界失效 / 淘汰按最高重要性 / miss 折成 None），跑完按字节还原并核 MD5 一致。
+# 入册前逐文件单跑两次同读数 17 passed / 18 passed / 19 passed。
+tests/unit/api/test_loginRouteContract.py
+tests/unit/api/test_neuronSharedGraphHandlers.py
+tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py
 # §6-157 活路补的两格能力：层内并发上限、节点级重试（幂等声明门，默认拒绝）。
 # 并发面两式同档——先断峰值 >1（限流不许把并发压成串行），再断峰值 ≤ 上限（无界 gather 今天读数 12）；
 # 重试面拦三种谎：未声明幂等却重试（副作用节点重试＝重复动作）、重试用尽仍回成功、
