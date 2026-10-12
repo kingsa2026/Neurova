@@ -41,7 +41,7 @@ def _stampTurn(session_id):
     """按生产单源登记本轮身份（与 `turn_state.py:119` 同一入口，不手工塞私有字段）。"""
     from neurova.core.turn_context import set_turn_identity
 
-    set_turn_identity("读一下", session_id, "u1")
+    set_turn_identity("读一下", session_id)
 
 
 class TestBackgroundOutcomeCarriesSession:

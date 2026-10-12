@@ -98,7 +98,7 @@ def main() -> int:
 
     print("A) 折叠摘要缓存键：两个单聊会话各自分槽")
     for sid, topic in (("sess_one", "量子计算"), ("sess_two", "火星殖民")):
-        set_turn_identity("继续", sid, "u1")
+        set_turn_identity("继续", sid)
         history = [
             {"role": "user", "content": f"{sid} 第{i}条：" + topic * 60} for i in range(12)
         ]
@@ -115,7 +115,7 @@ def main() -> int:
     assert len(summaries) >= 2, "第二会话没有各自生成摘要（没打到折叠路径）"
 
     print("B) 池归属 / 条目 metadata / 持久台账 session 列")
-    set_turn_identity("继续", "sess_ledger", "u1")
+    set_turn_identity("继续", "sess_ledger")
     asyncio.run(
         _build(orch, [{"role": "user", "content": "台账会话列探针内容"}])
     )
@@ -141,7 +141,7 @@ def main() -> int:
     assert row_sessions == {"sess_ledger"}, f"台账会话列为 {row_sessions}"
 
     print("C) 无身份轮必须可见（计数 + 点名，不静默共槽）")
-    set_turn_identity("继续", None, "u1")
+    set_turn_identity("继续", None)
     orch._resolve_window_cache_key()
     report = orch.get_context_health()["turn_identity"]
     print(f"   turn_identity 读数 = {report}")
@@ -157,7 +157,7 @@ def main() -> int:
         return [{"role": "user", "content": f"{label} 第{i}条：" + "内容" * 60} for i in range(12)]
 
     def _foldFor(sid):
-        set_turn_identity("继续", sid, "u1")
+        set_turn_identity("继续", sid)
         asyncio.run(_build(orch, _lruHistory(f"会话 {sid}")))
 
     # 前几段留下的槽先清掉，只观察本段：填满 → **回访最早那个** → 再进一个新会话。

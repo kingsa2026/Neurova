@@ -1,5 +1,14 @@
 # CognitionOrchestrator 模块设计文档
 
+> **⚠ 本模块已退役（2026-10-12，台账 §6-166）**：`neurova/core/cognition_orchestrator.py` 生产侧
+> 零消费者，且本文描述的行为与实现不符——实测 `process_thought_cycle("用户想要一个周报")` 产出
+> `observations=['输入包含 1 个词']`、`reasoning=[... , '推理完成']`、`reflections=[..., '反思完成']`
+> 而 `success=True`；`MetacognitionMonitor` 只计数不测量；`save_state/load_state` 裸 `open(path)`
+> 绕过数据根。现役对应物：召回 `agent/chat_pipeline.py`、回合后反思 `agent/post_chat_pipeline.py`、
+> 记忆巩固 `SleepConsolidation`、元认知 `cognitive_layers/meta_cognition_layer/`（`ledger.py` 的
+> `confidence`/`load_score` 与 `self_model.py` 的 Wilson 区间，经 `metacognition_api.py` 在服务）、
+> 任务编排 `collaboration/neurflow/execution_engine.py`。本文保留作设计沿革，**不可作事实源**。
+
 > **模块名称**：CognitionOrchestrator（认知编排器）  
 > **对应生物器官**：大脑皮层  
 > **设计版本**：1.0  

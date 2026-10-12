@@ -114,7 +114,7 @@ def testApprovalRecordCarriesReturnAddress():
 
     from neurova.core.turn_context import set_turn_identity, set_turn_tool_call_id
 
-    set_turn_identity("q", session_id="sess_a", user_id="u1")
+    set_turn_identity("q", session_id="sess_a")
     set_turn_tool_call_id("call_a")
 
     originalStore = te._get_approval_manager
@@ -179,7 +179,7 @@ def testApprovalReturnAddressIsIsolatedAcrossParallelCalls():
         _bareExecutor()._create_approval_request("file_read", {"path": callId}, _Verdict())
 
     async def _drive() -> None:
-        set_turn_identity("q", session_id="sess_p", user_id="u1")
+        set_turn_identity("q", session_id="sess_p")
         await asyncio.gather(*(_worker(f"call_{i}") for i in range(4)))
 
     originalStore = te._get_approval_manager

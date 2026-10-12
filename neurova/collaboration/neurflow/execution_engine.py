@@ -5,6 +5,7 @@ Neurflow 执行引擎 — 垂直切片 6
 
 from neurova.core.logger import get_logger
 import asyncio
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -27,6 +28,42 @@ from .variable_resolver import ResolutionContext, get_variable_resolver
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
+
+#: 层内并发上限的唯一入口（一条工作流的一层可以有几十个互不依赖的节点，
+#: 无界 gather 会一次性把这些节点的工具/LLM 调用全打出去——下游限流与本机句柄同时遭殃）。
+MAX_CONCURRENT_NODES_ENV = "NEUROVA_NEURFLOW_MAX_CONCURRENT_NODES"
+MAX_CONCURRENT_NODES_DEFAULT = 8
+
+#: 节点级重试：只对**声明了幂等**的节点类型开放（默认拒绝，见 models.NodeDefinition.idempotent）。
+#: 退避按线性累加——不写成"指数"，实现是什么样就叫什么名。
+NODE_RETRY_ATTEMPTS_DEFAULT = 2
+NODE_RETRY_BACKOFF_SECONDS_DEFAULT = 0.5
+
+
+def maxConcurrentNodes() -> int:
+    """读层内并发上限（每次执行时读，脏值退回默认，最小钳到 1）。"""
+    raw = (os.environ.get(MAX_CONCURRENT_NODES_ENV) or "").strip()
+    if not raw:
+        return MAX_CONCURRENT_NODES_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s 不是整数，退回默认上限 %s（收到 %r）",
+                       MAX_CONCURRENT_NODES_ENV, MAX_CONCURRENT_NODES_DEFAULT, raw)
+        return MAX_CONCURRENT_NODES_DEFAULT
+    if value < 1:
+        logger.warning("%s=%s 小于 1，按 1 处理", MAX_CONCURRENT_NODES_ENV, value)
+        return 1
+    return value
+
+
+def nodeRetryAttempts() -> int:
+    """节点级重试的追加次数上限（0 = 关闭重试）。"""
+    return NODE_RETRY_ATTEMPTS_DEFAULT
+
+
+def nodeRetryBackoffSeconds() -> float:
+    return NODE_RETRY_BACKOFF_SECONDS_DEFAULT
 
 
 class _NodeExecutionError(RuntimeError):
@@ -96,6 +133,8 @@ class ExecutionEventType(Enum):
     NODE_COMPLETED = "node_completed"
     NODE_FAILED = "node_failed"
     NODE_SKIPPED = "node_skipped"
+    # 声明幂等的节点失败后重来：被重试吸收的失败不发 node_failed，改发这条
+    NODE_RETRY = "node_retry"
     VARIABLE_SET = "variable_set"
     PAUSED = "paused"
     RESUMED = "resumed"
@@ -516,23 +555,26 @@ class WorkflowExecutor:
                     and not (resume and resolution_context.node_results.get(nid, {}).get("status") == "success")
                 ]
 
-                # ── 层内并发执行普通节点 ──
+                # ── 层内并发执行普通节点（受 maxConcurrentNodes() 上限约束）──
                 if active:
-                    tasks = [
-                        self._execute_single_node(
-                            nid,
-                            node_map[nid],
-                            inputs,
-                            resolution_context,
-                            instance,
-                            workflow.id,
-                            execution_id,
-                            subflow_harness=subflow_harness,
-                            debug_session=debug_session,
-                            expected_upstream=_expected_upstream(nid),
-                        )
-                        for nid in active
-                    ]
+                    semaphore = asyncio.Semaphore(maxConcurrentNodes())
+
+                    async def _bounded(nid: str) -> Any:
+                        async with semaphore:
+                            return await self._execute_single_node(
+                                nid,
+                                node_map[nid],
+                                inputs,
+                                resolution_context,
+                                instance,
+                                workflow.id,
+                                execution_id,
+                                subflow_harness=subflow_harness,
+                                debug_session=debug_session,
+                                expected_upstream=_expected_upstream(nid),
+                            )
+
+                    tasks = [_bounded(nid) for nid in active]
                     gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
                     first_failure: Optional[str] = None
@@ -724,7 +766,10 @@ class WorkflowExecutor:
                 )
                 return
 
-            result = await self._execute_node(
+            result = await self._executeNodeWithRetry(
+                node_id,
+                workflow_id,
+                execution_id,
                 node,
                 resolved_config,
                 {
@@ -813,6 +858,55 @@ class WorkflowExecutor:
                 )
             )
             raise
+
+    async def _executeNodeWithRetry(
+        self,
+        node_id: str,
+        workflow_id: str,
+        execution_id: str,
+        node: WorkflowNode,
+        config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """节点级重试——只对**声明了幂等**的节点类型开放，其余抛一次即失败。
+
+        默认拒绝的理由是副作用：发消息/写文件/扣款类工具重试一次就是重复动作，
+        这个判断属于节点类型的作者，不属于调用它的那张画布。
+        被重试吸收的失败不发 node_failed——否则画布上该节点先闪红再变绿，
+        而"红过"在事件流里已经是既成事实。
+        """
+        definition = get_node_registry().get(node.type)
+        attempts = nodeRetryAttempts() + 1 if getattr(definition, "idempotent", False) else 1
+
+        last_error: Optional[BaseException] = None
+        for attempt in range(attempts):
+            try:
+                return await self._execute_node(node, config, context)
+            except Exception as e:  # noqa: BLE001 — 原样上抛给调用方的失败聚合，不吞
+                last_error = e
+                if attempt + 1 >= attempts:
+                    break
+                delay = nodeRetryBackoffSeconds() * (attempt + 1)
+                self._emit(
+                    ExecutionEvent(
+                        type=ExecutionEventType.NODE_RETRY,
+                        workflow_id=workflow_id,
+                        execution_id=execution_id,
+                        node_id=node_id,
+                        data={
+                            "attempt": attempt + 2,
+                            "max_attempts": attempts,
+                            "delay_seconds": delay,
+                            "error": str(e),
+                        },
+                    )
+                )
+                logger.warning(
+                    "节点 %s (%s) 第 %s 次失败，%ss 后重试: %s",
+                    node_id, node.type, attempt + 1, delay, e,
+                )
+                await asyncio.sleep(delay)
+        raise last_error
 
     def _record_skipped(
         self, node_id: str, instance: ExecutionInstance, workflow_id: str, execution_id: str

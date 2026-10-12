@@ -89,10 +89,10 @@ class TestSessionIdPassthrough:
         pipeline = make_pipeline()
         ctx = ChatContext(user_input="q", session_id="sess-9")
         pipeline._init_agent_state(ctx)
-        # P3-c 收窄：身份经 set_request_identity 显式 API 透传（MagicMock 记录调用；
-        # user_id 缺省由 Agent.set_request_identity 内部落 "default"，管线只透传原值）
+        # P3-c 收窄：轮次内容经 set_request_identity 显式 API 透传（MagicMock 记录调用）。
+        # §6-163 之后这个调用里**没有** user_id——身份只在请求边界写一次，管线不是第二个写点。
         pipeline._agent.set_request_identity.assert_called_once_with(
-            user_input="q", session_id="sess-9", user_id=None
+            user_input="q", session_id="sess-9"
         )
 
     def test_emitter_promoted_from_metadata(self):

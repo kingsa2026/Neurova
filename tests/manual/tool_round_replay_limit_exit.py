@@ -106,7 +106,7 @@ def buildAgent():
     agent.config.workspace_path = tempfile.mkdtemp(prefix="batchB-ws-")
     agent.user_id = "u1"
     agent.agent_id = AGENT_ID
-    set_turn_identity("连续读三个文件", SESSION_ID, "u1")
+    set_turn_identity("连续读三个文件", SESSION_ID)
     agent.session_manager = get_session_manager()
     agent.memory_agent = MemCore(agent)
     agent._current_user_id = "u1"

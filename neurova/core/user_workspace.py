@@ -97,7 +97,8 @@ class UserWorkspace:
             默认配置字典
         """
         return {
-            "language": "zh-CN",
+            # `language` 一格已退役（§6-167）：它是「某人默认看什么语言」的第四份字面量，
+            # 随工作区配置各存一份而没有任何读者。语言的起点只在语言层。
             "timezone": "Asia/Shanghai",
             "theme": "light",
             "font_size": 14,
