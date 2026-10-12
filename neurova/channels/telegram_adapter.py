@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from neurova.channels import ChannelAdapter, ChannelConfig, MessageChannel
 from neurova.channels.base import ChannelEventType, ChannelMessage
+from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_PLACEHOLDER
 
 from neurova.channels.telegram_api_client import TelegramAPIMixin
 from neurova.channels.telegram_sender import TelegramSenderMixin
@@ -279,15 +280,26 @@ class TelegramAdapter(
         chat_type = "p2p" if ctype == "private" else "group"
         text = msg.get("text") or msg.get("caption") or ""
         mentions = [e for e in (msg.get("entities") or []) if e.get("type") == "mention"]
+        # 入站语音：Telegram 把语音放在 msg["voice"]（音频文件在 msg["audio"]），两者都
+        # 没有 text/caption——此前正文被取成空串、类型硬编码 "text"，agent 收到的是一条
+        # 空消息（连占位都没有）。按平台引用把字节取回来，交给 manager 收口处的预转写。
+        voicePayload = msg.get("voice") or msg.get("audio") or {}
+        voiceFileId = str(voicePayload.get("file_id") or "") if isinstance(voicePayload, dict) else ""
+        content = text.strip() or (INBOUND_VOICE_PLACEHOLDER if voiceFileId else "")
+        metadata: Dict[str, Any] = {"mentions": mentions} if mentions else {}
+        if voiceFileId:
+            rawAudio = self.fetchVoiceBytes(voiceFileId)
+            if rawAudio:
+                metadata[AUDIO_BYTES_KEY] = rawAudio
         channel_msg = self._make_message(
             message_id=str(msg.get("message_id", "")),
             sender_id=str(sender.get("id", "")),
             sender_name=sender.get("username") or sender.get("first_name", "") or str(sender.get("id", "")),
-            content=text.strip(),
+            content=content,
             chat_id=chat_id,
             chat_type=chat_type,
-            message_type="text",
-            metadata={"mentions": mentions} if mentions else {},
+            message_type="voice" if voiceFileId else "text",
+            metadata=metadata,
             raw_event=msg,
         )
         if self._main_loop is not None and self._main_loop.is_running():
