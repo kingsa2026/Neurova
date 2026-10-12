@@ -157,11 +157,11 @@ def test_escalated_proposal_shows_up_in_pending_endpoint(
     proposal_id = result["escalation"]["proposals"][0]
 
     app = FastAPI()
-    from neurova.api.deps import get_current_user
+    from neurova.api.auth import get_current_user as strictIdentityGate
     from neurova.api.endpoints.governance import router
 
     app.include_router(router, prefix="/api/v1/governance")
-    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+    app.dependency_overrides[strictIdentityGate] = lambda: {"user_id": "admin1", "role": "admin"}
     with patch(
         "neurova.api.endpoints.governance._get_rsi_orchestrator",
         return_value=probe.orchestrator,

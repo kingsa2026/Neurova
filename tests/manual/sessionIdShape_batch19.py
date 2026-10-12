@@ -71,7 +71,8 @@ def main() -> int:
     child = subprocess.run(
         [sys.executable, "-c", CHILD.format(repo=str(Path(__file__).resolve().parents[2]),
                                             agent=AGENT, owner=OWNER)],
-        capture_output=True, text=True, env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT)},
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT), "PYTHONIOENCODING": "utf-8"},
     )
     payload = json.loads(child.stdout.strip().splitlines()[-1]) if child.stdout.strip() else {}
     check("[3] 子进程（＝重启后）读到了索引快路径，而不是回退全扫",
