@@ -551,9 +551,12 @@ const saveSection = async (section: string) => {
     const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value, routing: routing.value }
     await updateSettings(section, sectionMap[section])
 
-    if (section === 'general' && general.value.language !== locale.value) {
-      locale.value = general.value.language
-      appStore.setLocale(general.value.language)
+    if (section === 'general' && general.value.language !== appStore.locale) {
+      // 语言的改法只有 store 里那一处（i18n 实例 + 方向 + 覆盖层）。
+      // `false` 是刻意的：这格表单写的是**全局默认**（`PUT /settings`，仅管理员），
+      // 不该顺手把"管理员本人的偏好"写成跟他刚替所有人选的那个值一样。
+      // 个人偏好的入口是右上角语言下拉（`MainLayout.changeLocale`），那条才落 per-user。
+      appStore.setLocale(general.value.language, false)
     }
 
     message.success(t('common.success'))
