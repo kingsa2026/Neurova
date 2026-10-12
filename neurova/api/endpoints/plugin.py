@@ -84,6 +84,10 @@ _REASON_TO_STATUS = {
     "not_granted": 404,                # 撤销一条本来就没有的授予
     "grants_store_corrupt": 500,       # 授权文件读不出：不静默当「谁都没授予过」
     "grants_store_unwritable": 500,
+    # ── §6-164：登记状态落盘（安装/enabled 跨重启；`loaded` 刻意不落）──
+    "state_store_corrupt": 500,        # 状态文件读不出：列表空是"没读进来"，不是"没装过插件"
+    "state_store_version": 500,        # 版本不认识：不自动映射，等人重做那次决定
+    "state_write_failed": 500,         # 写不进即回滚内存（与 audit_write_failed 同一条纪律）
     "audit_write_failed": 500,         # 审计写不进＝变更回滚（权限变更必须可追溯到人）
     "no_app_context": 500,             # 没有活 HTTP 栈，谈不上挂载
     "path_out_of_namespace": 400,      # 挂载边界：只能落在插件自己的命名空间
@@ -187,7 +191,12 @@ async def list_plugins(
     start = (page - 1) * size
     items = results[start : start + size]
     return {"code": 0, "message": "success",
-            "data": {"items": items, "total": total, "page": page, "size": size}}
+            "data": {"items": items, "total": total, "page": page, "size": size,
+                     # §6-164：状态文件读不出时列表为空**不等于**"这台机器没装过插件"。
+                     # 不把这两件事分开，一次坏文件就会被读成一次干净的 uninstall-all。
+                     "state_load_error": manager.stateLoadError,
+                     # 盘上是插件目录但从没登记过（登记要过安装门）：只报读数，不代做决定。
+                     "discovered_not_installed": manager.unregisteredPluginDirs()}}
 
 
 @router.get("/status")

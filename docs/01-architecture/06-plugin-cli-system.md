@@ -205,6 +205,20 @@ manager.disable_plugin("my-plugin")
 manager.uninstall_plugin("my-plugin")
 ```
 
+> **安装与启用状态落盘，装载状态不落盘**（用户 2026-10-12 裁「落盘状态 + 只发现不装载」，台账 §6-164）。
+>
+> - `PluginManager` 把每个插件的 `{installed, enabled, 清单路径…}` 写进 `<插件根>/state.json`
+>   （`STATE_STORE_VERSION = 1`），写入走 `core/atomic_io.atomic_write_text` 这一处原子口。
+>   装／卸／启／停四个动作**先落盘再改内存**，落盘失败即回滚内存并点名原因（`state_write_failed`），
+>   不留"内存里有、文件里没有"的半成品；文件坏了改名隔离后响亮报 `state_store_corrupt`，
+>   版本不认识报 `state_store_version`——都不静默兜底。
+> - **`loaded` 重启后一律为 `False`，且从不写进文件**：装载＝进程内任意代码执行，
+>   一次授权不该在每次开机时被自动复现成隐式信任。
+> - 于是重启后的 `startupMountPass()` 按 `entry_not_loaded` 拒挂，这是如实读数而不是故障；
+>   要让插件真跑起来必须显式重走 `enable` → `load`。
+> - 目录里扫得到、`state.json` 里没有的插件＝**已发现未安装**，只在列表接口里以
+>   `discovered_not_installed` 逐条点名，既不静默登记也不静默装载。
+
 ### 3.2 依赖解析
 
 ```python

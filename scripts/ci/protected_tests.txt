@@ -2426,3 +2426,17 @@ tests/unit/api/test_mobilePairingChatSendContract.py
 #   门面也不得再把它列作在役成员（§6-115 的"文档声称有、代码没有"）。
 # 入册前逐文件单跑两次同读数 4 passed（6.32s / 6.26s）。
 tests/unit/core/test_orchestratorTriadRetired.py
+# §6-164 插件登记状态落盘的判据（用户 2026-10-12 裁「落盘状态 + 只发现不装载」）。
+# 判据问的不是"有没有 state.json"这一句形状，而是四件事一起成立：
+# ① 装／启／停／卸四个动作都写盘，删除路径**先写盘再改内存**（反序会得到"内存说删了、
+#   文件里还留着"，重启时那条记录自己活回来）；写不进去即回滚内存并点名 `state_write_failed`。
+# ② 状态文件坏掉不得被读成"这台机器没装过插件"——改名隔离＋响亮 `state_store_corrupt`，
+#   版本不认识一律拒、不自动映射（与 §6-159 授权存储同一口径）。
+# ③ `loaded` 刻意不落盘：读回时无条件清掉盘上残留，装载必须显式发生在本进程内
+#   （P3 的来源白名单与构件完整性未做，开机自动 exec 第三方代码是风险不是便利）。
+# ④ 发现与登记是两件事：盘上有目录但没登记过 ⇒ 只交 `discovered_not_installed` 读数，
+#   不静默登记也不静默装载；列表面另把"没读进来"与"没装过"分开回。
+# 另有两格钉写入面：只经 `core/atomic_io.atomic_write_text` 这一处，且生产码里不得再
+# 出现 `Path.home()` 那类第二落点（§6-150 复算过的那条）。
+# 入册前逐文件单跑两次同读数 14 passed（1.98s / 2.22s）。
+tests/unit/plugins/test_pluginStateSurvivesRestart.py
