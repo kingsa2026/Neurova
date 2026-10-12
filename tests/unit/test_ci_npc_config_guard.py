@@ -99,7 +99,7 @@ BUILD_HARD_LIMIT_SECONDS = 14400
 #: token）⇒ 单轮耗时由早期 ~16s 涨到 30s+。
 #:
 #: 用途**仅限** `spinCeilingReading()` 这一个窄用途（回答"某一份单轮成本下
-#: 一次 2h 会话最多容纳多少轮"）；它**不再**用来给 maxTurns 反推值或钳上界 ——
+#: 现行墙钟内一次会话最多容纳多少轮"）；它**不再**用来给 maxTurns 反推值或钳上界 ——
 #: 那等于把"配额"与"单轮成本"混成一份口径（Issue #158 起了头，Issue #236 收口）。
 SECONDS_PER_TURN = 35.3
 
@@ -123,7 +123,7 @@ MAX_TURNS_BASELINE = 500
 
 
 def spinCeilingReading(cost_per_turn: float | None = None) -> int:
-    """某一份单轮耗时下，一次 2h 会话最多容纳的轮数（**读数，不是判据**）。
+    """某一份单轮耗时下，现行墙钟内一次会话最多容纳的轮数（**读数，不是判据**）。
 
     调用方必须显式给出成本口径（默认取 `SECONDS_PER_TURN`）——
     参数化是刻意的：它让"这个算式依赖哪个成本读数"在调用点可见，
@@ -350,7 +350,7 @@ class TestTurnBudget:
             f"现行上限 {ceiling} 不高于一次会话的容纳读数 {spin_ceiling} 轮 ——"
             "上限又被耗时算式钳住了（Issue #236 的根因复现）。\n"
             "配额是功能决策：把「跑满后由收尾阶段接力」作为正常收官形态，"
-            "而不是把配额压到单个 2h 会话之内。"
+            "而不是把配额压到单次会话的墙钟之内。"
         )
         declared = sorted({
             parseTurnBudget(options.get("maxTurns"))
@@ -627,7 +627,7 @@ DURATION_DISCIPLINE_MARKERS = (
 
 
 class TestNpcBuildDurationDiscipline:
-    """NPC 人设必须载明构建时长纪律（2h 硬上限的根因处修复）。
+    """NPC 人设必须载明构建时长纪律（现行 4h 硬上限的根因处修复）。
 
     只调 maxTurns 治不了这个病：cnb-f1c-1k31garu5（251 轮）与
     cnb-3k8-1k33gorhr（204 轮）两次掐断的轮数都远低于 1000 配额，
@@ -1119,11 +1119,11 @@ class TestMountClaimMatchesTheRealMount:
 #: 确切上界不与平台能力挂钩：预算是**配额**（让出的值），不是墙钟反推值。
 MEASURED_SECONDS_PER_TURN_READINGS = (2.428, 15.9, 21.4, 29.0, 35.3)
 
-#: 平台对 `npc:go` 会话的墙钟硬限（秒）。会话横跨任意多轮，
-#: 配额用满只是换一个会话继续 —— 与 `SECONDS_PER_TURN` 描述的"2h 能跑几轮"不是同一件事。
-PLATFORM_SESSION_WALLCLOCK_LIMIT_SECONDS = 7200
+#: `npc:go` 会话的墙钟口径只有一处定义：本文件的 `BUILD_HARD_LIMIT_SECONDS`
+#: （现行 Runner 下发值）。此处不再另立第二份常量 —— 会话横跨任意多轮，
+#: 配额用满只是换一个会话继续，与 `SECONDS_PER_TURN` 描述的"一次会话能跑几轮"不是同一件事。
 
-#: 平台墙钟倍数（现行值，功能决策）：一次会话跑满的墙钟不落在单个 2h 会话里。
+#: 平台墙钟倍数（现行值，功能决策）：一次会话跑满的墙钟不落在单次会话墙钟里。
 #: 记录本轮修复的**唯一本意**：把"跑满配额 = 平台反复掐断（无告警、无收尾、
 #: worktree 成果直接丢）"换成"撞顶正常收官、由收尾阶段接力（成果经评论交接）"。
 #: 与上下文窗口同理：窗口不足时用接力续跑，而不是把单轮压到 6 千 token。
@@ -1134,7 +1134,7 @@ TURN_BUDGET_MULTIPLIER = 500
 
 
 def _spinCeilingUnderCurrentTurnCost():
-    """按实测单轮耗时算：一次 2h 会话最多能容纳多少轮。
+    """按实测单轮耗时算：现行墙钟内一次会话最多能容纳多少轮。
 
     它是**读数**，不是配额 —— 用途是回答"把配额写在它之上，撞顶还等得到吗"。
     """
@@ -1196,7 +1196,7 @@ class TestTurnBudgetMultiplierIsNotAReachableSpinCeiling:
         assert not problems, "\n  ".join(problems)
 
     def test_budget_leaves_room_for_repeated_topouts(self, cnb_doc):
-        """配额相对实测单轮成本必须有反复撞顶的余量（不是一个 2h 会话的量）。
+        """配额相对实测单轮成本必须有反复撞顶的余量（不是单次会话墙钟的量）。
 
         反向自证：若某天单轮耗时被优化到与配额同量级，本条转红 ——
         那说明"配额"已经退化成"一次会话的轮数"，接力链没有存在的必要，
@@ -1205,7 +1205,7 @@ class TestTurnBudgetMultiplierIsNotAReachableSpinCeiling:
         ceiling = maxTurnsCeiling(cnb_doc)
         spin_ceiling = _spinCeilingUnderCurrentTurnCost()
         assert ceiling > spin_ceiling, (
-            f"现行配额 {ceiling} 未超过「一次 2h 会话可容纳的 {spin_ceiling} 轮」"
+            f"现行配额 {ceiling} 未超过「现行墙钟内一次会话可容纳的 {spin_ceiling} 轮」"
             f"（按实测单轮均摊 {SECONDS_PER_TURN}s）——"
             "配额退化成单会话轮数，撞顶无法正常收官。\n"
             "若这是刻意的（单轮成本已优化到配额量级），请先改这条判据与 "
