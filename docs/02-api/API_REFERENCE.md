@@ -282,6 +282,18 @@
 ### 75. `/api/v1/memory-share-groups` — `memory_share_groups.py` | 需认证
 - CRUD + members + `POST /{id}/memories`
 
+### 76. `/api/v1/language` — `language_api.py` | 需认证（写面另加管理员门）
+- 本人语言偏好：`GET /preferences/mine`（只读，没设过如实回 `configured:false`，不替用户建一条）｜
+  `PUT /preferences/mine`（属主**只从登录态取**，请求体 `extra="forbid"`，多写 `user_id` 直接 422）
+- 译文覆盖层：`GET /overlay?language=&namespace=`（含**未审**条目，逐条带 `approved`/`translator`）｜
+  `PUT /overlay/{namespace}`（**仅管理员**；`{key: {语言码: 文案}}`，坏语言码整批 400 并点名）
+- 语言码归一只走 `Language.normalizeTag`（本面不写第二刀）；`auto` 不许当首选/回退语言，
+  那一层语义由 `auto_detect` 承载（台账 §6-140/§6-145 的同一根因，别在新字段上重建）
+- 偏好落盘：数据根下 `language_preferences.json`（**刻意不放进 `language/` 译文目录**——
+  那里每个 `*.json` 都会被当成一个命名空间读进来）；写盘失败回 500 且内存回滚，不谎报已保存
+- 实测：无凭证两个读面均 401、普通用户写面 403（活体 `tests/manual/languageFace_batch14.py`
+  第 [22]/[13] 项，台账 §6-160）
+
 ---
 
 ## 附录
@@ -291,7 +303,7 @@
 | 认证类型 | 模块 |
 |----------|------|
 | **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
-| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups |
+| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups, language（写面另加管理员门） |
 | **API Key** | agent-communication |
 | **HTTPBearer** | mobile |
 
@@ -299,12 +311,15 @@
 > `APIRouter(dependencies=[Depends(get_current_user)])`，无凭证请求实测回 **401**
 > （活体第 [8] 项）。这张表**没有逐模块复核过**，其余条目同样可能是旧的：本批只按实测改了
 > 自己动过的那一格，不做整表顺手清扫（那需要一次自己的复算与裁定，登记在台账）。
+>
+> 追加（§6-160）：`language` 这一行是**按实测新加的**，不是照旧表抄的——两个读面无凭证 401、
+> 覆盖层写面对普通用户 403（活体第 [22]/[13] 项）。旧表那张"无需认证"名单至今仍未逐模块复核。
 
 ### 项目统计
 
 | 指标 | 数值 |
 |------|------|
-| 后端API模块 | 75 |
+| 后端API模块 | 76 |
 | 端点总数 | 625+ |
 | GET端点 | ~250 |
 | POST端点 | ~250 |

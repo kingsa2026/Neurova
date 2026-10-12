@@ -2274,6 +2274,26 @@ tests/media/test_tts_module.py
 tests/language/test_language_models.py
 tests/language/test_language_externalLibraryTags.py
 
+# 批 14 裁定乙（§6-160）：语言包从"全仓零生产消费者"接成有读面、有落盘。
+# 两档各钉一半，缺一半都会回到今天这种"写进去了没人读得到"的形态：
+# `test_languageUserPreferencePersistence.py` 17 格钉**偏好真的留得住**——换一个实例(＝重启)
+# 从盘上读回同一个人、默认落点走 `callerPath` 单点且**不在译文 `*.json` glob 目录里**
+# （放里面会长出一条假的命名空间）、读不建文件、写盘失败即内存回滚并回 False（不许拿
+# "内存里已经有了"对用户承诺已保存）、坏文件改名隔离不原地覆盖、一个坏码只跳它自己、
+# `auto` 不许当首选/回退语言（那件事 `auto_detect` 已在承载）；其中一格用桩替
+# `atomic_write_text` 自证那条路真被走，否则"写盘失败"那格是在桩一条没人走的路。
+# `test_languageFaceReadSurface.py` 20 格钉**HTTP 面本身**——属主只从登录态取（体里多写
+# `user_id` 直接拒）、换 token 读不到别人的、无凭证 401 且配一格真 404 校准、
+# 不识别的语言码 400 点名（回 200 空列表会让打错字母的人以为自己那套语言没文案）、
+# 覆盖层读面把 `is_approved=False` 的条目**如实带状态**读出（裁定是不引入审批，
+# 不是把未审说成已审）、内置那条 `get_translation()` 的门一寸没松、写面只认管理员、
+# 拒因经 `LanguageManager.rejectedLanguageTags` 那一份单点（桩掉它读数必须从 400 变 500，
+# 否则 400 是端点自己另写的第二处实现）、命名空间不许变成穿越路径、
+# 另按 AST 钉住"面上不许多写一刀语言码归一"。
+# 逐文件单跑两次同读数 17 passed / 20 passed。
+tests/language/test_languageUserPreferencePersistence.py
+tests/unit/api/test_languageFaceReadSurface.py
+
 
 # 插件体系按裁定接回后的常驻判据（用户 2026-10-11 改裁「做插件体系并接线」，§6-150）
 # 上一档 `test_pluginSystemRetired.py`（钉"包不得复活"）随裁定撤销，同批换成钉"接线是真的、边界是真的"：
