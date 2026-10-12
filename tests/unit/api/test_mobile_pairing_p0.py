@@ -15,6 +15,7 @@ import sys
 import importlib
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+from types import SimpleNamespace
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -28,20 +29,30 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 
 class TestWSUrlHardcoded:
-    """BUG: WS URL 硬编码 ws://localhost:8000 → 应从 Host header 推导"""
+    """BUG: WS URL 硬编码 ws://localhost:8000 → 应从 Host header 推导
+
+    §6-172 批 26 之后，路径那半边也归路由表管（`request.url_for`）——这三格替的就是
+    请求对象：`MagicMock` 对 `url_for` 只能回一串 repr，既不含 host 也不含路径，
+    断言会"通过"在一条无意义的串上（教义第 3 条禁止的形态），故换成显式替身。
+    """
+
+    @staticmethod
+    def _request(host: str, scheme: str, path: str = "/api/v1/mobile/ws"):
+        """答 host/scheme（本类审的两项）+ 路由表查询（框架那半边；路径这里当夹具用，
+        "发出去的路径必须真在路由表里"由 `test_mobilePairingAdvertisedWsPathResolves.py` 审）。"""
+        return SimpleNamespace(
+            headers={"host": host},
+            url=SimpleNamespace(scheme=scheme),
+            url_for=lambda name, **params: f"{scheme}://{host}{path}",
+        )
 
     def test_ws_url_should_derive_from_host_header(self):
         """RED: ws_url 应从请求的 Host header 推导，而非硬编码 localhost:8000"""
         from neurova.api.endpoints import mobile_pairing as mp
 
-        # 模拟请求带 Host header = example.com:9527
-        mock_request = MagicMock()
-        mock_request.headers = {"host": "example.com:9527"}
-        mock_request.url.scheme = "http"
+        ws_url = mp._build_ws_url(self._request("example.com:9527", "http"), code="123456")
 
-        ws_url = mp._build_ws_url(mock_request, code="123456")
-
-        # 期望: ws://example.com:9527/mobile/ws?code=123456
+        # 期望: ws://example.com:9527/api/v1/mobile/ws?code=123456
         assert "localhost:8000" not in ws_url, "WS URL 不应硬编码 localhost:8000"
         assert "example.com:9527" in ws_url, "WS URL 应包含实际 host:port"
         assert ws_url.startswith("ws://"), "WS URL 应以 ws:// 开头"
@@ -51,11 +62,7 @@ class TestWSUrlHardcoded:
         """RED: HTTPS 请求应生成 wss:// URL"""
         from neurova.api.endpoints import mobile_pairing as mp
 
-        mock_request = MagicMock()
-        mock_request.headers = {"host": "secure.neurova.io"}
-        mock_request.url.scheme = "https"
-
-        ws_url = mp._build_ws_url(mock_request, code="abc")
+        ws_url = mp._build_ws_url(self._request("secure.neurova.io", "https"), code="abc")
 
         assert ws_url.startswith("wss://"), "HTTPS 请求应生成 wss:// URL"
         assert "secure.neurova.io" in ws_url
@@ -64,11 +71,7 @@ class TestWSUrlHardcoded:
         """RED: confirm_pairing 返回的 ws_url 也应从 Host 推导"""
         from neurova.api.endpoints import mobile_pairing as mp
 
-        mock_request = MagicMock()
-        mock_request.headers = {"host": "192.168.1.100:9527"}
-        mock_request.url.scheme = "http"
-
-        ws_url = mp._build_ws_url(mock_request, token="test-token")
+        ws_url = mp._build_ws_url(self._request("192.168.1.100:9527", "http"), token="test-token")
 
         assert "localhost:8000" not in ws_url
         assert "192.168.1.100:9527" in ws_url

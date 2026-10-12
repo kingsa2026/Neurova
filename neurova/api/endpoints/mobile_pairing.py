@@ -182,17 +182,23 @@ async def _run_chat_stream(ws, data: dict, user_id: str):
 
 
 def _build_ws_url(request, code=None, token=None) -> str:
-    """从请求的 Host header 推导 WebSocket URL（BE-MOB-001 修复）"""
-    host = request.headers.get("host", "localhost:9527")
+    """设备回连地址：路径向**路由表**要，scheme/host 向请求要（§6-172 批 26）。
+
+    原先这里把 `/mobile/ws` **抄在函数里**（BE-MOB-001 那次只改了 host/scheme 的来处），
+    而本模块的挂载前缀由注册表给：`/api` + `/v1/mobile`（`endpoints/__init__.py:345`）。
+    抄出来的那条路径在真实路由表里根本不存在——`POST /pairing/confirm` 回的 `ws_url`
+    与批 25 那张"终于能扫"的二维码，发的都是同一个连不上的地址：扫完只能失败一次。
+    """
+    target = str(request.url_for("mobile_websocket"))
     scheme = getattr(request.url, "scheme", "http")
-    ws_scheme = "wss" if scheme == "https" else "ws"
+    ws_target = ("wss://" if scheme == "https" else "ws://") + target.split("://", 1)[1]
     params = []
     if code:
         params.append(f"code={code}")
     if token:
         params.append(f"token={token}")
     query = ("?" + "&".join(params)) if params else ""
-    return f"{ws_scheme}://{host}/mobile/ws{query}"
+    return f"{ws_target}{query}"
 
 
 def _generate_pairing_code() -> str:
