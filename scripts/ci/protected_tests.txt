@@ -2514,3 +2514,17 @@ tests/unit/session/test_sessionIdShapeAcrossReadPaths.py
 # 内容认语音那一跳而不是按位置取最后一条——文本走 lark SDK 路、语音走纯 HTTP 路，两跳先后随
 # 装配耗时变化，用 sends[-1] 会在慢的那次读成没按 file 发）。
 tests/unit/channels/test_channelVoiceInboundBytes.py
+
+# §6-173 语音装配层契约（形状格退役后的替代证据）：
+# `test_voiceAssemblyContracts.py` 8 格——问的是「被读的那一侧真读到了什么」，不是「名字在不在」：
+# 端点按属性名读 `VoiceResult`，属性漂移就是运行期 AttributeError ⇒ 用真 dataclass 字段集合对真源码
+# 的属性读数取差；预检按 text 键读 ASR 返回 dict，键名一改就变成「转写成功、内容为空」（静默降级）
+# ⇒ 用真引擎产物的键集合去覆盖真源码里的读键集合；`_channel_voice` 由两条 hasattr 格改成行为格
+# （只回 asr_transcription 命中项、分数按 confidence×0.7＋时间衰减×0.3、limit 生效、空库回空列表不抛）。
+# 两格探测器自证（合成样本必被点名）：「X 不该出现」型断言在探测器失明时会自动成立，本批实测过——
+# 上限探测器第一版只认 ast.Constant，放过了真码里的 `10 * 1024 * 1024`。
+# 为什么不用 inspect.signature().bind：本层生产签名一律以 **kwargs 收口，bind 对 catch-all 恒成功，
+# 那样造出来的格子常年全绿且看着像契约——比 hasattr 更坏。
+# 入册前逐文件单跑两次同读数 8 passed；同批另补 7 格在 `test_voice_engine_api_integration.py`
+# （响应体真字节 / 魔数定媒体类型 / 空产物 500 / 引擎头读真名），并用四处生产变异验过牙。
+tests/unit/voice/test_voiceAssemblyContracts.py
