@@ -257,7 +257,10 @@ async def get_memory(
         raise
     except Exception as e:
         logger.exception("获取记忆失败: %s", e)
-        raise APIError(ErrorCodes.MEMORY_NOT_FOUND, f"获取记忆失败: {str(e)}")
+        # 故障不许折成"不存在"（台账 §6-126）：读面出错与查无此条是两件事——
+        # 真查无此条走上面那条 `APIError.not_found`（7002→404），这里回 7001。
+        # 7001 不在 `error_handlers` 的码→状态表里，天然落 500，两类从此分得开。
+        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"获取记忆失败: {str(e)}")
 
 
 @router.post("/compress", summary="压缩低重要性记忆")

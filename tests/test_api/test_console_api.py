@@ -31,6 +31,7 @@ def _make_ws_token():
     return create_access_token({'user_id': 'test_user', 'sub': 'test_user', 'role': 'user'})
 
 from neurova.api.app import create_app
+from tests.auth_headers import overrideIdentity
 
 def _authed_client(app):
     """统一注入登录态（admin 角色——console debug 面需管理员）。
@@ -200,15 +201,22 @@ class TestConsoleAPI:
     
     def test_debug_logs_endpoint_denied_for_non_admin(self, client):
         """非管理员访问 debug 面 403（现行鉴权契约）。残留处理 2026-09-13：
-        原用例基于已删的 ENABLE_DEBUG_ENDPOINT 门禁。"""
-        from neurova.api import deps as deps_mod
+        原用例基于已删的 ENABLE_DEBUG_ENDPOINT 门禁。
 
+        2026-10-08 §6-54：debug 面的角色门取源换成严格门本体后，只替 `deps` 那一份
+        会**静默不生效**（模块夹具给两条门都装了 admin，于是替一半 = 仍是 admin → 200）。
+        这里改用 `overrideIdentity` 把端点真正依赖的那条一起替掉，
+        并在 teardown **整体还原**快照——`pop` 单个键会把另一条的替身留给下一个用例
+        （`create_app()` 返回缓存实例，`app.py:1320`，残留会跨用例活下来）。
+        """
         plain = {"user_id": "plain", "username": "plain", "role": "user"}
-        client.app.dependency_overrides[deps_mod.get_current_user] = lambda: plain
+        before = dict(client.app.dependency_overrides)
+        overrideIdentity(client.app, plain)
         try:
             assert client.get("/api/v1/console/debug/logs?lines=50").status_code == 403
         finally:
-            client.app.dependency_overrides.pop(deps_mod.get_current_user, None)
+            client.app.dependency_overrides.clear()
+            client.app.dependency_overrides.update(before)
     
     def test_debug_system_status_endpoint(self, client):
         """系统状态（现行 data 面：资源水位）。残留处理 2026-09-13：
@@ -221,15 +229,15 @@ class TestConsoleAPI:
         assert "uptime_seconds" in data
     
     def test_debug_status_denied_for_non_admin(self, client):
-        """非管理员访问 debug status 403（现行鉴权契约）。"""
-        from neurova.api import deps as deps_mod
-
+        """非管理员访问 debug status 403（现行鉴权契约）。§6-54 同上一条同形修法。"""
         plain = {"user_id": "plain", "username": "plain", "role": "user"}
-        client.app.dependency_overrides[deps_mod.get_current_user] = lambda: plain
+        before = dict(client.app.dependency_overrides)
+        overrideIdentity(client.app, plain)
         try:
             assert client.get("/api/v1/console/debug/status").status_code == 403
         finally:
-            client.app.dependency_overrides.pop(deps_mod.get_current_user, None)
+            client.app.dependency_overrides.clear()
+            client.app.dependency_overrides.update(before)
     
     def test_websocket_endpoint(self, client):
         """测试 WebSocket 接口"""

@@ -28,6 +28,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_mssettings_
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import enhanced_memory_search_api as EMS
 from neurova.cognitive_layers.memory_layer.settings_config import MemorySettingsConfig
+from tests.auth_headers import overrideIdentity
 
 MOCK_ADMIN = {"user_id": "a1", "username": "admin1", "role": "admin"}
 
@@ -46,7 +47,7 @@ def isolated(tmp_path, monkeypatch):
 def client(isolated):
     app = FastAPI()
     app.include_router(EMS.router, prefix="/api/v1/enhanced-memory-search")
-    app.dependency_overrides[get_current_user] = lambda: MOCK_ADMIN
+    overrideIdentity(app, MOCK_ADMIN)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()

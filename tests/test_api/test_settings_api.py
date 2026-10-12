@@ -52,16 +52,17 @@ def app() -> FastAPI:
     application = FastAPI()
     application.include_router(settings_router)
 
-    # 端点依赖 neurova.api.deps.get_current_user（b1dfb744 起从 auth 迁入，
-    # 并加 require_admin 写锁）；require_admin→require_role→check_role 内部
-    # 同样 Depends(get_current_user)，故覆盖 deps 对象 + 假用户带 admin 角色
-    # 即可同时放行 GET（登录）与 PUT（管理员）。
-    from neurova.api.deps import get_current_user
+    # 端点与角色门都经 `api/deps` 那条再导出取身份（b1dfb744 起从 auth 迁入，
+    # 并加 require_admin 写锁）。2026-10-08 §6-54 把**角色门**的取源改成严格门本体
+    # （`require_role` 不再吃 `?access_token=`），原来"覆盖 deps 那一份就同时放行
+    # GET 与 PUT"的前提因此不再成立——PUT 会 401。改用 helper，按 app 路由图上
+    # **真正出现的那几条身份入口**一起替，既不漏也不把残留铺到没用的门上。
+    from tests.auth_headers import overrideIdentity
 
     async def _fake_current_user() -> dict:
         return {"user_id": "test_user", "username": "tester", "role": "admin"}
 
-    application.dependency_overrides[get_current_user] = _fake_current_user
+    overrideIdentity(application, _fake_current_user)
     return application
 
 

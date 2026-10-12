@@ -351,25 +351,38 @@ def _repoWideAstScans(source: str) -> list:
 
 #: 会**物化整片节点元组**的入口：语义是「跨判据复用同一份语法树 + 同一份节点表」。
 #:
-#: 与 `_cachedParse` / `_cachedNodes` 的区别是**要不要一次拿全节点**：
-#: 前者（本名单）返回 `(path, node)` 清单，调用方为了一次判据把整棵树的每个
-#: 节点都取出来；后者只编译/展开一棵树，消费方按需 `ast.walk` 自己那一棵。
+#: 门槛是**要不要一次拿全节点**，不是"名字听起来像保留型"：
+#: `walkedModules` 返回 `(path, node)` 清单，每次调用都经 `_cachedNodes` 把
+#: 整棵树的节点元组建出来并留在会话里；`parsedModules` 返回 `(path, tree)`，
+#: 路径是 `sourceRefsUnder` + `_cachedParse`——**它拿的是树，不是节点**。
 #:
-#: 为什么只钉这一对：`_cachedParse` / `_cachedNodes` 在本仓有**一批正当用法**
-#: （`test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing` 的
-#: 落点判据……），它们的 docstring 逐条写明「同进程里其余守卫共享这份预算」——
-#: 把它们一并禁掉就是拿判据打正当设计（假阳性会训练人忽略门禁）。
-#: 而 `walkedModules` / `parsedModules` 在一次判据里物化全量节点，没有可比的
-#: 正当面：要复用就该像上面那样共享 `_cachedParse`，要一次性就该走
-#: `transientNodes`。
-MATERIALIZING_ENTRIES = frozenset({"walkedModules", "parsedModules"})
+#: 正因如此，`parsedModules` 从一开始就不属于本名单（原先误收）：它就是本注释
+#: 下方要求"要复用就该共享的那份预算"本身，消费方按需 `ast.walk` 自己那一棵。
+#: 实测（本机，`neurova/` 全仓 1015 文件）两条入口各自的缓存账：
+#:
+#: | 入口 | `_cachedParse` | `_cachedNodes` | RSS 增量 |
+#: |---|---|---|---|
+#: | `parsedModules` | 1015 棵 | **0** | +446MB（树，跨判据共享） |
+#: | `walkedModules` | 1015 棵 | **1015 组节点元组** | 再 +411MB |
+#:
+#: 把 `parsedModules` 留在名单里，就是拿判据打正当设计：`test_turnIdentitySingleSource`
+#: 的 `declIndex()` 以模块级缓存建索引、被四个以上用例跨类消费，正是本判据
+#: 要求的那种"会重复扫"的正当面，却因这一条被报红——假阳性会训练人忽略门禁。
+#:
+#: `_cachedParse` / `_cachedNodes` 不在名单里乃是同一理（它们的正当用法有
+#: `test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing` 的
+#: 落点判据……，docstring 逐条写明「同进程里其余守卫共享这份预算」）。
+#: 一次性扫描的出路仍是 `transientTree` / `transientNodes`。
+MATERIALIZING_ENTRIES = frozenset({"walkedModules"})
 
 
 def _oneShotRetainingScanHits(source: str) -> list:
     """文件里「用了物化全量节点的保留型入口」的落点（函数名，模块级记 `<模块级>`）。
 
-    靶点：`walkedModules` / `parsedModules` 返回 `(路径, 节点)` 清单，调用方
-    为一次判据把整棵树的每个节点都取出来并让它们留在会话里。实测全仓
+    靶点：`walkedModules` 经 `_cachedNodes` 把整棵树的**节点元组**建出来并留在
+    会话里，而调用方往往只扫一次。（`parsedModules` 拿的是树、不拿节点，与
+    `_cachedParse` 同属共享预算，不在靶点内——见 `MATERIALIZING_ENTRIES`。）
+    实测全仓
     `neurova/` + 同一组文本预筛：
 
     | 入口 | 节点数 | 扫描 | RSS 增量 | 常驻节点表 |
@@ -448,7 +461,7 @@ class TestNoUnprefilteredRepoWideScan:
 
 
 class TestOneShotCallsUseTheTransientEntry:
-    """不得用**物化全量节点**的保留型入口（`walkedModules` / `parsedModules`）。
+    """不得用**物化全量节点**的保留型入口（`walkedModules`）。
 
     根因（`cnb-a99-1k4bpgeim` 的 unit-tests 腿实测）：受保护子集里
     `tests/unit/api/test_context_build_token_count_caliber.py::test_production_has_no_len_split_token_count`
@@ -472,10 +485,6 @@ class TestOneShotCallsUseTheTransientEntry:
     走保留型入口」是一个当场可判的事实。
     """
 
-    #: 保留型入口：语义是「跨判据复用」，只在会重复扫时成立。
-    RETAINING_ENTRIES = frozenset({"walkedModules", "parsedModules", "_cachedParse",
-                                   "_cachedNodes"})
-
     def test_no_one_shot_criteria_materialize_the_whole_node_tuple(self):
         offenders = []
         for rel in protectedFiles():
@@ -490,8 +499,8 @@ class TestOneShotCallsUseTheTransientEntry:
             if hits:
                 offenders.append(f"{rel} → {hits}")
         assert not offenders, (
-            "受保护子集里用了物化全量节点的保留型入口（`walkedModules` / "
-            "`parsedModules`）——一次判据把整棵树的每个节点都留在会话里:\n  "
+            "受保护子集里用了物化全量节点的保留型入口（`walkedModules`）"
+            "——一次判据把整棵树的每个节点都留在会话里:\n  "
             + "\n  ".join(sorted(offenders))
             + "\n修法：只扫一次的走一次性入口 `transientTree` / `transientNodes`"
             "（吃同一份文本预筛、同样不留常驻树）；会重复扫的才用 `nodeScan` /"
@@ -518,6 +527,39 @@ class TestOneShotCallsUseTheTransientEntry:
         assert _oneShotRetainingScanHits(transient) == [], (
             f"一次性入口被误报：{_oneShotRetainingScanHits(transient)}"
             "（把推荐修法报红，等于逼人绕开它）"
+        )
+
+    def test_tree_level_entry_is_not_banned_but_node_level_one_is(self):
+        """门槛是「拿不拿全节点」，不是"名字像保留型"。
+
+        根因（本批实测）：`parsedModules` 返回 `(path, tree)`，路是
+        `sourceRefsUnder` + `_cachedParse`——**它拿树、不拿节点**，正是下面
+        `test_cross_criterion_retaining_entries_are_not_banned` 要求"该共享的那份预算"
+        本身。把它与 `walkedModules` 同列，报错就打在正当设计上：本仓
+        `test_turnIdentitySingleSource.py::declIndex` 以模块级缓存建索引、
+        被四个以上用例跨类消费，属"会重复扫"的正当面，却被判红。
+
+        缓存账实测（本机，`neurova/` 全仓 1015 文件，两入口各起一遍）：
+        `parsedModules` 后 `_cachedNodes` 为 0；`walkedModules` 后为 1015 组节点元组。
+        """
+        tree_level = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, tree in ast_scan.parsedModules(PRODUCTION):\n"
+            "        assert tree is not None\n"
+        )
+        node_level = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.walkedModules(PRODUCTION, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(tree_level) == [], (
+            f"拿树的入口被误报成物化节点：{_oneShotRetainingScanHits(tree_level)}"
+            "（`parsedModules` 是共享预算本身，把它报红即拿判据打正当设计）"
+        )
+        assert _oneShotRetainingScanHits(node_level), (
+            "拿节点的入口没被报出——判据退化成恒真的空断言"
         )
 
     def test_cross_criterion_retaining_entries_are_not_banned(self):

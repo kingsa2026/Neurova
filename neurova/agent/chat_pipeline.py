@@ -467,17 +467,14 @@ class ChatPipeline:
             finish_task(self._agent, ctx.user_input, completed=completed)
 
     async def _execute_steps(self, ctx: ChatContext) -> Dict[str, Any]:
-        """执行完整的对话管线"""
-        # 身份注入：把请求级 user_id 写入 ContextVar（对齐 memory/tool 三层隔离
-        # 模式），深层模块（multi_model_client 的 usage_history 入账等）在同一
-        # 请求任务/线程上下文内直接读取，无需逐层透传。
-        try:
-            from neurova.core.identity_context import set_request_user_id
+        """执行完整的对话管线
 
-            set_request_user_id((ctx.metadata or {}).get("user_id") or None)
-        except Exception:
-            logger.debug("get_model_context_window 失败（上下文窗口预算按缺省值）", exc_info=True)
-
+        请求级属主（`neurova_request_user_id`）**不在这里写**：原先这处补写会让
+        渠道路径的"会话属主＝agent 属主"在回合内被 `meta['user_id']`（发送者）覆盖，
+        于是渠道会话落进一个谁也不匹配的命名空间、控制台看不见（Issue #290 Wave H-W0
+        修好的那条visibility 又被吃掉）。写它的正确位置是请求边界（`api/endpoints/chat.py`
+        与 `channels/channel_router.py`），见 §6-121 (b) 乙案与 §6-145。
+        """
         # 成本记账归属：把本轮 agent/session/turn 写入 ContextVar，
         # 深层 LLMClient 在同步/流式同任务上下文内直接读取，无需逐层透传。
         try:
@@ -1638,12 +1635,20 @@ class ChatPipeline:
 
     async def _step_retrieve_and_build_context(self, ctx: ChatContext):
         """统一检索 + 结晶经验 + 上下文构建"""
+        # 会话作用域**在此单点解析一次**，检索过滤与编排器入参共用同一份（批 3 的读侧口径）。
+        # 此前它在两处各算各的——`_retrieve_memories` 里有，本函数直接用 `build_context` 的
+        # 那几个 `chat_*` 入参却没有，于是这条链每次走到都抛 `NameError`（真实回合的上下文
+        # 构建整段失败）。同源关系只能有一个持有者，见 §6-147。
+        from neurova.collaboration.memory_scope import turnScopeContext
+
+        _scopeCtx = turnScopeContext(ctx.metadata, ctx.session_id)
+
         # 启动推理链（使用独立字段，避免覆盖轨迹 trace_id —— A-12）
         if self.trace_manager:
             ctx.reasoning_trace_id = self.trace_manager.start_trace(ctx.user_input)
 
         # 统一检索
-        await self._retrieve_memories(ctx)
+        await self._retrieve_memories(ctx, _scopeCtx)
 
         # 结晶经验检索
         await self._retrieve_crystallized_patterns(ctx)
@@ -1696,8 +1701,11 @@ class ChatPipeline:
             session_context=ctx.session_context,
             voice_context=voice_context,
             citation_registry=ctx.citation_registry,
-            chat_collab=(ctx.metadata or {}).get("turn_origin") == "collaboration",
-            chat_room_id=(ctx.session_id or "") if (ctx.metadata or {}).get("turn_origin") == "collaboration" else "",
+            chat_collab=_scopeCtx["collab"],
+            chat_room_id=_scopeCtx["room_id"],
+            chat_channel_group=_scopeCtx["channel_group"],
+            chat_channel=_scopeCtx["channel"],
+            chat_group_id=_scopeCtx["chat_id"],
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
@@ -1728,8 +1736,12 @@ class ChatPipeline:
         except Exception:  # noqa: BLE001 - 增量提示失败不影响主链路
             logger.debug("环境增量注入失败(忽略)", exc_info=True)
 
-    async def _retrieve_memories(self, ctx: ChatContext):
-        """统一检索（使用 MemoryRetrievalChain 深度模块）"""
+    async def _retrieve_memories(self, ctx: ChatContext, scopeCtx: Dict[str, Any]):
+        """统一检索（使用 MemoryRetrievalChain 深度模块）
+
+        `scopeCtx` 由调用方单点解析（`_step_retrieve_and_build_context`）——这里不再自己算一遍：
+        两处各算各的，一处漏掉就是本轮"检索按 A 作用域、编排按 B 作用域"的分叉。
+        """
         # Bug C-2 修复：ChatContext 无 user_id 字段，应从 metadata 取值
         # 对比同文件 line 283 正确写法: (ctx.metadata or {}).get("user_id", "anonymous")
         user_id = (ctx.metadata or {}).get("user_id", "anonymous")
@@ -1767,10 +1779,7 @@ class ChatPipeline:
         # 提取记忆内容（按会话作用域隔离：单聊只见 direct；群聊见 direct + 本群，群群互不可见）
         from neurova.collaboration.memory_scope import filter_memories_by_scope
 
-        _collab = (ctx.metadata or {}).get("turn_origin") == "collaboration"
-        ctx.relevant_memories = filter_memories_by_scope(
-            result.memories, collab=_collab, room_id=(ctx.session_id or "") if _collab else ""
-        )
+        ctx.relevant_memories = filter_memories_by_scope(result.memories, **scopeCtx)
 
         # 记录检索统计
         logger.info(
@@ -2238,7 +2247,7 @@ class ChatPipeline:
         try:
             _coordinator = getattr(self.tool_executor, "tool_coordinator", None)
             if _coordinator:
-                for _hint in _coordinator.pop_pending_hints():
+                for _hint in _coordinator.pop_pending_hints(ctx.session_id):
                     _outcome = (
                         str(_hint.get("result"))[:800]
                         if _hint.get("success")

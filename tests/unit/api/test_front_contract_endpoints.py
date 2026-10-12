@@ -19,6 +19,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
+from tests.auth_headers import bearerHeaders
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -41,7 +43,7 @@ def _client(router, prefix, **overrides):
     for dep in (get_current_user_or_default, _auth_user, _deps_user):
         app.dependency_overrides[dep] = lambda: identity
     app.dependency_overrides.update(overrides)
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app, raise_server_exceptions=False, headers=bearerHeaders("u1"))
 
 
 # ── memory PUT ──────────────────────────────────────────────────────────

@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -88,6 +89,52 @@ class SimulatedAgent:
             return ""
         return str(result.get("response") or "").strip()
 
+
+def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
+    """生产装配路径的执行器**唯一出处**。
+
+    为什么要收成一处：`evolve()` 与 `ab_compare()` 过去各写一遍
+    `agent or SimulatedAgent(model=...)`——同一条回落存在两份定义（教义第 6 条）。
+    后果不是难看，是**改不动**：接真轨迹时只会改到其中一条，另一条静默留在旧语义上，
+    而两条路径都自称"评测"。历史代价本仓已实测过一次：`agent=None` 的回落会接上
+    **真**多模型客户端，三个用例因此真花 LLM 配额并把整目录跑测挂死
+    （来历见 `tests/unit/evolution/eval/conftest.py` 首段）。
+
+    本函数只回答"装配时用什么执行器"。`SkillEvolutionRunner` 自己的离线兜底
+    （`runner._DefaultAgent`）不动——那是直接构造对象时的库层默认，不是装配路径；
+    §8 前置 2 的探针问的必须是这里，不是那里。
+    """
+    if agent is not None:
+        return agent
+    cfg = config or EvolutionConfig()
+    return SimulatedAgent(model=cfg.judge_model)
+
+
+def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
+    """这道能力问的是"**执行判据的那一步是否真跑 agent 回合**"（§8 前置 2）。
+
+    能力**不许写成常量旗标**：旗标会在实装被摘掉之后继续说真，而那比"没做实"更糟——
+    下游有理由继续信任这条判据。所以这里由**结构**推导：真轨迹执行器必须既持有
+    `agent_ref`（AGENTS.md §3 的深模块注入约定），又显式声明自己跑真回合；缺一即 False。
+    评测替身与 `SimulatedAgent`/`_DefaultAgent` 都不带这两样，因此不会被误认成同域。
+
+    唯一读方是 `rsi/automation_prerequisites.probeRealTrajectoryExecutor`，它问的必须是
+    **生产装配点实际拿到的执行器**（`resolveEvolutionExecutor`），不是 runner 的离线兜底
+    `_DefaultAgent`——换掉兜底就把旗标翻真，那是弱保护（台账 §6-97 记的这处口径缺陷）。
+    """
+    if executor is None:
+        return False
+    if not getattr(executor, "agent_ref", None):
+        return False
+    declares = getattr(executor, "declaresRealAgentTrajectory", None)
+    return bool(declares()) if callable(declares) else False
+
+
+#: `_persist_run` 生成的运行 id 形态：`run_` + 时间戳(数字与 T) + `_` + 6 位十六进制。
+#: 读侧按它拒掉一切带分隔符/`..`/绝对路径的输入（见 `SkillEvolutionService.readRun`）。
+_RUN_ID_PATTERN = re.compile(r"^run_[0-9A-Za-z_]+$")
+
+
 @dataclass
 class EvolutionProposal:
     """一条待审进化提案(永不自动应用)。"""
@@ -99,6 +146,10 @@ class EvolutionProposal:
     baseline_text: str
     improved_text: str
     status: str = STATUS_PENDING
+    # §6-95 后半：这条提案凭哪一次运行出街。审计文件此前只写不读（`_persist_run` 落
+    # `runs/*.json`，全仓零读方），关联键落在这里，详情端点才有一条既有的读路径可走
+    # ——不新建端点，也不靠文件名猜。改动之前落盘的旧记录没有这一键（空串 = 当轮未记）。
+    run_id: str = ""
     holdout_before: float = 0.0
     holdout_after: float = 0.0
     # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
@@ -107,6 +158,10 @@ class EvolutionProposal:
     heldout_after: float = 0.0
     heldout_improvement: float = 0.0
     iterations_run: int = 0
+    # 例级不退化门读数（§8 前置 1）：容忍度内的退化照样出提案，但审批人必须
+    # 看见"均值涨了而这条用例被改坏了"。形状只由 runner 侧 caseGateReadout()
+    # 定义一处，此处只搬运不另算。
+    case_gate: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -121,7 +176,6 @@ class SkillEvolutionService:
         # 显式 base_dir 就是进化目录本身；缺省才按数据根推出 agents/<id>/evolution
         self._dir = Path(base_dir) if base_dir else get_data_root() / "agents" / str(agent_id) / "evolution"
         self._proposals_file = self._dir / "proposals.json"
-        self._runs_dir = self._dir / "runs"
         self._history_ledger = None  # P1-4：懒创建
         self._skill_journal = None  # P2-11：懒创建
 
@@ -248,7 +302,7 @@ class SkillEvolutionService:
 
         runner = make_skill_evolution_runner(
             cfg,
-            agent=agent or SimulatedAgent(model=cfg.judge_model),
+            agent=resolveEvolutionExecutor(agent, config=cfg),
             judge=judge,
             mutate=mutate,
             bench_gate=bench_gate,
@@ -277,7 +331,7 @@ class SkillEvolutionService:
             dataset=dataset, iterations=iterations, noise_band=noise_band,
             ledger_key=skill_id, anchor_best=anchor_best,
         )
-        self._persist_run(skill_id, artifact_type, result)
+        run_id = self._persist_run(skill_id, artifact_type, result)
 
         proposal: Optional[EvolutionProposal] = None
         if not result.rejected and result.changed:
@@ -286,6 +340,7 @@ class SkillEvolutionService:
                 agent_id=self.agent_id,
                 skill_id=skill_id,
                 artifact_type=artifact_type,
+                run_id=run_id,
                 baseline_text=skill_text,
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),
@@ -294,6 +349,7 @@ class SkillEvolutionService:
                 heldout_after=round(result.heldout_after, 4),
                 heldout_improvement=round(result.heldout_improvement, 4),
                 iterations_run=result.iterations_run,
+                case_gate=result.caseGateReadout(),
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
@@ -359,10 +415,17 @@ class SkillEvolutionService:
         """
         from neurova.evolution.eval.dataset import evaluation_split
 
+        # 执行面先resolve：kind 必须由**真正拿去执行的那个对象**推导，两条返回路径
+        # 都要带——模拟面与真轨迹面的数字混成一栏时，审批人会拿模拟分当线上证据，
+        # 不可逆的是解释而不是数据。
+        executor = resolveEvolutionExecutor(agent, config=config)
+        kind = "real_agent" if isRealAgentTrajectoryExecutor(executor) else "simulated"
+
         split = dataset.heldout or evaluation_split(dataset)
         if not split:
             return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
-                    "candidate_avg": 0.0, "delta": 0.0, "per_task": []}
+                    "candidate_avg": 0.0, "delta": 0.0, "per_task": [],
+                    "executor_kind": kind}
         if judge is None:
             from neurova.evolution.eval.fitness import LLMJudge
 
@@ -371,7 +434,7 @@ class SkillEvolutionService:
 
         runner = SkillEvolutionRunner(
             config, judge=judge,
-            agent=agent or SimulatedAgent(model=config.judge_model),
+            agent=executor,
         )
         # 同包装配：复用 runner 的评测路径（judge 适配/执行器注入同源），
         # 禁止另写第二套打分。
@@ -380,7 +443,7 @@ class SkillEvolutionService:
         per_task = [
             {"task_input": ex.task_input,
              "baseline": round(float(b), 4), "candidate": round(float(c), 4)}
-            for (ex, b, _o, _f), (_ex2, c, _o2, _f2) in zip(baseline_details, candidate_details)
+            for (ex, b, _o, _f, _bf), (_ex2, c, _o2, _f2, _cf) in zip(baseline_details, candidate_details)
         ]
         return {
             "task_split": "heldout" if dataset.heldout else "selection",
@@ -389,6 +452,7 @@ class SkillEvolutionService:
             "candidate_avg": round(float(candidate_avg), 4),
             "delta": round(float(candidate_avg - baseline_avg), 4),
             "per_task": per_task,
+            "executor_kind": kind,
         }
 
     # ── 提案审批(人工闭环终点)──
@@ -491,17 +555,67 @@ class SkillEvolutionService:
 
     # ── 审计落盘 ──
 
-    def _persist_run(self, skill_id: str, artifact_type: str, result: EvolutionRunResult) -> None:
+    def _persist_run(self, skill_id: str, artifact_type: str,
+                     result: EvolutionRunResult) -> str:
+        """落一次运行的审计文件，回它的 `run_id`（写失败回空串，不假造一个 id）。
+
+        返回 id 而不是 None：提案要能指回这次运行（§6-95 后半）。"文件没落成"与
+        "落成了但没人知道它的名字"是两件事——前者必须让提案侧记成空串，否则详情面会
+        拿着一个不存在的 id 报"运行不见了"，把写侧的失败洗成读侧的失败。
+        """
         try:
-            self._runs_dir.mkdir(parents=True, exist_ok=True)
+            runsDir = self._runsDir()
+            runsDir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+            runId = f"run_{ts}_{uuid.uuid4().hex[:6]}"
             payload = {"skill_id": skill_id, "artifact_type": artifact_type,
-                       "at": datetime.now(UTC).isoformat(), **result.to_dict()}
-            (self._runs_dir / f"run_{ts}_{uuid.uuid4().hex[:6]}.json").write_text(
+                       "at": datetime.now(UTC).isoformat(),
+                       "run_id": runId, **result.to_dict()}
+            (runsDir / f"{runId}.json").write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            return runId
         except OSError as e:
             logger.debug("进化运行审计落盘失败: %s", e)
+            return ""
+
+    # ── 审计运行的读面（§6-95 后半：runs/*.json 从"只写不读"接上读者）──
+
+    def _runsDir(self) -> Path:
+        """运行审计目录的唯一出处（写侧与读侧共用，不各拼一份）。"""
+        return Path(self._dir) / "runs"
+
+    def runLookup(self, run_id: str) -> tuple[str, Optional[dict]]:
+        """一次取数回两件事：`(状态, 内容)`——详情面据此出声，不静默省略。
+
+        - `none_recorded`：提案没带 run_id（改动之前的旧记录，或那次落盘失败）；
+        - `missing`：带了 id 但文件不在（被清、被搬，或 id 形态根本不合法）；
+        - `attached`：取回了内容。
+
+        为什么要有这一层而不是让 `readRun` 只回一个 None：把"当轮没记"与"记录不见了"
+        混成同一个读数，详情面就只能在谎报与沉默之间选一个——教义第 2 条禁止的形态。
+        状态与内容同处一出（而不是两个方法各读一遍），是为了让这两件事不可能互相矛盾。
+        """
+        if not run_id:
+            return "none_recorded", None
+        payload = self.readRun(run_id)
+        return ("attached", payload) if payload is not None else ("missing", None)
+
+    def readRun(self, run_id: str) -> Optional[dict]:
+        """按 id 取回一次运行的审计内容；取不到回 None（不抛、不猜）。
+
+        `run_id` 来自磁盘上的提案记录，等于来自外部输入 ⇒ 只认本仓自己生成的文件名
+        形态（`run_` + 字母数字）：路径分隔符、`..`、绝对路径一律拒读。这一跳不校验
+        就等于给提案文件开一个"读仓内任意 json"的入口。
+        """
+        if not isinstance(run_id, str) or not _RUN_ID_PATTERN.match(run_id):
+            return None
+        try:
+            payload = json.loads(
+                (self._runsDir() / f"{run_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def _append_proposal(self, proposal: EvolutionProposal) -> None:
         items = self.list_proposals()

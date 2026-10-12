@@ -182,6 +182,12 @@
 - [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
 - [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
 - [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
+- [2026-10-08-前置3-技能呈现账收口实施方案.md](../04-plans/2026-10-08-前置3-技能呈现账收口实施方案.md) — 技能「呈现→派发」漏斗补最上游一级（对照报告 §8 前置 3：三份账并存 + `times_presented` 零写入零消费，呈现账收口到 manifest 漏斗单源）
+- [2026-10-08-前置1-例级不退化门实施方案.md](../04-plans/2026-10-08-前置1-例级不退化门实施方案.md) — 留出侧例级读数 + 例级不退化门（对照报告 §8 前置 1：均值吞掉单例退化，判分未量出与真退化同形）
+- [2026-10-09-运行终态回写台账-例级门可见性实施方案.md](../04-plans/2026-10-09-运行终态回写台账-例级门可见性实施方案.md) — §6-9 终局拒绝回写台账：`accepted` 改钉「已部署」义，提示词 / 换轴指令 / 产出剪枝不再被假阳性骗
+- [2026-10-09-四条自动化前置落成晋升判据实施方案.md](../04-plans/2026-10-09-四条自动化前置落成晋升判据实施方案.md) — §8 四条前置从"文档里的一句提醒"收成晋升判据：自动执行档（1→2 起）未满足即硬否决并逐条点名，每条配运行期可证伪探针
+- [2026-10-09-双臂试评接真轨迹-前置2落地实施方案.md](../04-plans/2026-10-09-双臂试评接真轨迹-前置2落地实施方案.md) — §8 前置 2 落地（用户裁"丙 + 修 C"）：执行器回落收成单源接缝、评测轮补 save_memory 闸门、探针改问生产装配点；轮级候选正文覆盖槽待 D2 拍板
+- [2026-10-10-渠道身份绑定与群聊记忆分账实施方案.md](../04-plans/2026-10-10-渠道身份绑定与群聊记忆分账实施方案.md) — §6-127 落地（用户裁四条）：未绑定者落渠道专属命名空间可事后提升、绑定接续 `UserIdentity`＋`verification_code` 加 `BIND_CHANNEL`、作用域取 **agent 级**、群=共享作用域/私聊=个人；四批分期与"不建第二套码/表、历史不合并、渠道 `user_id` 只服务端解析"的红线
 
 **CI / NPC 口径**：
 
@@ -242,6 +248,9 @@
 - [agent-memory-cutting-edge-research-2026.md](../08-research/agent-memory-cutting-edge-research-2026.md) — Agent 记忆前沿研究
 - [agent_memory_consciousness_research_20260511.md](../08-research/agent_memory_consciousness_research_20260511.md) — 记忆与意识调研
 - [neurova_memory_consciousness_enhancement_20260511.md](../08-research/neurova_memory_consciousness_enhancement_20260511.md) — 记忆意识增强方案
+- [rsiagent_vs_neurova_rsi_comparison_2026-10-06.md](../08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md) — 与外部 RSIAgent 的 RSI 代码级对比（竞品/外部对标）
+- [designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md](../08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md) — 与 Designer-RSI 论文（arXiv:2609.22086）的程序性记忆对照（竞品/外部对标）
+- [semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md](../08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md) — 与外部图谱工具链 Semantica（MIT / 22.4 万行）的知识库与知识图谱代码级对比，含本仓自有断点 N1–N6 与候选 K1–K8（竞品/外部对标，研究参考）
 
 ### 09-dev-progress 开发进展
 

@@ -12,6 +12,8 @@ P3-e 单例收敛防回归网（切片 2：高危无锁惰性单例补 DCL）
 1. 高危单例 get_ 函数体必须含锁守卫（AST 结构断言）
 2. get_multi_model_client 并发首访单次构造（行为断言：barrier + 慢构造）
 3. semantic_search / embedding 提供公有 reset
+4. 两份清单的每条条目都必须指向**在位的文件与在位的模块级工厂**——清单是手抄快照，实现
+   退役时条目不会自动跟；一条陈旧条目能把整档变成"已知红"，其余真检查就没人看了
 """
 import ast
 import threading
@@ -35,12 +37,15 @@ HIGH_RISK_SINGLETONS = [
 
 # 良性批（P3-e 收尾）：无状态/幂等构造，但统一收敛到 DCL 模式，
 # 防止未来构造获得副作用后竞态复活
+# （2026-10-09 本清单少一项：`cognitive_layers/memory_layer/memory_field.py::get_memory_field`
+# 的实现已在 `0c333a76`(2026-09-21)「温度衰减双实现收敛」里退役、全仓再无该名字，条目却没跟——
+# 于是这一格 FileNotFoundError 红了 18 天。它不在受保护子集里，同档其余 9 格真 DCL 检查一直被
+# 这层"已知红"噪声淹掉。现由 TestListsPointAtLiveImplementations 钉住条目在位性，不再靠记得。）
 BENIGN_SINGLETONS = [
     ("neurova/auth/invitation_code.py", "get_invitation_code_model"),
     ("neurova/auth/password_hasher.py", "get_password_hasher"),
     ("neurova/auth/user_group_model.py", "get_user_group_manager"),
     ("neurova/auth/verification_code.py", "get_verification_code_model"),
-    ("neurova/cognitive_layers/memory_layer/memory_field.py", "get_memory_field"),
     ("neurova/collaboration/collaboration_isolation.py", "get_collaboration_manager"),
     ("neurova/core/error_handler.py", "get_error_handler"),
     ("neurova/core/logger.py", "get_log_manager"),
@@ -56,6 +61,21 @@ def _get_function_source(rel_path: str, func_name: str) -> str:
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
             return ast.get_source_segment(src, node) or ""
     raise AssertionError(f"{rel_path} 中未找到 {func_name}")
+
+
+def _staleEntries(pairs) -> list[str]:
+    """返回"条目指向的实现已不在位"的清单：文件缺失，或文件里没有那个模块级函数。"""
+    stale = []
+    for rel_path, func_name in pairs:
+        p = NEUROVA_ROOT.parent / rel_path
+        if not p.is_file():
+            stale.append(f"{rel_path}::{func_name} —— 文件不存在（实现已退役，条目未跟）")
+            continue
+        tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
+        if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name == func_name for n in tree.body):
+            stale.append(f"{rel_path}::{func_name} —— 文件在，但没有这个模块级工厂")
+    return stale
 
 
 class TestHighRiskSingletonsLockGuarded:
@@ -83,6 +103,32 @@ class TestBenignSingletonsLockGuarded:
         assert re.search(r"with [\w\.]*[Ll]ock", seg), (
             f"{func_name} 创建段无锁守卫：应与全量惰性单例统一 DCL 模式。"
         )
+
+
+class TestListsPointAtLiveImplementations:
+    """清单条目自身的在位性——本档其余格的前提是"条目指的是还在位的那格实现"。
+
+    为什么要单独钉：这两份清单是手抄快照，实现被退役时条目不会自动跟。已经踩过一次——
+    `HIGH_RISK_SINGLETONS` 上方那段 2026-10-07 的注释就是补记的。补记靠人记得，所以钉成
+    判据：**条目指向的文件不存在、或文件里没有那个模块级函数，一律红**。
+    不这么做的后果不是"少一条检查"，而是**整档被当成已知红跳过**：一条指向不存在文件的
+    条目会让 `FileNotFoundError` 挂在参数化格上红到底，同档其余真 DCL 格从此没有人在看
+    （§6-116 实测这条红挂了 18 天，覆盖 9 格真检查）。
+    """
+
+    def test_noStaleEntryInEitherList(self):
+        stale = _staleEntries(HIGH_RISK_SINGLETONS + BENIGN_SINGLETONS)
+        assert not stale, "清单里有条目指向已退役的实现：\n  " + "\n  ".join(stale)
+
+    def test_staleDetectorRejectsADanglingEntry(self):
+        """反向对照：探测器对"文件不存在"与"符号不存在"两种形态都必须报警。"""
+        assert _staleEntries([("neurova/no_such_module_zz.py", "get_x")]), \
+            "探测器对不存在的文件不报警——它已经坏了"
+        assert _staleEntries([("neurova/shared_core/infrastructure.py", "get_no_such_factory_zz")]), \
+            "探测器对文件里不存在的符号不报警——它已经坏了"
+        assert not _staleEntries([("neurova/shared_core/infrastructure.py",
+                                   "get_infrastructure_manager")]), \
+            "探测器把在位条目判成陈旧——它会制造假红"
 
 
 class TestConcurrentFirstAccessSingleCreation:

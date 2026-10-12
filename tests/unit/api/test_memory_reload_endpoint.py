@@ -17,6 +17,7 @@
    "获取 memory_id=reload 的记忆" → 404，这正是此前 `/hot`、`/stats` 栽过的同一个坑）。
 """
 from __future__ import annotations
+from tests.auth_headers import bearerHeaders
 
 import pytest
 from fastapi import FastAPI
@@ -60,7 +61,7 @@ def client(manager, monkeypatch):
         "username": "tester", "role": "admin",
         "neuser_id": "default", "user_id": "default",
     }
-    yield TestClient(app)
+    yield TestClient(app, headers=bearerHeaders("default"))
     app.dependency_overrides.clear()
 
 

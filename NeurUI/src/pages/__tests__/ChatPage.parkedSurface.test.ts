@@ -87,3 +87,60 @@ describe('P2-8 挂起面用到的 i18n key 真实存在', () => {
     expect(source).toContain('@click="resumeParkedTurn(msg)"')
   })
 })
+
+/**
+ * P3-14（§6-72 第五格）：刷新后「这条正等人续跑」的入口必须还能出现。
+ *
+ * SSE 是一次性的，`parked` 事件随连接消失，而 run_id 是唯一续跑凭据。后端读面
+ * （`GET /console/chat/runs`）早就备好、docstring 承诺的就是"刷新或重启后必须还能查到"，
+ * 缺的只有这个消费者。形态判定：闸判发生在 `agent.chat` **之前**，那轮的用户问句与
+ * 助手回复都不曾落盘——历史里没有属于它的气泡，所以只能挂会话级入口，贴到上一条
+ * 已完成回复上等于把续跑按钮安在另一轮头上。
+ */
+describe('刷新后恢复挂起回合入口（P3-14）', () => {
+  const load = blockAfter('async function loadParkedRuns(')
+  const resumeEntry = blockAfter('async function resumeParkedRun(')
+
+  it('取回路径走共享 api 客户端打后端那条 run 读面', () => {
+    expect(load).not.toBe('')
+    expect(load).toContain("api.get('/console/chat/runs'")
+    expect(load).toContain('session_id')
+    // 不另造第二条请求链：裸 fetch 会绕过 401 单飞刷新与 Request-ID
+    expect(load).not.toContain('fetch(')
+  })
+
+  it('只认 parked 状态的行，且 run_id 缺失的行不进列表', () => {
+    expect(load).toContain("r?.status === 'parked'")
+    expect(load).toContain('r?.run_id')
+  })
+
+  it('入口挂在会话级列表上，而不是贴到某条既有气泡', () => {
+    expect(resumeEntry).not.toBe('')
+    expect(source).toContain('v-for="run in parkedRuns"')
+    expect(resumeEntry).not.toContain('.find((m)')
+  })
+
+  it('续跑复用既有那一份实现，不另起第二条流', () => {
+    expect(resumeEntry).toContain('resumeParkedTurn(msg)')
+    expect(resumeEntry).not.toContain('/console/chat/resume')
+  })
+
+  it('挂在 currentSessionId 的 watch 上：首会话是异步选中的，只写 onMounted 会漏', () => {
+    expect(source).toMatch(/currentSessionId,[\s\S]{0,600}loadParkedRuns\(sid\)/)
+  })
+
+  it('切会话先清空，过期响应不写当前视图', () => {
+    expect(load).toContain('parkedRuns.value = []')
+    expect(load).toContain('currentSessionId.value !== sid')
+  })
+
+  it('取不回时点名留痕，不静默缺席一个点了没反应的入口', () => {
+    expect(load).toContain('console.error')
+  })
+
+  it('不自己解析 SSE 帧（复用同一条解析口）', () => {
+    expect(load).not.toBe('')
+    expect(load).not.toContain('getReader()')
+    expect(resumeEntry).not.toContain('getReader()')
+  })
+})

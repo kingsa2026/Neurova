@@ -1125,6 +1125,10 @@ class ContextOrchestrator:
                 show_empathy=getattr(self._agent.config, "show_empathy", True),
                 metacog_agent_id=_metacog_id if isinstance(_metacog_id, str) and _metacog_id else None,
             )
+            # 生命周期要在唯一的装配点跑一遍：`on_initialize` 承载三条 context.* 订阅，
+            # 不调它，注入器就只是"构造出来了但请求面没人接"的半成品（本批之前即使
+            # 去掉 async 误标也仍是这形态——全仓无人调 initialize()）。
+            unified_injector.initialize()
             logger.info("Agent %s: UnifiedContextInjector 已启用 (16K tokens)", self.config.name)
 
         # 创建上下文构建器（如果有 unified_injector 则使用增强模式）
@@ -1151,6 +1155,9 @@ class ContextOrchestrator:
         citation_registry: Optional[Any] = None,
         chat_collab: bool = False,
         chat_room_id: str = "",
+        chat_channel_group: bool = False,
+        chat_channel: str = "",
+        chat_group_id: str = "",
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -1301,9 +1308,17 @@ class ContextOrchestrator:
             from neurova.collaboration.memory_scope import scope_tag_for_turn
 
             self._turn_collab = bool(chat_collab)
+            self._turn_channel_group = bool(chat_channel_group)
+            self._turn_channel = chat_channel or ""
+            self._turn_channel_chat_id = chat_group_id or ""
             # 作用域只认**房间**：单聊轮必须是 direct，把会话 id 当房间会当场破坏隔离。
             self._turn_room_id = chat_room_id or (self._session_id or "")
-            turn_scope = scope_tag_for_turn(collab=self._turn_collab, room_id=self._turn_room_id)
+            turn_scope = scope_tag_for_turn(
+                collab=self._turn_collab, room_id=self._turn_room_id,
+                channel_group=getattr(self, "_turn_channel_group", False),
+                channel=getattr(self, "_turn_channel", ""),
+                chat_id=getattr(self, "_turn_channel_chat_id", ""),
+            )
             # T-03b 第二命中点：改前这里是 `chat_room_id or self._session_id or None`
             # ——非协作轮把 None 写进池归属，连带条目 metadata["session_id"] 缺失、
             # query() 的本会话优先排序退化、写穿台账的 session 列为 NULL。
@@ -1493,6 +1508,9 @@ class ContextOrchestrator:
                 lambda c: getattr(c, "metadata", None) or {},
                 collab=chat_collab,
                 room_id=chat_room_id,
+                channel_group=chat_channel_group,
+                channel=chat_channel,
+                chat_id=chat_group_id,
             )
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
             for ctx in drawn_contexts:
@@ -2669,6 +2687,22 @@ class ContextOrchestrator:
         try:
             from neurova.skills.skill_injection import render_skill_catalog
 
+            def _onPresent(name: str, view=None) -> None:
+                """目录渲染回调：只记呈现账，故障不得改变目录输出。
+
+                账本归轮次技能漏斗单源（turn_context），此处只是写入方之一；
+                呈现与派发的归因在 post-chat flush（compute_skill_funnel_update）。
+                """
+                try:
+                    from neurova.core.turn_context import recordTurnSkillPresentation
+
+                    pool, owner = ("agent", "")
+                    if view is not None:
+                        pool, owner = view.provenance_for(name)
+                    recordTurnSkillPresentation(name, pool=pool, owner_key=owner)
+                except Exception:  # noqa: BLE001 - 记账故障不影响 prompt 装配
+                    pass
+
             budget = int(getattr(self.config, "skill_catalog_budget_chars", 8000) or 8000)
 
             # Wave H-W2：轮级可见视图在场 → 目录源 = 三库合并视图（trust 软
@@ -2682,7 +2716,8 @@ class ContextOrchestrator:
                 _view = None
             if _view is not None:
                 catalog = render_skill_catalog(
-                    _view.registry_view(), max_chars=budget, trust_lookup=_view.trust_for
+                    _view.registry_view(), max_chars=budget, trust_lookup=_view.trust_for,
+                    on_present=lambda n: _onPresent(n, _view),
                 )
                 if catalog:
                     return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
@@ -2705,7 +2740,8 @@ class ContextOrchestrator:
                 _trust = None
 
             catalog = render_skill_catalog(
-                self.skill_registry, max_chars=budget, trust_lookup=_trust
+                self.skill_registry, max_chars=budget, trust_lookup=_trust,
+                on_present=_onPresent,
             )
             if catalog:
                 return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"

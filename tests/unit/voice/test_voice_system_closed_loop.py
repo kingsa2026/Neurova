@@ -14,7 +14,6 @@ from unittest.mock import Mock, AsyncMock, patch
 # 导入被测模块
 try:
     from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
-    from neurova.voice_adapter import VoiceAdapterFactory, TTSManagerAdapter, ASRManagerAdapter
     from neurova.channels.voice import VoiceAdapter
     from neurova.channels.base import ChannelConfig
 except ImportError as e:
@@ -143,73 +142,6 @@ class TestVoiceMemoryBridgeClosedLoop:
         mock_emotion_module.analyze_text_emotion.assert_called_once_with("我今天非常开心！")
 
 
-class TestVoiceAdapterInterfaceAlignment:
-    """VoiceAdapter 接口对齐测试"""
-    
-    @pytest.fixture
-    def mock_tts_manager(self):
-        """模拟 TTSManager"""
-        manager = Mock()
-        manager.synthesize = AsyncMock(return_value=b"audio_data")
-        manager.engine_name = "edge-tts"
-        manager.is_initialized = True
-        return manager
-    
-    @pytest.fixture
-    def mock_asr_manager(self):
-        """模拟 ASRManager"""
-        manager = Mock()
-        manager.transcribe = AsyncMock(return_value={"text": "转写结果", "confidence": 0.9})
-        manager.engine_name = "whisper"
-        manager.is_initialized = True
-        return manager
-    
-    @pytest.mark.asyncio
-    async def test_tts_adapter_alignment(self, mock_tts_manager):
-        """测试 TTS 适配器接口对齐"""
-        # 1. 创建适配器
-        adapter = VoiceAdapterFactory.create_tts_adapter(mock_tts_manager)
-        
-        # 2. 适配处理请求
-        result = await adapter.adapt_process(
-            input_data="测试文本",
-            operation="synthesize",
-            voice="zh-CN-XiaoxiaoNeural",
-        )
-        
-        # 3. 验证对齐
-        assert result == b"audio_data"
-        mock_tts_manager.synthesize.assert_called_once_with("测试文本", voice="zh-CN-XiaoxiaoNeural")
-        
-        # 4. 适配结果
-        adapted_result = adapter.adapt_result(result, "synthesize")
-        assert adapted_result["audio_data"] == b"audio_data"
-        assert adapted_result["engine"] == "edge-tts"
-    
-    @pytest.mark.asyncio
-    async def test_asr_adapter_alignment(self, mock_asr_manager):
-        """测试 ASR 适配器接口对齐"""
-        # 1. 创建适配器
-        adapter = VoiceAdapterFactory.create_asr_adapter(mock_asr_manager)
-        
-        # 2. 适配处理请求
-        result = await adapter.adapt_process(
-            input_data=b"audio_bytes",
-            operation="transcribe",
-            language="zh",
-        )
-        
-        # 3. 验证对齐
-        assert result == {"text": "转写结果", "confidence": 0.9}
-        mock_asr_manager.transcribe.assert_called_once_with(b"audio_bytes", language="zh")
-        
-        # 4. 适配结果
-        adapted_result = adapter.adapt_result(result, "transcribe")
-        assert adapted_result["text"] == "转写结果"
-        assert adapted_result["confidence"] == 0.9
-        assert adapted_result["engine"] == "whisper"
-
-
 class TestVoiceAdapterLifecycleCompleteness:
     """VoiceAdapter 生命周期完整性测试"""
     
@@ -335,50 +267,6 @@ class TestEndToEndVoiceSystemIntegration:
         
         assert stats["asr_count"] >= 1
         assert stats["tts_count"] >= 1
-    
-    @pytest.mark.asyncio
-    async def test_adapter_with_voice_memory_bridge(self):
-        """测试适配器与 VoiceMemoryBridge 集成"""
-        # 1. 创建模拟组件
-        mock_tts_manager = Mock()
-        mock_tts_manager.synthesize = AsyncMock(return_value=b"audio_data")
-        mock_tts_manager.engine_name = "edge-tts"
-        
-        mock_evolution = Mock()
-        mock_evolution.on_after_tool_execution = Mock()
-        
-        # 2. 创建适配器
-        adapter = VoiceAdapterFactory.create_tts_adapter(mock_tts_manager)
-        
-        # 3. 创建桥接器（注入 evolution_orchestrator）
-        bridge = VoiceMemoryBridge(
-            evolution_orchestrator=mock_evolution,
-        )
-        
-        # 4. 适配处理
-        audio_data = await adapter.adapt_process(
-            input_data="测试文本",
-            operation="synthesize",
-        )
-        
-        # 5. 记录使用统计
-        tts_result = {
-            "text_length": len("测试文本"),
-            "engine": "edge-tts",
-            "voice": "default",
-            "duration_ms": 1000,
-            "success": True,
-            "audio_size_bytes": len(audio_data),
-        }
-        
-        usage_result = await bridge.record_tts_usage(
-            tts_result=tts_result,
-            user_id="user_123",
-            agent_id="agent_456",
-        )
-        
-        assert usage_result.success is True
-        assert usage_result.stats_recorded is True
 
 
 if __name__ == "__main__":

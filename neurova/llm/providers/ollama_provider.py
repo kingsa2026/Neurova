@@ -24,11 +24,6 @@ try:
 except ImportError:
     ChatOllama = None
 
-try:
-    import langchain_community.chat_models
-except ImportError:
-    langchain_community = None
-
 
 logger = get_logger(__name__)
 
@@ -326,14 +321,9 @@ class OllamaProvider(BaseProvider):
         if ChatOllama is None:
             raise ImportError("langchain_ollama 未安装，无法创建模型实例")
 
-        # 构建配置
-        config = self.get_llm_config(model_id)
-        config.update(kwargs)
-
-        # 创建 ChatOllama 实例
-        model = ChatOllama(model=model_id, base_url=self.base_url, **config)
-
-        return model
+        # ChatOllama 认 model/base_url 真字段；api_key 不是它的字段，
+        # langchain 侧 extra='ignore' 会忽略 → base 的中性装配够用
+        return ChatOllama(**self.get_llm_config(model_id, **kwargs))
 
     async def test_connection(self) -> ConnectionResult:
         """测试连接
@@ -475,23 +465,8 @@ class OllamaProvider(BaseProvider):
             self.logger.error("模型 %s 拉取失败: %s", model_name, e)
             return False
 
-    def get_llm_config(self, model_id: str) -> typing.Dict[str, typing.Any]:
-        """获取 LLM 配置
-
-        Args:
-            model_id: 模型ID
-
-        Returns:
-            配置字典
-        """
-        config = super().get_llm_config(model_id)
-        config.update(
-            {
-                "provider": "ollama",
-                "model": model_id,
-            }
-        )
-        return config
+    # get_llm_config 不在此覆盖：base 的中性装配已满足 ChatOllama 的字段名，
+    # 原覆盖多塞的 provider/model 属服务商元数据与重复键（见 base.get_llm_config）。
 
 
 # 便捷函数

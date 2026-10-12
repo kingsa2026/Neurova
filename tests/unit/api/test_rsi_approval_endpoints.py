@@ -20,6 +20,7 @@ from neurova.evolution.rsi.deployment_controller import (
     RSIDeploymentController,
     create_deployment_controller,
 )
+from tests.auth_headers import overrideIdentity
 
 
 class TestPhaseAutoTransition:
@@ -117,7 +118,7 @@ class TestRsiApprovalEndpoints:
         app = FastAPI()
         app.include_router(router, prefix="/api/v1/governance")
         from neurova.api.deps import get_current_user
-        app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+        overrideIdentity(app, {"user_id": "admin1", "role": "admin"})
         with patch(
             "neurova.api.endpoints.governance._get_rsi_orchestrator",
             return_value=orch,
@@ -223,7 +224,7 @@ class TestRsiApprovalEndpoints:
         app = FastAPI()
         app.include_router(router, prefix="/api/v1/governance")
         from neurova.api.deps import get_current_user
-        app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+        overrideIdentity(app, {"user_id": "admin1", "role": "admin"})
         with patch("neurova.api.endpoints.governance._get_rsi_orchestrator", return_value=None):
             client = TestClient(app)
             resp = client.get("/api/v1/governance/rsi/proposals/pending")

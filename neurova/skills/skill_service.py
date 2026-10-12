@@ -32,11 +32,15 @@ def compute_skill_funnel_update(
     """轮次派发账本 → {skill_id: {selections/applications/completions/fallbacks}} 增量。
 
     不得记功 / store.py:1587-1659 completed/fallback 判定）：
+    - presentation = 该技能本轮进过 prompt 技能目录（由目录渲染上报，与派发同级入账）
     - selection = 该技能本轮被 LLM 派发一次（治理预检放行后进入 execute_skill_tool）
     - application = 真正进入执行（查无此技能/未初始化 = 有 selection 无 application）
     - completion = application ∧ 执行成功 ∧ 本轮任务完成
     - fallback = application ∧ ¬completion——**执行失败但本轮靠其它工具兜底
       完成时不得给技能记 completion**，这是本函数存在的意义（防漏斗被污染）
+
+    呈现与派发是同一本账的两级（`stage` 键区分）：呈现条目只加 presentations，
+    **不得冒领 selection**——"进了 prompt"不等于"被点名"。
     """
     updates: Dict[str, Dict[str, int]] = {}
     for entry in entries or []:
@@ -45,8 +49,12 @@ def compute_skill_funnel_update(
             continue
         delta = updates.setdefault(
             skill_id,
-            {"selections": 0, "applications": 0, "completions": 0, "fallbacks": 0},
+            {"presentations": 0, "selections": 0, "applications": 0,
+             "completions": 0, "fallbacks": 0},
         )
+        if entry.get("stage") == "presented":
+            delta["presentations"] += 1
+            continue
         delta["selections"] += 1
         if not entry.get("applied"):
             continue
@@ -825,6 +833,7 @@ class SkillService:
         self,
         skill_id: str,
         *,
+        presentations: int = 0,
         selections: int = 0,
         applications: int = 0,
         completions: int = 0,
@@ -833,8 +842,9 @@ class SkillService:
         """累加技能质量漏斗计数并落盘（P0-1）。
 
         与 record_skill_usage（C11）同层共存、互不替代：use_count 是执行次数
-        原始账，漏斗是"选用→应用→完成/兜底"归因账（消费方：召回过滤、P0-2
-        信任态、前端质量徽标）。manifest 写穿，频率=回合数，非每 token。
+        原始账，漏斗是"呈现→选用→应用→完成/兜底"归因账（消费方：召回过滤、P0-2
+        信任态、前端质量徽标、§8 前置 3 的呈现漏斗判据）。manifest 写穿，
+        频率=回合数，非每 token。
         """
         try:
             with self._lock:
@@ -842,13 +852,15 @@ class SkillService:
                 if info is None:
                     return False
                 usage = info.setdefault("usage", {})
-                # 漏斗四键恒定存在（读侧 manifest 直读不判缺；脏值归一）
-                for key in ("selections", "applications", "completions", "fallbacks"):
+                # 漏斗五键恒定存在（读侧 manifest 直读不判缺；脏值归一）
+                for key in ("presentations", "selections", "applications",
+                            "completions", "fallbacks"):
                     try:
                         usage[key] = max(0, int(usage.get(key, 0) or 0))
                     except (TypeError, ValueError):
                         usage[key] = 0
                 for key, value in (
+                    ("presentations", presentations),
                     ("selections", selections),
                     ("applications", applications),
                     ("completions", completions),
@@ -942,7 +954,8 @@ class SkillService:
         trust = identity.get("trust") or {}
         funnel = {
             key: max(0, int(usage.get(key, 0) or 0))
-            for key in ("selections", "applications", "completions", "fallbacks")
+            for key in ("presentations", "selections", "applications",
+                        "completions", "fallbacks")
         }
         selections = funnel["selections"]
         applications = funnel["applications"]

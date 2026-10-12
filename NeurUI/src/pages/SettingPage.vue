@@ -162,6 +162,16 @@
               />
               <p class="governance-hint">{{ t('settings.llmRetryWaitCapHint') }}</p>
             </a-form-item>
+            <a-form-item :label="t('settings.llmRetryWaitBudget')">
+              <a-input-number
+                v-model:value="llmRetry.wait_budget"
+                :min="1"
+                :max="3600"
+                :step="10"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.llmRetryWaitBudgetHint') }}</p>
+            </a-form-item>
             <a-form-item :label="t('settings.llmRetryMaxSwitches')">
               <a-input-number
                 v-model:value="llmRetry.max_switches"
@@ -379,7 +389,7 @@ const savingToolOffload = ref(false)
 const toolOffloadLoaded = ref(false)
 
 /** LLM 429 重试/切换容错参数 */
-const llmRetry = ref({ max_retries: 10, interval: 10, wait_cap: 120, max_switches: 5 })
+const llmRetry = ref({ max_retries: 10, interval: 20, wait_cap: 120, max_switches: 5, wait_budget: 200 })
 const savingLlmRetry = ref(false)
 const llmRetryLoaded = ref(false)
 

@@ -66,6 +66,10 @@ _skill_funnel_var: ContextVar = ContextVar("neurova_turn_skill_funnel", default=
 # 轮首由 `_begin_skill_funnel_turn()` 换新（清零会把上一轮的记录续进本轮）。
 _skill_funnel_turn_ledger: Optional[List[Dict[str, Any]]] = None
 _skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=False)
+# 双臂试评（§8 前置 2）的轮级候选正文覆盖：{技能名: 候选指令体全文}。
+# 默认 None 而非共享空字典——可变默认值会让某处 setdefault 写进"全局那一份"。
+_skill_text_override_var: ContextVar = ContextVar(
+    "neurova_turn_skill_text_override", default=None)
 # 反思效力闭环（2026-09-15 P0a）：本轮被注入 prompt 的反思日志 id 痕迹。
 # build_context 选中注入时写入；post_chat 落盘读它挂进 assistant metadata，
 # /chat/feedback 与 Step 8.5 困惑降权据此裁决效力。
@@ -469,11 +473,16 @@ def record_turn_skill_funnel(
     ok: bool,
     pool: str = "agent",
     owner_key: str = "",
+    stage: str = "dispatch",
 ) -> None:
     """记一条本轮技能派发：applied=是否真正进入执行，ok=执行是否成功。
 
     Wave H-W1 三层库：pool/owner_key 记录命中的副本所在库（agent 库默认，
-    与既有调用零差异），flush 据此路由回写各库账本。"""
+    与既有调用零差异），flush 据此路由回写各库账本。
+
+    `stage` 区分同一本账里的两类条目：`dispatch`（执行咽喉记的派发）与
+    `presented`（技能目录记的呈现）。二者判据不同——呈现条目只说明"进了
+    prompt"，不得冒领 selection（那要求模型真的点名了）。"""
     _skill_funnel_ledger().append(
         {
             "skill_id": skill_id,
@@ -481,7 +490,25 @@ def record_turn_skill_funnel(
             "ok": bool(ok),
             "pool": str(pool or "agent"),
             "owner_key": str(owner_key or ""),
+            "stage": str(stage or "dispatch"),
         }
+    )
+
+
+def recordTurnSkillPresentation(
+    skill_id: str, pool: str = "agent", owner_key: str = ""
+) -> None:
+    """记一条本轮技能呈现：技能行进进了 prompt 技能目录即算，与是否被派发无关。
+
+    轮级去重——目录段由 `build_context` 与 `build_system_prompt` 两条路径共用
+    同一个单源 helper，逐次累加会把一轮读成两轮。"""
+    ledger = _skill_funnel_ledger()
+    for item in ledger:
+        if item.get("stage") == "presented" and item.get("skill_id") == skill_id:
+            return
+    record_turn_skill_funnel(
+        skill_id, applied=False, ok=False, pool=pool, owner_key=owner_key,
+        stage="presented",
     )
 
 
@@ -522,6 +549,41 @@ def reset_turn_skills_off(token) -> None:
 
 def get_turn_skills_off() -> bool:
     return bool(_skills_off_var.get())
+
+
+# ── 轮级候选正文覆盖（§8 前置 2：双臂试评的执行面）────────
+
+
+def set_turn_skill_text_override(mapping: Dict[str, str]):
+    """本轮把若干技能名的**指令体全文**换成给定正文；返回 token 供复位。
+
+    为什么必须有这一格：今天要让两份候选正文各走一遍管线，唯一办法是原地改 registry
+    里那个技能对象的 `doc_text`——那是全局态，两臂并发即串（实测：臂 A 想要 CAND_A，
+    拿到的 prompt 里装着 CAND_B）。覆盖槽只作用于本轮，且**不碰技能对象本体**，
+    所以线上读到的仍是仓内正文。
+
+    作用域边界（ContextVar 语义，别再当模块级全局用）：子任务继承父上下文的**值**，
+    子任务里的 `set` 不回灌父任务 ⇒ 写入方必须在发起双臂的那一层设槽，
+    每臂在自己的协程内设自己的那份。
+    """
+    return _skill_text_override_var.set(dict(mapping or {}))
+
+
+def reset_turn_skill_text_override(token) -> None:
+    _skill_text_override_var.reset(token)
+
+
+def get_turn_skill_text_override(name: str) -> Optional[str]:
+    """给定技能名返回本轮候选正文；未设返回 None。
+
+    区分两种"没有内容"：`None` 是没覆盖（读仓内正文），空串是**有意的空正文**
+    （候选可能就是清空指令体）——把它当未覆盖回落，双臂就会各拿同一份正文比出个 0 差。
+    """
+    mapping = _skill_text_override_var.get()
+    if not isinstance(mapping, dict) or not mapping:
+        return None
+    value = mapping.get(str(name or ""))
+    return value if isinstance(value, str) else None
 
 
 def append_turn_tool_event(event: Dict[str, Any]) -> None:
@@ -600,6 +662,7 @@ __all__ = [
     "append_turn_tool_messages",
     "get_turn_tool_messages_snapshot",
     "record_turn_skill_funnel",
+    "recordTurnSkillPresentation",
     "get_turn_skill_funnel",
     "set_turn_skill_view",
     "reset_turn_skill_view",

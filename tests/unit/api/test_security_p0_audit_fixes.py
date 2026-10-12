@@ -25,6 +25,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_01
 
 from neurova.api import auth
 from neurova.api.endpoints import computer, files_api, logs_api, sandbox, settings, shared_config
+from tests.auth_headers import overrideIdentity
 
 
 # ── Fixtures ────────────────────────────────────────────
@@ -74,9 +75,9 @@ def settings_admin_client(settings_client):
     """带 admin 认证的 settings 客户端（2026-08-31 收紧：读=登录、写=admin）"""
     from neurova.api.deps import get_current_user
 
-    settings_client.app.dependency_overrides[get_current_user] = lambda: {
+    overrideIdentity(settings_client.app, {
         "user_id": "admin_user", "username": "adminuser", "role": "admin",
-    }
+    })
     yield settings_client
     settings_client.app.dependency_overrides.clear()
 

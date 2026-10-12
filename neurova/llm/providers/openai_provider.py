@@ -319,14 +319,8 @@ class OpenAIProvider(BaseProvider):
         if ChatOpenAI is None:
             raise ImportError("langchain_openai 未安装，无法创建模型实例")
 
-        # 构建配置
-        config = self.get_llm_config(model_id)
-        config.update(kwargs)
-
-        # 创建 ChatOpenAI 实例
-        model = ChatOpenAI(model=model_id, api_key=self.api_key, base_url=self.base_url, **config)
-
-        return model
+        # 构造参数只在 get_llm_config 一处装配（见 base.get_llm_config 的说明）
+        return ChatOpenAI(**self.get_llm_config(model_id, **kwargs))
 
     async def test_connection(self) -> ConnectionResult:
         """测试连接
@@ -613,23 +607,8 @@ class OpenAIProvider(BaseProvider):
                 message = choices[0].get("message") or {}
                 return str(message.get("content") or message.get("reasoning_content") or "")
 
-    def get_llm_config(self, model_id: str) -> typing.Dict[str, typing.Any]:
-        """获取 LLM 配置
-
-        Args:
-            model_id: 模型ID
-
-        Returns:
-            配置字典
-        """
-        config = super().get_llm_config(model_id)
-        config.update(
-            {
-                "platform": self._platform_name,
-                "model": model_id,
-            }
-        )
-        return config
+    # get_llm_config 不在此覆盖：base 的中性装配已满足 ChatOpenAI 的字段名，
+    # 原覆盖多塞的 platform/model 属服务商元数据与重复键（见 base.get_llm_config）。
 
 
 # 便捷函数

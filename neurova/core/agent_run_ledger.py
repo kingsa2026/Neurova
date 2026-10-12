@@ -150,7 +150,8 @@ class AgentRunLedger:
         """续租（内部 5s 节流；主循环每轮调用，空闲时 15s ping 分支保底）。
 
         `force=True` 供让位等待期使用：那种等待按拍板可长到 200s，节流会让整段等待
-        一次租都不续，`reconcile_stale` 便把这条 run 误杀成 failed。
+        一次租都不续，`reconcile_stale` 便把这条 run 误杀成 failed。扫描已是现役周期
+        任务（app lifespan 起，间隔 = 租约/3），所以"等待期不续租"不再是理论风险。
         """
         if self.run_id is None:
             return
@@ -305,3 +306,78 @@ def resumeTurnIdentity(
         str(row.get("user_id") or "") or currentUserId,
         str(row.get("agent_id") or "") or currentAgentId,
     )
+
+
+# ── 蜂群子任务的台账记账（§6-78 L 条 / §6-85）──────────────────────
+#: 子任务收尾的**成因**词值。写侧（`swarm._execute`）与这里共用同一份常量——
+#: 台账的 `error_type` 由它翻译而来，不再靠嗅探错误字符串。
+SUBAGENT_CAUSE_NONE = ""
+SUBAGENT_CAUSE_TIMEOUT = "subagent_timeout"
+SUBAGENT_CAUSE_CANCELLED = "subagent_cancelled"
+SUBAGENT_CAUSE_FAILED = "subagent_failed"
+
+#: 蜂群状态 → 台账终态。completed 直落；取消归 `cancelled`（台账本就有这个词，
+#: 且 `reconcile_at_startup`/统计都认它）；其余失败归 `failed` 并留成因。
+_SUBAGENT_TERMINAL_MAP = {
+    "completed": ("completed", ""),
+    SUBAGENT_CAUSE_CANCELLED: ("cancelled", SUBAGENT_CAUSE_CANCELLED),
+    SUBAGENT_CAUSE_TIMEOUT: ("failed", SUBAGENT_CAUSE_TIMEOUT),
+}
+
+
+def subagentTerminalRow(runStatus: str, cause: str) -> typing.Tuple[str, str]:
+    """把蜂群的一条收尾翻成台账的 (status, error_type)。唯一一处翻译。"""
+    if cause in _SUBAGENT_TERMINAL_MAP:
+        return _SUBAGENT_TERMINAL_MAP[cause]
+    if runStatus == "completed":
+        return ("completed", "")
+    return ("failed", cause or SUBAGENT_CAUSE_FAILED)
+
+
+def openSubagentRun(
+    *, memberSessionId: str, subagentId: str, parentSessionId: str,
+    userId: str, agentId: str, task: str,
+) -> Optional[str]:
+    """子任务进台账：`intake` → 晋升 `running`。返回 run_id，失败返回 None。
+
+    **同步而非协程**：终态必须写回，而取消路径上协程 `await` 会被第二次 cancel 打断
+    （行就永久停在 running——正是 §6-84 刚收掉的那类半死态）。台账这几步是短 SQL，
+    起止各一次，不在高频流式循环里。
+
+    **为什么不走 `AgentRunLedger.acquire()`**：那条是回合准入闸（排队、让位、park
+    等人工续跑），而 park 对子任务没有对应 UI——把它塞进让位闸会造出"挂着等人点的
+    子任务"这种新产品形态，那是另一件事。这里只用同一张表、同一套终态枚举与 owner
+    栅栏（写侧仍只在本模块，不另建第二处 INSERT），把「这单子任务跑过、跑到哪一步」
+    记下来。是否让子任务参与让位闸属需人裁，已登记台账。
+    """
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        if not _ars.run_gate_enabled():
+            return None
+        store = _ars.get_agent_run_store()
+        run_id = store.intake(memberSessionId, userId, agentId, task,
+                              subagentId, parentSessionId)
+        claimed = store.claim_next(memberSessionId)
+        if claimed != run_id:
+            # 没晋升（同 member 会话已有 running 行）→ 弃 queued 行，绝不留幽灵 running
+            store.abandon(run_id, "subagent_not_promoted")
+            return None
+        return run_id
+    except Exception as e:  # noqa: BLE001 - 台账故障永不阻断子任务（与回合面同口径）
+        logger.warning("子任务台账登记失败（不阻断执行）: %s", e)
+        return None
+
+
+def closeSubagentRun(run_id: Optional[str], runStatus: str, cause: str = "") -> None:
+    """写终态。owner 栅栏沿用台账本体；`run_id` 为 None（登记失败/gate off）即静默跳过。"""
+    if not run_id:
+        return
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        store = _ars.get_agent_run_store()
+        status, errorType = subagentTerminalRow(runStatus, cause)
+        store.finish(run_id, _ars.OWNER_IDENTITY, status, errorType)
+    except Exception as e:  # noqa: BLE001 - 终态写不回时由启动收敛兜，不在这里炸子任务
+        logger.warning("子任务台账终态写入失败(%s): %s", run_id, e)

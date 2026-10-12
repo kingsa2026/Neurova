@@ -107,9 +107,15 @@ class TestExtractToGraph:
         _extract(item, repo, graph, registry, store)
 
         types = {n.nodeTypeValue for n in graph._nodes.values()}
-        assert "custom" in types  # "technique" 没在注册表里登记
+        assert "custom" in types  # "technique" 没在注册表里登记：类型只是数据，退成 custom
+
+        # 关系那一半自 §6-114 起**反向**判：未登记的关系（"uses_x"→custom）底座明拒
+        # （"custom 是兜底标记不是一种类型……只会造出一批读不出来源的无义事实"），
+        # 投影就不该收它。旧断言把"节点退 custom"与"边也进图"当同一件事，
+        # 而 §6-106 那 52 条孤儿边正是这一格放出来的——所以这里改判，不是放宽：
         rels = {e.relationTypeValue for e in graph._edges.values()}
-        assert "custom" in rels  # "uses_x" 同上
+        assert "custom" not in rels, (
+            "权威没收的关系仍进了图：%s——检索链读不到它，图上却与真事实同形" % rels)
 
     def test_repeated_extraction_reuses_nodes_by_identity(self, repo, graph, registry, store):
         """复用以身份消解段为准：同一实体不因类型词不同就开第二个节点。"""

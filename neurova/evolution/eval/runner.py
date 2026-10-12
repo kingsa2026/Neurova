@@ -59,6 +59,10 @@ class EvolutionRunResult:
     deployed_text: str = ""
     holdout_before: float = 0.0
     holdout_after: float = 0.0
+    # 留出侧例级读数（§8 前置 1）：{task_input: {baseline, candidate,
+    # baseline_failed, candidate_failed}}。均分照旧，明细只是不再被丢掉——
+    # 「谁被改坏了」这类判据读的是例级，集级均值会把一条撞坏被另一条涨幅抵掉。
+    holdout_case_scores: dict = field(default_factory=dict)
     train_before: float = 0.0
     train_best: float = 0.0
     iterations_run: int = 0
@@ -96,6 +100,11 @@ class EvolutionRunResult:
     anchor_no_skill: float = 0.0
     anchor_floor: float = 0.0
     anchor_evaluated: bool = False
+    # 例级不退化门（§8 前置 1）：本轮拦没拦、拦了哪几条、几条没量出来。
+    # 0.0/空在这里不是"没量"而是"量了且无事"——未量出的条目单独占一格。
+    caseRegressions: list[str] = field(default_factory=list)
+    unevidencedCases: list[str] = field(default_factory=list)
+    caseAllowance: int = 0
 
     @property
     def improvement(self) -> float:
@@ -109,12 +118,27 @@ class EvolutionRunResult:
     def changed(self) -> bool:
         return self.deployed_text != self.baseline_text
 
+    def caseGateReadout(self) -> dict:
+        """例级不退化门的读数格（唯一构造点：审计面与提案面都取这里）。
+
+        与 `holdout_*` 均分分格写——读的人要能一眼看出"均值过关、例级没过关"
+        是两件事，而不是把一个被均值吞掉的退化混进增益数字里。
+        """
+        return {
+            "allowance": self.caseAllowance,
+            "regressions": list(self.caseRegressions),
+            "unevidenced": list(self.unevidencedCases),
+        }
+
     def to_dict(self) -> dict:
         return {
             "rejected": self.rejected,
             "reject_reason": self.reject_reason,
+            # 紧跟 reject_reason：理由写着 case_regression 时，读数就在隔壁一格
+            "case_gate": self.caseGateReadout(),
             "holdout_before": round(self.holdout_before, 4),
             "holdout_after": round(self.holdout_after, 4),
+            "holdout_cases": dict(self.holdout_case_scores),
             "improvement": round(self.improvement, 4),
             "train_before": round(self.train_before, 4),
             "train_best": round(self.train_best, 4),
@@ -152,6 +176,24 @@ class _DefaultAgent:
 
     async def run(self, *, skill_text: str, task_input: str) -> str:
         return skill_text
+
+
+def _caseRegressionReadout(caseScores: dict) -> tuple[list[str], list[str]]:
+    """留出例级读数 → (退化用例, 未量出用例)。
+
+    退化 = 两侧都量到了，且候选分严格低于基线分（差值过 _EPS）。
+    未量出 = 任一侧判分失败——这种条目**两个方向都不记账**：
+    把它算成退化是拿器械故障当质量结论，算成没退化是把没测到当通过。
+    """
+    regressions: list[str] = []
+    unevidenced: list[str] = []
+    for task, readout in (caseScores or {}).items():
+        if readout["baseline_failed"] or readout["candidate_failed"]:
+            unevidenced.append(task)
+            continue
+        if readout["candidate"] < readout["baseline"] - _EPS:
+            regressions.append(task)
+    return regressions, unevidenced
 
 
 class SkillEvolutionRunner:
@@ -250,7 +292,7 @@ class SkillEvolutionRunner:
         if cand_details is not None and base_scores is not None and seq is not None:
             attr = attribution_hit_rate(
                 predicted=predicted, base_scores=base_scores,
-                cand_scores={ex.task_input: s for ex, s, _o, _f in cand_details})
+                cand_scores={ex.task_input: s for ex, s, _o, _f, _failed in cand_details})
             try:
                 self._ledger.patch(ledger_key, seq, {"attribution": attr})
             except OSError as e:
@@ -307,17 +349,23 @@ class SkillEvolutionRunner:
 
     async def _evaluate(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
-    ) -> tuple[float, list[tuple[EvalExample, float, str, str]]]:
+    ) -> tuple[float, list[tuple[EvalExample, float, str, str, bool]]]:
+        """返回 (均分, 明细)。明细第 5 位 `failed` = 该单例执行或判分是否异常。
+
+        带着它而不是只带 0.0：均分里 0.0 与"真考砸"同值，集合层判据可以忍，
+        一旦拿它做**例级**判据（谁退化了）就会把器械故障写成质量结论——
+        三态契约在集合层面已折叠过一次，不许在单例层面再折一次。
+        """
         if not examples:
             return 0.0, []
-        details: list[tuple[EvalExample, float, str, str]] = []
+        details: list[tuple[EvalExample, float, str, str, bool]] = []
         eval_errors = 0
         for ex in examples:
             score, output, feedback, failed = await self._score_example(skill_text, ex, artifact_type)
             eval_errors += int(failed)
-            details.append((ex, score, output, feedback))
+            details.append((ex, score, output, feedback, failed))
         self._run_eval_errors += eval_errors
-        avg = sum(s for _, s, _, _ in details) / len(details)
+        avg = sum(score for _ex, score, _o, _f, _failed in details) / len(details)
         return avg, details
 
     async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
@@ -326,7 +374,7 @@ class SkillEvolutionRunner:
         _, details = await self._evaluate(skill_text, examples, artifact_type)
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback in sorted(details, key=lambda d: d[1])
+            for ex, score, output, feedback, _failed in sorted(details, key=lambda d: d[1])
         ]
 
     async def _multi_variant_round(
@@ -425,7 +473,7 @@ class SkillEvolutionRunner:
         worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback in worst
+            for ex, score, output, feedback, _failed in worst
         ]
 
     # ── 主循环 ──
@@ -474,10 +522,16 @@ class SkillEvolutionRunner:
             result.reject_reason = "judge_unavailable"
             return result
 
-        result.holdout_before = await self._evaluate_avg(baseline_text, holdout, artifact_type)
+        holdoutBeforeAvg, holdoutBeforeDetails = await self._evaluate(
+            baseline_text, holdout, artifact_type)
+        result.holdout_before = holdoutBeforeAvg
+        holdoutBaseScores = {
+            ex.task_input: (score, failed)
+            for ex, score, _o, _f, failed in holdoutBeforeDetails
+        }
         result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
         # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
-        base_scores = {ex.task_input: score for ex, score, _o, _f in train_details}
+        base_scores = {ex.task_input: score for ex, score, _o, _f, _failed in train_details}
 
         best_text, best_score = baseline_text, result.train_before
         best_seq: Optional[int] = None
@@ -551,7 +605,23 @@ class SkillEvolutionRunner:
                 best_seq = seq
 
         result.train_best = best_score
-        result.holdout_after = await self._evaluate_avg(best_text, holdout, artifact_type)
+        holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
+            best_text, holdout, artifact_type)
+        result.holdout_after = holdoutAfterAvg
+        holdoutCandScores = {
+            ex.task_input: (score, failed)
+            for ex, score, _o, _f, failed in holdoutAfterDetails
+        }
+        result.holdout_case_scores = {
+            task: {
+                "baseline": holdoutBaseScores[task][0],
+                "candidate": holdoutCandScores[task][0],
+                "baseline_failed": holdoutBaseScores[task][1],
+                "candidate_failed": holdoutCandScores[task][1],
+            }
+            for task in holdoutCandScores
+            if task in holdoutBaseScores
+        }
         result.deployed_text = best_text
         # P1-4：胜者在留出集上的实测差回填其台账记录（无论最终接受与否，
         # 这都是该假设的诚实证据）
@@ -564,23 +634,49 @@ class SkillEvolutionRunner:
             except OSError as e:
                 logger.debug("编辑历史台账回填失败: %s", e)
 
-        # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
-        if result.holdout_after < result.holdout_before - _EPS:
+        # ── 终局拒绝的唯一出口 ──
+        async def rejectRun(reason: str) -> EvolutionRunResult:
+            """落理由、复位部署正文、把台账结局改回「未部署」、附 heldout 证据后返回。
+
+            台账里 `accepted` 在这里被钉成**「该假设被部署」**，不是「它在本轮 tune 上赢了」——
+            后者由 `round_winner` 单独占一格。此前六处判据各抄四行且都不回写台账，胜者行早在
+            评测期就写成 accepted=True，于是被拒的运行在三个读方（变异器提示词「已生效勿回退」、
+            stall 探索指令、产出剪枝）眼里仍是一条成功记录（§6-9）。
+            """
             result.rejected = True
-            result.reject_reason = "holdout_regression"
+            result.reject_reason = reason
             result.deployed_text = baseline_text
+            if self._ledger is not None and ledger_key and best_seq is not None:
+                try:
+                    self._ledger.patch(ledger_key, best_seq,
+                                       {"accepted": False, "reject_reason": reason,
+                                        "round_winner": True})
+                except OSError as e:
+                    logger.debug("运行终态回写台账失败: %s", e)
             await self._attach_heldout_evidence(result, dataset, artifact_type)
             return result
+
+        # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
+        if result.holdout_after < result.holdout_before - _EPS:
+            return await rejectRun("holdout_regression")
 
         # ── 判定 2:无实质增益 → 保留基线 ──
         # 阈值 = max(min_improvement, δ)：δ>0（已校准）时，评测噪声内的
         # "增益"不被当成真提升（P0-1 噪声地板）；未校准时即 min_improvement。
         if result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
-            result.rejected = True
-            result.reject_reason = "no_improvement"
-            result.deployed_text = baseline_text
-            await self._attach_heldout_evidence(result, dataset, artifact_type)
-            return result
+            return await rejectRun("no_improvement")
+
+        # ── 判定 2.1:例级不退化门（§8 前置 1）──
+        # 均值的性质决定的：一条用例被改坏，可以被另一条的涨幅抵掉。这道门只看
+        # "有多少既有用例从可用变成了不可用"，与增益幅度无关。判分未量出的
+        # 单例两个方向都不记账（落 unevidencedCases），既不救它也不杀它。
+        caseRegressions, unevidencedCases = _caseRegressionReadout(
+            result.holdout_case_scores)
+        result.caseAllowance = max(0, int(self.config.case_regression_allowance))
+        result.caseRegressions = caseRegressions
+        result.unevidencedCases = unevidencedCases
+        if len(caseRegressions) > result.caseAllowance:
+            return await rejectRun("case_regression")
 
         # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
         # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算
@@ -598,11 +694,7 @@ class SkillEvolutionRunner:
                     result.anchor_best = round(anchor_best, 6)
                 result.anchor_floor = round(anchor_floor, 6)
                 if result.holdout_after < anchor_floor - accept_threshold - _EPS:
-                    result.rejected = True
-                    result.reject_reason = "anchor_unreached"
-                    result.deployed_text = baseline_text
-                    await self._attach_heldout_evidence(result, dataset, artifact_type)
-                    return result
+                    return await rejectRun("anchor_unreached")
 
         # ── 判定 2.5:成本规则（P1-5）──
         # ΔC ≤ β0 + β1·ΔS：涨的成本必须由实测增益买单。文本臂成本代理 =
@@ -616,11 +708,7 @@ class SkillEvolutionRunner:
                 result.cost_change = delta_c
                 budget = self.config.cost_beta0 + self.config.cost_beta1 * result.improvement
                 if delta_c > budget:
-                    result.rejected = True
-                    result.reject_reason = "cost_rule_failed"
-                    result.deployed_text = baseline_text
-                    await self._attach_heldout_evidence(result, dataset, artifact_type)
-                    return result
+                    return await rejectRun("cost_rule_failed")
 
         # ── 判定 3:benchmark 回归门(技能分涨但 bench 回退 → 拒绝)──
         if self._bench_gate is not None:
@@ -637,11 +725,7 @@ class SkillEvolutionRunner:
             result.bench_neutral = bool(getattr(self._bench_gate, "neutral", False))
             result.bench_neutral_reason = str(getattr(self._bench_gate, "neutral_reason", "") or "")
             if gain < -self.config.bench_tolerance:
-                result.rejected = True
-                result.reject_reason = "bench_regression"
-                result.deployed_text = baseline_text
-                await self._attach_heldout_evidence(result, dataset, artifact_type)
-                return result
+                return await rejectRun("bench_regression")
 
         await self._attach_heldout_evidence(result, dataset, artifact_type)
         return result

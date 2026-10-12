@@ -70,6 +70,6 @@ class ConfidenceAggregator:
         fact = self._store.fact(factId)
         if fact is None:
             raise LookupError("事实不存在: %s" % factId)
-        verdict = self.aggregate(fact, self._store.assertions(factId))
+        verdict = self.aggregate(fact, self._store.liveAssertions(factId))
         self._store.setConfidence(factId, verdict["confidence"], verdict["evidence_state"])
         return verdict

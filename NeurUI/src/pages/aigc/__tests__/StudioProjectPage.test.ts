@@ -2,7 +2,7 @@
  * StudioProjectPage（R4/R5 四 Phase 向导）契约：
  * 进度导轨、拆解触发（runs 轮询）、镜头保存/单镜重试、导出双形态（成片/连播）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import zhCN from '@/i18n/locales/zh-CN'
@@ -20,9 +20,15 @@ vi.mock('@/utils/security', () => ({
 }))
 vi.mock('@/api/modules/models', () => ({ listModels: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/api/modules/files', () => ({ uploadFile: vi.fn() }))
-vi.mock('@/composables/useStudioRun', () => ({
-  waitStudioRun: vi.fn().mockResolvedValue({ id: 'r1', status: 'done', project_id: 'p1', kind: 'script', detail_json: '{}', error: '' }),
-}))
+vi.mock('@/composables/useStudioRun', async (importOriginal) => {
+  // 只替掉轮询本体，`describeRunOutcome` 必须用真件：这条测的就是"页面有没有把读数交给
+  // 真格式化函数"，连它一起 mock 掉即自证空转。
+  const actual = await importOriginal<typeof import('@/composables/useStudioRun')>()
+  return {
+    ...actual,
+    waitStudioRun: vi.fn().mockResolvedValue({ id: 'r1', status: 'done', project_id: 'p1', kind: 'script', detail_json: '{}', error: '' }),
+  }
+})
 
 vi.mock('@/api/modules/studio', () => ({
   getProject: vi.fn(),
@@ -40,16 +46,21 @@ vi.mock('@/api/modules/studio', () => ({
   updateAsset: vi.fn(),
   mergeEpisode: vi.fn(),
   addStoryboardManually: vi.fn(),
+  cancelStudioRun: vi.fn(),
+  getMerge: vi.fn(),
 }))
 vi.mock('ant-design-vue', () => ({
-  message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  // warning 是真 API 的一员（antd message 有 warning），补齐才不至于把"组件没调它"
+  // 这一行为红误报成"mock 少一个键"的类型错。
+  message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 import StudioProjectPage from '@/pages/aigc/StudioProjectPage.vue'
+import { message } from 'ant-design-vue'
 import { waitStudioRun } from '@/composables/useStudioRun'
 import {
   getProject, getEpisode, runSplitScript, retryStoryboard, updateStoryboard, mergeEpisode,
-  runGenerateImages, runGenerateVideos, runAssetImages,
+  runGenerateImages, runGenerateVideos, runAssetImages, cancelStudioRun, getMerge,
 } from '@/api/modules/studio'
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
@@ -61,7 +72,7 @@ const DETAIL = {
     thumbnail: '', created_at: 0, updated_at: 0,
   },
   episodes: [
-    { id: 'e1', project_id: 'p1', number: 1, title: '受辱', content: '客厅夜', synopsis: '', status: 'draft', duration: 0, video_path: '', subtitle_path: '' },
+    { id: 'e1', project_id: 'p1', number: 1, title: '受辱', content: '客厅夜', synopsis: '', status: 'draft', video_path: '', subtitle_path: '' },
   ],
   characters: [
     { id: 'c1', project_id: 'p1', name: '林凡', role: 'protagonist', description: '', appearance: '青年男', styling: '', personality: '', final_prompt: '', image_path: '', seed_value: '', status: 'pending' },
@@ -72,9 +83,9 @@ const DETAIL = {
 const SHOT = {
   id: 's1', episode_id: 'e1', number: 1, title: '', description: '主角推门',
   image_prompt: 'man enters', video_prompt: '推门', narration: '他回来了', camera: '中景',
-  movement: '固定', atmosphere: '', bgm_prompt: '', sound_effect: '', duration: 3,
+  movement: '固定', atmosphere: '', duration: 3,
   characters_json: '[]', props_json: '[]', first_frame_path: '', injected_prompt: '',
-  video_path: '', video_status: 'pending', ledger_task_id: '', subtitle_path: '',
+  video_path: '', video_status: 'pending', ledger_task_id: '',
   audio_path: '', status: 'pending', error: '',
 }
 
@@ -108,6 +119,8 @@ describe('StudioProjectPage', () => {
   const retryMock = retryStoryboard as unknown as ReturnType<typeof vi.fn>
   const updateSbMock = updateStoryboard as unknown as ReturnType<typeof vi.fn>
   const mergeMock = mergeEpisode as unknown as ReturnType<typeof vi.fn>
+  const cancelRunMock = cancelStudioRun as unknown as ReturnType<typeof vi.fn>
+  const getMergeMock = getMerge as unknown as ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -142,6 +155,26 @@ describe('StudioProjectPage', () => {
     expect(getProjectMock).toHaveBeenCalled()
   })
 
+  it('带病完成落警示条并点名条数（detail_json 的读数有真读者）', async () => {
+    // §6-87：改前这条走的是 message.success('任务完成')——服务端写的条数在界面上等于没写
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'r1', status: 'done_with_fallback', project_id: 'p1', kind: 'videos',
+      detail_json: '{"submitted":4,"fallback_failed":1,"fallback_blocked":2,"fallback":""}',
+      error: '',
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.novel = '三年之期已到'
+    await vm.splitScript()
+    await flushPromises()
+    const warned = (message.warning as unknown as ReturnType<typeof vi.fn>).mock.calls.flat()
+    expect(warned.join('')).toContain('任务带病完成')
+    expect(warned.join('')).toContain('1 项失败')
+    expect(warned.join('')).toContain('2 项被阻断')
+    expect(message.success).not.toHaveBeenCalled()
+  })
+
   it('Phase03 镜头卡片渲染 + 保存透传 @角色映射', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -153,6 +186,125 @@ describe('StudioProjectPage', () => {
     const args = updateSbMock.mock.calls.at(-1) ?? []
     expect(args[0]).toBe('s1')
     expect(args[1].characters).toEqual([{ name: '林凡', id: 'c1' }])
+  })
+
+  it('镜头面读出 title 与注入后的成品提示词（injected_prompt 有读者）', async () => {
+    // §6-89：`injected_prompt` 由首帧生成时写进行（services.py 唯一写点），改前全仓零读者
+    // ——@角色注入后到底喂给模型什么，事后一行都回看不了；`title` 同形（拆解写入，镜头卡只渲染 description）。
+    getEpisodeMock.mockResolvedValue({
+      code: 0,
+      data: {
+        episode: DETAIL.episodes[0],
+        storyboards: [{
+          ...SHOT, title: '雨夜对峙', image_prompt: 'man enters',
+          injected_prompt: '林凡（青年男，黑色风衣）推门而入，冷色调',
+        }],
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.switchPhase('workbench')
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('雨夜对峙')
+    expect(text).toContain('林凡（青年男，黑色风衣）推门而入，冷色调')
+    expect(text).toContain('实际注入提示词')
+  })
+
+  it('长任务在跑时记着它的 run_id，停止按钮把两个读数分开播报（取消四件套的前端那一件）', async () => {
+    let release: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((res) => { release = res }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const running = vm.track('images', 'run_live')
+    await flushPromises()
+    // 意图与句柄都在服务端收敛，前端只负责"知道现在跑的是哪一条"并把它交出去
+    expect(vm.activeRuns.images).toBe('run_live')
+    expect(wrapper.text()).toContain('停止任务')
+
+    cancelRunMock.mockResolvedValue({ data: { run_id: 'run_live', cancel_requested: true, tasks_cancelled: 1, status: 'running' } })
+    await vm.cancelActiveRun()
+    expect(cancelRunMock).toHaveBeenCalledWith('run_live')
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('任务已停止'))
+    expect(message.info).not.toHaveBeenCalled()
+
+    // 第二档：句柄不在（服务重启过）时只报"已请求停止"，不许宣称已停止
+    cancelRunMock.mockResolvedValue({ data: { run_id: 'run_live', cancel_requested: true, tasks_cancelled: 0, status: 'running' } })
+    await vm.cancelActiveRun()
+    expect(message.success).toHaveBeenCalledTimes(1)
+    expect(message.info).toHaveBeenCalledWith(expect.stringContaining('已请求停止'))
+
+    release({ id: 'run_live', status: 'cancelled', detail_json: '{}', error: 'task_cancelled（执行体在 await 点被打断）' })
+    await running
+    expect(vm.activeRuns.images).toBeUndefined()
+    // cancelled 既不是"完成"也不是"失败"
+    expect(message.success).not.toHaveBeenCalledWith('任务完成')
+    expect(message.error).not.toHaveBeenCalled()
+  })
+
+  it('并发跑两条长任务时，停止按钮把两条都停并如实报条数（不再只停第一条）', async () => {
+    // §6-91 未覆盖面④：`activeRuns` 是 kind→run_id 的表，而按钮取的是 `Object.values()[0]`
+    // ——用户并发点了「批量首帧」+「批量视频」时，一次点击只停其中一条且不说是哪条，
+    // 这就是"点了停没反应"的误判源头。
+    let settleA: (v: any) => void = () => {}
+    let settleB: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(() => new Promise((res) => { settleA = res }))
+      .mockImplementationOnce(() => new Promise((res) => { settleB = res }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const a = vm.track('images', 'run_a')
+    const b = vm.track('videos', 'run_b')
+    await flushPromises()
+
+    expect(Object.keys(vm.activeRuns)).toEqual(['images', 'videos'])
+    expect(wrapper.text()).toContain('停止 2 条在跑的任务')
+
+    cancelRunMock.mockResolvedValue({
+      data: { cancel_requested: true, tasks_cancelled: 1, status: 'running' },
+    })
+    await vm.cancelActiveRun()
+    expect(cancelRunMock.mock.calls.map((c: any[]) => c[0]).sort()).toEqual(['run_a', 'run_b'])
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('任务已停止'))
+
+    settleA({ id: 'run_a', status: 'cancelled', detail_json: '{}', error: '' })
+    settleB({ id: 'run_b', status: 'cancelled', detail_json: '{}', error: '' })
+    await Promise.all([a, b])
+    expect(vm.activeRuns).toEqual({})
+  })
+
+  it('停止播报交代「对端已提交的任务不撤回」——点了停不等于远端也停', async () => {
+    // 单镜内部那几十秒 await 打不断（设计如此：打断生图请求既不现实也不安全），
+    // 而 i2v 任务早已在服务商侧排队。用户看到的"停止"只覆盖"剩余分片不再续跑"这一半；
+    // 不写清就会让人以为产物不会再回来，进而以为删掉镜头行等于删掉产物。
+    let settle: (v: any) => void = () => {}
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation(() => new Promise((res) => { settle = res }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const running = vm.track('videos', 'run_live')
+    await flushPromises()
+
+    cancelRunMock.mockResolvedValue({ data: { cancel_requested: true, tasks_cancelled: 1 } })
+    await vm.cancelActiveRun()
+    const okText = (message.success as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join('')
+    expect(okText).toContain('任务已停止')
+    expect(okText).toContain('对端')
+
+    cancelRunMock.mockResolvedValue({ data: { cancel_requested: true, tasks_cancelled: 0 } })
+    await vm.cancelActiveRun()
+    const queuedText = (message.info as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join('')
+    expect(queuedText).toContain('已请求停止')
+    expect(queuedText).toContain('对端')
+
+    settle({ id: 'run_live', status: 'cancelled', detail_json: '{}', error: '' })
+    await running
   })
 
   it('单镜重试 stage=image 走 retryStoryboard', async () => {
@@ -221,15 +373,21 @@ describe('StudioProjectPage', () => {
     expect(mergeMock).toHaveBeenCalledWith(expect.any(String), { bgm_path: 'uploads/bg.mp3' })
   })
 
-  it('Phase04 导出：成片 URL 与连播清单双形态', async () => {
-    mergeMock.mockResolvedValue({
-      code: 0,
-      data: {
-        ok: true, composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4',
+  it('Phase04 导出走后台 run：poll 终态后从 merges 行取明细，成片与连播双形态', async () => {
+    // §6-94：改前 `POST /merge` 同步返回整包结果，导出既进不了 runs 台账、也没有停止入口；
+    // 现在端点只回 run_id，状态与成因在 run 行的 detail_json，产物明细仍以 merges 表为唯一事实源。
+    mergeMock.mockResolvedValue({ code: 0, data: { run_id: 'run_m', status: 'started' } })
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'run_m', status: 'done', project_id: 'p1', kind: 'merge', error: '',
+      detail_json: JSON.stringify({
+        composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4',
+        merge_id: 'm1', subtitle_burned: false, bgm_mixed: false,
         // A5：诚实降级标注（无中文字体不假烧录，warning 原文上屏）
-        subtitle_burned: false, warning: '本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）',
-        merge: { id: 'm1' }, items: [],
-      },
+        fallback: '本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）',
+      }),
+    })
+    getMergeMock.mockResolvedValue({
+      code: 0, data: { merge: { id: 'm1', mode: 'ffmpeg_concat', items_json: '[]' } },
     })
     const wrapper = mountPage()
     await flushPromises()
@@ -237,19 +395,108 @@ describe('StudioProjectPage', () => {
     vm.switchPhase('export')
     await vm.doMerge()
     await flushPromises()
+    expect(waitStudioRun).toHaveBeenCalledWith('p1', 'run_m')
+    expect(getMergeMock).toHaveBeenCalledWith('m1')
     expect(vm.composedUrl).toBe('/api/v1/generation/files/m1.mp4')
     expect(wrapper.html()).toContain('access_token=tok')
     expect(wrapper.find('.studio-merge-warn').text()).toContain('中文字体')
 
-    mergeMock.mockResolvedValue({
+    // 连播清单形态：降级由 run 行说话，明细来自 merges 行
+    mergeMock.mockResolvedValue({ code: 0, data: { run_id: 'run_m2', status: 'started' } })
+    ;(waitStudioRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'run_m2', status: 'done_with_fallback', project_id: 'p1', kind: 'merge', error: '',
+      detail_json: JSON.stringify({
+        composed: false, mode: 'slideshow_manifest', url: '', merge_id: 'm2',
+        fallback: '本机无 FFmpeg，输出连播清单',
+      }),
+    })
+    getMergeMock.mockResolvedValue({
       code: 0,
       data: {
-        ok: true, composed: false, mode: 'slideshow_manifest', merge: { id: 'm2' },
-        items: [{ index: 1, shot: 1, image: '/f/a.png', audio: '', video: '', text: '他回来了' }],
+        merge: {
+          id: 'm2', mode: 'slideshow_manifest',
+          items_json: JSON.stringify([{
+            index: 1, shot: 1, image: '/f/a.png', audio: '', video: '', text: '他回来了',
+          }]),
+        },
       },
     })
     await vm.doMerge()
     await flushPromises()
     expect(wrapper.find('.slideshow-stub').exists()).toBe(true)
+  })
+})
+
+/**
+ * §6-78 F 条：Phase03 视频刷新定时器的**启停必须同源**。
+ *
+ * 改前的三格都是同一件事的三个断面——「停表」没有入口，只有「读到 running 才起表」：
+ * ① `loadStoryboards` 失败分支把列表清空却不重判启停 → 无数据可停时 5s 表继续无限打 GET；
+ * ② `switchPhase` 不停表 → 镜头卡片已被 `v-if` 摘掉，页面仍在后台每 5s 拉一次整集；
+ * ③ `retryShot` 不走 `track()` 而是发一次性 `setTimeout(3000)` → 提交发生在服务端后台任务里，
+ *    3s 时读到的常是旧态，`running` 永不成立，周期表根本不启，直到用户手动切一次 phase 才复活。
+ */
+describe('Phase03 视频刷新定时器（H2-4 · F 条）', () => {
+  const getProjectMock = getProject as unknown as ReturnType<typeof vi.fn>
+  const getEpisodeMock = getEpisode as unknown as ReturnType<typeof vi.fn>
+  const retryMock = retryStoryboard as unknown as ReturnType<typeof vi.fn>
+  const waitMock = waitStudioRun as unknown as ReturnType<typeof vi.fn>
+
+  const RUNNING_SHOT = { ...SHOT, video_status: 'running' }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    getProjectMock.mockResolvedValue({ code: 0, data: DETAIL })
+    getEpisodeMock.mockResolvedValue({
+      code: 0, data: { episode: DETAIL.episodes[0], storyboards: [RUNNING_SHOT] },
+    })
+    retryMock.mockResolvedValue({ code: 0, data: { run_id: 'r2' } })
+    waitMock.mockResolvedValue({ id: 'r2', status: 'done', detail_json: '{}', error: '' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('读失败即停表：列表被清空后不再无限打 GET', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(getEpisodeMock.mock.calls.length).toBeGreaterThan(0)
+
+    getEpisodeMock.mockRejectedValue(new Error('网络中断'))
+    await vi.advanceTimersByTimeAsync(5000)   // 触发起表的那一跳，走失败分支
+    const afterFailure = getEpisodeMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(20000)   // 若没停表，这里会再打 4 次
+    expect(getEpisodeMock.mock.calls.length).toBe(afterFailure)
+    expect((wrapper.vm as any).storyboards).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('离开工作台即停表：卡片已摘掉就不该还在后台拉整集', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.switchPhase('export')
+    const afterLeave = getEpisodeMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(getEpisodeMock.mock.calls.length).toBe(afterLeave)
+    wrapper.unmount()
+  })
+
+  it('单镜重试走 track 轮询，定时器由真状态决定而非 3s 盲刷', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const before = getEpisodeMock.mock.calls.length
+    const vm = wrapper.vm as any
+    await vm.retryShot(RUNNING_SHOT, 'video')
+    await flushPromises()
+
+    // 重试的 run 必须交回同一个轮询入口（改前这里根本没有 track）
+    expect(waitMock).toHaveBeenCalledWith('p1', 'r2')
+    // 重读后镜头仍是 running → 周期表应当是活的（改前只有那一次性 3s）
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(getEpisodeMock.mock.calls.length).toBeGreaterThan(before)
+    wrapper.unmount()
   })
 })

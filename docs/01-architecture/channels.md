@@ -770,6 +770,67 @@ curl -X POST http://localhost:8000/api/channels/users/link \
 4. **Webhook 配置**: 各平台需要在开发者后台配置 Webhook URL 指向 `/api/channels/webhook/<channel>`
 5. **安全**: 敏感配置 (secret, token) 建议通过环境变量传递，不要硬编码
 
+
+## 12. 渠道身份与记忆作用域（工单 2026-10-10 批 1–6）
+
+**一句话**：渠道里说话的人是谁，只由一张表决定；他看得见哪些记忆，由作用域标签决定；
+**群聊沉淀的记忆按群共享**——同一个群的成员互相可见，这是设计后果，不是缺陷。
+
+### 12.1 三个事实源
+
+| 关注点 | 唯一出处 | 关键入口 |
+|---|---|---|
+| "这一轮是谁" | `neurova/channels/user_identity.py` | `resolveTurnIdentity():226`（已绑→平台账号对；未绑→`ch:{渠道}:{发送者}`） |
+| 渠道写入点 | `neurova/channels/channel_router.py` | `:143` 解析轮身份、`:155` 登记观察到的发送者 |
+| "能看见哪些" | `neurova/collaboration/memory_scope.py` | `scope_tag_for_turn():49` 出标签、`allowed_scopes_for_tag():71` 定可见集、`filter_by_scope():113` 执行过滤 |
+
+命名空间 `ch:{渠道}:{发送者}` 与技能库 `skills/skill_visibility.py` 的 `resolve_user_key` 逐字同形
+（同一个人不能在技能库、记忆、审计里变成三个身份；同步钉在
+`tests/unit/channels/test_channelIdentityBindingStore.py` 第 ⑦ 格）。
+
+### 12.2 作用域标签的三种形态
+
+| 轮次形态 | 标签 | 允许召回的范围 |
+|---|---|---|
+| 协作房间 | `room:{room_id}` | `direct` + 本房间 |
+| 渠道群聊 | `chgrp:{渠道}:{chat_id}`（`CHANNEL_GROUP_PREFIX:19`） | **仅本群**（群内容不外溢到单聊，也不跨群） |
+| 其他（单聊、网页） | `direct` | 仅 `direct`（**同一用户跨会话可召回**，见下） |
+
+`direct` 跨会话共享是本仓的既定语义，不是串台：折叠进上下文池的原文要能"经 [历史回忆]
+语义召回（零丢失）"（`neurova/context/orchestrator.py:1389`、`:1502`）。台账 §6-139 处理过
+一次把这条误判成缺陷的判据。
+
+### 12.3 谁与 `share_session_in_group` 不是一件事
+
+`share_session_in_group`（`neurova/channels/manager.py:689` 单点裁决）决定的是**会话记录**
+是否全群共用一条；`chgrp:` 作用域决定的是**记忆沉淀**的可见范围。两个轴各管一件事，
+改一个不影响另一个——把它们混成一个开关，就会出现"关了群共享会话，群里聊出来的记忆
+却还在共享"这类说不清的状态。
+
+### 12.4 绑定与面板
+
+- 存储：表 `channel_user_bindings`，唯一键 `(agent_id, channel_type, channel_user_id)`
+  ⇒ 作用域是 **agent 级**（同一渠道用户在 N 个 agent 下各绑一次）；解绑置 `revoked` 不删行。
+- 观察：表 `channel_observed_senders`（`observeSender():274` / `listObservedSenders():316`）
+  只记"见到过谁"，不构成任何归属决定。
+- 端点（`neurova/api/endpoints/channel_config.py`）：读 `:519` 列表、`:530` 我的绑定、
+  `:547` 观察到的发送者；写 `:565` 发码、`:585` 解绑。门沿用 `_requireChannelAccess`。
+- **归属只从登录态取**：发码端点不接受 body 里的 `user_id`，也不存在"替别人绑"的入口。
+  绑定唯一的写入口是**渠道内那句带码的消息**——它自带持有证明（只有能在该渠道发言的人
+  才消费得掉这张码）。观察面刻意只做读，正是这条约束的结果。
+- 面板：`NeurUI/src/components/ChannelIdentityPanel.vue`（发码 / 列表 / 解绑 / 观察到的发送者），
+  群共享后果那句话也写在面板上。
+
+### 12.5 隐私后果（必须让使用者读到）
+
+群共享作用域意味着**同一个群的成员能看到彼此在这个群里沉淀的记忆**。控制台的渠道身份
+面板与本节是它的两处说明；若产品要"群内也按人隔离"，那需要另一次裁定（改
+`scope_tag_for_turn` 的出标签口径，代价是群协作记忆不再成一条）。
+
+另注：**未绑定发送者不共享一个桶**。裁定 ① 让他落在 `ch:{渠道}:{发送者}` 专属命名空间，
+所以"没绑定的陌生人"之间也互相看不见；绑定只改**今后**写入的归属，历史留在原命名空间
+（合并搬迁不可逆，未裁不做）。
+
 ---
 
 *文档完成，消息渠道集成系统已实现核心功能*

@@ -9,12 +9,21 @@
 3. 门禁覆盖的四项能力仍在（import 预算 / 埋点开销 / 共享池复用 / 假数据门控）；
 4. 假数据门控不会被"顺手"放宽（默认禁用的不变式由门禁自己验证）；
 5. **判分量与机器负载无关**：进程内两处微基准不得用墙钟判分（下节）；
-6. **池复用判据必须能被证伪**（再下一节）：真退化成"每次新建池"时要报红。
+6. **池复用判据必须能被证伪**（再下一节）：真退化成"每次新建池"时要报红；
+7. **烧 CPU 自旋的目标不得细于本机时钟粒度**（`TestTheGate...` 侧的常驻守卫见
+   `tests/unit/ci/test_subQuantumSpinClockGate.py`）：粒度粗于目标时一次自旋即跑满
+   一个量子，判据成本变成「量子 × 迭代数」，整格按实测粒度跳过（§6-96）。
 
 本套件自身不得自带负载：它每个用例的预算（pytest-timeout 30s）由 CI job 的
 全部用例共享，自带 32 个 CPU 自旋线程的判据会把测量拖到 ~19s，机器一忙即撞
 超时（2026-09-24 构建 cnb-i3l-1k3a5ht8f-004 实测）。负载一律走**注入**：
 在被测环节的生产装配点上注入等待，是确定性的、与机器无关的。
+
+**注入"等待"与注入"CPU"的代价不对称**（§6-96）：等待走 `time.sleep`，与迭代数解耦
+（见 `INJECT_EVERY`）；而注入 CPU 的自旋是 `while time.thread_time() < deadline: pass`，
+成本下限是**本机该时钟的推进粒度**。Windows 实测粒度 15.625ms（`thread_time` 随系统
+tick 前进），于是 0.1ms 一档的自旋在 2000 次调用的生产循环里变成 ≈31s/轮 × 5 轮，
+整文件超时、受保护子集被打断；CI/Linux 侧粒度亚微秒，同样的格照跑不受影响。
 
 第 5 条是 2026-09-24 那次「同一份代码 py3.11 红、py3.12 绿」的根修判据：
 `POOL_GET_BUDGET_MS` / `STEP_METRIC_BUDGET_MS` 是**数量级契约**，判分却取自
@@ -59,6 +68,64 @@ PER_CALL_POOL_WAIT_MS = 0.1
 yaml = pytest.importorskip("yaml")
 pytest.importorskip("prometheus_client", reason="门禁 import 面依赖 neurova.core.metrics")
 pytest.importorskip("psutil", reason="端口占用者观测面依赖 psutil.net_connections")
+
+#: 本文件里"生产规模重复"的烧 CPU 注入都取 0.1ms 一档——也是**最小**的自旋目标。
+#: 时钟分不出这个目标的那些格，成本下限由量子决定，而不是由这个数决定。
+SUB_QUANTUM_SPIN_TARGET_MS = 0.1
+
+
+def threadTimeQuantumMs(capS: float = 1.0) -> float:
+    """实测本机 `time.thread_time()` 的推进粒度（ms）；量不到时返回 inf。
+
+    **不信 `time.get_clock_info("thread_time").resolution`**：本机它宣称 1e-07 秒
+    （0.0001ms），实测 15.625ms——差五个数量级。拿宣称值判"这台机器分得出 0.1ms"，
+    等于把要防的形态原样放行且报绿。本探针自身最多烧一个量子（粗粒度机 ≈16ms）。
+    """
+    before = time.thread_time()
+    wall = time.perf_counter()
+    while time.thread_time() == before:
+        if time.perf_counter() - wall > capS:
+            return float("inf")
+    return (time.thread_time() - before) * 1000.0
+
+
+CPU_QUANTUM_MS = threadTimeQuantumMs()
+
+
+def spinClockIsResolvable(quantumMs: float) -> bool:
+    """本机时钟能否分辨 `SUB_QUANTUM_SPIN_TARGET_MS` 一档的自旋目标。
+
+    按**实测粒度**答，不按平台名答：平台名两头失真——不是每台 Windows 都粗，
+    也不是只有 Windows 会粗（低频 tick 或被限流的 Linux 容器同样粗）。
+    """
+    return quantumMs <= SUB_QUANTUM_SPIN_TARGET_MS
+
+
+def spinThreadCpu(targetMs: float) -> None:
+    """烧本线程 CPU `targetMs`——全文件唯一的自旋基元。
+
+    收在一处是"成本与机器挂钩"这条判据能成立的前提：各处内联自旋时，
+    新增一格只要抄那三行就能绕开量子判定（常驻守卫
+    `tests/unit/ci/test_subQuantumSpinClockGate.py` 按形态禁掉内联）。
+    粒度分不出时，误差以"一个量子"计，本函数不藏补偿。
+    """
+    deadline = time.thread_time() + targetMs / 1000.0
+    while time.thread_time() < deadline:
+        pass
+
+
+#: 亚毫秒自旋被生产循环调 1000~2000 次的格，在粗粒度时钟上必然超时：整格跳过并点名
+#: 读数来源。细粒度机器（CI/Linux）上条件为假，照跑——本文件在受保护子集里，
+#: 跳过的不是 CI 那侧的覆盖。
+needsFineThreadClock = pytest.mark.skipif(
+    not spinClockIsResolvable(CPU_QUANTUM_MS),
+    reason=(
+        f"本机 time.thread_time() 推进粒度实测 {CPU_QUANTUM_MS:.1f}ms，"
+        f"分不出 {SUB_QUANTUM_SPIN_TARGET_MS}ms 一档的自旋目标：一次自旋即跑满一个量子，"
+        "被生产循环调 1000~2000 次时判据成本变成「量子 × 迭代数」而撞超时。"
+        "粒度 ≤ 0.1ms 的机器（CI/Linux）照跑不跳；本跳过按实测粒度成立，非平台名。"
+    ),
+)
 
 
 def _cnb_pipelines():
@@ -270,6 +337,7 @@ class TestJudgingIgnoresMachineLoad:
             f"{list(failures)}"
         )
 
+    @needsFineThreadClock
     def test_real_cpu_regression_in_step_metric_is_still_caught(self, monkeypatch):
         """反向控制：真退化（CPU 变重）必须仍被判红，本判据不得空转。"""
         gate = importlib.import_module("scripts.ci.perf_gate")
@@ -280,9 +348,7 @@ class TestJudgingIgnoresMachineLoad:
         original = collector.record_pipeline_step
 
         def heavy(self, step_name, status, duration_ms):
-            deadline = time.thread_time() + 0.0001
-            while time.thread_time() < deadline:
-                pass
+            spinThreadCpu(SUB_QUANTUM_SPIN_TARGET_MS)
             return original(self, step_name, status, duration_ms)
 
         monkeypatch.setattr(collector, "record_pipeline_step", heavy)
@@ -494,6 +560,34 @@ class TestImportBudgetKeepsWallClock:
             "该路径会让首轮对话替 import 付 IO 等待"
         )
 
+    def test_ownTreePathJoinedWithNativeSeparatorIsNotASideEffect(self, tmp_path):
+        """import 期开"解释器/内核地盘"下的路径不得被点名为重活——两种分隔符都要认。
+
+        形态取自第三方依赖的真实动作：`prometheus_client` 在模块级建
+        `PROCESS_COLLECTOR` 时读 `os.path.join("/proc", "stat")`。POSIX 得到
+        `/proc/stat`（探针按 `/proc` 地盘豁免），Windows 得到 `/proc\\stat`——
+        该路径不存在、open 必失败、首轮零等待，但豁免判据原来只按 `/` 比前缀，
+        于是它漏网并被点成"首轮对话要为它付等待"。实测（本机）：
+        `perf_gate.py --json` ⇒ `failures: [import-budget … ['open:/proc\\stat']]`，
+        而 `sys.prefix` 全反斜杠，同一根因把整片地盘豁免都打穿。
+        """
+        import importlib as _importlib
+
+        gate = _importlib.import_module("scripts.ci.perf_gate")
+        (tmp_path / "vtree_module.py").write_text(
+            "import os\n"
+            "try:\n"
+            "    open(os.path.join('/proc', 'stat'), 'rb').close()\n"
+            "except OSError:\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        probe = gate.measureImportProbe("vtree_module", searchPath=str(tmp_path))
+        assert probe["sideEffects"] == [], (
+            f"地盘路径被点成 import 期重活: {probe['sideEffects']}——"
+            "门禁因此在该平台恒红，红与本仓代码无关（第三方 import 的正常动作）"
+        )
+
     def test_real_cpu_regression_in_import_is_still_caught(self, tmp_path):
         """反向控制：import 期真做 CPU 重活必须仍被判红。"""
         import importlib as _importlib
@@ -555,6 +649,7 @@ class TestJudgedValueIsLoadIndependent:
             f"判值 {judged}"
         )
 
+    @needsFineThreadClock
     def test_real_cpu_regression_is_still_caught_under_the_same_harness(self, monkeypatch):
         """同一判据必须仍咬得住真退化：CPU 真变重 10 倍即判红（反向控制）。
 
@@ -631,9 +726,7 @@ def _injectLoad(monkeypatch, sleep_ms: float, cpu_ms: float):
 
     def injectedStep(self, step_name, status, duration_ms):
         if cpu_ms:
-            deadline = time.thread_time() + cpu_ms / 1000.0
-            while time.thread_time() < deadline:
-                pass
+            spinThreadCpu(cpu_ms)
         if sleep_ms:
             # 有界注入：每 `INJECT_EVERY` 次粗睡一次、时长 ×`INJECT_EVERY`。
             # 逐次小睡会把 N 次 `sleep` 系统调用铺进被测链路，其内核开销
@@ -653,9 +746,7 @@ def _injectLoad(monkeypatch, sleep_ms: float, cpu_ms: float):
 
     def injectedPool(*args, **kwargs):
         if cpu_ms:
-            deadline = time.thread_time() + cpu_ms / 1000.0
-            while time.thread_time() < deadline:
-                pass
+            spinThreadCpu(cpu_ms)
         if sleep_ms:
             pool_calls["n"] += 1
             if pool_calls["n"] % INJECT_EVERY == 0:
@@ -758,15 +849,14 @@ class TestCheckSourceIsSingleAndRepeated:
     取优抹不平它。两半都由行为侧用例钉住（取最小值 + 首轮一次性成本被抹掉）。
     """
 
+    @needsFineThreadClock
     def test_best_of_rounds_takes_the_minimum_and_repeats(self):
         gate = importlib.import_module("scripts.ci.perf_gate")
         rounds = []
 
         def job():
             start = time.thread_time()
-            deadline = start + 0.01
-            while time.thread_time() < deadline:
-                pass
+            spinThreadCpu(10.0)
             rounds.append((time.thread_time() - start) * 1000.0)
 
         best = gate.bestOfRounds(job)
@@ -778,6 +868,7 @@ class TestCheckSourceIsSingleAndRepeated:
             "——判值会随机器抖动"
         )
 
+    @needsFineThreadClock
     def test_single_round_reading_is_not_a_usable_judge_on_a_loaded_machine(self):
         """反向控制：**同一段工作**的单轮读数确实会随机器状态漂开——取优不是装饰。
 
@@ -793,9 +884,7 @@ class TestCheckSourceIsSingleAndRepeated:
             state["round"] += 1
             if state["round"] == 1:
                 # 首轮的一次性成本：与稳态差一个数量级（复刻 prometheus 首次编译）
-                deadline = time.thread_time() + 0.02
-                while time.thread_time() < deadline:
-                    pass
+                spinThreadCpu(20.0)
 
         best = gate.bestOfRounds(firstCallThenSteady)
         assert best < 10.0, (

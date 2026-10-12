@@ -209,6 +209,35 @@ class KnowledgeVectorIndex:
             self._last_uid = uid
             return {"computed": len(to_compute), "entry_count": len(records)}
 
+    def dropEntry(self, knowledgeId: str) -> Dict[str, int]:
+        """从所有用户分片里取掉该条目的向量与正文副本。
+
+        `ensure_indexed` 会在下一次检索时按可见集合自愈式剔除（见其"剔除已删除条目"
+        一段），但那要等到有人查询才发生——违规内容清理不能把删除寄托在下一次检索上：
+        在那之前，分片文件里的 `content` 副本一直是可读的。所以擦除当场改写分片。
+
+        Returns:
+            {"files": 改写的分片数, "records": 取掉的副本数}
+        """
+        removed = files = 0
+        with self._lock:
+            for path in sorted(self._dir.glob("knowledge_vectors_*.json")):
+                uid = path.stem.split("_")[-1]
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception as e:  # noqa: BLE001 - 分片坏了不该顶住擦除
+                    logger.warning("向量分片擦除时读取失败 %s: %s", path, e)
+                    continue
+                records = data.get("vectors") if isinstance(data, dict) else None
+                if not isinstance(records, dict) or knowledgeId not in records:
+                    continue
+                records.pop(knowledgeId, None)
+                self._cache[uid] = records
+                self._save_user({"user_id": uid}, records, str(data.get("engine", "")))
+                files += 1
+                removed += 1
+        return {"files": files, "records": removed}
+
     def search(
         self,
         query: str,

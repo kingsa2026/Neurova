@@ -328,8 +328,16 @@ class ActivityDigestChain:
 
     @staticmethod
     def _breakReason(item: Dict[str, Any], index: int, prev: str) -> Optional[str]:
-        if hashlib.sha256(str(item.get("statement_text") or "").encode("utf-8")
-                          ).hexdigest()[:16] != str(item.get("statement_hash") or ""):
+        if str(item.get("erased_at") or ""):
+            # 擦除喉（批次 K2）把正文置空、却**故意**留住 `statement_hash` 与链位：
+            # 这条跳的"正文与哈希不符"是法定的缺失，不是有人改过数据。
+            # 判据因此改咬另一件事——缺失必须是声明过的：正文非空却带着擦除标记，
+            # 等于有人借擦除之名往里塞新内容，照旧报断裂。
+            if str(item.get("statement_text") or "") != "":
+                return "已标记擦除的断言仍带着正文"
+        elif hashlib.sha256(
+                str(item.get("statement_text") or "").encode("utf-8")
+        ).hexdigest()[:16] != str(item.get("statement_hash") or ""):
             return "正文与哈希不符"
         if int(item.get("seq") or 0) != index:
             return "seq 不连续"

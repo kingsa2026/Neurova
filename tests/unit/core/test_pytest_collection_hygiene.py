@@ -212,3 +212,125 @@ def test_reverseProofDetectsAnUncollectableName(tmp_path):
     assert any("模块级函数 test（" in item for item in livePatterns), (
         "裸名 def test 在活口径下未被点名：%s" % livePatterns
     )
+
+
+def _emptyTestModulesUnder(root: Path) -> list:
+    """`test_*.py` 却 **0 字节**：文件名进收集面，内容一条用例也不贡献。
+
+    与本文件主题同源：都是"看起来在守，其实没跑"。`test_noTestCaseNameIsUncollectable`
+    走 AST 数名字，空文件自然数出 0 条不合规 —— 数不出这个形状，所以另立一格。
+    """
+    return [p.relative_to(root).as_posix()
+            for p in _testFilesUnder(root) if p.stat().st_size == 0]
+
+
+def test_noEmptyTestModules():
+    """测试根下不得留 0 字节的 `test_*.py`（`__init__.py` 不在收集名内，不受本格约束）。
+
+    危害不是"占一行目录"：这类文件的名字通常写着某项安全/回归主题，
+    于是"有这个名字"被当成"有这项覆盖"——`grep` 到文件名的人会以为那条链已被守过。
+    """
+    offenders = _emptyTestModulesUnder(_TESTS_DIR)
+
+    assert not offenders, (
+        "以下测试模块 0 字节，收集时以 0 用例混在通过数里（名字像覆盖，实为空白）:\n"
+        + "\n".join(offenders) + "\n"
+        "要么补上真断言，要么删掉——留着就是给「这项有测」留一张空票"
+    )
+
+
+def test_reverseProofDetectsAnEmptyTestModule(tmp_path):
+    """反向自证：判定必须抓得到空模块，且不把"有内容但很少"误报成空。"""
+    (tmp_path / "test_empty.py").write_bytes(b"")
+    (tmp_path / "test_thin_but_real.py").write_text(
+        "def test_one():\n    assert True\n", encoding="utf-8")
+
+    found = _emptyTestModulesUnder(tmp_path)
+
+    assert found == ["test_empty.py"], (
+        "空模块判据要么空转（没抓到 test_empty.py），要么误报了非空模块：%s" % found)
+
+
+#: 已登记的「零用例 test 模块」存量（2026-10-10 按**活配置**现取，逐条路径）。
+#: 形态不是空白，而是**模块级语句**：`print`/裸 `assert`/`if __name__ == "__main__"` 的
+#: 手工脚本留在了唯一测试根里（AGENTS.md §4「临时验证脚本即用即删，不留 tests/ 根目录」）。
+#: 它们仍会在收集期被 import（副作用照跑），只是**一条用例都不产**——于是"这个名字"
+#: 被当成"这项覆盖"。处置（删、迁 `tests/manual/`、或补成真用例）需逐文件裁，
+#: 本表只保证两件事：**不许再长**，且**只能变短**。
+_ZERO_CASE_TEST_FILES_BASELINE = {
+    "auth/test_jwt.py",
+    "auth/test_login_api.py",
+    "integration/test_live_llm.py",
+    "llm/test_volcano_model.py",
+    "test_api/test_api.py",
+    "test_api/test_api_direct.py",
+    "test_api/test_api_shared_graph.py",
+    "test_api/test_endpoints.py",
+    "test_api/test_new_endpoints.py",
+    "test_api/test_server.py",
+    "test_api/test_shared_graph.py",
+    "test_memory/test_real_data.py",
+    "unit/agent/test_agent_collaboration.py",
+    "unit/cognitive/test_conflict_comprehensive.py",
+    "unit/cognitive/test_working_memory_comprehensive.py",
+    "unit/memory/test_memory_isolation.py",
+    "unit/security/test_bug_scanner.py",
+    "unit/security/test_static_code_scanner.py",
+    "unit/skills/test_skill.py",
+    "unit/skills/test_skill_security.py",
+    "unit/test_connection_pool.py",
+    "unit/test_final.py",
+    "unit/test_functionality.py",
+    "unit/test_import_api_endpoints.py",
+    "unit/test_init_order_check.py",
+    "unit/tools/test_builtin_tools.py",
+}
+
+
+def _zeroCaseTestFiles(root: Path, functionPatterns: list, classPatterns: list) -> list:
+    """`root` 下**贡献 0 条可收集用例**的 `test_*.py`（按给定活口径）。"""
+    found = []
+    for path in _testFilesUnder(root):
+        collected = [
+            name for kind, name in _declaredCases(path, classPatterns)
+            if kind != "类" and _matchesCollectionPattern(functionPatterns, name)
+        ]
+        if not collected:
+            found.append(path.relative_to(root).as_posix())
+    return found
+
+
+def test_zeroCaseTestModulesStayOnTheRegisteredList(pytestconfig):
+    """零用例清单与代码逐条对账：新增落点当场红，修好的必须从表里摘掉。"""
+    functionPatterns = pytestconfig.getini("python_functions")
+    classPatterns = pytestconfig.getini("python_classes")
+    found = set(_zeroCaseTestFiles(_TESTS_DIR, functionPatterns, classPatterns))
+
+    extra = sorted(found - _ZERO_CASE_TEST_FILES_BASELINE)
+    assert not extra, (
+        "又出现了「名字像用例集、实则 0 用例」的 test 模块：%s\n"
+        "要么补成真用例，要么移出测试根（临时脚本按 §4 即用即删，或落 `tests/manual/`）"
+        % extra)
+
+    stale = sorted(_ZERO_CASE_TEST_FILES_BASELINE - found)
+    assert not stale, (
+        "这些存量已经不再是零用例了，却还留在表里替不存在的事背书：%s —— 摘掉它们再提交"
+        % stale)
+
+
+def test_reverseProofDetectsAZeroCaseModule(tmp_path):
+    """反向自证：只有模块级语句的文件必须被点名，真有用例的不得误报。"""
+    (tmp_path / "test_script_only.py").write_text(
+        "print('manual probe')\nassert 1 + 1 == 2\n", encoding="utf-8")
+    (tmp_path / "test_real.py").write_text(
+        "def test_one():\n    assert True\n\n\n"
+        "class TestTwo:\n    def test_inner(self):\n        assert True\n",
+        encoding="utf-8",
+    )
+
+    found = _zeroCaseTestFiles(tmp_path, ["test_*", "test[A-Z]*"], ["Test*"])
+
+    assert found == ["test_script_only.py"], (
+        "零用例判据要么空转（没抓到 test_script_only.py），要么误报了真用例文件：%s" % found)
+
+

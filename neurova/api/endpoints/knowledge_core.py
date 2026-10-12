@@ -264,6 +264,42 @@ async def get_foundation_integrity(
     return ActivityDigestChain(get_knowledge_fact_store()).verify()
 
 
+@router.post("/foundation/expiry")
+async def run_foundation_expiry(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """把已到期的事实推进为 `expired`，并撤销以它们为前提的推导结论（批次 K1 / 断点 N1）。
+
+    为什么要有这个端点而不是让 `expireDueFacts()` 继续等着：底座的生命周期注释写着
+    "状态是唯一权威……到期靠显式调用推进，不起后台线程"，而那句"显式调用"在全仓
+    没有落点——于是它下面那段"前提到期⇒撤销其推导"的级联运行期不可达。读侧另有
+    `searchableFacts` 的时钟兜底，直接检索看不出问题，漏的是派生面：由带窗口前提推出的
+    结论行不带窗口（推导器不填 `validUntil`），永远进不了到期候选。
+
+    与 `/foundation/integrity` 同族，但那条只读、这一条**会写**：整库状态迁移不是租户级
+    动作，所以只有管理员能按。这里给 403 而不是 404 同构——不存在"别人的资源"，
+    只存在"普通人不该有这个开关"，装作没有反而让人以为试错姿势不对。
+
+    幂等：只推进 `status='active'` 且已过 `valid_until` 的行，第二次跑回 0；
+    重复跑不重复写活动账，这是它敢被启动路径调一次的前提。
+    """
+    from neurova.api.endpoints.knowledge_common import get_request_id
+
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="到期收敛是整库动作，仅管理员可触发")
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    expired = int(get_knowledge_fact_store().expireDueFacts())
+    return {
+        "code": 0,
+        "message": "Expired facts advanced: %d" % expired,
+        "data": {"expired": expired},
+        "request_id": get_request_id(request),
+    }
+
+
 @router.get("/facts/{fact_id}/lineage")
 async def get_fact_lineage(
     request: Request,
@@ -415,7 +451,11 @@ async def delete_knowledge(
     - 公共库与私人库是同一份物理数据（submit-public 仅改可见性）。
     - 管理员删除「他人提交的公共条目」→ 默认下架：条目保留、回私有、
       submission 置 rejected——公共库消失，属主私人库保住。
-    - ?purge=true → 物理删除整条（清除违规内容的显式通道）。
+    - ?purge=true → 条目擦除喉：逐面清除该条目留在各存储的正文副本（权威事实行、
+      断言正文、活动信封、向量分片、投影节点、条目行与墓碑），并逐面回执。
+      断言**行**留在审计链上（`seq`/`digest`/`statement_hash` 不动，正文置空并打
+      `erased_at` 标记）——合规删除不以毁掉 `/foundation/integrity` 为代价。
+      任一面失败即回 500 并点名是哪一面，不再无条件报"已删除"。
     - 删除自己的条目（属主或管理员自建）→ 物理删除，语义不变。
     """
     from neurova.api.endpoints.knowledge_common import get_request_id
@@ -446,13 +486,30 @@ async def delete_knowledge(
             }
 
     if purge:
-        repo.purge_knowledge(_agent_id, knowledge_id)
-    else:
-        repo.delete_knowledge(
-            _agent_id,
-            knowledge_id,
-            deleted_by=str(current_user.get("user_id", "")),
-        )
+        receipt = repo.purge_knowledge(
+            _agent_id, knowledge_id,
+            reason="purge by %s" % str(current_user.get("user_id", "")))
+        failed = {name: face for name, face in receipt["faces"].items()
+                  if face.get("state") == "failed"}
+        if failed:
+            # 半删不叫删：把失败面点名交回调用方，别让它读成"已删除"。
+            raise HTTPException(
+                status_code=500,
+                detail={"knowledge_id": knowledge_id, "faces_failed": failed,
+                        "message": "条目擦除未完成，正文仍在下列存储面可读"})
+        return {
+            "code": 0,
+            "message": "Knowledge '%s' erased" % knowledge_id,
+            "data": {"knowledge_id": knowledge_id, "action": "purged",
+                     "erasure": receipt},
+            "request_id": request_id,
+        }
+
+    repo.delete_knowledge(
+        _agent_id,
+        knowledge_id,
+        deleted_by=str(current_user.get("user_id", "")),
+    )
 
     return {
         "code": 0,

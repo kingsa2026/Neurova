@@ -24,7 +24,7 @@ from neurova.context import ContextOrchestrator
 from neurova.core.idle_tracker import IdleTimeTracker
 from neurova.llm_client import LLMConfig
 from neurova.mem_core import MemCore
-from neurova.router import MessageRouter, RouteResult
+from neurova.router import Message, MessageRouter, RouteResult
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
 # ADR 0011: 从 skill_system 导入规范 SkillRegistry（class A），
 # 而非 skills/registry.py 的 class B（tuple 返回/__len__ falsy/register 双参）。
@@ -1684,8 +1684,8 @@ class Agent:
             # 如果 Router 未初始化，自动初始化
             self.init_router()
 
-        # 创建消息对象
-        message = self._router.create_message(content=content, sender=sender)
+        # 消息构造只留 `Message` 一处（Router 的 create_message 已随异步化重构移除）
+        message = Message(content=content, sender_id=sender)
 
         # 附加引用以便命令处理器访问
         message.metadata["agent"] = self

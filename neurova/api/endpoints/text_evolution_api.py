@@ -201,6 +201,9 @@ class ABRequest(BaseModel):
     skill_id: str
     candidate_text: str = Field(min_length=1)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
+    # 执行面开关：默认 False=模拟面（单轮 chat，零工具零上下文）。真轨迹臂会把候选正文
+    # 经轮级覆盖槽送进一次真实 agent 回合，成本约 2 臂×任务数 个回合，且必须显式开。
+    real_trajectory: bool = False
 
 
 @router.post("/skills/{agent_id}/ab", dependencies=[Depends(_admin_dep)])
@@ -252,9 +255,40 @@ async def ab_compare_texts(body: ABRequest, agent_id: str,
 
     report = await service.ab_compare(
         baseline_text=skill_text, candidate_text=body.candidate_text,
-        dataset=dataset, config=config,
+        dataset=dataset, config=config, agent=_textArmExecutorFor(agent_id, info, body),
     )
+    # 来源标注不在这里重算：service 已按"真正拿去执行的那个对象"定好。端点自己
+    # 再推一遍就会分叉（实测：注入真臂后被这里改标成 simulated，标注反而成了谎）。
     return {"code": 0, "data": report}
+
+
+def _textArmExecutorFor(agent_id: str, info: Dict[str, Any], body: ABRequest):
+    """按请求把双臂切到真 agent 轨迹；**不在此判执行器类型**，只负责装配与诚实失败。
+
+    三条口径：
+    · 拿不到 agent ⇒ 409 点名原因并给出回退项，绝不静默降级成模拟面（教义第 2 条）；
+    · 技能名组不出 `$mention` ⇒ 422——那种情况下两臂会拿到同一份仓内正文，
+      比出一个看起来正常的假 0 差；
+    · `real_trajectory=false` ⇒ 返回 None，由 service 的装配接缝回落模拟面，
+      并在报告里如实标注来源（`executor_kind`）。
+    """
+    if not body.real_trajectory:
+        return None
+
+    from neurova.api.endpoints import get_agent_instance
+    from neurova.evolution.eval.ab_library import TextArmAgentExecutor
+
+    agent = get_agent_instance(agent_id)
+    if agent is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"agent「{agent_id}」不在线，无法跑真轨迹双臂；"
+                    "如需继续请用 real_trajectory=false 走模拟面（报告会标注来源）"),
+        )
+    try:
+        return TextArmAgentExecutor(agent, skill_name=str(info.get("name") or body.skill_id))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 def _load_settings_safe():
@@ -295,11 +329,25 @@ async def list_evolution_proposals(
 @router.get("/skills/{agent_id}/proposals/{proposal_id}")
 async def get_evolution_proposal_detail(agent_id: str, proposal_id: str,
                                         user: Dict[str, Any] = Depends(get_current_user)):
+    """提案详情：正文 + 那次进化的审计运行（§6-95 后半给 `runs/*.json` 接上的读者）。
+
+    刻意走这条**既有**详情面而不是新建端点：审批人点开提案时本来就要取一次详情，
+    运行记录挂在这里等于"决策时看得见证据"，而不是再多一个没人调的通道
+    （台账 §6-111 记的就是"落了零消费者的读数"那种形态）。
+    一条如实边界：**被门拒掉的候选不产提案**，所以这条读路径天然只覆盖"出了提案的那些
+    运行"；「门逐条拦了谁」那一半仍无出口（属另一裁，见台账 §6-95 后半）。
+    """
     from neurova.evolution.eval.service import SkillEvolutionService
 
-    for p in SkillEvolutionService(agent_id).list_proposals():
+    service = SkillEvolutionService(agent_id)
+    for p in service.list_proposals():
         if p.get("proposal_id") == proposal_id:
-            return {"code": 0, "data": p}
+            runState, runPayload = service.runLookup(str(p.get("run_id") or ""))
+            return {"code": 0, "data": {
+                **p,
+                "evolution_run": runPayload,
+                "evolution_run_status": runState,
+            }}
     raise HTTPException(status_code=404, detail=f"提案不存在: {proposal_id}")
 
 

@@ -71,6 +71,19 @@ class SkillMarkdownExecutor(BaseSkillExecutor):
 
         meta, instructions = parse_skill_md(text)
 
+        # 同一契约的第二命中点：SKILL.md 型技能的指令体是经**工具返回**进模型的，
+        # 不经 mention 注入那条路。双臂试评若只覆盖注入面，这类技能的候选正文根本
+        # 到不了模型——两臂拿到同一份正文，比出个假的 0 差（教义第 5 条要求同契约
+        # 全部命中点一并接）。槽未设时走文件原文，线上行为零变化。
+        from neurova.core import turn_context
+
+        override = turn_context.get_turn_skill_text_override(
+            str(meta.get("name") or self.skill_name or self.skill_id))
+        if override is None:
+            override = turn_context.get_turn_skill_text_override(str(self.skill_id))
+        if override is not None:
+            instructions = override
+
         scripts: list = []
         scripts_dir = self.skill_dir / "scripts"
         if scripts_dir.exists():
