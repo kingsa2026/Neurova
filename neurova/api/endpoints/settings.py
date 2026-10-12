@@ -34,7 +34,10 @@ router = APIRouter(prefix="/v1/settings")
 # 默认设置（平铺 legacy 键，供 /{key} 兼容读写）
 _default_settings = {
     "theme": "dark",
-    "language": "zh-CN",
+    # 2026-10-12 §6-167：`language` 一格退役。它先前**同时**是这张平铺表的一格与
+    # `core/app_settings.py` `GENERAL_DEFAULTS` 的一格——同一个面把同一个问题回显两遍
+    # （顶层一份、general 一份），而两份的读者都是 0 处。语言的起点现在只在语言层
+    # （`GET/PUT /api/v1/language/preferences/default`，写面仅管理员）。
     "auto_save": True,
     "notifications": True,
     "stream_mode": True,
@@ -48,6 +51,40 @@ _default_settings = {
 # 结构化 section（真持久化，data/app_settings.json——替换内存 stub：
 # 此前高级选项卡保存即丢、读取形状错位，整页为装饰性）
 _SETTINGS_SECTIONS = ("general", "security", "storage", "advanced", "routing")
+
+#: 已退役的语言键：本面**既不读也不收**。
+#: 只删默认表是不够的——`PUT /settings` 的 body 是 `Dict[str, Any]`，没有任何闭集校验
+#: （实测旧调用方写 `"zh_CN"` 这种下划线码也照样回 200），所以旧键能被原样写回盘上、
+#: 再被 `GET` 原样回显，得到一根**只写不读**的新断链，比退役前更糟。
+#: 按教义第 2 条，退役后的键必须以显式 400 ＋ 去处暴露，而不是静默收下。
+RETIRED_LANGUAGE_KEY = "language"
+#: 拒因里必须带的去处——不带给谁去，旧调用方只会重试，不会知道自己该改指哪里。
+LANGUAGE_MIGRATION_POINTER = (
+    "语言的默认值已收口到语言层：开箱默认（影响所有还没选过语言的人，仅管理员可写）"
+    " PUT /api/v1/language/preferences/default，本人偏好 PUT /api/v1/language/preferences/mine")
+
+
+def _rejectRetiredLanguageKey(key: str, where: str) -> None:
+    if key == RETIRED_LANGUAGE_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{where} 不再接受 `{RETIRED_LANGUAGE_KEY}` 这一格：{LANGUAGE_MIGRATION_POINTER}")
+
+
+def _dropRetiredLanguageKeys(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """把盘上残留的旧键从**读数**里摘掉，但不改写数据根里的文件。
+
+    两件事分开是有意的：回显一份没人读的键＝假装这条词汇还活着；而一次 GET 顺手
+    "清理"别人的盘＝把读操作变成一次不可逆的写（判据
+    `testReadingTheFileDoesNotRewriteIt` 钉这条边界）。
+    """
+    cleaned = {k: v for k, v in settings.items() if k != RETIRED_LANGUAGE_KEY}
+    general = cleaned.get("general")
+    if isinstance(general, dict) and RETIRED_LANGUAGE_KEY in general:
+        cleaned["general"] = {k: v for k, v in general.items()
+                              if k != RETIRED_LANGUAGE_KEY}
+    return cleaned
+
 
 # CORS 配置文件路径
 _CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"
@@ -114,7 +151,7 @@ def _merged_settings() -> Dict[str, Any]:
     settings = dict(_default_settings)
     settings.update(flat)
     settings.update(stored)
-    return settings
+    return _dropRetiredLanguageKeys(settings)
 
 
 @router.get("", response_model=SettingsResponse)
@@ -158,6 +195,15 @@ async def update_settings(
     _get_request_id(request)
 
     from neurova.core.app_settings import save_app_settings
+
+    # 先整批校验再落盘：边校验边写会得到"第 2 项被拒、第 1 项已经写进去了"——
+    # 报错与状态变更不一致，调用方重试时面对的是一个自己没打算要过的中间态。
+    if RETIRED_LANGUAGE_KEY in body.settings:
+        _rejectRetiredLanguageKey(RETIRED_LANGUAGE_KEY, "PUT /v1/settings 的平铺键")
+    for key, value in body.settings.items():
+        if key in _SETTINGS_SECTIONS and isinstance(value, dict):
+            if RETIRED_LANGUAGE_KEY in value:
+                _rejectRetiredLanguageKey(RETIRED_LANGUAGE_KEY, f"`{key}` section")
 
     flat_updates: Dict[str, Any] = {}
     for key, value in body.settings.items():
@@ -478,6 +524,8 @@ async def update_setting(
             status_code=400,
             detail=f"'{key}' 是结构化 section，请用 PUT /v1/settings 提交对象",
         )
+    # 同根因的第二个写口（教义第 5 条）：整表 PUT 拒了而单键不拒，旧键就能从这里活回来
+    _rejectRetiredLanguageKey(key, f"PUT /v1/settings/{key}")
     save_app_settings("flat", {key: value})
     _default_settings[key] = value
 

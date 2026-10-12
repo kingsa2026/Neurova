@@ -2320,6 +2320,8 @@ export default {
     general: 'सामान्य',
     generalSettings: 'सामान्य सेटिंग्स',
     appName: 'ऐप्लिकेशन नाम',
+    outOfBoxLanguage: 'डिफ़ॉल्ट भाषा',
+    outOfBoxLanguageHint: 'केवल उन उपयोगकर्ताओं पर लागू होती है जिन्होंने अभी भाषा नहीं चुनी; उनका अपना चुनाव ही माना जाता है (केवल एडमिन)।',
     security: 'सुरक्षा',
     securitySettings: 'सुरक्षा सेटिंग्स',
     jwtSecret: 'JWT गुप्त कुंजी',

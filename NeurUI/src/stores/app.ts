@@ -9,7 +9,12 @@ import i18n, {
   readStoredLocaleCode,
   uiCodeForLanguageTag,
 } from '@/i18n'
-import { getMyLanguagePreference, getTranslationOverlay, setMyLanguagePreference } from '@/api/modules/language'
+import {
+  LANGUAGE_SOURCE,
+  getMyLanguagePreference,
+  getTranslationOverlay,
+  setMyLanguagePreference,
+} from '@/api/modules/language'
 
 const THEME_KEY = 'app_theme'
 const SKIN_KEY = 'app_skin'
@@ -174,12 +179,18 @@ export const useAppStore = defineStore('app', () => {
    *
    * 读数分五类，每一类都留得下来（`outcome` 是给判据与日志用的，不是给用户看的弹窗）：
    * - `applied`   —— 服务端有偏好且能映射到本 UI 的语言，界面已切过去；
-   * - `same`      —— 服务端偏好与本地一致，什么都不动；
+   * - `same`      —— 服务端读数与本地一致，什么都不动；
    * - `unmapped`  —— 服务端给的语言本 UI 没有语言包（如 `pt`），**保持本地选择**，
    *                  不把某人切到他根本没选的语言；
-   * - `default` / `failed` —— 没设过偏好 / 请求没成，同样保持本地。
+   * - `default` / `failed` —— 谁都没给过起点 / 请求没成，同样保持本地。
+   *
+   * §6-167 之后多了一条**来源**（`via`）：这个人没自己选过、但管理员定过开箱默认时，
+   * 默认照样作用在他身上（`via=out_of_box`），而**不会**被回写成他的偏好——
+   * 回写就把"起点"冻成了"偏好"，以后管理员再改也不再作用于他。
    */
-  async function syncLocaleFromServer(): Promise<{ outcome: string; from?: string; to?: string }> {
+  async function syncLocaleFromServer(): Promise<{
+    outcome: string; from?: string; to?: string; via?: string
+  }> {
     const from = locale.value
     let view
     try {
@@ -187,12 +198,22 @@ export const useAppStore = defineStore('app', () => {
     } catch {
       return { outcome: 'failed', from }
     }
+
+    const code = view ? uiCodeForLanguageTag(view.primary_language) : ''
     if (!view?.configured) {
+      if (view?.source === LANGUAGE_SOURCE.outOfBox && code) {
+        if (code === from) {
+          refreshOverlay(from)
+          return { outcome: 'same', from, to: code, via: LANGUAGE_SOURCE.outOfBox }
+        }
+        // persist=false：读来的东西不许再写回去（见 setLocale 那条注释）
+        setLocale(code, false)
+        return { outcome: 'applied', from, to: code, via: LANGUAGE_SOURCE.outOfBox }
+      }
       refreshOverlay(from)
       return { outcome: 'default', from }
     }
 
-    const code = uiCodeForLanguageTag(view.primary_language)
     if (!code) return { outcome: 'unmapped', from, to: view.primary_language }
     if (code === from) {
       refreshOverlay(code)

@@ -2320,6 +2320,8 @@ export default {
     general: 'Allgemein',
     generalSettings: 'Allgemeine Einstellungen',
     appName: 'App-Name',
+    outOfBoxLanguage: 'Voreingestellte Sprache',
+    outOfBoxLanguageHint: 'Gilt nur für Personen, die selbst noch keine Sprache gewählt haben; eine eigene Wahl hat immer Vorrang. Nur für Administratoren.',
     security: 'Sicherheit',
     securitySettings: 'Sicherheitseinstellungen',
     jwtSecret: 'JWT-Geheimnis',
