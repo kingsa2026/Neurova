@@ -27,6 +27,7 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 import pytest
+from tests import ast_scan
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -523,8 +524,9 @@ class TestEveryRefusalHasHttpSemantics:
         found = set()
         # 按目录扫，不手抄文件清单：包里没有 `PluginError` 抛点＝没人能授予也没人能挂，
         # 那种「扫不到东西」的绿是本判据最危险的失效形态（成因集合为空时下面的格子会红）。
-        for path in sorted((PROJECT_ROOT / "neurova" / "plugins").glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        # 枚举与解析走共享预算（含 `__pycache__` 剪枝；只扫一遍）。
+        for path in sorted(ast_scan.filesUnder(PROJECT_ROOT / "neurova" / "plugins")):
+            tree = ast_scan.transientTree(path)
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue

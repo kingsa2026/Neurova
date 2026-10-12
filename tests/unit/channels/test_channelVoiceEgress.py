@@ -22,6 +22,7 @@ import pathlib
 import wave
 
 import pytest
+from tests import ast_scan
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CHANNELS = REPO / "neurova" / "channels"
@@ -134,10 +135,11 @@ class TestTurnAudioReachesReplyItems:
         本档第一版自己就踩了一次）。
         """
         offenders = []
-        for path in sorted(CHANNELS.rglob("*.py")):
-            if "__pycache__" in path.parts or path.name == "voice_egress.py":
+        # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍）。
+        for path in sorted(ast_scan.filesUnder(CHANNELS)):
+            if path.name == "voice_egress.py":
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = ast_scan.transientTree(path)
             for node in ast.walk(tree):
                 targets = []
                 value = None
@@ -228,8 +230,9 @@ class TestDeclaredCapabilityMustBeImplemented:
 
     def _declarations(self):
         out = []
-        for path in sorted(CHANNELS.glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        # 枚举与解析走共享预算（同上）。
+        for path in sorted(ast_scan.filesUnder(CHANNELS)):
+            tree = ast_scan.transientTree(path)
             for cls in [n for n in tree.body if isinstance(n, ast.ClassDef)]:
                 mode = None
                 for stmt in cls.body:
@@ -244,7 +247,7 @@ class TestDeclaredCapabilityMustBeImplemented:
     def test_everyDeclaringAdapterReadsTheFilePath(self):
         offenders = []
         for cls_name, path, mode in self._declarations():
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = ast_scan.transientTree(path)
             cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls_name)
             send = next((n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_message"), None)
             if send is None:
@@ -259,7 +262,7 @@ class TestDeclaredCapabilityMustBeImplemented:
     def test_detectorIsNotBlind(self):
         """反向对照：同一段代码里把 send_message 换成不读任何 kwargs，探测器必须报出来。"""
         src = "class A:\n    voiceOutMode = VOICE_OUT_AUDIO_FILE\n    async def send_message(self, c, x, **kw):\n        return 1\n"
-        tree = ast.parse(src)
+        tree = ast_scan.transientSource(src)
         cls = tree.body[0]
         send = cls.body[1]
         read = {n.id for n in ast.walk(send) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
@@ -364,7 +367,7 @@ class TestFeishuEgressIsReal:
     def test_declaringModeIsBackedByAnUploadCall(self):
         """AST 反查：声明 audio_file 的适配器，其语音分支必须真调用上传面。"""
         src = (CHANNELS / "feishu.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = ast_scan.transientSource(src)
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "FeishuAdapter")
         called = {
             getattr(c.func, "attr", "")
