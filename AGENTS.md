@@ -133,6 +133,18 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
 
 - **深模块模式**：模块经 `agent_ref` 依赖注入访问 Agent，禁止直接 import Agent（循环依赖靠懒加载 `__getattr__` 打破——不要随手把局部 import 提到模块级）。
 - **单例**：懒创建型单例必须走 DCL（double-checked locking）+ `threading.RLock`；`neurova/agent/` 包的 `__init__` 链回 `tool_executor`，新增模块导入注意懒加载。
+- **身份只有一条通道**（§6-163 裁定甲）：`neurova/core/identity_context.py` 的
+  `neurova_request_user_id` 是全仓唯一"这一轮是谁"，装的是**说话的人（sender）**，只由请求边界写一次
+  （HTTP `/v1/chat` 与 `/v1/chat/stream`、`console` REST/WS、`mobile_pairing`、渠道路由、工具与 MCP
+  侧各自的边界）。**会话记录的可见性不走这条通道**：由 `meta["session_owner_id"]` 显式带上
+  （渠道路径＝agent 属主，Issue #290 Wave H-W0），取法单点是 `post_chat_pipeline.resolveSessionOwner()`，
+  `MemCore.save_to_session` 只收参数、不从环境猜。缺省兜底属于各消费方（属主＝空即共享、用量＝anonymous、
+  profile 池＝default、配额＝无身份即不判），门面里兜一层就是第二个事实源。
+  **渠道回合有两个记账主体**：模型额度与 usage 按发送者计，运行台账（`core/agent_run_ledger`）的行
+  `user_id` 与续跑权威仍按 agent 属主——这是裁定的结果，不是漂移。新增第二条装 `user_id` 的
+  ContextVar、或往 `set_request_identity(...)` 传 `user_id`，一律算复活旧病（常驻判据：
+  `tests/unit/core/test_identityChannelMergedToOneSource.py`、`tests/unit/agent/test_turnIdentitySingleSource.py`、
+  `tests/unit/agent/test_requestUserIdEntryConsistency.py`）。
 - **可选依赖**：一律惰性 import + fail-soft，不得在模块顶层裸 import 重型可选依赖（torch 等）。
 - **SQLite**：多线程访问走 `threading.RLock`；WAL 已在 `core/connection_pool.py` 开启；schema 变更加入 `core/db_migration.py` 注册表（PRAGMA user_version），不要只写 `IF NOT EXISTS`。
 - **尺寸棘轮**：`agent_core.py` 有常驻尺寸门禁（`tests/unit/agent/test_agent_core_size_ratchet.py`，基线只降不升）——新装配逻辑落独立模块，不要回填。

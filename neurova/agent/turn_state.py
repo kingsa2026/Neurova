@@ -3,7 +3,7 @@
 
 职责与边界
 ==========
-轮次级状态（本轮用户输入/身份、工具展示消息、工具事件、思考过程、
+轮次级状态（本轮用户输入、会话号、工具展示消息、工具事件、思考过程、
 会话轮次号）的实际存储自审计 P0-B1 起就在 ``neurova.core.turn_context``
 的 ContextVar 中（并发请求天然隔离，会话轮次号按会话单调）。本模块把
 Agent 上那 17 个"轮次级显式 API"（P3-c）的**实现**从 agent_core 迁到
@@ -12,8 +12,11 @@ Agent 上那 17 个"轮次级显式 API"（P3-c）的**实现**从 agent_core �
 - Agent 持有 ``self.turn_state = TurnState()``，同名方法/property 一行
   转发——对 deep modules（chat_pipeline / tool_executor / loops /
   post_chat_pipeline）与 tests 的契约名零变化；
-- ``set_request_identity`` 的 user_id 缺省落 "default" 语义在此实现
-  （与 P0-B1 前 chat_pipeline 写入语义一致）；
+- **身份不在本模块实现**（§6-163 裁定甲）：原先 ``set_request_identity`` 带
+  ``user_id`` 且缺省落 "default"，与 ``core.identity_context`` 那条通道同答
+  "这一轮是谁"；合并后 ``current_user_id`` 只是那条唯一通道的**直读转发**，
+  且**不自带兜底**——缺省口径属于各消费方（属主＝空即共享、用量＝anonymous、
+  profile 池＝default、配额＝无身份即不判），门面替它们兜就是第二个事实源；
 - ``session_id`` property 保持 "未设置返回空串" 的读取契约。
 
 硬约束（方案 §4）：
@@ -39,7 +42,6 @@ from neurova.core.turn_context import (
     get_turn_session_id,
     get_turn_tool_events,
     get_turn_tool_messages_snapshot,
-    get_turn_user_id,
     get_turn_user_input,
     increment_turn_count as _tc_increment,
     reset_turn_tool_messages,
@@ -106,17 +108,17 @@ class TurnState:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
     ) -> None:
-        """记录本轮请求级身份（工具层三层隔离/蜂群事件广播依赖）。
+        """记录本轮的轮次内容（输入与会话号；工具层三层隔离/蜂群事件广播依赖）。
 
-        审计 P0-B1：轮次级状态迁 ContextVar——Agent 是单例，实例属性存储
-        在并发请求下互踩（请求 B 覆盖请求 A 的身份/工具消息）。
-        user_id 缺省落 "default"（与原 chat_pipeline 写入语义一致）。
+        审计 P0-B1：轮次级状态迁 ContextVar——Agent 是单例，实例属性存储在并发请求下互踩。
+        **身份不从这里走**（§6-163 裁定甲）：原先它带一个 `user_id` 写进第二条通道，
+        与请求边界写的 `neurova_request_user_id` 同答"这一轮是谁"；合并后这条门面只管内容，
+        签名里不许再加回 `user_id`，否则两条通道立刻复活。
         """
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity(user_input, session_id, user_id)
+        set_turn_identity(user_input, session_id)
 
     @property
     def current_user_input(self) -> Optional[str]:
@@ -132,9 +134,14 @@ class TurnState:
 
     @property
     def current_user_id(self) -> Optional[str]:
-        from neurova.core.turn_context import get_turn_user_id
+        """这一轮是谁——唯一出处是请求边界写的那条通道（§6-163）。
 
-        return get_turn_user_id()
+        这里**不做兜底**：兜底口径属于消费方各自的语义（属主＝空即共享、配额＝无身份即不判、
+        浏览器池＝`default`），在门面里兜一层就是第二个事实源。
+        """
+        from neurova.core.identity_context import get_request_user_id
+
+        return get_request_user_id()
 
     # ── 思考过程 ────────────────────────────────────────────────
 

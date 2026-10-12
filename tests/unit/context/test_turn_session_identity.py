@@ -66,7 +66,7 @@ def _clearTurnIdentity():
     from neurova.core.turn_context import set_turn_identity
 
     yield
-    set_turn_identity("", None, None)
+    set_turn_identity("", None)
 
 
 class _TurnIdentityAgent(MagicMock):
@@ -111,7 +111,7 @@ def _setTurnIdentity(session_id):
     """写入本轮身份（与 `chat_pipeline._init_agent_state` 同型）。"""
     from neurova.core.turn_context import set_turn_identity
 
-    set_turn_identity("继续", session_id, "u1")
+    set_turn_identity("继续", session_id)
 
 
 async def _build(orch, *, user_input="继续", history, collab=False, room_id=""):

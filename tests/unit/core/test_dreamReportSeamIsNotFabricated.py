@@ -9,7 +9,9 @@
 - `storage.save_dream_report(...)` / `get_dream_report(...)` / `get_dream_report_stats()` ——
   `git log --all -S "def save_dream_report"` **零命中**：写侧从来没实现过，不是被删的；
 - `CognitionOrchestrator(storage=...)` 与 `orchestrator._storage` —— 真签名
-  `__init__(self, config=None)`（`core/cognition_orchestrator.py:322`），类里也没有 `_storage`；
+  `__init__(self, config=None)`（当时位于 `core` 包那只编排器的 `:322`，该文件已随 §6-166 退役；
+  复核这条依据请用 `git log -S "def get_cognition_orchestrator" --oneline`，别按现树找文件），
+  类里也没有 `_storage`；
 - `IdleTimeTracker(storage=...)` / `idle_thresholds=` —— 真签名不收这些参数
   （`core/idle_tracker.py:90`）。
 

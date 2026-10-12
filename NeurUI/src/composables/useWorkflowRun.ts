@@ -146,6 +146,8 @@ export function useWorkflowRun() {
               node_completed: 'success',
               node_failed: 'failed',
               node_skipped: 'skipped',
+              // 引擎对声明幂等的节点自动重来：节点仍在跑，不得闪成 failed
+              node_retry: 'running',
             }
             setStep(frame.node_id, map[frame.type] || 'running')
           }

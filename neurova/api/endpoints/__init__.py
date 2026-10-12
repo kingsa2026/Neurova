@@ -320,6 +320,11 @@ ENDPOINT_MODULES = [
     #     此前零挂载且零鉴权；本批补身份闸口（破坏性动作另加管理员闸）后接线。
     ("neurova.api.endpoints.computer_api", "/v1", "Computer API"),
     ("neurova.api.endpoints.phase3_api", "/v1", "Phase 3 Intelligence API"),
+    # 语言面（台账 §6-145 裁定乙）：`neurova/language/` 这个包此前全仓零生产消费者——
+    # `get_language_manager()`/`init_language()` 没有一处调用点，于是"用户选了什么语言"
+    # 在后台既不存在也留不住，而外部/用户上传的译文写完就没人读得出来。
+    # 这一行是那两条断链的接法：读面（偏好 + 覆盖层）+ 管理员写面。
+    ("neurova.api.endpoints.language_api", "/v1/language", "Language API"),
 ]
 
 

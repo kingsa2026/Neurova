@@ -697,6 +697,8 @@ async def list_nodes(
                 "source": n.source,
                 "version": n.version,
                 "tags": n.tags,
+                # 幂等声明：画布据此告知"这个节点失败后引擎会自动重来"
+                "idempotent": bool(getattr(n, "idempotent", False)),
                 # 端口与配置表单（画布动态节点库渲染用）
                 "inputs": [_port_to_dict(p) for p in (n.inputs or [])],
                 "outputs": [_port_to_dict(p) for p in (n.outputs or [])],
@@ -1178,11 +1180,6 @@ async def create_agent(data: Dict[str, Any] = Body(...)):
         role = data.get("role")
         if not name or not role:
             raise HTTPException(status_code=400, detail="名称和角色是必填字段")
-
-        import logging
-
-        logger = get_logger(__name__)
-        logger.error("DEBUG: name=%s, role=%s, manager=%s", name, role, manager)
 
         agent = manager.create_agent(name=name, role=role, config=data.get("config", {}), flow_id=data.get("flow_id"))
         from starlette.responses import JSONResponse

@@ -353,6 +353,9 @@ const ChatPage: React.FC = () => {
 
 ## 4. 国际化（i18n）
 
+> **本节是通用范式草图，与本仓实装不同源**（2026-10-12 复核，台账 §6-167 登记）：仓内**没有** `src/contexts/LanguageContext.tsx`，也没有 `src/locales/*.json`；真正那条链是 `NeurUI/src/i18n/index.ts`（11 份 locale、`readStoredLocaleCode`、`uiCodeForLanguageTag`）＋ `NeurUI/src/stores/app.ts` 的 `setLocale`（改语言的唯一一处）。
+> 尤其**不要**照下面的 `localStorage.getItem('language')` 再建第五份「默认语言」——仓内那四份已按 §6-167 收口到语言层一处（`LanguageManager` 的按人偏好＋开箱默认），而 UI 侧那个键名是 `locale` 不是 `language`（唯一读者在 `i18n/index.ts`）。整节按实况重写＝另一刀，已登记待做，不在本批顺手改画架构图。
+
 ### 4.1 i18n配置位置
 
 **主配置**: `src/contexts/LanguageContext.tsx`

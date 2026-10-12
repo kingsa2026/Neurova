@@ -82,6 +82,7 @@ PROBES = [
     ("PUT", "/config", "/config"),
     ("POST", "/save", "/save"),
     ("POST", "/batch-delete", "/batch-delete"),
+    ("GET", "/trash", "/trash"),
     ("GET", "/download/media-abc123", "/download/{media_id}"),
     ("GET", "/stats/a1", "/stats/{agent_id}"),
     ("POST", "/cache/clear", "/cache/clear"),
@@ -90,6 +91,7 @@ PROBES = [
     # 参数路由本身照常工作（守卫不是禁参数路由）
     ("GET", "/media-abc123", "/{media_id}"),
     ("GET", "/media-abc123/metadata", "/{media_id}/metadata"),
+    ("POST", "/media-abc123/restore", "/{media_id}/restore"),
     ("DELETE", "/media-abc123", "/{media_id}"),
 ]
 
@@ -131,14 +133,19 @@ def test_dead_pydantic_models_removed(model_name):
 
 
 # 删除前捕获的真实路由表（path, methods）——④ 的行为不变锚
+# §6-156（批 13，裁定乙）新增两档：GET /trash 与 POST /{media_id}/restore。
+# 这份清单的用途是"锚住形状"，不是"禁增面"——增面时必须同时改这里，
+# 否则锚就变成一条永远红的摆设（同族教训见台账"清单改动别借他人 commit"）。
 EXPECTED_ROUTES = [
     ("/save", {"POST"}),
     ("/list", {"GET"}),
     ("/config", {"GET"}),
     ("/config", {"PUT"}),
     ("/batch-delete", {"POST"}),
+    ("/trash", {"GET"}),
     ("/{media_id}", {"GET"}),
     ("/{media_id}/metadata", {"GET"}),
+    ("/{media_id}/restore", {"POST"}),
     ("/download/{media_id}", {"GET"}),
     ("/{media_id}", {"DELETE"}),
     ("/stats/{agent_id}", {"GET"}),

@@ -3,10 +3,17 @@ Neurova Language 管理器
 
 功能:
 1. 多语言翻译管理
-2. 用户语言偏好管理
+2. 用户语言偏好管理（**落盘**，见下）
 3. 实时语言切换
 4. 翻译缓存
 5. 用户数据隔离（每个用户独立的语言设置）
+
+用户语言偏好的落盘口径（台账 §6-145 裁定乙）：原先偏好只存在实例字典里，
+进程重启即全失，而 `get_statistics()` 一直在数它——那是一个每次启动都归零的读数。
+现在写盘走 `core/atomic_io.atomic_write_text` 单点，落点刻意放在
+**译文目录的旁边而不是里面**：`_load_external_translations()` 把 `data_dir/*.json`
+的每个文件当一个命名空间读，偏好文件放里面会长出一条假的 namespace（多出来的读数不报错，
+只会一直在那儿）。写盘失败 ⇒ 内存回滚并回 `False`，不许"内存改了、告诉用户已保存"。
 """
 
 import json
@@ -14,7 +21,7 @@ from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.language.models import (
     Language,
@@ -24,10 +31,28 @@ from neurova.language.models import (
     TranslationResponse,
     UserLanguagePreference,
 )
+from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
 from neurova.core.data_root import callerPath
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
+
+#: 偏好文件名（放在译文目录的**同级**，见模块 docstring 那条 glob 约束）
+PREFERENCES_FILE_NAME = "language_preferences.json"
+#: 落盘格式版本。读到不认识的版本一律不采信并隔离——半自动映射会把"当初没人签字的决定"
+#: 变成"看起来有人签字过"（与插件授权存储 `STORE_VERSION` 同一口径）。
+PREFERENCES_STORE_VERSION = 1
+#: 存储里那条**开箱默认**的顶层键名（§6-167 取长补短取进来的那一格）。它落在顶层而不是
+#: `preferences` 表里——占一条用户行的话，「多少人设过偏好」会被管理员那一次点击灌大，
+#: 而 `configured` 也会把一个替所有人做的决定报成本人做过的决定。
+#: **新增可选键不抬版本**：抬了就是让今天已落盘的每条按人偏好被上面那段版本隔离逻辑
+#: 改名隔离——那不是兼容，是凭空丢掉真数据。
+DEFAULT_STORE_KEY = "default"
+#: 那条开箱默认在内存里的**保留属主名**（`UserLanguagePreference.user_id` 要求非空，
+#: 而这一格不属于任何具体的人）。它**永远不进 `preferences` 表**——真有个用户叫这名字
+#: 也拿不到那条读数，判据 `testTheDefaultIsNotStoredAsAUserRow` 钉的就是这件事。
+#: HTTP 面要构造那条哨兵偏好时取用本常量，不在自己文件里再抄一遍串（教义第 6 条）。
+OUT_OF_BOX_OWNER = "__defaults__"
 
 
 class LanguageManager:
@@ -37,16 +62,27 @@ class LanguageManager:
     负责管理多语言翻译、用户语言偏好和翻译缓存。
     """
 
-    def __init__(self, data_dir: Optional[str] = None, default_language: Language = Language.CHINESE):
+    #: 「这个人现在该看哪种语言」这条解析链的**来源词汇，全仓只在这一定义**（教义第 6 条）。
+    #: 三个值各有实义：`user`＝本人显式选过；`out_of_box`＝管理员替还没选的人定的起点；
+    #: `builtin`＝谁都没定，落到枚举级的 last resort。HTTP 面与前端的分支都取这一份，
+    #: 第二处字面量长出来时先漂移的一定是没人对着读的那份（判据按文件面钉住）。
+    EFFECTIVE_SOURCES = ("user", "out_of_box", "builtin")
+
+    def __init__(self, data_dir: Optional[str] = None, default_language: Language = Language.CHINESE,
+                 preferences_path: Optional[str] = None):
         """
         初始化语言管理器
 
         Args:
             data_dir: 数据目录路径
             default_language: 默认语言
+            preferences_path: 用户偏好落盘路径；不给则落 `data_dir` **同级**的
+                `language_preferences.json`（同级而不是里面，理由见模块 docstring）
         """
         self.data_dir = callerPath(data_dir, "language")
         self.default_language = default_language
+        self.preferences_path = (Path(preferences_path) if preferences_path
+                                 else self.data_dir.parent / PREFERENCES_FILE_NAME)
 
         # 线程锁
         self._lock = threading.RLock()
@@ -56,6 +92,10 @@ class LanguageManager:
 
         # 用户语言偏好: {user_id: UserLanguagePreference}
         self._user_preferences: Dict[str, UserLanguagePreference] = {}
+
+        #: 管理员定的「开箱默认」（§6-167 取长补短取进来的那一格）：它**不是**一条用户偏好，
+        #: 所以不占 `_user_preferences` 的任何键，也不进"多少人设过偏好"的计数。
+        self._outOfBoxDefault: Optional[UserLanguagePreference] = None
 
         # 翻译缓存
         self._cache: Dict[str, Dict[str, str]] = {}  # {cache_key: {language: value}}
@@ -67,6 +107,9 @@ class LanguageManager:
 
         # 加载翻译
         self._load_all_translations()
+
+        # 读回用户偏好（缺文件＝没人设过，不是错误）
+        self._load_user_preferences()
 
         logger.info("LanguageManager initialized: default_language=%s", default_language.value)
 
@@ -234,6 +277,25 @@ class LanguageManager:
                 )
                 self._translations[namespace][key][language.value] = translation
 
+    def rejectedLanguageTags(self, translations: Dict[str, Any]) -> List[tuple]:
+        """整批预验语言码，返回拒收项 `(key, 坏码)`——**这份校验的唯一出处**。
+
+        抽成公开方法是为了让 HTTP 写面能在动手之前拿到点名的拒因。
+        端点若自己再写一遍这段循环，同一件事就有了两份口径（教义第 6 条），
+        漂移时先坏的是"拒因文本"这种没人对着读的东西。判据
+        `tests/unit/api/test_languageFaceReadSurface.py::…RefusalNamesTheBadCodeThroughTheSameSinglePoint`
+        用桩替本方法来自证那条 400 确实经这里。
+        """
+        rejected: List[tuple] = []
+        for key, lang_translations in (translations or {}).items():
+            if not isinstance(lang_translations, dict):
+                rejected.append((key, "<值不是映射>"))
+                continue
+            for lang_code, value in lang_translations.items():
+                if Language.normalizeTag(lang_code) is None or not isinstance(value, str):
+                    rejected.append((key, lang_code))
+        return rejected
+
     def save_external_translations(self, namespace: str, translations: Dict[str, Dict[str, str]]) -> bool:
         """保存外部翻译——**先整批验码，再一起动内存与盘**。
 
@@ -245,20 +307,23 @@ class LanguageManager:
           于是**内存已经半写、文件还没写**，两边从此两套数——比存错桶更难查。
         """
         normalized: List[tuple] = []
-        rejected: List[tuple] = []
-        for key, lang_translations in (translations or {}).items():
-            if not isinstance(lang_translations, dict):
-                rejected.append((key, "<值不是映射>"))
-                continue
-            for lang_code, value in lang_translations.items():
-                language = Language.normalizeTag(lang_code)
-                if language is None or not isinstance(value, str):
-                    rejected.append((key, lang_code))
-                    continue
-                normalized.append((key, language, value))
+        rejected = self.rejectedLanguageTags(translations)
 
         if rejected:
             logger.warning("译文库整批拒收：namespace=%s，不识别的语言码 %r", namespace, rejected)
+            return False
+
+        for key, lang_translations in (translations or {}).items():
+            for lang_code, value in lang_translations.items():
+                normalized.append((key, Language.normalizeTag(lang_code), value))
+
+        # 校验与写入之间的一致性哨兵：正常情况下上面已经拒过，走到这里还拿到 `None`
+        # 只可能是"校验被绕过"（桩替、将来新增的第三条写路）。宁可点名拒写，
+        # 也不要在这里把 None 传进 `language.value` —— 那会被下面的 except 兜成 False，
+        # 而那时内存里可能已经写进半截（§6-140 记的就是这个形态）。
+        stray = [(k, c) for k, lang, c in normalized if lang is None]
+        if stray:
+            logger.error("译文库写入被中止：校验放过了一条不识别的语言码 %r（不该发生）", stray)
             return False
 
         try:
@@ -293,6 +358,20 @@ class LanguageManager:
         except Exception as e:
             logger.error("Failed to save translations: %s", e)
             return False
+
+    def overlayEntries(self, namespace: str, language: Language) -> List[Translation]:
+        """覆盖层读面：按命名空间与语言取出**全部**条目，含未审的，按 key 排序。
+
+        为什么单开一个读法而不是放宽 `get_translation()`：后者是内置那条读路，门是
+        `is_approved`（`:328`）；裁定「不引入审批」的意思是"不假装有人审过"，
+        不是"把未审的当已审送进所有读路径"。所以这里原样取出、把 `is_approved`
+        与 `translator` 一起交给调用方，让读的人自己看得见状态。
+        """
+        with self._lock:
+            bucket = (self._translations.get(namespace) or {})
+            entries = [t for keys in bucket.values()
+                       for t in keys.values() if t.language is language]
+        return sorted(entries, key=lambda t: t.key)
 
     def get_translation(
         self, key: str, language: Optional[Language] = None, namespace: str = "default", fallback: bool = True
@@ -384,36 +463,177 @@ class LanguageManager:
         # 如果没有找到翻译，返回原文
         return TranslationResponse(request=request, translated_text=text, confidence=0.0, source="fallback")
 
+    def _load_user_preferences(self) -> None:
+        """从盘上读回用户偏好：一个坏条目只跳它自己，整份文件坏了就改名隔离。
+
+        三种形态分开处置，混在一起就会造出"读数看起来正常、其实是被清空"：
+        - 文件不存在 ⇒ 正常空态（没人设过偏好，不是故障，也不建文件）；
+        - JSON 解析失败 / 版本不认识 ⇒ `quarantine_corrupt_file` 留现场，内存按空态起，
+          原路径腾空——否则紧接着的任何一次成功保存会用内存空态覆盖掉真数据（整库丢失）；
+        - 单个用户条目不合法（不识别的语言码、`user_id` 与键不一致）⇒ 只跳那一条并点名，
+          与译文装载面「一个坏码不许毁掉整份文件」是同一条口径（§6-145）。
+        """
+        path = Path(self.preferences_path)
+        if not path.exists():
+            return
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            quarantined = quarantine_corrupt_file(path)
+            logger.error("用户偏好文件无法解析，已隔离现场 %s：%s（本轮按空态起，不覆盖原文件）",
+                         quarantined, e)
+            return
+
+        if not isinstance(data, dict) or data.get("version") != PREFERENCES_STORE_VERSION:
+            quarantined = quarantine_corrupt_file(path)
+            logger.error("用户偏好文件格式版本不认识（现值 %r，期望 %r），已隔离现场 %s——"
+                         "不做自动映射：那种映射会把没人签过字的旧数据读成签过",
+                         data.get("version") if isinstance(data, dict) else "<非映射>",
+                         PREFERENCES_STORE_VERSION, quarantined)
+            return
+
+        loaded = 0
+        self._outOfBoxDefault = self._readDefaultEntry(data.get(DEFAULT_STORE_KEY))
+        for key, entry in (data.get("preferences") or {}).items():
+            if not isinstance(entry, dict):
+                logger.warning("跳过格式不合法的用户偏好条目：user=%r", key)
+                continue
+            try:
+                preference = UserLanguagePreference.from_dict(entry)
+            except Exception as e:
+                logger.warning("跳过不合法的用户偏好条目 user=%r：%s", key, e)
+                continue
+            if preference.user_id != key:
+                logger.warning("跳过键与条目属主不一致的用户偏好：键=%r 条目=%r",
+                               key, preference.user_id)
+                continue
+            self._user_preferences[preference.user_id] = preference
+            loaded += 1
+
+        logger.info("读回用户语言偏好：%s 条（跳过 %s 条）",
+                    loaded, len(data.get("preferences") or {}) - loaded)
+
+    def _persist_user_preferences(self) -> None:
+        """把当前全部偏好原子写盘；失败向上抛，由调用方（按人写入 / 开箱默认写入）回滚。
+
+        `default` 键**只在设过的时候出现**：一条 GET 之后不该凭空长出这格，
+        而"没人定过起点"与"定过但值是 zh"必须是两个能区分的读数。
+        """
+        payload: Dict[str, Any] = {
+            "version": PREFERENCES_STORE_VERSION,
+            "preferences": {uid: pref.to_dict() for uid, pref in self._user_preferences.items()},
+        }
+        if self._outOfBoxDefault is not None:
+            payload[DEFAULT_STORE_KEY] = self._outOfBoxDefault.to_dict()
+        atomic_write_text(self.preferences_path, json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _readDefaultEntry(self, raw: Any) -> Optional[UserLanguagePreference]:
+        """把存储顶层那条 `default` 读成一条开箱默认；坏就只跳它自己并点名。
+
+        一条坏默认值不许把整份按人偏好带下水——与 `_load_user_preferences` 里
+        「一个坏码不许毁掉整份文件」是同一条口径（§6-145）。
+        """
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            logger.warning("跳过格式不合法的开箱默认条目（不是对象）：%r", type(raw).__name__)
+            return None
+        try:
+            preference = UserLanguagePreference.from_dict(raw)
+        except Exception as e:
+            logger.warning("跳过不合法的开箱默认条目：%s", e)
+            return None
+        # 存的就是"给所有没选过的人"的那一条，属主名不进 `preferences` 表，所以这里
+        # 只要求它是那条保留名；别的名字说明这份文件被手改过，按不合法跳掉而不是猜。
+        if preference.user_id != OUT_OF_BOX_OWNER:
+            logger.warning("开箱默认条目的属主不是保留名（现值 %r），按不合法跳过",
+                           preference.user_id)
+            return None
+        return preference
+
+    def getOutOfBoxDefault(self) -> Optional[UserLanguagePreference]:
+        """管理员替「还没表达过偏好的人」定的起点；没设过就是 `None`（不冒充成一条决定）。"""
+        with self._lock:
+            return self._outOfBoxDefault
+
+    def setOutOfBoxDefault(self, preference: UserLanguagePreference) -> bool:
+        """写开箱默认：内存与盘同成或同败（与按人偏好那条纪律一寸不差）。
+
+        这一格影响的是**所有还没选过的人**，所以"内存里已经有了、盘上没写成"
+        绝不能被当成保存成功——重启后它就不在了，而管理员已经以为改动生效。
+        """
+        if preference.user_id != OUT_OF_BOX_OWNER:
+            logger.warning("拒绝写入属主不是保留名的开箱默认条目（user_id=%r）",
+                           preference.user_id)
+            return False
+
+        with self._lock:
+            previous = self._outOfBoxDefault
+            self._outOfBoxDefault = preference
+            try:
+                self._persist_user_preferences()
+            except Exception as e:
+                self._outOfBoxDefault = previous
+                logger.error("Failed to persist out-of-box language default: %s", e)
+                return False
+
+            logger.info("开箱语言默认已保存：%s（影响所有未表达过偏好的用户）",
+                        preference.primary_language.value)
+            return True
+
+    def resolvePreference(self, user_id: str) -> Tuple[UserLanguagePreference, str]:
+        """这个人现在该看哪种语言，**以及这个读数是哪个来源给的**。
+
+        解析链三格：本人偏好 → 开箱默认 → 枚举级 last resort。不点名来源就退成"返回一个
+        偏好"，那「管理员设的开箱默认到底生效了没」在生产里不可观测——而这条链在 §6-167
+        之前正是靠不可观测活着的（四份默认值谁都没读过它）。
+        """
+        with self._lock:
+            preference = self._user_preferences.get(user_id)
+            if preference is not None:
+                return preference, self.EFFECTIVE_SOURCES[0]
+            if self._outOfBoxDefault is not None:
+                return self._outOfBoxDefault, self.EFFECTIVE_SOURCES[1]
+            return (UserLanguagePreference(user_id=user_id or OUT_OF_BOX_OWNER,
+                                           primary_language=self.default_language,
+                                           fallback_language=self.default_language),
+                    self.EFFECTIVE_SOURCES[2])
+
     def set_user_preference(self, user_id: str, preference: UserLanguagePreference) -> bool:
         """
-        设置用户语言偏好
+        设置用户语言偏好（写内存 + 落盘，两边同成或同败）
 
         Args:
             user_id: 用户ID
             preference: 用户语言偏好
 
         Returns:
-            是否设置成功
+            是否设置成功——**盘上没写成就不算成功**（调用方据此如实回错，
+            不能拿"内存里已经有了"对用户承诺已保存）
         """
-        try:
-            with self._lock:
-                self._user_preferences[user_id] = preference
-                logger.info("Set user preference: %s -> %s", user_id, preference.primary_language.value)
-                return True
-        except Exception as e:
-            logger.error("Failed to set user preference: %s", e)
+        if not user_id:
+            logger.warning("拒绝写入无属主的语言偏好（user_id 为空）")
             return False
 
+        with self._lock:
+            previous = self._user_preferences.get(user_id)
+            self._user_preferences[user_id] = preference
+            try:
+                self._persist_user_preferences()
+            except Exception as e:
+                if previous is None:
+                    self._user_preferences.pop(user_id, None)
+                else:
+                    self._user_preferences[user_id] = previous
+                logger.error("Failed to persist user preference for %s: %s", user_id, e)
+                return False
+
+            logger.info("Set user preference: %s -> %s", user_id, preference.primary_language.value)
+            return True
+
     def get_user_preference(self, user_id: str) -> Optional[UserLanguagePreference]:
-        """
-        获取用户语言偏好
-
-        Args:
-            user_id: 用户ID
-
-        Returns:
-            用户语言偏好
-        """
+        """获取用户语言偏好（**只读**，不在这里建文件也不落默认值）"""
         return self._user_preferences.get(user_id)
 
     def get_available_languages(self) -> List[Language]:

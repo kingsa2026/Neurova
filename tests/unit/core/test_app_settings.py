@@ -23,7 +23,11 @@ class TestLoadSave:
         s = asm.load_app_settings(settings_file)
         assert s["advanced"]["max_output_tokens"] == asm.LLM_DEFAULT_MAX_TOKENS
         assert s["advanced"]["log_level"] == "info"
-        assert s["general"]["language"] == "zh-CN"
+        assert s["general"]["app_name"] == "Neurova"
+        # `language` 一格已随 §6-167 退役（四份「默认语言」定义收口到语言层），
+        # 这里断的是**退役后 defaults 仍然完整**：摘掉那一格不许把邻座一起带走。
+        assert "language" not in s["general"], (
+            "盘上没这条键却读出了 language：默认表又把它长回来了")
 
     def test_save_merges_and_persists(self, settings_file):
         asm.save_app_settings("advanced", {"max_output_tokens": 32768}, settings_file)
