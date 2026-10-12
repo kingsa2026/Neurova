@@ -2454,3 +2454,6 @@ tests/unit/plugins/test_pluginStateSurvivesRestart.py
 # （`neurova.skills`／`neurova.skill_system`／`neurova.skills.models`）一律不得误报。
 # 入册前逐文件单跑两次同读数 8 passed（10.93s / 11.31s）。
 tests/unit/skills/test_skillCompatShimRetired.py
+# §6-163（批 18 裁定甲）身份通道合并的常驻面：一条通道、一处派生、属主显式传参。
+# 入册前逐文件单跑两次同读数 15 passed（13.68s／10.64s）。
+tests/unit/core/test_identityChannelMergedToOneSource.py

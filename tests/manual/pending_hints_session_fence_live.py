@@ -98,7 +98,7 @@ def buildAgent(coordinator):
     agent.tool_executor = ToolExecutor(agent)
     # 协调器换成被测那一份，执行链其余全真
     agent.tool_executor.tool_coordinator = coordinator
-    set_turn_identity("读一下", SESSION_A, "u1")
+    set_turn_identity("读一下", SESSION_A)
     return agent
 
 
@@ -142,13 +142,13 @@ async def scenario() -> int:
     assert hint.get("session_id") == SESSION_A, f"终态归属错：{hint}"
 
     print(f"3) 同一 agent 上的 B 会话（{SESSION_B}）排干 → 必须拿不到")
-    set_turn_identity("别人的一轮", SESSION_B, "u1")
+    set_turn_identity("别人的一轮", SESSION_B)
     foreign = coordinator.pop_pending_hints(SESSION_B)
     print(f"   B 取到 = {foreign}")
     assert foreign == [], f"B 会话把 A 的后台工具结果读进了自己的上下文：{foreign}"
 
     print(f"4) 回到 A 会话排干 → 取得到，且正文是那次执行的真实结果")
-    set_turn_identity("A 的下一轮", SESSION_A, "u1")
+    set_turn_identity("A 的下一轮", SESSION_A)
     mine = coordinator.pop_pending_hints(SESSION_A)
     print(f"   A 取到 = {[(h.get('tool_name'), h.get('success')) for h in mine]}")
     assert len(mine) == 1 and mine[0]["success"] is True
@@ -156,7 +156,7 @@ async def scenario() -> int:
     assert coordinator.pop_pending_hints(SESSION_A) == [], "取走未清空，会被重复注入"
 
     print("5) 无归属终态 → 点名拒绝，不广播也不入队")
-    set_turn_identity("无会话身份的一轮", None, "u1")
+    set_turn_identity("无会话身份的一轮", None)
     coordinator.recordApprovalOutcome(
         "file_write", "call_orphan", success=True, session_id=None, result={"ok": 1}
     )

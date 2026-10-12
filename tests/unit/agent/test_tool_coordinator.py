@@ -35,7 +35,7 @@ def _turnSession():
     归属经生产单源 `set_turn_identity` 登记，不往协调器私有字段里塞。"""
     from neurova.core.turn_context import set_turn_identity
 
-    set_turn_identity("跑一下", _SESSION_ID, "u1")
+    set_turn_identity("跑一下", _SESSION_ID)
     yield
 
 

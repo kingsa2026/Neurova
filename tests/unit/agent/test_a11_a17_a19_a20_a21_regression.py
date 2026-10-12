@@ -238,7 +238,7 @@ class TestA20ObserverStrongReference:
         # 晚到终态按会话归属分流（C 批栅栏），测试要按生产入口登记本轮身份
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity("搜一下", "sess_a20", "u1")
+        set_turn_identity("搜一下", "sess_a20")
 
         async def slow():
             await asyncio.sleep(0.3)
@@ -273,7 +273,7 @@ class TestA20ObserverStrongReference:
         from neurova.core.turn_context import set_turn_identity
 
         coordinator = ToolCoordinator()
-        set_turn_identity("搜一下", "sess_a20b", "u1")
+        set_turn_identity("搜一下", "sess_a20b")
 
         async def slow():
             await asyncio.sleep(0.25)

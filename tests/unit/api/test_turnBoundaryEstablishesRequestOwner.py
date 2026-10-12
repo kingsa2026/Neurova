@@ -48,10 +48,10 @@ BOB = "u-bob"
 
 
 class _OwnerRecordingAgent:
-    """记录被调那一刻的两条通道读数，并把回合交给**生产写盘路径**落盘。
+    """记录被调那一刻的通道读数与载体读数，并把回合交给**生产写盘路径**落盘。
 
-    不在测试里自己拼 `user_id=`：`MemCore.save_to_session()` 才是那行的作者，
-    替它写就等于把被审对象换成自己的复制品（判据会恒绿）。
+    不在测试里自己拼属主：`post_chat_pipeline.resolveSessionOwner` + `MemCore.save_to_session()`
+    才是那两行的作者，替它们写就等于把被审对象换成自己的复制品（判据会恒绿）。
 
     `user_input` 收位置参：`console.py:826` 与 `/ws`(:2106) 都是按位置传的，
     只声明关键字会在替身里 TypeError 被端点的 catch-all 吞成 `Echo:` —— 那就是假绿。
@@ -74,8 +74,14 @@ class _OwnerRecordingAgent:
             "request_channel": get_request_user_id(),
         })
         if self.session_manager is not None:
+            # 属主由**生产那一个取法函数**给出（`resolveSessionOwner`，§6-163）：测试自己拼
+            # `user_id=` 就等于把被审的那一行换成复制品，判据会绿得没有意义。
+            from neurova.mem_core import MemCore
+            from neurova.post_chat_pipeline import resolveSessionOwner
+
             MemCore(self).save_to_session(user_input or "", "好的", session_id=session_id,
-                                          metadata=metadata)
+                                          metadata=metadata,
+                                          session_owner=resolveSessionOwner(metadata))
         emitter = (metadata or {}).get("event_emitter")
         if callable(emitter):
             emitter("content", {"type": "content", "content": "好的"})

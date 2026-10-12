@@ -37,14 +37,27 @@ class TestTurnStateFacade:
 
         return TurnState()
 
-    def test_identity_roundtrip_and_default_user(self):
+    def test_identity_roundtrip_without_facade_fallback(self):
+        """§6-163：门面只管轮次内容；身份那格直读唯一通道，且**不**自带 `"default"` 兜底。
+
+        兜底口径属于各消费方（属主＝空即共享、用量＝anonymous、profile 池＝default、
+        配额＝无身份即不判）。门面里再兜一层，就是第二个事实源，也是渠道群里
+        "所有人都算同一个人"的起点。
+        """
+        from neurova.core.identity_context import get_request_user_id, set_request_user_id
+
         ts = self._ts()
-        ts.set_request_identity("问题", session_id="s1")
-        assert ts.current_user_input == "问题"
-        assert ts.current_session_id == "s1"
-        assert ts.current_user_id == "default"  # 缺省语义
-        ts.set_request_identity("问题2", session_id="s1", user_id="u9")
-        assert ts.current_user_id == "u9"
+        previous = get_request_user_id()
+        try:
+            set_request_user_id(None)
+            ts.set_request_identity("问题", session_id="s1")
+            assert ts.current_user_input == "问题"
+            assert ts.current_session_id == "s1"
+            assert ts.current_user_id is None, "门面替消费方兜了缺省"
+            set_request_user_id("u9")
+            assert ts.current_user_id == "u9"  # 同一次读，取的是通道里那个人
+        finally:
+            set_request_user_id(previous)
 
     def test_reasoning_roundtrip(self):
         ts = self._ts()
@@ -81,7 +94,7 @@ class TestTurnStateFacade:
         from neurova.agent.turn_state import TurnState
 
         expected = {
-            "set_request_identity": "(self, user_input: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> None",
+            "set_request_identity": "(self, user_input: str, session_id: Optional[str] = None) -> None",
             "set_current_reasoning": "(self, reasoning: Optional[str]) -> None",
             "reset_tool_messages": "(self) -> None",
             "append_tool_messages": "(self, records: List[Dict[str, Any]]) -> None",

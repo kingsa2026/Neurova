@@ -463,7 +463,7 @@ class TestHazardsExcluded:
         # 同批多项转后台：归属取自发起那一轮（C 批栅栏），两条都落同一会话
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity("一起搜", "sess_batch_bg", "u1")
+        set_turn_identity("一起搜", "sess_batch_bg")
         coordinator = ToolCoordinator()
 
         async def slow(tag):
