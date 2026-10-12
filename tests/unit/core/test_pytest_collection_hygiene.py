@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -405,7 +406,8 @@ def test_reverseProofShowsSuchAFileSilentlyDoesNotRun(tmp_path, pytestconfig):
     collected = subprocess.run(
         [sys.executable, "-m", "pytest", "-c", str(_PROJECT_ROOT / "pyproject.toml"),
          "-p", "no:cacheprovider", "--collect-only", "-q", str(tmp_path)],
-        capture_output=True, text=True, cwd=str(tmp_path))
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(tmp_path))
     listing = collected.stdout
     assert "test_fooCollected.py" in listing, (
         f"真收集连合规文件都没收（退出码 {collected.returncode}）：{listing[:400]}")
