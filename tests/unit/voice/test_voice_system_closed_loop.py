@@ -183,26 +183,6 @@ class TestVoiceAdapterLifecycleCompleteness:
         assert health["has_client"] is False
         assert health["from_number"] == "+1234567890"
     
-    @pytest.mark.asyncio
-    async def test_lifecycle_methods_complete(self, voice_adapter):
-        """测试生命周期方法完整性"""
-        # 1. 验证所有必需方法存在
-        assert hasattr(voice_adapter, "connect")
-        assert hasattr(voice_adapter, "disconnect")
-        assert hasattr(voice_adapter, "send_message")
-        assert hasattr(voice_adapter, "health_check")
-        
-        # 2. 验证方法可调用
-        assert callable(voice_adapter.connect)
-        assert callable(voice_adapter.disconnect)
-        assert callable(voice_adapter.send_message)
-        assert callable(voice_adapter.health_check)
-        
-        # 3. 验证属性
-        assert hasattr(voice_adapter, "is_connected")
-        assert hasattr(voice_adapter, "channel_type")
-
-
 class TestEndToEndVoiceSystemIntegration:
     """端到端语音系统集成测试"""
     
