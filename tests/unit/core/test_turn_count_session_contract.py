@@ -23,7 +23,7 @@ def _one_request(session_id: str) -> int:
     ContextVar.set 不外泄）→ 轮次号必须仍跨请求累积。"""
 
     async def _req() -> int:
-        set_turn_identity("你好", session_id=session_id, user_id="u1")
+        set_turn_identity("你好", session_id=session_id)
         increment_turn_count()
         return get_turn_count()
 
@@ -52,7 +52,7 @@ class TurnCountSessionContractTest(unittest.TestCase):
 
     def test_no_session_falls_back_to_default_bucket(self):
         async def _req() -> int:
-            set_turn_identity("你好", session_id=None, user_id="u1")
+            set_turn_identity("你好", session_id=None)
             increment_turn_count()
             return get_turn_count()
 
@@ -88,7 +88,7 @@ class PeriodicReflectionGateTest(unittest.TestCase):
 
         def _one_turn() -> bool:
             async def _req() -> bool:
-                set_turn_identity(user, session_id="sess-r", user_id="u1")
+                set_turn_identity(user, session_id="sess-r")
                 increment_turn_count()
                 return pipeline._should_reflect(user, reply)
 

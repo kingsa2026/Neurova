@@ -1833,10 +1833,19 @@ class SessionManager(SessionRepository):
         return index
 
     def _summary_from_entry(self, sid: str, entry: Dict[str, Any]) -> Dict[str, Any]:
-        """索引条目 → 对外摘要视图（仅 _SUMMARY_FIELDS，不泄漏内部字段）。"""
+        """索引条目 → 对外摘要视图（仅 _SUMMARY_FIELDS，不泄漏内部字段）。
+
+        会话号取**条目里的真 id**，不是索引的键：键是 `normalize_store_key()` 净化后的落盘名
+        （冒号在 NTFS 是数据流分隔符，渠道会话号 `agent:chat` 必须净化才能建文件），
+        而 `_rebuild_sidecar` 把记录内的 `session_id` 一并存进了条目。取键的话，同一条会话在
+        "全量重扫"与"索引快路径"两条读路上会给出两种字形 ⇒ 重启后控制台按 id 字符串做的
+        "我正在看哪一条"关联就断了（§6-163 留案② 取证 / 批 19）。
+        老索引条目没有该字段时回落键——与既有行为等价，不让升级变成读丢。
+        """
+        realId = str(entry.get("session_id") or "") or sid
         return {
-            "id": sid,
-            "session_id": sid,
+            "id": realId,
+            "session_id": realId,
             "agent_id": entry.get("agent_id", ""),
             "title": entry.get("title", "新对话"),
             "user_id": entry.get("user_id", ""),

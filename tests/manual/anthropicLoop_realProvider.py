@@ -112,7 +112,7 @@ def makeAgent(client, loopCls, model):
         return {"content": f"ECHO<{params.get('p', '?')}>"}
 
     agent._skill_registry = _StubRegistry(TOOL_NAME, AsyncMock(side_effect=echo))
-    set_turn_identity(USER_TEXT, "sess_real_key", "u1")
+    set_turn_identity(USER_TEXT, "sess_real_key")
     loop = loopCls(agent)
     loop.llm_client = client
     agent.loop = loop

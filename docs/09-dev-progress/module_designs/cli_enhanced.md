@@ -122,9 +122,12 @@ from agent import Agent, AgentConfig
 self.agent = Agent(agent_config)
 
 # 修改后
-from neurova.cognitive.orchestrator import CognitionOrchestrator
+# （2026-10-11 更正：原文写的 `neurova.cognitive.orchestrator` 已退役——那只编排器的
+#  任务流水线给每步直接写 "completed"，从不派发执行器。在位实现是 NeurFlow 的工作流引擎，
+#  判据 tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py）
+from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.skills.registry import SkillRegistry
-self.orchestrator = CognitionOrchestrator(registry=SkillRegistry())
+self.orchestrator = get_workflow_executor()
 ```
 
 ---
@@ -180,7 +183,7 @@ def complete_session(self, text, line, begidx, endidx):
 ### 3.1 依赖模块
 - `neurova.llm_client.LLMClient` - LLM 客户端（流式输出）
 - `neurova.session_manager.SessionManager` - 会话管理
-- `neurova.cognitive.orchestrator.CognitionOrchestrator` - 认知编排器
+- 认知编排：~~`neurova.cognitive.orchestrator.CognitionOrchestrator`~~ 已于 2026-10-11 退役（任务流水线从不派发），在位实现为 `neurova.collaboration.neurflow.execution_engine.WorkflowExecutor`
 - `neurova.skills.registry.SkillRegistry` - 技能注册表
 - `mimetypes` - 文件类型检测
 - `pathlib` - 文件路径处理

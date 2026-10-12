@@ -3130,11 +3130,11 @@ CogArch 2.0 架构          现有 Neurova 模块
 | **记忆层 - 安全** | neurova/memory/core/security.py | MemorySecurity | ✅ 已实现 | 记忆安全（防护）|
 | **功能壳 - 附件管理** | neurova/core/attachment_manager.py | AttachmentManager | ✅ 已实现 | 附件管理 |
 | | neurova/memory/core/attachment_manager.py | AttachmentManager (Memory) | ✅ 已实现 | 记忆中的附件管理 |
-| **基础设施 - 插件系统** | neurova/plugins/plugin_manager.py | PluginManager | ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） | 插件管理 |
+| **基础设施 - 插件系统** | neurova/plugins/plugin_manager.py | PluginManager | ✅ 已实现 | 插件管理 |
 | | neurova/plugins/base_plugin.py | BasePlugin | ✅ 已实现 | 插件基类 |
 | | neurova/plugins/plugin_lifecycle.py | PluginLifecycle | ✅ 已实现 | 插件生命周期管理 |
 | | neurova/plugins/plugin_manifest.py | PluginManifest | ✅ 已实现 | 插件清单 |
-| | neurova/plugins/plugin_api_registry.py | PluginApiRegistry | ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） | 插件 API 注册 |
+| | neurova/plugins/plugin_api_registry.py | PluginApiRegistry | ✅ 已实现 | 插件 API 注册 |
 | **基础设施 - 模块库** | neurova/core/module_lib.py | ModuleLib | ✅ 已实现 | 模块库管理 |
 | **基础设施 - 模块追踪** | neurova/core/module_tracker.py | ModuleTracker | ✅ 已实现 | 模块追踪 |
 | **基础设施 - 基础模块** | neurova/core/base_module.py | BaseModule | ✅ 已实现 | 基础模块类 |
@@ -3646,7 +3646,7 @@ Neurova CogArch 2.0 接口层架构：
 
 #### 8.8.5 插件系统（可扩展能力）
 
-**所在位置**：`neurova/plugins/`  <!-- 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） -->
+**所在位置**：`neurova/plugins/`
 
 | 模块 | 位置 | 说明 | 在架构中的角色 |
 |-----|-----|-----|--------------|

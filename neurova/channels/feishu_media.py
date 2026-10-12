@@ -4,6 +4,9 @@
 提供媒体文件上传、下载和处理功能。
 """
 
+import asyncio
+import os
+
 from neurova.core.logger import get_logger
 from typing import Optional
 
@@ -62,11 +65,12 @@ class MediaMixin:
             with open(image_path, "rb") as f:
                 file_content = f.read()
 
-            # 上传图片
-            response = self._feishu_post(
+            # 上传图片（真 multipart；同步 requests 下沉工作线程，别堵事件循环）
+            response = await asyncio.to_thread(
+                self._feishu_multipart,
                 "/im/v1/images",
-                data={"image_type": image_type},
-                files={"image": (os.path.basename(image_path), file_content, mime_type)},
+                {"image_type": image_type},
+                {"image": (os.path.basename(image_path), file_content, mime_type)},
             )
 
             if response.get("code") == 0:
@@ -114,14 +118,15 @@ class MediaMixin:
             with open(file_path, "rb") as f:
                 file_content = f.read()
 
-            # 上传文件
-            response = self._feishu_post(
+            # 上传文件（真 multipart；同步 requests 下沉工作线程，别堵事件循环）
+            response = await asyncio.to_thread(
+                self._feishu_multipart,
                 "/im/v1/files",
-                data={
+                {
                     "file_type": file_type,
                     "file_name": os.path.basename(file_path),
                 },
-                files={"file": (os.path.basename(file_path), file_content, mime_type)},
+                {"file": (os.path.basename(file_path), file_content, mime_type)},
             )
 
             if response.get("code") == 0:

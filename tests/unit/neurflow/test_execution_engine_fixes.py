@@ -33,7 +33,14 @@ class TestExecutionEventType:
 
     def test_enum_members(self):
         """测试枚举成员数量"""
-        assert len(ExecutionEventType) == 13  # 10 + P0 调试事件 3 个（BREAKPOINT_HIT/STEP_ADVANCED/VARIABLE_SCOPED）
+        # 10 基础 + P0 调试事件 3（BREAKPOINT_HIT/STEP_ADVANCED/VARIABLE_SCOPED）
+        # + 节点级重试 1（NODE_RETRY，§6-157；被重试吸收的失败改发这条，前端据此不闪红）
+        assert len(ExecutionEventType) == 14
+
+    def test_nodeRetryEventExists(self):
+        """重试必须是独立事件，不能靠"先发 failed 再发 completed"表达——
+        那样画布上"红过"就成了既成事实。"""
+        assert ExecutionEventType.NODE_RETRY.value == "node_retry"
 
     def test_enum_is_string(self):
         """测试枚举值是字符串"""

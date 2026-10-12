@@ -804,6 +804,18 @@ ErrorCode (neurova/core/error_handler.py)
 
 ### 18.3 API 测试
 
+> **本节与上面「十一、测试覆盖清单」的表自 2026-09-04 起未再与代码树对账**（2026-10-12 记，
+> 台账 §6-162）。现场复算：这里点名的 `tests/test_api_standard.py`／`test_api_direct.py`／
+> `test_api_async.py`／`test_api_quick.py`／`test_jwt.py` 与 11.1/11.2 里的
+> `tests/unit/test_skill.py`／`test_router.py`／`test_agent.py` **都不在仓内**。
+> 其中三个（`test_api_direct.py`、`test_jwt.py`、`skills/test_skill.py`）属 §6-133 点名的
+> 26 档「名字像覆盖、实则 0 用例」文件，已按裁定分流删除；现行真判据是
+> `tests/unit/api/test_api_auth.py`（20）＋ `tests/unit/api/test_jwt_identity_claims.py`（6）
+> ＋ `tests/unit/api/test_loginRouteContract.py`（17）
+> ＋ `tests/unit/api/test_neuronSharedGraphHandlers.py`（18，端点层那份共享图）
+> ＋ `tests/unit/skills/test_skills_modules.py`（39）。
+> 整表逐行重画是一次独立复算，不在本批授权内。
+
 | 测试文件 | 说明 |
 |----------|------|
 | `tests/test_api_standard.py` | API 标准测试 |

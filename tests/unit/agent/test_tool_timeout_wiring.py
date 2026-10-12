@@ -57,7 +57,7 @@ class TestTimeoutOffloadWiring:
         # 晚到终态按会话归属分流（C 批栅栏）：按生产入口登记本轮身份
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity("搜一下", "sess_timeout_wiring", "u1")
+        set_turn_identity("搜一下", "sess_timeout_wiring")
         result = await executor._execute_single_tool("web_search", {"query": "x"}, skip_governance=True)
 
         assert result["status"] == "background"

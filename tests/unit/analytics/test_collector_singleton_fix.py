@@ -7,7 +7,7 @@ P0-2 修复测试：get_collector 单例并发安全（C2）
 
 设计依据：
 - neurova/analytics/collector.py:803-812 用 hasattr 检查无锁，TOCTOU
-- 修复模板：neurova/cognitive/orchestrator.py:358-369（_singleton + _singleton_lock + with）
+- 修复模板：neurova/llm/presets.py:258-265（模块级实例 + Lock + 锁内二次判空）
 """
 
 import threading

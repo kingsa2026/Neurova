@@ -1386,6 +1386,7 @@ class MemCore:
         metadata: Optional[Dict] = None,
         assistant_metadata: Optional[Dict] = None,
         writer_claim=None,
+        session_owner: Optional[str] = None,
     ) -> str:
         """保存对话到 session 文件，委托给 SessionManager.add_message()。
 
@@ -1417,14 +1418,13 @@ class MemCore:
 
         agent_id = getattr(self.config, "agent_id", "unknown") if self.config else "unknown"
 
-        # DATA-P1-1（审计 2026-09-11）：会话属主随写落盘——请求级身份优先
-        #（ContextVar），无请求上下文（后台任务）时回退空串（共享口径）
-        try:
-            from neurova.core.identity_context import get_request_user_id
-
-            owner_id = str(get_request_user_id() or "")
-        except Exception:  # noqa: BLE001 — 身份模块不可用不阻断保存
-            owner_id = ""
+        # DATA-P1-1（审计 2026-09-11）→ §6-163（裁定甲）：会话属主**由调用方显式给**，
+        # 不再从环境里读。合并后那条身份通道装的是"谁在说话（sender）"，而会话记录的
+        # 可见性要的是"这条会话归谁（owner）"——渠道路径上这是两个不同的人
+        # （群成员发的话要出现在 agent 属主的控制台里，Issue #290 Wave H-W0）。
+        # 拿前者当属主，渠道会话就会落到发送者的命名空间，属主控制台再也看不见它。
+        # 缺省（None/空）＝不声明属主 ⇒ 共享会话，与后台任务/排程的既有口径一致。
+        owner_id = str(session_owner or "")
 
         return sm.add_message(
             agent_id=agent_id,

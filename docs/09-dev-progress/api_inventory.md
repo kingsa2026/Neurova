@@ -9,7 +9,7 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（58 个）
+## 一、前端 API 模块（59 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
@@ -38,6 +38,7 @@
 | `NeurUI/src/api/modules/home.ts` | `/home` | 是 | 3 |
 | `NeurUI/src/api/modules/image.ts` | `/image` | 是 | 1 |
 | `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`, `/knowledge-graph`, `/semantic-search` | 是 | 9 |
+| `NeurUI/src/api/modules/language.ts` | `/language` | 是 | 4 |
 | `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 是 | 1 |
 | `NeurUI/src/api/modules/media.ts` | `/media` | 是 | 1 |
 | `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 是 | 4 |
@@ -57,7 +58,7 @@
 | `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 是 | 1 |
 | `NeurUI/src/api/modules/sandbox.ts` | `/sandbox` | 是 | 0 |
 | `NeurUI/src/api/modules/scheduler.ts` | `/scheduler` | 是 | 3 |
-| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 7 |
+| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 8 |
 | `NeurUI/src/api/modules/shared-config.ts` | `/shared-config` | 是 | 0 |
 | `NeurUI/src/api/modules/skill-pool.ts` | `/marketplace`, `/skill-pool` | 是 | 9 |
 | `NeurUI/src/api/modules/sleep.ts` | `/sleep` | 是 | 8 |
@@ -74,7 +75,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（89 条）
+## 二、后端挂载前缀（90 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -121,6 +122,7 @@
 | `neurova/api/endpoints/knowledge_core.py` | `/api/v1/knowledge` |
 | `neurova/api/endpoints/knowledge_graph_api.py` | `/api/v1/knowledge-graph` |
 | `neurova/api/endpoints/knowledge_integration.py` | `/api/v1/knowledge-integration` |
+| `neurova/api/endpoints/language_api.py` | `/api/v1/language` |
 | `neurova/api/endpoints/logs.py` | `/api/v1/logs` |
 | `neurova/api/endpoints/logs_api.py` | `/api/v1/logs-api` |
 | `neurova/api/endpoints/marketplace.py` | `/api/v1/marketplace` |

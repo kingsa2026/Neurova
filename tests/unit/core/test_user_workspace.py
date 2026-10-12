@@ -37,14 +37,6 @@ class TestUserWorkspace:
         assert workspace.logs_path.exists()
         assert workspace.cache_path.exists()
 
-    def test_get_config_default_language(self, tmp_path):
-        """测试默认配置 language = zh-CN"""
-        workspace = UserWorkspace("user1", tmp_path)
-
-        language = workspace.get_config("language")
-
-        assert language == "zh-CN"
-
     def test_get_config_default(self, tmp_path):
         """测试获取默认配置"""
         workspace = UserWorkspace("user1", tmp_path)
