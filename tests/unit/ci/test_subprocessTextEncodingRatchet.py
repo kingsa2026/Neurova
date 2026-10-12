@@ -17,6 +17,9 @@
 （2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
  子进程文本捕获全部钉上显式 `encoding="utf-8"` 而清零，该文件从基线摘除——
  摘除而不是留 0：日后它再长出一处，`BASELINE.get(f, 0)` 会让棘轮当场红。）
+（2026-10-12 收：`scripts/ci/pip_audit_gate.py` 的 1 处随本批离线裁决通路一并清零——
+ 该文件新增的离线扫描调用点原先与既有直连调用点一样没写 `encoding`，两处一起补上
+ 显式 `encoding="utf-8", errors="replace"`，站点数回到 0，同样从基线摘除。）
 判定形态是**逐文件计数**而不是全局总数：
 - 某文件站点数**上升**或**新文件出现** → 红（增长被止住，这是本判据的全部目的）；
 - 站点数**下降** → 允许，但本文件会**红着提示"基线该收了"**，逼一次显式改基线，
@@ -55,7 +58,6 @@ BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
     "scripts/ci/perf_gate.py": 1,
-    "scripts/ci/pip_audit_gate.py": 1,
     "scripts/desktop/bundle_backend.py": 1,
     "scripts/desktop/package_installer_zip.py": 3,
     "scripts/desktop/win_installer_kit.py": 4,

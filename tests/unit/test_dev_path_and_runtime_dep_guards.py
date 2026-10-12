@@ -178,10 +178,19 @@ class TestProviderChatModelDepsDeclaredForRuntime:
     PROVIDERS_DIR = PROJECT_ROOT / "neurova" / "llm" / "providers"
 
     def _importedLangchainDists(self) -> set:
-        """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。"""
+        """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。
+
+        取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+        不私有 `glob + ast.parse`：后者把判据成本绑在代码总量上
+        （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处——受保护
+        子集里多一份私有全仓解析，与其余文件共享机器时必偶发红）。
+        预筛词是判据的**充分条件**：连 `langchain` 字样都没出现的文件不可能
+        产出 langchain 发行版名，解析量从**代码总量**降到**命中面**。
+        """
         dists = set()
-        for path in sorted(self.PROVIDERS_DIR.glob("*.py")):
-            tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
+        for ref in ast_scan.sourceRefsUnder(
+                self.PROVIDERS_DIR, ".py", ast_scan.textHints("langchain")):
+            tree = ast.parse(ref.code, filename=str(ref.path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom):
                     top = (node.module or "").split(".")[0]
