@@ -261,8 +261,20 @@ class TestTTSManager:
 
     @pytest.mark.asyncio
     async def test_synthesize(self):
-        """测试语音合成"""
-        manager = TTSManager(TTSConfig(engine="mock"))
+        """测试语音合成。
+
+        `fallback_chain` 必须**只钉 mock**：`mock` 是链尾的"最后兜底"，
+        生产侧对链尾引擎的既有策略是"不霸占、从链顶重新竞争"
+        （`_synthesize_with_fallback` 的 `is_last_resort` 分支，注释逐条写明）。
+        于是只写 `engine="mock"` 时，本用例实际会去试链顶的 `moss-nano`——
+        而 `moss-nano` 的 `initialize()` 会**真下载模型**（`model_downloader` →
+        HF 镜像，timeout=300）。CI 容器出站被拦时这条就撞 `timeout = 30` 转红：
+        判据与外部网络可达性捆绑，与本次改动无关却堵合并（实测构建
+        `cnb-o9g-1k4oij3vm-003`，本机同形 2 failed）。
+        钉成单元素链后，mock 自己既是当前引擎又是链首，"重新竞争"回到自己，
+        零网络、瞬时返回——判据回归到它要测的那件事（合成产出非空）。
+        """
+        manager = TTSManager(TTSConfig(engine="mock", fallback_chain=["mock"]))
         await manager.initialize()
 
         audio = await manager.synthesize("测试文本")
@@ -271,8 +283,8 @@ class TestTTSManager:
 
     @pytest.mark.asyncio
     async def test_synthesize_stream(self):
-        """测试流式语音合成"""
-        manager = TTSManager(TTSConfig(engine="mock"))
+        """测试流式语音合成（`fallback_chain` 只钉 mock 的理由同上格）。"""
+        manager = TTSManager(TTSConfig(engine="mock", fallback_chain=["mock"]))
         await manager.initialize()
 
         chunks = []
