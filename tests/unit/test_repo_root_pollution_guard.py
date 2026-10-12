@@ -45,33 +45,48 @@ def _topLevelEntries() -> set:
 
 
 def _acquireProbeRoot() -> tuple[Path, Path]:
-    """给探针一棵**自己独占**的仓库根：仓外 detached git worktree。
+    """给探针一棵**自己独占**的仓库根：把装配面复制到临时目录，不借 git 元数据。
 
-    为什么必须是整棵树而不是临时目录里摆几个文件：`tests/conftest.py` 的
-    `REPO_ROOT = Path(__file__).resolve().parents[1]` 是按文件位置推的，子进程在
-    worktree 里跑时，守卫快照的就是那棵树自己——机制原样跑到，共享工作树零痕迹。
+    为什么是整棵装配面而不是临时目录里摆几个文件：`tests/conftest.py` 的
+    `REPO_ROOT = Path(__file__).resolve().parents[1]` 是按文件位置推的，子进程在这棵树
+    里跑时，守卫快照的就是那棵树自己——机制原样跑到，共享工作树零痕迹。
     拼最小目录树要么复刻 conftest（第二份事实源），要么缺 `neurova/` 与
     `pyproject.toml` 的 addopts 让探针测的不再是同一套装配。
+
+    为什么不再走 `git worktree add`（`83dad089` 的写法，本笔改掉）：那条路把守卫
+    绑在一份**可写的 git 元数据**上，而 CI 容器只给源码树，`git worktree add` 当场
+    退 2（连续三个构建 `cnb-mei-1k4odroc5` / `cnb-o9g-1k4oij3vm` / `cnb-l6f-1k4bi087n`
+    的 `unit-tests` 腿同形），四条用例于是全部变成 setup ERROR——**而真正的报错
+    （git 的 stderr）被 `capture_output=True` 吃掉**，只看得到一个裸
+    `CalledProcessError`。守卫要的是"一棵自己独占的仓库根"，不是"git 能不能建
+    worktree"；换成复制装配面即把这条外部依赖根除，且实测更快（0.22s / 33.5MB，
+    原 worktree 整树检出约 12s）。
+
+    复制的是**当前工作树这一份**（不是 HEAD 那份）：守卫本体若在本地有未提交改动，
+    探针就该测改后的版本，否则改坏了也照样绿。
     """
     staging = Path(tempfile.mkdtemp(prefix="neurovaProbeRoot-"))
     root = staging / "tree"
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(root), "HEAD"],
-        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=180,
-    )
-    # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
-    # 探针就该测**工作树这一份**，否则改坏了也照样绿。
-    shutil.copy2(REPO_ROOT / "tests" / "conftest.py", root / "tests" / "conftest.py")
+    root.mkdir()
+    shutil.copy2(REPO_ROOT / "pyproject.toml", root / "pyproject.toml")
+    for entry in ("pytest.ini", "conftest.py"):
+        candidate = REPO_ROOT / entry
+        if candidate.is_file():
+            shutil.copy2(candidate, root / entry)
+    for entry in ("tests", "neurova"):
+        shutil.copytree(
+            REPO_ROOT / entry, root / entry,
+            symlinks=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    # 探针要在 `tests/unit/` 落临时用例（`_runPytestProbe`），而复制面按忽略表
+    # 剪掉的正是空的字节码目录——`tests/unit` 本身在源树里必然存在，这里只兜底。
+    (root / "tests" / "unit").mkdir(parents=True, exist_ok=True)
     return staging, root
 
 
 def _releaseProbeRoot(staging: Path, root: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(root)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-    )
+    """整棵临时树一次删净（没有 git 侧的注册项要摘，故无 `worktree remove`）。"""
     shutil.rmtree(staging, ignore_errors=True)
 
 
