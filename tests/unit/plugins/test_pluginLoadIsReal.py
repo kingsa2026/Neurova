@@ -49,7 +49,7 @@ def _writePlugin(root, name, *, body=None, manifest_extra=None):
     pdir.mkdir(parents=True, exist_ok=True)
     manifest = {"name": name, "version": "1.0.0", "description": "probe", "author": "qa",
                 "entry_point": "main.py", "dependencies": [],
-                # §6-157 收口：能力面用 `permissions`（键取自 skills 那份词汇），
+                # §6-159 收口：能力面用 `permissions`（键取自 skills 那份词汇），
                 # 框架中介面用 `framework_surfaces`。这里显式写空——缺整节会被挂载门拒。
                 "permissions": {}, "framework_surfaces": []}
     manifest.update(manifest_extra or {})

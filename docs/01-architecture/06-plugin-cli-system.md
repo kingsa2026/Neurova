@@ -90,7 +90,7 @@ class PluginState(str, Enum):
     ERROR = "error"           # 错误
     UPDATING = "updating"     # 更新中
 
-# 插件独有的框架中介面（§6-157 收口后只剩两档）
+# 插件独有的框架中介面（§6-159 收口后只剩两档）
 class PluginFrameworkSurface(str, Enum):
     READ_EVENTS = "read:events"      # 经事件总线订阅/退订
     EMIT_EVENTS = "emit:events"      # 经事件总线投递

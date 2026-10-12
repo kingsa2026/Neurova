@@ -6,7 +6,7 @@ P1 把动态装载接通了，并留下一句读数恒 `false` 的诚实声明�
 是两次授权**。本模块就是第二次授权那一道，规则四条，全部在这里判（别处不另判一套）：
 
 1. **聚合权限门**：`声明 ⊆ 已确认` 才挂；声明里有 `execute:commands` / `admin`
-   （§6-157 收口后没有"不可授予档"——高危能力可授，但授予后由调用面真拦）。逐项确认在
+   （§6-159 收口后没有"不可授予档"——高危能力可授，但授予后由调用面真拦）。逐项确认在
    `plugin_permissions.py`，档位口径也在那一份里，本模块只**执行**。
 2. **命名空间**：插件声明的 `path` 是它自己空间里的**相对路径**，最终形态固定为
    `PLUGIN_ROUTE_PREFIX/{plugin_id}/{path}`。绝对路径、`..`、`?`/`#`、越出该前缀一律拒——
@@ -191,7 +191,7 @@ def mountPluginRoutes(pluginId: str, actor: str = "") -> typing.Dict[str, typing
 
 
 def _permissionGate(pluginId, manager, store) -> None:
-    """聚合门（§6-157 收口后）：清单必须**显式声明过**能力面，且声明 ⊆ 已确认。
+    """聚合门（§6-159 收口后）：清单必须**显式声明过**能力面，且声明 ⊆ 已确认。
 
     两条判据各挡一种形态：
     - 整节缺失 ⇒ `permissions_undeclared`。§6-155 只判"声明 ⊆ 已确认"，于是
@@ -247,7 +247,7 @@ def _plan(pluginId, app, endpoints):
 
 
 def _withSkillPermissionScope(pluginId, handler, manager):
-    """把插件声明的能力面装进 skills 那份作用域，让调用面仲裁真的生效（§6-157 收口的落点）。
+    """把插件声明的能力面装进 skills 那份作用域，让调用面仲裁真的生效（§6-159 收口的落点）。
 
     拦不拦**不由本包判断**：进入 `skill_permission_scope` 后，插件 handler 经框架调工具时，
     `tool_executor._check_skill_declaration` 按 `permissions.py` 那份声明 fail-closed。

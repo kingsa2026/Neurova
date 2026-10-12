@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""授权存储的落盘与审计纪律（§6-155 立的规则，§6-157 换掉词汇后原样保留）。
+"""授权存储的落盘与审计纪律（§6-155 立的规则，§6-159 换掉词汇后原样保留）。
 
 本文件只管**存储这一层**的四条纪律，词汇与两类面的口径在
 `tests/unit/plugins/test_pluginPermissionSingleSource.py`，挂载门与调用面仲裁在
 `tests/unit/plugins/test_pluginRoutesAreMounted.py`，事件面强制点在
 `tests/unit/test_base_plugin.py`——同一规则只在一处钉（教义第 6 条）。
-§6-157 收口时本文件从 21 格降到现在这些：删掉的 4 格档位模型格（`PERMISSION_MODEL`/`PermissionTier`
+§6-159 收口时本文件从 21 格降到现在这些：删掉的 4 格档位模型格（`PERMISSION_MODEL`/`PermissionTier`
 随「甲 · 彻底合一」退役，替代判据在 `test_pluginPermissionSingleSource.py`）与 4 格事件总线格
 （与 `test_base_plugin.py` 同题，留在那一档更贴生产接缝）——**规则一条没少，只是不再两处钉**。
 

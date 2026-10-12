@@ -2407,6 +2407,101 @@
       不在本批顺手做；③ 媒体面按 `agent_id` 分账、不按 `user_id`，回收站沿用同一口径——
       改鉴权语义不属本批授权，需要时另裁。
 
+159. **批 15 裁定甲落地：插件那套权限词汇收口到技能侧那份单点，插件独有的只剩事件总线两档——本会话 §6-155 自立的第二份定义由本会话自己拆掉（✅ `5cb8416b`，判据入子集 `e94720b5`）** 🟢
+    - **先记编号勘误**（它会误导读台账的人，所以放在最前）：`5cb8416b`／`e94720b5` 两笔正文写的
+      §6-157 是**错号**——157 早已被并发会话那笔「三套零接线编排器」（`f060c2f4`/`6153becc`）占用，
+      158 又被媒体回收站占用，本批实为 §6-159。**不改写已提交历史**，只在此登记；本批 13 份文件
+      （4 份生产 + 2 份文档 + 7 份判据）里的 `§6-157` 已随本笔一次性改指 `§6-159`，
+      并复核并发会话那两处引用（`test_workflowConcurrencyCapAndNodeRetry.py` 1 处、
+      `protected_tests.txt` 5 处）**仍是 157、一字未动**。踩的形状与 §6-158 之前记过的同源：
+      落账前必须现查 max 号，不能沿用自己写代码时定下的号——号是在提交那一刻被别人占走的。
+    - **根因（这笔账是本会话自己的）**：§6-155 给插件立的八项 `PluginPermission` 与
+      `neurova/skills/permissions.py:105` 的七类 `KNOWN_CAPABILITY_KEYS` 是**同一件事的两份定义**，
+      而技能那一份才是真在执行的——`tool_executor.py:1033` 把声明装进作用域、`:1540` 按声明
+      fail-closed 裁。更糟的是我把其中四项（`read:files`／`write:files`／`network:access`／
+      `execute:commands`）自己写成了 `disclosed_only`＝"框架拦不住，只是披露"，等于用判据把
+      一份更弱的平行词汇表钉成了合法存在。判"有没有第二份定义"时我**只按包名扫了
+      `neurova/plugins/`，没按能力面关键词扫到 `neurova/skills/`**——与 §6-151 记过的
+      「比对象比窄了」是同一条坑，这次是自己踩（失效形态第 69 条由此而来）。
+      用户 2026-10-12 裁「甲 · 彻底合一」，按教义第 6/7 条收口。
+    - **收口后各面只剩一处定义**：
+      ① **能力面**（`tools|network|file|model|system|node|storage`）词汇**每次现取**
+      （`capabilityKeys()` 读 `skills.permissions` 的模块属性，不留副本），合法性**复用**
+      `skill_install_gate.validate_permissions_for_install`（未知能力键／白名单含未登记工具／
+      `mcp.*` 未声明网络 ⇒ 拒，拒因原文透传），运行时仲裁就是技能那份 `skill_permission_scope()`；
+      ② **框架中介面** `PluginFrameworkSurface` 只剩 `read:events`／`emit:events` 两档
+      （事件总线，技能侧无此概念），强制点仍在 `BasePlugin` 三方法；
+      ③ `http:request` 删（就是 `network`）、`admin` 删（角色门单点在 `api/deps.require_role`）。
+      `PluginPermission`／`PermissionTier`／三档口径（`framework_enforced`/`disclosed_only`/
+      `never_grantable`）整体退役，`RETIRED_PERMISSION_VALUES` 六值留着只为**点名拒**，不作映射。
+    - **三档退役不是放宽，有调用面读数为证**：原把 `execute:commands` 定成"不许授予"实质是
+      "我拦不住所以禁止"；现在系统/命令面归 `system` 能力键，可授予而授予后由调用面真拦。
+      活体两段：显式 `permissions: {}` 的插件挂载后 `browser_navigate` 与 `file_write` **都被拒**；
+      声明并确认 `network` 的插件 `browser_navigate` 放行而 `file_write` 仍拒——
+      拦截粒度从"整档开关"变成"逐能力键仲裁"，比 §6-155 更严不是更松。
+    - **顺手修掉 §6-155 自己留的两处**：
+      ① **聚合门的空真通过**（§6-156 已登记的那格）：只判"声明 ⊆ 已确认"时清单**不写**
+      `permissions` 也过门，而该插件一被请求就拥有整个进程的能力。现在整节缺失 ⇒
+      `permissions_undeclared` 拒挂；显式空 dict 合法（＝"我什么都不要"）且调用面全拒——
+      两者必须可区分，否则"忘了写"和"刻意不要"是同一个读数。
+      ② **旧字段被拖到装载才炸**：`required_permissions` 现在在**安装这一站**就以
+      `legacy_permissions_field` 拒；授权文件 `STORE_VERSION` 升到 2，读到 v1 走
+      `grants_store_legacy_format`——**不自动映射也不覆写**，因为 `execute:commands → system`
+      是变宽，那种决定只能由人重做一次；读侧一律朝安全侧失败，`snapshot()` 把
+      `legacy`／`corrupt` 两态显式暴露给面板。存储三条既有纪律（落盘位置、审计写不进即回滚、
+      坏文件不覆写）逐格保持，本批未放宽。
+    - **判据 54 格（三份文件）**：新档 `test_pluginPermissionSingleSource.py` **14 格**钉
+      "取用而非复制"——一格 set-equality 对 `KNOWN_CAPABILITY_KEYS`、一格 monkeypatch 改那份集合
+      断插件侧跟着变（变异对照，证明不是恒真）、一格 **AST 扫 `neurova/plugins/*.py`** 拦
+      "同时含 ≥3 个能力键字符串的字面量集合/字典"（那正是八项枚举当年的出生形态）、
+      一格 v1 旧文件拒读且**盘上字节未变**。`test_pluginRoutesAreMounted.py` 19→**24** 格
+      （不可授予档那格换成"整节缺失拒挂"＋"显式空声明可挂且 fail-closed"＋"声明的能力键真到达作用域、
+      越声明范围仍拒"＋"作用域不外泄到请求外"＋两格反空转）。
+      `test_pluginPermissionGate.py` 21→**16** 格（4 格档位模型格由新档替代、4 格事件总线格与
+      `test_base_plugin.py` 同题只留一处）——**规则一条没少，只是不再两处钉**，这正是教义第 7 条
+      判据「该功能在仓内只剩一处实现被消费」在本格的形态。
+    - **红自证换了形态，如实记**：本批**不能**用"整体还原生产件"证红——还原会把
+      `plugin_permissions` 的 import 断在词汇共享上，那种红是 ImportError/收集错误，
+      什么也不证明（教义第 3 条要红落在行为断言上）。改用**就地桩替**：把包装函数与声明判据
+      monkeypatch 掉，对应格必须红；两格反空转常驻进判据文件，不再依赖一次性手工回退。
+    - **A/B 与活体**：受害族（`tests/unit/api` ＋ 插件族 ＋ skills 两档出红文件）本树与 HEAD 侧
+      **27 条 FAILED/ERROR 逐条同名、集合差为空**；skills 那两格红（`github_push` 状态、
+      内置包解压缺文件）两侧同在，不认领也不当作已通过。活体真 `create_app()` 逐段：
+      未声明整节 ⇒ mount **409 [permissions_undeclared]**、空声明探针挂上后
+      `scope_present:true / network_allowed:false / denial_for_undeclared:"工具 brows…"`、
+      声明 `network` 的探针 `network_allowed:true` 且拒因转 `null`、撤销后该探针路由 **404**、
+      旧字段 install **400 [legacy_permissions_field]**、未知能力键 install
+      **400 [invalid_permissions_declaration] 未知权限能力键: 'teleport'**、无凭证 **401**、
+      请求之外作用域读数为 `None`。插件族并跑 **210 passed**。
+    - **净 LOC（`git show --numstat` 现量）**：生产池 **+353/−253**（净 **+100**；
+      `plugin_permissions.py` 165/22 主体重写、`plugin_manifest.py` 47/22、`plugin_route_mount.py` 50/19、
+      `plugin_manager.py` 42/6、`endpoints/plugin.py` 36/22、`base_plugin.py` 11/9、`plugins/__init__.py` 2/2）；
+      判据池 **+578/−405**（净 +173）；文档池 **+33/−33**（净 0，两份架构文档的八项枚举块与
+      三档导读改成两类面，并写明"本节曾列过八项、为何收口"——不留一条看不出改过的文档）；
+      基建池 **+21/−9**（净 +12，子集块按新格数与新增档**就地按行区间改写**，别人那几档一字未动）。
+      生产池为正的理由：收口的同时把两处 §6-155 遗留缺陷修在行为上（空真通过门、旧字段拒在错误的一站），
+      并新增三档 HTTP 读面；逐条去向写在提交正文。
+    - **同批扫到并当场闭环的一格常驻红（✅ `80b395ac`）**：跑子集守卫复算时撞见
+      `test_every_vanished_entry_is_signed_off` 自 `fed108a0` 起一直红——`test_pluginSystemRetired.py`
+      曾入子集（`51b60bd6`）、文件已随 P1 改裁删除、退役台账里却没有那一行。§6-149 当时把它登记成
+      "署名要由删它的那一批写，不代填"，这笔账挂了两天。现在补的依据是**前提已不成立**：那次撤销是
+      用户的改裁（§6-150 正文写着"防再生判据与其子集条目同批撤"），不是某个会话自己的退役判断，
+      按守卫格式记进台账不改判定、不改清单、不新增豁免通道。实测三档并跑 **50 passed**（改前 1 failed），
+      反向自证 `test_retired_ledger_exemption_is_honored` 三向读数仍在原位。
+      形状记一笔：**"等别人来补"的欠账不会自己闭环**——它只在有人复算守卫时露头，
+      所以登记欠账时必须同时登记"谁在什么动作里会撞见它"，否则等价于静默遗留（教义第 5 条）。
+    - **子集清单里的台账引用同步改号**：本批那块（三份判据的说明）四处 `§6-157` 改指 `§6-159`，
+      并就地加一行编号勘误说明；并发会话那两档（`§6-157 活路补的两格能力`、`§6-158` 媒体档）
+      **一字未动**，`git diff --numstat` 复核为 **+6/−4**（4 处改号 ＋ 2 行勘误），不是整块重写。
+    - **本批没做、留在案上的**：① **P3 供应链那半从未动**——设计稿 §6-156 已把它改写成
+      「两条通道共有的构件完整性欠账」（七个外部源在 `hub_client.py` 真在拉包而
+      `sha256|hashlib|digest|checksum|signature` 全零命中；插件侧远程源仍回 501），
+      哈希／签名固定属**跨通道一次设计**，不在本批授权内顺手做；② P4 插件前端与 11 locale 未起，
+      且新权限读面（`GET /permissions/model`、`/{id}/permissions`、grant/revoke、mount/unmount）
+      在 UI 上没有任何入口——今天只有 HTTP 面能用；③ 安装/启用状态不跨重启（授权落盘了、
+      `enabled` 没落盘）仍是 §6-155 留的那笔待裁；④ `frontend_resources` 只写不读、
+      `PluginType` 七值无分派、渠道登记口无写侧（§6-156 的另五项）本批未碰。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
@@ -2636,6 +2731,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `f060c2f4` | 三套零接线编排器逐格比对做完，按裁定「加」把**唯二真缺的两格**并入活路（生产池 **+134/−19**：`execution_engine.py` 111/17＝`maxConcurrentNodes()` 单点＋层内 `asyncio.Semaphore`＋`_executeNodeWithRetry()`＋`NODE_RETRY` 事件；`storage.py` 11/2＝`node_definitions` 增 `idempotent` 列并走既有补列迁移、读写两侧同批；`custom_nodes.py` 5＝validate/create/update 三点接上，少 update 那行部分更新会静默抹掉声明；`models.py` 3＝`NodeDefinition.idempotent=False` **默认拒绝**；`neurflow_api.py` 2＝`GET /nodes` 暴露该键；`useWorkflowRun.ts` 2＝`node_retry: 'running'`）。**不是搬那 633 行**：候选注释写「指数退避」实现是线性、执行表恒空从未跑过。比对表结论：任务分解／拓扑调度／取消断点／元认知／认知周期／状态持久化六格活路已覆盖且更强（候选实测 `decompose` 得 1 步 `simple_task`、`execute_plan` 返回体带 `simulated: true`、周期产出「输入包含 1 个词」＋「推理完成」＋`success=True`、`save_state` 裸 `open(path)` 违反数据根）；`adjust_plan` 判**不取**（`ExecutionFeedback` 全仓无写入方且该档从不重试＝取一格从未生效的死代码过去）。红 5f/2p（`peak=12>8`、`env=2 未生效 peak=6`、`calls=1≠3`、spec 键被吞）→ 绿 7p，逐文件单跑四次同读数；红自证＝6 个生产文件整体还原 ⇒ **恰 7 格翻红**（含枚举闭集那 2 格）、无外溢，还原后 SHA256 逐字节一致；A/B（HEAD worktree 铺入判据）基线 **8f/1259p/2e** ↔ 本树 **3f/1265p/2e**，集合差只有本批 5 格、本树独有 0 条；活体真端点四段（宽 12 实测 peak=8、幂等探针 calls=3 且 node_retry 2 条 node_failed 0 条、默认拒绝侧 calls=1 终态 failed、`GET /nodes` 每条带 idempotent）。**两枚自曝**：前端那格没红过（兜底已归 running）⇒ 改做两步变异对照验牙（只改兜底仍绿、再摘显式键才翻红 `expected 'failed' to be 'running'`），说明键已承重；改枚举漏跑闭集守卫**复发**（`test_enum_members==13`）第一次并跑才看见。判据池 +501/−1 | §6-157 |
 | `6153becc` | 上述判据入受保护子集（基建池 **+7/−0**＝6 行说明 + 1 条路径，按整档 CRLF 落；入册前逐文件单跑四次同读数 7 passed；登记前后 `test_dev_path_and_runtime_dep_guards.py` 39 passed）。常驻的理由不是这格会红：下次有人把 Semaphore 拆回裸 gather 看起来只是「少一层开销」，而给副作用节点顺手开重试不是性能问题、是重复发消息 | §6-157 的常驻面 |
 | `05b8b2e0` | 裁定乙落地：`media` 面接回差集的另一半——软删＋回收站四件（`?mode=trash`／`GET /trash`／`POST /{id}/restore`／`?mode=permanent`，`batch-delete` 同用一份 `DELETE_MODES`），**默认档仍硬删**（现役页面"删了就没了"是对用户的既有承诺，翻成软删＝隐私语义变更，不在授权内）；保留策略同日人裁＝永久保留直到显式彻底删除，不设 TTL。生产池 **+511/−51**（`media.py` 198/19 ＋ 前端 `media.ts` 31/6、`AgentMediaPage.vue` 139/26、11 份 locale 143/0＝每份 13 新键）；判据池 **+833/−5**；基建池 **+11/−0**（新档入册，入册前逐文件单跑两次同读数 21 passed 14.15s/7.91s）。**活体第一步就撞到一枚既有缺陷**：`_storage_root()` 在默认配置下返回 CWD 相对名（模块默认值 `"media_storage"` 就是那个裸名，注释里"未配置时落数据根"那句兜底从未生效），于是 `is_relative_to()` 绝对比相对 ⇒ **每次** `POST /save` 都 400 ⇒ 上传前门是坏的、四件在活 app 上一步走不到；根修在这一处解析（与 `c2cb809c`/`721ef038` 同一条锚定口径）。**本批自伤一枚由 A/B 抓到**：`mode: str = Query(default=…)` 把 `Query` 对象当 Python 缺省值，`test_media_disk_storage.py` 两处直接按函数调用 ⇒ 拿到描述对象撞上"未知模式"；改 `Annotated[...] = 常量`，新写的 `/trash` 一并换，不留第二处同形地雷。**四格"绿得没道理"**：实现前那四格排除断言全绿，是因为 `?mode=trash` 未实现时行被整个删掉——"不存在"让"不该出现"自动成立；这种格靠"先红后绿"发现不了（它本来就绿），只能在实现后做变异验牙（M1 `_isTrashed` 恒 False ⇒ 恰 5 格红）。变异共七枚（后端 M1/M3/M4/M5/M6、前端 F1/F2）逐条命中自己的格，跑完按字节还原核 SHA256 一致。A/B（`tests/unit/api`＋`tests/media`＋`test_wechat_split.py`）HEAD **30f/2256p/8e** ↔ 本树 **17f/2271p/8e**，集合差＝本批 13 格转绿、新增 0 条；第一次本树多出的 `test_memory_reload_endpoint.py::…` ERROR 单跑 4 passed、同选型复跑不出现 ⇒ 不重现的装配抖动，记档不认领。活体真 `create_app()` **15 读数全 PASS**（含摘掉身份覆盖后写口回 401——补回收站没放宽既有鉴权门）；`data/` 最近 15 分钟零改写。前端两道门 vitest **255 files/2037 passed**、`vue-tsc --noEmit` 退出码 0。**登记不静默**：回收站 UI 未在浏览器实跑（同 §6-137 那笔欠账的形状）；`API_REFERENCE.md` 附录"无需认证"表从未逐模块复核，本批只按实测改了 `media` 一行并留脚注；媒体面按 `agent_id` 分账不按 `user_id`，改鉴权语义另裁 | §6-158 |
+| `5cb8416b` | 批 15 裁定甲落地：插件侧那份八项 `PluginPermission` 收口到技能 `KNOWN_CAPABILITY_KEYS` 单点——能力键词汇**每次现取**不留副本、合法性复用 `skill_install_gate.validate_permissions_for_install`、运行时仲裁就是技能那份 `skill_permission_scope()`；插件独有的只剩 `read:events`/`emit:events` 两档框架中介面，`http:request`（＝`network`）与 `admin`（角色门单点 `deps.require_role`）删除，三档口径整体退役。生产池 **+353/−253**（净 +100：`plugin_permissions.py` 165/22 重写、`plugin_manifest.py` 47/22、`plugin_route_mount.py` 50/19、`plugin_manager.py` 42/6、`endpoints/plugin.py` 36/22、`base_plugin.py` 11/9、`plugins/__init__.py` 2/2），为正逐条去向在提交正文（修两处 §6-155 遗留：聚合门**空真通过**⇒整节缺失 `permissions_undeclared` 拒挂而显式空 dict 合法且调用面全拒；旧字段拖到装载才炸⇒安装这一站 `legacy_permissions_field` 拒，`STORE_VERSION` 升 2、v1 文件 `grants_store_legacy_format` **不映射不覆写**；另加三档权限 HTTP 读面）。判据池 **+578/−405**（净 +173；54 格＝新档 `test_pluginPermissionSingleSource.py` 14 ＋ `test_pluginRoutesAreMounted.py` 24 ＋ `test_pluginPermissionGate.py` 16）。**红自证换形态并如实记**：本批整体还原生产件会把 import 断在词汇共享上（ImportError/收集错误，什么也不证明），改成就地 monkeypatch 桩替包装与声明判据、对应格必须红，两格反空转常驻进判据文件。A/B 受害族 27 条 FAILED/ERROR 本树与 HEAD 逐条同名、集合差为空（skills 两格红两侧同在，不认领）；活体真 `create_app()` 八段读数（未声明整节 409、空声明探针 `network_allowed:false` 且 `denial_for_undeclared` 指名工具、声明 `network` 后 `true` 且拒因转 `null`、撤销后 404、旧字段 install 400、未知能力键 install 400 `未知权限能力键: 'teleport'`、无凭证 401、请求外作用域 `None`）；插件族并跑 210 passed。文档池 **+33/−33**（净 0，两份架构文档的八项枚举块与三档导读改成两类面并写明"曾列过八项、为何收口"）。⚠ 本笔正文写的 §6-157 是**错号**（157/158 已被并发会话占用），本批实为 §6-159，不改写已提交历史，勘误登记在该格首条 | §6-159 |
+| `e94720b5` | 上述词汇单点判据入受保护子集（基建池 **+21/−9**＝净 +12）。三件事：① 新档 `test_pluginPermissionSingleSource.py` 入册（入册前逐文件单跑两次同读数 14 passed 1.90s/1.92s），它拦的是"再长出一份能力键集合"——AST 扫 `neurova/plugins/` 找同时含 ≥3 个能力键字符串的字面量集合/字典，那正是八项枚举当年的出生形态；② 两档已有条目的说明与格数改到实态（`test_pluginPermissionGate.py` 21→16、`test_pluginRoutesAreMounted.py` 19→24，逐文件单跑两次 16 passed 3.54s/2.00s、24 passed 3.15s/3.02s）——子集清单里写着"八项权限档位三态"而生产已收口，这种名实漂移会让下一个人照旧清单理解系统；③ **就地按行区间改写**而不是删了重加，别人那几档一字未动（`git diff --numstat` 仅 +21/−9；上一笔让号脚本连带改掉并发会话一行的教训在这一批被执行前避开）。入册前后 `test_dev_path_and_runtime_dep_guards.py` 39 passed，`TestProtectedSubsetEntriesAreTracked` 在 `git add` 之前确实红——这一格第一次替我们发现"本机跑得通、CI 上文件不存在"的遗漏 | §6-159 的常驻面 |
+| `80b395ac` | 补 §6-150 那批欠的退役署名并销掉一格常驻红（基建池 **+1/−0**＝`protectedSubsetRetired.txt` 一行，按整档 CRLF 落）。`test_every_vanished_entry_is_signed_off` 自 `fed108a0` 起长红：`test_pluginSystemRetired.py` 曾入子集（`51b60bd6`）、文件已随改裁删除、台账无署名；§6-149 当时判"由删它的那一批署，不代填"，因为代填＝替别人的退役决定背书。前提现已被推翻——那次撤销是用户 2026-10-11 的改裁（§6-150 正文实证"防再生判据与其子集条目同批撤"），不是会话自己的判断，故按守卫要求的 `路径 | 依据` 格式记账，不改判定、不改清单、不新增豁免通道。三档并跑 **50 passed**（改前 1 failed），`test_retired_ledger_exemption_is_honored` 三向读数仍在原位。**留在案上的形状**：登记"等别人补"的欠账时必须同时登记谁在什么动作里会撞见它，否则等价于静默遗留 | §6-159 附带闭环 |
 
 上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 遗留的"只留两个门"已于同日补完**：`709bb58e` 把角色门取源收口到严格门本体（§6-54 闭环），资源标签面的查询参数放行按既有守卫保留未动；比这更窄的"把 21 个文件缩到 3 个"仍不做，理由与成立条件写在 §6-54 格内。**2026-10-08 追加 P3-14（长任务与工具调用是否闭环）五批全部落地**：`8d9a459e` 工具轮回放闭环（§6-67）、`1cc26b47` 晚到终态会话栅栏（§6-68）、`898355db` 租约写了要有人读（§6-69）、`2ffe4a8d` Studio 台账三格收口（§6-70）、`39a1add9` Anthropic 流式契约（§6-71）；五份判据各自入子集（`750395e2`/`047e58af`/`6ca9b4e5`/`57a108f5`/`281d15c9`）。生产净 LOC 依次 +54/+55/+111/+72/+244，A 批为正的理由写在正文：缺陷本体是「契约从未实现」，只删不增无法闭合，而「删」已在同一提交由 openai_loop 的 −295 兑现。本轮另扫出四组只写不读或需人裁的格，未顺手改：§6-72（Studio 无取消、runs 状态词汇表无单源、`get_background_status` 与死信队列、`/console/chat/runs` 与 `AgentRunStore.stats`）、§6-73（`test_closed_loop_verification` 名为闭环实为 import smoke）、§6-74（并发负载污染 A/B 与 `test_agent.py` 预存挂起的处置）、§6-75（本会话三条记账更正，含一次共享清单文件上的 `--only` 违规自纠）。**同日 G 轮把这四组里能自行闭合的都做完**：G1 词汇表单源 `62a36f96`（+判据入子集 `9bbbd9fa`）、G2 查询口半退役 `4770340a`、G3 台账计数接读侧 `4737fb6f`、G4 parked 续跑会话级入口 `df2a1e00`（+两判据入子集 `3e801962`）、G5 名实改名 `0e47b2c8`+`c17cbd6e`；真 key 复验 `aaa590b8` 收掉 §6-71 的边界并同时报出 §6-76。**§6-72 至此六格闭四格**，真余两格需人裁（Studio 取消、ACP 死信队列）；§6-73 闭环；§6-75 由三条**增至八条**（G 轮又抓出三笔净 LOC 写错与一笔"声明与 numstat 不符"，见该条 ④—⑧）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（**已闭环 `35649409`**：七份活体脚本的复现行不再写死开发机绝对路径，实况与"CI 是否看得见决定常驻红能活多久"这条读数见 §6-117）、**§6-119（序 5 批 E：通用 KV 配置器有两份实现而生产零消费者——"删弱留强"的前提是假的，要裁的是"本仓要不要这一层"，三条路的影响面已摆在该格）**已裁 E-2 并落地 ✅ `9146989c`/`ce26d1e5`，见 §6-125****、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64-B 已落地（`6850bfde` 逐文件只降不升棘轮，基线 38 文件 / 60 处）；剩下 A「按目录分批扫净」已从"需人裁"转为可排期工单**、RSI 遗产分支成功语义、属主读会话、**§6-65 已裁定「不删，就地标为已知存量」并转结（文件未跟踪且被 gitignore，删了不可恢复，而防再生判据已在装配点生效）**、**§6-66 已闭环（`tests/manual` 收集拦截层：E1 原计划"退役它"的前提被实测推翻，实际待办只剩对新增脚本的只降不升棘轮——`7c494c93` 落地，基线 20 文件 / 25 处）**、**§6-76（Anthropic 协议转换双定义——**已裁毕并按修法 A 落地 `c9edf408`**，原三选一代价档案留在该条正文供引用）**、**§6-72 真余两格（Studio 取消＝2026-10-08 裁定"按新能力做全套四件"；ACP 死信队列＝同日裁定"接读侧"，两批在途）**；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
 
