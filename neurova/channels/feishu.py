@@ -23,6 +23,8 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.channels.feishu_auth import AuthMixin
+from neurova.channels.feishu_media import MediaMixin
+from neurova.channels.voice_egress import VOICE_MESSAGE_TYPE, VOICE_OUT_AUDIO_FILE
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
@@ -35,7 +37,7 @@ logger = get_logger(__name__)
 _VOICE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
 
 
-class FeishuAdapter(AuthMixin, ChannelAdapter):
+class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
     """
     飞书渠道适配器
 
@@ -48,6 +50,11 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
     复审断链修复③: 补继承 AuthMixin——_download_media_bytes 依赖的
     tenant token 管理在此 Mixin（此前该 Mixin 与 MediaMixin 均为孤儿）。
     """
+
+    # 语音出站：以**音频文件**形式送达（上传拿 file_key → msg_type="file"）。
+    # 刻意不声明 voice_bubble：那条要求 opus 且有大小/时长约束，而本仓 TTS 产物是 WAV、
+    # 没有转码链路——与其把"能发语音气泡"写成假事实，不如以文件形式真送出去。
+    voiceOutMode: str = VOICE_OUT_AUDIO_FILE
 
     def __init__(self, config: ChannelConfig):
         super().__init__(config)
@@ -347,6 +354,10 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
         **kwargs,
     ) -> Optional[str]:
         """发送消息到飞书"""
+        if message_type == VOICE_MESSAGE_TYPE:
+            # 语音回发走自己的上传+发送路（纯 HTTP），不进 lark SDK 分支——
+            # 语音产物不是文本，分片/AT 注入那套对它无意义。
+            return await self._sendAudioFile(chat_id, str(kwargs.get("file_path") or ""), kwargs)
         try:
             import lark_oapi as lark
             from lark_oapi.api.im.v1 import (
@@ -400,6 +411,51 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
         except Exception as e:
             logger.exception("Feishu send error: %s", e)
             return None
+
+    async def _sendAudioFile(
+        self,
+        chat_id: str,
+        file_path: str,
+        kwargs: Dict[str, Any],
+    ) -> Optional[str]:
+        """把回合的 TTS 产物作为音频文件送达（上传拿 file_key → 发 file 消息）。
+
+        任一步失败一律返回 None 并点名原因——manager 会把它记成"该条发送失败"，
+        不能拿"发了"回执糊过去（语音在渠道链上最容易假成功：文本发出去了，
+        对方却永远收不到那条音频）。
+        """
+        import os
+
+        if not file_path or not os.path.isfile(file_path):
+            logger.error("飞书语音出站：音频文件不在位（%r）", file_path)
+            return None
+
+        file_key = await self.upload_file(file_path, file_type="stream")
+        if not file_key:
+            logger.error("飞书语音出站：音频上传失败（%s）", os.path.basename(file_path))
+            return None
+
+        try:
+            response = await asyncio.to_thread(
+                self._feishu_post,
+                "/im/v1/messages",
+                {
+                    "receive_id": chat_id,
+                    "msg_type": "file",
+                    "content": json.dumps({"file_key": file_key}),
+                },
+                params={"receive_id_type": kwargs.get("receive_id_type") or "chat_id"},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.exception("飞书语音出站：发送请求异常: %s", e)
+            return None
+
+        if response.get("code") != 0:
+            logger.error("飞书语音出站：消息发送被拒 %s", response)
+            return None
+        msgId = str((response.get("data") or {}).get("message_id") or "")
+        logger.info("飞书语音已送达：file_key=%s message_id=%s", file_key, msgId)
+        return msgId or file_key
 
     async def disconnect(self):
         """断开飞书连接（幂等）"""
