@@ -236,7 +236,8 @@ class BasePlugin(BaseModule):
     plugin_type: PluginType  # 插件类型
     api_endpoints: List[APIEndpoint]  # 提供的 API 端点
     frontend_resources: List[str]  # 前端静态资源
-    required_permissions: List[PluginPermission]  # 需要的权限
+    permissions: Dict[str, Any]                   # 能力面（键取自 skills 那份词汇，§6-157）
+    framework_surfaces: List[PluginFrameworkSurface]  # 事件总线两档
     
     async def on_initialize(self) -> None:
         """初始化: 注册事件监听器、加载配置"""
@@ -893,7 +894,7 @@ class DynamicAPIRouter:
 # neurova/builtin_plugins/memory/memory_plugin.py
 
 from neurova.plugins.base_plugin import BasePlugin, PluginType
-from neurova.plugins.plugin_manifest import PluginPermission
+from neurova.plugins.plugin_manifest import PluginFrameworkSurface
 from neurova.memory.core.manager import MemoryManager
 
 
@@ -1134,14 +1135,14 @@ plugins/weather-skill/
 
 import httpx
 from neurova.plugins.base_plugin import BasePlugin, PluginType, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginPermission
+from neurova.plugins.plugin_manifest import PluginFrameworkSurface
 
 
 class WeatherSkillPlugin(BasePlugin):
     """天气查询技能"""
     
     plugin_type = PluginType.SKILL
-    required_permissions = [PluginPermission.HTTP_REQUEST]
+    permissions = {"network": True}   # 能力面单点在 skills：词汇 KNOWN_CAPABILITY_KEYS
     
     api_endpoints = [
         APIEndpoint("GET", "/plugins/weather/current", "get_current_weather"),

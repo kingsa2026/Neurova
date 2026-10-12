@@ -1,7 +1,9 @@
 """
 插件清单模块单元测试
 
-测试 SemVersion、VersionConstraint、PluginType、PluginState、PluginPermission、PluginManifest 和 parse_manifest 的功能。
+测试 SemVersion、VersionConstraint、PluginType、PluginState、PluginFrameworkSurface、
+PluginManifest 和 parse_manifest 的功能。（§6-157 收口：能力面词汇单点在 skills，
+本文件只钉插件自己的清单形状。）
 """
 
 import sys
@@ -17,8 +19,8 @@ from neurova.plugins.plugin_manifest import (
     SemVersion,
     VersionConstraint,
     PluginType,
+    PluginFrameworkSurface,
     PluginState,
-    PluginPermission,
     PluginManifest,
     parse_manifest,
 )
@@ -236,23 +238,34 @@ class TestPluginState:
         assert PluginState("enabled") == PluginState.ENABLED
 
 
-class TestPluginPermission:
-    """测试插件权限枚举"""
+class TestPluginFrameworkSurface:
+    """§6-157 收口：这里只剩**插件独有**的框架中介面，能力面词汇单点在 skills。
 
-    def test_permissions(self):
-        """测试权限值"""
-        assert PluginPermission.READ_EVENTS.value == "read:events"
-        assert PluginPermission.EMIT_EVENTS.value == "emit:events"
-        assert PluginPermission.HTTP_REQUEST.value == "http:request"
-        assert PluginPermission.READ_FILES.value == "read:files"
-        assert PluginPermission.WRITE_FILES.value == "write:files"
-        assert PluginPermission.EXECUTE_COMMANDS.value == "execute:commands"
-        assert PluginPermission.NETWORK_ACCESS.value == "network:access"
-        assert PluginPermission.ADMIN.value == "admin"
+    原来这一族有八项 `PluginPermission`，其中四项与 `skills/permissions.py` 的
+    `KNOWN_CAPABILITY_KEYS` 是同一件事的两份定义——而那一份才是真在 `tool_executor`
+    里拦的。本族因此改成钉三件事：只剩两档、旧值不再被认、旧清单字段被拒而不是被猜。
+    """
+
+    def test_surface_values_are_exactly_the_event_bus_pair(self):
+        assert [s.value for s in PluginFrameworkSurface] == ["read:events", "emit:events"]
 
     def test_from_string(self):
-        """测试从字符串创建"""
-        assert PluginPermission("http:request") == PluginPermission.HTTP_REQUEST
+        assert PluginFrameworkSurface("emit:events") == PluginFrameworkSurface.EMIT_EVENTS
+
+    def test_retired_capability_values_are_not_surfaces(self):
+        """被收口掉的六个值不能"顺手也认一下"——那等于给第二份词汇留入口。"""
+        for retired in ("http:request", "read:files", "write:files",
+                        "network:access", "execute:commands", "admin"):
+            with pytest.raises(ValueError):
+                PluginFrameworkSurface(retired)
+
+    def test_legacy_required_permissions_field_is_rejected_not_guessed(self):
+        data = {"plugin_id": "p", "name": "p", "version": "1.0.0",
+                "required_permissions": ["read:events"]}
+        with pytest.raises(ValueError) as caught:
+            parse_manifest(data)
+        assert "不做自动映射" in str(caught.value), (
+            "旧字段被静默忽略＝旧授权语义被悄悄改掉；报错要写明为什么不能自动映射")
 
 
 class TestPluginManifest:
@@ -286,7 +299,8 @@ class TestPluginManifest:
         assert manifest.author == ""
         assert manifest.plugin_type == PluginType.FUNCTIONAL
         assert manifest.dependencies == {}
-        assert manifest.required_permissions == []
+        assert manifest.permissions == {}
+        assert manifest.framework_surfaces == []
         assert manifest.entry_point == ""
         assert manifest.module_class == ""
         assert manifest.config_schema == {}
@@ -303,15 +317,24 @@ class TestPluginManifest:
         assert manifest.dependencies == {"neurova-core": ">=1.0.0"}
 
     def test_manifest_with_permissions(self):
-        """测试带权限的清单"""
+        """§6-157 收口后的清单形状：能力面是 dict（原样带过，合法性由 skills 那道门判），
+        框架中介面是封闭枚举列表。"""
         manifest = PluginManifest(
             plugin_id="test",
             name="Test",
             version=SemVersion("1.0.0"),
-            required_permissions=[PluginPermission.HTTP_REQUEST, PluginPermission.READ_EVENTS],
+            permissions={"network": True, "file": {"enabled": True, "read_only": True}},
+            framework_surfaces=[PluginFrameworkSurface.READ_EVENTS],
         )
-        assert len(manifest.required_permissions) == 2
-        assert PluginPermission.HTTP_REQUEST in manifest.required_permissions
+        assert manifest.permissions["network"] is True
+        assert manifest.framework_surfaces == [PluginFrameworkSurface.READ_EVENTS]
+
+    def test_manifest_does_not_validate_capability_keys(self):
+        """清单层**不判**能力键合法性——判它是 `skill_install_gate` 的活（单点）。
+        这一格钉的是"别在这儿再写一套校验"：写第二套就会与那道门漂移。"""
+        manifest = PluginManifest(plugin_id="t", name="T", version=SemVersion("1.0.0"),
+                                  permissions={"teleport": True})
+        assert manifest.permissions == {"teleport": True}
 
     def test_manifest_to_dict(self):
         """测试清单转换为字典"""
@@ -320,14 +343,16 @@ class TestPluginManifest:
             name="Test Plugin",
             version=SemVersion("1.0.0"),
             plugin_type=PluginType.SKILL,
-            required_permissions=[PluginPermission.HTTP_REQUEST],
+            permissions={"network": True},
+            framework_surfaces=[PluginFrameworkSurface.EMIT_EVENTS],
         )
         d = manifest.to_dict()
         assert d["plugin_id"] == "test-plugin"
         assert d["name"] == "Test Plugin"
         assert d["version"] == "1.0.0"
         assert d["plugin_type"] == "skill"
-        assert d["required_permissions"] == ["http:request"]
+        assert d["permissions"] == {"network": True}
+        assert d["framework_surfaces"] == ["emit:events"]
 
     def test_manifest_from_dict(self):
         """测试从字典创建清单"""
@@ -336,13 +361,15 @@ class TestPluginManifest:
             "name": "Test Plugin",
             "version": "1.0.0",
             "plugin_type": "skill",
-            "required_permissions": ["http:request"],
+            "permissions": {"system": True},
+            "framework_surfaces": ["read:events"],
         }
         manifest = PluginManifest.from_dict(data)
         assert manifest.plugin_id == "test-plugin"
         assert manifest.version == SemVersion("1.0.0")
         assert manifest.plugin_type == PluginType.SKILL
-        assert PluginPermission.HTTP_REQUEST in manifest.required_permissions
+        assert manifest.permissions == {"system": True}
+        assert manifest.framework_surfaces == [PluginFrameworkSurface.READ_EVENTS]
 
     def test_manifest_roundtrip(self):
         """测试清单序列化往返"""
@@ -352,7 +379,8 @@ class TestPluginManifest:
             version=SemVersion("1.2.3"),
             plugin_type=PluginType.CHANNEL,
             dependencies={"dep1": ">=1.0.0"},
-            required_permissions=[PluginPermission.HTTP_REQUEST],
+            permissions={"network": True},
+            framework_surfaces=[PluginFrameworkSurface.READ_EVENTS],
         )
         d = original.to_dict()
         restored = PluginManifest.from_dict(d)
@@ -360,7 +388,8 @@ class TestPluginManifest:
         assert restored.version == original.version
         assert restored.plugin_type == original.plugin_type
         assert restored.dependencies == original.dependencies
-        assert restored.required_permissions == original.required_permissions
+        assert restored.permissions == original.permissions
+        assert restored.framework_surfaces == original.framework_surfaces
 
 
 class TestParseManifest:
@@ -379,7 +408,8 @@ class TestParseManifest:
             "dependencies": {
                 "neurova-core": ">=1.0.0"
             },
-            "required_permissions": ["http:request"],
+            "permissions": {"file": {"enabled": true, "read_only": true}},
+            "framework_surfaces": ["emit:events"],
             "entry_point": "plugin.py",
             "module_class": "TestPlugin"
         }
@@ -390,7 +420,8 @@ class TestParseManifest:
         assert manifest.version == SemVersion("1.0.0")
         assert manifest.plugin_type == PluginType.SKILL
         assert "neurova-core" in manifest.dependencies
-        assert PluginPermission.HTTP_REQUEST in manifest.required_permissions
+        assert manifest.permissions["file"]["read_only"] is True
+        assert manifest.framework_surfaces == [PluginFrameworkSurface.EMIT_EVENTS]
 
     def test_parse_dict_manifest(self):
         """测试解析字典清单"""

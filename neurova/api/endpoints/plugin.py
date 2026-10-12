@@ -15,12 +15,15 @@ P1 接通的是**装载**，边界写死在这里：
   不可达分支后假装失败。供应链校验（源、哈希/签名、权限确认、回滚）属 P3。
 - 插件声明的 API 端点**要经第二次授权才挂进运行中的 app**：`POST /{id}/routes/mount`
   （admin）。门在 `neurova/plugins/plugin_route_mount.py`——enabled + loaded + 清单声明的
-  权限**逐项确认过**（`GET /{id}/permissions` 读还差哪几项），且只落在
-  `/api/v1/plugin-api/{id}/` 命名空间里、一律带身份门。`routes_mounted` 跟随活路由表。
+  能力声明**显式写过**（§6-157：整节缺失即 `permissions_undeclared` 拒挂，不再空真通过）、
+  声明项**逐项确认过**（`GET /{id}/permissions` 读还差哪几项），且只落在
+  `/api/v1/plugin-api/{id}/` 命名空间里、一律带身份门。挂载时把声明装进 skills 那份作用域，
+  于是插件 handler 经框架调工具时由 `tool_executor` fail-closed 裁。`routes_mounted` 跟随活路由表。
 - 权限授予/撤销与挂载放行都进既有审计面（`log_audit`，`PERMISSION_CHANGE` / `SECURITY_EVENT`），
   并落盘在数据根 `plugins/permissions.json`——那是人的决定，不能随进程走。
 - ⚠ 这套**不是沙箱**：能装载即能在进程内执行任意代码。这里给的是能力面的准入与留痕，
-  口径见 `plugin_permissions.PERMISSION_MODEL` 的三档（含 `never_grantable` 两项）。
+  能力面词汇与调用面仲裁单点在 `neurova/skills/permissions.py`（§6-157 收口），
+  插件侧只剩事件总线两档（`PluginFrameworkSurface`）。
 
 `plugin_id` 就是 manifest 里的 `name`（`PluginManager` 的键）；两者不一致时报 400 而不是静默改名。
 """
@@ -35,8 +38,11 @@ from neurova.api.deps import require_admin
 from neurova.core.logger import get_logger
 from neurova.plugins import plugin_permissions, plugin_route_mount
 from neurova.plugins.plugin_manager import PluginError, get_plugin_manager
-from neurova.plugins.plugin_manifest import PluginPermission
-from neurova.plugins.plugin_permissions import PermissionTier, grantablePermissions
+from neurova.plugins.plugin_permissions import (
+    FRAMEWORK_SURFACE_MODEL,
+    capabilityKeys,
+    grantCandidates,
+)
 
 
 def getPermissionStore():
@@ -69,8 +75,11 @@ _REASON_TO_STATUS = {
     # ── P2：权限门与挂载门面 ──
     "permission_not_granted": 403,     # 框架中介点上的实时拒绝（事件总线）
     "permission_not_declared": 400,    # 清单没声明的权限不给授予（防「先授予后声明」）
-    "permission_not_grantable": 403,   # never_grantable 档：要命令面/管理员面的插件
     "permissions_unconfirmed": 409,    # 聚合门：声明 ⊄ 已确认，还差哪几项写在 detail 里
+    "permissions_undeclared": 409,     # 清单没 permissions 这一节 ⇒ 不对外开面（§6-157 修的空真通过）
+    "invalid_permissions_declaration": 400,  # skills 那道安装门判的（未知能力键/白名单含未知工具）
+    "grants_store_legacy_format": 409,       # §6-155 那一版的授权文件或历史取值：要人重新确认
+    "legacy_permissions_field": 400,         # 清单还写着旧字段：在安装这一站拒，不拖到装载
     "unknown_permission": 400,
     "not_granted": 404,                # 撤销一条本来就没有的授予
     "grants_store_corrupt": 500,       # 授权文件读不出：不静默当「谁都没授予过」
@@ -138,8 +147,9 @@ def _pluginView(name: str) -> dict:
     view["declared_endpoints"] = manager.declaredEndpoints(name)
 
     store = getPermissionStore()
-    declared = manager.declaredPermissionsOf(name)
-    view["declared_permissions"] = sorted(declared)
+    view["permissions_declared"] = manager.permissionsDeclared(name)
+    view["capability_declarations"] = manager.capabilityDeclarations(name)
+    view["declared_permissions"] = sorted(manager.declaredPermissionsOf(name))
     view["granted_permissions"] = store.grantedFor(name)
     view["pending_permissions"] = store.pendingFor(name)
     view["orphaned_permissions"] = store.orphanedFor(name)
@@ -352,26 +362,30 @@ async def disable_plugin(plugin_id: str):
 
 @router.get("/permissions/model")
 async def get_permission_model():
-    """八项权限的口径表（档位/授予后放行什么/强制点）——管理面渲染「逐项确认」用的就是这一份。
+    """两类授权面的口径表——管理面渲染「逐项确认」用的就是这一份，不让前端自己抄词汇。
 
-    存在意义是不让前端自己抄一份枚举语义（教义第 6 条）：档位改这里，面板跟着变。
+    §6-157 收口后这里**只列候选与强制点，不重定义任何口径**：
+    - `capabilities` 的键来自 `skills/permissions.py:KNOWN_CAPABILITY_KEYS`（经
+      `capabilityKeys()` 现取，那份才是唯一出处，语义与拦点都在 skills 侧）；
+    - `surfaces` 是插件独有面（事件总线两档），强制点在 `BasePlugin`。
     """
-    model = plugin_permissions.PERMISSION_MODEL
     return {
         "code": 0,
         "message": "success",
         "data": {
-            "tiers": [t.value for t in PermissionTier],
-            "grantable": grantablePermissions(),
-            "items": [
-                {
-                    "permission": spec.permission.value,
-                    "tier": spec.tier.value,
-                    "unlocks": spec.unlocks,
-                    "enforced_at": spec.enforcedAt or "",
-                }
-                for spec in (model[p] for p in PluginPermission)
+            "capabilities": [
+                {"key": key, "kind": "capability",
+                 "enforced_at": "neurova.skills.permissions:check_tool_permission"
+                                 "（经 tool_executor 调用面 fail-closed）"}
+                for key in capabilityKeys()
             ],
+            "surfaces": [
+                {"key": spec.surface.value, "kind": "surface",
+                 "unlocks": spec.unlocks, "enforced_at": spec.enforcedAt}
+                for spec in FRAMEWORK_SURFACE_MODEL.values()
+            ],
+            "candidates": grantCandidates(),
+            "retired_values": list(plugin_permissions.RETIRED_PERMISSION_VALUES),
         },
     }
 
@@ -441,7 +455,7 @@ async def mount_plugin_routes(plugin_id: str, user: dict = Depends(get_current_u
     """第二次授权：把这个插件声明的端点挂进运行中的 app（admin）。
 
     挂之前先 `await startPlugin()`——作者的 `on_initialize/on_start` 钩子在此获得唯一调用者，
-    而钩子里的订阅/发布会过事件权限门（`framework_enforced` 两档）。
+    而钩子里的订阅/发布会过事件中介面门（`read:events` / `emit:events`）。
     """
     manager = get_plugin_manager()
     if not manager.has_plugin(plugin_id):
