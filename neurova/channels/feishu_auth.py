@@ -143,6 +143,34 @@ class AuthMixin:
         """发送 POST 请求"""
         return self._feishu_request("POST", path, data=data, **kwargs)
 
+    def _feishu_multipart(
+        self,
+        path: str,
+        data: Dict[str, Any],
+        files: Dict[str, Any],
+        params: Optional[Dict[str, Any]] = None,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """multipart 上传（`/im/v1/files`、`/im/v1/images` 走这条）。
+
+        不能复用 `_feishu_request`：它恒带 `Content-Type: application/json; charset=utf-8`
+        且签名不收 `files`——把 JSON 头配着 multipart 体发出去，平台侧只会当坏请求，
+        而 `files=` 传进它在到达网络之前就先 TypeError。
+        同步 `requests` 由调用方 `asyncio.to_thread` 下沉（P1-6 同族），本方法本身是阻塞的。
+        """
+        token = self._get_tenant_access_token()
+        url = f"{self._api_base()}{path}"
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},  # 不设 Content-Type：由 requests 生成 boundary
+            data=data,
+            files=files,
+            params=params,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def _feishu_put(
         self,
         path: str,
