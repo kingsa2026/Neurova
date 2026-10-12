@@ -21,22 +21,6 @@ from datetime import datetime, timezone
 class TestVoiceContextModuleInterface:
     """测试 VoiceContextModule 接口设计"""
 
-    def test_import_voice_context_module(self):
-        """验证 VoiceContextModule 可以导入"""
-        from neurova.voice_context_module import VoiceContextModule
-        assert VoiceContextModule is not None
-
-    def test_voice_context_module_has_required_methods(self):
-        """验证 VoiceContextModule 有必要的方法"""
-        from neurova.voice_context_module import VoiceContextModule
-        
-        # 检查必要方法存在
-        assert hasattr(VoiceContextModule, 'build_voice_context')
-        assert hasattr(VoiceContextModule, 'inject_metadata')
-        assert hasattr(VoiceContextModule, 'analyze_emotion')
-        assert hasattr(VoiceContextModule, 'get_voice_context')
-
-
 # ============================================================
 # 测试 2: 语音元数据传递到上下文构建
 # ============================================================

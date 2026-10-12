@@ -81,7 +81,6 @@ class TestVoiceEngineAPIIntegration:
         
         assert response.status_code == 200
         # 验证 VoiceEngine.process 被调用
-        print("DBG fixture asr id=", id(mock_asr_voice_engine))
         mock_asr_voice_engine.process.assert_called_once()
         call_args = mock_asr_voice_engine.process.call_args
         assert call_args.kwargs["operation"] == "transcribe"
@@ -91,7 +90,6 @@ class TestVoiceEngineAPIIntegration:
         """TTS 端点应优雅处理 VoiceEngine 错误"""
         # 替换为失败的引擎
         app_with_voice_engines.state.voice_engines["tts"] = mock_failing_voice_engine
-        print("process return_value:", app_with_voice_engines.state.voice_engines["tts"].process.return_value)
         
         client = TestClient(app_with_voice_engines)
         response = client.post(
@@ -214,3 +212,73 @@ class TestVoiceEngineAutoSelection:
         # 已初始化的引擎
         mock_engine.is_initialized = True
         assert engine.is_available() == True
+
+
+class TestSynthesizeResponseIsRealAudio:
+    """端点交回给调用方的必须是**引擎产物本身**，而不是"看起来成功"。
+
+    这一档此前只管"引擎被调了、参数对了"，没管响应体里到底有没有那段音频、
+    media_type 是不是按魔数判的、产物为空时会不会照样回 200——而这三条正是
+    本仓反复点名的"假成功"形态（§6-18 那条 `emotion_adapter` 兜底恒返 neutral 的同族）：
+    管线跑完、状态 200、对方拿到的是空气。端点本体是生产的 `api/endpoints/audio.py`
+    （本文件把真 router 挂进测试 app，见 `app.include_router` 那行），替身只有引擎一个边界。
+    """
+
+    @staticmethod
+    def _engineReturning(app, audioBytes):
+        from unittest.mock import AsyncMock
+
+        from neurova.voice_engine import VoiceResult
+
+        engine = app.state.voice_engines["tts"]
+        engine.process = AsyncMock(return_value=VoiceResult(audio_data=audioBytes))
+        return engine
+
+    def test_responseBodyIsTheEngineBytesVerbatim(self, app_with_voice_engines, mock_tts_voice_engine):
+        """响应体逐字节等于引擎产物——不是 JSON 元数据、不是截断、不是重新编码。"""
+        client = TestClient(app_with_voice_engines)
+
+        response = client.post("/api/v1/audio/synthesize", json={"text": "测试文本"})
+
+        assert response.status_code == 200
+        assert response.content == b"mock audio bytes", (
+            f"调用方拿到的不是引擎字节：{response.content!r}")
+
+    @pytest.mark.parametrize(
+        "audioBytes, expectedType",
+        [
+            (b"RIFF....WAVEfmt ", "audio/wav"),      # WAV 魔数
+            (b"\xff\xfb\x90\x00", "audio/mpeg"),     # MP3 帧头
+            (b"ID3\x04\x00", "audio/mpeg"),          # ID3 标签
+            (b"\x00\x01\x02\x03", "audio/wav"),      # 认不出来：如实落默认，不谎报成别家
+        ],
+    )
+    def test_mediaTypeComesFromMagicBytes(self, app_with_voice_engines, audioBytes, expectedType):
+        """格式按产物头部判；判不出时落 wav 是**默认**而不是"什么都行"。"""
+        self._engineReturning(app_with_voice_engines, audioBytes)
+        client = TestClient(app_with_voice_engines)
+
+        response = client.post("/api/v1/audio/synthesize", json={"text": "测试文本"})
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(expectedType), (
+            f"媒体类型没按魔数判：{response.headers.get('content-type')!r}")
+
+    def testEmptyAudioDataIsHonestFailureNotTwoHundred(self, app_with_voice_engines, mock_tts_voice_engine):
+        """引擎"成功返回但没有字节" ⇒ 500 点名，不得回 200 空身体。"""
+        self._engineReturning(app_with_voice_engines, b"")
+        client = TestClient(app_with_voice_engines)
+
+        response = client.post("/api/v1/audio/synthesize", json={"text": "测试文本"})
+
+        assert response.status_code == 500, (
+            f"产物为空却回 {response.status_code}——正是假成功那形")
+        assert "合成失败" in response.json().get("detail", "")
+
+    def testEngineHeaderReadsFromEngineInfo(self, app_with_voice_engines, mock_tts_voice_engine):
+        """`X-TTS-Engine` 取引擎自报的类名，不是硬编码——否则排障时读数会说假话。"""
+        client = TestClient(app_with_voice_engines)
+
+        response = client.post("/api/v1/audio/synthesize", json={"text": "测试文本"})
+
+        assert response.headers.get("X-TTS-Engine") == "MockTTS"

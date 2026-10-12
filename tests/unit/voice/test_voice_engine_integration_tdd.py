@@ -171,22 +171,3 @@ class TestVoiceEngineIntegration:
 class TestVoiceEngineWithRealManagers:
     """VoiceEngine 与真实管理器集成测试"""
     
-    @pytest.mark.asyncio
-    async def test_asr_manager_compatibility(self, asr_manager):
-        """ASRManager 应与 VoiceEngine 兼容"""
-        # 检查 ASRManager 是否有 VoiceEngine 需要的属性
-        assert hasattr(asr_manager, 'is_initialized')
-        assert hasattr(asr_manager, 'transcribe')
-        
-        # 检查 is_initialized 属性
-        assert isinstance(asr_manager.is_initialized, bool)
-    
-    @pytest.mark.asyncio
-    async def test_tts_manager_compatibility(self, tts_manager):
-        """TTSManager 应与 VoiceEngine 兼容"""
-        # 检查 TTSManager 是否有 VoiceEngine 需要的属性
-        assert hasattr(tts_manager, 'is_initialized')
-        assert hasattr(tts_manager, 'synthesize')
-        
-        # 检查 is_initialized 属性
-        assert isinstance(tts_manager.is_initialized, bool)

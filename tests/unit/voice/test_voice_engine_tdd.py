@@ -117,6 +117,10 @@ class TestVoiceEngineBehavior:
         # 都返回 VoiceResult
         assert isinstance(asr_result, VoiceResult)
         assert isinstance(tts_result, VoiceResult)
+        # 类型对不算通过——包装层不得把产物丢掉（"跑完了但内容没了"那形）
+        assert asr_result.text == "Hello world", f"ASR 文本被包装层丢了：{asr_result}"
+        assert asr_result.confidence == 0.9
+        assert tts_result.audio_data == b"audio bytes", f"TTS 字节被包装层丢了：{tts_result}"
     
     @pytest.mark.asyncio
     async def test_voice_engine_error_handling(self, asr_voice_engine, mock_asr_engine):

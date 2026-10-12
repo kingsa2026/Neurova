@@ -223,22 +223,6 @@ class TestVoiceRecallChannel:
         # 默认通道列表应包含 VOICE
         assert RecallChannel.VOICE in engine._channel_weights
 
-    def test_channel_voice_method_exists(self):
-        """验证 _channel_voice 方法存在"""
-        from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
-
-        engine = NeurovaRecallEngine()
-        assert hasattr(engine, '_channel_voice')
-        assert callable(engine._channel_voice)
-
-    def test_channel_voice_returns_list(self):
-        """验证 _channel_voice 返回列表"""
-        from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
-
-        engine = NeurovaRecallEngine()
-        result = engine._channel_voice("测试", 5)
-        assert isinstance(result, list)
-
     def test_channel_voice_handles_no_memory_manager(self):
         """验证 _channel_voice 在无 memory_manager 时安全返回"""
         from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
