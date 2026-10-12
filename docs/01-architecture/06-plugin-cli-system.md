@@ -69,7 +69,7 @@ print(constraint.satisfies(SemVersion("1.3.0")))  # False
 ### 2.2 插件类型和状态
 
 ```python
-from neurova.plugins.plugin_manifest import PluginType, PluginState, PluginPermission
+from neurova.plugins.plugin_manifest import PluginType, PluginState, PluginFrameworkSurface
 
 # 插件类型
 class PluginType(str, Enum):
@@ -90,34 +90,34 @@ class PluginState(str, Enum):
     ERROR = "error"           # 错误
     UPDATING = "updating"     # 更新中
 
-# 插件权限
-class PluginPermission(str, Enum):
-    READ_EVENTS = "read:events"      # 读取事件
-    EMIT_EVENTS = "emit:events"      # 发送事件
-    HTTP_REQUEST = "http:request"    # HTTP 请求
-    READ_FILES = "read:files"        # 读取文件
-    WRITE_FILES = "write:files"      # 写入文件
-    EXECUTE_COMMANDS = "execute:commands"  # 执行命令
-    NETWORK_ACCESS = "network:access"    # 网络访问
-    ADMIN = "admin"                    # 管理员权限
+# 插件独有的框架中介面（§6-157 收口后只剩两档）
+class PluginFrameworkSurface(str, Enum):
+    READ_EVENTS = "read:events"      # 经事件总线订阅/退订
+    EMIT_EVENTS = "emit:events"      # 经事件总线投递
 ```
 
-> 这八项**有效力的口径只有一处定义**：`neurova/plugins/plugin_permissions.py` 的
-> `PERMISSION_MODEL`（每档写明授予后放行什么、由哪个框架点强制、属哪一档）。本节只作导读：
+> **两类授权面，各有一处定义，互不重复**（用户 2026-10-12 裁「甲 · 彻底合一」）：
 >
-> - `framework_enforced`（`read:events` / `emit:events`）——框架真有中介点，未确认即当场拒；
-> - `disclosed_only`（`http:request` / `read:files` / `write:files` / `network:access`）——
->   框架拦不住（装载即进程内任意代码执行），授予的含义是"这份声明经人看过并签字"，
->   外加它参与聚合挂载门与审计留痕，**不是隔离**；
-> - `never_grantable`（`execute:commands` / `admin`）——本批不开放授予；声明这两项之一的插件
->   可以装载，但因为"声明 ⊆ 已确认"永远做不到，它**永远挂不上 HTTP 路由**。
+> - **能力面**（文件／网络／命令／模型／系统／节点／存储配额）的词汇与调用面仲裁**只在 skills 那一份**：
+>   键取自 `neurova/skills/permissions.py:KNOWN_CAPABILITY_KEYS`，合法性由
+>   `skill_install_gate.validate_permissions_for_install` 在安装时判，运行时由
+>   `tool_executor` 经 `skill_permission_scope()` fail-closed 裁（多归属工具取 AND）。
+>   插件清单里写成 `permissions: {network: true, file: {enabled: true, read_only: true}}`。
+> - **框架中介面**（事件总线两档）在 `plugin_permissions.FRAMEWORK_SURFACE_MODEL`，
+>   强制点是 `BasePlugin.subscribe/unsubscribe/publish_event`——技能侧没有这个概念，所以不属于上一份。
+>
+> 本节曾经列过八项 `PluginPermission`（含 `http:request`/`read:files`/`write:files`/
+> `network:access`/`execute:commands`/`admin`），其中四项与 skills 那份是同一件事的两份定义、
+> `http:request` 就是 `network`、`admin` 是 `api/deps.require_role` 的角色门——**全部收口掉，
+> 旧清单字段不做自动映射**（`execute:commands → system` 会变宽，那种决定只能由人重做一次）。
+> 也不构成沙箱：动态装载即进程内任意代码执行，这里管的是"经框架调用时拦得住"＋"对外开的那一面"。
 
 ### 2.3 插件清单 (PluginManifest)
 
 ```python
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
-from neurova.plugins.plugin_manifest import SemVersion, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import SemVersion, PluginType, PluginFrameworkSurface
 
 @dataclass
 class PluginManifest:
@@ -139,7 +139,8 @@ class PluginManifest:
     module_class: str = ""             # 入口类
     
     # 权限
-    required_permissions: List[PluginPermission] = None
+    permissions: Dict[str, Any] = None            # 能力面，键 ∈ skills 那份词汇
+    framework_surfaces: List[PluginFrameworkSurface] = None
     
     # 配置
     config_schema: Dict[str, Any] = None
@@ -252,7 +253,7 @@ lifecycle.execute_lifecycle(LifecycleEvent.AFTER_ENABLE, "my-plugin")
 
 ```python
 from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginFrameworkSurface
 
 class MyPlugin(BasePlugin):
     """示例插件"""
@@ -268,7 +269,7 @@ class MyPlugin(BasePlugin):
             tags=["status"]
         )
     ]
-    required_permissions = [PluginPermission.READ_EVENTS]
+    framework_surfaces = [PluginFrameworkSurface.READ_EVENTS]
     
     def __init__(self, manifest: PluginManifest):
         super().__init__(manifest)
@@ -527,10 +528,8 @@ sensitive_patterns = [
   "neurova_min_version": "4.0.0",
   "entry_point": "main.py",
   "module_class": "MyPlugin",
-  "required_permissions": [
-    "read:events",
-    "emit:events"
-  ],
+  "permissions": { "network": true },
+  "framework_surfaces": ["read:events", "emit:events"],
   "config_schema": {
     "type": "object",
     "properties": {
@@ -586,7 +585,7 @@ my-plugin/
 ```python
 # main.py
 from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginFrameworkSurface
 
 class MyPlugin(BasePlugin):
     """示例插件"""
@@ -600,7 +599,7 @@ class MyPlugin(BasePlugin):
             description="获取插件状态"
         )
     ]
-    required_permissions = [PluginPermission.READ_EVENTS]
+    framework_surfaces = [PluginFrameworkSurface.READ_EVENTS]
     
     def __init__(self, manifest: PluginManifest):
         super().__init__(manifest)

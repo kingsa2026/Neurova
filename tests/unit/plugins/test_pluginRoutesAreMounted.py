@@ -5,7 +5,7 @@ P1 留下一句诚实声明并把读数钉成恒 `false`：装载与「插件可
 本文件把那两次授权都做成真的，且钉三件事——
 
 1. **门是真的**：未确认全部声明权限 ⇒ 挂不上；声明了 `execute:commands`/`admin` ⇒ 永远挂不上
-   （聚合规则：声明 ⊆ 已确认，见 `plugin_permissions.PERMISSION_MODEL` 的三档）。
+   （聚合规则：清单必须显式声明过 `permissions`，且声明 ⊆ 已确认；§6-157 收口）。
 2. **挂载是真的**：挂上之后请求真的落到插件类的方法上并执行了插件文件里的代码
    （不是把 `_PLUGINS` 字典里的布尔翻一下——那正是 P1 之前那副样子）。
 3. **边界是真的**：插件只能在自己的命名空间 `/api/v1/plugin-api/{plugin_id}/` 里出现，
@@ -71,14 +71,28 @@ class MountProbe(BasePlugin):
         pass
 
     def status(self):
-        return {"marker": "from-plugin-code", "plugin": self.plugin_id}
+        # 回读**调用面**看到的声明作用域：收口后拦不拦不由本包判断，
+        # 由 skills 那份 `check_tool_permission` 在工具执行咽喉处裁。
+        from neurova.skills.permissions import check_tool_permission, current_skill_permissions
+
+        perms = current_skill_permissions()
+        return {"marker": "from-plugin-code", "plugin": self.plugin_id,
+                "scope_present": perms is not None,
+                "network_allowed": bool(perms is not None and perms.network),
+                "undeclared_tool_denial": check_tool_permission(perms, "browser_navigate")}
 
     def extra(self):
         return {"marker": "extra"}
 '''
 
 
-def _writePlugin(root, name, *, endpoints=None, permissions=None, source=_PLUGIN_SOURCE):
+_UNSET = object()
+
+
+def _writePlugin(root, name, *, endpoints=None, permissions=_UNSET, surfaces=None,
+                 source=_PLUGIN_SOURCE):
+    """`permissions=None` 与 `permissions={}` 是**两件事**：前者整节缺失（§6-157 之后挂不上），
+    后者是显式声明"我什么都不要"（可以挂，且调用面 fail-closed）。"""
     pdir = root / name
     pdir.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -87,10 +101,16 @@ def _writePlugin(root, name, *, endpoints=None, permissions=None, source=_PLUGIN
         "description": "mount probe",
         "entry_point": "main.py",
         "module_class": "MountProbe",
-        "required_permissions": list(permissions or []),
         "api_endpoints": list(endpoints if endpoints is not None else
                               [{"method": "GET", "path": "status", "handler_name": "status"}]),
     }
+    if permissions is _UNSET:
+        manifest["permissions"] = {}          # 默认给一个显式空声明
+    elif permissions is not None:
+        manifest["permissions"] = dict(permissions)
+    # permissions=None ⇒ 整节缺失（`testManifestWithoutPermissionsSectionIsRefused` 用）
+    if surfaces is not None:
+        manifest["framework_surfaces"] = list(surfaces)
     (pdir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (pdir / "main.py").write_text(source, encoding="utf-8")
     return pdir
@@ -188,27 +208,44 @@ class TestMountNeedsASecondAuthorization:
         assert "授权" in view["routes_reason"], view["routes_reason"]
 
     def testPartialConfirmationKeepsRoutesOff(self, client):
-        _install(client, "half", permissions=["read:events", "http:request"],
-                 endpoints=[{"method": "GET", "path": "status", "handler_name": "status"}])
+        _install(client, "half", permissions={"network": True, "file": True},
+                 surfaces=["read:events"])
         _load(client, "half")
+        client.store.grant("half", "network", grantedBy="admin-1")
         client.store.grant("half", "read:events", grantedBy="admin-1")
 
         resp = client.post("/api/v1/plugins/half/routes/mount")
 
         assert resp.status_code == 409, resp.text
-        assert "http:request" in resp.text, "拒了不点名还差哪一项——人无法据此补确认"
+        assert "file" in resp.text, "拒了不点名还差哪一项——人无法据此补确认：%s" % resp.text
         assert client.get("/api/v1/plugin-api/half/status").status_code == 404
 
-    def testNeverGrantableDeclarationBlocksMountPermanently(self, client):
-        _install(client, "armed", permissions=["execute:commands"])
-        _load(client, "armed")
+    def testManifestWithoutPermissionsSectionIsRefused(self, client):
+        """§6-155 的空真通过在这里修掉：只判"声明 ⊆ 已确认"时，
+        不写 `permissions` 的清单会**空真过门**，而它一被请求就拥有整个进程的能力。"""
+        _install(client, "silent", permissions=None)   # 显式：整节缺失
+        _load(client, "silent")
 
-        resp = client.post("/api/v1/plugins/armed/routes/mount")
+        resp = client.post("/api/v1/plugins/silent/routes/mount")
 
-        assert resp.status_code == 403, resp.text
-        assert "execute:commands" in resp.text
-        assert client.store.mountAuthorized("armed") is False, (
-            "拒挂却把挂载授权记下来了：下一次重启会再试一遍")
+        assert resp.status_code == 409, resp.text
+        assert "permissions" in resp.text, resp.text
+        assert client.store.mountAuthorized("silent") is False, (
+            "拒挂却把挂载授权记下来了：下一次启动重放会再试一遍")
+        assert client.get("/api/v1/plugin-api/silent/status").status_code == 404
+
+    def testExplicitEmptyDeclarationMountsAndFailsClosed(self, client):
+        """显式 `permissions: {}` 是合法的"我什么都不要"：可以挂，但调用面一律拒。"""
+        _install(client, "plain", permissions={})
+        _load(client, "plain")
+        assert client.post("/api/v1/plugins/plain/routes/mount").status_code == 200
+
+        body = client.get("/api/v1/plugin-api/plain/status").json()
+
+        assert body["scope_present"] is True, "没把声明装进作用域＝收口没接上，拦的是空气"
+        assert body["network_allowed"] is False
+        assert body["undeclared_tool_denial"], (
+            "未声明的工具没被调用面拒——那『可授予 + 真拦』就是句空话")
 
     def testAuthorizationIsPersistedAndReadable(self, client):
         _install(client, "signed")
@@ -220,6 +257,70 @@ class TestMountNeedsASecondAuthorization:
                                          declaredProvider=client.manager.declaredPermissionsOf)
         assert reopened.mountAuthorized("signed") is True, (
             "挂载授权是人的决定，只留内存＝重启即失，面板却会显示『上次挂过』")
+
+
+class TestTheGuardsCanFail:
+    """反空转：把收口的两处动作桩掉，对应的格子必须翻红。
+
+    收口这类改动最舒服的失效形态是"判据在演自己"——所以每加一条真拦，就配一格
+    "把它假做完，判据必须红"。用 monkeypatch 而不是回退生产件：回退会让 import 断在
+    词汇共享上（collection error），那种红什么也没证明。
+    """
+
+    def test_droppingTheScopeWrapperIsCaught(self, client, monkeypatch):
+        mount = _mount()
+        monkeypatch.setattr(mount, "_withSkillPermissionScope",
+                            lambda pluginId, handler, manager: handler)
+        _install(client, "nostub", permissions={})
+        _load(client, "nostub")
+        assert client.post("/api/v1/plugins/nostub/routes/mount").status_code == 200
+
+        body = client.get("/api/v1/plugin-api/nostub/status").json()
+
+        assert body["scope_present"] is False, (
+            "去掉包装后作用域确实不在——这一格反过来证明 `testExplicitEmptyDeclarationMountsAndFailsClosed` "
+            "不是在演空转（它断的是 True）")
+
+    def test_trustingAnAbsentPermissionsSectionIsCaught(self, client, monkeypatch):
+        from neurova.plugins import plugin_manager as pm
+
+        monkeypatch.setattr(pm.PluginManager, "permissionsDeclared", lambda self, name: True)
+        _install(client, "trustme", permissions=None)
+        _load(client, "trustme")
+
+        mounted = client.post("/api/v1/plugins/trustme/routes/mount")
+
+        assert mounted.status_code == 200, (
+            "把「整节缺失」当已声明就直接放行——那正是 §6-155 那个空真通过的复活，"
+            "而 `testManifestWithoutPermissionsSectionIsRefused` 会因为它红")
+
+
+class TestCallTimeArbitrationIsTheSkillOne:
+    """收口的实质：能力面授予之后，是 skills 那份在裁，不是插件包自己写的一句注释。"""
+
+    def testDeclaredCapabilityReachesTheScope(self, client):
+        _install(client, "netted", permissions={"network": True})
+        _load(client, "netted")
+        client.store.grant("netted", "network", grantedBy="admin-1")
+        assert client.post("/api/v1/plugins/netted/routes/mount").status_code == 200
+
+        body = client.get("/api/v1/plugin-api/netted/status").json()
+
+        assert body["network_allowed"] is True
+        assert body["undeclared_tool_denial"] is None, (
+            "声明并确认了 network 还被拒——那道门会把插件做成废件")
+
+    def testScopeDoesNotLeakOutsideTheRequest(self, client):
+        from neurova.skills.permissions import current_skill_permissions
+
+        _install(client, "leaky", permissions={"network": True})
+        _load(client, "leaky")
+        client.store.grant("leaky", "network", grantedBy="admin-1")
+        client.post("/api/v1/plugins/leaky/routes/mount")
+        client.get("/api/v1/plugin-api/leaky/status")
+
+        assert current_skill_permissions() is None, (
+            "作用域泄到请求外：下一个无关调用会带着这个插件的授权跑")
 
 
 class TestMountedRouteIsReallyLive:
@@ -394,8 +495,9 @@ class TestUnmountIsComplete:
             "禁用了还在接流量——禁用不是读数，是可执行的动作")
 
     def testUninstallLeavesNoGrantNoRoute(self, client):
-        _install(client, "gone", permissions=["read:events"])
+        _install(client, "gone", permissions={"file": True}, surfaces=["read:events"])
         _load(client, "gone")
+        client.store.grant("gone", "file", grantedBy="admin-1")
         client.store.grant("gone", "read:events", grantedBy="admin-1")
         client.post("/api/v1/plugins/gone/routes/mount")
 
