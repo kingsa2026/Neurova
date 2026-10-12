@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.channels.base import ChannelAdapter, ChannelConfig, ChannelEventType
+from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
 from neurova.channels.wechat_ilink_client import DEFAULT_BASE_URL, ILinkClient
 
 logger = logging.getLogger(__name__)
@@ -261,7 +262,7 @@ class WeChatILinkAdapter(ChannelAdapter):
                 else:
                     raw = await self._download_bytes(item.get("voice_item") or {})
                     if raw:
-                        media["audio_bytes"] = raw
+                        media[AUDIO_BYTES_KEY] = raw
                         message_type = "voice"
                     else:
                         text_parts.append("[voice: no transcription]")
