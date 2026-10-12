@@ -389,7 +389,7 @@ class TestCancelledBackgroundFeedback:
         # 晚到终态按会话归属分流（C 批栅栏）：无归属的终态会被点名拒绝，故先登记本轮
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity("跑一下", "sess_cancel", "u1")
+        set_turn_identity("跑一下", "sess_cancel")
         coordinator = ToolCoordinator()
 
         async def slow():

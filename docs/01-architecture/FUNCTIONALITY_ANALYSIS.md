@@ -146,7 +146,7 @@
 
 | ID | 模块 | 状态 | 文件/位置 | 备注 |
 |----|------|------|-----------|------|
-| H1 | 插件清单 | ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） | `neurova/plugins/plugin_manifest.py` | PluginManifest/版本约束/权限声明 |
+| H1 | 插件清单 | ✅ 已实现 | `neurova/plugins/plugin_manifest.py` | PluginManifest/版本约束/权限声明 |
 | H2 | 插件管理器 | ✅ 已实现 | `neurova/plugins/plugin_manager.py` | 发现/安装/卸载/依赖解析/版本检查 |
 | H3 | 插件生命周期 | ✅ 已实现 | `neurova/plugins/plugin_lifecycle.py` | 11种生命周期钩子/事件总线集成 |
 | H4 | 钩子系统 | ✅ 已实现 | `neurova/skill.py` | Skill事件钩子 |
@@ -334,7 +334,7 @@
 | ID | 问题 | 状态 | 文件/位置 | 备注 |
 |----|------|------|-----------|------|
 | 1 | 睡眠整理未写入数据库 | ✅ 已解决 | `neurova/memory/core/sleep.py` | 梦境报告持久化到数据库 |
-| 2 | 插件系统不完整 | ✅ 已解决 | `neurova/plugins/` | 完整插件框架（清单/管理器/生命周期） |  <!-- 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） -->
+| 2 | 插件系统不完整 | ✅ 已解决 | `neurova/plugins/` | 完整插件框架（清单/管理器/生命周期） |
 | 3 | FTS5触发器未启用 | ✅ 已解决 | `neurova/memory/core/storage.py` | 添加INSERT/UPDATE/DELETE触发器 |
 | 4 | 版本控制效率低 | ✅ 已解决 | `neurova/memory/core/version_control.py` | 优化4个版本查询索引 |
 | 5 | 记忆压缩摘要粗糙 | ✅ 已解决 | `neurova/memory/core/compression.py` | LLM生成高质量摘要+TF-IDF相似度 |
@@ -386,6 +386,16 @@
 | AC1 | Agent 配置管理器 | ✅ 已实现 | `neurova/agent_config.py` | JSON 存储/热加载/验证 |
 
 ### 6.6 测试覆盖扩展 (7/7 已实现)
+
+> **本表自 2026-09-04 起未再与代码树对账，别再当作现行事实源（2026-10-12 记，台账 §6-162）。**
+> 现场复算：下面 7 行点名的路径**没有一行还在**（`tests/test_api_*.py`、`tests/test_jwt.py`、
+> `tests/test_auth_isolated.py`、`tests/test_auth_direct.py`、`tests/test_cross_channel_context.py`、
+> `tests/test_context_cache_compression.py` 均已不在仓内；`tests/conftest.py` 是唯一的例外）。
+> 其中 `test_jwt.py` 属"名字像覆盖、实则 0 用例"那 26 档，已按裁定分流删除；
+> JWT/登录这两面今天的真判据是 `tests/unit/api/test_api_auth.py`（20 格）、
+> `tests/unit/api/test_jwt_identity_claims.py`（6 格）、
+> `tests/unit/api/test_loginRouteContract.py`（17 格）。
+> 整表逐行重画是一次独立的复算，不在那一批的授权内，登记在台账。
 
 | ID | 模块 | 状态 | 文件/位置 | 备注 |
 |----|------|------|-----------|------|

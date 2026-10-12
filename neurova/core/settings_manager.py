@@ -23,7 +23,7 @@ class SettingsManager:
     """
     系统设置管理器
 
-    管理用户语言偏好、时区设置和工作空间配置。
+    管理用户时区设置和工作空间配置。
     支持持久化到 JSON 文件。
     """
 
@@ -39,7 +39,7 @@ class SettingsManager:
 
         # 默认设置
         self._settings: Dict[str, Any] = {
-            "language": "zh-CN",
+            # `language` 一格随 `get/set_user_language` 同批退役（§6-167，见那两个方法的原位注释）
             "timezone": "Asia/Shanghai",
             "workspace": None,
             "theme": "light",
@@ -86,41 +86,13 @@ class SettingsManager:
         """异步保存设置到文件（内部使用同步版本）"""
         self._save_settings_sync()
 
-    def get_user_language(self, user_id: str = "default") -> str:
-        """
-        获取用户语言偏好
-
-        Args:
-            user_id: 用户ID，默认为"default"
-
-        Returns:
-            语言代码，如 "zh-CN", "en-US"
-        """
-        with self._lock:
-            key = f"user_{user_id}_language"
-            return self._settings.get(key, self._settings.get("language", "zh-CN"))
-
-    def set_user_language(self, language: str, user_id: str = "default") -> bool:
-        """
-        设置用户语言偏好
-
-        Args:
-            language: 语言代码
-            user_id: 用户ID
-
-        Returns:
-            是否设置成功
-        """
-        with self._lock:
-            try:
-                key = f"user_{user_id}_language"
-                self._settings[key] = language
-                self._save_settings_sync()
-                logger.info("用户 %s 语言设置为: %s", user_id, language)
-                return True
-            except Exception as e:
-                logger.error("设置语言失败: %s", e)
-                return False
+    # `get_user_language` / `set_user_language` 已退役（§6-167，用户裁「先取长补短再退役」）。
+    # 它们是「某个用户默认看什么语言」的**第二套词汇**：按人键拼成
+    # `f"user_{user_id}_language"` 塞进自己的 `settings.json`，既不归一语言码
+    # （`zh_CN` 这种下划线形它照收），也没有任何 HTTP 面，生产消费者 0 处——
+    # 现役那条在 `neurova/language/`（按人偏好落盘 ＋ 开箱默认 ＋ `normalizeTag` 单点）。
+    # 留着不是"多一层保险"，是下一个接线的人会误用的那条路（教义第 7 条的判据：
+    # 同一功能在仓内只剩一处被消费）。
 
     def get_user_timezone(self, user_id: str = "default") -> str:
         """
@@ -208,7 +180,6 @@ class SettingsManager:
             result = {}
             # 获取默认设置
             for key in [
-                "language",
                 "timezone",
                 "workspace",
                 "theme",
@@ -236,7 +207,6 @@ class SettingsManager:
             try:
                 for key, value in settings.items():
                     if key in [
-                        "language",
                         "timezone",
                         "workspace",
                         "theme",
