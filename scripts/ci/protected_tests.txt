@@ -2440,3 +2440,17 @@ tests/unit/core/test_orchestratorTriadRetired.py
 # 出现 `Path.home()` 那类第二落点（§6-150 复算过的那条）。
 # 入册前逐文件单跑两次同读数 14 passed（1.98s / 2.22s）。
 tests/unit/plugins/test_pluginStateSurvivesRestart.py
+# §6-165 兼容 shim `neurova/skill/` 退役的判据（用户 2026-10-12 裁「退役 shim，旧集成档另批分流」）。
+# 判据问的不是"那个文件删了没"，而是三件事一起成立：
+# ① 命名空间真取不到——且必须连**目录**一起判：只删 `__init__.py` 会留下一只隐式
+#   命名空间包，`import neurova.skill` 照样成功，防再生格就此空转（本批复算现场撞上）。
+# ② 全仓（生产/测试/脚本）不再有任何一处按这个命名空间取符号——口径同时收
+#   `from neurova.skill import …` 与 `import neurova.skill`，并按 **AST 形状**而不是文本
+#   包含，免得一档判据把自己那句断言算进命中面（§6-162 记过的那枚形态）。
+# ③ 退役不等于删能力：`Skill`/`ExperienceRecord`/`create_default_skills` 仍在
+#   `neurova.skills` 那条生产本来就在用的路径上取得到，被改指的那条消费方 import
+#   也真的解析成功。
+# 探测器自带**双侧对照**一格：合成样本里两形取用都必须点名，三个真近邻
+# （`neurova.skills`／`neurova.skill_system`／`neurova.skills.models`）一律不得误报。
+# 入册前逐文件单跑两次同读数 8 passed（10.93s / 11.31s）。
+tests/unit/skills/test_skillCompatShimRetired.py
