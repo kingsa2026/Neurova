@@ -1,41 +1,50 @@
 # -*- coding: utf-8 -*-
-"""「本轮哪个用户」的两条通道之间，一致性由这张表与代码实状逐条对账（台账 §6-121 的 (a) 档）。
+"""唯一身份通道的写点，与「内联载体」`metadata['user_id']` 之间的一致性逐条对账。
 
-用户 2026-10-10 裁「先补一枚判据、合并另批」。落之前先复算所有写方的实际取值，
-**推荐档原本那句"同一轮两读数必须相等"被证伪**——五处写方里没有一处可以笼统地这么判：
+沿革三段：§6-121 裁「先补一枚判据、合并另批」，本文件就是那枚判据（(a) 档）；
+(a) 档的**原形态**是"两条通道之间对账"——`neurova_request_user_id` 与轮身份那条
+`neurova_turn_user_id` 同答"这一轮是谁"。§6-163（批 18，裁定甲）把轮身份那条退役之后，
+本文件审的东西换了一格，但**一格都没少**：现在对账的是「唯一那条通道」与「随请求内联
+进来的那份 `metadata['user_id']`」之间还不对谁说话——后者仍被技能可见视图
+（`resolve_user_key`）与经验检索读取，是第二条取值路径的候选孵化地。
 
-| 入口 | request 侧（`neurova_request_user_id`）读的是 | 轮身份侧（`neurova_turn_user_id`） |
+复算所有写方的实际取值时，**推荐档原本那句"同一轮两读数必须相等"被证伪**——各写方里
+没有一处可以笼统地这么判（下表每格都写清了它到底从哪取）：
+
+| 入口 | 通道侧（`set_request_user_id`）读的是 | 载体侧（`metadata['user_id']`） |
 | --- | --- | --- |
-| `agent/chat_pipeline.py:477` | `(ctx.metadata or {}).get("user_id")`（调用者本人） | **同一个表达式**（`:613` 传给 `set_request_identity`） |
-| `channels/channel_router.py:180` | `agent.config.owner_user_id`（渠道会话落盘归属） | 该入口的 `meta` **没有 `user_id` 键** ⇒ 轮身份落缺省 `"default"`（§6-123） |
-| `api/endpoints/computer.py:729` | `get_current_user()["user_id"] or "default"`（浏览器 profile 池化） | 该入口不跑对话轮，不写轮身份 |
-| `tool_executor.py:2229` | `self._agent_identity()[0]` —— 就是轮身份那一侧的读数转写过来 | 它不写，它读（读取序由 `test_b5_identity_read_order.py` 守） |
-| `tool_layers/mcp_server.py:192` | `get_request_user_id()` —— 同一条通道自读自写（MCP 执行链透传） | 不涉及 |
+| `api/endpoints/chat.py` | 登录用户 `current_user['user_id']`（非流式 + 流式各一处） | 同一个变量塞进 metadata，由管线读取 |
+| `api/endpoints/console.py` | REST 用 `current_user`，`/ws` 自验 JWT | 同一个变量进 dict 字面量 |
+| `api/endpoints/mobile_pairing.py` | WS 接入层解出后按参数交给处理器（§6-154） | 同一个变量进 `turnMetadata` |
+| `tool_executor.py` | `self._agent_identity()[0]` —— 门面读数转写过来 | 它不写载体，它读通道 |
+| `tool_layers/mcp_server.py` | `get_request_user_id()` —— 同一条通道自读自写 | 不涉及 |
+| `channels/channel_router.py` | `resolveTurnIdentity()` 产出的**发送者**（§6-163：不再写 agent 属主） | 同一个出口产出，另带显式 `session_owner_id` |
+| `api/endpoints/computer.py` | `get_current_user()['user_id'] or 'default'`（profile 池化） | 该入口不跑对话轮 |
 
-所以本批不写"必须相等"那条恒假判据（写了就是拿一条谎报当守卫，且渠道那格当场红），
-而是钉四件各自成立、且各自真会咬的事：
+所以本文件不写"必须相等"那种恒假判据（写了就是拿一条谎报当守卫），
+而是钉六件各自成立、且各自真会咬的事：
 
 ① **写方文件集合必须与这张表逐条相等**（`set_request_user_id`/`clear_request_user_id`）——
-   新增第六个入口而不同步说明它的来源即红。漂移正是从"多一个入口没人对照"开始的；
+   新增一个入口而不同步说明它的来源即红。漂移正是从"多一个入口没人对照"开始的；
    这张表初版只有三行，是 ① 自己把 `tool_executor` 与 `mcp_server` 两处补出来的
    （先前的 grep 被 `head` 截断 ⇒ 少数两处；"命中数被截断骗过"本卷已记，此处再证一次）。
-② 标 `sameSource` 的入口：两处调用点的**来源表达式必须逐字同形**（允许 `or None` /
-   `or "default"` 这类缺省补皮）——网页聊天那条链上"进记忆隔离的身份"与"进浏览器归属的
-   身份"必须同一个读法，改任一侧即红。
-③ 标 `derivedFromTurnRead` / `sameChannelPassThrough` / `noTurnWrite` 的入口：**该文件不得出现
-   轮身份写入点**（否则"它不写轮身份"这句声明就过期了），且必须真的在同一个函数里
-   读它声明的那个来源口（`_agent_identity` / `get_request_user_id`）。
-④ 渠道那一格额外钉死"它的 meta 里没有 `user_id` 键"——这正是 §6-123 那条后果的成因；
-   谁往里加了 `user_id`，本判据就逼他先去看 §6-123，而不是让渠道隔离语义静默改写。
+② 标 `boundaryFeedsMetadata` 的入口：**每一处**通道写入都只能取那个变量，且同一个变量
+   必须真的交给 `metadata['user_id']`（赋值形与 dict 字面量形都算）——边界与载体同源。
+③ 标 `derivedFromFacadeRead` / `sameChannelPassThrough` / `noChannelWrite` 的入口：
+   不得往载体里塞 `user_id` 之外的东西（声明过期即红），且必须真在同一个函数里读它
+   声明的那个来源口（`_agent_identity` / `get_request_user_id`）。
+④ 渠道那一格额外钉死"meta 里的 `user_id` 只能来自解析单点 `resolveTurnIdentity`"——
+   两处产出身份就会给同一个人算出两个身份。
+⑤ 凡是"取到登录用户并跑一轮对话"的入口，都必须在自己那条链上建立请求级身份
+   ——拦的是**登记表漏了一行**这种形态（成因见 `ownerWritesByTurnHandler` 的文档）。
+⑥ §6-163 的复活闸：全仓生产侧不得有任何调用点往 `set_request_identity(...)` 里传
+   `user_id=`。那个形参已随轮身份通道一起退役，传了必 TypeError；更糟的是"今天不传、
+   明天加回来"——两条通道并存就是 §6-121 那条老病。
 
-分工（不重复既有判据）：轮身份自身只有一个写入口由
-`tests/unit/agent/test_turnIdentitySingleSource.py` 守；`Agent._current_user_id` 与 public
-别名的**读取序**由 `tests/unit/agent/test_b5_identity_read_order.py` 守。本文件只管
-**两条 ContextVar 通道之间**的一致性来源，不复述它们。
-
-未解决、且本批刻意不解决的（(a) 档的全部范围就是"让漂移可见"）：
-渠道入口那格暴露的"渠道对话的轮身份落 `"default"`"⇒ 同一 agent 上所有外部发送者共享
-同一个隔离域，已另立 §6-123 待裁；两条通道的合并本身是 §6-121 的 (b) 档，另批。
+分工（不重复既有判据）：通道本身的条数、`set_turn_identity` 的签名、会话属主的显式传参
+链路由 `tests/unit/core/test_identityChannelMergedToOneSource.py` 守；
+`Agent._current_user_id` 与 public 别名的**读取序**由
+`tests/unit/agent/test_b5_identity_read_order.py` 守。本文件只管**写点这张表**。
 """
 
 import ast
@@ -47,71 +56,78 @@ from tests import ast_scan
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "neurova"
 
-#: 写 request 侧通道的两个入口函数名（清槽也算：它同样决定"这一轮是谁"）。
+#: 通道侧的写入函数名（清槽也算：它同样决定"这一轮是谁"）。
 REQUEST_WRITERS = ("set_request_user_id", "clear_request_user_id")
-#: 轮身份侧的门面函数名（②要对账的就是它的 `user_id=` 实参）。
+#: 轮次内容门面的函数名——§6-163 之后它的签名里不再有 `user_id`，
+#: 本文件用它做的是**复活闸**（⑥）：全仓任何调用点往里塞 `user_id=` 就是红。
 TURN_WRITER = "set_request_identity"
 
 #: 允许的"这一格为什么不漂"的说法，每一种在下面都有对应的机器检查。
-#: `boundaryFeedsTurn`（§6-121 (b) 乙案新增）：入口只在**请求边界**写 request 通道，
-#: 轮身份侧不在此处写，但同一个变量被塞进 metadata、由管线透传给 `set_turn_identity`——
-#: 两侧同源，只是不同函数。原先这种关系由 `sameSource` 那一格（chat_pipeline 一处写两条）
-#: 保证；乙案把那条双写拆掉之后，同源关系搬到了请求边界，kind 必须跟着换了才不假装还在。
-KINDS = ("sameSource", "boundaryFeedsTurn", "derivedFromTurnRead",
-         "sameChannelPassThrough", "noTurnWrite")
+#: `boundaryFeedsMetadata`：入口在**请求边界**写那唯一一条通道，同一个值又作为
+#: `metadata['user_id']` 随请求内联下去（技能可见视图 `resolve_user_key`、经验检索读它）。
+#: 原名 `boundaryFeedsTurn`（§6-121 (b) 乙案）里的"喂轮身份"那半在 §6-163 之后不再成立——
+#: 管线只把 user_input/session_id 交给门面，身份不再经管线二次写入；名字跟着实状换，
+#: 免得留一个说旧话的 kind 让下一个人以为还有第二条通道。
+#: `notATurnEntry`：该入口不跑对话回合，只在边界为浏览器 profile 池设人。
+KINDS = ("boundaryFeedsMetadata", "derivedFromFacadeRead",
+         "sameChannelPassThrough", "notATurnEntry")
 
 ENTRY_POINTS: Dict[str, Dict[str, object]] = {
     "neurova/api/endpoints/chat.py": {
-        "kind": "boundaryFeedsTurn",
+        "kind": "boundaryFeedsMetadata",
         "requestSource": "current_user['user_id']，两处各写一次：非流式 `/chat`（含续跑原属主）"
                          "与流式 `/chat/stream`（裁定甲，§6-153——流式此前不写 ⇒ 空属主 "
                          "对全员可见）",
-        "turnSource": "同一个 user_id 赋给 call_metadata['user_id']，由管线透传给 set_turn_identity",
+        "carrierSource": "同一个 user_id 赋给 call_metadata['user_id']，随请求内联给技能与经验面",
         "feedsVia": "user_id",
     },
     "neurova/api/endpoints/console.py": {
-        "kind": "boundaryFeedsTurn",
+        "kind": "boundaryFeedsMetadata",
         "requestSource": "current_user['user_id']（REST `/chat`）与 JWT `_user_identity()`"
                          "（`/ws/{client_id}`）；两处都写在跑回合的那条链上、"
                          "`create_task(run_chat())` 之前",
-        "turnSource": "同一个 user_id 进 metadata['user_id']（dict 字面量），由管线透传给 set_turn_identity",
+        "carrierSource": "同一个 user_id 进 metadata['user_id']（dict 字面量）",
         "feedsVia": "user_id",
     },
     "neurova/api/endpoints/mobile_pairing.py": {
-        "kind": "boundaryFeedsTurn",
+        "kind": "boundaryFeedsMetadata",
         "requestSource": "user_id 形参——由 `_get_current_user_id`（JWT）或配对码在 WS 接入层解出后"
                          "按参数交给 `_handle_chat_send`（§6-154 合修：这条面此前只把人留在参数里，"
                          "从不交给请求通道）",
-        "turnSource": "同一个 user_id 进 turnMetadata['user_id']，与管线其余入口同形",
+        "carrierSource": "同一个 user_id 进 turnMetadata['user_id']，与管线其余入口同形",
         "feedsVia": "user_id",
     },
     "neurova/tool_executor.py": {
-        "kind": "derivedFromTurnRead",
+        "kind": "derivedFromFacadeRead",
         "requestSource": "self._agent_identity()[0]",
-        "turnSource": "不写轮身份；它读的就是轮身份那一侧的读数再转写（读取序见 B-5 判据）",
+        "carrierSource": "不设载体；它读的就是门面读数再转写进通道（读取序见 B-5 判据）",
         "readsVia": "_agent_identity",
-        # `_agent_identity` 是**另一个方法**，所以"读的是轮身份"这句必须在它自己的函数体里验；
+        # `_agent_identity` 是**另一个方法**，所以"读的是门面"这句必须在它自己的函数体里验；
         # 只在写入点所在函数里找会把这条跨方法的取值链误判成缺失（本判据第一版正栽在这）。
         "readsViaResolvesTo": "_current_user_id",
     },
     "neurova/tool_layers/mcp_server.py": {
         "kind": "sameChannelPassThrough",
         "requestSource": "self._current_user_id() → get_request_user_id()（MCP 调用方身份沿执行链透传）",
-        "turnSource": "不涉及轮身份",
+        "carrierSource": "不涉及载体",
         "readsVia": "_current_user_id",
         "readsViaResolvesTo": "get_request_user_id",
     },
     "neurova/channels/channel_router.py": {
-        "kind": "noTurnWrite",
-        "requestSource": "agent.config.owner_user_id（渠道会话落盘归属）",
-        "turnSource": "批 2 起：meta['user_id'] 由 UserIdentityManager.resolveTurnIdentity 单点产出"
-                      "（已绑→平台账号对，未绑→ch:{渠道}:{发送者}）",
+        "kind": "boundaryFeedsMetadata",
+        "requestSource": "turnIdentity['user_id'] —— §6-163 裁定甲：通道装**发送者**，"
+                         "与载体同一个出口（原形态是把 agent.config.owner_user_id 写进通道，"
+                         "于是「属主」与「发送者」分占两条通道，§6-127 裁定 ④ 那处声明式分叉）",
+        "carrierSource": "meta['user_id'] 与 memory_scope 都由 UserIdentityManager"
+                         ".resolveTurnIdentity 单点产出（已绑→平台账号对，未绑→ch:{渠道}:{发送者}）；"
+                         "会话可见性另走显式元数据 `session_owner_id`（agent 属主，H-W0）",
+        "feedsVia": "resolveTurnIdentity",
         "resolvedVia": "resolveTurnIdentity",
     },
     "neurova/api/endpoints/computer.py": {
-        "kind": "noTurnWrite",
+        "kind": "notATurnEntry",
         "requestSource": "get_current_user()['user_id'] or 'default'（浏览器 profile 按用户池化）",
-        "turnSource": "该入口不跑对话轮，不写轮身份",
+        "carrierSource": "该入口不跑对话回合，不产生 metadata 载体",
     },
 }
 
@@ -223,12 +239,19 @@ def requestWriteOrigins(tree: ast.AST) -> List[str]:
 
 
 def turnSideSources(tree: ast.AST) -> List[str]:
-    """轮身份写入点的 `user_id=` 实参表达式（规范化 dump）。"""
+    """调用点往 `set_request_identity(...)` 塞身份的两种写法（⑥ 的靶）。
+
+    关键字形（`user_id=…`）与第三个**位置**实参都要抓——只认关键字会让
+    `set_request_identity(user_input, session_id, someone)` 这一形从网眼里过去，
+    而它同样是"把身份交回管线"的动作（那个形参已随轮身份通道退役，两种写法今天都必抛）。
+    """
     out: List[str] = []
     for call in _callsNamed(tree, (TURN_WRITER,)):
         for keyword in call.keywords:
             if keyword.arg == "user_id":
                 out.append(_normalizedDump(keyword.value))
+        if len(call.args) >= 3:
+            out.append(_normalizedDump(call.args[2]))
     return out
 
 
@@ -373,34 +396,34 @@ class TestEntryPointsAreDeclared:
         assert live == sorted(ENTRY_POINTS), (
             f"`set_request_user_id`/`clear_request_user_id` 的生产写方与登记表不一致：\n"
             f"  实测 {live}\n  表   {sorted(ENTRY_POINTS)}\n"
-            "多出来的那一行就是两条通道之间没人对照的面（漂移从这儿开始）；"
+            "多出来的那一行就是通道与载体之间没人对照的面（漂移从这儿开始）；"
             "少掉的那一行说明表在替已消失的代码作保。"
-            "新增入口请同时写明 requestSource / turnSource / kind。"
+            "新增入口请同时写明 requestSource / carrierSource / kind。"
         )
 
     def test_everyEntryNamesBothSidesAndAnAllowedKind(self):
-        """② 的前置：每一格都得说清"两侧各从哪来"，且至少有一格承诺同形。"""
+        """② 的前置：每一格都得说清"两侧各从哪来"，且至少有一格承诺同源。"""
         for rel, entry in ENTRY_POINTS.items():
-            assert entry.get("requestSource"), f"{rel} 没写 request 侧来源"
-            assert entry.get("turnSource"), f"{rel} 没写轮身份侧来源（拿什么判分叉？）"
+            assert entry.get("requestSource"), f"{rel} 没写通道侧来源"
+            assert entry.get("carrierSource"), f"{rel} 没写载体侧来源（拿什么判分叉？）"
             assert entry.get("kind") in KINDS, f"{rel} 的 kind 不在允许集合 {KINDS}"
-            if entry["kind"] in ("derivedFromTurnRead", "sameChannelPassThrough"):
+            if entry["kind"] in ("derivedFromFacadeRead", "sameChannelPassThrough"):
                 assert entry.get("readsVia"), f"{rel} 声明了派生却没写经由哪个读取口"
-            if entry["kind"] == "boundaryFeedsTurn":
+            if entry["kind"] == "boundaryFeedsMetadata":
                 assert entry.get("feedsVia"), (
-                    f"{rel} 声明「边界喂轮身份」却没写靠哪个变量把两侧串起来")
-        assert any(e["kind"] in ("sameSource", "boundaryFeedsTurn")
-                   for e in ENTRY_POINTS.values()), (
-            "所有入口都声明分叉 ⇒ 两条通道没有任何一处保证同读一个来源，"
+                    f"{rel} 声明「边界写通道 + 同一个值进载体」却没写靠哪个变量把两侧串起来")
+        assert any(e["kind"] == "boundaryFeedsMetadata" for e in ENTRY_POINTS.values()), (
+            "所有入口都声明分叉 ⇒ 没有任何一处保证通道与载体同读一个来源，"
             "这张表就从「对齐依据」退化成「分歧登记表」"
         )
 
     def test_boundaryEntriesFeedBothSidesFromOneVariable(self):
-        """②b 标 `boundaryFeedsTurn` 的入口：**每一处** request 写入都只能取那个变量。
+        """②b 标 `boundaryFeedsMetadata` 的入口：**每一处**通道写入都只能取那个变量。
 
-        这正是乙案要守住的东西——把双写拆成"边界写一次 + 同一值喂给轮身份"之后，
-        同源关系不再由一行代码显然成立，而由"两处取的是同一个变量"成立。
+        守住的东西：通道只在一处写、载体只在一个出口产出，两者必须是同一个值——
         哪天有人把边界某处改成别的来源（比如从报文里读 `user_id`），本格立刻红。
+        （原形态里这一格比的是"通道 vs 轮身份"，§6-163 并成一条之后比的是"通道 vs 载体"，
+        式子一字未动，只是被比的两侧换了名字。）
 
         一个入口里**多处**写（非流式与流式两条端点同居 `chat.py`）是允许的，但必须逐处
         同变量——原先断"恰好一处"会在第二处合法写入（流式补属主）时假红，
@@ -408,31 +431,36 @@ class TestEntryPointsAreDeclared:
         **非空且集合相等**这一形。
         """
         for rel, entry in ENTRY_POINTS.items():
-            if entry["kind"] != "boundaryFeedsTurn":
+            if entry["kind"] != "boundaryFeedsMetadata":
                 continue
             tree = productionSources()[rel]
             origins = requestWriteOrigins(tree)
             assert origins and set(origins) == {entry["feedsVia"]}, (
-                f"{rel} 写 request 通道共 {len(origins)} 处，来源 {sorted(set(origins))}；"
-                f"要求每一处都是它声称与轮身份同源的那个变量 {entry['feedsVia']!r}"
-                "——两条通道在此分叉"
+                f"{rel} 写通道共 {len(origins)} 处，来源 {sorted(set(origins))}；"
+                f"要求每一处都是它声称与载体同源的那个变量 {entry['feedsVia']!r}"
+                "——通道与载体在此分叉"
             )
             assert entry["feedsVia"] in metadataUserOrigins(tree), (
                 f"{rel} 不再把 `{entry['feedsVia']}` 交给 metadata 的 `user_id` 那一格"
-                "（赋值形与 dict 字面量形都没取到）：边界只写了 request 一侧，"
-                "轮身份那一侧的来源断了（乙案的同源关系失效）"
+                "（赋值形与 dict 字面量形都没取到）：边界只写了通道一侧，"
+                "载体那一侧的来源断了（技能可见视图与经验检索会各读各的）"
             )
 
 
 class TestDeclaredKindsMatchCode:
     def test_otherEntriesDoNotWriteTurnIdentityAndDoReadWhatTheyClaim(self):
-        """③ 其余格：不得写轮身份（声明就过期了），且要真读它说的那个口。"""
+        """③ 其余两件事：不得往载体里塞 `user_id`（声明就过期了），且要真读它说的那个口。"""
         for rel, entry in ENTRY_POINTS.items():
             tree = productionSources()[rel]
             assert not turnSideSources(tree), (
-                f"{rel} 现在写了轮身份，但表里说它不写——kind 需要重新判定"
-                "（多半要连 §6-123 一起看，别只改这张表）"
+                f"{rel} 现在往 `{TURN_WRITER}(...)` 里传 user_id——那个形参已随轮身份通道"
+                "一起退役（§6-163），传了必 TypeError；不传也不该留着这个形状"
             )
+            if entry["kind"] != "boundaryFeedsMetadata":
+                assert "user_id" not in metaKeysOfTheWriterFunction(tree), (
+                    f"{rel} 声明「不产生载体」，却在写通道的那个函数里往 metadata 塞了 "
+                    "`user_id`——kind 需要重新判定（多半要连 §6-123 一起看，别只改这张表）"
+                )
             readsVia = entry.get("readsVia")
             if not readsVia:
                 continue
@@ -523,6 +551,40 @@ class TestEveryTurnEntryEstablishesTheOwner:
         )
         live = ownerWritesByTurnHandler(productionSources()[rel])
         assert live and all(live.values()), f"实况面本该全部有写：{live}"
+
+
+class TestIdentityIsNotHandedBackToTheTurnFacade:
+    """⑥ §6-163 的复活闸：全仓生产侧没有任何调用点把身份交回轮次门面。
+
+    为什么单独一格（③ 已经对每个登记入口比过一次）：③ 的口径是"这张表里逐格看"，
+    而复活可以发生在**表外**的某个模块——`memory_layer`、`cognitive_layers`、某个
+    后处理步骤，那里同样调得起 `set_request_identity(...)`。本格按形状自己数全仓调用点，
+    与 ⑤ 对写方的做法同形（"每个 X 都必须 Y"的契约要有一格自己枚举 X）。
+
+    式子今天**能**咬：`Agent.set_request_identity(user_input, session_id)` 与
+    `TurnState.set_request_identity(user_input, session_id=None)` 的签名里都没有 `user_id`，
+    任一形（关键字或第三个位置实参）传进去都是当场 TypeError——不是"看着像死码的红"，
+    而是改了立刻在那一行炸。
+    """
+
+    def test_noProductionCallSitePassesAUserIdToTheTurnFacade(self):
+        offenders = [rel for rel, tree in productionSources().items() if turnSideSources(tree)]
+        assert not offenders, (
+            f"这些文件仍把 user_id 交给轮次门面：{offenders}——那个形参已随轮身份通道退役，"
+            "两条通道并存就是 §6-121 那句「同一轮两个读数」的老病，甲就白做了"
+        )
+
+    def test_theRevivalDetectorFiresOnBothSpellings(self):
+        """反向自证：两种写法都要抓，且不许把「只传两格」的正常调用报成违例。"""
+        keywordForm = "def f(u, s, i):\n    set_request_identity(user_input=u, session_id=s, user_id=i)\n"
+        positionalForm = "def f(u, s, i):\n    set_request_identity(u, s, i)\n"
+        assert len(turnSideSources(ast.parse(keywordForm))) == 1, (
+            "关键字形抓不到 ⇒ ⑥ 恒绿（复活了也没人红）")
+        assert len(turnSideSources(ast.parse(positionalForm))) == 1, (
+            "第三个位置实参抓不到 ⇒ 换个写法就绕过 ⑥")
+        assert turnSideSources(
+            ast.parse("def f(u, s):\n    set_request_identity(user_input=u, session_id=s)\n")) == [], (
+            "合并后的正常调用形状被判成违例 ⇒ ⑥ 恒红，改了也白改")
 
 
 class TestTheComparatorsAreNotVacuous:

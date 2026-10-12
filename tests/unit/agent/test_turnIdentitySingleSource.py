@@ -8,78 +8,89 @@
 
 - `sender_id` 不是无人读的字段——传输面确有读方（协议层 `to_dict`/回复、ACP 端点），
   不接线不留下"只写不读"的断点（第 ⑥ 格把它钉成读数，免得下次有人当死码摘掉）；
-- 一旦把 `Message.sender_id` 喂进轮身份，"这一轮是谁"就多了第二条写入路径：
-  与 `set_turn_identity()`（工具层三层隔离、蜂群事件广播都读它）并存的、
+- 一旦把 `Message.sender_id` 喂进身份通道，"这一轮是谁"就多了第二条写入路径：
+  与边界处的 `set_request_user_id()`（工具层三层隔离、蜂群事件广播都读它）并存的、
   "某个信封字段顺手抄过来"的那条。后者按调用点手感存在，正是教义第 6 条要禁的平行体系。
 
 **通道按声明名认，不按局部变量名认**（本判据第一版就是这样误报的）：
-`neurova/core/identity_context.py` 里另有一条 ContextVar，局部名同样叫 `_user_id_var`，
-但声明的是 `neurova_request_user_id`——与轮身份的 `neurova_turn_user_id` 是两条运行时通道。
-按局部名匹配会把它的两处正常写点报成"轮身份被旁路直写"，那种假红比没有判据更坏
-（读者会学会无视它）。所以检出器先解析 `_x = ContextVar("名字")` 的**声明名**，
-再按声明名归账，并把"同名不同通道"这一形态本身钉成一条反证（见 ⑦）。
+`neurova/core/identity_context.py` 里那条 ContextVar 的局部名与轮次上下文里原先那条
+同名（都叫 `_user_id_var`），声明的却是不同运行时通道——按局部名匹配会把另一条通道上的
+正常写点报成"本通道被旁路直写"，那种假红比没有判据更坏（读者会学会无视它）。
+所以检出器先解析 `_x = ContextVar("名字")` 的**声明名**，再按声明名归账，并把
+"同名不同通道"这一形态本身钉成一条反证（见 ⑦）。
 
-顺带抓出的真事实（不在本裁范围内，已登记台账待裁）：`neurova_request_user_id` 确实
-是"本轮哪个用户"的第二条通道——三处生产写方（`chat_pipeline.py:477`、
-`api/endpoints/computer.py:729`、`channels/channel_router.py:180`）与两处读方
-（`computer_use/browser_manager.py:1790`、`camofox_server_backend.py:79`）。
-它不与轮身份同写一条变量，所以本文件把它**作为独立通道逐条登记**（多一处写点即红），
-而不是假装它不存在，也不在这里合并它（合并动到浏览器/计算机使用的按用户隔离，
-属另一批）。
+**身份通道今昔只有一条**（§6-163 · 批 18 按裁定甲合并）：与轮身份并存的
+`neurova_turn_user_id` 已退役，读口 `get_turn_user_id()` 一并删，`set_turn_identity()`
+的签名里不再收 `user_id`。合并方向取「唯一那条通道装 **sender（谁在说话）**」，
+会话记录的可见性改由显式参数 `session_owner` 承载（链路见
+`tests/unit/core/test_identityChannelMergedToOneSource.py`）。本文件因此从"两条通道各自
+单一写方"升级为"这条通道就是全部"：多一条身份类 ContextVar、多一处写点、
+少一处读点，都在这里红。读方台账那八→九处的实测来由照旧成立——
+合并与否曾按"读两处"的错误数拍过板，读数必须自己算。
 """
 
 import ast
 import asyncio
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Set, Tuple
 
 from neurova.agent.turn_state import TurnState
 from neurova.agent_core import Agent
+from neurova.core.identity_context import get_request_user_id, set_request_user_id
 from neurova.router import MessageRouter, RouteResult
 from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "neurova"
 
-#: 四条身份通道的**声明名**（ContextVar 的运行时身份）。新增第五条时本表必须跟着长，
+#: 三条通道变量的**声明名**（ContextVar 的运行时身份）。新增第四条时本表必须跟着长，
 #: 否则新通道无人守；`test_theDetectorsAreNotVacuous` 只保证检出现有的写法。
-#: 前三条 = 轮身份；第四条 = 已知并行的"本轮哪个用户"第二通道（见文件头）。
+#: 前两条 = 轮次内容（user_input / session_id），第三条 = **唯一**的身份通道
+#: （§6-163 按裁定甲合并后，`neurova_turn_user_id` 已退役，本表里不许再长出第二条装
+#: user_id 的通道——两条并存就是 §6-121 那句"同一轮两个读数"的老问题）。
 WRITERS: Dict[str, Set[str]] = {
     "neurova_turn_user_input": {
         "neurova/core/turn_context.py::set_turn_identity",
         # A-04 契约的单字段 setter：`Agent._current_user_input` 的后端，
-        # 只动 user_input 一格、不碰 session/user 两个身份字段。写成"整个身份一个写方"
+        # 只动 user_input 一格、不碰 session 那一格。写成"整个身份一个写方"
         # 会把这条既有契约谎报成违规，也拦不住它长大。
         "neurova/core/turn_context.py::set_turn_user_input",
     },
     "neurova_turn_session_id": {"neurova/core/turn_context.py::set_turn_identity"},
-    "neurova_turn_user_id": {"neurova/core/turn_context.py::set_turn_identity"},
     "neurova_request_user_id": {
         "neurova/core/identity_context.py::set_request_user_id",
         "neurova/core/identity_context.py::clear_request_user_id",
     },
 }
 
-#: 轮身份三通道（不含那条并行通道）——`set_turn_identity` 只该写这三条。
-TURN_IDENTITY = ("neurova_turn_user_input", "neurova_turn_session_id", "neurova_turn_user_id")
+#: 轮次内容两通道（不含身份通道）——`set_turn_identity` 只该写这两条。
+TURN_IDENTITY = ("neurova_turn_user_input", "neurova_turn_session_id")
 
-#: 并行通道 `neurova_request_user_id` 的**读方台账**。
+#: 身份通道 `neurova_request_user_id` 的**读方台账**。
 #:
 #: 立账的缘由：§6-121 把这条通道的读面写成"两处（browser_manager / camofox_server_backend）"，
-#: 那条数是用 computer_use 目录筛出来的，不是全仓复算。本文件的探测器实测**八处**，
+#: 那条数是用 computer_use 目录筛出来的，不是全仓复算。本文件的探测器实测**九处**，
 #: 且各处的兜底口径不同（`or "default"` / `or "anonymous"` / 回落 `backend._user_id` /
-#: `or self._agent_identity()[0]` / 裸取无兜底）。合并与否必须按真读数裁——
-#: 按名推断裁会把成本归因、会话属主、MCP 身份三条不同的关注点当成"同一个用户键"一起搬走。
+#: `or self._agent_identity()[0]` / 裸取无兜底）——按名推断裁会把成本归因、会话属主、
+#: MCP 身份三条不同的关注点当成"同一个用户键"一起搬走。
+#: §6-163 合并让读数发生两处变化，逐条记在这里免得下次当成漂移：
+#: `MemCore.save_to_session` 的 ambient 读**退役**（会话属主改由显式参数传，合并后这条
+#: 通道装的是发送者，拿它当属主会让渠道会话从 agent 属主的控制台里消失）；
+#: 新增 `TurnState.current_user_id`（门面直读唯一通道，不再自带 'default' 兜底——
+#: 兜底口径属于消费方，门面再兜一层就是第二个事实源）
+#: 与 `post_chat_pipeline.resolveSessionOwner`（属主取法单点：显式键优先，缺省才读通道）。
 #: 先钉住读面：多一处读点即红（少一处也要红，退役一条读点同样是一次口径变更）。
 READERS: Dict[str, Set[str]] = {
     "neurova_request_user_id": {
+        "neurova/agent/turn_state.py::TurnState.current_user_id",
         "neurova/computer_use/browser_manager.py::BrowserManager._get_or_create_user_camofox_backend",
         "neurova/computer_use/camofox_server_backend.py::CamofoxServerBackend._eff_user_id",
         "neurova/llm/multi_model_client.py::MultiModelLLMClient._chat_single_attempt",
         "neurova/llm/multi_model_client.py::MultiModelLLMClient.chat_stream",
         "neurova/llm/multi_model_client.py::_consume_llm_quota",
-        "neurova/mem_core.py::MemCore.save_to_session",
+        "neurova/post_chat_pipeline.py::resolveSessionOwner",
         "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
         "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
     },
@@ -89,7 +100,6 @@ READERS: Dict[str, Set[str]] = {
 DECLARED_IN: Dict[str, str] = {
     "neurova_turn_user_input": "neurova/core/turn_context.py",
     "neurova_turn_session_id": "neurova/core/turn_context.py",
-    "neurova_turn_user_id": "neurova/core/turn_context.py",
     "neurova_request_user_id": "neurova/core/identity_context.py",
 }
 
@@ -363,15 +373,20 @@ def liveWriterLedger() -> Dict[str, Set[str]]:
 
 
 class _IdentityRecordingAgent:
-    """下游 agent：在**被路由到的那一刻**记录轮身份（事后读会读到别的轮写进去的）。"""
+    """下游 agent：在**被路由到的那一刻**记录轮次与身份（事后读会读到别的轮写进去的）。
+
+    形参名照真 `Agent.chat` 写：§6-161 那枚教训是「桩件的签名替坏掉的契约背书」——
+    这里若把首个形参写成 `content`，路由隔着位置参数调用照样绿，而真 `Agent.chat`
+    的形参叫 `user_input`，下一个按关键字改调用点的人就得不到任何预警。
+    """
 
     def __init__(self):
         self.seen: List[Dict[str, object]] = []
 
-    async def chat(self, content, **kwargs):
+    async def chat(self, user_input, session_id=None, metadata=None, **kwargs):
         state = TurnState()
         self.seen.append({
-            "content": content,
+            "content": user_input,
             "session_id": state.current_session_id,
             "user_id": state.current_user_id,
             "user_input": state.current_user_input,
@@ -448,11 +463,11 @@ class TestIdentityChannelsHaveOneWriter:
         """⑧ 反向自证：三台检出器各喂合成样本必须真抓到，且不被同名不同通道骗过去。"""
         rogue = (
             "from contextvars import ContextVar\n"
-            "_user_id_var = ContextVar('neurova_turn_user_id', default=None)\n"
-            "def rogueWriter(value):\n    _user_id_var.set(value)\n"
+            "_session_id_var = ContextVar('neurova_turn_session_id', default=None)\n"
+            "def rogueWriter(value):\n    _session_id_var.set(value)\n"
         )
         assert identityWrites(rogue, "synthetic.py") == [
-            ("neurova_turn_user_id", "synthetic.py::rogueWriter")
+            ("neurova_turn_session_id", "synthetic.py::rogueWriter")
         ], "检出器抓不到模块级通道的旁路写点——①② 两格都会空转"
 
         lookAlike = (
@@ -462,14 +477,15 @@ class TestIdentityChannelsHaveOneWriter:
         )
         assert identityWrites(lookAlike, "synthetic.py") == [
             ("neurova_request_user_id", "synthetic.py::set_request_user_id")
-        ], "按声明名归账失效：同名不同通道被记成了轮身份的写点——那种假红会让人无视本判据"
+        ], "按声明名归账失效：局部名 `_user_id_var` 被按名字记到了轮次内容通道上——" \
+           "那种假红会让人无视本判据（合并后两模块里同局部名的还有 `_user_input_var`）"
 
         viaAlias = (
             "from neurova.core import turn_context\n"
-            "def bypass(v):\n    turn_context._user_id_var.set(v)\n"
+            "def bypass(v):\n    turn_context._user_input_var.set(v)\n"
         )
         assert identityWrites(viaAlias, "synthetic.py") == [
-            ("neurova_turn_user_id", "synthetic.py::bypass")
+            ("neurova_turn_user_input", "synthetic.py::bypass")
         ], "模块别名 + 属性形式的旁路写点没被解析出来——② 会漏这一整类写法"
 
         assert identityWrites("def f():\n    somethingElse.set(1)\n", "s.py") == [], (
@@ -521,14 +537,19 @@ class TestIdentityEntryHasOneCaller:
 
 
 class TestEntryDoesNotOpenASecondChannel:
-    def test_processMessageLeavesTurnIdentityUntouched(self):
-        """④ 行为面：入口带 sender 走传输面，但不得改写已进入的轮身份。"""
+    def test_processMessageLeavesIdentityUntouched(self):
+        """④ 行为面：入口带 sender 走传输面，但不得改写已进入的唯一身份通道。"""
         downstream = _IdentityRecordingAgent()
         router = MessageRouter(agent=downstream, skill_registry=None, memory_manager=None)
         host, process_message = _EntryHost(router), Agent.process_message
 
-        TurnState().set_request_identity("原输入", "sess-A", "user-A")
-        result = asyncio.run(process_message(host, "你好", sender="someone"))
+        previous = get_request_user_id()
+        TurnState().set_request_identity("原输入", "sess-A")
+        set_request_user_id("user-A")
+        try:
+            result = asyncio.run(process_message(host, "你好", sender="someone"))
+        finally:
+            set_request_user_id(previous)
 
         assert result.success is True, result
         assert downstream.seen, "根本没走到被路由的那一跳——本格的断言是空的"
@@ -537,11 +558,38 @@ class TestEntryDoesNotOpenASecondChannel:
             observed["session_id"] == "sess-A" and observed["user_id"] == "user-A"
             and observed["user_input"] == "原输入"
         ), (
-            f"入口改写了轮身份：{observed}——`Message.sender_id` 一旦成为身份来源，"
+            f"入口改写了身份：{observed}——`Message.sender_id` 一旦成为身份来源，"
             "同一轮就有两处身份写入点，而两者语义并不等价"
-            "（信封里的 sender 是「谁发的」，轮身份里的 user_id 是「按哪个用户隔离记忆」）"
+            "（信封里的 sender 是「谁发的」，通道里的 user_id 是「按哪个用户隔离与计费」）"
         )
         assert observed["content"] == "你好", observed
+
+    def test_theRecordingStubStillMatchesTheRealChatContract(self):
+        """④b 桩件不许替坏掉的契约背书（§6-161 同族）：路由那处调用得能绑上真签名。
+
+        只查桩件形参名不够——本格的靶是**调用点**：路由隔着 `chat(message.content,
+        metadata=...)` 调用，若哪天有人把它改成 `chat(content=...)`，桩件带 `**kwargs`
+        照样绿，而真 `Agent.chat` 必 TypeError。合并动过这条链的签名面，就该在这里被钉住。
+        """
+        realParams = set(inspect.signature(Agent.chat).parameters)
+        stubParams = set(inspect.signature(_IdentityRecordingAgent.chat).parameters) - {"self", "kwargs"}
+        assert stubParams <= realParams, (
+            f"桩件形参 {sorted(stubParams)} 里有真 `Agent.chat` 不认的名字"
+            f"（真签名：{sorted(realParams)}）——桩件在替一个不存在的契约背书")
+
+        calls: List[Tuple[int, Dict[str, object]]] = []
+        routerTree = ast.parse((REPO_ROOT / "neurova/router.py").read_text(encoding="utf-8"))
+        for node in ast.walk(routerTree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "chat" and "agent" in ast.unparse(node.func.value)):
+                calls.append((len(node.args), {kw.arg: kw for kw in node.keywords if kw.arg}))
+        assert calls, "router 里找不到 `…agent.chat(...)` 调用点——本格的靶已换"
+        for nPositional, kwargs in calls:
+            # 首个 None 占掉 `self`（这里是未绑定的函数对象），其余按调用点**真实**的位置
+            # 参数量铺——调用点少给了必填项，这里就该红，而不是被测试自己补一个占位填平。
+            args = (None,) + ("占位",) * nPositional
+            inspect.signature(Agent.chat).bind(*args, **kwargs)
+            inspect.signature(_IdentityRecordingAgent.chat).bind(*args, **kwargs)
 
     def test_senderStillReachesTheTransportPlane(self):
         """⑤ 不接线的前提之一：入口确实把 sender 交给了信封，没半路丢掉。"""

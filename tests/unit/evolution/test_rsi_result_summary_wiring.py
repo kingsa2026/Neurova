@@ -303,7 +303,7 @@ class TestProcessExposesSummary:
 
         from neurova.core.turn_context import set_turn_identity
 
-        set_turn_identity("hi", "s1", "u1")
+        set_turn_identity("hi", "s1")
         step_result = asyncio.run(pipe._step_rsi_iteration())
         assert step_result["applied_count"] == 2
 

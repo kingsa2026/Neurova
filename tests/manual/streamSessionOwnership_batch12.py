@@ -92,8 +92,13 @@ class _StreamingStubAgent:
             "request_channel": get_request_user_id(),
         })
         if self.session_manager is not None:
+            # §6-163 之后属主不再由 `save_to_session` 自己从环境里读；脚本复用生产那一个
+            # 取法函数（`resolveSessionOwner`），而不是自己拼一遍同样的式子。
+            from neurova.post_chat_pipeline import resolveSessionOwner
+
             MemCore(self).save_to_session(user_input or "", "好的", session_id=session_id,
-                                          metadata=metadata)
+                                          metadata=metadata,
+                                          session_owner=resolveSessionOwner(metadata))
         emitter = (metadata or {}).get("event_emitter")
         if callable(emitter):
             emitter("content", {"type": "content", "content": "好的"})

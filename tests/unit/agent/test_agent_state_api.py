@@ -76,21 +76,37 @@ class TestTurnLevelStateAPI:
         assert agent.tool_events == [{"type": "x"}]
 
     def test_request_identity_roundtrip(self):
+        """轮次内容两格走门面；身份那格自 §6-163 起只由请求通道给（门面不再收 user_id）。"""
         from neurova.agent_core import Agent
+        from neurova.core.identity_context import get_request_user_id, set_request_user_id
 
         agent = Agent.__new__(Agent)
-        agent.set_request_identity(user_input="hi", session_id="s1", user_id="u9")
-        assert agent.current_user_input == "hi"
-        assert agent.current_session_id == "s1"
-        assert agent.current_user_id == "u9"
+        previous = get_request_user_id()
+        try:
+            agent.set_request_identity(user_input="hi", session_id="s1")
+            set_request_user_id("u9")
+            assert agent.current_user_input == "hi"
+            assert agent.current_session_id == "s1"
+            assert agent.current_user_id == "u9"
+        finally:
+            set_request_user_id(previous)
 
     def test_request_identity_defaults(self):
+        """缺省只到 session 那一格。身份门面**不**自带 `"default"` 兜底（§6-163）：
+        属主＝空、用量＝anonymous、profile 池＝default、配额＝无身份即不判——兜底口径
+        属于各消费方，门面再兜一层就是第二个事实源。"""
         from neurova.agent_core import Agent
+        from neurova.core.identity_context import get_request_user_id, set_request_user_id
 
         agent = Agent.__new__(Agent)
-        agent.set_request_identity(user_input="hi")
-        assert agent.current_session_id is None
-        assert agent.current_user_id == "default"
+        previous = get_request_user_id()
+        try:
+            set_request_user_id(None)
+            agent.set_request_identity(user_input="hi")
+            assert agent.current_session_id is None
+            assert agent.current_user_id is None
+        finally:
+            set_request_user_id(previous)
 
 
 class TestPublicAliases:
@@ -138,10 +154,10 @@ class TestChatPipelineViaAPI:
             def reset_tool_messages(self):
                 self._tool_messages_list = []
 
-            def set_request_identity(self, user_input, session_id=None, user_id=None):
+            def set_request_identity(self, user_input, session_id=None):
                 self.current_user_input = user_input
                 self.current_session_id = session_id
-                self.current_user_id = user_id or "default"
+                # §6-163：身份不进这一格——管线不许成为第二个写点。
 
         pipeline._agent = _Agent()
         ctx = ChatContext(
@@ -155,7 +171,9 @@ class TestChatPipelineViaAPI:
         assert pipeline._agent._tool_messages_list == []
         assert pipeline._agent.current_user_input == "问题"
         assert pipeline._agent.current_session_id == "sess-1"
-        assert pipeline._agent.current_user_id == "u7"
+        assert pipeline._agent.current_user_id == "old", (
+            "管线按 metadata['user_id'] 改写了身份——§6-163 之后那是请求边界的事，"
+            "这里多一个写点就是渠道路径把属主换成发送者的老地方")
 
     def test_step_activity_uses_increment_api(self):
         pipeline = ChatPipeline.__new__(ChatPipeline)
