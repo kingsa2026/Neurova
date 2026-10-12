@@ -2487,3 +2487,14 @@ tests/language/testOutOfBoxDefaultLayer.py
 # 并配一格变异对照证明它抓得住"把键加回去"。
 # 入册前逐文件单跑两次同读数 15 passed（2.01s / 2.00s）。
 tests/unit/api/testRetiredGlobalLanguageDefault.py
+# §6-168 渠道语音出站（缺口②）两面判据：
+# `test_channelVoiceEgress.py` 12 格——出站形态的**唯一来源**（按 voiceOutMode 赋值形状判，
+# 不按字符串扫，否则 "none" 这类词会既假红又放过）、回合音频必须进回发项（含"文件不在位不得产出语音条"）、
+# 支持侧真收到 voice+file_path（用 inspect.signature().bind 校调用形状，防桩件替坏契约背书）、
+# 不支持侧**必须点名丢弃**（静默丢弃就是本批根修对象）、飞书两跳顺序与 multipart、
+# 以及"声明了能力就必须真调用上传面"的 AST 反查（配反向对照）。
+# `test_feishuMediaUploadIsRealMultipart.py` 5 格——用本地回环真 HTTP 桩验上传的**字节形状**
+# （multipart 还是 JSON）与"文件不在位就不发请求也不返回假 key"；该 Mixin 是孤儿，坏签名从未被调用过。
+# 两档全程 127.0.0.1，不开外网、不花服务商额度。入册前逐文件单跑两次同读数 12 passed / 5 passed。
+tests/unit/channels/test_channelVoiceEgress.py
+tests/unit/channels/test_feishuMediaUploadIsRealMultipart.py
