@@ -20,6 +20,12 @@ from neurova.channels.base import (
     ChannelEventType,
     ChannelMessage,
 )
+from neurova.channels.voice_egress import (
+    VOICE_MESSAGE_TYPE,
+    VOICE_OUT_NONE,
+    VoiceReply,
+    resolveVoiceReply,
+)
 from neurova.core.data_root import callerPath
 from neurova.core.lazy_singleton import lazySingleton
 
@@ -398,6 +404,52 @@ class ChannelManager:
             "session_scope": self.resolve_session_scope_id(message),
         }
 
+    async def _sendReplyItems(self, message: ChannelMessage, items) -> None:
+        """把 handler 返回的回发项逐条送出。
+
+        项有两种：`str`＝文本条（既有契约）；`VoiceReply`＝本轮 TTS 产物（§6-168 缺口②）。
+        处理器链与单处理器回退**共用这一条**——此前两处各写一份循环，改一处漏一处正是
+        §6-161 那笔（删双写只补 chat.py 漏了 console.py）的同族。
+        """
+        for part in (items if isinstance(items, (list, tuple)) else [items]):
+            if part is None or part == "":
+                continue
+            if isinstance(part, VoiceReply):
+                await self._sendVoiceReply(message, part)
+                continue
+            await self.send_message(
+                message.channel_type,
+                message.chat_id,
+                str(part),
+                **self._reply_kwargs(message),
+            )
+
+    async def _sendVoiceReply(self, message: ChannelMessage, reply: VoiceReply) -> None:
+        """按渠道能力落地一条语音回发；发不出去必须点名，不得静默丢。
+
+        能力位在适配器上（`ChannelAdapter.voiceOutMode`，取值只在
+        `neurova/channels/voice_egress.py` 定义）。不支持时**不降级成"发个链接"**——
+        本仓没有公网基址配置，相对 URL 在手机上不可点，那样做等于把假送达写进日志。
+        """
+        agent_id = str(message.metadata.get("agent_id") or "default")
+        adapter = self.get_adapter(message.channel_type, agent_id)
+        mode = getattr(adapter, "voiceOutMode", VOICE_OUT_NONE) if adapter is not None else VOICE_OUT_NONE
+        resolved = resolveVoiceReply(reply.file_path, mode, reply.paired_text)
+        if resolved is None:
+            logger.warning(
+                "渠道 %s（agent=%s）不支持语音出站，本轮 TTS 产物未送达：%s",
+                message.channel_type, agent_id, reply.file_path,
+            )
+            return
+        await self.send_message(
+            message.channel_type,
+            message.chat_id,
+            "",
+            message_type=VOICE_MESSAGE_TYPE,
+            file_path=resolved.file_path,
+            **self._reply_kwargs(message),
+        )
+
     async def _dispatch_message(self, message: ChannelMessage):
         """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。"""
         # 优先使用多处理器链
@@ -408,16 +460,8 @@ class ChannelManager:
                     reply = await handler(message)
                     if reply:
                         # 2026-09-14 契约扩展：handler 可返回多条消息（思考/工具/
-                        # 正文拆分）；str 视为单条，逐条回发。
-                        for part in (reply if isinstance(reply, (list, tuple)) else [reply]):
-                            if not part:
-                                continue
-                            await self.send_message(
-                                message.channel_type,
-                                message.chat_id,
-                                part,
-                                **self._reply_kwargs(message),
-                            )
+                        # 正文拆分）；2026-10-12 起项可为文本或 VoiceReply（语音）。
+                        await self._sendReplyItems(message, reply)
                         break  # 第一个返回回复的处理器获胜
                 except Exception as e:
                     logger.exception("Message handler %s error: %s", handler_id, e)
@@ -426,15 +470,7 @@ class ChannelManager:
             try:
                 reply = await self._message_handler(message)
                 if reply:
-                    for part in (reply if isinstance(reply, (list, tuple)) else [reply]):
-                        if not part:
-                            continue
-                        await self.send_message(
-                            message.channel_type,
-                            message.chat_id,
-                            part,
-                            **self._reply_kwargs(message),
-                        )
+                    await self._sendReplyItems(message, reply)
             except Exception as e:
                 logger.exception("Message handler error: %s", e)
                 # 尝试发送错误提示

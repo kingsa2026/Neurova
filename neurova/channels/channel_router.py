@@ -24,6 +24,7 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
+from neurova.channels.voice_egress import turnAudioCandidate
 from neurova.channels.group_leadership import (
     get_group_leadership_arbiter,
     get_group_leadership_config,
@@ -319,6 +320,13 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
                 parts.append("🔧 本轮工具调用：\n" + "\n".join(lines))
         if text:
             parts.append(text)
+        # 语音出站（§6-168 缺口②）：回合的 TTS 产物此前在这里被整份丢掉——
+        # `post_chat_pipeline._step_generate_tts` 已把音频落盘、`chat_pipeline` 已把它
+        # 放进 `resp["audio_path"]`，而这里只取 `resp["text"]`。带出去即可，
+        # "这个渠道收不收音频"由 manager 按适配器能力判（那里才有名可点）。
+        audioCandidate = turnAudioCandidate(resp.get("audio_path") if isinstance(resp, dict) else None, paired_text=text)
+        if audioCandidate is not None:
+            parts.append(audioCandidate)
         return parts or None
 
     return _handler
