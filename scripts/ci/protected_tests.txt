@@ -2409,3 +2409,12 @@ tests/unit/collaboration/test_workflowConcurrencyCapAndNodeRetry.py
 # 这是活体跑第一步撞到的既有缺陷，判据在档）。
 # 入册前逐文件单跑两次同读数 21 passed（14.15s / 7.91s）。
 tests/media/test_mediaTrashLifecycle.py
+# §6-161（工单 2026-10-12 批 17，§6-154 合修）：移动端 chat:send 的调用形状、请求级属主与不静默的 catch-all。
+# 替身不手抄签名，而是每次被调时按**真 `Agent.chat_stream`/`Agent.chat` 的签名** bind 一遍——
+# 调用点写错参数名（原样 `content=`/`user_id=`）就落在行为断言上（客户端只收到 chat_failed），
+# 而不是落在一份会随生产漂移的签名清单上；两条分支（有/无 chat_stream）各一格。
+# 属主一格读的是被调那一刻的 `get_request_user_id()`，另配一格钉 metadata 与请求通道同源。
+# 防再生面按**整档**扫「把异常转成 ws.send_json 却不记日志」的 catch-all（本文件实数 6 处），
+# 并带一格双侧对照：现码判合规、把日志行摘掉必须至少点到 4 处。
+# 入册前逐文件单跑两次同读数 10 passed（2.73s / 2.52s）。
+tests/unit/api/test_mobilePairingChatSendContract.py
