@@ -174,7 +174,7 @@ class TestBasePlugin:
         assert plugin.version == SemVersion("1.0.0")
         assert plugin.plugin_type == PluginType.SKILL
         assert len(plugin.api_endpoints) == 1
-        # §6-157 收口：能力面不在插件类上声明（单点在 skills 的 `permissions`），
+        # §6-159 收口：能力面不在插件类上声明（单点在 skills 的 `permissions`），
         # 插件类只声明框架中介面
         assert plugin.framework_surfaces == [PluginFrameworkSurface.EMIT_EVENTS]
 
@@ -270,7 +270,7 @@ class TestBasePlugin:
 
     def test_plugin_event_callsWithoutGrantsAreRefused(self, tmp_path, monkeypatch):
         """P2 改名实（台账 §6-155）：上一档断的是「未经确认也能订阅」，而订阅/发布正是
-        事件总线两档框架中介面的强制点（能力面词汇单点在 skills，§6-157）。未授予必须当场拒，
+        事件总线两档框架中介面的强制点（能力面词汇单点在 skills，§6-159）。未授予必须当场拒，
         且**一次都不能落到总线上**——只断「抛了」不够，替身没被碰才算门在门前。
         """
         from neurova.plugins.plugin_errors import PluginError

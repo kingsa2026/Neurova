@@ -15,14 +15,14 @@ P1 接通的是**装载**，边界写死在这里：
   不可达分支后假装失败。供应链校验（源、哈希/签名、权限确认、回滚）属 P3。
 - 插件声明的 API 端点**要经第二次授权才挂进运行中的 app**：`POST /{id}/routes/mount`
   （admin）。门在 `neurova/plugins/plugin_route_mount.py`——enabled + loaded + 清单声明的
-  能力声明**显式写过**（§6-157：整节缺失即 `permissions_undeclared` 拒挂，不再空真通过）、
+  能力声明**显式写过**（§6-159：整节缺失即 `permissions_undeclared` 拒挂，不再空真通过）、
   声明项**逐项确认过**（`GET /{id}/permissions` 读还差哪几项），且只落在
   `/api/v1/plugin-api/{id}/` 命名空间里、一律带身份门。挂载时把声明装进 skills 那份作用域，
   于是插件 handler 经框架调工具时由 `tool_executor` fail-closed 裁。`routes_mounted` 跟随活路由表。
 - 权限授予/撤销与挂载放行都进既有审计面（`log_audit`，`PERMISSION_CHANGE` / `SECURITY_EVENT`），
   并落盘在数据根 `plugins/permissions.json`——那是人的决定，不能随进程走。
 - ⚠ 这套**不是沙箱**：能装载即能在进程内执行任意代码。这里给的是能力面的准入与留痕，
-  能力面词汇与调用面仲裁单点在 `neurova/skills/permissions.py`（§6-157 收口），
+  能力面词汇与调用面仲裁单点在 `neurova/skills/permissions.py`（§6-159 收口），
   插件侧只剩事件总线两档（`PluginFrameworkSurface`）。
 
 `plugin_id` 就是 manifest 里的 `name`（`PluginManager` 的键）；两者不一致时报 400 而不是静默改名。
@@ -76,7 +76,7 @@ _REASON_TO_STATUS = {
     "permission_not_granted": 403,     # 框架中介点上的实时拒绝（事件总线）
     "permission_not_declared": 400,    # 清单没声明的权限不给授予（防「先授予后声明」）
     "permissions_unconfirmed": 409,    # 聚合门：声明 ⊄ 已确认，还差哪几项写在 detail 里
-    "permissions_undeclared": 409,     # 清单没 permissions 这一节 ⇒ 不对外开面（§6-157 修的空真通过）
+    "permissions_undeclared": 409,     # 清单没 permissions 这一节 ⇒ 不对外开面（§6-159 修的空真通过）
     "invalid_permissions_declaration": 400,  # skills 那道安装门判的（未知能力键/白名单含未知工具）
     "grants_store_legacy_format": 409,       # §6-155 那一版的授权文件或历史取值：要人重新确认
     "legacy_permissions_field": 400,         # 清单还写着旧字段：在安装这一站拒，不拖到装载
@@ -364,7 +364,7 @@ async def disable_plugin(plugin_id: str):
 async def get_permission_model():
     """两类授权面的口径表——管理面渲染「逐项确认」用的就是这一份，不让前端自己抄词汇。
 
-    §6-157 收口后这里**只列候选与强制点，不重定义任何口径**：
+    §6-159 收口后这里**只列候选与强制点，不重定义任何口径**：
     - `capabilities` 的键来自 `skills/permissions.py:KNOWN_CAPABILITY_KEYS`（经
       `capabilityKeys()` 现取，那份才是唯一出处，语义与拦点都在 skills 侧）；
     - `surfaces` 是插件独有面（事件总线两档），强制点在 `BasePlugin`。

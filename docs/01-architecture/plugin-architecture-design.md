@@ -236,7 +236,7 @@ class BasePlugin(BaseModule):
     plugin_type: PluginType  # 插件类型
     api_endpoints: List[APIEndpoint]  # 提供的 API 端点
     frontend_resources: List[str]  # 前端静态资源
-    permissions: Dict[str, Any]                   # 能力面（键取自 skills 那份词汇，§6-157）
+    permissions: Dict[str, Any]                   # 能力面（键取自 skills 那份词汇，§6-159）
     framework_surfaces: List[PluginFrameworkSurface]  # 事件总线两档
     
     async def on_initialize(self) -> None:
