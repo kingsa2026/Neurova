@@ -176,6 +176,10 @@ class ToolCoordinator:
         self._completed: Dict[str, Dict[str, Any]] = {}
         self._MAX_COMPLETED = 200
         self._pending_hints: List[Dict[str, Any]] = []
+        # 有界留存：排干已按会话分流，别的会话的终态会留在队列里等自己的下一轮；
+        # 会话结束/切走后不再排干的那批不得无界堆积（与 `_MAX_COMPLETED` 同一处置，
+        # 淘汰最旧一条并点名警告，不静默丢）
+        self._MAX_PENDING_HINTS = 200
 
     async def run_with_timeout(
         self,
@@ -247,12 +251,18 @@ class ToolCoordinator:
 
         # 超时 → 转后台：同一任务继续（持有引用防 GC 静默吞掉），观察者投递 hint
         task_id = f"bg_{uuid.uuid4().hex[:12]}"
+        # 归属在**转后台这一刻**盖章，而不是等观察者回投时再取：观察者跑起来时发起
+        # 那一轮可能早已收尾，那一刻的轮次上下文不属于这次调用。取数走单源
+        # `turn_context`（与 `tool_call_id` 同一套盖章机制，见 base.py 的 G5-A 注释）。
+        from neurova.core.turn_context import get_turn_session_id
+
         self._background[task_id] = {
             "task": task,
             "tool_name": tool_name,
             "result": None,
             "error": None,
             "success": None,
+            "session_id": str(get_turn_session_id() or ""),
         }
         # A-20：观察者任务挂强引用——事件循环对 Task 只持弱引用，裸
         # ensure_future 的观察者可能被 GC 静默吞掉（pending hints 永不投递）。
@@ -326,12 +336,14 @@ class ToolCoordinator:
         entry = self._background.get(task_id)
         if entry is None:
             return
+        sessionId = entry.get("session_id")
         try:
             entry["result"] = await task
             entry["success"] = True
-            self._pending_hints.append({
+            self._queueHint({
                 "task_id": task_id,
                 "tool_name": tool_name,
+                "session_id": sessionId,
                 "success": True,
                 "result": entry["result"],
             })
@@ -339,12 +351,13 @@ class ToolCoordinator:
             entry["success"] = False
             entry["error"] = "cancelled"
             # 断链修复（G4-RC6）：取消分支此前既不投 hint 也不记日志，`finally`
-            # 只把 entry 移入 `_completed`。于是 `get_background_status` 查得到
-            # "cancelled"，而下一轮 LLM 与用户**永远收不到这条终态**——一个已经
+            # 只把 entry 移入 `_completed`。于是终态查得到、
+            # 而下一轮 LLM 与用户**永远收不到这条终态**——一个已经
             # 转后台的工具被取消后凭空消失。终态必须回到反馈环。
-            self._pending_hints.append({
+            self._queueHint({
                 "task_id": task_id,
                 "tool_name": tool_name,
+                "session_id": sessionId,
                 "success": False,
                 "cancelled": True,
                 "error": "cancelled",
@@ -353,9 +366,10 @@ class ToolCoordinator:
         except Exception as e:
             entry["error"] = str(e)
             entry["success"] = False
-            self._pending_hints.append({
+            self._queueHint({
                 "task_id": task_id,
                 "tool_name": tool_name,
+                "session_id": sessionId,
                 "success": False,
                 "error": str(e),
             })
@@ -364,7 +378,8 @@ class ToolCoordinator:
             entry["task"] = None
             # A-20：断开对观察者自身的强引用（entry 随后移入 _completed 留存）
             entry["observer"] = None
-            # 资源修复: 移入有界留存(供 get_background_status 查询近 200 条终态)
+            # 资源修复: 移入有界留存——活动字典只留运行中任务，超时任务条目
+            # 不再只增不减（留存本身没有查询口，是纯内存上界，见 `_MAX_COMPLETED`）
             self._background.pop(task_id, None)
             self._completed[task_id] = entry
             while len(self._completed) > self._MAX_COMPLETED:
@@ -382,7 +397,7 @@ class ToolCoordinator:
         `success` 由调用方给定，不在这里自己判：成败判据全仓唯一
         （`ToolExecutor._result_is_success`），在此重推一遍就是造第二份。
         """
-        self._pending_hints.append({
+        self._queueHint({
             "kind": "approval",
             "task_id": call_id,
             "tool_name": tool_name,
@@ -392,20 +407,49 @@ class ToolCoordinator:
             "error": error,
         })
 
-    def pop_pending_hints(self) -> List[Dict[str, Any]]:
-        """取走全部已完成的晚到提示（清空）——注入下一轮 LLM 上下文。"""
-        hints = self._pending_hints
-        self._pending_hints = []
-        return hints
+    def _queueHint(self, hint: Dict[str, Any]) -> bool:
+        """把一条晚到终态放进队列——**有会话归属**才放得进去。
 
-    def get_background_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """查询后台任务状态（运行中/已完成/未知）。"""
-        entry = self._background.get(task_id) or self._completed.get(task_id)
-        if entry is None:
-            return None
-        return {
-            "task_id": task_id,
-            "tool_name": entry["tool_name"],
-            "running": entry["task"] is not None,
-            "success": entry["success"],
-        }
+        无归属不广播：这条通路答的是「哪一次调用的下文」，塞进别的会话等于替它编
+        一个前提，还会把 A 会话的文件正文带进 B 会话的上下文。故如实点名拒绝并留
+        警告——既不是静默丢弃（那正是 G4-RC6 在修的病），也不是留给「下一个开轮的人」。
+        """
+        sessionId = str(hint.get("session_id") or "")
+        if not sessionId:
+            logger.warning(
+                "晚到工具终态无会话归属，不回投（工具 %s / call_id=%s）"
+                "——宁可点名丢，也不塞进别人的上下文",
+                hint.get("tool_name"), hint.get("task_id"),
+            )
+            return False
+        hint["session_id"] = sessionId
+        while len(self._pending_hints) >= self._MAX_PENDING_HINTS:
+            dropped = self._pending_hints.pop(0)
+            logger.warning(
+                "晚到终态队列已满 (%s)，淘汰最旧一条：会话 %s / 工具 %s / call_id=%s",
+                self._MAX_PENDING_HINTS,
+                dropped.get("session_id"), dropped.get("tool_name"),
+                dropped.get("task_id"),
+            )
+        self._pending_hints.append(hint)
+        return True
+
+    def pop_pending_hints(self, session_id: str) -> List[Dict[str, Any]]:
+        """取走**本会话**的晚到终态，其余留在队列里等自己的下一轮。
+
+        会话归属是必填项：无参形态就是「谁先开轮谁就读到别人的结果」那扇门，
+        故不提供默认值，也不提供「全取」的兼容口子（教义第 7 条：接通即退役旧口）。
+        """
+        sid = str(session_id or "")
+        if not sid:
+            logger.warning("排干晚到终态时缺少会话标识，本轮不注入任何终态")
+            return []
+        mine: List[Dict[str, Any]] = []
+        held: List[Dict[str, Any]] = []
+        for hint in self._pending_hints:
+            if str(hint.get("session_id") or "") == sid:
+                mine.append(hint)
+            else:
+                held.append(hint)
+        self._pending_hints = held
+        return mine

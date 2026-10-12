@@ -43,6 +43,7 @@ from neurova.evolution.skill_experience import (
     SkillExperienceStore,
     reset_skill_experience_store,
 )
+from tests.auth_headers import overrideIdentity
 
 
 class _ArchiveSkill:
@@ -144,9 +145,9 @@ class TestGovernanceSurface:
 
         app = FastAPI()
         app.include_router(gov_module.router, prefix="/api/v1/governance")
-        app.dependency_overrides[get_current_user] = lambda: {
+        overrideIdentity(app, {
             "user_id": "admin1", "role": "admin",
-        }
+        })
         monkeypatch.setattr(gov_module, "_skill_rollback_context", lambda agent_id: context)
         return TestClient(app)
 

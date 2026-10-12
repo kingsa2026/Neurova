@@ -149,7 +149,11 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
 - 跑测试用项目解释器：`.venv/Scripts/python.exe -m pytest`（Windows）或 `.venv/bin/python -m pytest`。
 - **预存失败不算回归，新增失败才算**：涉及共享文件时提交前做 A/B 自证
   （`git stash push <files> && pytest <套件> && git stash pop`），失败集合修复前后逐行比对。
-- 前端：`npm run test`（vitest）、`npm run lint`、`npx vue-tsc --noEmit`。
+- 前端实跑门两道：`npm run test`（vitest）与 `npx vue-tsc --noEmit`（CI 同款，见
+  `.cnb.yml` 的 `frontend` 段与 `.github/workflows/ci.yml`）。`NeurUI/package.json` 里的
+  `lint` 脚本指向 eslint，而仓内既无 `eslint.config.*`/`.eslintrc*`、eslint 也不在依赖清单
+  ⇒ **这道门今天跑不起来**，故不作为验收项；要恢复它须另批补 flat config + 依赖并接入 CI
+  （台账 §6-112 形态三）。规则以"实际存在的命令"为准，不以"规则里写着"当作已存在。
 
 ## 5. 提交纪律
 

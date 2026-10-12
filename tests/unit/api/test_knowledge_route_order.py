@@ -27,6 +27,7 @@ _KB_ROUTES = [
     ("/evaluation/baseline", "GET"),
     ("/foundation/usage", "GET"),
     ("/foundation/integrity", "GET"),
+    ("/foundation/expiry", "POST"),  # §6-103 起的整库到期收敛开关（管理员）
     ("/facts/{fact_id}/lineage", "GET"),
     ("/facts/{fact_id}/turtle", "GET"),
     ("/deleted", "GET"),

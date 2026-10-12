@@ -187,14 +187,9 @@ class AnthropicProvider(BaseProvider):
         if ChatAnthropic is None:
             raise ImportError("langchain_anthropic 未安装，无法创建模型实例")
 
-        # 构建配置
-        config = self.get_llm_config(model_id)
-        config.update(kwargs)
-
-        # 创建 ChatAnthropic 实例
-        model = ChatAnthropic(model=model_id, anthropic_api_key=self.api_key, **config)
-
-        return model
+        # ChatAnthropic 的 anthropic_api_key/anthropic_api_url 接受 api_key/base_url
+        # 作为别名，model 按字段名填充（populate_by_name=True）→ base 的中性装配够用
+        return ChatAnthropic(**self.get_llm_config(model_id, **kwargs))
 
     async def test_connection(self) -> ConnectionResult:
         """测试连接
@@ -327,23 +322,8 @@ class AnthropicProvider(BaseProvider):
 
         return capabilities
 
-    def get_llm_config(self, model_id: str) -> typing.Dict[str, typing.Any]:
-        """获取 LLM 配置
-
-        Args:
-            model_id: 模型ID
-
-        Returns:
-            配置字典
-        """
-        config = super().get_llm_config(model_id)
-        config.update(
-            {
-                "provider": "anthropic",
-                "model": model_id,
-            }
-        )
-        return config
+    # get_llm_config 不在此覆盖：base 的中性装配已满足 ChatAnthropic 的字段别名，
+    # 原覆盖多塞的 provider/model 属服务商元数据与重复键（见 base.get_llm_config）。
 
 
 # 便捷函数

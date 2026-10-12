@@ -134,6 +134,27 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # §6-127 裁定 ①/③：渠道发送者"这一轮是谁"由绑定表解析（agent 级作用域），未绑定
+        # 退到渠道专属命名空间 `ch:{渠道}:{发送者}`——不再落 default 共享桶（那正是 §6-123 的
+        # 成因）。`user_id` 在这里**只产生一次**，下游 `chat_pipeline._init_agent_state` 照旧读
+        # metadata；解析单点若多出一处，两条通道就会给同一个人算出两个身份。
+        from neurova.channels.user_identity import UserIdentityManager
+
+        turnIdentity = UserIdentityManager().resolveTurnIdentity(
+            agent_id, message.channel_type, str(meta["channel_user_id"]))
+        meta["user_id"] = turnIdentity["user_id"]
+        meta["identity_bound"] = turnIdentity["bound"]
+        # 记忆三层隔离键是 (neuser_id, user_id) 一对（`api/deps.py:118-125` 从 JWT 成对取）；
+        # 只带一个键名过去会复现不出控制台写入的那把键，等于同一个人两份记忆。
+        meta["memory_scope"] = {"neuser_id": turnIdentity["neuser_id"],
+                                "user_id": turnIdentity["user_id"]}
+        # 观察面（工单批 6）：每条入站都记下"这个 agent 的这条渠道里见过这个发送者"。
+        # 控制台的绑定面板只能靠这一面列人——人抄不到自己的 `ou_xxx`/`tg_xxx`，
+        # 而发码之前他得先知道"我在飞书里那个身份"是哪一格。写侧就在这一行，读侧是
+        # `GET /channel-configs/identity/observed`。
+        UserIdentityManager().observeSender(
+            agent_id, message.channel_type, str(meta["channel_user_id"]),
+            str(meta.get("channel_name") or "") or None)
         # 可信轮次来源（任务2 actionability 门控地基）：默认 human——人类/未标注一律
         # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
         sender_is_bot = _detect_sender_is_bot(message)
@@ -175,9 +196,35 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 落同一本账。台账/闸口/续跑身份的执行体只有 `core/agent_run_ledger` 一处实现。
         # 会话属主＝agent 属主（渠道会话本就落在他名下，`session_title` 上方已设），
         # 所以挂起回执里"去网页控制台点续跑"是真能做到的。
+        # 绑定码就在这条消息里消费掉：它不该进模型额度、不该落运行台账、也不该被当成
+        # 一轮对话写进记忆——它唯一的效果是改写绑定表（下一轮起身份就变了）。
+        from neurova.channels.identity_binding import consumeBindingCode, parseBindCommand
+
+        submittedCode = parseBindCommand(content)
+        if submittedCode:
+            outcome = consumeBindingCode(
+                agent_id, message.channel_type, str(meta["channel_user_id"]), submittedCode)
+            if outcome["ok"]:
+                return (
+                    "已绑定：这个渠道身份今后按你的平台账号隔离记忆与技能库。"
+                    f"（账号 {outcome['user_id']}）"
+                )
+            reasons = {
+                "no_pending_code": "这里没有待确认的绑定码——请先在网页控制台的「渠道身份绑定」里生成。",
+                "code_invalid_or_expired": "绑定码不对或已过期，请重新生成一张。",
+                "code_without_account": "这张码没有记下要绑定的账号，请重新生成。",
+            }
+            return reasons.get(outcome["reason"], "绑定失败，请重试。")
+
         ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
         try:
             set_request_user_id(owner)
+            # 会话落盘归 agent 属主（上一行），记忆/工具隔离归解析出的发送者身份（这一行）
+            # ——两者本就不同职，是 §6-127 裁定 ④登记过的**声明式分叉**，不是漂了。
+            memoryManager = getattr(agent, "memory_manager", None)
+            if memoryManager is not None and hasattr(memoryManager, "set_request_scope"):
+                memoryManager.set_request_scope(
+                    neuser_id=turnIdentity["neuser_id"], user_id=turnIdentity["user_id"])
             preflight = await ledger.acquire()
             if ledger.rejected:
                 # 排队期被 /chat/stop 取消，或排队超时：如实回一句，不静默吞掉

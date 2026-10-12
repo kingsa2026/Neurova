@@ -383,6 +383,49 @@ class RetrievalBenchmark:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM evaluation_runs").fetchone()[0])
 
+    def compareAgainstBaseline(self, report: Dict[str, Any]) -> Dict[str, Any]:
+        """把这次 run 与已冻结基线逐案对账——台架此前只有"冻"与"看"，没有"退步了没有"。
+
+        为什么硬判据落在**逐案**而不是平均值：`search.py` 在 jieba 不可用时会静默回退
+        n-gram（中文 bm25/fts 精度降级，本机与 CI 可能不同），平均 recall 因此会随环境漂；
+        而"某案例原本命中的条目现在一条都不剩"不是分词粒度问题，是管路断了。
+        所以：`newlyUnhit`/`missingCases` 非空即回归；聚合读数一并回传，由调用方按
+        容差自判，并且**只许往下比**——基线没冻时回 `unevidenced`，绝不回 `pass`
+        （与 `run()` 里"没有任何评测案例"那一支同口径：没测过的事不能报成没退化）。
+        """
+        baseline = self.baseline()
+        if baseline is None:
+            return {"verdict": "unevidenced", "missing_reason": "尚未冻结基线",
+                    "case_count": self.caseCount()}
+        if baseline.get("run_id") == report.get("run_id"):
+            return {"verdict": "self_reference",
+                    "missing_reason": "本次 run 就是基线本身，无从对账",
+                    "baseline_run_id": baseline.get("run_id")}
+
+        before = {f["case_id"]: f for f in self.findings(baseline["run_id"])}
+        after = {f["case_id"]: f for f in self.findings(report["run_id"])}
+        newlyUnhit = sorted(cid for cid, f in after.items()
+                            if cid in before and not before[cid]["unhit"] and f["unhit"])
+        missingCases = sorted(set(before) - set(after))
+        recovered = sorted(cid for cid, f in after.items()
+                           if cid in before and before[cid]["unhit"] and not f["unhit"])
+        deltas = {
+            key: round(float(report.get(key) or 0.0) - float(baseline.get(key) or 0.0), 6)
+            for key in ("recall_at_k", "mrr", "unhit_rate")
+        }
+        verdict = "regress" if (newlyUnhit or missingCases) else "pass"
+        return {
+            "verdict": verdict,
+            "baseline_run_id": baseline["run_id"],
+            "run_id": report.get("run_id"),
+            "deltas": deltas,
+            "baseline_readings": {k: baseline.get(k)
+                                  for k in ("recall_at_k", "mrr", "unhit_rate")},
+            "newly_unhit_cases": newlyUnhit,
+            "recovered_cases": recovered,
+            "missing_cases": missingCases,
+        }
+
     def findings(self, runId: str) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(

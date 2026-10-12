@@ -53,12 +53,34 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_ROOT = REPO_ROOT / "neurova"
 
 
+#: 剪枝目录名：第三方安装产物与构建/缓存目录。判据扫的是**本仓代码**，把这些算进
+#: 扫描面不仅烧时间，还让"绿灯"取决于本机装了什么（实测本仓根下 `.venv`/`node_modules`
+#: 贡献 32711 个 .py，全量读文本 49.68s，越过 pyproject 全局 `timeout = 30`，
+#: 导致 `tests/unit/cognitive_layers/` 整目录在开发机上不可跑）。
+#: 只列第三方/产物目录，**不含任何仓内源码目录**——排除第三方不等于砍窄仓内面。
+_PRUNED_DIR_NAMES = frozenset({
+    ".venv", "venv", "env", "node_modules", "site-packages", "dist-packages",
+    ".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", ".tox", "htmlcov", "coverage", "build", "dist",
+})
+
+
 def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
-    """`root` 子树下的源码文件清单（跳过字节码缓存目录，路径排序稳定）。"""
-    return sorted(
-        path for path in root.rglob("*" + suffix)
-        if "__pycache__" not in path.parts
-    )
+    """`root` 子树下的源码文件清单（原地剪掉第三方/产物目录，路径排序稳定）。
+
+    用 `os.walk` 而不是 `rglob` 后过滤：`rglob` 会**先进目录再筛**，实测剪枝前
+    光是遍历 11376 个目录就要 1.82s，而真正被扫的仓内文件只有约 3200 个。
+    """
+    import os
+
+    found: List[Path] = []
+    for dirPath, dirNames, fileNames in os.walk(root):
+        dirNames[:] = [d for d in dirNames if d not in _PRUNED_DIR_NAMES]
+        base = Path(dirPath)
+        for name in fileNames:
+            if name.endswith(suffix):
+                found.append(base / name)
+    return sorted(found)
 
 
 #: 文本预筛词表：`attributePrefilter` 的默认词。判据若只找 `X.attest(...)`，

@@ -34,6 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = PROJECT_ROOT / "neurova"
 OPENAI_LOOP = PRODUCTION / "agent" / "loops" / "openai_loop.py"
 BASE_LOOP = PRODUCTION / "agent" / "loops" / "base.py"
+ANTHROPIC_LOOP = PRODUCTION / "agent" / "loops" / "anthropic_loop.py"
 
 
 def _readText(path: Path) -> str:
@@ -370,34 +371,56 @@ class TestPathSymmetry:
 
 class TestGateAssemblyIsSingleSource:
     def test_gateRunnerIsConstructedOnce(self):
-        """`GateRunner([...])` 只允许在装配单点 `_buildGateRunner` 出现。"""
-        src = _readText(OPENAI_LOOP)
-        owners = [
-            line.strip()
-            for line in src.splitlines()
-            if "GateRunner([" in line
-        ]
-        assert len(owners) == 1, (
-            f"`GateRunner([` 在 openai_loop.py 出现多次：门控清单有两份定义，"
-            f"加门控必然只加到其中一份（修复教义第 6 条）：{owners}"
+        """`GateRunner([...])` 只允许在装配单点 `_buildGateRunner` 出现，且它在基类。
+
+        2026-10-08 A 批把装配从 `OpenAILoop` 上移到 `BaseAgentLoop`：门清单属于
+        "环怎么停"，不属于某一家供应商。留在 OpenAI 侧时，claude 走的 AnthropicLoop
+        连执行器都没有（基类 `gateRunnerForExit` 恒回 None），同一份配置键在两条环里
+        读出两套停止行为。判据因此改成双向咬合：基类恰好一处，两条环各自零处。
+        """
+        owners = {
+            path: [
+                line.strip()
+                for line in _readText(path).splitlines()
+                if "GateRunner([" in line
+            ]
+            for path in (BASE_LOOP, OPENAI_LOOP, ANTHROPIC_LOOP)
+        }
+        assert len(owners[BASE_LOOP]) == 1, (
+            f"`GateRunner([` 在 base.py 出现 {len(owners[BASE_LOOP])} 次：门控清单要么有两份"
+            "定义，要么已不在单点（修复教义第 6 条）"
         )
+        for loopPath in (OPENAI_LOOP, ANTHROPIC_LOOP):
+            assert owners[loopPath] == [], (
+                f"{loopPath.name} 自己拼了一份门清单：加门控必然只加到其中一份 → "
+                f"{owners[loopPath]}"
+            )
 
     def test_gateAssemblyIsSharedByInitAndLazyPath(self):
         """三条装配入口（__init__ / 懒初始化 / 每轮重建）必须同调一个装配函数。
 
         轮次态归属（Issue #268）要求门控执行器每轮一份，故入口不止 __init__、
         懒初始化两处；判据钉的是"装配实现只有一处"，而不是"调用点只有一处"。
+        实现点在基类，调用点跨两条环——两边都要数到。
         """
-        src = _readText(OPENAI_LOOP)
-        assert "_buildGateRunner" in src, "门控装配未收口到单一函数"
-        assert "def _buildGateRunner" in src, "装配单点函数未定义"
+        baseSrc = _readText(BASE_LOOP)
+        assert "def _buildGateRunner" in baseSrc, "门控装配单点未定义在基类"
+        assert "self._buildGateRunner()" in baseSrc, "基类 __init__/懒初始化未走装配单点"
         callers = [
-            line.strip()
-            for line in src.splitlines()
-            if re.search(r"self\._buildGateRunner\(\)", line)
+            str(loopPath.name)
+            for loopPath in (OPENAI_LOOP, ANTHROPIC_LOOP)
+            if "self._buildGateRunner()" in _readText(loopPath)
         ]
-        assert len(callers) >= 3, (
-            f"装配入口应含 __init__ / 懒初始化 / 每轮重建三处，实测 {callers}"
+        assert len(callers) >= 1, (
+            f"没有任何一条环经装配单点重建本轮执行器（每轮一份的口径丢了）：{callers}"
+        )
+        lazy = [
+            line.strip()
+            for line in baseSrc.splitlines()
+            if "self._gate_runner = self._buildGateRunner()" in line
+        ]
+        assert len(lazy) >= 2, (
+            f"__init__ 与懒初始化路径应同调装配单点，实测 {lazy}"
         )
 
 

@@ -624,14 +624,29 @@ class TestConvertedSitesStayStructural:
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
-    # `tests/e2e/test_phase4_integration.py` 的 `test_coordination_overhead`
-    # （`avgTime < 0.01`）已**销账**（原登记 2 处 → 现 1 处）：`78abaa2e` 把该用例
-    # 从"直接问裁决器 5 次"改成"过 5 个真回合入口"，量的是 `requestYieldGate` 的
-    # 平均开销；那正是**放行路径的闸开销**这条机时契约本身，墙钟不可替代
-    # （它的结构面由同文件 `attempts == 1` 与 `proceeded is True` 两侧钉住）。
-    # 同文件的 `test_cost_tracking_speed` 仍留墙钟（10 次纯算术 < 1.0s）。
-    # 键还在，只是计数随判据结构变化重新给结论——不是"沉默地少登记一条"：
-    # 任何一处新增的墙钟上界都会让本表的分布比对重新判红。
+    # `tests/e2e/test_phase4_integration.py` 原登记 2 处，现 1 处（销账的那半条不是
+    # "退役"，是**检出器看不到了**——这点必须写准，否则下一个人会以为主体已消失）。
+    #
+    # `78abaa2e` 重写该用例时改动了两件事，只有其一影响本表：
+    #   （一）调用面：`check_yield_rules` ×5 → `requestYieldGate` ×5（真回合入口）；
+    #   （二）读数形态：`elapsed = time.time() - start` → `avg_time = elapsed / 5`
+    #        改写为 `avgTime = (time.perf_counter() - start) / 5`。
+    #
+    # 检出器认"用时"靠名字传染：旧写法先有 `elapsed = time.time() - start`
+    # （`_isClockDifference` 认 `Sub` → 进 elapsed 集合），`avg_time = elapsed / 5`
+    # 读到 elapsed 而继承该身份，于是 `assert avg_time < 0.01` 被判为墙钟上界。
+    # 新写法把时钟**就地**折进一个 `Div`：`_isClockDifference` 只收 `Sub`，
+    # `(perf_counter() - start) / 5` 因此落进**时刻**桶（instant 不外传），
+    # `avgTime` 既不在 elapsed 集合、名字也不含 `elapsed|latency|duration` 词，
+    # 该断言对 `wallclockBounds` 整体不可见。
+    # 实测（本机，真跑判据）：旧形态报出 `[(333,'test_cost_tracking_speed'),
+    # (360,'test_coordination_overhead')]`；新形态只剩 `[(352, 'test_cost_tracking_speed')]`。
+    #
+    # 所以这里给的是**当前检出实况**（1），不是"上界已退场"：`assert avgTime < 0.01`
+    # 仍在文件里（`tests/e2e/test_phase4_integration.py:381`），只是判据的结构面已由同用例的
+    # `outcome.proceeded is True and outcome.attempts == 1` 就地钉住，墙钟只是冗余读数。
+    # 键还在，计数按实况给：任何一处新增的、**能被检出器认出的**墙钟上界都会让本表
+    # 的分布比对重新判红。
     "tests/e2e/test_phase4_integration.py": 1,
     # `tests/integration/test_multi_agent_coordination.py` 已**销账**（原登记 1 处）：
     # `f4776229` 把那条性能用例（`avg_latency_ms < 1.0`）的读数改成按

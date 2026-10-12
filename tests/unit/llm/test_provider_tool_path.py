@@ -387,9 +387,13 @@ if __name__ == "__main__":
 
 
 class TestPreConvertedToolsSurvive:
-    """`AnthropicLoop._convert_tools_to_anthropic` 已把 tools 转成 Anthropic
-    形态；客户端若只认 OpenAI 形态，`tool.get("function")` 取空 ⇒ **全部工具被
-    静默清空**。这是同一根因的第二个命中点（请求侧两条转码路径相撞）。"""
+    """进料已是目标协议形态时，客户端不得把它转空。
+
+    原 premise 是「`AnthropicLoop._convert_tools_to_anthropic` 已把 tools 转成 Anthropic
+    形态」——那份预转在 §6-76 修法 A 里退役了，环现在只交 OpenAI 形态。这条判据**留着**，
+    因为归一器对 Anthropic 形态的识别是它自身契约的一部分（认全部进料，才谈得上幂等）；
+    它守的是"下一次又有调用方带预转形态进来时不被静默清空"，不再替某个已退役的调用方背书。
+    """
 
     def test_anthropic_body_accepts_preconverted_tools(self):
         from neurova.llm.providers.anthropic_client import build_anthropic_body

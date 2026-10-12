@@ -28,6 +28,7 @@ from neurova.cognitive_layers.memory_layer.settings_config import (
     get_memory_settings,
     MemorySettingsConfig,
 )
+from tests.auth_headers import overrideIdentity
 
 # 真实挂载: /api/v1/memory-settings + router 内路径 /settings[/...]
 BASE = "/api/v1/memory-settings/settings"
@@ -64,7 +65,7 @@ def user_client(client):
     def _override():
         return MOCK_USER
 
-    client.app.dependency_overrides[get_current_user] = _override
+    overrideIdentity(client.app, _override)
     yield client
     client.app.dependency_overrides.clear()
 
@@ -74,7 +75,7 @@ def admin_client(client):
     def _override():
         return MOCK_ADMIN
 
-    client.app.dependency_overrides[get_current_user] = _override
+    overrideIdentity(client.app, _override)
     yield client
     client.app.dependency_overrides.clear()
 

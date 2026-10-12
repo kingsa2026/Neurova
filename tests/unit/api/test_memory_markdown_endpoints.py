@@ -4,6 +4,7 @@ GET  /api/v1/memory/markdown        → 可读 Markdown
 POST /api/v1/memory/markdown        → 解析编辑后的 Markdown，版本化 diff 写回文本层
 """
 
+from tests.auth_headers import bearerHeaders
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -49,7 +50,7 @@ def _make_client(manager) -> TestClient:
         "neuser_id": "ne-test",
         "user_id": "u-test",
     }
-    client = TestClient(app)
+    client = TestClient(app, headers=bearerHeaders("u-test"))
     return client
 
 

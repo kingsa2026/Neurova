@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.endpoints import governance as gov_module
 from neurova.security import llm_retry_settings as retry_mod
+from tests.auth_headers import overrideIdentity
 
 
 @pytest.fixture
@@ -25,9 +26,9 @@ def client(monkeypatch, tmp_path):
 
     app = FastAPI()
     app.include_router(gov_module.router, prefix="/api/v1/governance")
-    app.dependency_overrides[get_current_user] = lambda: {
+    overrideIdentity(app, {
         "user_id": "admin1", "role": "admin",
-    }
+    })
     return TestClient(app)
 
 
@@ -36,7 +37,17 @@ class TestLlmRetryEndpoints:
         resp = client.get("/api/v1/governance/llm-retry")
         assert resp.status_code == 200
         data = resp.json()["data"]
-        assert data == {"max_retries": 10, "interval": 10.0, "wait_cap": 120.0, "max_switches": 5}
+        # 改判（P3-11 拍板，2026-10-08）：间隔由 10s 改为 20s，并新增 `wait_budget`
+        # （累计等待预算 200s，跨同模型重试与跨模型切换共享）。本条钉的是
+        # 「治理面回读的默认值 == 单源 DEFAULTS」这一契约本身，取值随拍板走——
+        # 不是放宽判据：新增一格若漏进单源，这里就会少一个键而红。
+        assert data == {
+            "max_retries": 10,
+            "interval": 20.0,
+            "wait_cap": 120.0,
+            "max_switches": 5,
+            "wait_budget": 200.0,
+        }
 
     def test_put_then_get_roundtrip(self, client):
         resp = client.put(

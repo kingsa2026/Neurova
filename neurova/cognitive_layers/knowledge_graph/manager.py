@@ -259,6 +259,11 @@ class KnowledgeGraphManager:
         # 线程安全
         self._lock = threading.RLock()
 
+        # 最近一次落盘结果：未尝试过就是 attempted=False，不是"成功"——
+        # 把"没写过"与"写过且成了"混成一格，读的人就分不出这图到底落过盘没有。
+        self._lastSave: Dict[str, Any] = {"ok": True, "failed": [], "detail": "",
+                                         "attempted": False}
+
         # P1-1 实体消解合并台账：source_id -> {target_id, moved_edge_ids,
         # source_snapshot, reason, merged_at}。独立结构而非删除——undo 按
         # 名单原路读回，此前已删的边不在名单不会被误救。
@@ -314,30 +319,53 @@ class KnowledgeGraphManager:
             except Exception as e:
                 logger.warning("Failed to load edges: %s", e)
 
+    def _writeToDisk(self) -> Dict[str, Any]:
+        """把当前内存态整体落盘，逐文件如实回报成败。
+
+        失败**不再被吞成"没事"**（§6-106 实测：真库 rebuild 期间出现 3 次
+        `[WinError 5] 拒绝访问`，端点却照样回 `code:0 success`——内存与磁盘分叉
+        对调用方完全不可见）。这里既不抛也不谎报：抛会把 auto-save 的 8 个调用点
+        变成半截事务现场（内存已改、磁盘未落，改也改不回去），谎报就是假成功。
+        所以返回回执 + 记住最近一次结果，由**需要确证的编排方**显式要 `persist()`。
+        """
+        receipt: Dict[str, Any] = {"ok": True, "failed": [], "detail": "", "attempted": True}
+        from neurova.core.atomic_io import atomic_write_text
+
+        payloads = (
+            ("nodes", self._storage_dir / "nodes.json",
+             [node.to_dict() for node in self._nodes.values()]),
+            ("edges", self._storage_dir / "edges.json",
+             [edge.to_dict() for edge in self._edges.values()]),
+        )
+        for name, path, data in payloads:
+            try:
+                atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+            except Exception as e:  # noqa: BLE001 - 不吞成成功：记进回执再交调用方判
+                logger.error("Failed to save knowledge graph %s: %s", name, e)
+                receipt["ok"] = False
+                receipt["failed"].append(name)
+                receipt["detail"] = receipt["detail"] or str(e)
+        self._lastSave = receipt
+        return receipt
+
+    def persist(self) -> Dict[str, Any]:
+        """显式落盘并回执，不受 `_auto_save` 影响——编排方确证"磁盘 == 内存"的唯一入口。"""
+        with self._lock:
+            if not self._storage_dir:
+                self._lastSave = {"ok": True, "failed": [], "detail": "", "attempted": False}
+                return self._lastSave
+            return self._writeToDisk()
+
+    def lastSaveOutcome(self) -> Dict[str, Any]:
+        """最近一次落盘结果。auto-save 的调用点不读它，但故障必须留一处可查的落点。"""
+        return dict(self._lastSave)
+
     def _save(self):
-        """保存数据到存储"""
+        """保存数据到存储（auto-save 路径；成败见 `lastSaveOutcome()`，需确证者用 `persist()`）"""
         if not self._storage_dir or not self._auto_save:
             return
-
-        try:
-            from neurova.core.atomic_io import atomic_write_text
-
-            nodes_file = self._storage_dir / "nodes.json"
-            edges_file = self._storage_dir / "edges.json"
-
-            nodes_data = [node.to_dict() for node in self._nodes.values()]
-            edges_data = [edge.to_dict() for edge in self._edges.values()]
-
-            atomic_write_text(
-                nodes_file,
-                json.dumps(nodes_data, ensure_ascii=False, indent=2),
-            )
-            atomic_write_text(
-                edges_file,
-                json.dumps(edges_data, ensure_ascii=False, indent=2),
-            )
-        except Exception as e:
-            logger.error("Failed to save knowledge graph: %s", e)
+        with self._lock:
+            self._writeToDisk()
 
     def _save_merges(self):
         """合并台账持久化（与 nodes/edges 分文件， undo 依赖它）。"""
@@ -487,6 +515,19 @@ class KnowledgeGraphManager:
             node.updated_at = time.time()
             self._save()
             return node
+
+    def nodesForSourceKnowledge(self, knowledge_id: str) -> List[str]:
+        """按来源条目回看投影节点（`graph_bridge` 把 `source_knowledge_id` 写在 properties 上）。
+
+        投影不是权威，但它带得走正文：`graph_bridge.py` 建节点时把
+        `properties.description` 写成条目正文的前 200 字。所以条目被物理清除时，
+        这一面必须跟着清，否则"删掉的违规内容"在图谱视图里仍然一字不差地读得到。
+        """
+        with self._lock:
+            return [
+                node.node_id for node in self._nodes.values()
+                if str((node.properties or {}).get("source_knowledge_id", "")) == knowledge_id
+            ]
 
     def delete_node(self, node_id: str) -> bool:
         """

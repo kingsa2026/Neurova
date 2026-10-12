@@ -112,12 +112,19 @@
   且产物不经过证据闸；专用测试 `tests/skill/*` 同步移除
 
 ### 2.11 其他 STUB_CHAIN
-- `shared_core/plan_orchestrator.py`
+- ~~`shared_core/plan_orchestrator.py`~~ —— 已删除（2026-10-09 序 5 批 D，台账 §6-115）：四个
+  handler 只回名字字典、一次 LLM/工具调用都不发，生产与测试两侧 import 复算均为 0
 - `shared_core/infrastructure.py`
 - `shared_core/execution_engine.py`
-- `plugins/plugin_manifest.py`
-- `plugins/plugin_manager.py`
-- `plugins/plugin_lifecycle.py`
+- ~~`plugins/plugin_manifest.py`~~、~~`plugins/plugin_manager.py`~~、
+  ~~`plugins/plugin_lifecycle.py`~~、~~`plugins/base_plugin.py`~~、
+  ~~`plugins/plugin_api_registry.py`~~ —— 已整批删除（2026-10-10 用户裁定「不做插件体系」，
+  台账 §6-131，落地 `e95d3a76`）：包 2206 行、生产侧包外 import 复算为 0；
+  删掉的是"第三方插件装载"这项能力（唯一实装在 `plugin_manager.py:377-384` 的
+  `spec_from_file_location` + `exec_module`，另有 semver/权限/生命周期钩子），
+  不是残留——所以走裁定而非走清单。`/v1/plugins` 端点作为记账面保留，
+  其模块 docstring 已写明"只记账、不加载"，防再生判据
+  `tests/unit/plugins/test_pluginSystemRetired.py`
 - `performance.py`
 - `error_logger.py`
 - `shared_config.py`

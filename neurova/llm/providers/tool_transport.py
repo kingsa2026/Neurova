@@ -26,6 +26,11 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+#: Anthropic computer 工具的线协议版本串。**只许在这里出现**：Agent 环交的是中立
+#: 能力描述符（`{"type": "computer", ...}`），版本号属线协议细节，写在环里就是
+#: 协议知识的第二处落点（§6-76 修法 A 的收口项）。
+_ANTHROPIC_COMPUTER_TOOL_VERSION = "computer_20241022"
+
 __all__ = [
     "toAnthropicTools",
     "toAnthropicToolChoice",
@@ -45,8 +50,9 @@ def _asOpenAIFunction(tool: dict) -> typing.Optional[dict]:
     请求侧与响应侧（`protocol_thinking.toOpenAIToolCalls` → `ToolCallParser`）
     共用同一份判别表。此前两处各判一遍，判别表漂移时不会有任何东西报红。
 
-    调用方可能已按目标协议转好（`AnthropicLoop` 自带的
-    `_convert_tools_to_anthropic` 就是这么做的），也可能给的是 OpenAI 形态；
+    调用方可能给的是 OpenAI 形态（现行唯一路径），也可能已按目标协议转好——
+    `AnthropicLoop` 曾在请求装配点预转过一次，§6-76 修法 A 已退役那份；这里保留
+    对 Anthropic 形态的识别，是因为判别本身要认全部进料，而不是因为还有人预转。
     判别一次、两条路都归到同一中间形态，避免同一份 tools 被转两次而互相清空
     （这是 T-03 live 自证里实测到的形态）。
     """
@@ -83,16 +89,29 @@ def _asOpenAIFunction(tool: dict) -> typing.Optional[dict]:
 
 
 def toAnthropicTools(tools: typing.Optional[typing.List[dict]]) -> typing.List[dict]:
-    """tools（OpenAI / Anthropic / Google 任一形态）→ Anthropic `tools`。
+    """tools（OpenAI / Anthropic / Google / 中立能力描述符 任一形态）→ Anthropic `tools`。
 
     转换经 `tool_layers/openai_schema.py` 的既有归一器完成；入参形态先经
     `_asOpenAIFunction` 收口，故对已转换过的输入是幂等的。
+
+    `{"type": "computer", ...}` 是**协议中立的能力描述符**（Agent 环只交分辨率这类
+    能力参数）；`computer_20241022` 这个版本串是线协议细节，只在这里出现一次——
+    此前它写在 `AnthropicLoop` 里，等于同一份转换的第二处定义（§6-76 修法 A）。
     """
     from neurova.tool_layers.openai_schema import OpenAIFunctionSchema, ToolSchemaConverter
 
     converter = ToolSchemaConverter()
     out: typing.List[dict] = []
     for tool in tools or []:
+        if isinstance(tool, dict) and tool.get("type") == "computer":
+            out.append({
+                "type": _ANTHROPIC_COMPUTER_TOOL_VERSION,
+                "name": str(tool.get("name") or "computer"),
+                "display_width_px": int(tool.get("display_width_px") or 1024),
+                "display_height_px": int(tool.get("display_height_px") or 768),
+                "display_number": int(tool.get("display_number") or 1),
+            })
+            continue
         normalized = _asOpenAIFunction(tool)
         if normalized is None:
             continue

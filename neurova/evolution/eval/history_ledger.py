@@ -40,7 +40,14 @@ def sanitize_key(key: str) -> str:
 
 
 class EvolutionLedger:
-    """逐 artifact 的候选结局台账（多实例同目录读写安全：短小原子重写）。"""
+    """逐 artifact 的候选结局台账（多实例同目录读写安全：短小原子重写）。
+
+    两格一义，消费方按此理解，不许混用：
+      - `accepted` = **该假设被部署**（运行终态）。判定链任一终局拒绝都会由
+        `runner.rejectRun` 把胜者行翻成 False 并带上 `reject_reason`（§6-9）。
+      - `round_winner` = 它在**本轮 tune 集上是 argmax**。被拒的运行仍可能为 True——
+        「赢了本轮」与「被部署」是两件事，合成一格就会骗到提示词、探索指令与剪枝。
+    """
 
     def __init__(self, history_dir: Path | str):
         self._dir = Path(history_dir)
@@ -161,6 +168,8 @@ class EvolutionLedger:
                     why += f"（命中率 {hits}/{total}）"
                 lines.append(f"- [{r.get('ts', '')}] {r['hypothesis']}{why}")
         if accepted:
+            # 这里的"已生效"= 被部署（不是"本轮 tune 赢过基线"）——被终局拒过的运行
+            # 不得进这一段，否则变异器会被叫去"别回退"一个压根没上的改动。
             lines.append("已生效（勿做无谓回退）：")
             for r in accepted[-4:]:
                 lines.append(f"- [{r.get('ts', '')}] {r['hypothesis']}")

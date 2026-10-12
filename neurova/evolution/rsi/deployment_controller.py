@@ -7,6 +7,7 @@ RSI 风险较高，必须采用渐进式部署，从被动观察到完全自动�
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
+from .automation_prerequisites import automationPrerequisiteVerdict
 from .gate_verdict import GateVerdict
 from .metrics import RSIMetrics
 
@@ -78,6 +79,11 @@ class RSIDeploymentController:
 
         # 当前阶段必须大于等于最低阶段
         return self._current_phase >= min_phase
+
+    # 自动执行档的起点：晋升目标 ≥ 该阶段才要求 §8 四条自动化前置齐备。
+    # 0→1 不产生任何自动执行（阶段描述见 `_phase_descriptions`），把它一起卡住会让
+    # 观察期攒不到证据 —— 正是工单 006 立过裁决的那条循环依赖。
+    _AUTONOMY_START_PHASE = 2
 
     # 各阶段晋升所要求的"无回滚天数"门槛（phase 0 → 1 无要求）
     _REQUIRED_DAYS_WITHOUT_ROLLBACK = {0: 0, 1: 7, 2: 7, 3: 30, 4: 0}
@@ -169,7 +175,10 @@ class RSIDeploymentController:
         因此调用方 `if controller.evaluate_phase_transition(m):` 的旧写法无需改动，
         就不会再把"取不到数据"读成"判据通过"。
 
-        两类判据分开处理：
+        三类判据分开处理：
+        - **结构性前置**（§8 四条）：晋升目标进入自动执行档时先核自动化前置，未满足
+          即硬否决并点名是哪一条——它问的是"有没有实装"，不是"本轮有没有读数"；
+
         - **硬否决**（有读数且结论为否）：发散、度量失明、不可晋升的收敛读数、
           负 ROI、无回滚天数未达标、经验采纳后成功率低于门槛
           —— 只要读数存在就生效，不因"此阶段不要求"而豁免；
@@ -180,6 +189,15 @@ class RSIDeploymentController:
         """
         if self._current_phase >= 4:
             return GateVerdict.failed("已处于最高阶段 4，不再晋升")
+
+        # ── §8 四条自动化前置：进入自动执行档起，未满足即硬否决并点名 ──
+        # 前置问的是"有没有实装"，不是"本轮有没有读数"，所以不落成 unevidenced。
+        if (self._current_phase + 1) >= self._AUTONOMY_START_PHASE:
+            prerequisite = automationPrerequisiteVerdict()
+            if not prerequisite:
+                logger.warning("Automation prerequisites veto promotion: %s",
+                               prerequisite.reason)
+                return prerequisite
 
         unevidenced: List[str] = []
         required = self._REQUIRED_EVIDENCE.get(self._current_phase, frozenset())

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """aigc_studio 存储层（R3）：SQLite WAL + 属主隔离。
 
-实现自研），按复用裁剪为 9 表
+实现自研），按复用裁剪为 8 表
 服务商配置复用 Neurova provider 管理、任务队列复用 task_ledger、
 关联关系（角色/道具 ↔ 集/分镜）以 JSON 数组列承载而非 link 表（本地单库形态）。
 """
@@ -15,6 +15,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import get_data_root
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 def defaultDbPath() -> Path:
     """默认库落点：数据根下的 `aigc_studio.db`（原值按 PROJECT_ROOT 拼，是第二份根）。"""
@@ -32,7 +35,7 @@ CREATE TABLE IF NOT EXISTS projects(
 CREATE TABLE IF NOT EXISTS episodes(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
   number INTEGER DEFAULT 1, title TEXT DEFAULT '', content TEXT DEFAULT '',
-  synopsis TEXT DEFAULT '', status TEXT DEFAULT 'draft', duration REAL DEFAULT 0,
+  synopsis TEXT DEFAULT '', status TEXT DEFAULT 'draft',
   video_path TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
   created_at REAL, updated_at REAL
 );
@@ -60,21 +63,17 @@ CREATE TABLE IF NOT EXISTS storyboards(
   number INTEGER DEFAULT 1, title TEXT DEFAULT '', description TEXT DEFAULT '',
   image_prompt TEXT DEFAULT '', video_prompt TEXT DEFAULT '',
   narration TEXT DEFAULT '', camera TEXT DEFAULT '', movement TEXT DEFAULT '',
-  atmosphere TEXT DEFAULT '', bgm_prompt TEXT DEFAULT '', sound_effect TEXT DEFAULT '',
+  atmosphere TEXT DEFAULT '',
   duration REAL DEFAULT 3,
   characters_json TEXT DEFAULT '[]', props_json TEXT DEFAULT '[]',
   first_frame_path TEXT DEFAULT '', end_frame_path TEXT DEFAULT '',
   injected_prompt TEXT DEFAULT '',
   video_path TEXT DEFAULT '', video_status TEXT DEFAULT 'pending',
-  ledger_task_id TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
+  video_resolution TEXT DEFAULT '',
+  ledger_task_id TEXT DEFAULT '',
   audio_path TEXT DEFAULT '',
   status TEXT DEFAULT 'pending', error TEXT DEFAULT '',
   created_at REAL, updated_at REAL
-);
-CREATE TABLE IF NOT EXISTS assets(
-  id TEXT PRIMARY KEY, project_id TEXT DEFAULT '', kind TEXT NOT NULL,
-  name TEXT DEFAULT '', ref_path TEXT DEFAULT '', meta_json TEXT DEFAULT '{}',
-  created_at REAL
 );
 CREATE TABLE IF NOT EXISTS merges(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, episode_id TEXT NOT NULL,
@@ -86,6 +85,7 @@ CREATE TABLE IF NOT EXISTS merges(
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL,
   status TEXT DEFAULT 'running', detail_json TEXT DEFAULT '{}', error TEXT DEFAULT '',
+  cancel_requested INTEGER DEFAULT 0,
   created_at REAL, updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_ep_project ON episodes(project_id);
@@ -95,8 +95,25 @@ CREATE INDEX IF NOT EXISTS idx_owner ON projects(owner_user_id);
 
 _TABLES = {
     "projects", "episodes", "characters", "scenes", "props",
-    "storyboards", "assets", "merges", "runs",
+    "storyboards", "merges", "runs",
 }
+
+# ── runs 状态词汇表（唯一出处）─────────────────────────────────────────
+# 长任务的成败口径散在三个文件里写过四份字面量（`done`/`failed` 在端点 wrapper、
+# `done`/`done_with_fallback` 在服务层、`running` 在建表默认与收敛里），
+# 而前端要认出终态才知道何时停止轮询——同一契约的第二份定义就是这样长出来的
+# （E 批 §6-80 的第四格正是"生产有第三种终态、读侧只认两种"）。判据见
+# `tests/unit/api/test_studioRunStatusVocabulary.py`。
+RUN_RUNNING = "running"
+RUN_DONE = "done"
+RUN_DONE_WITH_FALLBACK = "done_with_fallback"
+RUN_FAILED = "failed"
+#: 用户叫停的终态。与 `failed` 是两件事：一个是"人让它停的"，一个是"它自己崩了"；
+#: 混写等于把取消记成故障——按失败率排查时会去查一条根本没坏的任务（§6-91）。
+RUN_CANCELLED = "cancelled"
+#: 终态集合：轮询侧只认这个，非终态才继续等
+RUN_TERMINAL_STATUSES = frozenset(
+    {RUN_DONE, RUN_DONE_WITH_FALLBACK, RUN_FAILED, RUN_CANCELLED})
 
 
 def _now() -> float:
@@ -121,13 +138,60 @@ class StudioStore:
         self._conn.commit()
         # A1/A5：既有库幂等补列（旧版表缺新列——PRAGMA 探测，
         # 不依赖异常吞 duplicate：重复执行安全）
-        for table, col in (("storyboards", "end_frame_path"), ("merges", "warning")):
+        # `storyboards.video_resolution`＝这条镜头实际用哪档规格提交的留痕（§6-78 G 条）。
+        # 写侧在 `services.generate_shot_videos` 提交成功时落值，读侧是单镜重试——
+        # 缺了它，「重试」只能落回服务层默认，等于背着用户换规格。
+        # 退役列（`storyboards.bgm_prompt`/`sound_effect`/`subtitle_path`、`episodes.duration`，
+        # §6-90）只从**定义面**摘除，旧库里的残留列不 DROP：那两列可能有人工编辑过的内容，
+        # 删列不可逆；新代码一侧不写、不读、白名单不收，判据里另有一格证旧库照跑。
+        for table, col, ddl in (
+                ("storyboards", "end_frame_path", "TEXT DEFAULT ''"),
+                ("storyboards", "video_resolution", "TEXT DEFAULT ''"),
+                ("merges", "warning", "TEXT DEFAULT ''"),
+                ("runs", "cancel_requested", "INTEGER DEFAULT 0")):
             cols = {r["name"] for r in self._conn.execute(
                 f"PRAGMA table_info({table})").fetchall()}
             if col not in cols:
-                self._conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
                 self._conn.commit()
+        self._convergeLeftoverRuns()
+
+    def _convergeLeftoverRuns(self) -> None:
+        """启动收敛：构造时仍为 running 的 runs 行只可能来自已死进程。
+
+        studio 长任务的执行体是 `asyncio.create_task` 挂在**进程内**（句柄登记在
+        `core/task_tracker`），进程没了就再没人写它的终态；`status` 建表默认 `'running'`，于是
+        每次重启都留下一批"永远在跑"的幽灵行——前端 `useStudioRun` 轮满 10 分钟返回
+        null，用户看到超时，库里那条仍是 running。`agent_runs` 有 `reconcile_at_startup`
+        的对偶，runs 表此前没有，本方法补上（两张表各管一类任务，不是第二份口径）。
+
+        收尾分两档：**叫过停的行收 `cancelled`**，没收过才收 `failed(process_died)`。
+        合成一档就把"人让它停的"记成"它自己死了"——而这条意图本来就存在库里，
+        重启之后正是靠它把终态说对的。
+        """
+        with self._lock:
+            leftover = self._conn.execute(
+                "SELECT id, cancel_requested FROM runs WHERE status=?",
+                (RUN_RUNNING,)).fetchall()
+            if not leftover:
+                return
+            self._conn.execute(
+                "UPDATE runs SET status=?, error=?, updated_at=?"
+                " WHERE status=? AND cancel_requested=1",
+                (RUN_CANCELLED, "user_cancelled（重启前已请求停止，执行体随进程一起没了）",
+                 _now(), RUN_RUNNING))
+            self._conn.execute(
+                "UPDATE runs SET status=?, error=?, updated_at=?"
+                " WHERE status=? AND cancel_requested=0",
+                (RUN_FAILED, "process_died（服务重启，后台任务不续跑）", _now(), RUN_RUNNING))
+            self._conn.commit()
+        logger.warning(
+            "Studio 启动收敛: %d 条 running 收尾（cancelled=%d failed=%d），id=%s",
+            len(leftover),
+            sum(1 for r in leftover if r["cancel_requested"]),
+            sum(1 for r in leftover if not r["cancel_requested"]),
+            [r["id"] for r in leftover][:20],
+        )
 
     # ── 内部 ────────────────────────────────────────────────────────────
 
@@ -264,6 +328,16 @@ class StudioStore:
         return self._fetch_all(
             "SELECT * FROM storyboards WHERE episode_id=? ORDER BY number", (eid,))
 
+    def listEpisodeIdsWithRunningVideos(self) -> List[str]:
+        """有"在跑的视频"的分集 id（去重）。
+
+        服务端收口驱动器用它自己找活干——此前这件事只有 HTTP 投影在做，于是
+        "有没有人来看"决定了"任务算不算跑完"。
+        """
+        return [r["episode_id"] for r in self._fetch_all(
+            "SELECT DISTINCT episode_id FROM storyboards"
+            " WHERE video_status='running' AND ledger_task_id <> ''")]
+
     def update_storyboard(self, sid: str, fields: Dict[str, Any]) -> None:
         row = dict(fields)
         if "characters" in row:
@@ -272,20 +346,7 @@ class StudioStore:
             row["props_json"] = json.dumps(row.pop("props") or [], ensure_ascii=False)
         self._update("storyboards", sid, row)
 
-    # ── assets 库 / merges / runs ───────────────────────────────────────
-
-    def add_asset(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        row = dict(data)
-        if "meta" in row:
-            row["meta_json"] = json.dumps(row.pop("meta") or {}, ensure_ascii=False)
-        return self._insert("assets", "ast", row)
-
-    def list_assets(self, pid: str = "") -> List[Dict[str, Any]]:
-        if pid:
-            return self._fetch_all(
-                "SELECT * FROM assets WHERE project_id=? OR project_id='' ORDER BY created_at DESC",
-                (pid,))
-        return self._fetch_all("SELECT * FROM assets ORDER BY created_at DESC")
+    # ── merges / runs ───────────────────────────────────────────────────
 
     def add_merge(self, data: Dict[str, Any]) -> Dict[str, Any]:
         row = dict(data)
@@ -308,6 +369,33 @@ class StudioStore:
     def list_runs(self, pid: str) -> List[Dict[str, Any]]:
         return self._fetch_all(
             "SELECT * FROM runs WHERE project_id=? ORDER BY created_at DESC", (pid,))
+
+    def get_run(self, rid: str) -> Optional[Dict[str, Any]]:
+        """按 id 取一行台账（wrapper 判「这一行是否已被服务自己结掉」的读面）。"""
+        return self._fetch_one("SELECT * FROM runs WHERE id=?", (rid,))
+
+    def requestCancel(self, rid: str) -> bool:
+        """落一条**持久**的停止意图；行已终态则拒绝（返回 False）。
+
+        为什么不直接把行写成 `cancelled`：执行体在进程内，从"点了停"到"真停下来"之间
+        还有正在跑的那一步。此刻就写终态等于在事情没发生前先说它发生了，而执行体随后
+        又会写一次——两次写谁赢只看时序。所以这里只落意图，终态由两个消费者之一写：
+        服务自己的分片检查点（`services.guardCancel`），或 wrapper 收到的
+        `CancelledError`（`Task.cancel()` 那条路）。与 `agent_runs` 的取消同一双轨形态
+        （持久意图 + 内存句柄），两张表各管一类任务，不是第二份口径。
+        """
+        placeholders = ",".join("?" * len(RUN_TERMINAL_STATUSES))
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"UPDATE runs SET cancel_requested=1, updated_at=? "
+                f"WHERE id=? AND status NOT IN ({placeholders})",
+                [_now(), rid, *sorted(RUN_TERMINAL_STATUSES)])
+            return cur.rowcount > 0
+
+    def cancelRequested(self, rid: str) -> bool:
+        """检查点读的那一枪：这一行被叫停了吗。"""
+        row = self._fetch_one("SELECT cancel_requested FROM runs WHERE id=?", (rid,))
+        return bool(row and row["cancel_requested"])
 
     def close(self) -> None:
         with self._lock:

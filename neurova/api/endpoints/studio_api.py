@@ -15,7 +15,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from neurova.aigc_studio import services
 from neurova.aigc_studio.llm import call_llm  # noqa: F401 — 测试可 monkeypatch services 层
-from neurova.aigc_studio.store import get_store
+from neurova.aigc_studio.store import (
+    get_store, RUN_CANCELLED, RUN_DONE, RUN_FAILED, RUN_TERMINAL_STATUSES,
+)
+from neurova.aigc_studio.video_reconcile import reconcileEpisode
 from neurova.api.deps import get_current_user
 from neurova.core.logger import get_logger
 
@@ -23,7 +26,9 @@ logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-_tasks: set = set()  # 后台任务强引用（与 neurflow _background_tasks 同法）
+# 后台任务的句柄登记在 `core/task_tracker`（按 run_id 找得回，取消/停机才有落点）。
+# 改前这里是模块级 `_tasks: set = set()`——无键强引用只能防 GC，
+# 谁也找不回任何一条任务（§6-78 H2-3 的第四格）。
 
 
 def _uid(user: Dict[str, Any]) -> str:
@@ -118,23 +123,97 @@ async def delete_project(pid: str, current_user: Dict[str, Any] = Depends(get_cu
 
 
 def _spawn_run(store, pid: str, kind: str, work) -> Dict[str, Any]:
+    """一次请求 = 一行台账 = 一个生命周期拥有者。
+
+    `work` 收本次的 run id：需要写中间读数的服务把终态写回**这一行**，而不是另起一行。
+    改前外层建一行、服务内部再建一行，前端只 poll 外层那条，而 `GET /projects/{pid}`
+    的 runs 投影里同 kind 并排两行——读侧无从判断哪条代表这次请求（E 批 §闭环审计）。
+
+    取消的两条路都收在这里，落到**同一个**终态 `cancelled`（§6-91）：
+    - 服务在分片检查点读到停止意图 → 抛 `services.RunCancelled`；
+    - 端点直接 `Task.cancel()`（整段 await、没有检查点）→ `CancelledError`，
+      写完终态**必须原样上抛**，吞掉它等于破坏 asyncio 的取消语义。
+    改前第二条落的是 `failed` + `run_cancelled`——那是"至少别永久 running"的中间形态，
+    把"人让它停的"记成"它自己崩了"，按失败率排查时会去查一条根本没坏的任务。
+    """
     run = store.add_run({"project_id": pid, "kind": kind})
 
     async def _wrapper():
         try:
-            result = await work()
+            result = await work(run["id"])
             import json as _json
-            store.update_run(run["id"], {"status": "done", "detail_json": _json.dumps(
-                result if isinstance(result, (dict, list)) else {"result": str(result)},
-                ensure_ascii=False, default=str)})
+            # 服务被交回这一行的归属时，它自己写终态与产出读数（含 `done_with_fallback`
+            # 这种「带病完成」与回退成因）。wrapper 只在它没结掉时补一份，**绝不覆盖**：
+            # 改前这里无条件写 `{"status": "done", detail: 返回值}`，于是服务标好的
+            # done_with_fallback 被压成 done、detail 里的成因被返回值抹掉，
+            # 一行台账只剩状态字（E 批活体抓出）。
+            row = store.get_run(run["id"]) or {}
+            # 「未结束」只按终态集合判——写一份  的窄比较，就是给
+            # 同一个口径留第二份定义（今天取值域里两者等价，等有人写入第三种
+            # 非终态值那天才会静默漏判）；集合与写侧同源（§6-78 G1 的 RUN_* 表）。
+            if row.get("status") not in RUN_TERMINAL_STATUSES:
+                store.update_run(run["id"], {"status": RUN_DONE, "detail_json": _json.dumps(
+                    result if isinstance(result, (dict, list)) else {"result": str(result)},
+                    ensure_ascii=False, default=str)})
+        except services.RunCancelled as e:
+            logger.info("studio 长任务在检查点收尾(%s): %s", kind, e)
+            store.update_run(run["id"], {"status": RUN_CANCELLED, "error": str(e)[:500]})
+        except asyncio.CancelledError:
+            # 取消不是"没发生"：`CancelledError` 继承 `BaseException`，下面那条
+            # `except Exception` 抓不到它——被停掉的 run 会永久停在 running，
+            # 前端轮满 10 分钟才报超时。写终态、点名成因，然后照常上抛。
+            logger.info("studio 长任务句柄被打断(%s)，run=%s", kind, run["id"])
+            store.update_run(run["id"], {
+                "status": RUN_CANCELLED,
+                "error": "task_cancelled（执行体在 await 点被打断，未完成的分片不再续跑，"
+                         "产物可能不完整）"})
+            raise
         except Exception as e:  # noqa: BLE001
             logger.exception("studio 后台任务失败(%s)", kind)
-            store.update_run(run["id"], {"status": "failed", "error": str(e)[:500]})
+            store.update_run(run["id"], {"status": RUN_FAILED, "error": str(e)[:500]})
 
     task = asyncio.create_task(_wrapper())
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    # 句柄进注册表（键=run_id）：取消端点与停机排空都要能按这条 run 找回它的 Task。
+    # 不自己再存一份 set——仓内 `task_tracker` 已是那份注册表（教义第 6 条）。
+    from neurova.core.task_tracker import get_task_tracker
+
+    get_task_tracker().register_async_task(run["id"], task, kind=f"studio:{kind}")
     return {"code": 0, "data": {"run_id": run["id"], "status": "started"}}
+
+
+@router.post("/runs/{rid}/cancel")
+async def cancel_run(rid: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """请求停止一条长任务：先落持久意图，再打断本进程的句柄。
+
+    顺序是刻意的：**先判归属、再判状态、最后才写**。反过来会让陌生账号先拿到 409
+    （等于确认这条 run 存在且未结束），归属面就漏了一格——与 console 侧续跑端点同一条
+    纪律。
+
+    读数如实分开：`cancel_requested` 是"意图已落库"，`tasks_cancelled` 是"本进程真
+    打断了几个句柄"。行挂着而句柄不在（进程重启过）时后者为 0——那不叫失败，剩下的
+    那一步由服务检查点或启动收敛收尾；但端点不许据此宣称"已停止"。
+    """
+    store = get_store()
+    run = store.get_run(rid)
+    if run is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    _owned_project(store, run["project_id"], current_user)
+    if run["status"] in RUN_TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {rid} 已是终态 {run['status']}，无可停止的长任务")
+
+    requested = store.requestCancel(rid)
+    from neurova.core.task_tracker import get_task_tracker
+
+    cancelledHandles = get_task_tracker().request_session_stop(rid)
+    row = store.get_run(rid) or {}
+    return {"code": 0, "data": {
+        "run_id": rid,
+        "cancel_requested": requested,
+        "tasks_cancelled": cancelledHandles,
+        "status": row.get("status"),
+    }}
 
 
 @router.post("/projects/{pid}/script")
@@ -148,7 +227,8 @@ async def split_script(pid: str, body: Dict[str, Any] = Body(...),
     model = body.get("model")
 
     return _spawn_run(store, pid, "script",
-                      lambda: services.split_script(store, pid, content, model=model))
+                      lambda runId: services.split_script(
+                          store, pid, content, model=model, run_id=runId))
 
 
 @router.post("/episodes/{eid}/extract")
@@ -156,7 +236,8 @@ async def extract_assets(eid: str, current_user: Dict[str, Any] = Depends(get_cu
     store = get_store()
     project, ep = _episode_with_project(store, eid, current_user)
     return _spawn_run(store, project["id"], "extract",
-                      lambda: services.extract_assets(store, project["id"], eid))
+                      lambda runId: services.extract_assets(
+                          store, project["id"], eid, run_id=runId))
 
 
 @router.post("/episodes/{eid}/storyboards")
@@ -166,7 +247,8 @@ async def break_storyboards(eid: str, body: Optional[Dict[str, Any]] = Body(defa
     project, _ep = _episode_with_project(store, eid, current_user)
     force = bool((body or {}).get("force"))
     return _spawn_run(store, project["id"], "storyboard",
-                      lambda: services.break_storyboards(store, project["id"], eid, force=force))
+                      lambda runId: services.break_storyboards(
+                          store, project["id"], eid, force=force, run_id=runId))
 
 
 @router.post("/episodes/{eid}/generate-images")
@@ -178,9 +260,10 @@ async def generate_images(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     model = str((body or {}).get("model") or "")
     provider_id = str((body or {}).get("provider_id") or "")
     return _spawn_run(store, project["id"], "images",
-                      lambda: services.generate_shot_images(store, project["id"], eid,
-                                                            provider=provider, model=model,
-                                                            provider_id=provider_id))
+                      lambda runId: services.generate_shot_images(store, project["id"], eid,
+                                                                   provider=provider, model=model,
+                                                                   provider_id=provider_id,
+                                                                   run_id=runId))
 
 
 @router.post("/episodes/{eid}/generate-videos")
@@ -190,14 +273,16 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     project, _ep = _episode_with_project(store, eid, current_user)
     b = body or {}
     return _spawn_run(store, project["id"], "videos",
-                      lambda: services.generate_shot_videos(
+                      lambda runId: services.generate_shot_videos(
                           store, project["id"], eid,
                           provider=str(b.get("provider") or "wan"),
                           model=str(b.get("model") or ""),
                           provider_id=str(b.get("provider_id") or ""),
-                          resolution=str(b.get("resolution") or "1080p"),
-                          duration=int(b.get("duration") or 5),
-                          owner_user_id=_uid(current_user)))
+                          # 缺省即不重述：兜底口径只在 services 一处（§6-78 G 条）
+                          resolution=str(b.get("resolution") or ""),
+                          duration=b.get("duration"),
+                          owner_user_id=_uid(current_user),
+                          run_id=runId))
 
 
 @router.post("/episodes/{eid}/narration")
@@ -207,7 +292,8 @@ async def narration(eid: str, body: Optional[Dict[str, Any]] = Body(default=None
     project, _ep = _episode_with_project(store, eid, current_user)
     voice = str((body or {}).get("voice") or "default")
     return _spawn_run(store, project["id"], "narration",
-                      lambda: services.synthesize_narration(store, project["id"], eid, voice=voice))
+                      lambda runId: services.synthesize_narration(store, project["id"], eid,
+                                                                   voice=voice, run_id=runId))
 
 
 @router.post("/projects/{pid}/assets/images")
@@ -219,46 +305,23 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
     provider = str(b.get("provider") or "ark")
     ids = [str(i) for i in (b.get("ids") or [])] or None
     return _spawn_run(store, pid, "asset_images",
-                      lambda: services.generate_asset_images(
+                      lambda runId: services.generate_asset_images(
                           store, pid, provider=provider, ids=ids,
                           model=str(b.get("model") or ""),
-                          provider_id=str(b.get("provider_id") or "")))
+                          provider_id=str(b.get("provider_id") or ""),
+                          run_id=runId))
 
 
 # ── episodes / storyboards 读与编辑 ───────────────────────────────────────
-
-
-def _backfill_video_status(store, eid: str) -> List[Dict[str, Any]]:
-    """从任务账本回填镜头视频状态（recovery 循环收口 ledger → 此处只读投影）。"""
-    from neurova.llm.generators.task_ledger import get_generation_task_ledger
-    from neurova.llm.generators.runtime import local_url_for
-
-    led = get_generation_task_ledger()
-    shots = store.list_storyboards(eid)
-    for sb in shots:
-        if sb.get("video_status") == "running" and sb.get("ledger_task_id"):
-            task = led.get(sb["ledger_task_id"])
-            if task is None:
-                continue
-            if task.status == "succeeded":
-                path = task.local_path or ""
-                store.update_storyboard(sb["id"], {
-                    "video_status": "done", "video_path": path,
-                    "status": "video_ready" if path else sb["status"], "error": ""})
-                sb["video_status"] = "done"
-                sb["video_path"] = path
-            elif task.status == "failed":
-                store.update_storyboard(sb["id"], {
-                    "video_status": "failed", "error": task.error[:200]})
-                sb["video_status"] = "failed"
-    return shots
 
 
 @router.get("/episodes/{eid}")
 async def get_episode(eid: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     store = get_store()
     _project, ep = _episode_with_project(store, eid, current_user)
-    shots = _backfill_video_status(store, eid)
+    # 映射本体在 `aigc_studio/video_reconcile.py`（服务端驱动器与这条投影共用一份）。
+    # 端点里再写一遍就是第二份实现：驱动器与页面迟早给出两种镜头状态（§6-78 A 条）。
+    shots = reconcileEpisode(store, eid)
     return {"code": 0, "data": {"episode": ep, "storyboards": shots}}
 
 
@@ -268,7 +331,7 @@ async def update_episode(eid: str, body: Dict[str, Any] = Body(...),
     store = get_store()
     _project, _ep = _episode_with_project(store, eid, current_user)
     fields = {k: v for k, v in body.items()
-              if k in ("title", "content", "synopsis", "status", "duration")}
+              if k in ("title", "content", "synopsis", "status")}
     store.update_episode(eid, fields)
     return {"code": 0, "data": {"episode": store.get_episode(eid)}}
 
@@ -281,8 +344,8 @@ async def add_storyboard_manual(eid: str, body: Dict[str, Any] = Body(...),
     store = get_store()
     _project, ep = _episode_with_project(store, eid, current_user)
     keep = ("number", "title", "description", "image_prompt", "video_prompt",
-            "narration", "camera", "movement", "atmosphere", "bgm_prompt",
-            "sound_effect", "duration", "characters", "props", "scene_id",
+            "narration", "camera", "movement", "atmosphere",
+            "duration", "characters", "props", "scene_id",
             "first_frame_path", "end_frame_path")
     row = {k: v for k, v in body.items() if k in keep}
     if not any(str(row.get(k) or "").strip() for k in ("description", "image_prompt", "video_prompt")):
@@ -303,8 +366,9 @@ async def update_storyboard(sid: str, body: Dict[str, Any] = Body(...),
     _episode_with_project(store, sb["episode_id"], current_user)
     fields = {k: v for k, v in body.items() if k in (
         "title", "description", "image_prompt", "video_prompt", "narration",
-        "camera", "movement", "atmosphere", "bgm_prompt", "sound_effect",
-        "duration", "characters", "props", "first_frame_path", "end_frame_path")}
+        "camera", "movement", "atmosphere",
+        "duration", "characters", "props", "scene_id",
+        "first_frame_path", "end_frame_path")}
     store.update_storyboard(sid, fields)
     return {"code": 0, "data": {"storyboard": store.get_storyboard(sid)}}
 
@@ -325,13 +389,14 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
     provider_id = str(b.get("provider_id") or "")
 
     if stage == "video":
-        work = lambda: services.generate_shot_videos(  # noqa: E731
+        work = lambda runId: services.generate_shot_videos(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid])
+            provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid],
+            run_id=runId)
     else:
-        work = lambda: services.generate_shot_images(  # noqa: E731
+        work = lambda runId: services.generate_shot_images(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            provider_id=provider_id, shot_ids=[sid])
+            provider_id=provider_id, shot_ids=[sid], run_id=runId)
     return _spawn_run(store, project["id"], f"retry_{stage}", work)
 
 
@@ -341,15 +406,18 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
 @router.post("/episodes/{eid}/merge")
 async def merge(eid: str, body: Optional[Dict[str, Any]] = Body(default=None),
                 current_user: Dict[str, Any] = Depends(get_current_user)):
-    """合并导出同步执行（本地 FFmpeg 拼接或连播清单，秒级）。
+    """制片导出：后台执行并落一行 kind=merge 台账，立即返回 run_id。
 
-    body.bgm_path（A3）：用户已上传的 BGM 音频本地路径，参与二级混音。"""
+    改前是同步 `await services.merge_episode(...)`：不建台账行、不登记句柄，所以
+    导出既停不掉也查不到——`runs` 里根本没有它，带病完成（降级连播清单、无字体不烧字幕、
+    混音失败）那套读数对导出完全不适用（§6-94）。产物明细仍以 `merges` 表为唯一事实源，
+    前端 poll 到终态后用 `GET /merges/{mid}` 取 items，不把 items 塞进 `detail_json`。"""
     store = get_store()
     project, _ep = _episode_with_project(store, eid, current_user)
-    res = await services.merge_episode(store, project["id"], eid,
-                                       bgm_path=str((body or {}).get("bgm_path") or ""))
-    code = 0 if res.get("ok") else -1
-    return {"code": code, "data": res}
+    bgm_path = str((body or {}).get("bgm_path") or "")
+    return _spawn_run(store, project["id"], "merge",
+                      lambda runId: services.merge_episode(
+                          store, project["id"], eid, bgm_path=bgm_path, run_id=runId))
 
 
 @router.get("/merges/{mid}")

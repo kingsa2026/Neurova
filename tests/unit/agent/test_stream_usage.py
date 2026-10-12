@@ -77,6 +77,32 @@ class TestStreamUsageAggregation:
         done = next(e for e in events if e.get("type") == "done")
         assert done.get("usage") is None
 
+    @pytest.mark.asyncio
+    async def test_done_event_reports_cumulative_not_last_chunk(self):
+        """多次回传 usage 的网关下，done 交的是**本轮累计**，不是末片读数。
+
+        §6-77 的同根命中点：done 事件此前用"最后一个带 usage 的 chunk"自己拼的那份，
+        而门控与 TokenBudgetGate 读 `agent._round_usage`（累计）。同一轮两个数，
+        前端显示的用量与真正掐闸的用量就不是同一个东西。
+        """
+        loop, agent = _make_loop([
+            _llm_response(
+                content="a",
+                usage=SimpleNamespace(prompt_tokens=60, completion_tokens=20, total_tokens=80),
+            ),
+            _llm_response(
+                content="b",
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=30, total_tokens=130),
+                finish_reason="stop",
+            ),
+        ])
+        events = [e async for e in loop._predict_stream_once({"messages": [{"role": "user", "content": "hi"}]})]
+        done = events[-1]
+        assert done["usage"] == {
+            "prompt_tokens": 160, "completion_tokens": 50, "total_tokens": 210,
+        }, f"done 与预算闸必须同源：{done['usage']}"
+        assert done["usage"] == agent._round_usage
+
 
 class TestPipelineRecords:
     @pytest.mark.asyncio

@@ -1,47 +1,42 @@
 """
-ConfigManager 单元测试（2026-09-02 修复 A 类导入漂移）。
+ConfigManager 通用 KV 面（unittest 形态那一份）
 
-本文件测试目标原为 KV 简单版 ConfigManager（neurova/core/config_manager.py，
-支持单例+JSON 文件持久化），但导入被漂移到 neurova.core.config（统一分层
-配置管理器，非单例、set 需显式 save 才落盘）——7/9 用例通过纯属两个 API
-恰好同名。修复：指向正确被测对象 + 按真实持久化契约（save/load 显式调用）
-重写 persistence 用例。
+沿革两改：
+- 2026-09-02 修复 A 类导入漂移：本文件原本测 KV 简单版（`core/config_manager.py`），导入却
+  被漂移到分层版，7/9 通过纯属两个 API 恰好同名 —— 当时改指简单版。
+- 2026-10-10 批 E：两份 KV 实现合并到分层版（`neurova.core.config.ConfigManager`），简单版
+  退役，本文件随之改指。合并前逐格比过：本文件的 A 类语义（读写/默认值/删除/全等 get_all）
+  与 B 类语义（显式 save → 新实例 load 往返）在分层版上等价成立，故原样保留断言。
+
+先前 setup 里那句 `patch.object(Path, 'home', ...)` 已删：被测类的构造从不读 `Path.home()`
+（`config.py:67` 只用显式 `config_path`），空设一个补丁只会让后来人以为有默认落点这回事。
 """
 
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from neurova.core.config_manager import ConfigManager
+from neurova.core.config import ConfigManager
 
 
 class TestConfigManager(unittest.TestCase):
-    """ConfigManager（KV 简单版）测试类"""
+    """ConfigManager 通用 KV 面"""
 
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
-        self._temp_path = Path(self._temp_dir.name)
-        self._home_patcher = patch.object(Path, 'home', return_value=self._temp_path)
-        self._home_patcher.start()
-        # KV 版无 _instance 单例机制（__init__ 每次新建）；持久化用例改走
-        # save/load 显式文件往返，不再依赖单例重置
-        self._config_file = self._temp_path / "config.json"
+        self._config_file = Path(self._temp_dir.name) / "config.json"
 
     def tearDown(self) -> None:
-        self._home_patcher.stop()
         self._temp_dir.cleanup()
 
     def test_get_set_config(self) -> None:
         manager = ConfigManager()
         manager.set("test_key", "test_value")
-        value = manager.get("test_key")
-        self.assertEqual(value, "test_value")
+        self.assertEqual(manager.get("test_key"), "test_value")
 
     def test_get_default_value(self) -> None:
         manager = ConfigManager()
-        value = manager.get("non_existent_key", "default_value")
-        self.assertEqual(value, "default_value")
+        self.assertEqual(manager.get("non_existent_key", "default_value"), "default_value")
 
     def test_delete_config(self) -> None:
         manager = ConfigManager()
@@ -54,8 +49,7 @@ class TestConfigManager(unittest.TestCase):
         manager = ConfigManager()
         manager.set("key1", "value1")
         manager.set("key2", "value2")
-        all_config = manager.get_all()
-        self.assertEqual(all_config, {"key1": "value1", "key2": "value2"})
+        self.assertEqual(manager.get_all(), {"key1": "value1", "key2": "value2"})
 
     def test_has_config(self) -> None:
         manager = ConfigManager()

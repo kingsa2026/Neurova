@@ -289,6 +289,14 @@ async def chat(
         call_metadata = body.metadata or {}
         # 隔离注入：服务端身份覆盖客户端自报（kb_builder 等技能据此归属知识条目）
         call_metadata["user_id"] = user_id
+        # 请求级属主（§6-121 (b) 的乙案）：**在请求边界写一次**，不再由管线中途补写。
+        # 原先 `ChatPipeline._execute_steps` 每次回合都按 metadata 里的 user_id 再写一遍这条
+        # 通道，于是渠道路径里"会话属主"（router 写的 owner）在回合内被换成"发送者"——
+        # `mem_core.save_to_session` 只读这条通道，渠道会话因此不再落进属主的控制台。
+        # 两边取的是同一个 `user_id`（上面那行），同源、单点、无第二写方。
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
 
@@ -626,125 +634,83 @@ async def chat_stream(
 async def get_chat_history(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
-    agent_id: str = Query(default="default"),
-    session_id: Optional[str] = Query(default=None),
+    session_id: str = Query(..., description="会话 ID（必填：缺键只能回空表，那是把'没给键'伪装成'没有历史'）"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """获取对话历史"""
+    """读取会话历史。
+
+    原实现调的是 agent 上那两个**从未被定义过**的会话历史方法（那两个名字全仓只
+    出现在原来的四行里，来源是 `7835c367` 的 pyc 骨架恢复），`hasattr` 恒 False，
+    于是对任何人都恒回 `{"history": []}`：门挂着、数据恒空的空转端点。
+    现接上仓内**唯一**那份有数据、有归属校验的实现（与
+    `console.py` 的 `GET /chat/history` 同一条链，教义第 7 条选定那份）。
+
+    归属键换成**会话属主**而不是"agent 可达"：调用者传的 `agent_id` 本来就不参与
+    取数，拿它当门只会把"自己的会话读不到"（非 default agent 的属主先撞 403）
+    和"别人的会话能不能读"（agent 可达就放行，`session_id` 从不比对）同时留下。
+    """
     request_id = _get_request_id(request)
+    from neurova.api.endpoints.console import _find_session_target, _get_user_id
+    from neurova.session_repository import get_session_repository
 
-    # 权限检查
-    user_id = current_user.get("user_id", "")
-    role = current_user.get("role", "user")
-    if not _user_can_access_agent(user_id, agent_id, role):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "code": 4003,
-                "message": "Permission denied: you don't have access to this Agent",
-                "request_id": request_id,
-            },
-        )
+    user_id = _get_user_id(request, current_user)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id)
+    messages = repo.get_history(
+        agent_id=str(target.get("agent_id", "")), session_id=session_id
+    )
+    if limit:
+        messages = messages[-limit:]
 
-    agent = _get_agent(agent_id)
-    if not agent:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "code": 3000,
-                "message": f"Agent '{agent_id}' not found",
-                "request_id": request_id,
-            },
-        )
-
-    try:
-        # 获取对话历史
-        history = []
-        if hasattr(agent, "get_conversation_history"):
-            history = agent.get_conversation_history(
-                session_id=session_id,
-                limit=limit,
-            )
-
-        return {
-            "code": 0,
-            "message": "success",
-            "data": {
-                "history": history,
-                "agent_id": agent_id,
-                "session_id": session_id,
-            },
-            "request_id": request_id,
-        }
-    except Exception as e:
-        logger.error(f"Get history error: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "code": 5000,
-                "message": f"Failed to get history: {str(e)}",
-                "request_id": request_id,
-            },
-        )
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "history": messages,
+            "agent_id": str(target.get("agent_id", "")),
+            "session_id": session_id,
+        },
+        "request_id": request_id,
+    }
 
 
 @router.delete("/history")
 async def clear_chat_history(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
-    agent_id: str = Query(default="default"),
-    session_id: Optional[str] = Query(default=None),
+    session_id: str = Query(..., description="会话 ID"),
 ):
-    """清空对话历史"""
+    """清空对话历史——**显式 501**，不再谎报成功。
+
+    原实现用 `hasattr` 探一个从未定义的 agent 方法，探测恒 False，于是每次都回
+    `{"code": 0, "message": "History cleared"}` 而什么都没清：§6-8「依赖缺失却报
+    成功」那一族，处置形态沿用仓内先例（`212d855c` 把 `/v1/health/recover` 的假成功
+    收成显式 501）。
+
+    为什么不顺手接一个"真清"：`session_repository` 只有 `delete_session`（整条会话
+    没了）与 `delete_round`（单轮），**没有**"清空一个会话的持久消息"这一格；只清
+    agent 内存历史又会被 `_restore_session_history` 从文件复活——
+    `console.py:_sync_agent_history_from_session` 的存在就是那条 bug 的实证。补这个
+    primitive 是新增一条不可逆写路径且当前零调用方，属产品裁决（已登记台账）。
+
+    身份仍在能力判定**之前**：陌生人拿到 403 而不是 501，否则 501 会替他确认
+    "这条会话存在"（与 `console.py` 的 `/chat/resume` 同一纪律）。
+    """
     request_id = _get_request_id(request)
+    from neurova.api.endpoints.console import _find_session_target, _get_user_id
+    from neurova.session_repository import get_session_repository
 
-    # 权限检查
-    user_id = current_user.get("user_id", "")
-    role = current_user.get("role", "user")
-    if not _user_can_access_agent(user_id, agent_id, role):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "code": 4003,
-                "message": "Permission denied: you don't have access to this Agent",
-                "request_id": request_id,
-            },
-        )
+    user_id = _get_user_id(request, current_user)
+    _find_session_target(get_session_repository(), session_id, user_id)
 
-    agent = _get_agent(agent_id)
-    if not agent:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "code": 3000,
-                "message": f"Agent '{agent_id}' not found",
-                "request_id": request_id,
-            },
-        )
-
-    try:
-        if hasattr(agent, "clear_conversation_history"):
-            agent.clear_conversation_history(session_id=session_id)
-
-        return {
-            "code": 0,
-            "message": "History cleared",
-            "data": {
-                "agent_id": agent_id,
-                "session_id": session_id,
-            },
-            "request_id": request_id,
-        }
-    except Exception as e:
-        logger.error(f"Clear history error: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "code": 5000,
-                "message": f"Failed to clear history: {str(e)}",
-                "request_id": request_id,
-            },
-        )
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "清空会话持久消息在本仓没有落点（session_repository 只有 delete_session / "
+            "delete_round）；整条会话删除请走 DELETE /api/v1/console/chat/sessions/"
+            "{session_id}"
+        ),
+    )
 
 
 @router.post("/attachment")

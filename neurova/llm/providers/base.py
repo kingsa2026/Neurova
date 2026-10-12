@@ -187,22 +187,28 @@ class BaseProvider(ABC):
             capabilities=[],
         )
 
-    def get_llm_config(self, model_id: str) -> typing.Dict[str, typing.Any]:
-        """获取 LLM 配置
+    def get_llm_config(self, model_id: str, **kwargs) -> typing.Dict[str, typing.Any]:
+        """聊天模型构造参数的**唯一装配点**（服务商无关形态）。
 
-        Args:
-            model_id: 模型ID
+        返回 `model/api_key/base_url` 三件，各 provider 的覆盖负责把它们改写成
+        自家 SDK 的字段名（ChatAnthropic 认 `anthropic_api_key`，
+        ChatGoogleGenerativeAI 认 `google_api_key`，ChatOllama 不认 `api_key`）。
 
-        Returns:
-            配置字典
+        `create_chat_model` 因此只做 `Cls(**config)`，**不得**再显式重复传
+        model/api_key/base_url —— 2026-10-08 模型管理「测试模型连接」的第二环
+        正是这么来的：字典里已含同名键，显式实参再传一次，Python 在进 pydantic
+        之前就抛 `TypeError: got multiple values for keyword argument`。
+
+        原先这里还返回 provider_id/provider_type/model_id/provider 四件元数据：
+        它们不是聊天模型的构造字段，只会被当成未知字段喂给 SDK，故随本次收口移除。
         """
-        return {
-            "provider_id": self.provider_id,
-            "provider_type": self.provider_type.value,
-            "model_id": model_id,
+        config: typing.Dict[str, typing.Any] = {
+            "model": model_id,
             "api_key": self.api_key,
             "base_url": self.base_url,
         }
+        config.update(kwargs)
+        return config
 
     async def get_all_models(self) -> typing.List[ModelInfo]:
         """获取所有模型（包括额外模型）

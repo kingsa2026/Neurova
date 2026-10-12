@@ -26,6 +26,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_01
 from neurova.api.endpoints import marketplace, notifications as notif_module
 from neurova.api.deps import get_current_user
 from neurova.skills.market_store import reset_market_store
+from tests.auth_headers import overrideIdentity
 
 USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
 ADMIN = {"user_id": "a9", "username": "admin", "role": "admin", "neuser_id": "a9"}
@@ -61,7 +62,7 @@ def app(tmp_path, monkeypatch):
 
 def _auth(c, role):
     user = ADMIN if role == "admin" else USER
-    c.app.dependency_overrides[get_current_user] = lambda: user
+    overrideIdentity(c.app, user)
     return c
 
 

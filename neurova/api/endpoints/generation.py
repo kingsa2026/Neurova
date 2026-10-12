@@ -295,7 +295,9 @@ async def generate_image(
 
     # B2-a/c：真实协议实现（OPENAI_COMPAT/ARK/DASHSCOPE 实测矩阵）
     from neurova.llm.generators.protocols import generate_image
-    from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
+    from neurova.llm.generators.task_ledger import (
+        TASK_FAILED, TASK_SUCCEEDED, TaskRecord, get_generation_task_ledger,
+    )
 
     # 批次1 根因修复：原实现把前端默认值 "auto" 当真实模型名透传并覆盖服务商
     # 默认模型（`model or default` 中 "auto" 为真值），图像/视频端点从未走过
@@ -343,8 +345,8 @@ async def generate_image(
         get_aigc_usage().record(
             kind="image", user_id=uid, provider=str(provider_id or ""),
             model=creds.model or "", protocol=protocol.value,
-            status="success" if status == "succeeded" else "failed",
-            items=body.num_images if status == "succeeded" else 0,
+            status="success" if status == TASK_SUCCEEDED else "failed",
+            items=body.num_images if status == TASK_SUCCEEDED else 0,
             duration_ms=(time.monotonic() - _t0) * 1000)
 
     _t0 = time.monotonic()
@@ -356,11 +358,11 @@ async def generate_image(
             seed=body.seed, strength=body.strength,
         )
     except FileNotFoundError as e:
-        _ledger_add("failed", error=str(e))
+        _ledger_add(TASK_FAILED, error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001 — 诚实 5xx，不伪造成功
         logger.warning("图像生成失败: %s", e)
-        _ledger_add("failed", error=str(e))
+        _ledger_add(TASK_FAILED, error=str(e))
         raise HTTPException(status_code=502, detail=f"图像生成失败: {str(e)[:300]}")
 
     ignored_csv = ",".join(result.get("ignored_params") or [])
@@ -375,9 +377,9 @@ async def generate_image(
         except Exception as e:  # noqa: BLE001 — 单图下载失败不影响其余
             images.append({"url": item if item.startswith("http") else "", "error": str(e)[:200]})
     if not images:
-        _ledger_add("failed", error="图像生成未返回产物", ignored=ignored_csv)
+        _ledger_add(TASK_FAILED, error="图像生成未返回产物", ignored=ignored_csv)
         raise HTTPException(status_code=502, detail="图像生成未返回产物")
-    _ledger_add("succeeded", local_path=str(images[0].get("path") or ""),
+    _ledger_add(TASK_SUCCEEDED, local_path=str(images[0].get("path") or ""),
                 ignored=ignored_csv)
     data: Dict[str, Any] = {"images": images, "task_id": task_id}
     if ignored_csv:
@@ -438,7 +440,9 @@ async def generate_audio(
     """
     request_id = _get_request_id(request)
 
-    from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
+    from neurova.llm.generators.task_ledger import (
+        TASK_SUCCEEDED, TaskRecord, get_generation_task_ledger,
+    )
 
     _t0 = time.monotonic()
 
@@ -450,7 +454,7 @@ async def generate_audio(
         path.write_bytes(audio_bytes)
         get_generation_task_ledger().add(TaskRecord(
             kind="audio",
-            status="succeeded",
+            status=TASK_SUCCEEDED,
             protocol="tts",
             model=body.model or "",
             prompt=body.text[:500],
@@ -549,7 +553,9 @@ async def generate_video(
     import asyncio as _asyncio
 
     from neurova.llm.generators.protocols import submit_video
-    from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
+    from neurova.llm.generators.task_ledger import (
+        TASK_SUBMITTED, TaskRecord, get_generation_task_ledger,
+    )
 
     # 批次1：model=auto/缺省 → 按视频生成能力路由（与 /image 同口径）
     requested_model = (body.model or "").strip()
@@ -595,7 +601,7 @@ async def generate_video(
         protocol=protocol.value,
         model=creds.model,
         base_url=creds.base_url,
-        status="submitted",
+        status=TASK_SUBMITTED,
         remote_task_id=remote_task_id,
         poll_url=str(submitted.get("poll_url") or ""),
         prompt=body.prompt[:500],
@@ -605,7 +611,8 @@ async def generate_video(
     return {
         "code": 0,
         "message": "success",
-        "data": {"task_id": record.task_id, "status": "submitted", "protocol": protocol.value,
+        "data": {"task_id": record.task_id, "status": record.status,
+                 "protocol": protocol.value,
                  **({"ignored_params": ignored_csv} if ignored_csv else {})},
     }
 
@@ -645,7 +652,9 @@ async def get_generation_video_status(
     与后台重启恢复循环同一实现——口径单源）。"""
     _ = request
     from neurova.llm.generators.recovery import settle_video_record
-    from neurova.llm.generators.task_ledger import get_generation_task_ledger
+    from neurova.llm.generators.task_ledger import (
+        TASK_TERMINAL_STATUSES, get_generation_task_ledger,
+    )
 
     ledger = get_generation_task_ledger()
     record = ledger.get(task_id)
@@ -659,7 +668,7 @@ async def get_generation_video_status(
         raise HTTPException(status_code=403, detail="无权访问该任务")
     if not owner and current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="无权访问该任务")
-    if record.status in ("succeeded", "failed"):
+    if record.status in TASK_TERMINAL_STATUSES:
         return {
             "code": 0,
             "message": "success",
@@ -702,7 +711,9 @@ async def list_generation_tasks(
     """生成任务列表（批次2：历史面板数据源——kind 过滤 + 产物可访问 url）。
     仅返回本人任务；无主存量任务仅管理员可见。"""
     _ = request
-    from neurova.llm.generators.task_ledger import get_generation_task_ledger
+    from neurova.llm.generators.task_ledger import (
+        TASK_TERMINAL_STATUSES, get_generation_task_ledger,
+    )
 
     uid = str(current_user.get("user_id") or "")
     is_admin = current_user.get("role") == "admin"
@@ -720,7 +731,7 @@ async def list_generation_tasks(
             # C3：保留清理删除文件后账本行仍在——file_missing 显式标注并清空
             # url（历史面板显示「已过期」，不给必 404 的链接装作可用）
             "file_missing": bool(t.local_path)
-                            and t.status in ("done", "failed", "succeeded")
+                            and t.status in TASK_TERMINAL_STATUSES
                             and not Path(t.local_path).is_file(),
             "url": (_local_url(t.local_path)
                     if t.local_path and Path(t.local_path).is_file()

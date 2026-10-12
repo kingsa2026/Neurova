@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 __all__ = [
@@ -33,8 +34,62 @@ __all__ = [
     "build_seed_from_successful_run",
     "collect_warm_seeds_from_patterns",
     "make_agent_ab_executor",
+    "TextArmAgentExecutor",
     "run_cold_warm_ab",
 ]
+
+# 与 `skill_injection._MENTION_RE` 同字符集：名字组不出 $mention，候选正文就进不了
+# 本轮——那会让两臂拿到同一份仓内正文、比出一个看起来正常的假 0 差，所以宁可当场拒。
+_MENTION_SAFE_RE = re.compile(r"^[A-Za-z0-9_\-一-鿿]+$")
+
+
+class TextArmAgentExecutor:
+    """双臂试评的「两份候选正文」真 agent 执行器（§8 前置 2 的落地面）。
+
+    与 `make_agent_ab_executor` 是**同一条 primitive 的两种臂语义**，不是第二套打分：
+    那边比"技能开 / 关"（开关面），这里比"同一技能的两份正文"（正文面）。共用同一批
+    轮级开关与同一个注入路径，因此候选正文走的仍是生产那条管线，而不是另搭的评测旁路。
+
+    能力声明（`agent_ref` + `declaresRealAgentTrajectory`）是给
+    `service.isRealAgentTrajectoryExecutor` 读的——§8 前置 2 的旗标由它推导，
+    不写常量旗标。
+    """
+
+    def __init__(self, agent: Any, *, skill_name: str,
+                 sender: str = "ab-eval", session_id: Optional[str] = None):
+        if agent is None:
+            raise ValueError("真轨迹执行器必须拿到一个 agent 实例（None 即无回合可跑）")
+        name = str(skill_name or "")
+        if not _MENTION_SAFE_RE.match(name):
+            raise ValueError(
+                f"技能名 {name!r} 组不出 $mention，候选正文进不了本轮；"
+                "请改用可 mention 的技能名，而不是让评测空跑")
+        self.agent_ref = agent
+        self._skill_name = name
+        self._sender = sender
+        self._session_id = session_id
+
+    def declaresRealAgentTrajectory(self) -> bool:
+        return True
+
+    async def run(self, *, skill_text: str, task_input: str) -> str:
+        from neurova.core import turn_context
+
+        # 覆盖槽排在注入路径最前（见 skill_injection._skill_doc_text）：不设就是仓内正文
+        token = turn_context.set_turn_skill_text_override(
+            {self._skill_name: str(skill_text or "")})
+        try:
+            result = await self.agent_ref.chat(
+                f"{task_input}\n\n${self._skill_name}",
+                save_memory=False, session_id=self._session_id,
+                metadata={"eval_arms": "text_ab", "sender": self._sender},
+            )
+        finally:
+            turn_context.reset_turn_skill_text_override(token)
+
+        if isinstance(result, dict):
+            return str(result.get("text") or "")
+        return str(getattr(result, "response", None) or result)
 
 # warm 种子白名单（仅"怎么做的"，禁"答案是什么"）
 _SEED_ALLOWED_KEYS = frozenset({"task_input", "tool_sequence", "summary"})

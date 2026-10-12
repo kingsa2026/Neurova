@@ -125,14 +125,18 @@ class TestTombstoneDelete:
         repo1 = KnowledgeRepository(tmp_path)
         item = repo1.create_knowledge("default", title="违规内容", content="c")
         kid = item["knowledge_id"]
-        assert repo1.purge_knowledge("default", kid) is True
+        # 批次 K2 起 `purge_knowledge` 回逐面回执：条目面 erased 才是"删到了东西"，
+        # 原来那个 bool 分不清"删净了""只删了一处""查无此条目"三件事。
+        assert repo1.purge_knowledge("default", kid)["faces"]["entry"]["state"] == "erased"
 
         repo2 = KnowledgeRepository(tmp_path)
         assert repo2.get_item("default", kid) is None
         assert repo2.list_deleted() == []
 
-    def test_purge_unknown_returns_false(self, repo):
-        assert repo.purge_knowledge("default", "no-such-id") is False
+    def test_purge_unknown_reports_absent(self, repo):
+        receipt = repo.purge_knowledge("default", "no-such-id")
+        assert receipt["faces"]["entry"]["state"] == "absent"
+        assert receipt["complete"] is True
 
     def test_delete_unknown_returns_false(self, repo):
         assert repo.delete_knowledge("default", "no-such-id") is False

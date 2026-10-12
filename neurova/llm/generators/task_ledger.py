@@ -26,6 +26,19 @@ logger = get_logger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LEDGER_PATH = get_data_root() / "generation_tasks.json"
 
+# 账本状态词汇的**唯一事实源**（§6-78 E 条：`retention` 曾自造 `("done","failed")`，
+# 而成功态由 `recovery` 写 `succeeded`——`done` 是账本里不存在的值，于是清理逻辑
+# 对每一个成功产物都走 continue，开关打开也一件不清、且不打一行日志）。
+# 新增状态请先改这里，再让所有写侧/读侧引用同一份；不要在本地抄集合。
+TASK_SUBMITTED = "submitted"
+TASK_RUNNING = "running"
+TASK_SUCCEEDED = "succeeded"
+TASK_FAILED = "failed"
+#: 已收口、其产物可按保留策略清理的状态
+TASK_TERMINAL_STATUSES = frozenset({TASK_SUCCEEDED, TASK_FAILED})
+#: 尚未收口、重启后需恢复轮询的状态
+TASK_ACTIVE_STATUSES = frozenset({TASK_SUBMITTED, TASK_RUNNING})
+
 
 @dataclass
 class TaskRecord:
@@ -37,7 +50,7 @@ class TaskRecord:
     protocol: str = ""
     model: str = ""
     base_url: str = ""
-    status: str = "submitted"  # submitted / running / succeeded / failed
+    status: str = TASK_SUBMITTED  # 取值域见上方 TASK_* 常量（唯一事实源）
     remote_task_id: str = ""
     poll_url: str = ""
     result_url: str = ""
@@ -127,11 +140,11 @@ class GenerationTaskLedger:
         return [TaskRecord(**e) for e in entries]
 
     def unfinished(self) -> List[TaskRecord]:
-        """submitted/running 状态任务（重启恢复轮询的数据源）。"""
+        """活跃态任务（见 TASK_ACTIVE_STATUSES）——重启恢复轮询的数据源。"""
         with self._lock:
             entries = [
                 e for e in self._tasks.values()
-                if e.get("status") in ("submitted", "running") and e.get("remote_task_id")
+                if e.get("status") in TASK_ACTIVE_STATUSES and e.get("remote_task_id")
             ]
         return [TaskRecord(**e) for e in entries]
 

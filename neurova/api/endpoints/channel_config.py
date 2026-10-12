@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
+from neurova.channels import identity_binding
 from neurova.channels.base import ChannelConfig
 from neurova.channels.dingtalk import create_dingtalk_adapter
 from neurova.channels.discord import create_discord_adapter
@@ -484,6 +485,115 @@ async def list_plugin_channel_schemas():
         "message": "success",
         "data": {"schemas": get_plugin_channel_registry().schemas()},
     }
+
+
+# ============================================================
+# 渠道身份自助绑定（工单 2026-10-10 §6-127 裁定 ①②③）
+#
+# 这五个端点是"网页发码 → 渠道里回一句 → 下轮身份就变"闭环的控制台面
+# （读面三格：绑定列表 / 我的绑定 / 观察到的发送者；写面两格：发码 / 解绑）。两条刻意：
+# · 归属**只从登录态取**：发码端点不接受 body 里的 `user_id`，也**没有**"替别人绑"的入口——
+#   批 6 把"按渠道观察到的人"那面读接口建起来了（`/identity/observed`），结论仍是只做读：
+#   控制台无法证明点按钮的人就是那个渠道里的发送者，而发码路径自带持有证明
+#   （只有能在那个渠道里发言的人才消费得掉这张码）。少了这条约束，任何登录用户可把
+#   别人的渠道身份挂到自己名下，从此读走对方的记忆归属，且不可逆。
+# · 文案里的绑定指令由 `bindCommandText()` 生成，与渠道侧解析正则同源——
+#   抄一份"绑定 XXXX"到前端，正则一改前端就发错话。
+# ============================================================
+
+
+class ChannelBindCodeRequest(BaseModel):
+    agent_id: str = Field(default="default")
+    channel_type: str = Field(..., min_length=1)
+
+
+def _identityCaller(current_user: Any) -> Dict[str, str]:
+    identity = current_user if isinstance(current_user, Mapping) else {}
+    return {
+        "user_id": str(identity.get("user_id") or ""),
+        "neuser_id": str(identity.get("neuser_id") or identity.get("user_id") or ""),
+        "username": str(identity.get("username") or ""),
+    }
+
+
+@router.get("/identity/bindings", summary="渠道身份绑定列表")
+async def list_identity_bindings(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Any = Depends(get_current_user),
+):
+    """该 agent 下的绑定（含已解绑留痕——面板要答得出"这人以前算谁的"）。"""
+    agent_id = _norm_agent(agent_id)
+    _requireChannelAccess(agent_id, current_user, action="read")
+    return {"bindings": identity_binding.listBindings(agent_id)}
+
+
+@router.get("/identity/bindings/mine", summary="我在这个 agent 下绑了哪些渠道身份")
+async def list_my_identity_bindings(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Any = Depends(get_current_user),
+):
+    """裁定 ①「不同渠道可绑同一 userID」的正向读面：我这个账号名下挂着哪些渠道身份。
+
+    面板拿它做"我的绑定"那一栏，并据此给出解绑目标——解绑必须打在服务端算出的
+    这几格上，前端自己拼的键名一旦与表里不同形，按钮就是空转。
+    """
+    agent_id = _norm_agent(agent_id)
+    _requireChannelAccess(agent_id, current_user, action="read")
+    caller = _identityCaller(current_user)
+    return {"user_id": caller["user_id"],
+            "bindings": identity_binding.myBindings(agent_id, caller["user_id"])}
+
+
+@router.get("/identity/observed", summary="该 agent 各渠道观察到过的发送者")
+async def list_observed_channel_senders(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    channel_type: str = Query(default="", description="留空＝全渠道"),
+    current_user: Any = Depends(get_current_user),
+):
+    """绑定面板"可绑的人从哪来"的那一面：渠道路径每条入站都登记在这里。
+
+    刻意**只读**：这一面列出的每一格都不构成"可以替它绑定"的授权——控制台无法证明
+    点按钮的人就是那个渠道里的发送者。绑定唯一的写入口仍是**渠道内那条带码的消息**
+    （持有证明：只有能在那个渠道里发言的人才消费得掉这张码）。
+    """
+    agent_id = _norm_agent(agent_id)
+    _requireChannelAccess(agent_id, current_user, action="read")
+    return {"senders": identity_binding.observedSenders(
+        agent_id, str(channel_type or "").strip() or None)}
+
+
+@router.post("/identity/bindings/code", summary="发一张渠道绑定码（归属＝调用者本人）")
+async def issue_identity_binding_code(
+    body: ChannelBindCodeRequest,
+    current_user: Any = Depends(get_current_user),
+):
+    caller = _identityCaller(current_user)
+    agent_id = _norm_agent(body.agent_id)
+    _requireChannelAccess(agent_id, current_user, action="write")
+
+    code = identity_binding.issueBindingCode(
+        agent_id, body.channel_type, caller["user_id"],
+        neuserId=caller["neuser_id"], displayName=caller["username"])
+    return {
+        "code": code,
+        "command": identity_binding.bindCommandText(code),
+        "expires_in": identity_binding.CODE_TTL_SECONDS,
+        "bound_user_id": caller["user_id"],
+    }
+
+
+@router.delete("/identity/bindings", summary="解绑渠道身份（置 revoked，不删行）")
+async def delete_identity_binding(
+    agent_id: str = Query(default="default"),
+    channel_type: str = Query(..., min_length=1),
+    channel_user_id: str = Query(..., min_length=1),
+    current_user: Any = Depends(get_current_user),
+):
+    agent_id = _norm_agent(agent_id)
+    _requireChannelAccess(agent_id, current_user, action="delete")
+    if not identity_binding.revoke(agent_id, channel_type, channel_user_id):
+        raise HTTPException(status_code=404, detail="该渠道身份当前没有生效中的绑定")
+    return {"revoked": True}
 
 
 @router.get("/{channel_type}", summary="获取指定渠道配置")

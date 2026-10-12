@@ -61,6 +61,58 @@ def _src(rel):
     return io.open(PROJECT_ROOT / rel, encoding="utf-8").read()
 
 
+def _connect_calls(source):
+    """把源码里的每个 `sqlite3.connect(...)` 调用切出来（配平括号，含跨行）。"""
+    calls = []
+    needle = "sqlite3.connect("
+    idx = 0
+    while True:
+        start = source.find(needle, idx)
+        if start < 0:
+            return calls
+        depth, pos = 0, start + len(needle) - 1
+        while pos < len(source):
+            if source[pos] == "(":
+                depth += 1
+            elif source[pos] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            pos += 1
+        calls.append(source[start:pos + 1])
+        idx = pos + 1
+
+
+class TestResidentConnectionsAreCrossThread:
+    """常驻连接必须显式 `check_same_thread=False`——否则跨线程取数即 ProgrammingError。
+
+    本仓的常驻存储由单例持有，而**单例在哪条线程上第一次被取用是不可预知的**：
+    FastAPI 的同步端点跑在线程池（多条线程），渠道事件循环又在另一条线程上。
+    批 4 的渠道绑定面板第一次把 `verification_code` 放到这条交叉路径上，
+    实测报 `SQLite objects created in a thread can only be used in that same thread`（500）。
+
+    共享一条连接而不外加互斥，前提是 sqlite 编译期线程模式为 SERIALIZAL；
+    这一条前提写在这里，是为了让它**可被发现**——换到别的构建上时报红，
+    而不是变成偶发的读写错乱。
+    """
+
+    RESIDENT = RESIDENT_CONN_FILES + ["neurova/channels/user_identity.py"]
+
+    @pytest.mark.parametrize("rel", RESIDENT)
+    def test_resident_connect_declares_thread_flag(self, rel):
+        for call in _connect_calls(_src(rel)):
+            assert "check_same_thread" in call, (
+                f"{rel} 的常驻连接没写 check_same_thread：{call[:80]}"
+            )
+
+    def test_sqlite_thread_mode_is_serial(self):
+        # `sqlite3.threadsafety` 在 3.12 是裸整数（1/2/3），不是枚举
+        assert sqlite3.threadsafety >= 3, (
+            "本仓常驻共享连接不换锁、改依赖 sqlite 自身串行化；线程模式不是 SERIALIZAL "
+            "时这批文件需要外加互斥，请一并复核后再放宽本判据"
+        )
+
+
 class TestResidentConnectionsStayOutOfPool:
     @pytest.mark.parametrize("rel", RESIDENT_CONN_FILES)
     def test_no_pooled_short_connection(self, rel):

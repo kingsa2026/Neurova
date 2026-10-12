@@ -1266,6 +1266,7 @@ async def get_console_chat_runs(
     session_id: str,
     request: Request,
     limit: int = Query(default=20, ge=1, le=200),
+    scope: str = Query(default="turns", pattern="^(turns|subagents)$"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """回合台账的读面：SSE 是一次性的，刷新或重启后"这条正等人续跑"必须还能查到。
@@ -1281,7 +1282,14 @@ async def get_console_chat_runs(
             detail="run 台账已关闭（NEUROVA_RUN_GATE=off），无 run 读面",
         )
     user_id = _get_user_id(request, current_user)
-    rows = await asyncio.to_thread(_ars.get_agent_run_store().list_runs, session_id, limit)
+    # scope=subagents 查的是"这次对话派出去的子任务"（键是发起者会话），与
+    # scope=turns 的"这个会话跑过哪些回合"（键是该会话自己）是两条不同的问法；
+    # 同一张表、同一个读面，不另开一条子任务端点（§6-78 L 条）。
+    if scope == "subagents":
+        rows = await asyncio.to_thread(
+            _ars.get_agent_run_store().list_subagent_runs, session_id, limit)
+    else:
+        rows = await asyncio.to_thread(_ars.get_agent_run_store().list_runs, session_id, limit)
     if not _isAdminIdentity(current_user):
         # 归属判定只许一处实现（教义第 6 条）：逐行交给会话那条同一谓词
         # `_check_session_ownership`，这里不再本地重写比较式
@@ -1292,12 +1300,18 @@ async def get_console_chat_runs(
         "message": "success",
         "data": {
             "session_id": session_id,
+            "scope": scope,
             "runs": [
                 {
                     "run_id": r.get("run_id"),
                     "status": r.get("status"),
                     "park_reason": r.get("park_reason") or "",
                     "error_type": r.get("error_type") or "",
+                    "subagent_id": r.get("subagent_id") or "",
+                    "agent_id": r.get("agent_id") or "",
+                    # 窗口标题要显示"这条子任务在做什么"——digest 就是 intake 时存的 task 摘要，
+                    # 缺它的话刷新后小窗只剩一个 id，回读等于没回读
+                    "task": r.get("message_digest") or "",
                     "attempt": int(r.get("attempt") or 0),
                     "cancel_requested": bool(r.get("cancel_requested")),
                     "created_at": r.get("created_at"),
@@ -2151,8 +2165,14 @@ async def list_console_running_tasks(
     返回 per-session 注册的 asyncio 任务（kind/started_at/duration），
     供前端后台任务面板分组展示与取消操作联动 POST /console/chat/stop。
     审计 2026-09-11 P0-3：补鉴权（原实现匿名泄露全部会话任务面）。
+
+    `run_ledger` 是**持久台账**的四档计数：进程内快照只看得见"这个进程还在跑的任务"，
+    而 `AgentRunStore.stats()` 早就算好了 running/queued/parked/terminal 却全仓无人取——
+    运维面板因此看不到"库里还挂着几条待办"，尤其是重启后那些被收敛成终态的行。
+    parked 单列不可折进 terminal：那是"等人续跑"，报成"已结束"就是把待办说成完成。
     """
     _ = request
+    from neurova.core.agent_run_store import get_agent_run_store
     from neurova.core.task_tracker import get_task_tracker
 
     tasks = get_task_tracker().snapshot_async_tasks()
@@ -2162,5 +2182,6 @@ async def list_console_running_tasks(
         "data": {
             "tasks": tasks,
             "total": len(tasks),
+            "run_ledger": get_agent_run_store().stats(),
         },
     }

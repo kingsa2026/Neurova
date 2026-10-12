@@ -300,6 +300,23 @@
             </div>
           </div>
         </div>
+
+        <!-- P3-14（§6-72 第五格）：刷新后仍挂着的回合。闸判挂在回合入口，那轮的两条
+             消息从未落盘，历史里没有属于它的气泡——所以这是会话级入口，不贴任何气泡。 -->
+        <div v-for="run in parkedRuns" :key="`parked-${run.runId}`" class="nr-msg nr-msg--assistant">
+          <div class="nr-msg-avatar"><UiIcon name="monitor" :size="16" /></div>
+          <div class="nr-msg-body">
+            <div class="nr-parked-notice">
+              <span class="nr-parked-notice-label">{{ t('chat.turnParked') }}</span>
+              <button
+                class="nr-parked-resume"
+                type="button"
+                :disabled="isStreaming"
+                @click="resumeParkedRun(run)"
+              >{{ t('chat.resumeRun') }}</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 跳至最新悬浮按钮：用户上翻离开底部时出现在输入区上方（纯 CSS 液态玻璃圆钮，
@@ -442,7 +459,7 @@ import { formatFileSize, getFileCategory, getFileIcon } from '@/utils/fileKind'
 import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
 import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
-import { useSubAgentWindows } from '@/composables/useSubAgentWindows'
+import { useSubAgentWindows, restoreSubAgentWindows } from '@/composables/useSubAgentWindows'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
 import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
@@ -1795,6 +1812,61 @@ function stopStreaming() {
   chatStore.setStreaming(false)
 }
 
+/** 本会话里"已挂起、等人工续跑"的回合（会话级，不绑定任何一条气泡）。 */
+interface ParkedRun {
+  runId: string
+  reason: string
+}
+const parkedRuns = ref<ParkedRun[]>([])
+
+/**
+ * P3-14（§6-72 第五格）：刷新/重开后恢复「这条正等人续跑」的入口。
+ *
+ * SSE 是一次性的：`parked` 事件跟着连接一起消失，而 `run_id` 是唯一续跑凭据。
+ * 后端 `GET /console/chat/runs` 的读面早就备好了（其 docstring 承诺的正是
+ * "刷新或重启后必须还能查到"），缺的只是这个消费者。
+ *
+ * 形态取**会话级入口**而不是往某条气泡上贴标签：闸判挂在回合入口
+ * （`requestTurnAdmission` 在 `agent.chat` 之前），那轮的用户问句与助手回复
+ * 都不曾落盘——刷新后历史里根本没有属于它的气泡，贴到上一条已完成回复上
+ * 等于把续跑按钮安在另一轮头上。
+ */
+async function loadParkedRuns(sid: string): Promise<void> {
+  parkedRuns.value = []  // 会话级态：切换即清，跨会话不残留
+  if (!sid) return
+  try {
+    const res: any = await api.get('/console/chat/runs', { params: { session_id: sid } })
+    if (currentSessionId.value !== sid) return  // 已切走：过期响应不写当前视图
+    const runs: any[] = res?.data?.runs ?? res?.runs ?? []
+    parkedRuns.value = runs
+      .filter((r) => r?.status === 'parked' && r?.run_id)
+      .map((r) => ({
+        runId: String(r.run_id),
+        reason: String(r.park_reason ?? ''),
+      }))
+  } catch (err: any) {
+    // 台账关闭(503)/归属失败(403)都是"没有续跑入口"的正当理由，但要留痕，
+    // 不能让用户面对一个静默缺席的按钮（教义第 2 条）
+    console.error(`[parked] 取回挂起回合失败 HTTP ${err?.response?.status ?? '网络异常'}，本会话无续跑入口`, err)
+  }
+}
+
+/**
+ * 会话级入口的续跑：先落一条空的助手气泡作为输出载体，再交给既有
+ * `resumeParkedTurn`——续跑的实现只有一份，这里不另起第二条流。
+ */
+async function resumeParkedRun(run: ParkedRun): Promise<void> {
+  parkedRuns.value = parkedRuns.value.filter((r) => r.runId !== run.runId)
+  const msg = chatStore.addMessage({
+    role: 'assistant',
+    content: '',
+    steps: [],
+    toolCalls: [],
+    parkedNotice: { runId: run.runId, reason: run.reason },
+  })
+  await resumeParkedTurn(msg)
+}
+
 /**
  * P2-8：续跑一条挂起的回合（让位闸等不到额度、已落库 parked 的那一轮）。
  * 输出继续写进**同一条气泡**——用户看到的仍是那一问的答复，不是在另起一轮。
@@ -2428,7 +2500,12 @@ watch(agentId, (newId, oldId) => {
 
 // P2-15（审计 2026-09-11）：会话切换回收子 Agent 浮窗（模块级单例跨会话残留）。
 // 浮窗状态不随会话持久化，切换后旧窗不再有事件流入，一律整栈回收。
-watch(currentSessionId, () => clearSubAgentWindows())
+watch(currentSessionId, async (sid) => {
+  clearSubAgentWindows()
+  // §6-78 L 条：回收之后从台账读面把这条会话派出的子任务捡回来——
+  // 改前切会话/刷新即整栈清零，而运行中的子任务其实还在跑，只是界面再也看不见它
+  await restoreSubAgentWindows(sid ?? '', () => currentSessionId.value === sid)
+}, { immediate: true })   // 刷新进页面时 currentSessionId 已有值，不等它也就不回读
 
 onMounted(() => {
   loadSessions()
@@ -2454,6 +2531,9 @@ watch(
       activeStreamSessionId = sid
       abortController = inflight.controller
     }
+    // 挂起回合的取回同样放在这里而不是只 onMounted：`loadSessions` 异步自动选首会话时，
+    // 挂载瞬间 currentSessionId 还是空（与上面重绑视图同一个理由）
+    void loadParkedRuns(sid)
   },
   { immediate: true },
 )

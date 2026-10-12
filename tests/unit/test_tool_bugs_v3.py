@@ -92,33 +92,28 @@ class TestA1HasToolCJKFailure:
 
 
 # ═══════════════════════════════════════════════════════════════
-# A-3: anthropic_loop 不处理 "tool" role (anthropic_loop.py:105)
+# A-3: "tool" role 必须落成 Anthropic tool_result（落点已收口到 provider 层）
 # ═══════════════════════════════════════════════════════════════
 
 class TestA3AnthropicLoopToolRole:
-    """Bug A-3: anthropic_loop._convert_messages_to_anthropic 不处理 "tool" role。
+    """Bug A-3 的行为契约：OpenAI 的 `role=="tool"` 不得原样交给 Anthropic。
 
-    base.py:149-155 的 handle_tool_calls 生成 OpenAI 格式 tool result:
+    原始缺陷（当年记在 `anthropic_loop._convert_messages_to_anthropic`）：
+    base.py 的 handle_tool_calls 产出 OpenAI 形态
         {"role": "tool", "tool_call_id": "...", "content": "..."}
-
-    anthropic_loop.py:83-115 的 _convert_messages_to_anthropic 只处理
-    user/assistant/system role，line 105 `else: ant_role = role` 把 "tool"
-    role 原样传给 Anthropic API。Anthropic 不认识 "tool" role，会报错或
-    行为未定义。
-
-    Anthropic 正确格式:
+    而 Anthropic 不认识 "tool" role，正确形态是把它挂到 user 轮的内容块里：
         {"role": "user", "content": [{"type": "tool_result",
          "tool_use_id": "...", "content": "..."}]}
 
-    根因: 缺少 "tool" role → Anthropic tool_result 格式的转换。
+    **§6-76 修法 A 把这条转换收口到 provider 层**（`toAnthropicMessages`），环内那份
+    实现已退役——同一件事曾有两处实现，走 OpenAI 兼容网关时被校验判 400、走真
+    anthropic-kind 时预转好的块又被 `str(content)` 拍平成 repr。断言本体不变，
+    只是搬到了唯一落点上（教义第 7 条：搬断言，不删断言）。
     """
 
     def test_tool_role_converted_to_anthropic_tool_result(self):
         """OpenAI 格式 tool message 应转换为 Anthropic tool_result 格式。"""
-        from neurova.agent.loops.anthropic_loop import AnthropicLoop
-
-        loop = object.__new__(AnthropicLoop)
-        loop.agent = MagicMock()
+        from neurova.llm.providers.anthropic_client import toAnthropicMessages
 
         messages = [
             {"role": "user", "content": "搜索文件"},
@@ -139,7 +134,7 @@ class TestA3AnthropicLoopToolRole:
             },
         ]
 
-        converted = loop._convert_messages_to_anthropic(messages)
+        converted = toAnthropicMessages(messages)
 
         # 找到 tool result 对应的转换后 message
         tool_result_msgs = [
@@ -167,10 +162,7 @@ class TestA3AnthropicLoopToolRole:
 
     def test_no_tool_role_in_converted_messages(self):
         """转换后的 messages 不应包含 'tool' role。"""
-        from neurova.agent.loops.anthropic_loop import AnthropicLoop
-
-        loop = object.__new__(AnthropicLoop)
-        loop.agent = MagicMock()
+        from neurova.llm.providers.anthropic_client import toAnthropicMessages
 
         messages = [
             {"role": "user", "content": "hi"},
@@ -182,7 +174,7 @@ class TestA3AnthropicLoopToolRole:
             {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         ]
 
-        converted = loop._convert_messages_to_anthropic(messages)
+        converted = toAnthropicMessages(messages)
 
         tool_roles = [m for m in converted if m["role"] == "tool"]
         assert len(tool_roles) == 0, (
@@ -191,10 +183,7 @@ class TestA3AnthropicLoopToolRole:
 
     def test_assistant_tool_calls_converted_to_tool_use(self):
         """assistant message 的 tool_calls 应转换为 Anthropic tool_use block。"""
-        from neurova.agent.loops.anthropic_loop import AnthropicLoop
-
-        loop = object.__new__(AnthropicLoop)
-        loop.agent = MagicMock()
+        from neurova.llm.providers.anthropic_client import toAnthropicMessages
 
         messages = [
             {"role": "user", "content": "搜索文件"},
@@ -210,7 +199,7 @@ class TestA3AnthropicLoopToolRole:
             },
         ]
 
-        converted = loop._convert_messages_to_anthropic(messages)
+        converted = toAnthropicMessages(messages)
 
         assistant_msgs = [m for m in converted if m["role"] == "assistant"]
         assert len(assistant_msgs) == 1

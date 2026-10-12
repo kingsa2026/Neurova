@@ -23,7 +23,12 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
+from tests.auth_headers import bearerHeaders
 from tests.route_table import mountedLeafRoutes
+
+# C1（P3-12，2026-10-08）后写类请求必须有凭证；本文件测的是路由匹配与错误语义，
+# 身份不是被测面，但 DELETE 不带凭证会在路由级写门就 401，压根进不到被测的 handler。
+WRITE_HDR = bearerHeaders("shadowing-probe")
 
 
 # ============================================================
@@ -88,6 +93,15 @@ class _FakeMemoryManager:
 
     def get_stats(self, **kwargs):
         return {"total_memories": len(self._store)}
+
+    def get_memory(self, memory_id, **kwargs):  # agent_wide 口径透传（接口演进同步）
+        """与真实 `MemoryManager.get_memory`（`manager.py:1788`）同契约：命中回 dict、未命中回 None。
+
+        端点 `crud.py:246/331` 与 `pending.py:124` 都读这一处——P1-6 的归属校验也收口在那里，
+        所以替身缺这个方法时，被测端点会走进 `except Exception` 分支、把"读不到"
+        报成 `7002 获取记忆失败`（404 壳里装 500 的话），两格就此常红：红的是替身，不是契约。
+        """
+        return self._store.get(memory_id)
 
     def get_self_model(self):
         return {"persona": "tester"}
@@ -223,7 +237,7 @@ def test_get_self_model_returns_200(env):
 
 def test_delete_wm_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == 0
     assert agent.memory_manager.cleared is True
@@ -258,7 +272,7 @@ def test_get_memory_detail_returns_200(env):
 
 def test_delete_memory_detail_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 200, resp.text
     assert "mem-2" not in agent.memory_manager._store
 
@@ -279,6 +293,6 @@ def test_get_unknown_memory_returns_structured_404(env):
 
 def test_delete_unknown_memory_returns_structured_404(env):
     client, _ = env
-    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"})
+    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == ErrorCodes.NOT_FOUND

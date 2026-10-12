@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.endpoints.governance import router
 from neurova.security.approval_manager import ApprovalManager
+from tests.auth_headers import overrideIdentity
 
 
 def _make_client(tmpdir: str) -> TestClient:
@@ -18,7 +19,7 @@ def _make_client(tmpdir: str) -> TestClient:
     app.include_router(router, prefix="/api/v1/governance")
     # 2026-09-07 安全修复：governance 端点要求 admin；测试注入 admin 身份
     from neurova.api.deps import get_current_user
-    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+    overrideIdentity(app, {"user_id": "admin1", "role": "admin"})
     return TestClient(app)
 
 
