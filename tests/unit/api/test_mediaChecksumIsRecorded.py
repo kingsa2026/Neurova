@@ -42,7 +42,14 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(MEDIA, "_INDEX_FILE", str(tmp_path / "media_index.json"))
     monkeypatch.setattr(MEDIA, "_CONFIG_FILE", str(tmp_path / "media_config.json"))
     MEDIA._media_store.clear()
-    MEDIA._media_config["storage_path"] = str(tmp_path / "media_storage")
+    # 走 `monkeypatch.setitem` 而不是直接赋值：`_media_config` 是**模块级共享**字典，
+    # 裸赋值在用例结束后不还原，于是下一个读到它的用例拿到的是一条指向**本用例**
+    # tmp_path 的绝对路径（实测形态：`test_mediaTrashLifecycle` 的
+    # `TestStorageRootIsNeverCwdRelative` 两格红，报错里的路径是
+    # `/tmp/pytest-of-root/pytest-N/test_concurrent_uploads_lose_n0/media_storage`——
+    # 那是本文件这条用例的 tmp_path）。那两格判的正是"相对配置锚不锚到数据根"，
+    # 被上游留成绝对路径后，`_storage_root()` 的"未配置/相对名"分支根本进不去。
+    monkeypatch.setitem(MEDIA._media_config, "storage_path", str(tmp_path / "media_storage"))
     app = FastAPI()
     app.include_router(MEDIA.router, prefix="/api/v1/media")
     app.dependency_overrides[get_current_user] = lambda: dict(ADMIN)

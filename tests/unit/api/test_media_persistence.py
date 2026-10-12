@@ -29,7 +29,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(MEDIA, "_INDEX_FILE", str(tmp_path / "media_index.json"))
     monkeypatch.setattr(MEDIA, "_CONFIG_FILE", str(tmp_path / "media_config.json"))
     MEDIA._media_store.clear()
-    MEDIA._media_config["storage_path"] = str(tmp_path / "media_storage")
+    # `monkeypatch.setitem` 而不是裸赋值：`_media_config` 是模块级共享字典，
+    # 裸赋值会把一条指向本用例 tmp_path 的绝对路径留给下一个读它的用例——
+    # `test_mediaTrashLifecycle` 的 `TestStorageRootIsNeverCwdRelative` 两格因此红
+    # （它判的正是"相对配置锚不锚到数据根"，被留成绝对路径后那条分支就进不去了）。
+    monkeypatch.setitem(MEDIA._media_config, "storage_path", str(tmp_path / "media_storage"))
     app = FastAPI()
     app.include_router(MEDIA.router, prefix="/api/v1/media")
     app.dependency_overrides[get_current_user] = lambda: dict(ADMIN)
