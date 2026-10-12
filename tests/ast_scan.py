@@ -291,6 +291,17 @@ def transientTree(path: Path) -> ast.AST:
     return ast.parse(sourceCode(path))
 
 
+def transientSource(source: str) -> ast.AST:
+    """**一次性**解析一段**已在手的源码字符串**：返回语法树，不留任何缓存。
+
+    与 `transientTree(path)` 的分工：后者从盘上取文本（`sourceCode`），本入口收
+    调用方**已经读进来**的字符串（典型是判据自己拼的合成样本）。存在的理由是
+    「解析入口只有一个口径」——调用方不该为此再写一次 `ast.parse`，那正是
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 拦的形态。
+    """
+    return ast.parse(source)
+
+
 def transientNodes(root: Path, suffix: str = ".py",
                    hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
     """**一次性**逐节点产出 `(路径, 节点)`，不留常驻语法树。
