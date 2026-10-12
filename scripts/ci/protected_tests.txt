@@ -2498,3 +2498,6 @@ tests/unit/api/testRetiredGlobalLanguageDefault.py
 # 两档全程 127.0.0.1，不开外网、不花服务商额度。入册前逐文件单跑两次同读数 12 passed / 5 passed。
 tests/unit/channels/test_channelVoiceEgress.py
 tests/unit/channels/test_feishuMediaUploadIsRealMultipart.py
+# §6-163 留案② 取证后立项（批 19）：两条读路必须给出同一个 session_id。
+# 入册前逐文件单跑两次同读数 8 passed（1.55s／1.54s）。
+tests/unit/session/test_sessionIdShapeAcrossReadPaths.py
