@@ -77,6 +77,14 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
         "turnSource": "同一个 user_id 进 metadata['user_id']（dict 字面量），由管线透传给 set_turn_identity",
         "feedsVia": "user_id",
     },
+    "neurova/api/endpoints/mobile_pairing.py": {
+        "kind": "boundaryFeedsTurn",
+        "requestSource": "user_id 形参——由 `_get_current_user_id`（JWT）或配对码在 WS 接入层解出后"
+                         "按参数交给 `_handle_chat_send`（§6-154 合修：这条面此前只把人留在参数里，"
+                         "从不交给请求通道）",
+        "turnSource": "同一个 user_id 进 turnMetadata['user_id']，与管线其余入口同形",
+        "feedsVia": "user_id",
+    },
     "neurova/tool_executor.py": {
         "kind": "derivedFromTurnRead",
         "requestSource": "self._agent_identity()[0]",
@@ -323,13 +331,17 @@ def ownerWritesByTurnHandler(tree: ast.AST) -> Dict[str, bool]:
             continue
         defaults = [d for d in list(fn.args.defaults) + list(fn.args.kw_defaults)
                     if d is not None]
-        # 身份来源两种形状都算"取到了人"：`Depends(get_current_user)`（REST），
-        # 以及函数体里自己 `verify_access_token(...)`（WebSocket 没有 Depends 通道）。
-        # 只认 Depends 会把 WS 那条面整个漏在探测器之外——它同样是"已鉴权且跑回合"。
+        params = [a.arg for a in list(fn.args.args) + list(fn.args.kwonlyargs)]
+        # 身份来源三种形状都算"取到了人"：`Depends(get_current_user)`（REST）、
+        # 函数体里自己 `verify_access_token(...)`（WebSocket 没有 Depends 通道），
+        # 以及**身份按参数传进来**（`mobile_pairing._handle_chat_send(ws, data, user_id)`——
+        # 人由 WS 接入层解出后交给处理器；漏掉这一形就等于给这条面开了免检口）。
+        # 只认前两种会把整条路径判成"不归本判据管"，而它同样是"已鉴权且跑回合"。
         resolvesIdentity = (
             any(isinstance(d, ast.Call) and _calleeName(d) == "Depends" for d in defaults)
             or any(_calleeName(node) == "verify_access_token"
                    for node in ast.walk(fn) if isinstance(node, ast.Call))
+            or "user_id" in params
         )
         runsTurn = any(isinstance(node, ast.Call)
                        and getattr(node.func, "attr", None) == "chat"
