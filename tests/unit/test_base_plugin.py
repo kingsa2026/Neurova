@@ -22,8 +22,8 @@ from neurova.plugins.base_plugin import (
     BasePlugin,
     APIEndpoint,
     PluginType,
-    PluginPermission,
 )
+from neurova.plugins.plugin_manifest import PluginFrameworkSurface
 from neurova.plugins.plugin_manifest import PluginManifest, SemVersion
 
 
@@ -55,7 +55,7 @@ def _grantStore(tmp_path, granted, plugin_id="test-plugin"):
     path = tmp_path / "permissions.json"
     path.write_text(
         json.dumps({"version": STORE_VERSION,
-                    "grants": {plugin_id: {value: {"granted_by": "qa", "tier": "framework_enforced"}
+                    "grants": {plugin_id: {value: {"granted_by": "qa", "kind": "surface"}
                                             for value in granted}}},
                    ensure_ascii=False),
         encoding="utf-8")
@@ -146,7 +146,7 @@ class TestBasePlugin:
             api_endpoints = [
                 APIEndpoint("GET", "/test", "handle_test"),
             ]
-            required_permissions = [PluginPermission.HTTP_REQUEST]
+            framework_surfaces = [PluginFrameworkSurface.EMIT_EVENTS]
 
             async def on_initialize(self):
                 return None
@@ -174,7 +174,9 @@ class TestBasePlugin:
         assert plugin.version == SemVersion("1.0.0")
         assert plugin.plugin_type == PluginType.SKILL
         assert len(plugin.api_endpoints) == 1
-        assert plugin.required_permissions == [PluginPermission.HTTP_REQUEST]
+        # §6-157 收口：能力面不在插件类上声明（单点在 skills 的 `permissions`），
+        # 插件类只声明框架中介面
+        assert plugin.framework_surfaces == [PluginFrameworkSurface.EMIT_EVENTS]
 
     @pytest.mark.asyncio
     async def test_plugin_lifecycle(self):
@@ -268,7 +270,7 @@ class TestBasePlugin:
 
     def test_plugin_event_callsWithoutGrantsAreRefused(self, tmp_path, monkeypatch):
         """P2 改名实（台账 §6-155）：上一档断的是「未经确认也能订阅」，而订阅/发布正是
-        `read:events` / `emit:events` 两档 framework_enforced 的中介点。未授予必须当场拒，
+        事件总线两档框架中介面的强制点（能力面词汇单点在 skills，§6-157）。未授予必须当场拒，
         且**一次都不能落到总线上**——只断「抛了」不够，替身没被碰才算门在门前。
         """
         from neurova.plugins.plugin_errors import PluginError

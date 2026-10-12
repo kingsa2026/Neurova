@@ -6,7 +6,7 @@ P1 把动态装载接通了，并留下一句读数恒 `false` 的诚实声明�
 是两次授权**。本模块就是第二次授权那一道，规则四条，全部在这里判（别处不另判一套）：
 
 1. **聚合权限门**：`声明 ⊆ 已确认` 才挂；声明里有 `execute:commands` / `admin`
-   （`PERMISSION_MODEL` 的 `never_grantable` 档）⇒ 永远挂不上。逐项确认在
+   （§6-157 收口后没有"不可授予档"——高危能力可授，但授予后由调用面真拦）。逐项确认在
    `plugin_permissions.py`，档位口径也在那一份里，本模块只**执行**。
 2. **命名空间**：插件声明的 `path` 是它自己空间里的**相对路径**，最终形态固定为
    `PLUGIN_ROUTE_PREFIX/{plugin_id}/{path}`。绝对路径、`..`、`?`/`#`、越出该前缀一律拒——
@@ -36,7 +36,7 @@ from neurova.core.logger import get_logger
 from neurova.plugins import plugin_permissions
 from neurova.plugins.plugin_api_registry import get_plugin_api_registry
 from neurova.plugins.plugin_errors import PluginError
-from neurova.plugins.plugin_permissions import PERMISSION_MODEL, PermissionTier, permissionValue
+from neurova.plugins.plugin_permissions import capabilityKeys, frameworkSurfaces, permissionValue
 from neurova.security.audit_logger import AuditEventType, AuditSeverity, log_audit
 
 logger = get_logger(__name__)
@@ -171,7 +171,7 @@ def mountPluginRoutes(pluginId: str, actor: str = "") -> typing.Dict[str, typing
     plan = _plan(pluginId, app, endpoints)
 
     with _lock:
-        routes = _addRoutes(app, pluginId, plan)
+        routes = _addRoutes(app, pluginId, plan, manager)
         declined = [full for ep, full in plan if ep.auth_required is False]
         _declinedAuth[pluginId] = declined
     try:
@@ -191,22 +191,24 @@ def mountPluginRoutes(pluginId: str, actor: str = "") -> typing.Dict[str, typing
 
 
 def _permissionGate(pluginId, manager, store) -> None:
-    """聚合门：声明 ⊆ 已确认；含不可授予档 ⇒ 直接拒（不给「补一项就挂」的口子）。"""
-    declared = manager.declaredPermissionsOf(pluginId)
-    never = []
-    for value in declared:
-        try:
-            spec = PERMISSION_MODEL[permissionValue(value)]
-        except PluginError:
-            continue  # 不认识的声明留给 pending 分支挡（安全侧：认不出的东西没人能确认）
-        if spec.tier is PermissionTier.NEVER_GRANTABLE:
-            never.append(value)
-    if never:
-        raise PluginError(
-            "permission_not_grantable",
-            "插件 %s 声明了本批不可授予的权限 %s——这类插件可以装载，但不能对外挂 HTTP 面"
-            % (pluginId, ", ".join(sorted(never))))
+    """聚合门（§6-157 收口后）：清单必须**显式声明过**能力面，且声明 ⊆ 已确认。
 
+    两条判据各挡一种形态：
+    - 整节缺失 ⇒ `permissions_undeclared`。§6-155 只判"声明 ⊆ 已确认"，于是
+      `permissions` 写空或干脆不写都**空真通过**——而插件 handler 一旦被请求，
+      它拥有的是整个进程的能力。显式空 dict 是合法的（"我什么都不要"），
+      没想过这件事不合法。
+    - 认不出的声明留在 pending 里（没人能确认它），因此必然挡挂——安全侧。
+    """
+    if not manager.permissionsDeclared(pluginId):
+        raise PluginError(
+            "permissions_undeclared",
+            "插件 %s 的清单没有 permissions 一节：能力面词汇单点在 "
+            "neurova/skills/permissions.py（可用键：%s；框架中介面：%s）。"
+            "没声明过就不要对外开 HTTP 面——显式写 permissions: {} 表示「什么都不要」也可以挂"
+            % (pluginId, ", ".join(capabilityKeys()), ", ".join(frameworkSurfaces())))
+
+    declared = manager.declaredPermissionsOf(pluginId)
     pending = [value for value in declared if not store.isGranted(pluginId, value)]
     if pending:
         raise PluginError(
@@ -244,12 +246,41 @@ def _plan(pluginId, app, endpoints):
     return plan
 
 
-def _addRoutes(app, pluginId, plan):
+def _withSkillPermissionScope(pluginId, handler, manager):
+    """把插件声明的能力面装进 skills 那份作用域，让调用面仲裁真的生效（§6-157 收口的落点）。
+
+    拦不拦**不由本包判断**：进入 `skill_permission_scope` 后，插件 handler 经框架调工具时，
+    `tool_executor._check_skill_declaration` 按 `permissions.py` 那份声明 fail-closed。
+    `functools.wraps` 是为了让 FastAPI 仍然按原签名解析参数依赖——不加它，
+    路由会看见 `(*args, **kwargs)` 而把插件 handler 的入参全丢掉（假挂载）。
+    """
+    import functools
+    import inspect
+
+    from neurova.skills.permissions import parse_permissions, skill_permission_scope
+
+    declarations = manager.capabilityDeclarations(pluginId)
+
+    @functools.wraps(handler)
+    async def _scoped(*args, **kwargs):
+        with skill_permission_scope(parse_permissions(declarations)):
+            outcome = handler(*args, **kwargs)
+            if inspect.isawaitable(outcome):
+                outcome = await outcome
+            return outcome
+
+    return _scoped
+
+
+def _addRoutes(app, pluginId, plan, manager=None):
     routes = []
     for endpoint, full in plan:
+        handler = endpoint.handler
+        if manager is not None:
+            handler = _withSkillPermissionScope(pluginId, handler, manager)
         app.add_api_route(
             full,
-            endpoint.handler,
+            handler,
             methods=[endpoint.method],
             name="plugin_%s_%s_%s" % (pluginId, endpoint.method, _slug(full)),
             tags=["plugin", pluginId] + list(endpoint.tags or []),

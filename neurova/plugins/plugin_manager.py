@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Type
 
 import yaml
 from neurova.core.data_root import dataPath
+from neurova.skills.skill_install_gate import validate_permissions_for_install
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.plugins.plugin_errors import PluginError  # noqa: F401  (既有 import 面继续可用)
 
@@ -251,6 +252,16 @@ class PluginManager:
         if not manifest:
             raise PluginError("no_manifest", "目录里没有可解析的 manifest：%s" % plugin_path)
 
+        # 历史字段在**安装**这一站就拒：让它活到装载，报错会被包成
+        # `instantiate_failed`（成因被吞成"插件构造失败"，那是别人的缺陷名片）。
+        if manifest.get("required_permissions") is not None:
+            raise PluginError(
+                "legacy_permissions_field",
+                "插件 %s 的清单用了 §6-155 那版的 `required_permissions`：能力面已收口到 "
+                "skills 那份词汇（`permissions` dict），框架中介面改用 `framework_surfaces`。"
+                "不自动映射——execute:commands → system 是变宽，那种决定只能由人重做一次"
+                % plugin_path.name)
+
         name = manifest.get("name", plugin_path.name)
         record = PluginRecord(
             name=name,
@@ -267,6 +278,15 @@ class PluginManager:
         if not self._check_dependencies(record):
             raise PluginError(
                 "unmet_dependencies", "依赖不满足：%s" % record.name)
+
+        # 能力声明的合法性校验**不在本包再写一套**：未知能力键、白名单含未知工具、
+        # mcp.* 未声明网络这些判据都归 `skill_install_gate.validate_permissions_for_install`
+        # （教义第 6/7 条：一份词汇、一道门，两条接入通道不能各判各的）。
+        gate = validate_permissions_for_install(manifest.get("permissions"))
+        if gate.get("blocked"):
+            raise PluginError(
+                "invalid_permissions_declaration",
+                "; ".join(str(e) for e in gate.get("errors") or []) or "permissions 声明不合法")
 
         self._plugins[name] = record
         self._manifests[name] = manifest
@@ -408,16 +428,32 @@ class PluginManager:
         return registered
 
     def declaredPermissionsOf(self, plugin_name: str) -> List[str]:
-        """清单声明的权限值（原样收成字符串）。
+        """该插件声明的全部授权项：能力键（取自 skills 那份词汇）＋ 框架中介面。
 
-        认不出的声明**保留**而不是丢弃：丢弃会让「声明了一个拼错的权限」的插件
-        变成「什么都没声明」，聚合门反而放行——不认识的项没人能确认，留在 pending 里
-        才是安全侧。
+        认不出的声明**原样保留**而不是丢弃：丢弃会让「声明了一个拼错项」的插件变成
+        「什么都没声明」，聚合门反而空真通过——不认识的项没人能确认，留在 pending 里
+        才是安全侧。（§6-155 的空真通过在 §6-157 里另有一道 `permissions_undeclared` 挡。）
         """
-        out: List[str] = []
-        for item in (self._manifests.get(plugin_name) or {}).get("required_permissions") or []:
+        raw = self._manifests.get(plugin_name) or {}
+        out: List[str] = [str(k) for k in (raw.get("permissions") or {})]
+        for item in raw.get("framework_surfaces") or []:
             out.append(item.value if hasattr(item, "value") else str(item))
         return out
+
+    def permissionsDeclared(self, plugin_name: str) -> bool:
+        """清单里**有没有** `permissions` 这一节。
+
+        这是挂载门要的判据，和"声明了哪些"是两件事：显式空 dict＝"我什么都不要"（可挂），
+        整节缺失＝作者没想过这件事（不可挂）。§6-155 之前两者都过门，那是空真通过。
+        """
+        return "permissions" in (self._manifests.get(plugin_name) or {})
+
+    def capabilityDeclarations(self, plugin_name: str) -> Dict[str, Any]:
+        """清单里的能力声明原文（`permissions` dict）——挂载时把它装进
+        `skill_permission_scope`，于是插件 handler 经框架调工具时由 skills 那份仲裁。
+        本方法只搬运，不解释、不校验（校验单点在 `skill_install_gate`）。
+        """
+        return dict((self._manifests.get(plugin_name) or {}).get("permissions") or {})
 
 
     def _instantiate(self, plugin_class: Type, plugin_name: str) -> Any:

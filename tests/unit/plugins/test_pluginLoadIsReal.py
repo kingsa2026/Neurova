@@ -49,8 +49,9 @@ def _writePlugin(root, name, *, body=None, manifest_extra=None):
     pdir.mkdir(parents=True, exist_ok=True)
     manifest = {"name": name, "version": "1.0.0", "description": "probe", "author": "qa",
                 "entry_point": "main.py", "dependencies": [],
-                # 键名按 `PluginManifest.from_dict` 的口径写：`permissions` 是一份没人读的装饰
-                "required_permissions": []}
+                # §6-157 收口：能力面用 `permissions`（键取自 skills 那份词汇），
+                # 框架中介面用 `framework_surfaces`。这里显式写空——缺整节会被挂载门拒。
+                "permissions": {}, "framework_surfaces": []}
     manifest.update(manifest_extra or {})
     (pdir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (pdir / "main.py").write_text(body or "MARKER = 1\n", encoding="utf-8")

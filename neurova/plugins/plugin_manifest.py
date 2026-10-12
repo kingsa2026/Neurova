@@ -242,19 +242,24 @@ class PluginState(str, Enum):
     UPDATING = "updating"
 
 
-class PluginPermission(str, Enum):
-    """
-    插件权限枚举
+class PluginFrameworkSurface(str, Enum):
+    """插件独有的**框架中介面**——技能那套能力键没有对应概念的两项。
+
+    原先这里有八项 `PluginPermission`，其中四项与 `neurova/skills/permissions.py` 的
+    `KNOWN_CAPABILITY_KEYS` 是同一件事的两份定义（且那一份才真在 `tool_executor` 里拦），
+    `http:request` 就是 `network`，`admin` 是 `api/deps.require_role` 的角色门。
+    用户 2026-10-12 裁「甲 · 彻底合一」后，能力面词汇单点在 skills，本枚举只留
+    **事件总线**这两档——它是框架方法（`BasePlugin.subscribe/publish_event`）上的强制点，
+    不是"能碰哪些工具"，所以不属于那份词汇表。
     """
 
     READ_EVENTS = "read:events"
     EMIT_EVENTS = "emit:events"
-    HTTP_REQUEST = "http:request"
-    READ_FILES = "read:files"
-    WRITE_FILES = "write:files"
-    EXECUTE_COMMANDS = "execute:commands"
-    NETWORK_ACCESS = "network:access"
-    ADMIN = "admin"
+
+
+#: 能力面（文件／网络／命令／模型／存储…）**不在这里定义**：单点是
+#: `neurova/skills/permissions.py:KNOWN_CAPABILITY_KEYS`，取用走
+#: `plugin_permissions.capabilityKeys()`（每次现取，不存副本）。
 
 
 @dataclass
@@ -279,8 +284,12 @@ class PluginManifest:
     entry_point: str = ""
     module_class: str = ""
 
-    # 权限
-    required_permissions: typing.List[PluginPermission] = None
+    # 能力面声明：形状与合法性单点在 skills（`permissions` dict，键 ∈ KNOWN_CAPABILITY_KEYS；
+    # 校验走 `skill_install_gate.validate_permissions_for_install`，本模块不另造一套）
+    permissions: typing.Dict[str, typing.Any] = None
+
+    # 框架中介面（事件总线两档）：清单声明、admin 逐项确认后才生效
+    framework_surfaces: typing.List[PluginFrameworkSurface] = None
 
     # 配置
     config_schema: typing.Dict[str, typing.Any] = None
@@ -303,8 +312,10 @@ class PluginManifest:
             self.dependencies = {}
         if self.optional_dependencies is None:
             self.optional_dependencies = {}
-        if self.required_permissions is None:
-            self.required_permissions = []
+        if self.permissions is None:
+            self.permissions = {}
+        if self.framework_surfaces is None:
+            self.framework_surfaces = []
         if self.config_schema is None:
             self.config_schema = {}
         if self.default_config is None:
@@ -330,7 +341,8 @@ class PluginManifest:
             "neurova_min_version": self.neurova_min_version,
             "entry_point": self.entry_point,
             "module_class": self.module_class,
-            "required_permissions": [p.value for p in self.required_permissions],
+            "permissions": self.permissions,
+            "framework_surfaces": [s.value for s in self.framework_surfaces],
             "config_schema": self.config_schema,
             "default_config": self.default_config,
             "api_endpoints": self.api_endpoints,
@@ -356,13 +368,25 @@ class PluginManifest:
         # 枚举转换
         plugin_type = PluginType(plugin_type_str)
 
-        # 权限转换
-        permissions = []
-        for p in data.get("required_permissions", []):
-            if isinstance(p, str):
-                permissions.append(PluginPermission(p))
-            else:
-                permissions.append(p)
+        # 能力面声明原样带过（合法性由 `skill_install_gate.validate_permissions_for_install`
+        # 在安装时判——那份才是单点，这里不重复校验也不静默改写）
+        permissions = data.get("permissions") or {}
+        if not isinstance(permissions, dict):
+            raise ValueError("manifest.permissions 必须是对象，实际 %s" % type(permissions).__name__)
+
+        # 框架中介面：只认封闭集合，认不出即拒（拼错的项不会静默变成"没声明"）
+        surfaces = []
+        for raw in data.get("framework_surfaces") or []:
+            surfaces.append(raw if isinstance(raw, PluginFrameworkSurface)
+                            else PluginFrameworkSurface(str(raw)))
+
+        if data.get("required_permissions") is not None:
+            raise ValueError(
+                "manifest 里的 `required_permissions` 已收口：能力面用 `permissions`"
+                "（键取自 `skills/permissions.py:KNOWN_CAPABILITY_KEYS`），"
+                "框架中介面用 `framework_surfaces`（可选值：%s）——旧字段不做自动映射，"
+                "因为 execute:commands → system 是变宽，那种决定只能由人重做一次"
+                % ", ".join(s.value for s in PluginFrameworkSurface))
 
         return cls(
             plugin_id=plugin_id,
@@ -376,7 +400,8 @@ class PluginManifest:
             neurova_min_version=data.get("neurova_min_version", ""),
             entry_point=data.get("entry_point", ""),
             module_class=data.get("module_class", ""),
-            required_permissions=permissions,
+            permissions=permissions,
+            framework_surfaces=surfaces,
             config_schema=data.get("config_schema", {}),
             default_config=data.get("default_config", {}),
             api_endpoints=data.get("api_endpoints", []),

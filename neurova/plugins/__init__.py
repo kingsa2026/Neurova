@@ -12,8 +12,8 @@ from neurova.plugins.base_plugin import (
 
 # 导出主要类
 from neurova.plugins.plugin_manifest import (
+    PluginFrameworkSurface,
     PluginManifest,
-    PluginPermission,
     PluginState,
     PluginType,
     SemVersion,
@@ -26,7 +26,7 @@ __all__ = [
     "VersionConstraint",
     "PluginType",
     "PluginState",
-    "PluginPermission",
+    "PluginFrameworkSurface",
     "PluginManifest",
     "parse_manifest",
     "BasePlugin",

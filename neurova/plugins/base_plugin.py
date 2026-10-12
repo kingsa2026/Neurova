@@ -13,8 +13,8 @@ from abc import ABC, abstractmethod
 from neurova.core.logger import LogLevel
 from neurova.plugins import plugin_permissions
 from neurova.plugins.plugin_manifest import (
+    PluginFrameworkSurface,
     PluginManifest,
-    PluginPermission,
     PluginType,
     SemVersion,
 )
@@ -91,7 +91,9 @@ class BasePlugin(ABC):
     plugin_type: PluginType = PluginType.FUNCTIONAL
     api_endpoints: typing.List[APIEndpoint] = []
     frontend_resources: typing.List[str] = []
-    required_permissions: typing.List[PluginPermission] = []
+    # 框架中介面声明（事件总线两档）。能力面（文件/网络/命令/模型/存储…）不在插件侧另立词汇：
+    # 单点是 skills 那套 `permissions`（键 ∈ `KNOWN_CAPABILITY_KEYS`，拦点在 `tool_executor`）。
+    framework_surfaces: typing.List[PluginFrameworkSurface] = []
 
     def __init__(self, manifest: PluginManifest):
         """初始化插件
@@ -227,7 +229,7 @@ class BasePlugin(ABC):
         「忘了给插件设 event_bus」会把一次越权调用降成一条 warning，
         调用方拿到 None 继续跑（§6-126 那一族：把不同故障折成同一个结论）。
         """
-        self._requirePermission(PluginPermission.READ_EVENTS)
+        self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
         if self._event_bus:
             self._event_bus.subscribe(event_name, handler)
         else:
@@ -235,19 +237,19 @@ class BasePlugin(ABC):
 
     def unsubscribe(self, event_name: str, handler: typing.Callable) -> None:
         """取消订阅事件（同 `read:events`——退订也是对他方事件面的操作）。"""
-        self._requirePermission(PluginPermission.READ_EVENTS)
+        self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
         if self._event_bus:
             self._event_bus.unsubscribe(event_name, handler)
 
     def publish_event(self, event_name: str, data: typing.Any = None) -> None:
         """发布事件（须 `emit:events` 已被逐项确认）。"""
-        self._requirePermission(PluginPermission.EMIT_EVENTS)
+        self._requirePermission(PluginFrameworkSurface.EMIT_EVENTS)
         if self._event_bus:
             self._event_bus.publish(event_name, data)
         else:
             self._logger.warning("事件总线未设置，无法发布事件: %s", event_name)
 
-    def _requirePermission(self, permission: PluginPermission) -> None:
+    def _requirePermission(self, permission: PluginFrameworkSurface) -> None:
         """框架中介点的判定单点：未确认即抛 `PluginError("permission_not_granted")`。
 
         读的是 `plugin_permissions` 模块属性（不是 import 进来的名字副本），
@@ -257,11 +259,11 @@ class BasePlugin(ABC):
             return
         from neurova.plugins.plugin_errors import PluginError
 
+        spec = plugin_permissions.FRAMEWORK_SURFACE_MODEL[permission]
         raise PluginError(
             "permission_not_granted",
-            "插件 %s 未被授予 %s（该权限档位：%s）"
-            % (self.plugin_id, permission.value,
-               plugin_permissions.PERMISSION_MODEL[permission].tier.value))
+            "插件 %s 未被授予框架中介面 %s——它管的是：%s（强制点 %s）"
+            % (self.plugin_id, permission.value, spec.unlocks, spec.enforcedAt))
 
     def log(self, level: LogLevel, message: str, **kwargs) -> None:
         """记录日志
