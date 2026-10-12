@@ -421,6 +421,9 @@ onMounted(() => {
     startUnreadStream()
     // 刷新用户组 allowed_modules：管理员调整组配置后无需重新登录即生效
     authStore.fetchCurrentUser()
+    // 语言：先按这个人**在服务端存过的**偏好定界面语言，再拉那门语言的覆盖层（§6-145 乙案）。
+    // localStorage 里那份只是启动瞬间的兜底（避免闪一下错误语言），不是事实源。
+    appStore.syncLocaleFromServer()
   }
 })
 
@@ -431,7 +434,9 @@ onUnmounted(() => {
 })
 
 const changeLocale = (code: string) => {
-  locale.value = code
+  // 语言只有一个改法：store 里那一处（i18n 实例、方向、覆盖层、落盘都在那儿）。
+  // 这里原先自己写了一遍 `locale.value = code`——那是第二个改点，
+  // 漏掉它的调用方会"点了却没换"，或换了却没持久。
   appStore.setLocale(code)
 }
 

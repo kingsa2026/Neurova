@@ -1,6 +1,14 @@
 """
 设置管理器测试（对齐 neurova/core/settings_manager.py 真实契约）
-测试 SettingsManager 的语言/时区/工作空间设置、持久化与生命周期回调。
+测试 SettingsManager 的时区/工作空间设置、持久化与生命周期回调。
+
+**语言那一格不在本档的范围内了**（§6-167，用户 2026-10-12 裁「先取长补短再退役」）：
+`get_user_language`/`set_user_language` 连同两处 key 白名单里的 `language` 一起退役，
+因为它们是「某个用户默认看什么语言」的第二套词汇而生产消费者 0 处。退役面与防再生的
+判据在 `tests/unit/api/testRetiredGlobalLanguageDefault.py`，本档只留**仍然活着**的那些
+契约——原先有 10 个用例把 `set_user_language(...)` 当"给某个用户塞点自有值"的顺手写法，
+它们测的是持久化、按用户隔离、重置、损坏回落这些**别的东西**，所以逐格改指
+`timezone`/`workspace` 两键，而不是连覆盖一起删掉。
 """
 
 import pytest
@@ -30,25 +38,12 @@ class TestSettingsManager:
         return _make_manager(tmp_path)
 
     def test_init(self, tmp_path):
-        """测试初始化（data_dir 目录自动创建，默认语言 zh-CN）"""
+        """测试初始化（data_dir 目录自动创建，默认时区 Asia/Shanghai）"""
         manager = _make_manager(tmp_path)
 
         assert manager is not None
         assert (tmp_path / "settings").exists()
-        assert manager.get_setting("language") == "zh-CN"
         assert manager.get_setting("timezone") == "Asia/Shanghai"
-
-    def test_get_user_language_default(self, settings_manager):
-        """测试获取用户默认语言（契约：返回语言代码字符串）"""
-        language = settings_manager.get_user_language("user1")
-        assert language == "zh-CN"
-
-    def test_set_user_language(self, settings_manager):
-        """测试设置用户语言（契约：set_user_language(language, user_id)）"""
-        success = settings_manager.set_user_language("en-US", "user1")
-
-        assert success is True
-        assert settings_manager.get_user_language("user1") == "en-US"
 
     def test_get_user_timezone_default(self, settings_manager):
         """测试获取用户默认时区"""
@@ -68,12 +63,12 @@ class TestSettingsManager:
         assert settings_manager.get_user_workspace("user1") == "/tmp/ws"
 
     def test_get_all_settings(self, settings_manager):
-        """测试获取用户所有设置（8 个标准键，用户覆盖优先）"""
-        settings_manager.set_user_language("en-US", "user1")
+        """测试获取用户所有设置（标准键视图，用户覆盖优先）"""
+        settings_manager.set_user_workspace("/ws/a", "user1")
         settings_manager.set_user_timezone("America/New_York", "user1")
 
         all_settings = settings_manager.get_all_settings("user1")
-        assert all_settings["language"] == "en-US"
+        assert all_settings["workspace"] == "/ws/a"
         assert all_settings["timezone"] == "America/New_York"
         # 未覆盖的键回落全局默认
         assert all_settings["theme"] == "light"
@@ -95,13 +90,13 @@ class TestSettingsManager:
 
     def test_multiple_users(self, settings_manager):
         """测试多用户设置隔离"""
-        settings_manager.set_user_language("en-US", "user1")
-        settings_manager.set_user_language("zh-CN", "user2")
+        settings_manager.set_user_workspace("/ws/one", "user1")
+        settings_manager.set_user_workspace("/ws/two", "user2")
         settings_manager.set_user_timezone("America/New_York", "user1")
         settings_manager.set_user_timezone("Asia/Tokyo", "user2")
 
-        assert settings_manager.get_user_language("user1") == "en-US"
-        assert settings_manager.get_user_language("user2") == "zh-CN"
+        assert settings_manager.get_user_workspace("user1") == "/ws/one"
+        assert settings_manager.get_user_workspace("user2") == "/ws/two"
         assert settings_manager.get_user_timezone("user1") == "America/New_York"
         assert settings_manager.get_user_timezone("user2") == "Asia/Tokyo"
 
@@ -113,11 +108,11 @@ class TestSettingsManager:
 
     def test_reset_settings(self, settings_manager):
         """测试重置用户设置为默认值"""
-        settings_manager.set_user_language("en-US", "user1")
+        settings_manager.set_user_workspace("/ws/a", "user1")
         settings_manager.set_user_timezone("Asia/Tokyo", "user1")
 
         assert settings_manager.reset_settings("user1") is True
-        assert settings_manager.get_user_language("user1") == "zh-CN"
+        assert settings_manager.get_user_workspace("user1") is None
         assert settings_manager.get_user_timezone("user1") == "Asia/Shanghai"
 
 
@@ -127,19 +122,19 @@ class TestSettingsPersistence:
     def test_save_and_reload(self, tmp_path):
         """测试设置落盘并在新实例中恢复（扁平 user_{uid}_* 键）"""
         manager = _make_manager(tmp_path)
-        manager.set_user_language("en-US", "user1")
         manager.set_user_timezone("America/New_York", "user1")
+        manager.set_user_workspace("/ws/a", "user1")
 
         settings_file = manager._settings_file
         assert settings_file.exists()
 
         data = json.loads(settings_file.read_text(encoding="utf-8"))
-        assert data["user_user1_language"] == "en-US"
+        assert data["user_user1_timezone"] == "America/New_York"
 
         # 新实例从同一文件恢复
         manager2 = _make_manager(tmp_path)
-        assert manager2.get_user_language("user1") == "en-US"
         assert manager2.get_user_timezone("user1") == "America/New_York"
+        assert manager2.get_user_workspace("user1") == "/ws/a"
 
     def test_load_settings_on_init(self, tmp_path):
         """测试初始化时加载已有设置文件"""
@@ -148,14 +143,15 @@ class TestSettingsPersistence:
 
         settings_file = data_dir / "settings.json"
         settings_file.write_text(
-            json.dumps({"user_user1_language": "ja-JP", "user_user1_timezone": "Asia/Tokyo"}),
+            json.dumps({"user_user1_timezone": "Asia/Tokyo",
+                        "user_user1_workspace": "/ws/loaded"}),
             encoding="utf-8",
         )
 
         manager = _make_manager(tmp_path)
 
-        assert manager.get_user_language("user1") == "ja-JP"
         assert manager.get_user_timezone("user1") == "Asia/Tokyo"
+        assert manager.get_user_workspace("user1") == "/ws/loaded"
 
     def test_corrupt_settings_file_falls_back(self, tmp_path):
         """设置文件损坏时回落默认值不崩"""
@@ -165,7 +161,7 @@ class TestSettingsPersistence:
 
         manager = _make_manager(tmp_path)
 
-        assert manager.get_setting("language") == "zh-CN"
+        assert manager.get_setting("timezone") == "Asia/Shanghai"
 
 
 class TestSettingsManagerLifecycle:
@@ -185,7 +181,7 @@ class TestSettingsManagerLifecycle:
     def test_on_stop_saves(self, tmp_path):
         """测试停止阶段回调触发落盘"""
         manager = _make_manager(tmp_path)
-        manager.set_user_language("en-US", "user1")
+        manager.set_user_timezone("Asia/Tokyo", "user1")
 
         # 手动清掉文件模拟未保存状态，_on_stop 应重新落盘
         manager._settings_file.unlink()
@@ -220,14 +216,14 @@ class TestEdgeCases:
         """测试不存在的用户回落全局默认"""
         manager = _make_manager(tmp_path)
 
-        language = manager.get_user_language("nonexistent")
         timezone = manager.get_user_timezone("nonexistent")
         all_settings = manager.get_all_settings("nonexistent")
 
-        assert language == "zh-CN"
         assert timezone == "Asia/Shanghai"
+        # 标准键视图的闭集：`language` 随 §6-167 退役后不再出现（这一格同时是
+        # 「白名单没被顺手加回别的键」的对账面——加一个键就得在这里改一次）
         assert set(all_settings.keys()) == {
-            "language", "timezone", "workspace", "theme",
+            "timezone", "workspace", "theme",
             "font_size", "auto_save", "notifications", "debug_mode",
         }
 
@@ -235,16 +231,16 @@ class TestEdgeCases:
         """测试空用户ID"""
         manager = _make_manager(tmp_path)
 
-        manager.set_user_language("en-US", "")
-        assert manager.get_user_language("") == "en-US"
+        manager.set_user_timezone("UTC", "")
+        assert manager.get_user_timezone("") == "UTC"
 
     def test_special_characters_in_user_id(self, tmp_path):
         """测试用户ID包含特殊字符"""
         manager = _make_manager(tmp_path)
 
         user_id = "user@example.com"
-        manager.set_user_language("en-US", user_id)
-        assert manager.get_user_language(user_id) == "en-US"
+        manager.set_user_workspace("/ws/special", user_id)
+        assert manager.get_user_workspace(user_id) == "/ws/special"
 
     def test_invalid_timezone_stored_as_is(self, tmp_path):
         """测试无效时区原样存储（不做校验）"""
@@ -257,7 +253,7 @@ class TestEdgeCases:
         """测试覆盖现有设置"""
         manager = _make_manager(tmp_path)
 
-        manager.set_user_language("en-US", "user1")
-        manager.set_user_language("zh-CN", "user1")
+        manager.set_user_timezone("Asia/Tokyo", "user1")
+        manager.set_user_timezone("Asia/Shanghai", "user1")
 
-        assert manager.get_user_language("user1") == "zh-CN"
+        assert manager.get_user_timezone("user1") == "Asia/Shanghai"

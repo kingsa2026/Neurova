@@ -603,14 +603,15 @@ class ChatPipeline:
         from neurova.agent.capability_gap import clearCapabilityGap
 
         clearCapabilityGap(str(ctx.session_id or ""))
-        # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
-        # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
-        # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）；
-        # 未携带时由 Agent.set_request_identity 落 "default"
+        # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）。
+        # **身份不在这里写**（§6-163 裁定甲）：合并后"这一轮是谁"只由请求边界写一次
+        # （HTTP `/v1/chat`、`/v1/chat/stream`、`console` REST/WS、`mobile_pairing`、渠道路由、
+        # 工具与 MCP 侧各自的入口）。原先它在管线里按 `metadata['user_id']` 再写一遍，
+        # 于是渠道路径的"会话属主"会在回合内被换成"发送者"——那是 §6-121 (b) 乙案的成因，
+        # 现在两条通道已成一条，管线更不该出现第二个写点。
         self._agent.set_request_identity(
             user_input=ctx.user_input,
             session_id=ctx.session_id,
-            user_id=(ctx.metadata or {}).get("user_id"),
         )
         # G2 目标写入面 ①：会话声明的目标（`metadata["goal"]`，与 thinking_effort
         # 同一注入面）。归一由 turn_context 单点负责；未声明即清槽——否则上一轮的

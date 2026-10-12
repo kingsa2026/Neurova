@@ -289,6 +289,15 @@ class UserLanguagePreference:
             Language.from_str(lang.value if isinstance(lang, Language) else str(lang))
             for lang in (self.secondary_languages or [])
         ]
+        # `AUTO` 表达的是"自动检测"，而这件事本类已有 `auto_detect: bool` 专职承载。
+        # 让 `primary_language = AUTO` 过关，等于把 §6-140 刚拆掉的"不识别与自动检测共用
+        # 一个合法值"在新字段上重建一遍：下游按 `.value` 比语言时，`auto` 谁都不会命中，
+        # 表现是"用户选了语言却读不到对应文案"。非法状态在构造点就拒。
+        for field_name in ("primary_language", "fallback_language"):
+            if getattr(self, field_name) is Language.AUTO:
+                raise ValueError(
+                    "`UserLanguagePreference.%s` 不接受 `auto`：它表达的是「自动检测」，"
+                    "那个意思由 `auto_detect` 承载；首选/回退语言必须是一个真实语言" % field_name)
 
     def get_preferred_languages(self) -> List[Language]:
         """获取首选语言列表"""

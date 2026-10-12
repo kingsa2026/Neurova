@@ -1,8 +1,5 @@
 # 插件系统和 CLI 接口设计
 
-> **状态**: ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131）
-> **说明**: 本文的 manifest/semver/权限/生命周期与动态加载实装原在 `neurova/plugins/`，该包生产侧从未接线（唯一动态加载实现在 `plugin_manager.py:377-384`，零调用方），按裁定整批退役；`/v1/plugins` 端点作为记账面保留，**不加载任何模块**。下面的代码示例为历史设计记录，不再可运行。
-
 > **状态**: 已实现（对照代码核实） · 版本: v1.0.0-beta1
 > **说明**: 本文档描述的功能已在 `neurova/` 对应模块实现，详见 [功能模块矩阵](../0-index/README.md)
 
@@ -72,7 +69,7 @@ print(constraint.satisfies(SemVersion("1.3.0")))  # False
 ### 2.2 插件类型和状态
 
 ```python
-from neurova.plugins.plugin_manifest import PluginType, PluginState, PluginPermission
+from neurova.plugins.plugin_manifest import PluginType, PluginState, PluginFrameworkSurface
 
 # 插件类型
 class PluginType(str, Enum):
@@ -93,24 +90,34 @@ class PluginState(str, Enum):
     ERROR = "error"           # 错误
     UPDATING = "updating"     # 更新中
 
-# 插件权限
-class PluginPermission(str, Enum):
-    READ_EVENTS = "read:events"      # 读取事件
-    EMIT_EVENTS = "emit:events"      # 发送事件
-    HTTP_REQUEST = "http:request"    # HTTP 请求
-    READ_FILES = "read:files"        # 读取文件
-    WRITE_FILES = "write:files"      # 写入文件
-    EXECUTE_COMMANDS = "execute:commands"  # 执行命令
-    NETWORK_ACCESS = "network:access"    # 网络访问
-    ADMIN = "admin"                    # 管理员权限
+# 插件独有的框架中介面（§6-159 收口后只剩两档）
+class PluginFrameworkSurface(str, Enum):
+    READ_EVENTS = "read:events"      # 经事件总线订阅/退订
+    EMIT_EVENTS = "emit:events"      # 经事件总线投递
 ```
+
+> **两类授权面，各有一处定义，互不重复**（用户 2026-10-12 裁「甲 · 彻底合一」）：
+>
+> - **能力面**（文件／网络／命令／模型／系统／节点／存储配额）的词汇与调用面仲裁**只在 skills 那一份**：
+>   键取自 `neurova/skills/permissions.py:KNOWN_CAPABILITY_KEYS`，合法性由
+>   `skill_install_gate.validate_permissions_for_install` 在安装时判，运行时由
+>   `tool_executor` 经 `skill_permission_scope()` fail-closed 裁（多归属工具取 AND）。
+>   插件清单里写成 `permissions: {network: true, file: {enabled: true, read_only: true}}`。
+> - **框架中介面**（事件总线两档）在 `plugin_permissions.FRAMEWORK_SURFACE_MODEL`，
+>   强制点是 `BasePlugin.subscribe/unsubscribe/publish_event`——技能侧没有这个概念，所以不属于上一份。
+>
+> 本节曾经列过八项 `PluginPermission`（含 `http:request`/`read:files`/`write:files`/
+> `network:access`/`execute:commands`/`admin`），其中四项与 skills 那份是同一件事的两份定义、
+> `http:request` 就是 `network`、`admin` 是 `api/deps.require_role` 的角色门——**全部收口掉，
+> 旧清单字段不做自动映射**（`execute:commands → system` 会变宽，那种决定只能由人重做一次）。
+> 也不构成沙箱：动态装载即进程内任意代码执行，这里管的是"经框架调用时拦得住"＋"对外开的那一面"。
 
 ### 2.3 插件清单 (PluginManifest)
 
 ```python
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
-from neurova.plugins.plugin_manifest import SemVersion, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import SemVersion, PluginType, PluginFrameworkSurface
 
 @dataclass
 class PluginManifest:
@@ -132,7 +139,8 @@ class PluginManifest:
     module_class: str = ""             # 入口类
     
     # 权限
-    required_permissions: List[PluginPermission] = None
+    permissions: Dict[str, Any] = None            # 能力面，键 ∈ skills 那份词汇
+    framework_surfaces: List[PluginFrameworkSurface] = None
     
     # 配置
     config_schema: Dict[str, Any] = None
@@ -197,6 +205,20 @@ manager.disable_plugin("my-plugin")
 manager.uninstall_plugin("my-plugin")
 ```
 
+> **安装与启用状态落盘，装载状态不落盘**（用户 2026-10-12 裁「落盘状态 + 只发现不装载」，台账 §6-164）。
+>
+> - `PluginManager` 把每个插件的 `{installed, enabled, 清单路径…}` 写进 `<插件根>/state.json`
+>   （`STATE_STORE_VERSION = 1`），写入走 `core/atomic_io.atomic_write_text` 这一处原子口。
+>   装／卸／启／停四个动作**先落盘再改内存**，落盘失败即回滚内存并点名原因（`state_write_failed`），
+>   不留"内存里有、文件里没有"的半成品；文件坏了改名隔离后响亮报 `state_store_corrupt`，
+>   版本不认识报 `state_store_version`——都不静默兜底。
+> - **`loaded` 重启后一律为 `False`，且从不写进文件**：装载＝进程内任意代码执行，
+>   一次授权不该在每次开机时被自动复现成隐式信任。
+> - 于是重启后的 `startupMountPass()` 按 `entry_not_loaded` 拒挂，这是如实读数而不是故障；
+>   要让插件真跑起来必须显式重走 `enable` → `load`。
+> - 目录里扫得到、`state.json` 里没有的插件＝**已发现未安装**，只在列表接口里以
+>   `discovered_not_installed` 逐条点名，既不静默登记也不静默装载。
+
 ### 3.2 依赖解析
 
 ```python
@@ -245,7 +267,7 @@ lifecycle.execute_lifecycle(LifecycleEvent.AFTER_ENABLE, "my-plugin")
 
 ```python
 from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginFrameworkSurface
 
 class MyPlugin(BasePlugin):
     """示例插件"""
@@ -261,7 +283,7 @@ class MyPlugin(BasePlugin):
             tags=["status"]
         )
     ]
-    required_permissions = [PluginPermission.READ_EVENTS]
+    framework_surfaces = [PluginFrameworkSurface.READ_EVENTS]
     
     def __init__(self, manifest: PluginManifest):
         super().__init__(manifest)
@@ -520,10 +542,8 @@ sensitive_patterns = [
   "neurova_min_version": "4.0.0",
   "entry_point": "main.py",
   "module_class": "MyPlugin",
-  "required_permissions": [
-    "read:events",
-    "emit:events"
-  ],
+  "permissions": { "network": true },
+  "framework_surfaces": ["read:events", "emit:events"],
   "config_schema": {
     "type": "object",
     "properties": {
@@ -539,8 +559,9 @@ sensitive_patterns = [
   "api_endpoints": [
     {
       "method": "GET",
-      "path": "/api/my-plugin/status",
-      "handler": "get_status"
+      "path": "status",
+      "handler_name": "get_status",
+      "description": "插件自检"
     }
   ],
   "frontend_resources": [
@@ -552,6 +573,11 @@ sensitive_patterns = [
   "license": "MIT"
 }
 ```
+
+> 清单里 `api_endpoints[].path` 写的是**本插件命名空间内的相对路径**（`status` 而不是
+> `/api/my-plugin/status`）：最终路径固定为 `/api/v1/plugin-api/{plugin_id}/{path}`，前缀由框架定。
+> 绝对声明、`..`、带 `?`/`#` 的声明一律被拒（`path_out_of_namespace`），插件压不到核心路由上。
+> handler 键 `handler_name` 与 `handler` 两种拼写在 `APIEndpoint.from_dict` 一处归一。
 
 ### 6.2 插件目录结构
 
@@ -573,7 +599,7 @@ my-plugin/
 ```python
 # main.py
 from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
-from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginFrameworkSurface
 
 class MyPlugin(BasePlugin):
     """示例插件"""
@@ -587,7 +613,7 @@ class MyPlugin(BasePlugin):
             description="获取插件状态"
         )
     ]
-    required_permissions = [PluginPermission.READ_EVENTS]
+    framework_surfaces = [PluginFrameworkSurface.READ_EVENTS]
     
     def __init__(self, manifest: PluginManifest):
         super().__init__(manifest)
@@ -707,10 +733,10 @@ Content-Type: application/json
 
 ### 8.3 安全考虑
 
-1. **插件签名**：验证插件来源和完整性
-2. **权限控制**：限制插件可访问的资源
-3. **沙箱执行**：在隔离环境中运行插件
-4. **审计日志**：记录所有插件操作
+1. **插件签名**：验证插件来源和完整性（**未落地**，属 P3 的供应链校验；今天只接受插件根内的目录，远程源直接 501）
+2. **权限控制**：清单逐项声明、admin 逐项确认，未确认即拒（事件总线两档当场拒；HTTP 面走聚合门）
+3. **装载与挂载边界**：装载源必须在插件根内；插件路由只能落在 `/api/v1/plugin-api/{id}/` 且一律带身份门——**这不是沙箱**，能装载即能在进程内执行任意代码
+4. **审计日志**：授予/撤销与挂载/摘除都进既有审计面（`PERMISSION_CHANGE` / `SECURITY_EVENT`）
 5. **CLI 命令白名单**：只允许安全命令执行
 6. **输出脱敏**：自动过滤敏感信息
 

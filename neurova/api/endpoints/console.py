@@ -753,6 +753,16 @@ async def post_console_chat(
                 # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
                 "emit_status_events": True,
             }
+            # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
+            # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
+            # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
+            # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
+            # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
+            # （`session_manager:1650` 空属主＝对全员可见）。写点必须落在 `event_stream` 内、
+            # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
+            from neurova.core.identity_context import set_request_user_id
+
+            set_request_user_id(user_id)
             # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
             attachments = attach_files(getattr(body, "file_ids", None), user_id)
             logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
@@ -2092,6 +2102,15 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
     if not payload:
         await websocket.close(code=4401)
         return
+    # 同一条请求边界口径（§6-153 扫出的第二个命中点）：这条面也跑回合，身份却只停在
+    # `conn_id` 的字符串里——不建立请求级属主，usage 就记 `"anonymous"`、按日配额不判、
+    # `agent.chat` 之后落盘的会话也是空属主（对全员可见）。取数走 `_user_identity`
+    # 那份单点，不在这里另推一遍 `sub` 的口径。
+    from neurova.api.auth import _user_identity
+    from neurova.core.identity_context import set_request_user_id
+
+    user_id = str(_user_identity(payload).get("user_id") or "")
+    set_request_user_id(user_id)
     conn_id = f"{payload.get('sub', 'unknown')}:{uuid.uuid4().hex[:8]}"
     await _manager.connect(websocket, conn_id)
     try:

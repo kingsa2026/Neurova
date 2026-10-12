@@ -158,8 +158,8 @@ Agent.__init__ [agent_core.py:1061]
 | 类名 | 次数 | 分布 |
 |------|------|------|
 | `SkillInfo` | 6 | `api/endpoints/{skill,skills_market,skill_pool_api}.py`、`skills/market_adapters.py:22`、`skill_system/__init__.py:267`、`skill_system.py:43` |
-| `MemoryType` | 4 | `cognitive/orchestrator.py:35`、`cognitive_layers/memory_layer/models.py:15`、`cognitive_layers/.../cognitive_storage_engine.py:34`、`core/cognition_orchestrator.py:43` |
-| `MemoryManager` | 3 | 同上三处**平行命名空间各一个**（`:112` / `:136` / `:193`） |
+| `MemoryType` | 3 | `cognitive_layers/memory_layer/models.py:15`、`cognitive_layers/.../cognitive_storage_engine.py:34`、`core/cognition_orchestrator.py:43`（第 4 处 `cognitive/orchestrator.py:35` 随该文件于 2026-10-11 退役） |
+| `MemoryManager` | 2 | `cognitive_layers/memory_layer/manager.py:160`（记忆真源，在服务路上）、`core/cognition_orchestrator.py:193`（内存版，该模块零生产消费者）；`cognitive/orchestrator.py:113` 那份带 JSON 落盘、全仓零消费者，随该文件于 2026-10-11 退役 |
 | `Message` | 2 | `llm/interfaces/provider_interface.py:40`、`router.py:67`（`context_compressor.py:50` 已随该模块于 B6-10 批次 C 退役） |
 | `WorkflowDefinition`/`NodeType` | 4 | — |
 | `Message`、`MessageType`、`CognitiveState`、`AgentStatus`、`MemoryManager` | 各 3 | — |

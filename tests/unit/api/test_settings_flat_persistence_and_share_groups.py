@@ -50,10 +50,15 @@ class TestSettingsFlatPersistence:
         assert json.loads(f.read_text(encoding="utf-8"))["flat"]["theme"] == "light"
 
     def test_get_key_reads_persisted_value(self, settings_client):
+        """单键 GET 与整表 GET 读源一致（原缺陷：单键只读内存）。
+
+        原先这一格用 `language` 当例子——那个键已随 §6-167 从 settings 面退役
+        （写它 400、读它 404），所以改用一个仍然活着的平铺键，测的还是同一件事。
+        """
         c, _ = settings_client
-        c.put("/api/v1/settings/language", json={"value": "en-US"})
-        got = c.get("/api/v1/settings/language").json()
-        assert got["data"]["value"] == "en-US"
+        c.put("/api/v1/settings/auto_save", json={"value": False})
+        got = c.get("/api/v1/settings/auto_save").json()
+        assert got["data"]["value"] is False
 
     def test_flat_survives_memory_reset(self, settings_client, monkeypatch):
         """重启模拟：内存默认字典恢复初始值后，持久值仍从盘回读。"""

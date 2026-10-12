@@ -110,7 +110,7 @@ class TestWindowCacheKeyReadsTurnIdentity:
             "无任何身份时才落 direct（本用例的前提）"
         )
 
-        set_turn_identity("你好", session_id="sess-single-1", user_id="u1")
+        set_turn_identity("你好", session_id="sess-single-1")
         assert orch._resolve_window_cache_key() == "sess-single-1", (
             "装配入口没读每轮身份单源 —— 键仍退化："
             f"{orch._resolve_window_cache_key()!r}。`agent.current_session_id` "
@@ -124,7 +124,7 @@ class TestWindowCacheKeyReadsTurnIdentity:
         orch = ContextOrchestrator(
             _ProductionShapedAgent(), use_pool=True, session_id="sess-explicit"
         )
-        set_turn_identity("你好", session_id="sess-turn", user_id="u1")
+        set_turn_identity("你好", session_id="sess-turn")
         assert orch._resolve_window_cache_key() == "sess-explicit", (
             "构造期显式覆盖（测试/运维入口）被每轮身份单源盖掉——回落链次序错了"
         )
@@ -149,10 +149,10 @@ class TestWindowCacheKeyReadsTurnIdentity:
 
         orch._window_summarizer = summarize
 
-        set_turn_identity("问 A", session_id="sess-one", user_id="u1")
+        set_turn_identity("问 A", session_id="sess-one")
         await _build(orch, user_input="继续 A", history=_long_history("量子计算"))
 
-        set_turn_identity("问 B", session_id="sess-two", user_id="u1")
+        set_turn_identity("问 B", session_id="sess-two")
         view_b = await _build(orch, user_input="继续 B", history=_long_history("火星殖民"))
 
         keys = set(orch._window_compaction_cache)
@@ -177,7 +177,7 @@ class TestWindowCacheKeyReadsTurnIdentity:
 
         orch._window_summarizer = summarize
         for index in range(orch._WINDOW_CACHE_SLOTS + 4):
-            set_turn_identity("继续", session_id=f"sess-{index}", user_id="u1")
+            set_turn_identity("继续", session_id=f"sess-{index}")
             await _build(orch, user_input="继续", history=_long_history(f"会话{index}"))
 
         assert len(orch._window_compaction_cache) <= orch._WINDOW_CACHE_SLOTS, (
@@ -191,7 +191,7 @@ class TestPoolIdentityFollowsTurnSession:
     @pytest.mark.asyncio
     async def test_pool_session_id_follows_turn_identity_on_direct_turns(self):
         orch = _orchestrator()
-        set_turn_identity("你好", session_id="sess-pool-1", user_id="u1")
+        set_turn_identity("你好", session_id="sess-pool-1")
 
         await _build(
             orch,
@@ -214,7 +214,7 @@ class TestPoolIdentityFollowsTurnSession:
     async def test_room_turn_keeps_room_identity_over_turn_session(self):
         """正向锁：协作轮的房间身份优先于每轮 session（不得被覆盖成单聊 id）。"""
         orch = _orchestrator()
-        set_turn_identity("群聊", session_id="sess-plain", user_id="u1")
+        set_turn_identity("群聊", session_id="sess-plain")
 
         await _build(
             orch,
@@ -252,7 +252,7 @@ class TestIdentitylessTurnIsVisible:
     @pytest.mark.asyncio
     async def test_identified_turn_is_not_counted_as_identityless(self):
         orch = _orchestrator()
-        set_turn_identity("你好", session_id="sess-visible-1", user_id="u1")
+        set_turn_identity("你好", session_id="sess-visible-1")
 
         await _build(
             orch,
