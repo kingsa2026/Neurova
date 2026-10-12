@@ -2332,6 +2332,8 @@ export default {
     general: '通用',
     generalSettings: '通用设置',
     appName: '应用名称',
+    outOfBoxLanguage: '开箱默认语言',
+    outOfBoxLanguageHint: '只作用于还没自己选过语言的用户；任何人一旦选过，就以他自己的选择为准（仅管理员可改）。',
     security: '安全',
     securitySettings: '安全设置',
     jwtSecret: 'JWT 密钥',

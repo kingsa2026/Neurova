@@ -2322,6 +2322,8 @@ export default {
     general: 'General',
     generalSettings: 'General Settings',
     appName: 'App Name',
+    outOfBoxLanguage: 'Out-of-box language',
+    outOfBoxLanguageHint: 'Applies only to users who have not picked a language yet; once someone picks one, their own choice wins. Admin only.',
     security: 'Security',
     securitySettings: 'Security Settings',
     jwtSecret: 'JWT Secret',

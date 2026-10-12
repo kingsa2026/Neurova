@@ -72,7 +72,10 @@ class TestPreferenceReadFace:
         data = r.json()["data"]
         assert data["configured"] is False, (
             "没设过偏好却报 configured=True——读面把默认值冒充成用户做过的决定")
-        assert data["source"] == "default"
+        assert data["source"] == "builtin", (
+            "来源词汇自 §6-167 起是 (user|out_of_box|builtin) 三值闭集，定义在 "
+            "`LanguageManager.EFFECTIVE_SOURCES`——旧值 `default` 已被拆成"
+            "「管理员定过起点」与「谁都没定」两种，混成一个词就读不出区别")
         assert not Path(client.manager.preferences_path).exists(), (
             "一次 GET 就在盘上留下文件：那会让「多少人设过偏好」被读操作自己灌大")
 

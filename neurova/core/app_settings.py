@@ -24,7 +24,12 @@ logger = get_logger(__name__)
 # 该值即"未显式设置"的哨兵
 LLM_DEFAULT_MAX_TOKENS = 131072
 
-GENERAL_DEFAULTS: Dict[str, Any] = {"app_name": "Neurova", "language": "zh-CN"}
+#: `language` 一格已退役（§6-167，用户裁「先取长补短再退役」）：它是仓内四份
+#: 「某人默认看什么语言」里的第一份，而**生产读者 0 处**——只被 `GET /settings` 回显。
+#: 它唯一不可替代的语义（管理员替未表达偏好者定起点）已被取进语言层
+#: （`neurova/language/manager.py` 的开箱默认 ＋ `PUT /api/v1/language/preferences/default`）。
+#: 留在这里只会让同一个问题有两份词汇，而漂移时先坏的是没人对着读的那一份（教义第 6 条）。
+GENERAL_DEFAULTS: Dict[str, Any] = {"app_name": "Neurova"}
 ADVANCED_DEFAULTS: Dict[str, Any] = {
     "debug_mode": False,
     "log_level": "info",

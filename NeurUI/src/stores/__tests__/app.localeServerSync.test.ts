@@ -13,6 +13,10 @@ import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('@/api/modules/language', () => ({
   UI_OVERLAY_NAMESPACE: 'ui-overlay',
+  // §6-167 起 store 按这份常量分支；mock 里不给它就会在取属性时抛错——
+  // 而抛错落在 `syncLocaleFromServer` 的 try 里，表现是"每次都报 failed"，
+  // 于是判据绿着掩盖一条根本没跑到的分支（静默失败那一族）。
+  LANGUAGE_SOURCE: { user: 'user', outOfBox: 'out_of_box', builtin: 'builtin' },
   getMyLanguagePreference: vi.fn(),
   setMyLanguagePreference: vi.fn(),
   getTranslationOverlay: vi.fn(),
@@ -88,6 +92,60 @@ describe('启动时按服务端的本人偏好定语言', () => {
     expect(store.locale).toBe('zh-CN')
     // 没有偏好也要把这一门语言的覆盖层拉一次：文案层与"谁选了哪门语言"是两件事
     await vi.waitFor(() => expect(getTranslationOverlay).toHaveBeenCalled())
+  })
+
+  it('applies the admin\'s out-of-box default to someone who never picked — without writing it back', async () => {
+    // §6-167 取进来的那一格：管理员定的起点必须**真的作用到人身上**，
+    // 否则退役掉全局默认就等于把"开箱语言"这件事整体删了。
+    vi.mocked(getMyLanguagePreference).mockResolvedValue(
+      preferencePayload({ configured: false, source: 'out_of_box', primary_language: 'en' }) as any)
+    const store = useAppStore()
+
+    const result = await store.syncLocaleFromServer()
+
+    expect(result.outcome).toBe('applied')
+    expect(result.via).toBe('out_of_box')
+    expect(store.locale).toBe('en-US')
+    expect(globalComposer().locale.value).toBe('en-US')
+    // 关键一格：读来的起点不许回写成"他自己的偏好"——回写就把它冻住了，
+    // 以后管理员再改也不再作用于他（起点与偏好是两件事，判据钉的就是这条边界）。
+    expect(setMyLanguagePreference).not.toHaveBeenCalled()
+  })
+
+  it('reports same (not applied) when the out-of-box default already matches the local choice', async () => {
+    vi.mocked(getMyLanguagePreference).mockResolvedValue(
+      preferencePayload({ configured: false, source: 'out_of_box', primary_language: 'zh' }) as any)
+    const store = useAppStore()
+
+    const result = await store.syncLocaleFromServer()
+
+    expect(result.outcome).toBe('same')
+    expect(result.via).toBe('out_of_box')
+    expect(setMyLanguagePreference).not.toHaveBeenCalled()
+  })
+
+  it('keeps the local choice when the out-of-box default speaks a language the UI does not ship', async () => {
+    vi.mocked(getMyLanguagePreference).mockResolvedValue(
+      preferencePayload({ configured: false, source: 'out_of_box', primary_language: 'pt' }) as any)
+    const store = useAppStore()
+
+    const result = await store.syncLocaleFromServer()
+
+    expect(result.outcome).toBe('default')
+    expect(store.locale).toBe('zh-CN')
+    expect(setMyLanguagePreference).not.toHaveBeenCalled()
+  })
+
+  it('the person\'s own preference still beats the out-of-box default', async () => {
+    vi.mocked(getMyLanguagePreference).mockResolvedValue(
+      preferencePayload({ configured: true, source: 'user', primary_language: 'ja' }) as any)
+    const store = useAppStore()
+
+    const result = await store.syncLocaleFromServer()
+
+    expect(result.outcome).toBe('applied')
+    expect(result.via).toBeUndefined()
+    expect(store.locale).toBe('ja-JP')
   })
 
   it('is quiet when the request fails — the interface keeps working with shipped copy', async () => {

@@ -91,3 +91,66 @@ describe('GET /language/overlay', () => {
     })
   })
 })
+
+describe('GET/PUT /language/preferences/default（§6-167 开箱默认）', () => {
+  it('reads the out-of-box default at the registered path', async () => {
+    apiGet.mockResolvedValue({ data: {} } as any)
+
+    await languageApi.getOutOfBoxLanguageDefault()
+
+    expect(apiGet).toHaveBeenCalledWith('/language/preferences/default')
+  })
+
+  it('writes it as a language payload and never with an owner field of its own', async () => {
+    apiPut.mockResolvedValue({ data: {} } as any)
+
+    await languageApi.setOutOfBoxLanguageDefault({
+      primary_language: 'zh-CN', auto_detect: false,
+    })
+
+    expect(apiPut).toHaveBeenCalledWith('/language/preferences/default', {
+      primary_language: 'zh-CN', auto_detect: false,
+    })
+    const body = apiPut.mock.calls[0][1] as Record<string, unknown>
+    // 这一格影响的是"所有还没选过的人"，属主由后端那条保留名给；
+    // 客户端递 user_id 就会长出第二个"替他人绑"的入口（后端 `extra="forbid"` 也拒）
+    expect(body).not.toHaveProperty('user_id')
+  })
+
+  it('keeps the source vocabulary in exactly one UI file', async () => {
+    // 后端那份定义在 `LanguageManager.EFFECTIVE_SOURCES`；跨语言无法共享定义，
+    // 所以 UI 侧允许一份**类型/常量**，但只允许**一个文件**——两处各写一遍时，
+    // 先漂移的一定是没人对着读的那一份（教义第 6 条）。
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const srcRoot = path.resolve(fileURLToPath(import.meta.url), '../../..')
+
+    const hits: string[] = []
+    // 名字带上面那件事：仓内已有两只叫 `walk` 的 fs 遍历器（`i18n/__tests__` 与
+    // `components/__tests__`），第三只同名会让「跨文件同名函数」台账 +1 而没有任何必要
+    // ——同名不总是错，但为省一个名字造一次同名是。
+    const collectVocabularyHits = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          // 测试夹具里也写着这三个值（它必须能替身那份常量），但它不是"定义处"；
+          // 不排掉就会把判据自己那句搜索字符串算进命中面（§6-162 那枚自我指涉形态）
+          if (entry.name !== '__tests__') collectVocabularyHits(full)
+          continue
+        }
+        if (/\.(ts|vue)$/.test(entry.name)
+          && !entry.name.includes('.test.') && !entry.name.includes('.spec.')
+          && fs.readFileSync(full, 'utf-8').includes("'out_of_box'")) hits.push(full)
+      }
+    }
+    collectVocabularyHits(srcRoot)
+
+    expect(hits.map((p) => path.relative(srcRoot, p).replace(/\\/g, '/'))).toEqual([
+      'api/modules/language.ts',
+    ])
+    expect(Object.values(languageApi.LANGUAGE_SOURCE).sort()).toEqual(
+      ['builtin', 'out_of_box', 'user'])
+  })
+})

@@ -2320,6 +2320,8 @@ export default {
     general: 'عام',
     generalSettings: 'الإعدادات العامة',
     appName: 'اسم التطبيق',
+    outOfBoxLanguage: 'اللغة الافتراضية',
+    outOfBoxLanguageHint: 'تنطبق فقط على من لم يختر لغة بنفسه؛ واختيار الشخص نفسه له الأولوية دائمًا. للمديرين فقط.',
     security: 'الأمان',
     securitySettings: 'إعدادات الأمان',
     jwtSecret: 'مفتاح JWT السري',
