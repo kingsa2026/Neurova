@@ -398,34 +398,59 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
     # 孤儿取消标记只对在流会话生效：新流开始即消费残留标记
     _cancelled_sessions.pop(session_id, None)
 
+    agent = None
+    agentLookupFailed = False
     try:
         from neurova.api.endpoints import get_agent_instance
 
         agent = get_agent_instance(agent_id)
     except Exception:
-        agent = None
+        # 把故障读成"不存在"是 §6-126 那一族的又一形：装配/导入坏掉时客户端同样只收到
+        # 一句 `agent_not_found`，服务端一行日志都没有——真因永远看不见。
+        logger.exception("mobile 取 Agent 失败 agent=%s", agent_id)
+        agentLookupFailed = True
 
     if agent is None:
-        await ws.send_json({"type": "error", "code": "agent_not_found", "message": f"Agent '{agent_id}' 不存在"})
+        await ws.send_json({
+            "type": "error",
+            "code": "agent_lookup_failed" if agentLookupFailed else "agent_not_found",
+            "message": (f"Agent '{agent_id}' 查询失败（详见服务端日志）" if agentLookupFailed
+                        else f"Agent '{agent_id}' 不存在"),
+        })
         return
 
     try:
         index = 0
+        # 请求级属主（§6-154 合修的第二半）：这条面从 JWT/配对码里就拿到了人，
+        # 但从不交给请求通道——`mem_core.save_to_session` 与 usage 入账读的就是这条通道，
+        # 空读数的后果是 usage 记 `anonymous`、按日 LLM 配额整条不判、会话落空属主（对全员可见）。
+        # 写在 `_handle_chat_send` 内：这条函数本身就跑在 `chat:send` 那条 task 上
+        # （`mobile_websocket` 里 `create_task(_run_chat_stream(...))`），不存在"写在外层 task 而内层看不见"。
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
+        turnMetadata = {"user_id": user_id, "role": "user"}
         if hasattr(agent, "chat_stream") and callable(agent.chat_stream):
-            async for chunk in agent.chat_stream(content=content, session_id=session_id, user_id=user_id):
+            async for chunk in agent.chat_stream(user_input=content, session_id=session_id,
+                                                 metadata=turnMetadata):
                 if _cancelled_sessions.get(session_id):
                     await ws.send_json({"type": "chat:cancelled", "session_id": session_id})
                     return
                 await ws.send_json({"type": "chat:chunk", "content": str(chunk), "session_id": session_id, "index": index})
                 index += 1
         else:
-            result = await agent.chat(content=content, session_id=session_id, user_id=user_id)
+            result = await agent.chat(user_input=content, session_id=session_id,
+                                      metadata=turnMetadata)
             text = result.get("text", "") if isinstance(result, dict) else str(result)
             await ws.send_json({"type": "chat:chunk", "content": text, "session_id": session_id, "index": index})
             index += 1
 
         await ws.send_json({"type": "chat:done", "session_id": session_id, "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
     except Exception as e:
+        # 原先这里只把异常文本发给客户端、服务端一行都不记——一次 `TypeError`（调用点参数名
+        # 与 `Agent.chat_stream` 的真签名对不上）就这样把整个移动端对话面挂了四个月而无人可见。
+        # 客户端事件契约保持不变（`chat_failed`），但根因必须留在日志里。
+        logger.exception("mobile chat:send 回合失败 agent=%s session=%s", agent_id, session_id)
         await ws.send_json({"type": "error", "code": "chat_failed", "message": str(e)})
     finally:
         # 资源修复 #3: 取消标记随流终态（done/cancelled/error）回收
@@ -445,15 +470,25 @@ async def _handle_chat_cancel(ws, data: dict):
 async def _handle_agent_switch(ws, data: dict):
     """处理 agent:switch -- 切换 Agent"""
     agent_id = data.get("agent_id", "")
+    agent = None
+    agentLookupFailed = False
     try:
         from neurova.api.endpoints import get_agent_instance
 
         agent = get_agent_instance(agent_id)
     except Exception:
-        agent = None
+        # 把故障读成"不存在"是 §6-126 那一族的又一形：装配/导入坏掉时客户端同样只收到
+        # 一句 `agent_not_found`，服务端一行日志都没有——真因永远看不见。
+        logger.exception("mobile 取 Agent 失败 agent=%s", agent_id)
+        agentLookupFailed = True
 
     if agent is None:
-        await ws.send_json({"type": "error", "code": "agent_not_found", "message": f"Agent '{agent_id}' 不存在"})
+        await ws.send_json({
+            "type": "error",
+            "code": "agent_lookup_failed" if agentLookupFailed else "agent_not_found",
+            "message": (f"Agent '{agent_id}' 查询失败（详见服务端日志）" if agentLookupFailed
+                        else f"Agent '{agent_id}' 不存在"),
+        })
         return
 
     await ws.send_json({
@@ -481,6 +516,7 @@ async def _handle_session_list(ws, data: dict, user_id: str):
         sessions = sm.list_sessions(agent_id=agent_id, user_id=user_id)
         await ws.send_json({"type": "session:list", "sessions": sessions})
     except Exception as e:
+        logger.exception("mobile session:list 失败")
         await ws.send_json({"type": "error", "code": "session_list_failed", "message": str(e)})
 
 
@@ -497,6 +533,7 @@ async def _handle_session_create(ws, data: dict, user_id: str):
         session_id = sm.create_session(agent_id, user_id=user_id)
         await ws.send_json({"type": "session:created", "session": {"session_id": session_id, "agent_id": agent_id}})
     except Exception as e:
+        logger.exception("mobile session:create 失败 agent=%s", agent_id)
         await ws.send_json({"type": "error", "code": "session_create_failed", "message": str(e)})
 
 
@@ -520,6 +557,7 @@ async def _handle_ws_message(ws, data: dict, user_id: str, pairing_id: str):
     try:
         await handler()
     except Exception as e:
+        logger.exception("mobile WS 分发器处理 %s 失败", msg_type)
         await ws.send_json({"type": "error", "code": "handler_error", "message": str(e)})
 
 
