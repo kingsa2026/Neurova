@@ -2,7 +2,7 @@
 插件清单模块单元测试
 
 测试 SemVersion、VersionConstraint、PluginType、PluginState、PluginFrameworkSurface、
-PluginManifest 和 parse_manifest 的功能。（§6-157 收口：能力面词汇单点在 skills，
+PluginManifest 和 parse_manifest 的功能。（§6-159 收口：能力面词汇单点在 skills，
 本文件只钉插件自己的清单形状。）
 """
 
@@ -239,7 +239,7 @@ class TestPluginState:
 
 
 class TestPluginFrameworkSurface:
-    """§6-157 收口：这里只剩**插件独有**的框架中介面，能力面词汇单点在 skills。
+    """§6-159 收口：这里只剩**插件独有**的框架中介面，能力面词汇单点在 skills。
 
     原来这一族有八项 `PluginPermission`，其中四项与 `skills/permissions.py` 的
     `KNOWN_CAPABILITY_KEYS` 是同一件事的两份定义——而那一份才是真在 `tool_executor`
@@ -317,7 +317,7 @@ class TestPluginManifest:
         assert manifest.dependencies == {"neurova-core": ">=1.0.0"}
 
     def test_manifest_with_permissions(self):
-        """§6-157 收口后的清单形状：能力面是 dict（原样带过，合法性由 skills 那道门判），
+        """§6-159 收口后的清单形状：能力面是 dict（原样带过，合法性由 skills 那道门判），
         框架中介面是封闭枚举列表。"""
         manifest = PluginManifest(
             plugin_id="test",

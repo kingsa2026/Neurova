@@ -432,7 +432,7 @@ class PluginManager:
 
         认不出的声明**原样保留**而不是丢弃：丢弃会让「声明了一个拼错项」的插件变成
         「什么都没声明」，聚合门反而空真通过——不认识的项没人能确认，留在 pending 里
-        才是安全侧。（§6-155 的空真通过在 §6-157 里另有一道 `permissions_undeclared` 挡。）
+        才是安全侧。（§6-155 的空真通过在 §6-159 里另有一道 `permissions_undeclared` 挡。）
         """
         raw = self._manifests.get(plugin_name) or {}
         out: List[str] = [str(k) for k in (raw.get("permissions") or {})]

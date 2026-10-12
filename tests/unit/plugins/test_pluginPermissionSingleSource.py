@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""权限词汇必须只有一处定义（用户 2026-10-12 裁「甲 · 彻底合一」，台账 §6-157，设计稿 §3/§5）。
+"""权限词汇必须只有一处定义（用户 2026-10-12 裁「甲 · 彻底合一」，台账 §6-159，设计稿 §3/§5）。
 
 §6-155 立了八项 `PluginPermission`，而 `neurova/skills/permissions.py` 里那套七类能力键
 （`tools|network|file|model|system|node|storage`）才是**真在执行**的那份——

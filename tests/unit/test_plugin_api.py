@@ -8,7 +8,7 @@
 - `enable` **不再顺带把 loaded 置真**（启用是门，装载是另一步，两步都会留痕）；
 - `load` 在未启用时回 409 并带成因，不再假装成功；
 - 详情/列表/状态三个读面都来自 manager；`routes_mounted` 读的是活 app 的路由表
-  （§6-157 之后它不再是常量：没授权/没逐项确认就是 false 带成因，挂上就是 true 带路径）
+  （§6-159 之后它不再是常量：没授权/没逐项确认就是 false 带成因，挂上就是 true 带路径）
   （P1 只接通装载，插件声明的路由没挂进运行中的 app）。
 
 装配类断言（"exec 真发生""越界真拒"）在 `tests/unit/plugins/test_pluginLoadIsReal.py`；

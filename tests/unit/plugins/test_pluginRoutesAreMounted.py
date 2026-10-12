@@ -5,7 +5,7 @@ P1 留下一句诚实声明并把读数钉成恒 `false`：装载与「插件可
 本文件把那两次授权都做成真的，且钉三件事——
 
 1. **门是真的**：未确认全部声明权限 ⇒ 挂不上；声明了 `execute:commands`/`admin` ⇒ 永远挂不上
-   （聚合规则：清单必须显式声明过 `permissions`，且声明 ⊆ 已确认；§6-157 收口）。
+   （聚合规则：清单必须显式声明过 `permissions`，且声明 ⊆ 已确认；§6-159 收口）。
 2. **挂载是真的**：挂上之后请求真的落到插件类的方法上并执行了插件文件里的代码
    （不是把 `_PLUGINS` 字典里的布尔翻一下——那正是 P1 之前那副样子）。
 3. **边界是真的**：插件只能在自己的命名空间 `/api/v1/plugin-api/{plugin_id}/` 里出现，
@@ -91,7 +91,7 @@ _UNSET = object()
 
 def _writePlugin(root, name, *, endpoints=None, permissions=_UNSET, surfaces=None,
                  source=_PLUGIN_SOURCE):
-    """`permissions=None` 与 `permissions={}` 是**两件事**：前者整节缺失（§6-157 之后挂不上），
+    """`permissions=None` 与 `permissions={}` 是**两件事**：前者整节缺失（§6-159 之后挂不上），
     后者是显式声明"我什么都不要"（可以挂，且调用面 fail-closed）。"""
     pdir = root / name
     pdir.mkdir(parents=True, exist_ok=True)

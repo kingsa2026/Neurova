@@ -2322,20 +2322,22 @@ tests/unit/api/test_turnBoundaryEstablishesRequestOwner.py
 # （夜跑是用来暴露红的，不是用来把红压平的），另四格反向对照。
 # 入册前逐文件单跑两次同读数 9 passed（1.84s / 1.81s）。
 tests/unit/ci/test_ci_protected_subset_nightly.py
-# §6-155 → §6-157：授权存储的落盘与审计纪律（授予只随声明走、审计写不进即回滚、
+# §6-155 → §6-159：授权存储的落盘与审计纪律（授予只随声明走、审计写不进即回滚、
 # 坏文件不静默读成"谁都没授予过"、卸载连授予与挂载授权一起摘掉）。
-# §6-157 收口时本档从 21 格降到 16 格：删掉的 4 格档位模型格（八项枚举与三档口径已退役，
+# §6-159 收口时本档从 21 格降到 16 格：删掉的 4 格档位模型格（八项枚举与三档口径已退役，
 # 替代判据在 test_pluginPermissionSingleSource.py）与 4 格事件总线格（与 test_base_plugin.py
 # 同题，留那一档更贴生产接缝）——规则一条没少，只是不再两处钉。
 # 入册前逐文件单跑两次同读数 16 passed（3.54s / 2.00s）。
 tests/unit/plugins/test_pluginPermissionGate.py
-# §6-157 词汇单点：能力键必须**取用** `skills/permissions.py:KNOWN_CAPABILITY_KEYS`
+# §6-159 词汇单点：能力键必须**取用** `skills/permissions.py:KNOWN_CAPABILITY_KEYS`
 # （一格改那份集合、断插件侧跟着变——不留副本），AST 扫全包拦"再长出一份能力键集合"，
 # 八项枚举与三档口径不得复活（旧值只准被点名成历史，不参与判定），
 # 历史授权文件既不覆写也不自动映射（execute:commands → system 是变宽，只能人重做）。
+# 台账号勘误：`5cb8416b`/`e94720b5` 两笔正文写的 §6-157 是错号（157/158 已被并发会话的
+# 编排器批与媒体批占用），本批实为 §6-159，已提交历史不改写。
 # 入册前逐文件单跑两次同读数 14 passed（1.90s / 1.92s）。
 tests/unit/plugins/test_pluginPermissionSingleSource.py
-# §6-155 的 HTTP 面 + §6-157 的调用面：装载与挂载是两次授权。门（清单必须**显式声明过**
+# §6-155 的 HTTP 面 + §6-159 的调用面：装载与挂载是两次授权。门（清单必须**显式声明过**
 # permissions——整节缺失即拒，修掉 §6-155 的空真通过；未确认/命名空间越界/绝对路径/
 # 同路径遮蔽/handler 取不到 ⇒ 整批不挂）、真挂载（请求落到插件方法并执行插件代码、
 # auth_required:false 不采信且可见）、**真拦**（挂载时把声明装进 skills 那份作用域：
