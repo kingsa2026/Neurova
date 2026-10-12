@@ -340,14 +340,17 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
             "`.cnb.yml` 消费的是一个不存在的读数"
         )
         # 真跑两支：远未触达（外部中止）与触达阈值，判据必须可分辨。
+        # 额度取**现行** Runner 下发值（4h）而不是历史 2h 读数：判据的判据链
+        # 只有一处阈值定义（量尺脚本的 HALT_PCT），本处喂的是同一个量级的输入。
         import subprocess, sys, time
+        TOTAL_MS = 14400000  # 现行 CNB_PIPELINE_MAX_RUN_TIME（4h）
         def run(start_offset_s: int) -> str:
             start = time.strftime(
                 "%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - start_offset_s)
             )
             env = dict(
                 os.environ,
-                CNB_PIPELINE_MAX_RUN_TIME="7200000",
+                CNB_PIPELINE_MAX_RUN_TIME=str(TOTAL_MS),
                 CNB_BUILD_START_TIME=start,
             )
             proc = subprocess.run(
@@ -357,9 +360,9 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
             assert proc.returncode == 0, proc.stderr
             return proc.stdout.strip()
 
-        early, late = run(7 * 60), run(int(7200 * 0.9))
+        early, late = run(7 * 60), run(int(TOTAL_MS / 1000 * 0.9))
         assert early == "false", (
-            "已用 7 分钟（2h 配额的 6%）时判据仍为真 —— 平台网关的外部中止"
+            "已用 7 分钟（现行 4h 下发值的 2.9%）时判据仍为真 —— 平台网关的外部中止"
             "依旧会被当成撞墙，自动续跑链条没有断（Issue #327）"
         )
         assert late == "true", "已用 90% 配额时判据为假 —— 真撞墙的中止反而不会续跑"
