@@ -2502,6 +2502,82 @@
       `enabled` 没落盘）仍是 §6-155 留的那笔待裁；④ `frontend_resources` 只写不读、
       `PluginType` 七值无分派、渠道登记口无写侧（§6-156 的另五项）本批未碰。
 
+160. **批 14 裁定乙落地：语言包接成有读面、有落盘的一层（✅ `149b37a7`，两档新判据同笔入子集）** 🟢
+    - **落的是哪两格旧账**：`UserLanguagePreference` 只活在实例字典里（`manager.py:58/400/417`）
+      而 `get_statistics()`（`:509`）一直在数它 ⇒ 面板上"有 N 人设过语言"是每次启动归零的读数；
+      `save_external_translations()` 写的条目一律 `is_approved=False`（`:232/279`）而内置读路
+      `get_translation()` 只回已审（`:328`）、仓内又无审批动作 ⇒ 写完没人读得出来。
+      用户 2026-10-11 裁「不引入审批」，所以这一格的正解**不是**补审批动作，而是给这批内容
+      另开一条**如实标未审**的读路：`approved`/`translator` 原样交出，内置那条门一寸不放宽
+      （判据 `testTheBuiltinReadFaceStillRefusesUnapprovedEntries` ＋ 活体第 [18] 项专钉此事）。
+    - **一条链而不是两个补丁**：偏好落 `<数据根>/language_preferences.json`（走
+      `core/atomic_io.atomic_write_text` 单点，坏文件 `quarantine_corrupt_file` 改名隔离、
+      不原地覆盖；写盘失败 ⇒ 内存回滚并回 False）＋ 新 `api/endpoints/language_api.py` 进端点注册表
+      （读 `GET /preferences/mine`、`GET /overlay`；写 `PUT /preferences/mine` 属主只从登录态取、
+      `PUT /overlay/{namespace}` **仅管理员**）＋ 前端 `MainLayout` 挂载时拉偏好、切语言时拉覆盖层
+      （合并用此前全 `src` 零命中的 `mergeLocaleMessage`）。`get_language_manager()` 从"零调用点"
+      变成面的取用入口 ⇒ §6-156 设计稿里那行"整包零生产消费者"已就地标注为已收口（原读数保留）。
+    - **三条设计约束，每条都对应一个会静默长出来的坑**：
+      ① 偏好文件放译文目录的**同级而不是里面**——`_load_external_translations()` 把
+      `data_dir/*.json` 每个文件当一个命名空间读，放里面会长出一条假的
+      `language_preferences` 命名空间（多出来的读数不报错，只会一直在那儿）；
+      ② `Language.AUTO` 在构造点就拒当首选/回退语言——那层意思已由 `auto_detect` 承载，
+      放行等于把 §6-140 刚拆掉的"不识别与自动检测共用一个合法值"在新字段上重建一遍；
+      ③ 不识别的语言码一律 400 点名——回 200 空列表会让打错一个字母的人以为自己那套语言
+      没文案，而这个读数永远不会自己变红。
+    - **拒因与校验也是单点**：端点取用 `LanguageManager.rejectedLanguageTags` 那一份，
+      不重抄校验循环；并加一条一致性哨兵——校验被绕过时**中止写入**而不是把 `None` 传进
+      `language.value` 被外层 except 兜成 False（那正是 §6-140 记的"内存半写、盘没写"第三种形态）。
+      判据里用"桩掉那份校验，端点读数必须从 400 变 500"来自证那条 400 不是端点自己另写的。
+    - **前端收掉的三个双源**（`i18n/index.ts` 三个单点函数）：`readStoredLocaleCode()`
+      （原先 `i18n/index.ts` 裸 `localStorage.getItem('locale')` 与 `stores/app.ts` 经 `secureStorage`
+      各读一遍）、`uiCodeForLanguageTag()`（认不出的码回 `null` 而不是就近落到别的语言——
+      那等于替用户选了他没说过的东西）、`overlayTreeFromEntries()`（点分键展开）。
+      改语言只剩 store 一处：MainLayout 与 SettingPage 原先各自 `locale.value = ...`，
+      漏掉一半就出现"点了却没换"或"换了却没持久"。
+    - **同根因扫荡（教义第 5 条）顺带挖出的既有缺陷**：`tests/test_api/test_system_settings.py`
+      三处 **CWD 相对落点**（`test_language_data`/`test_workspaces`/`test_workspaces_2`）。
+      偏好一落盘，`test_language_data/../language_preferences.json` 就写进了**仓库根**并被
+      仓库根污染守卫当场点名；原先那三处靠 `tearDown` 一句 `shutil.rmtree` 把自己扫得看不见——
+      又一次印证「测试往仓库根写」这类缺陷的可见性取决于它有没有留下不被删的产物。
+      另把 `neurova/language/__init__.py` 那句"支持11种语言"（写的其实是前端那份 locale 清单，
+      枚举侧是 32 个成员）改到实况。
+    - **判据 37 格后端 + 35 格前端**：新档 `tests/language/test_languageUserPreferencePersistence.py`
+      17 格、`tests/unit/api/test_languageFaceReadSurface.py` 20 格（两档同笔入子集，
+      入册前逐文件单跑两次同读数 17 passed / 20 passed）；前端
+      `i18n/__tests__/localeSingleSource.test.ts` 17 ＋ `stores/__tests__/app.localeServerSync.test.ts` 13
+      ＋ `api/__tests__/language.test.ts` 5。红灯原文：后端首跑 **14 failed / 2 passed**
+      （`AttributeError: … no attribute 'preferences_path'`、`assert None is not None`＝重启读不回），
+      HTTP 那一档 **6 failed / 13 errors** 且红在 `ModuleNotFoundError` 上（按教义第 3 条
+      与行为红分开报，它只证"这条面还没有"）。红自证＝只带 `-u` 退本批生产四件、判据留树
+      ⇒ **23 failed / 2 passed / 12 errors**，失败集恰为本次新格。
+    - **活体与 A/B**：`tests/manual/languageFace_batch14.py` 真 `create_app()` + **真 JWT**
+      （不用 `dependency_overrides` 的假身份）+ `isolatedDataRoot`，**26 项全 PASS / 退出码 0**；
+      关键读数 [8] 换**另一个进程**读回同一偏好的同一语言、[15][16] 覆盖层把刚写的那条读出来且
+      状态如实、[18] 内置门没松、[13] 普通用户写面 403、[22][23] 无凭证 401 配一格真 404 校准、
+      [25][26] 仓库 `data/` 内容指纹逐字节不变。反证一枚：把 `_persist_user_preferences()`
+      那一行退回旧形态 ⇒ 活体 5/6/7/8 当场翻红，还原后 MD5 与还原前一致。
+      A/B（`tests/unit/api`＋`tests/language`＋`tests/test_api`＋`tests/unit/ci`，基线＝HEAD 仓外
+      worktree 铺入本批新判据，逐条复跑 3 次）基线 45f/20e ↔ 本树 22f/8e，**仅本树红 0 条 ⇒ AB_PASS**；
+      仅基线红 35 条逐条是本批新格。前端两道门 `npm run test` **258 files / 2072 passed**、
+      `vue-tsc --noEmit` 退出码 0。
+    - **生成物按守卫要求重跑**：`docs/09-dev-progress/api_inventory.md`（58→59 个前端模块、
+      89→90 条后端前缀）与 `docs/05-reports/同名函数盘点台账_2026-09-25.md`
+      （`scannedFiles` 327→328）。后者第一次生成把口径读数推成 125→126——是本批测试文件里的
+      helper 与 store 里同名造出的一组跨文件同名；**没有把台账读数为"合规"而留着**，
+      而是把测试 helper 改名 `globalComposer()`，台账口径回到 125。
+    - **净 LOC**：生产池 **+725/−68**（净 +657，为正逐条去向写在提交正文：新面 262、
+      manager 落盘 151/31、store 112/7、i18n 单点 77/16、api 模块 83/0、models 9/0、注册表 5/0）；
+      判据池 **+1306/−18**；基建池 **+20/−0**；文档池 **+25/−8**。
+    - **本批没做、留在案上的**：① **覆盖层的编辑 UI 没建**——今天写面只有 HTTP（管理员），
+      判据与活体验的是那条路真通，"运营能不能在面板里改文案"仍未落地；
+      ② `SettingPage` 通用表单那格 `language` 写的是**全局默认**（`PUT /api/v1/settings`，
+      `require_admin()`），与本人偏好是两件事，本批按 `persist=false` 分开、没有并成一个，
+      于是"普通用户在设置页改语言"这条既有路径今天仍然要求管理员权限（旧行为，未在本批授权内改）；
+      ③ 全局默认与按人偏好并存要不要收成一层＝**另一次裁定**；
+      ④ `API_REFERENCE.md` 附录那张"无需认证"名单仍未逐模块复核（本批只把自己新加那行按实测
+      写进 JWT 那列，脚注保留）。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
@@ -2734,6 +2810,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `5cb8416b` | 批 15 裁定甲落地：插件侧那份八项 `PluginPermission` 收口到技能 `KNOWN_CAPABILITY_KEYS` 单点——能力键词汇**每次现取**不留副本、合法性复用 `skill_install_gate.validate_permissions_for_install`、运行时仲裁就是技能那份 `skill_permission_scope()`；插件独有的只剩 `read:events`/`emit:events` 两档框架中介面，`http:request`（＝`network`）与 `admin`（角色门单点 `deps.require_role`）删除，三档口径整体退役。生产池 **+353/−253**（净 +100：`plugin_permissions.py` 165/22 重写、`plugin_manifest.py` 47/22、`plugin_route_mount.py` 50/19、`plugin_manager.py` 42/6、`endpoints/plugin.py` 36/22、`base_plugin.py` 11/9、`plugins/__init__.py` 2/2），为正逐条去向在提交正文（修两处 §6-155 遗留：聚合门**空真通过**⇒整节缺失 `permissions_undeclared` 拒挂而显式空 dict 合法且调用面全拒；旧字段拖到装载才炸⇒安装这一站 `legacy_permissions_field` 拒，`STORE_VERSION` 升 2、v1 文件 `grants_store_legacy_format` **不映射不覆写**；另加三档权限 HTTP 读面）。判据池 **+578/−405**（净 +173；54 格＝新档 `test_pluginPermissionSingleSource.py` 14 ＋ `test_pluginRoutesAreMounted.py` 24 ＋ `test_pluginPermissionGate.py` 16）。**红自证换形态并如实记**：本批整体还原生产件会把 import 断在词汇共享上（ImportError/收集错误，什么也不证明），改成就地 monkeypatch 桩替包装与声明判据、对应格必须红，两格反空转常驻进判据文件。A/B 受害族 27 条 FAILED/ERROR 本树与 HEAD 逐条同名、集合差为空（skills 两格红两侧同在，不认领）；活体真 `create_app()` 八段读数（未声明整节 409、空声明探针 `network_allowed:false` 且 `denial_for_undeclared` 指名工具、声明 `network` 后 `true` 且拒因转 `null`、撤销后 404、旧字段 install 400、未知能力键 install 400 `未知权限能力键: 'teleport'`、无凭证 401、请求外作用域 `None`）；插件族并跑 210 passed。文档池 **+33/−33**（净 0，两份架构文档的八项枚举块与三档导读改成两类面并写明"曾列过八项、为何收口"）。⚠ 本笔正文写的 §6-157 是**错号**（157/158 已被并发会话占用），本批实为 §6-159，不改写已提交历史，勘误登记在该格首条 | §6-159 |
 | `e94720b5` | 上述词汇单点判据入受保护子集（基建池 **+21/−9**＝净 +12）。三件事：① 新档 `test_pluginPermissionSingleSource.py` 入册（入册前逐文件单跑两次同读数 14 passed 1.90s/1.92s），它拦的是"再长出一份能力键集合"——AST 扫 `neurova/plugins/` 找同时含 ≥3 个能力键字符串的字面量集合/字典，那正是八项枚举当年的出生形态；② 两档已有条目的说明与格数改到实态（`test_pluginPermissionGate.py` 21→16、`test_pluginRoutesAreMounted.py` 19→24，逐文件单跑两次 16 passed 3.54s/2.00s、24 passed 3.15s/3.02s）——子集清单里写着"八项权限档位三态"而生产已收口，这种名实漂移会让下一个人照旧清单理解系统；③ **就地按行区间改写**而不是删了重加，别人那几档一字未动（`git diff --numstat` 仅 +21/−9；上一笔让号脚本连带改掉并发会话一行的教训在这一批被执行前避开）。入册前后 `test_dev_path_and_runtime_dep_guards.py` 39 passed，`TestProtectedSubsetEntriesAreTracked` 在 `git add` 之前确实红——这一格第一次替我们发现"本机跑得通、CI 上文件不存在"的遗漏 | §6-159 的常驻面 |
 | `80b395ac` | 补 §6-150 那批欠的退役署名并销掉一格常驻红（基建池 **+1/−0**＝`protectedSubsetRetired.txt` 一行，按整档 CRLF 落）。`test_every_vanished_entry_is_signed_off` 自 `fed108a0` 起长红：`test_pluginSystemRetired.py` 曾入子集（`51b60bd6`）、文件已随改裁删除、台账无署名；§6-149 当时判"由删它的那一批署，不代填"，因为代填＝替别人的退役决定背书。前提现已被推翻——那次撤销是用户 2026-10-11 的改裁（§6-150 正文实证"防再生判据与其子集条目同批撤"），不是会话自己的判断，故按守卫要求的 `路径 | 依据` 格式记账，不改判定、不改清单、不新增豁免通道。三档并跑 **50 passed**（改前 1 failed），`test_retired_ledger_exemption_is_honored` 三向读数仍在原位。**留在案上的形状**：登记"等别人补"的欠账时必须同时登记谁在什么动作里会撞见它，否则等价于静默遗留 | §6-159 附带闭环 |
+| `149b37a7` | 批 14 裁定乙落地：语言包接成有读面、有落盘的一层。生产池 **+725/−68**（`language_api.py` 262/0 新面｜`language/manager.py` 151/31 落盘＋损坏隔离＋失败回滚＋`overlayEntries`＋`rejectedLanguageTags` 单点｜`stores/app.ts` 112/7｜`i18n/index.ts` 77/16 三个单点｜`api/modules/language.ts` 83/0｜`models.py` 9/0 构造点拒 `AUTO`｜注册表 5/0｜`language/__init__.py` 13/10 名实改到实况）；判据池 **+1306/−18**（后端 17＋20 格、前端 35 格、活体脚本、既有 fixture 三处 CWD 相对落点改临时目录）；基建池 **+20/−0**（两档入子集，入册前逐文件单跑两次同读数 17p/20p）；文档池 **+25/−8**（两份生成物按各自守卫重跑：`api_inventory.md` 58→59 模块/89→90 前缀、同名函数台账 327→328，且第一次生成把台账口径推成 125→126 时**没有把读数当合规留着**而是改测试 helper 名回到 125）。裁定「不引入审批」落成一条**如实标未审**的读路而不是补审批：`approved`/`translator` 原样交出，内置 `get_translation()` 的 `is_approved` 门一寸不松（判据＋活体 [18] 各钉一次）。三条设计约束各对一个静默坑：偏好文件放译文目录**同级**（放里面会被 `*.json` glob 当成一条真命名空间）、`AUTO` 构造点拒（否则 §6-140 那条共用值在新字段上重建）、不识别码 400 点名（回 200 空列表会让打错字母的人以为自己没文案）。红 14f/2p（行为）＋ 6f/13e（`ModuleNotFoundError`，分开报）⇒ 绿；红自证退生产四件 ⇒ 23f/2p/12e 恰为本批新格；活体真 `create_app()`＋**真 JWT** 26 项全 PASS（含 [8] 跨进程读回同一偏好、[25][26] 仓库 `data/` 指纹逐字节不变），反证一枚：`_persist_user_preferences()` 退回旧形态 ⇒ 活体 5/6/7/8 翻红、还原后 MD5 一致；A/B（`tests/unit/api`＋`tests/language`＋`tests/test_api`＋`tests/unit/ci`，基线铺入新判据、逐条复跑 3 次）45f/20e ↔ 22f/8e，**仅本树红 0 条 ⇒ AB_PASS**；前端 `npm run test` 258 files/2072 passed、`vue-tsc --noEmit` 退出码 0。**留在案上**：覆盖层编辑 UI 未建（写面今天只有 HTTP）、`SettingPage` 那格 `language` 是全局默认且 `PUT /settings` 仍要管理员、全局默认与按人偏好是否收成一层＝另一次裁定 | §6-160 |
 
 上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 遗留的"只留两个门"已于同日补完**：`709bb58e` 把角色门取源收口到严格门本体（§6-54 闭环），资源标签面的查询参数放行按既有守卫保留未动；比这更窄的"把 21 个文件缩到 3 个"仍不做，理由与成立条件写在 §6-54 格内。**2026-10-08 追加 P3-14（长任务与工具调用是否闭环）五批全部落地**：`8d9a459e` 工具轮回放闭环（§6-67）、`1cc26b47` 晚到终态会话栅栏（§6-68）、`898355db` 租约写了要有人读（§6-69）、`2ffe4a8d` Studio 台账三格收口（§6-70）、`39a1add9` Anthropic 流式契约（§6-71）；五份判据各自入子集（`750395e2`/`047e58af`/`6ca9b4e5`/`57a108f5`/`281d15c9`）。生产净 LOC 依次 +54/+55/+111/+72/+244，A 批为正的理由写在正文：缺陷本体是「契约从未实现」，只删不增无法闭合，而「删」已在同一提交由 openai_loop 的 −295 兑现。本轮另扫出四组只写不读或需人裁的格，未顺手改：§6-72（Studio 无取消、runs 状态词汇表无单源、`get_background_status` 与死信队列、`/console/chat/runs` 与 `AgentRunStore.stats`）、§6-73（`test_closed_loop_verification` 名为闭环实为 import smoke）、§6-74（并发负载污染 A/B 与 `test_agent.py` 预存挂起的处置）、§6-75（本会话三条记账更正，含一次共享清单文件上的 `--only` 违规自纠）。**同日 G 轮把这四组里能自行闭合的都做完**：G1 词汇表单源 `62a36f96`（+判据入子集 `9bbbd9fa`）、G2 查询口半退役 `4770340a`、G3 台账计数接读侧 `4737fb6f`、G4 parked 续跑会话级入口 `df2a1e00`（+两判据入子集 `3e801962`）、G5 名实改名 `0e47b2c8`+`c17cbd6e`；真 key 复验 `aaa590b8` 收掉 §6-71 的边界并同时报出 §6-76。**§6-72 至此六格闭四格**，真余两格需人裁（Studio 取消、ACP 死信队列）；§6-73 闭环；§6-75 由三条**增至八条**（G 轮又抓出三笔净 LOC 写错与一笔"声明与 numstat 不符"，见该条 ④—⑧）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（**已闭环 `35649409`**：七份活体脚本的复现行不再写死开发机绝对路径，实况与"CI 是否看得见决定常驻红能活多久"这条读数见 §6-117）、**§6-119（序 5 批 E：通用 KV 配置器有两份实现而生产零消费者——"删弱留强"的前提是假的，要裁的是"本仓要不要这一层"，三条路的影响面已摆在该格）**已裁 E-2 并落地 ✅ `9146989c`/`ce26d1e5`，见 §6-125****、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64-B 已落地（`6850bfde` 逐文件只降不升棘轮，基线 38 文件 / 60 处）；剩下 A「按目录分批扫净」已从"需人裁"转为可排期工单**、RSI 遗产分支成功语义、属主读会话、**§6-65 已裁定「不删，就地标为已知存量」并转结（文件未跟踪且被 gitignore，删了不可恢复，而防再生判据已在装配点生效）**、**§6-66 已闭环（`tests/manual` 收集拦截层：E1 原计划"退役它"的前提被实测推翻，实际待办只剩对新增脚本的只降不升棘轮——`7c494c93` 落地，基线 20 文件 / 25 处）**、**§6-76（Anthropic 协议转换双定义——**已裁毕并按修法 A 落地 `c9edf408`**，原三选一代价档案留在该条正文供引用）**、**§6-72 真余两格（Studio 取消＝2026-10-08 裁定"按新能力做全套四件"；ACP 死信队列＝同日裁定"接读侧"，两批在途）**；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
 
