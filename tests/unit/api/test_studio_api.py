@@ -56,7 +56,9 @@ class TestBackgroundRuns:
     def test_script_launches_run_with_injected_llm(self, client, monkeypatch):
         from neurova.aigc_studio import services as svc
 
-        async def fake_split(store, pid, content, llm=None, model=None):
+        async def fake_split(store, pid, content, llm=None, model=None, run_id=None):
+            # `run_id` 是端点传下来的那一行台账（E 批：一次请求一行，服务写回它而不是
+            # 另起一行）；本替身不自己写终态，由 _spawn_run 的 wrapper 落
             return store.add_episode(pid, {"number": 1, "title": "注入集", "content": content})
 
         monkeypatch.setattr(svc, "split_script", fake_split)
@@ -80,13 +82,16 @@ class TestBackgroundRuns:
         seen = {}
 
         async def fake_images(store, pid, eid, provider="openai", model="",
-                              provider_id="", shot_ids=None):
+                              provider_id="", shot_ids=None, run_id=""):
             seen["images"] = (model, provider_id)
             return {"done": 1, "failed": 0, "skipped_no_prompt": 0}
 
+        # 形参表必须跟真服务同形：H2-3 ① 之后端点会透传 run_id，
+        # 而 resolution/duration 的兜底口径已收口到 services 一处（§6-78 G 条）——
+        # 替身里再抄一份 "1080p"/5 就是让判据对着一个生产已不存在的签名打分
         async def fake_videos(store, pid, eid, provider="wan", model="",
-                              resolution="1080p", duration=5, owner_user_id="",
-                              provider_id="", shot_ids=None):
+                              resolution="", duration=None, owner_user_id="",
+                              provider_id="", shot_ids=None, run_id=""):
             seen["videos"] = (model, provider_id)
             return {"submitted": 1, "skipped": 0, "failed": 0}
 
@@ -102,7 +107,10 @@ class TestBackgroundRuns:
         assert r.status_code == 200
         for _ in range(50):
             runs = client.store.list_runs(pid)
-            if len(runs) >= 2 and all(x["status"] in ("done", "failed") for x in runs):
+            # 终态判据取 store 那份单源：手抄 ("done","failed") 会漏掉
+            # `done_with_fallback`（§6-72 G1 立单源时正是为了不再各抄一份）
+            from neurova.aigc_studio.store import RUN_TERMINAL_STATUSES
+            if len(runs) >= 2 and all(x["status"] in RUN_TERMINAL_STATUSES for x in runs):
                 break
         assert seen.get("images") == ("flux.1", "prov-x")
         assert seen.get("videos") == ("seedance-2-0", "prov-y")
@@ -142,8 +150,17 @@ class TestEpisodeProjection:
 
 
 class TestMergeEndpoint:
-    def test_merge_sync_manifest(self, client, tmp_path, monkeypatch):
+    def test_merge_is_a_background_run(self, client, tmp_path, monkeypatch):
+        """§6-94 改判：导出不再同步返回整包结果。
+
+        改前 `POST /merge` 直接把 `{ok, composed, mode, items, merge…}` 回给调用方，
+        于是导出既进不了 runs 台账（停不掉、查不到、带病完成读数对它完全不适用），
+        又在协程里同步跑 FFmpeg（事件循环停摆，见 §6-93）。现在端点只回 run_id。
+        """
+        import asyncio
         import shutil
+
+        from neurova.aigc_studio import services
 
         monkeypatch.setattr(shutil, "which", lambda x: None)
         pid = client.post("/api/v1/studio/projects", json={"title": "T"}).json()["data"]["project"]["id"]
@@ -154,13 +171,22 @@ class TestMergeEndpoint:
                                                "first_frame_path": str(f)})
         r = client.post(f"/api/v1/studio/episodes/{ep['id']}/merge")
         assert r.status_code == 200
-        data = r.json()["data"]
-        assert data["mode"] in ("slideshow_manifest", "ffmpeg_concat")
-        assert data["items"][0]["text"] == "旁白"
-        m = client.get(f"/api/v1/studio/merges/{data['merge']['id']}")
+        accepted = r.json()["data"]
+        assert accepted.get("run_id") and accepted.get("status") == "started", accepted
+        rows = [x for x in client.store.list_runs(pid) if x["kind"] == "merge"]
+        assert [x["id"] for x in rows] == [accepted["run_id"]], (
+            f"一次导出在 runs 里留下 {len(rows)} 行，或外层那行不是端点回给前端的那行：{rows}")
+
+        # 交付物本身：这条 fixture 的 TestClient 不带上下文（每个请求各起一个 portal，
+        # 后台任务当场被 cancel），所以终态判据在 test_mergeAsBackgroundRun.py（那里循环是活的）；
+        # 这里直接跑一次服务，保住"items 有旁白 / merges 行可查 / SRT 挂到分集"这三格原证据。
+        res = asyncio.run(services.merge_episode(client.store, pid, ep["id"]))
+        assert res["mode"] in ("slideshow_manifest", "ffmpeg_concat")
+        assert res["items"][0]["text"] == "旁白"
+        m = client.get(f"/api/v1/studio/merges/{res['merge']['id']}")
         assert m.status_code == 200
         # 字幕 SRT 已生成并挂到分集
-        assert json.loads(client.store.get_merge(data["merge"]["id"])["items_json"])[0]["text"] == "旁白"
+        assert json.loads(client.store.get_merge(res["merge"]["id"])["items_json"])[0]["text"] == "旁白"
         assert client.store.get_episode(ep["id"])["subtitle_path"].endswith(".srt")
 
 

@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from neurova.api.endpoints import console as api
 from tests.route_table import leafRoutes
+from tests.auth_headers import overrideIdentity
 
 SNAPSHOT = Path(__file__).with_name("console_split_routes.json")
 DOMAINS = {
@@ -96,7 +97,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "_CONSOLE_UPLOAD_DIR", tmp_path)
     app = FastAPI()
     app.include_router(api.router)
-    app.dependency_overrides[api.get_current_user] = lambda: {"user_id": "test", "role": "admin"}
+    overrideIdentity(app, {"user_id": "test", "role": "admin"})
     with TestClient(app) as client:
         yield client
 
@@ -153,7 +154,7 @@ def test_admin_http_rejection(client, monkeypatch, role, expected, method, path,
         if role is None:
             raise HTTPException(401, "Not authenticated")
         return {"user_id": "test", "role": role}
-    client.app.dependency_overrides[api.get_current_user] = user
+    overrideIdentity(client.app, user)
     spawn = AsyncMock(side_effect=AssertionError("must not execute"))
     monkeypatch.setattr(api.asyncio, "create_subprocess_exec", spawn)
     assert client.request(method, path, json=body).status_code == expected

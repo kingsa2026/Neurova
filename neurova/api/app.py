@@ -867,6 +867,43 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as _ingress_err:  # noqa: BLE001
             logger.warning("知识摄取排水循环启动失败（忽略）: %s", _ingress_err)
 
+    # 知识底座到期收敛——给"到期"这条生命周期迁移接上真触发点（批次 K1 / 断点 N1）。
+    # `expireDueFacts()` 自工单 008 起就是"状态是生命周期唯一权威"那句话的执行体，
+    # 但全仓零调用点，于是它下面那段"前提到期⇒撤销其推导结论"运行期不可达；
+    # 读侧有 `searchableFacts` 的时钟兜底所以直接检索看不出，漏的是派生面。
+    # 一次性收敛、不起循环（底座注释明写"不起后台线程"）；走 `to_thread`——它是同步
+    # SQLite 写，裸调会把启动事件循环占住（§6-93/§6-99 同族故障，日志零异常那种）。
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        _expired = await asyncio.to_thread(get_knowledge_fact_store().expireDueFacts)
+        logger.info("知识底座到期收敛：推进 %d 行 active→expired，并撤销其推导结论", _expired)
+    except Exception as _expiry_err:  # noqa: BLE001 - 收敛故障不阻断启动，但必须点名
+        logger.warning("知识底座到期收敛失败（到期行暂由读侧时钟闸兜住）: %s", _expiry_err)
+
+    # 知识投影↔权威一致性读数（风险 3：用户 2026-10-09 裁定"接启动、只报不修"）。
+    # 只读投影 JSON 与底座库，不写任何文件——修仍走 projection/rebuild，把"报出"与
+    # "顺手修掉"混成一件事，读的人就再也看不到曾经分叉过。走 to_thread 与上面的
+    # 到期收敛同一口径：读盘 + 建 per-agent 管理器都是同步活，裸调会占住启动循环
+    # （§6-93/§6-99 那一族"日志零异常的共享停摆"就是这么来的）。
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+        from neurova.knowledge.graph_bridge import driftFindingsForAllAgents
+
+        _drift = await asyncio.to_thread(
+            driftFindingsForAllAgents, get_knowledge_fact_store())
+        for _d in _drift:
+            logger.warning(
+                "知识投影与权威分叉 agent=%s：缺关系 %d、孤儿关系 %d、无据节点 %d"
+                "（其中 %d 个带条目正文摘要）；修请走 knowledge-graph/{agent_id}/knowledge-graph/projection/rebuild",
+                _d["agent_id"], len(_d["missing_relations"]), len(_d["orphan_relations"]),
+                len(_d["unbacked_nodes"]), _d["unbacked_nodes_with_body"])
+        if not _drift:
+            logger.info("知识投影与权威一致性巡检：无分叉")
+    except Exception as _drift_err:  # noqa: BLE001 - 读数故障不阻断启动，但必须点名
+        logger.warning("知识投影一致性读数失败（本轮没有巡检读数，不是没有分叉）: %s",
+                       _drift_err)
+
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
     if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
@@ -1096,6 +1133,24 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("生成任务恢复轮询启动失败: %s", e)
 
+    # AgentRun 租约过期周期扫描：启动收敛只管「重启过」的遗留行，进程活着而某轮
+    # 工作卡死的 run 靠这条才收敛（否则 heartbeat/lease 只写不读）
+    try:
+        from neurova.core.agent_run_store import startStaleSweep
+
+        startStaleSweep()
+    except Exception as e:
+        logger.warning("AgentRun 租约扫描启动失败: %s", e)
+
+    # Studio 视频收口周期驱动器：账本由 recovery 收敛，镜头行必须有人回写它——
+    # 改前这件事只发生在 GET /episodes/{eid} 的投影里，等于"有人来看任务才算跑完"
+    try:
+        from neurova.aigc_studio.video_reconcile import startReconcileSweep
+
+        startReconcileSweep()
+    except Exception as e:
+        logger.warning("Studio 视频收口驱动器启动失败: %s", e)
+
     # 批次4：内置短剧一键成片模板种子入工作流库（幂等；AIGC 页实例化消费）
     try:
         from neurova.collaboration.neurflow.storage import NeurflowStorage
@@ -1171,6 +1226,22 @@ async def _on_shutdown(app_state: AppState) -> None:
         await stop_generation_recovery()
     except Exception as e:
         logger.warning("generation recovery shutdown error: %s", e)
+
+    # 停止 AgentRun 租约扫描：不显式收敛的常驻 task 会让退出路径走满超时
+    try:
+        from neurova.core.agent_run_store import stopStaleSweep
+
+        await stopStaleSweep()
+    except Exception as e:
+        logger.warning("AgentRun 租约扫描停止异常: %s", e)
+
+    # 停止 Studio 视频收口驱动器：与上面同一条纪律——启停必须成对
+    try:
+        from neurova.aigc_studio.video_reconcile import stopReconcileSweep
+
+        stopReconcileSweep()
+    except Exception as e:
+        logger.warning("Studio 视频收口驱动器停止异常: %s", e)
 
     # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:

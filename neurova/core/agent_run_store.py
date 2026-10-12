@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -86,6 +87,28 @@ def _migrateToV2(conn: sqlite3.Connection) -> None:
 
 register_migration(2, _migrateToV2, domain="agent_runs")
 
+
+def _migrateToV3(conn: sqlite3.Connection) -> None:
+    """v3：给蜂群子任务补两个**成对的键**（§6-78 L 条 / §6-85）。
+
+    改前的形态：子任务在台账里连一行都没有；而 `subagent_id` 与 `member_session_id`
+    是两枚各自生成的 uuid，台账按 `session_id` 索引，连手工 JOIN 的键都不成对。
+    - `subagent_id`：台账行 ↔ 蜂群 run 的配对键（前端小窗与 `subagent_status` 都用它对齐）；
+    - `parent_session_id`：**发起者**的聊天会话。子任务自己的会话键是 member 那条
+      （台账的会话列归它），要按"我这次对话派出去了哪些子任务"回读，必须有这一列——
+      没有它，出口只能返回空，用户看到的还是「刷新一下就没了」。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    for name, decl in (("subagent_id", "TEXT NOT NULL DEFAULT ''"),
+                       ("parent_session_id", "TEXT NOT NULL DEFAULT ''")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {decl}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_parent ON agent_runs(parent_session_id, seq)")
+
+
+register_migration(3, _migrateToV3, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 # 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
@@ -132,16 +155,23 @@ class AgentRunStore:
     # ------------------------------------------------------------------
 
     def intake(
-        self, session_id: str, user_id: str = "", agent_id: str = "", message: str = ""
+        self, session_id: str, user_id: str = "", agent_id: str = "", message: str = "",
+        subagent_id: str = "", parent_session_id: str = "",
     ) -> str:
-        """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。"""
+        """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。
+
+        `subagent_id`/`parent_session_id` 只由蜂群记账路径填（见
+        `agent_run_ledger.openSubagentRun`）；回合入口留空，语义与改前一致。
+        """
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         now = time.time()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO agent_runs (run_id, session_id, user_id, agent_id,"
-                " message_digest, status, created_at) VALUES (?,?,?,?,?,'queued',?)",
-                (run_id, session_id, user_id, agent_id, (message or "")[:200], now),
+                " subagent_id, parent_session_id,"
+                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,'queued',?)",
+                (run_id, session_id, user_id, agent_id, subagent_id, parent_session_id,
+                 (message or "")[:200], now),
             )
         return run_id
 
@@ -357,6 +387,21 @@ class AgentRunStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_subagent_runs(self, parent_session_id: str,
+                           limit: int = 20) -> List[Dict[str, Any]]:
+        """按**发起者会话**列出它派出的子任务行（§6-78 L 条的读面）。
+
+        与 `list_runs` 分开的理由是键不同：那条查的是"这个会话里跑过哪些回合"，
+        这条查的是"这次对话派出去了哪些子任务"——子任务自己的会话键是 member 那条。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE parent_session_id=?"
+                " ORDER BY seq DESC LIMIT ?",
+                (parent_session_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             # parked 必须单列：把它折进 terminal 就等于把"等人续跑"读成"已结束"
@@ -436,6 +481,96 @@ class AgentRunStore:
                     (now, now),
                 )
         return [{"run_id": r, "session_id": s} for r, s in rows]
+
+
+# ------------------------------------------------------------------
+# 运行期驱动：租约过期扫描（2026-10-08 闭环审计 D 批）
+#
+# `reconcile_stale` 早就写好了，但全仓只有测试在调它——生产侧没有驱动者，于是
+# `heartbeat_at`/`lease_expires_at` 变成「每轮都写、没人读来做判定」的字段：
+# 进程活着而某一轮的工作卡死时，那条 run 永远停在 running，只有重启才会被
+# `reconcile_at_startup` 顺手收敛。启动收敛管「重启过」，这条管「还在跑的过程」，
+# 两者不重叠。间隔由租约派生而不是另写一个数：扫描必须比租约密，否则「过期」到
+# 「被读」之间的窗口比租约本身还长；也比心跳疏，不把 SQLite 写成第二个心跳源。
+# ------------------------------------------------------------------
+
+#: 扫描间隔下限（秒）。租约很短时（测试用 2s）不至于把库打成筛子。
+SWEEP_INTERVAL_MIN_S = 5.0
+
+_sweepTask = None
+_sweepLock = threading.Lock()
+
+
+def staleSweepIntervalSeconds(store: "AgentRunStore") -> float:
+    """扫描间隔的唯一派生点：租约 / 3，下限 `SWEEP_INTERVAL_MIN_S`。"""
+    return max(SWEEP_INTERVAL_MIN_S, float(store.lease_seconds) / 3.0)
+
+
+def sweepStaleOnce(store: "AgentRunStore") -> List[Dict[str, Any]]:
+    """跑一轮过期收敛，并把收敛结果点名进日志（运维看得见"收了几条"）。"""
+    converged = store.reconcile_stale()
+    if converged:
+        logger.warning(
+            "AgentRun 租约过期收敛: %d 条 running→failed(process_died)，run_id=%s",
+            len(converged),
+            [c["run_id"] for c in converged],
+        )
+    return converged
+
+
+async def _staleSweepLoop(store: "AgentRunStore", intervalSeconds: float) -> None:
+    """周期扫描。收敛失败永不阻断对话——台账接线层一贯 fail-open（见 `run_gate_enabled`）。"""
+    while True:
+        await asyncio.sleep(intervalSeconds)
+        try:
+            sweepStaleOnce(store)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - 扫描异常只记，不把主流程带下水
+            logger.warning("AgentRun 租约过期扫描异常（下一轮再试）: %s", e)
+
+
+def startStaleSweep() -> bool:
+    """起周期扫描（幂等）。没有运行中事件循环时如实返回 False，不自建第二份循环。"""
+    global _sweepTask
+    with _sweepLock:
+        if _sweepTask is not None and not _sweepTask.done():
+            return False
+        store = get_agent_run_store()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("AgentRun 租约扫描未启动：当前线程没有运行中的事件循环")
+            return False
+        _sweepTask = loop.create_task(
+            _staleSweepLoop(store, staleSweepIntervalSeconds(store))
+        )
+        logger.info(
+            "AgentRun 租约过期扫描已启动：每 %.1fs 一轮（租约 %.0fs）",
+            staleSweepIntervalSeconds(store), store.lease_seconds,
+        )
+        return True
+
+
+async def stopStaleSweep() -> None:
+    """停周期扫描并等它真的退出。
+
+    必须收敛：常驻 task 不结束会让 `TestClient.__exit__` 的 join 挂住（本仓实测过的
+    teardown 陷阱），也让真进程退出走满超时。可重复调用。
+    """
+    global _sweepTask
+    with _sweepLock:
+        task = _sweepTask
+        _sweepTask = None
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:  # noqa: BLE001 - 退出路径不因扫描异常而中断
+        logger.warning("AgentRun 租约扫描退出时异常: %s", e)
 
 
 # ── 单例工厂（全项目 get_*/reset_* 惯例）────────────────────────────

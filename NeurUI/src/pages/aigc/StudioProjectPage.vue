@@ -13,13 +13,14 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
-  addStoryboardManually, getEpisode, getProject,
+  addStoryboardManually, cancelStudioRun, getEpisode, getProject,
   runAssetImages, runExtract, runGenerateImages, runGenerateVideos,
   runNarration, runSplitScript, runStoryboards,
   retryStoryboard, updateAsset, updateEpisode, updateStoryboard,
-  type ProjectDetail, type StudioEpisode, type StudioStoryboard,
+  getMerge, type ProjectDetail, type StudioEpisode,
+  type StudioRun, type StudioStoryboard,
 } from '@/api/modules/studio'
-import { waitStudioRun } from '@/composables/useStudioRun'
+import { waitStudioRun, describeRunOutcome, parseRunDetail } from '@/composables/useStudioRun'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { uploadFile } from '@/api/modules/files'
 import { withFileToken } from '@/utils/genFiles'
@@ -73,16 +74,59 @@ async function loadDetail() {
   }
 }
 
-async function track(kind: string, runId: string) {
+/** 在跑的长任务：kind → run_id。停止按钮取的就是这一格，收尾即摘。 */
+const activeRuns = ref<Record<string, string>>({})
+const stoppingRun = ref(false)
+// 并发跑两类长任务是允许的（各按钮的 busy 键不同）：按钮必须把**全部**在跑的停掉，
+// 而不是取第一条——那等于"点了停没反应"（§6-91 未覆盖面④）。
+const activeRunIds = computed(() => Object.values(activeRuns.value))
+const runningCount = computed(() => activeRunIds.value.length)
+
+async function track(kind: string, runId: string): Promise<StudioRun | null> {
   busy.value = { ...busy.value, [kind]: true }
+  activeRuns.value = { ...activeRuns.value, [kind]: runId }
+  let run: StudioRun | null = null
   try {
-    const run = await waitStudioRun(pid, runId)
+    run = await waitStudioRun(pid, runId)
     if (!run) message.error(t('studio.runTimeout'))
     else if (run.status === 'failed') message.error(run.error || t('aigc.generateError'))
-    else message.success(t('studio.runDone'))
+    else if (run.status === 'cancelled') message.info(run.error || t('studio.runCancelled'))
+    else if (run.status === 'done_with_fallback') {
+      // 带病完成不能报「任务完成」：条数与成因由结算侧写进 detail_json，这里取用（§6-87）
+      message.warning(t('studio.runPartial', { detail: describeRunOutcome(run, t) }))
+    } else message.success(t('studio.runDone'))
+    return run
   } finally {
     busy.value = { ...busy.value, [kind]: false }
+    const rest = { ...activeRuns.value }
+    delete rest[kind]
+    activeRuns.value = rest
     await loadDetail()
+  }
+}
+
+/**
+ * 停止当前长任务（取消四件套的前端那一件）。
+ *
+ * 两个读数分开播报：`tasks_cancelled > 0` 才是"本进程的句柄真被打断"；只有意图落库时
+ * （服务重启过、句柄不在）说"已停止"就是把没发生的事说成发生了，那条只报"已请求停止，
+ * 剩余步骤不再续跑"。后端点名过的原因（404 归属/不存在、409 已终态）必须透出，
+ * 只说"失败了"没法定位。
+ */
+async function cancelActiveRun() {
+  const runIds = activeRunIds.value
+  if (!runIds.length || stoppingRun.value) return
+  stoppingRun.value = true
+  try {
+    const results = await Promise.allSettled(runIds.map((rid) => cancelStudioRun(rid)))
+    const interrupted = results.filter(
+      (r) => r.status === 'fulfilled' && Number((r.value as any)?.data?.tasks_cancelled) > 0).length
+    if (interrupted > 0) message.success(t('studio.runCancelled'))
+    else message.info(t('studio.runCancelQueued'))
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+    if (failed) message.error(failed.reason?.response?.data?.detail || t('aigc.generateError'))
+  } finally {
+    stoppingRun.value = false
   }
 }
 
@@ -137,22 +181,29 @@ async function uploadAssetImage(c: { id: string; image_path?: string }) {
 const storyboards = ref<StudioStoryboard[]>([])
 
 async function loadStoryboards() {
-  if (!currentEid.value) { storyboards.value = []; return }
+  if (!currentEid.value) { storyboards.value = []; ensureVideoRefresh(); return }
   try {
     const res: any = await getEpisode(currentEid.value)
     storyboards.value = res?.data?.storyboards ?? []
-    ensureVideoRefresh()
   } catch { storyboards.value = [] }
+  // 成败都要重判启停：失败分支只清空列表不停表，5s 表就会无限打 GET（§6-78 F 条①）
+  ensureVideoRefresh()
 }
 
-/** 任一镜头视频 running → 5s 自动刷新（账本投影回填） */
-function ensureVideoRefresh() {
-  const running = storyboards.value.some((s) => s.video_status === 'running')
-  if (running && !videoRefreshTimer) {
-    videoRefreshTimer = setInterval(() => { void loadStoryboards() }, 5000)
-  } else if (!running && videoRefreshTimer) {
+/** 定时器唯一的停表口（`videoRefreshTimer` 只在这一处被清） */
+function stopVideoRefresh() {
+  if (videoRefreshTimer) {
     clearInterval(videoRefreshTimer)
     videoRefreshTimer = null
+  }
+}
+
+/** 任一镜头视频 running → 5s 自动刷新（账本投影回填）；启停同一个入口判同一份状态 */
+function ensureVideoRefresh() {
+  const running = storyboards.value.some((s) => s.video_status === 'running')
+  if (!running) { stopVideoRefresh(); return }
+  if (!videoRefreshTimer) {
+    videoRefreshTimer = setInterval(() => { void loadStoryboards() }, 5000)
   }
 }
 
@@ -244,9 +295,12 @@ async function genNarration() {
 }
 
 async function retryShot(sb: StudioStoryboard, stage: 'image' | 'video') {
-  await retryStoryboard(sb.id, { stage, ...(stage === 'image' ? imgParams() : vdParams()) })
+  const res: any = await retryStoryboard(sb.id, { stage, ...(stage === 'image' ? imgParams() : vdParams()) })
   message.success(t('studio.retryStarted'))
-  setTimeout(() => { void loadStoryboards() }, 3000)
+  // 与其它长任务同一个入口：等 run 收口后再读镜头面。改前是发一次 setTimeout(3000)——
+  // 提交落在服务端后台任务里，3s 时读到的常是旧态，running 永不成立、周期表根本不启（§6-78 F 条③）
+  await track(`retry_${stage}`, res?.data?.run_id || '')
+  await loadStoryboards()
 }
 
 const mentionCandidates = computed(() =>
@@ -278,10 +332,34 @@ async function uploadBgm() {
 async function doMerge() {
   if (!currentEid.value) return
   try {
-    const res: any = await mergeEpisode(currentEid.value,
+    const accepted: any = await mergeEpisode(currentEid.value,
       bgmPath.value ? { bgm_path: bgmPath.value } : undefined)
-    mergeResult.value = res?.data ?? null
-    if (res?.code === -1) message.error(res?.data?.error || t('aigc.generateError'))
+    const runId = accepted?.data?.run_id
+    if (!runId) {
+      message.error(t('aigc.generateError'))
+      return
+    }
+    // 导出现在是后台 run：能停（顶部停止按钮覆盖所有在跑的 kind）、能查（runs 投影）。
+    // 产物明细仍以 `merges` 表为唯一事实源，所以 poll 到终态后再取那一行，
+    // 不把 items 塞进 detail_json 造成第二份表示。
+    const run = await track('merge', runId)
+    if (!run || run.status === 'failed' || run.status === 'cancelled') return
+    const detail = parseRunDetail(run)
+    const mid = String(detail.merge_id || '')
+    if (!mid) return
+    const row = (await getMerge(mid))?.data?.merge
+    if (!row) return
+    mergeResult.value = {
+      ok: true,
+      composed: Boolean(detail.composed),
+      mode: String(detail.mode || row.mode || ''),
+      url: String(detail.url || ''),
+      subtitle_burned: Boolean(detail.subtitle_burned),
+      bgm_mixed: Boolean(detail.bgm_mixed),
+      warning: String(detail.fallback || ''),
+      merge: row,
+      items: JSON.parse(row.items_json || '[]'),
+    }
   } catch {
     message.error(t('aigc.generateError'))
   }
@@ -303,6 +381,8 @@ const composedUrl = computed(() => mergeResult.value?.url || '')
 function switchPhase(p: Phase) {
   phase.value = p
   if (p === 'workbench') void loadStoryboards()
+  // 离开工作台时镜头卡片已被 v-if 摘掉，表却还在后台每 5s 拉一次整集（§6-78 F 条②）
+  else stopVideoRefresh()
   if (p === 'export') mergeResult.value = null
 }
 
@@ -316,11 +396,12 @@ onMounted(async () => {
   await loadStoryboards()
 })
 onUnmounted(() => {
-  if (videoRefreshTimer) clearInterval(videoRefreshTimer)
+  stopVideoRefresh()
 })
 
 defineExpose({
   phase, detail, episodes, characters, storyboards, currentEid, busy,
+  activeRuns, activeRunIds, runningCount, stoppingRun, cancelActiveRun, track,
   novel, scriptModel, imgModel, vdModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
@@ -341,6 +422,12 @@ defineExpose({
         <a-tag>{{ detail.project.aspect_ratio }}</a-tag>
         <a-tag color="cyan">{{ detail.project.style }}</a-tag>
       </span>
+      <!-- 长任务的停止入口：只在有任务在跑时出现（条件是 activeRuns 非空，而不是 phase 匹配
+           ——拆解/批量出图/旁白任一步都要能停，按钮常驻但点了没用比看不见入口更糟）。
+           多条并发时如实报条数：一次点击停掉全部，不让用户猜"停的是哪一条"。 -->
+      <GlassButton v-if="runningCount" size="sm" :loading="stoppingRun" @click="cancelActiveRun">
+        {{ runningCount > 1 ? t('studio.stopRunN', { n: runningCount }) : t('studio.stopRun') }}
+      </GlassButton>
     </div>
 
     <div class="studio-body">
@@ -443,6 +530,7 @@ defineExpose({
           <div v-for="sb in storyboards" :key="sb.id" class="studio-shot-card">
             <div class="studio-shot-head">
               <span class="studio-shot-no">#{{ sb.number }}</span>
+              <span v-if="sb.title" class="studio-shot-no">{{ sb.title }}</span>
               <a-tag :color="sb.status === 'video_ready' ? 'success' : sb.status === 'failed' ? 'error' : 'default'">
                 {{ sb.status }}<template v-if="sb.video_status && sb.video_status !== 'pending'">/video:{{ sb.video_status }}</template>
               </a-tag>
@@ -471,6 +559,12 @@ defineExpose({
                   @update:model-value="(v: string) => (sb.image_prompt = v)"
                   @refs="(refs: any[]) => saveShot(sb, refs)"
                 />
+                <!-- 首帧生成时 @角色/道具/场景被注入后的成品提示词（services.py 唯一写点）：
+                     回看它才知道模型实际收到什么，改前这列写了没人读。 -->
+                <div v-if="sb.injected_prompt" class="studio-shot-injected">
+                  <div class="studio-shot-field-label">{{ t('studio.injectedPrompt') }}</div>
+                  <div class="studio-shot-injected-text">{{ sb.injected_prompt }}</div>
+                </div>
                 <div class="studio-shot-field-label">{{ t('studio.videoPrompt') }}</div>
                 <a-textarea v-model:value="sb.video_prompt" :rows="2" />
                 <div class="studio-shot-row">

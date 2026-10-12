@@ -20,6 +20,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_01
 from neurova.api.endpoints import marketplace
 from neurova.api.deps import get_current_user
 from neurova.skills.market_store import reset_market_store
+from tests.auth_headers import overrideIdentity
 
 MOCK_USER = {"user_id": "u1", "username": "user1", "role": "user"}
 MOCK_ADMIN = {"user_id": "admin1", "username": "adminuser", "role": "admin"}
@@ -38,7 +39,7 @@ def app(tmp_path, monkeypatch):
 
 def _auth(c, role):
     user = MOCK_ADMIN if role == "admin" else MOCK_USER
-    c.app.dependency_overrides[get_current_user] = lambda: user
+    overrideIdentity(c.app, user)
     return c
 
 

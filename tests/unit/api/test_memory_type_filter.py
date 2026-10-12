@@ -6,6 +6,7 @@
   - 响应每行带 type 字段（MemoryType 枚举值），前端类型列不再恒空
   - POST /memory 接受 memory_type（此前 AddMemoryRequest 缺字段，类型被丢弃）
 """
+from tests.auth_headers import bearerHeaders
 import os
 from unittest.mock import MagicMock, patch
 
@@ -40,7 +41,7 @@ def app_client(mock_manager):
             "neuser_id": "7",
             "role": "user",
         }
-        client = TestClient(app)
+        client = TestClient(app, headers=bearerHeaders("7"))
         yield client
 
 

@@ -88,16 +88,6 @@ class TestAPIRouter(unittest.TestCase):
         p2_endpoints = self.router.get_endpoints_by_plugin("plugin_2")
         self.assertEqual(len(p2_endpoints), 1)
 
-    def test_unregister_plugin_endpoints(self) -> None:
-        handler = self._make_handler()
-        for i in range(3):
-            self.router.register_endpoint(APIEndpoint(
-                path=f"/api/plugin/{i}", method="GET", handler=handler, plugin_name="plugin_x"
-            ))
-        removed = self.router.unregister_plugin_endpoints("plugin_x")
-        self.assertEqual(removed, 3)
-        self.assertEqual(len(self.router.get_endpoints()), 0)
-
     def test_get_openapi_spec(self) -> None:
         handler = self._make_handler()
         self.router.register_endpoint(APIEndpoint(

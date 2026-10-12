@@ -23,6 +23,7 @@ from neurova.api.endpoints import skill_pool_api
 from neurova.api.deps import get_current_user
 from neurova.skills import library_service as lib
 from neurova.skills.market_store import get_market_store, reset_market_store
+from tests.auth_headers import overrideIdentity
 
 USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
 ADMIN = {"user_id": "a9", "username": "admin", "role": "admin", "neuser_id": "a9"}
@@ -60,12 +61,12 @@ def app(tmp_path, monkeypatch):
 
 
 def _submit(client, monkeypatch_user=None, **body):
-    client.app.dependency_overrides[get_current_user] = lambda: monkeypatch_user or USER
+    overrideIdentity(client.app, monkeypatch_user or USER)
     return client.post(f"{BASE}/skills/submit", json=body)
 
 
 def _approve_pending(client):
-    client.app.dependency_overrides[get_current_user] = lambda: ADMIN
+    overrideIdentity(client.app, ADMIN)
     listing = client.get(f"{BASE}/skill-submissions")
     assert listing.status_code == 200, listing.text
     subs = listing.json()["data"]["items"]
@@ -153,11 +154,11 @@ def test_create_conflict_still_guarded(app):
 
 def test_public_endpoints_read_library(app):
     client, tmp = app
-    client.app.dependency_overrides[get_current_user] = lambda: USER
+    overrideIdentity(client.app, USER)
     assert client.get(f"{BASE}/public").json() == []
     _submit(client, skill_id="vis-tool", name="Visible", description="desc-x", version="1.0.0")
     _approve_pending(client)
-    client.app.dependency_overrides[get_current_user] = lambda: USER
+    overrideIdentity(client.app, USER)
     rows = client.get(f"{BASE}/public").json()
     ids = {r["skill_id"] for r in rows}
     assert "vis-tool" in ids
@@ -193,7 +194,7 @@ def test_pool_skill_submit_carries_exec_payload(app):
     assert cfg.get("tool_sequence") == ["web_search", "file_operation"], "可执行载荷进公共库"
     # 装机链闭环：from-public 副本携带 tool_sequence（公共→私库不再退化为元目）
     # （_approve_pending 把鉴权态留在 ADMIN，装机须以 u1 本人身份发起）
-    client.app.dependency_overrides[get_current_user] = lambda: USER
+    overrideIdentity(client.app, USER)
     r2 = client.post(f"{BASE}/me/skills/kit_pub/from-public")
     assert r2.status_code == 200, r2.text
     mine = lib.get_library("user", "u:u1").get_skill_info("kit_pub")

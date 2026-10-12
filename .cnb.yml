@@ -576,6 +576,37 @@ main:
           script: python scripts/ci/deploy_config_consistency_check.py
           timeout: 10m
 
+  # ── 夜间复核：受保护子集逐条单跑（crontab）───────────────────────────────
+  # 白天那一步把 498 条塞进**一次** pytest 跑完，它证明的是"放在一起时全绿"，
+  # 而清单的准入口径（AGENTS.md §4/§3）写的是「逐文件单跑确定全绿」——这条准入
+  # 此前没有任何判据复核过。台账 §6-138 就是撞上去的实证：一条常驻红在子集里
+  # 躺了十几没人说，因为没有人单独跑过它。
+  #
+  # 为什么放夜间：逐条单跑 ≈40–60 分钟（498 次进程启动为主），放 push 门禁上
+  # 时长没人接受；而"条目悄悄变红"是时间维度的漂移（公共 fixture 被改、依赖上游变），
+  # 与上面的部署配置巡检同类，都属"沉寂期也要有人看一眼"的那一类。
+  #
+  # 口径照旧：非门禁 → `allowFailure: true` 且不上报提交状态（提交状态通道是门禁专用）。
+  "crontab: 0 4 * * *":
+    - name: nightly-protected-subset-audit
+      allowFailure: true
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install uv + locked dependencies
+          script: |
+            python -m pip install uv
+            uv pip install --system -r requirements-ci.lock
+          timeout: 30m
+        - name: per-file audit of the protected subset
+          script: python scripts/ci/protected_subset_nightly.py --quiet
+          timeout: 90m
+
 # ============================================================================
 # 自定义 NPC —— 运行参数（角色定义见 .cnb/settings.yml）
 # ============================================================================

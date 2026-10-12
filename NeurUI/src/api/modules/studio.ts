@@ -30,7 +30,6 @@ export interface StudioEpisode {
   content: string
   synopsis: string
   status: string
-  duration: number
   video_path: string
   subtitle_path: string
   shot_count?: number
@@ -89,8 +88,6 @@ export interface StudioStoryboard {
   camera: string
   movement: string
   atmosphere: string
-  bgm_prompt: string
-  sound_effect: string
   duration: number
   characters_json: string
   props_json: string
@@ -100,8 +97,9 @@ export interface StudioStoryboard {
   injected_prompt: string
   video_path: string
   video_status: string
+  /** 这条镜头实际用哪档规格提交的留痕；单镜重试不传规格时由服务端读回它（§6-78 G 条） */
+  video_resolution: string
   ledger_task_id: string
-  subtitle_path: string
   audio_path: string
   status: string
   error: string
@@ -170,6 +168,23 @@ export function deleteProject(pid: string) {
 // ── 长任务（后台 runs，立即返回 run_id）───────────────────────────────────
 
 export interface RunAccepted { run_id: string; status: string }
+
+/**
+ * 停止一条长任务的读数（取消四件套）。两个字段说的是不同的事，UI 必须分开显示：
+ * `cancel_requested` 是"意图已落库"，`tasks_cancelled` 是"本进程真打断了几个句柄"。
+ * 行挂着而句柄不在（服务重启过）时后者为 0——那不叫失败，剩下的收尾由服务检查点
+ * 或启动收敛完成；但界面不许据此宣称"已停止"。
+ */
+export interface RunCancelResult {
+  run_id: string
+  cancel_requested: boolean
+  tasks_cancelled: number
+  status: string
+}
+
+export function cancelStudioRun(rid: string) {
+  return api.post<ApiResponse<RunCancelResult>>(`${BASE}/runs/${rid}/cancel`)
+}
 
 export function runSplitScript(pid: string, content: string, model?: string) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/projects/${pid}/script`, { content, model })

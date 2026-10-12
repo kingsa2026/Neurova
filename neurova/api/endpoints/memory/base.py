@@ -9,9 +9,10 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import requireIdentityForWrites
 from neurova.interfaces.api_standard import (
     APIError,
     ErrorCodes,
@@ -19,7 +20,12 @@ from neurova.interfaces.api_standard import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["记忆管理"])
+# 写类请求（POST/PUT/PATCH/DELETE）必须有可验证身份——门挂在**这一个点**上：
+# 本包 11 个子模块全部 `from .base import router` 注册到同一个 APIRouter
+# （见 `memory/__init__.py` 的注册顺序注释），所以这里加一次即覆盖全门面，
+# 不需要在 26 个写 handler 上各补一遍判空（那是 consumer-side guard）。
+# 匿名**读**仍落 default 桶（2026-10-06 政策），本行不改读侧语义。
+router = APIRouter(tags=["记忆管理"], dependencies=[Depends(requireIdentityForWrites)])
 
 # ============================================================
 # 辅助函数

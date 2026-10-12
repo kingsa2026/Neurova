@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints.governance import router
+from tests.auth_headers import overrideIdentity
 
 
 def _agentsPool(agents):
@@ -101,7 +102,7 @@ def _client(state, monkeypatch):
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/governance")
-    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+    overrideIdentity(app, {"user_id": "admin1", "role": "admin"})
     monkeypatch.setattr(endpoints_pkg, "_app_state", state)
     return TestClient(app)
 

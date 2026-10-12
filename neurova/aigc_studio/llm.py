@@ -29,7 +29,9 @@ STORYBOARD_BREAKER = (
     "每个元素字段：number(镜头序号 int)、title、description(画面叙事)、"
     "image_prompt(英文文生图提示词)、video_prompt(镜头运动/主体动作描述)、"
     "narration(旁白台词)、camera(景别)、movement(运镜)、atmosphere(氛围)、"
-    "bgm_prompt、sound_effect、duration(秒 number)、characters(出场角色名数组)、props(道具名数组)。"
+    "duration(秒 number)、characters(出场角色名数组)、"
+    "props(道具名数组)、scene(该镜头场景的 location，须原样取自可用场景列表)、"
+    "scene_time(该场景的时间，取自可用场景列表的 time)。"
 )
 
 PROMPT_GENERATOR = (

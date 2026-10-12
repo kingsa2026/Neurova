@@ -373,6 +373,16 @@
           {{ t('skillEvo.holdout') }}: {{ proposalDetail.holdout_before }} →
           {{ proposalDetail.holdout_after }}
         </p>
+        <!-- 那次进化的审计运行（runs/*.json 的读者；§6-95 后半）。三态各自出声：
+             取回了 ⇒ 逐例读数；文件不见了 / 本轮未记 ⇒ 点名，不静默省略。 -->
+        <p v-if="auditRunState === 'attached'" class="proposal-metric">
+          {{ t('skillEvo.auditRun') }} · {{ auditRun?.at }} ·
+          {{ t('skillEvo.auditRunCases') }}:
+          <span v-for="(reading, task) in auditRunCases" :key="task">
+            {{ task }} {{ reading.baseline }}→{{ reading.candidate }}{{ reading.candidate_failed ? '✗' : '' }}
+          </span>
+        </p>
+        <p v-if="auditRunNote" class="proposal-metric">{{ auditRunNote }}</p>
         <a-row :gutter="12">
           <a-col :span="12">
             <div class="evo-diff-title">{{ t('skillEvo.baseline') }}</div>
@@ -383,6 +393,62 @@
             <pre class="evo-diff-body">{{ proposalDetail.improved_text }}</pre>
           </a-col>
         </a-row>
+        <div class="ab-verify">
+          <div class="ab-verify-head">
+            <span class="evo-diff-title">{{ t('skillEvo.abVerify') }}</span>
+            <GlassButton
+              variant="secondary"
+              size="sm"
+              :disabled="abLoading !== ''"
+              @click="runAbArm('simulated')"
+            >
+              {{ t('skillEvo.abRunSimulated') }}
+            </GlassButton>
+            <GlassButton
+              variant="secondary"
+              size="sm"
+              :disabled="abLoading !== ''"
+              @click="runAbArm('real_agent')"
+            >
+              {{ t('skillEvo.abRunReal') }}
+            </GlassButton>
+          </div>
+          <p class="proposal-metric">{{ t('skillEvo.abHint') }}</p>
+          <p v-if="abError" class="ab-error">{{ abError }}</p>
+          <div v-for="report in abReportRows" :key="report.executor_kind" class="ab-arm">
+            <div class="ab-arm-title">
+              {{ t('skillEvo.abExecutor') }}:
+              {{
+                report.executor_kind === 'real_agent'
+                  ? t('skillEvo.abKindReal')
+                  : t('skillEvo.abKindSimulated')
+              }}
+              <span class="proposal-metric">
+                · {{ t('skillEvo.abMetricN') }} {{ report.n }}
+                · {{ t('skillEvo.abMetricBaseline') }} {{ report.baseline_avg }}
+                · {{ t('skillEvo.abMetricCandidate') }} {{ report.candidate_avg }}
+                · {{ t('skillEvo.abMetricDelta') }}
+                  {{ report.delta >= 0 ? '+' : '' }}{{ report.delta }}
+              </span>
+            </div>
+            <table class="ab-table">
+              <thead>
+                <tr>
+                  <th>{{ t('skillEvo.abTaskCol') }}</th>
+                  <th>{{ t('skillEvo.baseline') }}</th>
+                  <th>{{ t('skillEvo.improved') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in report.per_task" :key="row.task_input">
+                  <td>{{ row.task_input }}</td>
+                  <td>{{ row.baseline }}</td>
+                  <td>{{ row.candidate }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="proposal-detail-actions">
           <GlassButton variant="primary" size="sm" @click="decideProposal(proposalDetail.proposal_id, true)">
             {{ t('skillEvo.approve') }}
@@ -403,7 +469,7 @@ import { message } from 'ant-design-vue'
 import * as skillPoolApi from '@/api/modules/skill-pool'
 import * as evolutionApi from '@/api/modules/text-evolution'
 import * as governanceApi from '@/api/modules/governance'
-import type { EvolutionSettings, ProposalSummary, EvolutionProposal } from '@/api/modules/text-evolution'
+import type { EvolutionSettings, ProposalSummary, EvolutionProposal, AbReportData, ArmExecutorKind } from '@/api/modules/text-evolution'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -593,6 +659,37 @@ const proposals = ref<ProposalSummary[]>([])
 const proposalDetail = ref<EvolutionProposal | null>(null)
 const detailVisible = ref(false)
 
+// §6-95 后半：那次进化的审计运行在详情面被读出来。三态各自出声——
+// 取回了 ⇒ 逐例读数；`missing` ⇒ 明说"文件取不回"；`none_recorded` ⇒ 明说"本轮未记"。
+// 静默省略等于把审计面的缺失洗成"看起来没有这回事"，审批人无从分辨。
+const auditRunState = computed(() => proposalDetail.value?.evolution_run_status ?? '')
+const auditRun = computed(() => proposalDetail.value?.evolution_run ?? null)
+const auditRunCases = computed(() => auditRun.value?.holdout_cases ?? {})
+const auditRunNote = computed(() => {
+  if (auditRunState.value === 'missing') return t('skillEvo.auditRunMissing')
+  if (auditRunState.value === 'none_recorded') return t('skillEvo.auditRunNoneRecorded')
+  if (auditRunState.value === 'attached' && auditRun.value?.judge_available === false) {
+    return t('skillEvo.auditRunJudgeDown')
+  }
+  return ''
+})
+
+// 双臂核验：模拟面与真 agent 轨迹面各占一栏，永不合并成一个数字——
+// 两个面量的是不同的事，混标会让审批人拿模拟分当线上证据（不可逆的是解释）。
+const abReports = ref<Record<ArmExecutorKind, AbReportData | null>>({
+  simulated: null,
+  real_agent: null,
+})
+const abLoading = ref<ArmExecutorKind | ''>('')
+const abError = ref('')
+
+/** 已跑出来的臂（最多两栏，各带自己的来源标签；两栏并存才看得出两个面在说不同的话）。 */
+const abReportRows = computed<AbReportData[]>(() =>
+  [abReports.value.simulated, abReports.value.real_agent].filter(
+    (r): r is AbReportData => !!r,
+  ),
+)
+
 const evolveVisible = ref(false)
 const evolveRunning = ref(false)
 const evolveTarget = ref<Skill | null>(null)
@@ -758,10 +855,53 @@ async function viewProposal(p: ProposalSummary) {
   try {
     const res = await evolutionApi.getProposal(props.agentId, p.proposal_id)
     proposalDetail.value = ((res as any)?.data ?? res) as EvolutionProposal
+    // 每开一条提案都清空上一臂的读数：留在屏上就等于把 A 提案的核验结果挂到 B 提案上
+    resetAbReports()
     detailVisible.value = true
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skillEvo.loadError')
     message.error(msg)
+  }
+}
+
+function resetAbReports() {
+  abReports.value = { simulated: null, real_agent: null }
+  abLoading.value = ''
+  abError.value = ''
+}
+
+async function runAbArm(kind: ArmExecutorKind) {
+  const detail = proposalDetail.value
+  if (!detail) return
+  // 详情面里正文是可选字段（列表页为省带宽不剥它）；没有候选正文就没有"双臂"可跑，
+  // 直接说明，而不是拿空串去撞后端 422
+  const candidate = (detail.improved_text || '').trim()
+  if (!candidate) {
+    abError.value = t('skillEvo.abNoCandidate')
+    return
+  }
+  abLoading.value = kind
+  abError.value = ''
+  try {
+    const res = await evolutionApi.abCompareSkills(props.agentId, {
+      skill_id: detail.skill_id,
+      candidate_text: candidate,
+      real_trajectory: kind === 'real_agent',
+    })
+    const report = ((res as any)?.data ?? res) as AbReportData
+    // 来源以**报告**为准，不按请求参数回填：服务端回落成模拟面时，标签必须跟着事实走
+    if (report.executor_kind === 'real_agent') abReports.value.real_agent = report
+    else abReports.value.simulated = report
+    if (report.executor_kind !== kind) {
+      abError.value = t('skillEvo.abKindMismatch')
+    }
+  } catch (err: any) {
+    abError.value = err?.response?.data?.detail
+      || err?.response?.data?.error
+      || err?.message
+      || t('skillEvo.abFailed')
+  } finally {
+    abLoading.value = ''
   }
 }
 
@@ -1045,6 +1185,47 @@ async function installFromMarket(skill: MarketSkill) {
 .proposal-metric {
   font-size: 12px;
   color: var(--nr-text-secondary);
+}
+
+.ab-verify {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--nr-glass-border);
+}
+
+.ab-verify-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ab-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.ab-arm {
+  margin-top: 10px;
+}
+
+.ab-arm-title {
+  font-size: 12px;
+  color: var(--nr-text-primary);
+}
+
+.ab-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.ab-table th,
+.ab-table td {
+  padding: 2px 6px;
+  text-align: left;
+  color: var(--nr-text-secondary);
+  border-bottom: 1px solid var(--nr-glass-border);
 }
 
 .consolidation-info {

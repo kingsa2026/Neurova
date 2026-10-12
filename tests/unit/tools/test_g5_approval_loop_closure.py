@@ -276,7 +276,7 @@ async def testApprovedReplayDeliversResultToConversation(monkeypatch):
         "工具跑在了别人的上下文/工作目录里"
     )
 
-    hints = agent.tool_executor.tool_coordinator.pop_pending_hints()
+    hints = agent.tool_executor.tool_coordinator.pop_pending_hints("sess_g5")
     assert hints, (
         "重放执行成功（result 已产生）但会话的晚到通路收到 0 条 ⇒ "
         "结果只进了 approve 的 HTTP 响应体，模型视角那次调用仍停在『待用户确认』"
@@ -340,7 +340,7 @@ async def testRejectedApprovalAlsoReachesLateResultChannel(monkeypatch):
         f"拒绝回投没有落在审批单自带的 agent 上（查询名 {lookedUp!r}）"
         "⇒ 终态投进了默认 agent 那条没人排水的 coordinator"
     )
-    hints = _Executor.tool_coordinator.pop_pending_hints()
+    hints = _Executor.tool_coordinator.pop_pending_hints("sess_r")
     assert hints and hints[0].get("success") is False and hints[0].get("task_id") == "call_r", (
         f"拒绝没有产生可回投的终态：{hints!r}"
     )

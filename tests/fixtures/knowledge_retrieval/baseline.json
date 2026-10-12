@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "批次 K3：检索回归门的入库基线。由 tests/fixtures/knowledge_retrieval/harness.py 的",
+    "runGateBenchmark() 生成——同一条跑法既是基线的产法也是门的跑法，",
+    "否则门拦的是两套装配之差而不是检索退步。",
+    "重生成口径（不落仓内文件，只取读数，可在仓库根跑）：",
+    "  PYTHONPATH=\"$(git rev-parse --show-toplevel)\" .venv/Scripts/python.exe -c \"",
+    "import tempfile, json; from tests.fixtures.knowledge_retrieval.harness import runGateBenchmark;",
+    "print(json.dumps(runGateBenchmark(tempfile.mkdtemp()), ensure_ascii=False))\"",
+    "改完检索相关代码后：若读数变了，先判是语料动的还是管路动的，再决定改基线还是修检索——",
+    "基线是尺子，不是成绩单，随手对齐新读数等于把回归擦掉。",
+    "刻意不记录真实库的数字：真库 36 条全是 private，那份实证只在台账里留聚合读数。"
+  ],
+  "generated_by": "tests/fixtures/knowledge_retrieval/harness.py::runGateBenchmark",
+  "corpus": "tests/fixtures/knowledge_retrieval/corpus.json",
+  "top_k": 5,
+  "case_count": 30,
+  "context": {"user": {"user_id": "gate-user"}, "agent_id": "default", "scope": "all"},
+  "readings": {"recall_at_k": 0.8, "mrr": 0.8, "unhit_rate": 0.2},
+  "labeling_breakdown": {"category": 6, "tag": 12, "title_literal": 12},
+  "notes": [
+    "unhit_rate 0.2 是现状而非达标线：30 例里 6 例一条都没命中。本批只立地板。",
+    "把它压下去属另一件事，且要先分成因：category 口径的 expected 是整类条目，",
+    "top_k=5 天然吃不满，这一格混着两类成因，不能直接读成检索差两成。",
+    "三种标注口径都有产例是刻意的：真库那次跑出 29/1/0（标签为空），",
+    "那种形状下管路通会被当成检索准，地板也就只钉住标题直取这一条路。"
+  ]
+}

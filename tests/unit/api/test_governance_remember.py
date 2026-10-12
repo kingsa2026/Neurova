@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.auth_headers import overrideIdentity
 
 
 @pytest.fixture()
@@ -47,7 +48,7 @@ def client(monkeypatch):
     app = FastAPI()
     app.include_router(gov_mod.router, prefix="/v1/governance")
     from neurova.api.deps import get_current_user
-    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
+    overrideIdentity(app, {"user_id": "admin1", "role": "admin"})
     return TestClient(app), captured
 
 

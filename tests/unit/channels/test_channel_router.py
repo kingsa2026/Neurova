@@ -292,3 +292,233 @@ async def test_session_owned_by_agent_owner_via_request_context(manager):
     assert seen["req_user"] == "admin-77"
     # chat 结束后清除，不污染后续
     assert get_request_user_id() in (None, "")
+
+
+class _ScopeSpy:
+    """承载 memory_manager 的最小替身：只记录 set_request_scope 的成对入参。"""
+
+    def __init__(self):
+        self.scopes = []
+
+    def set_request_scope(self, neuser_id=None, user_id=None):
+        self.scopes.append((neuser_id, user_id))
+
+
+def _bindManager(tmp_path):
+    from neurova.channels.user_identity import UserIdentityManager
+
+    UserIdentityManager.resetInstance()
+    return UserIdentityManager(str(tmp_path / "bindings.db"))
+
+
+@pytest.mark.asyncio
+async def test_unboundSenderGetsChannelNamespaceNotDefault(manager, tmp_path):
+    """§6-127 裁定 ①：未绑定的渠道发送者落 `ch:{渠道}:{发送者}`，不再进 default 共享桶。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("ok")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    manager.add_message_handler(handler, priority=50)
+
+    await manager._dispatch_message(_msg("你好", sender="ou_55"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["user_id"] == "ch:feishu:ou_55", meta
+    assert meta["identity_bound"] == "false", meta
+    assert agent.memory_manager.scopes == [("ch:feishu:ou_55", "ch:feishu:ou_55")]
+
+
+@pytest.mark.asyncio
+async def test_boundSenderUsesPlatformAccountAndScopePair(manager, tmp_path):
+    """已绑定 → 轮身份是平台账号，且记忆作用域成对下发（少一个键就复现不出控制台那把键）。"""
+    mgr = _bindManager(tmp_path)
+    mgr.bindIdentity("default", "feishu", "ou_55", "u-alice", neuserId="ne-u1",
+                     boundBy="admin")
+    agent = FakeAgent("ok")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    manager.add_message_handler(handler, priority=50)
+
+    await manager._dispatch_message(_msg("你好", sender="ou_55"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["identity_bound"] == "true", meta
+    assert meta["user_id"] == "u-alice", meta
+    assert meta["channel_user_id"] == "ou_55", "渠道原身份仍要留着（来源展示/群内 @ 用它）"
+    assert agent.memory_manager.scopes == [("ne-u1", "u-alice")]
+
+
+@pytest.mark.asyncio
+async def test_bindingIsScopedPerAgentOnTheChannelPath(manager, tmp_path):
+    """裁定 ③＝agent 级：换 agent 不认这条绑定，各自算各自的身份。"""
+    mgr = _bindManager(tmp_path)
+    mgr.bindIdentity("a1", "feishu", "ou_55", "u-alice", neuserId="ne-u1")
+    for agentId, expected in (("a1", "u-alice"), ("default", "ch:feishu:ou_55")):
+        agent = FakeAgent("ok")
+        agent.memory_manager = _ScopeSpy()
+        handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+        manager._message_handlers = [h for h in manager._message_handlers
+                                     if getattr(h, "__name__", "") != "<lambda>"]
+        manager.add_message_handler(handler, priority=50)
+        await manager._dispatch_message(_msg("你好", sender="ou_55", agent_id=agentId))
+        assert agent.calls[0]["metadata"]["user_id"] == expected, (agentId, agent.calls)
+
+
+# ── 批 4：渠道内自助绑定（工单 §6-127 裁定 ①②③）──
+#
+# 这四格守的是"绑定这条消息**只**改绑定表"：它不进模型额度、不落运行台账、不写记忆。
+# 若哪天有人把拦截点挪到 ledger 之后，前两条立刻红。
+
+@pytest.fixture
+def codesInMemory(monkeypatch):
+    from neurova.auth.verification_code import VerificationCodeModel
+
+    model = VerificationCodeModel(":memory:")
+    monkeypatch.setattr(
+        "neurova.auth.verification_code.get_verification_code_model", lambda: model)
+    return model
+
+
+class _LedgerSpy:
+    """记录 AgentRunLedger 被构造了几次——绑定消息应当一次都不构造（不占额度账）。"""
+
+    def __init__(self):
+        self.built = []
+
+    def __call__(self, *args, **kwargs):
+        self.built.append(args)
+        raise AssertionError("绑定消息不该构造运行台账")
+
+
+@pytest.mark.asyncio
+async def test_bindCodeIsConsumedWithoutTouchingModelOrLedger(manager, tmp_path, codesInMemory,
+                                                              monkeypatch):
+    """"绑定 <码>" 就地消费：回一句确认，agent 一次都不被调用，台账一次都不构造。"""
+    from neurova.channels.identity_binding import issueBindingCode
+
+    _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    spy = _LedgerSpy()
+    monkeypatch.setattr(channel_router, "AgentRunLedger", spy)
+
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    reply = await handler(_msg(f"绑定 {code}", sender="ou_77"))
+
+    assert reply and "已绑定" in str(reply), reply
+    assert agent.calls == [], "绑定消息不该进模型（既花额度又写记忆）"
+    assert spy.built == [], "绑定消息不该落运行台账"
+
+
+@pytest.mark.asyncio
+async def test_bindCodeFailureRepliesNamedReason(manager, tmp_path, codesInMemory):
+    """没有待确认的码 ⇒ 回话点名原因并指路，而不是把这条消息当对话丢给模型糊过去。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    reply = await handler(_msg("绑定 123456", sender="ou_77"))
+
+    assert reply and "网页控制台" in str(reply), reply
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_boundSenderNextTurnUsesPlatformAccount(manager, tmp_path, codesInMemory):
+    """闭环：码绑上之后，同一发送者的**下一轮**身份就是平台账号（写→读→反馈）。"""
+    from neurova.channels.identity_binding import issueBindingCode
+
+    mgr = _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    agent = FakeAgent("pong")
+    agent.memory_manager = _ScopeSpy()
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg(f"绑定 {code}", sender="ou_77"))
+    assert mgr.resolveTurnIdentity("default", "feishu", "ou_77")["bound"] == "true"
+
+    await handler(_msg("刚才说的那些还记得吗", sender="ou_77"))
+
+    meta = agent.calls[0]["metadata"]
+    assert meta["user_id"] == "u-alice", meta
+    assert agent.memory_manager.scopes == [("ne-1", "u-alice")]
+
+
+@pytest.mark.asyncio
+async def test_chatMentioningBindingStillGoesToAgent(manager, tmp_path, codesInMemory):
+    """聊普通内容时提到"绑定"两个字，不得被当成指令吃掉。"""
+    _bindManager(tmp_path)
+    agent = FakeAgent("pong")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    reply = await handler(_msg("帮我绑定一下账号，怎么弄", sender="ou_77"))
+
+    assert len(agent.calls) == 1, agent.calls
+    assert reply == ["pong"]
+
+
+# ── 批 6：观察面写侧（"按渠道查人"的读数从这一行开始长）──
+
+@pytest.mark.asyncio
+async def testInboundMessageRegistersObservedSender(manager, tmp_path):
+    """每条入站都登记发送者：面板要列"可绑的人"只有这一个来源（用户抄不到 open_id）。"""
+    mgr = _bindManager(tmp_path)
+    agent = FakeAgent("ok")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg("你好", sender="ou_77"))
+
+    rows = mgr.listObservedSenders("default")
+    assert [(r["channel_user_id"], r["display_name"]) for r in rows] == [("ou_77", "ou_77")]
+    assert rows[0]["namespace"] == "ch:feishu:ou_77"
+    assert rows[0]["bound_user_id"] is None, "登记不等于绑定"
+
+
+@pytest.mark.asyncio
+async def testBindCodeMessageStillRegistersSender(manager, tmp_path, codesInMemory):
+    """消费绑定码那条消息也要登记——否则"绑上之后"的人反而从观察面消失。"""
+    from neurova.channels.identity_binding import bindCommandText, issueBindingCode
+
+    mgr = _bindManager(tmp_path)
+    code = issueBindingCode("default", "feishu", "u-alice", neuserId="ne-1")
+    agent = FakeAgent("ok")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+
+    await handler(_msg(bindCommandText(code), sender="ou_88"))
+
+    row = next(r for r in mgr.listObservedSenders("default") if r["channel_user_id"] == "ou_88")
+    assert row["bound_user_id"] == "u-alice"
+
+
+@pytest.mark.asyncio
+async def testRequestChannelStaysWithSessionOwnerDuringTurn(manager, tmp_path):
+    """§6-121 (b) 乙案的靶：回合内请求通道仍是**会话属主**，不是发送者。
+
+    原先 `ChatPipeline._execute_steps` 每次回合都用 `meta['user_id']`（发送者）再写一遍这条
+    通道，把 router 写的 owner 换掉——而 `mem_core.save_to_session` 只读这一条通道，
+    于是渠道会话落进一个谁也不匹配的命名空间，控制台的会话列表（按 user_id 过滤）
+    看不见它：Issue #290 Wave H-W0 修好的那条可见性被批 2 静默吃掉。
+    """
+    from neurova.core.identity_context import get_request_user_id
+
+    _bindManager(tmp_path)
+    seen = {}
+
+    class OwnerAwareAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(owner_user_id="owner-of-kai", agent_id="default")
+
+        async def chat(self, user_input, session_id=None, metadata=None, **kw):
+            # 这一刻就是 save_to_session / 浏览器 profile 池化的读数时机
+            seen["request_channel"] = get_request_user_id()
+            seen["meta_user_id"] = (metadata or {}).get("user_id")
+            return {"text": "pong"}
+
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: OwnerAwareAgent())
+    await handler(_msg("你好", sender="ou_55"))
+
+    assert seen["request_channel"] == "owner-of-kai", (
+        f"回合内请求通道被换成 {seen['request_channel']!r}——渠道会话将不再属于属主")
+    assert seen["meta_user_id"] == "ch:feishu:ou_55", (
+        "发送者身份仍要走记忆隔离（这一格不许被上面的修复顺手删掉）")

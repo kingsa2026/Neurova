@@ -3,9 +3,12 @@
 
 规则（台账 C3，只提升不下降）：
 - `NEUROVA_GENERATION_RETENTION_DAYS` 默认 **0=关闭**——开启权在用户；
-- 仅删「账本终态（done/failed）+ 超期 + local_path 位于产物目录内」的文件；
+- 仅删「账本终态（`task_ledger.TASK_TERMINAL_STATUSES`：succeeded/failed）+ 超期 +
+  local_path 位于产物目录内」的文件；终态判定一律引用那份单源，不在本地抄集合
+  （§6-78 E 条：曾自造 `("done","failed")`，而 `done` 在账本里根本不存在，
+  于是每个成功件都被跳过——清理逻辑从未清过成功产物）；
   **账本行永不删**（历史面板据 local_path 存在性显示已过期态）；
-- Studio 库（storyboards/characters/assets/episodes/merges）在引用的路径一律
+- Studio 库（storyboards/characters/scenes/props/episodes/merges）在引用的路径一律
   保护；Studio 库读取失败 → 整轮放弃（宁可不清，不冒删用在产物之险）；
 - 纯账本驱动：产物目录里无账本记录的文件不碰；
 - 启动后台任务执行（与 ffmpeg bootstrap 同款不阻塞；同步文件 IO 走
@@ -22,18 +25,23 @@ from typing import Dict, Optional, Set
 
 from neurova.core.logger import get_logger
 
-from .task_ledger import GenerationTaskLedger, TaskRecord, get_generation_task_ledger
+from .task_ledger import (
+    GenerationTaskLedger, TaskRecord, TASK_TERMINAL_STATUSES,
+    get_generation_task_ledger,
+)
 
 logger = get_logger(__name__)
 
 ENV_DAYS = "NEUROVA_GENERATION_RETENTION_DAYS"
-_TERMINAL = ("done", "failed")
 
 # Studio 库中代表"产物被引用"的 (表, 列) 组合
+# 三份 `image_path`（角色定妆图 / 场景参考图 / 道具参考图）都在镜头生成时被
+# `resolveShotContinuity` 作为参考图读取，漏一条就是删掉还在用的参考件。
 _REF_COLUMNS = [
     ("storyboards", "first_frame_path"), ("storyboards", "end_frame_path"),
     ("storyboards", "video_path"), ("storyboards", "audio_path"),
-    ("characters", "image_path"), ("assets", "ref_path"),
+    ("characters", "image_path"), ("scenes", "image_path"),
+    ("props", "image_path"),
     ("episodes", "video_path"), ("episodes", "subtitle_path"),
     ("merges", "output_path"),
 ]
@@ -95,7 +103,7 @@ def purge_expired_files(
     cutoff = (now or time.time()) - days * 86400.0
     out_resolved = Path(out_dir).resolve()
     for rec in ledger.list():
-        if rec.status not in _TERMINAL or not rec.local_path:
+        if rec.status not in TASK_TERMINAL_STATUSES or not rec.local_path:
             continue
         stats["scanned"] = int(stats["scanned"]) + 1
         if rec.updated_at >= cutoff:

@@ -371,6 +371,16 @@ def extract_knowledge_to_graph(
     admitted = admitExtractedFacts(
         data, {**item, "agent_id": domain}, authority, termRegistry)
 
+    # 投影只铺**权威真接纳**的那些。底座对关系有两道门（`custom` 不收、逐字可核与
+    # 定义域校验会拒），投影这一侧此前一道都没有：模型说 `X telepathizes Y`，
+    # 权威没收，图上却长出一条 `relation="custom"` 的边——§6-106 那 52 条孤儿边
+    # 与清账后仍留的 33 个无据节点，根因就在这。判据不另立一套：直接用
+    # `_authorityRelations`，与漂移读数同一个口径。
+    # **边**的据只有一份：权威里真收下的那条关系。节点不设这道门——一个实体只要
+    # 的 `is_a` 落了库，它就是权威里的主体，"暂时没连上边"不是无据（`_authorityRelations`
+    # 有意排除 `is_a`，因为类型在投影里对应节点类型而不是一条边）。
+    backedKeys = {_relKey(r) for r in _authorityRelations(authority, domain, termRegistry)}
+
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
     resolver = SubjectResolver()
@@ -413,6 +423,11 @@ def extract_knowledge_to_graph(
         if not source_id or not target_id or source_id == target_id:
             continue
         relation = _typeFromRegistry(termRegistry, rel.get("type"))
+        if _relKey({"source": sourceLabel, "relation": relation,
+                    "target": targetLabel}) not in backedKeys:
+            logger.debug("graph_bridge: 关系未进权威，投影不建这条边：%s %s %s",
+                         sourceLabel, relation, targetLabel)
+            continue
         try:
             graph_manager.add_edge(
                 source_id=source_id, target_id=target_id, relation_type=relation
@@ -536,28 +551,90 @@ def _projectionRelations(graph: Any) -> List[Dict[str, str]]:
     return out
 
 
+def _relKey(rel: Dict[str, str]) -> str:
+    """关系恒等键：投影与权威比对的唯一口径。
+
+    `projectionDrift` 与 `rebuildProjectionFromAuthority` 共用它——两处各拼一份
+    分隔符，就会漂出一条"两边都不认"的差集，而那正是最难查的假读数。
+    """
+    return "".join((rel["source"], rel["relation"], rel["target"]))
+
+
 def projectionDrift(agentId: str, graph: Any, store: Any,
                     termRegistry: Any = None) -> Dict[str, Any]:
-    """权威与投影的关系差集：缺的（权威有投影无）与孤儿（投影有权威无）。
+    """权威与投影的差集：关系两向（缺的/孤儿）+ **节点维度的无据残留**。
 
     只报不计分、不自动修：分叉是**运维读数**，修由 `rebuildProjectionFromAuthority`
     显式做——顺手修掉就等于把报出与处置混成一件事，读的人再也看不到曾经分叉过。
+
+    节点这一维是 §6-106 补的：此前只比关系，真库清账后 drift 回"missing 0 / orphan 0"，
+    而投影里实际还留着 33 个无邻居的孤立节点、**个个带 `description`（条目正文前 200 字）**。
+    同一份读数里 `nodes`（rebuild 报的是"按权威铺出来的节点数"）与投影总节点数也不同名
+    却同城，读的人必然把 145 当成 178——所以这里把三个数分开摆明。
+    判"无据"的口径与 rebuild 的删除口径对齐：标签不在权威关系两端、且没有任何邻居。
     """
     authority = _authorityRelations(store, agentId, termRegistry)
     projection = _projectionRelations(graph)
 
-    def _key(rel: Dict[str, str]) -> str:
-        return "\x1f".join((rel["source"], rel["relation"], rel["target"]))
-
-    held = {_key(r) for r in projection}
-    known = {_key(r) for r in authority}
+    held = {_relKey(r) for r in projection}
+    known = {_relKey(r) for r in authority}
+    wantedLabels = {r["source"] for r in authority} | {r["target"] for r in authority}
+    # 点据 = 权威里有这个主体（`is_a` 落了库就算）。上一版这里拿"是否参与关系"当点据，
+    # 于是把 33 个**有据但未连边**的实体报成了"无据残留"——那是我的口径错，
+    # 不是数据脏。孤立与无据是两件事，各占一格，谁也不冒充谁。
+    knownSubjects = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    unbacked = [
+        {"label": node.label,
+         "has_body": bool((node.properties or {}).get("description"))}
+        for node in graph._nodes.values() if node.label not in knownSubjects
+    ]
+    isolated = [node.label for node in graph._nodes.values()
+                if not graph.get_neighbors(node.node_id)]
     return {
         "agent_id": agentId,
         "authority_relations": len(authority),
         "projection_relations": len(projection),
-        "missing_relations": [r for r in authority if _key(r) not in held],
-        "orphan_relations": [r for r in projection if _key(r) not in known],
+        "missing_relations": [r for r in authority if _relKey(r) not in held],
+        "orphan_relations": [r for r in projection if _relKey(r) not in known],
+        "authority_nodes": len(wantedLabels),
+        "projection_nodes": len(graph._nodes),
+        "unbacked_nodes": unbacked,
+        "unbacked_nodes_with_body": sum(1 for u in unbacked if u["has_body"]),
+        # 形状读数，不是缺陷：一个实体有类型没边是合法状态
+        "isolated_nodes": isolated,
     }
+
+
+def driftFindingsForAllAgents(store: Any) -> List[Dict[str, Any]]:
+    """扫一遍所有带投影目录的 agent，回**有分叉**的那些（启动只报不修用它）。
+
+    枚举口径不另起一份：目录根走 `agent_workspaces` 单源，管理器走 per-agent
+    工厂——与端点 `_get_kg_manager` 之外的那条 fallback 同一个构造点。
+    目录名不合 agent_id 规则的脏目录跳过而非抛：那不是图谱故障，是工作区里
+    多了个陌生文件夹，把它算成"投影漂移"会污染读数。
+    """
+    from neurova.cognitive_layers.knowledge_graph.manager import (
+        get_agent_knowledge_graph_manager,
+    )
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    root = get_agent_workspaces_root()
+    findings: List[Dict[str, Any]] = []
+    if not root.exists():
+        return findings
+    for child in sorted(root.iterdir()):
+        if not (child / "knowledge_graph").is_dir():
+            continue
+        try:
+            graph = get_agent_knowledge_graph_manager(child.name)
+            drift = projectionDrift(child.name, graph, store)
+        except Exception as e:  # noqa: BLE001 - 一个 agent 读不动不许带停启动
+            logger.warning("投影一致性读数跳过 agent %s: %s", child.name, e)
+            continue
+        if (drift["missing_relations"] or drift["orphan_relations"]
+                or drift["unbacked_nodes"]):
+            findings.append(drift)
+    return findings
 
 
 def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
@@ -572,15 +649,32 @@ def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
     authority = _authorityRelations(store, agentId, termRegistry)
+    known = {_relKey(r) for r in authority}
     wanted = {r["source"] for r in authority} | {r["target"] for r in authority}
 
+    # 「整体按权威换新」按字面执行。此前只摘"碰到本域标签"的边、只摘"本域标签且无邻居"
+    # 的点——两端都不在权威里的孤儿边它根本不动，§6-106 量到的 52 条就是这么留下的
+    # （docstring 说换新，实做却漏一类，文案与行为不一致比漏功能更难查）。
+    # 顺序是必要的：先摘完所有无据边，剩下的边两端必然都在 wanted 里，
+    # 于是一趟节点清理就能把"无据且孤立"的那批（还带着条目正文摘要）一并摘净。
     labels = {n.node_id: n.label for n in graph._nodes.values()}
+    prunedEdges = 0
     for edge_id, edge in list(graph._edges.items()):
-        if labels.get(edge.source_id) in wanted or labels.get(edge.target_id) in wanted:
+        key = _relKey({"source": labels.get(edge.source_id) or "",
+                       "relation": edge.relationTypeValue,
+                       "target": labels.get(edge.target_id) or ""})
+        if key not in known:
             graph.delete_edge(edge_id)
+            prunedEdges += 1
+    # 节点只摘"权威里没有这个主体"的那些；孤立的但有据（有类型没边）留下——
+    # 顺手清空一片合法图形不叫"按权威换新"，叫过修
+    knownSubjects = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    prunedNodes = 0
     for node in list(graph._nodes.values()):
-        if node.label in wanted and not graph.get_neighbors(node.node_id):
-            graph.delete_node(node.node_id)
+        if node.label in knownSubjects:
+            continue
+        graph.delete_node(node.node_id)
+        prunedNodes += 1
 
     types = {s["canonical_label"]: (s.get("type_term_id") or _NodeType.CONCEPT.value)
              for s in store.listSubjects(agentId)}
@@ -605,5 +699,13 @@ def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
         if graph.add_edge(source_id=sourceId, target_id=targetId,
                           relation_type=rel["relation"]) is not None:
             edges += 1
+    persist = graph.persist()
     return {"agent_id": agentId, "nodes": len(nodeIds), "edges": edges,
+            # `nodes` 是"按权威铺出来的节点数"，`projection_nodes` 是投影里的总节点数：
+            # 两个数同城不同名，摆在一起才不会被人读成一个（§6-106）
+            "projection_nodes": len(graph._nodes),
+            # 摘了多少要说话：不报数的清理等于"看起来什么都没发生"，
+            # 而下一次有人问"图怎么少了东西"时，这条读数就是唯一答案
+            "pruned_edges": prunedEdges, "pruned_nodes": prunedNodes,
+            "persist": persist,
             "drift": projectionDrift(agentId, graph, store, termRegistry)}

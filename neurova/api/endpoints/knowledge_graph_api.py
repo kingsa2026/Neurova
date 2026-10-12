@@ -361,4 +361,12 @@ async def rebuild_graph_projection(
 
     graph = _get_kg_manager(agent_id)
     outcome = rebuildProjectionFromAuthority(agent_id, graph, get_knowledge_fact_store())
+    if not outcome.get("persist", {}).get("ok", True):
+        # 落盘失败不再被吞成 code:0——内存按权威重铺了、磁盘没落地，
+        # 这时候报成功等于让下一次启动读到一份没人知道的旧图（§6-106）。
+        raise HTTPException(
+            status_code=500,
+            detail={"agent_id": agent_id, "persist": outcome["persist"],
+                    "message": "投影已按权威重铺但落盘失败：内存与磁盘当前不一致"},
+        )
     return {"code": 0, "message": "success", "data": outcome}

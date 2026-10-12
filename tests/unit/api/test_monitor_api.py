@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 from neurova.api.endpoints.monitor import router
 from neurova.api.deps import get_current_user
 from neurova.execution_engine.execution_monitor import AlertLevel, ExecutionMonitor
+from tests.auth_headers import overrideIdentity
 
 BASE = "/api/v1/monitor"
 
@@ -73,12 +74,12 @@ def app_client(engine_stub):
         pm.return_value = manager
 
         app.include_router(router, prefix=BASE)
-        app.dependency_overrides[get_current_user] = lambda: ADMIN
+        overrideIdentity(app, ADMIN)
         yield TestClient(app), engine_stub
 
 
 def _auth(client, user):
-    client.app.dependency_overrides[get_current_user] = lambda: user
+    overrideIdentity(client.app, user)
 
 
 class TestAlertsContract:

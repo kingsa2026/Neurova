@@ -1,30 +1,32 @@
 """
-test_config_manager_persistence.py — P0-10: config_manager load/save 静默数据丢失修复
+test_config_manager_persistence.py — load/save 的失败语义与**错误分级**（P0-10 口径）
 
-验证：
-1. load 处理损坏 JSON 不崩溃
-2. load 处理缺失文件优雅返回
-3. save 处理权限错误不崩溃
-4. save 创建父目录
-5. load/save 失败时记录日志（mock logger 验证调用）
+被测对象自 2026-10-10 起是 `neurova.core.config.ConfigManager`（统一分层配置管理器）。
+原来这一套断言打在 `neurova/core/config_manager.py`（KV 简单版）上：那份实现把
+「配置文件缺失/JSON 损坏」记 warning（可降级到默认值，不是事故），把「写盘失败」记
+error（用户数据丢失）。两份并存属双源，按教义第 7 条比后合并——**这一格分级是简单版
+比分层版强的地方**，随本批并入 `config.py::load`；本文件即它的常驻判据。
+
+夹具不再全局 patch 标准库：写盘失败用"父路径是一个已存在的文件"这个真触发（`mkdir`
+确实会抛 `NotADirectoryError`，它是 `OSError` 的子类），不可序列化用真塞进一个 `set`。
+以前那种 `patch("….json.dump")` / `patch("….Path.mkdir")` 打的是进程级标准库符号，
+块内任何旁路落盘都会被牵连——判据自己成了污染源。
 """
 import json
 from unittest.mock import patch
 
 import pytest
 
-from neurova.core.config_manager import ConfigManager
+from neurova.core.config import ConfigManager
 
 
 class TestLoadErrorHandling:
     def test_load_handles_corrupt_json_without_crash(self, tmp_path):
-        """损坏 JSON 不应导致崩溃，应记录 warning"""
+        """损坏 JSON 不应崩溃，且不写入任何配置"""
         cfg_file = tmp_path / "broken.json"
         cfg_file.write_text("{invalid json content", encoding="utf-8")
         cm = ConfigManager(str(cfg_file))
-        # 不应抛异常
         cm.load()
-        # 数据保持为空（未加载）
         assert cm.get_all() == {}
 
     def test_load_handles_missing_file_gracefully(self, tmp_path):
@@ -33,17 +35,21 @@ class TestLoadErrorHandling:
         cm.load()
         assert cm.get_all() == {}
 
-    def test_load_logs_warning_on_corrupt_json(self, tmp_path):
-        """损坏 JSON 应触发 logger.warning"""
+    def test_load_logs_warning_not_error_on_corrupt_json(self, tmp_path):
+        """可恢复的读取失败记 warning；把它报成 error 会让"回落默认值"看起来像事故"""
         cfg_file = tmp_path / "broken.json"
         cfg_file.write_text("{invalid", encoding="utf-8")
         cm = ConfigManager(str(cfg_file))
-        with patch("neurova.core.config_manager.logger") as mock_logger:
+        with patch("neurova.core.config.logger") as mock_logger:
             cm.load()
-            assert mock_logger.warning.called
+            assert mock_logger.warning.called, (
+                "load 侧的 JSON/IO 失败必须走 warning 级——这是 KV 简单版比分层版强的那一格，"
+                "本批把它并了过来")
+            assert not mock_logger.error.called, (
+                "同一场失败不该既 warning 又 error：两条读数为同一个可恢复事件报警两次")
 
     def test_load_preserves_existing_data_on_error(self, tmp_path):
-        """load 失败时应保留已存在的内存配置"""
+        """load 失败时应保留已存在的内存配置（失败不许把用户手上的配置抹掉）"""
         cfg_file = tmp_path / "broken.json"
         cfg_file.write_text("{invalid", encoding="utf-8")
         cm = ConfigManager(str(cfg_file))
@@ -53,17 +59,26 @@ class TestLoadErrorHandling:
 
 
 class TestSaveErrorHandling:
-    def test_save_handles_permission_error_without_crash(self, tmp_path):
-        """权限错误不应导致崩溃，应记录 error"""
-        cm = ConfigManager(str(tmp_path / "config.json"))
+    def test_save_reports_error_when_parent_is_a_file(self, tmp_path):
+        """父路径是个已存在的文件 ⇒ mkdir 真抛 OSError：不得崩，且必须 error 级"""
+        blocker = tmp_path / "blocker.json"
+        blocker.write_text("{}", encoding="utf-8")
+        cm = ConfigManager(str(blocker / "nested" / "config.json"))
         cm.set("key", "value")
-        with patch("neurova.core.config_manager.json.dump", side_effect=OSError("disk full")):
-            with patch("neurova.core.config_manager.logger") as mock_logger:
-                cm.save()
-                assert mock_logger.error.called
+        with patch("neurova.core.config.logger") as mock_logger:
+            cm.save()
+            assert mock_logger.error.called, "写盘失败＝用户数据丢失，必须 error 级"
+
+    def test_save_reports_error_on_unserializable_value(self, tmp_path):
+        """值不可 JSON 序列化 ⇒ 真触发 TypeError：不得崩，且必须 error 级点名数据没了"""
+        cm = ConfigManager(str(tmp_path / "config.json"))
+        cm.set("bad_value", {"not", "serializable"})
+        with patch("neurova.core.config.logger") as mock_logger:
+            cm.save()
+            assert mock_logger.error.called
 
     def test_save_creates_parent_directory(self, tmp_path):
-        """save 应自动创建父目录"""
+        """save 应自动创建父目录，并写出真 JSON（不是 repr）"""
         nested_path = tmp_path / "deep" / "nested" / "config.json"
         cm = ConfigManager(str(nested_path))
         cm.set("key", "value")
@@ -71,19 +86,15 @@ class TestSaveErrorHandling:
         assert nested_path.exists()
         assert json.loads(nested_path.read_text(encoding="utf-8"))["key"] == "value"
 
-    def test_save_logs_error_on_oserror(self, tmp_path):
-        """OSError 应触发 logger.error"""
-        cm = ConfigManager(str(tmp_path / "config.json"))
-        cm.set("key", "value")
-        with patch("neurova.core.config_manager.Path.mkdir", side_effect=OSError("permission denied")):
-            with patch("neurova.core.config_manager.logger") as mock_logger:
-                cm.save()
-                assert mock_logger.error.called
+    def test_saved_bytes_are_readable_back_in_a_new_process_object(self, tmp_path):
+        """落盘事实要在**新实例**上成立——同一实例的内存读数不算往返证据"""
+        path = tmp_path / "round_trip.json"
+        writer = ConfigManager(str(path))
+        writer.set("k", "v")
+        writer.set("n", 42)
+        writer.save()
 
-
-class TestLoggerImport:
-    def test_logger_is_available(self):
-        """config_manager 模块应导出 logger 实例"""
-        from neurova.core import config_manager
-        assert hasattr(config_manager, "logger")
-        assert config_manager.logger is not None
+        reader = ConfigManager(str(path))
+        reader.load()
+        assert reader.get("k") == "v"
+        assert reader.get("n") == 42

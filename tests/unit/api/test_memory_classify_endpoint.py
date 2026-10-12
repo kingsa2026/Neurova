@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.auth_headers import bearerHeaders
+
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_0123456789")
 
 from fastapi import FastAPI
@@ -56,7 +58,7 @@ def client(manager):
             "neuser_id": "neu",
             "role": "user",
         }
-        yield TestClient(app)
+        yield TestClient(app, headers=bearerHeaders("u1"))
 
 
 class TestClassifyEndpoint:

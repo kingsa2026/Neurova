@@ -24,6 +24,7 @@ from neurova.api.endpoints import settings as SETTINGS
 from neurova.api.endpoints import memory_share_groups as MSG
 from neurova.cognitive_layers.memory_layer import share_group as SG
 from neurova.core import app_settings as APPS
+from tests.auth_headers import overrideIdentity
 
 ADMIN = {"user_id": "a1", "username": "a1", "role": "admin"}
 
@@ -33,7 +34,7 @@ def settings_client(tmp_path, monkeypatch):
     monkeypatch.setattr(APPS, "_settings_path", lambda path=None: tmp_path / "app_settings.json")
     app = FastAPI()
     app.include_router(SETTINGS.router, prefix="/api")
-    app.dependency_overrides[deps_u] = lambda: dict(ADMIN)
+    overrideIdentity(app, dict(ADMIN))
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c, tmp_path
     app.dependency_overrides.clear()
@@ -78,7 +79,7 @@ def share_client(tmp_path, monkeypatch):
     SG.reset_share_group_manager()
     app = FastAPI()
     app.include_router(MSG.router, prefix="/api/v1")
-    app.dependency_overrides[auth_u] = lambda: dict(ADMIN)
+    overrideIdentity(app, dict(ADMIN))
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c, tmp_path
     app.dependency_overrides.clear()

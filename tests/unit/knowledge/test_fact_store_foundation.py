@@ -172,7 +172,12 @@ class TestMigrationVersions:
                 'knowledge_entry_conflicts', 'ontology_terms',
                 'ontology_rules', 'knowledge_derivation_edges',
                 'ontology_rule_fires', 'knowledge_lineage_heads'} <= names
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 12
+        # v13（批次 K2）：断言表加 `erased_at`——擦除的落点是"正文置空 + 打标记"，
+        # 而标记必须落在这一张表的列上，不能靠别处的第二份状态推断。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 13
+        erased = [r[1] for r in store._conn.execute(
+            "PRAGMA table_info(knowledge_assertions)").fetchall()]
+        assert "erased_at" in erased, "v13 没重放到本库，擦除会退化成硬删断言行"
 
     def test_reopeningAnExistingDbStillUpgrades(self, tmp_path):
         first = KnowledgeFactStore(str(tmp_path / 'reopen.db'))

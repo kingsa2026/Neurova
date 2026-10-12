@@ -3100,7 +3100,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 | | neurova/channels/feishu.py | FeishuChannel | ✅ 已实现 | 飞书 |
 | | neurova/channels/telegram.py | TelegramChannel | ✅ 已实现 | Telegram |
 | | ... | ... | ... | ... |
-| **功能壳 / 媒介管理** | neurova/media/manager.py | MediaManager | ✅ 已实现 | 媒介管理 |
+| **功能壳 / 媒介管理** | ~~neurova/media/manager.py~~ | MediaManager | **已退役**（2026-10-11，台账 §6-139：生产零消费者，校验位已并入 REST 端点）| 媒介管理 |
 | **功能壳 / 模型生成** | neurova/llm/generators/ | *Generator | ✅ 已实现 | text_to_image, video_to_video 等 |
 | **接口层 - 消息路由** | neurova/router.py | MessageRouter | ✅ 已实现 | 消息类型识别、路由到正确的处理模块 |
 | **基础设施 - LLM 配置** | neurova/llm/provider_manager.py | LLMProviderManager | ✅ 已实现 | 统一管理多个 API Key 和服务商配置 |
@@ -3130,11 +3130,11 @@ CogArch 2.0 架构          现有 Neurova 模块
 | **记忆层 - 安全** | neurova/memory/core/security.py | MemorySecurity | ✅ 已实现 | 记忆安全（防护）|
 | **功能壳 - 附件管理** | neurova/core/attachment_manager.py | AttachmentManager | ✅ 已实现 | 附件管理 |
 | | neurova/memory/core/attachment_manager.py | AttachmentManager (Memory) | ✅ 已实现 | 记忆中的附件管理 |
-| **基础设施 - 插件系统** | neurova/plugins/plugin_manager.py | PluginManager | ✅ 已实现 | 插件管理 |
+| **基础设施 - 插件系统** | neurova/plugins/plugin_manager.py | PluginManager | ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） | 插件管理 |
 | | neurova/plugins/base_plugin.py | BasePlugin | ✅ 已实现 | 插件基类 |
 | | neurova/plugins/plugin_lifecycle.py | PluginLifecycle | ✅ 已实现 | 插件生命周期管理 |
 | | neurova/plugins/plugin_manifest.py | PluginManifest | ✅ 已实现 | 插件清单 |
-| | neurova/plugins/plugin_api_registry.py | PluginApiRegistry | ✅ 已实现 | 插件 API 注册 |
+| | neurova/plugins/plugin_api_registry.py | PluginApiRegistry | ⛔ 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） | 插件 API 注册 |
 | **基础设施 - 模块库** | neurova/core/module_lib.py | ModuleLib | ✅ 已实现 | 模块库管理 |
 | **基础设施 - 模块追踪** | neurova/core/module_tracker.py | ModuleTracker | ✅ 已实现 | 模块追踪 |
 | **基础设施 - 基础模块** | neurova/core/base_module.py | BaseModule | ✅ 已实现 | 基础模块类 |
@@ -3646,7 +3646,7 @@ Neurova CogArch 2.0 接口层架构：
 
 #### 8.8.5 插件系统（可扩展能力）
 
-**所在位置**：`neurova/plugins/`
+**所在位置**：`neurova/plugins/`  <!-- 已退役（2026-10-10 裁定不做插件体系，见台账 §6-131） -->
 
 | 模块 | 位置 | 说明 | 在架构中的角色 |
 |-----|-----|-----|--------------|
@@ -3664,7 +3664,7 @@ Neurova CogArch 2.0 接口层架构：
 |-----|-----|-----|--------------|
 | **AttachmentManager (Core)** | `neurova/core/attachment_manager.py` | 附件管理 | **功能壳** - 统一管理附件 |
 | **AttachmentManager (Memory)** | `neurova/memory/core/attachment_manager.py` | 记忆附件管理 | **记忆层** - 管理记忆中的附件 |
-| **MediaManager** | `neurova/media/manager.py` | 媒体管理 | **功能壳** - 媒体文件处理与管理 |
+| ~~**MediaManager**~~ | ~~`neurova/media/manager.py`~~ | 媒体管理 | **已退役**（2026-10-11，台账 §6-139；产物索引现役落点是 `api/endpoints/media.py` 自持的 `media_index.json`） - 媒体文件处理与管理 |
 
 ---
 

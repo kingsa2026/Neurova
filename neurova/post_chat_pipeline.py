@@ -794,7 +794,7 @@ class PostChatPipeline:
             # 技能质量漏斗回写 + 信任观测（每回合一个独立 task 观测）
             (
                 "skill_funnel_flush",
-                lambda: self._step_skill_funnel_flush(reply, actual_session_id),
+                lambda: self._step_skill_funnel_flush(reply, actual_session_id, save_memory),
                 None,
             ),
             (
@@ -828,7 +828,7 @@ class PostChatPipeline:
                 None,
             ),
             # RSI 迭代：内含技能进化/市场发布/LLM 裁决，最重的一步
-            ("rsi_iteration", lambda: self._step_rsi_iteration(), None),
+            ("rsi_iteration", lambda: self._step_rsi_iteration(save_memory), None),
         ]
 
         if self.background_enabled():
@@ -1148,10 +1148,12 @@ class PostChatPipeline:
             # 使用记忆管理器
             if memory_manager:
                 # 会话作用域打标：协作群轮 → room:<id>；其余 → direct（基线，跨会话共享）。
-                from neurova.collaboration.memory_scope import scope_tag_for_turn
+                from neurova.collaboration.memory_scope import scope_tag_for_turn, turnScopeContext
 
-                _collab = isinstance(metadata, dict) and metadata.get("turn_origin") == "collaboration"
-                _scope = scope_tag_for_turn(collab=_collab, room_id=session_id if _collab else "")
+                # 作用域入参由 `turnScopeContext` 单点给出（写侧/读侧/池打标三处共用一份）：
+                # 三处各推一遍会裂脑——记忆打了 chgrp: 而池 chunk 仍打 direct，群内容反而
+                # 比改前更不可见，且没有任何判据会红（工单 §6-127 批 3）。
+                _scope = scope_tag_for_turn(**turnScopeContext(metadata, session_id))
                 # 保存用户消息记忆
                 user_memory_id = memory_manager.remember(
                     content=f"用户: {user_input}",
@@ -1854,7 +1856,8 @@ class PostChatPipeline:
                 )
             )
 
-    async def _step_skill_funnel_flush(self, reply: str, actual_session_id: str = "") -> None:
+    async def _step_skill_funnel_flush(self, reply: str, actual_session_id: str = "",
+                                       save_memory: bool = True) -> None:
         """Step 9.06: 技能质量漏斗 + 信任观测回写。
 
         读本轮 tool_executor 写入 turn_context 的技能派发账本，按
@@ -1877,6 +1880,19 @@ class PostChatPipeline:
 
         entries = get_turn_skill_funnel()
         if not entries:
+            return
+        # 评测/只读轮（save_memory=False）不得写漏斗：信任状态机与用量账本一旦
+        # 收下试评轮，就分不清"真用户点名了它"与"评测臂跑了它"——这条信号进来就
+        # 洗不掉（票面 2026-10-09 D3 拍板：补 save_memory 尊重，不新造 eval_mode 旗标，
+        # 后者会成为"评测态"的第二处定义）。
+        if not save_memory:
+            self._step_results.append(
+                StepResult(
+                    step_name="skill_funnel_flush",
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, skip skill funnel and trust writeback",
+                )
+            )
             return
         task_completed = bool(reply and reply.strip())
         agent_id = str(getattr(self._agent.config, "agent_id", "") or "")
@@ -2746,7 +2762,7 @@ class PostChatPipeline:
                 )
             )
 
-    async def _step_rsi_iteration(self) -> Optional[Dict[str, Any]]:
+    async def _step_rsi_iteration(self, save_memory: bool = True) -> Optional[Dict[str, Any]]:
         """Step 11: RSI 迭代（递归自我改进）
 
         如果 RSI 编排器可用且应该继续迭代，执行一次 RSI 迭代。
@@ -2756,6 +2772,18 @@ class PostChatPipeline:
         """
         step_name = "rsi_iteration"
         start_time = time.time()
+        # 评测/只读轮不得进自我改进：这一步会提改进提案、写归因台账、并可能落盘
+        # 技能正文——拿试评轮去喂它，等于让评测自己给自己打分（票面 2026-10-09 D3）。
+        if not save_memory:
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, skip RSI iteration",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+            return None
         # 本步内三个消费方（改进落盘的 SkillService、MetaLedger、归因台账）必须用
         # 同一个 agent_id —— 台账按 agent 分库，各算各的会把归因查成 "default"。
         agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "") or "default")

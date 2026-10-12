@@ -698,44 +698,44 @@ async def verify_code(request: Request, email: str = Query(...), code: str = Que
 
 @router.post("/logout")
 async def logout(request: Request):
-    """用户登出"""
+    """用户登出
+
+    撤销失败**不得**回 200：token 若没进黑名单就仍然有效，客户端却会据此清掉本地凭据，
+    于是"以为自己登出了"的服务端仍可用凭据长期存在。原先这里外层套着
+    `except Exception: return {code:0,'Logged out successfully'}`（注释称"登出是幂等的"），
+    而 HTTPException 本身是 Exception 的子类——内层 S-12 那记 500 被同一个函数的另一段
+    吞掉，意图从未生效（台账 §6-126 的成功侧形态）。去掉外层兜底即让意图落地：
+    没带凭据仍回 200（确实没有可撤销物，幂等语义留在它该在的地方），
+    撤销路径出错则由 FastAPI 兜底为 500。
+    """
     _get_request_id(request)
 
-    try:
-        # 获取当前用户的 token
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+    # 获取当前用户的 token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
 
-            # 将 token 加入黑名单（双源：本模块 set + api/auth 全局单源，
-            # verify_access_token 只查后者——否则登出对受保护端点无效）
-            if token:
-                _blacklist_token_local(token)
-                try:
-                    from neurova.api.auth import blacklist_token
+        # 将 token 加入黑名单（双源：本模块 set + api/auth 全局单源，
+        # verify_access_token 只查后者——否则登出对受保护端点无效）
+        if token:
+            _blacklist_token_local(token)
+            try:
+                from neurova.api.auth import blacklist_token
 
-                    blacklist_token(token)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("全局黑名单注册失败: %s", e)
-                    # BUG AUDIT S-12: 黑名单写入失败时不得谎报"登出成功"，否则
-                    # token 实际仍有效，客户端误以为已登出。显式返回错误让客户端重试。
-                    raise HTTPException(
-                        status_code=500, detail="Logout failed: unable to invalidate token"
-                    )
-                logger.info("Token added to blacklist")
+                blacklist_token(token)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("全局黑名单注册失败: %s", e)
+                # BUG AUDIT S-12: 黑名单写入失败时不得谎报"登出成功"，否则
+                # token 实际仍有效，客户端误以为已登出。显式返回错误让客户端重试。
+                raise HTTPException(
+                    status_code=500, detail="Logout failed: unable to invalidate token"
+                )
+            logger.info("Token added to blacklist")
 
-        return {
-            "code": 0,
-            "message": "Logged out successfully",
-        }
-
-    except Exception as e:
-        logger.error(f"Logout error: {e}", exc_info=True)
-        # 即使出错也返回成功，因为登出是幂等操作
-        return {
-            "code": 0,
-            "message": "Logged out successfully",
-        }
+    return {
+        "code": 0,
+        "message": "Logged out successfully",
+    }
 
 
 class InviteRegisterRequest(BaseModel):

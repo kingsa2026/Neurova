@@ -460,6 +460,10 @@ class TestHazardsExcluded:
 
         from neurova.agent.tool_coordinator import ToolCoordinator
 
+        # 同批多项转后台：归属取自发起那一轮（C 批栅栏），两条都落同一会话
+        from neurova.core.turn_context import set_turn_identity
+
+        set_turn_identity("一起搜", "sess_batch_bg", "u1")
         coordinator = ToolCoordinator()
 
         async def slow(tag):
@@ -474,7 +478,7 @@ class TestHazardsExcluded:
         assert first["task_id"] != second["task_id"]
 
         await asyncio.sleep(0.4)  # 等两个后台观察者投递完
-        hints = coordinator.pop_pending_hints()
+        hints = coordinator.pop_pending_hints("sess_batch_bg")
         assert len(hints) == 2, f"hints 汇聚丢条（收到 {len(hints)}）"
         assert sorted(h.get("tool_name") for h in hints) == ["web_fetch", "web_search"]
 

@@ -7,6 +7,7 @@ Tests for ChatPipeline — 对话流程管线
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+from neurova.collaboration.memory_scope import turnScopeContext
 
 
 @pytest.fixture
@@ -253,7 +254,7 @@ class TestRetrieval:
         mock_agent.unified_retriever.retrieve = MagicMock(return_value=[
             {"content": "test memory", "score": 0.9}
         ])
-        await pipeline._retrieve_memories(ctx)
+        await pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
         assert len(ctx.relevant_memories) == 1
         mock_agent.unified_retriever.retrieve.assert_called_once()
 
@@ -262,7 +263,7 @@ class TestRetrieval:
         """无 UnifiedRetriever 时应 fallback 到 MoE"""
         mock_agent.unified_retriever = None
         mock_agent.memory_agent.moe_retrieve = MagicMock(return_value=[])
-        await pipeline._retrieve_memories(ctx)
+        await pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
         mock_agent.memory_agent.moe_retrieve.assert_called_once()
 
     @pytest.mark.skip(reason="旧 API crystallizer.retrieve 已被 CrystallizedExperienceManager 替代, "
