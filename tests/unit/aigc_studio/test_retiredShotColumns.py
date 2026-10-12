@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 pytestmark = pytest.mark.timeout(90)
 
 REPO = Path(__file__).resolve().parents[3]
@@ -56,13 +58,24 @@ LIVE_COLUMNS = {
 }
 
 
-def _codeText(path: Path) -> str:
+def _codeTextOfFile(path: Path) -> str:
+    """单文件判据文本（探针用）：读盘走共享预算，判据与生产面那一格同源。"""
+    for ref in ast_scan.sourceRefsUnder(path.parent, suffix=""):
+        if ref.path.name == path.name:
+            return _codeText(ref)
+    raise AssertionError(f"{path} 不在扫描面内——探针目录被共享枚举的剪枝剔掉了")
+
+
+def _codeText(ref) -> str:
     """只取**代码里出现**的这个名字（AST 字符串常量 + 名字 + 属性名），不数注释。
 
     退役说明本身要在 `store.py` 里写清楚"哪四列退役、为何旧列不 DROP"——按原文扫描会把
     这段正当文档判成 offender（假红）。按 AST 取形后，注释与 docstring 之外的真实使用才咬合。
+
+    入参是 `tests/ast_scan.SourceRef`：枚举与读盘都走共享预算（Issue #148）。
     """
-    src = path.read_text(encoding="utf-8", errors="replace")
+    path = ref.path
+    src = ref.code
     if path.suffix != ".py":
         stripped = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
         return re.sub(r"(^|[^:])//.*$", " ", stripped, flags=re.M)
@@ -106,14 +119,15 @@ class TestProductionFaceHasNoRetiredSymbols:
     @pytest.mark.parametrize("name", GLOBALLY_BANNED)
     def test_retiredSymbolGoneFromProduction(self, name):
         offenders = []
+        # 文件枚举走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+        # 再出现自带 rglob 的第二份实现）。`.ts` / `.vue` 不走 AST，只借用枚举面；
+        # 名字判据在文本层做（含短名的字面量），预筛会把真命中一起滤掉，故不预筛。
         for root in (REPO / "neurova", REPO / "NeurUI" / "src"):
-            for path in root.rglob("*"):
-                if path.suffix not in (".py", ".ts", ".vue") or "__tests__" in path.parts:
+            for ref in ast_scan.sourceRefsUnder(root, suffix="") :
+                if Path(ref.path).suffix not in (".py", ".ts", ".vue") or "__tests__" in ref.path.parts:
                     continue
-                if "__pycache__" in path.parts:
-                    continue
-                if name in _codeText(path):
-                    offenders.append(str(path.relative_to(REPO)))
+                if name in _codeText(ref):
+                    offenders.append(str(ref.path.relative_to(REPO)))
         assert offenders == [], f"{name} 已退役却仍在生产面出现：{offenders}"
 
     @pytest.mark.parametrize("table,column", PER_TABLE_BANNED)
@@ -138,19 +152,19 @@ class TestRetirementScannerFormIsRight:
         commentOnly = tmp_path / "c.py"
         commentOnly.write_text("# bgm_prompt 与 sound_effect 已退役（见 §6-90）\nX = 1\n",
                                encoding="utf-8")
-        assert "bgm_prompt" not in _codeText(commentOnly)
+        assert "bgm_prompt" not in _codeTextOfFile(commentOnly)
         realUse = tmp_path / "u.py"
         realUse.write_text("keep = ('bgm_prompt', 'title')\n", encoding="utf-8")
-        assert "bgm_prompt" in _codeText(realUse)
+        assert "bgm_prompt" in _codeTextOfFile(realUse)
 
     def test_tsCommentMentionIsNotAUsage_butFieldIs(self, tmp_path):
         commentOnly = tmp_path / "c.ts"
         commentOnly.write_text("// bgm_prompt 已退役\nexport interface A { title: string }\n",
                                encoding="utf-8")
-        assert "bgm_prompt" not in _codeText(commentOnly)
+        assert "bgm_prompt" not in _codeTextOfFile(commentOnly)
         realUse = tmp_path / "u.ts"
         realUse.write_text("export interface A { bgm_prompt: string }\n", encoding="utf-8")
-        assert "bgm_prompt" in _codeText(realUse)
+        assert "bgm_prompt" in _codeTextOfFile(realUse)
 
 
 class TestLiveColumnsSurvive:

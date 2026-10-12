@@ -126,19 +126,38 @@ def resolveTarget(ref: str, source: Path, byBasename: dict) -> tuple:
     return VERDICT_DELETED, "—"
 
 
-def emptyCodeSpans(line: str) -> list:
-    r"""返回该行中"被清空的引用"位置（反引号 run 的起始下标）。
+def _quotedDiagnosticMessage(line: str, start: int) -> bool:
+    """该孤立双反引号 run 是否落在「被引用的诊断消息」里。
 
-    判据：**孤立的反引号 run**——它在整行里找不到同长度的配对 run。
-    这条判据同时挡住两类相反的错误：
+    根因（`audit-reports/simplification-audit-2026-10-05.md:946`）：审计档按
+    「**红原文**」逐字抄录测试的失败消息，其中一条原文本身就以 ``-version``
+    开头，于是这份**引号**与抄录句尾的收束引号在行里配成了一对合法定界，而夹在
+    它们中间那三个行内码的反引号全成了奇数——配对判据从这里切，切断处读起来
+    正是一个被删空的引用。扫描器把这个排版巧合报成「引用被删成空白」，棘轮
+    `docsErasureBaseline.txt` 随之从 0 升到 1（红线）——**红在引用形态上不成立**：
+    那一段是数据，没有人把它删空。
 
-    - 假阳性：`\`\` `行内码` \`\`` 是"内容里含反引号"的合法写法（CommonMark 用双
-      反引号定界），代码审计与规范类文档里大量出现。它的首尾 run 会彼此配对，
-      故被正确跳过。若简单地把任意两个反引号读成"空引用"，这些会成批误报——
-      假阳性比漏报更坏，它会训练人忽略这道门禁。
-    - 假阴性：真正被删空的引用就是一个孤立的 `\`\``，没有任何配对 run，
-      必须照样报出来（漏报等于门禁失效）。
+    判据取「位置 + 语境」，不取内容（内容判据是第二份事实源，且任一份档单改
+    一句话就漂）：
+    1. **位置**：这是本行**最后一处**双反引号 run，且其后到行尾**不再有**任何
+       双反引号 run —— 真被删空的引用后面常跟着别的引用（``见 `a.py```），
+       引号后面只剩散文。一个不对任何引用开放的孤引号，就是内容里的反引号。
+    2. **语境**：本行是**引用诊断原文**的那种行 —— 行首剥掉缩进后以列表项
+       `- ` 开头，且行内含 `原文`（抄录标记）。文档自己的散文与台账表格里的
+       形态样例都不满足，故照旧报出。
     """
+    runs = _backtickRuns(line)
+    doubleRuns = [run for run in runs if run[1] == 2]
+    if not doubleRuns or doubleRuns[-1][0] != start:
+        return False
+    stripped = line.lstrip()
+    if not stripped.startswith("- ") or "原文" not in line:
+        return False
+    return True
+
+
+def _backtickRuns(line: str) -> list:
+    """该行全部反引号 run：`(起始下标, run 长度)`，按出现顺序。"""
     runs = []
     index = 0
     length = len(line)
@@ -151,6 +170,27 @@ def emptyCodeSpans(line: str) -> list:
             runEnd += 1
         runs.append((index, runEnd - index))
         index = runEnd
+    return runs
+
+
+def emptyCodeSpans(line: str) -> list:
+    r"""返回该行中"被清空的引用"位置（反引号 run 的起始下标）。
+
+    判据：**孤立的反引号 run**——它在整行里找不到同长度的配对 run
+    （且不在被引用的诊断消息里，见 `_quotedDiagnosticMessage`）。
+    这条判据同时挡住三类相反的错误：
+
+    - 假阳性：`\`\` `行内码` \`\`` 是"内容里含反引号"的合法写法（CommonMark 用双
+      反引号定界），代码审计与规范类文档里大量出现。它的首尾 run 会彼此配对，
+      故被正确跳过。若简单地把任意两个反引号读成"空引用"，这些会成批误报——
+      假阳性比漏报更坏，它会训练人忽略这道门禁。
+    - 假阳性（另一种根）：抄录一段**自身以反引号开头的诊断消息**时，引号与收束
+      引号也会配成对，把夹在中间的行内码反引号推成奇数 —— 同一条 `audit-reports/
+      simplification-audit-2026-10-05.md:946` 的两重形态，见 `_quotedDiagnosticMessage`。
+    - 假阴性：真正被删空的引用就是一个孤立的 `\`\``，没有任何配对 run，
+      必须照样报出来（漏报等于门禁失效）。
+    """
+    runs = _backtickRuns(line)
 
     paired = set()
     for position, (start, runLength) in enumerate(runs):
@@ -164,7 +204,8 @@ def emptyCodeSpans(line: str) -> list:
                 paired.add(other)
                 break
     return [start for position, (start, runLength) in enumerate(runs)
-            if runLength == 2 and position not in paired]
+            if runLength == 2 and position not in paired
+            and not _quotedDiagnosticMessage(line, start)]
 
 
 def _isFenceLine(line: str) -> bool:

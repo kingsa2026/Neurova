@@ -21,6 +21,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TARGET_ROOT = REPO_ROOT / 'neurova'
 
@@ -87,12 +89,22 @@ def _isWide(handler: ast.ExceptHandler) -> bool:
     return False
 
 
-def _enclosingFunction(tree: ast.AST, node: ast.AST) -> str:
-    """取最近的**外层**函数（按 lineno..end_lineno 区间判，不靠行号先后猜）。"""
+def _functionsIn(tree: ast.AST) -> list:
+    """一棵树里的全部函数定义节点（**一趟** `ast.walk`，供下面反复取用）。"""
+    return [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _enclosingFunction(functions: list, node: ast.AST) -> str:
+    """取最近的**外层**函数（按 lineno..end_lineno 区间判，不靠行号先后猜）。
+
+    入参是**已算好的函数清单**而不是树：本判据的每个 wide `except` 都要问一次
+    "我在哪个函数里"，而待测面实测有 3224 处。原实现每次调用都 `ast.walk(tree)`
+    找候选 ⇒ 3224 × 整棵树，单跑 10.3s（`testRatchetMatchesTheRegisteredBaseline`
+    实测 16.0s，30s 默认墙钟下共享机器即红）。函数清单按树算一趟就够了。
+    """
     best = None
-    for cand in ast.walk(tree):
-        if not isinstance(cand, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for cand in functions:
         end = getattr(cand, 'end_lineno', cand.lineno)
         if cand.lineno <= node.lineno <= end:
             if best is None or cand.lineno > best.lineno:
@@ -101,19 +113,29 @@ def _enclosingFunction(tree: ast.AST, node: ast.AST) -> str:
 
 
 def scan(root: pathlib.Path):
+    """扫描面：`root` 子树里的 `except` 处理体（枚举、解析与**词法遍历**都走共享预算）。
+
+    Issue #148 的两半都在这里：判据原先自带 `rglob` + `ast.parse`，被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名；改走 `parsedModules`
+    之后解析那半归零，但**遍历**那半仍在判据自己身上 —— 本函数每跑一次就把整棵树
+    `ast.walk` 一遍，而 `testRatchetMatchesTheRegisteredBaseline` 与
+    `testTargetRootIsNotEmpty` 各调一次，于是同一份节点被走两遍（实测 16.0s + 11.7s；
+    30s 默认墙钟下与其余受保护文件共享机器时即红，正是本判据要防的那条根因）。
+    改走 `nodeScan`：遍历按文件整进程缓存，第二遍近零成本（`tests/ast_scan.py` 的
+    `_cachedNodes`），且 `hints` 文本预筛把「没有 `except` 三个字的文件」整段跳过 ——
+    谓词是 `ast.ExceptHandler`，不含该关键字的文件不可能命中，预筛不改变判据。
+
+    节点只与自己所属的文件配用：`_enclosingFunction` 取的是待查节点所在的那棵树，
+    这里必须传**本节点所属**的树，不能换成"当前遍历到的那一棵"。
+    """
     hits = []
-    for path in sorted(root.rglob('*.py')):
-        if '__pycache__' in path.parts:
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
+    for path, tree in ast_scan.parsedModules(root, hints=("except",)):
         rel = path.relative_to(root.parent).as_posix()
+        functions = _functionsIn(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.ExceptHandler) or not _isWide(node):
                 continue
-            func = _enclosingFunction(tree, node)
+            func = _enclosingFunction(functions, node)
             if _foldsIntoNotFound(node):
                 hits.append((f'{rel}::{func}', node.lineno, '折成"查无此类"'))
             elif _returnsSuccessPayload(node):
@@ -160,6 +182,6 @@ def testScannerReallyFindsBothShapes(tmp_path):
 
 
 def testTargetRootIsNotEmpty():
-    files = [p for p in TARGET_ROOT.rglob('*.py') if '__pycache__' not in p.parts]
+    files = ast_scan.filesUnder(TARGET_ROOT)
     assert len(files) > 500, (
         '扫描面只剩 %d 个文件——这条守卫已经在扫半空目录，它的绿不代表任何事' % len(files))

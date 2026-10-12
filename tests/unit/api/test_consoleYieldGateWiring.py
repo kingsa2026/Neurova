@@ -293,7 +293,13 @@ def testAdminResumeExecutesAsTheOriginalRequester(makeClient, runStore, yieldChe
 
 def testParkedRunsAreReadableButPayloadStaysInside(makeClient, runStore, yieldChecker):
     """SSE 是一次性的：重启/刷新后"等人"这条必须还有读处，否则 parked 只写不读。
-    读面回状态与原因，不回用户原文。"""
+    读面回状态与原因，不回用户原文。
+
+    `task` 那一键是 2026-10-12 实测抓到的泄漏形态：`message_digest` 存的就是这一轮
+    的用户输入，而读面此前不分 scope 一律投出 —— `GET /chat/runs?session_id=…`
+    把整句 "park-me" 带了回来。子任务面（`scope=subagents`）需要它当小窗标题，
+    回合面（默认）不需要，故键随 scope 分流；下面两半一起钉，防"顺手统一"把它又合回去。
+    """
     run_id, sseBody = _parkATurn(makeClient, runStore, yieldChecker, "g-read")
 
     body = makeClient(_RecordingAgent(), OWNER).get(
@@ -303,6 +309,10 @@ def testParkedRunsAreReadableButPayloadStaysInside(makeClient, runStore, yieldCh
     assert runs[run_id]["status"] == ars.PARKED_STATUS
     assert runs[run_id]["park_reason"]
     assert "resume_payload" not in runs[run_id] and "park-me" not in json.dumps(body)
+    # 回合面不投 task（它是用户原文），子任务面才投——两半一起钉，防合成一处
+    assert "task" not in runs[run_id], (
+        f"回合面的读面不该投 `task`（它是这一轮的用户输入原文）：{runs[run_id]}"
+    )
 
     assert makeClient(_RecordingAgent(), STRANGER).get(
         "/api/v1/console/chat/runs", params={"session_id": "g-read"}

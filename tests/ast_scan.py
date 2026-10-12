@@ -70,6 +70,9 @@ def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
 
     用 `os.walk` 而不是 `rglob` 后过滤：`rglob` 会**先进目录再筛**，实测剪枝前
     光是遍历 11376 个目录就要 1.82s，而真正被扫的仓内文件只有约 3200 个。
+
+    `suffix=""` 取全部文件——判据面不止 `.py` 时（如生产面同时扫 `.ts` / `.vue`）
+    用它，剪枝与排序口径仍只有这一份。
     """
     import os
 
@@ -248,10 +251,15 @@ def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
     return tree
 
 
-def parsedModules(root: Path, suffix: str = ".py") -> List[Tuple[Path, ast.AST]]:
-    """`(路径, 语法树)` 清单，整进程复用（同一份文本只编译一次）。"""
+def parsedModules(root: Path, suffix: str = ".py",
+                  hints: Tuple[str, ...] = ()) -> List[Tuple[Path, ast.AST]]:
+    """`(路径, 语法树)` 清单，整进程复用（同一份文本只编译一次）。
+
+    `hints` 与 `sourceRefsUnder` 同源（文本预筛，判据的充分条件）：
+    「仓库里有没有 `class EventBus`」这类判据不需要解析全文不含该名字的文件。
+    """
     return [(ref.path, _cachedParse(ref.stamp, ref.code))
-            for ref in sourceRefsUnder(root, suffix)]
+            for ref in sourceRefsUnder(root, suffix, hints)]
 
 
 def walkedModules(root: Path, suffix: str = ".py",

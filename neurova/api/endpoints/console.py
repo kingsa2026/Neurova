@@ -1273,6 +1273,12 @@ async def get_console_chat_runs(
 
     只回状态与原因，不回消息内容——`resume_payload` 里是用户原文，它只在行确实
     挂着时存在于库里，且这个列表端点不是取回原文的地方。
+
+    `task`（`message_digest` 那份摘要）**只在 `scope=subagents` 投出**：子任务小窗
+    刷新后要显示"这条在做什么"，缺它只剩一个 id、回读等于没回读；而回合面（默认
+    `scope=turns`）里这个键就是这一轮的用户输入原文，把它投出去等于在列表端点
+    泄回原文——同一张表的两个读法口径不同，键的取舍随之不同（2026-10-12 实测：
+    未分流时 `GET /chat/runs?session_id=…` 会把 "park-me" 整句带出去）。
     """
     from neurova.core import agent_run_store as _ars
 
@@ -1309,9 +1315,9 @@ async def get_console_chat_runs(
                     "error_type": r.get("error_type") or "",
                     "subagent_id": r.get("subagent_id") or "",
                     "agent_id": r.get("agent_id") or "",
-                    # 窗口标题要显示"这条子任务在做什么"——digest 就是 intake 时存的 task 摘要，
-                    # 缺它的话刷新后小窗只剩一个 id，回读等于没回读
-                    "task": r.get("message_digest") or "",
+                    # 子任务面才投 `task`（见 docstring）：窗口标题要显示"这条在做什么"，
+                    # digest 就是 intake 时存的 task 摘要。回合面里它是用户原文，不投。
+                    **({"task": r.get("message_digest") or ""} if scope == "subagents" else {}),
                     "attempt": int(r.get("attempt") or 0),
                     "cancel_requested": bool(r.get("cancel_requested")),
                     "created_at": r.get("created_at"),
