@@ -27,26 +27,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import ast
+
 import pytest
+
+from tests import ast_scan
 
 REPO = Path(__file__).resolve().parents[2]
 PKG_ROOT = REPO / "neurova"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _isDocstringOnlyInit(path: Path) -> bool:
-    """`__init__.py` 里除一个裸字符串外什么都没有 ⇒ 这个包门面是空壳。
+def _isDocstringOnlyInit(tree) -> bool:
+    """`__init__.py` 的语法树里除一个裸字符串外什么都没有 ⇒ 这个包门面是空壳。
 
     本谓词必须**两**个条件同时成立才判空壳。只看"子树里没有别的 .py"会误伤
     `neurova/execution_layers` 与 `neurova/skill`——那两个包把实现写在 `__init__.py` 里
     （首跑就被这么误伤过，实状见下面 `test_packagesWithRealModulesAreNotFlagged`）。
     """
-    import ast
-
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except SyntaxError:
-        return False
     return all(isinstance(n, ast.Expr) for n in tree.body) and (
         len(tree.body) == 0 or (len(tree.body) == 1 and isinstance(tree.body[0].value, ast.Constant)
                                 and isinstance(tree.body[0].value.value, str)))
@@ -57,17 +55,24 @@ def _shellPackages(root: Path) -> list[str]:
 
     空壳 ＝ 本目录的 `__init__.py` 只有一个 docstring，**且**整个子树里再没有别的模块。
     纯数据子目录（如当年的 `covers/`）不改变判定——那正是本类要抓的形态。
+
+    枚举与解析走 tests/ast_scan 的共享预算（`parsedModules` 一次给出 `(路径, 语法树)`），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     """
+    modules = {p: t for p, t in ast_scan.parsedModules(root, ".py")}
     shells: list[str] = []
-    for init in sorted(root.rglob("__init__.py")):
-        pkgDir = init.parent
-        if "__pycache__" in pkgDir.parts or not _isDocstringOnlyInit(init):
+    for init, tree in modules.items():
+        if init.name != "__init__.py":
             continue
-        hasOtherModule = any(p.name != "__init__.py" and "__pycache__" not in p.parts
-                             for p in pkgDir.rglob("*.py"))
+        if not _isDocstringOnlyInit(tree):
+            continue
+        pkgDir = init.parent
+        hasOtherModule = any(p.name != "__init__.py" and pkgDir in p.parents
+                             for p in modules)
         if not hasOtherModule:
             shells.append(pkgDir.relative_to(root).as_posix())
-    return shells
+    return sorted(shells)
 
 
 def test_neurovaTreeHasNoShellPackage():
@@ -120,5 +125,5 @@ def test_packagesWithRealModulesAreNotFlagged(tmp_path):
 
 def test_scanRootActuallyCoversTheTree():
     """防"扫描根写错→无事发生却报绿"：覆盖性当场数一遍。"""
-    inits = [p for p in PKG_ROOT.rglob("__init__.py") if "__pycache__" not in p.parts]
+    inits = [p for p in ast_scan.filesUnder(PKG_ROOT, ".py") if p.name == "__init__.py"]
     assert len(inits) > 50, f"扫描根 {PKG_ROOT} 只找到 {len(inits)} 个包，路径层级写错了"

@@ -264,7 +264,8 @@ def runOfflineOnce(requirement: str) -> tuple:
         staged = _scannerModule().scannerReadableAlias(Path(requirement), Path(stage))
         cmd = buildOfflineCommand(str(staged))
         print(f"[pip-audit] (离线库) $ {' '.join(cmd)}", flush=True)
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                   encoding="utf-8", errors="replace")
     merged = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     print(merged, flush=True)
     return proc.returncode, merged
@@ -313,7 +314,8 @@ def runOnce(requirement: str, timeout: int) -> tuple:
     """跑一次 pip-audit，返回 `(退出码, 合并输出)`。"""
     cmd = buildCommand(requirement, timeout)
     print(f"[pip-audit] $ {' '.join(cmd)}", flush=True)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                   encoding="utf-8", errors="replace")
     merged = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     print(merged, flush=True)
     return proc.returncode, merged

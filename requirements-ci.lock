@@ -145,10 +145,14 @@ langchain-protocol==0.0.19
     # via langchain-core
 langsmith==0.14.4
     # via langchain-core
+markdown-it-py==4.2.0
+    # via rich
 mcp==2.2.0
     # via -r requirements-ci.txt
 mcp-types==2.2.0
     # via mcp
+mdurl==0.1.2
+    # via markdown-it-py
 multidict==6.9.1
     # via
     #   aiohttp
@@ -211,7 +215,9 @@ pydantic-core==2.46.5
 pyflakes==3.4.0
     # via -r requirements-ci.txt
 pygments==2.21.0
-    # via pytest
+    # via
+    #   pytest
+    #   rich
 pyjwt==2.15.0
     # via
     #   -r requirements-ci.txt
@@ -261,6 +267,8 @@ requests==2.34.2
     #   tiktoken
 requests-toolbelt==1.0.0
     # via langsmith
+rich==15.0.0
+    # via -r requirements-ci.txt
 rpds-py==2026.6.3
     # via
     #   jsonschema
