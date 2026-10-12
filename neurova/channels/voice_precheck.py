@@ -17,12 +17,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Dict, Optional
 
+from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_TYPES
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 语音消息类型白名单（各渠道统一标记 voice；feishu 原生用 audio）
-_VOICE_TYPES = {"voice", "audio"}
 # 预转写超时（秒）：群语音通常 <60s，本地 funasr 推理秒级；超时即降级占位
 _TRANSCRIBE_TIMEOUT_SECONDS = 20.0
 
@@ -43,16 +42,16 @@ def _get_asr_transcriber() -> Callable[..., Any]:
 async def transcribe_voice_message(message):
     """对语音消息做预转写（原对象原地修改并返回）。
 
-    条件：message_type ∈ {voice, audio} 且 metadata 带 audio_bytes。
+    条件：message_type 在 voice_ingress.INBOUND_VOICE_TYPES 里，且 metadata 带语音字节键。
     成功 → content 替换为转写文本 + metadata["voice_transcribed"]=True；
     失败 → 保留占位 + metadata["voice_transcribe_failed"]=原因。
     """
     mtype = (getattr(message, "message_type", "") or "").lower()
-    if mtype not in _VOICE_TYPES:
+    if mtype not in INBOUND_VOICE_TYPES:
         return message
 
     metadata: Dict[str, Any] = getattr(message, "metadata", None) or {}
-    audio_bytes = metadata.get("audio_bytes")
+    audio_bytes = metadata.get(AUDIO_BYTES_KEY)
     if not audio_bytes:
         # 适配器未送字节：保持历史行为（"[语音]" 占位直通）
         return message

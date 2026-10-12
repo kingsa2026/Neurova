@@ -25,6 +25,11 @@ from typing import Any, Dict, Optional
 from neurova.channels.feishu_auth import AuthMixin
 from neurova.channels.feishu_media import MediaMixin
 from neurova.channels.voice_egress import VOICE_MESSAGE_TYPE, VOICE_OUT_AUDIO_FILE
+from neurova.channels.voice_ingress import (
+    AUDIO_BYTES_KEY,
+    INBOUND_VOICE_PLACEHOLDER,
+    VOICE_DOWNLOAD_MAX_BYTES,
+)
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
@@ -32,9 +37,6 @@ from neurova.channels.base import (
 )
 
 logger = get_logger(__name__)
-
-# 语音消息下载大小上限（P1-12 断点③）：防御异常大文件拖垮内存
-_VOICE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
 
 
 class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
@@ -223,7 +225,7 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                                     if elem.get("tag") == "text":
                                         content += elem.get("text", "")
             elif msg.message_type == "audio":
-                content = "[语音]"
+                content = INBOUND_VOICE_PLACEHOLDER
 
             # 构造统一消息
             audio_metadata: Dict[str, Any] = {}
@@ -236,7 +238,7 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                     if file_key and msg.message_id:
                         audio_data = self._download_media_bytes(msg.message_id, file_key)
                         if audio_data:
-                            audio_metadata["audio_bytes"] = audio_data
+                            audio_metadata[AUDIO_BYTES_KEY] = audio_data
                 except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
                     logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
 
@@ -335,10 +337,10 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                 logger.warning("Feishu 媒体下载 HTTP %s: msg=%s", resp.status_code, message_id)
                 return None
             declared = resp.headers.get("Content-Length")
-            if declared and int(declared) > _VOICE_DOWNLOAD_MAX_BYTES:
+            if declared and int(declared) > VOICE_DOWNLOAD_MAX_BYTES:
                 logger.warning("Feishu 媒体超大小上限，拒收: %s bytes", declared)
                 return None
-            if len(resp.content) > _VOICE_DOWNLOAD_MAX_BYTES:
+            if len(resp.content) > VOICE_DOWNLOAD_MAX_BYTES:
                 logger.warning("Feishu 媒体实际字节超上限，拒收")
                 return None
             return resp.content
