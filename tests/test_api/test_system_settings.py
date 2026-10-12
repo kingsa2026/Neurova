@@ -15,6 +15,7 @@ name/offset/utc_offset；UserWorkspace 使用 Path 路径）。本文件对齐�
 
 import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -114,12 +115,17 @@ class TestLanguageManager(unittest.TestCase):
     """测试 LanguageManager 类"""
 
     def setUp(self):
-        """测试前准备"""
-        self.manager = LanguageManager(data_dir="test_language_data")
+        """落点用显式临时目录，不用 CWD 相对名。
 
-    def tearDown(self):
-        """测试后清理"""
-        shutil.rmtree("test_language_data", ignore_errors=True)
+        原先这里是 `data_dir="test_language_data"` 配 `tearDown` 里
+        `shutil.rmtree("test_language_data")`：每次跑测都在**仓库根**建目录再扫掉，
+        于是"测试往仓库根写"这件事只留下被删过的痕迹、看不见事故本身。
+        §6-145 给偏好接上落盘之后，同级的 `language_preferences.json` 不在那次 rmtree
+        的覆盖范围内，当场被仓库根污染守卫点名——按实况把 fixture 收到临时目录。
+        """
+        self._tmpRoot = tempfile.mkdtemp(prefix="neurovaTestLanguage-")
+        self.addCleanup(shutil.rmtree, self._tmpRoot, True)
+        self.manager = LanguageManager(data_dir=str(Path(self._tmpRoot) / "language"))
 
     def test_get_available_languages(self):
         """测试获取可用语言列表（内置 zh/en/ja/ko）"""
@@ -252,13 +258,11 @@ class TestUserWorkspace(unittest.TestCase):
     """测试 UserWorkspace 类"""
 
     def setUp(self):
-        """测试前准备"""
+        """测试前准备（同 `TestLanguageManager`：落点收进临时目录，不留 CWD 相对产物）"""
+        self._tmpRoot = tempfile.mkdtemp(prefix="neurovaTestWorkspace-")
+        self.addCleanup(shutil.rmtree, self._tmpRoot, True)
         self.test_user_id = "test_user_123"
-        self.workspace = UserWorkspace(self.test_user_id, Path("test_workspaces"))
-
-    def tearDown(self):
-        """测试后清理"""
-        shutil.rmtree("test_workspaces", ignore_errors=True)
+        self.workspace = UserWorkspace(self.test_user_id, Path(self._tmpRoot) / "test_workspaces")
 
     def test_workspace_creation(self):
         """测试工作空间创建"""
@@ -294,12 +298,10 @@ class TestUserWorkspaceManager(unittest.TestCase):
     """测试 UserWorkspaceManager 类"""
 
     def setUp(self):
-        """测试前准备"""
-        self.manager = UserWorkspaceManager(Path("test_workspaces_2"))
-
-    def tearDown(self):
-        """测试后清理"""
-        shutil.rmtree("test_workspaces_2", ignore_errors=True)
+        """测试前准备（同上：临时目录）"""
+        self._tmpRoot = tempfile.mkdtemp(prefix="neurovaTestWorkspaceManager-")
+        self.addCleanup(shutil.rmtree, self._tmpRoot, True)
+        self.manager = UserWorkspaceManager(Path(self._tmpRoot) / "test_workspaces_2")
 
     def test_create_workspace(self):
         """测试创建工作空间"""
