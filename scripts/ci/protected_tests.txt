@@ -2418,3 +2418,11 @@ tests/media/test_mediaTrashLifecycle.py
 # 并带一格双侧对照：现码判合规、把日志行摘掉必须至少点到 4 处。
 # 入册前逐文件单跑两次同读数 10 passed（2.73s / 2.52s）。
 tests/unit/api/test_mobilePairingChatSendContract.py
+# §6-166 三套零接线编排器退役的守卫面（比对与并格见 §6-157）。
+# 判据问的不是"这仨文件在不在"这一句形状，而是三件事一起成立：
+# ① 三只不可 import（真取数，不是注释说没了）；② 生产/测试/脚本无任何按路径或模块名的引用
+# ——清单条目与"DCL 模板"注释也算引用，留着就是 §6-116 那种"实现退了条目没跟"的悬空红；
+# ③ 顶替那条活路与本批迁进去的两格（层内 Semaphore 上限、幂等门节点重试）必须在位，
+#   门面也不得再把它列作在役成员（§6-115 的"文档声称有、代码没有"）。
+# 入册前逐文件单跑两次同读数 4 passed（6.32s / 6.26s）。
+tests/unit/core/test_orchestratorTriadRetired.py
