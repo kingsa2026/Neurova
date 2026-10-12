@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: '에이전트 소유자 또는 관리자만 해당 채널을 보고 구성할 수 있습니다',
     identityTitle: '채널 신원 바인딩',
     identityDesc: '바인딩하면 이 채널 발신자의 기억과 스킬이 사용자의 플랫폼 계정으로 격리됩니다. 바인딩되지 않은 발신자는 각각 채널 전용 공간에 분리됩니다.',
+    identityNoConfiguredChannel: '구성된 채널이 없습니다. 상단에서 채널 봇을 구성한 뒤 여기서 바인딩 코드를 발급하세요(구성되지 않은 채널에는 메시지가 들어오지 않아 코드를 쓸 수 없습니다).',
     identityIssue: '바인딩 코드 발급',
     identityIssuing: '발급 중…',
     identityIssued: '바인딩 코드가 발급되었습니다: {seconds}초 안에 해당 채널에서 "{command}"을(를) 전송하세요 (1회용).',

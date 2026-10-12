@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: 'Solo il proprietario dell\'agente o un amministratore può vedere e configurare i suoi canali',
     identityTitle: 'Vincolo identità del canale',
     identityDesc: 'Una volta vincolato, memoria e competenze di questo mittente sono isolate nel tuo account piattaforma; i mittenti non vincolati restano nello spazio dedicato del canale.',
+    identityNoConfiguredChannel: 'Nessun canale configurato: configura prima il bot di un canale qui sopra, poi emetti qui un codice di collegamento (un canale non configurato non riceve messaggi e il codice resterebbe inutilizzato).',
     identityIssue: 'Genera codice di vincolo',
     identityIssuing: 'Generazione…',
     identityIssued: 'Codice generato: invia «{command}» in quel canale entro {seconds} secondi (uso singolo).',

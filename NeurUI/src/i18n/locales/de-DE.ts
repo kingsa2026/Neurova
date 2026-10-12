@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: 'Nur der Eigentümer des Agenten oder ein Administrator kann dessen Kanäle sehen und konfigurieren',
     identityTitle: 'Kanal-Identitätsverknüpfung',
     identityDesc: 'Nach der Verknüpfung werden Gedächtnis und Fähigkeiten dieses Absenders über dein Plattformkonto getrennt; nicht verknüpfte Absender bleiben im eigenen Kanalbereich.',
+    identityNoConfiguredChannel: 'Noch kein eingerichteter Kanal — richte oben zuerst den Bot eines Kanals ein, bevor du hier einen Bindungscode erzeugst (über einen nicht eingerichteten Kanal kommen keine Nachrichten, der Code bliebe ungenutzt).',
     identityIssue: 'Bindungscode erzeugen',
     identityIssuing: 'Erzeugung…',
     identityIssued: 'Code erzeugt: Sende "{command}" innerhalb von {seconds} Sekunden in diesem Kanal (einmalig).',

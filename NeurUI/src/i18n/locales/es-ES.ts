@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: 'Solo el propietario del agente o un administrador puede ver y configurar sus canales',
     identityTitle: 'Vínculo de identidad del canal',
     identityDesc: 'Una vez vinculado, la memoria y las habilidades de este remitente se aíslan en tu cuenta de plataforma; los remitentes sin vincular permanecen en el espacio propio del canal.',
+    identityNoConfiguredChannel: 'Todavía no hay ningún canal configurado: configura arriba el bot de un canal antes de emitir aquí un código de vinculación (un canal sin configurar no recibe mensajes y el código no serviría de nada).',
     identityIssue: 'Generar código de vínculo',
     identityIssuing: 'Generando…',
     identityIssued: 'Código generado: envía «{command}» en ese canal dentro de {seconds} segundos (de un solo uso).',
