@@ -19,6 +19,13 @@
       </div>
     </div>
 
+    <!-- 一个渠道都没配时，下拉是空的、按钮永久禁用（`!channelType` 恒真）。浏览器实跑验收
+         撞上的正是这一形：新用户看着一块点不动的面板，分不清"坏了""没权限""还不该用"。
+         禁用理由与解决动作为什么要写在屏幕上：它是页面的前置条件，不是提示文案的装饰。 -->
+    <p v-if="!channelTypes.length" class="nr-cid-blocked" data-testid="identity-no-configured-channel">
+      {{ t('channel.identityNoConfiguredChannel') }}
+    </p>
+
     <p v-if="issued" class="nr-cid-issued" data-testid="identity-issued-command">
       {{ t('channel.identityIssued', { command: issued.command, seconds: issued.expires_in }) }}
     </p>
@@ -222,6 +229,7 @@ watch(() => props.agentId, () => { issued.value = null; load() }, { immediate: t
 .nr-cid-desc { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-tertiary); max-width: 60ch; }
 .nr-cid-scope { margin: 6px 0 0; font-size: 12px; color: var(--nr-text-secondary); max-width: 60ch; }
 .nr-cid-issue { display: flex; gap: 8px; align-items: center; }
+.nr-cid-blocked { margin: 12px 0 0; font-size: 12px; color: var(--nr-text-secondary); max-width: 60ch; }
 .nr-cid-issued { margin: 12px 0 0; font-size: 12px; color: var(--nr-accent, #6366f1); }
 .nr-cid-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-color-danger, #e11d48); }
 .nr-cid-empty { margin-top: 14px; font-size: 12px; color: var(--nr-text-tertiary); }

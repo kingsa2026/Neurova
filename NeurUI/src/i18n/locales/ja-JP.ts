@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: 'チャネルの閲覧と設定はエージェントの所有者または管理者のみ可能です',
     identityTitle: 'チャネルIDバインド',
     identityDesc: 'バインドすると、このチャネル送信者の記憶とスキルはあなたのプラットフォームアカウントで隔離されます。未バインドの送信者は各自チャネル専用の領域に分離されます。',
+    identityNoConfiguredChannel: '設定済みのチャネルがありません。上部でいずれかのチャネルの bot を設定してから、ここでバインドコードを発行してください（未設定のチャネルにはメッセージが届かず、コードは使えません）。',
     identityIssue: 'バインドコードを発行',
     identityIssuing: '発行中…',
     identityIssued: 'バインドコードを発行しました：{seconds} 秒以内にそのチャネルで「{command}」を送信してください（1回のみ有効）',

@@ -1455,6 +1455,7 @@ export default {
     accessDeniedHint: 'Seul le propriétaire de l\'agent ou un administrateur peut voir et configurer ses canaux',
     identityTitle: 'Liaison d\'identité du canal',
     identityDesc: 'Une fois liée, la mémoire et les compétences de cet expéditeur sont isolées sous votre compte plateforme ; les expéditeurs non liés restent dans l\'espace dédié du canal.',
+    identityNoConfiguredChannel: 'Aucun canal configuré pour l\'instant — configurez d\'abord le bot d\'un canal ci-dessus avant d\'émettre ici un code de liaison (un canal non configuré ne reçoit aucun message, le code resterait inutilisable).',
     identityIssue: 'Générer un code de liaison',
     identityIssuing: 'Génération…',
     identityIssued: 'Code généré : envoyez « {command} » dans ce canal dans les {seconds} secondes (à usage unique).',
