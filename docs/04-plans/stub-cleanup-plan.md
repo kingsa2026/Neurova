@@ -61,7 +61,8 @@
 ### 2.5 执行引擎 - STUB_CHAIN
 - `execution_engine/workflow_engine.py`
 - `execution_engine/tool_engine.py`
-- `execution_engine/plan_orchestrator.py`
+- ~~`execution_engine/plan_orchestrator.py`~~（2026-10-12 退役，台账 §6-166：执行表零注册方 ⇒
+  每步必 raise；其唯二真缺的格子已并入 `neurflow/execution_engine.py`，见 §6-157）
 - `execution_engine/mcp_manager.py`
 - `execution_engine/mcp_client_manager.py`
 - `execution_engine/execution_monitor.py`
@@ -77,9 +78,12 @@
 - `tool_layers/browser_capability.py`
 
 ### 2.7 核心层 - STUB_CHAIN / ORPHAN
-- `core/cognition_orchestrator.py`
+- ~~`core/cognition_orchestrator.py`~~（2026-10-12 退役，台账 §6-166：零消费者，"周期"按字符串长度
+  编内容并把 `success` 写 True；现役对应物见 `docs/09-dev-progress/module_designs/cognition_orchestrator.md`
+  顶部的更正说明）
 - `core/flow_orchestrator.py`
-- `core/plan_orchestrator.py`
+- ~~`core/plan_orchestrator.py`~~（2026-10-12 退役，台账 §6-166：`set_executor` 零调用 ⇒
+  `_execute_single_task` 无条件走 `_simulate_task_execution`；`adjust_plan` 无写入方 ⇒ 死格）
 - `core/state_manager.py`
 - `core/task_tracker.py`
 - `core/firewall.py`

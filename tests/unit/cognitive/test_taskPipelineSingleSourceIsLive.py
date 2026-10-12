@@ -1,7 +1,8 @@
 """任务编排的单点活路核验（序 6 甲方案余下半 · 丙′ 裁定）。
 
 台账 §6-135 把 `neurova/cognitive` 包内那只编排器判为「全仓唯一实装 ⇒ 需人裁」，
-比对象只选了同名近邻 `core/cognition_orchestrator.py`。本档把比对象换成**真正在服务
+比对象只选了同名近邻 `core/cognition_orchestrator.py`（该近邻也已随 §6-166 退役——它的
+"周期"实测按字符串长度编内容并把 `success` 写 True）。本档把比对象换成**真正在服务
 请求的那条路**（NeurFlow：节点注册表 + `WorkflowExecutor` + 团队 Agent 管理 + 执行实例
 落盘），逐格实测后才动旧件——丙′ 的前置「先把任务编排做成真能力」由此判定成立与否。
 
