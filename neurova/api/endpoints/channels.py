@@ -182,9 +182,12 @@ async def handle_webhook(channel_type: str, request: Request):
     - 企业微信: POST XML
     """
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
-    if not adapter:
-        raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not found")
+    # 解析只在 `ChannelManager.resolveInboundAdapter` 那一处（§6-188）：实例表按
+    # (agent_id, channel_type) 存，而回调 URL 只带 channel_type。取不到时两种失败要分得开
+    # （没配 / 多 agent 同名歧义），歧义绝不静默投给任意一个 bot。
+    adapter, failureReason = manager.resolveInboundAdapter(channel_type)
+    if adapter is None:
+        raise HTTPException(status_code=404, detail=failureReason)
 
     body = await request.body()
     request.headers.get("content-type", "")
