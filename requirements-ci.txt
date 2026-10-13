@@ -93,3 +93,10 @@ prometheus_client>=0.20
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
 pypdf>=4.0.0
+
+# CLI 呈现层（`cli.py` 模块级 `from rich import box`）——受保护子集里
+# tests/unit/test_cliFourOhOneSelfRescueHint.py 走真实导入 `from cli import _error_message`，
+# 缺席 rich 即 ModuleNotFoundError: No module named 'rich'（4 个用例全红）。
+# 它此前只在 requirements-full.lock 里作为 typer 的传递依赖出现，CI 薄环境没有 ——
+# 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
+rich>=13.0

@@ -16,12 +16,35 @@ TDD 测试:工具调用链路遗漏断点修复(第二批)
   缺 await,对 coroutine 迭代会抛 TypeError。
 """
 
+import ast
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from tests.repo_paths import repo_str
+
+
+def _emptyHistoryLiterals(path: str) -> list:
+    """文件**可执行代码**里出现的空历史字面量（行号 + 形态）。
+
+    按 AST 取，不按文本扫：原判据用 `re.sub(r'#.*', '', src)` 剥注释，但
+    **docstring 不是 `#` 注释**——`d9224d52` 给 `/v1/chat/history` 写的说明里
+    提到过这个字面量（叙述"原实现恒回"），文本判据于是把它读成了"强制注入仍在位"。
+    判据打的是**可执行形态**，文本面却把叙述算进来，属本仓反复记过的两头失真。
+    docstring 是 `Expr(Constant(str))`、不是 `Dict`，故 AST 判据天然不受叙述影响，
+    而真正的强制注入（`metadata={"history": []}`）仍是 `Dict` 节点。
+    """
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if (isinstance(key, ast.Constant) and key.value == "history"
+                    and isinstance(value, ast.List) and not value.elts):
+                out.append((node.lineno, ast.unparse(node)))
+    return out
 
 
 
@@ -124,19 +147,12 @@ class TestChatEndpointNotForceEmptyHistory:
     """
 
     def test_chat_endpoint_no_force_empty_history(self):
-        """chat.py 不应出现 `{"history": []}` 强制注入(非注释代码)。"""
-        import re
-        src = open(
-            repo_str("neurova/api/endpoints/chat.py"),
-            encoding="utf-8",
-        ).read()
-        # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
-        src_no_comments = re.sub(r'#.*', '', src)
-        # 修复后非注释代码不应再出现强制空历史注入
-        assert '"history": []' not in src_no_comments, (
-            "chat.py 非注释代码仍存在 `{'history': []}` 强制注入,"
+        """chat.py 可执行代码不应出现 `{"history": []}` 强制注入（AST 判据）。"""
+        literals = _emptyHistoryLiterals(repo_str("neurova/api/endpoints/chat.py"))
+        assert literals == [], (
+            "chat.py 可执行代码仍存在 `{'history': []}` 强制注入,"
             "LLM 缺对话上下文,工具参数指代不清。"
-            "应改为 call_metadata = body.metadata or {}。"
+            "应改为 call_metadata = body.metadata or {}。命中：" + str(literals)
         )
 
 
@@ -151,18 +167,11 @@ class TestConsoleWebSocketNotForceEmptyHistory:
     """
 
     def test_console_ws_no_force_empty_history(self):
-        """console.py WebSocket 不应传 metadata={"history": []}(非注释代码)。"""
-        import re
-        src = open(
-            repo_str("neurova/api/endpoints/console.py"),
-            encoding="utf-8",
-        ).read()
-        # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
-        src_no_comments = re.sub(r'#.*', '', src)
-        # 修复后非注释代码不应再出现 WebSocket 强制空历史
-        assert 'metadata={"history": []}' not in src_no_comments, (
-            "console.py WebSocket 路径非注释代码仍强制传 metadata={'history': []},"
-            "LLM 缺对话上下文。应删除此 metadata 注入。"
+        """console.py WebSocket 不应传 metadata={"history": []}(AST 判据)。"""
+        literals = _emptyHistoryLiterals(repo_str("neurova/api/endpoints/console.py"))
+        assert literals == [], (
+            "console.py WebSocket 路径可执行代码仍强制传 metadata={'history': []},"
+            "LLM 缺对话上下文。应删除此 metadata 注入。命中：" + str(literals)
         )
 
 

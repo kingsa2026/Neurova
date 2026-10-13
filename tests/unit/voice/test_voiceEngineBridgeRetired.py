@@ -36,6 +36,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
@@ -46,9 +48,10 @@ RETIRED = "neurova.voice_adapter"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(path: Path) -> list[str]:
+def _importedNames(source: str) -> list[str]:
+    """源码文本里的 import 名（文本由共享预算 `ast_scan` 供给，不再各自读盘）。"""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):
         return []
     names = []
@@ -61,15 +64,20 @@ def _importedNames(path: Path) -> list[str]:
 
 
 def _hits(root: Path) -> list[str]:
+    """子树里仍 import 已退役桥的文件清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`：后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词是判据的**充分条件**：连退役模块名都没出现的文件不可能 import 它。
+    """
     out = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(p)):
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints(RETIRED)):
+        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(ref.code)):
             try:
-                out.append(p.relative_to(REPO).as_posix())
+                out.append(ref.path.relative_to(REPO).as_posix())
             except ValueError:
-                out.append(p.name)
+                out.append(ref.path.name)
     return out
 
 

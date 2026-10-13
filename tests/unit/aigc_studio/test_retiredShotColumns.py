@@ -26,6 +26,13 @@
 6. 旧库兼容：老安装留下的这四列**不 DROP**（不可逆点写在正文与台账），新代码开库后
    读写如常，不因"库里多出一列没人管"而崩；
 7. 反向对照：把含退役列的伪 schema / 伪 TS 接口喂给同一扫描器，必须报出来。
+
+CI 红与根因（2026-10-13 `cnb-elr-1k4pvclq5-003`）：第 1 条判据原先自己写了一套
+`root.rglob("*")` + 逐文件 `ast.parse`，**不剪枝**且对 `.py`/`.ts`/`.vue` 各扫一遍，
+于是解析面 = 本机装了什么（根下 `.venv`/`node_modules` 数万个文件都算进来），
+单跑就撞本模块自己挂的 90s 墙钟。现收口到唯一 AST 入口 `tests/ast_scan`：
+枚举走 `sourceRefsUnder`（原地剪掉第三方/产物目录），解析仍走本文件唯一的
+`_codeText` 取形实现，并按判据自身的**充分条件**（文本里要出现这个名字）预筛。
 """
 from __future__ import annotations
 
@@ -34,11 +41,16 @@ import json
 import re
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 pytestmark = pytest.mark.timeout(90)
 
 REPO = Path(__file__).resolve().parents[3]
+
+from tests import ast_scan  # noqa: E402  (仓根在 sys.path 上，见 tests/conftest.py)
+
 _STORE = REPO / "neurova" / "aigc_studio" / "store.py"
 _SERVICES = REPO / "neurova" / "aigc_studio" / "services.py"
 _API = REPO / "neurova" / "api" / "endpoints" / "studio_api.py"
@@ -56,20 +68,20 @@ LIVE_COLUMNS = {
 }
 
 
-def _codeText(path: Path) -> str:
-    """只取**代码里出现**的这个名字（AST 字符串常量 + 名字 + 属性名），不数注释。
+def _assetText(path: Path) -> str:
+    """`.ts` / `.vue` 里的代码文本（剥掉注释；这类文件不走 AST 预算，只读文本）。"""
+    src = path.read_text(encoding="utf-8", errors="replace")
+    stripped = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
+    return re.sub(r"(^|[^:])//.*$", " ", stripped, flags=re.M)
+
+
+def _codeText(tree: ast.AST) -> str:
+    """从**已解析的语法树**里只取代码里出现的名字（字符串常量 + 名字 + 属性名），不数注释。
 
     退役说明本身要在 `store.py` 里写清楚"哪四列退役、为何旧列不 DROP"——按原文扫描会把
     这段正当文档判成 offender（假红）。按 AST 取形后，注释与 docstring 之外的真实使用才咬合。
+    语法树由 `tests/ast_scan` 的共享预算供给（调用方不再各自 `ast.parse`）。
     """
-    src = path.read_text(encoding="utf-8", errors="replace")
-    if path.suffix != ".py":
-        stripped = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
-        return re.sub(r"(^|[^:])//.*$", " ", stripped, flags=re.M)
-    try:
-        tree = ast.parse(src)
-    except SyntaxError:
-        return src
     chunks = [n.value for n in ast.walk(tree)
               if isinstance(n, ast.Constant) and isinstance(n.value, str)]
     chunks += [n.id for n in ast.walk(tree) if isinstance(n, ast.Name)]
@@ -105,15 +117,35 @@ def _functionSource(path: Path, fn: str) -> str:
 class TestProductionFaceHasNoRetiredSymbols:
     @pytest.mark.parametrize("name", GLOBALLY_BANNED)
     def test_retiredSymbolGoneFromProduction(self, name):
+        """枚举与解析都走唯一 AST 入口（Issue #148 / #197）。
+
+        原写法是私有 `root.rglob("*")` 逐文件读文本 + `ast.parse`：两份清单
+        （`.py` 与 `.ts`/`.vue`）各扫一遍，且**不剪枝**——`node_modules` 与
+        第三方产物目录都被算进扫描面，成本随本机装了什么而变（实测本仓根下
+        `.venv`/`node_modules` 贡献数万个 `.py`），单跑就撞本模块自己挂的
+        `pytest.mark.timeout(90)`。
+
+        改后：解析面走 `_codeText` 唯一实现（先按判据自身的**充分条件**做文本
+        预筛再取形），枚举面走 `sourceRefsUnder`（原地剪掉第三方/产物目录）。
+        判据与报错形态不变——仍是"代码里出现这个名字的文件清单"。
+        """
         offenders = []
+        # `.py` 侧的枚举与解析走 tests/ast_scan 的共享预算（`nodeScan` 一次给全
+        # 节点流），不私有 `rglob("*") + ast.parse`：那条写法每次调用都要走遍整棵
+        # 目录树、成本随代码总量涨（见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+        # 预筛词是判据的**充分条件**：连禁名都没出现的文件不可能命中。
         for root in (REPO / "neurova", REPO / "NeurUI" / "src"):
-            for path in root.rglob("*"):
-                if path.suffix not in (".py", ".ts", ".vue") or "__tests__" in path.parts:
+            for path, tree in ast_scan.parsedModules(root, ".py"):
+                if "__tests__" in path.parts:
                     continue
-                if "__pycache__" in path.parts:
-                    continue
-                if name in _codeText(path):
+                if name in _codeText(tree):
                     offenders.append(str(path.relative_to(REPO)))
+            for suffix in (".ts", ".vue"):
+                for path in ast_scan.filesUnder(root, suffix):
+                    if "__tests__" in path.parts:
+                        continue
+                    if name in _assetText(path):
+                        offenders.append(str(path.relative_to(REPO)))
         assert offenders == [], f"{name} 已退役却仍在生产面出现：{offenders}"
 
     @pytest.mark.parametrize("table,column", PER_TABLE_BANNED)
@@ -134,23 +166,24 @@ class TestRetirementScannerFormIsRight:
     """`_codeText` 从"原文扫描"改成"按 AST/去注释取形"是为了让退役说明能写在代码旁边；
     但这一改也很容易把守卫改成永远绿，所以两个方向都要反证：注释不算使用，真使用必须算。"""
 
+    @staticmethod
+    def _pyCodeText(source: str) -> str:
+        """把源码解析成树再取形（与生产扫描同一份口径：`_codeText(tree)`）。"""
+        return _codeText(ast.parse(source))
+
     def test_pyCommentMentionIsNotAUsage_butStringConstantIs(self, tmp_path):
-        commentOnly = tmp_path / "c.py"
-        commentOnly.write_text("# bgm_prompt 与 sound_effect 已退役（见 §6-90）\nX = 1\n",
-                               encoding="utf-8")
-        assert "bgm_prompt" not in _codeText(commentOnly)
-        realUse = tmp_path / "u.py"
-        realUse.write_text("keep = ('bgm_prompt', 'title')\n", encoding="utf-8")
-        assert "bgm_prompt" in _codeText(realUse)
+        assert "bgm_prompt" not in self._pyCodeText(
+            "# bgm_prompt 与 sound_effect 已退役（见 §6-90）\nX = 1\n")
+        assert "bgm_prompt" in self._pyCodeText("keep = ('bgm_prompt', 'title')\n")
 
     def test_tsCommentMentionIsNotAUsage_butFieldIs(self, tmp_path):
         commentOnly = tmp_path / "c.ts"
         commentOnly.write_text("// bgm_prompt 已退役\nexport interface A { title: string }\n",
                                encoding="utf-8")
-        assert "bgm_prompt" not in _codeText(commentOnly)
+        assert "bgm_prompt" not in _assetText(commentOnly)
         realUse = tmp_path / "u.ts"
         realUse.write_text("export interface A { bgm_prompt: string }\n", encoding="utf-8")
-        assert "bgm_prompt" in _codeText(realUse)
+        assert "bgm_prompt" in _assetText(realUse)
 
 
 class TestLiveColumnsSurvive:

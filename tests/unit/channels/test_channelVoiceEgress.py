@@ -16,6 +16,7 @@
 """
 
 import ast
+import functools
 import inspect
 import json
 import pathlib
@@ -25,6 +26,8 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CHANNELS = REPO / "neurova" / "channels"
+
+from tests import ast_scan as _astScan  # noqa: E402
 
 from neurova.channels.voice_egress import (  # noqa: E402
     VOICE_OUT_AUDIO_FILE,
@@ -134,10 +137,11 @@ class TestTurnAudioReachesReplyItems:
         本档第一版自己就踩了一次）。
         """
         offenders = []
-        for path in sorted(CHANNELS.rglob("*.py")):
-            if "__pycache__" in path.parts or path.name == "voice_egress.py":
+        for ref in _astScan.sourceRefsUnder(CHANNELS, hints=("voiceOutMode",)):
+            if ref.path.name == "voice_egress.py":
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            path = ref.path
+            tree = _astScan._cachedParse(ref.stamp, ref.code)
             for node in ast.walk(tree):
                 targets = []
                 value = None
@@ -226,25 +230,35 @@ class TestDeclaredCapabilityMustBeImplemented:
 
     _MODE_ATTRS = ("voiceOutMode",)
 
-    def _declarations(self):
+    @classmethod
+    @functools.lru_cache(maxsize=None)
+    def _declarations(cls):
+        """声明支持语音出站的适配器清单（模块级缓存，多格跨用例共用一次扫描）。
+
+        取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `rglob + ast.parse`
+        把「解析量」绑成「代码总量」）。本清单被本类三格消费，属**会重复扫**的
+        正当面，故走保留型 `sourceRefsUnder` + 文本预筛（`voiceOutMode` 是判据的
+        充分条件——不声明这个属性的模块不可能进清单）。
+        """
         out = []
-        for path in sorted(CHANNELS.glob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-            for cls in [n for n in tree.body if isinstance(n, ast.ClassDef)]:
+        for ref in _astScan.sourceRefsUnder(CHANNELS, hints=cls._MODE_ATTRS):
+            tree = _astScan._cachedParse(ref.stamp, ref.code)
+            for clsNode in [n for n in tree.body if isinstance(n, ast.ClassDef)]:
                 mode = None
-                for stmt in cls.body:
+                for stmt in clsNode.body:
                     if isinstance(stmt, ast.Assign) and any(
-                        isinstance(t, ast.Name) and t.id in self._MODE_ATTRS for t in stmt.targets
+                        isinstance(t, ast.Name) and t.id in cls._MODE_ATTRS for t in stmt.targets
                     ):
                         mode = _constName(stmt.value)
                 if mode in {VOICE_OUT_AUDIO_FILE}:
-                    out.append((cls.name, path, mode))
+                    out.append((clsNode.name, ref.path, mode))
         return out
 
     def test_everyDeclaringAdapterReadsTheFilePath(self):
         offenders = []
         for cls_name, path, mode in self._declarations():
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = _astScan._cachedParse(_astScan._cacheKey(path),
+                                         _astScan.sourceCode(path))
             cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls_name)
             send = next((n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_message"), None)
             if send is None:

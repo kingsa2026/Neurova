@@ -123,8 +123,13 @@ def _attrHead(node: ast.AST) -> str:
 
 def declaredVars(tree: ast.AST) -> Dict[str, str]:
     """局部名 → ContextVar 声明名（`_x: ContextVar = ContextVar("NAME", ...)`）。"""
+    return declaredVarsAmong(tuple(ast.walk(tree)))
+
+
+def declaredVarsAmong(nodes) -> Dict[str, str]:
+    """已走查过的版本（见 `identityWritesAmong` 对"遍历与判定拆开"的说明）。"""
     out: Dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         value = node.value
@@ -159,13 +164,21 @@ _declIndex: Optional[Dict[str, Dict[str, str]]] = None
 
 
 def declIndex() -> Dict[str, Dict[str, str]]:
+    """`dotted 模块名 → 该模块声明的 ContextVar`。
+
+    **文本预筛 `ContextVar`**：`declaredVars` 只认 `ContextVar(...)` 的赋值，连这个
+    词都没出现的文件必然给出空表——它进不了索引，也就无人能隔着模块点名直写这条通道。
+    索引的**键仍是全量清单**（`sourceRefsUnder` 的枚举口径不变），只是不解析那些
+    不可能贡献声明的文件（实测 `neurova/` 1021 → 27 文件）。
+    """
     global _declIndex
     if _declIndex is None:
-        trees = ast_scan.parsedModules(PRODUCTION)
-        assert trees, f"生产扫描面为空（{PRODUCTION}）——本文件会空转"
+        refs = ast_scan.sourceRefsUnder(PRODUCTION, hints=("ContextVar",))
+        assert refs, f"预筛后声明面为空（{PRODUCTION}）——本文件会空转"
         _declIndex = {
-            _dottedOf(ast_scan.relativeToRepo(path)): declaredVars(tree)
-            for path, tree in trees
+            _dottedOf(ast_scan.relativeToRepo(ref.path)):
+                declaredVars(ast_scan.transientTree(ref.path))
+            for ref in refs
         }
     return _declIndex
 
@@ -177,10 +190,15 @@ def channelMap(tree: ast.AST) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]
     `from neurova.core import turn_context` 后的 `turn_context._user_id_var.set(...)`
     （模块别名 + 属性）——漏掉任一条，旁路写点就从网眼里过去。
     """
-    direct = declaredVars(tree)
+    return channelMapAmong(tuple(ast.walk(tree)), tree)
+
+
+def channelMapAmong(nodes, tree: ast.AST) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+    """已走查过的版本（见 `identityWritesAmong` 对"遍历与判定拆开"的说明）。"""
+    direct = declaredVarsAmong(nodes)
     index = declIndex()
     aliased: Dict[str, Dict[str, str]] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             if not node.module.startswith("neurova"):
                 continue
@@ -252,10 +270,23 @@ def identityWritesIn(tree: ast.AST, rel: str) -> List[Tuple[str, str]]:
     成对返回而不是只返回串：判据要**按通道**归账，在串里猜变量名会把两件事混成一件，
     而那条同名的并行通道正是会混进去的那种。
     """
+    return identityWritesAmong(tuple(ast.walk(tree)), tree, rel)
+
+
+def identityWritesAmong(nodes, tree: ast.AST,
+                        rel: str) -> List[Tuple[str, str]]:
+    """已走查过的版本：`scanProduction` 逐文件只趟一次节点。
+
+    本文件六格共用一趟扫描，若每格各自 `ast.walk(tree)`，同一棵树要被走查四到五遍
+    （实测 `neurova/` 1021 棵树 = 1750 万次 `ast.walk`，两条用例各 14.5s 级 / 552MB）。
+    判据的成本于是绑在**代码总量**上——正是 `tests/ast_scan.py` 开头点名的那形态。
+    故把「遍历」与「判定」拆开：遍历由调用方一次给（`scanProduction` 之上去共享节点
+    预算），判定在这里字字不动。
+    """
     parents = _parents(tree)
-    direct, aliased = channelMap(tree)
+    direct, aliased = channelMapAmong(nodes, tree)
     hits: List[Tuple[str, str]] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "set"):
             continue
@@ -273,9 +304,14 @@ def identityWrites(source: str, rel: str) -> List[Tuple[str, str]]:
 
 def setIdentityCallersIn(tree: ast.AST, rel: str) -> List[str]:
     """对 `set_turn_identity(...)` 的**调用**落点（`__all__` 里的字符串不是调用）。"""
+    return setIdentityCallersAmong(tuple(ast.walk(tree)), tree, rel)
+
+
+def setIdentityCallersAmong(nodes, tree: ast.AST, rel: str) -> List[str]:
+    """已走查过的版本（见 `identityWritesAmong` 对"遍历与判定拆开"的说明）。"""
     parents = _parents(tree)
     hits: List[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -292,8 +328,13 @@ def setIdentityCallers(source: str, rel: str) -> List[str]:
 
 def senderIdReadersIn(tree: ast.AST) -> int:
     """把 `.sender_id` 当**读**用（Load）的次数；赋值左侧（Store）不计。"""
+    return senderIdReadersAmong(tuple(ast.walk(tree)))
+
+
+def senderIdReadersAmong(nodes) -> int:
+    """已走查过的版本（见 `identityWritesAmong` 对"遍历与判定拆开"的说明）。"""
     return sum(
-        1 for node in ast.walk(tree)
+        1 for node in nodes
         if isinstance(node, ast.Attribute) and node.attr == "sender_id"
         and isinstance(node.ctx, ast.Load)
     )
@@ -311,9 +352,14 @@ def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
     `or "anonymous"` / `or self._agent_identity()[0]` / 裸取）。合并与否要按真读数裁，
     不能按名字推断裁——所以先把读面钉成台账，多一处读点即红。
     """
+    return requestUserIdReadersAmong(tuple(ast.walk(tree)), tree, rel)
+
+
+def requestUserIdReadersAmong(nodes, tree: ast.AST, rel: str) -> List[str]:
+    """已走查过的版本（见 `identityWritesAmong` 对"遍历与判定拆开"的说明）。"""
     parents = _parents(tree)
     hits: List[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -328,28 +374,52 @@ def requestUserIdReaders(source: str, rel: str) -> List[str]:
     return requestUserIdReadersIn(ast.parse(source), rel)
 
 
+#: 生产扫描面的**文本预筛词**：本文件六格的判据只可能命中含这些符号（或须建
+#: ContextVar 索引）的文件。三个通道声明名、轮身份唯一入口、两条 ContextVar 读写口、
+#: 以及 `sender_id` 那个属性。预筛是判据的**充分条件**，不是把面砍窄——键仍按
+#: `neurova/` 全量清单枚举，只是不解析那些不可能命中的文件（实测 1021 → 57，
+#: 取数经全量口径逐条比对，零漏报）。
+SCAN_HINTS = (
+    "ContextVar", "set_turn_identity", "get_request_user_id",
+    "set_request_user_id", "get_turn_user_id", "neurova_request_user_id",
+    "neurova_turn_user_input", "neurova_turn_session_id", "sender_id",
+)
+
 _scan: Optional[Dict[str, Dict[str, object]]] = None
 
 
 def scanProduction() -> Dict[str, Dict[str, object]]:
-    """一趟扫完生产面，逐文件备好四件读数；本文件六格共用这一份。
+    """一趟扫完生产面，逐文件备好五件读数；本文件六格共用这一份。
 
     语法树取自 `tests/ast_scan.py` 的整进程缓存（同一份源码只编译一次），本函数只
-    在此之上做一次归账遍历。分格各扫一遍实测把两格各推到 ≈25s，而默认 `timeout = 30`、
-    受保护子集与 4000+ 条用例共享 2 vCPU——判据自己就能把门禁拖红。
+    在此之上做一次归账遍历。分格各扫一遍实测把两条用例各推到 14.5s 级 / 552MB，
+    而默认 `timeout = 30`、受保护子集与 6000 条用例共享 CI 的 2~4 vCPU——判据自己
+    就能把门禁拖红（实测 `cnb-mei-1k4odroc5-003` 与 `cnb-o9g-1k4oij3vm-003`）。
+
+    两层收口（同根：判据的成本不许绑在代码总量上）：
+
+    1. **文本预筛** `SCAN_HINTS` 把解析量从「代码总量」降到「命中面」；
+    2. **每文件只趟一遍节点**：五个检出器共用同一趟 `nodes` 与同一份 `_parents`
+       （改前每格各自 `ast.walk`，实测 1021 棵树 = 1750 万次 walk）。
     """
     global _scan
     if _scan is None:
         out: Dict[str, Dict[str, object]] = {}
-        for path, tree in ast_scan.parsedModules(PRODUCTION):
-            rel = ast_scan.relativeToRepo(path)
+        for ref in ast_scan.sourceRefsUnder(PRODUCTION, hints=SCAN_HINTS):
+            tree = ast_scan.transientTree(ref.path)
+            nodes = tuple(ast.walk(tree))
+            rel = ast_scan.relativeToRepo(ref.path)
             out[rel] = {
-                "writes": identityWritesIn(tree, rel),
-                "callers": setIdentityCallersIn(tree, rel),
-                "readers": senderIdReadersIn(tree),
-                "requestReaders": requestUserIdReadersIn(tree, rel),
-                "declared": declaredVars(tree),
+                "writes": identityWritesAmong(nodes, tree, rel),
+                "callers": setIdentityCallersAmong(nodes, tree, rel),
+                "readers": senderIdReadersAmong(nodes),
+                "requestReaders": requestUserIdReadersAmong(nodes, tree, rel),
+                "declared": declaredVarsAmong(nodes),
             }
+        assert out, (
+            f"预筛后面为空（{PRODUCTION} / {SCAN_HINTS}）——判据会空转，"
+            "预筛词必须与判据同源"
+        )
         _scan = out
     return _scan
 

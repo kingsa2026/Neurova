@@ -28,6 +28,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
 
@@ -111,15 +113,19 @@ def _topLevelEnvWrites(source: str) -> int:
 
 
 def scanManualEnvWrites(directory: pathlib.Path = MANUAL_DIR) -> dict[str, int]:
+    """逐文件统计模块顶层改写 `os.environ` 的语句数。
+
+    枚举与读盘走 `tests/ast_scan` 的共享预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `glob + 裸读盘`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词 `os.environ` 是判据的**充分条件**：连这串字样都没有的文件不可能有
+    顶层 env 写。
+    """
     perFile: dict[str, int] = {}
-    for path in sorted(directory.glob("*.py")):
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        n = _topLevelEnvWrites(source)
+    for ref in ast_scan.sourceRefsUnder(directory, ".py", ast_scan.textHints("os.environ")):
+        n = _topLevelEnvWrites(ref.code)
         if n:
-            perFile[path.name] = n
+            perFile[ref.path.name] = n
     return perFile
 
 

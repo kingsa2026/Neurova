@@ -153,10 +153,15 @@ def _dashSplitSites(root):
     import ast as _ast
     import pathlib
 
+    from tests import ast_scan
+
     sites = []
-    for path in sorted(pathlib.Path(root).rglob("*.py")):
+    # 枚举与解析走 tests/ast_scan 的共享预算；预筛词是判据的**充分条件**
+    # （谓词只认 `.split("-")` 这一形态，连 `split` 字样都没有的文件不可能命中）。
+    for ref in ast_scan.sourceRefsUnder(pathlib.Path(root), ".py",
+                                        ast_scan.textHints("split")):
         try:
-            tree = _ast.parse(path.read_text(encoding="utf-8"))
+            tree = _ast.parse(ref.code)
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in _ast.walk(tree):
@@ -173,7 +178,7 @@ def _dashSplitSites(root):
                 if fn.lineno <= node.lineno <= (fn.end_lineno or fn.lineno):
                     if holder is None or fn.lineno > holder.lineno:
                         holder = fn
-            sites.append("%s::%s" % (path.name, holder.name if holder else "<module>"))
+            sites.append("%s::%s" % (ref.path.name, holder.name if holder else "<module>"))
     return sites
 
 

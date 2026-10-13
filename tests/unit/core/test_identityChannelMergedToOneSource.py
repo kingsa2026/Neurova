@@ -28,6 +28,8 @@ from typing import Dict, List
 
 import pytest
 
+from tests import ast_scan as _astScan
+
 REPO = Path(__file__).resolve().parents[3]
 CHANNEL_FILES = ("neurova/core/identity_context.py", "neurova/core/turn_context.py")
 
@@ -89,16 +91,22 @@ def turnIdentityParamNames(text: str) -> List[str]:
 
 
 def requestChannelDecls(root: Path) -> List[str]:
+    """身份通道的 `ContextVar` 声明处（按 AST，不按文本包含）。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `rglob + ast.parse`
+    把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟）。
+    `neurova_request_user_id` 字面量是判据的**充分条件**——不出现这个串的文件
+    不可能命中；本函数被两格消费且扫的是同一片树，故走保留型
+    `sourceRefsUnder` + 文本预筛。
+    """
     out = []
-    for path in root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for ref in _astScan.sourceRefsUnder(root, hints=("neurova_request_user_id",)):
+        tree = _astScan._cachedParse(ref.stamp, ref.code)
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and _callee(node) == "ContextVar"
                     and any(isinstance(a, ast.Constant)
                             and a.value == "neurova_request_user_id" for a in node.args)):
-                out.append(path.relative_to(REPO).as_posix())
+                out.append(ref.path.relative_to(REPO).as_posix())
     return out
 
 
@@ -158,9 +166,14 @@ class TestOnlyOneIdentityChannelRemains:
             f"身份通道声明处数 {len(decls)}：{decls}——退役一条不等于允许再造两条")
 
     def test_noProductionCodeReadsTheRetiredChannel(self):
-        hits = [p.relative_to(REPO).as_posix() for p in (REPO / "neurova").rglob("*.py")
-                if "__pycache__" not in p.parts
-                and retiredChannelRefs(p.read_text(encoding="utf-8"))]
+        # 预筛词是判据的**充分条件**：`retiredChannelRefs` 只认
+        # `neurova_turn_user_id` / `get_turn_user_id` 两个符号，连其中之一都没出现的
+        # 文件不可能命中。本格只做文本判定（`ref.code`），不建语法树。
+        hits = [ref.path.relative_to(REPO).as_posix()
+                for ref in _astScan.sourceRefsUnder(
+                    REPO / "neurova",
+                    hints=("neurova_turn_user_id", "get_turn_user_id"))
+                if retiredChannelRefs(ref.code)]
         assert not hits, f"退役通道仍有生产引用：{hits}"
 
 
