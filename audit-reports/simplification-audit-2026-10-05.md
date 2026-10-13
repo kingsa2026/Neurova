@@ -3264,6 +3264,19 @@
     - **顺手量到的另一条，并先更正我自己的一次错引**：在 `tests/unit/api/MagicMock` 造一个目录，仓库根污染守卫**不红**——真实原因是它只快照仓库根顶层（`_guardRepoRootAgainstPollution` 用 `os.listdir(REPO_ROOT)`），嵌套落点结构性看不见；`git check-ignore -v` 对该路径现查给的是 `.gitignore:452:!tests/**`（测试根整体豁免那条 negation），而 MagicMock 的两条规则复算后在 **257/380 行、都以 `/MagicMock/` 根锚定**——我初稿写成「存在一条未锚定规则、行号 447/448」，现场 `grep -n` 后不成立，所以本条只留「守卫只看根顶层」这条能量到的事实。**给下一批的一条硬规矩：引用行号前现场复算，别按上一轮的记忆抄**（同族先例＝形态集第 79 条自动推荐数据先实测再落库）。若要给守卫补「按锚点目录各自自查」那一维，属另一次改动面，本批未动 `.gitignore` 也未动该守卫。
 
 
+198. **市场取数的超时从三份各自写死收成一处，两条叠乘路径各补一条截止线；顺带量到跨市场搜索在真环境里一直是 0 结果（✅ `101ca867` 生产+判据+活体 / `bba0fac0` 活体档改域名 / `82157ec3` 子集 558→559）** 🟢 —— 落地裁定 A（2026-10-14 仓主点单「收每市场预算」），但实测把范围往外顶了一步：只收单次超时兜不住。
+    - **先勘误上一格**：§6-196 我写「串行聚合 × 每市场 `urlopen(timeout=30)`，四市场最坏 ≈120s」。现读 `SkillMarketRegistry:515-523` 实际注册 **7** 只适配器（skills_sh/clawhub/skillsmp/lobehub/github/modelscope/skillhub_cn），最坏是 **7 × 30 = 210 秒**。那个「四」是从记忆里抄的、没现读——同一格里我自己写的「别手抄」，下一段就用在了自己头上。
+    - **三份私有实现、三个预算值（动手前实测）**：`market_adapters.py:127` 裸 `timeout=30`；`market_sources.py:37` 另立 `HTTP_TIMEOUT = 20`；`hub_client.py:127` 第三份兜底 `config.get(配置键 HTTP_TIMEOUT, 字面量 30)`——且 hub 那条外面还套 `retries+1 = 4` 次尝试与指数退避，单次调用最坏 ≈127 秒，而它在**生产安装链**上（`agent_skill_manager.py:79`、`manifest_source.py:119`、`skill_service.py:652`）。跑测墙钟是 `pyproject.toml:116` 的全局 `timeout = 30`：三条数从没跟它对齐过，所以一次慢远端既拖死用户也直接把整场 pytest 击杀（§6-196 那两笔 A/B 的 AB_FAIL 就是这个）。
+    - **收法**：每市场预算收成单点 `market_adapters.MARKET_FETCH_TIMEOUT_SECONDS = 6.0`，另两处改取它（配置覆盖仍保留，只换缺省）；串行聚合加 `market_searcher.MARKET_SEARCH_AGGREGATE_SECONDS = 18.0`——**到点不再开新的市场**，已开跑那只仍由单次超时兜 ⇒ 新最坏 18 + 6 = **24 秒**；hub 那条加 `hub_client.HUB_FETCH_TOTAL_SECONDS = 20.0`，到点停止下一次重试**并照常把最后一次的失败抛出去**（不悄悄返回半截）。跳过与停止都必须点名——静默跳过就是「把失败写成没事」（§2）。
+    - **只收单次超时为什么不够（实测）**：每试从 30s 收到 6s 后，hub 那条路最坏仍是 `4 × 6.0 + 退避 7.9 = 31.9 秒 > 墙钟`。那条路上真正兜底的是**总预算**，不是单次超时——这条单独一格钉住。
+    - **判据第一版被红顶出自己的两个洞（改判据，不迁就断言）**：① 探测器只认 `ast.Assign`，而我落的常量写作带注解的 `X: float = 6.0`（`ast.AnnAssign`）⇒ 恒报「没有宿主」；② 市场数我去 registry 上数，而 `SkillMarketRegistry` **没有** `list_market_names()`（那是 searcher 的方法）⇒ `AttributeError`。改完：市场数从 `SkillMarketSearcher.list_market_names()` 现读、墙钟从 `pyproject.toml` 现读、重试数从 `hub_client` 现读，断言里不手抄数字。
+    - **读数**：红（四个生产档 stash 掉、只留新档）`6 failed, 1 passed`——那枚绿的是「探测器牙齿」格，本就该两侧都绿；失败原文含「三份 fetcher 还在各写各的超时」、「hub_client 没有总预算线（实测 31.9s）」、「总预算 0.5s 却重试到 10.2s」，那一跑还量到 `HTTP request failed after 51 attempts`。绿 `7 passed`。变异 4 枚全咬（预算退回 30s⇒2 格／聚合不看截止线⇒1／跳过不留读数⇒1／hub 总预算不生效⇒1），三档锚点 sha256 逐枚复原一致。A/B（skills+api，两侧同一份「出网即断连」的代理环境）基线 25f/8e（集合 35 条）↔ 本树 19f/9e（集合 29 条）：**仅基线红 6 条恰是本批 6 格新判据**（交付证据）；仅本树红 1 条 `test_mcp_oauth_endpoint::test_full_flow_authorized_and_cached` 回基线单跑 **3/3 皆红**＝预存 ⇒ AB_PASS。活体 8 读数 exit=0。
+    - **活体量到那条比超时更要紧的（本批不修，登记待裁）**：真出网跑 `search_all_markets` —— **7 只市场、9.3 秒、返回 0 条结果**，失败原文逐条：`Failed to search Skills.sh: Expecting value: line 1 column 1 (char 0)`（拿到的不是 JSON）、`Failed to search ClawHub: HTTP Error 404: Not Found`、`Failed to search SkillsMP: HTTP Error 404`、`Failed to search LobeHub: HTTP Error 403: Forbidden`。⇒ **跨市场搜索这条面在真环境里一直是空的**，各适配器把失败咽成 `return []`（有 error 日志、不静默，所以结果面上看不见）。修法要外部 API 的事实源，按批 24 的同族口径**不许猜路径**；撞见时机＝谁做「市场源有效性」那批时逐源取证。
+    - **一笔反手自伤，记给下一批**：活体档我用了假域名 `https://neurova-b40-invalid.invalid/...`，被常驻守卫 `TestNoHardcodedDevMachinePaths` 判成开发机绝对路径（其启发式把「协议名 + 双斜杠 + 项目名」当成盘符路径）。换域名后又踩了形态集第 118 条第二次——**我在注释里写了那句触发字面量本身**，守卫继续红。复跑 53 passed 收口。
+    - **净 LOC（`git show --numstat` 现值，分池）**：生产池 **+45/−5＝净 +40**（净增为正，去向逐条列在 `101ca867` 正文：截止线常量与注因注释、到点判定、跳过/停止的点名日志、两处 import 单源、删第二份 `HTTP_TIMEOUT`）；测试池 +461/−0（判据 293 行 7 格 + 活体 168 行 8 读数）。
+    - **本会话下一枚空号现查 §6-199。**
+
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
