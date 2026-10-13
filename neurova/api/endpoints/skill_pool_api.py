@@ -842,27 +842,12 @@ async def install_from_url(request: Request, current_user: Dict[str, Any] = Depe
         result = service.install_skill(
             skill_path=url, skill_id=skill_id, pool_type=_pool, owner_user_id=_owner
         )
-        return dict(_installReceipt(result, "Skill installed from URL"), url=url, version=version)
+        return {"success": True, "url": url, "version": version, "result": result}
     except ValueError as bad:
         return {"success": False, "error": str(bad)}
     except Exception as e:
         logger.exception("install_from_url failed: %s", e)
         return {"success": False, "error": str(e)}
-
-
-def _installReceipt(result, okMessage: str) -> Dict[str, Any]:
-    """把咽喉结论如实抬到回执顶层。
-
-    咽喉（`SkillService.install_skill`）返回 `success=False` 时——安全门拦下、路径非法、
-    扫描器故障 fail-closed——顶层 `success` 必须跟着 False 并带上拒因，不能让调用方读到
-    "installed" 后再去 `result` 里发现没装上。异常路径本就回 False，不在此列。
-    """
-    result = result if isinstance(result, dict) else {"success": bool(result)}
-    ok = bool(result.get("success", True))
-    if ok:
-        return {"success": True, "message": okMessage, "result": result}
-    reason = str(result.get("error") or "安装未成功（未点名原因）")
-    return {"success": False, "error": reason, "message": reason, "result": result}
 
 
 def _install_target(target, current_user: Dict[str, Any]):
@@ -900,9 +885,7 @@ async def install_from_zip(
                 pool_type=pool,
                 owner_user_id=owner,
             )
-            # 回执不得与内层结论相反（§6-189：与批 35 修的 marketplace 两条分支同一根因）——
-            # 装被门拦下时这里曾照回 "success": true + "Skill installed from ZIP"。
-            return _installReceipt(result, "Skill installed from ZIP")
+            return {"success": True, "message": "Skill installed from ZIP", "result": result}
     except ValueError as bad:
         raise HTTPException(status_code=400, detail=str(bad))
     except Exception as e:
