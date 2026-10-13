@@ -2608,3 +2608,23 @@ tests/unit/skills/test_artifactIntegrityAtInstallAndLoad.py
 # `pluginArtifact_batch31.py` 9 读数（换字节 ⇒ 409 带两条 sha256）。
 # 入册前单跑三次同读数 10 passed；批 32 之后复跑读数未动。
 tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py
+# §6-178 全仓非法转义棘轮（零容忍，不留存量表）：Python 现在对未知转义按字面保留，只报
+# SyntaxWarning，所以文本没坏——害处在**导入期**：语言侧把它升级为错误的那天，断的是全仓 import，
+# 而断点在别人的文档注释上（本批现量 11 处命中，生产 3 / 脚本 2 / 判据 6，全在 docstring 里写给人看的
+# 正则字符类、Windows 路径段、Schema 锚点）。留一份"允许非法转义的文件清单"就是第二个事实源，
+# 且那份清单只会被顺手加长，故取零容忍。
+# 三格形状：全仓棘轮本体（扫描集合＝`git ls-files -z '*.py'` 的读数，不用 rglob——那会把 __pycache__
+# 算进来、把已跟踪但被 ignore 规则遮住的档漏掉，两个方向都能造假绿）；扫描面覆盖格（三池各自必须扫到
+# 且带 3000 文件地板——排除型断言在功能缺失时会自动成立，所以证"扫得到"而不只证"没命中"）；
+# 探测器自证三格（坏样本必须被抓、加 r 前缀后必须放过、编译失败的文件必须**点名**而不是被吞——
+# "语法坏就跳过"这条兜底一旦存在就是纯逃逸口）。
+# 一处自指形态写进判据文档并避开：样本里的反斜杠全部由 chr(92) 现拼，本文件若写裸反斜杠，
+# 判据就把自己算成第 12 处命中（"本文件不得出现 X"的源码包含检查把自己那句算进去＝恒红那一形）。
+# 口径边界如实：扫的是**工作树**，并发会话在途的半截文件可能让它本机一时红而 CI（扫提交态）不会。
+# 入册前逐文件单跑三次同读数 6 passed（8.3—8.6s，全仓 3340 个文件逐个 compile）；
+# 红自证＝仓外 SHA256 快照 + 只按路径还原被修的 6 个文件（判据档保留）⇒ 1 failed/5 passed 且红句
+# 恰是那 11 条点名，无收集错误；活体 sourceEscapeSequenceImportClean_live.py exit=0 共 20 条读数，
+# 含反证那段（HEAD 那份源码在同形状下真导入必须 exit=1 且点名 invalid escape sequence，否则正证只是恒 0）。
+# A/B（HEAD=5121779a 仓外 worktree，context+memory+core+ci+llm+evolution 六族）基线 24f+1e/6836p
+# ↔ 本树 24f/6842p（+6 即本批判据），仅本树红 0 条；仅基线那条 ERROR 单档两侧各两次复跑皆绿，不重现不认领。
+tests/unit/core/test_sourceEscapeSequenceHygiene.py
