@@ -443,7 +443,9 @@ Plugin 架构设计
 - `neurova/skills/experience_caller.py`
 - `neurova/skills/skill_packager.py`
 - `neurova/skills/registry.py`
-- `neurova/skills/security_scanner.py`
+- ~~`neurova/skills/security_scanner.py`~~ —— 已退役（2026-10-13 批 38，台账 §6-194）：
+  技能安全扫描的唯一实装在 `neurova/security/skill_scanner.py`，装载侧经
+  `neurova/skills/skill_install_gate.py` 单点调用它
 - `scripts/sync_builtin_skills.py`
 
 ---

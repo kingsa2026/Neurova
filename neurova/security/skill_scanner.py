@@ -86,9 +86,46 @@ CODE_SHAPE_CATEGORIES = frozenset({
     "network", "file_operation", "path_traversal", "obfuscation", "malware",
 })
 
+#: 名称级规则族（`artifact_name`）：判的是**文件名与后缀**，不是内容。它不进上面那张表，
+#: 于是 `isDenyBearing` 恒判参与 DENY——`.env` 哪怕一行可读内容也没有也是泄漏，
+#: 「这个后缀算不算文档」跟它泄不泄密无关（§6-194 裁定甲″）。
+ARTIFACT_NAME_CATEGORY = "artifact_name"
+
+#: 只出读数、永不参与 DENY 的类目。「没扫到」不等于「扫出危险」——把前者当后者，
+#: 每个带图片的技能都会被误拒，这道门反而会被人整个关掉。
+UNSCANNED_CATEGORY = "unscanned_artifact"
+REPORT_ONLY_CATEGORIES = frozenset({UNSCANNED_CATEGORY})
+
+#: 已知凭据/私钥产物的文件名（精确匹配，不按子串——按子串会把 `design_tokens.json`、
+#: `password-hash.json` 这类正当资产名一起冤枉掉，实测第一方资产包里 4 个名字中枪）。
+CREDENTIAL_BASENAMES = frozenset({
+    ".env", ".netrc", ".npmrc", ".pypirc", ".git-credentials", "git-credentials",
+    "credentials", "credentials.json", "credentials.yml", "credentials.yaml",
+    "serviceaccount.json", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+})
+CREDENTIAL_SUFFIXES = frozenset({".pem", ".key", ".ppk", ".p12", ".pfx", ".kdbx"})
+#: 凭据库目录（相对技能根的路径分段）。`.git` 不在其列：它是仓库产物而非密钥，
+#: 开发中的技能目录里带 `.git` 是常态，拦它等于误拦。
+SECRET_STORE_DIR_MARKERS = frozenset({".ssh", ".aws", ".gnupg"})
+EXECUTABLE_SUFFIXES = frozenset({
+    ".exe", ".dll", ".so", ".dylib", ".msi", ".scr", ".elf", ".ocx",
+})
+#: 内容扫描读哪些后缀（单源，P1-6）。不在表内的文件不会「没问题」，而是「没被读」——
+#: 后者由 `unscanned_artifact` 报告项显式记账（§6-194）。
+SCANNABLE_SUFFIXES = frozenset({
+    ".md", ".markdown", ".txt",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs", ".mts", ".cts",
+    ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+    ".sh", ".bat", ".ps1",
+})
+#: 普查时一并跳过的缓存目录（内容扫描本来也不读它们，报出来只会淹没真信号）。
+CENSUS_IGNORED_DIRS = frozenset({"__pycache__", "node_modules"})
+
 
 def isDenyBearing(finding: "Finding") -> bool:
     """这一条发现是否参与 DENY（口径唯一，装载侧不得另写一份）。"""
+    if finding.category in REPORT_ONLY_CATEGORIES:
+        return False
     if finding.category not in CODE_SHAPE_CATEGORIES:
         return True
     path = finding.file_path or ""
@@ -587,48 +624,21 @@ class SkillScanner:
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _discover_files(self, skill_path: str) -> List[SkillFile]:
-        """发现技能文件"""
+        """发现技能文件（内容面：只读可扫后缀里的字节）"""
         files: List[SkillFile] = []
-        path = Path(skill_path)
+        root = Path(skill_path)
 
-        if not path.exists() or not path.is_dir():
-            return files
-
-        # 可扫描的文件类型
+        # 可扫描的文件类型见模块级 SCANNABLE_SUFFIXES（单源）。
         # P1-6：.md/.markdown/.txt 必须在列——SKILL.md 是提示注入的主载体，
         # 纯文本注入不依赖代码执行（原白名单漏 .md 属漏洞缺口）
-        scannable_suffixes = {
-            ".md",
-            ".markdown",
-            ".txt",
-            ".py",
-            ".js",
-            ".ts",
-            ".jsx",
-            ".tsx",
-            ".json",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".cfg",
-            ".ini",
-            ".sh",
-            ".bat",
-            ".ps1",
-        }
-
-        for file_path in sorted(path.rglob("*")):
-            if not file_path.is_file():
+        # §6-194：补 .mjs/.cjs/.mts/.cts。原清单缺它们，实测自带资产包里 37 个 .mjs
+        # 从不进扫描——代码形状的字节落在门看不见的后缀里。
+        for file_path in sorted(self._enumerateArtifactPaths(skill_path)):
+            # 跳过隐藏目录（内容扫描不读前导点目录；名称级普查另走一条，见 _enumerateArtifactPaths）
+            if any(p.startswith(".") for p in file_path.relative_to(root).parts):
                 continue
 
-            # 跳过隐藏目录和缓存
-            rel_path = file_path.relative_to(path)
-            parts = rel_path.parts
-            if any(p.startswith(".") or p == "__pycache__" or p == "node_modules" for p in parts):
-                continue
-
-            # 检查文件类型
-            if file_path.suffix not in scannable_suffixes:
+            if file_path.suffix.lower() not in SCANNABLE_SUFFIXES:
                 continue
 
             # 跳过过大文件
@@ -647,6 +657,77 @@ class SkillScanner:
                 logger.debug("无法读取文件 %s: %s", file_path, e)
 
         return files
+
+    def _enumerateArtifactPaths(self, skill_path: str) -> List[Path]:
+        """目录内**全部**文件（含前导点的），只排除缓存目录。
+
+        与 `_discover_files` 的取舍正相反：那张表决定「读谁的内容」，这张表决定
+        「谁的名字该被看一眼」——`.env`、`id_rsa` 没有可读内容也照样是泄漏。
+        """
+        root = Path(skill_path)
+        if not root.exists() or not root.is_dir():
+            return []
+        found: List[Path] = []
+        for file_path in sorted(root.rglob("*")):
+            if not file_path.is_file():
+                continue
+            if any(part in CENSUS_IGNORED_DIRS for part in file_path.relative_to(root).parts):
+                continue
+            found.append(file_path)
+        return found
+
+    def _artifactNameFindings(self, skill_path: str, allPaths: List[Path],
+                              scannedPaths: set) -> List[Finding]:
+        """名称级裁决：凭据/私钥产物、可执行产物、以及「没被读过」这件事本身。"""
+        root = Path(skill_path)
+        findings: List[Finding] = []
+        unscanned: List[str] = []
+
+        for file_path in allPaths:
+            rel = file_path.relative_to(root)
+            name = file_path.name.lower()
+            suffix = file_path.suffix.lower()
+            if str(file_path) not in scannedPaths:
+                unscanned.append(rel.as_posix())
+
+            if suffix in EXECUTABLE_SUFFIXES:
+                findings.append(Finding(
+                    rule_id="executable_artifact",
+                    severity="high",
+                    category=ARTIFACT_NAME_CATEGORY,
+                    message=f"技能包含可执行产物: {rel.as_posix()}",
+                    file_path=str(file_path),
+                    suggestion="技能包只应携带源码与资产，二进制产物无法审计",
+                ))
+                continue
+
+            reason = ""
+            if name in CREDENTIAL_BASENAMES:
+                reason = "已知凭据文件"
+            elif suffix in CREDENTIAL_SUFFIXES:
+                reason = "私钥/证书容器"
+            elif any(part.lower() in SECRET_STORE_DIR_MARKERS for part in rel.parts[:-1]):
+                reason = "凭据目录下的文件"
+            if reason:
+                findings.append(Finding(
+                    rule_id="credential_artifact_name",
+                    severity="high",
+                    category=ARTIFACT_NAME_CATEGORY,
+                    message=f"技能包含{reason}: {rel.as_posix()}",
+                    file_path=str(file_path),
+                    suggestion="安装前移除凭据与私钥文件（技能包不得携带用户密钥）",
+                ))
+
+        if unscanned:
+            findings.append(Finding(
+                rule_id="unscanned_artifact",
+                severity="medium",
+                category=UNSCANNED_CATEGORY,
+                message=f"{len(unscanned)} 个文件不在可扫描后缀/大小清单内，内容未经审计",
+                evidence=", ".join(unscanned[:10]) + ("…" if len(unscanned) > 10 else ""),
+                suggestion="把其后缀纳入 SCANNABLE_SUFFIXES，或改为可读的源码/资产形态",
+            ))
+        return findings
 
     def scan_skill(
         self,
@@ -668,8 +749,13 @@ class SkillScanner:
                 metadata={"skipped": True, "reason": "whitelisted"},
             )
 
-        # 发现文件
+        # 发现文件（内容面）+ 全量普查（名称面）。两面的取舍正相反：内容面跳过前导点目录，
+        # 名称面恰恰要靠这些点认出 `.env`/`.ssh/` 这类凭据产物（§6-194）。
         files = self._discover_files(skill_path)
+        allPaths = self._enumerateArtifactPaths(skill_path)
+        nameFindings = self._artifactNameFindings(skill_path, allPaths, {f.path for f in files})
+        unscannedCount = len(allPaths) - len(files)
+
         if not files:
             return ScanResult(
                 skill_id=skill_id,
@@ -681,11 +767,15 @@ class SkillScanner:
                         severity="high",
                         message=f"技能路径不存在或没有可扫描的文件: {skill_path}",
                     )
-                ],
+                ] + nameFindings,
+                file_count=0,
+                metadata={"unscanned_file_count": unscannedCount},
             )
 
-        # 计算内容哈希
-        all_content = "\n".join(f.content for f in files)
+        # 计算内容哈希。摘要**必须含文件名普查**：只按可读内容算时，包里多塞一个 `.env`
+        # 不改摘要，第二次扫就命中缓存里那条旧的放行结论——门形同虚设。
+        census = "\n".join(str(p.relative_to(Path(skill_path)).as_posix()) for p in allPaths)
+        all_content = census + "\n" + "\n".join(f.content for f in files)
         content_hash = self._compute_content_hash(all_content)
 
         # 检查缓存
@@ -695,7 +785,7 @@ class SkillScanner:
             return cached
 
         # 执行扫描
-        all_findings: List[Finding] = []
+        all_findings: List[Finding] = list(nameFindings)
 
         for skill_file in files:
             for analyzer in self.analyzers:
@@ -722,6 +812,7 @@ class SkillScanner:
             scan_duration=time.time() - start_time,
             file_count=len(files),
             metadata={"report_only_rules": reportOnly,
+                      "unscanned_file_count": unscannedCount,
                       "blocking_rule_count": sum(1 for f in denying
                                                  if f.severity in ("critical", "high"))},
         )

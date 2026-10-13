@@ -30,7 +30,9 @@ ToolEngine 是 Neurova CogArch 2.0 执行引擎（手脚）的核心组件之一
 
 - **依赖模块**: 
   - `neurova.security.tool_guard`：提供 ToolGuardEngine（工具守卫）
-  - `neurova.skills.security_scanner`：提供 SkillScanner（技能扫描器）
+  - `neurova.security.skill_scanner`：提供 SkillScanner（技能扫描器，唯一实装；装载侧经
+    `neurova.skills.skill_install_gate` 单点调用它。原设计的 `neurova.skills.security_scanner`
+    是第二套实装，2026-10-13 批 38 已退役，见台账 §6-194）
   - `neurova.core.event_bus`：提供 EventBus（事件总线，可选）
   - `neurova.core.service_manager`：提供 ServiceManager（服务管理器，可选）
 
@@ -526,7 +528,7 @@ if self.tool_guard:
 # 延迟加载 SkillScanner
 if self._skill_scanner is None:
     try:
-        from neurova.skills.security_scanner import SkillScanner
+        from neurova.security.skill_scanner import SkillScanner
         self._skill_scanner = SkillScanner()
     except ImportError:
         logger.warning("SkillScanner 未安装，跳过技能扫描")
@@ -691,7 +693,7 @@ execution_engine:
 # ToolEngine 本身不需要额外依赖
 # 但 ToolGuard 和 SkillScanner 可能需要：
 # - neurova.security.tool_guard（内置）
-# - neurova.skills.security_scanner（内置）
+# - neurova.security.skill_scanner（内置，经 skills/skill_install_gate 单点调用）
 ```
 
 ---

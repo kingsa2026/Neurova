@@ -109,7 +109,10 @@
 ### 2.10 技能系统 - STUB_CHAIN
 - `skills/task_decomposer.py`
 - `skills/skill_need_analyzer.py`
-- `skills/security_scanner.py`
+- ~~`skills/security_scanner.py`~~ —— 已删除（2026-10-13 批 38，台账 §6-194）：与
+  `security/skill_scanner.py` 同功能的第二套实装且零生产消费者；名称级凭据/可执行产物检查
+  两项能力已重造进那一处，其 `SkillSandbox` 经查是假沙箱（内存上限取了从不使用、无 rlimit
+  与网络隔离、每次留一个未回收的临时目录），不接生产
 - `skills/market_searcher.py`
 - `skills/market_adapt.py`
 - ~~`skill/skill_packer.py`~~ —— 已删除（2026-09-17 P2 收口，Issue #46）：零生产调用，

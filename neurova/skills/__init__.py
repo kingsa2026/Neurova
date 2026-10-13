@@ -145,11 +145,6 @@ except ImportError as _e:
 try:
     pass
 except ImportError as _e:
-    _logger.debug("skills.security_scanner 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
     _logger.debug("skills.skill_need_analyzer 模块未可用: %s", _e)
 
 try:
