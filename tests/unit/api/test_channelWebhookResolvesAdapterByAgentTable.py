@@ -1,0 +1,241 @@
+# -*- coding: utf-8 -*-
+"""入站回调该交给哪个适配器：实例表主键是 `(agent_id, channel_type)`，解析却只看 default（§6-189 批 28）。
+
+复核实状（逐处自己命中）：
+- **注册是全量的，解析是半边**：`manager.register_adapter(adapter, agent_id=...)` 把实例存进
+  `_agent_adapters[(agent_id, channel_type)]`，启动装配 `bootstrap_channel_adapters` 就是按持久化配置
+  里**每个 agent** 逐个注册的（`channel_config.py` 那个 `store["agents"]` 循环）；而
+  `get_adapter(channel_type, agent_id="default")` 不传 agent 时只命中 default 那一格。
+- **出站带 agent，入站不带**：`channel_router.py` 取适配器时传 `agent_id=agent_id`，
+  `manager._on_channel_event` 里那两处也带（第二个位置参数的写法）。于是形状是"回得去、进不来"——
+  一条只在 agent「凯蒂」名下配置的渠道，连接与回复都正常，但平台 POST 进
+  `/api/v1/channel-adapters/{channel_type}/webhook` 时**找不到适配器，整条渠道不响应**，
+  而文案是 `Channel 'feishu' not found`，把人引向"没配置"这个错结论。
+- **更坏的一种**：同一平台同时挂在 default 与别的 agent 下 ⇒ 回调一律落到 default 那个 bot，
+  消息进了别人的会话与额度（打的正是 §6-123/§6-163 那套"发送者即身份"的上游）。
+
+修法（一处口径）：解析入站适配器收成 manager 上唯一入口 `resolveInboundAdapter(channel_type)`，
+返回 `(adapter, failureReason)`——两种失败（没配 / 多 agent 同名歧义）分开点名：default 名下有就用它
+（既有部署行为一字不变）；否则该类型全表**唯一**时用那一格；多格且 default 缺席时**不静默投给任意一个**。
+把 agent 维度带进回调 URL 需要前端与部署面一起改，是另一次裁定，本批不假装解决，也不留静默错投。
+
+同根因余点由本档最后一格自己数着（不在本批动手）：`channels.py` 的状态/连接/断开三个端点、
+`channel_sharing.py` 的只读状态栏、以及零调用者的死面 `manager.replace_channel`。
+"""
+
+import ast
+import json
+import pathlib
+import re
+
+import pytest
+from fastapi.testclient import TestClient
+
+REPO = pathlib.Path(__file__).resolve().parents[3]
+
+from neurova.api.app import create_app  # noqa: E402
+from neurova.channels.base import ChannelConfig  # noqa: E402
+from neurova.channels.feishu import FeishuAdapter  # noqa: E402
+from neurova.channels.manager import ChannelManager, get_channel_manager  # noqa: E402
+
+WEBHOOK = "/api/v1/channel-adapters/{}/webhook"
+VERIFY_TOKEN = "fs-token-b28"
+CHANNELS_SRC = (REPO / "neurova" / "api" / "endpoints" / "channels.py").read_text(encoding="utf-8")
+
+
+def _adapter(appTag="app"):
+    return FeishuAdapter(ChannelConfig(
+        channel_type="feishu", app_id=f"cli_{appTag}", app_secret="sec",
+        verification_token=VERIFY_TOKEN, use_stream=False))
+
+
+def _eventBody(user="ou_real_b28"):
+    return {
+        "schema": "2.0",
+        "header": {"event_type": "im.message.receive_v1", "token": VERIFY_TOKEN},
+        "event": {"sender": {"sender_id": {"user_id": user, "open_id": "ou_open"}},
+                  "message": {"message_id": "om_1", "chat_id": "oc_1", "chat_type": "p2p",
+                              "message_type": "text",
+                              "content": json.dumps({"text": "在的"}), "mentions": []}},
+    }
+
+
+def _resolutionCallsIn(src: str, funcName: str) -> list:
+    """某函数体内对"取适配器"两副面孔的调用名（`get_adapter` 是旧面、`resolveInboundAdapter` 是单源）。"""
+    target = next((n for n in ast.walk(ast.parse(src))
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == funcName),
+                  None)
+    assert target is not None, f"{funcName} 不在了——扫描口径失效"
+    return [node.func.attr for node in ast.walk(target)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("get_adapter", "resolveInboundAdapter")]
+
+
+def _bareAdapterLookups(sources) -> dict:
+    """数"无 agent 维度的渠道取实例"落点。sources = [(relPath, text)]。
+
+    三条口径都是被本仓的伪命中教出来的：① 只看接收者是 `manager`/`mgr`/`self` 的
+    `.get_adapter(...)`——技能市场那个 `self.registry.get_adapter(market)` 是**同名异面**，
+    裸按属性名扫会把它算进来；② 带 agent 的写法有两种形（`agent_id=` 关键字、第二个位置参数），
+    只认关键字会把 `manager.py` 里两处合法调用误报成欠账；③ `resolveInboundAdapter` 是本批新立的
+    唯一入口，不该被算成欠账。
+    """
+    hits = {}
+    for rel, text in sources:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "get_adapter":
+                continue
+            if not (isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in ("manager", "mgr", "self")):
+                continue
+            if len(node.args) >= 2 or any(k.arg == "agent_id" for k in node.keywords):
+                continue
+            hits.setdefault(rel, []).append(node.lineno)
+    return hits
+
+
+def _neurovaSources() -> list:
+    return [
+        (path.relative_to(REPO).as_posix(),
+         path.read_text(encoding="utf-8", errors="replace"))
+        for path in sorted((REPO / "neurova").rglob("*.py")) if "__pycache__" not in path.parts
+    ]
+
+
+@pytest.fixture()
+def harness(tmp_path):
+    """真 app + 真路由；每只实例各挂一个 recorder（不起 agent、不调模型、不开外网、不花配额）。"""
+    ChannelManager._instance = None
+    seen = {"default": [], "kai": [], "yi_ling": []}
+
+    def _recorder(bucket):
+        async def _record(_eventType, message):
+            seen[bucket].append(message)
+        return _record
+
+    app = create_app()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        mgr = get_channel_manager()
+
+        def _register(agentId, bucket, appTag):
+            adapter = _adapter(appTag)
+            mgr.register_adapter(adapter, agent_id=agentId)
+            adapter._event_callback = _recorder(bucket)
+            return adapter
+
+        yield client, mgr, seen, _register
+    ChannelManager._instance = None
+
+
+class TestNonDefaultAdapterReachesInbound:
+    def testCallbackFindsTheOnlyAdapter(self, harness):
+        """只在 agent「kai」名下配了这条渠道 ⇒ 回调必须进它自己，不是 404。"""
+        client, mgr, seen, register = harness
+        register("kai", "kai", "kai_app")
+
+        r = client.post(WEBHOOK.format("feishu"), json=_eventBody())
+
+        assert r.status_code == 200, (
+            f"渠道明明连着，回调却说找不到：{r.status_code} {r.text[:160]}")
+        assert len(seen["kai"]) == 1 and seen["default"] == [] and seen["yi_ling"] == [], (
+            f"事件落错了桶：kai={len(seen['kai'])} default={len(seen['default'])} "
+            f"yi_ling={len(seen['yi_ling'])}")
+        assert seen["kai"][0].sender_id == "ou_real_b28", "解析途中把消息内容弄丢了"
+
+    def testDefaultAdapterStillWinsWhenPresent(self, harness):
+        """对照：default 名下也有 ⇒ 仍走 default（既有部署的行为一字不变）。"""
+        client, mgr, seen, register = harness
+        register("default", "default", "def_app")
+        register("kai", "kai", "kai_app")
+
+        r = client.post(WEBHOOK.format("feishu"), json=_eventBody())
+
+        assert r.status_code == 200
+        assert len(seen["default"]) == 1 and seen["kai"] == []
+
+    def testAmbiguousMultiAdapterNeverSilentlyDelivers(self, harness):
+        """两个非 default agent 各配一条同名渠道 ⇒ 不许静默投给任意一个，文案还得点名歧义。"""
+        client, mgr, seen, register = harness
+        register("kai", "kai", "kai_app")
+        register("yi_ling", "yi_ling", "yl_app")
+
+        r = client.post(WEBHOOK.format("feishu"), json=_eventBody())
+
+        assert seen["kai"] == [] and seen["yi_ling"] == [] and seen["default"] == [], (
+            f"歧义场景把消息投给了某一个：kai={len(seen['kai'])} "
+            f"yi_ling={len(seen['yi_ling'])} default={len(seen['default'])}")
+        assert r.status_code == 404, f"歧义应当显式失败而不是 200（实得 {r.status_code}）"
+        detail = r.json().get("detail") or ""
+        assert "multiple agents" in detail and "kai" in detail and "yi_ling" in detail, (
+            f"文案没点名歧义与涉及的 agent，运维会以为是没配置：{detail!r}")
+
+    def testTrulyUnconfiguredChannelStillSaysNotFound(self, harness):
+        """反空转：一格都没配时不能被"歧义"盖掉——两种失败必须分得开，否则下一次没人看得出接线坏了。"""
+        client, mgr, seen, register = harness
+
+        r = client.post(WEBHOOK.format("feishu"), json=_eventBody())
+
+        assert r.status_code == 404 and not any(seen.values())
+        detail = r.json().get("detail") or ""
+        assert "multiple agents" not in detail and "not found" in detail.lower(), (
+            f"两种失败混成一种了：{detail!r}")
+
+
+class TestTheResolutionHasOneFace:
+    def testEndpointStopsCallingGetAdapterItself(self):
+        """`handle_webhook` 不再自己取 default 视图——解析只在 manager 那一个入口，且只一次。"""
+        attrs = _resolutionCallsIn(CHANNELS_SRC, "handle_webhook")
+        assert attrs.count("get_adapter") == 0, f"入站还在自己取 default 视图（{attrs}）"
+        assert attrs.count("resolveInboundAdapter") == 1, f"解析入口没被用上或用了多次（{attrs}）"
+
+    def testResolutionDetectorHasTeeth(self):
+        """自证：探测器真分得清两副面孔（只断"现在对了"的那格会随代码漂移而失真）。"""
+        sample = chr(10).join([
+            "async def handle_webhook(manager):",
+            "    a = manager.get_adapter('feishu')",
+            "    b = manager.resolveInboundAdapter('feishu')",
+            "    return a, b",
+        ])
+        assert _resolutionCallsIn(sample, "handle_webhook") == [
+            "get_adapter", "resolveInboundAdapter"], "读法失真"
+
+    def testOutboundFaceKeepsItsAgentDimension(self):
+        """别把出站那条也改掉——`channel_router` 一直是按 agent 取实例的现役正解（对照格）。"""
+        src = (REPO / "neurova" / "channels" / "channel_router.py").read_text(encoding="utf-8")
+        assert re.search(r"get_adapter\([^)\n]*agent_id\s*=", src), (
+            "channel_router 的 agent 维度丢了：入站合流不该把出站那条改成默认视图")
+
+    def testDebtDetectorHasTeeth(self):
+        """四形对照：裸调要抓、两种合法写法都不许抓、同名异面也不抓。"""
+        src = chr(10).join([
+            "def f(manager):",
+            "    a = manager.get_adapter('feishu')",                  # 裸调：抓
+            "    b = manager.get_adapter('feishu', agent_id='kai')",  # 关键字写法：放过
+            "    c = manager.get_adapter('feishu', 'kai')",           # 位置参数写法：放过
+            "    d = manager.registry.get_adapter('feishu')",         # 同名异面：放过
+        ])
+        assert _bareAdapterLookups([("synthetic.py", src)]) == {"synthetic.py": [2]}, "探测器口径失真"
+
+    def testRegisteredDebtSitesAreCountedByShape(self):
+        """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。"""
+        known = {
+            "neurova/api/endpoints/channels.py":
+                "状态/连接/断开三个只读与管理端点——是否 agent 化取决于前端消费面，未取证，另批裁",
+            "neurova/api/endpoints/channel_sharing.py":
+                "共享状态只读一栏，取不到就写 unavailable，不入回合，风险低；与上同批裁",
+            "neurova/channels/manager.py":
+                "replace_channel 内一处裸调——该面全仓零调用者（死面），接线前先按本批口径 agent 化",
+        }
+        hits = _bareAdapterLookups(_neurovaSources())
+        extra = set(hits) - set(known)
+        assert extra == set(), (
+            f"新长出一处无 agent 维度的渠道取实例，先裁再合：{[(f, hits[f]) for f in sorted(extra)]}")
+        vanished = set(known) - set(hits)
+        assert vanished == set(), (
+            f"登记表里的落点已消失，同批把那一行销掉（别留过期豁免）：{sorted(vanished)}")
