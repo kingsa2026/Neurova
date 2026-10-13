@@ -90,11 +90,16 @@ class TestSkillDocSkill:
 
 
 class TestRegistryIntegration:
-    def test_build_executable_prefers_doc_skill(self, installed_remote_skill, fake_importer):
-        skill = _build_executable_skill("aliyun--demo", "演示描述")
+    def test_build_executable_prefers_doc_skill(self, installed_remote_skill):
+        """取径单点：只认传进来的那份目录（账本 `path`），不再回看市场缓存根。"""
+        skill = _build_executable_skill("aliyun--demo", "演示描述", installed_remote_skill)
         assert skill is not None
         assert skill.name == "aliyun--demo"
         assert skill.description == "演示描述"
+
+    def test_build_executable_without_dir_returns_none(self, installed_remote_skill):
+        """没有账本目录就没有第二条读路——旧形态会自己去 MarketImporter 单例找包体。"""
+        assert _build_executable_skill("aliyun--demo", "演示描述") is None
 
     def test_link_registers_doc_skill(self, service, installed_remote_skill, fake_importer):
         registry = SkillRegistry()
@@ -125,7 +130,7 @@ class TestRegistryIntegration:
         )
         # 模拟 Agent 重启后全新注册表
         fresh = SkillRegistry()
-        restored = restore_market_skills_from_service(service, fresh, market_skills_dir=fake_importer)
+        restored = restore_market_skills_from_service(service, fresh)
         assert restored >= 1
         skill = fresh.get_skill("aliyun--demo")
         assert skill is not None

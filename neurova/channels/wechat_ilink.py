@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.channels.base import ChannelAdapter, ChannelConfig, ChannelEventType
-from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
+from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_PLACEHOLDER
 from neurova.channels.wechat_ilink_client import DEFAULT_BASE_URL, ILinkClient
 
 logger = logging.getLogger(__name__)
@@ -296,7 +296,7 @@ class WeChatILinkAdapter(ChannelAdapter):
             self._context_tokens[from_user_id] = context_token
             self._save_context_tokens()
 
-        content = text or {"image": "[图片]", "voice": "[语音]",
+        content = text or {"image": "[图片]", "voice": INBOUND_VOICE_PLACEHOLDER,
                            "file": f"[文件] {media.get('file_path', '')}",
                            "video": "[视频]"}.get(message_type, "")
         channel_msg = self._make_message(
