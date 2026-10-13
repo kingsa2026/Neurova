@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from neurova.core import vector_math
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -163,14 +164,10 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
         va, vb = engine.encode(a), engine.encode(b)
         if not va or not vb:
             return None
-        import math
-
-        dot = sum(x * y for x, y in zip(va, vb))
-        na = math.sqrt(sum(x * x for x in va))
-        nb = math.sqrt(sum(y * y for y in vb))
-        if na == 0 or nb == 0:
+        raw = vector_math.tryCosineSimilarity(va, vb)
+        if raw is None:
             return None
-        return max(0.0, min(1.0, dot / (na * nb)))
+        return max(0.0, min(1.0, raw))
     except Exception:  # noqa: BLE001 - 可选依赖,缺失时退回 Jaccard
         return None
 

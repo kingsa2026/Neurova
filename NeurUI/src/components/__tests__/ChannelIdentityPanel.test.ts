@@ -1,13 +1,15 @@
 /**
  * 渠道身份绑定面板（工单 2026-10-10 批 4b）+ 其 API 客户端。
  *
- * 判据不在"渲染得好不好看"，在三条会被随手改坏的语义：
+ * 判据不在"渲染得好不好看"，在四条会被随手改坏的语义：
  * 1. 前端**不指定归属**：发码只带 (agent, 渠道)，body 里出现 `user_id` 就等于把
  *    "这个渠道身份算谁"交给点面板的人；
  * 2. 权限态与空态**不合并**：403 显示"无权查看"，不能退化成"还没有绑定"——
  *    后者会把权限问题伪装成空数据，用户永远想不到去要权限；
  * 3. 解绑留痕：`revoked` 行继续显示（这张表要答得出"这人以前算谁的"），
- *    且解绑动作只出现在生效中的行上。
+ *    且解绑动作只出现在生效中的行上；
+ * 4. 禁用态要出声：一个渠道都没配时，下拉是空的、发码按钮永久禁用——界面必须把
+ *    "为什么不能点、要先做什么"写在屏幕上（浏览器实跑验收发现的就是这一格哑巴）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -43,10 +45,10 @@ const REVOKED = {
   created_at: 1, updated_at: 2,
 }
 
-function mountPanel() {
+function mountPanel(channelTypes: string[] = ['feishu', 'telegram']) {
   const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN as never } })
   return mount(ChannelIdentityPanel, {
-    props: { agentId: 'kai', channelTypes: ['feishu', 'telegram'] },
+    props: { agentId: 'kai', channelTypes },
     global: {
       plugins: [i18n],
       stubs: {
@@ -254,5 +256,33 @@ describe('ChannelIdentityPanel — 群共享后果必须写在面板上（裁定
     expect(note.exists(), '群共享作用域的后果没有可见落点——用户只能在出事之后才知道').toBe(true)
     expect(note.text()).toContain('按群共享')
     expect(note.text()).toContain('单聊')
+  })
+})
+
+describe('ChannelIdentityPanel — 没有可发码的渠道时要说明原因', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listChannelIdentityBindings.mockResolvedValue({ bindings: [] })
+    listObservedChannelSenders.mockResolvedValue({ senders: [] })
+  })
+
+  it('渠道列表为空 ⇒ 出声解释"先配渠道"，而不是留一个永久禁用的按钮', async () => {
+    const wrapper = mountPanel([])
+    await flushPromises()
+
+    const hint = wrapper.find('[data-testid="identity-no-configured-channel"]')
+    expect(hint.exists(),
+      '下拉是空的、按钮点不动，界面一个字的解释都不给——用户只能猜是坏了还是没权限').toBe(true)
+    expect(hint.text()).toContain('配置')
+    // 按钮确实还是禁用的：这句提示是解释，不是把门放宽
+    expect(wrapper.find('[data-testid="identity-issue"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('有已配置渠道 ⇒ 这句解释不出现（不是常驻说明文）', async () => {
+    const wrapper = mountPanel(['feishu'])
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="identity-no-configured-channel"]').exists(),
+      '提示若常驻，上面那格"为空才出声"就退化成恒真——它什么也没钉住').toBe(false)
   })
 })

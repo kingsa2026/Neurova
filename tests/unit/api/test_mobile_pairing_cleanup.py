@@ -38,6 +38,11 @@ def _request() -> SimpleNamespace:
         client=SimpleNamespace(host="203.0.113.9"),
         headers={"host": "localhost:9527"},
         url=SimpleNamespace(scheme="http"),
+        # §6-172 批 25：`generate_pairing` 现在向框架要自家二维码地址（`request.url_for`），
+        # 这两格审的是**过期码回收**，与那条 URL 无关——这里替的是 Starlette 的请求对象，
+        # 不是被审逻辑。同源判据本身在 `test_mobilePairingQrSameOrigin.py`（真 app 真路由）。
+        url_for=lambda name, **params: (
+            f"http://localhost:9527/api/v1/mobile/pairing/qrcode/{params.get('code', '')}"),
     )
 
 

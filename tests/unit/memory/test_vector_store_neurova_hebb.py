@@ -9,8 +9,8 @@ import pytest
 
 from neurova.cognitive_layers.memory_layer.unified_vector_store import (
     UnifiedVectorStore,
-    vector_normalize,
 )
+from neurova.core import vector_math
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def _fake_vec(seed: int, dim: int = 100) -> list:
     import random
     rng = random.Random(seed)
     vec = [rng.random() for _ in range(dim)]
-    return vector_normalize(vec)
+    return vector_math.vectorNormalize(vec)
 
 
 class TestAddNeurovaHebb:

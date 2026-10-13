@@ -25,6 +25,11 @@ from typing import Any, Dict, Optional
 from neurova.channels.feishu_auth import AuthMixin
 from neurova.channels.feishu_media import MediaMixin
 from neurova.channels.voice_egress import VOICE_MESSAGE_TYPE, VOICE_OUT_AUDIO_FILE
+from neurova.channels.voice_ingress import (
+    AUDIO_BYTES_KEY,
+    INBOUND_VOICE_PLACEHOLDER,
+    VOICE_DOWNLOAD_MAX_BYTES,
+)
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
@@ -32,9 +37,6 @@ from neurova.channels.base import (
 )
 
 logger = get_logger(__name__)
-
-# 语音消息下载大小上限（P1-12 断点③）：防御异常大文件拖垮内存
-_VOICE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
 
 
 class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
@@ -223,7 +225,7 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                                     if elem.get("tag") == "text":
                                         content += elem.get("text", "")
             elif msg.message_type == "audio":
-                content = "[语音]"
+                content = INBOUND_VOICE_PLACEHOLDER
 
             # 构造统一消息
             audio_metadata: Dict[str, Any] = {}
@@ -236,7 +238,7 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                     if file_key and msg.message_id:
                         audio_data = self._download_media_bytes(msg.message_id, file_key)
                         if audio_data:
-                            audio_metadata["audio_bytes"] = audio_data
+                            audio_metadata[AUDIO_BYTES_KEY] = audio_data
                 except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
                     logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
 
@@ -335,10 +337,10 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                 logger.warning("Feishu 媒体下载 HTTP %s: msg=%s", resp.status_code, message_id)
                 return None
             declared = resp.headers.get("Content-Length")
-            if declared and int(declared) > _VOICE_DOWNLOAD_MAX_BYTES:
+            if declared and int(declared) > VOICE_DOWNLOAD_MAX_BYTES:
                 logger.warning("Feishu 媒体超大小上限，拒收: %s bytes", declared)
                 return None
-            if len(resp.content) > _VOICE_DOWNLOAD_MAX_BYTES:
+            if len(resp.content) > VOICE_DOWNLOAD_MAX_BYTES:
                 logger.warning("Feishu 媒体实际字节超上限，拒收")
                 return None
             return resp.content
@@ -505,6 +507,18 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
     # 验证辅助
     # ============================================================
 
+    def _requireVerificationToken(self, token: str, what: str) -> None:
+        """C-23：必须与配置的 verification_token 恒定时间比对；未配置即 fail-closed。
+
+        口径与 wecom/telegram 一致——"没配密钥就跳过校验"是最坏的那种兜底，
+        它让任何自算的 token 都能通过。
+        """
+        expected = self.config.verification_token or ""
+        if not expected or not token or not hmac.compare_digest(token, expected):
+            raise ValueError(
+                f"Feishu {what} rejected: verification token missing or mismatched (fail-closed)"
+            )
+
     def verify_url_challenge(self, challenge: str, token: str) -> Dict[str, str]:
         """
         Webhook URL 验证
@@ -514,12 +528,16 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
         C-23: 必须与配置的 verification_token 比对（恒定时间比较）；
         未配置 token 时 fail-closed（拒绝挑战，与 wecom/telegram 口径一致）。
         """
-        expected = self.config.verification_token or ""
-        if not expected or not token or not hmac.compare_digest(token, expected):
-            raise ValueError(
-                "Feishu URL verification rejected: token missing or mismatched (fail-closed)"
-            )
+        self._requireVerificationToken(token, "URL verification")
         return {"challenge": challenge}
+
+    def verify_event_token(self, token: str) -> None:
+        """事件回调的令牌核对——分派链在把消息投出去**之前**必须过这道。
+
+        令牌位置两代不同：v2 在 `header.token`，v1 在顶层 `token`；取哪个由端点负责，
+        "比不比、怎么比"只此一份（教义第 6 条）。不通过就抛 ValueError，由端点翻成 4xx。
+        """
+        self._requireVerificationToken(token or "", "event callback")
 
 
 def create_feishu_adapter(

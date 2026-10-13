@@ -9,8 +9,8 @@ NeuHebbCurator — Neurova Hebb 检索与排序器
 
 from __future__ import annotations
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
-import math
 from typing import Callable, List, Optional, Tuple
 
 from .neurova_hebb import NeuHebbConfig, NeuHebbMem, NeurovaHebb
@@ -84,7 +84,7 @@ class NeuHebbCurator:
         for hebb in all_hebbs:
             if hebb.embedding is None:
                 continue
-            score = self._cosine_similarity(query_embedding, hebb.embedding)
+            score = vector_math.cosineSimilarity(query_embedding, hebb.embedding)
             scored.append((score, hebb))
 
         # 按分数降序
@@ -128,7 +128,7 @@ class NeuHebbCurator:
             for sel in selected:
                 if sel.embedding is None:
                     continue
-                sim = self._cosine_similarity(candidate.embedding, sel.embedding)
+                sim = vector_math.cosineSimilarity(candidate.embedding, sel.embedding)
                 if sim >= self.config.diversity_threshold:
                     is_diverse = False
                     break
@@ -149,16 +149,6 @@ class NeuHebbCurator:
                 if hebb.embedding is not None:
                     result.append(hebb)
         return result
-
-    @staticmethod
-    def _cosine_similarity(a: List[float], b: List[float]) -> float:
-        """计算余弦相似度。"""
-        dot = sum(x * y for x, y in zip(a, b))
-        norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(x * x for x in b))
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return dot / (norm_a * norm_b)
 
     @staticmethod
     def _default_embed(text: str) -> List[float]:

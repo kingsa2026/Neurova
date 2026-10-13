@@ -9,6 +9,7 @@
 - 循环检测
 """
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -515,18 +516,9 @@ class GraphTraversal:
         if not query_vector or not node_vector:
             return 0.5
 
-        # 计算余弦相似度
-        dot_product = sum(a * b for a, b in zip(query_vector, node_vector))
-        norm_a = sum(a * a for a in query_vector) ** 0.5
-        norm_b = sum(b * b for b in node_vector) ** 0.5
-
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-
-        cosine_similarity = dot_product / (norm_a * norm_b)
-
-        # 归一化到 [0, 1] 范围
-        normalized_similarity = (cosine_similarity + 1) / 2
+        # 余弦与 [0,1] 映射的口径在 core/vector_math（§6-179 批 33）。零向量走 cosineScore
+        # 的"没有信息"⇒ 0.0，与这段改前的读数逐值一致；空向量的 0.5 中性值仍归本函数自己定。
+        normalized_similarity = vector_math.cosineScore(query_vector, node_vector)
 
         # 应用意图权重
         weighted_similarity = normalized_similarity * intent_weight

@@ -9,8 +9,9 @@ import pytest
 from datetime import datetime
 
 from neurova.cognitive_layers.memory_layer.sleep import (
-    SleepConsolidation, MemoryRecord, MergeResult, cosine_similarity
+    SleepConsolidation, MemoryRecord, MergeResult
 )
+from neurova.core import vector_math
 from neurova.cognitive_layers.memory_layer.graph_traversal import (
     GraphTraversal, MemoryRelation, TraversalPath, TraversalResult
 )
@@ -26,19 +27,19 @@ class TestSleepConsolidation:
     def test_cosine_similarity_identical(self):
         """测试21: 相同向量的余弦相似度为1"""
         vec = [1.0, 2.0, 3.0]
-        assert cosine_similarity(vec, vec) == pytest.approx(1.0)
+        assert vector_math.cosineSimilarity(vec, vec) == pytest.approx(1.0)
 
     def test_cosine_similarity_orthogonal(self):
         """测试22: 正交向量的余弦相似度为0"""
         vec_a = [1.0, 0.0]
         vec_b = [0.0, 1.0]
-        assert cosine_similarity(vec_a, vec_b) == pytest.approx(0.0)
+        assert vector_math.cosineSimilarity(vec_a, vec_b) == pytest.approx(0.0)
 
     def test_cosine_similarity_similar(self):
         """测试23: 相似向量的余弦相似度接近1"""
         vec_a = [1.0, 2.0, 3.0]
         vec_b = [1.1, 2.1, 3.1]
-        sim = cosine_similarity(vec_a, vec_b)
+        sim = vector_math.cosineSimilarity(vec_a, vec_b)
         assert sim > 0.99
 
     def test_cluster_by_similarity(self):

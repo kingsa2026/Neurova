@@ -330,8 +330,8 @@ class TestMoEAccuracy:
         query_vec = [1.0, 0.0, 0.0]  # 与 A 完全匹配
 
         # 余弦相似度
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import cosine_similarity
-        sim_a = cosine_similarity(query_vec, centroid_a)
-        sim_b = cosine_similarity(query_vec, centroid_b)
+        from neurova.core import vector_math
+        sim_a = vector_math.cosineSimilarity(query_vec, centroid_a)
+        sim_b = vector_math.cosineSimilarity(query_vec, centroid_b)
 
         assert sim_a > sim_b
