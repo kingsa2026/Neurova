@@ -2684,3 +2684,16 @@ tests/unit/core/test_denseCosineSingleSource.py
 # 入册前逐文件单跑三次同读数 13 passed；红自证＝只按路径还原三个生产件 ⇒ 10 failed/3 passed
 # 且失败集恰为那 10 格拒绝断言；A/B（HEAD 仓外 worktree，channels+api）两侧失败集合逐条相同。
 tests/unit/api/test_channelWebhookAuthBeforeDispatch.py
+# §6-182 批 34：向量原语（范数／点积／归一化）也接进 `core/vector_math` 单源——纯搬家，
+# 逐值不变。两处细节是搬家时最容易"顺手改好"而改坏契约的：零范数那支 `vectorNormalize`
+# 返回**传入对象本身**而不是副本（判据用 `is` 钉），`vectorDot` 对长度不等按 `zip` 截断
+# （那是点积的定义，维度守卫归余弦那一处）。另收三份"同一个原语的第 4/5/6 份写法"：
+# `positional_encoding._vec_norm`（零消费者）退役、`semantic_emotion._zero_norm` 与
+# `semantic_search` 降级嵌入里的内联模长改取单源。
+# 枚守卫按**形状**数而不是按函数名数——批 33 那枚 M4 教出来的：只认 `def vector_norm` 时，
+# 站点内联重写 `sum(x*x …) ** 0.5` 就滑过去了（本批 M3 正是这一形，第一版判据对它无牙）。
+# 两步写法的限度写在格子里，不装作覆盖。红 4 failed/1 passed ⇒ 绿 7 passed；变异 3 枚全咬
+# （M2 一枚同时翻红枚举/归属/形状三格）；活体 `vectorPrimitives_batch34.py` 8 读数 exit=0
+# （反向校准：桩坏 `vectorNorm` ⇒ 真质心读数跟着变 2.0，路上没有第二份模长）。
+# A/B 仅本树红 0。入册前单跑三次同读数 7 passed（11~12s，两枚全仓 AST 扫描占大头）。
+tests/unit/core/test_vectorPrimitivesSingleFace.py
