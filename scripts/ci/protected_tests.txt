@@ -2669,3 +2669,18 @@ tests/unit/channels/test_channelVoiceFactorySeamCloses.py
 # 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
 # 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
 tests/unit/core/test_denseCosineSingleSource.py
+# §6-181 渠道 webhook 分派链：验签必须先于投递（安全判据，仿冒必拒 + 合法必通成对）。
+# 危害是活体量出来的，不是读代码读出来的：飞书支与钉钉支此前不做任何验签，把请求体直接拼成
+# ChannelMessage 投进 manager，而 sender_id 取自请求体 ⇒ 任何人能对已配置渠道冒充任意平台用户
+# 驱动 agent 回合——正好绕过 §6-123/§6-163 那套"发送者即身份"（身份解析读的就是这个 sender_id）：
+# 以他人身份读写其绑定 agent 的技能私库与记忆、把消息投进别人会话、按伪造用户计额度。
+# 默认绑定还是 0.0.0.0。wecom 那支有 msg_signature 校验是例外 ⇒ 洞来自"逐平台加分支时各写各的"。
+# 形状上钉三件事：① 每段都成对（仿冒 4xx 且**事件数为 0** / 合法签名仍 200 且投递）——只证一半的
+# 安全判据等于没证，"顺手把端点一关了之"也能让"仿冒被拒"那半全绿；② 未配置密钥时 fail-closed
+# （空 appSecret 会让任何自算签名都匹配，比不验签更糟）；③ 时间戳非数字/超 1 小时都要拒，
+# 且不得退化成 500（那是把"来源不合法"混进"服务出故障"）。密文回调本批不解密 ⇒ 要求拒绝时点名原因。
+# 口径边界如实：合法签名样本由测试本地按文档公式自算，证的是机制生效与失败方向（算错⇒拒），
+# 不证与真平台逐字节互操作——那要有凭据的批次；wecom 那支不动，它委托适配器且早已 fail-closed。
+# 入册前逐文件单跑三次同读数 13 passed；红自证＝只按路径还原三个生产件 ⇒ 10 failed/3 passed
+# 且失败集恰为那 10 格拒绝断言；A/B（HEAD 仓外 worktree，channels+api）两侧失败集合逐条相同。
+tests/unit/api/test_channelWebhookAuthBeforeDispatch.py
