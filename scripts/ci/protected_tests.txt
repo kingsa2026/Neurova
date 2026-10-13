@@ -2807,3 +2807,15 @@ tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py
 # 普查（否则包里多塞一个 .env 不改摘要，第二次扫读的是缓存不是门）。17 格含反误报格（正当资产名不得按
 # 子串冤枉）、名称级不受文档豁免那格、以及「第二套已退役」的 find_spec 格。逐文件单跑三次同读数 17/17/17。
 tests/unit/security/test_installGateArtifactNameRules.py
+# 批 31（§6-195）出站点名不回落 default + 广播覆盖全量实例。判据 11 格分三组：
+# send_message 两态（点名落空 ⇒ 一只都不许动且日志点名是谁；未点名/点名 default ⇒ 旧语义一字不变，
+# `neurflow` 审批通知那一形有专门对照格）、回发安全凭据（真闭包给 metadata 盖 agent 归属 ⇒ 收紧打不到
+# 回发路，这一格改前改后都绿，它是本批的"能不能收"证据而非装饰）、broadcast 定义域（非 default 实例
+# 真被叫到 + default 裸键向后兼容 + caller 那一形 `list(...)[0]` 不破）、视图键单源（按变量名配对收口，
+# 并把 `resolve_session_scope_id` 的会话作用域键作为**同形不同域**负样本钉住不许抓）。
+# 红自证＝manager.py 还原 HEAD ⇒ 6 failed/5 passed（那 5 格本就该绿：三形对照 + 回发安全 + 探测器牙齿）；
+# 逐文件单跑三次同读数 11/11/11；目录级 collect 复算 tests/unit/channels 661→672。
+# A/B 顺带比出两笔与本批无关的既有事实（都已在台账单列）：`test_generation_batch3.py:121` 把桩打在
+# `deps.verify_access_token` 而该函数住在 `api/auth.py:333` ⇒ 8 条用例 setup 恒错；仓库根污染守卫
+# 会被并发会话在途探针（`tmp_b39_netguard.py`）触发，报在"当刻正在收尾"的那条用例上，身份随采样漂移。
+tests/unit/channels/test_channelOutboundDoesNotFallBackToDefaultBot.py
