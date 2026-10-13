@@ -44,6 +44,46 @@ def _topLevelEntries() -> set:
     return set(os.listdir(REPO_ROOT))
 
 
+def _lfsNeutralGit(argv: list, *, cwd: Path) -> subprocess.CompletedProcess:
+    """跑一次**不依赖 Git LFS** 的 git 子命令，返回成品。
+
+    为什么要这一层：CI 的 `python:3.12` 镜像里没有 `git-lfs`，而本仓是 LFS 仓库——
+    `.git/hooks/post-checkout` 里那句 `command -v git-lfs || exit 2`（返回码 2）
+    与 LFS 过滤器（`filter.lfs.process` 找不到 `git-lfs`，返回码 128）都会让
+    `git worktree add` 整个失败，探针仓库根建不起来，四格判据全成 ERROR。
+    实测本机复现两条症状（隐藏 `/usr/bin/git-lfs`）：
+
+        $ git worktree add --detach <tmp> HEAD
+        stderr: git-lfs filter-process: 1: git-lfs: not found
+                fatal: the remote end hung up unexpectedly        # 返回码 128
+        或 stderr: ... 'git-lfs' was not found on your path ...   # 返回码 2
+
+    探针只借这棵树拿 `tests/conftest.py` 与 `neurova/`，**一个 LFS 大文件都不读**。
+    故根修是让这次 checkout 不走 LFS：`core.hooksPath` 指向一个空的临时目录（跳过
+    `post-checkout`），`filter.lfs.required=false` 且把四个 LFS 过滤器置空（跳过
+    smudge——否则 `embedding/**/*.safetensors` 这类指针文件仍会触发 filter-process）。
+    判据一个字没放宽：探针树里该有的文件一个不少（`neurova/` 78 个顶层条目、`tests/`
+    与 `pyproject.toml` 齐备），只是 `*.safetensors` 保持指针形态——探针从不读它。
+    """
+    hooksDir = tempfile.mkdtemp(prefix="neurovaProbeHooks-")
+    args = [
+        "git",
+        "-c", f"core.hooksPath={hooksDir}",
+        "-c", "filter.lfs.required=false",
+        "-c", "filter.lfs.process=",
+        "-c", "filter.lfs.smudge=",
+        "-c", "filter.lfs.clean=",
+        *argv,
+    ]
+    try:
+        return subprocess.run(
+            args, cwd=str(cwd), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180,
+        )
+    finally:
+        shutil.rmtree(hooksDir, ignore_errors=True)
+
+
 def _acquireProbeRoot() -> tuple[Path, Path]:
     """给探针一棵**自己独占**的仓库根：仓外 detached git worktree。
 
@@ -60,10 +100,10 @@ def _acquireProbeRoot() -> tuple[Path, Path]:
     # 就只有这一行，看不出是 git 缺席、HEAD 不可解析、还是 `worktree` 目录被占用
     # （`cnb-o5u-1k4od02gs` 的 pipeline-3）。这里改为自己收返回码并把 stderr 原文
     # 接进失败消息：诚实暴露，而不是让下一轮读者去猜（修复教义第 2 条）。
-    proc = subprocess.run(
-        ["git", "worktree", "add", "--detach", str(root), "HEAD"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=180,
+    # git 调用统一走 `_lfsNeutralGit`：CI 镜像没有 git-lfs，裸调用会被 LFS 钩子
+    # 与过滤器拦死（详见该函数 docstring），而不是真实反映"这棵树建不起来"。
+    proc = _lfsNeutralGit(
+        ["worktree", "add", "--detach", str(root), "HEAD"], cwd=REPO_ROOT,
     )
     if proc.returncode != 0:
         shutil.rmtree(staging, ignore_errors=True)
@@ -74,7 +114,8 @@ def _acquireProbeRoot() -> tuple[Path, Path]:
             f"  stderr: {proc.stderr.strip()[:500]!r}\n"
             "常见成因：镜像里没有 git / 只有浅克隆而 HEAD 不可解析 / "
             "同一 git 目录被并发会话同时加挂。本守卫依赖 git 才能建独占仓库根，"
-            "缺席时它是**测不了**而不是**通过**。"
+            "缺席时它是**测不了**而不是**通过**。（Git LFS 缺席不在此列——"
+            "`_lfsNeutralGit` 已把 LFS 钩子与过滤器摘掉，不再构成成因。）"
         )
     # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
     # 探针就该测**工作树这一份**，否则改坏了也照样绿。
@@ -83,11 +124,7 @@ def _acquireProbeRoot() -> tuple[Path, Path]:
 
 
 def _releaseProbeRoot(staging: Path, root: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(root)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-    )
+    _lfsNeutralGit(["worktree", "remove", "--force", str(root)], cwd=REPO_ROOT)
     shutil.rmtree(staging, ignore_errors=True)
 
 
