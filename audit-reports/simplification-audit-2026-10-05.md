@@ -3213,6 +3213,14 @@
     - **同批未动的三个只读/管理端点**（`channels.py` 的状态/连接/断开）与 `channel_sharing.py` 那一栏：要不要一并 agent 化，取决于**前端到底调不调它们**——这条没取证，登记给下一次带消费面排查的批次（判据已经把它们钉成"欠账表"，新写第四处裸调会当场红）。`manager.replace_channel` 现量**全仓零调用者**，属死面：接线之前必须先按本批口径 agent 化，否则一接上就错投；退役还是接线同属那次裁。
 
 
+191. **安装门：文档/资产类命中降为报告项，代码面与提示注入面照旧严；顺带修掉 install-from-zip 的回执谎报（✅ `2e6e9eb5` 生产+判据+活体、`6a8993b3` 子集）** 🟢 —— 落地裁定甲（"文档类不参与 DENY"），边界比票面更窄：只有"这段字节会被执行/落地"才有意义的规则族降级，`.py`/`.sh`/`.js` 照旧全规则，**提示注入对 .md 仍然 DENY**（SKILL.md 正是它的主载体，P1-6 那次"原白名单漏 .md 属漏洞缺口"的修复不因本批撤销）。
+    - **口径单点**：`Finding` 新增 `category`（pattern_analyzer 带规则族、prompt_injection 带自己的族、元项留空＝按严），`skill_scanner` 一处定义 `DOC_ASSET_SUFFIXES` + `CODE_SHAPE_CATEGORIES` + `isDenyBearing()`，判决处只筛"参与 DENY 的那部分"，findings 原样留着并由 `metadata.report_only_rules` 点名降级项——**放行不等于删读数**。判据按 AST 数"三后缀凑成一个集合字面量"的宿主文件，钉住装载侧不得各写一份清单（配反空转样本）。
+    - **一处更正，写给下一批别照错读数施工**：动手前我报的是「`builtin--adaptive-presentation-studio` 只因 .md/JSON 里的 `../` 被误拦，甲落地即恢复可装」。把仓内真 zip 解出来逐条按 (后缀, 规则) 复量后不对——62 条命中里 31 条落在**自带 .py**（27× dangerous_exec + 4× subprocess_call），属真代码形状，按裁定照旧拦。本批对它的真实效果是"文档侧那批降为报告项"，而它**仍然装不上**；给第一方资产开白名单还是改资产，是**另一次裁定**，没顺手替仓主做。判据那一格因此写成实测形状（降级生效 + 自带 .py 仍阻断），不是"应过门"。
+    - **同根因扫荡（批 35 的另一面）**：`POST /skill-pool/install-from-zip` 与 `-from-url` 的回执顶层曾恒 `success: true` 而 `result.success` 是 False——正是批 35 在 marketplace 两条分支修掉的"把拒装报成成功"，这道面漏着。现由 `_installReceipt` 把咽喉结论抬到顶层并带拒因。**残留一条**：这层诚实只有活体读数（`tests/unit/api` 里那 8 条 install-from-zip 断言仍只核成功路径），要补常驻判据得复用 `test_my_skills_wave_v.py` 的 env 夹具；撞见时机＝谁给 skill-pool 安装面建判据档时一并钉，别当已做。
+    - **方法学一条（进形态集）**：**同一 skill_id 的第二次安装会被咽喉判成"重复"而短路在门之前**——第一次活体用同 id 复量"带 .py 的包该拒"，结果量到的是 duplicate 快速返回，门的结论根本没参与。活体每例必须换新 id（文件名即 id）。
+    - **验证读数**：判据 7 格；红自证（`skill_scanner.py` 显式路径清单还原 HEAD）3 failed/4 passed ⇒ 绿 7 passed ×3；变异 5 枚——M1 后缀表清空 / M2 类目表清空 / M3 注入被误划进代码形状 / M4 来源不明不再从严 / M5 分析器不带规则族，**M4 第一版没咬**（`no_files` 元项 category 为空，走第一个分支，到不了"说不出落点就按严"那一支），补两条 `isDenyBearing` 直读断言后才咬；每枚 sha256 复证逐字节复原。活体 `tests/manual/installGateDocCaliber_batch37.py` **9 读数 exit=0**。A/B（api+skills+security）本树 19 failed/21 errors，其中 security 的 `test_safe_file_read_still_works`、`test_market_builtin[presentation-studio]` 与 transfers/wave 一族在 HEAD 现建 worktree 里逐条复现＝预存，**仅本树独有红 0 条**；`test_github_push_skill::test_get_status` 仍是跨盘 `cd` 环境形，不认领。
+    - **净 LOC（生产池 +61/−5，净 +56）**：`skill_scanner.py` +42/−3（两张表 + 单点谓词 + Finding.category 三处构造点 + 判决筛 denying，其余为边界注释）；`skill_pool_api.py` +19/−2（`_installReceipt` 与两条面的调用改动）。正向主因是把"能不能参与 DENY"从隐式变成显式口径；测试池 376 行不计入。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
