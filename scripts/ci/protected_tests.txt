@@ -2579,3 +2579,32 @@ tests/unit/api/test_mediaOwnerComesFromLoginState.py
 tests/unit/api/test_mobilePairingQrSameOrigin.py
 tests/unit/api/test_mobilePairingAdvertisedWsPathResolves.py
 tests/unit/api/test_mobilePairingCodeOracleClosed.py
+# §6-177 批 32 市场安装两条旁路收口，都在**现役**那条路上（`marketplace.install_skill`
+# → `market_importer.import_skill` → `market_sources.extract_remote_skill_zip`），不是适配器那张
+# 没人调的 install 面：① 那里自己写了第二份解压判定，而咽喉 `security/safe_archive.py` 已被
+# 6 处生产点消费，两份并存时咽喉修了这里不跟着修——机制进咽喉、上限作**调用方递进来的参数**
+# 且缺省不设限（缺省就设限＝本批会把另外 6 处的形状莫名挪动），市场侧只留"把抛错折成 bool
+# 契约"的薄适配；② 装完落盘不钉摘要 ⇒ 读侧只能退回 TOFU 首钉（首次调用时盘上是什么就采信
+# 什么），这一钉把采信点提前到"安装完成"，且只钉真取回字节的两支（模拟链路那支不钉——
+# 空目录钉下去就是伪造采信点）。
+# 红 5 failed/3 passed（红在行为断言上）⇒ 绿 10 passed；红自证只还原三个生产件、外溢 0 格、
+# 复原按 sha256 逐文件复证；变异 8 枚全咬——其中两枚第一版咬不住：无上限样本取 300 条，低于
+# 被变异出来的缺省 500，改取 501 条并补两格签名缺省读数才落到点上；活体 17 读数 exit=0
+# （三种拒因「路径穿越成员 / 字节数超上限 / 成员数超上限」互不掩盖）；A/B 两侧失败集合逐条
+# 相同，4 条预存不认领（`test_market_builtin[presentation-studio]` 那条是 Windows 260 字符长路径墙）。
+# 入册前逐文件单跑三次同读数 10 passed（第三次 8.15s，全仓 AST 数解包落点那一格占的）。
+tests/unit/skills/test_marketInstallUsesSingleFaceAndPins.py
+# §6-176 P3 技能半区随批欠的那档（当时清单被并发会话占着）：摘要口径唯一出处
+# `security/artifact_digest.py`，门通过后钉进 manifest.json、`call_skill` 在 exec 前对账。
+# 首跑 5 行为格红；红自证只还原生产件并**保留新模块**（整体还原会断在 import＝无效红）；
+# 变异 6 枚全咬；活体 `artifactIntegrity_batch30.py` 9 读数。三条边界如实写死：不防定向重算、
+# 抹掉摘要即重采信、目录内新增文件也算改。入册前单跑三次同读数 15 passed；批 32 把解包机制
+# 收进咽喉后本档复跑过，读数未动。
+tests/unit/skills/test_artifactIntegrityAtInstallAndLoad.py
+# §6-176 P3 插件半区那档：`PluginRecord.artifactDigest` 落 `state.json` 用 `.get` 向后兼容、
+# **不升** `STATE_STORE_VERSION`（升版会让整店存量记录撞版本守卫读出空态）；对账放 `load_plugin`
+# 不放 `_load_plugin_module`（后者那圈宽 except 会把"构件被改过"折成"入口装载失败"）；
+# 已 loaded 的记录不重验，判据按冷启态取。首跑 6 格红；变异 5 枚全咬；活体
+# `pluginArtifact_batch31.py` 9 读数（换字节 ⇒ 409 带两条 sha256）。
+# 入册前单跑三次同读数 10 passed；批 32 之后复跑读数未动。
+tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py
