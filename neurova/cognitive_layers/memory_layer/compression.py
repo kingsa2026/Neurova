@@ -7,6 +7,7 @@
 - 优化记忆聚合逻辑 (按时间+类别双维度分组)
 """
 
+from neurova.core import vector_math
 import datetime
 from neurova.core.logger import get_logger
 import math
@@ -713,30 +714,7 @@ class MemoryCompressor:
             vector2.append(tf2.get(token, 0.0) * idf)
 
         # 计算余弦相似度
-        return self._cosine_similarity(vector1, vector2)
-
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """
-        计算余弦相似度
-
-        Args:
-            vec1: 向量1
-            vec2: 向量2
-
-        Returns:
-            相似度分数 (0-1)
-        """
-        if len(vec1) != len(vec2):
-            return 0.0
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = math.sqrt(sum(a * a for a in vec1))
-        norm2 = math.sqrt(sum(b * b for b in vec2))
-
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-
-        return dot_product / (norm1 * norm2)
+        return vector_math.cosineSimilarity(vector1, vector2)
 
     def _find_similarity_groups(
         self,

@@ -13,6 +13,7 @@ UnifiedVectorStore — 三合一向量索引
 - Tier 3: FAISS + sentence-transformers (~2GB)
 """
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
 import base64
 import hashlib
@@ -191,10 +192,10 @@ def vector_norm(a: List[float]) -> float:
     return math.sqrt(sum(x * x for x in a))
 
 
+
 def vector_dot(a: List[float], b: List[float]) -> float:
     """计算向量点积"""
     return sum(x * y for x, y in zip(a, b))
-
 
 def vector_normalize(a: List[float]) -> List[float]:
     """归一化向量"""
@@ -830,8 +831,9 @@ class UnifiedVectorStore:
                     scores.append((i, -1.0))
                     continue
 
-            # 余弦相似度
-            sim = vector_dot(query_vec, mem_vec)
+            # 余弦口径在 core/vector_math（§6-179 批 33）：这里此前拿点积冒充余弦，
+            # 赌的是"两侧都已归一"；归一破了就给出 >1 的假分并按它排序。
+            sim = vector_math.cosineSimilarity(query_vec, mem_vec)
             scores.append((i, sim))
 
         # 排序
@@ -900,7 +902,7 @@ class UnifiedVectorStore:
 
         scores = []
         for i, vec in enumerate(self._neurova_hebb_vectors):
-            sim = vector_dot(query_embedding, vec)
+            sim = vector_math.cosineSimilarity(query_embedding, vec)
             scores.append((i, sim))
 
         scores.sort(key=lambda x: x[1], reverse=True)
@@ -952,10 +954,3 @@ class UnifiedVectorStore:
         return True
 
 
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    """计算余弦相似度"""
-    norm_a = vector_norm(a)
-    norm_b = vector_norm(b)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return vector_dot(a, b) / (norm_a * norm_b)

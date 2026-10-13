@@ -2896,7 +2896,8 @@ class ToolExecutor:
             _uid, _aid = self._agent_identity()
             _agent_id = str(_aid or "default")
             from neurova.context.orchestrator import _VECTOR_CACHES
-            from neurova.skills.skill_semantics import SkillVectorCache, _cosine
+            from neurova.skills.skill_semantics import SkillVectorCache
+            from neurova.core import vector_math
             from neurova.skills.skill_semantics import skill_semantic_text
 
             cache = _VECTOR_CACHES.get(_agent_id)
@@ -2913,7 +2914,7 @@ class ToolExecutor:
                 for row in ranked:
                     vec = vecs.get(row[0])
                     if vec is not None:
-                        cos = _cosine(qvec, vec)
+                        cos = vector_math.cosineSimilarity(qvec, vec)
                         if cos >= 0.15:
                             row[1] += cos
         except Exception as sem_err:  # noqa: BLE001 - 语义档是增强
