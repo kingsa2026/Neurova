@@ -29,7 +29,7 @@ import os
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 __all__ = ["UnsafeArchiveError", "safe_extract_zip", "safe_extract_tar"]
 
@@ -56,13 +56,26 @@ def _resolve_within(base: Path, name: str) -> Path:
     return target
 
 
-def safe_extract_zip(source: Union[str, bytes, Path, "zipfile.ZipFile"], target_dir: Union[str, Path]) -> Path:
+def safe_extract_zip(
+    source: Union[str, bytes, Path, "zipfile.ZipFile"],
+    target_dir: Union[str, Path],
+    *,
+    maxPayloadBytes: Optional[int] = None,
+    maxEntries: Optional[int] = None,
+) -> Path:
     """安全解包 ZIP，校验每个成员路径后落盘。
 
     source 可以是路径、字节内容或已打开的 ZipFile。
+    两条上限缺省不设（本地包与已有 6 处调用点的形状不变）；远端取回那条路由调用方把
+    自己的策略递进来——上限数值属于那条路，不属于解包器。
     """
     base = Path(target_dir)
-    base.mkdir(parents=True, exist_ok=True)
+    if (
+        maxPayloadBytes is not None
+        and isinstance(source, (bytes, bytearray))
+        and len(source) > maxPayloadBytes
+    ):
+        raise UnsafeArchiveError(f"压缩包含字节数超上限: {len(source)} > {maxPayloadBytes}")
 
     own = False
     if isinstance(source, zipfile.ZipFile):
@@ -74,8 +87,13 @@ def safe_extract_zip(source: Union[str, bytes, Path, "zipfile.ZipFile"], target_
         zf = zipfile.ZipFile(source, "r")
         own = True
     try:
+        if maxEntries is not None:
+            count = len(zf.infolist())
+            if count > maxEntries:
+                raise UnsafeArchiveError(f"压缩包成员数超上限: {count} > {maxEntries}")
         for info in zf.infolist():
             _resolve_within(base, info.filename)
+        base.mkdir(parents=True, exist_ok=True)
         zf.extractall(base)
     finally:
         if own:

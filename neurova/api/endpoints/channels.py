@@ -191,27 +191,51 @@ async def handle_webhook(channel_type: str, request: Request):
         if channel_type == "feishu":
             return await _handle_feishu_webhook(adapter, body, request.query_params)
         elif channel_type == "dingtalk":
-            return await _handle_dingtalk_webhook(adapter, body, request.query_params)
+            return await _handle_dingtalk_webhook(
+                adapter, body, request.query_params, request.headers)
         elif channel_type == "wecom":
             return await _handle_wecom_webhook(adapter, body, request.query_params, request)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported webhook for {channel_type}")
     except HTTPException:
         raise
+    except ValueError as e:
+        # 各适配器把"这不是来自平台的合法回调"统一翻成 ValueError：拒在投递之前，
+        # 一条消息都不会进 manager。与意外故障（下面那支 500）分开，运维才分得清两种响。
+        logger.warning("渠道回调被拒 %s: %s", channel_type, e)
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.exception("Webhook error for %s: %s", channel_type, e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
-    """处理飞书 Webhook"""
+    """处理飞书 Webhook
+
+    投递前必须先过适配器的 verification token 门（C-23 同口径，未配置即 fail-closed）。
+    此前这一支自己 echo challenge、自己把 `sender_id` 从请求体里取出来投进 manager，
+    等于任何能 POST 到本端点的人都能冒充任意飞书用户驱动 agent 回合。
+    """
     import json
 
     data = json.loads(body)
 
-    # URL 验证（challenge）
+    # 密文回调（平台配了 Encrypt Key 时只给 {"encrypt": ...}）：本批不解密，就明确拒绝并点名原因。
+    # "读不到令牌就当是明文放行"是最坏的那种兜底——那条路会让验签形同不存在。
+    if "encrypt" in data and "event" not in data and "challenge" not in data:
+        raise ValueError(
+            "Feishu callback rejected: encrypted event is not supported here (configure "
+            "Encrypt Key off, or implement decryption before dispatch)")
+
+    # 令牌位置两代信封不同：v2 在 header.token，v1 在顶层 token。取哪个由这里负责，
+    # "比不比、怎么比"只在适配器那一份。
+    token = (data.get("header") or {}).get("token") or data.get("token") or ""
+
+    # URL 验证（challenge）——交给适配器核完令牌再回，不在这里 echo
     if "challenge" in data:
-        return {"challenge": data["challenge"]}
+        return adapter.verify_url_challenge(data["challenge"], token)
+
+    adapter.verify_event_token(token)
 
     # 消息事件
     event = data.get("event", {})
@@ -244,9 +268,15 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
     return {"code": 0}
 
 
-async def _handle_dingtalk_webhook(adapter, body: bytes, query_params) -> dict:
-    """处理钉钉 Webhook"""
+async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) -> dict:
+    """处理钉钉 Webhook
+
+    投递前先按平台「接收消息」协议核 header 的 `timestamp` + `sign`（HMAC-SHA256、
+    key=appSecret、偏差 1 小时）。这一支此前什么都不核，`senderId` 直接取自请求体。
+    """
     import json
+
+    adapter.verify_callback_headers(headers.get("timestamp", ""), headers.get("sign", ""))
 
     # 钉钉 Webhook 可能是 JSON 或 form-data
     try:

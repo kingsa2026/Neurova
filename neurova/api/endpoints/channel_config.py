@@ -40,6 +40,7 @@ from neurova.channels.telegram import create_telegram_adapter
 from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
+from neurova.channels.voice import create_voice_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 from neurova.api.agent_access import agentOwnerById, can_access_agent, requireAgentOwner
 from neurova.core.data_root import dataLanding
@@ -1099,6 +1100,13 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
         except Exception as e:
             logger.warning("Failed to create qclaw adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "voice":
+        # Twilio：凭据走 ChannelConfig 的通用字段（app_id=AccountSid、app_secret=AuthToken、
+        # extra.from_number=出振号），不像 sip/mqtt 那样有平台专有键名要映射，故直接交构造函数。
+        # 出站仍需 `twilio` 依赖与凭据（`voice.py:36 connect()` 惰性 import、fail-soft），
+        # 本支只让"存了配置就建得出适配器"这条与其它 13 个渠道同形。
+        return create_voice_adapter(config)
 
     else:
         # B4-d：插件化自定义渠道注册表优先于"仅存配置"兜底

@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-import math
+from neurova.core import vector_math
 import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -29,20 +29,10 @@ PROTOTYPE_TEXTS: Dict[str, str] = {
 }
 
 
-def _cosine(a: List[float], b: List[float]) -> float:
-    """余弦相似度（输入不保证归一化）"""
-    if len(a) != len(b):
-        raise ValueError("vector dim mismatch")
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
-
 
 def _zero_norm(vec: List[float]) -> bool:
-    return len(vec) == 0 or math.sqrt(sum(x * x for x in vec)) == 0
+    """空向量或零模长。模长本身不在这里算——口径归 core/vector_math（§6-182 批 34）。"""
+    return not vec or vector_math.vectorNorm(vec) == 0
 
 
 class SemanticEmotionClassifier:
@@ -114,7 +104,7 @@ class SemanticEmotionClassifier:
             if not vec or len(vec) != self._prototype_dim:
                 return None
 
-            sims = {e: _cosine(vec, p) for e, p in self._prototype_vectors.items()}
+            sims = {e: vector_math.cosineSimilarity(vec, p) for e, p in self._prototype_vectors.items()}
             top_emotion, top_sim = max(sims.items(), key=lambda kv: kv[1])
             second_sim = sorted(sims.values(), reverse=True)[1]
 

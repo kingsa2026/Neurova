@@ -16,6 +16,8 @@ API 参考:
 """
 
 import asyncio
+import base64
+import hashlib
 import hmac
 import inspect
 import json
@@ -24,6 +26,9 @@ import time
 from typing import Any, Dict, Optional
 
 logger = get_logger(__name__)
+
+#: 回调 `timestamp` 允许的最大时钟偏差（平台口径：超过 1 小时即视为非法请求）。
+_CALLBACK_MAX_CLOCK_SKEW_MS = 60 * 60 * 1000
 
 try:
     import dingtalk_stream
@@ -458,6 +463,33 @@ class DingTalkAdapter(ChannelAdapter):
         self._stream_client = None
         self._access_token = None
         logger.info("DingTalk adapter disconnected")
+
+    def verify_callback_headers(self, timestamp: str, sign: str) -> None:
+        """钉钉「接收消息」回调验签——不通过就抛，由分派链翻成 4xx，消息一条都不许投出去。
+
+        平台口径两条都要过：`timestamp` 与系统时间差 1 小时以上视为非法（否则抓到的请求可无限
+        重放）；`sign` 必须等于 Base64(HmacSHA256(key=appSecret, msg=timestamp + "\\n" + appSecret))。
+        两个函数名/顺序都按平台强制的互操作算法写，不是本实现的安全选择（同 `wecom.py` 里
+        `_wecom_callback_signature` 的记法）。
+
+        未配置 appSecret 时**拒绝**而不是跳过：空密钥会让任何自算签名都匹配，比不验签更糟。
+        """
+        secret = self.config.app_secret or ""
+        if not secret:
+            raise ValueError("DingTalk callback rejected: appSecret not configured (fail-closed)")
+        stamp = (timestamp or "").strip()
+        try:
+            sentMs = int(stamp)
+        except ValueError:
+            raise ValueError("DingTalk callback rejected: timestamp is not a millisecond integer")
+        if abs(int(time.time() * 1000) - sentMs) > _CALLBACK_MAX_CLOCK_SKEW_MS:
+            raise ValueError("DingTalk callback rejected: timestamp outside the allowed window")
+        digest = hmac.new(secret.encode("utf-8"),
+                          f"{stamp}\n{secret}".encode("utf-8"),
+                          hashlib.sha256).digest()
+        expected = base64.b64encode(digest).decode("utf-8")
+        if not sign or not hmac.compare_digest(expected, sign):
+            raise ValueError("DingTalk callback rejected: sign mismatch")
 
     async def health_check(self) -> Dict[str, Any]:
         """钉钉健康检查"""

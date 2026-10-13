@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 import urllib.request
 import zipfile
@@ -27,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from neurova.core.logger import get_logger
+from neurova.security import safe_archive
 
 logger = get_logger(__name__)
 
@@ -296,42 +296,22 @@ def sync_source(source_key: str, store: Any) -> Dict[str, Any]:
 
 
 def extract_remote_skill_zip(skill_id: str, payload: bytes, dest: Path) -> bool:
-    """把远端技能 zip 安全解压到 dest。
+    """把远端技能 zip 落位到 dest，判定全在咽喉里，这里只把它折成本模块的 bool 契约。
 
-    防护: 总大小上限(MAX_SKILL_ZIP_BYTES)、条目数上限、zip-slip 路径逃逸拒绝。
-    失败返回 False（可能留下部分文件，调用方 uninstall 可清理）。
+    两条上限是**这条路的策略**（远端包先按字节拒、再按成员数拒），路径逃逸/绝对成员/
+    越出目标目录的判定与解包机制在 `neurova/security/safe_archive.py`——本函数此前自己
+    写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
+    失败返回 False；`extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
-    if len(payload) > MAX_SKILL_ZIP_BYTES:
-        logger.warning("skill %s zip too large: %d bytes", skill_id, len(payload))
-        return False
     try:
-        zf = zipfile.ZipFile(io.BytesIO(payload))
-    except zipfile.BadZipFile:
-        logger.warning("skill %s payload is not a zip", skill_id)
-        return False
-
-    names = zf.namelist()
-    if len(names) > MAX_ZIP_ENTRIES:
-        logger.warning("skill %s zip has too many entries: %d", skill_id, len(names))
-        return False
-
-    dest = Path(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-    try:
-        for info in zf.infolist():
-            # 拒绝绝对路径与 .. 逃逸（zip-slip）
-            if info.is_dir():
-                continue
-            name = info.filename.replace("\\", "/")
-            if name.startswith("/") or ".." in Path(name).parts or ":" in name:
-                logger.warning("skill %s zip entry rejected: %s", skill_id, info.filename)
-                return False
-            target = dest / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(zf.read(info))
+        safe_archive.safe_extract_zip(
+            payload, dest,
+            maxPayloadBytes=MAX_SKILL_ZIP_BYTES,
+            maxEntries=MAX_ZIP_ENTRIES,
+        )
         return True
-    except Exception as e:  # noqa: BLE001
-        logger.warning("extract skill %s failed: %s", skill_id, e)
+    except (safe_archive.UnsafeArchiveError, zipfile.BadZipFile, OSError) as e:
+        logger.warning("skill %s zip refused: %s", skill_id, e)
         return False
 
 

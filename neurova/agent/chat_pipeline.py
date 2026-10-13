@@ -35,6 +35,7 @@ from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
 from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value, resolve_turn_origin
+from neurova.voice_context_module import VOICE_CONTEXT_KEY
 
 logger = get_logger(__name__)
 
@@ -1664,7 +1665,7 @@ class ChatPipeline:
         voice_context = None
         caller_history = None
         if ctx.metadata and isinstance(ctx.metadata, dict):
-            voice_context = ctx.metadata.get("voice_context")
+            voice_context = ctx.metadata.get(VOICE_CONTEXT_KEY)
             caller_history = ctx.metadata.get("history")
 
         # 优先使用调用方传入的完整对话历史（包含 user+assistant）

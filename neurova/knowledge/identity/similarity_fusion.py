@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from neurova.core import vector_math
 from typing import Any, Callable, Dict, List, Optional
 
 DEFAULT_WEIGHTS: Dict[str, float] = {
@@ -162,11 +163,8 @@ def _jaccard(left: set, right: set) -> float:
 
 
 def cosine(left: List[float], right: List[float]) -> float:
+    """维度不齐在这条路上是坏数据，必须喊人——这是调用方边界上的前置条件，不是第二份实现：
+    算术在 core/vector_math（§6-179 批 33）。"""
     if not left or not right or len(left) != len(right):
         raise ValueError("向量维度不齐，无法算余弦")
-    dot = sum(a * b for a, b in zip(left, right))
-    normLeft = sum(a * a for a in left) ** 0.5
-    normRight = sum(b * b for b in right) ** 0.5
-    if not normLeft or not normRight:
-        return 0.0
-    return dot / (normLeft * normRight)
+    return vector_math.cosineSimilarity(left, right)

@@ -52,16 +52,6 @@ DEFAULT_DELETE_MODE = "permanent"
 # ---------------------------------------------------------------------------
 
 
-class SaveMediaRequest(BaseModel):
-    """保存媒体请求"""
-
-    media_type: str = Field(..., description="媒体类型 (image, audio, video, file)")
-    agent_id: str = Field(default="default", description="Agent ID")
-    user_id: Optional[str] = Field(default=None, description="用户 ID")
-    memory_id: Optional[str] = Field(default=None, description="关联记忆 ID")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
-
-
 class BatchDeleteRequest(BaseModel):
     """批量删除请求（F-1 契约对齐：NeurUI batchDeleteMedia）"""
 
@@ -318,6 +308,21 @@ _REJECTION_HTTP = {
 def _reject(reason: str) -> HTTPException:
     code, detail = _REJECTION_HTTP[reason]
     return HTTPException(status_code=code, detail=detail)
+
+
+def _uploaderOr401(current_user: Dict[str, Any]) -> str:
+    """登录态 → 上传者；不可归因时显式 401，不写进索引。
+
+    `_user_identity` 对**无 `sub` 的合法签名令牌**兜成 `"unknown"`（`api/auth.py:627`）。
+    照直记下就是批 12 那枚「usage 落 anonymous」的同形缺陷：归属那一格看着有值，
+    其实谁都不是，事后按人筛产物会筛出一堆假账号。
+    """
+    user_id = str(current_user.get("user_id") or "")
+    if not user_id or user_id == "unknown":
+        raise HTTPException(
+            status_code=401, detail="缺少可归因的登录身份（令牌无 sub），无法记录上传者")
+    return user_id
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -328,11 +333,18 @@ async def save_media(
     file: UploadFile = File(...),
     media_type: str = Form(...),
     agent_id: str = Form(default="default"),
-    user_id: Optional[str] = Form(default=None),
     memory_id: Optional[str] = Form(default=None),
     metadata: Optional[str] = Form(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """保存上传的媒体文件"""
+    """保存上传的媒体文件
+
+    归属只从登录态取（§6-172）：这一格此前是**可选表单字段**，而现役前端从不传它，
+    于是索引里每条媒体记录的 `user_id` 恒为 null——归属从未被写侧填过。
+    "让前端补传"不是替代方案：`user_id` 是标识不是凭证，收下就等于允许任何人
+    把产物记到别人名下。
+    """
+    uploaderId = _uploaderOr401(current_user)
     # 验证媒体类型
     if media_type not in _media_config.get("allowed_types", []):
         raise HTTPException(
@@ -405,7 +417,7 @@ async def save_media(
         "mime_type": mime_type,
         "size": size,
         "agent_id": agent_id,
-        "user_id": user_id,
+        "user_id": uploaderId,
         "memory_id": memory_id,
         "storage_path": storage_path,
         "created_at": now,
@@ -615,6 +627,8 @@ async def get_media_metadata(media_id: str):
             "mime_type": media.get("mime_type"),
             "size": media.get("size"),
             "created_at": media.get("created_at"),
+            # 归属要有读面：写侧填了而元数据回不出来，就又是一次「只写不读」（§6-172）
+            "user_id": media.get("user_id"),
             "checksum": stored,
             "checksum_ok": checksum_ok,
             "metadata": media.get("metadata", {}),

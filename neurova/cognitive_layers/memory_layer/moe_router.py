@@ -8,17 +8,13 @@ MoE Memory Router — 稀疏门控专家混合记忆路由器
   3. 可塑性: centroid drift (LTP/LTD 更新质心位置)
 """
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
-from neurova.cognitive_layers.memory_layer.unified_vector_store import (
-    UnifiedVectorStore,
-    cosine_similarity,
-    vector_norm,
-    vector_normalize,
-)
+from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
 
 logger = get_logger(__name__)
 
@@ -81,14 +77,14 @@ class VectorGatingNetwork:
         centroids = self.vector_store.get_expert_centroids()
 
         # 归一化查询向量
-        norm = vector_norm(query_vec)
+        norm = vector_math.vectorNorm(query_vec)
         if norm > 0:
-            query_vec = vector_normalize(query_vec)
+            query_vec = vector_math.vectorNormalize(query_vec)
 
         # 计算 cosine 相似度
         scores = {}
         for expert_id, centroid in centroids.items():
-            score = cosine_similarity(query_vec, centroid)
+            score = vector_math.cosineSimilarity(query_vec, centroid)
             if score >= self.activation_threshold:
                 scores[expert_id] = score
 

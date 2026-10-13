@@ -11,9 +11,9 @@ Muscle Memory - 真正的肌肉记忆系统（条件反射级）
 遗忘机制：30天未使用自动降级L2→L3
 """
 
+from neurova.core import vector_math
 import hashlib
 import json
-import math
 import os
 from neurova.core.logger import get_logger
 import re
@@ -85,12 +85,6 @@ def _semantic_vector(text: str) -> Optional[List[float]]:
     # 存储瘦身：4 位小数足够分档，落盘体积减半以上
     return [round(float(x), 4) for x in vec]
 
-
-def _cosine(a: List[float], b: List[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a)) or 1.0
-    nb = math.sqrt(sum(x * x for x in b)) or 1.0
-    return dot / (na * nb)
 
 
 class MemoryLevel(Enum):
@@ -391,7 +385,7 @@ class MuscleMemory:
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
         if query_emb and item_emb:
-            sim = _cosine(query_emb, item_emb)
+            sim = vector_math.cosineSimilarity(query_emb, item_emb)
             if sim > 0.75:
                 score += 0.3 * min(1.0, (sim - 0.75) / 0.2)
             else:
@@ -619,7 +613,7 @@ class MuscleMemory:
     _MAX_FINGERPRINT_TOKENS = 96
 
     def _extract_keywords(self, text: str) -> str:
-        """提取查询指纹（自研字符 n-gram 口径，零新增第三方依赖）。
+        r"""提取查询指纹（自研字符 n-gram 口径，零新增第三方依赖）。
 
         旧实现用 `[^\w\s]` + `split()`：中文整句在 `\w` 下是**一个** token，
         于是"指纹相等"退化成"整串相等"，近似问法（今天↔明天、换实体）恒不命中，

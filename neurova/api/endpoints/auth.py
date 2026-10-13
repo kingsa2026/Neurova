@@ -63,12 +63,14 @@ def _purge_expired_blacklist() -> None:
     for t in expired:
         _token_blacklist.pop(t, None)
 
-# 忘记密码/取回密码：最高权重恢复密码（写死常量）。
-# 校验只允许发生在服务端（前端仅做 UX 即时校验）；双条件缺一不可：
-# 1) username 是系统内角色为 admin 的管理员账号；2) master_password == 此常量。
-# 根因修复 2026-09-07：硬编码恢复密码随源码/打包分发=后门；改为环境变量，
-# 未配置则恢复功能整体禁用（403）。
-MASTER_RECOVERY_PASSWORD = os.environ.get("NEUROVA_MASTER_RECOVERY_PASSWORD", "")
+# 忘记密码/取回密码：最高权重恢复密码（写死常量）。双条件缺一不可——
+# 1) username 是系统内角色为 admin 的管理员账号；2) master_password 与此常量相等。
+# 校验只发生在服务端，前端只做必填（不做任何常量比对）。
+# §6-171（2026-10-13 用户裁定）：`66269ea0` 曾把这行换成 NEUROVA_MASTER_RECOVERY_PASSWORD
+# 环境变量、未配置即禁用，实测把本机唯一 admin 永久挡在门外，现按原形态接回写死常量。
+# 代价已在台账写明：此常量随源码与打包产物分发，而端点在免 JWT 白名单内
+# （见 global_auth.py），构建外流或端口对外即等于管理员可被接管——不要把这份构建放出去。
+MASTER_RECOVERY_PASSWORD = "neurovamakehappy"
 
 # recover-password 简易限流：key=(username|ip) -> 尝试时间戳列表
 _recover_attempts: Dict[str, list] = {}
@@ -315,8 +317,6 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
         user_model = _get_user_model()
         user = user_model.get_user_by_username(body.username)
 
-        if not MASTER_RECOVERY_PASSWORD:
-            raise HTTPException(status_code=403, detail="密码恢复功能未配置（NEUROVA_MASTER_RECOVERY_PASSWORD），已禁用")
         # S-20: 恒定时间比较，防时序攻击探测恢复密码
         master_ok = hmac.compare_digest(
             body.master_password.encode("utf-8", "ignore"),

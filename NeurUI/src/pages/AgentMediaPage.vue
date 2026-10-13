@@ -78,7 +78,11 @@
           </GlassCard>
         </div>
         <a-pagination v-if="mediaItems.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="mediaItems.length" size="small" style="margin-top: 16px; text-align: center" />
-        <a-empty v-else :description="trashMode ? t('media.trashEmpty') : t('media.noMedia')" />
+        <!-- 空态必须判"有没有条目"，不能挂在分页的 v-else 上：分页只在超过一页时才出现，
+             于是 1..pageSize 条时两者都不成立，`v-else` 会把「暂无媒体文件」印在满屏卡片下面
+             （2026-10-13 浏览器实跑抓到；vitest 测不到是因为 a-empty 的替身只渲染 slot、
+             把写着文案的 description 属性丢掉了）。 -->
+        <a-empty v-if="!mediaItems.length" :description="trashMode ? t('media.trashEmpty') : t('media.noMedia')" />
       </template>
 
       <!-- List View -->

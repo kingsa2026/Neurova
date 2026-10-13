@@ -10,6 +10,7 @@ SKILL.md 但向量陈旧"。引擎失败返回的零向量不入缓存、不参�
 """
 from __future__ import annotations
 
+from neurova.core import vector_math
 import hashlib
 import json
 import os
@@ -48,11 +49,6 @@ def skill_semantic_text(skill: Any) -> str:
     when = str(cfg.get("when_to_use", "")) if isinstance(cfg, dict) else ""
     return f"{name}\n\n{desc}" + (f"\n\n{when}" if when else "")
 
-
-def _cosine(a: List[float], b: List[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    return sum(x * y for x, y in zip(a, b))  # 引擎输出已 L2 归一化
 
 
 def is_zero_vector(vec: Optional[List[float]]) -> bool:
@@ -176,4 +172,4 @@ def semantic_scores_for(
     if qvec is None:
         return {}
     vecs = cache.vectors_for(skills)
-    return {name: _cosine(qvec, vec) for name, vec in vecs.items()}
+    return {name: vector_math.cosineSimilarity(qvec, vec) for name, vec in vecs.items()}

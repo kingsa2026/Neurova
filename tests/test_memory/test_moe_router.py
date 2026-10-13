@@ -119,13 +119,14 @@ class TestUnifiedVectorStore:
 
     def test_centroid_vectors_are_normalized(self):
         """质心向量应归一化"""
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore, vector_norm
+        from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
+        from neurova.core import vector_math
 
         store = UnifiedVectorStore(backend="tfidf")
         store.initialize_centroids(EXPERT_DEFINITIONS)
 
         for expert_id, centroid in store.get_expert_centroids().items():
-            norm = vector_norm(centroid)
+            norm = vector_math.vectorNorm(centroid)
             assert abs(norm - 1.0) < 0.01, f"Centroid {expert_id} not normalized: {norm}"
 
     def test_index_memories(self):

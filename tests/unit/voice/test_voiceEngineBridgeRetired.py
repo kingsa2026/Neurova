@@ -20,9 +20,10 @@
 
 **本批只删孤儿自己，不动活的邻居**——这是这组判据的重点：
 `neurova/voice_memory_bridge.py` 是**活的**（`agent_core.py:706-717` 构造、
-`agent_shutdown.py:87-90` 收尾），`neurova/channels/voice.py` 的渠道适配器也在用
-（`api/app.py:990-993` 注册；但它 `enabled` 取全仓无人写入的 `voice_enabled`，
-故从不 connect——那是"渠道语音对话"另案的缺口，见 §6-108 末）。
+`agent_shutdown.py:87-90` 收尾），`neurova/channels/voice.py` 的渠道适配器也仍在。
+⚠ **本档原先那句"`api/app.py` 注册 VoiceAdapter"已于 2026-10-13 §6-180 失效**：那条平行装配读的是
+全仓无人写入的 `voice_enabled`/`twilio_*` 四个键（生产里恒 enabled=False、凭据空），已由 §6-180 退役；
+voice 现在与其它 13 个渠道同路，走 `api/endpoints/channel_config.py _create_adapter` 从持久化配置建。
 所以两个混合测试文件按**格**摘、不按文件删：只删直接依赖孤儿的类/格，
 `TestVoiceMemoryBridgeAsyncio`、`TestAgentShutdown`、`TestVoiceAdapterRegistration`、
 `TestVoicePerformanceMonitoring`、`TestVoiceMemoryBridgeClosedLoop` 等全部保留。

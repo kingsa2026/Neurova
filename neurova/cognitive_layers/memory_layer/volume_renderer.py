@@ -16,6 +16,7 @@
 - 支持通道间交互和协同
 """
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
 import math
 from dataclasses import dataclass, field
@@ -256,14 +257,8 @@ class VolumeRenderer:
                     continue
                 scores_j = [mem_j.channel_scores.get(ch, 0.0) for ch in all_channels]
 
-                # 纯 Python 余弦相似度
-                dot = sum(a * b for a, b in zip(scores_i, scores_j))
-                norm_i = math.sqrt(sum(a * a for a in scores_i))
-                norm_j = math.sqrt(sum(b * b for b in scores_j))
-
-                if norm_i > 0 and norm_j > 0:
-                    similarity = dot / (norm_i * norm_j)
-                    attention_boost += similarity * mem_j.score * 0.1
+                # 余弦口径在 core/vector_math（§6-179 批 33）；不可比 ⇒ 0.0，加成为 0，与本段改前一致
+                attention_boost += vector_math.cosineSimilarity(scores_i, scores_j) * mem_j.score * 0.1
 
             mem_i.score += attention_boost
 

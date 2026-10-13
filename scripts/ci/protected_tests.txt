@@ -2501,3 +2501,199 @@ tests/unit/channels/test_feishuMediaUploadIsRealMultipart.py
 # §6-163 留案② 取证后立项（批 19）：两条读路必须给出同一个 session_id。
 # 入册前逐文件单跑两次同读数 8 passed（1.55s／1.54s）。
 tests/unit/session/test_sessionIdShapeAcrossReadPaths.py
+# §6-170 渠道语音入站（缺口①）一面判据档，三面读数：
+# Telegram 那条活路由真 `_process_update` 驱动（不直调新 helper，否则改前的红是形状红）——
+# 语音必须带 audio_bytes 且类型标 voice、两跳顺序 getFile→/file/bot<token>/<路径>、取不到字节
+# 则保留占位而**不丢消息**、声明长度超限先拒收（不为拒收而把大文件吸进内存）、文字消息形状不变；
+# 入站口径单源三格（键名／语音类型集合／下载上限，各有第二份定义即红）+ 一格探测器自证（合成样本
+# 必被点名、docstring 与无关整数不误报——上限检测第一版只认 Constant，被这格当场抓到放过了
+# `10 * 1024 * 1024` 那形）；再加一格端到端：真飞书入站 → 真 ChannelManager → 真预检 → 真 router
+# → 真上传＋真发送，断言进回合的是转写文本而不是占位、对岸收到的是本轮那段 WAV 的字节。
+# 全程 127.0.0.1 桩，ASR 用真 MockASREngine、agent 用替身：不开外网、不花服务商与 LLM 额度。
+# 入册前逐文件单跑三次同读数 13 passed（第二跑曾飘一次：等待窗口按谓词放宽到 30s，并按 body
+# 内容认语音那一跳而不是按位置取最后一条——文本走 lark SDK 路、语音走纯 HTTP 路，两跳先后随
+# 装配耗时变化，用 sends[-1] 会在慢的那次读成没按 file 发）。
+tests/unit/channels/test_channelVoiceInboundBytes.py
+
+# §6-173 语音装配层契约（形状格退役后的替代证据）：
+# `test_voiceAssemblyContracts.py` 8 格——问的是「被读的那一侧真读到了什么」，不是「名字在不在」：
+# 端点按属性名读 `VoiceResult`，属性漂移就是运行期 AttributeError ⇒ 用真 dataclass 字段集合对真源码
+# 的属性读数取差；预检按 text 键读 ASR 返回 dict，键名一改就变成「转写成功、内容为空」（静默降级）
+# ⇒ 用真引擎产物的键集合去覆盖真源码里的读键集合；`_channel_voice` 由两条 hasattr 格改成行为格
+# （只回 asr_transcription 命中项、分数按 confidence×0.7＋时间衰减×0.3、limit 生效、空库回空列表不抛）。
+# 两格探测器自证（合成样本必被点名）：「X 不该出现」型断言在探测器失明时会自动成立，本批实测过——
+# 上限探测器第一版只认 ast.Constant，放过了真码里的 `10 * 1024 * 1024`。
+# 为什么不用 inspect.signature().bind：本层生产签名一律以 **kwargs 收口，bind 对 catch-all 恒成功，
+# 那样造出来的格子常年全绿且看着像契约——比 hasattr 更坏。
+# 入册前逐文件单跑两次同读数 8 passed；同批另补 7 格在 `test_voice_engine_api_integration.py`
+# （响应体真字节 / 魔数定媒体类型 / 空产物 500 / 引擎头读真名），并用四处生产变异验过牙。
+tests/unit/voice/test_voiceAssemblyContracts.py
+# §6-171 取回密码的最高权重口令按用户裁定回到源码常量。六格分三面：AST 形态格钉住「常量是源码字面量
+# 而非环境查询」（本批裁定本身，防下个会话静默改回），死分支退役格钉住「未配置即 403」那道不可达门
+# 不许留在路上，行为四格走真端点——admin+源码口令⇒200 且新口令在登录端点上真能用、旧口令即失效
+# （写→读闭环）；非 admin+正确口令⇒400 且该账号原口令未被改动（用户那条硬要求）；错口令⇒400；
+# 空口令⇒400——反证实测过：只把常量退回环境查询而不补那道门时 hmac.compare_digest("", "") 为真，
+# 留空最高权重密码即可接管任意 admin，这一格就是被删掉的那道门的替身。全程落临时数据根，不碰仓内
+# data/users.db；入册前逐文件单跑三次同读数 6 passed。
+tests/unit/api/test_recoverPasswordFromSourceConstant.py
+# §6-174 语音上下文的注入实现唯一性（三处拷贝合一口 + 退无主状态）：
+# 同一批标签串（语音识别文本/识别置信度/语言/识别引擎/语音情感/TTS引擎/TTS音色）此前被抄三遍——
+# `voice_context_module.inject_metadata` 一份（其两个调用点都在 `context_pool` 永假的分支里，生产从未执行），
+# `context/orchestrator.py` 池分支与候选池分支各一份（这两条才是现役读侧）。标签漂移的症状不是报错，
+# 是 prompt 里悄悄少一项，所以按定义处唯一判：扫描 7 个标签的定义文件集合必须恰为选定那一份。
+# 另钉三条：现役两处调用点对唯一实现的调用形状（≥2 处，按 AST/调用计数不按注释）、
+# 「构造 VoiceContextModule 后该名字再无去处」的 dead-one-shot（此前每次上下文组装都白跑一遍
+# EmotionModule 的导入与实例化），以及模块不再自持 `_current_context` 且两个退役读口全仓零调用点。
+# 状态符号那格的口径按归属收：`_current_context` 在 `auto_context_module.py` 里是另一回事
+# （对话窗口消息列表，同名词不同物）——扫全仓符号名会把别人的合法使用算成命中，故本模块状态只看
+# 本模块文件，读口按 `name(` 调用形状查。探测器自证一格（临时造一个含标签的文件，必须被抓到）。
+# 不选 bind 型契约格的理由同 §6-173：本层签名带 **kwargs 收口时 bind 恒成功。
+# 入册前逐文件单跑两次同读数 11 passed；红自证＝stash 两个生产档 ⇒ 10 格翻红且无收集错误；
+# A/B 基线（HEAD 仓外 worktree 铺入本判据）10 failed/1160 passed ↔ 本树 1170 passed、本树独有红 0。
+tests/unit/voice/test_voiceContextInjectionSingleSource.py
+# §6-175 语音上下文写侧接进现役渠道回合（预检写 → 路由交 → 读侧同名键）：
+# 读侧 `chat_pipeline` 一直在取 `metadata["voice_context"]`，而此前全仓唯一的写者只活在评测面
+# （`agent_core.process_multimodal`，其生产调用点只有 `evolution/eval/ab_library.py`）——对真用户
+# 这条功能从未生效。断链的症状不是报错，是 prompt 里悄悄少一项，所以按接缝逐段钉：
+# 预检成功那一刻写下 ASR 真产物（失败路径必须不写，否则下游读出一条空语音信息）、
+# `channel_router` 把它交进回合 metadata（文字回合不得被染色＝进程级残留）、
+# 写侧与读侧引同一个常量（两侧各写字面量时改名只表现为 prompt 少一项）。
+# 键位/取值用法分形判：只数下标键、`.get` 键实参、字典字面量键位三种，
+# `{"type": "voice_context"}` 那种取值位置不算命中——按字符串包含扫会一边假红一边逼人绕开判据；
+# 配一格探测器自证（三形都被抓、取值形不被抓）与一格"豁免过期即红"。
+# `agent_core.py` 那处字面量登记在 EXEMPT：受尺寸棘轮（基线只降不升）所阻，本批无正当减行理由，
+# 且那条路只活在评测面上——留待与 `process_multimodal` 拆分同批。
+# 入册前逐文件单跑三次同读数 9 passed；红自证＝仓外 SHA256 快照 + 只按路径还原两个行为件
+# （保留契约件的常量定义，否则 import 即红＝无效红）⇒ 3 failed/6 passed 且失败集恰为三条行为格；
+# 活体反证同一还原下 `channelVoiceRoundTrip_live.py` exit=1、4 条 FAIL 全落在新读数上。
+# A/B（HEAD 仓外 worktree，agent+context 族）基线 16 红 ↔ 本树 17 红，多出的
+# `test_pool_cleanup_expired` 单节点两侧各三次复跑皆绿、整目录复跑不重现 ⇒ 记档不认领。
+tests/unit/channels/test_channelVoiceContextReachesTheTurn.py
+# §6-172 欠账销账：本会话浏览器实跑撞出四项时新建的四档判据入册（清单当时被并发会话占着，
+# 撞见时机与"哪道门不会替它红"都写在该格正文里——`TestProtectedSubsetEntriesAreTracked`
+# 只核已登记行是否被跟踪，不核新档该登记，所以这笔账必须有人手动来结）。
+# 四档各自钉的是：媒体归属只从登录态取（拒客户端自报）、配对二维码全仓一处渲染且失败不许被
+# 假 SVG 盖住、发出去的回连地址向路由表要而不是手抄前缀、按码回话的两个读口上登录门（枚举预言机）。
+# 入册前逐文件单跑三次同读数：6 / 11 / 5 / 7 passed（合计 29 格），各自 <2.5s，远低于夜跑单条上限。
+tests/unit/api/test_mediaOwnerComesFromLoginState.py
+tests/unit/api/test_mobilePairingQrSameOrigin.py
+tests/unit/api/test_mobilePairingAdvertisedWsPathResolves.py
+tests/unit/api/test_mobilePairingCodeOracleClosed.py
+# §6-177 批 32：市场安装的解压判定收进咽喉。现役那条路是 `marketplace.install_skill`
+# → `market_importer.import_skill` → `market_sources.extract_remote_skill_zip`（**不是** `market_adapters`
+# 那张没人调的 install 面）。那里原来自写了一份判定（数条目、判 `..`、逐条 write_bytes），而咽喉
+# `security/safe_archive.py` 已被 6 处生产点消费——两份并存时咽喉修了这里不跟着修（教义第 6/7 条）。
+# 机制进咽喉、上限作**调用方递进来的参数**且缺省不设限（缺省就设限＝本批会把另外 6 处的形状
+# 莫名挪动），市场侧只留"把抛错折成 bool 契约"的薄适配（−33/+13）。
+# 红 3 failed/4 passed（红在行为断言上、无收集错误）⇒ 绿 7 passed；红自证只还原两个生产件、
+# 外溢 0 格、复原按 sha256 复证；变异 7 枚全咬——其中两枚第一版咬不住：无上限样本取 300 条，
+# 低于被变异出来的缺省 500，改取 501 条并补两格签名缺省读数才落到点上；活体 10 读数 exit=0
+# （四种恶意/超限样本全拒、三条拒因互不掩盖、咽喉桩成拒时市场侧必须跟着拒＝手里不留第二份
+# 判定的反向校准）。
+# ⚠ 本批随批还写了"市场装完即钉摘要"，做完才发现 `skill.json` 全仓**零读者**（钉进去就是只写
+# 不读的断点），已撤回并转 §6-177 待裁；判据档因此去掉 "&Pins" 改名。
+# 入册前逐文件单跑三次同读数 7 passed（第三格全仓 AST 数落点，单跑 5~8s）。
+tests/unit/skills/test_marketInstallUsesSingleFace.py
+# §6-176 P3 技能半区随批欠的那档（当时清单被并发会话占着）：摘要口径唯一出处
+# `security/artifact_digest.py`，门通过后钉进 manifest.json、`call_skill` 在 exec 前对账。
+# 首跑 5 行为格红；红自证只还原生产件并**保留新模块**（整体还原会断在 import＝无效红）；
+# 变异 6 枚全咬；活体 `artifactIntegrity_batch30.py` 9 读数。三条边界如实写死：不防定向重算、
+# 抹掉摘要即重采信、目录内新增文件也算改。入册前单跑三次同读数 15 passed；批 32 把解包机制
+# 收进咽喉后本档复跑过，读数未动。
+tests/unit/skills/test_artifactIntegrityAtInstallAndLoad.py
+# §6-176 P3 插件半区那档：`PluginRecord.artifactDigest` 落 `state.json` 用 `.get` 向后兼容、
+# **不升** `STATE_STORE_VERSION`（升版会让整店存量记录撞版本守卫读出空态）；对账放 `load_plugin`
+# 不放 `_load_plugin_module`（后者那圈宽 except 会把"构件被改过"折成"入口装载失败"）；
+# 已 loaded 的记录不重验，判据按冷启态取。首跑 6 格红；变异 5 枚全咬；活体
+# `pluginArtifact_batch31.py` 9 读数（换字节 ⇒ 409 带两条 sha256）。
+# 入册前单跑三次同读数 10 passed；批 32 之后复跑读数未动。
+tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py
+# §6-178 全仓非法转义棘轮（零容忍，不留存量表）：Python 现在对未知转义按字面保留，只报
+# SyntaxWarning，所以文本没坏——害处在**导入期**：语言侧把它升级为错误的那天，断的是全仓 import，
+# 而断点在别人的文档注释上（本批现量 11 处命中，生产 3 / 脚本 2 / 判据 6，全在 docstring 里写给人看的
+# 正则字符类、Windows 路径段、Schema 锚点）。留一份"允许非法转义的文件清单"就是第二个事实源，
+# 且那份清单只会被顺手加长，故取零容忍。
+# 三格形状：全仓棘轮本体（扫描集合＝`git ls-files -z '*.py'` 的读数，不用 rglob——那会把 __pycache__
+# 算进来、把已跟踪但被 ignore 规则遮住的档漏掉，两个方向都能造假绿）；扫描面覆盖格（三池各自必须扫到
+# 且带 3000 文件地板——排除型断言在功能缺失时会自动成立，所以证"扫得到"而不只证"没命中"）；
+# 探测器自证三格（坏样本必须被抓、加 r 前缀后必须放过、编译失败的文件必须**点名**而不是被吞——
+# "语法坏就跳过"这条兜底一旦存在就是纯逃逸口）。
+# 一处自指形态写进判据文档并避开：样本里的反斜杠全部由 chr(92) 现拼，本文件若写裸反斜杠，
+# 判据就把自己算成第 12 处命中（"本文件不得出现 X"的源码包含检查把自己那句算进去＝恒红那一形）。
+# 口径边界如实：扫的是**工作树**，并发会话在途的半截文件可能让它本机一时红而 CI（扫提交态）不会。
+# 入册前逐文件单跑三次同读数 6 passed（8.3—8.6s，全仓 3340 个文件逐个 compile）；
+# 红自证＝仓外 SHA256 快照 + 只按路径还原被修的 6 个文件（判据档保留）⇒ 1 failed/5 passed 且红句
+# 恰是那 11 条点名，无收集错误；活体 sourceEscapeSequenceImportClean_live.py exit=0 共 20 条读数，
+# 含反证那段（HEAD 那份源码在同形状下真导入必须 exit=1 且点名 invalid escape sequence，否则正证只是恒 0）。
+# A/B（HEAD=5121779a 仓外 worktree，context+memory+core+ci+llm+evolution 六族）基线 24f+1e/6836p
+# ↔ 本树 24f/6842p（+6 即本批判据），仅本树红 0 条；仅基线那条 ERROR 单档两侧各两次复跑皆绿，不重现不认领。
+tests/unit/core/test_sourceEscapeSequenceHygiene.py
+# §6-180 渠道语音缺口③：voice 收进唯一工厂路，并钉住那条平行死装配不许回来。
+# 复核实状：`api/app.py` 的 `_on_startup()` 里曾自己 new 一个 ChannelConfig 再 register_adapter，
+# 读的是 `voice_enabled`/`twilio_account_sid`/`twilio_auth_token`/`twilio_from_number` 四个键，
+# 而这四个键全仓零写入点（三个真入口都 `create_app()` 不带 config）⇒ 生产里恒 enabled=False、凭据空，
+# 属于"只读不写的配置断点 + 与 `_create_adapter` 并存的双源"。本批删那条平行路、工厂补 voice 一支。
+# 判据形状三条值得留下：① 工厂那格按**真字段**核（app_id/app_secret/extra.from_number），
+# 只断 isinstance 的话"凭据落错字段"的表现是连上了但打不出电话；反向一格证未知类型仍只存配置，
+# 防有人为了过判据把 else 改成什么都建。② 启动那格的读数取"**启动做了什么**"（register_adapter 装 spy
+# + `_on_startup` 包装），不取"全局单例里有什么"——ChannelManager 是进程级单例、`create_app()` 又返回
+# 缓存实例，直接读 get_adapter("voice") 会被同进程先前跑过的渠道测试留下的注册污染，假红假绿都可能。
+# 排除型断言配一格证明 spy 抓得到 voice 类型的注册，读完立刻 unregister_adapter 不留残留。
+# ③ 键名那格按**键位**判（.get 实参 / 下标 / 字典字面量键位），取值位置不算，探测器自证一格
+# （样本第二行是 `b = {}`，行号不连号——期望值必须按真样本取，别按记忆写）。
+# 边界如实：webhook 分派链那支**本批刻意没接**（`_handle_feishu_webhook`/`_handle_dingtalk_webhook`
+# 不做任何验签、sender_id 取自请求体，活体取证到 200 + 伪造身份进事件；见 §6-180 待裁），
+# 出站仍需 `twilio` 依赖 + 凭据 + 验签三件一起做，本批只接通"存了配置就建得出适配器"。
+# 入册前逐文件单跑三次同读数 7 passed（11.15 / 11.88 / 16.45s）；红自证＝只按路径还原两个生产件
+# ⇒ 3 failed/4 passed 且失败集恰为三条行为格；A/B（HEAD=489076a1 仓外 worktree，channels+voice+api）
+# 基线 17f+8e/3104p ↔ 本树 17f+8e/3111p，两侧独有红各 0 条；活体 channelVoiceFactorySeam_live.py exit=0。
+tests/unit/channels/test_channelVoiceFactorySeamCloses.py
+# §6-179 批 33：稠密余弦 14 处收进 `core/vector_math` 一处。分叉的不是行数而是三种互相
+# 矛盾的口径——五份没有长度检查，`zip` 把长的那条截掉，4 维查询对 2 维存量算出 0.408 的**假分**
+# （真 `UnifiedVectorStore.search_neurova_hebbs` 上的活体读数；判据档那对构造样本上是 1.0 满分），
+# 假分不喊人还按它往上排，记忆召回／工具目录／技能合并三条路都吃它；另两份抛 ValueError、
+# 三份回 0.0，零范数有 `== 0`／`or 1.0`／`<= 1e-12` 三种写法，`skills/skill_semantics` 干脆拿
+# 点积冒充余弦（未归一时 `[3,4]·[3,4]` 给 25.0，而下游写的是 `if cos >= threshold`）。
+# 单源定三件事：原始值域、[0,1] 映射、以及**三态出口** `tryCosineSimilarity`——
+# `evolution/eval/constraints` 那条进化闸靠 None 回退 Jaccard，把"算不了"折成 0.0 等于告诉它
+# "算出来是 0"，回退条件从此永不成立。按定义域不并的一份：`vector_search` 吃 `Dict[str, float]`
+# 稀疏向量，判据里有专门一格钉它必须仍在原位（"顺手一起并了"就是洗掉稀疏语义）。
+# 红 4 failed/5 passed ⇒ 绿 11 passed；红自证＝按路径清单还原 19 生产件 + 3 测试件、判据与单源
+# 留在树里复跑 ⇒ 恰 4 格翻红无收集错误，复原逐文件 sha256 复证；变异 5 枚全咬，其中 M4 反过来
+# 抓到判据自己的洞：站点写成 `dot / na`（除数是已算好的范数变量）时探测器按式子不认变量名，
+# 第二份实现能从守卫底下滑过去——补分支后必须配自证样本（同一个 `continue` 控制流坑犯了两次：
+# 新分支写在 continue 之后等于没写）。活体 10 读数 exit=0，含与 numpy 逐值对照（偏差 0.000e+00，
+# 外部参照不是自证）与反向校准（把单源桩成 zip 截断 ⇒ 站点读数立刻变回 0.408 假分）。
+# A/B：四族基线 16 红 ↔ 本树 17 红，多的 `test_github_push_skill::test_get_status` 当场定性为
+# 盘符布局（`os.system("cd … &&")` 跨盘不改盘；基线代码把临时目录放 E: 同样红、放回 C: 同样绿）；
+# 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
+# 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
+tests/unit/core/test_denseCosineSingleSource.py
+# §6-181 渠道 webhook 分派链：验签必须先于投递（安全判据，仿冒必拒 + 合法必通成对）。
+# 危害是活体量出来的，不是读代码读出来的：飞书支与钉钉支此前不做任何验签，把请求体直接拼成
+# ChannelMessage 投进 manager，而 sender_id 取自请求体 ⇒ 任何人能对已配置渠道冒充任意平台用户
+# 驱动 agent 回合——正好绕过 §6-123/§6-163 那套"发送者即身份"（身份解析读的就是这个 sender_id）：
+# 以他人身份读写其绑定 agent 的技能私库与记忆、把消息投进别人会话、按伪造用户计额度。
+# 默认绑定还是 0.0.0.0。wecom 那支有 msg_signature 校验是例外 ⇒ 洞来自"逐平台加分支时各写各的"。
+# 形状上钉三件事：① 每段都成对（仿冒 4xx 且**事件数为 0** / 合法签名仍 200 且投递）——只证一半的
+# 安全判据等于没证，"顺手把端点一关了之"也能让"仿冒被拒"那半全绿；② 未配置密钥时 fail-closed
+# （空 appSecret 会让任何自算签名都匹配，比不验签更糟）；③ 时间戳非数字/超 1 小时都要拒，
+# 且不得退化成 500（那是把"来源不合法"混进"服务出故障"）。密文回调本批不解密 ⇒ 要求拒绝时点名原因。
+# 口径边界如实：合法签名样本由测试本地按文档公式自算，证的是机制生效与失败方向（算错⇒拒），
+# 不证与真平台逐字节互操作——那要有凭据的批次；wecom 那支不动，它委托适配器且早已 fail-closed。
+# 入册前逐文件单跑三次同读数 13 passed；红自证＝只按路径还原三个生产件 ⇒ 10 failed/3 passed
+# 且失败集恰为那 10 格拒绝断言；A/B（HEAD 仓外 worktree，channels+api）两侧失败集合逐条相同。
+tests/unit/api/test_channelWebhookAuthBeforeDispatch.py
+# §6-182 批 34：向量原语（范数／点积／归一化）也接进 `core/vector_math` 单源——纯搬家，
+# 逐值不变。两处细节是搬家时最容易"顺手改好"而改坏契约的：零范数那支 `vectorNormalize`
+# 返回**传入对象本身**而不是副本（判据用 `is` 钉），`vectorDot` 对长度不等按 `zip` 截断
+# （那是点积的定义，维度守卫归余弦那一处）。另收三份"同一个原语的第 4/5/6 份写法"：
+# `positional_encoding._vec_norm`（零消费者）退役、`semantic_emotion._zero_norm` 与
+# `semantic_search` 降级嵌入里的内联模长改取单源。
+# 枚守卫按**形状**数而不是按函数名数——批 33 那枚 M4 教出来的：只认 `def vector_norm` 时，
+# 站点内联重写 `sum(x*x …) ** 0.5` 就滑过去了（本批 M3 正是这一形，第一版判据对它无牙）。
+# 两步写法的限度写在格子里，不装作覆盖。红 4 failed/1 passed ⇒ 绿 7 passed；变异 3 枚全咬
+# （M2 一枚同时翻红枚举/归属/形状三格）；活体 `vectorPrimitives_batch34.py` 8 读数 exit=0
+# （反向校准：桩坏 `vectorNorm` ⇒ 真质心读数跟着变 2.0，路上没有第二份模长）。
+# A/B 仅本树红 0。入册前单跑三次同读数 7 passed（11~12s，两枚全仓 AST 扫描占大头）。
+tests/unit/core/test_vectorPrimitivesSingleFace.py

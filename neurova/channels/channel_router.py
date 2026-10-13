@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
 from neurova.channels.voice_egress import turnAudioCandidate
+from neurova.voice_context_module import VOICE_CONTEXT_KEY
 from neurova.channels.group_leadership import (
     get_group_leadership_arbiter,
     get_group_leadership_config,
@@ -140,6 +141,12 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # 语音回合的元数据交接：预检在 `transcribe_voice_message` 成功那一刻写下 ASR 真产物，
+        # 这里交给回合 metadata；下游 `chat_pipeline` 按同名键读走，喂给上下文组装的唯一实现。
+        # 不在这一步接，读侧就永远等不到（此前"语音上下文进 prompt"只对评测路生效）。
+        voiceContext = (message.metadata or {}).get(VOICE_CONTEXT_KEY)
+        if voiceContext:
+            meta[VOICE_CONTEXT_KEY] = voiceContext
         # §6-127 裁定 ①/③：渠道发送者"这一轮是谁"由绑定表解析（agent 级作用域），未绑定
         # 退到渠道专属命名空间 `ch:{渠道}:{发送者}`——不再落 default 共享桶（那正是 §6-123 的
         # 成因）。`user_id` 在这里**只产生一次**，下游 `chat_pipeline._init_agent_state` 照旧读

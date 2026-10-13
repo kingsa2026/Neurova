@@ -1011,27 +1011,6 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.debug("VoiceEngine creation skipped: %s", e)
 
-    # P2-4: 注册 VoiceAdapter 到 ChannelManager（语音通话渠道）
-    try:
-        from neurova.channels.base import ChannelConfig
-        from neurova.channels.voice import create_voice_adapter
-
-        voice_config = ChannelConfig(
-            channel_type="voice",
-            enabled=app_state.config.get("voice_enabled", False),
-            app_id=app_state.config.get("twilio_account_sid", ""),
-            app_secret=app_state.config.get("twilio_auth_token", ""),
-            extra={
-                "from_number": app_state.config.get("twilio_from_number", ""),
-            },
-        )
-        voice_adapter = create_voice_adapter(voice_config)
-        if app_state.channel_manager:
-            app_state.channel_manager.register_adapter(voice_adapter)
-            logger.info("VoiceAdapter registered to ChannelManager")
-    except Exception as e:
-        logger.debug("VoiceAdapter registration skipped: %s", e)
-
     # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（后台任务，不阻塞
     # 就绪；完成后补挂到已存在 agent 的 ToolRouter）。任务句柄存进 app_state：
     # 关停时先收敛它再关会话，否则在关停之后才建出的会话已经没有关的窗口。
