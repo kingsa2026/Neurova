@@ -13,6 +13,7 @@ import importlib.util
 import json
 import re
 from neurova.security.safe_archive import safe_extract_zip
+from neurova.security import artifact_digest
 from neurova.core.logger import get_logger
 import shutil
 import threading
@@ -610,6 +611,10 @@ class SkillService:
                             and skill_review_gate_enabled()))),
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(target_dir),
+                        # 构件完整性钉（§6-172 批 30 / P3 技能半区）：这里算的是**安装门刚扫过
+                        # 的那份字节**落位之后的摘要——门只证明"当时干净"，这一格才把它和
+                        # 以后每次 exec 的那份字节绑成同一份。口径（算法/排除清单）不在这里重述。
+                        artifact_digest.DIGEST_FIELD: artifact_digest.digestDir(target_dir),
                         # Wave H-W1 归属坐标（安装目标库由实例目录决定；
                         # 默认 agent 库 = 现状链，user/public 库经参数覆写）
                         "pool_type": str(_prev.get("pool_type") or pool_type or "agent"),
@@ -681,6 +686,11 @@ class SkillService:
                         "enabled": True,
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(hub_client._installed_dir / name),  # SkillHubClient 实际安装目录
+                        # 同上：hub 这支的门在 `SkillHubClient._gate_check_and_rollback` 里，
+                        # 落位与登记到本账本的正是那份字节，钉在这里而不是 hub_client 里
+                        # （hub 侧没有账本，摘要落到账本唯一写侧才不留第二份读法）。
+                        artifact_digest.DIGEST_FIELD: artifact_digest.digestDir(
+                            hub_client._installed_dir / name),
                         "manifest": {"source": "remote", "url": url},
                     }
                     self._save_manifest()
@@ -1677,6 +1687,31 @@ class SkillService:
                 skill_path = Path(skill_info.get("path", ""))
                 if not skill_path.exists():
                     return {"success": False, "error": f"Skill path not found: {skill_path}"}
+
+                # 构件完整性（§6-172 批 30 / P3）：exec 之前，把眼前这份字节与安装门当时
+                # 钉下的摘要对账。扫描门证明的是"那一刻干净"，这一格才把它和"跑起来的这份"
+                # 绑住。没钉过（存量条目、旁路落地的构件）⇒ 现算现钉并放行一次；
+                # 钉过却不符 ⇒ 结构化拒因，绝不"照样跑"。
+                digestStatus, digestNow = artifact_digest.checkArtifact(
+                    skill_path, skill_info.get(artifact_digest.DIGEST_FIELD))
+                if digestStatus == artifact_digest.STATUS_UNPINNED:
+                    skill_info[artifact_digest.DIGEST_FIELD] = digestNow
+                    self._save_manifest()
+                    self._logger.warning(
+                        "技能 %s 账本里没有构件摘要（存量或旁路落地），本次首钉 %s",
+                        skill_id, digestNow)
+                elif digestStatus != artifact_digest.STATUS_MATCH:
+                    pinnedDigest = str(skill_info.get(artifact_digest.DIGEST_FIELD) or "")
+                    self._logger.error(
+                        "技能 %s 构件摘要不符，拒绝装载：钉=%s 现=%s",
+                        skill_id, pinnedDigest, digestNow)
+                    return {
+                        "success": False,
+                        "error": artifact_digest.refusalReason(digestStatus),
+                        "skill_id": skill_id,
+                        "expected_digest": pinnedDigest,
+                        "actual_digest": digestNow,
+                    }
 
                 # 查找技能入口文件
                 entry_file = skill_path / "main.py"
