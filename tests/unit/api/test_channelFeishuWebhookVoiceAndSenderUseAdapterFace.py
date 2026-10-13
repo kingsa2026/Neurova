@@ -142,7 +142,9 @@ class TestWebhookVoiceIsNotEmptied:
         client, events, adapter = webhookFace
         probe = {"called": False, "loopInThread": None}
 
-        def _stub(message_id, file_key):
+        def _stub(*args, **kwargs):
+            # 形参表透传、不手抄 `_download_media_bytes` 的签名：抄一份就是第二份
+            # 签名事实源，生产侧加/删参数即断（守卫 test_stub_signature_single_source.py）。
             probe["called"] = True
             try:
                 asyncio.get_running_loop()
