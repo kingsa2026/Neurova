@@ -2569,3 +2569,13 @@ tests/unit/voice/test_voiceContextInjectionSingleSource.py
 # A/B（HEAD 仓外 worktree，agent+context 族）基线 16 红 ↔ 本树 17 红，多出的
 # `test_pool_cleanup_expired` 单节点两侧各三次复跑皆绿、整目录复跑不重现 ⇒ 记档不认领。
 tests/unit/channels/test_channelVoiceContextReachesTheTurn.py
+# §6-172 欠账销账：本会话浏览器实跑撞出四项时新建的四档判据入册（清单当时被并发会话占着，
+# 撞见时机与"哪道门不会替它红"都写在该格正文里——`TestProtectedSubsetEntriesAreTracked`
+# 只核已登记行是否被跟踪，不核新档该登记，所以这笔账必须有人手动来结）。
+# 四档各自钉的是：媒体归属只从登录态取（拒客户端自报）、配对二维码全仓一处渲染且失败不许被
+# 假 SVG 盖住、发出去的回连地址向路由表要而不是手抄前缀、按码回话的两个读口上登录门（枚举预言机）。
+# 入册前逐文件单跑三次同读数：6 / 11 / 5 / 7 passed（合计 29 格），各自 <2.5s，远低于夜跑单条上限。
+tests/unit/api/test_mediaOwnerComesFromLoginState.py
+tests/unit/api/test_mobilePairingQrSameOrigin.py
+tests/unit/api/test_mobilePairingAdvertisedWsPathResolves.py
+tests/unit/api/test_mobilePairingCodeOracleClosed.py
