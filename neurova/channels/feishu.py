@@ -198,6 +198,155 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
         logger.info("Feishu Webhook mode configured. " f"Register webhook at: %s", self.config.webhook_url)
         return True
 
+    # ============================================================
+    # 入站事件体 → ChannelMessage（教义第 6 条：两条入站路共用这一份）
+    # ============================================================
+
+    def buildInboundMessage(self, eventBody: Dict[str, Any],
+                            rawEvent: Optional[Dict[str, Any]] = None) -> ChannelMessage:
+        """飞书「消息事件」→ 统一消息的**唯一**内容面（§6-185）。
+
+        入站有两条路拿到同一份事件体：Stream 模式的 SDK 回调与 Webhook 模式的 HTTP 回调。
+        此前 Webhook 那支在端点里另写了一份"只认 text"的解析，于是同一平台两种形状——
+        语音进回合是空串、外部用户 `sender_id` 是空串、@提及不结构化。这里收成一处：
+        正文口径（text/post/audio）、语音字节、发送者回退、@提及替换都只有这一份实现。
+
+        注意：audio 分支含**同步 HTTP 下载**，在事件循环里调它的是一支慢请求拖住整个进程的
+        入站；调用方（Webhook 端点）须走 `asyncio.to_thread`，Stream 那支本身已在 SDK 线程上。
+        """
+        msg = eventBody.get("message") or {}
+        sender = eventBody.get("sender") or {}
+        messageType = msg.get("message_type") or "text"
+        contentRaw = msg.get("content") or ""
+
+        content = ""
+        if messageType == "text":
+            content = self._contentTextOf(contentRaw)
+        elif messageType == "post":
+            content = self._contentPlainTextOf(contentRaw)
+        elif messageType == "audio":
+            content = INBOUND_VOICE_PLACEHOLDER
+
+        metadata: Dict[str, Any] = {}
+        if messageType == "audio":
+            # P1-12 断点③: 下载语音字节供 voice_precheck 预转写；失败静默降级占位（绝不丢消息）。
+            fileKey = ""
+            try:
+                fileKey = (json.loads(contentRaw) or {}).get("file_key", "") or ""
+            except (json.JSONDecodeError, TypeError):
+                fileKey = ""
+            messageId = msg.get("message_id") or ""
+            if fileKey and messageId:
+                try:
+                    audioData = self._download_media_bytes(messageId, fileKey)
+                except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
+                    logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
+                    audioData = None
+                if audioData:
+                    metadata[AUDIO_BYTES_KEY] = audioData
+
+        # 外部用户 user_id 常为 null（只有 open_id/union_id）——回退取，否则 sender_id 空
+        # → ChannelRouter 的 user_id 落到带冒号的回退值，且记忆隔离失效。
+        senderId = sender.get("sender_id") or {}
+        resolvedSender = (senderId.get("user_id") or senderId.get("open_id")
+                          or senderId.get("union_id") or "") or ""
+
+        # 解析 @提及：1) 结构化进 metadata 供 ChannelRouter require_mention 判定；
+        # 2) 把正文里的 "@_user_N" 占位符换成可读 "@昵称"，避免污染 agent 输入。
+        mentions: list = []
+        for m in (msg.get("mentions") or []):
+            mid = m.get("id") or {}
+            mentions.append({
+                "key": m.get("key", "") or "",
+                "name": m.get("name", "") or "",
+                "open_id": mid.get("open_id", "") or "",
+                "user_id": mid.get("user_id", "") or "",
+            })
+        contentOut = content.strip()
+        for mention in mentions:
+            if mention["key"]:
+                contentOut = contentOut.replace(mention["key"],
+                                                f"@{mention['name'] or mention['key']}")
+        if mentions:
+            metadata["mentions"] = mentions
+
+        return self._make_message(
+            message_id=msg.get("message_id") or "",
+            sender_id=resolvedSender,
+            sender_name=resolvedSender,
+            content=contentOut,
+            chat_id=msg.get("chat_id") or "",
+            chat_type=msg.get("chat_type") or "p2p",
+            message_type=messageType,
+            metadata=metadata,
+            raw_event=rawEvent if rawEvent is not None else {"event": eventBody},
+        )
+
+    @staticmethod
+    def _contentTextOf(contentRaw: str) -> str:
+        try:
+            return (json.loads(contentRaw) or {}).get("text", "") or ""
+        except (json.JSONDecodeError, TypeError):
+            return contentRaw
+
+    @staticmethod
+    def _contentPlainTextOf(contentRaw: str) -> str:
+        """富文本（post）：提取所有 text 元素拼成一条正文。"""
+        try:
+            contentJson = json.loads(contentRaw) or {}
+        except (json.JSONDecodeError, TypeError):
+            return contentRaw
+        parts: list = []
+        for langContent in contentJson.values():
+            if not isinstance(langContent, list):
+                continue
+            for paragraph in langContent:
+                if not isinstance(paragraph, list):
+                    continue
+                for elem in paragraph:
+                    if isinstance(elem, dict) and elem.get("tag") == "text":
+                        parts.append(elem.get("text", "") or "")
+        return "".join(parts)
+
+    @staticmethod
+    def _eventBodyFromSdk(event) -> Dict[str, Any]:
+        """SDK 属性对象 → 与 Webhook 事件体同形的 dict。
+
+        两条入站路拿到的形状不同（Stream 给对象、Webhook 给 JSON），但内容口径只能有一份：
+        这里只做形状归一，正文/字节/发送者/提及一律交 `buildInboundMessage`。
+        """
+        msg = getattr(event.event, "message", None)
+        sender = getattr(event.event, "sender", None)
+        sid = getattr(sender, "sender_id", None) if sender else None
+
+        mentions: list = []
+        for m in (getattr(msg, "mentions", None) or []):
+            mid = getattr(m, "id", None)
+            mentions.append({
+                "key": getattr(m, "key", "") or "",
+                "name": getattr(m, "name", "") or "",
+                "id": {
+                    "open_id": getattr(mid, "open_id", "") if mid else "",
+                    "user_id": getattr(mid, "user_id", "") if mid else "",
+                },
+            })
+
+        return {
+            "sender": {"sender_id": {
+                "user_id": getattr(sid, "user_id", "") if sid else "",
+                "open_id": getattr(sid, "open_id", "") if sid else "",
+                "union_id": getattr(sid, "union_id", "") if sid else "",
+            }},
+            "message": {
+                "message_id": getattr(msg, "message_id", "") or "",
+                "message_type": getattr(msg, "message_type", "") or "text",
+                "content": getattr(msg, "content", "") or "",
+                "chat_id": getattr(msg, "chat_id", "") or "",
+                "chat_type": getattr(msg, "chat_type", "") or "p2p",
+                "mentions": mentions,
+            },
+        }
+
     def _handle_message_event(self, event):
         """处理飞书消息事件（Stream 模式回调）。
 
@@ -205,80 +354,14 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
         （data: P2ImMessageReceiveV1，其 .event 为 P2ImMessageReceiveV1Data）。
         此前签名多一个 ctx 形参 → data 绑到 ctx、event 缺参 TypeError 被 SDK 吞掉，
         收消息静默丢弃（"飞书发消息无响应"根因）。
+
+        内容口径自 §6-185 起只有 `buildInboundMessage` 一份——本函数负责 SDK 形状归一与
+        跨线程投递，不再自己解析事件体。
         """
         try:
-            msg = event.event.message
-            sender = event.event.sender
-
-            # 解析消息内容
-            content = ""
-            if msg.message_type == "text":
-                content_json = json.loads(msg.content)
-                content = content_json.get("text", "")
-            elif msg.message_type == "post":
-                content_json = json.loads(msg.content)
-                # 富文本: 提取所有 text 元素
-                for lang_content in content_json.values():
-                    if isinstance(lang_content, list):
-                        for paragraph in lang_content:
-                            if isinstance(paragraph, list):
-                                for elem in paragraph:
-                                    if elem.get("tag") == "text":
-                                        content += elem.get("text", "")
-            elif msg.message_type == "audio":
-                content = INBOUND_VOICE_PLACEHOLDER
-
-            # 构造统一消息
-            audio_metadata: Dict[str, Any] = {}
-            if msg.message_type == "audio":
-                # P1-12 断点③: 下载语音字节供 voice_precheck 预转写。
-                # file_key 在 content JSON；失败静默降级占位（绝不丢消息）。
-                try:
-                    content_json = json.loads(msg.content) if msg.content else {}
-                    file_key = content_json.get("file_key", "")
-                    if file_key and msg.message_id:
-                        audio_data = self._download_media_bytes(msg.message_id, file_key)
-                        if audio_data:
-                            audio_metadata[AUDIO_BYTES_KEY] = audio_data
-                except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
-                    logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
-
-            # 外部用户 user_id 常为 null（只有 open_id/union_id）——回退取，否则
-            # sender_id 空 → ChannelRouter 的 user_id 落到带冒号的回退值，且记忆隔离失效。
-            _sid = sender.sender_id if sender else None
-            _sender_id = ((_sid.user_id or _sid.open_id or _sid.union_id) if _sid else "") or ""
-
-            # 解析 @提及：msg.mentions=[{key:"@_user_1", id:{open_id..}, name}]。
-            # 1) 结构化进 metadata.mentions 供 ChannelRouter require_mention 判定；
-            # 2) 把正文里的 "@_user_N" 占位符替换为可读 "@昵称"，避免污染 agent 输入。
-            mentions: list = []
-            for m in (getattr(msg, "mentions", None) or []):
-                mid = getattr(m, "id", None)
-                mentions.append({
-                    "key": getattr(m, "key", "") or "",
-                    "name": getattr(m, "name", "") or "",
-                    "open_id": getattr(mid, "open_id", "") if mid else "",
-                    "user_id": getattr(mid, "user_id", "") if mid else "",
-                })
-            content_out = content.strip()
-            for mm in mentions:
-                if mm["key"]:
-                    content_out = content_out.replace(mm["key"], f"@{mm['name'] or mm['key']}")
-            if mentions:
-                audio_metadata["mentions"] = mentions
-
-            channel_msg = self._make_message(
-                message_id=msg.message_id or "",
-                sender_id=_sender_id,
-                sender_name=_sender_id,
-                content=content_out,
-                chat_id=msg.chat_id or "",
-                chat_type=msg.chat_type or "p2p",
-                message_type=msg.message_type or "text",
-                metadata=audio_metadata,
-                raw_event={
-                    "event": event.__dict__ if hasattr(event, "__dict__") else {},
-                },
+            channel_msg = self.buildInboundMessage(
+                self._eventBodyFromSdk(event),
+                rawEvent={"event": event.__dict__ if hasattr(event, "__dict__") else {}},
             )
 
             # 触发事件（同步回调转异步）

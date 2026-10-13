@@ -265,7 +265,7 @@ class WeChatILinkAdapter(ChannelAdapter):
                         media[AUDIO_BYTES_KEY] = raw
                         message_type = "voice"
                     else:
-                        text_parts.append("[voice: no transcription]")
+                        text_parts.append(INBOUND_VOICE_PLACEHOLDER)
             elif it == _ITEM_FILE:
                 fi = item.get("file_item") or {}
                 name = fi.get("file_name") or "file.bin"
