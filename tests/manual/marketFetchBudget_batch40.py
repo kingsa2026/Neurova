@@ -94,7 +94,10 @@ def main() -> int:
     started = time.monotonic()
     raised = None
     try:
-        HUB._http_fetch("https://neurova-b40-invalid.invalid/skill.json")
+        # 假域名刻意不与项目同名：TestNoHardcodedDevMachinePaths 的启发式会把
+        # 「协议名 + 双斜杠 + 项目名」那一段读成开发机的绝对路径（形态集第 118 条：
+        # 自警文字不能带上触发它的字面量）。
+        HUB._http_fetch("https://b40-invalid-host.invalid/skill.json")
     except Exception as e:  # noqa: BLE001
         raised = e
     hubElapsed = time.monotonic() - started
