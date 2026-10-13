@@ -80,6 +80,11 @@
 
 **影响**: 阻塞 `create_app()` 启动；测试环境 13 个 errors 直接源于此；生产环境可能因设置了环境变量而掩盖。
 
+**后续形态（2026-10-14 批 41）**：CORS 口径已收进 `neurova/api/cors_policy.py` 单源，本条点名的
+`middleware._load_cors_origins_from_config` 随之退役（它收口后只剩一行转发，留着就是无人读的别名）。
+本节是**事故记录**，不改写；守卫意图原样搬到了活代码上——`tests/unit/test_history_load_bugs.py`
+的 `TestH7CorsConfigShadowing` 现按单源复量「env 入口被打桩 + 文件可读/缺失」两条分支都不许崩。
+
 ### H-6 架构观察（不修，仅记录）
 - **三套并行存储脱节**: console API 用 `_CHAT_SESSIONS`（内存+JSON），Agent 内部用 `SessionManager`（文件层），SQLite `sessions`/`session_messages` 表是孤儿（无代码读写）。两套数据不同步。
 - **无 Pinia store**: 聊天状态全在 `ChatPage.vue` 局部 `ref`，违反用户规则"建立统一的状态管理库"。无法跨组件共享。

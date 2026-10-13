@@ -29,6 +29,6 @@ data:
   # 数据库配置（读取键是 NEUROVA_DB_PATH，见 neurova/core/db_indexes.py）
   NEUROVA_DB_PATH: {{ .Values.database.dbPath | quote }}
 
-  # CORS 配置（读取键是 NEUROVA_CORS_ORIGINS，见 neurova/api/middleware.py；
+  # CORS 配置（读取键是 NEUROVA_CORS_ORIGINS，见 neurova/api/cors_policy.py；
   # 留空则回落到应用内 config/cors.json 与内置默认来源）
   NEUROVA_CORS_ORIGINS: {{ join "," .Values.cors.origins | quote }}
