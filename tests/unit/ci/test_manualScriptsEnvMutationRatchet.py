@@ -28,6 +28,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
 
@@ -81,17 +83,16 @@ def _walkTopLevel(node: ast.AST):
             stack.append(child)
 
 
-def _topLevelEnvWrites(source: str) -> int:
+def _topLevelEnvWrites(tree: ast.AST) -> int:
     """数**模块顶层**（不在函数/类/lambda 体内）改写 `os.environ` 的语句。
 
     只看顶层：函数体内改 env 是脚本自己的局部行为，不会被收集期执行；
     顶层那一条才是"import 即污染进程"的形态。
     判据取 AST 代码形态而不是搜文本——脚本里提一句 `os.environ` 的注释不该被判红。
+    入参是**已解析的树**：枚举与解析走 `tests/ast_scan.py` 的共享预算
+    （本判据在受保护子集里，自带 `glob` + `ast.parse` 会被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名）。
     """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return 0
     count = 0
     for node in _walkTopLevel(tree):
         if isinstance(node, (ast.Assign, ast.AugAssign)):
@@ -112,12 +113,8 @@ def _topLevelEnvWrites(source: str) -> int:
 
 def scanManualEnvWrites(directory: pathlib.Path = MANUAL_DIR) -> dict[str, int]:
     perFile: dict[str, int] = {}
-    for path in sorted(directory.glob("*.py")):
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        n = _topLevelEnvWrites(source)
+    for path, tree in ast_scan.parsedModules(directory):
+        n = _topLevelEnvWrites(tree)
         if n:
             perFile[path.name] = n
     return perFile
@@ -130,7 +127,7 @@ def test_manualDirIsReallyThereAndScanned():
     把扫描面指成了空集，若无这条断言，那把棘轮会永远绿着。
     """
     assert MANUAL_DIR.is_dir(), f"扫描根不存在：{MANUAL_DIR}"
-    total = len(list(MANUAL_DIR.glob("*.py")))
+    total = len(ast_scan.filesUnder(MANUAL_DIR))
     assert total > 50, f"tests/manual 的脚本数异常低（{total}），扫描根或目录结构被动过"
 
 
@@ -194,4 +191,4 @@ def test_functionLevelEnvWriteIsNotCounted():
     少了这条，谓词宽窄无人知道，基线会被误伤项稀释。
     """
     src = 'import os\n\n\ndef main():\n    os.environ["X"] = "1"\n'
-    assert _topLevelEnvWrites(src) == 0, "函数体内的 env 改写被误算成顶层"
+    assert _topLevelEnvWrites(ast.parse(src)) == 0, "函数体内的 env 改写被误算成顶层"

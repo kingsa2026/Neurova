@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 import pytest
 from fastapi.testclient import TestClient
 
+from tests import ast_scan
 from neurova.api.app import create_app
 from neurova.collaboration.glance_yield_rules import GlanceYieldChecker
 from neurova.core import agent_run_store as ars
@@ -236,9 +237,10 @@ class TestLedgerImplementationIsSingleSource:
     def testAdmissionHelperIsNotReimplementedAnywhere(self):
         """不许有第二份"问闸→挂起→落库"：全仓 `requestYieldGate` 的调用点只许在单源模块里。"""
         callers = []
-        for path in _REPO.glob("neurova/**/*.py"):
+        # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+        # 再出现自带 glob + ast.parse 的第二份实现）。
+        for path, tree in ast_scan.parsedModules(_REPO / "neurova"):
             rel = path.relative_to(_REPO).as_posix()
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call):
                     fn = node.func

@@ -32,6 +32,11 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   （`ignoreUntil` 由 osv-scanner 强制），防"永久静音"。
 - **失败即红灯**：扫描器跑不起来（下载失败/清单缺失）按基础设施错误退出非 0。
   "跑不起来就算过"的安全门禁是安全剧场，本仓库不收。
+- **取回工具这一段对抖动重试、对完整性不重试**：下载挂在 `urlopen` 裸调用上时，
+  一次 57.5MB 传输里的 SSL EOF 就是阻塞红灯（2026-10-12 构建 `cnb-n3l-1k4o62410`
+  的 dependency-audit 正是此形态），红与提交内容无关。故传输失败重试、指纹不符
+  立即判红——重试一份字节不对的下载等于把供应链判据交给重试次数。与
+  `scripts/ci/pip_audit_gate.py` 同一纪律（Issue #354）。
 - **两种根因不许混为一句话**：2026-09-22 PR #121 的 dependency-audit 连红三次，
   每次预检都真的跑通了，红只发生在随后那次调用上（127 = `sh` 的 command not found，
   与「命令拼错」同码同形）。故调用侧故障由 `ScannerInvocationError` 单独归因，
@@ -79,6 +84,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 
 import tempfile
 import urllib.request
@@ -467,7 +473,37 @@ def _platform_key() -> str:
     return f"{os_part}_{arch_part}"
 
 
+#: 下载失败时的重试次数（含首次）。与 `pip_audit_gate.DEFAULT_ATTEMPTS` 同源口径：
+#: 「抖动一次还能救回」与「真不可达时不要空转」的折中。57.5MB 的单次传输里
+#: GitHub release 的 CDN 掉一次流是网络抖动，不是判据（2026-10-12 构建
+#: cnb-n3l-1k4o62410 的红就是这个形态：`[SSL: UNEXPECTED_EOF_WHILE_READING]`）。
+_DOWNLOAD_ATTEMPTS = 3
+#: 重试退避基数（秒）：第 n 次重试前等 `_DOWNLOAD_RETRY_BACKOFF * 2**(n-1)`。
+_DOWNLOAD_RETRY_BACKOFF = 5.0
+#: 单次传输的 socket 超时（秒）。57.5MB 在慢链路上要按分钟计，给足。
+_DOWNLOAD_TIMEOUT = 180
+
+
 def _download_scanner(dest_dir: Path) -> Path:
+    """下载扫描器二进制；**只对基础设施错误重试**（见 `_downloadScannerWithRetry`）。"""
+    return _downloadScannerWithRetry(dest_dir)
+
+
+def _downloadScannerWithRetry(dest_dir: Path) -> Path:
+    """取回扫描器二进制：传输层的抖动重试，「指纹不符」立即判红。
+
+    两件事刻意分开（与 `scripts/ci/pip_audit_gate.py` 同一纪律）：
+
+    * **传输失败**（SSL EOF / 连接重置 / 读超时）是环境抖动——重试，且每次
+      从头下（落盘前先截断，半份文件不许参与指纹校验）。
+    * **指纹不符**是**裁决已成立**：这份字节不是我钉的那一份。重试它等于
+      "重试到某次恰好对上"，供应链判据就交给了重试次数——故立即 SystemExit。
+
+    为什么必须有这一步：下载是本门禁唯一的"取工具"动作，而它此前挂在
+    `urlopen` 的裸调用上——一次 57.5MB 传输里的 SSL EOF 直接判红，红与提交
+    内容无关，读日志的人只能原地重跑。这正是本仓在 pip-audit 那一路收口过的
+    同形形态（Issue #354）。
+    """
     key = _platform_key()
     expected = _BINARY_SHA256.get(key)
     if expected is None:
@@ -477,27 +513,42 @@ def _download_scanner(dest_dir: Path) -> Path:
     url = f"{_RELEASE_BASE}/osv-scanner_{key}{suffix}"
     dest = dest_dir / f"osv-scanner{suffix}"
 
-    print(f"[osv] 下载 {url}")
-    try:
-        with urllib.request.urlopen(url, timeout=180) as resp, open(dest, "wb") as f:
-            while True:
-                chunk = resp.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-    except Exception as e:  # noqa: BLE001 - 基础设施错误，下面统一报错退出
-        raise SystemExit(f"osv-scanner 下载失败: {e}") from e
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        print(f"[osv] 下载 {url}")
+        try:
+            # 每轮从头下：半份文件若留着，下一轮的 append/续传语义会让
+            # "取回的是哪一段"变得不可判定，而指纹校验只能对完整字节说话。
+            with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp, open(dest, "wb") as f:
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception as e:  # noqa: BLE001 - 传输层错误，按抖动处理
+            dest.unlink(missing_ok=True)
+            print(f"[osv] 第 {attempt} 次下载失败（传输层）: {e}", file=sys.stderr)
+            if attempt == _DOWNLOAD_ATTEMPTS:
+                raise SystemExit(
+                    f"osv-scanner 下载失败（{_DOWNLOAD_ATTEMPTS} 次尝试均为传输层错误）: {e}"
+                ) from e
+            backoff = _DOWNLOAD_RETRY_BACKOFF * (2 ** (attempt - 1))
+            print(f"[osv] {backoff:.0f}s 后重试（共 {_DOWNLOAD_ATTEMPTS} 次）", file=sys.stderr)
+            if backoff > 0:
+                time.sleep(backoff)
+            continue
 
-    digest = hashlib.sha256(dest.read_bytes()).hexdigest()
-    if digest != expected:
-        dest.unlink(missing_ok=True)
-        raise SystemExit(
-            f"osv-scanner 指纹不符——拒绝执行（供应链完整性）\n"
-            f"  期望 {expected}\n  实得 {digest}"
-        )
-    dest.chmod(0o755)
-    print(f"[osv] 指纹校验通过 ({key})")
-    return dest
+        digest = hashlib.sha256(dest.read_bytes()).hexdigest()
+        if digest != expected:
+            dest.unlink(missing_ok=True)
+            # 不重试：字节不对是裁决，不是抖动（反向锁见
+            # tests/unit/test_osv_audit_hardening_guard.py）。
+            raise SystemExit(
+                f"osv-scanner 指纹不符——拒绝执行（供应链完整性）\n"
+                f"  期望 {expected}\n  实得 {digest}"
+            )
+        dest.chmod(0o755)
+        print(f"[osv] 指纹校验通过 ({key})")
+        return dest
 
 
 def resolveBinaryPath(scanner) -> Path:

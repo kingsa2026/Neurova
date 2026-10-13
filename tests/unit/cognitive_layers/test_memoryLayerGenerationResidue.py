@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 LAYER = REPO / "neurova" / "cognitive_layers" / "memory_layer"
 PKG_ROOT = REPO / "neurova"
@@ -58,11 +60,9 @@ PENDING = {
 pytestmark = pytest.mark.timeout(120)
 
 
-def _importedNames(path: Path) -> list[str]:
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, UnicodeDecodeError):
-        return []
+def _importedNames(tree) -> list[str]:
+    """一棵树里 AST 可见的导入目标。入参是**已解析的树**：枚举与解析走共享预算
+    （`tests/ast_scan.py`，Issue #148：受保护子集里不得自带第二份全仓解析写法）。"""
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -79,10 +79,8 @@ def _importedNames(path: Path) -> list[str]:
 
 def _hits(root: Path, names: dict) -> list[str]:
     found = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        imported = _importedNames(p)
+    for p, tree in ast_scan.parsedModules(root):
+        imported = _importedNames(tree)
         for dotted in names:
             tail = dotted.rsplit(".", 1)[1]
             if any(n == dotted or n.startswith(dotted + ".") or n == f"__REL__.{tail}"
@@ -146,5 +144,5 @@ def test_scannerCatchesARevival(tmp_path):
 
 
 def test_scanRootActuallyCoversTheTree():
-    mods = [p for p in PKG_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
+    mods = ast_scan.filesUnder(PKG_ROOT)
     assert len(mods) > 500, f"扫描根只覆盖 {len(mods)} 个 .py，层级写错了"

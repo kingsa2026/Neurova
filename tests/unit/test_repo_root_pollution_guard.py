@@ -55,11 +55,27 @@ def _acquireProbeRoot() -> tuple[Path, Path]:
     """
     staging = Path(tempfile.mkdtemp(prefix="neurovaProbeRoot-"))
     root = staging / "tree"
-    subprocess.run(
+    # `check=True` 的 `CalledProcessError.__str__` 只给 "returned non-zero exit
+    # status N"，`capture_output` 收下的 stderr 一句都不带——实测 CI 上四格 ERROR
+    # 就只有这一行，看不出是 git 缺席、HEAD 不可解析、还是 `worktree` 目录被占用
+    # （`cnb-o5u-1k4od02gs` 的 pipeline-3）。这里改为自己收返回码并把 stderr 原文
+    # 接进失败消息：诚实暴露，而不是让下一轮读者去猜（修复教义第 2 条）。
+    proc = subprocess.run(
         ["git", "worktree", "add", "--detach", str(root), "HEAD"],
-        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=180,
     )
+    if proc.returncode != 0:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise AssertionError(
+            "探针仓库根建不起来：`git worktree add --detach <tmp>/tree HEAD` "
+            f"在 {REPO_ROOT} 以返回码 {proc.returncode} 收场。\n"
+            f"  stdout: {proc.stdout.strip()[:500]!r}\n"
+            f"  stderr: {proc.stderr.strip()[:500]!r}\n"
+            "常见成因：镜像里没有 git / 只有浅克隆而 HEAD 不可解析 / "
+            "同一 git 目录被并发会话同时加挂。本守卫依赖 git 才能建独占仓库根，"
+            "缺席时它是**测不了**而不是**通过**。"
+        )
     # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
     # 探针就该测**工作树这一份**，否则改坏了也照样绿。
     shutil.copy2(REPO_ROOT / "tests" / "conftest.py", root / "tests" / "conftest.py")

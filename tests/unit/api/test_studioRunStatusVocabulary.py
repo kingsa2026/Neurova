@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
 from neurova.aigc_studio import store as studio_store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -54,13 +55,9 @@ def _vocab():
 def _statusLiteralsInRunWrites():
     """`add_run(...)` / `update_run(...)` 实参里出现的状态字面量（AST，不数注释）。"""
     offenders = []
-    for path in PRODUCTION.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            tree = ast.parse(io.open(path, encoding="utf-8").read())
-        except SyntaxError:
-            continue
+    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+    # 再出现自带 rglob + ast.parse 的第二份实现）。
+    for path, tree in ast_scan.parsedModules(PRODUCTION):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

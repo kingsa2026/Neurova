@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import pytest
+from tests import ast_scan
 
 REPO = Path(__file__).resolve().parents[3]
 CHANNEL_FILES = ("neurova/core/identity_context.py", "neurova/core/turn_context.py")
@@ -37,7 +38,8 @@ def source(rel: str) -> str:
 
 
 def tree(rel: str) -> ast.AST:
-    return ast.parse(source(rel))
+    # 解析走共享源的一次性入口（不留常驻语法树）。
+    return ast_scan.transientSource(source(rel))
 
 
 def functions(root: ast.AST) -> Dict[str, ast.AST]:
@@ -63,7 +65,7 @@ def retiredChannelRefs(text: str) -> int:
     这条沿革，按字符串计数会把解释性注释算成通道复活——判据于是永远红，而下次为了让它绿
     的人会把注释删掉，历史就没头了（本卷记过这一族）。
     """
-    tree = ast.parse(text)
+    tree = ast_scan.transientSource(text)
     hits = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -83,17 +85,16 @@ def retiredChannelRefs(text: str) -> int:
 
 
 def turnIdentityParamNames(text: str) -> List[str]:
-    fn = functions(ast.parse(text)).get("set_turn_identity")
+    fn = functions(ast_scan.transientSource(text)).get("set_turn_identity")
     assert fn is not None, "找不到 set_turn_identity——轮次上下文本身换了，本档须重写"
     return [a.arg for a in list(fn.args.args) + list(fn.args.kwonlyargs)]
 
 
 def requestChannelDecls(root: Path) -> List[str]:
     out = []
-    for path in root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍）。
+    for path in ast_scan.filesUnder(root):
+        tree = ast_scan.transientTree(path)
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and _callee(node) == "ContextVar"
                     and any(isinstance(a, ast.Constant)
@@ -108,7 +109,7 @@ def channelBoundaryWriteExpressions(text: str) -> List[str]:
     不展开就会放过真形状：路由里写的是 `set_request_user_id(owner)`，`owner` 的上一行才是
     `config.owner_user_id`。只看实参那一格会以为"里面没有 owner_user_id"，判成已合并干净。
     """
-    fn = functions(ast.parse(text)).get("_handler")
+    fn = functions(ast_scan.transientSource(text)).get("_handler")
     assert fn is not None, "找不到 channel_router 的 _handler，本档的靶已换"
     out: List[str] = []
     for call in _callsNamed(fn, "set_request_user_id"):
@@ -158,9 +159,8 @@ class TestOnlyOneIdentityChannelRemains:
             f"身份通道声明处数 {len(decls)}：{decls}——退役一条不等于允许再造两条")
 
     def test_noProductionCodeReadsTheRetiredChannel(self):
-        hits = [p.relative_to(REPO).as_posix() for p in (REPO / "neurova").rglob("*.py")
-                if "__pycache__" not in p.parts
-                and retiredChannelRefs(p.read_text(encoding="utf-8"))]
+        hits = [p.relative_to(REPO).as_posix() for p in ast_scan.filesUnder(REPO / "neurova")
+                if retiredChannelRefs(p.read_text(encoding="utf-8"))]
         assert not hits, f"退役通道仍有生产引用：{hits}"
 
 

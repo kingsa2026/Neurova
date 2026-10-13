@@ -70,6 +70,9 @@ def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
 
     用 `os.walk` 而不是 `rglob` 后过滤：`rglob` 会**先进目录再筛**，实测剪枝前
     光是遍历 11376 个目录就要 1.82s，而真正被扫的仓内文件只有约 3200 个。
+
+    `suffix=""` 取全部文件——判据面不止 `.py` 时（如生产面同时扫 `.ts` / `.vue`）
+    用它，剪枝与排序口径仍只有这一份。
     """
     import os
 
@@ -248,10 +251,15 @@ def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
     return tree
 
 
-def parsedModules(root: Path, suffix: str = ".py") -> List[Tuple[Path, ast.AST]]:
-    """`(路径, 语法树)` 清单，整进程复用（同一份文本只编译一次）。"""
+def parsedModules(root: Path, suffix: str = ".py",
+                  hints: Tuple[str, ...] = ()) -> List[Tuple[Path, ast.AST]]:
+    """`(路径, 语法树)` 清单，整进程复用（同一份文本只编译一次）。
+
+    `hints` 与 `sourceRefsUnder` 同源（文本预筛，判据的充分条件）：
+    「仓库里有没有 `class EventBus`」这类判据不需要解析全文不含该名字的文件。
+    """
     return [(ref.path, _cachedParse(ref.stamp, ref.code))
-            for ref in sourceRefsUnder(root, suffix)]
+            for ref in sourceRefsUnder(root, suffix, hints)]
 
 
 def walkedModules(root: Path, suffix: str = ".py",
@@ -281,6 +289,17 @@ def transientTree(path: Path) -> ast.AST:
     自行选择，口径仍只在本模块一处。
     """
     return ast.parse(sourceCode(path))
+
+
+def transientSource(source: str) -> ast.AST:
+    """**一次性**解析一段**已在手的源码字符串**：返回语法树，不留任何缓存。
+
+    与 `transientTree(path)` 的分工：后者从盘上取文本（`sourceCode`），本入口收
+    调用方**已经读进来**的字符串（典型是判据自己拼的合成样本）。存在的理由是
+    「解析入口只有一个口径」——调用方不该为此再写一次 `ast.parse`，那正是
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 拦的形态。
+    """
+    return ast.parse(source)
 
 
 def transientNodes(root: Path, suffix: str = ".py",

@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
 TESTS = REPO / "tests"
@@ -30,23 +32,26 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _importers(root: Path) -> list[str]:
+    """`root` 子树里 import 退役模块的文件（解析走 `tests/ast_scan.py` 的共享预算）。
+
+    本判据原先自己 `rglob` + `ast.parse` + `ast.walk`（被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 点名：判据成本随代码总量涨）。
+    收口到共享入口后形态与读数不变——共享面同样只报「真 import 了」的文件，
+    注释里提过不算。
+    """
     out = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
+    for path, node in ast_scan.nodeScan(root, hints=(RETIRED,)):
+        top = node.module if isinstance(node, ast.ImportFrom) else None
+        if isinstance(node, ast.Import):
+            top = node.names[0].name if node.names else None
+        if top != RETIRED and not (top or "").startswith(RETIRED + "."):
             continue
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-        for node in ast.walk(tree):
-            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
-                     else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
-            if any(n == RETIRED or n.startswith(RETIRED + ".") for n in names):
-                try:
-                    out.append(p.relative_to(REPO).as_posix())
-                except ValueError:
-                    out.append(p.name)
-                break
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.name
+        if rel not in out:
+            out.append(rel)
     return out
 
 

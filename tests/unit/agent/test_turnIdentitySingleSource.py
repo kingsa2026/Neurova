@@ -170,14 +170,19 @@ def declIndex() -> Dict[str, Dict[str, str]]:
     return _declIndex
 
 
-def channelMap(tree: ast.AST) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+def channelMap(
+    tree: ast.AST, direct: Optional[Dict[str, str]] = None
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
     """本文件的 `(局部名→通道名, 模块别名→该模块的 局部名→通道名)`。
 
     两条解析路都要：`from x import _user_id_var`（直接名字）与
     `from neurova.core import turn_context` 后的 `turn_context._user_id_var.set(...)`
     （模块别名 + 属性）——漏掉任一条，旁路写点就从网眼里过去。
+
+    `direct` 可由调用方传进来复用既有读数（`scanProduction` 本就要 `declared` 那一格）：
+    不传时自建，供合成样本入口与反向对照单独使用。
     """
-    direct = declaredVars(tree)
+    direct = declaredVars(tree) if direct is None else direct
     index = declIndex()
     aliased: Dict[str, Dict[str, str]] = {}
     for node in ast.walk(tree):
@@ -246,14 +251,21 @@ def _enclosingFunction(node: ast.AST, parents: Dict[ast.AST, ast.AST]) -> str:
     return _qualName(holder, parents) if holder else "<module>"
 
 
-def identityWritesIn(tree: ast.AST, rel: str) -> List[Tuple[str, str]]:
+def identityWritesIn(
+    tree: ast.AST, rel: str, parents: Dict[ast.AST, ast.AST],
+    declared: Optional[Dict[str, str]] = None,
+) -> List[Tuple[str, str]]:
     """对身份通道调 `.set()` 的落点：`(通道声明名, 相对路径::限定名)`。
 
     成对返回而不是只返回串：判据要**按通道**归账，在串里猜变量名会把两件事混成一件，
     而那条同名的并行通道正是会混进去的那种。
+
+    `parents` / `declared` 由调用方建一趟传进来：本函数与另外两处检出器都要父链，
+    各建一份就是同一棵树走四遍——实测 1021 个生产文件 × 单遍 1.80s = 7.2s；`declaredVars`
+    又被 `channelMap` 与 `scanProduction` 各调一次，共两遍。判据内容一字未动，
+    变的只是把每棵树的派生读数收成一份（修复教义第 6 条：同一份读数不留第二套算法）。
     """
-    parents = _parents(tree)
-    direct, aliased = channelMap(tree)
+    direct, aliased = channelMap(tree, declared)
     hits: List[Tuple[str, str]] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -268,12 +280,14 @@ def identityWritesIn(tree: ast.AST, rel: str) -> List[Tuple[str, str]]:
 def identityWrites(source: str, rel: str) -> List[Tuple[str, str]]:
     """合成样本入口：与生产侧**共用同一套** tree 级检出器（各写一台，反向控制就只证明了
     那台空的那台会抓）。"""
-    return identityWritesIn(ast.parse(source), rel)
+    tree = ast.parse(source)
+    return identityWritesIn(tree, rel, _parents(tree))
 
 
-def setIdentityCallersIn(tree: ast.AST, rel: str) -> List[str]:
+def setIdentityCallersIn(
+    tree: ast.AST, rel: str, parents: Dict[ast.AST, ast.AST]
+) -> List[str]:
     """对 `set_turn_identity(...)` 的**调用**落点（`__all__` 里的字符串不是调用）。"""
-    parents = _parents(tree)
     hits: List[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -287,7 +301,8 @@ def setIdentityCallersIn(tree: ast.AST, rel: str) -> List[str]:
 
 
 def setIdentityCallers(source: str, rel: str) -> List[str]:
-    return setIdentityCallersIn(ast.parse(source), rel)
+    tree = ast.parse(source)
+    return setIdentityCallersIn(tree, rel, _parents(tree))
 
 
 def senderIdReadersIn(tree: ast.AST) -> int:
@@ -303,7 +318,9 @@ def senderIdReaders(source: str) -> int:
     return senderIdReadersIn(ast.parse(source))
 
 
-def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
+def requestUserIdReadersIn(
+    tree: ast.AST, rel: str, parents: Dict[ast.AST, ast.AST]
+) -> List[str]:
     """读 `get_request_user_id()` 的落点（`file::限定函数名`）。
 
     并行通道只有写方入账、读方无人登记，是 §6-121 那句"读两处"被算错的根子：
@@ -311,7 +328,6 @@ def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
     `or "anonymous"` / `or self._agent_identity()[0]` / 裸取）。合并与否要按真读数裁，
     不能按名字推断裁——所以先把读面钉成台账，多一处读点即红。
     """
-    parents = _parents(tree)
     hits: List[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -325,7 +341,8 @@ def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
 
 
 def requestUserIdReaders(source: str, rel: str) -> List[str]:
-    return requestUserIdReadersIn(ast.parse(source), rel)
+    tree = ast.parse(source)
+    return requestUserIdReadersIn(tree, rel, _parents(tree))
 
 
 _scan: Optional[Dict[str, Dict[str, object]]] = None
@@ -343,12 +360,17 @@ def scanProduction() -> Dict[str, Dict[str, object]]:
         out: Dict[str, Dict[str, object]] = {}
         for path, tree in ast_scan.parsedModules(PRODUCTION):
             rel = ast_scan.relativeToRepo(path)
+            # 每棵树的派生读数各建**一趟**，三处检出器与 `declared` 那一格共用：
+            # 各建一份即同一棵树走四遍，单遍其实测 1.80s × 1021 文件 = 7.2s，
+            # 够单独吃掉 `pyproject.toml` 默认 `timeout = 30` 的四分之一。
+            parents = _parents(tree)
+            declared = declaredVars(tree)
             out[rel] = {
-                "writes": identityWritesIn(tree, rel),
-                "callers": setIdentityCallersIn(tree, rel),
+                "writes": identityWritesIn(tree, rel, parents, declared),
+                "callers": setIdentityCallersIn(tree, rel, parents),
                 "readers": senderIdReadersIn(tree),
-                "requestReaders": requestUserIdReadersIn(tree, rel),
-                "declared": declaredVars(tree),
+                "requestReaders": requestUserIdReadersIn(tree, rel, parents),
+                "declared": declared,
             }
         _scan = out
     return _scan

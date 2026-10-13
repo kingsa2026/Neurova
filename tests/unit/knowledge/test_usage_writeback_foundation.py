@@ -11,6 +11,8 @@ import pathlib
 
 import pytest
 
+from tests import ast_scan
+
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 ADOPTION_OUTCOMES = ("success", "failure", "unevidenced")
@@ -129,10 +131,11 @@ class TestNoLongerBlindToUsage:
 
         root = Path('neurova/knowledge')
         hits = {name: 0 for name in ('injected_count', 'last_injected_at', 'adoption_outcome')}
-        for path in list(root.rglob('*.py')):
-            text = path.read_text(encoding='utf-8', errors='ignore')
+        # 文件枚举与读盘走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
+        # 不得再出现自带 rglob 的第二份实现）。
+        for ref in ast_scan.sourceRefsUnder(root):
             for name in hits:
-                hits[name] += text.count(name)
+                hits[name] += ref.code.count(name)
 
         assert all(hits.values()), '使用回流列仍无人引用，B06 未灭：%s' % hits
 
@@ -147,13 +150,9 @@ def _adoptionCallSites(root):
 
     root = pathlib.Path(root)
     sites = []
-    for path in sorted(root.rglob('*.py')):
-        try:
-            # filename 传下去：全树解析若有 SyntaxWarning，报的必须是真文件而不是
-            # `<unknown>`——否则"哪个文件有非法转义"这条线索被整个抹掉
-            tree = _ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
+    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+    # 再出现自带 rglob + ast.parse 的第二份实现）。
+    for path, tree in ast_scan.parsedModules(root):
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)                     and node.func.attr == 'recordAdoption':
                 sites.append('%s:%d' % (path.relative_to(root).as_posix(), node.lineno))
