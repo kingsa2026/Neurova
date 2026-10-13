@@ -331,7 +331,7 @@ class TestLevelRoleEnumUnchanged:
         )
 
     def test_every_level_role_has_mount_point(self, cnb_doc, settings_doc):
-        """每个档位角色都必须落到**合法**挂载点上 —— 非法顶层的唯一形态是角色名。
+        r"""每个档位角色都必须落到**合法**挂载点上 —— 非法顶层的唯一形态是角色名。
 
         本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧最初把本条判据写成
         「每个档位角色在 .cnb.yml 有同名顶层 key」，理由是角色名缺挂载点会静默回落
