@@ -48,6 +48,9 @@ class Finding:
     line_number: Optional[int] = None
     evidence: Optional[str] = None
     suggestion: Optional[str] = None
+    #: 规则族（ScanRule.category / prompt_injection / 空＝元项）。
+    #: 「这条能不能参与 DENY」由它与落点文件类型一起决定，见 isDenyBearing。
+    category: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -63,7 +66,35 @@ class Finding:
             result["evidence"] = self.evidence
         if self.suggestion:
             result["suggestion"] = self.suggestion
+        if self.category:
+            result["category"] = self.category
         return result
+
+
+#: 文档与资产类后缀：内容里的示例路径/示例代码不是会被执行的字节（§6-189 裁定甲）。
+#: 本仓自带的 presentation-studio 资产包就是被 path_traversal 在 .md 与
+#: template-registry.json 的相对链接上误拦的那一类。
+DOC_ASSET_SUFFIXES = frozenset({
+    ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+})
+
+#: 只在「这段字节会被执行/落地」时才有裁决意义的规则族——落在文档类文件上降为**报告项**。
+#: 名单外的一律按严：提示注入不依赖代码执行（SKILL.md 正是它的主载体，P1-6 那次修复不撤销），
+#: 元项（如 no_files）来源不明也不能被放宽。
+CODE_SHAPE_CATEGORIES = frozenset({
+    "code_execution", "system_call", "command_injection", "import",
+    "network", "file_operation", "path_traversal", "obfuscation", "malware",
+})
+
+
+def isDenyBearing(finding: "Finding") -> bool:
+    """这一条发现是否参与 DENY（口径唯一，装载侧不得另写一份）。"""
+    if finding.category not in CODE_SHAPE_CATEGORIES:
+        return True
+    path = finding.file_path or ""
+    if not path:
+        return True
+    return Path(path).suffix.lower() not in DOC_ASSET_SUFFIXES
 
 
 @dataclass
@@ -209,6 +240,7 @@ class PromptInjectionAnalyzer(BaseAnalyzer):
                         Finding(
                             rule_id=rid,
                             severity="critical",
+                            category="prompt_injection",
                             message=f"检测到提示注入内容（{rid}）",
                             file_path=skill_file.path,
                             line_number=lineno,
@@ -378,6 +410,7 @@ class PatternAnalyzer(BaseAnalyzer):
                     finding = Finding(
                         rule_id=rule.rule_id,
                         severity=rule.severity,
+                        category=rule.category,
                         message=rule.message,
                         file_path=skill_file.path,
                         line_number=line_num,
@@ -669,11 +702,14 @@ class SkillScanner:
                 findings = analyzer.analyze(skill_file)
                 all_findings.extend(findings)
 
-        # 根据策略判断是否通过
+        # 根据策略判断是否通过。文档/资产类文件上的"代码形状"规则**不参与 DENY**，
+        # 但发现项原样留在 findings 里（放行≠删读数——报告面与审计面都还看得见）。
+        denying = [f for f in all_findings if isDenyBearing(f)]
+        reportOnly = [f.rule_id for f in all_findings if not isDenyBearing(f)]
         if self.policy == ScanPolicy.DENY:
-            passed = not any(f.severity in ("critical", "high") for f in all_findings)
+            passed = not any(f.severity in ("critical", "high") for f in denying)
         elif self.policy == ScanPolicy.WARN:
-            passed = not any(f.severity == "critical" for f in all_findings)
+            passed = not any(f.severity == "critical" for f in denying)
         else:  # ALLOW
             passed = True
 
@@ -685,6 +721,9 @@ class SkillScanner:
             content_hash=content_hash,
             scan_duration=time.time() - start_time,
             file_count=len(files),
+            metadata={"report_only_rules": reportOnly,
+                      "blocking_rule_count": sum(1 for f in denying
+                                                 if f.severity in ("critical", "high"))},
         )
 
         # 缓存结果
