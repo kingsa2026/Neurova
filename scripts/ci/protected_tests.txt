@@ -2837,3 +2837,5 @@ tests/unit/ci/test_noCrossDriveShellCdShape.py
 # 红自证＝三生产件还原 HEAD ⇒ 12 failed/12 passed（含被改判那两格一起翻红）；单跑三次 14/14/14；
 # 目录级 collect tests/unit/channels 672→686。
 tests/unit/channels/test_channelInboundCallbackRoutesByItsOwnCredentials.py
+# 批 40（§6-198，裁定 A）：市场取数的超时从三份各自写死收成一处（market_adapters 单点，原 30/20/30 三份），并给两条叠乘路径各补一条截止线——串行聚合 7 只市场原最坏 7×30=210s，现由 MARKET_SEARCH_AGGREGATE_SECONDS 兜（到点不再开新市场、且点名跳过谁）；hub_client 那条重试+退避叠乘由 HUB_FETCH_TOTAL_SECONDS 兜（只收单次超时时实测仍要 31.9s > 墙钟）。7 格里：市场数从 searcher 现读、墙钟从 pyproject 现读、重试数从 hub 现读，断言里不手抄数字；三类坏超时形状由同一函数判定并配正反样本。逐档单跑三次同读数 7/7/7。
+tests/unit/skills/test_marketFetchBudgetIsSingleSource.py
