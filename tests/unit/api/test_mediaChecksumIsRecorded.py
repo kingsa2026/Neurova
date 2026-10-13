@@ -42,7 +42,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(MEDIA, "_INDEX_FILE", str(tmp_path / "media_index.json"))
     monkeypatch.setattr(MEDIA, "_CONFIG_FILE", str(tmp_path / "media_config.json"))
     MEDIA._media_store.clear()
-    MEDIA._media_config["storage_path"] = str(tmp_path / "media_storage")
+    # 存储根必须走 monkeypatch（整份字典替换），不能就地改模块级 `_media_config`：
+    # 就地改是**没有回滚**的——本档跑完，`storage_path` 停在本文用例的 tmp_path 上，
+    # 后续同进程的媒体判据（`test_mediaTrashLifecycle` 的 `defaultConfigClient`
+    # 会复制当前 `_media_config`）读到别人的绝对路径，明明"未配置"却指到别处，
+    # 于是 `TestStorageRootIsNeverCwdRelative` 两格在整批里必红、单跑却绿。
+    monkeypatch.setitem(MEDIA._media_config, "storage_path", str(tmp_path / "media_storage"))
     app = FastAPI()
     app.include_router(MEDIA.router, prefix="/api/v1/media")
     app.dependency_overrides[get_current_user] = lambda: dict(ADMIN)

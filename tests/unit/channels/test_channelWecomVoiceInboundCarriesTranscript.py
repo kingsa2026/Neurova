@@ -33,6 +33,8 @@ import time
 REPO = pathlib.Path(__file__).resolve().parents[3]
 NEUROVA = REPO / "neurova"
 
+from tests import ast_scan  # noqa: E402  (仓根在 sys.path 上，见 tests/conftest.py)
+
 from neurova.channels.voice_ingress import (  # noqa: E402
     AUDIO_BYTES_KEY,
     INBOUND_VOICE_PLACEHOLDER,
@@ -59,12 +61,20 @@ _DEAD_ROAD_EXEMPT: dict = {
 
 
 def _importersOf(ownerPath: pathlib.Path) -> list:
-    """`neurova/` 内真 import 了那档模块的文件（排除自身与 `__pycache__`）。"""
+    """`neurova/` 内**文本里出现 import 那档模块**的文件（排除自身）。
+
+    取数（枚举 + 不剪枝的文本面）走唯一 AST 入口 `tests/ast_scan`：受保护子集里的
+    跨文件判据不得各写一套 `rglob`（Issue #148 / #197，本仓 `test_ci_ast_scan_budget_guard`
+    逐条咬合）。判定仍是"某三行里出现 `from/import <模块名>`"这一**行级证据**
+    （报错要能点名那一行，故不换成 AST 命中点）；`hints` 用模块名本身——
+    判据只可能命中文本里出现过该词的文件，是充分条件，不放松覆盖面。
+    读的仍是**未剪枝**的全量文本清单（`sourceRefsUnder` 只剪第三方/产物目录）。
+    """
     return [
-        path for path in sorted(NEUROVA.rglob("*.py"))
-        if path != ownerPath and "__pycache__" not in path.parts
+        ref.path for ref in ast_scan.sourceRefsUnder(NEUROVA, hints=(ownerPath.stem,))
+        if ref.path != ownerPath
         and re.search(rf"^\s*(from|import)\s.*\b{re.escape(ownerPath.stem)}\b",
-                      path.read_text(encoding="utf-8", errors="replace"), re.M)
+                      ref.code, re.M)
     ]
 
 
@@ -73,7 +83,7 @@ def _callSitesIn(candidatePaths: list, name: str) -> list:
     shape = re.compile(rf"(?:self|adapter)\.{re.escape(name)}\(")
     hits = []
     for path in candidatePaths:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in ast_scan.sourceCode(path).splitlines():
             if shape.search(line) and not line.strip().startswith("def "):
                 hits.append(f"{path.name}: {line.strip()[:80]}")
     return hits
@@ -180,14 +190,21 @@ class TestThePlaceholderVocabularyStaysSingleSource:
         return hits
 
     def _scan(self) -> dict:
+        """全仓只枚举一次、逐文件解析一次（取数收口到唯一 AST 入口）。
+
+        口径与原来逐字相同：数的是**值恰为该占位串的字符串字面量**所在行号。
+        改的只是取数：`rglob + ast.parse` 私有扫描正是 `test_ci_ast_scan_budget_guard`
+        点名要红的形态（判据成本随代码总量涨），本判据只扫一次，故走一次性入口
+        `transientNodes`（不留常驻语法树）。`hints` 是占位串本身——连它都没出现的
+        文件不可能承载这份字面量，是充分条件。
+        """
         found = {}
-        for path in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in path.parts:
+        for path, node in ast_scan.transientNodes(
+                NEUROVA, hints=(INBOUND_VOICE_PLACEHOLDER,)):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and node.value == INBOUND_VOICE_PLACEHOLDER and node.lineno):
                 continue
-            sites = self._literalLines(path.read_text(encoding="utf-8", errors="replace"),
-                                       INBOUND_VOICE_PLACEHOLDER)
-            if sites:
-                found[path.relative_to(REPO).as_posix()] = sites
+            found.setdefault(path.relative_to(REPO).as_posix(), []).append(node.lineno)
         return found
 
     def testOnlyTheSingleSourceAndRegisteredDeadRoadsCarryIt(self):

@@ -124,3 +124,6 @@ modelscope>=1.9.0
 requests>=2.31.0
 PyYAML>=6.0
 comtypes; sys_platform == "win32"
+
+# CLI 呈现层（`cli.py` 模块级 `from rich import box`）——直接依赖，显式声明。
+rich>=13.0

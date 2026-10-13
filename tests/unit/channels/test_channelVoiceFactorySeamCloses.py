@@ -52,6 +52,8 @@ TWILIO_CONFIG_KEYS = ("voice_enabled", "twilio_account_sid", "twilio_auth_token"
 
 from neurova.channels.base import ChannelConfig  # noqa: E402
 
+from tests import ast_scan  # noqa: E402
+
 
 def _voiceConfig() -> ChannelConfig:
     return ChannelConfig(
@@ -172,13 +174,17 @@ class TestTheParallelAssemblyIsRetired:
         return hits
 
     def _keySitesInTree(self) -> list:
+        """全仓里仍把配置键当字面量使用的落点。
+
+        取数走共享解析预算 `tests/ast_scan`（Issue #148）：私有 `rglob + ast.parse`
+        把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟。
+        文本预筛取键名本身——连这些串都没出现的文件不可能命中。
+        """
         bad = []
-        for path in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            sites = self._keySites(path.read_text(encoding="utf-8", errors="replace"))
+        for ref in ast_scan.sourceRefsUnder(NEUROVA, hints=tuple(TWILIO_CONFIG_KEYS)):
+            sites = self._keySites(ref.code)
             if sites:
-                bad.append(f"{path.relative_to(REPO).as_posix()}:{sites}")
+                bad.append(f"{ref.path.relative_to(REPO).as_posix()}:{sites}")
         return bad
 
     def testDetectorHasTeeth(self):
