@@ -24,6 +24,11 @@ from neurova.skills.market_adapters import SkillInfo, get_market_registry
 
 logger = get_logger(__name__)
 
+#: 一次跨市场搜索的**聚合截止线**：到点后不再开新的市场，已开跑的那一只仍由每市场预算兜
+#: （单只的最坏值 = 那一只的 socket 超时）。与 `MARKET_FETCH_TIMEOUT_SECONDS` 一起必须落在
+#: 跑测墙钟以下——判据按现读的市场数与墙钟自己算，不手抄。
+MARKET_SEARCH_AGGREGATE_SECONDS: float = 18.0
+
 
 @dataclass
 class SearchResult:
@@ -149,11 +154,21 @@ class SkillMarketSearcher:
         """搜索所有（或指定）市场并按相关性聚合（同步）"""
         names = list(markets) if markets else self.list_market_names()
         all_results: List[SearchResult] = []
+        deadline = time.monotonic() + MARKET_SEARCH_AGGREGATE_SECONDS
+        skipped: List[str] = []
         for market in names:
+            if time.monotonic() >= deadline:
+                # 到点不再开新的：跳过必须留读数，静默跳过就是「把失败写成没事」
+                skipped.append(market)
+                continue
             try:
                 all_results.extend(self.search_market(market, query, limit_per_market))
             except Exception as e:  # noqa: BLE001 — 单市场失败不阻断聚合
                 logger.warning("Failed to search market %s: %s", market, e)
+        if skipped:
+            logger.warning(
+                "跨市场搜索在 %.1fs 聚合截止线处跳过 %d 只市场（未开跑：%s）",
+                MARKET_SEARCH_AGGREGATE_SECONDS, len(skipped), ", ".join(skipped))
 
         all_results.sort(key=lambda x: self._relevance_score(x, query), reverse=True)
         return all_results

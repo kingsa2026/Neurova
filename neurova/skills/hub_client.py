@@ -18,6 +18,13 @@ import json
 from neurova.core import config
 from neurova.security.safe_archive import safe_extract_tar, safe_extract_zip
 from neurova.core.logger import get_logger
+# 预算单点在适配器表；这条路上另有 retries+1 次尝试与退避（`_http_retries`），
+# 所以最坏值是「预算 × (重试+1) + 退避」，不在这里另开一份数字。
+from neurova.skills.market_adapters import MARKET_FETCH_TIMEOUT_SECONDS
+
+#: `hub_client` 单次调用的总预算（尝试 + 退避的合值上限）。单次超时取市场预算单点，
+#: 常驻账见 tests/unit/skills/test_marketFetchBudgetIsSingleSource.py（§6-198）。
+HUB_FETCH_TOTAL_SECONDS: float = 20.0
 import re
 import threading
 import time
@@ -123,8 +130,8 @@ def _github_cache_set(key: str, value: Any, ttl: int = None) -> None:
 
 
 def _http_timeout() -> float:
-    """获取HTTP超时时间"""
-    return float(config.get("HTTP_TIMEOUT", "30"))
+    """获取HTTP超时时间（缺省取市场预算单点，配置仍可覆盖）"""
+    return float(config.get("HTTP_TIMEOUT", MARKET_FETCH_TIMEOUT_SECONDS))
 
 
 def _http_retries() -> int:
@@ -181,8 +188,17 @@ def _http_fetch(url: str, headers: Dict[str, str] = None, timeout: float = None)
 
     retries = _http_retries()
     last_error = None
+    #: 总预算线：这条路叠了 `retries+1` 次尝试与指数退避，只收单次超时兜不住
+    #: （实测单次收到 6s 后最坏仍是 4 × 6.0 + 退避 7.9 = 31.9s > 跑测墙钟 30s）。
+    #: 到点**停止开下一次**，并照常把最后一次的失败抛出去——不悄悄返回半截结果。
+    deadline = time.monotonic() + HUB_FETCH_TOTAL_SECONDS
 
     for attempt in range(retries + 1):
+        if attempt and time.monotonic() >= deadline:
+            logger.warning(
+                "HTTP 取数在总预算 %.1fs 处停止重试（已试 %d 次，最后一次失败：%s）",
+                HUB_FETCH_TOTAL_SECONDS, attempt, last_error)
+            break
         try:
             request = _build_request(url, headers)
             response = urlopen(request, timeout=timeout)
