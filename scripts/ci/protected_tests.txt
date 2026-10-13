@@ -2826,3 +2826,14 @@ tests/unit/channels/test_channelOutboundDoesNotFallBackToDefaultBot.py
 # 少一个根就会"扫了个空却报绿"）。基线为空＝零容忍；建档命中的两处已同批改净。
 # 逐文件单跑三次同读数 10/10/10 passed。
 tests/unit/ci/test_noCrossDriveShellCdShape.py
+# 批 32（§6-197）入站回调按**实例自己的凭据**裁决落点。判据 14 格分三组：
+# 真端点 + 各配各凭据的两只实例（飞书 kai 的 token 只进 kai、default 的仍进 default，成对；
+# 共用凭据 ⇒ 拒并点名 default/kai 且 0 投递；陌生凭据 ⇒ 拒且 0 投递；单候选时不依赖谓词但投递门
+# 照旧拦错凭据）、解析层契约（≥2 候选必须逐只问过＝default 不许插队，按"被问过哪几只"取读数；
+# 谓词自己抛异常算不匹配而不是把分派带进 500；**单参调用＝§6-189 三条旧语义逐字不变**）、
+# 凭据取法单源（三平台各一段 + 无验签面/读不懂 ⇒ None 不猜；企微签名核对抽成 verifyCallbackSignature
+# 后，handle_callback 与 verify_url 都复用它、公式定义只一处）。
+# 同批改判 §6-189 那档的"仍走 default"对照格（拆成"共用凭据 ⇒ 拒"与"各配各的 ⇒ 各进各的"两格）。
+# 红自证＝三生产件还原 HEAD ⇒ 12 failed/12 passed（含被改判那两格一起翻红）；单跑三次 14/14/14；
+# 目录级 collect tests/unit/channels 672→686。
+tests/unit/channels/test_channelInboundCallbackRoutesByItsOwnCredentials.py
