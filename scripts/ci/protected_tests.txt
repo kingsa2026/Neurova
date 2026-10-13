@@ -2770,3 +2770,14 @@ tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py
 # 补 isDenyBearing 直读断言后才咬）。活体 installGateDocCaliber_batch37.py 9 读数 exit=0，
 # 含反向校准桩与"同 id 二次安装会短路在门之前"的方法学读数。
 tests/unit/security/test_installGateDocFilesAreReportOnly.py
+# 批 29（§6-190）渠道管理面的 agent 维度 + 契约清单双向核对。判据 13 格分四组：
+# 契约文本 vs 真路由表（双向差集 + 两侧各一条地板断言 ≥10 + 一格三形变异：多一条假地址 /
+# 漏一条真路由 / 方法名整体写反）、四端点带 agent_id（ghost 必 404 且 0 触碰实例、缺省仍走
+# default 的对照）、健康视图覆盖全量实例表（两份端点键集相等 + 键约定单源 `_adapterViewKey`）、
+# replace_channel 退役两格（比过才退：一格断全仓无调用点，一格现读现役替代的四步）。
+# 红自证＝两生产件按路径清单还原 HEAD ⇒ 10 failed/12 passed；逐文件单跑三次同读数 13/13/13 passed。
+# 一处先修好的假绿（本批自己的判据犯的）：第一版取清单用 ast.get_docstring——本文件那段清单排在
+# from __future__ 与 import 之后，根本不是合法 docstring，返回 None；"真路由表"又取自 app.routes，
+# 而本仓挂载走 _IncludedRouter，95 条里只有 5 条带 .path。两侧皆空 ⇒ 差集皆空 ⇒ 该红的比对绿得
+# 没道理。改法是 regex 取清单 + router.routes 取实现，并给取数器加地板断言与变异对照。
+tests/unit/api/test_channelManagementFaceTakesAgent.py
