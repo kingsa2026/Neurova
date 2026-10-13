@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.channels.base import ChannelAdapter, ChannelConfig, ChannelEventType
+from neurova.channels.voice_ingress import INBOUND_VOICE_PLACEHOLDER
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ class WeComAIBotAdapter(ChannelAdapter):
             text = "\n".join(text_parts).strip()
             if not text and not media:
                 return
-            content = text or {"image": "[图片]", "file": "[文件]", "voice": "[语音]"}.get(message_type, "")
+            content = text or {"image": "[图片]", "file": "[文件]", "voice": INBOUND_VOICE_PLACEHOLDER}.get(message_type, "")
             channel_msg = self._make_message(
                 message_id=str(msg_id or ""),
                 sender_id=sender_id,
