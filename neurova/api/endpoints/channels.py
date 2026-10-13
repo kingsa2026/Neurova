@@ -5,16 +5,24 @@ import asyncio
 """
 渠道管理 API 端点
 
-提供渠道适配器的配置、状态查询、Webhook 回调处理等 API。
+提供渠道适配器的状态查询、连接/断开、主动发送与 Webhook 回调处理。
 
-路由 (注册前缀: /api/v1/channel-adapters):
-- GET  /api/v1/channel-adapters/channels                    - 列出所有渠道状态
-- GET  /api/v1/channel-adapters/channels/{type}             - 获取指定渠道状态
-- POST /api/v1/channel-adapters/channels/{type}/connect     - 连接指定渠道
-- POST /api/v1/channel-adapters/channels/{type}/disconnect  - 断开指定渠道
-- POST /api/v1/channel-adapters/channels/{type}/send        - 通过指定渠道发送消息
-- POST /api/v1/channel-adapters/channels/{type}/webhook     - Webhook 回调入口（飞书/钉钉/企微）
-- GET  /api/v1/channel-adapters/channels/health/all         - 渠道健康检查
+路由清单（挂载前缀 `/api/v1` + `/channel-adapters`；每条都是**可寻址的真地址**）：
+- GET  /api/v1/channel-adapters                                  - 全部实例健康状态（跨 agent）
+- GET  /api/v1/channel-adapters/health/all                       - 同一份健康视图
+- GET  /api/v1/channel-adapters/conflicts/check                  - 跨 agent 机器人身份冲突检测
+- GET  /api/v1/channel-adapters/{channel_type}                   - 指定实例健康状态
+- POST /api/v1/channel-adapters/{channel_type}/connect           - 连接该实例
+- POST /api/v1/channel-adapters/{channel_type}/disconnect        - 断开该实例
+- POST /api/v1/channel-adapters/{channel_type}/send              - 经该实例发送消息
+- POST /api/v1/channel-adapters/{channel_type}/webhook           - 平台回调入口（飞书/钉钉/企微）
+- POST /api/v1/channel-adapters/{channel_type}/restart           - 重启该实例
+- POST /api/v1/channel-adapters/{channel_type}/clear-queue       - 清空该实例待处理队列
+
+除 webhook 与 conflicts/check 外都接受 `agent_id` Query（缺省 default，实例表主键是
+`(agent_id, channel_type)`）。这份清单由判据按真路由表**双向**核对——此前它写的是
+`/channel-adapters/channels/...`（多一段、实际不存在）还漏了前端真正在用的三条；
+契约文本错比没写更坏：它看起来是权威的。
 """
 
 from neurova.core.logger import get_logger
@@ -109,22 +117,37 @@ async def list_channels(current_user: Any = Depends(get_current_user),):
 
 
 @router.get("/{channel_type}", summary="获取指定渠道状态")
-async def get_channel_status(channel_type: str, current_user: Any = Depends(get_current_user),):
-    """获取指定渠道的连接状态"""
+async def get_channel_status(
+    channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),):
+    """获取指定渠道的连接状态
+
+    与 restart / clear-queue 同形带 `agent_id`：缺省仍是 default（既有调用者一字不变），
+    不传就打不到非 default 名下那条渠道——同一个 router 里"重启能精确到 agent、查状态不能"是两种口径。
+    """
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
-    if not adapter:
-        raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not found")
+    adapter = manager.get_adapter(channel_type, agent_id=agent_id)
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel '{channel_type}' not found (agent={agent_id})")
     return await adapter.health_check()
 
 
 @router.post("/{channel_type}/connect", summary="连接指定渠道")
-async def connect_channel(channel_type: str, request: ConnectRequest, current_user: Any = Depends(get_current_user),):
+async def connect_channel(
+    channel_type: str,
+    request: ConnectRequest,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),):
     """连接指定渠道适配器"""
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
-    if not adapter:
-        raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not found")
+    adapter = manager.get_adapter(channel_type, agent_id=agent_id)
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel '{channel_type}' not found (agent={agent_id})")
 
     # 更新配置
     if request.app_id:
@@ -135,30 +158,40 @@ async def connect_channel(channel_type: str, request: ConnectRequest, current_us
     adapter.config.extra.update(request.extra)
 
     success = await adapter.connect()
-    return {"success": success, "channel_type": channel_type}
+    return {"success": success, "channel_type": channel_type, "agent_id": agent_id}
 
 
 @router.post("/{channel_type}/disconnect", summary="断开指定渠道")
-async def disconnect_channel(channel_type: str, current_user: Any = Depends(get_current_user),):
+async def disconnect_channel(
+    channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),):
     """断开指定渠道适配器"""
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
-    if not adapter:
-        raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not found")
+    adapter = manager.get_adapter(channel_type, agent_id=agent_id)
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel '{channel_type}' not found (agent={agent_id})")
     await adapter.disconnect()
-    return {"success": True, "channel_type": channel_type}
+    return {"success": True, "channel_type": channel_type, "agent_id": agent_id}
 
 
 @router.post("/{channel_type}/send", summary="发送消息")
-async def send_message(channel_type: str, request: SendMessageRequest, current_user: Any = Depends(get_current_user),):
+async def send_message(
+    channel_type: str,
+    request: SendMessageRequest,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),):
     """通过指定渠道发送消息"""
     manager = get_channel_manager()
+    # `agent_id` 由查询参数定，不让请求体 extra 里的同名字段越权决定发给哪个 bot
     msg_id = await manager.send_message(
         channel_type=channel_type,
         chat_id=request.chat_id,
         content=request.content,
         message_type=request.message_type,
-        **request.extra,
+        **{**request.extra, "agent_id": agent_id},
     )
     return SendMessageResponse(
         success=msg_id is not None,
