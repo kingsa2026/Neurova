@@ -1,24 +1,26 @@
 """
 市场技能联邦注册 — 安装后打通 Agent 技能页 + 工具注册表
 
-根因链（详见 tests/unit/skills/test_market_registry.py）：
-- MarketImporter.import_skill 只写市场目录模拟 meta，Agent 技能页
-  （SkillService -> data/agents/{id}/skills/manifest.json）感知不到；
-- agent 工具集（SkillRegistry）未注册 → LLM 看不到也调不动。
-
-链路契约：
+链路契约（§6-186 把真字节接进咽喉之后）：
 - link_market_skill_to_agent:
-  ① SkillService(agent_id).install_skill —— 技能页可见；
+  ① SkillService(agent_id).install_skill —— 技能页可见；staging 里放的是
+     **市场缓存目录的真字节** + 咽喉合成的 manifest.json，所以安装门扫的、
+     构件摘要钉的都是将被执行那份，不是空壳；
   ② SkillRegistry.register —— 工具集可见且可调：有映射时注册真实可执行
-     Skill（参数直通）；安装目录含 SKILL.md 时注册 SkillDocSkill 指令型
-     （execute 返回 SKILL.md 指令体）；两者皆无时注册壳（executable=False，
+     Skill（参数直通）；账本 `path` 指的目录含 SKILL.md 时注册 SkillDocSkill
+     指令型（execute 返回 SKILL.md 指令体）；两者皆无时注册壳（executable=False，
      可见不可调，如实标注）。
+  ③ 咽喉因安全门拒装 ⇒ 不注册可执行体，并把拒因交回调用方（端点据此显式 4xx）。
 - unlink_market_skill_from_agent：两处同步移除（卸载一致性）。
+
+运行时**只有一条取径**：账本 `path`。市场缓存目录只是安装期的来源，清掉了不影响
+恢复（钉过的那份才是权威）。
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -34,9 +36,15 @@ _MARKET_EXECUTORS: Dict[str, str] = {
     "web-search": "WebSearchSkillExecutor",
 }
 
+#: 安装期不进账本的运行产物（缓存目录里可能有上一次跑出来的字节）
+_STAGING_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".incoming_*")
+
 
 def _default_market_skills_dir() -> Path:
-    """市场安装根目录（与 MarketImporter 单例一致；异常时回退 data/skills）"""
+    """市场安装根目录（与 MarketImporter 单例一致；异常时回退 data/skills）
+
+    只服务安装期的**来源目录**——运行时取径已经收在账本 `path` 一处。
+    """
     try:
         from neurova.skills.market_importer import get_market_importer
 
@@ -45,12 +53,24 @@ def _default_market_skills_dir() -> Path:
         return get_data_root() / "skills"
 
 
-def _build_executable_skill(skill_id: str, description: str, market_skills_dir: Any = None) -> Optional[Any]:
+def _marketSourceDir(skill_id: str, market_skills_dir: Any = None) -> Optional[Path]:
+    """安装期真字节的来源目录（不存在则 None，staging 退回只挂 manifest）。"""
+    try:
+        base = Path(market_skills_dir) if market_skills_dir else _default_market_skills_dir()
+        source = base / skill_id
+        return source if source.is_dir() else None
+    except Exception as e:  # noqa: BLE001 — 来源目录取不到不阻断，退化为无真字节
+        logger.warning("market source dir for %s unresolved: %s", skill_id, e)
+        return None
+
+
+def _build_executable_skill(skill_id: str, description: str, installed_dir: Any = None) -> Optional[Any]:
     """按优先级构造可执行 Skill：市场映射执行体 → SKILL.md 指令型 → None。
 
     1. MARKET_EXECUTORS 映射（如 web-search）：ExecutorBackedSkill 真实执行体；
-    2. 安装目录含 SKILL.md（远端市场技能）：SkillDocSkill 指令型——execute
-       返回 SKILL.md 指令体（Agent Skills 标准语义），不自动执行下载脚本。
+    2. 账本 `path` 指的目录含 SKILL.md（远端市场技能）：SkillDocSkill 指令型——
+       execute 返回 SKILL.md 指令体（Agent Skills 标准语义），不自动执行下载脚本。
+       这里只认传入的那一份目录，不再回看市场缓存：门扫过、摘要钉过的就是它。
 
     执行体统一经 skills.executor.ExecutorBackedSkill 桥接为 SkillRegistry
     可注册的异步 Skill（线程池执行同步 executor, 参数直通）。
@@ -73,9 +93,10 @@ def _build_executable_skill(skill_id: str, description: str, market_skills_dir: 
             logger.warning("build executable skill %s failed: %s", skill_id, e)
 
     # SKILL.md 指令型（远端市场技能的可执行映射）
+    if not installed_dir:
+        return None
     try:
-        base = Path(market_skills_dir) if market_skills_dir else _default_market_skills_dir()
-        skill_dir = base / skill_id
+        skill_dir = Path(installed_dir)
         if (skill_dir / "SKILL.md").exists():
             from neurova.skills.builtin.skill_doc_executor import SkillMarkdownExecutor
 
@@ -152,7 +173,7 @@ def persist_synthesized_skill(
     )
 
 
-def _write_agent_manifest(
+def _writeAgentManifestOutcome(
     service: Any,
     skill_id: str,
     name: str,
@@ -161,8 +182,16 @@ def _write_agent_manifest(
     source: str = "marketplace",
     extra_config: Optional[dict] = None,
     human_approved: bool = False,
-) -> bool:
-    """以 staging 目录挂 manifest.json，走 SkillService.install_skill 公开 API"""
+    source_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """staging 挂**真字节** + 咽喉合成的 manifest.json，走 install_skill 公开 API。
+
+    返回 {"ok": bool, "refused": bool, "error": str}：`refused` 只在安装门拦下时为真，
+    调用方据此把拒装如实报出去（不许回"安装成功"）。
+
+    `source_dir` 是真字节的来处（市场缓存目录）。缺了它安装就退回旧形态——门扫空壳、
+    摘要钉空壳，所以市场链路必须递；合成/自主分装类技能本就没有外部字节，递 None 是对的。
+    """
     manifest = {
         "id": skill_id,
         "name": name,
@@ -177,6 +206,11 @@ def _write_agent_manifest(
         with tempfile.TemporaryDirectory() as td:
             stage = Path(td) / skill_id
             stage.mkdir(parents=True, exist_ok=True)
+            if source_dir is not None:
+                shutil.copytree(str(source_dir), str(stage),
+                                ignore=_STAGING_IGNORED, dirs_exist_ok=True)
+            # 咽喉合成的这张赢（包自带的 manifest.json 不获 id/name/version/source 的定义权，
+            # 否则同一身份有两份账）。
             (stage / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -184,10 +218,32 @@ def _write_agent_manifest(
             result = service.install_skill(
                 str(stage), skill_id=skill_id, human_approved=human_approved
             )
-            return bool(result and result.get("success", True)) and service.get_skill_info(skill_id) is not None
+            refused = bool(isinstance(result, dict) and result.get("findings"))
+            ok = bool(result and result.get("success", True)) and service.get_skill_info(skill_id) is not None
+            return {
+                "ok": ok,
+                "refused": refused,
+                "error": str((result or {}).get("error") or "") or None,
+            }
     except Exception as e:  # noqa: BLE001 — 技能页可见性失败不阻断安装主链路
         logger.error("market skill %s -> agent manifest failed: %s", skill_id, e)
-        return False
+        return {"ok": False, "refused": False, "error": str(e)}
+
+
+def _write_agent_manifest(
+    service: Any,
+    skill_id: str,
+    name: str,
+    description: str,
+    version: str,
+    source: str = "marketplace",
+    extra_config: Optional[dict] = None,
+    human_approved: bool = False,
+) -> bool:
+    return _writeAgentManifestOutcome(
+        service, skill_id, name, description, version,
+        source=source, extra_config=extra_config, human_approved=human_approved,
+    )["ok"]
 
 
 def link_market_skill_to_agent(
@@ -206,16 +262,36 @@ def link_market_skill_to_agent(
     持有独立注册表（agent_core.init_tools 用 create_default_skills 新建，
     非全局单例），安装时需注入每个运行实例才能立即被 LLM 工具集感知。
 
-    market_skills_dir: 市场安装根目录（SKILL.md 指令型技能探测用）；
-    None 时用 MarketImporter 单例目录。
+    market_skills_dir: 市场安装根目录，**只作安装期的真字节来源**（staging 从这里
+    取包体，之后一律经账本 `path` 读）；None 时用 MarketImporter 单例目录。
     """
-    manifest_ok = _write_agent_manifest(service, skill_id, name, description, version)
+    outcome = _writeAgentManifestOutcome(
+        service, skill_id, name, description, version,
+        source_dir=_marketSourceDir(skill_id, market_skills_dir),
+    )
+    if not outcome["ok"]:
+        # 没过门 / 没落账 ⇒ 一个可执行体都不注册：给被拒的字节开工具面，等于
+        # 让门白扫一次。拒因原样交回调用方（端点显式 4xx 用）。
+        logger.warning(
+            "market skill %s not linked: refused=%s reason=%s",
+            skill_id, outcome["refused"], outcome["error"],
+        )
+        return {
+            "registered": False,
+            "registry_count": 0,
+            "manifest_ok": False,
+            "install_refused": bool(outcome["refused"]),
+            "reason": outcome["error"],
+        }
+
+    info = service.get_skill_info(skill_id) or {}
+    installedDir = str(info.get("path") or "")
     target_registries = [registry] + list(extra_registries or [])
     registered = 0
     for reg in target_registries:
         if reg is None:
             continue
-        executable = _build_executable_skill(skill_id, description, market_skills_dir)
+        executable = _build_executable_skill(skill_id, description, installedDir)
         if executable is not None:
             try:
                 # 与 create_default_skills 的内置技能一致: registry.register 直接
@@ -236,21 +312,24 @@ def link_market_skill_to_agent(
             logger.warning("market skill %s shell register failed: %s", skill_id, e)
     logger.info(
         "market skill %s linked: manifest=%s registries=%s/%s",
-        skill_id, manifest_ok, registered, len(target_registries),
+        skill_id, outcome["ok"], registered, len(target_registries),
     )
     return {
         "registered": registered > 0,
         "registry_count": registered,
-        "manifest_ok": bool(manifest_ok),
+        "manifest_ok": bool(outcome["ok"]),
+        "install_refused": False,
+        "reason": None,
     }
 
 
-def restore_market_skills_from_service(service: Any, registry: Any, market_skills_dir: Any = None) -> int:
+def restore_market_skills_from_service(service: Any, registry: Any) -> int:
     """Agent 初始化时从 SkillService manifest 恢复持久化技能（重启后仍可感知）。
 
     覆盖四类来源（manifest.source 区分）：
-    - marketplace: 市场安装，经 MarketImporter/联邦注册；安装目录含 SKILL.md
-      时恢复为 SkillDocSkill 指令型可执行；
+    - marketplace: 市场安装，经 MarketImporter/联邦注册；账本 `path` 指的目录含
+      SKILL.md 时恢复为 SkillDocSkill 指令型可执行（市场缓存清掉也照恢复——
+      权威在钉过的那份里）；
     - synthesized: agent 自主分装（NL 合成/create_skill），config.tool_sequence
       恢复为可执行 ToolSequenceSkill——注册表须先 set_tool_router 注入路由器。
     - agent / auto: agent 显式保存 / pattern 封装与 genetic 进化产物
@@ -290,7 +369,8 @@ def restore_market_skills_from_service(service: Any, registry: Any, market_skill
                     )
                     registry.register_skill(m)
                 else:
-                    executable = _build_executable_skill(skill_id, entry.get("description", ""), market_skills_dir)
+                    executable = _build_executable_skill(
+                        skill_id, entry.get("description", ""), info.get("path") or "")
                     if executable is not None:
                         registry.register(executable)
                     else:
