@@ -2819,3 +2819,10 @@ tests/unit/security/test_installGateArtifactNameRules.py
 # `deps.verify_access_token` 而该函数住在 `api/auth.py:333` ⇒ 8 条用例 setup 恒错；仓库根污染守卫
 # 会被并发会话在途探针（`tmp_b39_netguard.py`）触发，报在"当刻正在收尾"的那条用例上，身份随采样漂移。
 tests/unit/channels/test_channelOutboundDoesNotFallBackToDefaultBot.py
+# 批 39（§6-196）：全仓禁 `cd <路径> && …` 这种靠 shell 改目录的调用形状——Windows 的 cmd
+# 里 `cd D:\x` 不改盘符，实测有用例因此在**开发者仓库根**跑 `git init` + `git config user.*`
+# 并改写提交身份。判定按 AST 形态（os.system/os.popen、带 shell=True 的 subprocess.*，命令串字面量
+# 片段拼合后匹配 cd…&&），四种坏形四种好形正反配对，另带扫描面地板格（四个根各须覆盖到文件，
+# 少一个根就会"扫了个空却报绿"）。基线为空＝零容忍；建档命中的两处已同批改净。
+# 逐文件单跑三次同读数 10/10/10 passed。
+tests/unit/ci/test_noCrossDriveShellCdShape.py
