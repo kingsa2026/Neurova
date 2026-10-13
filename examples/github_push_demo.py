@@ -5,6 +5,7 @@ GitHub Push Skill 演示脚本
 """
 
 import asyncio
+import subprocess
 import tempfile
 import os
 import shutil
@@ -52,10 +53,13 @@ async def demo_github_push_skill():
     print("   - config.json")
     print()
     
-    # 初始化 Git 仓库
-    os.system(f"cd {demo_dir} && git init")
-    os.system(f"cd {demo_dir} && git config user.email 'demo@neurova.com'")
-    os.system(f"cd {demo_dir} && git config user.name 'Neurova Demo'")
+    # 初始化 Git 仓库：目录交给 `cwd=` 传，不经 shell（Windows 的 `cd D:\x` 不改盘符，
+    # 原写法会把 git init/config 落到调用方所在目录上，§6-196 批 39）
+    for args in (["git", "init"],
+                 ["git", "config", "user.email", "demo@neurova.com"],
+                 ["git", "config", "user.name", "Neurova Demo"]):
+        subprocess.run(args, cwd=str(demo_dir), check=True,
+                       capture_output=True, encoding="utf-8", errors="replace")
     print("🔧 初始化 Git 仓库")
     print()
     
