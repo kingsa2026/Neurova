@@ -1569,20 +1569,15 @@ class ContextOrchestrator:
                 blocks["emotion"].append(emotion_line)
 
             # 语音上下文（每轮瞬态）——与 <tooling> 同槽（都是"本轮环境类"注入）
+            # 行的词汇不在这里重拼：唯一实现在 voice_context_module.voiceContextLines()
+            # （此前池分支与候选池分支各抄一份，标签漂移只会表现为"prompt 里悄悄少一项"）
             if voice_context:
                 try:
-                    content_parts = []
-                    if voice_context.get("text"):
-                        content_parts.append(f"语音识别文本: {voice_context['text']}")
-                    if voice_context.get("confidence", 0) > 0:
-                        content_parts.append(f"识别置信度: {voice_context['confidence']:.2f}")
-                    emotion = voice_context.get("emotion")
-                    if emotion and emotion.get("primary_emotion") != "neutral":
-                        content_parts.append(
-                            f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
-                        )
-                    if content_parts:
-                        blocks["tooling"].append("\n".join(content_parts))
+                    from neurova.voice_context_module import voiceContextLines
+
+                    lines = voiceContextLines(voice_context)
+                    if lines:
+                        blocks["tooling"].append("\n".join(lines))
                 except Exception as e:
                     logger.debug("语音上下文注入跳过: %s", e)
 
@@ -1689,34 +1684,18 @@ class ContextOrchestrator:
                 )
             )
 
-        # 添加语音上下文
+        # 添加语音上下文（与池分支同一份实现，不再重拼标签；也不再构造用不上的模块实例——
+        # 那次构造会跑 EmotionModule 的导入与实例化，而实例从头到尾没被引用）
         if voice_context:
             try:
-                from neurova.voice_context_module import VoiceContextModule
+                from neurova.voice_context_module import voiceContextLines
 
-                voice_module = VoiceContextModule()
-                # 将语音上下文转换为 ContextInput 并添加到候选池
-                content_parts = []
-                if voice_context.get("text"):
-                    content_parts.append(f"语音识别文本: {voice_context['text']}")
-                if voice_context.get("confidence", 0) > 0:
-                    content_parts.append(f"识别置信度: {voice_context['confidence']:.2f}")
-                if voice_context.get("language"):
-                    content_parts.append(f"语言: {voice_context['language']}")
-                if voice_context.get("engine"):
-                    content_parts.append(f"识别引擎: {voice_context['engine']}")
-
-                emotion = voice_context.get("emotion")
-                if emotion and emotion.get("primary_emotion") != "neutral":
-                    content_parts.append(
-                        f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
-                    )
-
-                if content_parts:
+                lines = voiceContextLines(voice_context)
+                if lines:
                     candidate_pool.append(
                         ContextInput(
                             source=ContextSource.MULTIMODAL,
-                            content="\n".join(content_parts),
+                            content="\n".join(lines),
                             metadata={"type": "voice_context"},
                         )
                     )
