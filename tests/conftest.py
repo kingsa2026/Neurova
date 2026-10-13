@@ -13,6 +13,26 @@ from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# 跑测期间不写字节码缓存——**仓库根顶层条目**里有 `__pycache__` 这一项的唯一来源。
+#
+# 本仓有过三处"局部关掉写盘"的补丁（`tests/unit/skills/conftest.py` 对 `start.py`、
+# `tests/unit/desktop/test_install_supply_contract.py` 对 `install.py`、
+# `tests/unit/test_cliFourOhOneSelfRescueHint.py` 对 `cli.py`），成因同一个：仓库根住着
+# 若干**顶层脚本**（`cli.py` / `start.py` / `install.py`），而顶层脚本不是一个包，
+# CPython 的常规 import 会把编译产物写在**源文件旁**——也就是仓库根的 `__pycache__/`，
+# 由 `_guardRepoRootAgainstPollution` 逐条点名肇事用例（2026-10-12 CI 实测
+# `tests/unit/test_cliFourOhOneSelfRescueHint.py` 报 `['__pycache__']`）。
+#
+# 三处补丁各管一个脚本，是同一件事的三份实现（教义第 6/7 条：口径只许一处）；
+# 而且它们只护住自己那一个 import。根因是"跑测会往仓库根写盘"这件事本身，
+# 就该在一处收口：判据与那批 `.pyc` 全无关系（没有任何用例断言缓存存在，
+# 实测上表三处也只把它当副作用），关掉不影响任何断言；生产跑 `python cli.py`
+# 是另一个进程，不受影响。
+#
+# 为什么必须在**导入期**：写盘发生在任何一个 `import cli` 的瞬间，
+# per-test 的 monkeypatch 来得太晚（与上面 `NEUROVA_DATA_DIR` 同形）。
+sys.dont_write_bytecode = True
+
 # MoE 索引状态目录——会话级兜底。per-test fixture 用 monkeypatch 指向 tmp_path，
 # 但那一刻之后仍有写盘：daemon 索引线程可能拖到 monkeypatch 撤销后才落盘，
 # 起子进程的测试也不一定带上这个变量。实测（2026-09-19）全量 tests/unit 期间

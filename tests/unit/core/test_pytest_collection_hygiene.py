@@ -25,6 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 #: 跨文件 AST 判据的唯一入口（Issue #148）：不自己 `rglob` + `ast.parse`。
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -37,6 +39,15 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _CASE_PREFIX = "test"
 _CLASS_PREFIX = "Test"
 _GUARD_SELF_PATTERN = "test_"
+
+#: 本档那格真收集是**另起一个解释器**跑 `pytest --collect-only` 的：子进程要重新
+#: 起 pytest、读活配置、加载插件，与父进程里已有的进程内状态无关。全局的
+#: `timeout = 30` 是给"进程内一格"定的，转嫁给子进程就是拿子进程的冷启动去撞
+#: 进程内的闸——2026-10-13 的 CI 上它正是这么红的（`unit-tests` 腿唯一一条失败：
+#: `Failed: Timeout (>30.0s) from pytest-timeout`，而本档此前从未红过）。
+#: 子进程侧另给一个显式上界，超时是**诚实失败**（TimeoutExpired 带命令与秒数）
+#: 而不是被父进程的闸半路掐死、连子进程在干什么都读不到。
+_COLLECT_SUBPROCESS_TIMEOUT = 120
 
 
 def _matchesCollectionPattern(patterns: list, name: str) -> bool:
@@ -388,6 +399,7 @@ def test_noTestBearingFileHasAnUncollectableFileName(pytestconfig):
         % stale)
 
 
+@pytest.mark.timeout(_COLLECT_SUBPROCESS_TIMEOUT + 30)
 def test_reverseProofShowsSuchAFileSilentlyDoesNotRun(tmp_path, pytestconfig):
     """反向自证：同一份内容，`testFoo.py` 被目录跑静默丢掉、`test_foo.py` 收得到；
     探测器必须只点名前者，且不得误报没有用例的普通模块。"""
@@ -403,14 +415,23 @@ def test_reverseProofShowsSuchAFileSilentlyDoesNotRun(tmp_path, pytestconfig):
     assert found == ["testFooSilentlySkipped.py"], (
         "探测器要么空转（没抓到 testFooSilentlySkipped.py），要么误报了普通模块：%s" % found)
 
-    collected = subprocess.run(
-        [sys.executable, "-m", "pytest", "-c", str(_PROJECT_ROOT / "pyproject.toml"),
-         "-p", "no:cacheprovider", "--collect-only", "-q", str(tmp_path)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        # 写侧同样钉 UTF-8：本机 locale 是 cp936 时，收集清单里的中文文件名会在
-        # 子进程 stdout 上按 locale 编码，读侧显式 utf-8 只会拿到替换字符。
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-        cwd=str(tmp_path))
+    try:
+        collected = subprocess.run(
+            [sys.executable, "-m", "pytest", "-c", str(_PROJECT_ROOT / "pyproject.toml"),
+             "-p", "no:cacheprovider", "--collect-only", "-q", str(tmp_path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            # 写侧同样钉 UTF-8：本机 locale 是 cp936 时，收集清单里的中文文件名会在
+            # 子进程 stdout 上按 locale 编码，读侧显式 utf-8 只会拿到替换字符。
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            cwd=str(tmp_path),
+            # 子进程自己也得有上界：没有它，子进程真挂住时父进程只能靠 pytest-timeout
+            # 的闸把它连同证据一起杀掉（本档 2026-10-13 的 CI 红相即此）；给了它，
+            # 读到的是一条点名秒数的失败，而不是一条被掐断的静默。
+            timeout=_COLLECT_SUBPROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError(
+            "子进程真收集超过 %ss 没回来——本档的靶（`python_files` 收不到的文件名）"
+            "无法自证，判据不成立：%s" % (_COLLECT_SUBPROCESS_TIMEOUT, exc)) from exc
     listing = collected.stdout
     assert "test_fooCollected.py" in listing, (
         f"真收集连合规文件都没收（退出码 {collected.returncode}）：{listing[:400]}")
