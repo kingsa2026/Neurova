@@ -68,12 +68,10 @@ def _install_module():
         sys.path.insert(0, root)
     spec = importlib.util.spec_from_file_location("neurova_install_entry", _INSTALL)
     mod = importlib.util.module_from_spec(spec)
-    _prev = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
-        spec.loader.exec_module(mod)
-    finally:
-        sys.dont_write_bytecode = _prev
+    # 字节码写盘由 tests/conftest.py 在导入期统一关掉（`sys.dont_write_bytecode`）——
+    # 本处原有一份局部开关，与 `tests/unit/skills/conftest.py`（start.py）和
+    # CLI 那条（cli.py）是同一件事的三份实现，已按教义第 6/7 条收口到那一处。
+    spec.loader.exec_module(mod)
     return mod
 
 

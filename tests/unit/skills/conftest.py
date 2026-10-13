@@ -29,12 +29,8 @@ if "start" not in sys.modules and _START_PY.is_file():
         _module = importlib.util.module_from_spec(_spec)
         sys.modules["start"] = _module
         # `spec_from_file_location` 的 loader 默认会把 `.pyc` 写在**源文件旁**
-        # 即仓库根的 `__pycache__/`。本次加载是唯一入口，故在此局部关掉字节码
-        # 写盘——判据（工具函数行为）与 `.pyc` 缓存无关，关掉不影响断言，
-        # 也不再往仓库根写盘。生产跑 `python start.py` 不受影响（那是另一进程）。
-        _prev = sys.dont_write_bytecode
-        sys.dont_write_bytecode = True
-        try:
-            _spec.loader.exec_module(_module)
-        finally:
-            sys.dont_write_bytecode = _prev
+        # 即仓库根的 `__pycache__/`。字节码写盘已由 `tests/conftest.py` 在导入期
+        # 统一关掉（`sys.dont_write_bytecode`）——本处原有一份局部开关，与
+        # `tests/unit/desktop/test_install_supply_contract.py`（install.py）和
+        # CLI 那条（cli.py）是同一件事的三份实现，已按教义第 6/7 条收口。
+        _spec.loader.exec_module(_module)
