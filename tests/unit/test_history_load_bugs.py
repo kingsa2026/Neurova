@@ -292,30 +292,38 @@ class TestH5ConsoleTsUrl:
 
 
 # ============================================================
-# H-7: CORS _load_cors_origins_from_config 局部 config 变量遮蔽模块级 config
+# H-7: 读 CORS 配置的这条路上，env 入口与文件读取不得互相破坏
 # ============================================================
 
 class TestH7CorsConfigShadowing:
-    """H-7: middleware._load_cors_origins_from_config 内 line 168 `config = _json.load(f)`
-    会让 Python 把整个函数的 config 视为局部变量，导致 line 159 `config.get(...)` 触发
-    UnboundLocalError。这是已存在的 bug，在 NEUROVA_CORS_ORIGINS 环境变量未设置时
-    必然崩溃，阻塞 app 启动。"""
+    """H-7（原形）: `middleware._load_cors_origins_from_config` 里 `config = _json.load(f)`
+    是局部赋值，Python 便把整个函数的 `config` 当局部变量，于是前面那句
+    `config.get("NEUROVA_CORS_ORIGINS", "")` 触发 UnboundLocalError——未设该环境变量时
+    必然崩溃，直接阻塞 app 启动。
 
-    def test_load_cors_origins_does_not_shadow_config(self, monkeypatch):
-        """RED: 当前实现会在 NEUROVA_CORS_ORIGINS 未设置时崩溃"""
-        # 清掉环境变量，强制走 config 文件分支
-        monkeypatch.delenv("NEUROVA_CORS_ORIGINS", raising=False)
-        from neurova.api import middleware as mw
-        # 临时让 config.get 返回空（模拟环境变量未设置）
+    2026-10-14 批 41 把 CORS 口径收进 `neurova/api/cors_policy.py` 单源，那个函数只剩一行转发、
+    已随收口退役；这一格的**守卫意图原样保留**：读配置这条动作，不许把 env 读取入口弄坏，
+    也不许在配置文件可读时反手崩掉。故按活着的单源复量两条分支。
+    """
+
+    def test_load_cors_origins_does_not_shadow_config(self, monkeypatch, tmp_path):
+        """env 入口被打桩成"什么都读不到"时：文件分支要能读数，缺文件时要能退回默认清单。"""
+        import json
+
         from neurova.core import config as cfg
-        saved_get = cfg.get
+        from neurova.api import cors_policy as CP
+
+        monkeypatch.delenv("NEUROVA_CORS_ORIGINS", raising=False)
         monkeypatch.setattr(cfg, "get", lambda key, default="": default)
-        # 调用 — GREEN 期望返回 list；RED 现状 UnboundLocalError
-        try:
-            result = mw._load_cors_origins_from_config()
-            assert isinstance(result, list), f"H-7 失败：返回类型 {type(result)}"
-        except UnboundLocalError as e:
-            pytest.fail(f"H-7 失败：_load_cors_origins_from_config 触发 UnboundLocalError: {e}")
+
+        real = tmp_path / "cors.json"
+        real.write_text(json.dumps({"origins": ["http://h7-recheck.test"]}), encoding="utf-8")
+        monkeypatch.setattr(CP, "configFile", lambda: real)
+        assert CP.effectiveOrigins() == ["http://h7-recheck.test"], "文件分支没能读出配置"
+
+        monkeypatch.setattr(CP, "configFile", lambda: tmp_path / "absent.json")
+        result = CP.effectiveOrigins()
+        assert isinstance(result, list) and result, f"H-7 复量失败：返回 {result!r}"
 
 
 # ============================================================
