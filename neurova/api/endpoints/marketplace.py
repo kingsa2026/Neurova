@@ -137,6 +137,27 @@ def _default_skill_registry():
     return get_skill_registry()
 
 
+def _refuseIfBlocked(link: Dict[str, Any], skill_id: str) -> None:
+    """咽喉没把技能落进账本时不得回"安装成功"（§6-186，教义第 2 条）。
+
+    真字节接进安装门之后，市场安装第一次真的可能被拒——此前端点完全不看
+    `link_market_skill_to_agent` 的返回，拒了照样报成功，用户看到的"已安装"
+    背后技能页与工具集都是空的。门拒给 409（点名拒因），其余未落账给 500。
+    """
+    if link.get("manifest_ok"):
+        return
+    reason = str(link.get("reason") or "未点名原因")
+    if link.get("install_refused"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Skill '{skill_id}' 被安装安全门拒绝: {reason}",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Skill '{skill_id}' 已落市场缓存但未登记进技能账本: {reason}",
+    )
+
+
 def _running_agent_registries():
     """运行中 Agents 的独立技能注册表（agent_core 各实例自建，非全局单例）"""
     regs: List[Any] = []
@@ -388,7 +409,7 @@ async def install_skill(
                 from neurova.skills.market_registry import link_market_skill_to_agent
                 from neurova.skills.skill_service import SkillService
 
-                link_market_skill_to_agent(
+                link = link_market_skill_to_agent(
                     skill_id=target_skill.skill_id,
                     name=target_skill.name,
                     description=target_skill.description,
@@ -398,6 +419,8 @@ async def install_skill(
                     extra_registries=_running_agent_registries(),
                     market_skills_dir=importer._skills_dir,
                 )
+                # 咽喉拒装不得报成"已安装"（§6-186：真字节接进安装门后第一次真的会拒）
+                _refuseIfBlocked(link, skill_id)
                 return {
                     "code": 0,
                     "message": f"Skill '{skill_id}' is already installed",
@@ -437,7 +460,7 @@ async def install_skill(
         from neurova.skills.market_registry import link_market_skill_to_agent
         from neurova.skills.skill_service import SkillService
 
-        link_market_skill_to_agent(
+        link = link_market_skill_to_agent(
             skill_id=target_skill.skill_id,
             name=target_skill.name,
             description=target_skill.description,
@@ -447,6 +470,7 @@ async def install_skill(
             extra_registries=_running_agent_registries(),
             market_skills_dir=importer._skills_dir,
         )
+        _refuseIfBlocked(link, skill_id)
 
         return {
             "code": 0,
