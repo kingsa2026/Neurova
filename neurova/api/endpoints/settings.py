@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
+from neurova.api import cors_policy
 from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
@@ -86,20 +87,12 @@ def _dropRetiredLanguageKeys(settings: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
-# CORS 配置文件路径
-_CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"
-
-# 默认 CORS origins（开发端口 + Tauri v2 桌面壳 WebView origin）
-_DEFAULT_CORS_ORIGINS = [
-    "http://localhost:8100",
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:8100",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-]
+# CORS 的名单、方法、头、配置落点与三级优先都在 `neurova.api.cors_policy` 一处。
+# 本模块此前自持一份 8 项 origins 白名单（与 api/middleware 那份逐字重复）、
+# 两份 methods/headers 清单，且 GET 不看 env——面板显示的与实际生效的不是同一份。
+def _corsConfigFile() -> FilePath:
+    """CORS 配置落点。conftest 与判据重定向的是 `cors_policy.configFile` 这一个接缝。"""
+    return cors_policy.configFile()
 
 
 class SettingsResponse(BaseModel):
@@ -341,8 +334,8 @@ class CorsConfigResponse(BaseModel):
 
     origins: List[str]
     allow_credentials: bool = True
-    allow_methods: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-    allow_headers: List[str] = ["Authorization", "Content-Type", "Accept", "X-Request-ID"]
+    allow_methods: List[str] = list(cors_policy.ALLOW_METHODS)
+    allow_headers: List[str] = list(cors_policy.ALLOW_HEADERS)
     updated_at: Optional[str] = None
 
 
@@ -355,27 +348,21 @@ class UpdateCorsConfigRequest(BaseModel):
     allow_headers: Optional[List[str]] = Field(None, description="允许的请求头")
 
 
-def _load_cors_config() -> Dict[str, Any]:
-    """从文件加载 CORS 配置"""
-    if _CORS_CONFIG_FILE.exists():
-        try:
-            with open(_CORS_CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning("Failed to load CORS config: %s", e)
-    return {
-        "origins": _DEFAULT_CORS_ORIGINS,
-        "allow_credentials": True,
-        "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        "allow_headers": ["Authorization", "Content-Type", "Accept", "X-Request-ID"],
-    }
+def _load_cors_config(config_file=None) -> Dict[str, Any]:
+    """当前**实际生效**的 CORS 配置——委托单源，与中间件共读同一份。
+
+    此前这里只看文件、不看 `NEUROVA_CORS_ORIGINS`，而中间件看的正是 env：
+    设了 env 之后面板显示的是一份**没在生效**的清单，管理员照着改就改错了东西。
+    """
+    return cors_policy.effectiveConfig(config_file)
 
 
 def _save_cors_config(config: Dict[str, Any]) -> bool:
     """保存 CORS 配置到文件"""
     try:
-        _CORS_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(_CORS_CONFIG_FILE, "w", encoding="utf-8") as f:
+        target = _corsConfigFile()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -393,10 +380,10 @@ async def get_cors_config(
     config = _load_cors_config()
 
     return CorsConfigResponse(
-        origins=config.get("origins", _DEFAULT_CORS_ORIGINS),
-        allow_credentials=config.get("allow_credentials", True),
-        allow_methods=config.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
-        allow_headers=config.get("allow_headers", ["Authorization", "Content-Type", "Accept", "X-Request-ID"]),
+        origins=config["origins"],
+        allow_credentials=config["allow_credentials"],
+        allow_methods=config["allow_methods"],
+        allow_headers=config["allow_headers"],
         updated_at=str(time.time()),
     )
 
@@ -441,11 +428,14 @@ async def update_cors_config(
 
     logger.info("CORS config updated by user, origins: %s", validated_origins)
 
+    # 回显再从单源读一次：写进文件 ≠ 就是生效值（env 可能压着它，中间件也只在启动时读一次）。
+    # 报「重启后实际会生效的那份」，不报「你刚提交的那份」——后者会让 PUT 成功回执与 GET 不一致。
+    effective = _load_cors_config()
     return CorsConfigResponse(
-        origins=config["origins"],
-        allow_credentials=config.get("allow_credentials", True),
-        allow_methods=config.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
-        allow_headers=config.get("allow_headers", ["Authorization", "Content-Type", "Accept", "X-Request-ID"]),
+        origins=effective["origins"],
+        allow_credentials=effective["allow_credentials"],
+        allow_methods=effective["allow_methods"],
+        allow_headers=effective["allow_headers"],
         updated_at=str(time.time()),
     )
 

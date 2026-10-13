@@ -556,19 +556,21 @@ def mock_auto_asr_engine(available_engine):
 # ---------------------------------------------------------------------------
 # 仓库文件防污染隔离
 # ---------------------------------------------------------------------------
-# 历史事故（2026-09，dee84dc）: settings API 的 CORS PUT 会写模块级常量
-# _CORS_CONFIG_FILE（直指仓库 config/cors.json），测试期写入的
-# evil.example.com 被误提交入库，随安装包分发后桌面端注册/登录全挂。
+# 历史事故（2026-09，dee84dc）: settings API 的 CORS PUT 会写仓库 config/cors.json，
+# 测试期写入的 evil.example.com 被误提交入库，随安装包分发后桌面端注册/登录全挂。
 # 统一重定向：测试会话期间 CORS 配置只落临时目录，永不碰仓库真实文件。
+#
+# 接缝 2026-10-14 起单点在 `cors_policy.configFile`（此前中间件与管理端各算一遍落点，
+# 因此要 patch 两处；收口后这一个接缝盖住读写两侧，patch 漏一处的静默失效面也随之消失）。
 
 @pytest.fixture(autouse=True)
 def _isolate_cors_config_file(tmp_path, monkeypatch):
     """所有测试的 CORS 配置读写都指向临时目录。"""
     try:
-        from neurova.api.endpoints import settings as _settings
+        from neurova.api import cors_policy as _cors_policy
     except Exception:  # pragma: no cover - settings 依赖缺失时跳过
         return
-    monkeypatch.setattr(_settings, "_CORS_CONFIG_FILE", tmp_path / "cors.json")
+    monkeypatch.setattr(_cors_policy, "configFile", lambda: tmp_path / "cors.json")
 
 
 # ---------------------------------------------------------------------------
