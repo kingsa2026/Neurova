@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-"""live-verify（工单 2026-10-13 批 32，§6-172 / P3 旁路收口）：市场安装这条活路真的走咽喉、真的把摘要钉进账。
+"""live-verify（工单 2026-10-13 批 32，§6-177）：市场安装真走咽喉解包，仓内不再有两份解压判定。
 
-判据档（`tests/unit/skills/test_marketInstallUsesSingleFaceAndPins.py`）在 tmp_path 里搭场景；
-这一支要证的是**真包内资产走真安装路**之后的产物：
+判据档（`tests/unit/skills/test_marketInstallUsesSingleFace.py`）在 tmp_path 里搭场景；这一支
+要在**真包内资产**与**真模块**上自证：
 
-1. 真 `MarketImporter` + 真内置 bundle（零网络）装完 ⇒ 盘上的 `skill.json` 里带着摘要；
-2. 摘要等于落位那份字节的聚合值（不是凭空写的一个哈希）；
-3. 换一字节 / 加一个文件 ⇒ 读侧按同一口径报不符（钉是有牙的，不是装饰）；
-4. 反向校准：抹掉摘要 ⇒ 退回 `unpinned` 首钉（否则第 3 项可能只是"永远拒"的假绿）；
-5. zip-slip / 超字节 / 超成员三种载荷过真市场侧函数 ⇒ 全拒且目录外什么都没落，
-   而**不递上限时**咽喉仍不设限（另外 6 个调用点的形状没被本批挪动）；
-6. 全仓按 AST 数"往目录里写压缩包成员"的落点 ⇒ 只剩咽喉那一个文件。
+1. 真内置 bundle 的字节经真市场侧函数落盘 ⇒ 解出的文件集与 zip 成员一致（咽喉没把正常件焊死）；
+2. zip-slip / 绝对成员 / 超字节 / 超成员四种载荷四种**互不掩盖**的拒因，且拒绝时一个文件都不落；
+3. 反向校准：把咽喉桩成"一律拒"，市场侧必须跟着拒——若它手里还留着第二份判定，这一跑会照旧解出来；
+4. 不递上限时咽喉不自设限（另外 6 个调用点的形状没被本批挪动）；
+5. 全仓按 AST 数"往目录里写压缩包成员"的落点 ⇒ 只剩咽喉那一个文件。
+
+另附一条**只取证不判定**的观察（它决定本批为何不给市场侧钉摘要）：`skill.json` 的读者数。
+写了没人读就是 §2 的断点，判据不该给坏状态焊死修复路，故这条进台账 §6-177 待人裁。
 
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) python tests/manual/marketInstallSingleFace_batch32.py`
 """
@@ -32,10 +33,9 @@ from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORK_ROOT = isolatedDataRoot(prefix="neurovaMarketB32")
 
-from neurova.security import artifact_digest as AD  # noqa: E402
 from neurova.security import safe_archive as SA  # noqa: E402
 from neurova.skills import market_sources as MS  # noqa: E402
-from neurova.skills.market_importer import MarketImporter  # noqa: E402
+from neurova.skills.market_importer import read_builtin_bundle  # noqa: E402
 
 failures: list[str] = []
 BUNDLE = "multi-search-engine.zip"
@@ -73,82 +73,110 @@ def _extractallFiles(root: Path) -> list:
     return hits
 
 
+def _ledgerFileSites(relName: str) -> list:
+    """逐条列出 `"skill.json"` 这个字面量在 `neurova/` 的出现处并按**那一行自己**写得清的
+    动作分类（写盘／读盘／其余＝路径拼接或常量集）。经变量转手的读写不在这里计数——所以
+    整张表一起打出来：「读侧为 0」这件事要由人来核，不由脚本自证。"""
+    sites = []
+    for path in sorted((REPO_ROOT / "neurova").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        try:
+            tree = ast.parse("\n".join(lines))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(REPO_ROOT / "neurova").as_posix()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == relName:
+                line = lines[node.lineno - 1].strip() if node.lineno - 1 < len(lines) else ""
+                if "write_text" in line or "write_bytes" in line:
+                    kind = "写"
+                elif any(tok in line for tok in ("read_text", "read_bytes", "json.load")):
+                    kind = "读"
+                else:
+                    kind = "其它"
+                sites.append(f"{kind} | {rel}:{node.lineno} | {line[:70]}")
+    return sites
+
+
 def main() -> int:
     print(f"数据根（注入隔离）: {WORK_ROOT}")
-    skills = WORK_ROOT / "s"          # 短名：长路径会撞 Windows 260 字符墙（与本批无关的预存坑）
-    importer = MarketImporter(skills)
-    importer._lookup_catalog_entry = lambda skill_id: {"bundle_zip": BUNDLE, "version": "1.0.0"}
+    work = WORK_ROOT / "e"
+    work.mkdir(parents=True, exist_ok=True)
 
-    task = importer.import_skill("live-b32")
-    dest = skills / "live-b32"
-    meta = json.loads((dest / "skill.json").read_text(encoding="utf-8")) if (dest / "skill.json").exists() else {}
-    check("[1] 真内置 bundle 安装完成", task.status.value == "completed", str(task.error_message))
-    check("[2] 盘上 skill.json 带摘要键", bool(meta.get(AD.DIGEST_FIELD)), repr(meta.get(AD.DIGEST_FIELD)))
+    payload = read_builtin_bundle(BUNDLE)
+    check("[1] 真内置 bundle 取得到", bool(payload), f"{len(payload or b'')} bytes")
+    dest = work / "bundle"
+    check("[2] 真市场侧函数解真 bundle 成功",
+          MS.extract_remote_skill_zip("live", payload, dest) is True, "")
+    names = sorted(str(p.relative_to(dest).as_posix()) for p in dest.rglob("*") if p.is_file())
+    inZip = sorted(i.filename for i in zipfile.ZipFile(io.BytesIO(payload)).infolist()
+                   if not i.is_dir())
+    check("[3] 落盘文件集与 zip 成员一致", names == inZip, f"盘上={names} 包内={inZip}")
 
-    pinned = str(meta.get(AD.DIGEST_FIELD) or "")
-    now = AD.digestDir(dest)
-    check("[3] 钉的就是落位那份字节", pinned == now, f"pinned={pinned[:20]} now={now[:20]}")
+    refused = {}
+    for label, sample, target in [
+        ("slip", _zipBytes({"../escaped.txt": "pwned"}), work / "slip"),
+        ("abs", _zipBytes({"/etc/escaped.txt": "pwned"}), work / "abs"),
+        ("big", b"z" * (MS.MAX_SKILL_ZIP_BYTES + 1), work / "big"),
+        ("many", _zipBytes({f"f{i}.txt": "x" for i in range(MS.MAX_ZIP_ENTRIES + 1)}), work / "many"),
+    ]:
+        refused[label] = MS.extract_remote_skill_zip(label, sample, target) is False
+    check("[4] 四种恶意/超限样本全拒", all(refused.values()), str(refused))
+    check("[5] 目录外没落任何文件", not (work / "escaped.txt").exists(), "")
+    for label in ("slip", "abs", "many"):
+        d = work / label
+        left = [p.name for p in d.rglob("*") if p.is_file()] if d.exists() else []
+        check(f"[6.{label}] 拒时一个文件都不落", left == [], str(left))
 
-    status, _ = AD.checkArtifact(dest, pinned)
-    check("[4] 未改动时读侧报 match", status == AD.STATUS_MATCH, status)
+    reasons = {}
+    for label, sample, kwargs in [
+        ("big", b"z" * (MS.MAX_SKILL_ZIP_BYTES + 1), {"maxPayloadBytes": MS.MAX_SKILL_ZIP_BYTES}),
+        ("many", _zipBytes({f"f{i}.txt": "x" for i in range(501)}), {"maxEntries": MS.MAX_ZIP_ENTRIES}),
+        ("slip", _zipBytes({"../e.txt": "x"}), {}),
+    ]:
+        try:
+            SA.safe_extract_zip(sample, work / f"r{label}", **kwargs)
+            reasons[label] = "没拒"
+        except SA.UnsafeArchiveError as e:
+            reasons[label] = str(e)
+    check("[7] 三条拒因互不掩盖且点名",
+          "字节" in reasons["big"] and "成员" in reasons["many"]
+          and ("穿越" in reasons["slip"] or "越出" in reasons["slip"]),
+          json.dumps(reasons, ensure_ascii=False))
 
-    victim = next((p for p in dest.rglob("*") if p.is_file() and p.name != "skill.json"), None)
-    victim.write_bytes(b"T" + victim.read_bytes()[1:])
-    status, actual = AD.checkArtifact(dest, pinned)
-    check("[5] 改一字节即被读侧拒", status == AD.STATUS_MISMATCH, f"{status} actual={actual[:20] if actual else actual}")
-    status, _ = AD.checkArtifact(dest, pinned)
-    check("[6] 拒因文案点名构件不符", AD.refusalReason(status) == AD.REASON_MISMATCH, AD.refusalReason(status))
+    original = SA.safe_extract_zip
+    try:
+        def refuse(*a, **k):
+            raise SA.UnsafeArchiveError("桩：一律拒")
 
-    clean = WORK_ROOT / "clean"
-    cleanImporter = MarketImporter(clean)
-    cleanImporter._lookup_catalog_entry = lambda skill_id: {"bundle_zip": BUNDLE, "version": "1.0.0"}
-    cleanImporter.import_skill("clean-b32")
-    cleanDir = clean / "clean-b32"
-    cleanPinned = json.loads((cleanDir / "skill.json").read_text(encoding="utf-8"))[AD.DIGEST_FIELD]
-    (cleanDir / "extra.py").write_text("print('x')\n", encoding="utf-8")
-    status, _ = AD.checkArtifact(cleanDir, cleanPinned)
-    check("[7] 目录内新增文件也算篡改", status == AD.STATUS_MISMATCH, status)
-    (cleanDir / "extra.py").unlink()
-    status, _ = AD.checkArtifact(cleanDir, cleanPinned)
-    check("[8] 撤掉新增即复原（拒因不是随机数）", status == AD.STATUS_MATCH, status)
-
-    status, _ = AD.checkArtifact(cleanDir, None)
-    check("[9] 反向校准：抹掉摘要退回首钉", status == AD.STATUS_UNPINNED, status)
-
-    seed = WORK_ROOT / "seed"
-    seedImporter = MarketImporter(seed)
-    seedImporter._lookup_catalog_entry = lambda skill_id: {"version": "1.0.0"}
-    seedImporter.import_skill("seed-b32")
-    seedMeta = json.loads((seed / "seed-b32" / "skill.json").read_text(encoding="utf-8"))
-    check("[10] 没取回字节的那支不钉", AD.DIGEST_FIELD not in seedMeta, repr(sorted(seedMeta)))
-
-    escape = WORK_ROOT / "e"
-    escape.mkdir(parents=True, exist_ok=True)
-    ok = MS.extract_remote_skill_zip("slip", _zipBytes({"../escaped.txt": "pwned"}), escape / "d")
-    check("[11] zip-slip 被拒", ok is False, f"returns={ok}")
-    check("[12] 目录外确实没落文件", not (escape / "escaped.txt").exists(), "")
-
-    big = b"z" * (MS.MAX_SKILL_ZIP_BYTES + 1)
-    check("[13] 超字节上限被拒", MS.extract_remote_skill_zip("big", big, escape / "b") is False, "")
-    many = _zipBytes({f"f{i}.txt": "x" for i in range(MS.MAX_ZIP_ENTRIES + 1)})
-    destMany = escape / "m"
-    check("[14] 超成员上限被拒", MS.extract_remote_skill_zip("many", many, destMany) is False, "")
-    check("[15] 拒时一个文件都不落", not any(p.is_file() for p in destMany.rglob("*")) if destMany.exists() else True, "")
+        SA.safe_extract_zip = refuse
+        stubbed = MS.extract_remote_skill_zip("stub", payload, work / "stub")
+    finally:
+        SA.safe_extract_zip = original
+    check("[8] 反向校准：咽喉桩成拒 ⇒ 市场侧必须拒（手里不许还留着第二份判定）",
+          stubbed is False, f"returns={stubbed}")
 
     wide = _zipBytes({f"w{i}.txt": "x" for i in range(MS.MAX_ZIP_ENTRIES + 1)})
     try:
-        SA.safe_extract_zip(wide, escape / "wide")
-        uncapped = True
-        why = "未设限即解出"
+        SA.safe_extract_zip(wide, work / "wide")
+        uncapped, why = True, "未设限即解出"
     except SA.UnsafeArchiveError as e:
-        uncapped = False
-        why = str(e)
-    check("[16] 不递上限时咽喉不自设限（另 6 个调用点形状未动）", uncapped, why)
+        uncapped, why = False, str(e)
+    check("[9] 不递上限时咽喉不自设限（另 6 个调用点形状未动）", uncapped, why)
 
     hits = _extractallFiles(REPO_ROOT / "neurova")
-    check("[17] 全仓落盘解包只剩咽喉一个文件", hits == ["security/safe_archive.py"], str(hits))
+    check("[10] 全仓落盘解包只剩咽喉一个文件", hits == ["security/safe_archive.py"], str(hits))
 
-    print(f"\n读数 {17} 项，失败 {len(failures)} 项: {failures}")
+    obs = _ledgerFileSites("skill.json")
+    readers = [o for o in obs if o.startswith("读")]
+    print('[OBSERVE] "skill.json" 在 neurova/ 的每个出现处（读侧 %d 条）——本批因此不给市场侧'
+          "钉摘要：写进没人读的文件就是 §2 的断点。影响面与待裁三项见台账 §6-177。" % len(readers))
+    for o in obs:
+        print("          " + o)
+
+    print(f"\n读数 {10} 项，失败 {len(failures)} 项: {failures}")
     return 1 if failures else 0
 
 

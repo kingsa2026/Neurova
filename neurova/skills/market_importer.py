@@ -15,7 +15,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import get_data_root
-from neurova.security import artifact_digest
 
 logger = get_logger(__name__)
 
@@ -305,12 +304,6 @@ class MarketImporter:
                     from neurova.skills.permissions import SkillPermissions
 
                     skill_meta["permissions"] = SkillPermissions.from_dict(perm_raw).to_dict()
-                # P3 构件完整性（§6-172 批 32）：字节是从包里取回来的（内置 bundle 或远端下载），
-                # 就在安装这一侧钉摘要。不钉，读侧只能退回 TOFU 首钉——那等于"第一次调用时盘上是
-                # 什么就采信什么"，取回与落位之间被换过的包会被静默 adopt。模拟链路那支没有取回
-                # 任何字节，不钉（把空目录钉上就是伪造一个采信点）。口径不在此重述，见 artifact_digest。
-                if bundle_name or downloaded:
-                    skill_meta[artifact_digest.DIGEST_FIELD] = artifact_digest.digestDir(skill_dir)
                 (skill_dir / "skill.json").write_text(
                     json.dumps(skill_meta, ensure_ascii=False, indent=2),
                     encoding="utf-8",
