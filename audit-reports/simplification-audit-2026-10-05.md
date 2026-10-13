@@ -3028,7 +3028,7 @@
       - **甲｜把市场安装接进 `skill_service` 账本咽喉**：装完即经 `install_skill`/登记落进 `manifest.json`，摘要、权限声明、`enabled` 三件一起才有读者；P3 那条"装时钉"就自动成立、不必再造第二份账。代价：`market_importer` 需拿到 `SkillService` 实例（agent 作用域，按 §3 走 `agent_ref` 注入而非直接 import），并要定 `pool_type`/`owner_user_id` 归属口径（§6-163 后属主只能显式传）。受益面：`marketplace.install_skill`、`skill_pool_api`、移动/前端"已装技能"列表、`call_skill` 拒因。
       - **乙｜承认它只落文件**：把 `skill.json` 两个写侧退役（`hub_client.py:526-535`、`market_importer.py:296-317`），市场安装降级为"取包器"，UI 文案随之如实改（否则"安装完成"是假成功）。代价：现在靠 `skill.json` 留痕的权限声明（P0-4）改由别处出，且 §6-159 那条"声明落 skill.json 作运行时读取源"的口径要一并更正。
       - **丙｜死面另批处置**：`market_adapters` 五个 `install`（含 `:370` 空装 `return True`）与 `agent_skill_manager.acquire_skill` 零调用者——要么按教义第 7 条退役（连带 `_install_skill` 里那句 `hasattr(importer, "install_skill")` 的假接线），要么接线进甲案那条咽喉。现状：不修则 §6-176 的旁路①③常驻。
-      - 三案共同点：**都不允许"往 `skill.json` 钉摘要"这种第三形态**——它既不产生读者，又留下第二个采信点。
+      - 三案共同点：**都不允许"往 `skill.json` 钉摘要"这种第三形态**——它既不产生读者，又留下第二个采信点。（**10-13 §6-183 就地更正：本格上文"从不进 `manifest.json`、装了也不可调用"是错的**——登记路一直在那里，见下格；据此下的"裁定甲"前提要按 §6-183 重述，不要照本格的措辞施工。）
     - **未动的邻近项（如实）**：④ `GET /media/storage-path/{media_type}` 名实不符零消费者（§6-172 已记）；⑤ `state.json`/`manifest.json` 与被保护构件同根、要封定向重算需根外信任锚（§6-176 ⑤）。
     - **净 LOC 落字复核（本卷记过的那形又现身一次）**：`35a91bad` 正文写 **+17/−0**，实测 `git diff --numstat` 为 **+18/−1**——那 −1 是就地更正 §6-176 那一行本身（同一行尾部追加一句），不是删内容；已提交的历史不改写，此处落正。
 
@@ -3084,6 +3084,16 @@
     - **枚守卫按形状数，不按函数名数**：批 33 那枚 M4 教出来的口径在本批立刻复现——站点把原语内联重写一遍（`sum(x * x …) ** 0.5`）时，只认 `def vector_norm` 的守卫全绿，M3 跑出来"0 格翻红"被误读成"这块没牙"。补 `_isNormShape` 之后 M3 咬住，M2 一枚同时翻红枚举/归属/形状三格。**已知限度写在格子里而不是装作覆盖**：两步写法（先 `norm = sum(x*x…)` 再 `sqrt(norm)`）这个探测器抓不到。
     - **证据**：红 **4 failed/1 passed** ⇒ 绿 **7 passed**（入册前单跑三次同读数，11~12s，两枚全仓 AST 扫描占大头）；变异 3 枚全咬；活体 `tests/manual/vectorPrimitives_batch34.py` **8 读数 exit=0**——其中反向校准那一枚是把 `vector_math.vectorNorm` 桩成返回 2.0，真 `UnifiedVectorStore` 的质心读数就跟着变 2.0（证明路上没有第二份模长在算，而不是只证明"名字没了"）；A/B（memory + test_memory + cognitive + context）基线 27 红 ↔ 本树 26 红、**仅本树红 0**，基线多的 `test_pool_cleanup_expired` 两向复跑不重现、记档不认领。生产池 **+41/−48（净 −7）**。`test_memory_safety_net` 那张"模块必须导出这些名字"的安全网随公共出口搬家如实改落点（断言强度不变：仍是"可导入且可调用"+三个行为读数）。
     - **两笔过程账（都进形态集，见该文件 119/120 与其后新条）**：① 本批第一次两树对照把还原清单取成了 `git diff --name-only` 全量，连带把并发会话在途的 `channels.py`/`dingtalk.py`/`feishu.py` 退到 HEAD 约 50 秒——复原按快照逐字节复证、无损失，但**共享树里还原类操作的作用域必须来自本批清单而不是工作树全量**；第二次改成显式 9 文件。② 台账号 **181 在本批落笔途中被对方会话占走**（那笔 webhook 验签修复 `1516d619`），本批引用一律改 **§6-182**，且改号脚本只列自己的三档文件——上一批就记过"改号脚本会顺手改掉别人的引用"。
+
+
+183. **就地更正 §6-177 的一句错判，并把市场安装的真形状量清：登记在、门与摘要扫的是影子目录（本会话实测，未改码）** 🟡 —— 落 §6-182 时按裁定甲去接线，动手前现量发现**上一批那句"市场装的东西从不进 `manifest.json`、点了「安装完成」也不可调用"是错的**：登记路一直都在——`marketplace.install_skill:437-446` 装完调 `market_registry.link_market_skill_to_agent`，其内部 `_write_agent_manifest` 是**经 `SkillService.install_skill` 公开 API** 落账的（不是我以为的手写 manifest）。错因：我只读了 `market_importer` 就下了结论，没顺链路往下读一个文件——正是本卷"只审已登记的入口/按名字推断可行性"那一族。
+    - **实测形状（一次性隔离探针，脚本即用即删）**：市场目录 `<数据根>/skills/probe-skill/` 里是真字节 `['SKILL.md', '_meta.json', 'skill.json']`；agent 侧 `agents/probe_agent/skills/probe-skill/` 里**只有 `manifest.json`**；账本 `path` 指向后者；`checkArtifact` 对该目录报 `unpinned`（探针经 `get_skill_info` 取值取到的是清单内层，摘要键在条目层——这一条我按代码读到 617 行的钉在，未凭探针读数下结论）。
+    - **由此得到的真问题（比原判断更硬，两条都是安全面的）**：
+      ① **安装门扫的是影子目录**——`install_skill` 的 `scan_skill_for_install(skill_id, incoming)` 扫的是 `copytree` 自 staging 的那份，而 staging 只有 `manifest.json` ⇒ 市场包里的 `SKILL.md`/`_meta.json` 这些**真从远端取回的字节从来没被 P0-4 扫过**；
+      ② **摘要钉的也是影子目录**——`digestDir(target_dir)` 算的是只有 `manifest.json` 的那份，而运行时 `_build_executable_skill` 造的 `SkillDocSkill(skill_id, skill_dir=市场目录/​id)` 读的是**市场目录**（重启回灌 `restore_market_skills_from_service` 同一条路）⇒ 篡改真正被执行的那份字节，装载前对账不会红。P3 在这条路上等于空转，而且不是我原来说的"没登记"。
+      ③ 仍成立的一条：`skill.json` 全仓零读者（`hub_client.py:531`、`market_importer.py:307` 两处写、无人读）。
+    - **修法（已定未做，供下一批照此施工；比"再补一个写侧"小且更对）**：`_write_agent_manifest` 的 staging 别再只挂一张 `manifest.json`，而是 `copytree(市场目录 → staging)` 后在同一路径补 `manifest.json`，其余流程不动 ⇒ 门扫真字节、agent 目录落真字节、`digestDir` 钉的就是被执行那份。配套两处必须同批改，否则只是把影子换了个方向：`_build_executable_skill` 与 `restore_market_skills_from_service` 的 SKILL.md 取径改读**账本 `path` 指的 agent 目录**（市场目录退回"下载缓存"，`skill.json` 两处写侧随本批退役——它从此没读者也没写者）。波及面：`marketplace.py` 两处 link、`agent_core.py:891` 与 `rsi/self_improvement_proposer.py:1011` 两处回灌、`unlink_market_skill_from_agent` 的卸载一致性（现在要删两处目录，卸载语义要先量）、既有判据 `test_market_registry.py`/`test_market_doc_skill.py`。
+    - **本格未做的事**：没改一行生产码（发现前提错就先量，别把错的施工图继续往下刷）；探针脚本即用即删，读数贴在格内。
 
 
 
