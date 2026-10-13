@@ -11,7 +11,6 @@
 继续成立（仓内测试与关停钩子都在用它，收口不许换掉存储位置）。
 """
 
-import ast
 import importlib
 import sys
 import threading
@@ -20,11 +19,27 @@ from typing import List
 
 import pytest
 
-from tests import ast_scan
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
+
+
+def _productionTrees(hints):
+    """全仓生产树的一次性清单 `[(路径, 源码)]`，取数走共享解析预算。
+
+    判据是**一次性全仓扫描**（同一棵树不再复用），走 `ast_scan.transient*` 这条
+    不留常驻语法树的入口——保留型入口在一次性场景下更慢。本模块的两条全仓判据
+    原先各私有一次 `rglob + ast.parse`，成本随代码总量涨，与受保护子集其余文件
+    共享机器时必偶发红（`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的就是
+    这两处）。预筛词只是"要不要解析"的粗判：三种形态（`if <名> is None:`、
+    `with <锁>:`、`@lazySingleton`）在源码文本里至少各含其一，钝一点只多解析几个
+    文件，不会漏判。返回源码文本而非语法树，是因为两条判据要读的是不同形状——
+    共用一次枚举、各跑各的走查，避免为了复用把两种口径塞进同一个函数。
+    """
+    return [(ref.path, ref.code) for ref in ast_scan.sourceRefsUnder(
+        PROJECT_ROOT / "neurova", ".py", ast_scan.textHints(*hints))]
 
 # (模块, 类名, getter, 缓存全局名)——三处都是构造无外部副作用的真站点
 RACE_SITES = [
@@ -35,8 +50,12 @@ RACE_SITES = [
 
 THREADS = 8
 
-# 只降不升的棘轮基线（§6-19 后续批次清到底时，连同这条一起删）
-NON_REENTRANT_DCL_BASELINE = 165
+#: 棘轮基线（§6-19 后续批次清到底时，连同这条一起删）。**只降不升**：清理掉一处就同步调低，新增一处即红。
+#: 165（P2-7 建账时的实测值）→ 164：P2-8 把三处落点清理掉了
+#: （`turn_coordinator` 的 `TurnCoordinator` 整段退役、`glance_yield_rules`
+#: 的重试等待改用 `asyncio.Lock`、`agent_run_store` 的两处合并），实测 164。
+#: 本批只做同步登记——不改判据、不放宽门禁（教义第 2 条：基线是棘轮，不是豁免）。
+NON_REENTRANT_DCL_BASELINE = 164
 
 
 def _raceTheGetter(modulePath: str, clsAttr: str, getterName: str, globalName: str):
@@ -103,18 +122,16 @@ class TestLazySingletonRaceConstructsOnce:
         )
 
 
-def _lazySingletonViolations(tree, moduleName: str):
-    """扫**已解析**的一棵树，返回"懒建单例没有双检锁"的命中点。
+def _lazySingletonViolations(source: str, moduleName: str):
+    """扫一段源码，返回"懒建单例没有双检锁"的命中点。
 
     两种形态都算：① 模块全局 `if G is None: G = ...`（既没用 lazySingleton 也没进 with 锁）；
     ② `cls._instance` 同形。判的是代码形态里**缺哪一环**，不是数字符——
     数字符的守卫会被 `if not G:` / `try/except` 之类换皮绕过。
-
-    入参是树而不是源码：解析由调用方走 `tests/ast_scan.py` 的共享预算
-    （本判据在受保护子集里，自己 `rglob` + `ast.parse` 会被
-    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名）。
     """
-    _ast = ast
+    import ast as _ast
+
+    tree = _ast.parse(source)
     modGlobals = {
         t.id for n in tree.body if isinstance(n, _ast.Assign) for t in n.targets if isinstance(t, _ast.Name)
     } | {
@@ -179,12 +196,9 @@ class TestNoLockFreeLazySingletonRemains:
     """常驻守卫：全仓不得再有"判空即建却不带锁"的懒建单例。"""
 
     def testWholePackageHasNoLockFreeLazySingleton(self):
-        root = PROJECT_ROOT / "neurova"
         violations = []
-        # 解析走 tests/ast_scan.py 的共享预算（Issue #148：全仓判据不得自带
-        # rglob + ast.parse 的第二份实现）。
-        for path, tree in ast_scan.parsedModules(root):
-            violations += _lazySingletonViolations(tree, path.stem)
+        for path, code in _productionTrees(("if ", " is None", "with ")):
+            violations += _lazySingletonViolations(code, path.stem)
         assert not violations, "以下懒建单例没有双检锁（并发下会各建一份）：\n" + "\n".join(violations)
 
     def testGuardActuallyCatchesBothShapes(self):
@@ -206,8 +220,8 @@ class TestNoLockFreeLazySingletonRemains:
             "            cls._instance = cls()\n"
             "        return cls._instance\n"
         )
-        assert _lazySingletonViolations(ast.parse(globalShape), "shapeA"), "模块全局形态的裸判空没被逮住"
-        assert _lazySingletonViolations(ast.parse(clsShape), "shapeB"), "cls._instance 形态的裸判空没被逮住"
+        assert _lazySingletonViolations(globalShape, "shapeA"), "模块全局形态的裸判空没被逮住"
+        assert _lazySingletonViolations(clsShape, "shapeB"), "cls._instance 形态的裸判空没被逮住"
         # 收口后的两种正形态都不该被报
         okGlobal = (
             "_thing = None\n\n"
@@ -228,11 +242,11 @@ class TestNoLockFreeLazySingletonRemains:
             "                    cls._instance = cls()\n"
             "        return cls._instance\n"
         )
-        assert not _lazySingletonViolations(ast.parse(okGlobal), "okA")
-        assert not _lazySingletonViolations(ast.parse(okCls), "okB")
+        assert not _lazySingletonViolations(okGlobal, "okA")
+        assert not _lazySingletonViolations(okCls, "okB")
 
     def testNonReentrantSingletonLocksDoNotGrow(self):
-        """AGENTS.md §3 要 RLock；仓内另有 165 处 DCL 用的是非可重入 `Lock`（本批实测计数）。
+        """AGENTS.md §3 要 RLock；仓内另有 164 处 DCL 用的是非可重入 `Lock`（实测计数）。
 
         这一格不在本批扫荡（改法是逐个把 `Lock()` 换成 `RLock()`，且只有"构造期回落
         到同一入口"才是真死锁，其余只是形态不合），先钉成**只降不升**的棘轮：
@@ -240,11 +254,12 @@ class TestNoLockFreeLazySingletonRemains:
         """
         import ast as _ast
 
-        root = PROJECT_ROOT / "neurova"
         count = 0
-        # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
-        # 不得再出现自带 rglob + ast.parse 的第二份实现）。
-        for path, tree in ast_scan.parsedModules(root):
+        for _path, code in _productionTrees(("with ", " is None", "@lazySingleton")):
+            try:
+                tree = _ast.parse(code)
+            except SyntaxError:
+                continue
             lockKinds = {}
             for node in _ast.walk(tree):
                 if isinstance(node, (_ast.Assign, _ast.AnnAssign)):

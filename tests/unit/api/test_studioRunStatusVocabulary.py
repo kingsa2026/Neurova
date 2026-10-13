@@ -20,9 +20,10 @@ import io
 import re
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
-from tests import ast_scan
 from neurova.aigc_studio import store as studio_store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -55,9 +56,9 @@ def _vocab():
 def _statusLiteralsInRunWrites():
     """`add_run(...)` / `update_run(...)` 实参里出现的状态字面量（AST，不数注释）。"""
     offenders = []
-    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
-    # 再出现自带 rglob + ast.parse 的第二份实现）。
-    for path, tree in ast_scan.parsedModules(PRODUCTION):
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
+    # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    for path, tree in ast_scan.parsedModules(PRODUCTION, ".py"):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

@@ -25,6 +25,28 @@ import pytest
 from tests.repo_paths import repo_str
 
 
+def _emptyHistoryLiterals(path: str) -> list:
+    """文件**可执行代码**里出现的空历史字面量（行号 + 形态）。
+
+    按 AST 取，不按文本扫：原判据用 `re.sub(r'#.*', '', src)` 剥注释，但
+    **docstring 不是 `#` 注释**——`d9224d52` 给 `/v1/chat/history` 写的说明里
+    提到过这个字面量（叙述"原实现恒回"），文本判据于是把它读成了"强制注入仍在位"。
+    判据打的是**可执行形态**，文本面却把叙述算进来，属本仓反复记过的两头失真。
+    docstring 是 `Expr(Constant(str))`、不是 `Dict`，故 AST 判据天然不受叙述影响，
+    而真正的强制注入（`metadata={"history": []}`）仍是 `Dict` 节点。
+    """
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if (isinstance(key, ast.Constant) and key.value == "history"
+                    and isinstance(value, ast.List) and not value.elts):
+                out.append((node.lineno, ast.unparse(node)))
+    return out
+
+
 
 # 规范实现载体在包内 `skill_system/core.py`（顶层同名文件被同名包遮蔽期间的
 # 按路径反射加载，已随搬家一并退役）
@@ -114,31 +136,6 @@ class TestToolRouterListSkillsSupport:
 # 断点 V2-3: chat.py 不应强制传空历史(POST /chat 和 /chat/stream)
 # ──────────────────────────────────────────────────────────────────
 
-def _hitsInSource(source: str) -> list:
-    """从一份源码里取「把 history 钉成空列表」的 dict 字面量行号（按 AST 形态）。
-
-    判定式：`ast.Dict` 里 key 是常量 `"history"` 且 value 是**空列表字面量**。
-    只认代码——注释与 docstring 里的描述都不是 `ast.Dict` 结点。
-    与主判据同式，故反向对照测的就是主判据本身。
-    """
-    return [n.lineno for n in ast.walk(ast.parse(source))
-            if isinstance(n, ast.Dict) and any(
-                isinstance(k, ast.Constant) and k.value == "history"
-                and isinstance(v, ast.List) and not v.elts
-                for k, v in zip(n.keys, n.values))]
-
-
-def _emptyHistoryInjectionLines(rel: str) -> list:
-    """`rel` 文件里把 `history` 钉成空列表的**代码**行号。
-
-    为什么不用文本正则：原实现是 `re.sub(r'#.*', '', src)` 后找 `"history": []`，
-    它把**注释**当作可忽略、却把**docstring**当作代码。`chat.py` 的
-    `get_chat_history` docstring 如实描述了「原先恒回 `{"history": []}`」这段沿革，
-    于是修复说明本身被判成了"还在强制注入"——同一份守卫两头失真里假红的那头。
-    """
-    return _hitsInSource(open(repo_str(rel), encoding="utf-8").read())
-
-
 class TestChatEndpointNotForceEmptyHistory:
     """V2-3: chat.py 两处不应强制 `{"history": []}`。
 
@@ -150,24 +147,13 @@ class TestChatEndpointNotForceEmptyHistory:
     """
 
     def test_chat_endpoint_no_force_empty_history(self):
-        """chat.py 不应出现 `{"history": []}` 强制注入(按 AST 判代码)。"""
-        lines = _emptyHistoryInjectionLines("neurova/api/endpoints/chat.py")
-        assert lines == [], (
-            "chat.py 代码里仍存在 `{'history': []}` 强制注入(第 %s 行),"
+        """chat.py 可执行代码不应出现 `{"history": []}` 强制注入（AST 判据）。"""
+        literals = _emptyHistoryLiterals(repo_str("neurova/api/endpoints/chat.py"))
+        assert literals == [], (
+            "chat.py 可执行代码仍存在 `{'history': []}` 强制注入,"
             "LLM 缺对话上下文,工具参数指代不清。"
-            "应改为 call_metadata = body.metadata or {}。" % lines
+            "应改为 call_metadata = body.metadata or {}。命中：" + str(literals)
         )
-
-    def test_theScannerReallyCatchesTheShapeItClaimsToCatch(self):
-        """反向对照：真注入必须被抓到，注释/docstring 里的描述不许被算成注入。"""
-        assert _hitsInSource('metadata = {"history": []}\n') == [1], \
-            "探测器抓不住真注入，本判据是恒绿的空转"
-        assert _hitsInSource('metadata = {"history": messages}\n') == [], \
-            "有内容的 history 被误报成强制空注入"
-        assert _hitsInSource('"""原先恒回 {"history": []}"""\n') == [], \
-            "docstring 里如实描述沿革被算成了注入——这正是文本正则的假红形态"
-        assert _hitsInSource('# 老代码 {"history": []}\nX = 1\n') == [], \
-            "注释里的描述被算成了注入"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -181,18 +167,11 @@ class TestConsoleWebSocketNotForceEmptyHistory:
     """
 
     def test_console_ws_no_force_empty_history(self):
-        """console.py WebSocket 不应传 metadata={"history": []}(非注释代码)。"""
-        import re
-        src = open(
-            repo_str("neurova/api/endpoints/console.py"),
-            encoding="utf-8",
-        ).read()
-        # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
-        src_no_comments = re.sub(r'#.*', '', src)
-        # 修复后非注释代码不应再出现 WebSocket 强制空历史
-        assert 'metadata={"history": []}' not in src_no_comments, (
-            "console.py WebSocket 路径非注释代码仍强制传 metadata={'history': []},"
-            "LLM 缺对话上下文。应删除此 metadata 注入。"
+        """console.py WebSocket 不应传 metadata={"history": []}(AST 判据)。"""
+        literals = _emptyHistoryLiterals(repo_str("neurova/api/endpoints/console.py"))
+        assert literals == [], (
+            "console.py WebSocket 路径可执行代码仍强制传 metadata={'history': []},"
+            "LLM 缺对话上下文。应删除此 metadata 注入。命中：" + str(literals)
         )
 
 

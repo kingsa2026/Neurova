@@ -39,9 +39,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from tests import ast_scan
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 PROD_ROOT = REPO / "neurova"
@@ -54,11 +54,12 @@ RETIRED = frozenset({"neurova.context_cache", "neurova.context_persistence"})
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(tree) -> list[str]:
-    """一棵树里 AST 可见的导入目标（含 `from X import y` 的 X 与 `import X` 的 X）。
-
-    入参是**已解析的树**：枚举与解析走共享预算（`tests/ast_scan.py`，Issue #148）。
-    """
+def _importedNames(source: str) -> list[str]:
+    """一份源码里 AST 可见的导入目标（含 `from X import y` 的 X 与 `import X` 的 X）。"""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
     names = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -70,17 +71,25 @@ def _importedNames(tree) -> list[str]:
 
 
 def _retiredImports(root: Path) -> list[str]:
-    """`root` 树里仍引用已退役模块的落点。"""
+    """`root` 树里仍引用已退役模块的落点。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词是判据的**充分条件**：连 `context_cache` / `context_persistence` 字样
+    都没出现的文件不可能 import 这两座。
+    """
     hits = []
-    for p, tree in ast_scan.parsedModules(root):
-        for n in _importedNames(tree):
+    hints = tuple(sorted({r.rsplit(".", 1)[1] for r in RETIRED}))
+    for ref in ast_scan.sourceRefsUnder(root, ".py", hints):
+        for n in _importedNames(ref.code):
             if n in RETIRED or any(n.startswith(r + ".") for r in RETIRED):
                 # 相对 REPO 只对仓内扫描有效；注入探针在 tmp 下，退到按扫描根显示，
                 # 否则判据自己会抛 ValueError（首跑就是这么崩的，不是被测代码崩）
                 try:
-                    shown = p.relative_to(REPO).as_posix()
+                    shown = ref.path.relative_to(REPO).as_posix()
                 except ValueError:
-                    shown = p.relative_to(root).as_posix()
+                    shown = ref.path.relative_to(root).as_posix()
                 hits.append(f"{shown} → {n}")
                 break
     return hits

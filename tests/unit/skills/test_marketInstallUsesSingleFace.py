@@ -22,7 +22,6 @@ tests/unit/skills/test_marketInstallUsesSingleFaceAndPins.py -q`
 
 from __future__ import annotations
 
-import ast
 import inspect
 import io
 import warnings
@@ -33,6 +32,8 @@ import pytest
 
 from neurova.security import safe_archive
 from neurova.skills import market_sources
+
+from tests import ast_scan
 
 REAL_BUNDLE_DIR = Path(market_sources.__file__).resolve().parent
 NEUROVA_ROOT = REAL_BUNDLE_DIR.parent
@@ -46,30 +47,21 @@ def _zipBytes(entries: dict) -> bytes:
     return buf.getvalue()
 
 
-def _extractallCalls(source: str) -> int:
-    """按 AST 数"真的调了解包器"，不按文本——注释里那句「原 extractall 无成员校验」既会被
-    文本守卫算成命中（假红），又会放过真调用旁的任何写法；只有调用节点才是事实。"""
-    tree = ast.parse(source)
-    hits = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr == "extractall":
-                hits += 1
-    return hits
-
-
 def _extractallFiles() -> list:
-    hits = []
-    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            count = _extractallCalls(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - 由收集卫生守卫兜
-            continue
-        if count:
-            hits.append(path.relative_to(NEUROVA_ROOT).as_posix())
-    return hits
+    """真调了解包器的文件清单：按 AST 取调用节点，不按文本。
+
+    文本守卫既会把注释里那句「原 extractall 无成员校验」算成命中（假红），
+    又会放过真调用旁的任何写法；只有调用节点才是事实。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148）：`extractall` 是判据的
+    **充分条件**——连这个符号都没出现的文件不可能命中，故带文本预筛。
+    私有 `rglob + ast.parse` 把「解析量」绑成「代码总量」，与其余受保护文件
+    共享机器时撞 30s 墙钟。
+    """
+    return sorted({
+        path.relative_to(NEUROVA_ROOT).as_posix()
+        for path, _line in ast_scan.callSites(NEUROVA_ROOT, "extractall")
+    })
 
 
 # ── 落盘解包只剩一处 ──
@@ -86,11 +78,22 @@ def testExtractallSurvivesOnlyInsideTheSingleFace():
         )
 
 
-def testExtractallProbeHasTeeth():
-    """排除型断言在功能缺失时会自动成立——先证探针抓得到真调用、也不被注释骗。"""
-    assert _extractallCalls("def f(zf, d):\n    zf.extractall(d)\n") == 1
-    assert _extractallCalls("# 原 extractall 无成员校验\nPASS\n") == 0
-    assert _extractallCalls("class A:\n    def extractall(self, d): pass\n") == 0
+def testExtractallProbeHasTeeth(tmp_path):
+    """排除型断言在功能缺失时会自动成立——先证探针抓得到真调用、也不被注释骗。
+
+    探针现走共享入口 `ast_scan.callSites`（原私有 `_extractallCalls` 已退役）：
+    反向对照仍按同一判据取数，在临时树里放三种写法逐条反证。
+    """
+    tree = tmp_path / "probe"
+    tree.mkdir()
+    (tree / "real.py").write_text("def f(zf, d):\n    zf.extractall(d)\n", encoding="utf-8")
+    (tree / "commented.py").write_text("# 原 extractall 无成员校验\nPASS\n", encoding="utf-8")
+    (tree / "defined.py").write_text("class A:\n    def extractall(self, d): pass\n",
+                                    encoding="utf-8")
+
+    hits = {path.name for path, _line in ast_scan.callSites(tree, "extractall")}
+
+    assert hits == {"real.py"}, f"探针抓不到真调用或被注释/定义骗：{hits}"
 
 
 # ── 市场侧只递策略，不重写判定 ──

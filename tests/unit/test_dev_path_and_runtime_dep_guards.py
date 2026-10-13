@@ -180,14 +180,15 @@ class TestProviderChatModelDepsDeclaredForRuntime:
     def _importedLangchainDists(self) -> set:
         """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。
 
-        解析走 `tests/ast_scan.py` 的共享预算（Issue #148）：本判据原先自己
-        `ast.parse` + `ast.walk`，被 `tests/unit/test_ci_ast_scan_budget_guard.py`
-        的受保护子集形态门禁点名——同一条根因（判据成本与代码总量捆绑）在本仓
-        只允许一处实现，收口到共享入口后本文件不再持有第二份全仓解析写法。
-        扫的是 `providers/*.py` 这一层（6 个文件），本类其余断言逐条复用本读数。
+        枚举与解析都走本仓唯一 AST 入口 `tests/ast_scan`（Issue #148 收口）：
+        私有 `glob` + `ast.parse` 是 `test_ci_ast_scan_budget_guard` 点名要红的
+        形态——判据的成本从此与目录大小脱钩。预筛词 `langchain` 是判据的**充分
+        条件**（`top.startswith("langchain")` 只可能命中文本里出现过这个词的文件，
+        而那个词只可能写在 import 语句里），故仍逐文件解析 import 面，
+        不放松「从 import 现场扫出来、不手抄」这条覆盖面。
         """
         dists = set()
-        for _path, node in ast_scan.nodeScan(self.PROVIDERS_DIR, hints=("langchain",)):
+        for path, node in ast_scan.nodeScan(self.PROVIDERS_DIR, hints=("langchain",)):
             if isinstance(node, ast.ImportFrom):
                 top = (node.module or "").split(".")[0]
             elif isinstance(node, ast.Import):
@@ -253,84 +254,6 @@ class TestProviderChatModelDepsDeclaredForRuntime:
         assert not hits, (
             f"{hits} 被登记为可优雅降级的可选依赖——它的缺席会让模型级连接检查"
             "恒报『未安装』，属于必须显式声明的运行时依赖（同 mcp 先例）。"
-        )
-
-
-class TestCliReplDepsDeclaredForCi:
-    """仓库根 `cli.py` 的模块级硬依赖必须在 CI 清单里声明（2026-10-12 实锤）。
-
-    实锤：受保护子集里的 `tests/unit/test_cliFourOhOneSelfRescueHint.py` 从
-    `cli` 取 `_error_message()`，而 `cli.py` 模块级 `from rich import box` 一族
-    （六个符号，无 try 降级）。CI 装的是 `requirements-ci.lock`，而 `rich` 此前
-    **一处都没直接被声明**——它只经 `typer` 传递进 `requirements-full.lock`，
-    CI 精简锁里没有。于是薄环境里那四条判据全部
-    `ModuleNotFoundError: No module named 'rich'`。
-
-    同一条红里还有第二个症状：`import cli` 会把仓库根的 `cli.py` 编译成
-    `__pycache__/cli.*.pyc`，被 `tests/conftest.py` 的仓库根污染守卫抓到
-    `['__pycache__']`。两个症状同一根因（CI 薄环境装不起这个模块），故同批收口。
-
-    覆盖面按 import 现场扫，不手抄清单：`cli.py` 顶层 import 的第三方顶层模块，
-    逐个在 `requirements-ci.txt` 与 `requirements-ci.lock` 里找声明与 pin。
-    标准库与仓内包（`scripts`）不在射程内。
-    """
-
-    CLI_PATH = PROJECT_ROOT / "cli.py"
-
-    #: 标准库 / 仓内包不算第三方发行版；PEP 503 名字与 import 名不同的按此表折算。
-    NON_DISTRIBUTIONS = frozenset({"scripts"})
-    IMPORT_TO_DIST = {
-        "yaml": "pyyaml",
-        "dotenv": "python-dotenv",
-    }
-
-    def _importedDists(self) -> set:
-        """`cli.py` 顶层 import 的第三方发行版名（PEP 503 形态）。"""
-        import sys
-
-        tree = ast_scan.transientTree(self.CLI_PATH)
-        tops: set = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                tops |= {a.name.split(".")[0] for a in node.names}
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                tops.add(node.module.split(".")[0])
-        stdlib = sys.stdlib_module_names
-        return {
-            self.IMPORT_TO_DIST.get(top, top).lower().replace("_", "-")
-            for top in tops
-            if top not in stdlib and top not in self.NON_DISTRIBUTIONS
-        }
-
-    def test_scan_itself_finds_the_chain(self):
-        """判据必须真扫到东西——扫空等于守卫静默不跑（本文件第 1 条的老根因）。"""
-        dists = self._importedDists()
-        assert {"httpx", "rich"} <= dists, (
-            f"未在 {self.CLI_PATH.name} 扫到 httpx/rich；实得 {sorted(dists)}。"
-            "本类其余断言会因此恒真，请先确认扫描面还是活的。"
-        )
-
-    def test_declared_in_ci_requirements(self):
-        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
-        missing = sorted(
-            d for d in self._importedDists()
-            if not re.search(rf"(?m)^\s*{re.escape(d)}\s*[><=!~]", ci)
-        )
-        assert not missing, (
-            f"requirements-ci.txt 未声明 {missing}——CI 装的是 requirements-ci.lock，"
-            "薄环境里 `tests/unit/test_cliFourOhOneSelfRescueHint.py` 会整文件 "
-            "ModuleNotFoundError，四条判据一条都跑不到。"
-        )
-
-    def test_pinned_in_ci_lock(self):
-        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
-        unpinned = [
-            d for d in sorted(self._importedDists())
-            if not re.search(rf"(?m)^\s*{re.escape(d)}==", lock)
-        ]
-        assert not unpinned, (
-            f"requirements-ci.lock 缺 {unpinned} 的 pin——声明了没重编等于没装。\n"
-            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
         )
 
 

@@ -30,9 +30,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from tests import ast_scan
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
@@ -58,14 +58,14 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _trees():
-    """扫描面：`ROOTS` 子树里已解析的 (路径, 树)。
-
-    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148：本判据在受保护
-    子集里，自带 `rglob` + `ast.parse` 会被形态门禁点名）。
-    """
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——后者把
+    # 判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     for root in ROOTS:
-        for p, tree in ast_scan.parsedModules(root):
-            yield p, tree
+        for ref in ast_scan.sourceRefsUnder(root, ".py"):
+            try:
+                yield ref.path, ast.parse(ref.code)
+            except (SyntaxError, UnicodeDecodeError):
+                continue
 
 
 def _definedNames(tree: ast.AST) -> set[str]:

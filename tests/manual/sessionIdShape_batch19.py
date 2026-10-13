@@ -72,6 +72,8 @@ def main() -> int:
         [sys.executable, "-c", CHILD.format(repo=str(Path(__file__).resolve().parents[2]),
                                             agent=AGENT, owner=OWNER)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        # 写侧也钉 UTF-8：本机 locale 是 cp936 时，子进程 stdout 的编码由它决定，
+        # 读侧显式 utf-8 而写侧照 locale 走，中文读数会被替换成 U+FFFD 而不是报错。
         env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT), "PYTHONIOENCODING": "utf-8"},
     )
     payload = json.loads(child.stdout.strip().splitlines()[-1]) if child.stdout.strip() else {}

@@ -44,14 +44,15 @@ BASELINE: dict[str, int] = {
 }
 
 
-def _blockingCallsInAsync(tree: ast.AST) -> list[int]:
+def _blockingCallsInAsync(source: str) -> list[int]:
     """返回 `async def` 子树里直接调用 `subprocess.<阻塞族>(...)` 的行号。
 
     含 `async def` 内嵌的 `def`——那种嵌套体一旦被同协程直接调用，照样占循环。
-    入参是**已解析的树**：枚举与解析走 `tests/ast_scan.py` 的共享预算
-    （本判据在受保护子集里，自带 `rglob` + `ast.parse` 会被
-    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名）。
     """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
     hits: list[int] = []
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)]:
         for node in ast.walk(fn):
@@ -65,14 +66,22 @@ def _blockingCallsInAsync(tree: ast.AST) -> list[int]:
 
 
 def _scan(directory: pathlib.Path) -> dict[str, int]:
+    """逐文件统计 `async def` 体内裸调阻塞子进程的落点数。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词取 `subprocess`，是判据的**充分条件**：谓词只认
+    `subprocess.<阻塞族>(...)`，连 `subprocess` 字样都没出现的文件不可能命中。
+    """
     perFile: dict[str, int] = {}
-    for path, tree in ast_scan.parsedModules(directory):
-        hits = _blockingCallsInAsync(tree)
+    for ref in ast_scan.sourceRefsUnder(directory, ".py", ast_scan.textHints("subprocess")):
+        hits = _blockingCallsInAsync(ref.code)
         if hits:
             # `as_posix()` 不是风格问题：基线里的键要能在 Linux CI 上同样命中，
             # 而 `str(relative_to(...))` 在 Windows 上给的是反斜杠（本判据首跑即被
             # 自己的 baseline 格抓到：4 个键里只有 `tool_executor.py` 那个不含目录的对了）。
-            perFile[path.relative_to(directory).as_posix()] = len(hits)
+            perFile[ref.path.relative_to(directory).as_posix()] = len(hits)
     return perFile
 
 
@@ -107,14 +116,14 @@ def test_asyncBodyReallyIsTheCountedShape():
         "async def handler():\n"
         "    return subprocess.run(['x'], check=False)\n"
     )
-    assert _blockingCallsInAsync(ast.parse(asyncShape)) == [3], "协程内那一发必须被抓到"
+    assert _blockingCallsInAsync(asyncShape) == [3], "协程内那一发必须被抓到"
 
     syncShape = (
         "import subprocess\n"
         "def helper():\n"
         "    return subprocess.run(['x'], check=False)\n"
     )
-    assert _blockingCallsInAsync(ast.parse(syncShape)) == [], (
+    assert _blockingCallsInAsync(syncShape) == [], (
         "同步函数不是本判据的射程（它由调用侧决定在不在循环里）——误伤会让下一轮把守卫放宽")
 
     nestedShape = (
@@ -124,12 +133,12 @@ def test_asyncBodyReallyIsTheCountedShape():
         "        return subprocess.Popen(['x'])\n"
         "    return inner\n"
     )
-    assert _blockingCallsInAsync(ast.parse(nestedShape)) == [4], "协程内嵌套 def 里那一发同样要抓"
+    assert _blockingCallsInAsync(nestedShape) == [4], "协程内嵌套 def 里那一发同样要抓"
 
 
 def test_scanRootActuallyCoversTheTree():
     """防"扫了个空却报绿"：扫描根必须真覆盖到生产树里那些文件。"""
-    files = ast_scan.filesUnder(SCAN_ROOT)
+    files = ast_scan.filesUnder(SCAN_ROOT, ".py")
     assert len(files) > 200, f"扫描根 {SCAN_ROOT} 只覆盖 {len(files)} 个文件——路径层级写错了"
     for rel in BASELINE:
         assert (SCAN_ROOT / rel).is_file(), f"基线里的 {rel} 不在扫描面内"

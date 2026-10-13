@@ -26,9 +26,9 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
-
 from tests import ast_scan
+
+import pytest
 from fastapi.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -154,9 +154,9 @@ def testMemoryPackageUsesOnlyDeclaredGates():
     """
     declared = {"get_current_user", "get_current_user_or_default"}
     offenders = []
-    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
-    # 再出现自带 rglob + ast.parse 的第二份实现）。
-    for py, tree in ast_scan.parsedModules(MEMORY_PKG):
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
+    # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    for path, tree in ast_scan.parsedModules(MEMORY_PKG, ".py"):
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue
@@ -167,10 +167,10 @@ def testMemoryPackageUsesOnlyDeclaredGates():
                     continue
                 src = "deps" if node.module.endswith("api.deps") else "auth"
                 if alias.name not in declared:
-                    offenders.append(f"{py.name}:{node.lineno} {src}.{alias.name}")
+                    offenders.append(f"{path.name}:{node.lineno} {src}.{alias.name}")
                 elif alias.name in declared and src != "auth":
                     offenders.append(
-                        f"{py.name}:{node.lineno} 从 {src} 导入 {alias.name}"
+                        f"{path.name}:{node.lineno} 从 {src} 导入 {alias.name}"
                         "（deps 那份是带 query token 的变体，名字相同语义不同）"
                     )
     assert not offenders, "记忆面的身份门不如清单：\n  - " + "\n  - ".join(offenders)

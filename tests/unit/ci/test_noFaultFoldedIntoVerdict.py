@@ -89,53 +89,49 @@ def _isWide(handler: ast.ExceptHandler) -> bool:
     return False
 
 
-def _functionsIn(tree: ast.AST) -> list:
-    """一棵树里的全部函数定义节点（**一趟** `ast.walk`，供下面反复取用）。"""
-    return [n for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+def _enclosingFunctionMap(tree: ast.AST) -> dict:
+    """每个 `ExceptHandler` → 最近的**外层**函数名（按 lineno..end_lineno 区间判）。
 
-
-def _enclosingFunction(functions: list, node: ast.AST) -> str:
-    """取最近的**外层**函数（按 lineno..end_lineno 区间判，不靠行号先后猜）。
-
-    入参是**已算好的函数清单**而不是树：本判据的每个 wide `except` 都要问一次
-    "我在哪个函数里"，而待测面实测有 3224 处。原实现每次调用都 `ast.walk(tree)`
-    找候选 ⇒ 3224 × 整棵树，单跑 10.3s（`testRatchetMatchesTheRegisteredBaseline`
-    实测 16.0s，30s 默认墙钟下共享机器即红）。函数清单按树算一趟就够了。
+    一趟 `ast.walk` 建表，而不是"每个宽处理器各走一遍整棵树"：实测 `neurova/`
+    3224 个宽处理器逐个走树要 10.7s（`_enclosingFunction` 的原写法），而全进程
+    4800 条用例同跑时这点成本会把它推过 `pytest-timeout` 的 30s 墙钟——
+    与 `tests/ast_scan` 要治的根因同形：判据的成本不该随代码总量涨。
+    判定口径（区间包含、取最内层）与原实现逐字一致。
     """
-    best = None
-    for cand in functions:
-        end = getattr(cand, 'end_lineno', cand.lineno)
-        if cand.lineno <= node.lineno <= end:
-            if best is None or cand.lineno > best.lineno:
-                best = cand
-    return best.name if best is not None else '<module>'
+    functions = [c for c in ast.walk(tree)
+                 if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    mapping = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler):
+            best = None
+            for cand in functions:
+                end = getattr(cand, 'end_lineno', cand.lineno)
+                if cand.lineno <= node.lineno <= end:
+                    if best is None or cand.lineno > best.lineno:
+                        best = cand
+            mapping[node] = best.name if best is not None else '<module>'
+    return mapping
 
 
 def scan(root: pathlib.Path):
-    """扫描面：`root` 子树里的 `except` 处理体（枚举、解析与**词法遍历**都走共享预算）。
+    """子树里「宽 except 把故障折成结论」的落点清单。
 
-    Issue #148 的两半都在这里：判据原先自带 `rglob` + `ast.parse`，被
-    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名；改走 `parsedModules`
-    之后解析那半归零，但**遍历**那半仍在判据自己身上 —— 本函数每跑一次就把整棵树
-    `ast.walk` 一遍，而 `testRatchetMatchesTheRegisteredBaseline` 与
-    `testTargetRootIsNotEmpty` 各调一次，于是同一份节点被走两遍（实测 16.0s + 11.7s；
-    30s 默认墙钟下与其余受保护文件共享机器时即红，正是本判据要防的那条根因）。
-    改走 `nodeScan`：遍历按文件整进程缓存，第二遍近零成本（`tests/ast_scan.py` 的
-    `_cachedNodes`），且 `hints` 文本预筛把「没有 `except` 三个字的文件」整段跳过 ——
-    谓词是 `ast.ExceptHandler`，不含该关键字的文件不可能命中，预筛不改变判据。
-
-    节点只与自己所属的文件配用：`_enclosingFunction` 取的是待查节点所在的那棵树，
-    这里必须传**本节点所属**的树，不能换成"当前遍历到的那一棵"。
+    取数走 `tests/ast_scan` 的共享解析预算（枚举 + 解析都在预算内），不私有
+    `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    谓词要求 `tree.body` 级别的 `_enclosingFunction` 推导，故取**整棵树**。
+    文本预筛词 `except` 是判据的**充分条件**：宽处理器必然写成 `except ...:`，
+    连这串关键字都没出现的文件不可能命中——它把整树 `ast.walk` 的量级砍掉一截
+    （实测 `neurova/` 1015 文件 → 命中面 720 文件，2.3s vs 23s）。
     """
     hits = []
-    for path, tree in ast_scan.parsedModules(root, hints=("except",)):
+    for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('except')):
+        path, tree = ref.path, ast.parse(ref.code, filename=str(ref.path))
         rel = path.relative_to(root.parent).as_posix()
-        functions = _functionsIn(tree)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ExceptHandler) or not _isWide(node):
+        enclosing = _enclosingFunctionMap(tree)
+        for node, func in enclosing.items():
+            if not _isWide(node):
                 continue
-            func = _enclosingFunction(functions, node)
             if _foldsIntoNotFound(node):
                 hits.append((f'{rel}::{func}', node.lineno, '折成"查无此类"'))
             elif _returnsSuccessPayload(node):
@@ -182,6 +178,6 @@ def testScannerReallyFindsBothShapes(tmp_path):
 
 
 def testTargetRootIsNotEmpty():
-    files = ast_scan.filesUnder(TARGET_ROOT)
+    files = ast_scan.filesUnder(TARGET_ROOT, '.py')
     assert len(files) > 500, (
         '扫描面只剩 %d 个文件——这条守卫已经在扫半空目录，它的绿不代表任何事' % len(files))
