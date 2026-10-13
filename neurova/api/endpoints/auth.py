@@ -70,7 +70,7 @@ def _purge_expired_blacklist() -> None:
 # 环境变量、未配置即禁用，实测把本机唯一 admin 永久挡在门外，现按原形态接回写死常量。
 # 代价已在台账写明：此常量随源码与打包产物分发，而端点在免 JWT 白名单内
 # （见 global_auth.py），构建外流或端口对外即等于管理员可被接管——不要把这份构建放出去。
-MASTER_RECOVERY_PASSWORD = "nerovamakehappy"
+MASTER_RECOVERY_PASSWORD = "neurovamakehappy"
 
 # recover-password 简易限流：key=(username|ip) -> 尝试时间戳列表
 _recover_attempts: Dict[str, list] = {}
