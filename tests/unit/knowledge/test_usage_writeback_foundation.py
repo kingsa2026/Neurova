@@ -145,18 +145,21 @@ def _adoptionCallSites(root):
     """
     import ast as _ast
 
+    from tests import ast_scan
+
     root = pathlib.Path(root)
     sites = []
-    for path in sorted(root.rglob('*.py')):
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——后者把
+    # 判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    # 预筛词 `recordAdoption` 是判据的**充分条件**：谓词只认这一处属性调用。
+    for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('recordAdoption')):
         try:
-            # filename 传下去：全树解析若有 SyntaxWarning，报的必须是真文件而不是
-            # `<unknown>`——否则"哪个文件有非法转义"这条线索被整个抹掉
-            tree = _ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+            tree = _ast.parse(ref.code, filename=str(ref.path))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)                     and node.func.attr == 'recordAdoption':
-                sites.append('%s:%d' % (path.relative_to(root).as_posix(), node.lineno))
+                sites.append('%s:%d' % (ref.path.relative_to(root).as_posix(), node.lineno))
     return sites
 
 

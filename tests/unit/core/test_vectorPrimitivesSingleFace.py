@@ -21,6 +21,8 @@ from pathlib import Path
 
 from neurova.core import vector_math
 
+from tests import ast_scan
+
 NEUROVA_ROOT = Path(vector_math.__file__).resolve().parent.parent
 SINGLE_FACE = "core/vector_math.py"
 OLD_HOST = "cognitive_layers/memory_layer/unified_vector_store.py"
@@ -32,36 +34,40 @@ def _parse(rel: str) -> ast.Module:
 
 
 def _primitiveDefinitions() -> list:
-    """全仓 `neurova/` 里这几个原语的**定义**落点（按归属收口，不看调用也不看文本包含）。"""
+    """全仓 `neurova/` 里这几个原语的**定义**落点（按归属收口，不看调用也不看文本包含）。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148）：私有 `rglob + ast.parse`
+    把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟。
+    文本预筛按**定义形状**取词——`def <名字>` 都没出现的文件不可能定义它。
+    """
     hits = []
-    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - 收集卫生守卫兜
-            continue
-        for node in ast.walk(tree):
+    for ref in ast_scan.sourceRefsUnder(
+            NEUROVA_ROOT, hints=tuple("def %s" % name for name in PRIMITIVES)):
+        for node in ast.walk(ast_scan._cachedParse(ref.stamp, ref.code)):
             if isinstance(node, ast.FunctionDef) and node.name in PRIMITIVES:
-                hits.append("%s::%s" % (path.relative_to(NEUROVA_ROOT).as_posix(), node.name))
+                hits.append("%s::%s" % (ref.path.relative_to(NEUROVA_ROOT).as_posix(),
+                                        node.name))
     return sorted(hits)
 
 
 def _importsFromOldHost() -> list:
-    """还有谁从旧落点导这几个名字——留着就是两份出口并存，改一处另一处静默不跟。"""
+    """还有谁从旧落点导这几个名字——留着就是两份出口并存，改一处另一处静默不跟。
+
+    取数走共享预算的 `importsOf`（`nodeScan` 惰性产出 + 判据筛 import 节点）：
+    文本预筛取旧落点名——连模块名都没出现的文件不可能从它导东西。
+    """
     hits = []
-    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("unified_vector_store"):
-                bad = [a.name for a in node.names if a.name in PRIMITIVES]
-                if bad:
-                    hits.append("%s:%s" % (path.relative_to(NEUROVA_ROOT).as_posix(), ",".join(sorted(bad))))
+    for ref in ast_scan.sourceRefsUnder(NEUROVA_ROOT,
+                                        hints=ast_scan.textHints("unified_vector_store")):
+        for node in ast.walk(ast_scan._cachedParse(ref.stamp, ref.code)):
+            if not isinstance(node, ast.ImportFrom) or not node.module:
+                continue
+            if not node.module.endswith("unified_vector_store"):
+                continue
+            bad = [a.name for a in node.names if a.name in PRIMITIVES]
+            if bad:
+                hits.append("%s:%s" % (ref.path.relative_to(NEUROVA_ROOT).as_posix(),
+                                       ",".join(sorted(bad))))
     return sorted(hits)
 
 
@@ -129,17 +135,15 @@ def _normShapeHits(root: Path) -> list:
     批 33 那枚 M4 教出来的口径：只认函数名的话，站点把原语内联重写一遍就滑过去了
     （本批 M3 正是这一形）。所以这里按式子认，不按 `def vector_norm` 认。"""
     hits = []
-    for path in sorted(root.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        rel = path.relative_to(root).as_posix()
+    # 取数走共享预算的一次性入口（本判据只扫一次，不留常驻语法树）。
+    # 文本预筛：判据要认「平方和 + 开根」，连 `sqrt` 与 `** 0.5` 都没出现的文件
+    # 不可能命中——这是 `_isNormShape` 的**充分条件**。
+    for ref in ast_scan.sourceRefsUnder(
+            root, hints=ast_scan.textHints("sqrt(", "** 0.5")):
+        rel = ref.path.relative_to(root).as_posix()
         if rel == SINGLE_FACE:
             continue
-        try:
-            with open(path, encoding="utf-8") as fh:
-                tree = ast.parse(fh.read())
-        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - 收集卫生守卫兜
-            continue
+        tree = ast_scan._cachedParse(ref.stamp, ref.code)
         for node in ast.walk(tree):
             src = None
             if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "sqrt":

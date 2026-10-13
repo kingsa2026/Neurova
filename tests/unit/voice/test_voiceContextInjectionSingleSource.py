@@ -26,6 +26,8 @@ import ast
 import pathlib
 import re
 
+from tests import ast_scan
+
 REPO = pathlib.Path(__file__).resolve().parents[3]
 NEUROVA = REPO / "neurova"
 
@@ -34,10 +36,13 @@ STATE_SYMBOLS = ("_current_context", "get_voice_context", "clear_voice_context")
 
 
 def _pyFiles(root: pathlib.Path):
-    for path in sorted(root.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        yield path
+    """`root` 子树下的 `.py` 清单——枚举走共享解析预算（Issue #148）。
+
+    私有 `rglob` + 别处私有 `ast.parse` 组成「全仓扫描」：判据成本随代码总量涨，
+    与其余受保护文件共享机器时撞 30s 墙钟。枚举归 `ast_scan.filesUnder`
+    （`SHARED_ENUM_ENTRIES`），解析归 `ast_scan.transientNodes`。
+    """
+    return iter(ast_scan.filesUnder(root))
 
 
 class TestInjectionHasOneImplementation:
@@ -80,20 +85,21 @@ class TestInjectionHasOneImplementation:
         而现役那份根本没用这个实例（注入是内联重拼的）。
         """
         offenders = []
-        for path in _pyFiles(NEUROVA):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-                    continue
-                target = node.targets[0]
-                if not (isinstance(target, ast.Name) and isinstance(node.value, ast.Call)):
-                    continue
-                fname = getattr(node.value.func, "id", "") or getattr(node.value.func, "attr", "")
-                if not fname.endswith("VoiceContextModule"):
-                    continue
-                if len(re.findall(rf"\b{re.escape(target.id)}\b", text)) <= 1:
-                    offenders.append(f"{path.relative_to(REPO).as_posix()}:{node.lineno}")
+        # 取数走共享解析预算：`VoiceContextModule` 是判据的充分条件——连这个符号
+        # 都没出现的文件不可能构造它，故带文本预筛（解析量从代码总量降到命中面）。
+        for path, node in ast_scan.transientNodes(
+                NEUROVA, hints=ast_scan.textHints("VoiceContextModule")):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not (isinstance(target, ast.Name) and isinstance(node.value, ast.Call)):
+                continue
+            fname = getattr(node.value.func, "id", "") or getattr(node.value.func, "attr", "")
+            if not fname.endswith("VoiceContextModule"):
+                continue
+            text = ast_scan.sourceCode(path)
+            if len(re.findall(rf"\b{re.escape(target.id)}\b", text)) <= 1:
+                offenders.append(f"{path.relative_to(REPO).as_posix()}:{node.lineno}")
         assert offenders == [], f"构造后即弃的实例（每次还白跑一遍情感分析器初始化）：{offenders}"
 
 

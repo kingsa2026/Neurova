@@ -221,10 +221,31 @@ jobs:
           path: ~/.cache/osv-scalibr
           key: osv-scalibr-${{ runner.os }}
 
+      - name: Prefetch OSV offline databases (best effort)
+        # 先把漏洞库落到 runner 本地缓存，让下面两条门禁的裁决**都不依赖**
+        # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+        # 在 CI 容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+        #
+        # **必须排在 pip-audit 两条之前**（Issue #357）：`pip_audit_gate.py`
+        # 的离线裁决通路读的就是这一步落下的 `PyPI/all.zip`。此前预取排在后面，
+        # 于是 pip-audit 两条永远走直连——构建 `cnb-a99-1k4bpgeim` 的
+        # `audit full runtime locked set`（169 包 = 169 次 POST）撞上连接失败，
+        # 3 次重试耗尽后退 2，成为与提交内容无关的阻塞红灯。同一构建里 85 包的
+        # `requirements-ci.lock` 过了，正说明这不是配置问题而是长链路上的必然抖动。
+        # 预取覆盖的生态由 `osv_audit.py` 的 `OFFLINE_DB_SCOPE` 单源给出
+        # （crates.io / npm / PyPI），不在本文件里手抄第二份。
+        #
+        # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+        # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+        # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+        run: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+
       # pip-audit 经 scripts/ci/pip_audit_gate.py 调用（Issue #354）：直调
       # `python -m pip_audit` 时 pypi.org 的一次 15s 读超时就是阻塞红灯，而那次红
       # 与提交内容无关。包装脚本换 `--vulnerability-service osv`、给足单次查询超时、
-      # 并只对基础设施错误重试。与 cnb 侧命令逐字一致（test_ci_parity_guard.py 守）。
+      # 并只对基础设施错误重试；离线库在场时改走离线口径（OSV-Scanner + 本地
+      # `PyPI/all.zip`），裁决不再依赖远端可达性。与 cnb 侧命令逐字一致
+      # （test_ci_parity_guard.py 守）。
       - name: Audit CI locked set
         run: python scripts/ci/pip_audit_gate.py -r requirements-ci.lock
 
@@ -232,15 +253,6 @@ jobs:
         # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
         # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
         run: python scripts/ci/pip_audit_gate.py -r requirements-full.lock
-
-      - name: Prefetch OSV offline databases (best effort)
-        # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
-        # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
-        # 在 CI 容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
-        # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
-        # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
-        # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
-        run: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
 
       - name: Audit non-pip trees (Rust crates + runtime npx packages)
         # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：

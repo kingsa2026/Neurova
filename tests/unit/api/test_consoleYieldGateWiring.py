@@ -293,7 +293,13 @@ def testAdminResumeExecutesAsTheOriginalRequester(makeClient, runStore, yieldChe
 
 def testParkedRunsAreReadableButPayloadStaysInside(makeClient, runStore, yieldChecker):
     """SSE 是一次性的：重启/刷新后"等人"这条必须还有读处，否则 parked 只写不读。
-    读面回状态与原因，不回用户原文。"""
+    读面回状态与原因，不回**续跑载荷**（用户原文住在那儿，只在行确实挂着时存在于库里）。
+
+    判据落在"载荷字段不外泄"上，而不是"正文里不出现任何用户字样"：`e1067e02` 按子
+    Agent 浮窗的回读需要，给投影补了 `task`（`message_digest` 就是 `intake` 存的
+    task 摘要，截断到 200 字符）——那是**有意公开**的窗口标题，不是载荷本体。
+    只钉"整串正文里不含任何用户字样"会把正当设计判红（假阳性会训练人忽略门禁）。
+    """
     run_id, sseBody = _parkATurn(makeClient, runStore, yieldChecker, "g-read")
 
     body = makeClient(_RecordingAgent(), OWNER).get(
@@ -302,7 +308,9 @@ def testParkedRunsAreReadableButPayloadStaysInside(makeClient, runStore, yieldCh
     runs = {r["run_id"]: r for r in body["data"]["runs"]}
     assert runs[run_id]["status"] == ars.PARKED_STATUS
     assert runs[run_id]["park_reason"]
-    assert "resume_payload" not in runs[run_id] and "park-me" not in json.dumps(body)
+    # 续跑载荷（`resume_payload`，用户原文）一律不出现在读面
+    assert "resume_payload" not in runs[run_id], f"读面带出了续跑载荷：{runs[run_id]}"
+    assert not any("resume_payload" in r for r in body["data"]["runs"])
 
     assert makeClient(_RecordingAgent(), STRANGER).get(
         "/api/v1/console/chat/runs", params={"session_id": "g-read"}
