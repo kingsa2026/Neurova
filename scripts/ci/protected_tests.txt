@@ -2788,3 +2788,16 @@ tests/unit/api/test_channelManagementFaceTakesAgent.py
 # 红自证基线取的是**被守护那次改动的父笔**（HEAD 已含批 37，还原 HEAD 会量出 4 全绿的假"已修"）
 # ⇒ 2 failed/2 passed，复证还原后 4 passed。
 tests/unit/api/test_skillPoolInstallReceiptIsHonest.py
+# 批 30（§6-193）MQTT/WebSocket 入站投递的载荷必须付得起事件门的货币。判据 10 格分四组：
+# 真 MQTTAdapter + 真装配闭包 + 真 `_on_channel_event`（只在 `_dispatch_message` 那道门截住，不起
+# agent 不花配额）——消息真到门 & 到门的字段齐两样；反证格拿旧形状真投进闭包 ⇒ 必抛 TypeError 且
+# 点名 NoneType，补 metadata={} ⇒ 必抛 AttributeError 且缺 channel_type（证明红在门的读法上）；
+# 全仓按形状数 `_emit_event` 投递点（扫描面按目录收口，避开 scheduler/orchestrator 那族同名
+# `_emit_event` 的同名词不同物），牙齿四形：投 UnifiedMessage 要红 / 合法 _make_message 不许红 /
+# 带 ChannelMessage 注解的形参不许红 / 换个函数名混过去也要红；两支 parse_raw_message 的返回注解
+# 与真产物同形两格。
+# 红自证＝两生产件按路径清单还原 HEAD ⇒ 7 failed/3 passed（那 3 格本就该绿：反证、牙齿、地板）；
+# 逐文件单跑三次同读数 10/10/10 passed；目录级 collect 复算 tests/unit/channels 651→661。
+# 两笔自伤进形态集：反证段的桩写成 async 而生产方法是同步 ⇒ 成因被换成"协程对象没有 metadata"，
+# 红证的是自己的桩；活体没把 `_main_loop` 交给适配器 ⇒ "门收到 0 条"读的是探针的洞不是被测代码。
+tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py
