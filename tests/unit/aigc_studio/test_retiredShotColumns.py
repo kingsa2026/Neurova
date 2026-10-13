@@ -26,6 +26,13 @@
 6. 旧库兼容：老安装留下的这四列**不 DROP**（不可逆点写在正文与台账），新代码开库后
    读写如常，不因"库里多出一列没人管"而崩；
 7. 反向对照：把含退役列的伪 schema / 伪 TS 接口喂给同一扫描器，必须报出来。
+
+CI 红与根因（2026-10-13 `cnb-elr-1k4pvclq5-003`）：第 1 条判据原先自己写了一套
+`root.rglob("*")` + 逐文件 `ast.parse`，**不剪枝**且对 `.py`/`.ts`/`.vue` 各扫一遍，
+于是解析面 = 本机装了什么（根下 `.venv`/`node_modules` 数万个文件都算进来），
+单跑就撞本模块自己挂的 90s 墙钟。现收口到唯一 AST 入口 `tests/ast_scan`：
+枚举走 `sourceRefsUnder`（原地剪掉第三方/产物目录），解析仍走本文件唯一的
+`_codeText` 取形实现，并按判据自身的**充分条件**（文本里要出现这个名字）预筛。
 """
 from __future__ import annotations
 
@@ -41,6 +48,9 @@ import pytest
 pytestmark = pytest.mark.timeout(90)
 
 REPO = Path(__file__).resolve().parents[3]
+
+from tests import ast_scan  # noqa: E402  (仓根在 sys.path 上，见 tests/conftest.py)
+
 _STORE = REPO / "neurova" / "aigc_studio" / "store.py"
 _SERVICES = REPO / "neurova" / "aigc_studio" / "services.py"
 _API = REPO / "neurova" / "api" / "endpoints" / "studio_api.py"
@@ -107,6 +117,18 @@ def _functionSource(path: Path, fn: str) -> str:
 class TestProductionFaceHasNoRetiredSymbols:
     @pytest.mark.parametrize("name", GLOBALLY_BANNED)
     def test_retiredSymbolGoneFromProduction(self, name):
+        """枚举与解析都走唯一 AST 入口（Issue #148 / #197）。
+
+        原写法是私有 `root.rglob("*")` 逐文件读文本 + `ast.parse`：两份清单
+        （`.py` 与 `.ts`/`.vue`）各扫一遍，且**不剪枝**——`node_modules` 与
+        第三方产物目录都被算进扫描面，成本随本机装了什么而变（实测本仓根下
+        `.venv`/`node_modules` 贡献数万个 `.py`），单跑就撞本模块自己挂的
+        `pytest.mark.timeout(90)`。
+
+        改后：解析面走 `_codeText` 唯一实现（先按判据自身的**充分条件**做文本
+        预筛再取形），枚举面走 `sourceRefsUnder`（原地剪掉第三方/产物目录）。
+        判据与报错形态不变——仍是"代码里出现这个名字的文件清单"。
+        """
         offenders = []
         # `.py` 侧的枚举与解析走 tests/ast_scan 的共享预算（`nodeScan` 一次给全
         # 节点流），不私有 `rglob("*") + ast.parse`：那条写法每次调用都要走遍整棵
