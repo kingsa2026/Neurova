@@ -507,6 +507,18 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
     # 验证辅助
     # ============================================================
 
+    def _requireVerificationToken(self, token: str, what: str) -> None:
+        """C-23：必须与配置的 verification_token 恒定时间比对；未配置即 fail-closed。
+
+        口径与 wecom/telegram 一致——"没配密钥就跳过校验"是最坏的那种兜底，
+        它让任何自算的 token 都能通过。
+        """
+        expected = self.config.verification_token or ""
+        if not expected or not token or not hmac.compare_digest(token, expected):
+            raise ValueError(
+                f"Feishu {what} rejected: verification token missing or mismatched (fail-closed)"
+            )
+
     def verify_url_challenge(self, challenge: str, token: str) -> Dict[str, str]:
         """
         Webhook URL 验证
@@ -516,12 +528,16 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
         C-23: 必须与配置的 verification_token 比对（恒定时间比较）；
         未配置 token 时 fail-closed（拒绝挑战，与 wecom/telegram 口径一致）。
         """
-        expected = self.config.verification_token or ""
-        if not expected or not token or not hmac.compare_digest(token, expected):
-            raise ValueError(
-                "Feishu URL verification rejected: token missing or mismatched (fail-closed)"
-            )
+        self._requireVerificationToken(token, "URL verification")
         return {"challenge": challenge}
+
+    def verify_event_token(self, token: str) -> None:
+        """事件回调的令牌核对——分派链在把消息投出去**之前**必须过这道。
+
+        令牌位置两代不同：v2 在 `header.token`，v1 在顶层 `token`；取哪个由端点负责，
+        "比不比、怎么比"只此一份（教义第 6 条）。不通过就抛 ValueError，由端点翻成 4xx。
+        """
+        self._requireVerificationToken(token or "", "event callback")
 
 
 def create_feishu_adapter(
