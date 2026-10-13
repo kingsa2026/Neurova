@@ -14,11 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
-from neurova.cognitive_layers.memory_layer.unified_vector_store import (
-    UnifiedVectorStore,
-    vector_norm,
-    vector_normalize,
-)
+from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
 
 logger = get_logger(__name__)
 
@@ -81,9 +77,9 @@ class VectorGatingNetwork:
         centroids = self.vector_store.get_expert_centroids()
 
         # 归一化查询向量
-        norm = vector_norm(query_vec)
+        norm = vector_math.vectorNorm(query_vec)
         if norm > 0:
-            query_vec = vector_normalize(query_vec)
+            query_vec = vector_math.vectorNormalize(query_vec)
 
         # 计算 cosine 相似度
         scores = {}

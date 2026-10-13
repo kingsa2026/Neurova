@@ -89,11 +89,6 @@ def _vec_sub(a: List[float], b: List[float]) -> List[float]:
     return [x - y for x, y in zip(a, b)]
 
 
-def _vec_norm(v: List[float]) -> float:
-    """向量模长"""
-    return math.sqrt(sum(x * x for x in v))
-
-
 # ────── 时间位置编码器 ──────
 
 
