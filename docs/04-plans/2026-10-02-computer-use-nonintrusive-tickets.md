@@ -224,12 +224,12 @@ T-08 ← RS 会话池（档 C，本轮不开工）
 
 ## 4. 本批取证顺手撞见的相邻断点（登记，不在本批顺手修）
 
-1. **`NeurUI/package.json` 的 `lint` 脚本不可用**：命令调 `eslint`，但 eslint 既不在
-   `dependencies`/`devDependencies`，也不在 `node_modules/.bin`，实跑报
-   "eslint 不是内部或外部命令"。而 `AGENTS.md` 第 4 节把 `npm run lint` 列为前端必跑三项之一
-   ——即该纪律项在本机**一直无法满足**，且失败形态是 shell 层报错，容易被当成环境问题跳过。
-   处置需另拍：补依赖并全量过一遍既有代码（会翻红一大片，属独立决定），
-   或如实把该项从纪律里摘掉。**不在本批顺手改**（会动 lock 与既有代码面）。
+1. **前端 lint 门**：口径以 `AGENTS.md` §4 为唯一权威（该节已裁定"两道实跑门
+   `npm run test` + `npx vue-tsc --noEmit`，lint 不作验收项；恢复它须另批补 flat config +
+   依赖并接入 CI，形态三见台账 §6-112"）。本条只留我实测到的失败形态，不复述口径：
+   `npm run lint` 报"eslint 不是内部或外部命令"（eslint 既不在依赖清单也不在
+   `node_modules/.bin`）——shell 层报错、语气像环境问题，容易被跳过。
+   ~~处置需另拍：补依赖或从纪律里摘掉~~ → 已由 §4 收口，本批 W1-T01/T-01b 的验收按两道实跑门执行。
 2. `tests/unit/api` + `agent/test_computer_browser_tools.py` + `integration/test_computer_use_integration.py`
    共 **20 条预存红**（W1-T01 做过 HEAD 回退 A/B，失败集合逐行相同 ⇒ 非本批引入）。
    大头：`test_transfers_wave_h4` 8 条、`test_files_store_persistence` 4 条、
