@@ -180,26 +180,23 @@ class TestProviderChatModelDepsDeclaredForRuntime:
     def _importedLangchainDists(self) -> set:
         """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。
 
-        取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-        不私有 `glob + ast.parse`：后者把判据成本绑在代码总量上
-        （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处——受保护
-        子集里多一份私有全仓解析，与其余文件共享机器时必偶发红）。
-        预筛词是判据的**充分条件**：连 `langchain` 字样都没出现的文件不可能
-        产出 langchain 发行版名，解析量从**代码总量**降到**命中面**。
+        枚举与解析都走本仓唯一 AST 入口 `tests/ast_scan`（Issue #148 收口）：
+        私有 `glob` + `ast.parse` 是 `test_ci_ast_scan_budget_guard` 点名要红的
+        形态——判据的成本从此与目录大小脱钩。预筛词 `langchain` 是判据的**充分
+        条件**（`top.startswith("langchain")` 只可能命中文本里出现过这个词的文件，
+        而那个词只可能写在 import 语句里），故仍逐文件解析 import 面，
+        不放松「从 import 现场扫出来、不手抄」这条覆盖面。
         """
         dists = set()
-        for ref in ast_scan.sourceRefsUnder(
-                self.PROVIDERS_DIR, ".py", ast_scan.textHints("langchain")):
-            tree = ast.parse(ref.code, filename=str(ref.path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    top = (node.module or "").split(".")[0]
-                elif isinstance(node, ast.Import):
-                    top = (node.names[0].name or "").split(".")[0]
-                else:
-                    continue
-                if top.startswith("langchain"):
-                    dists.add(top.lower().replace("_", "-"))
+        for path, node in ast_scan.nodeScan(self.PROVIDERS_DIR, hints=("langchain",)):
+            if isinstance(node, ast.ImportFrom):
+                top = (node.module or "").split(".")[0]
+            elif isinstance(node, ast.Import):
+                top = (node.names[0].name or "").split(".")[0]
+            else:
+                continue
+            if top.startswith("langchain"):
+                dists.add(top.lower().replace("_", "-"))
         return dists
 
     def test_scan_itself_finds_the_chain(self):

@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import gc
 import io
 import sys
@@ -72,6 +73,56 @@ def protectedFiles() -> list:
     return [line.split("#", 1)[0].strip()
             for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
             if line.split("#", 1)[0].strip()]
+
+
+def _mayHideRepoWideScan(text: str) -> bool:
+    """文本层粗判：这份源码里**有没有可能**出现「枚举 + 解析」的组合。
+
+    根因（本门禁自己踩的那条）：`TestNoUnprefilteredRepoWideScan` 与
+    `test_known_hit_points_use_the_shared_budget` 都要把受保护子集里的每个
+    `.py` 交给 `_repoWideAstScans`，而后者第一步就是 `ast.parse(source)`。
+    于是**门禁自身的解析面 = 受保护子集的总量**：本机 546 条清单约 1.7s 单跑，
+    在同一台机器上与其余近 500 个文件共享时撞 30s 默认墙钟——判据成本又一次
+    绑在代码总量上（与本文件要防的根因同形，只是账单记在门禁自己身上）。
+
+    预筛是**充分条件**，不是放宽判据：
+
+    - 落点候选 = 枚举调用名（`rglob`/`glob`/`iglob`/`iterdir`/`listdir`/`scandir`）
+      或 `walk`（含 `os.walk` 的裸名与属性两形态。属性根名无法靠文本区分
+      `ast.walk` 与 `os.walk`，故要宽收）；
+    - 解析原语候选 = `parse`、`compile` 与模块名 `ast` / `builtins` / `py_compile` /
+      `compileall` / `parso` / `libcst` / `astroid`（`import ast` 后写的
+      `_ast.parse(...)`、`from ast import parse as P` 之后只留 `P`，这两形都要能被
+      `ast` 一词兜住）。
+
+    两份词表都是 `_repoWideAstScans` 各输出面的**超集**——两个候选词一个都没出现
+    的文件，在那个谓词下不可能命中。反向钉住见
+    `TestPrefilterNeverSkipsARealHit`：预筛若把真命中滤掉，本门禁会静默空转。
+    """
+    if not any(word in text for word in ENUMERATION_HINTS):
+        return False
+    return any(word in text for word in PARSE_HINTS)
+
+
+#: 枚举侧预筛词：`ENUMERATION_ATTRS` / `ENUMERATION_NAMES` / `os.walk` 的超集。
+ENUMERATION_HINTS = ("rglob", "glob", "iglob", "iterdir", "listdir", "scandir", "walk")
+#: 解析侧预筛词：`PARSE_MODULE_ATTRS` / `BARE_PARSE_NAMES` 的超集。
+PARSE_HINTS = ("parse", "compile", "ast", "builtins", "py_compile", "compileall",
+               "parso", "libcst", "astroid")
+
+
+def _repoWideScanHits(rel: str) -> list:
+    """受保护子集里单个文件的扫描落点（文本预筛 → 需要时才解析）。"""
+    path = PROJECT_ROOT / rel
+    if not path.is_file() or not rel.endswith(".py"):
+        return []
+    text = io.open(path, encoding="utf-8", errors="ignore").read()
+    if not _mayHideRepoWideScan(text):
+        return []
+    try:
+        return _repoWideAstScans(text)
+    except SyntaxError:
+        return []
 
 
 #: 文件系统枚举调用：属性形态（`X.rglob` / `X.iterdir` …）
@@ -416,21 +467,15 @@ def _oneShotRetainingScanHits(source: str) -> list:
 
 
 class TestNoUnprefilteredRepoWideScan:
-    """受保护子集里的全仓 AST 扫描归零：判据不得与代码总量捆绑。"""
+    """受保护子集里的全仓 AST 扫描归零：判据不得与代码总量捆绑。
+
+    取数只读一遍：两份断言各走一次 `_liveRepoWideScans()`（本模块唯一取数口，
+    整会话算一次），不各写一套「遍历清单 + 解析」——
+    门禁自己重复解析一遍受保护子集，就是本文件要防的那条根因。
+    """
 
     def test_no_unledgered_repo_wide_ast_scan(self):
-        live = {}
-        for rel in protectedFiles():
-            path = PROJECT_ROOT / rel
-            if not path.is_file() or not rel.endswith(".py"):
-                continue
-            try:
-                source = io.open(path, encoding="utf-8", errors="ignore").read()
-                hits = _repoWideAstScans(source)
-            except SyntaxError:
-                continue
-            if hits:
-                live[rel] = hits
+        live = _liveRepoWideScans()
         unledgered = {rel: hits for rel, hits in live.items() if rel not in REPO_WIDE_SCAN_LEDGER}
         assert not unledgered, (
             "受保护子集里出现「rglob + ast.parse」全仓扫描（判据与代码总量、"
@@ -444,18 +489,7 @@ class TestNoUnprefilteredRepoWideScan:
 
     def test_ledger_has_no_stale_entries(self):
         """台账里不得有已经不存在命中点的条目（清了扫描要同步销账）。"""
-        live = {}
-        for rel in protectedFiles():
-            path = PROJECT_ROOT / rel
-            if not path.is_file() or not rel.endswith(".py"):
-                continue
-            try:
-                source = io.open(path, encoding="utf-8", errors="ignore").read()
-                hits = _repoWideAstScans(source)
-            except SyntaxError:
-                continue
-            if hits:
-                live[rel] = hits
+        live = _liveRepoWideScans()
         stale = sorted(set(REPO_WIDE_SCAN_LEDGER) - set(live))
         assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
 
@@ -1428,6 +1462,70 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
         )
         assert after["frozen"] > 0, f"退役后冻结对象仍为 0：{after}"
 
+class TestPrefilterNeverSkipsARealHit:
+    """预筛不得漏判：受保护子集里每个真命中都要能过预筛。
+
+    预筛只决定「要不要解析」，本门禁因此从「解析受保护子集全部源码」降到
+    「解析候选文件」。代价是引入一个**可能静默空转**的缝：若某个真命中被
+    滤掉，两份断言都会对它的文件全体沉默（绿，但什么也没查）。
+
+    两条反向钉住：① 逐文件把预筛读数与真判据对上；② 每一处**历史上真出现过**
+    的形态写成样本，必须过预筛（形态来自台账与上一轮销账记录，
+    含 helper 拆两层、`os.walk`、`import ast as _ast`、`from ast import parse as P`）。
+    """
+
+    def test_every_live_hit_passes_the_prefilter(self):
+        for rel, hits in _liveRepoWideScans().items():
+            text = io.open(PROJECT_ROOT / rel, encoding="utf-8", errors="ignore").read()
+            assert _mayHideRepoWideScan(text), (
+                f"{rel} 含真命中 {hits} 却被预筛滤掉——本门禁会对它静默空转"
+            )
+
+    @pytest.mark.parametrize("label,source", [
+        ("helper 拆两层", "def _scan():\n"
+                          "    import ast\n"
+                          "    return [ast.parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+                          "def test_calls_it():\n    assert _scan() == []\n"),
+        ("os.walk 展开全树", "import ast, os\n"
+                             "def test_w():\n"
+                             "    return [ast.parse(open(p).read()) for _, _, fs in os.walk(ROOT)\n"
+                             "            for p in fs]\n"),
+        ("模块级裸枚举", "import ast\n"
+                        "TREES = [ast.parse(p.read_text()) for p in ROOT.glob('**/*.py')]\n"),
+        ("ast 别名", "import ast as _ast\n"
+                     "def test_a():\n"
+                     "    return [_ast.parse(p.read_text()) for p in ROOT.iterdir()]\n"),
+        ("parse 裸名", "from ast import parse as P\n"
+                       "def test_p():\n"
+                       "    return [P(p.read_text()) for p in ROOT.scandir()]\n"),
+        ("第三方解析器", "import libcst\n"
+                        "def testc():\n"
+                        "    return [libcst.parse_module(p.read_text()) for p in ROOT.rglob('*.py')]\n"),
+    ])
+    def test_prefilter_keeps_every_judged_shape(self, label, source):
+        assert _repoWideAstScans(source), f"{label} 的样本没被判据报出，样本本身失效"
+        assert _mayHideRepoWideScan(source), (
+            f"{label} 的真命中被预筛滤掉——本门禁会对这一形静默空转"
+        )
+
+
+@functools.lru_cache(maxsize=1)
+def _liveRepoWideScans() -> dict:
+    """受保护子集当前的全仓扫描分布（本模块唯一取数口，整会话算一次）。
+
+    为什么必须只有一份取数：`TestNoUnprefilteredRepoWideScan` 的两条与
+    `test_known_hit_points_use_the_shared_budget` 问的是**同一份**事实，
+    各写一遍就是把「遍历 546 条清单 + 逐个解析」付三遍（本机约 5s 量级）。
+    冻结成 `dict` 交给调用方，是为了不让任何一条断言能就地改到别人的读数。
+    """
+    live: dict = {}
+    for rel in protectedFiles():
+        hits = _repoWideScanHits(rel)
+        if hits:
+            live[rel] = hits
+    return live
+
+
 @pytest.mark.parametrize("rel", [
     "tests/unit/knowledge/test_write_boundary_closes_verification.py",
     "tests/unit/core/test_dead_cache_module_removed.py",
@@ -1445,6 +1543,7 @@ def test_known_hit_points_use_the_shared_budget(rel):
         f"{rel} 不再使用 tests/ast_scan.py 的共享解析预算——"
         "跨文件 AST 判据又各写一套，Issue #148 的根因会回来。"
     )
-    assert not _repoWideAstScans(source), (
-        f"{rel} 又出现了 rglob + ast.parse 的同用例组合：{_repoWideAstScans(source)}"
+    live = _liveRepoWideScans()
+    assert rel not in live, (
+        f"{rel} 又出现了 rglob + ast.parse 的同用例组合：{live.get(rel, [])}"
     )
