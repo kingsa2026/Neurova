@@ -30,6 +30,7 @@ from neurova.channels import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
+    ChannelMessage,
     ContentType,
     MessageChannel,
     UnifiedMessage,
@@ -252,17 +253,21 @@ class MQTTAdapter(ChannelAdapter):
             logging.debug("MQTT 收到消息 [%s]: %s", msg.topic, payload[:100])
 
             # 解析消息
-            unified_msg = self._parse_mqtt_message(msg, payload)
-            if unified_msg:
+            channel_msg = self._parse_mqtt_message(msg, payload)
+            if channel_msg:
                 # P1-7: 经统一事件分发（对照 feishu/dingtalk 模式）。
                 # 原 _message_queue 无界堆积且 receive_message 全仓零调用
-                self._schedule_emit(unified_msg)
+                self._schedule_emit(channel_msg)
         except Exception as e:
             logging.error("MQTT 消息处理异常: %s", e)
 
-    def _schedule_emit(self, message: UnifiedMessage) -> None:
+    def _schedule_emit(self, message: ChannelMessage) -> None:
         """P1-7: paho 网络线程回调 → 主事件循环统一分发（feishu P0-4 同型）。
 
+        载荷必须是 `ChannelMessage`：装配闭包读 `message.metadata`（manager.py:138）、
+        `_on_channel_event` 首行读 `channel_type`/`sender_name`（manager.py:351）。此前这里交的是
+        `UnifiedMessage`（`metadata` 恒 None），于是每条 MQTT 入站在门第一行抛 TypeError，
+        被 `_emit_event` 的 catch-all 记成一行日志后整条消失——渠道配上了却从不响应。
         无可用运行中循环时丢弃并告警——死队列删除后不允许退回无界堆积。
         """
         if self._main_loop is None or not self._main_loop.is_running():
@@ -281,8 +286,8 @@ class MQTTAdapter(ChannelAdapter):
         """发布成功回调"""
         logging.debug("MQTT 消息发布确认，Message ID: %s", mid)
 
-    def _parse_mqtt_message(self, msg, payload: str) -> Optional[UnifiedMessage]:
-        """解析 MQTT 消息"""
+    def _parse_mqtt_message(self, msg, payload: str) -> Optional[ChannelMessage]:
+        """解析 MQTT 消息 → 交进门的那份形状（`_make_message` 单点构造）"""
         try:
             # 尝试解析 JSON 格式的消息
             data = json.loads(payload)
@@ -309,23 +314,21 @@ class MQTTAdapter(ChannelAdapter):
         # 提取 chat_id（从主题或消息中）
         chat_id = data.get("chat_id", msg.topic)
 
-        return UnifiedMessage(
-            message_id=message_id,
-            channel=MessageChannel.MQTT,
-            chat_id=chat_id,
-            user_id=user_id,
-            agent_id="",
+        return self._make_message(
+            message_id=str(message_id),
+            sender_id=user_id,
+            sender_name=user_id,
             content=content,
-            content_type=ContentType.TEXT,
-            timestamp=timestamp,
-            global_user_id=f"mqtt:{user_id}",
-            session_id=f"mqtt:{chat_id}",
-            raw_message={
+            chat_id=chat_id,
+            chat_type="p2p",
+            message_type="text",
+            raw_event={
                 "topic": msg.topic,
                 "qos": msg.qos,
                 "retain": msg.retain,
                 "payload": payload,
                 "data": data,
+                "timestamp": timestamp.isoformat(),
             },
             metadata={
                 "topic": msg.topic,
@@ -406,12 +409,15 @@ class MQTTAdapter(ChannelAdapter):
             logging.error("MQTT 消息发送异常: %s", e)
             return False
 
-    def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
-        """
-        解析 MQTT 原始消息
+    def parse_raw_message(self, raw_data: Any) -> Optional[ChannelMessage]:
+        """解析 MQTT 原始消息（现量：全仓零调用者，本批只把返回注解改到与产物一致）。
 
         参数:
         raw_data: 包含 topic 和 payload 的字典
+
+        注意这一族的不一致：discord/qq/qqbot/sip/qclaw 的同名方法交的是 `UnifiedMessage`，
+        mqtt/websocket 这两支自 §6-193 起交 `ChannelMessage`。整族收成一份属
+        `UnifiedMessage`/Gen2 那次裁（台账本格"登记不修"），不在这里顺手改其余五支。
         """
         if isinstance(raw_data, dict):
             topic = raw_data.get("topic", "")
