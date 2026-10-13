@@ -2628,3 +2628,23 @@ tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py
 # A/B（HEAD=5121779a 仓外 worktree，context+memory+core+ci+llm+evolution 六族）基线 24f+1e/6836p
 # ↔ 本树 24f/6842p（+6 即本批判据），仅本树红 0 条；仅基线那条 ERROR 单档两侧各两次复跑皆绿，不重现不认领。
 tests/unit/core/test_sourceEscapeSequenceHygiene.py
+# §6-180 渠道语音缺口③：voice 收进唯一工厂路，并钉住那条平行死装配不许回来。
+# 复核实状：`api/app.py` 的 `_on_startup()` 里曾自己 new 一个 ChannelConfig 再 register_adapter，
+# 读的是 `voice_enabled`/`twilio_account_sid`/`twilio_auth_token`/`twilio_from_number` 四个键，
+# 而这四个键全仓零写入点（三个真入口都 `create_app()` 不带 config）⇒ 生产里恒 enabled=False、凭据空，
+# 属于"只读不写的配置断点 + 与 `_create_adapter` 并存的双源"。本批删那条平行路、工厂补 voice 一支。
+# 判据形状三条值得留下：① 工厂那格按**真字段**核（app_id/app_secret/extra.from_number），
+# 只断 isinstance 的话"凭据落错字段"的表现是连上了但打不出电话；反向一格证未知类型仍只存配置，
+# 防有人为了过判据把 else 改成什么都建。② 启动那格的读数取"**启动做了什么**"（register_adapter 装 spy
+# + `_on_startup` 包装），不取"全局单例里有什么"——ChannelManager 是进程级单例、`create_app()` 又返回
+# 缓存实例，直接读 get_adapter("voice") 会被同进程先前跑过的渠道测试留下的注册污染，假红假绿都可能。
+# 排除型断言配一格证明 spy 抓得到 voice 类型的注册，读完立刻 unregister_adapter 不留残留。
+# ③ 键名那格按**键位**判（.get 实参 / 下标 / 字典字面量键位），取值位置不算，探测器自证一格
+# （样本第二行是 `b = {}`，行号不连号——期望值必须按真样本取，别按记忆写）。
+# 边界如实：webhook 分派链那支**本批刻意没接**（`_handle_feishu_webhook`/`_handle_dingtalk_webhook`
+# 不做任何验签、sender_id 取自请求体，活体取证到 200 + 伪造身份进事件；见 §6-180 待裁），
+# 出站仍需 `twilio` 依赖 + 凭据 + 验签三件一起做，本批只接通"存了配置就建得出适配器"。
+# 入册前逐文件单跑三次同读数 7 passed（11.15 / 11.88 / 16.45s）；红自证＝只按路径还原两个生产件
+# ⇒ 3 failed/4 passed 且失败集恰为三条行为格；A/B（HEAD=489076a1 仓外 worktree，channels+voice+api）
+# 基线 17f+8e/3104p ↔ 本树 17f+8e/3111p，两侧独有红各 0 条；活体 channelVoiceFactorySeam_live.py exit=0。
+tests/unit/channels/test_channelVoiceFactorySeamCloses.py
