@@ -2707,3 +2707,12 @@ tests/unit/core/test_vectorPrimitivesSingleFace.py
 # 活体 `channelWecomVoiceInbound_live.py` 11 读数 exit=0；反证段还原 wecom.py 到 HEAD ⇒ 恰 2 条链路读数 FAIL。
 # A/B（channels+voice）基线 800 passed/0 failed ↔ 本树 809/0，两侧独有红 0。
 tests/unit/channels/test_channelWecomVoiceInboundCarriesTranscript.py
+# 批 35（§6-186）市场安装让真字节走通账本咽喉：staging 从缓存拷真字节 ⇒ 安装门扫的、构件摘要
+# 钉的、执行体读的三处从此同源；咽喉拒装 ⇒ 一个可执行体都不注册，端点两条分支同判（409 点名拒因）。
+# 红自证（按显式路径清单还原 market_registry.py+marketplace.py）9 failed/3 passed ⇒ 绿 12+2 passed；
+# 逐文件单跑三次同读数（12/12/12 与 2/2/2）。变异 6 枚全咬；活体 marketRealBytes_batch35.py
+# 11 读数 exit=0，含 [OBSERVE] 反向校准段（桩掉来源目录后危险包照旧回 200、账本里只有空壳）。
+# A/B（skills+api）基线 3437/18f/8e ↔ 本树 3462/19f/8e，仅本树独有红 1 条＝
+# test_github_push_skill::test_get_status（Windows 跨盘 `cd` 不改盘的已登记环境形，不认领）。
+tests/unit/skills/test_marketInstallCarriesRealBytes.py
+tests/unit/api/test_marketInstallRefusalIsNotReportedAsSuccess.py
