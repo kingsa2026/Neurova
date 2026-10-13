@@ -163,30 +163,60 @@ class ChannelManager:
             return self._adapters.get(channel_type)
         return None
 
-    def resolveInboundAdapter(self, channel_type: str):
+    def resolveInboundAdapter(self, channel_type: str, authenticator=None):
         """入站回调的适配器解析——全仓唯一入口（§6-188）。
 
-        实例表主键是 `(agent_id, channel_type)`，而平台回调 URL 只带 `channel_type`：
-        - default 名下有实例 ⇒ 用它（既有部署行为一字不变）；
-        - default 没有而该类型在全表**唯一** ⇒ 用那一格（只在别的 agent 名下配置好的渠道，
-          此前一律吃 404 "Channel not found"，文案还把人引向"没配置"这个错结论）；
-        - 多格且 default 缺席 ⇒ `(None, 点名歧义)` —— 静默投给任意一个就是把消息送进
-          别人的会话与额度（§6-123/§6-163 的身份口径上游）。
-        把 agent 维度带进回调 URL 是需要前端与部署面一起改的另一次裁定，这里不假装解决。
+        实例表主键是 `(agent_id, channel_type)`，而平台回调 URL 只带 `channel_type`。
+        **本意是每个 agent 各有专属渠道配置**，所以"这条回调是谁的"不该由 default 说了算——
+        三平台的验签面用的都是实例自己的凭据（飞书 verification_token、钉钉 appSecret、
+        企微 callback token），回调体自带答案。于是分两态：
 
+        - 给了 `authenticator` 且候选 ≥2 ⇒ **逐只问凭据，恰好一只验过就用它**（default 不插队）；
+          0 只 ⇒ 拒并点名"没有一只验下"；≥2 只 ⇒ 拒并点名是哪几只——那不是路由问题，是
+          **同一份凭据被两个 agent 共用**（`/conflicts/check` 在报的就是它），静默投给 default
+          等于把配置错误掩盖成正常投递。
+        - 没给谓词（该类型没有验签面、或回调体读不懂）或候选只有 1 只 ⇒ §6-189 的语义一字不变：
+          default 有则用它；否则该类型全表唯一则用那一格；多格歧义则拒并点名涉及哪几个 agent。
+
+        `authenticator(adapter)` 抛异常按**不匹配**处理并记一条告警：入站回调是外部边界，
+        一只实例的读法炸了不许把整条分派带进 500（也不许因此放行）。
         返回 `(adapter, failureReason)`：取不到时成对给出原因，别让调用方用 None 猜两种失败。
         """
         table = getattr(self, "_agent_adapters", {}) or {}
         owners = sorted(aid for (aid, ctype) in table if ctype == channel_type)
-        if "default" in owners:
-            return table[("default", channel_type)], ""
+        candidates = [table[(aid, channel_type)] for aid in owners]
         legacy = self._adapters.get(channel_type)
-        if legacy is not None:
-            return legacy, ""
-        if len(owners) == 1:
-            return table[(owners[0], channel_type)], ""
-        if not owners:
+        if legacy is not None and "default" not in owners:
+            owners = sorted(owners + ["default"])
+            candidates.append(legacy)
+        if not candidates:
             return None, f"Channel '{channel_type}' not found"
+
+        if authenticator is not None and len(candidates) > 1:
+            matched = []
+            for agentId, candidate in zip(owners, candidates):
+                try:
+                    verified = bool(authenticator(candidate))
+                except Exception as e:  # noqa: BLE001 - 外部回调是边界：一只读法抛错不算它匹配
+                    logger.warning("渠道 %s（agent=%s）验签自己的回调时抛错，按不匹配处理：%s",
+                                   channel_type, agentId, e)
+                    verified = False
+                if verified:
+                    matched.append(agentId)
+            if len(matched) == 1:
+                return candidates[owners.index(matched[0])], ""
+            if not matched:
+                return None, (
+                    f"Channel '{channel_type}': none of the registered instances "
+                    f"({'、'.join(owners)}) authenticated this callback（凭据都不匹配，歧义不投递）")
+            return None, (
+                f"Channel '{channel_type}' callback authenticated against multiple agents "
+                f"({'、'.join(matched)})——这几只共用了同一份凭据（见 /conflicts/check），歧义不投递")
+
+        if "default" in owners:
+            return table.get(("default", channel_type)) or legacy, ""
+        if len(owners) == 1:
+            return candidates[0], ""
         return None, (
             f"Channel '{channel_type}' is registered under multiple agents ({'、'.join(owners)}); "
             "回调 URL 无法唯一确定适配器（歧义不投递）——请把 agent 维度带进回调地址")
