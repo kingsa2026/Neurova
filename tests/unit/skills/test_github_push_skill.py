@@ -6,6 +6,7 @@ GitHub Push Skill 测试
 
 import pytest
 import asyncio
+import subprocess
 import tempfile
 import shutil
 import os
@@ -58,10 +59,16 @@ class TestGitHubPushSkill:
         self.test_dir = Path(tempfile.mkdtemp())
         (self.test_dir / "test.txt").write_text("test content")
 
-        # 初始化 git 仓库
-        os.system(f"cd {self.test_dir} && git init")
-        os.system(f"cd {self.test_dir} && git config user.email 'test@test.com'")
-        os.system(f"cd {self.test_dir} && git config user.name 'Test'")
+        # 初始化 git 仓库：目录交给 `cwd=` 传，不经 shell。
+        # 原形是 `os.system(f"cd {self.test_dir} && git init")`——Windows 的 cmd 里
+        # `cd D:\x` 不改盘符，于是这条命令实际跑在 pytest 的 CWD（＝开发者仓库根）上，
+        # 实测 stdout `Reinitialized existing Git repository in E:/…/.git/`：一次单元跑测
+        # 在开发者的仓里 git init，并接着改写 user.name/user.email（§6-196 批 39）。
+        for args in (["git", "init"],
+                     ["git", "config", "user.email", "b39-scratch@example.invalid"],
+                     ["git", "config", "user.name", "B39 Scratch"]):
+            subprocess.run(args, cwd=str(self.test_dir), check=True,
+                           capture_output=True, encoding="utf-8", errors="replace")
 
         # 测试状态获取
         self.skill.repo_path = self.test_dir
