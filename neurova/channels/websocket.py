@@ -32,6 +32,7 @@ from neurova.channels import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
+    ChannelMessage,
     ContentType,
     MessageChannel,
     UnifiedMessage,
@@ -261,11 +262,11 @@ class WebSocketAdapter(ChannelAdapter):
         try:
             async for message in self._ws_connection:
                 try:
-                    unified_msg = self._parse_websocket_message(message)
-                    if unified_msg:
+                    channel_msg = self._parse_websocket_message(message)
+                    if channel_msg:
                         # P1-7: 直接走统一事件分发（对照 feishu/dingtalk 模式）。
                         # 原 _message_queue 无界堆积且 receive_message 全仓零调用
-                        await self._emit_event(ChannelEventType.MESSAGE_RECEIVED, unified_msg)
+                        await self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
                 except Exception as e:
                     logging.error("WebSocket 消息解析异常: %s", e)
         except websockets.exceptions.ConnectionClosed as e:
@@ -310,8 +311,14 @@ class WebSocketAdapter(ChannelAdapter):
             if self.reconnect_enabled:
                 self._reconnect_task = asyncio.create_task(self._reconnect())
 
-    def _parse_websocket_message(self, raw_message: str) -> Optional[UnifiedMessage]:
-        """解析 WebSocket 消息"""
+    def _parse_websocket_message(self, raw_message: str) -> Optional[ChannelMessage]:
+        """解析 WebSocket 消息 → 交进门的那份形状（`_make_message` 单点构造）。
+
+        门的读法：装配闭包取 `message.metadata`（manager.py:138），`_on_channel_event` 首行取
+        `channel_type`/`sender_name`（manager.py:351）——交 `UnifiedMessage` 进去会在第一行就抛
+        并被 `_emit_event` 吞成一行日志。这一支今天在生产里构造不出来
+        （`create_websocket_adapter` 零调用者），改的是形状，不声称端到端已通。
+        """
         try:
             if self.message_format == "json":
                 data = json.loads(raw_message)
@@ -337,38 +344,35 @@ class WebSocketAdapter(ChannelAdapter):
             else:
                 timestamp = datetime.now()
 
-            return UnifiedMessage(
-                message_id=message_id,
-                channel=MessageChannel.WEBSOCKET,
-                chat_id=user_id,
-                user_id=user_id,
-                agent_id="",
+            return self._make_message(
+                message_id=str(message_id),
+                sender_id=user_id,
+                sender_name=user_id,
                 content=content,
-                content_type=ContentType.TEXT,
-                timestamp=timestamp,
-                global_user_id=f"ws:{user_id}",
-                session_id=f"ws:{self._client_id}",
-                raw_message=raw_message,
+                chat_id=user_id,
+                chat_type="p2p",
+                message_type="text",
+                raw_event={
+                    "raw_message": raw_message,
+                    "parsed_data": data if self.message_format == "json" else None,
+                    "timestamp": timestamp.isoformat(),
+                },
                 metadata={
                     "ws_url": self.ws_url,
                     "message_format": self.message_format,
-                    "parsed_data": data if self.message_format == "json" else None,
                 },
             )
         except json.JSONDecodeError:
             # 如果不是有效的 JSON，作为纯文本处理
-            return UnifiedMessage(
+            return self._make_message(
                 message_id=f"ws_{int(time.time())}",
-                channel=MessageChannel.WEBSOCKET,
-                chat_id=self._client_id,
-                user_id=self._client_id,
-                agent_id="",
+                sender_id=self._client_id,
+                sender_name=self._client_id,
                 content=raw_message,
-                content_type=ContentType.TEXT,
-                timestamp=datetime.now(),
-                global_user_id=f"ws:{self._client_id}",
-                session_id=f"ws:{self._client_id}",
-                raw_message=raw_message,
+                chat_id=self._client_id,
+                chat_type="p2p",
+                message_type="text",
+                raw_event={"raw_message": raw_message},
                 metadata={
                     "ws_url": self.ws_url,
                     "message_format": "text",
@@ -450,8 +454,8 @@ class WebSocketAdapter(ChannelAdapter):
             logging.error("WebSocket 消息发送异常: %s", e)
             return False
 
-    def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
-        """解析 WebSocket 原始消息"""
+    def parse_raw_message(self, raw_data: Any) -> Optional[ChannelMessage]:
+        """解析 WebSocket 原始消息（返回注解改到与产物一致；这一族的整体收口见 §6-193 台账本格）。"""
         if isinstance(raw_data, str):
             return self._parse_websocket_message(raw_data)
 
