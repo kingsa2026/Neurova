@@ -9,8 +9,8 @@ NeuHebbForge — Neurova Hebb 生成器
 
 from __future__ import annotations
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
-import math
 import re
 from typing import Callable, List, Optional
 
@@ -220,7 +220,7 @@ class NeuHebbForge:
         query_vec = self._embed(query)
         scores = []
         for i, emb in enumerate(chunk_embeddings):
-            sim = self._cosine_similarity(query_vec, emb)
+            sim = vector_math.cosineSimilarity(query_vec, emb)
             scores.append((i, sim))
 
         scores.sort(key=lambda x: x[1], reverse=True)
@@ -270,20 +270,10 @@ class NeuHebbForge:
         if not existing_embeddings:
             return True
         for existing in existing_embeddings:
-            sim = self._cosine_similarity(candidate_embedding, existing)
+            sim = vector_math.cosineSimilarity(candidate_embedding, existing)
             if sim >= self.config.diversity_threshold:
                 return False
         return True
-
-    @staticmethod
-    def _cosine_similarity(a: List[float], b: List[float]) -> float:
-        """计算余弦相似度。"""
-        dot = sum(x * y for x, y in zip(a, b))
-        norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(x * x for x in b))
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return dot / (norm_a * norm_b)
 
     # ── 默认实现 ──────────────────────────────────────────────────────────────
 

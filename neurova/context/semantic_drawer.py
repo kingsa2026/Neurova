@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from neurova.core import vector_math
 """
 向量语义匹配取水器 - Semantic Match Drawer
 
@@ -385,7 +386,6 @@ class ScoringContext:
     并点名告警——不静默把分数当 0 处理（那会把相关性门槛变成"全挡"）。
     """
 
-    _EPSILON = 1e-12
 
     def __init__(self, drawer, need: str, needVector=None, vectors=None, degraded: bool = False):
         self._drawer = drawer
@@ -426,34 +426,7 @@ class ScoringContext:
         if not self._degraded and self._needVector is not None:
             vector = self._vectors.get(id(drop))
             if vector is not None:
-                return self._cosineScore(self._needVector, vector)
+                return vector_math.cosineScore(self._needVector, vector)
 
         return 0.5 + self._drawer._keyword_match_score(drop, self._need) / 2
 
-    @classmethod
-    def _cosineScore(cls, left, right) -> float:
-        """余弦 → (cos+1)/2。左向量可与右向量归一化口径不同，故两侧各自求范数。"""
-        dot = cls._dot(left, right)
-        norm_left = cls._norm(left)
-        norm_right = cls._norm(right)
-        if norm_left <= cls._EPSILON or norm_right <= cls._EPSILON:
-            return 0.0
-        return (dot / (norm_left * norm_right) + 1) / 2
-
-    @staticmethod
-    def _dot(left, right) -> float:
-        try:
-            import numpy as np
-
-            return float(np.dot(np.asarray(left, dtype="float32"), np.asarray(right, dtype="float32")))
-        except ImportError:
-            return float(sum(a * b for a, b in zip(left, right)))
-
-    @staticmethod
-    def _norm(vector) -> float:
-        try:
-            import numpy as np
-
-            return float(np.linalg.norm(np.asarray(vector, dtype="float32")))
-        except ImportError:
-            return math.sqrt(sum(x * x for x in vector))

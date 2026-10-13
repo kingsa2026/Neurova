@@ -8,6 +8,7 @@
 - 缓存优化
 """
 
+from neurova.core import vector_math
 import hashlib
 from neurova.core.logger import get_logger
 import re
@@ -70,7 +71,7 @@ class SemanticSearch:
         try:
             emb1 = self._get_embedding(text1)
             emb2 = self._get_embedding(text2)
-            return self._cosine_similarity(emb1, emb2)
+            return vector_math.cosineSimilarity(emb1, emb2)
         except Exception as e:
             logger.warning("嵌入相似度计算失败: %s", e)
             return self._compute_keyword_similarity(text1, text2)
@@ -189,20 +190,6 @@ class SemanticSearch:
             embedding = [x / norm for x in embedding]
         
         return embedding
-    
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度"""
-        if not vec1 or not vec2 or len(vec1) != len(vec2):
-            return 0.0
-        
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = sum(a * a for a in vec1) ** 0.5
-        norm2 = sum(b * b for b in vec2) ** 0.5
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        return dot_product / (norm1 * norm2)
     
     def build_keyword_index(self, memories: List[Dict[str, Any]]):
         """构建关键词索引"""
