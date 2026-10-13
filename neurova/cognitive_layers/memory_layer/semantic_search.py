@@ -184,10 +184,8 @@ class SemanticSearch:
             hash_val = hash(kw) % 256
             embedding[hash_val] = 1.0
         
-        # 归一化
-        norm = sum(x * x for x in embedding) ** 0.5
-        if norm > 0:
-            embedding = [x / norm for x in embedding]
+        # 归一化：零模长那支原样返回（与 core/vector_math 的口径同一条）
+        embedding = vector_math.vectorNormalize(embedding)
         
         return embedding
     

@@ -187,22 +187,7 @@ def _cacheable_vector(backend: str, encoder: Any) -> bool:
     return bool(getattr(encoder, "is_initialized", False))
 
 
-def vector_norm(a: List[float]) -> float:
-    """计算向量范数"""
-    return math.sqrt(sum(x * x for x in a))
 
-
-
-def vector_dot(a: List[float], b: List[float]) -> float:
-    """计算向量点积"""
-    return sum(x * y for x, y in zip(a, b))
-
-def vector_normalize(a: List[float]) -> List[float]:
-    """归一化向量"""
-    norm = vector_norm(a)
-    if norm == 0:
-        return a
-    return [x / norm for x in a]
 
 
 class UnifiedVectorStore:
@@ -513,7 +498,7 @@ class UnifiedVectorStore:
                 # 相似度变成随机噪声（曾引发语义调取门槛随机失效）
                 idx = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dim
                 result[idx] += 1.0
-            norm = vector_norm(result)
+            norm = vector_math.vectorNorm(result)
             if norm > 0:
                 result = [x / norm for x in result]
             return result
@@ -540,7 +525,7 @@ class UnifiedVectorStore:
                     result[idx] = value
 
         # 归一化
-        norm = vector_norm(result)
+        norm = vector_math.vectorNorm(result)
         if norm > 0:
             result = [x / norm for x in result]
 
@@ -648,9 +633,9 @@ class UnifiedVectorStore:
             centroid = self.encode(desc)
 
             # 归一化
-            norm = vector_norm(centroid)
+            norm = vector_math.vectorNorm(centroid)
             if norm > 0:
-                centroid = vector_normalize(centroid)
+                centroid = vector_math.vectorNormalize(centroid)
 
             self.centroids[expert_id] = centroid
             self._centroid_last_access[expert_id] = datetime.now().timestamp()
@@ -710,9 +695,9 @@ class UnifiedVectorStore:
             vec = self.encode(content)
 
             # 归一化
-            norm = vector_norm(vec)
+            norm = vector_math.vectorNorm(vec)
             if norm > 0:
-                vec = vector_normalize(vec)
+                vec = vector_math.vectorNormalize(vec)
 
             self.memory_vectors.append(vec)
             self.memory_ids.append(mem_id)
@@ -761,9 +746,9 @@ class UnifiedVectorStore:
     def update_centroid(self, expert_id: str, new_centroid: List[float]):
         """更新质心"""
         # 归一化
-        norm = vector_norm(new_centroid)
+        norm = vector_math.vectorNorm(new_centroid)
         if norm > 0:
-            new_centroid = vector_normalize(new_centroid)
+            new_centroid = vector_math.vectorNormalize(new_centroid)
         self.centroids[expert_id] = new_centroid
 
     def touch_centroid(self, expert_id: str):
@@ -794,9 +779,9 @@ class UnifiedVectorStore:
             return []
 
         query_vec = self.encode(query)
-        norm = vector_norm(query_vec)
+        norm = vector_math.vectorNorm(query_vec)
         if norm > 0:
-            query_vec = vector_normalize(query_vec)
+            query_vec = vector_math.vectorNormalize(query_vec)
 
         # numpy 快路径（维度齐 + 无过滤时）：矩阵点积替代逐条暴力扫描
         if self._np_matrix is not None and not filter_dict:
@@ -875,9 +860,9 @@ class UnifiedVectorStore:
             embedding: 嵌入向量
             metadata: 附加元数据
         """
-        norm = vector_norm(embedding)
+        norm = vector_math.vectorNorm(embedding)
         if norm > 0:
-            embedding = vector_normalize(embedding)
+            embedding = vector_math.vectorNormalize(embedding)
         self._neurova_hebb_vectors.append(embedding)
         self._neurova_hebb_ids.append(neurova_hebb_id)
         self._neurova_hebb_metadata.append(metadata)
@@ -896,9 +881,9 @@ class UnifiedVectorStore:
         if not self._neurova_hebb_vectors:
             return []
 
-        norm = vector_norm(query_embedding)
+        norm = vector_math.vectorNorm(query_embedding)
         if norm > 0:
-            query_embedding = vector_normalize(query_embedding)
+            query_embedding = vector_math.vectorNormalize(query_embedding)
 
         scores = []
         for i, vec in enumerate(self._neurova_hebb_vectors):
