@@ -54,6 +54,41 @@ class VoiceContext:
         }
 
 
+def voiceContextLines(voice_context: Dict[str, Any]) -> list:
+    """把一份语音上下文转成给人读的行——**全仓唯一一份这个词汇**。
+
+    现役曾有三处各写一遍同一批标签（本模块的 `inject_metadata`、`context/orchestrator.py`
+    的池分支与候选池分支）。标签漂移的后果不是报错而是 prompt 里悄悄少一项，
+    所以按教义第 6/7 条收口到这一处，其余只许调用。
+
+    纯函数：不碰实例状态、不需要情感分析器——现役两处调用因此不再白建 `VoiceContextModule`。
+    """
+    ctx = voice_context or {}
+    lines = []
+
+    if ctx.get("text"):
+        lines.append(f"语音识别文本: {ctx['text']}")
+    if ctx.get("confidence", 0) and ctx["confidence"] > 0:
+        lines.append(f"识别置信度: {ctx['confidence']:.2f}")
+    if ctx.get("language"):
+        lines.append(f"语言: {ctx['language']}")
+    if ctx.get("engine"):
+        lines.append(f"识别引擎: {ctx['engine']}")
+
+    emotion = ctx.get("emotion")
+    if emotion and emotion.get("primary_emotion") and emotion["primary_emotion"] != "neutral":
+        lines.append(
+            f"语音情感: {emotion['primary_emotion']} (置信度: {emotion.get('confidence', 0):.2f})")
+
+    audioMeta = ctx.get("audio_metadata") or {}
+    if audioMeta.get("tts_engine"):
+        lines.append(f"TTS引擎: {audioMeta['tts_engine']}")
+    if audioMeta.get("tts_voice"):
+        lines.append(f"TTS音色: {audioMeta['tts_voice']}")
+
+    return lines
+
+
 class VoiceContextModule:
     """语音上下文集成模块
 
@@ -61,11 +96,11 @@ class VoiceContextModule:
     - build_voice_context(): 构建语音上下文
     - inject_metadata(): 注入元数据到上下文池
     - analyze_emotion(): 分析语音情感
-    - get_voice_context(): 获取语音上下文
+    （行的词汇在模块级 `voiceContextLines()`；本模块**不自持**"最近一次语音上下文"——
+    那是无会话键的进程级状态，读它就是串台，故不提供读口。）
     """
 
     def __init__(self):
-        self._current_context: Optional[VoiceContext] = None
         self._emotion_analyzer = None
         self._init_emotion_analyzer()
 
@@ -128,7 +163,6 @@ class VoiceContextModule:
         if context.text:
             context.emotion = self.analyze_emotion(context.text)
 
-        self._current_context = context
         return context.to_dict()
 
     def analyze_emotion(self, text: str) -> Dict[str, Any]:
@@ -184,36 +218,8 @@ class VoiceContextModule:
         try:
             from neurova.context_pool import ContextInput, ContextSource
 
-            # 构建语音上下文内容
-            content_parts = []
-
-            # ASR 信息
-            if voice_context.get("text"):
-                content_parts.append(f"语音识别文本: {voice_context['text']}")
-
-            if voice_context.get("confidence", 0) > 0:
-                content_parts.append(f"识别置信度: {voice_context['confidence']:.2f}")
-
-            if voice_context.get("language"):
-                content_parts.append(f"语言: {voice_context['language']}")
-
-            if voice_context.get("engine"):
-                content_parts.append(f"识别引擎: {voice_context['engine']}")
-
-            # 情感信息
-            emotion = voice_context.get("emotion")
-            if emotion and emotion.get("primary_emotion") != "neutral":
-                content_parts.append(
-                    f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
-                )
-
-            # 音频元数据
-            audio_meta = voice_context.get("audio_metadata")
-            if audio_meta:
-                if audio_meta.get("tts_engine"):
-                    content_parts.append(f"TTS引擎: {audio_meta['tts_engine']}")
-                if audio_meta.get("tts_voice"):
-                    content_parts.append(f"TTS音色: {audio_meta['tts_voice']}")
+            # 行的词汇只此一处定义（模块级 voiceContextLines）；这里只消费，不再重拼一份。
+            content_parts = voiceContextLines(voice_context)
 
             if content_parts:
                 content = "\n".join(content_parts)
@@ -264,20 +270,6 @@ class VoiceContextModule:
 
         except Exception as e:
             logger.warning("注入语音上下文失败: %s", e)
-
-    def get_voice_context(self) -> Optional[Dict[str, Any]]:
-        """获取当前语音上下文
-
-        Returns:
-            语音上下文字典，如果没有则返回 None
-        """
-        if self._current_context:
-            return self._current_context.to_dict()
-        return None
-
-    def clear_voice_context(self):
-        """清除当前语音上下文"""
-        self._current_context = None
 
 
 # 单例管理
