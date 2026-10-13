@@ -36,7 +36,7 @@ Neurova 同一套后端服务有三种交付形态，它们必须共享同一份
 | `NEUROVA_LOG_FILE` | `neurova/api/endpoints/console_system.py` | ~~`LOG_FILE`~~ |
 | `NEUROVA_LOG_JSON` | `neurova/core/logger.py` | ~~`LOG_FORMAT`~~ |
 | `NEUROVA_DB_PATH` | `neurova/core/db_indexes.py` | ~~`DATABASE_PATH`~~ |
-| `NEUROVA_CORS_ORIGINS` | `neurova/api/middleware.py` | ~~`CORS_ORIGINS`~~ |
+| `NEUROVA_CORS_ORIGINS` | `neurova/api/cors_policy.py` | ~~`CORS_ORIGINS`~~ |
 | `NEUROVA_JWT_SECRET` | `neurova/api/auth.py` | — |
 | `NEUROVA_PORT` / `NEUROVA_HOST` | `start_server.py` | — |
 

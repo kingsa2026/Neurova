@@ -77,7 +77,7 @@ ENV_ALLOWLIST = {"PYTHONUNBUFFERED", "PYTHONUTF8", "PYTHONIOENCODING", "TZ", "LC
 # 应用运行时会从 config/ 目录读取的文件（reader 见注释）。镜像缺它们时不会报错，
 # 只会静默回落到内置默认值——比崩溃更难发现。
 RUNTIME_CONFIG_ASSETS = {
-    "config/cors.json": "neurova/api/middleware.py（CORS 来源清单）",
+    "config/cors.json": "neurova/api/cors_policy.py（CORS 口径单源）",
     "config/llm_presets/defaults.json": "neurova/llm/presets.py（模型预设）",
 }
 
