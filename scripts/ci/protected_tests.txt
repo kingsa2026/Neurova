@@ -2781,3 +2781,10 @@ tests/unit/security/test_installGateDocFilesAreReportOnly.py
 # 而本仓挂载走 _IncludedRouter，95 条里只有 5 条带 .path。两侧皆空 ⇒ 差集皆空 ⇒ 该红的比对绿得
 # 没道理。改法是 regex 取清单 + router.routes 取实现，并给取数器加地板断言与变异对照。
 tests/unit/api/test_channelManagementFaceTakesAgent.py
+# 小账 #35 第一笔（§6-192）：skill-pool 两道安装面的回执诚实化补上常驻判据——批 37 当时只有
+# 活体读数，退回"恒 success:true"不会有常驻红来拦。4 格成对写：门拒⇒顶层 success=False+点名拒因+
+# 账本无条目（三处同向），干净包⇒顶层 True 且条目落账（防"把端点一关了之"骗绿），另在 HTTP 面复量
+# 批 37 的文档口径、并钉两道面共用同一个映射函数。逐文件单跑三次同读数 4/4/4 passed；
+# 红自证基线取的是**被守护那次改动的父笔**（HEAD 已含批 37，还原 HEAD 会量出 4 全绿的假"已修"）
+# ⇒ 2 failed/2 passed，复证还原后 4 passed。
+tests/unit/api/test_skillPoolInstallReceiptIsHonest.py
