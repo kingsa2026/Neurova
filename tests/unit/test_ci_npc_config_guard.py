@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""NPC 配置守卫（.cnb.yml / .cnb/settings.yml）。
+r"""NPC 配置守卫（.cnb.yml / .cnb/settings.yml）。
 
 锁定几件已实锤踩过的事故，防同源复发：
 
@@ -436,7 +436,7 @@ class TestRolePipelineAlignment:
         )
 
     def test_no_role_named_top_level_keys(self, cnb_doc, settings_doc):
-        """顶层 key 只准是分支名 / `crontab:` / `.` 锚点——角色名挂顶层 key 是非法配置。
+        r"""顶层 key 只准是分支名 / `crontab:` / `.` 锚点——角色名挂顶层 key 是非法配置。
 
         这类 key 会在**推送的那一刻**就非法（Schema 的顶层 key 只认分支名 +
         `^\..` 锚点；平台语义规则另把 `issue.*` 钉在 `$` 下），而不是等到跑任务才失败。
@@ -550,7 +550,7 @@ class TestRolePipelineAlignment:
         assert not problems, "\n  ".join(problems)
 
     def test_every_registry_role_falls_into_a_legal_mount(self, cnb_doc, settings_doc):
-        """每个在册角色都必须被合法挂载点覆盖——「静默回落平台默认 prompt」的根因处判据。
+        r"""每个在册角色都必须被合法挂载点覆盖——「静默回落平台默认 prompt」的根因处判据。
 
         本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧的诊断洞见是
         「角色名没有配置期必达通道时，被 @ 会静默回落平台默认 prompt，本仓 90+ 处
@@ -1001,7 +1001,7 @@ class TestTurnHandoffCeiling:
 
 
 class TestAnchoredConfigHasConsumer:
-    """`.cnb.yml` 的锚点定义必须有消费方：只写不读的配置就是断点。
+    r"""`.cnb.yml` 的锚点定义必须有消费方：只写不读的配置就是断点。
 
     平台不解析 YAML 锚点语义（那是 YAML 解析期的事），故「有没有人读」
     只能由本仓自己守。`^\..` 形态的顶层键在 Schema 里合法、平台也不报错，

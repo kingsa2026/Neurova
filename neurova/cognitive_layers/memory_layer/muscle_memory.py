@@ -619,7 +619,7 @@ class MuscleMemory:
     _MAX_FINGERPRINT_TOKENS = 96
 
     def _extract_keywords(self, text: str) -> str:
-        """提取查询指纹（自研字符 n-gram 口径，零新增第三方依赖）。
+        r"""提取查询指纹（自研字符 n-gram 口径，零新增第三方依赖）。
 
         旧实现用 `[^\w\s]` + `split()`：中文整句在 `\w` 下是**一个** token，
         于是"指纹相等"退化成"整串相等"，近似问法（今天↔明天、换实体）恒不命中，

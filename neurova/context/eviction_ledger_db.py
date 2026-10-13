@@ -1,4 +1,4 @@
-"""
+r"""
 驱逐台账持久化
 
 SQLite WAL + FTS5：被驱逐/折叠的上下文 chunk 落库，重启后经 FTS 召回。
@@ -802,7 +802,7 @@ class EvictionLedgerDB:
         return [row for row in recent if needle in row["content"].lower()][:limit]
 
     def _likeCandidates(self, conn, query: str, session_id: Optional[str], limit: int) -> List:
-        """LIKE 子串分支（长度 <3 或 MATCH 空结果/语法错误时的兜底）。
+        r"""LIKE 子串分支（长度 <3 或 MATCH 空结果/语法错误时的兜底）。
 
         `%` `_` `\` 的转义只经 `core.sql_like.likePattern`——就地拼
         `f"%{query}%"` 等于把用户输入当通配模式（实测库内 3 行时 `%` 命中 3 行）。

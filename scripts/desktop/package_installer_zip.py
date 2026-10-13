@@ -77,7 +77,7 @@ def tauri_nsis_cache_root() -> Path | None:
 
 
 def resolve_working_nsis() -> Path | None:
-    """挑一份**实跑验证**能用的 NSIS 工具集，返回其目录（找不到返回 None）。
+    r"""挑一份**实跑验证**能用的 NSIS 工具集，返回其目录（找不到返回 None）。
 
     为什么必须实跑：实机证据（2026-09-30，节点 orange-connector）——
     tauri 自带的 nsis-3.11 整树下 makensis（根 stub 与 `Bin\makensis.exe`）
@@ -194,7 +194,7 @@ def _find_cached_tauri_utils_dll(cache_dir: Path) -> Path | None:
 
 
 def tauri_build_env() -> dict:
-    """`tauri build` 的进程环境：把 `LOCALAPPDATA` 挪出 systemprofile。
+    r"""`tauri build` 的进程环境：把 `LOCALAPPDATA` 挪出 systemprofile。
 
     实机踩到（2026-09-30，节点 orange-connector，whoami=`nt authority\system`）：
     自托管 Runner 以 SYSTEM 身份跑，`%LOCALAPPDATA%` 落在
