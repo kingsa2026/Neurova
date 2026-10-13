@@ -204,3 +204,50 @@ async def test_moss_stream_raises_on_inference_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="inference broken"):
         async for _ in tts.synthesize_stream("你好"):
             break
+
+
+@pytest.mark.asyncio
+async def test_explicit_mock_engine_does_not_drag_the_whole_chain_into_offline_path(monkeypatch):
+    """常驻判据：显式只给 mock 一条链时，合成不得去碰链上别的引擎。
+
+    2026-10-12 实测（CI `unit-tests` 转红的那两格）：`TTSConfig(engine="mock")` 只
+    声明"初始用 mock"，**没有**声明回退链 —— 默认链是
+    `["moss-nano", "edge-tts", "sapi5", "mock"]`，而 `_synthesize_with_fallback`
+    有一条生产上正确的规矩：当前引擎是链尾兜底时不算"本引擎产出"，回链顶重新竞争
+    （免得兜底哔声永久顶班，这条由本文件 `test_synthesize_recovers_from_mock_last_resort`
+    把守）。两件事叠加，`synthesize` 每次都会把 moss 重新拉起来一次
+    ——`MOSSNanTTS.initialize()` 在 `auto_download=True` 下去**下载 GB 级模型**
+    （`neurova/tts/moss_nano.py:261`），于是 `pytest-timeout` 的 30s 墙钟被吃满
+    （`tests/media/test_tts_module.py` 两条用例报 `Timeout (>30.0s)`；本机同形态 127s）。
+    判据在**联网**，而它要测的只是 mock 引擎的合成契约。
+
+    本格把"链上只放 mock"这件事钉成不变量：moss 的 initialize 被换成必须被调用即红的
+    探针，显式一条链时它一次都不该被碰。反向那一半（默认链确实会回卷）由上面那条
+    last-resort 用例把守 —— 两条一起，防有人把 `_synthesize_with_fallback` 的规矩
+    当成"多余"删掉，也防有人把测试里的链又改回默认。
+    """
+    from neurova.tts.manager import TTSConfig
+
+    called: list = []
+
+    async def _mustNotBeCalled(name):
+        called.append(name)
+        return False
+
+    # 链收窄成 mock + 一个不存在的引擎名，且 **mock 放在链首**（不是链尾）：
+    # 链尾那条 last-resort 规矩（当前引擎是兜底就回链顶重竞争）本格不触碰——
+    # 它由上面 `test_synthesize_recovers_from_mock_last_resort` 把守。
+    # 这里要证明的是另一半：mock 在链首、当前引擎就是它时，产出即返回；
+    # 链尾那个名字一次都不该被初始化。
+    mock_engine = _FakeEngine(synth=b"BEEP-WAV")
+    mgr = TTSManager(TTSConfig(engine="mock", fallback_chain=["mock", "moss-nano"]))
+    mgr._engine = mock_engine
+    mgr._engine_name = "mock"
+    mgr._initialized = True
+    monkeypatch.setattr(mgr, "_initialize_engine", _mustNotBeCalled)
+
+    assert await mgr.synthesize("你好") == b"BEEP-WAV"
+    assert called == [], (
+        f"链首引擎产出后仍去初始化链上别的引擎（每次合成都要付它的初始化代价，"
+        f"MOSS 的 auto_download 会真联网）：{called}"
+    )
