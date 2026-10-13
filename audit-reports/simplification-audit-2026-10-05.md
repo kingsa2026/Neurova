@@ -3030,6 +3030,7 @@
       - **丙｜死面另批处置**：`market_adapters` 五个 `install`（含 `:370` 空装 `return True`）与 `agent_skill_manager.acquire_skill` 零调用者——要么按教义第 7 条退役（连带 `_install_skill` 里那句 `hasattr(importer, "install_skill")` 的假接线），要么接线进甲案那条咽喉。现状：不修则 §6-176 的旁路①③常驻。
       - 三案共同点：**都不允许"往 `skill.json` 钉摘要"这种第三形态**——它既不产生读者，又留下第二个采信点。
     - **未动的邻近项（如实）**：④ `GET /media/storage-path/{media_type}` 名实不符零消费者（§6-172 已记）；⑤ `state.json`/`manifest.json` 与被保护构件同根、要封定向重算需根外信任锚（§6-176 ⑤）。
+    - **净 LOC 落字复核（本卷记过的那形又现身一次）**：`35a91bad` 正文写 **+17/−0**，实测 `git diff --numstat` 为 **+18/−1**——那 −1 是就地更正 §6-176 那一行本身（同一行尾部追加一句），不是删内容；已提交的历史不改写，此处落正。
 
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
