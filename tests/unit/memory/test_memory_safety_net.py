@@ -53,16 +53,15 @@ class TestMemorySystemSafetyNet:
 
     def test_unified_vector_store_importable(self):
         """测试 unified_vector_store 可导入（核心向量存储）"""
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import (
-            UnifiedVectorStore,
-            vector_norm,
-            vector_dot,
-            vector_normalize,
-        )
+        # 向量原语的公共出口在 §6-181 批 34 搬进 core/vector_math —— 这张安全网钉的是
+        # "这些名字可从其单源导入且可调用"，落点随搬家如实改；留在旧落点上再导一份就是第二份出口。
+        from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
+        from neurova.core import vector_math
+
         assert UnifiedVectorStore is not None
-        assert callable(vector_norm)
-        assert callable(vector_dot)
-        assert callable(vector_normalize)
+        assert callable(vector_math.vectorNorm)
+        assert callable(vector_math.vectorDot)
+        assert callable(vector_math.vectorNormalize)
 
     def test_unified_vector_store_in_init(self):
         """测试 UnifiedVectorStore 在 memory_layer/__init__.py 中导出"""
@@ -100,28 +99,29 @@ class TestMemorySystemSafetyNet:
     # ═══ 向量工具函数行为 ═══
 
     def test_vector_norm_behavior(self):
-        """测试 vector_norm 行为不变"""
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import vector_norm
-        assert vector_norm([3, 4]) == 5.0
-        assert vector_norm([0, 0]) == 0.0
-        assert vector_norm([1]) == 1.0
+        """测试 vectorNorm 行为不变（§6-181 批 34 搬家前后逐值同）"""
+        from neurova.core import vector_math
+
+        assert vector_math.vectorNorm([3, 4]) == 5.0
+        assert vector_math.vectorNorm([0, 0]) == 0.0
+        assert vector_math.vectorNorm([1]) == 1.0
 
     def test_vector_dot_behavior(self):
-        """测试 vector_dot 行为不变"""
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import vector_dot
-        assert vector_dot([1, 2, 3], [4, 5, 6]) == 32  # 1*4 + 2*5 + 3*6
-        assert vector_dot([0, 0], [1, 1]) == 0.0
+        """测试 vectorDot 行为不变"""
+        from neurova.core import vector_math
+
+        assert vector_math.vectorDot([1, 2, 3], [4, 5, 6]) == 32  # 1*4 + 2*5 + 3*6
+        assert vector_math.vectorDot([0, 0], [1, 1]) == 0.0
 
     def test_vector_normalize_behavior(self):
-        """测试 vector_normalize 行为不变"""
-        from neurova.cognitive_layers.memory_layer.unified_vector_store import vector_normalize
-        # 正常归一化
-        result = vector_normalize([3, 4])
+        """测试 vectorNormalize 行为不变（零范数那支返回传入对象本身，不是副本）"""
+        from neurova.core import vector_math
+
+        result = vector_math.vectorNormalize([3, 4])
         assert abs(result[0] - 0.6) < 1e-6
         assert abs(result[1] - 0.8) < 1e-6
-        # 零向量保持不变
-        result = vector_normalize([0, 0])
-        assert result == [0, 0]
+        zero = [0.0, 0.0]
+        assert vector_math.vectorNormalize(zero) is zero
 
     # ═══ ConflictDetector V2 行为 ═══
 

@@ -8,10 +8,10 @@
 - 压缩和归档
 """
 
+from neurova.core import vector_math
 from neurova.core.logger import get_logger
 from neurova.core.sleep_settings_store import SleepSettingsStore
 import json
-import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -23,20 +23,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-
-def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
-    """计算两个向量的余弦相似度"""
-    if len(vec_a) != len(vec_b):
-        return 0.0
-
-    dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-
-    return dot_product / (norm_a * norm_b)
 
 
 @dataclass
@@ -285,7 +271,7 @@ class SleepConsolidation:
             for cluster in clusters:
                 # 使用簇中心（第一个元素）计算相似度
                 if cluster[0].embedding and memory.embedding:
-                    sim = cosine_similarity(cluster[0].embedding, memory.embedding)
+                    sim = vector_math.cosineSimilarity(cluster[0].embedding, memory.embedding)
                     if sim > best_similarity:
                         best_similarity = sim
                         best_cluster = cluster

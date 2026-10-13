@@ -28,6 +28,7 @@ import yaml
 from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
 from neurova.core.data_root import dataPath
 from neurova.skills.skill_install_gate import validate_permissions_for_install
+from neurova.security import artifact_digest
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.plugins.plugin_errors import PluginError  # noqa: F401  (既有 import 面继续可用)
 
@@ -59,6 +60,10 @@ class PluginRecord:
     metadata: Dict[str, Any] = field(default_factory=dict)
     install_time: float = 0.0
     load_time: float = 0.0
+    #: 构件完整性钉（§6-172 批 31 / P3 插件半区）。属性名走本仓 camelCase 规矩，
+    #: 而**落盘键**与技能账本共用 `artifact_digest` 同一个字符串（口径在 `artifact_digest` 模块）——
+    #: 两条通道各起一个键名，读法就会分叉。默认空＝存量记录没有钉，装载时 TOFU 首钉。
+    artifactDigest: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -75,6 +80,7 @@ class PluginRecord:
             "metadata": self.metadata,
             "install_time": self.install_time,
             "load_time": self.load_time,
+            artifact_digest.DIGEST_FIELD: self.artifactDigest,
         }
 
     @classmethod
@@ -93,6 +99,10 @@ class PluginRecord:
             metadata=data.get("metadata", {}),
             install_time=data.get("install_time", 0.0),
             load_time=data.get("load_time", 0.0),
+            # `.get` 默认路径＝向后兼容：存量 `state.json` 没有这一样也能读回来，
+            # 所以**不需要**升 STATE_STORE_VERSION（升版会让整店记录撞版本守卫，
+            # 读成"这台机器没装过插件"那种看着自洽的空态）。
+            artifactDigest=str(data.get(artifact_digest.DIGEST_FIELD) or ""),
         )
 
 
@@ -396,6 +406,10 @@ class PluginManager:
                 "invalid_permissions_declaration",
                 "; ".join(str(e) for e in gate.get("errors") or []) or "permissions 声明不合法")
 
+        # 构件完整性钉（§6-172 批 31）：过了能力门的这份字节留一次底。
+        # 门证明的是"当时声明合法"，装载前比对证明的才是"跑的还是那份"。
+        record.artifactDigest = artifact_digest.digestDir(plugin_path)
+
         self._plugins[name] = record
         self._manifests[name] = manifest
         try:
@@ -489,6 +503,28 @@ class PluginManager:
 
         if not record.enabled:
             raise PluginError("not_enabled", "插件未启用，不能装载：%s" % plugin_name)
+
+        # 装载前对账（§6-172 批 31 / P3 插件半区）：与技能通道同一处判定
+        # （`artifact_digest.checkArtifact` 是全仓唯一的"钉过没有 / 符不符"口径）。
+        # 刻意放在这里而不是 `_load_plugin_module` 里——那个函数的宽
+        # `except Exception: return None` 会把这条 raise 折成 `entry_not_loaded`，
+        # 即"内层正确的拒绝被外层兜底吞成另一种成因"（本卷记过那形）。
+        digestStatus, digestNow = artifact_digest.checkArtifact(
+            record.path, record.artifactDigest)
+        if digestStatus == artifact_digest.STATUS_UNPINNED:
+            record.artifactDigest = digestNow
+            try:
+                self._persistState()
+            except Exception as persistError:  # noqa: BLE001 - 首钉没落账只是下次再钉，不拦住这次装载
+                logger.error("插件 %s 首钉未能落盘（本次仍放行，下次重钉）：%s",
+                             record.name, persistError)
+            logger.warning("插件 %s 登记里没有构件摘要（存量件），本次首钉 %s",
+                           record.name, digestNow)
+        elif digestStatus != artifact_digest.STATUS_MATCH:
+            raise PluginError(
+                artifact_digest.refusalReason(digestStatus),
+                "插件 %s 盘上的字节与登记时钉下的不是同一份：expected=%s actual=%s"
+                % (record.name, record.artifactDigest or "(未钉)", digestNow or "(读不到)"))
 
         module = self._load_plugin_module(record)
         if module is None:

@@ -19,19 +19,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 class TestUnifiedVoicePipelineInterface:
     """测试 UnifiedVoicePipeline 接口设计"""
 
-    def test_import_voice_pipeline(self):
-        """验证 UnifiedVoicePipeline 可以导入"""
-        from neurova.voice_pipeline import UnifiedVoicePipeline
-        assert UnifiedVoicePipeline is not None
-
-    def test_voice_pipeline_has_required_methods(self):
-        """验证 UnifiedVoicePipeline 有必要的方法"""
-        from neurova.voice_pipeline import UnifiedVoicePipeline
-
-        assert hasattr(UnifiedVoicePipeline, 'process_asr')
-        assert hasattr(UnifiedVoicePipeline, 'process_tts')
-        assert hasattr(UnifiedVoicePipeline, 'get_pipeline_stats')
-
     def test_voice_pipeline_result_dataclass(self):
         """验证 VoicePipelineResult 数据类"""
         from neurova.voice_pipeline import VoicePipelineResult

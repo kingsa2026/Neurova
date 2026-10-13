@@ -208,6 +208,8 @@ def _save(payload: bytes, filename: str, media_type: str = "file"):
             file=_FakeUploadFile(payload, filename=filename),
             media_type=media_type,
             agent_id="a1",
+            # §6-172：归属从登录依赖取；这里把 handler 当函数直调，身份得自己递
+            current_user={"user_id": "u1", "username": "u1", "role": "user"},
         )
     )
 

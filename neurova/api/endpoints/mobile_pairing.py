@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -181,17 +182,23 @@ async def _run_chat_stream(ws, data: dict, user_id: str):
 
 
 def _build_ws_url(request, code=None, token=None) -> str:
-    """从请求的 Host header 推导 WebSocket URL（BE-MOB-001 修复）"""
-    host = request.headers.get("host", "localhost:9527")
+    """设备回连地址：路径向**路由表**要，scheme/host 向请求要（§6-172 批 26）。
+
+    原先这里把 `/mobile/ws` **抄在函数里**（BE-MOB-001 那次只改了 host/scheme 的来处），
+    而本模块的挂载前缀由注册表给：`/api` + `/v1/mobile`（`endpoints/__init__.py:345`）。
+    抄出来的那条路径在真实路由表里根本不存在——`POST /pairing/confirm` 回的 `ws_url`
+    与批 25 那张"终于能扫"的二维码，发的都是同一个连不上的地址：扫完只能失败一次。
+    """
+    target = str(request.url_for("mobile_websocket"))
     scheme = getattr(request.url, "scheme", "http")
-    ws_scheme = "wss" if scheme == "https" else "ws"
+    ws_target = ("wss://" if scheme == "https" else "ws://") + target.split("://", 1)[1]
     params = []
     if code:
         params.append(f"code={code}")
     if token:
         params.append(f"token={token}")
     query = ("?" + "&".join(params)) if params else ""
-    return f"{ws_scheme}://{host}/mobile/ws{query}"
+    return f"{ws_target}{query}"
 
 
 def _generate_pairing_code() -> str:
@@ -591,9 +598,11 @@ async def generate_pairing(
         "expires_at": time.time() + expires_in,
     }
 
-    # 生成二维码 URL（从 Host header 推导，BE-MOB-001 修复）
-    ws_url = _build_ws_url(request, code=code)
-    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={ws_url}"
+    # 二维码必须同源出（§6-172 批 25）：原先回的是外部渲染服务的 URL，等于把 6 位配对码
+    # （`_generate_pairing_code` 自陈它是本仓唯一认证凭据）连 ws 地址一起交给第三方，
+    # 而确认后那条设备就挂到账号名下。路径由路由表自己给（`url_for`），
+    # 不在端点里再抄一份 `/api/v1/mobile/…`。
+    qr_code_url = str(request.url_for("get_pairing_qrcode", code=code))
 
     return GeneratePairingResponse(
         code=code,
@@ -603,60 +612,29 @@ async def generate_pairing(
     )
 
 
-@router.get("/pairing/qrcode/{code}")
+@router.get("/pairing/qrcode/{code}", dependencies=[Depends(_get_current_user_id)])
 async def get_pairing_qrcode(request: Request, code: str):
-    """获取配对二维码图片（PNG）"""
+    """配对二维码（PNG）——渲染只走渠道侧那**唯一一份** segno 实现（§6-172 批 25）。
+
+    原先这里 `import qrcode`，而那个库**不在依赖清单**（清单里声明的是 segno），
+    于是 `try` 恒定落到 `except ImportError`，回的是一张"方框里写着配对码"的 SVG 占位图：
+    手机扫它扫不出任何东西，端点却承诺"获取配对二维码图片（PNG）"——失败被一张
+    看着像成功的图盖住了（教义第 2 条禁止的形态）。现在渲染器全仓一处，渲染不出就显式 5xx。
+    """
     pairing = _pairing_codes.get(code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Pairing code not found")
 
-    # 尝试生成 PNG 二维码
-    try:
-        import io
-
-        import qrcode
-        from fastapi.responses import Response
-
-        ws_url = _build_ws_url(request, code=code)
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(ws_url)
-        qr.make(fit=True)
-
-        img = qr.make_image(fill_color="black", back_color="white")
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        buffer.seek(0)
-
-        return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
-            headers={"Content-Disposition": f'inline; filename="qr-{code}.png"'},
-        )
-    except ImportError:
-        # 降级为 SVG
-        return _generate_svg_qrcode(code)
-
-
-def _generate_svg_qrcode(code: str):
-    """生成简单的 SVG 二维码占位图（降级方案）"""
     from fastapi.responses import Response
 
-    svg_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
-  <rect width="200" height="200" fill="white"/>
-  <rect x="20" y="20" width="160" height="160" fill="none" stroke="black" stroke-width="2"/>
-  <text x="100" y="90" text-anchor="middle" font-family="Arial" font-size="12" fill="black">
-    配对码: {code}
-  </text>
-  <text x="100" y="120" text-anchor="middle" font-family="Arial" font-size="10" fill="gray">
-    请使用手机 App 扫描
-  </text>
-</svg>"""
+    # 函数内 import 与渠道侧调用方同一形态（`channel_config.py:300`），也保住测试的替换面
+    from neurova.channels.qrcode_auth import generate_qrcode_image
 
+    png = base64.b64decode(generate_qrcode_image(_build_ws_url(request, code=code)))
     return Response(
-        content=svg_content,
-        media_type="image/svg+xml",
-        headers={"Content-Disposition": f'inline; filename="qr-{code}.svg"'},
+        content=png,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="qr-{code}.png"'},
     )
 
 
@@ -713,9 +691,16 @@ async def confirm_pairing(request: Request, body: ConfirmPairingRequest):
     )
 
 
-@router.get("/pairing/status/{code}", response_model=PairingStatusResponse)
+@router.get("/pairing/status/{code}", response_model=PairingStatusResponse,
+            dependencies=[Depends(_get_current_user_id)])
 async def get_pairing_status(code: str):
-    """轮询配对状态"""
+    """轮询配对状态——**只给登录本人读**（§6-172 批 28，裁定乙）。
+
+    这两个按码回话的读面原先无门（`s08_route_auth_baseline:787` 整节 `router_deps=[]`）：
+    认码回图/状态、不认回 404，而 6 位配对码是 `_generate_pairing_code` 自陈的**唯一认证凭据**，
+    只有 10^6 个取值——匿名调用方拿它当枚举预言机，探到一个存在的码就能去 `confirm` 它，
+    设备随即挂到别人账号名下。`confirm` 有每 IP 限流，这两个口一个都没有。
+    """
     pairing = _pairing_codes.get(code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Pairing code not found")

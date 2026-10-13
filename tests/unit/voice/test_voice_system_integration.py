@@ -23,15 +23,6 @@ from datetime import datetime, timezone
 class TestVoiceMemoryBridgeAsyncio:
     """测试 VoiceMemoryBridge 的 asyncio 导入修复"""
 
-    def test_import_asyncio(self):
-        """验证 voice_memory_bridge 模块可以正确导入 asyncio"""
-        import importlib
-        import neurova.voice_memory_bridge as vmb
-        # 重新加载模块确保 asyncio 已导入
-        importlib.reload(vmb)
-        # 验证模块有 asyncio 属性
-        assert hasattr(vmb, 'asyncio') or hasattr(asyncio, 'create_task')
-
     def test_shutdown_with_pending_batch(self):
         """验证 shutdown 在有未完成批次时不抛出 NameError"""
         from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
@@ -203,12 +194,6 @@ class TestAgentShutdown:
 class TestVoiceAdapterRegistration:
     """测试 VoiceAdapter 注册到 ChannelManager"""
 
-    def test_voice_adapter_importable(self):
-        """验证 VoiceAdapter 可以从 channels 导入"""
-        from neurova.channels.voice import VoiceAdapter, create_voice_adapter
-        assert VoiceAdapter is not None
-        assert create_voice_adapter is not None
-
     def test_voice_adapter_is_channel_adapter(self):
         """验证 VoiceAdapter 继承 ChannelAdapter"""
         from neurova.channels.voice import VoiceAdapter
@@ -248,13 +233,6 @@ class TestVoiceAdapterRegistration:
 
         # 清理
         ChannelManager._instance = None
-
-    def test_voice_adapter_in_channels_init(self):
-        """验证 VoiceAdapter 已在 channels/__init__.py 中导出"""
-        from neurova.channels import VoiceAdapter, create_voice_adapter
-        assert VoiceAdapter is not None
-        assert create_voice_adapter is not None
-
 
 # ============================================================
 # Fix 5: VoiceEngineAdapter 适配器模式

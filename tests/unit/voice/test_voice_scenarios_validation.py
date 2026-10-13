@@ -227,14 +227,6 @@ class TestVoiceMemoryRetrieval:
         assert RecallChannel.VOICE in engine._channel_weights
         assert engine._channel_weights[RecallChannel.VOICE] == 0.10
 
-    def test_voice_channel_method_exists(self):
-        """验证 _channel_voice 方法存在"""
-        from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
-
-        engine = NeurovaRecallEngine()
-        assert hasattr(engine, '_channel_voice')
-        assert callable(engine._channel_voice)
-
     def test_voice_channel_searches_asr_transcription(self):
         """验证语音通道搜索 memory_type='asr_transcription' 的记忆"""
         from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
@@ -456,13 +448,6 @@ class TestEmotionAwareEvolution:
 class TestEndToEndVoiceDialog:
     """测试端到端语音对话：完整的 ASR → LLM → TTS 流程，所有系统协同工作"""
 
-    def test_voice_pipeline_import(self):
-        """验证 UnifiedVoicePipeline 可导入"""
-        from neurova.voice_pipeline import UnifiedVoicePipeline, VoicePipelineResult
-
-        assert UnifiedVoicePipeline is not None
-        assert VoicePipelineResult is not None
-
     def test_voice_pipeline_has_required_methods(self):
         """验证 VoicePipeline 有必需的方法"""
         from neurova.voice_pipeline import UnifiedVoicePipeline
@@ -520,12 +505,16 @@ class TestVoiceSystemIntegration:
     """测试语音系统集成：所有模块协同工作"""
 
     def test_voice_context_module_injects_metadata(self):
-        """验证 VoiceContextModule 注入元数据"""
+        """注入的必须是**内容本身**，不是"调用过了"——只断 called 的那版给的是假安心。"""
         from neurova.voice_context_module import VoiceContextModule
 
         module = VoiceContextModule()
-        mock_context_pool = MagicMock()
-        
+        captured = []
+
+        class _Pool:
+            def add_context(self, item):
+                captured.append(item)
+
         asr_result = {
             "text": "测试文本",
             "confidence": 0.9,
@@ -535,10 +524,29 @@ class TestVoiceSystemIntegration:
         }
 
         voice_context = module.build_voice_context(asr_result=asr_result)
-        module.inject_metadata(mock_context_pool, voice_context)
+        module.inject_metadata(_Pool(), voice_context)
 
-        # 验证 ContextPool.add_context 被调用
-        assert mock_context_pool.add_context.called
+        assert captured, "上下文池一条都没收到——注入路径断了"
+        content = captured[0].content
+        for fragment in ("测试文本", "0.90", "zh", "funasr"):
+            assert fragment in content, f"注入内容少了『{fragment}』：{content!r}"
+        assert captured[0].metadata.get("type") == "voice_context"
+        assert captured[0].metadata.get("engine") == "funasr"
+
+    def testEmptyVoiceContextInjectsNothing(self):
+        """没有可读信息 ⇒ 不往上下文池塞空气（否则下游看到一条空语音上下文，
+        以为"这轮有语音信息"，正是"成功却没内容"那形）。"""
+        from neurova.voice_context_module import VoiceContextModule
+
+        captured = []
+
+        class _Pool:
+            def add_context(self, item):
+                captured.append(item)
+
+        VoiceContextModule().inject_metadata(_Pool(), {})
+
+        assert captured == [], f"空上下文仍被注入：{[c.content for c in captured]}"
 
     @pytest.mark.asyncio
     async def test_voice_memory_bridge_records_asr(self):

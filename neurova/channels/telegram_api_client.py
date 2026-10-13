@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+from neurova.channels.voice_ingress import VOICE_DOWNLOAD_MAX_BYTES
 
 try:
     import requests  # type: ignore[import-not-found]
@@ -39,6 +41,51 @@ class TelegramAPIMixin:
         except Exception as e:
             logger.error("Telegram API 请求异常: %s", e)
             return {"ok": False, "description": str(e)}
+
+    def fetchVoiceBytes(self: Any, fileId: str) -> Optional[bytes]:
+        """按 file_id 取回入站语音/音频字节：getFile 拿相对路径 → /file/bot<token>/<路径>。
+
+        同步实现——调用点在轮询线程里，不进事件循环。任一步失败返回 None，由调用方降级
+        占位：取不到字节不能把整条消息吞掉。超限的语音**先按声明长度拒收**（`stream=True`
+        只读头），再按累计字节拒收，不为拒收而先把大文件吸进内存。
+        """
+        if not REQUESTS_AVAILABLE:
+            logger.warning("Telegram 语音下载跳过: requests 库未安装")
+            return None
+
+        info = self._api_request("GET", f"/bot{self.bot_token}/getFile", params={"file_id": fileId})
+        if not info.get("ok"):
+            logger.warning("Telegram getFile 失败: %s", info.get("description"))
+            return None
+        filePath = str((info.get("result") or {}).get("file_path") or "")
+        if not filePath:
+            logger.warning("Telegram getFile 未返回 file_path，放弃取字节")
+            return None
+
+        url = f"{self.API_BASE}/file/bot{self.bot_token}/{filePath}"
+        resp = None
+        try:
+            resp = requests.get(url, timeout=20, stream=True, proxies=self._proxies or None)
+            if resp.status_code != 200:
+                logger.warning("Telegram 语音下载 HTTP %s", resp.status_code)
+                return None
+            declared = resp.headers.get("Content-Length")
+            if declared and int(declared) > VOICE_DOWNLOAD_MAX_BYTES:
+                logger.warning("Telegram 语音声明长度超上限，拒收: %s 字节", declared)
+                return None
+            buf = bytearray()
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                buf += chunk
+                if len(buf) > VOICE_DOWNLOAD_MAX_BYTES:
+                    logger.warning("Telegram 语音实际字节超上限，拒收")
+                    return None
+            return bytes(buf)
+        except Exception as e:  # noqa: BLE001 - 取字节失败由调用方降级占位
+            logger.warning("Telegram 语音下载异常: %s", e)
+            return None
+        finally:
+            if resp is not None:
+                resp.close()
 
     async def _download_url(self: Any, url: str, timeout: int = 60) -> bytes | None:
         # 批次0：facade 产物契约是服务端本地路径（provider URL 临时有效，生成即落盘）
