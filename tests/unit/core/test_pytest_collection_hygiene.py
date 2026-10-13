@@ -407,7 +407,10 @@ def test_reverseProofShowsSuchAFileSilentlyDoesNotRun(tmp_path, pytestconfig):
         [sys.executable, "-m", "pytest", "-c", str(_PROJECT_ROOT / "pyproject.toml"),
          "-p", "no:cacheprovider", "--collect-only", "-q", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(tmp_path))
+        # 写侧同样钉 UTF-8：本机 locale 是 cp936 时，收集清单里的中文文件名会在
+        # 子进程 stdout 上按 locale 编码，读侧显式 utf-8 只会拿到替换字符。
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        cwd=str(tmp_path))
     listing = collected.stdout
     assert "test_fooCollected.py" in listing, (
         f"真收集连合规文件都没收（退出码 {collected.returncode}）：{listing[:400]}")

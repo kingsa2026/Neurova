@@ -35,7 +35,8 @@ import json
 from pathlib import Path
 
 import pytest
-from tests import ast_scan
+
+from tests import ast_scan as _astScan
 
 from neurova.plugins.plugin_manager import PluginError
 
@@ -90,9 +91,12 @@ class TestCapabilityVocabularyIsSourcedNotCopied:
         skills = _skillPermissions()
         keys = set(skills.KNOWN_CAPABILITY_KEYS)
         offenders = []
-        # 枚举与解析走共享预算（含 `__pycache__` 剪枝；只扫一遍）。
-        for path in sorted(ast_scan.filesUnder(PLUGIN_PACKAGE)):
-            tree = ast_scan.transientTree(path)
+        # 取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `glob + ast.parse`
+        # 把「解析量」绑成「代码总量」）。预筛词取能力键本身——它们是判据的
+        # **充分条件**：字面量集合里不含任何一个键的节点集不可能构成本判据的靶。
+        for ref in _astScan.sourceRefsUnder(PLUGIN_PACKAGE, hints=tuple(keys)):
+            path = ref.path
+            tree = _astScan._cachedParse(ref.stamp, ref.code)
             for node in ast.walk(tree):
                 literals = {n.value for n in ast.walk(node)
                             if isinstance(n, ast.Constant) and isinstance(n.value, str)}

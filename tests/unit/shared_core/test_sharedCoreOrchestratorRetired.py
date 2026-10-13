@@ -28,9 +28,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from tests import ast_scan
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 PKG_ROOT = REPO / "neurova"
@@ -40,9 +40,11 @@ RETIRED = "neurova.shared_core.plan_orchestrator"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(tree) -> list[str]:
-    """一棵树里 AST 可见的导入目标。入参是**已解析的树**：枚举与解析走共享预算
-    （`tests/ast_scan.py`，Issue #148：受保护子集里不得自带第二份全仓解析写法）。"""
+def _importedNames(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -57,16 +59,22 @@ def _importedNames(tree) -> list[str]:
 
 
 def _hits(root: Path) -> list[str]:
+    """子树里仍引用已退役编排器的文件清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词取退役模块末段，是判据的**充分条件**：无论绝对还是相对 import，
+    真引用它的文件必然含这一段字样。
+    """
     found = []
-    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
-    # 不得再出现自带 rglob + ast.parse 的第二份实现）。
-    for p, tree in ast_scan.parsedModules(root):
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("plan_orchestrator")):
         if any(n == RETIRED or n.startswith(RETIRED + ".") or n == "__REL__.plan_orchestrator"
-               for n in _importedNames(tree)):
+               for n in _importedNames(ref.code)):
             try:
-                shown = p.relative_to(REPO).as_posix()
+                shown = ref.path.relative_to(REPO).as_posix()
             except ValueError:
-                shown = p.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
+                shown = ref.path.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
             found.append(shown)
     return found
 
@@ -116,5 +124,5 @@ def test_scannerCatchesARevival(tmp_path):
 
 
 def test_scanRootActuallyCoversTheTree():
-    mods = ast_scan.filesUnder(PKG_ROOT)
+    mods = [p for p in PKG_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
     assert len(mods) > 500, f"扫描根只覆盖 {len(mods)} 个 .py，层级写错了"

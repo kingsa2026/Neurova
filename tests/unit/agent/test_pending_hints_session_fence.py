@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import io
 from pathlib import Path
 
 from tests import ast_scan
+
 from neurova.agent.tool_coordinator import ToolCoordinator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -160,9 +160,9 @@ class TestProductionConsumerPassesSession:
     def test_noBarePopPendingHintsCallInProduction(self):
         """生产侧每一处排干都必须传会话——空参即那条无栅栏的门。"""
         offenders = []
-        # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
-        # 不得再出现自带 rglob + ast.parse 的第二份实现）。
-        for path, tree in ast_scan.parsedModules(PRODUCTION):
+        # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
+        # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+        for path, tree in ast_scan.parsedModules(PRODUCTION, ".py"):
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call)

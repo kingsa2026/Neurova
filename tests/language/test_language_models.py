@@ -149,18 +149,21 @@ class TestUserLanguagePreferenceContract:
 
 
 def _dashSplitSites(root):
-    """语言包内**按连字符切标签**的落点：`文件::所属函数`（AST 取节点，不按文本猜）。
-
-    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148：受保护子集里不得
-    再出现自带 `rglob` + `ast.parse` 的第二份实现）。
-    """
+    """语言包内**按连字符切标签**的落点：`文件::所属函数`（AST 取节点，不按文本猜）。"""
     import ast as _ast
     import pathlib
 
     from tests import ast_scan
 
     sites = []
-    for path, tree in ast_scan.parsedModules(pathlib.Path(root)):
+    # 枚举与解析走 tests/ast_scan 的共享预算；预筛词是判据的**充分条件**
+    # （谓词只认 `.split("-")` 这一形态，连 `split` 字样都没有的文件不可能命中）。
+    for ref in ast_scan.sourceRefsUnder(pathlib.Path(root), ".py",
+                                        ast_scan.textHints("split")):
+        try:
+            tree = _ast.parse(ref.code)
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
         for node in _ast.walk(tree):
             if not (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
                     and node.func.attr == "split"):
@@ -175,7 +178,7 @@ def _dashSplitSites(root):
                 if fn.lineno <= node.lineno <= (fn.end_lineno or fn.lineno):
                     if holder is None or fn.lineno > holder.lineno:
                         holder = fn
-            sites.append("%s::%s" % (path.name, holder.name if holder else "<module>"))
+            sites.append("%s::%s" % (ref.path.name, holder.name if holder else "<module>"))
     return sites
 
 

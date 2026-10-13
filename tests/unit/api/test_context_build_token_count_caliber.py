@@ -135,10 +135,21 @@ class TestNoWordSplitTokenCountingInProduction:
         return isinstance(name, str) and "token" in name.lower()
 
     def test_production_has_no_len_split_token_count(self):
+        """全仓取数走**一次性**入口：本判据只扫一遍，不留常驻节点表。
+
+        根因（`cnb-a99-1k4bpgeim` 的 unit-tests 腿）：本用例原先走保留型
+        `walkedModules`，它把 `(路径, 节点)` **全量物化**——实测同一组文本预筛下
+        91.2 万节点、RSS +282MB，而本判据**只扫一次**，保留的收益（跨判据复用）
+        完全不存在，成本却全额留在 4800 条用例同进程的会话里。实测（本机）：
+        物化 1.68s / +282MB ↔ 一次性 1.46s / +0MB，判定结果逐条一致。
+
+        预筛词是判据的**充分条件**：连 `split` 或 `token` 字样都没出现的文件，
+        不可能命中 `len(<text>.split())` 被当成 token 数的落点。
+        """
         from tests import ast_scan
 
         offenders = []
-        for path, node in ast_scan.walkedModules(
+        for path, node in ast_scan.transientNodes(
             ast_scan.PRODUCTION_ROOT, hints=ast_scan.textHints("split", "token")
         ):
             # ① 关键字参数名含 token
