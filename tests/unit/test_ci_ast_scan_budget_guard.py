@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import gc
 import io
 import sys
@@ -72,6 +73,56 @@ def protectedFiles() -> list:
     return [line.split("#", 1)[0].strip()
             for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
             if line.split("#", 1)[0].strip()]
+
+
+def _mayHideRepoWideScan(text: str) -> bool:
+    """文本层粗判：这份源码里**有没有可能**出现「枚举 + 解析」的组合。
+
+    根因（本门禁自己踩的那条）：`TestNoUnprefilteredRepoWideScan` 与
+    `test_known_hit_points_use_the_shared_budget` 都要把受保护子集里的每个
+    `.py` 交给 `_repoWideAstScans`，而后者第一步就是 `ast.parse(source)`。
+    于是**门禁自身的解析面 = 受保护子集的总量**：本机 546 条清单约 1.7s 单跑，
+    在同一台机器上与其余近 500 个文件共享时撞 30s 默认墙钟——判据成本又一次
+    绑在代码总量上（与本文件要防的根因同形，只是账单记在门禁自己身上）。
+
+    预筛是**充分条件**，不是放宽判据：
+
+    - 落点候选 = 枚举调用名（`rglob`/`glob`/`iglob`/`iterdir`/`listdir`/`scandir`）
+      或 `walk`（含 `os.walk` 的裸名与属性两形态。属性根名无法靠文本区分
+      `ast.walk` 与 `os.walk`，故要宽收）；
+    - 解析原语候选 = `parse`、`compile` 与模块名 `ast` / `builtins` / `py_compile` /
+      `compileall` / `parso` / `libcst` / `astroid`（`import ast` 后写的
+      `_ast.parse(...)`、`from ast import parse as P` 之后只留 `P`，这两形都要能被
+      `ast` 一词兜住）。
+
+    两份词表都是 `_repoWideAstScans` 各输出面的**超集**——两个候选词一个都没出现
+    的文件，在那个谓词下不可能命中。反向钉住见
+    `TestPrefilterNeverSkipsARealHit`：预筛若把真命中滤掉，本门禁会静默空转。
+    """
+    if not any(word in text for word in ENUMERATION_HINTS):
+        return False
+    return any(word in text for word in PARSE_HINTS)
+
+
+#: 枚举侧预筛词：`ENUMERATION_ATTRS` / `ENUMERATION_NAMES` / `os.walk` 的超集。
+ENUMERATION_HINTS = ("rglob", "glob", "iglob", "iterdir", "listdir", "scandir", "walk")
+#: 解析侧预筛词：`PARSE_MODULE_ATTRS` / `BARE_PARSE_NAMES` 的超集。
+PARSE_HINTS = ("parse", "compile", "ast", "builtins", "py_compile", "compileall",
+               "parso", "libcst", "astroid")
+
+
+def _repoWideScanHits(rel: str) -> list:
+    """受保护子集里单个文件的扫描落点（文本预筛 → 需要时才解析）。"""
+    path = PROJECT_ROOT / rel
+    if not path.is_file() or not rel.endswith(".py"):
+        return []
+    text = io.open(path, encoding="utf-8", errors="ignore").read()
+    if not _mayHideRepoWideScan(text):
+        return []
+    try:
+        return _repoWideAstScans(text)
+    except SyntaxError:
+        return []
 
 
 #: 文件系统枚举调用：属性形态（`X.rglob` / `X.iterdir` …）
@@ -349,22 +400,82 @@ def _repoWideAstScans(source: str) -> list:
     return sorted(set(hits))
 
 
+#: 会**物化整片节点元组**的入口：语义是「跨判据复用同一份语法树 + 同一份节点表」。
+#:
+#: 门槛是**要不要一次拿全节点**，不是"名字听起来像保留型"：
+#: `walkedModules` 返回 `(path, node)` 清单，每次调用都经 `_cachedNodes` 把
+#: 整棵树的节点元组建出来并留在会话里；`parsedModules` 返回 `(path, tree)`，
+#: 路径是 `sourceRefsUnder` + `_cachedParse`——**它拿的是树，不是节点**。
+#:
+#: 正因如此，`parsedModules` 从一开始就不属于本名单（原先误收）：它就是本注释
+#: 下方要求"要复用就该共享的那份预算"本身，消费方按需 `ast.walk` 自己那一棵。
+#: 实测（本机，`neurova/` 全仓 1015 文件）两条入口各自的缓存账：
+#:
+#: | 入口 | `_cachedParse` | `_cachedNodes` | RSS 增量 |
+#: |---|---|---|---|
+#: | `parsedModules` | 1015 棵 | **0** | +446MB（树，跨判据共享） |
+#: | `walkedModules` | 1015 棵 | **1015 组节点元组** | 再 +411MB |
+#:
+#: 把 `parsedModules` 留在名单里，就是拿判据打正当设计：`test_turnIdentitySingleSource`
+#: 的 `declIndex()` 以模块级缓存建索引、被四个以上用例跨类消费，正是本判据
+#: 要求的那种"会重复扫"的正当面，却因这一条被报红——假阳性会训练人忽略门禁。
+#:
+#: `_cachedParse` / `_cachedNodes` 不在名单里乃是同一理（它们的正当用法有
+#: `test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing` 的
+#: 落点判据……，docstring 逐条写明「同进程里其余守卫共享这份预算」）。
+#: 一次性扫描的出路仍是 `transientTree` / `transientNodes`。
+MATERIALIZING_ENTRIES = frozenset({"walkedModules"})
+
+
+def _oneShotRetainingScanHits(source: str) -> list:
+    """文件里「用了物化全量节点的保留型入口」的落点（函数名，模块级记 `<模块级>`）。
+
+    靶点：`walkedModules` 经 `_cachedNodes` 把整棵树的**节点元组**建出来并留在
+    会话里，而调用方往往只扫一次。（`parsedModules` 拿的是树、不拿节点，与
+    `_cachedParse` 同属共享预算，不在靶点内——见 `MATERIALIZING_ENTRIES`。）
+    实测全仓
+    `neurova/` + 同一组文本预筛：
+
+    | 入口 | 节点数 | 扫描 | RSS 增量 | 常驻节点表 |
+    |---|---|---|---|---|
+    | `walkedModules`（物化） | 912141 | 1.68s | +282MB | 有 |
+    | `transientNodes`（一次性） | 912141 | 1.46s | +0MB | 无 |
+
+    纯静态判定：只看调用了哪个入口名。不判「扫了几个文件」——那在不读运行时的
+    前提下不可判定，而入口的**物化语义**是当场可判的事实。
+    """
+    tree = ast.parse(source)
+    units, _byFunction = _scanUnits(tree)
+    hits = []
+    for label, body, _shadow in units:
+        found = set()
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else (
+                    func.id if isinstance(func, ast.Name) else "")
+                if name in MATERIALIZING_ENTRIES:
+                    found.add(name)
+            stack.extend(ast.iter_child_nodes(node))
+        if found:
+            hits.append(label)
+    return sorted(set(hits))
+
+
 class TestNoUnprefilteredRepoWideScan:
-    """受保护子集里的全仓 AST 扫描归零：判据不得与代码总量捆绑。"""
+    """受保护子集里的全仓 AST 扫描归零：判据不得与代码总量捆绑。
+
+    取数只读一遍：两份断言各走一次 `_liveRepoWideScans()`（本模块唯一取数口，
+    整会话算一次），不各写一套「遍历清单 + 解析」——
+    门禁自己重复解析一遍受保护子集，就是本文件要防的那条根因。
+    """
 
     def test_no_unledgered_repo_wide_ast_scan(self):
-        live = {}
-        for rel in protectedFiles():
-            path = PROJECT_ROOT / rel
-            if not path.is_file() or not rel.endswith(".py"):
-                continue
-            try:
-                source = io.open(path, encoding="utf-8", errors="ignore").read()
-                hits = _repoWideAstScans(source)
-            except SyntaxError:
-                continue
-            if hits:
-                live[rel] = hits
+        live = _liveRepoWideScans()
         unledgered = {rel: hits for rel, hits in live.items() if rel not in REPO_WIDE_SCAN_LEDGER}
         assert not unledgered, (
             "受保护子集里出现「rglob + ast.parse」全仓扫描（判据与代码总量、"
@@ -378,20 +489,129 @@ class TestNoUnprefilteredRepoWideScan:
 
     def test_ledger_has_no_stale_entries(self):
         """台账里不得有已经不存在命中点的条目（清了扫描要同步销账）。"""
-        live = {}
+        live = _liveRepoWideScans()
+        stale = sorted(set(REPO_WIDE_SCAN_LEDGER) - set(live))
+        assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
+
+
+class TestOneShotCallsUseTheTransientEntry:
+    """不得用**物化全量节点**的保留型入口（`walkedModules`）。
+
+    根因（`cnb-a99-1k4bpgeim` 的 unit-tests 腿实测）：受保护子集里
+    `tests/unit/api/test_context_build_token_count_caliber.py::test_production_has_no_len_split_token_count`
+    走的是**保留型**入口 `ast_scan.walkedModules(...)`。它确实是共享预算
+    （故上一类判据看不见它），但保留型入口的语义是「跨判据复用同一份语法树」，
+    而这条判据**只扫一次**——保留的收益不存在，成本却全额留下。
+
+    实测（本机，`neurova/` 全仓 + 同一组文本预筛）：
+
+    | 入口 | 节点数 | 扫描 | RSS 增量 | 常驻树 |
+    |---|---|---|---|---|
+    | `walkedModules`（保留型） | 912141 | 1.68s | **+282MB** | 379 棵 |
+    | `transientNodes`（一次性） | 912141 | 1.46s | +0MB | 0 棵 |
+
+    282MB 常驻 AST 在 4800 条用例同进程的会话里，把这条判据的墙钟从本机 2.36s
+    推到 CI 的 30s 之上——`pytest-timeout` 报的是超时，而真因是它替整个会话
+    养着一片不再被任何人读的语法树。这与 `Issue #148`「代码总量被编码成时间上界」
+    同根，只是账单记在**内存/GC** 上。
+
+    判据按**结构**（用了哪个入口）而不是秒数：秒数会随机器漂移，而「一次性扫描
+    走保留型入口」是一个当场可判的事实。
+    """
+
+    def test_no_one_shot_criteria_materialize_the_whole_node_tuple(self):
+        offenders = []
         for rel in protectedFiles():
             path = PROJECT_ROOT / rel
             if not path.is_file() or not rel.endswith(".py"):
                 continue
             try:
                 source = io.open(path, encoding="utf-8", errors="ignore").read()
-                hits = _repoWideAstScans(source)
-            except SyntaxError:
+            except OSError:
                 continue
+            hits = _oneShotRetainingScanHits(source)
             if hits:
-                live[rel] = hits
-        stale = sorted(set(REPO_WIDE_SCAN_LEDGER) - set(live))
-        assert not stale, f"台账登记了已不存在的全仓扫描：{stale}"
+                offenders.append(f"{rel} → {hits}")
+        assert not offenders, (
+            "受保护子集里用了物化全量节点的保留型入口（`walkedModules`）"
+            "——一次判据把整棵树的每个节点都留在会话里:\n  "
+            + "\n  ".join(sorted(offenders))
+            + "\n修法：只扫一次的走一次性入口 `transientTree` / `transientNodes`"
+            "（吃同一份文本预筛、同样不留常驻树）；会重复扫的才用 `nodeScan` /"
+            " `callSites` 一族。实测全仓 912141 节点：保留型 +282MB / 一次性 +0MB。"
+        )
+
+    def test_detector_is_not_vacuous(self):
+        """反向控制：检出器真的分得清两类入口（否则上面那条恒真）。"""
+        retaining = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.walkedModules(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        transient = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.transientNodes(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(retaining), (
+            "保留型入口没被报出——上面那条判据是空的"
+        )
+        assert _oneShotRetainingScanHits(transient) == [], (
+            f"一次性入口被误报：{_oneShotRetainingScanHits(transient)}"
+            "（把推荐修法报红，等于逼人绕开它）"
+        )
+
+    def test_tree_level_entry_is_not_banned_but_node_level_one_is(self):
+        """门槛是「拿不拿全节点」，不是"名字像保留型"。
+
+        根因（本批实测）：`parsedModules` 返回 `(path, tree)`，路是
+        `sourceRefsUnder` + `_cachedParse`——**它拿树、不拿节点**，正是下面
+        `test_cross_criterion_retaining_entries_are_not_banned` 要求"该共享的那份预算"
+        本身。把它与 `walkedModules` 同列，报错就打在正当设计上：本仓
+        `test_turnIdentitySingleSource.py::declIndex` 以模块级缓存建索引、
+        被四个以上用例跨类消费，属"会重复扫"的正当面，却被判红。
+
+        缓存账实测（本机，`neurova/` 全仓 1015 文件，两入口各起一遍）：
+        `parsedModules` 后 `_cachedNodes` 为 0；`walkedModules` 后为 1015 组节点元组。
+        """
+        tree_level = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, tree in ast_scan.parsedModules(PRODUCTION):\n"
+            "        assert tree is not None\n"
+        )
+        node_level = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.walkedModules(PRODUCTION, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(tree_level) == [], (
+            f"拿树的入口被误报成物化节点：{_oneShotRetainingScanHits(tree_level)}"
+            "（`parsedModules` 是共享预算本身，把它报红即拿判据打正当设计）"
+        )
+        assert _oneShotRetainingScanHits(node_level), (
+            "拿节点的入口没被报出——判据退化成恒真的空断言"
+        )
+
+    def test_cross_criterion_retaining_entries_are_not_banned(self):
+        """跨判据共享的保留型入口**不是**禁品（不得一刀切报红）。
+
+        本仓有一批正当用法：`test_ci_thin_env_guards` 的注解地雷、`test_data_root_no_cwd_landing`
+        的落点判据，都以 `sourceRefsUnder` 取文本 + `_cachedParse` 取树，docstring 写明
+        「同进程里其余守卫共享这份预算」。判据若把它们一并禁掉，就是拿判据打正当设计。
+        """
+        legit = (
+            "from tests import ast_scan\n"
+            "def test_x():\n"
+            "    for path, node in ast_scan.nodeScan(ROOT, hints=('a',)):\n"
+            "        assert node is not None\n"
+        )
+        assert _oneShotRetainingScanHits(legit) == [], (
+            f"保留型预算的正常用法被误报：{_oneShotRetainingScanHits(legit)}"
+        )
 
 
 class TestDetectionSurfaceCoversHelpersNotJustTestNames:
@@ -1242,6 +1462,70 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
         )
         assert after["frozen"] > 0, f"退役后冻结对象仍为 0：{after}"
 
+class TestPrefilterNeverSkipsARealHit:
+    """预筛不得漏判：受保护子集里每个真命中都要能过预筛。
+
+    预筛只决定「要不要解析」，本门禁因此从「解析受保护子集全部源码」降到
+    「解析候选文件」。代价是引入一个**可能静默空转**的缝：若某个真命中被
+    滤掉，两份断言都会对它的文件全体沉默（绿，但什么也没查）。
+
+    两条反向钉住：① 逐文件把预筛读数与真判据对上；② 每一处**历史上真出现过**
+    的形态写成样本，必须过预筛（形态来自台账与上一轮销账记录，
+    含 helper 拆两层、`os.walk`、`import ast as _ast`、`from ast import parse as P`）。
+    """
+
+    def test_every_live_hit_passes_the_prefilter(self):
+        for rel, hits in _liveRepoWideScans().items():
+            text = io.open(PROJECT_ROOT / rel, encoding="utf-8", errors="ignore").read()
+            assert _mayHideRepoWideScan(text), (
+                f"{rel} 含真命中 {hits} 却被预筛滤掉——本门禁会对它静默空转"
+            )
+
+    @pytest.mark.parametrize("label,source", [
+        ("helper 拆两层", "def _scan():\n"
+                          "    import ast\n"
+                          "    return [ast.parse(p.read_text()) for p in ROOT.rglob('*.py')]\n"
+                          "def test_calls_it():\n    assert _scan() == []\n"),
+        ("os.walk 展开全树", "import ast, os\n"
+                             "def test_w():\n"
+                             "    return [ast.parse(open(p).read()) for _, _, fs in os.walk(ROOT)\n"
+                             "            for p in fs]\n"),
+        ("模块级裸枚举", "import ast\n"
+                        "TREES = [ast.parse(p.read_text()) for p in ROOT.glob('**/*.py')]\n"),
+        ("ast 别名", "import ast as _ast\n"
+                     "def test_a():\n"
+                     "    return [_ast.parse(p.read_text()) for p in ROOT.iterdir()]\n"),
+        ("parse 裸名", "from ast import parse as P\n"
+                       "def test_p():\n"
+                       "    return [P(p.read_text()) for p in ROOT.scandir()]\n"),
+        ("第三方解析器", "import libcst\n"
+                        "def testc():\n"
+                        "    return [libcst.parse_module(p.read_text()) for p in ROOT.rglob('*.py')]\n"),
+    ])
+    def test_prefilter_keeps_every_judged_shape(self, label, source):
+        assert _repoWideAstScans(source), f"{label} 的样本没被判据报出，样本本身失效"
+        assert _mayHideRepoWideScan(source), (
+            f"{label} 的真命中被预筛滤掉——本门禁会对这一形静默空转"
+        )
+
+
+@functools.lru_cache(maxsize=1)
+def _liveRepoWideScans() -> dict:
+    """受保护子集当前的全仓扫描分布（本模块唯一取数口，整会话算一次）。
+
+    为什么必须只有一份取数：`TestNoUnprefilteredRepoWideScan` 的两条与
+    `test_known_hit_points_use_the_shared_budget` 问的是**同一份**事实，
+    各写一遍就是把「遍历 546 条清单 + 逐个解析」付三遍（本机约 5s 量级）。
+    冻结成 `dict` 交给调用方，是为了不让任何一条断言能就地改到别人的读数。
+    """
+    live: dict = {}
+    for rel in protectedFiles():
+        hits = _repoWideScanHits(rel)
+        if hits:
+            live[rel] = hits
+    return live
+
+
 @pytest.mark.parametrize("rel", [
     "tests/unit/knowledge/test_write_boundary_closes_verification.py",
     "tests/unit/core/test_dead_cache_module_removed.py",
@@ -1259,6 +1543,7 @@ def test_known_hit_points_use_the_shared_budget(rel):
         f"{rel} 不再使用 tests/ast_scan.py 的共享解析预算——"
         "跨文件 AST 判据又各写一套，Issue #148 的根因会回来。"
     )
-    assert not _repoWideAstScans(source), (
-        f"{rel} 又出现了 rglob + ast.parse 的同用例组合：{_repoWideAstScans(source)}"
+    live = _liveRepoWideScans()
+    assert rel not in live, (
+        f"{rel} 又出现了 rglob + ast.parse 的同用例组合：{live.get(rel, [])}"
     )

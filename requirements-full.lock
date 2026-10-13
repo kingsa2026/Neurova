@@ -460,7 +460,9 @@ requests-toolbelt==1.0.0
     #   langsmith
     #   lark-oapi
 rich==15.0.0
-    # via typer
+    # via
+    #   -r requirements.txt
+    #   typer
 rpds-py==2026.6.3
     # via
     #   jsonschema

@@ -178,19 +178,25 @@ class TestProviderChatModelDepsDeclaredForRuntime:
     PROVIDERS_DIR = PROJECT_ROOT / "neurova" / "llm" / "providers"
 
     def _importedLangchainDists(self) -> set:
-        """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。"""
+        """providers/*.py 真 import 的 langchain 顶层模块 → PEP 503 发行版名。
+
+        枚举与解析都走本仓唯一 AST 入口 `tests/ast_scan`（Issue #148 收口）：
+        私有 `glob` + `ast.parse` 是 `test_ci_ast_scan_budget_guard` 点名要红的
+        形态——判据的成本从此与目录大小脱钩。预筛词 `langchain` 是判据的**充分
+        条件**（`top.startswith("langchain")` 只可能命中文本里出现过这个词的文件，
+        而那个词只可能写在 import 语句里），故仍逐文件解析 import 面，
+        不放松「从 import 现场扫出来、不手抄」这条覆盖面。
+        """
         dists = set()
-        for path in sorted(self.PROVIDERS_DIR.glob("*.py")):
-            tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    top = (node.module or "").split(".")[0]
-                elif isinstance(node, ast.Import):
-                    top = (node.names[0].name or "").split(".")[0]
-                else:
-                    continue
-                if top.startswith("langchain"):
-                    dists.add(top.lower().replace("_", "-"))
+        for path, node in ast_scan.nodeScan(self.PROVIDERS_DIR, hints=("langchain",)):
+            if isinstance(node, ast.ImportFrom):
+                top = (node.module or "").split(".")[0]
+            elif isinstance(node, ast.Import):
+                top = (node.names[0].name or "").split(".")[0]
+            else:
+                continue
+            if top.startswith("langchain"):
+                dists.add(top.lower().replace("_", "-"))
         return dists
 
     def test_scan_itself_finds_the_chain(self):
