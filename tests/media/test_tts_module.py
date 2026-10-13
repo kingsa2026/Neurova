@@ -241,7 +241,24 @@ class TestTTSConfig:
 
 
 class TestTTSManager:
-    """测试 TTSManager"""
+    """测试 TTSManager
+
+    这两格在构造时显式声明 `fallback_chain=["mock"]`，不是顺手写法（2026-10-12 实测）：
+    `_synthesize_with_fallback` 有一条**生产上正确**的规矩 —— 当前引擎是链尾兜底
+    （mock）时，它不算"本引擎产出"，而是回到链顶重新竞争，免得兜底哔声永久顶班。
+    于是 `TTSConfig(engine="mock")` 只声明了"初始用 mock"，**没有**声明回退链：
+    默认链是 `["moss-nano", "edge-tts", "sapi5", "mock"]`，每次 `synthesize` 都会先把
+    moss 重新拉起来一次。而在真跑 CI 的容器里，`MOSSNanTTS.initialize()` 的
+    `auto_download=True` 会去**下载 GB 级模型**（`neurova/tts/moss_nano.py:261`），
+    于是 `pytest-timeout` 的默认 30s 墙钟被吃满，两条用例报
+    `Failed: Timeout (>30.0s) from pytest-timeout`（本机实测同一形态耗时 127s）。
+    这不是"跑得慢"，是**判据在联网**：本格要测的是 mock 引擎的合成契约，
+    与链上别的引擎能不能起来无关。显式给链 = 把被测面钉在 mock 上，同时不触碰
+    生产那条 last-resort 规矩（它由 tests/unit/tts/test_tts_manager_fallback.py 常驻把守）。
+    """
+
+    #: 本类只测 mock 引擎的合成契约 ⇒ 链上只放它（理由见类 docstring）。
+    _MOCK_ONLY_CHAIN = ["mock"]
 
     @pytest.mark.asyncio
     async def test_initialize_edge_tts(self):
@@ -262,7 +279,7 @@ class TestTTSManager:
     @pytest.mark.asyncio
     async def test_synthesize(self):
         """测试语音合成"""
-        manager = TTSManager(TTSConfig(engine="mock"))
+        manager = TTSManager(TTSConfig(engine="mock", fallback_chain=list(self._MOCK_ONLY_CHAIN)))
         await manager.initialize()
 
         audio = await manager.synthesize("测试文本")
@@ -272,7 +289,7 @@ class TestTTSManager:
     @pytest.mark.asyncio
     async def test_synthesize_stream(self):
         """测试流式语音合成"""
-        manager = TTSManager(TTSConfig(engine="mock"))
+        manager = TTSManager(TTSConfig(engine="mock", fallback_chain=list(self._MOCK_ONLY_CHAIN)))
         await manager.initialize()
 
         chunks = []

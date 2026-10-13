@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 PROD_ROOT = REPO / "neurova"
 TESTS_ROOT = REPO / "tests"
@@ -46,11 +48,9 @@ RETIRED = "neurova.voice_adapter"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(path: Path) -> list[str]:
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, UnicodeDecodeError):
-        return []
+def _importedNames(tree) -> list[str]:
+    """一棵树里 AST 可见的导入目标。入参是**已解析的树**：枚举与解析走共享预算
+    （`tests/ast_scan.py`，Issue #148：受保护子集里不得自带第二份全仓解析写法）。"""
     names = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -62,10 +62,8 @@ def _importedNames(path: Path) -> list[str]:
 
 def _hits(root: Path) -> list[str]:
     out = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(p)):
+    for p, tree in ast_scan.parsedModules(root):
+        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(tree)):
             try:
                 out.append(p.relative_to(REPO).as_posix())
             except ValueError:

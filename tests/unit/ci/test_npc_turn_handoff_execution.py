@@ -767,7 +767,7 @@ class TestRelayCoversEveryPlatformAbortReason:
     历史（记两轮，免得再犯）：
 
     * v1 只认 `$CNB_BUILD_FAILED_MSG` 里的 `reached maxTurns limit` ——
-      整轮会话撞 2h 墙钟那一形态被判 `skipped`
+      整轮会话撞会话墙钟那一形态被判 `skipped`（当时 Runner 下发值为 2h）
       （构建 cnb-m74-1k3cm87o9：`106ms (skipped)`），Agent 跑了 222 轮、
       7,330,218ms 后改而未提交的成果随容器一起丢。
     * v1 的补丁是"再猜一段文案"（`超过最大运行时长`）。**这一猜被实测推翻**

@@ -27,6 +27,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+from tests import ast_scan
 from fastapi.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -152,8 +154,9 @@ def testMemoryPackageUsesOnlyDeclaredGates():
     """
     declared = {"get_current_user", "get_current_user_or_default"}
     offenders = []
-    for py in MEMORY_PKG.rglob("*.py"):
-        tree = ast.parse(py.read_text(encoding="utf-8"))
+    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
+    # 再出现自带 rglob + ast.parse 的第二份实现）。
+    for py, tree in ast_scan.parsedModules(MEMORY_PKG):
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue
