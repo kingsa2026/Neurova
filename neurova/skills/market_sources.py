@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 
 from neurova.core.logger import get_logger
 from neurova.security import safe_archive
+# 预算单点在适配器表（同一能力的三份 fetcher 共用一份口径，教义第 6 条）
+from neurova.skills.market_adapters import MARKET_FETCH_TIMEOUT_SECONDS
 
 logger = get_logger(__name__)
 
@@ -34,7 +36,6 @@ logger = get_logger(__name__)
 MAX_SKILL_ZIP_BYTES = 10 * 1024 * 1024
 # 安全解压条目上限
 MAX_ZIP_ENTRIES = 500
-HTTP_TIMEOUT = 20
 
 
 def _http_get(url: str) -> bytes:
@@ -43,7 +44,7 @@ def _http_get(url: str) -> bytes:
     if host not in _remote_hosts():
         raise ValueError(f"blocked non-whitelisted market host: {host}")
     req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "Neurova-Market/1.0"})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+    with urllib.request.urlopen(req, timeout=MARKET_FETCH_TIMEOUT_SECONDS) as resp:
         if resp.status != 200:
             raise OSError(f"HTTP {resp.status} for {url}")
         return resp.read()
