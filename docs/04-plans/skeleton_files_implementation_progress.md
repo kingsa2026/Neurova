@@ -10,7 +10,9 @@
 #### 1. Skills 模块 (5 个文件)
 - `neurova/skills/market_searcher.py` ✅
 - `neurova/skills/market_adapters.py` ✅
-- `neurova/skills/security_scanner.py` ✅
+- ~~`neurova/skills/security_scanner.py`~~ —— 已退役（2026-10-13 批 38，台账 §6-194）：与
+  `neurova/security/skill_scanner.py` 同功能的第二套实装，零生产消费者；两项独有能力
+  （名称级凭据/可执行产物检查）已按真语义重造进那一处。**不要再按本清单重建它**
 - `neurova/skills/task_decomposer.py` ✅
 - `neurova/skills/skill_need_analyzer.py` ✅
 
