@@ -515,12 +515,19 @@ class TestEveryRefusalHasHttpSemantics:
 
     扫 AST 而不是扫文本：`raise PluginError("x", ...)` 的字面首参才是成因集合，
     注释里提到的名字不算。
+
+    §6-172 批 31 起有**第二份成因来源是算出来的**（构件完整性走
+    `artifact_digest.refusalReason(状态)`，字面量扫不到）。不收进来会得到两个坏结果：
+    映射表被报"留着从未抛出的成因"，而真抛出的那两条反而没人核对 HTTP 语义。
+    收进来的前提是插件包里确实存在这个抛点——常量没被任何抛点引用时不算，
+    否则映射表里就会多出幽灵条目（那正是本判据要抓的东西）。
     """
 
     def _reasons(self):
         import ast
 
         found = set()
+        computedRaise = False
         # 按目录扫，不手抄文件清单：包里没有 `PluginError` 抛点＝没人能授予也没人能挂，
         # 那种「扫不到东西」的绿是本判据最危险的失效形态（成因集合为空时下面的格子会红）。
         for path in sorted((PROJECT_ROOT / "neurova" / "plugins").glob("*.py")):
@@ -530,11 +537,24 @@ class TestEveryRefusalHasHttpSemantics:
                     continue
                 func = node.func
                 name = getattr(func, "id", None) or getattr(func, "attr", None)
+                if name == "refusalReason":
+                    computedRaise = True
                 if name != "PluginError" or not node.args:
                     continue
                 first = node.args[0]
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     found.add(first.value)
+        if computedRaise:
+            digest = PROJECT_ROOT / "neurova" / "security" / "artifact_digest.py"
+            for node in ast.walk(ast.parse(digest.read_text(encoding="utf-8"),
+                                           filename=str(digest))):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for target in node.targets:
+                    if (isinstance(target, ast.Name) and target.id.startswith("REASON_")
+                            and isinstance(node.value, ast.Constant)
+                            and isinstance(node.value.value, str)):
+                        found.add(node.value.value)
         return found
 
     def test_everyRaisedReasonIsMappedAndNothingMappedIsStale(self):
