@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 """
 渠道管理 API 端点
@@ -205,6 +206,92 @@ async def send_message(
 # ============================================================
 
 
+def _feishuCallbackToken(data: dict) -> str:
+    """飞书回调令牌的取法只此一份：v2 在 `header`.token，v1 在顶层 token。
+
+    "取哪个位置"由端点负责（它读信封），"比不比、怎么比"只在适配器那一份
+    （`FeishuAdapter.verify_event_token`）——选实例与投递因此过的是同一道门。
+    """
+    return (data.get("header") or {}).get("token") or data.get("token") or ""
+
+
+def _wecomEncryptOf(xmlText: str) -> str:
+    """从企业微信回调体外层取 `<Encrypt>` 密文——只用于**选实例**时算签名。
+
+    真正的投递仍走 `WeComAdapter.handle_callback`，它自己按安全口径解析 XML（限大小、
+    拒 DOCTYPE/ENTITY）并再核一次签名；这里读到的东西不决定投递，放宽不了任何一道门。
+    """
+    match = re.search(r"<Encrypt>(.*?)</Encrypt>", xmlText, re.S)
+    return match.group(1) if match else ""
+
+
+def inboundCredentialPredicate(channelType: str, body: bytes, queryParams, headers):
+    """返回"这条回调在这只实例自己的凭据下验得通吗"的谓词；不知道就返回 None（不猜）。
+
+    设计本意是每 agent 各有专属渠道配置，而回调 URL 只带渠道类型——三平台的验签面用的都是
+    实例自己的凭据（飞书 verification token、钉钉 appSecret、企微 callback token），所以
+    同类型多只实例时该由凭据裁决落到哪一只，而不是让 default 插队（§6-197）。
+    没有验签面的类型、或信封读不懂（畸形体、飞书密文回调）⇒ None，退回 §6-189 的原语义。
+    """
+    import json
+
+    if channelType == "feishu":
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        if "encrypt" in data and "event" not in data and "challenge" not in data:
+            return None  # 密文里没有可读令牌；真原因由 handler 点名，别在这里冒充"凭据不匹配"
+        token = _feishuCallbackToken(data)
+
+        def _feishuOk(adapter) -> bool:
+            try:
+                adapter.verify_event_token(token)
+            except ValueError:
+                return False
+            return True
+
+        return _feishuOk
+
+    if channelType == "dingtalk":
+        timestamp = (headers.get("timestamp") or "") if headers is not None else ""
+        sign = (headers.get("sign") or "") if headers is not None else ""
+
+        def _dingtalkOk(adapter) -> bool:
+            try:
+                adapter.verify_callback_headers(timestamp, sign)
+            except ValueError:
+                return False
+            return True
+
+        return _dingtalkOk
+
+    if channelType == "wecom":
+        msgSignature = queryParams.get("msg_signature", "") if queryParams is not None else ""
+        if not msgSignature:
+            return None  # 连签名都没有 ⇒ 谓词无从判断，交给 handler 去拒
+        timestamp = queryParams.get("timestamp", "") if queryParams is not None else ""
+        nonce = queryParams.get("nonce", "") if queryParams is not None else ""
+        try:
+            encrypt = _wecomEncryptOf(body.decode("utf-8", errors="replace"))
+        except UnicodeError:
+            return None
+
+        def _wecomOk(adapter) -> bool:
+            try:
+                adapter.verifyCallbackSignature(msgSignature, timestamp, nonce, encrypt)
+            except (ValueError, AttributeError):
+                # AttributeError：这只实例根本没有那道门（未登记过的适配器类型），同样算不匹配
+                return False
+            return True
+
+        return _wecomOk
+
+    return None
+
+
 @router.post("/{channel_type}/webhook", summary="Webhook 回调入口")
 async def handle_webhook(channel_type: str, request: Request):
     """
@@ -215,15 +302,16 @@ async def handle_webhook(channel_type: str, request: Request):
     - 企业微信: POST XML
     """
     manager = get_channel_manager()
-    # 解析只在 `ChannelManager.resolveInboundAdapter` 那一处（§6-188）：实例表按
-    # (agent_id, channel_type) 存，而回调 URL 只带 channel_type。取不到时两种失败要分得开
-    # （没配 / 多 agent 同名歧义），歧义绝不静默投给任意一个 bot。
-    adapter, failureReason = manager.resolveInboundAdapter(channel_type)
+    # 先取体再解析：落哪一只实例由这条回调自己的凭据说（§6-197）。解析仍只在
+    # `ChannelManager.resolveInboundAdapter` 那一处——实例表按 (agent_id, channel_type) 存，
+    # 而回调 URL 只带 channel_type；取不到时几种失败要分得开（没配 / 歧义 / 凭据都不匹配 /
+    # 凭据被两只共用），歧义绝不静默投给任意一个 bot。
+    body = await request.body()
+    adapter, failureReason = manager.resolveInboundAdapter(
+        channel_type,
+        inboundCredentialPredicate(channel_type, body, request.query_params, request.headers))
     if adapter is None:
         raise HTTPException(status_code=404, detail=failureReason)
-
-    body = await request.body()
-    request.headers.get("content-type", "")
 
     try:
         if channel_type == "feishu":
@@ -266,8 +354,8 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
             "Encrypt Key off, or implement decryption before dispatch)")
 
     # 令牌位置两代信封不同：v2 在 header.token，v1 在顶层 token。取哪个由这里负责，
-    # "比不比、怎么比"只在适配器那一份。
-    token = (data.get("header") or {}).get("token") or data.get("token") or ""
+    # "比不比、怎么比"只在适配器那一份。取法与选实例用的谓词同一处（§6-197）。
+    token = _feishuCallbackToken(data)
 
     # URL 验证（challenge）——交给适配器核完令牌再回，不在这里 echo
     if "challenge" in data:
