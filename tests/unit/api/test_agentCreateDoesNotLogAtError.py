@@ -18,9 +18,10 @@ import logging
 import pathlib
 
 import pytest
-from tests import ast_scan
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from tests import ast_scan as _astScan
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
@@ -83,19 +84,26 @@ class TestAgentCreateLoggingHonesty:
 
 class TestNoErrorLevelDebugAnywhere:
     def test_productionPackagesHaveNone(self):
+        """取数走共享解析预算 `tests/ast_scan`。
+
+        私有 `rglob + ast.parse` 会把"解析量"绑成"代码总量"（Issue #148），
+        与其余受保护文件共享机器时撞 30s 墙钟。本格只扫一遍且不跨用例复用，
+        故走**一次性**入口 `transientNodes`（不留常驻节点表）。文本预筛词是
+        判据的**充分条件**：`_errorLevelDebugHits` 只认首参为字符串常量的
+        `error/exception/critical` 调用，而这类调用的首参必然落在
+        `DEBUG_MARKERS` 里——连这些词都没出现的文件不可能命中。
+        """
         hits = []
-        # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍，
-        # 故走一次性入口，不留常驻语法树）。
-        for path in ast_scan.filesUnder(PKG):
-            tree = ast_scan.transientTree(path)
-            for line in _errorLevelDebugHits(tree):
+        for path, node in _astScan.transientNodes(PKG, hints=DEBUG_MARKERS):
+            for line in _errorLevelDebugHits(node):
                 hits.append(f"{path.relative_to(REPO).as_posix()}:{line}")
+        hits = sorted(set(hits))
         assert hits == [], f"ERROR 级承载调试内容的日志调用仍在位：{hits}"
 
     def test_detectorItselfIsNotBlind(self):
         """反向对照：探测器不是恒绿——同一棵 AST 上换个级别就必须不命中。"""
-        loud = ast_scan.transientSource('logger.error("DEBUG: x=%s", x)')
-        quiet = ast_scan.transientSource('logger.debug("DEBUG: x=%s", x)')
+        loud = ast.parse('logger.error("DEBUG: x=%s", x)')
+        quiet = ast.parse('logger.debug("DEBUG: x=%s", x)')
         assert _errorLevelDebugHits(loud) == [1]
         assert _errorLevelDebugHits(quiet) == []
 

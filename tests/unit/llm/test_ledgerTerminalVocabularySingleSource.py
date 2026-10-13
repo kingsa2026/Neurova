@@ -26,9 +26,10 @@ import ast
 import time
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
-from tests import ast_scan
 from neurova.llm.generators import retention as rt
 from neurova.llm.generators import task_ledger as tl
 from neurova.llm.generators.task_ledger import GenerationTaskLedger, TaskRecord
@@ -52,13 +53,11 @@ _DEF_SITE = "neurova/llm/generators/task_ledger.py"
 REPO = Path(__file__).resolve().parents[3]
 
 
-def _importsTaskLedger(tree: ast.AST) -> bool:
+def _importsTaskLedger(rel: str) -> bool:
     """现场 AST 反推扫描面：谁 import 了 `task_ledger`，谁就受词汇纪律约束。
     两种写法都要认：`from a.b import task_ledger as m`（名字在 alias 里）与
-    `from a.b.task_ledger import X`（名字在 module 里）。
-
-    入参是**已解析的树**：解析由调用方走共享预算（见 `_vocabFiles`）。"""
-    for node in ast.walk(tree):
+    `from a.b.task_ledger import X`（名字在 module 里）。"""
+    for node in ast.walk(_parseSrc(_source(rel), rel)):
         if isinstance(node, ast.Import):
             if any(a.name.endswith("task_ledger") for a in node.names):
                 return True
@@ -70,18 +69,27 @@ def _importsTaskLedger(tree: ast.AST) -> bool:
 
 
 def _vocabFiles() -> list[str]:
-    """扫描面：`neurova/` 下真 import `task_ledger` 的文件（含定义点本体）。
+    """import 了 `task_ledger` 的文件清单（受词汇纪律约束的扫描面）。
 
-    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148）：本判据原先自带
-    `rglob` + `ast.parse`，被 `tests/unit/test_ci_ast_scan_budget_guard.py` 的
-    受保护子集形态门禁点名。默认面全扫 —— 预筛词取模块名，连名字都没出现的
-    文件不可能命中。
+    枚举与解析走 tests/ast_scan 的共享预算（`parsedModules` 一次给出
+    `(路径, 语法树)`），不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     """
     found = [_DEF_SITE]
-    for path, tree in ast_scan.parsedModules(REPO / "neurova"):
+    for path, tree in ast_scan.parsedModules(REPO / "neurova", ".py"):
         rel = path.relative_to(REPO).as_posix()
-        if rel != _DEF_SITE and _importsTaskLedger(tree):
-            found.append(rel)
+        if rel == _DEF_SITE:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(a.name.endswith("task_ledger") for a in node.names):
+                    found.append(rel)
+                    break
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.endswith("task_ledger") or any(
+                        a.name == "task_ledger" for a in node.names):
+                    found.append(rel)
+                    break
     return sorted(found)
 
 

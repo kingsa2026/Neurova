@@ -37,7 +37,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests import ast_scan
+
+from tests import ast_scan as _astScan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHIM_DIR = PROJECT_ROOT / "neurova" / "skill"
@@ -66,17 +67,25 @@ def _shimImportsInTree(tree: ast.AST) -> list:
 
 
 def _shimImportRows() -> list:
+    """全仓取用 `neurova.skill` 命名空间的 import 行（三个根：neurova/tests/scripts）。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148：私有 `rglob + ast.parse`
+    把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟）。
+    本格只扫一遍（`testNoSourceStillReachesTheShimNamespace` 是唯一消费方），
+    故直接 `ast.parse(ref.code)` 就地解析、不留常驻语法树（保留型入口的收益
+    只在重复扫同一棵树时成立）。文本预筛词 `neurova.skill` 是判据的**充分条件**
+    ——连这个串都没出现的文件不可能含有指向它的 import。
+    """
     hits = []
     for root in SCAN_ROOTS:
         if not root.is_dir():
             continue
-        # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍）。
-        for path in sorted(ast_scan.filesUnder(root)):
+        for ref in _astScan.sourceRefsUnder(root, hints=("neurova.skill",)):
             try:
-                tree = ast_scan.transientTree(path)
+                tree = ast.parse(ref.code)
             except SyntaxError as e:  # 语法坏掉的档本身就该被别的守卫点名，这里不吞也不判
-                raise AssertionError(f"{path} 解析失败，本判据无法判定：{e}") from e
-            hits.extend("%s:%s" % (path.relative_to(PROJECT_ROOT), line)
+                raise AssertionError(f"{ref.path} 解析失败，本判据无法判定：{e}") from e
+            hits.extend("%s:%s" % (ref.path.relative_to(PROJECT_ROOT), line)
                         for line in _shimImportsInTree(tree))
     return hits
 
@@ -100,14 +109,14 @@ class TestTheShimIsGone:
 
         只证"能抓"会放过误报，只证"不误报"会放过恒绿——两侧一起给。
         """
-        caught = _shimImportsInTree(ast_scan.transientSource(
+        caught = _shimImportsInTree(ast.parse(
             "from neurova.skill import create_default_skills\nimport neurova.skill\n"))
         assert sorted(caught) == [1, 2], caught
 
         for real in ("from neurova.skills import create_default_skills",
                      "from neurova.skill_system import get_skill_registry",
                      "from neurova.skills.models import Skill"):
-            assert _shimImportsInTree(ast_scan.transientSource(real)) == [], real
+            assert _shimImportsInTree(ast.parse(real)) == [], real
 
 
 class TestTheCapabilityStillHasItsHome:

@@ -34,9 +34,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from tests import ast_scan
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 LAYER = REPO / "neurova" / "cognitive_layers" / "memory_layer"
@@ -60,9 +60,11 @@ PENDING = {
 pytestmark = pytest.mark.timeout(120)
 
 
-def _importedNames(tree) -> list[str]:
-    """一棵树里 AST 可见的导入目标。入参是**已解析的树**：枚举与解析走共享预算
-    （`tests/ast_scan.py`，Issue #148：受保护子集里不得自带第二份全仓解析写法）。"""
+def _importedNames(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -78,9 +80,18 @@ def _importedNames(tree) -> list[str]:
 
 
 def _hits(root: Path, names: dict) -> list[str]:
+    """子树里仍引用这批 mixin 的文件清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词取**模块末段**（`search_mixin` 等），是判据的**充分条件**：无论绝对
+    还是相对 import，真引用它的文件必然含这一段字样。
+    """
     found = []
-    for p, tree in ast_scan.parsedModules(root):
-        imported = _importedNames(tree)
+    hints = tuple(sorted({dotted.rsplit(".", 1)[1] for dotted in names}))
+    for ref in ast_scan.sourceRefsUnder(root, ".py", hints):
+        imported = _importedNames(ref.code)
         for dotted in names:
             tail = dotted.rsplit(".", 1)[1]
             if any(n == dotted or n.startswith(dotted + ".") or n == f"__REL__.{tail}"
@@ -88,9 +99,9 @@ def _hits(root: Path, names: dict) -> list[str]:
                 # 注入探针在 tmp 下：relative_to(REPO) 会抛 ValueError 冒名成被测故障
                 # （同一坑在 §6-107 刚栽过一次，这次照搬修好的形态）
                 try:
-                    shown = p.relative_to(REPO).as_posix()
+                    shown = ref.path.relative_to(REPO).as_posix()
                 except ValueError:
-                    shown = p.relative_to(root).as_posix()
+                    shown = ref.path.relative_to(root).as_posix()
                 found.append(f"{shown} → {dotted}")
                 break
     return found
@@ -144,5 +155,5 @@ def test_scannerCatchesARevival(tmp_path):
 
 
 def test_scanRootActuallyCoversTheTree():
-    mods = ast_scan.filesUnder(PKG_ROOT)
+    mods = [p for p in PKG_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
     assert len(mods) > 500, f"扫描根只覆盖 {len(mods)} 个 .py，层级写错了"

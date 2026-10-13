@@ -34,6 +34,8 @@ NEUROVA = REPO / "neurova"
 from neurova.channels.base import ChannelMessage  # noqa: E402
 from neurova.voice_context_module import VOICE_CONTEXT_KEY  # noqa: E402
 
+from tests import ast_scan  # noqa: E402
+
 # 现役 ASR 引擎的真产物键（funasr/mock 两档一致）——不发明键名
 ASR_PRODUCT = {"text": "帮我看下明天的排程", "language": "zh", "duration_sec": 2.4}
 
@@ -179,14 +181,21 @@ class TestKeyVocabularyIsDefinedOnce:
     EXEMPT = {"neurova/agent_core.py"}
 
     def _offenders(self, includeExempt: bool = False):
+        """把键名当字面量又用了一次的文件清单。
+
+        取数走共享解析预算 `tests/ast_scan`（Issue #148）：私有 `rglob + ast.parse`
+        把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟。
+        文本预筛取键名本身——连这个串都没出现的文件不可能命中。
+        """
         bad = []
-        for path in sorted(NEUROVA.rglob("*.py")):
-            rel = path.relative_to(REPO).as_posix()
-            if "__pycache__" in path.parts or rel == "neurova/voice_context_module.py":
+        for ref in ast_scan.sourceRefsUnder(
+                NEUROVA, hints=ast_scan.textHints(VOICE_CONTEXT_KEY)):
+            rel = ref.path.relative_to(REPO).as_posix()
+            if rel == "neurova/voice_context_module.py":
                 continue
             if not includeExempt and rel in self.EXEMPT:
                 continue
-            sites = self._keySitesIn(path)
+            sites = self._keySites(ref.code)
             if sites:
                 bad.append(f"{rel}:{sites}")
         return bad

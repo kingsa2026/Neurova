@@ -11,8 +11,6 @@ import pathlib
 
 import pytest
 
-from tests import ast_scan
-
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 ADOPTION_OUTCOMES = ("success", "failure", "unevidenced")
@@ -131,11 +129,10 @@ class TestNoLongerBlindToUsage:
 
         root = Path('neurova/knowledge')
         hits = {name: 0 for name in ('injected_count', 'last_injected_at', 'adoption_outcome')}
-        # 文件枚举与读盘走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里
-        # 不得再出现自带 rglob 的第二份实现）。
-        for ref in ast_scan.sourceRefsUnder(root):
+        for path in list(root.rglob('*.py')):
+            text = path.read_text(encoding='utf-8', errors='ignore')
             for name in hits:
-                hits[name] += ref.code.count(name)
+                hits[name] += text.count(name)
 
         assert all(hits.values()), '使用回流列仍无人引用，B06 未灭：%s' % hits
 
@@ -148,14 +145,21 @@ def _adoptionCallSites(root):
     """
     import ast as _ast
 
+    from tests import ast_scan
+
     root = pathlib.Path(root)
     sites = []
-    # 枚举与解析走 tests/ast_scan.py 的共享预算（Issue #148：受保护子集里不得
-    # 再出现自带 rglob + ast.parse 的第二份实现）。
-    for path, tree in ast_scan.parsedModules(root):
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——后者把
+    # 判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    # 预筛词 `recordAdoption` 是判据的**充分条件**：谓词只认这一处属性调用。
+    for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('recordAdoption')):
+        try:
+            tree = _ast.parse(ref.code, filename=str(ref.path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)                     and node.func.attr == 'recordAdoption':
-                sites.append('%s:%d' % (path.relative_to(root).as_posix(), node.lineno))
+                sites.append('%s:%d' % (ref.path.relative_to(root).as_posix(), node.lineno))
     return sites
 
 

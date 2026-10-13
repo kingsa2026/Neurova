@@ -32,26 +32,28 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _importers(root: Path) -> list[str]:
-    """`root` 子树里 import 退役模块的文件（解析走 `tests/ast_scan.py` 的共享预算）。
+    """子树里仍 import 已退役面的文件清单。
 
-    本判据原先自己 `rglob` + `ast.parse` + `ast.walk`（被
-    `tests/unit/test_ci_ast_scan_budget_guard.py` 点名：判据成本随代码总量涨）。
-    收口到共享入口后形态与读数不变——共享面同样只报「真 import 了」的文件，
-    注释里提过不算。
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词是判据的**充分条件**：连退役模块名都没出现的文件不可能 import 它。
     """
     out = []
-    for path, node in ast_scan.nodeScan(root, hints=(RETIRED,)):
-        top = node.module if isinstance(node, ast.ImportFrom) else None
-        if isinstance(node, ast.Import):
-            top = node.names[0].name if node.names else None
-        if top != RETIRED and not (top or "").startswith(RETIRED + "."):
-            continue
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints(RETIRED)):
         try:
-            rel = path.relative_to(REPO).as_posix()
-        except ValueError:
-            rel = path.name
-        if rel not in out:
-            out.append(rel)
+            tree = ast.parse(ref.code)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+            if any(n == RETIRED or n.startswith(RETIRED + ".") for n in names):
+                try:
+                    out.append(ref.path.relative_to(REPO).as_posix())
+                except ValueError:
+                    out.append(ref.path.name)
+                break
     return out
 
 

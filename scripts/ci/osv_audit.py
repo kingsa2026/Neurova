@@ -82,6 +82,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -112,6 +113,28 @@ SCAN_TARGETS = (
     # 运行时 npx 拉取的 Node 包清单（生产路径上执行，此前无锁无审计）
     "tools/npx-runtime/package-lock.json",
 )
+
+#: 只用于 `--prefetch-offline-databases` 的**附加**目标（不参与扫描、不参与对账）。
+#: 为什么要有它：Python 锁由 `pip_audit_gate.py` 扫（它有自己的入口与判据），
+#: 但它的离线库必须由这里预取——否则「谁负责把 PyPI/all.zip 落到缓存」就有两处
+#: 说法。加进 SCAN_TARGETS 又会把 Python 锁塞进本脚本的包数对账（那是另一套判据）。
+PREFETCH_ONLY_TARGETS = (
+    "requirements-ci.lock",
+    "requirements-full.lock",
+)
+
+
+def prefetchTargets(targets) -> list:
+    """预取时实际要喂给扫描器的目标：被扫目标 + 仅预取目标（去重、保持顺序）。
+
+    单一落点：`main()` 与自证共用，避免「预取时算一套、对账时算另一套」。
+    """
+    merged = []
+    for rel in list(targets) + list(PREFETCH_ONLY_TARGETS):
+        if rel not in merged:
+            merged.append(rel)
+    return merged
+
 
 ALLOWLIST = "scripts/ci/osv-allowlist.toml"
 
@@ -352,6 +375,12 @@ OSV_DB_CACHE = Path.home() / ".cache" / "osv-scalibr"
 OFFLINE_DB_SCOPE = {
     "NeurUI/src-tauri/Cargo.lock": "crates.io",
     "tools/npx-runtime/package-lock.json": "npm",
+    # Python 锁（Issue #357）：`scripts/ci/pip_audit_gate.py` 的裁决通路也走
+    # 同一份离线库。登记在这里而不是在那边另写一份，是为了让「哪个生态落在哪个
+    # 子目录」这件事只有一处出处——`pip_audit_gate.OSV_DB_CACHE` 与本常量同值，
+    # 由 tests/unit/test_pip_audit_gate.py 逐字校验（教义第 6 条）。
+    "requirements-ci.lock": "PyPI",
+    "requirements-full.lock": "PyPI",
 }
 
 
@@ -421,6 +450,37 @@ def resolveVerdictChannel(targets, requireOffline: bool):
     return False, problems
 
 
+def scannerReadableAlias(lock_path: Path, stage_dir: Path) -> Path:
+    """把锁文件暂存成扫描器**认得出解析器**的文件名，返回暂存副本路径。
+
+    扫描器按**文件名**认解析器：实测 `requirements.txt` / `requirements-ci.txt`
+    都被认出（`found N packages`），而 `requirements-ci.lock` 报
+    `could not determine extractor suitable to this file`，随后退出 127——
+    127 与「命令不成形」同码同形，读日志的人会把它读成基础设施故障。
+
+    故这里只改**文件名**、内容逐字不动：`<原名>.txt` 副本落在调用方给的临时目录，
+    包数因此可复算（实测 85 / 169 与锁里 `==` 行数一致）。
+    """
+    staged = stage_dir / (lock_path.name + ".txt")
+    shutil.copyfile(lock_path, staged)
+    return staged
+
+
+def _needsAlias(lock_path: Path) -> bool:
+    """这个锁文件要不要暂存改名？
+
+    判据是**内容形状**而不是扩展名：`Cargo.lock` 同样以 `.lock` 结尾，但扫描器
+    认得出它（`found N packages`），改名反而会让它认不出（实测把
+    `Cargo.lock` 暂存成 `Cargo.lock.txt` 后报 `could not determine extractor`）。
+    故只在「pip 风格 `name==version` 且原名扫描器认不出」时改名。
+    """
+    if not lock_path.is_file():
+        return False
+    if OFFLINE_DB_SCOPE.get(lock_path.name) != "PyPI":
+        return False
+    return lock_path.name.endswith(".lock")
+
+
 def prefetch_offline_databases(scanner: Path, targets) -> int:
     """预取离线漏洞库到 `OSV_DB_CACHE`，返回退出码（0 = 齐备）。
 
@@ -441,8 +501,14 @@ def prefetch_offline_databases(scanner: Path, targets) -> int:
         return 2
     print(f"[osv] 预取离线漏洞库 → {OSV_DB_CACHE}（生态: {', '.join(scopes)}）")
     cmd = [str(binary), "scan", "source", "--offline", "--download-offline-databases"]
+    # Python 锁要暂存成扫描器认得出的文件名才能被解析（见 scannerReadableAlias）。
+    # 暂存目录随调用结束一并清理，不留残件。
+    stage = tempfile.TemporaryDirectory(prefix="osv-prefetch-")
+    stage_dir = Path(stage.name)
     for t in targets:
-        cmd += ["--lockfile", str(t)]
+        path = Path(t)
+        cmd += ["--lockfile",
+                str(scannerReadableAlias(path, stage_dir) if _needsAlias(path) else path)]
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
     # 退出码语义：「已经是最新」与「刚下载完」都不该算失败。实测下载完 rc=1
     # （扫描器先下载、再拿新库扫了一遍并报了允许清单外的历史命中），
@@ -1101,8 +1167,20 @@ def main() -> int:
 
     if args.prefetch_offline_databases:
         # 预取是 CI 的前置步骤，只做这一件事就退出；判据在门禁本体里。
+        # 目标取 `prefetchTargets()`：把仅预取目标（Python 锁 → PyPI/all.zip）
+        # 一并落盘——`pip_audit_gate.py` 的离线裁决通路靠的就是它。
+        # 预取用的 `targets` 在这里是**仓内相对路径**，故换算回相对形态再合并。
+        relative = []
+        for t in targets:
+            try:
+                relative.append(Path(t).resolve().relative_to(PROJECT_ROOT).as_posix())
+            except ValueError:
+                relative.append(Path(t).name)
+        merged = prefetchTargets(relative)
+        prefetch_paths = [str(PROJECT_ROOT / rel) for rel in merged
+                          if (PROJECT_ROOT / rel).is_file()]
         try:
-            return prefetch_offline_databases(scanner, targets)
+            return prefetch_offline_databases(scanner, prefetch_paths)
         except ScannerInvocationError as e:
             print(f"[osv] 预取时调用故障（扫描器没被跑起来）: {e}", file=sys.stderr)
             return 2

@@ -250,10 +250,11 @@ class TestProcessExposesSummary:
         pipe = _stub_pipeline()
         rsi_entered = asyncio.Event()
 
-        async def _gated_rsi(save_memory: bool = True):
-            # 形参跟生产签名（`post_chat_pipeline._step_rsi_iteration(save_memory)`）对齐：
-            # 派发层真按 `self._step_rsi_iteration(save_memory)` 传一个位置实参，
-            # 替身不接就抛 TypeError——那会让本格红在"替身签名漂了"而不是被测行为上。
+        # 桩件签名必须与生产实现同形：`process()` 的派发 lambda 显式传
+        # `save_memory`（`_step_rsi_iteration(save_memory)`，`0d5eed19` 补的
+        # 评测轮尊重），零参桩件会被判成编程错误直接炸穿整轮——本格要测的是
+        # "RSI 没被 await 在响应路径上"，不是"桩件签名对不对"。
+        async def _gated_rsi(save_memory=True):
             rsi_entered.set()
             await asyncio.Event().wait()  # 永不自行结束：只有被取消才会退出
             return REAL_ITERATION_RESULT

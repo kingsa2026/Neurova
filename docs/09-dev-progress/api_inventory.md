@@ -44,7 +44,7 @@
 | `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 是 | 4 |
 | `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 14 |
 | `NeurUI/src/api/modules/metacognition.ts` | `/metacognition` | 是 | 4 |
-| `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 1 |
+| `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 2 |
 | `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 12 |
 | `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 6 |
 | `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |

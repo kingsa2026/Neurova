@@ -30,6 +30,8 @@ import pytest
 
 from neurova.core import vector_math
 
+from tests import ast_scan
+
 NEUROVA_ROOT = Path(vector_math.__file__).resolve().parent.parent
 SINGLE_FACE = "core/vector_math.py"
 
@@ -113,21 +115,25 @@ def _computesCosineMath(node: ast.FunctionDef) -> bool:
 
 
 def _denseCosineDefinitions() -> list:
-    hits = []
-    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        rel = path.relative_to(NEUROVA_ROOT).as_posix()
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - 收集卫生守卫兜这层
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and _computesCosineMath(node):
-                if _isSparseSignature(node):
-                    continue
-                hits.append(rel)
-    return sorted(set(hits))
+    """稠密余弦的定义文件清单（按形状认，不按名字）。
+
+    取数走共享解析预算 `tests/ast_scan`（Issue #148）：私有 `rglob + ast.parse`
+    把「解析量」绑成「代码总量」，与其余受保护文件共享机器时撞 30s 墙钟。
+
+    用一次性入口 `transientNodes` 而非保留型：本判据只扫一次，保留语法树没有
+    收益，成本却全额留下（`AGENTS.md` 修复教义第 6 条：不新造平行体系）。
+    文本预筛按 `_computesCosineMath` 的**充分条件**取词——判据要认的是
+    「点积 ÷ 范数」，连 `sqrt`/`sum` 都没出现的文件不可能命中。
+    """
+    hints = ast_scan.textHints("sqrt", "sum(")
+    hits = {
+        path.relative_to(NEUROVA_ROOT).as_posix()
+        for path, node in ast_scan.transientNodes(NEUROVA_ROOT, hints=hints)
+        if isinstance(node, ast.FunctionDef)
+        and _computesCosineMath(node)
+        and not _isSparseSignature(node)
+    }
+    return sorted(hits)
 
 
 # ── 一、单源自己的语义 ──
@@ -177,8 +183,11 @@ def testDenseCosineIsImplementedOnlyInTheSingleFace():
 
 
 def testScanFaceIsWideEnough():
-    """让判据自己数扫描面：漏扫一半的守卫只会绿得没道理（本卷记过 `grep | head` 那形）。"""
-    scanned = [p for p in NEUROVA_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
+    """让判据自己数扫描面：漏扫一半的守卫只会绿得没道理（本卷记过 `grep | head` 那形）。
+
+    枚举走共享预算 `ast_scan.filesUnder`（`SHARED_ENUM_ENTRIES`），不自己 `rglob`。
+    """
+    scanned = ast_scan.filesUnder(NEUROVA_ROOT)
     assert len(scanned) > 1000, f"扫描面只剩 {len(scanned)} 个文件，口径必然被收窄过"
 
 
