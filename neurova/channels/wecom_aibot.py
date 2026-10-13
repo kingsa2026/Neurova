@@ -214,7 +214,7 @@ class WeComAIBotAdapter(ChannelAdapter):
                     text_parts.append(text)
             elif msgtype == "voice":
                 asr = ((body.get("voice") or {}).get("content", "") or "").strip()
-                text_parts.append(asr or "[voice: no transcription]")
+                text_parts.append(asr or INBOUND_VOICE_PLACEHOLDER)
             elif msgtype in ("image", "file"):
                 info = body.get(msgtype) or {}
                 url = info.get("url") or ""

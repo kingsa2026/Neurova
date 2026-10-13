@@ -368,10 +368,15 @@ class SkillsMPAdapter(SkillMarketAdapter):
         return results
 
     def install(self, skill_info: SkillInfo, target_dir: str) -> bool:
-        """从 SkillsMP 安装技能"""
-        # 类似于其他适配器的实现
-        logger.info("Installing %s from SkillsMP", skill_info.name)
-        return True
+        """SkillsMP 的搜索条目只带页面 URL，没有包体下载口 ⇒ 如实拒绝，不谎报成功。
+
+        原实现是 `return True` 的空装（§6-176 登记过，本批按"接线不退役"的裁定改成诚实形态）：
+        一行字节都不落却回成功。哪天该市场给出真下载口，接 `search` 已带的字段走
+        `safe_archive` 咽喉即可——不要回到静默成功。
+        """
+        logger.warning(
+            "SkillsMP 未实装包体下载，拒报安装成功（未写入任何字节）: %s", skill_info.name)
+        return False
 
     def get_skill_info(self, skill_name: str) -> Optional[SkillInfo]:
         """获取技能详细信息"""

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from neurova.core.logger import get_logger
+from neurova.channels.wecom import fetchWecomMediaBytes
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -225,54 +226,30 @@ class WeChatMediaMixin:
             return self._download_wecom_media(media_id, save_path)
 
     def _download_wecom_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
-        """从企业微信下载媒体文件"""
+        """从企业微信下载媒体文件——HTTP 那一层走 `wecom.fetchWecomMediaBytes` 那一份单源（§6-187）。
+
+        本面保留自己那两件事：同步 token 检查与 `save_path` 落盘；被删掉的只是手抄的请求。
+        """
         if not self.adapter._ensure_wecom_token():
             logger.error("企业微信 Token 获取失败")
             return None
 
-        if not REQUESTS_AVAILABLE:
-            logger.warning("企业微信媒体未下载: requests 未安装")
+        media_data = fetchWecomMediaBytes(self.adapter.access_token, media_id)
+        if media_data is None:
             return None
 
-        try:
-            a = self.adapter
-            url = f"{a.WECOM_API_BASE}/cgi-bin/media/get"
-            params = {
-                "access_token": a.access_token,
-                "media_id": media_id,
-            }
-
-            resp = requests.get(url, params=params, timeout=30, stream=True)
-
-            content_type = resp.headers.get("Content-Type", "")
-
-            if "application/json" in content_type:
-                result = resp.json()
-                logger.error("企业微信媒体下载失败: %s", result)
-                return None
-
-            media_data = resp.content
-
-            if save_path:
-                save_path_obj = Path(save_path)
-                save_path_obj.parent.mkdir(parents=True, exist_ok=True)
-                with open(save_path_obj, "wb") as f:
+        if save_path:
+            try:
+                savePathObj = Path(save_path)
+                savePathObj.parent.mkdir(parents=True, exist_ok=True)
+                with open(savePathObj, "wb") as f:
                     f.write(media_data)
-                logger.info("企业微信媒体已保存: %s", save_path)
+            except OSError as e:
+                logger.error("保存媒体文件失败: %s", e)
+                return None
+            logger.info("企业微信媒体已保存: %s", save_path)
 
-            return media_data
-        except requests.exceptions.Timeout:
-            logger.error("媒体下载超时: %s", media_id)
-            return None
-        except requests.exceptions.HTTPError as e:
-            logger.error("媒体下载 HTTP 错误: %s", e)
-            return None
-        except IOError as e:
-            logger.error("保存媒体文件失败: %s", e)
-            return None
-        except Exception as e:
-            logger.error("媒体下载异常: %s", e)
-            return None
+        return media_data
 
     def _download_official_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
         """从微信公众号下载媒体文件"""
