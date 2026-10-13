@@ -17,16 +17,21 @@
 
 判据一律走生产入口：Telegram 用真 `_process_update` + 真 `_emit_event` 回调，端到端格用真
 `FeishuAdapter` 入站 + 真 `ChannelManager` + 真 `transcribe_voice_message` + 真
-`channel_router.make_handler` + 真飞书出口。替身只放在两个边界：**平台服务器**（本地回环
-真 HTTP 桩）与**模型**（ASR 转写文本、agent 回合产物）——ASR/LLM 真跑要开外网并花服务商额度，
-而本批验的是"字节流不流得到、类型标不标得对"，不是模型质量。
+`channel_router.make_handler` + 真飞书出口。替身放在三个边界：**平台服务器**（本地回环
+真 HTTP 桩）、**模型**（ASR 转写文本、agent 回合产物）与**渠道 SDK**（飞书文本出口那一层
+的 `lark_oapi`）——ASR/LLM 真跑要开外网并花服务商额度，而本批验的是"字节流不流得到、
+类型标不标得对"，不是模型质量；SDK 那一层只在"环境装没装 `lark-oapi`"时才可达，而 CI 装的是
+`requirements-ci.lock`（该包只在生产清单里，且把 `websockets` 压在 `<16`，与 CI 锁的 16.x 冲突），
+判据不该与它捆绑（见 `_installFakeLarkMessageApi`）。
 """
 
 import ast
 import asyncio
 import json
 import pathlib
+import sys
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -483,6 +488,111 @@ def fsStub():
         thread.join(timeout=5)
 
 
+class _FakeLarkMessageApi:
+    """飞书文本出口的替身：记下每一条经 lark SDK 发出的消息内容。
+
+    文本回复在生产侧走 ``send_message`` 的 lark SDK 分支
+    （``channels/feishu.py`` 的 ``self._client.im.v1.message.create``），
+    只有该 SDK 装在环境里才走得到。判据不该与"薄环境装不装 lark-oapi"
+    这件事捆绑（CI 装的是 ``requirements-ci.lock``，而 ``lark-oapi`` 只在
+    生产清单里，且它把 ``websockets`` 压在 ``<16``，与 CI 锁的 16.x 冲突），
+    故在此把 SDK 这一层替成纯内存记录——**判据仍是它要守的那件事**：
+    语音回合的文本回复不得被吞掉。
+    """
+
+    def __init__(self):
+        self.sent = []  # 每条 (chat_id, msg_type, content)
+
+    def create(self, request):
+        # 生产侧链条是 `CreateMessageRequest.builder().request_body(body)`，
+        # 字段落在 request 的 `request_body` 上（body 才带 receive_id/msg_type/content）。
+        body = getattr(request, "request_body", None)
+        self.sent.append((
+            getattr(body, "receive_id", None),
+            getattr(body, "msg_type", None),
+            getattr(body, "content", None),
+        ))
+        return _FakeLarkResponse()
+
+
+class _FakeLarkResponse:
+    def __init__(self):
+        self.data = types.SimpleNamespace(message_id="om_text_stub")
+        self.code = 0
+        self.msg = "ok"
+
+    def success(self):
+        return True
+
+
+class _FakeLarkChainBuilder:
+    """`lark` 的三条 builder 链（Client / CreateMessageRequest / ...RequestBody）。
+
+    生产侧只用到"链式赋值 + build()"，故按同形收口成一条：
+    每个 setter 原样存下键值，``build()`` 交回携带这些字段的对象。
+    """
+
+    def __init__(self):
+        self._fields = {}
+
+    @classmethod
+    def builder(cls):
+        return cls()
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def _set(value):
+            self._fields[name] = value
+            return self
+
+        return _set
+
+    def build(self):
+        obj = types.SimpleNamespace()
+        for k, v in self._fields.items():
+            setattr(obj, "_" + k, v)
+            setattr(obj, k, v)
+        return obj
+
+
+def _installFakeLarkMessageApi(monkeypatch) -> _FakeLarkMessageApi:
+    """注入 fake `lark_oapi` 模块树，返回挂在 ``im.v1.message`` 上的替身。
+
+    与 ``tests/unit/channels/test_res_p1_feishu_ws_mqtt.py::_install_fake_lark``
+    同一形态（同一根因、同一仓既有先例）：文本出口只在 SDK 装着时才可达，
+    替掉 SDK 这一层，判据就不再依赖薄环境的依赖装配。
+    """
+    api = _FakeLarkMessageApi()
+
+    class _FakeClient:
+        def __init__(self, **client_fields):
+            self.im = types.SimpleNamespace(
+                v1=types.SimpleNamespace(message=api))
+
+    class _FakeLarkClientBuilder(_FakeLarkChainBuilder):
+        def build(self):
+            return _FakeClient(**self._fields)
+
+    mod_lark = types.ModuleType("lark_oapi")
+    mod_api = types.ModuleType("lark_oapi.api")
+    mod_im = types.ModuleType("lark_oapi.api.im")
+    mod_v1 = types.ModuleType("lark_oapi.api.im.v1")
+    mod_lark.Client = types.SimpleNamespace(
+        builder=lambda: _FakeLarkClientBuilder())
+    mod_v1.CreateMessageRequest = _FakeLarkChainBuilder
+    mod_v1.CreateMessageRequestBody = _FakeLarkChainBuilder
+    mod_lark.api = mod_api
+    mod_api.im = mod_im
+    mod_im.v1 = mod_v1
+    monkeypatch.setitem(sys.modules, "lark_oapi", mod_lark)
+    monkeypatch.setitem(sys.modules, "lark_oapi.api", mod_api)
+    monkeypatch.setitem(sys.modules, "lark_oapi.api.im", mod_im)
+    monkeypatch.setitem(sys.modules, "lark_oapi.api.im.v1", mod_v1)
+    return api
+
+
 class _EvtUserIds:
     """lark SDK 里 EventSender.sender_id 是"三种 id 的对象"，不是字符串。"""
 
@@ -566,6 +676,9 @@ class TestVoiceInVoiceOutLoop:
             channel_type="feishu", app_id="cli_stub", app_secret="sec_stub"))
         adapter.api_base = fsStub
         adapter.open_base = fsStub
+        # 文本出口替掉 lark SDK 这一层（见 `_installFakeLarkMessageApi` 的说明）：
+        # 判据不依赖薄环境装不装 `lark-oapi`。
+        textApi = _installFakeLarkMessageApi(monkeypatch)
 
         # 判据不许有任何通向外部的出口，包括它本不该走到的那条：manager 的发送路径见
         # `is_connected` 为假时会 `await adapter.connect()`，而飞书的 connect 会起一条真
@@ -616,8 +729,12 @@ class TestVoiceInVoiceOutLoop:
         assert b"fk_in" in sends[0]["body"], f"发送那一跳没带上传回来的 file_key：{sends[0]['body'][:120]}"
         paths = [c["path"] for c in _FeishuStub.captured]
         assert paths.index(uploads[0]["path"]) < paths.index(sends[0]["path"]), "先上传后发送没成立"
-        assert any(b'"msg_type": "text"' in c["body"] or b'"text"' in c["body"]
-                   for c in _FeishuStub.captured if c["method"] == "POST"), "文本回复不该因语音而丢失"
+        textSent = [c for c in textApi.sent if c[1] == "text"]
+        assert textSent, f"文本回复不该因语音而丢失（文本出口一条都没发出）：{textApi.sent!r}"
+        # 文本正文是 `{\"text\": ...}` 的 JSON 载荷，取出正文再比——不按转义形态判。
+        textBodies = [json.loads(c[2] or "{}").get("text", "") for c in textSent]
+        assert any("明天晴" in b for b in textBodies), (
+            f"文本回复里没有本轮回合的答复正文：{textApi.sent!r}")
 
     @pytest.mark.asyncio
     async def testPlaceholderNeverReachesTheAgentWhenBytesArePresent(self, fsStub, monkeypatch):
