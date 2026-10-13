@@ -2728,3 +2728,16 @@ tests/unit/api/test_marketInstallRefusalIsNotReportedAsSuccess.py
 # 反证段还原两个生产件到 HEAD ⇒ 恰 9 项内容面读数 FAIL，验签/文本/收尾三件照常 ok）。
 # A/B（channels+api，基线 b99c3bad）两侧失败集合逐条相同：17 failed / 8 errors 双向一致、独有红 0。
 tests/unit/api/test_channelFeishuWebhookVoiceAndSenderUseAdapterFace.py
+# §6-187 企业微信语音的素材字节半区：只给 <MediaId> 的那条语音真去取回字节交给预检，
+# 素材 GET 收成一份实装（旧同步面保留 token 检查与 save_path 落盘，只删手抄的请求）。
+# 判格口径四条：① 接缝四条与"平台已转写就 0 次出站"成对（省掉一次没用的请求也是主张）；
+# ② 线程探针成对——既要求"真下载过"又要求"不在循环线程上"，只写后半会被「关掉下载」骗绿；
+# ③ 单源落点按"路径 + 企微基址同现"数，并把仓内现成的**公众号同名路径那一行**留作负样本
+#   （`/cgi-bin/media/get` 是两条不同平台通道共用一条路径，按裸路径扫会假红——第一版就在这上面栽了）；
+# ④ 上限只许在单源缺省里定义一次（按 `inspect.signature().parameters["maxBytes"].default` 取），
+#   调用方各补一个数就是第二个事实源。
+# 准入读数：逐文件单跑三次同读数 13 passed（4.27s / 3.77s / 2.16s）。
+# 活体 `channelWecomVoiceBytes_live.py` 13 读数 exit=0（本机假企微平台真 HTTP 下载 + 真 voice_precheck；
+# 反证段还原 4 个生产件到 HEAD ⇒ 恰 5 项接缝读数 FAIL，其余照常 ok）。
+# A/B（channels+voice+api，基线 3861bd5e）两侧失败集合逐条相同：17f/8e ↔ 17f/8e、仅本树独有红 0。
+tests/unit/channels/test_channelWecomVoiceBytesReachThePrecheck.py
