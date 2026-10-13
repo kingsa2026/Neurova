@@ -34,6 +34,7 @@ from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
+    ChannelMessage,
 )
 
 logger = get_logger(__name__)
