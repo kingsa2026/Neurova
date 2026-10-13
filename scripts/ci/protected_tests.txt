@@ -2648,3 +2648,24 @@ tests/unit/core/test_sourceEscapeSequenceHygiene.py
 # ⇒ 3 failed/4 passed 且失败集恰为三条行为格；A/B（HEAD=489076a1 仓外 worktree，channels+voice+api）
 # 基线 17f+8e/3104p ↔ 本树 17f+8e/3111p，两侧独有红各 0 条；活体 channelVoiceFactorySeam_live.py exit=0。
 tests/unit/channels/test_channelVoiceFactorySeamCloses.py
+# §6-179 批 33：稠密余弦 14 处收进 `core/vector_math` 一处。分叉的不是行数而是三种互相
+# 矛盾的口径——五份没有长度检查，`zip` 把长的那条截掉，4 维查询对 2 维存量算出 0.408 的**假分**
+# （真 `UnifiedVectorStore.search_neurova_hebbs` 上的活体读数；判据档那对构造样本上是 1.0 满分），
+# 假分不喊人还按它往上排，记忆召回／工具目录／技能合并三条路都吃它；另两份抛 ValueError、
+# 三份回 0.0，零范数有 `== 0`／`or 1.0`／`<= 1e-12` 三种写法，`skills/skill_semantics` 干脆拿
+# 点积冒充余弦（未归一时 `[3,4]·[3,4]` 给 25.0，而下游写的是 `if cos >= threshold`）。
+# 单源定三件事：原始值域、[0,1] 映射、以及**三态出口** `tryCosineSimilarity`——
+# `evolution/eval/constraints` 那条进化闸靠 None 回退 Jaccard，把"算不了"折成 0.0 等于告诉它
+# "算出来是 0"，回退条件从此永不成立。按定义域不并的一份：`vector_search` 吃 `Dict[str, float]`
+# 稀疏向量，判据里有专门一格钉它必须仍在原位（"顺手一起并了"就是洗掉稀疏语义）。
+# 红 4 failed/5 passed ⇒ 绿 11 passed；红自证＝按路径清单还原 19 生产件 + 3 测试件、判据与单源
+# 留在树里复跑 ⇒ 恰 4 格翻红无收集错误，复原逐文件 sha256 复证；变异 5 枚全咬，其中 M4 反过来
+# 抓到判据自己的洞：站点写成 `dot / na`（除数是已算好的范数变量）时探测器按式子不认变量名，
+# 第二份实现能从守卫底下滑过去——补分支后必须配自证样本（同一个 `continue` 控制流坑犯了两次：
+# 新分支写在 continue 之后等于没写）。活体 10 读数 exit=0，含与 numpy 逐值对照（偏差 0.000e+00，
+# 外部参照不是自证）与反向校准（把单源桩成 zip 截断 ⇒ 站点读数立刻变回 0.408 假分）。
+# A/B：四族基线 16 红 ↔ 本树 17 红，多的 `test_github_push_skill::test_get_status` 当场定性为
+# 盘符布局（`os.system("cd … &&")` 跨盘不改盘；基线代码把临时目录放 E: 同样红、放回 C: 同样绿）；
+# 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
+# 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
+tests/unit/core/test_denseCosineSingleSource.py
