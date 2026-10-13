@@ -2551,3 +2551,21 @@ tests/unit/api/test_recoverPasswordFromSourceConstant.py
 # 入册前逐文件单跑两次同读数 11 passed；红自证＝stash 两个生产档 ⇒ 10 格翻红且无收集错误；
 # A/B 基线（HEAD 仓外 worktree 铺入本判据）10 failed/1160 passed ↔ 本树 1170 passed、本树独有红 0。
 tests/unit/voice/test_voiceContextInjectionSingleSource.py
+# §6-175 语音上下文写侧接进现役渠道回合（预检写 → 路由交 → 读侧同名键）：
+# 读侧 `chat_pipeline` 一直在取 `metadata["voice_context"]`，而此前全仓唯一的写者只活在评测面
+# （`agent_core.process_multimodal`，其生产调用点只有 `evolution/eval/ab_library.py`）——对真用户
+# 这条功能从未生效。断链的症状不是报错，是 prompt 里悄悄少一项，所以按接缝逐段钉：
+# 预检成功那一刻写下 ASR 真产物（失败路径必须不写，否则下游读出一条空语音信息）、
+# `channel_router` 把它交进回合 metadata（文字回合不得被染色＝进程级残留）、
+# 写侧与读侧引同一个常量（两侧各写字面量时改名只表现为 prompt 少一项）。
+# 键位/取值用法分形判：只数下标键、`.get` 键实参、字典字面量键位三种，
+# `{"type": "voice_context"}` 那种取值位置不算命中——按字符串包含扫会一边假红一边逼人绕开判据；
+# 配一格探测器自证（三形都被抓、取值形不被抓）与一格"豁免过期即红"。
+# `agent_core.py` 那处字面量登记在 EXEMPT：受尺寸棘轮（基线只降不升）所阻，本批无正当减行理由，
+# 且那条路只活在评测面上——留待与 `process_multimodal` 拆分同批。
+# 入册前逐文件单跑三次同读数 9 passed；红自证＝仓外 SHA256 快照 + 只按路径还原两个行为件
+# （保留契约件的常量定义，否则 import 即红＝无效红）⇒ 3 failed/6 passed 且失败集恰为三条行为格；
+# 活体反证同一还原下 `channelVoiceRoundTrip_live.py` exit=1、4 条 FAIL 全落在新读数上。
+# A/B（HEAD 仓外 worktree，agent+context 族）基线 16 红 ↔ 本树 17 红，多出的
+# `test_pool_cleanup_expired` 单节点两侧各三次复跑皆绿、整目录复跑不重现 ⇒ 记档不认领。
+tests/unit/channels/test_channelVoiceContextReachesTheTurn.py
