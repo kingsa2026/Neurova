@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_TYPES
 from neurova.core.logger import get_logger
+from neurova.voice_context_module import VOICE_CONTEXT_KEY
 
 logger = get_logger(__name__)
 
@@ -68,6 +69,10 @@ async def transcribe_voice_message(message):
             message.content = text
             metadata["voice_transcribed"] = True
             metadata["voice_transcript"] = text
+            # 写侧接进回合：ASR 的真产物 dict 原样交给下游（键名唯一化在 voice_context_module）。
+            # 不在这一步，`chat_pipeline` 那份读侧就永远等不到——此前全仓唯一写者只活在评测路上，
+            # "语音上下文进 prompt" 对真用户从未生效。引擎没交的键（confidence/engine）不凭空造。
+            metadata[VOICE_CONTEXT_KEY] = result
             logger.info("渠道语音预转写成功: channel=%s, len=%s", message.channel_type, len(text))
         else:
             metadata["voice_transcribe_failed"] = "empty_result"

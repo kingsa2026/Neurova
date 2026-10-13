@@ -16,8 +16,10 @@
 
 四段读数：
 ① Telegram 真 `_process_update` → 消息带 `audio_bytes`、类型 voice，桩侧真发生 getFile→下载两跳；
-② 真预检把占位换成转写文本，进回合的正文不是 "[语音]"；
-③ 飞书真入站事件 → 真 manager → 真 router → 真上传+真发送，桩侧收到的字节 == 本轮 TTS 产物；
+② 真预检把占位换成转写文本，进回合的正文不是 "[语音]"，并把 ASR 真产物写进语音上下文键；
+③ 飞书真入站事件 → 真 manager → 真 router → 真上传+真发送，桩侧收到的字节 == 本轮 TTS 产物，
+   且**回合收到的 metadata 里带着那份语音上下文**（§6-175 批 20 接的写侧→读侧交接，
+   这一段只有在这里能证明——单元格各自审两端，跨 manager 事件回调这一跳的只有本支）；
 ④ 不支持语音出站的渠道（真 Telegram 适配器，能力默认 none）：文本照常、语音点名丢弃。
 """
 
@@ -102,11 +104,12 @@ class _PlatformStub(BaseHTTPRequestHandler):
 
 
 class _StubAgent:
-    """只替 agent 本体；返回值按 chat_pipeline 的真实产物键取，并把收到的正文交回来。"""
+    """只替 agent 本体；返回值按 chat_pipeline 的真实产物键取，并把收到的正文与 metadata 交回来。"""
 
-    def __init__(self, reply: str, audioPath: pathlib.Path, sink: list):
+    def __init__(self, reply: str, audioPath: pathlib.Path, sink: list, metaSink: list | None = None):
         self._resp = {"text": reply, "audio_path": str(audioPath)}
         self._sink = sink
+        self._metaSink = metaSink
         self.current_reasoning = ""
 
     def get_tool_messages_snapshot(self):
@@ -114,6 +117,8 @@ class _StubAgent:
 
     async def chat(self, user_input="", session_id=None, metadata=None, **kw):
         self._sink.append(user_input)
+        if self._metaSink is not None:
+            self._metaSink.append(metadata or {})
         return dict(self._resp)
 
 
@@ -195,6 +200,7 @@ def main() -> int:
     from neurova.channels.telegram_adapter import TelegramAdapter
     from neurova.channels.voice_egress import VoiceReply
     from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
+    from neurova.voice_context_module import VOICE_CONTEXT_KEY
 
     # 一个跑在后台线程的事件循环，扮生产里的主循环（适配器回调都往它投）
     mainLoop = asyncio.new_event_loop()
@@ -244,7 +250,7 @@ def main() -> int:
         _check(len(hops) == 2 and "/getFile" in hops[0] and hops[1].startswith("/file/bot"),
                f"两跳顺序 getFile→下载：{hops}")
 
-        print("\n② 真预检把占位换成转写文本（ASR 用真 MockASREngine 对象）")
+        print("\n② 真预检把占位换成转写文本（ASR 用真 MockASREngine 对象），并把 ASR 真产物写成语音上下文")
         asr = MockASREngine(transcribe_text="帮我看下明天的排程")
         _run(asr.initialize())
         voice_precheck._get_asr_transcriber = lambda: asr.transcribe
@@ -253,6 +259,12 @@ def main() -> int:
             _check(outMsg.content == "帮我看下明天的排程",
                    f"预检后正文是转写文本（实得 {outMsg.content!r}）")
             _check(outMsg.metadata.get("voice_transcribed") is True, "转写成功被如实标注")
+            voiceCtx = outMsg.metadata.get(VOICE_CONTEXT_KEY) or {}
+            _check(voiceCtx.get("text") == "帮我看下明天的排程",
+                   f"预检写下的语音上下文带的是 ASR 真 text（实得键 {sorted(voiceCtx)}）")
+            # 键按真产物取：MockASREngine 只交 text/language/duration_sec，没交的不许凭空出现
+            _check(set(voiceCtx) == {"text", "language", "duration_sec"},
+                   f"语音上下文的键集合不等于 ASR 真产物键：{sorted(voiceCtx)}")
 
         print("\n③ 飞书语音往返：真入站事件 → 真 manager → 真 router → 真上传+真发送")
         wav = pathlib.Path(workdir) / "tts_live_roundtrip.wav"
@@ -260,6 +272,7 @@ def main() -> int:
                f"回合 TTS 产物是真 WAV：{wav.stat().st_size if wav.exists() else 0} 字节")
 
         seenInput: list = []
+        seenMeta: list = []
         fs = FeishuAdapter(ChannelConfig(
             channel_type="feishu", app_id="cli_live", app_secret="sec_live"))
         fs.api_base = stubBase
@@ -272,7 +285,8 @@ def main() -> int:
         fs._connected = True
         mgr.register_adapter(fs, agent_id="default")
         mgr._message_handlers = [
-            (50, "rt-handler", make_handler(mgr, lambda _aid: _StubAgent("明天上午两点有会", wav, seenInput)))
+            (50, "rt-handler", make_handler(
+                mgr, lambda _aid: _StubAgent("明天上午两点有会", wav, seenInput, seenMeta)))
         ]
 
         _PlatformStub.seen = []
@@ -298,6 +312,21 @@ def main() -> int:
         _check(bool(upload) and bool(send)
                and _PlatformStub.seen.index(upload[0]) < _PlatformStub.seen.index(send[0]),
                "先上传后发送（顺序反了平台会拒收）")
+
+        # §6-175 批 20 接的那一手：预检写下的语音上下文经真 router 交进真回合。
+        # 单元格各自审写侧与读侧，跨 manager 事件回调这一跳只有这条真链能证明。
+        handed = [m.get(VOICE_CONTEXT_KEY) for m in seenMeta if m.get(VOICE_CONTEXT_KEY)]
+        _check(bool(handed) and handed[-1].get("text") == "帮我看下明天的排程",
+               f"回合 metadata 带着这份语音上下文（实得 {handed[-1:]!r}）")
+        _check(bool(handed) and set(handed[-1]) == {"text", "language", "duration_sec"},
+               f"交给回合的键就是 ASR 真产物键，没凭空造：{sorted(handed[-1]) if handed else []}")
+        if handed:
+            # 同一进程内把它交给唯一渲染函数：交接与呈现之间不留"另一份数据"的空隙
+            from neurova.voice_context_module import voiceContextLines
+
+            rendered = voiceContextLines(handed[-1])
+            _check(any("语音识别文本" in ln and "帮我看下明天的排程" in ln for ln in rendered),
+                   f"交接那份经渲染进得了 prompt 行（实得 {rendered}）")
 
         print("\n④ 不支持语音出站的渠道：文本照常、语音点名丢弃（真 Telegram 适配器，能力默认 none）")
 
