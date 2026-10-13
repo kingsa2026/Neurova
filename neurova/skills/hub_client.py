@@ -478,7 +478,8 @@ class SkillHubClient:
         fail-closed：门自身异常视为不通过（安全默认值优先于可用性）。
         P0-4：SKILL.md/manifest 携带的 permissions 声明一并过门——非法
         声明（未知能力键/白名单引用未知工具等）拒绝安装并回滚；合法
-        声明归一化持久化进 skill.json（运行时读取源）。声明缺省放行
+        声明归一化留底进 skill.json（**只是留底，全仓零读者**——运行时裁决读
+        技能账本条目，§6-177 复算）。声明缺省放行
         （向后兼容；Claude 式 allowed-tools 模式语法不映射，避免误拒）。
         """
         import shutil
@@ -523,7 +524,7 @@ class SkillHubClient:
 
     @staticmethod
     def _persist_declared_permissions(skill_dir: Path, perm_raw: dict) -> None:
-        """把通过校验的权限声明归一化写进 skill.json（可观测 + 运行时读取源）。"""
+        """把通过校验的权限声明归一化写进 skill.json（可观测留底；无运行时读者）。"""
         try:
             from neurova.skills.permissions import SkillPermissions
 
