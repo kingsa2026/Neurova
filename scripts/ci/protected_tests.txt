@@ -2801,3 +2801,9 @@ tests/unit/api/test_skillPoolInstallReceiptIsHonest.py
 # 两笔自伤进形态集：反证段的桩写成 async 而生产方法是同步 ⇒ 成因被换成"协程对象没有 metadata"，
 # 红证的是自己的桩；活体没把 `_main_loop` 交给适配器 ⇒ "门收到 0 条"读的是探针的洞不是被测代码。
 tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py
+# 批 38（§6-194，裁定甲″）：技能安装门从此看**文件名**——`.env`/`id_rsa`/`*.pem`/`.aws/credentials`
+# 与 `.exe`/`.dll` 参与 DENY，`.mjs/.cjs/.mts/.cts` 不再掉出可扫清单，未扫文件计进
+# `metadata.unscanned_file_count` + `unscanned_artifact` 报告项（放行不等于没看）；内容摘要折入文件名
+# 普查（否则包里多塞一个 .env 不改摘要，第二次扫读的是缓存不是门）。17 格含反误报格（正当资产名不得按
+# 子串冤枉）、名称级不受文档豁免那格、以及「第二套已退役」的 find_spec 格。逐文件单跑三次同读数 17/17/17。
+tests/unit/security/test_installGateArtifactNameRules.py
