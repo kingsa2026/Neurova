@@ -2762,3 +2762,11 @@ tests/unit/skills/test_marketInstalledStateIsReadBack.py
 # （HTTP=404 与 `Channel 'feishu' not found` 实据），余下对照与旧面语义读数照常 ok。
 # A/B（channels+api，基线 c56656c7 现建）两侧失败名集逐条相同：各 16 条、两向差集皆空、8 errors 一致。
 tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py
+# 批 37（§6-191·裁定甲）安装门把文档/资产侧命中降为报告项，代码面与提示注入面照旧严：
+# 口径单点在 skill_scanner（DOC_ASSET_SUFFIXES + CODE_SHAPE_CATEGORIES + isDenyBearing），
+# findings 原样保留并在 metadata.report_only_rules 点名（放行不等于删读数）。判据 7 格
+# （含反空转样本与"包自带 .py 仍阻断"的实测格）；红自证＝skill_scanner.py 还原 HEAD ⇒
+# 3 failed/4 passed；逐文件单跑三次同读数 7/7/7 passed。变异 5 枚（M4 第一版没咬，
+# 补 isDenyBearing 直读断言后才咬）。活体 installGateDocCaliber_batch37.py 9 读数 exit=0，
+# 含反向校准桩与"同 id 二次安装会短路在门之前"的方法学读数。
+tests/unit/security/test_installGateDocFilesAreReportOnly.py
