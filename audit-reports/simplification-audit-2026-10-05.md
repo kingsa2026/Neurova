@@ -3232,6 +3232,14 @@
     - **验证读数**：判据 7 格；红自证（`skill_scanner.py` 显式路径清单还原 HEAD）3 failed/4 passed ⇒ 绿 7 passed ×3；变异 5 枚——M1 后缀表清空 / M2 类目表清空 / M3 注入被误划进代码形状 / M4 来源不明不再从严 / M5 分析器不带规则族，**M4 第一版没咬**（`no_files` 元项 category 为空，走第一个分支，到不了"说不出落点就按严"那一支），补两条 `isDenyBearing` 直读断言后才咬；每枚 sha256 复证逐字节复原。活体 `tests/manual/installGateDocCaliber_batch37.py` **9 读数 exit=0**。A/B（api+skills+security）本树 19 failed/21 errors，其中 security 的 `test_safe_file_read_still_works`、`test_market_builtin[presentation-studio]` 与 transfers/wave 一族在 HEAD 现建 worktree 里逐条复现＝预存，**仅本树独有红 0 条**；`test_github_push_skill::test_get_status` 仍是跨盘 `cd` 环境形，不认领。
     - **净 LOC（生产池 +61/−5，净 +56）**：`skill_scanner.py` +42/−3（两张表 + 单点谓词 + Finding.category 三处构造点 + 判决筛 denying，其余为边界注释）；`skill_pool_api.py` +19/−2（`_installReceipt` 与两条面的调用改动）。正向主因是把"能不能参与 DENY"从隐式变成显式口径；测试池 376 行不计入。
 
+192. **小账第一笔：给 skill-pool 两道安装面的"拒装不得报成功"补常驻判据，并记一次自己踩到的索引泄漏（✅ `d5241a41` 判据、`a499d3d4` 纠偏、子集随后一笔）** 🟢 —— 批 37 把 `_installReceipt` 接上后只留了活体读数，仓内没有一格常驻红能阻止它退回"恒 success:true"。这一档补 4 格：门拒⇒顶层 `success=False`+点名拒因+**账本里没有该条目**（三处同向，缺一处就是各说各话）；干净包⇒顶层 True 且条目落账（成对，防"把端点一关了之"骗绿）；在这道 HTTP 面上复量批 37 的文档口径（只有 .md 里照抄 `os.system(...)`/`../` 示例必须装得上）；两道面共用同一个映射函数（按源码读数，防第三本回执账）。
+
+    - **本格的另一半是过程事故，值得单独记**：做红自证时用了 `git checkout 2e6e9eb5^ -- neurova/api/endpoints/skill_pool_api.py`——这条命令**同时改索引与工作树**。我只按备份复原了工作树，索引里仍是父笔那份，于是紧接着那笔本该只加判据档的提交 `d5241a41` 把 `_installReceipt` 连同两处调用一起退回去了。发现后用**新增提交** `a499d3d4` 纠正（不改写历史，内容以 `2e6e9eb5` 那份为准，`git diff` 为空、sha 差异只是 CRLF/LF）。
+    - **连带一次对并发会话的危险动作**：为了摘掉自己那笔误提交，我跑了 `git reset --mixed HEAD^`——而 HEAD 此刻已是对方刚落的 `43f715e5`（渠道管理面按 agent 取实例，§6-190），这一条把**对方的提交**从分支指针上摘了下来。当场以 `git reset --mixed 43f715e5` 原样装回，其三档在提交内、工作树零残留（复证 `git status` 只剩我自己的档）。**教训**：共享树里 `reset`/`checkout <rev> -- path` 这类操作前，必须先 `git log --oneline -3` 确认 HEAD 是谁的一笔；红自证的还原动作要么用"仓外快照 + 显式 `git restore --source=HEAD --staged --worktree -- <paths>`"，要么干脆用只动工作树的 `git show <rev>:<path> > <path>`，绝不让索引停在旧内容上。
+    - **另记一条基线口径**：判据守护的是"**某次改动之后**不许退回"时，红自证基线必须取**那次改动的父笔**，不是 HEAD——本例 HEAD 已含批 37 的修复，还原 HEAD 会得到 4 全绿的假"已修"（与形态集"预存归因要用本会话第一笔的父 commit"同族的新变体）。
+    - **读数**：4 格逐文件单跑三次同读数；红自证（还原 `2e6e9eb5^`）2 failed/2 passed——两枚绿的正是正向配对格，本就该在旧态也绿，牙由诚实格与共用映射格出。A/B：`test_my_skills_wave_v::test_from_public_refused_over_local_same_name`（404 vs 409）在批 35/36 两侧基线里同为预存，不认领。
+    - **未落地的一笔墨账**（本批不做、写清楚）：① `#34a/#34b` 两支——第二套扫描器（`neurova/skills/security_scanner.py`，908 行，含咽喉没有的 `DANGEROUS_EXTENSIONS` 与 `SENSITIVE_PATTERNS`）先"接裁决单点"再"迁检测、退实现"；② 第一方资产包 `builtin--adaptive-presentation-studio` 被自带 .py 的 31 条真命中拦着，白名单/改资产/维持拒**未裁**。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
