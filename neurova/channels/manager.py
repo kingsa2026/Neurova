@@ -258,15 +258,24 @@ class ChannelManager:
         message_type: str = "text",
         **kwargs,
     ) -> Optional[str]:
-        """通过指定渠道发送消息（长文本按渠道上限分片，失败不静默）"""
-        # 按 (agent_id, channel_type) 取实例（agent 多实例隔离）；缺 agent 上下文
-        # 或非 default 未注册时回落 default 视图，保证既有调用零破坏。
+        """通过指定渠道发送消息（长文本按渠道上限分片，失败不静默）
+
+        `agent_id` 两态（§6-195）：**未点名或点名 default**＝沿用 default 兼容视图（`neurflow`
+        审批通知那条路不带 agent_id，它要的就是"default 有什么发什么"，语义一字不变）；
+        **点名非 default**＝只认那一格，取不到就诚实失败——此前它无条件
+        `or self._adapters.get(t)`，于是 §6-190 给 `/send` 加上 `agent_id` 之后，
+        `?agent_id=kai` 在 kai 名下没配这条渠道时会**由 default 的 bot 把这条消息发出去**、
+        回执还写 success。回落不是兼容，是拿别人的身份说话（§6-189 同一条纪律的出站半边）。
+        """
         agent_id = str(kwargs.pop("agent_id", "default") or "default")
         session_scope = kwargs.pop("session_scope", "") or chat_id  # 回复广播按 scope 反查
-        adapter = getattr(self, "_agent_adapters", {}).get((agent_id, channel_type)) \
-            or self._adapters.get(channel_type)
-        if not adapter:
-            logger.error("No adapter for channel: %s", channel_type)
+        adapter = getattr(self, "_agent_adapters", {}).get((agent_id, channel_type))
+        if adapter is None and agent_id == "default":
+            # 兼容视图：只给 default 那一态用（点名别的 agent 却回落到它，就是错投）
+            adapter = self._adapters.get(channel_type)
+        if adapter is None:
+            logger.error("渠道 %s 没有登记在 agent=%s 名下的实例（不做跨 agent 回落）",
+                         channel_type, agent_id)
             return None
         if not adapter.is_connected:
             logger.warning("Adapter %s not connected, attempting connect", channel_type)
@@ -334,16 +343,27 @@ class ChannelManager:
         message_type: str = "text",
         **kwargs,
     ) -> Dict[str, Optional[str]]:
-        """向所有已连接的渠道广播消息"""
+        """向**所有实例**广播消息——定义域是全量实例表，不是 default 兼容视图（§6-195）。
+
+        此前遍历 `self._adapters`，于是工作流审批通知（唯一生产调用者
+        `collaboration/neurflow/builtin.py:2135`）只发给 default 名下那几只渠道，挂在别的 agent
+        名下的渠道收不到审批、流程卡在 pending 等人。键沿用 `_adapterViewKey` 单源：
+        default 仍是裸渠道名 ⇒ 现有 caller 的 `list(results.values())[0]` 与 mock 形状都不破。
+        """
         results = {}
-        for channel_type, adapter in self._adapters.items():
+        table = getattr(self, "_agent_adapters", {}) or {}
+        targets = list(table.items())
+        for channelType, adapter in self._adapters.items():
+            if ("default", channelType) not in table:
+                targets.append((("default", channelType), adapter))
+        for (agent_id, channel_type), adapter in targets:
             if adapter.is_connected:
                 try:
                     msg_id = await adapter.send_message("", content, message_type, **kwargs)
-                    results[channel_type] = msg_id
+                    results[_adapterViewKey(agent_id, channel_type)] = msg_id
                 except Exception as e:
                     logger.exception("Broadcast to %s failed: %s", channel_type, e)
-                    results[channel_type] = None
+                    results[_adapterViewKey(agent_id, channel_type)] = None
         return results
 
     async def _on_channel_event(self, event_type: ChannelEventType, message: ChannelMessage):
@@ -698,7 +718,7 @@ class ChannelManager:
             if not identity:
                 continue
             groups.setdefault(identity, []).append(
-                channel_type if agent_id == "default" else f"{agent_id}:{channel_type}"
+                _adapterViewKey(agent_id, channel_type)
             )
         conflicts = [
             {"identity": identity, "channels": channels}
