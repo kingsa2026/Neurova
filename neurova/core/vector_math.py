@@ -25,7 +25,8 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-__all__ = ["ZERO_NORM_EPSILON", "cosineScore", "cosineSimilarity", "tryCosineSimilarity"]
+__all__ = ["ZERO_NORM_EPSILON", "cosineScore", "cosineSimilarity", "tryCosineSimilarity",
+           "vectorDot", "vectorNorm", "vectorNormalize"]
 
 #: 范数低于此值按"没有信息"处理。取 1e-12 而不是 0：`context/semantic_drawer` 今天就是用
 #: 这个阈值防 float32 噪声，沿用它可让那支点保持原读数；对真实嵌入（范数量级 1）无影响。
@@ -80,3 +81,21 @@ def cosineScore(vecA: Sequence[float], vecB: Sequence[float]) -> float:
     """
     raw = _rawCosine(vecA, vecB)
     return 0.0 if raw is None else (raw + 1) / 2
+
+def vectorNorm(vec: Sequence[float]) -> float:
+    """范数。`_rawCosine` 不复用它——检索热路要一次遍历同时算点积与两条范数。"""
+    return math.sqrt(sum(x * x for x in vec))
+
+
+def vectorDot(vecA: Sequence[float], vecB: Sequence[float]) -> float:
+    """点积：长度不等按 `zip` 截断（这是点积的定义，不是缺陷）。
+    维度守卫归余弦那一处——那边"不可比"要折成 0.0／None，这里没有可折的语义。"""
+    return sum(x * y for x, y in zip(vecA, vecB))
+
+
+def vectorNormalize(vec: Sequence[float]) -> Sequence[float]:
+    """归一化。零范数时**原样返回传入的那个对象**（改前的行为，不是副本）。"""
+    norm = vectorNorm(vec)
+    if norm == 0:
+        return vec
+    return [x / norm for x in vec]

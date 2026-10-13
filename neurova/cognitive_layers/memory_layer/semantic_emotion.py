@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 from neurova.core import vector_math
-import math
 import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -32,7 +31,8 @@ PROTOTYPE_TEXTS: Dict[str, str] = {
 
 
 def _zero_norm(vec: List[float]) -> bool:
-    return len(vec) == 0 or math.sqrt(sum(x * x for x in vec)) == 0
+    """空向量或零模长。模长本身不在这里算——口径归 core/vector_math（§6-182 批 34）。"""
+    return not vec or vector_math.vectorNorm(vec) == 0
 
 
 class SemanticEmotionClassifier:
