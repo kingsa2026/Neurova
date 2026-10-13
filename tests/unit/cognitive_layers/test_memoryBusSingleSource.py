@@ -32,6 +32,8 @@ import ast
 import re
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 from neurova.core.event_bus import get_event_bus, reset_event_bus
@@ -63,14 +65,13 @@ def manager(tmp_path):
 
 def _eventBusDefinitions() -> list:
     hits = []
-    for py in NEUROVA_ROOT.rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
-        if "class EventBus" not in text:
-            continue
-        tree = ast.parse(text)
+    # 枚举与解析走 tests/ast_scan 的共享预算；预筛词是判据的**充分条件**
+    # （谓词只认名为 EventBus 的 ClassDef，连这串字样都没有的文件不可能命中）。
+    for ref in ast_scan.sourceRefsUnder(NEUROVA_ROOT, ".py", ast_scan.textHints("class EventBus")):
+        tree = ast.parse(ref.code)
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "EventBus":
-                hits.append(f"{py.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+                hits.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
     return hits
 
 

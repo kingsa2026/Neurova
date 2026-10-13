@@ -20,6 +20,8 @@ import io
 import re
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 from neurova.aigc_studio import store as studio_store
@@ -54,13 +56,9 @@ def _vocab():
 def _statusLiteralsInRunWrites():
     """`add_run(...)` / `update_run(...)` 实参里出现的状态字面量（AST，不数注释）。"""
     offenders = []
-    for path in PRODUCTION.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            tree = ast.parse(io.open(path, encoding="utf-8").read())
-        except SyntaxError:
-            continue
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
+    # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    for path, tree in ast_scan.parsedModules(PRODUCTION, ".py"):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

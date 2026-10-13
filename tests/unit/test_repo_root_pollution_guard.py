@@ -23,6 +23,11 @@
 "共享根与共享 tests/unit 全程无痕"——判据走过程观测，事后检查会被 `finally` 抹平。
 另：该笔提交正文写的净 LOC `+85/-16` 是估算，按 `git diff --numstat` 实数为 **112/8**，
 在此勘误（本仓先例：不改历史，另笔落字）。
+
+探针的墙钟额度和它的判据无关（2026-10-13 CI `cnb-elr-1k4pvclq5` 实测）：
+两条探针用例在共享负载下撞 `pyproject.toml` 的 30s 默认墙钟转红，而它们要钉的
+是"落点在自己那棵树里"这条**结构**事实。子进程 pytest 那一段因此显式放宽
+（`_PROBE_PYTEST_TIMEOUT_S`）——把额度与契约分开，不让守卫自己成为偶发红源。
 """
 
 import os
@@ -39,39 +44,61 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: 探针子命令的超时额度——**超时不是被测契约**：本模块要钉的是"探针的落点在
+#: 它自己那棵树里"，不是"子进程 pytest 多快"。额度按 `pyproject.toml` 的
+#: `timeout = 30` 反推：起子进程 pytest 一段在共享负载下本就贴墙钟，留出余量
+#: 免得本守卫自己成为偶发红源（实测 2026-10-13 CI `cnb-elr-1k4pvclq5`：
+#: 两条探针用例撞 30s 默认墙钟转红）。
+_PROBE_PYTEST_TIMEOUT_S = 240
+
 
 def _topLevelEntries() -> set:
     return set(os.listdir(REPO_ROOT))
 
 
 def _acquireProbeRoot() -> tuple[Path, Path]:
-    """给探针一棵**自己独占**的仓库根：仓外 detached git worktree。
+    """给探针一棵**自己独占**的仓库根：把装配面复制到临时目录，不借 git 元数据。
 
-    为什么必须是整棵树而不是临时目录里摆几个文件：`tests/conftest.py` 的
-    `REPO_ROOT = Path(__file__).resolve().parents[1]` 是按文件位置推的，子进程在
-    worktree 里跑时，守卫快照的就是那棵树自己——机制原样跑到，共享工作树零痕迹。
+    为什么是整棵装配面而不是临时目录里摆几个文件：`tests/conftest.py` 的
+    `REPO_ROOT = Path(__file__).resolve().parents[1]` 是按文件位置推的，子进程在这棵树
+    里跑时，守卫快照的就是那棵树自己——机制原样跑到，共享工作树零痕迹。
     拼最小目录树要么复刻 conftest（第二份事实源），要么缺 `neurova/` 与
     `pyproject.toml` 的 addopts 让探针测的不再是同一套装配。
+
+    为什么不再走 `git worktree add`（`83dad089` 的写法，本笔改掉）：那条路把守卫
+    绑在一份**可写的 git 元数据**上，而 CI 容器只给源码树，`git worktree add` 当场
+    退 2（连续三个构建 `cnb-mei-1k4odroc5` / `cnb-o9g-1k4oij3vm` / `cnb-l6f-1k4bi087n`
+    的 `unit-tests` 腿同形），四条用例于是全部变成 setup ERROR——**而真正的报错
+    （git 的 stderr）被 `capture_output=True` 吃掉**，只看得到一个裸
+    `CalledProcessError`。守卫要的是"一棵自己独占的仓库根"，不是"git 能不能建
+    worktree"；换成复制装配面即把这条外部依赖根除，且实测更快（0.22s / 33.5MB，
+    原 worktree 整树检出约 12s）。
+
+    复制的是**当前工作树这一份**（不是 HEAD 那份）：守卫本体若在本地有未提交改动，
+    探针就该测改后的版本，否则改坏了也照样绿。
     """
     staging = Path(tempfile.mkdtemp(prefix="neurovaProbeRoot-"))
     root = staging / "tree"
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(root), "HEAD"],
-        cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=180,
-    )
-    # worktree 取的是 HEAD 那份 conftest；守卫本体若在工作树里有未提交改动，
-    # 探针就该测**工作树这一份**，否则改坏了也照样绿。
-    shutil.copy2(REPO_ROOT / "tests" / "conftest.py", root / "tests" / "conftest.py")
+    root.mkdir()
+    shutil.copy2(REPO_ROOT / "pyproject.toml", root / "pyproject.toml")
+    for entry in ("pytest.ini", "conftest.py"):
+        candidate = REPO_ROOT / entry
+        if candidate.is_file():
+            shutil.copy2(candidate, root / entry)
+    for entry in ("tests", "neurova"):
+        shutil.copytree(
+            REPO_ROOT / entry, root / entry,
+            symlinks=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    # 探针要在 `tests/unit/` 落临时用例（`_runPytestProbe`），而复制面按忽略表
+    # 剪掉的正是空的字节码目录——`tests/unit` 本身在源树里必然存在，这里只兜底。
+    (root / "tests" / "unit").mkdir(parents=True, exist_ok=True)
     return staging, root
 
 
 def _releaseProbeRoot(staging: Path, root: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(root)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-    )
+    """整棵临时树一次删净（没有 git 侧的注册项要摘，故无 `worktree remove`）。"""
     shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -94,7 +121,7 @@ def _runPytestProbe(root: Path, fileName: str, body: str, expectGreen: bool) -> 
             encoding="utf-8",
             errors="replace",
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-            timeout=180,
+            timeout=_PROBE_PYTEST_TIMEOUT_S,
         )
         out = proc.stdout + proc.stderr
         if expectGreen:

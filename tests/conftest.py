@@ -40,6 +40,21 @@ os.environ.setdefault("NEUROVA_DATA_DIR", str(DATA_ROOT_SESSION_DIR))
 # 仓库根（污染守卫的快照对象）：conftest 在 tests/ 下，parents[1] 即根。
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# 字节码落点——**导入期**兜底（与上面 MoE/数据根同形，且是同一族污染的剩余命中点）。
+#
+# 仓库根那六个顶层 `.py`（`cli.py` / `start.py` / …）是真模块：CPython 默认把字节码写在
+# **源文件旁**，于是 `import cli` 会在仓库根建出 `__pycache__/cli.cpython-*.pyc`。
+# 这正是 `_guardRepoRootAgainstPollution` 报的 `__pycache__`——它不是某条用例"写错路径"，
+# 而是解释器的默认落点；判据本身没错（顶层条目不得新增），错的是让它有得可写。
+#
+# 为什么不收口到"点名的那个用例"：`cli.py` 住在仓库根是**既定事实**，任何 `import cli`
+# 都会复现同一形态（`tests/unit/test_cli_repl.py`、`test_cli_repl_ui.py` 同样如此）。
+# 在源头把字节码落点搬到会话临时区，才是根因处修复（教义第 1 条）；判据一个字不改。
+# `sys.pycache_prefix` 必须在**首次 import 之前**设（`os.environ` 的同名变量在解释器
+# 启动后再设无效——实测 `sys.pycache_prefix` 直接生效），故与本段其余兜底同处导入期。
+BYTECODE_CACHE_SESSION_DIR = tempfile.mkdtemp(prefix="neurovaBytecodeCache-")
+sys.pycache_prefix = BYTECODE_CACHE_SESSION_DIR
+
 
 @pytest.fixture(scope="session")
 def moe_state_session_dir() -> Path:

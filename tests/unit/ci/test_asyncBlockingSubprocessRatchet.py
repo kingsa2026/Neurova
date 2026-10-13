@@ -26,6 +26,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 SCAN_ROOT = REPO_ROOT / "neurova"
 
@@ -64,14 +66,22 @@ def _blockingCallsInAsync(source: str) -> list[int]:
 
 
 def _scan(directory: pathlib.Path) -> dict[str, int]:
+    """逐文件统计 `async def` 体内裸调阻塞子进程的落点数。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词取 `subprocess`，是判据的**充分条件**：谓词只认
+    `subprocess.<阻塞族>(...)`，连 `subprocess` 字样都没出现的文件不可能命中。
+    """
     perFile: dict[str, int] = {}
-    for path in sorted(directory.rglob("*.py")):
-        hits = _blockingCallsInAsync(path.read_text(encoding="utf-8", errors="ignore"))
+    for ref in ast_scan.sourceRefsUnder(directory, ".py", ast_scan.textHints("subprocess")):
+        hits = _blockingCallsInAsync(ref.code)
         if hits:
             # `as_posix()` 不是风格问题：基线里的键要能在 Linux CI 上同样命中，
             # 而 `str(relative_to(...))` 在 Windows 上给的是反斜杠（本判据首跑即被
             # 自己的 baseline 格抓到：4 个键里只有 `tool_executor.py` 那个不含目录的对了）。
-            perFile[path.relative_to(directory).as_posix()] = len(hits)
+            perFile[ref.path.relative_to(directory).as_posix()] = len(hits)
     return perFile
 
 
@@ -128,7 +138,7 @@ def test_asyncBodyReallyIsTheCountedShape():
 
 def test_scanRootActuallyCoversTheTree():
     """防"扫了个空却报绿"：扫描根必须真覆盖到生产树里那些文件。"""
-    files = list(SCAN_ROOT.rglob("*.py"))
+    files = ast_scan.filesUnder(SCAN_ROOT, ".py")
     assert len(files) > 200, f"扫描根 {SCAN_ROOT} 只覆盖 {len(files)} 个文件——路径层级写错了"
     for rel in BASELINE:
         assert (SCAN_ROOT / rel).is_file(), f"基线里的 {rel} 不在扫描面内"
