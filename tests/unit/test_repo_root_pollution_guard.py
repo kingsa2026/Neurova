@@ -23,6 +23,11 @@
 "共享根与共享 tests/unit 全程无痕"——判据走过程观测，事后检查会被 `finally` 抹平。
 另：该笔提交正文写的净 LOC `+85/-16` 是估算，按 `git diff --numstat` 实数为 **112/8**，
 在此勘误（本仓先例：不改历史，另笔落字）。
+
+探针的墙钟额度和它的判据无关（2026-10-13 CI `cnb-elr-1k4pvclq5` 实测）：
+两条探针用例在共享负载下撞 `pyproject.toml` 的 30s 默认墙钟转红，而它们要钉的
+是"落点在自己那棵树里"这条**结构**事实。子进程 pytest 那一段因此显式放宽
+（`_PROBE_PYTEST_TIMEOUT_S`）——把额度与契约分开，不让守卫自己成为偶发红源。
 """
 
 import os
@@ -38,6 +43,13 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: 探针子命令的超时额度——**超时不是被测契约**：本模块要钉的是"探针的落点在
+#: 它自己那棵树里"，不是"子进程 pytest 多快"。额度按 `pyproject.toml` 的
+#: `timeout = 30` 反推：起子进程 pytest 一段在共享负载下本就贴墙钟，留出余量
+#: 免得本守卫自己成为偶发红源（实测 2026-10-13 CI `cnb-elr-1k4pvclq5`：
+#: 两条探针用例撞 30s 默认墙钟转红）。
+_PROBE_PYTEST_TIMEOUT_S = 240
 
 
 def _topLevelEntries() -> set:
@@ -109,7 +121,7 @@ def _runPytestProbe(root: Path, fileName: str, body: str, expectGreen: bool) -> 
             encoding="utf-8",
             errors="replace",
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-            timeout=180,
+            timeout=_PROBE_PYTEST_TIMEOUT_S,
         )
         out = proc.stdout + proc.stderr
         if expectGreen:
