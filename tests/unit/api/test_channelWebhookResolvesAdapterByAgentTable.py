@@ -21,6 +21,8 @@
 
 同根因余点由本档最后一格自己数着（不在本批动手）：`channels.py` 的状态/连接/断开三个端点、
 `channel_sharing.py` 的只读状态栏、以及零调用者的死面 `manager.replace_channel`。
+（**后记**：其中 `channels.py` 三个端点与 `replace_channel` 已由 §6-190 收掉，那张表随之缩到一条——
+ 本档那句"不在本批动手"是当时的实况，不是永久裁决。）
 """
 
 import ast
@@ -223,14 +225,16 @@ class TestTheResolutionHasOneFace:
         assert _bareAdapterLookups([("synthetic.py", src)]) == {"synthetic.py": [2]}, "探测器口径失真"
 
     def testRegisteredDebtSitesAreCountedByShape(self):
-        """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。"""
+        """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。
+
+        §6-190 那批把 `channels.py` 的三个管理端点与 `manager.replace_channel` 收掉后，这张表从三条
+        缩到一条。**是这一格反过来抓到我的**：改完生产码它就报"落点已消失"，逼得同批删过期豁免，
+        而不是留一张看着还在核实、其实早已空转的表。
+        """
         known = {
-            "neurova/api/endpoints/channels.py":
-                "状态/连接/断开三个只读与管理端点——是否 agent 化取决于前端消费面，未取证，另批裁",
             "neurova/api/endpoints/channel_sharing.py":
-                "共享状态只读一栏，取不到就写 unavailable，不入回合，风险低；与上同批裁",
-            "neurova/channels/manager.py":
-                "replace_channel 内一处裸调——该面全仓零调用者（死面），接线前先按本批口径 agent 化",
+                "共享面板的一栏只读状态——它读的这份渠道状态本身没有 agent 维度（sharing 配置是全局的），"
+                "要一并 agent 化属 sharing 整块的那次裁定，不在 §6-189/§6-190 两批里顺手改",
         }
         hits = _bareAdapterLookups(_neurovaSources())
         extra = set(hits) - set(known)

@@ -31,6 +31,16 @@ from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
+
+def _adapterViewKey(agentId: str, channelType: str) -> str:
+    """渠道实例在对外视图里的键——`list_adapters` 与 `health_check` 共用这一份约定（§6-190）。
+
+    default 保留裸 channel 名（既有前端与脚本按 `"feishu"` 读），其余带 `agent:` 前缀。
+    两份视图各写一遍这个约定，就是"同一个口径两个事实源"——加 agent 维度时必然漏掉一处。
+    """
+    return channelType if agentId == "default" else f"{agentId}:{channelType}"
+
+
 # 延迟导入 SessionSyncManager 避免循环导入
 _session_sync_manager = None
 
@@ -182,13 +192,11 @@ class ChannelManager:
             "回调 URL 无法唯一确定适配器（歧义不投递）——请把 agent 维度带进回调地址")
 
     def list_adapters(self) -> Dict[str, Dict[str, Any]]:
-        """列出所有已注册的适配器状态（跨 agent 全量；key 带 agent 前缀，
-        default 保留裸 channel 键向后兼容）"""
+        """列出所有已注册的适配器状态（跨 agent 全量；键约定与 `health_check` 同一份）"""
         result = {}
         table = getattr(self, "_agent_adapters", {}) or {}
         for (agent_id, channel_type), adapter in table.items():
-            key = channel_type if agent_id == "default" else f"{agent_id}:{channel_type}"
-            result[key] = {
+            result[_adapterViewKey(agent_id, channel_type)] = {
                 "channel_type": channel_type,
                 "agent_id": agent_id,
                 "connected": adapter.is_connected,
@@ -197,7 +205,7 @@ class ChannelManager:
         # 兼容：仅存在于 _adapters 而无复合键的实例（理论不发生，兜底）
         for channel_type, adapter in self._adapters.items():
             if ("default", channel_type) not in table:
-                result[channel_type] = {
+                result[_adapterViewKey("default", channel_type)] = {
                     "channel_type": channel_type,
                     "agent_id": "default",
                     "connected": adapter.is_connected,
@@ -656,25 +664,6 @@ class ChannelManager:
         except Exception as e:  # noqa: BLE001
             return {"success": False, "channel_type": channel_type, "error": str(e)}
 
-    async def replace_channel(
-        self, channel_type: str, adapter_factory: "Callable[[], ChannelAdapter]",
-    ) -> Dict[str, Any]:
-        """替换渠道适配器实例（配置热更新：旧实例断开注销，新实例注册并连接）。"""
-        old = self.get_adapter(channel_type)
-        if old is not None:
-            try:
-                await old.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
-            self.unregister_adapter(channel_type)
-        adapter = adapter_factory()
-        self.register_adapter(adapter)
-        try:
-            ok = await adapter.connect()
-            return {"success": bool(ok), "channel_type": channel_type}
-        except Exception as e:  # noqa: BLE001
-            return {"success": False, "channel_type": channel_type, "error": str(e)}
-
     def clear_channel_queue(self, channel_type: str, agent_id: str = "default") -> int:
         """清空该 (agent, 渠道) 的待处理入站队列，返回清除条数。
 
@@ -771,18 +760,33 @@ class ChannelManager:
     # ============================================================
 
     async def health_check(self) -> Dict[str, Any]:
-        """检查所有渠道健康状态"""
-        statuses = {}
-        for channel_type, adapter in self._adapters.items():
+        """检查**所有实例**的健康状态——定义域是全量实例表，不是 default 视图（§6-190）。
+
+        此前遍历 `self._adapters`（default 兼容视图），于是 `GET /channel-adapters` 与
+        `/health/all` 看不见挂在别的 agent 名下的渠道——实例明明连着、也在收消息，健康视图里却没有它。
+        键约定与 `list_adapters` 共用同一个 `_adapterViewKey`（default 保留裸键向后兼容）。
+        """
+        table = getattr(self, "_agent_adapters", {}) or {}
+        targets = list(table.items())
+        for channelType, adapter in self._adapters.items():
+            if ("default", channelType) not in table:
+                targets.append((("default", channelType), adapter))
+
+        statuses: Dict[str, Any] = {}
+        for (agentId, channelType), adapter in targets:
             try:
                 status = await adapter.health_check()
-                statuses[channel_type] = status
-            except Exception as e:
-                statuses[channel_type] = {
-                    "channel_type": channel_type,
+            except Exception as e:  # noqa: BLE001 - 单渠道探活失败不影响整张视图
+                status = {
+                    "channel_type": channelType,
                     "connected": False,
                     "error": str(e),
                 }
+            entry = dict(status or {})
+            entry.setdefault("channel_type", channelType)
+            entry.setdefault("agent_id", agentId)
+            statuses[_adapterViewKey(agentId, channelType)] = entry
+
         return {
             "running": self._running,
             "adapters": statuses,
