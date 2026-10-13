@@ -18,6 +18,14 @@ from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
+#: 取一个市场 URL 的**每市场预算**，全仓唯一定义在此（本模块是三处 fetcher 的宿主）。
+#: 为什么是 6 秒：`search_all_markets` 串行遍历现役 7 只适配器（`SkillMarketRegistry:515-523`），
+#: 原值 30 秒时一次搜索最坏 7 × 30 = 210 秒；而跑测墙钟是 `pyproject.toml` 的全局 `timeout = 30`，
+#: 于是一次慢远端既拖死用户也直接把整场 pytest 击杀。预算与聚合截止线
+#: （`market_searcher.MARKET_SEARCH_AGGREGATE_SECONDS`）一起钉在墙钟以下，
+#: 常驻账见 tests/unit/skills/test_marketFetchBudgetIsSingleSource.py（§6-198）。
+MARKET_FETCH_TIMEOUT_SECONDS: float = 6.0
+
 
 @dataclass
 class SkillInfo:
@@ -124,7 +132,7 @@ class SkillMarketAdapter(ABC):
                 req.add_header(key, value)
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=MARKET_FETCH_TIMEOUT_SECONDS) as response:
                 return response.read()
         except HTTPError as e:
             logger.error("HTTP error %s for %s: %s", e.code, url, e.reason)
