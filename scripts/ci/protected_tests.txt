@@ -2747,3 +2747,18 @@ tests/unit/channels/test_channelWecomVoiceBytesReachThePrecheck.py
 # 红自证 4 failed/4 passed ⇒ 绿 9 passed（逐文件单跑三次同读数）。变异 6 枚全咬；活体
 # marketInstalledStateReadBack_batch36.py 10 读数 exit=0（含真 create_app 的 GET /installed 读回）。
 tests/unit/skills/test_marketInstalledStateIsReadBack.py
+# §6-189 入站回调的适配器解析：注册是全量的（按 agent），解析此前只看 default 那一格——
+# 只在非 default agent 名下配置的渠道，平台回调一直吃 404"Channel not found"（文案还把人引向
+# "没配置"这个错结论），而同一平台双 agent 时回调一律落到 default 那只 bot（别人的会话与额度）。
+# 收成 `ChannelManager.resolveInboundAdapter` 唯一入口，返回 (adapter, failureReason)：
+# default 有⇒用它（既有部署一字不变）；否则全表唯一⇒用那一格；多格且 default 缺席⇒**一只都不投**，
+# "没配置"与"歧义"两种失败分开点名。带 agent 的回调 URL 是另一次裁定，本批不假装能分辨歧义。
+# 判格口径两条防假红：接收者限定 manager/mgr/self（技能市场那个 `registry.get_adapter` 是同名异面）；
+# 带 agent 的写法有两种形（`agent_id=` 关键字与第二个位置参数），只认一种就把合法调用报成欠账。
+# 欠账登记表同时反着断：落点消失必须销行（channels.py 三个只读/管理端点、channel_sharing 一栏、
+# manager.replace_channel 那处零调用者的死面——都不在本批动手）。
+# 准入读数：逐文件单跑三次同读数 9 passed（24.75s / 23.58s / 23.97s）。
+# 活体 `channelWebhookResolvesAgentAdapter_live.py` 14 读数 exit=0；反证段还原两生产件 ⇒ 6 项 FAIL
+# （HTTP=404 与 `Channel 'feishu' not found` 实据），余下对照与旧面语义读数照常 ok。
+# A/B（channels+api，基线 c56656c7 现建）两侧失败名集逐条相同：各 16 条、两向差集皆空、8 errors 一致。
+tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py
