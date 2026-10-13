@@ -10,7 +10,7 @@ FastAPI 中间件集合
 - 认证中间件
 """
 
-from neurova.core import config
+from neurova.api import cors_policy
 from neurova.core.logger import get_logger
 import threading
 import time
@@ -189,57 +189,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# 兜底默认值：开发端口 + Tauri v2 桌面壳 WebView origin
-# （Windows 打包态为 http://tauri.localhost；https 变体覆盖 useHttpsScheme 场景）
-DEFAULT_CORS_ORIGINS = [
-    "http://localhost:8100",
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:8100",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-]
-
-
-def _load_cors_origins_from_config(config_file=None) -> list:
-    """
-    从配置文件加载 CORS origins
-
-    优先级:
-    1. 环境变量 NEUROVA_CORS_ORIGINS
-    2. 配置文件 config/cors.json
-    3. 默认值
-
-    Args:
-        config_file: 配置文件路径；None 时使用仓库 config/cors.json（测试可注入临时路径）
-    """
-    import json as _json
-    from pathlib import Path
-
-    # 1. 检查环境变量
-    cors_origins_env = config.get("NEUROVA_CORS_ORIGINS", "")
-    if cors_origins_env:
-        return [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-
-    # 2. 检查配置文件
-    if config_file is None:
-        config_file = Path(__file__).parent.parent.parent / "config" / "cors.json"
-    if Path(config_file).exists():
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                # 注意：变量名用 cors_config，避免遮蔽模块级 config
-                cors_config = _json.load(f)
-                if "origins" in cors_config and cors_config["origins"]:
-                    return cors_config["origins"]
-        except Exception as e:
-            logger.warning("Failed to load CORS config from file: %s", e)
-
-    # 3. 默认值
-    return list(DEFAULT_CORS_ORIGINS)
-
-
 def setup_middleware(app: FastAPI) -> None:
     """
     设置所有中间件
@@ -247,16 +196,17 @@ def setup_middleware(app: FastAPI) -> None:
     Args:
         app: FastAPI 应用实例
     """
-    # CORS 配置 — 支持环境变量、配置文件、默认值三种方式
-    cors_origins = _load_cors_origins_from_config()
-
-    # CORS 中间件
+    # CORS 四项口径全取自单源（origins 走 env > 配置文件 > 默认三级）。
+    # 此前本模块自持一份 8 项白名单，与 endpoints/settings 那份逐字重复；
+    # 而 `config/cors.json` 里的 allow_credentials 只有面板在读、装配处写死 True——
+    # 管理员改了这一格却改不动生效值，故这里连凭证开关一起取生效口径。
+    corsCfg = cors_policy.effectiveConfig()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+        allow_origins=corsCfg["origins"],
+        allow_credentials=corsCfg["allow_credentials"],
+        allow_methods=list(cors_policy.ALLOW_METHODS),
+        allow_headers=list(cors_policy.ALLOW_HEADERS),
     )
 
     # 安全响应头

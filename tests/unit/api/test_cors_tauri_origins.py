@@ -53,24 +53,57 @@ def test_repo_cors_config_includes_tauri_origins():
     assert "https://evil.example.com" not in origins, "测试污染 origin 不得出现在仓库配置"
 
 
-def test_middleware_defaults_include_tauri_origins():
-    """配置文件缺失时的兜底默认值也必须放行桌面壳 origin。"""
-    defaults = set(getattr(cors_middleware, "DEFAULT_CORS_ORIGINS", []))
-    assert TAURI_ORIGINS <= defaults, f"middleware 默认值缺少桌面壳 origin: {TAURI_ORIGINS - defaults}"
+def test_middleware_defaults_include_tauri_origins(tmp_path, no_cors_env, monkeypatch):
+    """配置文件缺失时的兜底默认值也必须放行桌面壳 origin。
+
+    2026-10-14 起这条改按**装配后的预检**读：此前它读的是 `middleware.DEFAULT_CORS_ORIGINS`
+    这个常量，而该常量与 settings 那份正是本批收口的双源——读常量只能证明"字面量还在"，
+    证明不了"装配进中间件的确实是它"。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from neurova.api import cors_policy
+
+    monkeypatch.setattr(cors_policy, "configFile",
+                        lambda: tmp_path / "absent" / "cors.json")
+    app = FastAPI()
+    cors_middleware.setup_middleware(app)
+
+    @app.post("/api/v1/auth/register")
+    async def _register():  # pragma: no cover - 预检不会到达路由
+        return {"ok": True}
+
+    # env 与配置文件都不可用 ⇒ 只剩代码兜底值，桌面壳预检必须过
+    resp = TestClient(app).options(
+        "/api/v1/auth/register",
+        headers={"Origin": "http://tauri.localhost",
+                 "Access-Control-Request-Method": "POST"})
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("access-control-allow-origin") == "http://tauri.localhost"
 
 
 def test_load_origins_falls_back_to_defaults_without_config(tmp_path, no_cors_env):
-    """env 未设置且配置文件不存在 → 返回含 tauri origin 的默认值。"""
-    origins = cors_middleware._load_cors_origins_from_config(
-        config_file=tmp_path / "absent" / "cors.json"
-    )
+    """env 未设置且配置文件不存在 → 返回含 tauri origin 的默认值。
+
+    2026-10-14 收口后取数函数搬进单源（`middleware._load_cors_origins_from_config`
+    已退役，它只剩一行转发，留着就是没人读的别名）。
+    """
+    from neurova.api import cors_policy
+
+    origins = cors_policy.effectiveOrigins(str(tmp_path / "absent" / "cors.json"))
     assert TAURI_ORIGINS <= set(origins)
 
 
-def test_settings_default_origins_include_tauri():
-    """settings API 的默认 origins（文件缺失/管理端展示）必须包含桌面壳 origin。"""
-    defaults = set(settings_module._DEFAULT_CORS_ORIGINS)
-    assert TAURI_ORIGINS <= defaults, f"settings 默认值缺少桌面壳 origin: {TAURI_ORIGINS - defaults}"
+def test_settings_default_origins_include_tauri(no_cors_env, tmp_path):
+    """管理面板的默认 origins（文件缺失时的展示值）必须包含桌面壳 origin。
+
+    同样改按生产读取函数 `_load_cors_config` 取——面板曾自持一份 `_DEFAULT_CORS_ORIGINS`
+    常量（与本批收口的双源同体），读那份常量等于读一份可能不在生效的清单。
+    """
+    defaults = set(settings_module._load_cors_config(
+        config_file=str(tmp_path / "absent" / "cors.json"))["origins"])
+    assert TAURI_ORIGINS <= defaults, f"面板默认值缺少桌面壳 origin: {TAURI_ORIGINS - defaults}"
 
 
 def _preflight(client: TestClient, origin: str):
@@ -86,7 +119,11 @@ def _preflight(client: TestClient, origin: str):
 
 @pytest.fixture
 def middleware_app(no_cors_env):
-    """挂载真实 CORS 中间件链的最小应用（读仓库 cors.json，端到端复刻桌面壳请求）。"""
+    """挂载真实 CORS 中间件链的最小应用（端到端复刻桌面壳请求）。
+
+    配置落点被 conftest 的会话级隔离引到临时目录，故这里走的是**代码兜底默认值**
+    那一档——正好也是打包产物缺 cors.json 时的形态。
+    """
     app = FastAPI()
     cors_middleware.setup_middleware(app)
 
