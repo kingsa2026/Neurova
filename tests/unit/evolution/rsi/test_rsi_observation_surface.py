@@ -224,7 +224,13 @@ def _governance_client(rsi_orchestrator):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from neurova.api.deps import get_current_user
+    # 覆盖的必须是角色门**真正依赖的那个对象**：`governance` 的路由走
+    # `deps.require_admin()` → `require_role()` → `Depends(strictIdentityGate)`，
+    # 而 `strictIdentityGate` 就是 `neurova.api.auth.get_current_user`。
+    # 覆盖 `deps.get_current_user`（那是 `get_current_userWithQueryToken` 的再导出，
+    # 与角色门不是同一个对象）会**静默不生效**——判据于是拿到 401 而不是 200，
+    # 报的却是"端点读错实例"（deps.py 顶栏记的正是这个形态）。
+    from neurova.api.auth import get_current_user
     from neurova.api.endpoints.governance import router
 
     app = FastAPI()

@@ -20,6 +20,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
@@ -30,9 +32,9 @@ RETIRED = "neurova.core.config_manager"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(path: Path) -> list[str]:
+def _importedNames(source: str) -> list[str]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):
         return []
     out: list[str] = []
@@ -45,28 +47,34 @@ def _importedNames(path: Path) -> list[str]:
 
 
 def _importers(root: Path) -> list[str]:
+    """子树里仍 import 已退役 KV 简单版的文件清单。
+
+    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
+    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
+    预筛词取退役模块末段 `config_manager`，是判据的**充分条件**。
+    """
     found = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(p)):
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("config_manager")):
+        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(ref.code)):
             try:
-                shown = p.relative_to(REPO).as_posix()
+                shown = ref.path.relative_to(REPO).as_posix()
             except ValueError:
-                shown = p.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
+                shown = ref.path.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
             found.append(shown)
     return found
 
 
 def _kvConfigManagerClasses(root: Path) -> list[str]:
-    """定义了名为 ConfigManager、且同时给出 get 与 set 的类（真正的 KV 面）。"""
+    """定义了名为 ConfigManager、且同时给出 get 与 set 的类（真正的 KV 面）。
+
+    同走共享解析预算；预筛词 `ConfigManager` 是判据的**充分条件**。
+    """
     hits = []
-    for p in sorted(root.rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
+    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("ConfigManager")):
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
-        except (SyntaxError, UnicodeDecodeError):
+            tree = ast.parse(ref.code)
+        except SyntaxError:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "ConfigManager":
@@ -74,9 +82,9 @@ def _kvConfigManagerClasses(root: Path) -> list[str]:
                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
                 if {"get", "set"} <= methods:
                     try:
-                        shown = p.relative_to(REPO).as_posix()
+                        shown = ref.path.relative_to(REPO).as_posix()
                     except ValueError:
-                        shown = p.relative_to(root).as_posix()   # 同上：tmp 探针不在仓内
+                        shown = ref.path.relative_to(root).as_posix()   # 同上：tmp 探针不在仓内
                     hits.append(f"{shown}:{node.lineno}")
     return hits
 

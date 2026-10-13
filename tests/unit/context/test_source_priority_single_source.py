@@ -112,7 +112,9 @@ class TestNoLiteralPriorityInProduction:
         from tests import ast_scan
 
         offenders = []
-        for path, node in ast_scan.walkedModules(
+        # 一次性入口：本判据只扫一遍，不留常驻节点表（同根命中点，与
+        # test_context_build_token_count_caliber 同一批收口）。
+        for path, node in ast_scan.transientNodes(
             ast_scan.PRODUCTION_ROOT, hints=ast_scan.textHints("ContextInput")
         ):
             if not isinstance(node, ast.Call):

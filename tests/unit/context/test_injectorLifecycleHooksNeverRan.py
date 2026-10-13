@@ -31,6 +31,8 @@ import ast
 import inspect
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 from neurova.context.injector import UnifiedContextInjector
@@ -86,11 +88,9 @@ def testNoAsyncHookWithoutAwaitInBody():
     """
     offenders = []
     root = INJECTOR_PATH.parents[1]
-    for py in root.rglob("*.py"):
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+    # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
+    # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
+    for path, tree in ast_scan.parsedModules(root, ".py"):
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             bases = {ast.unparse(b).rsplit(".", 1)[-1] for b in cls.bases}
             if not (bases & {"BaseModule", "MemoryModule"}):
@@ -101,7 +101,7 @@ def testNoAsyncHookWithoutAwaitInBody():
                         isinstance(n, ast.Await) for sub in fn.body for n in ast.walk(sub)
                     )
                     if not hasAwait:
-                        rel = py.relative_to(root.parent).as_posix()
+                        rel = path.relative_to(root.parent).as_posix()
                         offenders.append(f"{rel}:{fn.lineno} {cls.name}.{fn.name}")
     assert not offenders, (
         "async 声明 + 零 await 实体的生命周期钩子会被同步 initialize() 丢成协程对象，"
