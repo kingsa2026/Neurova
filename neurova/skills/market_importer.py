@@ -116,6 +116,29 @@ class MarketImporter:
         self._import_tasks: Dict[str, ImportTask] = {}
         self._installed: Dict[str, str] = {}  # skill_id -> version
         self._skills_dir.mkdir(parents=True, exist_ok=True)
+        # 「装过什么」必须有读者（§6-188）：写侧一直在写 `<缓存根>/<id>/skill.json`，而读侧
+        # 只有这本内存账 ⇒ 重启后市场页说没装、幂等补链分支永不触发、卸载面也认不出它。
+        self._restoreInstalledFromDisk()
+
+    def _restoreInstalledFromDisk(self) -> None:
+        """从 `<缓存根>/*/skill.json` 重建已装账（只读，不改盘上任何东西）。
+
+        键取**目录名**而不是文件里自报的 `skill_id`——`uninstall_skill` 删的就是这个目录，
+        两者不同源时（复制/改名目录）会读出幽灵条目或删不掉。读不懂的记账件**出声跳过**：
+        不把"我读不懂"读成"没装"，也不顺手覆盖别人的坏文件（那是毁证据）。
+        """
+        for metaPath in sorted(self._skills_dir.glob("*/skill.json")):
+            try:
+                with open(metaPath, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (OSError, ValueError) as e:
+                logger.warning("市场安装记账件读不懂，本次不采信也不改写 %s: %s", metaPath, e)
+                continue
+            if not isinstance(meta, dict):
+                logger.warning("市场安装记账件不是对象，本次不采信: %s", metaPath)
+                continue
+            # 版本缺省如实标 unknown：force/升级判定会拿这枚值比，替它编一个就是假账
+            self._installed[metaPath.parent.name] = str(meta.get("version") or "unknown")
 
     def search_skills(
         self,

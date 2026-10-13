@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 """
 渠道管理 API 端点
 
@@ -237,30 +239,12 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
 
     adapter.verify_event_token(token)
 
-    # 消息事件
-    event = data.get("event", {})
-    msg = event.get("message", {})
-    sender = event.get("sender", {})
-
-    content = ""
-    msg_type = msg.get("message_type", "text")
-    if msg_type == "text":
-        try:
-            content_json = json.loads(msg.get("content", "{}"))
-            content = content_json.get("text", "")
-        except json.JSONDecodeError:
-            content = msg.get("content", "")
-
-    channel_msg = adapter._make_message(
-        message_id=msg.get("message_id", ""),
-        sender_id=sender.get("sender_id", {}).get("user_id", ""),
-        sender_name=sender.get("sender_id", {}).get("user_id", ""),
-        content=content.strip(),
-        chat_id=msg.get("chat_id", ""),
-        chat_type=msg.get("chat_type", "p2p"),
-        message_type=msg_type,
-        raw_event=data,
-    )
+    # 内容口径不在这里：事件体 → 统一消息 只有 `FeishuAdapter.buildInboundMessage` 一份（§6-185）。
+    # 此前这一支自己写了一份"只认 text"的解析，于是同一平台两种形状——语音进回合是空串、
+    # 外部用户（user_id 为 null）的 sender_id 是空串、@提及完全不结构化，而 Stream 那半区三件都做。
+    # 走线程池的原因：audio 分支含同步 HTTP 下载，一次 15 秒的下载会把整个进程的入站一起拖住。
+    channel_msg = await asyncio.to_thread(
+        adapter.buildInboundMessage, data.get("event") or {}, data)
 
     from neurova.channels.base import ChannelEventType
 
