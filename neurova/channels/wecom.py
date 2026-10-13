@@ -26,6 +26,7 @@ from neurova.channels.base import (
     ChannelConfig,
     ChannelEventType,
 )
+from neurova.channels.voice_ingress import INBOUND_VOICE_PLACEHOLDER, INBOUND_VOICE_TYPES
 
 logger = get_logger(__name__)
 
@@ -192,6 +193,11 @@ class WeComAdapter(ChannelAdapter):
             create_time = root.findtext("CreateTime", "")
             msg_type = root.findtext("MsgType", "text")
             content = root.findtext("Content", "").strip()
+            # 语音的正文不在 `<Content>`：企业微信把平台侧转写结果放在 `<Recognition>`
+            # （需企业在后台开通语音识别），按 `<Content>` 读恒得空串——用户发语音等于发了句
+            # 不存在的话。取不到转写时退回共享占位，与 ilink/aibot 两条活路同一口径。
+            if msg_type in INBOUND_VOICE_TYPES:
+                content = (root.findtext("Recognition", "") or "").strip() or INBOUND_VOICE_PLACEHOLDER
             msg_id = root.findtext("MsgId", "")
             # 群聊：企业微信回调群消息带 <ChatId>；此前硬编码 p2p → 群消息会话键
             # 退化成发送者、无法按群绑定/回复。

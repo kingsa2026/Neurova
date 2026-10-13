@@ -299,7 +299,10 @@ class MarketImporter:
                     "version": installed_version,
                     "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 }
-                # P0-4：通过校验的权限声明随 skill.json 持久化（运行时读取源）
+                # P0-4：通过校验的权限声明随 skill.json 持久化。
+                # ⚠ 这只是一份**安装留底**，不是运行时读取源——全仓对该文件零读者
+                # （§6-177 逐条复算：两处写侧 + 摘要排除清单里那一行常量）。运行时
+                # 权限裁决读的是技能账本条目，别照着这句话接读侧。
                 if perm_raw is not None:
                     from neurova.skills.permissions import SkillPermissions
 

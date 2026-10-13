@@ -3094,6 +3094,77 @@
     - **修法（已定未做，供下一批照此施工；比"再补一个写侧"小且更对）**：`_write_agent_manifest` 的 staging 别再只挂一张 `manifest.json`，而是 `copytree(市场目录 → staging)` 后在同一路径补 `manifest.json`，其余流程不动 ⇒ 门扫真字节、agent 目录落真字节、`digestDir` 钉的就是被执行那份。配套两处必须同批改，否则只是把影子换了个方向：`_build_executable_skill` 与 `restore_market_skills_from_service` 的 SKILL.md 取径改读**账本 `path` 指的 agent 目录**（市场目录退回"下载缓存"，`skill.json` 两处写侧随本批退役——它从此没读者也没写者）。波及面：`marketplace.py` 两处 link、`agent_core.py:891` 与 `rsi/self_improvement_proposer.py:1011` 两处回灌、`unlink_market_skill_from_agent` 的卸载一致性（现在要删两处目录，卸载语义要先量）、既有判据 `test_market_registry.py`/`test_market_doc_skill.py`。
     - **本格未做的事**：没改一行生产码（发现前提错就先量，别把错的施工图继续往下刷）；探针脚本即用即删，读数贴在格内。
 
+184. **渠道语音缺口①（wecom）：入站语音要读平台已给的 `<Recognition>`；占位串收进 `voice_ingress` 单源，死路五档就地登记（✅ `2befdc20` 生产+判据+活体、`d9ca3d58` 子集）** 🟢 —— §6-170 那句"缺口① 其余渠道各缺的不是同一件东西"在 wecom 这一档的具体形状：**它缺的不是音频字节，是平台已经替我们转写好、我们没去读的那句话**。
+
+    - **实状与根因（现量，非推测）**：`channels/wecom.py:handle_callback` 的入站只取 `<MsgType>` 与 `<Content>`，而企业微信把语音的平台转写放在 `<Recognition>`（需企业在后台开通语音识别）、素材引用放在 `<MediaId>` ⇒ 用户在渠道里发一条语音，`ChannelMessage.content` 是**空串**进回合。同一条链路上 `wechat_message.py` 那份映射早就写了 `content = data.get("Recognition")`，但它在死路上（见下条），所以"仓内已有人这么写"从来没让它生效过。修复点落在取字段那一行（教义第 1 条），取不到转写时退回 `INBOUND_VOICE_PLACEHOLDER` 而不是交空串——空正文进回合会被下游当作一条真消息。
+    - **同一根因的第二面（教义第 5 条扫荡，这是本批真多出来的收益）**：那句占位串此前在 `neurova/` 内有 **8 处字面定义**（`voice_ingress.py` 那份单源之外）。判据按 **AST 字符串常量值相等**扫（注释与长 docstring 里的提及不算第二份定义，这是排除型断言最容易假红的一形），命中面按活路/死路分开处置：**活路三档改取单源**（wecom 新支、`wechat_ilink.py` 的 `_on_message`、`wecom_aibot.py` 的 `_on_message`——后两档是同一段 `{"image": …, "voice": …}.get(message_type)` 写法）；**死路五档留原地并入豁免清单**（`feishu_message.py` 整档零 importer；`telegram_parser.py`、`wechat_parsing.py` 的 `parse_raw_message`/`receive_message` 族**全仓只有定义没有调用**）。
+    - **豁免清单不是自我声明，判据自己数**：`testEveryExemptionIsStillADeadRoad` 先按"真 import 了那档模块的文件"收候选面，再在候选里数 `self.NAME(` / `adapter.NAME(` 的调用形状 ⇒ 那条路一旦被接活，豁免立刻红，逼下一批改取单源或退役。第一版就在这格假红过一次：只按裸名扫，把 `telegram_parser.py` **自己文件内**的 `self.parse_raw_message(update)` 记成了 `wechat_parsing` 那条路的消费者——同名词不同物的守卫版，处置是把候选面收到 importer 里（判定单位是符号＋归属，不是名字）。配套 `testDeadRoadDetectorHasTeeth` 用三形对照钉住检测器本身：接活写法必须抓到、`def NAME(` 不算、`self.other.NAME(` 不算。
+    - **刻意没做的一件事（写了就有人当已做）**：`MediaId` → 音频字节**仍未接**。按"断链结论不能在链路第一个文件收尾"复算了两跳：`WeComAdapter(ChannelAdapter)` 不带媒体 mixin；`download_media`/`_download_wecom_media` 挂在 `WeChatMediaMixin` 上，其内部要 `self.adapter._ensure_wecom_token()`——那个同步 token 方法只属于 `WeChatAdapter`（`wechat.py`），`wecom.py` 里没有；而活路 `handle_callback` 是同步的、在事件循环线程上靠 `run_coroutine_threadsafe` 投消息。要接得先把下载器抽成两处共用单源、再把阻塞取回挪出循环 ⇒ **另一次改动**。因此也**没往 metadata 塞一个没人读的 `wecom_media_id`**（§2：只写不读即断点），判据里有正格守着（`audio_bytes` 与任何含 media 的键都不得凭空出现）。
+    - **需人裁（退役候选，非本批动手项）**：那五档豁免所在的两族 `UnifiedMessage` 解析层与 `wechat_message.py`（整档零 importer）是 §6-170 那条"解析族在死路上"的同一批遗产。**裁"退役"** ⇒ 需一并处理 `wechat.py`/`telegram_adapter.py` 仍 mixin 进这两族的事实与 `test_telegram_split.py`/`test_wechat_split.py` 那两片只断形状的守卫，收益是占位串、`ContentType` 词汇与整条 `UnifiedMessage` 转换面失去第二份写法；**裁"接线"** ⇒ 先要证需求成立（现量：入站生产路一条也不经过它们），且接活即触发本批那格豁免红，占位串必须同批改取单源。两条都不成立时维持现状的代价：这五处字面量与新单源并存，改占位文案时只改一处会漏。
+    - **验证读数**：红 **4 failed / 5 passed**（把本批 3 个生产件按**路径清单**还原到 HEAD 复跑；红恰落在两条行为断言 `'' == '明天天气怎么样'`、`'' == '[语音]'` 与两条分布断言上，其余 5 格是负向守卫与牙齿格，自证期照常绿是应当）⇒ 绿 **9 passed**，逐文件单跑三次同读数（8.78s / 8.01s / 7.86s）。活体 `tests/manual/channelWecomVoiceInbound_live.py` **11 读数 exit=0**：真 `create_app()` + 真 lifespan + 真路由 `/api/v1/channel-adapters/wecom/webhook` + 真 `WeComAdapter`（`connect()` 在 `use_stream=False` 下不碰网络），事件回调换 recorder ⇒ 不起 agent、不调模型、不开外网、不花配额；装配面先证 `connect()` 捕到的 loop 就是驱动请求的那个（否则读到 0 条是夹具没驱动，§6-168 那一形），安全面证错签名 0 事件（本批往验签之后的函数里加了分支，不得顺手放宽 §6-181 那道门），下一跳把活体真产物喂进 `voice_precheck.transcribe_voice_message` 证"无字节即原样直通、不凭空转写"。**反证段**：只把 `wecom.py` 还原到 HEAD 复跑 ⇒ 恰那两条链路读数 FAIL（`实得 ''`）其余照常 ok，还原后按 SHA256 逐文件复证一致。宽域 A/B（`tests/unit/channels` + `tests/unit/voice`，HEAD 仓外 worktree 现建基线）：基线 800 passed/0 failed ↔ 本树 809 passed/0 failed，**两侧独有红 0**（多的 9 条即本档）。
+    - **一处观察，不是缺陷也不写判据**：验签失败的语音回调仍然回 **HTTP 200**（`{"errcode": 0}`）而 0 事件。这是企业微信回调协议要的形态（非 2xx 会被平台重投），所以本批按"事件数为 0"取证而非按状态码；形态集第 117 条——不给这种现值写判据。
+    - **过程账**：本批红自证**做了一遍多余的第二轮**（第一轮已 SHA256 复证还原，我又重跑了一次还原），第二次还原后工作树短暂处于 HEAD 态，随即按新快照复证字节一致并复跑 9 passed——共享树里"还原→复证→复跑"必须是同一条命令里的三步，缺一格就是把自己暴露在丢改动的窗口里。净 LOC 票面第一版写成 `+10/−5`，现量 `git diff HEAD --numstat` 是 **+10/−3 ⇒ 净 +7**，提交前改成按实测落字。
+
+
+
+186. **市场安装把"被执行的那份字节"接进账本咽喉——门、摘要钉、执行体读，三处从此同源（✅ `66030ba1` 生产+判据+活体、`c1377d27` 子集）** 🟢 —— 按裁定甲施工，前提已按 §6-183 重述：登记路一直都在，缺的是**把包体真的递进去**。
+    - **实状的第三面（本批现量，比 §6-183 那句更细）**：`_write_agent_manifest` 的 staging 里只有
+      一张合成的 `manifest.json`，而它递进 `install_skill` 之后，门扫的是这份空壳、
+      `digestDir(target_dir)` 钉的也是空壳；运行时 `_build_executable_skill` 另从**市场缓存目录**
+      构造 `SkillDocSkill`。三处各读一遍，没有一处读的是同一份字节——活体直扫读数：带
+      `os.system` 的包 `blocked=True`，走 `link_market_skill_to_agent` 却装成功并把可执行体注册进
+      工具集（§6-177 当年写的是"门从未看过真字节"，这条把它量成了可复现的三处接缝）。
+    - **动手的三处（缺一处就是半截）**：① staging 先 `copytree(市场缓存 → stage)`（剔
+      `__pycache__`/`*.pyc`/`.incoming_*`）再覆写咽喉合成的 `manifest.json`——包自报的
+      id/name/version/source 不获定义权（否则同一身份两份账）；② 运行时取径收成一处：
+      `_build_executable_skill` 第三参由"市场根"改取账本 `path`，
+      `restore_market_skills_from_service` 去掉 `market_skills_dir` 参数，AST 读数钉住"咽喉里
+      `_default_market_skills_dir()` 的调用宿主只剩 `_marketSourceDir`"（签名格拦不住函数体里
+      自己拼路径那一形，故两格并立）；③ 拒装如实：咽喉拒 ⇒ 一个可执行体都不注册（旧形态是
+      门拒了、工具照旧注册），端点两条分支（首次安装 / 幂等补链）同判——门拒回 409 点名拒因，
+      其余未落账回 500，不再把拒装报成 `installed successfully`。
+    - **行为变更（不许当成已验证的互操作）**：市场里带脚本的远端包从此真的可能被拦。现量 8 只
+      缓存包直扫 ⇒ **4 只 blocked**：`aliyun--alibabacloud-agentbay-aio-skills`（`scripts/run_code.py`
+      import subprocess/os）、`aliyun--alibabacloud-agentloop-management`（.py/.sh 与文档混合）、
+      `xfyun--daily-report`（`exec(`）、`builtin--adaptive-presentation-studio`（**只因** .md 与
+      JSON 里的相对链接触发 `../` 路径遍历规则——这一只是误报）。本批不动门口径（那是安全语义，
+      另次裁定：文档类文件是否参与 DENY），在此登记读数。被拦时**旧版本原地保留**（活体 [6a]：
+      摘要与盘上字节都不动）。
+    - **两条边界如实写**：① 包体落进 agent 目录后，`call_skill`（REST `/skill-pool/{id}/call` 与
+      `skill_chain_executor`）第一次能在其中找到 `*.py` 入口并动态加载——此前这类目录只有
+      `manifest.json`，永远 "No entry point found"。该面现在的两道前置是"门先扫 + 摘要先对"，
+      比旧形态强；但**注册表执行面（`SkillDocSkill.execute`）仍不做装载前对账**——那是 §6-176
+      技能半区已定的边界，撞见时机：谁给注册表面加执行前对账时一并处理，本批不越界扩。
+      ② `skill.json` 两处写侧**没随批退役**：复算发现 4 档测试把它当"安装副本存在"的读面
+      （`test_market_delete_semantics:83/98/138`、`test_market_builtin:159`、
+      `test_market_sources:271`、`test_skill_permissions_compat:150`），退役它是**另一次裁定**
+      （待裁丙同族，与本格那条"直调 hub 的旁路"同批裁最省）。本批只把两处"运行时读取源"的
+      假自陈改成如实（纯注释，行为零变化）。
+    - **验证读数**：判据 A 档 `test_marketInstallCarriesRealBytes.py` 12 格、B 档
+      `test_marketInstallRefusalIsNotReportedAsSuccess.py` 2 格。红自证＝把
+      `market_registry.py`+`marketplace.py` 按**显式路径清单**还原 HEAD 复跑 ⇒
+      **9 failed/3 passed**（3 枚绿的是"门直扫真字节"格、"干净包照常装"正控制格，以及
+      "包 manifest 不夺定义权"格——末者在旧形态**自动成立**，其牙由变异 M2 证，按形态集第 101
+      条就地补了反空转样本）。转绿 12+2，连同 `test_market_doc_skill`(8)+`test_market_registry`(7)
+      +`test_artifactIntegrityAtInstallAndLoad`(15)+`test_marketInstallUsesSingleFace`(7) 共 51 passed。
+      变异 6 枚全咬：M1 不拷字节 / M2 写序颠倒 / M3 取径改回缓存 / M4 拒装仍注册 / M5 拒因不点名 /
+      M6 端点不看返回值——每枚跑完按 sha256 逐字节复原。活体
+      `tests/manual/marketRealBytes_batch35.py` 真 `create_app()` + 真 HTTP 安装面 **11 读数 exit=0**，
+      含 `[OBSERVE]` 反向校准段（桩掉来源目录后同一只危险包回 200、账本目录内只剩
+      `manifest.json`——旧形态当场复现）。A/B（skills+api）基线 3437 collected/18 failed/8 errors ↔
+      本树 3462/19/8：仅本树独有红 1 条＝`test_github_push_skill::test_get_status`（已登记的
+      Windows 跨盘 `cd` 不改盘环境形，不认领）；collected 差 25 ＝ 本批 15 格 ＋ 并发会话未入库档
+      `test_channelFeishuWebhookVoiceAndSenderUseAdapterFace.py` 那 10 格（按 `<Function>` 名集合差
+      逐条认过——第一次我把差集命令的输出形状按 `::` 猜，结果两侧都空＝假"无差异"，改按真形状重取）。
+    - **净 LOC（生产池 +143/−35，净 +108）**：`market_registry.py` +110/−30（staging 拷字节与来源
+      解析 25、结构化返回与拒装早退 30、取径单源改造 8，其余为契约 docstring 重写）；
+      `marketplace.py` +26/−2；`hub_client.py` +3/−2、`market_importer.py` +4/−1（两处假自陈）。
+      正向的主因是"拒装必须被如实报出去"这段接缝——旧形态连"拒装"这个状态都不存在，无从报起。
+    - **过程账**：台账号 **184/185 归并发会话**（wecom 语音、feishu 适配器面），本批落 **§6-186**；
+      两次取数之间 HEAD 移动了 3 笔，A/B 基线仍按本会话第一笔的父 commit（`084c97ae`）现建。
+      第一次红自证把还原清单取成 `git diff --name-only` 全量，连带把对方在途的
+      `channels.py`/`feishu.py` 退到 HEAD 约一分钟内自行复证还原——**同族坑第三次点名**
+      （形态集既有条目），此后所有还原类操作一律带本批显式路径清单。
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
@@ -3385,6 +3456,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `49842ef9` | 撤回本批自伤：`skill.json` 全仓零读者（出现处逐条只有 `market_importer.py:307` 写、`hub_client.py:531` 拼路径后写、`artifact_digest.py:57` 排除清单常量），往它上面钉摘要＝§2 的只写不读断点；写侧撤 −7、判据删三格并改名 `...AndPins`→`test_marketInstallUsesSingleFace.py`、活体加只取证的出现处清单、子集注释按实测改数。顺带证伪 P0-4 那句「运行时读取源」自陈（两处写侧注释都这么写） | §6-177 |
 | `1ddb730b` | 批 33 生产+判据+活体：13 个函数 + 1 段内联的稠密余弦收进新建 `neurova/core/vector_math.py`（`cosineSimilarity`／`cosineScore`／`tryCosineSimilarity` 三态出口 + 唯一 `ZERO_NORM_EPSILON`）。五份无长度检查的实现把维度不等算成**假分**（活体真读数 0.408、构造样本 1.0），`skill_semantics` 拿点积冒充余弦（25.0）——一并根修。稀疏 `Dict[str,float]` 那份按定义域保留。判据 11 格（红 4/绿 11）、红自证还原 19+3 件外溢 0、变异 5 枚全咬（M4 抓到探测器自己的洞 `dot / na`）、活体 10 读数 exit=0（含 numpy 逐值对照与反向校准）。生产池 +131/−207（净 −76） | §6-179 |
 | `ce1c3c9f` | §6-179 那档入受保护子集：逐文件单跑三次 11/11/11 passed 取数，守卫 48 passed。⚠ 正文写「条目 539→540」是**错的**——现量为 **540→541**（其间并发会话的 §6-180 子集块 `38b36e07` 先占了 539→540）；已提交历史不改写，此处落正 | §6-179 |
+| `66030ba1` | 批 35 生产+判据+活体：市场安装的 staging 改为携带**真字节**（门扫的、摘要钉的、执行读的三处同源），运行时取径收成账本 `path` 一处，咽喉拒装 ⇒ 不注册可执行体、端点 409/500 点名原因。判据 12+2 格（红自证 9f/3p）、变异 6 枚全咬、活体 11 读数 exit=0；A/B 仅本树独有红 1 条（环境形）。生产池 +143/−35 | §6-186 |
+| `c1377d27` | §6-186 那两档入受保护子集（条目 544→546）：逐文件单跑三次同读数 12/12/12 与 2/2/2，守卫 `test_dev_path_and_runtime_dep_guards.py` 34 passed | §6-186 |
 
 上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 遗留的"只留两个门"已于同日补完**：`709bb58e` 把角色门取源收口到严格门本体（§6-54 闭环），资源标签面的查询参数放行按既有守卫保留未动；比这更窄的"把 21 个文件缩到 3 个"仍不做，理由与成立条件写在 §6-54 格内。**2026-10-08 追加 P3-14（长任务与工具调用是否闭环）五批全部落地**：`8d9a459e` 工具轮回放闭环（§6-67）、`1cc26b47` 晚到终态会话栅栏（§6-68）、`898355db` 租约写了要有人读（§6-69）、`2ffe4a8d` Studio 台账三格收口（§6-70）、`39a1add9` Anthropic 流式契约（§6-71）；五份判据各自入子集（`750395e2`/`047e58af`/`6ca9b4e5`/`57a108f5`/`281d15c9`）。生产净 LOC 依次 +54/+55/+111/+72/+244，A 批为正的理由写在正文：缺陷本体是「契约从未实现」，只删不增无法闭合，而「删」已在同一提交由 openai_loop 的 −295 兑现。本轮另扫出四组只写不读或需人裁的格，未顺手改：§6-72（Studio 无取消、runs 状态词汇表无单源、`get_background_status` 与死信队列、`/console/chat/runs` 与 `AgentRunStore.stats`）、§6-73（`test_closed_loop_verification` 名为闭环实为 import smoke）、§6-74（并发负载污染 A/B 与 `test_agent.py` 预存挂起的处置）、§6-75（本会话三条记账更正，含一次共享清单文件上的 `--only` 违规自纠）。**同日 G 轮把这四组里能自行闭合的都做完**：G1 词汇表单源 `62a36f96`（+判据入子集 `9bbbd9fa`）、G2 查询口半退役 `4770340a`、G3 台账计数接读侧 `4737fb6f`、G4 parked 续跑会话级入口 `df2a1e00`（+两判据入子集 `3e801962`）、G5 名实改名 `0e47b2c8`+`c17cbd6e`；真 key 复验 `aaa590b8` 收掉 §6-71 的边界并同时报出 §6-76。**§6-72 至此六格闭四格**，真余两格需人裁（Studio 取消、ACP 死信队列）；§6-73 闭环；§6-75 由三条**增至八条**（G 轮又抓出三笔净 LOC 写错与一笔"声明与 numstat 不符"，见该条 ④—⑧）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（**已闭环 `35649409`**：七份活体脚本的复现行不再写死开发机绝对路径，实况与"CI 是否看得见决定常驻红能活多久"这条读数见 §6-117）、**§6-119（序 5 批 E：通用 KV 配置器有两份实现而生产零消费者——"删弱留强"的前提是假的，要裁的是"本仓要不要这一层"，三条路的影响面已摆在该格）**已裁 E-2 并落地 ✅ `9146989c`/`ce26d1e5`，见 §6-125****、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64-B 已落地（`6850bfde` 逐文件只降不升棘轮，基线 38 文件 / 60 处）；剩下 A「按目录分批扫净」已从"需人裁"转为可排期工单**、RSI 遗产分支成功语义、属主读会话、**§6-65 已裁定「不删，就地标为已知存量」并转结（文件未跟踪且被 gitignore，删了不可恢复，而防再生判据已在装配点生效）**、**§6-66 已闭环（`tests/manual` 收集拦截层：E1 原计划"退役它"的前提被实测推翻，实际待办只剩对新增脚本的只降不升棘轮——`7c494c93` 落地，基线 20 文件 / 25 处）**、**§6-76（Anthropic 协议转换双定义——**已裁毕并按修法 A 落地 `c9edf408`**，原三选一代价档案留在该条正文供引用）**、**§6-72 真余两格（Studio 取消＝2026-10-08 裁定"按新能力做全套四件"；ACP 死信队列＝同日裁定"接读侧"，两批在途）**；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
 
