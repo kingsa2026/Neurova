@@ -23,6 +23,11 @@
 `channel_sharing.py` 的只读状态栏、以及零调用者的死面 `manager.replace_channel`。
 （**后记**：其中 `channels.py` 三个端点与 `replace_channel` 已由 §6-190 收掉，那张表随之缩到一条——
  本档那句"不在本批动手"是当时的实况，不是永久裁决。）
+
+**§6-197 的改判（本档那格"仍走 default"已被替换）**：入站回调落到哪一只，改由**这条回调自己的凭据**
+裁决（三平台的验签面用的都是实例自己的 `verification_token`/`appSecret`/`callback_token`）。于是
+"default 优先"降级成"没有谓词时的兜底"，而"两只共用同一份凭据"从静默进 default 变成**拒并点名**。
+本档那格按新语义拆成两格：共用 ⇒ 拒；各配各的 token ⇒ 谁的进谁那只（default 不插队）。
 """
 
 import ast
@@ -45,16 +50,16 @@ VERIFY_TOKEN = "fs-token-b28"
 CHANNELS_SRC = (REPO / "neurova" / "api" / "endpoints" / "channels.py").read_text(encoding="utf-8")
 
 
-def _adapter(appTag="app"):
+def _adapter(appTag="app", token=VERIFY_TOKEN):
     return FeishuAdapter(ChannelConfig(
         channel_type="feishu", app_id=f"cli_{appTag}", app_secret="sec",
-        verification_token=VERIFY_TOKEN, use_stream=False))
+        verification_token=token, use_stream=False))
 
 
-def _eventBody(user="ou_real_b28"):
+def _eventBody(user="ou_real_b28", token=VERIFY_TOKEN):
     return {
         "schema": "2.0",
-        "header": {"event_type": "im.message.receive_v1", "token": VERIFY_TOKEN},
+        "header": {"event_type": "im.message.receive_v1", "token": token},
         "event": {"sender": {"sender_id": {"user_id": user, "open_id": "ou_open"}},
                   "message": {"message_id": "om_1", "chat_id": "oc_1", "chat_type": "p2p",
                               "message_type": "text",
@@ -125,8 +130,8 @@ def harness(tmp_path):
     with TestClient(app, raise_server_exceptions=False) as client:
         mgr = get_channel_manager()
 
-        def _register(agentId, bucket, appTag):
-            adapter = _adapter(appTag)
+        def _register(agentId, bucket, appTag, token=VERIFY_TOKEN):
+            adapter = _adapter(appTag, token)
             mgr.register_adapter(adapter, agent_id=agentId)
             adapter._event_callback = _recorder(bucket)
             return adapter
@@ -150,19 +155,50 @@ class TestNonDefaultAdapterReachesInbound:
             f"yi_ling={len(seen['yi_ling'])}")
         assert seen["kai"][0].sender_id == "ou_real_b28", "解析途中把消息内容弄丢了"
 
-    def testDefaultAdapterStillWinsWhenPresent(self, harness):
-        """对照：default 名下也有 ⇒ 仍走 default（既有部署的行为一字不变）。"""
+    def testSharedCredentialsNoLongerSlideIntoDefault(self, harness):
+        """**§6-197 的行为变更**：两只共用同一份 verification token ⇒ 拒，并点名是哪几只。
+
+        这一格是对本档原"default 优先"那条的**改判**（不是放宽）。旧断言"仍走 default"看着像兼容，
+        实际是把配置错误掩盖成正常投递：两只 app 用了同一份凭据（`/conflicts/check` 在报的就是它），
+        此时回调确实无法分辨，那就明确不投——静默投给 default 等于替其中一个 agent 收下别人的消息。
+        """
         client, mgr, seen, register = harness
         register("default", "default", "def_app")
-        register("kai", "kai", "kai_app")
+        register("kai", "kai", "kai_app")          # 与 default 同一份 VERIFY_TOKEN（共用凭据）
 
         r = client.post(WEBHOOK.format("feishu"), json=_eventBody())
 
-        assert r.status_code == 200
-        assert len(seen["default"]) == 1 and seen["kai"] == []
+        assert r.status_code in (403, 404), f"共用凭据的歧义拿到了 {r.status_code}"
+        assert not any(seen.values()), f"却仍然投递了：{ {k: len(v) for k, v in seen.items()} }"
+        detail = (r.json() or {}).get("detail") or ""
+        assert "default" in detail and "kai" in detail, f"文案没点名是哪几只共用：{detail!r}"
+
+    def testDistinctCredentialsRouteToTheirOwnInstance(self, harness):
+        """本意这条才是对的：各 agent 各有专属凭据 ⇒ 谁的 token 进谁那只，default 不插队。"""
+        client, mgr, seen, register = harness
+        register("default", "default", "def_app")
+        register("kai", "kai", "kai_app")
+        # 投递面是 record-only 的假适配器，凭据核在真 FeishuAdapter.verify_event_token 上：
+        # 把 kai 那只换成 kai 自己的 token，default 那只保持原 token。
+        mgr.get_adapter("feishu", agent_id="kai").config.verification_token = "kai-own-token"
+
+        r = client.post(WEBHOOK.format("feishu"), json=_eventBody(token="kai-own-token"))
+
+        assert r.status_code == 200, f"kai 自己的凭据发的回调被拒：{r.status_code} {r.text[:120]}"
+        assert len(seen["kai"]) == 1 and seen["default"] == [], (
+            f"落错了实例：kai={len(seen['kai'])} default={len(seen['default'])}")
+
+        r2 = client.post(WEBHOOK.format("feishu"), json=_eventBody(user="ou_def_person"))
+        assert r2.status_code == 200 and len(seen["default"]) == 1 and len(seen["kai"]) == 1, (
+            f"default 自己的凭据该仍进 default：{ {k: len(v) for k, v in seen.items()} }")
 
     def testAmbiguousMultiAdapterNeverSilentlyDelivers(self, harness):
-        """两个非 default agent 各配一条同名渠道 ⇒ 不许静默投给任意一个，文案还得点名歧义。"""
+        """两个非 default agent 各配一条同名渠道 ⇒ 不许静默投给任意一个，文案还得点名涉及哪几个。
+
+        §6-197 之后这一支走的是"凭据都不唯一"那条分支（两只在夹具里共用 VERIFY_TOKEN），
+        旧文案是"回调 URL 无法唯一确定适配器"、新文案点名"authenticated against multiple agents"——
+        两者都要求'拒 + 点名'，所以本格断言不变；真按不同凭据配的话，见上面那格（各进各的）。
+        """
         client, mgr, seen, register = harness
         register("kai", "kai", "kai_app")
         register("yi_ling", "yi_ling", "yl_app")

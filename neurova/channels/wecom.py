@@ -16,6 +16,7 @@ API 参考:
 
 import asyncio
 import hashlib
+import hmac
 from neurova.core.logger import get_logger
 import time
 import xml.etree.ElementTree as ET
@@ -244,15 +245,12 @@ class WeComAdapter(ChannelAdapter):
             root = ET.fromstring(xml_data)
             encrypt = root.findtext("Encrypt", "") or ""
 
-            # 验证签名: msg_signature = SHA1(sort(token, timestamp, nonce, encrypt))
-            # BUG AUDIT C-09: 此前当 _callback_token 为空时跳过验签 → 任何人可伪造回调。
-            # 改为 fail-closed：无回调密钥时一律拒绝，避免未授权回调被处理。
-            if not self._callback_token:
-                logger.warning("WeCom 回调未配置 _callback_token，拒绝处理回调（fail-closed）")
-                return None
-            signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
-            if signature != msg_signature:
-                logger.warning("WeCom callback signature verification failed")
+            # 签名核对只在 `verifyCallbackSignature` 一处（含"无回调密钥即拒"那条 fail-closed，
+            # BUG AUDIT C-09）——这里只决定"拒了之后回什么"，不重复判一次。
+            try:
+                self.verifyCallbackSignature(msg_signature, timestamp, nonce, encrypt)
+            except ValueError as e:
+                logger.warning("%s", e)
                 return None
 
             to_user_name = root.findtext("ToUserName", "")
@@ -347,6 +345,20 @@ class WeComAdapter(ChannelAdapter):
 </xml>"""
         return xml_template
 
+    def verifyCallbackSignature(self, msg_signature: str, timestamp: str, nonce: str,
+                               encrypt: str) -> None:
+        """企业微信回调签名的**唯一核对处**：不通过就抛 ValueError，未配密钥一律拒（fail-closed）。
+
+        分成一个方法而不是埋在 `handle_callback` 里，是因为入站回调现在要拿它**选实例**
+        （§6-197：同类型多只实例时，逐只问"这条回调在你自己的凭据下验得通吗"）——
+        选实例与投递必须过同一道门，两处各写一遍公式就会在其中一处放宽。
+        """
+        if not self._callback_token:
+            raise ValueError("WeCom callback rejected: callback token not configured (fail-closed)")
+        expected = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
+        if not msg_signature or not hmac.compare_digest(expected, msg_signature):
+            raise ValueError("WeCom callback rejected: msg_signature mismatch")
+
     def verify_url(self, msg_signature: str, timestamp: str, nonce: str, echostr: str) -> str:
         """
         URL 验证（企业微信回调配置时使用）
@@ -355,11 +367,12 @@ class WeComAdapter(ChannelAdapter):
         SHA1(sort(token, timestamp, nonce, echostr))，第 4 元为 URL 上
         的加密 echostr 密文。验证通过后完整实现应解密 echostr 并返回
         明文（需 EncodingAESKey 的 AES-CBC 解密）；当前返回密文原文。
+
+        这一支在**未配 token 时按既有语义放行**（握手只把对方给的 echostr 原样回给它自己，
+        不产生投递）——与事件回调那支的 fail-closed 不同，属另一次收紧的范围，记在 §6-197 本格。
         """
         if self._callback_token:
-            signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, echostr)
-            if signature != msg_signature:
-                raise ValueError("URL verification signature mismatch")
+            self.verifyCallbackSignature(msg_signature, timestamp, nonce, echostr)
         return echostr
 
     async def send_message(
