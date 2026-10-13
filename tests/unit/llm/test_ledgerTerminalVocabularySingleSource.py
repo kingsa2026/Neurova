@@ -82,7 +82,7 @@ def _source(rel: str) -> str:
 
 
 def _parseSrc(src: str, rel: str = "<inline>") -> ast.AST:
-    """被扫文件里的 `\w`/`\`` 之类会以 SyntaxWarning 冒到本判据名下——那些是**被扫**
+    r"""被扫文件里的 `\w`/`\`` 之类会以 SyntaxWarning 冒到本判据名下——那些是**被扫**
     源码的事，不是本文件的事，扫的时候按名字压掉，不顺手改别人的转义。"""
     import warnings
 
