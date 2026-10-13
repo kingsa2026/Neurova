@@ -2741,3 +2741,9 @@ tests/unit/api/test_channelFeishuWebhookVoiceAndSenderUseAdapterFace.py
 # 反证段还原 4 个生产件到 HEAD ⇒ 恰 5 项接缝读数 FAIL，其余照常 ok）。
 # A/B（channels+voice+api，基线 3861bd5e）两侧失败集合逐条相同：17f/8e ↔ 17f/8e、仅本树独有红 0。
 tests/unit/channels/test_channelWecomVoiceBytesReachThePrecheck.py
+# 批 36（§6-188）市场「装过什么」接真读侧 + SkillsMP 空装改如实：探针实证「包体与 skill.json 俱在，
+# 重启后 list_installed() 仍为空」⇒ 接线不退役（2026-10-13 裁定）。键取目录名、坏件出声跳过不改写、
+# 缺版本如实 unknown；空装回 False 并配"真 zip 仍装得动"的正向配对格。
+# 红自证 4 failed/4 passed ⇒ 绿 9 passed（逐文件单跑三次同读数）。变异 6 枚全咬；活体
+# marketInstalledStateReadBack_batch36.py 10 读数 exit=0（含真 create_app 的 GET /installed 读回）。
+tests/unit/skills/test_marketInstalledStateIsReadBack.py
