@@ -54,6 +54,12 @@ class VoiceContext:
         }
 
 
+#: 一份语音上下文在 `ChannelMessage.metadata` / 回合 `metadata` 里的唯一键名。
+#: 写侧（渠道预检成功那一刻）与读侧（`chat_pipeline` → `build_context`）都引它；
+#: 别把 `ContextInput(metadata={"type": "voice_context"})` 那个**取值**当成本键的使用处。
+VOICE_CONTEXT_KEY = "voice_context"
+
+
 def voiceContextLines(voice_context: Dict[str, Any]) -> list:
     """把一份语音上下文转成给人读的行——**全仓唯一一份这个词汇**。
 
