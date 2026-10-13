@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:8100",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "npm run build:desktop"
+    "beforeDevCommand": "python ../../scripts/desktop/disk_headroom.py",
+    "beforeBuildCommand": "python ../../scripts/desktop/disk_headroom.py && npm run build:desktop"
   },
   "app": {
     "windows": [
