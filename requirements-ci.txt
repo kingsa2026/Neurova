@@ -93,3 +93,14 @@ prometheus_client>=0.20
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
 pypdf>=4.0.0
+
+# CLI（仓库根 `cli.py` 的 REPL 客户端）——受保护子集里
+# `tests/unit/test_cliFourOhOneSelfRescueHint.py` 取该模块的 `_error_message()`，
+# 而 `cli.py` 在模块级 `from rich import box` 一族（六个符号，裸 import 无降级）。
+# 缺席时那四条判据全部 `ModuleNotFoundError: No module named 'rich'`——与上面
+# reportlab / pypdf 同一根因（"只在锁的传递依赖面里存在、CI 清单没声明"：
+# rich 此前仅经 typer → 传递带入 requirements-full.lock，本仓没有任何一处
+# 直接声明它）。同时它把仓库根 `cli.py` 编译成 `__pycache__/cli.*.pyc`，
+# 触发 `tests/conftest.py` 的仓库根污染守卫（同一条红里两个症状，同一个根因）。
+# 声明面只此一处：requirements-full.lock 的 pin 由传递面带出，不在此重复钉版本。
+rich>=13.6

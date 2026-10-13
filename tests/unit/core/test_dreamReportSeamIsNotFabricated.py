@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
 
@@ -56,14 +58,14 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _trees():
+    """扫描面：`ROOTS` 子树里已解析的 (路径, 树)。
+
+    枚举与解析走 `tests/ast_scan.py` 的共享预算（Issue #148：本判据在受保护
+    子集里，自带 `rglob` + `ast.parse` 会被形态门禁点名）。
+    """
     for root in ROOTS:
-        for p in sorted(root.rglob("*.py")):
-            if "__pycache__" in p.parts:
-                continue
-            try:
-                yield p, ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
-            except (SyntaxError, UnicodeDecodeError):
-                continue
+        for p, tree in ast_scan.parsedModules(root):
+            yield p, tree
 
 
 def _definedNames(tree: ast.AST) -> set[str]:

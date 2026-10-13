@@ -26,6 +26,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 SCAN_ROOT = REPO_ROOT / "neurova"
 
@@ -42,15 +44,14 @@ BASELINE: dict[str, int] = {
 }
 
 
-def _blockingCallsInAsync(source: str) -> list[int]:
+def _blockingCallsInAsync(tree: ast.AST) -> list[int]:
     """返回 `async def` 子树里直接调用 `subprocess.<阻塞族>(...)` 的行号。
 
     含 `async def` 内嵌的 `def`——那种嵌套体一旦被同协程直接调用，照样占循环。
+    入参是**已解析的树**：枚举与解析走 `tests/ast_scan.py` 的共享预算
+    （本判据在受保护子集里，自带 `rglob` + `ast.parse` 会被
+    `tests/unit/test_ci_ast_scan_budget_guard.py` 的形态门禁点名）。
     """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
     hits: list[int] = []
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)]:
         for node in ast.walk(fn):
@@ -65,8 +66,8 @@ def _blockingCallsInAsync(source: str) -> list[int]:
 
 def _scan(directory: pathlib.Path) -> dict[str, int]:
     perFile: dict[str, int] = {}
-    for path in sorted(directory.rglob("*.py")):
-        hits = _blockingCallsInAsync(path.read_text(encoding="utf-8", errors="ignore"))
+    for path, tree in ast_scan.parsedModules(directory):
+        hits = _blockingCallsInAsync(tree)
         if hits:
             # `as_posix()` 不是风格问题：基线里的键要能在 Linux CI 上同样命中，
             # 而 `str(relative_to(...))` 在 Windows 上给的是反斜杠（本判据首跑即被
@@ -106,14 +107,14 @@ def test_asyncBodyReallyIsTheCountedShape():
         "async def handler():\n"
         "    return subprocess.run(['x'], check=False)\n"
     )
-    assert _blockingCallsInAsync(asyncShape) == [3], "协程内那一发必须被抓到"
+    assert _blockingCallsInAsync(ast.parse(asyncShape)) == [3], "协程内那一发必须被抓到"
 
     syncShape = (
         "import subprocess\n"
         "def helper():\n"
         "    return subprocess.run(['x'], check=False)\n"
     )
-    assert _blockingCallsInAsync(syncShape) == [], (
+    assert _blockingCallsInAsync(ast.parse(syncShape)) == [], (
         "同步函数不是本判据的射程（它由调用侧决定在不在循环里）——误伤会让下一轮把守卫放宽")
 
     nestedShape = (
@@ -123,12 +124,12 @@ def test_asyncBodyReallyIsTheCountedShape():
         "        return subprocess.Popen(['x'])\n"
         "    return inner\n"
     )
-    assert _blockingCallsInAsync(nestedShape) == [4], "协程内嵌套 def 里那一发同样要抓"
+    assert _blockingCallsInAsync(ast.parse(nestedShape)) == [4], "协程内嵌套 def 里那一发同样要抓"
 
 
 def test_scanRootActuallyCoversTheTree():
     """防"扫了个空却报绿"：扫描根必须真覆盖到生产树里那些文件。"""
-    files = list(SCAN_ROOT.rglob("*.py"))
+    files = ast_scan.filesUnder(SCAN_ROOT)
     assert len(files) > 200, f"扫描根 {SCAN_ROOT} 只覆盖 {len(files)} 个文件——路径层级写错了"
     for rel in BASELINE:
         assert (SCAN_ROOT / rel).is_file(), f"基线里的 {rel} 不在扫描面内"

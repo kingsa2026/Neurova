@@ -37,6 +37,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHIM_DIR = PROJECT_ROOT / "neurova" / "skill"
@@ -69,11 +70,10 @@ def _shimImportRows() -> list:
     for root in SCAN_ROOTS:
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
+        # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍）。
+        for path in sorted(ast_scan.filesUnder(root)):
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
+                tree = ast_scan.transientTree(path)
             except SyntaxError as e:  # 语法坏掉的档本身就该被别的守卫点名，这里不吞也不判
                 raise AssertionError(f"{path} 解析失败，本判据无法判定：{e}") from e
             hits.extend("%s:%s" % (path.relative_to(PROJECT_ROOT), line)
@@ -100,14 +100,14 @@ class TestTheShimIsGone:
 
         只证"能抓"会放过误报，只证"不误报"会放过恒绿——两侧一起给。
         """
-        caught = _shimImportsInTree(ast.parse(
+        caught = _shimImportsInTree(ast_scan.transientSource(
             "from neurova.skill import create_default_skills\nimport neurova.skill\n"))
         assert sorted(caught) == [1, 2], caught
 
         for real in ("from neurova.skills import create_default_skills",
                      "from neurova.skill_system import get_skill_registry",
                      "from neurova.skills.models import Skill"):
-            assert _shimImportsInTree(ast.parse(real)) == [], real
+            assert _shimImportsInTree(ast_scan.transientSource(real)) == [], real
 
 
 class TestTheCapabilityStillHasItsHome:

@@ -18,6 +18,7 @@ import logging
 import pathlib
 
 import pytest
+from tests import ast_scan
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -83,18 +84,18 @@ class TestAgentCreateLoggingHonesty:
 class TestNoErrorLevelDebugAnywhere:
     def test_productionPackagesHaveNone(self):
         hits = []
-        for path in PKG.rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        # 枚举与解析走共享预算（`__pycache__` 由 `filesUnder` 剪枝；只扫一遍，
+        # 故走一次性入口，不留常驻语法树）。
+        for path in ast_scan.filesUnder(PKG):
+            tree = ast_scan.transientTree(path)
             for line in _errorLevelDebugHits(tree):
                 hits.append(f"{path.relative_to(REPO).as_posix()}:{line}")
         assert hits == [], f"ERROR 级承载调试内容的日志调用仍在位：{hits}"
 
     def test_detectorItselfIsNotBlind(self):
         """反向对照：探测器不是恒绿——同一棵 AST 上换个级别就必须不命中。"""
-        loud = ast.parse('logger.error("DEBUG: x=%s", x)')
-        quiet = ast.parse('logger.debug("DEBUG: x=%s", x)')
+        loud = ast_scan.transientSource('logger.error("DEBUG: x=%s", x)')
+        quiet = ast_scan.transientSource('logger.debug("DEBUG: x=%s", x)')
         assert _errorLevelDebugHits(loud) == [1]
         assert _errorLevelDebugHits(quiet) == []
 

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+from tests import ast_scan
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -103,9 +104,10 @@ def _filesContaining(literal: str, root: Path) -> List[str]:
     `ast.Constant` 的 str 值；注释与 docstring 里的提到不算定义。
     """
     hits: List[str] = []
-    for path in sorted(root.rglob("*.py")):
+    # 枚举与解析走共享预算（判据只扫一遍，故走一次性入口，不留常驻语法树）。
+    for path in sorted(ast_scan.filesUnder(root)):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = ast_scan.transientTree(path)
         except Exception:
             continue
         for node in ast.walk(tree):

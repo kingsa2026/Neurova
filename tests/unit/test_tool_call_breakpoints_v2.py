@@ -16,6 +16,7 @@ TDD 测试:工具调用链路遗漏断点修复(第二批)
   缺 await,对 coroutine 迭代会抛 TypeError。
 """
 
+import ast
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -113,6 +114,31 @@ class TestToolRouterListSkillsSupport:
 # 断点 V2-3: chat.py 不应强制传空历史(POST /chat 和 /chat/stream)
 # ──────────────────────────────────────────────────────────────────
 
+def _hitsInSource(source: str) -> list:
+    """从一份源码里取「把 history 钉成空列表」的 dict 字面量行号（按 AST 形态）。
+
+    判定式：`ast.Dict` 里 key 是常量 `"history"` 且 value 是**空列表字面量**。
+    只认代码——注释与 docstring 里的描述都不是 `ast.Dict` 结点。
+    与主判据同式，故反向对照测的就是主判据本身。
+    """
+    return [n.lineno for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Dict) and any(
+                isinstance(k, ast.Constant) and k.value == "history"
+                and isinstance(v, ast.List) and not v.elts
+                for k, v in zip(n.keys, n.values))]
+
+
+def _emptyHistoryInjectionLines(rel: str) -> list:
+    """`rel` 文件里把 `history` 钉成空列表的**代码**行号。
+
+    为什么不用文本正则：原实现是 `re.sub(r'#.*', '', src)` 后找 `"history": []`，
+    它把**注释**当作可忽略、却把**docstring**当作代码。`chat.py` 的
+    `get_chat_history` docstring 如实描述了「原先恒回 `{"history": []}`」这段沿革，
+    于是修复说明本身被判成了"还在强制注入"——同一份守卫两头失真里假红的那头。
+    """
+    return _hitsInSource(open(repo_str(rel), encoding="utf-8").read())
+
+
 class TestChatEndpointNotForceEmptyHistory:
     """V2-3: chat.py 两处不应强制 `{"history": []}`。
 
@@ -124,20 +150,24 @@ class TestChatEndpointNotForceEmptyHistory:
     """
 
     def test_chat_endpoint_no_force_empty_history(self):
-        """chat.py 不应出现 `{"history": []}` 强制注入(非注释代码)。"""
-        import re
-        src = open(
-            repo_str("neurova/api/endpoints/chat.py"),
-            encoding="utf-8",
-        ).read()
-        # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
-        src_no_comments = re.sub(r'#.*', '', src)
-        # 修复后非注释代码不应再出现强制空历史注入
-        assert '"history": []' not in src_no_comments, (
-            "chat.py 非注释代码仍存在 `{'history': []}` 强制注入,"
+        """chat.py 不应出现 `{"history": []}` 强制注入(按 AST 判代码)。"""
+        lines = _emptyHistoryInjectionLines("neurova/api/endpoints/chat.py")
+        assert lines == [], (
+            "chat.py 代码里仍存在 `{'history': []}` 强制注入(第 %s 行),"
             "LLM 缺对话上下文,工具参数指代不清。"
-            "应改为 call_metadata = body.metadata or {}。"
+            "应改为 call_metadata = body.metadata or {}。" % lines
         )
+
+    def test_theScannerReallyCatchesTheShapeItClaimsToCatch(self):
+        """反向对照：真注入必须被抓到，注释/docstring 里的描述不许被算成注入。"""
+        assert _hitsInSource('metadata = {"history": []}\n') == [1], \
+            "探测器抓不住真注入，本判据是恒绿的空转"
+        assert _hitsInSource('metadata = {"history": messages}\n') == [], \
+            "有内容的 history 被误报成强制空注入"
+        assert _hitsInSource('"""原先恒回 {"history": []}"""\n') == [], \
+            "docstring 里如实描述沿革被算成了注入——这正是文本正则的假红形态"
+        assert _hitsInSource('# 老代码 {"history": []}\nX = 1\n') == [], \
+            "注释里的描述被算成了注入"
 
 
 # ──────────────────────────────────────────────────────────────────
