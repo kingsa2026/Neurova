@@ -153,6 +153,34 @@ class ChannelManager:
             return self._adapters.get(channel_type)
         return None
 
+    def resolveInboundAdapter(self, channel_type: str):
+        """入站回调的适配器解析——全仓唯一入口（§6-188）。
+
+        实例表主键是 `(agent_id, channel_type)`，而平台回调 URL 只带 `channel_type`：
+        - default 名下有实例 ⇒ 用它（既有部署行为一字不变）；
+        - default 没有而该类型在全表**唯一** ⇒ 用那一格（只在别的 agent 名下配置好的渠道，
+          此前一律吃 404 "Channel not found"，文案还把人引向"没配置"这个错结论）；
+        - 多格且 default 缺席 ⇒ `(None, 点名歧义)` —— 静默投给任意一个就是把消息送进
+          别人的会话与额度（§6-123/§6-163 的身份口径上游）。
+        把 agent 维度带进回调 URL 是需要前端与部署面一起改的另一次裁定，这里不假装解决。
+
+        返回 `(adapter, failureReason)`：取不到时成对给出原因，别让调用方用 None 猜两种失败。
+        """
+        table = getattr(self, "_agent_adapters", {}) or {}
+        owners = sorted(aid for (aid, ctype) in table if ctype == channel_type)
+        if "default" in owners:
+            return table[("default", channel_type)], ""
+        legacy = self._adapters.get(channel_type)
+        if legacy is not None:
+            return legacy, ""
+        if len(owners) == 1:
+            return table[(owners[0], channel_type)], ""
+        if not owners:
+            return None, f"Channel '{channel_type}' not found"
+        return None, (
+            f"Channel '{channel_type}' is registered under multiple agents ({'、'.join(owners)}); "
+            "回调 URL 无法唯一确定适配器（歧义不投递）——请把 agent 维度带进回调地址")
+
     def list_adapters(self) -> Dict[str, Dict[str, Any]]:
         """列出所有已注册的适配器状态（跨 agent 全量；key 带 agent 前缀，
         default 保留裸 channel 键向后兼容）"""
