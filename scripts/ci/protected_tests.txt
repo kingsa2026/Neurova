@@ -2716,3 +2716,15 @@ tests/unit/channels/test_channelWecomVoiceInboundCarriesTranscript.py
 # test_github_push_skill::test_get_status（Windows 跨盘 `cd` 不改盘的已登记环境形，不认领）。
 tests/unit/skills/test_marketInstallCarriesRealBytes.py
 tests/unit/api/test_marketInstallRefusalIsNotReportedAsSuccess.py
+# §6-185 飞书入站单源：同一平台的两份内容面（Stream 与 Webhook）合成一份——
+# 语音不再落空串、外部发送者不再落空 sender_id、@提及不再不结构化。
+# 判格口径三条：① 两条路必须**同形**（拿同一事件体分别驱动 Stream 与 Webhook 再比读数；
+# 只验一条会被「另一条继续各写各的」骗绿）；② 下载必须在事件循环**外**——探针问「发起下载的那条
+# 线程上有没有在跑的 loop」，并同时要求桩侧真收到 GET（只证「不在循环里」会退化成「下载被关掉」）；
+# ③ 排除型断言要审穿自己的口径：`json.loads(body)` 是传输面不该禁，禁的是带 "content" 的内容面手抄
+# 与 `== "text"` 的类型分派——故配一格合成样本钉住这条分界，再留一格拿仍未收口的钉钉支做变异对照。
+# 准入读数：逐文件单跑三次同读数 10 passed（11.74s / 8.60s / 8.62s）。
+# 活体 `channelFeishuWebhookVoiceInbound_live.py` 13 读数 exit=0（本机假平台真 HTTP 下载 + 真预检；
+# 反证段还原两个生产件到 HEAD ⇒ 恰 9 项内容面读数 FAIL，验签/文本/收尾三件照常 ok）。
+# A/B（channels+api，基线 b99c3bad）两侧失败集合逐条相同：17 failed / 8 errors 双向一致、独有红 0。
+tests/unit/api/test_channelFeishuWebhookVoiceAndSenderUseAdapterFace.py
