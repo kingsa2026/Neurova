@@ -2536,3 +2536,18 @@ tests/unit/voice/test_voiceAssemblyContracts.py
 # 留空最高权重密码即可接管任意 admin，这一格就是被删掉的那道门的替身。全程落临时数据根，不碰仓内
 # data/users.db；入册前逐文件单跑三次同读数 6 passed。
 tests/unit/api/test_recoverPasswordFromSourceConstant.py
+# §6-174 语音上下文的注入实现唯一性（三处拷贝合一口 + 退无主状态）：
+# 同一批标签串（语音识别文本/识别置信度/语言/识别引擎/语音情感/TTS引擎/TTS音色）此前被抄三遍——
+# `voice_context_module.inject_metadata` 一份（其两个调用点都在 `context_pool` 永假的分支里，生产从未执行），
+# `context/orchestrator.py` 池分支与候选池分支各一份（这两条才是现役读侧）。标签漂移的症状不是报错，
+# 是 prompt 里悄悄少一项，所以按定义处唯一判：扫描 7 个标签的定义文件集合必须恰为选定那一份。
+# 另钉三条：现役两处调用点对唯一实现的调用形状（≥2 处，按 AST/调用计数不按注释）、
+# 「构造 VoiceContextModule 后该名字再无去处」的 dead-one-shot（此前每次上下文组装都白跑一遍
+# EmotionModule 的导入与实例化），以及模块不再自持 `_current_context` 且两个退役读口全仓零调用点。
+# 状态符号那格的口径按归属收：`_current_context` 在 `auto_context_module.py` 里是另一回事
+# （对话窗口消息列表，同名词不同物）——扫全仓符号名会把别人的合法使用算成命中，故本模块状态只看
+# 本模块文件，读口按 `name(` 调用形状查。探测器自证一格（临时造一个含标签的文件，必须被抓到）。
+# 不选 bind 型契约格的理由同 §6-173：本层签名带 **kwargs 收口时 bind 恒成功。
+# 入册前逐文件单跑两次同读数 11 passed；红自证＝stash 两个生产档 ⇒ 10 格翻红且无收集错误；
+# A/B 基线（HEAD 仓外 worktree 铺入本判据）10 failed/1160 passed ↔ 本树 1170 passed、本树独有红 0。
+tests/unit/voice/test_voiceContextInjectionSingleSource.py
