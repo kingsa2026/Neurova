@@ -90,11 +90,12 @@ class TestSemanticSearch:
         search = SemanticSearch()
         
         # 相同向量
-        sim = search._cosine_similarity([1, 0, 0], [1, 0, 0])
+        from neurova.core import vector_math
+        sim = vector_math.cosineSimilarity([1, 0, 0], [1, 0, 0])
         assert abs(sim - 1.0) < 0.01
         
         # 正交向量
-        sim = search._cosine_similarity([1, 0, 0], [0, 1, 0])
+        sim = vector_math.cosineSimilarity([1, 0, 0], [0, 1, 0])
         assert abs(sim - 0.0) < 0.01
     
     def test_text_to_embedding(self):

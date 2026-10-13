@@ -11,6 +11,7 @@
 控制工具的执行由 ToolExecutor.execute 入口拦截（见该文件 A6 注释）。
 """
 
+from neurova.core import vector_math
 import math
 import os
 import re
@@ -198,12 +199,6 @@ def _save_index(fp: str, vectors: Dict[str, Any]) -> None:
     os.replace(tmp, _INDEX_PATH)
 
 
-def _cosine(a, b) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a)) or 1.0
-    nb = math.sqrt(sum(x * x for x in b)) or 1.0
-    return dot / (na * nb)
-
 
 def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
     """BM25 与嵌入余弦各按最高值归一后加权合并；引擎不可用返回 None（调用方回落 BM25）。"""
@@ -235,7 +230,7 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
     scores: Dict[str, float] = {}
     for e in entries:
         stored = vectors.get(e["name"])
-        sim = _cosine(q_vec, stored["v"]) if stored else 0.0
+        sim = vector_math.cosineSimilarity(q_vec, stored["v"]) if stored else 0.0
         combined = _EMB_WEIGHT * sim + _BM25_WEIGHT * (bm25.get(e["name"], 0.0) / (bmax or 1.0))
         if combined > 0:
             scores[e["name"]] = combined

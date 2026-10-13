@@ -406,7 +406,7 @@ def semantic_family_clusters(
     确定性:成员按名排序后依次作种子,吸收与种子相似 ≥threshold 的未认领
     成员——不做对链式合并(那会把"相似链"两端拉进同族)。
     """
-    from neurova.skills.skill_semantics import _cosine
+    from neurova.core import vector_math
 
     names = sorted(n for n in vectors if n not in (exclude or set()))
     claimed: set = set()
@@ -418,7 +418,7 @@ def semantic_family_clusters(
         for other in names:
             if other == seed or other in claimed:
                 continue
-            if _cosine(vectors[seed], vectors[other]) >= threshold:
+            if vector_math.cosineSimilarity(vectors[seed], vectors[other]) >= threshold:
                 members.append(other)
         if len(members) >= 2:
             claimed.update(members)
