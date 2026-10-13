@@ -25,13 +25,80 @@ from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
+    ChannelMessage,
 )
-from neurova.channels.voice_ingress import INBOUND_VOICE_PLACEHOLDER, INBOUND_VOICE_TYPES
+from neurova.channels.voice_ingress import (
+    AUDIO_BYTES_KEY,
+    INBOUND_VOICE_PLACEHOLDER,
+    INBOUND_VOICE_TYPES,
+    VOICE_DOWNLOAD_MAX_BYTES,
+)
 
 logger = get_logger(__name__)
 
 # 回调 XML 请求体大小上限（防实体扩展/资源耗尽；企微消息体远小于此值）
 _MAX_XML_BODY_SIZE = 64 * 1024
+
+WECOM_API_BASE = "https://qyapi.weixin.qq.com"
+#: 素材取回接口——全仓唯一实装在那份 `fetchWecomMediaBytes` 里（教义第 6 条）。
+MEDIA_GET_PATH = "/cgi-bin/media/get"
+
+
+def fetchWecomMediaBytes(accessToken: str, mediaId: str, *,
+                         maxBytes: int = VOICE_DOWNLOAD_MAX_BYTES,
+                         timeoutSeconds: int = 10):
+    """按 `media_id` 取回企业微信素材字节；取不到就返回 None，绝不谎报有内容。
+
+    两道大小上限（声明长度 + 实际字节）照 `voice_ingress.VOICE_DOWNLOAD_MAX_BYTES` 的口径：
+    声明已超限就不再读 body，免得为一个注定拒收的大响应把整段读进来。
+    平台出错时该接口回的是 JSON 错误体——那不能当音频字节交给预检去转写。
+
+    这是同步 HTTP（`requests` 是可选依赖，缺了就点名不装、不静默成功）。在事件循环里调它的
+    那一条路必须走线程池（见 `WeComAdapter.downloadVoiceBytes`）——§6-185 为同一件事踩过一次。
+    """
+    try:
+        import requests
+    except ImportError:
+        logger.warning("企业微信素材未取: requests 未安装")
+        return None
+
+    if not accessToken or not mediaId:
+        logger.warning("企业微信素材未取: 缺 access_token 或 media_id")
+        return None
+
+    try:
+        resp = requests.get(
+            f"{WECOM_API_BASE}{MEDIA_GET_PATH}",
+            params={"access_token": accessToken, "media_id": mediaId},
+            timeout=timeoutSeconds,
+            stream=True,
+        )
+        if getattr(resp, "status_code", 200) >= 400:
+            logger.warning("企业微信素材下载 HTTP %s: media_id=%s",
+                           resp.status_code, mediaId)
+            return None
+        contentType = resp.headers.get("Content-Type", "") or ""
+        if "application/json" in contentType:
+            logger.error("企业微信素材下载失败（平台回的是 JSON 错误体）: media_id=%s", mediaId)
+            return None
+        declared = resp.headers.get("Content-Length")
+        try:
+            declaredBytes = int(declared) if declared else None
+        except (TypeError, ValueError):
+            declaredBytes = None
+        if declaredBytes is not None and declaredBytes > maxBytes:
+            logger.warning("企业微信素材超大小上限，拒收: declared=%s max=%s",
+                           declaredBytes, maxBytes)
+            return None
+        data = resp.content
+        if len(data) > maxBytes:
+            logger.warning("企业微信素材实际字节超上限，拒收: %s > %s", len(data), maxBytes)
+            return None
+        return data
+    except Exception as e:  # noqa: BLE001 - 取不到字节就退回占位，绝不阻断入站
+        logger.warning("企业微信素材下载异常: media_id=%s err=%s", mediaId, e)
+        return None
+
 
 
 def _wecom_callback_signature(token: str, timestamp: str, nonce: str, encrypt: str) -> str:
@@ -196,8 +263,12 @@ class WeComAdapter(ChannelAdapter):
             # 语音的正文不在 `<Content>`：企业微信把平台侧转写结果放在 `<Recognition>`
             # （需企业在后台开通语音识别），按 `<Content>` 读恒得空串——用户发语音等于发了句
             # 不存在的话。取不到转写时退回共享占位，与 ilink/aibot 两条活路同一口径。
+            recognition = ""
+            mediaId = ""
             if msg_type in INBOUND_VOICE_TYPES:
-                content = (root.findtext("Recognition", "") or "").strip() or INBOUND_VOICE_PLACEHOLDER
+                recognition = (root.findtext("Recognition", "") or "").strip()
+                mediaId = (root.findtext("MediaId", "") or "").strip()
+                content = recognition or INBOUND_VOICE_PLACEHOLDER
             msg_id = root.findtext("MsgId", "")
             # 群聊：企业微信回调群消息带 <ChatId>；此前硬编码 p2p → 群消息会话键
             # 退化成发送者、无法按群绑定/回复。
@@ -226,10 +297,14 @@ class WeComAdapter(ChannelAdapter):
             # 修复 P0-6 (C5): 用 _main_loop 引用 + run_coroutine_threadsafe 调度到主 loop
             # 原代码用 asyncio.get_event_loop() 在子线程中不可靠，except 分支创建新 loop 破坏主 loop
             if self._main_loop and self._main_loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
-                    self._main_loop,
-                )
+                # 平台没转写而只给了 `<MediaId>` 时，先把素材取回来再投——`voice_precheck` 读的
+                # 就是 `metadata["audio_bytes"]`，不取这条语音在本仓没有任何东西能转写它。
+                # 两条分支都**只投一次**（同一句话进两次回合是比迟一秒更坏的错误）。
+                if mediaId and not recognition:
+                    pending = self._deliverVoiceWithBytes(channel_msg, mediaId)
+                else:
+                    pending = self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
+                asyncio.run_coroutine_threadsafe(pending, self._main_loop)
             else:
                 logger.warning("WeCom: 主事件循环未运行，丢弃消息")
 
@@ -239,6 +314,26 @@ class WeComAdapter(ChannelAdapter):
         except Exception as e:
             logger.exception("WeCom callback error: %s", e)
             return None
+
+    async def downloadVoiceBytes(self, mediaId: str):
+        """取一条语音素材的字节——同步 HTTP 走线程池，别在事件循环里阻塞全进程入站（§6-185 同形）。"""
+        if not self._access_token or time.time() > self._token_expires_at:
+            await self._refresh_access_token()
+        if not self._access_token:
+            logger.warning("WeCom 语音素材未取: access_token 不可用")
+            return None
+        return await asyncio.to_thread(fetchWecomMediaBytes, self._access_token, mediaId)
+
+    async def _deliverVoiceWithBytes(self, message: ChannelMessage, mediaId: str) -> None:
+        """取字节 → 挂进预检读的那个键 → 投递；取不到就带着共享占位照常投，绝不丢消息。"""
+        audioBytes = await self.downloadVoiceBytes(mediaId)
+        if audioBytes:
+            if message.metadata is None:
+                message.metadata = {}
+            message.metadata[AUDIO_BYTES_KEY] = audioBytes
+        else:
+            logger.info("WeCom 语音素材没取到，按占位投递: media_id=%s", mediaId)
+        await self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message)
 
     def _build_reply_xml(self, to_user: str, from_user: str, content: str, msg_type: str = "text") -> str:
         """构造被动回复 XML"""
