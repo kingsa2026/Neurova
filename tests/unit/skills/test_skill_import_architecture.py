@@ -301,17 +301,34 @@ class TestEndToEndSkillAcquisitionChain:
         assert "auto_acquire" in source, "analyze_task 应返回 auto_acquire 字段"
 
     def test_skills_init_exports_modules(self):
-        """skills/__init__.py 应实际导入 hub_client/skill_service，而非空 pass。"""
-        init_path = Path("neurova/skills/__init__.py")
-        content = init_path.read_text(encoding="utf-8")
-        # 不应有空 try: pass except ImportError 块
-        # 检查是否有实际 import 语句
-        assert "from neurova.skills.hub_client import" in content or "import hub_client" in content, (
-            "skills/__init__.py 应导入 hub_client 模块（当前是空 pass）"
-        )
-        assert "from neurova.skills.skill_service import" in content or "import skill_service" in content, (
-            "skills/__init__.py 应导入 skill_service 模块（当前是空 pass）"
-        )
+        """`skills/__init__.py` 必须是真在导入东西的包，不是空 pass 的壳。
+
+        原来这两行断言查的是源码文本里有没有 `from neurova.skills.hub_client import`
+        这类字样——那既不证明模块装得上，也把"门面只能挂被消费的名字"这条规矩挡死
+        （批 46 退役 45 个零消费者再导出时就被它拦下）。判据因此换成行为：
+        包能真导入、`__all__` 里每个名字都取得到、且不再有 except ImportError 的静默壳。
+        """
+        import importlib
+
+        skills = importlib.import_module("neurova.skills")
+        exported = list(getattr(skills, "__all__", []))
+        assert exported, "门面 __all__ 是空的——要么它不该存在，要么名字被摘错了"
+        for name in exported:
+            assert getattr(skills, name, None) is not None, f"门面上 {name} 取不到"
+
+        # 这一半必须按 AST 查：门面自己的 docstring 里就写了"except ImportError"这个词，
+        # 查文本会被自己的自陈抓红（本批第三次撞这一形）。
+        import ast as _ast
+
+        tree = _ast.parse(inspect.getsource(skills))
+        swallowed = [
+            f":{node.lineno}"
+            for node in _ast.walk(tree)
+            if isinstance(node, _ast.ExceptHandler)
+            and _ast.unparse(node.type or _ast.Constant(value="")) == "ImportError"
+        ]
+        assert not swallowed, (
+            f"门面里还有把导入失败静默掉的 except ImportError 分支 {swallowed}（批 42 的根因）")
 
 
 # ══════════════════════════════════════════════════════════════════

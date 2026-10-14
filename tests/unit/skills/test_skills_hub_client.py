@@ -7,8 +7,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
+from neurova.skills.models import SkillSource
 from neurova.skills.hub_client import (
-    SkillSource,
     RemoteSkill,
     SkillHubClient,
     _github_cache_ttl,
@@ -28,12 +28,19 @@ class TestSkillSource:
         assert SkillSource.LOCAL.value == "local"
     
     def test_skill_source_members(self):
-        """Test SkillSource enum members."""
-        assert len(SkillSource) >= 4
-        assert "GITHUB" in SkillSource.__members__
-        assert "CLAWHUB" in SkillSource.__members__
-        assert "LOBEHUB" in SkillSource.__members__
-        assert "LOCAL" in SkillSource.__members__
+        """市场源那一段词汇必须齐全，且不多不少——合并成一份枚举后，
+        `>= 4` 这种下限断言不再能挡住"把装载来源也塞进 RemoteSkill"。"""
+        assert SkillSource.marketSources() == frozenset({
+            SkillSource.GITHUB, SkillSource.CLAWHUB, SkillSource.LOBEHUB,
+            SkillSource.MODELSCOPE, SkillSource.LOCAL})
+        assert not (SkillSource.marketSources() & {
+            SkillSource.MARKETPLACE, SkillSource.BUILTIN}), (
+            "市场源子集里混进了装载来源——`RemoteSkill.source` 因此会接受不该接受的值")
+
+    def test_remote_skill_rejects_install_only_source(self):
+        """`RemoteSkill` 只吃市场源：合并后类型不再区分，这层由 __post_init__ 承担。"""
+        with pytest.raises(ValueError):
+            RemoteSkill(name="x", source=SkillSource.MARKETPLACE)
 
 
 class TestRemoteSkill:

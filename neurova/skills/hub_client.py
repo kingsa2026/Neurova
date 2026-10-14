@@ -21,6 +21,7 @@ from neurova.core.logger import get_logger
 # 预算单点在适配器表；这条路上另有 retries+1 次尝试与退避（`_http_retries`），
 # 所以最坏值是「预算 × (重试+1) + 退避」，不在这里另开一份数字。
 from neurova.skills.market_adapters import MARKET_FETCH_TIMEOUT_SECONDS
+from neurova.skills.models import SkillSource
 
 #: `hub_client` 单次调用的总预算（尝试 + 退避的合值上限）。单次超时取市场预算单点，
 #: 常驻账见 tests/unit/skills/test_marketFetchBudgetIsSingleSource.py（§6-198）。
@@ -29,7 +30,6 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
@@ -37,16 +37,6 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 logger = get_logger(__name__)
-
-
-class SkillSource(str, Enum):
-    """技能来源枚举"""
-
-    GITHUB = "github"
-    CLAWHUB = "clawhub"
-    LOBEHUB = "lobehub"
-    MODELSCOPE = "modelscope"
-    LOCAL = "local"
 
 
 @dataclass
@@ -65,6 +55,21 @@ class RemoteSkill:
     downloads: int = 0
     created_at: str = ""
     updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        """市场源域检查。
+
+        `SkillSource` 合并成一份之后，类型本身不再区分"装载来源"与"市场源"两段词汇，
+        这层区分因此由这里显式承担——今天它由 hub 那份枚举天然挡住
+        （`SkillSource("marketplace")` 当场 ValueError），合并后必须仍然拒，
+        这不是新增限制而是不让保护随门面一起消失。
+        """
+        if isinstance(self.source, str) and not isinstance(self.source, SkillSource):
+            self.source = SkillSource(self.source)  # 落盘与网络数据里给的是裸串
+        if self.source not in SkillSource.marketSources():
+            raise ValueError(
+                "RemoteSkill.source 只接受市场源 "
+                f"{sorted(m.value for m in SkillSource.marketSources())}，收到 {self.source!r}")
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

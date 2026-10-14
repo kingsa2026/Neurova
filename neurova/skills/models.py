@@ -13,12 +13,41 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-class SkillSource(Enum):
-    """技能来源"""
+class SkillSource(str, Enum):
+    """技能来源——全仓唯一一份（此前 `hub_client.py` 里还有一份同名枚举）。
 
+    成员并起来是**两段词汇**，各自回答不同的问题，`.value` 就是写进 manifest 的那串字：
+
+    - 装载来源（`installSources()`）：这个技能是从哪一类地方来到本机的；
+      注在 `Skill.source` 上。
+    - 市场源（`marketSources()`）：远程检索到的技能属于哪个市场；
+      注在 `RemoteSkill.source` 上（`hub_client` 用）。
+
+    合并成一份类型＝名字不再区分这两段，所以区分改由数据显式承担
+    （两个 classmethod + `RemoteSkill.__post_init__` 的验段）。值一字未动，
+    已落盘的数据与 `/api` 响应形状都不受影响。
+    """
+
+    # 装载来源
     LOCAL = "local"
     MARKETPLACE = "marketplace"
     BUILTIN = "builtin"
+    # 市场源
+    GITHUB = "github"
+    CLAWHUB = "clawhub"
+    LOBEHUB = "lobehub"
+    MODELSCOPE = "modelscope"
+
+    @classmethod
+    def installSources(cls) -> frozenset:
+        """`Skill.source` 那一段词汇（技能从哪一类地方来到本机）。"""
+        return frozenset({cls.LOCAL, cls.MARKETPLACE, cls.BUILTIN})
+
+    @classmethod
+    def marketSources(cls) -> frozenset:
+        """`RemoteSkill.source` 那一段词汇（远程技能属于哪个市场；LOCAL＝本地市场条目）。"""
+        return frozenset({cls.GITHUB, cls.CLAWHUB, cls.LOBEHUB, cls.MODELSCOPE, cls.LOCAL})
+
 
 
 # ── 经验成败三态：词、记号、摘要提取的**唯一**定义处 ────────────────────────

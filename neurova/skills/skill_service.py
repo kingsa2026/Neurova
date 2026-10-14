@@ -649,7 +649,8 @@ class SkillService:
         本方法只是把 URL 转成 RemoteSkill 对象后委托，避免重复实现下载逻辑。
         """
         try:
-            from neurova.skills.hub_client import RemoteSkill, SkillHubClient, SkillSource
+            from neurova.skills.hub_client import RemoteSkill, SkillHubClient
+            from neurova.skills.models import SkillSource
 
             # 推断 source 枚举
             lower_url = url.lower()
