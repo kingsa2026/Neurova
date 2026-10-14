@@ -106,7 +106,6 @@ def debug_log(msg: str) -> None:
     logger.debug(msg)
 
 
-from neurova.core.data_root import ensure_agent_data_dir
 from neurova.core.trace_recorder import get_trajectory_recorder
 from neurova.session_manager import get_session_manager
 from neurova.agent_loop_detection import calculate_similarity, detect_content_loop, has_repeated_patterns
@@ -1414,16 +1413,23 @@ class Agent:
         )
 
     def _init_cognitive_graph(self):
-        """初始化认知图谱存储架构"""
-        # 创建数据目录：与删除端点取同一处推导，CWD 不再决定它是哪儿
-        data_dir = ensure_agent_data_dir(self.config.agent_id)
+        """初始化认知图谱存储架构（L0/检索编排层挂在正文库之上，不再自带库）。"""
+        if self.memory_manager is None:
+            logger.warning(
+                "agent %s 没有 memory_manager——跳过认知图谱装配。"
+                "正文库归 MemoryManager，没有它就没有可挂的库，不留一份空转的引擎。",
+                self.config.agent_id,
+            )
+            return
 
-        # 1. 初始化 CognitiveStorageEngine
+        # 1. 初始化 CognitiveStorageEngine（落点由正文库给出，本处不再推第二遍）
         self.cognitive_engine = CognitiveStorageEngine(
             agent_id=self.config.agent_id,
-            data_dir=str(data_dir),
+            memory_manager=self.memory_manager,
         )
-        logger.info("CognitiveStorageEngine 初始化完成: %s", data_dir)
+        logger.info(
+            "CognitiveStorageEngine 初始化完成: %s", self.memory_manager.persistenceDbPath()
+        )
 
         # 2. 初始化 UnifiedRetriever（包装旧检索器）
         moe_router = getattr(self.memory_agent, "moe_router", None)

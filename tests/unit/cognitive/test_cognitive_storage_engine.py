@@ -97,23 +97,34 @@ class TestUnifiedMemoryNodeDecay:
 
 # ── Tracer Bullet 4: CognitiveStorageEngine.store() ──────────────────────────
 
+def _body(tmp_path, agentId: str = "test"):
+    """正文库 + 挂在它之上的引擎（双根收口后二者必须成对构造，落点不再自拼）。"""
+    from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
+        CognitiveStorageEngine,
+    )
+    from tests.cognitive_body_store import bodyManager
+
+    manager = bodyManager(tmp_path, agentId=agentId)
+    return manager, CognitiveStorageEngine(agent_id=agentId, memory_manager=manager)
+
+
 class TestCognitiveStorageEngineStore:
     """store() 写入 L0 缓冲区"""
 
     def test_store_returns_id(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        _, engine = _body(tmp_path)
         node = UnifiedMemoryNode(content="hello")
         result_id = engine.store(node)
         assert result_id == node.id
 
     def test_store_adds_to_l0_buffer(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        _, engine = _body(tmp_path)
         node = UnifiedMemoryNode(content="hello")
         engine.store(node)
         assert len(engine._l0_buffer) == 1
@@ -127,9 +138,9 @@ class TestCognitiveStorageEngineRetrieveL0:
 
     def test_retrieve_returns_stored_node(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        _, engine = _body(tmp_path)
         node = UnifiedMemoryNode(content="hello world")
         engine.store(node)
         results = engine.retrieve("hello", limit=10)
@@ -138,9 +149,9 @@ class TestCognitiveStorageEngineRetrieveL0:
 
     def test_retrieve_returns_empty_for_no_match(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        _, engine = _body(tmp_path)
         node = UnifiedMemoryNode(content="hello world")
         engine.store(node)
         results = engine.retrieve("xyz", limit=10)
@@ -154,17 +165,16 @@ class TestCognitiveStorageEngineFlush:
 
     def test_flush_when_buffer_full(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        manager, engine = _body(tmp_path)
         # Store 100 nodes to trigger flush
         for i in range(100):
             engine.store(UnifiedMemoryNode(content=f"node {i}"))
         # Buffer should be empty after flush
         assert len(engine._l0_buffer) == 0
-        # L1 should have 100 records
-        count = engine._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        assert count == 100
+        # 正文库应收到这 100 条（flush 的落点只有一个）
+        assert manager.bodyMemoryCount() == 100
 
 
 # ── Tracer Bullet 7: retrieve() from L1 ──────────────────────────────────────
@@ -174,9 +184,9 @@ class TestCognitiveStorageEngineRetrieveL1:
 
     def test_retrieve_from_l1_after_flush(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        _, engine = _body(tmp_path)
         # Store 100+ nodes to trigger flush
         for i in range(105):
             engine.store(UnifiedMemoryNode(content=f"node {i}"))
@@ -192,24 +202,34 @@ class TestCognitiveStorageEngineWAL:
 
     def test_wal_file_created_on_store(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        import pathlib
+
+        manager, engine = _body(tmp_path)
         engine.store(UnifiedMemoryNode(content="hello"))
-        wal_path = tmp_path / "wal.jsonl"
-        assert wal_path.exists()
+        assert engine._wal_path is not None and engine._wal_path.exists(), "恢复文件没建出来"
+        assert engine._wal_path.parent == pathlib.Path(manager.persistenceDbPath()).parent, (
+            "恢复文件与正文库不同目录——正文搬走时它会留在原地没人读"
+        )
 
     def test_wal_recovery_on_restart(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            CognitiveStorageEngine,
+            UnifiedMemoryNode,
         )
+        from tests.cognitive_body_store import bodyManager
+
         # First engine: store data
-        engine1 = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        manager = bodyManager(tmp_path)
+        engine1 = CognitiveStorageEngine(agent_id="test", memory_manager=manager)
         engine1.store(UnifiedMemoryNode(content="before crash"))
-        # Simulate crash: don't flush, just create new engine
-        engine2 = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
-        # WAL recovery should restore the data
-        results = engine2.retrieve("before crash", limit=10)
+        # Simulate crash: 没 flush，进程重来——正文库与恢复文件都在盘上，装配点重建
+        restarted = CognitiveStorageEngine(
+            agent_id="test", memory_manager=bodyManager(tmp_path)
+        )
+        # 恢复文件应把这条取回 L0；它没进正文，取不回就是永久丢失
+        results = restarted.retrieve("before crash", limit=10)
         assert len(results) == 1
 
 
@@ -223,15 +243,15 @@ class TestRetrieveTreatsInputAsSubstring:
 
     def _engine(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path / "cse"))
+        _, engine = _body(tmp_path)
         engine.store(UnifiedMemoryNode(content="含百分号 100% 的记录"))
         engine.store(UnifiedMemoryNode(content="带下划线 a_b 的记录"))
         engine.store(UnifiedMemoryNode(content="普通记录"))
-        engine._flush_l0_to_l1()
-        engine._l0_buffer.clear()  # 只走 L1（L0 走的是 Python 子串判定，不经 SQL）
+        engine._flushL0ToBody()
+        engine._l0_buffer.clear()  # 只走正文检索（L0 走 Python 子串判定，不经 SQL）
         return engine
 
     def test_percentDoesNotActAsWildcard(self, tmp_path):

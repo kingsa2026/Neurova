@@ -39,6 +39,10 @@ _LIKE_METACHARS = (LIKE_ESCAPE, "%", "_")
 #: （漏召回，比慢更糟）。短查询一律走 LIKE 子串分支。
 MATCH_MIN_CHARS = 3
 
+#: FTS5 分词器的唯一出处。中文正文必须用 `trigram`：默认 `unicode61` 把整段中文
+#: 当作一个 token，实测对文本里就存在的中文子串恒 0 命中——「建了 FTS 表」不等于「能检索」。
+FTS_TOKENIZER = "trigram"
+
 
 def escapeLike(text: str) -> str:
     """转义 LIKE 元字符（`\\` `%` `_`），供 `LIKE :pattern ESCAPE '\\'` 使用。"""

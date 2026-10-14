@@ -443,9 +443,15 @@ async def execute_workflow(
     if crystallizer is None:
         try:
             from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
+            from neurova.cognitive_layers.memory_layer.manager import MemoryManager
             from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
 
-            engine = CognitiveStorageEngine(agent_id=agent_id or "default")
+            # 正文库只有一个落点：这里用 MemoryManager 自己的默认推导（agent 工作区），
+            # 不在端点里另拼一遍路径。
+            bodyManager = MemoryManager(agent_id=agent_id or "default")
+            engine = CognitiveStorageEngine(
+                agent_id=agent_id or "default", memory_manager=bodyManager
+            )
             crystallizer = PatternCrystallizer(engine=engine)
             logger.info("Agent 不可用，已创建默认 PatternCrystallizer 用于 $crystal 变量解析")
         except Exception as e:

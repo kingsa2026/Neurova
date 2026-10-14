@@ -1,66 +1,42 @@
-"""Tier 2.1 RED 测试 — cse_au UPDATE trigger 缺失
+"""正文表 UPDATE 触发器：改了内容，全文影子必须跟着改。
 
-Bug 2: cognitive_storage_engine.py 只有 cse_ai (INSERT) 和 cse_ad (DELETE) trigger，
-缺 cse_au (UPDATE)。当 UPDATE memories SET content 时 FTS 索引不同步。
-
-本测试验证：UPDATE content 后，FTS 索引应同步更新（新内容可搜索，旧内容不残留）。
-当前预期 FAIL（无 cse_au trigger）。
+原判据立的是「引擎自建库缺 `cse_au`」这条缺陷（Tier 2.1）。双根收口后，全文影子
+`memories_fts` 与三条触发器长在 `MemoryManager` 的正文表上（名字随宿主改为
+`memories_ai` / `memories_ad` / `memories_au`），判据本身一句没松：
+UPDATE 后新内容要查得到、旧内容不许残留。
 """
 
-import pytest
-from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-    CognitiveStorageEngine,
-    UnifiedMemoryNode,
-)
+from __future__ import annotations
+
+import sqlite3
+
+from tests.cognitive_body_store import bodyManager
+
+OLD_TEXT = "old text unique_token_alpha"
+NEW_TEXT = "new text unique_token_beta"
 
 
-class TestCseFtsUpdateTrigger:
-    """cse_au UPDATE trigger 验证"""
+def _hits(manager, query: str):
+    return [mem.content for mem in manager.searchMemoriesFulltext(query, limit=10)]
 
-    def test_update_content_syncs_fts_index(self, tmp_path):
-        """UPDATE memories SET content 应同步更新 FTS 索引
 
-        步骤：
-        1. 创建引擎，store 一条 content='old text' 的节点
-        2. flush 到 L1（触发 cse_ai INSERT trigger，FTS 索引 'old text'）
-        3. 验证 retrieve('old text') 能找到（基线）
-        4. 直接 SQL UPDATE content='new text'
-        5. 验证 retrieve('new text') 能找到（RED — 无 cse_au trigger 时 FTS 仍为 'old text'）
-        6. 验证 retrieve('old text') 找不到（RED — 无 cse_au trigger 时 FTS 残留 'old text'）
-        """
-        # 1. 创建引擎
-        engine = CognitiveStorageEngine(agent_id="test_cse_au", data_dir=str(tmp_path))
+class TestBodyFtsUpdateTrigger:
+    def test_updateContentSyncsFtsIndex(self, tmp_path):
+        manager = bodyManager(tmp_path, agentId="test_body_au")
+        memoryId = manager.add_memory(OLD_TEXT)
 
-        # 2. store 节点
-        node = UnifiedMemoryNode(content="old text unique_token_alpha")
-        node_id = engine.store(node)
-
-        # 3. flush 到 L1（触发 cse_ai INSERT trigger）
-        engine._flush_l0_to_l1()
-
-        # 4. 基线：retrieve('old text') 应找到
-        old_hits = engine.retrieve("old text unique_token_alpha", limit=10)
-        assert len(old_hits) >= 1, "基线失败：INSERT 后 FTS 应能搜索到 'old text'"
-        assert old_hits[0].id == node_id
-
-        # 5. SQL UPDATE content='new text'
-        with engine._db_lock:
-            engine._db.execute(
-                "UPDATE memories SET content = ? WHERE id = ?",
-                ("new text unique_token_beta", node_id),
-            )
-            engine._db.commit()
-
-        # 6. RED: retrieve('new text') 应找到（当前 FAIL — FTS 索引仍为 'old text'）
-        new_hits = engine.retrieve("new text unique_token_beta", limit=10)
-        assert len(new_hits) >= 1, (
-            "RED: UPDATE 后 FTS 未索引新内容 'new text' — 缺 cse_au trigger"
+        assert OLD_TEXT in _hits(manager, OLD_TEXT), (
+            "基线失败：INSERT 触发器没把正文收进影子表"
         )
 
-        # 7. RED: retrieve('old text') 应找不到（当前 FAIL — FTS 残留 'old text'）
-        stale_hits = engine.retrieve("old text unique_token_alpha", limit=10)
-        assert len(stale_hits) == 0, (
-            "RED: UPDATE 后 FTS 仍残留旧内容 'old text' — 缺 cse_au trigger"
-        )
+        conn = sqlite3.connect(str(manager.persistenceDbPath()), check_same_thread=False)
+        conn.execute("UPDATE memories SET content = ? WHERE id = ?", (NEW_TEXT, memoryId))
+        conn.commit()
+        conn.close()
 
-        engine.close()
+        assert NEW_TEXT in _hits(manager, NEW_TEXT), (
+            "UPDATE 后影子表还留着旧内容——正文表上的 UPDATE 触发器失效了"
+        )
+        assert OLD_TEXT not in _hits(manager, OLD_TEXT), (
+            "旧内容仍被检索命中：影子表与正文脱节，召回会吐出已经不存在的记忆"
+        )

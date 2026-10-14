@@ -11,14 +11,11 @@ import time
 import pytest
 
 from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
+from tests.cognitive_body_store import cognitiveEngine
 
 
 def _make_crystallizer(tmp_path, monkeypatch):
-    from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-        CognitiveStorageEngine,
-    )
-
-    engine = CognitiveStorageEngine(agent_id="audit-cryst", data_dir=str(tmp_path / "cse"))
+    engine = cognitiveEngine(tmp_path / "cse", agentId="audit-cryst")
     return PatternCrystallizer(engine=engine, evolution_orchestrator=None, state_path=str(tmp_path / "state.json"))
 
 
