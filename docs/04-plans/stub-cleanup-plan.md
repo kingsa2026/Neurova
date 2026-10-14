@@ -21,7 +21,7 @@
 - `memory_layer/memory_layer.py` — 无人导入
 
 ### 2.2 记忆层 - STUB_CHAIN 文件（仅被其他 stub 引用）
-- `memory_layer/cache.py` — 设计文档明确要删除
+- ~~`memory_layer/cache.py`~~ — **已删除**（缓存三本账收成一处 `neurova/core/cache.py`，连同 `neurova/core/cache.py` 旧门面与 `neurova/memory/core/` 包一并退役；判据 `tests/unit/core/test_cacheAccountsMergedIntoOneModule.py`）
 - `memory_layer/working_memory.py` — 设计文档明确要删除
 - `memory_layer/agent_self.py`
 - `memory_layer/bus_event.py`

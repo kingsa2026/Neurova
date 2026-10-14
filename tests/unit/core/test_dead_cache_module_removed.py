@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Issue #55 死代码收敛守卫：neurova/performance.py 已删，缓存实现只留一份。
+"""Issue #55 死代码收敛守卫：`neurova/performance.py` 已删，缓存实现只留一份。
 
 背景：仓库里有两份 MemoryCache 实现——
 - ``neurova/memory/core/cache.py``（真实载体，core/cache.py 与其 re-export、
@@ -12,11 +12,17 @@
 ``memory/core/cache.py``（+ ``core/cache.py`` 的全局实例门面）。原 performance
 测试里对真实载体的契约断言已由 tests/unit/memory/test_cache_*.py 覆盖。
 
-本守卫防止死模块被"顺手加回来"。
+**2026-10-14 批 45 改判（用户点单 G＝裁定 B）**：上面那句"收敛到 memory/core/cache.py
++ core/cache.py 门面"**不是终局**——两层面各自登记一条全局实例（`memory_global` 与
+`core_global`），同一个进程在 /metrics 里就被记成两列；`cache_get/set/delete/clear`
+四个便捷函数全仓零消费者；`memory_layer/cache.py` 薄壳自陈已废弃却仍是唯一一条
+`neurova.memory.cache` 别名的落点（还是那条真循环的载体）。现收成一条：
+实装住在 ``neurova/core/cache.py``，两份门面全部退役。
+本守卫因此从"允许两份薄门面"改成"不得再出现任何再导出门面"。
+
+本守卫防止死模块与退役门面被"顺手加回来"。
 """
 
-import ast
-import io
 from pathlib import Path
 
 import pytest
@@ -27,13 +33,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
 
 # 唯一允许的 MemoryCache 实现载体
-CANONICAL_CACHE = "neurova/memory/core/cache.py"
+CANONICAL_CACHE = "neurova/core/cache.py"
 
-# 允许 re-export 该实现的薄门面（不含第二套实现），值为其导入来源
-KNOWN_REEXPORT_SHIMS = {
-    "neurova/core/cache.py": "memory.core.cache",
-    "neurova/cognitive_layers/memory_layer/cache.py": "core.cache",
-}
+# 已退役的再导出门面：批 45 之后不得存在，也不得被 import
+# （曾以 KNOWN_REEXPORT_SHIMS 的形式被本守卫当作合法形状钉着——那份判断已被改判）
+RETIRED_SHIMS = (
+    "neurova/memory/core/cache.py",
+    "neurova/memory/core/__init__.py",
+    "neurova/cognitive_layers/memory_layer/cache.py",
+)
 
 
 #: 已删模块名：文本预筛词（含 `neurova.performance` 字样的文件才需要解析）
@@ -98,16 +106,21 @@ class TestSingleMemoryCacheImplementation:
             "重复实现会导致缓存语义分叉（TTL/LRU 行为不一致）。"
         )
 
-    @pytest.mark.parametrize("shim,source", sorted(KNOWN_REEXPORT_SHIMS.items()))
-    def test_shim_is_reexport_only(self, shim, source):
-        src = io.open(PROJECT_ROOT / shim, encoding="utf-8").read()
-        assert f"{source} import" in src, (
-            f"{shim} 应是 {source} 的 re-export 薄门面"
+    @pytest.mark.parametrize("shim", RETIRED_SHIMS)
+    def test_reexport_shimsStayRetired(self, shim):
+        """批 45 退役的两层面不得复活——留门面＝留第二条全局实例与第二条读取路径。"""
+        assert not (PROJECT_ROOT / shim).is_file(), (
+            f"{shim} 是缓存的再导出门面，批 45 已按 §6/§7 退役；"
+            "要消费缓存请直接从 neurova/core/cache.py 取"
         )
-        assert "class MemoryCache" not in src, f"{shim} 不得自带第二套 MemoryCache 实现"
 
-    def test_core_cache_facade_exposes_global_instance(self):
-        from neurova.core.cache import get_global_cache
-        from neurova.memory.core.cache import MemoryCache
+    def test_canonicalModuleHoldsTheRealContract(self):
+        """选定那份必须真有全局实例与实现本体——别把收口做成"只剩一个空名字"。
 
+        反空转配对格：`MemoryCache` 的定义必须就在这个模块里（`__module__` 自证），
+        否则 `CANONICAL_CACHE == definitions` 那条会被一次 re-export 蒙过去。
+        """
+        from neurova.core.cache import MemoryCache, get_global_cache
+
+        assert MemoryCache.__module__ == "neurova.core.cache"
         assert isinstance(get_global_cache(), MemoryCache)

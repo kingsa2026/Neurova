@@ -195,8 +195,7 @@
 |---|---|---|---|
 | 进程内快照 | `manager._memories`（`manager.py:189`）+ `_content_index`（`:191`） | **实质上是唯一缓存层**；失效时机只有构造期、`reload_memories()` 与重启（`:474-478`） | 生效 |
 | embedding 缓存 | `data/embedding_cache.json`（`unified_vector_store.py:68-72`，写穿 `:134-142`） | 省重复编码 | 生效 `[实测]` |
-| `memory_layer/cache.py` | 全文 21 行，`:9` 自述**已废弃**，仅转发 `neurova.core.cache` | — | 无实现 `[静态]` |
-| `neurova/memory/core/cache.py` | `MemoryCache(capacity, default_ttl)` + 清理线程（`:85-140`） | **不在记忆读写路径**：全仓 import 者仅 `api/endpoints/settings.py:420`（观测列举）与 `core/metrics.py:555`（指标） | 挂了但没人用 `[未复核]` |
+| `neurova/core/cache.py` | `MemoryCache(capacity, default_ttl)` + 清理线程 + 缓存注册表（全仓唯一实现；曾经的 `memory/core/cache.py` 实装与 `memory_layer/cache.py` 薄壳已按 §6-204 后批退役） | **不在记忆读写路径**：消费者只有 `api/endpoints/settings.py`（清缓存，走 `clearRegisteredCaches()`）与 `core/metrics.py`（命中率） | 挂了但没人用 `[实测]` |
 | 事件 | `MemoryEvent.MEMORY_ACCESSED`/`TEMPERATURE_UPDATED`（`bus_event.py:67`） | 进程内 pub/sub，无 MQ | 生效 |
 
 后台触发（**均为进程内直调，不经 HTTP 端点**）`[静态/未复核]`：
