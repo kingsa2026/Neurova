@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +28,9 @@ import pytest
 from neurova.core.data_root import DATA_ROOT_ENV
 
 NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+sys.path.insert(0, str(NEUROVA.parent))  # 仓根进 sys.path，`from tests import ast_scan` 才取得到
+
+from tests import ast_scan  # noqa: E402
 
 
 @pytest.fixture()
@@ -212,11 +216,10 @@ class TestNoNewHomeLandingIsAllowed:
         import ast
 
         offenders = {}
-        for py in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in str(py):
-                continue
+        # 同上一条：枚举与解析都走共享一次性入口，不在判据里自付 ast.parse
+        for py in ast_scan.filesUnder(NEUROVA):
             try:
-                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+                tree = ast_scan.transientTree(py)
             except SyntaxError:
                 continue
             docStringIds = {

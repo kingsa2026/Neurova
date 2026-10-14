@@ -31,6 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests import ast_scan  # noqa: E402
+
+NEUROVA = REPO_ROOT / "neurova"
+
 STDLIB = set(sys.stdlib_module_names)
 
 
@@ -91,7 +95,8 @@ def _thirdPartyClosure(mod: str, seen=None, depth=0):
     if rel is None:
         return set(), True
     try:
-        tree = ast.parse(io.open(REPO_ROOT / rel, encoding="utf-8", errors="replace").read())
+        # 走共享一次性入口：留文本缓存、不留常驻语法树，与 `filesUnder` 同一份口径
+        tree = ast_scan.transientTree(REPO_ROOT / rel)
     except Exception:
         return set(), True
     third, bad = set(), False
@@ -260,13 +265,10 @@ class TestFacadeNullsAreAllBackedByRealOptional:
         import importlib
 
         offenders = []
-        for initFile in sorted((REPO_ROOT / "neurova").rglob("__init__.py")):
-            if "__pycache__" in initFile.parts:
-                continue
-            rel = initFile.relative_to(REPO_ROOT).as_posix()
-            source = initFile.read_text(encoding="utf-8", errors="replace")
+        for initFile in ast_scan.filesUnder(NEUROVA, "__init__.py"):
+            rel = ast_scan.relativeToRepo(initFile)
             try:
-                tree = ast.parse(source)
+                tree = ast_scan.transientTree(initFile)
             except SyntaxError:
                 continue
             backed = set()
