@@ -1781,6 +1781,42 @@ def _apply_feedback_to_memory(
         logger.warning("反馈记忆温度更新失败 (session=%s): %s", session_id, e)
 
 
+def _apply_feedback_to_crystallizer(
+    repo, agent_id: str, session_id: str, timestamp: str, feedback: str
+) -> int:
+    """把用户回执补进结晶器的证据面（§6-209，用户裁定甲）。
+
+    此前反馈只喂温度/反思/动机三面，结晶器的证据闸永远看到 `evidenced=0`——
+    模式因此永不结晶。这里按**该轮的用户原文**取模式键（与 `observe` 同一个
+    `_extract_pattern_key`，不在反馈侧重造一份推导），只给该轮的**工具**条目补票；
+    纯对话轮的 `chat` 伪条目不补（把"寒暄被赞"结晶成模式正是 2026-09-05 那条教训）。
+    best-effort：补不上票不该让反馈本身失败。
+    """
+    try:
+        agent = get_agent_instance(agent_id=agent_id or "")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
+        return 0
+    crystallizer = getattr(agent, "crystallizer", None) if agent else None
+    if crystallizer is None:
+        return 0
+    try:
+        round_data = repo.get_round(agent_id=agent_id, session_id=session_id, timestamp=timestamp)
+        userText = (round_data or {}).get("user") or {}
+        text = userText.get("content", "") if isinstance(userText, dict) else ""
+        if not text:
+            return 0
+        attached = crystallizer.attachTurnOutcome(text, feedback == "like")
+        if attached:
+            logger.info(
+                "用户回执补进结晶证据 %d 条 (session=%s, feedback=%s)",
+                attached, session_id[:8], feedback)
+        return attached
+    except Exception as e:  # noqa: BLE001
+        logger.warning("结晶证据补票失败 (session=%s): %s", session_id, e)
+        return 0
+
+
 async def _apply_feedback_to_reflections(agent, repo, session_id: str, timestamp: str, feedback: str) -> int:
     """反思效力反馈（P0b）：赞踩裁决该轮实际注入过的反思日志。
 
@@ -1875,6 +1911,9 @@ async def post_chat_feedback(
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
         _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
+        # §6-209 第四面扇出：把该轮回执补进结晶器证据面（只补工具条目，寒暄轮不补）。
+        _apply_feedback_to_crystallizer(
+            repo, agent_id, body.session_id, body.timestamp, body.feedback)
         # 2026-09-15 P0b 反思效力反馈：赞/踩裁决该轮实际注入过的反思日志
         # （assistant metadata.injected_reflections 留痕，见 turn_context）。
         # like→validated（升最高信任层）；dislike→降置信/转 rejected。best-effort。

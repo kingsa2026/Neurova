@@ -46,6 +46,11 @@ _TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+|[a-zA-Z][a-zA-Z0-9_]*")
 # 与 reap_stale_patterns() 配对构成淘汰路径——只衰减不屏蔽是假淘汰。
 COLD_PATTERN_TEMPERATURE = 20.0
 
+#: 「这一轮没有任何工具调用」的伪工具名，与 EKB 的 `skill_name="chat"` 同一约定。
+#: 全仓只在此处定义：`closed_loop` 用它记账、`attachTurnOutcome` 用它**排除**补票。
+#: 两处各写一个 `"chat"` 字面量，就会有一处先漂——那时寒暄轮会悄悄拿到票。
+CHAT_PSEUDO_TOOL = "chat"
+
 
 def _tokenize(context: str) -> List[str]:
     """简单分词: 中文连续字符 + 英文单词"""
@@ -245,6 +250,38 @@ class PatternCrystallizer:
         if len(self._buffer[key]) >= self.min_observations:
             self._try_crystallize(key)
             self._save_buffer_state()
+
+    def attachTurnOutcome(self, userText: str, success: bool) -> int:
+        """把**事后到达**的用户回执补到该轮的工具观察条目上，返回补上的条数。
+
+        为什么要它：`POST /api/v1/console/chat/feedback` 早就有真 like/dislike 信号，
+        并向记忆温度、反思裁决、context 台账三面扇出，唯独不喂结晶器——于是证据闸永远
+        看到 `evidenced=0`（盘上 `crystallizer_state.json` 实测），模式永不结晶。
+
+        三条不做的事各自有理由：
+        - **不新增一次观察**：条目数就是 `min_observations` 的分母，点赞若写成"再来一条"
+          等于把三轮门槛降成两轮再加一票，结晶被虚增的观察绕过；
+        - **不补 `CHAT_PSEUDO_TOOL`**：纯对话轮的伪工具不是任何客观事实的来源，给它票就是
+          把"寒暄被赞了"结晶成模式——2026-09-05 那条教训换个入口回来（用户裁定甲）；
+        - **不覆盖已有票据**：`success` 非 None 说明这条已有客观票据（工单 002/010），
+          主观反馈无权改判客观回执。
+        模式键对不上时不新建键：新建就是静默双计，比一次失败更难发现。
+        """
+        key = self._extract_pattern_key(userText)
+        entries = self._buffer.get(key)
+        if not entries:
+            return 0
+        targets = [e for e in entries
+                   if e.get("success") is None and e.get("tool") != CHAT_PSEUDO_TOOL]
+        if not targets:
+            return 0
+        for entry in targets:
+            entry["success"] = bool(success)
+        self._save_buffer_state()
+        if len(entries) >= self.min_observations:
+            self._try_crystallize(key)
+            self._save_buffer_state()
+        return len(targets)
 
     def _try_crystallize(self, key: str) -> None:
         """
