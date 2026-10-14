@@ -1179,11 +1179,44 @@ class TestSharedParseBudgetIsReal:
 
     def test_helper_surface_exists(self):
         for name in ("callSites", "importsOf", "classDefsIn", "nodeScan",
-                     "sourceRefsUnder", "relativeToRepo", "filesUnder"):
+                     "sourceRefsUnder", "relativeToRepo", "filesUnder",
+                     "resolveImportModule", "namesTakenFrom"):
             assert hasattr(ast_scan, name), (
                 f"tests/ast_scan.py 未提供 {name}：跨文件判据没有共享入口，"
                 "本门禁会退化成一条空规则。"
             )
+
+    def test_names_taken_from_honours_alias_and_relative_forms(self):
+        """`namesTakenFrom` 记的是**原名**，且认相对导入形态——两条都是 §6-211 实测的假死源。
+
+        `from neurova.skills import get_skill_registry as gsr` 取的是 `get_skill_registry`；
+        按 `asname` 记账会把它读成"没人经门面取用"。`from .skills import X` 的
+        `node.module` 只是 `"skills"`，按文本相等比较同样读不到。
+        """
+        pairs = []
+        for relPath, source in (
+                # 绝对形 + 别名：取的是 `get_skill_registry`，不是本地别名 gsr
+                ("neurova/api/app.py", "from neurova.skills import get_skill_registry as gsr\n"),
+                # 相对形（三个点＝上跳到 neurova 再取 skills）：node.module 只是 "skills"
+                ("neurova/api/endpoints/z.py", "from ...skills import create_default_skills\n"),
+                # 包内相对形：`from ..` 指回 neurova.skills 自己
+                ("neurova/skills/sub/x.py", "from .. import get_skill_registry\n"),
+                ("neurova/foo.py", 'NOTE = "neurova.skills 只是文本"\n'),
+                ("neurova/bar.py", "from neurova.skills_extra import create_default_skills\n")):
+            tree = ast.parse(source)
+            # `namesTakenFrom` 的入参形状与 `importsOf` 一致：nodeScan 吐的 (path, node) 对
+            pairs += [(PROJECT_ROOT / relPath, node) for node in ast.walk(tree)]
+        got = {name for name, _p, _l in ast_scan.namesTakenFrom(pairs, "neurova.skills")}
+        assert got == {"get_skill_registry", "create_default_skills"}, (
+            f"别名形或相对形没被认下，或把文本提及/近名模块当成了取用：{got}")
+        rel = ast.ImportFrom(module="models", names=[ast.alias(name="Skill", asname=None)],
+                            level=1)
+        rel.lineno = 1
+        assert ast_scan.resolveImportModule("neurova/skills/agent.py", rel) == \
+            "neurova.skills.models", "单点相对导入解析错"
+        assert ast_scan.resolveImportModule("neurova/skills/__init__.py",
+                                            ast.parse("from . import x").body[0]) == \
+            "neurova.skills", "包 __init__ 的 level=1 应指回包自己"
 
     def test_prefilter_is_sufficient_not_a_loophole(self, tmp_path):
         """预筛是**充分条件**：命中必定在，未命中的文件确实不含关键词。

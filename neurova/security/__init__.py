@@ -12,23 +12,13 @@ Neurova 安全体系 2.0
 本包不再提供认证组件（S-07 死代码 security/auth_system.py 已删除）。
 """
 
-from neurova.core.logger import get_logger
-
 from neurova.security.audit_logger import AuditLog
 
 from neurova.security.rbac import Permission, Role
-
-
-def get_logger(name: str = "security"):
-    """获取安全模块日志记录器"""
-    import logging
-
-    return logging.getLogger(f"neurova.security.{name}" if name != "security" else name)
 
 
 __all__ = [
     "AuditLog",
     "Permission",
     "Role",
-    "get_logger",
 ]
