@@ -2894,3 +2894,12 @@ tests/unit/tts/test_unitTierNeverPaysForRealWeights.py
 # "四族都走带闸入口、不得直用无闸原语"。逐档单跑三次 10/10/10；活体
 # `tests/manual/homeAdoptionGateLive.py` 另带摘闸反证（桩成恒真必须把假 home 搬空）。
 tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py
+# 批 §6-206：推理链持久化门接进治理面（此前只有裸 env `NEUROVA_TRACE_PERSIST` 能拨，而全仓
+# 无生产赋值点 ⇒ 门永远关且没人能开）。10 格里 4 格是 2026-09-05 事故的原防线（默认不写、
+# env=1 才写、无效值不算显式、开关两侧 trace 都要从活跃表摘掉），6 格是本批新增：治理面开
+# ⇒ 交棒引擎、env 显式 0 压住治理面（优先级三个方向都要断，少一个方向就是没锁）、默认值
+# 不得被收口翻转、读取时机必须在决策点（构造期快照＝"页面能改运行时不认"的幻影旋钮）、
+# 消费方不得再裸读该 env、键必须在 DEFAULTS 声明。同批还加了「DEFAULTS 每个布尔开关都得在
+# PUT 面有字段」的枚举报示——它一跑就跑出两处存量同形（consolidation_* 两键），已同批扫掉。
+# 逐档单跑三次 10/10/10；活体 `tests/manual/traceGateGovernanceFaceLive.py` 18 项读数 exit=0。
+tests/unit/cognitive/test_reasoning_trace_persist_gate.py
