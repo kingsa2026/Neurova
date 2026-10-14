@@ -122,15 +122,11 @@ def auditDbPath() -> str:
     为什么连 `-wal`/`-shm` 一起收：WAL 模式下未 checkpoint 的帧只存在于 `-wal`，
     只搬主库等于把最近的审计记录留在原地——"看着搬完了、实则丢数据"就是这一形。
     """
-    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+    from neurova.core.data_root import adoptHomeLanding, dataLanding
 
     target = dataLanding(AUDIT_DB_NAME, legacy=())
-    legacy = legacyHomeLanding(AUDIT_DB_NAME)
-    if legacy.exists():
-        for suffix in ("", "-wal", "-shm"):
-            src = legacy.parent / (legacy.name + suffix)
-            if src.exists():
-                adoptLandingFrom(target.parent / (target.name + suffix), src)
+    for suffix in ("", "-wal", "-shm"):
+        adoptHomeLanding(target.parent / (target.name + suffix), AUDIT_DB_NAME + suffix)
     return str(target)
 
 

@@ -614,10 +614,10 @@ def _default_whitelist_path() -> Path:
     前者是 `{entries:[{pattern,match_type,tool,...}]}` 条目表，字段零交集），
     收落点时不并文件——并了就等于擅自改语义。
     """
-    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+    from neurova.core.data_root import adoptHomeLanding, dataLanding
 
     target = dataLanding("governance_whitelist.json", legacy=())
-    adoptLandingFrom(target, legacyHomeLanding("config", "governance_whitelist.json"))
+    adoptHomeLanding(target, "config", "governance_whitelist.json")
     return target
 
 

@@ -264,7 +264,7 @@ class SkillHubClient:
             base_dir: 基础目录路径
             config: 配置字典
         """
-        from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+        from neurova.core.data_root import adoptHomeLanding, dataLanding
 
         if base_dir:
             self._base_dir = Path(base_dir)
@@ -272,9 +272,7 @@ class SkillHubClient:
             # 包体落数据根：与账本（`<skills_dir>/manifest.json`）同一根，卸载才可能
             # 真删到字节——旧主目录那份被判定在 skills_dir 子树外，卸载只删账不删字节。
             self._base_dir = dataLanding("skills_hub", legacy=())
-            legacyInstalled = legacyHomeLanding("skills", "installed")
-            if legacyInstalled.is_dir():
-                adoptLandingFrom(self._base_dir / "installed", legacyInstalled)
+            adoptHomeLanding(self._base_dir / "installed", "skills", "installed")
         self._config = config or {}
 
         # 技能源

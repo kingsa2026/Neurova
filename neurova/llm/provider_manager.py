@@ -2084,16 +2084,14 @@ def _default_config_dir() -> Path:
     home 那一址在容器里重启即失；桌面打包也不提 `.neurova` 目录。而它此前绕开
     `NEUROVA_DATA_DIR`，直接后果是测试期把真凭据文件写进开发者主目录（实测如此）。
     """
-    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+    from neurova.core.data_root import adoptHomeLandingGlob, dataLanding
 
     target = dataLanding("llm", legacy=())
     target.mkdir(parents=True, exist_ok=True)
-    legacyDir = legacyHomeLanding("config")
-    if legacyDir.is_dir():
-        # 逐份收养：admin 全局那份 + 每个 scope 一份；两侧都在场时不覆盖、点名（语义见
-        # data_root.adoptLandingFrom），搬完旧文件即消失，凭据不会两头各存一半。
-        for legacy in sorted(legacyDir.glob("providers*.json")):
-            adoptLandingFrom(target / legacy.name, legacy)
+    # 逐份收养：admin 全局那份 + 每个 scope 一份；两侧都在场时不覆盖、点名。
+    # 取法与"本进程有没有权利动主目录"的判定都在 `data_root.adoptHomeLandingGlob`
+    # 里合一次——凭据搬走就没了，这里不能各判一遍。
+    adoptHomeLandingGlob(target, "config", pattern="providers*.json")
     return target
 
 

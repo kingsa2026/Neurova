@@ -40,6 +40,25 @@ def landingRoots(tmp_path, monkeypatch):
     return dataRoot, fakeHome
 
 
+@pytest.fixture()
+def ownRootLandingRoots(tmp_path, monkeypatch):
+    """同上，但注入的数据根**等于默认推导**——即"这个进程就是操作者本人"。
+
+    §6-204 给收养加了权利闸：数据根被指到别处（跑测临时根）时，主目录旧物一律不动。
+    收养格因此不能再用上面那个形状，否则它验的是"跳过"而不是"搬且内容不变"。
+    """
+    from neurova.core import data_root
+
+    repo = tmp_path / "theOperatorsRepo"
+    dataRoot = repo / "data"
+    fakeHome = tmp_path / "fakeHome"
+    fakeHome.mkdir()
+    monkeypatch.setattr(data_root, "_REPO_ROOT", repo)
+    monkeypatch.setenv(DATA_ROOT_ENV, str(dataRoot))
+    monkeypatch.setattr("pathlib.Path.home", lambda: fakeHome)
+    return dataRoot, fakeHome
+
+
 def _nothingUnder(home: Path) -> list:
     return sorted(str(p.relative_to(home)) for p in home.rglob("*") if p.is_file() or p.is_dir())
 
@@ -123,12 +142,12 @@ class TestFourFacesLandInTheDataRoot:
 
 
 class TestLegacyHomeCopiesAreAdopted:
-    def test_existingProvidersFileIsMovedIntoDataRootOnce(self, landingRoots):
+    def test_existingProvidersFileIsMovedIntoDataRootOnce(self, ownRootLandingRoots):
         # 直接问落点函数，不借 get_provider_manager：构造会把"没有文件"种成内置默认，
         # 断言就会被那次改写盖住——收养这一格要看的只是搬没搬、内容变没变。
         from neurova.llm.provider_manager import _default_config_dir
 
-        dataRoot, fakeHome = landingRoots
+        dataRoot, fakeHome = ownRootLandingRoots
         legacy = fakeHome / ".neurova" / "config"
         legacy.mkdir(parents=True)
         legacyFile = legacy / "providers.json"
@@ -149,10 +168,10 @@ class TestLegacyHomeCopiesAreAdopted:
         _default_config_dir()
         assert (targetDir / "providers.user-alice.json").exists(), "scope 版没被收养"
 
-    def test_bothSidesPresentDoesNotOverwriteAndIsNamed(self, landingRoots):
+    def test_bothSidesPresentDoesNotOverwriteAndIsNamed(self, ownRootLandingRoots):
         from neurova.llm.provider_manager import _default_config_dir
 
-        dataRoot, fakeHome = landingRoots
+        dataRoot, fakeHome = ownRootLandingRoots
         legacyDir = fakeHome / ".neurova" / "config"
         legacyDir.mkdir(parents=True)
         legacyFile = legacyDir / "providers.json"
