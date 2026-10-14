@@ -3333,6 +3333,67 @@
     - **验证读数**：判据 `tests/unit/test_noFirstPartyImportPlaceholder.py` 6 格，逐档单跑三次 6/6/6；建档红 `4 failed/2 passed`，红自证 4 failed/2 passed（两枚绿的始终是配对格）；变异 6 枚全咬（M1 重新包一条仓内兜底 / M2 体里多一条赋值 / M3 把 SelfModel 指回不存在处 / M4 把第三方门换成仓内兜底 / M5 回退桩焊回 llm_client / M6 门面直接留 None 公开符号），每枚 sha256 复证逐字节复原；活体 `tests/manual/facadePlaceholders_batch43.py` 10 读数 exit=0（六个被改端点模块面全在且是 401 登录门——七条路径逐条实跑取码；子进程反向校准：打死 `cost_tracking` ⇒ 显式抛 ImportError）。
     - **净 LOC（生产池 +133/−418＝净 −285）**：21 个门面/模块摘 70 条不可达兜底、随之失效的 9 处 logger 绑定、以及 llm_client 那整套走不到的回退实现；测试池另计（判据 6 格、活体 10 读数、一档测试同形摘 3 行）。
     - **本会话下一枚空号现查 §6-204**（201＝本批；202/203 已被并发会话占走，别再按"上一条 +1"取号）。
+
+204. **跑测层的「真权重出网」门：单元档的释放后预热不再载 670MB，缺件侧从「现场下载」改判为 skip（✅ `aeb933d1` 测试层+判据+活体 / `dcce8f74` 子集 567→569）** 🟢 —— 用户点单的 F 项（原话「F：修跑测层挂死与真出网」）。§6-196/§6-198/§6-201 三格都撞见过这一族，前两次只写了「限制」，这次定位到根。
+    - **两处同因，现象都不是「某格红」而是整场拿不到汇总行**：
+      ① `tests/unit/tts/test_tts_lazy_release.py` 的 `heavy_manager` 只往 `mgr._engines` 里塞假引擎，
+      没桩 manager 的**构造**接缝。TTL 释放恰好把链顶从 `_engines` 丢掉，随后的后台预热因此构造
+      生产那个 `MOSSNanTTS`，在 executor 线程上载 5 张 onnx 图 + 跑一次探针推理——
+      现算：本树该格 call 相 **19.32s**、HEAD 干净仓外 worktree **31s**（同一格，断言早就过了，
+      多出来的全是权重）。
+      ② 真权重用例的前置写的是「`models/tts/moss-nano` 目录存在」，而 5 只 `.onnx` **入 git**、
+      那两份 `.data`（670MB）被 `.gitignore` 的 `models/**/*.data` 挡在库外 ⇒ 这条假前置在**任何**
+      worktree 里都成立，权重却缺。走到 `ensure_model` 的那条于是发真 HTTPS 下载 + 退避 sleep
+      （实证：今天 13:17 我建的 HEAD worktree 里凭空长出 670MB 两份 `.data`，`~/.cache/modelscope/.lock` 为凭）。
+      终点相同：全局 `timeout = 30` 的 pytest-timeout **thread 法**一到点就打死进程 ⇒ 无汇总行 ⇒
+      `ab_compare.sh` 判 AB_FAIL——批 42、批 43 各因此烧掉一轮宽域自证。
+    - **修在接缝处**（教义 1，不在下游加判空）：夹具桩掉 `neurova.tts.manager` 那个模块级的
+      `MOSSNanTTS` 构造名字
+      （落点 `tests/unit/tts/conftest.py`，夹具与假引擎一并从测试档搬到目录级＝一处定义）；
+      「本机有没有权重」只认 `ModelDownloader.is_model_available` 一处（它按 `required_files` 逐件数，
+      含 `.data`）；出网那一层（`snapshot_download` 的三处调用点）在跑测期一律换成**点名拒绝**的桩，
+      拒绝发生在写出任何字节之前。真权重用例改挂 `@pytest.mark.real_model(<模型名>)`（标记词表落在
+      `pyproject.toml` 一处），缺件只 skip，不许现场补下载。
+    - **一处对自己上一格的勘误**：§6-201 那句「channels 一族整族同场跑会挂死（卡在 asyncio/IOCP 等待，
+      全局 `--timeout=30` 的 thread 法打不断）……在 HEAD 的干净仓外 worktree 里同样复现 ⇒ 预存缺陷」
+      **定性过头了**。本批按同一个 harness 形状复算：warmed worktree `686 passed in 62.82s`、
+      干净 worktree `686 passed in 60.62s`、A/B 两侧同读数 `16 failed 3060 passed 4 skipped 8 errors`
+      且失败集合逐条相同、都产出汇总行——**不复现**。真实机制与本格同源：该族最长节点是 10.20s
+      （`test_channels.py::TestFeishuAdapter::test_disconnect`）与 7.31s setup
+      （`test_channelInboundCallbackRoutesByItsOwnCredentials.py::...testKaiTokenLandsOnKaiOnly`），
+      同场争用下越过 30s 即被 thread 法打死＝「无汇总行」，那不是死锁而是墙钟。上一格把「取不到读数」
+      写成了「打不断」，下一批别拿那句当施工图。
+    - **验证读数**：红灯 `2 failed in 34.71s`（tts 档，断言是 `assert not ['moss-nano']` 与
+      `isinstance(<...MOSSNanTTS object>, _FakeHeavyEngine)` 为假）+ `4 failed`（门判据档，
+      `assert None is not None`＝门未注册），夹具搬迁本身是纯搬迁（搬完复跑仍是 19.32s），
+      红因此只可能来自缺失的隔离。绿灯两档合跑 `6 passed in 5.46s`，泄漏格 call 相 19.32s → **0.00s**；
+      tts 一族主树 72.25s → 65.79s 且 `118 passed`。**红自证**：只摘本批两处修复（门 + 夹具那行接缝桩，
+      作用域清单取自本会话自存的档名清单）⇒ 6 格全红，红的还是那两条行为断言。
+      **变异 7 枚**：M1 登记表少一处下载点→覆盖面格红；M1b 登记表多一处→每格 setup 点名
+      `AttributeError`（不静默）；M2 拒绝桩先落字节再抛→「拒绝在落字节之前」格红；M3 缺件不再 skip→
+      skip 格红（`DID NOT RAISE Skipped`）；M4 桩抛而门不记账→记账断言红；M5 生产侧把 `_ensure_preheat`
+      整条摘掉→反空转格红（证第一格不是白给的绿）；M6 把下载点改成扫描器不认的别名→覆盖面格红
+      （证它认 `from modelscope import snapshot_download as ms_snapshot` 这一形）。逐枚按 sha256 逐字节复原。
+      **宽域 A/B 两轮 AB_PASS 且两侧都有汇总行**：① tts/asr/voice/deploy/desktop + 门判据
+      = 基线 `451 passed 7 skipped` ↔ 本树 `458 passed`（差的正是那 7 格：基线侧缺件 skip、本树真跑）；
+      ② channels 整族 + api = 两侧同读数（见上一格那条勘误用的就是这一轮）。
+      **活体** `tests/manual/weightEgressGate_batch44.py` 10 读数 exit=0：干净 worktree 铺上本批测试层
+      `111 passed 7 skipped in 5.05s`、`.data` 落盘 0、modelscope 缓存字节 0→0、缺件侧点名「真权重不齐」；
+      同侧「目录存在=True 而 is_model_available=False」把旧假前置钉死；本树权重齐 ⇒ 那 7 格真跑真过
+      （`19 passed`，0 skipped）＝门没顺手把契约跳掉。
+    - **净 LOC**：生产池 **+0/−0**（本批一处生产码未改，教义 2 那条「正数须逐列去向」因此为空）；
+      测试与跑测配置 +592/−75。
+    - **登记不修（三条）**：① channels 族那三处硬等待（10.20s/7.31s/5.12s，含
+      `test_feishu_connect_nonblocking.py::test_disconnect_during_setup_cancels_start` 里
+      `release_setup.wait(timeout=5)` 被 disconnect 的线程 join 满额耗掉）——撞的是墙钟余量，
+      修法要在 `neurova/channels/*` 的 join/取消语义上动，而那一族此刻由并发会话在改，
+      同一能力面只容一个会话动；② `whisper`/`funasr` 不在依赖清单也未装 ⇒ ASR 那条下载路今天够不到，
+      门的覆盖面按「`snapshot_download` 的调用点」定，没为它造第二条平行门（要装须先补依赖再扩登记表，
+      覆盖面格会自己红）；③ 跑测中新出现的一条 teardown ERROR 点名仓库根 `.tmp_ab204.log`
+      （13:51 由并发会话的 A/B 写入）——`.tmp_*` 探针按约定即用即删且应落仓外，本格只记不代删。
+    - **本会话下一枚空号现查 §6-205**（204＝本批；写前必现查 `grep -oE '^[0-9]+\. \*\*' | sort -n | tail`，
+      别按上一条 +1）。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
