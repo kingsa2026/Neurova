@@ -551,9 +551,9 @@ class _Metrics:
         只读"已创建的"缓存实例——抓指标绝不懒建缓存（与 iter_pools 同一原则）。
         """
         try:
-            # 单一注册表：memory/core/cache.py 持有，core/cache.py 的全局实例
-            # 也登记进同一张表（两个生产者各自迭代会重复计数）
-            from neurova.memory.core.cache import iter_caches
+            # 注册表只有一处（neurova/core/cache.py），进程默认实例登记的
+            # 名字是 GLOBAL_CACHE_NAME——曾经的两条注册名会让同一个进程记成两列。
+            from neurova.core.cache import iter_caches
 
             for name, stats in iter_caches():
                 try:

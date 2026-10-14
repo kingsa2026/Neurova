@@ -11,7 +11,7 @@ TDD RED 阶段: 验证 cached() 装饰器能正确缓存返回 None 的函数结
 """
 import pytest
 
-from neurova.memory.core.cache import cached, reset_global_cache, get_global_cache
+from neurova.core.cache import cached, reset_global_cache, get_global_cache
 
 
 @pytest.fixture(autouse=True)

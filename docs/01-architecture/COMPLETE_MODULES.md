@@ -512,8 +512,7 @@ ErrorCode (neurova/core/error_handler.py)
 | `TimeAwareness` | `memory/core/time_awareness.py` | 时间感知 |
 | `MemorySecurity` | `memory/core/security.py` | 记忆安全 |
 | `ContextInjector` | `memory/core/context_injector.py` | 上下文注入器 |
-| `MemoryCache` | `memory/core/cache.py` | 记忆缓存 |
-| `BatchWriter` | `memory/core/cache.py` | 批量写入器 |
+| `MemoryCache` | `neurova/core/cache.py` | 记忆缓存（全仓唯一实现，§6-204 后批收口） |
 | `MemoryVersionControl` | `memory/core/version_control.py` | 记忆版本控制 |
 | `MemoryEventBus` | `memory/core/memory_bus.py` | 记忆事件总线 |
 

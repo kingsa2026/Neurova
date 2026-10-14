@@ -54,7 +54,7 @@
 |----|------|------|-----------|------|
 | B1 | 记忆数据模型 | ✅ 已实现 | `neurova/memory/core/models.py` | 11种分类+温度+生命周期 |
 | B2 | 记忆管理器 | ✅ 已实现 | `neurova/memory/core/manager.py` | CRUD+温度+检索 |
-| B3 | 短期记忆 | ✅ 已实现 | `neurova/memory/core/cache.py` | LRU缓存 |
+| B3 | 短期记忆 | ✅ 已实现 | `neurova/core/cache.py` | LRU缓存 |
 | B4 | 长期记忆 | ✅ 已实现 | `neurova/memory/core/storage.py` | SQLite持久化 |
 | B5 | 情感引擎 | ✅ 已实现 | `neurova/memory/core/emotion.py` | 7种情感维度 |
 | B6 | 记忆巩固机制 | ✅ 已实现 | `neurova/memory/core/temperature.py` | 温度升级固化 |
@@ -175,11 +175,11 @@
 
 | ID | 模块 | 状态 | 文件/位置 | 备注 |
 |----|------|------|-----------|------|
-| J1 | 读取缓存 | ✅ 已实现 | `neurova/memory/core/cache.py` | LRU缓存 |
+| J1 | 读取缓存 | ✅ 已实现 | `neurova/core/cache.py` | LRU缓存 |
 | J2 | 写入缓存 | ✅ 已实现 | `neurova/memory_rw_manager.py` | 批量写入器 |
 | J3 | 会话缓存 | ✅ 已实现 | `neurova/channels/manager.py` | 会话管理 |
-| J4 | 缓存淘汰策略 | ✅ 已实现 | `neurova/memory/core/cache.py` | TTL+LRU |
-| J5 | 缓存统计 | ✅ 已实现 | `neurova/memory/core/cache.py` | 命中率统计 |
+| J4 | 缓存淘汰策略 | ✅ 已实现 | `neurova/core/cache.py` | TTL+LRU |
+| J5 | 缓存统计 | ✅ 已实现 | `neurova/core/cache.py` | 命中率统计 |
 
 ### K. 数据库模块 (13/13 已实现)
 

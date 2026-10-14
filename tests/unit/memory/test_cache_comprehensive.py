@@ -1,20 +1,13 @@
 """
 全面单元测试 - cache 模块
 
-测试 neurova/cognitive_layers/memory_layer/cache.py
+测试 neurova/core/cache.py
 覆盖 MemoryCache 类。
 """
-import pytest
 import time
 from datetime import datetime, timedelta
 
-from neurova.cognitive_layers.memory_layer.cache import MemoryCache
-
-try:
-    from neurova.cognitive_layers.memory_layer.cache import BatchWriter
-    _HAS_BATCH_WRITER = True
-except ImportError:
-    _HAS_BATCH_WRITER = False
+from neurova.core.cache import MemoryCache
 
 
 class TestMemoryCache:
@@ -55,9 +48,3 @@ class TestMemoryCache:
         cache = MemoryCache()
         stats = cache.get_stats()
         assert isinstance(stats, dict)
-
-
-@pytest.mark.skipif(not _HAS_BATCH_WRITER, reason="BatchWriter removed from cache module")
-class TestBatchWriter:
-    def test_batch_writer_not_available(self):
-        pass

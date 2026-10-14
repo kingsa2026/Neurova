@@ -52,19 +52,13 @@ from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
 
 from neurova.cognitive_layers.memory_layer.memory_stream import MemoryStream
 
-# `MemoryCache` 的再导出随本批摘掉，理由三条，逐条现读可核：
-# ① `from neurova.memory import MemoryCache` 全仓零消费者（AST 数 ImportFrom(neurova.memory) 的
-#    绑定名，命中 0）；
-# ② 这条 import 与 `neurova/core/cache.py` 之间是**真循环**：`memory_layer/cache.py` 取
-#    `neurova.core.cache`，后者取 `neurova.memory.core.cache`，取包名就回头执行本 `__init__`。
-#    先 import 本门面时侥幸走通（探针实证 P1/P2/P3 三条都对），先 import
-#    `neurova.cognitive_layers.memory_layer.cache`（`tests/unit/memory/test_cache_comprehensive.py`
-#    就是这么写的）时(cache 半成品) 就撞回本行——**此前这条被 try/except 吞着，所以表现为
-#    门面上 `MemoryCache = None` 而测试照样绿**，摘掉兜底后循环才第一次露出来（本批实测：
-#    留着这行，那档测试直接 collection error）。
-# ③ 缓存实现的单一出处是 `neurova.core.cache`。顺带登记一条双源（台账 §6-201）：仓里现在有三本
-#    缓存账——`neurova/memory/core/cache.py`（实装）、`neurova/core/cache.py`（全局实例与再导出）、
-#    `neurova/cognitive_layers/memory_layer/cache.py`（薄壳再导出）。三者要不要收成一条＝另一次裁定。
+# `MemoryCache` 的再导出随批 43 摘掉：`from neurova.memory import MemoryCache` 全仓零消费者
+# （AST 数 ImportFrom(neurova.memory) 的绑定名，命中 0），而这条 import 与缓存模块之间是
+# **真循环**——先 import 本门面时侥幸走通，先 import 薄壳那侧就撞回本行；循环被 try/except
+# 吞着，表现为「门面上 `MemoryCache = None` 而测试照样绿」，摘掉兜底才第一次露出来。
+# 批 45 把这条循环本身拆掉了：三本缓存账收成一处 `neurova/core/cache.py`，
+# `memory_layer/cache.py` 薄壳与 `neurova.memory.core.cache` 一并退役，
+# 因此下面的 `_MODULE_MAP` 不再有 `cache` 这一条别名。
 from neurova.cognitive_layers.memory_layer.security import MemorySecurity
 
 from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer
@@ -107,7 +101,6 @@ _MODULE_MAP = {
     "memory_stream": "neurova.cognitive_layers.memory_layer.memory_stream",
     "conflict": "neurova.cognitive_layers.memory_layer.conflict",
     "version_control": "neurova.cognitive_layers.memory_layer.version_control",
-    "cache": "neurova.cognitive_layers.memory_layer.cache",
     "security": "neurova.cognitive_layers.memory_layer.security",
 }
 
