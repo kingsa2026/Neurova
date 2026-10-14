@@ -51,6 +51,11 @@ DEFAULTS: Dict[str, Any] = {
     "consolidation_semantic_plans_enabled": True,
     # 压缩经济性判据（关=沿用"必然装不下就等比缩小"的既有行为，现网零变更）
     "compression_economics_enabled": False,
+    # 推理链持久化门（§6-206）。此前**只有裸 env** `NEUROVA_TRACE_PERSIST` 能拨，而全仓
+    # 无任何生产赋值点（compose/helm/.env.example 都不提）——等于"定义了没人能开"的
+    # 幻影旋钮反方向：门是好的，键却无处可设。默认 **关**＝收口前现网语义一字不改，
+    # 回声污染那道防线（零消费方 + 检索不带 category 过滤）也一字未动。
+    "trace_persistence_enabled": False,
     # G5-D：治理判 ASK 时，执行咽喉阻塞等待人工裁决的上界（秒）。
     # 为什么必须有键、而不是在代码里写字面量：把"不阻塞"改成"阻塞"之后，
     # 没有上界的阻塞就是永久挂起——审批人在别处、不点、会话就永远卡在这一次调用上。
