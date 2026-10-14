@@ -2972,3 +2972,15 @@ tests/unit/memory/test_engineFlushConvergesFetchFace.py
 # 逐档单跑三次 4/4/4；活体 tests/manual/sleepRetiredSourcesNotReMergedLive.py 走真 create_app()
 # + 真 agent 的 sleep_consolidation，反证段（单独退回聚类那一击）必须红在 3→4 行那条读数上。
 tests/unit/memory/test_sleepConsolidationSkipsRetiredMemories.py
+# 批 §6-215（§6-214 那张票的甲案）：正文出口 `Memory.to_dict()` 必须把 embedding 带得出去。
+# `from_dict()` 当年只补了读侧（M-16 注释还写着"round-trip 即丢"），写侧 23 个键里没这个字段
+# ⇒ 凡经 `get_all_memories()` 的读面都失明嵌入这件事，而睡眠聚类的相似度只在两侧都有嵌入时
+# 才算得出 ⇒ "合并"在自动路上从未触发过。5 格构成——出口带值 1、空值统一给 [] 而非 None/缺键 1、
+# round-trip 不丢 1、**从生产出口走完整条链能真聚出 ≥2 源簇** 1（形态集第 189 条要求的形状：
+# 只在转换之后补数据的判据测得到逻辑、测不到路通不通）、"写侧今天仍没人填嵌入 ⇒ 本批不让合并
+# 当场开工" 1（现值绿，红由变异 M5 提供；另 M6 空值给 None 咬形状格、M7 出口截断咬三格）。
+# 逐档单跑三次 5/5/5；活体 tests/manual/memoryEmbeddingReachesConsolidationLive.py 走真
+# create_app() + 真 agent 的 sleep_consolidation，读出 face_embedding_lengths=[4,4,0] 与
+# round1_real_merge=[[mem_000001, mem_000002]]——这条路第一次真走通；反证删那一行必须红在
+# "聚类退回全单例簇"上。
+tests/unit/memory/test_memoryToDictCarriesEmbedding.py
