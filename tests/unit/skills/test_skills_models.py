@@ -27,9 +27,16 @@ class TestSkillSource:
         assert SkillSource.BUILTIN.value == "builtin"
 
     def test_skill_source_members(self):
-        """测试所有成员"""
-        members = list(SkillSource)
-        assert len(members) == 3
+        """`Skill.source` 那一段词汇钉死为三个，整份枚举是两段的并集（7 个）。
+
+        合并前这里写的是 `len(list(SkillSource)) == 3`——那时"三个"就是全部；
+        现在 `SkillSource` 一份类型装两段词汇，字段允许的取值集合必须显式说出，
+        否则"成员数"这类断言既管不住越段，也会在下次并新源时悄悄漂掉。
+        """
+        assert SkillSource.installSources() == frozenset({
+            SkillSource.LOCAL, SkillSource.MARKETPLACE, SkillSource.BUILTIN})
+        assert len(list(SkillSource)) == 7, (
+            f"整份枚举应当是装载来源 3 + 市场源 4（LOCAL 同值共用）＝7，实得 {len(list(SkillSource))}")
 
 
 class TestSkillInfo:

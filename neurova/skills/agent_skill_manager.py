@@ -7,9 +7,26 @@ Agent 技能管理器
 from pathlib import Path
 
 from neurova.core.logger import get_logger
+from neurova.skills.models import SkillSource
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+
+def marketSourceOf(value: Any) -> SkillSource:
+    """把市场源写成枚举：认枚举、认裸串，认不出来回落 GITHUB（既有行为，一字未改）。
+
+    此前这段转换在同一个方法里写了两份（dict 一份、带属性对象一份），
+    两份都是 `SkillSource(str(v).lower())` + `except ValueError → GITHUB`。
+    `RemoteSkill.__post_init__` 会做同一件转换，但它对"认不出来"是 raise，
+    而这里要的是既有那条静默回落——所以留着这一份，不留两份。
+    """
+    if isinstance(value, SkillSource):
+        return value
+    try:
+        return SkillSource(str(value or "github").lower())
+    except ValueError:
+        return SkillSource.GITHUB
 
 
 class AgentSkillManager:
@@ -250,30 +267,17 @@ class AgentSkillManager:
         # SkillHubClient.install_skill 接受 RemoteSkill 对象
         try:
             if hasattr(self.importer, "install_skill"):
-                from neurova.skills.hub_client import RemoteSkill, SkillSource
+                from neurova.skills.hub_client import RemoteSkill
+                from neurova.skills.models import SkillSource
 
                 # 将搜索结果统一转为 RemoteSkill
                 if isinstance(skill_info, RemoteSkill):
                     remote_skill = skill_info
                 elif isinstance(skill_info, dict):
-                    # 字符串 source 转 SkillSource 枚举（github/clawhub/lobehub/modelscope/local）
-                    raw_source = (
-                        skill_info.get("source")
-                        or skill_info.get("market")
-                        or "github"
-                    )
-                    try:
-                        source_enum = (
-                            raw_source
-                            if isinstance(raw_source, SkillSource)
-                            else SkillSource(str(raw_source).lower())
-                        )
-                    except ValueError:
-                        source_enum = SkillSource.GITHUB
-
                     remote_skill = RemoteSkill(
                         name=skill_info.get("name", skill_name),
-                        source=source_enum,
+                        source=marketSourceOf(
+                            skill_info.get("source") or skill_info.get("market")),
                         description=skill_info.get("description", ""),
                         version=skill_info.get("version", "0.0.0"),
                         url=skill_info.get("url", ""),
@@ -281,19 +285,9 @@ class AgentSkillManager:
                     )
                 else:
                     # SearchResult 等带属性对象
-                    raw_source = getattr(skill_info, "source", "github")
-                    try:
-                        source_enum = (
-                            raw_source
-                            if isinstance(raw_source, SkillSource)
-                            else SkillSource(str(raw_source).lower())
-                        )
-                    except ValueError:
-                        source_enum = SkillSource.GITHUB
-
                     remote_skill = RemoteSkill(
                         name=getattr(skill_info, "name", skill_name),
-                        source=source_enum,
+                        source=marketSourceOf(getattr(skill_info, "source", "github")),
                         description=getattr(skill_info, "description", ""),
                         version=getattr(skill_info, "version", "0.0.0"),
                         url=getattr(skill_info, "url", ""),
