@@ -2963,3 +2963,12 @@ tests/unit/core/test_packageInitBindsNoUnusedGenericNames.py
 # 逐档单跑三次 8/8/8；活体 tests/manual/sleepConsolidationReadFaceLive.py 的
 # same_process_bodyRows_visible_in_fetch 由 0 变 1——那个期望是上一批预先写在档头的，不是事后补的。
 tests/unit/memory/test_engineFlushConvergesFetchFace.py
+# 批 §6-214：睡眠固化不得把已 soft-forget 的源当活跃记忆再合并一次（两击同根，缺一即漏）。
+# 4 格里 2 格真红转绿——跨界转换必须认得 `lifecycle_stage` 这个真键（`Memory.to_dict()` 里
+# 压根没有 `is_archived`，此前读的是不存在的键 ⇒ 退役事实在进入固化那一刻就丢）、
+# 第二轮不得把退役源再拉进同一个簇（实测旧形状每轮稳定 +1 行，2026-09-05 全库翻倍的线性版）。
+# 另 2 格**落笔即绿**，红由变异提供：M1 把退役行重新并入 merged_memories ⇒ 1 红、
+# M2 写回不 soft-forget 源 ⇒ 3 红；M3/M4 各只退回一击，主格都照样红，这就是"两击必须一起修"的实证。
+# 逐档单跑三次 4/4/4；活体 tests/manual/sleepRetiredSourcesNotReMergedLive.py 走真 create_app()
+# + 真 agent 的 sleep_consolidation，反证段（单独退回聚类那一击）必须红在 3→4 行那条读数上。
+tests/unit/memory/test_sleepConsolidationSkipsRetiredMemories.py
