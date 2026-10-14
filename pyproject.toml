@@ -123,6 +123,7 @@ filterwarnings = [
 ]
 markers = [
     "slow: 全库扫描等耗时测试（node guard 扫 953 文件），默认仍随 pytest 运行，可用 -m 'not slow' 跳过",
+    "real_model(name, ...): 需要本地真模型权重的用例；前置由 tests/conftest.py 的权重出网门按 ModelDownloader.is_model_available 判定，缺件即 skip，不在跑测层现场下载",
 ]
 
 [tool.coverage.run]
