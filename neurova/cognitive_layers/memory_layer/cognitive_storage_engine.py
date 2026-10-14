@@ -74,6 +74,25 @@ _CARRY_KEYS = frozenset(
     {META_LAYER, META_TRACE_ID, META_CATEGORY, META_MEMORY_TYPE, META_AGENT_SCOPE}
 )
 
+#: 生产侧节点类别的**上下文可见性表态表**：每个新增类别都必须在这里点名（枚举守卫
+#: `test_everyDeclaredProducerCategory` 按 AST 扫 `UnifiedMemoryNode(category="X")` 的字面量逼这条）。
+#: 未点名的类别**默认放行**——正文库里的普通记忆（general/conversation/reflection…）本来
+#: 就走这条路进上下文，把它们并进白名单会当场掐死现网检索；所以杠杆只能是"显式禁"。
+#:
+#: `reasoning_trace` 为什么必须禁（2026-09-05 事故）：每轮对话把整条推理链
+#: （含"晚上好→晚上好呀"这类寒暄）存成记忆，而检索侧不带 category 过滤 ⇒ 寒暄链被当
+#: 相关记忆捞回上下文形成回声污染；§6-206 把持久化门接进治理面之后，"门能开"与
+#: "开了会不会污染"分成两件事，这张表负责后者。
+CONTEXT_VISIBILITY: Dict[str, bool] = {
+    "crystallized": True,     # 结晶经验：设计上就要注入
+    "reasoning_trace": False,  # 推理链回声：永不进上下文
+}
+
+
+def mayEnterContext(category: Any) -> bool:
+    """这一类节点是否允许被检索进上下文。只认这张表，别处不许再判第二遍。"""
+    return CONTEXT_VISIBILITY.get(category or "", True) is not False
+
 #: L0 攒够多少条并进正文。崩溃恢复文件在每次 store 时已落盘，未 flush 的节点
 #: 检索照样覆盖（retrieve 先扫 L0），所以阈值只决定"什么时候省一次内存态"。
 _FLUSH_THRESHOLD = 100
@@ -413,15 +432,19 @@ class CognitiveStorageEngine:
         with self._buffer_lock:
             l0Snapshot = list(self._l0_buffer)
 
+        # 回声过滤装在**记账之前**：两条支路共用同一个谓词，被丢掉的行既不返回也不 +10
+        # （先记账再过滤＝冷档被自己这次命中复活，与工单 017 那条同形）。
         results: List[UnifiedMemoryNode] = [
             node
             for node in l0Snapshot
-            if query.lower() in node.content.lower() and not self._apply_filters(node, filters)
+            if query.lower() in node.content.lower()
+            and mayEnterContext(node.category)
+            and not self._apply_filters(node, filters)
         ]
 
         for mem in self._memory.searchMemoriesFulltext(query, limit=limit):
             node = UnifiedMemoryNode.from_memory(mem).withAgentScope(self.agent_id)
-            if not self._apply_filters(node, filters):
+            if mayEnterContext(node.category) and not self._apply_filters(node, filters):
                 results.append(node)
 
         # S-4: 去重(按 id)，保留温度更高的那份
@@ -448,6 +471,9 @@ class CognitiveStorageEngine:
         巡检类调用方（结晶模式冷处理 017）需要遍历节点，但不能把"我在巡检"
         记成"这条被用了一次"——走 retrieve() 会 touch + 刷新 updated_at，
         于是闲置判定永远不成立，冷档也永远进不来。
+
+        这里**不过滤上下文可见性**：巡检的对象恰恰包括永不进上下文的那一类
+        （推理链回声行要被人降温度、归档掉），把它们藏起来等于让治理看不见。
         """
         with self._buffer_lock:
             buffered = list(self._l0_buffer)
