@@ -29,16 +29,11 @@ router = APIRouter()
 _background_tasks: set = set()
 
 # 导入协作服务
-try:
-    from neurova.collaboration.collaboration_isolation import (
-        CollaborationIsolationManager,
-        MemberRole,
-        get_collaboration_manager,
-    )
-except ImportError:
-    logger.warning("Collaboration service not available")
-    get_collaboration_manager = None
-    CollaborationIsolationManager = None
+from neurova.collaboration.collaboration_isolation import (
+    CollaborationIsolationManager,
+    MemberRole,
+    get_collaboration_manager,
+)
 
 
 class CollaborationTemplate(BaseModel):

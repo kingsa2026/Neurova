@@ -11,132 +11,73 @@ import sys
 
 logger = get_logger(__name__)
 
-# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（每个单独 try/except,避免一个失败全部 None）
-try:
-    from neurova.cognitive_layers.memory_layer import ConflictDetector
-except ImportError:
-    ConflictDetector = None
+# 从 neurova.cognitive_layers.memory_layer 各子模块重新导出主要类。
+# 此前每条都包着 `try/except ImportError: X = None`——本批拆掉之后立刻暴露出两条**一直在被吞**的
+# 坏指路：聚合模块 `memory_layer` 并不导出 GraphTraversal / SleepConsolidation，名字其实在
+# `.graph_traversal` / `.sleep` 里。旧形态下 `from neurova.memory import GraphTraversal` 拿到的是
+# None 且不报错；改指真出处之后才拿得到真类（探针实证，见台账 §6-201）。
+from neurova.cognitive_layers.memory_layer import ConflictDetector
 
-try:
-    from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer as ConversationMemoryBuffer
-except ImportError:
-    ConversationMemoryBuffer = None
+from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer as ConversationMemoryBuffer
 
-try:
-    from neurova.cognitive_layers.memory_layer import GraphTraversal
-except ImportError:
-    GraphTraversal = None
+from neurova.cognitive_layers.memory_layer.graph_traversal import GraphTraversal
 
-try:
-    from neurova.cognitive_layers.memory_layer import MoEMemoryRouter
-except ImportError:
-    MoEMemoryRouter = None
+from neurova.cognitive_layers.memory_layer import MoEMemoryRouter
 
-try:
-    from neurova.cognitive_layers.memory_layer import SleepConsolidation
-except ImportError:
-    SleepConsolidation = None
+from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
-try:
-    from neurova.cognitive_layers.memory_layer import TemperatureEngine
-except ImportError:
-    TemperatureEngine = None
+from neurova.cognitive_layers.memory_layer import TemperatureEngine
 
-try:
-    from neurova.cognitive_layers.memory_layer import UnifiedVectorStore
-except ImportError:
-    UnifiedVectorStore = None
+from neurova.cognitive_layers.memory_layer import UnifiedVectorStore
 
-# 可能不存在的类，用占位
-try:
-    from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
-except ImportError:
-    WorkingMemoryAugmenter = None
+# 其余子系统的再导出（这一组原先也各带一条 None 兜底；拆掉后全部指得通，注释随之改如实）
+from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
 
-try:
-    from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import TemporalKnowledgeGraph
-except ImportError:
-    TemporalKnowledgeGraph = None
+from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import TemporalKnowledgeGraph
 
-try:
-    from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
-except ImportError:
-    MemoryStorage = None
+from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
 
-try:
-    from neurova.cognitive_layers.memory_layer.agent_self import AgentSelfManager, SelfModel
-except ImportError:
-    SelfModel = None
-    AgentSelfManager = None
+from neurova.cognitive_layers.memory_layer.agent_self import AgentSelfManager
 
-try:
-    from neurova.cognitive_layers.memory_layer.agent_self import UserProfile
-except ImportError:
-    UserProfile = None
+from neurova.cognitive_layers.memory_layer.models import SelfModel, UserProfile
 
-try:
-    from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
-except ImportError:
-    MemoryCompressor = None
+from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
 
-try:
-    from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
-except ImportError:
-    VectorSearch = None
+from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
 
-try:
-    from neurova.cognitive_layers.memory_layer.proactive_question import ProactiveQuestion
-except ImportError:
-    ProactiveQuestion = None
+# `ProactiveQuestion` / `VersionControl` 这两个名字在仓内**没有实装**（真身分别是
+# `proactive_question.Question`+`QuestionQueueManager` 与 `version_control.MemoryVersionControl`，
+# 名字不同）。此前门面用 try/except 把它们降级成 None，谁都没发现；本批把坏指路摘掉而不是
+# 猜一个别名顶上去——要不要以真名再导出＝另一次裁定（台账 §6-201）。
 
-try:
-    from neurova.cognitive_layers.memory_layer.memory_stream import MemoryStream
-except ImportError:
-    MemoryStream = None
+from neurova.cognitive_layers.memory_layer.memory_stream import MemoryStream
 
-try:
-    from neurova.cognitive_layers.memory_layer.version_control import VersionControl
-except ImportError:
-    VersionControl = None
+# `MemoryCache` 的再导出随本批摘掉，理由三条，逐条现读可核：
+# ① `from neurova.memory import MemoryCache` 全仓零消费者（AST 数 ImportFrom(neurova.memory) 的
+#    绑定名，命中 0）；
+# ② 这条 import 与 `neurova/core/cache.py` 之间是**真循环**：`memory_layer/cache.py` 取
+#    `neurova.core.cache`，后者取 `neurova.memory.core.cache`，取包名就回头执行本 `__init__`。
+#    先 import 本门面时侥幸走通（探针实证 P1/P2/P3 三条都对），先 import
+#    `neurova.cognitive_layers.memory_layer.cache`（`tests/unit/memory/test_cache_comprehensive.py`
+#    就是这么写的）时(cache 半成品) 就撞回本行——**此前这条被 try/except 吞着，所以表现为
+#    门面上 `MemoryCache = None` 而测试照样绿**，摘掉兜底后循环才第一次露出来（本批实测：
+#    留着这行，那档测试直接 collection error）。
+# ③ 缓存实现的单一出处是 `neurova.core.cache`。顺带登记一条双源（台账 §6-201）：仓里现在有三本
+#    缓存账——`neurova/memory/core/cache.py`（实装）、`neurova/core/cache.py`（全局实例与再导出）、
+#    `neurova/cognitive_layers/memory_layer/cache.py`（薄壳再导出）。三者要不要收成一条＝另一次裁定。
+from neurova.cognitive_layers.memory_layer.security import MemorySecurity
 
-try:
-    from neurova.cognitive_layers.memory_layer.cache import MemoryCache
-except ImportError:
-    MemoryCache = None
+from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer
 
-try:
-    from neurova.cognitive_layers.memory_layer.security import MemorySecurity
-except ImportError:
-    MemorySecurity = None
+from neurova.cognitive_layers.memory_layer.models import Memory
 
-try:
-    from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer
-except ImportError:
-    ConversationBuffer = None
-
-try:
-    from neurova.cognitive_layers.memory_layer.models import Memory
-except ImportError:
-    Memory = None
-
-try:
-    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-except ImportError:
-    MemoryManager = None
+from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 # memory_layer/meta_cognition.py 已删除（零调用方死代码，2026-08 清理）
 
-try:
-    from neurova.cognitive_layers.memory_layer.models import LifecycleStage, MemoryCategory, MemoryType
-except ImportError:
-    MemoryCategory = None
-    MemoryType = None
-    LifecycleStage = None
+from neurova.cognitive_layers.memory_layer.models import LifecycleStage, MemoryCategory, MemoryType
 
-try:
-    from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
-except ImportError:
-    EmotionAnalyzer = None
+from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
 
 try:
     from neurova.cognitive_layers.emotion_context_layer.emotion import (
@@ -147,8 +88,8 @@ except ImportError:
     EMOTION_KEYWORDS = {}
     EMOTION_WEIGHTS = {}
 
-# 兼容性别名
-ProactiveQuestionManager = ProactiveQuestion
+# 兼容性别名（`ProactiveQuestionManager = ProactiveQuestion` 这一条随上面坏指路一起摘除：
+# 右边那个名字在仓内没有实装，旧形态下它是 None，于是这个别名也是 None，没人发现）
 
 # 为了支持 `from neurova.memory.xxx import ...` 这样的导入
 _MODULE_MAP = {
@@ -187,13 +128,10 @@ __all__ = [
     "SleepConsolidation",
     "MemoryCompressor",
     "VectorSearch",
-    "ProactiveQuestionManager",
     "AgentSelfManager",
     "ConversationBuffer",
     "MemoryStream",
     "ConflictDetector",
-    "VersionControl",
-    "MemoryCache",
     "MemorySecurity",
     "MemoryManager",
     "MetaCognition",

@@ -22,10 +22,7 @@ from neurova.agent.memory_retrieval_chain import (
 
 
 # 待实现的适配器（红测：导入失败时跳过文件报错，用 pytest.importorskip 语义）
-try:
-    from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
-except ImportError:
-    KnowledgeRetrieverAdapter = None
+from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 
 
 @pytest.fixture(autouse=True)

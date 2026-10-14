@@ -22,15 +22,9 @@ from neurova.tts.base import TTSBase
 from neurova.tts.edge_tts import EdgeTTS
 from neurova.tts.mock_tts_simple import MockTTSSimple
 
-try:
-    from neurova.tts.moss_nano import MOSSNanTTS
-except ImportError:
-    MOSSNanTTS = None
+from neurova.tts.moss_nano import MOSSNanTTS
 
-try:
-    from neurova.tts.sapi5_tts import SAPI5TTS
-except ImportError:
-    SAPI5TTS = None
+from neurova.tts.sapi5_tts import SAPI5TTS
 
 logger = get_logger(__name__)
 

@@ -14,10 +14,7 @@ from neurova.tts.manager import TTSConfig, TTSManager
 from neurova.tts.mock_tts_simple import MockTTSSimple
 from neurova.tts.model_downloader import ModelDownloader, get_model_downloader
 
-try:
-    from neurova.tts.moss_nano import MOSSNanTTS
-except ImportError:
-    MOSSNanTTS = None
+from neurova.tts.moss_nano import MOSSNanTTS
 
 __all__ = [
     "TTSBase",

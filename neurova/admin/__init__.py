@@ -7,18 +7,7 @@ Neurova 管理员服务
 3. 数据清理
 """
 
-from neurova.core.logger import get_logger
-_logger = get_logger(__name__)
 
-try:
-    from neurova.admin.admin_service import AdminService
-except ImportError as _e:
-    _logger.debug("AdminService 未可用: %s", _e)
-    AdminService = None
+from neurova.admin.admin_service import AdminService
 
-try:
-    from neurova.admin.resource_quota_manager import ResourceQuotaManager, ResourceUsage
-except ImportError as _e:
-    _logger.debug("ResourceQuotaManager 未可用: %s", _e)
-    ResourceQuotaManager = None
-    ResourceUsage = None
+from neurova.admin.resource_quota_manager import ResourceQuotaManager, ResourceUsage

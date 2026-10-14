@@ -14,28 +14,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, List, Optional
 
 # Cost tracking imports
-try:
-    from neurova.models.cost_tracking import (
-        track_llm_call,
-        record_llm_cost,
-        LLMProvider,
-        LLMDirection,
-    )
-except ImportError:
-    # Fallback if cost tracking not available
-    def track_llm_call(**kwargs):
-        def decorator(func):
-            return func
-        return decorator
-
-    def record_llm_cost(**kwargs):
-        return None
-
-    class LLMDirection:  # noqa: N801 - 兼容占位
-        INPUT = "input"
-        OUTPUT = "output"
-
-    LLMProvider = None
+# 此前这条 import 包着 `except ImportError` 并当场定义了四件套回退（decorator 桩、
+# `record_llm_cost` 空实现、`LLMDirection` 兼容类、`LLMProvider = None`）。
+# `neurova/models/cost_tracking.py` 存在且顶层无第三方依赖，四个名字全在（探针实证）
+# ⇒ 那套回退今天走不到；留着就是把"记账可能整个静默失效"这件事写在代码里。
+from neurova.models.cost_tracking import (
+    track_llm_call,
+    record_llm_cost,
+    LLMProvider,
+    LLMDirection,
+)
 
 # 声明式 provider 兼容开关（P0-2）：懒加载防循环导入（provider_compat 只依赖
 # 标准库，但 llm/ 包 __init__ 有重初始化链，保守走函数内导入）
