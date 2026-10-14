@@ -1000,11 +1000,18 @@ class MemoryManager:
             mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
         )
 
-    def persist_memory_batch(self, mems: List[Memory]) -> None:
+    def persist_memory_batch(self, mems: List[Memory]) -> bool:
         """批量持久化（审计 P1-D2：单事务 executemany，替代逐条
-        connect+commit——recall 对 top-N touch 落盘曾致每轮 10 次 fsync）。"""
+        connect+commit——recall 对 top-N touch 落盘曾致每轮 10 次 fsync）。
+
+        返回值＝这批**到底落地了没有**。异常照旧只告警不抛（召回那侧的 touch 落盘是
+        副作用，一次查询不该因为温度没写回而整条打回），但要保数据的调用方必须按
+        返回值办：引擎的 flush 就是——它若把没落地的批次连同 L0 与恢复文件一起清掉，
+        M-11 那条「写入失败不清缓冲」的承诺就是从下面被破掉的（§6-211 实测）。
+        """
         if not getattr(self, "_persist_db_path", None):
-            return
+            logger.warning("正文库路径未配置：%d 条批量持久化没有落地", len(mems))
+            return False
         conn = getattr(self, "_persist_conn", None)
         try:
             if conn is not None:
@@ -1023,6 +1030,8 @@ class MemoryManager:
                         self._persist_upsert(conn, m)
         except Exception as e:
             logger.warning("Persist memory batch failed (%d mems): %s", len(mems), e)
+            return False
+        return True
 
     def _persist_memory(self, mem: Memory):
         """将单条记忆写入 SQLite 持久化（经常驻连接；批量入口见
