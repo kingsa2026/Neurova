@@ -3412,7 +3412,7 @@
     - **净 LOC**：生产池 **+89/−20＝净 +69**（`core/data_root.py` +77＝四个单点与理由注释 + `adoptLandingFrom` 上那句"主目录族不要直用"；四族调用点合计 −20）。测试基建池 **+459/−4**（新判据 229、活体 207、§6-203 档 +23/−4）。文档池 +6/0（`DEPLOYMENT_CONFIG.md` 的收养权利口径）。**本提交正文自己有一处数字口误留此对账**：`981a83e2` 正文把测试基建池写成「+252/−4」，`git show --numstat` 复算真值为 **+459/−4**（229+207+23），分池逐项列的那三个数是对的。
     - **登记不修（一处同形）**：`adoptLegacyLanding()`＝「仓库根旧物 → 注入的数据根」的同形状无闸搬迁。今天没造成事故只因仓根当前**没有**那些旧物（实测 `ls -d storage logs uploads checkpoints trajectories` 数到 0 个命中，`config/`、`logs/` 在仓根但不是收养目标形状）；一旦有人在仓根重新落下同名物，任何一次跑测就会把它搬进临时根。**撞见时机**：谁把一个新面接进 `dataLanding(..., legacy=...)` 且旧物真在仓根存在时——那一批必须先决定这条腿要不要一并收口（新旧两侧都在项目内、搬它是设计意图，故本批不动，但也不能默认它安全）。
     - **常驻红如实上报（不认领）**：`tests/unit/ci/test_subprocessTextEncodingRatchet.py::test_ratchetDoesNotRise` 在 HEAD 即红，offender 集 `{scripts/desktop/wsl_crash_cleanup.py: 2, tests/unit/core/test_temp_reclaim.py: 1, tests/unit/desktop/test_disk_headroom_gate.py: 1}` 三处同源于并发提交 `20049e5d`，而该棘轮的 `BASELINE` 自 `306ddf28` 起未跟改。把本批两个新档移出扫描面复跑，offender 集逐字不变 ⇒ 与本批无关、本批未给这档添格（新活体的 env 改写收在 `main()` 内、`subprocess.run` 带 `encoding="utf-8"`，另两道棘轮 8 格全绿）。
-    - **现场注意（待用户处置）**：Temp 里那份副本仍在 `C:\Users\xccoo\AppData\Local\Temp\neurovaDataRoot-8ur_l8p6\`——含 13 份加密凭据与 909KB 审计库的**第二份**。复原取的是「复制 + 哈希一致后保留原件」，没代用户删 Temp；要清掉那份重复凭据须一句授权。`~/.neurova` 里剩下的六处家目录落点表（承 §6-203「登记不修」）未变。
+    - **现场注意（已处置）**：那份被搬进 Temp 的第二份已在用户授权后删除；删前先对账——18 个 provider id 逐条按**条目内容指纹（含加密凭据字段）**与现役 `data/llm/providers.json` 全等、`audit_logs` 两侧同为 2361 行、白名单在数据根在场，三项皆过才 `rmtree` （Temp 根 `neurovaDataRoot-8ur_l8p6` 共 65 个文件、36,558,774 字节）。判据形态记进形态集第 165 条；`~/.neurova` 里剩下的六处家目录落点表（承 §6-203「登记不修」）未变。
     - **本会话下一枚空号现查 §6-206。**
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
