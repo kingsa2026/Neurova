@@ -2934,3 +2934,13 @@ tests/unit/memory/test_recallContextFilterKeepsEchoRowsOut.py
 # 挡不住结晶类进上下文（结晶按设计就该注入），所以寒暄只能不吃票。
 # 活体 `tests/manual/crystallizerEvidenceFromFeedbackLive.py` 带反证基线（未点赞时 evidenced=0）。
 tests/unit/cognitive/test_crystallizerTurnEvidenceFromUserFeedback.py
+# 批 46（§6-210）：技能门面只留被经取用的两个名字，`SkillSource` 两份枚举并成一份。7 格按接缝分段：
+# 门面侧 2 格（AST 比"包级绑定的名字"与"生产侧经该包路径取用的名字"两个集合 + 反空转配对格，
+# 缺后者则"只挂 2 个"可以靠把活着的那两个也摘掉来假绿）；枚举侧 5 格（全仓只准一份类定义、
+# 7 个成员值逐字锁住落盘词汇、两段取值域作为数据显式存在、`Skill.source` 仍收存储写的裸串——
+# 本批刻意不给它加运行时拒绝，因为 manifest 上还有第三套词汇未裁、加了就是借道上线、
+# 取径不许借 hub_client 转手）。
+# 合并带出的语义变更是实测过的：`SkillSource.LOCAL == "local"` 由假变真、`json.dumps` 由 TypeError
+# 变 "local"；`RemoteSkill.__post_init__` 的验段是"弱者那份保护"的落点，变异 M6/M7 专钉它。
+# 逐档单跑三次 7/7/7；活体面在同档 `tests/manual/deadImportFacade_batch42.py` 的 [1][6][8] 三项读数。
+tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py
