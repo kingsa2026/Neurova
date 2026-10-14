@@ -5,9 +5,6 @@ Neurova 认证模块:
 提供统一的认证接口
 """
 
-from neurova.core.logger import get_logger
-logger = get_logger(__name__)
-
 try:
     from neurova.auth.enhanced_user_model import EnhancedUserModel
 except ImportError:
@@ -43,12 +40,6 @@ try:
     from neurova.auth.user_group_model import UserGroupManager
 except ImportError:
     UserGroupManager = None  # type: ignore[assignment,misc]
-
-# auth imports
-try:
-    pass
-except ImportError as e:
-    logger.debug("部分 auth 子模块导入失败: %s", e)
 
 __all__ = [
     "EnhancedUserModel",
