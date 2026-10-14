@@ -39,21 +39,6 @@ try:
 except ImportError as _e:
     _mem_layer_logger.debug("temperature 未可用: %s", _e)
 
-try:
-    pass
-except ImportError as _e:
-    _mem_layer_logger.debug("conversation_buffer 未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _mem_layer_logger.debug("sleep 未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _mem_layer_logger.debug("graph_traversal 未可用: %s", _e)
-
 # 认知图谱存储架构 — 一步到位替换
 try:
     from .cognitive_storage_engine import (
@@ -81,11 +66,6 @@ try:
     from .reasoning_trace_manager import ReasoningStep, ReasoningTrace, ReasoningTraceManager
 except ImportError as _e:
     _mem_layer_logger.debug("reasoning_trace_manager 未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _mem_layer_logger.debug("sleep_adapter 未可用: %s", _e)
 
 try:
     from .causal_reasoning import CausalReasoningEngine, get_causal_reasoning_engine
