@@ -214,6 +214,8 @@ def adoptLandingFrom(target: Path, legacy: Path) -> bool:
     与 `adoptLegacyLanding` 的分工只在"旧落点怎么算出来"：那个按仓库根推，
     本函数由调用方给绝对路径。收养规则（不覆盖、冲突点名、失败不抛）逐字同一份，
     两处各写一遍就是两条可独立漂移的救济语义。
+
+    **主目录那一族不要直接用本函数**——它无闸，见 `adoptHomeLanding()` 的理由。
     """
     if not legacy.exists():
         return False
@@ -228,6 +230,81 @@ def adoptLandingFrom(target: Path, legacy: Path) -> bool:
         return False
     logger.info("旧落点已收养：%s → %s", legacy, target)
     return True
+
+
+def homeAdoptionAllowed() -> bool:
+    """本进程有没有权利把 `~/.neurova/` 的旧物搬走。
+
+    收养是 `shutil.move`，搬走即不在原地，而主目录**不属于这个项目**——它是操作者
+    本人的东西。只有"这个进程的数据根就是操作者自己的那一址"时，一次启动才配被当成
+    一次升级。数据根被显式指到别处时（跑测临时根、取证探针的隔离根、别人指定的目录），
+    这个进程连目标根会不会长期存在都不知道，动了就是事故：§6-203 落地后的一次普通跑测
+    （`tests/conftest.py:58` 注入临时根，而 home 没被一起隔离）实测把开发者的
+    `providers.json`（18 家、13 份加密凭据）、`audit.db`（2361 行）、
+    `governance_whitelist.json` 搬进了 `Temp/neurovaDataRoot-<随机>/`。
+
+    判据只看注入值与默认推导是否同址：把 `NEUROVA_DATA_DIR` 显式写成默认那一址的
+    部署照旧收养，闸不是总开关。
+    """
+    injected = (os.environ.get(DATA_ROOT_ENV) or "").strip()
+    if not injected:
+        return True
+    try:
+        root = get_data_root()
+    except ValueError:
+        # 非法注入值连目标根是谁都定不下来，更没权利动别人的主目录。
+        return False
+    return root == _REPO_ROOT / _DEFAULT_DATA_DIR
+
+
+@functools.lru_cache(maxsize=256)
+def homeAdoptionSkippedOnce(legacy: str, root: str) -> None:
+    """跳过收养要点名一次：静默跳过等于让操作者以为"配置没生效"。
+
+    桌面部署把数据根长期指到 AppData 那类位置是正当形态，那种情况下旧物**不会**自动
+    进门，必须让人知道它还在 `~/.neurova` 里、以及怎么才能把它收进去。按落点对去重，
+    与 `nameConflictOnce` 同一口径（落点解析在读写路径上被反复调用）。
+    """
+    logger.warning(
+        "主目录旧物 %s 未被收养：本进程的数据根是 %s，不是操作者自己的那一址。"
+        "要收进数据根，请在默认数据根下启动一次本仓，或手工搬移。", legacy, root)
+
+
+def adoptHomeLanding(target: Path, *homeParts: str) -> bool:
+    """把 `~/.neurova/<homeParts>` 的旧物收进当前数据根——**只在此进程代表操作者本人时动手**。
+
+    主目录族收养的唯一入口：`legacyHomeLanding()` 的取法、`homeAdoptionAllowed()` 的
+    权利判定、`adoptLandingFrom()` 的搬迁规则都在这里合一次，四处调用点各判一遍就会
+    各漂一遍。仓库根旧物没有这个问题（旧物与新物都在本项目内，搬它就是设计意图），
+    仍走 `adoptLegacyLanding()`。
+    """
+    legacy = legacyHomeLanding(*homeParts)
+    if not legacy.exists():
+        return False
+    if not homeAdoptionAllowed():
+        homeAdoptionSkippedOnce(str(legacy), str(get_data_root()))
+        return False
+    return adoptLandingFrom(target, legacy)
+
+
+def adoptHomeLandingGlob(targetDir: Path, *homeParts: str, pattern: str) -> int:
+    """收养主目录旧目录下匹配 `pattern` 的每一份，返回搬动数。
+
+    供应商配置是"全局那份 + 每个 scope 一份"的形状，逐份收养是既有语义；把 glob 也收
+    进带闸的入口，是因为枚举本身就得够着主目录——让调用方自己算目录再逐个调原语，
+    等于把上面那道权利判定绕过。
+    """
+    legacyDir = legacyHomeLanding(*homeParts)
+    if not legacyDir.is_dir():
+        return 0
+    if not homeAdoptionAllowed():
+        if any(legacyDir.glob(pattern)):
+            homeAdoptionSkippedOnce(str(legacyDir), str(get_data_root()))
+        return 0
+    return sum(
+        1 for legacy in sorted(legacyDir.glob(pattern))
+        if adoptLandingFrom(targetDir / legacy.name, legacy)
+    )
 
 
 def nameConflictOnceFor(target: Path, legacy: Path) -> None:
