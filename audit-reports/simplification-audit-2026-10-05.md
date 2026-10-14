@@ -3496,6 +3496,23 @@
     - **本会话下一枚空号现查 §6-208**（207＝本批；写前必现查 `grep -oE '^[0-9]+\. \*\*' | sort -n | tail`，
       别按上一条 +1——204/205/206 这几天是被并发会话连着占的）。
 
+208. **回声行永不进上下文：检索侧按节点类别过滤，且过滤装在记账之前；睡眠固化族的 §7 对比档案同批产出（✅ `66cfc70d`）**
+    - **号占说明（又踩一次，记形状）**：本批生产提交 `66cfc70d` 的标题写的是 §6-207，而该号在 A/B 跑的十几分钟里被并发会话的「缓存三本账收成一条」（`2cd14598`）占走 ⇒ 台账实际落账 **208**，引用请以本格为准；按「错号只落勘误、不改写已提交历史」处置，不改笔。这是本会话第二次撞号（前一次是 §6-205），形状相同：**取号的时刻必须是落笔那一刻，不能是开工那一刻**。
+    - **为什么先做过滤器**：用户对 §6-206 第一张票裁定「先补检索侧过滤再接票据」。2026-09-05 事故的读侧成因一直是同一句：每轮对话把整条推理链（含寒暄）存成记忆，而检索侧不带 category 过滤 ⇒ 寒暄链被当相关记忆捞回上下文。§6-206 把门接进治理面之后，"门能开"与"开了会不会污染"分成两件事，先钉后者前者才敢拨。
+    - **形状是"默认放行 + 显式禁"，不是白名单**：现场实测正文库里现有行是 `default 12 行 general / kai 3 general + 1 reflection`，普通记忆本来就靠统一检索进上下文——把它们并进白名单会当场掐死现网检索。所以 `CONTEXT_VISIBILITY` 只点名"已表态"的类别（`crystallized: True` / `reasoning_trace: False`），`mayEnterContext()` 对未点名者默认放行；判据里有一格专钉 `mayEnterContext("general") is True`。
+    - **过滤装在记账之前**（顺序不能倒，倒了就复现工单 017 那一族）：`retrieve()` 的 L0 支路与正文支路共用同一个谓词，被丢掉的行既不返回也不 `touch()`/`creditRecallHits`——否则那行已挨过 +10，冷档被自己这次命中复活。`iter_nodes` 巡检口**不过滤**并写明理由：要治理的恰是永不进上下文那一类，藏起来等于让治理看不见。
+    - **枚举报示逼新类别表态**：按 AST 扫 `UnifiedMemoryNode(category="X")` 的字面量，未在 `CONTEXT_VISIBILITY` 点名即红（现场实算全仓只有 2 个字面量：`pattern_crystallizer.py:365`、`reasoning_trace_manager.py:167`）；另按代码形态数 `CONTEXT_VISIBILITY`/`mayEnterContext` 的定义处各只准 1 处。
+    - **判据 11 格**（`tests/unit/memory/test_recallContextFilterKeepsEchoRowsOut.py`，逐档单跑 11/11/11）：4 格行为（引擎取不到 / L0 未 flush 那份也取不到 / 统一检索口取不到 / 被丢掉的行不被记账）+ 4 格词表与单源（其中 4 格第一版红在新符号 `ImportError` 上，与行为红**分开报**）+ **3 格改码前就该绿的反证**：`test_theProductionPathActuallyWroteIt`（真生产路确实存了一行，缺它则"取不到"可能只是没写进去）、`test_crystallizedPatternStillEnters` 与 `testOrdinaryBodyRowStillEnters`（同一次查询捞得到别的东西，缺这两格"没泄漏"就是空转读数）。
+    - **一格改判**：`test_cognitive_graph_integration.py::test_reasoning_trace_stored_and_retrievable` 的原名后半句「可检索」正是事故读侧行为，被新过滤器判红。改判为 `…_is_stored_but_never_enters_context`——存得下与永不进上下文各钉一格，原契约的"存储侧"意图没松。
+    - **红自证**：只 stash 生产那一档（`-m red-selfproof-207-echoFilter`）⇒ `9 failed, 3 passed`，失败集恰等本批 8 格新判据 + 1 格改判；`apply` 后 numstat 复算一致（28/2）才 drop。
+    - **A/B**（memory + cognitive + cognitive_layers）：基线 `24 failed 1 error 2117 passed` ↔ 本树 `15 failed 2126 passed`，**仅本树红 0 条 = AB_PASS**；仅基线红 10 条 = 本批 8+1 判据 + 那条连续两轮都在基线侧出现、本树整目录与单跑皆绿的 `test_decay_cycle_bounded::test_no_max_processes_all` ERROR（判顺序偶发，不认领）。本树余下 15 条（含 `test_pattern_crystallizer.py` 8 条、`tests/unit/memory/core/test_manager.py` 3 条等）与基线**逐条同名** ⇒ 预存，不认领。
+    - **活体**（`tests/manual/traceGateGovernanceFaceLive.py` 扩到 22 项读数，exit=0）：真 app + 真 agent 的统一检索口 ⇒ `body_has_echo_row: 1`、`echo_leaked_into_context: false`、`ordinary_row_still_returns: true`、`echo_row_not_credited: true`；§6-206 原有读数（默认不写 / PUT 开则 L0 +1 / env 显式 0 压住 / 拨回不写）全部保持。
+    - **净 LOC 与一处数字口误**：生产池 **+28/−2＝净 +26**（`cognitive_storage_engine.py`：两张表 + 谓词 + 两条支路各一个条件 + `iter_nodes` 的理由段）。测试基建池真值 **+308/−8**（新判据档 244 行、改判档 +23/−7、活体档 +41/−1），**而 `66cfc70d` 正文写成「+237/−8、新档 190 行」**——两处都偏小，且这次是"先把数写进正文再测"造成的，正好撞在形态集第 167 条（分项与合计分处两段、分项对而合计错）的新变体：**分项也没测就直接落字**。流程收紧为"numstat 出表 → awk 现场加总 → 才允许出现合计数"。
+    - **§7 先比后合（第三张票）已出档案**：`audit-reports/sleep-consolidation-family-comparison-2026-10-14.md`。两条硬证据决定判定——① 壳的 `_fetch_memories` 走 `retrieve("")`，而 `searchMemoriesFulltext` 对空查询在 `manager.py:555` 恒返回 `[]` ⇒ 它**只看得到 L0，拿不到 §6-202 之后的正文库**（是错读面不是更宽读法）；② 覆盖面现役那份是严格超集（梦境/洞察/冲突审计/真写回/设置日志壳都没有，因为它 `:48` 另 new 时不传 `memory_manager`/`settings_store`/日志路径）。判定 **可退役**，同批动作（删档 + 删该档 5 格 + 改指三处文档）与退役判据钉法写在档案 §5。
+    - **档案里跑出的两条额外界**：① 那族**四份实现不是同一功能**——`modules/sleep_module.py` 与 `core/flow_orchestrator.py` 是不落盘的判据器（各自生产零消费者），不许并成"四份重复实现"一起处理；② 壳退役后 `CognitiveStorageEngine.get_statistics()` 生产零消费者（只剩活体探针在读）⇒ **需人裁**，档案建议保留并登记，不顺手删。
+    - **顺带登记一条门禁缺口**：睡眠固化族（HTTP 13 端点 + 每 10 回合自动跑 + 写回正文库）**0 格进 `protected_tests.txt`** `[实]`。要补的那格要点写在档案 §5 末：断"`run_sleep_cycle` 真把合并结果写进 A1 且 ≥2 源才新增"，不能只断返回值形状。属另一批。
+    - **本会话下一枚空号现查 §6-209。**
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
