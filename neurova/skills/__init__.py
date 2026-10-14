@@ -15,7 +15,7 @@ Skills System 1.0.0 - 技能系统
 本包是技能子系统的统一外观入口：`from neurova.skills import create_default_skills /
 get_skill_registry` 都从这里取。
 
-**这里只挂"确实有人经门面取用"的名字**（现算 2 个，出处 `agent_core.py:861,1257,1523`
+**这里只挂"确实有人经门面取用"的名字**（现算 2 个，出处 `neurova/agent_core.py:861,1257,1523`
 与 `api/endpoints/skill.py:121,399,487`）。此前门面再导出 47 个名字，其余 45 个在
 生产与测试两侧都零消费者——要用 `SkillInfo`/`SkillService` 的人都直取
 `from neurova.skills.models import ...`，门面因此是同一词汇表的第二份抄本
