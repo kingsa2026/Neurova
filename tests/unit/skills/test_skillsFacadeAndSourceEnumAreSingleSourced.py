@@ -3,7 +3,7 @@
 
 建档时读到的实状（现算，非记忆）：
 - `neurova/skills/__init__.py` 挂 47 个再导出名字，**生产侧只有 2 个被经门面取用**
-  （`create_default_skills`←`agent_core.py` 三处、`get_skill_registry`←`api/endpoints/skill.py`
+  （`create_default_skills`←`neurova/agent_core.py` 三处、`get_skill_registry`←`api/endpoints/skill.py`
   三处）；其余 45 个生产与测试两侧都零消费者——两边用的都是
   `from neurova.skills.models import ...` 这种直取。批 42 已经把那 48 个 `X = None`
   占位符摘掉，但"门面挂一份没人读的词汇表"这条 §2 断点留在原地。
