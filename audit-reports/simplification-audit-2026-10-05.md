@@ -3553,8 +3553,15 @@
       只翻一侧就是判据与设计口径互相打脸。在那之前运维要链路照旧用 `NEUROVA_TRACE_PERSIST=1` 临时拨，
       能力没有丢。**上一格（§6-206）里的 `:156`/`:178` 两个行号已被本批次的改动位移，现读为门在
       `:150-166`、读侧在 `:184`；旧格不改写，此处记对账。**
+      **2026-10-15 追加一条前置（§6-211 实测撞出，裁定不变、前置由两条并成三条）**：除读侧消费者
+      之外，还须**给睡眠固化那条腿补类别可见性**。它的取数面是 `manager.get_all_memories()`
+      （进程内缓存，§6-208 那道门不在这条腿上），重启后 `reasoning_trace` 行进得来，而固化拿到的
+      `MemoryRecord.categories` 活体实测是 `[]`（类别只活在 `metadata.cse_category`）⇒ 只补读侧就翻
+      默认值，等于给固化喂它自己的输出，2026-09-05 那笔账换个入口复现。三条前置齐了才谈翻。
       ② `sleep_adapter.py` 那层壳的退役（仍需一次裁定：档案判"可退役"，同批要删档 + 删该档 5 格 +
-      改指三处文档，另需裁 `CognitiveStorageEngine.get_statistics()` 的去留）；
+      改指三处文档，另需裁 `CognitiveStorageEngine.get_statistics()` 的去留）。**§6-211 已把这张票
+      缺的那块比对基准补上**：壳看 L0、原生类看进程内缓存，**两者都不等于正文单源**——原先那句
+      "谁更强"要按这条新事实重问；
       ③ 睡眠固化族 0 格进子集（仍需一次裁定）。
     - **本会话下一枚空号现查 §6-210。**
 
@@ -3576,7 +3583,7 @@
     - **仍开（本批没动）**：① `manifest.source` 上那**第三套词汇**（`auto`/`synthesized`）没有任何类型承载，与本批并起来的二段词汇并存——是否收进 `SkillSource` 或另立一个键，需一次裁定；② 若哪天要把 `Skill.source` 也收紧成"只许装载段"，前置是先给存储里已有的越段值出一份清单（现算至少 `auto`/`synthesized` 两类），否则就是让门拒真数据；③ 上面那 360 个门面名字的三态分流；④ 批 45 登记的两条缓存欠账（`cached` 装饰器生产零消费者、`MemoryCache` 五个跨模块零调用方法）一行未动。
     - **本会话下一枚空号现查 §6-211。**
 
-211. **正文单源收口后留下一张滞后的第二读面：`get_all_memories()` 取的是进程内缓存，经引擎写入的行同进程看不见（实据登记，零生产改动，需一次裁定）** 🟡
+211. **正文单源收口后留下一张滞后的第二读面：`get_all_memories()` 取的是进程内缓存，经引擎写入的行同进程看不见（✅ `7f8bd08b` 台账+活体档，零生产改动；处置需一次裁定）** 🟡
     - **撞见路径（不是新题，是复核 ② 时撞出来的）**：为「壳 vs 原生类」那张先比后合的票复算取数面时才问出这一件。§6-208 当时写的是**壳那条腿**（`sleep_adapter._fetch_memories` → `retrieve("")` 空查询短路 ⇒ 只见 L0）；本轮要问的是**现役原生那条腿**取的是哪一份数据——答案不是正文单源。
     - **机制（三处代码位置，逐处现读）**：`cognitive_storage_engine.py:376-401 _flushL0ToBody()` 只调 `manager.persist_memory_batch()`；`manager.py:1003` 那口子只做 `_persist_upsert` + `commit`，**不动 `self._memories`**；而 `sleep.py:826` 的固化取数是 `manager.get_all_memories()`（`manager.py:2287` ＝ `[m.to_dict() for m in self._memories.values()]`）。`_memories` 的写点在 `manager.py:697/708/1523/1807/2154` 那一族常规记忆路上，引擎那条不在其中。
     - **活体读数**（`tests/manual/sleepConsolidationReadFaceLive.py`，exit=0，数据根与 agent 工作区两根都走 `_liveVerifyIsolation` 隔离）：`flushed_into_body=2` + `body_rows_after_flush=2`（写侧通）⇒ `trace_visible_via_engine_retrieve=0` 且 `ordinary_visible_via_engine_retrieve=1`（§6-208 那道门在真装配上咬得住、且不是总闸）⇒ `fetch_total=0`、`same_process_bodyRows_visible_in_fetch=0`，同档配反空转格 `managerOwnWrite_visible_in_fetch=1`（manager 自己 `add_memory` 的行看得见 ⇒ 「看不见引擎那行」不能推给探针走错支路）⇒ **模拟重启后** `after_restart_bodyRows_visible_in_fetch=1`，`restart_metadata_face` 里 `cse_category="reasoning_trace"` 还在，而 `MemoryRecord.from_dict(...).categories` 是 **`[]`**。
