@@ -2859,3 +2859,12 @@ tests/unit/memory/test_memoryDualRootMergedToOneStore.py
 tests/unit/core/test_cognitive_wal_flush_race.py
 tests/unit/test_cognitive_storage_flush_m11.py
 tests/unit/cognitive_layers/memory_layer/test_cse_fts_update_trigger.py
+# 批 §6-203：`~/.neurova/` 那族配置/状态收进数据根（凭据 providers.json、审计 audit.db、
+# 治理白名单 governance_whitelist.json、技能安装根 skills/installed）。8 格里：4 格问"经生产
+# 接缝写一次，东西在不在数据根 + 假 home 里是否零文件"、1 格问"探针清单与写侧取同一处"
+# （resolve_probe_paths 曾自己再拼一遍 home，留着就会对不存在的库报缺索引）、2 格问收养
+# （旧凭据整份搬进且内容逐字节不变；两侧同时在场时不覆盖新那份、旧物不静默消失）、
+# 1 格双向咬合的家目录落点表（按 AST 数"以 .neurova 打头的路径段"且排除文档串——按子串数
+# 会把 `.neurova_token_secret` 这类环境变量名与 api.neurova.dev 一起算成假红），
+# 新增即红、修好了不摘表也红。逐档单跑三次 8/8/8；活体另带反证子进程（退回旧 home 形态必须看见文件冒出）。
+tests/unit/core/test_homeLandingMovedIntoDataRoot.py
