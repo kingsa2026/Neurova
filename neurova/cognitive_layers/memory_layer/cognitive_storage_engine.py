@@ -376,8 +376,11 @@ class CognitiveStorageEngine:
     def _flushL0ToBody(self) -> int:
         """把 L0 并进正文库（经唯一写入口）。
 
-        M-11 的教训保留：写入失败**不清缓冲**。异常上抛由调用方日志兜底，
-        恢复文件里那条还在，崩溃后可重试——先清后写会把数据静默丢掉。
+        M-11 的教训保留：写入失败**不清缓冲**。失败有两种形状，都得留住数据——
+        写入口上抛（调用方日志兜底），或写入口把异常吞在内部只回一个 False
+        （`persist_memory_batch` 的 fail-soft 语义，为召回那侧的 touch 落盘而设）。
+        后者以前没人接：批次照清、恢复文件照收敛，那条节点就只剩"L0 里刚被删掉"
+        这一段历史——本批把它接上（§6-211）。
         """
         with self._buffer_lock:
             if not self._l0_buffer:
@@ -391,12 +394,21 @@ class CognitiveStorageEngine:
             mem = node.to_memory(self.agent_id)
             mem.neuser_id, mem.user_id = neuserId, userId
             mems.append(mem)
-        self._memory.persist_memory_batch(mems)
+        if not self._memory.persist_memory_batch(mems):
+            logger.warning("L0 未并入正文库，保留 %d 条待重试", len(nodes))
+            return 0
         writtenIds = {node.id for node in nodes}
         with self._buffer_lock:
             self._l0_buffer = [n for n in self._l0_buffer if n.id not in writtenIds]
         with self._wal_lock:
             self._convergeWal(writtenIds)
+        # 正文库与 manager 的进程内快照在这一刻是分叉的：写入口只落盘，而固化/召回那
+        # 12 个调用档读的是快照 ⇒ 引擎写的行要等下次重启才进得来（§6-211）。分歧在这点
+        # 制造就在这点收尾，且只走仓里已有的唯一对账口 `reload_memories()`——不在引擎侧
+        # 另造一份"读盘并入"，那是第二个平行体系（教义第 6 条）。
+        # 锁序是「引擎锁 → manager 的 RLock」，与上面那句写盘同向；反向不成立
+        # （manager 不引引擎，判据钉着这条前提），故不会与 WAL/L0 那两把锁互咬。
+        self._memory.reload_memories()
         logger.debug("L0 并入正文库 %d 条", len(nodes))
         return len(nodes)
 
