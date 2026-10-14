@@ -8,13 +8,7 @@ Neurova 协作模块
 4. 团队成员管理
 """
 
-from neurova.core.logger import get_logger
-_logger = get_logger(__name__)
 
-try:
-    from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager
-except ImportError as _e:
-    _logger.debug("CollaborationIsolationManager 未可用: %s", _e)
-    CollaborationIsolationManager = None
+from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager
 
 __all__ = ["CollaborationIsolationManager"]

@@ -14,16 +14,9 @@ Neurova 安全体系 2.0
 
 from neurova.core.logger import get_logger
 
-try:
-    from neurova.security.audit_logger import AuditLog
-except ImportError as _e:
-    AuditLog = None
+from neurova.security.audit_logger import AuditLog
 
-try:
-    from neurova.security.rbac import Permission, Role
-except ImportError as _e:
-    Permission = None
-    Role = None
+from neurova.security.rbac import Permission, Role
 
 
 def get_logger(name: str = "security"):

@@ -25,21 +25,13 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # 尝试导入审计日志管理器
-try:
-    from neurova.security.audit_logger import (
-        AuditEventType,
-        AuditLogEntry,
-        AuditLogger,
-        AuditSeverity,
-        get_audit_logger,
-    )
-except ImportError:
-    logger.warning("Audit logger service not available")
-    get_audit_logger = None
-    AuditLogger = None
-    AuditEventType = None
-    AuditSeverity = None
-    AuditLogEntry = None
+from neurova.security.audit_logger import (
+    AuditEventType,
+    AuditLogEntry,
+    AuditLogger,
+    AuditSeverity,
+    get_audit_logger,
+)
 
 
 class AuditLog(BaseModel):

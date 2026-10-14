@@ -25,12 +25,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 # 导入防火墙服务
-try:
-    from neurova.core.firewall import AgentFirewall, get_firewall
-except ImportError:
-    logger.warning("Firewall service not available")
-    get_firewall = None
-    AgentFirewall = None
+from neurova.core.firewall import AgentFirewall, get_firewall
 
 
 class FirewallRule(BaseModel):

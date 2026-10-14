@@ -28,14 +28,7 @@ _DEPRECATED = True
 """已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点调用 stub MarketImporter。"""
 
 # 导入技能市场导入器
-try:
-    from neurova.skills.market_importer import ImportStatus, MarketImporter, MarketSkill, get_market_importer
-except ImportError:
-    logger.warning("Market importer service not available")
-    get_market_importer = None
-    MarketImporter = None
-    MarketSkill = None
-    ImportStatus = None
+from neurova.skills.market_importer import ImportStatus, MarketImporter, MarketSkill, get_market_importer
 
 
 class MarketplaceSkill(BaseModel):

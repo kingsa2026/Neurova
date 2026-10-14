@@ -28,13 +28,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # 导入用户组服务
-try:
-    from neurova.auth.user_group_model import UserGroup, UserGroupManager, get_user_group_manager
-except ImportError:
-    logger.warning("User group service not available")
-    get_user_group_manager = None
-    UserGroupManager = None
-    UserGroup = None
+from neurova.auth.user_group_model import UserGroup, UserGroupManager, get_user_group_manager
 
 
 class GroupInfo(BaseModel):

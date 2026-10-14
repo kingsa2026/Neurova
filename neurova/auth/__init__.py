@@ -5,15 +5,9 @@ Neurova 认证模块:
 提供统一的认证接口
 """
 
-try:
-    from neurova.auth.enhanced_user_model import EnhancedUserModel
-except ImportError:
-    EnhancedUserModel = None  # type: ignore[assignment,misc]
+from neurova.auth.enhanced_user_model import EnhancedUserModel
 
-try:
-    import hashlib
-except ImportError:
-    hashlib = None  # type: ignore[assignment]
+import hashlib
 
 # FastAPI 为可选依赖
 try:
@@ -21,25 +15,13 @@ try:
 except ImportError:
     _FastAPIPath = None  # type: ignore[assignment]
 
-try:
-    from neurova.security.rbac import Permission
-except ImportError:
-    Permission = None  # type: ignore[assignment,misc]
+from neurova.security.rbac import Permission
 
-try:
-    from neurova.admin.resource_quota_manager import ResourceQuotaManager
-except ImportError:
-    ResourceQuotaManager = None  # type: ignore[assignment,misc]
+from neurova.admin.resource_quota_manager import ResourceQuotaManager
 
-try:
-    from neurova.auth.user_model import User
-except ImportError:
-    User = None  # type: ignore[assignment,misc]
+from neurova.auth.user_model import User
 
-try:
-    from neurova.auth.user_group_model import UserGroupManager
-except ImportError:
-    UserGroupManager = None  # type: ignore[assignment,misc]
+from neurova.auth.user_group_model import UserGroupManager
 
 __all__ = [
     "EnhancedUserModel",

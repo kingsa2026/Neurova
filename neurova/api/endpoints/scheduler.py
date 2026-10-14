@@ -26,14 +26,8 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # 导入调度器服务
-try:
-    from neurova.collaborate.workflow.models import ScheduledTask
-    from neurova.collaborate.workflow.scheduler import AgentScheduler, get_scheduler
-except ImportError:
-    logger.warning("Scheduler service not available")
-    get_scheduler = None
-    AgentScheduler = None
-    ScheduledTask = None
+from neurova.collaborate.workflow.models import ScheduledTask
+from neurova.collaborate.workflow.scheduler import AgentScheduler, get_scheduler
 
 
 class SchedulerStatus(BaseModel):
