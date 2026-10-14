@@ -2870,3 +2870,19 @@ tests/unit/cognitive_layers/memory_layer/test_cse_fts_update_trigger.py
 tests/unit/core/test_homeLandingMovedIntoDataRoot.py
 # 批 43（§6-201，用户点单 E 项）：把「永远走不到的 None 兜底」从 21 个门面/模块里拆掉——现按 AST+依赖闭包数是 93 个 None 占位符节点 / 136 个名字，其中 70 个节点包的是 stdlib 或仓内纯模块（其模块级闭包一个第三方都不碰）⇒ 全清；23 个包真第三方（fastapi/httpx/aiohttp/langchain_*/bcrypt/Crypto/numpy）按 AGENTS.md §3 保留。判定口径三条各配样本：直接 import 第三方＝正当；仓内模块但闭包只触及 requirements 已声明的包＝不算保留理由（仓主点单时拍的）；闭包含未声明包＝真可选，保留。拆完暴露四条一直静默为 None 的坏指路（memory 门面的 SelfModel/UserProfile 指 agent_self、GraphTraversal/SleepConsolidation 指聚合模块、ProactiveQuestion/VersionControl 全仓无实装、memory_layer.cache 与 core.cache 真循环），HEAD 现读该门面 8 个公开符号为 None。6 格里：1 格全仓零容忍（git ls-files 取集合＋3000 文件地板）、1 格两向反空转（漏认必红、误伤 §3 正当档也必红）、1 格 requirements 名归一（连字符/下划线不归一会把 langchain_openai 误判成真可选）、2 格钉坏指路改对（`is` 同一对象＆没实装的名字不许再挂 __all__）、1 格门面 None 符号必须有第三方兜底作出处。探测器口径中途从「try 体清一色 import」加宽过一次，加宽靠 M2（体里多一条赋值那一形）现场验牙。红自证 4 failed/2 passed；变异 6 枚全咬；活体 10 读数 exit=0（真 create_app 下六个被改端点面仍 401 登录门，路径逐条实跑取码）；A/B 主体仅本树红 0 条，channels 一族分四组跑：三组 AB_PASS、一组基线侧挂死（整族挂死在 HEAD 干净 worktree 里同样复现，预存缺陷，已入账）。逐档单跑三次 6/6/6。
 tests/unit/test_noFirstPartyImportPlaceholder.py
+# 批 44（§6-204，用户点单 F 项）：跑测层「真权重出网」门 + 单元档预热不载真权重。
+# 根因两处同族：`heavy_manager` 只桩 `_engines` 缓存、没桩 manager 的构造接缝（TTL 释放
+# 把链顶丢出缓存后，后台预热构造生产那个 MOSSNanTTS，本树单格 19.32s / HEAD 干净 worktree
+# 31s）；真权重用例按「目录存在」放行，而 670MB 的 `.data` 不入 git（5 只 .onnx 入）⇒
+# 干净 worktree 里那条假前置为真、权重却缺，走到 `ensure_model` 就发真 HTTPS + 退避 sleep。
+# 终点同一个：全局 timeout=30 的 thread 法打死整场 ⇒ 无汇总行 ⇒ 批 42/43 各烧掉一轮 A/B。
+# 判据 6 格里：1 格门必须装着、1 格三处下载点逐个「先点名拒绝后一字节不写」且门记了账、
+# 1 格缺件即 skip（不许现场补下载）、1 格覆盖面按**调用点**双向相等且内含一条「扫描器
+# 必须看见 `import snapshot_download as 别名` 那一形」的前置断言（只按模块比的话悄悄删
+# 一处照样看着全覆盖，变异 M1 实测咬不住；M6 把别名改掉必须红）、
+# 1 格反空转（预热被整条摘掉即红）、1 格预热不得构造真引擎。
+# 逐档单跑三次 4/4/4 与 2/2/2；宽域 A/B 两轮皆 AB_PASS 且两侧产出汇总行
+# （tts/asr/voice/deploy/desktop：基线 451 passed 7 skipped ↔ 本树 458 passed；
+# channels 整族 + api：两侧同读数 16 failed 3060 passed 4 skipped 8 errors、集合逐条相同）。
+tests/unit/test_weightEgressGateRefusesBeforeBytes.py
+tests/unit/tts/test_unitTierNeverPaysForRealWeights.py
