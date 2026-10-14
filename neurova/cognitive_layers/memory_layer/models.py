@@ -444,6 +444,13 @@ class Memory:
             # is_crystallized 单一真源 = lifecycle_stage（2026-09-08 结晶闭环）
             "is_crystallized": self.lifecycle_stage == LifecycleStage.CRYSTALLIZED,
             "is_important": bool((self.metadata or {}).get("is_important", False)),
+            # 嵌入必须出得了这道跨界口。M-16 当年只修了读侧（`from_dict()` 回填 embedding，
+            # 注释还写着"round-trip 即丢"），写侧没配平 ⇒ 这份字典 23 个键里根本没有它，
+            # 于是凡经 `get_all_memories()`（＝本函数的列表）的读面都失明这个事实：
+            # 睡眠固化的 `cluster_by_similarity` 只在两侧都有嵌入时打分 ⇒ 恒单例簇、
+            # "合并"在自动路上从未触发过（§6-214 那张票）。空值统一给 `[]`，
+            # 不给 None 也不缺键——两头与 `from_dict()` 对称，省得下游各写一套兜底。
+            "embedding": list(self.embedding) if self.embedding else [],
             "metadata": self.metadata,
             "agent_id": self.agent_id,
             "neuser_id": self.neuser_id,
