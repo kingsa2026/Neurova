@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,9 @@ from neurova.core import data_root
 from neurova.core.data_root import DATA_ROOT_ENV
 
 NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+sys.path.insert(0, str(NEUROVA.parent))  # 仓根进 sys.path，`from tests import ast_scan` 才取得到
+
+from tests import ast_scan  # noqa: E402
 
 #: 四族落点的解析函数所在文件——形状格逐个问它走没走带闸的入口。
 _FACE_FILES = (
@@ -198,11 +202,11 @@ class TestHomeAdoptionHasExactlyOneGate:
         import ast
 
         callers = set()
-        for py in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in str(py):
-                continue
+        # 枚举与解析都走 tests/ast_scan.py 的一次性入口（`filesUnder` 原地剪产物目录，
+        # `transientTree` 不留常驻语法树）——共享枚举 + 自付 ast.parse 是门禁点名的免检通道
+        for py in ast_scan.filesUnder(NEUROVA):
             try:
-                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+                tree = ast_scan.transientTree(py)
             except SyntaxError:
                 continue
             for node in ast.walk(tree):

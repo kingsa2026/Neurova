@@ -35,19 +35,44 @@
 import ast
 import json
 import pathlib
+import sys
 
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from tests import ast_scan  # noqa: E402
+
 SCOPED = [REPO / "neurova" / "channels"]
 
 
 def _scanFiles():
     files = []
     for base in SCOPED:
-        files.extend(p for p in sorted(base.rglob("*.py")) if "__pycache__" not in p.parts)
+        files.extend(ast_scan.filesUnder(base))
     files.append(REPO / "neurova" / "api" / "endpoints" / "channels.py")
-    return files
+    return sorted(set(files))
+
+
+def _trees(*pairs):
+    """把 `(名字, 源码字面量)` 变成 `(名字, 语法树)`——自证格仍按源码写，读得懂。"""
+    return [(name, ast.parse(src)) for name, src in pairs]
+
+
+def _scanTrees():
+    """`[(相对路径, 语法树)]`——解析走 `ast_scan.transientTree`（一次性入口，不留常驻树）。
+
+    原来这里是「共享枚举 + 各消费方自付 `ast.parse`」：门禁点名的免检通道形状。
+    """
+    out = []
+    for path in _scanFiles():
+        try:
+            out.append((ast_scan.relativeToRepo(path), ast_scan.transientTree(path)))
+        except SyntaxError:
+            continue
+    return out
 
 
 def _emitOffenders(sources) -> list:
@@ -60,8 +85,7 @@ def _emitOffenders(sources) -> list:
     （`wecom._deliverVoiceWithBytes` 就走这条——它由调用方把 `_make_message` 的产物交进来）。
     """
     offenders = []
-    for name, src in sources:
-        tree = ast.parse(src)
+    for name, tree in sources:
         made = set()
         annotated = set()
         makerFuncs = set()
@@ -293,9 +317,7 @@ class TestEveryEmitSitePaysTheDoor:
     """全仓按形状数，不只审"已登记的两支"——新写第三处违约就当场红。"""
 
     def testNoEmitSiteFeedsTheDoorSomethingItCannotRead(self):
-        sources = [(str(p.relative_to(REPO)).replace("\\", "/"),
-                    p.read_text(encoding="utf-8", errors="replace")) for p in _scanFiles()]
-        offenders = _emitOffenders(sources)
+        offenders = _emitOffenders(_scanTrees())
         assert offenders == [], "这些 _emit_event 投递点交给门的对象读不起：%s" % [
             (f, ln, shape) for f, ln, shape in offenders]
 
@@ -329,19 +351,20 @@ class TestEveryEmitSitePaysTheDoor:
             "    def _schedule_emit(self, message: UnifiedMessage):",
             "        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message)",
         ])
-        offenders = _emitOffenders([("bad.py", bad)])
+        offenders = _emitOffenders(_trees(("bad.py", bad)))
         assert [o[:2] for o in offenders] == [("bad.py", 3)], (
             f"投 UnifiedMessage 却没报——守卫没牙（实得 {offenders}）")
-        assert _emitOffenders([("good.py", good)]) == [], "合法写法被误报"
-        assert _emitOffenders([("wecom.py", viaParam)]) == [], "带 ChannelMessage 注解的形参被误报"
-        hopped = _emitOffenders([("mqtt2.py", hopButWrongCurrency)])
+        assert _emitOffenders(_trees(("good.py", good))) == [], "合法写法被误报"
+        assert _emitOffenders(_trees(("wecom.py", viaParam))) == [], "带 ChannelMessage 注解的形参被误报"
+        hopped = _emitOffenders(_trees(("mqtt2.py", hopButWrongCurrency)))
         assert [o[1] for o in hopped] == [9], (
             f"换了个函数名就混过去了（只该报投递点那行，实得 {hopped}）")
 
     def testScanScopeActuallyFoundCallSites(self):
         """地板：取数面不能是空的（空集与"全都合规"不可分辨，与 §6-190 那一格同族）。"""
-        sources = [(str(p.relative_to(REPO)).replace("\\", "/"),
-                    p.read_text(encoding="utf-8", errors="replace")) for p in _scanFiles()]
+        sources = _scanTrees()
         assert len(sources) >= 25, f"扫描目录里只有 {len(sources)} 个文件，扫描面收窄了"
-        hits = [ln for _f, src in sources for ln in src.splitlines() if "_emit_event(" in ln]
+        # 投递点按 AST 数（文本数法会把注释与字符串也算进来，是另一种口径）
+        hits = [node for _f, tree in sources for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and _calleeName(node.func) == "_emit_event"]
         assert len(hits) >= 15, f"投递点只数到 {len(hits)} 条，口径失效"

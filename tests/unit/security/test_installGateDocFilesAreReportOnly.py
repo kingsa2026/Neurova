@@ -13,16 +13,22 @@
 判据成对写：同一段内容放进 `.py` 必须拦、放进 `.md` 必须放行且仍报出；注入反过来在 `.md` 必须拦。
 """
 
+import ast
 import io
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan  # noqa: E402
+
 from neurova.skills.market_importer import read_builtin_bundle
 from neurova.skills.skill_install_gate import reset_install_gate_scanner, scan_skill_for_install
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 DOC_WITH_CODE_SAMPLES = """# 部署说明
 
@@ -168,38 +174,41 @@ class TestCaliberIsSingleSource:
             "neurova/skills/fake_loader.py"}
 
 
+def _hostsFromNodes(pairs) -> set:
+    """谓词单份：`(相对路径, 语法树节点)` 里凑齐三个后缀字面量的那些路径。"""
+    docs = {".md", ".markdown", ".txt"}
+    hosts = set()
+    for rel, node in pairs:
+        if not isinstance(node, (ast.Set, ast.List, ast.Tuple, ast.Dict)):
+            continue
+        elements = ([k for k in node.keys if isinstance(k, ast.Constant)]
+                    if isinstance(node, ast.Dict)
+                    else [e for e in node.elts if isinstance(e, ast.Constant)])
+        values = {str(e.value) for e in elements}
+        if docs <= values:
+            hosts.add(rel)
+    return hosts
+
+
 def _suffixTableHosts(overrides: dict | None = None) -> set:
     """按 AST 找"把 .md/.markdown/.txt 三个后缀一起写进一个集合字面量"的文件。
 
     只认这种形状——单个后缀在别处出现是合法的（例如文件发现表的并集），把三者凑成一个集合
     才意味着那里也在做"文档类"的裁决。
-    """
-    import ast
 
-    docs = {".md", ".markdown", ".txt"}
-    hosts = set()
-    files = overrides or {}
-    if not overrides:
-        for path in sorted((REPO_ROOT / "neurova").rglob("*.py")):
-            if "__pycache__" in path.parts:
+    取数走 `ast_scan.transientNodes`（一次性入口）＋文本预筛：一份完整副本必然把三个后缀
+    原样写进该文件的源码文本，连关键词都没出现的文件不可能命中（预筛是充分条件）。
+    """
+    if overrides is not None:
+        pairs = []
+        for rel, source in overrides.items():
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
                 continue
-            files[path.relative_to(REPO_ROOT).as_posix()] = path.read_text(encoding="utf-8",
-                                                                            errors="replace")
-    for rel, source in files.items():
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.Set, ast.List, ast.Tuple, ast.Dict)):
-                continue
-            elements = []
-            if isinstance(node, ast.Dict):
-                elements = [k for k in node.keys if isinstance(k, ast.Constant)]
-            else:
-                elements = [e for e in node.elts if isinstance(e, ast.Constant)]
-            values = {str(e.value) for e in elements}
-            if docs <= values:
-                hosts.add(rel)
-                break
-    return hosts
+            pairs += [(rel, node) for node in ast.walk(tree)]
+        return _hostsFromNodes(pairs)
+    return _hostsFromNodes(
+        (ast_scan.relativeToRepo(path), node)
+        for path, node in ast_scan.transientNodes(
+            REPO_ROOT / "neurova", hints=(".md", ".markdown", ".txt")))

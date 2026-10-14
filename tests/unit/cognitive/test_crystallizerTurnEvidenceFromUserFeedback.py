@@ -17,6 +17,7 @@ evidenced=0`），模式永不结晶。
 from __future__ import annotations
 
 import ast
+import sys
 import json
 from pathlib import Path
 
@@ -26,6 +27,9 @@ import pytest
 # 顶层 import 会让基线侧整场 collection 以 `Interrupted: 1 error` 中断——两侧就不可比了。
 # 收进函数/夹具后，基线侧只有本批那几格红，其余照跑。
 NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+sys.path.insert(0, str(NEUROVA.parent))  # 仓根进 sys.path，`from tests import ast_scan` 才取得到
+
+from tests import ast_scan  # noqa: E402
 
 
 def _symbols():
@@ -219,18 +223,12 @@ class TestChatPseudoToolNameIsSingleSourced:
         assert '["chat"]' not in src, "closed_loop 里仍有裸的 [\"chat\"] 字面量"
 
     def test_theConstantIsDefinedExactlyOnce(self):
-        homes = []
-        for py in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in str(py):
-                continue
-            try:
-                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Assign):
-                    for t in node.targets:
-                        if isinstance(t, ast.Name) and t.id == "CHAT_PSEUDO_TOOL":
-                            homes.append(py.relative_to(NEUROVA).as_posix())
+        # 取数走 `tests/ast_scan.py` 的一次性入口 + 文本预筛：把这个名字赋值过，
+        # 源码文本里必然出现它 ⇒ 预筛是充分条件，缩面不缩判据（口径同 §6-212）。
+        homes = [ast_scan.relativeToRepo(path)[len("neurova/"):]
+                 for path, node in ast_scan.transientNodes(NEUROVA, hints=("CHAT_PSEUDO_TOOL",))
+                 if isinstance(node, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id == "CHAT_PSEUDO_TOOL"
+                         for t in node.targets)]
         assert homes == ["cognitive_layers/memory_layer/pattern_crystallizer.py"], (
             "伪工具名被定义了 %d 处：%s" % (len(homes), homes))

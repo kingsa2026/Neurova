@@ -36,6 +36,8 @@ import pathlib
 import re
 
 import pytest
+
+from tests import ast_scan
 from fastapi.testclient import TestClient
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
@@ -78,8 +80,8 @@ def _resolutionCallsIn(src: str, funcName: str) -> list:
             and node.func.attr in ("get_adapter", "resolveInboundAdapter")]
 
 
-def _bareAdapterLookups(sources) -> dict:
-    """数"无 agent 维度的渠道取实例"落点。sources = [(relPath, text)]。
+def _bareAdapterLookups(trees) -> dict:
+    """数"无 agent 维度的渠道取实例"落点。trees = [(relPath, 语法树)]。
 
     三条口径都是被本仓的伪命中教出来的：① 只看接收者是 `manager`/`mgr`/`self` 的
     `.get_adapter(...)`——技能市场那个 `self.registry.get_adapter(market)` 是**同名异面**，
@@ -88,11 +90,7 @@ def _bareAdapterLookups(sources) -> dict:
     唯一入口，不该被算成欠账。
     """
     hits = {}
-    for rel, text in sources:
-        try:
-            tree = ast.parse(text)
-        except SyntaxError:
-            continue
+    for rel, tree in trees:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
@@ -107,12 +105,20 @@ def _bareAdapterLookups(sources) -> dict:
     return hits
 
 
-def _neurovaSources() -> list:
-    return [
-        (path.relative_to(REPO).as_posix(),
-         path.read_text(encoding="utf-8", errors="replace"))
-        for path in sorted((REPO / "neurova").rglob("*.py")) if "__pycache__" not in path.parts
-    ]
+def _neurovaTrees() -> list:
+    """`[(相对路径, 语法树)]`——枚举与解析都走 `tests/ast_scan.py` 的一次性入口。
+
+    原来这里是 `(rel, text)` + 各消费方自己 `ast.parse`：枚举走共享入口而解析自付，
+    正是门禁点名的"免检通道"形状；一次性入口 `transientTree` 不留常驻语法树，
+    成本与代码总量脱钩（本文件只扫一遍，不存在第二次命中）。
+    """
+    out = []
+    for path in ast_scan.filesUnder(REPO / "neurova"):
+        try:
+            out.append((ast_scan.relativeToRepo(path), ast_scan.transientTree(path)))
+        except SyntaxError:
+            continue
+    return out
 
 
 @pytest.fixture()
@@ -258,7 +264,8 @@ class TestTheResolutionHasOneFace:
             "    c = manager.get_adapter('feishu', 'kai')",           # 位置参数写法：放过
             "    d = manager.registry.get_adapter('feishu')",         # 同名异面：放过
         ])
-        assert _bareAdapterLookups([("synthetic.py", src)]) == {"synthetic.py": [2]}, "探测器口径失真"
+        assert _bareAdapterLookups([("synthetic.py", ast.parse(src))]) == {
+            "synthetic.py": [2]}, "探测器口径失真"
 
     def testRegisteredDebtSitesAreCountedByShape(self):
         """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。
@@ -272,7 +279,7 @@ class TestTheResolutionHasOneFace:
                 "共享面板的一栏只读状态——它读的这份渠道状态本身没有 agent 维度（sharing 配置是全局的），"
                 "要一并 agent 化属 sharing 整块的那次裁定，不在 §6-189/§6-190 两批里顺手改",
         }
-        hits = _bareAdapterLookups(_neurovaSources())
+        hits = _bareAdapterLookups(_neurovaTrees())
         extra = set(hits) - set(known)
         assert extra == set(), (
             f"新长出一处无 agent 维度的渠道取实例，先裁再合：{[(f, hits[f]) for f in sorted(extra)]}")
