@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
+from tests.cognitive_body_store import cognitiveEngine
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # D10: 集成测试 — 全链路协同
@@ -24,12 +26,12 @@ class TestCognitiveGraphFullStack:
     def test_store_observe_crystallize_retrieve_flow(self, tmp_path):
         """完整流程：存储 → 观察 → 结晶 → 检索"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode, MemoryType,
+            UnifiedMemoryNode, MemoryType,
         )
         from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         crystallizer = PatternCrystallizer(engine=engine)
         retriever = UnifiedRetriever(engine=engine)
 
@@ -59,11 +61,10 @@ class TestCognitiveGraphFullStack:
     def test_reasoning_trace_stored_and_retrievable(self, tmp_path, monkeypatch):
         """推理链存储后可检索（持久化需显式开启 NEUROVA_TRACE_PERSIST）"""
         monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         trace_mgr = ReasoningTraceManager(engine=engine)
         retriever = UnifiedRetriever(engine=engine)
 
@@ -80,11 +81,11 @@ class TestCognitiveGraphFullStack:
     def test_temperature_unified_0_to_100(self, tmp_path):
         """温度系统统一为 0-100 范围"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
         from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
 
         # 创建节点，温度应为 100.0
         node = UnifiedMemoryNode(content="test")
@@ -112,11 +113,11 @@ class TestCognitiveGraphFullStack:
     def test_crystallizer_temperature_is_0_to_100(self, tmp_path):
         """结晶器温度输出在 0-100 范围"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode, MemoryType,
+            UnifiedMemoryNode, MemoryType,
         )
         from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
 
         # Mock store to capture the node
         stored_nodes = []
@@ -139,17 +140,17 @@ class TestCognitiveGraphFullStack:
     def test_wal_persistence_across_restart(self, tmp_path):
         """WAL 持久化：重启后数据不丢失"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
 
         # 第一次启动：存储数据
-        engine1 = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine1 = cognitiveEngine(tmp_path)
         for i in range(5):
             engine1.store(UnifiedMemoryNode(content=f"memory {i}", temperature=80.0))
         # 不调用 close()，模拟崩溃
 
-        # 第二次启动：WAL 恢复
-        engine2 = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        # 第二次启动：崩溃恢复文件取回（另起一份正文库，模拟进程重启）
+        engine2 = cognitiveEngine(tmp_path)
         results = engine2.retrieve("memory", limit=10)
         assert len(results) == 5
         # 温度应保持 80.0
@@ -157,21 +158,21 @@ class TestCognitiveGraphFullStack:
             assert r.temperature == 80.0
 
     def test_flush_preserves_temperature_values(self, tmp_path):
-        """L0→L1 flush 后温度值保持不变"""
+        """L0 并入正文库后温度值保持不变"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         # 存储不同温度的节点
         temps = [20.0, 40.0, 60.0, 80.0, 100.0]
         for t in temps:
             engine.store(UnifiedMemoryNode(content=f"temp {t}", temperature=t))
 
         # 手动 flush
-        engine._flush_l0_to_l1()
+        engine._flushL0ToBody()
 
-        # 从 L1 检索
+        # 从正文库检索
         results = engine.retrieve("temp", limit=10)
         result_temps = sorted([r.temperature for r in results])
         assert result_temps == sorted(temps)
@@ -186,10 +187,9 @@ class TestSleepConsolidationAdapter:
 
     def test_adapter_init(self, tmp_path):
         """适配器可以正确初始化"""
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         from neurova.cognitive_layers.memory_layer.sleep_adapter import SleepConsolidationAdapter
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         adapter = SleepConsolidationAdapter(engine=engine)
 
         assert adapter.engine is engine
@@ -197,10 +197,9 @@ class TestSleepConsolidationAdapter:
 
     def test_run_consolidation_with_no_memories(self, tmp_path):
         """空引擎执行整合不报错"""
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         from neurova.cognitive_layers.memory_layer.sleep_adapter import SleepConsolidationAdapter
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         adapter = SleepConsolidationAdapter(engine=engine)
 
         result = adapter.run_consolidation()
@@ -210,11 +209,11 @@ class TestSleepConsolidationAdapter:
     def test_run_consolidation_with_memories(self, tmp_path):
         """有记忆时执行整合"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
         from neurova.cognitive_layers.memory_layer.sleep_adapter import SleepConsolidationAdapter
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         adapter = SleepConsolidationAdapter(engine=engine, archive_threshold=20.0)
 
         # 存储不同温度的记忆
@@ -231,11 +230,11 @@ class TestSleepConsolidationAdapter:
     def test_consolidation_decays_temperature(self, tmp_path):
         """整合后温度应衰减"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
         from neurova.cognitive_layers.memory_layer.sleep_adapter import SleepConsolidationAdapter
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         adapter = SleepConsolidationAdapter(
             engine=engine,
             archive_threshold=20.0,
@@ -251,10 +250,9 @@ class TestSleepConsolidationAdapter:
 
     def test_get_stats(self, tmp_path):
         """获取适配器统计信息"""
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         from neurova.cognitive_layers.memory_layer.sleep_adapter import SleepConsolidationAdapter
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         adapter = SleepConsolidationAdapter(engine=engine)
 
         stats = adapter.get_stats()
@@ -300,10 +298,10 @@ class TestRegression:
     def test_retrieve_with_filters(self, tmp_path):
         """检索过滤器正常工作"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode, MemoryType,
+            UnifiedMemoryNode, MemoryType,
         )
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         engine.store(UnifiedMemoryNode(content="episodic memory", memory_type=MemoryType.EPISODIC))
         engine.store(UnifiedMemoryNode(content="semantic memory", memory_type=MemoryType.SEMANTIC))
         engine.store(UnifiedMemoryNode(content="pattern memory", memory_type=MemoryType.PATTERN))
@@ -319,11 +317,11 @@ class TestRegression:
     def test_unified_retriever_deduplication(self, tmp_path):
         """统一检索器去重正常"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         retriever = UnifiedRetriever(engine=engine)
 
         # 存储相同内容
@@ -337,11 +335,11 @@ class TestRegression:
     def test_pattern_crystallizer_low_success_no_crystallize(self, tmp_path):
         """低成功率不触发结晶"""
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine, UnifiedMemoryNode,
+            UnifiedMemoryNode,
         )
         from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
 
-        engine = CognitiveStorageEngine(agent_id="test", data_dir=str(tmp_path))
+        engine = cognitiveEngine(tmp_path)
         original_count = len(engine._l0_buffer)
 
         crystallizer = PatternCrystallizer(engine=engine)

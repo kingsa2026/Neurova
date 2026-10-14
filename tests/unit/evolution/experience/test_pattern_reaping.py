@@ -12,12 +12,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-    CognitiveStorageEngine,
     MemoryType,
     StorageLayer,
     UnifiedMemoryNode,
@@ -25,6 +25,7 @@ from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
 from neurova.cognitive_layers.memory_layer.pattern_crystallizer import (
     COLD_PATTERN_TEMPERATURE,
 )
+from tests.cognitive_body_store import bodyManager, cognitiveEngine
 
 
 def _pattern(content: str, temperature: float) -> UnifiedMemoryNode:
@@ -38,23 +39,42 @@ def _pattern(content: str, temperature: float) -> UnifiedMemoryNode:
 
 
 def _store_flushed(engine, node) -> str:
-    """入库并立刻落 L1 —— 冷档判据读的是 L1 行的 updated_at/temperature。"""
+    """入库并立刻并进正文库——冷档判据读的是正文行的 updated_at/temperature。"""
     nid = engine.store(node)
-    engine._flush_l0_to_l1()
+    engine._flushL0ToBody()
     return nid
 
 
-def _age_days(engine: CognitiveStorageEngine, node_id: str, days: int) -> None:
+def _bodyTemperature(bodyStore, node_id: str) -> float:
+    """只读取正文行的温度：走 `bodyMemoryById`，不经检索——
+    走 `searchMemoriesFulltext` 会把"我在读数"记成"这条被用了一次"。"""
+    row = bodyStore.bodyMemoryById(node_id)
+    assert row is not None, f"正文库里没有这一行：{node_id}"
+    return float(row.temperature)
+
+
+def _age_days(bodyStore, node_id: str, days: int) -> None:
+    """把正文行的 `updated_at` 推到过去——闲置时钟只有这一个造法。"""
     stamp = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    engine._db.execute("UPDATE memories SET updated_at = ? WHERE id = ?", (stamp, node_id))
-    engine._db.commit()
+    conn = sqlite3.connect(str(bodyStore.persistenceDbPath()))
+    try:
+        conn.execute("UPDATE memories SET updated_at = ? WHERE id = ?", (stamp, node_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture()
-def engine(tmp_path):
-    eng = CognitiveStorageEngine(agent_id="cse-017", data_dir=str(tmp_path / "cse"))
+def bodyStore(tmp_path):
+    """正文库（本票所有行读数的落点）。"""
+    return bodyManager(tmp_path / "cse", agentId="cse-017")
+
+
+@pytest.fixture()
+def engine(tmp_path, bodyStore):
+    eng = cognitiveEngine(tmp_path / "cse", agentId="cse-017", manager=bodyStore)
     yield eng
-    eng._db.close()
+    bodyStore.close()
 
 
 @pytest.fixture()
@@ -65,47 +85,39 @@ def crystallizer(engine):
 
 
 class TestReapDecaysIdlePatterns:
-    def test_idle_pattern_gets_colder(self, engine, crystallizer):
+    def test_idle_pattern_gets_colder(self, engine, bodyStore, crystallizer):
         nid = _store_flushed(engine, _pattern("pattern_idle_flow", 70.0))
-        _age_days(engine, nid, days=40)
-        before = engine._db.execute(
-            "SELECT temperature FROM memories WHERE id = ?", (nid,)
-        ).fetchone()[0]
+        _age_days(bodyStore, nid, days=40)
+        before = _bodyTemperature(bodyStore, nid)
         summary = crystallizer.reap_stale_patterns(idle_days=30.0)
-        after = engine._db.execute(
-            "SELECT temperature FROM memories WHERE id = ?", (nid,)
-        ).fetchone()[0]
+        after = _bodyTemperature(bodyStore, nid)
         assert summary["decayed"] == 1
         assert after < before, "闲置 40 天的结晶模式必须被降温"
 
-    def test_recently_used_pattern_is_left_alone(self, engine, crystallizer):
+    def test_recently_used_pattern_is_left_alone(self, engine, bodyStore, crystallizer):
         """反向锁：刚被取用的模式（006 记账刷新 updated_at）不得被扫掉。"""
         nid = _store_flushed(engine, _pattern("pattern_hot_flow", 70.0))
         engine.retrieve("pattern_hot_flow", limit=5)
         summary = crystallizer.reap_stale_patterns(idle_days=30.0)
         assert summary["decayed"] == 0
-        row = engine._db.execute(
-            "SELECT temperature FROM memories WHERE id = ?", (nid,)
-        ).fetchone()[0]
+        row = _bodyTemperature(bodyStore, nid)
         assert row == pytest.approx(80.0), "检索记账应把它抬到 70+10"
 
-    def test_other_memory_types_are_not_touched(self, engine, crystallizer):
+    def test_other_memory_types_are_not_touched(self, engine, bodyStore, crystallizer):
         nid = _store_flushed(engine, UnifiedMemoryNode(
             content="semantic_fact_about_user", memory_type=MemoryType.SEMANTIC,
             category="general", layer=StorageLayer.L1_HOT, temperature=70.0,
         ))
-        _age_days(engine, nid, days=400)
+        _age_days(bodyStore, nid, days=400)
         crystallizer.reap_stale_patterns(idle_days=30.0)
-        row = engine._db.execute(
-            "SELECT temperature FROM memories WHERE id = ?", (nid,)
-        ).fetchone()[0]
+        row = _bodyTemperature(bodyStore, nid)
         assert row == 70.0, "冷档规则只作用于结晶模式"
 
 
 class TestColdPatternsLeaveInjection:
-    def test_cold_pattern_is_not_retrievable(self, engine, crystallizer):
+    def test_cold_pattern_is_not_retrievable(self, engine, bodyStore, crystallizer):
         nid = _store_flushed(engine, _pattern("pattern_dying_flow", 25.0))
-        _age_days(engine, nid, days=400)
+        _age_days(bodyStore, nid, days=400)
         crystallizer.reap_stale_patterns(idle_days=30.0)
         hits = engine.retrieve(
             "pattern_dying_flow", limit=5,

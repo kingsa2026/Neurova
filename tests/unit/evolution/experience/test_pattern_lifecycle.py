@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+from tests.cognitive_body_store import bodyManager, cognitiveEngine
 
 
 @pytest.fixture(autouse=True)
@@ -73,19 +74,19 @@ class TestManualPromotionStillExempts:
 class TestPersistentUseIsNotZeroed:
     def test_retrieval_credit_outpaces_one_decay_cycle(self, tmp_path):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-            CognitiveStorageEngine,
             UnifiedMemoryNode,
         )
 
-        engine = CognitiveStorageEngine(agent_id="cse-017", data_dir=str(tmp_path / "cse"))
+        # 正文库先立起来，再让引擎挂到它上面——本票读的就是这张正文表的行。
+        bodyStore = bodyManager(tmp_path / "cse", agentId="cse-017")
+        engine = cognitiveEngine(tmp_path / "cse", agentId="cse-017", manager=bodyStore)
         try:
             nid = engine.store(UnifiedMemoryNode(content="pattern_hot_export_flow", temperature=75.0))
-            engine._flush_l0_to_l1()
+            engine._flushL0ToBody()
             after_decay = TemperatureEngine().on_decay(75.0, days_idle=30.0)["new_temp"]
             engine.retrieve("pattern_hot_export_flow", limit=5)
-            row = engine._db.execute(
-                "SELECT temperature FROM memories WHERE id = ?", (nid,)
-            ).fetchone()
-            assert row[0] > after_decay, "被持续取用的模式应能跑赢一个衰减周期（反向锁）"
+            row = bodyStore.bodyMemoryById(nid)
+            assert row is not None, "正文库里取不回刚并进正文的那一行"
+            assert row.temperature > after_decay, "被持续取用的模式应能跑赢一个衰减周期（反向锁）"
         finally:
-            engine._db.close()
+            bodyStore.close()

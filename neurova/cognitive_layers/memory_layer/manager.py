@@ -23,6 +23,8 @@ MemoryManager — 记忆管理器（CogArch 总线版）
 import json
 import datetime
 from neurova.core.content_identity import normalized_key
+from neurova.core import sql_like
+from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 import os
 import sqlite3
@@ -62,6 +64,20 @@ def _row_origin(row) -> "MemoryOrigin":
         return MemoryOrigin(val)
     except (ValueError, KeyError):
         return MemoryOrigin.UNTRUSTED
+
+def _row_embedding(row) -> "Optional[List[float]]":
+    """从正文行安全取向量（v2 前的旧库无此列 → None，不炸装载路径）。"""
+    try:
+        raw = row["embedding"]
+    except (IndexError, KeyError):
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
 
 # 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
 # 原方案由 API 层直接给共享单例的 neuser_id/user_id 只读 property 赋值:
@@ -155,6 +171,74 @@ def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
 # 用裸文件名当默认值是本轮要灭的根因，用 `""` 当默认值又会让既有校验把
 # "没给"误判成"给错了"，所以另立一个不可能与真实路径相撞的值。
 _DEFAULT_DB_SENTINEL = "\x00__agent_workspace__"
+
+#: 正文库的 schema 版本域（`core/db_migration.py` 的注册表域；引擎那份第二库已并入这里）
+MEMORY_BODY_DOMAIN = "memory"
+
+#: 正文全文影子的三条触发器。触发器是「索引跟着正文走」的唯一机制——
+#: 少了它，写入侧照常落库而检索恒空，正是本轮之前那条「FTS 表存在但从不命中」的形态。
+_MEMORIES_FTS_TRIGGERS = (
+    """
+    CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+        INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
+        INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+    END
+    """,
+)
+
+
+def _hasColumn(conn, table: str, column: str) -> bool:
+    return any(row[1] == column for row in conn.execute('PRAGMA table_info("%s")' % table))
+
+
+def _migrateBodyEmbedding(conn) -> None:
+    """memory 域 v2：正文库补 embedding 列。
+
+    向量此前只长在认知引擎自建的第二库里（实测 0 行），落盘即与正文无关。
+    """
+    if not _hasColumn(conn, "memories", "embedding"):
+        conn.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
+
+
+def _migrateBodyFulltext(conn) -> None:
+    """memory 域 v3：正文库长出 trigram 全文影子、三条触发器，并回填存量行。
+
+    分词器必须是 trigram：`unicode61` 把整段中文当一个 token，实测对文本里
+    本来就存在的中文子串恒 0 命中——「建了 FTS 表」不等于「能检索」。
+    回填不可省：触发器只管将来的写入，存量记忆若不一次入索引就永远检索不到。
+    """
+    try:
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5("
+            "content, tokenize='%s')" % sql_like.FTS_TOKENIZER
+        )
+    except sqlite3.OperationalError as exc:
+        logger.warning(
+            "本 SQLite 无 FTS5 模块（%s）——正文检索恒走 LIKE 子串分支，全文排序不可用", exc
+        )
+        return
+    for triggerSql in _MEMORIES_FTS_TRIGGERS:
+        conn.execute(triggerSql)
+    conn.execute(
+        "INSERT OR IGNORE INTO memories_fts(rowid, content)"
+        " SELECT rowid, content FROM memories"
+    )
+    indexed = conn.execute("SELECT COUNT(*) FROM memories_fts").fetchone()[0]
+    logger.info("正文库全文影子就绪：%d 行已入索引（%s）", indexed, sql_like.FTS_TOKENIZER)
+
+
+register_migration(2, _migrateBodyEmbedding, domain=MEMORY_BODY_DOMAIN)
+register_migration(3, _migrateBodyFulltext, domain=MEMORY_BODY_DOMAIN)
 
 
 class MemoryManager:
@@ -361,6 +445,7 @@ class MemoryManager:
                     importance REAL NOT NULL DEFAULT 50.0,
                     access_count INTEGER NOT NULL DEFAULT 0,
                     metadata TEXT NOT NULL DEFAULT '{}',
+                    embedding TEXT,
                     agent_id TEXT NOT NULL DEFAULT 'default',
                     neuser_id TEXT NOT NULL DEFAULT 'default',
                     user_id TEXT NOT NULL DEFAULT 'default',
@@ -387,6 +472,7 @@ class MemoryManager:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_mem_temperature ON memories(temperature)"
             )
+            applyMigrations(conn, MEMORY_BODY_DOMAIN)
             conn.commit()
             logger.debug("Persistence DB initialized: %s", self._persist_db_path)
         except Exception as e:
@@ -410,6 +496,7 @@ class MemoryManager:
             importance=row["importance"],
             access_count=row["access_count"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            embedding=_row_embedding(row),
             agent_id=row["agent_id"],
             neuser_id=row["neuser_id"],
             user_id=row["user_id"],
@@ -422,6 +509,181 @@ class MemoryManager:
                 datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
             ),
         )
+
+    def memoryScope(self) -> Tuple[str, str]:
+        """当前生效的 `(neuser_id, user_id)` 两层作用域。
+
+        给正文盖章的一方（认知引擎 flush 节点时）取这一处，不要自己去读 ContextVar
+        也不要自带默认值——作用域口径只在这里。agent 层由实例自身承担，不在返回值里。
+        """
+        return self._eff_neuser_id(), self._eff_user_id()
+
+    def persistenceDbPath(self) -> Optional[str]:
+        """正文库落点（主库同目录的配对库）；持久层关闭时为 None。
+
+        需要"正文在哪儿"的一方（认知引擎的崩溃恢复文件、删除端）取这一处，
+        不要再自己按 agent 目录推第二遍。
+        """
+        return getattr(self, "_persist_db_path", None) or None
+
+    def bodyMemoryCount(self) -> int:
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None:
+            return 0
+        with self._persist_db_lock:
+            return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
+
+    def searchMemoriesFulltext(self, query: str, limit: int = 10) -> List[Memory]:
+        """在正文库上按**生效三元组**做全文召回；**不做记账**（记账另有一句）。
+
+        三条口径都是被动的，不能省：
+
+        - 作用域与 `_scoped_memories` 同源——正文库合并后读侧若不带三元组，
+          收口本身就成了跨用户泄漏；
+        - 短查询（< `sql_like.MATCH_MIN_CHARS`）trigram 索引不到，强行 MATCH 是假阴性，
+          必须落 LIKE 子串；
+        - FTS 零命中也补跑一次 LIKE：分词边界（标点邻接、全半角）造成的漏召回
+          不该让"这条记忆存在"变成"这条记忆不存在"。
+
+        不把调用方的过滤条件下进 SQL：`memory_type`/`category` 在正文闭集里
+        没有对应值时，节点原值活在 `metadata.cse_*` 里（见认知层的 `META_CATEGORY`），
+        按列筛会把它们整批筛掉。过滤归读方，记账归本行的 `creditRecallHits`——
+        先记账再过滤会让冷档被自己这次命中复活（工单 017）。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        text = (query or "").strip()
+        if conn is None or not text:
+            return []
+        scope = (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
+        with self._persist_db_lock:
+            cur = conn.cursor()
+            cur.row_factory = sqlite3.Row
+            rows: List[sqlite3.Row] = []
+            if sql_like.shouldMatch(text):
+                try:
+                    rows = cur.execute(
+                        "SELECT m.* FROM memories m JOIN memories_fts f ON m.rowid = f.rowid"
+                        " WHERE memories_fts MATCH ?"
+                        " AND m.agent_id = ? AND m.neuser_id = ? AND m.user_id = ?"
+                        " ORDER BY rank LIMIT ?",
+                        (sql_like.matchQuery(text), *scope, int(limit)),
+                    ).fetchall()
+                except sqlite3.OperationalError as exc:
+                    logger.info("FTS MATCH 不可用（%s）——同查询降级 LIKE 子串匹配", exc)
+            if not rows:
+                rows = cur.execute(
+                    "SELECT * FROM memories"
+                    " WHERE agent_id = ? AND neuser_id = ? AND user_id = ? AND "
+                    + sql_like.likePredicate("content")
+                    + " ORDER BY temperature DESC LIMIT ?",
+                    (*scope, sql_like.likePattern(text), int(limit)),
+                ).fetchall()
+            return [self._row_to_memory(row) for row in rows]
+
+    def _findBodyRow(self, memoryId: str):
+        """按业务 id 找一行正文（作用域限定行带前缀也认）；找不到回 None。
+
+        读一行与记一笔账都只经这一处——剥壳规则写两遍就会各自漂移。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None or not memoryId:
+            return None
+        with self._persist_db_lock:
+            cur = conn.cursor()
+            cur.row_factory = sqlite3.Row
+            row = cur.execute(
+                "SELECT * FROM memories WHERE id = ? AND agent_id = ?",
+                (memoryId, self._agent_id),
+            ).fetchone()
+            if row is not None:
+                return row
+            scope = (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
+            for candidate in cur.execute(
+                "SELECT * FROM memories WHERE agent_id = ? AND neuser_id = ? AND user_id = ?",
+                scope,
+            ):
+                if self._plain_memory_id(candidate["id"]) == memoryId:
+                    return candidate
+        return None
+
+    def creditRecallHits(self, memoryIds: List[str]) -> int:
+        """对本轮**真正回给调用方**的记忆记账：`access_count + 1`、温度 +10 封顶 100、
+        刷新 `updated_at`/`last_accessed_at`；返回被记了账的行数。
+
+        记账只此一处实现，且由读方**过滤之后**调用——先记账再过滤，被排除的行也已经
+        挨过一次 +10，冷档就被自己这次命中复活（工单 017 的淘汰因此永不成立）。
+
+        计数走 DB 侧自增而非读回来再写：读-改-写会把并发 increment 覆盖掉。
+        更新按**行自带 id**（M-25 后作用域限定行带 `\x1f` 前缀，按业务 id 更新会插出
+        重复行）。未 flush 的 L0 节点在库里没有行，不计入返回值，其内存值由调用方
+        自己 touch 并随 flush 落盘（契约 006 第 3 条）。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None or not memoryIds:
+            return 0
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        credited = 0
+        with self._persist_db_lock:
+            for memoryId in memoryIds:
+                row = self._findBodyRow(memoryId)
+                if row is None:
+                    continue
+                conn.execute(
+                    "UPDATE memories SET access_count = access_count + 1,"
+                    " temperature = MIN(100.0, temperature + 10.0),"
+                    " updated_at = ?, last_accessed_at = ? WHERE id = ?",
+                    (now, now, row["id"]),
+                )
+                credited += 1
+            conn.commit()
+        for memoryId in memoryIds:
+            cached = self._memories.get(memoryId)
+            if cached is not None:
+                cached.access_count += 1
+                cached.temperature = min(100.0, cached.temperature + 10.0)
+        return credited
+
+    def iterBodyMemories(self, limit: int = 500) -> List[Memory]:
+        """按 `updated_at` 升序只读列举本 agent 的正文行，**不做访问记账**。
+
+        巡检（结晶冷处理）走这里：走 `searchMemoriesFulltext` 会把"我在巡检"
+        记成"这条被用了一次"，闲置判定因此永不成立。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None:
+            return []
+        with self._persist_db_lock:
+            cur = conn.cursor()
+            cur.row_factory = sqlite3.Row
+            rows = cur.execute(
+                "SELECT * FROM memories WHERE agent_id = ? ORDER BY updated_at LIMIT ?",
+                (self._agent_id, int(limit)),
+            ).fetchall()
+        return [self._row_to_memory(row) for row in rows]
+
+    def adjustBodyTemperature(self, row_id: str, delta: float) -> bool:
+        """按**行自带 id** 调温度；返回是否真有一行被调（巡检要分得开"没这条"与"调了 0 度"）。
+
+        必须带 agent_id 条件：正文库是配对库，历史上同目录可能留着别处的行。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None:
+            return False
+        with self._persist_db_lock:
+            cur = conn.execute(
+                "UPDATE memories SET temperature = MAX(0.0, MIN(100.0, temperature + ?))"
+                " WHERE id = ? AND agent_id = ?",
+                (float(delta), row_id, self._agent_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def bodyMemoryById(self, memoryId: str) -> Optional[Memory]:
+        """按业务 id 取一行正文；找不到回 None（调用方分得开"没这条"与"那条是空的"）。"""
+        row = self._findBodyRow(memoryId)
+        return self._row_to_memory(row) if row is not None else None
 
     def _merge_loaded_memory(self, mem: "Memory") -> bool:
         """把一篇持久行并入快照；返回是否真的并入了（装载与 reload 共用一条口径）。
@@ -669,15 +931,16 @@ class MemoryManager:
     _PERSIST_UPSERT_SQL = (
         """INSERT INTO memories
            (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
-            temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
-            shared, created_at, updated_at, last_accessed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            temperature, importance, access_count, metadata, embedding, agent_id, neuser_id,
+            user_id, shared, created_at, updated_at, last_accessed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              content=excluded.content, memory_type=excluded.memory_type,
              category=excluded.category, lifecycle_stage=excluded.lifecycle_stage,
              perspective=excluded.perspective, origin=excluded.origin, emotion=excluded.emotion,
              temperature=excluded.temperature, importance=excluded.importance,
              access_count=excluded.access_count, metadata=excluded.metadata,
+             embedding=excluded.embedding,
              agent_id=excluded.agent_id, neuser_id=excluded.neuser_id, user_id=excluded.user_id,
              shared=excluded.shared, created_at=excluded.created_at,
              updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at
@@ -727,6 +990,7 @@ class MemoryManager:
             mem.importance,
             mem.access_count,
             json.dumps(mem.metadata, ensure_ascii=False),
+            json.dumps(mem.embedding) if mem.embedding else None,
             mem.agent_id,
             mem.neuser_id,
             mem.user_id,
