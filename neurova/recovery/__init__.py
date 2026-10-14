@@ -13,9 +13,3 @@ try:
 except ImportError as _e:
     _logger.debug("ShutdownGuard 未可用: %s", _e)
     ShutdownGuard = None
-
-# recovery imports
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("recovery.shutdown_guard 模块未可用: %s", _e)

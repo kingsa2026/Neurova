@@ -149,14 +149,6 @@ class XiaoYiAdapter(ChannelAdapter):
     async def _init_connection(self) -> bool:
         """初始化 WebSocket 连接"""
         try:
-            # 尝试导入websockets
-            try:
-                pass
-            except ImportError:
-                logger.warning("websockets 未安装，使用模拟模式")
-                self._connected = True
-                return True
-
             # 初始化WebSocket连接
             await self._async_init_connection()
             return True

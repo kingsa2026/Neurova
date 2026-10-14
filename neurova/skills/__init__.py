@@ -3,198 +3,74 @@ Skills System 1.0.0 - 技能系统
 
 实现 Neurova CogArch 1.0.0 的技能系统1.0.0架构：
 - builtin/: 内置技能 (只读)
-- pool/: 公共技能池 (所有 Agent 共享)
 - models.py: 数据模型 (SkillInfo, SkillSource, etc.)
-- pool_service.py: 公共池服务 (SkillPoolService)
-- skill_service.py: Agent 技能服务 (SkillService)
-- experience_caller.py: 经验调用系统 (ExperienceCaller)
-...
+- skill_service.py: Agent 技能服务 (SkillService)——存储引擎单源
+- library_service.py: 三库路由（agent 私库 / 用户私库 / 公共库），取法
+  `from neurova.skills import library_service`
+- registry.py: 技能注册表
+- manifest.py: 技能清单
+- hub_client.py: 市场侧远端技能取数 (SkillHubClient, RemoteSkill)
+- skill_install_gate.py: 安装门（所有安装面共用的唯一咽喉）
+
+本包是技能子系统的统一外观入口：`from neurova.skills import SkillInfo / SkillService /
+create_default_skills / get_skill_registry` 都从这里取。
+
+这些导入此前包在 `try/except ImportError` 里，并在 except 分支把 48 个名字赋成 `None`。
+现测被包的四个模块（models / hub_client / skill_service / skill_system）都可导入，
+且它们顶层除 `__future__` 外没有第三方可选依赖 ⇒ 那条兜底从不触发；而按教义第 1 条，
+替"不会发生的失败"在下游补 None 不是降级保护——`agent_core.py` 三处
+`from neurova.skills import create_default_skills` 一旦落到那条分支，拿到的是 None
+并在下一行调用它。故此处一律顶层直接导入，失败就显式抛。
+
+`SkillSource` 只从 models 导那一份：`hub_client` 里另有一个同名枚举（成员是市场源
+GITHUB/CLAWHUB/LOBEHUB/MODELSCOPE/LOCAL，与 models 的 LOCAL/MARKETPLACE/BUILTIN 不同物），
+此前两条 import 先后绑同一个名字，门面给出去哪一份取决于书写顺序。两份要不要合并或改名
+＝另一次裁定（台账 §6-200），这里先把静默覆盖摘掉，hub 自己仍用它那一份。
 """
 
-from neurova.core.logger import get_logger
-_logger = get_logger(__name__)
-
-try:
-    from neurova.skills.models import (
-        PluginEntryPoints,
-        Skill,
-        SkillConflict,
-        SkillConflictResult,
-        SkillConflictStats,
-        SkillDependency,
-        SkillDependencyResult,
-        SkillDependencyStats,
-        SkillDisableResult,
-        SkillDisableStats,
-        SkillEnableResult,
-        SkillEnableStats,
-        SkillExecutionLog,
-        SkillExecutionResult,
-        SkillExecutionStats,
-        SkillInfo,
-        SkillInstallResult,
-        SkillInstallStats,
-        SkillManifest,
-        SkillMarketplaceStats,
-        SkillMarketResult,
-        SkillMetadata,
-        SkillOutput,
-        SkillParameter,
-        SkillPublishResult,
-        SkillPublishStats,
-        SkillRecommendation,
-        SkillRecommendationResult,
-        SkillRecommendationStats,
-        SkillRecord,
-        SkillRequirement,
-        SkillSearchResult,
-        SkillSearchStats,
-        SkillSource,
-        SkillUninstallResult,
-        SkillUninstallStats,
-        SkillUpdateResult,
-        SkillUpdateStats,
-        SkillVerifyResult,
-        SkillVerifyStats,
-        SkillVersion,
-    )
-except ImportError as _e:
-    _logger.debug("skills.models 模块未可用: %s", _e)
-    # 提供最小化占位符
-    Skill = None
-    SkillMetadata = None
-    SkillSource = None
-    SkillInfo = None
-    SkillVersion = None
-    SkillDependency = None
-    SkillParameter = None
-    SkillOutput = None
-    SkillRequirement = None
-    SkillConflict = None
-    SkillRecommendation = None
-    SkillExecutionResult = None
-    SkillSearchResult = None
-    SkillInstallResult = None
-    SkillMarketResult = None
-    SkillUpdateResult = None
-    SkillUninstallResult = None
-    SkillEnableResult = None
-    SkillDisableResult = None
-    SkillVerifyResult = None
-    SkillPublishResult = None
-    SkillDependencyResult = None
-    SkillConflictResult = None
-    SkillRecommendationResult = None
-    SkillExecutionLog = None
-    SkillMarketplaceStats = None
-    SkillSearchStats = None
-    SkillInstallStats = None
-    SkillUpdateStats = None
-    SkillUninstallStats = None
-    SkillEnableStats = None
-    SkillDisableStats = None
-    SkillVerifyStats = None
-    SkillPublishStats = None
-    SkillDependencyStats = None
-    SkillConflictStats = None
-    SkillRecommendationStats = None
-    SkillExecutionStats = None
-    SkillRecord = None
-    SkillManifest = None
-    PluginEntryPoints = None
-
-# skills imports
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.auto_skill_improver 模块未可用: %s", _e)
-
-try:
-    from neurova.skills.hub_client import SkillHubClient, RemoteSkill, SkillSource
-except ImportError as _e:
-    _logger.debug("skills.hub_client 模块未可用: %s", _e)
-    SkillHubClient = None
-    RemoteSkill = None
-    SkillSource = None
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.manifest 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.market_searcher 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.models 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.pool_service 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.registry 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.skill_need_analyzer 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.skill_packager 模块未可用: %s", _e)
-
-try:
-    from neurova.skills.skill_service import SkillService
-except ImportError as _e:
-    _logger.debug("skills.skill_service 模块未可用: %s", _e)
-    SkillService = None
-
-# 技能注册表工厂（从被遮蔽的 neurova.skill_system 包加载）
-# 使 `from neurova.skills import create_default_skills / get_skill_registry /
-# SkillRegistry` 可用，作为技能子系统的统一外观入口。
-try:
-    from neurova.skill_system import (
-        SkillRegistry,
-        create_default_skills,
-        get_skill_registry,
-    )
-except ImportError as _e:
-    _logger.debug("skill registry 导出失败 (neurova.skill_system 未可用): %s", _e)
-    SkillRegistry = None
-    create_default_skills = None
-    get_skill_registry = None
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.task_decomposer 模块未可用: %s", _e)
-
-# Meta-skill 集成模块
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.skill_generator 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.project_to_skill 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.skill_chain_executor 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills.prompt_optimizer 模块未可用: %s", _e)
+from neurova.skills.models import (
+    PluginEntryPoints,
+    Skill,
+    SkillConflict,
+    SkillConflictResult,
+    SkillConflictStats,
+    SkillDependency,
+    SkillDependencyResult,
+    SkillDependencyStats,
+    SkillDisableResult,
+    SkillDisableStats,
+    SkillEnableResult,
+    SkillEnableStats,
+    SkillExecutionLog,
+    SkillExecutionResult,
+    SkillExecutionStats,
+    SkillInfo,
+    SkillInstallResult,
+    SkillInstallStats,
+    SkillManifest,
+    SkillMarketplaceStats,
+    SkillMarketResult,
+    SkillMetadata,
+    SkillOutput,
+    SkillParameter,
+    SkillPublishResult,
+    SkillPublishStats,
+    SkillRecommendation,
+    SkillRecommendationResult,
+    SkillRecommendationStats,
+    SkillRecord,
+    SkillRequirement,
+    SkillSearchResult,
+    SkillSearchStats,
+    SkillSource,
+    SkillUninstallResult,
+    SkillUninstallStats,
+    SkillUpdateResult,
+    SkillUpdateStats,
+    SkillVerifyResult,
+    SkillVerifyStats,
+    SkillVersion,
+)
+from neurova.skills.hub_client import RemoteSkill, SkillHubClient
+from neurova.skills.skill_service import SkillService
+from neurova.skill_system import SkillRegistry, create_default_skills, get_skill_registry

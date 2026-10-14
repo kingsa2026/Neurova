@@ -8,11 +8,6 @@ TTS Module - 语音合成模块
 """
 
 
-try:
-    pass
-except ImportError:
-    pass
-
 from neurova.tts.base import TTSBase
 from neurova.tts.edge_tts import EdgeTTS
 from neurova.tts.manager import TTSConfig, TTSManager

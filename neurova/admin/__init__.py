@@ -22,14 +22,3 @@ except ImportError as _e:
     _logger.debug("ResourceQuotaManager 未可用: %s", _e)
     ResourceQuotaManager = None
     ResourceUsage = None
-
-# admin imports
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("admin.admin_service 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("admin.resource_quota_manager 模块未可用: %s", _e)
