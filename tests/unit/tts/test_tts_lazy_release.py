@@ -12,7 +12,8 @@
 6. lazy_release=False（默认）行为完全不变：不释放、启动即初始化（由 app 层
    决定时机，manager 自身 initialize 语义不变）。
 
-用 mock 引擎替代真实 moss（模型 GB 级）：假"重引擎"经 _engines 注册表注入。
+用 mock 引擎替代真实 moss（权重 670MB）：假引擎与 `heavy_manager` 夹具住在
+本目录的 `_fakeEngines.py` / `conftest.py`，供同目录判据档复用。
 """
 
 import asyncio
@@ -23,72 +24,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from neurova.tts.manager import TTSConfig, TTSManager
-
-
-class _FakeHeavyEngine:
-    """模拟 moss-nano：重模型 + is_initialized 生命周期。"""
-
-    name = "moss-nano"
-    audio_media_type = "audio/wav"
-
-    def __init__(self):
-        self._initialized = False
-        self.released = False
-        self.synthesize = AsyncMock(return_value=b"RIFFheavy-audio")
-        self.calls = 0
-
-    @property
-    def is_initialized(self) -> bool:
-        return self._initialized
-
-    async def initialize(self) -> bool:
-        # 模拟加载耗时但可控
-        await asyncio.sleep(0)
-        self._initialized = True
-        return True
-
-    async def shutdown(self) -> None:
-        self.released = True
-        self._initialized = False
-
-
-class _FakeLightEngine:
-    """模拟 edge-tts：轻量、秒级就绪。"""
-
-    name = "edge-tts"
-    audio_media_type = "audio/mpeg"
-
-    def __init__(self):
-        self._initialized = False
-        self.synthesize = AsyncMock(return_value=b"\xff\xfblight-audio")
-
-    @property
-    def is_initialized(self) -> bool:
-        return self._initialized
-
-    async def initialize(self) -> bool:
-        await asyncio.sleep(0)
-        self._initialized = True
-        return True
-
-    async def shutdown(self) -> None:
-        self._initialized = False
-
-
-@pytest.fixture()
-def heavy_manager():
-    """预注入假引擎的 manager（绕过真实引擎构造，缓存经 _engines 命中）。"""
-    cfg = TTSConfig(
-        engine="auto",
-        fallback_chain=["moss-nano", "edge-tts", "mock"],
-        fallback_enabled=True,
-        lazy_release=True,
-        release_ttl_sec=60,
-    )
-    mgr = TTSManager(config=cfg)
-    heavy, light = _FakeHeavyEngine(), _FakeLightEngine()
-    mgr._engines = {"moss-nano": heavy, "edge-tts": light}
-    return mgr, heavy, light
+from tests.unit.tts._fakeEngines import _FakeHeavyEngine
 
 
 def test_default_config_has_lazy_release_off():
