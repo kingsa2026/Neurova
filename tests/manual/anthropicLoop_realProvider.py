@@ -3,7 +3,7 @@
 
 补的是单元测试与假分片活体**证不到**的那一层：真网关的流式分片形状。
 
-两段，各自走真 `MultiModelLLMClient`（真 key 取自 `~/.neurova/config/providers.json`，
+两段，各自走真 `MultiModelLLMClient`（真 key 取自 `<数据根>/llm/providers.json`（旧版在 `~/.neurova/config/`），
 经生产 `set_active_model` 选择，不手工塞私有字段）：
 
 1. **AMD**（`DeepSeek-V4.1-Flash`，OpenAI 兼容）→ 驱动 `OpenAILoop`：证共用流式事件契约在

@@ -323,9 +323,13 @@ def resolve_probe_paths() -> List[str]:
     if env_path:
         candidates.append(env_path)
     try:
-        candidates.append(str(Path.home() / ".neurova" / "audit.db"))
-    except Exception:  # noqa: BLE001
-        pass
+        # 与写侧同一处推导：探针自己再拼一遍 home 路径，就会对一个不存在的库报
+        # "缺索引"，而真库没人检查。
+        from neurova.security.audit_logger import auditDbPath
+
+        candidates.append(auditDbPath())
+    except Exception as exc:  # noqa: BLE001 - 探针清单不该因单库取法失败而整体不跑
+        logger.debug("审计库落点取不到，跳过该项体检: %s", exc)
 
     seen: List[str] = []
     for path in candidates:

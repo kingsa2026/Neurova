@@ -197,6 +197,17 @@ def legacyLanding(*legacyParts: str) -> Path:
     return repoRoot().joinpath(*legacyParts)
 
 
+def legacyHomeLanding(*parts: str) -> Path:
+    """旧「用户主目录」落点的**绝对路径**（`~/.neurova/...`）——只供收养端使用。
+
+    与 `legacyLanding()` 同义、同一用途，只是那一处按仓库根推，本函数按主目录推：
+    历史上有一族配置/状态写在 `Path.home()/.neurova` 下（凭据、审计库、治理白名单、
+    技能安装根），它们不在仓库根之下，`legacyLanding()` 表达不出那个语义。
+    收进数据根时若各处再手拼一遍 home，就是把"一个锚点四处各算一遍"原样搬进收养端。
+    """
+    return Path.home().joinpath(".neurova", *parts)
+
+
 def adoptLandingFrom(target: Path, legacy: Path) -> bool:
     """收养的**唯一实现**：把 `legacy` 处的东西搬到 `target`（空缺时才动）。
 
