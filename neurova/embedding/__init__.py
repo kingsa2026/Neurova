@@ -8,12 +8,7 @@ import threading
 from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
 
-try:
-    from neurova.embedding.onnx_embedding import EmbeddingResult, ONNXEmbeddingEngine
-except ImportError as _e:
-    _logger.debug("ONNXEmbeddingEngine/EmbeddingResult 未可用: %s", _e)
-    ONNXEmbeddingEngine = None
-    EmbeddingResult = None
+from neurova.embedding.onnx_embedding import EmbeddingResult, ONNXEmbeddingEngine
 
 __all__ = ["ONNXEmbeddingEngine", "EmbeddingResult", "get_embedding_engine", "_reset_embedding_engine", "reset_embedding_engine"]
 

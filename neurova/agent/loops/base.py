@@ -635,10 +635,7 @@ class BaseAgentLoop(ABC):
 
         空回复（纯工具轮）不参与内容停滞判定，避免误伤只调工具不说话的正常轮次。
         """
-        try:
-            from neurova.agent_loop_detection import calculate_similarity
-        except ImportError:  # pragma: no cover - 模块缺失时退化为仅签名判定
-            calculate_similarity = None
+        from neurova.agent_loop_detection import calculate_similarity
 
         previous_calls = state.lastRoundCalls
         previous_replies = [r for r in state.roundReplies if r]

@@ -18,12 +18,6 @@ Cognitive Module - 认知模块
 记忆的唯一真源是 cognitive_layers/memory_layer/。
 """
 
-from neurova.core.logger import get_logger
 
-_logger = get_logger(__name__)
 
-try:
-    from neurova.cognitive_layers.memory_layer.models import Memory
-except ImportError as _e:
-    _logger.debug("Memory 未可用: %s", _e)
-    Memory = None
+from neurova.cognitive_layers.memory_layer.models import Memory

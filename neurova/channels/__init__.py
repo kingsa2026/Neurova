@@ -11,74 +11,27 @@ Neurova 渠道集成模块
     manager.start()
 """
 
-from neurova.core.logger import get_logger
-_logger = get_logger(__name__)
 
-try:
-    from neurova.channels.base import (
-        ChannelAdapter,
-        ChannelConfig,
-        ChannelEventType,
-        ChannelMessage,
-    )
-except ImportError as _e:
-    _logger.debug("channels.base 未可用: %s", _e)
-    ChannelAdapter = None
-    ChannelConfig = None
-    ChannelMessage = None
-    ChannelEventType = None
+from neurova.channels.base import (
+    ChannelAdapter,
+    ChannelConfig,
+    ChannelEventType,
+    ChannelMessage,
+)
 
-try:
-    from neurova.channels.models import ContentType, MessageChannel, UnifiedMessage, UserIdentity
-except ImportError as _e:
-    _logger.debug("channels.models 未可用: %s", _e)
-    ContentType = None
-    MessageChannel = None
-    UnifiedMessage = None
-    UserIdentity = None
+from neurova.channels.models import ContentType, MessageChannel, UnifiedMessage, UserIdentity
 
-try:
-    from neurova.channels.user_identity import UserIdentityManager
-except ImportError as _e:
-    _logger.debug("channels.user_identity 未可用: %s", _e)
-    UserIdentityManager = None
+from neurova.channels.user_identity import UserIdentityManager
 
-try:
-    from neurova.channels.manager import ChannelManager, get_channel_manager
-except ImportError as _e:
-    _logger.debug("channels.manager 未可用: %s", _e)
-    ChannelManager = None
-    get_channel_manager = None
+from neurova.channels.manager import ChannelManager, get_channel_manager
 
-try:
-    from neurova.channels.xiaoyi import XiaoYiAdapter, create_xiaoyi_adapter
-except ImportError as _e:
-    _logger.debug("channels.xiaoyi 未可用: %s", _e)
-    XiaoYiAdapter = None
-    create_xiaoyi_adapter = None
+from neurova.channels.xiaoyi import XiaoYiAdapter, create_xiaoyi_adapter
 
-try:
-    from neurova.channels.voice import VoiceAdapter, create_voice_adapter
-except ImportError as _e:
-    _logger.debug("channels.voice 未可用: %s", _e)
-    VoiceAdapter = None
-    create_voice_adapter = None
+from neurova.channels.voice import VoiceAdapter, create_voice_adapter
 
-try:
-    from neurova.channels.telegram_adapter import TelegramAdapter, create_telegram_adapter
-except ImportError as _e:
-    _logger.debug("channels.telegram_adapter 未可用: %s", _e)
-    TelegramAdapter = None
-    create_telegram_adapter = None
+from neurova.channels.telegram_adapter import TelegramAdapter, create_telegram_adapter
 
-try:
-    from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
-except ImportError as _e:
-    _logger.debug("session_manager 未可用: %s", _e)
-    SessionManager = None
-    SessionMessage = None
-    SessionRecord = None
-    get_session_manager = None
+from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
 
 __all__ = [
     "ChannelAdapter",
