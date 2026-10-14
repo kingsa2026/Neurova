@@ -2926,3 +2926,11 @@ tests/unit/core/test_cacheAccountsMergedIntoOneModule.py
 # 形状取"默认放行 + 显式禁"而非白名单：正文普通行本来就靠这条路进上下文，白名单会当场掐死现网检索。
 # 逐档单跑三次 11/11/11；活体另扩到 22 项读数带摘闸反证。
 tests/unit/memory/test_recallContextFilterKeepsEchoRowsOut.py
+# 批 §6-209：用户回执接进结晶器证据面（裁定甲）。11 格里 9 格问结晶器接缝、2 格问端点接缝。
+# 钉死的三件"不做"各有独立一格：补票**不新增观察**（条目数就是 min_observations 的分母）、
+# **不覆盖客观票据**（工单 002/010 优先级，两个方向都断）、**模式键对不上时不新建键**
+# （新建即静默双计）；另加"不落盘不算补上"与"取消反馈不撤票"（三态不许被写成两态）。
+# 纯对话轮的 CHAT_PSEUDO_TOOL 条目永不因点赞吃票——§6-208 那个过滤器挡得住推理链回声、
+# 挡不住结晶类进上下文（结晶按设计就该注入），所以寒暄只能不吃票。
+# 活体 `tests/manual/crystallizerEvidenceFromFeedbackLive.py` 带反证基线（未点赞时 evidenced=0）。
+tests/unit/cognitive/test_crystallizerTurnEvidenceFromUserFeedback.py

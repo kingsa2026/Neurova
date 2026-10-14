@@ -3513,6 +3513,40 @@
     - **顺带登记一条门禁缺口**：睡眠固化族（HTTP 13 端点 + 每 10 回合自动跑 + 写回正文库）**0 格进 `protected_tests.txt`** `[实]`。要补的那格要点写在档案 §5 末：断"`run_sleep_cycle` 真把合并结果写进 A1 且 ≥2 源才新增"，不能只断返回值形状。属另一批。
     - **本会话下一枚空号现查 §6-209。**
 
+209. **用户回执接进结晶器证据面（裁定甲：只补工具轮，寒暄轮永不因点赞吃票）（✅ `88a5258d`）**
+    - **接的是实算出来的缺口**：`POST /api/v1/console/chat/feedback`（`console.py:1847`）早就带真 like/dislike，并已向**记忆温度（+10/−15）**、**反思效力裁决**、**动机台账 observe_purpose** 三面扇出——唯独不喂结晶器。于是 `pattern_crystallizer.py:264` 那道证据闸永远看到 `evidenced=0`（盘上两份 `crystallizer_state.json` 实测 `observations=1 / evidenced=0`），模式永不结晶。这批补的是**第四面扇出**，不是新造信号。
+    - **裁定甲的形状**：`attachTurnOutcome(userText, success)` 只给该轮的**工具**条目补票；`CHAT_PSEUDO_TOOL`（纯对话轮的伪工具名，与 EKB `skill_name="chat"` 同一约定）明确排除——把"寒暄被赞了"结晶成模式，正是 2026-09-05 那条教训换个入口回来，而 §6-208 那个过滤器只挡推理链回声、**挡不住结晶类进上下文**（结晶按设计就该注入）。
+    - **三条"不做"各有格**：不新增一次观察（条目数就是 `min_observations` 的分母，补票若写成"再来一条"等于把三轮门槛降成两轮再加一票）；不覆盖已有客观票据（工单 002/010 的优先级，主观不改判客观，两个方向都断）；模式键对不上时**不新建键**（新建即静默双计，比一次失败难发现得多）。另加"补票不落盘就不算补上"一格（重启退回无票）与"取消反馈不撤票"一格（三态不许被写成两态）。
+    - **单源**：`CHAT_PSEUDO_TOOL` 全仓只定义一处（AST 数定义点），`closed_loop.py:605` 的 `observe_targets` 从裸 `["chat"]` 改引该常量——两处各写字面量必有一处先漂；`_apply_feedback_to_crystallizer` 用该轮**存下来的用户原文**过 `_extract_pattern_key`（同一函数），不在反馈侧重造一份推导。
+    - **判据 11 格**（`tests/unit/cognitive/test_crystallizerTurnEvidenceFromUserFeedback.py`，逐档单跑 11/11/11）：9 格在结晶器接缝 + 2 格在端点接缝（形状取自同族 `tests/unit/api/test_feedback_purpose_signal.py`，不新建第二套假 app）。红灯原文是**收集期 ImportError**（`cannot import name 'CHAT_PSEUDO_TOOL'`，1 error）——新符号的正常红，按教义第 3 条与行为红**分开报**；行为红的证据走两段红自证（见下）。
+    - **红自证（分两段，因为一次全退只剩 ImportError）**：① 只回退接缝两件（`console.py` + `closed_loop.py`，`-m red-selfproof-209-endpointOnly`）⇒ `2 failed, 9 passed`，失败恰等"端点扇出格"与"closed_loop 常量格"；② 回退全部三件 ⇒ `1 error during collection`（新符号缺席）。`apply` 后逐档 numstat 复算一致（39/0、37/0、7/4）才 drop。
+    - **变异自检 5 枚全咬**：M1 去掉"排除 chat"⇒ 2 格红；M2 键对不上时 `setdefault` 造键⇒ 1 格红；M3 去掉"只补无票条目"⇒ 1 格红；M4 `closed_loop` 退回裸 `["chat"]`⇒ 1 格红；M5 补票不落盘⇒ 1 格红。全部按**字节**快照还原并复核一致（第一版用 text 模式还原，被 CRLF 翻译报了个假"还原失败"——本仓 `pattern_crystallizer.py` 是 CRLF 文件，多行锚点要按被测文件的行尾风格换算，否则恒 0 命中会被读成"变异没打到"）。
+    - **活体**（`tests/manual/crystallizerEvidenceFromFeedbackLive.py`，exit=0）：真 `create_app()` + 真 agent 的真结晶器 + 真会话仓储落的一轮真对话 + 真 HTTP 反馈端点 ⇒ `before: {observations: 2, evidenced: 0}`（反证基线：没点赞时确实无票）、`feedback_status: 200`、`after_like: {observations: 2, evidenced: 1}`（票到了且**没虚增观察**）、`after_chat_like: {observations: 2, evidenced: 1}`（寒暄轮点赞后两值一动不动＝裁定甲在真面上成立）。踩记一条：agent 必须在 `with TestClient(app)` **之内**取——认知图在 lifespan 里装配，外面取到的 `crystallizer` 恒 None（第一版就是这么失败的）。
+    - **A/B**（cognitive + evolution + 反馈端点同族档 + 检索链档，基线 = HEAD 生产 + 铺入本批判据）：
+      基线 `15 failed 7 errors 2030 passed` ↔ 本树 `11 failed 2041 passed`，
+      **仅本树红 0 条 = AB_PASS**；仅基线红 11 条＝本批 11 格（基线无修复，其中 7 格表现为夹具
+      装配 ERROR、4 格 FAILED），两侧同名交集 11 条为预存不认领。**前两轮 AB_FAIL 都是取证通道塌了
+      而不是"两侧一致"**，形状值得留档（已进形态集第 178 条）：① 选择集带了并发会话**未入库**的
+      `tests/unit/api/test_reflection_effectiveness_loop.py`，基线侧 `file or directory not found`
+      整场 exit=4；② 本批新档在**模块顶层** import 新符号，被 `-c` 铺进基线树后基线侧
+      `Interrupted: 1 error during collection`、`no tests ran`——脚本只报"仅基线红 1 条"，
+      极易被读成"基线也红＝预存"。修法是把新符号的 import 收进函数/夹具（同族 §6-206 的
+      resolver 档本来就是这个形状，所以那轮一次通过）。
+    - **净 LOC 与第三次同一形状的自查**：生产池 **+83/−4＝净 +79**，去向逐条——
+      `pattern_crystallizer.py` +37（`CHAT_PSEUDO_TOOL` 单源常量 + `attachTurnOutcome()` 与三条"不做"的理由）、
+      `api/endpoints/console.py` +39（第四面扇出 helper + 端点那一跳）、
+      `evolution/closed_loop.py` +7/−4（改引常量并把理由写进注释）。测试基建池真值 **+389/−0**
+      （判据档 236 行、活体档 153 行），而 `88a5258d` 正文写的是「+378/−0、新档 225 行」——
+      225 是我**后来把 import 收进函数之前**量的数。这是本会话第三次栽在"先写数后量数"
+      （前两次：§6-205 的 +252、§6-208 的 +237），且这次连分项都量在了改动之前。
+      流程改死：**提交正文里任何数字必须先跑 `git show --numstat | awk` 现场产出**，
+      没出表就不许出现该数字；并作为形态集第 179 条单独立档（167 的第三次复现）。
+    - **仍开（本批没动，各需一次裁定）**：① `trace_persistence_enabled` 的默认值翻不翻
+      （读侧 `get_recent_traces()` 仍零生产调用方）；② `sleep_adapter.py` 那层壳的退役
+      （档案判"可退役"，同批要删档 + 删该档 5 格 + 改指三处文档，另需裁
+      `CognitiveStorageEngine.get_statistics()` 的去留）；③ 睡眠固化族 0 格进子集。
+    - **本会话下一枚空号现查 §6-210。**
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
