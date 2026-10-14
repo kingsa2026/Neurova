@@ -3428,6 +3428,74 @@
       ③ **`sleep_adapter.py` 这层重复壳的去留**。复核更正了本人上一轮回答里的一处说宽：睡眠固化本体**是活的**（`agent_core.py:1373` 构造原生 `SleepConsolidation`、`:1382` 挂 `idle_tracker`、`agent_shutdown.py:72` 关机跑一次、`flow_orchestrator.py:796` 一个 phase、`sleep.py:824-837` 读 `memory_manager.get_all_memories()` 再 `write_back_consolidation_result` 写回），零消费者的只是 `sleep_adapter.py`——而它 `__init__` 里**又自己 new 一个 `SleepConsolidation`**（`:48`），即同一功能的第二个装配壳。档案 §4-3 当时写的是"零装配 + 现役是原生类"，是准确的；把它说成"睡眠适配彻底未接"是我的转述错位。处置属教义第 7 条**先比后合**：比 `_fetch_memories`（以引擎为源）与现役（以 memory_manager 为源）在 §6-202 之后取到的集合是否实质等价，等价则退役壳，不等价则说明它保留了什么。**撞见时机**：谁要开"离线固化"这条面时先做这份对比，别直接接 adapter。
     - **本会话下一枚空号现查 §6-207。**
 
+
+207. **缓存三本账收成一条：实装搬进 `neurova/core/cache.py`，两份门面与第二个全局实例退役（✅ `b0e5af44` 生产+判据 9 格+活体 8 读数 / `9cbd7ac6` 子集 571→572）** 🟢 —— 用户 2026-10-14 点单 G，落点选 **B**（"实装搬到 neurova/core/cache.py"），并批准三条同族断点随批处理。
+    - **三本账的实状（本批现算）**：`neurova/memory/core/cache.py`(574 行)＝唯一实装 + 全局实例
+      注册名 `memory_global`（手写 `threading.Lock` 的 DCL）+ 缓存注册表 + `cached` 装饰器；
+      `neurova/core/cache.py`(84 行)＝门面，**第二条**全局实例注册名 `core_global`（走 `lazySingleton`）
+      加四个便捷函数 `cache_get/cache_set/cache_delete/cache_clear`——现算全仓零消费者
+      （除自身定义与 `__all__`）；`neurova/cognitive_layers/memory_layer/cache.py`(21 行)＝自陈已废弃的薄壳
+      带 4 个未用 import。两条注册名的真实危害不是"多一个名字"：`/metrics` 会把同一个进程的缓存
+      记成两列命中率，而消费方无从知道哪列是真的；薄壳那条 import 则是批 43 挖出的**真循环载体**
+      （`memory/__init__.py` 的 `_MODULE_MAP["cache"]` 别名是它唯一消费者，随批删）。
+      生产侧消费者只有两读一写：`core/metrics.py`（命中率）、`api/endpoints/settings.py`（清缓存）。
+    - **比-取-接-退**：实装那份有完整契约，门面那份唯一不可替代的东西是 `lazySingleton`
+      那条 DCL+RLock 单例接缝（AGENTS.md §3 口径）⇒ 选定实装、把它的单例改走 `lazySingleton`
+      （取长补短，行为不变，活体 [7b] 逐值对账证明）；两份门面的"再导出"角色整体退役，
+      不留"一条实装 + 一层薄门面"的中态——那正是 `test_dead_cache_module_removed.py` 此前钉成
+      合法形状的东西（`KNOWN_REEXPORT_SHIMS` 两条），本批把它**改判**成"不得存在任何再导出门面"。
+    - **三条同族断点随批（教义 5）**：① 设置页「清缓存」端点越过公开口直接读私有 `_cache_registry`
+      （且 import 了公开的 `iter_caches` 却没用）⇒ 改吃实装侧新添的 `clearRegisteredCaches()`；
+      ② `test_cache_comprehensive.py` 的 `TestBatchWriter` 整类 gate 在 `BatchWriter` 上，该类
+      **全仓零实装**（另一档测试早已写明）⇒ gate 恒假、整类恒 skip、体内只有一句 `pass`，连同
+      try/except 导入一起退；③ 四个零消费者便捷函数按 §2 断点条款退役并配一格零容忍防复活。
+    - **验证读数**：新档 `tests/unit/core/test_cacheAccountsMergedIntoOneModule.py` 9 格，
+      建档红＝摘掉修复复跑 `12 failed`（红全落在行为/集合断言上且带 file:line 命中清单，
+      不是 import/collection 错）；绿灯判据 9 格 + 改判档 8 格合跑 `17 passed`，受影响 7 档合跑
+      `59 passed`；`tests/unit/core` 整族 `2080 passed / 8 failed` 与改动前逐条相同（预存）。
+      逐档单跑三次 9/9/9 与 8/8/8，已入子集。**变异 7 枚全咬**：M1 再登记第二条注册名→
+      `实得 ['default', 'core_global']`；M2 端点回退读私有注册表；M3 薄壳加回来；M4 造第二份
+      `MemoryCache` 实现；M5 便捷函数复活；M6 用 `importlib.import_module("<退役路径>")` 那一形；
+      M7 公开清缓存口改名。每枚按 sha256 逐字节复原，临时件残留核过＝无。
+      **红自证**：只把生产侧 7 档退回 HEAD、判据留着 ⇒ 12 格红；复原作用域取本会话自存的
+      17 档清单（不用 `git status` 现算），复原后做锚点回读——这条是形态集第 162 条的直接兑现。
+    - **活体 `tests/manual/cacheSingleSource_batch45.py` 8 读数 exit=0**：三条退役入口在独立子进程里
+      全部不可导入且失败原因点名；注册表只剩 `default` 一条；`/metrics` 三列读数是 `0.5 None None`
+      （default 有值、`memory_global`/`core_global` 都取不到）；真 HTTP 面未登录 401、登录后 200 且
+      `default` 计数进响应、实例真被清空；反向校准手工再登记一条名字，读数立刻成两条；
+      **纯搬家证明**＝同一串行为读数（LRU 逐出 / TTL 过期 / 命中率 / "缓存值为 None 不算 miss" /
+      resize / clear）在本树与 HEAD 那份旧实装上 sha256 逐值相同（`ba3bd90ee9e0`）。
+    - **一处 A/B 用法上的坑（记给下一批，形态集新增）**：`-c` 铺进基线树的"改指后的测试档"如果
+      import 了基线那侧还不存在的名字（本批是 `_MISSING`/`cached`/`reset_global_cache`），
+      基线整场会在 collection 阶段 `Interrupted` 并**照样产出一行汇总**（`1 skipped, 2 errors`），
+      于是 `summary()` 非空那道"没跑成"自检不拦，差集就拿一个 2 条的基线集合去比 46 条的本树集合——
+      整轮结论是假的。搬家型批次只铺"基线侧也收得进来"的档（新判据 + 不引用新名字的改指档）。
+    - **宽域 A/B（memory+core+api）**：基线 `48 failed 5613 passed 51 skipped 9 errors` 失败集合 57 条
+      ↔ 本树 `34 failed … 12 errors` 46 条；「仅基线红」14 条正是本批转绿的格；「仅本树红」4 条 ERROR
+      经**同选型复跑**定性为不重现（复跑 `34 failed 5627 passed 51 skipped 9 errors`，errors 回到与
+      基线一致的 9，四条单跑 `4 passed`）⇒ 记档不认领，也不当作已通过。机制对得上今天两次直接
+      看见的那一形：仓库根污染守卫把第三方跑测期间写进根目录的 `.tmp_*` 探针件
+      （`.tmp_ab204.log`、`.tmp_closeLedgerNote.py`）记到"当时正在跑的那一格"名下。
+    - **净 LOC**：生产池 **+584/−681 ＝ 净 −97**。去向：搬家 574 行进 `neurova/core/cache.py`
+      （该文件 +567/−49，新增那约 48 行＝docstring 9 + `GLOBAL_CACHE_NAME` 常量 + `lazySingleton`
+      改造段 + `clearRegisteredCaches()` 25，删掉的 49 行＝四个零消费者便捷函数 + 第二个全局实例）；
+      退役 `memory/core/cache.py` −574、`memory/core/__init__.py` −7、`memory_layer/cache.py` −21；
+      `settings.py` +7/−13、`metrics.py` +3/−3、`memory/__init__.py` +7/−14。
+    - **文档同步**：只改现役事实表——`COMPLETE_MODULES.md`（顺带删掉 `BatchWriter` 那一行，
+      该类全仓零实装、是条假账）、`FUNCTIONALITY_ANALYSIS.md` 四行、
+      `docs/02-api/memory-system-api-logic.md` 两行合成一行并把 `[未复核]` 改成 `[实测]`、
+      `stub-cleanup-plan.md` 那条划掉记完成。`cognitive-graph-*`、`unified-storage-format-discussion`、
+      `BUG_AUDIT_REPORT`、`11-legacy/源码图谱` 属过程/历史档案，本批不改写。
+    - **登记不修（三条）**：① `cached` 装饰器生产侧零消费者（现读只有 `test_cache_decorator_none.py`
+      自用自测），按 §2 属"写而无读"，但它是公开能力面，删＝另一次裁定；
+      ② `MemoryCache` 类内 `get_many/set_many/delete_many/get_entry_info/get_or_set` 跨模块属性调用
+      现数 0（`has` 这一名过钝，别处同名方法会一起算进来，要判它得再按持有者类型核一遍）——
+      类内方法面的退役不是本批那条根因，未扩；③ `docs/01-architecture/cognitive-graph-*.md`、
+      `unified-storage-format-discussion.md`、`BUG_AUDIT_REPORT_2026-09-10.md` 里仍写着
+      `memory_layer/cache.py` 那句"stub"——历史档案按惯例不改写，读的时候知道它已不存在即可。
+    - **本会话下一枚空号现查 §6-208**（207＝本批；写前必现查 `grep -oE '^[0-9]+\. \*\*' | sort -n | tail`，
+      别按上一条 +1——204/205/206 这几天是被并发会话连着占的）。
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
