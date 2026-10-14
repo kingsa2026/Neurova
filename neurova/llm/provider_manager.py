@@ -530,11 +530,12 @@ class LLMProviderManager(Module):
         self._log(LogLevel.INFO, f"LLM Provider Manager started with {len(self._providers)} providers")
 
     def _get_default_config_path(self) -> Path:
-        """获取默认配置路径"""
-        home = Path.home()
-        config_dir = home / ".neurova" / "config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        return config_dir / "providers.json"
+        """默认配置路径——取模块级那一处推导，不在方法里再拼一遍落点。
+
+        此前这里与 `_default_config_dir()` 各写一份 `Path.home()/.neurova/config`，
+        同一个锚点两份算法，改一处就漏一处（教义第 6 条）。
+        """
+        return _default_config_dir() / "providers.json"
 
     def _load_config(self) -> None:
         """加载配置"""
@@ -2077,10 +2078,23 @@ def _sanitize_scope_part(value: str) -> str:
 
 
 def _default_config_dir() -> Path:
-    home = Path.home()
-    config_dir = home / ".neurova" / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir
+    """凭据与供应商配置的落点：**数据根下一处**（旧 `~/.neurova/config` 已收养进来）。
+
+    为什么不该留在主目录：部署面只挂数据根（docker-compose 与 helm 都只挂 `/app/data`），
+    home 那一址在容器里重启即失；桌面打包也不提 `.neurova` 目录。而它此前绕开
+    `NEUROVA_DATA_DIR`，直接后果是测试期把真凭据文件写进开发者主目录（实测如此）。
+    """
+    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+
+    target = dataLanding("llm", legacy=())
+    target.mkdir(parents=True, exist_ok=True)
+    legacyDir = legacyHomeLanding("config")
+    if legacyDir.is_dir():
+        # 逐份收养：admin 全局那份 + 每个 scope 一份；两侧都在场时不覆盖、点名（语义见
+        # data_root.adoptLandingFrom），搬完旧文件即消失，凭据不会两头各存一半。
+        for legacy in sorted(legacyDir.glob("providers*.json")):
+            adoptLandingFrom(target / legacy.name, legacy)
+    return target
 
 
 def _config_path_for_scope(scope: str) -> Path:

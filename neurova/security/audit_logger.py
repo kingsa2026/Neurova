@@ -112,6 +112,28 @@ class AuditLogEntry:
 AuditLog = AuditLogEntry
 
 
+#: 审计库文件名（落点推导见 `auditDbPath()`，别处不要手拼）。
+AUDIT_DB_NAME = "audit.db"
+
+
+def auditDbPath() -> str:
+    """审计库落点：数据根下唯一一处；旧 `~/.neurova/audit.db` 在空缺时收养。
+
+    为什么连 `-wal`/`-shm` 一起收：WAL 模式下未 checkpoint 的帧只存在于 `-wal`，
+    只搬主库等于把最近的审计记录留在原地——"看着搬完了、实则丢数据"就是这一形。
+    """
+    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+
+    target = dataLanding(AUDIT_DB_NAME, legacy=())
+    legacy = legacyHomeLanding(AUDIT_DB_NAME)
+    if legacy.exists():
+        for suffix in ("", "-wal", "-shm"):
+            src = legacy.parent / (legacy.name + suffix)
+            if src.exists():
+                adoptLandingFrom(target.parent / (target.name + suffix), src)
+    return str(target)
+
+
 class AuditLogger:
     """
     审计日志管理器
@@ -141,7 +163,7 @@ class AuditLogger:
         if self._initialized:
             return
 
-        self._db_path = db_path or str(Path.home() / ".neurova" / "audit.db")
+        self._db_path = db_path or auditDbPath()
         self._ensure_db_dir()
         self._init_db()
         self._initialized = True

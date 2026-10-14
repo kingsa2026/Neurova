@@ -73,11 +73,16 @@ class TestScopeIsolation:
         assert "Admin Only" not in alice_names
 
     def test_sanitized_scope_path(self, tmp_path, monkeypatch):
+        from neurova.core.data_root import get_data_root
+
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         mgr = get_provider_manager(scope="user:alice@acme/CN")
         # 非法文件名字符需被替换,不得产生嵌套/特殊路径
-        assert mgr._config_path.parent == tmp_path / ".neurova" / "config"
+        # 落点已收进数据根：home 不再决定它（原断言钉的是 `~/.neurova/config`，
+        # 那是本批收口的对象；这里改钉"在数据根下 + 文件名被净化"两件事）
+        assert get_data_root() in mgr._config_path.parents
         assert ".." not in mgr._config_path.name
+        assert "/" not in mgr._config_path.name and "\\" not in mgr._config_path.name
         assert mgr._config_path.suffix == ".json"
 
     def test_reset_clears_all_scopes(self, tmp_path, monkeypatch):
