@@ -2984,3 +2984,12 @@ tests/unit/memory/test_sleepConsolidationSkipsRetiredMemories.py
 # round1_real_merge=[[mem_000001, mem_000002]]——这条路第一次真走通；反证删那一行必须红在
 # "聚类退回全单例簇"上。
 tests/unit/memory/test_memoryToDictCarriesEmbedding.py
+# 批 §6-217：一次性嵌入回填工具的三条硬规矩，各有判据。8 格——只填 NULL 不覆盖既有向量、
+# 幂等（第二跑填 0 且不再调推理）、引擎缺席则一行不写且退出码非零、initialize_sync 失败要带原因、
+# 空内容跳过并计数（否则伪装成"填了个空向量"）、dry-run 不落盘只报 wouldFill、
+# 填完经 `get_all_memories()` → `MemoryRecord` 取回真能聚成簇（§6-215 那条出口闭环的下游半段）、
+# 形状格按 AST 钉工具不许 import sqlite3 / 不许裸 execute（绕开唯一写口＝第二个落点）。
+# 七枚变异 M1..M7 各咬各格（M6 只加一句 import 即红）。逐档单跑六次 8/8/8/8/8/8。
+# ⚠ 本档的桩引擎早期用内置 hash() 造出过间歇红——字符串哈希按进程加盐，无关文本余弦会跳过
+# 0.7 阈值；换 zlib.crc32 后才稳（形态集"判据自己不稳，红就没法归因"那一形）。
+tests/unit/memory/test_backfillMemoryEmbeddingsTool.py
