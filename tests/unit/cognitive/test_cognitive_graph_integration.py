@@ -58,25 +58,41 @@ class TestCognitiveGraphFullStack:
         pattern_results = [r for r in results if r.get('source') == 'pattern']
         assert len(pattern_results) >= 1
 
-    def test_reasoning_trace_stored_and_retrievable(self, tmp_path, monkeypatch):
-        """推理链存储后可检索（持久化需显式开启 NEUROVA_TRACE_PERSIST）"""
+    def test_reasoning_trace_is_stored_but_never_enters_context(self, tmp_path, monkeypatch):
+        """改判（§6-207，用户裁定乙前半）：原格名「存储后可检索」，后半句正是 2026-09-05
+        回声污染的读侧成因——寒暄推理链被当相关记忆捞回上下文。现契约拆成两半各自钉：
+        **存得下**（治理面开时正文库真有一行），**永不进上下文**（检索面取不到它）。
+        """
         monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
+        from tests.cognitive_body_store import bodyManager
 
-        engine = cognitiveEngine(tmp_path)
+        manager = bodyManager(tmp_path)
+        engine = cognitiveEngine(tmp_path, manager=manager)
         trace_mgr = ReasoningTraceManager(engine=engine)
         retriever = UnifiedRetriever(engine=engine)
 
-        # 创建推理链
+        # 创建推理链并 flush 进正文库
         trace_id = trace_mgr.start_trace("什么是深度学习？")
         trace_mgr.add_step(trace_id, "retrieve", "搜索深度学习", "找到相关记忆")
         trace_mgr.finish_trace(trace_id, "深度学习是机器学习的子领域", total_tokens=200)
+        engine.close()
 
-        # 检索
+        echo = [m for m in manager.iterBodyMemories(limit=500)
+                if (m.metadata or {}).get("cse_category") == "reasoning_trace"]
+        assert len(echo) == 1, "门开着却没存下推理链——写侧契约也漂了"
+
+        # 对照格：同一次查询里普通正文行照常返回，证"取不到"是过滤而非检索坏了
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
+        engine.store(UnifiedMemoryNode(content="深度学习属于机器学习的子领域"))
+        engine.close()
+
         results = asyncio.run(retriever.retrieve("深度学习", limit=10))
-        trace_results = [r for r in results if r.get('source') == 'episodic']
-        assert len(trace_results) >= 1
+        assert all(r.get("category") != "reasoning_trace" for r in results), (
+            "推理链回声行又进上下文了（§6-207 的过滤器被绕过）")
+        assert any("深度学习" in (r.get("content") or "") and r.get("category") != "reasoning_trace"
+                   for r in results), "普通正文行也取不到了＝过滤器成了总闸或检索本身坏了"
 
     def test_temperature_unified_0_to_100(self, tmp_path):
         """温度系统统一为 0-100 范围"""
