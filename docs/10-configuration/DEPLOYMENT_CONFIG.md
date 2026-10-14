@@ -41,8 +41,11 @@ Neurova 同一套后端服务有三种交付形态，它们必须共享同一份
 | `NEUROVA_PORT` / `NEUROVA_HOST` | `start_server.py` | — |
 
 模型/服务商默认值**不通过环境变量配置**：运行时以
-`~/.neurova/config/providers.json` 与 `agent_workspaces/<agent_id>/agent_config.json`
-为准（配置页写入）。
+`<数据根>/llm/providers.json`（按用户身份分文件时同目录 `providers.<scope>.json`）
+与 `agent_workspaces/<agent_id>/agent_config.json` 为准（配置页写入）。
+数据根默认是仓库内 `data/`，由 `NEUROVA_DATA_DIR` 单点注入；旧版曾把凭据写在
+`~/.neurova/config/providers.json`，首次访问时会**整体搬进数据根**（新落点已在则不覆盖并点名）。
+容器与 helm 部署只挂 `/app/data`，凭据因此随卷持久——这也是把它从主目录收回数据根的原因。
 
 ## 门禁
 
