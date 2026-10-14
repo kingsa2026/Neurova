@@ -2903,3 +2903,18 @@ tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py
 # PUT 面有字段」的枚举报示——它一跑就跑出两处存量同形（consolidation_* 两键），已同批扫掉。
 # 逐档单跑三次 10/10/10；活体 `tests/manual/traceGateGovernanceFaceLive.py` 18 项读数 exit=0。
 tests/unit/cognitive/test_reasoning_trace_persist_gate.py
+# 批 45（裁定 G＝用户点单「缓存三本账收成一条」，走 B 项：实装搬进 neurova/core/cache.py）：
+# 退役 `neurova/memory/core/cache.py`(574 行实装) + `neurova/core/cache.py`(84 行门面，含第二条
+# 全局实例注册名 core_global 与四个零消费者便捷函数) + `memory_layer/cache.py`(21 行薄壳)。
+# 两条注册名的真实危害＝同一个进程的缓存被 /metrics 记成两列，消费方不知哪列是真；薄壳那条
+# import 是批 43 挖出的真循环载体（`memory/__init__.py` 的 `_MODULE_MAP["cache"]` 别名是唯一消费者，
+# 随批删）。同批三条同族断点：设置页「清缓存」不再跨模块读私有 `_cache_registry`（改吃
+# clearRegisteredCaches()）、恒 skip 的 TestBatchWriter 整类退（BatchWriter 全仓零实装）、
+# 四个零消费者便捷函数按 §2 退役并配零容忍格。
+# 判据 9 格里：1 格退役档必须不存在且选定那份必须在（反空转）、3 格按三条退役模块逐个查生产侧
+# import、1 格 `importlib.import_module("<退役路径>")` 那一形（importsOf 看不见）、1 格全局只一条
+# 注册名、1 格私有注册表不出本模块、1 格清缓存公开口作用在真实对象上、1 格四个便捷函数不得复活。
+# 改判 `test_dead_cache_module_removed.py`：它此前把"一份实装 + 两份薄门面"钉成合法形状。
+# 逐档单跑三次 9/9/9（改判档 8/8/8）；活体 8 读数 exit=0 含**纯搬家逐值对账**（本树与 HEAD 那份
+# 六组行为读数 sha256 相同）；A/B 两侧 errors 数一致（9↔9），"仅基线红"14 条即本批转绿的格。
+tests/unit/core/test_cacheAccountsMergedIntoOneModule.py
