@@ -24,6 +24,24 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+#: 对本轮固化而言"已退役"的两个阶段。`soft forget` 与归档都**不删行**（可恢复），
+#: 所以退役只存在于 `lifecycle_stage` 这一个键上。`crystallized`/`consolidated` 不在
+#: 此列——它们仍算在用库里，改判属产品语义，另一次裁。
+_RETIRED_STAGES = frozenset({"archived", "forgotten"})
+
+
+def _retiredFromDict(data: Dict[str, Any]) -> bool:
+    """从一份记忆字典里取出"是否已退役"。
+
+    优先按真键 `lifecycle_stage`；键缺席时才退回自带的 `is_archived`（`MemoryRecord.to_dict()`
+    自己写出的形状），两者都没有才算未退役。
+    """
+    stage = data.get("lifecycle_stage")
+    value = str(getattr(stage, "value", stage) or "").strip().lower()
+    if value:
+        return value in _RETIRED_STAGES
+    return bool(data.get("is_archived", False))
+
 
 @dataclass
 class MemoryRecord:
@@ -70,7 +88,10 @@ class MemoryRecord:
             recall_count=data.get("recall_count", data.get("access_count", 0)),
             created_at=created_at,
             categories=data.get("categories", []),
-            is_archived=data.get("is_archived", False),
+            # 退役与否的唯一出处是 `lifecycle_stage`——`Memory.to_dict()` 里**没有** `is_archived`
+            # 这个键。此前只读 `is_archived`，于是 soft-forget/归档过的行在进入固化时被当成活跃
+            # 记忆，同一批源每轮被再合并一次（§6-214）。仍兼容自带 is_archived 的旧形状。
+            is_archived=_retiredFromDict(data),
             merged_from=data.get("merged_from", []),
             agent_id=data.get("agent_id", "default"),
             neuser_id=data.get("neuser_id", "default"),
@@ -461,8 +482,14 @@ class SleepConsolidation:
         """
         logger.info("开始睡眠整合: %s 条记忆", len(memories))
 
-        # 1. 聚类
-        clusters = self.cluster_by_similarity(memories)
+        # 1. 聚类 —— 只吃未退役的记录。soft forget 与归档都不删行，退役只写在
+        # `lifecycle_stage` 上；此前这里从不看状态，于是**上一轮刚被合并并 forget 掉的源**
+        # 下一轮又被拉进同一个簇再合一次（实测盘上稳定 +1 行/轮——2026-09-05 全库翻倍
+        # 那笔账的线性版），退役行的温度也每轮被重算。判据取自 `from_dict` 里那个真键，
+        # 两处必须一起修：只修键，聚类照旧收它们；只修聚类，判据恒 False 等于没修。
+        retired = [m for m in memories if m.is_archived]
+        working = [m for m in memories if not m.is_archived]
+        clusters = self.cluster_by_similarity(working)
 
         # 2. 合并
         merged_memories = []
@@ -514,8 +541,8 @@ class SleepConsolidation:
 
         logger.info(
             f"睡眠整合完成: "
-            f"合并 {len(memories)} → {len(merged_memories)} 条记忆, "
-            f"活跃 {active_count}, 归档 {archived_count}"
+            f"参与 {len(working)} 条（退役 {len(retired)} 条未参与）→ {len(merged_memories)} 条记忆, "
+            f"活跃 {active_count}, 本轮归档 {archived_count}"
         )
 
         # 更新 RSI 反馈统计
