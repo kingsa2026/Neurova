@@ -21,3 +21,8 @@ Cognitive Module - 认知模块
 
 
 from neurova.cognitive_layers.memory_layer.models import Memory
+
+# `Memory` 是本包唯一对外供给的名字，取法是属性形（`import neurova.cognitive as cog; cog.Memory`，
+# 见 tests/unit/cognitive_layers/memory_layer/test_memory_dataclass_unification.py:58-65）——
+# 按 `from … import …` 一种形状去数消费者会把它读成零消费者（§6-212 实测的第三种偏法）。
+__all__ = ["Memory"]
