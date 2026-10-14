@@ -785,3 +785,91 @@ def _reset_memory_request_scope():
     except Exception:  # pragma: cover - 模块未就绪时跳过
         return
     clear_memory_request_scope()
+
+
+# ---------------------------------------------------------------------------
+# 跑测层「真权重出网」门（§6-201 登记的跑测环境缺陷家族，批 44 立）
+# ---------------------------------------------------------------------------
+# 实状：`models/**/*.data`（moss 权重 670MB）是未跟踪件，而入 git 的 5 只 `.onnx`
+# 让 `models/tts/moss-nano/` 在任何仓外 worktree 里都「看着存在」⇒ 用例里那句
+# 「目录存在＝有权重」是假前置。走到 `ensure_model` 的用例于是发真 HTTPS 下载 +
+# 退避 sleep：`test_ttl_release_switches_to_light_engine` 实测 HEAD 干净 worktree
+# 单格 31s、本树 19.32s；全局 `timeout = 30` 的 thread 法一到点就把整场打死，
+# A/B 因此拿不到汇总行（批 42、批 43 各烧掉一轮宽域自证）。
+#
+# 口径只在这里定义一次：登记表 = 仓内直接调外部权重下载的那几处
+# （`snapshot_download` / `hf_hub_download` / `HubApi`），由
+# `tests/unit/test_weightEgressGateRefusesBeforeBytes.py` 按 AST 反证覆盖面；
+# 「本机有没有权重」一律走 `ModelDownloader.is_model_available`（它按
+# `required_files` 逐件数，含那两份 .data），不另造第二份完整性谓词。
+# 真权重用例改挂 `@pytest.mark.real_model(<模型名>)`——门对它们同样关着，
+# 缺件只 skip，不许现场补下载。
+
+_WEIGHT_EGRESS_SITES = (
+    ("neurova.tts.model_downloader", "_download_via_modelscope"),
+    ("neurova.tts.model_downloader", "_download_via_hf_mirror"),
+    ("neurova.tts.model_downloader", "_download_via_huggingface"),
+)
+
+
+class _WeightEgressGate:
+    """出网那一层的拒绝桩 + 「本机有权重」的单源判定。"""
+
+    def __init__(self, sites):
+        self.sites = tuple(sites)
+        self.trips = []
+
+    def refusalFor(self, moduleName, attr):
+        trips = self.trips
+
+        def _refuse(*_args, **_kwargs):
+            trips.append(f"{moduleName}.{attr}")
+            raise RuntimeError(
+                f"跑测层禁止真出网取权重（被拦: {moduleName}.{attr}）。"
+                "要读真权重：给该用例挂 @pytest.mark.real_model(<模型名>) 且本机件齐；"
+                "要测下载逻辑：自己把这一处打桩（既有下载档都这么做）。")
+
+        return _refuse
+
+    def requireWeightsOrSkip(self, modelNames, baseDir=None):
+        """缺件即 skip；判定与生产共用同一个下载器实例（baseDir 仅供判据造缺件场景）。"""
+        if baseDir is None:
+            from neurova.tts.model_downloader import get_model_downloader
+
+            downloader = get_model_downloader()
+        else:
+            from neurova.tts.model_downloader import ModelDownloader
+
+            downloader = ModelDownloader(base_dir=str(baseDir))
+        missing = [name for name in modelNames if not downloader.is_model_available(name)]
+        if missing:
+            pytest.skip(
+                f"真权重不齐（本机缺 {missing}）——real_model 用例的前提是本地齐件，"
+                "不在此处补下载")
+
+
+_weightEgressGate = _WeightEgressGate(_WEIGHT_EGRESS_SITES)
+
+
+def pytest_configure(config):
+    config.pluginmanager.register(_weightEgressGate, "weightEgressGate")
+
+
+@pytest.fixture(autouse=True)
+def _closeWeightEgressDuringTests(request, monkeypatch):
+    """跑测期把三处权重下载点换成点名拒绝（在写出任何字节之前）。
+
+    用例自己 setattr 的桩在本夹具之后生效、覆盖它——既有下载类档照旧可跑。
+    """
+    marker = request.node.get_closest_marker("real_model")
+    if marker is not None:
+        if not marker.args:
+            pytest.fail(
+                "real_model 标记必须点名它需要哪些权重，"
+                "例如 @pytest.mark.real_model('moss-tts-nano')")
+        _weightEgressGate.requireWeightsOrSkip(tuple(marker.args))
+    import importlib
+
+    for moduleName, attr in _WEIGHT_EGRESS_SITES:
+        site = importlib.import_module(moduleName)
+        monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))

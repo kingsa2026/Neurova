@@ -27,7 +27,10 @@ from neurova.tts import manager as tts_manager_mod
 from neurova.tts.manager import TTSManager
 from neurova.tts.moss_nano import MOSSNanTTS
 
-# 仓库根下的本地模型目录（不入 git；缺失则跳过真实模型用例）
+# 仓库根下的本地模型目录：5 只 .onnx 与两份 manifest 入 git，而那两份 `.data`
+# 权重不入（`.gitignore` 的 `models/**/*.data`）——「目录存在」从来推不出「权重齐」。
+# 真权重用例的前置因此改挂 real_model 标记，由 tests/conftest.py 的权重出网门按
+# `ModelDownloader.is_model_available`（逐件数 required_files，含 .data）判缺件即 skip。
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _MOSS_MODEL_DIR = _REPO_ROOT / "models" / "tts" / "moss-nano"
 
@@ -134,7 +137,7 @@ def test_moss_probe_capability_false_when_inference_raises(monkeypatch):
     assert tts._probe_inference_capability() is False
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
 def test_moss_build_request_rows_shape():
     """请求行构造：row_width=17，slot 行/文本行填充 1024，通道 1..16 放 codes。
 
@@ -165,7 +168,7 @@ def test_moss_build_request_rows_shape():
     assert rows[-1][0] == 6
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
 def test_moss_builtin_voice_prompt_codes_loaded():
     """本地 manifest 内置音色 codes 经 _resolve_prompt_codes 默认路径可加载。"""
     tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
@@ -200,7 +203,8 @@ def test_create_wav_bytes_empty_array_returns_header():
     assert struct.unpack("<I", header[40:44])[0] == 0
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
+@pytest.mark.timeout(240)  # 真推理：本树实测 12.7–19.8s，冷盘/争用下会越全局 30s 墙钟
 @pytest.mark.asyncio
 async def test_moss_stream_real_synthesis():
     """moss 流式真合成：头部 + 数据块顺序产出，不能静默空/中途崩。"""
@@ -219,7 +223,8 @@ async def test_moss_stream_real_synthesis():
         await tts.shutdown()
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
+@pytest.mark.timeout(240)  # 真推理：本树实测 12.7–19.8s，冷盘/争用下会越全局 30s 墙钟
 @pytest.mark.asyncio
 async def test_moss_initialized_implies_real_synthesis():
     """诚实初始化不变量：模型齐全时 initialize() 必须成功，且真能合成非空语音。
@@ -253,7 +258,8 @@ async def test_moss_initialized_implies_real_synthesis():
 # ---- 2026-09-08 三修：16k 降采样 / 掐停顿 / 音色透传 ----
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
+@pytest.mark.timeout(240)  # 真推理：本树实测 12.7–19.8s，冷盘/争用下会越全局 30s 墙钟
 @pytest.mark.asyncio
 async def test_moss_output_16k_mono():
     """moss 输出契约：16kHz 单声道（降压力：48k 双声道→16k 单声道，体积/内存 -6x）。"""
@@ -321,7 +327,7 @@ def test_compress_silence_caps_gap():
 # ---- 2026-09-08 音色映射：moss 内置音色按名切换 + edge↔moss 双向近似 ----
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
 def test_moss_resolve_prompt_codes_by_voice_name():
     """voice 名匹配内置音色 → 对应 prompt codes；未知名 → 默认首个。"""
     tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
@@ -334,7 +340,7 @@ def test_moss_resolve_prompt_codes_by_voice_name():
     assert unknown == tts._resolve_prompt_codes(None, voice=None)
 
 
-@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.real_model("moss-tts-nano")
 def test_moss_edge_voice_alias_maps_to_builtin():
     """edge 音色名（zh-CN-XiaoxiaoNeural）经别名表映射到 moss 近似内置音色。"""
     tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
