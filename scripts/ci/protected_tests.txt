@@ -2954,6 +2954,16 @@ tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py
 # 逐档单跑三次 10/10/10；活体 `tests/manual/facadeGenericNames_batch47.py` 带反向校准
 # （同一取数打在 HEAD 那份工作树上必须报出 1 处通用名 + 3 处被盖掉的 import）。
 tests/unit/core/test_packageInitBindsNoUnusedGenericNames.py
+# 批 49（§6-220）：包门面「声明的公开面」必须盖住「真被人经包路径取用的名字」——这条根因的**另一侧**。
+# 6 格：登记表格**两侧都要相等**（新长出隐式公开面要红，补了 __all__ 却忘了销行也要红，同 §6-197
+# 那张"落点已消失必须销行"的手法）；幽灵声明格（`__all__` 里不许有本包给不出的名字）；扫描面地板格
+# （包数 ≥60、跟踪 .py ≥3000、消费者表非空）；两条探测器成对格（正头：符号名被包外取用而未声明必报；
+# 反头：子模块名／包内自指／`__version__` 三条排除各自都不许顺手吞掉同包里的符号名）。
+# 动态供给（PEP 562 `__getattr__`、模块层 `globals()[alias] = ...`、`sys.modules[__name__ + "." + a] = ...`）
+# 静态证不了供出什么 ⇒ 幽灵那一格对这类包放过，是写进注释的口径边界，不是没看见。
+# 逐档单跑三次 6/6/6；活体 `tests/manual/declaredSurface_batch49.py` 带反向校准
+# （同一条取数打在 HEAD 那份工作树上必须报出本批修掉的 4 包 10 名）。
+tests/unit/core/test_packageDeclaredSurfaceCoversWhatIsTaken.py
 # 批 §6-213（§6-211 丙案落地）：引擎 flush 之后，取数面必须等于正文单源。8 格构成——主行为格 1；
 # 两个"不许越界"的方向各 1（对账只准在 flush 那一点触发；取数面每次读都不许扫盘——缺后一格就会被
 # "改成每调用全表读"那种假实现骗绿，而它会把五条每查询都走的检索通道变成查询放大器）；
