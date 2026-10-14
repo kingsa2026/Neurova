@@ -25,11 +25,20 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 from tests.cognitive_body_store import bodyManager, cognitiveEngine
 
 NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+sys.path.insert(0, str(NEUROVA.parent))  # 仓根进 sys.path，`from tests import ast_scan` 才取得到
+
+from tests import ast_scan  # noqa: E402
+
+
+def _neurovaRel(path) -> str:
+    """读数口径保持"相对 `neurova/`"——只换取数入口，报错信息一字不变。"""
+    return ast_scan.relativeToRepo(path)[len("neurova/"):]
 ECHO = "reasoning_trace"
 ECHO_QUERY = "晚上好"
 
@@ -161,26 +170,21 @@ class TestCategoryVocabularyIsExplicitlyTriaged:
 
     def _producerLiterals(self):
         found = {}
-        for py in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in str(py):
+        # 取数走 `tests/ast_scan.py` 的一次性入口 + 文本预筛：造过 `UnifiedMemoryNode(...)`
+        # 的文件才会被解析（被赋值/被调用过的那个名字必然出现在源码文本里 ⇒ 预筛是充分条件）
+        for path, node in ast_scan.transientNodes(NEUROVA, hints=("UnifiedMemoryNode",)):
+            if not isinstance(node, ast.Call):
                 continue
-            try:
-                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
-            except SyntaxError:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else "")
+            if name != "UnifiedMemoryNode":
                 continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                name = func.id if isinstance(func, ast.Name) else (
-                    func.attr if isinstance(func, ast.Attribute) else "")
-                if name != "UnifiedMemoryNode":
-                    continue
-                for kw in node.keywords:
-                    if kw.arg == "category" and isinstance(kw.value, ast.Constant) \
-                            and isinstance(kw.value.value, str):
-                        found.setdefault(kw.value.value, []).append(
-                            "%s:%d" % (py.relative_to(NEUROVA).as_posix(), node.lineno))
+            for kw in node.keywords:
+                if kw.arg == "category" and isinstance(kw.value, ast.Constant) \
+                        and isinstance(kw.value.value, str):
+                    found.setdefault(kw.value.value, []).append(
+                        "%s:%d" % (_neurovaRel(path), node.lineno))
         return found
 
     def test_everyProducerCategoryIsDeclared(self):
@@ -216,24 +220,18 @@ def test_theVocabularyAndPredicateHaveExactlyOneHome(tmp_path, monkeypatch):
     """
     names = {"CONTEXT_VISIBILITY", "mayEnterContext"}
     homes = {n: [] for n in names}
-    for py in sorted(NEUROVA.rglob("*.py")):
-        if "__pycache__" in str(py):
-            continue
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            targets = []
-            if isinstance(node, ast.Assign):
-                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                targets = [node.target.id]
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                targets = [node.name]
-            for t in targets:
-                if t in names:
-                    homes[t].append("%s:%d" % (py.relative_to(NEUROVA).as_posix(), node.lineno))
+    # 一次性入口 + 两个词一起预筛（被定义过的那个名字必然出现在源码文本里）
+    for path, node in ast_scan.transientNodes(NEUROVA, hints=tuple(sorted(names))):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = [tg.id for tg in node.targets if isinstance(tg, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            targets = [node.name]
+        for tg in targets:
+            if tg in names:
+                homes[tg].append("%s:%d" % (_neurovaRel(path), node.lineno))
     for name, places in sorted(homes.items()):
         assert len(places) == 1, "%s 被定义了 %d 处（第二处即平行事实源）：%s" % (
             name, len(places), places)

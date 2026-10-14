@@ -28,6 +28,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests import ast_scan  # noqa: E402
+
+NEUROVA = REPO_ROOT / "neurova"
+
 POLICY = "neurova/api/cors_policy.py"
 REPO_CORS_CONFIG = REPO_ROOT / "config" / "cors.json"
 
@@ -54,16 +58,20 @@ def _literalGroups(source: str):
 
 
 def _hostsDefining(required: set) -> set:
-    """按 AST 找"把某组字面量整套写全"的文件——判的是副本存在，不钉变量名。"""
+    """按 AST 找"把某组字面量整套写全"的文件——判的是副本存在，不钉变量名。
+
+    取数走 `ast_scan.transientNodes`（一次性入口，不留常驻语法树）＋**文本预筛**：
+    一份完整副本必然把这些字面量原样写在该文件里，所以连关键词都没出现的文件不可能命中
+    ——预筛是充分条件，缩面不缩判据。
+    """
     hosts = set()
-    for path in sorted((REPO_ROOT / "neurova").rglob("*.py")):
-        if "__pycache__" in path.parts:
+    for path, node in ast_scan.transientNodes(NEUROVA, hints=tuple(sorted(required))):
+        if not isinstance(node, (ast.List, ast.Set, ast.Tuple)):
             continue
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        for group in _literalGroups(path.read_text(encoding="utf-8", errors="replace")):
-            if required <= group:
-                hosts.add(rel)
-                break
+        items = {e.value for e in node.elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        if items and required <= items:
+            hosts.add(ast_scan.relativeToRepo(path))
     return hosts
 
 
