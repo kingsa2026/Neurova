@@ -28,17 +28,20 @@ def _make_store(tmp_path):
 
 
 def test_a05_persist_db_store_close_idempotent(tmp_path):
-    store = _make_store(tmp_path)
-    store._ensure_schema()
-    store.upsert_row(
-        {
-            "id": "m1",
-            "content": "hello",
-            "agent_id": "a1",
-            "neuser_id": "n1",
-            "user_id": "u1",
-        }
+    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
+    # 正文库经生产装配点建、经唯一写入口写；适配器只读，不再自带第三份建表语句。
+    manager = MemoryManager(
+        db_path=str(tmp_path / "memory.db"),
+        agent_id="a1",
+        neuser_id="n1",
+        user_id="u1",
+        enable_buffer=False,
     )
+    manager.add_memory("hello")
+    from neurova.mem_core import _PersistDbStore
+
+    store = _PersistDbStore(manager.persistenceDbPath(), "a1", "n1", "u1")
     assert len(store.execute("SELECT id FROM memories").fetchall()) == 1
 
     raw_conn = store._conn

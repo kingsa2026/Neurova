@@ -4,14 +4,16 @@
 攒了 71,831 行，成因是记忆库曾以裸文件名 `neurova_memory.db` 当默认值，持久库
 随进程 CWD 散落五处。`MemoryManager` 的默认已改成按 agent 工作区推导，但**同一族
 的第二批仍在**——`core/database.py`、`connection_pool.py`、`db_indexes.py`、
-`files_api`、`memory_layer/storage.py`、`memory/pending_memory.py`、
-`CognitiveStorageEngine` 的默认值全是 CWD 相对路径，换个工作目录就换个库。
+`files_api`、`memory_layer/storage.py`、`memory/pending_memory.py` 的默认值全是
+CWD 相对路径，换个工作目录就换个库。
 
 判据（每条都可由本文件复现，不用替身）：
 
 1. 默认落点是**绝对路径**，且落在数据根之内；数据根可由 `NEUROVA_DATA_DIR` 注入。
 2. 在任意 CWD 下用默认值取连接 / 建存储引擎，**不得在 CWD 造出文件**。
-3. 认知图谱目录与它的删除方必须是**同一处推导**（写出去了没人删 = 断点）。
+3. 记忆正文库只有一处落点推导：主库 + 配对规则；认知引擎不再自带库
+   （它曾按 `data/<agent>/` 建第二张 `memories` 表，收口见
+   `audit-reports/memory-dual-root-comparison-2026-10-14.md`）。
 4. 权威字面量只剩一处：全仓不得再有用裸文件名当默认值的函数签名。
 """
 
@@ -134,34 +136,52 @@ class TestDefaultsAreNotCwdRelative:
             store.close()
             pending_memory._process_store = None
 
-    def test_cognitiveEngineDefaultLandsUnderDataRoot(self, elsewhere):
+    def test_cognitiveEngineOwnsNoLandingAtAll(self, elsewhere, tmp_path):
+        """认知引擎不再问"我的库在哪儿"——正文库必须由装配点交给它。
+
+        原判据问的是「它的默认落点是不是绝对路径、会不会掉在 CWD」。那是第二张
+        `memories` 表还存在时的形态；收口（批：记忆双根）后它连库都没有，
+        也就没有落点可漂——所以这一格改成问两件仍为真的事：
+        没库就当场失败，且不许在任何地方造出文件。
+        """
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
             CognitiveStorageEngine,
         )
 
-        engine = CognitiveStorageEngine(agent_id="probe")
-        try:
-            assert engine.data_dir.is_absolute(), "认知图谱目录必须是绝对路径"
-            assert list(elsewhere.iterdir()) == [], (
-                "认知引擎默认落点在 CWD 造出了文件：%s" % [p.name for p in elsewhere.iterdir()]
-            )
-        finally:
-            engine._db.close()
+        with pytest.raises(ValueError):
+            CognitiveStorageEngine(agent_id="probe", memory_manager=None)
+
+        assert list(elsewhere.iterdir()) == [], (
+            "构造失败的路上仍在 CWD 造文件：%s" % [p.name for p in elsewhere.iterdir()]
+        )
 
 
-class TestCognitiveDataDirIsOneDerivation:
-    """写它的人与删它的人必须同一处推导，否则删除端永远删不掉。"""
+class TestMemoryBodyLandingIsOneDerivation:
+    """正文库的落点只有一处推导：主库路径 + `persist_landing` 的配对规则。
 
-    def test_producerAndConsumerShareTheResolver(self):
+    此前 `agent_core` 拼一遍 `data/<agent>/`、引擎再拼一遍、删除端又按
+    `Path("data")/agent_id` 推第三遍——写它的人与删它的人不是同一处，
+    CWD 一变删除端就删不掉。引擎那一遍已随双根收口删净。
+    """
+
+    def test_assemblyPointAsksTheManagerInsteadOfRebuildingPath(self):
+        producer = (NEUROVA / "agent_core.py").read_text(encoding="utf-8")
+        assert "memory_manager=self.memory_manager" in producer, (
+            "认知引擎的装配点没有把正文库交进去——它一定会退回自己拼的第二落点"
+        )
+
+    def testEngineTouchesNoDatabaseOfItsOwn(self):
+        engineSrc = (NEUROVA / "cognitive_layers" / "memory_layer"
+                     / "cognitive_storage_engine.py").read_text(encoding="utf-8")
+        assert "import sqlite3" not in engineSrc, (
+            "引擎又自己开上了数据库连接：正文库归 MemoryManager，第二落点就是本轮的病根"
+        )
+        assert "get_agent_data_dir" not in engineSrc, "引擎仍在自己拼 data/{agent_id}"
+
+    def testDeleteEndpointStillSharesTheResolver(self):
         from neurova.core.data_root import get_agent_data_dir
 
-        producer = (NEUROVA / "agent_core.py").read_text(encoding="utf-8")
         consumer = (NEUROVA / "api" / "endpoints" / "agent.py").read_text(encoding="utf-8")
-        engine = (NEUROVA / "cognitive_layers" / "memory_layer"
-                  / "cognitive_storage_engine.py").read_text(encoding="utf-8")
-
-        assert "ensure_agent_data_dir" in producer, "agent_core 仍在自己拼 data/{agent_id}"
-        assert "get_agent_data_dir" in engine, "认知引擎仍在自己拼 data/{agent_id}"
         assert get_agent_data_dir.__name__ in consumer, (
             "删除端点仍按 Path('data')/agent_id 推导——与写入端不是一处，"
             "CWD 一变就删不掉"

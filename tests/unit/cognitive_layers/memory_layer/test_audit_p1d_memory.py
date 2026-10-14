@@ -216,28 +216,19 @@ class TestD8PersistStoreConnection:
     def test_execute_reuses_connection(self, tmp_path):
         """两次 execute 只打开一次连接（常驻只读连接）。"""
         import neurova.mem_core as mc
+        from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
-        store = mc._PersistDbStore(
-            str(tmp_path / "persist.db"), "a", "n", "u"
+        # 正文库由 MemoryManager 建并写——适配器不自带建表语句，也不从旁边插行
+        # （那是本轮收口前第三份 memories schema 的入口）。
+        manager = MemoryManager(
+            db_path=str(tmp_path / "memory.db"),
+            agent_id="a",
+            neuser_id="n",
+            user_id="u",
+            enable_buffer=False,
         )
-        store._ensure_schema()
-        store.upsert_row(
-            {
-                "id": "r1",
-                "content": "c",
-                "memory_type": "semantic",
-                "category": "general",
-                "lifecycle_stage": "active",
-                "temperature": 50,
-                "importance": 50,
-                "access_count": 0,
-                "metadata": "{}",
-                "agent_id": "a",
-                "neuser_id": "n",
-                "user_id": "u",
-                "shared": 0,
-            }
-        )
+        manager.add_memory("c")
+        store = mc._PersistDbStore(manager.persistenceDbPath(), "a", "n", "u")
 
         opens = {"n": 0}
         orig_connect = store._sqlite3.connect

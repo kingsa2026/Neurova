@@ -61,6 +61,27 @@ def isolatedDataRoot(prefix: str = "neurovaLive") -> Path:
     return useDataRoot(tempfile.mkdtemp(prefix=f"{prefix}-"))
 
 
+#: agent 工作区根的注入口（与 `neurova/core/agent_workspaces.py` 的 `AGENT_WORKSPACES_ENV` 同值）。
+#: 记忆正文落在这**另一根**下（`<workspace>/<agent>/memory/`），不在数据根管辖内：
+#: 只调 `isolatedDataRoot()` 的活体会把记忆写进仓内真 `agent_workspaces/`（本仓实测踩过）。
+AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
+
+
+def isolatedAgentWorkspaces(prefix: str = "neurovaLive") -> Path:
+    """把 agent 工作区根也指到临时目录并返回它。
+
+    写记忆/附件/按-agent 图谱的活体都要连同这一根一起隔——`isolatedDataRoot()`
+    管不到它。幂等同 `isolatedDataRoot`：已注入就沿用，父子进程共读同一份落点
+    才断言得动（如「重启后同库能否召回」）。
+    """
+    injected = (os.environ.get(AGENT_WORKSPACES_ENV) or "").strip()
+    if injected:
+        return Path(injected)
+    target = Path(tempfile.mkdtemp(prefix=f"{prefix}-ws-"))
+    os.environ[AGENT_WORKSPACES_ENV] = str(target)
+    return target
+
+
 def useDataRoot(path: str | os.PathLike[str]) -> Path:
     """把数据根**显式**指到 `path`（保证绝对路径，目录建好）。"""
     root = Path(path).expanduser().resolve()

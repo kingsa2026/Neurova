@@ -6,7 +6,7 @@
   与 remember/forget 的字典增删竞态 → RuntimeError: dictionary changed size。
 - M-07（semantic_search.py）：_keyword_index 全方法无锁，remove_memory_index
   边迭代边 del → 并发 RuntimeError。
-- M-09（cognitive_storage_engine.py）：_l0_buffer / _vector_index 无任何锁保护，
+- M-09（cognitive_storage_engine.py）：_l0_buffer 无任何锁保护，
   store / retrieve / update_temperature / get_statistics / flush 并发竞态。
 
 确定性策略（沿用 test_thread_safety_bugs.py）：主线程持锁，子线程调用方法应阻塞
@@ -19,12 +19,10 @@ import threading
 import time
 import uuid
 
-from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
-    CognitiveStorageEngine,
-    UnifiedMemoryNode,
-)
+from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from neurova.cognitive_layers.memory_layer.semantic_search import SemanticSearch
+from tests.cognitive_body_store import cognitiveEngine
 
 
 def _make_manager(agent_id="m060709"):
@@ -148,7 +146,7 @@ class TestM07SemanticSearchIndexLock:
 
 
 class TestM09StorageEngineBufferLock:
-    """M-09：_l0_buffer / _vector_index 的所有访问必须在 _buffer_lock 内。
+    """M-09：_l0_buffer 的所有访问必须在 _buffer_lock 内。
 
     旧代码 store/retrieve/update_temperature/get_statistics/flush 对内存态无锁，
     并发竞态。修复：新增 _buffer_lock 并保护全部内存态访问。
@@ -156,7 +154,7 @@ class TestM09StorageEngineBufferLock:
     """
 
     def _make_engine(self, tmp_path):
-        return CognitiveStorageEngine(agent_id="m09", data_dir=str(tmp_path / "store"))
+        return cognitiveEngine(tmp_path / "store", agentId="m09")
 
     def _assert_method_blocks_on_buffer_lock(self, engine, method):
         assert hasattr(engine, "_buffer_lock"), "M-09 未修复：引擎缺少 _buffer_lock"

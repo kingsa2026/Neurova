@@ -88,40 +88,6 @@ class _PersistDbStore:
         def fetchall(self) -> List[Dict[str, Any]]:
             return self._rows
 
-    def _ensure_schema(self) -> None:
-        """建最小 memories 表（P1-D8 测试/新库初始化辅助；与 MemoryManager
-        的建表语句同构的最小列集）。"""
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                memory_type TEXT NOT NULL DEFAULT 'semantic',
-                category TEXT NOT NULL DEFAULT 'general',
-                lifecycle_stage TEXT NOT NULL DEFAULT 'active',
-                temperature REAL NOT NULL DEFAULT 100.0,
-                importance REAL NOT NULL DEFAULT 50.0,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                metadata TEXT NOT NULL DEFAULT '{}',
-                agent_id TEXT NOT NULL DEFAULT 'default',
-                neuser_id TEXT NOT NULL DEFAULT 'default',
-                user_id TEXT NOT NULL DEFAULT 'default',
-                shared INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT, updated_at TEXT, last_accessed_at TEXT
-            )
-            """
-        )
-        self._conn.commit()
-
-    def upsert_row(self, row: Dict[str, Any]) -> None:
-        """写入/更新一行（P1-D8 测试辅助；生产写入走 MemoryManager）。"""
-        cols = ", ".join(row.keys())
-        marks = ", ".join(f":{k}" for k in row)
-        self._conn.execute(
-            f"INSERT OR REPLACE INTO memories ({cols}) VALUES ({marks})", row
-        )
-        self._conn.commit()
-
     def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> "_PersistDbStore._Rows":
         import re
 
