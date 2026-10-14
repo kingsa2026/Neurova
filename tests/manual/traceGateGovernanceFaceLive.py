@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -118,6 +119,33 @@ def main() -> int:
         runOneTrace("on")
         readings["l0_delta_when_open"] = l0Count() - before
 
+        # ── 3b. §6-207 读侧过滤：经真 app 的统一检索口，回声行取不到、也不被记账 ──
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
+
+        # 对照物先落一条普通正文行（同一查询下必须捞得到，否则"取不到"没有反证力）
+        control = UnifiedMemoryNode(content="晚上好时先给结论再展开", temperature=60.0)
+        engine.store(control)
+        engine.close()          # 把上一轮的开闸产物与本条一起 flush 进正文库
+        rows = [m for m in memory.iterBodyMemories(limit=500)]
+        echo = [m for m in rows if (m.metadata or {}).get("cse_category") == "reasoning_trace"]
+        readings["body_has_echo_row"] = len(echo)
+        echoCreditBefore = (int(echo[0].access_count or 0), float(echo[0].temperature)) if echo else None
+
+        hits = asyncio.run(agent.unified_retriever.retrieve("晚上好", limit=10))
+        readings["retriever_returns_something"] = len(hits) > 0
+        readings["echo_leaked_into_context"] = any(
+            (h.get("category") if isinstance(h, dict) else getattr(h, "category", None))
+            == "reasoning_trace" for h in hits)
+        readings["ordinary_row_still_returns"] = any(
+            "晚上好" in (h.get("content") if isinstance(h, dict) else getattr(h, "content", ""))
+            for h in hits)
+        echoAfter = [m for m in memory.iterBodyMemories(limit=500)
+                     if (m.metadata or {}).get("cse_category") == "reasoning_trace"]
+        readings["echo_row_not_credited"] = (
+            echoAfter and echoCreditBefore is not None
+            and (int(echoAfter[0].access_count or 0), float(echoAfter[0].temperature))
+            == echoCreditBefore)
+
         # ── 4. 反证：治理 True 而 env 显式 0 ⇒ 仍不写（优先级没被换向）──
         os.environ[ENV] = "0"
         readings["resolve_flag_env_zero"] = resolve_flag(KEY, ENV)
@@ -152,6 +180,17 @@ def main() -> int:
     if readings.get("put_on_echo") is not True or readings.get("persisted_on_disk") is not True:
         failures.append("PUT 没落盘：echo=%s disk=%s"
                         % (readings.get("put_on_echo"), readings.get("persisted_on_disk")))
+    if readings.get("body_has_echo_row") != 1:
+        failures.append("正文库里回声行数=%s，应为 1（门开着却没存下来）"
+                        % readings.get("body_has_echo_row"))
+    if readings.get("echo_leaked_into_context") is not False:
+        failures.append("回声行经真统一检索口进了上下文（过滤器没生效）：%s"
+                        % readings.get("echo_leaked_into_context"))
+    if readings.get("ordinary_row_still_returns") is not True:
+        failures.append("同一查询下普通正文行也取不到 ⇒ 过滤器成了总闸或这条查询本来就捞不到，"
+                        "上一格「没泄漏」的读数就是空转")
+    if readings.get("echo_row_not_credited") is not True:
+        failures.append("被丢掉的回声行仍被记账（先记账后过滤的形状复现）")
     if readings.get("resolve_flag_after_put") is not True:
         failures.append("治理面写了值而消费方读不到 ⇒ 又一个幻影旋钮")
     if readings.get("l0_delta_when_open") != 1:
@@ -174,7 +213,8 @@ def main() -> int:
         print("[FAIL] " + f)
     if failures:
         return 1
-    print("LIVE-PASS：治理面可读可写可回滚，开则交棒入库、关则不写，env 显式 0 仍能压住")
+    print("LIVE-PASS：治理面可读可写可回滚，开则交棒入库、关则不写，env 显式 0 仍能压住；"
+          "§6-207 读侧——回声行存得下却经统一检索口取不到，也不被记账，普通行照常返回")
     return 0
 
 
