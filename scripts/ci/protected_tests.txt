@@ -2954,3 +2954,12 @@ tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py
 # 逐档单跑三次 10/10/10；活体 `tests/manual/facadeGenericNames_batch47.py` 带反向校准
 # （同一取数打在 HEAD 那份工作树上必须报出 1 处通用名 + 3 处被盖掉的 import）。
 tests/unit/core/test_packageInitBindsNoUnusedGenericNames.py
+# 批 §6-213（§6-211 丙案落地）：引擎 flush 之后，取数面必须等于正文单源。8 格构成——主行为格 1；
+# 两个"不许越界"的方向各 1（对账只准在 flush 那一点触发；取数面每次读都不许扫盘——缺后一格就会被
+# "改成每调用全表读"那种假实现骗绿，而它会把五条每查询都走的检索通道变成查询放大器）；
+# L0 未 flush 不许倒进取数面 1（否则刚收口的单源又长出第二个）；往返键与 metadata 1；
+# 写入口回 False 时保住 L0 与恢复文件、且不触发对账 1（对账口的回收会删掉唯一那份内存副本）；
+# "manager 不得反向引引擎" 1（本批锁序 引擎锁→manager RLock 单向的前提，反向一出现即红）；反空转 1。
+# 逐档单跑三次 8/8/8；活体 tests/manual/sleepConsolidationReadFaceLive.py 的
+# same_process_bodyRows_visible_in_fetch 由 0 变 1——那个期望是上一批预先写在档头的，不是事后补的。
+tests/unit/memory/test_engineFlushConvergesFetchFace.py
