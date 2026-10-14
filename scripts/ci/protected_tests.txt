@@ -2944,3 +2944,13 @@ tests/unit/cognitive/test_crystallizerTurnEvidenceFromUserFeedback.py
 # 变 "local"；`RemoteSkill.__post_init__` 的验段是"弱者那份保护"的落点，变异 M6/M7 专钉它。
 # 逐档单跑三次 7/7/7；活体面在同档 `tests/manual/deadImportFacade_batch42.py` 的 [1][6][8] 三项读数。
 tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py
+# 批 47（§6-212）：包门面上的通用名与被盖掉的 import。10 格里 3 条规则各按**零容忍**钉——
+# 甲 包 `__init__.py` 不得绑"本文件不读、也没进 __all__"的通用名；乙 顶层 import 不得被同文件
+# 后面的同名定义作废（那条 import 从绑定起就读不到）；丙 通用名不得写进 `__all__`（堵"加一行
+# 声明来消音"这条后门）。另 7 格是口径自己：扫描集合地板（1021 个生产文件 + 5 个已知包必在集合里，
+# 防口径收窄）、用了的不报、字符串注解算使用、**docstring 不算使用**（否则判据退化成文本匹配）、
+# try 里的可选依赖兜底属正当形状不报、**后定义在前不报**与**后定义在后必报**成对钉顺序语义
+# （变异 M8 一开始无牙，就是因为缺"定义在前"那一格——顺序写反照样全绿）。
+# 逐档单跑三次 10/10/10；活体 `tests/manual/facadeGenericNames_batch47.py` 带反向校准
+# （同一取数打在 HEAD 那份工作树上必须报出 1 处通用名 + 3 处被盖掉的 import）。
+tests/unit/core/test_packageInitBindsNoUnusedGenericNames.py
