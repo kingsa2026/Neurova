@@ -2843,3 +2843,19 @@ tests/unit/skills/test_marketFetchBudgetIsSingleSource.py
 tests/unit/api/test_corsPolicyIsSingleSource.py
 # 批 42（§6-200，用户点单 B 项）：全仓「惰性 try 体（只有 pass/文档串）+ except ImportError」的空转块清零——现按 AST 数是 35 段 / 9 个文件（skills 13、llm/providers 11、memory_layer 4、admin 2，auth/xiaoyi/collaboration/recovery/tts 各 1；§6-194 那句「其余八段」数错了，已在 §6-200 勘误）。这类体永远不抛 ImportError ⇒ 那句「模块未可用」日志从不打印，是永不成立的自陈；xiaoyi 那一处还藏着不可达的「模拟模式 return True」假降级。同批把 skills 门面四条 first-party 导入改顶层直连、删 48 个 `X = None` 占位符（agent_core 三处 `from neurova.skills import create_default_skills` 一旦落到那条分支就是拿到 None 再调），并止住 `SkillSource` 被 models/hub_client 两份不同枚举同名先后绑进门面这条静默覆盖（现测该门面名零消费者）。7 格里：1 格全仓零容忍按 git ls-files 数（配 3000 文件地板格）、1 格反空转（合成样本必须计数 + 真 fail-soft 不许误伤）、2 格门面 None 占位符与被包导入、1 格档头清单行必须真存在（配清单样本）、1 格同名抢绑 + 门面符号是 models 那份、1 格关键符号非 None。红自证 9 生产件回 HEAD ⇒ 5 failed/2 passed（同名抢绑那枚靠红自证补牙）；变异 5 枚全咬，M2 特意把空转段藏进函数体证明探测器看得见嵌套；活体 8 读数 exit=0 含子进程反向校准；A/B 仅本树红 0 条（tests/unit/tts 因基线侧发真出网撞墙钟被排除，理由写在正文）。逐档单跑三次 7/7/7。
 tests/unit/test_noDeadImportSwallowFacadeBlocks.py
+# 批：记忆双根收口（§6-202）：正文的 memories 表原跨两根有六处建表定义，其中认知引擎自建的
+# data/<agent>/memory.db 实测 0 行、崩溃恢复文件从未被创建，而每轮检索以最高优先级读它且
+# 返回空不报错。现收成一处：FTS5(trigram) 与 embedding 长在现役真行库上，引擎退为 L0/索引层。
+# 10 格里：1 格按 AST 面数「正文建表定义还有几个宿主」（配地板格与"唯一宿主必须是 manager"格，
+# 防空扫假绿）、3 格读真产物 sqlite_master/PRAGMA 钉影子表+三触发器+embedding 列、1 格中文子串
+# 必须 MATCH 得到（默认 unicode61 恒 0 命中，这一枚是变异对照锚点）、1 格删正文后影子必须同数
+# （防只删主表两表脱节）、1 格构造引擎不在数据根开第二落点、1 格恢复文件与正文库同目录、
+# 1 格引擎召回正文真行、1 格读侧带生效三元组（正例先断，反例后断——排除型断言单写会绿得没道理）。
+# 红自证与 A/B 同形：基线铺入本批判据 60 failed/12 errors ↔ 本树仅本树红 0 条。逐档单跑三次 10/10/10。
+tests/unit/memory/test_memoryDualRootMergedToOneStore.py
+# 批：记忆双根收口顺带改指的三档（判据本体未松，只把读数从引擎自建库换到正文库）：
+# 记账只在过滤后对真回出去的行发生（冷档不得被自己的命中复活）、崩溃恢复文件不无条件清空、
+# UPDATE 正文必同步影子表。逐档单跑三次 2/2/2、2/2/2、1/1/1。
+tests/unit/core/test_cognitive_wal_flush_race.py
+tests/unit/test_cognitive_storage_flush_m11.py
+tests/unit/cognitive_layers/memory_layer/test_cse_fts_update_trigger.py
