@@ -608,7 +608,17 @@ _governance_instance: Optional[GovernancePolicy] = None
 
 
 def _default_whitelist_path() -> Path:
-    return Path.home() / ".neurova" / "config" / "governance_whitelist.json"
+    """治理白名单落点：数据根下唯一一处，旧主目录那份在空缺时收养。
+
+    它与 `data/governance_settings.json` 是**两件东西**（后者是 9 个标量开关，
+    前者是 `{entries:[{pattern,match_type,tool,...}]}` 条目表，字段零交集），
+    收落点时不并文件——并了就等于擅自改语义。
+    """
+    from neurova.core.data_root import adoptLandingFrom, dataLanding, legacyHomeLanding
+
+    target = dataLanding("governance_whitelist.json", legacy=())
+    adoptLandingFrom(target, legacyHomeLanding("config", "governance_whitelist.json"))
+    return target
 
 
 @lazySingleton("_governance_instance")

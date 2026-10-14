@@ -9,7 +9,7 @@
 """
 
 # 说明: 手动验证脚本,非 pytest 用例 —— 顶层执行会读写真实
-# 配置路径(~/.neurova/config/providers.json),故加 __main__ 防护。
+# 配置路径(数据根下 llm/providers.json；旧版在 ~/.neurova/config/),故加 __main__ 防护。
 
 import requests
 import json
