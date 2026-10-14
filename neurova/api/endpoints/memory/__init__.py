@@ -22,3 +22,8 @@ from . import working_memory  # noqa: F401
 from . import pending  # noqa: F401  # P1-2 待确认队列（字面路由，先于 crud）
 from . import visibility  # noqa: F401  # F-05 跨进程可见性（字面路由 /reload，先于 crud）
 from . import crud  # noqa: F401
+
+# 对外只供给 `router` 一个符号（4 个集成测试写 `from neurova.api.endpoints.memory import router`）；
+# 上面那串 `from . import <子模块>` 是路由注册的装配动作，子模块本身由 import 机制直接可取，
+# 不列进契约——否则每加一个子模块都要来改一次 `__all__`。
+__all__ = ["router"]

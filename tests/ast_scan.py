@@ -418,7 +418,7 @@ def resolveImportModule(relPath: str, node: ast.ImportFrom) -> str:
     """把 `from .x import a` / `from ..x import a` 解析成**绝对模块名**；解不出返回空串。
 
     为什么收进共享源：只按 `node.module` 文本相等比较的口径看不见相对导入，于是
-    "这个门面名字没人经门面取用"会被读成假死。§6-211 的档案实测这形会误判
+    『这个门面名字没人经门面取用』会被读成假死。§6-212 那批的档案实测这形会误判
     `neurova.api.endpoints.memory.router`（4 个集成测试写的正是这种取法）与
     `neurova.cognitive.Memory`（判据按 `import pkg as p` + `p.X` 的属性形在用）。
     """
@@ -450,3 +450,72 @@ def namesTakenFrom(scan: Iterable[Tuple[Path, ast.AST]],
         for alias in node.names:
             hits.append((alias.name, path, node.lineno))
     return hits
+
+
+def takenPerModule(root: Path, suffix: str = ".py") -> dict:
+    """一次遍历，按**被取用的绝对模块名**归集"谁从它取了什么名"。
+
+    四种取法都记（少一种就会把活着的门面名字读成『没人取用』——§6-212 那批就是这么发现的）：
+      `from M import X [as Y]`（记**原名** X）、相对形按发起文件位置解析成绝对名、
+      `import M` / `import M as p` 之后的 `M.X` 与 `p.X` 属性读法。
+    返回 `{模块名: {名字: [(仓内相对路径, 行号), ...]}}`。"包自己绑的那几条 `from . import x`
+    算不算它的消费者"是裁决不是取数 ⇒ 由调用方按路径滤掉本包 `__init__.py`。
+
+    为什么单开一个整表入口而不是逐包调 `namesTakenFrom`：后者一次调用要把整棵子树走一遍，
+    五个包就五遍；这张表一遍扫完全部归属，且沿用 `transientTree` 一族的**不留常驻语法树**口径。
+    属性链的归属按"该文件确实 import 过那个前缀"判定（不是拿全表前缀去凑），
+    否则同一棵文件里 `a.b` 与另一文件里的 `a.b.c` 会互相串味。
+    """
+    out: dict = {}
+    for ref in sourceRefsUnder(root, suffix):
+        try:
+            tree = ast.parse(ref.code)
+        except SyntaxError:
+            continue
+        rel = relativeToRepo(ref.path)
+        imported = set()                      # 该文件里真被 import 过的绝对模块名
+        aliasTo = {}                          # 本地名 → 绝对模块名
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = resolveImportModule(rel, node)
+                if not mod:
+                    continue
+                imported.add(mod)
+                bucket = out.setdefault(mod, {})
+                for a in node.names:
+                    if a.name == "*":
+                        continue
+                    imported.add(f"{mod}.{a.name}")
+                    bucket.setdefault(a.name, []).append((rel, node.lineno))
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    imported.add(a.name)
+                    aliasTo[(a.asname or a.name).split(".")[0]] = a.name
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            base = node.value
+            target = aliasTo[base.id] if isinstance(base, ast.Name) and base.id in aliasTo else None
+            if target:
+                out.setdefault(target, {}).setdefault(node.attr, []).append((rel, node.lineno))
+            d = dottedChain(node)
+            if not d:
+                continue
+            parts = d.split(".")
+            for i in range(1, len(parts)):
+                prefix = ".".join(parts[:i])
+                if prefix in imported:
+                    out.setdefault(prefix, {}).setdefault(parts[i], []).append((rel, node.lineno))
+    return out
+
+
+def dottedChain(node: ast.AST):
+    """把 `a.b.c` 这类纯属性链解成点号串；解不出返回 None。"""
+    parts, cur = [], node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if not isinstance(cur, ast.Name):
+        return None
+    parts.append(cur.id)
+    return ".".join(reversed(parts))
