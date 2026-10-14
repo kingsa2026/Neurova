@@ -3576,6 +3576,20 @@
     - **仍开（本批没动）**：① `manifest.source` 上那**第三套词汇**（`auto`/`synthesized`）没有任何类型承载，与本批并起来的二段词汇并存——是否收进 `SkillSource` 或另立一个键，需一次裁定；② 若哪天要把 `Skill.source` 也收紧成"只许装载段"，前置是先给存储里已有的越段值出一份清单（现算至少 `auto`/`synthesized` 两类），否则就是让门拒真数据；③ 上面那 360 个门面名字的三态分流；④ 批 45 登记的两条缓存欠账（`cached` 装饰器生产零消费者、`MemoryCache` 五个跨模块零调用方法）一行未动。
     - **本会话下一枚空号现查 §6-211。**
 
+211. **正文单源收口后留下一张滞后的第二读面：`get_all_memories()` 取的是进程内缓存，经引擎写入的行同进程看不见（实据登记，零生产改动，需一次裁定）** 🟡
+    - **撞见路径（不是新题，是复核 ② 时撞出来的）**：为「壳 vs 原生类」那张先比后合的票复算取数面时才问出这一件。§6-208 当时写的是**壳那条腿**（`sleep_adapter._fetch_memories` → `retrieve("")` 空查询短路 ⇒ 只见 L0）；本轮要问的是**现役原生那条腿**取的是哪一份数据——答案不是正文单源。
+    - **机制（三处代码位置，逐处现读）**：`cognitive_storage_engine.py:376-401 _flushL0ToBody()` 只调 `manager.persist_memory_batch()`；`manager.py:1003` 那口子只做 `_persist_upsert` + `commit`，**不动 `self._memories`**；而 `sleep.py:826` 的固化取数是 `manager.get_all_memories()`（`manager.py:2287` ＝ `[m.to_dict() for m in self._memories.values()]`）。`_memories` 的写点在 `manager.py:697/708/1523/1807/2154` 那一族常规记忆路上，引擎那条不在其中。
+    - **活体读数**（`tests/manual/sleepConsolidationReadFaceLive.py`，exit=0，数据根与 agent 工作区两根都走 `_liveVerifyIsolation` 隔离）：`flushed_into_body=2` + `body_rows_after_flush=2`（写侧通）⇒ `trace_visible_via_engine_retrieve=0` 且 `ordinary_visible_via_engine_retrieve=1`（§6-208 那道门在真装配上咬得住、且不是总闸）⇒ `fetch_total=0`、`same_process_bodyRows_visible_in_fetch=0`，同档配反空转格 `managerOwnWrite_visible_in_fetch=1`（manager 自己 `add_memory` 的行看得见 ⇒ 「看不见引擎那行」不能推给探针走错支路）⇒ **模拟重启后** `after_restart_bodyRows_visible_in_fetch=1`，`restart_metadata_face` 里 `cse_category="reasoning_trace"` 还在，而 `MemoryRecord.from_dict(...).categories` 是 **`[]`**。
+    - **影响面（现场算，不手抄）**：这条取数面在生产侧有 **12** 个调用档——`agent_shutdown.py`、`core/idle_tracker.py`、`mem_core.py`、`memory/pending_memory.py`、`api/endpoints/semantic_search_api.py`（`:115/:498` 两处）、`neurova_recall.py`、`sleep.py`，以及 `channels/builtin/{category,graph,temperature,text,voice}.py` 五条检索通道。口径照本报告的老警告：只覆盖 `.py`，不含 NeurUI 按名调用与运行时字符串路由。
+    - **三条后果，逐条给接线与不接各留下什么**：
+      ① **结晶出来的模式，在长跑进程里对这 12 个面隐形**（要到下次重启才进）。`pattern_crystallizer.py:425` 走的正是 `engine.store(node)` 这条不回灌缓存的路，现网那只服务 22:32 起没重启过——§6-209 刚把点赞接进证据面，一旦结晶开始产货，货只进盘、不进固化、也不进那五条检索通道。这不是假想，是「写侧通、读侧滞后一整个进程生命周期」的实测形状。
+      ② **①那张门一打开，第一个吃到回声的就是固化**。重启后 `reasoning_trace` 行进入取数面，而固化拿到的 `MemoryRecord` **不携带类别**（`from_dict()` 读 `categories` 字段，类别实际在 `metadata.cse_category`），§6-208 的门又只装在 `retrieve()` 上——两条防线在这条腿上都不存在。所以 ① 的前置除「读侧消费者就位」之外还要补一条：**这条腿的类别可见性**；否则翻默认值等于给固化喂它自己的输出，2026-09-05 那笔账换个入口复现。
+      ③ **②那张票的对比基准至此才完整**：原先问「壳与原生类哪个更强」，实测**两者都不等于正文单源**（壳看 L0，原生看进程缓存）。按教义第 7 条先比后合的口径，这一格的比对缺的那块今天才补上。
+    - **三态票（本批一律不动手）**：甲＝`_flushL0ToBody()` 之后把同一批 `Memory` 回灌 `_memories`——改动一处就补齐滞后，代价是长期进程的缓存只增不减，等于把「缓存滞后」换成「缓存无界」，且要按 `to_memory()` 的逆向量把作用域三元组对齐，错一位就是写进去读不回来。乙＝12 个调用档改指引擎/正文——教义第 6 条的正解，面最大，含五条检索通道与 `semantic_search_api` 两条端点，且引擎得先长出一个「全量取」的稳定口。丙（**推荐**）＝`get_all_memories()` 改从正文单源取、`_memories` 退回纯加速层——12 个调用点一字不改，代价是要给「全表读」配一个上限或分页口径，否则库一大就把取数面变成全表扫（现网正文实测 default 12 行 + kai 4 行，量级无碍，但这条必须同时定，不能留给"以后再说"）。
+    - **登记不修（撞见时机写死）**：谁翻 ① 的默认值，必须先做完这条收口，否则 ② 那条腿就是回声的第二个入口；谁下一次给睡眠固化族建判据（＝把 ③「该族 0 格进子集」结掉），第一格该钉的就是这条——但按形态集第 117 条**不给缺陷现值写判据**，所以 ③ 的正解是先裁这条、再钉修后的契约，不是现在照现值建一格绿的。
+    - **本批净 LOC**：生产池 0/0（一条代码没动）；改动全在台账本格与那份活体档。
+    - **本会话下一枚空号现查 §6-212。**
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
