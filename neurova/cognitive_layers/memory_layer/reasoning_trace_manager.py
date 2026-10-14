@@ -146,15 +146,21 @@ class ReasoningTraceManager:
         for step in trace.steps:
             all_memory_ids.extend(step.memory_ids)
 
-        # 持久化门控（新扩展点默认关，与 NEUROVA_METACOG_GATE 同口径）：
+        # 持久化门控（新扩展点默认关，与 `metacog_gate_enabled` 同一条优先级口径）：
         # 原实现每轮对话无条件把整条推理链（含寒暄）存为记忆——零消费方
         # （get_recent_traces 全仓无调用），且 unified_retriever 检索不带
         # category 过滤，寒暄链会被当相关记忆捞回上下文形成回声污染。
         # 2026-09-05 事故：与睡眠巩固翻倍叠加，4 万行库中绝大多数为此类行。
-        import os
+        #
+        # §6-206：这道门此前只有裸 env 能拨，而全仓无生产赋值点——门该留，但"无处可开"
+        # 是另一个缺陷。现取电走 `resolve_flag`（治理面可拨，默认仍关），且必须在**决策
+        # 时刻**读：构造期快照等于造一个"页面能改、运行时不认"的幻影旋钮。
+        from neurova.security.governance_settings import resolve_flag
 
-        if os.environ.get("NEUROVA_TRACE_PERSIST") != "1":
-            logger.debug("推理链 %s 未持久化（NEUROVA_TRACE_PERSIST 未开启）", trace_id)
+        if not resolve_flag("trace_persistence_enabled", "NEUROVA_TRACE_PERSIST"):
+            logger.debug(
+                "推理链 %s 未持久化（trace_persistence_enabled / NEUROVA_TRACE_PERSIST 均未开）",
+                trace_id)
             return
 
         # 存储为记忆节点（可被检索）

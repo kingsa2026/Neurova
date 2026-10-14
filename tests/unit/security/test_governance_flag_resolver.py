@@ -141,3 +141,30 @@ class TestGovernanceSwitchSurfaceIsReadableAndWritable:
                 if hit:
                     offenders.append(f"{rel}:{lineno}: {hit.group(1)}")
         assert offenders == [], "消费方仍在裸读 env:\n" + "\n".join(offenders)
+
+
+class TestEveryGovernanceSwitchIsWritable:
+    """DEFAULTS 里每个布尔开关都必须在 PUT 面有字段——否则"收进治理"只是换个名字读。
+
+    本仓实测过这个形状的**反面**幻影旋钮：门本身是对的（`NEUROVA_TRACE_PERSIST` 防的是
+    2026-09-05 回声污染），但全仓无生产赋值点、治理面也没这个键 ⇒ 谁都想开而开不了。
+    §6-206 接上键之后，这条守卫保证下一个"只加 DEFAULTS 不加 schema"的开关当场红。
+    """
+
+    def test_everyBoolDefaultHasAnUpdateField(self):
+        from neurova.api.endpoints.governance import GovernanceSettingsUpdate
+        from neurova.security.governance_settings import DEFAULTS
+
+        unwritable = sorted(
+            key for key, value in DEFAULTS.items()
+            if isinstance(value, bool) and key not in GovernanceSettingsUpdate.model_fields)
+        assert unwritable == [], (
+            "这些开关治理页读得到、改不到（GET 有值而 PUT 无入口）：%s" % unwritable)
+
+    def test_noUpdateFieldPointsAtAnUndeclaredKey(self):
+        """双向咬合：schema 里多出的字段若不在 DEFAULTS，`save` 只认已声明键会静默丢弃。"""
+        from neurova.api.endpoints.governance import GovernanceSettingsUpdate
+        from neurova.security.governance_settings import DEFAULTS
+
+        orphaned = sorted(set(GovernanceSettingsUpdate.model_fields) - set(DEFAULTS))
+        assert orphaned == [], "PUT 面有字段而事实源无此键（写了等于没写）：%s" % orphaned
