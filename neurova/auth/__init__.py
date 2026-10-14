@@ -7,8 +7,6 @@ Neurova 认证模块:
 
 from neurova.auth.enhanced_user_model import EnhancedUserModel
 
-import hashlib
-
 # FastAPI 为可选依赖
 try:
     from fastapi import Path as _FastAPIPath

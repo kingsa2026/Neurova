@@ -412,3 +412,41 @@ def relativeToRepo(path: Path) -> str:
     计算（消费方自己的镜像缓存层正是「consumer-only guard」的形态）。
     """
     return path.relative_to(REPO_ROOT).as_posix()
+
+
+def resolveImportModule(relPath: str, node: ast.ImportFrom) -> str:
+    """把 `from .x import a` / `from ..x import a` 解析成**绝对模块名**；解不出返回空串。
+
+    为什么收进共享源：只按 `node.module` 文本相等比较的口径看不见相对导入，于是
+    "这个门面名字没人经门面取用"会被读成假死。§6-211 的档案实测这形会误判
+    `neurova.api.endpoints.memory.router`（4 个集成测试写的正是这种取法）与
+    `neurova.cognitive.Memory`（判据按 `import pkg as p` + `p.X` 的属性形在用）。
+    """
+    if node.level == 0:
+        return node.module or ""
+    parts = relPath.split("/")[:-1]
+    drop = node.level - 1
+    if drop > len(parts):
+        return ""
+    base = ".".join(parts[:len(parts) - drop] if drop else parts)
+    if node.module:
+        base = f"{base}.{node.module}" if base else node.module
+    return base
+
+
+def namesTakenFrom(scan: Iterable[Tuple[Path, ast.AST]],
+                   moduleName: str) -> List[Tuple[str, Path, int]]:
+    """扫描结果里 `from <moduleName> import a`／`… import a as b` 的**原名**取点。
+
+    记的是 `alias.name`（源模块必须提供的那个名字），不是本地别名——按别名记账会把
+    活着的门面名字读成零消费者。`scan` 用 `nodeScan(hints=...)` 的惰性迭代即可。
+    """
+    hits: List[Tuple[str, Path, int]] = []
+    for path, node in scan:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if resolveImportModule(relativeToRepo(path), node) != moduleName:
+            continue
+        for alias in node.names:
+            hits.append((alias.name, path, node.lineno))
+    return hits

@@ -47,15 +47,20 @@ def _facadeReexports():
 
 
 def _facadeConsumers():
-    """生产侧 `from neurova.skills import <name>` 的绑定名集合（含子模块取法）。"""
+    """生产侧**经门面**取用的原名集合（取法口径收在 `ast_scan.namesTakenFrom`，本档不再自写一份）。
+
+    两处都是 §6-211 档案实测过的坑：按 `asname` 记账会把活着的名字读成零消费者
+    （`from neurova.skills import get_skill_registry as gsr`），不解析相对导入则
+    `from .skills import …`／`from ..skills import …` 整形看不见——两者都让上一格假红。
+    预筛 hint 给两条：绝对形含 `neurova.skills`，相对形必含 `.skills`。
+    """
     used = {}
-    for path, node in ast_scan.nodeScan(NEUROVA, hints=("neurova.skills",)):
+    for name, path, lineno in ast_scan.namesTakenFrom(
+            ast_scan.nodeScan(NEUROVA, hints=("neurova.skills", ".skills")),
+            "neurova.skills"):
         if ast_scan.relativeToRepo(path) == FACADE:
             continue
-        if isinstance(node, ast.ImportFrom) and node.module == "neurova.skills":
-            for alias in node.names:
-                used.setdefault(alias.asname or alias.name, []).append(
-                    f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
+        used.setdefault(name, []).append(f"{ast_scan.relativeToRepo(path)}:{lineno}")
     return used
 
 
