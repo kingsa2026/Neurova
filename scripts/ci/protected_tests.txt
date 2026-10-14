@@ -2886,3 +2886,11 @@ tests/unit/test_noFirstPartyImportPlaceholder.py
 # channels 整族 + api：两侧同读数 16 failed 3060 passed 4 skipped 8 errors、集合逐条相同）。
 tests/unit/test_weightEgressGateRefusesBeforeBytes.py
 tests/unit/tts/test_unitTierNeverPaysForRealWeights.py
+# 批 §6-204：`~/.neurova/` 那族的收养补权利闸——数据根被注入到别处（跑测临时根、探针隔离
+# 根）时一律不动主目录，只点名一次。10 格里 4 格问"别处根下四族旧物是否原地不动且不复制"
+# （§6-203 落地后的一次跑测实测把本机 providers.json 18 家／13 份加密凭据、audit.db 2361 行
+# 搬进了 Temp）、2 格问"跳过必须点名且无旧物时不报警"、2 格问"操作者自己的那一址照常收养"
+# （闸不是总开关，否则把救济做成开关）、2 格按 AST 钉"够着主目录的入口只有一号仓库"与
+# "四族都走带闸入口、不得直用无闸原语"。逐档单跑三次 10/10/10；活体
+# `tests/manual/homeAdoptionGateLive.py` 另带摘闸反证（桩成恒真必须把假 home 搬空）。
+tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py
