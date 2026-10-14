@@ -3555,13 +3555,14 @@
       `:150-166`、读侧在 `:184`；旧格不改写，此处记对账。**
       **2026-10-15 追加一条前置（§6-211 实测撞出，裁定不变、前置由两条并成三条）**：除读侧消费者
       之外，还须**给睡眠固化那条腿补类别可见性**。它的取数面是 `manager.get_all_memories()`
-      （进程内缓存，§6-208 那道门不在这条腿上），重启后 `reasoning_trace` 行进得来，而固化拿到的
+      （进程内缓存，§6-208 那道门不在这条腿上），`reasoning_trace` 行**当轮就进得来**——原先那层
+      "要等下次重启才进"的滞后已由 §6-213 修掉，所以这条前置从"将来"变成"眼下"；而固化拿到的
       `MemoryRecord.categories` 活体实测是 `[]`（类别只活在 `metadata.cse_category`）⇒ 只补读侧就翻
       默认值，等于给固化喂它自己的输出，2026-09-05 那笔账换个入口复现。三条前置齐了才谈翻。
       ② `sleep_adapter.py` 那层壳的退役（仍需一次裁定：档案判"可退役"，同批要删档 + 删该档 5 格 +
-      改指三处文档，另需裁 `CognitiveStorageEngine.get_statistics()` 的去留）。**§6-211 已把这张票
-      缺的那块比对基准补上**：壳看 L0、原生类看进程内缓存，**两者都不等于正文单源**——原先那句
-      "谁更强"要按这条新事实重问；
+      改指三处文档，另需裁 `CognitiveStorageEngine.get_statistics()` 的去留）。比对基准已两次补齐：
+      §6-211 发现**壳看 L0、原生类看进程内缓存，两者都不等于正文单源**；§6-213 把原生那条腿接到
+      单源之后，只剩壳那侧仍然窄 ⇒ "谁更强"这一格至此才真可比。
       ③ 睡眠固化族 0 格进子集（仍需一次裁定）。
     - **本会话下一枚空号现查 §6-210。**
 
@@ -3583,7 +3584,7 @@
     - **仍开（本批没动）**：① `manifest.source` 上那**第三套词汇**（`auto`/`synthesized`）没有任何类型承载，与本批并起来的二段词汇并存——是否收进 `SkillSource` 或另立一个键，需一次裁定；② 若哪天要把 `Skill.source` 也收紧成"只许装载段"，前置是先给存储里已有的越段值出一份清单（现算至少 `auto`/`synthesized` 两类），否则就是让门拒真数据；③ 上面那 360 个门面名字的三态分流；④ 批 45 登记的两条缓存欠账（`cached` 装饰器生产零消费者、`MemoryCache` 五个跨模块零调用方法）一行未动。
     - **本会话下一枚空号现查 §6-211。**
 
-211. **正文单源收口后留下一张滞后的第二读面：`get_all_memories()` 取的是进程内缓存，经引擎写入的行同进程看不见（✅ `7f8bd08b` 台账+活体档，零生产改动；处置需一次裁定）** 🟡
+211. **正文单源收口后留下一张滞后的第二读面：`get_all_memories()` 取的是进程内缓存，经引擎写入的行同进程看不见（✅ `7f8bd08b` 台账+活体档，零生产改动 → 已按丙收口 `0a8df272`，见 §6-213）** 🟢
     - **撞见路径（不是新题，是复核 ② 时撞出来的）**：为「壳 vs 原生类」那张先比后合的票复算取数面时才问出这一件。§6-208 当时写的是**壳那条腿**（`sleep_adapter._fetch_memories` → `retrieve("")` 空查询短路 ⇒ 只见 L0）；本轮要问的是**现役原生那条腿**取的是哪一份数据——答案不是正文单源。
     - **机制（三处代码位置，逐处现读）**：`cognitive_storage_engine.py:376-401 _flushL0ToBody()` 只调 `manager.persist_memory_batch()`；`manager.py:1003` 那口子只做 `_persist_upsert` + `commit`，**不动 `self._memories`**；而 `sleep.py:826` 的固化取数是 `manager.get_all_memories()`（`manager.py:2287` ＝ `[m.to_dict() for m in self._memories.values()]`）。`_memories` 的写点在 `manager.py:697/708/1523/1807/2154` 那一族常规记忆路上，引擎那条不在其中。
     - **活体读数**（`tests/manual/sleepConsolidationReadFaceLive.py`，exit=0，数据根与 agent 工作区两根都走 `_liveVerifyIsolation` 隔离）：`flushed_into_body=2` + `body_rows_after_flush=2`（写侧通）⇒ `trace_visible_via_engine_retrieve=0` 且 `ordinary_visible_via_engine_retrieve=1`（§6-208 那道门在真装配上咬得住、且不是总闸）⇒ `fetch_total=0`、`same_process_bodyRows_visible_in_fetch=0`，同档配反空转格 `managerOwnWrite_visible_in_fetch=1`（manager 自己 `add_memory` 的行看得见 ⇒ 「看不见引擎那行」不能推给探针走错支路）⇒ **模拟重启后** `after_restart_bodyRows_visible_in_fetch=1`，`restart_metadata_face` 里 `cse_category="reasoning_trace"` 还在，而 `MemoryRecord.from_dict(...).categories` 是 **`[]`**。
@@ -3592,7 +3593,7 @@
       ① **结晶出来的模式，在长跑进程里对这 12 个面隐形**（要到下次重启才进）。`pattern_crystallizer.py:425` 走的正是 `engine.store(node)` 这条不回灌缓存的路，现网那只服务 22:32 起没重启过——§6-209 刚把点赞接进证据面，一旦结晶开始产货，货只进盘、不进固化、也不进那五条检索通道。这不是假想，是「写侧通、读侧滞后一整个进程生命周期」的实测形状。
       ② **①那张门一打开，第一个吃到回声的就是固化**。重启后 `reasoning_trace` 行进入取数面，而固化拿到的 `MemoryRecord` **不携带类别**（`from_dict()` 读 `categories` 字段，类别实际在 `metadata.cse_category`），§6-208 的门又只装在 `retrieve()` 上——两条防线在这条腿上都不存在。所以 ① 的前置除「读侧消费者就位」之外还要补一条：**这条腿的类别可见性**；否则翻默认值等于给固化喂它自己的输出，2026-09-05 那笔账换个入口复现。
       ③ **②那张票的对比基准至此才完整**：原先问「壳与原生类哪个更强」，实测**两者都不等于正文单源**（壳看 L0，原生看进程缓存）。按教义第 7 条先比后合的口径，这一格的比对缺的那块今天才补上。
-    - **三态票（本批一律不动手）**：甲＝`_flushL0ToBody()` 之后把同一批 `Memory` 回灌 `_memories`——改动一处就补齐滞后，代价是长期进程的缓存只增不减，等于把「缓存滞后」换成「缓存无界」，且要按 `to_memory()` 的逆向量把作用域三元组对齐，错一位就是写进去读不回来。乙＝12 个调用档改指引擎/正文——教义第 6 条的正解，面最大，含五条检索通道与 `semantic_search_api` 两条端点，且引擎得先长出一个「全量取」的稳定口。丙（**推荐**）＝`get_all_memories()` 改从正文单源取、`_memories` 退回纯加速层——12 个调用点一字不改，代价是要给「全表读」配一个上限或分页口径，否则库一大就把取数面变成全表扫（现网正文实测 default 12 行 + kai 4 行，量级无碍，但这条必须同时定，不能留给"以后再说"）。
+    - **三态票（本批一律不动手）**：甲＝`_flushL0ToBody()` 之后把同一批 `Memory` 回灌 `_memories`——改动一处就补齐滞后，代价是长期进程的缓存只增不减，等于把「缓存滞后」换成「缓存无界」，且要按 `to_memory()` 的逆向量把作用域三元组对齐，错一位就是写进去读不回来。乙＝12 个调用档改指引擎/正文——教义第 6 条的正解，面最大，含五条检索通道与 `semantic_search_api` 两条端点，且引擎得先长出一个「全量取」的稳定口。丙（**推荐**）＝`get_all_memories()` 改从正文单源取、`_memories` 退回纯加速层——12 个调用点一字不改，代价是要给「全表读」配一个上限或分页口径，否则库一大就把取数面变成全表扫（现网正文实测 default 12 行 + kai 4 行，量级无碍，但这条必须同时定，不能留给"以后再说"）。**已裁丙并由 §6-213 落地（`0a8df272`）——落地形态比丙原稿更省**：不新增读盘路径，而是把仓里已有的唯一对账口 `reload_memories()` 接到制造分歧的那一点（flush 之后），于是"每调用全表扫 + 上限/分页"这件代价根本没付。
     - **登记不修（撞见时机写死）**：谁翻 ① 的默认值，必须先做完这条收口，否则 ② 那条腿就是回声的第二个入口；谁下一次给睡眠固化族建判据（＝把 ③「该族 0 格进子集」结掉），第一格该钉的就是这条——但按形态集第 117 条**不给缺陷现值写判据**，所以 ③ 的正解是先裁这条、再钉修后的契约，不是现在照现值建一格绿的。
     - **本批净 LOC**：生产池 0/0（一条代码没动）；改动全在台账本格与那份活体档。
     - **本会话下一枚空号现查 §6-212。**
@@ -3610,6 +3611,20 @@
     - **登记不修（四条，均在档案 §5）**：① `neurova/knowledge/foundation` 的 `ADOPTION_OUTCOMES` 与 `skills/models.py` 的三态词是**同一件事的第二份定义**，而 `tests/unit/knowledge/test_usage_writeback_foundation.py:16` 还手抄了第三份字面量——收口属 §6 那条根因，要先定"三态词"的唯一事实源在哪；② `tests/e2e/cua_sim/harness.py:17-23` 的 `PlaywrightBackend = pytest.importorskip(...) and PlaywrightBackend` 同属"被盖掉的 import"那一形，但是测试件、不在本条生产口径内；③ 动态取用面（`importlib.import_module("<pkg>")` 字符串）静态口径不宣称覆盖，现读 3 处已逐条眼过（都是"取模块对象"而非"取包门面里的名字"）；④ `neurova/channels/__init__.py` 的 21 个绑定里 9 个在 `__all__` 且零消费者——那包正被并发会话改着，本档案只读数。
     - **三张票写在档案 §6**（各选项的代价与不可逆点都列了）：票一 甲态 272 个，推荐**结清不立项**；票二 乙态 74 个，推荐**先补 `__all__` 声明公开面**（实测全仓对 `neurova.*` 的 `import *` 为 0 处 ⇒ 零行为变更），实现挪出 `__init__.py` 是更大的另一次；票三 丙态 18 个，推荐**先做 `llm.providers` 与 `admin` 两包**（丙态里唯一"现役消费者全部直取子模块"的两档）。
     - **本会话下一枚空号现查 §6-213。**
+
+213. **§6-211 的第二读面按丙收口：引擎 flush 就地走仓里已有的唯一对账口；同一条咽喉上顺手根修"写失败照清缓冲"（✅ `0a8df272` 生产+判据 8 格 / 本笔 子集+台账）** 🟢 —— 用户裁定「按丙建议动刀，改完后跑一次回归测试」。
+    - **与丙原稿的差别要说清（不是换了个方案，是省掉了一件代价）**：§6-211 里丙写的是"`get_all_memories()` 改从正文单源取、`_memories` 退回加速层，代价是必须给全表读配上限或分页"。动手时发现**这条读面根本不用改**——仓里已有唯一对账口 `manager.reload_memories()`（`api/endpoints/memory/visibility.py:43` 那个"不重启就看见"的端点用的就是它，`test_reload_memories_visibility.py` 那族判据也早把它钉成契约），缺的只是把它接到**制造分歧的那一点**。丙的本意（读面等于正文单源、缓存只做加速、12 个调用点一字不动）由此全额达成，而"每调用全表扫 + 上限/分页"这件代价**根本不必付**——对账只在 flush 那一点发生。按教义第 6 条，另造一份"引擎侧读盘并入"就是第二个平行体系，所以取此形。
+    - **根修的第二件事是同一条咽喉上的另一个坑（实测撞出，非推测）**：`persist_memory_batch` 把异常吞成 `logger.warning` 后返回 None ⇒ flush 以为成功，**照清 L0、照收敛恢复文件**——那条节点只剩"L0 里刚被删掉"这一段历史，静默整条丢。M-11 的"写入失败不清缓冲"其实是从下面被破的。现改成回 `bool`：没落地就什么都不动（`retrieve()` 先扫 L0，检索不受影响，等下次 flush 或崩溃恢复重试），而且**不去对账**——`reload_memories()` 会回收"盘上没有"的快照行，写失败后调它，等于让回收口删掉唯一那份内存副本。fail-soft 语义**保留**给召回侧的 touch 落盘（一次查询不该因为温度没写回而整条打回），所以是"回值 + 调用方按值办"，不是"改成上抛"。
+    - **原有判据为什么抓不到那层吞异常（形态集第 187 条立案）**：`test_cognitive_storage_flush_m11.py` 桩的是**写入口本身**（`monkeypatch` 让它 raise），于是它验的是"调用方收到异常时怎么办"，而真实路径里那个异常在**下一层**就被吞了、根本传不上来。桩住上游函数＝把下游的吞异常盖住，契约照样全绿。本批新增那格用 `_fail` 返回 False（照写入口的真实形状，而不是照旧桩法）才咬得到。
+    - **判据 8 格**（`tests/unit/memory/test_engineFlushConvergesFetchFace.py`，逐档单跑三次 8/8/8，已入子集）：主行为格＝flush 后同进程取数面必须看见那一行；另钉**两个不许越界的方向**——对账只准发生在 flush 那一点（未到阈值的 store 一次也不触发，否则批量语义被拆）、取数面每次读都不许扫盘（反向锁，否则 12 个调用档里那五条每查询都走的检索通道会变成查询放大器）；还有"L0 里没 flush 的节点不许被倒进取数面"（否则刚收口的单源又长出第二个）与一行 AST 钉"manager 不引引擎"（本批锁序 引擎锁→manager RLock 单向成立的前提，反向一出现即红）。
+    - **红→绿原文**：`4 failed, 4 passed`（四条全落在行为断言上，无 collection error；`test_engineFlushedRowIsVisible...` 的 E 行是 `assert False + where False = any(...)`，另三条分别是 `assert 0 == 1`／`assert 0 == 1`／flush 回了 1 而非 0）⇒ 绿 `8 passed`，落库后复取 `12 passed`（8 + M-11 两格 + WAL 竞态两格）。
+    - **红自证**：只 stash 本次两件生产改动（`-m red-selfproof-212-fetchFace`，不带 `-u` 以留出未跟踪新判据），复跑同一选择集 ⇒ `4 failed, 16 passed`，失败集**恰等**本批 4 格；M-11、WAL 竞态、reload 可见性那 16 档在生产改动缺席时照旧绿 ⇒ 没偷偷借这次接线转绿。`apply` 后逐文件 numstat 复算一致（15/3、12/3）才 `drop`。
+    - **活体兑现**（`tests/manual/sleepConsolidationReadFaceLive.py` 复跑 exit=0）：上一批在档头**预先写下**"收口之后 `same_process_bodyRows_visible_in_fetch` 应从 0 变 1"，本轮读 **1**（`fetch_total` 0→2）；同时 `trace_visible_via_engine_retrieve=0`、`ordinary_visible_via_engine_retrieve=1` 两格不变 ⇒ §6-208 那道门没被这次接线顶掉。这是本会话第一次由"预先登记的期望读数"而不是事后补的读数来验收。
+    - **宽域 A/B**（`-k HEAD -n 3 -c` 铺入本批新判据；memory+cognitive+cognitive_layers+api+core+agent+knowledge+voice+`test_data_flow_closed_loop.py`，并 `--ignore` 掉并发会话那档**尚未入库**的 `test_packageInitBindsNoUnusedGenericNames.py`——本树有它、基线树没有，不摘就会把别人的在途修复算成我的差集）：基线 `69 failed / 10 errors` ↔ 本树 `65 failed / 8 errors`，**仅本树红 0 条 = AB_PASS**；仅基线红 6 条＝本批 4 格（基线无修复＝"改前必红"的第二层证据）+ 两条 ERROR（`test_loop_manager::test_agent_uses_loop_manager`、`test_decay_cycle_bounded::test_no_max_processes_all`），这两条在本树单跑 `2 passed` ⇒ 与 §6-205/206 记过的**同一对**顺序偶发，不认领、不下结论。
+    - **净 LOC 分池**（`git show --numstat` 现测）：生产池 **+27/−6＝净 +21**——`cognitive_storage_engine.py` +15/−3（失败不清分支 3 行 + 对账调用 1 行 + 锁序与"为何不另造平行体系"的注释 5 行 + 更正 docstring 里那句已失效的"异常上抛由调用方日志兜底"），`manager.py` +12/−3（bool 出口四处 return + 两条未落地路径的点名 warning + 理由）。**逻辑本体 8 行，其余 19 行是注释与文档串**——那条静默丢数据的路径此前没有任何文字写明它该往哪走。测试基建池 212 行；子集条目 **576→577**。
+    - **同根因第二点·登记不修**：`_persist_memory()`（单条口，`manager.py:1035` 一带）同样吞异常（带一次重试后 `logger.error`）。它的后果形状不同——调用方不清自己的副本，于是留下"内存在、盘上没有"的行，**重启即静默消失**（`remember()` 那条路就在此形上）。不当本批顺手改的理由：改它要回答的是"一次 remember 该不该因为盘失败而打回"，那是产品语义不是装配。撞见时机：谁把 `remember()` 的返回当"已持久"往上报成功（写进台账/回给用户）时，必须先裁这条。
+    - **它改到 ①②③ 哪一格**：①的前置第三条（固化/通道那层的类别可见性）**因本批而更贴近必做**——滞后一整个进程周期被修掉后，一旦门打开，回声行不再是"重启后才进得来"，而是**当轮就进**取数面；门仍关着 ⇒ 今天零暴露，但那张票剩下的前置只有"读侧消费者"与这一条了。②的比对基准再进一格：原生类那条腿**现已等于正文单源**，壳仍只看到 L0——"谁更强"至此才真可比。③仍开。
+    - **本会话下一枚空号现查 §6-214。**
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
