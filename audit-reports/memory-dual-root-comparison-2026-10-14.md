@@ -175,5 +175,4 @@
 ① `agent_core.py:289` 与 `manager.py:4234 _default_db_path_for` 仍各拼一遍
 `<workspace>/memory/memory.db`（今天同形，改一处即分叉）；② 引擎 L0 的写侧今天仍无可达
 生产者，将来开闸时落点已是 A1、无需再造；③ `~/.neurova/` 那族配置是否收进数据根＝另一张
-档案；④ `data/<agent>/memory.db` 的 0 行空库残留 default/kai/yi_ling 三处，属运行期产物，
-**未替用户删**；⑤ `eviction_ledger_db.py:120 _FTS_TOKENIZE` 未跟随 `sql_like.FTS_TOKENIZER`。
+档案；④ ~~`data/<agent>/memory.db` 的 0 行空库残留~~ **已按用户裁定清掉**：`git glob data/*/memory.db` 现数到 7 个 agent 目录，逐个用只读连接过「`memories` 与 `memories_fts` 双 0 行」安全闸后删主库+`-wal`+`-shm`（共 18 个文件，含 `ng_test`、`test-agent`、`test`、`test_001`、`test_agent`、`yi_ling`）；`data/default` 与 `data/kai` 两处**被本机在跑的旧代码实例握着**（WinError 32），未代停服务，**该服务重启后按同一安全闸再删即可**——新代码不会再创建它们（引擎已不持有自己的库）。只删文件不删目录：`data/<agent>/workspace/` 等仍由 `media/config.py:295`、`api/endpoints/agent_package.py:347` 现役使用。现役真行库复证 default 12 / kai 4 行未动；⑤ `eviction_ledger_db.py:120 _FTS_TOKENIZE` 未跟随 `sql_like.FTS_TOKENIZER`。
