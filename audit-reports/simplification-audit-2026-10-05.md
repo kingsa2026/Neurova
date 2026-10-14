@@ -3297,6 +3297,20 @@
     - **本批两处自伤，都记给下一批**：① 判据的清单格第一版按"docstring 全文里出现 `xxx.py`"取数，把我自己正文里提到的 `agent_core.py` 也算成清单项 ⇒ 假红；改判为"只认 `- xxx.py` / `- xxx/` 这种清单行"并配合成样本证明它仍认得 `pool_service.py` 那一形（排除型判据改窄口径必须自带反空转格）。② 活体 [3] 第一版按 `app.routes` 的 `.path` 数技能面 ⇒ 读出 **0 条**，而 `GET /api/v1/skills/stats` 真给 401。这就是形态集记过的 `_IncludedRouter` 形状失真，我自己上一批刚写过它，这一批又踩了一次；改回行为读数并配一条"不存在的面必须 404"的校准格。
     - **净 LOC（生产池 +68/−313＝净 −245）**：八个门面/适配器文件纯删 121 行空转段；`skills/__init__.py` +68/−192（删 48 个占位符赋值与 13 段空转，新增的是重写后的清单与四行直接导入）。测试池：判据 235 行 7 格、活体 187 行 8 读数。
     - **本会话下一枚空号现查 §6-201。**
+
+202. **记忆正文收成一处库：认知引擎自建的 `data/<agent>/memory.db` 退役，FTS5(trigram) 与 embedding 并到现役真行库上（✅ `4172d3cc` 生产+判据+活体 / `1ab1691f` 子集 561→565 / 本笔档案）** 🟢 —— 用户 2026-10-14 点单「按推荐进行修复（别忘了取长补短再退役）」，并裁「三层能力（FTS5/向量/LSM）要保」。档案 `memory-dual-root-comparison-2026-10-14.md`。
+    - **实据先行（六处建表定义，不止档案最初写的两处）**：按 AST 面数 `CREATE TABLE IF NOT EXISTS memories (` 在 `neurova/` 的宿主——`memory_layer/manager.py`（A1，现役唯一真行库：default 12 行 / kai 4 行，-wal 4 MB 当日仍在写）、`cognitive_storage_engine.py`（B，**0 行且 `wal.jsonl` 从不存在**）、`mem_core.py:91 _ensure_schema`（生产模块里的第三份同构少列定义，**只有 2 个测试在调**）、`memory/scripts/{init_db,save_guardian_story,save_vue_frontend_memories}.py`（另一族：建的是 legacy 种子库 `yi_ling_memory.db`，列集不同且**无生产与 CI 入口**，本批只登记不动）。前四处里本批收掉三处，种子脚本一族属另一功能面另批处置。
+    - **两根不同名同形的 `memory.db`**：`agent_workspaces/<agent>/memory/memory.db` 只有 `attachments`/`memory_emotions`（不含正文），`data/<agent>/memory.db` 才是 `memories`+FTS。档案 §0 的取证因此一度误判 A 侧主库；正文真行其实在配对库 `neurova_memories_persist.db`（配对规则单点 `persist_landing.persistCompanionPath`）。
+    - **「FTS5 存在」≠「FTS5 能用」**：本机 sqlite 3.49 实测默认 `unicode61` 下，对文本里就存在的 5 字中文子串 `MATCH` **恒 0 命中**（`trigram` 命中 1）。B 侧原 DDL 正是前者——即便有行也检索不到，而 LIKE 兜底只在 `OperationalError` 时触发、不在零命中时触发，所以这条读路对中文一直是空的。
+    - **写侧四条链为何都到不了 `store()`**（逐条给断点行）：`pattern_crystallizer.py:264-267` 证据闸（盘上 `crystallizer_state.json` 实测 `evidenced: 0`）、`reasoning_trace_manager.py:156` `NEUROVA_TRACE_PERSIST` 全仓无生产赋值（`logs/server.log:13870` 有该分支运行时 DEBUG，证门真被走到并短路）、`sleep_adapter` 在 `neurova/` 内**零 import**（只剩 pycache）、`_FLUSH_THRESHOLD=100` vs 真实用量个位数。**这三道门都是 2026-09-05 事故的根修，本批一道没拆。**
+    - **收口形态**：memory 域迁移 v2 补 `embedding` 列、v3 建 `memories_fts`(trigram) + 三触发器 `memories_ai/ad/au` + 存量回填（真库 default/kai 迁移后仍 12/4 行、影子同数）；检索与记账归 `MemoryManager`（`searchMemoriesFulltext` 不记账、`creditRecallHits` 由读方过滤后只对真回出去的行调用）；引擎退为 L0 缓冲 + 崩溃恢复文件（移正文库同目录）+ 温度分层，构造改 `engine(agent_id, memory_manager)`，裸 SQL 层 -416 行。
+    - **本批自伤两处，都当场改判并留证据**：① 记账写在过滤之前 ⇒ 冷档（衰减到 19.9）被自己这次命中 +10 复活，`test_pattern_reaping` 两格翻红——教训：**合并读路时，"命中即记账"的位置必须在调用方过滤之后**，否则淘汰永不成立；曾试过"把行级条件下推 SQL"，实测证伪（`crystallized`/`tool_memory` 不在正文闭集，原值活在 `metadata.cse_*`，按列筛整批漏）。② 活体探针只隔了数据根，而记忆正文落在 **agent 工作区根**（另一根），真往生产 A1 写了一行 `mem_000019` ⇒ 已按 `id+content` 精确删净并复算（default 回 12、影子同数、孤儿 0），隔离单点因此补 `isolatedAgentWorkspaces()`——教训：**写记忆/附件/按-agent 图谱的活体必须两根同隔**，`isolatedDataRoot()` 管不到 `agent_workspaces/`。
+    - **判据 10 格**（`test_memoryDualRootMergedToOneStore.py`，10/10/10）：宿主唯一性按"扫到几个文件"数并配地板格 + "唯一宿主必须是 manager"格；影子表/触发器/embedding 列三格读真产物 `sqlite_master`+`PRAGMA`；中文子串必 MATCH 得（变异对照锚点）；删正文后影子必同数（防两表脱节）；构造引擎不在数据根开第二落点；恢复文件与正文库同目录；引擎召回正文真行；作用域隔离格写成正例先断、反例后断。
+    - **A/B**：基线（HEAD 生产 + 铺入本批 16 个判据档与共用助手）60 failed/12 errors ↔ 本树 15 failed/2332 passed，**仅本树红 0 条 AB_PASS**；本树余下 15 条经逐条回基线单跑 3 次皆红，属预存（crystallizer LLM 裁决闸 7、graph_integration 温度读数 4、`test_manager` bus 3、moe env 泄漏 1），不认领。
+    - **仍开（非本批做）**：① `agent_core.py:289` 与 `manager.py:4234 _default_db_path_for` 仍各拼一遍 `<workspace>/memory/memory.db`（今天同形，改一处即分叉）；② 引擎的 L0 写侧今天仍无可达生产者，将来开闸时落点已是 A1、无需再造；③ `~/.neurova/` 那族配置（providers.json/audit.db/governance_whitelist.json/skills）是否收进数据根＝另一张档案；④ `data/<agent>/memory.db` 的 0 行空库残留在 default/kai/yi_ling 三处，属运行期产物，**未替用户删**，需人工核对后处置；⑤ context 台账的 `_FTS_TOKENIZE`（`eviction_ledger_db.py:120`）未跟随 `sql_like.FTS_TOKENIZER` 单点。
+    - **本会话下一枚空号现查 §6-203。**
+
+
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
 **主会话未复算**：标 ◑ 的条目全部；各类候选行数估计（依赖子代理的相似度采样与手工加总，误差可达 ±20%）。
