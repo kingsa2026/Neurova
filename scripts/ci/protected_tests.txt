@@ -2918,3 +2918,11 @@ tests/unit/cognitive/test_reasoning_trace_persist_gate.py
 # 逐档单跑三次 9/9/9（改判档 8/8/8）；活体 8 读数 exit=0 含**纯搬家逐值对账**（本树与 HEAD 那份
 # 六组行为读数 sha256 相同）；A/B 两侧 errors 数一致（9↔9），"仅基线红"14 条即本批转绿的格。
 tests/unit/core/test_cacheAccountsMergedIntoOneModule.py
+# 批 §6-208：回声行永不进上下文（§6-206 三张票里第一张的裁定乙前半段）。11 格里 4 格是行为断言
+# （引擎/L0/统一检索口三处都取不到，且被丢掉的行不被 touch+creditRecallHits——先记账再过滤会让
+# 冷档被自己这次命中复活，与工单 017 同形）、4 格钉词表与单源（按 AST 扫 UnifiedMemoryNode(category="X")
+# 的字面量逼新类别在 CONTEXT_VISIBILITY 表态；表与谓词各只准定义一处）、3 格是**改码前就该绿的反证**
+# （真生产路确实存了一行 + 同一次查询仍捞得到 crystallized 与普通行——缺它们"没泄漏"就是空转读数）。
+# 形状取"默认放行 + 显式禁"而非白名单：正文普通行本来就靠这条路进上下文，白名单会当场掐死现网检索。
+# 逐档单跑三次 11/11/11；活体另扩到 22 项读数带摘闸反证。
+tests/unit/memory/test_recallContextFilterKeepsEchoRowsOut.py
