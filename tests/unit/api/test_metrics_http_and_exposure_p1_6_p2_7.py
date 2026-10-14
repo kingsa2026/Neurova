@@ -110,39 +110,41 @@ class TestHttpMetricsMiddleware:
 
 class TestCacheHitRateExport:
     def test_cache_registry_snapshot(self):
-        from neurova.memory.core.cache import get_global_cache, iter_caches
+        from neurova.core.cache import get_global_cache, iter_caches
 
         cache = get_global_cache()
         cache.set("k", 1)
         cache.get("k")
         names = dict(iter_caches())
-        assert "memory_global" in names
-        stats = names["memory_global"]
+        assert "default" in names
+        stats = names["default"]
         assert {"hit_rate", "size"} <= set(stats)
 
     def test_observe_caches_writes_gauges(self):
         from neurova.core.metrics import get_metrics
-        from neurova.memory.core.cache import get_global_cache
+        from neurova.core.cache import get_global_cache
 
         cache = get_global_cache()
         cache.set("a", 1)
         cache.get("a")
         cache.get("nope")
         get_metrics().observe_caches()
-        rate = REGISTRY.get_sample_value("neurova_cache_hit_rate", {"cache": "memory_global"})
+        rate = REGISTRY.get_sample_value("neurova_cache_hit_rate", {"cache": "default"})
         assert rate is not None and 0.0 <= rate <= 1.0
 
     def test_observe_caches_does_not_lazy_create(self):
         """抓指标不得创建缓存实例（否则 /metrics 本身成了消费者）。"""
         src = io.open(
-            PROJECT_ROOT / "neurova" / "memory" / "core" / "cache.py", encoding="utf-8"
+            PROJECT_ROOT / "neurova" / "core" / "cache.py", encoding="utf-8"
         ).read()
         tree = ast.parse(src)
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == "iter_caches":
-                body = ast.get_source_segment(src, node)
-                assert "get_global_cache()" not in body, "iter_caches 触发了懒建"
-                assert "MemoryCache(" not in body, "iter_caches 触发了懒建"
+        found = [node for node in tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "iter_caches"]
+        assert found, "这份模块里没有 iter_caches——下面的走查会空转成恒真"
+        for node in found:
+            body = ast.get_source_segment(src, node)
+            assert "get_global_cache()" not in body, "iter_caches 触发了懒建"
+            assert "MemoryCache(" not in body, "iter_caches 触发了懒建"
 
     def test_endpoint_refreshes_caches(self):
         src = io.open(APIDIR / "app.py", encoding="utf-8").read()

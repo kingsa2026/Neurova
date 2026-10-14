@@ -6,8 +6,9 @@
 1. 所有能导入的 `neurova` 包门面：**没有**一个公开符号是 `None`（旧形态下 HEAD 现读 8 个）；
 2. 本批修好的四条坏指路给出的是真身对象（`SelfModel`/`UserProfile`/`GraphTraversal`/
    `SleepConsolidation`），不是同名复制；
-3. 曾经被门面吞掉的循环：以 `memory_layer.cache` 为入口先导入，现在成功，且
-   `MemoryCache` 的出处仍是 `neurova.memory.core.cache`（单一出处没被搬走）；
+3. 缓存只有一处出处（`neurova.core.cache`）——批 45 把 `memory_layer.cache` 薄壳与
+   `neurova.memory.core.cache` 门面都退役了，原先"以薄壳为入口先导入会撞回门面"
+   那条真循环因此失去载体，这里改读"出处只有一个模块名"；
 4. `neurova.llm_client` 用的记账函数就是 `neurova.models.cost_tracking` 那一个对象
    ——旧形态那里有一套 no-op decorator 桩，若走到那条，LLM 记账会整个静默不落地；
 5. `interfaces` 门面里 §3 允许的第三方门保留（`APIError is fastapi.HTTPException`），
@@ -96,9 +97,9 @@ def main() -> int:
           and mem.GraphTraversal is GraphTraversal and mem.SleepConsolidation is SleepConsolidation,
           f"SelfModel={mem.SelfModel.__module__} GraphTraversal={mem.GraphTraversal.__module__}")
 
-    cache = importlib.import_module("neurova.cognitive_layers.memory_layer.cache")
-    check("[3] 以 cache 为入口先导入不再撞循环，且 MemoryCache 出处没被搬走",
-          cache.MemoryCache.__module__ == "neurova.memory.core.cache", cache.MemoryCache.__module__)
+    cache = importlib.import_module("neurova.core.cache")
+    check("[3] 缓存出处只有一处（薄壳与门面已随批 45 退役，循环失去载体）",
+          cache.MemoryCache.__module__ == "neurova.core.cache", cache.MemoryCache.__module__)
 
     import neurova.llm_client as LC
     import neurova.models.cost_tracking as CT

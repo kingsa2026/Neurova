@@ -162,7 +162,7 @@ class TestSettingsClearCacheEndpoint:
 
     def test_clear_cache_clears_registered_caches(self):
         from neurova.api.endpoints import settings as settings_mod
-        from neurova.memory.core import cache as cache_mod
+        from neurova.core.cache import register_cache, unregister_cache
         cleared = []
 
         class _Cache:
@@ -170,16 +170,17 @@ class TestSettingsClearCacheEndpoint:
                 cleared.append(True)
                 return 3
 
-        cache_mod._cache_registry.clear()
-        cache_mod._cache_registry["probe"] = _Cache()
+        # 走公开登记口，不再清私有 `_cache_registry`：把整张表清空会连进程默认实例
+        # 的登记一起抹掉，端点随后测的就不是真实状态了。
+        register_cache("probe", _Cache())
         try:
             client = _client(settings_mod.router, "")
             r = client.post("/v1/settings/clear-cache")
             assert r.status_code == 200, r.text
-            assert r.json()["data"]["total_cleared"] == 3
+            assert r.json()["data"]["caches"]["probe"] == 3, r.text
             assert cleared == [True]
         finally:
-            cache_mod._cache_registry.clear()
+            unregister_cache("probe")
 
 
 # ── tool-layers execute (改指真实契约) ───────────────────────────────────

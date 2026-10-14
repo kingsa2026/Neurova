@@ -19,7 +19,7 @@ cached None),但同源的 get_or_set / get_many 仍用 `if value is None` 判断
 """
 import pytest
 
-from neurova.memory.core.cache import MemoryCache, _MISSING
+from neurova.core.cache import MemoryCache, _MISSING
 
 
 class TestGetOrSetHandlesNone:
