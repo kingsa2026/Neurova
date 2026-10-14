@@ -597,12 +597,15 @@ class EvolutionOrchestrator:
             self.pattern_miner.add_sequence(tools, context=task, success=success)
 
         # 触发经验结晶
-        # 入口：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的 skill_name="chat"
-        # 约定一致；`success` 三态原样传给结晶器，由它把 None 记成"无证据观察"
-        # （既不投成功票也不投失败票，工单 003/004）
+        # 入口：纯对话轮（无工具）以 `CHAT_PSEUDO_TOOL` 伪工具名观察，与 EKB 的
+        # skill_name="chat" 约定一致；`success` 三态原样传给结晶器，由它把 None 记成"无证据观察"
+        # （既不投成功票也不投失败票，工单 003/004）。名字取自结晶器单源常量——
+        # 用户回执补票（attachTurnOutcome）按同一个名字**排除**寒暄轮，两处各写字面量就会各漂。
+        from neurova.cognitive_layers.memory_layer.pattern_crystallizer import CHAT_PSEUDO_TOOL
+
         cryst = crystallizer or self.crystallizer
         if cryst:
-            observe_targets = tools if tools else ["chat"]
+            observe_targets = tools if tools else [CHAT_PSEUDO_TOOL]
             for tool in observe_targets:
                 try:
                     cryst.observe(
