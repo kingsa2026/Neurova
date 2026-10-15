@@ -152,18 +152,23 @@ def scan_skill_for_install(skill_id: str, skill_path: str) -> Dict[str, Any]:
 
     findings = [f.to_dict() for f in result.findings]
     if not result.passed:
-        blocked_by = [f.get("rule_id") for f in findings]
-        logger.warning(
-            "技能 %s 安装被安全门拦截: %s", skill_id, blocked_by
-        )
+        # 拒因只念**实际决定这次拒绝**的条目（口径在 `blockingFindings` 一处，本函数不再自写阈值）。
+        # 旧版取 `findings[:5]`，于是"拒因"里混着不参与裁决的读数——读的人会照着去改资产文档。
+        from neurova.security.skill_scanner import blockingFindings
+
+        blocking = [f.to_dict() for f in blockingFindings(result)]
+        blocked_by = [f.get("rule_id") for f in blocking]
+        logger.warning("技能 %s 安装被安全门拦截: %s", skill_id, blocked_by)
+        reasons = "; ".join(
+            "{}({}): {}".format(f.get("severity") or "?", f.get("rule_id") or "?",
+                                 f.get("message") or f.get("rule_id") or "")
+            for f in blocking) or "无参与裁决的条目（读数与裁决口径不一致，按严拒绝）"
         return {
             "passed": False,
             "blocked": True,
             "action": "deny",
             "findings": findings,
-            "error": "安全扫描未通过: " + "; ".join(
-                f.get("message", f.get("rule_id", "")) for f in findings[:5]
-            ),
+            "error": "安全扫描未通过: " + reasons,
         }
 
     return {"passed": True, "blocked": False, "action": "allow", "findings": findings, "error": None}

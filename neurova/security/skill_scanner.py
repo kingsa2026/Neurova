@@ -134,6 +134,33 @@ def isDenyBearing(finding: "Finding") -> bool:
     return Path(path).suffix.lower() not in DOC_ASSET_SUFFIXES
 
 
+#: 各策略下"够格决定这次结果"的严重度阈值。**资格**由 `isDenyBearing` 判，**够不够格**由这张表判，
+#: 两件事合在一处只算一次（旧实现把 `critical/high` 这个名单在 `passed` 与
+#: `blocking_rule_count` 两处各写一遍，改一处就漂一处）。
+BLOCKING_SEVERITIES = {
+    ScanPolicy.DENY: frozenset({"critical", "high"}),
+    ScanPolicy.WARN: frozenset({"critical"}),
+}
+
+
+def isBlocking(finding: "Finding", policy: ScanPolicy = ScanPolicy.DENY) -> bool:
+    """这条发现是否**实际决定**这次扫描的结果（ deny-bearing ＋ 达到该策略的严重度阈值）。"""
+    if policy == ScanPolicy.ALLOW:
+        return False
+    return isDenyBearing(finding) and finding.severity in BLOCKING_SEVERITIES[policy]
+
+
+def blockingFindings(result: "ScanResult") -> List["Finding"]:
+    """这次扫描里实际决定结果的条目——**拒因文本只能由它生成**（§6-259）。
+
+    旧版 `scan_skill_for_install` 的 `error` 取的是 `findings[:5]`，于是被念出去的"拒因"里
+    混着不参与裁决的读数（文档侧的相对链接等）：读的人会照着去改资产文档，方向全错。
+    """
+    raw = (result.metadata or {}).get("scan_policy")
+    policy = ScanPolicy(raw) if raw in {p.value for p in ScanPolicy} else ScanPolicy.DENY
+    return [f for f in result.findings if isBlocking(f, policy)]
+
+
 @dataclass
 class ScanResult:
     """扫描结果"""
@@ -197,7 +224,18 @@ class ScanRule:
     enabled: bool = True
     category: str = "general"
     suggestion: Optional[str] = None
+    #: 命中成立的**第二个条件**：同一行是否出现"这段路径会被拿去读/写/解包"的形态。
+    #: 为什么要有它（§6-259）：行级正则只看字节，看不见语义——旧版 `dangerous_path_traversal`
+    #: 把 `.mjs` 的 ES 相对导入 `from "../…/runtime_helpers.mjs"` 和数据字面量里的
+    #: `"../assets/slide-01.png"` 都判成 high 级攻击并参与 DENY（真资产包里光这两形就 60+ 条）。
+    #: 真防线在 `security/safe_archive.py::_resolve_within`（成员名归一化后仍须在目标目录内），
+    #: 这条行级正则只是**信号**；信号打在无害形态上只会淹没真信号。
+    context_pattern: str = ""
+    #: 第二个条件没满足时**降到这个严重度照常上报**，不把读数删掉——批 37 定的口径是
+    #: "放行≠删发现"，报告面与审计面都得继续看得见这条相对路径引用。
+    context_miss_severity: str = "low"
     _compiled: Optional[Pattern] = field(default=None, repr=False)
+    _compiled_context: Optional[Pattern] = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.pattern:
@@ -205,11 +243,22 @@ class ScanRule:
                 self._compiled = re.compile(self.pattern, re.IGNORECASE)
             except re.error:
                 self._compiled = None
+        if self.context_pattern:
+            try:
+                self._compiled_context = re.compile(self.context_pattern, re.IGNORECASE)
+            except re.error:
+                self._compiled_context = None
+
+    def severityFor(self, text: str) -> Optional[str]:
+        """这一行的结论：不命中 None；命中但缺上下文 ⇒ 降级严重度；否则按本条严重度。"""
+        if not self._compiled or not self.enabled or not self._compiled.search(text):
+            return None
+        if self._compiled_context is not None and not self._compiled_context.search(text):
+            return self.context_miss_severity
+        return self.severity
 
     def matches(self, text: str) -> bool:
-        if not self._compiled or not self.enabled:
-            return False
-        return self._compiled.search(text) is not None
+        return self.severityFor(text) is not None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -291,6 +340,29 @@ class PromptInjectionAnalyzer(BaseAnalyzer):
 class PatternAnalyzer(BaseAnalyzer):
     """模式分析器：基于正则表达式检测危险模式"""
 
+    #: 路径"要拿去读/写/解包/落地"的调用形态——`dangerous_path_traversal` 只在同一行出现这些
+    #: 形态时才成立（§6-259，与 `ScanRule.context_pattern` 同一件事）。
+    #: **模块说明符故意不在名单里**：ES/CJS 的 `from "../x.mjs"`、`import()`、`require()` 走的是
+    #: 模块解析，不是把路径交给文件系统；旧版把它们判成攻击，一只资产包里光这一形就贡献 2 条 high。
+    #: 真防线在 `security/safe_archive.py::_resolve_within`（成员名归一化后仍须在目标目录内，显式拦
+    #: `..`），这条行级正则只是信号。
+    FS_PATH_API_PATTERN = "(" + "|".join((
+        r"\bopen\s*\(",
+        r"\bPath\s*\(",
+        r"\bjoinpath\s*\(",
+        r"\bos\.path\.\w+\s*\(",
+        r"\bos\.(?:remove|unlink|rename|replace|mkdir|makedirs|listdir|scandir|chdir|startfile)\s*\(",
+        r"\bshutil\.\w+\s*\(",
+        r"\b(?:read|write)_(?:text|bytes)\s*\(",
+        r"\b(?:glob|rglob)\s*\(",
+        r"\bextract(?:all|file)?\s*\(",
+        r"\bsendfile\s*\(",
+        r"\b(?:mkdir|rmdir|unlink|rename|replace|truncate|stat|touch|copyfile|copy2|copytree|copy|rmtree|move)\s*\(",
+        r"\b(?:readFile|writeFile|appendFile|createReadStream|createWriteStream)Sync?\s*\(",
+        r"\b(?:mkdirSync|rmSync|unlinkSync|renameSync|copyFileSync|rmdirSync)\s*\(",
+        r"\bpath\.(?:join|resolve|normalize)\s*\(",
+    )) + ")"
+
     def __init__(self):
         self.rules: Dict[str, ScanRule] = {}
         self._load_default_rules()
@@ -305,7 +377,11 @@ class PatternAnalyzer(BaseAnalyzer):
             ScanRule(
                 rule_id="dangerous_exec",
                 name="危险执行函数",
-                pattern=r"\b(exec|eval|compile)\s*\(",
+                # 只判**裸名调用**：`exec(`/`eval(`/`compile(`。旧形态 `\b(exec|eval|compile)\s*\(`
+                # 里 `\b` 在 `.` 与 `c` 之间同样成立 ⇒ `re.compile(` 被当成 critical 级危险执行，
+                # 仓内自带资产包里 27 条命中有 26 条是正则预编译（§6-250），门就此把"任何带正则的
+                # 技能包"一律拒掉。属性调用（`re.compile(`、`cursor.exec(`）不是内置动态执行。
+                pattern=r"(?<![\w.])\b(exec|eval|compile)\s*\(",
                 severity="critical",
                 message="检测到危险的代码执行函数调用",
                 category="code_execution",
@@ -376,6 +452,8 @@ class PatternAnalyzer(BaseAnalyzer):
                 rule_id="dangerous_path_traversal",
                 name="路径遍历",
                 pattern=r"\.\.[\\/]",
+                # 同行要有"把这段路径拿去读/写/解包"的形态才算（见 FS_PATH_API_PATTERN 的理由）
+                context_pattern=self.FS_PATH_API_PATTERN,
                 severity="high",
                 message="检测到潜在的路径遍历攻击",
                 category="path_traversal",
@@ -443,10 +521,11 @@ class PatternAnalyzer(BaseAnalyzer):
                 continue
 
             for line_num, line in enumerate(lines, 1):
-                if rule.matches(line):
+                severity = rule.severityFor(line)
+                if severity is not None:
                     finding = Finding(
                         rule_id=rule.rule_id,
-                        severity=rule.severity,
+                        severity=severity,
                         category=rule.category,
                         message=rule.message,
                         file_path=skill_file.path,
@@ -769,7 +848,9 @@ class SkillScanner:
                     )
                 ] + nameFindings,
                 file_count=0,
-                metadata={"unscanned_file_count": unscannedCount},
+                # 早退也要带上策略：拒因文本由 `blockingFindings` 生成，它读的就是这个键
+                metadata={"unscanned_file_count": unscannedCount,
+                          "scan_policy": self.policy.value},
             )
 
         # 计算内容哈希。摘要**必须含文件名普查**：只按可读内容算时，包里多塞一个 `.env`
@@ -794,14 +875,12 @@ class SkillScanner:
 
         # 根据策略判断是否通过。文档/资产类文件上的"代码形状"规则**不参与 DENY**，
         # 但发现项原样留在 findings 里（放行≠删读数——报告面与审计面都还看得见）。
-        denying = [f for f in all_findings if isDenyBearing(f)]
         reportOnly = [f.rule_id for f in all_findings if not isDenyBearing(f)]
-        if self.policy == ScanPolicy.DENY:
-            passed = not any(f.severity in ("critical", "high") for f in denying)
-        elif self.policy == ScanPolicy.WARN:
-            passed = not any(f.severity == "critical" for f in denying)
-        else:  # ALLOW
+        blocking = [f for f in all_findings if isBlocking(f, self.policy)]
+        if self.policy == ScanPolicy.ALLOW:
             passed = True
+        else:
+            passed = not blocking
 
         result = ScanResult(
             skill_id=skill_id,
@@ -813,8 +892,9 @@ class SkillScanner:
             file_count=len(files),
             metadata={"report_only_rules": reportOnly,
                       "unscanned_file_count": unscannedCount,
-                      "blocking_rule_count": sum(1 for f in denying
-                                                 if f.severity in ("critical", "high"))},
+                      # 阈值随策略走（旧实现不分策略都按 critical/high 数，WARN 下会多报）
+                      "blocking_rule_count": len(blocking),
+                      "scan_policy": self.policy.value},
         )
 
         # 缓存结果
