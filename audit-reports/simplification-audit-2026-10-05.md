@@ -4059,7 +4059,19 @@
       但其中"删除 M-D 子集行"这一条要由他们自己确认。这正是本仓一路记着的共享长文档纪律
       又踩了一次——**同一文件的 `git add` 就是别人的段落入口**，形态只有 hash-object 那一种。
     - **M-E 后半不在本批（三态票，需人裁）**：目标是让改写候选带"改的是哪个运行环节"，把 `attribution_hit_rate` 从"预测哪些题会涨"升级成"声称修 X 环节则 X 环节必须涨、其余环节不得跌"（`history_ledger.py:184-203` 现只按 task_input 命中，`unpredicted_regressions` 只入账）。**卡点是证据面而不是判据**：仓内没有"每个评测任务属于哪个环节"的实测来源。三态——甲 扩 `capability_gap` 三值成唯一环节轴（要动检测器，跨 chat_pipeline/tool_executor/tool_search 三处投递，且它今天只覆盖"能力缺口"不覆盖 loop/completion）；乙 新建环节枚举（就是本仓明禁的第三套分类，除非先与 `self_model` 五算子、`FailurePattern` 六桶比后合）；丙 维持现状只做本批的词表收口（推荐：先让反思→归因这条链不静默丢，读数积累后再判环节轴值不值一套词汇）。推荐**丙**，其次甲。
-    - **本会话下一枚空号现查 §6-245。**
+    - **本会话下一枚空号现查 §6-252。**
+251. **环节轴并进 `capability_gap` 单源；harness 族不得驱动自主创建（✅ `36987c02` 生产+判据+活体 / 子集一笔 597→598）** 🟢 —— M-E 后半·甲案，出处 `docs/08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md` §7.1-Q4。
+
+    - **为什么扩这份而不是新造枚举**：本仓对"哪里出问题"有三份各自表述——`self_model` 五算子答"谁在失败"、`FailurePattern` 六桶答"什么错误类型"、`capability_gap` 三值答"缺哪项能力"。再造一套"环节"枚举就是第三套分类（教义第 7 条禁止），比后合的结论是**扩 `capability_gap` 这份单源**并给每条 kind 登记用途。模块头原写"信号有界三条，不扩面"（T-03 立模块时的口径），按"规则与行为不一致时以改规则为准"就地改写并写明改口来历。
+    - **本批真正的靶（一个不报错的坏接法）**：`chat_pipeline._check_nl_synthesis` 判的是 `gap.hasGap`。新 kind 一旦进同一收件箱，`hasGap` 即为真 ⇒ **"环推不完"被当成"缺一条工具"**去驱动自主合成，产出一堆没人用的工具。处置：用途在 `_GAP_PURPOSE` 单源登记，派生 `CAPABILITY_GAP_KINDS`/`HARNESS_GAP_KINDS`（不是第二份字面量），入口改判 `capabilityKinds`。
+    - **副作用不长在纯判定里**：新 kinds 的投递点是**环出口求值点**（`loops/base.py:evaluateLoopExit` 的 TERMINATE 与"续跑预算耗尽"两处），门名取自真 `StopDecision`；`agent/gates.py` 里零投递调用——判据钉住这条，否则门控不可单测也不可复用。目标已达成时不投（那是正常收口，不是缺口）。
+    - **判据八格**：词表单源两族派生 / 派生名单不许改回字面量 / 新 kind 投得进 / **只投 harness 族时 capabilityKinds 必须为空** / 出口助手按门名分流 / 入口按族把关（AST 钉代码形态不钉措辞）/ 门控模块零投递 / 观测读侧 `gapMetricReadout().by_kind` 见得到新 kind。
+    - **红自证**（只 stash 三个生产文件，tag `red-selfproof-HG-prod`）：`6 failed, 2 passed`，红的 6 格正是本批语义（`单源名单与预期两族不等：{attachment_unreadable, catalog_miss, repeated_tool_failure}`、`合成入口没按族把关`）；另 2 格（不许改回字面量、门控零副作用）是反向钉，HEAD 态本就该绿——如实分开报。⇒ 绿：本档 8 passed；既有 `test_capability_gap_trigger.py` 18 passed **一字未改**（三值语义不变）。
+    - **A/B 这轮没拿到可信差集，记下来而不是当作通过**：`ab_compare.sh` 在 detached worktree 里跑 `tests/unit/agent`（含 agent+evolution 组合）两侧都报 `20 failed + 2014 error`、汇总 2034 条而抽取只 24–27 条——"没跑成"不是"无差异"，同一选择集在**本树真跑**是 22 failed/1423 passed 无 error。交付证据改由上面的定向红自证承担；"隔离 worktree 里成量 error"这个环境形态与本批无关，另批查（同 §6-240/244 那族"两侧同集的预存失败"）。
+    - **活体 6 组读数 exit=0**：真 `DoomLoopGate` 四次 check 内 TERMINATE、真 `GoalGate` 出口判 `terminate/gate=goal`（自认完成但目标未达成）→ 门名喂真助手 → 真 `detectCapabilityGap` 得 `kinds=[false_completion, loop_stalled]`、**`capabilityKinds=[]`**（"不误驱动合成"的活体读数）、`harnessKinds` 两形齐；观测读侧两个新 kind 各计数 1；达成时不投；`data/` md5 前后一致。
+    - **净 LOC**：生产池 **+73/−7 ⇒ 净 +66**（`capability_gap.py +35/−4`、`loops/base.py +33/−1`、`chat_pipeline.py +5/−2`）；判据 150 行。注：提交正文第一版把这些数字写成估算（+58/−9），落库前用 `git show --numstat` 复算后改正——同一文件的净数本仓已错过四次，这次是第五次，只是当笔自己抓出来了。
+    - **未做的下一刀（不静默留白）**：把环节证据接到**每个评测任务**上，让 `history_ledger.attribution_hit_rate` 从"预测哪些题会涨"升级成"声称修 X 环节则 X 环节必须涨、其余环节不得跌"。卡点是收件箱为**轮次级且读取即消费**（`detectCapabilityGap` 的既有语义），要做任务↔回合的证据关联得先定生命周期，不属本批。
+    - **本会话下一枚空号现查 §6-252。**
 241. **读面失败形态收成诚实：未就绪 503 带原因，search 不再把故障画成 200 空信封（✅ `dc05ae65` 生产+判据+夹具 / `6f99d3ca` 子集 593→594）** 🟢 —— §6-220 登记项落地（票面那句"未登录 500"顺带纠准）。
 
     - **根因不是"少映射一个码"**：`error_handlers.py` 旧注释写着"未列出的错误码保持 500（与历史行为一致）"——**默认落 500 等于没人表态**。于是 6001/6003 一族"服务未就绪"被兜底成 500（含义是"我方代码错了"，调用方据此重试与报警的方向完全错）。修法是把"每个已声明的码都必须表过态"做成会红的判据（映射表 ∪ 显式 5xx 故障清单），兜底那一路保留但出声（不在任一份清单里的码会 warning 点名）。
