@@ -3116,3 +3116,7 @@ tests/unit/memory/test_IngestIdentityKeyIsScopedPerOwner.py
 # ② `testAnonymousReadStillSeesOnlyDefaultBucket` 那个 200 是假信封给的（夹具根本没有 app state），
 #   "匿名读只看到 default 桶"从未被真测过——修法是给夹具装真 MemoryManager，不是放宽断言。
 tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
+# 安全集成判据改指现役 API（RBAC 的权限是枚举目录、角色自带权限集合；EventBus 递给 handler 的是
+# `Event` 数据类而不是 dict）。这档此前不在子集 ⇒ 调用不存在的名字长期只有本机显式跑才红；改绿后入册，
+# 让同一处再漂一次变成会红的判据。逐格差异写在该档自己的 docstring 里。
+tests/integration/test_security_integration.py
