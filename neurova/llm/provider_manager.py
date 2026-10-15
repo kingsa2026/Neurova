@@ -60,7 +60,6 @@ reset 链路(与 MultiModelLLMClient 协同)
 import inspect
 import asyncio
 import json
-import logging
 import os
 import random
 import re
@@ -73,96 +72,24 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 # 导入依赖
-try:
-    from neurova.core.module_system import Module
-except ImportError:
-    # 占位符，如果模块不存在
-    class Module:
-        def __init__(self, config=None, event_bus=None):
-            pass
-
-        def _log(self, level, message):
-            pass
-
-
-try:
-    from neurova.core.log_level import LogLevel
-except ImportError:
-
-    class LogLevel:
-        INFO = "INFO"
-        WARNING = "WARNING"
-        ERROR = "ERROR"
-
-
-try:
-    from neurova.core.logger import get_logger
-except ImportError:
-
-    def get_logger(name):
-        return logging.getLogger(name)
-
-
-try:
-    from neurova.llm.presets import LLMPresetRegistry, ModelPreset, get_preset_registry
-except ImportError:
-    # 占位符
-    def get_preset_registry():
-        return None
-
-    class LLMPresetRegistry:
-        def list_presets(self):
-            return []
-
-    class ModelPreset:
-        pass
-
-
-try:
-    from neurova.llm.providers.secret_store import SecretStore, decrypt_api_key, encrypt_api_key
-except ImportError:
-    # 占位符
-    def encrypt_api_key(key):
-        return key
-
-    def decrypt_api_key(key):
-        return key
-
-    class SecretStore:
-        pass
-
-
-try:
-    from neurova.llm.providers.types import (
-        ConnectionResult,
-        ModelInfo as PydanticModelInfo,
-        ProbeResult,
-        ProviderCapability,
-        ProviderType,
-    )
-except ImportError:
-    # 占位符
-    @dataclass
-    class ConnectionResult:
-        success: bool = True
-        message: str = ""
-        latency_ms: float = 0.0
-
-    @dataclass
-    class ProbeResult:
-        vision: bool = False
-        audio: bool = False
-        video: bool = False
-        image_generation: bool = False
-
-    @dataclass
-    class PydanticModelInfo:
-        id: str = ""
-        name: str = ""
-        owned_by: str = ""
-
-    class ProviderCapability:
-        pass
+# 这六条原先各自包着一段 `except ImportError` 的同名 class/def 桩。按批 43 已裁口径它们**永不可达**
+# （被包的模块其模块级闭包只碰 stdlib 与本仓），留着就是把"降级"写成第二套词汇/结构；而这一族比
+# `X = None` 更坏——`None` 下一行就炸，桩能一路走下去：`encrypt_api_key(key): return key` 一旦真触发，
+# 密钥加解密被静默做成透传；`get_preset_registry(): return None` 让预设整个失效而调用方以为有；
+# `types` 那四条桩 dataclass 与真身字段各漂各的；而同一段兜底里连 `ProviderType` 都没补，
+# 真触发时下一句就是 NameError。台账 §6-228。
+from neurova.core.log_level import LogLevel
+from neurova.core.logger import get_logger
+from neurova.core.module_system import Module
+from neurova.llm.presets import LLMPresetRegistry, ModelPreset, get_preset_registry
+from neurova.llm.providers.secret_store import SecretStore, decrypt_api_key, encrypt_api_key
+from neurova.llm.providers.types import (
+    ConnectionResult,
+    ModelInfo as PydanticModelInfo,
+    ProbeResult,
+    ProviderCapability,
+    ProviderType,
+)
 
 
 logger = get_logger(__name__)

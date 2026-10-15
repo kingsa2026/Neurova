@@ -166,16 +166,15 @@ def placeholderViolations(source: str, rel: str):
     return out
 
 
-#: 同一根因的**另一种形状**（§6-224 现算，8 处 / 3 档）：handler 里不赋 `None`，而是定义
+#: 同一根因的**另一种形状**（首次现算 §6-224，8 处 / 3 档）：handler 里不赋 `None`，而是定义
 #: 与 try 体**同名**的 class/def 桩。它比 `None` 更难查——`None` 在下一行就 `TypeError`，
 #: 空类/"返回桩"的函数能一路走下去，把降级悄悄做实。`neurova/execution_engine/__init__.py`
-#: 那九枚同名空类是本批撞出来的第一处（已摘，见 §6-224）；剩下这 3 档不在本批动手面，
-#: 按文件钉成**存量表**：新长一处即红，修好了不摘行也红（与 §6-197 同一手法）。
-STUB_LEDGER: dict = {  # type: ignore[type-arg]
-    "neurova/llm/provider_manager.py": 6,
-    "neurova/post_chat_pipeline.py": 1,
-    "neurova/router.py": 1,
-}
+#: 那九枚同名空类是 §6-224 撞出来的第一处；剩下 3 档 8 处由 §6-228 全拆（用户拍甲）。
+#: 现在这张表是**零容忍政策**而不只是"清零的存量"：将来撞出一处，出路只有「拆桩直连」，
+#: 或者被包的导入确实触及未声明第三方——后一条由 `touchesRealOptional` 自己判，不由人在这里登记。
+#: 为什么这类桩比 `X = None` 更该零容忍：`encrypt_api_key(key): return key` 那枚一旦真触发，
+#: 密钥加解密就被静默做成透传，而读代码的人看见的是"有兜底"。
+STUB_LEDGER: dict = {}  # type: ignore[type-arg]
 
 
 def stubViolations(source: str, rel: str):
@@ -270,8 +269,20 @@ class TestPlaceholderMustBindToRealOptional:
         extra = sorted(set(counts) - set(STUB_LEDGER))
         stale = sorted(p for p in STUB_LEDGER if counts.get(p, 0) != STUB_LEDGER[p])
         assert not extra and not stale, (
-            f"同名桩与存量表不符。新长出来的（摘桩或改直连）：{[(p, counts[p]) for p in extra]}；"
-            f"数目变了却没改表的：{[(p, counts.get(p, 0), STUB_LEDGER[p]) for p in stale]}")
+            f"同名桩与豁免表不符。新长出来的（唯一出路是拆桩直连；确实触及未声明第三方的那一形"
+            f"本来就不进这条判据）：{[(p, counts[p]) for p in extra]}；"
+            f"数目变了却没改表的（别留过期豁免）：{[(p, counts.get(p, 0), STUB_LEDGER[p]) for p in stale]}")
+
+    def testTheStubExemptionLedgerIsStillEmpty(self):
+        """零容忍格（§6-228 清零后新增）：这张表的空值本身就是要钉的东西。
+
+        防的不是"这次忘了拆"，而是下一个人把"顺手加个兜底"当合法出路——他可以往表里加一行让
+        上面那条等号格绿，但这一格会红着告诉他那条路已经封了：确实可能缺的东西由
+        `touchesRealOptional` 自己判，不由人在这里登记。
+        """
+        assert not STUB_LEDGER, (
+            f"同名桩豁免表又被填上了：{STUB_LEDGER}——拆桩直连，"
+            "或让 touchesRealOptional 那条『确实可能缺』的判定自己放行，别在这里登记")
 
     def testStubDetectorHasTeethAndDoesNotOverReach(self):
         """探测器正反两头：桩冒充真身必抓，§3 允许的第三方可选依赖回退不许误伤。"""
