@@ -23,8 +23,6 @@ _GEN_SYSTEM = (
     "每条包含:\n"
     "- task_input: 用户会真实提出的问题/任务\n"
     "- expected_behavior: 好响应的评分细则(rubric,描述应做到什么,不是精确输出文本)\n"
-    "- difficulty: easy|medium|hard\n"
-    "- category: 考察的技能侧面\n"
     "只输出一个 JSON 数组,不要其它文字。"
 )
 
@@ -96,8 +94,6 @@ class SyntheticDatasetBuilder:
             EvalExample(
                 task_input=str(c.get("task_input", "")).strip(),
                 expected_behavior=str(c.get("expected_behavior", "")).strip(),
-                difficulty=str(c.get("difficulty", "medium")).strip() or "medium",
-                category=str(c.get("category", "general")).strip() or "general",
                 source="synthetic",
             )
             for c in cases

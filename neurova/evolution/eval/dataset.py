@@ -24,16 +24,12 @@ class EvalExample:
 
     task_input: str
     expected_behavior: str
-    difficulty: str = "medium"
-    category: str = "general"
     source: str = "synthetic"  # synthetic|history|golden
 
     def to_dict(self) -> dict:
         return {
             "task_input": self.task_input,
             "expected_behavior": self.expected_behavior,
-            "difficulty": self.difficulty,
-            "category": self.category,
             "source": self.source,
         }
 
