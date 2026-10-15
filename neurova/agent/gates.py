@@ -99,20 +99,46 @@ class TokenBudgetGate(StopGate):
         return StopDecision.bypass()
 
 
+def _settingsDoomLoopDefaults() -> Dict[str, int]:
+    """死循环门两个在用阈值的默认值：**取自**配置单源，不在此手抄第二份数字。
+
+    单源不可导入是真实故障，交给 import 出声（与 `agent/swarm.py` 同口径），
+    不吞异常改成静默常量。
+    """
+    from neurova.security.agent_limits_settings import DEFAULTS
+
+    return {
+        "window_size": int(DEFAULTS["doom_loop_window_size"]),
+        "max_interrupts": int(DEFAULTS["doom_loop_max_interrupts"]),
+    }
+
+
 class DoomLoopGate(StopGate):
-    """死循环门控。"""
+    """死循环门控。
+
+    两个在用的阈值默认值**取自** `security/agent_limits_settings.DEFAULTS` 单源
+    （先例 `agent/swarm.py:_settingsDefaultSubagentDepth()`）——此前它们是类字面量，
+    而唯一装配点无参构造本门，于是「几次重复算死循环」这件事不受任何配置键管辖。
+    `similarity_threshold` 仍留字面量：它存进实例后全仓零读取（`check()` 判的是签名
+    逐字相等），给死旋钮挂键就是造第二个空转配置，存废另批裁。
+    """
 
     def __init__(
         self,
-        window_size: int = 4,
+        window_size: Optional[int] = None,
         similarity_threshold: float = 0.95,
-        max_interrupts: int = 2,
+        max_interrupts: Optional[int] = None,
     ):
+        defaults = _settingsDoomLoopDefaults()
         self.name = "doom_loop"
         self.priority = 5
-        self.window_size = window_size
+        self.window_size = (
+            defaults["window_size"] if window_size is None else int(window_size)
+        )
         self.similarity_threshold = similarity_threshold
-        self.max_interrupts = max_interrupts
+        self.max_interrupts = (
+            defaults["max_interrupts"] if max_interrupts is None else int(max_interrupts)
+        )
         self._window: List[str] = []
         self._interrupt_count = 0
 
