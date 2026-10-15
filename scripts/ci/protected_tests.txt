@@ -3069,19 +3069,19 @@ tests/unit/memory/test_writeSideFillsEmbedding.py
 # `agent_workspaces.agentMemoryDirUnder/agentMemoryDbPathUnder` 一份。
 # ⚠ 判据第一版按"单条除法链里两个字面量齐不齐"数命中，漏掉了 `dir = root/"memory"` 先落变量、
 # 下一行再 `dir/"memory.db"` 那种拆写——数到 1 处是**假干净**。现在按文件级取 `and`、行号级取 `or`。
-tests/unit/memory/testAgentMemoryLandingIsSingleDerived.py
+tests/unit/memory/test_AgentMemoryLandingIsSingleDerived.py
 # ② context 台账的 FTS 分词器不再自持一份字面量，改取 `sql_like.FTS_TOKENIZER`。
 # 取值本相同 ⇒ 纪律问题非行为问题，所以第三格是**真建库**读 `sqlite_master` 的 SQL：
 # 只钉"引用了常量"测不到那条 `%` 拼出来的建表语句拼错形态。换分词器要重建（影子表按 rowid
 # 回填后 RENAME），本批改的只是"谁定义这个词"，迁移语义未动。
-tests/unit/context/testLedgerFtsTokenizerFollowsSingleSource.py
+tests/unit/context/test_LedgerFtsTokenizerFollowsSingleSource.py
 # 批 §6-233（§6-209 票②）：睡眠固化的编排面只剩 `sleep.py` 一份实现——那层壳（198 行、
 # 生产零外部 import、自建 MemoryRecord 把隔离三元组抹成 "default"）已退役，同批摘掉它那 5 格、
 # 改指文档四处。另两格是**交付锁**（现值绿）：六个编排入口必须还在选定那份上、
 # `from_dict` 必须仍认壳当年手工搬的 9 个键——盯的是"退役别把唯一能力一起删没"。
 # ⚠ 主格取数走 `ast_scan.sourceRefsUnder`（共享预算＋文本预筛），不许改回 `rglob + read_text`：
 # 后者把判据成本绑在代码总量上，实测给同选择集的重扫描档加墙钟压力、造出一条假回归。
-tests/unit/memory/testSleepConsolidationHasOneImplementation.py
+tests/unit/memory/test_SleepConsolidationHasOneImplementation.py
 # 批 家目录落点收口：五处默认落点从 `~/.neurova/` 与裸相对（随 CWD）收进数据根。
 # 病灶形状是"数据根注入管不到主目录"——`tests/conftest.py` 只注入临时数据根，于是测试里的
 # bare 构造（rbac 那 7 处）会在操作者主目录建出真库。行为格从生产入口取数当场量到了实得值
@@ -3089,7 +3089,7 @@ tests/unit/memory/testSleepConsolidationHasOneImplementation.py
 # ⚠ 两格值得记：① 落点函数是"进程级单例"的（`get_benchmark_framework`）不许直接从判据走，
 # 要直接构造，否则改进程状态带倒同进程后续用例；② 只把字面量删掉而没接 `dataLanding`/
 # `adoptHomeLanding` 是另一种"看着修好了"，故接线格与行为格各钉一头。
-tests/unit/core/testHomeFamilyLandingsFollowDataRoot.py
+tests/unit/core/test_HomeFamilyLandingsFollowDataRoot.py
 
 # 批 54（§6-234）：扫描面取数只准一处——判据自己抄一份全树 `git ls-files` 时，解码口径、
 #   退出码、切法各写一份，抄错的那侧红的是它自己，别人看不出是取数坏了。三格分工：
@@ -3105,11 +3105,11 @@ tests/unit/ci/test_trackedScanFaceIsSingleSourced.py
 #   只装一个作用域），所以召回断言降格为反向钉，主证只有 id 形状那条；② 第一版主格写成
 #   "甲召回为空"是假绿未遂——那道空是 `import_memories` 自陈"不喂关键词倒排"的既定设计，
 #   要按生产真实读法（第二份实例 reload 后召回）才测得到路。
-tests/unit/memory/testIngestIdentityKeyIsScopedPerOwner.py
+tests/unit/memory/test_IngestIdentityKeyIsScopedPerOwner.py
 # 批 读面失败形态诚实化：未就绪 503 带原因，search 不再把故障画成 200 空信封。
 # ⚠ 两格改判值得记：① 把 `MEMORY_OPERATION_FAILED=7001` 一并映射成 503 是**本批自己改坏的**
 #   （三格内部故障判据当场抓住——7001 在本仓两用，真故障报成"稍后再试"比原来的 500 更糟），
 #   所以未就绪那一用改抛 AGENT_NOT_READY，7001 留在 5xx 故障清单；
 # ② `testAnonymousReadStillSeesOnlyDefaultBucket` 那个 200 是假信封给的（夹具根本没有 app state），
 #   "匿名读只看到 default 桶"从未被真测过——修法是给夹具装真 MemoryManager，不是放宽断言。
-tests/unit/api/testMemoryReadFaceRefusesToPaintFailureAsSuccess.py
+tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
