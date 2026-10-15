@@ -3066,3 +3066,12 @@ tests/unit/context/testLedgerFtsTokenizerFollowsSingleSource.py
 # ⚠ 主格取数走 `ast_scan.sourceRefsUnder`（共享预算＋文本预筛），不许改回 `rglob + read_text`：
 # 后者把判据成本绑在代码总量上，实测给同选择集的重扫描档加墙钟压力、造出一条假回归。
 tests/unit/memory/testSleepConsolidationHasOneImplementation.py
+
+# 批 54（§6-234）：扫描面取数只准一处——判据自己抄一份全树 `git ls-files` 时，解码口径、
+#   退出码、切法各写一份，抄错的那侧红的是它自己，别人看不出是取数坏了。三格分工：
+#   ①全树枚举只准 `tests/ast_scan.py` 一处（探测器按**参数形状**判，不按词判；`--error-unmatch`/
+#     `-- <档>`/`*显式清单` 是合法的 scoped 用法，必须**不被误伤**——写宽了下一个人就去摘扫描面）；
+#   ②单点自身行为：NUL 分隔、显式 utf-8、**git 失败必抛**（回空清单＝"扫了个空"读成"仓里干净"，
+#     那是最坏的一种假绿）；③常驻格的扫描面按用途取面——"存量比对"走已跟踪清单，
+#     "不许新增"走工作树，两者混用会把并发会话的在途档读成自己的回归。
+tests/unit/ci/test_trackedScanFaceIsSingleSourced.py
