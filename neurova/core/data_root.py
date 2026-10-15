@@ -287,6 +287,23 @@ def adoptHomeLanding(target: Path, *homeParts: str) -> bool:
     return adoptLandingFrom(target, legacy)
 
 
+def adoptHomeRootLanding(target: Path, legacyName: str) -> bool:
+    """收养挂在主目录**根**上的旧物（`~/.neurova_repl_history` 这类，不在 `~/.neurova/` 下）。
+
+    `legacyHomeLanding()` 按 `~/.neurova/<parts>` 推，表达不出"就挂在主目录根上"的旧落点。
+    取法不同，权利判定与搬迁规则**不许**因此分叉：闸还是 `homeAdoptionAllowed()` 那一枚，
+    搬还是 `adoptLandingFrom()` 那一份。调用方自己去判一道闸再手拼路径，就是把同一套救济
+    规则抄成第二处——§6-204 点名的正是这个分叉形态。
+    """
+    legacy = Path.home() / legacyName
+    if not legacy.exists():
+        return False
+    if not homeAdoptionAllowed():
+        homeAdoptionSkippedOnce(str(legacy), str(get_data_root()))
+        return False
+    return adoptLandingFrom(target, legacy)
+
+
 def adoptHomeLandingGlob(targetDir: Path, *homeParts: str, pattern: str) -> int:
     """收养主目录旧目录下匹配 `pattern` 的每一份，返回搬动数。
 
