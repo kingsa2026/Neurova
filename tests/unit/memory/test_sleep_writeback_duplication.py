@@ -119,8 +119,10 @@ class TestRealMergeStillWorks:
     def test_writeback_mixed_result(self):
         """混合场景：1 条真实合并 + 2 条单例 → added=1, forgotten=2, updated=2"""
         engine = SleepConsolidation(memory_manager=MagicMock(), storage=MagicMock())
-        a1 = _rec("a1", "相似内容第一句，用于聚类合并测试")
-        a2 = _rec("a2", "相似内容第二句，用于聚类合并测试", embedding=[1.0, 0.0])
+        # a1/a2 取"包含关系 + 同嵌入"——甲3（§6-219）后这才是合法的一对重复；
+        # 原先的"相似内容第一句/第二句"互不包含，按新判据各成一簇，本格的混合形态就凑不出来了。
+        a1 = _rec("a1", "用于聚类合并测试的重复内容")
+        a2 = _rec("a2", "用于聚类合并测试的重复内容，第二句只是补充", embedding=[1.0, 0.0])
         a1.embedding = [1.0, 0.0]
         s1 = _rec("s1", "完全不同的话题内容甲")
         s2 = _rec("s2", "完全不同的话题内容乙")

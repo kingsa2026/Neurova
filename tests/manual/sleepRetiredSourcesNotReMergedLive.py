@@ -78,8 +78,8 @@ def _run() -> None:
         # 正文库位置按真 manager 的自陈取，不手拼路径
         bodyPath = Path(manager._persist_db_path)
 
-        manager.remember(content="登录页验证码在弱网下加载超时，用户投诉第一例")
-        manager.remember(content="登录页验证码在弱网下加载超时，用户投诉第二例")
+        manager.remember(content="登录页验证码在弱网下加载超时")
+        manager.remember(content="登录页验证码在弱网下加载超时，用户已提交投诉")
         manager.remember(content="本周会议纪要讨论了排期与预算分配")
 
         readings["rows_after_seed"] = len(_bodyRows(bodyPath))

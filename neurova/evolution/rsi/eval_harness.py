@@ -135,21 +135,24 @@ def _sleep_fixture(live_params) -> Tuple[Any, bool]:
 
 
 def _case_sl_dedup_band(live_params) -> Tuple[float, str, bool]:
-    """相似合并带宽：近似重复对必须合并，不相关记忆必须幸存。
+    """合并带宽：内容近等价的重复对必须合并，不相关记忆必须幸存。
 
-    敏感性：merge_threshold→1.0（欠合并：0.99 相似对也不再合并）或
-    →0.05（过合并：0.2 相似的无关记忆被吞并）→ 扣分。
+    敏感性（甲3，§6-219 改判）：`similarity_threshold`→1.0（欠合并：0.99 的重复对也不再
+    合并）→ 扣分。原先另一头写的"→0.05（过合并：0.2 相似的无关记忆被吞并）"**已被这条
+    腿的新判据关掉**——合并的准入是"余弦达近等价下限 **且** 归一化后短者为长者子串"，
+    阈值调低拉不穿那条下限，所以"调低就会过合并"这个方向今天不可能再出现（§6-218 实测的
+    误伤正是从这个方向进来的）。夹具也随之从 `dup a / dup b`（两条互不包含的不同事实）
+    改成包含关系的一对——旧夹具编码的就是被证伪的那条规则。
     """
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
 
     sleep, evidenced = _sleep_fixture(live_params)
     dup_a = MemoryRecord(id="dup_a", content="dup a", embedding=[1.0, 0.0])
-    dup_b = MemoryRecord(id="dup_b", content="dup b", embedding=[0.99, 0.141])  # cos≈0.99
+    dup_b = MemoryRecord(id="dup_b", content="dup a 补充", embedding=[0.99, 0.141])  # cos≈0.99
     other = MemoryRecord(id="other", content="other", embedding=[0.2, 0.98])  # cos≈0.2
     merged_memories, _merge_results = sleep.consolidate([dup_a, dup_b, other])
 
-    # 3 条 → 2 条（重复对合并、无关记忆幸存）。阈值 1.0 → 欠合并（3 条）；
-    # 阈值 0.05 → 过合并（1 条）。
+    # 3 条 → 2 条（重复对合并、无关记忆幸存）。阈值 1.0 → 欠合并（3 条）。
     did_merge = len(merged_memories) == 2
     other_survived = any(
         m.id == "other" and not m.merged_from for m in merged_memories
