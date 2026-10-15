@@ -3120,3 +3120,7 @@ tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
 # `Event` 数据类而不是 dict）。这档此前不在子集 ⇒ 调用不存在的名字长期只有本机显式跑才红；改绿后入册，
 # 让同一处再漂一次变成会红的判据。逐格差异写在该档自己的 docstring 里。
 tests/integration/test_security_integration.py
+# UserModel 夹具的收尾不再抢句柄：库改落本轮 `tmp_path`、删除交还 pytest（池化短连接按路径持句柄，
+# 夹具里 `os.remove` 必撞 WinError 32 —— 实测 13 格 ERROR 全是收尾，13 格断言本身都过）。
+# 入册是为了让归还顺序这一课留在 CI 的视野里，而不是只活在某台机器的临时目录里。
+tests/unit/security/test_auth_comprehensive.py
