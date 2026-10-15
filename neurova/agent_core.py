@@ -278,17 +278,18 @@ class AgentConfig:
         # 构造时消解 .. 语义；真实越界仍由各消费方校验器拒绝。
         self.workspace_path = Path(workspace_path).resolve()
 
-        # 数据库路径配置 - 优先使用Agent工作目录下的memory文件夹
+        # 标准路径：workspace/memory/memory.db（布局那一段走单源，见 agent_workspaces）
+        from neurova.core.agent_workspaces import agentMemoryDbPathUnder, agentMemoryDirUnder
+
         if db_path:
             self.db_path = db_path
         else:
-            # 标准路径：workspace/memory/memory.db
-            agent_memory_dir = self.workspace_path / "memory"
-            agent_memory_dir.mkdir(parents=True, exist_ok=True)
-            self.db_path = str(agent_memory_dir / "memory.db")
+            agent_memory_db = agentMemoryDbPathUnder(self.workspace_path)
+            agent_memory_db.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path = str(agent_memory_db)
 
         # 附件存储路径 - 标准路径：workspace/memory/attachments/
-        self.attachment_dir = str(self.workspace_path / "memory" / "attachments")
+        self.attachment_dir = str(agentMemoryDirUnder(self.workspace_path) / "attachments")
 
         # LLM 服务商 ID（用于路由到指定服务商）
         self.llm_provider = llm_provider
