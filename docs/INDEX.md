@@ -140,7 +140,10 @@
 [`08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md`](08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md)（外部编码代理工具调用与迭代循环对标，含 G1–G8 缺口复验与本文自我更正记录）
 [`08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)（外部 RSI 框架与 Neurova 演进系统代码级对比：十维加权评分 7.9 vs 6.7、习得点清单与本仓待修点登记，研究参考）
 [`08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md`](08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md)（外部技能沉淀论文与 Neurova 技能域对比：吸收账本迁移、召回预检、全自动整合 commit gate 的落地登记与规则修订记录，研究参考）
+[`08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)（Designer-RSI 论文与 Neurova 程序性记忆对照：例级成对回放闸 P1-A、成败对照 P1-B、真轨迹核验面 P1-C 与「能不能撤掉人在环」的四条前置条件，研究参考）
+[`08-research/dramaclaw_vs_neurova_aigc_pipeline_comparison_2026-10-08.md`](08-research/dramaclaw_vs_neurova_aigc_pipeline_comparison_2026-10-08.md)（外部自托管短剧流水线 dramaclaw 与 Neurova AIGC 管线代码级对比：含整合否决裁决的三道闸取证，研究参考）
 [`08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md`](08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md)（外部图谱工具链 Semantica 与 Neurova 知识库/知识图谱代码级对比：22.4 万行的「账面功能 vs 已接线」逐层清点、本仓五条自有断点 N1–N6 与候选 K1–K8，研究参考）
+[`08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)（ModularRSI 论文与 Neurova harness 层自改进对照：可演化面覆盖面 M-A、联合轮归因 M-B、跨基座迁移 M-C、难度维只写不读 M-D、环节归因 M-E，只记两篇 RSI 前作未覆盖的增量，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
