@@ -4083,6 +4083,36 @@
     - **净 LOC**：生产池 +25/0（helper 各一份＋调用点各一行）；守卫档 +67/−8。
     - **本会话下一枚空号现查 §6-243。**
 
+246. **CLI 的 REPL history 收进数据根，并给"主目录根上那份"补一道与家目录同源的收养权利闸（✅ 内容载于 `60c7cb85`；判据档见 §6-248 改名批）** 🟢 —— 家目录那族（§6-203 表、§6-204 闸）的**第五处**，也是那张表一直看不见的一处：旧落点是 `~/.neurova_repl_history`，挂在主目录**根**上而不在 `~/.neurova/` 下，形态又是**模块级常量**，import 即定值 ⇒ 注入 `NEUROVA_DATA_DIR` 对它无能为力。
+    - **本批自己踩的家规要写在前面**：第一版用无闸的 `adoptLandingFrom` 搬主目录那份——正是 §6-203/204 实测事故的形状（一次注入临时根的跑测把开发者 `providers.json`/`audit.db`/`governance_whitelist.json` 搬进 `Temp/neurovaDataRoot-<随机>/`）。根修在收养端：新增 `data_root.adoptHomeRootLanding()`，取法按主目录根推，权利判定与搬迁规则**复用** `homeAdoptionAllowed()` 与 `adoptLandingFrom()` 那一份；不在调用方各抄一遍（教义第 6 条）。
+    - **红自证原文**（生产两档 stash、只留判据）：`4 failed, 6 passed`，红的恰是本批四格（落点随换根而变／别处根不许搬／自己根照常搬／父目录须先备好），同档上一批那 6 格不受牵连。绿灯：判据＋cli 三档＋两份收养家规常驻档并跑 `99 passed`；落库后复取 `100 passed`。
+    - **另补一条 `mkdir`**：`_save_history` 是 `except OSError: pass`，缺父目录会把 FileNotFoundError 读成"历史没存"——写侧不建目录这件事必须由落点自己收口，不给下游加判空。
+    - **活体（真 `NeurovaCLI._load_history/_save_history`，假 `Path.home`，真主目录一字未动）**：`LIVE_PASSED`，读数含 `B3 history=['OLD-1','OLD-2']`、`B4 history=['OLD-1','OLD-2','NEW-3']`（写→读→反馈闭环）。反证（只把落点那一行退回旧常量形态）⇒ `LIVE_FAILED: A2, A3, B2, B5`；还原后 `cli.py` md5 `534722957e305c1ab500922a8c1bb15d` 与备份逐字节一致。探针 `._load_history` 首跑误红两格，真因是该方法在生产里先看 `console.is_terminal`——非终端夹具下**按设计**不回填历史，是脚本谓词比生产窄，改脚本不改产品。
+    - **A/B 一条 AB_REGRESSION 不认领，三条实据写在提交正文里**：差集点名 `test_session_list_order::test_explicit_sort_order_kept_before_unsorted`；① 把本批生产改动 stash 掉整目录复跑 ⇒ 该格绿，带改动复跑⇒红的却是**同档另一格** `test_unsorted_sessions_newest_first`（两格各自独立翻转）；② 同轮 6 条 teardown ERROR 全是根污染守卫点名**并发会话正在落**的 `.tmp_liveVerifyME_operatorVocabulary.py`/`.tmp_me_live.txt` ⇒ 本轮"无并发负载"这条环境闸不成立；③ 该档时序并列抖动已五度登记（§6-113 同族与 §6-227/230 那两轮 A/B 记录）。本批一行没碰 `session_manager`。
+    - **净 LOC**：生产 +42/−4＝**净 +38**（真代码 17 行：`replHistoryPath()` 落点解析 6、`adoptHomeRootLanding()` 取法-闸-搬 8、使用点改写 3；docstring 14、`#` 注释 4）；测试池 +123/−0。为正的去向就一条：把一处 import 期定死的落点转成调用时算，并给"主目录根"这一形状补上带闸入口。
+    - **一笔被吞的提交要留话**：这批原以 `fix(cli)` 单笔入库，随后被并发会话对同一父链的两次 amend 卷进 `60c7cb85`（其正文只写 M-E 回写）。判据＝`git diff <原笔> 60c7cb85 -- cli.py neurova/core/data_root.py 判据档` 为空 ⇒ 内容逐字在 HEAD，而 `git merge-base --is-ancestor <原笔> HEAD` 已不成立，故此处**不写那个号**（写了就被 `scripts/ci/audit_ledger_commit_guard.py` 的可达性判据点名）。以后取证只认 `git log -S "replHistoryPath"` ⇒ `60c7cb85`。
+    - **同批收尾的一项实况**：`~/.neurova/rbac.db`（§6-203 点名的污染件）本轮由**生产收养端自己**搬进 `data/security/rbac.db`——搬前核过内容：`roles` 恰 5 行全 `is_system=1`、`user_roles`/`permission_requests` 均 0 行，即与 `_init_system_roles()` 自建的那份同形，不是用户数据。搬后 `find ~/.neurova -type f` 为空，且 rbac 面 `57 passed` 复跑不再在主目录重建。
+
+247. **`neurova.benchmark` 门面补 `__all__`：判据经包路径取的名字要有一句声明（✅ `7ed41cda`）** 🟢 —— §6-224「门面声明清零」那一族的续账，且这条红是**我上一批自己顶出来的**、不是外来的。
+    - **红原文（HEAD 仓外 worktree 整目录跑）**：`{'neurova.benchmark': ['BenchmarkFramework']}` 被 `test_implicitSurfaceIsExactlyTheRegisteredOnes` 点名——家目录落点那批的判据从包路径构造 `BenchmarkFramework()`，而该包从未有 `__all__`。
+    - **修形按判据自己给的两条出路取"补声明"**：另一条"改直取子模块"在此无路——该类就定义在 `__init__.py` 里，挪进子模块属 §6-244 之后那张票④（六个门面包实现）的搬迁动作，不混进这一笔。声明面照 `neurova/image_pipeline/__init__.py` 既有形状：**只列被包路径真取用的名字**（现读该包其余取用一律走 `neurova.benchmark.rag_eval`／`rag_dataset_gen` 直取，8 处，不受影响）。
+    - **反证与活体**：`git stash` 只退声明那 7 行 ⇒ 同一格红原文逐字复现，还原 `md5sum -c` OK；活体五格 `LIVE_PASSED`（包路径名仍可取／子模块直取 `load_datasets()` 调用得通／真装配点 12 条 benchmark 路由在册／`create_app()` 起得来 `/health` 200／端点面真请求 401 不 5xx）。探针第一版判"路由在册"用 `app.routes` 读到 0 条——该 app 把 API 挂成一个 Mount，`app.routes` 只有挂载点，换 `app.openapi()["paths"]` 才是产品面的在册读数；属脚本取数口径错，不是产品没接线。
+    - **A/B**：`AB_PASS`，仅本树红 0；仅基线红 1 条即上面那格（交付证据）。**净 LOC**：生产 +7/−0（一项声明＋四行出处注释），测试 0。
+
+248. **六档判据文件名补 `test_` 前缀——此前目录跑与 CI 对它们一条都不收（✅ `0e0eda24` 改名＋引用面 / `fcd6ce0e` 退役台账署名）** 🟢 —— 危害形态与 §6-188 那族"静默不跑"同源，只是发生在**文件名**上：活的口径是 `pyproject.toml:102` `python_files = ["test_*.py"]`，驼峰无下划线名整档不被收集，显式给路径却又全绿。
+    - **这六档全是我这几批建的**（`testMemoryReadFace…`／`testLedgerFtsTokenizer…`／`testHomeFamilyLandings…`／`testAgentMemoryLanding…`／`testIngestIdentityKey…`／`testSleepConsolidation…`），常驻守卫 `test_pytest_collection_hygiene::test_noTestBearingFileHasAnUncollectableFileName` 在 HEAD 上就因它们而红。改判方向＝**改名**，不放宽防火墙也不加豁免。
+    - **一次 A/B 假象由此解释**：上一轮的"两侧失败集合逐字相同"看不见我的新格——因为基线树用目录选择集时**根本没收集**那档（显式单跑才红）。同批还纠掉判据自身一处更狠的：`importlib.import_module("cli") + reload` 里 `reload` 只重跑 `sys.modules["cli"]` 当前指向的文件，同进程谁先导入决定是哪一棵树，A/B 基线树曾被主树已修的 `cli.py` 顶掉 ⇒ 现按 `__file__` 反推仓根、`spec_from_file_location` 显式加载，采集顺序无关。
+    - **同批收掉引用面两处**：`scripts/ci/protected_tests.txt` 六行改指新名（用 HEAD blob＋六行替换写索引，避开并发会话在同一文件上的未提交删除），`neurova/api/error_handlers.py:25` 的判据出处注释跟着改名。台账里按旧名引用的历史段落不改写，映射逐条列在上面那条括号内。
+    - **改名在文本上等于删行 ⇒ 必须署名**：`test_protected_subset_registration_history::test_every_vanished_entry_is_signed_off` 当场红（该守卫防的就是"删一行不产生任何红"），故 `protectedSubsetRetired.txt` 补六行"改名迁移署名（不是撤判据）"，每行写清新持有档与为什么必须改。
+    - **宽域 A/B**（基线＝HEAD worktree 铺入**改名后**六档以对齐收集集合；选择集＝api+context+memory+core，约 6800 条/侧）：基线 `32 failed 9 errors`（41 条）↔ 本树 `31 failed 8 errors`（39 条），**仅本树红 0 ⇒ AB_PASS**；仅基线红 2 条＝①那枚收集守卫（本批交付证据）＋②`test_decay_cycle_bounded::test_no_max_processes_all` 的 ERROR（§6-207/220/223/226/229 五记同名，第六次如实记下，不认领）。跑测期间并发会话活跃，时序类读数一律按同名复现史处置。
+    - **同族还剩两条不在本会话名下**：`_UNCOLLECTABLE_FILE_BASELINE` 里的 `tests/language/testOutOfBoxDefaultLayer.py`、`tests/unit/api/testRetiredGlobalLanguageDefault.py`。该表自述"空表是零容忍口径"，待机器安静时逐条验绿再收名；本批不静默把它们当噪声划掉。**净 LOC**：生产 +1/−1（注释一行），测试基建＝六档 R100＋子集六行＋台账七行。
+
+249. **登记一处新撞见的静默腐烂：`tests/integration/test_security_integration.py` 有一半调用打在不存在的 API 上（🟡 需人裁，未动手）** —— A/B 之外的一次旁证：验"rbac 落点不再污染主目录"时顺手复跑该档，`2 failed, 2 passed`。
+    - **实测量数（AST 现场取，不靠 grep 印象）**：该档以 `self.rbac_manager.*`／`self.event_bus.*` 形式调用的方法名共 13 个，其中 **6 个在当前类上根本不存在**——`RBACManager.add_role`（现役名 `create_role`，`neurova/security/rbac.py:291`）、`add_permission`、`assign_permission_to_role`、`assign_role_to_user`（现役 `assign_role`，`:415`）、`user_has_permission`，以及 `EventBus.emit`（现役名 `publish`，`neurova/core/event_bus.py:174`）。
+    - **它为什么一直没红过**：该档**不在** `scripts/ci/protected_tests.txt`（现查 `grep -c test_security_integration` ⇒ 0），CI 的受保护子集按清单逐文件跑，目录跑与 CI 都不为它负责；红只在本机显式跑到时出现。这与 §6-248 是同一族失效（只是那处是"文件名收不到"，此处是"没进子集"）。
+    - **三态在此，请人裁**（影响面已摆开）：**(甲) 改判据到现役 API**——两处格子重写调用与断言（`emit`→`publish`、`add_role`→`create_role` 等），代价小，但等于承认"RBAC 的这套组合语义只由测试自己定义"，改完还得判断言是否降级（教义第 2 条不许把断言改松）；**(乙) 补 API 门面**——给 `RBACManager` 加 `add_role`/`add_permission`/`assign_permission_to_role`/`assign_role_to_user`/`user_has_permission` 五个别名，代价是在生产里养一层为测试存在的兼容壳，与本仓"门面是契约不是便利"（§6-224）直接冲突，且 `EventBus.emit` 若也补就是第六个别名；**(丙) 判该档已失去对象**——按断点条款整档退役并署进 `protectedSubsetRetired.txt`，代价是"RBAC×脱敏×事件"这条组合链路从此无测。推荐 **(甲)**，理由：现役 API 覆盖该档想表达的每一步（`create_role`＋`assign_role`＋权限查询都在），缺的只是测试没跟上改名；(乙) 会把一次历史改名固化成生产契约，(丙) 留下断点。
+    - **本会话下一枚空号现查 §6-250。**
+
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
 2. **相对导入指向同名他文件** —— `neurflow/templates/__init__.py:34` 的 `from .media`、`context/orchestrator.py:24` 的 `from .recovery`（指 `context/recovery.py`，11783 字节，已核实）。
