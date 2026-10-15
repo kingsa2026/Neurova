@@ -1899,6 +1899,9 @@ tests/unit/evolution/eval/test_evalExampleUnusedLabelFieldsRetired.py
 # "测试脚手架还在吗"的守卫——脚手架被静默摘掉会红这一格，而不是红 44 格无主墙。
 tests/unit/evolution/rsi/test_automationPrerequisiteGate.py
 tests/unit/evolution/rsi/test_automationPrerequisiteScaffold.py
+# 联合轮的族级归因读数：族集合等值参数表、acted 带逐参数 from-to、被闸拦不折成 no_candidate、
+# 不臆造按族 gain；并钉跨文件闭环（投影出得了 jsonl、响应面读得回来）。
+tests/unit/evolution/rsi/test_jointRoundFamilyAttributionReadout.py
 
 # C1 跨集资产连续性（§6-78 的 H 条 + I 条）：这一档锁的是"引用了就必须取到，取不到
 # 就不许发请求"。判据打在行为上——实际发出的提示词含场景定妆词/灯光/氛围/道具描述、
