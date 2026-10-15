@@ -776,9 +776,7 @@ class TestProtectedSubsetEntriesAreTracked:
         """
         if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
             pytest.skip("非 git 工作区 / 无 git")
-        proc = self._git("ls-files", "-z")
-        assert proc.returncode == 0, f"git ls-files 失败：{proc.stderr[:200]}"
-        tracked = [p for p in proc.stdout.split("\0") if p]
+        tracked = ast_scan.trackedPaths()
         offenders = sorted(
             p
             for p in tracked

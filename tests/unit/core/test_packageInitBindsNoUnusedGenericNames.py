@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import ast
 import functools
-import subprocess
 from pathlib import Path
 
 from tests import ast_scan
@@ -64,14 +63,6 @@ GENERIC_SOURCES = frozenset({
     "functools", "io", "copy", "math", "random", "string", "inspect", "traceback",
     "importlib", "itertools", "contextlib", "logging", "neurova",
 })
-
-
-def _gitLsFiles(*extra: str) -> list:
-    """`git ls-files` 取数必须显式按 utf-8 解——本仓路径含中文，缺省走平台码（GBK）当场炸。"""
-    out = subprocess.run(["git", "-C", str(PROJECT_ROOT), *extra],
-                         capture_output=True, text=True, encoding="utf-8",
-                         errors="replace").stdout
-    return [p for p in out.split("\0") if p] if "-z" in extra else out.splitlines()
 
 
 def _identifiersInExprText(text: str) -> set:
@@ -173,7 +164,7 @@ def shadowedImportOffenders(tree: ast.AST) -> list:
 @functools.lru_cache(maxsize=1)
 def _scan():
     """一次解析、两条规则共用（`ast_scan.transientTree`＝一次性入口，不留常驻树）。"""
-    tracked = [p for p in _gitLsFiles("ls-files", "-z")
+    tracked = [p for p in ast_scan.trackedPaths()
                if p.startswith("neurova/") and p.endswith(".py") and (PROJECT_ROOT / p).exists()]
     generic, shadowed, inits = [], [], 0
     for rel in tracked:
@@ -220,7 +211,7 @@ def test_theScanActuallyCoversTheTrackedProductionTree():
     挪目录时静默消失。
     """
     read = _scan()
-    tracked = [p for p in _gitLsFiles("ls-files", "-z")
+    tracked = [p for p in ast_scan.trackedPaths()
                if p.startswith("neurova/") and p.endswith(".py")]
     assert sorted(read["files"]) == sorted(tracked), (
         f"扫描集合与跟踪面不符（取数 {len(read['files'])}／应有 {len(tracked)}）")

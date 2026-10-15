@@ -56,7 +56,10 @@ CAPTURE_FUNCS = ("run", "check_output", "check_call", "call", "Popen",
 #: 扫描根。刻意含 `tests/`：判据自己的空转就发生在测试侧。
 SCAN_ROOTS = ("neurova", "scripts", "tests")
 
-#: 冻结基线（本轮实测：37 文件 / 59 站点）。只准降不准升。
+#: 冻结基线（**表内现量为准**：35 文件 / 57 站点，逐档单跑现复算）。只准降不准升。
+#: 建档那轮（批 51）写的是"37 文件 / 59 站点"——那是一批时间性快照，此后各批收掉的落点
+#: 都按本表逐格摘除（批 54 摘的是 `test_temperature_single_source.py` 那一处，它改走
+#: `ast_scan` 单点后不再自己起文本模式子进程），注释留着旧数就等于留一条没人对的账。
 BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
@@ -78,7 +81,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/ci/test_npc_auto_continue_wiring.py": 2,
     "tests/unit/ci/test_npc_handoff_role_continuity.py": 2,
     "tests/unit/ci/test_npc_turn_handoff_execution.py": 1,
-    "tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py": 1,
     "tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py": 1,
     "tests/unit/context/test_b5_scale_batch_registration.py": 1,
     "tests/unit/core/test_safe_paths.py": 1,

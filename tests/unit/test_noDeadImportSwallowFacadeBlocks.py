@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import ast
 import io
-import subprocess
 import sys
 from pathlib import Path
 
@@ -37,15 +36,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests import ast_scan  # noqa: E402
+
 SKILLS_INIT = "neurova/skills/__init__.py"
 FACADE_FIRST_PARTY = ("neurova.skills.models", "neurova.skills.hub_client",
                       "neurova.skills.skill_service", "neurova.skill_system")
 
 
 def _trackedPyFiles() -> list:
-    proc = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO_ROOT), capture_output=True)
-    assert proc.returncode == 0, f"git ls-files 退出码 {proc.returncode}"
-    return [l for l in proc.stdout.decode("utf-8").split("\0") if l.endswith(".py")]
+    """扫描面＝已跟踪的 .py（走 `ast_scan` 的单点；这里不抄解码与退出码口径）。"""
+    return ast_scan.trackedPyPaths()
 
 
 def _importErrorHandlers(node: ast.Try) -> list:
