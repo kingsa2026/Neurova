@@ -4040,7 +4040,26 @@
     - **活体 5 组读数 exit=0**：默认装配执行器类名 `SimulatedAgent`、`default_model="client_default"` 且 `cfg.judge_model=""`（把"判分模型未指名 ⇒ 执行也未绑定"量成读数）；真 `_append_proposal` 落盘 3 条全带 `model_under_test`；真分组 `{glm-4.6:1(批准1), minimax-2.5:1(批准0), __unrecorded__:1(批准1)}`；真 `create_app()` + 真 JWT 打 `GET /api/v1/evolution/skills/{agent}/proposals` 回 200、`data` 仍是列表、3/3 行带基座格、`model_coverage` 同级在场；真 `_persist_run` 审计文件带基座格；仓内真 `data/` md5 前后一致。**两处探针自纠**：第一版猜落点路径（`WORK/evo/<agent>/proposals.json`）读出 0/3——那是探针的洞不是产品的洞，改为取服务自持锚点 `svc._proposals_file` / `svc._runsDir()`；且服务要与端点同一份存储，故**不传** `base_dir`（否则端点读的是默认落点，`data` 空列表会让"投影没带出来"与"根本没数据"不可分）。反证：摘掉端点投影那一行复跑同一脚本 ⇒ 红在"[3] 列表投影没把基座格带出来"，cp 还原并 sha256 复证。
     - **净 LOC**：生产池 **+104/−18 ⇒ 净 +86**（`eval/service.py +88/−5`、`text_evolution_api.py +16/−13`；增侧为两个新函数与口径注释、提案字段与三处随行赋值）；判据 202 行；子集池 +4/−0（595→596）。注：这笔的数字是落库后补进提交说明的（`git commit --amend`，`HEAD^{tree}` 前后相等自证只改说明），正文原稿只列了去向没落数字。
     - **仍开**：① 真轨迹臂要落到具体型号，需在执行期取 `select_model_for_request` 的结果并回灌读数——那是新接缝，另批；② "换基座后复跑验收集"的触发点按裁定暂未接任何自动面，读数稳几轮后另批再谈是否进判据；③ 端点入参词值 `"approved"` 与写侧 `STATUS_APPLIED`（`applied`）对不上——按 `approved` 过滤会把已批准的提案筛成空，属既有口径差，本批不顺手改；④ M-E 仍未点单（须晚于 M-B，分类枚举要**比后合**不得并存第三套）。
-    - **本会话下一枚空号现查 §6-244。**
+    - **本会话下一枚空号现查 §6-245。**
+244. **反思五算子的词表收成一份定义——失效形态是"两边都绿"（✅ `3ed82515` 生产+判据+活体）** 🟢 —— M-E 前半。出处 `docs/08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md` §4 M-E（其后半另批，见本条末段）。
+
+    - **一句话根因**：`meta_cognition_layer/self_model.py` 的反思循环逐字写了五对"算子名-实现"，而 `evolution/skill_attribution.py:38` 又抄了第二份 `_KNOWN_OPERATORS` 当技能归因闸门（唯一读点 :170）。两份各自演进时坏的不是形状：反思侧产出新算子教训，归因侧在闸门处 `continue` 丢弃——**两边测试都绿，教训静默不落技能库**。这正是教义第 6 条明禁的"两边都留着"形态，而它比报错更难发现，因为没有红。
+    - **单点落在产出侧**：`self_model.OPERATORS`（名字同时是实现约定 `_op_<name>`），循环改 `for op_name in OPERATORS`；`calibration` 的签名例外（要读已积累的 lessons）就地闭包适配，**默认参数绑定**避免闭包晚绑定。
+    - **归因侧调用时取值**：`_knownOperators()` 每次调用现读单点。刻意不写 `from x import OPERATORS`——import 期把值抄成快照，单点怎么改另一侧都不动，那种"看着像在引用单点"的形态比手抄更难发现；判据里用**运行时注入一个新算子名**专钉这一形（当场两侧同生效才算真单点）。
+    - **模板字典保留本地**：`_GUIDANCE_TEMPLATES` 是内容不是词表。反向钉只禁"≥3 个算子名同现的字面集合定义"这一形状，不误伤模板键——仓内踩过"扫全文的守卫被自家合法同名用途撞红"，这次把口径直接写进判据。
+    - **判据五格**：跨文件等值 / 注入新名两侧同生效 / 禁第二份词表字面量 / 词表每个名字必须有实装（空名单比没名单更坏）/ 未知算子照旧拒 + 模板缺项走兜底不抛。
+    - **红→绿**：首跑 5 failed，其中一条最值钱——`AssertionError: 归因模块里仍留算子词表的第二份字面定义 [":38 ['budget','calibration','contrast','drift','sequence']"]`，这条就是本批的靶本身。⇒ 绿 5 passed；`tests/unit/cognitive` + `evolution` + 元认知注入面 + metacognition API 合跑 2074 passed。红自证（只 stash 两个生产文件，tag `red-selfproof-ME-prod`）`5 failed`＝本批 5 格。宽域 A/B：基线 `16 failed 2043 passed` ↔ 本树 `11 failed 2048 passed`，仅本树红 0 ⇒ **AB_PASS**，仅基线红 5 条＝本批判据；本树那 11 条（`test_pattern_crystallizer` 族等）两侧同集，是 main 预存，不认领。
+    - **活体 6 组读数 exit=0**：真 `record_tool_event` 造 drift 形态（前 30 成后 15 败）→ 真 `reflect()` 产出含 `drift` 且 ⊆ 单点；真 `attribute_failures_to_skills` 从同一份台账读到 `lessons_read=2`、`attributed=2`、边界 store 实收 2 次写入、上下文 `lesson:drift:probe_tool` 与 `lesson:sequence:probe_tool`——证归因链在收口后**照样通电**，不是只把词表并起来；单点加名 ⇒ 闸门当场认；**反证**把 `drift` 从单点摘掉 ⇒ 反思侧不再产 `drift` 且闸门同时不认（`shrunk_produced=[calibration,sequence]`、`gate_accepts_drift_after_shrink=false`）；`data/` md5 前后一致。探针自纠一处：第一版传 `registry=None`，撞上函数开头 `if ledger is None or registry is None: return`，`lessons_read=0` 被误读成"两侧不同源"——那是**函数在数教训之前就返回了**，属探针的洞；补 registry/store 边界替身才拿到真实读数。
+    - **净 LOC**：生产池 **+29/−10 ⇒ 净 +19**（`self_model.py +18/−7`、`skill_attribution.py +11/−3`）；判据 117 行；子集 +3/−0（596→597）。
+    - **本批自己的一次假交付与更正（写进台账，不默默留错值）**：子集那笔第一版用 `git add` 整档暂存，
+      把并发会话在同一文件里的未提交段一起署了进来——后果是 `git diff HEAD~1 HEAD` 成了 +3/−3，
+      而那 3 行删除**正好删掉上一批 M-D 的子集行**（条目数原地不动，看起来像"登记成功"）。
+      处置＝用「HEAD~1 内容 + 只插我这 3 行」重建 blob 走 hash-object/update-index、`--amend`
+      成本地纯插入（本地未推送），M-D 那格回到在册；对方未提交段原样留在工作树不代删，
+      但其中"删除 M-D 子集行"这一条要由他们自己确认。这正是本仓一路记着的共享长文档纪律
+      又踩了一次——**同一文件的 `git add` 就是别人的段落入口**，形态只有 hash-object 那一种。
+    - **M-E 后半不在本批（三态票，需人裁）**：目标是让改写候选带"改的是哪个运行环节"，把 `attribution_hit_rate` 从"预测哪些题会涨"升级成"声称修 X 环节则 X 环节必须涨、其余环节不得跌"（`history_ledger.py:184-203` 现只按 task_input 命中，`unpredicted_regressions` 只入账）。**卡点是证据面而不是判据**：仓内没有"每个评测任务属于哪个环节"的实测来源。三态——甲 扩 `capability_gap` 三值成唯一环节轴（要动检测器，跨 chat_pipeline/tool_executor/tool_search 三处投递，且它今天只覆盖"能力缺口"不覆盖 loop/completion）；乙 新建环节枚举（就是本仓明禁的第三套分类，除非先与 `self_model` 五算子、`FailurePattern` 六桶比后合）；丙 维持现状只做本批的词表收口（推荐：先让反思→归因这条链不静默丢，读数积累后再判环节轴值不值一套词汇）。推荐**丙**，其次甲。
+    - **本会话下一枚空号现查 §6-245。**
 241. **读面失败形态收成诚实：未就绪 503 带原因，search 不再把故障画成 200 空信封（✅ `dc05ae65` 生产+判据+夹具 / `6f99d3ca` 子集 593→594）** 🟢 —— §6-220 登记项落地（票面那句"未登录 500"顺带纠准）。
 
     - **根因不是"少映射一个码"**：`error_handlers.py` 旧注释写着"未列出的错误码保持 500（与历史行为一致）"——**默认落 500 等于没人表态**。于是 6001/6003 一族"服务未就绪"被兜底成 500（含义是"我方代码错了"，调用方据此重试与报警的方向完全错）。修法是把"每个已声明的码都必须表过态"做成会红的判据（映射表 ∪ 显式 5xx 故障清单），兜底那一路保留但出声（不在任一份清单里的码会 warning 点名）。
