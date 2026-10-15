@@ -277,6 +277,7 @@ class MemoryManager:
         self._content_index: Dict[Tuple[str, str, str, str], str] = {}
         self._content_index_ready = False
         self._counter = 0
+        self._embeddingAbsentWarned = False   # 引擎缺席只报一次，免得每条写入刷警告
         self._lock = threading.RLock()
         self._last_decay_at: Optional[float] = None   # 节流：上次 run_decay_cycle 的 monotonic 时间戳
         self._decay_cursor: int = 0                   # 轮询：有界衰减的游标
@@ -1304,6 +1305,45 @@ class MemoryManager:
         if key is not None:
             self._content_index[key] = mem.id
 
+    def _embeddingForNewRow(self, content: str) -> Optional[List[float]]:
+        """新行的向量在建行这一处算出来——该列的生产者从此不止一次性回填脚本一个。
+
+        §6-215 那张三态票的甲案两年没接线：`remember()` 与 `_build_imported_memory()` 造
+        `Memory` 时都不填 `embedding`，于是每一行新写入对睡眠固化永久不可见（甲3「任一侧
+        无嵌入不合」，`sleep.py:_mergeAdmission`）。成本实测不是障碍：本地 ONNX
+        （bge-small-zh-v1.5，512 维）暖调 3.2ms／次，冷加载 0.41s 每进程一次，且召回路
+        `semantic_search.py:291` 用同一个单例，写入时通常已被暖好。
+
+        算不出就留空，**不许写占位向量**：零向量会让 `cluster_by_similarity` 算出恒 0 的余弦，
+        看上去"有向量、只是不相似"，缺陷从此在读数里不可见（教义第 2 条；与回填工具同口径）。
+        """
+        if not (content or "").strip():
+            return None
+        try:
+            from neurova.embedding import get_embedding_engine
+
+            engine = get_embedding_engine()
+        except Exception as exc:  # noqa: BLE001 - 补嵌入失败不得阻断记忆写入
+            logger.warning("嵌入引擎不可达，该行 embedding 留空: %s", exc)
+            return None
+        if engine is None:
+            if not self._embeddingAbsentWarned:
+                self._embeddingAbsentWarned = True
+                logger.warning(
+                    "嵌入引擎不可用（模型缺失或初始化失败）：新行不写 embedding，"
+                    "固化对这些行不可见，直到引擎就绪或走 scripts/backfill_memory_embeddings.py"
+                )
+            return None
+        try:
+            vector = [float(x) for x in engine.encode(content)]
+        except Exception as exc:  # noqa: BLE001 - 单条算不出不该断这次写入
+            logger.warning("嵌入计算失败，该行 embedding 留空: %s", exc)
+            return None
+        if not vector or not any(abs(x) > 0.0 for x in vector):
+            logger.warning("引擎回零向量（按未算出处置），该行 embedding 留空")
+            return None
+        return vector
+
     def remember(
         self,
         content: str,
@@ -1534,6 +1574,7 @@ class MemoryManager:
                 agent_id=self._agent_id,
                 neuser_id=self._eff_neuser_id(),
                 user_id=self._eff_user_id(),
+                embedding=self._embeddingForNewRow(content),
             )
             if final_metadata.get("type") == "question_queue":
                 self._persist_memory(mem)
@@ -1940,6 +1981,7 @@ class MemoryManager:
             # 半年回填的历史会被直接判成 ARCHIVED/FORGOTTEN。在产生该状态的这一侧定标，
             # 不去改衰减消费方（消费方按"距今多久没被访问"算，语义本就正确）。
             last_accessed_at=datetime.datetime.now(datetime.timezone.utc),
+            embedding=self._embeddingForNewRow(rec.content),
         )
 
     def delete_ingested_memories(self, ingest_run_id: str) -> int:
