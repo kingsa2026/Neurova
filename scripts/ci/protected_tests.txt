@@ -1902,6 +1902,10 @@ tests/unit/evolution/rsi/test_automationPrerequisiteScaffold.py
 # 联合轮的族级归因读数：族集合等值参数表、acted 带逐参数 from-to、被闸拦不折成 no_candidate、
 # 不臆造按族 gain；并钉跨文件闭环（投影出得了 jsonl、响应面读得回来）。
 tests/unit/evolution/rsi/test_jointRoundFamilyAttributionReadout.py
+# 评测结果绑定「被测基座」的读数：值由真正执行的那个对象推导（四种形状）、
+# ab_compare 两条返回路径都带、提案与列表端点两处出得去、未记基座自成一组；
+# 并钉住「只出读数不判」——换基座值分数不变、runner 判定链零引用（蕴涵格）。
+tests/unit/evolution/eval/test_evalResultIsKeyedByModelUnderTest.py
 
 # C1 跨集资产连续性（§6-78 的 H 条 + I 条）：这一档锁的是"引用了就必须取到，取不到
 # 就不许发请求"。判据打在行为上——实际发出的提示词含场景定妆词/灯光/氛围/道具描述、
