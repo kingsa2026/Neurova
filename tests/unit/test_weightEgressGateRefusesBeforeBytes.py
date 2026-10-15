@@ -18,8 +18,8 @@
 
 import ast
 import importlib
-import subprocess
 from pathlib import Path
+from tests import ast_scan  # noqa: E402
 
 import pytest
 
@@ -102,12 +102,8 @@ def test_egressCallSitesAreAllCoveredByTheGate(request):
 
 def _scanEgressCallSites():
     """按 AST 取「模块级函数里直接调外部权重下载」的 (模块点号路径, 函数名)。"""
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z", "neurova"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    ).stdout.split("\0")
     hits = set()
-    for rel in [p for p in tracked if p.endswith(".py")]:
+    for rel in ast_scan.trackedPyPaths("neurova"):
         try:
             tree = ast.parse(Path(rel).read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):

@@ -65,6 +65,58 @@ _PRUNED_DIR_NAMES = frozenset({
 })
 
 
+#: ── 扫描面的两个"清单"入口（§6-232，与 `filesUnder` 并列的第三种取数口）───────────────
+#:
+#: 判据要回答"仓里有哪些文件"时，历史上只有两条路：`filesUnder()`（**工作树**遍历）与
+#: 各判据自己抄一份 `git ls-files`。后者在收口前的 HEAD 树里实测被抄了 **13 处／9 档**
+#: （按 AST 调用点数，同档本文件判据现量），而每份自抄都各自决定
+#: "怎么解码、查不查退出码、按不按空白切"——本仓路径含中文，这几处正是出错的地方：
+#: `test_temperature_single_source.py` 那档**不查退出码**，git 一失败就读到空清单，
+#: 于是"没人 import 退役模块"当场假绿；`test_committed_tree_dependencies.py` 按空白切，
+#: 实测把 181 条非 ASCII 跟踪档读成带引号的八进制串（这些档因此压根不在扫描面里），
+#: 带空格的路径同形会断。收口到这一处，出错只可能错在一个地方。
+#:
+#: 两条路面区别（本仓两次 A/B 误报的根因，务必按用途选）：
+#:   * **工作树面**（`filesUnder`）＝"不许新增"型守卫用——当场咬住还没提交的档；
+#:   * **已跟踪面**（本函数族）＝"存量比对"型守卫用——并发会话正在半写的在途档不该
+#:     被算成本仓的存量红，也不该被算成"我引入了新命中"。
+def _gitLsFiles(*args: str) -> List[str]:
+    """`git ls-files` 的唯一出口：NUL 分隔、显式 utf-8 解、退出码非 0 **就抛**。
+
+    抛而不是回空清单：回空清单会让"扫了个空"读成"仓里干净"，那是最坏的一种假绿
+    （自抄的那 13 处里就有一处不查退出码）。
+    """
+    import subprocess
+
+    proc = subprocess.run(["git", "-C", str(REPO_ROOT), "ls-files", *args, "-z"],
+                          capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "git ls-files 失败（退出码 %d），扫描面不可信：%s"
+            % (proc.returncode, proc.stderr.decode("utf-8", "replace")[:200]))
+    return [p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def trackedPaths(*pathspecs: str) -> List[str]:
+    """**已跟踪**文件清单（仓内相对路径，正斜杠）。给"存量比对"型判据用作扫描面。"""
+    return sorted(_gitLsFiles(*pathspecs))
+
+
+def trackedPyPaths(*pathspecs: str) -> List[str]:
+    """已跟踪的 `.py` 清单；不传 pathspec 时按全仓 `*.py` 取。"""
+    specs = pathspecs or ("*.py",)
+    return sorted(p for p in _gitLsFiles(*specs) if p.endswith(".py"))
+
+
+def untrackedNotIgnoredPaths() -> List[str]:
+    """未跟踪**且未被 `.gitignore` 豁免**的清单（= 别人/自己正在写、还没提交的在途档）。
+
+    与 `trackedPaths()` 合成"证据面"＝"这文件要么在版本控制里，要么是有意放在树上的"；
+    被忽略的散件（`.tmp_*.py` 那族）不算——它们到不了 CI，也到不了别人的机器。
+    """
+    return _gitLsFiles("--others", "--exclude-standard")
+
+
 def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
     """`root` 子树下的源码文件清单（原地剪掉第三方/产物目录，路径排序稳定）。
 
