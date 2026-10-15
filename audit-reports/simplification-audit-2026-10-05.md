@@ -4039,6 +4039,16 @@
     - **净 LOC**：生产池 +45/−10（error_handlers +36/−2、crud +4/−7、base +5/−1）；测试池 +115/−5；子集 +7/−0。
     - **仍开**：① 500 兜底虽已出声，但全仓仍有一批端点用 `APIError.internal(...)` 把各种内部异常统一包成 5000/5001——要不要按域细分（超时／依赖不可达／数据不一致各一码）是另一张票；② 读面"匿名回落 default"这条政策本身（`auth.py:695`）本批未动，仍由 `test_memoryWriteIdentityGate` 双格钉着现状。
     - **本会话下一枚空号现查 §6-242。**
+242. **子进程写侧钉 utf-8 那族半修的第一批：吃生产与 CI 脚本五处，顺带把守卫的两处「看不见」修掉（✅ `761656f1` 生产+守卫；等号基线 27→29）** 🟢 —— §6-225 那张甲/乙票按推荐取**甲、分批**。
+
+    - **为什么必须连谓词一起修**：存量数字是在盲谓词下量的，只吃站点就是"数着 27、实际 34"。两处盲区：① `_argvFirstIsPythonChild` 只认**字面 list** 的 argv，`cmd = [sys.executable, ...]` 先落变量再传进 `subprocess.run(cmd, ...)` 一概不计（这类另有 6 处，含本批 reach.py 两处与 ci_static_gate.py 两处）；② "这一档钉过写侧"原判成 `"PYTHONIOENCODING" in source`——**在 docstring 里提一句这词就整档免检**，被放行的恰好是"写了说明、没真钉 env"那一类，最像已修的样子（AGENTS.md「钉形态不钉词」的反例，也是形态集第 211 条同族）。改成只认字典键与下标两种真形态。
+    - **五处站点**：`neurova/web_reach/reach.py:206/:298`（yt-dlp 子件）、`scripts/ci_static_gate.py:90/:113`（compileall／pyflakes）、`scripts/ci/protected_subset_nightly.py:68`（夜间逐档跑 pytest 那道门）。选它们的理由：这三档跑在真流水线与真用户请求路上，而本仓根路径含中文——坏法正是"父端按 utf-8 解、子端按 cp936 写"。
+    - **活体读数（同一子进程、只差 env）**：`locale.getpreferredencoding()=cp936` 下不钉 ⇒ 解出 **14 字符且含 U+FFFD 替换符**（输出看着在、内容已毁）；钉了 ⇒ **8 字符、码点为正确中文**；`a==b` 为 False。顺带一条探针自身的坑：第一版想把两种结果直接 print 出来，结果自己撞在同一个坑上（把 U+FFFD 打到 gbk 控制台抛 `UnicodeEncodeError`）——**探针也会犯被测代码那个错**，改成只报长度与码点才拿到读数。
+    - **等号基线 27→29 不是放宽**：谓词修盲后真值 34，本批消化 5 ⇒ 29。旧数字 27 从未描述过真实世界；改完谓词先跑出 `现读 34 / 基线 27` 这条红，再钉站点、再收数字，顺序不能倒。
+    - **剩下 29 处（19 档）分批**：全在 `tests/` 下。其中 `test_npc_script_interpreter_reachability.py` 两档的 `base_env` 只含 `PATH`，加键会改那档"瘦环境"语义（邻档 `test_ci_thin_env_guards` 相关）——留给那一批一起裁，不在本批顺手改。
+    - **一次旁证**：`tests/unit/ci` 全家复跑时 `test_protected_subset_registration_history` 红了一格，起因是并发会话工作树里有一处**未入库**的子集删除（`test_evalExampleUnusedLabelFieldsRetired.py`）。这正好验证了 §6-241 记的那条纪律：共享清单上不许用 `git commit --only` 按工作树内容提交，否则这种红会被署进别人的笔。
+    - **净 LOC**：生产池 +25/0（helper 各一份＋调用点各一行）；守卫档 +67/−8。
+    - **本会话下一枚空号现查 §6-243。**
 
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
