@@ -33,6 +33,13 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+#: 反思五算子的**唯一词表**（名字同时也是实现的方法名 `_op_<name>`）。
+#: 消费方必须**调用时**从这里取，不许 import 期抄成快照、更不许另写一份字面集合——
+#: `evolution/skill_attribution.py` 曾自写一份 `_KNOWN_OPERATORS` 当闸门，
+#: 两份各自演进的结果是"反思侧产出新算子教训、归因侧一律判未知丢弃"（AGENTS.md 教义第 6 条）。
+#: 名字有实装是判据（`tests/unit/evolution/test_attributionOperatorVocabularyIsSingleSourced.py`）。
+OPERATORS = ("drift", "sequence", "contrast", "calibration", "budget")
+
 _WINDOW = 30            # 基线期最少样本参考（预算算子）
 _MIN_BASELINE = 20      # 基线最少样本
 _MIN_WINDOW = 10        # 近期窗口大小（事件数）
@@ -202,13 +209,17 @@ class SelfModelEngine:
 
             # P1-4：per-operator 隔离——原单 try 包五算子，_op_drift 一崩
             # contrast/sequence/calibration/budget 整轮静默报废。
-            for op_name, op in (
-                ("drift", self._op_drift),
-                ("contrast", self._op_contrast),
-                ("sequence", self._op_sequence),
-                ("calibration", lambda ev, ob: self._op_calibration(lessons, ev, ob)),
-                ("budget", self._op_budget),
-            ):
+            # 名字一律取自本模块的 `OPERATORS` 单点：此处曾逐字抄一份"名字-实现"对，
+            # 而 `evolution/skill_attribution.py` 又抄了第二份当闸门——两份各自演进时
+            # 反思侧产出新算子教训、归因侧一律判"未知算子"丢弃，两边都绿而教训静默消失。
+            # `calibration` 的签名例外（它要读已积累的 lessons）在此就地闭包适配；
+            # 默认参数绑定避免闭包晚绑定。
+            for op_name in OPERATORS:
+                if op_name == "calibration":
+                    op = lambda ev, ob, _self=self, _acc=lessons: _self._op_calibration(
+                        _acc, ev, ob)
+                else:
+                    op = getattr(self, f"_op_{op_name}")
                 try:
                     lessons.extend(op(events, observations))
                 except Exception as e:
