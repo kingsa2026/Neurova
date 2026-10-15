@@ -24,6 +24,9 @@ __all__ = [
     "FileOperationSkillExecutor",
     "KbBuilderSkillExecutor",
     "create_builtin_executor_skills",
+    # §6-224：`skill_system/core.py:843` 经包路径取它，此前却是隐式公开面——
+    # 契约里没写，任何一次"零消费者"清理都可能把它摘掉而判据不红。
+    "create_builtin_skills",
 ]
 
 

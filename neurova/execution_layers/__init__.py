@@ -23,6 +23,19 @@ from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
 
+# 本包对外的契约（§6-224）：这 8 个名字是包外真在经包路径取用的那一圈（沙箱、工具执行器、
+# 技能系统与判据各取若干）。实现写在本文件里，没有这份声明就没人能说清"这层对外给什么"。
+__all__ = [
+    "DockerExecutor",
+    "ExecutionResult",
+    "LocalExecutor",
+    "RuntimeFactory",
+    "RuntimeManager",
+    "RuntimeType",
+    "get_runtime_manager",
+    "reset_runtime_manager",
+]
+
 
 class RuntimeType(Enum):
     """运行时类型"""

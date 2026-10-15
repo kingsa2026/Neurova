@@ -12,58 +12,37 @@ Neurova CogArch 1.0.0 - 执行引擎（手脚）
 零消费者——它自称的步骤状态机与真重试从未可达（执行表零注册方），那两格能力现已落在
 服务路上的 `collaboration/neurflow/execution_engine.py`（层内并发上限 + 幂等声明门的
 节点级重试）。台账 §6-157 比对、§6-166 退役。）
+
+本门面原先把这条再导出包在 `try/except ImportError` 里，handler 里定义九个**同名空类**顶替
+真身（八枚只有 docstring，`ToolStatus` 那枚另抄四份状态常量）。按批 43 已裁口径，被包的
+`tool_engine` 其模块级闭包只碰 stdlib 与本仓（`neurova.core.logger`），这条兜底**永不可达**；
+而它一旦真触发（循环导入、路径没装好），调用方拿到的是"看着像"的空类——比拿到 `None` 更坏，
+`None` 下一行就炸，空类能一路走下去。故直接导入，不再兜。台账 §6-224。
 """
 
-try:
-    from .tool_engine import (
-        ToolCallingContext,
-        ToolDefinition,
-        ToolDiscoveryResult,
-        ToolEngine,
-        ToolInvocation,
-        ToolParameter,
-        ToolSelection,
-        ToolStatus,
-        ToolVersion,
-    )
-except ImportError:
-    # 如果 tool_engine 模块不可用，提供占位类
-    class ToolEngine:
-        """工具引擎占位类"""
+from .tool_engine import (
+    ToolCallingContext,
+    ToolDefinition,
+    ToolDiscoveryResult,
+    ToolEngine,
+    ToolInvocation,
+    ToolParameter,
+    ToolSelection,
+    ToolStatus,
+    ToolVersion,
+)
 
-
-    class ToolStatus:
-        """工具状态占位类"""
-
-        AVAILABLE = "available"
-        UNAVAILABLE = "unavailable"
-        DEPRECATED = "deprecated"
-        DISABLED = "disabled"
-
-    class ToolParameter:
-        """工具参数占位类"""
-
-
-    class ToolDefinition:
-        """工具定义占位类"""
-
-
-    class ToolInvocation:
-        """工具调用占位类"""
-
-
-    class ToolSelection:
-        """工具选择占位类"""
-
-
-    class ToolCallingContext:
-        """工具调用上下文占位类"""
-
-
-    class ToolVersion:
-        """工具版本占位类"""
-
-
-    class ToolDiscoveryResult:
-        """工具发现结果占位类"""
-
+# 本门面给出去的公开面（§6-224）：这九名是包外真在经包路径取用的那一圈，
+# 由 tests/unit/core/test_packageDeclaredSurfaceCoversWhatIsTaken.py 逐名复核「在 __all__ 里 ∧
+# 取得到 ∧ 真身来自 tool_engine」。
+__all__ = [
+    "ToolCallingContext",
+    "ToolDefinition",
+    "ToolDiscoveryResult",
+    "ToolEngine",
+    "ToolInvocation",
+    "ToolParameter",
+    "ToolSelection",
+    "ToolStatus",
+    "ToolVersion",
+]

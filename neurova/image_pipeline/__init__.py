@@ -22,6 +22,13 @@ from .docker_builder import get_docker_builder
 
 logger = get_logger(__name__)
 
+# 本包对外的契约（§6-224）：端点与判据经包路径取的就是这三样，声明面由声明面判据逐名复核。
+__all__ = [
+    "BuildStatus",
+    "ImagePipelineManager",
+    "get_image_pipeline_manager",
+]
+
 
 class BuildStatus(Enum):
     """构建状态"""

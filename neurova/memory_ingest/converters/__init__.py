@@ -12,6 +12,9 @@ from neurova.memory_ingest.converters import (codex_rollout, dialog_daily, herme
                                     legacy_session, openclaw_transcript,
                                     opencode_session, qwenpaw_history)
 
+# 本包对外的契约（§6-224）：`CONVERTERS` 是识别面与适配面同处登记的那本账，脚本与判据都经包路径取它。
+__all__ = ["CONVERTERS"]
+
 CONVERTERS: Dict[str, Callable] = {
     qwenpaw_history.CONVERTER_NAME: qwenpaw_history.convert,
     dialog_daily.CONVERTER_NAME: dialog_daily.convert,

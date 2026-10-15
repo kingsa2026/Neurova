@@ -13,14 +13,28 @@
 而那时红的是删除者的判据、绿的是使用者——两边都看不出"契约本来就没写"。
 
 现算（2026-10-15，全仓 3400 余档一次扫）：**12 个包 54 个名字**被经包路径取用而未声明。
-本批修 5 个包（`llm.providers` 8、`memory` 补 2、`cognitive` 补 1、`api.endpoints.memory`
-补 `router`、`admin` 明写 3 个公开面），其余 7 个包 45 个名字进登记表逐条给理由——
-它们全是**实现就写在 `__init__.py` 里**的那一族（`api/endpoints` 368 行、`computer_use` 701、
-`execution_layers` 706、`execution_engine`、`image_pipeline` 382…），
-给它们定"哪些算公开面"是档案 `facade-reexport-triage-2026-10-15.md` 票二那一次裁定，
-不在本批顺手定。
+批 49 修 5 个包（`llm.providers` 6、`memory` 补 2、`cognitive` 补 1、`api.endpoints.memory`
+补 `router`，另 `admin` 明写 3 个公开面但那 3 名原本不在隐式面里），其余 **8 个包 44 个名字**
+进登记表逐条给理由。（批 49 建档时把这条写成"7 个包 45 个名字"——本批在 `b6d45de6^` 的仓外
+工作树上用**同一把尺**重算得 44，勘误见 §6-224；那句"12 包 54 名"复核为真。）
 
-两条排除口径（都不是放过，是另一件事）：
+批 50（§6-224）按档案票二**甲案**把这张登记表清零：8 个包逐个补 `__all__`，登记表收成
+`{}` 并加一条零容忍格。清零之后，这条根因两侧都收完了——供给面（批 46/47/48）与声明面（本档）。
+
+补 `__all__` 是**机械、零行为变更**那一案，前提两条都现读过：全仓跟踪 `.py` 里
+`from X import *` **0 处**（3422 档一次扫），且没有任何生产代码**读** `__all__` 来决定注册
+（读它的只有判据与活体档）。真正被推后的那是乙案——把实现从 `__init__.py` 挪出去。
+
+登记表那 8 个包的实状也不该沿用建档时那句笼统的"全是实现写在门面里"：现算是 **6 包实现在
+`__init__.py`**（`api/endpoints` 368 行、`computer_use` 701、`execution_layers` 706、
+`image_pipeline` 382、`memory_ingest/converters` 23、`skills/builtin` 81），另 **2 包是纯再导出门面**
+（`execution_engine` 69 行、`cognitive_layers/memory_layer` 的那个名字来自第 38 行的再导出）。
+`execution_engine` 那一包在划契约前必须先修一处：它的再导出包在 `try/except ImportError` 里，
+而 handler 里定义了**九个同名空桩**（八枚只有 docstring，`ToolStatus` 那枚另抄了四份状态常量）——
+被包的 `tool_engine` 模块级闭包只碰 stdlib 与本仓，按批 43 已裁口径这条兜底永不可达。
+给一个假门面划公开面＝把谎写进契约，故本批先摘桩、再声明。
+
+三条排除口径（都不是放过，是另一件事）：
 
 - **子模块名**（`import neurova.agent_core` 之后 `neurova.agent_core.X`、
   `from neurova.api.endpoints.memory import crud`）：取的是子模块本身，列不列进 `__all__`
@@ -28,6 +42,10 @@
   绑到的那些"当子模块，漏掉这条，于是 `neurova.agent_core` 与 `__version__` 一起被误报。
 - **下划线名**（`__version__` 这类模块级约定、`_logger` 这类私有名）：`__all__` 管的是
   `from pkg import *` 的可见集，双下划线名本来就不参与。
+- **非证据文件的取用**（批 50 加）：消费者表按工作树走，而工作树里有 `.gitignore` 豁免掉的散件
+  （本仓实测 `.tmp_auth_bak.py` 就在取 `api.endpoints.get_app_state`）。这类文件**到不了 CI，
+  也到不了别人的机器**，把它们当"有人在取"会让同一格在两台机器上给出不同读数——登记表清零之后
+  这条更危险：读数差一个名字就是红。故取用面只认「已跟踪 ∪ 未跟踪但未被忽略」。
 
 `__all__` 也不许写空话：第二格钉"声明了的名字本包必须真给得出"，堵"往契约里塞一个不存在的
 名把判据喂绿"这条后门（与 §6-212 那条"通用名不得进 `__all__`"同族）。给得出的四条形：
@@ -46,11 +64,10 @@ from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-#: 本批承认"暂时隐式"的存量表：包 → 那包里被取用却未声明的名字。
-#: **两侧都要相等**——新长出一个名字要红，把某个包补进 `__all__` 之后忘了销行也要红
-#: （与 §6-197 那张"落点已消失必须销行"同一手法）。
-IMPLICIT_SURFACE: dict = {  # type: ignore[type-arg]
-    # ── 以下 7 个包全是"实现写在 __init__.py 里"那一族：哪些名字算公开面＝档案票二那次裁定
+#: 批 50 之前"承认暂时隐式"的那 8 包 44 名。登记表清零后它换了一个身份：**票二甲的交付清单**，
+#: 由最后一条格按**导入后的真对象**复核（不是读文本）——名字既得进 `__all__`，又得真从包上取到，
+#: 免得补契约时手抖漏一个还能全绿。
+EXPECTED_FACES: dict = {  # type: ignore[type-arg]
     "neurova.api.endpoints": {
         "DEFAULT_AGENT_ID", "ENDPOINT_MODULES", "defaultAgentId", "get_agent_instance",
         "get_app_state", "get_health_checker", "get_llm_client", "get_provider_manager",
@@ -72,6 +89,11 @@ IMPLICIT_SURFACE: dict = {  # type: ignore[type-arg]
     "neurova.skills.builtin": {"create_builtin_skills"},
     "neurova.memory_ingest.converters": {"CONVERTERS"},
 }
+
+#: 隐式公开面的**豁免台账**。批 50 起为零——票二甲案已把当时全部的 8 包 44 名补进 `__all__`。
+#: 留空不是"没有存量"的口头话，而是第一条格咬着的**零容忍政策**：将来新长出一个隐式公开面，
+#: 出路只有「补 `__all__`」或「改直取子模块」两种；往这里登记一行＝替人补裁，同一格会红。
+IMPLICIT_SURFACE: dict = {}  # type: ignore[type-arg]
 
 
 def _gitLsFiles(*extra: str) -> list:
@@ -182,9 +204,32 @@ def suppliedNames(info: dict, pkgDir: Path) -> set:
 
 
 @functools.lru_cache(maxsize=1)
+def evidencePaths() -> frozenset:
+    """「证据面」＝已跟踪 ∪ 未跟踪但未被 `.gitignore` 豁免的仓内文件。
+
+    为什么不含被忽略的散件：那些文件到不了 CI，也到不了别人的机器。把它们算成消费者，
+    同一条格就会在两处给出不同读数（本仓实测 `.tmp_auth_bak.py` 正在取 `get_app_state`）。
+    """
+    tracked = _gitLsFiles("ls-files", "-z")
+    others = _gitLsFiles("ls-files", "--others", "--exclude-standard", "-z")
+    return frozenset(p for p in list(tracked) + list(others) if p)
+
+
+def pruneNonEvidence(table: dict, evidence: frozenset) -> dict:
+    """把消费者表里落在证据面之外的取用剔掉；剔空的名字整条消失（纯函数，第四/五格按形状钉它）。"""
+    out = {}
+    for mod, names in table.items():
+        for name, places in names.items():
+            keep = [p for p in places if p[0] in evidence]
+            if keep:
+                out.setdefault(mod, {})[name] = keep
+    return out
+
+
+@functools.lru_cache(maxsize=1)
 def _scan() -> dict:
-    """全仓"谁从哪个模块取了哪个名字"一张表，跑一次给所有格共用。"""
-    return ast_scan.takenPerModule(PROJECT_ROOT)
+    """全仓"谁从哪个模块取了哪个名字"一张表，跑一次给所有格共用（只认证据面）。"""
+    return pruneNonEvidence(ast_scan.takenPerModule(PROJECT_ROOT), evidencePaths())
 
 
 def undeclaredTakeaways() -> dict:
@@ -232,6 +277,10 @@ def test_theScanCoversTheTrackedTreeAndThePackageSet():
     tracked = [p for p in _gitLsFiles("ls-files", "-z") if p.endswith(".py")]
     assert len(tracked) >= 3000, f"扫描面现读 {len(tracked)} 个 .py，地板 3000 被打破"
     assert _scan(), "消费者表是空的——那是『没人取用』的假绿，不是全绿"
+    # 登记表清零后，"扫出来一片空"与"确实干净"两种读法都让第一条格绿 ⇒ 规模必须有地板。
+    # 数取本批复算的现值（消费者 5356 名 / 93908 处），只留下限不上限。
+    taken = sum(len(v) for v in _scan().values())
+    assert taken >= 5000, f"消费者表现读 {taken} 个（模块,名字）对，地板 5000 被打破＝取数面塌了"
 
 
 def test_thePredicateReportsASymbolTakenButNotDeclared():
@@ -283,3 +332,74 @@ def test_adminAndProvidersSurfacesAreDeclaredAsPromise():
     for n in ("GraphTraversal", "UnifiedVectorStore"):
         assert n in mem.__all__ and getattr(mem, n, None) is not None, (
             f"neurova.memory 的 {n} 该既在 __all__ 里又真取到")
+
+
+def test_theExemptionLedgerIsStillEmpty():
+    """零容忍格：隐式公开面的豁免台账不许再长行（这条是政策，不是存量表）。
+
+    批 50 之前这里躺着 8 包 44 名；清零之后，新长出一个隐式公开面的两种正当出路是
+    「补 `__all__`」与「改直取子模块」。**登记一行**看起来也能让第一条格绿，但那等于
+    把"这个包的公开面是什么"这件本来要人拍板的事，由写代码的人在判据里替他拍了。
+    """
+    assert not IMPLICIT_SURFACE, (
+        "隐式公开面豁免台账被人加行了。要么把名字补进那包的 `__all__`（票二甲的做法），"
+        f"要么让取用方直取子模块；实得 {IMPLICIT_SURFACE}")
+
+
+def test_scratchFilesOutsideTheEvidenceFaceAreNotConsumers():
+    """证据面正反两头：被 `.gitignore` 豁免的散件不算"有人在取"，跟踪文件里的取用照算。
+
+    没有这一格，登记表清零之后的读数就取决于谁的机器上躺着哪个 `.tmp_*.py`——
+    同一条格在我机器上红、在 CI 上绿，那种红既不是回归也修不掉。
+    """
+    evidence = frozenset({"neurova/live.py", "tests/unit/live_test.py"})
+    table = {
+        "neurova.pkg": {
+            "Live": [("neurova/live.py", 9)],
+            "ScratchOnly": [(".tmp_auth_bak.py", 208)],
+            "Mixed": [(".tmp_auth_bak.py", 7), ("tests/unit/live_test.py", 3)]},
+    }
+    pruned = pruneNonEvidence(table, evidence)
+    assert "Live" in pruned["neurova.pkg"], "跟踪文件里的取用被剔掉了（探测器过窄）"
+    assert "ScratchOnly" not in pruned["neurova.pkg"], (
+        "只被 ignored 散件取用的名字仍算消费者——那会让同一条格在两台机器上给不同读数")
+    assert pruned["neurova.pkg"]["Mixed"] == [("tests/unit/live_test.py", 3)], (
+        "混合取用没剔净：剩下的必须是证据面内的那几条")
+    assert len(evidencePaths()) >= 3000, (
+        f"证据面现读 {len(evidencePaths())} 个文件，地板 3000 被打破＝取用面塌了")
+
+
+def test_theClearedFacesAreDeclaredAndReachableThroughThePackage():
+    """票二甲的交付格：那 44 名逐个既在 `__all__` 里、又能从包上真取到对象（读对象不读文本）。"""
+    import importlib
+
+    failures = []
+    for pkg, names in sorted(EXPECTED_FACES.items()):
+        mod = importlib.import_module(pkg)
+        declared = set(getattr(mod, "__all__", []) or [])
+        failures += [(pkg, n) for n in sorted(names) if n not in declared]
+        failures += [(pkg, n) for n in sorted(names & declared)
+                     if getattr(mod, n, None) is None]
+    assert not failures, (
+        f"这些名字该已进包契约且真给得出，实得缺项：{failures[:10]}")
+
+
+def test_executionEngineReexportsTheRealToolEngineNotStubs():
+    """门面划了公开面，就得证它给的是真身——`execution_engine` 曾给的是九个同名空桩。
+
+    建档实状（`neurova/execution_engine/__init__.py:17-69`）：再导出包在 `try/except ImportError`
+    里，handler 定义 `ToolEngine`/`ToolParameter`/… 九个**同名空 class**（八枚只有 docstring，
+    `ToolStatus` 那枚另抄四份状态常量）。被包的 `tool_engine` 模块级闭包只碰 stdlib 与本仓，
+    按批 43 已裁口径这条兜底永不可达；而它一旦真触发（循环导入、路径没装好），调用方拿到的是
+    一个"看着像"的空类，比拿到 `None` 更难查——`None` 下一行就炸，空类能一路走下去。
+    """
+    import importlib
+
+    engine = importlib.import_module("neurova.execution_engine")
+    wrong = {}
+    for name in sorted(EXPECTED_FACES["neurova.execution_engine"]):
+        obj = getattr(engine, name)
+        if obj.__module__ != "neurova.execution_engine.tool_engine":
+            wrong[name] = obj.__module__
+    assert not wrong, (
+        f"这些名字不是来自 tool_engine 真身，而是门面 handler 里的桩：{wrong}")
