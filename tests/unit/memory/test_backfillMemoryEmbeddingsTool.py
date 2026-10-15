@@ -62,9 +62,17 @@ def _dbPathOf(tmp_path: Path) -> str:
     return str(tmp_path / "memory.db")
 
 
-def _seed(tmp_path: Path, *contents: str):
+def _seed(tmp_path: Path, monkeypatch, *contents: str):
+    """种出"该列还是空的"那批既有行——回填工具面对的就是这个历史形状。
+
+    §6-215 的甲案已接线（`manager._embeddingForNewRow`：新行入库即由引擎算出向量），
+    所以直接 `remember()` 种出来的行**自带嵌入**，本档那些"只补 NULL 的那些""幂等"
+    全都会退化成"没东西可补"。这里把写侧单例引擎换成 None 来复刻回填工具要服务的那批行
+    （模型未就绪/历史库）；这不是放宽判据，是把前置条件钉回它描述的那个状态。
+    """
     from tests.cognitive_body_store import bodyManager
 
+    monkeypatch.setattr("neurova.embedding.get_embedding_engine", lambda: None)
     manager = bodyManager(tmp_path, agentId="backfill")
     for c in contents:
         manager.remember(content=c)
@@ -84,10 +92,10 @@ def _embeddingsInBody(dbPath: str):
     return {rid: (json.loads(raw) if raw else []) for rid, _c, raw in rows}
 
 
-def test_onlyFillsMissingEmbeddings(tmp_path: Path):
+def test_onlyFillsMissingEmbeddings(tmp_path: Path, monkeypatch):
     """主格：只补 NULL 的那些，已有向量的行一律不动。"""
     tool = _tool()
-    manager = _seed(tmp_path, SIMILAR_A, UNRELATED)
+    manager = _seed(tmp_path, monkeypatch, SIMILAR_A, UNRELATED)
     sentinel = [0.111] * STUB_DIM
     existingId = next(m.id for m in manager._memories.values() if UNRELATED in m.content)
     with manager._lock:
@@ -105,10 +113,10 @@ def test_onlyFillsMissingEmbeddings(tmp_path: Path):
     assert len(after[filledId]) == STUB_DIM
 
 
-def test_secondRunIsIdempotent(tmp_path: Path):
+def test_secondRunIsIdempotent(tmp_path: Path, monkeypatch):
     """幂等：第二次跑一行也不填（可反复执行才是运维可用的工具）。"""
     tool = _tool()
-    _seed(tmp_path, SIMILAR_A, UNRELATED)
+    _seed(tmp_path, monkeypatch, SIMILAR_A, UNRELATED)
     engine = _StubEngine()
 
     first = tool.backfillAgent("backfill", engine, dbPath=_dbPathOf(tmp_path))
@@ -124,7 +132,7 @@ def test_secondRunIsIdempotent(tmp_path: Path):
 def test_engineUnavailableWritesNothingAndFailsLoudly(tmp_path: Path, monkeypatch):
     """引擎不可用 ⇒ 一行不写、退出码非零、点名原因；绝不用占位向量冒充成功。"""
     tool = _tool()
-    _seed(tmp_path, SIMILAR_A)
+    _seed(tmp_path, monkeypatch, SIMILAR_A)
 
     monkeypatch.setattr(tool, "defaultEngine", lambda: None)
     outcome = tool.main(["--agent", "backfill", "--db-path", _dbPathOf(tmp_path)])
@@ -135,10 +143,10 @@ def test_engineUnavailableWritesNothingAndFailsLoudly(tmp_path: Path, monkeypatc
     )
 
 
-def test_engineFailingToInitializeIsReportedNotSwallowed(tmp_path: Path):
+def test_engineFailingToInitializeIsReportedNotSwallowed(tmp_path: Path, monkeypatch):
     """引擎对象在但初始化失败：同样不得写入，且失败要上抛到退出码。"""
     tool = _tool()
-    _seed(tmp_path, SIMILAR_A)
+    _seed(tmp_path, monkeypatch, SIMILAR_A)
 
     outcome = tool.backfillAgent("backfill", _StubEngine(failToInitialize=True),
                                  dbPath=_dbPathOf(tmp_path))
@@ -146,10 +154,10 @@ def test_engineFailingToInitializeIsReportedNotSwallowed(tmp_path: Path):
     assert outcome.get("error"), "初始化失败却没带原因 ⇒ 调用方无从区分'没得填'与'填不了'"
 
 
-def test_blankContentRowIsSkippedNotCrashing(tmp_path: Path):
+def test_blankContentRowIsSkippedNotCrashing(tmp_path: Path, monkeypatch):
     """空内容行跳过并计数，整批不炸。"""
     tool = _tool()
-    manager = _seed(tmp_path, SIMILAR_A)
+    manager = _seed(tmp_path, monkeypatch, SIMILAR_A)
     with manager._lock:
         blank = next(iter(manager._memories.values()))
         blank.content = ""
@@ -160,10 +168,10 @@ def test_blankContentRowIsSkippedNotCrashing(tmp_path: Path):
     assert result["filled"] == 0
 
 
-def test_dryRunLeavesStoreUntouched(tmp_path: Path):
+def test_dryRunLeavesStoreUntouched(tmp_path: Path, monkeypatch):
     """dry-run：只报数不写盘（回填前先看清影响面才有得谈）。"""
     tool = _tool()
-    _seed(tmp_path, SIMILAR_A, UNRELATED)
+    _seed(tmp_path, monkeypatch, SIMILAR_A, UNRELATED)
 
     result = tool.backfillAgent("backfill", _StubEngine(),
                                 dbPath=_dbPathOf(tmp_path), dryRun=True)
@@ -172,13 +180,13 @@ def test_dryRunLeavesStoreUntouched(tmp_path: Path):
     assert all(len(v) == 0 for v in _embeddingsInBody(_dbPathOf(tmp_path)).values())
 
 
-def test_backfilledVectorsActuallyFeedTheClusteringFace(tmp_path: Path):
+def test_backfilledVectorsActuallyFeedTheClusteringFace(tmp_path: Path, monkeypatch):
     """本工具的存在理由：填完之后经正文出口取数，相近的两条真能聚成一簇。"""
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
     from tests.cognitive_body_store import bodyManager
 
     tool = _tool()
-    _seed(tmp_path, SIMILAR_A, SIMILAR_B, UNRELATED)
+    _seed(tmp_path, monkeypatch, SIMILAR_A, SIMILAR_B, UNRELATED)
     result = tool.backfillAgent("backfill", _StubEngine(), dbPath=_dbPathOf(tmp_path))
     assert result["filled"] == 3
 

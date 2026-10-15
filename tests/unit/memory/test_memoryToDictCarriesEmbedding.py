@@ -93,23 +93,41 @@ def test_embeddingReachesConsolidationThroughTheProductionFace(tmp_path: Path):
     )
 
 
-def test_noEmbeddingWrittenTodayMeansNoBehaviorChange(tmp_path: Path):
-    """现量锁：写侧今天没人填嵌入 ⇒ 本批补键不会让"合并"当场开始真跑。
+def test_writeSideNowFillsEmbeddingsButTheContentGateStillRules(tmp_path: Path, monkeypatch):
+    """现量锁改判（本批）：本格原先钉的是"写侧今天没人填嵌入 ⇒ 合并不当场开工"，
+    它自己的失败文案就写着前提变了要按"合并真开始跑"重评——甲案落地，前提正是变了。
 
-    落笔即绿；它的红由变异提供（M5：给 `remember()` 的产物偷偷补一个假嵌入 ⇒ 这格转红，
-    说明它确实在盯"这条路今天是否开工"）。
+    改判后的锁换一头钉：嵌入既然随写入进来，**准入仍只由内容门决定**。两句互不相干的话
+    哪怕都带上了向量，也不许被聚成一簇（甲3：余弦达下限**且**归一化后短者为长者子串）。
+    这里用取值表把余弦钉成 0（不相交的方向），引擎缺席/模型未装的环境也恒定，
+    不把"这台机器有没有 ONNX 模型"读进判据。
     """
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
     from tests.cognitive_body_store import bodyManager
+
+    class _TableEngine:
+        def initialize_sync(self) -> bool:
+            return True
+
+        def encode(self, text: str):
+            return {
+                "会议纪要讨论了排期": [1.0, 0.0, 0.0, 0.0],
+                "会议纪要讨论了预算": [0.0, 1.0, 0.0, 0.0],
+            }[text]
+
+    monkeypatch.setattr("neurova.embedding.get_embedding_engine", lambda: _TableEngine())
 
     manager = bodyManager(tmp_path, agentId=AGENT)
     manager.remember(content="会议纪要讨论了排期")
     manager.remember(content="会议纪要讨论了预算")
 
     records = [MemoryRecord.from_dict(m) for m in manager.get_all_memories()]
-    assert all(list(r.embedding) == [] for r in records), (
-        "写侧已经开始填嵌入（实得 %s）⇒ 甲上线即开工，本格的前提变了，"
-        "要按『合并真开始跑』重新评估行为面" % [r.embedding[:2] for r in records]
+    assert all(list(r.embedding) for r in records), (
+        "写侧没把嵌入带进出口（实得 %s）⇒ 甲案没接到建行那两处"
+        % [r.embedding for r in records]
     )
     clusters = SleepConsolidation(memory_manager=manager).cluster_by_similarity(records)
-    assert all(len(c) == 1 for c in clusters)
+    assert all(len(c) == 1 for c in clusters), (
+        "两句不相干的话被聚成一簇了（尺寸=%s）⇒ 有了向量就合，内容门形同虚设"
+        % sorted(len(c) for c in clusters)
+    )
