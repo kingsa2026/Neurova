@@ -154,6 +154,9 @@ __all__ = [
     "VolumeRenderer",
     "create_volume_renderer",
     "get_volume_renderer",
+    # §6-224：`neurova/memory/__init__.py:29` 经包路径取它，此前是隐式公开面——契约里没写。
+    # 它同样包在 try 里（依赖缺失时由下面的裁剪行摘掉），与本表其余可选依赖模块同形。
+    "TemperatureEngine",
 ]
 
 # 上面的 NeRF 系列模块（volume_renderer / positional_encoding 等）
