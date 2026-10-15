@@ -22,6 +22,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = get_logger(__name__)
 
+# 本包对外的契约（§6-224）：包路径被取用的只有 `BenchmarkFramework`（落点判据构造它），
+# 其余一律经子模块直取（`neurova.benchmark.rag_eval` 等）。声明面由
+# `test_packageDeclaredSurfaceCoversWhatIsTaken` 逐名复核——隐式公开面不留第二份口径。
+__all__ = [
+    "BenchmarkFramework",
+]
+
 
 class BenchmarkStatus(Enum):
     """基准测试状态"""
