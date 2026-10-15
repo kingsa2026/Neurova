@@ -55,6 +55,21 @@ DEFAULTS: Dict[str, Any] = {
     # 竞争。它是**独立配置键**：不与 max_loop_rounds 共享尺度（那个键已有
     # 两尺度，见下方 GoalGate 注释）。
     "max_parallel_tools": 4,
+    # DoomLoopGate：死循环判定的**滑动窗口长度**（近 N 轮签名里出现重复即计一次中断）。
+    # 此前它是 `agent/gates.py` 的类字面量 4，而唯一装配点 `_buildGateRunner` 写的是
+    # `DoomLoopGate()` 无参构造 ⇒ 这一档阈值**不受任何配置键管辖**。同文件
+    # `loops/base.py:366-368` 已把这种形态点名为忌讳（GoalGate 轮次预算收口时写下的原话），
+    # 而三把同族门都从本单源取数，只它例外（ModularRSI 对照 §4 M-A 第①步）。
+    #
+    # 同类的第三个构造参数 `similarity_threshold` **不在本表**：它存进实例后全仓零读取
+    # （`check()` 判的是签名逐字相等，近似比较从未实装）。给死旋钮挂配置键，就是工单 018
+    # 与 §6-1 那两条"棘轮/面板编辑空对象"的第二形态——存废另批裁。
+    "doom_loop_window_size": 4,
+    # DoomLoopGate：**连续中断多少次后**才升级为 TERMINATE（中断＝注入"换策略"提示续跑）。
+    # 合法域下界取 1 而不是 0：0 意味着第一次重复签名就直接终止，那是换了一道判据，
+    # 不是把现有这道收紧；上界 8 与 `goal_max_continuations` 同量级——每次中断都要多付
+    # 一次模型往返，再高只会把死循环跑成成本。
+    "doom_loop_max_interrupts": 2,
 }
 
 MIN_TOKEN_BUDGET = 1000
@@ -79,6 +94,14 @@ MAX_PARALLEL_TOOLS = 16
 # 不该一个能到 200、另一个被封在 15）。`None` 是"跟随"哨兵，不参与夹紧。
 MIN_GOAL_ROUND_BUDGET = MIN_ROUNDS
 MAX_GOAL_ROUND_BUDGET = MAX_ROUNDS
+# 死循环窗口合法域。下界 1 = 只看上一轮（最严的"重复"定义）；上界 32 的理由与
+# GoalGate 续跑上界同源——窗口越长，越会把"隔了二十几轮的正常复用"判成死循环，
+# 而真死循环的周期远短于此。
+MIN_DOOM_LOOP_WINDOW = 1
+MAX_DOOM_LOOP_WINDOW = 32
+# 中断次数合法域，理由见 DEFAULTS 内那条注释。
+MIN_DOOM_LOOP_INTERRUPTS = 1
+MAX_DOOM_LOOP_INTERRUPTS = 8
 
 
 def settings_path() -> Path:
@@ -131,7 +154,8 @@ def get_effective_limits() -> Dict[str, Any]:
 
     env 键：NEUROVA_AGENT_TOKEN_BUDGET / NEUROVA_AGENT_MAX_LOOP_ROUNDS /
     NEUROVA_AGENT_MAX_SUBAGENT_DEPTH / NEUROVA_AGENT_MAX_PARALLEL_TOOLS /
-    NEUROVA_AGENT_GOAL_ROUND_BUDGET
+    NEUROVA_AGENT_GOAL_ROUND_BUDGET / NEUROVA_AGENT_DOOM_LOOP_WINDOW /
+    NEUROVA_AGENT_DOOM_LOOP_MAX_INTERRUPTS
     """
     settings = load_agent_limits()
 
@@ -154,6 +178,14 @@ def get_effective_limits() -> Dict[str, Any]:
     env_goal_rounds = os.environ.get("NEUROVA_AGENT_GOAL_ROUND_BUDGET")
     if env_goal_rounds and env_goal_rounds.isdigit():
         settings["goal_round_budget"] = int(env_goal_rounds)
+
+    env_doom_window = os.environ.get("NEUROVA_AGENT_DOOM_LOOP_WINDOW")
+    if env_doom_window and env_doom_window.isdigit():
+        settings["doom_loop_window_size"] = int(env_doom_window)
+
+    env_doom_interrupts = os.environ.get("NEUROVA_AGENT_DOOM_LOOP_MAX_INTERRUPTS")
+    if env_doom_interrupts and env_doom_interrupts.isdigit():
+        settings["doom_loop_max_interrupts"] = int(env_doom_interrupts)
 
     # 夹紧到合法区间
     settings["token_budget"] = max(
@@ -183,5 +215,13 @@ def get_effective_limits() -> Dict[str, Any]:
     settings["max_subagent_depth"] = max(
         MIN_SUBAGENT_DEPTH,
         min(MAX_SUBAGENT_DEPTH_LIMIT, int(settings["max_subagent_depth"])),
+    )
+    settings["doom_loop_window_size"] = max(
+        MIN_DOOM_LOOP_WINDOW,
+        min(MAX_DOOM_LOOP_WINDOW, int(settings["doom_loop_window_size"])),
+    )
+    settings["doom_loop_max_interrupts"] = max(
+        MIN_DOOM_LOOP_INTERRUPTS,
+        min(MAX_DOOM_LOOP_INTERRUPTS, int(settings["doom_loop_max_interrupts"])),
     )
     return settings
