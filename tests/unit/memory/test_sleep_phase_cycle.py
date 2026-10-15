@@ -22,6 +22,7 @@ start_sleep 才写；洞察端点恒空；无任何到点唤醒；状态页 phas
    不完整（未达休眠）不记冷却，随时可进。
 """
 
+import contextlib
 import time
 import unittest
 from unittest.mock import patch
@@ -38,13 +39,26 @@ _AUTH = {"Authorization": f"Bearer {_TOKEN}"}
 
 
 class FakeMemoryManager:
-    """最小记忆管理器桩：记录写操作（与 test_idle_tracker_phase_loop 同口径）"""
+    """最小记忆管理器桩：记录写操作（与 test_idle_tracker_phase_loop 同口径）
+
+    `request_scope` 是睡眠写回（§6-223 甲）真会调用的生产接口，桩必须实现——否则被测代码
+    走的是真 manager 不存在的一条路。
+    """
 
     def __init__(self, memories):
         self._mems = {m["id"]: dict(m) for m in memories}
         self.added = []
         self.forgotten = []
         self.updated = []
+        self.scopes = []
+
+    @contextlib.contextmanager
+    def request_scope(self, neuser_id=None, user_id=None):
+        self.scopes.append((neuser_id, user_id))
+        try:
+            yield self
+        finally:
+            self.scopes.pop()
 
     def get_all_memories(self):
         return [dict(v) for v in self._mems.values()]

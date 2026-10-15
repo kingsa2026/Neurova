@@ -524,7 +524,15 @@ class SleepConsolidation:
         # 两处必须一起修：只修键，聚类照旧收它们；只修聚类，判据恒 False 等于没修。
         retired = [m for m in memories if m.is_archived]
         working = [m for m in memories if not m.is_archived]
-        clusters = self.cluster_by_similarity(working)
+        # 再按隔离作用域分桶（乙，§6-223）：`get_all_memories()` 给的是这只 agent 的**全部用户**
+        # 的行，而合并是"取最长、其余退役"——跨 neuser/user 并成一簇就等于把 alice 的事实变成
+        # bob 的行（检索可见性跟着串）。同归属内该合的照合。
+        buckets: Dict[Tuple[str, str, str], List[MemoryRecord]] = {}
+        for memory in working:
+            buckets.setdefault((memory.agent_id, memory.neuser_id, memory.user_id), []).append(memory)
+        clusters: List[List[MemoryRecord]] = []
+        for bucket in buckets.values():
+            clusters.extend(self.cluster_by_similarity(bucket))
 
         # 2. 合并
         merged_memories = []
@@ -555,10 +563,13 @@ class SleepConsolidation:
                 categories=merge_result.combined_categories,
                 merged_from=merge_result.source_ids,
                 created_at=datetime.now(),
-                # 继承隔离上下文
-                agent_id=isolation_context.agent_id if isolation_context else "default",
-                neuser_id=isolation_context.neuser_id if isolation_context else "default",
-                user_id=isolation_context.user_id if isolation_context else "default",
+                # 产物继承**源行自己的**归属三元组（甲，§6-223）：此前没有 isolation_context 时
+                # 这里硬写 ("default","default","default")，于是 alice 的合并产物落到别人的作用域，
+                # 而写回侧的归属校验又把源的退役那一腿整段拒掉——合并只复制、不收拢。
+                # isolation_context 显式给定时仍以它为准（那是调用方声明的目标作用域）。
+                agent_id=isolation_context.agent_id if isolation_context else cluster[0].agent_id,
+                neuser_id=isolation_context.neuser_id if isolation_context else cluster[0].neuser_id,
+                user_id=isolation_context.user_id if isolation_context else cluster[0].user_id,
             )
 
             # 保留嵌入（使用第一个记忆的嵌入）
