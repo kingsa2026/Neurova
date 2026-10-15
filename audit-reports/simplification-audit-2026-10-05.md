@@ -4010,7 +4010,23 @@
     - **活体 6 组读数 exit=0**（`.tmp_liveVerifyMA_doomLoopLimits.py`，即用即删）：越界夹紧（99999→32、−5→1）；真 `OpenAILoop._buildGateRunner()` 装配值 == 生效值（6/3）；`=1` 首次终止在第 2 次 check、`=3` 在第 4 次；真 `create_app()` + 真 JWT 打 `GET /api/v1/governance/agent-limits` 回 200 且回显新两键；env 覆盖通道生效（9）；死旋钮未被挂键 + 仓内真 `data/` md5 前后一致。反证：把装配点那一行单独退回 `DoomLoopGate()` 复跑同一脚本 ⇒ 红在两处，且 [3] 读数变成「2 vs 2」——「配多大都不管用」被量成了读数；随后 cp 还原并 sha256 复证字节一致。
     - **净 LOC**：生产池 **+79/−7 ⇒ 净 +72**（`agent_limits_settings.py +41/−1`、`gates.py +31/−5`、`loops/base.py +7/−1`；增侧是键定义/合法域/夹紧/env 三条通道与根因注释，逻辑改动只有装配点那一次传参）；基建台账池 +7/−0；判据 221 行；子集池 +3/−0（592→593）。
     - **登记不修（两条）**：① `scripts/ci/tool_loop_deadline_ledger.py` 对账现读的 `count_conflict: ToolParameter（台账 4 / 实测 3）` 已在 HEAD 仓外工作树复现 ⇒ main 上的预存红，非本批引入，归属那张 T-09 自循环面条目（§6-210 一族）的另次复核；② `api/endpoints/governance.py:638-641` 的 `AgentLimitsUpdate` 字段白名单只认 `token_budget`/`max_loop_rounds`，`goal_*`/`max_subagent_depth`/`max_parallel_tools` 与本次两键**都写不进面板**——GET 读面自动带全（本批活体 [4] 已证），PUT 面落后是既有缺口，补它属「哪些旋钮对外可调」的产品裁定，不在本批顺手扩。
-    - **本会话下一枚空号现查 §6-240。**
+    - **本会话下一枚空号现查 §6-241。**
+240. **联合轮的族级归因读数：只拆账不拆增益，四态不折叠（✅ `3158f38e` 生产+判据+活体 / `9a26af62` 子集 593→594）** 🟢 —— 出处 `docs/08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md` §4 M-B，用户裁定的档位是**先加读数、不动动作粒度**。
+
+    - **一句话根因**：一轮 RSI 是**联合动作**——`generate_optimizations()` 对每个参数各选 1 个候选 → `apply_optimizations()` 全量应用 → **一次** `perf_after - perf_before` → **一次**整轮回滚。提名按参数、判定与回滚按整轮，观测面上只留 `optimizations` 与 `applied_results` 两个平铺列表，"这轮涨了"于是永远回答不了"是哪一族动的"。
+    - **为什么本批不拆轮**（外部论据说"模块化演化优于联合演化"，照搬会错）：`rsi/parameter_activity.py:5-9` 实测 262 行真账里 11 个参数只有 7 个出现过、4 个 `never_proposed`——拆成每族一轮，多数轮次会在无数据上空转，且每轮都要再付一次评测成本。**读数和动作粒度是两件事**：先把"哪一族动了"量出来，拆不拆轮是读数稳定之后的另批。
+    - **读数形状**：模块级纯函数 `familyAttribution(optimizations, appliedResults, *, tableFamilies, placeholderSystems)` → `{"by_family": {族: {proposed, applied, params[], status}}, "gain_scope": "round"}`。族集合**直接取参数表的键**，不另立第二份族清单（教义第 6 条）。四态：`acted` / `proposed_not_applied`（有提名却一件没落地——被反向闸或阶段闸拦下）/ `placeholder_host`（替身系统，工单 018 那格）/ `no_candidate`。`gain_scope` 恒 "round"：一轮只有一次读数，**出现按族拆的 gain 就是造假归因**，这一格是写给后来人的边界不是待办。
+    - **最要紧的一格是 C**：`debt_gate` 早就为"拦下了"单独留痕（003 M2 的原话是"不得表现为这轮刚好没有候选"），族级读数若把 `proposed_not_applied` 折回 `no_candidate`，就是同一根因在新观测面上复发——**折叠的代价是把相反的两件事读成一件**，与 `parameter_activity` 的 `never_proposed ≠ sparse ≠ no_data` 同族纪律。
+    - **判据（新档 10 格）**：纯函数六格（族集合等值 / acted 逐参数 `from`→`to` 实质 / 被拦不折成 no_candidate / 替身自成一态 / 不臆造按族 gain / 状态词汇封闭）+ 接线四格（随行且覆盖全表、投影 + 读回跨文件闭环、族级合计与平铺列表等值、不发明表外族）。C 格与 F 格是一对方向钉：C 证"被拦"这一态存在，F 证词汇表没被随手扩。
+    - **红→绿**：首跑 `8 failed, 2 passed`，两类分开报——`ImportError: cannot import name 'familyAttribution'`（新符号，6 格）与两条 AssertionError（随行缺格、投影丢格，红在行为断言）；那 2 条 passed 是结构对齐前的形状断言，不是漏红。⇒ 绿：本档 10 passed、`tests/unit/evolution/rsi` 215 passed、`tests/unit/evolution` 1578 passed。
+    - **红自证**（只 stash 两个生产文件，tag `red-selfproof-MB-prod`，apply 后 drop）：`10 failed, 1568 passed`，失败集**恰好等于**本批 10 格。
+    - **宽域 A/B**（`-k HEAD -n 3 -c <新判据> -- tests/unit/evolution tests/unit/api/test_evolution_ab_endpoint.py`）：基线 `10 failed 1579 passed` ↔ 本树 `1589 passed`，仅本树红 0 ⇒ **AB_PASS**；仅基线红 10 条＝本批判据（交付证据）。
+    - **活体 5 组读数 exit=0**：真 `RSIOrchestrator`（四系统边界替身、属性偏离 setpoint、阶段经治理设置进 2）跑出 sleep/emotion/experience/tool_memory 全 `acted`、context `no_candidate`；`proposed_total=11 == len(optimizations)`、`applied_total=11 == applied_count`；acted 样本 `{sleep.base_decay_rate, from 0.5 → to 0.42, applied true}`；真 `attach_persistence` 的 jsonl 行带 `family_attribution`；真响应面函数 `get_latest_rsi_summary` 读回 5 族且 `stale=false`；仓内真 `data/` md5 前后一致。边界如实写：探针没装整只 `PostChatPipeline`（要真 agent_ref 与对话态），读侧打的是该 pipeline 自己 import 的那条生产函数。
+    - **反证**：只摘掉 `summarize_rsi_result` 的投影段再跑同一脚本 ⇒ 红在两处（"[3] 落盘的摘要行里没有族级归因"与"[4] 响应面读不到——只写不读的观测面"），随后 cp 还原并 sha256 复证字节一致。**这条反证是本批与"写了没人读"的分界**：观测面新增一格，必须同时证它出得了进程、也被人读回来。
+    - **顺手收一处手抄计数**：`result_summary` 模块头原文写着"响应面摘要（**九个字段**，…）"，本批加一格就是十个——字段数的单一事实源是函数返回的键集合，手抄计数下一次增字段必漂（`tests/unit/test_docs_index_hand_copied_counts` 禁的是同一形态，只是那守卫只管导航/纪律两处）。改成按形态描述、不写数字。
+    - **净 LOC**：生产池 **+96/−2 ⇒ 净 +94**（`orchestrator.py +85/−0`、`result_summary.py +13/−2`；增侧主体是"为什么不拆轮 / 为什么不拆 gain"的边界说明，逻辑只有新函数与一次随行赋值）；判据 182 行；子集池 +3/−0（593→594）。
+    - **仍开**：① 拆不拆轮（模块化每族一轮）待读数稳定后另批，且要同批改判 `rollback_manager` 的判定粒度；② M-E（环节归因三元组）按 §4 的次序约束**必须晚于本批**，其分类枚举要先与 `self_model.py:205-210` 五算子、`capability_gap.py:43-47` 三值缺口**比后合**，不得并存第三套；③ `context` 族在探针里读作 `no_candidate` 而非 `placeholder_host`——构造编排器时没传 `context_system`，`get_placeholder_system_names()` 现读未把它算进缺席名单，这一格形态归"门限入表"那批一并核（不在本批顺手改判定）。
+    - **本会话下一枚空号现查 §6-241。**
 
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
