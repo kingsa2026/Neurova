@@ -3047,3 +3047,22 @@ tests/unit/memory/test_memoryPersistWritesTheRowItCameFrom.py
 # 夹具两条实据写在档头：甲3 的 0.98 门要"只差一两个虚词"才够得着（`+了`=0.9952，`+，已复核`=0.9513）；
 # `+。` 那对 normalized_key 相同会被内容门吞成一句。
 tests/unit/memory/test_writeSideFillsEmbedding.py
+# 批 §6-232（§6-210 老账①⑤）：两条"同一件事的第二处定义"收成一处。
+# ① 记忆落点 `<root>/memory/memory.db` 此前在 `agent_core.py` 与 `manager._default_db_path_for`
+# 各拼一遍（同形、只差 root 来源），改一处即分叉＝数据搬迁事故；现收进
+# `agent_workspaces.agentMemoryDirUnder/agentMemoryDbPathUnder` 一份。
+# ⚠ 判据第一版按"单条除法链里两个字面量齐不齐"数命中，漏掉了 `dir = root/"memory"` 先落变量、
+# 下一行再 `dir/"memory.db"` 那种拆写——数到 1 处是**假干净**。现在按文件级取 `and`、行号级取 `or`。
+tests/unit/memory/testAgentMemoryLandingIsSingleDerived.py
+# ② context 台账的 FTS 分词器不再自持一份字面量，改取 `sql_like.FTS_TOKENIZER`。
+# 取值本相同 ⇒ 纪律问题非行为问题，所以第三格是**真建库**读 `sqlite_master` 的 SQL：
+# 只钉"引用了常量"测不到那条 `%` 拼出来的建表语句拼错形态。换分词器要重建（影子表按 rowid
+# 回填后 RENAME），本批改的只是"谁定义这个词"，迁移语义未动。
+tests/unit/context/testLedgerFtsTokenizerFollowsSingleSource.py
+# 批 §6-233（§6-209 票②）：睡眠固化的编排面只剩 `sleep.py` 一份实现——那层壳（198 行、
+# 生产零外部 import、自建 MemoryRecord 把隔离三元组抹成 "default"）已退役，同批摘掉它那 5 格、
+# 改指文档四处。另两格是**交付锁**（现值绿）：六个编排入口必须还在选定那份上、
+# `from_dict` 必须仍认壳当年手工搬的 9 个键——盯的是"退役别把唯一能力一起删没"。
+# ⚠ 主格取数走 `ast_scan.sourceRefsUnder`（共享预算＋文本预筛），不许改回 `rglob + read_text`：
+# 后者把判据成本绑在代码总量上，实测给同选择集的重扫描档加墙钟压力、造出一条假回归。
+tests/unit/memory/testSleepConsolidationHasOneImplementation.py

@@ -17,10 +17,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests import ast_scan
+
 import neurova
 from neurova.core import agent_workspaces
 
 NEUROVA_DIR = Path(neurova.__file__).resolve().parent
+REPO = Path(neurova.__file__).resolve().parents[1]
 LEAF = "memory.db"
 SEGMENT = "memory"
 
@@ -39,15 +42,15 @@ def _divideChains(tree: ast.AST):
             yield node, consts
 
 
-def _spellingsIn(path: Path) -> list:
-    """返回该文件里"拼出这条落点"的行号；没拼就回空。
+def _spellingsInCode(code: str) -> list:
+    """返回该源码里"拼出这条落点"的行号；没拼就回空。
 
     判据按**文件级常量并集**取，不按单条链取：`agent_core.py` 是 `dir = root / "memory"` 先落
     一个变量、下一行再 `dir / "memory.db"`——单条链里两个字面量从不齐，按链数会把它漏成"干净"
     （本档第一版就是这么假干净的：只数到 manager 那一处）。文件级取 `and`、行号级取 `or`，
     两种写法都认，同时不牵连那些只出现 `"memory"` 一段的别的目录。
     """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(code)
     chains = list(_divideChains(tree))
     allConsts: set = set()
     for _node, consts in chains:
@@ -58,16 +61,28 @@ def _spellingsIn(path: Path) -> list:
                    if SEGMENT in consts or LEAF in consts})
 
 
+def _offenders() -> dict:
+    """仍在这条落点上拼字面量的文件清单。
+
+    取数走 `tests/ast_scan.sourceRefsUnder` 的共享预算＋文本预筛，不私有 `rglob + ast.parse`
+    ——扫描预算守卫 `test_ci_ast_scan_budget_guard` 判红的正是那形，而本格登记进受保护子集的
+    **当天**就被它点名（判据成本绑在代码总量上，30s 默认墙钟下整目录跑会偶发）。
+    预筛词取 `memory.db`：无论拆成几条除法链，真拼这条落点的文件必然出现这三个字 ⇒
+    这是判据的**充分条件**，不是放宽。
+    """
+    out = {}
+    for ref in ast_scan.sourceRefsUnder(NEUROVA_DIR, ".py", (LEAF,)):
+        lines = _spellingsInCode(ref.code)
+        if lines:
+            out[ref.path.relative_to(REPO).as_posix()] = lines
+    return out
+
+
 def testTheMemoryLandingIsSpelledInExactlyOneFile():
     """全仓有几个文件在这条落点上拼过字面量——只许单源那一个。"""
-    hits = {}
-    for py in NEUROVA_DIR.rglob("*.py"):
-        lines = _spellingsIn(py)
-        if lines:
-            hits[py.relative_to(NEUROVA_DIR.parent).as_posix()] = lines
+    hits = _offenders()
     assert list(hits) == ["neurova/core/agent_workspaces.py"], (
-        "落点拼法散在 %d 个文件：%s ⇒ 改一处即分叉（§6-210 老账①）" % (
-            len(hits), {k: v for k, v in hits.items()})
+        "落点拼法散在 %d 个文件：%s ⇒ 改一处即分叉（§6-210 老账①）" % (len(hits), hits)
     )
 
 
