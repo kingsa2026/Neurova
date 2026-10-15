@@ -66,7 +66,27 @@ COMMAND_SPEC: Dict[str, List[str]] = {
     "stream": [],
 }
 
-HISTORY_FILE = Path(os.path.expanduser("~")) / ".neurova_repl_history"
+def replHistoryPath() -> Path:
+    """REPL 历史落点：数据根下唯一一处；旧 `~/.neurova_repl_history` 在空缺时收养。
+
+    原形态是**模块级常量** `Path(os.path.expanduser("~")) / ".neurova_repl_history"`，两处病灶：
+    ① 它在主目录**根**上而不在 `~/.neurova/` 下，所以家目录落点守卫那张表一直看不见它；
+    ② import 那一刻就把路径定死了——注入 `NEUROVA_DATA_DIR` 对已固化的常量无能为力
+    （与 `tests/conftest.py` 段头写的"落点多数是构造期/import 期定死"同一形态）。
+    因此改成**调用时算**；旧那份仍被认出来收养，历史不会因为换根而丢。
+    """
+    from neurova.core.data_root import adoptHomeRootLanding, dataLanding
+
+    target = dataLanding("cli", "repl_history", legacy=())
+    # 旧那份挂在主目录根上（`~/.neurova_repl_history`），走带权利闸的收养入口：
+    # 跑测与取证探针把数据根指到临时目录时，这一格不许把操作者自己的历史搬走。
+    adoptHomeRootLanding(target, ".neurova_repl_history")
+    # write_text 不建父目录；缺目录时保存走的是 `except OSError: pass`，会静默变成"历史没存"。
+    # 落点自己负责把父目录备齐，两处使用点才不需要各自补判空。
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 HISTORY_MAX = 500
 
 
@@ -1945,8 +1965,9 @@ class NeurovaCLI:
 
     def _load_history(self) -> None:
         try:
-            if self.console.is_terminal and HISTORY_FILE.exists():
-                lines = HISTORY_FILE.read_text(encoding="utf-8").splitlines()
+            historyFile = replHistoryPath()      # 一处一次：它带收养副作用，重复调用就是重复搬移
+            if self.console.is_terminal and historyFile.exists():
+                lines = historyFile.read_text(encoding="utf-8").splitlines()
                 self._history = [l for l in lines if l.strip()][-HISTORY_MAX:]
         except OSError:
             self._history = []
@@ -1958,7 +1979,7 @@ class NeurovaCLI:
             self._history.append(line)
             if len(self._history) > HISTORY_MAX:
                 self._history = self._history[-HISTORY_MAX:]
-            HISTORY_FILE.write_text("\n".join(self._history[-HISTORY_MAX:]), encoding="utf-8")
+            replHistoryPath().write_text("\n".join(self._history[-HISTORY_MAX:]), encoding="utf-8")
         except OSError:
             pass
 

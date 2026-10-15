@@ -19,15 +19,25 @@
 收养接线格钉 `dataLanding`/`adoptHomeLanding` 真的被调——只把字面量删掉而没接上单点，
 是"看起来修好了"的另一种形态。反向钉由既有常驻守卫承担：`TestNoNewHomeLandingIsAllowed`
 的豁免表本批从 6 条收到 1 条（只剩 `core/data_root.py` 那个收养端本身）。
+
+第五处是 CLI 的 REPL history，与前四处不同族也不同形：旧落点挂在**主目录根**上
+（`~/.neurova_repl_history`，不在 `~/.neurova/` 下），家目录那张表一直看不见它；且它是
+**模块级常量**，import 即定值，注入数据根对一个已固化的常量无能为力。收它时踩到自家家规：
+第一版直接调无闸的 `adoptLandingFrom` 搬主目录文件——那正是 §6-203/204 实测事故的形状
+（跑测把操作者的凭据搬进临时根）。故收养端补一个同闸的入口 `adoptHomeRootLanding`，
+取法不同而权利判定同一份；本档那三格收养行为钉的就是这道闸。
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests import ast_scan
 
 import neurova
+from neurova.core import data_root
 
 NEUROVA_DIR = Path(neurova.__file__).resolve().parent
 #: 主目录族落点（§6-203 那张表里的真 home 两处 + rbac）
@@ -133,6 +143,119 @@ def testBareRelativeLandingsFollowTheDataRoot(tmp_path: Path, monkeypatch):
         assert str(Path(value).resolve()).startswith(str(tmp_path.resolve())), (
             "%s 的 storage_dir 仍随 CWD 或仍指主目录（实得 %s）" % (label, value)
         )
+
+
+@pytest.fixture()
+def fakeHome(tmp_path: Path, monkeypatch) -> Path:
+    """把 `Path.home()` 指到临时目录——真主目录本轮一个字都不碰。"""
+    home = tmp_path / "fakeHome"
+    home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+    return home
+
+
+def _loadCliFace():
+    """按**仓根那份文件的绝对路径**加载 CLI 门面，不用 `import_module("cli") + reload`。
+
+    `reload` 重跑的是 `sys.modules["cli"]` **当前指向的那份文件**——整目录跑时"谁先导入"
+    决定了那份是谁。实测踩坑：A/B 的基线树里 `cli.py` 是未修的旧形态，这一格却绿了，
+    因为同进程先导入的是主树那份已修的 `cli.py`；判据换了采集顺序就失去咬合力。
+    路径按 `__file__` 反推仓根，不写死机器路径。
+    """
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    cliPath = Path(__file__).resolve().parents[3] / "cli.py"
+    spec = spec_from_file_location("cliFaceUnderTest", cliPath)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _seedHomeHistory(home: Path, payload: str = "SENTINEL-HISTORY") -> Path:
+    legacy = home / ".neurova_repl_history"
+    legacy.write_text(payload, encoding="utf-8")
+    return legacy
+
+
+def _foreignRoot(monkeypatch, tmp_path: Path) -> Path:
+    """数据根显式指到**不等于默认推导**的一址（跑测临时根、取证探针根都是这形状）。"""
+    monkeypatch.setattr(data_root, "_REPO_ROOT", tmp_path / "theOperatorsRepo")
+    injected = tmp_path / "elsewhereRoot"
+    monkeypatch.setenv(data_root.DATA_ROOT_ENV, str(injected))
+    return injected
+
+
+def testReplHistoryLandsInTheDataRootAndIsNotFrozenAtImport(tmp_path: Path, monkeypatch):
+    """行为钉（第五处）：CLI 的 REPL history 从 `~/.neurova_repl_history` 收进数据根。
+
+    这条与其余四处不同形，两件事都得钉：
+    ① 旧落点在**主目录根**上（不在 `~/.neurova/` 下），所以守卫那张表看不见它——
+       不收就会一直漏；② 它原先是**模块级常量**，import 那一刻就把路径定死了，
+       注入数据根对一个已 import 的常量毫无办法（本仓 conftest 那段"构造期定死"的老账同形）。
+       ② 的判据形状是"换了根，同一次 exec 出来的模块也要跟着换落点"——常量形态下
+       第二次设 env 后调用仍读到老值。
+    """
+    first = _foreignRoot(monkeypatch, tmp_path)
+    cli = _loadCliFace()
+    second = tmp_path / "secondRoot"
+    monkeypatch.setenv(data_root.DATA_ROOT_ENV, str(second))
+
+    path = cli.replHistoryPath()
+    assert str(Path(path).resolve()).startswith(str(second.resolve())), (
+        "换根后仍指着上一次解析的落点（实得 %s，本轮根 %s）⇒ 常量形态，注入无效"
+        % (path, second)
+    )
+    assert str(first) not in str(path), "同一模块实例把第一次的根记成了默认值"
+    assert not str(path).endswith(".neurova_repl_history"), (
+        "还指着主目录根那份（实得 %s）⇒ 收了函数没收落点" % path
+    )
+
+
+def testForeignRootDoesNotStealTheOperatorsHistory(fakeHome: Path, tmp_path: Path, monkeypatch):
+    """收养那一族的家规同样管主目录根那份：数据根指到别处时一个字都不动。
+
+    本批判据自身就是这一格的受害面——先前写的是无闸的 `adoptLandingFrom`，跑测注入临时根
+    时会把操作者自己的历史搬进 `Temp/neurovaDataRoot-<随机>/`（§6-203 那次实测事故的形状）。
+    """
+    injected = _foreignRoot(monkeypatch, tmp_path)
+    legacy = _seedHomeHistory(fakeHome)
+    cli = _loadCliFace()
+
+    path = cli.replHistoryPath()
+    pathParent = Path(path).parent
+
+    assert legacy.read_text(encoding="utf-8") == "SENTINEL-HISTORY", "操作者的历史被搬进了临时根"
+    assert not (pathParent / "repl_history").exists(), (
+        "别处根下凭空长出一份历史＝同一份东西两个落点（未收养时新落点必须不存在）"
+    )
+    assert str(injected) in str(path), "落点本身没在注入的根下，后面两条断言就是空转"
+
+
+def testOperatorsOwnRootStillAdoptsTheHistory(fakeHome: Path, tmp_path: Path, monkeypatch):
+    """闸不是总开关：操作者自己的默认根下照常收养，换根不让他丢掉历史。"""
+    repo = tmp_path / "repo"
+    monkeypatch.setattr(data_root, "_REPO_ROOT", repo)
+    monkeypatch.delenv(data_root.DATA_ROOT_ENV, raising=False)
+    legacy = _seedHomeHistory(fakeHome)
+    cli = _loadCliFace()
+
+    path = cli.replHistoryPath()
+
+    assert Path(path).read_text(encoding="utf-8") == "SENTINEL-HISTORY", "升级路径没收进旧历史"
+    assert not legacy.exists(), "旧那份留在原地＝同一份历史两个落点"
+
+
+def testHistoryParentDirExistsBeforeWrite(tmp_path: Path, monkeypatch):
+    """落点自己备齐父目录：写侧是 `except OSError: pass`，缺目录会静默变成"历史没存"。"""
+    _foreignRoot(monkeypatch, tmp_path)
+    cli = _loadCliFace()
+
+    path = cli.replHistoryPath()
+
+    assert Path(path).parent.is_dir(), (
+        "父目录没建 ⇒ `_save_history` 的 FileNotFoundError 被 `except OSError: pass` 吞掉，"
+        "界面上看着一切正常、历史一条不存"
+    )
 
 
 def testScannerFaceSeesTheseFiles():
