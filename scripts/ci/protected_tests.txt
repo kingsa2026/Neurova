@@ -3015,3 +3015,12 @@ tests/unit/memory/test_backfillMemoryEmbeddingsTool.py
 # 活跃面消失；整条退回只看余弦 ⇒ kai 那条 0.7875 的姊妹条把它吞掉）。
 # ⚠ 只回退两个 clause 里的**一个**（去掉包含条款、留 0.98 下限）活体仍全绿——反证要整条退。
 tests/unit/memory/test_sleepMergeRequiresNearEquivalentContent.py
+# 批 §6-226（§6-223 三态票的乙＋甲）：固化必须按隔离作用域分桶，写回必须进源行自己的作用域。
+# 6 格——跨归属的两条（内容相同、余弦 1.0）不许进同簇；**同归属的重复照旧要合**（反向钉，
+# 防分桶收得比裁定更紧）；产物继承源行的归属三元组；写回在源行作用域内真退役（查盘上 lifecycle
+# 与 stats["forgotten"]，不信被拒时只回 False 不抛的那条计数）；外来作用域单例的温度盘上真降；
+# AST 形状锁：写回里不得出现 agent_wide（那是把越权写成契约），且必须出现 request_scope。
+# 逐档单跑 6/6；活体 tests/manual/sleepConsolidationScopesLiveCopy.py 走现网库**副本** + 真
+# create_app() + 真 start_sleep()，读出 added=2/forgotten=5（修前 forgotten=0），反证只把
+# request_scope 的实参退空即红在"3 条逐字重复仍活跃 + 一行温度都没降"上。
+tests/unit/memory/test_sleepConsolidationBucketsByIsolationScope.py
