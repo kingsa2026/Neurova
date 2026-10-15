@@ -47,16 +47,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-try:
-    from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
-except ImportError:
-
-    class ReflectionType(str, Enum):
-        ERROR_ANALYSIS = "error_analysis"
-        PROBLEM_SOLVING = "problem_solving"
-        DECISION_MAKING = "decision_making"
-        INTERACTION = "interaction"
-        LEARNING = "learning"
+# `ReflectionType` 直连真身。原先那段 `except ImportError` 桩把五个成员抄成第二份枚举
+# （`str, Enum` 那份与 `growth_log` 真身各漂各的），而真身所在的 `growth_log` 模块级闭包只碰
+# stdlib 与本仓 ⇒ 这条兜底按批 43 已裁口径永不可达。台账 §6-228。
+from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
 
 
 logger = get_logger(__name__)
