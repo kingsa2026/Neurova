@@ -117,6 +117,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "本守卫自身：它按语法树**检出**墙钟上界并比对台账，脚本里出现的 perf_counter "
         "字样是被检对象（用于构造检出器反向控制的样例），不参与任何计时读数。",
     ),
+    "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
+        ("wallClock",),
+        "本文件**不读真实墙钟**——`monotonic` 字样只出现在两处：本格自造的虚拟钟 "
+        "`VirtualTime.monotonic()`（被测代码经 `H.time.monotonic()` 取的就是它），以及这条结论本身。"
+        "量的是「重试被总预算掐停在第几次」与虚拟钟推进量，都是精确值，与机器负载无关。"
+        "§6-198 建档时这格读的是真实 `time.monotonic()` 差值并断上界 `elapsed < 1.5`——"
+        "注入的 0.2s 延迟在加压机器上会漂，那正是本门要逐条给结论的形态；"
+        "§6-230 改判为虚拟钟驱动（同 §6-96/§6-216 那一族的处理方向）。",
+    ),
 }
 
 
