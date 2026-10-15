@@ -1190,6 +1190,9 @@ tests/unit/ci/test_manual_live_verify_contract.py
 #    判据坏掉不阻断回复 / 非流式 ctx 与流式同键 / 门控装配单源 / goal 有跨文件读写面 /
 #    台账阈值轴为 single_source。含一处放大视角命中点：受限子会话通道形态归一）
 tests/unit/agent/test_goal_gate_wiring.py
+# 死循环门的两个在用阈值必须来自配置单源（装配读数等值 + 开火时点随配置变 +
+# 类默认取自单源不留字面量 + 死旋钮若挂键则必须被读）。
+tests/unit/agent/test_doomLoopGateThresholdsFollowConfig.py
 
 # Issue #268：轮次态归属（G1 方案切片 A）——loop 单例上的轮次控制状态迁到
 #   每轮显式的 `TurnRunState`，两处 loop（OpenAI 流式/非流式、Anthropic）同批收口。
