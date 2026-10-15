@@ -46,11 +46,15 @@ def _stageById(rows, memoryId: str):
 
 
 def _seedTwoSimilarManager(tmp_path: Path):
-    """真 manager + 两条真行：内容相近，靠显式嵌入让它们必然同簇。"""
+    """真 manager + 两条真行：内容**近等价**（短者是长者的子串）且同嵌入 ⇒ 按甲3（§6-219）必同簇。
+
+    夹具原样是"…第一例 / …第二例"——两条互不包含的不同事实，那正是 §6-218 证明会丢内容的
+    形状；本档问的是"退役行还进不进聚类"，用一对合法重复即可，不必借旧规则。
+    """
     _, _, _, bodyManager = _symbols()
     manager = bodyManager(tmp_path, agentId=AGENT)
-    manager.remember(content="登录页验证码在弱网下加载超时，用户投诉第一例")
-    manager.remember(content="登录页验证码在弱网下加载超时，用户投诉第二例")
+    manager.remember(content="登录页验证码在弱网下加载超时")
+    manager.remember(content="登录页验证码在弱网下加载超时，用户已提交投诉")
     manager.remember(content="本周会议纪要讨论了排期与预算分配")
     return manager
 

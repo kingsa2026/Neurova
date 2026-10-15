@@ -12,7 +12,8 @@
   tool_memory: tm_multiplier_differentiation（奖惩分化）
                tm_decay_forgetting_band（遗忘带宽：不衰减/过衰减都扣分）
                tm_threshold_band（肌肉记忆阈值语义域）
-  sleep:       sl_dedup_band（相似合并：欠合并/过合并都扣分）
+  sleep:       sl_dedup_band（重复对合并；欠合并扣分。甲3/§6-219 后"调低阈值即过合并"
+                             这一形被判据关死，改由本格反向钉住：0.05 必须仍满分）
                sl_decay_band（睡眠衰减带宽）
   emotion:     em_protection_direction（情感记忆不得比中性记忆衰减更快）
                em_threshold_band（保护阈值语义域）
@@ -89,10 +90,15 @@ class SensitivityTest(unittest.TestCase):
         self.assertEqual(self._score_with("tool_memory", "decay_rate", 0.0), 0.0)
 
     def test_similarity_threshold_extremes_break_dedup(self):
-        # 欠合并（阈值 1.0：完全相同的记忆对也不再合并）
+        # 欠合并（阈值 1.0：cos≈0.99 的重复对也不再合并）
         self.assertEqual(self._score_with("sleep", "similarity_threshold", 1.0), 0.0)
-        # 过合并（阈值 0.05：不相关记忆也被吞并）
-        self.assertEqual(self._score_with("sleep", "similarity_threshold", 0.05), 0.0)
+        # 甲3（§6-219）关掉了另一头：合并准入是"余弦达近等价下限 **且** 内容互为子串"，
+        # 阈值调低拉不穿那条下限 ⇒ "0.05 就过合并"这一形今天必须**不再成立**，且要由本格钉住
+        # （哪天它又能过合并，本格红）。判据不许只删不补。
+        self.assertEqual(
+            self._score_with("sleep", "similarity_threshold", 0.05), 1.0,
+            "阈值调低到 0.05 仍应达成'重复对合并、无关记忆幸存'——过合并回来了就是甲3 的门被拉穿",
+        )
 
     def test_sleep_decay_rate_extremes_break_band(self):
         self.assertEqual(self._score_with("sleep", "base_decay_rate", 0.0), 0.0)

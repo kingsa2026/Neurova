@@ -59,13 +59,18 @@ def test_roundTripKeepsEmbedding():
 
 
 def test_embeddingReachesConsolidationThroughTheProductionFace(tmp_path: Path):
-    """从生产出口取数走完整条路：有嵌入时，固化的两条相近记忆要真聚成一簇。"""
+    """从生产出口取数走完整条路：有嵌入时，固化的两条**内容近等价**记忆要真聚成一簇。
+
+    夹具原样是"…甲例 / …乙例"——那是"语义相近即同簇"的形状，而 §6-218 实测证明那条规则
+    的代价是丢内容，§6-219 甲3 已把准入换成"余弦达下限 **且** 归一化后短者为长者子串"。
+    故这里改成包含关系的一对（EMB_A 与 EMB_B 的余弦实测 0.9997，过得了下限）。
+    """
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
     from tests.cognitive_body_store import bodyManager
 
     manager = bodyManager(tmp_path, agentId=AGENT)
-    manager.remember(content="登录页验证码在弱网下超时，甲例")
-    manager.remember(content="登录页验证码在弱网下超时，乙例")
+    manager.remember(content="登录页验证码在弱网下超时")
+    manager.remember(content="登录页验证码在弱网下超时，重试两次后恢复")
 
     # 模拟"以后写侧开始填嵌入"的形状：只给对象赋值，不碰任何转换函数——
     # 转换之后补数据就测不到这条路（形态集第 189 条）。
@@ -84,7 +89,7 @@ def test_embeddingReachesConsolidationThroughTheProductionFace(tmp_path: Path):
     clusters = sleep.cluster_by_similarity(records)
     sizes = sorted(len(c) for c in clusters)
     assert sizes == [2], (
-        "两条相近记忆没聚成一簇（簇尺寸=%s）⇒ 合并这条路经生产出口走不通" % sizes
+        "两条近等价记忆没聚成一簇（簇尺寸=%s）⇒ 合并这条路经生产出口走不通" % sizes
     )
 
 

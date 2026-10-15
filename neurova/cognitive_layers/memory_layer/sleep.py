@@ -9,6 +9,7 @@
 """
 
 from neurova.core import vector_math
+from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 from neurova.core.sleep_settings_store import SleepSettingsStore
 import json
@@ -28,6 +29,12 @@ logger = get_logger(__name__)
 #: 所以退役只存在于 `lifecycle_stage` 这一个键上。`crystallized`/`consolidated` 不在
 #: 此列——它们仍算在用库里，改判属产品语义，另一次裁。
 _RETIRED_STAGES = frozenset({"archived", "forgotten"})
+
+
+#: 甲3（§6-219 裁定）：合并的准入从"语义相近"换成"内容近等价"，余弦只是其中一条腿。
+#: 这个下限不许被 `similarity_threshold` 调低拉穿——§6-218 实测的误伤正是从"只看余弦"
+#: 进来的（`IMP-探针` 与 `DB-探针` 余弦 1.0 却被并成一条）。
+MERGE_NEAR_EQUIV_COSINE = 0.98
 
 
 def _retiredFromDict(data: Dict[str, Any]) -> bool:
@@ -77,6 +84,12 @@ class MemoryRecord:
         elif not isinstance(created_at, datetime):
             created_at = datetime.now()
 
+        categories = data.get("categories") or []
+        if not categories and data.get("category"):
+            # `Memory.to_dict()` 只有单数 `category`：不接住它，分类就跨不过这道跨界口，
+            # 合并产物落到 ["general"] 兜底，事实被挪出按分类过滤的检索面（§6-219 甲3）。
+            categories = [data["category"]]
+
         # 映射MemoryManager的字段到MemoryRecord
         return cls(
             id=data.get("id", ""),
@@ -87,7 +100,7 @@ class MemoryRecord:
             emotion_score=data.get("emotion_score", 0.0),
             recall_count=data.get("recall_count", data.get("access_count", 0)),
             created_at=created_at,
-            categories=data.get("categories", []),
+            categories=categories,
             # 退役与否的唯一出处是 `lifecycle_stage`——`Memory.to_dict()` 里**没有** `is_archived`
             # 这个键。此前只读 `is_archived`，于是 soft-forget/归档过的行在进入固化时被当成活跃
             # 记忆，同一批源每轮被再合并一次（§6-214）。仍兼容自带 is_archived 的旧形状。
@@ -264,13 +277,36 @@ class SleepConsolidation:
         """获取状态值"""
         return self._state.get(key, default)
 
+    def _mergeAdmission(self, left: "MemoryRecord", right: "MemoryRecord") -> Optional[float]:
+        """两条记忆是否"同一件事的又一次记录"——是则返回用于排序的余弦，否则返回 None。
+
+        甲3（§6-218 实测 → §6-219 裁定）：合并的准入是**两条同时成立**——余弦达近等价下限、
+        且归一化后短者是长者的子串。只看余弦会把 `IMP-探针`(5 字) 与 `DB-探针`(4 字)
+        （余弦 1.0）并成一条，也会把 kai 那 4 条互不相同的对话回合（0.71~0.88）一口气收成
+        一簇，而 `merge_cluster` 是"取最长、其余 soft-forget"——合并于是成"丢内容"的同义词。
+        内容判据走全仓唯一的 `content_identity.normalized_key()`，不另写第二份归一化。
+        """
+        if not left.embedding or not right.embedding:
+            return None
+        cosine = vector_math.cosineSimilarity(left.embedding, right.embedding)
+        # max()：调低 similarity_threshold 拉不穿这条下限，调高它仍然真的收紧
+        if cosine < max(self.similarity_threshold, MERGE_NEAR_EQUIV_COSINE):
+            return None
+        left_key = normalized_key(left.content)
+        right_key = normalized_key(right.content)
+        # 空键＝没有内容身份（纯空白/纯标点），不得互吞（content_identity 的口径）
+        if not left_key or not right_key:
+            return None
+        shorter, longer = sorted((left_key, right_key), key=len)
+        return cosine if shorter in longer else None
+
     def cluster_by_similarity(self, memories: List[MemoryRecord]) -> List[List[MemoryRecord]]:
-        """基于语义相似度聚类
+        """把"同一件事的重复记录"聚成同簇——同簇即意味着 `consolidate` 会合并它们
 
         使用简单的贪心聚类算法：
         1. 遍历所有记忆
-        2. 找到与当前记忆最相似的簇
-        3. 如果相似度超过阈值，加入该簇
+        2. 找到与当前记忆**可合并**的最相似簇（判据见 `_mergeAdmission`）
+        3. 命中则加入该簇
         4. 否则创建新簇
 
         Args:
@@ -291,14 +327,13 @@ class SleepConsolidation:
             # 找到最相似的簇
             for cluster in clusters:
                 # 使用簇中心（第一个元素）计算相似度
-                if cluster[0].embedding and memory.embedding:
-                    sim = vector_math.cosineSimilarity(cluster[0].embedding, memory.embedding)
-                    if sim > best_similarity:
-                        best_similarity = sim
-                        best_cluster = cluster
+                admission = self._mergeAdmission(cluster[0], memory)
+                if admission is not None and admission > best_similarity:
+                    best_similarity = admission
+                    best_cluster = cluster
 
-            # 如果相似度超过阈值，加入簇
-            if best_cluster is not None and best_similarity >= self.similarity_threshold:
+            # 只有内容近等价才同簇；语义相近而不等价的各成一簇
+            if best_cluster is not None:
                 best_cluster.append(memory)
             else:
                 # 创建新簇

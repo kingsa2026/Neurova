@@ -82,8 +82,8 @@ def _run() -> None:
         sleep = agent.sleep_consolidation
         bodyPath = Path(manager._persist_db_path)
 
-        manager.remember(content="登录页验证码在弱网下超时，活体甲例")
-        manager.remember(content="登录页验证码在弱网下超时，活体乙例")
+        manager.remember(content="登录页验证码在弱网下超时")
+        manager.remember(content="登录页验证码在弱网下超时，重试两次后恢复")
         manager.remember(content="会议纪要讨论排期与预算，活体丙例")
 
         with manager._lock:

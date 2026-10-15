@@ -43,23 +43,31 @@ class TestSleepConsolidation:
         assert sim > 0.99
 
     def test_cluster_by_similarity(self):
-        """测试24: 语义相似度聚类"""
+        """测试24: 聚类只把「内容近等价的重复」聚成一簇（甲3，§6-219）
+
+        原夹具是 `Python编程 / Python语法` 这种"同话题、不同事实"的一对，钉的正是 §6-218
+        证伪的规则（相近即同簇 ⇒ 合并取最长 ⇒ 另一条独有正文退役）。现两侧都钉住。
+        """
         engine = SleepConsolidation(similarity_threshold=0.8)
-        
-        # 创建两组相似记忆
+
+        # 创建两组近等价重复 + 一条同话题不同内容的反例
         memories = [
             MemoryRecord(id="m1", content="Python编程", embedding=[1.0, 0.0, 0.0]),
-            MemoryRecord(id="m2", content="Python语法", embedding=[0.95, 0.05, 0.0]),
+            MemoryRecord(id="m2", content="Python编程入门笔记", embedding=[0.99, 0.01, 0.0]),
             MemoryRecord(id="m3", content="深度学习", embedding=[0.0, 0.0, 1.0]),
-            MemoryRecord(id="m4", content="神经网络", embedding=[0.0, 0.05, 0.95]),
+            MemoryRecord(id="m4", content="深度学习优化", embedding=[0.0, 0.0, 0.99]),
+            MemoryRecord(id="m5", content="Python语法", embedding=[1.0, 0.0, 0.0]),
         ]
-        
+
         clusters = engine.cluster_by_similarity(memories)
-        
-        # 应该有2个簇
-        assert len(clusters) == 2
-        # 每个簇有2条记忆
-        assert all(len(c) == 2 for c in clusters)
+
+        # 两组重复各成一簇，同话题不同内容的 m5 独自成簇
+        assert len(clusters) == 3
+        assert sorted(sorted(m.id for m in c) for c in clusters) == [
+            ["m1", "m2"],
+            ["m3", "m4"],
+            ["m5"],
+        ], "相近而不等价的记忆被聚进了同一簇（§6-218 的误伤形状）"
 
     def test_merge_cluster_content(self):
         """测试25: 合并簇取最长内容"""
@@ -90,13 +98,17 @@ class TestSleepConsolidation:
         assert set(result.combined_categories) == {"python", "编程", "算法"}
 
     def test_consolidate_reduces_redundancy(self):
-        """测试27: 完整整合流程减少冗余"""
+        """测试27: 完整整合流程减少冗余——冗余＝"内容近等价的重复"（甲3，§6-219）
+
+        夹具原样是 机器学习入门 / 基础 / 原理：三条互不包含的不同事实，被"相近即合"吞成一条
+        正是 §6-218 记下的误伤。改成包含关系的三条，问的仍是同一件事（重复收掉、异题留下）。
+        """
         engine = SleepConsolidation(similarity_threshold=0.8)
         
         memories = [
             MemoryRecord(id="m1", content="机器学习入门", embedding=[1.0, 0.0], temperature=80.0, importance=0.6),
-            MemoryRecord(id="m2", content="机器学习基础", embedding=[0.98, 0.02], temperature=75.0, importance=0.7),
-            MemoryRecord(id="m3", content="机器学习原理", embedding=[0.96, 0.04], temperature=70.0, importance=0.5),
+            MemoryRecord(id="m2", content="机器学习入门指南", embedding=[0.98, 0.02], temperature=75.0, importance=0.7),
+            MemoryRecord(id="m3", content="机器学习入门指南附习题", embedding=[0.96, 0.04], temperature=70.0, importance=0.5),
             MemoryRecord(id="m4", content="自然语言处理", embedding=[0.0, 1.0], temperature=60.0, importance=0.4),
         ]
         
