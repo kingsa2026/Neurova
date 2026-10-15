@@ -90,6 +90,65 @@ class SimulatedAgent:
         return str(result.get("response") or "").strip()
 
 
+#: 未记基座的分组键：读数里"这条证据没绑定过任何型号"必须自成一组、不许消失，
+#: 也不许被折进某个型号（折进去就是把未知读成已知）。
+UNRECORDED_MODEL_KEY = "__unrecorded__"
+
+
+def resolveModelUnderTest(executor: Any) -> str:
+    """这轮评测实际跑在**哪个基座**上——由真正拿去执行的那个对象推导。
+
+    与 `isRealAgentTrajectoryExecutor` 同一条纪律：能力/事实**不许写成旗标或手工传参**，
+    否则实装被摘掉后读数照样说真，而下游有理由继续信它。
+
+    三种如实形态：
+    - 模拟臂自己带着执行用的 `model` ⇒ 直接回报那个值；没指名 ⇒ `"client_default"`
+      （事实是"交给多模型客户端按路由选"，不是某个型号）。注意默认装配的
+      `SimulatedAgent(model=cfg.judge_model)`——判分模型顺手当了被执行模型，
+      这一格第一次把这件事变成可见读数。
+    - 真轨迹臂 ⇒ `"agent_routed"`：模型选择发生在 agent 的请求期，执行器自己不持模型，
+      编一个型号就是伪造"已绑定基座的证据"。
+    - 取不到 ⇒ 空串（未记）。不兜默认名——兜一个出来，覆盖读数就会多出一个假分组。
+
+    本值只作**读数**：`accept/reject` 的判定链不许读它（用户裁定"只出读数不判"，
+    判据链里出现即红，见 `tests/.../test_evalResultIsKeyedByModelUnderTest.py`）。
+    """
+    if executor is None:
+        return ""
+    if isRealAgentTrajectoryExecutor(executor):
+        return "agent_routed"
+    model = getattr(executor, "model", None)
+    if isinstance(model, str):
+        return model.strip() or "client_default"
+    return ""
+
+
+def modelCoverageReadout(proposals: list) -> dict:
+    """把"哪些验收证据绑定过哪个基座"按型号分组——只呈报，不判定。
+
+    存在的理由：本仓基座是管理员运行时可换的配置，而一条技能正文的 `holdout_after`
+    从来不记录它跑在哪个模型上。换基座之后，历史批准记录对新模型**没有任何证据**——
+    这一格把那件看不见的事量出来，供人决定要不要复跑（复跑触发点的裁定见 §7.1-Q3，
+    本批不进判据）。未记基座的条目折进 `UNRECORDED_MODEL_KEY`，不消失也不冒充已知型号。
+    """
+    byModel: dict = {}
+    for item in proposals or []:
+        if not isinstance(item, dict):
+            continue
+        model = str(item.get("model_under_test") or "").strip() or UNRECORDED_MODEL_KEY
+        row = byModel.setdefault(model, {"proposals": 0, "approved": 0})
+        row["proposals"] += 1
+        # 批准词值取**写侧那一份**（`STATUS_APPLIED`——批准即应用是本仓提案生命周期词汇），
+        # 不在读数里再造第二个词；端点入参的 "approved" 与它的对不上属既有口径差，另批。
+        if str(item.get("status") or "") == STATUS_APPLIED:
+            row["approved"] += 1
+    return {
+        "by_model": byModel,
+        "unrecorded_key": UNRECORDED_MODEL_KEY,
+        "total": sum(r["proposals"] for r in byModel.values()),
+    }
+
+
 def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
     """生产装配路径的执行器**唯一出处**。
 
@@ -150,6 +209,10 @@ class EvolutionProposal:
     # `runs/*.json`，全仓零读方），关联键落在这里，详情端点才有一条既有的读路径可走
     # ——不新建端点，也不靠文件名猜。改动之前落盘的旧记录没有这一键（空串 = 当轮未记）。
     run_id: str = ""
+    # M-C：这条验收证据跑在哪个基座上（`resolveModelUnderTest` 由执行器对象推导）。
+    # 只作读数与分组证据，不参与 accept/reject；旧记录没这一键 ⇒ 空串 = 未记，
+    # 在覆盖读数里自成一组，不折进任何型号。
+    model_under_test: str = ""
     holdout_before: float = 0.0
     holdout_after: float = 0.0
     # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
@@ -300,9 +363,13 @@ class SkillEvolutionService:
 
         from neurova.evolution.eval.factory import make_skill_evolution_runner
 
+        # 执行器在此**一次** resolve（装配单点不变），基座读数由**真正拿去执行的那个对象**
+        # 推导——手工传一个模型名就是伪造证据。
+        executor = resolveEvolutionExecutor(agent, config=cfg)
+        modelUnderTest = resolveModelUnderTest(executor)
         runner = make_skill_evolution_runner(
             cfg,
-            agent=resolveEvolutionExecutor(agent, config=cfg),
+            agent=executor,
             judge=judge,
             mutate=mutate,
             bench_gate=bench_gate,
@@ -331,7 +398,8 @@ class SkillEvolutionService:
             dataset=dataset, iterations=iterations, noise_band=noise_band,
             ledger_key=skill_id, anchor_best=anchor_best,
         )
-        run_id = self._persist_run(skill_id, artifact_type, result)
+        run_id = self._persist_run(skill_id, artifact_type, result,
+                                   model_under_test=modelUnderTest)
 
         proposal: Optional[EvolutionProposal] = None
         if not result.rejected and result.changed:
@@ -341,6 +409,7 @@ class SkillEvolutionService:
                 skill_id=skill_id,
                 artifact_type=artifact_type,
                 run_id=run_id,
+                model_under_test=modelUnderTest,
                 baseline_text=skill_text,
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),
@@ -420,12 +489,15 @@ class SkillEvolutionService:
         # 不可逆的是解释而不是数据。
         executor = resolveEvolutionExecutor(agent, config=config)
         kind = "real_agent" if isRealAgentTrajectoryExecutor(executor) else "simulated"
+        # 基座读数同由**这个**执行器推导；两条返回路径都得带——空集那条若不带，
+        # "没跑成"就会被读成"没有这个维度"。
+        modelUnderTest = resolveModelUnderTest(executor)
 
         split = dataset.heldout or evaluation_split(dataset)
         if not split:
             return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
                     "candidate_avg": 0.0, "delta": 0.0, "per_task": [],
-                    "executor_kind": kind}
+                    "executor_kind": kind, "model_under_test": modelUnderTest}
         if judge is None:
             from neurova.evolution.eval.fitness import LLMJudge
 
@@ -453,6 +525,7 @@ class SkillEvolutionService:
             "delta": round(float(candidate_avg - baseline_avg), 4),
             "per_task": per_task,
             "executor_kind": kind,
+            "model_under_test": modelUnderTest,
         }
 
     # ── 提案审批(人工闭环终点)──
@@ -556,7 +629,8 @@ class SkillEvolutionService:
     # ── 审计落盘 ──
 
     def _persist_run(self, skill_id: str, artifact_type: str,
-                     result: EvolutionRunResult) -> str:
+                     result: EvolutionRunResult,
+                     *, model_under_test: str = "") -> str:
         """落一次运行的审计文件，回它的 `run_id`（写失败回空串，不假造一个 id）。
 
         返回 id 而不是 None：提案要能指回这次运行（§6-95 后半）。"文件没落成"与
@@ -570,7 +644,11 @@ class SkillEvolutionService:
             runId = f"run_{ts}_{uuid.uuid4().hex[:6]}"
             payload = {"skill_id": skill_id, "artifact_type": artifact_type,
                        "at": datetime.now(UTC).isoformat(),
-                       "run_id": runId, **result.to_dict()}
+                       "run_id": runId,
+                       # 审计文件也要绑定基座：审批人日后追问"这条证据在哪个模型上量的"，
+                       # 只能靠这次运行的落盘字节，不能靠内存里的提案。
+                       "model_under_test": model_under_test,
+                       **result.to_dict()}
             (runsDir / f"{runId}.json").write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
