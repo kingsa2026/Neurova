@@ -56,11 +56,18 @@ def write_back_consolidation_result(memory_manager, result: Dict[str, Any]) -> D
                 categories = getattr(memory, "categories", None) or ["general"]
                 category = categories[0] if isinstance(categories, list) else str(categories)
                 try:
+                    # 显式 id：产物正文就是某条源的正文，不给 id 时 `remember()` 的内容门会
+                    # 把这次写入改道成"命中那条源"，紧接着它又进退役清单 ⇒ 活跃库里这条事实
+                    # 一条不剩（本轮现量：默认分类下报 `added=1`，盘上只剩 2 条 forgotten 行）。
+                    # 顺带把来源落到产物行上——`MergeResult.source_ids` 此前只进 sleep_logs.json，
+                    # "这条记忆是那几条合出来的"在库内不可回查（§6-218 的断点）。
                     memory_manager.remember(
                         content=memory.content,
                         category=category,
                         importance=getattr(memory, "importance", 50.0),
                         temperature=getattr(memory, "temperature", 50.0),
+                        id=memory.id,
+                        metadata={"merged_from": list(getattr(memory, "merged_from", None) or [])},
                     )
                     stats["added"] += 1
                 except Exception as e:  # noqa: BLE001

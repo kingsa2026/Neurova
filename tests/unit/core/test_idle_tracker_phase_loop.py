@@ -49,7 +49,11 @@ class FakeMemoryManager:
 
 
 def _sample_memories():
-    """m1/m2 语义相似（同嵌入）应被合并；m3 是孤立单例必须保留"""
+    """m1/m2 内容近等价（短者是长者的子串 + 同嵌入）应被合并；m3 是孤立单例必须保留
+
+    m2 原样是"用户喜欢喝咖啡"——与 m1 互不包含，按甲3（§6-219）不再算重复；
+    本档要的是"一对真重复 + 一条单例"，故把 m2 写成包含 m1 的补充句。
+    """
     return [
         {
             "id": "m1",
@@ -61,7 +65,7 @@ def _sample_memories():
         },
         {
             "id": "m2",
-            "content": "用户喜欢喝咖啡",
+            "content": "用户喜欢咖啡，尤其是手冲",
             "embedding": [1.0, 0.0],
             "temperature": 60.0,
             "importance": 0.5,
