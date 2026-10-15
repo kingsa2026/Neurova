@@ -3810,6 +3810,19 @@
     - **本批状态**：这条腿**现在是开着的**（两 agent `true`，进程侧已验）；`data/sleep_settings/` 仍属运行期配置不进库；现网 16 行 = 11 活跃 + 5 退役。若用户不要它继续开着，一句话即可回到止血（翻 false + 重启，无代码改动）。
     - **仍开**：① 上面那张三态票（推荐甲）；② 睡眠固化族那一路的读面仍有一条老账——全文 SQL 不按 lifecycle 过滤（"过滤归读方"），所以 soft-forget 的行在只走 SQL 的读面上仍能被命中，本批的残迹清理因此选了**硬删**而不是软删（这条与 §6-208 那道检索侧过滤器是同一件事的两面）。
     - **本会话下一枚空号现查 §6-228。**
+228. **同名 class/def 桩全拆：八处假降级直连真身，豁免表转零容忍（✅ `b2ec68b1` 生产+判据+活体；子集 0 变——判据早已在册，条目仍 583）** 🟢 —— 用户点单：§6-224 那张三态票取**甲**（全拆），粒度取"三档一批＋表清零"。
+    - **实状（现算，不沿用批 50 的描述）**：8 处／3 档——`neurova/llm/provider_manager.py` 6、`neurova/router.py` 1、`neurova/post_chat_pipeline.py` 1。逐处读过它们"兜"成什么：`encrypt_api_key(key): return key` 与 `decrypt_api_key(key): return key`＝**密钥加解密被静默做成透传**；`get_preset_registry(): return None`＝预设整层失效而调用方以为有；`LogLevel`/`Module` 与真身各一份词汇；`types` 那四条桩 dataclass 的字段与真身各漂各的；而该段 try 体里还导入了 `ProviderType`，handler **没补它** ⇒ 兜底真触发时下一句就是 `NameError`——"兜底"自己就是坏得不对称的那一份。`post_chat_pipeline` 那枚最尖锐：桩写的成员是 `error_analysis/problem_solving/decision_making/interaction/learning`，真身是 `ERROR/IMPROVEMENT/INSIGHT/PATTERN/PERFORMANCE/STRATEGY`，**交集为空**（这不是降级，是另一套假词汇）。
+    - **为什么这类桩该比 `X = None` 更严**：`None` 在下一行就 `TypeError`，故障当场可见；"看着像真身"的空类与返回桩能一路走下去，把降级做成事实。可达性也不成立——被包的六条 import 其模块级闭包只碰 stdlib 与本仓，`touchesRealOptional` 逐条判 False（批 43 已裁口径）。
+    - **生产侧净 −101（+34/−135）**：`provider_manager` +18/−91、`router` +12/−34、`post_chat_pipeline` +4/−10。`router.py` 里那段兜底顺手维护的 `LLM_ROUTER_AVAILABLE` **一并摘掉**——全仓现读只写不读（两处赋值、零消费方），留着就是 §2 那条"只写不读的配置"，它承诺了一个没人查的状态。
+    - **判据**（`tests/unit/test_noFirstPartyImportPlaceholder.py` 8→**9 格**）：`STUB_LEDGER` 由 3 档:8 处 收成空表，等号格之外**另加一条零容忍格**。这条不是装饰：等号格只证"现读＝表"，往表里加一行就能让它绿；零容忍格红着说明"登记豁免"这条路已封——确实可能缺的东西由 `touchesRealOptional` 自己判，不由人在这里写名字。
+    - **红→绿**：红灯首跑 `1 failed, 8 passed`（红落等号格，报错原文列出 8 处／3 档；零容忍格首跑即绿＝政策格按设计不产红，不拿它冒充本批的红）；绿灯 9 passed。红自证（`git stash push -m red-selfproof-b52` 只退 3 档生产件、留判据）`1 failed, 8 passed`，失败集恰等于那条等号格。
+    - **变异 4 枚全咬**（按 bytes、模式跟随目标行尾、逐枚 sha256 复原复核，残留 无）：M1 往 `router.py` 装回一枚同名桩⇒等号格红；M2 往豁免表加一行⇒**两格**红（零容忍格专治"用表格喂绿等号格"）；M3 摘掉"同名"条件⇒探测器反空转格红（不再要求同名就会把无关 class 也算桩）；M4 摘掉可达性判定⇒两格红（§3 允许的正当回退会被一起打掉）。
+    - **活体 7 项 exit=0**（`tests/manual/stubFallbacksRemoved_batch52.py`）：① `provider_manager` 的 14 个名字逐个 **`is`** 真身（桩那侧必然是本地另定义的一份，`is` 就是判别式）；② 密钥那条腿实测**密文≠明文**（16 字符→102 字符）且解回原值——正是被拆掉的透传桩给不出的读数；③ `get_preset_registry()` 给出真注册表与 5 条预设；④ `router` 四名 is `llm_router` 真身、`LLM_ROUTER_AVAILABLE` 已不存在、`detect_request_type()` 真回 `chat`；⑤ `ReflectionType` 单源（成员清单直接取真身六个）；⑥ 真 `create_app()` 路由挂载 90 只、`/health`→200、校准→404；⑦ **反向校准**：同一把尺（判据自己的 `stubViolations`）打在 HEAD 仓外工作树报 8 处／3 档，本树报 0。
+    - **宽域 A/B 的交付证据没取自汇总，另做定向复算**：选择集 `tests/unit/{llm,agent,api,core,evolution}`，基线＝HEAD＋铺入本批判据 ⇒ 基线失败集合 57 条 ↔ 本树 56 条、**仅本树红 0 条＝AB_PASS**；但"仅基线红"只列出 1 条与本批无关的 `test_loop_manager.py` ERROR，且脚本对账提示两侧"汇总报 2060 条／抽取 61·58 条"都不等（本仓 `addopts` 带 `-v` 的老形状，§6-212 记过）。⇒ 另跑一发：把本批判据铺进 HEAD 的仓外工作树单跑 `TestPlaceholderMustBindToRealOptional` ＝ **`1 failed, 5 passed`，红的正是那条等号格**，本树同档 `9 passed`。两侧同红的 46 条预存（node 环境红、时钟跳格族等）不认领。
+    - **一条间歇读数不认领也不当作已通过**：配对跑本档＋CI 预算守卫时出现过 1 条 **teardown ERROR** 点名在最长那条格（等号格）名下；后续三次同选择集复跑皆 `76 passed`、单跑该格也不复现。处置同 §6-207/§6-212/§6-220/§6-224/§6-225 那族——仓库根污染守卫把别的进程落在仓根的条目记到"当时在跑的格"名下。
+    - **号位说明（本会话第五次让号，形状已经变了）**：草稿原拟 §6-225→让到 §6-227（当时明细 max＝226）；等 A/B 的那几十分钟里对方把 §6-227 用掉（`82e17800`），本格最终落 **§6-228**。这轮让号第一次落到**代码注释**上——三档生产件＋判据＋活体档共 6 处写着旧号，必须提交前整体改写并复跑判据。**教训：号写进代码注释＝把一次时间性快照钉进仓库**；后续批次改为"注释先不写号、提交前一次性写"。留下的空洞（221 及各次跳过的号）**不复用**，理由见 §6-224/§6-225。
+    - **仍开**：① 半修（父端 utf-8 解 Python 子件、子端没钉 `PYTHONIOENCODING`）存量 27 处／18 档的甲/乙票（§6-225）；② 档案票二乙案（实现从 5 个 `__init__.py` 挪出）；③ memory 读面未登录 500（§6-220）；④ task #35 的安装面判据欠账；⑤ `test_clock_caliber_ledger` 那 1 格 main 上现存的预存红；⑥ 对方 §6-227 新登记的 M-25（剥前缀插重复行）等裁。
+    - **本会话下一枚空号现查 §6-229。**
 
 ## 7. 未覆盖与存疑（请勿当结论使用）
 
