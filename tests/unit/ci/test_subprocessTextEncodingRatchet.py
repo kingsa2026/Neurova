@@ -236,10 +236,15 @@ def test_knownBadFormsAreCounted(bad):
 #: （AGENTS.md 反证守卫那条：一条纪律若只写在文档里，根因是缺自动复核通道，不是这次忘了查）。
 CAPTURE_FUNCS_PY = CAPTURE_FUNCS
 
-#: 半修站点现读（§6-225 本批复算，收掉 `test_temp_reclaim`/`test_disk_headroom_gate`/
-#: `declaredSurfaceFaces_batch50` 之后）：**等号格**——多一处即红（半修蔓延），少一处也红
+#: 半修站点现读：**等号格**——多一处即红（半修蔓延），少一处也红
 #: （逼一次显式收数，与本文件"降要看得见"同一手法）。
-HALF_PINNED_BASELINE = 27
+#:
+#: 34 → 29 这一步不是放宽，是"先把看不见的挖出来、再吃掉生产与 CI 脚本那 5 处"：
+#: 旧基线 27 是在**盲谓词**下量的——它只认字面 list 形态的 argv，且把"全文出现过
+#: `PYTHONIOENCODING` 这个词"当成钉过写侧（docstring 提一句就整档免检）。两处修好后真值 34，
+#: 本批把 `neurova/` 与 `scripts/` 的 5 处两头钉齐（这两族的子进程跑在真流水线里，
+#: 中文路径下坏得最静默），剩 29 处全在 `tests/` 下，按档继续分批消化。
+HALF_PINNED_BASELINE = 29
 
 
 def _callNodes(source: str):
@@ -258,18 +263,71 @@ def _callNodes(source: str):
     return out
 
 
-def _argvFirstIsPythonChild(node) -> bool:
-    """argv 首项是 `sys.executable` ⇒ 子进程是本仓的 Python 件（写侧可以由我们钉）。"""
+def _pythonChildArgvNames(source: str) -> set:
+    """收集 `name = [sys.executable, ...]` 这类变量形态的 argv 名。
+
+    原谓词只认**字面 list**，于是 `argv = [sys.executable, "-c", code]` 先落变量再传给
+    `subprocess.run(argv, ...)` 的写法一概看不见——实测这种"半修"另有 6 处（本仓路径含中文，
+    它们和字面形态一样会静默毁读数）。看不见就不是"没病"，是"病历上没写"。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.List):
+            continue
+        first = node.value.elts[0] if node.value.elts else None
+        isPy = (isinstance(first, ast.Attribute) and isinstance(first.value, ast.Name)
+                and first.value.id == "sys" and first.attr == "executable")
+        if not isPy:
+            continue
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name):
+                names.add(tgt.id)
+    return names
+
+
+def _argvFirstIsPythonChild(node, varNames=frozenset()) -> bool:
+    """argv 首项是 `sys.executable`（字面）或指向一个已知以它为头元素的变量 ⇒ 子进程是本仓 Python 件。"""
     argv = node.args[0] if node.args else None
+    if isinstance(argv, ast.Name):
+        return argv.id in varNames
     if not isinstance(argv, ast.List) or not argv.elts:
         return False
     first = argv.elts[0]
+    if isinstance(first, ast.Name):
+        return first.id in varNames
     return (isinstance(first, ast.Attribute) and isinstance(first.value, ast.Name)
             and first.value.id == "sys" and first.attr == "executable")
 
 
+def _writesSideIsPinnedInFile(source: str) -> bool:
+    """写侧到底钉没钉——按**代码形态**判，不按"全文有没有这个词"判。
+
+    原判定是 `"PYTHONIOENCODING" in source`：在 docstring 里提一句这个词就整档免检，
+    而被放行的恰好是"写了说明、没钉 env"那一类——最像已修的样子（AGENTS.md「钉形态不钉词」）。
+    现在只认两种真写法：字典键（`env={..., "PYTHONIOENCODING": ...}`）或下标赋值
+    （`os.environ["PYTHONIOENCODING"] = ...` / `env["PYTHONIOENCODING"] = ...`）。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict) and any(
+                isinstance(k, ast.Constant) and k.value == "PYTHONIOENCODING"
+                for k in node.keys):
+            return True                      # env={..., "PYTHONIOENCODING": "utf-8"}
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
+                and node.slice.value == "PYTHONIOENCODING":
+            return True                      # os.environ["PYTHONIOENCODING"] = "utf-8"
+    return False
+
+
 def halfPinnedSites() -> list:
-    """`(文件, 行号)`：按 utf-8 解 Python 子件，而该文件里没有一处 `PYTHONIOENCODING` 钉写侧。"""
+    """`(文件, 行号)`：按 utf-8 解 Python 子件，而该文件里没有一处真把写侧钉上 `PYTHONIOENCODING`。"""
     out = []
     for root in SCAN_ROOTS:
         for path in filesUnder(REPO_ROOT / root):
@@ -281,10 +339,11 @@ def halfPinnedSites() -> list:
                 continue
             if "subprocess" not in source or "sys.executable" not in source:
                 continue
-            pinned = "PYTHONIOENCODING" in source
+            varNames = _pythonChildArgvNames(source)
+            pinned = _writesSideIsPinnedInFile(source)
             for node in _callNodes(source):
                 kws = {k.arg for k in node.keywords if k.arg}
-                if "encoding" not in kws or not _argvFirstIsPythonChild(node):
+                if "encoding" not in kws or not _argvFirstIsPythonChild(node, varNames):
                     continue
                 encNode = next(k for k in node.keywords if k.arg == "encoding")
                 enc = ast.unparse(encNode.value).strip("'\"").lower().replace("-", "")
