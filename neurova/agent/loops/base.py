@@ -128,7 +128,10 @@ async def evaluateLoopExit(
         "goal_continuations": turnContext.get_turn_goal_continuations(),
     })
     if decision.action == StopAction.TERMINATE:
-        if verdict and verdict.get("achieved"):
+        achieved = bool(verdict and verdict.get("achieved"))
+        _recordHarnessGapFromExit(decision.gate_name, achieved=achieved,
+                                  reason=decision.reason)
+        if achieved:
             return LoopExitDecision.done()
         return LoopExitDecision.stop(decision.reason, decision.gate_name)
     if decision.action == StopAction.INTERRUPT_AND_CONTINUE:
@@ -137,6 +140,10 @@ async def evaluateLoopExit(
         budget = _exitContinuationBudget(runner)
         spent = turnContext.get_turn_goal_continuations()
         if budget <= 0 or spent >= budget:
+            # 走到这里说明出口被判"自认完成但目标未达成"且续跑额度用尽 ——
+            # 这条**必须**留下环节证据，否则"改好了"与"再也没人看"在观测上同形。
+            _recordHarnessGapFromExit(decision.gate_name, achieved=False,
+                                      reason=decision.reason)
             return LoopExitDecision.stop(
                 f"目标未达成且续跑预算耗尽（{budget}）: {decision.reason}",
                 decision.gate_name,
@@ -145,6 +152,31 @@ async def evaluateLoopExit(
         logger.info("主出口门控 %s 软干预（提示将注入消息序列）: %s", decision.gate_name, decision.reason)
         return LoopExitDecision.resume(decision.continuation_prompt, decision.gate_name)
     return LoopExitDecision.done()
+
+
+def _recordHarnessGapFromExit(gateName: str, *, achieved: bool, reason: str = "") -> None:
+    """把"这一环走不动"投成 harness 族缺口证据（ModularRSI 对照 §7.1-Q4 甲案）。
+
+    用途在 `agent/capability_gap.py::_GAP_PURPOSE` 单源登记，本函数**不**判断该不该驱动
+    自主创建——那是消费方按族取用的事。门控自身保持纯判定（无副作用、同步、可单测），
+    投递只发生在环出口这一处求值点。
+
+    两类实测形态：
+    - `goal` 门开火且目标未达成 ⇒ `false_completion`（模型自认完成、验收判据不认）；
+    - `doom_loop`/`iteration`/`token_budget` 开火 ⇒ `loop_stalled`（环在推进但推不完）。
+    目标已达成时不投——那不是缺口，是正常收口。
+    """
+    from neurova.agent.capability_gap import (
+        GAP_FALSE_COMPLETION, GAP_LOOP_STALLED, recordCapabilityGap,
+    )
+
+    if achieved:
+        return
+    detail = {"gate": gateName or "", "reason": (reason or "")[:200]}
+    if gateName == "goal":
+        recordCapabilityGap(GAP_FALSE_COMPLETION, detail)
+    elif gateName in ("doom_loop", "iteration", "token_budget"):
+        recordCapabilityGap(GAP_LOOP_STALLED, detail)
 
 
 def _exitContinuationBudget(runner: Any) -> int:
