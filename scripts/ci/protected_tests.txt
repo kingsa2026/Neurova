@@ -1911,7 +1911,7 @@ tests/unit/evolution/eval/test_evalResultIsKeyedByModelUnderTest.py
 tests/unit/evolution/test_attributionOperatorVocabularyIsSingleSourced.py
 # 环节轴（假完成/环停滞）与能力轴同表但用途分流：自主创建的入口只吃 capability 族、
 # 门控保持纯判定（零投递副作用）、新 kind 在观测读侧可见。
-tests/unit/agent/testHarnessGapEvidenceStaysOutOfSynthesis.py
+tests/unit/agent/test_HarnessGapEvidenceStaysOutOfSynthesis.py
 
 # C1 跨集资产连续性（§6-78 的 H 条 + I 条）：这一档锁的是"引用了就必须取到，取不到
 # 就不许发请求"。判据打在行为上——实际发出的提示词含场景定妆词/灯光/氛围/道具描述、
