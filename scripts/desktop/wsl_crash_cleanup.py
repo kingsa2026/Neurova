@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import locale
 import os
 import subprocess
 import sys
@@ -75,19 +76,24 @@ def taskCommandLine() -> List[str]:
     return [sys.executable, str(THIS_FILE), "--purge"]
 
 
+# `schtasks.exe` 是原生控制台件：它按**控制台码页**输出（本机 cp936），成功行还会回显任务名与
+# 命令行——那条命令行里带着仓库路径中的「项目」二字。所以这两处显式按 locale 解码，
+# **不要"顺手"改成 utf-8**：那会把中文换成 U+FFFD，看着像没报错、实际把回显读坏了。
+# 显式写出来才是重点：默认值随父进程的 locale 变，换一台机器/换一套 ANSI 代码页就换一种读法。
 def installTask() -> int:
     """按天调度当前用户任务；不需要管理员权限。"""
     tr = " ".join(taskCommandLine())
     result = subprocess.run(
         ["schtasks", "/Create", "/F", "/TN", TASK_NAME, "/SC", "DAILY", "/ST", "09:30", "/TR", tr],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding=locale.getpreferredencoding(False))
     print((result.stdout + result.stderr).strip())
     return result.returncode
 
 
 def uninstallTask() -> int:
     result = subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK_NAME],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True,
+                            encoding=locale.getpreferredencoding(False))
     print((result.stdout + result.stderr).strip())
     return result.returncode
 

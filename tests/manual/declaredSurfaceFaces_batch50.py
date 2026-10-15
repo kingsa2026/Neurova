@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -186,7 +187,10 @@ def _headSideCalibration() -> str:
             "print(json.dumps({'pkgs': len(g), 'names': sum(len(v) for v in g.values()), "
             "'per_pkg': {k: len(v) for k, v in g.items()}}, ensure_ascii=False))\n")
         p = subprocess.run([sys.executable, "-c", code, str(worktree)], capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", cwd=str(worktree))
+                           text=True, encoding="utf-8", errors="replace", cwd=str(worktree),
+                           # 两头钉：子端不写 PYTHONIOENCODING 就按本机码页（cp936）吐字节，
+                           # 父端按 utf-8 解会把里面的中文换成 U+FFFD（§6-225 的半修形状）。
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         got = json.loads(p.stdout.strip().splitlines()[-1])
         assert got["pkgs"] == 8 and got["names"] == 44, (
             "HEAD 侧应报 8 包 44 名，实得 %s（stderr 尾：%s）" % (got, (p.stderr or "")[-200:]))
