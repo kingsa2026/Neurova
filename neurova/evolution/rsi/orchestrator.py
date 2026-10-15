@@ -82,6 +82,80 @@ def _e2e_gain_from_evals(eval_before: Any, eval_after: Any) -> Optional[float]:
     return round(float(a) - float(b), 6)
 
 
+#: 族级归因的状态词汇——四态不可折叠（与 `parameter_activity` 的
+#: `never_proposed ≠ sparse ≠ no_data` 同族纪律：折叠会把相反的事读成同一件事）。
+_FAMILY_ACTED = "acted"
+_FAMILY_PROPOSED_NOT_APPLIED = "proposed_not_applied"
+_FAMILY_NO_CANDIDATE = "no_candidate"
+_FAMILY_PLACEHOLDER_HOST = "placeholder_host"
+
+
+def familyAttribution(
+    optimizations: List[Dict[str, Any]],
+    appliedResults: List[Dict[str, Any]],
+    *,
+    tableFamilies: List[str],
+    placeholderSystems: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """把"这一轮到底动了哪几族"按参数族拆开，随观测面同行——**只拆账，不拆增益**。
+
+    为什么要这格：一轮 RSI 是**联合动作**——`generate_optimizations()` 对每个参数各选
+    1 个候选，`apply_optimizations()` 全量应用，然后**一次** `perf_after - perf_before`、
+    **一次**整轮回滚（见 `run_iteration` 的应用段）。提名按参数、判定与回滚按整轮，
+    于是"这轮涨了/跌了"永远回答不了"是哪一族动的"，而返回体里只留着
+    `optimizations` 与 `applied_results` 两个平铺列表，要靠人现场对表。
+
+    为什么**不**按族拆 gain：本仓一轮只有一次读数，按族摊就是造归因。
+    `gain_scope` 因此恒为 `"round"`，这一格是写给后来人的边界，不是待办。
+
+    为什么不拆轮（拆成每族一轮才是外部论据里的"模块化演化"）：真账里 11 个参数只有
+    7 个出现过、4 个 `never_proposed`（`parameter_activity` 的实测），拆轮会让多数轮次
+    在无数据上空转，且每轮都要再付一次评测成本。读数先立住，拆不拆轮是读数稳定之后的事。
+
+    参数表之外的 `system` 不会进本读数：候选只从 `get_optimizable_parameters()` 生成
+    （`generate_optimizations` 逐族逐参遍历），所以这里不另立第二份族清单。
+    """
+    placeholders = set(placeholderSystems or [])
+    byFamily: Dict[str, Dict[str, Any]] = {
+        family: {"proposed": 0, "applied": 0, "params": []} for family in tableFamilies
+    }
+    appliedByParam = {
+        str(item.get("parameter")): bool(item.get("applied"))
+        for item in (appliedResults or [])
+        if item.get("parameter")
+    }
+
+    for optimization in optimizations or []:
+        family = optimization.get("system")
+        row = byFamily.get(family)
+        if row is None:
+            continue
+        parameter = optimization.get("parameter")
+        applied = bool(appliedByParam.get(str(parameter), False))
+        row["proposed"] += 1
+        row["applied"] += 1 if applied else 0
+        row["params"].append({
+            "parameter": parameter,
+            "from": optimization.get("current_value"),
+            "to": optimization.get("new_value"),
+            "applied": applied,
+        })
+
+    for family, row in byFamily.items():
+        if row["applied"]:
+            row["status"] = _FAMILY_ACTED
+        elif row["proposed"]:
+            # 有提名却一件没落地：被反向闸/阶段闸拦下，或应用本身失败——
+            # 与"这族压根没候选"是相反的事，不许折叠。
+            row["status"] = _FAMILY_PROPOSED_NOT_APPLIED
+        elif family in placeholders:
+            row["status"] = _FAMILY_PLACEHOLDER_HOST
+        else:
+            row["status"] = _FAMILY_NO_CANDIDATE
+
+    return {"by_family": byFamily, "gain_scope": "round"}
+
+
 def _ratchet_candidates_from_settings() -> list:
     """棘轮每轮候选数从 evolution_settings 读(§6-3 收口 2026-10-06)。
 
@@ -584,6 +658,17 @@ class RSIOrchestrator:
             "optimizations": optimizations,
             "applied_results": applied_results,
             "applied_count": applied_count,
+            # 族级归因读数：联合轮只有一次 gain，但"哪一族动了、从多少改到多少"
+            # 必须随行——否则观测面只剩两个平铺列表，事后无法归因。
+            # 只拆账不拆增益（`gain_scope` 恒 "round"），四态不折叠。
+            "family_attribution": familyAttribution(
+                optimizations,
+                applied_results,
+                tableFamilies=list(
+                    self.integration_manager.get_optimizable_parameters().keys()
+                ),
+                placeholderSystems=self.integration_manager.get_placeholder_system_names(),
+            ),
             "gain": gain,
             "eval": {"before": eval_before, "after": eval_after},
             # P1-2:e2e 标尺增益(并列读数;任一侧未量出即 None,不折算 0)

@@ -17,8 +17,9 @@
 
 本模块只做两件事，字段名一律对齐 orchestrator 真实输出：
 
-1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（九个字段，
-   含度量证据状态、有证据用例数、缺席闭环系统名单、晋升判据结论与落盘状态）。
+1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（字段名一律对齐
+   orchestrator 真实输出：收敛态、应用计数、增益、晋升与落盘、度量证据状态、
+   有证据用例数、缺席闭环系统名单、晋升判据结论、族级归因读数）。
 2. :func:`record_rsi_summary` / :func:`get_latest_rsi_summary` —— 按
    (agent, session) 记录**最近一次已完成**的迭代摘要。
 
@@ -269,6 +270,14 @@ def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
     summary.update(measurement_evidence(result))
     summary["placeholder_systems"] = _placeholder_systems(result)
     summary["phase_verdict"] = phase_verdict_evidence(result)
+    # 族级归因读数随行（M-B）：联合轮的"哪一族动了"必须出得了投影，
+    # 否则写进返回体却看不见，等于又造一格只写不读的观测面。
+    attribution = result.get("family_attribution")
+    if isinstance(attribution, Mapping) and attribution.get("by_family"):
+        summary["family_attribution"] = {
+            "by_family": dict(attribution["by_family"]),
+            "gain_scope": str(attribution.get("gain_scope") or "round"),
+        }
     return summary
 
 
