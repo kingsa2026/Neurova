@@ -92,7 +92,7 @@ class TestSettingsAPI:
 
         原先这一格顺手用 `language: "zh_CN"` 当第二个键——那是四份「默认语言」定义里的
         一个写口（§6-167 已退役，现在写它会得 400，判据在
-        `tests/unit/api/testRetiredGlobalLanguageDefault.py`）。这里改用一个仍然活着的
+        `tests/unit/api/test_RetiredGlobalLanguageDefault.py`）。这里改用一个仍然活着的
         平铺键，测的仍是"整表更新回 200 且带 settings"这一件事。
         """
         payload = {"settings": {"theme": "dark", "auto_save": False}}
