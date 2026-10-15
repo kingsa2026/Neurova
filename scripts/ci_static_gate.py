@@ -76,6 +76,17 @@ IMPORT_EXCLUDE_SUBSTRINGS = (
 )
 
 
+def _utf8ChildEnv():
+    """子进程写侧钉 utf-8——父端按 utf-8 解、子端按 cp936 写就是半修（§6-225 那族）。
+
+    本仓根路径含中文，子件把带路径的日志写到 stderr 时按 `locale.getpreferredencoding()`
+    （开发机 cp936）编码，父端再按 utf-8 解就成了 U+FFFD 替换字符：读数为真、内容为假。
+    """
+    import os
+
+    return {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+
 def _hr(title: str) -> None:
     print("\n" + "=" * 80)
     print(title)
@@ -87,7 +98,8 @@ def check_syntax() -> bool:
     _hr("✅ 检查 1/3：语法检查（compileall）")
     targets = [str(PROJECT_ROOT / d) for d in CHECK_DIRS if (PROJECT_ROOT / d).exists()]
     cmd = [sys.executable, "-m", "compileall", "-q", *targets]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   env=_utf8ChildEnv())
     if result.returncode == 0:
         print(f"通过：{', '.join(CHECK_DIRS)} 无语法错误")
         return True
@@ -110,7 +122,8 @@ def check_pyflakes() -> bool:
 
     target = str(PROJECT_ROOT / "neurova")
     cmd = [sys.executable, "-m", "pyflakes", target]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   env=_utf8ChildEnv())
     undefined = [
         line
         for line in (result.stdout or "").splitlines()

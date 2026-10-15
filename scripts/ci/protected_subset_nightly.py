@@ -43,6 +43,17 @@ LIST_FILE = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
 DEFAULT_PER_FILE_TIMEOUT = 600.0
 
 
+def _utf8ChildEnv():
+    """子进程写侧钉 utf-8——父端按 utf-8 解、子端按 cp936 写就是半修（§6-225 那族）。
+
+    本仓根路径含中文，子件把带路径的日志写到 stderr 时按 `locale.getpreferredencoding()`
+    （开发机 cp936）编码，父端再按 utf-8 解就成了 U+FFFD 替换字符：读数为真、内容为假。
+    """
+    import os
+
+    return {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+
 def readEntries(path: Path = LIST_FILE) -> List[str]:
     """清单读数：注释与空行剔除，其余原样保留（**不做去重、不做排序**）。
 
@@ -70,6 +81,7 @@ def runOne(entry: str, perFileTimeout: float) -> Tuple[str, float, str]:
              entry],
             cwd=str(REPO_ROOT), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=perFileTimeout,
+            env=_utf8ChildEnv(),
         )
     except subprocess.TimeoutExpired:
         return "timeout", time.monotonic() - started, f">{perFileTimeout:.0f}s 未完成"
