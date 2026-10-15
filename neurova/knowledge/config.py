@@ -248,11 +248,17 @@ def _find_config_file() -> Optional[Path]:
 
 
 def _get_default_config_path() -> Path:
-    """获取默认配置文件路径"""
-    # 使用用户目录
-    home_dir = Path.home()
-    config_dir = home_dir / ".neurova" / "config"
-    return config_dir / "knowledge_config.json"
+    """知识库默认配置路径：数据根下唯一一处；旧 `~/.neurova/config/knowledge_config.json` 在空缺时收养。
+
+    §6-203 家目录落点表里的一处。这一面**只读探测**（`:237` 调用），落点错了就是
+    "配置写了但读不到"那形——所以它同样归数据根管，而不是留给操作者主目录。
+    """
+    from neurova.core.data_root import adoptHomeLanding, dataLanding
+
+    target = dataLanding("config", "knowledge_config.json",
+                         legacy=("config", "knowledge_config.json"))
+    adoptHomeLanding(target, "config", "knowledge_config.json")
+    return target
 
 
 def _load_config_from_file(config_path: Path) -> KnowledgeBaseConfig:
