@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import subprocess
 from pathlib import Path
+from tests import ast_scan  # noqa: E402
 from typing import Dict, List, Optional, Set
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -62,7 +63,7 @@ def test_everyImportedByKnowledgePackageIsCommitted():
     tracked = _trackedAtHead()
     exists: Dict[str, bool] = {}
     offenders: List[str] = []
-    for rel in _git("ls-files").decode("utf-8").split():
+    for rel in ast_scan.trackedPaths():
         if not rel.startswith(_LANES):
             continue
         for module in _importsOf(rel):

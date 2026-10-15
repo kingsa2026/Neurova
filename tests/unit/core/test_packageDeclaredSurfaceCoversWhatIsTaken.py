@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import ast
 import functools
-import subprocess
 from pathlib import Path
 
 from tests import ast_scan
@@ -94,14 +93,6 @@ EXPECTED_FACES: dict = {  # type: ignore[type-arg]
 #: 留空不是"没有存量"的口头话，而是第一条格咬着的**零容忍政策**：将来新长出一个隐式公开面，
 #: 出路只有「补 `__all__`」或「改直取子模块」两种；往这里登记一行＝替人补裁，同一格会红。
 IMPLICIT_SURFACE: dict = {}  # type: ignore[type-arg]
-
-
-def _gitLsFiles(*extra: str) -> list:
-    """`git ls-files` 取数必须显式 utf-8——本仓路径含中文，缺省走平台码（GBK）当场炸。"""
-    out = subprocess.run(["git", "-C", str(PROJECT_ROOT), *extra],
-                         capture_output=True, text=True, encoding="utf-8",
-                         errors="replace").stdout
-    return [p for p in out.split("\0") if p] if "-z" in extra else out.splitlines()
 
 
 def submodulesOf(pkgDir: Path) -> set:
@@ -149,8 +140,8 @@ def undeclaredFor(supplied: set, subs: set, declared: set, refs: dict, ownInit: 
 def _packages() -> dict:
     """`{包名: {"init","bound","defs","all","subs","dynamicSupply"}}`，只看被跟踪的包门面。"""
     found = {}
-    for rel in sorted(p for p in _gitLsFiles("ls-files", "-z")
-                      if p.startswith("neurova/") and p.endswith("__init__.py")):
+    for rel in [p for p in ast_scan.trackedPaths()
+                if p.startswith("neurova/") and p.endswith("__init__.py")]:
         path = PROJECT_ROOT / rel
         if not path.exists():
             continue
@@ -210,9 +201,7 @@ def evidencePaths() -> frozenset:
     为什么不含被忽略的散件：那些文件到不了 CI，也到不了别人的机器。把它们算成消费者，
     同一条格就会在两处给出不同读数（本仓实测 `.tmp_auth_bak.py` 正在取 `get_app_state`）。
     """
-    tracked = _gitLsFiles("ls-files", "-z")
-    others = _gitLsFiles("ls-files", "--others", "--exclude-standard", "-z")
-    return frozenset(p for p in list(tracked) + list(others) if p)
+    return frozenset(list(ast_scan.trackedPaths()) + ast_scan.untrackedNotIgnoredPaths())
 
 
 def pruneNonEvidence(table: dict, evidence: frozenset) -> dict:
@@ -274,7 +263,7 @@ def test_theScanCoversTheTrackedTreeAndThePackageSet():
     for pkg in ("neurova.llm.providers", "neurova.admin", "neurova.cognitive",
                 "neurova.api.endpoints.memory", "neurova.skills"):
         assert pkg in pkgs, f"{pkg} 不在包集合里——取数口径被收窄了"
-    tracked = [p for p in _gitLsFiles("ls-files", "-z") if p.endswith(".py")]
+    tracked = ast_scan.trackedPyPaths()
     assert len(tracked) >= 3000, f"扫描面现读 {len(tracked)} 个 .py，地板 3000 被打破"
     assert _scan(), "消费者表是空的——那是『没人取用』的假绿，不是全绿"
     # 登记表清零后，"扫出来一片空"与"确实干净"两种读法都让第一条格绿 ⇒ 规模必须有地板。

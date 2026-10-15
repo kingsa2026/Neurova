@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import ast
 import io
-import subprocess
 import sys
 from pathlib import Path
 
@@ -39,10 +38,8 @@ STDLIB = set(sys.stdlib_module_names)
 
 
 def _trackedPyFiles() -> list:
-    proc = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO_ROOT), capture_output=True)
-    assert proc.returncode == 0, f"git ls-files 退出码 {proc.returncode}"
-    return sorted(l.replace("\\", "/") for l in proc.stdout.decode("utf-8").split("\0")
-                  if l.endswith(".py"))
+    """扫描面＝已跟踪的 .py，走 `tests/ast_scan.py` 的单点（解码/退出码口径也只在那里定一次）。"""
+    return ast_scan.trackedPyPaths()
 
 
 def _requiredThirdPartyNames() -> set:

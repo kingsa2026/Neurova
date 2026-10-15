@@ -30,7 +30,6 @@ import ast
 import importlib.util
 import io
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -62,11 +61,7 @@ def _tracked_py() -> list:
     与受保护子集其余 170 个文件共享机器时必撞 30s 默认墙钟（本次构建实测 timeout）。
     判据只谈「哪些文件 import 了退役模块」，与入库文件总量无关，故按模块名文本预筛。
     """
-    out = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "ls-files", "-z", "*.py"],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-    ).stdout.split("\0")
-    return [p for p in out if p and "__pycache__" not in p and (PROJECT_ROOT / p).is_file()]
+    return [p for p in ast_scan.trackedPyPaths() if (PROJECT_ROOT / p).is_file()]
 
 
 def _importedModules(ref: ast_scan.SourceRef) -> set:

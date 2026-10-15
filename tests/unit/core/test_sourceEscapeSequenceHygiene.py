@@ -29,8 +29,8 @@ Bin 目录段、Schema 锚点里的转义点）。Python 目前对未知转义**
 那样会把别人未提交的坏写法读成绿。
 """
 
+from tests import ast_scan  # noqa: E402
 import pathlib
-import subprocess
 import warnings
 
 import pytest
@@ -45,11 +45,8 @@ _MIN_SCANNED = 3000
 
 def _trackedSources() -> list:
     """扫描集合＝git 跟踪的 `*.py`（不用 rglob：那会把 __pycache__ 与未跟踪垃圾算进来，
-    也会漏掉 .gitignore 外但已跟踪的档，两个方向都能造假绿）。"""
-    proc = subprocess.run(
-        ["git", "ls-files", "-z", "*.py"], cwd=str(REPO), capture_output=True)
-    assert proc.returncode == 0, f"git ls-files 失败：{proc.stderr.decode('utf-8', 'replace')[:200]}"
-    return [f.decode("utf-8") for f in proc.stdout.split(b"\0") if f]
+    也会漏掉 .gitignore 外但已跟踪的档，两个方向都能造假绿）。取数走 `ast_scan` 单点。"""
+    return ast_scan.trackedPyPaths()
 
 
 def _escapeWarnings(rel: str, src: str) -> list:

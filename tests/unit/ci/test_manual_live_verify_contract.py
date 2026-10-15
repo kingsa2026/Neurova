@@ -251,10 +251,21 @@ def _constantKeyIndexes() -> list[tuple[str, int, str]]:
 
 
 def _manualScripts() -> list[Path]:
-    return sorted(
-        path for path in MANUAL_ROOT.glob("*.py")
-        if not path.name.startswith("_") and "__pycache__" not in path.parts
-    )
+    """本格扫描面＝**已跟踪**的 `tests/manual/*.py`（裁定乙）。
+
+    为什么不按目录 glob：本格拿现读与 `_KNOWN_LAYOUT_OFFENDERS` 比**两侧相等**，属"存量比对"型判据。
+    按工作树 glob 时，并发会话正在半写的在途档会被算成"本仓多了一条断点"——而 A/B 的基线侧是
+    HEAD 的 worktree，看不见那份文件，于是别人写的东西被记成本批引入的回归（§6-225 的 A/B 第一轮
+    与本批复算都撞到过）。代价说清楚：**新档要先 `git add` 才进本判据**（CI 只跑跟踪文件，
+    所以漏不掉，只是当场不咬）。
+
+    与"不许新增"型守卫（棘轮、形状扫描）刻意相反——那一类要的就是当场咬住未提交的档，
+    用工作树面；两者的区别写在 `tests/ast_scan.py` 的清单入口注释里。
+    """
+    tracked = {rel.rsplit("/", 1)[-1] for rel in ast_scan.trackedPaths("tests/manual")
+               if rel.endswith(".py")}
+    return sorted(MANUAL_ROOT / name for name in tracked
+                  if not name.startswith("_") and (MANUAL_ROOT / name).is_file())
 
 
 def _callsProductionBuilder(tree: ast.AST) -> bool:
@@ -304,6 +315,37 @@ def testManualScriptsDoNotReplicateDataRootLayout():
         + "\n  ".join(unexpected)
         + "\n（已知存量另见 `_KNOWN_LAYOUT_OFFENDERS`，双向咬合，不静默放行）"
     )
+
+
+def testScanFaceIgnoresForeignUntrackedScratchFile():
+    """本格是**存量比对**型判据 ⇒ 扫描面只认已跟踪清单，外来未跟踪档不得算进来。
+
+    为什么不是"顺手把 glob 换成 tracked 列表"这么小：本仓实测过两次同形误报——
+    并发会话正在 `tests/manual/` 里半写自己的活体档时，那一档会进**本树**读数而进不了
+    **基线树**（A/B 的基线是 HEAD 的 worktree），于是别人写的内容被记成"我引入了新断点"
+    （§6-225 的 A/B 第一轮、以及本批现量都撞到这一形）。
+
+    反面一并钉：**谓词本身不许跟着松**。同一份内容形状若已被跟踪，必须照样点名——
+    所以本格同时断"`_replicatesDataRootLayout` 认得这份探针内容"，把"收面"与"改谓词"分开。
+    """
+    probe = MANUAL_ROOT / "b54_foreign_untracked_scratch_tmp.py"
+    assert not probe.exists(), "上一次探针残留会污染扫描面"
+    probe.write_text(
+        "import sqlite3\n"
+        "from pathlib import Path\n"
+        "\n"
+        "root = Path('here') / 'data' / 'scratch.db'\n"
+        "conn = sqlite3.connect(str(root))\n",
+        encoding="utf-8")
+    try:
+        offenders = _layoutOffenders()
+        assert probe not in offenders, (
+            f"未跟踪的外来档被算进本仓存量红里了（扫描面没收口）：{offenders}")
+        assert _replicatesDataRootLayout(ast_scan.transientTree(probe)), (
+            "谓词对同一份内容形状不再翻红——那是把『扫描面收口』做成了『判据变松』")
+    finally:
+        probe.unlink(missing_ok=True)
+    assert not probe.exists(), "探针残留会让下一条用例把临时文件算进真实存量"
 
 
 def testKnownLayoutOffendersAreStillReallyMatched():
