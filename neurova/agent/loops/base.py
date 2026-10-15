@@ -376,7 +376,13 @@ class BaseAgentLoop(ABC):
             )
         )
         return GateRunner([
-            DoomLoopGate(),
+            # 死循环门的两个在用阈值同样从配置单源取数——此前这里是 `DoomLoopGate()`
+            # 无参构造，门限只活在 gates.py 的字面量上（同下面那条 GoalGate 注释
+            # 点名的形态：上限不受任何配置键管辖）。
+            DoomLoopGate(
+                window_size=limits["doom_loop_window_size"],
+                max_interrupts=limits["doom_loop_max_interrupts"],
+            ),
             # T-04：门控阈值与轮内守卫同取一处派生，不再各读一遍配置键的不同尺度。
             IterationGate(max_rounds=resolveToolRoundBudget()),
             TokenBudgetGate(max_tokens=limits["token_budget"]),
