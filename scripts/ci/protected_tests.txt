@@ -3066,6 +3066,14 @@ tests/unit/context/testLedgerFtsTokenizerFollowsSingleSource.py
 # ⚠ 主格取数走 `ast_scan.sourceRefsUnder`（共享预算＋文本预筛），不许改回 `rglob + read_text`：
 # 后者把判据成本绑在代码总量上，实测给同选择集的重扫描档加墙钟压力、造出一条假回归。
 tests/unit/memory/testSleepConsolidationHasOneImplementation.py
+# 批 家目录落点收口：五处默认落点从 `~/.neurova/` 与裸相对（随 CWD）收进数据根。
+# 病灶形状是"数据根注入管不到主目录"——`tests/conftest.py` 只注入临时数据根，于是测试里的
+# bare 构造（rbac 那 7 处）会在操作者主目录建出真库。行为格从生产入口取数当场量到了实得值
+# （`C:/Users/xccoo/.neurova/rbac.db`、`.../.neurova/config/knowledge_config.json`）。
+# ⚠ 两格值得记：① 落点函数是"进程级单例"的（`get_benchmark_framework`）不许直接从判据走，
+# 要直接构造，否则改进程状态带倒同进程后续用例；② 只把字面量删掉而没接 `dataLanding`/
+# `adoptHomeLanding` 是另一种"看着修好了"，故接线格与行为格各钉一头。
+tests/unit/core/testHomeFamilyLandingsFollowDataRoot.py
 
 # 批 54（§6-234）：扫描面取数只准一处——判据自己抄一份全树 `git ls-files` 时，解码口径、
 #   退出码、切法各写一份，抄错的那侧红的是它自己，别人看不出是取数坏了。三格分工：
