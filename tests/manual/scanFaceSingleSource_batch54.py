@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""live-verify（§6-232）：扫描面取数收口之后，**证据面逐字没变**，而旧形态的失效方向当场翻红。
+"""live-verify（§6-234）：扫描面取数收口之后，**证据面逐字没变**，而旧形态的失效方向当场翻红。
 
 收口的风险不在"新单点能不能跑"，在"九档判据改走单点之后各自看见的文件集合还是不是原来那一份"。
 所以本档的读数都围着这一件事取，且都在**真仓**上跑（不是合成目录）：
@@ -261,11 +261,11 @@ def _runGuards():
         if " failed" in tail or " error" in tail:
             failed.append("%s→%s" % (rel.rsplit("/", 1)[-1][:-3], tail))
         lines.append("%s→%s" % (rel.rsplit("/", 1)[-1][:-3], tail))
-    # 唯一允许的红＝main 上那道常驻红（§6-232 登记，非本批引入：HEAD 的仓外工作树同形复现）
+    # 唯一允许的红＝main 上那道常驻红（§6-234 登记，非本批引入：HEAD 的仓外工作树同形复现）
     assert len(failed) <= 1, "本批收口之后仍有除常驻红之外的红：%s" % failed
     if len(failed) == 1:
         assert "test_noDeadImportSwallowFacadeBlocks" in failed[0], (
-            "那道红不是 §6-232 登记的常驻红，本批不得带着它交付：%s" % failed[0])
+            "那道红不是 §6-234 登记的常驻红，本批不得带着它交付：%s" % failed[0])
         return ("11 档里 10 档全绿，1 档＝已登记的常驻红（HEAD 同样红）。那道红被修好之后这一格应当"
                 "收紧成全绿，添了新格则先登记再放行：" + failed[0])
     return " ; ".join(lines)
