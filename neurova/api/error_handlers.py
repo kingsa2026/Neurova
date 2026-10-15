@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 # 落成 500 会让调用方按"我方代码错了"去重试与报警，方向完全错；`memory` 的 search 端点
 # 甚至曾捕住 6001 返回 200 空列表（教义第 2 条禁止的"把失败改写成成功形态"）。
 # 现在每个声明过的码都必须二选一：进这张表，或进下面那份"按设计就是 5xx"的显式清单。
-# 漏一个就有判据红：`tests/unit/api/testMemoryReadFaceRefusesToPaintFailureAsSuccess.py`。
+# 漏一个就有判据红：`tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py`。
 _CODE_TO_HTTP_STATUS = {
     ErrorCodes.VALIDATION_ERROR: 400,
     ErrorCodes.MEMORY_INVALID_CONTENT: 400,
