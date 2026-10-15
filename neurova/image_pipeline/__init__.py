@@ -177,7 +177,12 @@ class ImagePipelineManager:
     """镜像管道管理器"""
 
     def __init__(self, storage_dir: Optional[str] = None):
-        self._storage_dir = storage_dir or ".neurova/image_pipeline"
+        # 同 `benchmark/__init__.py`：原默认值是裸相对 `.neurova/image_pipeline`，随 CWD 散落。
+        # 管理器本身有生产调用方（`api/endpoints/image.py:150/194/212`），但 `_storage_dir`
+        # 这个字段现读零消费点——落点先判对，字段去留随"档案票二"裁。
+        from neurova.core.data_root import dataLanding
+
+        self._storage_dir = storage_dir or str(dataLanding("image_pipeline", legacy=()))
         self._templates: Dict[str, ImageTemplate] = {}
         self._builds: List[BuildRecord] = []
         self._lock = threading.RLock()

@@ -279,7 +279,13 @@ class BenchmarkFramework:
     """基准测试框架"""
 
     def __init__(self, storage_dir: Optional[str] = None):
-        self._storage_dir = storage_dir or ".neurova/benchmark"
+        # 原默认值是裸相对 ".neurova/benchmark" —— 随 CWD 散落（§6-202 那族"裸文件名默认值"
+        # 的同形），换个工作目录就是一堆互不相认的库。归数据根。
+        # 注：`_storage_dir` 本体现在**零消费点**（全文件仅此一处赋值），属"档案票二"那批
+        # 门面包实现的退役候选；本批只把落点判对，不顺手删字段（删除归属那张票）。
+        from neurova.core.data_root import dataLanding
+
+        self._storage_dir = storage_dir or str(dataLanding("benchmark", legacy=()))
         self._suites: Dict[str, BenchmarkSuite] = {}
         self._runs: List[BenchmarkResult] = []
         self._test_runners: Dict[str, Callable] = {}
