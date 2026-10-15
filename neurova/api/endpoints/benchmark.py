@@ -103,9 +103,13 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
     """执行基准测试（2026-09-12 P6 诚实化）
 
     原实现用 random.randint 伪造分数/延迟并谎称 status=completed——假数据。
-    真实评测执行器（neurova/benchmark 框架 + LLM 答题打分）未接线，属功能
-    决策项（登记台账），本端点不投机实现；现如实记录一次 simulated 运行：
-    仅登记"跑了个模拟"的事实，score 等指标一律 None，不编造数字。
+    真实评测执行器（当年 `neurova/benchmark` 门面里那套框架 + LLM 答题打分）**从未接线**，
+    本端点不投机实现；现如实记录一次 simulated 运行：仅登记"跑了个模拟"的事实，
+    score 等指标一律 None，不编造数字。
+
+    那套门面实装已于票④第一包退役（它连本端点都没服务过：`/suites` 用的是本文件的
+    `_SUITES` 常量，运行台账用进程内 `_RUNS_STORE`）。因此"接真评测执行器"从今天起是
+    **新建能力**而不是接线——要做，按现役 `rag_eval` 那条路另立批次，别在门门面重写第二份。
     """
     suite = next((s for s in _SUITES if s["id"] == body.suite_id), None)
     if not suite:
