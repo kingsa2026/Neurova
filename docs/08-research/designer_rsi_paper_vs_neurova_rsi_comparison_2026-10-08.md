@@ -12,6 +12,10 @@
 > `neurova/cognitive_layers/memory_layer/` 的维护者。
 > **前作**：[`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)
 > 的方法（问题域先钉、逐维取证、习得点分 P 级、附"明确不学"清单）本文沿用。
+> **后续**：[`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
+> 只记 ModularRSI 那篇相对本文的增量（其 M-A..M-E），与本文 §4 P1-B 重叠处指回本文、不复述。
+> **同主题三档按日期成链**（RSIAgent 10-06 → Designer-RSI 10-08 → ModularRSI 10-15），
+> 各表其纸；本文 §4 与其派生票面是那三件事的唯一出处，主题级现状的事实源是代码本身而非文档聚合。
 
 ---
 
