@@ -216,6 +216,12 @@ optimizer_model`**——那是打分与生成用的模型，不是被测模型�
 - **红线**：**不碰 `propose_pr_patch`**（`self_improvement_proposer.py:11, 503` 的 `not_supported`
   是安全模型的一部分，§5）。本条只让门限可被观测与调节，不让 agent 改自己的控制流代码。
 - **✅ 已裁定（§7.1-Q1，2026-10-15）**：只走上面第①步（挂配置键、补齐管辖），**不入棘轮表**。
+- **✅ 已落地（同日，第一档）**：`7b7a058f` 生产+判据+ledger 登记 / `e7fa0a97` 子集 592→593 /
+  台账 `f994cadd`（§6-239）。生产池净 +72。
+  **复核实状时改掉一条本档原前提**：三个构造参数里有**一个从未被读**——
+  `similarity_threshold` 存进实例后全仓零读取（`check()` 判的是签名逐字相等，近似比较没实装），
+  给它挂配置键就是工单 018 / §6-1 那种「面板编辑空对象」，故只接两个在用的键；
+  该旋钮的存废见 §6.7 的三态票。
 - **代价与风险**：门限直接改变线上回合行为（轮次上限、假完成续跑次数），比调记忆阈值风险高一档；
   须与 `deployment_controller` 阶段语义绑档，不得 phase 0 就自动动。
 - **红灯设想**：断言 `DoomLoopGate` 三阈值当前无配置键管辖（红），挂键后断言
@@ -311,6 +317,21 @@ optimizer_model`**——那是打分与生成用的模型，不是被测模型�
 6. **一道与本仓 RSI 无关的预存红**：`tests/unit/test_archive_nav_impact_guard.py` 两格在 HEAD 即红
    （生成物台账 1640/826 与扫描器现读数 1637/823 差 3 条）。已用 scoped A/B（四文档回 HEAD、
    新档移出树）定性为非本批引入；该档案归属别的会话，本批只点名。
+7. **`DoomLoopGate.similarity_threshold` 是第四格只写不读**（M-A 落地时现量，需人裁）：
+   `agent/gates.py:108` 收下、`:114` 存进实例，`check()`（`:119-146`）判的是签名逐字相等
+   落在滑动窗口里——近似比较**从未实装**。三态：甲 实装签名相似度判定（行为变更，门的开火
+   时点会变，线上死循环判定要重估）｜乙 退役这个从未生效的构造参数（面板与代码不再互相误导，
+   净 LOC 为负）｜丙 原样留着。**推荐乙**。已登记台账 §6-239，判据里另有一格写成蕴涵：
+   将来若给它挂配置键，`gates.py` 必须同时出现读取点，否则红。
+8. **管理面 PUT 的字段白名单落后于配置单源**（既有缺口，非本批引入）：
+   `api/endpoints/governance.py:638-641` 的 `AgentLimitsUpdate` 只认 `token_budget` 与
+   `max_loop_rounds`，`goal_max_continuations` / `goal_round_budget` / `max_subagent_depth` /
+   `max_parallel_tools` 与 M-A 新增的两键**都写不进面板**——GET 读面自动带全
+   （`governance.py:629-635` 直接回 `get_effective_limits()`），PUT 面却只放两个键。
+   补它属「哪些旋钮对外可调」的产品裁定，不由接线批顺手扩。
+9. **`scripts/ci/tool_loop_deadline_ledger.py` 对账现读一条预存冲突**：
+   `count_conflict: ToolParameter（台账 4 / 实测 3）`——已在 HEAD 仓外工作树复现，属 main 上
+   既存，归 T-09 自循环面那族条目的另次复核，不是 M-A 引入。
 
 ---
 
@@ -327,6 +348,8 @@ optimizer_model`**——那是打分与生成用的模型，不是被测模型�
   `parameter_identity.admits_into_table` 前置判据。选第二档即让**线上回合终止行为**进入自动寻优，
   须同时把它绑进 `deployment_controller` 阶段档；不可逆点是用户可感知的"回答变长/变短"。
   **✅ 裁定：第一档**（只挂配置键，补齐管辖；门限有账本后再谈入表）。
+  **落地：`7b7a058f` + `e7fa0a97` + 台账 `f994cadd`（§6-239）**——三个构造参数里只接了两个
+  在用的，理由见 §6.7。
 - **Q2｜M-D 的甲/乙/丙**：影响面 `eval/dataset.py`、`eval/synthetic.py`、`eval/miner.py`、
   split 与留出基线复现性。**✅ 裁定：乙（退役字段）**——连带 synthetic prompt 里那行
   `difficulty`（`eval/synthetic.py:26`）一起删，不留"让 LLM 产一个没人读的标签"。
