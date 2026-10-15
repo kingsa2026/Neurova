@@ -201,7 +201,11 @@ def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, 
             raise APIError(ErrorCodes.AGENT_NOT_INITIALIZED, "默认 Agent 未初始化") from None
 
     if not agent.memory_manager:
-        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "记忆系统未启用") from None
+        # 「记忆子系统没开」是**状态未就绪**，不是操作失败：原来它穿的是
+        # `MEMORY_OPERATION_FAILED=7001`，而 7001 在本仓同时被用来报真故障
+        # （"添加记忆失败: <异常>"），一个码两种语义 ⇒ HTTP 形态没法同时诚实。
+        # 未就绪走 6003（→503），故障留在 7001（→500）。
+        raise APIError(ErrorCodes.AGENT_NOT_READY, "记忆系统未启用") from None
 
     # 审计修复 (P0-1): 原实现对共享单例的只读 property 赋值 —— AttributeError
     # 被 except 静默吞掉, 隔离注入从未生效; 且并发请求互相覆盖上下文。

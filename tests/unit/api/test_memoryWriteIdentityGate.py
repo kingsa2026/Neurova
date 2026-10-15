@@ -45,23 +45,48 @@ _PATH_PARAM_FILL = re.compile(r"\{[^}]+\}")
 
 @pytest.fixture(scope="module")
 def appClient():
-    """把**生产 memory router 本体**挂进一个 FastAPI 实例。
+    """把**生产 memory router 本体**挂进一个 FastAPI 实例，并给它一份真的 app state。
 
     为什么不用整 app：本批要验的门挂在 `memory/base.py:22` 那个共享 router 上，
     挂本体即可全覆盖，且与 `tests/unit/api/test_governance_llm_retry.py` 同形
     （不是新造装配口径）。用整 app 反而要额外背 lifespan 与默认 Agent 装配。
+
+    为什么必须自己装 state（本批改判加的前置）：原先没有 state 时读端点走的是
+    `AGENT_NOT_INITIALIZED`，而 `crud.py` 当年把它**吞成 200 空列表**——于是
+    `testAnonymousReadStillSeesOnlyDefaultBucket` 的 200 是假成功给的，"匿名读只看到
+    default 桶"这半句从没真被测过（A/B 里它在基线绿、在本树红＝本批摘掉吞异常后才露出来）。
+    这里给一个真 `MemoryManager`（落临时隔离库）而不是再造假 manager：作用域注入
+    (`base.py:214 set_request_scope`) 与读面归属都得走生产实现才叫验到。
     """
+    import tempfile
+    import types
+    from pathlib import Path
+
     from fastapi import FastAPI
 
+    from neurova.api import app as appModule
     from neurova.api.endpoints.memory import router as memory_router
+    from tests.cognitive_body_store import bodyManager
 
     app = FastAPI()
     app.include_router(memory_router, prefix="/api/v1/memory")
+
+    root = Path(tempfile.mkdtemp(prefix="memWriteGate-"))
+    manager = bodyManager(root, agentId="default")
+    manager.remember(content="default 桶里的那条记忆", id="gate_row")
+    agent = types.SimpleNamespace(memory_manager=manager, agent_id="default")
+    state = types.SimpleNamespace(agents={"default": agent}, get_agent=lambda: agent)
+    originalGetAppState = appModule.get_app_state
+    appModule.get_app_state = lambda: state
     # raise_server_exceptions=False：本判据要的是"匿名请求能不能通过门"，
-    # 不是"handler 里抛什么"。门缺失时后端可能 500（没有 agent 状态），那同样是
-    # "放行匿名"的证据；让它抛出来只会把红变成异常，归因反而更难。
-    with TestClient(app, raise_server_exceptions=False) as client:
-        yield client
+    # 不是"handler 里抛什么"——门缺失时后端会 5xx，那同样是"放行匿名"的证据；
+    # 让它抛出来只会把红变成异常，归因反而更难。
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
+    finally:
+        appModule.get_app_state = originalGetAppState
+        manager.close()
 
 
 def _memoryWriteRoutes(appClient):
