@@ -158,6 +158,25 @@ class PermissionChangeRequest:
         }
 
 
+def rbacDbPath() -> str:
+    """RBAC 库落点：数据根下唯一一处；旧 `~/.neurova/rbac.db` 在空缺时收养。
+
+    §6-203 那张"家目录落点表"里的一处，也是实测踩过污染的一处：原默认值是
+    `Path.home()/".neurova"/"rbac.db"`，而 `tests/conftest.py` 只注入**数据根**、管不到主目录
+    ⇒ 测试里任何一次 bare 构造（`e2e/conftest.py:63`、`integration/test_security_integration.py:33`
+    等 7 处）都会在操作者主目录建出一个真库。修在产生该状态的这一侧：落点归数据根之后，
+    既有的临时数据根注入自动覆盖它，不需要给 conftest 再加一道"把 home 也隔掉"的兜底。
+    WAL 三件套一起收养，与 `security/audit_logger.py:118 auditDbPath` 同口径——
+    只搬主库等于把未 checkpoint 的帧留在原地。
+    """
+    from neurova.core.data_root import adoptHomeLanding, dataLanding
+
+    target = dataLanding("security", "rbac.db", legacy=())
+    for suffix in ("", "-wal", "-shm"):
+        adoptHomeLanding(target.parent / (target.name + suffix), "rbac.db" + suffix)
+    return str(target)
+
+
 class RBACManager:
     """RBAC 管理器（单例）"""
 
@@ -174,7 +193,7 @@ class RBACManager:
     def __init__(self, db_path: Optional[str] = None):
         if self._initialized:
             return
-        self._db_path = db_path or str(Path.home() / ".neurova" / "rbac.db")
+        self._db_path = db_path or rbacDbPath()
         self._ensure_db_dir()
         self._init_db()
         self._init_system_roles()

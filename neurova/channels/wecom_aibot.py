@@ -32,6 +32,20 @@ from neurova.channels.voice_ingress import INBOUND_VOICE_PLACEHOLDER
 logger = logging.getLogger(__name__)
 
 
+def wecomMediaDir() -> str:
+    """企微媒体下载件的落点：数据根下唯一一处；旧 `~/.neurova/wecom_media` 在空缺时收养。
+
+    §6-203 家目录落点表里的一处（台账当时记它"以别的形式取 home、不在同一口径"——现量更正：
+    它就在守卫那张表里，`channels/wecom_aibot.py: 1`）。旧物是**目录**：`adoptHomeLanding`
+    走 `shutil.move`，目录与单文件同一规则，不另起一份搬移实现。
+    """
+    from neurova.core.data_root import adoptHomeLanding, dataLanding
+
+    target = dataLanding("channels", "wecom_media", legacy=())
+    adoptHomeLanding(target, "wecom_media")
+    return str(target)
+
+
 class WeComAIBotAdapter(ChannelAdapter):
     """企业微信智能机器人（aibot WS 长连接）适配器。"""
 
@@ -261,7 +275,7 @@ class WeComAIBotAdapter(ChannelAdapter):
         except Exception as e:
             logger.warning("wecom(aibot) 媒体下载失败: %s", e)
             return None
-        base = self._media_dir or str(Path.home() / ".neurova" / "wecom_media")
+        base = self._media_dir or wecomMediaDir()
         try:
             Path(base).mkdir(parents=True, exist_ok=True)
             path = Path(base) / f"{int(time.time() * 1000)}_{fname or filename_hint}"
