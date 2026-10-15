@@ -1888,6 +1888,9 @@ tests/unit/evolution/eval/test_runOutcomeLedgerConsistency.py
 # 已实测过一次代价：agent=None 落到真多模型客户端，真花配额并把整目录跑测挂死）。
 # 另两档钉"真轨迹能力由结构推导、不许写成旗标"——它是 §8 前置 2 探针的唯一读方。
 tests/unit/evolution/eval/test_evolutionExecutorSingleSource.py
+# M-D：评测用例的表示面/传输面/写侧/构造点四档——difficulty/category 两个只写不读
+# 标签字段退役后不得复活（写侧词频归零 + AST 构造点关键字为 0 + 扫描面下限钉住）。
+tests/unit/evolution/eval/test_evalExampleUnusedLabelFieldsRetired.py
 # §8 四条自动化前置落成晋升判据：前置未满足 ⇒ 自动执行档硬否决并点名哪一条；
 # 读数面另有反谎（旗标=探针）与反空转（摘掉实装必须报假）两档，外加一格
 # "测试脚手架还在吗"的守卫——脚手架被静默摘掉会红这一格，而不是红 44 格无主墙。
