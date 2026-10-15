@@ -3024,3 +3024,15 @@ tests/unit/memory/test_sleepMergeRequiresNearEquivalentContent.py
 # create_app() + 真 start_sleep()，读出 added=2/forgotten=5（修前 forgotten=0），反证只把
 # request_scope 的实参退空即红在"3 条逐字重复仍活跃 + 一行温度都没降"上。
 tests/unit/memory/test_sleepConsolidationBucketsByIsolationScope.py
+# 批 §6-229（§6-227 那张三态票的甲）：M-25 作用域限定行必须记住"自己这一行的主键"。
+# 现网量到的形状：读回时 `_plain_memory_id()` 剥掉 `agent\x1fneuser\x1fuser\x1f` 前缀，对象只剩
+# 业务 id ⇒ 下一次 `_persist_memory` 按业务 id 出发，一旦那个 id 空出来就 INSERT 出同内容的
+# 第二行（现网 14→16、四条产物两两同内容）。`manager.py:617` 的注释早写明这件事并只在
+# creditRecallHits 一条路径上修了——本批推广到整条持久路径。4 格——
+# 主格（装载→改温度→写回后主表仍只有一行、温度落在该行上）、装载保真格（对象记得行 id 而
+# `to_dict()` 不泄漏 `\x1f`：持久细节不外泄）、`agent_wide` 硬删格（同根因第三击：按调用现场
+# 三元组删 ⇒ 内存删了盘上留着、重启复活）、**反向钉格**（普通新建仍按业务 id 原位落一行，
+# 不许凭空给每行套前缀）。
+# ⚠ 主格与装载格都必须在**乙作用域**里 reload：快照每个业务 id 只留一份（`_merge_loaded_memory`
+# 的既定取舍"生效作用域优先"），不在那个作用域里装载就看不到那条行。
+tests/unit/memory/test_memoryPersistWritesTheRowItCameFrom.py
