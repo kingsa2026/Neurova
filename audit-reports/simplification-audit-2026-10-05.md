@@ -4111,6 +4111,7 @@
     - **实测量数（AST 现场取，不靠 grep 印象）**：该档以 `self.rbac_manager.*`／`self.event_bus.*` 形式调用的方法名共 13 个，其中 **6 个在当前类上根本不存在**——`RBACManager.add_role`（现役名 `create_role`，`neurova/security/rbac.py:291`）、`add_permission`、`assign_permission_to_role`、`assign_role_to_user`（现役 `assign_role`，`:415`）、`user_has_permission`，以及 `EventBus.emit`（现役名 `publish`，`neurova/core/event_bus.py:174`）。
     - **它为什么一直没红过**：该档**不在** `scripts/ci/protected_tests.txt`（现查 `grep -c test_security_integration` ⇒ 0），CI 的受保护子集按清单逐文件跑，目录跑与 CI 都不为它负责；红只在本机显式跑到时出现。这与 §6-248 是同一族失效（只是那处是"文件名收不到"，此处是"没进子集"）。
     - **三态在此，请人裁**（影响面已摆开）：**(甲) 改判据到现役 API**——两处格子重写调用与断言（`emit`→`publish`、`add_role`→`create_role` 等），代价小，但等于承认"RBAC 的这套组合语义只由测试自己定义"，改完还得判断言是否降级（教义第 2 条不许把断言改松）；**(乙) 补 API 门面**——给 `RBACManager` 加 `add_role`/`add_permission`/`assign_permission_to_role`/`assign_role_to_user`/`user_has_permission` 五个别名，代价是在生产里养一层为测试存在的兼容壳，与本仓"门面是契约不是便利"（§6-224）直接冲突，且 `EventBus.emit` 若也补就是第六个别名；**(丙) 判该档已失去对象**——按断点条款整档退役并署进 `protectedSubsetRetired.txt`，代价是"RBAC×脱敏×事件"这条组合链路从此无测。推荐 **(甲)**，理由：现役 API 覆盖该档想表达的每一步（`create_role`＋`assign_role`＋权限查询都在），缺的只是测试没跟上改名；(乙) 会把一次历史改名固化成生产契约，(丙) 留下断点。
+    - **本会话自查的一条错值**：上面四批的落库笔 `fe404f67` 正文写「文档 +25/−0」，现量是 **+30/−0**（`git show --numstat` 复算）。条目内容与结论不受影响，但按本仓「提交已入库改不了，错值就勘误在台账」的口径留这一行，不默默过去。
     - **本会话下一枚空号现查 §6-250。**
 
 
