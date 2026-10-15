@@ -3089,7 +3089,7 @@ tests/unit/memory/test_SleepConsolidationHasOneImplementation.py
 # 病灶形状是"数据根注入管不到主目录"——`tests/conftest.py` 只注入临时数据根，于是测试里的
 # bare 构造（rbac 那 7 处）会在操作者主目录建出真库。行为格从生产入口取数当场量到了实得值
 # （`C:/Users/xccoo/.neurova/rbac.db`、`.../.neurova/config/knowledge_config.json`）。
-# ⚠ 两格值得记：① 落点函数是"进程级单例"的（`get_benchmark_framework`）不许直接从判据走，
+# ⚠ 两格值得记：① 落点函数是"进程级单例"的（`get_image_pipeline_manager`）不许直接从判据走，
 # 要直接构造，否则改进程状态带倒同进程后续用例；② 只把字面量删掉而没接 `dataLanding`/
 # `adoptHomeLanding` 是另一种"看着修好了"，故接线格与行为格各钉一头。
 tests/unit/core/test_HomeFamilyLandingsFollowDataRoot.py
@@ -3133,3 +3133,7 @@ tests/unit/security/test_auth_comprehensive.py
 # 真产物与回执 3 格（真 zip 只剩 1 条裸 compile 参与裁决且仍被拒、拒因只点名参与裁决的条目）。
 # 逐文件单跑三次同读数 12/12/12；红自证＝撤本批两生产件后恰好 5 格红；6 枚变异反证全红。
 tests/unit/security/test_installGateRulesFollowCodeShape.py
+# 票④第一包·benchmark 门面实装退役（用户裁定取甲）：主格两枚钉「实现不在门面里、且全仓无人提名
+# 那些退役名字」；另三枚是交付锁——RAG 子模块那条活路仍可解析、真装配点 12 条 benchmark 路由仍在册、
+# 上一批那张落点判据不许留一枚指向已退役落点的悬空 pin。交付锁的失效方向由「删过头」提供。
+tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py

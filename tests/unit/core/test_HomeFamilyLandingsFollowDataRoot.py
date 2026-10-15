@@ -9,11 +9,13 @@
 （落点自己），不去给 conftest 加"把 home 也隔掉"的第二道兜底——落点收进数据根后，
 既有的临时数据根注入自动覆盖它，那道补丁根本不需要存在。
 
-另两处（`benchmark/__init__.py:282`、`image_pipeline/__init__.py:180`）形状不同：它们不是 home，
-是**裸相对** `".neurova/benchmark"`，即随 CWD 散落——同一件事在本仓已量过五处的代价（§6-202 那条
+另两处（`benchmark/__init__.py`、`image_pipeline/__init__.py` 的 `_storage_dir`）形状不同：它们不是 home，
+是**裸相对** `".neurova/<包名>"`，即随 CWD 散落——同一件事在本仓已量过五处的代价（§6-202 那条
 "裸文件名默认值让持久化文件随 cwd 散落"）。本批把落点正确性收掉；这两个字段本身**零消费点**
-（`_storage_dir` 全文件仅此一处赋值），属"档案票二"那 5 个门面包实现的退役候选，登记在那张票里，
-不在本批顺手删。
+（`_storage_dir` 全文件仅此一处赋值），属票④那 6 个门面包实现的退役候选，登记在那张票里，不在本批顺手删。
+**后续变化记在这里**：`benchmark` 那一半已在票④第一包随门面实装一起退役（该包现在只剩
+`rag_eval`／`rag_dataset_gen` 两个子模块），本档相应只留 `image_pipeline` 一枚裸相对落点——
+落点字段没了却还留一格去"验它的落点"，就是指向空气的 pin。
 
 判据两轨：行为格从生产入口取数，钉"注入数据根后落点在那一根下、且不在主目录下"；
 收养接线格钉 `dataLanding`/`adoptHomeLanding` 真的被调——只把字面量删掉而没接上单点，
@@ -121,28 +123,30 @@ def testKnowledgeConfigPathFollowsTheDataRoot(tmp_path: Path, monkeypatch):
 
 
 def testBareRelativeLandingsFollowTheDataRoot(tmp_path: Path, monkeypatch):
-    """行为格（第三、四处）：裸相对 `".neurova/<包名>"` 随 CWD 走＝换目录就换一个库。
+    """行为格（第三处）：裸相对 `".neurova/<包名>"` 随 CWD 走＝换目录就换一个库。
 
-    只验落点归属，不验消费——这两个字段现读零消费点（档头写明），退役归属在档案票二。
+    这一格原本钉**两处**（`benchmark` 与 `image_pipeline`）。`benchmark` 那一半随票④第一包
+    的门面实装退役**一起收掉**：那个 `_storage_dir` 是门面包实现里的字段，实现都不在了，
+    再留一格"验它的落点"就是指向空气的 pin——退役批里有一格专门钉这件事。
+    现读只剩 `image_pipeline` 一处，该字段本身仍是**零消费点**，其归属记在票④队列里，
+    本批不顺手删（只改这格的取数面）。
+
+    直接构造而不是走 `get_image_pipeline_manager()`：那是进程级单例，一格把它指向临时根，
+    同进程后续拿到的就是这一份——判据不该改进程级状态。
     """
     from neurova.core import data_root
 
     monkeypatch.setenv(data_root.DATA_ROOT_ENV, str(tmp_path))
     monkeypatch.chdir(tmp_path)          # 旧形态在这里会算出 tmp_path/.neurova/... 之类的随 CWD 落点
 
-    from neurova.benchmark import BenchmarkFramework
     from neurova.image_pipeline import ImagePipelineManager
 
-    # 直接构造而不是走 `get_benchmark_framework()`：那是**进程级单例**（`_framework_instance`），
-    # 一格把它指向临时根，同进程后续拿到的就是这一份——判据不该改进程级状态。
-    bench = BenchmarkFramework()
     pipe = ImagePipelineManager()
-    for label, value in (("benchmark", getattr(bench, "_storage_dir", None)),
-                         ("image_pipeline", getattr(pipe, "_storage_dir", None))):
-        assert value is not None, f"{label} 的 storage_dir 字段没了 ⇒ 本批动了形状"
-        assert str(Path(value).resolve()).startswith(str(tmp_path.resolve())), (
-            "%s 的 storage_dir 仍随 CWD 或仍指主目录（实得 %s）" % (label, value)
-        )
+    value = getattr(pipe, "_storage_dir", None)
+    assert value is not None, "image_pipeline 的 storage_dir 字段没了 ⇒ 有批次动了它的形状"
+    assert str(Path(value).resolve()).startswith(str(tmp_path.resolve())), (
+        "image_pipeline 的 storage_dir 仍随 CWD 或仍指主目录（实得 %s）" % value
+    )
 
 
 @pytest.fixture()
