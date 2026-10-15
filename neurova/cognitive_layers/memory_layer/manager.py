@@ -137,11 +137,20 @@ def _is_valid_category(category: str) -> bool:
         return False
 
 
-def _ingest_memory_id(identity_key: str) -> str:
-    """导入行的确定性主键：同一 identity_key 反复导入命中同一行（幂等靠它）。"""
+def _ingest_memory_id(identity_key: str, owner: str = "") -> str:
+    """导入行的确定性主键：同一 `identity_key` **在同一属主下**反复导入命中同一行（幂等靠它）。
+
+    属主要并进哈希输入：只由 `identity_key` 决定 id 时，同一条历史被导入给两个 owner 会算出
+    **同一个业务 id**——持久层自 §6-229 起按作用域限定行存（不互相覆盖），但关键词倒排与
+    运行期向量索引仍按业务 id 建单槽（`semantic_search.py:199/217/230`、
+    `unified_vector_store.py:690-706`），于是后导入那份把前一份的索引位顶掉，检索面少一条事实。
+    修在产生该 id 的这一侧（教义第 1 条），而不是给索引层处处加作用域键（那要动召回读面一整片）。
+    `ing-` 前缀是撤销口径与既有判据认的形状，只改哈希输入、不改外壳。
+    """
     import hashlib
 
-    return "ing-" + hashlib.sha256(str(identity_key).encode("utf-8")).hexdigest()[:16]
+    keyed = "%s\x1f%s" % (owner, identity_key)
+    return "ing-" + hashlib.sha256(keyed.encode("utf-8")).hexdigest()[:16]
 
 
 def _parse_import_ts(value: str) -> datetime.datetime:
@@ -1961,7 +1970,7 @@ class MemoryManager:
         if rec.supersedes:
             metadata["supersedes"] = rec.supersedes
         return Memory(
-            id=_ingest_memory_id(rec.identity_key),
+            id=_ingest_memory_id(rec.identity_key, owner or self._eff_user_id()),
             content=rec.content,
             memory_type=memory_type,
             category=category,
