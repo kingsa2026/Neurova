@@ -62,13 +62,10 @@ async def search_memories(
             request_id=_get_request_id(None),
         )
 
-    except APIError as e:
-        if e.code == ErrorCodes.AGENT_NOT_INITIALIZED:
-            return success_response(
-                data={"count": 0, "memories": []},
-                message="记忆系统未初始化，请先创建 Agent",
-                request_id=_get_request_id(None),
-            )
+    except APIError:
+        # 曾经这里捕住 AGENT_NOT_INITIALIZED 返回 200 + 空列表（"记忆系统未初始化，请先创建 Agent"）——
+        # 那是把故障画成成功：界面一片空白、日志零故障、指标不涨，看的人以为"就是没有记忆"。
+        # 未就绪由全局处理器如实落成 503（见 `api/error_handlers.py` 的码表）。
         raise
     except Exception as e:
         logger.exception("记忆搜索失败: %s", e)
