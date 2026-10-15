@@ -118,23 +118,19 @@ class TestUserModel:
     """测试 UserModel 类（基础功能）"""
 
     @pytest.fixture
-    def user_model(self):
-        """创建 UserModel 实例（使用临时数据库）"""
-        import tempfile
-        import os
+    def user_model(self, tmp_path):
+        """创建 UserModel 实例（库落在本轮 `tmp_path` 下）。
 
-        # 使用临时数据库文件
-        db_fd, db_path = tempfile.mkstemp(suffix=".db")
-        os.close(db_fd)
-
+        原形状是 `tempfile.mkstemp` 建库、夹具收尾再 `os.remove`。而 `UserModel` 走的是
+        **池化短连接**（`neurova/auth/user_model.py:94 PooledConnection`——`close()` 被重定向成
+        "归还池"，不是真关闭），池按路径持有真句柄 ⇒ 删除时撞
+        `PermissionError: [WinError 32]`（实测 13 格 ERROR，且 13 格断言本身全过——
+        红的全是收尾）。改落 `tmp_path` 并把回收交还给 pytest：`tests/conftest.py:134`
+        每测试后 `close_all_pools()` 先放句柄，临时目录要到会话结束才删，两者不再抢顺序。
+        """
         from neurova.auth.user_model import UserModel
-        model = UserModel(db_path=db_path)
 
-        yield model
-
-        # 清理
-        if os.path.exists(db_path):
-            os.remove(db_path)
+        return UserModel(db_path=str(tmp_path / "users.db"))
 
     def test_create_user(self, user_model):
         """测试创建用户"""
