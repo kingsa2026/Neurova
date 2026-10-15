@@ -89,6 +89,8 @@ class TestSyntheticBuilder:
     async def test_generates_split_dataset(self):
         async def fake_call(messages, model):
             assert "评测" in str(messages)
+            # 夹具**故意多吐**两个已被退役的键（difficulty/category）：合成臂只按
+            # task_input/expected_behavior 取值，LLM 超额输出不得炸、也不得复活空字段。
             cases = [{"task_input": f"任务{i}", "expected_behavior": f"细则{i}",
                       "difficulty": "medium", "category": "gen"} for i in range(8)]
             import json as _json

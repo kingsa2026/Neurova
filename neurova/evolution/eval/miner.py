@@ -117,12 +117,11 @@ class RelevanceScorer:
     async def score(self, *, skill_name: str, skill_text: str,
                     task_input: str, assistant_response: str) -> Optional[dict]:
         if self._llm_call is None:
-            return {"relevant": True, "expected_behavior": "应正确完成该任务",
-                    "difficulty": "medium", "category": "general"}
+            return {"relevant": True, "expected_behavior": "应正确完成该任务"}
         messages = [
             {"role": "system", "content":
              "判断用户消息是否与给定技能相关。只输出 JSON:{relevant:bool, "
-             "expected_behavior:str, difficulty:str, category:str}"},
+             "expected_behavior:str}"},
             {"role": "user", "content":
              f"技能名:{skill_name}\n技能描述:{skill_text[:800]}\n"
              f"用户消息:{task_input[:1000]}\n助手回复:{assistant_response[:1000]}"},
@@ -195,8 +194,6 @@ class HistoryMiner:
                 EvalExample(
                     task_input=m["task_input"],
                     expected_behavior=expected,
-                    difficulty=scored.get("difficulty", "medium"),
-                    category=scored.get("category", "general"),
                     source=m.get("source", "history"),
                 )
             )

@@ -67,7 +67,7 @@ class TestPersistence:
         assert loaded.all_examples == []
 
     def test_example_roundtrip(self):
-        e = EvalExample(task_input="t", expected_behavior="e", difficulty="hard", category="cat")
+        e = EvalExample(task_input="t", expected_behavior="e", source="golden")
         d = e.to_dict()
         assert EvalExample.from_dict(d) == e
 
