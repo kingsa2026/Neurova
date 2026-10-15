@@ -32,8 +32,9 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 BENCH_INIT = REPO_ROOT / "neurova" / "benchmark" / "__init__.py"
 
-#: 门面实装曾有的顶层名字（退役后**一个都不许再被提名**，包括测试与文档里的活代码）
-RETIRED_NAMES = (
+#: 门面实装曾有的顶层名字（退役后**一个都不许再被代码引用**）。必须是 frozenset：
+#: 上一版写成 tuple 却在判据里用 `&`，那一格其实一直停在 TypeError 上，什么都没判。
+RETIRED_NAMES = frozenset({
     "BenchmarkFramework",
     "get_benchmark_framework",
     "reset_benchmark_framework",
@@ -41,7 +42,7 @@ RETIRED_NAMES = (
     "BenchmarkCategory",
     "BenchmarkSuite",
     "BenchmarkResult",
-)
+})
 
 
 def _trackedFiles(suffix: str) -> list:
@@ -65,23 +66,50 @@ def test_benchmarkFacadeHoldsNoImplementation():
     assert not assigned, f"门面里还留着模块级状态：{assigned[:8]}"
 
 
-def test_noOneAnyMoreNamesTheRetiredSurface():
-    """主红②：退役名字在全仓（生产＋测试）都不许再被提名——留一处就是留一条指向空气的引用。
+def _codeReferences(text: str) -> set:
+    """一个文件里**以代码身份**出现的目标名字（不是注释、不是 docstring）。
 
-    扫描面用 `git ls-files` 而不是 `rglob`：只认跟踪件，工作树里别人的在途新档不该由我判红，
-    而我自己的改动必定在跟踪面内。
+    为什么必须按 AST 判而不是 `if name in text`：退役哨兵档自己就得写着那些退役名字，
+    被退役的门面也要留一份"这里曾经是什么"的说明——按词判会把这两处自己判红。
+    本仓同族的教训跑过两遭（按词判的守卫被自家文档撞红）。
     """
+    found = set()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return found
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            found.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            found.add(node.attr)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                found.add(alias.name.split(".")[0])
+                found.add(alias.name)
+                if alias.asname:
+                    found.add(alias.asname)
+    return found
+
+
+def test_noOneAnyMoreNamesTheRetiredSurface():
+    """主红②：退役名字在全仓（生产＋测试）都不许再被**代码引用**——留一处就是留一条指向空气的引用。
+
+    扫描面用 `git ls-files` 而不是 `rglob`：只认跟踪件，工作树里别人的在途新档不该由我判红。
+    两处**必须**排除且理由不同：本哨兵档（它按定义就得写出那些名字）、
+    被退役的门面 `__init__.py`（它留的是"这里曾经是什么"的分子说明，属文档不是引用）。
+    """
+    selfPath = pathlib.Path(__file__).resolve()
     offenders = []
     for rel in _trackedFiles(".py"):
-        path = REPO_ROOT / rel
-        if path == BENCH_INIT or not path.exists():
+        path = (REPO_ROOT / rel).resolve()
+        if path == BENCH_INIT or path == selfPath or not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        hit = [n for n in RETIRED_NAMES if n in text]
+        hit = RETIRED_NAMES & _codeReferences(path.read_text(encoding="utf-8", errors="replace"))
         if hit:
-            offenders.append((rel, hit))
+            offenders.append((rel, sorted(hit)))
     assert not offenders, (
-        "这些文件还在提名已退役的门面名字（改判或删除引用，别留着当指路牌）：%s" % offenders
+        "这些文件还在**代码里**引用已退役的门面名字（改判或删除引用，别留着当指路牌）：%s" % offenders
     )
 
 
