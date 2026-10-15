@@ -3003,3 +3003,15 @@ tests/unit/memory/test_memoryToDictCarriesEmbedding.py
 # ⚠ 本档的桩引擎早期用内置 hash() 造出过间歇红——字符串哈希按进程加盐，无关文本余弦会跳过
 # 0.7 阈值；换 zlib.crc32 后才稳（形态集"判据自己不稳，红就没法归因"那一形）。
 tests/unit/memory/test_backfillMemoryEmbeddingsTool.py
+# 批 §6-222（甲3，§6-218 三态票 → §6-219 丙止血之后的机制批）：睡眠合并的准入是
+# "余弦达近等价下限 **且** 归一化后短者为长者子串"，只看余弦即误伤。11 格——正例 2
+# （逐字重复照合、包含关系取最长且短者正文一字不丢）、反例 4（余弦 1.0 而内容不等价＝
+# IMP-探针/DB-探针那一形、kai 形状两条不同回合在现网阈 0.7 下各成一簇、阈值调到 0.3 不许
+# 把语义合并放回来、空键不得互吞）、参数 1（调高到 0.995 仍真的收紧＝阈值不是装饰）、
+# 写回 3（合并后活跃面恰 1 条产物且退役的正是那两条源、产物带 metadata.merged_from、
+# 产物分类不被挪进 general）。前 3 格在新旧判据下同绿是设计如此：它们钉"这条腿别整条熄火"。
+# 逐档单跑 11/11；活体 tests/manual/mergeGateNearEquivalentLive.py 走真 create_app() + 真
+# start_sleep() + 真 ONNX 引擎，两枚反证各红在各自的读数上（去掉写回 id= ⇒ 两条真事实从
+# 活跃面消失；整条退回只看余弦 ⇒ kai 那条 0.7875 的姊妹条把它吞掉）。
+# ⚠ 只回退两个 clause 里的**一个**（去掉包含条款、留 0.98 下限）活体仍全绿——反证要整条退。
+tests/unit/memory/test_sleepMergeRequiresNearEquivalentContent.py
