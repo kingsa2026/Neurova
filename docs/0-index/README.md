@@ -27,7 +27,7 @@
 | 记忆系统（多维度分类 + 温度引擎） | ✅ | `cognitive_layers/memory_layer/` | [02-memory-system](../01-architecture/02-memory-system.md) |
 | NeRF 增强记忆检索（六通道体积渲染） | ✅ | `neurova_recall.py` `volume_renderer.py` `positional_encoding.py` `unified_retriever.py` | [16-vector-retrieval-system](../01-architecture/16-vector-retrieval-system.md) |
 | 记忆温度机制（遗忘曲线 + 固化） | ✅ | `temperature.py` | [12-memory-temperature-mechanism](../01-architecture/12-memory-temperature-mechanism.md) |
-| 睡眠整理（记忆巩固 + 梦境） | ✅ | `sleep.py` `sleep_adapter.py` `sleep_writeback.py` | [13-memory-intelligence-enhancements](../01-architecture/13-memory-intelligence-enhancements.md) |
+| 睡眠整理（记忆巩固 + 梦境） | ✅ | `sleep.py` `sleep_writeback.py` | [13-memory-intelligence-enhancements](../01-architecture/13-memory-intelligence-enhancements.md) |
 | 情感中枢引擎（四层 17 种情感） | ✅ | `cognitive_layers/emotion_context_layer/emotion_hub_engine.py` | [15-emotion-resonance-engine](../01-architecture/15-emotion-resonance-engine.md) |
 | 自我进化引擎（人格/动机/宪法/反思） | 🟡 | `evolution/`（11 文件，遗传引擎部分） | [21-recursive-self-improvement](../01-architecture/21-recursive-self-improvement.md) |
 | RSI 递归自我进化（8 组件） | ✅ | `evolution/rsi/`（orchestrator/convergence/ratchet 等） | [21-recursive-self-improvement-v1.3](../01-architecture/21-recursive-self-improvement-v1.3-summary.md) |

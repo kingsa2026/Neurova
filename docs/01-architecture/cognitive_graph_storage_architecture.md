@@ -21,7 +21,7 @@
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │           SleepConsolidationAdapter (睡眠整合)          │  │
+│  │           SleepConsolidation (睡眠整合)                 │  │
 │  │  SleepConsolidation ←→ CognitiveStorageEngine          │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -107,14 +107,18 @@ results = engine.retrieve("Python", limit=10, filters={"memory_type": "semantic"
 
 记录完整推理过程，存储为可检索的 EPISODIC 记忆。
 
-### 6. SleepConsolidationAdapter — 睡眠整合适配器
+### 6. SleepConsolidation — 睡眠整合
 
-桥接 SleepConsolidation（MemoryRecord）和 CognitiveStorageEngine（UnifiedMemoryNode）。
+固化只有这一份实现（`sleep.py`）。历史上另有一层 `sleep_adapter.py` 桥接
+CognitiveStorageEngine 的 `UnifiedMemoryNode`，它自建 `MemoryRecord` 不经 `from_dict`，
+因此 `agent_id/neuser_id/user_id` 一律落成默认值——隔离作用域在这条腿上被抹平；
+而 `neurova/` 里对它的外部 import 为 0（生产零消费者），同一条链在 `sleep.py` 上早已
+按作用域分桶、按源行写回，故该层已退役（教义第 7 条：同功能只剩一处实现被消费）。
 
 **功能**:
-- 从引擎读取记忆 → 转为 MemoryRecord
-- 运行整合（聚类、合并、衰减）
-- 将结果写回引擎
+- 从记忆管理器读取记忆 → `MemoryRecord.from_dict`（含单数 `category` 的跨界口）
+- 运行整合（聚类、合并、衰减），合并准入要求内容近等价而非"语义相近"
+- 结果经 `sleep_writeback.write_back_consolidation_result` 写回，每条动作先进该行自己的隔离作用域
 
 ### 7. TemperatureEngine — 温度引擎
 
@@ -184,6 +188,5 @@ self.reasoning_trace = ReasoningTraceManager(engine=self.storage_engine)
 | pattern_crystallizer.py | ~180 | 经验结晶器 |
 | unified_retriever.py | ~155 | 统一检索器 |
 | reasoning_trace_manager.py | ~195 | 推理链管理器 |
-| sleep_adapter.py | ~170 | 睡眠整合适配器 |
 | temperature.py | ~240 | 温度引擎 |
 | sleep.py | ~275 | 睡眠整合核心 |
