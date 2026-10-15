@@ -115,9 +115,12 @@ _POOL_HASH_BACKFILL_BATCH = 5000
 # 一次性 `INSERT … SELECT` 会把并发写整段阻塞（基线脚本 §6 实测 0.84 s 全程持写锁）。
 _FTS_REBUILD_BATCH = 5000
 
-# v2 的影子表名与分词器（重建期用；切换完成后影子表被 RENAME 成正式表）
+# v2 的影子表名（重建期用；切换完成后影子表被 RENAME 成正式表）。
+# 分词器不在这里再定义一遍——只取 `core.sql_like.FTS_TOKENIZER` 那一份（§6-210 老账⑤）：
+# 取值今天相同，所以这不是行为问题而是第二份定义的漂移入口——单源哪天改了，这张表会悄悄
+# 回到"中文子串恒 0 命中"，而没有任何一格会红。换分词器要重建（影子表按 rowid 回填后 RENAME），
+# 改常量不生效，故本批只收"谁定义这个词"，不动迁移语义。
 _FTS_SHADOW_TABLE = "evicted_fts_v2"
-_FTS_TOKENIZE = "trigram"
 
 
 def contentDigest(content: str) -> str:
@@ -298,7 +301,7 @@ def _rebuildFtsAsTrigram(conn: sqlite3.Connection) -> None:
     side = _openSideConnection(dbPath)
     try:
         side.execute("CREATE VIRTUAL TABLE IF NOT EXISTS %s USING fts5(content, tokenize='%s')"
-                     % (_FTS_SHADOW_TABLE, _FTS_TOKENIZE))
+                     % (_FTS_SHADOW_TABLE, sql_like.FTS_TOKENIZER))
         while True:
             side.execute("BEGIN IMMEDIATE")
             batch = side.execute(

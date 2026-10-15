@@ -26,3 +26,20 @@ def get_agent_workspaces_root() -> Path:
 def get_agent_workspace_dir(agent_id: str = "") -> Path:
     """单个 agent 的工作区目录（agent_id 空值回落 default）"""
     return get_agent_workspaces_root() / (agent_id or _DEFAULT_AGENT_ID)
+
+
+def agentMemoryDirUnder(workspaceRoot) -> Path:
+    """工作区里"记忆落点"那一段的唯一拼法（`<root>/memory`）。"""
+    return Path(workspaceRoot) / "memory"
+
+
+def agentMemoryDbPathUnder(workspaceRoot) -> Path:
+    """记忆主库路径那一段的唯一拼法（`<root>/memory/memory.db`）。
+
+    §6-210 老账①：这条形状此前在 `agent_core.py` 与
+    `memory_layer/manager.py:_default_db_path_for` 各拼一遍（两处逐字同形，只差 root 来源
+    是注入的还是按 agent_id 推的）。今天算出的字符串相同所以没人疼，但改一处即分叉——
+    落点一分叉就是数据搬迁事故（正文库、情绪表、附件目录都按这条路径认地方）。
+    两个 root 来源都得留着，所以收口形态不是删掉一处，而是把**布局那一段**收成这一份。
+    """
+    return agentMemoryDirUnder(workspaceRoot) / "memory.db"

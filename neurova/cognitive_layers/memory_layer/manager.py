@@ -4565,9 +4565,9 @@ def _default_db_path_for(agent_id: str) -> str:
     原默认值 "neurova_memory.db" 是相对路径——持久化文件随进程 cwd 散落
     （项目根 / data / neurova/memory/data 各一份且互不一致）。
     """
-    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.core.agent_workspaces import agentMemoryDbPathUnder, get_agent_workspace_dir
 
-    path = get_agent_workspace_dir(agent_id) / "memory" / "memory.db"
+    path = agentMemoryDbPathUnder(get_agent_workspace_dir(agent_id))
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
 
