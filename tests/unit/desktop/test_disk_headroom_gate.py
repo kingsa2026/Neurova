@@ -25,6 +25,7 @@ r"""构建前磁盘余量闸守卫：多 GB 级 target 写入之前必须先证�
 import ast
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -44,8 +45,12 @@ def _loadGate():
 
 
 def _runGate(args, cwd=None):
+    # 被调的闸脚本是本仓 Python 件 ⇒ 两头钉死（子端 PYTHONIOENCODING=utf-8、父端按 utf-8 解）。
+    # 闸的读数里带仓库路径（含「项目」二字），只补父端 encoding 会把那条路径读成 U+FFFD。
     return subprocess.run([sys.executable, str(_GATE), *[str(a) for a in args]],
-                          capture_output=True, text=True, cwd=str(cwd or _REPO), timeout=120)
+                          capture_output=True, text=True, cwd=str(cwd or _REPO), timeout=120,
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                          encoding="utf-8", errors="replace")
 
 
 def test_gateModuleIsTheSingleSourceOfTheThreshold():

@@ -31,7 +31,10 @@
 from __future__ import annotations
 
 import ast
+import locale
+import os
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -224,3 +227,126 @@ def test_probeRemovedFromBaselineAfterRun():
 ])
 def test_knownBadFormsAreCounted(bad):
     assert _violationCount(bad) == 1, f"该被判的形态没判到：{bad}"
+#: ── 批 51（§6-225）补的下半张：本文件原本只钉"有没有写 encoding"，不钉**写的是不是对的那一个**。
+#: 于是出现一种比原缺陷更隐蔽的形态——**半修**：父端按 utf-8 解，子端（本仓的 Python 件）没钉
+#: `PYTHONIOENCODING`，仍按本机码页（cp936）吐字节 ⇒ 非 ASCII 被换成 U+FFFD，而代码看起来"已修"。
+#: 本文件自己的修法文案早就写了"并让子进程写侧也钉成 UTF-8"，那句话此前**只落在散文里没有通道**
+#: （AGENTS.md 反证守卫那条：一条纪律若只写在文档里，根因是缺自动复核通道，不是这次忘了查）。
+CAPTURE_FUNCS_PY = CAPTURE_FUNCS
+
+#: 半修站点现读（§6-225 本批复算，收掉 `test_temp_reclaim`/`test_disk_headroom_gate`/
+#: `declaredSurfaceFaces_batch50` 之后）：**等号格**——多一处即红（半修蔓延），少一处也红
+#: （逼一次显式收数，与本文件"降要看得见"同一手法）。
+HALF_PINNED_BASELINE = 27
+
+
+def _callNodes(source: str):
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name) \
+                and fn.value.id == "subprocess" and fn.attr in CAPTURE_FUNCS:
+            out.append(node)
+    return out
+
+
+def _argvFirstIsPythonChild(node) -> bool:
+    """argv 首项是 `sys.executable` ⇒ 子进程是本仓的 Python 件（写侧可以由我们钉）。"""
+    argv = node.args[0] if node.args else None
+    if not isinstance(argv, ast.List) or not argv.elts:
+        return False
+    first = argv.elts[0]
+    return (isinstance(first, ast.Attribute) and isinstance(first.value, ast.Name)
+            and first.value.id == "sys" and first.attr == "executable")
+
+
+def halfPinnedSites() -> list:
+    """`(文件, 行号)`：按 utf-8 解 Python 子件，而该文件里没有一处 `PYTHONIOENCODING` 钉写侧。"""
+    out = []
+    for root in SCAN_ROOTS:
+        for path in filesUnder(REPO_ROOT / root):
+            if path.suffix != ".py":
+                continue
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if "subprocess" not in source or "sys.executable" not in source:
+                continue
+            pinned = "PYTHONIOENCODING" in source
+            for node in _callNodes(source):
+                kws = {k.arg for k in node.keywords if k.arg}
+                if "encoding" not in kws or not _argvFirstIsPythonChild(node):
+                    continue
+                encNode = next(k for k in node.keywords if k.arg == "encoding")
+                enc = ast.unparse(encNode.value).strip("'\"").lower().replace("-", "")
+                if enc == "utf8" and not pinned:
+                    out.append((path.relative_to(REPO_ROOT).as_posix(), node.lineno))
+    return sorted(out)
+
+
+def test_halfPinnedPythonChildSitesMatchTheCountedBaseline():
+    """半修面等号格：不许蔓延，也不许悄悄变好不收数。"""
+    now = halfPinnedSites()
+    assert len(now) == HALF_PINNED_BASELINE, (
+        "半修（父端 utf-8 解 Python 子件、子端没钉 PYTHONIOENCODING）站点数与基线不符："
+        "现读 %d / 基线 %d。\n多了＝新写了一处半修，把子端 env 一起钉上；"
+        "少了＝有人收掉了存量，把 `HALF_PINNED_BASELINE` 收下去再提交。\n%s"
+        % (len(now), HALF_PINNED_BASELINE, now[:HALF_PINNED_BASELINE + 6]))
+
+
+def test_bothEndsPinnedRoundTripsNonAsciiWhileHalfPinDoesNot():
+    """行为对照格：两头钉 ⇒ 中文原样回；只钉父端 ⇒ 在本机码页非 UTF-8 时必然读坏。
+
+    这一格是**探测器自身的自证**：上面那条数形状，这条证形状背后那个危害是真的。
+    本机 locale 已是 UTF-8 时反向那半恰好不成立——如实 skip，不假装验过。
+    """
+    marker = "项目Neurova-中文回显"
+    code = "import sys\nsys.stdout.write(%r)\n" % marker
+    envPinned = dict(os.environ)
+    envPinned["PYTHONIOENCODING"] = "utf-8"
+    pinned = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", env=envPinned, timeout=120)
+    assert pinned.returncode == 0, pinned.stderr[-400:]
+    assert pinned.stdout == marker, f"两头钉后仍读坏：{pinned.stdout!r}"
+
+    preferred = locale.getpreferredencoding(False).lower().replace("-", "")
+    if preferred == "utf8":
+        pytest.skip("本机首选编码已是 UTF-8——半修在这一台机器上恰好读得对，反向那半无从验")
+    if os.environ.get("PYTHONIOENCODING"):
+        pytest.skip("父进程环境已带 PYTHONIOENCODING，半修那一发不再代表真实形态")
+    half = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+    assert half.stdout != marker, (
+        "半修那发竟读对了（本机首选编码 %s）——探测口径变了，重定这一半而不是留着当恒真"
+        % locale.getpreferredencoding(False))
+
+
+def test_consoleToolChildUsesTheConsoleCodecNotUtf8():
+    """原生控制台件（`schtasks`）不许"顺手统一"成 utf-8：它按控制台码页输出，回显里带中文路径。
+
+    记的是**判断**而不是编码常量：`scripts/desktop/wsl_crash_cleanup.py` 那两处按
+    `locale.getpreferredencoding(False)` 显式解（写出来而不是靠默认值，默认值随父进程 locale 漂）。
+    将来若有人加 `wsl` 件的捕获，那是第三种编码（UTF-16LE），本格不含它 ⇒ 必须另判，不许并进这一条。
+    """
+    src = (REPO_ROOT / "scripts" / "desktop" / "wsl_crash_cleanup.py").read_text(encoding="utf-8")
+    sites = []
+    for node in _callNodes(src):
+        argv = node.args[0] if node.args else None
+        if not (isinstance(argv, ast.List) and argv.elts
+                and getattr(argv.elts[0], "value", None) == "schtasks"):
+            continue
+        enc = next((k for k in node.keywords if k.arg == "encoding"), None)
+        assert enc is not None, f"schtasks 调用没写 encoding（回到 §6-64 那一态）：行 {node.lineno}"
+        sites.append((node.lineno, ast.unparse(enc.value)))
+    assert sites, "schtasks 捕获点形状变了——本格会空转，先按实状重定取数口径"
+    wrong = [(lineno, enc) for lineno, enc in sites if "getpreferredencoding" not in enc]
+    assert not wrong, (
+        f"原生控制台件被改成按 utf-8 解：{wrong}——schtasks 按控制台码页输出且回显含中文路径，"
+        "utf-8 会把回显里的中文换成 U+FFFD（看着像没报错、实际读坏）")
