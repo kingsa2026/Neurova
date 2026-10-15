@@ -2491,7 +2491,7 @@ tests/unit/core/test_identityChannelMergedToOneSource.py
 # HTTP 面另钉：写面仅管理员、请求体没有"替他人绑"的口（多写 `user_id` → 422）、
 # 不识别码 400 点名、`auto` 当首选语言是 400 而不是 500、盘没写成回 500 不是 200。
 # 入册前逐文件单跑两次同读数 17 passed（6.27s / 5.63s）。
-tests/language/testOutOfBoxDefaultLayer.py
+tests/language/test_OutOfBoxDefaultLayer.py
 # §6-167 退役那一半的判据：全局语言默认从 settings 退净、写面拒收并给出去处。
 # 摘掉默认值**不够**——`PUT /settings` 的 body 是 `Dict[str, Any]` 且无闭集校验
 # （实测旧调用方写 `zh_CN` 这种下划线码也回 200），旧键能被原样写回盘上再被原样回显，
@@ -2505,7 +2505,7 @@ tests/language/testOutOfBoxDefaultLayer.py
 # （`language` 这个键名在生产码里还服务于编程语言/播报语种，全仓一刀切会把无关命中算进来），
 # 并配一格变异对照证明它抓得住"把键加回去"。
 # 入册前逐文件单跑两次同读数 15 passed（2.01s / 2.00s）。
-tests/unit/api/testRetiredGlobalLanguageDefault.py
+tests/unit/api/test_RetiredGlobalLanguageDefault.py
 # §6-168 渠道语音出站（缺口②）两面判据：
 # `test_channelVoiceEgress.py` 12 格——出站形态的**唯一来源**（按 voiceOutMode 赋值形状判，
 # 不按字符串扫，否则 "none" 这类词会既假红又放过）、回合音频必须进回发项（含"文件不在位不得产出语音条"）、
