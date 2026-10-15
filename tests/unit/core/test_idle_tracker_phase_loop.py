@@ -9,6 +9,7 @@
 - 断点: 空闲路径 _write_back_consolidated_memories 从不删除被合并的源记忆 → 记忆翻倍。
 """
 
+import contextlib
 import time
 import unittest
 
@@ -17,13 +18,26 @@ from neurova.core.idle_tracker import IdleTimeTracker, SleepPhaseThresholds
 
 
 class FakeMemoryManager:
-    """最小记忆管理器桩：记录 remember/forget/update 调用"""
+    """最小记忆管理器桩：记录 remember/forget/update 调用
+
+    `request_scope` 是被测方（睡眠写回，§6-223 甲）真会调用的生产接口——桩不实现它，
+    就等于让被测代码走了一条真 manager 不会走的路。这里记下作用域供断言用。
+    """
 
     def __init__(self, memories):
         self._mems = {m["id"]: dict(m) for m in memories}
         self.added = []
         self.forgotten = []
         self.updated = []
+        self.scopes = []
+
+    @contextlib.contextmanager
+    def request_scope(self, neuser_id=None, user_id=None):
+        self.scopes.append((neuser_id, user_id))
+        try:
+            yield self
+        finally:
+            self.scopes.pop()
 
     def get_all_memories(self):
         return [dict(v) for v in self._mems.values()]
