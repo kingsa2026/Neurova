@@ -34,8 +34,14 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# SelfModelEngine 五算子产出的教训算子集合（subject 均为工具名）
-_KNOWN_OPERATORS = {"drift", "sequence", "contrast", "calibration", "budget"}
+# SelfModelEngine 五算子产出的教训算子集合（subject 均为工具名）。
+# 词表**不在此定义**：单点是 `meta_cognition_layer/self_model.py::OPERATORS`，
+# 这里**调用时**取——手抄一份的后果是反思侧加算子、归因侧照旧判"未知算子"丢弃，
+# 两边都绿而教训静默不落技能库（AGENTS.md 教义第 6 条；判据钉单点变更当场两处同生效）。
+def _knownOperators() -> frozenset:
+    from neurova.cognitive_layers.meta_cognition_layer.self_model import OPERATORS
+
+    return frozenset(OPERATORS)
 
 # 默认归因置信度阈值（默认置信度阈值 0.7）
 DEFAULT_MIN_CONFIDENCE = 0.7
@@ -157,11 +163,13 @@ def attribute_failures_to_skills(
 
     index = build_tool_skill_index(registry)
 
+    # 词表在**每次调用**时从单点取（不是 import 期快照，也不是本模块字面集合）
+    knownOperators = _knownOperators()
     for item in items:
         meta = item.get("metadata") or {}
         subject = str(meta.get("subject") or "").strip()
         operator = str(meta.get("operator") or "").strip()
-        if not subject or operator not in _KNOWN_OPERATORS:
+        if not subject or operator not in knownOperators:
             continue
         if not _is_active(meta):
             continue
