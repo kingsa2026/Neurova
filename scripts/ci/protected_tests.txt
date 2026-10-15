@@ -3036,3 +3036,14 @@ tests/unit/memory/test_sleepConsolidationBucketsByIsolationScope.py
 # ⚠ 主格与装载格都必须在**乙作用域**里 reload：快照每个业务 id 只留一份（`_merge_loaded_memory`
 # 的既定取舍"生效作用域优先"），不在那个作用域里装载就看不到那条行。
 tests/unit/memory/test_memoryPersistWritesTheRowItCameFrom.py
+# 批 §6-231（§6-215 那张票的甲案）：新行入库时就把嵌入算出来——否则固化这条腿对新写入永久失明。
+# 现网读数：`default` 14 行里那 2 行固化产物 `embedding IS NULL`，按甲3「任一侧无嵌入不合」永不进簇；
+# 全仓该列此前唯一的生产者是一次性脚本 `scripts/backfill_memory_embeddings.py`。成本实测不是障碍：
+# 本地 ONNX 冷加载 0.412s／进程一次、暖调 3.2ms，召回路与写侧用同一个单例。
+# 5 格——主格（真 `remember()` 后内存对象与正文列两头都有引擎那份向量）、零向量格（引擎回全零
+# ＝没算出来，不许当"有向量"写进列——教义第 2 条）、引擎缺席格（行照写、列留空、不炸调用方）、
+# **导入路同根因格**（`_build_imported_memory` 是第二处建行，只修 `remember()` 就留一条瞎腿）、
+# 闭环格（产物带嵌入 → 第二 `start_sleep()` 真把它吸收掉；认本轮产物按 id 集合差，不按 `merged_` 前缀）。
+# 夹具两条实据写在档头：甲3 的 0.98 门要"只差一两个虚词"才够得着（`+了`=0.9952，`+，已复核`=0.9513）；
+# `+。` 那对 normalized_key 相同会被内容门吞成一句。
+tests/unit/memory/test_writeSideFillsEmbedding.py
