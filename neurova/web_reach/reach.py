@@ -50,6 +50,17 @@ from neurova.security.url_guard import assert_public_url as _url_guard_assert_pu
 _BLOCKED_NETS = _URL_GUARD_BLOCKED_NETS
 
 
+def _utf8ChildEnv():
+    """子进程写侧钉 utf-8——父端按 utf-8 解、子端按 cp936 写就是半修（§6-225 那族）。
+
+    本仓根路径含中文，子件把带路径的日志写到 stderr 时按 `locale.getpreferredencoding()`
+    （开发机 cp936）编码，父端再按 utf-8 解就成了 U+FFFD 替换字符：读数为真、内容为假。
+    """
+    import os
+
+    return {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+
 def _check_scheme(url: str) -> Optional[str]:
     """协议校验（仅 http/https），非法返回错误消息"""
     scheme = urllib.parse.urlparse(url).scheme.lower()
@@ -208,6 +219,7 @@ def youtube_transcript(url: str, timeout: float = _YTDLP_TIMEOUT) -> Dict[str, A
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=_utf8ChildEnv(),
             errors="replace",
             timeout=timeout,
         )
@@ -300,6 +312,7 @@ def bilibili_search(query: str, limit: int = 5, timeout: float = _YTDLP_TIMEOUT)
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=_utf8ChildEnv(),
             errors="replace",
             timeout=timeout,
         )
