@@ -248,9 +248,14 @@
 - [agent-memory-cutting-edge-research-2026.md](../08-research/agent-memory-cutting-edge-research-2026.md) — Agent 记忆前沿研究
 - [agent_memory_consciousness_research_20260511.md](../08-research/agent_memory_consciousness_research_20260511.md) — 记忆与意识调研
 - [neurova_memory_consciousness_enhancement_20260511.md](../08-research/neurova_memory_consciousness_enhancement_20260511.md) — 记忆意识增强方案
+- [AIGC生成端点矩阵_2026-09-14.md](../08-research/AIGC生成端点矩阵_2026-09-14.md) — AIGC 图像/视频生成端点矩阵（官方文档核实 + 真实 HTTP 探测，模型管理预置与 AIGC 页能力过滤的参考盘点）
+- [zcode_vs_neurova_tool_loop_comparison_2026-09-26.md](../08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md) — 与外部编码代理 ZCode 的工具调用与迭代循环对标，含 G1–G8 缺口复验与自我更正记录（竞品/外部对标，研究参考）
 - [rsiagent_vs_neurova_rsi_comparison_2026-10-06.md](../08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md) — 与外部 RSIAgent 的 RSI 代码级对比（竞品/外部对标）
+- [skillglow_vs_neurova_skill_consolidation_2026-10-07.md](../08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md) — 与外部技能沉淀论文 SkillGLoW 的技能域对比：吸收账本迁移、召回预检、全自动整合提交闸的落地登记与规则修订记录（竞品/外部对标，研究参考）
 - [designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md](../08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md) — 与 Designer-RSI 论文（arXiv:2609.22086）的程序性记忆对照（竞品/外部对标）
+- [dramaclaw_vs_neurova_aigc_pipeline_comparison_2026-10-08.md](../08-research/dramaclaw_vs_neurova_aigc_pipeline_comparison_2026-10-08.md) — 与外部自托管短剧流水线 dramaclaw 的 AIGC 管线代码级对比，含整合否决裁决的取证（竞品/外部对标，研究参考）
 - [semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md](../08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md) — 与外部图谱工具链 Semantica（MIT / 22.4 万行）的知识库与知识图谱代码级对比，含本仓自有断点 N1–N6 与候选 K1–K8（竞品/外部对标，研究参考）
+- [modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md](../08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md) — 与 ModularRSI 论文（arXiv:2609.14857）的 harness 递归自我改进对照，只记 RSIAgent／Designer-RSI 两篇前作未覆盖的增量项 M-A..M-E（竞品/外部对标，研究参考）
 
 ### 09-dev-progress 开发进展
 
