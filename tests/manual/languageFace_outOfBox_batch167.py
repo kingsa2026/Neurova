@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """live-verify（台账 §6-167，裁定「先取长补短再退役」）：开箱默认在**活 app** 上真走一遍。
 
-判据档（`tests/language/testOutOfBoxDefaultLayer.py` + 
-`tests/unit/api/testRetiredGlobalLanguageDefault.py`）挂的是手搭的 `FastAPI()`；这一支要证的
+判据档（`tests/language/test_OutOfBoxDefaultLayer.py` + 
+`tests/unit/api/test_RetiredGlobalLanguageDefault.py`）挂的是手搭的 `FastAPI()`；这一支要证的
 是另一件事——
 
 1. `/api/v1/language/preferences/default` 在 `create_app()` 的真路由表里可达，真吃**真 JWT**，

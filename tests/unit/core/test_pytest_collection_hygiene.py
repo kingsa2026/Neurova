@@ -327,19 +327,19 @@ def test_reverseProofDetectsAZeroCaseModule(tmp_path):
 
 
 
-#: 已登记的「文件名收不到、内容却是用例」存量（2026-10-12 现取，路径相对 `tests/`）。
-#: 这两档是**另一会话的在途件**（`git status` 里尚未跟踪），本批不代它改名、也不代它裁；
-#: 它们会在自己那批"提交 + 跑 CI"那一刻撞上本档——那正是该撞见它的动作。
+#: 已登记的「文件名收不到、内容却是用例」存量。**现表为空＝零容忍口径生效**：任何新增者当场红。
+#: 表里原有两条（`language/testOutOfBoxDefaultLayer.py`、`unit/api/testRetiredGlobalLanguageDefault.py`）
+#: 登记时是另一会话的在途件、当时尚未跟踪，故只署名不代改；两档此后都已入库并各自逐文件单跑全绿
+#: （17 passed / 15 passed），已按本表自述的第一条出路收进 `test_` 前缀，署名进
+#: `tests/unit/ci/protectedSubsetRetired.txt`。**留过期的行就是替不存在的事背书**——`stale` 那一向判据
+#: 正是为这一刻准备的，摘表与改名必须同批完成。
 #: 三条出路（与 `_ZERO_CASE_TEST_FILES_BASELINE` 同）：按活的 `python_files` 改名
 #: （`test_` 前缀 + 驼峰其余，例：`test_sessionIdShapeAcrossReadPaths.py`）、
 #: 移出唯一测试根、或作为手工配方落 `tests/manual/`。
-#: **空表是零容忍口径**：任何新增者当场红。本批自己就踩过一次——
-#: 新判据先写成 `testSessionIdShapeAcrossReadPaths.py`，显式给路径跑得全绿、
-#: 目录跑与 CI 却一条都不收（见 `test_reverseProofShowsSuchAFileSilentlyDoesNotRun`）。
-_UNCOLLECTABLE_FILE_BASELINE: set = {
-    "language/testOutOfBoxDefaultLayer.py",
-    "unit/api/testRetiredGlobalLanguageDefault.py",
-}
+#: 本档自己就踩过一次——新判据先写成 `testSessionIdShapeAcrossReadPaths.py`，
+#: 显式给路径跑得全绿、目录跑与 CI 却一条都不收
+#: （见 `test_reverseProofShowsSuchAFileSilentlyDoesNotRun`）。
+_UNCOLLECTABLE_FILE_BASELINE: set = set()
 
 #: 按设计不参与目录收集的目录（活体配方、退役存档、运行器；AGENTS.md §2 列的结构）。
 _NON_COLLECTED_TEST_DIRS = ("manual", "archive", "runners")
