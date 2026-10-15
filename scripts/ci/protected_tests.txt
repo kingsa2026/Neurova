@@ -3083,3 +3083,10 @@ tests/unit/core/testHomeFamilyLandingsFollowDataRoot.py
 #     那是最坏的一种假绿）；③常驻格的扫描面按用途取面——"存量比对"走已跟踪清单，
 #     "不许新增"走工作树，两者混用会把并发会话的在途档读成自己的回归。
 tests/unit/ci/test_trackedScanFaceIsSingleSourced.py
+# 批 导入行 id 并进属主：同一 identity_key 导入两个 owner 不再共用一个业务 id。
+# ⚠ 这档最有价值的部分不是断言，是档头记的两条：① 本票原前提"同业务 id 会顶掉索引槽"
+#   被**变异反证否掉**（旧公式下两属主都召得回——§6-229 起持久层按作用域限定行存、读侧每次
+#   只装一个作用域），所以召回断言降格为反向钉，主证只有 id 形状那条；② 第一版主格写成
+#   "甲召回为空"是假绿未遂——那道空是 `import_memories` 自陈"不喂关键词倒排"的既定设计，
+#   要按生产真实读法（第二份实例 reload 后召回）才测得到路。
+tests/unit/memory/testIngestIdentityKeyIsScopedPerOwner.py
