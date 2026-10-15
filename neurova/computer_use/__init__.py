@@ -22,6 +22,21 @@ import typing
 
 logger = get_logger(__name__)
 
+# 本包对外的契约（§6-224）：这 9 个名字是包外真在经包路径取用的那一圈（工具路径、HTTP 端点、
+# 远端桌面接缝与判据各取若干），由声明面判据逐名复核。`computer_use` 的实现就写在本文件里，
+# 没有这一份声明，"谁能用这个包"只存在于读代码的人的直觉里。
+__all__ = [
+    "ComputerUseManager",
+    "bind_remote_desktop",
+    "get_active_remote_desktop",
+    "get_computer_use_manager",
+    "reset_computer_use_manager",
+    "screen_point_to_screenshot_px",
+    "screenshot_px_to_screen_point",
+    "scroll_semantics",
+    "unbind_remote_desktop",
+]
+
 
 def scroll_semantics(
     scroll_x: typing.Optional[int] = 0,

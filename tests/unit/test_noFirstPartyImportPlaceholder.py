@@ -166,6 +166,46 @@ def placeholderViolations(source: str, rel: str):
     return out
 
 
+#: 同一根因的**另一种形状**（§6-224 现算，8 处 / 3 档）：handler 里不赋 `None`，而是定义
+#: 与 try 体**同名**的 class/def 桩。它比 `None` 更难查——`None` 在下一行就 `TypeError`，
+#: 空类/"返回桩"的函数能一路走下去，把降级悄悄做实。`neurova/execution_engine/__init__.py`
+#: 那九枚同名空类是本批撞出来的第一处（已摘，见 §6-224）；剩下这 3 档不在本批动手面，
+#: 按文件钉成**存量表**：新长一处即红，修好了不摘行也红（与 §6-197 同一手法）。
+STUB_LEDGER: dict = {  # type: ignore[type-arg]
+    "neurova/llm/provider_manager.py": 6,
+    "neurova/post_chat_pipeline.py": 1,
+    "neurova/router.py": 1,
+}
+
+
+def stubViolations(source: str, rel: str):
+    """返回「except ImportError 里定义同名 class/def 桩，而所包导入不触及真可选依赖」的节点。"""
+    try:
+        tree = ast.parse(source, filename=rel)
+    except SyntaxError as exc:
+        return [("语法解析失败，扫描面未覆盖该文件", rel, 0, str(exc))]
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        handlers = [h for h in node.handlers or []
+                    if isinstance(h.type, ast.Name) and h.type.id in ("ImportError", "ModuleNotFoundError")]
+        if not handlers:
+            continue
+        imported = {a.asname or a.name.split(".")[0] for st in node.body
+                    if isinstance(st, (ast.Import, ast.ImportFrom)) for a in st.names}
+        stubbed = sorted({n.name for h in handlers for n in h.body
+                          if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                          and n.name in imported})
+        if not stubbed:
+            continue
+        mods = [m for st in node.body if isinstance(st, (ast.Import, ast.ImportFrom))
+                for m in _importsOf(st, rel)]
+        if mods and not any(touchesRealOptional(m) for m in mods):
+            out.append((rel, node.lineno, stubbed))
+    return out
+
+
 class TestPlaceholderMustBindToRealOptional:
     def testRepoWideNoPlaceholderWrappingOnlyFirstPartyImports(self):
         offenders = []
@@ -219,6 +259,42 @@ class TestPlaceholderMustBindToRealOptional:
         assert me.touchesRealOptional("neurova.any.module"), "未声明可选应算真降级风险"
         monkeypatch.setattr(me, "_thirdPartyClosure", lambda mod, *a, **k: ({"fastapi"}, False))
         assert not me.touchesRealOptional("neurova.any.module"), "已声明依赖不该算保留理由"
+
+    def testStubShadowingFirstPartyImportMatchesTheLedger(self):
+        """同名 class/def 桩：现读与存量表**两侧相等**（新长一处即红，修好了不摘行也红）。"""
+        counts = {}
+        for rel in _trackedPyFiles():
+            for _r, _lineno, _names in stubViolations(
+                    io.open(REPO_ROOT / rel, encoding="utf-8", errors="replace").read(), rel):
+                counts[rel] = counts.get(rel, 0) + 1
+        extra = sorted(set(counts) - set(STUB_LEDGER))
+        stale = sorted(p for p in STUB_LEDGER if counts.get(p, 0) != STUB_LEDGER[p])
+        assert not extra and not stale, (
+            f"同名桩与存量表不符。新长出来的（摘桩或改直连）：{[(p, counts[p]) for p in extra]}；"
+            f"数目变了却没改表的：{[(p, counts.get(p, 0), STUB_LEDGER[p]) for p in stale]}")
+
+    def testStubDetectorHasTeethAndDoesNotOverReach(self):
+        """探测器正反两头：桩冒充真身必抓，§3 允许的第三方可选依赖回退不许误伤。"""
+        caught = stubViolations(
+            "try:\n    from neurova.execution_engine.tool_engine import ToolEngine\n"
+            "except ImportError:\n    class ToolEngine:\n        '占位'\n", "x/probe.py")
+        assert caught, "漏认：仓内纯模块的同名空 class 桩没被抓到"
+
+        caughtFn = stubViolations(
+            "try:\n    from neurova.core.logger import get_logger\n"
+            "except ImportError:\n    def get_logger(name):\n        return None\n", "x/probe.py")
+        assert caughtFn, "漏认：同名函数桩没被抓到"
+
+        legitOptional = stubViolations(
+            "try:\n    import openai\n    from openai import APIConnectionError\n"
+            "except ImportError:\n    class APIConnectionError(Exception):\n        pass\n",
+            "x/probe.py")
+        assert not legitOptional, f"误伤真可选依赖的正当回退：{legitOptional}"
+
+        notShadowing = stubViolations(
+            "try:\n    import neurova.core.logger\n"
+            "except ImportError:\n    class LoggerShim:\n        pass\n", "x/probe.py")
+        assert not notShadowing, "handler 里定义的名字与 try 体不同名——不是『桩冒充真身』，不该报"
 
 class TestMemoryFacadeBrokenPointersRepaired:
     """拆掉兜底后现读到的三条坏指路必须改对——HEAD 上它们是静默的 None。

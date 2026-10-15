@@ -8,6 +8,24 @@ from typing import Any, Dict, Optional
 
 logger = get_logger(__name__)
 
+# 本包对外的契约（§6-224）：这 12 个名字是**包外真在经包路径取用**的那一圈，由
+# tests/unit/core/test_packageDeclaredSurfaceCoversWhatIsTaken.py 逐名复核「在 __all__ 里 ∧ 取得到」。
+# 此前它们是隐式公开面——取的人靠运气，而任何一次"零消费者"清理都可能把它们当死的摘掉。
+__all__ = [
+    "DEFAULT_AGENT_ID",
+    "ENDPOINT_MODULES",
+    "defaultAgentId",
+    "get_agent_instance",
+    "get_app_state",
+    "get_health_checker",
+    "get_llm_client",
+    "get_provider_manager",
+    "get_startup_manager",
+    "register_endpoint_routers",
+    "setDefaultAgentId",
+    "set_app_state",
+]
+
 # 挂载事实唯一的落点：`endpoint_modules` 注册表（见 register_endpoint_routers）。
 # 历史上这里另有三个模块级空 APIRouter（router / evolution_router / rag_router），
 # 被 app.py 挂成 /api、/api/evolution、/api/rag —— 对外声称三个前缀可用、实际全 404。
