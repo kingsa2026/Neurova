@@ -4114,6 +4114,16 @@
     - **本会话自查的一条错值**：上面四批的落库笔 `fe404f67` 正文写「文档 +25/−0」，现量是 **+30/−0**（`git show --numstat` 复算）。条目内容与结论不受影响，但按本仓「提交已入库改不了，错值就勘误在台账」的口径留这一行，不默默过去。
     - **本会话下一枚空号现查 §6-250。**
 
+250. **登记并更正一张票的前提：安装门的 DENY 由 `re.compile(` 误判驱动，"自带 .py 的资产包属真代码形状"那句是错的（⚠ 待裁，本轮一码未动）** 🟡 —— 起因是处理 §6-234「仍开」④（task #35 安装面欠账），复核实状时两处都与旧描述不符。
+
+    - **欠账前半已结清**：`tests/unit/api/test_skillPoolInstallReceiptIsHonest.py` 由 `d5241a41`（§6-192，10-13）落地成**常驻判据**并入子集（清单第 2803 行），本轮复跑 `4 passed`——门拒 ⇒ 顶层 `success=False` 且账本无条目、干净包 ⇒ 成功且条目真落账、文档侧样本仍可装、两道面共用同一转写函数。欠账标记一直挂着，是因为那批落库时没回写任务面。
+    - **后半的票面前提是错的**。task/§6-191 写的是"自带 .py 的 27× `exec(` + 4× subprocess 被门拦"。今天把真 zip（`neurova/skills/market_bundles/adaptive-presentation-studio.zip`，138 条目／24 个 `.py`）逐条重量：findings **103** 条、参与 DENY **40** 条；`dangerous_exec` 那 27 条里 **26 条的证据行是 `re.compile(...)` 这类属性调用**——规则本体 `pattern=r"\b(exec|eval|compile)\s*\("`，`re.compile(` 里 "compile" 前面是 `.` 而 `\b` 照样成立 ⇒ **正则预编译被当成 critical 级危险执行**。真裸 `compile(` 只 1 条且是真信号（`package_check.py` 的 `compile(script.read_text(...), str(script), "exec")`）。另有 2 条 `dangerous_path_traversal` 落在 `.mjs` 的 **ES 相对导入** `from "../…/runtime_helpers.mjs"`——`pattern=r"\.\.[\/]"` 只看字节不看语义。
+    - **四只合成包的最小读数（同一把尺，现跑）**：纯 `SKILL.md` ⇒ `allow`；`.py` 里只一行 `re.compile(` ⇒ **`deny`**；`.py` 里只一行 `import os` ⇒ `allow`；`.py` 里一行真 `exec(` ⇒ `deny`。⇒ 结论不是"这只第三方资产危险"，而是**任何带正则预编译的技能包装不上**；规模参照 `neurova/` 自己 194 处 `re.compile(`（裸 `compile(` 2、裸 `exec(` 6、裸 `eval(` 6）。
+    - **一处既有判据把误判钉成了期望**（修规则必须同批改它）：`tests/unit/security/test_installGateDocFilesAreReportOnly.py::testRealAssetBundleShowsTheExemptionAppliedButStillBlocksOnItsOwnPython` 断 `pyExec and blocked is True`，docstring 写"27×dangerous_exec 属真代码形状，按裁定甲照旧参与 DENY"。它按 **(后缀, 规则 id)** 计数而**没读证据行**，于是把规则本体的误判记成资产的真缺陷——那一格当年专门更正过"我报给仓主的一句错判"，方向对、根据错。改判受教义第 2 条管（不许拿降级断言收尾），要一起钉"修后 pyExec 只剩 1 条真 compile ＋ 4 条 subprocess，而真 `exec(` 样本仍 deny"。
+    - **三态票（等拍）**：**甲** 根修规则形态——exec 只判**裸名调用**（`(?<![\w.])\b(exec|eval|compile)\s*\(`，或走 AST：`Call.func` 是 `Name` 且 id ∈ {exec,eval,compile}）；traversal 只判**文件系统 API 参数里的 `..`**，不判 ES `from "../x.mjs"` 与数据串里的相对链接。影响面：`neurova/security/skill_scanner.py` 两条 pattern；这只包 DENY 40 → 约 8；**放行面变化＝所有带 `re.compile(` 或 `.mjs` 相对导入的包从"直接拒"进入下一环裁决**；反向钉须证明真 `exec/eval/compile(` 与真 `open("../..")` 仍 deny。**乙** 给第一方资产开白名单——教义第 1 条禁的下游兜底，且例外表一开就有第二款，真病留着继续冤枉每个带正则的第三方包。**丙** 改资产（把它的 `re.compile` 改写）——为迁就误判去改无害代码，且治不了"任何带正则的技能都装不上"这条一般面。**推荐甲**。
+    - **顺带一格小账**：`data/agents/default/skills/builtin--adaptive-presentation-studio/manifest.json` 现读 `enabled: true`，而该目录里**只有 manifest、0 个 `.py`**；`market_store.py:74-87` 又把这只条目当内置可装项交给读面 ⇒ 用户看到"可得"而安装必失败。甲落地后要么真装得上、要么撤条目，不留假可得。
+    - **本会话下一枚空号现查 §6-251。**
+
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
 2. **相对导入指向同名他文件** —— `neurflow/templates/__init__.py:34` 的 `from .media`、`context/orchestrator.py:24` 的 `from .recovery`（指 `context/recovery.py`，11783 字节，已核实）。
