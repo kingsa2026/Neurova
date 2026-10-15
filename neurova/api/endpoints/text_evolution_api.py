@@ -308,21 +308,29 @@ async def list_evolution_proposals(
 
     items = SkillEvolutionService(agent_id).list_proposals(status=status)
     # 列表面不夹带正文(可能很大),详情接口再给全文
+    rows = [
+        {
+            "proposal_id": p.get("proposal_id"),
+            "skill_id": p.get("skill_id"),
+            "status": p.get("status"),
+            "holdout_before": p.get("holdout_before"),
+            "holdout_after": p.get("holdout_after"),
+            "iterations_run": p.get("iterations_run"),
+            "created_at": p.get("created_at"),
+            "decided_at": p.get("decided_at"),
+            # M-C 读数：这条验收证据跑在哪个基座上（空串 = 未记，含本批之前落盘的全部旧记录）
+            "model_under_test": p.get("model_under_test") or "",
+        }
+        for p in items
+    ]
+    from neurova.evolution.eval.service import modelCoverageReadout
+
+    # 形状纪律：`data` 是前端已在消费的列表，改成 dict 会打破既有契约——
+    # 覆盖读数作**同级新增键**，老调用者读 data 不受影响。
     return {
         "code": 0,
-        "data": [
-            {
-                "proposal_id": p.get("proposal_id"),
-                "skill_id": p.get("skill_id"),
-                "status": p.get("status"),
-                "holdout_before": p.get("holdout_before"),
-                "holdout_after": p.get("holdout_after"),
-                "iterations_run": p.get("iterations_run"),
-                "created_at": p.get("created_at"),
-                "decided_at": p.get("decided_at"),
-            }
-            for p in items
-        ],
+        "data": rows,
+        "model_coverage": modelCoverageReadout(items),
     }
 
 
