@@ -1220,10 +1220,13 @@ class ChatPipeline:
             # 附件缺口（S1）由注入步在生产点投递（那里才知道抽取结果），
             # 此处只消费判据。
             gap = detectCapabilityGap()
-            if not gap.hasGap:
+            # 只看 capability 族：harness 族（假完成/环停滞）是环节证据，不是"缺一条工具"。
+            # 把它一起喂给自主合成，就是在给"环推不完"造更多没人用的工具——同根因的另一种坏法。
+            if not gap.capabilityKinds:
                 return
 
-            logger.info("[能力缺口] 驱动自主创建：kinds=%s", gap.kinds)
+            logger.info("[能力缺口] 驱动自主创建：kinds=%s（harness 族不参与：%s）",
+                        gap.capabilityKinds, gap.harnessKinds)
 
             skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
