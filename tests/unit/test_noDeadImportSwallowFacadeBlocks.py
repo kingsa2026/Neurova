@@ -23,6 +23,16 @@
 
 不在本批范围（逐文件要判"真可选依赖 vs first-party"，登记待裁，见 §6-200）：
 其余 39 个文件里 144 个 `except ImportError` 分支内的 `X = None` 占位符。
+
+**批 46（§6-210）之后，本档三格的方向反过来了**（改判记录，不是放宽）：那批把技能门面从 47 个
+再导出收成"只挂确实有人经门面取用的 2 个名字"（现读 `create_default_skills`/`get_skill_registry`，
+出处 `agent_core.py` 与 `api/endpoints/skill.py`），并把 `hub_client` 那份同名 `SkillSource` 并进
+`models` 那一份。于是本档原先当成**成功**来断言的那些输入——"四条 first-party 必须顶层直连"、
+"门面上必须能拿到 `SkillSource` 且等于 models 那份"、"这九个符号必须非 None"——在同一份代码上
+含义变成**缺陷**：它们要求的正是"门面再抄一份词汇表"这件事本身。处置不是删格（删了就不再有
+人盯这条门被拉穿），而是把方向写成会自己复活的反向断言：**这些名字再回到门面上即红**。
+"门面只准挂被经门面取用的名字"这条契约的判据在 `tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py`
+（同一契约只许一处判，教义第 6 条），本档只负责"空转 try / None 占位符 / 同名抢绑"这一族形状。
 """
 
 from __future__ import annotations
@@ -41,6 +51,13 @@ from tests import ast_scan  # noqa: E402
 SKILLS_INIT = "neurova/skills/__init__.py"
 FACADE_FIRST_PARTY = ("neurova.skills.models", "neurova.skills.hub_client",
                       "neurova.skills.skill_service", "neurova.skill_system")
+
+#: 批 46（§6-210）从技能门面退役的再导出目标。**反向钉**用：它们再出现在门面顶层绑定里（AST 级）
+#: 或真导入后的包属性上（运行时级）即红。旧判据把"这些名字必须在门面上"当成功来断，而批 46 之后
+#: 同一输入的含义变成缺陷——那正是"门面再抄一份词汇表"这件事本身；只删不补就等于把这条门从
+#: 验收面上擦掉（形态集第 196 条）。
+FACADE_RETIRED_NAMES = ("SkillInfo", "Skill", "SkillSource", "SkillHubClient", "RemoteSkill",
+                        "SkillService", "SkillRegistry")
 
 
 def _trackedPyFiles() -> list:
@@ -139,7 +156,7 @@ class TestNoDeadImportSwallowBlocks:
             "可达那天调用方拿到 None 再调用即 TypeError，这就是替不可能发生的场景兜底")
 
     def testSkillsFacadeImportsAreNotSwallowed(self):
-        """四条 first-party 导入必须在模块顶层直接执行，失败就显式抛。"""
+        """门面的 first-party 导入必须在顶层直接执行；而批 46 退役过的那批名字不得回来（§6-238）。"""
         tree = ast.parse(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
         swallowed = []
         for node in tree.body:
@@ -150,9 +167,17 @@ class TestNoDeadImportSwallowBlocks:
                     swallowed.append((inner.lineno, inner.module))
         assert not swallowed, (
             f"这些导入仍被 try 包住：{swallowed}——包着就会把真故障吞成上面的 None 占位符")
-        top = {n.module for n in tree.body if isinstance(n, ast.ImportFrom)}
-        assert set(FACADE_FIRST_PARTY) <= top, (
-            f"顶层直接导入缺项：现只有 {sorted(top)}")
+
+        bound = {}
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    bound[alias.asname or alias.name] = node.module
+        back = sorted(set(bound) & set(FACADE_RETIRED_NAMES))
+        assert not back, (
+            "这些名字又被导回技能门面：" + ", ".join(f"{n}←{bound[n]}" for n in back)
+            + "\n批 46（§6-210）已裁定门面只挂『确实有人经门面取用』的名字，零消费者的再导出就是"
+              "同一词汇表的第二份抄本；这一格钉的是**别再退回去**，不是要求它们存在。")
 
     def testFacadeDocstringNamesExistingModules(self):
         """档头的结构清单（`- xxx.py` / `- xxx/` 那些行）点名的每一项都必须真存在。
@@ -188,14 +213,14 @@ class TestNoDeadImportSwallowBlocks:
 
 
     def testFacadeBindsEachNameToExactlyOneDefinition(self):
-        """门面上同一个名字不得被两条不同来源的 import 先后绑两次。
+        """门面上同一个名字不得被两条不同来源的 import 先后绑两次；`SkillSource` 不得再经门面给出。
 
-        建档实状：`neurova/skills/__init__.py` 先从 models 导 `SkillSource`
-        （LOCAL/MARKETPLACE/BUILTIN），后从 hub_client 又导一个同名 `SkillSource`
-        （GITHUB/CLAWHUB/LOBEHUB/MODELSCOPE/LOCAL）——后者覆盖前者，门面给出去的是
-        哪一份取决于 import 的书写顺序，而两份成员不同。现读 `from neurova.skills import
-        SkillSource` 全仓零消费者，故本批把重复那行摘掉（hub_client 自己仍用它那份），
-        "两个同名枚举要不要合并/改名"另一次裁定。
+        建档实状（批 42）：门面先从 `models` 导 `SkillSource`（LOCAL/MARKETPLACE/BUILTIN），后从
+        `hub_client` 又导一个同名而**不同成员**的 `SkillSource`（GITHUB/CLAWHUB/…），后者盖掉前者——
+        给出去哪份取决于书写顺序。批 46（§6-210）按"比-取-接-退"把两份并成一份：`hub_client` 现在
+        用的就是 `models` 那份（本格下方现算 `is` 为真），而门面**根本不再挂这个名字**——消费者
+        直取 `neurova.skills.models`（活体第 3 项现数）。⇒ 旧的那半句 `facade.SkillSource is
+        models.SkillSource` 要求的是"门面上得有它"，方向已由本格反成"**有它就红**"。
         """
         tree = ast.parse(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
         seen = {}
@@ -213,23 +238,34 @@ class TestNoDeadImportSwallowBlocks:
         assert not dupes, f"门面里同名被两处定义抢绑：{dupes}——给出去的是哪份取决于书写顺序"
 
         import neurova.skills as facade
-        from neurova.skills import models as models_mod
 
-        assert facade.SkillSource is models_mod.SkillSource, (
-            "门面的 SkillSource 不是 models 那份——说明又有一条同名 import 盖在它后面")
+        assert not hasattr(facade, "SkillSource"), (
+            "`SkillSource` 又能在门面上取到了——批 46 已把它并成 `neurova.skills.models` 单源，"
+            "经门面拿它就是第二条通道（要它的人直取 models）")
+
+        from neurova.skills import hub_client as hub_mod, models as models_mod
+
+        assert hub_mod.SkillSource is models_mod.SkillSource, (
+            "合并掉的那份 `SkillSource` 又被另写了一遍——两份同名枚举的成员集不同，"
+            "按 §6-210 只许留 `models` 这一份")
 
 
 class TestFacadeExportsAreReal:
     def testKeyFacadeSymbolsAreNotPlaceholders(self):
-        """门面上的关键符号必须是真对象；`create_default_skills` 必须可调用。
+        """门面上不许存在值为 None 的公开绑定，且 `__all__` 声明过的名字必须真绑得上。
 
-        这条今天也绿——它钉的是"以后别再往回退"：一旦哪条导入被重新包进 try＋None 兜底，
-        `agent_core.py` 那三处 `from neurova.skills import create_default_skills` 就会拿到 None。
+        本档的主题是"假降级"，所以这一格钉的是**形状**而不是名字清单：批 42 之前门面把 48 个名字
+        赋成 None，调用方拿到 None 再调用即 TypeError。旧版这里钉的是"这九个符号必须非 None"，
+        而批 46 之后那九个已不在门面上——按名字清单写就会把"已退役"读成"是占位符"，红得没道理；
+        改成形状扫描后两件事都还在：谁再往门面上放 None，以及谁在 `__all__` 里声明了却没绑上
+        （后者让 `from neurova.skills import *` 当场 AttributeError，同 §6-200 那族"自陈不等于事实"）。
         """
         import neurova.skills as facade
 
-        for name in ("SkillInfo", "Skill", "SkillSource", "SkillHubClient", "RemoteSkill",
-                     "SkillService", "SkillRegistry", "create_default_skills",
-                     "get_skill_registry"):
-            assert getattr(facade, name, None) is not None, f"门面符号 {name} 是 None 占位符"
-        assert callable(facade.create_default_skills) and callable(facade.get_skill_registry)
+        declared = list(getattr(facade, "__all__", []))
+        assert declared, "门面没有 __all__——声明面无从比对，先确认这一格还在守什么"
+        unbound = [name for name in declared if not hasattr(facade, name)]
+        assert not unbound, f"__all__ 声明了却根本没绑定的名字：{unbound}（`import *` 会 AttributeError）"
+        placeholders = [name for name in vars(facade)
+                        if not name.startswith("_") and vars(facade)[name] is None]
+        assert not placeholders, f"门面上有 None 占位符：{placeholders}——被包回 try/except 的那一形就长这样"
