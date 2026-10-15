@@ -3925,6 +3925,8 @@
     - **红→绿与自证**：3 passed（4 处断言）；单独特起 `manager.py`（tag `red-selfproof-ingest-final`）＝1 failed 且红的恰是主格，还原后 3 passed。
     - **宽域 A/B**（memory＋memory_ingest）：基线 `1 error 4 failed 1537 passed` ↔ 本树 `4 failed 1537 passed`，**仅本树红 0 ⇒ AB_PASS**；仅基线红 1 条＝`test_decay_cycle_bounded` 的 ERROR（六记同名不认领）。**脚本口径缺口再复现一次**：`-c` 铺入的新格没进"仅基线红"列举（两侧收集数不等），交付证据改取红自证那一轮——连续两批同形，记作已知缺口，不再逐批重述。
     - **净 LOC**：生产池 +13/−4；测试池 +96/−0；子集 +7/−0。
+    - **现网收尾（本会话五批合起来的最终读数，2026-10-15 夜）**：备份两份库到 `Backups/neurova/live-final-closure-20261015T143226Z/{default,kai}/`（**第一版按同名平铺把 kai 盖在 default 上**，按 agent 分子目录重做并 md5 复证）→ 数外部客户端为 0 后按 PID 停服 → 跑 §6-217 那个回填工具：`dry-run 待填 2` ⇒ 真写 `filled 2 / 失败 0`（default），kai `0/4` 已齐 → 用 `.venv` 解释器起服务（PID 20852、`/health` 200、启动段 0 Traceback）→ 真 HTTP 链路读数：两 agent `memory_consolidation_enabled=true`，**POST 写入的行 `mem_000019` 盘上 `length(embedding)=11292`**（512 维序列化）⇒ 写侧补嵌入在生产入口生效；主表与 FTS 影子全程同步（15/15→14/14）。探针行按精确 id 硬删复证（`/api/v1/memory` 的 DELETE 是**软删**，第一版把它期望成硬删 ⇒ 残留 1 行走 `forget(soft=False)` 才清掉）。
+    - **两处探针自身的坑记在这里**（都不是被测代码的缺陷）：① URL 里的中文 query 不 percent-encode，urllib 在 ascii 编码那步直接抛，整轮读数半路断；② `GET /api/v1/memory` 的 `limit` 上限是 100，给 200 直接被 FastAPI 校验挡回 422——看着像"读端点坏了"，其实是探针越了参数域。
     - **§6-229 仍开① 至此闭**：索引/向量面仍按业务 id 建（形状未改，本仓"每业务 id 只留一份"的既定取舍仍在），但**触发它的那条路（跨属主同 id）已在源头断开**，且原以为的后果（召回丢一条）实测不存在。
     - **本会话下一枚空号现查 §6-237。**
 
