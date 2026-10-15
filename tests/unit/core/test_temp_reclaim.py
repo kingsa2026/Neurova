@@ -219,6 +219,10 @@ def test_pytestInvokesTheHookWithoutAHandCall(tmp_path):
     env = os.environ.copy()
     for key in ("TEMP", "TMP", "TMPDIR"):
         env[key] = str(tempRoot)
+    # 子进程是本仓的 pytest（Python 件）⇒ 两头一起钉死：子端强制 UTF-8 输出、父端按 UTF-8 解。
+    # 只补父端 `encoding="utf-8"` 而不钉子端，等于把"父按 locale 解"换成"父按 utf-8 解子端
+    # 按 cp936 写"——中文路径（本仓就在 `…\项目\Neurova` 下）会被替换成 U+FFFD，比原来更坏。
+    env["PYTHONIOENCODING"] = "utf-8"
 
     repoRoot = Path(__file__).resolve().parents[3]
     completed = subprocess.run(
@@ -226,6 +230,7 @@ def test_pytestInvokesTheHookWithoutAHandCall(tmp_path):
          "-k", "reportsHolderDeadWhenProcessDoesNotExist",
          "-q", "-p", "no:cacheprovider", "--no-header"],
         cwd=str(repoRoot), env=env, capture_output=True, text=True, timeout=300,
+        encoding="utf-8", errors="replace",
     )
 
     assert completed.returncode == 0, "子会话没跑起来，本条判据失去观测对象：\n" + completed.stdout[-2000:]
