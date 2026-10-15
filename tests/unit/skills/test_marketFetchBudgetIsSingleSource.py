@@ -140,38 +140,53 @@ class TestHubRetryStackIsBounded:
         assert total + B <= wall, f"总预算 {total}s + 在飞的一次 {B}s 超过墙钟 {wall}s"
 
     def testRetriesStopWhenTheTotalBudgetIsSpent(self, monkeypatch):
-        """到点就不再重试，并且**照旧把失败抛出去**——不是悄悄返回半截结果。"""
+        """到点就不再重试，并且**照旧把失败抛出去**——不是悄悄返回半截结果。
+
+        这格原先读真实墙钟（`time.monotonic()` 差值断 `elapsed < 1.5`）。那是**负载敏感的上界**：
+        注入的 0.2s 延迟在加压机器上会漂，同一份代码一红一绿——正是 `test_clock_caliber_ledger`
+        这道门要求逐条给结论的形态（§6-96/§6-216 记过同族）。现改成**虚拟单调钟**驱动：
+        时钟由被测代码去取（`H.time.monotonic()`），推进量由本格指定，于是"重试几次被掐停"
+        是精确读数，与机器负载无关。
+        """
         import urllib.error as ue
 
         import neurova.skills.hub_client as H
 
-        attempts: list[int] = []
+        class VirtualTime:
+            """只实现被测代码用到的两个入口：取时与睡。推进量全部由本格指定。"""
 
-        class Boom:
-            def __init__(self, seconds: float):
-                self.seconds = seconds
+            def __init__(self):
+                self.now = 0.0
 
-            def read(self):
-                raise AssertionError("不该读到内容")
+            def monotonic(self):        # noqa: D401 - 被测的截止线读的就是这个口
+                return self.now
+
+            def sleep(self, seconds):
+                self.now += seconds
+
+        clock = VirtualTime()
+        attempts: list = []
+        perAttempt = 0.2
 
         def fake_urlopen(request, timeout=None):
             attempts.append(timeout)
-            time.sleep(self_sleeper["each"])
+            clock.now += perAttempt        # 慢远端：在虚拟钟上花钱，不真睡
             raise ue.URLError("simulated slow remote")
 
-        self_sleeper = {"each": 0.2}
+        monkeypatch.setattr(H, "time", clock)
         monkeypatch.setattr(H, "urlopen", fake_urlopen)
         monkeypatch.setattr(H, "_compute_backoff_seconds", lambda attempt: 0.0)
         monkeypatch.setattr(H, "HUB_FETCH_TOTAL_SECONDS", 0.5, raising=False)
         monkeypatch.setattr(H, "_http_retries", lambda: 50)   # 重试次数故意给大
 
-        started = time.monotonic()
-        with pytest.raises(Exception):
+        with pytest.raises(ue.URLError):
             H._http_fetch("https://hub.invalid/x")
-        elapsed = time.monotonic() - started
 
-        assert len(attempts) >= 2, f"一次都没重试过（{attempts}）——总预算线把重试整条掐死了"
-        assert elapsed < 1.5, f"总预算 0.5s 却重试到 {elapsed:.1f}s——到点没停"
+        # 0.5s 预算 ÷ 每试 0.2s ⇒ 恰好三次：第三次结束时虚拟钟 0.6s ≥ 截止线，循环不再开第四次
+        assert len(attempts) == 3, (
+            f"重试次数应当被总预算掐在 3 次（每试 {perAttempt}s ÷ 预算 0.5s），实得 {len(attempts)} 次")
+        assert clock.now == pytest.approx(0.6, abs=1e-9), (
+            f"虚拟钟推进量异常：{clock.now}——截止线不是由这条预算算出来的")
 
 
 class TestBudgetIsSingleSource:
