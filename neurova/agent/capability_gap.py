@@ -23,7 +23,8 @@ S3 检索零命中     `tool_search.search_catalog` 的命中条数             
 
 ## 边界
 
-- 信号有界三条，不扩面。
+- 信号**分两族且用途在单源登记**（见上方 `_GAP_PURPOSE`）：capability 族驱动自主创建，
+  harness 族（`false_completion`/`loop_stalled`）只作环节证据，**不得**驱动自主创建。
 - 收件箱是**轮次级**且**读取即消费**（`detectCapabilityGap` 读到就清），
   下一轮不会无据重放上一轮的缺口 —— 这与工具消息账本同生命周期，
   故同样落在 ContextVar（`core.turn_context` 的轮次族）。
@@ -40,11 +41,33 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 #: 缺口类别的**单源**名单（键名即观测指标名的后缀，不另起第二份枚举）。
+#:
+#: 两族同表但**用途不同**（用途也是这一处定义，不在消费方各判一遍）：
+#: - `capability` 族＝"缺一项能力"，驱动自主创建（`chat_pipeline._check_nl_synthesis`）；
+#: - `harness` 族＝"环走过不去"，**不驱动造工具**——死循环/假完成不是"缺一条工具"，
+#:   把这类信号喂给自主合成只会造出更多没人用的工具（那是同一根因的另一种坏法）。
+#: 边界改口的来历：原判据口径写的是"信号有界三条，不扩面"（T-03 立模块时）。
+#: 2026-10-16 用户点单把环节轴并进本单源（ModularRSI 对照 §7.1-Q4 甲案），
+#: 因为 `self_model` 五算子与 `FailurePattern` 六桶各自回答的是别的问题
+#: （谁在失败 / 缺哪项能力 / 改哪个环节），再散着写就会长出第三套分类。
 GAP_ATTACHMENT_UNREADABLE = "attachment_unreadable"
 GAP_REPEATED_TOOL_FAILURE = "repeated_tool_failure"
 GAP_CATALOG_MISS = "catalog_miss"
+GAP_FALSE_COMPLETION = "false_completion"
+GAP_LOOP_STALLED = "loop_stalled"
 
-GAP_KINDS = (GAP_ATTACHMENT_UNREADABLE, GAP_REPEATED_TOOL_FAILURE, GAP_CATALOG_MISS)
+#: kind → 用途。新类别必须在此登记用途，否则视为非法类别被拒收。
+_GAP_PURPOSE: Dict[str, str] = {
+    GAP_ATTACHMENT_UNREADABLE: "capability",
+    GAP_REPEATED_TOOL_FAILURE: "capability",
+    GAP_CATALOG_MISS: "capability",
+    GAP_FALSE_COMPLETION: "harness",
+    GAP_LOOP_STALLED: "harness",
+}
+
+GAP_KINDS = tuple(_GAP_PURPOSE)
+CAPABILITY_GAP_KINDS = tuple(k for k, v in _GAP_PURPOSE.items() if v == "capability")
+HARNESS_GAP_KINDS = tuple(k for k, v in _GAP_PURPOSE.items() if v == "harness")
 
 #: S2 判据边界：同一轮内**连续**失败达到此条数才算缺口。
 #: 一次失败是噪声（参数写错一次很常见），两次同轮失败说明"这条工具链解决不了
@@ -69,6 +92,10 @@ class CapabilityGap(NamedTuple):
     hasGap: bool
     kinds: List[str]
     details: Dict[str, List[Dict[str, Any]]]
+    #: 按用途拆好的两族（消费方不许各自再判一遍）。`hasGap` 是"本轮有任何缺口"，
+    #: 自主创建的入口只看 `capabilityKinds`——环卡住/假完成不是"缺一条工具"。
+    capabilityKinds: List[str] = []
+    harnessKinds: List[str] = []
 
 
 def _inbox_list() -> List[Dict[str, Any]]:
@@ -162,13 +189,17 @@ def detectCapabilityGap(signals: Optional[List[Dict[str, Any]]] = None) -> Capab
         details.setdefault(kind, []).append(item.get("detail") or {})
     _inbox.set([])
 
+    capabilityKinds = [k for k in kinds if _GAP_PURPOSE.get(k) == "capability"]
+    harnessKinds = [k for k in kinds if _GAP_PURPOSE.get(k) == "harness"]
+
     if kinds:
         # 观测面（D2）：走既有 metric 通道，键名与类别名同源。
         # 只写不读是断点（AGENTS §2），故读侧在本文件下方 `gapMetricReadout()`，
         # 由 `/governance/rsi/status` 的 metrics 视图取走。
         recordGapMetrics(kinds)
 
-    return CapabilityGap(hasGap=bool(kinds), kinds=kinds, details=details)
+    return CapabilityGap(hasGap=bool(kinds), kinds=kinds, details=details,
+                         capabilityKinds=capabilityKinds, harnessKinds=harnessKinds)
 
 
 def recordGapMetrics(kinds: List[str]) -> None:
