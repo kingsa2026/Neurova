@@ -485,8 +485,11 @@ class MemoryManager:
         from datetime import datetime
 
         return Memory(
-            # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
+            # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）。
+            # 但**行自带 id 必须同时留着**（`row_id`）——只留业务 id，下一次写回就会按业务 id
+            # 另插一行，把同一条事实变成两行（§6-227 现量：14→16、四条产物两两同内容）。
             id=self._plain_memory_id(row["id"]),
+            row_id=row["id"],
             content=row["content"],
             memory_type=MemoryType(row["memory_type"]),
             category=MemoryCategory(row["category"]),
@@ -974,11 +977,16 @@ class MemoryManager:
                 self._PERSIST_UPSERT_SQL,
                 (scoped_id,) + self._persist_row_params(mem)[1:],
             )
+            # 重写之后必须把这个身份记回对象上：不记，下一次写回又从业务 id 出发，
+            # 一旦那个 id 空出来就插出重复行（§6-227 现网正是两轮之间多出一对）。
+            mem.row_id = scoped_id
 
     @staticmethod
     def _persist_row_params(mem: Memory) -> tuple:
         return (
-            mem.id,
+            # 写回落在**它自己那一行**上：行自带 id 存在就用它（M-25 作用域限定行），
+            # 否则才是业务 id。按业务 id 写会把作用域限定行复制成第二行（§6-227）。
+            mem.row_id or mem.id,
             mem.content,
             mem.memory_type.value,
             mem.category.value,
@@ -2200,7 +2208,12 @@ class MemoryManager:
                 del self._memories[memory_id]
                 # 审计 P1-D6：关键词倒排增量摘除（与撤销共用同一处收口）
                 self._drop_from_recall_indexes(memory_id)
-                self._delete_persisted_memory(memory_id)  # 删除持久化
+                # 删除按**行自带三元组**算：`agent_wide=True` 是管理页口径，本来就要能删
+                # 他人作用域的行；按调用现场的三元组删，跨作用域那一行会"内存删了、盘上留着"，
+                # 重启即复活（§6-227 同根因的第三击）。
+                self._delete_persisted_memory(
+                    memory_id, owner=(mem.agent_id, mem.neuser_id, mem.user_id)
+                )  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
         # 事件投递在锁外执行，避免持锁调用 handler 导致递归死锁
         self._publishMemoryEvent(

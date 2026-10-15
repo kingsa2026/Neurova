@@ -313,6 +313,11 @@ class Memory:
     """核心记忆模型"""
 
     id: str = ""
+    #: 这一行在正文库里**实际带着的主键**。业务 id 是对外身份，行 id 是持久身份；
+    #: 两者只在 M-25 跨作用域冲突时分家（行 id 变成 `agent\x1fneuser\x1fuser\x1f业务id`）。
+    #: 不分家就没有人记得自己该写回哪一行——按业务 id 写会插出同内容的第二行（§6-227 现网量到）。
+    #: 它是持久细节，不进 `to_dict()`：跨界字典只出业务 id，不向端点与前端泄漏 `\x1f`。
+    row_id: Optional[str] = None
     content: str = ""
     memory_type: MemoryType = MemoryType.SEMANTIC
     category: MemoryCategory = MemoryCategory.GENERAL
