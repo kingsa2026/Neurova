@@ -3124,3 +3124,12 @@ tests/integration/test_security_integration.py
 # 夹具里 `os.remove` 必撞 WinError 32 —— 实测 13 格 ERROR 全是收尾，13 格断言本身都过）。
 # 入册是为了让归还顺序这一课留在 CI 的视野里，而不是只活在某台机器的临时目录里。
 tests/unit/security/test_auth_comprehensive.py
+# 批 56（§6-259，用户裁甲）：安装门的两条形状规则从此判**代码形态**而非字面串——
+# `re.compile(` 不再算 critical 级危险执行（旧 pattern 的 `\b` 在 `.` 与 `c` 之间也成立，真资产包 27 条命中
+# 里 26 条是正则预编译），`..` 只有在同行出现「拿去读/写/解包/落地」的调用形态时才成立（ES 模块说明符
+# `from "../x.mjs"` 不经文件系统）。第二个条件不满足时**降级为 low 照常上报**，不删读数。
+# 12 格分三组：误判侧放行 3 格（各带"读数仍在"的反删断言 + `blocking_rule_count` 自洽）、
+# 真形态侧照旧拦 6 格（裸 exec/eval/compile 三形 + open/Path/extract 三形 + 干净包反向控制）、
+# 真产物与回执 3 格（真 zip 只剩 1 条裸 compile 参与裁决且仍被拒、拒因只点名参与裁决的条目）。
+# 逐文件单跑三次同读数 12/12/12；红自证＝撤本批两生产件后恰好 5 格红；6 枚变异反证全红。
+tests/unit/security/test_installGateRulesFollowCodeShape.py
