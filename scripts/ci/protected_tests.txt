@@ -3143,3 +3143,13 @@ tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py
 # 还有一格钉旧病复发面——比对键用整串 task_input、台账展示面保留 80 字截断，
 # 两者混用曾让超 80 字的任务永远「命中不了」（红灯现量 hits == [] 实证）。
 tests/unit/evolution/eval/test_taskLevelEnvironmentEvidenceFeedsAttribution.py
+# P1-C 线（真臂进进化主路径 + 预算闸）两档判据。
+# 为什么值得常驻：闸的意义在**次序**——拒绝必须发生在第一个回合之前，这条只能在
+# "agent 一次都没被调"上判出来；默认不动那一条是安全档（RSI 自动晋升的第四条否决
+# 照旧 False），给它塞一个真回合声明也不许翻旗标（能力由结构推导）。
+# 计划数是上界而非等式（约束闸/泄漏闸会跳过候选），故逐格核对：真实计数 ≤ 计划数，
+# 且锚定地板那一格的差值正好等于"留出集再跑一遍无技能臂"。
+# 单跑读数：本档 15 passed 连跑 9 次全绿；其中一次另有 1 error 落在 fixture teardown
+# 形状上（15 格全过，未归属到本档任何一格）——如实登记，复现则查根 conftest 的隔离夹具。
+tests/unit/evolution/eval/test_realArmBudgetPlanMatchesActualTurns.py
+tests/unit/api/test_evolveRealArmPathAndBudgetGate.py
