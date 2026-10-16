@@ -627,16 +627,21 @@ class SkillService:
                             and skill_review_gate_enabled()))),
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(target_dir),
-                        # 构件完整性钉（§6-172 批 30 / P3 技能半区）：这里算的是**安装门刚扫过
-                        # 的那份字节**落位之后的摘要——门只证明"当时干净"，这一格才把它和
-                        # 以后每次 exec 的那份字节绑成同一份。口径（算法/排除清单）不在这里重述。
-                        artifact_digest.DIGEST_FIELD: artifact_digest.digestDir(target_dir),
                         # Wave H-W1 归属坐标（安装目标库由实例目录决定；
                         # 默认 agent 库 = 现状链，user/public 库经参数覆写）
                         "pool_type": str(_prev.get("pool_type") or pool_type or "agent"),
                         "owner_user_id": str(_prev.get("owner_user_id") or owner_user_id or "") or self.agent_id,
                         "manifest": manifest,
                     }
+                    # 构件完整性钉（§6-172 批 30 / P3 技能半区）：这里算的是**安装门刚扫过的那份字节**
+                    # 落位之后的摘要——门只证明"当时干净"，这一格才把它和以后每次 exec 的那份字节绑成
+                    # 同一份。口径（算法/排除清单）不在这里重述。
+                    # **落盘没有构件时不钉**（§6-267 那一支的写侧半边，§6-289 第①条）：空壳钉下去的
+                    # 那份摘要不代表任何构件，却会把日后补进同一目录的真字节判成篡改——修 call 侧只是
+                    # 止血，装侧才是生产那种非法账本的地方。
+                    if self._hasArtifactBytes(target_dir):
+                        self._skills[skill_id][artifact_digest.DIGEST_FIELD] = \
+                            artifact_digest.digestDir(target_dir)
                     for _keep in ("usage", "identity", "version_history"):
                         if _keep in _prev:
                             self._skills[skill_id][_keep] = _prev[_keep]
@@ -703,13 +708,14 @@ class SkillService:
                         "enabled": True,
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(hub_client._installed_dir / name),  # SkillHubClient 实际安装目录
-                        # 同上：hub 这支的门在 `SkillHubClient._gate_check_and_rollback` 里，
-                        # 落位与登记到本账本的正是那份字节，钉在这里而不是 hub_client 里
-                        # （hub 侧没有账本，摘要落到账本唯一写侧才不留第二份读法）。
-                        artifact_digest.DIGEST_FIELD: artifact_digest.digestDir(
-                            hub_client._installed_dir / name),
                         "manifest": {"source": "remote", "url": url},
                     }
+                    # 同上：hub 这支的门在 `SkillHubClient._gate_check_and_rollback` 里，落位与登记
+                    # 到本账本的正是那份字节，钉在这里而不是 hub_client 里（hub 侧没有账本，摘要落到
+                    # 账本唯一写侧才不留第二份读法）。与本地安装口共用同一条判据：**没有构件就不钉**。
+                    if self._hasArtifactBytes(hub_client._installed_dir / name):
+                        self._skills[name][artifact_digest.DIGEST_FIELD] = \
+                            artifact_digest.digestDir(hub_client._installed_dir / name)
                     self._save_manifest()
                 self._logger.info("Installed skill from URL: %s (skill_id=%s)", url, name)
                 return {"success": True, "skill_id": name}
@@ -1697,6 +1703,18 @@ class SkillService:
                 return py_file
         return None
 
+    def _hasArtifactBytes(self, skill_path: Path) -> bool:
+        """落盘里有没有**构件字节**——"这份账本值不值得钉摘要"与"读面该不该说它可得"是同一个问句。
+
+        口径＝入口脚本（`_resolveEntryPoint` 那份）或指令体的 `SKILL.md`。装侧两处与读面这一处
+        过去各写一份内联判断（§6-289 第①条）：装侧那份在字节缺席时照样钉，就把"目录里只有
+        manifest.json"钉成了构件权威；日后把真字节补进同一个目录，反而被那份读数判成篡改
+        （§6-267 修的是 call 侧那一支，写侧这一半一直在新生这种账本）。
+        咽喉那一支问的不是这个——它要的是"能 exec 的 `.py` 入口"；把两个问句捏成一个就是拿
+        "同源"当名义改语义（指令型会在 call 时刻多写一次账本），所以刻意留开。
+        """
+        return (skill_path / "SKILL.md").exists() or self._resolveEntryPoint(skill_path) is not None
+
     def availabilityFor(self, skill_id: str) -> Dict[str, Any]:
         """这一条账目能不能变成一个**动得了**的执行体——读面唯一的问句（§6-272，用户裁甲）。
 
@@ -1737,7 +1755,7 @@ class SkillService:
         if not skill_path.is_dir():
             return {"available": False,
                     "unavailableReason": "账本落点目录不在盘上：%s" % skill_path.name}
-        if (skill_path / "SKILL.md").exists() or self._resolveEntryPoint(skill_path):
+        if self._hasArtifactBytes(skill_path):
             return {"available": True, "unavailableReason": ""}
         return {"available": False,
                 "unavailableReason": "落盘无可执行构件（既无 SKILL.md 指令体，也无入口脚本）"}
