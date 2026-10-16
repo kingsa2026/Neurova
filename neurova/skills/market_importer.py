@@ -286,9 +286,11 @@ class MarketImporter:
                         shutil.rmtree(dest, ignore_errors=True)
                     from neurova.skills import market_sources
 
-                    if not market_sources.extract_remote_skill_zip(skill_id, payload, dest):
+                    refusal = market_sources.extractRemoteSkillZipRefusal(skill_id, payload, dest)
+                    if refusal:
                         task.status = ImportStatus.FAILED
-                        task.error_message = f"extract builtin bundle {bundle_name} failed"
+                        # 原因原样带进回执：折成一句 "failed" 会让人去改一个没坏的包（§6-259）
+                        task.error_message = f"extract builtin bundle {bundle_name} failed: {refusal}"
                         logger.error("Failed to import skill '%s': %s", skill_id, task.error_message)
                         return task
                 elif download_url:
@@ -302,10 +304,10 @@ class MarketImporter:
                             import shutil
 
                             shutil.rmtree(dest, ignore_errors=True)
-                        downloaded = market_sources.download_and_extract(skill_id, download_url, dest)
-                        if not downloaded:
+                        refusal = market_sources.downloadAndExtractRefusal(skill_id, download_url, dest)
+                        if refusal:
                             task.status = ImportStatus.FAILED
-                            task.error_message = f"download/extract skill from {download_url} failed"
+                            task.error_message = f"download/extract skill from {download_url} failed: {refusal}"
                             logger.error("Failed to import skill '%s': remote download failed", skill_id)
                             return task
 
