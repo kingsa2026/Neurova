@@ -14,6 +14,7 @@
 """
 
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 import json
 import re
@@ -796,10 +797,8 @@ class SkillEvolutionService:
             logger.debug("技能日志仓写入失败: %s", e)
 
     def _apply_to_skill(self, proposal: dict, registry: Any) -> bool:
-        from neurova.skills.skill_service import SkillService
-
         try:
-            svc = SkillService(agent_id=self.agent_id)
+            svc = agentLibrary(self.agent_id)
             info = svc.get_skill_info(proposal["skill_id"])
             if info is None:
                 logger.debug("提案 %s 目标技能已不存在", proposal.get("proposal_id"))

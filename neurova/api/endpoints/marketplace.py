@@ -1,4 +1,5 @@
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 """
 技能市场接口 - Marketplace Endpoint
@@ -400,14 +401,13 @@ async def install_skill(
             if not body.force:
                 # 幂等补链: 旧版本安装未注册进 agent 技能页/工具集, 补一次联邦注册
                 from neurova.skills.market_registry import link_market_skill_to_agent
-                from neurova.skills.skill_service import SkillService
 
                 link = link_market_skill_to_agent(
                     skill_id=target_skill.skill_id,
                     name=target_skill.name,
                     description=target_skill.description,
                     version=target_skill.version,
-                    service=SkillService(agent_id=body.agent_id or "default"),
+                    service=agentLibrary(body.agent_id or "default"),
                     registry=_default_skill_registry(),
                     extra_registries=_running_agent_registries(),
                     market_skills_dir=importer._skills_dir,
@@ -451,14 +451,13 @@ async def install_skill(
 
         # 联邦注册: agent 技能页(manifest) + 工具注册表(可执行) 同时打通
         from neurova.skills.market_registry import link_market_skill_to_agent
-        from neurova.skills.skill_service import SkillService
 
         link = link_market_skill_to_agent(
             skill_id=target_skill.skill_id,
             name=target_skill.name,
             description=target_skill.description,
             version=target_skill.version,
-            service=SkillService(agent_id=body.agent_id or "default"),
+            service=agentLibrary(body.agent_id or "default"),
             registry=_default_skill_registry(),
             extra_registries=_running_agent_registries(),
             market_skills_dir=importer._skills_dir,
@@ -520,11 +519,10 @@ async def uninstall_skill(
 
         # 联邦注销: agent 技能页 + 工具注册表(全局+运行中 Agent) 同步移除
         from neurova.skills.market_registry import unlink_market_skill_from_agent
-        from neurova.skills.skill_service import SkillService
 
         unlink_market_skill_from_agent(
             skill_id,
-            service=SkillService(agent_id=agent_id),
+            service=agentLibrary(agent_id),
             registry=_default_skill_registry(),
         )
         for reg in _running_agent_registries():
@@ -905,9 +903,7 @@ async def submit_market_skill(
 
         local_trust_state = None
         try:
-            from neurova.skills.skill_service import SkillService
-
-            info = SkillService(agent_id="default").get_skill_info(body.skill_id) or {}
+            info = agentLibrary("default").get_skill_info(body.skill_id) or {}
             local_trust_state = ((info.get("identity") or {}).get("trust") or {}).get("state")
         except Exception:  # noqa: BLE001 - 本地查不到=纯市场申请，交文本门
             pass

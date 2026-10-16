@@ -426,9 +426,9 @@ class SelfImprovementProposer:
     def skill_service(self) -> Any:
         """技能库门面：按 agent 懒构造真实 SkillService（工单 010 的落点）。"""
         if self._skill_service is None:
-            from neurova.skills.skill_service import SkillService
+            from neurova.skills.library_service import agentLibrary
 
-            self._skill_service = SkillService(self._agent_id)
+            self._skill_service = agentLibrary(self._agent_id)
         return self._skill_service
 
     @property

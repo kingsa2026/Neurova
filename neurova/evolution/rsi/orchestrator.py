@@ -10,6 +10,7 @@ RSI 编排器
 """
 
 from neurova.core.logger import get_logger
+from neurova.skills.library_service import agentLibrary
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -1388,9 +1389,7 @@ def _readPresentationFunnel(agent_id: str) -> Dict[str, Any]:
     from neurova.evolution.skill_experience import presentationFunnelVerdict
 
     try:
-        from neurova.skills.skill_service import SkillService
-
-        service = SkillService(agent_id=agent_id)
+        service = agentLibrary(agent_id)
         rows = [
             service.get_skill_usage(skill_id)
             for skill_id, _info in service.iter_skills()

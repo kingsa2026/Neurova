@@ -4,6 +4,7 @@ No model-supplied counters are accepted. SQLite serializes creation across servi
 instances/processes; manifests remain in place, including all historical entries.
 """
 from contextlib import contextmanager
+from neurova.skills.library_service import agentLibrary
 from contextvars import ContextVar
 import copy
 import hashlib
@@ -280,9 +281,8 @@ def finish_task(agent, purpose, completed):
         if task["closed"] or not task["steps"]:
             flush_task(None, purpose, completed)
             return
-    from neurova.skills.skill_service import SkillService
 
-    service = SkillService(agent_id=agent.config.agent_id)
+    service = agentLibrary(agent.config.agent_id)
     record = flush_task(service, purpose, completed)
     builder = getattr(agent, "skill_packer", None)
     if builder is not None and record:

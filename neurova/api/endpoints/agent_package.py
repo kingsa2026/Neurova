@@ -1,4 +1,5 @@
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 """
 Agent 应用包端点。
@@ -49,9 +50,7 @@ _MCP_REFERENCE_KEYS = ("id", "name", "transport", "description", "enabled")
 
 
 def _SkillService(agent_id: str):  # noqa: N802 - 与测试注入缝同名
-    from neurova.skills.skill_service import SkillService
-
-    return SkillService(agent_id=agent_id)
+    return agentLibrary(agent_id)
 
 
 def _list_mcp_servers() -> List[Dict[str, Any]]:

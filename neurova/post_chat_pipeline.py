@@ -36,6 +36,7 @@ PostChatPipeline — 对话后处理管线
 """
 
 from neurova.core.logger import get_logger
+from neurova.skills.library_service import agentLibrary
 from neurova.cognitive_layers.growth_layer.analyzer import GrowthDimension
 import asyncio
 import collections
@@ -2277,10 +2278,8 @@ class PostChatPipeline:
                     # 进化技能同步持久化 SkillService（SkillRegistry 纯内存，重启即丢）
                     skill_service = None
                     try:
-                        from neurova.skills.skill_service import SkillService
-
                         agent_id = getattr(self._agt.config, "agent_id", "default")
-                        skill_service = SkillService(agent_id=agent_id)
+                        skill_service = agentLibrary(agent_id)
                     except Exception as svc_err:
                         logger.warning("创建 SkillService 失败, 进化技能仅写 registry: %s", svc_err)
 
@@ -2827,9 +2826,7 @@ class PostChatPipeline:
             # 应用后 config+version 同步磁盘 manifest——否则改进重启即失
             skill_service = None
             try:
-                from neurova.skills.skill_service import SkillService
-
-                skill_service = SkillService(agent_id=agent_id)
+                skill_service = agentLibrary(agent_id)
             except Exception as svc_err:
                 logger.debug("创建 SkillService 失败, 改进仅内存态: %s", svc_err)
             # 判据升级：开启文本进化时走反射式改进——
