@@ -5215,3 +5215,78 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **活体（`tests/manual/pathNameListsOneSource_b62.py`，真接缝三段：治理预检 → `ParamGuard.guard` 归一 → `ToolGuardEngine.guard` 分面）⇒ 6/6 PASS**；反证只把单源表里 `filepath` 那一行摘掉，**同一份脚本**退出码 0→1→0，红在第 3 腿（`归一后参数={'filepath': …}`、命令面读数 `['shell_十六进制编码']`）。**这一层证到的不是"来源单一"**：第 5 腿（派生对派生）在摘行后仍绿，漂移看不见——所以"来源单一"由形状格与抄本扫描格承担，活体只承担"那张表在真链上不是装饰"。仓内 `data/` 内容指纹 `d1ef4e99bd9f` 跑前跑后未变。
     - **A/B 与红自证都改在仓外 worktree 做，主工作树全程零触碰**：两侧同一 SHA `81f54c8f`、同一 venv、同一选择集（skills/api/tools/plugins/evolution/agent/context/security）、两侧同 `--ignore`；基线 39 failed＋9 errors＝48 条 ↔ 本批侧 48 条**逐行一致**，passed 10015→10032（差的 17 格是当时那一版判据，终版 19 格只加判据、生产两档字节未变，md5 复证）⇒ **AB_PASS**。改这形态的原因要记下：并发会话此刻正在主树里改 `neurova/execution_layers/__init__.py`(−235)，本批侧若用主树，那条红会被读成我的回归。
     - **仍开（下一拍，前提已解除）**：① 丁（按 schema 判"这个参数是不是路径"）vs 甲（扩清单）——名单现在是一份，拍哪个都只改一处；② 回落按空格截断那处老毛病；③ §6-284 的 case 1（一次调用只查一条路径、查到就早退）与 case 2 的命令文本短路——那是审批摩擦面（HIGH ⇒ ASK），属产品语义，另拍；④ 外部面暴露：MCP／远端注册工具的参数名由对端 schema 定，本仓清单永不覆盖它们，**只有丁能一次修掉"翻转"与"漏名"两件事**。
+
+289. **执行咽喉先问代码映射表再回落盘：读面说"可用"而点执行必失败那条分叉闭了（✅ `65f60f37` 生产+判据+活体 / `09192339` 子集 619→620；§6-280 甲·第②批，§6-283 那四条同批判据齐配）** 🟢 —— 前提（咽喉是协程）已随 §6-287 解除。
+
+    - **落笔前复核实状（真账本现读，四条读数与 §6-280 当时逐字一致，票面不必改判）**：
+      `data/agents/default/skills/manifest.json` 仍 1 条 `web-search`、`enabled=True`、目录只有 `manifest.json`、账本无摘要；
+      `availabilityFor("web-search")` ⇒ `{'available': True}`；`call_skill("web-search", query=…)` ⇒
+      `success=False, error='No entry point found for skill'`；`_build_executable_skill("web-search", …)` ⇒ 真造得出 `ExecutorBackedSkill`。
+    - **本会话新量到的一条，是票面没记的第二处缺陷**：映射表 `_MARKET_EXECUTORS` 的值是**类名字符串**，
+      构造处（原 `market_registry.py:145`）另写了一张 `{"WebSearchSkillExecutor": 类}` 内联查表
+      ⇒ 同一个概念两份表示，添一只映射要改两处；漏第二处时问句说 True、构造造不出，只有一条 warning
+      就静默降级成裸壳注册（面板与工具面都画成可用而动不了）。收成 **id→工厂**（延迟 import 落在工厂里，
+      重型依赖不在模块顶层裸 import，AGENTS §3），问句／构造／注册面三条读路全部经这一张表。
+    - **为什么这条分叉能活到今天**：§6-272 那套读面判据把"映射执行体型"列进三条真形状之一，但
+      `tests/unit` 面 grep `hasExecutorMapping`／`_MARKET_EXECUTORS` 命中 **0 条**——那一支一格都没咬过，
+      只活在档头注释里。⇒ "登记了三条分支"与"三条分支都有判据"是两件事，本批那两格对照就是补这一课。
+    - **两条腿的锁形状是反的，这一点必须做成判据而不是注释**：落盘那一支留在本线程（§6-287 已钉）；
+      映射那一支走 `ExecutorBackedSkill` 的 `loop.run_in_executor`，同步执行体在**工作线程**里跑，
+      所以咽喉必须**出了锁再 await**——主线程持 `creation_governance.shared_lock(skills_dir)`（按目录共享、
+      重入只在同线程成立）await ＋执行体回调本服务＝当场死锁。该格自带 8s 限时把超时转成会说话的 red
+      （形态集 256：不许靠挂死或整轮被打断表态）。
+    - **契约与不可逆点按裁定写进代码**：映射型没有 `artifact_digest`，完整性语义是「**由代码本体负责、
+      不受安装门摘要管辖**」——反过来读成"摘要缺失所以放行"就把闸门读没了。所以反向钉两格：未钉的条目
+      跑完仍不许有摘要、已钉的跑完不许变；再配一格"同一份字节两条腿给不同正确答案"（盘上被塞进 `main.py`
+      时映射腿照跑、落盘腿按 `artifact_digest_mismatch` 拒）——只断前一半就等于宣称整条咽喉都不看摘要了。
+      `method` 参数对映射型无定义 ⇒ 如实拒而不静默吞（签名里接了不用＝在契约上承诺一件不做的事）。
+    - **本批真犯过的一次，已做成变异**：把表改成 id→工厂后，第一版只改了构造那处，**注册面仍留着旧的
+      `{类名: 类}` 内联查表** ⇒ `web-search` 在注册面静默降级成裸壳。抓到它的不是我的新格，而是
+      `tests/unit/skills/test_market_registry.py` 两格既有判据（`AttributeError: 'Skill' object has no
+      attribute '_get_parameters'`）。处置＝注册面改经同一处取数，并补两格"注册面必须是第三条同表读路"
+      （一格测新加的映射、一格测内置那条），N2 变异复现它。**教训**：一条收口有几条读路就要有几格，
+      只测其中两条拦不住"收到一半"；而且既有判据红不是环境噪声，它这一红就是把我的半成品拦下来了。
+    - **判据池 16 格**（`tests/unit/skills/test_throatRecognizesExecutorMapping.py`，入子集 619→620）：
+      映射腿真跑出值／同形不在册照旧拒／未钉不首钉＋已钉不许变／两条腿对同一份字节的不同答案／
+      执行体回调本服务限时不挂死／停用闸不被绕过／账本外不凭空造技能／`method` 如实拒／名实一致同向格
+      （读面与咽喉各跑一次，两形对照）／三条同表读路×2／表值必须是工厂／内置那条只构造不执行（执行会出网）／
+      链上真跑一次 dict 契约。**取值口径**：映射腿的样本必须是"盘上只有 `manifest.json`"那一形
+      （与本机 `web-search` 同形）——换成盘上有 `.py` 的样本，"分流"与"一律放行"两种实现同解（形态集 239）。
+      链那一格如实带一句：`SkillChainExecutor(` 在 `neurova/` 内**零构造点**（现读），所以它证的是
+      "链经真咽喉接得住 dict 契约"，不证它在生产在跑。
+    - **红自证 / 变异 / 活体三层的实测读数**：红自证＝本批五档铺进仓外本批树、只把生产三档
+      `git checkout a251f967 --` 退回旧态（共享工作树零触碰）⇒ **11 failed, 5 passed**，红的恰是依赖本批的
+      11 格（7 条行为断言红＋4 条新符号不在场，形态分开报），仍绿那 5 格全部是写明"设计成改前改后都绿"
+      的对照格。变异四枚各咬各侧：N1 分流退回⇒7 格；N2 注册面退回旧查表⇒恰那 2 格；N3 映射腿挪回持锁
+      await⇒恰回调那 1 格（15.75s，8s 限时生效）；N4 绕过 enabled⇒恰停用那 1 格。
+      活体（`tests/manual/throatRecognizesExecutorMapping_b63.py`，真 `create_app`＋`TestClient`＋真签 token＋
+      隔离根，执行体经**生产缝** `registerExecutorMapping` 注册）⇒ **7/7 PASS**，`[1] HTTP 200 data.success=True
+      执行体被跑 1 次`、`[3] 停用那条仍拒（走生产写侧 `disable_skill`）、账本外那条 404`、
+      `[4] 注册面造出 ExecutorBackedSkill 且参数 schema 有 query`、`[5] 面板两面 available=True 与执行口同向`、
+      `[6] 摘要跑前 sha256:6cb33211cfc ↔ 跑后同值`、`[7] 仓内 data/ 指纹未写入`。
+      反证（同一份脚本、只退回"先问映射表"那一步）⇒ 退出码 **0→1→0**，红在第 1 腿（`执行体被跑 0 次`、
+      拒因回到 `No entry point found`）与第 5 腿（`available=True` 而执行口跑出 `False`），
+      **第 4 腿仍绿**——它测注册面，分流退不回它；这条不对称正是"两条腿各自有格子钉"想要的形状。
+      活体第一版自己红过一次：第 5 腿按 `id` 找条目而回包里的键是 `skill_id`，取到空 dict、
+      `available=None`，看着像"面板说不可用"其实是脚本没看见那一行——先证看见，再谈同向。
+      这一层**不证**"来源单一"也不证"两条腿锁形状相反"（前者由三条读路格承担，后者由单元那格承担）。
+    - **A/B 与红自证都改在仓外 worktree 做**：两侧同一 SHA `a251f967`、同一 venv、同一选择集
+      （skills/api/tools/plugins/evolution/agent/context/security）、两侧同 `--ignore`；
+      基线（纯 HEAD）39 failed＋9 errors＝48 条 ↔ 本批侧同样 48 条**逐行一致**，passed 10034→10050
+      （差的 16 格正是本批新判据），仅本批侧红 0 条、仅基线侧红 0 条 ⇒ **AB_PASS**；那 48 条全是 HEAD
+      自带常驻红。本批侧不用主工作树的原因与批 62 同：并发会话此刻仍在树里改
+      `neurova/execution_layers/__init__.py`，那不是本批的改动，混进来会把它的红读成我的回归。
+      另记一笔取数口径教训：后台跑测的 harness 输出文件被截断过（汇总报 17 failed 而文件里 `FAILED`
+      行为 0 条），**"没抓到失败集"不等于"没有失败集"**——本批的权威读数一律取自自己落盘的 /tmp 产物。
+    - **同批登记、不动手的三条（教义第 5 条；静默遗留才算违规）**：
+      ① **装侧把空壳钉成构件权威**——`install_skill` 对一只只有 `manifest.json` 的目录当场首钉并落账
+      （本会话探针现读 `sha256:1992…`／活体侧 `sha256:6cb33211cfc`）。§6-267（批 57）那条"空壳不首钉"
+      只修了 call 侧；装侧同一根因仍在。不在本批改：有真字节时装侧钉的是真字节（是对的，§6-183 那条裁定
+      的全部意义就在这），要改只能改"装完盘上没有可执行构件"那一支，动的是安装语义，另拍。
+      ② **链把整包输入压成一个关键字**——`skill_chain_executor.py:270` 调的是
+      `call_skill(skill_id=…, input_data=mapped_input)` 而不是 `**mapped_input`，字段名因此在链上不平铺。
+      本批不改：改了会动每一只落盘技能收到的形状；链那一格只断 dict 契约接得住。
+      ③ **活体档里第二份"有没有映射"的实现**——`tests/manual/readFaceReconciles_b58.py:113-116` 自写
+      `str(sid) in _MARKET_EXECUTORS`。今天它与生产谓词等值，但生产已有公开 `hasExecutorMapping`；
+      不在本批改的原因是那档属批 58 的活体，改它须把那一轮重跑一遍，混进来会让两批共一份账。
+    - **仍开**：映射表在册的只有 `web-search` 一只，其余市场技能仍走盘；§6-284 那一拍（丁／甲）与本条无关，另拍。
