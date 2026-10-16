@@ -165,13 +165,19 @@ def test_shapeNeedlesSeparateTheTwoForms(gate):
 # ── 真产物：这只资产包今天的命运由谁决定 ────────────────────────────────────
 
 def testRealBundleDeniesOnItsOwnTrueShapesNotOnRegex(gate, tmp_path):
-    """真 zip 现读：误判关掉之后，这只包**仍然该被拦**——但拦它的是真形态，不是 `re.compile(`。
+    """真 zip 现读：属性调用永远不许被算成危险执行；真裸名那一处**已被本批资产那一刀改掉**。
 
-    钉三件事，少一件就是自欺：
-    ① `dangerous_exec` 的证据行里不得再出现属性调用（`X.compile(` 这一形）；
-    ② 参与裁决的 exec 命中只剩裸名调用那 1 条（真信号）；
-    ③ 修完不许偷偷变成放行——本批改的是误判，不是"给这只包开后门"，
-      要不要开白名单/撤条目仍是另一次裁定（§6-250 乙/丙案）。
+    改判记录（教义第 5 条 / 形态集 235）：本格原写「② 真裸名 exec 只剩 1 条 ③ 这只包仍该被拦」，
+    那是批 56 之后的实状。批 59 把包内 `scripts/package_check.py` 的
+    `compile(script.read_text(… ), …, "exec")` 换成等价的 `ast.parse(…, filename=…)`
+    ——自检能力不丢，真信号归零。继续钉「== 1」就是拿旧口径当契约，所以钉法跟着换：
+
+    ① `dangerous_exec` 的证据行里不得出现属性调用（`X.compile(`）——**这一条永不许松**；
+    ② 真裸名 exec 读数 **0** 条；
+    ③ "真信号没被一起判没"与"整包现在该放行"两件事**不在这里判**：前者由上面
+      `testRealDynamicExecutionStillDenies`（裸名 exec/eval/compile 三只合成包照旧拦）钉，
+      后者由 `tests/unit/skills/test_builtinBundleInstallsThroughGate.py` 钉——那里还钉了
+      "放行不许靠白名单"。本档只判形状，免得两档各判一次同源事实、日后各自漂移。
     """
     assert BUNDLE.exists(), f"包内资产缺失，本格的根据就没了：{BUNDLE}"
     dest = tmp_path / "studio"
@@ -185,10 +191,9 @@ def testRealBundleDeniesOnItsOwnTrueShapesNotOnRegex(gate, tmp_path):
 
     assert not attributeish, (
         f"仍有 {len(attributeish)} 条属性调用被当危险执行，例：{[(f.file_path, f.evidence) for f in attributeish[:3]]}")
-    assert len(execHits) == 1, (
-        f"真裸名动态执行读数应为 1 条（`package_check.py` 的 compile(...)），现读 {len(execHits)}："
+    assert not execHits, (
+        f"真裸名动态执行读数应为 0 条（资产那一刀已换成 ast.parse），现读 {len(execHits)}："
         f"{[(f.file_path, f.evidence) for f in execHits]}")
-    assert res.passed is False, "误判关掉后这只包反而放行了——真信号（动态编译/子进程）也判没了？"
 
 
 # ── 拒因文本只准念参与裁决的条目 ─────────────────────────────────────────────
