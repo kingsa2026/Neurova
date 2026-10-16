@@ -92,7 +92,9 @@ class SimulatedAgent:
 
 #: 未记基座的分组键：读数里"这条证据没绑定过任何型号"必须自成一组、不许消失，
 #: 也不许被折进某个型号（折进去就是把未知读成已知）。
-UNRECORDED_MODEL_KEY = "__unrecorded__"
+#: "这一格没记"的词值，**维度中立**：基座没记、来源没记，说的是同一件事，
+#: 各写一份常量就会漂成两组（判据 `testUnrecordedWordValueIsSharedNotRetyped` 钉这条）。
+UNRECORDED_GROUP_KEY = "__unrecorded__"
 
 
 def resolveModelUnderTest(executor: Any) -> str:
@@ -123,30 +125,75 @@ def resolveModelUnderTest(executor: Any) -> str:
     return ""
 
 
+def _coverageGroups(items: list, namesOf) -> dict:
+    """覆盖分组的**唯一**计数实现：一条记录归属哪几个组、其中几条已批准。
+
+    `namesOf(item)` 回一个组名列表；空列表 ⇒ 折进"未记"组，不消失也不冒充已知值
+    （折进已知值就是把未知读成已知）。批准词值取**写侧那一份**（`STATUS_APPLIED`），
+    不在读数里再造第二个词；端点入参的 "approved" 与它的对不上属既有口径差，另批。
+    """
+    byValue: dict = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        names = [n for n in (namesOf(item) or []) if n] or [UNRECORDED_GROUP_KEY]
+        for name in names:
+            row = byValue.setdefault(name, {"proposals": 0, "approved": 0})
+            row["proposals"] += 1
+            # 批准=已应用（提案生命周期词汇），未应用的一律只算 proposals
+            if str(item.get("status") or "") == STATUS_APPLIED:
+                row["approved"] += 1
+    return byValue
+
+
+def _coverageReadout(byValue: dict, outerKey: str) -> dict:
+    return {
+        outerKey: byValue,
+        "unrecorded_key": UNRECORDED_GROUP_KEY,
+        "total": sum(r["proposals"] for r in byValue.values()),
+    }
+
+
 def modelCoverageReadout(proposals: list) -> dict:
     """把"哪些验收证据绑定过哪个基座"按型号分组——只呈报，不判定。
 
     存在的理由：本仓基座是管理员运行时可换的配置，而一条技能正文的 `holdout_after`
     从来不记录它跑在哪个模型上。换基座之后，历史批准记录对新模型**没有任何证据**——
     这一格把那件看不见的事量出来，供人决定要不要复跑（复跑触发点的裁定见 §7.1-Q3，
-    本批不进判据）。未记基座的条目折进 `UNRECORDED_MODEL_KEY`，不消失也不冒充已知型号。
+    本批不进判据）。未记基座的条目折进"未记"组，不消失也不冒充已知型号。
     """
-    byModel: dict = {}
-    for item in proposals or []:
-        if not isinstance(item, dict):
-            continue
-        model = str(item.get("model_under_test") or "").strip() or UNRECORDED_MODEL_KEY
-        row = byModel.setdefault(model, {"proposals": 0, "approved": 0})
-        row["proposals"] += 1
-        # 批准词值取**写侧那一份**（`STATUS_APPLIED`——批准即应用是本仓提案生命周期词汇），
-        # 不在读数里再造第二个词；端点入参的 "approved" 与它的对不上属既有口径差，另批。
-        if str(item.get("status") or "") == STATUS_APPLIED:
-            row["approved"] += 1
-    return {
-        "by_model": byModel,
-        "unrecorded_key": UNRECORDED_MODEL_KEY,
-        "total": sum(r["proposals"] for r in byModel.values()),
-    }
+    return _coverageReadout(_coverageGroups(
+        proposals,
+        lambda item: [str(item.get("model_under_test") or "").strip()]),
+        "by_model")
+
+
+def sourceMixOfEvidence(dataset: EvalDataset) -> Dict[str, int]:
+    """这批**验收证据**的用例来源构成（golden / history / synthetic …）。
+
+    取数面只算判据集（`evaluation_split`，与 runner 的留出终审同一处）——把 train 里的
+    用例混进来，读数说的就是"这个语料有多大"而不是"这条提案凭什么"。
+    判据集为空 ⇒ 空构成；兜一个 `"synthetic"` 进去就是拿 dataclass 默认值编证据。
+    """
+    from collections import Counter
+
+    from neurova.evolution.eval.dataset import evaluation_split
+
+    return dict(Counter(str(ex.source or "") for ex in evaluation_split(dataset)
+                        if str(ex.source or "")))
+
+
+def sourceCoverageReadout(proposals: list) -> dict:
+    """按用例来源分组的覆盖面：一条提案可以同时进几个来源组（混合构成的证据集）。
+
+    与 `modelCoverageReadout` 共用同一处计数实现与同一个"未记"词值；两维各写一份
+    分组逻辑与各自的未记常量，就是第二份定义（教义第 6 条）。
+    旧记录整键缺席或构成为空 ⇒ 未记，**不**因为 `EvalExample.source` 有默认值就读成合成。
+    """
+    return _coverageReadout(_coverageGroups(
+        proposals,
+        lambda item: sorted((item.get("source_mix") or {}).keys())),
+        "by_source")
 
 
 def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
@@ -332,6 +379,12 @@ class EvolutionProposal:
     # 只作读数与分组证据，不参与 accept/reject；旧记录没这一键 ⇒ 空串 = 未记，
     # 在覆盖读数里自成一组，不折进任何型号。
     model_under_test: str = ""
+    # B 批（用户裁"接线"）：这批验收证据的用例来源构成（golden/history/synthetic…），
+    # 取数面＝`sourceMixOfEvidence`（只算判据集）。写它的理由：分数相同不代表证据同级——
+    # 3 条手工 golden 与 3 条合成用例上的 0.9 是两个可信度。审批人在提案列表面就该看见，
+    # 不必回查数据集。旧记录整键缺席 ⇒ 在来源覆盖里归"未记"，不读成默认值 synthetic；
+    # 同样只作解释面，不参与 accept/reject（判据钉住"同分不同来源 ⇒ 判据数字不变"）。
+    source_mix: dict = field(default_factory=dict)
     holdout_before: float = 0.0
     holdout_after: float = 0.0
     # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
@@ -540,6 +593,9 @@ class SkillEvolutionService:
                 artifact_type=artifact_type,
                 run_id=run_id,
                 model_under_test=modelUnderTest,
+                # 证据的来源构成在此现算（不是调用方传入）：传进来就等于允许别人替
+                # 这批证据编一个出处。
+                source_mix=sourceMixOfEvidence(dataset),
                 baseline_text=skill_text,
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),

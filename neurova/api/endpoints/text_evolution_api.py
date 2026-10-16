@@ -365,10 +365,13 @@ async def list_evolution_proposals(
             "decided_at": p.get("decided_at"),
             # M-C 读数：这条验收证据跑在哪个基座上（空串 = 未记，含本批之前落盘的全部旧记录）
             "model_under_test": p.get("model_under_test") or "",
+            # B 批读数：这批证据的用例来源构成。整键缺席（改动前的旧记录）或空 ⇒ 在覆盖
+            # 读数里归"未记"，不因为 `EvalExample.source` 有默认值就读成合成用例。
+            "source_mix": p.get("source_mix") or {},
         }
         for p in items
     ]
-    from neurova.evolution.eval.service import modelCoverageReadout
+    from neurova.evolution.eval.service import modelCoverageReadout, sourceCoverageReadout
 
     # 形状纪律：`data` 是前端已在消费的列表，改成 dict 会打破既有契约——
     # 覆盖读数作**同级新增键**，老调用者读 data 不受影响。
@@ -376,6 +379,8 @@ async def list_evolution_proposals(
         "code": 0,
         "data": rows,
         "model_coverage": modelCoverageReadout(items),
+        # 同级新键：按用例来源的覆盖面（一条提案可同时进多个来源组，混合构成的证据集）
+        "source_coverage": sourceCoverageReadout(items),
     }
 
 
