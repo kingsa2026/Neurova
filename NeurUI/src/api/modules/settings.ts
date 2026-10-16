@@ -161,20 +161,51 @@ export function updateGovernanceSettings(data: Partial<GovernanceSettings>) {
 }
 
 // ---------------------------------------------------------------------------
-// Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次）
+// Agent 运行限制（后端单源：`neurova/security/agent_limits_settings.py`）
+//
+// 键集不在这里维护：GET 把生效值全量带出、`domains` 把每键的控件形态与合法域一起带出，
+// 面板按回包渲染。这里的类型只作 IDE 辅助，**不是**"面板能调哪些键"的那份清单——
+// 真把类型当清单用就会回到旧病（回包十个键、模板画两个框，其余"能经 API 调不能经 UI 调"）。
 // ---------------------------------------------------------------------------
 
 export interface AgentLimits {
   token_budget: number
   max_loop_rounds: number
+  goal_max_continuations: number
+  goal_round_budget: number
+  goal_verification_enabled: boolean
+  max_subagent_depth: number
+  max_parallel_tools: number
+  doom_loop_window_size: number
+  doom_loop_max_interrupts: number
+  doom_loop_similarity_threshold: number
+}
+
+/** `get_limit_domains()` 的出街形态：kind 决定画开关还是画数字框，min/max 就是服务端夹紧区间。 */
+export interface AgentLimitDomain {
+  kind: 'int' | 'float' | 'bool'
+  min?: number
+  max?: number
+  /** 不填时取哪个键的值（`goal_round_budget` 的跟随哨兵）。 */
+  follows?: string
+}
+
+export type AgentLimitDomains = Partial<Record<keyof AgentLimits, AgentLimitDomain>>
+
+/** 回包里的 `domains` 是兄弟键而不是塞进 `data`——`data` 的语义始终是"生效值"。 */
+export interface AgentLimitsResponse {
+  code: number
+  message?: string
+  data: AgentLimits
+  domains?: AgentLimitDomains
 }
 
 export function getAgentLimits() {
-  return api.get<ApiResponse<AgentLimits>>('/governance/agent-limits')
+  return api.get<AgentLimitsResponse>('/governance/agent-limits')
 }
 
 export function updateAgentLimits(data: Partial<AgentLimits>) {
-  return api.put<ApiResponse<AgentLimits>>('/governance/agent-limits', data)
+  return api.put<AgentLimitsResponse>('/governance/agent-limits', data)
 }
 
 // ---------------------------------------------------------------------------
