@@ -404,6 +404,13 @@ class PatternAnalyzer(BaseAnalyzer):
                 message="检测到 subprocess 系统命令调用",
                 category="system_call",
                 suggestion="确保命令参数经过验证",
+                # 第二个条件＝**命令是怎么交给系统的**（用户裁甲）。只看"起了进程"就参与
+                # DENY，等于判死一切 CLI 型技能：真资产包里那 4 条全是 argv 列表
+                # （`subprocess.run([node, render.mjs, …])`），那是它渲染 deck 的功能本身。
+                # 真注入面是"把字符串交给 shell 解释"——`shell=True` 另有独立那条闸，
+                # 字符串首参这一形由这里的 context_pattern 判。降级不删读数（批 37 口径）。
+                context_pattern=r"\bsubprocess\.(?:call|run|Popen|check_output|check_call)\s*\(\s*f?[\"']",
+                context_miss_severity="low",
             ),
             ScanRule(
                 rule_id="shell_true",
