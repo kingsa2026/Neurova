@@ -3203,3 +3203,17 @@ tests/unit/security/test_shellEvasionPatternsAreOneFaceOnly.py
 # 短根同包必须装成（点名不是新增拒绝），以及桩在原因面上的替身真的被生产调到。
 # 单跑读数：本档 7 passed 连跑 2 次同读数。
 tests/unit/skills/test_zipRefusalNamesItsCause.py
+# §6-285·暂存名不吃 Windows 路径预算：钉"暂存名与 skill_id 长度无关"＋绝对预算 40（取任何合理
+# 命名策略都成立的值，不钉实现选的那个数），前缀 `.incoming_` 与两处豁免按值各自等于真源，
+# 另有一格 Windows 行为格——成员在终点投影 259（合法上界）的包必须装得成（POSIX 无 260 上限故如实跳）。
+# 单跑读数：本档 6 passed 连跑 2 次同读数（其中 1 格设计成今天就绿，docstring 已写明牙在变异 M1）。
+tests/unit/skills/test_stagingDirStaysWithinPathBudget.py
+# §6-285·subprocess_call 改判命令形状（用户裁甲）：argv 三形降 low 且必须"读数仍在＋不参与裁决"
+# 分开钉，字符串首参／shell=True／os.system 三条真闸照旧拦，跨行字符串首参这一已接受盲区写成会红的
+# 断言而不是注释；"降级"由规则本体的 severityFor 在两行同族样本上给相反答案自证，不是按 rule_id 名单豁免。
+# 单跑读数：本档 11 passed 连跑 2 次同读数（牙在变异 M2/M3/M4，各恰咬自己那一侧）。
+tests/unit/security/test_subprocessCallJudgesCommandShape.py
+# §6-285·真资产包装上且不靠削弱门：整包过门＋报告面 4 条起进程读数一条不许少＋往同一棵树塞一条真裸名
+# exec 必须照样被拒＋这条包不许出现在白名单里（裁定是改资产，禁开豁免）。
+# 单跑读数：本档 5 passed 连跑 2 次同读数。
+tests/unit/skills/test_builtinBundleInstallsThroughGate.py
