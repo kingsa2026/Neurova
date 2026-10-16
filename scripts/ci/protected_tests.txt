@@ -3159,3 +3159,11 @@ tests/unit/api/test_evolveRealArmPathAndBudgetGate.py
 # 失效方向＝有人为了绿把 guardian 摘掉或把 severity 降了，故留一格 CRITICAL 交付锁。
 # 单跑读数：本档 8 passed 连跑 2 次同读数。
 tests/unit/security/test_guardScansFollowParameterSemantics.py
+# §6-267：账本里的构件摘要只准代表**真在盘上的构件**。病灶是次序——`call_skill` 把摘要对账排在入口判定
+# 之前，未钉分支"现算现钉并放行"，于是每次调用一只空壳条目（账本有 `enabled: true` 而目录里只有
+# manifest.json）都先把空壳摘要落进账本，下一行才报 `No entry point found`；那份读数不代表任何构件，
+# 日后真补上字节反被它判成篡改。改法是入口判定收成一处 `_resolveEntryPoint`，未钉分支只在有构件时首钉。
+# 6 格分三组：行为 2 格（单次与连调三次都不许多出摘要）、对照 2 格（有构件的未钉条目仍首钉并放行＝TOFU
+# 那条腿不许被改断；已钉条目被篡改仍先报摘要不符而非"没入口"）、形状 2 格（入口判定全档只许一处 + 探测器反空转）。
+# 逐文件单跑三次同读数 6/6/6；活体两侧对照：无修复那侧 [4][5][6] 三项 FAIL，拒因正是 artifact_digest_mismatch。
+tests/unit/skills/test_unpinnedShellIsNotPinnedAsAuthority.py
