@@ -10,6 +10,7 @@ Agent 技能服务 (SkillService)
 
 import datetime
 import importlib.util
+import inspect
 import json
 import re
 from neurova.security.safe_archive import safe_extract_zip
@@ -1741,9 +1742,9 @@ class SkillService:
         return {"available": False,
                 "unavailableReason": "落盘无可执行构件（既无 SKILL.md 指令体，也无入口脚本）"}
 
-    def call_skill(self, skill_id: str, method: str = "main", **kwargs) -> Dict[str, Any]:
+    async def call_skill(self, skill_id: str, method: str = "main", **kwargs) -> Dict[str, Any]:
         """
-        调用技能
+        调用技能（协程）
 
         Args:
             skill_id: 技能ID
@@ -1752,6 +1753,15 @@ class SkillService:
 
         Returns:
             技能执行结果
+
+        为什么必须是协程：唯一的 HTTP 执行口 `POST /skill-pool/private/{id}/execute` 就在
+        `async def` 里，同步咽喉等于让入口写成协程的技能**从来没被 await 过**——回执照旧
+        `success: true`，`result` 里是一个 coroutine 对象（实测对外是 500）。
+        分派口径照 `agent/sub_session.py:callSubSessionChannel`：**在调用之前**判形状。
+        刻意不把技能体丢进 `asyncio.to_thread`：`self._lock` 取自
+        `creation_governance.shared_lock(skills_dir)`——**按目录共享**的 RLock，重入只在同线程成立。
+        技能体里回调本服务（同目录＝同一把锁）今天能过；挪进线程池就变成主线程持锁 await、
+        worker 线程等锁，当场死锁——这条不是偏好，判据第 2、3 格拿真回调技能钉着。
         """
         try:
             with self._lock:
@@ -1824,8 +1834,15 @@ class SkillService:
                 if not callable(func):
                     return {"success": False, "error": f"'{method}' is not callable"}
 
-                # 执行技能
-                result = func(**kwargs)
+                # 执行技能：协程入口 await 到底，同步入口留在**本线程**调用（锁的重入才成立）
+                if inspect.iscoroutinefunction(func):
+                    result = await func(**kwargs)
+                else:
+                    result = func(**kwargs)
+                # 同步包装器返回可等待对象（`lambda: client.chat()` 这类）：调用已完成，
+                # 此处补齐一次 await，而不是把 coroutine 交回调用方当结果。
+                if inspect.isawaitable(result):
+                    result = await result
 
                 self._logger.info("Called skill %s.%s", skill_id, method)
                 return {"success": True, "result": result}

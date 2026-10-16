@@ -457,7 +457,7 @@ async def execute_private_skill(skill_id: str, body: Dict[str, Any] = Body(defau
     args = body.get("arguments") or {}
     if not isinstance(args, dict):
         raise HTTPException(status_code=400, detail="arguments 须为对象")
-    return {"code": 0, "data": service.call_skill(skill_id, **args)}
+    return {"code": 0, "data": await service.call_skill(skill_id, **args)}
 
 
 # ── Wave V 用户私库真人面（三层技能库"我的技能"页签）─────────

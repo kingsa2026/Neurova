@@ -15,6 +15,7 @@ HEAD 对照腿（同一份脚本、不含本批修复）的跑法：在仓外 wo
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import os
 import shutil
@@ -95,7 +96,7 @@ def seedIsolated(root):
 
 
 def shellErrorText(svc):
-    return str((svc.call_skill(SKILL_ID) or {}).get("error") or "")
+    return str((asyncio.run(svc.call_skill(SKILL_ID)) or {}).get("error") or "")
 
 
 def replenishThenCall(ledgerPath, entryDir):
@@ -116,7 +117,7 @@ def replenishThenCall(ledgerPath, entryDir):
         (entryDir / "main.py").write_bytes(zf.read(victim))
     before = json.loads(ledgerPath.read_text(encoding="utf-8"))[SKILL_ID]
     fresh = SkillService(agent_id=AGENT_ID, skills_dir=str(entryDir.parent))
-    res = fresh.call_skill(SKILL_ID)
+    res = asyncio.run(fresh.call_skill(SKILL_ID))
     refused = str(res.get("error") or "")
     after = json.loads(ledgerPath.read_text(encoding="utf-8"))[SKILL_ID]
     tamperish = any(word in refused.lower() for word in ("mismatch", "digest", "tamper")) or \
@@ -144,7 +145,7 @@ def controlRealSkillPinsOnce(root):
     ledgerPath.write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8")
 
     reopened = SkillService(agent_id=AGENT_ID, skills_dir=str(skills))
-    res = reopened.call_skill(CONTROL_ID)
+    res = asyncio.run(reopened.call_skill(CONTROL_ID))
     after = json.loads(ledgerPath.read_text(encoding="utf-8"))[CONTROL_ID]
     return (bool(after.get(AD.DIGEST_FIELD)) and bool(res.get("success"))), (
         "回执 success=%s，首钉已落账＝%s" % (res.get("success"), bool(after.get(AD.DIGEST_FIELD))))

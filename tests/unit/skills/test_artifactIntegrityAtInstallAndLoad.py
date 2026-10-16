@@ -16,6 +16,7 @@
 **不夸大能力**：摘要钉在账本里，账本与构件同根同权限——能整体改写磁盘的人也能改写摘要。
 这块封的是在途换包与落盘后改动，不封拿到机器后的定向重算。
 """
+import asyncio
 import ast
 import json
 import os
@@ -124,7 +125,7 @@ class TestPinnedAtInstall:
         assert str(reloaded._skills["plain1"].get(AD.DIGEST_FIELD) or "") == pinned
         (installed / "main.py").write_text("def main(**kwargs):\n    return 'after-restart'\n",
                                            encoding="utf-8")
-        assert reloaded.call_skill("plain1").get("error") == AD.REASON_MISMATCH, (
+        assert asyncio.run(reloaded.call_skill("plain1")).get("error") == AD.REASON_MISMATCH, (
             "重启后摘要虽在却不再执法——执法接缝读的是内存态而非账本态")
 
     def test_reinstall_repins_to_the_new_bytes(self, svc, tmp_path):
@@ -144,7 +145,7 @@ class TestVerifiedBeforeExec:
         (installed / "main.py").write_text(
             "def main(**kwargs):\n    return {'stolen': True}\n", encoding="utf-8")
 
-        result = svc.call_skill("plain1")
+        result = asyncio.run(svc.call_skill("plain1"))
         assert result.get("success") is not True, (
             "字节被换过仍装载执行——扫描门证明的是过去，执行的是现在，中间没人对账")
         assert result.get("error") == AD.REASON_MISMATCH, (
@@ -153,7 +154,7 @@ class TestVerifiedBeforeExec:
     def test_untouched_skill_still_runs(self, svc, tmp_path):
         """正向格：钉与验是为了拦换包，不是为了把功能焊死。"""
         _install(svc, tmp_path)
-        assert svc.call_skill("plain1").get("success") is True
+        assert asyncio.run(svc.call_skill("plain1")).get("success") is True
 
     def test_legacy_entry_without_digest_is_pinned_then_enforced(self, svc, tmp_path):
         """TOFU 两拍：存量条目没有摘要 ⇒ 首钉放行；此后才开始执法。
@@ -164,7 +165,7 @@ class TestVerifiedBeforeExec:
         svc._skills["plain1"].pop(AD.DIGEST_FIELD, None)
         assert svc._save_manifest()
 
-        assert svc.call_skill("plain1").get("success") is True, (
+        assert asyncio.run(svc.call_skill("plain1")).get("success") is True, (
             "存量无摘要即拒＝把今天所有已安装技能一起挡掉，这不是安全是停机")
         assert str(svc._skills["plain1"].get(AD.DIGEST_FIELD) or "").startswith(
             AD.DIGEST_PREFIX), (
@@ -172,7 +173,7 @@ class TestVerifiedBeforeExec:
 
         (installed / "main.py").write_text("def main(**kwargs):\n    return 'evil'\n",
                                            encoding="utf-8")
-        assert svc.call_skill("plain1").get("error") == AD.REASON_MISMATCH
+        assert asyncio.run(svc.call_skill("plain1")).get("error") == AD.REASON_MISMATCH
 
     def test_bookkeeping_and_runtime_files_do_not_trip_the_pin(self, svc, tmp_path):
         """系统自己写的不算篡改：`skill.json` 在校验链里会被重写，`__pycache__` 运行时长出来。
@@ -185,7 +186,7 @@ class TestVerifiedBeforeExec:
         os.makedirs(installed / "__pycache__", exist_ok=True)
         (installed / "__pycache__" / "main.cpython-312.pyc").write_bytes(b"\x00stale-bytecode")
 
-        assert svc.call_skill("plain1").get("success") is True, (
+        assert asyncio.run(svc.call_skill("plain1")).get("success") is True, (
             "记账件/运行产物被计入摘要 ⇒ 正常安装也会翻红，判据就成了噪音发生器")
 
 
@@ -194,7 +195,7 @@ class TestRefusalIsAttributable:
         installed = _install(svc, tmp_path)
         (installed / "main.py").write_text("def main(**kwargs):\n    return 'swapped'\n",
                                            encoding="utf-8")
-        result = svc.call_skill("plain1")
+        result = asyncio.run(svc.call_skill("plain1"))
         expected = str(result.get("expected_digest") or "")
         actual = str(result.get("actual_digest") or "")
         assert expected.startswith(AD.DIGEST_PREFIX) and actual.startswith(AD.DIGEST_PREFIX), (
