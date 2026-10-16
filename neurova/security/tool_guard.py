@@ -161,7 +161,41 @@ class BaseGuardian:
 # 此前 governance.py 另抄了一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`，
 # 同一个问题（"哪些参数是命令、哪些是路径"）有两个答案，改一处另一处静默不跟（教义第 6 条）。
 COMMAND_PARAM_KEYS = ("command", "code")
-PATH_PARAM_KEYS = ("file_path", "path")
+
+#: 「哪些名字指向路径语义」的**唯一出处**：一个名字在这件事上可以扮演四种角色，
+#: 下面每个消费方各取自己那一份投影，不再各自写字面（§6-284 第②刀前半）。
+#: 本表**只统一来源，不改裁决**——四角色的划分就是改前三份名单的实状：
+#:   scanned      值按键名从参数面取来扫路径面，并从命令扫描面剔除（§6-266 第①刀裁的就是这一族）
+#:   textual      仅当 scanned 一支取不到时，才在扁串里按 `k=v` 抠值（原回落正则的字面键）
+#:   alias_plain  LLM 常产出的无歧义别名，直接归一到规范名（原 UNAMBIGUOUS_ALIASES）
+#:   alias_gated  可能与真实参数名撞车、须 schema 背书的别名（原 SCHEMA_REQUIRED_ALIASES 的路径族）
+#: 顺序有意义：`pathNamesWithRole` 保持声明顺序，而"取哪条路径"正是由 scanned 清单的**顺序**定的。
+#: "到底该按哪张表判"（按 schema 判 vs 扩清单）是下一批要拍的；拍之前，分歧在本文件一处可见、
+#: 且由 `tests/unit/security/test_pathNameListsDerivedFromOneTable.py` 逐名钉住。
+PATH_CANONICAL_NAME = "file_path"
+PATH_NAME_ROLES = {
+    "file_path": ("scanned",),
+    "path":      ("scanned", "textual", "alias_gated"),
+    "file":      ("textual", "alias_gated"),
+    "dir":       ("textual",),
+    "filename":  ("alias_plain",),
+    "filepath":  ("alias_plain",),
+    "filePath":  ("alias_plain",),
+    "file_name": ("alias_plain",),
+    "fileName":  ("alias_plain",),
+}
+
+
+def pathNamesWithRole(role: str) -> tuple:
+    """单源表的一个投影（消费方只许经此取数，不许再写字面）。"""
+    return tuple(name for name, roles in PATH_NAME_ROLES.items() if role in roles)
+
+
+#: 键名清单（与改前逐项同序）：治理预检与命令面剔除都读它。
+PATH_PARAM_KEYS = pathNamesWithRole("scanned")
+#: 扁串回落那一支的取值式，由 textual 角色派生（原字面 `(?:path|file|dir)=([^\s]+)`）。
+#: 仍按 `[^\s]+` 截断是**改前的实状**，本批不动它——那是下一拍的一部分。
+PATH_VALUE_PATTERN = re.compile(r"(?:%s)=([^\s]+)" % "|".join(pathNamesWithRole("textual")))
 
 #: 路径值里"shell 会另作解释"的字符——命中任一即由 `FilePathGuardian` 出一条 low 级审计读数。
 #: 这一族**只用于报告面**：§6-266 第①刀裁定之前它还兼作豁免闸（含这些字符就不豁免），于是同一个
@@ -547,7 +581,8 @@ class FilePathGuardian(BaseGuardian):
         findings: List[GuardFinding] = []
 
         # 路径值优先按**键名清单**从参数面取（`PATH_PARAM_KEYS` 单源）；取不到才回落到整串里
-        # 的 `path|file|dir=` 形状——那支老写法按空格截断，`C:\a b.txt` 会被切成 `C:\a`。
+        # 的 `k=v` 形状（键集由单源表的 textual 角色派生）。那支老写法按空格截断，
+        # `C:\a b.txt` 会被切成 `C:\a`——本批只统一来源，截断行为留给下一拍一起改。
         path = ""
         if isinstance(context, dict):
             for key in PATH_PARAM_KEYS:
@@ -557,7 +592,7 @@ class FilePathGuardian(BaseGuardian):
                     break
         if not path:
             # 尝试从工具输入中提取路径
-            path_match = re.search(r"(?:path|file|dir)=([^\s]+)", tool_input)
+            path_match = PATH_VALUE_PATTERN.search(tool_input)
             if path_match:
                 path = path_match.group(1)
 
