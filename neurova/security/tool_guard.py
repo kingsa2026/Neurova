@@ -142,6 +142,12 @@ class ToolGuardRule:
 class BaseGuardian:
     """守护者基类"""
 
+    #: 该守护者吃哪一面扫描输入：
+    #:   "all"     ＝工具名＋全部参数值的整串（默认；新增 guardian 不声明就不掉覆盖面）
+    #:   "command" ＝只喂命令语义的输入：路径键的值仅在"整串就是一个路径"时被豁免（§6-255 甲案）
+    #: 豁免是白名单式的，判不准就当命令扫——收窄的方向永远是保守的。
+    scan_surface: str = "all"
+
     @property
     def name(self) -> str:
         raise NotImplementedError
@@ -150,8 +156,45 @@ class BaseGuardian:
         raise NotImplementedError
 
 
+# ── 参数语义两把键清单（§6-255 甲案，全仓唯一出处）─────────────────────────────
+# 治理预检（`governance.extract_adjudicable_params`）与守卫扫描面**都从这里取数**。
+# 此前 governance.py 另抄了一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`，
+# 同一个问题（"哪些参数是命令、哪些是路径"）有两个答案，改一处另一处静默不跟（教义第 6 条）。
+COMMAND_PARAM_KEYS = ("command", "code")
+PATH_PARAM_KEYS = ("file_path", "path")
+
+#: 路径值要豁免出命令面，整串不得含任一 shell 会另作解释的字符（命中即不豁免，回命令面）。
+#: 反斜杠**不在**表内——它是 Windows 的路径分隔符，而本条缺陷的起因正是把一个 `\` 当转义读。
+_SHELL_INTERPRETED_CHARS = frozenset(';|&`$<>"\'{}*?[]\n\r\t')
+_ABSOLUTE_PATH_SHAPE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/])")
+_PATH_SEPARATOR = re.compile(r"[/\\]")
+
+
+def looksLikePathValue(value: Any) -> bool:
+    """整串就是一个路径 → 允许豁免出命令语义 guardian 的扫描面。
+
+    两个条件同时成立才算，否则一律回命令面（保守方向）：
+    ① 形状＝绝对路径（POSIX／Windows 盘符或 UNC／`~`）或含分隔符的相对路径；
+    ② 不含 shell 会另作解释的字符（`;` `|` `&` 反引号 `$` 引号 大括号 通配符 控制符…）。
+
+    「像路径」不等于「安全」：`/etc/passwd` 这类值仍由 `FilePathGuardian` 按路径语义裁决，
+    这里豁免掉的只有"被 shell 逃逸那族规则当命令文本扫"这一件事。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if _SHELL_INTERPRETED_CHARS & set(value):
+        return False
+    return bool(_ABSOLUTE_PATH_SHAPE.match(value) or _PATH_SEPARATOR.search(value))
+
+
 class RuleBasedToolGuardian(BaseGuardian):
-    """基于规则的工具守护者"""
+    """基于规则的工具守护者
+
+    规则全是**命令形态**（`rm -rf`、`chmod 777`、`git push`、`curl | sh`…），
+    故只吃命令面：路径键里的无害整串值不参与匹配（§6-255 甲案）。
+    """
+
+    scan_surface = "command"
 
     def __init__(self):
         self.rules: Dict[str, ToolGuardRule] = {}
@@ -330,7 +373,13 @@ class RuleBasedToolGuardian(BaseGuardian):
 
 
 class ShellEvasionGuardian(BaseGuardian):
-    """Shell 逃逸检测守护者"""
+    """Shell 逃逸检测守护者
+
+    检测的是 shell 的转义/替换/管道写法，只在命令语义上有意义：
+    `C:\\Users\\xccoo\\a.txt` 里的 `\\xcc` 是路径分隔符加用户名，不是十六进制转义（§6-255）。
+    """
+
+    scan_surface = "command"
 
     def __init__(self):
         self._evasion_patterns = self._compile_evasion_patterns()
@@ -459,10 +508,6 @@ class FilePathGuardian(BaseGuardian):
     @property
     def name(self) -> str:
         return "file_path"
-
-    def _is_likely_path_param(self, value: str) -> bool:
-        """判断是否是路径参数"""
-        return "/" in value or "\\" in value or ".." in value
 
     def _match_sensitive_component(self, path: str) -> Optional[str]:
         """检查路径中是否包含用户敏感目录或凭据文件，返回命中描述。"""
@@ -668,14 +713,19 @@ class ToolGuardEngine:
         # P0-1：POSIX shell 分词前移除 \+换行续行，
         # 守卫必须看归一化后的命令形态，否则敏感路径/逃逸特征被物理换行
         # 拆开即可绕过。result.metadata 保留原文供日志审计。
+        # 命令语义的键取自单源清单 COMMAND_PARAM_KEYS（此处原先硬写一个 "command"，
+        # 同属命令语义的 `code` 就漏了归一化——两处口径分叉的同族形状）。
         guard_params = tool_params
+        normalizedFrom: Dict[str, str] = {}
         if isinstance(tool_params, dict):
-            command_value = tool_params.get("command")
-            if isinstance(command_value, str):
-                normalized = normalize_posix_line_continuations(command_value)
-                if normalized != command_value:
-                    guard_params = dict(tool_params)
-                    guard_params["command"] = normalized
+            for key in COMMAND_PARAM_KEYS:
+                value = tool_params.get(key)
+                if isinstance(value, str):
+                    folded = normalize_posix_line_continuations(value)
+                    if folded != value:
+                        normalizedFrom[key] = folded
+            if normalizedFrom:
+                guard_params = {**tool_params, **normalizedFrom}
 
         all_findings: List[GuardFinding] = []
 
@@ -691,13 +741,16 @@ class ToolGuardEngine:
                 )
             )
 
-        # 构建工具输入文本
+        # 构建工具输入文本，并按 guardian 声明的语义分两面（§6-255 甲案）：
+        # 命令语义的 guardian 不吃"路径键里的纯路径值"，全量面照旧。
         tool_input = self._build_tool_input(tool_name, guard_params)
+        command_input = self._build_command_surface(tool_name, guard_params)
 
         # 运行所有守护者
         for guardian in self.guardians:
+            surface = command_input if guardian.scan_surface == "command" else tool_input
             try:
-                findings = guardian.guard(tool_input, guard_params)
+                findings = guardian.guard(surface, guard_params)
                 all_findings.extend(findings)
             except Exception as e:
                 logger.warning("守护者 %s 异常: %s", guardian.name, e)
@@ -710,9 +763,9 @@ class ToolGuardEngine:
             safe=safe,
             findings=all_findings,
         )
-        if guard_params is not tool_params:
+        if normalizedFrom:
             result.metadata["normalized_command"] = True
-            result.metadata["original_command"] = tool_params.get("command")
+            result.metadata["original_command"] = tool_params.get(next(iter(normalizedFrom)))
 
         if not safe:
             logger.warning("工具守卫阻止: %s, " f"发现 %s 个问题", tool_name, len(all_findings))
@@ -723,6 +776,21 @@ class ToolGuardEngine:
         """构建工具输入文本"""
         parts = [tool_name]
         for key, value in tool_params.items():
+            parts.append(f"{key}={value}")
+        return " ".join(str(p) for p in parts)
+
+    def _build_command_surface(self, tool_name: str, tool_params: Dict[str, Any]) -> str:
+        """命令语义扫描面：从整串输入里剔除"确实是一个路径"的路径键值（§6-255 甲案）。
+
+        剔除是白名单式的：键得在 `PATH_PARAM_KEYS` 里，且值要过 `looksLikePathValue`，
+        两个条件缺一个就照旧留在面上——未登记的键、夹带 shell 语义的路径值、非字符串值
+        一律不豁免。工具名始终保留。豁免掉的只是"被命令族规则扫"这一件事，
+        路径本身仍由 `FilePathGuardian` 在全量面上裁决。
+        """
+        parts = [tool_name]
+        for key, value in tool_params.items():
+            if key in PATH_PARAM_KEYS and looksLikePathValue(value):
+                continue
             parts.append(f"{key}={value}")
         return " ".join(str(p) for p in parts)
 
