@@ -4290,6 +4290,7 @@
     - **A/B**（选择集 `tests/unit/skills tests/unit/plugins`，基线＝仓外 worktree at `90f7fc6c` ＋铺入本批两档判据、无修复）：
       基线 `5 failed, 1210 passed` ↔ 本批 `1 failed, 1214 passed`，**仅本批侧红 0 条 ⇒ AB_PASS**；仅基线侧红 4 格即交付证据；
       两侧共有那条是 `test_market_builtin.py::test_import_builtin_offline[presentation-studio]`（Windows MAX_PATH，§6-259 已登记）。
+      **→ 2026-10-16 同族另两格已由 §6-278／§6-279 收口；本格那句"条数随采集顺序与机器负载浮动"经复证**不成立**（定性见 §6-279 末段），别按旧述记账。**
     - **两格新常驻红不认领，也不代改（归属有证据）**：`test_subprocessTextEncodingRatchet::test_ratchetDoesNotRise` 与
       `test_trackedScanFaceIsSingleSourced::test_fullTreeLsFilesEnumerationHasExactlyOneHome` 点名的都是
       `tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py:51`（手抄 `git ls-files`＋未钉 encoding），
@@ -4700,6 +4701,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `9ef336e5` | §6-266 末格第①刀落地（用户裁"按路径语义待它"）：豁免出命令面不再看 shell 字符——键名语义决定扫描面，含执行字符的路径值改由 `FilePathGuardian` 出一条 low 级 `path_with_shell_metacharacters` 落审计面（low 不参与裁决，AUTO 拦 ≥HIGH／STRICT 拦 ≥MEDIUM）。同根因一处：路径值原先靠整串正则按空格截断（`C:\a b.txt` 被切成 `C:\a`），改优先按单源 `PATH_PARAM_KEYS` 从参数面取。**方法论**：那格反绕过判据只写 `assert findings`，产生 finding 的来源被换掉后一字未改照样绿——已改名并拆成四件（命令族零 finding／low 读数必在／它不参与拦截／真遍历与敏感位置照旧拦）。**生产池 +48/−19＝净 +29（代码 +23）**、测试池 +38/−13；红自证恰 1 格（tag `red-selfproof-266-cut1`）、变异四枚各恰咬自己那格且 md5 字节还原、活体 17 格全 PASS（含真 ToolExecutor 写进带 `$` `'` `;` 与空格的路径）＋反证 5 红（`shell_十六进制编码` 原样回来）、A/B 基线 6 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS。两处自犯入账：还原写成条件 no-op 致变异体多留一轮；明码记下已接受的边界（`file_path="rm -rf /"` 这类整串是命令的值零读数） | §6-273（承 §6-266） |
 | `a549e4de` `670070b0` | §6-266 末格第③刀：shell 逃逸检测收成一张表。两个零调用 helper 里唯一独有的 `\u{4}` 并进主表（严重度取齐同族 HIGH），helper 删除——生产池 **净 −12**。并进来之后这条真的开始参与裁决（命令里的 `\u4142` ⇒ HIGH ⇒ ASK），这条代价写在正文而不是藏在 diff 里。本刀的牙咬在上一刀：`\u{4}` 能安全落地只因为 §6-273 把路径键整体挪出命令面；控制格取值刻意带 `;`（首版用干净路径 ⇒ 变异 M4 打空，四枚跑出「三咬一空」才抓到）。红 3/绿 4、红自证恰三格、四枚变异各恰咬自己那格且 md5 字节还原、活体 13 格全 PASS（真执行咽喉那条 `\u4142` 被闸住）＋反证 4 红、A/B 基线 8 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS；子集 610→611；另记一次跟踪态守卫的瞬时 ERROR（并发提交撞索引锁）复跑即绿，不记成本批回归 | §6-274（承 §6-266） |
 | `09a45e86` `62666ba0` | §6-276 用户立项落地：zip 解包三类失败（安全拒／坏包／落点根过长）不再折成同一句 failed——`extractRemoteSkillZipRefusal()` 收成唯一原因面（空串＝成功），bool 面降级成薄包装；长路径那一支把成员长／根长／合计连同 `WINDOWS_MAX_PATH` 写进文案，**量长度不参与任何拒绝判定**。实测本机就在这一形上：内置包最长成员 125 ＋ 147 字符落点根＝273 > 260，`LongPathsEnabled=0x0`。顺带量出一条既有判据从没跑到它所声称的断言（`test_import_builtin_offline` 先被 OS 上限挡住 ⇒ 改短根夹具）。**本批唯一真回归由 A/B 抓到并根修**：生产调用点挪到原因面后，仍桩在旧面的替身静默失效变成连真网络——改桩＋加"生产调哪面替身就打哪面"的交付锁，不给生产加 `getattr` 兜底。判据两形入账：或式断言会被"全都报同一句"蒙住（M3 首版打空，补"长度没问题的 IO 故障"那一族才有牙）、上限数字只许由常量算出（M4 monkeypatch 常量）。红 1/绿 7、红自证 `7 failed 1 passed`、四枚变异各咬自己那格且 md5 字节还原、活体两跑（既有真安装链 10 项全 PASS ＋ 深根点名"路径过长"／短根真落 `SKILL.md`）、A/B 基线 10 红 ↔ 本树 1 条（端口时序，单跑 26 passed 不认领）。生产池 **+66/−16＝净 +50（代码 +38）**、测试池净 +229；子集 611→612 | §6-276 |
+| `55ec3006` `e7d24c3c` | §6-279：`tests/unit/tools` 那族常驻红收掉两格，并把 §6-266 给的旧定性改对。根因一＝**台账数据陈旧**：`referenceSites("ToolParameter")` 现读 3 条而 `toolLoopDeadlines.txt` 写 4，多的那站是 `execution_engine/__init__.py:39` 的同名占位空类桩，已随 `8a934329`（§6-224 摘桩）删净——同批改掉依据里那句"`__init__` 那份仍在"（拥有者级判据断的从来只是 `tool_engine.py` 那份），**prose 跑在代码前面**就是下一个人照散文去找一个不存在的桩。根因二＝**处置状态没有论证**：`DoomLoopGate` 与三个 `doom_loop_*` 键被写成「已接线」却不在 `WIRED_BY_LATER_WAVES`，判据要的是"有批次的动作"，故逐条补论证并现读读取点（`base.py:417-419` 唯一构造、`get_effective_limits()` 夹紧；批次 `7b7a058f`／`111ba0df`）。**定性改判**：那族"条数随负载浮动"不成立——11 格全是 `subprocess.run(text=True)` 未钉 `encoding`，父进程带 `PYTHONIOENCODING=utf-8` 时 stderr 静默变 None（同树去掉该 env 立刻 4 passed）。第三笔**刻意不做**：它要收编码棘轮里该档的基线 9，而棘轮档正被并发会话重写（+258/−51 未提交），后提交者会整体盖掉对方的表——等其落库再动，登记于此。证据：四档合跑 107 passed、M1 摘论证恰咬一格且 md5 字节复原、整目录 FAILED 差集只减不增（14→11，新增 0）。净 LOC：台账数据 +1/−1、判据池 +10/−0、生产 0 | §6-279 |
 | `312841a3` | §6-278：main 上**两道**常驻红同批转绿——`test_benchmarkFacadeImplementationRetired.py:51` 那处自抄的 `git ls-files` 改指 `ast_scan.trackedPyPaths()` 单点。这一处手抄是 §6-234 收口之后又长出来的，同时被编码棘轮与"全树只准一处枚举"点名；**差分变异证明两道红判的是两件事**：装回原形⇒两红，只给手抄补 `encoding="utf-8"`⇒编码棘轮绿、单源守卫照样红 ⇒ 修法必须取"改指单点"（教义第 6 条），修手抄只解一半。危害量出来：本机首选码 cp936，设 `core.quotepath=false` 后旧解法当场 `UnicodeDecodeError`；旧形按行切还会把八进制引用的 182 行读漏——今天跟踪 `.py` 非 ASCII 恰好 0 条才读数等值（3462/3462），**等值是运气不是没错**。活体反证第一版打助手名撞成 `AttributeError`＝"符号改名了"的红，改打那条格本身才证到"扫描面真经单点"。A/B（基线建在**中文路径**的仓外 worktree，避形态集 231）基线 8 红 ↔ 本树 6 红、仅本树 0 ⇒ AB_PASS，仅基线那 2 条即交付证据；两侧同红 6 条（node 环境 5＋时钟跳格 1）不认领。生产池 **0/0**，测试池 +15/−6（代码面净 −1）；子集不动。自犯入账：`rm -rf test_workspace/` 未先查归属就删陌生未跟踪目录（事后取证它是 `test_agent_loop.py:198` 的 CWD 相对落点、`pollution_purge.py:97` 已列为污染面，内容可重生），**动作仍不成立**⇒先 grep 生成者再处置 | §6-278 |
 
 > **这张表有一处维护断档，如实标出**：上表止于 `c1377d27`（§6-186，10-13），中间十余批（§6-187—§6-230）
@@ -4960,6 +4962,43 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **§6-235 半修存量仍在**（现读 `HALF_PINNED_BASELINE = 29`，本批一站点没进那一维——`git` 不是本仓 Python 子件）。
     - **本会话下一枚空号现查 §6-279（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`；
       本笔落库前该读数为 277，落库后为 278）。**
+279. **main 上第三条常驻红族收掉两格，并把"负载浮动"那句旧定性改对（✅ `55ec3006` 台账数据＋`e7d24c3c` 处置论证；生产池 0/0）** 🟢 —— 同一族里两个根因分两笔提，各钉各的红；第三笔（编码那 11 格）**刻意没做**，理由写在末段。
+
+    - **根因一＝台账数据陈旧，不是判据过严（`55ec3006`）**：CI 现读 `referenceSites("ToolParameter")` 三条
+      （`execution_engine/tool_engine.py:33` 定义、`:531` 构造、`__init__.py:23` barrel import），
+      而 `scripts/ci/toolLoopDeadlines.txt:129` 写 4。多的那一条正是 `__init__.py:39` 的**同名占位空类桩**，
+      它已随 §6-224「先摘桩再划契约」那笔（`8a934329`，八枚空类桩同批退役）删净。
+      **同批改掉那句随之作废的陈述**——原依据写着「断言 `tool_engine` / `execution_engine/__init__` 那两份仍在」，
+      而拥有者级判据 `test_t09_selfloop_face_ruling.py` 断的从来只是 `tool_engine.py` 那一份；prose 跑在代码前面
+      就是下一次动手的人会照散文去找一个不存在的桩。判据一个字没动（类目 `self_loop`、处置「已删除」原样）。
+    - **根因二＝处置状态没有论证（`e7d24c3c`）**：`DoomLoopGate` 与三个 `doom_loop_*` 键在台账里被写成「已接线」，
+      而 `test_every_disposal_is_either_pending_or_justified` 的语义正是"处置必须是**有批次的动作**"——
+      登记表里没有对应论证即红。本笔不放宽判据，把论证逐条补进 `WIRED_BY_LATER_WAVES`，每条都现读过读取点：
+      三键唯一构造点 `agent/loops/base.py:417-419`（在 `_buildGateRunner()` 内），单源定义与夹紧在
+      `security/agent_limits_settings.py:216 get_effective_limits()`；接线批次 `7b7a058f`（此前装配点是
+      `DoomLoopGate()` 无参构造，键配了也不归它管），第四键由 `111ba0df` 实装签名近似后第一次真被读
+      （`gates.py:129 _signaturesSimilar` 用在 `:211`）——默认 1.0＝逐字相等 ⇒ 这条"接线"指**管辖成立**，不是行为变化。
+    - **取证方式（这族红值钱的 learnings）**：`referenceSites` 按代码形态数站点，所以"少一条"必须能指到
+      **是哪一站、哪一笔把它删掉的**——`git log -S "    class ToolParameter:" -- neurova/execution_engine/__init__.py`
+      给出 `8a934329`，删的行就是那一站。改台账数字而不给这句来历，等于把对账守卫改成"信我"。
+    - **一次改判旧定性（本格最有用的产出）**：§6-266 把 `tests/unit/tools` 那族记成"条数随采集顺序与机器负载浮动"，
+      **复证不成立**。11 格每一格都 `subprocess.run([sys.executable, READOUT_SCRIPT, …], text=True)` 而不钉
+      `encoding`——本机首选码 cp936，父进程带 `PYTHONIOENCODING=utf-8` 时子端吐 UTF-8、父端按 cp936 解 ⇒
+      reader 线程抛 `UnicodeDecodeError`、`result.stderr` **静默变 None**，报出来是
+      `TypeError: argument of type 'NoneType' is not iterable`。同一选择集去掉那条 env 立刻 4 passed（同树同刻对照）。
+      ⇒ 这条红**稳定可复现、条件明确**，属 §6-64／§6-225 那一族的现症，不是负载噪声。
+    - **第三笔刻意不做（时序约束，不是留票）**：修它要把 `test_subprocessTextEncodingRatchet.py` 里
+      `tests/unit/tools/test_tool_parallelism_readout.py` 的基线 9 收下去（"降要看得见"那条格逼一次显式收数），
+      而那档此刻正被并发会话重写（现读 `+258/−51` 未提交）。两侧都改同一张表的同一行时，**后提交的人会把自己
+      那份表整体盖上去**，把对方已入库的收数再解一次红。故等其落库再动；本批把它登记在此，不改判据也不代改。
+    - **证据**：红→绿原文＝`E AssertionError: ToolParameter: 台账 4 / 实测 3` 与
+      `DoomLoopGate / doom_loop_*: 已接线（无处置批论证）`；改后合跑四档（ledger 对账／disposal 登记／
+      batch_parallelism／T-09 拥有者级）**107 passed**。变异 M1（摘掉刚补的一枚论证）恰红在
+      `test_every_disposal_is_either_pending_or_justified` 一格，`md5 297d5979a845` 字节复原复证。
+      整目录 `tests/unit/tools` 前后 FAILED **集合差集只减不增**（14 → 11，减的三条即本族两笔；仅新增 0 条），
+      落库后复取同四档 107 passed。
+    - **净 LOC**：台账数据 **+1/−1**（那一行整体改写）；判据池 **+10/−0**（四条论证＋一段来由注释）；生产池 0；子集不动。
+    - **本会话下一枚空号现查 §6-280（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`）。**
 277. **§6-271「仍开②」划闭：门控缺省值接回配置单源——`iteration` 与 `token_budget` 两把门不再手抄 20/100000（✅ `fb55183d` 生产+判据+改判；子集 0 变，该档 1195 行已在册）** 🟢
 
     - **这条根因原来有四份手抄**：`gates.py` 两个构造签名默认值、`gate_catalog.py` 两个 params 模型默认值，都与 `security/agent_limits_settings.DEFAULTS` 并存。生产装配点每轮显式传值（`loops/base.py:422-423`），所以"漂移风险"这句在本批被实测**加重**了：`IterationGate(max_rounds=None)` 走的分支引用 `self.ROUND_BUDGET_FALLBACK`，而那个属性**只在 `GoalGate` 上定义**（`gates.py:245`）⇒ 传入 None 当场 AttributeError。**一份手抄数字与一条会崩的分支并排放在同一条"缺省时取什么"的路上**——说明这条路从来没人真走过，两份默认值也都不是被使用过的契约。
