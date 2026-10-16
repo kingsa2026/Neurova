@@ -132,10 +132,10 @@ def get_library(pool: str, owner_key: str = ""):
 def agentLibrary(agent_id: str):
     """agent 库的**唯一取法**：写侧/读侧都经这里，同一进程只一份内存态。
 
-    为什么要有它：`marketplace` 等 23 处此前各自 `SkillService(agent_id=…)` 新建实例，而读面
-    走 `get_library` 的同进程单例——同一本 `manifest.json` 于是有两份内存账，写完读不到
-    （实测装成功后 `/agent/default/skills` 读到 0 条，重启才有）。构造点散在 15 个模块里
-    就是下一次漂移的起点，所以收一个名字。
+    为什么要有它：`marketplace` 等 23 处此前各自 `SkillService(agent_id=…)` 新建实例（开工前全仓
+    现读是 25 处构造点、散在 17 个模块），而读面走 `get_library` 的同进程单例——同一本
+    `manifest.json` 于是有两份内存账，写完读不到（实测装成功后 `/agent/default/skills` 读到 0 条，
+    重启才有）。构造点散得多就是下一次漂移的起点，所以收一个名字。
 
     与直连构造的唯一语义差：非法/空 `agent_id` 这里**当场 ValueError**，而直连会静默算出
     `<root>/agents/skills`（少一层 agent 段）。读面今天就已经走 `get_library`，所以让写面

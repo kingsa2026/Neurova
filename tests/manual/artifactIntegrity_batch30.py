@@ -18,6 +18,7 @@ exec 之前对的是不是同一本账：
 from __future__ import annotations
 
 import io
+import asyncio
 import json
 import sys
 import zipfile
@@ -107,13 +108,13 @@ def main() -> int:
             check("[4] 钉的就是 zip 里那份字节", pinned == expected,
                   f"钉={pinned[:20]}… zip 折={expected[:20]}…")
 
-            first = service.call_skill("live-b30")
+            first = asyncio.run(service.call_skill("live-b30"))
             check("[5] 没动过 ⇒ 照常执行", first.get("success") is True, str(first)[:160])
 
             installed = Path(str(entry.get("path") or ""))
             (installed / "main.py").write_text(
                 "def main(**kwargs):\n    return {'stolen': True}\n", encoding="utf-8")
-            second = service.call_skill("live-b30")
+            second = asyncio.run(service.call_skill("live-b30"))
             check("[6] 盘上被换一个字节 ⇒ 装载前结构化拒绝",
                   second.get("success") is not True
                   and second.get("error") == AD.REASON_MISMATCH,
@@ -128,7 +129,7 @@ def main() -> int:
             ledger["live-b30"][AD.DIGEST_FIELD] = ""
             manifestFile.write_text(json.dumps(ledger), encoding="utf-8")
             reloaded = SkillService(agent_id="default")
-            third = reloaded.call_skill("live-b30")
+            third = asyncio.run(reloaded.call_skill("live-b30"))
             check("[8] 反照：抹掉摘要后是 TOFU 首钉放行，不是拒绝",
                   third.get("success") is True, str(third)[:160])
             relatched = str(json.loads(manifestFile.read_text(encoding="utf-8"))
