@@ -25,6 +25,22 @@ from neurova.core.data_root import get_data_root, require_data_path
 # 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
 
+
+def _incomingStagingName(skill_id: str) -> str:
+    """.incoming 暂存目录名的**唯一拼法**：定长短标记，不嵌整段 skill_id。
+
+    嵌 ID 时暂存路径比终点路径长出一整段 ID（真包 37 字符）；Windows 的 260 上限是绝对
+    预算，多出来的每一字符都是从那里借的——于是"成员在终点合法"的包在暂存那一步就被
+    `shutil.copytree` 以 `[WinError 3]` 拒掉，安装门根本没被调用（面板安装报 500 的真实成因）。
+    前缀 `.incoming_` 不许改：`artifact_digest._VOLATILE_DIR_PREFIXES` 与
+    `market_registry._STAGING_IGNORED` 两处豁免只认它。
+    `skill_id` 不参与拼名——装载侧因此不引入任何摘要算法依赖（摘要口径仍只在
+    `artifact_digest` 那一处）。
+    """
+    import time as _time
+
+    return f".incoming_{_time.time_ns()}"
+
 # ── 技能质量漏斗归因──
 
 def compute_skill_funnel_update(
@@ -478,7 +494,6 @@ class SkillService:
               （修复预存根因 bug：原 zip 流程解压目录与 target 同路径，
               rmtree(target) 先删源 → copytree FileNotFoundError，zip 安装从未成功过。）
         """
-        import time as _time
         import tempfile
 
         try:
@@ -567,7 +582,7 @@ class SkillService:
                     # .incoming 暂存再扫描，被拦即删暂存、旧版本原地保留。
                     from neurova.skills.skill_install_gate import scan_skill_for_install
 
-                    incoming = self.skills_dir / f".incoming_{skill_id}_{int(_time.time() * 1000)}"
+                    incoming = self.skills_dir / _incomingStagingName(skill_id)
                     shutil.copytree(skill_path, incoming)
                     scan = scan_skill_for_install(skill_id, str(incoming))
                     if scan.get("blocked"):
