@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'निष्पादन संख्या',
     searchPlaceholder: 'स्किल्स खोजें...',
     disabled: 'अक्षम',
+    artifactMissing: "आर्टीफैक्ट गुम",
     enabled: 'सक्षम',
     executions: 'निष्पादन',
     executeSkill: 'स्किल निष्पादित करें',

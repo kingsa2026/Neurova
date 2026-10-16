@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'Anzahl der Ausführungen',
     searchPlaceholder: 'Fertigkeiten suchen...',
     disabled: 'Deaktiviert',
+    artifactMissing: "Artefakt fehlt",
     enabled: 'Aktiviert',
     executions: 'Ausführungen',
     executeSkill: 'Fertigkeit ausführen',

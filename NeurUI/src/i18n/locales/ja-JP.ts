@@ -1154,6 +1154,7 @@ export default {
     executionCount: '実行回数',
     searchPlaceholder: 'スキルを検索...',
     disabled: '無効',
+    artifactMissing: "成果物なし",
     enabled: '有効',
     executions: '実行回数',
     executeSkill: 'スキルを実行',

@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'Количество выполнений',
     searchPlaceholder: 'Поиск навыков...',
     disabled: 'Отключено',
+    artifactMissing: "Артефакт отсутствует",
     enabled: 'Включено',
     executions: 'Выполнения',
     executeSkill: 'Выполнить навык',
