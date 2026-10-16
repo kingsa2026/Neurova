@@ -60,17 +60,23 @@ class VisibleSkill:
 
     @property
     def enabled(self) -> bool:
-        """可调性 = manifest `enabled` 且运行时 `status` 不停用、生命周期未归档。
+        """可调性 = manifest `enabled`、运行时 `status` 不停用、生命周期未归档、**且这条真能动**。
 
-        三处判停落点各管一件事，任一判停即不可调：
+        四处判停各管一件事，任一判停即不可调：
 
         - `enabled`：运营面/评审闸的停用（`SkillService.enable_skill` 写它）；
         - `status`：`SkillRegistry` 运行时状态机（`set_skill_enabled` 写它）——
           此前 schema 段只看得到①条目的硬编码 True，这条判据形同虚设；
         - `usage.state`：生命周期扫描的归档态（`SkillService.archive_skill` 写它）。
-          归档是最大破坏动作，工具面还留着它等于给 LLM 一个必然失败的工具。
+          归档是最大破坏动作，工具面还留着它等于给 LLM 一个必然失败的工具；
+        - `available`：账本在册但落盘/账本自证都拿不出构件（`SkillService.availabilityFor` 的读数）。
+          缺这一闸时，空壳条目会进工具表与提示词目录，模型照着调，回来的是
+          `NotImplementedError`／"No entry point found"——**给了 LLM 一个必然失败的工具**。
+          字段缺席（旁路构造的条目、库面行）不裁决，沿用旧语义，避免把没这概念的来源一律灰掉。
         """
         if not bool(self.entry.get("enabled", True)):
+            return False
+        if "available" in self.entry and not bool(self.entry.get("available")):
             return False
         status = str(self.entry.get("status") or "").strip().lower()
         if status in _DISABLED_RUNTIME_STATUS:
@@ -232,6 +238,9 @@ def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Opt
             # 不新建第三份映射。
             entry = dict(entry)
             entry.setdefault("name", str(entry.get("name") or _skill_id))
+            # 「在册」不等于「可得」：把库自身的对账读数并进**这一份副本**（不回写账本——
+            # 账本是要落盘的，把投影值写进去等于伪造一份状态）。第四闸见 `VisibleSkill.enabled`。
+            entry.update(service.availabilityFor(_skill_id))
             manifest_entries[str(entry["name"])] = entry
             if not bool(entry.get("enabled", True)):
                 disabled_names.add(str(entry["name"]))

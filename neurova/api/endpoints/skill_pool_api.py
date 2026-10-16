@@ -69,6 +69,11 @@ class SkillInfo(BaseModel):
     updated_at: float = 0
     # Wave F：共享标志（落 manifest config.shared，列表回显供前端徽标）
     shared: bool = False
+    # 「在册」不等于「可得」：这一对是 `SkillService.availabilityFor` 的对账读数，
+    # 不是 `enabled` 的别名——`enabled` 是运营开关，`available` 是"这条真能变成一个动得了的执行体"。
+    # 判定只有一处实现，前端据此显示"已装·构件缺失"，不许把空壳画成可用（§6-272，用户裁甲）。
+    available: bool = True
+    unavailable_reason: str = ""
     # 生命周期与用量（前端状态徽标数据源；C11 遥测延伸）
     usage: Dict[str, Any] = Field(default_factory=dict)
 
@@ -170,11 +175,13 @@ async def list_public_skills(category: Optional[str] = Query(default=None)):
 
     rows: List[SkillInfo] = []
     try:
-        for sid, info in _lib.get_library(POOL_PUBLIC).iter_skills():
+        library = _lib.get_library(POOL_PUBLIC)
+        for sid, info in library.iter_skills():
             if not info.get("enabled", True):
                 continue
             manifest = info.get("manifest") or {}
             cfg = manifest.get("config") or {}
+            availability = library.availabilityFor(sid)
             cat = str(cfg.get("category") or "general")
             if category and cat != category:
                 continue
@@ -188,6 +195,8 @@ async def list_public_skills(category: Optional[str] = Query(default=None)):
                     scope="public",
                     owner_id="",
                     enabled=True,
+                    available=bool(availability["available"]),
+                    unavailable_reason=str(availability["unavailableReason"] or ""),
                     usage=info.get("usage") or {},
                 )
             )
@@ -256,6 +265,7 @@ async def list_private_skills(agent_id: str = Query(default="default")):
         for sid, info in service.iter_skills():
             manifest = info.get("manifest") or {}
             cfg = manifest.get("config") or {}
+            availability = service.availabilityFor(sid)
             result.append(
                 SkillInfo(
                     skill_id=sid,
@@ -263,6 +273,8 @@ async def list_private_skills(agent_id: str = Query(default="default")):
                     description=str(info.get("description") or ""),
                     version=str(info.get("version") or "1.0.0"),
                     enabled=bool(info.get("enabled", True)),
+                    available=bool(availability["available"]),
+                    unavailable_reason=str(availability["unavailableReason"] or ""),
                     scope="private",
                     owner_id=agent_id,
                     category=str(cfg.get("category") or "general"),
@@ -467,9 +479,11 @@ async def list_my_skills(current_user: Dict[str, Any] = Depends(get_current_user
     acct = _account_key(current_user)
     rows: List[SkillInfo] = []
     try:
-        for sid, info in _lib.get_library(POOL_USER, acct).iter_skills():
+        library = _lib.get_library(POOL_USER, acct)
+        for sid, info in library.iter_skills():
             manifest = info.get("manifest") or {}
             cfg = manifest.get("config") or {}
+            availability = library.availabilityFor(sid)
             rows.append(
                 SkillInfo(
                     skill_id=sid,
@@ -480,6 +494,8 @@ async def list_my_skills(current_user: Dict[str, Any] = Depends(get_current_user
                     scope="user",
                     owner_id=acct,
                     enabled=bool(info.get("enabled", True)),
+                    available=bool(availability["available"]),
+                    unavailable_reason=str(availability["unavailableReason"] or ""),
                     shared=bool(cfg.get("shared")),
                     usage=info.get("usage") or {},
                 )
@@ -817,6 +833,9 @@ async def get_agent_skills(agent_id: str):
                 usage=s.get("usage") or {},
                 version=s.get("version", "1.0.0"),
                 enabled=s.get("enabled", True),
+                # 投影直取 `list_skills` 已算好的那一格，端点不再自写判据（单点在 service）
+                available=bool(s.get("available", True)),
+                unavailable_reason=str(s.get("unavailableReason") or ""),
                 scope="agent",
                 owner_id=agent_id,
             )
