@@ -23,18 +23,31 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-# 市场技能 id → 真实执行体工厂（参数直通；无映射时尝试 SKILL.md 指令型，
-# 两者皆无则注册为壳）
-_MARKET_EXECUTORS: Dict[str, str] = {
-    "web-search": "WebSearchSkillExecutor",
-}
+#: 映射表里存的是一只**执行体工厂**（零参可调用），不是类名。
+#: 旧形态在这里存 `"WebSearchSkillExecutor"` 字符串，构造处另写了一张 `{类名: 类}` 的内联查表——
+#: 同一个概念两份表示（教义第 6 条）：加一只映射要改两处，漏第二处时问句说"有映射"、
+#: 构造却造不出东西，只留一条 warning 就静默降级成空壳（§6-280 甲收口这一处）。
+#: 存工厂同时保住"重型依赖不在模块顶层裸 import"（AGENTS §3）——延迟 import 落在工厂里。
+ExecutorFactory = Callable[[], Any]
+
+
+def _webSearchExecutor() -> Any:
+    from neurova.skills.builtin.web_search_executor import WebSearchSkillExecutor
+
+    return WebSearchSkillExecutor()
+
+
+_BUILTIN_EXECUTOR_MAPPINGS: Dict[str, ExecutorFactory] = {"web-search": _webSearchExecutor}
+
+# 市场技能 id → 真实执行体工厂（参数直通；无映射时尝试 SKILL.md 指令型，两者皆无则注册为壳）
+_MARKET_EXECUTORS: Dict[str, ExecutorFactory] = dict(_BUILTIN_EXECUTOR_MAPPINGS)
 
 
 def hasExecutorMapping(skill_id: str) -> bool:
@@ -44,6 +57,45 @@ def hasExecutorMapping(skill_id: str) -> bool:
     这类技能盘上本来就没有字节，按落盘判会把真能动的好技能集体误灰（§6-272 的对照格）。
     """
     return str(skill_id or "") in _MARKET_EXECUTORS
+
+
+def executorMappings() -> Dict[str, ExecutorFactory]:
+    """映射表的只读投影——问"在册的是哪些"别直读私有表（改一处就是一份平行事实源）。"""
+    return dict(_MARKET_EXECUTORS)
+
+
+def registerExecutorMapping(skill_id: str, factory: ExecutorFactory) -> None:
+    """添一只代码侧执行体映射——**唯一**的添法。
+
+    当场判形状而不是等构造那步静默失败：这张表的值必须是工厂，收下一个类名字符串就是
+    把刚收掉的双表示重新长回来。
+    """
+    if not callable(factory):
+        raise TypeError(
+            f"执行体映射要的是工厂，收到 {type(factory).__name__}：{factory!r}")
+    _MARKET_EXECUTORS[str(skill_id or "")] = factory
+
+
+def buildMappedExecutable(skill_id: str, description: str = "") -> Optional[Any]:
+    """按映射表构造 `ExecutorBackedSkill`；不在册 ⇒ None，在册却造不出 ⇒ 点名后 None。
+
+    只认映射、**不看盘**：盘上那一支（SKILL.md 指令型、构件摘要门）不经这里，
+    否则这条腿会顺手绕过安装门钉下的那份对账（§6-280 甲要的是一条咽喉一个口径，不是第二条后门）。
+    """
+    factory = _MARKET_EXECUTORS.get(skill_id)
+    if factory is None:
+        return None
+    try:
+        from neurova.skills.executor import ExecutorBackedSkill
+
+        skill = ExecutorBackedSkill(factory())
+    except Exception as e:  # noqa: BLE001 — 造不出执行体要如实降级，但不许无声
+        logger.warning("mapped executor %s could not be built: %s", skill_id, e)
+        return None
+    skill.name = skill_id
+    skill.description = description or skill.description
+    return skill
+
 
 #: 安装期不进账本的运行产物（缓存目录里可能有上一次跑出来的字节）
 _STAGING_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".incoming_*")
@@ -84,22 +136,12 @@ def _build_executable_skill(skill_id: str, description: str, installed_dir: Any 
     执行体统一经 skills.executor.ExecutorBackedSkill 桥接为 SkillRegistry
     可注册的异步 Skill（线程池执行同步 executor, 参数直通）。
     """
-    exec_name = _MARKET_EXECUTORS.get(skill_id)
-    if exec_name:
-        try:
-            from neurova.skills.executor import ExecutorBackedSkill
-            from neurova.skills.builtin.web_search_executor import WebSearchSkillExecutor
-
-            executor_cls = {"WebSearchSkillExecutor": WebSearchSkillExecutor}.get(exec_name)
-            if executor_cls is None:
-                logger.warning("MARKET_EXECUTORS mapping %s -> %s not found", skill_id, exec_name)
-            else:
-                skill = ExecutorBackedSkill(executor_cls())
-                skill.name = skill_id
-                skill.description = description or skill.description
-                return skill
-        except Exception as e:  # noqa: BLE001 — 注册失败降级，不阻断安装
-            logger.warning("build executable skill %s failed: %s", skill_id, e)
+    # 映射那一支只经 `buildMappedExecutable` 一处取数（§6-280 甲收口：这里原先自己又查了
+    # 一张 `{类名: 类}` 内联表，于是"加一只映射"要改两处；把表改成 id→工厂后漏改这一处，
+    # 拿到的是函数对象、查表必空 ⇒ 静默降级成裸壳注册，面板与工具面都画成可用却动不了）。
+    mapped = buildMappedExecutable(skill_id, description)
+    if mapped is not None:
+        return mapped
 
     # SKILL.md 指令型（远端市场技能的可执行映射）
     if not installed_dir:
