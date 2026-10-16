@@ -430,6 +430,12 @@ class ShellEvasionGuardian(BaseGuardian):
              "Base64 解码"),
             (r"\\x[0-9a-fA-F]{2}", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
              "十六进制编码"),
+            # `\uNNNN` 这条原先只活在两个零调用的 helper 里（＝等于不存在）。§6-266 第③刀
+            # 按教义第 7 条把它并进主表，严重度取齐同族（`$()`／反引号／`\xNN`／base64 全 HIGH），
+            # 不分叉成第二档口径。路径键的值不进命令面（第①刀换向），所以 `C:\Users\u1234\…`
+            # 不会被读成转义——这条能力落地不带回 §6-255 那条老病。
+            (r"\\u[0-9a-fA-F]{4}", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "Unicode 编码"),
             (r"\|\s*(python[23]?|perl|ruby|node|php)\b", GuardSeverity.HIGH,
              GuardThreatCategory.SHELL_EVASION, "管道到脚本解释器"),
             # curl | sh / wget | bash：远程脚本直接执行（方案 P0-1.2 明确要求）
@@ -448,24 +454,6 @@ class ShellEvasionGuardian(BaseGuardian):
             (re.compile(p, re.IGNORECASE), severity, cat, desc)
             for p, severity, cat, desc in patterns
         ]
-
-    def _has_command_substitution(self, text: str) -> bool:
-        """检查命令替换"""
-        patterns = [
-            re.compile(r"\$\([^)]*\)"),
-            re.compile(r"`[^`]+`"),
-            re.compile(r"<\([^)]*\)"),
-        ]
-        return any(p.search(text) for p in patterns)
-
-    def _has_encoding_evasion(self, text: str) -> bool:
-        """检查编码逃逸"""
-        patterns = [
-            re.compile(r"base64\s+(-d|--decode)", re.IGNORECASE),
-            re.compile(r"\\x[0-9a-fA-F]{2}", re.IGNORECASE),
-            re.compile(r"\\u[0-9a-fA-F]{4}", re.IGNORECASE),
-        ]
-        return any(p.search(text) for p in patterns)
 
     def guard(self, tool_input: str, context: Dict[str, Any]) -> List[GuardFinding]:
         """检测 Shell 逃逸"""
