@@ -21,13 +21,14 @@ critical 命中直接决定命运。另有 2 条 `dangerous_path_traversal`（hi
 """
 from __future__ import annotations
 
-import re
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from neurova.security.skill_scanner import SkillScanner, ScanPolicy, isDenyBearing
+from neurova.security.skill_scanner import SkillScanner, ScanPolicy, blockingFindings
+
+from tests import execShapes
 
 REPO = Path(__file__).resolve().parents[3]
 BUNDLE = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
@@ -75,27 +76,23 @@ def verdict(gate, tmp_path: Path, name: str) -> dict:
     return gate.scan_skill(name, str(buildPackage(tmp_path, name)))
 
 
-def blockingOf(result) -> list:
-    return [f for f in result.findings if isDenyBearing(f) and f.severity in ("critical", "high")]
-
-
 # ── 误判侧：修后必须放行 ──────────────────────────────────────────────────────
 
 def testRegexPrecompileIsNotCodeExecution(gate, tmp_path):
     """`re.compile(` 是正则预编译，不是动态执行——它不得决定一次安装的死活。"""
     res = verdict(gate, tmp_path, "regexPrecompile")
-    hits = [f for f in blockingOf(res) if f.rule_id == "dangerous_exec"]
+    hits = [f for f in blockingFindings(res) if f.rule_id == "dangerous_exec"]
     assert not hits, (
         f"属性调用被当成危险执行：{[(f.file_path, f.evidence) for f in hits]}")
-    assert res.passed is True, f"只含 re.compile( 的包仍被拦：{[f.rule_id for f in blockingOf(res)]}"
+    assert res.passed is True, f"只含 re.compile( 的包仍被拦：{[f.rule_id for f in blockingFindings(res)]}"
 
 
 def testModuleRelativeImportIsNotPathTraversal(gate, tmp_path):
     """.mjs 里的 `from "../x.mjs"` 是 ES 模块说明符，不是拿去落地的文件系统路径。"""
     res = verdict(gate, tmp_path, "moduleRelativeImport")
-    hits = [f for f in blockingOf(res) if f.rule_id == "dangerous_path_traversal"]
+    hits = [f for f in blockingFindings(res) if f.rule_id == "dangerous_path_traversal"]
     assert not hits, f"ES 相对导入被判成路径遍历：{[(f.file_path, f.evidence) for f in hits]}"
-    assert res.passed is True, f"只含模块相对导入的包仍被拦：{[f.rule_id for f in blockingOf(res)]}"
+    assert res.passed is True, f"只含模块相对导入的包仍被拦：{[f.rule_id for f in blockingFindings(res)]}"
     readings = [f for f in res.findings if f.rule_id == "dangerous_path_traversal"]
     assert readings and all(f.severity == "low" for f in readings), (
         f"模块说明符这条读数的形状不对：{[(f.severity, f.evidence) for f in readings]}")
@@ -104,7 +101,7 @@ def testModuleRelativeImportIsNotPathTraversal(gate, tmp_path):
 def testDataLiteralRelativePathIsNotTraversal(gate, tmp_path):
     """数据字面量里的 `"../assets/x.png"` 不经过任何文件系统调用——它是内容，不是落点。"""
     res = verdict(gate, tmp_path, "dataLiteralRelativePath")
-    hits = [f for f in blockingOf(res) if f.rule_id == "dangerous_path_traversal"]
+    hits = [f for f in blockingFindings(res) if f.rule_id == "dangerous_path_traversal"]
     assert not hits, f"数据串里的相对路径被判成遍历：{[(f.file_path, f.evidence) for f in hits]}"
     assert res.passed is True
     # 但读数不许消失：降级不是删除（批 37 的口径），报告面还得看得见这条相对路径引用
@@ -122,23 +119,47 @@ def testRealDynamicExecutionStillDenies(gate, tmp_path, name):
     """裸名 `exec/eval/compile` 照旧 critical ⇒ 拦。这一半不许随窄化一起松掉。"""
     res = verdict(gate, tmp_path, name)
     assert res.passed is False, f"{name} 不拦了——窄化越界到了真动态执行面"
-    assert any(f.rule_id == "dangerous_exec" for f in blockingOf(res)), (
-        f"{name} 拦了，但拦的不是 dangerous_exec：{[f.rule_id for f in blockingOf(res)]}")
+    assert any(f.rule_id == "dangerous_exec" for f in blockingFindings(res)), (
+        f"{name} 拦了，但拦的不是 dangerous_exec：{[f.rule_id for f in blockingFindings(res)]}")
 
 
 @pytest.mark.parametrize("name", ["escapingOpen", "escapingJoin", "escapingExtract"])
 def testEscapingPathInFilesystemCallStillDenies(gate, tmp_path, name):
     """`..` 出现在**要拿去打开/拼接/解包的路径**里 ⇒ 照旧拦（这才是规则原本想抓的东西）。"""
     res = verdict(gate, tmp_path, name)
-    hits = [f for f in blockingOf(res) if f.rule_id == "dangerous_path_traversal"]
-    assert hits, f"{name} 的真遍历形态不再被点名：{[(f.rule_id, f.evidence) for f in blockingOf(res)]}"
+    hits = [f for f in blockingFindings(res) if f.rule_id == "dangerous_path_traversal"]
+    assert hits, f"{name} 的真遍历形态不再被点名：{[(f.rule_id, f.evidence) for f in blockingFindings(res)]}"
     assert res.passed is False, f"{name} 该被拦却放行"
 
 
 def testCleanPackageStillPasses(gate, tmp_path):
     """反向控制：干净包必须过——上面几条"仍拦"若连正常包也拦，等于什么都没修。"""
     res = verdict(gate, tmp_path, "clean")
-    assert res.passed is True, f"干净包被拦：{[(f.rule_id, f.evidence) for f in blockingOf(res)]}"
+    assert res.passed is True, f"干净包被拦：{[(f.rule_id, f.evidence) for f in blockingFindings(res)]}"
+
+
+# ── 真产物：这只资产包今天的命运由谁决定 ────────────────────────────────────
+
+
+def test_shapeNeedlesSeparateTheTwoForms(gate):
+    """两把针在这两个样本上必须给**相反**答案——不然分类只是空场自证。
+
+    形态集 220 记过同形账：针自己打空时，读数看着像"判据没牙"，实为探针没扎到地方。
+    属性调用那一侧的针是测试造的（生产没有"这是属性调用"的正向 pattern，它正是旧规则误判
+    的那一类形状），所以它本身要被钉住：命中 `re.compile(` 那行、不命中裸名那行，
+    而生产规则对这两行的答案恰好相反。任何一侧写成恒真/恒假，这格先红。
+    """
+    attributeLine = 'DATE = re.compile(r"日期|date", re.I)'
+    bareLine = 'compile("x = 1", "<str>", "exec")'
+    rule = execShapes.execRule(gate)
+
+    assert execShapes.classifyEvidence(attributeLine) == "attribute"
+    assert execShapes.classifyEvidence(bareLine) == "bare"
+    assert execShapes.isAttributeOnly(attributeLine) is True
+    assert execShapes.isAttributeOnly(bareLine) is False, (
+        "同一行里出现裸名 compile( 时不许只按属性调用判 ⇒ 这条闸会把真信号一起关掉")
+    assert rule.severityFor(attributeLine) is None, (
+        "属性调用形又被生产规则算成危险执行——上面那条分类随之失去意义")
 
 
 # ── 真产物：这只资产包今天的命运由谁决定 ────────────────────────────────────
@@ -159,8 +180,8 @@ def testRealBundleDeniesOnItsOwnTrueShapesNotOnRegex(gate, tmp_path):
         zf.extractall(dest)
 
     res = gate.scan_skill("builtin--adaptive-presentation-studio", str(dest))
-    execHits = [f for f in blockingOf(res) if f.rule_id == "dangerous_exec"]
-    attributeish = [f for f in execHits if re.search(r"\w+\.\s*(compile|exec|eval)\s*\(", str(f.evidence))]
+    execHits = [f for f in blockingFindings(res) if f.rule_id == "dangerous_exec"]
+    attributeish = [f for f in execHits if execShapes.isAttributeOnly(str(f.evidence))]
 
     assert not attributeish, (
         f"仍有 {len(attributeish)} 条属性调用被当危险执行，例：{[(f.file_path, f.evidence) for f in attributeish[:3]]}")

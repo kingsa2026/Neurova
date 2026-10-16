@@ -12,8 +12,14 @@
 5. 仓内自带的 presentation-studio 资产 zip：**前后对比读数**——旧口径参与裁决 40 条
    （其中 26 条是 `re.compile(` 属性调用），本批之后只剩真信号；它**仍然被拦**，
    拦它的是真动态编译与子进程，不是正则预编译（这条别记成"甲已让它恢复可装"）；
-6. 形状对照（不桩生产）：同一行文本，旧 pattern 命中、新 pattern 不命中；
-   真裸名 `exec(` 两种都命中 ⇒ 证明放开的是无害形态；
+   5d（§6-259 末格「读数面仍欠的一刀」补上的一次）：**逐条读证据行按 AST 分形状**，
+   并核对三条——读数能在自己的证据行上被生产规则复算、形状分类与参与裁决集合条数一致、
+   装载门发给调用方的那份 dict 与扫描器对象面给同一个分布。形状判定一律走
+   `tests/execShapes.py` 那一份（本子串判定原先自己写着 `"re.compile(" in evidence`，
+   它分不清 `cursor.exec(` 这类同族形状，会和判据给出两个答案）；
+6. 形状对照（不桩生产）：同一行文本，旧 pattern 命中、**生产现行 pattern** 不命中；
+   真裸名 `compile(` 现行命中 ⇒ 证明放开的是无害形态（现行 pattern 由 `execRule()` 现取，
+   不在脚本里再抄一份）；
 7. 撤桩复证：第 1 项那只包再装一次仍成功（幂等，不是缓存假绿）。
 
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) python tests/manual/installGateRulesFollowShape_batch56.py`
@@ -35,8 +41,10 @@ WORK_ROOT = isolatedDataRoot(prefix="neurovaGateB56")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from neurova.security import skill_scanner as SS  # noqa: E402
+from neurova.skills import skill_install_gate as SI  # noqa: E402
 from neurova.skills.market_importer import read_builtin_bundle  # noqa: E402
 from neurova.skills.skill_service import SkillService  # noqa: E402
+from tests import execShapes  # noqa: E402
 
 failures: list = []
 
@@ -147,11 +155,23 @@ def main() -> int:
         byRule[f.rule_id] = byRule.get(f.rule_id, 0) + 1
     execHits = [f for f in blocking if f.rule_id == "dangerous_exec"]
     attributeish = [f for f in real.findings
-                    if f.rule_id == "dangerous_exec" and "re.compile(" in f.evidence]
+                    if f.rule_id == "dangerous_exec" and execShapes.isAttributeOnly(f.evidence)]
     check("[5b] 真资产包仍被拒（拦它的是真信号）", real.passed is False and bool(execHits),
           "blocking=%d 条，其中 exec %d 条" % (len(blocking), len(execHits)))
-    check("[5c] `re.compile(` 不再产生任何危险执行读数（26 条误判归零）",
+    check("[5c] 属性调用形不再产生任何危险执行读数（26 条误判归零；按 AST 判形状而非数子串）",
           not attributeish, "残留 %d 条" % len(attributeish))
+    # [5d] 读数面那刀（§6-259 末格）：形状分类要能对上参与裁决的集合，两条面各量一次
+    buckets = execShapes.shapesOf(real.findings)
+    ghost = execShapes.unReproducible(execShapes.execReadings(real.findings), execShapes.execRule())
+    check("[5d1] 每条 exec 读数都能在自己的证据行上被生产规则复算", not ghost,
+          "复算不出 %d 条（例 %s）" % (len(ghost), [(g.get("file_path"), g.get("evidence")) for g in ghost[:1]]))
+    check("[5d2] 形状分类与参与裁决集合条数一致",
+          len(buckets.get("bare") or []) == len(execHits) and len(buckets.get("bare") or []) == 1,
+          "分类=%s 裁决集=%s" % (sorted(buckets), [(f.file_path, f.evidence) for f in execHits][:2]))
+    gateScan = SI.scan_skill_for_install("studio-real-gateface", str(work))
+    gateBuckets = execShapes.shapesOf(gateScan.get("findings") or [])
+    check("[5d3] 装载门发给调用方的那份 dict 与扫描器对象面给同一个形状分布",
+          sorted(gateBuckets) == sorted(buckets), "dict=%s 对象面=%s" % (sorted(gateBuckets), sorted(buckets)))
     print("    真资产包读数（规则→条数）：%s" % dict(sorted(byRule.items(), key=lambda kv: -kv[1])[:6]))
     print("    参与裁决集：%s" % sorted({f.rule_id for f in blocking}))
 
@@ -160,10 +180,12 @@ def main() -> int:
         return re.search(pattern, line, re.I) is not None
 
     line = 'DATE = re.compile(r"日期|date", re.I)'
-    check("[6] 形状对照：旧 pattern 命中这行、新 pattern 不命中；真裸名 exec( 两者都命中",
+    productionPattern = execShapes.execRule().pattern
+    check("[6] 形状对照：旧 pattern 命中这行、**生产现行 pattern** 不命中；真裸名 compile( 现行也命中",
           _hits(r"\b(exec|eval|compile)\s*\(", line) is True
-          and _hits(r"(?<![\w.])\b(exec|eval|compile)\s*\(", line) is False
-          and _hits(r"(?<![\w.])\b(exec|eval|compile)\s*\(", "exec('x')") is True)
+          and _hits(productionPattern, line) is False
+          and _hits(productionPattern, 'compile("x = 1", "<str>", "exec")') is True,
+          "现行 pattern=%s" % productionPattern)
 
     resp7, body7, _ = install("live-b56-regex", {"SKILL.md": SKILL_MD, "main.py": REGEX_PY})
     check("[7] 同一只包再走一次面：不出现「先拒后放行」的漂移（幂等复证）",
