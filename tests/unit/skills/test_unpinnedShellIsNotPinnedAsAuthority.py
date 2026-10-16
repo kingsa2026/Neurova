@@ -21,6 +21,7 @@ r"""未钉的**空壳条目**不许被首钉成权威（§6-259 末段"假可得
 from __future__ import annotations
 
 import ast
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -96,7 +97,7 @@ class TestUnpinnedShellIsNotPinnedAsAuthority:
         _stripToShellShape(svc, skillId, dropEntryFiles=True)
 
         reopened = _reopen(svc)
-        result = reopened.call_skill(skillId)
+        result = asyncio.run(reopened.call_skill(skillId))
 
         assert result.get("success") is False, f"空壳被当成可执行技能跑通了：{result}"
         after = _readLedger(svc)[skillId]
@@ -110,7 +111,7 @@ class TestUnpinnedShellIsNotPinnedAsAuthority:
         _stripToShellShape(svc, "shell-b57b", dropEntryFiles=True)
         reopened = _reopen(svc)
         for _ in range(2):
-            assert reopened.call_skill("shell-b57b").get("success") is False
+            assert asyncio.run(reopened.call_skill("shell-b57b")).get("success") is False
         assert AD.DIGEST_FIELD not in _readLedger(svc)["shell-b57b"]
 
     def test_unpinnedRealSkillStillPinsOnceAndRuns(self, tmp_path):
@@ -120,7 +121,7 @@ class TestUnpinnedShellIsNotPinnedAsAuthority:
         _stripToShellShape(svc, "real-b57", dropEntryFiles=False)
 
         reopened = _reopen(svc)
-        result = reopened.call_skill("real-b57")
+        result = asyncio.run(reopened.call_skill("real-b57"))
 
         assert "安全扫描" not in str(result.get("error") or "") and \
             "digest" not in str(result.get("error") or "").lower(), f"真技能被摘要环节拦了：{result}"
@@ -140,7 +141,7 @@ class TestPinnedComparisonKeepsPrecedence:
         (installed / "main.py").unlink()
 
         reopened = _reopen(svc)
-        result = reopened.call_skill("tamper-b57")
+        result = asyncio.run(reopened.call_skill("tamper-b57"))
 
         assert result.get("success") is False, "删掉入口文件的已钉技能竟跑通了"
         refused = str(result.get("error") or "")

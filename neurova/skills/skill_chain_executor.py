@@ -269,9 +269,13 @@ class SkillChainExecutor:
                 # 使用技能服务执行
                 execution_result = await self.skill_service.call_skill(skill_id=step.skill_id, input_data=mapped_input)
 
-                output_data = execution_result.output if execution_result.success else {}
-                error = execution_result.error if not execution_result.success else ""
-                status = StepStatus.COMPLETED if execution_result.success else StepStatus.FAILED
+                # 咽喉的契约是一份 dict（`{"success", "result", "error"}`），不是带属性的对象——
+                # 这里此前按 `.output`/`.success`/`.error` 取值，一旦走到就 AttributeError，
+                # 而外层那个宽 except 把它折成"这一步失败了"，看不出是契约读错。
+                ok = bool(execution_result.get("success"))
+                output_data = (execution_result.get("result") or {}) if ok else {}
+                error = "" if ok else str(execution_result.get("error") or "")
+                status = StepStatus.COMPLETED if ok else StepStatus.FAILED
             else:
                 # 模拟执行
                 await asyncio.sleep(0.1)  # 模拟执行时间
