@@ -512,14 +512,21 @@ class PluginManager:
         digestStatus, digestNow = artifact_digest.checkArtifact(
             record.path, record.artifactDigest)
         if digestStatus == artifact_digest.STATUS_UNPINNED:
-            record.artifactDigest = digestNow
-            try:
-                self._persistState()
-            except Exception as persistError:  # noqa: BLE001 - 首钉没落账只是下次再钉，不拦住这次装载
-                logger.error("插件 %s 首钉未能落盘（本次仍放行，下次重钉）：%s",
-                             record.name, persistError)
-            logger.warning("插件 %s 登记里没有构件摘要（存量件），本次首钉 %s",
-                           record.name, digestNow)
+            if not (Path(record.path) / record.entry_point).exists():
+                # 空壳不首钉、不落账：登记里没摘要、盘上又连入口都没有，把这份状态钉成权威，
+                # 日后真补上字节反被这份读数判篡改。拒因交给下面 `_load_plugin_module` 那条
+                # 既有的 `entry_not_loaded`——同一件事不另造一套词（§6-259 末段同根因第二命中点）。
+                logger.warning("插件 %s 登记无构件摘要且入口不在盘（%s），本次不首钉：%s",
+                               record.name, record.entry_point, record.path)
+            else:
+                record.artifactDigest = digestNow
+                try:
+                    self._persistState()
+                except Exception as persistError:  # noqa: BLE001 - 首钉没落账只是下次再钉，不拦住这次装载
+                    logger.error("插件 %s 首钉未能落盘（本次仍放行，下次重钉）：%s",
+                                 record.name, persistError)
+                logger.warning("插件 %s 登记里没有构件摘要（存量件），本次首钉 %s",
+                               record.name, digestNow)
         elif digestStatus != artifact_digest.STATUS_MATCH:
             raise PluginError(
                 artifact_digest.refusalReason(digestStatus),

@@ -1662,6 +1662,21 @@ class SkillService:
             self._logger.error("Failed to get skill info: %s", e)
             return None
 
+    def _resolveEntryPoint(self, skill_path: Path) -> Optional[Path]:
+        """技能目录里"拿去执行的那份字节"；没有则 None（＝空壳）。
+
+        单点在这里，是因为 `call_skill` 有两个读法要问同一个问题：未钉分支要问"该不该把这份落盘
+        内容钉成权威"，执行那一步要问"跑哪个文件"。两处各写一份就会各自演化——那时首钉分支
+        认"有构件"、执行分支认"没入口"，同一目录给出两个相反答案（§6-259 末段那条污染就是这么来的）。
+        """
+        entry_file = skill_path / "main.py"
+        if entry_file.exists():
+            return entry_file
+        for py_file in skill_path.glob("*.py"):
+            if py_file.name != "__init__.py":
+                return py_file
+        return None
+
     def call_skill(self, skill_id: str, method: str = "main", **kwargs) -> Dict[str, Any]:
         """
         调用技能
@@ -1691,11 +1706,22 @@ class SkillService:
 
                 # 构件完整性（§6-172 批 30 / P3）：exec 之前，把眼前这份字节与安装门当时
                 # 钉下的摘要对账。扫描门证明的是"那一刻干净"，这一格才把它和"跑起来的这份"
-                # 绑住。没钉过（存量条目、旁路落地的构件）⇒ 现算现钉并放行一次；
-                # 钉过却不符 ⇒ 结构化拒因，绝不"照样跑"。
+                # 绑住。没钉过（存量条目、旁路落地的构件）⇒ 现算现钉并放行一次，**但只在落盘
+                # 确有可执行构件时**——见下面空壳那一支；钉过却不符 ⇒ 结构化拒因，绝不"照样跑"。
+                entry_file = self._resolveEntryPoint(skill_path)
                 digestStatus, digestNow = artifact_digest.checkArtifact(
                     skill_path, skill_info.get(artifact_digest.DIGEST_FIELD))
                 if digestStatus == artifact_digest.STATUS_UNPINNED:
+                    if entry_file is None:
+                        # 空壳不首钉、也不落账：把"眼前这份什么都没有"钉成权威，日后真把字节补进
+                        # 这个目录，反而会被这份读数判成篡改——一次误点就把那条路钉死（§6-259 末段）。
+                        # 拒因与下面同一条，不改对外语义；变的只是"这次调用不许写账本"。
+                        self._logger.warning(
+                            "技能 %s 账本无构件摘要且落盘无可执行构件，不首钉：%s",
+                            skill_id, skill_path)
+                        return {"success": False,
+                                "error": "No entry point found for skill",
+                                "skill_id": skill_id}
                     skill_info[artifact_digest.DIGEST_FIELD] = digestNow
                     self._save_manifest()
                     self._logger.warning(
@@ -1714,16 +1740,8 @@ class SkillService:
                         "actual_digest": digestNow,
                     }
 
-                # 查找技能入口文件
-                entry_file = skill_path / "main.py"
-                if not entry_file.exists():
-                    # 尝试查找其他入口文件
-                    for py_file in skill_path.glob("*.py"):
-                        if py_file.name != "__init__.py":
-                            entry_file = py_file
-                            break
-
-                if not entry_file.exists():
+                # 入口判定已在上面那一步取过（同一处口径），这里只负责如实拒
+                if entry_file is None:
                     return {"success": False, "error": "No entry point found for skill"}
 
                 # 动态加载技能模块
