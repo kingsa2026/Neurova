@@ -4180,6 +4180,13 @@
     - **A/B（选择集 `tests/unit/security tests/unit/skills`，基线=仓外只读 worktree at `5cd67883` + 铺入本批新判据、无修复）**：基线 `7 failed, 2176 passed, 5 skipped` ↔ 本批 `2 failed, 2181 passed, 5 skipped`，**仅本批侧红 0 条 ⇒ AB_PASS**；仅基线侧红那 5 格即本批的交付证据。跑测副作用复证：仓内 `data/` 内容指纹跑前跑后同为 `0340a7cc0408`／3041 文件（未写入）；worktree 残留 0。**本批不认领的三条常驻红**（均在干净 HEAD 的仓外 worktree 复证同样红）：`test_governance_integration.py::…::test_safe_file_read_still_works`（§6-255，需人裁）；`test_ci_ast_scan_budget_guard.py::TestNoUnprefilteredRepoWideScan::test_no_unledgered_repo_wide_ast_scan`（点名 `tests/unit/evolution/eval/test_evalExampleUnusedLabelFieldsRetired.py`，随 `513c651f` 入库的全仓 `rglob + ast.parse` 未登记预算表，属该批欠账）；`tests/unit/skills/test_market_builtin.py::test_import_builtin_offline[presentation-studio]`——**本批照出来的新缺陷**：`market_sources.py:315` 把 `FileNotFoundError` 折成一句 "zip refused"，真因是 Windows 长路径，该成员名实测 **261** 字符（>260 `MAX_PATH`），临时根那 93 字符把它顶过线；换短根机器即绿，故与扫描门无关。**建议：把 zip 成员路径的构造收到一个可短化的落点根，并把这条 except 改写成点名"路径过长"的诚实失败**（登记待裁，非本批范围）。
     - **一处工具自纠**：本仓**并没有** `scripts/ab_compare.sh`（Skill 的速查表把它当既有件列着；现读 `git ls-files scripts/` 只有 `token_estimation_compare.py`）。首轮按该路径调用 ⇒ `No such file or directory`，而命令尾部接 `tail` 把退出码读成 0，于是"A/B 跑过了"是**假的**；改用手搭的仓外一次性脚本做两侧集合比对。记进形态集第 221 条：**工具存在性也要现读，不在场即当场露出，不沿用文档给的命令**。
     - **未决（产品语义，另次裁定）**：真资产包今天仍被那 1 条裸 `compile(`（`package_check.py`）拒——要不要开白名单/撤条目不在本批范围；§6-250 的乙/丙案由此结清，不再走。
+    - **本会话自犯之一（与 §6-257 那笔同形，但更坏）**：本轮改这一行指针时，我把**提交标题写成了并发会话那笔的题名**
+      （"§6-264 落批——票④包 2 结清不立项、包 3 按断点条款删净"），正文是对的。来源查清不是手滑打错，而是**从会话上下文的
+      "recent commits" 快照里抄了一条看起来像最近提交的串**——`8f0a09d1` 就在快照里躺着。该笔未推送且是 HEAD，
+      按 §6-211／§6-257 的口径就地 amend 更正（现号 `e943d46e`，`git diff <旧号> HEAD --stat` 为空＝树未变；
+      **被 amend 作废的那个 hash 不写进本格**——写进文档就是亲手造悬空引用，`scripts/ci/audit_ledger_commit_guard.py`
+      会按可达性判 `exit=1`，这一课 §6-238 那格已经记过一次）。**复证形态值得记住**：提交后 `git log -2 --format=%s` 看自己这笔与上一笔**题名雷同即可疑**——
+      同一工作树里两个会话各写各的标题，撞题的概率远高于"自己想出来的两句会一样"。
     - **本会话下一枚空号现查 §6-265。**（本格落笔时写的是"现查 §6-260"，被并发会话的 §6-261/262/264 越过；
       而 258／260／263 是**空洞**——洞里躺着别人的让号陈述，按形态集 202 的③不复用，所以取尾部 +1＝265。
       这一行就地改准，就是"让号是双向的"那条的老例：指针要在落笔前现查，不能指望它一直对。）
