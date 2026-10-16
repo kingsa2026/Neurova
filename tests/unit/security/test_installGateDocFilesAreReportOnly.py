@@ -133,8 +133,8 @@ class TestDocSamplesStopDenying:
            **AST** 判（`Call.func` 是 `Name` 还是 `Attribute`），刻意不看被测规则的 pattern：
            拿规则自己分类规则产生的读数，规则一改宽误判就被认成"真形态"，判据与被判对象共享
            同一个偏见，等于没判；
-        ③ 真裸名动态编译那条读数必须还在（现读 1 条：`scripts/package_check.py` 的 `compile(`），
-           不许用"把真信号也关掉"来凑 ②；
+        ③ 真裸名动态编译读数在**今天的资产里应为 0**（原为 1 条，§6-280 把那处换成了
+           ast.parse），而"分类器还认不认这一形"改由一条合成裸名读数钉——归零不许变成空守卫；
         ④ 文档侧命中仍在报告面里（降级不删读数，批 37 的口径）。
         前提（门这台装配走 DENY）也钉住：口径变了这格先红，不让它跟着默认值漂。
         """
@@ -168,35 +168,61 @@ class TestDocSamplesStopDenying:
             "命中项没带规则族 ⇒ 豁免判定在读什么？（口径必须可核对）")
 
         execReadings = execShapes.execReadings(findings)
-        assert execReadings, "真产物上一个 dangerous_exec 读数都没有——根据变了，去查规则表"
+        buckets = execShapes.shapesOf(findings)
+        bare = buckets.get("bare") or []
+        attributeish = [f for f in execShapes.blockingFromPayloads(findings)
+                        if f.rule_id == "dangerous_exec"]
+
+        # 改判记录（教义第 5 条 / 形态集 235）：本格原断「真裸名读数 1 条（package_check.py 的
+        # compile(）」。§6-280 那一刀把包内那处换成等价的 ast.parse(）——真信号被**合法清零**，
+        # 继续钉 "==1" 就是拿旧实状当契约。但直接把断言删空会让这格变成**恒真的空守卫**，
+        # 所以把"形状分类器与读数必须同向"这条腿改由**合成样本**钉：分类器不许因为真包里
+        # 没东西可分就不再认得这一形。
+        assert not bare, (
+            f"真裸名动态执行读数应为 0 条（资产那一刀已改掉），现读 {len(bare)}："
+            f"{[(f.get('file_path'), f.get('evidence')) for f in bare][:3]}")
+        assert not execReadings, (
+            f"包内已无裸名调用，却仍报出 {len(execReadings)} 条 dangerous_exec 读数："
+            f"{[(f.get('file_path'), f.get('evidence')) for f in execReadings][:3]}"
+            "⇒ 读数与证据脱节（§6-250 那族的反向形）")
+
+        (dest / "scripts" / "_shapeControl.py").write_text(
+            'compile("x = 1", "<str>", "exec")\n', encoding="utf-8")
+        injectedScan = scan_skill_for_install("builtin--adaptive-presentation-studio", str(dest))
+        injected = injectedScan.get("findings") or []
+        injExec = execShapes.execReadings(injected)
+        assert injExec, "塞进一条裸名 compile( 后分类器一个读数都不出——上一格的『归零』失去根据"
+        assert not execShapes.unReproducible(injExec, rule), (
+            "合成裸名读数在自己的证据行上复算不出来 ⇒ 裁决与证据已经脱节，这种绿不能要")
+        injBare = execShapes.shapesOf(injected).get("bare") or []
+        assert len(injBare) == 1, (
+            f"合成的那一形必须归到 bare、且只 1 条，实得 {len(injBare)}："
+            f"{[(f.get('file_path'), f.get('evidence')) for f in injBare][:3]}")
+
         ghost = execShapes.unReproducible(execReadings, rule)
         assert not ghost, (
             f"{len(ghost)} 条读数在自己的证据行上复算不出来"
             f"（例 {[(f.get('file_path'), f.get('evidence')) for f in ghost[:2]]}）"
             "⇒ 裁决与证据已经脱节，这种绿不能要")
 
-        buckets = execShapes.shapesOf(findings)
         assert not buckets.get("attribute"), (
             f"{len(buckets.get('attribute') or [])} 条属性调用被算成危险执行读数"
             f"（§6-250 那 26 条正则预编译的同形）："
             f"{[(f.get('file_path'), f.get('evidence')) for f in (buckets.get('attribute') or [])[:2]]}")
-        bare = buckets.get("bare") or []
-        assert len(bare) == 1, (
-            f"真裸名动态编译读数现读 {len(bare)} 条（应为 1 条 package_check.py 的 compile(）："
-            f"{[(f.get('file_path'), f.get('evidence')) for f in bare][:3]}——"
-            "多了就是真信号变多了（去读证据行），少了就是这条读数连证据行都不认了")
-
-        blockingExec = [f for f in execShapes.blockingFromPayloads(findings)
-                        if f.rule_id == "dangerous_exec"]
-        attributeish = [f for f in blockingExec if execShapes.isAttributeOnly(f.evidence)]
-        assert not attributeish, (
+        assert not [f for f in attributeish if execShapes.isAttributeOnly(f.evidence)], (
             f"{len(attributeish)} 条属性调用进了 DENY 读数集"
-            f"（例 {[(f.file_path, f.evidence) for f in attributeish[:2]]}）"
             "⇒ 装载门会把正则预编译当拒因念给调用方（§6-250 的根因就此复发）")
-        assert {str(f.evidence) for f in blockingExec} == {str(f["evidence"]) for f in bare}, (
-            f"参与裁决的 exec 集合与证据行分类不一致：blocking={blockingExec} bare={bare}")
-        assert scan.get("blocked") is True, (
-            f"自带 .py 的真动态编译不再拦了（阻断集={[f.rule_id for f in blockingExec]}）"
+
+        # 这两腿原本判在真包身上（那时它身上有 1 条真裸名）；随 ③ 一起搬到合成样本上，
+        # 判的内容没变：**参与裁决的 exec 集合必须等于按证据行分类出的 bare 集合**，
+        # 且这条 bare 必须真能把这次安装拦下来——豁免不许越界到代码面。
+        injBlocking = [f for f in execShapes.blockingFromPayloads(injected)
+                       if f.rule_id == "dangerous_exec"]
+        assert {str(f.evidence) for f in injBlocking} == {str(f.get("evidence")) for f in injBare}, (
+            f"合成样本上参与裁决的 exec 集合与证据行分类不一致："
+            f"blocking={[str(f.evidence) for f in injBlocking]} bare={[f.get('evidence') for f in injBare]}")
+        assert injectedScan.get("blocked") is True, (
+            f"塞进一条真裸名 compile( 后不再拦（阻断集={[f.rule_id for f in injBlocking]}）"
             "——豁免越界到了代码面")
 
 
