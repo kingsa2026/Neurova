@@ -56,10 +56,13 @@ CAPTURE_FUNCS = ("run", "check_output", "check_call", "call", "Popen",
 #: 扫描根。刻意含 `tests/`：判据自己的空转就发生在测试侧。
 SCAN_ROOTS = ("neurova", "scripts", "tests")
 
-#: 冻结基线（**表内现量为准**：35 文件 / 57 站点，逐档单跑现复算）。只准降不准升。
+#: 冻结基线（**表内现量为准**：34 文件 / 48 站点，逐档单跑现复算）。只准降不准升。
 #: 建档那轮（批 51）写的是"37 文件 / 59 站点"——那是一批时间性快照，此后各批收掉的落点
 #: 都按本表逐格摘除（批 54 摘的是 `test_temperature_single_source.py` 那一处，它改走
 #: `ast_scan` 单点后不再自己起文本模式子进程），注释留着旧数就等于留一条没人对的账。
+#: §6-281 摘的是 `tests/unit/tools/test_tool_parallelism_readout.py` 那 9 处：它把"每个用例
+#: 自己拼一份 argv 再 `text=True` 收"收成一个两头钉的出口，站点归零——所以这一行数字与表
+#: 必须一起改，只改表不改这行，下一次复算的人就没有对账的锚了。
 BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
@@ -95,7 +98,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/test_start_script.py": 2,
     "tests/unit/tools/test_git_tool.py": 1,
     "tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py": 1,
-    "tests/unit/tools/test_tool_parallelism_readout.py": 9,
 }
 
 
