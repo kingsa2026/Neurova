@@ -11,6 +11,9 @@ tests/unit/ci/test_clock_caliber_ledger.py
 tests/unit/test_ci_thin_env_guards.py
 # Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
 tests/unit/api/test_coordination_router_reachability.py
+# ⚠ HEAD 自带常驻红（§6-286 现场登记，非任何一批引入）：agent_core_lines 实测 2106 > 基线 2103、
+# agent_class_lines 同形。要收它得动拆分（−3 行以上），不是把基线改大——批 60 只保证自己没往上加
+# （该文件本次一字未增：新增的 agentLibrary 调用按 AGENTS.md 走函数内懒加载，行数与 HEAD 全等）。
 tests/unit/agent/test_agent_core_size_ratchet.py
 tests/unit/security/test_governance_mcp.py
 tests/unit/security/test_url_guard.py
@@ -3217,3 +3220,10 @@ tests/unit/security/test_subprocessCallJudgesCommandShape.py
 # exec 必须照样被拒＋这条包不许出现在白名单里（裁定是改资产，禁开豁免）。
 # 单跑读数：本档 5 passed 连跑 2 次同读数。
 tests/unit/skills/test_builtinBundleInstallsThroughGate.py
+# §6-286·同一本技能库只许一份内存态（用户裁乙＝全量收口）：真 HTTP 链装完，同进程读面必须立刻
+# 认账（改前实测 0 条）；全仓自建 SkillService 的实状与登记表**双向**咬合——多一处即红，把 offender
+# 修好了不摘表也红；唯一例外必须真的还带着 skills_dir=，否则它就该收进来。夹具半区同档钉：手写
+# 构造与工厂构造必须落到同一个、且在本次 tmp 下的库目录（旧夹具只切 None 那一支，工厂显式传的目录
+# 会漏回会话级数据根——本批 A/B 首轮 10 条回归的根因）。
+# 单跑读数：本档 9 passed 连跑 2 次同读数（10.95s×2）。
+tests/unit/skills/test_skillLibraryTakenFromOneFactory.py
