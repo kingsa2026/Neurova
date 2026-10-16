@@ -655,10 +655,13 @@ async def get_agent_limits(admin=Depends(_governance_admin_dep)):
 
     原 docstring 只写了 `token_budget / max_loop_rounds` 两键，而回的是全量生效值——
     说明文字落后于载荷，读文档的人会以为其余键不可调（正是下面那张 PUT 白名单的成因）。
-    """
-    from neurova.security.agent_limits_settings import get_effective_limits
 
-    return {"code": 0, "data": get_effective_limits()}
+    `domains` 是兄弟键而不是塞进 `data`：`data` 的语义是"生效值"，前端与既有页面都按
+    那张字典直接展开成表单，混进区间会让"值"与"能填到多少"两件事在同一个字典里分不开。
+    """
+    from neurova.security.agent_limits_settings import get_effective_limits, get_limit_domains
+
+    return {"code": 0, "data": get_effective_limits(), "domains": get_limit_domains()}
 
 
 class AgentLimitsUpdate(BaseModel):
@@ -704,6 +707,7 @@ async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance
     """更新 Agent 运行限制（仅管理员）"""
     from neurova.security.agent_limits_settings import (
         get_effective_limits,
+        get_limit_domains,
         save_agent_limits,
     )
 
@@ -712,7 +716,9 @@ async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance
         raise HTTPException(status_code=422, detail="无有效更新字段")
     if not save_agent_limits(payload):
         raise HTTPException(status_code=500, detail="Agent 运行限制保存失败")
-    return {"code": 0, "data": get_effective_limits()}
+    # 回包带同一份区间：管理员改完立刻能看到"这一档现在能填到多少"，
+    # 而不是下次填错才被 422 —— 两面的数字必须出自 `get_limit_domains()` 一处。
+    return {"code": 0, "data": get_effective_limits(), "domains": get_limit_domains()}
 
 
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
