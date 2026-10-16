@@ -231,24 +231,61 @@ def test_knownBadFormsAreCounted(bad):
     assert _violationCount(bad) == 1, f"该被判的形态没判到：{bad}"
 
 
-#: ── 半修计数自身的形状判据（§6-235 存量消化第一步）
-#: 计数格读的是"该文件有没有任何一处真把写侧钉上"，所以**识别器漏一个形制＝多记一处半修**，
-#: 而多记的那些恰恰是已经修对的——账越不准，下一次收数越会把"识别器坏了"读成"存量在涨"。
-#: 实测现仓有两处用 `env=dict(os.environ, PYTHONIOENCODING="utf-8")`（关键字实参形）真钉过，
-#: 而旧谓词只认字典字面与下标赋值 ⇒ 它们被记进了 29 处的账。
-@pytest.mark.parametrize("snippet, expectPinned", [
+#: ── 半修计数自身的形状判据（§6-235 存量消化）
+#: 计数读的是"那一次调用带的 env 里有没有键 / 全进程环境有没有被改写"，所以**识别器漏一个
+#: 形制＝多记一处半修**，而多记的那些恰恰是已经修对的——账越不准，下一次收数越会把
+#: "识别器坏了"读成"存量在涨"（实测现仓有两处 `env=dict(os.environ, PYTHONIOENCODING=...)`
+#: 真钉过却被旧谓词记进账，见 `test_knownBothPinnedFilesAreNotCountedAsHalfPinned`）。
+def _envExprOfFirstCall(snippet: str):
+    """取片段里第一个 `subprocess.*` 调用的 `env=` 表达式（没有 env 就返 None）。"""
+    for node in ast.walk(ast.parse(snippet)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
+            for kw in node.keywords:
+                if kw.arg == "env":
+                    return kw.value
+    return None
+
+
+@pytest.mark.parametrize("snippet, expectPin", [
     ("subprocess.run([sys.executable], env={'PYTHONIOENCODING': 'utf-8'})", True),
-    ("os.environ['PYTHONIOENCODING'] = 'utf-8'", True),
-    ("env = dict(os.environ, PYTHONIOENCODING='utf-8')", True),
-    ("import os\nsubprocess.run([sys.executable], env=dict(os.environ, PYTHONIOENCODING='utf-8'))", True),
-    ('"""说明里提一句 PYTHONIOENCODING 这个词而已"""\nsubprocess.run([sys.executable])', False),
+    ("subprocess.run([sys.executable], env=dict(os.environ, PYTHONIOENCODING='utf-8'))", True),
+    ("subprocess.run([sys.executable], env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})", True),
+    # 反检两形：把整份进程环境原样递过去、以及干脆不带 env，都不算钉
     ("subprocess.run([sys.executable], env=os.environ.copy())", False),
+    ("subprocess.run([sys.executable])", False),
 ])
-def test_writesSidePinShapesAreJudgedByCodeForm(snippet, expectPinned):
-    """写侧钉没钉只按代码形态判：正检三形＋反检两形，缺一形就是账不准。"""
-    got = _writesSideIsPinnedInFile(snippet)
-    assert got is expectPinned, (
-        f"形状判定与实状不符（期望 pinned={expectPinned}，现读 {got}）：{snippet[:70]}")
+def test_envExprShapesAreJudgedByCodeForm(snippet, expectPin):
+    """env 表达式带不带键只按 AST 形态判：正检三形＋反检两形，缺一形就是账不准。"""
+    got = _exprCarriesPin(_envExprOfFirstCall(snippet))
+    assert got is expectPin, (
+        f"env 形状判定与实状不符（期望 pinned={expectPin}，现读 {got}）：{snippet[:72]}")
+
+
+@pytest.mark.parametrize("snippet, expectMutates", [
+    ("os.environ['PYTHONIOENCODING'] = 'utf-8'", True),
+    ("os.environ.update({'PYTHONIOENCODING': 'utf-8'})", True),
+    # 反检：局部字典里带这个键**不改进程环境**，不许据此整档免检
+    ("env = {'PYTHONIOENCODING': 'utf-8'}", False),
+    ('"""说明里提一句 PYTHONIOENCODING 这个词而已"""', False),
+])
+def test_processEnvMutationShapesAreJudgedByCodeForm(snippet, expectMutates):
+    """只有真改写进程环境那一形才配"整档免检"——局部字典与 docstring 提词都不配。"""
+    got = _mutatesProcessEnv(snippet)
+    assert got is expectMutates, (
+        f"进程环境判定与实状不符（期望 {expectMutates}，现读 {got}）：{snippet[:60]}")
+
+
+def test_knownBothPinnedFilesAreNotCountedAsHalfPinned():
+    """存量账里不许留着"其实已两头钉"的文件——这一格把假阳性点名钉死。
+
+    写明去向：**从 29 收到 27 不是治理改进**，是识别器第一次认得这一形。收数时把它如实写进
+    提交说明，否则下一轮会把"谓词修准"读成"有人吃掉了两处存量"。
+    """
+    sites = {f for f, _ in halfPinnedSites()}
+    for name in ("tests/unit/memory/test_regression_worker_cleanup.py",
+                 "tests/unit/test_manual_scripts_are_not_collectible.py"):
+        assert name not in sites, f"{name} 已两头钉却被记成半修——识别器漏形，不是存量复发"
 
 
 def test_knownBothPinnedFilesAreNotCountedAsHalfPinned():
@@ -342,39 +379,146 @@ def _argvFirstIsPythonChild(node, varNames=frozenset()) -> bool:
             and first.value.id == "sys" and first.attr == "executable")
 
 
-def _writesSideIsPinnedInFile(source: str) -> bool:
-    """写侧到底钉没钉——按**代码形态**判，不按"全文有没有这个词"判。
+def _exprCarriesPin(expr, pinNames=frozenset()) -> bool:
+    """这个表达式到底带不带 `PYTHONIOENCODING`——只按 AST 形态判。
 
-    原判定是 `"PYTHONIOENCODING" in source`：在 docstring 里提一句这个词就整档免检，
-    而被放行的恰好是"写了说明、没钉 env"那一类——最像已修的样子（AGENTS.md「钉形态不钉词」）。
-    现在只认真写法：字典键（`env={..., "PYTHONIOENCODING": ...}`）、下标赋值
-    （`os.environ["PYTHONIOENCODING"] = ...` / `env["PYTHONIOENCODING"] = ...`）、
-    以及 `dict(...)` 的**关键字实参**形（`env=dict(os.environ, PYTHONIOENCODING="utf-8")`）。
-    第三形是本轮补的：漏认它不会让计数"更严"，只会把**已经修对的文件**记进半修账——
-    账越不准，下一次收数越会把"识别器坏了"读成"存量在涨"（现仓实测两处，见
-    `test_knownBothPinnedFilesAreNotCountedAsHalfPinned`）。
+    认三种直接写法（字典键、`dict(..., PYTHONIOENCODING=...)` 的关键字实参、下标改写），
+    外加**一跳**的间接来源：`pinNames` 是本文件里"产出/持有带键字典"的名字（helper 函数、
+    被赋过带键字典的变量、被 `x["PYTHONIOENCODING"] = ...` 改写过的局部字典）。
+    不认"全文出现过这个词"：docstring 提一句就整档免检，放行的恰好是最像已修的那类。
+    """
+    if expr is None:
+        return False
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Dict) and any(
+                isinstance(k, ast.Constant) and k.value == "PYTHONIOENCODING"
+                for k in sub.keys):
+            return True
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) \
+                and sub.func.id == "dict" and any(
+                    kw.arg == "PYTHONIOENCODING" for kw in sub.keywords):
+            return True
+        if isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Constant) \
+                and sub.slice.value == "PYTHONIOENCODING":
+            return True
+        if isinstance(sub, ast.Name) and sub.id in pinNames:
+            return True
+    return False
+
+
+def _mutatesProcessEnv(source: str) -> bool:
+    """文件里是否改写**进程**环境（`os.environ["PYTHONIOENCODING"] = ...` / `.update({...})`）。
+
+    这一形与 `env={...}` 不同：它改的是本进程的环境，子进程继承 ⇒ 文件级豁免在这里是对的。
+    只认 `os.environ` 这条下标/更新链，别把 `env["X"]=` 那种局部字典也算成进程级。
     """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return False
     for node in ast.walk(tree):
-        if isinstance(node, ast.Dict) and any(
-                isinstance(k, ast.Constant) and k.value == "PYTHONIOENCODING"
-                for k in node.keys):
-            return True                      # env={..., "PYTHONIOENCODING": "utf-8"}
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
-                and node.slice.value == "PYTHONIOENCODING":
-            return True                      # os.environ["PYTHONIOENCODING"] = "utf-8"
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id == "dict" and any(
-                    kw.arg == "PYTHONIOENCODING" for kw in node.keywords):
-            return True                      # dict(os.environ, PYTHONIOENCODING="utf-8")
+                and node.slice.value == "PYTHONIOENCODING" \
+                and isinstance(node.value, ast.Attribute) \
+                and isinstance(node.value.value, ast.Name) and node.value.value.id == "os" \
+                and node.value.attr == "environ":
+            return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "update" and isinstance(node.func.value, ast.Attribute) \
+                and isinstance(node.func.value.value, ast.Name) and node.func.value.value.id == "os" \
+                and node.func.value.attr == "environ" \
+                and any(_exprCarriesPin(a) for a in node.args):
+            return True
     return False
 
 
+def _bodyReturnsPinnedDict(fn) -> bool:
+    """函数体里有没有 `return {**os.environ, "PYTHONIOENCODING": ...}` 这一形。"""
+    for sub in ast.walk(fn):
+        if isinstance(sub, ast.Return) and sub.value is not None:
+            if any(isinstance(k, ast.Constant) and k.value == "PYTHONIOENCODING"
+                   for k in (sub.value.keys if isinstance(sub.value, ast.Dict) else [])):
+                return True
+            if isinstance(sub.value, ast.Call) and isinstance(sub.value.func, ast.Name) \
+                    and sub.value.func.id == "dict" \
+                    and any(kw.arg == "PYTHONIOENCODING" for kw in sub.value.keywords):
+                return True
+    return False
+
+
+def _pinHoldingNames(tree) -> set:
+    """本文件里"持有或产出带键字典"的名字——覆盖 helper 函数与局部字典改写这两类一跳来源。
+
+    实测两类误判都靠这一处收回来：`neurova/web_reach/reach.py` 与 `scripts/ci_static_gate.py`
+    都写 `env=_utf8ChildEnv()`，键在那个 helper 的返回值里；`tests/manual/
+    sourceEscapeSequenceImportClean_live.py` 先建局部 `env` 再 `env["PYTHONIOENCODING"] = ...`
+    改写。把这三处算成半修是**识别器不跟一跳**，不是存量在涨——反过来把它们记进账，
+    下一轮收数就会把"口径收严"读成"有人新写了几处半修"（形态集 232 的同族：分类器不能比被测
+    对象短一层，短了就把好形态判成坏形态）。
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            value = node.value
+            direct = (isinstance(value, ast.Dict) and any(
+                isinstance(k, ast.Constant) and k.value == "PYTHONIOENCODING"
+                for k in value.keys)) or (
+                isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == "dict"
+                and any(kw.arg == "PYTHONIOENCODING" for kw in value.keywords))
+            viaName = isinstance(value, ast.Name) and value.id in names
+            if direct or viaName:
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        names.add(tgt.id)
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
+                and node.slice.value == "PYTHONIOENCODING" \
+                and isinstance(node.value, ast.Name):
+            names.add(node.value.id)                  # env["PYTHONIOENCODING"] = ...（局部字典）
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and _bodyReturnsPinnedDict(node):
+            names.add(node.name)                      # def _utf8ChildEnv(): return {...}
+    return names
+
+
+def _halfPinnedLines(source: str) -> list:
+    """**逐调用**判半修：那次调用自己带的 env 里有没有键，或者全进程环境是否已被改写。
+
+    此前这里是文件级豁免（"该档有一处真钉 ⇒ 全部站点免检"），于是同一档里"一处钉了
+    `env={...}`、另一处压根不带 env"的第二次调用被读成干净，而它在运行时照样按本机码页吐字节
+    ——计数口径与危害不一致时，账越绿越危险。`env={...}` 只保护它那一个调用，
+    `os.environ[...] = ...` 才保护整档（见 `_mutatesProcessEnv`）。
+    """
+    if "subprocess" not in source or "sys.executable" not in source:
+        return []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    if _mutatesProcessEnv(source):
+        return []
+    varNames = _pythonChildArgvNames(source)
+    pinNames = _pinHoldingNames(tree)
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)
+                and fn.value.id == "subprocess" and fn.attr in CAPTURE_FUNCS):
+            continue
+        kws = {k.arg: k.value for k in node.keywords if k.arg}
+        if "encoding" not in kws or not _argvFirstIsPythonChild(node, varNames):
+            continue
+        enc = ast.unparse(kws["encoding"]).strip("'\"").lower().replace("-", "")
+        if enc != "utf8" or _exprCarriesPin(kws.get("env"), pinNames):
+            continue
+        out.append(node.lineno)
+    return sorted(out)
+
+
 def halfPinnedSites() -> list:
-    """`(文件, 行号)`：按 utf-8 解 Python 子件，而该文件里没有一处真把写侧钉上 `PYTHONIOENCODING`。"""
+    """`(文件, 行号)`：按 utf-8 解 Python 子件，而那一次调用没把写侧钉上 `PYTHONIOENCODING`。"""
     out = []
     for root in SCAN_ROOTS:
         for path in filesUnder(REPO_ROOT / root):
@@ -384,29 +528,93 @@ def halfPinnedSites() -> list:
                 source = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
-            if "subprocess" not in source or "sys.executable" not in source:
-                continue
-            varNames = _pythonChildArgvNames(source)
-            pinned = _writesSideIsPinnedInFile(source)
-            for node in _callNodes(source):
-                kws = {k.arg for k in node.keywords if k.arg}
-                if "encoding" not in kws or not _argvFirstIsPythonChild(node, varNames):
-                    continue
-                encNode = next(k for k in node.keywords if k.arg == "encoding")
-                enc = ast.unparse(encNode.value).strip("'\"").lower().replace("-", "")
-                if enc == "utf8" and not pinned:
-                    out.append((path.relative_to(REPO_ROOT).as_posix(), node.lineno))
+            for lineno in _halfPinnedLines(source):
+                out.append((path.relative_to(REPO_ROOT).as_posix(), lineno))
     return sorted(out)
 
 
+#: 分歧点样本：同一档里一处钉了 `env={...}`、另一处完全没带 env。
+_TWO_CALLS_ONE_PINNED = (
+    "import subprocess, sys\n"
+    "subprocess.run([sys.executable], encoding='utf-8', env={'PYTHONIOENCODING': 'utf-8'})\n"
+    "subprocess.run([sys.executable], encoding='utf-8')\n"
+)
+
+
+def test_fileLevelExemptionDoesNotHideAnUnpinnedCallInSameFile():
+    """字典形只钉住它那一个调用——同档下一处没带的必须照样点名。
+
+    整档免检在这里读成"0 处半修"，而第 3 行那次调用在运行时就是会按 cp936 吐字节：
+    计数口径与危害不一致时，账越绿越危险。
+    """
+    lines = _halfPinnedLines(_TWO_CALLS_ONE_PINNED)
+    assert lines == [3], (
+        f"同档里没带 env 的那处调用没被点名（现读 {lines}）——"
+        "`env={...}` 的文件级豁免把运行时真坏的那一处读成了干净")
+
+
+@pytest.mark.parametrize("source, expectLines", [
+    # 进程级改写：子继承父环境 ⇒ 文件级豁免在这一形是对的，不许退回逐调用
+    ("import os, subprocess, sys\nos.environ['PYTHONIOENCODING'] = 'utf-8'\n"
+     "subprocess.run([sys.executable], encoding='utf-8')\n", []),
+    # 既没 env 也没改进程环境 ⇒ 点名
+    ("import subprocess, sys\nsubprocess.run([sys.executable], encoding='utf-8')\n", [2]),
+    # env 走变量且变量里带键 ⇒ 该调用不点名
+    ("import os, subprocess, sys\nenv = dict(os.environ, PYTHONIOENCODING='utf-8')\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=env)\n", []),
+    # 一跳·helper 函数：键在函数返回值里（`neurova/web_reach/reach.py` 与
+    # `scripts/ci_static_gate.py` 就是这个形状——不跟这一跳会把已修的文件记成半修）
+    ("import os, subprocess, sys\n"
+     "def _utf8ChildEnv():\n    return {**os.environ, 'PYTHONIOENCODING': 'utf-8'}\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=_utf8ChildEnv())\n", []),
+    # 一跳·局部字典改写：先建 env 再写键（`tests/manual/sourceEscapeSequenceImportClean_live.py` 形）
+    ("import os, subprocess, sys\nenv = dict(os.environ)\n"
+     "env['PYTHONIOENCODING'] = 'utf-8'\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=env)\n", []),
+    # 反检：helper 存在但**没**带键 ⇒ 照样点名（一跳不许变成"看到函数就放行"）
+    # 行号按片段实数：1 import／2 def／3 return／4 调用 ⇒ 点名第 4 行
+    ("import os, subprocess, sys\ndef _childEnv():\n    return dict(os.environ)\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=_childEnv())\n", [4]),
+    # 反检：docstring 里提一句这个词不算钉
+    ('"""说明里写了 PYTHONIOENCODING 这件事"""\nimport subprocess, sys\n'
+     "subprocess.run([sys.executable], encoding='utf-8')\n", [3]),
+])
+def test_halfPinnedLinesJudgeTheCallThatActuallyRuns(source, expectLines):
+    assert _halfPinnedLines(source) == expectLines, (
+        f"逐调用判定与实状不符（期望 {expectLines}）：{source[:60]!r}")
+
+
+#: ── 刻意留着"只钉一头"的反证样本（逐调用口径下必须显式登记，不能靠整档豁免蒙过去）
+#: 这两档自己的**用途**就是制造一个没钉子端的调用，给反证当对照组。在它们身上补钉，
+#: 改掉的不是缺陷而是那条反证。登记的意义：① 计数里把它们剔掉，剩下的 0 才叫"真存量清零"；
+#: ② 由 `test_everyLedgeredHalfPinSampleIsStillCaught` 反向钉住"样本还在被点到"——
+#: 样本哪天不见了却不销行，本档就留成一条已经不存在的规定（§6-250 的 STUB_LEDGER 同一手法）。
+_HALF_PIN_SAMPLES = {
+    "tests/unit/ci/test_subprocessTextEncodingRatchet.py":
+        "本文件的行为对照格需要一发「只钉父端」的负样本，把它钉齐那条对照就恒不成立",
+    "tests/manual/subprocessDecodeBothEnds_batch51.py":
+        "§6-225 反证的驱动器：跑的是被改回半修形态的闸脚本副本，在这一层补钉会连下一层的继承环境一起改掉",
+}
+
+
 def test_halfPinnedPythonChildSitesMatchTheCountedBaseline():
-    """半修面等号格：不许蔓延，也不许悄悄变好不收数。"""
-    now = halfPinnedSites()
+    """半修面等号格：不许蔓延，也不许悄悄变好不收数（登记在案的负样本另算，见上）。"""
+    now = [s for s in halfPinnedSites() if s[0] not in _HALF_PIN_SAMPLES]
     assert len(now) == HALF_PINNED_BASELINE, (
-        "半修（父端 utf-8 解 Python 子件、子端没钉 PYTHONIOENCODING）站点数与基线不符："
+        "半修（父端 utf-8 解 Python 子件、那一次调用没钉 PYTHONIOENCODING）站点数与基线不符："
         "现读 %d / 基线 %d。\n多了＝新写了一处半修，把子端 env 一起钉上；"
         "少了＝有人收掉了存量，把 `HALF_PINNED_BASELINE` 收下去再提交。\n%s"
         % (len(now), HALF_PINNED_BASELINE, now[:HALF_PINNED_BASELINE + 6]))
+
+
+def test_everyLedgeredHalfPinSampleIsStillCaught():
+    """登记表每条都得仍在现读里被点到，且都得写明理由——防账上留一条已经不存在的规定。"""
+    raw = halfPinnedSites()
+    files = {f for f, _ in raw}
+    missing = [f for f in _HALF_PIN_SAMPLES if f not in files]
+    assert not missing, f"这些负样本已不再产生半修读数，请从 `_HALF_PIN_SAMPLES` 销行：{missing}"
+    reasonless = [f for f, why in _HALF_PIN_SAMPLES.items() if not str(why).strip()]
+    assert not reasonless, f"负样本必须写明为什么许它半修：{reasonless}"
 
 
 def test_bothEndsPinnedRoundTripsNonAsciiWhileHalfPinDoesNot():
