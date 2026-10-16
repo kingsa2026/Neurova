@@ -4175,6 +4175,8 @@
     - **根因（现读实据，非沿用旧票面）**：`dangerous_exec` 的 pattern 写作 `\b(exec|eval|compile)\s*\(`，而 `\b` 在 `.` 与 `c` 之间同样成立 ⇒ `re.compile(` 被认成 critical 级危险执行；真资产包 27 条该规则命中里 **26 条的证据行是正则预编译**。`dangerous_path_traversal` 只看字节 `\.\.[\\/]`，把 `.mjs` 的 ES 相对导入 `from "../…/runtime_helpers.mjs"` 与数据字面量 `"../assets/slide-01.png"` 都判成 high——门走 `ScanPolicy.DENY`（critical **与 high** 都参与裁决），于是「任何带正则的技能包」一律被拒。**这不是防线弱，是防线打错了地方**：真遍历的防线在 `neurova/security/safe_archive.py::_resolve_within`（成员名归一化后仍须在目标目录内，显式拦 `..`），行级正则只负责**给信号**，信号落在无害形态上只会淹没真信号。
     - **改法四处**：① `dangerous_exec` 收窄为裸名调用 `(?<![\w.])\b(exec|eval|compile)\s*\(`（属性调用不经内置动态执行）；② `ScanRule` 增 `context_pattern` + `context_miss_severity`（默认 `low`）与 `severityFor()`——第二个条件不满足时**降级照常上报、不删读数**（沿用批 37 的「放行≠删发现」）；③ `PatternAnalyzer.FS_PATH_API_PATTERN` 列「这段路径被拿去读/写/解包/落地」的调用形态，**模块说明符故意不在名单里**（`from "../x.mjs"` 走模块解析、不经文件系统）；④ 裁决与拒因收进一份口径：`BLOCKING_SEVERITIES`（按策略）+ `isBlocking()` + `blockingFindings()` 替换掉原先散在 `passed` 与 `metadata.blocking_rule_count` 两处各写一遍的 severity 名单（教义第 6 条），`skill_install_gate` 的 `error` 文本改由 `blockingFindings` 生成——旧版取 `findings[:5]`，把不参与裁决的读数念成「拒因」，读的人会照着去改资产文档。
     - **§6-250 第三条 bullet 点名的那格既有判据：本批没改它，也没被它挡住**（写下来免得读档的人以为已闭环）。`test_installGateDocFilesAreReportOnly.py::testRealAssetBundleShowsTheExemptionAppliedButStillBlocksOnItsOwnPython` 落库后复跑 `7 passed`——它断的是"有 pyExec 读数且仍被拦"，修后 `dangerous_exec` 从 27 条降到 1 条真裸 `compile(`，两条前提都还成立，所以它**跟着真信号一起绿**，不是被我放宽。但它那一维**仍是盲的**：按 **(后缀, 规则 id)** 计数而不读证据行——今天它分不清"27 条正则预编译"与"1 条真动态编译"，把这两种形态给出同一个绿。**仍欠的一刀**：把那格升级成"逐条读 evidence 行、按形状分类计数"，并钉住"属性调用形态不得进 DENY 读数"（该约束本批已由新档 `testRegexPrecompileIsNotCodeExecution` 从**放行面**钉住，缺的是**读数面**这一半）。登记待点单，非本批范围。
+      **✅ 这一刀已落（2026-10-16，见 §6-268 / `9bac66a1`）**：读数面改按 **AST** 分形状（分类器刻意不看被测规则），
+      四枚变异各咬自己那一格，其中"evidence 截断"那枚恰只打在新加的"读数可复算"这一维上——此前全仓无人判它。
     - **红→绿与自证**：新判据档 `tests/unit/security/test_installGateRulesFollowCodeShape.py` 首跑 `5 failed, 7 passed`；只撤本批两个生产件（tag `red-selfproof-scan-rules-b56-recheck`）复跑 ⇒ 失败集**恰好等于**这 5 格，`apply`+`drop` 复原后 `12 passed`。
     - **变异反证 6 枚全 RED、逐枚 `sha256` 复证字节还原**（未变异对照 `12 passed`，全程在仓外只读 worktree）：`exec` 退回含属性调用 ⇒ 3 红；`traversal` 去掉第二个条件 ⇒ 2 红；`context_miss_severity` 改回 `high` ⇒ 2 红；落地形态名单塞进裸 `\bfrom\s+` ⇒ 1 红（正是 ES 导入那格）；`isBlocking` 恒真 ⇒ 3 红；拒因退回 `findings[:5]` ⇒ 1 红。**一枚等价变异自纠**：我最初把"模块说明符"那条针写成 `\bfrom\s*\(`，而 `from "../x.mjs"` 的 `from` 后不带括号 ⇒ 变异后仍 `12 passed`，看着像"判据没牙"，实为**变异自己打空**（形态集第 220 条）。
     - **活体（真 HTTP 安装面，当前 HEAD 现跑，13 项计分读数全 PASS）**：`tests/manual/installGateRulesFollowShape_batch56.py`——只含 `re.compile(` 的包 ⇒ 200／`success=True` 且产物真落盘；真 `exec(` ⇒ 拒且回执 `critical(dangerous_exec)`；`open("../../etc/passwd")` ⇒ 拒且点名 `high(dangerous_path_traversal)`；数据字面量相对路径 ⇒ 放行而 findings 留 1 条 `low`、`blocking_rule_count=0`；仓内真资产包 ⇒ 仍 `passed=False`，参与裁决集 `['dangerous_exec']`（1 条），`re.compile(` 读数残留 **0** 条（改前 26），读数分布 `{'dangerous_path_traversal': 64, 'subprocess_call': 4, 'dangerous_import_subprocess': 4, 'file_write': 2, 'unscanned_artifact': 1, 'dangerous_import_os': 1}`；同包重复安装无「先拒后放行」漂移。
@@ -4312,6 +4314,57 @@
       推荐 **(甲)**：它把"可得"的凭据从"清单在册"换成"落盘确有可执行构件"，与刚落地的写侧同一条单点，
       且如实形态是"已装但构件缺失"而不是静默消失。**另需一并拍**：这只包到底该不该能装上（`market_bundles/` 里它有真字节，
       但今天仍被 1 条裸 `compile(` 拒——那是 §6-259 末段留下的产品题）。
+
+
+268. **§6-259 末格「读数面仍欠的一刀」落地：安装门读数逐条读证据行按 AST 分形状，分类器刻意不看被测规则（✅ `9bac66a1` 判据+活体；生产池 0 改动）** 🟢 —— 纯判据批：把"分不清 26 条正则预编译与 1 条真动态编译"的那一格升级成能分清，并把这条判定收成一处。
+
+    - **本批没有生产改动，所以"红"由变异造**（`AGENTS.md` 第 3 条的红绿闸在这里的合法形态是反证守卫：
+      先证判据咬得住，再谈它绿）。测试池 +266/−37 ＝ 净 +229，逐文件 `git diff --cached --numstat` 现量：
+      新档 `tests/execShapes.py` +139、`test_installGateDocFilesAreReportOnly.py` +59/−12、
+      `test_installGateRulesFollowCodeShape.py` +39/−18、活体脚本 +29/−7。**子集不动**：两档早已在册
+      （605→606 与 606→607 那两批登记的），新格落进在册档里，CI 天然收到。
+    - **方法论那一格（本格最值得留下的东西）：分类器不看被测规则**。要问"这一行是裸名 `compile(` 还是
+      `re.compile(`"，答案由 **AST** 给（`Call.func` 是 `Name` 还是 `Attribute`），不由被测规则的 pattern 给。
+      若拿规则自己的 pattern 去分类它自己产生的读数，规则一旦改宽，误判产生的读数会被分类器认成"真形态"——
+      **判据与被判对象共享同一个偏见，等于没判**（§6-259 的形态三：形状判据要认 `Attribute` 被调者，这里是它的
+      反向应用）。规则的 pattern 只用在另一问上：这条读数能否在自己的证据行上被复算（`ScanRule.severityFor`）——
+      两问各自独立，M3 那枚变异（evidence 截断成 6 字符）正是只打在后一问上，全仓此前无人判这一维。
+    - **单源三处收口（教义第 6 条，全在判据/脚本侧）**：① 形状判定收成一份 `tests/execShapes.py`，
+      装载门 dict 面与扫描器对象面共用；② 撤掉 `test_installGateRulesFollowCodeShape.py` 里本地的
+      `blockingOf`（它自己写着 `severity in ("critical", "high")`，而那份名单在生产只有一处
+      `BLOCKING_SEVERITIES`）——11 处调用改指 `blockingFindings`，dict 面则回填成 `Finding` 再交给
+      生产 `isBlocking`；③ 活体脚本原来写着子串判定 `"re.compile(" in evidence`（认不出 `cursor.exec(`
+      同族形状）和手抄的现行 pattern，两处都改指单点（现行 pattern 由 `execRule()` 现取）。
+    - **真产物那格现在钉四条**：① 每条 exec 读数可被自己证据行复算；② 属性调用形不得进 DENY 读数集，
+      也不得产生任何危险执行读数；③ 真裸名那条必须还在（现读 1 条：`scripts/package_check.py` 的
+      `compile(script.read_text(...))`）——不许用关掉真信号来凑 ②；④ 文档侧读数仍在报告面里（批 37 口径）。
+      另钉前提一格：装载门这台装配的策略确为 `DENY`（M2 改成就红），判据不跟着默认值漂。
+    - **变异四枚各咬自己那一格**（每步 md5 字节还原：scan `bc9ad38acd50`／gate `f9982af10546`／
+      shape `49ae2cb97a9e`）：M1 规则退回含属性调用的旧 pattern ⇒ 5 红（含本批新格与放行面那格）；
+      M2 门策略改成 WARN ⇒ 8 红（含前提格）；M3 evidence 截断 ⇒ **恰 1 红**，红的就是"复算一致"那格；
+      M4 分类器恒判不出属性调用 ⇒ **恰 1 红**，红在控制格 `test_shapeNeedlesSeparateTheTwoForms`
+      （形态集 220：针打空必须当场露出）。还原后对照 `37 passed`。
+    - **A/B 报了两条假回归，归因靠实验不靠推断**（选择集 `tests/unit/security tests/unit/skills tests/unit/ci`，
+      基线＝仓外只读 worktree at HEAD ＋铺入本批三档）：脚本报 AB_REGRESSION，两条"仅本树红"。
+      ① `test_npc_script_interpreter_reachability.py` 五格：`--ignore` 掉本批两档后在本树**仍红**，
+      且在**中文路径下的干净 HEAD worktree**（`E:/项目/ab259cn`，用完即删）复现同样 5 红——而 A/B 的基线树
+      建在 ASCII 临时根。**"按路径形状敏感"的门禁档会自己造出"仅本树红"**：判读差集前要先对齐两侧路径形状，
+      否则一轮真回归会被这种形状掩盖（记进形态集第 231 条）。
+      ② `test_audit_p0a_security.py::TestA4WhitelistAnchoring::test_case_insensitive_still_works`：
+      单跑本批三档绿、整选择集 ignore 掉本批档也不在失败面 ⇒ 采集顺序/进程状态耦合，**不下结论**。
+    - **顺带照见的两族红都不属本批**：`test_readFaceDoesNotClaimShellAsAvailable.py` 八格红的成因是并发会话
+      此刻正在改 `neurova/skills/skill_service.py`（`git status` 显 `M`，在途态，不代改不认领）；
+      `test_subprocessTextEncodingRatchet` 与 `test_trackedScanFaceIsSingleSourced` 点名
+      `tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py:51` 那两格已由 §6-267 记账并写明
+      "等对方那批落库后由其后继批次收"。本批选择集里另见 `test_subQuantumSpinClockGate` 一枚墙钟格红
+      （机器加压时段），单跑不复现。
+    - **活体（`tests/manual/installGateRulesFollowShape_batch56.py` 扩展，真 HTTP 安装面 + 真盘账本 + 仓内真 zip）**：
+      15 格全 PASS，新增的 5d1/5d2/5d3 三格用同一份分类器——复算例外 0 条、形状分类与参与裁决集合条数一致
+      （`bare=1`）、装载门 dict 面与扫描器对象面给同一个分布；[5c] 改按 AST 判形状；[6] 的现行 pattern 现取。
+      跑前跑后仓内 `data/` 内容指纹同为 `(3041, '4bec3526e916')`（未写入）。
+    - **划闭与仍开**：§6-259 第三条 bullet 的"仍欠的一刀"到此划闭（读数面这一半补上，放行面那格照旧）；
+      仍开的是**产品题**——这只包到底该不该能装上，并入 §6-267 末段那张读面三态票一起拍（本批不动生产语义）。
+    - **本会话下一枚空号现查 §6-269（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`，本笔落库时该读数为 268）。**
 
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
@@ -4572,6 +4625,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `cda68399` `c0d649f8` `9e3770b8` | 批 56 甲案落地：`dangerous_exec` 只判裸名调用（`(?<![\w.])`）、`dangerous_path_traversal` 须同行有落地形态且**降级 low 不删读数**、裁决与拒因收进 `isBlocking()/blockingFindings()` 一份口径。**本轮唯一动生产的一批，净 +85**（`skill_scanner` +95/−15、`skill_install_gate` +12/−7，去向逐条在正文）；判据 12 格（+380 测试池）入子集 600→601；红自证恰 5 格、6 枚变异全红且字节还原、活体 13 读数全 PASS、A/B 基线 7 红 ↔ 本批 2 红仅本批侧 0 条 ⇒ AB_PASS。两处自纠入账：一枚**等价变异**（针打空被读成"判据没牙"）与 `scripts/ab_compare.sh` **在本仓并不存在**而首调失败被尾命令洗成 0 | §6-259（承 §6-250） |
 | `49caacee` `ad3b79f5` | §6-255 甲案落地：guardian 自声明扫描面（默认 `"all"`＝不声明就掉不了覆盖面），命令语义那两族只吃"键在 `PATH_PARAM_KEYS` **且**值过 `looksLikePathValue`"的路径值，两把键清单从 governance 的三份平行定义收回 `tool_guard` 一处并让预检与守卫同取；`FilePathGuardian` 留全量面（命令里的 `/etc/passwd` 照拦）。同根因三处：续行归一化改遍历单源（`code` 不再漏）、删零调用的 `_is_likely_path_param`、`scan_all` 挑路径改按形状放宽。**生产池 +99/−32＝净 +67，其中代码 +30**；判据 8 格（+166）入子集 605→606；红自证恰 3＋1 格、3 枚变异各咬自己那一格且 md5 字节还原、活体 11 格全 PASS（含 data/ 内容指纹不变）、A/B 基线 9 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS。两处自纠：活体谓词写窄（找的是脚本自己写错的串，不是产品的故障）；commit 号被反引号命令替换吃掉 ⇒ 就地 amend 更正 | §6-266（承 §6-255） |
 | `8cf388c6` `84fc9b4a` | §6-267：空壳技能条目不再被首钉成构件权威——`call_skill` 的摘要对账排在入口判定之前，未钉分支每次调用先把空壳摘要落进账本、下一行才报"没入口"；入口判定收成一处 `_resolveEntryPoint`，未钉只在"落盘确有可执行构件"时首钉（同根因插件半区同批收）。生产净 **+25**、判据 +225、活体 +209、子集 606→607。红自证恰 4 格；**活体两侧对照**是本批的取证形态——无修复那侧 `[4][5][6]` FAIL 且 `[6]` 拒因正是 `artifact_digest_mismatch` | §6-267（承 §6-259） |
+| `9bac66a1` | §6-259 末格「读数面仍欠的一刀」划闭（纯判据批，生产池 0）：安装门读数逐条读证据行按 **AST** 分形状，分类器刻意不看被测规则（拿规则自己的 pattern 分类它产生的读数＝判据与被判对象共享同一个偏见）；另钉"读数可在自己证据行上被生产规则复算"这一维（M3 变异恰只咬它，此前全仓无人判）。单源三处收口：撤判据里本地的 `severity in (critical, high)` 名单改指生产 `blockingFindings`/`isBlocking`、形状判定收成 `tests/execShapes.py` 一份、活体脚本的子串判定与手抄 pattern 改指单点。四枚变异各咬自己那一格且 md5 字节还原（M3/M4 各恰 1 红）；活体 15 格全 PASS 含新增 5d1-5d3；A/B 报的两条"假回归"用中文路径干净 HEAD worktree 与 `--ignore` 复跑逐条归因（形态集 231：基线在 ASCII 根、本树在中文根 ⇒ 路径敏感门禁档自造差集）。测试池 +266/−37＝净 +229，子集不动（两档早已在册） |
 
 > **这张表有一处维护断档，如实标出**：上表止于 `c1377d27`（§6-186，10-13），中间十余批（§6-187—§6-230）
 > 没有逐笔进表——那些批的**明细一直在 §6 各格里，权威源是 §6，不是本表**。本表只补回"本轮（10-15/16）"这一段，
@@ -4586,12 +4640,17 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 > 危害由活体两侧对照量出——无修复时补上真字节会被判 `artifact_digest_mismatch`）；**读面半区仍等裁**
 > （列表／详情／schema 只认账本 `enabled`，`market_registry.py:376-379` 还兜底注册 ACTIVE 裸基类——
 > 三态票与推荐 (甲) 写在 §6-267 末段）。另"该不该让这只包装上"（今天仍被 1 条裸 `compile(` 拒）仍是产品语义，等裁；③ 既有判据 `test_installGateDocFilesAreReportOnly.py` 那一格**仍按
-> (后缀, 规则 id) 计数而不读证据行**，分不清"27 条正则预编译"与"1 条真动态编译"——**仍欠的一刀**，登记待点单；
+> (后缀, 规则 id) 计数而不读证据行**，分不清"27 条正则预编译"与"1 条真动态编译"——**✅ 已闭（§6-268 / `9bac66a1`）**：
+> 改按 **AST** 逐条读证据行分形状，分类器刻意不看被测规则，另钉"读数可在自己证据行上复算"这一维（全仓此前无人判它）；
 > ④ 新缺陷未立项：zip 成员名撞 Windows `MAX_PATH`（实测 261 字符），`market_sources.py:315` 把它折成一句 "zip refused"
 > （短根机器即绿，与扫描门无关）；⑤ 本会话不认领的两条常驻红见 §6-259"不认领"段（`513c651f` 的扫描预算登记欠账、
-> `test_market_builtin` 那条长路径）。
+> `test_market_builtin` 那条长路径）。⑤ 增补：`tests/unit/tools/` 那一族（并行读_out／截止台账，条数随采集顺序与
+> 负载浮动）此前**台账未登记**，现记在 §6-266；benchmark 档那两格基线欠账记在 §6-266／§6-267。
 > **一处工具账**：Skill 的速查表与形态集 218 都把 `scripts/ab_compare.sh` 当既有件写着，现查该路径**不在跟踪面**——
 > 规则（`FAILED`/`ERROR` 抽集合、基线复跑 N 次、failset 认 `tests/` 起头）照用，落点得自己手搭，别再去找那个脚本。
+> **另一处工具账（§6-268 实测，判读 A/B 前必读）**：基线树建在 **ASCII 临时根**、本树在中文根 `E:/项目/Neurova`，
+> 于是"按路径形状敏感"的门禁档（`test_npc_script_interpreter_reachability.py` 五格）必然给出"仅本树红"的**假回归**。
+> 差集里出现子进程/门禁/解释器派发类节点时，先补一次"中文路径下的干净 HEAD worktree"对照，再决定认不认领。
 
 上表未覆盖的序 1—11 仍按原序待点单。队列进度：**P0-1/P0-2/P0-3、P1-4/P1-5/P1-6、P2-7 已全部落地**（P2-7 见 `d63b3c66`，只收了"无锁"那一格，`Lock`→`RLock` 的 165 处转棘轮）；**P2-8 三批全部落地**（第一批 `78abaa2e` 执行体归一 + 额度记账，第二批 `81fd6b56` 接进网页回合入口 + `parked` 非终态 + 人工续跑，第三批 `d4c8b560` 渠道与两条 `/v1/chat` 入口接上同一份实现），§6-5 与 §6-46 均已真闭环——闸现在覆盖仓内四条真回合入口，台账执行体与准入口只剩 `core/agent_run_ledger` 一处实现。`agent/turn_coordinator.py` 因此**从"需人裁"移出**——裁决已给并实现完毕（≤10 次、单次 ≤20s、超时挂起等人工续跑；闸放回合入口一次；park 落库后立即收尾；续跑权限＝会话属主 + 管理员）。**2026-10-08 追加：P2-9（§6-12 事件面）A 轮三批落地**（`b2a4cf55` 缺陷①② 契约错配、`9d4befb9` 判据扫描面剪第三方、`e3cd82cc` 两份总线合一 + §6-49 留痕）；**P3-11（429 墙钟预算）落地**（`94f4eedc`，10×20s=200s 累计预算，同让位闸口径；其同根因判据补交见 `42447e8e`）；**P3-12（记忆面写侧匿名可改）落地**（`d2ee8d96`，路由级门一处覆盖 31 条写路由，读侧 default 桶语义未动）——这三项从"需人裁"移出。**P3-12 遗留的"只留两个门"已于同日补完**：`709bb58e` 把角色门取源收口到严格门本体（§6-54 闭环），资源标签面的查询参数放行按既有守卫保留未动；比这更窄的"把 21 个文件缩到 3 个"仍不做，理由与成立条件写在 §6-54 格内。**2026-10-08 追加 P3-14（长任务与工具调用是否闭环）五批全部落地**：`8d9a459e` 工具轮回放闭环（§6-67）、`1cc26b47` 晚到终态会话栅栏（§6-68）、`898355db` 租约写了要有人读（§6-69）、`2ffe4a8d` Studio 台账三格收口（§6-70）、`39a1add9` Anthropic 流式契约（§6-71）；五份判据各自入子集（`750395e2`/`047e58af`/`6ca9b4e5`/`57a108f5`/`281d15c9`）。生产净 LOC 依次 +54/+55/+111/+72/+244，A 批为正的理由写在正文：缺陷本体是「契约从未实现」，只删不增无法闭合，而「删」已在同一提交由 openai_loop 的 −295 兑现。本轮另扫出四组只写不读或需人裁的格，未顺手改：§6-72（Studio 无取消、runs 状态词汇表无单源、`get_background_status` 与死信队列、`/console/chat/runs` 与 `AgentRunStore.stats`）、§6-73（`test_closed_loop_verification` 名为闭环实为 import smoke）、§6-74（并发负载污染 A/B 与 `test_agent.py` 预存挂起的处置）、§6-75（本会话三条记账更正，含一次共享清单文件上的 `--only` 违规自纠）。**同日 G 轮把这四组里能自行闭合的都做完**：G1 词汇表单源 `62a36f96`（+判据入子集 `9bbbd9fa`）、G2 查询口半退役 `4770340a`、G3 台账计数接读侧 `4737fb6f`、G4 parked 续跑会话级入口 `df2a1e00`（+两判据入子集 `3e801962`）、G5 名实改名 `0e47b2c8`+`c17cbd6e`；真 key 复验 `aaa590b8` 收掉 §6-71 的边界并同时报出 §6-76。**§6-72 至此六格闭四格**，真余两格需人裁（Studio 取消、ACP 死信队列）；§6-73 闭环；§6-75 由三条**增至八条**（G 轮又抓出三笔净 LOC 写错与一笔"声明与 numstat 不符"，见该条 ④—⑧）。**2026-10-08 追加 P3-13（C2/C3 会话面归属）落地**：`d9224d52` 把 `/api/v1/chat/history` 两条空转端点接上唯一实现并同解归属（复核实状后原"跨租户可读"描述作废——真缺陷是从未工作过 + 假成功）；`2ca1bfc1` 把 C2 同根因 AST 扫荡扫出的 `/api/v1/sync` 六格补齐，其中三条**原本连身份依赖都没有**（匿名可结束任意会话、可按 `?user_id=` 拉整张会话表、可枚举在线 session_id），且该 store 与 chat 共用 session_id 命名空间。往后只剩两类：① **需人裁**——§6-37（敏感记忆加密从未接线）、§6-39（主链不吃记忆预算）、§6-40（受保护子集常驻红 + 判据与设计口径冲突）、§6-41（跑测污染上下文台账）、§6-42（技能池关键段两侧都不持锁）、§6-43（`computer_use` 目录超墙钟跑不完）、§6-47（miner 注释虚报数据源）、§6-48（前端两条 HEAD 常驻红）、§6-38（demo 脚本 CWD 落点）、§6-50（两处只写不读的总线取用面）、§6-51（上下文缓存与记忆流水账两个零写零读面）、§6-52（惰性导出判据前提符号已退役）、§6-53（跑测改写仓内真实用户会话文件）、§6-55（`test_memory_route_shadowing` 夹具落后于生产契约，HEAD 常驻红）、§6-56（**已闭环 `35649409`**：七份活体脚本的复现行不再写死开发机绝对路径，实况与"CI 是否看得见决定常驻红能活多久"这条读数见 §6-117）、**§6-119（序 5 批 E：通用 KV 配置器有两份实现而生产零消费者——"删弱留强"的前提是假的，要裁的是"本仓要不要这一层"，三条路的影响面已摆在该格）**已裁 E-2 并落地 ✅ `9146989c`/`ce26d1e5`，见 §6-125****、**§6-59（`SessionSyncPage.vue` 调两条从未注册的路径：接线 or 显式退役该页）**、**§6-60（sync 列表/在线连接的"管理员全量可见"被删，代价已写明）**、**§6-61（context composition 同类低危）**、**§6-62（phase3 `session-started` 的 `user_id` 来自查询串，可冒充他人记账）**、**§6-64-B 已落地（`6850bfde` 逐文件只降不升棘轮，基线 38 文件 / 60 处）；剩下 A「按目录分批扫净」已从"需人裁"转为可排期工单**、RSI 遗产分支成功语义、属主读会话、**§6-65 已裁定「不删，就地标为已知存量」并转结（文件未跟踪且被 gitignore，删了不可恢复，而防再生判据已在装配点生效）**、**§6-66 已闭环（`tests/manual` 收集拦截层：E1 原计划"退役它"的前提被实测推翻，实际待办只剩对新增脚本的只降不升棘轮——`7c494c93` 落地，基线 20 文件 / 25 处）**、**§6-76（Anthropic 协议转换双定义——**已裁毕并按修法 A 落地 `c9edf408`**，原三选一代价档案留在该条正文供引用）**、**§6-72 真余两格（Studio 取消＝2026-10-08 裁定"按新能力做全套四件"；ACP 死信队列＝同日裁定"接读侧"，两批在途）**；② **可按序推**——§9 序 1—11 与 B 档 14 组（≈1.3 万行）。「+60s 收集守卫是否进 CI 子集」这一格**已裁毕并维持原处置**（`aff4ec6b` 复算：单文件 63.63s，成本口径不变则不进；真正的产出是查出该守卫此前从未运行）。
 
