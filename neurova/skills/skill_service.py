@@ -1608,6 +1608,8 @@ class SkillService:
                             "version": skill_info.get("version", "1.0.0"),
                             "description": skill_info.get("description", ""),
                             "enabled": skill_info.get("enabled", True),
+                            # 「在册」不等于「可得」：这一格是落盘/账本对账后的读数，不是 `enabled` 的别名
+                            **self.availabilityFor(skill_id),
                             "installed_at": skill_info.get("installed_at", ""),
                             # 生命周期与用量（前端状态列/徽标数据源, C11 延伸）
                             "usage": skill_info.get("usage") or {},
@@ -1648,6 +1650,8 @@ class SkillService:
                     "version": skill_info.get("version", "1.0.0"),
                     "description": skill_info.get("description", ""),
                     "enabled": skill_info.get("enabled", True),
+                    # 与 `list_skills` 同一处判定，两面不许分叉（判据钉这一点）
+                    **self.availabilityFor(skill_id),
                     "installed_at": skill_info.get("installed_at", ""),
                     "path": skill_info.get("path", ""),
                     "manifest": skill_info.get("manifest", {}),
@@ -1676,6 +1680,51 @@ class SkillService:
             if py_file.name != "__init__.py":
                 return py_file
         return None
+
+    def availabilityFor(self, skill_id: str) -> Dict[str, Any]:
+        """这一条账目能不能变成一个**动得了**的执行体——读面唯一的问句（§6-272，用户裁甲）。
+
+        为什么需要它：`list_skills`／`get_skill_info`／轮级可见性过去只认账本的 `enabled`，
+        于是"清单在册"被当成"可得"。本机 `data/agents/default/skills/manifest.json` 的 8 条里 7 条
+        是 `enabled: true` 而目录里只有 `manifest.json`（2026-10-06 旧代码留下的陈态），
+        面板、工具 schema、提示词目录全把它们画成可用，要到执行那一刻才失败。
+
+        三条分支都是真形状，少认一条就是把**可用**技能误标成不可用（那是另一种故障）：
+        ① 账本自证型（`manifest.config.tool_sequence` 非空）——合成／自主分装的字节在账本里，磁盘可以空；
+        ② 代码映射型（`web-search` 那一族）——执行体在代码里，不在盘上；
+        ③ 落盘构件型——目录里有 `SKILL.md`（指令型）或有入口脚本（与 `_resolveEntryPoint` 同一口径）。
+        `path` 为空是 `register_auto_skill` 声明的"自动技能无文件路径"，本判据**不裁决**它。
+        """
+        with self._lock:
+            info = self._skills.get(skill_id)
+            if not isinstance(info, dict):
+                resolved = self.resolve_skill_alias(skill_id)
+                info = self._skills.get(resolved) if isinstance(resolved, str) else None
+            if not isinstance(info, dict):
+                return {"available": True, "unavailableReason": ""}
+            manifest = info.get("manifest") or {}
+            toolSequence = (manifest.get("config") or {}).get("tool_sequence")
+
+        if isinstance(toolSequence, list) and toolSequence:
+            return {"available": True, "unavailableReason": ""}
+
+        from neurova.skills.market_registry import hasExecutorMapping
+
+        if hasExecutorMapping(skill_id):
+            return {"available": True, "unavailableReason": ""}
+
+        rawPath = str(info.get("path") or "")
+        if not rawPath:
+            return {"available": True, "unavailableReason": ""}
+
+        skill_path = Path(rawPath)
+        if not skill_path.is_dir():
+            return {"available": False,
+                    "unavailableReason": "账本落点目录不在盘上：%s" % skill_path.name}
+        if (skill_path / "SKILL.md").exists() or self._resolveEntryPoint(skill_path):
+            return {"available": True, "unavailableReason": ""}
+        return {"available": False,
+                "unavailableReason": "落盘无可执行构件（既无 SKILL.md 指令体，也无入口脚本）"}
 
     def call_skill(self, skill_id: str, method: str = "main", **kwargs) -> Dict[str, Any]:
         """
