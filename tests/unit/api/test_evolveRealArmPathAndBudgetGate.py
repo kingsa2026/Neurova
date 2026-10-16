@@ -224,7 +224,45 @@ class TestBudgetGateBeforeSpending:
         assert r.json()["detail"].startswith("真臂预算不足")
 
 
-class TestBudgetKeyIsWritableThroughAdminPut:
+class TestArmKindReachesTheApproverFace:
+    """审批人不必回查文件：臂来源已随提案详情同一次取数出街（§6-95 后半那条读路径）。
+
+    这一格是给**上一笔我自己写重的话**收口的：台账 §6-265 原写"提案面看不见臂来源、
+    要回查运行文件"，复算后发现提案详情端点本来就把那次运行的审计内容嵌进同一条响应
+    （`evolution_run`），臂来源因此就在审批人点开提案的那一屏里。 claim 要么被测着成立，
+    要么就是 prose——所以这里补的是判据，不是文档。
+    """
+
+    def testProposalDetailEmbedsTheArmKindAndTurnCost(self, env, offline, monkeypatch):
+        import neurova.api.endpoints as endpoints
+
+        agent = _AgentStub()
+        monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
+                            raising=False)
+        _skillInfo(monkeypatch)
+        client = _client()
+        posted = _postEvolve(client, "a1",
+                             {"skill_id": SKILL_ID, "iterations": 1, "real_trajectory": True})
+        assert posted.status_code == 200, posted.text
+        proposalId = (posted.json()["data"].get("proposal") or {}).get("proposal_id")
+        assert proposalId, "这条链没出提案，详情面无可验"
+
+        r = client.get(f"{BASE}/skills/a1/proposals/{proposalId}")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["evolution_run_status"] == "attached", data["evolution_run_status"]
+        run = data["evolution_run"]
+        assert run["executor_kind"] == "real_agent", run
+        assert run["model_under_test"] == "agent_routed", run
+        # 计划与真实花费同时出街：审批人看得见这条证据花了多少回合、上限算的是多少。
+        # 17 = 本夹具那份集（train2/holdout2/heldout2、iterations=1、锚定地板开）；
+        # 两面必须给同一个数——运行审计与响应各算一遍就是第二份口径。
+        assert run["planned_agent_turns"] == 17, run
+        assert run["planned_agent_turns"] == posted.json()["data"]["planned_agent_turns"], run
+        assert run["agent_turns_used"] <= run["planned_agent_turns"], run
+        assert run["budget_plan_exceeded"] is False, run
+
+
     def testPutReachesTheNewKeyAndTheThreeLaggingRsiKnobs(self, env, monkeypatch):
         """PUT 白名单落后于配置单源 = 键写了也写不进去（agent_limits 家族的同形病）。"""
         from neurova.evolution.evolution_settings import load_settings
