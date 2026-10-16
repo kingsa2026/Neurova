@@ -374,3 +374,87 @@ class TestDeclarativeGateSharesTheSingleSource:
             DoomLoopParams(similarity_threshold=1.5)
         with pytest.raises(ValidationError):
             DoomLoopParams(similarity_threshold=0.2)
+
+
+class TestSiblingGatesShareTheSameSource:
+    """§6-271「仍开②」的落点：同一条根因在另外两把门上的两个命中点（教义第 5 条）。
+
+    `IterationGate(max_rounds: int = 20)` 与 `TokenBudgetGate(max_tokens: int = 100000)`
+    都是配置单源 `agent_limits_settings.DEFAULTS` 的第二份手抄，`gate_catalog` 的
+    `IterationParams` / `TokenBudgetParams` 又抄了第三、第四份。生产装配点每轮都显式传值
+    （`base.py:422-423`），所以这些数字今天"只是"漂移风险——但漂移这条路本来就没有正确答案：
+
+    **`IterationGate(max_rounds=None)` 走的是 `self.ROUND_BUDGET_FALLBACK`，而那个属性只在
+    `GoalGate` 上定义（`gates.py:245`）**，None 传进来当场 AttributeError。
+    也就是说"缺省时取什么"这一格上，一份手抄数字与一条会崩的分支并排放着——本批把它接到单源，
+    形态与 `DoomLoopGate` / `DoomLoopParams` 完全一致（缺省＝取单源，合法域＝取夹紧常量）。
+    """
+
+    def testClassDefaultsEqualTheSingleSource(self):
+        import neurova.security.agent_limits_settings as als
+        from neurova.agent.gates import IterationGate, TokenBudgetGate
+
+        assert IterationGate().max_rounds == als.DEFAULTS["max_loop_rounds"]
+        assert TokenBudgetGate().max_tokens == als.DEFAULTS["token_budget"]
+
+    def testDefaultsTrackTheSingleSourceNotAReType(self, restoreDefaults):
+        """按值相等只证"今天恰好一样"——把单源改掉，缺省读数必须跟着动（形态集 241）。"""
+        from neurova.agent.gates import IterationGate, TokenBudgetGate
+
+        restoreDefaults.DEFAULTS["max_loop_rounds"] = 33
+        restoreDefaults.DEFAULTS["token_budget"] = 44000
+        assert IterationGate().max_rounds == 33, "IterationGate 的缺省不跟着单源动＝又抄了一份"
+        assert TokenBudgetGate().max_tokens == 44000, "TokenBudgetGate 同上"
+
+    def testNoneMeansFollowTheSourceNotCrash(self):
+        """显式传 None 与不传必须同解——今天前者直接 AttributeError（属性定义在另一把门上）。"""
+        import neurova.security.agent_limits_settings as als
+        from neurova.agent.gates import IterationGate, TokenBudgetGate
+
+        assert IterationGate(max_rounds=None).max_rounds == als.DEFAULTS["max_loop_rounds"]
+        assert TokenBudgetGate(max_tokens=None).max_tokens == als.DEFAULTS["token_budget"]
+
+    def testGatesSourceDoesNotRetypeThoseLiterals(self):
+        """形状反证：数字不许留在 `gates.py` 的签名默认值上（同 `window_size: int = 4` 那一格）。"""
+        text = GATES_PY.read_text(encoding="utf-8")
+        for line in ("max_rounds: int = 20", "max_tokens: int = 100000"):
+            assert line not in text, f"gates.py 里仍手抄默认值：{line}"
+
+    def testCatalogOmittedParamsFallBackToTheSource(self):
+        """声明式配置与装配点同取一份默认，否则两边按两种阈值判停、各自测试都绿。"""
+        import neurova.security.agent_limits_settings as als
+        from neurova.agent.gate_catalog import GateCatalog, compile_gates
+
+        defaults = als.DEFAULTS
+        built = {g.name: g for g in compile_gates(
+            [{"type": "iteration"}, {"type": "token_budget"}], GateCatalog())}
+        assert built["iteration"].max_rounds == defaults["max_loop_rounds"]
+        assert built["token_budget"].max_tokens == defaults["token_budget"]
+
+    def testCatalogDoesNotRetypeThoseDefaults(self):
+        text = (PROJECT_ROOT / "neurova" / "agent" / "gate_catalog.py").read_text(encoding="utf-8")
+        for line in ("max_rounds: int = 20", "max_tokens: int = 100000"):
+            assert line not in text, f"gate_catalog.py 里仍手抄默认值：{line}"
+
+    def testCatalogBoundsComeFromTheClampConstants(self):
+        """合法域也取同一批常量：面板/schema 报出的区间必须等于 `get_effective_limits` 夹紧用的区间。"""
+        import neurova.security.agent_limits_settings as als
+        from pydantic import ValidationError
+
+        from neurova.agent.gate_catalog import IterationParams, TokenBudgetParams
+
+        def bounds(model, name):
+            ge = le = None
+            for meta in model.model_fields[name].metadata:
+                ge = getattr(meta, "ge", ge)
+                le = getattr(meta, "le", le)
+            return ge, le
+
+        assert bounds(IterationParams, "max_rounds") == (als.MIN_ROUNDS, als.MAX_ROUNDS)
+        assert bounds(TokenBudgetParams, "max_tokens") == (als.MIN_TOKEN_BUDGET, als.MAX_TOKEN_BUDGET)
+        for bad in (als.MIN_ROUNDS - 1, als.MAX_ROUNDS + 1):
+            with pytest.raises(ValidationError):
+                IterationParams(max_rounds=bad)
+        for bad in (als.MIN_TOKEN_BUDGET - 1, als.MAX_TOKEN_BUDGET + 1):
+            with pytest.raises(ValidationError):
+                TokenBudgetParams(max_tokens=bad)
