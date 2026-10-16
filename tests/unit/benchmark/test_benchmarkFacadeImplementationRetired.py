@@ -1,4 +1,4 @@
-"""`neurova/benchmark` 的门面实装退役判据（§6-258 起手的票④第一包，用户裁定取甲＝退役）。
+"""`neurova/benchmark` 的门面实装退役判据（票④第一包，用户裁定取甲＝退役）。
 
 **为什么值得单独一档**：这个包 575 行里有 468 行是实现，全仓对它门面名字的取用只剩一处
 ——我自己上一批写的落点判据（`test_HomeFamilyLandingsFollowDataRoot.py` 构造 `BenchmarkFramework()`
