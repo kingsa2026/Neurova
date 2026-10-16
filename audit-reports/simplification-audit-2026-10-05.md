@@ -5176,6 +5176,24 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **号次**：本格取 **286**（`audit-reports` 明细行 max 现读 285，且 §6-285 末行明文把下一枚留给本会话）。**下一枚空号现查 §6-287**（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`）。
 
 
+287. **技能执行咽喉改协程：`async def main` 的技能必须真被 await 到底，链上按 dict 契约取值（✅ `629d6564` 生产+判据+活体 / `66281829` 子集 617→618；用户裁甲·分两批的第①批）** 🟢 —— §6-283 那条票的前置件；映射表分流留给下一批。
+
+    - **复核实状（"存量事故"这个说法要收窄）**：咽喉 `SkillService.call_skill` 是同步函数，而它**唯一**的对外入口 `POST /api/v1/skill-pool/private/{id}/execute`（`skill_pool_api.py:460`）在 `async def` 里内联调它 ⇒ 入口写成协程的技能拿到的是 `{"success": true, "result": <coroutine object>}`，序列化到对外是 **HTTP 500**。但盘上现读**协程入口 0 个**（市场 zip 与 `neurova/skills/builtin/` 全扫）⇒ 这不是正在发生的事故，是一个**没有闸的口径洞**：谁第一天写 `async def main`，谁第一天撞上。
+    - **第二个命中点不声称在跑**：`skill_chain_executor.py:270` 早就在 `await` 这个同步方法，之后还按 `.output`/`.success`/`.error` **属性**取值——两处都与 dict 契约不符。该链在 `neurova/` 内**零构造点**，唯一构造方是 `tests/unit/skills/test_meta_skill_integration.py:165` 且不带 service（走"模拟执行"那一支），所以这行坏形态今天到不了运行时；修的正是"哪天有人接上它就炸"。
+    - **一处刻意不做的设计选择，写清机制而不是写偏好**：**不**把同步技能挪进 `asyncio.to_thread`。咽喉全程持的 `self._lock` 取自 `creation_governance.shared_lock(skills_dir)`——**按目录共享**的 RLock，重入只在**同线程**成立；技能体里回调本服务（同目录＝同一把锁）是能过的真路（活体读数 `listed=3`），挪进线程池就变成主线程持锁 await、worker 等锁，当场死锁。分派口径抄仓内既有的 `agent/sub_session.py:callSubSessionChannel`（**调用之前**判 `iscoroutinefunction`），不新造第二套。
+    - **判据池 8 格**（`tests/unit/skills/test_callSkillThroatIsAwaitable.py`）：协程入口真装真加载真 HTTP 跑出值／同步入口没被挪进线程池／技能回调限时 8s 自己红／链按 dict 取值（直接调那条格，打行为不打符号名）／两处调用点必须 await／判定在调用之前（AST 比行号，不钉词）／反向钉"生产里不许 `asyncio.run` 包咽喉"／咽喉源文件取法（`__file__` 是模块属性，不是类属性）。测试面同步改判 **17 处**调用（**11 处单元** ＋ **6 处活体探针**，逐档现读 `asyncio.run(` 计数 7/4/3/3）包一层 `asyncio.run`；回调落点写进生成的临时技能源码里，**不走进程 env**。勘误：`629d6564` 正文把这一串记成"12 单元＋5 探针"，是按文件数想当然，未逐档核。
+    - **红→绿原文**：红灯 `6 failed, 1 passed`，失败集恰为本批新判据；还原后 `8 passed` 连跑两次同读数。三类分开报——行为红 `执行口 HTTP 500` ＋ `链步骤…实得 StepExecutionResult(status=FAILED)` ＋ 解释器自报 `RuntimeWarning: coroutine 'main' was never awaited`；契约未实现的形状红 3 条；设计成今天就该绿的那格（反向钉）由 P6 证明它有牙。红自证（tag `redselfproof-b61-1792175604`，sha 从 `git rev-parse stash@{0}` 取）⇒ `6 failed, 22 passed`，失败集不许多也不空。
+    - **变异 5 枚咬住 ＋ 两枚如实否证**：P1 端点退回同步内联→2 格红；P2 链读回属性→1 格；P3 判定挪到调用之后→1 格（行为上它仍"能跑"，只能由口径格抓）；P4 挪进 `to_thread`→2 格；P6 `asyncio.run` 兜底→3 格。**P5「咽喉退回同步」构造不出来**（`await` 落在非协程函数上就是 SyntaxError，`compile()` 当场拒绝）——整体撤除这一形态已由红自证覆盖，不拿它冒充一枚变异。**P4 的第一版不是红而是挂死**（卡在同一把共享 RLock 上，30s thread 超时打断整轮 session）⇒ 判据自带限时 join 之后才会"自己红并说清原因"。
+    - **活体 4/4**（`tests/manual/callSkillThroatAwaitsEntries_b61.py`）：协程入口 `[1] HTTP 200 …result":{"ran":"coroutine-entry"}`（改前 500）、`[2]` 线程读数（基准取"有没有被挪进 ThreadPoolExecutor"，不是主线程名——portal 线程名做基准会比错东西）、`[3] 回调腿 200、listed=3、0.0s`、`[4] data/ 指纹未变`。反证腿（`apply P1` 后重跑）**同一份脚本**：`[1] FAIL …'coroutine' object is not iterable`，随后脚本在 `[2]` 的非 JSON 回包处炸停——挂在那里不算通过，读数照实记。
+    - **宽域 A/B（基线＝纯 HEAD `606be2bf` 中文路径仓外 worktree，两侧同选择集、一律 `--ignore` 那档起真 pip 子进程的）**：基线 `39 failed, 10007 passed, 9 errors` ↔ 本批 `39 failed, 10015 passed, 8 errors`；失败集合 48 ↔ 47，**仅本批侧红 0 条**。仅基线侧那 1 条仍是批 60 定性的 worktree 根缺 `test_workspace/`（形态差，非本批内容）。
+    - **顺带辨出两条 main 上的预存红**（两侧同红，且把本批改动整体 stash 掉后单跑也红）：`test_public_library_wave_h3.py::test_pool_skill_submit_carries_exec_payload`（`register_auto_skill('gen_kit', …)` 返回 False）与 `test_my_skills_wave_v.py::test_from_public_refused_over_local_same_name`（期望 409 实得 404）。两档**不在受保护子集**、台账此前也没记过 ⇒ 登记不动手（与本批不同根因，混修会把归因烧成一团）。
+    - **一次自我否决留档（判据形态，不是态度问题）**：中途我把"跑完 A/B 的差集"当成已有事实写了出来，而当时 `/tmp` 里根本没有 ab61 产物——是回头核对文件系统才发现。**没有留痕的读数就不许当结论**；上面那段 A/B 判读是在真跑完的 `/tmp/ab61_base.ids`(48) ↔ `/tmp/ab61_our.ids`(47) 之上重出的。同批净 LOC 的估写之错第三次复现（正文先写 +249/+170，现量 +289/+161），已被上一笔刚落的 `test_commitLocClaimMatchesOwnNumstat` 当场咬住——通道这次是**先建后用**。
+    - **给 §6-286 补一句准数**：`library_service` 文档原句"构造点散在 15 个模块里"混了两件事——被收口的是 **23 处／15 个模块**，开工前全仓实状是 **25 处／17 个模块**（含工厂自己与 `skill_encapsulation`）。已在本笔把该句改准。
+    - **净 LOC**（`git add` 后现读 `--cached --numstat`，先量后写）：生产池 **+33/−12 ＝ 净 +21**——`skill_service.py` +17（`import inspect` 1、协程分派 6、docstring 11，删旧签名/注释 4）、`skill_chain_executor.py` +4（dict 读法＋说明），`skill_pool_api.py`/`library_service.py` 净 0；测试/基建池 +471/−17（判据档 289、活体档 161、两处改判单元档 +13/−11、两处探针 +8/−6）。子集笔 **+7/−0**。
+    - **下一批（甲的第②批，未动）**：`call_skill` 先问映射表、再回落盘（§6-280 那条腿）。本批已把咽喉改成可 await，那一票不再被"同步咽喉"卡住。
+    - **号次**：本格取 **287**（明细行 max 现读 286）。**下一枚空号现查 §6-288**（写前现场重取 `grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`）。
+
+
 283. **§6-280 已裁甲；开工前实测出一条会让"两行分流"直接失败的前提——`call_skill` 是同步函数而所有执行体入口是协程（🟡 登记，未实施，等 `skill_service.py` 空闲）** ⏳ —— 用户裁定原文（2026-10-16）：「甲｜先问映射表，再回落盘」。
 
     - **裁定含义先写清（不可逆点已接受）**：对外执行契约从此承认"盘上没有字节的技能"可以经 `POST /skill-pool/private/{id}/execute` 这条池/运行口执行；映射型没有 `artifact_digest`，完整性语义按票面写成**由代码本体负责、不受安装门摘要管辖**（不是"摘要缺失所以放行"，那句是巧合不是契约，必须写成前者）。
