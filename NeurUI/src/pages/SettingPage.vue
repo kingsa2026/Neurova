@@ -269,31 +269,35 @@
         <!-- 凭据管理（SSH 多主机 + 社交平台），按当前用户隔离；与"我的凭据"页共用组件 -->
         <CredentialManager />
 
-        <!-- Agent 运行限制（Token 预算上限 + 单次会话最大 Loop 轮次） -->
+        <!-- Agent 运行限制：控件集合与合法域都取自 GET 回包（单源在后端 get_limit_domains()）
+             ——— 模板里不再抄区间，也不再抄一份"能调哪些键"的清单 -->
         <GlassCard :title="t('settings.agentLimitsTitle')">
           <p class="governance-hint">{{ t('settings.agentLimitsHint') }}</p>
-          <a-form layout="vertical">
-            <a-form-item :label="t('settings.agentTokenBudget')">
-              <a-input-number
-                v-model:value="agentLimits.token_budget"
-                :min="1000"
-                :max="10000000"
-                :step="10000"
-                style="width: 100%"
-              />
-              <p class="governance-hint">{{ t('settings.agentTokenBudgetHint') }}</p>
-            </a-form-item>
-            <a-form-item :label="t('settings.agentMaxRounds')">
-              <a-input-number
-                v-model:value="agentLimits.max_loop_rounds"
-                :min="2"
-                :max="200"
-                :step="1"
-                style="width: 100%"
-              />
-              <p class="governance-hint">{{ t('settings.agentMaxRoundsHint') }}</p>
-            </a-form-item>
+          <a-form v-if="agentLimitKeys.length" layout="vertical">
+            <div v-for="key in agentLimitKeys" :key="key" class="limit-row" :data-key="key">
+              <a-form-item :label="agentLimitLabel(key)">
+                <a-switch
+                  v-if="agentLimitDomain(key)?.kind === 'bool'"
+                  :checked="agentLimitBool(key)"
+                  @update:checked="setAgentLimit(key, $event)"
+                />
+                <a-input-number
+                  v-else
+                  :value="agentLimitNumber(key)"
+                  :min="agentLimitDomain(key)?.min"
+                  :max="agentLimitDomain(key)?.max"
+                  :step="agentLimitStep(key)"
+                  style="width: 100%"
+                  @update:value="setAgentLimit(key, $event)"
+                />
+                <p v-if="agentLimitHint(key)" class="governance-hint">{{ agentLimitHint(key) }}</p>
+                <p v-if="agentLimitDomain(key)?.follows" class="governance-hint">
+                  {{ t('settings.agentLimitFollows', { source: agentLimitDomain(key)?.follows }) }}
+                </p>
+              </a-form-item>
+            </div>
           </a-form>
+          <p v-else class="governance-hint">{{ t('settings.agentLimitsNotLoaded') }}</p>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="savingAgentLimits" @click="saveAgentLimits">{{ t('common.save') }}</GlassButton>
           </template>
@@ -351,6 +355,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
+import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { supportedLocales, uiCodeForLanguageTag } from '@/i18n'
@@ -394,9 +399,94 @@ const routing = ref({ actionability_enabled: false, actionability_lookback: 20, 
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
 const savingGovernance = ref(false)
 
-/** Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次） */
-const agentLimits = ref({ token_budget: 100000, max_loop_rounds: 20 })
+/**
+ * Agent 运行限制：**值与合法域都取自回包**，前端既不写默认值、也不写键名白名单。
+ *
+ * 此前这里是 `ref({ token_budget: 100000, max_loop_rounds: 20 })` 配模板里的
+ * `:min="1000" :max="10000000"`——两个数都是后端夹紧常量手抄来的第二份定义，
+ * 而模板只画两个框，回包里其余八键没人渲染（管理员只能绕开 UI 用 API 调）。
+ * 现在控件集合 = `domains` 的键集合，区间 = `domains` 的 min/max（同源见
+ * `agent_limits_settings.get_limit_domains()`）；加载失败时一个框都不画，
+ * 免得把前端编的数当成生效值存回去（F-12 同一根因）。
+ */
+const agentLimits = ref<Partial<AgentLimits>>({})
+const agentLimitDomains = ref<AgentLimitDomains>({})
 const savingAgentLimits = ref(false)
+
+/**
+ * 每键的界面文案。这是一张**文案表**，不是"面板能调哪些键"的清单——
+ * 表里没有的键仍会渲染，标签回退成键名本身（少一句翻译不该变成少一个旋钮）。
+ * 用 `() => 取文案` 而不是按键名动态拼：语言包引用守卫只认字面量形式的引用，
+ * 动态拼出来的键缺失时只在运行时 warn，守卫看不见（本文件注释里若写出示例引用，
+ * 也会被同一把尺当成引用点扫进去——措辞要避开那个形状）。
+ */
+const agentLimitCopy: Record<string, { label: () => string; hint: () => string }> = {
+  token_budget: {
+    label: () => t('settings.agentTokenBudget'),
+    hint: () => t('settings.agentTokenBudgetHint'),
+  },
+  max_loop_rounds: {
+    label: () => t('settings.agentMaxRounds'),
+    hint: () => t('settings.agentMaxRoundsHint'),
+  },
+  goal_max_continuations: {
+    label: () => t('settings.agentGoalMaxContinuations'),
+    hint: () => t('settings.agentGoalMaxContinuationsHint'),
+  },
+  goal_round_budget: {
+    label: () => t('settings.agentGoalRoundBudget'),
+    hint: () => t('settings.agentGoalRoundBudgetHint'),
+  },
+  goal_verification_enabled: {
+    label: () => t('settings.agentGoalVerification'),
+    hint: () => t('settings.agentGoalVerificationHint'),
+  },
+  max_subagent_depth: {
+    label: () => t('settings.agentMaxSubagentDepth'),
+    hint: () => t('settings.agentMaxSubagentDepthHint'),
+  },
+  max_parallel_tools: {
+    label: () => t('settings.agentMaxParallelTools'),
+    hint: () => t('settings.agentMaxParallelToolsHint'),
+  },
+  doom_loop_window_size: {
+    label: () => t('settings.agentDoomLoopWindow'),
+    hint: () => t('settings.agentDoomLoopWindowHint'),
+  },
+  doom_loop_max_interrupts: {
+    label: () => t('settings.agentDoomLoopInterrupts'),
+    hint: () => t('settings.agentDoomLoopInterruptsHint'),
+  },
+  doom_loop_similarity_threshold: {
+    label: () => t('settings.agentDoomLoopSimilarity'),
+    hint: () => t('settings.agentDoomLoopSimilarityHint'),
+  },
+}
+
+/** 控件集合由回包决定：优先 `domains`（新后端），退回生效值的键（老后端只给值不给区间）。 */
+const agentLimitKeys = computed(() => {
+  const fromDomains = Object.keys(agentLimitDomains.value)
+  return fromDomains.length ? fromDomains : Object.keys(agentLimits.value)
+})
+
+const agentLimitDomain = (key: string) =>
+  (agentLimitDomains.value as Record<string, AgentLimitDomain | undefined>)[key]
+const agentLimitLabel = (key: string) => (key in agentLimitCopy ? agentLimitCopy[key].label() : key)
+const agentLimitHint = (key: string) => (key in agentLimitCopy ? agentLimitCopy[key].hint() : '')
+/** 整数域步进 1；相似度那种 0.5–1.0 的浮点域给 0.01，不然一次点击就跨过整个合法区间。 */
+const agentLimitStep = (key: string) => (agentLimitDomain(key)?.kind === 'float' ? 0.01 : 1)
+
+// 键名来自回包、编译期不知道是哪一键，所以读写各走一处按 `unknown` 收口——
+// 动态 v-model 会把类型丢掉，显式取值/赋值反而让"读的是哪个形状"写在明面上。
+const agentLimitRaw = (key: string) => (agentLimits.value as Record<string, unknown>)[key]
+const agentLimitNumber = (key: string) => {
+  const v = agentLimitRaw(key)
+  return typeof v === 'number' ? v : undefined
+}
+const agentLimitBool = (key: string) => agentLimitRaw(key) === true
+const setAgentLimit = (key: string, value: unknown) => {
+  ;(agentLimits.value as Record<string, unknown>)[key] = value
+}
 
 /** 工具结果溢出阈值（P1-#6，KB；范围 8–512，默认 64） */
 const toolOffload = ref({ threshold_kb: 64 })
@@ -448,8 +538,11 @@ const fetchAgentLimits = async () => {
   try {
     const res = await getAgentLimits()
     const data = (res as any)?.data?.data ?? (res as any)?.data
-    if (data) {
+    // 合法域是回包的兄弟键（老后端没有它 ⇒ 空对象，控件不带区间，比编一份数字诚实）
+    const domains = (res as any)?.domains ?? (res as any)?.data?.domains ?? {}
+    if (data && Object.keys(data).length) {
       agentLimits.value = { ...agentLimits.value, ...data }
+      agentLimitDomains.value = domains
       agentLimitsLoaded.value = true
     }
   } catch (err) {
