@@ -13,9 +13,11 @@
 是**裸相对** `".neurova/<包名>"`，即随 CWD 散落——同一件事在本仓已量过五处的代价（§6-202 那条
 "裸文件名默认值让持久化文件随 cwd 散落"）。本批把落点正确性收掉；这两个字段本身**零消费点**
 （`_storage_dir` 全文件仅此一处赋值），属票④那 6 个门面包实现的退役候选，登记在那张票里，不在本批顺手删。
-**后续变化记在这里**：`benchmark` 那一半已在票④第一包随门面实装一起退役（该包现在只剩
-`rag_eval`／`rag_dataset_gen` 两个子模块），本档相应只留 `image_pipeline` 一枚裸相对落点——
-落点字段没了却还留一格去"验它的落点"，就是指向空气的 pin。
+**两处后来的收场记在这里**：`benchmark` 那半随票④第一包的门面实装退役一起消失（该包现在只剩
+`rag_eval`／`rag_dataset_gen` 两个子模块）；`image_pipeline._storage_dir` 随票④第三包按 §2 断点条款
+删除——"写出无人读的字段"该接线或删除，而它连一个读方都没有，本档那格也就成了
+**替一次从未发生过的持久化钉落点**。两格都改成了全仓形状哨兵（见 `test_noBareRelativeLandingSurvivesAnywhere`），
+以后再冒出第六、七处，同一格拦得住。
 
 判据两轨：行为格从生产入口取数，钉"注入数据根后落点在那一根下、且不在主目录下"；
 收养接线格钉 `dataLanding`/`adoptHomeLanding` 真的被调——只把字面量删掉而没接上单点，
@@ -122,31 +124,57 @@ def testKnowledgeConfigPathFollowsTheDataRoot(tmp_path: Path, monkeypatch):
     )
 
 
-def testBareRelativeLandingsFollowTheDataRoot(tmp_path: Path, monkeypatch):
-    """行为格（第三处）：裸相对 `".neurova/<包名>"` 随 CWD 走＝换目录就换一个库。
+def _relativeHomeLandingConstants(relPath: str) -> list:
+    """该文件里**以代码身份**出现的裸相对落点字符串（`".neurova/xxx"` 这种以它开头的字面量）。
 
-    这一格原本钉**两处**（`benchmark` 与 `image_pipeline`）。`benchmark` 那一半随票④第一包
-    的门面实装退役**一起收掉**：那个 `_storage_dir` 是门面包实现里的字段，实现都不在了，
-    再留一格"验它的落点"就是指向空气的 pin——退役批里有一格专门钉这件事。
-    现读只剩 `image_pipeline` 一处，该字段本身仍是**零消费点**，其归属记在票④队列里，
-    本批不顺手删（只改这格的取数面）。
-
-    直接构造而不是走 `get_image_pipeline_manager()`：那是进程级单例，一格把它指向临时根，
-    同进程后续拿到的就是这一份——判据不该改进程级状态。
+    为什么不能按文本判：`security/rbac.py` 等处的说明里写着"旧 `~/.neurova/rbac.db`"，
+    那是**交代来历**、不是落点。按词判会让哨兵被自家文档撞红（本仓这一形已栽过两次），
+    所以取 AST 的 `Constant` 且只认"字符串本身以 `.neurova/` 开头"——真·裸相对默认值正是这个形状。
     """
-    from neurova.core import data_root
+    tree = ast.parse((NEUROVA_DIR / relPath).read_text(encoding="utf-8", errors="replace"))
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and node.value.startswith(".neurova/"):
+            hits.append((node.lineno, node.value))
+    return hits
 
-    monkeypatch.setenv(data_root.DATA_ROOT_ENV, str(tmp_path))
-    monkeypatch.chdir(tmp_path)          # 旧形态在这里会算出 tmp_path/.neurova/... 之类的随 CWD 落点
 
-    from neurova.image_pipeline import ImagePipelineManager
+def test_noBareRelativeLandingSurvivesAnywhere():
+    """主格（第三、四处收完后改成哨兵）：全仓不许再有"裸相对 `.neurova/...`"落点。
 
-    pipe = ImagePipelineManager()
-    value = getattr(pipe, "_storage_dir", None)
-    assert value is not None, "image_pipeline 的 storage_dir 字段没了 ⇒ 有批次动了它的形状"
-    assert str(Path(value).resolve()).startswith(str(tmp_path.resolve())), (
-        "image_pipeline 的 storage_dir 仍随 CWD 或仍指主目录（实得 %s）" % value
+    原本这格是**逐个构造对象**验落点在数据根下。两处 subject 各自收场了：
+    `benchmark` 那半随门面实装退役（票④第一包），`image_pipeline._storage_dir` 那半是
+    §2 断点条款里的"写出无人读的字段"——它连一个读方都没有，那格其实是
+    **替一次从未发生过的持久化钉落点**（票④第三包删除）。
+    所以判据换成全仓形状哨兵：以后再来第五、六处，同一格就拦得住。
+    """
+    candidates = {ref.path.relative_to(NEUROVA_DIR).as_posix()
+                  for ref in ast_scan.sourceRefsUnder(NEUROVA_DIR, ".py", (".neurova/",))}
+    offenders = {rel: _relativeHomeLandingConstants(rel) for rel in candidates
+                 if _relativeHomeLandingConstants(rel)}
+    assert not offenders, (
+        "这些文件里还留着裸相对落点字面量（随 CWD 散落，注入数据根管不到它）：%s" % offenders
     )
+    landingRefs = [ref.path.name for ref in
+                   ast_scan.sourceRefsUnder(NEUROVA_DIR, ".py", ('dataLanding("image_pipeline"',))
+                   if ref.path.name != "data_root.py"]
+    assert not landingRefs, f"image_pipeline 的落点解析没随断点一起收掉：{landingRefs}"
+
+
+def test_imagePipelineManagerStillWorksWithoutTheRetiredField():
+    """交付锁：删字段与参数删的是**死面**，管理器这条活路必须照常（端点三处在调它）。
+
+    失效方向＝删过头：模板或构建记录面一旦被带走，这一格当场红。
+    """
+    from neurova.image_pipeline import ImagePipelineManager, get_image_pipeline_manager
+
+    manager = ImagePipelineManager()
+    assert not hasattr(manager, "_storage_dir"), "只写不读的字段还在 ⇒ 断点没收口"
+    assert get_image_pipeline_manager() is get_image_pipeline_manager(), "单例语义被改动"
+    templates = manager.list_templates()
+    assert len(templates) > 0, f"默认模板没了（现读 {len(templates)}）⇒ 管理器被删过头"
+    assert manager.get_builds(limit=10) == [], "新建管理器不该带历史构建记录"
 
 
 @pytest.fixture()
