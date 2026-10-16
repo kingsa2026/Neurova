@@ -3234,3 +3234,10 @@ tests/unit/skills/test_skillLibraryTakenFromOneFactory.py
 # 单跑读数：本档 6 passed 连跑 2 次同读数（4.x s）；对两个已被 amend 作废的悬空号复算，
 # 逐条点出 +50→+20 与 +55/−57→+57/−56（即本会话那两次真错）。
 tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py
+# §6-287·技能执行咽喉是协程：入口写成 `async def main` 的技能必须真被 await 到底——改前回包
+# `{"success": true, "result": <coroutine>}`（对外 500），回执与真相分家。三格真物（真装真加载
+# 真 HTTP）＋两格契约（链按 dict 取值／两处调用点必须 await）＋一格口径（判定在调用之前）＋
+# 两格形状牙：同步技能不许被挪进 asyncio.to_thread（锁取自 creation_governance.shared_lock(目录)，
+# 按目录共享、重入只在同线程，挪出去＝技能回调本服务即死锁；该格限时 8s 自己红，不许挂死整轮）。
+# 单跑读数：本档 8 passed 连跑 2 次同读数（9.8s／9.3s）。
+tests/unit/skills/test_callSkillThroatIsAwaitable.py
