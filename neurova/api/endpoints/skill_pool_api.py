@@ -449,7 +449,8 @@ async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="
 async def execute_private_skill(skill_id: str, body: Dict[str, Any] = Body(default_factory=dict)):
     """闭环核验轮 V5：AgentSkillPage 执行按钮此前恒 404（路由缺失，
     前端 executeSkill 调的 POST /private/{id}/execute 后端从未实现）。
-    执行走 SkillService.call_skill 咽喉（行级 enabled 闸 + 入口 .py 动态加载）。"""
+    执行走 SkillService.call_skill 咽喉（行级 enabled 闸；代码映射型走执行体，其余走入口 .py
+    动态加载 + 构件摘要对账，两条腿一个口径，§6-280 甲）。"""
     agent_id = str(body.get("agent_id") or "default")
     service = _pool_service(agent_id)
     if service.get_skill_info(skill_id) is None:
