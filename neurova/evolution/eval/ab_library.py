@@ -68,13 +68,24 @@ class TextArmAgentExecutor:
         self._skill_name = name
         self._sender = sender
         self._session_id = session_id
+        self._turnsUsed = 0
 
     def declaresRealAgentTrajectory(self) -> bool:
         return True
 
+    def turnsUsed(self) -> int:
+        """本执行器已花掉的**完整 agent 回合**数（预算闸的对照组）。
+
+        计划数（`service.planRealArmTurns`）是上界，真实数从这里取——两个数都外露，
+        调度与计划一旦漂移就能被读出来，而不是让预算变成一个无法复核的断言。
+        计数在 `chat` 之前递增：抛错的回合照样花了配额。
+        """
+        return self._turnsUsed
+
     async def run(self, *, skill_text: str, task_input: str) -> str:
         from neurova.core import turn_context
 
+        self._turnsUsed += 1
         # 覆盖槽排在注入路径最前（见 skill_injection._skill_doc_text）：不设就是仓内正文
         token = turn_context.set_turn_skill_text_override(
             {self._skill_name: str(skill_text or "")})

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -41,6 +41,16 @@ class SettingsPatch(BaseModel):
     lifecycle_interval_hours: Optional[int] = Field(default=None, ge=1, le=24 * 30)
     judge_model: Optional[str] = None
     optimizer_model: Optional[str] = None
+    # PUT 白名单必须盖住配置单源的每一个字段：漏收不是"这个键暂时不能用"，而是
+    # 管理员写了值、存了盘、读数照旧（`update_settings` 对未知键静默忽略）。
+    # 这三枚 RSI 键此前就落后于 `EvolutionSettings`，随本批一并补齐；
+    # 守卫见 `tests/unit/evolution/eval/test_realArmBudgetPlanMatchesActualTurns.py`
+    # 的 `testSettingsPatchAcceptsEverySettingsField`。
+    rsi_event_throttle_seconds: Optional[float] = None
+    rsi_backoff_every_turns: Optional[int] = None
+    rsi_ratchet_candidates: Optional[List[int]] = None
+    # 真臂预算：一次真臂运行可花的完整 agent 回合上限（闸见 service.checkRealArmBudget）
+    real_arm_max_agent_turns: Optional[int] = Field(default=None, ge=1, le=2000)
 
 
 @router.get("/settings")
@@ -142,6 +152,12 @@ class EvolveRequest(BaseModel):
     skill_id: str
     iterations: Optional[int] = Field(default=None, ge=1, le=50)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
+    # 执行面开关，与双臂侧同形：默认 False=模拟面（单轮 chat，零工具零上下文）。
+    # 真臂会把每份候选正文经轮级覆盖槽送进一次真实 agent 回合，一次整轮进化按默认
+    # 配置要 231 个回合 ⇒ 必须显式开，且要过 `real_arm_max_agent_turns` 这道预算闸。
+    # 默认留模拟面还有一层意义：RSI 自动晋升档的第四条前置（判据执行面与线上同域）
+    # 因此照旧不满足——本端点加能力不等于替安全档开门。
+    real_trajectory: bool = False
 
 
 @router.post("/skills/{agent_id}/evolve", dependencies=[Depends(_admin_dep)])
@@ -184,9 +200,18 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
             detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
         )
 
+    executor = _textArmExecutor(agent_id, info, skill_id=body.skill_id,
+                                realTrajectory=body.real_trajectory)
+    if executor is not None:
+        # 预算闸排在调用 service 之前：拒绝必须发生在第一个回合之前，而不是账单之后。
+        # 计划与 service 内部那次重算取的是同一个纯函数、同一批入参，不另立口径。
+        from neurova.evolution.eval.service import planRealArmTurns
+
+        _refuseIfOverBudget(planRealArmTurns(dataset, config, iterations=body.iterations))
     result, proposal = await service.evolve(
         skill_id=body.skill_id, skill_text=skill_text,
         dataset=dataset, iterations=body.iterations, config=config,
+        agent=executor,
     )
     return {
         "code": 0,
@@ -253,26 +278,33 @@ async def ab_compare_texts(body: ABRequest, agent_id: str,
             detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
         )
 
+    executor = _textArmExecutor(agent_id, info, skill_id=body.skill_id,
+                                realTrajectory=body.real_trajectory)
+    if executor is not None:
+        from neurova.evolution.eval.service import planAbArmTurns
+
+        _refuseIfOverBudget(planAbArmTurns(dataset))
     report = await service.ab_compare(
         baseline_text=skill_text, candidate_text=body.candidate_text,
-        dataset=dataset, config=config, agent=_textArmExecutorFor(agent_id, info, body),
+        dataset=dataset, config=config, agent=executor,
     )
     # 来源标注不在这里重算：service 已按"真正拿去执行的那个对象"定好。端点自己
     # 再推一遍就会分叉（实测：注入真臂后被这里改标成 simulated，标注反而成了谎）。
     return {"code": 0, "data": report}
 
 
-def _textArmExecutorFor(agent_id: str, info: Dict[str, Any], body: ABRequest):
-    """按请求把双臂切到真 agent 轨迹；**不在此判执行器类型**，只负责装配与诚实失败。
+def _textArmExecutor(agent_id: str, info: Dict[str, Any], *, skill_id: str,
+                     realTrajectory: bool):
+    """把"以指定正文跑真 agent 回合"这条装配接缝收在一处（双臂与进化共用）。
 
     三条口径：
     · 拿不到 agent ⇒ 409 点名原因并给出回退项，绝不静默降级成模拟面（教义第 2 条）；
     · 技能名组不出 `$mention` ⇒ 422——那种情况下两臂会拿到同一份仓内正文，
       比出一个看起来正常的假 0 差；
-    · `real_trajectory=false` ⇒ 返回 None，由 service 的装配接缝回落模拟面，
+    · `realTrajectory=false` ⇒ 返回 None，由 service 的装配接缝回落模拟面，
       并在报告里如实标注来源（`executor_kind`）。
     """
-    if not body.real_trajectory:
+    if not realTrajectory:
         return None
 
     from neurova.api.endpoints import get_agent_instance
@@ -282,13 +314,26 @@ def _textArmExecutorFor(agent_id: str, info: Dict[str, Any], body: ABRequest):
     if agent is None:
         raise HTTPException(
             status_code=409,
-            detail=(f"agent「{agent_id}」不在线，无法跑真轨迹双臂；"
+            detail=(f"agent「{agent_id}」不在线，无法跑真轨迹；"
                     "如需继续请用 real_trajectory=false 走模拟面（报告会标注来源）"),
         )
     try:
-        return TextArmAgentExecutor(agent, skill_name=str(info.get("name") or body.skill_id))
+        return TextArmAgentExecutor(agent, skill_name=str(info.get("name") or skill_id))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+def _refuseIfOverBudget(plan: dict) -> None:
+    """真臂预算闸：**在第一个回合之前**问，不过就 422。
+
+    顺序就是这条判据的全部意义：闸若放在运行之后，超支已经发生，422 只是在念账单。
+    模拟面不进这道闸（它不花 agent 回合），也不因超预算被降级成真臂或反之。
+    """
+    from neurova.evolution.eval.service import checkRealArmBudget
+
+    verdict = checkRealArmBudget(plan, _load_settings_safe().real_arm_max_agent_turns)
+    if not verdict.allowed:
+        raise HTTPException(status_code=422, detail=verdict.reason)
 
 
 def _load_settings_safe():

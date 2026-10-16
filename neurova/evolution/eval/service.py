@@ -21,7 +21,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
@@ -187,6 +187,125 @@ def isRealAgentTrajectoryExecutor(executor: Any) -> bool:
         return False
     declares = getattr(executor, "declaresRealAgentTrajectory", None)
     return bool(declares()) if callable(declares) else False
+
+
+#: 臂来源的词值单源（ab 报告、进化结果面、运行台账都取这两个词，不各造第三词）。
+EXECUTOR_KIND_REAL = "real_agent"
+EXECUTOR_KIND_SIMULATED = "simulated"
+
+
+def executorKind(executor: Any) -> str:
+    """这批读数来自真臂还是模拟面——由结构推导（`isRealAgentTrajectoryExecutor`），一处定义。
+
+    为什么现在收口：`ab_compare` 里就地写了一遍三元式，进化臂要接真臂再写一遍就是第二份
+    口径（教义第 6 条）。这个值不是装饰——§6-262 的环节证据里，`claimed_environments`
+    为空有两义（"没跑环"与"跑环没卡"），只有臂来源能把两者分开。
+    """
+    return EXECUTOR_KIND_REAL if isRealAgentTrajectoryExecutor(executor) else EXECUTOR_KIND_SIMULATED
+
+
+def realArmTurnsUsed(executor: Any, kind: str) -> Optional[int]:
+    """真臂已花掉的完整回合数；模拟臂回 **None**（不是 0——0 会被读成"跑了 0 个回合"）。
+
+    真臂执行器缺 `turnsUsed()` 就让它出声：那是要计数的臂没装上计数器，
+    静默回 None 会把"闸无对照组"这件事藏起来。
+    """
+    if kind != EXECUTOR_KIND_REAL:
+        return None
+    return executor.turnsUsed()
+
+
+def abEvaluationSplit(dataset: EvalDataset) -> list:
+    """双臂试评的任务集选取（单源）：真留出集优先，否则走 `evaluation_split`。
+
+    原先这段选择只写在 `ab_compare` 里；预算计划要量同一批任务的花费，
+    复制一遍选择逻辑就是第二份口径——两边一旦分叉，闸算的就不是要跑的那些题。
+    """
+    from neurova.evolution.eval.dataset import evaluation_split
+
+    return list(dataset.heldout or evaluation_split(dataset))
+
+
+def _planOf(breakdown: Dict[str, int]) -> dict:
+    return {"planned": sum(breakdown.values()), "breakdown": breakdown}
+
+
+def planAbArmTurns(dataset: EvalDataset) -> dict:
+    """双臂试评的回合计划：两臂各跑一遍同一批任务。"""
+    tasks = len(abEvaluationSplit(dataset))
+    return _planOf({"baselineArm": tasks, "candidateArm": tasks})
+
+
+def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
+                     *, iterations: Optional[int] = None) -> dict:
+    """真臂一次进化运行的**回合上界**，逐项点名——镜像 `runner.run` 的调度。
+
+    为什么必须是上界而不是精确值：装配体里还有约束闸与泄漏闸，它们会跳过部分候选，
+    所以真实花费只会 ≤ 计划；而噪声校准命中指纹缓存时也是 0。闸要拦的是"最坏花多少"，
+    取精确值反而会低估。**真实花费另由 `realArmTurnsUsed` 外露**，两个数并排给出，
+    调度与计划一旦漂移就能被读出来（漂移的判法见判据档：计数执行器真跑一遍）。
+
+    逐项与 runner 的对应：`probe`=判分可用性探针（只打第一例）；
+    `baselineHoldout`/`baselineTune`=基线两侧各一遍；`failureHarvest`=每轮反思前
+    对 `val or tune` 的重新评测；`candidateEvaluations`=每轮每候选对 tune 各一遍；
+    `finalHoldout`=胜者终审；`anchor`=锚定地板的无技能臂一遍；
+    `heldoutEvidence`=真留出两侧各一遍（只作证据，永不做判据）；
+    `noiseCalibration`=service 侧的重复基线评测。
+    """
+    from neurova.evolution.eval.dataset import evaluation_split
+
+    if not dataset or not dataset.all_examples:
+        return _planOf({})
+    holdout = evaluation_split(dataset)
+    tune = dataset.train + dataset.val or holdout
+    rounds = max(0, int(config.iterations if iterations is None else iterations))
+    variants = max(1, int(config.variants_per_round))
+    harvestSet = dataset.val or tune
+    return _planOf({
+        "probe": 1 if holdout else 0,
+        "baselineHoldout": len(holdout),
+        "baselineTune": len(tune),
+        "failureHarvest": rounds * len(harvestSet),
+        "candidateEvaluations": rounds * variants * len(tune),
+        "finalHoldout": len(holdout),
+        "anchor": len(holdout) if config.anchor_floor_enabled else 0,
+        "heldoutEvidence": 2 * len(dataset.heldout),
+        "noiseCalibration": (int(config.noise_repeats) * len(holdout)
+                             if config.noise_repeats > 1 else 0),
+    })
+
+
+class RealArmBudgetVerdict(NamedTuple):
+    """预算闸的判据：`allowed` 给调用方拦不拦，`reason` 给拦下来时怎么说。
+
+    `reason` 必须带逐项分解——"计划 53 > 预算 40"这种话没法行动；写成
+    `candidateEvaluations=20` 才知道该收 iterations 还是收用例数。
+    """
+
+    allowed: bool
+    planned: int
+    budget: int
+    breakdown: Dict[str, int]
+    reason: str
+
+
+def checkRealArmBudget(plan: dict, maxTurns: int) -> RealArmBudgetVerdict:
+    """真臂预算闸：只回答"这笔配额要不要花"，不改判定、不把真臂降级成模拟面。
+
+    降级是这里最容易做错的事：超预算若静默改跑模拟面，报告就会以模拟数字冒充线上证据
+    （教义第 2 条）。所以调用方的正解是**在装配之前**问这道闸，不过就 422。
+    """
+    planned = int((plan or {}).get("planned", 0))
+    breakdown = dict((plan or {}).get("breakdown") or {})
+    budget = int(maxTurns)
+    if planned <= budget:
+        return RealArmBudgetVerdict(True, planned, budget, breakdown, "")
+    detail = ", ".join(f"{name}={cost}" for name, cost in breakdown.items()) or "无评测集"
+    return RealArmBudgetVerdict(
+        False, planned, budget, breakdown,
+        f"真臂预算不足：本次运行计划最多 {planned} 个完整 agent 回合，已超过配置上限 {budget}"
+        f"（逐项：{detail}）。请收小 iterations 或评测用例数，"
+        "或显式调高 real_arm_max_agent_turns 再来。")
 
 
 #: `_persist_run` 生成的运行 id 形态：`run_` + 时间戳(数字与 T) + `_` + 6 位十六进制。
@@ -398,6 +517,17 @@ class SkillEvolutionService:
             dataset=dataset, iterations=iterations, noise_band=noise_band,
             ledger_key=skill_id, anchor_best=anchor_best,
         )
+        # 臂来源与花费外露到结果面：端点不再猜"这次是不是真臂"，台账读数也不再只有
+        # 分数没有来历（同一份推导见 `executorKind`）。计划在此**重算**而不是由调用方
+        # 传入：传进来就等于允许调用方替运行编一个预算数。
+        kind = executorKind(executor)
+        plan = (planRealArmTurns(dataset, cfg, iterations=iterations)
+                if kind == EXECUTOR_KIND_REAL else None)
+        result.executorKind = kind
+        result.plannedAgentTurns = None if plan is None else plan["planned"]
+        result.agentTurnsUsed = realArmTurnsUsed(executor, kind)
+        result.budgetPlanExceeded = (None if plan is None or result.agentTurnsUsed is None
+                                     else result.agentTurnsUsed > plan["planned"])
         run_id = self._persist_run(skill_id, artifact_type, result,
                                    model_under_test=modelUnderTest)
 
@@ -482,22 +612,27 @@ class SkillEvolutionService:
         判据集（evaluation_split）。**只读评测**——不产提案、不改技能、
         不入台账，供审批人在 decide 之前对候选做干净集核验。
         """
-        from neurova.evolution.eval.dataset import evaluation_split
-
         # 执行面先resolve：kind 必须由**真正拿去执行的那个对象**推导，两条返回路径
         # 都要带——模拟面与真轨迹面的数字混成一栏时，审批人会拿模拟分当线上证据，
-        # 不可逆的是解释而不是数据。
+        # 不可逆的是解释而不是数据。取值口径收在 `executorKind`（进化臂与双臂共用一份）。
         executor = resolveEvolutionExecutor(agent, config=config)
-        kind = "real_agent" if isRealAgentTrajectoryExecutor(executor) else "simulated"
+        kind = executorKind(executor)
         # 基座读数同由**这个**执行器推导；两条返回路径都得带——空集那条若不带，
         # "没跑成"就会被读成"没有这个维度"。
         modelUnderTest = resolveModelUnderTest(executor)
+        plan = planAbArmTurns(dataset) if kind == EXECUTOR_KIND_REAL else None
+        armReadout = {
+            "planned_agent_turns": None if plan is None else plan["planned"],
+            "agent_turns_used": None,
+            "budget_plan_exceeded": None,
+        }
 
-        split = dataset.heldout or evaluation_split(dataset)
+        split = abEvaluationSplit(dataset)
         if not split:
             return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
                     "candidate_avg": 0.0, "delta": 0.0, "per_task": [],
-                    "executor_kind": kind, "model_under_test": modelUnderTest}
+                    "executor_kind": kind, "model_under_test": modelUnderTest,
+                    **armReadout}
         if judge is None:
             from neurova.evolution.eval.fitness import LLMJudge
 
@@ -518,6 +653,7 @@ class SkillEvolutionService:
             for (ex, b, _o, _f, _bf, _env), (_ex2, c, _o2, _f2, _cf, _env2)
             in zip(baseline_details, candidate_details)
         ]
+        turnsUsed = realArmTurnsUsed(executor, kind)
         return {
             "task_split": "heldout" if dataset.heldout else "selection",
             "n": len(split),
@@ -527,6 +663,11 @@ class SkillEvolutionService:
             "per_task": per_task,
             "executor_kind": kind,
             "model_under_test": modelUnderTest,
+            "planned_agent_turns": armReadout["planned_agent_turns"],
+            "agent_turns_used": turnsUsed,
+            "budget_plan_exceeded": (
+                None if turnsUsed is None or armReadout["planned_agent_turns"] is None
+                else turnsUsed > armReadout["planned_agent_turns"]),
         }
 
     # ── 提案审批(人工闭环终点)──

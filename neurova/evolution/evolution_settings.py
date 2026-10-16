@@ -61,6 +61,25 @@ class EvolutionSettings:
     rsi_backoff_every_turns: int = 20
     # 递归棘轮每轮候选数(粗筛→中筛→细筛,轮数=len)
     rsi_ratchet_candidates: List[int] = field(default_factory=lambda: [50, 10, 3])
+    # ── 真臂预算（P1-C 线：进化主路径可切真 agent 轨迹）──
+    # 一次真臂运行要花多少个**完整 agent 回合**的上限。默认 40 是裁定本身，不是实现细节：
+    # 按默认配置（iterations=10、20 条用例、锚定地板开）一次整轮进化要 231 个回合，
+    # 默认档因此**必然拒绝**整轮——开真臂要么先把 iterations/用例数收小，要么显式调高这一键。
+    # 理由：这条链路的产物是"改技能正文"，超支要等配额账单才发现就太晚了。
+    real_arm_max_agent_turns: int = 40
+
+
+def _coerceArmKnobs(data: Dict[str, Any], defaults: Dict[str, Any]) -> None:
+    """真臂预算键收敛（load_settings / update_settings 共用一处）。
+
+    手改的 JSON 也算脏输入：坏值回默认、可解析的一律抬到 ≥1。
+    设 0 不是"关掉真臂"（那由请求级 `real_trajectory` 管），只会让每一次
+    真臂请求都在闸上撞死——抬到 1 保留"能跑一次双臂核验"的最小可用档。
+    """
+    try:
+        data["real_arm_max_agent_turns"] = max(1, int(data["real_arm_max_agent_turns"]))
+    except (TypeError, ValueError):
+        data["real_arm_max_agent_turns"] = defaults["real_arm_max_agent_turns"]
 
 
 def _coerce_rsi_knobs(data: Dict[str, Any], defaults: Dict[str, Any]) -> None:
@@ -107,6 +126,7 @@ def load_settings() -> EvolutionSettings:
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("进化设置读取失败, 使用默认: %s", e)
     _coerce_rsi_knobs(raw, _defaults())
+    _coerceArmKnobs(raw, _defaults())
     try:
         return EvolutionSettings(**raw)
     except TypeError as e:
@@ -154,6 +174,7 @@ def update_settings(**patch: Any) -> EvolutionSettings:
         for k in ("judge_model", "optimizer_model"):
             data[k] = str(data[k] or "")
         _coerce_rsi_knobs(data, defaults)
+        _coerceArmKnobs(data, defaults)
         settings = EvolutionSettings(**data)
         save_settings(settings)
         return settings
