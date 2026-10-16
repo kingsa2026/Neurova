@@ -5158,6 +5158,17 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **活体（`tests/manual/librarySingletonClosesReadFace_b60.py`）7/7 PASS**：`[2] 读面 1 条`（改前 0 条）、`[3]` 卸载后同进程即失账（走真卸载口 `DELETE /marketplace/skills/{id}/install`；第一版我把 URL 写成池路由的 `DELETE /skill-pool/...`，读数是 **405**——脚本 bug，不是产品）、`[4] 读面实例 is 写侧实例 = True`、`[7]` 仓库 `data/` 内容指纹 `d1ef4e99bd9f` 跑后未变。
     - **宽域 A/B（基线＝中文路径仓外 worktree at HEAD `6af29daf`，两侧同选择集 `tests/unit/skills api tools plugins evolution agent context security` 且一律 `--ignore=tests/unit/skills/test_scripts_health_check.py`）**：基线 `39 failed, 9998 passed, 9 errors` ↔ 本批 `39 failed, 10007 passed, 8 errors`；失败集合 48 ↔ 47，**仅本批侧红 0 条**。仅基线侧那 1 条（`test_loop_manager::test_agent_uses_loop_manager`）经查是基线 worktree 根缺 `test_workspace/`（仓内多档按 CWD 相对落点建它）被仓库根污染守卫点名——路径形态差，不下"本批修复"的结论。
     - **两轮方法学事故如实入账**：① 上一轮基线腿被 `test_scripts_health_check` 的真 pip 子进程以 thread 法超时**打断整个 session**（连收尾行都没产出＝按 AB_FAIL 处置，"没跑成"不等于全绿），本轮两侧一律 `--ignore` 并加了"没汇总行就停手"的闸；② 我在 A/B 跑的中途还改过一次工作树（死 import 与空行），虽都是行为无涉的删行，仍把改动全部收在启动之前重跑了一整轮；③ amend 消息那条命令我多打了一个 `--no-verify`——本仓 `.git/hooks` 只有 `pre-push`/`post-*`、**没有 pre-commit 钩子**，故实际没跳过任何东西，但这不该由我随手加；tree 复证 `c27ec5d3…` 与 amend 前全等，改的只是正文里那句净 LOC。
+    - **事故之后补的通道（教义第 1 条：只写在文档里的纪律，根因是缺自动复算）**：新增
+      `tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py`（6 格，子集 **616→617**）——未推送窗口里
+      每一笔正文写过的「生产池／测试池／本格 +A/−B（＝净 C）」必须等于**那一笔自己的** numstat；
+      池按 `neurova/` 归属分，二进制 `-\t-` 不参与行级复算。范围只取 `origin/main..HEAD`：老批次正文是
+      **跨笔合计**，单笔复算套不上，全量拉进来只会造出一堆无法处置的常驻红，而未推送窗口恰是唯一
+      还能就地 amend 的窗口。窗口在 CI 里会为空，所以同档另配「造坏号必红／造好号必放／写法解析
+      对账／拿真实正文只改数字」四格——空集不许被读成判据成立（211 那一族）。对两个已被 amend 作废的
+      悬空号复算，逐条点名本会话那两次真错：`本格 声明 +50/−0，实为 +20/−0`、
+      `生产池 声明 +55/−57，实为 +57/−56`。
+      另一枚 `--no-verify` 的事故没有可判的代码形态（本仓 `.git/hooks` 只有 `pre-push`/`post-*`，
+      无 pre-commit 钩子，那次实际未跳过任何检查），只能作为命令卫生记在形态集里，不硬造守卫。
     - **发现一条未登记的常驻红**：`tests/unit/agent/test_agent_core_size_ratchet.py` 的 `agent_core_lines`（实测 2106 > 基线 2103）与 `agent_class_lines` 两格在 **HEAD 就红**（基线整档跑 `.F..F...` 实证），而台账与子集都没记它。本批未加一行（`agent_core.py` 保持 2106，新调用按 AGENTS.md 走函数内懒加载），处置形态是在 `protected_tests.txt` 该条目就地加 ⚠ 注记；要真收它得动拆分，不是把基线改大。
     - **登记不动手两项**：① `tests/manual/` 8 档仍自建 `SkillService` 实例——活体探针要的正是**独立盘读**（验"落盘了没"），与生产侧"两份内存账"不是同一件事，不收；② `reset_libraries_for_tests()` 只清表，**不影响已被持有的引用**（`SelfImprovementProposer._skill_service`、`SkillNeedAnalyzer.skill_service` 都缓存实例）——生产没有复位调用点，故不构成缺陷，但改测试装配时要记得。
     - **净 LOC**（`git add` 后现读 `--cached --numstat`，逐文件；成文前我先心算成"净 −2"，amend 那次按 `git show --numstat` 现量重取）：生产池 **+57/−56 ＝ 净 +1**，唯一为正的是 `library_service.py` +16（`agentLibrary()` 本体 3 行＋文档 13 行），其余 15 个模块合计**净 −15**（marketplace −4、skill_version_api −3、post_chat_pipeline −3，另删净 18 行失效局部 import）；测试/基建池 +435/−11（判据档 260、活体档 131、conftest 净 +29、两处改判档合计净 +4）。

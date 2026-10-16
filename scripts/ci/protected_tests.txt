@@ -3227,3 +3227,10 @@ tests/unit/skills/test_builtinBundleInstallsThroughGate.py
 # 会漏回会话级数据根——本批 A/B 首轮 10 条回归的根因）。
 # 单跑读数：本档 9 passed 连跑 2 次同读数（10.95s×2）。
 tests/unit/skills/test_skillLibraryTakenFromOneFactory.py
+# 净 LOC 之错第五遭之后做成的通道：未推送窗口里每笔提交正文写过的「生产池/测试池/本格 +A/−B」
+# 必须等于那一笔自己的 numstat（池按 neurova/ 归属分）。范围只取 origin/main..HEAD——老批次写的是
+# 跨笔合计，单笔套不上，拉进来只会造出无法处置的常驻红；窗口在 CI 里会为空，所以同档另配
+# 「造坏号必红／造好号必放／写法解析对账／拿真实正文改坏数字」四格，空集不许被读成判据成立。
+# 单跑读数：本档 6 passed 连跑 2 次同读数（4.x s）；对两个已被 amend 作废的悬空号复算，
+# 逐条点出 +50→+20 与 +55/−57→+57/−56（即本会话那两次真错）。
+tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py
