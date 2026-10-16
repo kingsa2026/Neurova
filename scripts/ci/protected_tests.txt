@@ -3153,3 +3153,9 @@ tests/unit/evolution/eval/test_taskLevelEnvironmentEvidenceFeedsAttribution.py
 # 形状上（15 格全过，未归属到本档任何一格）——如实登记，复现则查根 conftest 的隔离夹具。
 tests/unit/evolution/eval/test_realArmBudgetPlanMatchesActualTurns.py
 tests/unit/api/test_evolveRealArmPathAndBudgetGate.py
+# §6-255 甲案·治理护栏按参数语义分扫描面：双向钉——正向「无害路径不再被判 shell 规避」，
+# 反向「命令里的真规避仍被抓」；另三格是反绕过（夹带执行语义的假路径、未登记的键不豁免、
+# 路径 guardian 仍看得见命令里的受保护路径），两格钉清单单源与「清单真的同时驱动预检与守卫」。
+# 失效方向＝有人为了绿把 guardian 摘掉或把 severity 降了，故留一格 CRITICAL 交付锁。
+# 单跑读数：本档 8 passed 连跑 2 次同读数。
+tests/unit/security/test_guardScansFollowParameterSemantics.py
