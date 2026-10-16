@@ -4257,6 +4257,61 @@
     - **净 LOC**：生产池 **+99/−32 ⇒ 净 +67**，其中注释 17、docstring 27 ⇒ **代码净 +30**（`tool_guard.py` +84/−16：单源两把键与形状判定、`scan_surface` 声明、引擎选面、`_build_command_surface` 剔除循环、续行归一化改遍历，抵掉被删的 `_is_likely_path_param` 与被替换的归一化段；`governance.py` +15/−16：三份平行清单/正则删除、取数改指单源）。判据池 **+166/−0**；子集 **+6/−0**（605→606）。数字按落库后 `git show --numstat` 复算，注释/docstring 与代码的分类由 tokenize+AST 现量，不心算。
     - **归属如实写明（不假装历史干净）**：本格正文与 §6-255 的改判、§9 表那一行，是随并发会话那笔 `90f7fc6c`（它自己的 §6-265 勘误）**一起入库**的——对方按文件提交时把本会话当时未提交的段落一并署进了它的提交信息。本笔只收最后两格（作废号删除＋那 2 条 ERROR 的留档）。读法：**号次与内容以 §6 为准，`git log` 的归属只是记账**。这也是「同一份台账两个会话同日写」的固有代价，与 §6-259 那格"提交标题抄自上下文快照"同一族。
     - **本会话下一枚空号现查 §6-267（写前必须现场重取，本笔落库时该读数为 266）。**
+267. **§6-259 那条"假可得"的写侧半区落地：空壳技能条目不再被首钉成构件权威（✅ `8cf388c6` 生产+判据+活体 / `84fc9b4a` 子集 606→607）** 🟢 —— 读面显示什么**仍等裁**，三态票在本格末段。
+
+    - **复核实状（关键：先分清陈态与活缺陷）**：本机 `data/agents/default/skills/manifest.json` 里
+      `builtin--adaptive-presentation-studio` 是 `enabled: true`，而落盘目录只有 `manifest.json`、0 个 `.py`
+      （mtime 2026-10-06，早于真字节那批 `66030ba1`＝10-13）。**今天的产品代码造不出这一形**：
+      `install_skill` 在门拦下时删 `.incoming` 且不建 `target_dir`（`skill_service.py:570-585`），另两处
+      `enabled: True` 写入点（`hub_client.py:350`、`skill_service.py:687`）是内存注册表且同批落 `path`＋摘要。
+      所以目录本身是旧代码留下的陈态。**但污染是活的**：`call_skill` 里摘要对账排在入口判定之前
+      （`:1696-1715` 在 `:1717-1727` 前），未钉分支"现算现钉并放行"，于是**每次调用**都先把空壳摘要写进账本、
+      下一行才报 `No entry point found`。两份后果：账本被一份不代表任何构件的读数占住；日后真把字节补进那个目录，
+      `checkArtifact` 会拿这份空壳读数判**篡改**——一次误点就把"以后装上了"这条路钉死。同根因第二命中点在插件半区
+      （`plugin_manager.load_plugin` 同序同形），按教义第 5 条同批收掉。
+    - **改法只动写侧次序，不改任何对外语义**：入口判定抽成一处 `SkillService._resolveEntryPoint`
+      （`main.py` 优先，否则首个非 `__init__` 的 `.py`）；未钉分支**只在落盘确有可执行构件时**首钉落账，
+      空壳那一路沿用既有拒因不另造词。**已钉条目比对次序一字不动**——篡改（含"把入口文件删了"）仍先报摘要不符，
+      不让"没入口"盖掉更准的那个读数。插件侧同形：入口不在盘 ⇒ 不首钉不落账，拒因交给既有 `entry_not_loaded`。
+    - **红→绿与自证**：`tests/unit/skills/test_unpinnedShellIsNotPinnedAsAuthority.py` 首跑 `3 failed`（本批新格），
+      插件档补的 2 格里 1 红；只撤本批两个生产件（tag `red-selfproof-shell-pin-b57`）复跑同一选择集 ⇒
+      **失败集恰好等于新增 4 格**（`4 failed, 14 passed`），`apply`+`drop` 复原后同选择集 `18 passed`。
+      两格对照（有构件的未钉条目仍首钉放行；已钉被篡改仍报摘要不符）改前改后都绿——它们钉的是"不许误伤"。
+    - **活体两侧对照（这是本批最强的一格证据）**：`tests/manual/shellEntryNotPinned_batch57.py` 把真账本副本落进
+      隔离数据根，**并把账本里的绝对 `path` 改指副本**——第一版没改，第 [6] 项走成"仍然没入口"那条支路，
+      看着绿其实没咬到"补上字节"这一腿（形态集"活体判据要能反证"同族，本轮自己抓到）。改后本树 7 项全 PASS：
+      账本 sha 前后一字不变、连调三次仍不落账、补上包里真 `create_montage.py` 后拒因变成该脚本自身的
+      `No module named 'ensure_raster_image'` 且此时才首钉。同一脚本在**仓外 HEAD worktree**（无修复）跑出
+      `[4][5][6] 三项 FAIL`，且 `[6]` 的拒因正是 `artifact_digest_mismatch`——"补上真字节反被空壳读数判篡改"是量出来的。
+      仓内 `data/` 内容指纹 3041 文件／`43d5d8a64ed5` 起＝止（未写入）。
+    - **A/B**（选择集 `tests/unit/skills tests/unit/plugins`，基线＝仓外 worktree at `90f7fc6c` ＋铺入本批两档判据、无修复）：
+      基线 `5 failed, 1210 passed` ↔ 本批 `1 failed, 1214 passed`，**仅本批侧红 0 条 ⇒ AB_PASS**；仅基线侧红 4 格即交付证据；
+      两侧共有那条是 `test_market_builtin.py::test_import_builtin_offline[presentation-studio]`（Windows MAX_PATH，§6-259 已登记）。
+    - **两格新常驻红不认领，也不代改（归属有证据）**：`test_subprocessTextEncodingRatchet::test_ratchetDoesNotRise` 与
+      `test_trackedScanFaceIsSingleSourced::test_fullTreeLsFilesEnumerationHasExactlyOneHome` 点名的都是
+      `tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py:51`（手抄 `git ls-files`＋未钉 encoding），
+      该档在 `HEAD~1` 就已存在（随票④那批入库），**不在本批提交面**（`git show --name-only HEAD` 只有五件）。
+      之所以不顺手改它：该档此刻正躺在并发会话的**未提交改动**里（`git status` 显 `M`），我改完用 `--only` 提交
+      会把人家的在途段落署进我笔里（§6-257 那格的同形）。出路守卫已经写在报错里——改走 `ast_scan.trackedPyPaths(*pathspecs)`，
+      一处改动同解两格。**等对方那批落库后由其后继批次收**。
+    - **净 LOC**（`git add` 后读 `--cached --numstat`）：生产池 **+45/−20 ⇒ 净 +25**（`skill_service.py` +30/−12、
+      `plugin_manager.py` +15/−8），去向＝新增 `_resolveEntryPoint`（把内联段原样搬出）＋未钉分支"空壳不首钉"那一支
+      －被删的内联 8 行；插件侧是同形的 `if/else` 包一层。判据池 +225/−0，活体档 +209/−0，子集 +8/−0。
+    - **仍开的那半区：读面把"账本在册"当"可得"（三态，请拍）**。活体 OBSERVE 留了读数——修后这条空壳仍然
+      `get_skill_info.enabled=True` 且出现在 `list_skills` 里；`market_registry.py:376-379` 在造不出执行体时
+      **兜底注册一个 `status=ACTIVE` 的裸基类**（点到才 `NotImplementedError`），而工具 schema／提示词目录／
+      `/agent/{id}/skills`／`GET /skills`（还 `setdefault("enabled", True)`）全都只读账本字段，没有一面看落盘内容。
+      **(甲) 读面对账**：列表／详情／schema 三面对每条做"入口在不在盘"的同一处判定（`_resolveEntryPoint` 已是单点），
+      不符 ⇒ 投影出 `available: false` ＋原因，而不是画成可用；代价是面板会开始出现"已装但不可用"这一态，
+      前端要接一个字段，且既有判据 `test_marketInstalledStateIsReadBack::TestSecondFetchPathRetired` 明确**认可空壳仍被注册**
+      （它钉的是"不许回看缓存"），改它须同批把那一格改成"空壳不得被标 ACTIVE"——不是放宽，是换方向。
+      **(乙) 不注册执行体**：造不出构件就不进注册表，目录与 schema 面自然看不见它；代价是这条技能从面板上**消失**，
+      用户不知道它曾存在、也无从卸载，且存量所有空壳条目会在下一次启动集体"蒸发"（本机现读该库 8 条里 1 条是空壳）。
+      **(丙) 只清态不修码**：删掉这条本地陈态目录＋账本条目（运维动作，零代码）；代价是"读面用错凭据"这条通道留着，
+      下次任何账实不符（磁盘被清、手改、迁移丢件）都会再次画成可得——**教义第 2 条反对**，列出来只为说明为什么不选。
+      推荐 **(甲)**：它把"可得"的凭据从"清单在册"换成"落盘确有可执行构件"，与刚落地的写侧同一条单点，
+      且如实形态是"已装但构件缺失"而不是静默消失。**另需一并拍**：这只包到底该不该能装上（`market_bundles/` 里它有真字节，
+      但今天仍被 1 条裸 `compile(` 拒——那是 §6-259 末段留下的产品题）。
 
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
@@ -4516,18 +4571,21 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `d7631851` | 登记并**推翻一张票的前提**：task #35 票面写"自带 .py 的 27× `exec(` 属真代码形状"，逐条读证据行后是 26/27 条 `re.compile(`；四只合成包现跑给出最小读数（`.py` 里只一行 `re.compile(` ⇒ deny）。三态票摆开后推荐甲 | §6-250 |
 | `cda68399` `c0d649f8` `9e3770b8` | 批 56 甲案落地：`dangerous_exec` 只判裸名调用（`(?<![\w.])`）、`dangerous_path_traversal` 须同行有落地形态且**降级 low 不删读数**、裁决与拒因收进 `isBlocking()/blockingFindings()` 一份口径。**本轮唯一动生产的一批，净 +85**（`skill_scanner` +95/−15、`skill_install_gate` +12/−7，去向逐条在正文）；判据 12 格（+380 测试池）入子集 600→601；红自证恰 5 格、6 枚变异全红且字节还原、活体 13 读数全 PASS、A/B 基线 7 红 ↔ 本批 2 红仅本批侧 0 条 ⇒ AB_PASS。两处自纠入账：一枚**等价变异**（针打空被读成"判据没牙"）与 `scripts/ab_compare.sh` **在本仓并不存在**而首调失败被尾命令洗成 0 | §6-259（承 §6-250） |
 | `49caacee` `ad3b79f5` | §6-255 甲案落地：guardian 自声明扫描面（默认 `"all"`＝不声明就掉不了覆盖面），命令语义那两族只吃"键在 `PATH_PARAM_KEYS` **且**值过 `looksLikePathValue`"的路径值，两把键清单从 governance 的三份平行定义收回 `tool_guard` 一处并让预检与守卫同取；`FilePathGuardian` 留全量面（命令里的 `/etc/passwd` 照拦）。同根因三处：续行归一化改遍历单源（`code` 不再漏）、删零调用的 `_is_likely_path_param`、`scan_all` 挑路径改按形状放宽。**生产池 +99/−32＝净 +67，其中代码 +30**；判据 8 格（+166）入子集 605→606；红自证恰 3＋1 格、3 枚变异各咬自己那一格且 md5 字节还原、活体 11 格全 PASS（含 data/ 内容指纹不变）、A/B 基线 9 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS。两处自纠：活体谓词写窄（找的是脚本自己写错的串，不是产品的故障）；commit 号被反引号命令替换吃掉 ⇒ 就地 amend 更正 | §6-266（承 §6-255） |
+| `8cf388c6` `84fc9b4a` | §6-267：空壳技能条目不再被首钉成构件权威——`call_skill` 的摘要对账排在入口判定之前，未钉分支每次调用先把空壳摘要落进账本、下一行才报"没入口"；入口判定收成一处 `_resolveEntryPoint`，未钉只在"落盘确有可执行构件"时首钉（同根因插件半区同批收）。生产净 **+25**、判据 +225、活体 +209、子集 606→607。红自证恰 4 格；**活体两侧对照**是本批的取证形态——无修复那侧 `[4][5][6]` FAIL 且 `[6]` 拒因正是 `artifact_digest_mismatch` | §6-267（承 §6-259） |
 
 > **这张表有一处维护断档，如实标出**：上表止于 `c1377d27`（§6-186，10-13），中间十余批（§6-187—§6-230）
 > 没有逐笔进表——那些批的**明细一直在 §6 各格里，权威源是 §6，不是本表**。本表只补回"本轮（10-15/16）"这一段，
 > 供按 commit 反查；要读某批的根因与证据，仍去对应 §6-N。
 >
-> **本轮（批 53—批 56，13 笔）收口**：生产池只动了一处（批 56 的 +85），其余全在测试／CI 子集清单／台账三面。
+> **本轮（批 53—批 57，15 笔）收口**：生产池动了两处（批 56 的 +85、批 57 的 +25），其余全在测试／CI 子集清单／台账三面。
 > 已推送到 `origin/main`（`5cd67883..9e3770b8`，快进，无 merge 提交）；本地分支面只有 `main`，无可清理项。
 > **仍开**：① §6-255 **已裁并落地**（甲案，见 §6-266：`49caacee` 生产+判据+活体 / `ad3b79f5` 子集 605→606）——
 > 该票点名的"中招面＝任何工具任何参数"由 guardian 自声明扫描面收掉，两把键清单收成一处；
 > 其"仍欠的三刀"（字符否决式豁免、整串扁平输入、两个零调用的第二份逃逸判定）登在 §6-266 末格待点单；
-> ② 那只真资产包今天仍被 1 条裸 `compile(` 拒，而 `manifest.json` 仍 `enabled: true` 且目录里 0 个 `.py`——
-> "撤条目还是开白名单"属产品语义，**等裁**；③ 既有判据 `test_installGateDocFilesAreReportOnly.py` 那一格**仍按
+> ② 那只真资产包的"假可得"已按两半拆开处理：**写侧半区已闭**（§6-267：空壳条目不再被首钉成构件权威，
+> 危害由活体两侧对照量出——无修复时补上真字节会被判 `artifact_digest_mismatch`）；**读面半区仍等裁**
+> （列表／详情／schema 只认账本 `enabled`，`market_registry.py:376-379` 还兜底注册 ACTIVE 裸基类——
+> 三态票与推荐 (甲) 写在 §6-267 末段）。另"该不该让这只包装上"（今天仍被 1 条裸 `compile(` 拒）仍是产品语义，等裁；③ 既有判据 `test_installGateDocFilesAreReportOnly.py` 那一格**仍按
 > (后缀, 规则 id) 计数而不读证据行**，分不清"27 条正则预编译"与"1 条真动态编译"——**仍欠的一刀**，登记待点单；
 > ④ 新缺陷未立项：zip 成员名撞 Windows `MAX_PATH`（实测 261 字符），`market_sources.py:315` 把它折成一句 "zip refused"
 > （短根机器即绿，与扫描门无关）；⑤ 本会话不认领的两条常驻红见 §6-259"不认领"段（`513c651f` 的扫描预算登记欠账、
