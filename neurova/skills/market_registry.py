@@ -36,6 +36,15 @@ _MARKET_EXECUTORS: Dict[str, str] = {
     "web-search": "WebSearchSkillExecutor",
 }
 
+
+def hasExecutorMapping(skill_id: str) -> bool:
+    """这只 id 有没有**代码里的**执行体映射（`web-search` 那一族）。
+
+    外面要问的是这一句，不是自己去读私有表：读面判"这条可得吗"必须把这一形算进去——
+    这类技能盘上本来就没有字节，按落盘判会把真能动的好技能集体误灰（§6-272 的对照格）。
+    """
+    return str(skill_id or "") in _MARKET_EXECUTORS
+
 #: 安装期不进账本的运行产物（缓存目录里可能有上一次跑出来的字节）
 _STAGING_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".incoming_*")
 
@@ -346,6 +355,14 @@ def restore_market_skills_from_service(service: Any, registry: Any) -> int:
             info = service.get_skill_info(skill_id) or {}
             source = (info.get("manifest") or {}).get("source") or info.get("source")
             if source not in ("marketplace", "synthesized", "agent", "auto"):
+                continue
+            if info.get("available") is False:
+                # 「在册」不等于「可得」：构件缺失的条目**不进执行表**，也不再兜底注册一个
+                # `status=ACTIVE` 的裸基类——那等于给 LLM 一个必然失败的工具，而面板把它画成可用。
+                # 读面仍看得见这条（`list_skills`/`get_skill_info` 照旧返回，带 unavailableReason），
+                # 用户据此重装或撤条目；这里关的是"能被调用"这一面（§6-272，用户裁甲）。
+                logger.warning("restore 跳过 %s：%s", skill_id,
+                               info.get("unavailableReason") or "构件缺失")
                 continue
             manifest = info.get("manifest") or {}
             tool_sequence = (manifest.get("config") or {}).get("tool_sequence")

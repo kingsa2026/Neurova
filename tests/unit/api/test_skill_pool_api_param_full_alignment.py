@@ -119,6 +119,16 @@ class _MiniService:
     def iter_skills(self):
         return list(self._skills.items())
 
+    def availabilityFor(self, skill_id):
+        """读面对账这一格必须跟着真协作者的契约走（§6-272 批 58）。
+
+        真 `SkillService.availabilityFor` 对"`path` 为空"的条目**不裁决**（那是
+        `register_auto_skill` 声明的"自动技能无文件路径"一形），本替身的条目全是 `path: ""`，
+        所以如实返回可得——不是把断言改松，是把缺的那块契约补齐：
+        缺它时端点的宽 `except` 会把 AttributeError 折成空列表，链路看着像"视图串了"。
+        """
+        return {"available": True, "unavailableReason": ""}
+
 
 @pytest.fixture
 def mini(tmp_path, monkeypatch):

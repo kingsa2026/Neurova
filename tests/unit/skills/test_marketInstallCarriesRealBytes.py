@@ -246,8 +246,15 @@ class TestSecondFetchPathRetired:
         assert not isinstance(skill, SkillDocSkill), (
             "账本目录里没有 SKILL.md，却仍从市场缓存造出了指令型执行体——"
             "执行的那份不在钉的范围内，门也从未看过它")
-        with pytest.raises(NotImplementedError):
-            asyncio.run(skill.execute({"task": "t"}))
+        # **本格方向已被改判**（§6-272，用户裁甲）：旧断言是"注册一个 `status=ACTIVE` 的裸壳，
+        # 调它才 `NotImplementedError`"。壳进执行表等于给 LLM 一个必然失败的工具，
+        # 且工具 schema／提示词目录／读面都会把它画成"可得"。现在的诚实形态是
+        # **根本不进执行表**——读面仍然看得见这一条（带 `unavailableReason`），重装或撤条目由人决定。
+        # 排除型主断言（不许回看缓存）一字未动，它的牙仍由变异 M3 证。
+        assert skill is None, (
+            "缺构件的条目又进了执行表——第二取径没复活，但工具表多了一个必然失败的工具")
+        assert svc.get_skill_info("aliyun--demo")["available"] is False, (
+            "物化口没注册，投影面却说可得：两处判定已经分叉")
 
     def test_marketCacheIsLookedAtOnlyAtInstallTime(self):
         """按 AST 数：咽喉里"回头看缓存"的调用只许落在安装期来源那一处。
