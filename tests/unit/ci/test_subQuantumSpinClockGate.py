@@ -37,6 +37,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -279,6 +280,7 @@ class TestSpinCellsSkipRatherThanBurn:
             capture_output=True,
             text=True, encoding="utf-8", errors="replace",
             cwd=str(REPO_ROOT),
+            env=dict(os.environ, PYTHONIOENCODING="utf-8"),
             timeout=240,
         )
         output = proc.stdout + proc.stderr

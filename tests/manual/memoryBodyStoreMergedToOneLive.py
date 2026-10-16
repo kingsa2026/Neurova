@@ -188,7 +188,8 @@ def main() -> int:
 def _runChild(code: str) -> str:
     proc = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True,
-        encoding="utf-8", errors="replace", env={**os.environ},
+        encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     tail = (proc.stdout or "").strip()[-300:]
     if proc.returncode != 0 and "AssertionError" not in (proc.stderr or ""):

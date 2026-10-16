@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import re
 import shutil
 import subprocess
@@ -136,7 +137,8 @@ def observe(name: str, detail: str) -> None:
 
 def runProbe(root: str) -> dict:
     proc = subprocess.run([sys.executable, "-c", PROBE, root], capture_output=True,
-                          text=True, encoding="utf-8", errors="replace", cwd=root)
+                          text=True, encoding="utf-8", errors="replace", cwd=root,
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     out = (proc.stdout or "").splitlines()
     if len(out) < 3:
         return {"error": (proc.stderr or "")[-300:] or "无输出", "lines": out}

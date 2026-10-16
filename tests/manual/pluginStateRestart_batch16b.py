@@ -126,7 +126,7 @@ def main() -> int:
          " 'load_error': m.stateLoadError,"
          " 'unregistered': m.unregisteredPluginDirs()}))"],
         capture_output=True, text=True, encoding="utf-8",
-        env={**os.environ, "NEUROVA_DATA_DIR": str(get_data_root())})
+        env={**os.environ, "NEUROVA_DATA_DIR": str(get_data_root()), "PYTHONIOENCODING": "utf-8"})
     try:
         reading = json.loads(second.stdout.strip().splitlines()[-1])
     except Exception:

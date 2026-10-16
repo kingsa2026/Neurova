@@ -22,6 +22,7 @@
 
 import ast
 import io
+import os
 import re
 import sys
 from pathlib import Path
@@ -311,6 +312,7 @@ class TestWebReachImportsWithoutItsOptionalDeps:
             [sys.executable, "-c", self._PROBE],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
+            env=dict(os.environ, PYTHONIOENCODING="utf-8"),
         )
         assert proc.returncode == 0 and "OK" in proc.stdout, (
             "playwright 缺席时 `neurova.web_reach` 无法导入——可选依赖又在模块顶层裸 import 了。\n"
