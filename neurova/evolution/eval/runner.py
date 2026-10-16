@@ -105,6 +105,15 @@ class EvolutionRunResult:
     caseRegressions: list[str] = field(default_factory=list)
     unevidencedCases: list[str] = field(default_factory=list)
     caseAllowance: int = 0
+    # ── 臂来源与真臂花费（P1-C 线）──
+    # 「这批分数是谁跑出来的」必须是结果的一部分：环节证据为空时，要能分得开
+    # "压根没跑环"（模拟臂）与"跑环没卡"（真臂），否则读数会被读成两种不同的事实。
+    executorKind: str = ""
+    # 计划上界与真实花费并排外露：两者一旦反向（用掉了比计划还多），就是调度与
+    # 计划漂移的信号，不该等到配额账单上才发现。未跑真臂 ⇒ None（不是 0）。
+    plannedAgentTurns: Optional[int] = None
+    agentTurnsUsed: Optional[int] = None
+    budgetPlanExceeded: Optional[bool] = None
 
     @property
     def improvement(self) -> float:
@@ -164,6 +173,10 @@ class EvolutionRunResult:
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
+            "executor_kind": self.executorKind,
+            "planned_agent_turns": self.plannedAgentTurns,
+            "agent_turns_used": self.agentTurnsUsed,
+            "budget_plan_exceeded": self.budgetPlanExceeded,
         }
 
 
