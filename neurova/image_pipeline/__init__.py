@@ -176,13 +176,11 @@ _DEFAULT_TEMPLATES = [
 class ImagePipelineManager:
     """镜像管道管理器"""
 
-    def __init__(self, storage_dir: Optional[str] = None):
-        # 同 `benchmark/__init__.py`：原默认值是裸相对 `.neurova/image_pipeline`，随 CWD 散落。
-        # 管理器本身有生产调用方（`api/endpoints/image.py:150/194/212`），但 `_storage_dir`
-        # 这个字段现读零消费点——落点先判对，字段去留随"档案票二"裁。
-        from neurova.core.data_root import dataLanding
-
-        self._storage_dir = storage_dir or str(dataLanding("image_pipeline", legacy=()))
+    def __init__(self):
+        # 本管理器**没有磁盘落点**：模板在内存里由 `_DEFAULT_TEMPLATES` 初始化，构建记录
+        # 也只在内存（`_builds`），真正的构建动作交给 `docker_builder`。原先这里挂着一个
+        # `_storage_dir`（默认值曾是裸相对 `.neurova/image_pipeline`，随 CWD 散落）——
+        # 全文件仅此一处赋值、零读取，属 §2 断点条款的"写出无人读的字段"，随票④第三包删净。
         self._templates: Dict[str, ImageTemplate] = {}
         self._builds: List[BuildRecord] = []
         self._lock = threading.RLock()
@@ -377,18 +375,11 @@ _manager_instance: Optional[ImagePipelineManager] = None
 _manager_lock = threading.Lock()
 
 
-def get_image_pipeline_manager(storage_dir: Optional[str] = None) -> ImagePipelineManager:
-    """获取全局 ImagePipelineManager 实例"""
+def get_image_pipeline_manager() -> ImagePipelineManager:
+    """获取全局 ImagePipelineManager 实例（DCL：懒创建单例必须走这条）"""
     global _manager_instance
     if _manager_instance is None:
         with _manager_lock:
             if _manager_instance is None:
-                _manager_instance = ImagePipelineManager(storage_dir=storage_dir)
+                _manager_instance = ImagePipelineManager()
     return _manager_instance
-
-
-def reset_image_pipeline_manager() -> None:
-    """重置全局 ImagePipelineManager 实例（用于测试）"""
-    global _manager_instance
-    with _manager_lock:
-        _manager_instance = None
