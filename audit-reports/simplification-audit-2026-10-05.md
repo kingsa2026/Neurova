@@ -4366,6 +4366,35 @@
       仍开的是**产品题**——这只包到底该不该能装上，并入 §6-267 末段那张读面三态票一起拍（本批不动生产语义）。
     - **本会话下一枚空号现查 §6-269（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`，本笔落库时该读数为 268）。**
 
+269. **A 批：`AgentLimitsUpdate` 补齐到配置单源全量键，"面板编辑空对象"当场有判据（✅ `21836620` 生产+判据 / `2890c7d4` 子集 607→609 / `5ee54a12` 被自家守卫咬住的那笔）** 🟢 —— 用户裁定：补齐全部键 + clamp + 与 evolution 侧同形守卫。裁定文案里说"八键"，现量是 **九键**（缺的是七键），正文一律按九键写。
+    - **这不是假想的静默失败，是面板每天在走的路径**：`SettingPage.saveAgentLimits` 发的是 `{...agentLimits.value}`，而那个 ref 在 `fetchAgentLimits` 里被 **GET 全量 spread** 过 ⇒ 每次保存都在发九键，其中七键被 pydantic 丢掉，请求 200、文件照写别的键、读数照旧。GET 面自动带全而 PUT 面只收两键，这一对不对称本身就是病灶。
+    - **边界原来在端点里重打了数字**（`ge=1000, le=10_000_000` / `ge=2, le=200`），与单源的 `MIN_*/MAX_*` **当前同值所以从没红过**；单源一改就悄悄漂移。现全部改成引用同一批常量，判据 `testNumericBoundsComeFromTheClampConstants` 逐键比对"面板合法域 == 夹紧区间"。
+    - `extra="forbid"` 补的是同一根因的另一半：打错的键名也不许"200 但没生效"。它的连带效果恰好是正向证明——**面板回环（GET 全量原样 PUT）必须能过**，过不了就是模型又漏了键（活体 B 腿量的就是这条真实路径：九键原样 PUT ⇒ 200 且值不变）。
+    - **一条如实边界单列一格**：`goal_round_budget` 的 `None` 是"跟随 `max_loop_rounds`"的哨兵，而 PUT 的 `if v is not None` 过滤让"钉住之后放回跟随"这条路不存在。要支持得改持久层的 None 语义（连带影响其余键），不在本批顺手做；判据钉的是**现状**，将来谁改成可清必须同批改判那一格。
+    - **这条守卫随后咬住了我自己**（`5ee54a12`）：C 批往单源加第三键 `doom_loop_similarity_threshold` 时漏同步 PUT 模型，独立单跑立刻 `1 failed / 17 passed`，红的正是 A 批刚立的那格。白名单滞后的真实成因从来不是"当初忘了"，而是"下一个加键的人不知道这里还有一份名单"——两份名单现在同一格上见面，不靠文档提醒。同批还纠了一处取值表达式坏：`(lo+hi)//2` 对浮点域向下取整成 0.0，撞上自己的下界 `ge=0.5`——被拒的是夹具的算术，不是配置。
+    - **红→绿→自证→活体→前端两门**：红 11 failed / 6 passed（只撤 `governance.py`、带 tag `p1aRedProof-batch-limits1` 复跑，失败格同名）→ 绿 47 passed（含既有 `test_agent_limits_settings.py`）。活体（`.tmp_liveVerifyLimits.py`，即用即删；**鉴权用生产同一函数签的真 JWT**，不 override 身份门）：A 载荷键集 == `DEFAULTS` 键集（9）、B 面板回环 200、C 写 `doom_loop_window_size=1` 后按装配口径构造的**真** `DoomLoopGate` 第二次重复签名即 `TERMINATE` 而默认窗口 4 同节奏只 `INTERRUPT_AND_CONTINUE`（这一键确实在管开火时点）、D 越界/未知键 422、E env 优先未被翻过来。前端两道实跑门（改的是面板在用的契约）：`npm run test` 2105 passed / `npx vue-tsc --noEmit` exit 0。
+    - **净 LOC**：生产池 +59/−5 ⇒ 净 +54；判据池 +166/−12（新档 18 格 + 两档间的搬家：覆盖性格从真臂判据档移来同族档，原处只留可达性格）。
+    - **仍开**：面板表单本身仍只渲染 `token_budget` / `max_loop_rounds` 两个输入框 ⇒ 其余七键**能经 API 调、不能经 UI 调**。补齐 UI 属前端批（11 语言 locale 对齐 + `vue-tsc`/vitest 两道门），不在本批顺手扩。
+
+270. **B 批：`EvalExample.source` 从只写不读接成"这批验收证据的来源构成"（✅ `f90e6d19` 生产+判据；子集同 `2890c7d4`）** 🟢 —— 用户裁定：接，不是退役。与 M-D 退役 `difficulty`/`category` 不矛盾，理由写进判据档开头：那两样是 LLM 自报、未经校准、无人验证的标签；`source` 是**产出通道的记账**，写侧本来有真值（`miner.py:197` 取挖掘记录、`synthetic.py:97` 写 synthetic），缺的只是读的人。
+    - **接成什么**：分数相同不代表证据同级——3 条手工 golden 与 3 条合成用例上的同一个 0.9 是两个可信度。所以提案记录带 `source_mix`，列表面同级出 `source_coverage`，审批人一屏看见，不必回查数据集怎么来的。
+    - **三条口径各有判据**：① 构成只算**判据集**（经 `evaluation_split` 单源取数，与 runner 的留出终审同一处）——那一格故意在 train 多放 3 条 history，混进来就红；② 旧记录整键缺席 ⇒ 归"未记"，**绝不因为 dataclass 有 `"synthetic"` 默认值就把历史提案读成合成用例**（判据集为空同理 ⇒ 空构成，不兜默认来源）；③ "未记"词值与计数实现收成一处：`UNRECORDED_MODEL_KEY` 改名 `UNRECORDED_GROUP_KEY`（维度中立，基座与来源共用）并删旧名，两维各自只留投影 `by_model` / `by_source`。
+    - **不造第二份读面**：`data` 是前端已在消费的列表，形状一字不动，覆盖面走同级新键（M-C 的 `model_coverage` 先例，那档既有契约测试照旧绿）。**来源只作解释面**：`testVerdictNumbersIgnoreTheMix` 钉"同分不同来源 ⇒ `holdout_before/after`、`iterations_run` 逐字段不变，而 `source_mix` 必不同"。
+    - **一处取数自纠**：判据初版把计划回合数写成 13，那是活体腿另一份**无 heldout** 的集形抄错了夹具；实测两面同为 17，不一致的是我写的字面值不是两面读数（与 §6-265 那条"两面必须给同一个数"同族）。
+    - **红→绿→自证→活体**：红 7 failed → 绿 7 passed；只撤 `service.py` + `text_evolution_api.py`（tag `p1bRedProof-batch-source1`）复跑 ⇒ 7 格全红同名；`tests/unit/evolution/eval` 全目录 300 passed。活体（`.tmp_liveVerifySource.py`）：真落盘 `proposals.json` 里 `source_mix={"golden":3,"history":2}` → 真 HTTP 列表端点读出同值、`data` 仍是列表、同一条提案同时计进 golden 与 history 两组；手工造一条旧记录 ⇒ 只落在 `__unrecorded__`。
+    - **净 LOC**：生产池 +80/−19 ⇒ 净 +61；判据池 +177/−0。
+
+271. **C 批：`DoomLoopGate` 实装签名相似度判定（用户裁甲）；默认留 1.0 是量出来的，不是偏好（✅ `111ba0df` 生产+判据+台账器械）** 🟢 —— 三态票（§6-239 登记）里那格"死旋钮"到此有下落：机制实装、配置键挂上、线上开火时点未动。
+    - **实测比值（签名由生产拼法 `_toolSignatures` 生成，不是手造）**：同参空转（offset 10→11）0.978、翻页推进（page 1→2）0.976、顺序读不同文件 0.932 / 0.843、不同工具同参数 0.902、多调用 vs 单调用 0.489。0.95 抓得到空转、放得下换文件与换工具，**但分不清"翻页读取"与"换参数空转"**——字符串层面只差一个数字，要分就得读工具返回值，而本门 `check(ctx)` 只拿轮次签名。长文件分段读是常见动作，误判代价是被注入"换策略"乃至终止 ⇒ 默认 1.0（＝逐字相等，与实装前逐字同形），启用与否交配置面显式决定。**这条代价本身写成判据**（`test_pagingIsCaughtTooAndThatIsTheDocumentedCost`），不留在注释里靠人信。
+    - **三处纪律值得单独记**：① 脏值/越界**退回上界而不是退 `DEFAULTS` 现值**——判据夹具会就地改 `DEFAULTS`，拿它兜底等于让脏值二次进入（与 §6-226 那条"展示串当比对键"同族：兜底值取自你可能正在改坏的那份状态）；② 比对前按 `_SIGNATURE_COMPARE_CAP=256` 截断，`check()` 每轮要比窗口内每一条而 `SequenceMatcher` 是 O(n·m)，不兜上界就等于让一条超长参数放大每轮判定；③ 阈值 ≤0 **不**解释成"任意两轮都算重复"（那是把门控变成无条件开火），退回逐字相等。
+    - **顺手收掉一处第二份定义**：`gate_catalog.DoomLoopParams` 原本把三个默认值重抄一遍，其中 `similarity_threshold: float = 0.95` 与单源的 1.0 **直接不一致**——声明式编出来的门与装配点装配出来的门会按两种语义判重复，而两边各自测试都绿。三键改 `Optional=None` ⇒ 缺省回落单源，边界取 `MIN/MAX_DOOM_LOOP_*` 常量。**同族另一处按实登记未改**：`IterationParams.max_rounds=20` 与 `TokenBudgetParams.max_tokens=100000` 同样手抄单源值，但那两把门的构造不接受 `None`（无回落路径），改它们要先给门加单源取值，不属本批。
+    - **合法域有实测依据**：下界 0.5 就是那条 0.489（再低等于任意两轮都算重复）。第三键随之进台账器械：`scripts/ci/tool_loop_deadline_ledger.py` 登记 + `toolLoopDeadlines.txt` 写机器算出的行（`key | consumed | not_a_threshold | 5 | 已接线`），对账仅余 `count_conflict: ToolParameter`（main 预存，前文已记）。
+    - **红→绿→自证→活体**：只撤四个生产件（tag `p1cRedProof2-batch-sim1`）⇒ 12 failed / 7 passed（含 `test_06/07/08` 由"蕴涵式跳过"转成直接断言后的同名红）→ 本档 19 passed，连带 `test_gates` / `test_gate_catalog` / 预算单源档 44 passed。活体（`.tmp_liveVerifySimilarity.py`，走**真装配点** `_buildGateRunner()` + **真入口** `GateRunner.on_round_end()`）：默认档翻页序列 `[BYPASS,BYPASS,BYPASS]`、逐字相同 `[BYPASS,INTERRUPT(doom_loop),TERMINATE]`；`NEUROVA_AGENT_DOOM_LOOP_SIMILARITY=0.95` 时同一串翻页序列变成 `[BYPASS,INTERRUPT,TERMINATE]`；env 越界 9.9 与脏值 not-a-number 都夹回 1.0 不崩装配。
+    - **宽域归属复算**：`tests/unit/agent tests/unit/security tests/unit/evolution`（4178 条）20 条红；把本批七个文件整体撤掉复跑同一选择集 ⇒ **failset 逐行一致（diff 为空）** ⇒ 一条都不是本批的（`test_pipeline_adaptive_rag` 10 条、`test_agent.py` 3 条、尺寸棘轮 2 条、`test_goal_gate_wiring` 1 条，另有前文记过的 `test_agent_public_contract` 与 `test_zeroHitSearch_recordsGap` 两条老面孔）。
+    - **净 LOC**：生产池 +121/−17 ⇒ 净 +104；CI 取数器械 +7/−1；判据池 +186/−31。
+    - **仍开（三处，不静默留白）**：① 想把近似真用到生产上，仍需在面板/env 把 `doom_loop_similarity_threshold` 调到 0.95 并接受翻页代价（判据已把两端都钉住，改的只是值）；② `IterationParams` / `TokenBudgetParams` 那两把手抄默认值（见上）；③ §6-269 的"面板表单仍只渲染两键"。
+    - **本会话（ModularRSI 这条线）下一枚空号现查 §6-272（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`；这三笔落库前读数为 268，落库后应为 271）。**
+
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
 2. **相对导入指向同名他文件** —— `neurflow/templates/__init__.py:34` 的 `from .media`、`context/orchestrator.py:24` 的 `from .recovery`（指 `context/recovery.py`，11783 字节，已核实）。
