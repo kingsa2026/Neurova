@@ -97,6 +97,15 @@ class TestGateBehaviorPreserved:
 
 class TestDescribe:
     def test_describe_schema_shape(self):
+        """出街 schema 的契约：**默认值是"跟随单源"这个语义**，不是一个抄来的数字。
+
+        旧断言写的是 `default == 20`——那等于把 `DEFAULTS["max_loop_rounds"]` 的手抄值
+        钉成对外契约：管理员把轮次上限配成 30 之后，配置面仍报 20，UI 照它渲染就是
+        "显示一份没在生效的值"（§6-269/271 同一条根因）。`doom_loop` 那三键在 §6-271
+        已经改成这一形态（`default: null` ＋ `minimum`/`maximum` 取夹紧常量），
+        本批改判只是把 `iteration` 对齐到同族——合法域仍然出街，只是不再假报生效默认值。
+        """
+        import neurova.security.agent_limits_settings as als
         from neurova.agent.gate_catalog import GateCatalog
 
         schema = GateCatalog().describe()
@@ -104,7 +113,13 @@ class TestDescribe:
         entry = schema["iteration"]
         assert entry["priority"] == 10
         assert "max_rounds" in entry["params"]
-        assert entry["params"]["max_rounds"]["default"] == 20
+        assert entry["params"]["max_rounds"]["default"] is None, (
+            "schema 不该再报一个手抄默认值——缺省语义是「取配置单源」"
+        )
+        spec = entry["params"]["max_rounds"]["anyOf"][0]
+        assert (spec["minimum"], spec["maximum"]) == (als.MIN_ROUNDS, als.MAX_ROUNDS), (
+            f"出街合法域应为夹紧常量 {(als.MIN_ROUNDS, als.MAX_ROUNDS)}，现读 "
+            f"{(spec['minimum'], spec['maximum'])}")
 
     def test_describe_lists_no_goal(self):
         from neurova.agent.gate_catalog import GateCatalog

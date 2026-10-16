@@ -58,14 +58,32 @@ class StopGate(ABC):
         last_tool_calls / goal（可选，goal 模式注入）。"""
 
 
-class IterationGate(StopGate):
-    """轮次上限门控。"""
+def _settingsLimitDefaults() -> Dict[str, int]:
+    """轮次与 token 预算两档门限的默认值：**取自**配置单源，不在此手抄第二份数字。
 
-    def __init__(self, max_rounds: int = 20):
+    此前这两个门的签名默认值写的是死数字 20 与 100000，与
+    `security/agent_limits_settings.DEFAULTS` 各持一份；而 `IterationGate` 的 None 分支引用的
+    `ROUND_BUDGET_FALLBACK` **只在 GoalGate 上定义**——"缺省时取什么"这条路上，一份手抄数字与
+    一条会崩的分支并排放着。同族的第三把门（`DoomLoopGate`）已经改成这个形态（见
+    `_settingsDoomLoopDefaults()`），本批把剩下两把接上（教义第 5 条：同一根因全命中点）。
+    """
+    from neurova.security.agent_limits_settings import DEFAULTS
+
+    return {
+        "max_rounds": int(DEFAULTS["max_loop_rounds"]),
+        "max_tokens": int(DEFAULTS["token_budget"]),
+    }
+
+
+class IterationGate(StopGate):
+    """轮次上限门控。缺省取配置单源（见 `_settingsLimitDefaults()`），不在此写数字。"""
+
+    def __init__(self, max_rounds: Optional[int] = None):
         self.name = "iteration"
         self.priority = 10
         self.max_rounds = (
-            int(max_rounds) if max_rounds is not None else self.ROUND_BUDGET_FALLBACK
+            int(max_rounds) if max_rounds is not None
+            else _settingsLimitDefaults()["max_rounds"]
         )
 
     def check(self, ctx: Dict[str, Any]) -> StopDecision:
@@ -80,12 +98,15 @@ class IterationGate(StopGate):
 
 
 class TokenBudgetGate(StopGate):
-    """累计 token 预算门控。"""
+    """累计 token 预算门控。缺省取配置单源（见 `_settingsLimitDefaults()`），不在此写数字。"""
 
-    def __init__(self, max_tokens: int = 100000):
+    def __init__(self, max_tokens: Optional[int] = None):
         self.name = "token_budget"
         self.priority = 20
-        self.max_tokens = max_tokens
+        self.max_tokens = (
+            int(max_tokens) if max_tokens is not None
+            else _settingsLimitDefaults()["max_tokens"]
+        )
 
     def check(self, ctx: Dict[str, Any]) -> StopDecision:
         usage = ctx.get("round_usage") or {}

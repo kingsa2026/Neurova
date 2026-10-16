@@ -25,15 +25,19 @@ from neurova.agent.gates import (
     StopGate,
     TokenBudgetGate,
 )
-# 死循环门三键的合法域取配置单源的常量，不在本档重打数字（重打的那份一旦与单源不一致，
-# 声明式编出来的门与装配点门就按两种语义判重复，两边测试各自都绿）
+# 各门参数的合法域一律取配置单源的常量，不在本档重打数字（重打的那份一旦与单源不一致，
+# 声明式编出来的门与装配点门就按两种语义判定，两边测试各自都绿）
 from neurova.security.agent_limits_settings import (
     MAX_DOOM_LOOP_INTERRUPTS,
     MAX_DOOM_LOOP_SIMILARITY,
     MAX_DOOM_LOOP_WINDOW,
+    MAX_ROUNDS,
+    MAX_TOKEN_BUDGET,
     MIN_DOOM_LOOP_INTERRUPTS,
     MIN_DOOM_LOOP_SIMILARITY,
     MIN_DOOM_LOOP_WINDOW,
+    MIN_ROUNDS,
+    MIN_TOKEN_BUDGET,
 )
 from neurova.core.logger import get_logger
 
@@ -44,13 +48,22 @@ logger = get_logger(__name__)
 
 
 class IterationParams(BaseModel):
+    """轮次上限门的声明式参数。缺省即由门自取配置单源，合法域取夹紧用的同一批常量。
+
+    形态与 `DoomLoopParams` 一致：这里再写一份 `= 20` 就是 `DEFAULTS` 的第二份手抄，
+    声明式配置编出来的门与 `_buildGateRunner` 装配出来的门会按两种阈值判停。
+    """
+
     model_config = ConfigDict(extra="forbid")
-    max_rounds: int = 20
+    max_rounds: Optional[int] = Field(default=None, ge=MIN_ROUNDS, le=MAX_ROUNDS)
 
 
 class TokenBudgetParams(BaseModel):
+    """token 预算门的声明式参数（同上：缺省取单源，不在此抄数字）。"""
+
     model_config = ConfigDict(extra="forbid")
-    max_tokens: int = 100000
+    max_tokens: Optional[int] = Field(
+        default=None, ge=MIN_TOKEN_BUDGET, le=MAX_TOKEN_BUDGET)
 
 
 class DoomLoopParams(BaseModel):
