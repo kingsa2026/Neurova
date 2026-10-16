@@ -166,6 +166,10 @@ class EvolutionLedger:
                     hits = len(attr.get("hits") or [])
                     total = round(hits / attr["hit_rate"]) if attr["hit_rate"] else 0
                     why += f"（命中率 {hits}/{total}）"
+                # 环节声明与它弄坏过的环节：证伪假设要能被读成"改错了地方"，
+                # 而不只是"没涨分"（读数进提示段即闭环，accept/reject 仍不读它）。
+                if isinstance(attr, dict):
+                    why += _environmentDigest(attr)
                 lines.append(f"- [{r.get('ts', '')}] {r['hypothesis']}{why}")
         if accepted:
             # 这里的"已生效"= 被部署（不是"本轮 tune 赢过基线"）——被终局拒过的运行
@@ -183,12 +187,31 @@ class EvolutionLedger:
 
 def attribution_hit_rate(*, predicted: list[str],
                          base_scores: dict, cand_scores: dict,
+                         envsByTask: Optional[dict] = None,
+                         candidateEnvsByTask: Optional[dict] = None,
                          eps: float = 1e-9) -> dict:
     """P2-10：predicted_affected 归因——预测面的任务是否真的上升。
 
-    predicted = 候选声明要修复的失败任务（task_input）；base/cand =
+    predicted = 候选声明要修复的失败任务（**完整** task_input：它是比对键，台账里那份
+    80 字截断串只作展示，拿截断串比分会让所有长任务永远"命中不了"）；base/cand =
     同批任务上原始基线与候选的得分。空预测诚实返回 hit_rate=None
     （没声明就没有命中率）。归因只进证据面，不改 accept/reject 判据。
+
+    `envsByTask` / `candidateEnvsByTask` 是环节证据（task → `capability_gap` 的 kind 清单），
+    两侧**故意取不同回合的读数**，因为要回答的是两个问题：
+
+    - `claimed_environments` 与 `by_environment` 取 **喂出该候选的那批失败用例**的证据
+      （`envsByTask`）。这就是候选"声称修的环节"——按裁定乙从证据反推，语义是
+      **生成时看到的环节分布**，不是"模型自认改了哪个环节"。若改用候选运行时的证据，
+      修好了的任务反而不再触发任何环节（环推过去了就没有卡点），桶会因成功而空——
+      那是把"没证据"读成"没修好"。
+    - `unpredicted_regressions_by_environment` 取 **候选运行时**的证据（`candidateEnvsByTask`）：
+      没被预测却跌了的题，要看的正是新正文下环卡在了哪一环。
+
+    三态纪律：入参缺席（模拟臂不跑环 / 旧记录）与"量到但为空"都记空清单，二者靠
+    **键在不在**区分——旧记录压根没有这几个键，读侧不得把空读成"没退化"。
+    一条任务含多个环节时它进每个桶，故各桶 `hit` 之和 ≥ 总命中数是定义使然；
+    桶只对得上"有据的那部分任务"，不是总命中率的另一种算法。
     """
     hits = [t for t in predicted
             if t in base_scores and t in cand_scores
@@ -197,11 +220,49 @@ def attribution_hit_rate(*, predicted: list[str],
                    if t in cand_scores and t not in predicted
                    and cand_scores[t] < base_scores[t] - eps]
     hit_rate = (len(hits) / len(predicted)) if predicted else None
+    feeding = envsByTask or {}
+    claimed = sorted({kind for t in predicted for kind in (feeding.get(t) or [])})
+    byEnvironment: dict = {}
+    for kind in claimed:
+        tasks = [t for t in predicted if kind in (feeding.get(t) or [])]
+        byEnvironment[kind] = {
+            "predicted": len(tasks),
+            "hit": sum(1 for t in tasks if t in hits),
+            "regressed": sum(1 for t in tasks
+                             if t in base_scores and t in cand_scores
+                             and cand_scores[t] < base_scores[t] - eps),
+        }
+    candidateEnvs = candidateEnvsByTask or {}
+    brokenByEnvironment: dict = {}
+    for task in regressions:
+        for kind in (candidateEnvs.get(task) or []):
+            brokenByEnvironment.setdefault(kind, []).append(task)
     return {
         "hit_rate": None if hit_rate is None else round(hit_rate, 4),
         "hits": hits[:12],
         "unpredicted_regressions": sorted(regressions)[:12],
+        "claimed_environments": claimed,
+        "by_environment": byEnvironment,
+        "unpredicted_regressions_by_environment": {
+            kind: sorted(tasks)[:12] for kind, tasks in sorted(brokenByEnvironment.items())},
     }
+
+
+def _environmentDigest(attr: dict) -> str:
+    """归因记录的环节摘要（渲染进变异器提示段——新字段的读者就在这里）。
+
+    无环节字段（改动前的旧记录）或有字段但全空（没跑环的臂）都回空串：提示段与
+    今日逐字节一致，「没证据」不会被写成「声称修某环节」。
+    """
+    claimed = attr.get("claimed_environments") or []
+    broken = attr.get("unpredicted_regressions_by_environment") or {}
+    parts = []
+    if claimed:
+        parts.append("声称环节 " + ",".join(claimed))
+    if isinstance(broken, dict) and broken:
+        parts.append("弄坏环节 " + ",".join(
+            f"{kind}×{len(tasks)}" for kind, tasks in sorted(broken.items())))
+    return f"（{'；'.join(parts)}）" if parts else ""
 
 
 def exploration_directive(records: list[dict], *, stall_window: int = 5) -> str:

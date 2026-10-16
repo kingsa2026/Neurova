@@ -28,6 +28,8 @@ S3 检索零命中     `tool_search.search_catalog` 的命中条数             
 - 收件箱是**轮次级**且**读取即消费**（`detectCapabilityGap` 读到就清），
   下一轮不会无据重放上一轮的缺口 —— 这与工具消息账本同生命周期，
   故同样落在 ContextVar（`core.turn_context` 的轮次族）。
+  另有 `peekCapabilityGapKinds()` 作**只读**观察口（评测面逐任务取证用），
+  它既不消费也不写指标；回合边界由调用方走 `clearCapabilityGap` 收口。
 - 无 env 开关：接线要么生效要么不存在（AGENTS §2 无例外条款）。
 """
 
@@ -200,6 +202,25 @@ def detectCapabilityGap(signals: Optional[List[Dict[str, Any]]] = None) -> Capab
 
     return CapabilityGap(hasGap=bool(kinds), kinds=kinds, details=details,
                          capabilityKinds=capabilityKinds, harnessKinds=harnessKinds)
+
+
+def peekCapabilityGapKinds() -> List[str]:
+    """**只读不消费**地取本轮收件箱里已有的缺口类别（去重、保持投递次序）。
+
+    为什么要第二个读数口：`detectCapabilityGap` 的契约是「读取即消费」，而评测面要
+    在**每条任务**执行后各取一次环节证据。逐条调消费口等于把自主合成的入口判据提前
+    吃掉；逐条调它还会按任务数累加指标——观测面就从「命中了几类缺口」变成「被读了几次」。
+    peek 两样都不做：不清收件箱（清空由调用方走既有 `clearCapabilityGap` 单点），
+    不写指标。
+
+    跨任务边界由调用方负责（`evolution/eval/runner` 逐条清），本函数只管读。
+    """
+    seen: List[str] = []
+    for item in _inbox.get() or []:
+        kind = item.get("kind")
+        if kind and kind not in seen:
+            seen.append(kind)
+    return seen
 
 
 def recordGapMetrics(kinds: List[str]) -> None:

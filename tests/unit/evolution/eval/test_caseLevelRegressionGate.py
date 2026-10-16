@@ -111,7 +111,7 @@ class TestEvaluateDetailsCarryFailedFlag:
             agent=_EchoAgent(failOn=("b",)),
         )
         avg, details = await runner._evaluate(BASELINE, _examples(["a", "b"]), "skill")
-        flags = {ex.task_input: failed for ex, _s, _o, _f, failed in details}
+        flags = {ex.task_input: failed for ex, _s, _o, _f, failed, _env in details}
         assert flags == {"a": False, "b": True}
         # 失败例仍按 0 分占满分母（P2-9 既有口径，本票不改）
         assert avg == pytest.approx(0.9 / 2)
