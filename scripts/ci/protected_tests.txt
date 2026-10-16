@@ -3241,3 +3241,10 @@ tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py
 # 按目录共享、重入只在同线程，挪出去＝技能回调本服务即死锁；该格限时 8s 自己红，不许挂死整轮）。
 # 单跑读数：本档 8 passed 连跑 2 次同读数（9.8s／9.3s）。
 tests/unit/skills/test_callSkillThroatIsAwaitable.py
+# 批 62（§6-284 第②刀前半）：「哪些参数名算路径」收成四角色单源表——清单／回落正则字面／两档别名表
+# 三份名单必须由 `pathNamesWithRole()` 投影出来，改一处就三处一起动。三格有牙：生产面（现量 1020 档）
+# 扫第二份字面抄本、派生被换成**同值字面**也照样红（形状格按 AST 认赋值目标，Assign 与 AnnAssign 都认，
+# 只认一种时别名表那两处带类型标注的声明会静默掉出扫描面）、12 名命令面分歧矩阵逐名钉住"改前实状"
+# ——本批不改裁决，动裁决（扩表/缩表/回落截断）要先过下一拍的丁/甲。
+# 单跑读数：本档 19 passed（7.3s）。
+tests/unit/security/test_pathNameListsDerivedFromOneTable.py
