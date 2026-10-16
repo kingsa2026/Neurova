@@ -3191,3 +3191,9 @@ tests/unit/skills/test_unpinnedShellIsNotPinnedAsAuthority.py
 # 契约 3 格（`app.openapi()` 里必须有 `available`/`unavailable_reason`——字段没人读就是新断点；
 # 两个 agent 面真走 HTTP 取 JSON 比对同向）。逐文件单跑三次同读数 11/11/11。
 tests/unit/skills/test_readFaceDoesNotClaimShellAsAvailable.py
+# §6-266 第③刀·shell 逃逸检测收成一张表：一格钉"六种形状并入后一条都不掉"（并退不丢能力），
+# 一格钉严重度与同族 `\xNN` 齐平（口径不分叉），一格按 AST 钉两个零调用的第二份判定不得回魂，
+# 一格钉 §6-266 第①刀与这条新规则的交界——路径键里的 `\u1234` 不许被读成转义（取值刻意带 `;`，
+# 否则把豁免改回双闸也照样绿；本批第一版就踩在这上面，变异 M4 打空被抓）。
+# 单跑读数：本档 4 passed 连跑 2 次同读数。
+tests/unit/security/test_shellEvasionPatternsAreOneFaceOnly.py
