@@ -17,6 +17,7 @@ ChatPipeline — 对话流程管线
 """
 
 from neurova.core.logger import get_logger
+from neurova.skills.library_service import agentLibrary
 from neurova.core.lazy_singleton import lazySingleton
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -1379,9 +1380,8 @@ class ChatPipeline:
             },
         )
         from neurova.skills.creation_governance import publish_automatic
-        from neurova.skills.skill_service import SkillService
 
-        result = publish_automatic(SkillService(agent_id=self.config.agent_id), skill_registry, manifest)
+        result = publish_automatic(agentLibrary(self.config.agent_id), skill_registry, manifest)
         if not result.get("success"):
             logger.info("合成技能未发布 %s: %s", manifest.id, result.get("error"))
         return result

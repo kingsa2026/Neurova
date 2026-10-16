@@ -1,4 +1,5 @@
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 """
 Skill Need Analyzer - 技能需求分析器 (v2)
@@ -133,14 +134,12 @@ class SkillNeedAnalyzer:
         """惰性获取 SkillService（首个安装/查询动作时构建）"""
         if self.skill_service is None:
             try:
-                from neurova.skills.skill_service import SkillService
-
                 agent_id = (
                     self.config.get("agent_id", "default")
                     if isinstance(self.config, dict)
                     else "default"
                 )
-                self.skill_service = SkillService(agent_id=agent_id)
+                self.skill_service = agentLibrary(agent_id)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Could not initialize SkillService: %s", e)
         return self.skill_service

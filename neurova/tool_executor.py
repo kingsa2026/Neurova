@@ -2406,10 +2406,10 @@ class ToolExecutor:
         if registry is None:
             return {"error": "当前 Agent 尚未初始化 SkillRegistry"}
         from neurova.skills.creation_governance import publish_automatic
-        from neurova.skills.skill_service import SkillService
+        from neurova.skills.library_service import agentLibrary
 
-        result = publish_automatic(SkillService(
-            agent_id=getattr(self._agent.config, "agent_id", "") or "default"
+        result = publish_automatic(agentLibrary(
+            getattr(self._agent.config, "agent_id", "") or "default"
         ), registry, manifest)
         return {**result, "step_count": len(tool_sequence)}
 
