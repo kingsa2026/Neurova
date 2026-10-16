@@ -4181,6 +4181,19 @@
     - **一处工具自纠**：本仓**并没有** `scripts/ab_compare.sh`（Skill 的速查表把它当既有件列着；现读 `git ls-files scripts/` 只有 `token_estimation_compare.py`）。首轮按该路径调用 ⇒ `No such file or directory`，而命令尾部接 `tail` 把退出码读成 0，于是"A/B 跑过了"是**假的**；改用手搭的仓外一次性脚本做两侧集合比对。记进形态集第 221 条：**工具存在性也要现读，不在场即当场露出，不沿用文档给的命令**。
     - **未决（产品语义，另次裁定）**：真资产包今天仍被那 1 条裸 `compile(`（`package_check.py`）拒——要不要开白名单/撤条目不在本批范围；§6-250 的乙/丙案由此结清，不再走。
     - **本会话下一枚空号现查 §6-260。**
+261. **票④第一包落地：`neurova/benchmark` 门面里那套从未接通的评测框架退役，生产净 −548 行（✅ `73fd56a8` 退役+判据+活体 / `fa845031` 判据自纠）** 🟢 —— 用户裁定取甲（退役），顺序按"包最小先走"。
+    - **判定不是"零消费者"一句话**（§6-224/教义第 7 条要求比过再合）：现读该门面 575 行／实现 468 行／七个类＋一对进程级单例；全仓对这些名字的**代码引用**实测为**生产 0、测试 1**，而那一处还是我自己上一批写的落点判据。最硬的证据来自被服务方本人——`endpoints/benchmark.py:106` 的注释写着"真实评测执行器（neurova/benchmark 框架 + LLM 答题打分）未接线，本端点不投机实现"。**所以这不是被人摘了消费者的残留，而是一条从未接通、连名义上它要服务的那个端点都不认识它的平行实现。**
+    - **在跑的链路一条没动，是量出来的**：`/suites` 用端点自持的 `_SUITES` 常量、`/run|/runs` 用进程内 `_RUNS_STORE`，从未 import 本门面；包内两个现役子模块（`rag_eval`／`rag_dataset_gen`）也**无一回头**取 `__init__` 的名字（实测无 `from .`）。前端 `NeurUI/src/pages/BenchmarkPage.vue` 真调的三张请求打的正是这些。活体因此拿**产品面读数**：生产签发 token 打 `/api/v1/benchmark/suites` ⇒ `status=200 条数=5`，`/results` ⇒ 200 正常信封，真装配点 12 条路由在册（取数面 `app.openapi()["paths"]`），反证内建——`from neurova.benchmark import BenchmarkFramework` 现在必须 `ImportError`。
+    - **删掉的两样写明白，不装作无损**：① `_DEFAULT_SUITES` 那套硬编码题面（三段论一类）——玩具数据，现役数据集走 `save_dataset` 由用户提供，并进活路等于塞占位 ⇒ **不并**；② 那份 SQLite 的评测运行历史持久面——现役端点用进程内字典、重启即失，要做真持久台账属**新建能力**（`core/agent_run_ledger` 有先例），不在退役批里顺手造。要恢复从 git 历史取，别在门面里重写第二份。
+    - **同批把三处指向已退役物的引用一起改判**（教义第 5 条的"命中点"包括注释与子集说明）：落点判据 `test_HomeFamilyLandings…py` 原本钉两处裸相对落点，`benchmark` 那半随实现消失——留着就是"永远测不到的形状检查"，同批改成只钉 `image_pipeline`；端点注释由"未接线、属功能决策项"改成"该门面已退役，接真执行器从今天起是**新建能力**而非接线"；`protected_tests.txt` 里"落点函数是进程级单例的（`get_benchmark_framework`）"那个例子换成仍在世的 `get_image_pipeline_manager`。
+    - **三笔自纠，都属"提交前看着绿"那一族，值得单独记**：
+      ① 退役哨兵那一格最初用 `if name in text` 扫全仓 `.py`，而哨兵档按定义就得写出那七个退役名字、被退役的门面还得留一份"这里曾经是什么"的墓碑说明——两处都是**说明**不是引用，落库后当场自咬。改成按 AST 判**代码身份**（`Name`／`Attribute`／import alias）。谓词有牙的反证不碰工作树：同一套取数打在 `HEAD~1` 那份落点档上 ⇒ 命中 `['BenchmarkFramework']`；打在工作树现版 ⇒ 空。
+      ② 那一格还带着一个让它**其实什么都没判**的类型错：`RETIRED_NAMES` 写成 tuple 却用 `&`，红形是 `TypeError: unsupported operand type(s) for &: 'tuple' and 'set'`——一条没在判东西的判据看起来和一条抓到 offender 的判据同样红。
+      ③ 扫描面取 `git ls-files` ⇒ **本档提交前不在跟踪面里、扫不到自己**，所以"三次全绿"发生在落库前是不能当结论的。凡**扫描面含自身所在仓库**的判据，必须在落库后复取一次。
+    - **复取与读数**：本档 `5 passed` 连跑三次（20.5/20.5/20.7s）；落点档＋门面声明守卫＋子集跟踪守卫并跑 `35 passed`；**全仓收集守卫** `test_whole_repo_collection_errors.py` ⇒ `4 passed`（删门面最大的系统性风险是某处 import 期炸，这一档替整仓扫过）；交付锁有牙——把活路子模块 `rag_eval.py` 临时藏起，判据立刻 `FAILED test_liveRagEvalPathStillResolvesThroughSubmodules`（`ModuleNotFoundError`，1 failed/4 passed），还原 `md5sum -c` OK。A/B（基线＝HEAD 仓外 worktree 铺入本批新判据，选择集 `tests/unit/benchmark tests/test_api tests/unit/ci`）⇒ **AB_PASS**，仅基线红 3 条＝两枚主格＋悬空 pin 锁（该红即交付证据）。
+    - **一笔数字自纠**：首版正文写生产净 −552、测试池 +145/−32，`git show --numstat` 现量是 **−548** 与 **+145/−16**；未推送且就是 HEAD，就地 amend（走 UTF-8 消息文件，不用管道——见形态集第 219 条），作废号不写进任何引用。**这是本会话第三次"数字凭估算落字"**，前两次已各记一次勘误；判据侧的根治办法（提交前必须跑 numstat 再成文）已写进形态集。
+    - **票④队列现读（其余五包，按最小先走的次序）**：`skills.builtin` 84/65（生产门面取用 1）→ `image_pipeline` 394/310（1）→ `execution_layers` 719/561（6）→ `computer_use` 716/588（46）→ `api.endpoints` 386/273（99，取用面最大放最后）。每包一 commit，仍走"比→并→接→退"，其中 `computer_use` 与 `api.endpoints` 的门面取用量大，**搬迁**而非退役的概率高——那两包的三态要单独摆给用户。
+    - **本会话下一枚空号现查 §6-262。**
 
 
 1. **同名词不同物** —— `constitution` 的 11 处生产命中全是 `agent/builder.py` 的配置字段与 `endpoints/constitution_*`；`voice_adapter` 的 `app.py:909` 是 `channels.voice.create_voice_adapter`。
