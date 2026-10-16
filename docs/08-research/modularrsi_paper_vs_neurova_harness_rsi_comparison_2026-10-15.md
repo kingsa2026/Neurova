@@ -316,8 +316,12 @@ optimizer_model`**——那是打分与生成用的模型，不是被测模型�
   臂来源收成 `executorKind()` 单源并外露到结果面与运行审计 ⇒ 台账里 `claimed_environments`
   为空从此**分得开**"没跑环"（simulated）与"跑环没卡"（real_agent）；真臂卡环那一腿的活体读数
   `claimed=["false_completion"]`，门名来自真 `GoalGate` 的出口判定。
-  **还剩的两刀**：读数进判（accept/reject 仍不取 `claimed_environments`，蕴涵格仍有效，
-  进判须同批改判）；提案记录面仍只带 `model_under_test`，臂来源要回查运行文件才看得见。
+  **还剩的一刀**：读数进判（accept/reject 仍不取 `claimed_environments`，蕴涵格仍有效，
+  进判须同批改判）。
+  > 这里原还列了第二条"提案记录面仍只带 `model_under_test`，臂来源要回查运行文件才看得见"，
+  > **经复算作废**（2026-10-16，台账 §6-265 勘误）：提案详情端点自 §6-95 后半起就把那次运行的
+  > 审计内容嵌进同一条响应（`evolution_run`），臂来源、计划数、真实回合花费一次取数全出；
+  > 已补判据 `testProposalDetailEmbedsTheArmKindAndTurnCost` 钉住两面一致，不做 prose 结论。
   票面 `docs/04-plans/2026-10-16-任务级环节证据-attribution升级实施方案.md`（含五条实测前提、
   「候选的环节声明由谁给」的三态裁定与 §7 落地回执——三态里推荐乙＝从喂它的那批失败用例的
   环节证据反推，不采甲＝LLM 自报未校准标签，**已按乙执行**）。
