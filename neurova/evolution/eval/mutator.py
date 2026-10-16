@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig
@@ -22,12 +22,19 @@ logger = get_logger(__name__)
 
 @dataclass
 class JudgeFailure:
-    """上一轮评分最低的用例,供反射分析。"""
+    """上一轮评分最低的用例,供反射分析。
+
+    `environments` 是**这条用例执行期间**测到的环节证据（`capability_gap` 的 kind 清单，
+    真臂才有；模拟臂恒空）。它不进变异器 prompt——候选「声称修哪个环节」由这批证据
+    反推（见 `history_ledger.attribution_hit_rate`），自报的环节声明正是 M-D 刚退役的
+    那类未校准标签。
+    """
 
     task_input: str
     output: str
     feedback: str
     score: float = 0.0
+    environments: List[str] = field(default_factory=list)
 
 
 _MUTATOR_SYSTEM = (

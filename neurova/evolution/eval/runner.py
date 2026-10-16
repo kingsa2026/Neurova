@@ -271,7 +271,8 @@ class SkillEvolutionRunner:
         if self._ledger is None or not ledger_key:
             return None
         worst = min((f.score for f in failures), default=None)
-        predicted = [f.task_input[:80] for f in failures[:6]]
+        feeding = failures[:6]
+        predicted = [f.task_input[:80] for f in feeding]
         try:
             seq = self._ledger.append(ledger_key, {
                 "artifact_type": artifact_type,
@@ -288,11 +289,16 @@ class SkillEvolutionRunner:
         except OSError as e:
             logger.debug("编辑历史台账写入失败: %s", e)
             return None
-        # P2-10：评测后有 per-task 分数 → 归因（命中率/未预测回归）回填
+        # P2-10：评测后有 per-task 分数 → 归因（命中率/未预测回归）回填。
+        # 比对键用**未截断**的 task_input（`predicted` 那份 80 字截断串是台账展示面，
+        # 与 `base_scores` 的整串键对不上——长任务会永远"命中不了"，命中率恒偏低）。
         if cand_details is not None and base_scores is not None and seq is not None:
             attr = attribution_hit_rate(
-                predicted=predicted, base_scores=base_scores,
-                cand_scores={ex.task_input: s for ex, s, _o, _f, _failed in cand_details})
+                predicted=[f.task_input for f in feeding], base_scores=base_scores,
+                cand_scores={ex.task_input: s for ex, s, _o, _f, _failed, _env in cand_details},
+                envsByTask={f.task_input: list(f.environments) for f in feeding},
+                candidateEnvsByTask={ex.task_input: list(env)
+                                     for ex, _s, _o, _f, _failed, env in cand_details})
             try:
                 self._ledger.patch(ledger_key, seq, {"attribution": attr})
             except OSError as e:
@@ -313,17 +319,30 @@ class SkillEvolutionRunner:
 
     async def _score_example(
         self, skill_text: str, ex: EvalExample, artifact_type: str
-    ) -> tuple[float, str, str, bool]:
-        """返回 (composite, agent 输出, judge 反馈文本, 是否单例失败)。
+    ) -> tuple[float, str, str, bool, list[str]]:
+        """返回 (composite, agent 输出, judge 反馈文本, 是否单例失败, 本任务的环节证据)。
 
         P2-9 missing 记 0：单例执行/判分异常 → 0 分占满分母、运行不中断；
         异常文本脱敏截断后进 feedback（会到变异器 prompt 面）。0.0 是诚实
         记分不是中性分——防"评测崩了但剩余用例分高"的幸存者偏差。
+
+        环节证据（第五格）在**执行前后各取一次边界**：执行前清收件箱、执行后只读。
+        生产侧的回合边界在 `agent.chat` 的起点（`chat_pipeline._init_agent_state` →
+        `clearCapabilityGap`），但评测的**相邻两条任务之间没有生产回合**——不就地收口，
+        上一条的卡点会被读成这一条的（本仓「跨轮残留」形态的第二处）。清空走既有单点，
+        不新造第二个清空口径；读用 `peekCapabilityGapKinds`（不消费、不写指标），因为
+        本轮的消费点（`_check_nl_synthesis`，Step 0.5）在 `agent.run` **返回之前**就跑完了，
+        这里再消费一次只是重复清空，按任务数累加指标倒会把「命中几类缺口」读成「被读几次」。
         """
+        from neurova.agent.capability_gap import clearCapabilityGap, peekCapabilityGapKinds
+
+        clearCapabilityGap("eval")
         try:
             output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
         except Exception as e:  # noqa: BLE001 - 单例失败记 0（BaseException 不经此路）
-            return 0.0, "", _redact_eval_error(e), True
+            # 崩溃前的卡点仍是证据：环是在抛错之前停的，丢掉这一格就是假象
+            return 0.0, "", _redact_eval_error(e), True, peekCapabilityGapKinds()
+        envKinds = peekCapabilityGapKinds()
         max_size = (
             self.config.max_tool_desc_size
             if artifact_type == "tool_description"
@@ -339,33 +358,40 @@ class SkillEvolutionRunner:
                 max_size=max_size,
             )
         except Exception as e:  # noqa: BLE001 - 单例判分失败记 0
-            return 0.0, str(output or ""), _redact_eval_error(e), True
+            return 0.0, str(output or ""), _redact_eval_error(e), True, envKinds
         return (
             float(getattr(score, "composite", score)),
             output,
             str(getattr(score, "feedback", "") or ""),
             False,
+            envKinds,
         )
 
     async def _evaluate(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
-    ) -> tuple[float, list[tuple[EvalExample, float, str, str, bool]]]:
-        """返回 (均分, 明细)。明细第 5 位 `failed` = 该单例执行或判分是否异常。
+    ) -> tuple[float, list[tuple[EvalExample, float, str, str, bool, list[str]]]]:
+        """返回 (均分, 明细)。明细第 5 位 `failed` = 该单例执行或判分是否异常，
+        第 6 位 = 该单例执行期间的环节证据（`capability_gap` 的 kind 清单）。
 
-        带着它而不是只带 0.0：均分里 0.0 与"真考砸"同值，集合层判据可以忍，
+        带着 `failed` 而不是只带 0.0：均分里 0.0 与"真考砸"同值，集合层判据可以忍，
         一旦拿它做**例级**判据（谁退化了）就会把器械故障写成质量结论——
         三态契约在集合层面已折叠过一次，不许在单例层面再折一次。
+
+        环节证据走明细而不是走 runner 实例上的旁路表：旁路要按 `id(example)` 键存，
+        P1-7a 的并行候选会对同一个 example 各写一份（串味），还得在 `run()` 收尾清账
+        （不清就是跨轮残留）。证据跟着它描述的那条读数走，两样都不用。
         """
         if not examples:
             return 0.0, []
-        details: list[tuple[EvalExample, float, str, str, bool]] = []
+        details: list[tuple[EvalExample, float, str, str, bool, list[str]]] = []
         eval_errors = 0
         for ex in examples:
-            score, output, feedback, failed = await self._score_example(skill_text, ex, artifact_type)
+            score, output, feedback, failed, envKinds = await self._score_example(
+                skill_text, ex, artifact_type)
             eval_errors += int(failed)
-            details.append((ex, score, output, feedback, failed))
+            details.append((ex, score, output, feedback, failed, envKinds))
         self._run_eval_errors += eval_errors
-        avg = sum(score for _ex, score, _o, _f, _failed in details) / len(details)
+        avg = sum(score for _ex, score, _o, _f, _failed, _env in details) / len(details)
         return avg, details
 
     async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
@@ -373,8 +399,9 @@ class SkillEvolutionRunner:
         """全量失败用例按得分升序（P1-7a 分片采样的数据源）。"""
         _, details = await self._evaluate(skill_text, examples, artifact_type)
         return [
-            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback, _failed in sorted(details, key=lambda d: d[1])
+            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
+                         environments=list(env))
+            for ex, score, output, feedback, _failed, env in sorted(details, key=lambda d: d[1])
         ]
 
     async def _multi_variant_round(
@@ -472,8 +499,9 @@ class SkillEvolutionRunner:
         _, details = await self._evaluate(skill_text, examples, artifact_type)
         worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
         return [
-            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
-            for ex, score, output, feedback, _failed in worst
+            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
+                         environments=list(env))
+            for ex, score, output, feedback, _failed, env in worst
         ]
 
     # ── 主循环 ──
@@ -527,11 +555,11 @@ class SkillEvolutionRunner:
         result.holdout_before = holdoutBeforeAvg
         holdoutBaseScores = {
             ex.task_input: (score, failed)
-            for ex, score, _o, _f, failed in holdoutBeforeDetails
+            for ex, score, _o, _f, failed, _env in holdoutBeforeDetails
         }
         result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
         # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
-        base_scores = {ex.task_input: score for ex, score, _o, _f, _failed in train_details}
+        base_scores = {ex.task_input: score for ex, score, _o, _f, _failed, _env in train_details}
 
         best_text, best_score = baseline_text, result.train_before
         best_seq: Optional[int] = None
@@ -610,7 +638,7 @@ class SkillEvolutionRunner:
         result.holdout_after = holdoutAfterAvg
         holdoutCandScores = {
             ex.task_input: (score, failed)
-            for ex, score, _o, _f, failed in holdoutAfterDetails
+            for ex, score, _o, _f, failed, _env in holdoutAfterDetails
         }
         result.holdout_case_scores = {
             task: {
