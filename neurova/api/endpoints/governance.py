@@ -13,6 +13,27 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 
 from neurova.security.approval_relay import hasApprovalWaiter
+# 合法域取配置单源的常量，不在端点里重打数字：重打的那两份（1000/10_000_000、2/200）
+# 与单源当前同值所以从没红过，而单源一改它们就悄悄漂移——判据
+# `testNumericBoundsComeFromTheClampConstants` 钉的就是这件事。
+from neurova.security.agent_limits_settings import (
+    MAX_DOOM_LOOP_INTERRUPTS,
+    MAX_DOOM_LOOP_WINDOW,
+    MAX_GOAL_CONTINUATIONS,
+    MAX_GOAL_ROUND_BUDGET,
+    MAX_PARALLEL_TOOLS,
+    MAX_ROUNDS,
+    MAX_SUBAGENT_DEPTH_LIMIT,
+    MAX_TOKEN_BUDGET,
+    MIN_DOOM_LOOP_INTERRUPTS,
+    MIN_DOOM_LOOP_WINDOW,
+    MIN_GOAL_CONTINUATIONS,
+    MIN_GOAL_ROUND_BUDGET,
+    MIN_PARALLEL_TOOLS,
+    MIN_ROUNDS,
+    MIN_SUBAGENT_DEPTH,
+    MIN_TOKEN_BUDGET,
+)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
@@ -21,7 +42,7 @@ from neurova.api.deps import require_admin
 
 # 模块级依赖实例：测试可用 dependency_overrides 覆盖
 _governance_admin_dep = require_admin()
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -628,17 +649,50 @@ def _governance_settings_path():
 
 @router.get("/agent-limits")
 async def get_agent_limits(admin=Depends(_governance_admin_dep)):
-    """Agent 运行限制（仅管理员）：token_budget / max_loop_rounds"""
+    """Agent 运行限制（仅管理员）：键集与合法域都以 `agent_limits_settings` 单源为准。
+
+    原 docstring 只写了 `token_budget / max_loop_rounds` 两键，而回的是全量生效值——
+    说明文字落后于载荷，读文档的人会以为其余键不可调（正是下面那张 PUT 白名单的成因）。
+    """
     from neurova.security.agent_limits_settings import get_effective_limits
 
     return {"code": 0, "data": get_effective_limits()}
 
 
 class AgentLimitsUpdate(BaseModel):
-    """Agent 运行限制更新"""
+    """Agent 运行限制的更新载荷：字段必须盖住配置单源 `DEFAULTS` 的每一键。
 
-    token_budget: Optional[int] = Field(None, ge=1000, le=10_000_000)
-    max_loop_rounds: Optional[int] = Field(None, ge=2, le=200)
+    为什么不是"只放两个安全的键"：GET 面自动带全，PUT 面只收两键时，管理员在面板或
+    API 上调其余旋钮会拿到 200、文件照写别的键、读数照旧——**面板编辑空对象**比报错更坏，
+    因为没人知道没生效（`save_agent_limits` 的 `if key in DEFAULTS` 与 pydantic 的丢未知键
+    是同一条静默路径的两个半区）。裁定：全部键对外可调，边界一律取夹紧用的同一批常量。
+
+    一条如实边界：`goal_round_budget` 的 `None` 是"跟随 `max_loop_rounds`"的哨兵，而本模型
+    把 `None` 当"本次不改"（`if v is not None`）⇒ 钉住之后无法从面板放回跟随。
+    要支持那条路得改持久层的 None 语义，会连带影响其余键，不属本批；判据
+    `testFollowSentinelIsNotUnpinnableFromThePanel` 钉的是现状。
+    """
+
+    # 未知键当场拒，不再静默丢弃：打错的键名等于"200 但没生效"。
+    model_config = ConfigDict(extra="forbid")
+
+    token_budget: Optional[int] = Field(
+        None, ge=MIN_TOKEN_BUDGET, le=MAX_TOKEN_BUDGET)
+    max_loop_rounds: Optional[int] = Field(
+        None, ge=MIN_ROUNDS, le=MAX_ROUNDS)
+    goal_max_continuations: Optional[int] = Field(
+        None, ge=MIN_GOAL_CONTINUATIONS, le=MAX_GOAL_CONTINUATIONS)
+    goal_round_budget: Optional[int] = Field(
+        None, ge=MIN_GOAL_ROUND_BUDGET, le=MAX_GOAL_ROUND_BUDGET)
+    goal_verification_enabled: Optional[bool] = None
+    max_subagent_depth: Optional[int] = Field(
+        None, ge=MIN_SUBAGENT_DEPTH, le=MAX_SUBAGENT_DEPTH_LIMIT)
+    max_parallel_tools: Optional[int] = Field(
+        None, ge=MIN_PARALLEL_TOOLS, le=MAX_PARALLEL_TOOLS)
+    doom_loop_window_size: Optional[int] = Field(
+        None, ge=MIN_DOOM_LOOP_WINDOW, le=MAX_DOOM_LOOP_WINDOW)
+    doom_loop_max_interrupts: Optional[int] = Field(
+        None, ge=MIN_DOOM_LOOP_INTERRUPTS, le=MAX_DOOM_LOOP_INTERRUPTS)
 
 
 @router.put("/agent-limits")

@@ -264,7 +264,8 @@ class TestArmKindReachesTheApproverFace:
 
 
     def testPutReachesTheNewKeyAndTheThreeLaggingRsiKnobs(self, env, monkeypatch):
-        """PUT 白名单落后于配置单源 = 键写了也写不进去（agent_limits 家族的同形病）。"""
+        """可达性那一半（覆盖性的守卫在 `test_adminPutWhitelistCoversConfigSingleSource.py`，
+        同一族病一档收口，不在这里再判一遍字段集合）。"""
         from neurova.evolution.evolution_settings import load_settings
 
         client = _client()
