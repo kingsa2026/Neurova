@@ -3153,6 +3153,20 @@ tests/unit/evolution/eval/test_taskLevelEnvironmentEvidenceFeedsAttribution.py
 # 形状上（15 格全过，未归属到本档任何一格）——如实登记，复现则查根 conftest 的隔离夹具。
 tests/unit/evolution/eval/test_realArmBudgetPlanMatchesActualTurns.py
 tests/unit/api/test_evolveRealArmPathAndBudgetGate.py
+# A 批（PUT 白名单补齐到配置单源全量键）的同族守卫，一档管两面（agent-limits + 进化设置）。
+# 立它的理由是"下一个加键的人不知道这里还有一份名单"——它随后真的咬住了本会话自己：
+# C 批把 `doom_loop_similarity_threshold` 加进 DEFAULTS 时漏同步 PUT 模型，独立单跑当场红。
+# 四件事分面判：覆盖性（单源键集 ⊆ PUT 字段集，含反向半区）、可达性（真发一次 PUT 并读回）、
+# 边界同源性（面板合法域 == get_effective_limits 夹紧用的那批常量，不重打数字）、
+# 未知键当场 422（打错的键名不得"200 但没生效"）。
+# 一条如实边界单列一格：goal_round_budget 钉住后无法从面板放回"跟随"，钉的是现状。
+tests/unit/api/test_adminPutWhitelistCoversConfigSingleSource.py
+# B 批（裁定：接线而不是退役）：`EvalExample.source` 从只写不读接成提案的来源构成。
+# 与 M-D 退役 difficulty 的区别写在该档开头——source 是产出通道的记账，写侧本来有真值。
+# 三条口径分格钉：构成只算判据集（train 混进来就说的是另一件事）、旧记录归"未记"且
+# 不因为 dataclass 默认值被读成合成、"未记"词值与基座维度共用一处常量与一处计数实现。
+# 另有一格钉形状契约（data 仍是列表、覆盖面走同级新键）与一格蕴涵（同分不同来源，判据数字不变）。
+tests/unit/evolution/eval/test_proposalCarriesEvidenceSourceComposition.py
 # §6-255 甲案·治理护栏按参数语义分扫描面：双向钉——正向「无害路径不再被判 shell 规避」，
 # 反向「命令里的真规避仍被抓」；另三格是反绕过（夹带执行语义的假路径、未登记的键不豁免、
 # 路径 guardian 仍看得见命令里的受保护路径），两格钉清单单源与「清单真的同时驱动预检与守卫」。
