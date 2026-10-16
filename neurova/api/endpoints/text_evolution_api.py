@@ -17,6 +17,7 @@
 """
 
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -78,9 +79,8 @@ async def update_evolution_settings(
 
 
 def _skill_service(agent_id: str):
-    from neurova.skills.skill_service import SkillService
 
-    return SkillService(agent_id=agent_id)
+    return agentLibrary(agent_id)
 
 
 @router.get("/skills/{agent_id}/usage")

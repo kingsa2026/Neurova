@@ -18,6 +18,9 @@ def make_executor():
     registry = MagicMock()
     registry.register_skill = MagicMock(return_value=True)
     agent = MagicMock()
+    # 替身必须带上合法身份：agent 库路由对非 `[A-Za-z0-9_-]` 的 agent_id 当场拒绝，
+    # 而 MagicMock 自动属性是个对象不是串——生产读面（get_library）本来就不收这种值。
+    agent.config.agent_id = "create-skill-tool-test"
     agent._current_session_id = "s1"
     agent._skill_registry = registry
     return ToolExecutor(agent), registry

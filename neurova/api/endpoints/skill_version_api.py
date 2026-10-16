@@ -13,6 +13,7 @@ _VERSIONS_STORE 硬编码假版本表/内存 dict 是演示残留（前端零消
 """
 
 import datetime
+from neurova.skills.library_service import agentLibrary
 from neurova.core.logger import get_logger
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import json
@@ -110,11 +111,10 @@ def _latest_market_version(skill_id: str) -> typing.Optional[str]:
 
 def _installed_skills() -> typing.List[dict]:
     """默认 agent 的真实安装技能（manifest 修订链直读）。"""
-    from neurova.skills.skill_service import SkillService
 
     rows = []
     try:
-        service = SkillService(agent_id=_DEFAULT_AGENT_ID)
+        service = agentLibrary(_DEFAULT_AGENT_ID)
         for s in service.list_skills():
             entry = service._skills.get(s["id"], {}) if hasattr(service, "_skills") else {}
             hist = entry.get("version_history") or []
@@ -142,19 +142,17 @@ def _installed_version(skill_id: str) -> typing.Optional[str]:
 
 
 def _installed_source(skill_id: str) -> str:
-    from neurova.skills.skill_service import SkillService
 
     try:
-        info = SkillService(agent_id=_DEFAULT_AGENT_ID).get_skill_info(skill_id) or {}
+        info = agentLibrary(_DEFAULT_AGENT_ID).get_skill_info(skill_id) or {}
         return str((info.get("identity") or {}).get("origin") or "")
     except Exception:
         return ""
 
 
 def _reads_path() -> str:
-    from neurova.skills.skill_service import SkillService
 
-    base = SkillService(agent_id=_DEFAULT_AGENT_ID).skills_dir
+    base = agentLibrary(_DEFAULT_AGENT_ID).skills_dir
     return str(base / "version_reads.json")
 
 
@@ -185,12 +183,11 @@ def _save_reads(reads: set) -> None:
 
 def _notification_items() -> typing.List[dict]:
     """从 manifest 修订链（有 parent 的修订 = 一次版本演进）派生更新通知。"""
-    from neurova.skills.skill_service import SkillService
 
     items = []
     reads = _load_reads()
     try:
-        service = SkillService(agent_id=_DEFAULT_AGENT_ID)
+        service = agentLibrary(_DEFAULT_AGENT_ID)
         for skill_id, entry in service.iter_skills():
             for rev in entry.get("version_history") or []:
                 if not rev.get("parent_revision_id"):

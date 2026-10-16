@@ -1556,9 +1556,9 @@ class Agent:
         if self.config.enable_skill_packer:
             try:
                 from neurova.evolution import AutoSkillBuilder
-                from neurova.skills.skill_service import SkillService
+                from neurova.skills.library_service import agentLibrary
                 self.skill_packer = AutoSkillBuilder(
-                    evidence_store=SkillService(agent_id=self.config.agent_id).creation_evidence,
+                    evidence_store=agentLibrary(self.config.agent_id).creation_evidence,
                     min_success_rate=0.7,
                 )
                 logger.info("Agent %s: AutoSkillBuilder 已初始化", self.config.name)
@@ -1597,9 +1597,9 @@ class Agent:
                 # C11 使用计数（第三遍审计重接：并行重写本 handler 时此调用被
                 # 覆盖丢失——use_count/last_used_at_ms 是 collection-review 与
                 # 改进提案的消费面。成败都记，ledger 语义与上方 record_usage 一致）
-                from neurova.skills.skill_service import SkillService
+                from neurova.skills.library_service import agentLibrary
 
-                SkillService(agent_id=self.config.agent_id).record_skill_usage(
+                agentLibrary(self.config.agent_id).record_skill_usage(
                     skill_id, success=bool(result and result.success)
                 )
 

@@ -2704,11 +2704,11 @@ class ContextOrchestrator:
 
             _trust = None
             try:
-                from neurova.skills.skill_service import SkillService
+                from neurova.skills.library_service import agentLibrary
 
                 _tmap = {}
-                for _sid, _info in SkillService(
-                    agent_id=str(getattr(self.config, "agent_id", "") or "default")
+                for _sid, _info in agentLibrary(
+                    str(getattr(self.config, "agent_id", "") or "default")
                 ).iter_skills():
                     _st = ((_info.get("identity") or {}).get("trust") or {}).get("state")
                     if _st:

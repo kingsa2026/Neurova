@@ -27,6 +27,7 @@
 """
 
 from __future__ import annotations
+from neurova.skills.library_service import agentLibrary
 
 import json
 from dataclasses import dataclass
@@ -161,9 +162,7 @@ def resolve_ticket_evidence(agent: Any,
         return _unreadable("agent 无身份，票据库按 agent 分库定位不到", record, tuple(steps))
 
     try:
-        from neurova.skills.skill_service import SkillService
-
-        results = SkillService(agent_id=agent_id).creation_evidence.task_results(steps)
+        results = agentLibrary(agent_id).creation_evidence.task_results(steps)
     except Exception as err:  # noqa: BLE001 - 查不了票必须出声，不许当成"没票"
         return _unreadable(f"证据库查询失败: {err}", record, tuple(steps))
 

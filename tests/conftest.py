@@ -164,16 +164,45 @@ def _isolate_execution_engine_singleton():
 
 @pytest.fixture(autouse=True)
 def _isolate_skill_service_storage(tmp_path, monkeypatch):
-    """Keep default skill-library writes out of user data during regressions."""
-    import hashlib
+    """Keep default skill-library writes out of user data during regressions.
+
+    切的是**库根**，不是单条分支。旧写法只改写「不传 skills_dir」那一支（按 agent_id 取
+    sha256 落 `tmp_path`），而 `library_service.get_library` 一直是**显式传目录**——生产把 23 处
+    自建构造收进工厂之后，读侧的落点就不再受夹具摆布：它按 `_BASE_DIR`（import 期冻住的**会话级**
+    数据根）解析，整个 pytest 进程内同一个根。于是夹具里写下的票据工厂读不到（露出来的那一角是
+    6 格 `lookup=absent`），而用例之间开始共享同一本账。`_BASE_DIR` 正是 library_service 自带的
+    测试注入点，把它指到 `tmp_path` 后，`resolve_library_dir` 与 `SkillService(agent_id=…)` 的
+    默认落点同形同址：两条形状共用同一个库，隔离也不再依赖「谁恰好没传目录」。
+    """
+    from neurova.skills import library_service as lib
     from neurova.skills.skill_service import SkillService
+
+    monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
     original = SkillService.__init__
 
     def isolated(self, agent_id, skills_dir=None):
-        directory = tmp_path / "agent-skills" / hashlib.sha256(str(agent_id).encode()).hexdigest()
-        return original(self, agent_id, skills_dir if skills_dir is not None else str(directory))
+        directory = skills_dir if skills_dir is not None else str(
+            tmp_path / "agents" / str(agent_id) / "skills")
+        return original(self, agent_id, directory)
 
     monkeypatch.setattr(SkillService, "__init__", isolated)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_library_singleton(tmp_path, monkeypatch):
+    """每个用例清一次库实例表（收进单例的配套半区，不是可选的卫生工作）。
+
+    生产侧把 23 处自建 `SkillService(agent_id=…)` 收进 `library_service.get_library` 的同进程
+    单例之后，实例表就成了**跨用例共享态**。上面那夹具已把库根按用例切到 `tmp_path`，目录变了
+    旧条目会自己失效——但那只是"不复用"，表里的条目仍然留着（上一个用例的实例连着它的锁与内存
+    账，谁也不知道还有没有人握着引用）。逐用例复位才是把"收进单例"这件事做成可证伪的：判据
+    `test_resetYieldsAFreshInstanceReadingFromDisk` 直接调这个函数，复位若做成空账它当场红。
+    """
+    from neurova.skills import library_service as lib
+
+    lib.reset_libraries_for_tests()
+    yield
+    lib.reset_libraries_for_tests()
 
 
 @pytest.fixture(autouse=True)
