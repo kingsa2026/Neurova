@@ -198,7 +198,8 @@ assert any(p.endswith("providers.json") for p in moved), "搬走却没进数据�
 print("COUNTER-MOVE-BLUE")
 '''
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env={**os.environ})
+                          encoding="utf-8", errors="replace",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     out = (proc.stdout or "").strip()
     return out[-500:] or (proc.stderr or "").strip()[-300:]
 

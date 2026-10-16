@@ -3,6 +3,7 @@ import ast
 import importlib
 import inspect
 import json
+import os
 import pickle
 import subprocess
 import sys
@@ -73,7 +74,8 @@ def test_fresh_process_import_order(leaf, names):
     )
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[3],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

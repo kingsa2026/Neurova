@@ -239,7 +239,7 @@ class TestGateScriptRunsOnBothInterpreters:
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONIOENCODING": "utf-8"}
 
         for workspace_env in (
             {"CNB_BUILD_WORKSPACE": str(workspace)},   # 落点可达
@@ -443,7 +443,7 @@ class TestNodeDispatchReallyWorks:
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONIOENCODING": "utf-8"}
 
         for workspace_env in (
             {"CNB_BUILD_WORKSPACE": str(workspace)},

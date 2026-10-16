@@ -147,7 +147,8 @@ def main() -> int:
 
     proc = subprocess.run([sys.executable, "-c", STUB_COST.replace("@@ROOT@@", str(REPO_ROOT))],
                           capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          cwd=str(REPO_ROOT))
+                          cwd=str(REPO_ROOT),
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     out = (proc.stdout or "").strip()
     line = out.splitlines()[-1] if out else "<无输出>"
     check("[9] 反向校准：打死 cost_tracking ⇒ 显式抛 ImportError（不再拿 no-op 桩继续跑）",

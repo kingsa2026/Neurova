@@ -165,7 +165,8 @@ def main() -> int:
 
     proc = subprocess.run([sys.executable, "-c", STUB_FAIL.replace("@@ROOT@@", str(REPO_ROOT))],
                           capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          cwd=str(REPO_ROOT))
+                          cwd=str(REPO_ROOT),
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     out = (proc.stdout or "").strip()
     line = out.splitlines()[-1] if out else "<无输出>"
     check("[6] 反向校准：打死门面唯一真依赖 neurova.skill_system ⇒ 显式抛 ImportError（不再吞成 None）",
@@ -173,7 +174,8 @@ def main() -> int:
 
     counted = subprocess.run([sys.executable, "-c", PROBE_ZERO, str(REPO_ROOT)],
                              capture_output=True, text=True, encoding="utf-8", errors="replace",
-                             cwd=str(REPO_ROOT))
+                             cwd=str(REPO_ROOT),
+                             env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     scanned, hits = ((counted.stdout or "? ?").strip().split() + ["?"])[:2]
     check("[7] 全仓惰性 try 段现读为 0（扫描集合 %s 个 .py）" % scanned, hits == "0", f"现读 {hits} 段")
 
