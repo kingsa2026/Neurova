@@ -18,6 +18,7 @@ from neurova.security.approval_relay import hasApprovalWaiter
 # `testNumericBoundsComeFromTheClampConstants` 钉的就是这件事。
 from neurova.security.agent_limits_settings import (
     MAX_DOOM_LOOP_INTERRUPTS,
+    MAX_DOOM_LOOP_SIMILARITY,
     MAX_DOOM_LOOP_WINDOW,
     MAX_GOAL_CONTINUATIONS,
     MAX_GOAL_ROUND_BUDGET,
@@ -26,6 +27,7 @@ from neurova.security.agent_limits_settings import (
     MAX_SUBAGENT_DEPTH_LIMIT,
     MAX_TOKEN_BUDGET,
     MIN_DOOM_LOOP_INTERRUPTS,
+    MIN_DOOM_LOOP_SIMILARITY,
     MIN_DOOM_LOOP_WINDOW,
     MIN_GOAL_CONTINUATIONS,
     MIN_GOAL_ROUND_BUDGET,
@@ -693,6 +695,8 @@ class AgentLimitsUpdate(BaseModel):
         None, ge=MIN_DOOM_LOOP_WINDOW, le=MAX_DOOM_LOOP_WINDOW)
     doom_loop_max_interrupts: Optional[int] = Field(
         None, ge=MIN_DOOM_LOOP_INTERRUPTS, le=MAX_DOOM_LOOP_INTERRUPTS)
+    doom_loop_similarity_threshold: Optional[float] = Field(
+        None, ge=MIN_DOOM_LOOP_SIMILARITY, le=MAX_DOOM_LOOP_SIMILARITY)
 
 
 @router.put("/agent-limits")
