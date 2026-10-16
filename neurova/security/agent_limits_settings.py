@@ -61,15 +61,28 @@ DEFAULTS: Dict[str, Any] = {
     # `loops/base.py:366-368` 已把这种形态点名为忌讳（GoalGate 轮次预算收口时写下的原话），
     # 而三把同族门都从本单源取数，只它例外（ModularRSI 对照 §4 M-A 第①步）。
     #
-    # 同类的第三个构造参数 `similarity_threshold` **不在本表**：它存进实例后全仓零读取
-    # （`check()` 判的是签名逐字相等，近似比较从未实装）。给死旋钮挂配置键，就是工单 018
-    # 与 §6-1 那两条"棘轮/面板编辑空对象"的第二形态——存废另批裁。
+    # 同类的第三个构造参数 `similarity_threshold` 当时**不在本表**，理由是它存进实例后
+    # 全仓零读取（`check()` 判的是签名逐字相等，近似比较从未实装）——给死旋钮挂配置键就是
+    # 工单 018 那类空转。2026-10-16 用户裁"实装签名相似度判定"，它从此真参与比对，
+    # 于是按同一条纪律挂上键（见下方 `doom_loop_similarity_threshold` 那条的实测默认与代价）。
     "doom_loop_window_size": 4,
     # DoomLoopGate：**连续中断多少次后**才升级为 TERMINATE（中断＝注入"换策略"提示续跑）。
     # 合法域下界取 1 而不是 0：0 意味着第一次重复签名就直接终止，那是换了一道判据，
     # 不是把现有这道收紧；上界 8 与 `goal_max_continuations` 同量级——每次中断都要多付
     # 一次模型往返，再高只会把死循环跑成成本。
     "doom_loop_max_interrupts": 2,
+    # DoomLoopGate：**签名相似判定**的阈值——2026-10-16 用户裁"实装签名相似度判定"后，
+    # 这一档第一次真正参与比对（此前它是 `gates.py` 里一格只写不读的死旋钮，台账 §6-239）。
+    #
+    # 默认 **1.0 = 逐字相等**，与实装前的线上行为逐字同形：这是有实测依据的保守，
+    # 不是"接了线不通电"。按生产单源 `_toolSignatures` 拼出的真实签名量出来的比值——
+    #   同参空转（offset 10→11）0.978｜翻页推进（page 1→2）0.976｜
+    #   顺序读不同文件 0.932 / 0.843｜不同工具同参数 0.902｜多调用 vs 单调用 0.489
+    # 收紧到 0.95 能抓住"同一调用换一点参数空转"，代价是**把翻页读取也判成重复**
+    # （长文件分段读是常见动作），因此启用与否交给配置面显式决定，不由接线批顺手改线上行为。
+    # 合法域 (0, 1]：下界取 MIN_DOOM_LOOP_SIMILARITY 是因为实测"完全不像的两轮"比值 0.489，
+    # 比它更低就等于任意两轮都算重复——门控变成无条件开火，不是收紧判据。
+    "doom_loop_similarity_threshold": 1.0,
 }
 
 MIN_TOKEN_BUDGET = 1000
@@ -102,6 +115,10 @@ MAX_DOOM_LOOP_WINDOW = 32
 # 中断次数合法域，理由见 DEFAULTS 内那条注释。
 MIN_DOOM_LOOP_INTERRUPTS = 1
 MAX_DOOM_LOOP_INTERRUPTS = 8
+# 相似度阈值的合法域：上界 1.0 = 只认逐字相等（实装前的语义）；下界 0.5 的理由见
+# DEFAULTS 那条实测（不像的两轮比值 0.489，再低就是任意两轮都算重复）。
+MIN_DOOM_LOOP_SIMILARITY = 0.5
+MAX_DOOM_LOOP_SIMILARITY = 1.0
 
 
 def settings_path() -> Path:
@@ -187,6 +204,16 @@ def get_effective_limits() -> Dict[str, Any]:
     if env_doom_interrupts and env_doom_interrupts.isdigit():
         settings["doom_loop_max_interrupts"] = int(env_doom_interrupts)
 
+    # 相似度是浮点，`isdigit()` 那条路走不了（"0.95" 里有小数点）⇒ 单独按 float 解析，
+    # 解析不了就当没设，不静默兜成某个值。
+    env_similarity = os.environ.get("NEUROVA_AGENT_DOOM_LOOP_SIMILARITY")
+    if env_similarity:
+        try:
+            settings["doom_loop_similarity_threshold"] = float(env_similarity)
+        except ValueError:
+            logger.warning("NEUROVA_AGENT_DOOM_LOOP_SIMILARITY 不是合法浮点，忽略: %r",
+                           env_similarity)
+
     # 夹紧到合法区间
     settings["token_budget"] = max(
         MIN_TOKEN_BUDGET, min(MAX_TOKEN_BUDGET, int(settings["token_budget"]))
@@ -224,4 +251,15 @@ def get_effective_limits() -> Dict[str, Any]:
         MIN_DOOM_LOOP_INTERRUPTS,
         min(MAX_DOOM_LOOP_INTERRUPTS, int(settings["doom_loop_max_interrupts"])),
     )
+    # 相似度是浮点且**可能来自手改的 JSON 文件**：脏值不能把门控装配崩掉。退回**上界**
+    # （1.0 ＝ 逐字相等 ＝ 实装前的语义），而不是回 `DEFAULTS` 现值——本函数的调用方
+    # 可能正把 DEFAULTS 改坏（判据夹具就这么改过），拿它当兜底等于让脏值二次进入。
+    # 同文件里 `int(...)` 那几处对脏值会抛，属既有隐患，已按同根因登记（不顺手改既有键的失败语义）。
+    try:
+        similarity = float(settings["doom_loop_similarity_threshold"])
+    except (TypeError, ValueError):
+        logger.warning("doom_loop_similarity_threshold 不是合法浮点，退回上界 1.0（逐字相等）")
+        similarity = MAX_DOOM_LOOP_SIMILARITY
+    settings["doom_loop_similarity_threshold"] = max(
+        MIN_DOOM_LOOP_SIMILARITY, min(MAX_DOOM_LOOP_SIMILARITY, similarity))
     return settings
