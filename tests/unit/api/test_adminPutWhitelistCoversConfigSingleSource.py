@@ -43,6 +43,8 @@ BOUND_TABLE = {
         limits_mod.MIN_DOOM_LOOP_WINDOW, limits_mod.MAX_DOOM_LOOP_WINDOW),
     "doom_loop_max_interrupts": (
         limits_mod.MIN_DOOM_LOOP_INTERRUPTS, limits_mod.MAX_DOOM_LOOP_INTERRUPTS),
+    "doom_loop_similarity_threshold": (
+        limits_mod.MIN_DOOM_LOOP_SIMILARITY, limits_mod.MAX_DOOM_LOOP_SIMILARITY),
 }
 
 
@@ -109,8 +111,10 @@ class TestPutWhitelistCoversTheSingleSource:
 
 class TestEveryKeyIsActuallyWritable:
     def testPutWritesAllKeysAndGetReadsThemBack(self, client):
-        payload = {key: (lo + hi) // 2 if lo != hi else lo
-                   for key, (lo, hi) in BOUND_TABLE.items()}
+        # 取合法域中点：整型域用 `int()` 落回整（`//` 对浮点域会向下取到 0，
+        # 相似度那一档的中点 0.75 会被它压成 0.0 而撞自己的下界——这不是配置坏，
+        # 是我这份取值表达式坏）
+        payload = {key: type(lo)((lo + hi) / 2) for key, (lo, hi) in BOUND_TABLE.items()}
         payload["goal_verification_enabled"] = True
         resp = client.put(f"{BASE}/agent-limits", json=payload)
         assert resp.status_code == 200, resp.text
