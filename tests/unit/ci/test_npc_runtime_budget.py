@@ -267,6 +267,7 @@ class TestBudgetScriptIsExecutedByTheBuild:
         """变量缺失时必须**响亮**报 unknown，不得崩栈、也不得默认「时间还很多」。"""
         env = {k: v for k, v in os.environ.items()
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT)],
             capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
@@ -309,6 +310,7 @@ class TestPredicateExitServesTheRelay:
     def _predicate(self, env_extra: dict) -> str:
         env = {k: v for k, v in os.environ.items()
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env["PYTHONIOENCODING"] = "utf-8"
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--predicate"],
@@ -358,6 +360,7 @@ class TestVerdictsAreFalsifiable:
     def _read(env_extra: dict) -> dict:
         env = {k: v for k, v in os.environ.items()
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env["PYTHONIOENCODING"] = "utf-8"
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--json"],
@@ -401,6 +404,7 @@ class TestVerdictsAreFalsifiable:
                      "CNB_BUILD_START_TIME": "2026-09-26T14:32:35.364Z"}
         env = {k: v for k, v in os.environ.items()
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env["PYTHONIOENCODING"] = "utf-8"
         env.update(env_extra)
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
         proc = subprocess.run(
@@ -538,6 +542,7 @@ class TestRoleAdmissionIsPinnedBeforeTheAgent:
     @staticmethod
     def _runAdmission(env_extra: dict, argv=None) -> subprocess.CompletedProcess:
         env = {k: v for k, v in os.environ.items() if k != "CNB_NPC_NAME"}
+        env["PYTHONIOENCODING"] = "utf-8"
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
         env.update(env_extra)
         if argv is None:

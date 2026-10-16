@@ -320,7 +320,12 @@ CAPTURE_FUNCS_PY = CAPTURE_FUNCS
 #: `tests/unit/test_manual_scripts_are_not_collectible.py`）。假阳性留在账里，下一轮收数
 #: 就会把"谓词修准"读成"有人治理了两处"，所以由
 #: `test_knownBothPinnedFilesAreNotCountedAsHalfPinned` 反过来钉住这两档不许再进账。
-HALF_PINNED_BASELINE = 27
+#:
+#: 27 → 0（§6-235 存量清零）：27 处逐处补上子端 `PYTHONIOENCODING`，口径同时改成逐调用判定
+#: （见 `_halfPinnedLines`）。**"清零"只到"非登记的读数"为止**——两处刻意的反证负样本走
+#: `_HALF_PIN_SAMPLES` 显式登记，不靠放宽谓词换绿，也不靠把负样本钉齐来"顺手治好"。
+#: 基线归零之后这一格就是"新增半修即红"的常驻闸：多一处 ⇒ 1 ≠ 0 当场红。
+HALF_PINNED_BASELINE = 0
 
 
 def _callNodes(source: str):

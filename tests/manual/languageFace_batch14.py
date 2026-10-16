@@ -106,7 +106,7 @@ def main() -> int:
              "p=os.path.join(os.environ['NEUROVA_DATA_DIR'],'language_preferences.json');"
              "print(json.load(open(p,encoding='utf-8'))['preferences']['u-live-1']['primary_language'])"],
             capture_output=True, text=True, encoding="utf-8",
-            env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT)})
+            env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT), "PYTHONIOENCODING": "utf-8"})
         check("8 换一个进程读回同一条（跨进程持久，不是进程内字典）",
               secondProcess.stdout.strip() == "zh",
               (secondProcess.stdout or secondProcess.stderr).strip()[:160])

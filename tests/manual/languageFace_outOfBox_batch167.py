@@ -144,7 +144,7 @@ def main() -> int:
              "d=json.load(open(p,encoding='utf-8'));"
              "print(d['default']['primary_language'], d['preferences']['u-167-picker']['primary_language'])"],
             capture_output=True, text=True, encoding="utf-8",
-            env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT)})
+            env={**os.environ, "NEUROVA_DATA_DIR": str(WORK_ROOT), "PYTHONIOENCODING": "utf-8"})
         check("12 换一个进程读回同一条起点与同一个人的偏好（跨进程持久）",
               secondProcess.stdout.strip() == "pt ja",
               (secondProcess.stdout or secondProcess.stderr).strip()[:180])

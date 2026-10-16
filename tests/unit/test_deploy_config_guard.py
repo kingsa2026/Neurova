@@ -28,6 +28,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -119,7 +120,8 @@ class TestGateScriptExists:
         """当前仓库应全绿（红即代表配置漂移已存在，须先修配置再谈门禁）。"""
         proc = subprocess.run(
             [sys.executable, str(GATE), "--json"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(PROJECT_ROOT), timeout=120,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(PROJECT_ROOT), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=120,
         )
         payload = json.loads(proc.stdout or "{}")
         assert proc.returncode == 0, (
@@ -255,7 +257,8 @@ class TestCopyDiscipline:
 
         proc = subprocess.run(
             [sys.executable, str(root / CHECK_CMD), "--json"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(root), timeout=180,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=180,
         )
         payload = json.loads(proc.stdout or "{}")
         assert proc.returncode == 0 and payload.get("ok") is True, (
@@ -280,7 +283,8 @@ class TestNegativeControls:
         mutate(root)
         proc = subprocess.run(
             [sys.executable, str(root / CHECK_CMD), "--json"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(root), timeout=180,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=180,
         )
         return json.loads(proc.stdout or "{}")
 

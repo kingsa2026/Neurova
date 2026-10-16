@@ -219,7 +219,8 @@ assert any("providers.json" in x for x in inHome) and any("audit.db" in x for x 
 print("COUNTER-HOME-BLUE")
 '''
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env={**os.environ})
+                          encoding="utf-8", errors="replace",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     return (proc.stdout or "").strip()[-400:] or (proc.stderr or "").strip()[-300:]
 
 

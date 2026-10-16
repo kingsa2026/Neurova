@@ -37,6 +37,7 @@ tick 前进），于是 0.1ms 一档的自旋在 2000 次调用的生产循环�
 import ast
 import importlib
 import io
+import os
 import subprocess
 import sys
 import time
@@ -150,6 +151,7 @@ class TestGateScriptExists:
             capture_output=True,
             text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
+            env=dict(os.environ, PYTHONIOENCODING="utf-8"),
             timeout=300,
         )
         assert proc.returncode == 0, (
@@ -433,7 +435,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
         import subprocess
 
         (tmp_path / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
-        env = dict(os.environ)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
         env["PYTHONPATH"] = str(tmp_path)
         proc = subprocess.run(
             # 刻意整文件跑（不带 `::用例` 选择器）：模块级 skip 只在收集期成立，
@@ -476,7 +478,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
             )
         scratch.write_text(stripped, encoding="utf-8")
         (Path(tmp_path) / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
-        env = dict(os.environ)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
         env["PYTHONPATH"] = str(tmp_path)
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", str(scratch), "-q", "--no-header", "-p", "no:cacheprovider"],
