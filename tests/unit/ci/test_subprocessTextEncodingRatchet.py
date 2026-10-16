@@ -229,6 +229,38 @@ def test_probeRemovedFromBaselineAfterRun():
 ])
 def test_knownBadFormsAreCounted(bad):
     assert _violationCount(bad) == 1, f"该被判的形态没判到：{bad}"
+
+
+#: ── 半修计数自身的形状判据（§6-235 存量消化第一步）
+#: 计数格读的是"该文件有没有任何一处真把写侧钉上"，所以**识别器漏一个形制＝多记一处半修**，
+#: 而多记的那些恰恰是已经修对的——账越不准，下一次收数越会把"识别器坏了"读成"存量在涨"。
+#: 实测现仓有两处用 `env=dict(os.environ, PYTHONIOENCODING="utf-8")`（关键字实参形）真钉过，
+#: 而旧谓词只认字典字面与下标赋值 ⇒ 它们被记进了 29 处的账。
+@pytest.mark.parametrize("snippet, expectPinned", [
+    ("subprocess.run([sys.executable], env={'PYTHONIOENCODING': 'utf-8'})", True),
+    ("os.environ['PYTHONIOENCODING'] = 'utf-8'", True),
+    ("env = dict(os.environ, PYTHONIOENCODING='utf-8')", True),
+    ("import os\nsubprocess.run([sys.executable], env=dict(os.environ, PYTHONIOENCODING='utf-8'))", True),
+    ('"""说明里提一句 PYTHONIOENCODING 这个词而已"""\nsubprocess.run([sys.executable])', False),
+    ("subprocess.run([sys.executable], env=os.environ.copy())", False),
+])
+def test_writesSidePinShapesAreJudgedByCodeForm(snippet, expectPinned):
+    """写侧钉没钉只按代码形态判：正检三形＋反检两形，缺一形就是账不准。"""
+    got = _writesSideIsPinnedInFile(snippet)
+    assert got is expectPinned, (
+        f"形状判定与实状不符（期望 pinned={expectPinned}，现读 {got}）：{snippet[:70]}")
+
+
+def test_knownBothPinnedFilesAreNotCountedAsHalfPinned():
+    """存量账里不许留着"其实已两头钉"的文件——这一格把假阳性点名钉死。
+
+    写明去向：**从 29 收到 27 不是治理改进**，是识别器第一次认得这一形。收数时把它如实写进
+    提交说明，否则下一轮会把"谓词修准"读成"有人吃掉了两处存量"。
+    """
+    sites = {f for f, _ in halfPinnedSites()}
+    for name in ("tests/unit/memory/test_regression_worker_cleanup.py",
+                 "tests/unit/test_manual_scripts_are_not_collectible.py"):
+        assert name not in sites, f"{name} 已两头钉却被记成半修——识别器漏形，不是存量复发"
 #: ── 批 51（§6-225）补的下半张：本文件原本只钉"有没有写 encoding"，不钉**写的是不是对的那一个**。
 #: 于是出现一种比原缺陷更隐蔽的形态——**半修**：父端按 utf-8 解，子端（本仓的 Python 件）没钉
 #: `PYTHONIOENCODING`，仍按本机码页（cp936）吐字节 ⇒ 非 ASCII 被换成 U+FFFD，而代码看起来"已修"。
@@ -244,7 +276,14 @@ CAPTURE_FUNCS_PY = CAPTURE_FUNCS
 #: `PYTHONIOENCODING` 这个词"当成钉过写侧（docstring 提一句就整档免检）。两处修好后真值 34，
 #: 本批把 `neurova/` 与 `scripts/` 的 5 处两头钉齐（这两族的子进程跑在真流水线里，
 #: 中文路径下坏得最静默），剩 29 处全在 `tests/` 下，按档继续分批消化。
-HALF_PINNED_BASELINE = 29
+#:
+#: 29 → 27（§6-235 消化第一步）：**这两处不是被吃掉的存量，是识别器第一次认得
+#: `env=dict(os.environ, PYTHONIOENCODING=...)` 这一形**——那两个文件本来就两头钉齐了
+#: （`tests/unit/memory/test_regression_worker_cleanup.py`、
+#: `tests/unit/test_manual_scripts_are_not_collectible.py`）。假阳性留在账里，下一轮收数
+#: 就会把"谓词修准"读成"有人治理了两处"，所以由
+#: `test_knownBothPinnedFilesAreNotCountedAsHalfPinned` 反过来钉住这两档不许再进账。
+HALF_PINNED_BASELINE = 27
 
 
 def _callNodes(source: str):
@@ -308,8 +347,12 @@ def _writesSideIsPinnedInFile(source: str) -> bool:
 
     原判定是 `"PYTHONIOENCODING" in source`：在 docstring 里提一句这个词就整档免检，
     而被放行的恰好是"写了说明、没钉 env"那一类——最像已修的样子（AGENTS.md「钉形态不钉词」）。
-    现在只认两种真写法：字典键（`env={..., "PYTHONIOENCODING": ...}`）或下标赋值
-    （`os.environ["PYTHONIOENCODING"] = ...` / `env["PYTHONIOENCODING"] = ...`）。
+    现在只认真写法：字典键（`env={..., "PYTHONIOENCODING": ...}`）、下标赋值
+    （`os.environ["PYTHONIOENCODING"] = ...` / `env["PYTHONIOENCODING"] = ...`）、
+    以及 `dict(...)` 的**关键字实参**形（`env=dict(os.environ, PYTHONIOENCODING="utf-8")`）。
+    第三形是本轮补的：漏认它不会让计数"更严"，只会把**已经修对的文件**记进半修账——
+    账越不准，下一次收数越会把"识别器坏了"读成"存量在涨"（现仓实测两处，见
+    `test_knownBothPinnedFilesAreNotCountedAsHalfPinned`）。
     """
     try:
         tree = ast.parse(source)
@@ -323,6 +366,10 @@ def _writesSideIsPinnedInFile(source: str) -> bool:
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
                 and node.slice.value == "PYTHONIOENCODING":
             return True                      # os.environ["PYTHONIOENCODING"] = "utf-8"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "dict" and any(
+                    kw.arg == "PYTHONIOENCODING" for kw in node.keywords):
+            return True                      # dict(os.environ, PYTHONIOENCODING="utf-8")
     return False
 
 
