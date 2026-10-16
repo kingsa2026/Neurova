@@ -121,6 +121,53 @@ MIN_DOOM_LOOP_SIMILARITY = 0.5
 MAX_DOOM_LOOP_SIMILARITY = 1.0
 
 
+def get_limit_domains() -> Dict[str, Dict[str, Any]]:
+    """每键的控件形态与合法域——**面板该长什么样**的唯一出处。
+
+    为什么要有这一格而不是让前端自己写：`GET` 把生效值全量带出、`PUT` 认全量键之后，
+    还剩第三处会漂的是**区间**——`SettingPage.vue` 此前把 `:min="1000" :max="10000000"`
+    这类数字抄在模板里。抄的那一份不是"第二份默认值"而是"第二份合法域"：改了夹紧常量，
+    界面会显示一个服务端并不认的区间，管理员照着填才被拒，比报错更坏的是他以为那能存。
+    所以区间与控件形态都由本函数出街，前端只渲染读数，不重打数字。
+
+    `min`/`max` 一律引用夹紧用的同一批常量（不在这里重打一遍数值——判据
+    `testDomainNumbersTrackTheClampConstants` 是按"改掉常量、读数必须跟着动"来证的，
+    按值比对判不出重打，因为重打的那份此刻恰好相等）。
+
+    `follows` 记录的是"不填时取哪个键的值"这一层语义：`goal_round_budget` 的 `None`
+    是跟随哨兵（见 `DEFAULTS` 那条注释），面板得知道它有个可跟随的默认来源。
+    """
+    domains: Dict[str, Dict[str, Any]] = {
+        "token_budget": {
+            "kind": "int", "min": MIN_TOKEN_BUDGET, "max": MAX_TOKEN_BUDGET},
+        "max_loop_rounds": {
+            "kind": "int", "min": MIN_ROUNDS, "max": MAX_ROUNDS},
+        "goal_max_continuations": {
+            "kind": "int", "min": MIN_GOAL_CONTINUATIONS, "max": MAX_GOAL_CONTINUATIONS},
+        "goal_round_budget": {
+            "kind": "int", "min": MIN_GOAL_ROUND_BUDGET, "max": MAX_GOAL_ROUND_BUDGET,
+            "follows": "max_loop_rounds"},
+        "goal_verification_enabled": {"kind": "bool"},
+        "max_subagent_depth": {
+            "kind": "int", "min": MIN_SUBAGENT_DEPTH, "max": MAX_SUBAGENT_DEPTH_LIMIT},
+        "max_parallel_tools": {
+            "kind": "int", "min": MIN_PARALLEL_TOOLS, "max": MAX_PARALLEL_TOOLS},
+        "doom_loop_window_size": {
+            "kind": "int", "min": MIN_DOOM_LOOP_WINDOW, "max": MAX_DOOM_LOOP_WINDOW},
+        "doom_loop_max_interrupts": {
+            "kind": "int", "min": MIN_DOOM_LOOP_INTERRUPTS, "max": MAX_DOOM_LOOP_INTERRUPTS},
+        "doom_loop_similarity_threshold": {
+            "kind": "float",
+            "min": MIN_DOOM_LOOP_SIMILARITY, "max": MAX_DOOM_LOOP_SIMILARITY},
+    }
+    drifted = (set(DEFAULTS) - set(domains), set(domains) - set(DEFAULTS))
+    if drifted[0] or drifted[1]:
+        raise ValueError(
+            f"agent-limits 合法域与配置单源不同步：缺 {sorted(drifted[0])} / "
+            f"多 {sorted(drifted[1])}——加键要同批补这一格，否则管理面少一个旋钮")
+    return domains
+
+
 def settings_path() -> Path:
     """设置文件路径（NEUROVA_AGENT_LIMITS_SETTINGS 可覆盖）"""
     custom = os.environ.get("NEUROVA_AGENT_LIMITS_SETTINGS")
