@@ -4999,6 +4999,37 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       落库后复取同四档 107 passed。
     - **净 LOC**：台账数据 **+1/−1**（那一行整体改写）；判据池 **+10/−0**（四条论证＋一段来由注释）；生产池 0；子集不动。
     - **本会话下一枚空号现查 §6-280（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`）。**
+280. **待点单票面（不实施）：`call_skill` 该不该认代码映射——同一只技能在两条执行路口径相反，读数已量出来（🔴 等裁）** ⏳ —— §6-272 末段那条"登记不改"的分叉，把票面补齐成可拍的形状。
+
+    - **现读证据（本机真账本，只读取证；跑完复证真根未写）**：`data/agents/default/skills/manifest.json` 今天 1 条 `web-search`，
+      `enabled=True`、`path` 指向的目录里**只有 `manifest.json`**（无 `.py`、无 `SKILL.md`、未钉构件摘要）。三条问句给出**相反**的答案：
+      `availabilityFor("web-search")` ⇒ `{'available': True, 'unavailableReason': ''}`（映射型，§6-272 甲案认它）；
+      `call_skill("web-search", query=…)` ⇒ `{'success': False, 'error': 'No entry point found for skill'}`（只认盘，`_resolveEntryPoint` 返 None）；
+      `market_registry._build_executable_skill("web-search", …)` ⇒ `ExecutorBackedSkill`（真构造得出来，`WebSearchSkillExecutor` 在役）。
+      取数口径如实记一句：账本里的 `path` 是**绝对路径**，所以即便把 manifest 复制进隔离根，`call_skill` 读到的仍是真目录——
+      这一格不写盘所以无害，但它正是 §6-272 记过的"写副本必须同批改 `path`"那条坑的读侧形态。
+    - **为什么这是产品语义而不是 bug 单**：`call_skill` 的对外契约一直是"跑盘上那份被安装门扫过、摘要钉过的字节"
+      （`skill_service.py::call_skill` 里那三段：`_resolveEntryPoint` 取入口 → `artifact_digest.checkArtifact` 对账 →
+      `importlib.util.spec_from_file_location` 动态加载）。
+      让它认映射，等于在这条咽喉里加一类**没有字节可扫、没有摘要可钉**的执行体——构件完整性那道闸对它先天不适用。
+      三条路的代价各自不同，都要"同批把另一面也定下来"，不然就是再留一层分叉。
+    - **甲｜`call_skill` 先问映射表，再回落盘（一条咽喉一个口径）**：改法＝执行前按 `hasExecutorMapping` 分流，
+      映射走 `ExecutorBackedSkill`，落盘走现路。影响面＝`api/endpoints/skill_pool_api.py:460`（HTTP 执行口）与
+      `skills/skill_chain_executor.py:270`（技能链）两处**立刻**能跑 `web-search`；面板"可用"与"跑得动"首次一致。
+      必须同批定的两件事：① 映射型没有 `artifact_digest`，完整性语义要显式写成"由代码本体负责、不受安装门摘要管辖"，
+      并给一格反向钉住（不许有人日后把它当空壳去首钉）；② §6-272 那套"空壳不首钉/不进执行表"的判据不许被扩到映射型，
+      否则下一次收口会把真能动的那条判灰。不可逆点＝对外契约放宽（"没有字节的技能"从此可经 pool/run 口执行）。
+    - **乙｜把映射型从账本与读面里摘出去**：`availabilityFor` 不再认映射，pool/run 与链也不接——`web-search` 只在
+      agent 注册路（`restore_market_skills_from_service`）里活着。影响面＝面板从此显示"构件缺失·不可用"，
+      而聊天里它照样能被调 ⇒ **名实分叉从执行面挪到展示面**，比今天更难看；且要改判 §6-272 的映射型对照格
+      （`test_marketInstallCarriesRealBytes.py` 那一族的前提）。可取之处＝call_skill 契约一字不动，最小风险。
+    - **丙｜给 `web-search` 落一份盘上入口（包一层 `main.py` 调 executor）**：两条路立刻同认盘、无需改契约。
+      代价＝同一功能两份实现（代码里那份 executor 仍在），与教义第 6/7 条正面冲突；且新落的字节要走一遍安装门扫描，
+      第一方资产包今天还装不上（§6-276 那只同理），属把问题搬进另一个未闭环面。
+    - **推荐＝甲**，但**必须与"映射型的完整性语义"同批定**，否则只是把分叉改成另一种分叉。理由：读面（§6-272 甲案）
+      已经承认映射型是"可得"，执行面不认它就是**假可得**的镜像形态——同一个 id 对两个问句给相反答案，
+      这正是本轮一路在收的那类缺陷。乙把矛盾移到展示面、丙造第二份实现，都不解决问题。
+      **本会话不实施**：改的是对外执行契约与判据前提，属产品语义，等人拍。
 277. **§6-271「仍开②」划闭：门控缺省值接回配置单源——`iteration` 与 `token_budget` 两把门不再手抄 20/100000（✅ `fb55183d` 生产+判据+改判；子集 0 变，该档 1195 行已在册）** 🟢
 
     - **这条根因原来有四份手抄**：`gates.py` 两个构造签名默认值、`gate_catalog.py` 两个 params 模型默认值，都与 `security/agent_limits_settings.DEFAULTS` 并存。生产装配点每轮显式传值（`loops/base.py:422-423`），所以"漂移风险"这句在本批被实测**加重**了：`IterationGate(max_rounds=None)` 走的分支引用 `self.ROUND_BUDGET_FALLBACK`，而那个属性**只在 `GoalGate` 上定义**（`gates.py:245`）⇒ 传入 None 当场 AttributeError。**一份手抄数字与一条会崩的分支并排放在同一条"缺省时取什么"的路上**——说明这条路从来没人真走过，两份默认值也都不是被使用过的契约。
