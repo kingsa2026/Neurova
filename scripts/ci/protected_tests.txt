@@ -3137,3 +3137,9 @@ tests/unit/security/test_installGateRulesFollowCodeShape.py
 # 那些退役名字」；另三枚是交付锁——RAG 子模块那条活路仍可解析、真装配点 12 条 benchmark 路由仍在册、
 # 上一批那张落点判据不许留一枚指向已退役落点的悬空 pin。交付锁的失效方向由「删过头」提供。
 tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py
+# M-E 第二刀乙案（§6-262）：环节证据落到每条评测任务，归因读数按环节分组。
+# 十六格里三格是反向钉：peek 不许消费收件箱、空证据不许编出环节标签、
+# 读数不许改 accept/reject 终态（同分不同证据逐字段一致，要进判必须同批改判那一格）；
+# 还有一格钉旧病复发面——比对键用整串 task_input、台账展示面保留 80 字截断，
+# 两者混用曾让超 80 字的任务永远「命中不了」（红灯现量 hits == [] 实证）。
+tests/unit/evolution/eval/test_taskLevelEnvironmentEvidenceFeedsAttribution.py
