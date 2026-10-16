@@ -54,6 +54,7 @@ from neurova.skills.skill_service import SkillService
 MAPPED_ID = "b63-mapped-shell"
 PLAIN_ID = "b63-plain-shell"
 SKILL_MD = "# demo\n指令型技能的说明体。\n"
+ENTRY = "def main(**kwargs):\n    return {'ok': True, 'saw': sorted(kwargs)}\n"
 
 
 class _ProbeExecutor(BaseSkillExecutor):
@@ -93,8 +94,10 @@ def _svc(tmp_path, agent="b63-agent"):
     return SkillService(agent_id=agent, skills_dir=str(tmp_path / "installed"))
 
 
-def _installShell(svc, tmp_path, skill_id: str) -> Path:
+def _installShell(svc, tmp_path, skill_id: str, files=None) -> Path:
     """装一只"目录里只有 manifest.json"的空壳条目——与真账本里 `web-search` 同形。
+
+    `files` 给非空时是"装上去就带构件"的那一形（批 64 之后两形分道：空壳不钉、有构件必钉）。
 
     取值必须同形是硬要求（形态集 239）：若给映射那一支挑一只盘上有 `.py` 的样本，
     "分流"与"什么都不判一律放行"两种实现就同解，格子抓不住东西。
@@ -104,6 +107,8 @@ def _installShell(svc, tmp_path, skill_id: str) -> Path:
     (src / "manifest.json").write_text(
         json.dumps({"id": skill_id, "name": skill_id, "version": "1.0.0",
                     "source": "marketplace"}, ensure_ascii=False), encoding="utf-8")
+    for name, body in (files or {}).items():
+        (src / name).write_text(body, encoding="utf-8")
     result = svc.install_skill(str(src), skill_id=skill_id)
     assert result.get("success") is True, f"装配本身没成功，样本不成立：{result}"
     return svc.skills_dir / skill_id
@@ -191,13 +196,22 @@ class TestThroatRecognizesExecutorMapping:
     def testMappedLegIgnoresDiskDigestWhileTheDiskLegStillEnforcesIt(self, tmp_path):
         """两条腿对同一份字节给出**不同**的正确答案，这一对就是"一个咽喉一个口径"的边界。
 
-        映射型的字节不在盘上，盘上目录被动过不构成篡改证据 ⇒ 映射腿照跑；
-        而同一状态下把映射撤掉，落盘腿必须按摘要不符拒——少一边都不算证到：
-        只断"映射腿照跑"可能是整条咽喉都不看摘要了（那是把闸门拆了）。
+        映射型的字节不在盘上，盘上那份被动过不构成篡改证据 ⇒ 映射腿照跑；而同一状态下把映射撤掉，
+        落盘腿必须按摘要不符拒——少一边都不算证到：只断"映射腿照跑"可能是整条咽喉都不看摘要了。
+
+        **本批改过样本取法（A/B 抓出来的跨批交互，不是环境噪声）**：这一格原来装的是空壳、
+        再往目录里补一份 `main.py`，靠"装侧把空壳钉过"来制造摘要不符。批 64（§6-290）把装侧改成
+        "落盘没构件就不钉"，那条路径的正确答案随之翻成"**该跑得动**"——于是本格在基线上复跑三次全绿、
+        在本批侧红。按回归处置：改成装时就带真字节（有构件必钉，两批都认同这条）、再把那份字节改掉，
+        本格要钉的那件事（两条腿对同一份字节给不同答案）一字不改；"补进真字节应当跑得动"那一半
+        现在由 `test_installDoesNotPinShellAsAuthority.py` 的第 2 格负责。
         """
         svc = _svc(tmp_path)
-        installed = _installShell(svc, tmp_path, MAPPED_ID)
+        installed = _installShell(svc, tmp_path, MAPPED_ID, files={"main.py": ENTRY})
         _registerProbe(MAPPED_ID)
+        assert json.loads(Path(svc.manifest_path).read_text(encoding="utf-8")) \
+            .get(MAPPED_ID, {}).get(AD.DIGEST_FIELD), \
+            "样本前提不成立：带构件的包装完就该钉好（没钉则这一格测不到摘要门）"
 
         (installed / "main.py").write_text(
             "def main(**kwargs):\n    return {'sneaked': True}\n", encoding="utf-8")
@@ -206,7 +220,7 @@ class TestThroatRecognizesExecutorMapping:
         assert mapped.get("success") is True, (
             f"映射腿被盘上摘要挡住了（它的完整性在代码本体，不在这份字节）：{mapped}")
         assert (mapped.get("result") or {}).get("executorRan") == MAPPED_ID, (
-            f"跑的不是映射执行体（盘上那份 sneak 进来的 main.py 被执行了？）：{mapped}")
+            f"跑的不是映射执行体（盘上那份被改过的 main.py 被执行了？）：{mapped}")
 
         del market_registry._MARKET_EXECUTORS[MAPPED_ID]
         onDisk = asyncio.run(_svc(tmp_path).call_skill(MAPPED_ID, query="ping"))
