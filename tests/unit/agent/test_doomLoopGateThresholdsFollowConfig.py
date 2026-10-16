@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""DoomLoopGate 的两个在用阈值必须受配置键管辖（ModularRSI 对照 §4 M-A 第①步；台账记有本格）。
+"""DoomLoopGate 的三个在用阈值必须受配置键管辖（ModularRSI 对照 §4 M-A 第①步；台账记有本格）。
 
 ## 根因（同一装配点上的管辖口径不一致）
 
@@ -19,26 +19,34 @@ gates.py 的类字面量，上限再次不受任何配置键管辖」）。
 这不是假设：死循环门是**唯一没有管理面的一档**——管理员把 `max_loop_rounds` 调到 200
 可以，改「几次重复签名就判死循环」只能改代码。
 
-## 复核实状时改掉的一条原前提（重要）
+## 复核实状时改掉的一条原前提（重要），以及它后来的下落
 
-原以为三阈值都要挂键。实测 `similarity_threshold`（`gates.py:108,114`）**存进实例后全仓零读取**
-——`check()` 判的是签名是否**逐字相等**落在滑动窗口里（`:124` `if signature in self._window`），
-近似匹配从未实装。给它造一个配置键，就是仓里明令禁止的第二形态「棘轮奖励自己编辑空对象」
-（见 `integration_manager.py:56-60` 的入表前置、§6-1 的 `context.experience_knowledge` 死旋钮）。
-本批因此**只把两个真在用的阈值接到单源**，`similarity_threshold` 的存废作为同根因第四格
-登记待裁（甲 实装近似比较＝行为变更｜乙 退役这个误导旋钮｜丙 原样留着），本批不擅动它。
+原以为三阈值都要挂键。实测 `similarity_threshold` **存进实例后全仓零读取**——`check()`
+判的是签名是否**逐字相等**落在滑动窗口里，近似匹配从未实装。给它造一个配置键，就是仓里
+明令禁止的第二形态「棘轮奖励自己编辑空对象」。M-A 那批因此**只把两个真在用的阈值接到单源**，
+第三键登记待裁（甲 实装近似比较＝行为变更｜乙 退役这个误导旋钮｜丙 原样留着）。
 
-## 判据（六格，全部走真装配点取数，不手工传阈值）
+**2026-10-16 用户裁甲并已实装**：`gates.py:_signaturesSimilar` 现在真按这一档比对，
+配置键 `doom_loop_similarity_threshold` 也随之进单源。默认值取 **1.0（＝逐字相等，
+线上开火时点一字不变）**，理由是实测量出来的而不是推测：用生产签名拼法 `_toolSignatures`
+算出的比值——同参空转 0.978、翻页推进 0.976、顺序读不同文件 0.932/0.843、
+不同工具同参数 0.902、多调用 vs 单调用 0.489。收紧到 0.95 抓到空转，但**会把翻页
+读取判成重复**（长文件分段读是常见动作），所以启用与否留给配置面显式决定；
+代价与判据同档可复核（见本档 `TestSignatureSimilarity` 的比值格）。
 
-1. 默认装配的两个阈值 == 配置单源的生效值（改前：单源根本没有这两个键 ⇒ 红）；
-2. 改配置 ⇒ 装配读数跟着走（管辖成立的正向读数，改前恒为 4/2）；
+## 判据（八格 + 相似度语义格，全部走真装配点取数，不手工传阈值）
+
+1. 默认装配的三个阈值 == 配置单源的生效值；
+2. 改配置 ⇒ 装配读数跟着走（管辖成立的正向读数）；
 3. **阈值真被使用**：`max_interrupts=1` 与 `=3` 两档下，同一个重复签名序列读出的
-   `StopAction` 必须不同（改前装配不传值，两档同读数）；
-4. 合法域夹紧：越界配置被夹回区间（窗口下界 1、中断下界 1——0 意味着第一次重复就终止，
-   那不是"收紧"而是换了一道判据）；
-5. 持久化面：设置文件能写能读回这两个键（`load/save` 按 `DEFAULTS` 过滤 ⇒ 漏定义键就静默丢）；
-6. 装配点形状：唯一装配点上 `DoomLoopGate` 的构造必须带齐这两个关键字实参（钉代码形态），
-   且类默认值取自同一单源、`gates.py` 里不留这两个数字的第二份手抄。
+   `StopAction` 必须不同；
+4. 合法域夹紧：越界配置被夹回区间（窗口下界 1、中断下界 1、相似度下界 0.5——
+   再低就等于任意两轮都算重复，那是把门控变成无条件开火）；
+5. 持久化面：设置文件能写能读回这些键（`load/save` 按 `DEFAULTS` 过滤 ⇒ 漏定义键就静默丢）；
+6. 装配点形状：唯一装配点上 `DoomLoopGate` 的构造必须带齐这三个关键字实参（钉代码形态），
+   且类默认值取自同一单源、`gates.py` 里不留数字字面量的第二份手抄。
+7. 声明式配置门（`gate_catalog`）与装配点**不许有两份默认值**：三键缺省即回落单源。
+8. 挂键与读取必须同时成立（这一格从 M-A 的蕴涵式转成直接断言）。
 """
 from __future__ import annotations
 
@@ -52,9 +60,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BASE_LOOP_PY = PROJECT_ROOT / "neurova" / "agent" / "loops" / "base.py"
 GATES_PY = PROJECT_ROOT / "neurova" / "agent" / "gates.py"
 
-DOOM_KEYS = ("doom_loop_window_size", "doom_loop_max_interrupts")
-CTOR_ATTRS = ("window_size", "max_interrupts")
-#: 存进实例却全仓零读取的那一格（本批只登记不接线）——它若被挂上配置键，必须同时被读。
+DOOM_KEYS = ("doom_loop_window_size", "doom_loop_max_interrupts",
+             "doom_loop_similarity_threshold")
+CTOR_ATTRS = ("window_size", "max_interrupts", "similarity_threshold")
+#: 曾经的"只写不读死旋钮"，2026-10-16 按用户裁定甲实装并挂键（见上方文档段）。
 DEAD_KNOB_KEY = "doom_loop_similarity_threshold"
 
 
@@ -148,6 +157,22 @@ class TestDoomLoopThresholdsFollowConfig:
             "那不是收紧而是换了一道判据）"
         )
 
+    def test_04b_similarityThresholdDomainIsClamped(self, restoreDefaults):
+        """相似度的合法域是 (0,1]：下界之下等于"任意两轮都算重复"。
+
+        下界取 0.5 有实测依据——生产签名拼法下，**完全不像**的两轮比值 0.489；
+        允许更低就是把门控变成无条件开火，而不是收紧判据。
+        """
+        restoreDefaults.DEFAULTS["doom_loop_similarity_threshold"] = 0.1
+        assert _effective()["doom_loop_similarity_threshold"] == \
+            restoreDefaults.MIN_DOOM_LOOP_SIMILARITY
+        restoreDefaults.DEFAULTS["doom_loop_similarity_threshold"] = 1.7
+        assert _effective()["doom_loop_similarity_threshold"] == \
+            restoreDefaults.MAX_DOOM_LOOP_SIMILARITY
+        restoreDefaults.DEFAULTS["doom_loop_similarity_threshold"] = "abc"
+        assert _effective()["doom_loop_similarity_threshold"] == 1.0, (
+            "坏值必须回默认（逐字相等），不能把脏配置读成「近似开火」")
+
     def test_05_persistenceRoundTripsTheGovernedKeys(self, tmp_path, monkeypatch):
         import json
 
@@ -201,21 +226,151 @@ class TestDoomLoopThresholdsFollowConfig:
             "gates.py 里仍留着 window_size 的数字字面量默认值"
         )
 
-    def test_08_deadKnobGetsNoConfigKeyUntilItIsRead(self):
-        """登记待裁的那一格：`similarity_threshold` 存进实例后全仓没人读。
+    def test_08_keyIsBothBoundAndRead(self):
+        """这一格从 M-A 的**蕴涵式**转成直接断言：旋钮已实装，挂键与读取必须同时成立。
 
-        判据写成**蕴涵**而不是"永远不许有键"：将来谁真去实装近似比较（甲案），
-        加键的同时必须让 gates.py 里出现读取点，否则这一格红——
-        防的是"挂上管理面却仍不生效"那种比死旋钮更坏的形态（面板显示一份没在生效的值）。
+        原形态是"键未定义就跳过"，防的是"挂上管理面却仍不生效"（面板显示一份没在生效
+        的值）。甲案落地后那个跳过分支就是死代码，留着等于给未来的回退留一条静默路。
         """
         import neurova.security.agent_limits_settings as als
 
-        if DEAD_KNOB_KEY not in als.DEFAULTS:
-            return  # 本批现状：键未定义，旋钮未接线——两件事保持一致
+        assert DEAD_KNOB_KEY in als.DEFAULTS, "键被摘掉：旋钮又回到不受管辖的字面量"
         gatesText = GATES_PY.read_text(encoding="utf-8")
-        readsIt = "self.similarity_threshold" in gatesText.split(
-            "def reset_session", 1)[0].split("class DoomLoopGate", 1)[1]
-        assert readsIt, (
-            f"{DEAD_KNOB_KEY} 已进配置单源，但 DoomLoopGate 里没有一处读 self.similarity_threshold"
+        body = gatesText.split("def reset_session", 1)[0].split("class DoomLoopGate", 1)[1]
+        assert "self.similarity_threshold" in body, (
+            f"{DEAD_KNOB_KEY} 在配置单源里，但 DoomLoopGate 没读 self.similarity_threshold"
             "——管理员会以为调它有效果"
         )
+
+
+def _sig(name, args):
+    """用**生产拼法**造签名（含参数截 64 字符的既有口径），不手造字符串。"""
+    from neurova.agent.loops.base import BaseAgentLoop
+
+    return BaseAgentLoop._toolSignatures([
+        {"function": {"name": name, "arguments": args}}])
+
+
+def _gate(threshold, window=4, interrupts=2):
+    from neurova.agent.gates import DoomLoopGate
+
+    return DoomLoopGate(window_size=window, similarity_threshold=threshold,
+                        max_interrupts=interrupts)
+
+
+class TestSignatureSimilarity:
+    """近似判定真在比，且**代价与收益都可判**——比值全部来自生产签名拼法。"""
+
+    def test_spinningRetryIsCaughtAt095(self):
+        """同一调用只换一点参数（论文那类空转）：0.95 下算重复并升级。"""
+        from neurova.agent.gates import StopAction
+
+        a = _sig("read_file", '{"path":"docs/audit.md","offset":10}')
+        b = _sig("read_file", '{"path":"docs/audit.md","offset":11}')
+        # 中断上限 2：第一次算重复只注入"换策略"，第二次才终止（升级阶梯本身也是判据）
+        gate = _gate(0.95, interrupts=2)
+        assert gate.check({"round_signature": a}).action is StopAction.BYPASS
+        assert gate.check({"round_signature": b}).action is StopAction.INTERRUPT_AND_CONTINUE
+        assert gate.check({"round_signature": b}).action is StopAction.TERMINATE
+        # 同一序列在默认档（1.0）下什么都不会发生——这一格就是"线上开火时点会变"的正向证据
+        untouched = _gate(1.0, interrupts=2)
+        untouched.check({"round_signature": a})
+        assert untouched.check({"round_signature": b}).action is StopAction.BYPASS
+
+    def test_sequentialDistinctFileReadsAreNotCaughtAt095(self):
+        """正常推进（换文件读）不得被误判：这一格是"0.95 可用"的下界证据。"""
+        from neurova.agent.gates import StopAction
+
+        a = _sig("read_file", '{"path":"src/components/SettingsPage.vue"}')
+        b = _sig("read_file", '{"path":"src/components/GlassButton.vue"}')
+        gate = _gate(0.95, interrupts=1)
+        gate.check({"round_signature": a})
+        assert gate.check({"round_signature": b}).action is StopAction.BYPASS
+
+    def test_pagingIsCaughtTooAndThatIsTheDocumentedCost(self):
+        """翻页读取（page 1→2）在 0.95 下**也**被判重复——这是本档默认的已知代价。
+
+        写成一格而不是只写在注释里，是因为它是"默认为什么留 1.0"的唯一可复核证据：
+        字符串层面翻页与空转不可分（0.976 vs 0.978），要区分得读工具返回值，
+        而本门的 `check(ctx)` 只看轮次签名。收紧之前必须知道这条代价。
+        """
+        from neurova.agent.gates import StopAction
+
+        p1 = _sig("read_file", '{"path":"docs/long.md","page":1}')
+        p2 = _sig("read_file", '{"path":"docs/long.md","page":2}')
+        gate = _gate(0.95, interrupts=2)
+        gate.check({"round_signature": p1})
+        assert gate.check({"round_signature": p2}).action is StopAction.INTERRUPT_AND_CONTINUE
+
+    def test_defaultOnePointZeroIsExactlyTheOldSemantics(self):
+        """默认 1.0 = 逐字相等：近似不误伤，而真重复照旧开火（线上开火时点不变的证据）。"""
+        from neurova.agent.gates import StopAction
+
+        spinA = _sig("read_file", '{"path":"docs/audit.md","offset":10}')
+        spinB = _sig("read_file", '{"path":"docs/audit.md","offset":11}')
+        gate = _gate(1.0, interrupts=1)
+        gate.check({"round_signature": spinA})
+        assert gate.check({"round_signature": spinB}).action is StopAction.BYPASS, (
+            "阈值 1.0 却按近似开了火——默认值不再是「实装前的语义」")
+        same = _sig("read_file", '{"path":"docs/audit.md","offset":10}')
+        assert gate.check({"round_signature": same}).action is StopAction.TERMINATE
+
+    def test_productionAssemblyKeepsTheOldFiringTime(self):
+        """装配点取的是单源默认（1.0）：本批没有把线上判定悄悄改成近似。"""
+        import neurova.security.agent_limits_settings as als
+
+        assert als.DEFAULTS["doom_loop_similarity_threshold"] == 1.0
+        assert _assembledDoomGate().similarity_threshold == 1.0
+
+    def test_absurdlyLowThresholdDoesNotBecomeFireAlways(self):
+        """非法下界不解释成"任意两轮都算重复"（那等于门控无条件开火）。"""
+        from neurova.agent.gates import StopAction
+
+        gate = _gate(0.0, interrupts=1)
+        gate.check({"round_signature": _sig("read_file", '{"path":"a.md"}')})
+        assert gate.check({"round_signature": _sig("write_file", '{"path":"zzz.md"}')}).action \
+            is StopAction.BYPASS
+
+    def test_comparisonCostHasAnUpperBound(self):
+        """长参数不得把每轮比对放大：比对前按上界截断，这是成本上界的可判形式。"""
+        from neurova.agent.gates import _SIGNATURE_COMPARE_CAP, _signaturesSimilar
+
+        longTail = "x" * (4 * _SIGNATURE_COMPARE_CAP)
+        a = "read:" + longTail + "|A"
+        b = "read:" + longTail + "|B"
+        # 尾部不同，但截断后完全相同 ⇒ 判为同一条：证明只看前 CAP 个字符
+        assert _signaturesSimilar(a, b, 0.999) is True
+        headA = "read:" + "a" * _SIGNATURE_COMPARE_CAP
+        headB = "read:" + "b" * _SIGNATURE_COMPARE_CAP
+        assert _signaturesSimilar(headA, headB, 0.999) is False
+
+
+class TestDeclarativeGateSharesTheSingleSource:
+    """声明式配置门与装配点不许各持一份默认值（两份默认＝两种判重语义，各自都绿）。"""
+
+    def testOmittedParamsFallBackToTheConfigSingleSource(self):
+        from neurova.agent.gate_catalog import GateCatalog, compile_gates
+        import neurova.security.agent_limits_settings as als
+
+        gate = compile_gates([{"type": "doom_loop"}], GateCatalog())[0]
+        defaults = als.DEFAULTS
+        assert gate.window_size == defaults["doom_loop_window_size"]
+        assert gate.max_interrupts == defaults["doom_loop_max_interrupts"]
+        assert gate.similarity_threshold == defaults["doom_loop_similarity_threshold"]
+
+    def testCatalogDoesNotRetypeTheDefaults(self):
+        text = (PROJECT_ROOT / "neurova" / "agent" / "gate_catalog.py").read_text(
+            encoding="utf-8")
+        for line in ("window_size: int = 4", "similarity_threshold: float = 0.95",
+                     "max_interrupts: int = 2"):
+            assert line not in text, f"gate_catalog.py 里仍手抄默认值：{line}"
+
+    def testOutOfRangeParamsFailFast(self):
+        from pydantic import ValidationError
+
+        from neurova.agent.gate_catalog import DoomLoopParams
+
+        with pytest.raises(ValidationError):
+            DoomLoopParams(similarity_threshold=1.5)
+        with pytest.raises(ValidationError):
+            DoomLoopParams(similarity_threshold=0.2)

@@ -99,8 +99,40 @@ class TokenBudgetGate(StopGate):
         return StopDecision.bypass()
 
 
-def _settingsDoomLoopDefaults() -> Dict[str, int]:
-    """死循环门两个在用阈值的默认值：**取自**配置单源，不在此手抄第二份数字。
+#: 近似比对的长度上界。签名由 `_toolSignatures` 拼（参数已截 64 字符），这里再兜一层
+#: 是给成本一个**写在上界**的理由：`check()` 每轮都要把窗口里的每条都比一遍，
+#: 而 `SequenceMatcher` 是 O(n·m)——不兜的话，一条超长参数就能把每轮判定放大。
+_SIGNATURE_COMPARE_CAP = 256
+
+
+def _signaturesSimilar(a: str, b: str, threshold: float) -> bool:
+    """两条轮次签名是否算"同一件事又做了一遍"。
+
+    阈值 1.0 ⇒ 逐字相等（本门实装至今的语义，保留可达且是生产默认）；
+    小于 1.0 ⇒ 取字符序列比值的**近似**判定，快路径先走逐字相等（多数命中不必算比值）。
+
+    实测比值（签名由生产单源 `_toolSignatures` 拼出，不是手造的）：
+    同参空转（offset 10→11）0.978、翻页（page 1→2）0.976、顺序读不同文件 0.932 / 0.843、
+    不同工具同参数 0.902、多调用一轮 vs 单调用 0.489。
+    所以 0.95 这一档抓到的是空转与翻页、放掉的是正常换文件与换工具——
+    **翻页是这一档的已知代价**，生产默认因此留在 1.0，收紧由配置键显式决定。
+    """
+    if a == b:
+        return True
+    if threshold >= 1.0:
+        return False
+    if threshold <= 0.0:
+        # 非法下界不解释成"全都算重复"（那等于把门控变成无条件开火），退回逐字相等；
+        # 合法域由配置侧夹紧到 (0, 1]，走到这里只可能是直接构造出的坏值。
+        return False
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(
+        None, a[:_SIGNATURE_COMPARE_CAP], b[:_SIGNATURE_COMPARE_CAP]).ratio() >= threshold
+
+
+def _settingsDoomLoopDefaults() -> Dict[str, float]:
+    """死循环门三个在用阈值的默认值：**取自**配置单源，不在此手抄第二份数字。
 
     单源不可导入是真实故障，交给 import 出声（与 `agent/swarm.py` 同口径），
     不吞异常改成静默常量。
@@ -110,23 +142,28 @@ def _settingsDoomLoopDefaults() -> Dict[str, int]:
     return {
         "window_size": int(DEFAULTS["doom_loop_window_size"]),
         "max_interrupts": int(DEFAULTS["doom_loop_max_interrupts"]),
+        "similarity_threshold": float(DEFAULTS["doom_loop_similarity_threshold"]),
     }
 
 
 class DoomLoopGate(StopGate):
     """死循环门控。
 
-    两个在用的阈值默认值**取自** `security/agent_limits_settings.DEFAULTS` 单源
+    三个在用的阈值默认值**取自** `security/agent_limits_settings.DEFAULTS` 单源
     （先例 `agent/swarm.py:_settingsDefaultSubagentDepth()`）——此前它们是类字面量，
     而唯一装配点无参构造本门，于是「几次重复算死循环」这件事不受任何配置键管辖。
-    `similarity_threshold` 仍留字面量：它存进实例后全仓零读取（`check()` 判的是签名
-    逐字相等），给死旋钮挂键就是造第二个空转配置，存废另批裁。
+
+    `similarity_threshold` 的历史：它被收下、存进实例，而 `check()` 判的是签名**逐字
+    相等**——近似比较从未实装，所以它是一格只写不读的死旋钮（台账 §6-239 点的名）。
+    2026-10-16 用户裁定"实装签名相似度判定"，本轮起它**真的在管比对**：判定见
+    `_signaturesSimilar`，代价与实测比值写在那里。生产默认留 1.0（等于逐字相等，
+    线上开火时点一字不变），收紧到 0.95 会抓同参空转但也会把翻页判成重复。
     """
 
     def __init__(
         self,
         window_size: Optional[int] = None,
-        similarity_threshold: float = 0.95,
+        similarity_threshold: Optional[float] = None,
         max_interrupts: Optional[int] = None,
     ):
         defaults = _settingsDoomLoopDefaults()
@@ -135,7 +172,10 @@ class DoomLoopGate(StopGate):
         self.window_size = (
             defaults["window_size"] if window_size is None else int(window_size)
         )
-        self.similarity_threshold = similarity_threshold
+        self.similarity_threshold = (
+            defaults["similarity_threshold"]
+            if similarity_threshold is None else float(similarity_threshold)
+        )
         self.max_interrupts = (
             defaults["max_interrupts"] if max_interrupts is None else int(max_interrupts)
         )
@@ -147,7 +187,8 @@ class DoomLoopGate(StopGate):
         if not signature:
             return StopDecision.bypass()
 
-        if signature in self._window:
+        if any(_signaturesSimilar(signature, seen, self.similarity_threshold)
+               for seen in self._window):
             self._interrupt_count += 1
             if self._interrupt_count >= self.max_interrupts:
                 observed = self._interrupt_count  # reset 前捕获（reset 会清零）
