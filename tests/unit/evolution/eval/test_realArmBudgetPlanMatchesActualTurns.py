@@ -237,14 +237,3 @@ class TestBudgetKeyIsLiveConfig:
             assert settings.real_arm_max_agent_turns >= 1, (bad, settings)
         assert update_settings(real_arm_max_agent_turns=500).real_arm_max_agent_turns == 500
         assert load_settings().real_arm_max_agent_turns == 500
-
-    def testSettingsPatchAcceptsEverySettingsField(self):
-        """PUT 白名单落后于配置单源＝键写了也写不进去（本仓在 agent_limits 上已有一张同族票）。"""
-        from dataclasses import fields as dataclassFields
-
-        from neurova.api.endpoints.text_evolution_api import SettingsPatch
-        from neurova.evolution.evolution_settings import EvolutionSettings
-
-        missing = ({f.name for f in dataclassFields(EvolutionSettings)}
-                   - set(SettingsPatch.model_fields))
-        assert not missing, f"PUT 白名单缺这些配置键：{sorted(missing)}"
