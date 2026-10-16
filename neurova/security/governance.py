@@ -25,7 +25,14 @@ from neurova.core.logger import get_logger
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.sandbox.exec_sandbox import SandboxSeverity, execute_in_sandbox
 from neurova.security.shell_normalization import normalize_posix_line_continuations
-from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEngine
+from neurova.security.tool_guard import (
+    ApprovalMode,
+    COMMAND_PARAM_KEYS,
+    GuardSeverity,
+    PATH_PARAM_KEYS,
+    ToolGuardEngine,
+    looksLikePathValue,
+)
 
 # P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows 走
 # AppContainer 真实现 + SAFER 受限令牌兜底）。探测结果驱动
@@ -184,19 +191,15 @@ class GovernanceResult:
         return d
 
 
-# 参数提取的约定键名（非 scan_all 模式保持既有语义）
-_ADJUDICABLE_COMMAND_KEYS = ("command", "code")
-_ADJUDICABLE_PATH_KEYS = ("file_path", "path")
-# 路径型参数启发式：绝对路径（POSIX/Windows 盘符/UNC），供敏感路径规则用
-_PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/])")
-
-
+# 参数语义两把键清单与路径形状判定**不在本文件另抄一份**：取自 tool_guard 的单源
+# （§6-255 甲案）。这里曾各有一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`
+# 和一条 `_PATH_LIKE`，与守卫那边的口径各演化各的——同一个问题两个答案。
 def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
     """从工具参数中提取可裁决内容 (command 文本, file_paths)。
 
     scan_all=True（MCP 等动态来源）：全部参数整体序列化进 command，
     不依赖约定键名——否则动态工具换个参数名即可绕过预检（P0-2 / M4）。
-    scan_all=False：保持既有四键名提取语义。
+    scan_all=False：保持既有约定键名提取语义（键名清单见 `tool_guard`）。
     """
     if not isinstance(params, dict) or not params:
         return "", None
@@ -207,11 +210,7 @@ def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
         except Exception:
             command = str(params)
         file_paths = next(
-            (
-                v
-                for v in params.values()
-                if isinstance(v, str) and _PATH_LIKE.match(v)
-            ),
+            (v for v in params.values() if looksLikePathValue(v)),
             None,
         )
         return command, file_paths
@@ -219,7 +218,7 @@ def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
     command = next(
         (
             params[k]
-            for k in _ADJUDICABLE_COMMAND_KEYS
+            for k in COMMAND_PARAM_KEYS
             if isinstance(params.get(k), str) and params[k].strip()
         ),
         "",
@@ -227,7 +226,7 @@ def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
     file_paths = next(
         (
             params[k]
-            for k in _ADJUDICABLE_PATH_KEYS
+            for k in PATH_PARAM_KEYS
             if isinstance(params.get(k), str) and params[k]
         ),
         None,
