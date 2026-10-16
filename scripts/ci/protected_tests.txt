@@ -3181,3 +3181,13 @@ tests/unit/security/test_guardScansFollowParameterSemantics.py
 # 那条腿不许被改断；已钉条目被篡改仍先报摘要不符而非"没入口"）、形状 2 格（入口判定全档只许一处 + 探测器反空转）。
 # 逐文件单跑三次同读数 6/6/6；活体两侧对照：无修复那侧 [4][5][6] 三项 FAIL，拒因正是 artifact_digest_mismatch。
 tests/unit/skills/test_unpinnedShellIsNotPinnedAsAuthority.py
+# §6-272：读面对账——「账本在册」不等于「可得」。过去没有一面看过落盘：列表/详情只吐账本的 `enabled`，
+# 四个列表口照抄，轮级可见性只有三闸（运营开关/运行时 status/生命周期归档），而恢复口在造不出执行体时
+# 还兜底注册一个 `status=ACTIVE` 的裸基类 ⇒ 工具 schema 与提示词目录把空壳画成可调用，点到才失败。
+# 本机实测量到 8 条里 7 条是这种空壳（2026-10-06 旧代码留下的陈态），活体在 HEAD 上的读数就是"恢复了 8 条"。
+# 改法是把判定收成一处 `SkillService.availabilityFor`，三面必须同向。11 格分三组：
+# 投影 5 格（空壳/目录丢失 ⇒ 不可得；指令型、账本自证的 tool_sequence、`path` 为空的自动技能 ⇒ 不许误灰）、
+# 跨边界 3 格（恢复口不给空壳建执行体、指令型照旧注册、可见性第四闸拒空壳且放行正常条目）、
+# 契约 3 格（`app.openapi()` 里必须有 `available`/`unavailable_reason`——字段没人读就是新断点；
+# 两个 agent 面真走 HTTP 取 JSON 比对同向）。逐文件单跑三次同读数 11/11/11。
+tests/unit/skills/test_readFaceDoesNotClaimShellAsAvailable.py
