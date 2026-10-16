@@ -239,9 +239,12 @@ class TestImporterIntegration:
             calls.append((skill_id, url, str(dest)))
             dest.mkdir(parents=True, exist_ok=True)
             (dest / "SKILL.md").write_text("---\nname: t\n---\n", encoding="utf-8")
-            return True
+            return ""        # 原因面：空串＝成功
 
-        monkeypatch.setattr(ms, "download_and_extract", fake_download)
+        # 替身必须打在**生产真正调用**的那一面：`market_importer` 现在取
+        # `downloadAndExtractRefusal`（要把原因带进回执），bool 面只是它的薄包装。
+        # 桩留在 bool 面上会静默失效、让这条 case 去连真网络（§6-276 那轮 A/B 就是这么抓出来的）。
+        monkeypatch.setattr(ms, "downloadAndExtractRefusal", fake_download)
         imp = MarketImporter(skills_dir=tmp_path / "skills")
         entry = {
             "skill_id": "aliyun--demo", "name": "Demo", "version": "1.0.0",

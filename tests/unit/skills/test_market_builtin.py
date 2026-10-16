@@ -19,6 +19,8 @@
 
 import io
 import json
+import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -130,6 +132,21 @@ def builtin_store(tmp_path, monkeypatch):
     return store
 
 
+@pytest.fixture()
+def shortSkillsRoot(request) -> Path:
+    r"""内置包导入的落点根：不挂在 pytest 那串"用例名即目录名"的深根上。
+
+    实测最长成员名 125 字符，而 `tmp_path` 那一段（含
+    `test_import_builtin_offline[presentation-studio]0`）会让"根 + 成员"合计 273 字符，
+    超过 Windows 的 260 上限（本机 `LongPathsEnabled=0`）——那样本格测的就是操作系统了。
+    长根那一维另有专档钉住（`test_zipRefusalNamesItsCause.py`：失败必须点名"路径过长"并给出
+    成员长／根长／合计三个数），这里只管它声称的那件事：内置包可离线导入且落盘内容正确。
+    """
+    root = Path(tempfile.mkdtemp(prefix="nvbm-")) / "skills"
+    request.addfinalizer(lambda: shutil.rmtree(root.parent, ignore_errors=True))
+    return root
+
+
 @pytest.mark.parametrize(
     "skill_id,version,expect_files",
     [
@@ -138,7 +155,8 @@ def builtin_store(tmp_path, monkeypatch):
     ],
     ids=["search-engine", "presentation-studio"],
 )
-def test_import_builtin_offline(tmp_path, monkeypatch, builtin_store, skill_id, version, expect_files):
+def test_import_builtin_offline(shortSkillsRoot, monkeypatch, builtin_store,
+                                     skill_id, version, expect_files):
     # 零网络断言: 任何 http 请求即失败
     import neurova.skills.market_sources as ms
 
@@ -147,11 +165,11 @@ def test_import_builtin_offline(tmp_path, monkeypatch, builtin_store, skill_id, 
 
     monkeypatch.setattr(ms, "_http_get", _no_net)
 
-    importer = MarketImporter(skills_dir=tmp_path / "skills")
+    importer = MarketImporter(skills_dir=shortSkillsRoot)
     task = importer.import_skill(skill_id)
     assert task.status.value == "completed", task.error_message
 
-    skill_dir = tmp_path / "skills" / skill_id
+    skill_dir = shortSkillsRoot / skill_id
     for rel in expect_files:
         assert (skill_dir / rel).exists(), f"{rel} 未落盘"
     if "SKILL.md" in expect_files:

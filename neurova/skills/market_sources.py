@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import urllib.request
 import zipfile
@@ -295,14 +296,49 @@ def sync_source(source_key: str, store: Any) -> Dict[str, Any]:
 
 # ── 安装下载（zip 安全解压）──
 
+#: Windows 传统路径上限：该机未开长路径（`LongPathsEnabled=0`）时，超过就是 ENOENT/ENAMETOOLONG。
+WINDOWS_MAX_PATH = 260
 
-def extract_remote_skill_zip(skill_id: str, payload: bytes, dest: Path) -> bool:
-    """把远端技能 zip 落位到 dest，判定全在咽喉里，这里只把它折成本模块的 bool 契约。
+
+def _longestProjectedPath(payload: bytes, dest: Path):
+    """量一遍"根 + 成员名"的最长投影。**只用来把失败原因说准**，不参与任何拒绝判定。"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+            names = zf.namelist()
+    except Exception:  # noqa: BLE001 - 读不出成员清单就没法报长度，交回原始异常文案
+        return None
+    if not names:
+        return None
+    longest = max(names, key=len)
+    base = str(dest).rstrip("\\/")
+    return longest, len(base) + 1 + len(longest)
+
+
+def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
+    """把一次解包失败写成能据以行动的一句话。
+
+    三条失败族（安全拒／包坏了／落点根太长）过去被同一句 "zip refused" 折在一起，而它们的
+    **处置方向完全不同**：前者该拒、中者该退回上游、后者该改部署——读的人拿不到区分，
+    就会去改一个没坏的包（§6-259 那条 "zip refused" 的真实成因正是第三种，被折了 17 天）。
+    """
+    if isinstance(exc, OSError):
+        projected = _longestProjectedPath(payload, dest)
+        if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
+            member, total = projected
+            return (
+                f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+                f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+                f"——这是落点问题，不是包的问题：换短根或开启长路径")
+    return f"{type(exc).__name__}: {exc}"
+
+
+def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:
+    """解包这个 zip：成功返回空串，失败返回**点名的原因**。判定与文案都只这一处实现。
 
     两条上限是**这条路的策略**（远端包先按字节拒、再按成员数拒），路径逃逸/绝对成员/
     越出目标目录的判定与解包机制在 `neurova/security/safe_archive.py`——本函数此前自己
     写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
-    失败返回 False；`extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
+    `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
     try:
         safe_archive.safe_extract_zip(
@@ -310,17 +346,29 @@ def extract_remote_skill_zip(skill_id: str, payload: bytes, dest: Path) -> bool:
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,
             maxEntries=MAX_ZIP_ENTRIES,
         )
-        return True
+        return ""
     except (safe_archive.UnsafeArchiveError, zipfile.BadZipFile, OSError) as e:
-        logger.warning("skill %s zip refused: %s", skill_id, e)
-        return False
+        reason = _describeExtractionFailure(e, payload, dest)
+        logger.warning("skill %s zip refused: %s", skill_id, reason)
+        return reason
 
 
-def download_and_extract(skill_id: str, url: str, dest: Path) -> bool:
-    """下载 + 解压一条龙；host 白名单在 _http_get 内校验"""
+def extract_remote_skill_zip(skill_id: str, payload: bytes, dest: Path) -> bool:
+    """既有 bool 调用面：它只是上面那一个实现的薄包装（判定只有一份，不另写一遍）。"""
+    return not extractRemoteSkillZipRefusal(skill_id, payload, dest)
+
+
+def downloadAndExtractRefusal(skill_id: str, url: str, dest: Path) -> str:
+    """下载 + 解包，失败原因点名（下载段的失败同样不许折成一句 "failed"）。"""
     try:
         payload = _http_get(url)
     except Exception as e:  # noqa: BLE001
-        logger.warning("download skill %s from %s failed: %s", skill_id, url, e)
-        return False
-    return extract_remote_skill_zip(skill_id, payload, dest)
+        reason = f"下载失败 {type(e).__name__}: {e}"
+        logger.warning("download skill %s from %s failed: %s", skill_id, url, reason)
+        return reason
+    return extractRemoteSkillZipRefusal(skill_id, payload, dest)
+
+
+def download_and_extract(skill_id: str, url: str, dest: Path) -> bool:
+    """下载 + 解压一条龙；host 白名单在 `_http_get` 内校验。bool 薄包装，同上不另写判定。"""
+    return not downloadAndExtractRefusal(skill_id, url, dest)
