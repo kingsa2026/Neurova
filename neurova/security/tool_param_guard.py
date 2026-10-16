@@ -33,22 +33,21 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.security.tool_guard import PATH_CANONICAL_NAME, pathNamesWithRole
 
 logger = get_logger(__name__)
 
-# 无歧义别名：无需 schema（目标名不会是任何工具的规范参数名）
+# 路径族别名**不在此处写字面**：那张表就是 `tool_guard.PATH_NAME_ROLES`（§6-284 第②刀前半）。
+# 此前"哪些名字算路径"由三份字面各自回答（清单／回落正则／这里的别名表），同一个问题三个答案，
+# 改一处另一处静默不跟——现在这里只是单源表的两个投影。
 UNAMBIGUOUS_ALIASES: Dict[str, str] = {
-    "filename": "file_path",
-    "filepath": "file_path",
-    "filePath": "file_path",
-    "file_name": "file_path",
-    "fileName": "file_path",
+    name: PATH_CANONICAL_NAME for name in pathNamesWithRole("alias_plain")
 }
 
-# 歧义别名：可能与真实参数名撞车，仅在 schema 证明目标存在且别名不存在时归一
+# 歧义别名：路径族那份仍由单源表给（可能与真实参数名撞车，仅在 schema 证明目标存在且别名不存在时归一）；
+# 后面两条是**非路径族**别名，不归那张表管。
 SCHEMA_REQUIRED_ALIASES: Dict[str, str] = {
-    "path": "file_path",
-    "file": "file_path",
+    **{name: PATH_CANONICAL_NAME for name in pathNamesWithRole("alias_gated")},
     "link": "url",
     "cmd": "command",
 }
