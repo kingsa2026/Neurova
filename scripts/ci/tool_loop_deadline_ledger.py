@@ -240,6 +240,11 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("DoomLoopGate", KIND_SYMBOL, "agent/gates.py（阈值型门控·死循环判定的配置管辖）"),
     ("doom_loop_window_size", KIND_KEY, "security/agent_limits_settings.py（死循环滑动窗口长度）"),
     ("doom_loop_max_interrupts", KIND_KEY, "security/agent_limits_settings.py（中断升级为终止的次数上限）"),
+    # 第三键：2026-10-16 用户裁甲实装签名相似度判定后，它才从"只写不读的死旋钮"
+    # 变成真参与比对的阈值（登记前它是 `gates.py` 的类字面量且零读取，台账 §6-239）。
+    # 默认 1.0 ＝ 逐字相等，线上开火时点因此不变；收紧代价见 gates.py:_signaturesSimilar。
+    ("doom_loop_similarity_threshold", KIND_KEY,
+     "security/agent_limits_settings.py（签名近似判定的相似度阈值，1.0＝逐字相等）"),
     ("TokenBudgetGate", KIND_SYMBOL, "agent/gates.py:78（阈值型门控·反向控制）"),
     ("notify_tool_result", KIND_SYMBOL, "agent/tool_pipeline.py:460（反向控制·符号级）"),
     ("get_pipeline_observers", KIND_SYMBOL, "agent/tool_pipeline.py:443（反向控制·符号级）"),

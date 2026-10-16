@@ -408,11 +408,14 @@ class BaseAgentLoop(ABC):
             )
         )
         return GateRunner([
-            # 死循环门的两个在用阈值同样从配置单源取数——此前这里是 `DoomLoopGate()`
+            # 死循环门的三个在用阈值同样从配置单源取数——此前这里是 `DoomLoopGate()`
             # 无参构造，门限只活在 gates.py 的字面量上（同下面那条 GoalGate 注释
             # 点名的形态：上限不受任何配置键管辖）。
+            # 第三键 `similarity_threshold` 的默认 1.0 就是实装前的逐字相等语义：
+            # 线上开火时点不因"把近似判定接上"而改变，收紧由配置面显式决定。
             DoomLoopGate(
                 window_size=limits["doom_loop_window_size"],
+                similarity_threshold=limits["doom_loop_similarity_threshold"],
                 max_interrupts=limits["doom_loop_max_interrupts"],
             ),
             # T-04：门控阈值与轮内守卫同取一处派生，不再各读一遍配置键的不同尺度。

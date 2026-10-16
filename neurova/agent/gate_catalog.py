@@ -15,15 +15,25 @@ GateRunner 故障隔离）。本模块补配置层：
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Optional, Type
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from neurova.agent.gates import (
     DoomLoopGate,
     IterationGate,
     StopGate,
     TokenBudgetGate,
+)
+# 死循环门三键的合法域取配置单源的常量，不在本档重打数字（重打的那份一旦与单源不一致，
+# 声明式编出来的门与装配点门就按两种语义判重复，两边测试各自都绿）
+from neurova.security.agent_limits_settings import (
+    MAX_DOOM_LOOP_INTERRUPTS,
+    MAX_DOOM_LOOP_SIMILARITY,
+    MAX_DOOM_LOOP_WINDOW,
+    MIN_DOOM_LOOP_INTERRUPTS,
+    MIN_DOOM_LOOP_SIMILARITY,
+    MIN_DOOM_LOOP_WINDOW,
 )
 from neurova.core.logger import get_logger
 
@@ -44,10 +54,22 @@ class TokenBudgetParams(BaseModel):
 
 
 class DoomLoopParams(BaseModel):
+    """死循环门的声明式参数。三键全部**可缺省**，缺省即由门自取配置单源的默认值。
+
+    为什么不在这里写默认数字：这道门的三个阈值在
+    `security/agent_limits_settings.DEFAULTS` 已有一份权威值，此处再抄一份就是第二份定义
+    ——而它一旦与单源不一致（本档曾把 `similarity_threshold` 抄成 0.95，而单源为
+    实装后的保守默认 1.0），声明式配置编出来的门与 `_buildGateRunner` 装配出来的门
+    就会按两种语义判重复，两边各自测试都绿。合法域取单源的 MIN/MAX 常量。
+    """
+
     model_config = ConfigDict(extra="forbid")
-    window_size: int = 4
-    similarity_threshold: float = 0.95
-    max_interrupts: int = 2
+    window_size: Optional[int] = Field(
+        default=None, ge=MIN_DOOM_LOOP_WINDOW, le=MAX_DOOM_LOOP_WINDOW)
+    similarity_threshold: Optional[float] = Field(
+        default=None, gt=MIN_DOOM_LOOP_SIMILARITY - 1e-9, le=MAX_DOOM_LOOP_SIMILARITY)
+    max_interrupts: Optional[int] = Field(
+        default=None, ge=MIN_DOOM_LOOP_INTERRUPTS, le=MAX_DOOM_LOOP_INTERRUPTS)
 
 
 class _GateSpec:
