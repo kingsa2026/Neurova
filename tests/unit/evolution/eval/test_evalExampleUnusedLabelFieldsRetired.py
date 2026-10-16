@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,24 @@ def _callSitesAsEvalExampleKeywords(py: Path) -> list[str]:
     return hits
 
 
+def _trackedScanFace(scanRoots: tuple[str, ...]) -> list[Path]:
+    """构造点扫描的取数面＝**跟踪集**（`git ls-files`），不是工作树目录 glob。
+
+    为什么改：常驻格按工作树 glob 取数时，并发会话半写的未跟踪文件会被读成我的回归
+    （形态集第 199 条），而这一格比那更糟——它 `ast.parse` 未跟踪的坏档直接抛
+    `SyntaxError`，红报在我的档上、真 offender 在别人的在途档里，读的人会被送错地方。
+    能进 CI 的文件都必然先被跟踪，因此收口到跟踪集**不丢任何真命中点**；
+    未跟踪的在途档自有它的收集错误来报，不该由本档代报。
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", *scanRoots],
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, encoding="utf-8",
+    )
+    assert listed.returncode == 0, f"git ls-files 失败：{listed.stderr}"
+    return [PROJECT_ROOT / rel for rel in sorted(listed.stdout.split("\0"))
+            if rel.endswith(".py")]
+
+
 class TestEvalExampleUnusedLabelFieldsRetired:
     """两个标签字段的表示面、传输面、写侧、构造点四档一并归零。"""
 
@@ -102,15 +121,15 @@ class TestEvalExampleUnusedLabelFieldsRetired:
             )
 
     def testD_noCallSitePassesRetiredKeywords(self):
-        scan_roots = (
-            PROJECT_ROOT / "neurova",
-            PROJECT_ROOT / "tests",
-            PROJECT_ROOT / "scripts",
-        )
+        scanRoots = ("neurova", "tests", "scripts")
         hits: list[str] = []
-        for root in scan_roots:
-            for py in sorted(root.rglob("*.py")):
+        broken: list[str] = []
+        for py in _trackedScanFace(scanRoots):
+            try:
                 hits.extend(_callSitesAsEvalExampleKeywords(py))
+            except SyntaxError as e:
+                broken.append(f"{py.relative_to(PROJECT_ROOT)}: {e}")
+        assert broken == [], "跟踪集里有 AST 解析不了的文件，本档的构造点扫描对它看不见：" + broken
         assert hits == [], "EvalExample(...) 构造点仍传退役关键字：" + "; ".join(hits)
 
     def testE_scanSurfaceHasNotShrunk(self):
