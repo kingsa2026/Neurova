@@ -27,6 +27,8 @@ import pathlib
 
 import pytest
 
+from tests import ast_scan
+
 #: 本档在 `tests/unit/benchmark/` 下 ⇒ 仓根是 parents[3]（写成一层的 [2] 会得到 `tests/neurova/…`，
 #: 三格全撞 FileNotFoundError——那是装配噪声，不是一条红判据）。
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -45,11 +47,17 @@ RETIRED_NAMES = frozenset({
 })
 
 
-def _trackedFiles(suffix: str) -> list:
-    import subprocess
+def _trackedPyFiles() -> list:
+    """全仓跟踪的 `.py` 清单——取数**只走 `tests/ast_scan.py` 那一个口**（§6-234 收的口）。
 
-    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout
-    return [p for p in out.splitlines() if p.endswith(suffix)]
+    这里原本自己抄了一份 `subprocess.run(["git","ls-files"], text=True)`，它是 §6-234 那道收口
+    之后**又长出来的一处手抄**（单源守卫现读 offender＝1），被两道常驻门禁同时点名：文本模式没写
+    `encoding`（本机首选码是 **cp936**，操作者一旦设 `core.quotepath=false`，git 吐的就是裸
+    UTF-8 字节，那份解法当场 `UnicodeDecodeError`），而"整棵树只准一处枚举"那条守卫要的是
+    **改指单点**，不是把手抄修好——修好手抄只解掉编码那道红，第二份口径照旧各定各的解码、
+    各查各的退出码（教义第 6 条）。
+    """
+    return ast_scan.trackedPyPaths()
 
 
 def test_benchmarkFacadeHoldsNoImplementation():
@@ -95,13 +103,14 @@ def _codeReferences(text: str) -> set:
 def test_noOneAnyMoreNamesTheRetiredSurface():
     """主红②：退役名字在全仓（生产＋测试）都不许再被**代码引用**——留一处就是留一条指向空气的引用。
 
-    扫描面用 `git ls-files` 而不是 `rglob`：只认跟踪件，工作树里别人的在途新档不该由我判红。
+    扫描面只认**跟踪件**（工作树里别人的在途新档不该由我判红），取数走 `ast_scan.trackedPyPaths()`
+    单点——不自己抄 `git ls-files`，理由写在 `_trackedPyFiles()` 里。
     两处**必须**排除且理由不同：本哨兵档（它按定义就得写出那些名字）、
     被退役的门面 `__init__.py`（它留的是"这里曾经是什么"的分子说明，属文档不是引用）。
     """
     selfPath = pathlib.Path(__file__).resolve()
     offenders = []
-    for rel in _trackedFiles(".py"):
+    for rel in _trackedPyFiles():
         path = (REPO_ROOT / rel).resolve()
         if path == BENCH_INIT or path == selfPath or not path.exists():
             continue
