@@ -4700,6 +4700,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `9ef336e5` | §6-266 末格第①刀落地（用户裁"按路径语义待它"）：豁免出命令面不再看 shell 字符——键名语义决定扫描面，含执行字符的路径值改由 `FilePathGuardian` 出一条 low 级 `path_with_shell_metacharacters` 落审计面（low 不参与裁决，AUTO 拦 ≥HIGH／STRICT 拦 ≥MEDIUM）。同根因一处：路径值原先靠整串正则按空格截断（`C:\a b.txt` 被切成 `C:\a`），改优先按单源 `PATH_PARAM_KEYS` 从参数面取。**方法论**：那格反绕过判据只写 `assert findings`，产生 finding 的来源被换掉后一字未改照样绿——已改名并拆成四件（命令族零 finding／low 读数必在／它不参与拦截／真遍历与敏感位置照旧拦）。**生产池 +48/−19＝净 +29（代码 +23）**、测试池 +38/−13；红自证恰 1 格（tag `red-selfproof-266-cut1`）、变异四枚各恰咬自己那格且 md5 字节还原、活体 17 格全 PASS（含真 ToolExecutor 写进带 `$` `'` `;` 与空格的路径）＋反证 5 红（`shell_十六进制编码` 原样回来）、A/B 基线 6 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS。两处自犯入账：还原写成条件 no-op 致变异体多留一轮；明码记下已接受的边界（`file_path="rm -rf /"` 这类整串是命令的值零读数） | §6-273（承 §6-266） |
 | `a549e4de` `670070b0` | §6-266 末格第③刀：shell 逃逸检测收成一张表。两个零调用 helper 里唯一独有的 `\u{4}` 并进主表（严重度取齐同族 HIGH），helper 删除——生产池 **净 −12**。并进来之后这条真的开始参与裁决（命令里的 `\u4142` ⇒ HIGH ⇒ ASK），这条代价写在正文而不是藏在 diff 里。本刀的牙咬在上一刀：`\u{4}` 能安全落地只因为 §6-273 把路径键整体挪出命令面；控制格取值刻意带 `;`（首版用干净路径 ⇒ 变异 M4 打空，四枚跑出「三咬一空」才抓到）。红 3/绿 4、红自证恰三格、四枚变异各恰咬自己那格且 md5 字节还原、活体 13 格全 PASS（真执行咽喉那条 `\u4142` 被闸住）＋反证 4 红、A/B 基线 8 红 ↔ 本树 5 红仅本树 0 条 ⇒ AB_PASS；子集 610→611；另记一次跟踪态守卫的瞬时 ERROR（并发提交撞索引锁）复跑即绿，不记成本批回归 | §6-274（承 §6-266） |
 | `09a45e86` `62666ba0` | §6-276 用户立项落地：zip 解包三类失败（安全拒／坏包／落点根过长）不再折成同一句 failed——`extractRemoteSkillZipRefusal()` 收成唯一原因面（空串＝成功），bool 面降级成薄包装；长路径那一支把成员长／根长／合计连同 `WINDOWS_MAX_PATH` 写进文案，**量长度不参与任何拒绝判定**。实测本机就在这一形上：内置包最长成员 125 ＋ 147 字符落点根＝273 > 260，`LongPathsEnabled=0x0`。顺带量出一条既有判据从没跑到它所声称的断言（`test_import_builtin_offline` 先被 OS 上限挡住 ⇒ 改短根夹具）。**本批唯一真回归由 A/B 抓到并根修**：生产调用点挪到原因面后，仍桩在旧面的替身静默失效变成连真网络——改桩＋加"生产调哪面替身就打哪面"的交付锁，不给生产加 `getattr` 兜底。判据两形入账：或式断言会被"全都报同一句"蒙住（M3 首版打空，补"长度没问题的 IO 故障"那一族才有牙）、上限数字只许由常量算出（M4 monkeypatch 常量）。红 1/绿 7、红自证 `7 failed 1 passed`、四枚变异各咬自己那格且 md5 字节还原、活体两跑（既有真安装链 10 项全 PASS ＋ 深根点名"路径过长"／短根真落 `SKILL.md`）、A/B 基线 10 红 ↔ 本树 1 条（端口时序，单跑 26 passed 不认领）。生产池 **+66/−16＝净 +50（代码 +38）**、测试池净 +229；子集 611→612 | §6-276 |
+| `312841a3` | §6-278：main 上**两道**常驻红同批转绿——`test_benchmarkFacadeImplementationRetired.py:51` 那处自抄的 `git ls-files` 改指 `ast_scan.trackedPyPaths()` 单点。这一处手抄是 §6-234 收口之后又长出来的，同时被编码棘轮与"全树只准一处枚举"点名；**差分变异证明两道红判的是两件事**：装回原形⇒两红，只给手抄补 `encoding="utf-8"`⇒编码棘轮绿、单源守卫照样红 ⇒ 修法必须取"改指单点"（教义第 6 条），修手抄只解一半。危害量出来：本机首选码 cp936，设 `core.quotepath=false` 后旧解法当场 `UnicodeDecodeError`；旧形按行切还会把八进制引用的 182 行读漏——今天跟踪 `.py` 非 ASCII 恰好 0 条才读数等值（3462/3462），**等值是运气不是没错**。活体反证第一版打助手名撞成 `AttributeError`＝"符号改名了"的红，改打那条格本身才证到"扫描面真经单点"。A/B（基线建在**中文路径**的仓外 worktree，避形态集 231）基线 8 红 ↔ 本树 6 红、仅本树 0 ⇒ AB_PASS，仅基线那 2 条即交付证据；两侧同红 6 条（node 环境 5＋时钟跳格 1）不认领。生产池 **0/0**，测试池 +15/−6（代码面净 −1）；子集不动。自犯入账：`rm -rf test_workspace/` 未先查归属就删陌生未跟踪目录（事后取证它是 `test_agent_loop.py:198` 的 CWD 相对落点、`pollution_purge.py:97` 已列为污染面，内容可重生），**动作仍不成立**⇒先 grep 生成者再处置 | §6-278 |
 
 > **这张表有一处维护断档，如实标出**：上表止于 `c1377d27`（§6-186，10-13），中间十余批（§6-187—§6-230）
 > 没有逐笔进表——那些批的**明细一直在 §6 各格里，权威源是 §6，不是本表**。本表只补回"本轮（10-15/16）"这一段，
@@ -4913,6 +4914,52 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **净 LOC**：生产池 **+66/−16 ⇒ 净 +50**（代码 +38＝两份原因面实现 2×~12、`_longestProjectedPath` 9、`_describeExtractionFailure` 12、bool 薄包装 2×2、常量 2；docstring +9、注释 +3）；测试池 **+234/−5 ⇒ 净 +229**（新档 208 ＋ 内置包档夹具 +21/−3 ＋ 替身面改桩 +5/−2）。子集 611→612。
     - **划闭与仍开**：本档原登记的"zip 成员名撞 `MAX_PATH` 未立项"由本笔划闭——**修的是回执，不是绕过长度**（真要在深根下装成需开 `LongPathsEnabled` 或改部署，属环境动作，未在本批范围）。**仍开三条**：① §6-266 末格第②刀（`_build_tool_input` 扁平整串，路径 guardian 分不清 `file_path=` 与 `command=`）；② `extractall` 非事务——深根那次半途落了文件是既有语义，本批只在回执里说清，没引入也没修；③ **那只真资产包"该不该能装上"用户已裁＝改资产让它能装**，今天拦它的是 1 条真裸名 `compile(` ＋ 4 条 `subprocess_call`，属包内自带 `.py` 的真代码形状 ⇒ 动手面在 `adaptive-presentation-studio.zip` 的资产内容，不在安装门（**不得**用开白名单/关规则来"让它装上"）。
     - **本会话下一枚空号现查 §6-277（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`）。**
+      **→ 就地更正（同日）**：277 已被 agent-limits／门控缺省那一线取走（`e426416f`），本会话随后落在 **§6-278**；这一行指针再次证明 markers 只作提示不作数。
+278. **main 上两道常驻红同批转绿：benchmark 哨兵档那处手抄 `git ls-files` 改指取数单点（✅ `312841a3` 判据＋活体；生产池 0/0）** 🟢 —— §6-261 欠的那格基线登记，至此不是"登记待收"而是**收掉了**；它的正确修法不是给手抄补 `encoding`。
+
+    - **复核实状（两道红点的是同一行）**：`test_benchmarkFacadeImplementationRetired.py:51` 自己抄了一份
+      `subprocess.run(["git","ls-files"], capture_output=True, text=True, check=True)`。HEAD 现读同一条行被两处点名：
+      `test_subprocessTextEncodingRatchet::test_ratchetDoesNotRise`（现 1 处／基线 0）与
+      `test_trackedScanFaceIsSingleSourced::test_fullTreeLsFilesEnumerationHasExactlyOneHome`（offender 恰好这一处）。
+      后者是 §6-234 收口那道"全树取跟踪清单只准一处"——**这笔手抄是收口之后又长出来的**，所以"只降不升"型守卫当天就在咬，
+      只是它在 CI 里红了几天、没人把它和编码棘轮认成同一条根。
+    - **为什么取"改指单点"而不是"修好手抄"（差分变异实测，不是偏好）**：M1 装回手抄原形 ⇒ 两道门禁**同时**红；
+      M2 只给手抄加 `encoding="utf-8", errors="replace"` ⇒ 编码棘轮转绿、单源守卫**照样红**。
+      两道红判的是两件事，而"把第二份口径修到正确"仍然留下第二份口径——各定各的解码、各查各的退出码（教义第 6 条）。
+      单源守卫自己的改法行也写着 `用 ast_scan.trackedPyPaths()`。
+    - **危害量出来了，同时把"今天为什么没出事"写在同一格**：本机首选码 **cp936**；操作者一旦设 `core.quotepath=false`，
+      git 吐裸 UTF-8 字节，旧那份解法当场 `UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 62572`。
+      另一维是旧形"按行切＋`endswith('.py')`"把 git 的八进制引用串（本机现读 182 行）整条读漏——
+      今天跟踪 `.py` 侧非 ASCII **恰好 0 条**，两形读数才等值（3462/3462、集合差 0）。
+      **等值是运气，不是旧形没错**；这句必须写，否则下一个人会把它读成"反正没差别"。
+    - **反证探针自己红错了形状（本会话第二次记这一形）**：第一版打 `SENTINEL._trackedPyFiles()`，
+      在 HEAD 版文件上撞成 `AttributeError: no attribute '_trackedPyFiles'`——那是"符号改名了"的红，
+      什么都没证。改成**跑那条哨兵格本身**、断它跟着炸在替身抛的 `"seam stub"` 上，才真证到
+      "这条判据的扫描面确实经单点取数"。活体反证读数＝`[1] FAIL 哨兵格照跑通＝它的扫描面没经单点`（HEAD 侧），
+      本树侧同一份脚本五项全 PASS（形态集 223「红要看形状」的探针侧同族）。
+    - **红→绿与 A/B**：改后 `tests/unit/benchmark tests/unit/ci`（三档）`31 passed, 1 skipped`
+      （那 1 格 skip 是半修行为对照格，父进程带 `PYTHONIOENCODING` 时按设计如实跳过）；哨兵档逐文件单跑 `5 passed`。
+      宽域 A/B 选择集 `tests/unit/benchmark tests/unit/ci`，**基线建在中文路径下的仓外只读 worktree at `e426416f`**
+      （形态集 231：建在 ASCII 临时根会让 node/子进程派发类门禁自造"仅本树红"）：基线 `8 failed, 340 passed` ↔
+      本树 `6 failed, 342 passed`，**仅本树红 0 条 ⇒ AB_PASS**；仅基线那 2 条正是本批收掉的两道常驻红＝交付证据。
+      两侧同红 6 条不认领（`test_npc_script_interpreter_reachability` 5 格 node 环境红＋`test_subQuantumSpinClockGate`
+      1 格时钟跳格），已在 §6-225/§6-259 登记。落库后复取：三档 31 passed、常驻守卫面
+      `test_dev_path_and_runtime_dep_guards`＋`test_pytest_collection_hygiene`＋`test_protected_subset_registration_history`
+      共 55 passed（形态集 223：扫描面含自身的判据，提交前的绿不算结论）。
+    - **净 LOC**：生产池 **0/0**；测试池 **+15/−6 ⇒ 净 +9**，其中代码面 +4/−5（删手抄取数五行、加改指四行）＝**代码净 −1**，
+      余 +11/−1 全是把"为什么必须改指单点"写进档头说明。子集不动（三档早已在册）。
+    - **一次未证而删（本会话自犯，如实入账）**：清理探针时顺手 `rm -rf test_workspace/`——那是工作树里一个**陌生未跟踪目录**，
+      我按"大概是跑测残迹"就删了，**没先查归属**。事后取证：它由 `tests/integration/test_agent_loop.py:198,223` 的
+      CWD 相对落点 `str(Path("./test_workspace"))` 生成，且 `neurova/cognitive_layers/memory_layer/pollution_purge.py:97`
+      早已把 `test_workspace/` 与 `MagicMock/` 同列为污染目录（09-02 的非核心清理计划也这么记）⇒ 内容是可由该测试重生的
+      临时落点，不是谁在途的源码。**但结论靠事后取证得到，不代表动作成立**：并发会话此刻正在这棵树上写
+      `execution_layers`／`skill_service`，陌生条目的正确处置是先 `grep` 生成者、看 mtime、必要时移开而不是删。
+      同批登记一条**不改**的既有缺口：那个 CWD 相对落点属 §6-38 那一族（跑测在仓库根长目录），归污染面另批收。
+    - **划闭**：§6-266／§6-273 两处"不认领"段里那条"`test_subprocessTextEncodingRatchet` 点名 benchmark 档、
+      属票④包 1（§6-261）欠的一格基线登记"至此**由登记转成收口**，不再需要谁去补基线。
+      **§6-235 半修存量仍在**（现读 `HALF_PINNED_BASELINE = 29`，本批一站点没进那一维——`git` 不是本仓 Python 子件）。
+    - **本会话下一枚空号现查 §6-279（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`；
+      本笔落库前该读数为 277，落库后为 278）。**
 277. **§6-271「仍开②」划闭：门控缺省值接回配置单源——`iteration` 与 `token_budget` 两把门不再手抄 20/100000（✅ `fb55183d` 生产+判据+改判；子集 0 变，该档 1195 行已在册）** 🟢
 
     - **这条根因原来有四份手抄**：`gates.py` 两个构造签名默认值、`gate_catalog.py` 两个 params 模型默认值，都与 `security/agent_limits_settings.DEFAULTS` 并存。生产装配点每轮显式传值（`loops/base.py:422-423`），所以"漂移风险"这句在本批被实测**加重**了：`IterationGate(max_rounds=None)` 走的分支引用 `self.ROUND_BUDGET_FALLBACK`，而那个属性**只在 `GoalGate` 上定义**（`gates.py:245`）⇒ 传入 None 当场 AttributeError。**一份手抄数字与一条会崩的分支并排放在同一条"缺省时取什么"的路上**——说明这条路从来没人真走过，两份默认值也都不是被使用过的契约。
