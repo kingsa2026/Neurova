@@ -120,16 +120,30 @@ class TestDocSamplesStopDenying:
                                     category="code_execution", file_path="pkg/SKILL.md")) is False
 
     def testRealAssetBundleShowsTheExemptionAppliedButStillBlocksOnItsOwnPython(self, tmp_path):
-        """真产物读数（这条同时纠正本批动手前我报给仓主的一句错判）。
+        """真产物读数**逐条读证据行按形状分类**（§6-259 末格「读数面仍欠的一刀」落在这里）。
 
-        我先说「presentation-studio 只因 .md/JSON 里的 `../` 被误拦，甲落地后即恢复可装」——
-        解出真 zip 逐条按 (后缀, 规则) 量过才发现不是：它的 62 条命中里 31 条落在**自带 .py**
-        （27×dangerous_exec + 4×subprocess_call），属真代码形状，按裁定甲照旧参与 DENY。
-        所以本批对它的实际效果是：文档侧那批命中降为报告项（豁免确实生效），而它仍然装不上——
-        要不要给第一方资产开白名单/改资产，是**另一次裁定**，不在本批顺手做。
+        这格的前身只按 (后缀, 规则 id) 计数，于是它分不清"27 条正则预编译"与"1 条真动态编译"——
+        两种形态给同一个绿（§6-250 的根因正是那条 pattern 把 `re.compile(` 算成 critical）。
+        现在钉四件事，少一件都算没升级：
+        ① 每条 `dangerous_exec` 读数都必须能被**生产规则本体**在它自己的证据行上复算出来
+           （读数与证据不符＝规则改了而读数没改，或 evidence 字段被截断）；
+        ② 属性调用形（`X.compile(`）在**参与裁决的集合**里必须为 0 条——这是放行面那档
+           （`testRegexPrecompileIsNotCodeExecution`）没覆盖的一半：它看的是扫描器对象面，
+           本档看的是装载门真正发给调用方的那份 dict。形状判定由 `tests/execShapes.py` 按
+           **AST** 判（`Call.func` 是 `Name` 还是 `Attribute`），刻意不看被测规则的 pattern：
+           拿规则自己分类规则产生的读数，规则一改宽误判就被认成"真形态"，判据与被判对象共享
+           同一个偏见，等于没判；
+        ③ 真裸名动态编译那条读数必须还在（现读 1 条：`scripts/package_check.py` 的 `compile(`），
+           不许用"把真信号也关掉"来凑 ②；
+        ④ 文档侧命中仍在报告面里（降级不删读数，批 37 的口径）。
+        前提（门这台装配走 DENY）也钉住：口径变了这格先红，不让它跟着默认值漂。
         """
         import neurova.security.safe_archive as SA
         from pathlib import PurePosixPath
+
+        from neurova.security.skill_scanner import ScanPolicy
+        from neurova.skills.skill_install_gate import _get_scanner
+        from tests import execShapes
 
         payload = read_builtin_bundle("adaptive-presentation-studio.zip")
         assert payload, "包内资产缺失——本格失去根据，先去补齐资产而不是关掉判据"
@@ -137,20 +151,53 @@ class TestDocSamplesStopDenying:
         dest.mkdir(parents=True)
         SA.safe_extract_zip(payload, dest)
 
+        gateScanner = _get_scanner()
+        assert gateScanner.policy is ScanPolicy.DENY, (
+            f"装载门的裁决策略不再是 DENY（实得 {gateScanner.policy}）——本格的形状判据要跟着改，"
+            "不许沿用默认值")
+        rule = execShapes.execRule(gateScanner)
+
         scan = scan_skill_for_install("builtin--adaptive-presentation-studio", str(dest))
         findings = scan.get("findings") or []
         docSide = [f for f in findings
                    if PurePosixPath(str(f.get("file_path") or "")).suffix.lower()
                    in {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini"}]
-        pyExec = [f for f in findings
-                  if str(f.get("file_path") or "").endswith(".py")
-                  and f.get("rule_id") in {"dangerous_exec", "subprocess_call"}]
 
         assert docSide, "这只包里没有文档侧命中——本格的根据变了，去重量而不是改断言"
         assert all(f.get("category") for f in findings), (
             "命中项没带规则族 ⇒ 豁免判定在读什么？（口径必须可核对）")
-        assert pyExec and scan.get("blocked") is True, (
-            f"自带 .py 的 exec/subprocess 不再拦了（阻断={len(pyExec)}）——豁免越界到了代码面")
+
+        execReadings = execShapes.execReadings(findings)
+        assert execReadings, "真产物上一个 dangerous_exec 读数都没有——根据变了，去查规则表"
+        ghost = execShapes.unReproducible(execReadings, rule)
+        assert not ghost, (
+            f"{len(ghost)} 条读数在自己的证据行上复算不出来"
+            f"（例 {[(f.get('file_path'), f.get('evidence')) for f in ghost[:2]]}）"
+            "⇒ 裁决与证据已经脱节，这种绿不能要")
+
+        buckets = execShapes.shapesOf(findings)
+        assert not buckets.get("attribute"), (
+            f"{len(buckets.get('attribute') or [])} 条属性调用被算成危险执行读数"
+            f"（§6-250 那 26 条正则预编译的同形）："
+            f"{[(f.get('file_path'), f.get('evidence')) for f in (buckets.get('attribute') or [])[:2]]}")
+        bare = buckets.get("bare") or []
+        assert len(bare) == 1, (
+            f"真裸名动态编译读数现读 {len(bare)} 条（应为 1 条 package_check.py 的 compile(）："
+            f"{[(f.get('file_path'), f.get('evidence')) for f in bare][:3]}——"
+            "多了就是真信号变多了（去读证据行），少了就是这条读数连证据行都不认了")
+
+        blockingExec = [f for f in execShapes.blockingFromPayloads(findings)
+                        if f.rule_id == "dangerous_exec"]
+        attributeish = [f for f in blockingExec if execShapes.isAttributeOnly(f.evidence)]
+        assert not attributeish, (
+            f"{len(attributeish)} 条属性调用进了 DENY 读数集"
+            f"（例 {[(f.file_path, f.evidence) for f in attributeish[:2]]}）"
+            "⇒ 装载门会把正则预编译当拒因念给调用方（§6-250 的根因就此复发）")
+        assert {str(f.evidence) for f in blockingExec} == {str(f["evidence"]) for f in bare}, (
+            f"参与裁决的 exec 集合与证据行分类不一致：blocking={blockingExec} bare={bare}")
+        assert scan.get("blocked") is True, (
+            f"自带 .py 的真动态编译不再拦了（阻断集={[f.rule_id for f in blockingExec]}）"
+            "——豁免越界到了代码面")
 
 
 class TestCaliberIsSingleSource:
