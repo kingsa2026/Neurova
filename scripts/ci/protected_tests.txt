@@ -3248,3 +3248,12 @@ tests/unit/skills/test_callSkillThroatIsAwaitable.py
 # ——本批不改裁决，动裁决（扩表/缩表/回落截断）要先过下一拍的丁/甲。
 # 单跑读数：本档 19 passed（7.3s）。
 tests/unit/security/test_pathNameListsDerivedFromOneTable.py
+# 批 63（§6-280 甲·第②批）：执行咽喉先问代码映射表再回落盘——读面 available 与咽喉跑出必须同向。
+# 四格是本批的形状钉，别当装饰删：① 注册面 `_build_executable_skill` 必须是**第三条**同表读路
+# （本批真犯过"收口收到一半"：表改成 id→工厂后只改了构造那处，web-search 在注册面静默降级成裸壳，
+# 是既有判据抓出来的，N2 那枚变异就是它）；② 映射腿在执行体回调本服务时必须**出了锁再 await**
+# （shared_lock 按目录共享，主线程持锁 await＝工作线程等锁 ⇒ 当场死锁；该格自带 8s 限时，红成 FAILED 行）；
+# ③ 未钉的条目跑完仍不许有摘要、已钉的不许变（映射型完整性归代码本体，不是"摘要缺失所以放行"）；
+# ④ 四格对照——同形不在册照旧拒／停用闸不被绕过／账本外不凭空造技能／method 参数如实拒。
+# 单跑读数：本档 16 passed（7.3s）。
+tests/unit/skills/test_throatRecognizesExecutorMapping.py
