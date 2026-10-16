@@ -32,23 +32,55 @@ from neurova.skills.skill_service import SkillService
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _guardedPinKeys(tree):
+    """被"落盘确有构件"那条谓词挡住的钉摘要赋值，按账本键名收（`self._skills[<key>][DIGEST_FIELD] = …`）。
+
+    §6-289 第①条改判了本档的口径：装侧过去**无条件**钉，空壳也被钉成构件权威；现在
+    `install_skill` 两个写账本口都写成 `if self._hasArtifactBytes(dir): 钉`。
+    "凡落盘条目必钉"因此不再等于"字面量里必须有那个键"——认不出这一形的守卫会把正确写法报成漏钉，
+    而那种误报历史上正是让人关掉守卫的起点（本档头上那段两种键写法都要认，同一族）。
+    """
+    keys = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        guarded = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "_hasArtifactBytes" for n in ast.walk(node.test))
+        if not guarded:
+            continue
+        for stmt in ast.walk(node):
+            if not isinstance(stmt, ast.Assign) or not isinstance(stmt.targets[0], ast.Subscript):
+                continue
+            outer = stmt.targets[0]
+            inner = outer.value
+            if (isinstance(inner, ast.Subscript) and isinstance(inner.value, ast.Attribute)
+                    and inner.value.attr == "_skills"
+                    and isinstance(outer.slice, ast.Attribute) and outer.slice.attr == "DIGEST_FIELD"):
+                keys.add(ast.unparse(inner.slice))
+    return keys
+
+
 def _ledgerEntryDicts(source: str):
     """枚举 `self._skills[<id>] = {…}` 这类账本条目创建点，读出它是落盘条目还是空路径条目。
 
     键的写法两种都要认：字面量 `"artifact_digest"` 与常量引用 `artifact_digest.DIGEST_FIELD`
     ——只认字面量的探测器会把"用了常量"这份**正确**写法报成没钉，那种误报会让人把守卫关掉。
     """
+    tree = ast.parse(source)
+    guardedKeys = _guardedPinKeys(tree)
     out = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
             continue
         targetIsLedger = False
+        entryKey = None
         for target in node.targets:
             sub = target
             if (isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Attribute)
                     and isinstance(sub.value.value, ast.Name)
                     and sub.value.value.id == "self" and sub.value.attr == "_skills"):
                 targetIsLedger = True
+                entryKey = ast.unparse(sub.slice)
         if not targetIsLedger:
             continue
         pathIsConstantBlank = False
@@ -65,7 +97,8 @@ def _ledgerEntryDicts(source: str):
             hasDigestKey = hasDigestKey or isDigestKey
         out.append({"line": node.lineno,
                     "diskBacked": hasPath and not pathIsConstantBlank,
-                    "hasDigestKey": hasDigestKey})
+                    "hasDigestKey": hasDigestKey,
+                    "pinnedByGuard": entryKey in guardedKeys})
     return out
 
 CLEAN_MD = "# helper\n\n把日期格式化为 ISO 标准格式的技能说明。\n"
@@ -263,10 +296,38 @@ class TestDigestCaliberIsSingleSource:
         src = (REPO_ROOT / "neurova/skills/skill_service.py").read_text(encoding="utf-8")
         entries = _ledgerEntryDicts(src)
         assert len(entries) >= 2, f"账本条目创建点数少于已知值：{entries}"
-        unpinned = [e for e in entries if e["diskBacked"] and not e["hasDigestKey"]]
+        unpinned = [e for e in entries
+                    if e["diskBacked"] and not (e["hasDigestKey"] or e["pinnedByGuard"])]
         assert not unpinned, (
-            f"这些落盘条目创建时没钉摘要：{[e['line'] for e in unpinned]}——"
+            f"这些落盘条目创建时没钉摘要也没走那条守卫：{[e['line'] for e in unpinned]}——"
             "从这条旁路进来的构件从此只有 TOFU 兜底，门当时看到的字节没有留底")
+
+    def test_guarded_pin_form_is_recognised_not_waved_through(self):
+        """改判口径自己要有牙：认的是"被那条谓词挡住的钉"，不是"只要有个 if 就算钉"。
+
+        两半必须反向：同一份带守卫的写法要被判成**已钉**（否则本批改判后一处也过不了），
+        而把守卫摘掉、只留一条无条件之外的空 if，要仍然被判成**漏钉**（否则这条改判
+        就是把守卫改成了橡皮章）。
+        """
+        guarded = (
+            "class S:\n"
+            "    def install(self):\n"
+            "        self._skills[skill_id] = {'id': 'x', 'path': str(d)}\n"
+            "        if self._hasArtifactBytes(d):\n"
+            "            self._skills[skill_id][artifact_digest.DIGEST_FIELD] = artifact_digest.digestDir(d)\n")
+        # 同一份代码，只把守卫摘掉（钉赋值仍在，但不再由那条谓词挡着）——这才叫落在分歧点上。
+        unguarded = (
+            "class S:\n"
+            "    def install(self):\n"
+            "        self._skills[skill_id] = {'id': 'x', 'path': str(d)}\n"
+            "        if d.exists():\n"
+            "            self._skills[skill_id][artifact_digest.DIGEST_FIELD] = artifact_digest.digestDir(d)\n")
+
+        assert _ledgerEntryDicts(guarded)[0]["pinnedByGuard"] is True, (
+            "带守卫的钉没被认出来——本批改判后，正确写法会被自己的守卫报成漏钉")
+        found = _ledgerEntryDicts(unguarded)
+        assert found[0]["pinnedByGuard"] is False and not found[0]["hasDigestKey"], (
+            "摘掉守卫也算钉好了？那这条改判就成了橡皮章")
 
     def test_detector_hits_a_revived_unpinned_writer(self):
         """反空转：把摘除掉的写法喂给探测器，必须被认成"没钉"。"""
