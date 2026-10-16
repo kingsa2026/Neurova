@@ -166,3 +166,110 @@ class TestNoSecondDefinitionOfTheWhitelist:
         names = {f.name for f in dataclassFields(EvolutionSettings)}
         extra = set(text_api.SettingsPatch.model_fields) - names
         assert not extra, f"进化设置 PUT 模型里有单源不认的键：{sorted(extra)}"
+
+
+#: 键 → 夹紧常量的**名字**（不是值）。按名字 monkeypatch 才判得出"读数是从常量取的"
+#: 还是"在函数体里重打了一遍数字"——后者与常量当前恰好相等，按值比永远看不出来。
+BOUND_CONST_NAMES = {
+    "token_budget": ("MIN_TOKEN_BUDGET", "MAX_TOKEN_BUDGET"),
+    "max_loop_rounds": ("MIN_ROUNDS", "MAX_ROUNDS"),
+    "goal_max_continuations": ("MIN_GOAL_CONTINUATIONS", "MAX_GOAL_CONTINUATIONS"),
+    "goal_round_budget": ("MIN_GOAL_ROUND_BUDGET", "MAX_GOAL_ROUND_BUDGET"),
+    "max_subagent_depth": ("MIN_SUBAGENT_DEPTH", "MAX_SUBAGENT_DEPTH_LIMIT"),
+    "max_parallel_tools": ("MIN_PARALLEL_TOOLS", "MAX_PARALLEL_TOOLS"),
+    "doom_loop_window_size": ("MIN_DOOM_LOOP_WINDOW", "MAX_DOOM_LOOP_WINDOW"),
+    "doom_loop_max_interrupts": ("MIN_DOOM_LOOP_INTERRUPTS", "MAX_DOOM_LOOP_INTERRUPTS"),
+    "doom_loop_similarity_threshold": ("MIN_DOOM_LOOP_SIMILARITY", "MAX_DOOM_LOOP_SIMILARITY"),
+}
+
+
+class TestDomainsArePublishedForThePanel:
+    """PUT 面补齐之后剩下的那一半：**面板能调哪些键、每键能填到多少**也由单源出街。
+
+    成因不是猜的：`SettingPage.vue` 的合法域写的是 `:min="1000" :max="10000000"` 这类字面量，
+    而夹紧常量在 `agent_limits_settings.py`——改一处另一处静默不动，正是本档第③条要防的
+    "两边各写一份数字"，只不过第二份写进了模板而不是模型。把这层区间收成一处并由 GET 带出，
+    前端才可能既盖住全量键、又不必重打数字。
+    """
+
+    def testDomainReadoutCoversExactlyTheSingleSourceKeys(self):
+        """双向：少一键＝面板少一旋钮，多一键＝UI 上有个存不下去的键（与②同形反方向）。"""
+        domains = limits_mod.get_limit_domains()
+        assert set(domains) == set(limits_mod.DEFAULTS), (
+            f"缺 {sorted(set(limits_mod.DEFAULTS) - set(domains))} / "
+            f"多 {sorted(set(domains) - set(limits_mod.DEFAULTS))}")
+
+    @pytest.mark.parametrize("key", sorted(BOUND_CONST_NAMES))
+    def testDomainNumbersTrackTheClampConstants(self, monkeypatch, key):
+        """把常量本身改掉，读数必须跟着动——这一格才是"没重打数字"的证据，按值比对不是。"""
+        loName, hiName = BOUND_CONST_NAMES[key]
+        monkeypatch.setattr(limits_mod, loName, 4242)
+        monkeypatch.setattr(limits_mod, hiName, 8484)
+        domain = limits_mod.get_limit_domains()[key]
+        assert (domain["min"], domain["max"]) == (4242, 8484), (
+            f"{key} 的合法域不跟着夹紧常量动（读到 {domain['min']}/{domain['max']}）"
+            "——它在别处又抄了一份数字，改常量时界面区间静默不动")
+
+    @pytest.mark.parametrize("key", sorted(BOUND_CONST_NAMES))
+    def testDomainBoundsEqualThePutModelBounds(self, key):
+        """三个面必须同一段区间：夹紧常量 ↔ PUT 模型 ge/le ↔ 出街读数。"""
+        modelBounds = _fieldBounds(gov_module.AgentLimitsUpdate, key)
+        domain = limits_mod.get_limit_domains()[key]
+        assert modelBounds == (domain["min"], domain["max"]), (
+            f"{key} 模型边界 {modelBounds} 与出街读数 {(domain['min'], domain['max'])} 不一致")
+
+    def testControlKindMatchesTheValueShapeInTheSingleSource(self):
+        """控件类型从 DEFAULTS 的值形状推，不在面板里按键名猜：布尔开关画成数字框、
+        浮点阈值画成整数框，都是"面板显示一份调不到的值"。"""
+        domains = limits_mod.get_limit_domains()
+        expectKind = {}
+        for key, value in limits_mod.DEFAULTS.items():
+            if isinstance(value, bool):
+                expectKind[key] = "bool"
+            elif isinstance(value, (int, float)) or key == "goal_round_budget":
+                expectKind[key] = "float" if key == "doom_loop_similarity_threshold" else "int"
+            else:
+                pytest.fail(f"DEFAULTS[{key!r}] 是 {type(value).__name__}，面板没有对应控件形态")
+        actual = {k: v["kind"] for k, v in domains.items()}
+        assert actual == expectKind, f"控件形态与单源值形状不符：{actual} != {expectKind}"
+
+    def testFollowSentinelIsPublishedAsFollowable(self):
+        """`goal_round_budget` 的 `None` 是"跟随 max_loop_rounds"哨兵——这条语义必须让面板看得见，
+        否则 UI 只能显示一个已解析的数字，管理员不知道自己不填时会取什么。"""
+        domain = limits_mod.get_limit_domains()["goal_round_budget"]
+        assert domain.get("follows") == "max_loop_rounds", domain
+
+    def testGetPublishesDomainsAlongsideValues(self, client):
+        body = client.get(f"{BASE}/agent-limits").json()
+        assert body.get("domains") == limits_mod.get_limit_domains(), (
+            "GET 没把合法域随读数一起带出（或带的不是同一处取的那份）")
+        assert set(body["data"]) == set(limits_mod.DEFAULTS)
+
+    def testPutAnswersWithTheSameDomainsTheGetGives(self, client):
+        """两面同源：PUT 回包只回值不区间，管理员改完看不到边界，下一次填错才被拒。
+
+        写这一格时先踩过一次无牙形态：`putBody.get("domains") == getBody.get("domains")`
+        在**两面都没这个键**时是 `None == None`，照样绿。所以先把 PUT 那面对比到单源，
+        再比两面——同源要由"两边都等于同一处读数"证，不能由"两边相等"证。
+        """
+        putBody = client.put(f"{BASE}/agent-limits", json={"max_parallel_tools": 3}).json()
+        getBody = client.get(f"{BASE}/agent-limits").json()
+        assert putBody.get("domains") == limits_mod.get_limit_domains(), (
+            "PUT 回包没带合法域，或带的不是 `get_limit_domains()` 那份")
+        assert putBody["domains"] == getBody["domains"]
+
+    @pytest.mark.parametrize("key", sorted(BOUND_CONST_NAMES))
+    def testEveryPublishedBoundIsActuallyAccepted(self, client, key):
+        """读数说能填到多少，服务端就得真收得下——两头各发一次合法端点，再各发一次越界。
+        这一格防的是"面板按读数放开、服务端按另一份区间拒绝"那种只显示不改的假旋钮。"""
+        domain = limits_mod.get_limit_domains()[key]
+        lo, hi = domain["min"], domain["max"]
+        cast = float if domain["kind"] == "float" else int
+        for value in (lo, hi):
+            resp = client.put(f"{BASE}/agent-limits", json={key: cast(value)})
+            assert resp.status_code == 200, f"{key}={value} 应为合法端点：{resp.text}"
+        step = 0.01 if domain["kind"] == "float" else 1
+        for bad in (cast(lo - step), cast(hi + step)):
+            assert client.put(f"{BASE}/agent-limits", json={key: bad}).status_code == 422, (
+                f"{key}={bad} 越界却被收下——出街读数比服务端区间宽")
+
