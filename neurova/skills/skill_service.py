@@ -1742,17 +1742,79 @@ class SkillService:
         return {"available": False,
                 "unavailableReason": "落盘无可执行构件（既无 SKILL.md 指令体，也无入口脚本）"}
 
+    def _mappedSkillTarget(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        """这一条是不是"代码映射型"——账本认识、已启用、且在映射表里，三条都成立才算。
+
+        返回 None 表示不归这条腿管，**包括**条目不认识／已停用：那些情形交回落盘那一支，
+        让原有的如实拒因（`Skill not found`／`Skill is disabled`）继续是唯一出处。
+        分流不许顺手造出第二套拒因（教义第 6 条）。
+        """
+        from neurova.skills.market_registry import hasExecutorMapping
+
+        with self._lock:
+            resolved = self.resolve_skill_alias(skill_id)
+            if self._entry(resolved) is None:
+                return None
+            info = self._skills[resolved]
+            if not info.get("enabled", True):
+                return None
+            if not hasExecutorMapping(resolved):
+                return None
+            return {"skill_id": resolved, "description": str(info.get("description") or "")}
+
+    async def _callMappedSkill(self, target: Dict[str, Any], method: str,
+                               kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """代码映射那一支：字节不在盘上，**完整性由代码本体负责、不受安装门摘要管辖**（§6-280 甲）。
+
+        这句话是契约，不是巧合——反过来读成"摘要缺失所以放行"就把闸门读没了，所以判据里
+        一格反向钉住"跑通之后账本里仍不许出现摘要键"，另一格钉住"同形但不在册的空壳照旧拒"。
+
+        刻意在 `self._lock` **之外** await：`ExecutorBackedSkill` 把同步执行体丢进
+        `loop.run_in_executor` 的工作线程，而 `self._lock` 取自
+        `creation_governance.shared_lock(skills_dir)`——按目录共享、重入只在同线程成立。
+        主线程持锁 await ＋执行体回调本服务，就是 `test_callSkillThroatIsAwaitable.py`
+        拿真回调技能钉住的那个死锁形状。
+        落盘那一支反过来：技能体必须留在本线程，所以它持锁——两支的差别由 `call_skill` 的
+        docstring 与 `test_throatRecognizesExecutorMapping.py` 那格真回调对照共同钉住，
+        不是各自随手写的。
+        """
+        from neurova.skills.market_registry import buildMappedExecutable
+
+        skill_id = target["skill_id"]
+        if method != "main":
+            # 映射型没有"方法名"这个概念：签名里那个 `method` 对它无定义，接了不用就是
+            # 在契约上承诺一件不做的事 ⇒ 如实拒，不静默吞。
+            return {"success": False, "skill_id": skill_id,
+                    "error": f"映射执行体型只认 main，不接受 method={method!r}"}
+
+        executable = buildMappedExecutable(skill_id, target["description"])
+        if executable is None:
+            self._logger.error("技能 %s 在映射表里却造不出执行体", skill_id)
+            return {"success": False, "skill_id": skill_id,
+                    "error": f"Mapped executor could not be built: {skill_id}"}
+
+        outcome = await executable.execute(dict(kwargs))
+        if not outcome.success:
+            return {"success": False, "error": outcome.error or "执行体返回失败",
+                    "skill_id": skill_id}
+        self._logger.info("Called mapped skill %s", skill_id)
+        return {"success": True, "result": outcome.data}
+
     async def call_skill(self, skill_id: str, method: str = "main", **kwargs) -> Dict[str, Any]:
         """
         调用技能（协程）
 
         Args:
             skill_id: 技能ID
-            method: 方法名
+            method: 方法名（落盘技能体里的函数名；映射执行体型只认 main）
             **kwargs: 传递给技能的参数
 
         Returns:
             技能执行结果
+
+        两条腿、一个口径（§6-280 甲）：先问代码映射表，在册就走 `ExecutorBackedSkill`；
+        不在册才回落盘那份"扫过、钉过摘要的字节"。读面 `availabilityFor` 认映射型而咽喉不认，
+        过去会让面板画成可用、点执行必失败——本机 `web-search` 就是这一形（判据里那条同向格钉住）。
 
         为什么必须是协程：唯一的 HTTP 执行口 `POST /skill-pool/private/{id}/execute` 就在
         `async def` 里，同步咽喉等于让入口写成协程的技能**从来没被 await 过**——回执照旧
@@ -1761,9 +1823,16 @@ class SkillService:
         刻意不把技能体丢进 `asyncio.to_thread`：`self._lock` 取自
         `creation_governance.shared_lock(skills_dir)`——**按目录共享**的 RLock，重入只在同线程成立。
         技能体里回调本服务（同目录＝同一把锁）今天能过；挪进线程池就变成主线程持锁 await、
-        worker 线程等锁，当场死锁——这条不是偏好，判据第 2、3 格拿真回调技能钉着。
+        worker 线程等锁，当场死锁——这条不是偏好，`test_callSkillThroatIsAwaitable.py`
+        拿真回调技能钉着。
+        映射那一支正相反：它天生在工作线程里跑，所以它**必须出锁**再 await，见 `_callMappedSkill`。
         """
         try:
+            mappedTarget = self._mappedSkillTarget(skill_id)
+            if mappedTarget is not None:
+                # 出了锁再 await：见 `_callMappedSkill` 那段——两支的锁形状是反的。
+                return await self._callMappedSkill(mappedTarget, method, kwargs)
+
             with self._lock:
                 skill_id = self.resolve_skill_alias(skill_id)
                 if self._entry(skill_id) is None:
