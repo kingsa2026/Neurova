@@ -1164,6 +1164,7 @@ export default {
     executionCount: '执行次数',
     searchPlaceholder: '搜索技能...',
     disabled: '已禁用',
+    artifactMissing: "构件缺失·不可用",
     enabled: '已启用',
     executions: '执行次数',
     executeSkill: '执行技能',

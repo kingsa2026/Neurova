@@ -60,6 +60,11 @@
                 <a-tag :color="skill.enabled ? 'green' : 'default'">
                   {{ skill.enabled ? t('skill.enabled') : t('skill.disabled') }}
                 </a-tag>
+                <!-- 「已启用」不等于「能跑」：账本在册而落盘无构件时如实标出来，
+                     原因走 title 透出（后端 `unavailable_reason` 是单点判定的读数，前端不自己猜） -->
+                <a-tag v-if="skill.available === false" color="orange" :title="skill.unavailable_reason || ''">
+                  {{ t('skill.artifactMissing') }}
+                </a-tag>
                 <a-tag v-if="stateOf(skill) !== 'active' || skill.usage" :color="stateColor(stateOf(skill))">
                   {{ stateLabel(stateOf(skill)) }}
                 </a-tag>
@@ -488,6 +493,10 @@ interface Skill {
   name: string
   description: string
   enabled: boolean
+  // 后端对账读数（单点 `SkillService.availabilityFor`）：`enabled` 是运营开关，
+  // `available` 是"这条真能变成一个动得了的执行体"——两件事，两格都要显示得出。
+  available?: boolean
+  unavailable_reason?: string
   execution_count?: number
   usage?: SkillUsage
   _toggling?: boolean

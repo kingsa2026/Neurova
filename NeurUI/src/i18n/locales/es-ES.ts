@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'Número de ejecuciones',
     searchPlaceholder: 'Buscar habilidades...',
     disabled: 'Desactivado',
+    artifactMissing: "Falta el artefacto",
     enabled: 'Activado',
     executions: 'Ejecuciones',
     executeSkill: 'Ejecutar habilidad',

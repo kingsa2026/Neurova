@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'Nombre d\'exécutions',
     searchPlaceholder: 'Rechercher des compétences...',
     disabled: 'Désactivé',
+    artifactMissing: "Artefact manquant",
     enabled: 'Activé',
     executions: 'Exécutions',
     executeSkill: 'Exécuter la compétence',

@@ -1154,6 +1154,7 @@ export default {
     executionCount: 'عدد مرات التنفيذ',
     searchPlaceholder: 'ابحث عن المهارات...',
     disabled: 'معطل',
+    artifactMissing: "المكوّنات مفقودة",
     enabled: 'مُمكّن',
     executions: 'مرات التنفيذ',
     executeSkill: 'تنفيذ المهارة',
