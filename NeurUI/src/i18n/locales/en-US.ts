@@ -1155,6 +1155,7 @@ export default {
     executionCount: 'Execution Count',
     searchPlaceholder: 'Search skills...',
     disabled: 'Disabled',
+    artifactMissing: "Artifact missing",
     enabled: 'Enabled',
     executions: 'Executions',
     executeSkill: 'Execute Skill',

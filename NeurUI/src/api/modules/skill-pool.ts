@@ -15,6 +15,9 @@ export interface Skill {
   tags?: string[]
   installed?: boolean
   enabled?: boolean
+  // 「在册」不等于「可得」：后端对账读数（SkillService.availabilityFor），前端只消费不自判
+  available?: boolean
+  unavailable_reason?: string
   config?: Record<string, unknown>
   created_at?: string
   updated_at?: string

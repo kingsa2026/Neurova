@@ -1154,6 +1154,7 @@ export default {
     executionCount: '실행 횟수',
     searchPlaceholder: '스킬 검색...',
     disabled: '사용 안 함',
+    artifactMissing: "산출물 없음",
     enabled: '사용 중',
     executions: '실행 횟수',
     executeSkill: '스킬 실행',
