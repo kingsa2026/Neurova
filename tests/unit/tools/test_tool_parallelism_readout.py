@@ -29,6 +29,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -50,6 +52,31 @@ try:
     SHAPE_LABELS = tuple(getattr(_readout_mod, "SHAPE_LABELS", ()))
 except Exception:  # noqa: BLE001 - 读侧入口不可导入时由用例自己点名
     SHAPE_LABELS = ()
+
+
+#: ── 子进程取数的唯一出口（§6-64／§6-225 那一族的收尾）───────────────────────────
+#: 这里原本每个用例各写一份对 `sys.executable` 的文本模式捕获而不给 `encoding`：
+#: 父进程带 `PYTHONIOENCODING=utf-8` 跑测时（本仓 CI 与多数人的 shell 都是），子端吐 UTF-8、
+#: 父端按本机首选码（实测 cp936）解 ⇒ reader 线程抛 `UnicodeDecodeError`，`result.stderr`
+#: **静默变成 None**，报出来是一句与缺陷无关的 `TypeError: argument of type 'NoneType' is not iterable`。
+#: 只钉父端是"半修"（子端仍按码页吐字节，非 ASCII 被换成 U+FFFD，代码看着像已修），所以**两头一起钉**。
+#: 站点从 9 处收成这一处，是为了下一次改口径只改得到一处（教义第 6 条）。
+def _runPython(argv: list, *, cwd=None, timeout: int = 300):
+    return subprocess.run(
+        [sys.executable, *argv], cwd=cwd or PROJECT_ROOT,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=timeout,
+    )
+
+
+def _readout(*args, timeout: int = 300):
+    """跑一次取数脚本（真子进程，与决策者手里的用法逐字相同）。"""
+    return _runPython([str(READOUT_SCRIPT), *args], timeout=timeout)
+
+
+#: 同名旧出口（本文件后半段的既有调用都走它）——这里只做别名，**不再自己写一遍 kwargs**；
+#: 原来那份自带 `text=True` 无 `encoding`，正是上面那条根因的第二处形状。
+_runReadout = _readout
 
 
 def _call(index: int, name: str) -> dict:
@@ -301,8 +328,6 @@ class TestReadoutEntryPoint:
 
     def test_parsesTheSameMetricText(self, tmp_path):
         """离线复算：把 /metrics 文本喂进去，两个读数都要能算出来。"""
-        import subprocess
-
         from neurova.core.metrics import get_metrics, generate_metrics_text
 
         # 独立路径名：注册表是进程级共享的，用别的用例也在写的名字会让断言随执行序漂移
@@ -313,10 +338,7 @@ class TestReadoutEntryPoint:
         text_path = tmp_path / "metrics.txt"
         text_path.write_text(generate_metrics_text(), encoding="utf-8")
 
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(text_path), "--json"],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--metrics-file", str(text_path), "--json")
         assert result.returncode == 0, f"脚本跑不起来：{result.stderr[-2000:]}"
         payload = json.loads(result.stdout.strip().splitlines()[-1])
         for key in ("batch_shapes", "multi_tool_round_share", "tool_durations", "verdict"):
@@ -425,16 +447,11 @@ class TestReadoutOnARealScrape:
         `ValueError: invalid metric name:<!DOCTYPE html>...`，退出码 1。
         取数命令的读者是**决策者**，他需要读到"这份输入不是 /metrics 文本"。
         """
-        import subprocess
-
         html = tmp_path / "scrape.html"
         html.write_text(
             "<!DOCTYPE html><html><body>proxy intercepted</body></html>", encoding="utf-8"
         )
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(html)],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--metrics-file", str(html))
         assert "Traceback" not in result.stderr, (
             f"喂错内容以解释器栈收场，读者分不清它是不是判定结论：{result.stderr[-500:]}"
         )
@@ -451,12 +468,7 @@ class TestReadoutOnARealScrape:
         Prometheus 文本），它们是同一个事实的两半 —— 只修被点名的那一半，
         另一半照样以解释器栈收场（教义第 5 条：同契约全部命中点一并修）。
         """
-        import subprocess
-
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(tmp_path / "nope.txt")],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--metrics-file", str(tmp_path / "nope.txt"))
         assert "Traceback" not in result.stderr, (
             f"文件读不到以解释器栈收场：{result.stderr[-400:]}"
         )
@@ -472,14 +484,9 @@ class TestReadoutOnARealScrape:
         "拿失明当结论"——本仓已为此付过代价（Issue #271 上一片：占比恒不可达时
         「低于 5% 就放弃」与「数据缺失」在观测面上同形）。
         """
-        import subprocess
-
         empty = tmp_path / "empty_metrics.txt"
         empty.write_text("", encoding="utf-8")
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(empty)],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--metrics-file", str(empty))
         assert result.returncode == 0, result.stderr[-500:]
         assert "no_data" in result.stdout, "零样本没有被读成 no_data"
         assert "否证" in result.stdout and "不构成" in result.stdout, (
@@ -496,8 +503,6 @@ class TestReadoutOnARealScrape:
         一个字段两种读法、结论相反，必须分别命名，不许折叠成一个 `share`。
         """
         import json as _json
-        import subprocess
-
         text = tmp_path / "mixed.txt"
         text.write_text(
             "# HELP neurova_tool_batch_shapes_total b\n"
@@ -509,10 +514,7 @@ class TestReadoutOnARealScrape:
             + 'neurova_tool_batch_shapes_total{path="P",shape="multi_parallel"} 1\n',
             encoding="utf-8",
         )
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(text), "--json"],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--metrics-file", str(text), "--json")
         assert result.returncode == 0, result.stderr[-800:]
         payload = _json.loads(result.stdout.strip().splitlines()[-1])
         assert payload["per_path"]["P"]["grouped_share"] == 1.0
@@ -550,14 +552,9 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
 
     @staticmethod
     def _run(tmp_path, text: str, *extra):
-        import subprocess
-
         scrape = tmp_path / "scrape.txt"
         scrape.write_text(text, encoding="utf-8")
-        return subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--metrics-file", str(scrape), *extra],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        return _readout("--metrics-file", str(scrape), *extra)
 
     @staticmethod
     def _zeroSampleScrape(tmp_path) -> str:
@@ -568,18 +565,12 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         另起进程同时正是"重启后新实例"的真实形态——判据仪表是进程级的，
         重启即清空计数器，样本随真实工具轮到达。
         """
-        import subprocess
-
-        fresh = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from neurova.core.metrics import get_metrics, generate_metrics_text;"
-                " get_metrics();"
-                " print(generate_metrics_text(), end='')",
-            ],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        fresh = _runPython([
+            "-c",
+            "from neurova.core.metrics import get_metrics, generate_metrics_text;"
+            " get_metrics();"
+            " print(generate_metrics_text(), end='')",
+        ])
         assert fresh.returncode == 0, f"新进程导出抓取失败：{fresh.stderr[-600:]}"
         return fresh.stdout
 
@@ -727,12 +718,7 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
         `_register_metrics_endpoint` 第一行），故进程内取数要照同一条装配走，
         判出来的"仪表在不在"才是关于**部署**的事实，而不是关于**本进程偷懒**。
         """
-        import subprocess
-
-        result = subprocess.run(
-            [sys.executable, str(READOUT_SCRIPT), "--json"],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = _readout("--json")
         assert result.returncode == 0, result.stderr[-600:]
         import json as _json
 
@@ -765,16 +751,6 @@ class TestNoDataCauseIsSplitByInstrumentPresence:
 
 #: 三态素材的落点（同一条命令、三份**真抓取**、三种读数）。
 M3_FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "m3_readout"
-
-
-def _runReadout(*args, timeout: int = 300):
-    """跑一次取数命令（真子进程，与决策者手里的用法逐字相同）。"""
-    import subprocess
-
-    return subprocess.run(
-        [sys.executable, str(READOUT_SCRIPT), *args],
-        cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
-    )
 
 
 def _readoutJson(*args):
