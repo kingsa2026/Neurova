@@ -205,3 +205,44 @@ class TestCaliberIsSharedWithSkillChannel:
         """`reason` 是封闭集合，漏映射会被画成 500——比错映射更难发现。"""
         assert plugin_api._REASON_TO_STATUS.get(AD.REASON_MISMATCH) == 409, (
             "新增成因没进端点的单点映射表")
+
+
+class TestUnpinnedShellIsNotPinnedAsAuthority:
+    """同根因第二命中点（§6-259 末段）：登记里没摘要、盘上连入口都不在 ⇒ 不许把这份空壳钉成权威。
+
+    技能半区那一形是：`call_skill` 里摘要对账排在入口判定之前，未钉分支"现算现钉并放行"，
+    于是每次调用空壳都往账本写一份**不代表任何构件**的摘要，再报 `No entry point found`。
+    插件半区同序同形（`plugin_manager.load_plugin` 里首钉在 `_load_plugin_module` 之前）。
+    后果不止脏账：日后真把字节补进那个目录，这份空壳读数会把它判成**篡改**。
+    """
+
+    def _stripToUnpinned(self, client, name: str) -> None:
+        client.manager.get_plugin(name).artifactDigest = ""
+        client.manager._persistState()
+
+    def _stateRow(self, client, name: str) -> dict:
+        payload = json.loads(client.manager.statePath().read_text(encoding="utf-8"))
+        return payload["plugins"][name]
+
+    def test_loadingAnUnpinnedShellDoesNotPinIntoTheState(self, client):
+        pdir = _install(client, "probeShell")
+        client.manager.enable_plugin("probeShell")
+        self._stripToUnpinned(client, "probeShell")
+        (pdir / "main.py").unlink()
+
+        resp = client.post("/api/v1/plugins/probeShell/load")
+        assert resp.status_code >= 400, (
+            f"入口都不在盘的插件竟被装载放行：HTTP {resp.status_code} {resp.text[:160]}")
+        assert not self._stateRow(client, "probeShell").get(AD.DIGEST_FIELD), (
+            "空壳的摘要被首钉进 state.json——下次真装上就会被这份读数判篡改")
+
+    def test_unpinnedPluginWithEntryStillPinsOnceAndLoads(self, client):
+        """对照格（不许误伤）：入口在盘、登记没摘要 ⇒ 首钉一次并装载——TOFU 那条腿一字不能动。"""
+        _install(client, "probeReal")
+        client.manager.enable_plugin("probeReal")
+        self._stripToUnpinned(client, "probeReal")
+
+        resp = client.post("/api/v1/plugins/probeReal/load")
+        assert resp.status_code == 200, f"未钉的真插件被拦了：{resp.status_code} {resp.text[:160]}"
+        assert self._stateRow(client, "probeReal").get(AD.DIGEST_FIELD), (
+            "首钉没发生：本批把「没构件才不钉」改成了「一律不钉」")
