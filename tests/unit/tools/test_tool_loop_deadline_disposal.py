@@ -127,6 +127,16 @@ class TestDisposalIsMachineCheckable:
             "由 provider_compat.ProviderCompat.supports_tool_choice 门控——"
             "本条**无待清存量**（不存在第二份形态判别），随同批收口一并终局"
         ),
+        # 死循环门的管辖补齐（`7b7a058f`）：此前装配点写的是 `DoomLoopGate()` 无参构造，
+        # 两个在用阈值只活在 gates.py 的类字面量上——配了键也不归它管。改后三键一律从
+        # `agent_limits_settings.get_effective_limits()` 取数并传进构造。签名近似判定那把
+        # 旋钮由后续实装批接上（`111ba0df`，默认 1.0＝逐字相等，线上开火时点因此不变）。
+        # 读取点现读：`neurova/agent/loops/base.py:417-419`（`_buildGateRunner` 内唯一构造），
+        # 常驻判据 tests/unit/agent/test_doomLoopGateThresholdsFollowConfig.py。
+        "DoomLoopGate": "死循环门管辖补齐：_buildGateRunner 唯一构造点，三键由配置单源传入",
+        "doom_loop_window_size": "死循环门管辖补齐：base._buildGateRunner 传入，agent_limits_settings 定义并夹紧",
+        "doom_loop_max_interrupts": "死循环门管辖补齐：同上，另 gates.py 取类默认时读同一单源",
+        "doom_loop_similarity_threshold": "签名近似判定实装：gates._signaturesSimilar 读该键（默认 1.0 不改开火时点）",
     }
 
     #: 已被**退役处置批**删除的条目（`符号: 处置批`）。与 `WIRED_BY_LATER_WAVES`
