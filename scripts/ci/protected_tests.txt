@@ -3197,3 +3197,9 @@ tests/unit/skills/test_readFaceDoesNotClaimShellAsAvailable.py
 # 否则把豁免改回双闸也照样绿；本批第一版就踩在这上面，变异 M4 打空被抓）。
 # 单跑读数：本档 4 passed 连跑 2 次同读数。
 tests/unit/security/test_shellEvasionPatternsAreOneFaceOnly.py
+# §6-276·解包失败点名原因：四族失败（安全拒／坏包／路径过长／与长度无关的 IO 故障）逐族钉"只许出现
+# 自己的关键字"——写成 `A in r or B in r` 的或式断言会被"全都报同一句"的实现蒙过去（本档变异 M3 第一次就打空）；
+# 另钉上限数字由 `WINDOWS_MAX_PATH` 算出（monkeypatch 那个常量，文案必须跟着动）、原因原样进回执、
+# 短根同包必须装成（点名不是新增拒绝），以及桩在原因面上的替身真的被生产调到。
+# 单跑读数：本档 7 passed 连跑 2 次同读数。
+tests/unit/skills/test_zipRefusalNamesItsCause.py
