@@ -163,28 +163,34 @@ class BaseGuardian:
 COMMAND_PARAM_KEYS = ("command", "code")
 PATH_PARAM_KEYS = ("file_path", "path")
 
-#: 路径值要豁免出命令面，整串不得含任一 shell 会另作解释的字符（命中即不豁免，回命令面）。
-#: 反斜杠**不在**表内——它是 Windows 的路径分隔符，而本条缺陷的起因正是把一个 `\` 当转义读。
-_SHELL_INTERPRETED_CHARS = frozenset(';|&`$<>"\'{}*?[]\n\r\t')
+#: 路径值里"shell 会另作解释"的字符——命中任一即由 `FilePathGuardian` 出一条 low 级审计读数。
+#: 这一族**只用于报告面**：§6-266 第①刀裁定之前它还兼作豁免闸（含这些字符就不豁免），于是同一个
+#: 值按键名是路径、按字符又被当命令扫一遍——两个答案。裁定后只留一个：**键名语义决定扫描面**。
+#: 通配 `*` `?` 不在表内——那是 `wildcard_path` 已有的 MEDIUM 读数，重复报只会淹没真信号。
+_SHELL_EXECUTION_PATTERN = re.compile(r"[;|&`$<>\"'{}\n\r\t]")
 _ABSOLUTE_PATH_SHAPE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/])")
 _PATH_SEPARATOR = re.compile(r"[/\\]")
 
 
 def looksLikePathValue(value: Any) -> bool:
-    """整串就是一个路径 → 允许豁免出命令语义 guardian 的扫描面。
+    """整串就是一个路径 → 该值按**路径语义**裁决，不进命令语义扫描面。
 
-    两个条件同时成立才算，否则一律回命令面（保守方向）：
-    ① 形状＝绝对路径（POSIX／Windows 盘符或 UNC／`~`）或含分隔符的相对路径；
-    ② 不含 shell 会另作解释的字符（`;` `|` `&` 反引号 `$` 引号 大括号 通配符 控制符…）。
-
-    「像路径」不等于「安全」：`/etc/passwd` 这类值仍由 `FilePathGuardian` 按路径语义裁决，
-    这里豁免掉的只有"被 shell 逃逸那族规则当命令文本扫"这一件事。
+    只看形状：绝对路径（POSIX／Windows 盘符或 UNC／`~`）或含分隔符的相对路径。
+    形状之外不再设字符否决——反斜杠是 Windows 的路径分隔符，`$` `;` 引号是合法文件名里的字符，
+    把它们当"这条不是路径"的证据，就是把同一个键的两种语义混在一处判。
+    「按路径待它」不等于「放过」：值里出现 shell 会另作解释的字符时，由
+    `carriesShellSemantics` 供 `FilePathGuardian` 出一条 low 级读数（报告面看得见，不参与 DENY）。
     """
     if not isinstance(value, str) or not value.strip():
         return False
-    if _SHELL_INTERPRETED_CHARS & set(value):
-        return False
     return bool(_ABSOLUTE_PATH_SHAPE.match(value) or _PATH_SEPARATOR.search(value))
+
+
+def carriesShellSemantics(value: Any) -> bool:
+    """这串值里是否出现 shell 会另作解释的字符——供审计点名，不作豁免判据。"""
+    if not isinstance(value, str):
+        return False
+    return bool(_SHELL_EXECUTION_PATTERN.search(value))
 
 
 class RuleBasedToolGuardian(BaseGuardian):
@@ -552,8 +558,15 @@ class FilePathGuardian(BaseGuardian):
         """检查文件路径安全性"""
         findings: List[GuardFinding] = []
 
-        # 从 context 中提取路径
-        path = context.get("path", "")
+        # 路径值优先按**键名清单**从参数面取（`PATH_PARAM_KEYS` 单源）；取不到才回落到整串里
+        # 的 `path|file|dir=` 形状——那支老写法按空格截断，`C:\a b.txt` 会被切成 `C:\a`。
+        path = ""
+        if isinstance(context, dict):
+            for key in PATH_PARAM_KEYS:
+                value = context.get(key)
+                if isinstance(value, str) and value.strip():
+                    path = value
+                    break
         if not path:
             # 尝试从工具输入中提取路径
             path_match = re.search(r"(?:path|file|dir)=([^\s]+)", tool_input)
@@ -645,6 +658,22 @@ class FilePathGuardian(BaseGuardian):
                     message=f"检测到路径通配符: {path}",
                     evidence=path,
                     suggestion="避免在路径中使用通配符",
+                )
+            )
+
+        # §6-266 第①刀（用户裁"按路径语义待它"）：路径键的值不再因这些字符被回命令面扫一遍，
+        # 但"这串里带 shell 会另作解释的字符"必须留痕。low 不参与 DENY（AUTO 拦 ≥HIGH、
+        # STRICT 拦 ≥MEDIUM），审计面与审批卡仍看得见这条——批 37 的"降级不删读数"口径。
+        if carriesShellSemantics(path):
+            findings.append(
+                GuardFinding(
+                    rule_id="path_with_shell_metacharacters",
+                    severity=GuardSeverity.LOW,
+                    category=GuardThreatCategory.PATH_TRAVERSAL,
+                    message=f"路径值含 shell 会另作解释的字符: {path}",
+                    evidence=path,
+                    suggestion="本条按路径语义裁决，不参与拦截；若工具实现要把这个参数拼进命令行，"
+                             "请改用参数数组或先转义，别依赖扫描器替它兜住",
                 )
             )
 
@@ -780,12 +809,12 @@ class ToolGuardEngine:
         return " ".join(str(p) for p in parts)
 
     def _build_command_surface(self, tool_name: str, tool_params: Dict[str, Any]) -> str:
-        """命令语义扫描面：从整串输入里剔除"确实是一个路径"的路径键值（§6-255 甲案）。
+        """命令语义扫描面：从整串输入里剔除"确实是一个路径"的路径键值（§6-255 甲案／§6-266 第①刀）。
 
-        剔除是白名单式的：键得在 `PATH_PARAM_KEYS` 里，且值要过 `looksLikePathValue`，
-        两个条件缺一个就照旧留在面上——未登记的键、夹带 shell 语义的路径值、非字符串值
-        一律不豁免。工具名始终保留。豁免掉的只是"被命令族规则扫"这一件事，
-        路径本身仍由 `FilePathGuardian` 在全量面上裁决。
+        剔除条件只看两件事：键在 `PATH_PARAM_KEYS` 里，且值过 `looksLikePathValue`（形状）。
+        **字符不再决定豁免**——含 `$` `;` 引号的合法文件名照样按路径语义走，改由
+        `FilePathGuardian` 出一条 low 级 `path_with_shell_metacharacters` 读数落进审计面。
+        没登记进任何一把清单的键一律照命令面扫（那是仍然保守的那一侧）。
         """
         parts = [tool_name]
         for key, value in tool_params.items():
