@@ -5830,14 +5830,15 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       其余仍开＝§6-293（远端 `format` 采信）、`ExecutionEngine` plan/execute_tool 子树待出死码档案、
       `mcp_client.py:598-603`（先立探针票）、命令键那一支仍是 `next(...)`。
     - **本批收尾时自己造的两处错（一处只是数字，一处有代价）**：
-      ① `eb589dda`（原 `f3df015b`）头一版正文把测试/基建池写成 **+397/−14 ＝ 净 +383**，该笔 numstat 实为
+      ① `eb589dda`（重刷前是 f3df015b，该号已不可达）头一版正文把测试/基建池写成 **+397/−14 ＝ 净 +383**，该笔 numstat 实为
       **+397/−2 ＝ 净 +395**——生产池那 12 行删除被重复计进了测试池。`test_commitLocClaimMatchesOwnNumstat`
       落库后复取时抓回。**处置与先前不同**：这条纪律只扫未推送窗口，留一句勘误并不会让它变绿，所以在未推送
       窗口内用 `git commit-tree`（plumbing；本仓无 pre-commit／commit-msg 钩子，pre-push 的 LFS 钩子照常生效）
-      重刷那一笔正文并顺链重建其后两笔——**三笔的 tree 逐一复证与原笔完全相同**（`eb589dda`←`f3df015b`、
-      `a8cff31f`←`c9509678`、`3f4dbf8f`←`dac57a6a`）。号次因此变化，本卷引用同步改成新号。
+      重刷那一笔正文并顺链重建其后两笔——**三笔的 tree 逐一复证与原笔完全相同**（`eb589dda`←f3df015b、`a8cff31f`←c9509678、
+      `3f4dbf8f`←dac57a6a；三个旧号已随重刷不可达，故不加成反引号引用）。号次因此变化，本卷引用同步改成新号。
       教训还是那条老纪律：数字要**抄** numstat，不能凭回忆（本会话同形已第五、六遭）。
-      ② 为了把正文取出来改，我用了 `git checkout f3df015b -- .` ——**这条命令在共享工作树里是破坏性的**：
+      ② 为了把正文取出来改，我用了 `git checkout <该笔> -- .`（当时那一笔的号是 f3df015b）——
+      **这条命令在共享工作树里是破坏性的**：
       它把整棵树回滚到该笔内容，连带把并发会话**未提交**的 `neurova/execution_layers/__init__.py` 半区改动一起抹掉
       （未入索引 ⇒ 无 blob 可恢复）。发现后立刻 `git checkout HEAD -- <那三个路径>` + `git reset` 把树恢复到 HEAD，
       自己的台账与子集内容无损；对方那笔的配套判据 `tests/unit/execution/test_executionLayersTransportHalfRetired.py`
