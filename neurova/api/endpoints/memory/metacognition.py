@@ -25,10 +25,16 @@ from .base import (
 
 
 class MatchSkillsRequest(BaseModel):
-    """匹配技能请求"""
+    """匹配技能请求
+
+    只有 `query` 这一件是契约的一部分。原先这里还挂着 `top_k`（默认 5），而
+    `MemoryManager.meta_match_skills(self, query)` 只收 query——端点每次都把它传下去，
+    于是 `POST /meta/skills/match` **每次必 500**（带不带 top_k 都一样，因为它有默认值）。
+    删除它的形态是"从模型里拿掉"而不是"留着不消费"：留着就是继续在对外广告一件做不到的事。
+    真要做"取前 N 条"得先让 manager 有可排序的匹配度，那是另一张票。
+    """
 
     query: str = Field(..., min_length=1, max_length=500, description="查询内容")
-    top_k: int = Field(default=5, ge=1, le=20, description="返回数量")
 
 
 # ============================================================
@@ -289,20 +295,25 @@ async def meta_should_evolve(
 # ============================================================
 
 
-@router.get("/meta/skills", summary="获取所有技能")
+@router.get("/meta/skills", summary="获取元认知近期事件（名字沿用 skills，见下）")
 async def meta_get_all_skills(
     agent_id: Optional[str] = None,
-    category: Optional[str] = None,
-    status: Optional[str] = None,
     req: Request = None,
     user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
-    获取所有技能，支持按分类和状态筛选
+    取回 `MemoryManager.meta_get_all_skills()` 的列表——**不含任何筛选**。
+
+    两处名实要说清（都比"广告了却做不到"诚实）：
+    - 它不筛分类也不筛状态：原签名挂着 `category`/`status` 并原样转给 manager，而那份实装是
+      `meta_get_all_skills(self)`，一个参数都不收 ⇒ 这条路由**每次必 500**。参数已从契约里删掉。
+    - 它也不是技能表：manager 侧那份实装委托到 `MetaCognitionModule.get_recent_events(count=50)`，
+      是"最近元认知事件"的别名视图（`tests/integration/test_memory_retired_routes_guard.py`
+      早就记下这一形）。要真做"按分类/状态筛技能"，得先在 manager 那侧立单源，别在端点里补第二份筛选。
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        skills = manager.meta_get_all_skills(category=category, status=status)
+        skills = manager.meta_get_all_skills()
 
         return success_response(
             data={
@@ -352,11 +363,14 @@ async def meta_match_skills(
     user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
-    根据查询内容匹配合适的技能
+    按查询内容取回匹配的元认知事件（manager 侧以描述子串匹配，上限是它自己取的最近 10 条）。
+
+    不做"前 N 条"截断：`MemoryManager.meta_match_skills(self, query)` 只收 query，
+    原先端点把 `top_k` 传下去 ⇒ 这条路由**每次必 500**。真要有排名/截断，先让 manager 给出匹配度。
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        matched = manager.meta_match_skills(request.query, top_k=request.top_k)
+        matched = manager.meta_match_skills(request.query)
 
         return success_response(
             data={
