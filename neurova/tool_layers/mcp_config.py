@@ -14,6 +14,7 @@ transport 推断（command→stdio / url→http，显式声明优先）、缺必
     url/headers             http、sse 必需 url
     timeout_ms  默认 30000，必须为正数
     tool_capabilities  可选，{工具名: 并行能力声明}；缺省空表（一律串行）
+    oauth       可选，{授权参数}；键名与必填项按 mcp_oauth 的取值点定（见 _OAUTH_*）
 """
 
 import os.path
@@ -28,7 +29,25 @@ _ALLOWED_KEYS = {
     # 提供、本仓改不了，故声明落在**本仓侧的 server 配置**上——即"每个提供方
     # 自己的声明处"，不是集中一份大名单。形状与推导见 `core/tool_capability.py`。
     "tool_capabilities",
+    # OAuth 参数位。读侧三处消费者（`mcp_client.call_tool` 取 token、
+    # `/mcp-servers/{id}/oauth/authorize`、`GET /mcp-servers` 的 `oauth_grant`）
+    # 一直在取它，此前却不在允许键里 ⇒ 生产注册路径存不下，只有测试夹具造得出。
+    "oauth",
 }
+
+# oauth 子键集取自 `mcp_oauth.py` 的取值点（现场反推，不留第二份口径）：
+# TokenCache.get_or_create 取 token_url/client_id（缺则调用期 KeyError），
+# run_authorization_code_flow 取 authorization_url/registration_endpoint/redirect_uri/scope。
+_OAUTH_KEYS = {
+    "grant_type", "client_id", "client_secret", "scope",
+    "token_url", "authorization_url", "registration_endpoint", "redirect_uri",
+}
+_OAUTH_GRANT_TYPES = {"client_credentials", "authorization_code"}
+
+# oauth 里**由本仓主动出网请求**的三个 URL 字段。注册层据此走 `assert_public_url`
+# （非 admin）——新增出网目标不得绕过既有 SSRF 门。
+# 不含 redirect_uri：那是 IdP 回跳到**本机环回**的地址，语义相反（RFC 8252 要求环回）。
+OAUTH_OUTBOUND_URL_KEYS = ("token_url", "authorization_url", "registration_endpoint")
 
 _VALID_TRANSPORTS = {"stdio", "http", "sse"}
 
@@ -66,6 +85,54 @@ def _reject_shell_command(server: typing.Dict[str, typing.Any]) -> None:
 
 def _reject(message: str) -> typing.NoReturn:
     raise ValueError(f"MCP server 配置无效: {message}")
+
+
+def _validate_oauth(oauth: typing.Any) -> None:
+    """校验 oauth 子配置：拦掉「存进去就会在调用期炸」的形状。
+
+    必填项取自读取方本身（`TokenCache.get_or_create` 用下标取 token_url/client_id，
+    `run_authorization_code_flow` 要求 authorization_url 与 client_id|registration_endpoint
+    二者之一）——在配置期拒绝，比在工具调用栈里抛 KeyError 诚实。
+    """
+    if not isinstance(oauth, dict):
+        _reject("oauth 必须为「授权参数」字典")
+
+    unknown = set(oauth.keys()) - _OAUTH_KEYS
+    if unknown:
+        _reject(f"oauth 未知字段 {sorted(unknown)}，允许的字段: {sorted(_OAUTH_KEYS)}")
+
+    for key, value in oauth.items():
+        if not isinstance(value, str):
+            _reject(f"oauth.{key} 必须为字符串")
+
+    grant_type = (oauth.get("grant_type") or "client_credentials").strip()
+    if grant_type not in _OAUTH_GRANT_TYPES:
+        _reject(
+            f"oauth.grant_type 必须为 {'/'.join(sorted(_OAUTH_GRANT_TYPES))} 之一，收到 {grant_type!r}"
+        )
+
+    if not oauth.get("token_url"):
+        _reject("oauth.token_url 必填（换取 access token 的端点）")
+
+    if grant_type == "client_credentials":
+        if not oauth.get("client_id"):
+            _reject("oauth.client_id 必填（client_credentials 流需预配置客户端凭据）")
+        return
+
+    if not oauth.get("authorization_url"):
+        _reject("oauth.authorization_url 必填（authorization_code 流的授权端点）")
+    if not oauth.get("client_id") and not oauth.get("registration_endpoint"):
+        _reject(
+            "oauth.client_id 缺失时必须提供 oauth.registration_endpoint，"
+            "以走 RFC 7591 动态客户端注册（DCR）"
+        )
+    redirect_uri = oauth.get("redirect_uri") or ""
+    if redirect_uri:
+        # 环回谓词与 mcp_oauth 同一份实现，不在此重述规则
+        from neurova.tool_layers.mcp_oauth import _is_loopback_redirect_uri
+
+        if not _is_loopback_redirect_uri(redirect_uri):
+            _reject(f"oauth.redirect_uri 必须是环回地址（RFC 8252），拒绝: {redirect_uri}")
 
 
 def _validate_types(server: typing.Dict[str, typing.Any]) -> None:
@@ -111,6 +178,12 @@ def _validate_types(server: typing.Dict[str, typing.Any]) -> None:
                 _reject("tool_capabilities 的工具名必须为非空字符串")
             if not isinstance(declaration, dict):
                 _reject(f"tool_capabilities[{tool_name!r}] 必须为字典")
+
+    oauth = server.get("oauth")
+    if oauth is not None and oauth != {}:
+        # 空表＝"未配置"（前端与注册请求体的缺省形状），不是一套残缺的 OAuth 参数；
+        # 除此之外一律进校验——oauth="" 这种错形状不许被当成空表静默放过
+        _validate_oauth(oauth)
 
     transport = server.get("transport")
     if transport:
@@ -188,5 +261,7 @@ def validate_mcp_server_config(server: typing.Dict[str, typing.Any]) -> typing.D
             str(tool_name): dict(declaration)
             for tool_name, declaration in (server.get("tool_capabilities") or {}).items()
         },
+        # oauth 同规：允许了却不落输出，等于把断点从「存不下」换成「存下了却读不到」
+        "oauth": dict(server.get("oauth") or {}),
     }
     return normalized
