@@ -54,6 +54,8 @@ from neurova.security import artifact_digest as AD  # noqa: E402
 from neurova.skills import library_service, market_registry  # noqa: E402
 from neurova.skills.executor import BaseSkillExecutor, ExecutorBackedSkill, SkillResult  # noqa: E402
 from neurova.skill_system.core import SkillRegistry  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 AGENT = "b63-live"
 MAPPED_ID = "b63-live-mapped"

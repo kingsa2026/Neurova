@@ -18,6 +18,8 @@ import asyncio
 import importlib
 import os
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 PLAN_BASE = "/api/v1/plans"
 FLOW_BASE = "/api/v1/neurflow"

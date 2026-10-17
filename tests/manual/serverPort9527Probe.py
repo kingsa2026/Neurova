@@ -11,6 +11,9 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 app = FastAPI(title="Test Server")
 

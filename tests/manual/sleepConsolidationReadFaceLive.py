@@ -31,6 +31,8 @@ if str(REPO) not in sys.path:
 sys.path.insert(0, str(REPO / "tests" / "manual"))
 
 from _liveVerifyIsolation import isolatedAgentWorkspaces, isolatedDataRoot  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 MARK_TRACE = "LIVE-ECHO-TRACE-MARKER"
 MARK_ORDINARY = "LIVE-ORDINARY-OK-MARKER"

@@ -23,6 +23,9 @@ from neurova.context.models import TokenBudget
 from neurova.context.token_estimator import isRulerCalibrated
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 isolatedDataRoot()
 
