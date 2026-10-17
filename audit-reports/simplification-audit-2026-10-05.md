@@ -5575,7 +5575,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       那条次序纪律的复发；`test_commitLocClaimMatchesOwnNumstat` 当场抓回，未推送窗口内带路径 amend 改正文
       （tree 逐字节一致）。
 
-295. **`ToolEngine` 执行前那道 `tool_guard` 是恒 safe 的门；而它守的恰好是唯一一条不经治理的回落路（🔴 三态票，推荐乙；运行时取证，未改一行码）** ⏳ —— §6-291 末格"单独立票"那条，按取证先行的次序做完了。
+295. **`ToolEngine` 执行前那道 `tool_guard` 是恒 safe 的门；而它守的恰好是唯一一条不经治理的回落路（🔴 三态票，推荐乙；运行时取证，未改一行码）** ✅ **已由 §6-296 落批（用户裁乙，`3f2ad065`＋`b8a935f5`）** —— §6-291 末格"单独立票"那条，按取证先行的次序做完了。
 
     - **复核实状全部来自运行时探针**（真 `create_app()` + `TestClient` + 真 JWT，数据根走
       `tests/manual/_liveVerifyIsolation.isolatedDataRoot()` 单点；
@@ -5616,3 +5616,40 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       那是另一张票（本票不并，理由＝合一会改变注册面归属，与守卫语义两问）。
     - **方法学一句**：这类"守卫在不在路上"的题，判据必须同时给**主路读数**与**支路读数**——只报支路会立成
       "整链失守"的错票，只报主路会漏掉真缺口（本票两条都有，所以能拍成三态而不是二态）。
+
+296. **执行前那道恒 safe 的门拆掉了；"无 agent ⇒ 引擎直调"这条支路改经治理单源（✅ `3f2ad065` 生产+判据+活体 / `b8a935f5` 子集 624→625；§6-295 乙落地）** 🟢 —— 用户 2026-10-17 拍乙。
+
+    - **同一根因的两刀，不做 consumer-only 补判空**：① 退役门面——删 `DefaultGuard` 类、`_create_default_guard`、
+      `ToolEngine.__init__` 的 `tool_guard` 形参、`execute()` 里那段检查与那句不实的 "C3 修复: 执行前安全检查"
+      注释；`execute_with_safeguards` 的 docstring 改成如实说"防护"指**状态闸**（须已注册且 AVAILABLE）。
+      ② 支路接回治理单源——端点直调前先经 `get_governance().evaluate_tool_call(tool_name, arguments, scan_all=True)`，
+      取数经那个唯一函数，**不在端点里复刻链**（沙箱路由／审批／审计都留在咽喉）。
+    - **刻意收窄写在码里而不是藏在测试里**：这一支没有会话可以问人，ASK 与 SANDBOX 一律按拒绝处理——
+      只朝保守方向偏（多拒不漏拒），不改主路。`scan_all=True` 沿用既有 P0-2／M4 规则，判据第 ② 条腿就是
+      换键名那一形（`{"target": "/etc/shadow"}`）。
+    - **刻意不做的两件**：① 不把两把 `ToolEngine` 合一（本卷末格另记的独立缺陷：`is` → False、两份注册表
+      ⇒ 咽喉里"优先使用 ToolEngine"对动态工具恒报未注册）——那是另一张票，并进来会把"裁决只有一处"与
+      "注册面归属"两问捏成一问；② 不删 `execute_with_safeguards` 这个名字（要删得连调用面一起改，与本批无关）。
+    - **既有判据联动（教义第 7 条：退役与接通同批）**：`tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py`
+      的 `TestToolGuardWired` **整类 4 格退役**（它钉的就是"引擎该自己裁决"这条被推翻的契约），新档里另有一格
+      `testOldEngineGuardCellsRetiredNotLeftZombie` 反向钉它不许复活；`tests/execution_engine/test_tool_engine_v2.py`
+      里 `test_init_default` 改判为"不许再有 `tool_guard` 属性"、`test_init_with_custom_guard` 换成
+      `test_init_rejects_guard_seam`（传该形参即 `TypeError`），`TestToolGuardIntegrationExtended` 整类退役，
+      共享夹具 `mock_security_system` 里那段 ToolGuard 桩**删掉**（替身桩着生产已不存在的接缝就是谎）。
+    - **证据**：红灯 `6 failed, 1 passed`（第 7 格是对照，设计成改前改后都绿——它钉"接治理"不许被做成一律拒，
+      既有那条"无 agent 的评测/脚本路径仍可用引擎"的反向锁依赖它）；改后新档 7 passed，四个被动的档合跑 105 passed。
+      红自证（纯 HEAD 生产＋本批全部判据，仓外 worktree）`5 failed, 2 passed`——少的那格钉的是**测试档自身**形态，
+      基线侧已铺入改判后的 zoom_out 故绿，不是漏红。活体两侧对照：本批侧 6 腿全 PASS 退出码 0，
+      同一份脚本在基线树 `①②⑤ FAIL` 退出码 1（① 读数 `code=0 / echoed=/etc/shadow`＝工具真跑了）。
+      宽域 A/B（execution＋tools＋skills＋api＋execution_engine）基线 `24 failed + 8 errors`、
+      本批侧 `17 failed + 8 errors`，失败集合 32↔25，**仅本批侧红 0 条**；仅基线红 7 条＝交付证据
+      （5 新格＋2 改判格）。两侧同红 25 条为预存，全在本批判据族之外（`test_generation_batch3` 8 ERROR、
+      `test_transfers_wave_h4` 7、`test_files_store_persistence` 4 等，其中 h3／my_skills 两格已由 §6-287 登记）。
+    - **净 LOC**：生产池 **+31/−35 ＝ 净 −4**；测试/基建池 **+292/−161 ＝ 净 +131**（新判据 +151、活体 +132、
+      两档改判 −161/+9）。子集那笔 **+7/−0**（1 条＋6 行注释）。数字逐笔按 `git add` 后
+      `git diff --cached --numstat` 现读。
+    - **划闭与仍开**：**§6-295 由本笔划闭**（乙落地；那张票的"待裁定"至此变"已落地＋留下的边界"）。
+      仍开＝① 两把 `ToolEngine` 该不该合一（新独立缺陷，未立票面，按取证先行的老规矩下一步先量它的影响面）；
+      ② §6-293（远端 `format` 采信）；③ `mcp_client.py:598-603` 那条"守卫看到的 dict 与送进 MCP 的 arguments
+      可能不同一份"（先立探针票）；④ `extract_adjudicable_params` 里命令键那一支仍是 `next(...)`（另一问句）。
+    - **本会话下一枚空号现查 §6-297（写前必须现场重取，本笔落库时该读数为 296）。**
