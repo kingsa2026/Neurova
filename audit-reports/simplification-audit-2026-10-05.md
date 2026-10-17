@@ -5505,7 +5505,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **两向差集皆空**；passed 差 12＝新档格数。落库前 `tests/unit/security` 1149 passed、八项常驻守卫 86 passed。
     - **本批撞出的两条，登记不动手**：① 批 62 的活体档打印 `↔`，GBK stdout 下 `UnicodeEncodeError` 直接
       退出码 1——**红指向脚本自己而不是产品**；正解是让 `tests/manual/*` 自己 `sys.stdout.reconfigure`，
-      那是全仓活体档一起做的一批，别在本批顺手改十几档。② 形状格头一版按 key 名 `"format"` 全仓扫，
+      那是全仓活体档一起做的一批，别在本批顺手改十几档。**✅ 已下一批落掉＝§6-294（`089f7237`＋`aa3fb145`）**：
+      现读 166 档里 27 档该钉未钉，全量补上并配一枚零容忍守卫（含双向自证与"钉在 `import sys` 之后"的位置格）。
+      ② 形状格头一版按 key 名 `"format"` 全仓扫，
       被三处无关同名字段自咬（`media/config.py`／`neurflow/drama_nodes.py`／`security/arg_grounding.py`），
       改成钉代码形态（定义数＋位置）才咬对——形态集 241"按词扫源码"的**按键名**变体。
     - **仍开**：命令键那一支仍是 `next(...)`（一个调用只有一条命令，另一问句）；远端 schema 里
@@ -5539,3 +5541,35 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       几个键"——那批键目前一个都没有；乙把"不采信"从一句隐含现状变成会红的判据与注释，成本一格判据＋一段注释。
       不可逆点：无（两态都可回退）；但**甲一旦落地，撤回要让所有已配置 server 重新对齐**——这才是真正的不可逆面。
     - **本会话不实施**：乙 也要动生产注释与判据，属代码批；甲 更要等人接真 server。票面到此完备。
+
+294. **活体脚本自己钉住 stdout 编码：退出码不再由一行 `print` 决定（✅ `089f7237` 生产+判据+活体 / `aa3fb145` 子集 623→624）** 🟢 —— 按价值排序接的第三件（② 要先取证立票、① 已立票，先做这件范围明确的）。
+
+    - **危害不是"输出难看"**：`tests/manual/*.py` 的证据形态就是**退出码 + 那几行 PASS/FAIL 读数**，
+      而它们把 detail 串直接 `print`；本机默认 stdout 是 cp936，字面量里的 `↔ ✓ ⇒` 编不出去 ⇒
+      `print` 抛 `UnicodeEncodeError`、**退出码 1**——"有没有腿 FAIL"由一行打印决定。本会话撞两次：
+      批 62 的 `pathNameListsOneSource_b62.py` 第 6 腿（复跑它时）、批 66 的探针（`✓`）。
+    - **复核实状（AST 现读 166 档 `tests/manual/*.py`）**：含不可 cp936 字面量且**已**钉＝36 档（安全，本批不动）；
+      含而**未**钉＝**27 档**（真 offender，全量补上）。取仓内既有那一行写法
+      `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`，放模块顶层、`import sys` 之后
+      （7 档原本没在顶层 `import sys`，各多一行）。为什么不在调用方带 `PYTHONIOENCODING`：
+      **判据的成立不该依赖"谁怎么起的"**；`errors="replace"` 是有意——编码只该影响显示，不该影响判定。
+    - **判据 3 格**（`tests/unit/ci/test_manualScriptStdoutEncoding.py`，零容忍、不留基线）：主格（含这类字面量
+      又没钉＝红）＋探测器双向自证（真调用要认下来，**写进注释/字符串里的字面话不算钉住**——单向探测器
+      会把合规档报成违规，或反过来成为橡皮章）＋位置格（钉在 `import sys` 之前＝跑到那行 NameError，
+      函数体内的调用不会在打印前生效；形态集 247 那族的静态版）。改前 1 failed / 2 passed，改后 3 passed。
+    - **活体是真跑**：`PYTHONIOENCODING=gbk` 起 b62 ⇒ 改后 6 腿全 PASS、退出码 0；
+      反证（同一份脚本、只摘掉那一行的临时副本）⇒ 前 5 腿 PASS、第 6 腿打印处 `UnicodeEncodeError`、
+      退出码 1，尾部 traceback 指着 `print` 那行——就是原坏形状。临时副本即删。27 档 `py_compile` 全过。
+    - **A/B（两侧仓外 worktree，本批 28 档铺入本批侧；选择集 ci＋security＋skills）**：
+      基线 `6 failed / 2657 passed`、本批侧 `6 failed / 2660 passed`，失败集 6 vs 6 **两向差集皆空**。
+      **顺手把两侧同红的那 6 条记进常驻红小账**（免下次误归因）：5 条
+      `test_npc_script_interpreter_reachability.py`——本机 node 起进程时原生断言
+      `ncrypto::CSPRNG(nullptr, 0)` 崩（python 侧退出码 0、node 侧 134，stderr 是 V8 栈回溯）；
+      1 条 `test_subQuantumSpinClockGate.py`（时钟量子门，负载敏感）。都不在受保护子集内。
+    - **覆盖边界写在守卫注释里（重要）**：这格管的是**字面常量**里的不可编码字符——静态可判、也正是撞到的两例。
+      运行时才决定内容的字符串（工具回包、模型文本、路径）仍可能不可编码，那类要逐档实跑才证得了。
+      所以它是"新档不许再漏"的门，**不是**"历史全清"的断言；不写这句，下一批会拿它去证一个它证不了的东西。
+    - **本批自己的一格数字错（同族第五遭）**：子集那笔正文写 `+7/−0`，实为 `+6/−0`——原末行缺换行符，
+      追加的 7 行有一行与它合并。**按"我写了几行"落字、而不是先读该笔 `--cached --numstat`** 就是形态集 223
+      那条次序纪律的复发；`test_commitLocClaimMatchesOwnNumstat` 当场抓回，未推送窗口内带路径 amend 改正文
+      （tree 逐字节一致）。
