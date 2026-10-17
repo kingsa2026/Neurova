@@ -5738,6 +5738,18 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **划闭与仍开**：**§6-297 由本笔划闭**（乙落地）。**乙的第三刀留在台账**——面板列表面把
       "只注册在端点单例、又不是 router 成员"的工具画成可得（活体读数：列表面 74 条含探针，而主路报
       未知工具），要动 `list_all_tools` 两个源的归属与前端渲染，与"拆恒空档"是两个落地面，不静默遗留。
+      **该登记 10-17 复核过一遍（五腿只读探针全 PASS，探针即用即删），形状比原句更具体——两条缺陷同在一个端点：**
+      ① **同一工具的可执行性取决于 agent 在场与否**：`POST /tools/execute` 带着只注册在端点单例里的工具，
+      agent 在场回 `{code:1, error:"未知工具: b71_singleton_only"}`（咽喉里已无内层引擎档），把 agent 摘掉
+      则回 `{code:0, result:{ran:true, echoed:"{'x': 1}"}}`（走批 69 那条已接治理的引擎直调）；
+      而 `GET /tool-layers/tools` 的回包键只有
+      `['description','name','parameters','sandbox_required','server_id','source','tool_id']`——**没有任何字段**
+      表达"这一条此刻能不能执行"，前端据此把它画成可点（§6-272 读面同族，但这里连标都没处标）。
+      ② **源 1 的 `source` 值是写死的**：`list_all_tools` 对动态注册来的条目默认 `tool_source = "builtin"`
+      （只有 `is_public`／`owner` 才改写），所以探针在列表面里的读数就是 `source:"builtin"`——
+      动态注册的工具被标成内置，与"源 1＝ToolEngine 动态注册"这行 docstring 自相矛盾，也解释了 ① 为什么没人发现。
+      修法两条都要带：可达性要么按主路真链条算出来再如实标（含"取决于是否有 agent"这一维），要么干脆不列；
+      `source` 必须来自注册方自己的声明，不在列表面里替它猜。
       其余仍开＝§6-293（远端 `format` 采信）、`mcp_client.py:598-603`（先立探针票）、
       命令键那一支仍是 `next(...)`、`ExecutionEngine` 的 plan/execute_tool 子树疑似整体无消费者
       （本批只动了它的 `register_tool` 一层判据归属，子树要按死码档案五字段单独出票）。
