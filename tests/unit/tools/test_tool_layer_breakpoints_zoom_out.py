@@ -7,7 +7,7 @@ TDD 红灯测试: 工具层断点 zoom-out 根因修复
 断点编号对照:
   C1  原生模式 tool_result 丢失
   C2  tool_pipeline.py 死代码
-  C3  ToolGuard 完全绕过
+  C3  ToolGuard 绕过（改判：裁决收在治理单源，见 §6-295）
   C4  ToolEngine stub 遮蔽（本测试不直接覆盖，由 import 路径保证）
   H1  touch() 签名不匹配静默失败
   H2  orchestrator 绕过 _unpack_skill
@@ -190,94 +190,10 @@ class TestToolLifecycleManagerUnified:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Wave C — ToolGuard 接线 (C3/M5)
+# Wave C — 引擎级守卫接线 (C3/M5)：该契约已被 §6-295 乙案推翻
+# （裁决只在治理那一处，引擎内层不留第二道门）。旧格子随之退役，
+# 续钉的新形状见 tests/unit/execution/test_engineAdjudicationLivesOnlyInGovernance.py
 # ══════════════════════════════════════════════════════════════════
-
-class TestToolGuardWired:
-    """C3/M5: ToolEngine.execute/execute_with_safeguards 必须实际调用 tool_guard.guard()。"""
-
-    def test_execute_calls_guard_before_execution(self):
-        """execute() 必须在调用工具函数前先调用 tool_guard.guard()。"""
-        from neurova.execution_engine.tool_engine import ToolEngine
-
-        engine = ToolEngine()
-        # 注册一个工具
-        def dangerous_tool(**kwargs):
-            return {"executed": True}
-        engine.register_tool("dangerous", dangerous_tool, {})
-
-        # mock guard 验证被调用
-        guard_called = []
-        original_guard = engine.tool_guard
-
-        class TrackingGuard:
-            def guard(self, tool_input="", context=None, **kwargs):
-                guard_called.append(True)
-                from neurova.security.tool_guard import ToolGuardResult
-                return ToolGuardResult(safe=True)
-
-        engine.tool_guard = TrackingGuard()
-        try:
-            result = asyncio.run(engine.execute("dangerous", {}))
-            assert guard_called, "execute() 必须调用 tool_guard.guard()"
-        finally:
-            engine.tool_guard = original_guard
-
-    def test_execute_with_safeguards_calls_guard(self):
-        """execute_with_safeguards 必须调用 tool_guard.guard()。"""
-        from neurova.execution_engine.tool_engine import ToolEngine
-
-        engine = ToolEngine()
-
-        def safe_tool(**kwargs):
-            return {"ok": True}
-        engine.register_tool("safe_tool", safe_tool, {})
-
-        guard_called = []
-
-        class TrackingGuard:
-            def guard(self, tool_input="", context=None, **kwargs):
-                guard_called.append(True)
-                from neurova.security.tool_guard import ToolGuardResult
-                return ToolGuardResult(safe=True)
-
-        engine.tool_guard = TrackingGuard()
-        try:
-            asyncio.run(engine.execute_with_safeguards("safe_tool", {}))
-            assert guard_called, "execute_with_safeguards 必须调用 tool_guard.guard()"
-        finally:
-            pass
-
-    def test_guard_blocks_unsafe_tool(self):
-        """guard 返回 should_block=True 时应阻止执行。"""
-        from neurova.execution_engine.tool_engine import ToolEngine
-        from neurova.security.tool_guard import ToolGuardResult
-
-        engine = ToolEngine()
-
-        def rm_rf(**kwargs):
-            return {"deleted": "everything"}
-        engine.register_tool("rm_rf", rm_rf, {})
-
-        class BlockingGuard:
-            def guard(self, tool_input="", context=None, **kwargs):
-                return ToolGuardResult(safe=False, tool_name="rm_rf")
-
-        engine.tool_guard = BlockingGuard()
-        # 应抛 ValueError（具体异常，非通用 Exception）— 守卫阻止时 engine.execute 抛 ValueError
-        with pytest.raises(ValueError, match="安全守卫阻止"):
-            asyncio.run(engine.execute("rm_rf", {}))
-
-    def test_default_guard_uses_correct_api(self):
-        """DefaultGuard 的返回值必须有 .safe 属性（不是 .is_safe）（M5）。"""
-        from neurova.execution_engine.tool_engine import ToolEngine
-        engine = ToolEngine()
-        guard = engine.tool_guard
-        result = guard.guard(tool_input="test", context={})
-        # 必须有 .safe 属性，不是 .is_safe
-        assert hasattr(result, 'safe'), (
-            f"guard 结果必须有 .safe 属性（M5 API 统一），实际属性: {dir(result)}"
-        )
 
 
 # ══════════════════════════════════════════════════════════════════

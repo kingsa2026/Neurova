@@ -78,7 +78,6 @@ def mock_security_system(engine):
     1. _cognitive_security.check_input_safety 是 AsyncMock
     2. _cognitive_security.check_output_safety 是 AsyncMock
     3. _constitution_engine.evaluate_tool_call 是普通 Mock
-    4. tool_guard.guard 是普通 Mock
     """
     from unittest.mock import Mock, AsyncMock
     
@@ -95,13 +94,6 @@ def mock_security_system(engine):
     engine._constitution_engine = Mock()
     engine._constitution_engine.evaluate_tool_call = Mock(
         return_value=Mock(is_compliant=True, compliance_score=1.0, details=[])
-    )
-    
-    # ToolGuard
-    engine.tool_guard = Mock()
-    # 规范 API 检查 should_block（Mock 自动属性会使其 truthy→误拦），必须显式 False
-    engine.tool_guard.guard = Mock(
-        return_value=Mock(is_safe=True, should_block=False, findings=[])
     )
 
 
@@ -166,14 +158,14 @@ class TestToolEngineInit(unittest.TestCase):
     
     def test_init_default(self):
         engine = ToolEngine()
-        self.assertIsNotNone(engine.tool_guard)
+        self.assertFalse(hasattr(engine, "tool_guard"))
         self.assertEqual(len(engine._tools), 0)
         self.assertEqual(len(engine._tool_funcs), 0)
     
-    def test_init_with_custom_guard(self):
-        custom_guard = Mock()
-        engine = ToolEngine(tool_guard=custom_guard)
-        self.assertEqual(engine.tool_guard, custom_guard)
+    def test_init_rejects_guard_seam(self):
+        """反向钉：`tool_guard` 这个形参不许回来——回来就是第二个裁决口（§6-295 乙）。"""
+        with self.assertRaises(TypeError):
+            ToolEngine(tool_guard=Mock())
 
 
 class TestToolRegistration(unittest.TestCase):
@@ -481,66 +473,6 @@ class TestInvocationHistoryExtended(unittest.TestCase):
             invocation = self.engine.get_invocation(history[0].invocation_id)
             self.assertIsNotNone(invocation)
             self.assertEqual(invocation.tool_name, "test_tool")
-
-
-class TestToolGuardIntegrationExtended(unittest.TestCase):
-    """扩展的 ToolGuard 集成测试（适配多租户逻辑）"""
-    
-    def setUp(self):
-        self.mock_guard = Mock()
-        self.engine = ToolEngine(tool_guard=self.mock_guard)
-        self.tool = create_test_tool()
-        
-        # 使用辅助函数统一 mock 安全系统
-        mock_security_system(self.engine)
-        
-        async def handler(**kwargs):
-            return "result"
-        
-        # 注册工具
-        self.engine.register_tool(self.tool.name, handler)
-    
-    def test_execute_with_safeguards_guard_allows(self):
-        """测试 ToolGuard 允许安全操作"""
-        # 模拟 ToolGuard 返回安全结果
-        self.mock_guard.guard.return_value = Mock(
-            is_safe=True,
-            findings=[]
-        )
-        
-        import asyncio
-        result = asyncio.run(
-            self.engine.execute_with_safeguards(
-                tool_name="test_tool",
-                parameters={},
-                user_id="test_user"
-            )
-        )
-        self.assertEqual(result, "result")
-    
-    def test_execute_with_safeguards_no_guard(self):
-        """测试没有 ToolGuard 的情况"""
-        engine = ToolEngine(tool_guard=None)
-        tool = create_test_tool()
-        
-        # 使用辅助函数统一 mock 安全系统
-        mock_security_system(engine)
-        
-        async def handler(**kwargs):
-            return "no_guard_result"
-        
-        # 注册工具
-        engine.register_tool(tool.name, handler)
-        
-        import asyncio
-        result = asyncio.run(
-            engine.execute_with_safeguards(
-                tool_name="test_tool",
-                parameters={},
-                user_id="test_user"
-            )
-        )
-        self.assertEqual(result, "no_guard_result")
 
 
 class TestToolDiscoveryExtended2(unittest.TestCase):

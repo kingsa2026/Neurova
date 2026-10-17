@@ -487,7 +487,32 @@ async def execute_tool(body: ToolExecuteRequest):
         except Exception as e:
             logger.warning("工具经咽喉执行异常: %s", e, exc_info=True)
 
-    # 无 agent/执行器：评测台架与脚本路径，退回引擎直调（无票据面可言）
+    # 无 agent/执行器：评测台架与脚本路径，退回引擎直调（无票据面可言）。
+    # 这一支是全仓唯一不经咽喉的执行路，治理预检就得在这里补上——取数一律经那个单源函数，
+    # 不在此复刻链（沙箱路由/审批/审计都留在咽喉）。动态来源那一侧按 P0-2／M4 规则用
+    # `scan_all=True`：否则动态工具把参数换个键名（不叫 command/path）就绕过预检。
+    # 这一支没有会话可以问人，所以 ASK 与 SANDBOX 一律按拒绝处理——只朝保守方向偏，不改主路。
+    from neurova.security.governance import GovernanceDecision, get_governance
+
+    try:
+        verdict = get_governance().evaluate_tool_call(
+            body.tool_name, body.arguments, scan_all=True
+        )
+    except Exception as e:
+        logger.warning("治理预检不可用 %s（该支无审批人，fail-closed）: %s", body.tool_name, e)
+        return {
+            "code": 1,
+            "error": f"治理预检不可用，已拒绝执行: {e}",
+            "data": {"execution_time": time.time() - start},
+        }
+    if verdict is not None and verdict.decision != GovernanceDecision.ALLOW:
+        logger.warning("无 agent 直调被治理拒绝 %s: %s", body.tool_name, "; ".join(verdict.reasons))
+        return {
+            "code": 1,
+            "error": "被治理策略拦截: " + "; ".join(verdict.reasons),
+            "data": {"governance": verdict.to_dict(), "execution_time": time.time() - start},
+        }
+
     try:
         engine = get_tool_engine()
         result = await engine.execute_with_safeguards(
