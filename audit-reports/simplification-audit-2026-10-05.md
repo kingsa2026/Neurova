@@ -2862,7 +2862,7 @@
       ③ **台账号会被"未提交的在途注释"预占**——我先写 §6-163，落账前查台账是空的，但 `neurova/core/turn_context.py` 的在途改动里已经写着 163；改指 164，`neurova/api/endpoints/plugin.py` 的在途注释又已写着 164。**只查 HEAD 与台账不够**，要连未跟踪/未提交的在途件一起查；本批最终用 §6-166（现查：台账 0 命中、树内 8 处全是我自己那批）。教训是号次在"别人提交那一刻"才真正归属，写码注释里的引用面比台账更容易被忽略。
       ④ **405 不是 404**（`/plans/sessions` 只收 POST），以及**身份依赖不止一只对象**（`console.py` 用 `neurova.api.deps.get_current_user`，与 `api.auth` 那只不同对象，只覆盖后者拿 401）——两枚都是 §6-157/§6-151 同族的替身口径坑，本批在第一版活体脚本里现场撞上。
     - **净 LOC（提交内 `git show --numstat` 复算，与正文逐字一致）**：生产池 **+5/−2242（净 −2237）**；判据池 **+305/−1338（净 −1033）**；文档池 **+37/−24**；基建池 **+8/−0**（7 行说明 + 1 条路径，按整档 CRLF 落）。工作树同时有别会话在途件（`turn_context.py`、`plugins/*`、`chat.py`、媒体回收站一批、11 locale），两笔均逐路径 `--only`，未用 `git add -A`。
-    - **仍留在案上（不在本批顺手做）**：`core/multi_agent_manager.py`(453)——它是唯一会调 `decompose_intent/execute_plan` 的地方（`:221-223`），但走的是鸭子类型注入、不 import 那三只，故本批退役没留下悬空 import；它自身生产零消费者，且那条 `else` 分支在没人注入时直接回 `{"success": True}`（又一次"没执行却报成功"），另案待裁。`api_router` 整模块零生产 import（§6-135）与 `media/config.py`、`language/` 那几格需人裁仍未裁。
+    - **仍留在案上（不在本批顺手做）**：`core/multi_agent_manager.py`(453)——它是唯一会调 `decompose_intent/execute_plan` 的地方（`:221-223`），但走的是鸭子类型注入、不 import 那三只，故本批退役没留下悬空 import；它自身生产零消费者，且那条 `else` 分支在没人注入时直接回 `{"success": True}`（又一次"没执行却报成功"），另案待裁——**此案已取证＝§6-308**（整座岛零 import，三态票推荐乙）。`api_router` 整模块零生产 import（§6-135）与 `media/config.py`、`language/` 那几格需人裁仍未裁。
 
 168. **渠道双向语音立项后的第一段：出站音频接上（缺口②），顺带根修飞书那层从没跑过的上传（✅ 缺陷 `9b547ea2`、能力 `8f1688fe`、子集 `0e65fb39`）** 🟢
     - **立项背景**：任务 #27 的三项缺口由 §6-108 记档（当时判"新能力，需用户立项"）。本批按"开始做渠道双向语音"起手，先做**出站**这一段——理由是复算后它的根因最干净：`tests`/`neurova` 里传输层早就支持类型化回发（`manager.send_message(message_type=...)` 在 `manager.py:217-263`，全部适配器签名齐备且有契约测试 `test_b4_gen1_send_signature.py` 钉着），而回合的 TTS 产物**已经生成好了被丢掉**：`post_chat_pipeline._step_generate_tts:1245` 落盘 WAV → `chat_pipeline.py:2933` 放进 `resp["audio_path"]` → `channel_router` 只取 `resp["text"]`，回发也不传类型。所以这不是"再造一套出站机制"，是把断掉的两处调用点接上。
@@ -6024,6 +6024,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **D3** `MultiAgentManager.initialize_shared_components` 全仓零调用，`_plan_orchestrator` 恒 None ⇒
       `multi_agent_manager.py:221-223` 那条"共享小脑执行"支路恒不命中，而 `:6` 的 docstring 仍宣称三件套共用；
       `shared_brainstem` 只活在那次批量入库的测试里。
+      **⇒ 已取证＝§6-308**：范围是整座岛（453 行连 import 都没有），不是那一条支路；三态票推荐乙。
       **D5** `core/flow_orchestrator.py` 与 `collaborate/workflow/orchestrator.py` 是两份同功能实现，**未比对**（教义第 6/7 条下一个对象）。
     - **等裁两问**（各带影响面，见档案第 8 节）**已裁定并已落地＝§6-304**：① A3 的退役范围取甲（只收 shared_core 那侧，legacy 356 行留作下批）
       还是乙（同批连 legacy 模块与其专用测试一起退）——推荐**乙**，甲会正好留下本卷在诊断的形态"实现还在、能到它的路全没了"；
@@ -6083,8 +6084,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `ff4f34a` 生产池 **+5/−357 ＝ 净 −352**、测试/基建池 **+27/−0**；`819713eb` 生产池 0/0、测试/基建池 +11/−0。
       本批生产池合计**净 −735**，无一处净增为正。
     - **仍开**：D1 **探针票已跑＝§6-305，丙案已落地＝§6-306**（甲接写侧／乙整把退役仍等裁）；
-      D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
-      "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）；
+      D3（`MultiAgentManager` 整座岛：**已取证＝§6-308**，三态票推荐乙）；D5（两份 FlowOrchestrator 未比对）；
       **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——已裁甲并落地＝§6-307（同族第二条
       `POST /meta/skills/match` 一并修）**。
     - **本会话下一枚空号现查 §6-305**（写前必须现场重取；本笔落库时该读数为 304）。
@@ -6225,3 +6225,64 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D3、D5；
       真做"按分类/状态筛技能"与"取前 N 条匹配"都要先在 manager 那侧立单源，属另票。
     - **本会话下一枚空号现查 §6-308**（写前必须现场重取；本笔落库时该读数为 307）。
+
+308. **批 80 · D3 取证完毕：`MultiAgentManager` 是一整座岛，不是"一条恒不命中的支路"（🔴 三态票，推荐乙；取证不实施）** 🟡 —— §6-303/§6-304 记的 D3、以及 §6-157 时代 line 2865 那句"另案待裁"，今天一并量清；用户 2026-10-18 点"只读取证"。本卷零改码。
+
+    - **原登记太窄**：D3 写的是"`initialize_shared_components` 零调用 ⇒ 那条共享小脑支路恒不命中"。
+      实测范围大一整圈：**整座 `core/multi_agent_manager.py`（453 行）连被 import 都没有**。
+      探针读数（`.tmp_*` 即用即删）：真 `create_app()` + lifespan 跑完 9 个真端点（含 `POST /api/v1/agents` 真建一个 agent、
+      真 `file_read` 执行、agents/skills/marketplace/memory/monitor/tool-layers 各一路，全 200）之后，
+      `neurova.core.multi_agent_manager` **不在 `sys.modules` 里**（`READOUT_B …False`）；
+      主动 import 它并给 9 个公开方法包计数 wrapper，再跑同一批真请求 ⇒ **9 个键全 0**（`READOUT_C`）。
+      静态同向：`grep -rn "MultiAgentManager|multi_agent_manager" neurova/` 剔自身文件后 **0 命中**，
+      `neurova/core/__init__.py` 不再导出它，无 `import_module`/`__import__` 动态装载路径。
+    - **来历（形态分水岭）**：`get_multi_agent_manager` 这个符号在 `neurova/` 的 git 史里只命中
+      **`7835c367`(2026-06-04「pyc骨架恢复 - 全量导入修复」) 一次** ⇒ **引入即孤岛**，不是"曾被消费后被摘"。
+      与批 75 那份档案里 A1/A2 同一出生事件（本卷 §4 事件分组那条"四次批量事件的未收尾"再添一名成员）。
+    - **它的执行面是假的，不只是空的**：`execute_with_shared_cerebellum` 在不注入共享组件时（生产唯一可能的形态，
+      因为注入方零调用）走 `else` 分支，实测回
+      `{'success': True, 'task': '读一下 README', 'cognitive_result': {'agent_id': …,'processing_time': 1792258480.09}}`
+      ——**没执行任何东西却报成功**；`_plan_orchestrator`／`_execution_engine`／`_infrastructure` 三件套实值
+      `None／None／None`，而 `:6` 的 docstring 仍宣称"所有 Agent 共用小脑（PlanOrchestrator）、脑干（ExecutionEngine）和脊髓（Infrastructure）"。
+      这正是 §6-157 那批退役三套编排器之后剩下的"消费方壳子"：三只都没了，喊它们的那句还在。
+    - **它还是 agent 工作区的第二份表示**（教义 第 6 条）：`get_workspace_dir()` 回 `<set_base_workspace_dir 传的目录>/<agent_id>`，
+      而真单源是 `core/agent_workspaces.get_agent_workspace_dir()`（`NEUROVA_AGENT_WORKSPACES_DIR` 可注入、默认落项目根，
+      被 `api/endpoints/agent.py:404/:620` 真消费）。同一 agent_id 两路实测不同源
+      （`READOUT_F parallel=…\agents\d3-agent  single_source=…\agent_workspaces\d3-agent  相等=False`）。
+    - **唯一读它的测试自己也在烂**：`tests/integration/test_multi_agent_manager.py`（494 行、28 格）今天
+      **`20 failed / 8 passed`**，且失败原因全是"测试引用了模块里没有的东西"——`module … does not have the attribute 'Workspace'`(8)、
+      `initialize_shared_components() got an unexpected keyword argument 'event_bus'`(3)、
+      `NeurovaAgent.__init__() got … 'persona'`(2)、`'NeurovaAgent' object has no attribute 'is_initialized'`(2)、
+      `'MultiAgentManager' object has no attribute 'agents'`(2)、`execute_with_shared_cerebellum() got … 'input_context'`(1)。
+      该档**不在受保护子集**——与 line 2324 那句"常年绿不说明任何事"合起来读：它既不被 CI 拦，也已经不绿，
+      留着只会让下一个会话把"有 494 行测试"当成"这块有人用"。
+    - **反向守卫前置（步骤 2）**：`grep -rE '不得删|不是死代码|防止.*误删|禁止删除' tests/` 在
+      multi_agent/agent_manager 相关面上 **0 命中** ⇒ 没有"显式禁止删除"的裁决挡路。
+      历史对向判例也有：line 2865 与 §6-157 那批都是"实现与消费方同批退役"的先例。
+    - **现役替代（验实质，不只看存在）**：agent 注册与清单 = `api/endpoints/agent.py` ＋ `agent_config.py`（真存储、真鉴权
+      `can_access_agent/resolve_agent_owner`）；per-agent 工作区 = `core/agent_workspaces`（唯一装配点，13 处手抄收口的产物）；
+      多 Agent 协作与执行 = `collaboration/`（room_bus、neurflow DAG、`api/endpoints/agent_communication_api.py`）。
+      本岛**不提供任何上述三者没有的能力**——它提供的是一条假的"共享小脑执行"回包。
+    - **三态票（推荐乙）**：
+      - **甲｜修好它**：把三件套真接进去。今天接无可接——`PlanOrchestrator` 那三套已在 §6-157/166 退役，
+        要接得先重造编排层。代价最大且与既有裁定相反，不建议。
+      - **乙｜整岛退役（推荐）**：删 `core/multi_agent_manager.py`(453) ＋ `tests/integration/test_multi_agent_manager.py`(494)，
+        合计约 **−947 行**；同批改准 `docs/` 里指向它的**活跃层**陈述（`01-architecture/*`、`04-plans/stub-cleanup-plan.md` 等，
+        带日期的 `05-reports/`、`09-dev-progress/` 按档案纪律不回改）。不可逆点＝"多 Agent 共享一套小脑/脑干/脊髓"这个**设想**
+        从此没有代码载体——但它今天也没有实现载体，只有假回包，所以实际失去的是一张骨架。
+        落地按红线：先立判据（"生产装配跑完一轮真流量后，该模块不得被 import"是可做成的形状格），再删，
+        并同批复跑 `scripts/scan_docs_refs.py` 防活跃层悬空。
+      - **丙｜只把假回包与 docstring 改如实**（最小）：留岛、只把 `{"success": True}` 那条改成显式
+        `not_supported`/点名未接线，docstring 删掉三件套宣称。它治的是"谎"，不治"岛"。
+      - 与 §6-306 同一口径：**丙只是把谎改成诚实的话，乙才是不留第二份表示**；本岛连"诚实的读侧"都没有
+        （零 import），所以推荐直接乙，不必先做丙。
+    - **顺带抓到一条自己的坑（D8，与本票无关但必须记）**：本会话几支活体探针只调了
+      `isolatedDataRoot()`，没调同一档里已有的 `isolatedAgentWorkspaces()`——而 `_liveVerifyIsolation.py:64-67`
+      那段注释写的正是这个坑（"只调 `isolatedDataRoot()` 的活体会把记忆写进仓内真 `agent_workspaces/`"）。
+      实测确实落了：`POST /api/v1/agents` 那一路在仓根新建了两个 workspace 目录
+      （`406d99a4`、`b8c501a4`，6 个文件 mtime 全在探针运行窗口内）。已按"只删本会话创建、且已取证"的口径清掉，
+      仓根只剩此前就存在的 `default`／`kai`／`test`；`data/` md5 `d1ef4e99bd9f` 全程不变。
+      **待办（另票）**：`isolatedDataRoot()` 是否该默认连 agent 工作区根一起隔——该隔就该由单点保证，
+      不该靠写探针的人记得（本仓"手抄一份"的老病就是这个形态）。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D5、§6-293、D8 那条单点待办。
+    - **本会话下一枚空号现查 §6-309**（写前必须现场重取；本笔落库时该读数为 308）。
