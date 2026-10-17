@@ -31,7 +31,7 @@ from neurova.security.tool_guard import (
     GuardSeverity,
     ToolGuardEngine,
     looksLikePathValue,
-    pathValuesFromParams,
+    pathValuesForTool,
 )
 
 # P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows 走
@@ -194,17 +194,20 @@ class GovernanceResult:
 # 参数语义两把键清单与路径形状判定**不在本文件另抄一份**：取自 tool_guard 的单源
 # （§6-255 甲案）。这里曾各有一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`
 # 和一条 `_PATH_LIKE`，与守卫那边的口径各演化各的——同一个问题两个答案。
-def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
+def extract_adjudicable_params(tool_name: Any, params: Any, scan_all: bool = False) -> tuple:
     """从工具参数中提取可裁决内容 (command 文本, `[(键名, 路径值), ...]`)。
 
+    工具名是**必需**的第一参数：路径值要靠它的 schema 声明来认（§6-284 丁）。只拿 params 就
+    只能问名字表，于是 `exec_command.workdir` 这种"声明了但没登记进名字表"的键在进入引擎之前
+    就被丢掉——咽喉再怎么逐值也拿不到它。
     scan_all=True（MCP 等动态来源）：全部参数整体序列化进 command，
     不依赖约定键名——否则动态工具换个参数名即可绕过预检（P0-2 / M4）。
-    scan_all=False：保持既有约定键名提取语义（键名清单见 `tool_guard`）。
+    scan_all=False：声明优先、名字表兜底（取数口见 `tool_guard.pathValuesForTool`）。
 
     路径值这一格过去是 `next(...)`——**只取第一个**，于是 `{"file_path": ..., "path": ...}` 这种
     一次调用带两条路径参数的形状，第二条在治理这一层就已经消失，守卫再怎么逐值也拿不到它
-    （§6-284 甲案的第二命中点）。取数现在与守卫共用 `pathValuesFromParams` 那一个口，
-    键名清单不再有两份写法。命令文本仍是一元（`next`）：一个调用只有一条命令，那是另一问句。
+    （§6-284 甲案的第二命中点）。取数与守卫共用同一个口，键名清单不再有两份写法。
+    命令文本仍是一元（`next`）：一个调用只有一条命令，那是另一问句。
     """
     if not isinstance(params, dict) or not params:
         return "", []
@@ -224,7 +227,7 @@ def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
         ),
         "",
     )
-    return command, pathValuesFromParams(params)
+    return command, pathValuesForTool(tool_name, params)
 
 
 class GovernancePolicy:
@@ -318,7 +321,7 @@ class GovernancePolicy:
             )
 
         # 每个路径值都按它**自己的键名**进参数面，交给守卫逐值裁决；键名与守卫共用同一个取数口
-        # （`extract_adjudicable_params` → `pathValuesFromParams`），这里不再另写一份认键的循环。
+        # （`extract_adjudicable_params` → `pathValuesForTool`），这里不再另写一份认键的循环。
         tool_params: Dict[str, Any] = {"command": command}
         for name, value in path_values:
             tool_params[name] = value
@@ -436,7 +439,7 @@ class GovernancePolicy:
         if declaration_verdict is not None:
             return declaration_verdict
 
-        command, path_values = extract_adjudicable_params(params, scan_all=scan_all)
+        command, path_values = extract_adjudicable_params(tool_name, params, scan_all=scan_all)
         if not command and not path_values:
             return None
         return self.evaluate(

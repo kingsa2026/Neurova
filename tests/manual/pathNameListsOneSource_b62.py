@@ -82,10 +82,15 @@ read("1 清单内键不进命令面",
 
 # ② 治理预检与守卫读的是同一份清单（不再各抄一份）
 def governanceAgreesWithGuard():
-    """真契约是 `(command 文本, file_paths)` 二元组——预检取的键名也来自同一份清单。"""
-    command, paths = governance.extract_adjudicable_params({"file_path": SAFE, "command": "ls -l"})
-    return (paths == SAFE and command == "ls -l",
-            f"预检分出 command={command!r} / path={str(paths)[:60]!r}",
+    """真契约是 `(command 文本, [(键名, 路径值), ...])`——预检取的键名与守卫共用一个取数口。
+
+    §6-284 丁之后：第一项要带工具名（声明要靠它问 schema），第二项由单个字符串变成 `(键,值)` 列表。
+    本腿改判到现契约，钉的东西没变——路径值不得混进命令文本，预检也不得自己另抄一份清单去认键。
+    """
+    command, paths = governance.extract_adjudicable_params(
+        "file_read", {"file_path": SAFE, "command": "ls -l"})
+    return ([v for _k, v in paths] == [SAFE] and command == "ls -l",
+            f"预检分出 command={command!r} / path_values={str(paths)[:60]!r}",
             "路径值混进命令文本，就是它另抄了一份清单")
 
 
