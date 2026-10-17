@@ -6025,8 +6025,64 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `multi_agent_manager.py:221-223` 那条"共享小脑执行"支路恒不命中，而 `:6` 的 docstring 仍宣称三件套共用；
       `shared_brainstem` 只活在那次批量入库的测试里。
       **D5** `core/flow_orchestrator.py` 与 `collaborate/workflow/orchestrator.py` 是两份同功能实现，**未比对**（教义第 6/7 条下一个对象）。
-    - **等裁两问**（各带影响面，见档案第 8 节）：① A3 的退役范围取甲（只收 shared_core 那侧，legacy 356 行留作下批）
+    - **等裁两问**（各带影响面，见档案第 8 节）**已裁定并已落地＝§6-304**：① A3 的退役范围取甲（只收 shared_core 那侧，legacy 356 行留作下批）
       还是乙（同批连 legacy 模块与其专用测试一起退）——推荐**乙**，甲会正好留下本卷在诊断的形态"实现还在、能到它的路全没了"；
       ② D1 的监控事件流是要接线（让告警真进总线）还是承认放弃该能力。
     - **§9.1 表本批未追加**（沿 §6-302 那格的口径：该表自 §6-285 起再没追加过，不在这里再造双面口径）。
     - **本会话下一枚空号现查 §6-304**（写前必须现场重取；本笔落库时该读数为 303）。
+
+304. **批 76 · ExecutionEngine 孤儿面整档退役＋legacy 线性链引擎收口（✅ `a6052a38` shared_core 侧／`ff4f34a` legacy 侧／`819713eb` 子集 631→632）** 🟢 —— §6-303 档案的落地笔；用户 2026-10-17 就 A3 拍**乙**（同批连 legacy 模块一起退），就 D1 拍"立探针票后详议"。
+
+    - **两笔的分割线是依赖，不是规模**：笔 1 拆掉 shared_core 那侧的孤儿装配（`_init_components` 不再
+      `WorkflowEngine()`／`ToolEngine()`），legacy 模块自此**全仓零引用**，笔 2 才删得动它那 356 行。
+      先删模块会让笔 1 带着一个悬空 import 出门；只删笔 1（甲案）就正好留下本卷在诊断的形态
+      "实现还在、能到它的路全没了"。
+    - **删了什么**：`ExecutionEngine` 类上 14 条孤儿方法（plan 子树 6 条＋`execute_tool`/`register_tool`＋
+      `execute_workflow`/`_load_neurflow_workflow`＋执行台账三条读口＋`set_event_bus`/`_call_llm`）、
+      模块顶层 `ExecutionResult`、以及**五个只写不读的实例字段**
+      （`_executions`/`_tool_engine`/`_workflow_engine`/`_event_bus`/`_running`）。
+      该文件 490→106 行；实例字段面实测从 8 个收到 2 个（`_execution_monitor`/`_initialized`）。
+      活路一条没动：`get_execution_monitor()` 仍被 `api/endpoints/monitor.py` 三个端点经
+      `get_execution_engine()` 取用（在册路由 5 条，全部 200）。
+    - **红→绿（原文）**：新档改前 `5 failed, 2 passed`
+      （红在 `test_orphanMethodsAreNoLongerOnThisClass`／`test_moduleNoLongerDeclaresTheOrphanDataclassAndLoader`／
+      `test_initNoLongerWritesFieldsNobodyReads`／`test_resetStillYieldsAFreshFullyBuiltEngine`／
+      `test_docstringNoLongerClaimsTheRetiredDuties`），改后 `7 passed`；笔 2 再加一格，
+      该格在基线树（笔 1 之前的 HEAD）单跑 `1 failed … AssertionError: legacy 引擎文件还在树上`，本树 `8 passed`。
+      两格**设计成两侧都绿**并写明理由：真单例给出监控器（活路对照）、反向钉监控器总线面不被顺手带走。
+    - **红自证**：只把 `neurova/shared_core/execution_engine.py` 带回 HEAD（带唯一 tag 的定向 stash），
+      同选型复跑 **`5 failed, 26 passed`**——失败集恰等于本批那五格。
+    - **活体两侧差分**（`tests/manual/sharedCoreEngineOrphanSurfaceRetired_b76.py`，7 腿）：本批侧全 PASS 退码 0；
+      基线树 `②③a③b FAIL` 退码 1。②给出的正是批 68 当年立票的那个数——**真 app 那一轮 ToolEngine 构造 2 → 1**；
+      ①与⑤两侧同读数（monitor 三端点全 200 且形状一致、列表面同为 73 条、execute 同为 200/code=1）
+      ⇒ 这条差分才叫"删的是死半区"（形态集 278）。
+    - **宽域 A/B**（`tests/unit/execution`＋`workflow`＋`core`＋`api`，两侧仓外 worktree）：
+      基线 `25 failed, 4678 passed, 8 errors in 398.23s` ↔ 本批侧 `24 failed, 4680 passed, 8 errors in 396.77s`；
+      失败集合 33↔32 与汇总逐侧对账相符，**仅本批侧红 0 条 ⇒ 无回归**。仅基线红那条
+      `test_pytest_collection_hygiene.py::test_reverseProofShowsSuchAFileSilentlyDoesNotRun`
+      **不领成本批交付**：两侧各单跑三次皆"一次红两次绿"（它自己起子进程跑 pytest）＝间歇红（形态集 277 的反向纪律）。
+      基线那 4 格收敛契约红没进差集，因为该档在本批被整档退役——差集口径下等价于两侧同绿，
+      这笔账写在正文里而不是让差集替它说话。
+    - **联动三处（同根因全命中点，不留"实现已删、测试还在引用"）**：`test_engine_consolidation.py` 整档退役
+      （六格钉的就是那 93 行转发面）；`test_tool_engine_integration.py` 摘 `TestSharedCoreToolEngineIntegration`
+      两格（断的是"会创建 ToolEngine 并委托注册"＝形状非来路，**在册不等于在产**）；
+      `test_execution_engine_reset.py` 的隔离契约**换见证物**——原来用 `_executions` 当"状态不外泄/初始化完成"的
+      证人，那一面退役后再断 `_executions == {}` 就是恒真空守卫（形态集 251），两条各改钉存活的
+      `_execution_monitor`，`reset_execution_engine` 与 `tests/conftest.py` 的"三层清"注释同步改两层。
+    - **散文与档案命中面**：门面 `neurova/execution_engine/__init__.py` 的"核心模块"清单删去
+      `- workflow_engine: 工作流引擎` 并按本档 `plan_orchestrator` 那段先例补去处说明；
+      `scripts/scan_docs_refs.py` 复跑活跃层零悬空引用（退码 0）。带日期的档案不回改，只登记：
+      `docs/04-plans/stub-cleanup-plan.md:62`、`docs/04-plans/skeleton_files_implementation_progress.md:81`、
+      `docs/05-reports/*`、`docs/09-dev-progress/code_reviews/workflow_engine_review.md`；
+      `docs/01-architecture/04-multi-agent-collaboration.md:1076` 那个 `class WorkflowEngine:` 是另一套签名的设计示例，核过不动。
+    - **两条自己踩到的取数坑（进判据前先记住）**：① 本仓这型文件把 `from __future__` 写在模块说明串**之前**，
+      那份串因此不是 `__doc__`——按 `ast.get_docstring` 取数会拿到 None，把 docstring 判据做成恒红的空判，
+      改成按体位取开头那段裸字符串；② 判"某模块全仓零引用"必须按 **AST 导入通道**，
+      本判据文件自己就带 `_workflow_engine` 字段名清单，按词扫会把它读成"还在引用"（形态集 241／268 同族）。
+    - **净 LOC 逐笔抄 numstat**：`a6052a38` 生产池 **+25/−408 ＝ 净 −383**、测试/基建池 **+362/−194 ＝ 净 +168**；
+      `ff4f34a` 生产池 **+5/−357 ＝ 净 −352**、测试/基建池 **+27/−0**；`819713eb` 生产池 0/0、测试/基建池 +11/−0。
+      本批生产池合计**净 −735**，无一处净增为正。
+    - **仍开**：D1 已裁"先立探针票"——待取证的是"监控告警今天到底发没发出、面板读的是哪一张表"，
+      探针未跑；D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
+      "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）。
+    - **本会话下一枚空号现查 §6-305**（写前必须现场重取；本笔落库时该读数为 304）。
