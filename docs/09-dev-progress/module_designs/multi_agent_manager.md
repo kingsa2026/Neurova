@@ -7,7 +7,7 @@
 > 从未成立，而 `execute_with_shared_cerebellum` 在未注入时回 `success: True`（没执行任何东西却报成功）。
 > 它同时是 agent 工作区的**第二份表示**（单源是 `core/agent_workspaces.py`，同一 agent_id 两路实测不同源）。
 > 同批退役两座专用测试（494 行 28 格、265 行 22 格，均不在受保护子集）。
-> 现役对应物：agent 注册与清单 `api/endpoints/agent.py`＋`core/agent_config.py`、per-agent 工作区
+> 现役对应物：agent 注册与清单 `api/endpoints/agent.py`＋`neurova/agent_config.py`、per-agent 工作区
 > `core/agent_workspaces.py`、多 Agent 协作与回合路由 `collaboration/`（`room_bus`、`room_turn_router`）
 > ＋`api/endpoints/agent_communication_api.py`。本文保留作设计沿革，**不可作事实源**。
 

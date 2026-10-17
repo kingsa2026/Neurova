@@ -96,7 +96,7 @@
 > **2026-10-18 更正（台账 §6-309）**：本节是**设计设想**，不是现状。按此设想落过的骨架
 > `neurova/core/multi_agent_manager.py` 已整岛退役——它全仓零 import，且那条"共用小脑执行"的回落分支
 > 在未注入时直接回 `success: True`（没执行任何东西却报成功）。本节代码块保留作设想记录。
-> 今天真正在跑的多 Agent 面：agent 注册与清单＝`api/endpoints/agent.py`＋`core/agent_config.py`，
+> 今天真正在跑的多 Agent 面：agent 注册与清单＝`api/endpoints/agent.py`＋`neurova/agent_config.py`，
 > per-agent 工作区单源＝`core/agent_workspaces.py`，多 Agent 协作与回合路由＝`neurova/collaboration/`。
 
 
