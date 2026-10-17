@@ -3341,3 +3341,13 @@ tests/unit/api/test_mcpServerFaceNegotiation.py
 # 另记一条取数坑：模块说明串的判据要按**体位**取裸字符串，`ast.get_docstring` 在
 # `from __future__` 写在最前的文件里返回 None——按它取就是恒红的空判。
 tests/unit/execution/test_executionEngineOrphanSurfaceRetired.py
+# 批 78（D1 丙落地，承 §6-305 探针票）：监控器没有写侧时，`/monitor/connections` 那一行不许报 connected。
+# 三格别当装饰删：
+# ① `test_monitorHasNoWritersOnTheRealPath` 是本档第一格（行为格 `test_monitorRowDoesNotClaimConnected...`）的
+#    **条件**——真跑一遍确认 14 个写入方法计数确实全 0。
+#    哪天接了写侧（D1 甲）它先红，逼着连期望一起改判，而不是留一条永远自称"未接线"的新谎。
+# ② `test_alertsReaderIsLiveWhenAProducerWrites` 是那串 0 的**正控**（形态集 283/266）：走未包装类方法写一条
+#    ⇒ 端点读出 1 条。缺了它，"空"分不清"确实没人写"与"读侧坏了"。
+# ③ `test_connectionsDerivesMonitorHealthFromNothing` 按 AST 判代码形态（`status` 实参不许是 `IfExp`），
+#    不按词扫——按词会把解释注释一起扫红。身份必须带 `role=admin`，否则 403 会被读成"没走到"。
+tests/unit/api/test_monitorContractHonestWhenNoProducer.py
