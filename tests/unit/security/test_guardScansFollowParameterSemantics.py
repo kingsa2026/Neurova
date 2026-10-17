@@ -166,7 +166,7 @@ def test_bothConsumersTakeTheSameKeyList():
             f"命令键 {key!r} 的值没进命令扫描面 ⇒ 清单与守卫已分叉")
     for key in paths:
         extracted, picked = governance.extract_adjudicable_params({key: SAFE_PATH})
-        assert picked == SAFE_PATH, f"路径键 {key!r} 没被治理预检当路径取走 ⇒ 清单与预检已分叉"
+        assert picked == [(key, SAFE_PATH)], f"路径键 {key!r} 没被治理预检当路径取走 ⇒ 清单与预检已分叉"
         assert not _evasionFindings("file_read", {key: SAFE_PATH}), (
             f"路径键 {key!r} 的无害值仍被命令面扫 ⇒ 清单与守卫已分叉")
 

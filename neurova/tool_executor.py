@@ -1655,7 +1655,7 @@ class ToolExecutor:
                 }
             from neurova.security.governance import extract_adjudicable_params
 
-            command, file_path = extract_adjudicable_params(params, scan_all=False)
+            command, _pathValues = extract_adjudicable_params(params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
