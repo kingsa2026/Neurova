@@ -3362,3 +3362,7 @@ tests/unit/api/test_monitorContractHonestWhenNoProducer.py
 # ③ 对照格 `test_siblingStatsEndpointStillServes` 设计成两侧都绿：它排除"三条路都不通＝夹具坏了"这种读法，
 #    ①②的红必须是签名错。取证时探针漏带 headers 会拿到 401，差点把"必 500"读成"没坏"（形态集 283）。
 tests/unit/api/test_memoryMetacognitionSkillsMatchManagerContract.py
+# 批 81（§6-309）：`core/multi_agent_manager.py` 整座岛（453 行，引入即孤岛、全仓零 import）连同两座
+# 专用测试退役。本档两轨都要常驻：主格钉"任何导入通道都不再取它"，交付锁钉"多 Agent 对外面与工作区
+# 单源一点没少"——只删实现不立此档，下一次批量事件还能把同名骨架提回来而无人拦。
+tests/unit/core/test_multiAgentManagerIslandRetired.py
