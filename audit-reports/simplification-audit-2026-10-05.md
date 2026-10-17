@@ -5755,7 +5755,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       "看得见跑不动"是探针合成的形状；当下真失真的是 `source` 被写死成 `builtin` 与 `server_id` 被抹成 None。
       其余仍开＝§6-293（远端 `format` 采信）、`mcp_client.py:598-603`（先立探针票）、
       命令键那一支仍是 `next(...)`、`ExecutionEngine` 的 plan/execute_tool 子树疑似整体无消费者
-      （本批只动了它的 `register_tool` 一层判据归属，子树要按死码档案五字段单独出票）。
+      （本批只动了它的 `register_tool` 一层判据归属，子树要按死码档案五字段单独出票）
+      **⇒ 该档案已出＝§6-303**（`audit-reports/execution-engine-subtree-archive-2026-10-17.md`，只读卷；判定与退役范围等裁）。
     - **本会话下一枚空号现查 §6-299（写前必须现场重取，本笔落库时该读数为 298）。**
 
 299. **列表面那一刀的真形状：今天没有"看得见跑不动"的实例，失真的是 `source` 与 `server_id`（🔴 三态票，推荐丙；取证不实施）** ✅ **已由 §6-300 落批（用户裁丙，`eb589dda`＋`a8cff31f`）** —— §6-298 末格那条登记复核完，结论把方向改了。
@@ -5827,7 +5828,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **划闭与仍开**：**§6-299 由本笔划闭**（丙落地）。**可达性那一维没做**，按票面留在登记里——
       现读生产路上源 1 唯一写入者是 MCP 同步、router 认同一命名，算出来恒可达，甲的契约变更（`executable`
       ＋前端标灰＋11 语言文案）等真出现"只注册在单例、又不是 router 成员"的注册者时再做，别顺手塞。
-      其余仍开＝§6-293（远端 `format` 采信）、`ExecutionEngine` plan/execute_tool 子树待出死码档案、
+      其余仍开＝§6-293（远端 `format` 采信）、`ExecutionEngine` plan/execute_tool 子树待出死码档案
+      （**已由 §6-303 出档案，本条就此划闭**）、
       `mcp_client.py:598-603`（先立探针票）、命令键那一支仍是 `next(...)`。
     - **本批收尾时自己造的两处错（一处只是数字，一处有代价）**：
       ① `eb589dda`（重刷前是 f3df015b，该号已不可达）头一版正文把测试/基建池写成 **+397/−14 ＝ 净 +383**，该笔 numstat 实为
@@ -5987,3 +5989,44 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `git rev-list` 建可达集再本地比对。形态同族见本卷"判据自身成本也是回归面"那一条。
     - **§9.1「已落地」表本批未追加**：该表自 §6-285 那行起就再没追加过（§5397 已记这笔欠账），本批五笔同样只在 §6 本格入账，避免再造一行"表里没有、正文里全有"的双面口径。
     - **本会话下一枚空号现查 §6-303**（写前必须现场重取；本笔落库时该读数为 302）。
+
+303. **批 75 · `shared_core.ExecutionEngine` 死码子树档案出卷（🔴 只读卷，零改码；判定与退役范围等裁）** —— §6-297 乙与 §6-300 两处"子树待出死码档案"的登记就此划闭；核心原则第 7 条要求逐条溯源，不许只说"死码"。
+
+    - **落点**：`audit-reports/execution-engine-subtree-archive-2026-10-17.md`（五字段逐条 + 事件分组 + 伪命中九类 + 缺陷单列）。
+    - **决定性证据是运行时探针，不是 grep**：给 15 个方法各包一层计数 wrapper，再包 `__new__`／`_init_components`／
+      工厂 `get_execution_engine()`，跑真 `create_app()` + lifespan + 真 HTTP 栈（monitor 五路 + 列表面 +
+      `POST /tool-layers/tools/execute` + neurflow 执行端点），身份用 `create_access_token({... 'role':'admin'})`
+      （monitor 那三条挂 `require_admin()`，第一版没带角色 ⇒ 五路全 403，把"没权限"读成"没走到"就是假结论）。
+      读数：`get_execution_engine_calls: 2`、`__new__: 1`、`_init_components: 1`、**`get_execution_monitor: 2`**，
+      其余 14 个方法**全 0**；`POST …/tools/execute` 回 200 而 `execute_tool: 0` ⇒ 工具真跑了，不经这把引擎；
+      neurflow 执行端点回 404 而 `execute_workflow: 0` ⇒ **"P1-7 收敛契约"那条转发入口在生产里没有一条来路**。
+      探针落 `.tmp_*` 即用即删，仓内 `data/` md5 复证 `d1ef4e99bd9f` 不变。
+    - **在役面只有一条**（`get_execution_monitor`，三个 monitor 端点用），但它带着整把引擎的装配：
+      `_init_components` 每轮真服务构造 1 次，`ToolEngine()` 与 `WorkflowEngine()` 各 new 一份供那三条死路用——
+      批 68 量到的"真装配下 ToolEngine 构造 2 次"，第二把就是这里。
+    - **三态**：删 13 方法＋1 dataclass（候选 246 行）／需人裁 1 方法＋1 helper（93 行，牵出 legacy
+      `execution_engine/workflow_engine.py` 356 行的退役范围）／接线 0。判"删"的三条依据各不同，不是一句零消费者：
+      plan 子树的替代是**超集**（neurflow 真做拓扑分层＋层内并发＋`safe_eval_condition` 真分支，而这里的
+      `_evaluate_condition` 是恒返 True 的桩），且 plan schema 在仓内**无生产者**（双向断点）；
+      `execute_tool` 的替代是真咽喉 `tool_executor._execute_tool_core`（治理/票据/hooks 都在它身上）；
+      `_call_llm` 属"空壳无功能"，删不失能力。
+    - **来历分水岭**：plan/execute_tool 侧＝`7835c367`(06-04 pyc 骨架恢复) 引入 + `806c7047`(06-06 145 文件批量) 补体，
+      **引入即未接线**（`git grep "\.execute_plan(" 65309f6b` 只命中另一个类的 `PlanOrchestrator.execute_plan`）；
+      `execute_workflow` 侧＝`53875590`(09-04 并行批次落库)**同一笔**把转发 shim 与它自己的契约测试一起入库（自产自销），
+      历史上唯一那次 `.execute_workflow(` 命中是本文件 :207 的内部调用，而那个调用者本身属死路。
+      测试面为何"看起来有覆盖"：`4a3c9380`(09-04) 解除 `tests/` 整目录忽略、809 文件入库，把私人笔记形状升格成守卫；
+      `test_tool_engine_integration.py:225-260` 两格只断"能创建/委托注册得到"（形状），且该档已在子集 `protected_tests.txt:28`
+      ——**在册不等于在产**。
+    - **本卷顺手抓到四处别的根因，一律单列不捆绑**：
+      **D1** `ExecutionMonitor._event_bus` 只写不读（`execution_monitor.py:198/202-204` 全文件再无第二处读取），
+      唯一注入口 `ExecutionEngine.set_event_bus` 零消费者 ⇒ 执行监控今天**不发一条事件**；接还是删属产品语义，**等裁**。
+      **D2** `_evaluate_condition` 的 `variable_check` 把 `variable`/`value` 读出来丢弃、恒返 True（随 A1 退役即消失，记下防复现形态）。
+      **D3** `MultiAgentManager.initialize_shared_components` 全仓零调用，`_plan_orchestrator` 恒 None ⇒
+      `multi_agent_manager.py:221-223` 那条"共享小脑执行"支路恒不命中，而 `:6` 的 docstring 仍宣称三件套共用；
+      `shared_brainstem` 只活在那次批量入库的测试里。
+      **D5** `core/flow_orchestrator.py` 与 `collaborate/workflow/orchestrator.py` 是两份同功能实现，**未比对**（教义第 6/7 条下一个对象）。
+    - **等裁两问**（各带影响面，见档案第 8 节）：① A3 的退役范围取甲（只收 shared_core 那侧，legacy 356 行留作下批）
+      还是乙（同批连 legacy 模块与其专用测试一起退）——推荐**乙**，甲会正好留下本卷在诊断的形态"实现还在、能到它的路全没了"；
+      ② D1 的监控事件流是要接线（让告警真进总线）还是承认放弃该能力。
+    - **§9.1 表本批未追加**（沿 §6-302 那格的口径：该表自 §6-285 起再没追加过，不在这里再造双面口径）。
+    - **本会话下一枚空号现查 §6-304**（写前必须现场重取；本笔落库时该读数为 303）。
