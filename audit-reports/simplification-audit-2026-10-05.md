@@ -6085,7 +6085,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：D1 **探针票已跑＝§6-305，丙案已落地＝§6-306**（甲接写侧／乙整把退役仍等裁）；
       D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
       "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）；
-      **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——下一批先立红灯再改**。
+      **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——已裁甲并落地＝§6-307（同族第二条
+      `POST /meta/skills/match` 一并修）**。
     - **本会话下一枚空号现查 §6-305**（写前必须现场重取；本笔落库时该读数为 304）。
 
 305. **批 77 · D1 探针票跑完：要问的不是"总线只写不读"，而是整把监控器只有读侧（🔴 三态票，推荐丙；取证不实施）** 🟡 —— §6-304 末格"仍开"那条 D1 的取证步；用户 2026-10-17 裁"立探针票后详议"。本卷零改码。
@@ -6181,6 +6182,46 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       形态与 `6304b6b0` 同一先例：**改生成物的正确形态是重跑生成器，不是手抄数字，也不是给守卫加豁免**；
       差出来只有一行 `| ... settings.ts | /governance, /settings | 是 | 8 |` → `9`，逐字核过。
     - **仍开**：D1 甲（接写侧）与乙（整把退役）仍等裁，本批只做丙——面板那行今天显示"未接线"是**如实**，
-      不是把能力补上；D6（`/memory/meta/skills` 每次必 500，用户已裁甲，**待落地**，下一批先立红灯再改）；
+      不是把能力补上；D6（`/memory/meta/skills` 每次必 500）已裁甲并落地＝§6-307；
       D3、D5 未动。
     - **本会话下一枚空号现查 §6-307**（写前必须现场重取；本笔落库时该读数为 306）。
+
+307. **批 79 · 元认知"技能"面两条必 500 的路由修好（✅ `7d9145e1` 生产＋判据＋文档 / `3c5fd1a7` 子集 633→634）** 🟢 —— 用户 2026-10-17 就 §6-305 登记的 D6 拍**甲**（端点不再传那两个参数＋docstring 改如实）。
+
+    - **性质**：端点把自己声明的 kwargs 原样转给 `MemoryManager`，而实装签名不收 ⇒ `except Exception` 包成
+      `APIError.internal` ⇒ **挂在 OpenAPI 上、每次必 500 的路由**。取数按**运行时 `inspect.signature`** 扫
+      `neurova/api/endpoints/memory/*.py` 里所有 `manager.X(...)` 调用，全命中点是**两条**（不是一条）：
+      `GET /meta/skills`（传 `category=`/`status=`，实装 `meta_get_all_skills(self)` 无参）与
+      `POST /meta/skills/match`（传 `top_k=`，实装 `meta_match_skills(self, query)` 只收 query）。
+      第二条尤其隐蔽：`top_k` 有默认值 ⇒ **带不带该字段都必 500**。
+    - **取证自己被咬一次**（形态集 283 复发，记下来）：第一版脚本给 `POST` 那条漏传了 headers ⇒ 回 401
+      `Not authenticated`，几乎被读成"这条路由没坏"。补上 `create_access_token({'sub':…,'role':'admin'})`
+      才看到真读数：`匹配技能失败: ... meta_match_skills() got an unexpected keyword argument 'top_k'`。
+    - **改的形状**：参数**从契约里删掉**（`category`/`status` 出签名、`top_k` 出 `MatchSkillsRequest`），
+      不取"留着不消费"——留着就是继续对外承诺一件做不到的事（教义 2）。兼容性上没有受害者：这两条今天
+      不存在"能用的调用方"，它们只有 500。真要做筛选/排名得先在 manager 那侧立单源（教义 6），
+      这条待办写进端点 docstring 与 `docs/02-api/memory-system-api-logic.md`。
+      两处 docstring 顺手把名实对齐：这一面对外是**"最近元认知事件"的别名视图**，不是技能表
+      （`tests/integration/test_memory_retired_routes_guard.py:13` 早记过这一形）。
+    - **同族的另一支在案**：`memory-system-api-logic.md:277` 记过一次"三条恒 500 路由"于 2026-10-07 按裁决
+      退役——那支是**方法根本不存在**；本批是**方法在、签名不收**。两种形态现在都有判据：旧的靠
+      `test_memory_retired_routes_guard.py`，新的靠本批这档常驻契约格。
+    - **红→绿（原文）**：新档 `collected 5 items`，改前 **`4 failed, 1 passed`**
+      （`test_metaSkillsListEndpointServesTwoHundred`／`test_metaSkillsMatchEndpointServesTwoHundred`／
+      `test_noEndpointPassesArgumentsTheManagerRefuses`／`test_openapiNoLongerAdvertisesUnhonouredParameters`），
+      改后 5 passed。那 1 格 `test_siblingStatsEndpointStillServes` **设计成两侧都绿**（钉"同一条 router、
+      同一套鉴权、同一个 manager 取法可用"，缺了它①②的红会被读成装配坏了而不是签名错）。
+    - **红自证**：只 stash `metacognition.py`（唯一 tag `red-selfproof-b79`）⇒ **`4 failed, 1 passed`**
+      失败集恰为本批四格；恢复后同选型 **`161 passed`**（新档＋`test_manager_full_delegation.py`＋
+      `test_memory_retired_routes_guard.py`）。
+    - **活体**：改后 LIST／MATCH(带 top_k)／MATCH(不带)／STATS 全 200、信封 `code:0`；
+      OpenAPI 上 `GET /meta/skills` 广告的参数只剩 `['agent_id']`；`data/` md5 `d1ef4e99bd9f` 不变。
+    - **宽域 A/B**（`tests/unit/api`，基线＝HEAD 仓外 worktree 并铺入本批新判据）：基线
+      `43 failed, 2457 passed, 8 errors in 192.68s` ↔ 本批侧 `39 failed, 2461 passed, 8 errors in 211.05s`；
+      抽取条数与汇总逐侧对账 51↔47；**仅本批侧红 0 条 ⇒ 无回归**，仅基线红 4 条即本批四格（交付证据）。
+    - **净 LOC**：`7d9145e1` 生产池 **+23/−9 ＝ 净 +14**（为正，去向逐条写在该笔正文：两处 docstring 名实
+      交代 ＋ 请求模型注释 ＋ 抵掉的假参数与错误传参 9 行）；测试/基建池 **+164/−0**（判据 156 ＋ 活跃层文档 8）。
+      `3c5fd1a7` 生产池 0/0、测试/基建池 +11/−0。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D3、D5；
+      真做"按分类/状态筛技能"与"取前 N 条匹配"都要先在 manager 那侧立单源，属另票。
+    - **本会话下一枚空号现查 §6-308**（写前必须现场重取；本笔落库时该读数为 307）。
