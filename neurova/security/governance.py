@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from neurova.core.logger import get_logger
 from neurova.core.lazy_singleton import lazySingleton
@@ -29,9 +29,9 @@ from neurova.security.tool_guard import (
     ApprovalMode,
     COMMAND_PARAM_KEYS,
     GuardSeverity,
-    PATH_PARAM_KEYS,
     ToolGuardEngine,
     looksLikePathValue,
+    pathValuesFromParams,
 )
 
 # P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows 走
@@ -195,25 +195,26 @@ class GovernanceResult:
 # （§6-255 甲案）。这里曾各有一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`
 # 和一条 `_PATH_LIKE`，与守卫那边的口径各演化各的——同一个问题两个答案。
 def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
-    """从工具参数中提取可裁决内容 (command 文本, file_paths)。
+    """从工具参数中提取可裁决内容 (command 文本, `[(键名, 路径值), ...]`)。
 
     scan_all=True（MCP 等动态来源）：全部参数整体序列化进 command，
     不依赖约定键名——否则动态工具换个参数名即可绕过预检（P0-2 / M4）。
     scan_all=False：保持既有约定键名提取语义（键名清单见 `tool_guard`）。
+
+    路径值这一格过去是 `next(...)`——**只取第一个**，于是 `{"file_path": ..., "path": ...}` 这种
+    一次调用带两条路径参数的形状，第二条在治理这一层就已经消失，守卫再怎么逐值也拿不到它
+    （§6-284 甲案的第二命中点）。取数现在与守卫共用 `pathValuesFromParams` 那一个口，
+    键名清单不再有两份写法。命令文本仍是一元（`next`）：一个调用只有一条命令，那是另一问句。
     """
     if not isinstance(params, dict) or not params:
-        return "", None
+        return "", []
 
     if scan_all:
         try:
             command = json.dumps(params, ensure_ascii=False, default=str)
         except Exception:
             command = str(params)
-        file_paths = next(
-            (v for v in params.values() if looksLikePathValue(v)),
-            None,
-        )
-        return command, file_paths
+        return command, [(str(k), v) for k, v in params.items() if looksLikePathValue(v)]
 
     command = next(
         (
@@ -223,15 +224,7 @@ def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
         ),
         "",
     )
-    file_paths = next(
-        (
-            params[k]
-            for k in PATH_PARAM_KEYS
-            if isinstance(params.get(k), str) and params[k]
-        ),
-        None,
-    )
-    return command, file_paths
+    return command, pathValuesFromParams(params)
 
 
 class GovernancePolicy:
@@ -270,11 +263,13 @@ class GovernancePolicy:
         command: str,
         tool_name: str = "shell",
         user_id: Optional[str] = None,
-        file_paths: Optional[str] = None,
+        path_values: Sequence[tuple] = (),
     ) -> GovernanceResult:
         """对一次工具/命令调用做策略裁决。
 
         优先级: tool_overrides > 白名单 > 内容检测。
+        `path_values` 是 `[(键名, 路径值), ...]`——**每一个**路径参数都进裁决面；过去这里收的是
+        单个 `file_paths` 字符串，一次调用带两条路径参数时第二条在治理层就已经被丢掉（§6-284 甲案）。
         """
         # P0-1：分段/白名单/内容检测统一看 shell
         # 实际执行的形态（续行已移除），防止换行拆分绕过。
@@ -322,9 +317,11 @@ class GovernancePolicy:
                 reasons=[f"命中白名单条目 {hit.get('id', '?')}: {hit.get('pattern', '')}"],
             )
 
+        # 每个路径值都按它**自己的键名**进参数面，交给守卫逐值裁决；键名与守卫共用同一个取数口
+        # （`extract_adjudicable_params` → `pathValuesFromParams`），这里不再另写一份认键的循环。
         tool_params: Dict[str, Any] = {"command": command}
-        if file_paths is not None:
-            tool_params["path"] = file_paths
+        for name, value in path_values:
+            tool_params[name] = value
 
         # P0-6：多段命令的分段信息透传到裁决结果（审批卡逐段展示）
         _seg_dicts_if_multi = [s.to_dict() for s in segs] if len(segs) > 1 else None
@@ -439,11 +436,11 @@ class GovernancePolicy:
         if declaration_verdict is not None:
             return declaration_verdict
 
-        command, file_paths = extract_adjudicable_params(params, scan_all=scan_all)
-        if not command and file_paths is None:
+        command, path_values = extract_adjudicable_params(params, scan_all=scan_all)
+        if not command and not path_values:
             return None
         return self.evaluate(
-            command=command, tool_name=tool_name, user_id=user_id, file_paths=file_paths
+            command=command, tool_name=tool_name, user_id=user_id, path_values=path_values
         )
 
     def _sandbox_declaration_verdict(self, tool_name: str) -> Optional["GovernanceResult"]:
@@ -495,10 +492,10 @@ class GovernancePolicy:
         env: Optional[Dict[str, str]] = None,
         tool_name: str = "shell",
         user_id: Optional[str] = None,
-        file_paths: Optional[str] = None,
+        path_values: Sequence[tuple] = (),
     ) -> Dict[str, Any]:
         """裁决后执行：DENY 直接拦截，SANDBOX 走隔离沙箱，其余常规执行。"""
-        result = self.evaluate(command, tool_name=tool_name, user_id=user_id, file_paths=file_paths)
+        result = self.evaluate(command, tool_name=tool_name, user_id=user_id, path_values=path_values)
         if result.decision == GovernanceDecision.DENY:
             logger.warning("Governance DENY: %s", "; ".join(result.reasons))
             return {

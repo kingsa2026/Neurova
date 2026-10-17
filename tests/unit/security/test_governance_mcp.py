@@ -48,10 +48,10 @@ def _fake_policy(capture: dict, decision=GovernanceDecision.ALLOW) -> Governance
     policy = GovernancePolicy.__new__(GovernancePolicy)
     policy.tool_overrides = {}
 
-    def fake_evaluate(command, tool_name="shell", user_id=None, file_paths=None):
+    def fake_evaluate(command, tool_name="shell", user_id=None, path_values=()):
         capture.update(
             command=command, tool_name=tool_name,
-            user_id=user_id, file_paths=file_paths,
+            user_id=user_id, path_values=path_values,
         )
         return GovernanceResult(decision=decision, reasons=["fake"])
 
@@ -91,8 +91,8 @@ class TestEvaluateToolCall:
         """scan_all=True：任意键名的参数值必须整体进入裁决文本"""
         policy = GovernancePolicy.__new__(GovernancePolicy)
         capture = {}
-        policy.evaluate = lambda command, tool_name="shell", user_id=None, file_paths=None: (
-            capture.update(command=command, tool_name=tool_name, file_paths=file_paths),
+        policy.evaluate = lambda command, tool_name="shell", user_id=None, path_values=(): (
+            capture.update(command=command, tool_name=tool_name, path_values=path_values),
             GovernanceResult(decision=GovernanceDecision.ALLOW),
         )[1]
         verdict = policy.evaluate_tool_call("mcp.s1.t", {"exec": "rm -rf /"}, scan_all=True)
@@ -103,14 +103,14 @@ class TestEvaluateToolCall:
     def test_scan_all_extracts_path_like_param(self):
         policy = GovernancePolicy.__new__(GovernancePolicy)
         capture = {}
-        policy.evaluate = lambda command, tool_name="shell", user_id=None, file_paths=None: (
-            capture.update(file_paths=file_paths),
+        policy.evaluate = lambda command, tool_name="shell", user_id=None, path_values=(): (
+            capture.update(path_values=path_values),
             GovernanceResult(decision=GovernanceDecision.ALLOW),
         )[1]
         policy.evaluate_tool_call(
             "mcp.s1.fs", {"target": "C:/Users/x/secret.txt", "mode": "read"}, scan_all=True
         )
-        assert capture["file_paths"] == "C:/Users/x/secret.txt"
+        assert capture["path_values"] == [("target", "C:/Users/x/secret.txt")]
 
     def test_empty_params_returns_none(self):
         policy = GovernancePolicy.__new__(GovernancePolicy)
@@ -122,8 +122,8 @@ class TestEvaluateToolCall:
         """非 scan_all 保持原四键名语义：exec 等其他键不进裁决文本"""
         policy = GovernancePolicy.__new__(GovernancePolicy)
         capture = {}
-        policy.evaluate = lambda command, tool_name="shell", user_id=None, file_paths=None: (
-            capture.update(command=command, file_paths=file_paths),
+        policy.evaluate = lambda command, tool_name="shell", user_id=None, path_values=(): (
+            capture.update(command=command, path_values=path_values),
             GovernanceResult(decision=GovernanceDecision.ALLOW),
         )[1]
         policy.evaluate_tool_call(
@@ -131,7 +131,7 @@ class TestEvaluateToolCall:
             scan_all=False,
         )
         assert capture["command"] == "ls -la"
-        assert capture["file_paths"] == "/tmp/a"
+        assert capture["path_values"] == [("file_path", "/tmp/a")]
         assert "injected" not in capture["command"]
 
 
