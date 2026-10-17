@@ -3366,3 +3366,7 @@ tests/unit/api/test_memoryMetacognitionSkillsMatchManagerContract.py
 # 专用测试退役。本档两轨都要常驻：主格钉"任何导入通道都不再取它"，交付锁钉"多 Agent 对外面与工作区
 # 单源一点没少"——只删实现不立此档，下一次批量事件还能把同名骨架提回来而无人拦。
 tests/unit/core/test_multiAgentManagerIslandRetired.py
+# 批 82（§6-310）：活体隔离单点必须一次隔干净两根（数据根 + agent 工作区根）。
+# 五格里两格是"取干净现场的子进程"跑的行为读数——在跑测进程内测会被 conftest 的注入直接沿用而恒绿；
+# 常驻这一档，为的是下一个人把 `isolatedAgentWorkspaces()` 那一句从单点里删掉时，当场红。
+tests/unit/ci/test_liveIsolationSinglePointCoversBothRoots.py
