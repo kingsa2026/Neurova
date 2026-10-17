@@ -6082,7 +6082,62 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **净 LOC 逐笔抄 numstat**：`a6052a38` 生产池 **+25/−408 ＝ 净 −383**、测试/基建池 **+362/−194 ＝ 净 +168**；
       `ff4f34a` 生产池 **+5/−357 ＝ 净 −352**、测试/基建池 **+27/−0**；`819713eb` 生产池 0/0、测试/基建池 +11/−0。
       本批生产池合计**净 −735**，无一处净增为正。
-    - **仍开**：D1 已裁"先立探针票"——待取证的是"监控告警今天到底发没发出、面板读的是哪一张表"，
-      探针未跑；D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
-      "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）。
+    - **仍开**：D1 **探针票已跑＝§6-305**（读数比原登记更宽：不是"总线只写不读"，而是整把监控器只有读侧；
+      三态甲／乙／丙等裁，推荐丙先行）；
+      D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
+      "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）；
+      **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——下一批先立红灯再改**。
     - **本会话下一枚空号现查 §6-305**（写前必须现场重取；本笔落库时该读数为 304）。
+
+305. **批 77 · D1 探针票跑完：要问的不是"总线只写不读"，而是整把监控器只有读侧（🔴 三态票，推荐丙；取证不实施）** 🟡 —— §6-304 末格"仍开"那条 D1 的取证步；用户 2026-10-17 裁"立探针票后详议"。本卷零改码。
+
+    - **探针形状**（`.tmp_*` 即用即删，跑完复证仓内 `data/` md5 `d1ef4e99bd9f` 不变）：给真单例上
+      `ExecutionMonitor` 的 **14 个写入方法**各包一层计数 wrapper（`missing=[]`，14 条全装上），再跑真
+      `create_app()` + lifespan + 真 HTTP 流量（monitor 四路、`GET /tool-layers/tools`、
+      `POST /tool-layers/tools/execute` 真跑一次 `file_read`、`POST /api/coordination/ab-tests/record-metric`）。
+    - **读数**：`writerCalls` **14 个键全 0**（含 `create_alert`/`record_metric`/`start_trace`/`end_trace`/
+      `set_event_bus`/两个 `register_*_handler`）；四张表 `alerts=1 metrics=0 traces=0 history=0`
+      （那 1 条是正控写进去的，见下），`eventBus=None`、`alertHandlers=0`、`metricHandlers=0`；
+      磁盘落点 `logs/executions` 文件数 **0**——`_save_execution_log` 只在 `end_trace` 里被叫，
+      而 `end_trace` 从未被叫，**那条写盘路径今天不存在过**。
+    - **正控**（缺了它上面那一堆 0 就是空集假绿，形态集 283）：走**未包装**的类方法写一条告警，
+      再读同一个端点 ⇒ `alertsEndpoint {beforePositiveControl: 0, afterPositiveControl: 1}`、
+      `positiveControlReadsBack: True`。**读侧是通的**，"空"来自没有写侧。
+    - **grep 那 14 个 `record_metric` 命中全是同名不同物**（伪命中复算）：`evolution/rsi/orchestrator.py` 的
+      `self.metrics` 是 `RSIMetrics`、`coordination_api.py:249` 与 `ab_test_manager.py:158` 是 `ABTestManager`、
+      `chat_pipeline.py` 那两条 `start_trace`/`end_trace` 是 `_trajectory_recorder` 与 `trace_manager`。
+      按方法名 grep 会得出"监控器在被写"的反向结论——这是本票为什么必须用运行时 wrapper 而不是数调用方。
+    - **对外契约面**：`NeurUI/src/pages/MonitorPage.vue:116-132` 确实在读 `/monitor/resources|connections|alerts`
+      并 `PUT /monitor/alerts/{id}/resolve`。分格看：`/status` 与 `/resources` **不经监控器**
+      （app state 与 psutil 真值，那两格是真的）；`/connections` 里 `n_alerts` 那一项与整个 `/alerts` 面读的是恒空表。
+      ⇒ 面板"告警"那一格与"resolve"那颗按钮，今天是一幅**永远为空的表**——与 §6-299 那次"画成可得"同族，
+      但这里连"哪天有数据"的前提都没有。
+    - **三态票（需人裁，附决策影响面）**：
+      - **甲｜接写侧**——把真事件灌进监控器（谁算告警？候选是治理 ASK/SANDBOX 拒绝、工具失败、provider 健康降级、
+        配额耗尽）。数据从各咽喉来、经 `create_alert`/`record_metric` 进内存表、由现有端点出去、面板直接就有东西读。
+        代价与不可逆点：要先定"告警口径"与保留策略（`_alerts` 是无限增长的 list，接上写真事件就是**新的无界内存落点**，
+        还要决定跨进程重启是否留档——今天那条磁盘路径本来就是死的）。
+      - **乙｜整把退役**——删 `execution_monitor.py`（496 行）+ `monitor.py` 的 alerts/connections-alert 那几面 +
+        面板那一块 + 其专用测试（`tests/execution_engine/test_execution_monitor.py`、
+        `tests/unit/api/test_monitor_api.py` 相关格）。代价＝**永久失去"执行监控"这项能力**，且 `ExecutionEngine`
+        最后一个组件也随之清空（批 76 留下的那条唯一活路 `get_execution_monitor` 一并退役）；
+        面板要改，属产品可见变更。
+      - **丙｜先把契约改如实（推荐先做）**——`/alerts` 显式回 `not_supported`/带"未接线"标记，`/connections`
+        里 `n_alerts` 不再报 0 冒充健康，面板那一格标注"未接线"而不是画空表。净 LOC 预期 ≤0，
+        不动任何生产链路，也不预设甲还是乙——**它只把"说谎的读数"换成"诚实的读数"**，正是教义第 2 条要的形态。
+      - 推荐**丙先行**：甲/乙都需要产品口径（要不要这项能力、告警算哪些），丙不需要，且做完丙之后
+        甲的接线点会更清楚（面板那侧不再依赖一个恒空的假象）。
+    - **顺带抓到一处独立缺陷 D6（单列，不与本票捆绑，也不折算成审计收益）**：
+      `GET /api/v1/memory/meta/skills` **每次必 500**。实测回包
+      `{"code":5001,"message":"获取技能列表失败: MemoryManager.meta_get_all_skills() got an unexpected keyword argument 'category'"}`。
+      根因：端点 `metacognition.py:305` 传 `category=category, status=status`，而
+      `cognitive_layers/memory_layer/manager.py:3357` 那份实装签名是 `meta_get_all_skills(self)`——**不收任何参数**，
+      而端点 docstring 还承诺"支持按分类和状态筛选"（又一处"契约上说说、body 里不做"）。
+      影响面：该路由在 `app.openapi()["paths"]` 在册（可达）；现有判据为什么没咬到——
+      `tests/unit/cognitive_layers/memory_layer/test_manager_full_delegation.py:333/339` 只在 **manager 层无参调用**，
+      端点那一条腿没人走过；前端 grep 无调用 ⇒ 危害限于外部 API 调用方与后续接入。
+      修法两态待裁：甲｜端点不再传那两个参数、docstring 改如实（最小）；乙｜让 manager 真做筛选——
+      但那要先把语义问清：`meta_get_all_skills` 实为"最近元认知事件"的别名视图
+      （`test_memory_retired_routes_guard.py:13` 已记过这一形），不是技能表。**下一批要走红线程序：先立红灯（打真端点）再改。**
+    - **§9.1 表本批未追加**（沿 §6-302/§6-303/§6-304 口径）。
+    - **本会话下一枚空号现查 §6-306**（写前必须现场重取；本笔落库时该读数为 305）。
