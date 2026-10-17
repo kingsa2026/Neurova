@@ -156,10 +156,9 @@ class ToolEngine:
     管理工具注册、执行、版本控制、共享和发现。
     """
 
-    def __init__(self, config: typing.Dict[str, typing.Any] = None, tool_guard: typing.Any = None):
+    def __init__(self, config: typing.Dict[str, typing.Any] = None):
         self._config = config or {}
         self._lock = __import__("threading").RLock()
-        self.tool_guard = tool_guard or self._create_default_guard()
 
         # 工具注册表
         self._tools: typing.Dict[str, ToolDefinition] = {}
@@ -173,22 +172,6 @@ class ToolEngine:
 
         # 共享记录
         self._shared_tools: typing.Dict[str, typing.List[str]] = {}  # tool_name -> [user_ids]
-
-    def _create_default_guard(self):
-        """创建默认的工具守卫"""
-
-        # C3/M5 修复: 返回规范 ToolGuardResult（.safe/.should_block），
-        # 而非自定义 stub（旧 stub 用 .is_safe，与 security.tool_guard API 不一致）
-        from neurova.security.tool_guard import ToolGuardResult
-
-        class DefaultGuard:
-            def guard(self, tool_input="", context=None, **kwargs):
-                return ToolGuardResult(
-                    safe=True,
-                    tool_name=(context.get("tool_name", "") if context else ""),
-                )
-
-        return DefaultGuard()
 
     def register_tool(
         self,
@@ -419,20 +402,9 @@ class ToolEngine:
             if func is None:
                 raise ValueError(f"工具未注册: {tool_name}")
 
-            # C3 修复: 执行前安全检查 — 之前完全绕过了 tool_guard
-            if self.tool_guard:
-                guard_result = self.tool_guard.guard(
-                    tool_input=str(parameters or {}),
-                    context={"tool_name": tool_name, "parameters": parameters or {}},
-                )
-                # 规范 API: ToolGuardResult.should_block（= not safe）
-                if hasattr(guard_result, "should_block") and guard_result.should_block:
-                    raise ValueError(
-                        f"工具被安全守卫阻止: {tool_name}, findings: {getattr(guard_result, 'findings', [])}"
-                    )
-                # 兼容旧 API: 自定义 stub 返回 .is_safe
-                elif hasattr(guard_result, "is_safe") and not guard_result.is_safe:
-                    raise ValueError(f"工具被安全守卫阻止: {tool_name}")
+            # 裁决只在治理那一处（请求边界经 `evaluate_tool_call`）。这一层不留第二道门：
+            # 旧版这里有个恒 `safe=True` 的 DefaultGuard 却注释成"执行前安全检查"，而
+            # "无 agent ⇒ 引擎直调"那条回落路上它是唯一守卫（§6-295 探针读数①②⑤）。
 
             # 准备参数
             prepared = self.prepare_arguments(tool_name, parameters or {})
@@ -479,8 +451,7 @@ class ToolEngine:
         user_id: str = None,
         agent_id: str = None,
     ) -> typing.Any:
-        """安全执行工具（带防护）"""
-        # 检查工具状态
+        """按状态闸执行（须已注册且 AVAILABLE）——"防护"指这一道，安全裁决不在这一层。"""
         defn = self._tools.get(tool_name)
         if not defn:
             raise ValueError(f"工具未注册: {tool_name}")
