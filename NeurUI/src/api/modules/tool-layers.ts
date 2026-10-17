@@ -51,24 +51,66 @@ export function listTools() {
  * ② auth_token 映射为标准 Bearer Authorization 头（此前被直接丢弃 → 输入框
  *    不起作用）；空值不发，不污染配置。headers 经 connect 端点入持久化配置，
  *    协议层 _open_session（httpx/sse_client）真实消费。
+ * ③ 2026-10-17 断点①：oauth 子配置补进写侧。后端读侧三处消费者一直在取它，
+ *    却因注册请求体没有该字段而恒存不进去；键名与 `mcp_config` 的允许键一致，
+ *    同样"空值不发"（全空则整个 oauth 键都不发，后端归一化为空表＝未配置）。
  */
+export interface MCPRegisterOAuth {
+  grant_type?: string
+  authorization_url?: string
+  token_url?: string
+  client_id?: string
+  client_secret?: string
+  scope?: string
+  registration_endpoint?: string
+  redirect_uri?: string
+}
+
+export interface MCPRegisterPayload {
+  name: string
+  url: string
+  transport: string
+  headers: Record<string, string>
+  oauth?: Record<string, string>
+}
+
+/** 裁剪空白项：oauth 里任何空字符串都不该发出去（后端按"配了一半"校验会 400）。 */
+function cleanOAuth(oauth?: MCPRegisterOAuth): Record<string, string> {
+  const cleaned: Record<string, string> = {}
+  for (const [key, value] of Object.entries(oauth ?? {})) {
+    const trimmed = (value ?? '').trim()
+    if (trimmed) cleaned[key] = trimmed
+  }
+  return cleaned
+}
+
 export function buildMCPRegisterPayload(
   name: string,
   url: string,
   authToken?: string,
-): { name: string; url: string; transport: string; headers: Record<string, string> } {
-  const payload = { name, url, transport: "http", headers: {} as Record<string, string> }
-  const token = (authToken || "").trim()
+  oauth?: MCPRegisterOAuth,
+): MCPRegisterPayload {
+  const payload: MCPRegisterPayload = { name, url, transport: 'http', headers: {} }
+  const token = (authToken || '').trim()
   if (token) {
     payload.headers.Authorization = `Bearer ${token}`
+  }
+  const oauthConfig = cleanOAuth(oauth)
+  if (Object.keys(oauthConfig).length > 0) {
+    payload.oauth = oauthConfig
   }
   return payload
 }
 
-export function registerMCPServer(data: { name: string; url: string; auth_token?: string }) {
+export function registerMCPServer(data: {
+  name: string
+  url: string
+  auth_token?: string
+  oauth?: MCPRegisterOAuth
+}) {
   return api.post<MCPServer>(
     `${BASE}/mcp-servers`,
-    buildMCPRegisterPayload(data.name, data.url, data.auth_token),
+    buildMCPRegisterPayload(data.name, data.url, data.auth_token, data.oauth),
   )
 }
 

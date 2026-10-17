@@ -128,6 +128,32 @@
         <a-form-item :label="t('tool.authToken')">
           <a-input-password v-model:value="newServer.auth_token" />
         </a-form-item>
+        <a-form-item :label="t('tool.oauthGrant')">
+          <a-select v-model:value="newServer.oauth.grant_type" :options="oauthGrantOptions" />
+        </a-form-item>
+        <template v-if="newServer.oauth.grant_type">
+          <a-form-item
+            v-if="newServer.oauth.grant_type === 'authorization_code'"
+            :label="t('tool.oauthAuthorizationUrl')"
+          >
+            <a-input v-model:value="newServer.oauth.authorization_url" placeholder="https://idp.example.com/authorize" />
+          </a-form-item>
+          <a-form-item :label="t('tool.oauthTokenUrl')">
+            <a-input v-model:value="newServer.oauth.token_url" placeholder="https://idp.example.com/token" />
+          </a-form-item>
+          <a-form-item :label="t('tool.oauthClientId')">
+            <a-input v-model:value="newServer.oauth.client_id" />
+          </a-form-item>
+          <a-form-item :label="t('tool.oauthClientSecret')">
+            <a-input-password v-model:value="newServer.oauth.client_secret" />
+          </a-form-item>
+          <a-form-item v-if="newServer.oauth.grant_type === 'authorization_code'" :label="t('tool.oauthRegistrationEndpoint')">
+            <a-input v-model:value="newServer.oauth.registration_endpoint" placeholder="https://idp.example.com/register" />
+          </a-form-item>
+          <a-form-item :label="t('tool.oauthScope')">
+            <a-input v-model:value="newServer.oauth.scope" />
+          </a-form-item>
+        </template>
       </a-form>
     </a-modal>
 
@@ -207,7 +233,29 @@ const execResult = ref('')
 const currentPage = ref(1)
 const pageSize = ref(12)
 
-const newServer = ref({ name: '', url: '', auth_token: '' })
+const emptyServerForm = () => ({
+  name: '',
+  url: '',
+  auth_token: '',
+  oauth: {
+    grant_type: '',
+    authorization_url: '',
+    token_url: '',
+    client_id: '',
+    client_secret: '',
+    registration_endpoint: '',
+    scope: '',
+  },
+})
+
+const newServer = ref(emptyServerForm())
+
+// grant_type 取值是协议字面量（后端 mcp_config 的允许值），不翻译；只翻译"不启用"这一项
+const oauthGrantOptions = computed(() => [
+  { value: '', label: t('common.none') },
+  { value: 'client_credentials', label: 'client_credentials' },
+  { value: 'authorization_code', label: 'authorization_code' },
+])
 
 const pagedServers = computed(() =>
   servers.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
@@ -252,7 +300,7 @@ const registerServer = async () => {
     await registerMCPServer(newServer.value)
     message.success(t('common.success'))
     showRegister.value = false
-    newServer.value = { name: '', url: '', auth_token: '' }
+    newServer.value = emptyServerForm()
     await fetchServers()
   } catch {
     message.error(t('common.error'))

@@ -28,6 +28,43 @@ describe('buildMCPRegisterPayload（register 弹窗契约）', () => {
     expect(buildMCPRegisterPayload('x', 'https://a.b', '   ').headers).toEqual({})
   })
 
+  describe('oauth 子配置（断点①前端写侧）', () => {
+    it('授权码流各字段按后端键名入载荷，空白项不发', () => {
+      const p = buildMCPRegisterPayload('x', 'https://a.b', undefined, {
+        grant_type: 'authorization_code',
+        authorization_url: 'https://idp/authorize',
+        token_url: ' https://idp/token ',
+        client_id: 'cid',
+        client_secret: '',
+        scope: '',
+      })
+      expect(p.oauth).toEqual({
+        grant_type: 'authorization_code',
+        authorization_url: 'https://idp/authorize',
+        token_url: 'https://idp/token',
+        client_id: 'cid',
+      })
+    })
+
+    it('oauth 全空 → 载荷不带 oauth 键（后端归一化为空表，不写脏配置）', () => {
+      const p = buildMCPRegisterPayload('x', 'https://a.b', undefined, {
+        grant_type: '',
+        token_url: '',
+        client_id: '   ',
+      })
+      expect('oauth' in p).toBe(false)
+    })
+
+    it('未传 oauth 参数 → 与既有三参调用形态逐字一致（不扩契约）', () => {
+      expect(buildMCPRegisterPayload('n', 'https://a.b', 'tok')).toEqual({
+        name: 'n',
+        url: 'https://a.b',
+        transport: 'http',
+        headers: { Authorization: 'Bearer tok' },
+      })
+    })
+  })
+
   it('name/url 原样透传', () => {
     const p = buildMCPRegisterPayload('srv1', 'http://localhost:3000/mcp')
     expect(p.name).toBe('srv1')
