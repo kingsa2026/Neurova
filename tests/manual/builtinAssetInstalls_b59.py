@@ -35,6 +35,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 from neurova.api.app import create_app  # noqa: E402
 from neurova.api.deps import get_current_user  # noqa: E402
 from neurova.skills.market_importer import read_builtin_bundle  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 SKILL_ID = "builtin--adaptive-presentation-studio"
 BUNDLE = "adaptive-presentation-studio.zip"

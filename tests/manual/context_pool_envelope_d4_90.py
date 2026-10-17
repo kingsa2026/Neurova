@@ -34,6 +34,8 @@ from neurova.context.envelope import (  # noqa: E402
 )
 from neurova.context.token_estimator import estimate_tokens  # noqa: E402
 from neurova.context.window_compactor import estimate_window_tokens  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 
 def buildAgent():

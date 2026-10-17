@@ -30,6 +30,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from neurova.core.data_root import dataPath  # noqa: E402
 from neurova.security import artifact_digest as AD  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 failures: list[str] = []
 NAME = "liveprobe31"

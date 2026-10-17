@@ -51,6 +51,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 from neurova.api.auth import get_current_user as auth_u  # noqa: E402
 from neurova.api.endpoints import chat as chat_ep  # noqa: E402
 from neurova.api.endpoints import set_app_state  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 failures: list[str] = []
 

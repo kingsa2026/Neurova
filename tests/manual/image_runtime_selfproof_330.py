@@ -13,6 +13,8 @@
 """
 import os, pwd, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 REPO = Path("/workspace")
 src = (REPO / "Dockerfile").read_text(encoding="utf-8")

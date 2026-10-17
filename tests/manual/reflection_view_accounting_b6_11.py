@@ -37,6 +37,9 @@ from neurova.cognitive_layers.meta_cognition_layer.growth_log import (  # noqa: 
 from neurova.context.orchestrator import ContextOrchestrator  # noqa: E402
 from neurova.context.reflection_view import VIEW_MISS_LIMIT  # noqa: E402
 from neurova.core.turn_context import get_turn_injected_reflections  # noqa: E402
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 LESSON = "固件升级前必须先备份配置"
 TITLE = "固件升级"
