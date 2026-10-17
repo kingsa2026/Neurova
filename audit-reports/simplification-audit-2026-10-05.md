@@ -5068,7 +5068,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **一次提交形态自纠（与 §6-281 那条同源，这次是在提交前拦住的）**：本树是多会话共享的，我按惯例准备走"不带路径只提交索引"，落笔前 `git diff --cached --name-only` 一核，发现索引里躺着**对方 staged 的四件在途件**（`skill_scanner.py`／`skill_service.py`／资产 zip／`test_installGateRulesFollowCodeShape.py`）——直接提交就是替人署名。改用 `git commit --only -- <本次两件>`（`--only` 只取给定路径的工作树内容、不动他人暂存态），提交后复证那四件仍在索引里。**口径更正写进记忆：共享树上"只提交索引"这条快捷形态不安全，一律带路径＋提交前核 `--cached --name-only`。**
     - **净 LOC**：生产池 **0/0**；测试池 **+44/−66 ⇒ 净 −22**（读侧档 −24：8 处多行调用收成单行出口；棘轮档 +4/−2：摘行与注释现量）。子集不动（两档早已在册）。
     - **本会话下一枚空号现查 §6-284（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`；本笔落库时该读数为 282，283 已被 `call_skill` 那一线取走）。**
-284. **§6-266 末格第②刀的票面：登记写的是"扁平整串分不清归属"，实测出的却是「一次调用只查一条路径，且查到就早退」——两格真覆盖缺口（✅ 已裁甲并落地＝§6-291／`5c23fc49`＋`8ecd105b`；丁仍开）** 🟢 —— 取证走真引擎 `ToolGuardEngine.guard()`，四形各跑一次并配一枚对照（探针即用即删）。
+284. **§6-266 末格第②刀的票面：登记写的是"扁平整串分不清归属"，实测出的却是「一次调用只查一条路径，且查到就早退」——两格真覆盖缺口（✅ 已裁甲并落地＝§6-291／`5c23fc49`＋`8ecd105b`；丁已落地＝§6-292）** 🟢 —— 取证走真引擎 `ToolGuardEngine.guard()`，四形各跑一次并配一枚对照（探针即用即删）。
 
     - **机制（`FilePathGuardian.guard()`，`neurova/security/tool_guard.py:545` 起）**：先按单源 `PATH_PARAM_KEYS`
       取**第一个**非空值 → 取不到才回落整串正则 `(?:path|file|dir)=([^\s]+)` → **只有两条都空**时才会去看
@@ -5461,7 +5461,54 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （一个调用只有一条命令，那是另一问句；第一方都只声明一个命令键，无实测危害不动它）；
       ② 取证时另报的疑点——`mcp_client.py:598-603` 的 `_mcp_executor(**kwargs)` 让"守卫看到的参数 dict"与
       "最终送进 MCP 的 arguments"可能不是同一份——要动得先立运行时探针票，**本批不据传闻改码**；
-      ③ 丁（按 schema 判是不是路径）仍是唯一能同时修掉"翻转"与"漏名"的一态。
+      ③ 丁（按 schema 判是不是路径）仍是唯一能同时修掉"翻转"与"漏名"的一态——**✅ 已由 §6-292（`e9d38350`＋`0ee9ff0b`）落批**：声明位立起来了，取数口 `pathValuesForTool` 声明优先、名字表只作兜底。真正剩下的边界换成一句：远端 schema 自己带的 `format` 声明本批**还不采信**（引擎入口只看本仓注册表），要接得连 `mcp_manager.input_schema` 那条取路一起做，并先探针证“远端确实会带这个键”。
     - **仍开**：丁；`plugin_manager` 那份 `_resolveEntryPoint`（§6-267 已注明同形）；`tool_engine.py:424`
       那个恒返回 safe 的 `DefaultGuard`（`neurova/` 内无任何 `tool_guard=` 注入 ⇒ 这条"执行前安全检查"
       其实是空转，与 §6-284 不同根因，要单独立票）。
+
+292. **路径语义改由 schema 声明决定：`format:"path"` 立起来，名字表降为"查不到声明时"的兜底（✅ `e9d38350` 生产+判据+活体 / `0ee9ff0b` 子集 622→623；§6-284 丁落地）** 🟢 —— 用户 2026-10-17 拍丁；甲（§6-291）之后剩下的那一半。
+
+    - **真实漏名是一条现读，不是推演**：`exec_command.workdir`（`builtin_tools.py:1013`，描述就是"工作目录"，
+      不在 `PATH_NAME_ROLES` 任何角色里）。三形各跑一次：`{"workdir":"/etc/shadow"}` ⇒ `['protected_path']`
+      （**偶然**——回落正则 `(?:path|file|dir)=` 咬到 `workdir=` 里的子串 `dir=`）；
+      `{"workdir":"/etc/shadow","file_path":良性}` ⇒ `[]`（**放行**——回落只在"参数面一个路径值都没有"时才跑）；
+      `{"workdir":r"C:\Program Files\Foo"}` ⇒ `[]`（扁串按空格切成 `C:\Program`，配不上 `c:\program files`）。
+      扩清单也能修这一只，但那是"加一个名字修一次"；丁把判定权交回声明方。
+    - **为什么形状不能顶替声明（这条决定形态，务必留住）**：`looksLikePathValue` 只要求整串含 `/` 或 `\`，
+      `"见 /etc/shadow"` 照样过——拿形状当依据就是把甲明确拒掉的 case 4 放回来。
+      本批＝**声明说了算，形状不参与裁决**；`looksLikePathValue` 仍只管扫描面剔除那一问，两问没混。
+    - **落地五件**：① 声明位＝property 级 `"format": "path"`（JSON Schema 自带扩展词表，未知 format 值按惯例
+      被校验器忽略；它随我们的 `inputSchema` 出街，远端可采用同一约定），11 个属性打上（清单按运行时注册表
+      `_BUILTIN_SCHEMAS` 现读 73 只工具枚举，不靠行号猜）；② `pathValuesForTool(toolName, params)`——
+      **声明优先、名字表兜底、只增不减**（"只增不减"是必须的：否则未声明的 `path` 键从裁决面掉出去，那是拆闸）；
+      ③ 引擎有 `tool_name` 而 guardian 没有 ⇒ 由 `ToolGuardEngine.guard` 算一次经保留 context 键
+      `__path_values__` 交下来（两面在此之前已构建完，保留键进不了扫描面），`FilePathGuardian` 自己不读 `format`；
+      ④ 命令面剔除的归属改由"声明 ∪ scanned"（`pathSurfaceOwnerNames`）——`workdir=/etc/shadow` 不再同时
+      出现在命令面上；⑤ 预检 `extract_adjudicable_params` 第一参数变成工具名，否则 `workdir` 在进引擎之前
+      就被名字表丢掉（这一手是甲那批的"第二命中点"的延续）。
+    - **兜底刻意保留**：`mcp.demo.tool` 这类查不到 schema 的工具名仍按名字表判。删掉它，远端工具的路径参数
+      从此无人看——那是放宽不是收口（活体第 4 腿与判据第 5 格各钉一处）。
+    - **判据 12 格**（`tests/unit/security/test_pathSemanticsComeFromDeclaration.py`）：主红两格（workdir 与清单内键
+      同给仍要查／声明值取到整串不被空格切短）＋声明完整性下限格（11 个 `(工具,属性)` 缺一个即红）＋真预检格
+      ＋形状格（取数口全仓一处定义、guardian 不许自读 `format`）＋名字表只关不加的棘轮格＋对照五格
+      （远端兜底／case 4 仍零读数／单路径四形不变）。首轮红灯 5 failed / 7 passed。
+    - **同批改判 3 格**（契约变了，摘掉就是没人守）：`test_guardScansFollowParameterSemantics.py::
+      test_bothConsumersTakeTheSameKeyList`（批 62）与 `test_pathGuardScansEveryPathValue.py::
+      TestThePrecheckDoesNotCollapseFirst` 两格（批 65）——三格改判到"工具名是必需第一参数／取数口叫
+      `pathValuesForTool`"，钉的东西没变（路径值不许混进命令文本、预检不许另抄一份清单）。
+      批 62 的活体档一并改判并**复跑那一轮 6/6 PASS**（它有一条腿按"单个字符串"比，签名换了谓词没换会假红）。
+    - **红自证**（纯 HEAD ＋ 本批全部判据）⇒ 8 failed / 1141 passed，失败集＝5 新格＋3 改判格，无杂红。
+      **活体**（`tests/manual/pathSemanticsComeFromDeclaration_b66.py`，真 `evaluate_tool_call`）⇒ 6/6 PASS，
+      反证跑基线树 ⇒ 退出码 0→1、红在第 1、2、3 腿；第 4、5、6 两侧同绿（第 6 腿是"改后不双报"的钉，
+      不是改前的缺陷，如实写明）。**A/B**（两侧仓外 worktree，本批九档逐档 md5 对账）⇒
+      基线 `38 failed/8963 passed/9 errors`、本批侧 `38 failed/8975 passed/9 errors`、失败集 47 vs 47
+      **两向差集皆空**；passed 差 12＝新档格数。落库前 `tests/unit/security` 1149 passed、八项常驻守卫 86 passed。
+    - **本批撞出的两条，登记不动手**：① 批 62 的活体档打印 `↔`，GBK stdout 下 `UnicodeEncodeError` 直接
+      退出码 1——**红指向脚本自己而不是产品**；正解是让 `tests/manual/*` 自己 `sys.stdout.reconfigure`，
+      那是全仓活体档一起做的一批，别在本批顺手改十几档。② 形状格头一版按 key 名 `"format"` 全仓扫，
+      被三处无关同名字段自咬（`media/config.py`／`neurflow/drama_nodes.py`／`security/arg_grounding.py`），
+      改成钉代码形态（定义数＋位置）才咬对——形态集 241"按词扫源码"的**按键名**变体。
+    - **仍开**：命令键那一支仍是 `next(...)`（一个调用只有一条命令，另一问句）；远端 schema 里
+      `format` 声明的采信面（MCP 工具若自己声明了 `format:"path"`，本批的引擎入口只看本仓注册表，
+      不会读到它——要接得连 `mcp_manager.input_schema` 那条取路一起做，并先探针证"远端确实会带这个键"）；
+      `mcp_client.py:598-603` 的"守卫看到的 dict 与送进 MCP 的 arguments 可能不同一份"疑点仍待探针票。
