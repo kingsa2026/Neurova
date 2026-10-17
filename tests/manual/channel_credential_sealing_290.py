@@ -30,9 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
-WORK_ROOT = isolatedDataRoot(prefix="neurovaChannelSecret290")
+WORK_ROOT = isolatedDataRoot(prefix="neurovaChannelSecret290")   # 数据根 + agent 工作区根一起隔（台账 D8）
 os.environ.setdefault("NEUROVA_SECRET_KEY", "live-verify-key-for-issue-290")
-os.environ.setdefault("NEUROVA_AGENT_WORKSPACES_DIR", str(WORK_ROOT / "ws"))
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "live-verify-jwt-secret-for-290")
 
 from fastapi import FastAPI  # noqa: E402

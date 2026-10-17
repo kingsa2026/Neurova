@@ -23,9 +23,10 @@
 但编排器/池的构造期会立刻取它，故必须在构造之前）：
 
     from tests.manual._liveVerifyIsolation import isolatedDataRoot
-    isolatedDataRoot()                       # 一次性：全新临时根
+    isolatedDataRoot()                       # 一次性：数据根 + agent 工作区根 一起隔到临时根
 
-按规模/形状分目录时用显式落点：
+按规模/形状分目录时用显式落点（**只**动数据根；那种场合还要隔工作区根就显式调
+`isolatedAgentWorkspaces()`，它本身也是幂等的）：
 
     root = useDataRoot(os.path.join(workdir, f"scale_{rows}"))
 
@@ -50,11 +51,20 @@ DATA_ROOT_ENV = "NEUROVA_DATA_DIR"
 
 
 def isolatedDataRoot(prefix: str = "neurovaLive") -> Path:
-    """把数据根指到一个全新临时目录并返回它。
+    """把**数据根与 agent 工作区根一起**指到临时目录，返回数据根。
 
-    幂等：调用方（或父进程）已注入过就沿用，不覆盖 —— 跨进程断言
-    （如「重启后同库能否召回」）依赖父子进程指向**同一个**根。
+    为什么是"两根一起"：记忆正文落在工作区那一根下（`<workspace>/<agent>/memory/`），
+    它**不在数据根管辖内**。此前只隔数据根的活体会把记忆写进仓内真 `agent_workspaces/`
+    （实测：`POST /api/v1/agents` 那一路在仓根新建了两个 workspace 目录，台账 §6-308 的 D8）。
+    同一件事散在 145 个调用点上"各人记得调第二个函数"就是第二个事实源的形态（教义 第 6 条），
+    所以这条保证收进单点：调用方一行不改就两根都隔。
+    只想要显式数据根落点（跨进程按规模分目录）时用 `useDataRoot()`——它**只**动数据根，
+    那种场合若还要隔工作区根，显式调 `isolatedAgentWorkspaces()`。
+
+    幂等：任一env 已注入过就沿用，不覆盖 —— 跨进程断言
+    （如「重启后同库能否召回」）依赖父子进程指向**同一个**落点（env 由父进程传给子进程）。
     """
+    isolatedAgentWorkspaces(prefix=prefix)
     injected = (os.environ.get(DATA_ROOT_ENV) or "").strip()
     if injected:
         return Path(injected)
@@ -62,16 +72,19 @@ def isolatedDataRoot(prefix: str = "neurovaLive") -> Path:
 
 
 #: agent 工作区根的注入口（与 `neurova/core/agent_workspaces.py` 的 `AGENT_WORKSPACES_ENV` 同值）。
-#: 记忆正文落在这**另一根**下（`<workspace>/<agent>/memory/`），不在数据根管辖内：
-#: 只调 `isolatedDataRoot()` 的活体会把记忆写进仓内真 `agent_workspaces/`（本仓实测踩过）。
+#: 记忆正文落在这**另一根**下（`<workspace>/<agent>/memory/`），不在数据根管辖内——
+#: 所以 `isolatedDataRoot()` 把它一起隔掉（此前"只隔数据根就把记忆写进仓内真 `agent_workspaces/`"
+#: 是本仓实测踩过的坑，台账 §6-308 的 D8）。
 AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
 
 
 def isolatedAgentWorkspaces(prefix: str = "neurovaLive") -> Path:
-    """把 agent 工作区根也指到临时目录并返回它。
+    """把 agent 工作区根指到临时目录并返回它。
 
-    写记忆/附件/按-agent 图谱的活体都要连同这一根一起隔——`isolatedDataRoot()`
-    管不到它。幂等同 `isolatedDataRoot`：已注入就沿用，父子进程共读同一份落点
+    走 `isolatedDataRoot()` 的活体**不必再调这一条**——那里已把两根一起隔了（D8 收口）。
+    这一条留给两种场合：只显式钉数据根落点（`useDataRoot()`）却仍要隔工作区根的活体，
+    以及单独复核这一根的判据（`tests/unit/ci/test_liveIsolationSinglePointCoversBothRoots.py`）。
+    幂等同 `isolatedDataRoot`：已注入就沿用，父子进程共读同一份落点
     才断言得动（如「重启后同库能否召回」）。
     """
     injected = (os.environ.get(AGENT_WORKSPACES_ENV) or "").strip()
