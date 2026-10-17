@@ -5901,3 +5901,89 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （`test_npc_script_interpreter_reachability.py` 5 格 node 环境红＋`test_subQuantumSpinClockGate.py` 1 格），
       早已在案，不在受保护子集内。
     - **本会话下一枚空号现查 §6-302**（写前必须现场重取；本笔落库时该读数为 301）。
+
+302. **批 74 · MCP 两处断点闭环：oauth 配置收成可写可读、服务端面改做协议版本协商（✅ `64995ad6` 凭据封存通道收口 / `b2d22da2` oauth 写侧+读侧 / `cd37cc23` 前端表单+11 语言 / `a445f391` 版本协商+ping+Accept / `b4754ad3` 子集 628→631）** 🟢 —— 起点是"fastmcp 能帮本仓解决什么"的评估，用户 2026-10-17 看完评估后点单"修复断点"，并就三个岔口拍板：②走仓内补协商不加依赖（甲）、①写侧做到前端表单那一层、①带出的凭据落盘问题两条通道收口到一份（甲）。
+
+    - **断点①的实状比票面厚两层**：票面写的是"`oauth` 不在 `_ALLOWED_KEYS`，注册路径存不下"。复核实状时
+      又发现：那三处读取面（`mcp_client.call_tool` 取 token、`/oauth/authorize`、`GET /mcp-servers` 的
+      `oauth_grant`）里有两处按 `entry["config"]["oauth"]` 取——那是 `mcp_client` 的**运行时包装**形状，
+      而 `SharedConfigManager` 落的是 `validate_mcp_server_config` 的扁平返回值本体，所以键就算存得进去
+      照样读不到。来历以 git 实证：`git log -S '"oauth"'` 在 `mcp_config.py` **零命中**（写侧从未建过），
+      读取面由 `931453e2`／`247ecbb7` 两笔带进来。第三层：既有夹具恰好自造了那层包装形状，于是九格全绿
+      而线上那条路一个都没通过——本档改由生产写入口 `validate_mcp_server_config` 产出 entry。
+    - **活体抓到本批最要紧的一格（单测漏了）**：`client_secret` 明文躺在 `shared_config.json` 上。根因不是
+      "忘了加密"，而是 `secret_store` 里并存两套封存实现——窄的一套只认字面键名 `api_key`，而
+      `shared_config` 的读写恰好走它；递归的那套按 `CREDENTIAL_KEY_NAMES` 封，只有 `channel_config` 在用。
+      同一份磁盘文件因此对"哪些字段算凭据"有两个答案。本批前一版判据**直接调 `sealSecrets` 验纯函数**，
+      绿，而生产那条写路根本不经过它——收口后判据一律走真 `SharedConfigManager`。
+      收口口径：三处调用改走 `sealSecrets`/`unsealSecrets`（返回新树，须接住返回值；多余 `deepcopy` 删掉），
+      `api_key` 并入集合，退役 `_walk_api_keys`/`encrypt_config_secrets`/`decrypt_config_secrets`
+      （删前复算：`tests/` 与 `neurova/` 除自身外零命中）。
+    - **断点②收成"协商"而不是"把版本号写大"**：此前 `initialize` 无条件回声字面量 `"2025-03-26"`，
+      按 spec 只支持较新版本的客户端必须断开，本面对它们不可达。现规则与参考实现同形
+      （`mcp/server/runner.py` 的 `_negotiate_initialize`）：请求版本在支持集内则回声，否则回
+      `LATEST_HANDSHAKE_VERSION`；支持集取 `mcp_types.version.HANDSHAKE_PROTOCOL_VERSIONS` 单源，
+      不在仓内手抄日期列表（抄一份的坏法不是今天抄错，而是 SDK 扩容后静默陈旧）。另补 `ping` 空 result
+      与 Accept 校验（本面只产 JSON 体，该规则在参考实现里按响应模式门禁而非按版本门禁）。**刻意不做的**：
+      `capabilities` 仍只声明 tools，并专钉一格反证——升版本号不等于升能力，resources/prompts 未实装
+      就不许出现在声明里。
+    - **红自证**（带唯一 tag 的定向 stash 撤掉 5 个生产档＋那档旧夹具，只留三档新判据复跑同一选择集）：
+      `35 failed, 132 passed`，35 条**全部**落在三档新判据内（oauth 档 19 红＋封存档 8 红＋协商档 8 红），
+      档外零失败；还原后 `95 passed`，三个还原件 md5 逐档复证一致。
+    - **宽域 A/B**（`scripts/ab_compare.sh` 本仓缺件，现场自建仓外 detached worktree 基线：HEAD 生产＋本批
+      三档判据、无修复；基线根路径的编码形态与本树一致，以免路径形状自造差集）：
+      基线 `36 failed, 2390 passed` ⊃ 本树 `1 failed, 2425 passed`，**仅本树红 0 条 ⇒ 无回归**；
+      仅基线红 3 档＝本批判据在无修复侧的红（交付证据）。本树唯一红
+      `test_governance_integration.py::TestGovernanceIntegration::test_curl_pipe_sh_asks_user_by_default`
+      两侧同红＝预存，与本批无关。
+    - **活体 13 读数全 PASS ＋ 三条反证各自咬住**：把三处根修分别单独退回旧形态跑同一份脚本——
+      退回钉死字面量 → 2 条 FAIL（`protocolVersion=2025-03-26`）；从 `_ALLOWED_KEYS` 摘掉 `"oauth"` →
+      4 条 FAIL（`未知字段 ['oauth']` 且列表 `entry=None`）；把 `persist = sealSecrets(...)` 退回不封 →
+      1 条 FAIL（明文命中=True）。三退各退码 1，还原 md5 一致，终态复跑全绿。
+      数据根隔离走 `_liveVerifyIsolation.isolatedDataRoot()` 单点；仓内 `data/shared_config.json`
+      本轮 md5 前后不变（`765cc09e06a5`）。
+    - **前端两道实跑门**：`npm run test` → `262 passed | 2 skipped (264)`、`2119 passed`；
+      `npx vue-tsc --noEmit` 退码 0。i18n 五档守卫 59 passed（`locale-consistency` 逐名比对 11 语言键集
+      相等）。仓内 eslint 那道今天仍跑不起来（无 flat config、依赖缺），按 §4 不作验收项。
+      如实记一句：这两道证契约与类型，不证弹窗在浏览器里的真实渲染——图形面走查未做，留给人眼。
+    - **本会话自己的五次错（都已做成会红的，记形防下次重犯）**：① 让空的 `oauth={}` 也走必填校验 ⇒
+      所有普通注册恒 400，被常驻档 `test_tool_layers_auth.py` 整档拦下（9 红）——已把该形状做成两格常驻
+      判据；② 上面那条"拿纯函数冒充生产路径"的假绿；③ AST 判据里写成 `Call.attr`（`AttributeError`）、
+      又按印象写了个不存在的方法名 `get_llm_providers()`（实为 `list_llm_providers`），后者让两格假红；
+      ④ 第一、二轮 A/B 把**没跑成**读成 `AB_PASS`——一次是选择集里给了不存在的档名（pytest 退码 4、
+      零收集），一次是汇总行正则按 `===== N passed` 起头，而本仓 `-v` 形态实为
+      `= 1 failed, 2425 passed … =`（单个 `=` 起头）。自建 A/B 必须自带两道对账：无汇总行即 FAIL、
+      汇总报红数≠实抽条数即 FAIL；⑤ `zh-CN.ts` 一度报 +3774/−3767 整档翻写，内容与 HEAD 只差 7 行，
+      翻的是行尾——本仓 `core.autocrlf=true`，工作树是 CRLF 而库内 blob 是 LF。改整档型文本前先看
+      库内形态，numstat 的异常量级本身就是信号。另更正一次誊写错：`b4754ad3` 前一版正文把基建池写成
+      +21，实为 +19（量过却打错字），已就地 amend 只改正文、树哈希 `1f6bd916…` 前后一致，
+      被 amend 作废的那个旧号不入账、也不落成反引号引用——反引号会被台账守卫当提交引用抓，而它已不在历史里（与 §6-300 那条号次记法同族）。
+    - **净 LOC 逐笔抄 numstat**：`64995ad6` 生产 −21（`secret_store.py` +9/−30、`shared_config.py` +10/−10）、
+      测试/基建 +158；`b2d22da2` 生产 **+93**（`mcp_config.py` +75/−0、`tool_layers.py` +28/−10，去向逐条已列
+      正文）、测试/基建 +349；`cd37cc23` 生产 **+167**（`tool-layers.ts` +47/−5、`ToolLayerPage.vue` +50/−2、
+      11 个 locale 各 +7/−0）、测试/基建 +37；`a445f391` 生产 **+38**（`mcp_server_api.py` +41/−3）、
+      测试/基建 +99；`b4754ad3` 生产 +0/−0、测试/基建 +19（子集 628→631，现读 `grep -vcE '^\s#|^\s*$'` ＝ 631）。
+      生产池合计 **+277**，四处为正的生产净增每笔各自在提交正文列明去向。
+    - **同根因扫出来但不同因、没顺手改（登记待点单）**：
+      ① `capabilities` 只声明 tools 是对的，但本面确实**没有** resources/prompts 两面——补它们是新增能力，
+      需单开一批；② `mcp_config._infer_transport()` 里重复了一份 `_validate_types()` 已有的
+      `tool_capabilities` 校验（同文件内两处同形，属冗余而非断言缺口）；③ `shared_config.py` 三处
+      `except Exception: pass` 把加密层故障吞成静默降级（教义第 2 条形态），与本批根因不同；
+      ④ 依赖声明与实装口径不符：`requirements.txt:91` 写 `mcp>=1.2.0`，而代码取的是 2.x 才有的名字
+      （`mcp_client` 的 `streamable_http_client`、本批 `mcp_server_api` 的 `mcp_types.version`），
+      且两份 lock 钉 2.2.0 而 venv 实装 2.3.0——声明的下界今天不成立；
+      ⑤ `docs/Neurova_Agent工具扩展计划_2026-09-12.md:180` 说 `POST /mcp-servers/{id}/test` 从未实现，
+      实况是它已于同日补上（`tool_layers.py:364`）——带日期档案按纪律不回改，此处只记一句；
+      ⑥ 本仓 `scripts/ab_compare.sh` 缺件（流水线 Skill 把它当既有基建引用），后续会话做 A/B 需自建或
+      先补回该脚本。
+    - **fastmcp 评估的落点（不入账为动作）**：结论是"只有服务端面那一格有真价值"，而引入第三方栈属新增
+      重依赖、与 §3 身份单通道有冲突面，**需人裁**；本批按甲案在仓内修，未引入任何新依赖（仅取既有
+      官方 SDK 的版本常量）。外部项目只作功能依赖登记，不搬其命名与结构（§2 原创性红线）。
+    - **既有守卫自己的成本成了一格待办**：`tests/unit/test_audit_ledger_commit_guard.py` 单跑实测
+      `3 passed in 47.84s`，而本仓 `pyproject.toml` 是全局 `timeout = 30`（thread 法）——按 30s 墙钟它
+      直接 Timeout 退码 1，放宽到 `-o timeout=300` 才拿到 3 passed。该档已在受保护子集内，逐文件单跑的
+      CI 那道门今天是否也在超时边缘，属**预存形态**（本批只给台账净增约 5 个号，量级不足以造成此形），
+      登记待点单：要么给这档目录级豁免墙钟、要么把逐号 shell 出 `git merge-base` 改成一次
+      `git rev-list` 建可达集再本地比对。形态同族见本卷"判据自身成本也是回归面"那一条。
+    - **§9.1「已落地」表本批未追加**：该表自 §6-285 那行起就再没追加过（§5397 已记这笔欠账），本批五笔同样只在 §6 本格入账，避免再造一行"表里没有、正文里全有"的双面口径。
+    - **本会话下一枚空号现查 §6-303**（写前必须现场重取；本笔落库时该读数为 302）。
