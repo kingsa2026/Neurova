@@ -82,7 +82,9 @@ class ToolInfo(BaseModel):
     tool_id: str
     name: str
     description: str = ""
-    source: str = "builtin"
+    # 必填：归属由注册面派生（`_ownershipFromRegistration`）。这里曾写死默认值 "builtin"，
+    # 于是任何漏传 source 的构造都静默把自己说成内置工具——那正是 §6-299 的病根形状。
+    source: str
     parameters: Dict[str, Any] = {}
     server_id: Optional[str] = None
     # P2-15 声明位：True=工具声明必须沙箱执行（前端徽标数据源）；
@@ -99,6 +101,30 @@ class ToolExecuteRequest(BaseModel):
 class ShareToolRequest(BaseModel):
     tool_id: str = Field(..., description="工具 ID")
     target_user_id: str = Field(..., description="目标用户 ID")
+
+
+#: 外部 MCP server 提供的工具在对外契约里的那一个来源标签；注册面带的 `tags=["mcp", server_id]`
+#: 用同一个值解释（`mcp_client._sync_tools_to_engine`），别处再写字面量就是第二个事实源。
+MCP_SOURCE = "mcp"
+
+
+def _ownershipFromRegistration(tool_def) -> tuple:
+    """一条工具的归属**由注册面派生**，列表面不替它猜（§6-299 丙）。
+
+    唯一实据是注册时带来的声明：MCP 同步打的是 `tags=["mcp", server_id]`。此前源 1 把来源写成
+    `"builtin"` 字面量、`server_id` 硬塞 None，于是外部 server 提供的工具在对外契约里成了内置工具、
+    归属被抹掉。都不带的那一形回 `"dynamic"`——中性值，**不顶替成 builtin**；"builtin" 此后只属于
+    `agent._builtin_tools` 那条真内置来源（`list_all_tools` 的源 2）。
+    """
+    tags = [str(t) for t in (getattr(tool_def, "tags", None) or [])]
+    if MCP_SOURCE in tags:
+        following = [t for t in tags[tags.index(MCP_SOURCE) + 1:] if t]
+        return MCP_SOURCE, (following[0] if following else None)
+    if tool_def.is_public:
+        return "public", None
+    if tool_def.owner:
+        return "user", None
+    return "dynamic", None
 
 
 _mcp_servers: Dict[str, Dict[str, Any]] = {}
@@ -384,7 +410,7 @@ async def list_mcp_tools(server_id: str):
             tool_id=f"mcp.{server_id}.{t.get('name', '')}",
             name=t.get("name", ""),
             description=t.get("description", ""),
-            source="mcp",
+            source=MCP_SOURCE,
             parameters=t.get("parameters") or {},
             server_id=server_id,
         )
@@ -406,12 +432,7 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
     # 源 1：从 ToolEngine 获取动态注册的工具
     tool_definitions = engine.list_tools(status=ToolStatus.AVAILABLE)
     for tool_def in tool_definitions:
-        # 确定工具来源
-        tool_source = "builtin"
-        if tool_def.is_public:
-            tool_source = "public"
-        elif tool_def.owner:
-            tool_source = "user"
+        tool_source, tool_server_id = _ownershipFromRegistration(tool_def)
 
         if tool_def.name not in seen_tool_ids:
             seen_tool_ids.add(tool_def.name)
@@ -422,7 +443,7 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
                     description=tool_def.description,
                     source=tool_source,
                     parameters={"type": "object", "properties": {p.name: p.to_dict() for p in tool_def.parameters}},
-                    server_id=None,
+                    server_id=tool_server_id,
                 )
             )
 
@@ -561,17 +582,18 @@ async def discover_public_tools():
     # 从 ToolEngine 获取公开工具
     discovery_result = engine.discover_public_tools()
 
-    # 转换为 API 格式
+    # 转换为 API 格式（归属同经那个派生口：这条面上的工具也能带出所属 server）
     tools = []
     for tool_def in discovery_result.tools:
+        tool_source, tool_server_id = _ownershipFromRegistration(tool_def)
         tools.append(
             ToolInfo(
                 tool_id=tool_def.name,
                 name=tool_def.name,
                 description=tool_def.description,
-                source="public",
+                source=tool_source,
                 parameters={"type": "object", "properties": {p.name: p.to_dict() for p in tool_def.parameters}},
-                server_id=None,
+                server_id=tool_server_id,
             )
         )
 
