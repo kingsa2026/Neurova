@@ -34,6 +34,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from neurova.security import artifact_digest as AD  # noqa: E402
 from neurova.skills.skill_service import SkillService  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 failures: list[str] = []
 CLEAN_BODY = "def main(**kwargs):\n    return {'ok': True}\n"

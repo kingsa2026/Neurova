@@ -51,6 +51,8 @@ from neurova.api.app import create_app  # noqa: E402
 from neurova.api.auth import create_access_token  # noqa: E402
 from neurova.security import artifact_digest as AD  # noqa: E402
 from neurova.skills import library_service  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 AGENT = "b64-live"
 ENTRY = "def main(**kwargs):\n    return {'ok': True, 'saw': sorted(kwargs)}\n"

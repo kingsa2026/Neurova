@@ -148,6 +148,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from neurova.api.deps import get_current_user  # noqa: E402 — 端点 import 的就是这个对象，patch 别处静默失效
 from neurova.api.endpoints import skill_pool_api  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 lib.reset_libraries_for_tests()
 monkey_app = FastAPI()

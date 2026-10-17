@@ -17,6 +17,8 @@ import json
 import os
 import sys
 import time
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 BASE = "/api/v1/neurflow"
 USER = {"user_id": "cap_live_probe", "username": "cap_live_probe", "role": "admin"}

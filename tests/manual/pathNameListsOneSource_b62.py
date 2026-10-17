@@ -44,6 +44,8 @@ from neurova.security import governance, tool_guard  # noqa: E402
 from neurova.security.tool_guard import GuardThreatCategory, ToolGuardEngine  # noqa: E402
 from neurova.security import tool_param_guard as tpg  # noqa: E402
 from neurova.security.tool_param_guard import ParamGuard  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 EVASION = GuardThreatCategory.SHELL_EVASION
 # 触发值把 `\xHH` 形状写进档名，不向操作者的用户名借（家目录形状随机器变，第 1/4 腿的读数会跟着翻）。

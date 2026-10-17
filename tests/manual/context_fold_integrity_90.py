@@ -30,6 +30,8 @@ if str(ROOT) not in sys.path:
 
 from neurova.context.orchestrator import ContextOrchestrator  # noqa: E402
 from neurova.context_pool import ContextInput, ContextSource  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 TOOL_PAYLOAD = "工具结果" * 400
 

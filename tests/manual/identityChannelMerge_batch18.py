@@ -40,6 +40,8 @@ from neurova.llm.multi_model_client import _consume_llm_quota  # noqa: E402
 from neurova.mem_core import MemCore  # noqa: E402
 from neurova.post_chat_pipeline import resolveSessionOwner  # noqa: E402
 from neurova.session_manager import SessionManager  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 failures: list[str] = []
 AGENT_ID = "merge18-agent"

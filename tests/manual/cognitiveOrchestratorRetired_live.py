@@ -19,6 +19,8 @@ import importlib
 import json
 import os
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 BASE = "/api/v1/neurflow"
 PROBE_TYPE = "probe:liveEcho"

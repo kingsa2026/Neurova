@@ -30,6 +30,9 @@ os.environ.setdefault("NEUROVA_DATA_DIR", tempfile.mkdtemp(prefix="neurovaT11bLi
 from prometheus_client import REGISTRY  # noqa: E402
 
 from neurova.context.orchestrator import ContextOrchestrator  # noqa: E402
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 
 class _TurnIdentityAgent(MagicMock):

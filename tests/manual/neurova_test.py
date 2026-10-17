@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 
 from tests.manual._liveVerifyIsolation import dataPathUnder, isolatedDataRoot  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 isolatedDataRoot()
 
 # 添加项目根目录到Python路径

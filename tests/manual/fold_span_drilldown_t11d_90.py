@@ -30,6 +30,9 @@ os.environ.setdefault("NEUROVA_DATA_DIR", tempfile.mkdtemp(prefix="neurovaT11dLi
 from neurova.context.fold_index import parseCoversRef  # noqa: E402
 from neurova.context.orchestrator import ContextOrchestrator  # noqa: E402
 from neurova.tool_executor import ToolExecutor  # noqa: E402
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 
 def _agent(agentId: str, sessionId: str):
