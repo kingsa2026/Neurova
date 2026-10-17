@@ -160,12 +160,12 @@ def test_bothConsumersTakeTheSameKeyList():
     commands, paths = _semanticLists()
     for key in commands:
         probe = "echo $(id)"
-        extracted, _ = governance.extract_adjudicable_params({key: probe})
+        extracted, _ = governance.extract_adjudicable_params("file_read", {key: probe})
         assert extracted == probe, f"命令键 {key!r} 没被治理预检取走 ⇒ 清单与预检已分叉"
         assert _evasionFindings("run_command", {key: probe}), (
             f"命令键 {key!r} 的值没进命令扫描面 ⇒ 清单与守卫已分叉")
     for key in paths:
-        extracted, picked = governance.extract_adjudicable_params({key: SAFE_PATH})
+        extracted, picked = governance.extract_adjudicable_params("file_read", {key: SAFE_PATH})
         assert picked == [(key, SAFE_PATH)], f"路径键 {key!r} 没被治理预检当路径取走 ⇒ 清单与预检已分叉"
         assert not _evasionFindings("file_read", {key: SAFE_PATH}), (
             f"路径键 {key!r} 的无害值仍被命令面扫 ⇒ 清单与守卫已分叉")

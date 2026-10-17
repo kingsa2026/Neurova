@@ -218,6 +218,64 @@ def pathValuesFromParams(params: Any) -> List[tuple]:
             out.append((name, value))
     return out
 
+
+#: 参数级路径语义的**声明位**：各工具 schema 的 property 上写 `"format": "path"`。
+#: 选 JSON Schema 自己的扩展词表是因为它随我们的 `inputSchema` 一起出街（`tool_layers/mcp_server.py`
+#: 聚合能力清单时直接带 `parameters`），远端工具可以采用同一约定；未知 format 值按惯例被校验器忽略。
+PATH_FORMAT = "path"
+#: 引擎算好的 `(键名, 值)` 清单交给 guardian 时用的保留 context 键。它不是工具参数，
+#: 也不进扫描面——两面都在注入之前构建完了。
+PATH_VALUES_CONTEXT_KEY = "__path_values__"
+
+
+def declaredPathParamNames(toolName: Any) -> tuple:
+    """这只工具的 schema 里**声明**为路径的参数名，顺序随 schema。无 schema／无声明 ⇒ 空。
+
+    `mcp.*` 这类动态注册工具在本仓注册表里没有条目，于是这里返回空——调用方退回名字表兜底，
+    那是刻意保留的保守面（删掉它，远端工具的路径参数从此无人看）。
+    """
+    if not isinstance(toolName, str) or not toolName:
+        return ()
+    try:
+        from neurova.builtin_tools import get_builtin_tool_params
+
+        schema = get_builtin_tool_params(toolName)
+    except Exception:  # noqa: BLE001 - 注册表不可达时退回名字表，不阻断裁决（同 _builtin_param_names）
+        return ()
+    props = ((schema or {}).get("parameters") or {}).get("properties") or {}
+    if not isinstance(props, dict):
+        return ()
+    return tuple(name for name, spec in props.items()
+                 if isinstance(spec, dict) and spec.get("format") == PATH_FORMAT)
+
+
+def pathValuesForTool(toolName: Any, params: Any) -> List[tuple]:
+    """这一次调用里哪些参数该按**路径**裁决——声明优先，名字表兜底，只增不减。
+
+    丁（§6-284 末态）要的是把判定权交回声明方：`exec_command.workdir` 这类"描述里就是工作目录、
+    名字不在任何清单里"的参数，过去只被回落正则**偶然**咬到（`(?:path|file|dir)=` 命中 `workdir=`
+    的子串），而同一次调用里出现任何清单内键时这份偶然就消失（回落整支不跑）——真实漏名。
+    声明只**增加**覆盖：名字表里已有的键继续按表判，否则未声明的 `path` 键会从裁决面里掉出去。
+    形状不参与这里的裁决：`looksLikePathValue` 只要串里有 `/` 就算路径形状，拿它当依据会把
+    `note: "见 /etc/shadow"` 拖进路径面——那是甲案明确拒掉的 case 4。
+    """
+    if not isinstance(params, dict) or not params:
+        return []
+    names = list(dict.fromkeys(
+        list(declaredPathParamNames(toolName))
+        + list(pathNamesWithRole("scanned")) + list(pathNamesWithRole("textual"))))
+    out: List[tuple] = []
+    for name in names:
+        value = params.get(name)
+        if isinstance(value, str) and value.strip():
+            out.append((name, value))
+    return out
+
+
+def pathSurfaceOwnerNames(toolName: Any) -> frozenset:
+    """命令扫描面该**剔除**哪些键的值——归属由声明定，不由名字表独自定（§6-266 第①刀的延伸）。"""
+    return frozenset(declaredPathParamNames(toolName)) | frozenset(pathNamesWithRole("scanned"))
+
 #: 路径值里"shell 会另作解释"的字符——命中任一即由 `FilePathGuardian` 出一条 low 级审计读数。
 #: 这一族**只用于报告面**：§6-266 第①刀裁定之前它还兼作豁免闸（含这些字符就不豁免），于是同一个
 #: 值按键名是路径、按字符又被当命令扫一遍——两个答案。裁定后只留一个：**键名语义决定扫描面**。
@@ -605,7 +663,8 @@ class FilePathGuardian(BaseGuardian):
         `tool_input` 扁串那支只在**参数面一个路径值都没有**时才用——按空格猜值边界会把
         `C:\\Program Files\\...` 切成 `C:\\Program`，能不走它就绪不走它。
         """
-        pairs = pathValuesFromParams(context)
+        pairs = (context.get(PATH_VALUES_CONTEXT_KEY) if isinstance(context, dict) else None) \
+            or pathValuesFromParams(context)
         if not pairs:
             # 参数面一个路径值都没有，才回落到扁串里那支 `k=v` 形状（名字集同出一张表）。
             # 按空格猜值边界会把 `C:\Program Files\...` 切成 `C:\Program`——所以参数面在场时
@@ -827,12 +886,16 @@ class ToolGuardEngine:
         # 命令语义的 guardian 不吃"路径键里的纯路径值"，全量面照旧。
         tool_input = self._build_tool_input(tool_name, guard_params)
         command_input = self._build_command_surface(tool_name, guard_params)
+        # 声明在这里算**一次**交下去（两面已构建完，保留键进不了任何扫描面）：guardian 手上没有
+        # tool_name，由引擎替它问 schema。两处各自解释声明，迟早给出两个答案。
+        guardianContext = {**guard_params,
+                           PATH_VALUES_CONTEXT_KEY: pathValuesForTool(tool_name, guard_params)}
 
         # 运行所有守护者
         for guardian in self.guardians:
             surface = command_input if guardian.scan_surface == "command" else tool_input
             try:
-                findings = guardian.guard(surface, guard_params)
+                findings = guardian.guard(surface, guardianContext)
                 all_findings.extend(findings)
             except Exception as e:
                 logger.warning("守护者 %s 异常: %s", guardian.name, e)
@@ -864,14 +927,16 @@ class ToolGuardEngine:
     def _build_command_surface(self, tool_name: str, tool_params: Dict[str, Any]) -> str:
         """命令语义扫描面：从整串输入里剔除"确实是一个路径"的路径键值（§6-255 甲案／§6-266 第①刀）。
 
-        剔除条件只看两件事：键在 `PATH_PARAM_KEYS` 里，且值过 `looksLikePathValue`（形状）。
+        剔除条件只看两件事：**这个键按路径语义裁决**（声明 ∪ 名字表的 scanned 兜底，
+        `pathSurfaceOwnerNames`），且值过 `looksLikePathValue`（形状）。
         **字符不再决定豁免**——含 `$` `;` 引号的合法文件名照样按路径语义走，改由
         `FilePathGuardian` 出一条 low 级 `path_with_shell_metacharacters` 读数落进审计面。
-        没登记进任何一把清单的键一律照命令面扫（那是仍然保守的那一侧）。
+        没登记进任何一把清单、也没声明的键一律照命令面扫（那是仍然保守的那一侧）。
         """
+        ownerNames = pathSurfaceOwnerNames(tool_name)
         parts = [tool_name]
         for key, value in tool_params.items():
-            if key in PATH_PARAM_KEYS and looksLikePathValue(value):
+            if key in ownerNames and looksLikePathValue(value):
                 continue
             parts.append(f"{key}={value}")
         return " ".join(str(p) for p in parts)
