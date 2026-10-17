@@ -1,26 +1,24 @@
 from __future__ import annotations
 
 """
-Execution Engine - 执行引擎（脑干）
+Execution Engine —— 执行监控器的宿主单例
 
-所有 Agent 共用的执行引擎，负责：
-- 工具执行（Tool Engine）
-- 工作流执行（Workflow Engine）
-- MCP 协议支持
-- 执行监控
+本模块今天只提供一件事：
+- 执行监控（装配 `ExecutionMonitor` 并经 `get_execution_monitor()` 交给 `/api/v1/monitor/*`）
 
-采用单例模式，确保多个 Agent 共用同一个执行引擎实例。
+曾与这把引擎同处的工具执行、工作流执行、计划节点执行与那份进程内执行台账已整体退役：
+全仓无一条来路（运行时探针实测 `get_execution_monitor: 2`，其余 14 个方法计数全 0），
+替代分别是 `tool_executor._execute_tool_core` 这条真咽喉（治理、票据、hooks 都在它身上）与
+`collaboration/neurflow/` 那台真 DAG 引擎（拓扑分层＋层内并发＋`safe_eval_condition` 真分支）。
+逐条证据与来历见 `audit-reports/execution-engine-subtree-archive-2026-10-17.md`。
+
+别把这里的单例当"通用执行入口"用——它不是，也不该是：工具与工作流各有自己的真咽喉。
 """
 
-import datetime
-from neurova.core.logger import get_logger
 import threading
 import typing
-import uuid
-from dataclasses import dataclass, field
 
-# ADR 0009: ExecutionStatus 单一规范定义位于 tool_layers.types
-from neurova.tool_layers.types import ExecutionStatus
+from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -28,60 +26,10 @@ if typing.TYPE_CHECKING:  # 仅类型检查期：monitor 为可选组件，运�
     from neurova.execution_engine.execution_monitor import ExecutionMonitor
 
 
-@dataclass
-class ExecutionResult:
-    """执行结果"""
-
-    execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    status: ExecutionStatus = field(default_factory=lambda: ExecutionStatus.PENDING)
-    result: typing.Any = None
-    error: typing.Optional[str] = None
-    start_time: typing.Optional[datetime.datetime] = None
-    end_time: typing.Optional[datetime.datetime] = None
-    duration: typing.Optional[float] = None
-    metadata: typing.Dict[str, typing.Any] = field(default_factory=dict)
-
-    def to_dict(self) -> typing.Dict[str, typing.Any]:
-        """转换为字典"""
-        return {
-            "execution_id": self.execution_id,
-            "status": self.status.value,
-            "result": self.result,
-            "error": self.error,
-            "start_time": self.start_time.isoformat() if self.start_time else None,
-            "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration": self.duration,
-            "metadata": self.metadata,
-        }
-
-    @classmethod
-    def from_dict(cls, data: typing.Dict[str, typing.Any]) -> "ExecutionResult":
-        """从字典创建"""
-        result = cls()
-        if "execution_id" in data:
-            result.execution_id = data["execution_id"]
-        if "status" in data:
-            result.status = ExecutionStatus(data["status"])
-        if "result" in data:
-            result.result = data["result"]
-        if "error" in data:
-            result.error = data["error"]
-        if "start_time" in data:
-            result.start_time = datetime.datetime.fromisoformat(data["start_time"])
-        if "end_time" in data:
-            result.end_time = datetime.datetime.fromisoformat(data["end_time"])
-        if "duration" in data:
-            result.duration = data["duration"]
-        if "metadata" in data:
-            result.metadata = data["metadata"]
-        return result
-
-
 class ExecutionEngine:
-    """
-    执行引擎
+    """执行引擎单例。
 
-    单例模式，管理工具执行、工作流执行和执行监控。
+    今天只装配并对外提供执行监控器；`monitor.py` 那三个端点是它唯一的生产来路。
     """
 
     _instance: typing.Optional["ExecutionEngine"] = None
@@ -98,354 +46,39 @@ class ExecutionEngine:
         if self._initialized:
             return
 
-        self._executions: typing.Dict[str, ExecutionResult] = {}
-        self._lock = threading.RLock()
-        self._event_bus = None
-        self._tool_engine = None
-        self._workflow_engine = None
-        self._execution_monitor = None
-        self._running = False
-
-        # 初始化执行引擎组件
+        self._execution_monitor: typing.Optional["ExecutionMonitor"] = None
         self._init_components()
 
         self._initialized = True
         logger.info("ExecutionEngine 初始化完成")
 
     def _init_components(self) -> None:
-        """初始化执行引擎组件"""
+        """装配执行监控器（延迟导入避免循环依赖）"""
         try:
-            # 导入执行引擎组件（延迟导入避免循环依赖）
             from neurova.execution_engine.execution_monitor import ExecutionMonitor
-            from neurova.execution_engine.tool_engine import ToolEngine
-            from neurova.execution_engine.workflow_engine import WorkflowEngine
 
-            self._tool_engine = ToolEngine()
-            self._workflow_engine = WorkflowEngine()
             self._execution_monitor = ExecutionMonitor()
-
             logger.debug("ExecutionEngine 组件初始化完成")
 
         except ImportError as e:
             logger.warning("ExecutionEngine 组件导入失败: %s", e)
-            # 创建占位组件
-            self._tool_engine = None
-            self._workflow_engine = None
             self._execution_monitor = None
-
-    async def execute_plan(self, plan: typing.Dict[str, typing.Any]) -> ExecutionResult:
-        """执行计划"""
-        execution_id = str(uuid.uuid4())
-        result = ExecutionResult(
-            execution_id=execution_id, status=ExecutionStatus.RUNNING, start_time=datetime.datetime.now()
-        )
-
-        with self._lock:
-            self._executions[execution_id] = result
-
-        try:
-            # 执行计划节点
-            await self._execute_plan_nodes(plan)
-
-            result.status = ExecutionStatus.COMPLETED
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.info("计划执行完成: %s", execution_id)
-
-        except Exception as e:
-            result.status = ExecutionStatus.FAILED
-            result.error = str(e)
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.error("计划执行失败: %s, 错误: %s", execution_id, e)
-            raise
-
-        return result
-
-    async def _execute_plan_nodes(self, plan: typing.Dict[str, typing.Any]) -> None:
-        """执行计划节点"""
-        nodes = plan.get("nodes", [])
-        execution_order = plan.get("execution_order", [])
-
-        if not execution_order:
-            # 简单顺序执行
-            await self._execute_simple_plan(nodes)
-        else:
-            # 按指定顺序执行
-            for node_id in execution_order:
-                node = next((n for n in nodes if n.get("id") == node_id), None)
-                if node:
-                    await self._execute_node(node)
-
-    async def _execute_simple_plan(self, nodes: typing.List[typing.Dict[str, typing.Any]]) -> None:
-        """执行简单计划（顺序执行）"""
-        for node in nodes:
-            await self._execute_node(node)
-
-    async def _execute_node(self, node: typing.Dict[str, typing.Any]) -> typing.Any:
-        """执行单个节点"""
-        node_type = node.get("type", "tool")
-
-        if node_type == "tool":
-            return await self.execute_tool(
-                tool_name=node.get("tool_name", ""), parameters=node.get("parameters", {}), timeout=node.get("timeout")
-            )
-        elif node_type == "workflow":
-            # P1-7：execute_workflow 返回 (result, meta) 二元组，节点结果取 result
-            wf_result, _wf_meta = await self.execute_workflow(
-                workflow_id=node.get("workflow_id", ""), parameters=node.get("parameters", {})
-            )
-            return wf_result
-        elif node_type == "condition":
-            # 条件节点
-            condition = node.get("condition", {})
-            if self._evaluate_condition(condition):
-                next_node = node.get("true_node")
-                if next_node:
-                    return await self._execute_node(next_node)
-            else:
-                next_node = node.get("false_node")
-                if next_node:
-                    return await self._execute_node(next_node)
-
-        return None
-
-    def _get_next_node(
-        self, nodes: typing.List[typing.Dict[str, typing.Any]], current_id: str
-    ) -> typing.Optional[typing.Dict[str, typing.Any]]:
-        """获取下一个节点"""
-        # 简单实现：返回列表中的下一个节点
-        for i, node in enumerate(nodes):
-            if node.get("id") == current_id and i + 1 < len(nodes):
-                return nodes[i + 1]
-        return None
-
-    def _evaluate_condition(self, condition: typing.Dict[str, typing.Any]) -> bool:
-        """评估条件"""
-        # 简单条件评估
-        condition_type = condition.get("type", "always_true")
-
-        if condition_type == "always_true":
-            return True
-        elif condition_type == "always_false":
-            return False
-        elif condition_type == "variable_check":
-            # 变量检查条件
-            condition.get("variable")
-            operator = condition.get("operator", "==")
-            condition.get("value")
-
-            # 这里需要从上下文中获取变量值
-            # 暂时返回 True
-            return True
-
-        return True
-
-    async def execute_tool(
-        self, tool_name: str, parameters: typing.Dict[str, typing.Any] = None, timeout: float = None
-    ) -> typing.Any:
-        """执行工具"""
-        if not self._tool_engine:
-            raise RuntimeError("ToolEngine 未初始化")
-
-        execution_id = str(uuid.uuid4())
-        result = ExecutionResult(
-            execution_id=execution_id, status=ExecutionStatus.RUNNING, start_time=datetime.datetime.now()
-        )
-
-        with self._lock:
-            self._executions[execution_id] = result
-
-        try:
-            # 调用工具引擎执行工具
-            tool_result = await self._tool_engine.execute(
-                tool_name=tool_name, parameters=parameters or {}, timeout=timeout
-            )
-
-            result.status = ExecutionStatus.COMPLETED
-            result.result = tool_result
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.info("工具执行完成: %s, 执行ID: %s", tool_name, execution_id)
-            return tool_result
-
-        except Exception as e:
-            result.status = ExecutionStatus.FAILED
-            result.error = str(e)
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.error("工具执行失败: %s, 错误: %s", tool_name, e)
-            raise
-
-    async def _call_llm(self, prompt: str, model: str = None, **kwargs) -> str:
-        """调用 LLM"""
-        # 这里需要集成 LLM 客户端
-        # 暂时返回占位符
-        logger.warning("_call_llm 方法未实现")
-        return "LLM 调用未实现"
-
-    async def execute_workflow(
-        self,
-        workflow_id: str,
-        parameters: typing.Dict[str, typing.Any] = None,
-        storage: typing.Any = None,
-    ) -> typing.Tuple[typing.Any, typing.Dict[str, typing.Any]]:
-        """执行工作流（P1-7 单轨收敛：neurflow 优先，旧引擎兼容期回退）。
-
-        转发语义：
-        1. 先查 neurflow（唯一引擎）：storage 未传时按环境缺省打开；
-           工作流存在 → neurflow DAG 引擎执行，meta.source="neurflow"
-        2. neurflow 无此工作流 → 回退旧 CogArch 引擎（兼容期，注册侧
-           仅存量模板/测试），meta.source="legacy"
-        3. 两边都没有 → ValueError（不再静默空转）
-
-        Returns:
-            (result, meta) 二元组：meta = {"source": "neurflow"|"legacy",
-            "status": 终态字符串, "execution_id": str}
-        """
-        # 1) neurflow 优先
-        try:
-            wf, nf_storage = await _load_neurflow_workflow(workflow_id, storage)
-        except Exception as e:  # noqa: BLE001 — storage 故障降级旧轨
-            logger.warning("neurflow 加载失败（回退旧引擎）: %s", e)
-            wf, nf_storage = None, None
-
-        if wf is not None:
-            from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
-
-            execution_id = str(uuid.uuid4())
-            result_row = ExecutionResult(
-                execution_id=execution_id, status=ExecutionStatus.RUNNING, start_time=datetime.datetime.now()
-            )
-            with self._lock:
-                self._executions[execution_id] = result_row
-            try:
-                instance = await get_workflow_executor().execute(wf, dict(parameters or {}))
-                ok = getattr(getattr(instance, "status", None), "value", "") == "completed"
-                result_row.status = ExecutionStatus.COMPLETED if ok else ExecutionStatus.FAILED
-                result_row.result = getattr(instance, "outputs", None)
-                result_row.end_time = datetime.datetime.now()
-                result_row.duration = (result_row.end_time - result_row.start_time).total_seconds()
-                outputs = getattr(instance, "outputs", None)
-                status = getattr(getattr(instance, "status", None), "value", "unknown")
-                return (outputs, {"source": "neurflow", "status": status, "execution_id": execution_id})
-            except Exception:
-                result_row.status = ExecutionStatus.FAILED
-                result_row.end_time = datetime.datetime.now()
-                raise
-
-        # 2) 旧引擎兼容回退
-        if not self._workflow_engine:
-            raise ValueError(f"工作流未注册: {workflow_id}（neurflow 与旧引擎均无此工作流）")
-
-        execution_id = str(uuid.uuid4())
-        result = ExecutionResult(
-            execution_id=execution_id, status=ExecutionStatus.RUNNING, start_time=datetime.datetime.now()
-        )
-
-        with self._lock:
-            self._executions[execution_id] = result
-
-        try:
-            # 调用工作流引擎执行工作流
-            workflow_result = await self._workflow_engine.execute(workflow_id=workflow_id, parameters=parameters or {})
-
-            result.status = ExecutionStatus.COMPLETED
-            result.result = workflow_result
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.info("工作流执行完成: %s, 执行ID: %s", workflow_id, execution_id)
-            return (workflow_result, {"source": "legacy", "status": "completed", "execution_id": execution_id})
-
-        except Exception as e:
-            result.status = ExecutionStatus.FAILED
-            result.error = str(e)
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.error("工作流执行失败: %s, 错误: %s", workflow_id, e)
-            raise
-
-    def get_execution_result(self, execution_id: str) -> typing.Optional[ExecutionResult]:
-        """获取执行结果"""
-        return self._executions.get(execution_id)
-
-    def list_executions(self, status: ExecutionStatus = None, limit: int = 100) -> typing.List[ExecutionResult]:
-        """列出执行记录"""
-        executions = list(self._executions.values())
-
-        if status:
-            executions = [e for e in executions if e.status == status]
-
-        # 按开始时间倒序排序
-        executions.sort(key=lambda x: x.start_time or datetime.datetime.min, reverse=True)
-
-        return executions[:limit]
-
-    async def cancel_execution(self, execution_id: str) -> bool:
-        """取消执行"""
-        with self._lock:
-            result = self._executions.get(execution_id)
-            if not result:
-                return False
-
-            if result.status in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]:
-                return False
-
-            result.status = ExecutionStatus.CANCELLED
-            result.end_time = datetime.datetime.now()
-            result.duration = (result.end_time - result.start_time).total_seconds()
-
-            logger.info("执行已取消: %s", execution_id)
-            return True
-
-    def register_tool(self, tool_name: str, tool_func: typing.Callable, description: str = "") -> None:
-        """注册工具"""
-        if self._tool_engine:
-            self._tool_engine.register_tool(tool_name, tool_func, description)
-            logger.debug("工具已注册: %s", tool_name)
-        else:
-            logger.warning("ToolEngine 未初始化，无法注册工具")
-
-    def set_event_bus(self, event_bus) -> None:
-        """设置事件总线"""
-        self._event_bus = event_bus
-        if self._execution_monitor:
-            self._execution_monitor.set_event_bus(event_bus)
 
     def get_execution_monitor(self) -> typing.Optional["ExecutionMonitor"]:
         """获取执行监控器（可能为 None: 组件导入失败时的占位）"""
         return self._execution_monitor
 
 
-async def _load_neurflow_workflow(workflow_id: str, storage: typing.Any = None) -> typing.Tuple[typing.Any, typing.Any]:
-    """从 neurflow storage 加载工作流（P1-7 转发查询；测试可注入 storage）。
-
-    Returns:
-        (WorkflowDefinition, storage)；工作流不存在返回 (None, storage)
-    """
-    if storage is None:
-        from neurova.collaboration.neurflow.storage import NeurflowStorage
-
-        storage = NeurflowStorage()
-    return storage.get_workflow(workflow_id), storage
-
-
 # 工厂函数
 _execution_engine: typing.Optional[ExecutionEngine] = None
-_execution_engine_lock = __import__('threading').Lock()
+_execution_engine_lock = threading.Lock()
 
 
 def get_execution_engine() -> ExecutionEngine:
     """获取执行引擎单例"""
     global _execution_engine
     if _execution_engine is None:
-        # P3-e：DCL——ExecutionEngine 装配 ToolEngine/WorkflowEngine/monitor，不可双创建
+        # P3-e：DCL——单例装配监控器，不可双创建
         with _execution_engine_lock:
             if _execution_engine is None:
                 _execution_engine = ExecutionEngine()
@@ -455,35 +88,19 @@ def get_execution_engine() -> ExecutionEngine:
 def reset_execution_engine() -> None:
     """重置执行引擎（用于测试隔离）。
 
-    此前只把模块级 ``_execution_engine`` 置 None，而 ``ExecutionEngine`` 是
-    **类级单例**（``_instance`` 在类上）：重置后再取回的是同一个对象，
-    ``_executions`` 里上一测试的执行记录原样存活，``_initialized`` 仍为 True
-    （Issue #65 实测：``get_execution_engine() is e1 → True``）。任何依赖它
-    做隔离的测试都会拿到脏状态。
-
-    现三层一起清：
+    Issue #65 那一次修的是"只清模块级缓存、没清类级 `_instance`"：reset 后再取回的是同一个对象，
+    `_initialized` 仍为 True，任何依赖它做隔离的测试都拿到脏状态。当时清了三层，其中第三层
+    （旧实例的 `_executions` 执行记录）随执行台账面一并退役——今天这把引擎不再有实例级可变状态，
+    所以剩两层：
 
     1. 模块级缓存 ``_execution_engine``；
-    2. 类级单例 ``ExecutionEngine._instance``（置 None，下次 ``__new__``
-       重建 → ``_initialized=False`` → ``__init__`` 重新装配组件）；
-    3. 旧实例的 ``_executions``（执行历史）——即便有外部引用持有旧对象，
-       也不再把状态带进后续测试。
+    2. 类级单例 ``ExecutionEngine._instance``（置 None，下次 ``__new__`` 重建 →
+       ``_initialized=False`` → ``__init__`` 重新装配监控器）。
 
-    调用方：``tests/conftest.py`` 的 autouse 隔离 fixture（此前本函数全仓
-    零调用方，"重置"契约从未被验证）。
+    调用方：``tests/conftest.py`` 的 autouse 隔离 fixture。
     """
     global _execution_engine
-    engine = _execution_engine if _execution_engine is not None else ExecutionEngine._instance
-    if engine is not None:
-        executions = getattr(engine, "_executions", None)
-        if isinstance(executions, dict):
-            with getattr(engine, "_lock", _execution_engine_lock):
-                executions.clear()
-        # 刻意**不**翻旧实例的 _initialized：复位后 _instance 已是 None，下次
-        # __new__ 会造全新对象，旧标记无从被读；而"就地失效"会让并发里已经
-        # 拿到旧引用的调用方观察到自相矛盾的状态（返回对象自称未初始化）。
-        # 隔离所需的是"状态不再外泄"，清 _executions 已足够。
     with _execution_engine_lock:
         _execution_engine = None
         ExecutionEngine._instance = None
-    logger.debug("ExecutionEngine 单例已重置（模块缓存 + 类级 _instance + 执行记录）")
+    logger.debug("ExecutionEngine 单例已重置（模块缓存 + 类级 _instance）")

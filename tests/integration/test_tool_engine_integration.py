@@ -3,10 +3,13 @@
 工具层集成断裂点测试
 
 验证 ToolEngine 与系统其他部分的集成：
-1. ToolExecutor ↔ ToolEngine
-2. API ↔ ToolEngine
-3. shared_core ↔ ToolEngine
-4. MCP ↔ ToolEngine
+- ToolExecutor ↔ ToolEngine
+- API ↔ ToolEngine
+- MCP ↔ ToolEngine
+
+（原列的 "shared_core ↔ ToolEngine" 一组已随 `ExecutionEngine` 的工具执行面退役——
+那两格断的是"引擎初始化时会创建 ToolEngine 并委托注册"，是形状而非来路；
+`shared_core` 今天不再装配第二把 ToolEngine，见 `test_executionEngineOrphanSurfaceRetired.py`。）
 """
 
 import asyncio
@@ -217,45 +220,6 @@ class TestAPIToolEngineIntegration:
         
         with pytest.raises(ValueError, match="工具不可用"):
             asyncio.run(engine.execute_with_safeguards("broken_tool"))
-
-
-class TestSharedCoreToolEngineIntegration:
-    """断裂点 3: shared_core ↔ ToolEngine 集成测试"""
-    
-    def test_shared_core_should_create_tool_engine(self):
-        """测试: shared_core 应该创建 ToolEngine 实例
-        
-        验证:
-        - ExecutionEngine 初始化时创建 ToolEngine
-        - ToolEngine 可用
-        """
-        from neurova.shared_core.execution_engine import ExecutionEngine
-        
-        engine = ExecutionEngine()
-        
-        # 验证 ToolEngine 已创建
-        assert engine._tool_engine is not None
-        assert isinstance(engine._tool_engine, ToolEngine)
-    
-    def test_shared_core_should_delegate_tool_registration(self):
-        """测试: shared_core 应该委托工具注册给 ToolEngine
-        
-        验证:
-        - register_tool 委托给 ToolEngine
-        - 工具在 ToolEngine 中可用
-        """
-        from neurova.shared_core.execution_engine import ExecutionEngine
-        
-        engine = ExecutionEngine()
-        tool_func = lambda x: x
-        
-        # 通过 ExecutionEngine 注册工具
-        engine.register_tool("test_tool_shared", tool_func, "测试工具")
-        
-        # 验证工具在 ToolEngine 中可用
-        tool = engine._tool_engine.get_tool("test_tool_shared")
-        assert tool is not None
-        assert tool.name == "test_tool_shared"
 
 
 class TestMCPToolEngineIntegration:
