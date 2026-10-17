@@ -3304,3 +3304,10 @@ tests/unit/execution/test_throatHasNoEmptyEngineBranch.py
 # 任何漏传的构造都静默自称内置（现必填，漏传当场 ValidationError）。
 # 对照格 `testOwnerAndBuiltinSourcesStillHold` 设计成两侧都绿：钉"改猜"没把真内置（源 2）改成别的值。
 tests/unit/api/test_toolOwnershipComesFromRegistration.py
+# 批 73（§6-300 事故收尾）：这份判据是**并发会话写的**（票④包 4，传输半区退役），本会话只是按它重建被
+# 自己误抹的生产半区（见 §6-300 末格那条记录），故连判据一起入库、**一字未改**。
+# 两格别当装饰删：① 交付锁 `test_runtimeHalfStillProducesAWorkingLocalRuntime` 钉"删的是死半区"——
+# 工厂造得出本地运行时、单例语义不变、**真 exec 回得来**（整包判死会误杀在役符号）；
+# ② `test_noCodeAnywhereImportsTheRetiredTransportSurface` 按**导入通道**取数而非符号名——
+# `mcp_manager.py` 里有个同名 `TransportType`，按名扫会把在役符号判成还在引用退役面。
+tests/unit/execution/test_executionLayersTransportHalfRetired.py
