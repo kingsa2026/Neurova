@@ -5465,7 +5465,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：丁；`plugin_manager` 那份 `_resolveEntryPoint`（§6-267 已注明同形）；`tool_engine.py:424`
       那个恒返回 safe 的 `DefaultGuard`（`neurova/` 内无任何 `tool_guard=` 注入 ⇒ 这条"执行前安全检查"
       其实是空转，与 §6-284 不同根因，要单独立票）——**票已立＝§6-295（运行时取证八腿，推荐乙，等人拍）**；
-      这一格的登记项至此从"待取证"变成"待裁定"。
+      这一格的登记项至此从"待取证"变成"待裁定"，再由 §6-296／§6-298 两笔**落地完毕**（乙案两刀）。
 
 292. **路径语义改由 schema 声明决定：`format:"path"` 立起来，名字表降为"查不到声明时"的兜底（✅ `e9d38350` 生产+判据+活体 / `0ee9ff0b` 子集 622→623；§6-284 丁落地）** 🟢 —— 用户 2026-10-17 拍丁；甲（§6-291）之后剩下的那一半。
 
@@ -5694,3 +5694,51 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `list_all_tools` 的两个源一起判归属）；不把 `ExecutionEngine.register_tool` 直接删掉——
       它若退役要带"原功能／关键入口／来历／现役替代／判定"五字段（先例：`dead-code-provenance-audit`）。
     - **本会话下一枚空号现查 §6-298（写前必须现场重取，本笔落库时该读数为 297）。**
+
+298. **咽喉里"优先使用 ToolEngine"那一档恒不命中，整条装配链一并退役（✅ `9b5f446e` 生产+判据+活体 / `11d6d603` 子集 625→626；§6-297 乙落地）** 🟢 —— 用户 2026-10-17 拍乙。
+
+    - **结构事实（比读数硬）**：那把内层 `ToolEngine` 的注册面在全仓**没有任何写入者**——唯一写入者是
+      `shared_core/execution_engine.py:410`，挂在 `ExecutionEngine.register_tool()` 名下，而它零消费者
+      （真装配运行时计数 0；`tests/execution_engine/test_tool_engine.py` 那批打的是 `ToolEngine()` 本身，
+      按**接收者**分开数过——同名方法混着数就会把"零消费者"读成"有人在用"）。于是那一档对任何调用恒抛
+      "未注册"再落回后序分支，连带 `tool_source = "mcp"`（全仓唯一给该标签赋值处）**恒不产生**：
+      遥测面上那个标签永远不会出现，而读代码的人会以为 MCP 已被归类统计。真在跑 MCP 的是第 4 档
+      `tool_layers/tool_router.py`（`_mcp_clients`）。
+    - **拆掉的整条链**（挂载点留着就是"它会被用到"的谎）：那一档 + `self._tool_engine` 挂载 +
+      `tool_engine` property + `_create_tool_engine` + `_get_tool_engine_class` + 模块级
+      `_TOOL_ENGINE_AVAILABLE`／`_ToolEngine`；`_execute_tool_core` 的顺序陈述改成真链条
+      `workflow_agent → workflow:{id} → builtin → skill → router → unknown`。
+    - **"不改可达性"是差分证明的，不是声明的**：同一份活体脚本（`tests/manual/throatEmptyEngineBranchRetired_b70.py`）
+      在 HEAD 基线树与本批侧各跑一次，四条 READOUT **完全一致**——未知工具落点、"只注册在端点单例里"的
+      工具落点、builtin 档执行读数、`on_tool_executed` 实际收到的 `tool_source` 集合
+      （两侧都是 `['tool_router','tool_router','builtin']`，都没有 `mcp`）。两侧各 5 腿全 PASS、退出码均 0。
+    - **既有判据联动**：`test_a18_tool_engine_eager_init_regression.py` **整档删除**（3 格钉"内层引擎急切构建／
+      构建期失败不吞"，被钉对象已退役）；`test_audit_p0b_concurrency.py` 的 `TestB6ToolEngineSingleInstance`
+      整类删除（它内联重建那把双检锁并调真实 `_create_tool_engine`），头部 B6 那行清单同步改判；
+      `test_p2_tool_executor_fixes.py` 的 fixture 桩与 `TestToolEngineIdentity` 整类退役；
+      `test_tool_success_flag_p1_fixes.py`／`test_governance_endpoints.py`／`test_governance_approval_flow.py`
+      清掉同类残留桩。
+    - **顺带修好的两处真缺陷（都是残留桩掩盖的）**：① `test_governance_endpoints.py` 的 teardown
+      `del ToolExecutor.__dict__["tool_engine"]` 在属性本不存在时抛 `TypeError: mappingproxy ...`
+      ——改前它被自己的 setUp 塞进去的假桩掩盖，桩一撤就红；② `test_governance_approval_flow.py` 的
+      `_orig_prop` **读取发生在赋值之后**，于是 teardown 把那个假 property 永久留在类上（跨用例污染）。
+    - **判据写法一处刻意**：docstring 那格只判**链条那一句**（第一个句号前），解释段允许点名被拆掉的东西——
+      按整段扫词会被本批自己写的说明咬到（形态集 241／268 那一族）。
+    - **净 LOC**：生产池 **+7/−79 ＝ 净 −72**；测试/基建池 **+226/−203 ＝ 净 +23**（新判据 +105、活体 +115，
+      抵掉三档退役 −66/−86/−26 与残留桩 −14/−10/−1）；子集那笔 +7/−0。数字逐笔按 `git add` 后
+      `git diff --cached --numstat` 现读。
+    - **红→绿／自证／A/B**：新档改前 `5 failed`、改后 `5 passed`；红自证＝把新档铺进纯 HEAD 的仓外 worktree
+      复跑，同一档 `5 failed`（失败集恰是本批新格）；宽域 A/B（execution＋tools＋agent＋execution_engine＋两档治理）
+      基线 `20 failed + 1 error` ↔ 本批侧 `20 failed`，FAILED/ERROR 集合 21↔20，**仅本批侧红 0 条**；
+      仅基线那 1 条（`test_loop_manager::test_agent_uses_loop_manager`）在基线树**单跑三次全绿**，
+      按顺序偶发处置、不写成"本批修复"。两侧同红 20 条逐档复算＝`test_pipeline_adaptive_rag` 10、
+      `test_agent` 3、`test_agent_core_size_ratchet` 2（HEAD 自带尺寸棘轮红，§6-286 已登记）、
+      `test_context_bugs_pipeline` 2、`test_capability_gap_trigger` 1、`test_agent_public_contract` 1、
+      `test_tool_closed_loop` 1——与本批判据族无交集。
+    - **划闭与仍开**：**§6-297 由本笔划闭**（乙落地）。**乙的第三刀留在台账**——面板列表面把
+      "只注册在端点单例、又不是 router 成员"的工具画成可得（活体读数：列表面 74 条含探针，而主路报
+      未知工具），要动 `list_all_tools` 两个源的归属与前端渲染，与"拆恒空档"是两个落地面，不静默遗留。
+      其余仍开＝§6-293（远端 `format` 采信）、`mcp_client.py:598-603`（先立探针票）、
+      命令键那一支仍是 `next(...)`、`ExecutionEngine` 的 plan/execute_tool 子树疑似整体无消费者
+      （本批只动了它的 `register_tool` 一层判据归属，子树要按死码档案五字段单独出票）。
+    - **本会话下一枚空号现查 §6-299（写前必须现场重取，本笔落库时该读数为 298）。**
