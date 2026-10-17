@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user
 from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
 from neurova.security.url_guard import assert_public_url
-from neurova.tool_layers.mcp_config import validate_mcp_server_config
+from neurova.tool_layers.mcp_config import OAUTH_OUTBOUND_URL_KEYS, validate_mcp_server_config
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
@@ -71,6 +71,11 @@ class MCPServerConnectRequest(BaseModel):
     # 本仓改不了，故声明落在本仓侧的 server 配置上。缺省空表 = 全部串行。
     tool_capabilities: Dict[str, Dict[str, Any]] = Field(
         default_factory=dict, description="工具并行能力声明（缺省全部串行）"
+    )
+    # OAuth 参数位（读侧消费者早已存在：call_tool 取 token / oauth/authorize 端点 /
+    # 列表的 oauth_grant）。子键与必填项由 `mcp_config` 单点校验，此处不重复定形状。
+    oauth: Dict[str, Any] = Field(
+        default_factory=dict, description="OAuth 参数（grant_type/token_url/client_id 等）"
     )
 
 
@@ -151,7 +156,9 @@ def _server_info_from_config(entry: Dict[str, Any], status: Dict[str, Any]) -> M
         tools_count=int(status.get("tool_count", 0)),
         user_id="default",
         created_at=0,
-        oauth_grant=((entry.get("config") or {}).get("oauth") or {}).get("grant_type"),
+        # 取**扁平记录**的 oauth：SharedConfigManager 落的是 validate 的返回值本体，
+        # 此前按 mcp_client 运行时包装形状取 entry["config"]["oauth"]，恒取不到。
+        oauth_grant=(entry.get("oauth") or {}).get("grant_type"),
     )
 
 
@@ -194,6 +201,7 @@ async def connect_mcp_server(
         "headers": body.headers,
         "enabled": True,
         "tool_capabilities": dict(body.tool_capabilities or {}),
+        "oauth": dict(body.oauth or {}),
     }
 
     result = await _register_mcp_server(config_raw, role)
@@ -217,7 +225,8 @@ async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[st
     表历史根因教训）。安全序（P0-1 原样迁移）：
     1. 归一化校验（未知键/shell/字段非法 → 400，指名字段）
     2. stdio = 本机进程派生面 → 仅 admin（403）
-    3. 非 admin 的 http/sse 私网/环回 URL 拒绝（400）——admin 豁免保自托管
+    3. 非 admin 的 http/sse 私网/环回 URL 拒绝（400）——admin 豁免保自托管；
+       server url 与 oauth 的三个出网端点走同一道门
     4. 持久化（重复/非法 → 400）→ 连接（失败也返回 error 态，原因可查）
     """
     from neurova.shared_config import get_shared_config_manager
@@ -235,10 +244,19 @@ async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[st
         )
 
     if role != "admin" and config.get("transport") in ("http", "sse"):
-        try:
-            assert_public_url(config.get("url") or "")
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
+        # 出网目标一并过同一道私网门：oauth 的 token_url / authorization_url /
+        # registration_endpoint 是本仓**主动 POST 过去**的地址，与 server url 同攻击面
+        # （169.254.169.254 这类链路本地元数据端点）。字段名单取 mcp_config 单源，
+        # 不在这里另抄一份键名。
+        outbound = [config.get("url") or ""]
+        outbound += [(config.get("oauth") or {}).get(key) or "" for key in OAUTH_OUTBOUND_URL_KEYS]
+        for target in outbound:
+            if not target:
+                continue
+            try:
+                assert_public_url(target)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
 
     sid = config["id"]
     if not get_shared_config_manager().add_mcp_server(config):
@@ -311,7 +329,7 @@ async def install_mcp_catalog_server(
 async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRequest] = None):
     """MCP OAuth2 授权码流：打开浏览器完成授权 → 环回回调换 token → 入缓存。
 
-    仅支持 config.oauth.grant_type=authorization_code 的 server；
+    仅支持 oauth.grant_type=authorization_code 的 server；
     client_credentials 流无需浏览器（call_tool 时自动按需取 token）。
     """
     from neurova.shared_config import get_shared_config_manager
@@ -324,11 +342,11 @@ async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRe
     if not entry:
         raise HTTPException(status_code=404, detail="MCP Server not found")
 
-    oauth_config = (entry.get("config") or {}).get("oauth") or {}
+    oauth_config = entry.get("oauth") or {}
     if not oauth_config:
         raise HTTPException(
             status_code=400,
-            detail="该 server 未配置 OAuth（config.oauth 缺失）；仅 authorization_code 流需要浏览器授权",
+            detail="该 server 未配置 OAuth（oauth 缺失）；仅 authorization_code 流需要浏览器授权",
         )
     if (oauth_config.get("grant_type") or "client_credentials") != "authorization_code":
         raise HTTPException(
