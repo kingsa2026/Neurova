@@ -194,8 +194,29 @@ def pathNamesWithRole(role: str) -> tuple:
 #: 键名清单（与改前逐项同序）：治理预检与命令面剔除都读它。
 PATH_PARAM_KEYS = pathNamesWithRole("scanned")
 #: 扁串回落那一支的取值式，由 textual 角色派生（原字面 `(?:path|file|dir)=([^\s]+)`）。
-#: 仍按 `[^\s]+` 截断是**改前的实状**，本批不动它——那是下一拍的一部分。
+#: 只剩「调用方没把参数面交出来」这一种场合用它——按空格猜值边界会把带空格的路径切短。
 PATH_VALUE_PATTERN = re.compile(r"(?:%s)=([^\s]+)" % "|".join(pathNamesWithRole("textual")))
+
+
+def pathValuesFromParams(params: Any) -> List[tuple]:
+    """参数面上**每一个**登记为路径语义的键值，成 `(键名, 值)` 返回——逐值裁决的唯一取数口。
+
+    名字集是单源表两个角色的投影（`scanned` ∪ `textual`，`path` 同时挂在两个角色上，只算一次），
+    本函数不新增也不删改任何名字：扩清单与"按 schema 判"（§6-284 的丁）都不在这一刀里。
+    过去这条问句有两个各写一份的实现——咽喉里「取到第一个非空就 break」，治理预检里
+    `next(...)` 再取一次第一个——于是同一次调用里的第二条路径参数在两处都消失（§6-284 甲案）。
+    按 `looksLikePathValue` 挑值的另一种问句（"这个串长得像不像路径"）不在这里，那是扫描面剔除的口径。
+    """
+    if not isinstance(params, dict):
+        return []
+    names = list(dict.fromkeys(tuple(pathNamesWithRole("scanned"))
+                               + tuple(pathNamesWithRole("textual"))))
+    out: List[tuple] = []
+    for name in names:
+        value = params.get(name)
+        if isinstance(value, str) and value.strip():
+            out.append((name, value))
+    return out
 
 #: 路径值里"shell 会另作解释"的字符——命中任一即由 `FilePathGuardian` 出一条 low 级审计读数。
 #: 这一族**只用于报告面**：§6-266 第①刀裁定之前它还兼作豁免闸（含这些字符就不豁免），于是同一个
@@ -577,32 +598,41 @@ class FilePathGuardian(BaseGuardian):
         return findings
 
     def guard(self, tool_input: str, context: Dict[str, Any]) -> List[GuardFinding]:
-        """检查文件路径安全性"""
-        findings: List[GuardFinding] = []
+        """检查文件路径安全性——§6-284 甲案：**每一个**路径值都判，命令文本恒常扫。
 
-        # 路径值优先按**键名清单**从参数面取（`PATH_PARAM_KEYS` 单源）；取不到才回落到整串里
-        # 的 `k=v` 形状（键集由单源表的 textual 角色派生）。那支老写法按空格截断，
-        # `C:\a b.txt` 会被切成 `C:\a`——本批只统一来源，截断行为留给下一拍一起改。
-        path = ""
-        if isinstance(context, dict):
-            for key in PATH_PARAM_KEYS:
-                value = context.get(key)
-                if isinstance(value, str) and value.strip():
-                    path = value
-                    break
-        if not path:
-            # 尝试从工具输入中提取路径
+        取数只经 `pathValuesFromParams`（名字集是单源表 scanned∪textual 的投影，这个方法不再自己
+        认键）；过去是「取到第一个非空就 break」，于是一次调用里第二条路径参数从不被查。
+        `tool_input` 扁串那支只在**参数面一个路径值都没有**时才用——按空格猜值边界会把
+        `C:\\Program Files\\...` 切成 `C:\\Program`，能不走它就绪不走它。
+        """
+        pairs = pathValuesFromParams(context)
+        if not pairs:
+            # 参数面一个路径值都没有，才回落到扁串里那支 `k=v` 形状（名字集同出一张表）。
+            # 按空格猜值边界会把 `C:\Program Files\...` 切成 `C:\Program`——所以参数面在场时
+            # 一律走上面那条，这一支只留给"值只在扫描面里"的场合。
             path_match = PATH_VALUE_PATTERN.search(tool_input)
             if path_match:
-                path = path_match.group(1)
+                pairs = [("", path_match.group(1))]
 
-        if not path:
-            # P0-1 同根因族补口：受保护路径出现在命令文本内（如 `cat /etc/passwd`）
-            # 也须覆盖——文件工具拦截了 path 参数，shell 读同一文件不该漏网。
-            command_text = context.get("command")
-            if isinstance(command_text, str) and command_text:
-                findings.extend(self._scan_protected_paths_in_text(command_text))
-            return findings
+        findings: List[GuardFinding] = []
+        judged: Set[str] = set()
+        for _key, value in pairs:
+            if value in judged:
+                continue
+            judged.add(value)
+            findings.extend(self._checkOnePath(value))
+
+        # P0-1 同根因族补口：受保护路径出现在命令文本内（如 `cat /etc/passwd`）也须覆盖。
+        # 这一支过去挂在 `if not path:` 下面，于是"带 path 参数的 shell 调用"里命令行写的受保护
+        # 路径从不被查（case 2）。它按**文本**裁决，与上面按**值**裁决是两个归属，互不去重。
+        command_text = context.get("command") if isinstance(context, dict) else None
+        if isinstance(command_text, str) and command_text:
+            findings.extend(self._scan_protected_paths_in_text(command_text))
+        return findings
+
+    def _checkOnePath(self, path: str) -> List[GuardFinding]:
+        """对**一个**路径值跑完整判定——规则顺序与 rule_id 与改前逐字一致（单路径读数不许变）。"""
+        findings: List[GuardFinding] = []
 
         # 检查路径遍历
         if ".." in path:

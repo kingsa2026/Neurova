@@ -114,21 +114,21 @@ class TestGovernanceFileGuard(unittest.TestCase):
         result = self.policy.evaluate(
             "cat ~/.ssh/id_rsa", tool_name="shell"
         )
-        # cat 命令本身不含高危模式；受保护路径经由 file_paths 通道检测
+        # cat 命令本身不含高危模式；受保护路径经由 path_values 通道进裁决面
         path_result = self.policy.evaluate("", tool_name="file_read",
-                                            file_paths="~/.ssh/id_rsa")
+                                            path_values=[("path", "~/.ssh/id_rsa")])
         self.assertNotEqual(path_result.decision, GovernanceDecision.ALLOW)
 
     def test_env_file_access_flagged(self):
         with patch("neurova.security.governance._platform_has_enforced_sandbox", return_value=True):
             result = self.policy.evaluate("", tool_name="file_read",
-                                          file_paths="/project/.env")
+                                          path_values=[("path", "/project/.env")])
         self.assertIn(result.decision,
                       (GovernanceDecision.SANDBOX, GovernanceDecision.ASK))
 
     def test_path_traversal_flagged(self):
         result = self.policy.evaluate("", tool_name="file_write",
-                                      file_paths="../../../etc/passwd")
+                                      path_values=[("path", "../../../etc/passwd")])
         self.assertIn(result.decision,
                       (GovernanceDecision.DENY, GovernanceDecision.SANDBOX))
 
