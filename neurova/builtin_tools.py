@@ -77,7 +77,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文件路径"},
+                "file_path": {"format": "path", "type": "string", "description": "文件路径"},
                 "offset": {"type": "integer", "description": "起始行号"},
                 "encoding": {"type": "string", "description": "文件编码", "default": "utf-8"},
             },
@@ -91,7 +91,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文档路径（相对锚定工作区，绝对路径按原语义）"},
+                "file_path": {"format": "path", "type": "string", "description": "文档路径（相对锚定工作区，绝对路径按原语义）"},
                 "max_chars": {"type": "integer", "description": "返回文本上限（默认 50000，超出截断并标 truncated）", "default": 50000},
             },
             "required": ["file_path"],
@@ -135,7 +135,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文件路径"},
+                "file_path": {"format": "path", "type": "string", "description": "文件路径"},
                 "content": {"type": "string", "description": "写入内容"},
                 "encoding": {"type": "string", "description": "文件编码", "default": "utf-8"},
             },
@@ -149,7 +149,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文件路径"},
+                "file_path": {"format": "path", "type": "string", "description": "文件路径"},
                 "content": {"type": "string", "description": "初始内容"},
             },
             "required": ["file_path"],
@@ -162,7 +162,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文件路径"},
+                "file_path": {"format": "path", "type": "string", "description": "文件路径"},
             },
             "required": ["file_path"],
         },
@@ -174,7 +174,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "文件路径"},
+                "file_path": {"format": "path", "type": "string", "description": "文件路径"},
                 "old_str": {"type": "string", "description": "待替换文本（须逐字符一致且唯一，建议带前后各几行上下文）"},
                 "new_str": {"type": "string", "description": "替换后文本"},
             },
@@ -859,7 +859,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "glob 匹配模式，如 *.py、*.json"},
-                "path": {"type": "string", "description": "搜索的根目录（默认当前工作目录）"},
+                "path": {"format": "path", "type": "string", "description": "搜索的根目录（默认当前工作目录）"},
                 "recursive": {"type": "boolean", "description": "是否递归子目录（默认 true）"},
                 "max_results": {
                     "type": "integer",
@@ -883,7 +883,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "搜索模式（支持正则；非法正则自动降级为字面量匹配）"},
-                "path": {"type": "string", "description": "要搜索的文件或目录路径"},
+                "path": {"format": "path", "type": "string", "description": "要搜索的文件或目录路径"},
                 "include": {"type": "string", "description": "搜索目录时的文件名过滤，如 *.py（可选）"},
                 "max_results": {"type": "integer", "description": "返回的最大匹配条数", "default": 50},
                 "offset": {
@@ -920,7 +920,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "footer_text": {"type": "string", "description": "页脚文字，覆盖模板默认（传空串是「关掉页脚」）"},
                 "page_number": {"type": "boolean", "description": "是否画页码（缺省跟随模板：report/cover 开，blank 关）"},
                 "margin_mm": {"type": "number", "description": "四边页边距（毫米，默认 18）"},
-                "path": {
+                "path": {"format": "path", 
                     "type": "string",
                     "description": "落到工作区内的指定路径（必须以 .pdf 结尾，越出工作区会被拒）；省略则落产物目录并返回鉴权 download_url",
                 },
@@ -940,7 +940,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "完整 git 命令行，必须以 git 开头（如 git log --oneline -10）"},
-                "path": {"type": "string", "description": "仓库目录（相对锚定 agent 工作区；缺省为工作区根）", "default": "."},
+                "path": {"format": "path", "type": "string", "description": "仓库目录（相对锚定 agent 工作区；缺省为工作区根）", "default": "."},
                 "timeout": {"type": "integer", "description": "超时秒数", "default": 60},
             },
             "required": ["command"],
@@ -1010,7 +1010,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "要执行的 shell 命令"},
-                "workdir": {"type": "string", "description": "工作目录（相对路径锚定 agent 工作区，缺省为工作区根）"},
+                "workdir": {"format": "path", "type": "string", "description": "工作目录（相对路径锚定 agent 工作区，缺省为工作区根）"},
                 "yield_time_ms": {"type": "integer", "description": "等待毫秒数（250-30000，超时未结束则返回 session_id 继续后台运行，默认 1000）"},
                 "max_output_tokens": {"type": "integer", "description": "返回输出 token 上限（超出保留首尾并标注，默认 10000）"},
             },

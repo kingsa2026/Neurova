@@ -181,10 +181,14 @@ class TestThePrecheckDoesNotCollapseFirst:
         return GovernancePolicy()
 
     def testPrecheckHandsEveryPathValueToTheAdjudication(self):
-        """取数契约本身：两个路径键都在，就得两个都交出去（改前只交第一个）。"""
+        """取数契约本身：两个路径键都在，就得两个都交出去（改前只交第一个）。
+
+        §6-284 丁之后工具名是**必需**第一参数——预检要靠它的 schema 声明认路径，
+        只拿 params 就退化成名字表那一侧，`exec_command.workdir` 这类键会在进引擎前就被丢掉。
+        """
         from neurova.security.governance import extract_adjudicable_params
 
-        picked = extract_adjudicable_params({"file_path": SAFE_PATH, "path": SHADOW})[1]
+        picked = extract_adjudicable_params("file_read", {"file_path": SAFE_PATH, "path": SHADOW})[1]
 
         assert [v for _k, v in picked] == [SAFE_PATH, SHADOW], (
             f"预检仍只把一条路径交给裁决面（改前读数是单个字符串 `{SHADOW}` 甚至空）：{picked}")
@@ -237,7 +241,7 @@ class TestThePrecheckDoesNotCollapseFirst:
         ownLoops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
                     and "PATH_PARAM_KEYS" in ast.unparse(n.iter)]
 
-        assert "pathValuesFromParams" in attrs, (
+        assert "pathValuesForTool" in attrs, (
             "预检不再经单源取数口了——那意味着它自己另写了一份键名清单")
         assert not ownLoops, (
             f"governance 里仍有自己遍历 `PATH_PARAM_KEYS` 的循环（第 "
