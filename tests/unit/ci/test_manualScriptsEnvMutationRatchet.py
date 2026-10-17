@@ -8,10 +8,12 @@
 （本仓实测掩盖过一次会话落点守卫，见 §6-31 与 `4ef87e3d`）。
 所以"改造完脚本就拆掉拦截"这条路不成立；成立的是**别让它继续长**。
 
-现值本轮 AST 实测：**20 个文件 / 25 处**模块顶层 env 改写
+现值本轮 AST 实测：**20 个文件 / 24 处**模块顶层 env 改写
 （`os.environ[...] = ...`、`os.environ.setdefault(...)`、`os.environ.update(...)`）。
 `tests/manual/conftest.py` 的 docstring 自记"21 个文件 27 处"——与本数基本吻合，
-差 1 个文件 2 处，属口径微差或后续一次动过，**不构成"记载已漂"**。
+差 1 个文件 3 处，属口径微差或后续一次动过，**不构成"记载已漂"**。
+（25 → 24 那一处＝批 82 把 `channel_credential_sealing_290.py` 里手抄的
+`NEUROVA_AGENT_WORKSPACES_DIR` 收进 `isolatedDataRoot()` 单点——台账 §6-310 的 D8。）
 
 （这里有一段自纠值得留着：本判据第一版把 `ast.walk` 直接从顶层语句下钻，
 于是连函数体内的 `os.environ[...] = ` 也算了进去，量出 24 文件 / 32 处；
@@ -33,14 +35,14 @@ from tests import ast_scan
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
 
-#: 冻结基线（本轮 AST 实测 20 文件 / 25 处，逐文件计数）。只准降不准升；新文件出现即红。
+#: 冻结基线（本轮 AST 实测 20 文件 / 24 处，逐文件计数）。只准降不准升；新文件出现即红。
 #: `_liveVerifyIsolation.py` **不在**名单里——它是唯一注入口本身，改 env 是它的职责；
 #: 但也刻意不写豁免清单，它就是普通的一条基线条目（现在它顶层不再直接写 env，
 #: 单点逻辑收在函数里，所以计数为 0）。豁免清单一开口，后面每个"看着像单点"的
 #: 落点都会来要一条。
 BASELINE: dict[str, int] = {
     "audit_context_chain_repair_90.py": 1,
-    "channel_credential_sealing_290.py": 3,
+    "channel_credential_sealing_290.py": 2,
     "context_archive_moment_and_budget_90.py": 2,
     "context_budget_face_retirement_90.py": 2,
     "context_pool_settings_face_retirement_90.py": 2,
@@ -165,16 +167,16 @@ def test_ratchetRecordsImprovementLoudly():
 
 
 def test_baselineMatchesMeasuredCount():
-    """基线自身可核：条目数与总站点数必须等于本轮实测的 20 / 25。
+    """基线自身可核：条目数与总站点数必须等于本轮实测的 20 / 24。
 
     钉这一条而不是只信那张字典，是因为基线一旦被手抄或被"顺手调一下"，
     棘轮就会从第一天起对不上账——而对不上账的方向永远是放行。
     """
     now = scanManualEnvWrites()
-    assert len(BASELINE) == 20 and sum(BASELINE.values()) == 25, (
+    assert len(BASELINE) == 20 and sum(BASELINE.values()) == 24, (
         f"基线常量自身与记录不符：{len(BASELINE)} 文件 / {sum(BASELINE.values())} 处"
     )
-    assert len(now) == 20 and sum(now.values()) == 25, (
+    assert len(now) == 20 and sum(now.values()) == 24, (
         f"现测与基线不符（{len(now)} 文件 / {sum(now.values())} 处）——"
         "要么真有人动了脚本，要么扫描根/谓词被改坏，两种都要当场看见"
     )

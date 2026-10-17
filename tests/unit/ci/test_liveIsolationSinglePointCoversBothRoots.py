@@ -1,0 +1,221 @@
+# -*- coding: utf-8 -*-
+r"""活体隔离单点必须一次隔干净两根（D8＝台账 §6-308 顺带抓到、§6-309 登记的待办）。
+
+实状（本轮现读，不抄旧票）：`tests/manual/` 里**起了真 app 的脚本 84 档**，其中调单点
+`isolatedDataRoot()` 的 **80 档**，而同时把 agent 工作区根也隔了的只有 **10 档**
+⇒ **70 档在"数据根已隔离、工作区根仍指仓内真 `agent_workspaces/`"的状态下起真 app**。
+记忆正文落在**另一根**下（`<workspace>/<agent>/memory/`），`isolatedDataRoot()` 管不到它——
+`_liveVerifyIsolation.py:64-67` 那段注释写的正是这个坑，§6-308 的 D8 就是它当场咬出来的实测
+（`POST /api/v1/agents` 那一路在仓根新建了两个 workspace 目录）。
+
+为什么"靠写探针的人记得调第二个函数"是坏形态：同一件事被 145 档调用点各自决定要不要做，
+就是本仓反复收口的"手抄一份"形状（教义第 6 条）。该由**单点保证**的，不该散在调用方。
+
+判据五格，缺一格就是没咬住：
+
+① 行为主格：干净进程里只调 `isolatedDataRoot()` ⇒ `get_agent_workspaces_root()` 不得落在仓内。
+   **必须在子进程测**：`tests/conftest.py:58/:228` 已把两个 env 注进跑测进程，而在进程内调单点，
+   幂等分支会"沿用已注入值"直接返回——判据就恒绿（夹具自造，形态集 242/252 同族）。
+② 正控格：同一取法但**不调**单点 ⇒ 必须正是仓内默认 `agent_workspaces`。
+   没有这一格，①那条"不等于仓内"的断言可能只是取数坏了（形态集 283：每个零都要先证能产生非零）。
+③ 形状格：单点函数体里对工作区根的那次隔离，必须经**它自己的注入口**
+   （AST 判 `isolatedDataRoot` 体内有一次对 `isolatedAgentWorkspaces` 的调用）——
+   防止有人改成"在这儿再拼一份 `Path(tempfile.mkdtemp())/...`"，那就又是第二份表示。
+④ 手抄棘轮：`tests/manual/` 里把 `"NEUROVA_AGENT_WORKSPACES_DIR"` **写进 env** 的档
+   （`os.environ[KEY]=…` / `setdefault(KEY, …)` 两种形态，按 AST 判；常量定义、`get`、`pop` 都不算），
+   只准是单点自己（按文件名→期望写入次数钉死，双向咬：新增即红，收干净了不摘表也红，同形态集 268）。
+   第一版按"字面量出现次数"数，被自家探针的 `pop`/`get` 与单点的常量定义一起自咬——
+   按词扫源码的守卫会被正常用法填满，这是本仓第六枚同族命中点。
+⑤ 幂等格：两个 env 都已注入时调单点 ⇒ 两根都不许被覆盖。
+   这一格钉的是本单点存在的另一个理由：跨进程断言（父子共读同一落点）依赖"已注入就沿用"。
+"""
+from __future__ import annotations
+
+import ast
+import json
+import os
+import pathlib
+import subprocess
+import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+MANUAL_DIR = REPO_ROOT / "tests" / "manual"
+SINGLE_POINT = MANUAL_DIR / "_liveVerifyIsolation.py"
+
+DATA_ROOT_ENV = "NEUROVA_DATA_DIR"
+AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
+
+#: ④ 手抄面的唯一合法持有者：单点自身（它必须把这个键写进 env，那是它的职责）。
+#: 按"文件名 → 期望**写入**次数"钉死，不写目录级豁免——豁免一开口，
+#: 每个"看着像单点"的落点都会来要一条（与 `test_manualScriptsEnvMutationRatchet` 同口径）。
+WORKSPACE_ENV_HANDCOPY_ALLOWED = {"_liveVerifyIsolation.py": 1}
+
+
+def _runInCleanProcess(source: str) -> dict:
+    """在**剥掉两个注入口**的子进程里跑一段脚本，取回它打印的 JSON 读数。
+
+    编码两侧都钉：父端 `encoding/errors`，子端 `PYTHONIOENCODING`
+    （`test_subprocessTextEncodingRatchet` 那一族的形态要求；只钉一侧是它实测过的两种坏法）。
+    """
+    env = dict(os.environ)
+    for key in (DATA_ROOT_ENV, AGENT_WORKSPACES_ENV):
+        env.pop(key, None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    proc = subprocess.run(
+        [sys.executable, "-c", source],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"子进程没跑成（rc={proc.returncode}）：\n{proc.stdout}\n{proc.stderr}"
+    last = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+    return json.loads(last)
+
+
+def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
+    """①主格：只调 `isolatedDataRoot()`，工作区根也必须离开仓内。"""
+    reading = _runInCleanProcess(
+        "import json, os\n"
+        "from tests.manual._liveVerifyIsolation import isolatedDataRoot\n"
+        "isolatedDataRoot()\n"
+        "from neurova.core.agent_workspaces import get_agent_workspaces_root\n"
+        "print(json.dumps({'ws': str(get_agent_workspaces_root()),\n"
+        "                  'data': os.environ.get('NEUROVA_DATA_DIR', '')}))"
+    )
+    repoDefault = REPO_ROOT / "agent_workspaces"
+    ws = pathlib.Path(reading["ws"])
+    assert reading["data"], "连数据根都没注入——子进程没走到单点，读数不可用"
+    assert ws != repoDefault, (
+        f"只调 isolatedDataRoot() 时工作区根仍指仓内真目录：{ws}\n"
+        "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
+        "该由单点保证的第二根没人保证（D8）。"
+    )
+    assert ws.resolve().is_relative_to(pathlib.Path(os.environ.get("TEMP", "")).resolve()) or "Temp" in str(ws), (
+        f"工作区根没有落在临时目录：{ws}"
+    )
+
+
+def test_positiveControlWithoutSinglePointLandsInsideRepo():
+    """②正控：不调单点时，工作区根**正是**仓内默认——主格那条腿能产生非仓内读数才有效。"""
+    reading = _runInCleanProcess(
+        "import json\n"
+        "from neurova.core.agent_workspaces import get_agent_workspaces_root\n"
+        "print(json.dumps({'ws': str(get_agent_workspaces_root())}))"
+    )
+    assert pathlib.Path(reading["ws"]).resolve() == (REPO_ROOT / "agent_workspaces").resolve(), (
+        f"正控落点不是仓内默认：{reading['ws']}——探测器取数口径坏了，①那条红/绿都不可信"
+    )
+
+
+def test_singlePointGuardsWorkspaceRootThroughItsOwnEntry():
+    """③形状格：单点里对工作区根的隔离必须经它自己的注入口，不许在这儿再拼一份路径。"""
+    tree = ast.parse(SINGLE_POINT.read_text(encoding="utf-8"))
+    fn = next(
+        (n for n in tree.body
+         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "isolatedDataRoot"),
+        None,
+    )
+    assert fn is not None, "单点里没有 isolatedDataRoot()——取法改了，本档要跟着改判而不是静默绿"
+    taken = {
+        (n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call)
+    }
+    assert "isolatedAgentWorkspaces" in taken, (
+        f"isolatedDataRoot() 没有经 isolatedAgentWorkspaces() 那唯一注入口隔工作区根"
+        f"（体内调用={sorted(t for t in taken if t)}）——第二份拼法就是双源的开始"
+    )
+
+
+def _isEnvironValue(node: ast.AST) -> bool:
+    """`os.environ`（含 `from os import environ` 后的裸名）。"""
+    if isinstance(node, ast.Attribute) and node.attr == "environ":
+        return isinstance(node.value, ast.Name) and node.value.id == "os"
+    return isinstance(node, ast.Name) and node.id == "environ"
+
+
+def _isTheWorkspaceKey(node: ast.AST) -> bool:
+    """这个表达式是不是"那把键"——字面量或单点里那个同名常量。"""
+    if isinstance(node, ast.Constant) and node.value == AGENT_WORKSPACES_ENV:
+        return True
+    return isinstance(node, ast.Name) and node.id == "AGENT_WORKSPACES_ENV"
+
+
+def _workspaceEnvWrites(path: pathlib.Path) -> int:
+    """该文件把键**写进 env** 的次数：`os.environ[KEY] = ...` 与 `os.environ.setdefault(KEY, ...)`。
+
+    按**写入形态**判，不按"这个字面量出现过几次"判。第一版就是按词数的，结果被三样东西自咬：
+    单点里那句常量定义、探针为了取干净现场而 `pop` 掉这两个键、以及读回包时的 `os.environ.get(KEY)`
+    ——它们都不是手抄注入（形态集 268／241 同族：按词扫源码的守卫会被自家正常用法填满）。
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return 0
+    count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (isinstance(target, ast.Subscript) and _isEnvironValue(target.value)
+                        and _isTheWorkspaceKey(target.slice)):
+                    count += 1
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in {"setdefault", "__setitem__"}
+              and _isEnvironValue(node.func.value) and node.args
+              and _isTheWorkspaceKey(node.args[0])):
+            count += 1
+    return count
+
+
+def _workspaceEnvHandCopies() -> dict:
+    """`tests/manual/**.py` 里对工作区根 env 的**写入**落点（文件名 → 写入次数）。
+
+    扫描面取工作树（本仓口径：'不许新增'型守卫要当场咬住新写的档，含还没提交的）；
+    这正是要的效果——本批我自己新写的那支探针一旦开始手抄这个键，也会被这里点名。
+    """
+    hits: dict[str, int] = {}
+    for path in sorted(MANUAL_DIR.glob("*.py")):
+        count = _workspaceEnvWrites(path)
+        if count:
+            hits[path.name] = count
+    return hits
+
+
+def test_manualScriptsDoNotHandCopyTheWorkspaceEnvKey():
+    """④棘轮：手抄面只准留在单点自己那一处，且它真写了才算在册（双向咬合）。"""
+    found = _workspaceEnvHandCopies()
+    offenders = {k: v for k, v in found.items() if k not in WORKSPACE_ENV_HANDCOPY_ALLOWED}
+    assert not offenders, (
+        f"这些 manual 脚本还在自己拼工作区根的 env（该由 isolatedDataRoot() 一起保证）：{offenders}"
+    )
+    for name, expected in WORKSPACE_ENV_HANDCOPY_ALLOWED.items():
+        assert found.get(name, 0) == expected, (
+            f"{name} 的工作区 env 字面量命中数应为 {expected}，实为 {found.get(name, 0)}"
+            "——单点自己不再写这个键，说明注入通道搬家了，本档的口径要跟着重定"
+        )
+
+
+def test_isolatedDataRootIsIdempotentForBothRoots():
+    """⑤幂等格：两根都已注入时调单点，一根都不许被覆盖（父子进程共读同一落点靠它）。"""
+    reading = _runInCleanProcess(
+        "import json, os, tempfile\n"
+        "data = tempfile.mkdtemp(prefix='b82-data-')\n"
+        "ws = tempfile.mkdtemp(prefix='b82-ws-')\n"
+        "os.environ['NEUROVA_DATA_DIR'] = data\n"
+        "os.environ['NEUROVA_AGENT_WORKSPACES_DIR'] = ws\n"
+        "from tests.manual._liveVerifyIsolation import isolatedDataRoot\n"
+        "isolatedDataRoot()\n"
+        "print(json.dumps({'data': os.environ['NEUROVA_DATA_DIR'],\n"
+        "                  'ws': os.environ['NEUROVA_AGENT_WORKSPACES_DIR']}))"
+    )
+    assert reading["data"].startswith("b82-data-") or os.sep + "b82-data-" in reading["data"], (
+        f"已注入的数据根被单点换掉了：{reading['data']}"
+    )
+    assert "b82-ws-" in reading["ws"], (
+        f"已注入的工作区根被单点换掉了：{reading['ws']}——跨进程断言会拿到两个不同落点"
+    )
