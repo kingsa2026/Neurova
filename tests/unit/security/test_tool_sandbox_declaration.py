@@ -214,10 +214,12 @@ class TestToolLayersApiDeclaration:
     def test_tool_info_has_optional_field(self):
         from neurova.api.endpoints.tool_layers import ToolInfo
 
-        info = ToolInfo(tool_id="t", name="t")
+        # `source` 自 §6-299 丙起是必填（曾有默认值 "builtin"，任何漏传都静默自称内置）；
+        # 这两格判的是 sandbox_required 那一维，来源如实写中性值。
+        info = ToolInfo(tool_id="t", name="t", source="dynamic")
         assert info.sandbox_required is None
 
-        info2 = ToolInfo(tool_id="t", name="t", sandbox_required=True)
+        info2 = ToolInfo(tool_id="t", name="t", source="dynamic", sandbox_required=True)
         assert info2.sandbox_required is True
 
     def test_list_all_tools_returns_declaration(self, monkeypatch, tmp_path):
