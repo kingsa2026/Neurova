@@ -72,11 +72,12 @@ class SharedConfigManager:
             try:
                 with open(self._config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                # P2-3：密文 api_key 解密（存量明文原样兼容）
+                # P2-3：密文凭据解密（存量明文原样兼容）。`unsealSecrets` 返回新树，
+                # 不像旧窄通道就地改写——必须接住返回值。
                 try:
-                    from neurova.security.secret_store import decrypt_config_secrets
+                    from neurova.security.secret_store import unsealSecrets
 
-                    decrypt_config_secrets(config)
+                    config = unsealSecrets(config)
                 except Exception:  # noqa: BLE001
                     pass
                 return config
@@ -169,12 +170,11 @@ class SharedConfigManager:
         try:
             self._config["last_updated"] = datetime.datetime.now().isoformat()
 
-            import copy as _copy
-
             try:
-                from neurova.security.secret_store import encrypt_config_secrets
+                from neurova.security.secret_store import sealSecrets
 
-                persist = encrypt_config_secrets(_copy.deepcopy(self._config))
+                # sealSecrets 返回新树（不改原对象），无需再自行 deepcopy
+                persist = sealSecrets(self._config)
             except Exception:  # noqa: BLE001
                 persist = self._config
 
@@ -456,12 +456,12 @@ class SharedConfigManager:
                     logger.error("导入的配置格式不正确")
                     return False
 
-                # P2-3 核验修正：导入树内密文 api_key 解密（明文原样——兼容
+                # P2-3 核验修正：导入树内密文凭据解回明文（明文原样——兼容
                 # 本系统导出的明文与手工备份的加密形态两种来源）
                 try:
-                    from neurova.security.secret_store import decrypt_config_secrets
+                    from neurova.security.secret_store import unsealSecrets
 
-                    decrypt_config_secrets(imported_config)
+                    imported_config = unsealSecrets(imported_config)
                 except Exception:  # noqa: BLE001
                     pass
 

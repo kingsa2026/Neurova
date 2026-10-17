@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """密钥静态加密存储。
 
-- data/shared_config.json 中的 provider api_key 由明文 JSON 字段升级为
-  Fernet 加密（"enc:v1:" 前缀标记），读侧解密、写侧加密——存量明文兼容
-  （读侧原样透传，下次保存自动迁移为密文）
+- 配置树内凡 `CREDENTIAL_KEY_NAMES` 命中的键（provider `api_key`、渠道 token、
+  MCP `oauth.client_secret` 等同族）一律由 `sealSecrets`/`unsealSecrets` 单通道
+  递归封存——读侧解密、写侧加密，存量明文兼容（无前缀值原样透传，下次保存自动
+  迁移为密文）。此前另有只认 `api_key` 一个键名的窄通道与它并存，导致同一份磁盘
+  文件里"哪些字段算凭据"有两个答案；窄通道已退役，集合是唯一出处。
 - 密钥通道三级：env NEUROVA_SECRET_KEY → keyring（服务名 "Neurova"）→
   data/.secret_key 文件（自动生成；POSIX chmod 0600，Windows 无 POSIX 权限位，
 - 任何加解密异常 fail-open 返回原值（不因加密层故障瘫痪配置读写）
@@ -99,33 +101,6 @@ def decrypt_secret(value: str) -> str:
         return text
 
 
-def _walk_api_keys(config: Dict[str, Any]):
-    """深度优先遍历，产出所有 api_key 字段的 (容器, 键) 对。"""
-    if isinstance(config, dict):
-        for key, value in config.items():
-            if key == "api_key" and isinstance(value, str):
-                yield config, key
-            elif isinstance(value, (dict, list)):
-                yield from _walk_api_keys(value)
-    elif isinstance(config, list):
-        for item in config:
-            yield from _walk_api_keys(item)
-
-
-def encrypt_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
-    """配置树内所有非空明文 api_key → 密文（就地修改并返回）。"""
-    for container, key in _walk_api_keys(config):
-        container[key] = encrypt_secret(container[key])
-    return config
-
-
-def decrypt_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
-    """配置树内所有密文 api_key → 明文（就地修改并返回；明文原样）。"""
-    for container, key in _walk_api_keys(config):
-        container[key] = decrypt_secret(container[key])
-    return config
-
-
 #: 需要封存落盘的凭据键名（值形如 `enc:v1:<fernet>`）。
 #:
 #: 与前端 `NeurUI/src/config/channelFields.ts` 里标为 `type: 'password'` 的字段
@@ -139,6 +114,10 @@ CREDENTIAL_KEY_NAMES = frozenset({
     "encrypt_key", "password", "secret_key", "sip_password", "verification_token",
     # 后端装配链真读、但未进前端字段表的同族键（扫码回填 / 平台专有）
     "callback_token", "encoding_aes_key", "secret", "token", "webhook_token",
+    # 收口进来的存量键：`api_key`（LLM provider 密钥）此前只由本模块另一套窄通道
+    # （只认这一个键名）封存。窄通道退役后它必须由集合接手，否则 provider 密钥
+    # 从"密文"退化成"明文"——存量密文读侧仍可解（`decrypt_secret` 对 enc:v1: 通用）。
+    "api_key",
 })
 
 
