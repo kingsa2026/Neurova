@@ -3351,3 +3351,14 @@ tests/unit/execution/test_executionEngineOrphanSurfaceRetired.py
 # ③ `test_connectionsDerivesMonitorHealthFromNothing` 按 AST 判代码形态（`status` 实参不许是 `IfExp`），
 #    不按词扫——按词会把解释注释一起扫红。身份必须带 `role=admin`，否则 403 会被读成"没走到"。
 tests/unit/api/test_monitorContractHonestWhenNoProducer.py
+# 批 79（D6 甲，承 §6-305）：元认知"技能"面两条路由此前**每次必 500**——端点把自己声明的 kwargs
+# （`category`/`status`/`top_k`）原样转给 `MemoryManager`，而实装签名不收，`except Exception` 再包成 500。
+# 三格别当装饰删：
+# ① `test_noEndpointPassesArgumentsTheManagerRefuses` 是**常驻契约**：扫 memory 端点目录里所有
+#    `manager.X(...)` 的关键字参数，运行时 `inspect.signature` 不收即红——把"下次再加一个做不到的参数"
+#    做成会红的东西，而不是靠人记得。按名扫文本会误判（别处有收 `category` 的同名实现，241/268 同族）。
+# ② `test_openapiNoLongerAdvertisesUnhonouredParameters` 钉"删参数的正确形态是从契约里拿掉"，
+#    不是留着不消费（留着＝继续对外承诺一件做不到的事，教义第 2 条）。
+# ③ 对照格 `test_siblingStatsEndpointStillServes` 设计成两侧都绿：它排除"三条路都不通＝夹具坏了"这种读法，
+#    ①②的红必须是签名错。取证时探针漏带 headers 会拿到 401，差点把"必 500"读成"没坏"（形态集 283）。
+tests/unit/api/test_memoryMetacognitionSkillsMatchManagerContract.py
