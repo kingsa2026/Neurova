@@ -107,9 +107,12 @@ def main() -> int:
 
     from tests.manual._liveVerifyIsolation import isolatedDataRoot
 
-    root = isolatedDataRoot()
-    os.environ.setdefault("NEUROVA_AGENT_WORKSPACES_DIR", str(root / "agent_workspaces"))
-    graphDir = Path(os.environ["NEUROVA_AGENT_WORKSPACES_DIR"]) / "default" / "knowledge_graph"
+    # 单点一次隔干净两根（数据根 + agent 工作区根，台账 §6-308 的 D8）——
+    # 这里不再 setdefault 第二份落点，取根一律走生产单源解析器。
+    isolatedDataRoot()
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    graphDir = get_agent_workspaces_root() / "default" / "knowledge_graph"
     graphDir.mkdir(parents=True, exist_ok=True)
 
     def node(nid, label, body=None):
@@ -133,7 +136,6 @@ def main() -> int:
 
     from neurova.api.app import create_app
     from neurova.api.auth import create_access_token
-    from neurova.core.agent_workspaces import AGENT_WORKSPACES_ENV
     from neurova.knowledge.foundation.admission import (
         AdmissionRequest,
         productionAdmissionGate,
@@ -152,8 +154,6 @@ def main() -> int:
             assertions=[{"actorType": "pipeline", "actorId": "live",
                          "mediumRef": "live:pfa", "statementText": obj}]))
 
-    os.environ[AGENT_WORKSPACES_ENV] = str(Path(
-        os.environ["NEUROVA_AGENT_WORKSPACES_DIR"]))
     from neurova.cognitive_layers.knowledge_graph.manager import (
         reset_agent_knowledge_graph_managers,
     )
