@@ -3269,3 +3269,10 @@ tests/unit/skills/test_installDoesNotPinShellAsAuthority.py
 # ③ governance 不许再自己遍历 `PATH_PARAM_KEYS`（两份名单是 §6-284 第③件事）。
 # 对照格写明改前改后都绿：case 4 自由文本仍零读数（甲不覆盖）、单路径三形读数不变、良性 dir 值不新增裁决。
 tests/unit/security/test_pathGuardScansEveryPathValue.py
+# 批 66（§6-292，用户裁丁）：路径语义由 schema 声明决定，名字表降为"查不到声明时"的兜底。
+# 现读到的真实漏名是 `exec_command.workdir`——它过去只被回落正则**偶然**咬到（`dir=` 命中 `workdir=` 的
+# 子串），同一次调用出现清单内键时偶然就消失（放行）。三条不许顺手做宽：形状不能顶替声明
+# （`looksLikePathValue` 把 "见 /etc/shadow" 也算路径形状，那就是甲拒掉的 case 4）；声明**只增不减**
+# （未声明的 `path` 键必须仍按名字表判，否则是拆闸）；远端无 schema 可问时兜底保留。
+# 棘轮一格钉"名字表只关不加"：往 `PATH_NAME_ROLES` 里添名字即红，新增语义请写进声明。
+tests/unit/security/test_pathSemanticsComeFromDeclaration.py
