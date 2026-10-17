@@ -212,12 +212,16 @@ async def get_connections(request: Request, _admin: dict = Depends(require_admin
 
     monitor = get_execution_engine().get_execution_monitor()
     if monitor is not None:
-        n_alerts = len(monitor.get_alerts(acknowledged=False))
+        # 台账 §6-305 探针量到的实状：真装配下这把监控器 14 个写入方法计数全 0——
+        # 告警表恒空的因是"没有生产者"，不是"没有告警"。老写法
+        # `detail=f"{n_alerts} open alerts"` ＋ `status="warning" if n_alerts else "connected"`
+        # 用条数反推健康，把前者报成了后者（面板按 status==='connected' 上色，于是一路显示绿点）。
+        # 教义第 2 条要的是诚实形态：这一行直接点名未接线，不兜底、也不删行了事。
         items.append(
             ConnectionStatus(
                 name="Execution Monitor",
-                detail=f"{n_alerts} open alerts",
-                status="warning" if n_alerts else "connected",
+                detail="no alert producer wired",
+                status="not_connected",
             )
         )
 
@@ -232,7 +236,12 @@ async def get_alerts(
     resolved: Optional[bool] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """获取告警 — ExecutionMonitor 真实告警; 前端契约: {id,severity,message,...}"""
+    """获取告警 — ExecutionMonitor 真实告警; 前端契约: {id,severity,message,...}
+
+    空数组今天**不表示**"监控在跑且没出事"：台账 §6-305 探针实测这把监控器没有任何生产者
+    （14 个写入方法计数全 0），所以恒返回空。健康状态请看 `/connections` 里
+    `Execution Monitor` 那一行——它已改直说 "no alert producer wired"，不再由条数反推。
+    """
     _get_request_id(request)
 
     from neurova.shared_core.execution_engine import get_execution_engine
