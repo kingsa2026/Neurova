@@ -3,10 +3,14 @@ Neurova CogArch 1.0.0 - 执行引擎（手脚）
 
 核心模块：
 - tool_engine: 工具引擎 - 智能工具选择与执行
-- workflow_engine: 工作流引擎
 - agent_colab: 多Agent协作引擎
 - execution_monitor: 执行监控器
 - mcp_manager: MCP 协议管理器
+
+（本门面原先还列着 `workflow_engine`（CogArch 1.0 任务型线性链）。它自己那份 docstring 早已声明
+deprecated 与"迁移完成后整体删除"，而它的唯一生产引用是 `shared_core.ExecutionEngine._init_components`
+里那份从不被读取的组件实例——那条孤儿装配随台账 §6-303 的档案退役后，本模块再无来路，遂整体删除。
+真工作流引擎是 `collaboration/neurflow/`（拓扑分层＋层内并发＋`safe_eval_condition` 真分支＋检查点）。）
 
 （原列在此处的 `plan_orchestrator`（计划编排器/小脑）从未被本门面导入或再导出，且生产侧
 零消费者——它自称的步骤状态机与真重试从未可达（执行表零注册方），那两格能力现已落在
