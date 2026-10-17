@@ -88,7 +88,10 @@
 - `core/task_tracker.py`
 - `core/firewall.py`
 - `core/intrinsic_motivation.py`
-- `core/multi_agent_manager.py`
+- ~~`core/multi_agent_manager.py`~~（2026-10-18 整岛退役，台账 §6-309：全仓零 import，实测 `sys.modules` 不在场、
+  9 个公开方法计数器全 0；它那条 `execute_with_shared_cerebellum` 的 `else` 分支还是"没执行却报 `success: True`"。
+  同批退役两座专用测试合计 759 行。现役对应物：agent 注册与清单＝`api/endpoints/agent.py`＋`agent_config.py`，
+  per-agent 工作区＝`core/agent_workspaces.py`，多 Agent 协作＝`neurova/collaboration/`）
 - `core/service_manager.py`
 - `core/timezone_manager.py`
 - `core/user_workspace.py`

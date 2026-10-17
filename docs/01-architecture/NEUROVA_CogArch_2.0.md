@@ -93,6 +93,13 @@
 
 #### Neurova 的 MultiAgentManager 设计：
 
+> **2026-10-18 更正（台账 §6-309）**：本节是**设计设想**，不是现状。按此设想落过的骨架
+> `neurova/core/multi_agent_manager.py` 已整岛退役——它全仓零 import，且那条"共用小脑执行"的回落分支
+> 在未注入时直接回 `success: True`（没执行任何东西却报成功）。本节代码块保留作设想记录。
+> 今天真正在跑的多 Agent 面：agent 注册与清单＝`api/endpoints/agent.py`＋`core/agent_config.py`，
+> per-agent 工作区单源＝`core/agent_workspaces.py`，多 Agent 协作与回合路由＝`neurova/collaboration/`。
+
+
 ```python
 # Neurova 专属的 MultiAgentManager
 
@@ -3033,7 +3040,8 @@ CogArch 2.0 架构          现有 Neurova 模块
 
 【执行引擎 - 手脚】
 ├─ 工具引擎              ➔ 待实现
-├─ 多 Agent 协作         ➔ [multi_agent_manager.py], [projects/team_manager.py]
+├─ 多 Agent 协作         ➔ [collaboration/] (room_bus, room_turn_router), [api/endpoints/agent_communication_api.py]
+│                          注：本行原指 [multi_agent_manager.py]，整座岛已退役（2026-10-18，台账 §6-309）
 ├─ 工作流引擎            ➔ [projects/workflow_engine.py] (雏形)
 └─ 执行监控器            ➔ 待实现
 
@@ -3051,7 +3059,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 ├─ 缓存系统              ➔ [memory/core/cache.py]
 ├─ 事件总线              ➔ [core/event_bus.py]
 ├─ 配置管理              ➔ [core/config_manager.py]
-├─ 工作空间              ➔ [core/workspace.py], [core/multi_agent_manager.py]
+├─ 工作空间              ➔ [core/workspace.py], [core/agent_workspaces.py] (per-agent 单源), [core/user_workspace.py]
 ├─ 服务管理              ➔ [core/service_manager.py]
 └─ 日志系统              ➔ [core/logger.py]
 ```
@@ -3088,7 +3096,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 | **计划编排器（小脑）** | | PlanOrchestrator | ❌ 待实现 | 任务分解 + 协调执行 |
 | **执行引擎** | | ToolEngine | ❌ 待实现 | 智能工具调用 |
 | | | ExecutionMonitor | ❌ 待实现 | 执行追踪 + 监控 |
-| | neurova/core/multi_agent_manager.py | MultiAgentManager | ✅ 雏形 | 多 Agent 协作 |
+| | neurova/core/multi_agent_manager.py | MultiAgentManager | ❌ 已退役 | 2026-10-18 整岛退役（台账 §6-309）：全仓零 import；现役见 collaboration/ 与 api/endpoints/agent.py |
 | | neurova/projects/workflow_engine.py | WorkflowEngine | ⚠️ 雏形 | 工作流引擎（需要增强）|
 | **功能壳 / 项目协作** | neurova/projects/project_manager.py | ProjectManager | ✅ 已实现 | 项目管理 |
 | | neurova/projects/task_board.py | TaskBoard | ✅ 已实现 | 任务看板 |
@@ -3168,7 +3176,8 @@ CogArch 2.0 架构          现有 Neurova 模块
 5. **安全系统** - ToolGuard 类似的防护机制
 
 #### ⚠️ 已有但需要整合的模块
-1. **MultiAgentManager** - 已有雏形，需要整合到执行引擎中
+1. ~~**MultiAgentManager**~~ - 雏形已于 2026-10-18 整岛退役（台账 §6-309，全仓零 import）；
+   "多 Agent 共用一套小脑/脑干/脊髓"这项能力今天**没有代码载体**，需求成立时按新设计重做
 2. **WorkflowEngine** - 项目里有雏形，需要增强
 
 ---

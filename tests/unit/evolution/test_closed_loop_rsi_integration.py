@@ -147,7 +147,7 @@ class TestOnExperienceRecordedTriggersRSI:
 # ============================================================
 
 class TestAgentCoreInjectsRSIToEvolution:
-    """根因 3: NeurovaAgent 初始化后, evolution 单例必须持有 RSI"""
+    """根因 3: agent_core 初始化后, evolution 单例必须持有 RSI"""
 
     def test_set_rsi_on_evolution_orchestrator_helper(self):
         """RED: EvolutionOrchestrator 应提供 set_rsi_orchestrator() 或可写属性"""
