@@ -6082,8 +6082,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **净 LOC 逐笔抄 numstat**：`a6052a38` 生产池 **+25/−408 ＝ 净 −383**、测试/基建池 **+362/−194 ＝ 净 +168**；
       `ff4f34a` 生产池 **+5/−357 ＝ 净 −352**、测试/基建池 **+27/−0**；`819713eb` 生产池 0/0、测试/基建池 +11/−0。
       本批生产池合计**净 −735**，无一处净增为正。
-    - **仍开**：D1 **探针票已跑＝§6-305**（读数比原登记更宽：不是"总线只写不读"，而是整把监控器只有读侧；
-      三态甲／乙／丙等裁，推荐丙先行）；
+    - **仍开**：D1 **探针票已跑＝§6-305，丙案已落地＝§6-306**（甲接写侧／乙整把退役仍等裁）；
       D3（`MultiAgentManager.initialize_shared_components` 全仓零调用而 `:6` 的 docstring 仍宣称
       "三件套共用"，`:221-223` 那条支路恒不命中）；D5（两份 FlowOrchestrator 未比对）；
       **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——下一批先立红灯再改**。
@@ -6127,6 +6126,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
         不动任何生产链路，也不预设甲还是乙——**它只把"说谎的读数"换成"诚实的读数"**，正是教义第 2 条要的形态。
       - 推荐**丙先行**：甲/乙都需要产品口径（要不要这项能力、告警算哪些），丙不需要，且做完丙之后
         甲的接线点会更清楚（面板那侧不再依赖一个恒空的假象）。
+        **⇒ 已裁丙并落地＝§6-306**（甲／乙仍开，等真要做时另批）。
     - **顺带抓到一处独立缺陷 D6（单列，不与本票捆绑，也不折算成审计收益）**：
       `GET /api/v1/memory/meta/skills` **每次必 500**。实测回包
       `{"code":5001,"message":"获取技能列表失败: MemoryManager.meta_get_all_skills() got an unexpected keyword argument 'category'"}`。
@@ -6141,3 +6141,46 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （`test_memory_retired_routes_guard.py:13` 已记过这一形），不是技能表。**下一批要走红线程序：先立红灯（打真端点）再改。**
     - **§9.1 表本批未追加**（沿 §6-302/§6-303/§6-304 口径）。
     - **本会话下一枚空号现查 §6-306**（写前必须现场重取；本笔落库时该读数为 305）。
+
+306. **批 78 · D1 丙落地：监控器没有写侧时端点不再自称健康（✅ `9ab957cb` 生产＋判据 / `83fef90a` D7 生成物 / `b5d5f85e` 子集 632→633）** 🟢 —— 用户 2026-10-17 就 §6-305 那张三态票拍**丙**（先把契约改如实，不预设甲／乙）。
+
+    - **坏形态的性质**：不是报错被吞，是**坏状态被报成好状态**。`get_connections` 里
+      `status="warning" if n_alerts else "connected"` ＋ `detail=f"{n_alerts} open alerts"`，把
+      §6-305 量到的"14 个写入方法计数全 0（没有生产者）"翻译成了"一切正常"；面板 `MonitorPage.vue:51`
+      按 `item.status === 'connected'` 上色，于是那行显示绿点。教义第 2 条要的是诚实形态。
+    - **改动面**：那一行改直说 `not_connected` ＋ `no alert producer wired`；`/alerts` 的行为一字未改
+      （空数组是事实），只把它的 docstring 扩成契约说明——这条经 OpenAPI 带出去，给下一个调用方看。
+      **后端单侧改动即够，不动前端、不动 11 语言**（面板读的还是既有的 `status`/`detail` 两个字段），
+      也不新增任何并行口径。
+    - **红→绿（原文）**：新档改前 `2 failed, 2 passed`，红的两格一格在行为读数
+      （`无写侧却仍报 connected（面板会上绿点）：{'name': 'Execution Monitor', 'detail': '0 open alerts', 'status': 'connected'}`）、
+      一格在形状（AST 判 `status` 实参是个 `IfExp`）；改后 `4 passed`。另两格**设计成两侧都绿**并写明作用：
+      条件格（真跑确认计数确实全 0——哪天接了写侧它先红，逼期望一起改判，别留一条永远自称未接线的新谎）、
+      正控格（走未包装类方法写一条 ⇒ 端点读出 1 条；缺了它那串 0 分不清"没人写"与"读侧坏"，形态集 283/266）。
+    - **红自证**：只 stash 生产档（唯一 tag `red-selfproof-b78`）同选型复跑 **`3 failed, 8 passed`**——
+      失败集恰为本批两格新判据 ＋ 既有档那格改判，多一条都没混进来。
+    - **既有判据改判（同根因命中点，教义 5）**：`test_monitor_api.py` 那格的
+      `assert item["status"] in ("connected", "degraded")` 对这个组件是**假的二分**（它有第三个真态）。
+      改判不是放宽：词表补 `not_connected` 的同时**加**两条硬断言（那一行必须正是它、detail 必须是诚实文案），
+      并把"确实没有写侧"那部分证据让给新档，两档不重复取数。
+    - **活体**：真 `create_app()` ＋ 真 JWT（带 `role=admin`）⇒
+      `LIVE connections rows: [('LLM Providers','connected','11/11 healthy'),('SQLite Database','connected','ok'),('Execution Monitor','not_connected','no alert producer wired')]`、
+      `alerts len: 0`、`status code: 200`；其余两行读数与改前一致（本批不碰）；仓内 `data/` md5 `d1ef4e99bd9f` 不变。
+    - **宽域 A/B**（`tests/unit/api`，基线＝HEAD 仓外 worktree 并铺入本批新判据）：基线
+      `41 failed, 2454 passed, 8 errors in 181.91s` ↔ 本批侧 `39 failed, 2456 passed, 8 errors in 178.74s`，
+      抽取条数与汇总逐侧对账 49↔47；**仅本批侧红 0 条 ⇒ 无回归**，仅基线红 2 条即本批那两格新判据。
+      （两条 `ERROR neurova.agent.chat_pipeline…` 是日志行不是节点，按 `^(FAILED|ERROR) tests/` 口径排除。）
+    - **净 LOC**：`9ab957cb` 生产池 **+13/−4 ＝ 净 +9**（为正，逐条去向＝5 行根因注释钉在改的那一行旁边 ＋
+      诚实文案两行替换老三元式两行 ＋ `/alerts` docstring 由一行扩成六行写进对外契约）；
+      测试/基建池 **+183/−2 ＝ 净 +181**。`b5d5f85e` 生产池 0/0、测试/基建池 +10/−0。
+    - **顺手收掉一条常驻红（D7，另一根因，所以单独一笔）**：
+      `tests/unit/test_api_inventory_guard.py::TestMachineBlockMatchesGenerator::test_tables_match_generator_output`
+      在 HEAD 上常驻红——`ffa20d86`(10-16，已推送) 给 `settings.ts` 加了第 9 个前端调用没重跑生成器，
+      而该档**在受保护子集内**（`protected_tests.txt:509`）⇒ CI 那道门一直带着一条红。
+      定性靠同编码形态的 HEAD 仓外 worktree 单跑（`1 failed`）对照本树重跑后（`17 passed/1 skipped`）。
+      形态与 `6304b6b0` 同一先例：**改生成物的正确形态是重跑生成器，不是手抄数字，也不是给守卫加豁免**；
+      差出来只有一行 `| ... settings.ts | /governance, /settings | 是 | 8 |` → `9`，逐字核过。
+    - **仍开**：D1 甲（接写侧）与乙（整把退役）仍等裁，本批只做丙——面板那行今天显示"未接线"是**如实**，
+      不是把能力补上；D6（`/memory/meta/skills` 每次必 500，用户已裁甲，**待落地**，下一批先立红灯再改）；
+      D3、D5 未动。
+    - **本会话下一枚空号现查 §6-307**（写前必须现场重取；本笔落库时该读数为 306）。
