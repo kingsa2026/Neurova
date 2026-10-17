@@ -3330,3 +3330,14 @@ tests/unit/security/test_configCredentialSealingOneChannel.py
 # ② `test_capabilitiesStayToolsOnly` 钉"升版本号不等于升能力"，resources/prompts 尚未实装，
 # 声明里出现它们就是谎称合规。三枚 Accept 控制格（json / */* / 不设）两侧都该绿，防新闸赶走老客户端。
 tests/unit/api/test_mcpServerFaceNegotiation.py
+# 批 76（承 §6-303 档案；生产笔 `a6052a38` ＋ `ff4f34a`）：`ExecutionEngine` 只剩监控器一条活路，
+# 十四条孤儿方法、那份进程内执行台账与 legacy 线性链引擎整档退役。三格别当装饰删：
+# ① 交付锁 `test_realSingletonStillHandsOutAMonitor` 走**真单例**取真 `ExecutionMonitor`——
+# 整包判死会误杀这条唯一来路（`api/endpoints/monitor.py` 三个端点就靠它）；
+# ② `test_initNoLongerWritesFieldsNobodyReads` 按 AST 判 `__init__` 里 `self.X =` 的目标集，
+# 它防的是**本批自己造新断点**（AGENTS §2「写出无人读的字段即断点」的形状化表达）；
+# ③ 反向钉 `test_monitorBusSurfaceIsKeptForPendingRuling` 钉的是"没裁的不许顺手删"：
+# `ExecutionMonitor._event_bus` 只写不读那处缺陷另有等裁票，被删的只是 `ExecutionEngine` 那条死路转发。
+# 另记一条取数坑：模块说明串的判据要按**体位**取裸字符串，`ast.get_docstring` 在
+# `from __future__` 写在最前的文件里返回 None——按它取就是恒红的空判。
+tests/unit/execution/test_executionEngineOrphanSurfaceRetired.py
