@@ -165,5 +165,12 @@ class TestConnectionsContract:
         by_name = {i["name"]: i for i in items}
         assert by_name["LLM Providers"]["detail"] == "1/2 healthy"
         assert by_name["Agent Runtime"]["detail"] == "2 agents"
-        for item in items:
-            assert item["status"] in ("connected", "degraded")
+        # 词表原本是 ("connected", "degraded") 两态——那对 `Execution Monitor` 这一行是假的二分：
+        # 台账 §6-305 探针实测这把监控器没有任何生产者（14 个写入方法计数全 0），
+        # 老写法却用"告警条数为 0"反推出 connected，把"没人写"报成"一切正常"。
+        # 现补上第三个真态，并**加**一条硬断言钉住那一行确实是它（不是放宽，是把假二分换成真三态；
+        # "确实没有写侧"那部分证据归 `test_monitorContractHonestWhenNoProducer.py`，两档不重复取数）。
+        assert all(i["status"] in ("connected", "degraded", "not_connected") for i in items), items
+        monitorRow = by_name["Execution Monitor"]
+        assert monitorRow["status"] == "not_connected", monitorRow
+        assert monitorRow["detail"] == "no alert producer wired", monitorRow
