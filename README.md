@@ -1776,8 +1776,8 @@ Agent 星星可以连接到你使用的各种平台：
   neurova computer browser type --selector "#username" --text "user"
   ```
 
-#### 7. 运行时+传输层双抽象
-- **功能**：支持多种运行时（本地、Docker）和传输层（HTTP、WebSocket）
+#### 7. 运行时抽象
+- **功能**：支持多种运行时（本地、Docker）。HTTP/WebSocket 传输层那一半从未接线，已随票④包 4 退役
 - **隔离层级**：全局
 - **使用方式**：
   ```bash

@@ -87,7 +87,7 @@ Neurova/
 ├── neurova/asr/                      # 语音识别
 ├── neurova/computer_use/             # 计算机视觉/浏览器自动化
 ├── neurova/benchmark/                # 基准测试框架
-├── neurova/execution_layers/         # 执行运行时和传输层
+├── neurova/execution_layers/         # 执行运行时（本地/Docker）
 ├── neurova/image_pipeline/           # 镜像管道管理器
 ├── neurova/tool_layers/              # 工具层模块
 ├── neurova/collaborate/              # 协作模块
