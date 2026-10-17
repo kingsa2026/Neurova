@@ -5653,3 +5653,44 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       ② §6-293（远端 `format` 采信）；③ `mcp_client.py:598-603` 那条"守卫看到的 dict 与送进 MCP 的 arguments
       可能不同一份"（先立探针票）；④ `extract_adjudicable_params` 里命令键那一支仍是 `next(...)`（另一问句）。
     - **本会话下一枚空号现查 §6-297（写前必须现场重取，本笔落库时该读数为 296）。**
+
+297. **"优先使用 ToolEngine"那一档恒不命中：它的注册面在全仓没有任何写入者（🔴 三态票，推荐乙；运行时取证，未改一行码）** ⏳ —— §6-296 末格"仍开①"，按取证先行的规矩先量影响面。
+
+    - **复核实状（六腿运行时读数，探针即用即删）**：真 `create_app()` 装配下
+      ① 咽喉内层那把（`ExecutionEngine._tool_engine`，`tool_executor.py:414-440` 取它）与端点单例
+      （`tool_layers.py:44` 的 `get_tool_engine()`）**不是同一个对象**，注册数分别读数 **0 与 1**；
+      ② 往单例注册一条工具后，主路 `agent.tool_executor.execute()` 的读数是
+      `{'error': '未知工具: b70_singleton_only'}`——它不在咽喉那把的注册面里，后序 builtin/skill/router
+      三档也接不住它；③ 同一个名字在面板列表面（`GET /api/v1/tool-layers/tools`，74 条）里**看得见**
+      ⇒ ②③ 同现就是"看得见跑不动"那一形（与 §6-267 写侧／§6-272 读面同族）；
+      ④ 工作流同步 `neurflow.adapters.sync_tools` 取的是端点单例那把（计数读数与单例注册数相等）；
+      ⑤ `ExecutionEngine.register_tool()` 这层包装在真装配里**一次都没被调用**。
+    - **结构事实（比读数更硬）**：全仓能往咽喉那把引擎里写东西的入口只有
+      `shared_core/execution_engine.py:410` 那一行，而它挂在 `ExecutionEngine.register_tool()` 名下，
+      后者**零消费者**（运行时计数 0；`tests/execution_engine/test_tool_engine.py` 那批打的是
+      `ToolEngine()` 不是这层包装，已按名字与接收者分开数过）。⇒ 那把引擎的注册面**恒空**，
+      `tool_executor.py:1472-1488` 那一档对任何调用都恒抛"未注册"再落回后序分支；
+      连带 `:1484` 那句 `tool_source = "mcp"` **今天恒不产生**（全仓只有这一处赋这个值，已 grep 定位）。
+    - **真正在跑 MCP 的是谁**：`tool_layers/tool_router.py`（`_mcp_clients`／`register_mcp_client`），
+      即咽喉的**第 4 档**。所以本票**不是**"MCP 工具在主路跑不动"——真 MCP 工具有 router 这条路；
+      缺口精确到一句：**只注册在端点单例里、又不是 router 成员的那一类工具**，面板画得出来而主路执行不了。
+    - **三态与代价**：
+      **甲｜合一**（让咽喉内层那把就是端点单例，或把注册面写进同一把）——"优先使用 ToolEngine"这才成立，
+      但**不是改一行 `is`**：MCP 工具于是有两条可执行路径（ToolEngine 在前、router 在后），要不留双源、
+      要不同批退役 router 那一档；而 router 上挂着三样东西——`mcp_grants` 授权闸（`tool_executor.py:1323-1326`）、
+      请求级身份穿透到 MCP 防火墙（`:1516-1521`）、`is_mcp` 的 `scan_all` 治理口径（`:1590`／`:1619`）。
+      动它得按教义第 7 条"比→并→接→退"走一整批。
+      **乙｜拆恒不命中那一档 + 把归属写清**——删 `tool_executor.py:1472-1488`（连同恒不产生的
+      `tool_source = "mcp"` 与"优先使用 ToolEngine"那句不实注释）；`ExecutionEngine.register_tool()`
+      那层零消费者包装按死码档案五字段出票（核心原则第 7 条，不许只说"死码"）；面板列表面那一族
+      按 §6-272 读面同形处理（不可得就如实标，别画成可选）。生产池预期净 ≤0。
+      **丙｜不改，登记**。
+    - **推荐乙**，理由三条：① 恒空这件事是**结构事实**（唯一写入者零消费者），留着那一档就等于留着
+      "主路优先走 ToolEngine"这个不成立的前提，下一批会据它判归因（本卷 §6-291 那条
+      "两层各写一份取第一个"就是同族事故）；② 甲要落地必须先裁"MCP 两条路径留哪条"，那是独立的设计裁定，
+      不能塞进一次收口；③ 乙顺带清掉一处不可达的 `tool_source` 值——它在遥测面上是个永不出现的标签，
+      读代码的人会以为 MCP 调用已被归类统计。
+    - **刻意没做的**：不在本批"顺手"把面板列表面改成按可达性过滤（那是乙的第三刀，需要连
+      `list_all_tools` 的两个源一起判归属）；不把 `ExecutionEngine.register_tool` 直接删掉——
+      它若退役要带"原功能／关键入口／来历／现役替代／判定"五字段（先例：`dead-code-provenance-audit`）。
+    - **本会话下一枚空号现查 §6-298（写前必须现场重取，本笔落库时该读数为 297）。**
