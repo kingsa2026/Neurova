@@ -3311,3 +3311,22 @@ tests/unit/api/test_toolOwnershipComesFromRegistration.py
 # ② `test_noCodeAnywhereImportsTheRetiredTransportSurface` 按**导入通道**取数而非符号名——
 # `mcp_manager.py` 里有个同名 `TransportType`，按名扫会把在役符号判成还在引用退役面。
 tests/unit/execution/test_executionLayersTransportHalfRetired.py
+# 批 74（§6-302 断点①后端半区）：oauth 配置写成可存、读成可得——此前只有三处读取面，写侧从未接。
+# 三格别当装饰删：① `test_emptyOauthDictMeansUnconfigured` 钉的是**本批自己引入的过度收紧**
+# （第一版让 oauth={} 也走必填校验 ⇒ 所有普通注册恒 400，被 test_tool_layers_auth.py 整档拦下）；
+# ② `test_clientSecretGoesToDiskThroughTheRealManager` 走真 SharedConfigManager 而非直接调封存函数——
+# 前一版判据调纯函数 sealSecrets 验，绿而磁盘上是明文（活体才抓到），这条不许退回纯函数口径；
+# ③ `test_plainRegistrationWithoutOauthStillReachesPersistence` 是反向闸：允许新键不得改变既有形态。
+tests/unit/tools/test_mcpOAuthConfigWriteThrough.py
+# 批 74（§6-302 凭据落盘收口）：同一份配置文件里"哪些字段算凭据"只许有一个答案。
+# 三格别当装饰删：① 两格存量兼容（明文可读回 / 既有 enc:v1 密文可解回）——收口把递归通道换成
+# 唯一通道时，跑掉这两格就等于把线上已有配置读坏；② `test_nonCredentialKeysStayReadableAsPlaintext`
+# 是反向控制：不许靠把集合塞满来骗过"全都封了"，id/url/非凭据 env 键必须仍是明文。
+# 形状那三格按 AST 判代码身份（`_calledOrLoadedNames`），注释里提到退役符号不算命中。
+tests/unit/security/test_configCredentialSealingOneChannel.py
+# 批 74（§6-302 断点②）：服务端面做协议版本协商、应答 ping、按 JSON 响应模式校验 Accept。
+# 两格别当装饰删：① `test_supportedSetIsSdkSingleSourceNotACopy` 钉**取数身份**而非取值——
+# 在仓里手抄一份日期列表，坏法不是今天抄错而是 SDK 扩容后静默陈旧；
+# ② `test_capabilitiesStayToolsOnly` 钉"升版本号不等于升能力"，resources/prompts 尚未实装，
+# 声明里出现它们就是谎称合规。三枚 Accept 控制格（json / */* / 不设）两侧都该绿，防新闸赶走老客户端。
+tests/unit/api/test_mcpServerFaceNegotiation.py
