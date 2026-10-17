@@ -26,8 +26,6 @@ class _ApprovalFlowTest(unittest.TestCase):
         agent.user_id = "u1"
         agent.agent_id = "a1"
         executor = ToolExecutor(agent)
-        ToolExecutor.tool_engine = property(lambda self: None)  # type: ignore[assignment]
-        self._orig_prop = ToolExecutor.__dict__.get("tool_engine")
         executor.on_tool_executed = MagicMock()
 
         # 注入临时 workspace 的审批管理器 + 注入指定策略的治理单例
@@ -43,15 +41,8 @@ class _ApprovalFlowTest(unittest.TestCase):
         am_patcher.start()
         self.addCleanup(am_patcher.stop)
 
-        self.addCleanup(self._restore_engine_prop)
+        self.addCleanup(reset_governance)
         return executor
-
-    def _restore_engine_prop(self):
-        if getattr(self, "_orig_prop", None) is not None:
-            ToolExecutor.tool_engine = self._orig_prop  # type: ignore[assignment]
-        elif "tool_engine" in ToolExecutor.__dict__:
-            del ToolExecutor.__dict__["tool_engine"]
-        reset_governance()
 
 
 class TestAskCreatesApprovalRequest(_ApprovalFlowTest):

@@ -52,10 +52,6 @@ def _ascii_slug(text: str, max_len: int = 40) -> str:
     return (_SLUG_RE.sub("-", text or "").strip("-").lower()[:max_len]) or "document"
 
 
-# ToolEngine 延迟导入（避免循环依赖）
-_TOOL_ENGINE_AVAILABLE = False
-_ToolEngine = None
-
 # ── 电脑/浏览器操作工具（Computer Use）─────────────────────────
 # 执行后向会话广播 computer_action 实时事件，驱动聊天页分屏面板
 COMPUTER_USE_TOOLS = frozenset(
@@ -253,19 +249,6 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     return tool_name
 
 
-@lazySingleton("_ToolEngine")
-def _get_tool_engine_class():
-    """延迟导入 ToolEngine 类（不可用时返回 None，下次照旧重试）"""
-    global _TOOL_ENGINE_AVAILABLE
-    try:
-        from neurova.execution_engine.tool_engine import ToolEngine
-    except ImportError:
-        _TOOL_ENGINE_AVAILABLE = False
-        return None
-    _TOOL_ENGINE_AVAILABLE = True
-    return ToolEngine
-
-
 def _get_approval_manager():
     """获取审批管理器（模块级函数，便于测试注入）。"""
     from neurova.security.approval_manager import get_approval_manager
@@ -395,49 +378,11 @@ class ToolExecutor:
         self._somMarksLock = threading.RLock()
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
-        # A-18：ToolEngine 构造为纯内存对象图（dict/RLock/deque + 默认守卫，
-        # 无 IO/线程/网络），懒初始化无收益且有并发缺陷——改为 __init__ 急切
-        # 构建，property 退化为纯读（消除 async 路径持同步锁 + 锁外首读无保护）。
-        # 循环依赖规避靠 _create_tool_engine 内函数级 import（构建期≠导入期）。
-        self._tool_engine = self._create_tool_engine()
         # P1-2：工具执行协调器（per-tool 超时 + 超时转后台 + pending hints）
         # 懒加载（AGENTS.md 纪律）：neurova.agent 包 __init__ 链回本模块，模块级导入会循环
         from neurova.agent.tool_coordinator import ToolCoordinator
 
         self.tool_coordinator = ToolCoordinator()
-
-    @property
-    def tool_engine(self):
-        """ToolEngine 实例（A-18：__init__ 急切构建，此处纯读零副作用）"""
-        return self._tool_engine
-
-    def _create_tool_engine(self):
-        """实际创建 ToolEngine（__init__ 急切构建期调用；函数级 import 规避循环依赖）"""
-        # A-18：急切构建发生在 __init__（实例上尚无 _tool_engine 属性），
-        # 先置 None 兜住"两级来源均不可用"的失败路径（与原懒加载失败语义一致：
-        # 静默降级 None，执行链回退 builtin/skill/router）
-        self._tool_engine = None
-        # 首先尝试从 ExecutionEngine 获取
-        try:
-            from neurova.shared_core.execution_engine import ExecutionEngine
-
-            engine = ExecutionEngine()
-            if hasattr(engine, "_tool_engine") and engine._tool_engine is not None:
-                self._tool_engine = engine._tool_engine
-                logger.debug("从 ExecutionEngine 获取 ToolEngine")
-                return self._tool_engine
-        except Exception as e:
-            logger.debug("从 ExecutionEngine 获取 ToolEngine 失败: %s", e)
-
-        # 如果 ExecutionEngine 不可用，创建新的 ToolEngine
-        ToolEngineClass = _get_tool_engine_class()
-        if ToolEngineClass:
-            try:
-                self._tool_engine = ToolEngineClass()
-                logger.debug("创建新的 ToolEngine 实例")
-            except Exception as e:
-                logger.warning("创建 ToolEngine 失败: %s", e)
-        return self._tool_engine
 
     @property
     def _skill_registry(self):
@@ -1436,8 +1381,13 @@ class ToolExecutor:
                 logger.exception("on_tool_executed 钩子失败: %s", tool_name)
 
     async def _execute_tool_core(self, tool_name: str, params: Dict) -> tuple:
-        """执行核心链（P1-2 抽取）：workflow_agent → ToolEngine → builtin →
-        skill → router → unknown。返回 (result, success, tool_source)。"""
+        """执行核心链（P1-2 抽取）：workflow_agent → workflow:{id} → builtin →
+        skill → router → unknown。返回 (result, success, tool_source)。
+
+        这里没有"内层 ToolEngine"那一档：它的注册面在全仓无任何写入者（唯一写入者是
+        `ExecutionEngine.register_tool()`，零消费者），故恒抛"未注册"再落回后序分支——
+        已随 §6-298 拆掉。真在跑 MCP 的是第 4 档 `tool_layers.tool_router`。
+        """
         success = False
         result = None
         tool_source = "unknown"
@@ -1468,28 +1418,6 @@ class ToolExecutor:
             success = self._result_is_success(outcome)
             return outcome, success, tool_source
 
-        # 优先使用 ToolEngine（如果可用）
-        if self.tool_engine:
-            try:
-                # 获取 user_id 和 agent_id（如果可用）
-                user_id, agent_id = self._agent_identity()
-
-                result = await self.tool_engine.execute_with_safeguards(
-                    tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
-                )
-                logger.debug("ToolEngine 执行成功: %s", tool_name)
-                # P1 修复: 工具函数可能返回 {"error": ...} 而不抛异常，
-                # 成败必须依据结果内容判定，不能无条件记为成功。
-                success = self._result_is_success(result)
-                tool_source = "mcp"
-                return result, success, tool_source
-            except ValueError as e:
-                # 工具未注册或不可用，回退到其他方式
-                logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
-            except Exception as e:
-                logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
-
-        # 回退到原有逻辑
         # 内置工具：以 builtin_tools.py 的注册表为单一事实源动态判断，
         # 避免硬编码白名单与 ToolRouter/实际注册不一致（P2-#13）。
         if get_builtin_tool_params(tool_name) is not None:

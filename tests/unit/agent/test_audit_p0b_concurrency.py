@@ -8,7 +8,7 @@
 - B3 provider 读路径并发安全：list_providers/get_provider 在增删线程并发下
   不抛 RuntimeError: dict changed size during iteration。
 - B5 热切换原子性：rebuild_loop 进行中其他请求读到完整新旧之一（不半旧半新）。
-- B6 tool_engine 惰性创建单实例。
+- B6 已随 §6-298 退役：咽喉内层那把 ToolEngine 的注册面全仓无写入者，构造链一并拆掉。
 """
 import asyncio
 import threading
@@ -224,88 +224,3 @@ class TestB5HotSwitchAtomicity:
             assert events[i].split(":")[1] == events[i + 1].split(":")[1], (
                 f"rebuild_loop 并发交错（无锁保护）: {events}"
             )
-
-
-# ═══════════════════════════════════════════════════════════════
-# B6: tool_engine 惰性创建单实例
-# ═══════════════════════════════════════════════════════════════
-
-
-class TestB6ToolEngineSingleInstance:
-    def test_lazy_init_thread_safe(self):
-        """并发首访 tool_engine 只创建一个实例（P0-B6 双检锁）。
-
-        注意：governance_integration 会把类属性 tool_engine 临时手术成
-        恒 None property 再还原（对称无损，最小重现已验证）。本用例为对
-        手术免疫：模块导入时（类属性必然为原始定义）捕获权威引用，用例
-        窗口内用自建等价 fget（内联双检锁，调用真实 _create_tool_engine），
-        finally 恢复进入时状态。
-        """
-        import builtins
-
-        from neurova.tool_executor import ToolExecutor
-
-        agent = MagicMock()
-        ex = ToolExecutor.__new__(ToolExecutor)
-        ex._agent = agent
-        ex._tool_engine = None
-        ex._tool_engine_lock = threading.Lock()
-
-        created = []
-
-        class FakeEngine:
-            def __init__(self):
-                created.append(1)
-
-        import neurova.tool_executor as te_mod
-
-        orig_getter = te_mod._get_tool_engine_class
-        te_mod._get_tool_engine_class = lambda: FakeEngine
-
-        orig_import = builtins.__import__
-
-        def fake_import(name, *a, **kw):
-            if "shared_core.execution_engine" in name:
-                raise ImportError("blocked in test")
-            return orig_import(name, *a, **kw)
-
-        builtins.__import__ = fake_import
-
-        _orig_prop = ToolExecutor.__dict__.get("tool_engine")
-
-        def _b6_fget(self):
-            # 与生产 property 相同的双检锁语义，fget 调真实 _create_tool_engine
-            if self._tool_engine is None:
-                with self._tool_engine_lock:
-                    if self._tool_engine is None:
-                        self._tool_engine = self._create_tool_engine()
-                return self._tool_engine
-            return self._tool_engine
-
-        ToolExecutor.tool_engine = property(_b6_fget)
-        try:
-            results = []
-            barrier = threading.Barrier(4)
-
-            def access():
-                barrier.wait()
-                results.append(ex.tool_engine)
-
-            threads = [threading.Thread(target=access, daemon=True) for _ in range(4)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
-            assert len(created) == 1, (
-                f"并发首访创建 {len(created)} 个 ToolEngine 实例（惰性创建无锁）"
-            )
-            assert all(r is results[0] for r in results)
-        finally:
-            te_mod._get_tool_engine_class = orig_getter
-            builtins.__import__ = orig_import
-            ex._tool_engine = None
-            if _orig_prop is None:
-                ToolExecutor.__dict__.pop("tool_engine", None)
-            else:
-                ToolExecutor.tool_engine = _orig_prop
