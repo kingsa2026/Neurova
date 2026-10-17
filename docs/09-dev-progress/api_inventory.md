@@ -58,7 +58,7 @@
 | `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 是 | 1 |
 | `NeurUI/src/api/modules/sandbox.ts` | `/sandbox` | 是 | 0 |
 | `NeurUI/src/api/modules/scheduler.ts` | `/scheduler` | 是 | 3 |
-| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 8 |
+| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 9 |
 | `NeurUI/src/api/modules/shared-config.ts` | `/shared-config` | 是 | 0 |
 | `NeurUI/src/api/modules/skill-pool.ts` | `/marketplace`, `/skill-pool` | 是 | 9 |
 | `NeurUI/src/api/modules/sleep.ts` | `/sleep` | 是 | 8 |
