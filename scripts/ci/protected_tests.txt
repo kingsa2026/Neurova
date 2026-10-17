@@ -3289,3 +3289,10 @@ tests/unit/ci/test_manualScriptStdoutEncoding.py
 # 不许回来；③ `testOldEngineGuardCellsRetiredNotLeftZombie` 钉旧契约的测试格不许留成僵尸断言。
 # 刻意不做：两把 ToolEngine 实例合一（§6-295 末格另记的独立缺陷，另一张票）。
 tests/unit/execution/test_engineAdjudicationLivesOnlyInGovernance.py
+# 批 70（§6-298，承 §6-297 乙）：咽喉里"优先使用 ToolEngine"那一档恒不命中——它的注册面在全仓
+# 无任何写入者（唯一写入者 `ExecutionEngine.register_tool()` 零消费者），本批把那一档与整条装配链退役。
+# 两格别当装饰删：① `testCoreChainDocstringMatchesRealBranchOrder` 只判链条那一句（第一个句号前），
+# 解释段允许点名被拆掉的东西——整段扫词会被自己写的说明咬到（形态集 241／268）；
+# ② `testOldA18CriteriaRetiredNotLeftZombie` 钉 A-18 那档旧判据不许留成僵尸断言（被钉对象已不存在）。
+# 行为中性由差分证而不是由声明证：同一份活体脚本在 HEAD 基线树与本批侧 READOUT 完全一致。
+tests/unit/execution/test_throatHasNoEmptyEngineBranch.py
