@@ -3276,3 +3276,9 @@ tests/unit/security/test_pathGuardScansEveryPathValue.py
 # （未声明的 `path` 键必须仍按名字表判，否则是拆闸）；远端无 schema 可问时兜底保留。
 # 棘轮一格钉"名字表只关不加"：往 `PATH_NAME_ROLES` 里添名字即红，新增语义请写进声明。
 tests/unit/security/test_pathSemanticsComeFromDeclaration.py
+# 批 67（§6-294）：活体脚本自己钉住 stdout 编码——`print` 抛 UnicodeEncodeError 会把退出码变成 1，
+# 而 `tests/manual/*` 的全部证据就是"退出码 + 那几行 PASS/FAIL 读数"，等于让打印来决定判定。
+# 两格别当装饰删：① 探测器双向自证（真调用要认下来，写进注释/字符串里的字面话不算钉住——否则零容忍格
+# 会把合规档报成违规）；② 钉的位置要在模块顶层且在 `import sys` 之后（函数体内的那行不会在打印前生效）。
+# 覆盖边界：只管字面常量里的不可编码字符；运行时才决定内容的字符串仍可能坏，那类要逐档实跑，不在这格能力内。
+tests/unit/ci/test_manualScriptStdoutEncoding.py
