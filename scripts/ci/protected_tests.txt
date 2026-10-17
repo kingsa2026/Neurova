@@ -3262,3 +3262,10 @@ tests/unit/skills/test_throatRecognizesExecutorMapping.py
 # 三条形状格别当装饰删：① 一处定义三处调用（装两处＋读面一处），少一处＝那一处又写回内联形状；
 # ② 调用点上不许内联重述这一问；③ 探测器自己的反空转证明（豁免按 AST 认函数身份，不按行号也不按文件名）。
 tests/unit/skills/test_installDoesNotPinShellAsAuthority.py
+# 批 65（§6-291，用户裁甲）：一次工具调用里的**每一条**路径参数都要进裁决，命令文本恒常扫。
+# 同一根因有两层各写了一份"取第一个"——咽喉的 `for … : break` 与治理预检的 `next(...)`，
+# 后者把参数面塌成「1 命令+1 路径」，所以只修咽喉等于修在走不到的分支上。
+# 形状格别当装饰删：① 取数循环里不许留 `break`；② 命令支不许被"路径为空"包回去；
+# ③ governance 不许再自己遍历 `PATH_PARAM_KEYS`（两份名单是 §6-284 第③件事）。
+# 对照格写明改前改后都绿：case 4 自由文本仍零读数（甲不覆盖）、单路径三形读数不变、良性 dir 值不新增裁决。
+tests/unit/security/test_pathGuardScansEveryPathValue.py
