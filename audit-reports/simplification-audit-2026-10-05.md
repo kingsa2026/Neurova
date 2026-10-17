@@ -5068,7 +5068,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **一次提交形态自纠（与 §6-281 那条同源，这次是在提交前拦住的）**：本树是多会话共享的，我按惯例准备走"不带路径只提交索引"，落笔前 `git diff --cached --name-only` 一核，发现索引里躺着**对方 staged 的四件在途件**（`skill_scanner.py`／`skill_service.py`／资产 zip／`test_installGateRulesFollowCodeShape.py`）——直接提交就是替人署名。改用 `git commit --only -- <本次两件>`（`--only` 只取给定路径的工作树内容、不动他人暂存态），提交后复证那四件仍在索引里。**口径更正写进记忆：共享树上"只提交索引"这条快捷形态不安全，一律带路径＋提交前核 `--cached --name-only`。**
     - **净 LOC**：生产池 **0/0**；测试池 **+44/−66 ⇒ 净 −22**（读侧档 −24：8 处多行调用收成单行出口；棘轮档 +4/−2：摘行与注释现量）。子集不动（两档早已在册）。
     - **本会话下一枚空号现查 §6-284（写前必须现场重取：`grep -oE '^2[0-9]{2}\. ' | tr -d '. ' | sort -n -u | tail -1`；本笔落库时该读数为 282，283 已被 `call_skill` 那一线取走）。**
-284. **§6-266 末格第②刀的票面（不实施）：登记写的是"扁平整串分不清归属"，实测出的却是「一次调用只查一条路径，且查到就早退」——两格真覆盖缺口（🔴 等裁，推荐甲）** ⏳ —— 取证走真引擎 `ToolGuardEngine.guard()`，四形各跑一次并配一枚对照（探针即用即删）。
+284. **§6-266 末格第②刀的票面：登记写的是"扁平整串分不清归属"，实测出的却是「一次调用只查一条路径，且查到就早退」——两格真覆盖缺口（✅ 已裁甲并落地＝§6-291／`5c23fc49`＋`8ecd105b`；丁仍开）** 🟢 —— 取证走真引擎 `ToolGuardEngine.guard()`，四形各跑一次并配一枚对照（探针即用即删）。
 
     - **机制（`FilePathGuardian.guard()`，`neurova/security/tool_guard.py:545` 起）**：先按单源 `PATH_PARAM_KEYS`
       取**第一个**非空值 → 取不到才回落整串正则 `(?:path|file|dir)=([^\s]+)` → **只有两条都空**时才会去看
@@ -5400,3 +5400,68 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：`market_registry._build_executable_skill` 里"看 `SKILL.md` 决定构造哪一类执行体"与本谓词
       是相邻但不同的问句（它问"造哪个执行体"，不是"值不值得钉"），本批不并；插件侧 `plugin_manager`
       另有一份 `_resolveEntryPoint`（§6-267 已注明同形），要合也得单开一批连行为格子一起做。
+
+291. **路径守卫逐值扫＋命令文本恒扫：同一根因在两层的 `next()` 并成一个取数口（✅ `5c23fc49` 生产+判据+活体 / `8ecd105b` 子集 621→622；§6-284 甲案落地）** 🟢 —— 用户 2026-10-17 在整备后的四态票上拍甲，并要求回落截断同批带上。
+
+    - **复核实状（真引擎现读，探针 `.tmp_b65_probe.py` 即用即删，七条形各跑一次）**：
+      `{"file_path":良性,"path":"/etc/shadow"}` ⇒ `[]`；`{"file_path":良性,"command":"cat /etc/shadow"}` ⇒ `[]`；
+      对照 `{"command":"cat /etc/shadow"}` ⇒ `['protected_path_in_command']`（规则在册，零读数是早退造成的）；
+      `{"file_path":良性,"note":"见 /etc/shadow"}` ⇒ `[]`；
+      **`{"file":r"C:\Program Files\Foo\passwd"}` ⇒ `[]`，而同一份字节给 `{"path":同值}` ⇒ `['windows_system_path']`**
+      ——回落那支从扁串只取到 `C:\Program`，系统目录前缀配不上就整条放行；
+      `{"dir":"/etc/shadow"}` 单给 ⇒ `['protected_path']`，与 `file_path` 同给 ⇒ `[]`（翻转）。
+    - **两处命中点、一个根因（教义第 5 条；只修咽喉就是把修落在走不到的分支上）**：
+      ① `FilePathGuardian.guard`「按 `PATH_PARAM_KEYS` 取到第一个非空就 `break`」＋命令文本那一支挂在
+      `if not path:` 下面；② **治理预检 `governance.extract_adjudicable_params` 另写了一份 `next(...)`**，
+      把参数面塌成「1 命令 + 1 路径」再喂守卫——而生产路上唯一的入口正是它
+      （`tool_executor.py:1615` → `evaluate_tool_call` → `evaluate` → `engine.guard`）。
+      两层的取数并成同一个口 `pathValuesFromParams`（名字集仍是 `PATH_NAME_ROLES` 两个角色的投影，
+      **一个名字都没扩**），`evaluate` 的入参由 `file_paths: Optional[str]` 改成 `path_values: Sequence[(键,值)]`，
+      `governance` 顶部因此失效的 `PATH_PARAM_KEYS` 导入一并摘掉（留着就是谎）。
+    - **截断的修法与边界**：参数面在场时一律从 dict 取；扁串正则**只留给"参数面一个路径值都没有"那一种场合**。
+      这里本批自己红过一次：第一版把回落收成"只在 context 不是 dict 时"，当场把既有判据
+      `test_pathNameListsDerivedFromOneTable.py::testFallbackOnlyRunsWhenTheListMisses` 咬红——那格钉的是
+      `engine.guard("dir=/etc/shadow", {})`（**空 dict** 也要能从扫描面看见名字表外的键）。改成"取不到任何
+      路径值才回落"后那格一字未改仍成立。**收成比承诺还窄同样是坏修法**，它会把既有覆盖面报成"已被本批改掉"。
+    - **case 4 明确不覆盖、名单明确不扩**：`note`/`target` 这类自由文本键里的路径照旧零读数（做了它就是
+      把守卫从"判形状"拖回"判词"）；`source`/`destination` 这些没登记进任何角色的键照旧不判——那是丁的范围。
+      **去重按归属，不按一个 seen 集合**（批 30 那族"同名不同源"的老坑）：同一个值被两个键带着只出一条；
+      "按值判出的 `protected_path`"与"按文本判出的 `protected_path_in_command`"互不吞并。
+    - **判据池 19 格**（`tests/unit/security/test_pathGuardScansEveryPathValue.py`，首轮红灯 14 格 9 红 5 绿）：
+      咽喉侧五格逐值（case 1 主红／两个受保护值各出一条／Windows 截断危害格／同值两形同判格／翻转形格）＋
+      命令面三格（case 2 主红／case 4 反向钉／去重按归属）＋对照五格（单路径三形读数不变、相对遍历形状
+      只出 `path_traversal`——现读它就是形状不是洞，`path_traversal` 同属 HIGH 所以拦阻结果没变，改它口径要
+      另开一票、良性 `dir` 值经预检转发后不新增裁决）＋预检四格（取数交出全部 `(键,值)`／case 1 经真路不再
+      ALLOW／case 2 经真路／`governance` 不许再自己遍历 `PATH_PARAM_KEYS`）＋咽喉形状两格（取数循环不许留
+      `break`、命令支不许被"路径为空"包回）。首轮红灯那一跑另有 10 failed，多出来的一条是**我自己的对照格
+      期望写错**（以为 `../../../etc/passwd` 也该出 `protected_path`），按实状改对后才是 9 红 5 绿。
+    - **红自证**（纯 HEAD 基线树里只铺终版判据，共享工作树零触碰）⇒ `collected 19 items / 13 failed, 6 passed`，
+      失败集恰为本批 13 格（5 咽喉行为＋4 预检＋2 咽喉形状＋… 逐条见提交正文），6 条绿全是设计成
+      改前改后都绿的对照格。
+    - **活体（`tests/manual/pathGuardScansEveryPathValue_b65.py`，走 `get_governance().evaluate_tool_call` 真入口）
+      ⇒ 6/6 PASS**：`[1] case 1 decision≠ALLOW`、`[2] git 形与 shell 形都≠ALLOW`、`[3] 两个受保护值各出一条`、
+      `[4] 同值双键一条、值面与文本面互不吞`、`[5] case 4 findings=[] decision=ALLOW`、`[6] 单路径裁决与改前一致`。
+      反证（同一份脚本跑基线树＝HEAD 生产码）⇒ 退出码 **0→1**，红在第 1、2、3、4 腿，第 5、6 腿两侧同绿。
+      第 2 腿用的是第一方那只**真实的双参数工具** `git`（`builtin_tools.py:931`）。仓内 `data/` 指纹
+      `d1ef4e99bd9f` 跑前跑后一致。
+    - **宽域 A/B（两侧仓外只读 worktree：基线＝纯 `590609b6`，本批侧＝HEAD＋本批八档逐档 md5 对账 SAME，串行同选择集）**：
+      基线 `38 failed / 8944 passed / 9 errors`，本批侧 `38 failed / 8962 passed / 9 errors`；失败集 **47 vs 47，
+      两向差集皆空** ⇒ AB_PASS。passed 差 18＝当时新档格数；落库后又补第 19 格（良性 `dir` 值对照，纯测试追加、
+      不动生产码），`tests/unit/security` 复取 1137 passed / 3 skipped、新档单跑 19 passed，八项常驻守卫 82 passed。
+    - **同批改判的既有判据 8 格**（契约由"单个字符串"变"(键,值) 列表，逐格写明而非顺手放宽）：
+      `test_governance.py::TestGovernanceFileGuard` 三格、`test_governance_mcp.py` 四格（含 `fake_evaluate`
+      与三处 lambda 的签名；`== "/tmp/a"` 现在如实写成 `[("file_path","/tmp/a")]`——键名第一次进入断言，
+      正是"要点名是谁命中的"那一半）、`test_guardScansFollowParameterSemantics.py::
+      test_bothConsumersTakeTheSameKeyList` 一格（`picked == SAFE_PATH` → `picked == [(key, SAFE_PATH)]`，
+      "两路同清单"那条闭环因此更强）。
+    - **甲的代价面在落笔前已被现量代掉**（§6-284 整备那格）：第一方 98 个字面 `properties` 块里含 ≥2 个路径名
+      **0 处** ⇒ 逐值扫不新增 ASK；同时带路径与命令参数的恰 **1 只**＝`git`，而它正是 case 2 的真实实例
+      ⇒ 摩擦面与收益面落在同一只工具上，不是一笔交换。
+    - **本批明确不动、登记下来的三件**：① `extract_adjudicable_params` 里**命令键那一支仍是 `next(...)`**
+      （一个调用只有一条命令，那是另一问句；第一方都只声明一个命令键，无实测危害不动它）；
+      ② 取证时另报的疑点——`mcp_client.py:598-603` 的 `_mcp_executor(**kwargs)` 让"守卫看到的参数 dict"与
+      "最终送进 MCP 的 arguments"可能不是同一份——要动得先立运行时探针票，**本批不据传闻改码**；
+      ③ 丁（按 schema 判是不是路径）仍是唯一能同时修掉"翻转"与"漏名"的一态。
+    - **仍开**：丁；`plugin_manager` 那份 `_resolveEntryPoint`（§6-267 已注明同形）；`tool_engine.py:424`
+      那个恒返回 safe 的 `DefaultGuard`（`neurova/` 内无任何 `tool_guard=` 注入 ⇒ 这条"执行前安全检查"
+      其实是空转，与 §6-284 不同根因，要单独立票）。
