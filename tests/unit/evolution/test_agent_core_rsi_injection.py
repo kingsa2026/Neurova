@@ -5,7 +5,7 @@ Bug: agent_core.py 初始化 RSIOrchestrator 后, 没有把它注入到 evolutio
 单例(EvolutionOrchestrator.rsi_orchestrator), 导致下游 on_experience_recorded
 即便能调用 RSI 也找不到引用。
 
-本测试用最小化集成(不真正构建 NeurovaAgent), 直接验证注入逻辑。
+本测试用最小化集成(不真正构建 AgentCore), 直接验证注入逻辑。
 """
 import sys
 import inspect
