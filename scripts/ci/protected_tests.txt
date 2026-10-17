@@ -3282,3 +3282,10 @@ tests/unit/security/test_pathSemanticsComeFromDeclaration.py
 # 会把合规档报成违规）；② 钉的位置要在模块顶层且在 `import sys` 之后（函数体内的那行不会在打印前生效）。
 # 覆盖边界：只管字面常量里的不可编码字符；运行时才决定内容的字符串仍可能坏，那类要逐档实跑，不在这格能力内。
 tests/unit/ci/test_manualScriptStdoutEncoding.py
+# 批 69（§6-296，承 §6-295 乙）：裁决只许有一个口——`ToolEngine` 内层那道恒 safe 的门已退役，
+# "无 agent ⇒ 引擎直调"这条全仓唯一不经治理的回落支改经 `evaluate_tool_call`（scan_all=True）。
+# 三格别当装饰删：① 对照格 `testNonAdjudicableCallStillRuns` 钉"接治理"没被做成一律拒（既有那条
+# "无 agent 的评测/脚本路径仍可用引擎"反向锁依赖它）；② `test_init_rejects_guard_seam` 钉那个形参
+# 不许回来；③ `testOldEngineGuardCellsRetiredNotLeftZombie` 钉旧契约的测试格不许留成僵尸断言。
+# 刻意不做：两把 ToolEngine 实例合一（§6-295 末格另记的独立缺陷，另一张票）。
+tests/unit/execution/test_engineAdjudicationLivesOnlyInGovernance.py
