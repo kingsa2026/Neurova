@@ -14,8 +14,13 @@
 且该函数全仓**零调用方**——"重置"契约
 从未被真实调用点验证。
 
-本套件钉：三层全清（模块缓存 / 类级 _instance / 执行记录）、重建后组件可用、
+本套件钉：两层全清（模块缓存 / 类级 _instance）、重建后组件可用、
 并发 reset 与 get 不产生"半初始化"实例。
+
+**见证物改判（执行记录面退役那一笔）**：原套件用 `_executions` 当"状态不外泄"与
+"初始化完成"两条的见证物。那一面（含写它的三条死路）已整体退役，再断 `_executions == {}`
+等于断一件拿不到也永远不会变的事——恒真空守卫。所以两条各换到**存活的组件位**
+`_execution_monitor` 上；"旧实例不得被就地失效"那一格保留，只剥掉 `_executions` 那半句。
 """
 import threading
 
@@ -47,36 +52,14 @@ class TestResetClearsClassSingleton:
         second = ee.get_execution_engine()
         assert second is not first, "reset 后取回同一对象 = 隔离无效"
 
-    def test_executions_cleared(self, engine_module):
-        ee = engine_module
-        first = ee.get_execution_engine()
-        first._executions["marker"] = "leak"
-        ee.reset_execution_engine()
-        second = ee.get_execution_engine()
-        assert second._executions == {}, "_executions 状态跨 reset 泄漏"
-
-    def test_old_instance_also_scrubbed(self, engine_module):
-        """外部持有旧引用时，旧实例不得继续带着执行记录（残留强引用防线）。
-
-        刻意不翻旧实例的 ``_initialized``：并发下已持有旧引用的调用方会观察到
-        "返回对象自称未初始化"的自相矛盾状态（实测过）。隔离所需只是状态不外泄。
-        """
-        ee = engine_module
-        first = ee.get_execution_engine()
-        first._executions["marker"] = "leak"
-        ee.reset_execution_engine()
-        assert first._executions == {}, "旧实例执行记录未清（残留引用仍可污染）"
-        assert first._initialized is True, "旧实例状态被就地失效（并发引用会观察到矛盾状态）"
-
     def test_rebuilt_instance_is_fully_initialized(self, engine_module):
         ee = engine_module
         ee.get_execution_engine()
         ee.reset_execution_engine()
         rebuilt = ee.get_execution_engine()
         assert rebuilt._initialized is True
-        assert rebuilt._executions == {}
-        # 组件重新装配（工具/工作流引擎可用性是单例重建的核心收益）
-        assert rebuilt._tool_engine is not None or rebuilt._workflow_engine is not None
+        # 组件重新装配——监控器是这把引擎今天唯一的组件，也是唯一还有人来路的那条
+        assert rebuilt._execution_monitor is not None
 
     def test_reset_is_idempotent_and_safe_when_never_created(self, engine_module):
         ee = engine_module
@@ -84,10 +67,21 @@ class TestResetClearsClassSingleton:
         ee.reset_execution_engine()
         assert ee.ExecutionEngine._instance is None
 
+    def test_old_instance_keeps_its_own_init_mark(self, engine_module):
+        """旧实例不得被就地失效。
+
+        刻意不翻旧实例的 ``_initialized``：并发下已持有旧引用的调用方会观察到
+        "返回对象自称未初始化"的自相矛盾状态（实测过）。
+        """
+        ee = engine_module
+        first = ee.get_execution_engine()
+        ee.reset_execution_engine()
+        assert first._initialized is True, "旧实例状态被就地失效（并发引用会观察到矛盾状态）"
+
     def test_concurrent_reset_and_get_yields_complete_instance(self, engine_module):
         """并发 reset + get 不得产出"半初始化"对象（__new__ 与 __init__ 竞态）。
 
-        判定用结构完整性（``_executions`` 已在 = ``__init__`` 跑完）而非
+        判定用结构完整性（``_execution_monitor`` 已在 = ``__init__`` 跑完）而非
         ``_initialized`` 标记——后者会被并发的 reset 就地改写，属观测噪声。
         """
         ee = engine_module
@@ -98,10 +92,7 @@ class TestResetClearsClassSingleton:
             try:
                 for _ in range(20):
                     engine = ee.get_execution_engine()
-                    seen.append(
-                        hasattr(engine, "_executions")
-                        and isinstance(engine._executions, dict)
-                    )
+                    seen.append(hasattr(engine, "_execution_monitor"))
                     ee.reset_execution_engine()
             except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
