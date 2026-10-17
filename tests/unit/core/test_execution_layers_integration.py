@@ -1,7 +1,7 @@
 """
 ExecutionLayers 集成测试
 
-验证 ExecutionLayers（Runtime + Transport 双抽象层）与核心流程的接线:
+验证 ExecutionLayers（只有运行时那一半——HTTP/WebSocket 传输那半从未接线，已退役）与核心流程的接线:
 1. run_code 内置工具通过 LocalExecutor 执行
 2. execute_skill_isolated 在隔离运行时中执行技能
 3. RuntimeManager 生命周期管理
