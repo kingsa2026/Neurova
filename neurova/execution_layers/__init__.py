@@ -1,13 +1,18 @@
 """
-Execution Runtime + Transport Abstraction v1.0.0
+Execution Runtime Abstraction v1.0.0
 
-运行时+传输层双抽象 — 隔离: 全局
+运行时单抽象 — 隔离: 全局
 
 架构:
-  执行环境 (Runtime)          传输层 (Transport)
-  - LocalExecutor          - HTTPTransport
-  - DockerExecutor        - WebSocketTransport
-  - CloudFunctionExecutor  - gRPCTransport
+  执行环境 (Runtime)
+  - LocalExecutor
+  - DockerExecutor
+  - CloudFunctionExecutor
+
+这里**没有传输层**：`TransportType`／`ExecutionTransport`／`HTTPTransport`／`WebSocketTransport`／
+`TransportFactory` 连同模块级 `execute_skill()` 一并退役（票④包 4）——生产与测试两侧现读零消费者，
+而那个 helper 的签名上挂着 `transport` 参数、函数体从头到尾没用它，属于"契约上承诺了一件不做的事"。
+注意别被同名骗了：`execution_engine/mcp_manager.py` 里那个 `TransportType` 是它自己的一份枚举。
 """
 
 from neurova.core.logger import get_logger
@@ -46,13 +51,6 @@ class RuntimeType(Enum):
     REMOTE = "remote"
 
 
-class TransportType(Enum):
-    """传输类型"""
-
-    HTTP = "http"
-    WEBSOCKET = "websocket"
-    GRPC = "grpc"
-    STDIO = "stdio"
 
 
 @dataclass
@@ -159,38 +157,6 @@ class ExecutionRuntime(ABC):
         """获取运行时信息"""
 
 
-class ExecutionTransport(ABC):
-    """执行传输抽象基类"""
-
-    def __init__(self, transport_type: TransportType, config: Optional[Dict[str, Any]] = None):
-        self._transport_type = transport_type
-        self._config = config or {}
-        self._connected = False
-        logger.debug("Transport %s initialized", transport_type.value)
-
-    @property
-    def transport_type(self) -> TransportType:
-        return self._transport_type
-
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
-
-    @abstractmethod
-    async def connect(self) -> bool:
-        """建立连接"""
-
-    @abstractmethod
-    async def disconnect(self) -> bool:
-        """断开连接"""
-
-    @abstractmethod
-    async def send(self, data: Any) -> Any:
-        """发送数据"""
-
-    @abstractmethod
-    async def receive(self) -> Any:
-        """接收数据"""
 
 
 class LocalExecutor(ExecutionRuntime):
@@ -448,108 +414,8 @@ class DockerExecutor(ExecutionRuntime):
         )
 
 
-class HTTPTransport(ExecutionTransport):
-    """HTTP 传输层"""
-
-    def __init__(self, base_url: str, config: Optional[Dict[str, Any]] = None):
-        super().__init__(TransportType.HTTP, config)
-        self._base_url = base_url.rstrip("/")
-
-    async def connect(self) -> bool:
-        """建立 HTTP 连接"""
-        self._connected = True
-        logger.info("HTTP transport connected to %s", self._base_url)
-        return True
-
-    async def disconnect(self) -> bool:
-        """断开 HTTP 连接"""
-        self._connected = False
-        logger.info("HTTP transport disconnected")
-        return True
-
-    async def send(self, data: Any) -> Any:
-        """发送 HTTP 请求"""
-        if not self._connected:
-            raise RuntimeError("Not connected")
-
-        try:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self._base_url}/execute",
-                    json=data,
-                    timeout=self._config.get("timeout", 30),
-                )
-                return response.json()
-
-        except ImportError:
-            logger.warning("httpx not available, using fallback")
-            return {"error": "httpx not installed"}
-        except Exception as e:
-            logger.error("HTTP send failed: %s", str(e))
-            return {"error": str(e)}
-
-    async def receive(self) -> Any:
-        """HTTP 无状态，返回 None"""
-        return None
 
 
-class WebSocketTransport(ExecutionTransport):
-    """WebSocket 传输层"""
-
-    def __init__(self, ws_url: str, config: Optional[Dict[str, Any]] = None):
-        super().__init__(TransportType.WEBSOCKET, config)
-        self._ws_url = ws_url
-        self._ws = None
-
-    async def connect(self) -> bool:
-        """建立 WebSocket 连接"""
-        try:
-            import websockets
-
-            self._ws = await websockets.connect(self._ws_url)
-            self._connected = True
-            logger.info("WebSocket transport connected to %s", self._ws_url)
-            return True
-        except ImportError:
-            logger.warning("websockets not available")
-            return False
-        except Exception as e:
-            logger.error("WebSocket connect failed: %s", str(e))
-            return False
-
-    async def disconnect(self) -> bool:
-        """断开 WebSocket 连接"""
-        if self._ws:
-            await self._ws.close()
-            self._ws = None
-        self._connected = False
-        logger.info("WebSocket transport disconnected")
-        return True
-
-    async def send(self, data: Any) -> Any:
-        """发送 WebSocket 消息"""
-        if not self._ws:
-            raise RuntimeError("Not connected")
-
-        import json
-
-        await self._ws.send(json.dumps(data))
-
-        # 等待响应
-        response = await self._ws.recv()
-        return json.loads(response)
-
-    async def receive(self) -> Any:
-        """接收 WebSocket 消息"""
-        if not self._ws:
-            raise RuntimeError("Not connected")
-
-        import json
-
-        message = await self._ws.recv()
-        return json.loads(message)
 
 
 class RuntimeFactory:
@@ -571,83 +437,8 @@ class RuntimeFactory:
         return [RuntimeType.LOCAL, RuntimeType.DOCKER]
 
 
-class TransportFactory:
-    """传输层工厂"""
-
-    @staticmethod
-    def create(transport_type: TransportType, endpoint: str, **kwargs) -> ExecutionTransport:
-        """创建传输层实例"""
-        if transport_type == TransportType.HTTP:
-            return HTTPTransport(base_url=endpoint, **kwargs)
-        elif transport_type == TransportType.WEBSOCKET:
-            return WebSocketTransport(ws_url=endpoint, **kwargs)
-        else:
-            raise ValueError(f"Unsupported transport type: {transport_type}")
-
-    @staticmethod
-    def list_supported_types() -> List[TransportType]:
-        """列出支持的传输类型"""
-        return [TransportType.HTTP, TransportType.WEBSOCKET]
 
 
-async def execute_skill(
-    skill_name: str,
-    args: Dict[str, Any],
-    runtime: Optional[ExecutionRuntime] = None,
-    transport: Optional[ExecutionTransport] = None,
-) -> ExecutionResult:
-    """
-    统一技能执行接口（运行时+传输层双抽象）
-
-    Args:
-        skill_name: 技能名称
-        args: 技能参数
-        runtime: 执行运行时（可选，默认本地）
-        transport: 传输层（可选）
-
-    Returns:
-        ExecutionResult 执行结果
-    """
-    start_time = time.time()
-
-    try:
-        # 使用默认本地运行时
-        if runtime is None:
-            runtime = LocalExecutor()
-            await runtime.start()
-
-        # 构建执行命令
-        command = "python"
-        script_args = ["-m", f"neurova.skills.{skill_name}"]
-
-        # 将参数转为环境变量
-        import json
-
-        env = {
-            "NEUROVA_SKILL_NAME": skill_name,
-            "NEUROVA_SKILL_ARGS": json.dumps(args),
-        }
-
-        # 执行
-        result = await runtime.exec(
-            command=command,
-            args=script_args,
-            env=env,
-            timeout=args.get("timeout", 60),
-        )
-
-        duration_ms = (time.time() - start_time) * 1000
-        result.duration_ms = duration_ms
-
-        return result
-
-    except Exception as e:
-        duration_ms = (time.time() - start_time) * 1000
-        return ExecutionResult(
-            success=False,
-            error=str(e),
-            duration_ms=duration_ms,
-        )
 
 
 class RuntimeManager:

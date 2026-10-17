@@ -1,0 +1,125 @@
+"""`neurova/execution_layers` 的传输那半退役判据（票④包 4）。
+
+这个文件 719 行是**两半**，必须分开判——整包判死会误杀在役符号（台账早先记过这一形）：
+- **运行时那半在役**：`RuntimeType`／`LocalExecutor`／`DockerExecutor`／`RuntimeFactory`／
+  `RuntimeManager`／`get_runtime_manager` 各有 1–3 个生产文件取用（`computer_use/__init__.py:496/501`、
+  `sandbox/exec_sandbox.py:421`、`skill_system/core.py:705/743`、`tool_executor.py:5692`）；
+- **传输那半从未接线**：`TransportType`／`ExecutionTransport`／`HTTPTransport`／`WebSocketTransport`／
+  `TransportFactory` 的生产档取用与测试档取用**现读全为 0**。别被同名骗了：
+  `execution_engine/mcp_manager.py:29` 那个 `TransportType` 是**它自己的一份枚举**，与这里无关。
+- 还有一处更隐蔽的：**API 谎**。`execute_skill()` 签名里有 `transport` 参数、docstring 写着
+  "传输层（可选）"，函数体从头到尾没用过它——调用方传什么都被静默丢弃。这类"接了不用的参数"
+  比死代码更坏，因为它在契约上承诺了一件不做的事。
+
+判据两轨：主格钉"传输那半不再是顶层定义、且全仓无代码引用"；交付锁钉"运行时那半一条没被删过头"
+（工厂造得出本地运行时、单例语义不变、真 `exec` 得回来），外加一格钉那个假参数确实从签名上消失。
+"""
+from __future__ import annotations
+
+import ast
+import pathlib
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+INIT = REPO_ROOT / "neurova" / "execution_layers" / "__init__.py"
+
+#: 传输那半（零消费者、零测试覆盖）——退役对象
+TRANSPORT_SURFACE = ("TransportType", "ExecutionTransport", "HTTPTransport",
+                     "WebSocketTransport", "TransportFactory")
+
+
+def _topLevelNames() -> dict:
+    tree = ast.parse(INIT.read_text(encoding="utf-8", errors="replace"))
+    kinds = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            kinds[node.name] = "class"
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # AsyncFunctionDef 必须一起认：`execute_skill` 就是 async def，
+            # 只认 FunctionDef 会让那一格**恒绿**（本会话第一次修完又踩到同族）。
+            kinds[node.name] = "def"
+    return kinds
+
+
+def _importsFromThisModule(relPath: pathlib.Path) -> set:
+    """该文件**经导入通道**从本模块取走的名字。
+
+    为什么不按符号名扫全仓（第一版就是这么写的，被自己抓红）：`TransportType` 这个名字在
+    `execution_engine/mcp_manager.py:29` 有**另一份同名枚举**，按名扫会把在役符号判成"还在引用
+    已退役面"。Python 里"消费某模块的名字"只有一条通道——从该模块导入（或 `module.Name` 属性访问），
+    判这条既无误伤也不漏。
+    """
+    tree = ast.parse(relPath.read_text(encoding="utf-8", errors="replace"))
+    taken = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("execution_layers"):
+            taken.update(a.name for a in node.names)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id == "execution_layers":
+            taken.add(node.attr)
+    return taken
+
+
+def test_noCodeAnywhereImportsTheRetiredTransportSurface():
+    """主格②：全仓（生产＋测试）不许再经导入通道取走那五个名字＋那个假 helper。"""
+    retired = set(TRANSPORT_SURFACE) | {"execute_skill"}
+    offenders = []
+    for path in REPO_ROOT.rglob("*.py"):
+        if ".venv" in path.parts or "__pycache__" in path.parts or path == INIT:
+            continue
+        hit = retired & _importsFromThisModule(path)
+        if hit:
+            offenders.append((path.relative_to(REPO_ROOT).as_posix(), sorted(hit)))
+    assert not offenders, f"这些地方还在从该模块导入已退役名字：{offenders}"
+
+
+def test_runtimeHalfStillProducesAWorkingLocalRuntime():
+    """交付锁①：删的是死半区，运行时那条活路必须照常能用（含真 exec 一个返回值）。
+
+    名字按**现役工厂真名**取（`RuntimeFactory.create`，不是 `create_runtime`——第一版按印象写，
+    被自己的红纠正）。
+    """
+    import asyncio
+
+    from neurova.execution_layers import (
+        LocalExecutor, RuntimeFactory, RuntimeManager, RuntimeType, get_runtime_manager)
+
+    runtime = RuntimeFactory.create(RuntimeType.LOCAL)
+    assert isinstance(runtime, LocalExecutor), f"工厂给的不是本地运行时：{type(runtime).__name__}"
+    assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
+    assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
+    assert isinstance(get_runtime_manager(), RuntimeManager)
+    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
+
+
+def test_transportHalfIsNoLongerDeclaredInThatModule():
+    """主格①：传输那五个符号不再是本模块的顶层定义，`__all__` 里也不许留名。"""
+    kinds = _topLevelNames()
+    left = [n for n in TRANSPORT_SURFACE if n in kinds]
+    declared = [n for n in TRANSPORT_SURFACE
+                if n in {c.value for c in ast.walk(ast.parse(INIT.read_text(encoding="utf-8")))
+                          if isinstance(c, ast.Constant) and isinstance(c.value, str)}]
+    assert not left, f"传输那半还留着顶层定义：{left}"
+    assert not declared, f"`__all__`／字符串面还挂着已退役的传输名：{declared}"
+
+
+def test_executeSkillHelperIsGoneWithItsLie():
+    """交付锁②：那个"接了 transport 却从头到尾不用"的模块级 helper 一并收掉。
+
+    `execute_skill()`（原 `:593`）全仓**无人从本模块导入它**（技能执行的真咽喉是
+    `tool_executor.execute_skill_tool` → `SkillRegistry.execute_skill`，与本模块无关），
+    而它签名上承诺的 `transport` 参数在函数体里一次都没出现——"接了不用的参数"比死代码更坏，
+    因为它在契约上写了一件不做的事。所以随传输那半一起删，而不是留着骗下一个调用方。
+    """
+    names = _topLevelNames()
+    assert "execute_skill" not in names, "`execute_skill` 还在：那条假参数就还在骗人"
+    importers = []
+    for path in (REPO_ROOT / "neurova").rglob("*.py"):
+        if "__pycache__" in path.parts or path == INIT:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("execution_layers"):
+                if any(a.name == "execute_skill" for a in node.names):
+                    importers.append(path.relative_to(REPO_ROOT).as_posix())
+    assert not importers, f"这些文件还从该模块导入 execute_skill：{importers}"
