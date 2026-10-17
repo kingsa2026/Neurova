@@ -28,7 +28,6 @@ def _make_executor(monkeypatch, tool_memory=None):
         _current_user_input="do the thing",
     )
     executor = ToolExecutor(agent)
-    monkeypatch.setattr(ToolExecutor, "tool_engine", property(lambda self: None))
     monkeypatch.setattr(
         tool_executor_module,
         "get_builtin_tool_params",

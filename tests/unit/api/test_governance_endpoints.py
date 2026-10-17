@@ -119,22 +119,12 @@ class TestApprovalEndpoints(GovernanceEndpointTestBase):
 
     def test_approve_replays_stored_tool_call(self):
         """核心链路: 批准 → 按 metadata 重放执行 → 返回真实结果。"""
-        from neurova.tool_executor import ToolExecutor
-
         request_id = self._create_request()
 
-        orig_prop = ToolExecutor.__dict__.get("tool_engine")
-        ToolExecutor.tool_engine = property(lambda self: None)  # type: ignore[assignment]
-        try:
-            resp = self.client.post(
-                f"/api/v1/governance/approvals/{request_id}/approve",
-                json={"note": "确认执行", "approved_by": "user"},
-            )
-        finally:
-            if orig_prop is not None:
-                ToolExecutor.tool_engine = orig_prop  # type: ignore[assignment]
-            elif "tool_engine" in ToolExecutor.__dict__:
-                del ToolExecutor.__dict__["tool_engine"]
+        resp = self.client.post(
+            f"/api/v1/governance/approvals/{request_id}/approve",
+            json={"note": "确认执行", "approved_by": "user"},
+        )
 
         self.assertEqual(resp.status_code, 200, resp.text)
         payload = resp.json()["data"]

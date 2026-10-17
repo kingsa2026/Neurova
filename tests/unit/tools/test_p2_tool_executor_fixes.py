@@ -40,38 +40,12 @@ def _make_executor(monkeypatch, config_user_id="u1", config_agent_id="a1"):
         append_tool_messages=lambda records: tool_messages.extend(records),
     )
     executor = ToolExecutor(agent)
-    monkeypatch.setattr(ToolExecutor, "tool_engine", property(lambda self: None))
     monkeypatch.setattr(
         tool_executor_module,
         "get_builtin_tool_params",
         lambda name: {"type": "object"} if name == "fake_builtin" else None,
     )
     return executor, agent
-
-
-class TestToolEngineIdentity:
-    @pytest.mark.asyncio
-    async def test_tool_engine_receives_identity_from_config(self, monkeypatch):
-        executor, agent = _make_executor(monkeypatch)
-        captured = {}
-        engine = MagicMock()
-
-        async def fake_execute(tool_name, parameters, user_id=None, agent_id=None):
-            captured["user_id"] = user_id
-            captured["agent_id"] = agent_id
-            return {"ok": True}
-
-        engine.execute_with_safeguards = fake_execute
-        monkeypatch.setattr(ToolExecutor, "tool_engine", property(lambda self: engine))
-
-        await executor._execute_single_tool("some_tool", {"x": 1})
-
-        assert captured["user_id"] == "u1", (
-            "user_id 必须从 agent.config 解析，getattr(agent, 'user_id') 恒 None"
-        )
-        assert captured["agent_id"] == "a1", (
-            "agent_id 必须从 agent.config 解析，getattr(agent, 'agent_id') 恒 None"
-        )
 
 
 class TestListModeArgumentsParsing:
