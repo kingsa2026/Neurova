@@ -1,5 +1,16 @@
 # MultiAgentManager 设计文档
 
+> **⚠ 本模块已整岛退役（2026-10-18，台账 §6-309）**：`neurova/core/multi_agent_manager.py`（453 行）
+> 全仓**零 import**——真 `create_app()` 跑完多 Agent 那一路端点后它不在 `sys.modules`，给它 9 个公开方法
+> 包计数 wrapper 后读数全 0；来历是 `7835c367`(2026-06-04「pyc 骨架恢复」)**引入即孤岛**，不是"曾被消费后被摘"。
+> 本文下面那句"状态：✅ 已完成"与实测不符：`initialize_shared_components` 零调用 ⇒ 宣称的"三件套共用"
+> 从未成立，而 `execute_with_shared_cerebellum` 在未注入时回 `success: True`（没执行任何东西却报成功）。
+> 它同时是 agent 工作区的**第二份表示**（单源是 `core/agent_workspaces.py`，同一 agent_id 两路实测不同源）。
+> 同批退役两座专用测试（494 行 28 格、265 行 22 格，均不在受保护子集）。
+> 现役对应物：agent 注册与清单 `api/endpoints/agent.py`＋`core/agent_config.py`、per-agent 工作区
+> `core/agent_workspaces.py`、多 Agent 协作与回合路由 `collaboration/`（`room_bus`、`room_turn_router`）
+> ＋`api/endpoints/agent_communication_api.py`。本文保留作设计沿革，**不可作事实源**。
+
 > **模块ID**: Task1-MultiAgentManager  
 > **创建时间**: 2026-05-12 21:00  
 > **最后更新**: 2026-05-12 23:45  
