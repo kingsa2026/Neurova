@@ -145,6 +145,33 @@ def test_resetStillYieldsAFreshFullyBuiltEngine():
     assert not hasattr(second, "_executions"), "执行记录面还在，本批没删净"
 
 
+def test_legacyWorkflowEngineModuleIsGoneAndNobodyImportsIt():
+    """主格⑤（本批第二笔）：legacy 线性链引擎整档消失，且全仓无人经导入通道取它。
+
+    它自己那份 docstring 早就写了"迁移完成后整体删除"，而"迁移完成"的证据是：孤儿装配退役之后
+    全仓对它**零引用**。判"零引用"按 AST 的导入通道取数，不按 `workflow_engine` 这个字样扫文本——
+    本文件自己就带一个 `_workflow_engine` 字段名清单，按词扫会把它读成"还在引用"。
+    真工作流引擎只有一份：`collaboration/neurflow/`（教义第 6/7 条：同一功能仓内只剩一处被消费）。
+    """
+    assert not (REPO_ROOT / "neurova" / "execution_engine" / "workflow_engine.py").exists(), \
+        "legacy 引擎文件还在树上"
+
+    importers = []
+    for path in REPO_ROOT.rglob("*.py"):
+        if ".venv" in path.parts or "__pycache__" in path.parts or "node_modules" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8", errors="replace"))):
+            taken = ""
+            if isinstance(node, ast.ImportFrom) and node.module:
+                taken = node.module
+            elif isinstance(node, ast.Import):
+                taken = " ".join(a.name for a in node.names)
+            if taken.replace(".", "_").endswith("execution_engine_workflow_engine") or \
+                    taken.rstrip(".").endswith("execution_engine.workflow_engine"):
+                importers.append(path.relative_to(REPO_ROOT).as_posix())
+    assert not importers, f"这些地方还在导入已退役的 legacy 引擎：{importers}"
+
+
 def test_monitorBusSurfaceIsKeptForPendingRuling():
     """反向钉：本批**不许**顺手处置 D1（监控器的事件总线只写不读）。
 
