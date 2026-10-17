@@ -3296,3 +3296,11 @@ tests/unit/execution/test_engineAdjudicationLivesOnlyInGovernance.py
 # ② `testOldA18CriteriaRetiredNotLeftZombie` 钉 A-18 那档旧判据不许留成僵尸断言（被钉对象已不存在）。
 # 行为中性由差分证而不是由声明证：同一份活体脚本在 HEAD 基线树与本批侧 READOUT 完全一致。
 tests/unit/execution/test_throatHasNoEmptyEngineBranch.py
+# 批 72（§6-300，承 §6-299 丙）：工具归属由注册面派生，列表面不再替它猜（`tags=["mcp", server_id]` 是唯一实据）。
+# 三格别当装饰删：① `testNoSecondInterpreterOfTheMcpTagAnywhere` 带**正控**——探测器先必须认下派生口自己那处，
+# 否则"全仓零命中"只是它坏了（本批实测就坏过一次：生产写的是 `MCP_SOURCE in tags`，只认字面量的探测器会假绿）；
+# ② `testDetectorBitesAnInlinedCopyOfTheQuestion` 合成反样本，证明内联重述会被点名、派生函数自己不被误报；
+# ③ `testToolInfoSourceHasNoGuessedDefault` 钉模型层那半边病根——`source` 有默认值 "builtin" 时，
+# 任何漏传的构造都静默自称内置（现必填，漏传当场 ValidationError）。
+# 对照格 `testOwnerAndBuiltinSourcesStillHold` 设计成两侧都绿：钉"改猜"没把真内置（源 2）改成别的值。
+tests/unit/api/test_toolOwnershipComesFromRegistration.py
