@@ -5844,9 +5844,60 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       自己的台账与子集内容无损；对方那笔的配套判据 `tests/unit/execution/test_executionLayersTransportHalfRetired.py`
       （未跟踪）仍在，但其两格现在为红——`test_transportHalfIsNoLongerDeclaredInThatModule`、
       `test_executeSkillHelperIsGoneWithItsLie`——即被抹掉的那半区是承重的，需要对方重做。
+      **⇒ 本格末句已改判（2026-10-17 同日）**：用户裁定"我按判据重建那半区"，故没有等对方重做，
+      由本会话按那份判据（**一字未改**）把生产半区重建出来，闭环见下一格 §6-301。
+      破坏性本身仍然成立——判据是对方写的，重建只是按判据反推实现，等价性由判据与活体两侧差分兜住，
+      不由"我记得原来长什么样"兜住。
       **本条的教训与先例同族（形态集 244／246／250）**：读历史笔的内容一律用 `git show <sha>:<path>`
       打到 stdout 或仓外临时文件，绝不把任何 `<commit> -- .` 形态的 checkout 用在工作树里。
     - **本会话下一枚空号现查 §6-301**（写前必须现场重取：`grep -oE '^[0-9]{3}\. ' | tr -d '. ' | sort -n -u | tail -1`，
       本笔落库时该读数为 300）。**口径换了**：这本账进了三位数之后，此前各处写下的 `^2[0-9]{2}\. `
       会**静默少报**（匹配不到 300 那一行，读数停在 299 ⇒ 下一笔直接撞号）；旧条目里的那些串是当时的
       事实源，不回改，但从本笔起一律用 `{3}` 那一版。
+
+301. **批 73 · 按对方的判据重建被本会话误抹的传输半区退役（✅ `2a0aeda1` 生产重建＋判据入库 / `59cc152f` 子集 627→628 / `235beb72` 散文命中面＋活体探针）** 🟢 —— §6-300 末格那条事故的收尾；用户 2026-10-17 裁"我按判据重建那半区"。
+
+    - **判据不是本会话写的，一字未改**：`tests/unit/execution/test_executionLayersTransportHalfRetired.py`
+      是并发会话为票④包 4 写的红灯。重建的做法是**按那份判据反推实现**（判据说要什么形状，生产就改成什么形状），
+      不靠"我记得原文件长什么样"——那份记忆正是事故的来源。
+    - **退役对象**（`neurova/execution_layers/__init__.py` 719 → 510 行）：`TransportType`／
+      `ExecutionTransport`／`HTTPTransport`／`WebSocketTransport`／`TransportFactory` 五个符号，
+      外加模块级 `async def execute_skill()`——它签名上有 `transport` 参数、docstring 写"传输层（可选）"，
+      函数体从头到尾没用过（"接了不用的参数"比死代码更坏：契约上承诺了一件不做的事）。
+    - **交付锁没被删过头**：运行时那半在役（`RuntimeType`／`LocalExecutor`／`DockerExecutor`／`RuntimeFactory`／
+      `RuntimeManager`／`get_runtime_manager`），判据里那条 `test_runtimeHalfStillProducesAWorkingLocalRuntime`
+      真起子进程 `exec` 回得来；整包判死会误杀这一族（本卷早期 A 段那条"只删传输符号"的判定与本批一致）。
+    - **红→绿（基线树复现，不靠回忆）**：把判据铺到退役前的 `35121a57` 仓外 worktree 单跑＝
+      `2 failed, 2 passed`，红的恰是 `test_transportHalfIsNoLongerDeclaredInThatModule` 与
+      `test_executeSkillHelperIsGoneWithItsLie` 两格；本树 4 格全绿。
+      这两格红在**形状**上——退役类批次没有可测的行为差，行为那一侧由交付锁（真 `exec`）与活体①（同读数）兜住。
+    - **宽域 A/B**（`tests/unit/execution`＋`tests/unit/sandbox`＋`tests/unit/tools`，两侧仓外 worktree、基线铺入本批判据）：
+      基线 `4 failed, 1235 passed` ↔ 本树 `1 failed, 1238 passed`，失败集合 4↔1，**仅本树红 0 条 ⇒ 无回归**。
+      仅基线红 3 条的定性：2 条＝本批两格形状判据（铺进基线即红，交付证据）；第 3 条
+      `test_code_execution_sandbox_contract.py::TestExecuteIsARealExecution::test_timeout_is_enforced`
+      **不领成本批交付**——基线单跑 3 次皆红、本树单跑同样红（4.27s vs 上界 4.25s），是墙钟边界抖动，
+      整轮翻绿只是时序效应（`test_appcontainer.py::...::test_restriction_marker_low_integrity` 两侧同红＝预存）。
+    - **活体两侧差分**（`tests/manual/executionLayersTransportHalfRetired_b73.py`，7 腿）：本树全 PASS 退码 0；
+      基线树只 ② FAIL 退码 1（读数列出 6 个还挂在门面上的退役名）。真正证"行为中性"的不是那条红的，
+      是 ① 真生产入口 `ToolExecutor._execute_run_code` 两侧给出同一个读数（`success=True stdout='42' runtime_type=local`）
+      与 ⑥ 真 `create_app()`＋lifespan 两侧同为 200、列表面同为 73 条。
+    - **两格现读纠了自己的预期（形态集 267 同族，记下来防下次又按印象写）**：
+      ③ 门面 `__all__` **两侧都是 8 名**——那五个传输名从来没进过门面声明，这就是"从未接线"在声明面上的形态，
+      本批并没有"收掉 `__all__`"（我原先这么以为）；
+      ⑤ `mcp_manager.TransportType` 值集实为 `['http','sse','stdio','websocket']`，我按印象少写一个，探针当场红给我看。
+    - **散文命中面（教义第 5 条，同根因第三类）**：`README.md:1779`、`docs/01-architecture/08-project-structure.md:90`、
+      `docs/03-user-guide/UI开发计划.md:17`、`docs/knowledge_graph.html:260`、
+      `tests/unit/core/test_execution_layers_integration.py:4` 五处都还在说"运行时＋传输层双抽象"，一并改准。
+      带日期的档案不回改（`docs/architecture-review-2026-06-07.html:279`、
+      `docs/09-dev-progress/daily_reports/2026-05-12-execution-engine-dev.md:146`）；
+      `docs/08-research/rsiagent_vs_neurova_rsi_comparison_2026-10-06.md:124` 说的是对方的传输层，与本模块无关。
+    - **同批扫出来、属别的根因所以没顺手改**：`neurova/tool_executor.py:5602` 的 docstring 写
+      "runtime_type…默认从 Agent 配置读取"，代码实为 `params.get("runtime_type", "local")`——又一处"契约上说说、
+       body 里不做"。**登记待点单**，与本批根因不同，不塞进同一笔。
+    - **净 LOC 逐笔抄 numstat**：`2a0aeda1` 生产池 **+11/−220 ＝ 净 −209**、测试/基建池 **+125/−0**；
+      `59cc152f` 生产池 +0/−0、测试/基建池 +7/−0（子集 627→628，现读 `grep -vcE '^\s*#|^\s*$'` ＝ 628）；
+      `235beb72` 生产池 +0/−0、测试/基建池 **+131/−6 ＝ 净 +125**（活体档 125 行＋五处散文各改一行、README 两行）。
+    - **常驻红小账（本批未新增 offender）**：`tests/unit/ci` 整目录跑 6 条红，两侧**同一集合逐条相同**
+      （`test_npc_script_interpreter_reachability.py` 5 格 node 环境红＋`test_subQuantumSpinClockGate.py` 1 格），
+      早已在案，不在受保护子集内。
+    - **本会话下一枚空号现查 §6-302**（写前必须现场重取；本笔落库时该读数为 301）。
