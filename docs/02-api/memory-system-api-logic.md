@@ -275,6 +275,14 @@
    与 `[实测]` 的矛盾：9527 实例跑提交态代码，这些路由仍返 200。**这是同一次隔离修复（删 `_get_user_ids_from_token` 旁路）改参数名时漏改函数体所致**，属教义第 5 条"同一根因全命中点扫荡"未扫完。
    现成守卫 `tests/integration/test_memory_route_authorization.py` 只断言"依赖挂上了"，**测不出这个 NameError**（绕过了真实调用路径）。
 2. **P1（实测恒 500）：三条调用不存在 manager 方法的路由。** —— **【已闭·退役】** 2026-10-07 按维护者裁决退役这 5 条路由（三条 questions + `eki/reinforce` + `meta/skills/generate`），含前端零消费封装与守卫测试同批，判据见 §十一。 `GET /memory/questions/stats` → `get_question_stats`（`questions.py:137`）、`GET /memory/eki/reinforce` → `eki_get_reinforcement_recommendations`（`eki.py:267` 路由）、`POST /memory/meta/skills/generate` → `meta_generate_skill`（`metacognition.py:365`）。前两条 `[实测]` 500 原文已贴；第三条 `[静态]`（全仓仅端点自身同名函数有定义，未跑 POST 以免写数据）。判据：我把端点里所有 `manager.<x>(` 调用与 `memory_layer/` + `neurova/memory/` 的 `def` 全集比对，缺失即这三条。
+   **2026-10-18 补：同族还有第二种形态——方法在、签名不收端点传的 kwargs。** `GET /memory/meta/skills`
+   （传 `category=`/`status=`，而 `meta_get_all_skills(self)` 无参）与 `POST /memory/meta/skills/match`
+   （传 `top_k=`，而 `meta_match_skills(self, query)` 只收 query）据此**每次必 500**，且因为 `top_k` 有默认值，
+   不带该字段也一样炸。2026-10-18 修：参数从契约里删掉（不是留着不消费），两处 docstring 名实改准
+   （这一面对外是"最近元认知事件"的别名视图，不含筛选与排名）；常驻判据
+   `tests/unit/api/test_memoryMetacognitionSkillsMatchManagerContract.py` 按**运行时 `inspect.signature`** 扫
+   `neurova/api/endpoints/memory/*.py` 里所有 `manager.X(...)` 的关键字参数，不收即红——把"再加一个不做到的参数"
+   做成会红的东西，而不是再靠人记得。
 3. **P1（静态）：`pending.py:64` 与 `:87` 用 `ErrorCodes.INTERNAL`，而枚举只有 `INTERNAL_ERROR`（`api_standard.py:42`）** —— **【已闭·2026-10-07】** 改为 `ErrorCodes.INTERNAL_ERROR`，红灯见 `tests/integration/test_memory_pending_failure_envelope.py`（红态原文：`AttributeError: type object 'ErrorCodes' has no attribute 'INTERNAL'`；绿态断言 HTTP 500 + `code:5001` 且响应点名原始故障）。 → store 故障时 except 块内再抛 `AttributeError`，原始故障彻底丢失。
 4. **P1（口径）：匿名写读落到 `default` 租户 + 读侧固定扩权。** 默认 `global_auth=off` 下，`GET /memory`(search)、`/stats`、`/hot`、`/crystallized` 全部 `agent_wide=True`（`crud.py:52/127/152/181`）→ 同一 agent 内**任意请求（含无凭证）**可读他人记忆；`DELETE /wm`、`GET/PUT /users/{user_id}/profile`、`GET /{agent_id}/metacognition[/stats]` 无角色门。注：`audit-reports/memory-isolation-2026-10-05.md` §三.1/2/3（PUT 无校验 / DELETE 扩权 / GET 读无人写的 `_storage` 恒 404）与 §三.4/5（`_get_user_ids_from_token` 双源旁路、`resolve_user` 死码）**在当前工作树均已修**——`base.py:33-39` 注释记录旁路删除、`crud.py:246/361` 改走带归属校验的 `manager.get_memory`/`forget`、`manager.py:1806-1832` 补齐 `update_memory` 校验。残留面即本条所列读侧。
 5. **P2（实测 404 恒失败）：`GET /api/v1/memory-settings/settings/export`** —— **【已闭·2026-10-07】** 把字面路由移到参数化路由之前（不给 `{section}` 抄第二份 section 白名单，否则顶教义第 6 条），并在删除处留顺序纪律注释。守卫 `tests/integration/test_memory_settings_export_route_order.py` 双向钉：导出必须 200、未知 section 仍须 404。 被 `:83` 的 `/settings/{section}` 抢先匹配 → `:96-99` 抛 `404 Unknown section: export`。
