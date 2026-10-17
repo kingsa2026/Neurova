@@ -1,8 +1,12 @@
 """MCP server HTTP 面（P1-5）——JSON-RPC 2.0 端点（streamable http 最小协议面）。
 
 NeurovaMCPServer（协议无关核心）经此挂上 HTTP：initialize / tools/list /
-tools/call 三方法 + JSON-RPC 错误语义（-32601/-32600）+ 通知 202。
+tools/call / ping 四方法 + JSON-RPC 错误语义（-32601/-32600）+ 通知 202。
 鉴权走平台既有 get_current_user_or_service（JWT/服务令牌）。
+
+`initialize` 做协议版本协商（支持则回声所请求版本，否则回自己支持的最新版本），
+支持集取官方 SDK 的握手期版本单源——此前把 "2025-03-26" 钉成字面量无条件回声，
+只支持较新版本的客户端按 spec 必须断开，本面对它们不可达。
 """
 
 from __future__ import annotations
@@ -10,6 +14,9 @@ from __future__ import annotations
 import typing
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS as SUPPORTED_HANDSHAKE_VERSIONS
+from mcp_types.version import LATEST_HANDSHAKE_VERSION
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
@@ -18,7 +25,19 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 _SERVER_NAME = "neurova"
-_PROTOCOL_VERSION = "2025-03-26"
+
+
+def _acceptsJson(request: Request) -> bool:
+    """本面只产 JSON 响应体（无 SSE 流），故要求客户端可接受 application/json。
+
+    通配按 RFC 7231 §5.3.2 处理（`*/*` 与 `application/*` 都算接受），与官方
+    服务端 JSON 响应模式的 Accept 校验同规则。
+    """
+    types = [
+        media.strip().split(";")[0].strip().lower()
+        for media in request.headers.get("accept", "").split(",")
+    ]
+    return "*/*" in types or "application/*" in types or "application/json" in types
 
 
 def _get_mcp_server():
@@ -79,6 +98,14 @@ async def _handle_tools_call(params: dict) -> dict:
 @router.post("")
 async def mcp_http_endpoint(request: Request, current_user: typing.Any = Depends(get_current_user_or_service)):
     """JSON-RPC 2.0 单请求入口（MCP streamable http 最小面）。"""
+    if not _acceptsJson(request):
+        return JSONResponse(
+            status_code=406,
+            content={
+                "jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "Not Acceptable: Client must accept application/json"},
+            },
+        )
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -101,11 +128,22 @@ async def mcp_http_endpoint(request: Request, current_user: typing.Any = Depends
 
     try:
         if method == "initialize":
+            requested = params.get("protocolVersion")
             result = {
-                "protocolVersion": _PROTOCOL_VERSION,
+                # spec 协商规则，与官方服务端实现同形：支持所请求版本则回声它，
+                # 否则回本面支持的最新版本（不把旧字面量硬塞回去）
+                "protocolVersion": (
+                    requested
+                    if requested in SUPPORTED_HANDSHAKE_VERSIONS
+                    else LATEST_HANDSHAKE_VERSION
+                ),
+                # 能力声明只报实际实现的 tools——升版本号不等于升能力
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": _SERVER_NAME, "version": "1.0.0"},
             }
+        elif method == "ping":
+            # spec 要求服务端必须应答 ping（健康探测）；此前落进 -32601 分支
+            result = {}
         elif method == "tools/list":
             result = {"tools": _get_mcp_server().list_tools()}
         elif method == "tools/call":
