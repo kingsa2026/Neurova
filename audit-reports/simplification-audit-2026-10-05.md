@@ -2862,7 +2862,7 @@
       ③ **台账号会被"未提交的在途注释"预占**——我先写 §6-163，落账前查台账是空的，但 `neurova/core/turn_context.py` 的在途改动里已经写着 163；改指 164，`neurova/api/endpoints/plugin.py` 的在途注释又已写着 164。**只查 HEAD 与台账不够**，要连未跟踪/未提交的在途件一起查；本批最终用 §6-166（现查：台账 0 命中、树内 8 处全是我自己那批）。教训是号次在"别人提交那一刻"才真正归属，写码注释里的引用面比台账更容易被忽略。
       ④ **405 不是 404**（`/plans/sessions` 只收 POST），以及**身份依赖不止一只对象**（`console.py` 用 `neurova.api.deps.get_current_user`，与 `api.auth` 那只不同对象，只覆盖后者拿 401）——两枚都是 §6-157/§6-151 同族的替身口径坑，本批在第一版活体脚本里现场撞上。
     - **净 LOC（提交内 `git show --numstat` 复算，与正文逐字一致）**：生产池 **+5/−2242（净 −2237）**；判据池 **+305/−1338（净 −1033）**；文档池 **+37/−24**；基建池 **+8/−0**（7 行说明 + 1 条路径，按整档 CRLF 落）。工作树同时有别会话在途件（`turn_context.py`、`plugins/*`、`chat.py`、媒体回收站一批、11 locale），两笔均逐路径 `--only`，未用 `git add -A`。
-    - **仍留在案上（不在本批顺手做）**：`core/multi_agent_manager.py`(453)——它是唯一会调 `decompose_intent/execute_plan` 的地方（`:221-223`），但走的是鸭子类型注入、不 import 那三只，故本批退役没留下悬空 import；它自身生产零消费者，且那条 `else` 分支在没人注入时直接回 `{"success": True}`（又一次"没执行却报成功"），另案待裁——**此案已取证＝§6-308**（整座岛零 import，三态票推荐乙）。`api_router` 整模块零生产 import（§6-135）与 `media/config.py`、`language/` 那几格需人裁仍未裁。
+    - **仍留在案上（不在本批顺手做）**：`core/multi_agent_manager.py`(453)——它是唯一会调 `decompose_intent/execute_plan` 的地方（`:221-223`），但走的是鸭子类型注入、不 import 那三只，故本批退役没留下悬空 import；它自身生产零消费者，且那条 `else` 分支在没人注入时直接回 `{"success": True}`（又一次"没执行却报成功"），另案待裁——**此案已取证＝§6-308**（整座岛零 import，三态票推荐乙）**⇒ 已按乙落批＝§6-309**（`82746965`，整座岛连同两座专用测试 1212 行一并退役）。`api_router` 整模块零生产 import（§6-135）与 `media/config.py`、`language/` 那几格需人裁仍未裁。
 
 168. **渠道双向语音立项后的第一段：出站音频接上（缺口②），顺带根修飞书那层从没跑过的上传（✅ 缺陷 `9b547ea2`、能力 `8f1688fe`、子集 `0e65fb39`）** 🟢
     - **立项背景**：任务 #27 的三项缺口由 §6-108 记档（当时判"新能力，需用户立项"）。本批按"开始做渠道双向语音"起手，先做**出站**这一段——理由是复算后它的根因最干净：`tests`/`neurova` 里传输层早就支持类型化回发（`manager.send_message(message_type=...)` 在 `manager.py:217-263`，全部适配器签名齐备且有契约测试 `test_b4_gen1_send_signature.py` 钉着），而回合的 TTS 产物**已经生成好了被丢掉**：`post_chat_pipeline._step_generate_tts:1245` 落盘 WAV → `chat_pipeline.py:2933` 放进 `resp["audio_path"]` → `channel_router` 只取 `resp["text"]`，回发也不传类型。所以这不是"再造一套出站机制"，是把断掉的两处调用点接上。
@@ -6024,7 +6024,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **D3** `MultiAgentManager.initialize_shared_components` 全仓零调用，`_plan_orchestrator` 恒 None ⇒
       `multi_agent_manager.py:221-223` 那条"共享小脑执行"支路恒不命中，而 `:6` 的 docstring 仍宣称三件套共用；
       `shared_brainstem` 只活在那次批量入库的测试里。
-      **⇒ 已取证＝§6-308**：范围是整座岛（453 行连 import 都没有），不是那一条支路；三态票推荐乙。
+      **⇒ 已取证＝§6-308**：范围是整座岛（453 行连 import 都没有），不是那一条支路；三态票推荐乙
+      **⇒ 已按乙落批＝§6-309**（那座支路连同整座岛一起退役，恒不命中的那条 `else` 也随之没了载体）。
       **D5** `core/flow_orchestrator.py` 与 `collaborate/workflow/orchestrator.py` 是两份同功能实现，**未比对**（教义第 6/7 条下一个对象）。
     - **等裁两问**（各带影响面，见档案第 8 节）**已裁定并已落地＝§6-304**：① A3 的退役范围取甲（只收 shared_core 那侧，legacy 356 行留作下批）
       还是乙（同批连 legacy 模块与其专用测试一起退）——推荐**乙**，甲会正好留下本卷在诊断的形态"实现还在、能到它的路全没了"；
@@ -6084,7 +6085,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `ff4f34a` 生产池 **+5/−357 ＝ 净 −352**、测试/基建池 **+27/−0**；`819713eb` 生产池 0/0、测试/基建池 +11/−0。
       本批生产池合计**净 −735**，无一处净增为正。
     - **仍开**：D1 **探针票已跑＝§6-305，丙案已落地＝§6-306**（甲接写侧／乙整把退役仍等裁）；
-      D3（`MultiAgentManager` 整座岛：**已取证＝§6-308**，三态票推荐乙）；D5（两份 FlowOrchestrator 未比对）；
+      D3（`MultiAgentManager` 整座岛：**已取证＝§6-308**，三态票推荐乙 **⇒ 已按乙落批＝§6-309**）；D5（两份 FlowOrchestrator 未比对）；
       **D6（§6-305 顺带抓到）`GET /api/v1/memory/meta/skills` 每次必 500——已裁甲并落地＝§6-307（同族第二条
       `POST /meta/skills/match` 一并修）**。
     - **本会话下一枚空号现查 §6-305**（写前必须现场重取；本笔落库时该读数为 304）。
@@ -6222,11 +6223,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **净 LOC**：`7d9145e1` 生产池 **+23/−9 ＝ 净 +14**（为正，去向逐条写在该笔正文：两处 docstring 名实
       交代 ＋ 请求模型注释 ＋ 抵掉的假参数与错误传参 9 行）；测试/基建池 **+164/−0**（判据 156 ＋ 活跃层文档 8）。
       `3c5fd1a7` 生产池 0/0、测试/基建池 +11/−0。
-    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D3、D5；
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D3（**已由 §6-309 按乙结清**）、D5；
       真做"按分类/状态筛技能"与"取前 N 条匹配"都要先在 manager 那侧立单源，属另票。
     - **本会话下一枚空号现查 §6-308**（写前必须现场重取；本笔落库时该读数为 307）。
 
-308. **批 80 · D3 取证完毕：`MultiAgentManager` 是一整座岛，不是"一条恒不命中的支路"（🔴 三态票，推荐乙；取证不实施）** 🟡 —— §6-303/§6-304 记的 D3、以及 §6-157 时代 line 2865 那句"另案待裁"，今天一并量清；用户 2026-10-18 点"只读取证"。本卷零改码。
+308. **批 80 · D3 取证完毕：`MultiAgentManager` 是一整座岛，不是"一条恒不命中的支路"（🔴 三态票，推荐乙；取证不实施）** 🟡 —— **⇒ 乙已落批＝§6-309** —— §6-303/§6-304 记的 D3、以及 §6-157 时代 line 2865 那句"另案待裁"，今天一并量清；用户 2026-10-18 点"只读取证"。本卷零改码。
 
     - **原登记太窄**：D3 写的是"`initialize_shared_components` 零调用 ⇒ 那条共享小脑支路恒不命中"。
       实测范围大一整圈：**整座 `core/multi_agent_manager.py`（453 行）连被 import 都没有**。
@@ -6266,7 +6267,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **三态票（推荐乙）**：
       - **甲｜修好它**：把三件套真接进去。今天接无可接——`PlanOrchestrator` 那三套已在 §6-157/166 退役，
         要接得先重造编排层。代价最大且与既有裁定相反，不建议。
-      - **乙｜整岛退役（推荐）**：删 `core/multi_agent_manager.py`(453) ＋ `tests/integration/test_multi_agent_manager.py`(494)，
+      - **乙｜整岛退役（推荐）**：**⇒ 已按乙落批＝§6-309（`82746965`）**；本行那句"合计约 **−947 行**"
+        由 §6-309 更正为 **1212 行**——票面漏了 `tests/unit/core/test_multi_agent_manager.py`(265)，
+        而那座测试的行数同卷 line 2324 早已记过。删 `core/multi_agent_manager.py`(453) ＋ `tests/integration/test_multi_agent_manager.py`(494)，
         合计约 **−947 行**；同批改准 `docs/` 里指向它的**活跃层**陈述（`01-architecture/*`、`04-plans/stub-cleanup-plan.md` 等，
         带日期的 `05-reports/`、`09-dev-progress/` 按档案纪律不回改）。不可逆点＝"多 Agent 共享一套小脑/脑干/脊髓"这个**设想**
         从此没有代码载体——但它今天也没有实现载体，只有假回包，所以实际失去的是一张骨架。
@@ -6286,3 +6289,78 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       不该靠写探针的人记得（本仓"手抄一份"的老病就是这个形态）。
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**仍开**：D1 甲／乙、D5、§6-293、D8 那条单点待办。
     - **本会话下一枚空号现查 §6-309**（写前必须现场重取；本笔落库时该读数为 308）。
+
+309. **批 81 · D3 乙案落地：`MultiAgentManager` 整座岛连同两座专用测试退役，文档陈述就地改准（`82746965`）** 🟢 —— 用户 2026-10-18 拍"乙｜整岛退役（推荐）"。
+
+    - **命中面比 §6-308 的票面大一圈（勘误写在这里，票已入库不改）**：§6-308 乙案写"约 **−947** 行"
+      （岛 453 ＋ `tests/integration/test_multi_agent_manager.py` 494）。实际删除面是 **1212 行**——漏了
+      `tests/unit/core/test_multi_agent_manager.py`（265 行、22 格）。**而这条漏项的本仓读数早就存在**：
+      同卷 line 2324（§6-151 那次比对）白纸黑字写着"靠 2086 行七份专用测试续命（… `test_multi_agent_manager`
+      **265＋494** …）"。取证的错不在"没找到"，在**只按本批那条 `grep neurova/` 的口径重扫，没回读台账里
+      已有的读数**——同一档里前一场票的命中面，本场票必须当输入读进来。已入形态集（第 286 号）。
+      这座 265 行的测试今天 **22 格全绿**，与那 494 行的"20 failed／8 passed"形状不同，但性质一样：
+      它只断这座岛自己的形状（`NeurovaAgent` 字段、`get_multi_agent_manager` 单例），岛退役它即悬空。
+    - **判据两轨（`tests/unit/core/test_multiAgentManagerIslandRetired.py`，111 行 4 格，已入子集 634→635）**：
+      主格①文件不再存在；主格②全仓（生产＋测试＋脚本，工作树 `rglob` 取面，按**模块全名的导入通道**判，
+      不按 `MultiAgentManager` 这个字样扫文本——`get_agent`/`NeurovaAgent` 在别处各有实装，按词扫会误伤，
+      而本档自己也要写出模块全名一次，按词扫会被自己咬，形态集 241/268 同族）；
+      交付锁③工作区单源 `core/agent_workspaces.py` 仍在且 `api/endpoints/agent.py` 仍经它取路径；
+      交付锁④真 `create_app()` 下 agents 列表 200 与协作/通信路由在册。
+    - **红→绿**：改前 `collected 4 items` → `2 failed, 2 passed`，两条红落在
+      `test_islandFileIsGone` 与 `test_noCodeAnywhereImportsTheIsland`（后者点名那两座测试）；
+      `git rm` 三档后同一档 `4 passed`。**红自证**走仓外基线树（detached HEAD `66059fb1`，岛还在）跑同一份
+      判据 ⇒ 失败集恰好＝那两条主格，两条交付锁同侧绿——比"在本树 stash 删除"更窄，不卷并发会话的在途面。
+    - **宽域 A/B（基线＝仓外只读 worktree at HEAD，与主树同为中文根；两侧严格串行、期间停掉一切并发跑测）**：
+      选择集 `tests/unit/core` ＋ `tests/unit/api` ＋ `tests/integration`，基线侧把两座岛测试 `--ignore` 掉以对齐文件面。
+      读数：core base `8 failed/2089 passed`(2097) ↔ mine `8 failed/2093 passed`(2101)（多的 4 格＝本批新判据）；
+      api 两侧 `39 failed + 8 errors`(2512)；integration 两侧 `72 failed + 15 errors`(563)。
+      **三目录仅本树红 0 条、仅基线红 0 条**（比集合不比条数）；两侧都产出汇总行，且"汇总报的 failed 数"与
+      "实抽到的 FAILED 条数"逐目录对账相等（8/8、39/39、72/72）——`scripts/ab_compare.sh` 本仓缺件，
+      对账两道闸按同口径手搭（形态集 280）。
+    - **活体差分（`tests/manual/multiAgentManagerIslandRetired_b81.py`，两侧同跑同一份）**：本批侧五腿全 PASS
+      （①agents 列表/创建/详情三个 200，真建出 `c0cc252c`；②跑完真请求后岛模块不在 `sys.modules`，
+      同进程已加载 670 个 `neurova.*` 模块＝那个"零"的正控；③`importlib.import_module` 岛模块抛
+      `ModuleNotFoundError`；④per-agent 工作区仍由单源给出；⑤仓内 `data/` 与 `agent_workspaces/`
+      内容指纹全程不变）；基线侧①②④⑤同形状 PASS，**只有③ FAIL=「仍可导入」**。
+      这一格就是本批的"行为差异"所在：退役前后其余读数一字未动。探针两侧都调
+      `isolatedDataRoot()` **＋** `isolatedAgentWorkspaces()`（D8 那条坑的现场闭环：只隔一个会把记忆写进仓内真目录）。
+    - **文档命中面（教义第 5 条第三类，散文陈述）**：`docs/01-architecture/NEUROVA_CogArch_2.0.md` 设计节顶部
+      加更正块（设想留、现状改）、§8.1 两行映射改指现役、§8.2 状态列 `✅ 雏形`→`❌ 已退役`、§8.3
+      "已有雏形需要整合"划闭；`docs/04-plans/stub-cleanup-plan.md` 按 §6-166 那行的既有先例划闭；
+      `docs/09-dev-progress/module_designs/multi_agent_manager.md` 顶部按 `cognition_orchestrator.md` 的先例
+      加退役更正（那里那句"状态：✅ 已完成"与实测相反）。roadmap 的"[ ] 实现 MultiAgentManager"两格与
+      致谢行**没动**——它们不是存在性宣称，退役后反而更贴合实状（这一区分写在提交正文，免得下一场再扫一遍）。
+      `tests/unit/evolution/` 两档 docstring 里的 `NeurovaAgent` 改回真主语（那个类名全仓只在岛上定义过，
+      `neurova/agent/` 并没有它——同名不同物的伪命中已核）。复跑 `scripts/scan_docs_refs.py`：
+      活跃层零悬空引用，只剩 `11-legacy` 档案层 195 条（与批次无关）。
+    - **顺带抓到一条新的、不在本批射程内的文档失真（D9，登记待裁）**：同一份 CogArch 文档 §8.2 的状态列
+      与仓内实状**整族不符**——`neurova/projects/` 这个 Python 包根本不存在，表里却列了 5 条 `projects/*.py`
+      并标 `✅ 已实现`／`⚠️ 雏形`（`team_manager`／`workflow_engine`／`project_manager`／`task_board`／`file_flow`），
+      另 `ToolEngine` 标 `❌ 待实现` 而它在役且被批 68-70 反复收口。本批只把自己那一行改准（其余属另一根因，
+      不顺手改＝不静默遗留）。要修就是"这份 2026-05-12 的映射表整体重做或明写不可作事实源"，属产品/文档口径，
+      需人裁定它到底是**现役架构文档**还是**设计沿革档案**——现在两种读法都成立，正是缺陷。
+    - **净 LOC（`git show --numstat 82746965` 逐文件复算）**：生产池 **+0/−453 ＝ 净 -453**；
+      测试/基建池 **+267/−766 ＝ 净 -499**（新判据 +111、活体探针 +126、两座测试 −494/−265、
+      docs 三处 +28/−5、evolution 两档 docstring 各 +1/−1）；全笔 **+267/−1219 ＝ 净 -952**。
+      子集那笔另计：+4/−0，634→635。
+    - **执行事故如实记**：本批第一次 A/B 刚起了 base 侧第一轮，我为了"等结果时做点事"把判据文件
+      `cp` 进基线树并起了第二个 pytest——**违反"两侧严格串行、期间不得有并发负载"**，且拷贝落进基线树
+      会让基线多一个文件。当场停：先杀脚本的三层 bash（`TaskStop` 只杀父，内层自己跑到了下一相，
+      按 CommandLine 认出 PID 连子一起杀），再摘掉误拷的文件（本会话写入才可删），
+      整轮作废重跑。所幸基线侧第一轮已完成 collection（拷贝晚于收集），但"没被污染"是运气不是纪律。
+    - **本批自己写进去的一条错路（`4e4da873` 补刀，另立一笔的理由：`82746965` 已被本卷按号引用，
+      改号即造悬空引用＝形态集 211/246 那一族）**：我在两处"现役对应物"里把 agent 配置写成
+      `` `core/agent_config.py` ``，真身是 `neurova/agent_config.py`（`api/endpoints/agent.py:230` 的
+      `from neurova.agent_config import get_config_manager` 是唯一取法）。按"退役岛在 `core/`、替代者大概
+      也在 `core/`"的形状补了前缀，**没现查**。
+    - **顺带量出一条判据局限（D10，登记待裁，本批不动判据）**：把那一行临时改回错形态再跑
+      `scan_docs_refs.activeLayerDangling()` ⇒ **命中 0 条**（还原后 md5 复证 `7080ba59f060`）。
+      根因在单点判据 `resolveTarget` 的兜底：带目录分隔符的行内码若**按 basename 全仓唯一命中**就判
+      「迁移可达」。于是在它眼里"路径写错"与"路径搬过家"是同一件事——它只拦「源已删除」与「空标签悬空」。
+      活跃层现存悬空引用总数＝0 与此一致。**这不是要修的 bug，是文档判据的设计边界**；若要把它做成会红的格子，
+      须加"目录段也必须命中"的第二态，而那会把现有按同名兜底判成「迁移可达」的条目一并改判
+      （光 `docs/11-legacy` 一档实测 154 条）——属文档口径，需人裁。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：D3（本笔）。**仍开**：D1 甲／乙、D5、
+      §6-293、D8 的单点待办、以及本笔新登记的 D9（CogArch §8.2 状态列整族失真）与 D10（文档引用判据的
+      同名兜底看不见"目录段写错"）。
+    - **本会话下一枚空号现查 §6-310**（写前必须现场重取；本笔落库时该读数为 309）。
