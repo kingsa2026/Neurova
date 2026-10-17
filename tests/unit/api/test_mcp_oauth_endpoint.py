@@ -3,9 +3,14 @@
 P3-d MCP OAuth 授权码流 API 端点测试
 
 端点：POST /v1/tool-layers/mcp-servers/{server_id}/oauth/authorize
-语义：从 SharedConfigManager 读 config.oauth，要求 grant_type=authorization_code，
+语义：从 SharedConfigManager 读 oauth 子配置，要求 grant_type=authorization_code，
 后端经 webbrowser.open 打开浏览器（本机应用=用户浏览器），等待环回回调换 token
 并入 per-call 缓存；未认证 401（路由级依赖）、server 不存在 404、配置不符 400。
+
+记录形状（2026-10-17 断点①复核修正）：本档 entry 一律经 `validate_mcp_server_config`
+产出，即 SharedConfigManager 实际落盘的那份扁平字典。旧版自造
+`entry["config"]["oauth"]`（`mcp_client` 的**运行时包装**形状），于是八格全绿而
+生产里 oauth 既存不进去、这条派生面也恒读不到——夹具与读侧一起自洽，谁也没咬到实装。
 """
 import os
 
@@ -36,14 +41,19 @@ OAUTH_CFG = {
 
 
 def _oauth_server_entry(oauth=OAUTH_CFG):
-    return {
+    """经生产写入口产出记录（SharedConfigManager 存的就是这份扁平字典本体）。"""
+    from neurova.tool_layers.mcp_config import validate_mcp_server_config
+
+    raw = {
         "id": "remote-ac",
         "name": "Remote AC",
         "transport": "http",
         "url": "https://remote.example.com/mcp",
         "enabled": True,
-        "config": {"oauth": oauth} if oauth is not None else {},
     }
+    if oauth is not None:
+        raw["oauth"] = oauth
+    return validate_mcp_server_config(raw)
 
 
 class FakeManager:
