@@ -463,9 +463,9 @@ async def execute_tool(body: ToolExecuteRequest):
 
     有 agent 时必须经**执行咽喉**（`agent.tool_executor`）：票据、轮级耗时、
     `on_tool_executed`（肌肉记忆/生命周期）、治理预检与 hooks 都挂在那一层。
-    `ToolEngine` 本身是咽喉的**内层**一档（`tool_executor._execute_tool_core`
-    调它），把端点直接接到它上面等于绕过整条链——与工单 003 之前的原生链同型。
-    只在"没有 agent"的评测/脚本场景（无咽喉可用）才退回引擎直调。
+    咽喉里没有"内层 ToolEngine"这一档——它对任何调用都恒报未注册（注册面全仓无写入者），
+    已随 §6-298 拆掉，别再照旧链条理解。只在"没有 agent"的评测/脚本场景（无咽喉可用）才退回
+    引擎直调，而那一支现在先经治理预检（§6-296）。
     """
     start = time.time()
 

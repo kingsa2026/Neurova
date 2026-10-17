@@ -232,10 +232,10 @@ class TestToolEngineReadEntries:
 class TestToolExecuteEndpointGoesThroughChoke:
     """005 残留：`/tool-layers/tools/execute` 不能再把 `ToolEngine` 当入口。
 
-    `ToolEngine` 是咽喉**内层**（`tool_executor._execute_tool_core` 调它）。
-    端点直接调它，就绕过了票据、`on_tool_executed`、治理预检与 hooks ——
-    与 003 收编前的原生链同型。有 agent/执行器时必须走咽喉；引擎只在
-    "无 agent 的评测/脚本" 那条降级分支里用。
+    当初这句的理由是"`ToolEngine` 是咽喉**内层**"——那条内层档已于 §6-298 拆掉
+    （它对任何调用恒报未注册：注册面在全仓没有写入者）。判据的理由换成现在这条：
+    端点直接调引擎就绕过票据、`on_tool_executed`、治理预检与 hooks，而有 agent 时那些
+    都挂在咽喉上。引擎只在"无 agent 的评测/脚本"那条降级分支里用（§6-296 起该支先经治理）。
     """
 
     @pytest.mark.asyncio
