@@ -19,6 +19,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 INIT = REPO_ROOT / "neurova" / "execution_layers" / "__init__.py"
 
@@ -40,18 +42,23 @@ def _topLevelNames() -> dict:
     return kinds
 
 
-def _importsFromThisModule(relPath: pathlib.Path) -> set:
-    """该文件**经导入通道**从本模块取走的名字。
+def _importsFromThisModule(tree: ast.AST, rel: str) -> set:
+    """该文件**经导入通道**从本模块取走的名字（输入是一棵已解析的树＋仓内相对路径）。
 
     为什么不按符号名扫全仓（第一版就是这么写的，被自己抓红）：`TransportType` 这个名字在
     `execution_engine/mcp_manager.py:29` 有**另一份同名枚举**，按名扫会把在役符号判成"还在引用
     已退役面"。Python 里"消费某模块的名字"只有一条通道——从该模块导入（或 `module.Name` 属性访问），
     判这条既无误伤也不漏。
+
+    枚举与解析归 `tests/ast_scan` 的共享预算（§6-314 的 D22：判据里不再自己 `glob + ast.parse`）。
+    绝对名一律由 `ast_scan.resolveImportModule` 解——只按 `node.module` 原文比对看不见相对形，
+    那会把"还在导入"读成零引用（§6-212 记过的同一族）。
     """
-    tree = ast.parse(relPath.read_text(encoding="utf-8", errors="replace"))
     taken = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("execution_layers"):
+        if isinstance(node, ast.ImportFrom) and (
+                (node.module or "").endswith("execution_layers")
+                or ast_scan.resolveImportModule(rel, node).endswith("execution_layers")):
             taken.update(a.name for a in node.names)
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
                 and node.value.id == "execution_layers":
@@ -60,15 +67,22 @@ def _importsFromThisModule(relPath: pathlib.Path) -> set:
 
 
 def test_noCodeAnywhereImportsTheRetiredTransportSurface():
-    """主格②：全仓（生产＋测试）不许再经导入通道取走那五个名字＋那个假 helper。"""
+    """主格②：全仓（生产＋测试）不许再经导入通道取走那五个名字＋那个假 helper。
+
+    取数走共享预算：`sourceRefsUnder` 枚举＋文本预筛（判据要求模块名以 `execution_layers` 结尾，
+    连这串字样都没有的文件不可能命中 ⇒ 充分条件），解析走 `transientTree`（本档只扫一遍，
+    不留常驻语法树）。§6-314 的 D22 收的就是"判据自己 `rglob + ast.parse`"这个形态。
+    """
     retired = set(TRANSPORT_SURFACE) | {"execute_skill"}
     offenders = []
-    for path in REPO_ROOT.rglob("*.py"):
-        if ".venv" in path.parts or "__pycache__" in path.parts or path == INIT:
+    for ref in ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py",
+                                         ast_scan.textHints("execution_layers")):
+        if ref.path == INIT:
             continue
-        hit = retired & _importsFromThisModule(path)
+        hit = retired & _importsFromThisModule(
+            ast_scan.transientTree(ref.path), ast_scan.relativeToRepo(ref.path))
         if hit:
-            offenders.append((path.relative_to(REPO_ROOT).as_posix(), sorted(hit)))
+            offenders.append((ast_scan.relativeToRepo(ref.path), sorted(hit)))
     assert not offenders, f"这些地方还在从该模块导入已退役名字：{offenders}"
 
 
@@ -114,12 +128,15 @@ def test_executeSkillHelperIsGoneWithItsLie():
     names = _topLevelNames()
     assert "execute_skill" not in names, "`execute_skill` 还在：那条假参数就还在骗人"
     importers = []
-    for path in (REPO_ROOT / "neurova").rglob("*.py"):
-        if "__pycache__" in path.parts or path == INIT:
+    for ref in ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, ".py",
+                                        ast_scan.textHints("execution_layers")):
+        if ref.path == INIT:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("execution_layers"):
+        rel = ast_scan.relativeToRepo(ref.path)
+        for node in ast.walk(ast_scan.transientTree(ref.path)):
+            if isinstance(node, ast.ImportFrom) and (
+                    (node.module or "").endswith("execution_layers")
+                    or ast_scan.resolveImportModule(rel, node).endswith("execution_layers")):
                 if any(a.name == "execute_skill" for a in node.names):
-                    importers.append(path.relative_to(REPO_ROOT).as_posix())
-    assert not importers, f"这些文件还从该模块导入 execute_skill：{importers}"
+                    importers.append(rel)
+    assert not importers, f"这些文件还从该模块导入 execute_skill：{sorted(set(importers))}"

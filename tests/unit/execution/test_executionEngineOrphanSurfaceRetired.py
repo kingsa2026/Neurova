@@ -29,6 +29,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MODULE = REPO_ROOT / "neurova" / "shared_core" / "execution_engine.py"
 
@@ -157,19 +159,17 @@ def test_legacyWorkflowEngineModuleIsGoneAndNobodyImportsIt():
         "legacy 引擎文件还在树上"
 
     importers = []
-    for path in REPO_ROOT.rglob("*.py"):
-        if ".venv" in path.parts or "__pycache__" in path.parts or "node_modules" in path.parts:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8", errors="replace"))):
-            taken = ""
-            if isinstance(node, ast.ImportFrom) and node.module:
-                taken = node.module
-            elif isinstance(node, ast.Import):
-                taken = " ".join(a.name for a in node.names)
-            if taken.replace(".", "_").endswith("execution_engine_workflow_engine") or \
-                    taken.rstrip(".").endswith("execution_engine.workflow_engine"):
-                importers.append(path.relative_to(REPO_ROOT).as_posix())
-    assert not importers, f"这些地方还在导入已退役的 legacy 引擎：{importers}"
+    for path, node in ast_scan.transientNodes(
+            ast_scan.REPO_ROOT, ".py", ast_scan.textHints("workflow_engine")):
+        taken = ""
+        if isinstance(node, ast.ImportFrom):
+            taken = ast_scan.resolveImportModule(ast_scan.relativeToRepo(path), node)
+        elif isinstance(node, ast.Import):
+            taken = " ".join(a.name for a in node.names)
+        if taken.replace(".", "_").endswith("execution_engine_workflow_engine") or \
+                taken.rstrip(".").endswith("execution_engine.workflow_engine"):
+            importers.append(ast_scan.relativeToRepo(path))
+    assert not importers, f"这些地方还在导入已退役的 legacy 引擎：{sorted(set(importers))}"
 
 
 def test_monitorBusSurfaceIsKeptForPendingRuling():

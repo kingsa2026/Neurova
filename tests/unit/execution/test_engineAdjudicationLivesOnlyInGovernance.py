@@ -29,6 +29,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests import ast_scan
+
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL_ENGINE = REPO / "neurova" / "execution_engine" / "tool_engine.py"
@@ -129,15 +131,17 @@ class TestEngineNoLongerPretendsToAdjudicate:
         assert not guarded, f"execute() 里还在自己裁决（{guarded}）——裁决只该有一个口"
 
     def testDefaultGuardNameGoneFromProductionSurface(self):
-        """全仓 `neurova/` 不再出现这个类名：留着就是"还有一道门"的假象。"""
+        """全仓 `neurova/` 不再出现这个类名：留着就是"还有一道门"的假象。
+
+        取数走 `tests/ast_scan` 的共享预算（`nodeScan` ＋文本预筛——判据认的是这个**名字**，
+        连这串字样都没出现的文件不可能命中）；不私有 `glob + ast.parse`（§6-314 的 D22）。
+        """
         offenders = []
-        for path in REPO.glob("neurova/**/*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef) and node.name == "DefaultGuard":
-                    offenders.append(f"{path.relative_to(REPO).as_posix()}:{node.lineno}")
-                if isinstance(node, ast.Name) and node.id == "DefaultGuard":
-                    offenders.append(f"{path.relative_to(REPO).as_posix()}:{node.lineno}")
+        for path, node in ast_scan.nodeScan(ast_scan.PRODUCTION_ROOT, ".py",
+                                            ast_scan.textHints("DefaultGuard")):
+            if (isinstance(node, ast.ClassDef) and node.name == "DefaultGuard") or \
+                    (isinstance(node, ast.Name) and node.id == "DefaultGuard"):
+                offenders.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
         assert not offenders, f"恒 safe 的门还在被定义或被引用：{sorted(set(offenders))}"
 
     def testOldEngineGuardCellsRetiredNotLeftZombie(self):
