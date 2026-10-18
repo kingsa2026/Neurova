@@ -40,6 +40,22 @@ SHADOW = "/etc/shadow"
 CHOKE_FILE = REPO / "tests" / "unit" / "tools" / "test_tool_layer_breakpoints_zoom_out.py"
 
 
+def _nameUseForm(node: ast.AST, name: str) -> str:
+    """这个节点是不是在**取用** `name`？是则返回取法名，否则空串。三种取法都认。
+
+    `ClassDef`＝还在定义；`Name`＝裸名（`DefaultGuard()`）；`Attribute`＝
+    `tool_engine.DefaultGuard` 这种经模块对象取的形。拆成纯函数是为了可证伪——
+    合成样本直接喂进来就能逐形验证，不必往生产里种临时文件。
+    """
+    if isinstance(node, ast.ClassDef) and node.name == name:
+        return "定义"
+    if isinstance(node, ast.Name) and node.id == name:
+        return "裸名引用"
+    if isinstance(node, ast.Attribute) and node.attr == name:
+        return "属性访问"
+    return ""
+
+
 def _callEndpoint(tool_name: str, arguments: dict):
     """走真端点函数，引擎与 agent 用替身——本批要判的是**端点这一层的次序**，不是引擎内部。"""
     from neurova.api.endpoints import tool_layers
@@ -134,15 +150,43 @@ class TestEngineNoLongerPretendsToAdjudicate:
         """全仓 `neurova/` 不再出现这个类名：留着就是"还有一道门"的假象。
 
         取数走 `tests/ast_scan` 的共享预算（`nodeScan` ＋文本预筛——判据认的是这个**名字**，
-        连这串字样都没出现的文件不可能命中）；不私有 `glob + ast.parse`（§6-314 的 D22）。
+        连这串字样都没出现的文件不可能命中）；不私有 `glob + ast.parse`（D22）。
+
+        取法认三种（定义／裸名／`tool_engine.DefaultGuard` 属性形）：旧口径只认前两种，
+        属性访问那条形即使留着也报"零引用"——取法窄于意图。
         """
-        offenders = []
-        for path, node in ast_scan.nodeScan(ast_scan.PRODUCTION_ROOT, ".py",
-                                            ast_scan.textHints("DefaultGuard")):
-            if (isinstance(node, ast.ClassDef) and node.name == "DefaultGuard") or \
-                    (isinstance(node, ast.Name) and node.id == "DefaultGuard"):
-                offenders.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
+        offenders = [
+            f"{ast_scan.relativeToRepo(path)}:{node.lineno} [{form}]"
+            for path, node in ast_scan.nodeScan(ast_scan.PRODUCTION_ROOT, ".py",
+                                                ast_scan.textHints("DefaultGuard"))
+            if (form := _nameUseForm(node, "DefaultGuard"))
+        ]
         assert not offenders, f"恒 safe 的门还在被定义或被引用：{sorted(set(offenders))}"
+
+    def testDetectorFlagsAllThreeFormsAndIgnoresNeighbours(self):
+        """探测函数自己可证伪：三种取法逐个给出，两个邻居形状不得误报。
+
+        没有这格，"补上属性访问形"这句话只能靠往生产里种文件来验——那会污染别的常驻判据。
+        仍**不覆盖** `getattr(x, "DefaultGuard")` 这种字符串形：把 `ast.Constant` 也算进去会
+        连docstring/日志文案一起咬，边界写在台账里而不是偷偷放宽。
+        """
+        forms = {
+            "定义": "class DefaultGuard:\n    pass\n",
+            "裸名引用": "g = DefaultGuard()\n",
+            "属性访问": "g = tool_engine.DefaultGuard\n",
+        }
+        for expected, source in forms.items():
+            tree = ast.parse(source)
+            found = {f for n in ast.walk(tree) if (f := _nameUseForm(n, "DefaultGuard"))}
+            assert found == {expected}, f"{expected} 那形的取法判不出来：{found}"
+
+        neighbours = {
+            "同前缀不同名": "class DefaultGuardX:\n    pass\ng = tool_engine.DefaultGuardX\n",
+            "被取的其它属性": "g = tool_engine.guard\n",
+        }
+        for label, source in neighbours.items():
+            found = [f for n in ast.walk(ast.parse(source)) if (f := _nameUseForm(n, "DefaultGuard"))]
+            assert not found, f"{label} 被误判成取用 DefaultGuard：{found}"
 
     def testOldEngineGuardCellsRetiredNotLeftZombie(self):
         """旧契约的格子必须跟着退役：留着就断言"引擎该自己裁决"这条被推翻的规矩。"""
