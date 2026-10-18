@@ -48,37 +48,17 @@ RETIRED = "neurova.voice_adapter"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(source: str) -> list[str]:
-    """源码文本里的 import 名（文本由共享预算 `ast_scan` 供给，不再各自读盘）。"""
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
-    names = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            names.append(node.module)
-    return names
-
-
 def _hits(root: Path) -> list[str]:
-    """子树里仍 import 已退役桥的文件清单。
+    """子树里仍 import 已退役桥的文件清单（四种取法都认）。
 
-    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-    不私有 `rglob + ast.parse`：后者把判据成本绑在代码总量上
-    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
-    预筛词是判据的**充分条件**：连退役模块名都没出现的文件不可能 import 它。
+    取数走 `tests/ast_scan` 的共享入口 `importersOfModule`：它自己按**末段名**
+    （`voice_adapter`）预筛——那是判据的充分条件，而相对形的源码里根本没有包前缀，
+    按全名预筛会把它们在文本这一关就滤掉。此前这里是私有 `_importedNames`，写着
+    `and not node.level`，相对形与父包取名形（`from neurova import voice_adapter`）
+    两条形都不在面内。显示名由入口按"仓内给相对路径／仓外给绝对路径"给，
+    注入探针落在 tmp 下不会把 `ValueError` 冒名成被测故障。
     """
-    out = []
-    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints(RETIRED)):
-        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(ref.code)):
-            try:
-                out.append(ref.path.relative_to(REPO).as_posix())
-            except ValueError:
-                out.append(ref.path.name)
-    return out
+    return sorted({rel for rel, _lineno, _form in ast_scan.importersOfModule(root, RETIRED)})
 
 
 def test_noImportOfRetiredEngineBridge():
@@ -128,8 +108,18 @@ def test_scannerCatchesARevival(tmp_path):
     """注入探针：造一处 import 必须被抓到，且现役邻居不误伤。"""
     bad = tmp_path / "revival.py"
     bad.write_text("from neurova.voice_adapter import VoiceAdapterFactory\n", encoding="utf-8")
-    assert _hits(tmp_path) == ["revival.py"]
+    assert [p.rsplit("/", 1)[-1] for p in _hits(tmp_path)] == ["revival.py"]
+
+    # 父包取名形：真引用，旧那份私有谓词（`and not node.level`）看不见这一形
+    viaParent = tmp_path / "via_parent.py"
+    viaParent.write_text("from neurova import voice_adapter\n", encoding="utf-8")
+    assert sorted(p.rsplit("/", 1)[-1] for p in _hits(tmp_path)) == ["revival.py", "via_parent.py"], \
+        "父包取名形没被抓到——导入通道判据又在学旧口径只比一种取法"
+
     ok = tmp_path / "live.py"
     ok.write_text("from neurova.voice_engine import VoiceEngine\n", encoding="utf-8")
+    okParent = tmp_path / "live_parent.py"
+    okParent.write_text("from neurova import voice_engine\n", encoding="utf-8")
     bad.unlink()
+    viaParent.unlink()
     assert not _hits(tmp_path), f"误伤了现役引擎：{_hits(tmp_path)}"
