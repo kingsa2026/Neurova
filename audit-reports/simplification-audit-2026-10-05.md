@@ -6550,7 +6550,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **三态票（推荐乙）**：甲＝只删 `models.py`＋`template.py`＋`orchestrator.py` 三档（−863）并改门面，
       留 `workflow/models.py` 的死半区；**乙＝甲 ＋ 按符号切 `workflow/models.py` 半区（候选 −929）**，
       但要说清差别——切到 C4 就是**改现役符号**（`FlowContext` 要瘦身到调度器真用的那几个字段），
-      必须"先立判据钉住调度器用到的字段与行为 → 再瘦 → A/B → 活体"，不能当删文件做；
+      必须"先立判据钉住调度器用到的字段与行为 → 再瘦 → A/B → 活体"，不能当删文件做
+      （**⇒ 该前置判据已落地并常驻＝§6-315**：七格钉住在役面，乙案动刀前它一路绿，红了即前提变了）；
       丙＝只改两个门面（岛仍在但不再挂启动路径，最省，死码本体留着）。
       不可逆点＝`TaskStep.timeout_seconds`/`input_requirements`/`output_produces`/`optional` 四个字段位随 C1 消失——
       今天它们**无生产者也无读者**（唯一读者就是死的 orchestrator）。
@@ -6668,3 +6669,40 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `ClassDef`/`Name`，不认 `module.DefaultGuard` 这种属性访问形。两种都是**同一族**（取法窄于意图），
       要收得先量命中面——本卷未量。
     - **本会话下一枚空号现查 §6-315**（写前必须现场重取；本笔落库时该读数为 314）。
+
+315. **批 87 · §6-312 乙案的前置判据落地：调度器在役面被七格钉住并入受保护子集** ✅ —— 判据 `tests/unit/collaboration/test_schedulerLiveSurfaceIsPinned.py`（291 行 / 7 格）＋活体 `tests/manual/schedulerLiveSurfaceProbe_b87.py`（140 行），子集 637→**638**。生产池 **+0/−0**（本批不动码）；测试/基建池 +431/−0、+3/−0。
+
+    - **先读实状再下笔**（不沿用 §6-312 的描述）：`AgentScheduler._execute_task` 里 `context = FlowContext()`
+      （`scheduler.py:260`）是全仓**唯一**的上下文使用点；三个动作 handler（`send_message` /
+      `execute_skill` / `run_workflow`，`:378/:387/:408`）的 `ctx` 形参在体内**一次都没被读**；
+      端点那两档只读 `ScheduledTask` 的字段面（`api/endpoints/scheduler.py:143-157,197-211,236-…`；
+      `agent_package.py:233-244` 走 `getattr`）。⇒ "编排方法群是死的"从档案里的一句话变成会红的格子。
+    - **与既有档不重叠**（教义第 6 条：不另起平行面）：`test_workflow_scheduler.py` 已覆盖排程期
+      `next_run_at`、完成后续排、单次置 completed、handler 派发、未注册即失败、重启后仍在；
+      `test_scheduler_api_auth.py` 覆盖鉴权与 run-now；`test_notifications_negative_screen_bridge.py`
+      覆盖通知桥。本档补的四面＝上下文生命周期（读＋写）、**全字段落盘等值**（既有那档只验三个字段）、
+      抛异常那条路的 `last_error`/计数/事件载荷、`compute_next_run` 的三条沉默语义与 0=周一。
+    - **探测器双向自证在判据里面**：合成 `context.add_event(...)` 与 `context["k"]` 两形必须被点名、
+      仅 import＋类型标注不得误报、带参构造单列——静态格报"零命中"时，先知道这条腿能产生非零（形态集 283）。
+      在役清单是**显式三档**，不收目录；清单里的档不见了会当场红（不许静默缩面）。
+    - **变异八枚（改生产码，仓外 worktree，逐枚 md5 复证还原）全部咬住**：交付前写上下文→①③红／
+      handler 读 ctx→①红／字段位掉一个→④红／failed 事件去 error→⑤红／`is_due` 不看 status→⑥红／
+      `interval=0` 吞掉 cron 支→⑥红／cron 改标准 0=周日→⑥红／统计键少一个→⑦红。
+      **一枚起初打空并当场改掉**：`interval=0` 那格原只断"不是 None"，而改坏后返回的正是 `after` 本身——
+      取值没落在分歧点上（形态集 239 同族第六枚左右），改成"必须给出 cron 的那一刻（次日 09:00）"才咬住。
+    - **活体（真 app＋真签 token＋真端点）10/10**：建单/列出/run-now/未知 agent 即如实 failed＋
+      store 落在隔离根内＋**仓内 `data/` 内容指纹一字节未动**（`c5e1b8e589 → c5e1b8e589`，按 261/279 的口径
+      取 md5 而非文件清单）。store 的 env 注入写在 `main()` 里而非模块顶层，避开
+      `test_manualScriptsEnvMutationRatchet` 那道只降不升棘轮（顶层那一条 import 即执行）。
+    - **A/B**：两侧同一选择集（collaboration 在役档＋调度端点鉴权＋通知桥＋解析预算门禁＋manual env 棘轮）
+      基线 95 passed / 17.12s ↔ 本批 95 passed / 15.36s，零失败零差集；子集登记后复跑解析预算门禁
+      不报新落点（本档有私有 `ast.parse` 但无私有枚举 ⇒ 不成对；292 那条"先过门禁再登子集"的次序走过了）。
+    - **顺手核到一条已登记常驻红不是本批所加**：`test_subQuantumSpinClockGate.py::
+      TestSpinCellsSkipRatherThanBurn::test_theSpinScaleCellsAreSkippedOrPassedWithinBudget` 在基线 worktree
+      单跑 2/2 同样红 ⇒ 是 §6-286 那本小账里的时钟量子门那条，不认领也不顺手改。
+    - **它改变的是什么**：§6-312 的甲／乙／丙仍等裁——本批不替人拍板；但从此刻起，任何退役批次动
+      `workflow/models.py` 的半区时，"改坏了现役行为"会有一格先红。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-312 票面里"乙案须先立判据"这道前置。
+      **仍开**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、批 82 那条
+      "4 档不走单点"、D11–D20、D19/D20 未裁部分、§6-314 记的两条窄面。
+    - **本会话下一枚空号现查 §6-316**（写前必须现场重取；本笔落库时该读数为 315）。
