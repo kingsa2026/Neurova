@@ -6570,7 +6570,56 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **未覆盖**：`/api/v1/builder/templates` 由 `api/endpoints/builder.py`（prefix `/v1/builder`）服务，
       未逐条确认它与"协作模板"是否同一业务概念（若是，C2 的替代还多一处）；活的 scheduler 只证到
       "端点 import 且路由在册"，**未跑计数 wrapper**；`tests/unit/collaboration/*`、
-      `tests/unit/projects/test_teams.py` 各测哪一份实现未逐档核；D21 那条守卫的命中面未量。
+      `tests/unit/projects/test_teams.py` 各测哪一份实现未逐档核；D21 那条守卫的命中面未量
+      （**⇒ 已量并做成常驻判据＝§6-313**：12 对，口径带推导、两路取数交叉验证）。
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-311 那条"相邻岛未判"。**仍开**：本票甲／乙／丙
-      等裁、§6-311 甲／乙等裁、D1 甲／乙、§6-293、D9、D10、批 82 那条"4 档不走单点"的次序、D11–D21。
+      等裁、§6-311 甲／乙等裁、D1 甲／乙、§6-293、D9、D10、批 82 那条"4 档不走单点"的次序、D11–D20
+      （D21 已落判据＝§6-313）、**新增 D22**（常驻红小账里要添的那条，见 §6-313）。
     - **本会话下一枚空号现查 §6-313**（写前必须现场重取；本笔落库时该读数为 312）。
+
+313. **批 85 · D21 落成常驻判据：跨文件「同一逻辑被复制第二份」的命中面量清了，并做成只降不升的棘轮** ✅ —— 判据 `tests/unit/ci/test_duplicateImplementationRatchet.py`（369 行 / 7 格），入子集 636→**637**。零改码（生产池 +0/−0）。
+
+    - **命中面现读**（这是 §6-312 里唯一"未量"的那格）：生产根 1018 个 `.py`、15795 个符号（顶层
+      def/class ＋ 顶层类的直接方法），归一后体长 ≥800 字符的 3047 个，按 (kind,name) 分桶后跨文件
+      两两比，`SequenceMatcher.ratio() ≥ 0.90` 者 **12 对**：
+      ① 5 对＝批 84 那座岛（`agent/templates/collaboration_template.py` ↔ `collaborate/{models,template}.py`，
+      全部 ratio=1.0：`CollaborationTemplate`/`TemplateManager`/`WorkflowDefinition`/`TaskStep`/`from_dict`）
+      ——§6-312 的退役批次落地后这 5 条应一起消失，棘轮里那格"降了要红着提醒收基线"就是为这一刻准备的；
+      ② 6 对＝`channels/{telegram,wechat}_ai_generation.py` 的六个 `generate_*`（0.9015–0.968，**两份都在活路上**）；
+      ③ 1 对＝`llm/providers/{openai,openrouter}_provider.py` 的 `_detect_capabilities`（0.9035）。
+    - **口径不是拍脑袋**：800 字符以下那一档（ratio≥0.99 的 684 对里有 636 对）是 getter／`__init__`
+      样板——"结构相同而职责本就相同"，放进来只会训练人去忽略门禁；0.85 那档开始混进按平台各写一份的
+      并行适配器（`neurflow/external_clients/{taobao,jd,pdd,douyin}.py` 的 `call`/`fetch_orders` 实测
+      0.83–0.89），那是合理分化，判据不替人拍板。长度带预筛 d ≤ 0.35L 由 ratio≥0.90 反推
+      （ratio ≤ 2L/(2L+d) ⇒ d ≤ 2/9·L），是**必要条件**不是取巧；切片前的"字符上界"预筛是**充分条件**，
+      且**不许**换成按行数筛——两行 900 字符的体会在行维度上漏掉，这一条由判据自己的一条腿钉住。
+    - **两路取数交叉验证**（命中面敢冻进基线的前提）：第一路 `deepcopy + ast.unparse`，第二路按行切片。
+      第一路起初**坏在自家**——13795 次 unparse 里 13780 次抛异常、返回同一串短文本、又被长度筛静默丢掉，
+      "测量面"塌成 2015 个、读数 50 对；异常计数补上后两路在 (≥0.90 ∧ ≥800) 上给出**同一个 12**。
+      教训形态＝取数路的失败不报错时，"零新增"就只是"没人看见"（同族：§6-309 的 −947 漏读、D9 的状态列失真）。
+    - **判据自证**：变异 6 条全在**仓外 worktree** 里做（主树零接触），逐条 md5 复证还原——扫描根指错 4 红／
+      体长下限抬高 6 红／预筛换成按行数 **1 红（唯一抓到它的是那条端到端腿）**／相似度抬到 0.95 2 红／
+      从基线里抹掉一条在册对 2 红（证明基线参与裁决）／相似度降到 0.5 **无汇总行、被 30s 墙钟击杀**
+      （阈值同时是成本闸门，写进口径说明）。活体＝在 HEAD 树里把 `WorkflowDefinition` 原样抄进
+      `neurova/zzDupProbeB85_tmp.py` ⇒ 2 红、报错点名探针文件、现测 14 对；撤掉 ⇒ 7 passed、无残留。
+      A/B（两侧均仓外，主树根上另有 27 个不属本会话的 `.tmp_*`）选择集＝`tests/unit/ci/`＋解析预算门禁
+      ＋dev-path 守卫＋收集卫生：基线 7 failed/collected 479，本批 7 failed/collected 486（多的 7 条即本档），
+      失败集合逐条一致 ⇒ 零差集，两侧"汇总红数==抽取数"对账通过。
+    - **顺带抓到一条该记的常驻红（D22，本批不动手）**：`test_ci_ast_scan_budget_guard.py::
+      TestNoUnprefilteredRepoWideScan::test_no_unledgered_repo_wide_ast_scan` **在 HEAD 就红**，列 10 档
+      受保护子集内的私有「枚举＋`ast.parse`」落点，而 `REPO_WIDE_SCAN_LEDGER` 的设计现值是**空集**（批 48
+      裁定丁清零过）⇒ 此后每个批次往里加同类判据都在给它添新格，**其中两档是本会话批 81/82 造的**
+      （`test_multiAgentManagerIslandRetired.py::test_noCodeAnywhereImportsTheIsland`、
+      `test_liveIsolationSinglePointCoversBothRoots.py::_workspaceEnvHandCopies` 等 2 档），另 8 档分属其他批次。
+      危害＝这道门禁的"零 offender"绿灯早就没了，而下一次真 offender 混在 10 条里没人区分得开。
+      修法方向（不选边执行）：按门禁给的推荐改指 `ast_scan` 的保留型／一次性入口，逐档收；本批先把
+      **自己那一格**收干净——第一版在判据里 `ast.parse(字面量)` 被这道门禁报成落点（入子集＝添新格），
+      已改判据形态（那条单元测试腿与端到端腿本就重复，删掉，读数一律从真扫描取），**未开白名单、未放宽门禁**，
+      改后 offender 面与基线逐条一致（仍是 10 档，未添）。
+    - **仍开的与本笔新增**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
+      批 82 那条"4 档不走单点"、D11–D20、**D22**；另留一条口径边界在本档 docstring 里说明而未做成判据——
+      **跨 kind 的拷贝（把类方法抄成模块函数）不在面内**（桶键是 (kind,name)）：放宽成按 name 会让配对量与
+      假阳性一起涨，而"方法抽成函数"多数时候是有意的收敛，不该由判据替人拍板。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：D21（§6-312 那条"命中面未量"）。
+      **仍开**：上列各项＋D22。
+    - **本会话下一枚空号现查 §6-314**（写前必须现场重取；本笔落库时该读数为 313）。
