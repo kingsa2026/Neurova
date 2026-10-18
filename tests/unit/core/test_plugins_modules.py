@@ -60,35 +60,6 @@ def _writePluginInto(root: Path, name: str) -> Path:
     return directory
 
 
-def _writePluginInto(root: Path, name: str) -> Path:
-    """在**插件根内**造一个真插件目录（manifest + 入口文件），返回该目录。
-
-    刻意不用替身：这批格子原先把 `_load_manifest` / `_load_plugin_module` 整个 mock 掉，
-    于是"安装/加载成功"从不要求真文件、真 import——84 例全绿的同时，真实 `load_plugin`
-    对任何按作者基类写的插件都必抛 TypeError（无参构造 vs 要求 manifest）。
-    幽灵替身形态见台账 §6-150。
-    """
-    import json
-
-    directory = root / name
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "manifest.json").write_text(
-        json.dumps({"name": name, "version": "1.0.0", "description": "d", "author": "qa",
-                    "entry_point": "main.py", "dependencies": []}),
-        encoding="utf-8",
-    )
-    className = "".join(word.capitalize() for word in name.replace("-", " ").split())
-    (directory / "main.py").write_text(
-        "class {}:\n"
-        "    def on_initialize(self):\n"
-        "        self.started = False\n"
-        "    def on_enable(self):\n"
-        "        self.started = True\n".format(className),
-        encoding="utf-8",
-    )
-    return directory
-
-
 class TestPluginRecord:
     """测试 PluginRecord 数据类"""
 

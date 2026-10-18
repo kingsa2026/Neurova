@@ -140,22 +140,6 @@ def _landingArgs(node) -> list:
     return [0]
 
 
-def _isCwdRelativeLiteral(value) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    if value in _SKIP_LITERALS:
-        return False
-    if value.startswith(("/", "~", "\\")):
-        return False
-    if len(value) > 1 and value[1] == ":":       # 盘符
-        return False
-    if "://" in value or value.startswith(("http", "ws")):
-        return False
-    if any(mark in value for mark in _NOT_A_LANDING):
-        return False
-    return bool(_REL_LITERAL.match(value))
-
-
 def _cwdLiteralsIn(node, pathTyped: bool = False) -> list:
     """落点参数里的 CWD 相对字面量。
 
