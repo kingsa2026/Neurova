@@ -25,7 +25,6 @@
 """
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 from tests import ast_scan
@@ -40,43 +39,23 @@ RETIRED = "neurova.shared_core.plan_orchestrator"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(source: str) -> list[str]:
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            out += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and not node.level:
-                out.append(node.module)
-                out += [f"{node.module}.{a.name}" for a in node.names]
-            elif node.level and node.module:
-                out.append(f"__REL__.{node.module}")
-    return out
-
-
 def _hits(root: Path) -> list[str]:
-    """子树里仍引用已退役编排器的文件清单。
+    """子树里仍引用已退役编排器的文件清单（四种取法都认）。
 
-    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
-    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
-    预筛词取退役模块末段，是判据的**充分条件**：无论绝对还是相对 import，
-    真引用它的文件必然含这一段字样。
+    取数走 `tests/ast_scan` 的共享入口 `importersOfModule`：它自己按**末段名**
+    （`plan_orchestrator`）预筛——那是判据的充分条件，而相对形的源码里根本没有包前缀，
+    按全名预筛会把它们在文本这一关就滤掉。此前这里是私有 `_importedNames` 加一个
+    `__REL__.` 前缀补丁：相对形自己补上了一半，而 `from neurova.shared_core import
+    plan_orchestrator`（父包取名形，`node.module` 是父包）仍看不见。
+    显示名由入口给"仓内相对路径／仓外绝对路径"，注入探针落在 tmp 下不会把
+    `ValueError` 冒名成被测故障。
     """
-    found = []
-    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("plan_orchestrator")):
-        if any(n == RETIRED or n.startswith(RETIRED + ".") or n == "__REL__.plan_orchestrator"
-               for n in _importedNames(ref.code)):
-            try:
-                shown = ref.path.relative_to(REPO).as_posix()
-            except ValueError:
-                shown = ref.path.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
-            found.append(shown)
-    return found
+    return sorted({rel for rel, _lineno, _form in ast_scan.importersOfModule(root, RETIRED)})
+
+
+def _basenames(paths: list[str]) -> list[str]:
+    """注入探针落在 tmp 下（要能证伪又不能往仓里种文件），按名字比就行。"""
+    return [p.rsplit("/", 1)[-1] for p in paths]
 
 
 def test_noImportOfRetiredOrchestrator():
@@ -116,10 +95,18 @@ def test_livePlanningFacesUntouched():
 def test_scannerCatchesARevival(tmp_path):
     bad = tmp_path / "revival.py"
     bad.write_text(f"from {RETIRED} import SharedPlanOrchestrator\n", encoding="utf-8")
-    assert _hits(tmp_path) == ["revival.py"]
+    assert _basenames(_hits(tmp_path)) == ["revival.py"]
+
+    # 父包取名形：真引用，旧那份私有谓词（含它自造的 `__REL__.` 补丁）看不见这一形
+    viaParent = tmp_path / "via_parent.py"
+    viaParent.write_text("from neurova.shared_core import plan_orchestrator\n", encoding="utf-8")
+    assert _basenames(_hits(tmp_path)) == ["revival.py", "via_parent.py"], (
+        "父包取名形没被抓到——导入通道判据又在学旧口径只比一种取法")
+
     ok = tmp_path / "live.py"
     ok.write_text("from neurova.planning.planning_tool import PlanningTool\n", encoding="utf-8")
     bad.unlink()
+    viaParent.unlink()
     assert not _hits(tmp_path), f"误伤了现役规划面：{_hits(tmp_path)}"
 
 
