@@ -56,6 +56,10 @@ def _vocab():
 def _statusLiteralsInRunWrites():
     """`add_run(...)` / `update_run(...)` 实参里出现的状态字面量（AST，不数注释）。"""
     offenders = []
+    surface = len(ast_scan.filesUnder(PRODUCTION))
+    assert surface > 500, (
+        f"扫描面现读 {surface} 个 .py（根＝neurova/）——状态词汇是生产侧的契约，"
+        "测试里出现的同名字符串是夹具不是第二份定义，故域明写在生产侧")
     # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
     # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     for path, tree in ast_scan.parsedModules(PRODUCTION, ".py"):

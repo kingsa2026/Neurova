@@ -65,6 +65,10 @@ def _hostsDefining(required: set) -> set:
     ——预筛是充分条件，缩面不缩判据。
     """
     hosts = set()
+    surface = len(ast_scan.sourceRefsUnder(NEUROVA, ".py"))
+    assert surface > 500, (
+        f"枚举面现读 {surface} 个 .py（根＝neurova/）——本格只管 Python 侧；"
+        "面板那一份是 `NeurUI` 的 TS，由另一条判据读，不在这面内（别把它当「面窄了」扩进来）")
     for path, node in ast_scan.transientNodes(NEUROVA, hints=tuple(sorted(required))):
         if not isinstance(node, (ast.List, ast.Set, ast.Tuple)):
             continue

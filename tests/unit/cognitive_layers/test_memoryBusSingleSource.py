@@ -67,7 +67,11 @@ def _eventBusDefinitions() -> list:
     hits = []
     # 枚举与解析走 tests/ast_scan 的共享预算；预筛词是判据的**充分条件**
     # （谓词只认名为 EventBus 的 ClassDef，连这串字样都没有的文件不可能命中）。
-    for ref in ast_scan.sourceRefsUnder(NEUROVA_ROOT, ".py", ast_scan.textHints("class EventBus")):
+    #
+    # 面＝**整仓**，不是 `neurova/`：本谓词按 AST 认定义，`tests/` 或 `scripts/` 里再长出一个
+    # 同名 ClassDef 就是第二份平行实装（各自订阅、各发各的事件，正是本判据要拦的那件事）。
+    # 扩面实测零新命中，也不会自咬——本档没有名为 EventBus 的定义，只有字样出现在说明里。
+    for ref in ast_scan.sourceRefsUnder(REPO_ROOT, ".py", ast_scan.textHints("class EventBus")):
         tree = ast.parse(ref.code)
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "EventBus":
@@ -77,6 +81,9 @@ def _eventBusDefinitions() -> list:
 
 def testOnlyOneEventBusImplementationRemains():
     """① 教义第 7 条的判据形态：该功能在仓内只剩一处实现被消费。"""
+    surface = len(ast_scan.sourceRefsUnder(REPO_ROOT, ".py"))
+    assert surface > 3000, (
+        f"枚举面现读 {surface} 个 .py（根＝仓根）——根被缩回单族时，「只剩一份」只说明那一族里没别人")
     hits = _eventBusDefinitions()
     assert len(hits) == 1, (
         f"仓内有 {len(hits)} 份 `class EventBus`（{hits}）——两份平行实现各调各的，"
