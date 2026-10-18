@@ -251,6 +251,9 @@ class TestIndexSurfaceDoesNotSpindle:
             f"建库任务未覆盖 {DOC_GLOB} —— docs/ 下的文档改动不会进索引"
         )
         hits = [p for p in PROJECT_ROOT.glob(DOC_GLOB) if p.is_file()]
+        surface = len(hits)
+        assert surface > 300, (
+            f"文档面现读 {surface} 份 Markdown（根＝{DOC_GLOB}）——根或后缀被改窄时，include 照样配得对而索引里什么都没有")
         assert hits, (
             f"{DOC_GLOB} 在真仓库里一个文件都没命中 —— "
             "这条 include 是空转的（流水线跑完照样 success，索引里什么都没有）"

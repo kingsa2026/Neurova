@@ -75,6 +75,8 @@ def test_noCodeAnywhereImportsTheRetiredTransportSurface():
     """
     retired = set(TRANSPORT_SURFACE) | {"execute_skill"}
     offenders = []
+    surface = len(ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py"))
+    assert surface > 3000, f"扫描面现读 {surface} 个 .py（根＝仓根）——根被改窄时「半区没复活」不代表退役成立"
     for ref in ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py",
                                          ast_scan.textHints("execution_layers")):
         if ref.path == INIT:
