@@ -22,6 +22,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests import ast_scan
+
 REPO = Path(__file__).resolve().parents[3]
 TOOL_LAYERS = REPO / "neurova" / "api" / "endpoints" / "tool_layers.py"
 
@@ -201,10 +203,10 @@ class TestDerivationIsTheOnlyInterpreter:
         """
         exempt = (TOOL_LAYERS.relative_to(REPO).as_posix(), DERIVE)
         hits = []
-        for path in (REPO / "neurova").rglob("*.py"):
-            rel = path.relative_to(REPO).as_posix()
-            hits.extend(_tagInterpretations(
-                path.read_text(encoding="utf-8", errors="ignore"), rel))
+        for ref in ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, ".py",
+                                            ast_scan.textHints("tags")):
+            rel = ast_scan.relativeToRepo(ref.path)
+            hits.extend(_tagInterpretations(ast_scan.sourceCode(ref.path), rel))
 
         mine = [h for h in hits if (h[0], h[1]) == exempt]
         assert mine, f"派生口自己都没被探测器认下来（现读命中 {hits}）——探测器坏了，别拿'零命中'当结论"

@@ -28,11 +28,12 @@ r"""丁：路径语义由**声明**决定，名字表降为"没有声明时"的�
 from __future__ import annotations
 
 import ast
-import io
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests import ast_scan
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
@@ -158,20 +159,17 @@ class TestTheNameTableIsClosingDown:
         改成钉代码形态：定义数＋调用位置。）
         """
         definitions, guardianReadsFormat = [], False
-        for path in REPO.glob("neurova/**/*.py"):
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
-            except (SyntaxError, UnicodeDecodeError):
-                continue
-            rel = path.relative_to(REPO).as_posix()
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == PATH_READER:
-                    definitions.append(rel)
-                if (isinstance(node, ast.ClassDef) and node.name == "FilePathGuardian"):
-                    for sub in ast.walk(node):
-                        if isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Constant) \
-                                and sub.slice.value == "format":
-                            guardianReadsFormat = True
+        for path, node in ast_scan.nodeScan(
+                ast_scan.PRODUCTION_ROOT, ".py",
+                ast_scan.textHints(PATH_READER, "FilePathGuardian")):
+            rel = ast_scan.relativeToRepo(path)
+            if isinstance(node, ast.FunctionDef) and node.name == PATH_READER:
+                definitions.append(rel)
+            if (isinstance(node, ast.ClassDef) and node.name == "FilePathGuardian"):
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Constant) \
+                            and sub.slice.value == "format":
+                        guardianReadsFormat = True
 
         assert len(definitions) == 1 and definitions[0] == "neurova/security/tool_guard.py", (
             f"`{PATH_READER}` 的实装应全仓一处且在 tool_guard，实得 {definitions}"
