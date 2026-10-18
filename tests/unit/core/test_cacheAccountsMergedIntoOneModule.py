@@ -63,12 +63,13 @@ def test_productionNoLongerImportsTheRetiredPaths(retired):
 
     按模块逐个参数化而不是只扫一条：漏一条即留下一条活路（`from neurova.memory.core
     import cache as m` 那种包级形状就只被第三条覆盖到）。
+
+    取数走共享入口 `importersOfModule`（末段名预筛＋四种取法都认）。此前是
+    `importsOf(nodeScan(hints=(全名,)), 全名)`：相对形 `from .cache import X` 不含包前缀，
+    既过不了文本预筛、也过不了 `node.module` 比对 ⇒ "零引用"可能是假零（§6-316 的窄面①）。
     """
-    offenders = [
-        f"{ast_scan.relativeToRepo(path)}:{lineno}"
-        for path, lineno in ast_scan.importsOf(
-            ast_scan.nodeScan(NEUROVA, hints=(retired,)), retired)
-    ]
+    offenders = [f"{rel}:{lineno} [{form}]"
+                 for rel, lineno, form in ast_scan.importersOfModule(NEUROVA, retired)]
     assert not offenders, f"仍有生产代码引用已退役的缓存路径 {retired}: {offenders}"
 
 

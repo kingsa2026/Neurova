@@ -434,11 +434,78 @@ def callsTo(scan: Iterable[Tuple[Path, ast.AST]], attribute: str) -> List[Tuple[
     ]
 
 
+def importersOfModule(root: Path, moduleName: str, suffix: str = ".py") -> List[Tuple[str, int, str]]:
+    """`root` 子树里**经导入通道取 `moduleName`** 的位置 `(相对路径, 行号, 取法)`。四种取法都认：
+
+      `import a.b.c` / `import a.b.c as p`、`from a.b.c import X`、
+      相对形 `from .c import X`（按发起文件位置解析成绝对名）、
+      父包取名形 `from a.b import c`（`node.module` 是父包，取的是子模块名）。
+
+    **预筛词取末段名 `c`，不取全名 `a.b.c`**——这是"判据成本"与"判据口径"同时成立的关键：
+    相对形与父包形的源码里根本不含包前缀，按全名预筛会把它们在**读文本这一关**就滤出扫描面，
+    于是"还在导入"被读成零引用——「取法窄于意图」那条老账在预筛这一关的复现。
+
+    为什么收在本模块而不是各判据自己写：`tests/` 里曾有 17 处各写一份 `_importedNames`，
+    每一处都要独立决定"相对形认不认、父包形认不认、预筛取哪个词"——同一个问题十七个口径，
+    正是教义第 6 条点名的形态。误报面只有一处并已界定：`from a.b import c` 里 `c` 若恰是
+    **符号名**而非子模块名，会被算进取法；两侧名字要同时相等才撞上，故宁可计入也不漏。
+
+    返回的是 `(相对路径, 行号, 取法)`，取法只用于报错文本点名，不参与裁决。
+    """
+    parts = moduleName.split(".")
+    base = parts[-1]
+    hits: List[Tuple[str, int, str]] = []
+    for path, node in transientNodes(root, suffix, textHints(base)):
+        rel = _relOrAbs(path)
+        form = importFormForModule(rel, node, moduleName)
+        if form:
+            hits.append((rel, node.lineno, form))
+    return hits
+
+
+def importFormForModule(relPath: str, node: ast.AST, moduleName: str) -> str:
+    """这个 import 节点取的是不是 `moduleName`？是则返回取法名，否则空串。**四种取法都认**。
+
+    拆成这个纯函数是为了**可证伪**：整棵树得在仓内才解得出相对形（`resolveImportModule` 按
+    发起文件的仓内相对路径算包名），而"四种形都认"这句话必须能用合成样本逐条验证——
+    往仓里种临时文件会污染别的常驻判据，所以把判定与枚举分开：枚举归 `importersOfModule`，
+    判定归这里。
+    """
+    parts = moduleName.split(".")
+    base, parent = parts[-1], ".".join(parts[:-1])
+    if isinstance(node, ast.Import):
+        return "import 全名" if any(a.name == moduleName for a in node.names) else ""
+    if not isinstance(node, ast.ImportFrom):
+        return ""
+    resolved = resolveImportModule(relPath, node)
+    if resolved == moduleName:
+        return "相对形" if node.level else "from 全名"
+    if parent and resolved == parent and any(a.name == base for a in node.names):
+        return "父包取名形"
+    return ""
+
+
+def _relOrAbs(path: Path) -> str:
+    """仓内给相对路径；仓外（探测器的合成夹具）给绝对路径。
+
+    为什么要容下仓外：`importersOfModule` 要能在 `tmp_path` 里被**合成源码**验证
+    （"四种取法都认"这句话没有合成样本就是不可证伪的），而往仓里种临时文件会污染别的常驻判据。
+    """
+    try:
+        return relativeToRepo(path)
+    except ValueError:
+        return path.as_posix()
+
+
 def importsOf(scan: Iterable[Tuple[Path, ast.AST]], moduleName: str) -> List[Tuple[Path, int]]:
-    """扫描结果里 `import moduleName` / `from moduleName import ...` 的命中点。
+    """扫描结果里 `import <moduleName>` / `from <moduleName> import ...` 的命中点。
 
     判据是「代码里有引用」，不是「文本里提过」——注释与字符串不算，故走 AST。
     `scan` 可以是 `nodeScan()` 的惰性迭代器（推荐），也可以是已物化的序列。
+
+    **本函数只认"取的就是那个模块"这一种形**：看不见相对形（`node.module` 不含包前缀）
+    也看不见父包取名形（`from a.b import c`）。要"谁还在导入它"的完整答案，用
+    `importersOfModule(root, moduleName)`——它自己管末段名预筛，不会在文本这一关漏。
     """
     hits: List[Tuple[Path, int]] = []
     for path, node in scan:
