@@ -25,6 +25,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
+#: 本档打出 `⇒`／`①` 这类 cp936 编不出的字符：不自己钉 stdout 编码时，`print` 抛的
+#: UnicodeEncodeError 会把退出码变成 1，读起来像"有一条腿 FAIL"（常驻判据
+#: `test_manualScriptStdoutEncoding` 拦的就是这一形）。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 WORK_ROOT = isolatedDataRoot(prefix="neurovaSchedulerB87")
 #: store 的路径在 `main()` 里注入 env——模块顶层改 `os.environ` 正是
 #: `test_manualScriptsEnvMutationRatchet` 拦的形态（顶层那一条 import 即执行，会把变量带进整个跑测进程）。
