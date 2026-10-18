@@ -52,6 +52,11 @@ tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py
 # 建档那轮只喂 `neurova/`，于是 `tests/` 下四处既存遮蔽活了三批而没有任何东西变红：
 # 同一把谓词喂 `tests/` 当场报 4 处、喂 `neurova/` 报 0 处，洞在面不在谓词。
 tests/unit/ci/test_moduleTopLevelShadowing.py
+# 上一条例子留下的账：能解出仓内扫描根的判据档共 70 处，其中 **46 处从没自证过"这次扫到了多少"**——
+# 那条根被改窄（或写错成少上一层）时，它们的读数是"零命中"而不是红。这道棘轮把
+# "新增一个扫仓内路径而不报面的判据"当场拦下；46 处存量登记在该文件的表里、按批消化，
+# 补上自证后必须显式收表（"降了要看得见"）。
+tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性

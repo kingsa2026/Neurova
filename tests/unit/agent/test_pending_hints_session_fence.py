@@ -160,9 +160,11 @@ class TestProductionConsumerPassesSession:
     def test_noBarePopPendingHintsCallInProduction(self):
         """生产侧每一处排干都必须传会话——空参即那条无栅栏的门。"""
         offenders = []
+        scanned = 0
         # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
         # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
         for path, tree in ast_scan.parsedModules(PRODUCTION, ".py"):
+            scanned += 1
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call)
@@ -172,6 +174,12 @@ class TestProductionConsumerPassesSession:
                     and not node.keywords
                 ):
                     offenders.append(f"{path.relative_to(PRODUCTION)}:{node.lineno}")
+        # 面自证：这条判据断的是"零违规"，而零违规既可能是"生产树真干净"也可能是"根写错、
+        # 少上一层、扫了个空目录"——不把这个数钉住，根一变窄它就恒绿（形态同族的实证见本仓
+        # 那条只喂 `neurova/` 的重名定义守卫，`tests/` 下的遮蔽因此活了三批）。
+        assert scanned > 500, (
+            f"生产树扫描面现读 {scanned} 个文件，地板 500 被打破＝这条判据没在扫它声称的东西"
+        )
         assert offenders == [], (
             "存在不传会话的排干点（跨会话串供的门没关）：\n  " + "\n  ".join(offenders)
         )
