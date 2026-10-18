@@ -7016,7 +7016,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       挡不住根被缩到子目录）。地板取现读量级之下（500／200），不是随手数。
     - **基线抄数错过一轮，如实记**：第一版表是我从探针尺抄的，判据自己一跑就错出"2 条漏登（真 offender
       没进表）＋ 5 条多登（表里留着已合规的档）"；改成由 `_faceFindings` 生成后依次是 48→47→46
-      （补掉一档、再认全两条形制）。**不同源的基线会把"尺换了"读成"治理有进展"**——这Exactly是
+      （补掉一档、再认全两条形制）。**不同源的基线会把"尺换了"读成"治理有进展"**——这正是
       形态集 291/296 说的事，这次落在我自己手上。
     - **四枚变异各中一格**（每枚跑完按字节还原并 md5 复证）：① 基线少登记一行 ⇒ 主格红（"升"那一半）；
       ② 给某档补自证而不收表 ⇒ `test_ratchetRecordsImprovementLoudly` 红（"降要看得见"）；
@@ -7028,8 +7028,78 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **明写的边界（不当已收口）**：按子集清单逐行 `read_text`、不经过扫描入口的档**不在本闸面内**——
       本档自己与 `test_ci_ast_scan_budget_guard.py` 都是这一形（没有根参数可解，就无从判面有没有被缩）。
       要覆盖那一形得先给这类读法定出"根"的表示法，另张票。另一条：基线必须由判据自身生成，
-      这条只能靠复核，格子拦不住"抄一份别的尺的数进来"。
+      这条只能靠复核，格子拦不住"抄一份别的尺的数进来"。**（下一笔：§6-324 就是把这把尺自己的两处取数缺陷修掉了。）**
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-322 的三态（裁定乙已落地）。
-      **仍开**：46 档存量按批消化；以及 §6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
+      **仍开**：46 档存量按批消化（**批 95 已收 10 档，余 36 档＝§6-324**；同一轮还把这把尺的两枚取数缺陷修了，
+      面由 70 档扩到 76 档）；以及 §6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
       批 82「4 档不走单点」、D11–D20、D19/D20 未裁部分、§6-318 边界①②、§6-317「同池名两读数即红」。
     - **本会话下一枚空号现查 §6-324**（写前必须现场重取；本笔落库时该读数为 323）。
+
+324. **批 95 · 这把尺自己的根解析坏了：`parents[N]` 按被档深度解、落点分五态、「根写错」做成不留存量豁免的闸——同批收掉 15 档存量（offender 46→36）** ✅🟢 —— 两笔：`f41eaef7`（预存常驻红根修：批 87 那枚活体探针没钉 stdout 编码）／`6766638f`（判据加固＋15 档面自证＋摘表 10 行）
+    - **要防的那件事，本闸自己正是样本**。§6-323 建的 `_resolveRoot` 里 `Path(__file__).resolve().parents[N]`
+      那一支**从仓根往上再数 N+1 层**，与档所在深度无关。现扫两档（`test_route_vocabulary_is_single_source.py`、
+      `tests/unit/test_deploy_config_guard.py`）的根被解成 `E:\`。失败集合没变（仍算 offender），所以它不红——
+      坏法在别处：**把根少写一层的那档会安静地掉出本闸的面**（解出来的目录存在即不算动态值），于是它的
+      "零命中"既可能来自干净、也可能来自根根本没指到代码。这一族的第一枚实证是 §6-321（遮蔽守卫喂 `tests/`
+      报 4、喂 `neurova/` 报 0），第二枚就是这条：**量面的尺坏了，报出来的数偏小且偏干净**（形态集 291 同族）。
+    - **同根因的第二枚**：递归深度上限 8 层。`REPO / "a" / "b" / "c" / "d"` 这一条链自身吃掉五层，
+      加上 `__file__`→`resolve()`→`parents[N]` 的层数就撞穿上限，被判成动态值 ⇒
+      `tests/unit/api/test_memoryWriteIdentityGate.py` 整档不在面内。修法两处同源：解析必须带**被档自身路径**
+      （`selfPath`），上限提到 64；不改判据形态、不放宽断言。
+    - **落点五态，其中两态零容忍**：仓内目录／仓内文件／仓外目录／指不到真实目录／动态值。只有"仓内目录"
+      要求面自证（"仓内文件"坏得**响**——入口当场 `FileNotFoundError`，目录坏掉才是"零命中"这种**哑**形态）；
+      "仓外"与"指不到"一律点名，**不看它在不在存量表里**。为什么要单开 `test_staticRootsNeverPointOutsideOrNowhere`：
+      `test_ratchetDoesNotRise` 只比"比基线新增了什么"，一档本来在册、后来把根写错，两侧失败集合完全相同。
+      实测把某在册档的 `parents[3]` 改成 `parents[4]`，旧两格全绿——存量名单把更重的那件事兜掉了。
+    - **红灯原文（三条都红在行为断言上，不是 import 噪声）**：
+      ```
+      E   AssertionError: 档在 ci/ 下（深度 3），parents[3] 就是仓根——这一档扫的是仓内路径，缺自证必须点名 ⇒ 判错：[]
+      E   AssertionError: 根多上九层＝解到仓外，面根本不在代码上；这种档**带了自证也照样红** ⇒ 判错：[]
+      E   AssertionError: 静态根指不到真实目录——与『目录被改名/删掉』同形，零命中是假的，必须点名 ⇒ 判错：[]
+      ```
+      绿灯 `collected 18 items / 18 passed`（面形状格 7＋分类器格 7＋四条独立格）。
+      其中"仓外"那格**初版取值打空**：`parents[9]` 修好后只交出 `missing`（`assert 'missing' == 'outside'` 当场把它
+      自己暴露出来），改写成 `parents[3].parent`（仓根上一层、目录真实存在）才落在分歧点上；`missing` 另由
+      `no_such_dir` 那格单独钉——两形各一格、各断自己的落点态（形态集 239 又一枚：控制格取值太干净）。
+    - **面读数的取法被预算门禁纠正了一次**。头一版统一 `ast_scan.filesUnder(根)` 量面，
+      `tests/unit/test_ci_ast_scan_budget_guard.py::TestNoUnprefilteredRepoWideScan` 当场拦下 3 档
+      （`test_manualScriptStdoutEncoding`／`test_ci_wallclock_assertion_ledger`／`test_tool_parallelism_readout`）：
+      `filesUnder` 是**只枚举**入口，配这三档自付的 `ast.parse` 正是该门禁点名的免检通道形态。
+      处置按判据的话做——**面读数优先由被裁的那次扫描给出**（物化返回值 `len()`，或循环里累加），
+      带文本预筛、命中数不随根大小变的档改用 `ast_scan.sourceRefsUnder(根, ".py")`；
+      既没把私有解析留着绕门禁，也没退成弱读数（教义第 2 条）。这条次序已写进判据 docstring，防止下批又走回头路。
+    - **存量与覆盖面（读数一律由 `_faceFindings` 现取，未手抄）**：面 70 档 → **76 档**（6 档因上面两枚解析缺陷
+      原本不在面内；其中 5 档本批补上面自证，第 6 档 `test_torch_lazy_import.py` 本就自带）；
+      offender **46 → 36**（摘表 10 行）；带自证 24 → **40**。地板取当轮 `filesUnder`／`sourceRefsUnder` 现读量级
+      之下（`neurova/` 1018→500、`tests/` 2398→1500、`tests/manual/` 174→100、`scripts/` 72→40、
+      `memory_layer/` 100→50、`scripts/diagnostics/` 23→12、`tests/unit/memory_ingest/` 24→12），
+      不是随手数；注释与 docstring 里**不留现值**（数字随批次动，写死一次就等着它讲假话）。
+    - **红自证**（唯一 tag `b95-redselfproof`）：把 15 个被判档退回 HEAD、只留新判据复跑同一选择集 ⇒
+      `1 failed, 15 passed`，失败集合恰为那 15 档、一条不多不少（`apply` 后 `git status` 复证 17 档改动无损、
+      `git stash list` 清空）。
+    - **四枚变异**（每枚按字节还原并 md5 复证：`crlf` 计数与还原前一致）：①`"diagnostics"→"no_such_dir"` ⇒
+      `[missing]` 点名；②`parents[3]→parents[4]` ⇒ `[outside]` 点名（**旧两格全绿，只有新闸咬住**）；
+      ③根改窄 `tests/manual→tests/ci` ⇒ 该档自己红在 `assert 0 > 100`；④枚举模式 `*.py→*.md` ⇒
+      红在 `assert 1 > 12`。
+    - **宽域 A/B**（定向 stash 形态；本仓 `scripts/ab_compare.sh` 缺件、HEAD worktree 大面积 ERROR＝形态集 227）：
+      选择集＝`tests/unit/ci`＋预算门禁＋`memory_ingest`＋`scripts`＋`cognitive`＋`memory`＋本批点名的档。
+      本树 **21 failed**／基线 **22 failed**，**仅本树红 0 条**；仅基线红 1 条＝
+      `test_manualScriptStdoutEncoding::testNoLiveScriptPrintsWhatThisMachineCannotEncode`，
+      即上一笔 `f41eaef7` 修好的交付证据（不冒领：该格在本树单跑亦绿）。两侧汇总条数与实际抽取条数对账
+      21/21、22/22。其余 21 条两侧同红＝子集在册的常驻红（5 条 npc 可达性＋1 条时钟量子门）与
+      `cognitive`／`memory` 两簇的顺序效应，本批不认领、也未见新增。
+    - **顺带清掉的预存常驻红**：批 87 留下的 `tests/manual/schedulerLiveSurfaceProbe_b87.py` 会打 `⇒`／`①`
+      又没钉 stdout 编码。先证它在 HEAD 就红（`git stash push -m "b95-precheck-manualstdout" -- <判据档>`
+      单跑那一格，红原文进 `f41eaef7` 正文），再按仓内既有活体档逐字同形态补 `sys.stdout.reconfigure(...)`。
+      **判据零容忍、不留基线，所以修的是探针不是判据**——这条是本批唯一的"归属自己"的常驻红。
+    - **绿面与落库后复取**：`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 等五档合跑
+      `150 passed, 1 skipped`（含 LOC 门禁、预算门禁、开发路径守卫、修复纪律三落点）；
+      `scripts/ci/audit_ledger_commit_guard.py` 报 624 条引用**失效 0**。子集**未动**，现值仍 640。
+      净 LOC：生产池 **+0/−0**；跑测基建池 `6766638f` +262/−62（判据档自身 +215/−50，15 个被判档 +47/−12）、
+      `f41eaef7` +5/−0。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-323"仍开"里那条"46 档存量按批消化"已收 10 档，
+      余 36 档；本闸取数两枚缺陷闭环。**仍开**：36 档存量继续按批消化；§6-323 明写的那条自盲区
+      （按子集清单逐行 `read_text`、不经扫描入口的档不在面内——含本档与预算门禁）；
+      以及 §6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、批 82「4 档不走单点」、
+      D11–D20、§6-318 边界①②、§6-317「同池名两读数即红」。
+    - **本会话下一枚空号现查 §6-325**（写前必须现场重取；本笔落库时该读数为 324）。
