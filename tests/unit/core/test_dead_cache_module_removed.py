@@ -44,13 +44,9 @@ RETIRED_SHIMS = (
 )
 
 
-#: 已删模块名：文本预筛词（含 `neurova.performance` 字样的文件才需要解析）
+#: 已删模块全名。预筛词由共享入口自己取**末段**（`performance`）——
+#: 写全名会把 `from .performance import X` 这种相对形在文本这一关就滤出扫描面。
 REMOVED_MODULE = "neurova.performance"
-
-
-def _iterProductionPy():
-    """生产侧源码路径（解析走 `tests/ast_scan.py` 的共享预算）。"""
-    return ast_scan.filesUnder(NEUROVA)
 
 
 class TestPerformanceModuleRemoved:
@@ -61,32 +57,30 @@ class TestPerformanceModuleRemoved:
         )
 
     def test_no_production_reference(self):
-        """生产侧不得 import 已删模块（判据是 `import` 语句，不是文本里提过）。
+        """生产侧不得 import 已删模块（判据是导入通道，不是文本里提过）。
 
-        解析走 `tests/ast_scan.py`（Issue #148）：全仓 `ast.parse` 单跑 5s、与
-        受保护子集其余 170 个文件共享机器时必然逼近 30s 默认墙钟；`importsOf`
-        只解析文本里出现过模块名的文件，与代码总量脱钩。
+        取数走 `tests/ast_scan.py`（Issue #148）的共享入口 `importersOfModule`：
+        它自己按**末段名**预筛（只解析含 `performance` 字样的文件 ⇒ 与代码总量脱钩），
+        四种取法都认。此前用的是 `importsOf(nodeScan(hints=(全名,)))`——那口径既看不见
+        `from .performance import X`（相对形不含包前缀，还被全名预筛滤掉），
+        也看不见 `from neurova import performance`（父包取名形），
+        "零引用"因此可能是假零。
         """
-        offenders = [
-            f"{ast_scan.relativeToRepo(path)}:{lineno}"
-            for path, lineno in ast_scan.importsOf(
-                ast_scan.nodeScan(NEUROVA, hints=(REMOVED_MODULE,)), REMOVED_MODULE)
-        ]
+        offenders = [f"{rel}:{lineno} [{form}]"
+                     for rel, lineno, form in ast_scan.importersOfModule(NEUROVA, REMOVED_MODULE)]
         assert not offenders, f"仍有代码引用已删除的 neurova.performance: {offenders}"
 
     def test_no_test_reference(self):
-        """测试也不得 import 已删模块（本守卫文件自身只谈字符串，不 import）。
+        """测试侧同样不得 import 已删模块（含 `tests/manual/` 里的旧活体脚本）。
 
-        解析范围用 `tests/ast_scan.py` 的共享预算；本文件按名字排除，
-        否则文档里那句 ``neurova.performance`` 会被自己的判据读到。
+        同一入口、同一口径；本文件按名字排除只是双保险——判据认的是 AST 节点，
+        文档里那句 ``neurova.performance`` 字样本来就不算引用，但预筛会把本档留在解析面内，
+        排除一次让"谁在引用"这份读数不混进守卫自己。
         """
-        offenders = []
-        for path, lineno in ast_scan.importsOf(
-                ast_scan.nodeScan(PROJECT_ROOT / "tests", hints=(REMOVED_MODULE,)),
-                REMOVED_MODULE):
-            if path.name == Path(__file__).name:
-                continue
-            offenders.append(f"{ast_scan.relativeToRepo(path)}:{lineno}")
+        offenders = [f"{rel}:{lineno} [{form}]"
+                     for rel, lineno, form in ast_scan.importersOfModule(
+                         PROJECT_ROOT / "tests", REMOVED_MODULE)
+                     if rel.rsplit("/", 1)[-1] != Path(__file__).name]
         assert not offenders, f"测试仍引用已删除的 neurova.performance: {offenders}"
 
 
