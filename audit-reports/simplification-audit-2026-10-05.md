@@ -6516,9 +6516,61 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       ⇒ 死码不只是占地方，它每年要被机械修一遍。
     - **未覆盖（原样列出，不并进主表）**：`NeurUI/src` 侧是否间接展示这两份的读数（只查了 Python 通道与 OpenAPI
       路由，未反查前端契约名）；相邻岛 `collaborate/models.py`(150)＋`template.py`(373) 复算到"只有彼此＋门面
-      再导出＋形状检阅"，但**没做运行时反证**故本卷不判；core 那 12 项相位的等价覆盖率只做了定性；
+      再导出＋形状检阅"，但**没做运行时反证**故本卷不判（**⇒ 该岛已量清＝§6-312**，含运行时拖拽实证与
+      `template.py` 的双源字节比对）；core 那 12 项相位的等价覆盖率只做了定性；
       `4a3c9380` 之外是否有被 squash 的接线尝试（未查 reflog／远端分支）。
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：D5（比对本身）。**仍开**：本票甲／乙／丙等裁、
       D1 甲／乙、§6-293、D9、D10、批 82 那条"4 档不走单点"的次序；**新增**：D11–D18 八条缺陷
       （随退役批次先立红灯，不与之捆同一次改动）。
     - **本会话下一枚空号现查 §6-312**（写前必须现场重取；本笔落库时该读数为 311）。
+
+312. **批 84 · `neurova/collaborate/` 整座岛量清：活的一半是 scheduler，死的一半从未接上过，而**门面把整座岛挂在每次进程启动路径上**（🔴 三态票，推荐乙；取证不实施）** 🟡 —— §6-311"未覆盖"里那句"相邻岛未做运行时反证故不判"在此结清。档案落 `audit-reports/collaborate-island-archive-2026-10-18.md`。本卷零改码。
+
+    - **按符号切，不按文件切**（整座包 1672 行）：
+      - **活（不可动，≈764 行）**：`workflow/scheduler.py`(426) 的 `AgentScheduler`/`get_scheduler`/
+        `register_action_handlers` ＋ `workflow/models.py` 的 `ScheduledTask`/`compute_next_run`/`FlowContext`**本体**。
+        生产通道（✅ 复算）＝`api/endpoints/scheduler.py:29-30,298,405`、`api/endpoints/agent_package.py:68,110`。
+      - **死（候选退役，≈929 行）**：`models.py`(150，4 符号) ＋ `template.py`(373，3 符号) ＋
+        `workflow/orchestrator.py`(340，2 符号) ＋ `workflow/models.py` 的 `FlowPhase`/`FlowEvent`
+        与 `FlowContext` 的编排方法群。外部按名取用**只剩 `test_refactor_imports.py` 的形状检阅**。
+      - **接线 0 条**：需求侧全有现役承载（模板＝`agent/templates/collaboration_template.py`、
+        角色→成员派发＝`agent/team.py` 经 `api/endpoints/acp_api.py:151-162`、流程执行＝neurflow 54 条路由、
+        定时＝本包活的 scheduler）。
+    - **C5 是本卷最有价值的一条（✅ 拖拽实证，不是推理）**：干净子进程里**只** import 那个活的
+      `collaborate.workflow.scheduler`，结果 `neurova.collaborate`、`collaborate.models`、
+      `collaborate.template`、`collaborate.workflow.orchestrator` **全部进 `sys.modules`**——
+      机制是两个包门面（`collaborate/__init__.py:8-9`、`workflow/__init__.py:8-9`）无条件再导出整座岛，
+      而 Python 导入子包必先执行父包 `__init__`。⇒ 每次进程启动都在执行 **929 行死码的模块体**。
+      这不是"占地方"，是真实成本＋读者预期（下一个人打开 `neurova/collaborate` 会以为这里有协作实现）。
+      出生即如此：`1832a12b`(2026-06-03) 一笔建整包 7 档 ＋1434 行，门面再导出**同笔写进**。
+    - **`template.py` 与现役那份不是"两个设计"，是同一份的双胞胎**（✅ difflib 量化）：
+      `CollaborationTemplate`＋`TemplateManager` 那一段，**350 行里 346 行逐行相同**、相似度 95.7%，
+      差异全是文件头与活支多出的预设模板（活支相对死支 ＋146/−9）。⇒ 教义 第 6 条的纯双源，
+      且**"取长补短"无事可做**（活支已是超集），合并动作＝删除。真消费链在活支侧（`agent/team.py:25` 取 `AgentRole`）。
+    - **三态票（推荐乙）**：甲＝只删 `models.py`＋`template.py`＋`orchestrator.py` 三档（−863）并改门面，
+      留 `workflow/models.py` 的死半区；**乙＝甲 ＋ 按符号切 `workflow/models.py` 半区（候选 −929）**，
+      但要说清差别——切到 C4 就是**改现役符号**（`FlowContext` 要瘦身到调度器真用的那几个字段），
+      必须"先立判据钉住调度器用到的字段与行为 → 再瘦 → A/B → 活体"，不能当删文件做；
+      丙＝只改两个门面（岛仍在但不再挂启动路径，最省，死码本体留着）。
+      不可逆点＝`TaskStep.timeout_seconds`/`input_requirements`/`output_produces`/`optional` 四个字段位随 C1 消失——
+      今天它们**无生产者也无读者**（唯一读者就是死的 orchestrator）。
+    - **顺带登记三条缺陷（单列）**：**D19** 包门面把整座死岛挂在每次启动路径上（本卷那条实证；
+      与 §6-42/批 43 那族"零消费者再导出"同根因，但危害不同）；**D20** 活支那份的
+      `agent/templates/collaboration_template.py:502 get_template_manager()` 同样零生产消费者
+      （只自家模块＋门面再导出；判它要先证"协作模板注册表"这条产品能力有没有人要 ⇒ 属产品语义，本卷不判）；
+      **D21** 双源分叉无守卫——两份 346/350 行同形的实现，仓内没有任何判据拦"同一逻辑被复制第二份"
+      （教义 第 6 条靠自觉）；做成会红的格子前要先量命中面（同 `class` 名＋同方法集合的判据容易误伤合理同名单子类，本卷未量）。
+    - **两条本卷自查**：① 上一场子代理把 `FlowContext` 判进死半区**不成立**（活的 `scheduler.py:260`
+      真在 `context = FlowContext()` 构造并传给 handler，签名契约在 `:103/:358`），已按符号改判——
+      ◑ 不进主表这条纪律第二次生效。② 本卷第一版把子集情况写错（说"测活半区的那档在册"）并把形状检阅
+      数成 15 格，逐条 `grep -c "^<path>$"` 现读后改为**四档全不在册**（`test_workflow_scheduler`/
+      `test_refactor_imports`/`test_scheduler_api_auth`/`test_notifications_negative_screen_bridge` 皆 0）、
+      `test_refactor_imports.py` 现数 **29 格**（24 格 `is not None` ＋ 5 格 `callable`/枚举值，无一触行为）。
+      这条改判本身也是要记的：**活的那一半同样没有 CI 保护 ⇒ 退役批次里"CI 没红"不能当"改对了"**。
+    - **未覆盖**：`/api/v1/builder/templates` 由 `api/endpoints/builder.py`（prefix `/v1/builder`）服务，
+      未逐条确认它与"协作模板"是否同一业务概念（若是，C2 的替代还多一处）；活的 scheduler 只证到
+      "端点 import 且路由在册"，**未跑计数 wrapper**；`tests/unit/collaboration/*`、
+      `tests/unit/projects/test_teams.py` 各测哪一份实现未逐档核；D21 那条守卫的命中面未量。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-311 那条"相邻岛未判"。**仍开**：本票甲／乙／丙
+      等裁、§6-311 甲／乙等裁、D1 甲／乙、§6-293、D9、D10、批 82 那条"4 档不走单点"的次序、D11–D21。
+    - **本会话下一枚空号现查 §6-313**（写前必须现场重取；本笔落库时该读数为 312）。
