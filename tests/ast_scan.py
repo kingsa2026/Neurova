@@ -43,6 +43,7 @@ from __future__ import annotations
 import ast
 import functools
 import gc
+import re
 from pathlib import Path
 from typing import Iterable, Iterator, List, NamedTuple, Tuple
 
@@ -646,3 +647,83 @@ def dottedChain(node: ast.AST):
         return None
     parts.append(cur.id)
     return ".".join(reversed(parts))
+
+
+#: 词法层的 def/class 头名（`shadowedTopLevelNames` 的预筛，**充分条件**，见该函数docstring）。
+#: 行首允许缩进是**故意的宽收**：类内方法名也算进来只会多解析几个文件，
+#: 而少收一种形就会把真命中滤出扫描面——预筛的错只许朝"多付钱"那一侧偏。
+DEF_OR_CLASS_HEADER = re.compile(r"^[ \t]*(?:async[ \t]+def|def|class)[ \t]+(\w+)", re.M)
+
+
+class TopLevelNameDup(NamedTuple):
+    """一份「模块级同名被定义多次」的档案：路径／名字／各份行号／剥掉说明行后是否同体。"""
+
+    rel: str
+    name: str
+    linenos: List[int]
+    sameIgnoringDocstring: bool
+
+
+def _lexicalHeaderDup(code: str) -> bool:
+    """词法闸：这份源码**有没有可能**藏着模块级重名定义。"""
+    if "\\\n" in code:
+        # 反斜杠续行能把 `def` 与头名拆到两行，词法层看不见名字——这种文件一律放行解析。
+        return True
+    names = DEF_OR_CLASS_HEADER.findall(code)
+    return len(names) != len(set(names))
+
+
+def _shapeSignature(node: ast.AST) -> Tuple[Tuple[str, ...], str]:
+    """节点的可比形状：装饰器 + 剥掉首条 docstring 后的函数/类体语法图。
+
+    为什么要剥 docstring：报错文本得说清「两份是差在说明文字，还是差在断言」——
+    前者是同一件事写了两遍（编辑哪一份才生效这件事答不出来），后者才可能藏着真分叉。
+    装饰器进签名，否则 `@x` 与裸定义会被判成同体。
+    """
+    body = list(getattr(node, "body", []))
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    deco = tuple(ast.dump(d) for d in getattr(node, "decorator_list", []))
+    return deco, ast.dump(ast.Module(body=body, type_ignores=[]))
+
+
+def shadowedTopLevelNames(root: Path, suffix: str = ".py") -> List[TopLevelNameDup]:
+    """`root` 子树里**同一个模块级名字被定义两次以上**的落点，按 `(路径, 名字)` 排序。
+
+    为什么要给它做格子（不是"下次编代码注意点"）：第二次定义会**静默遮住**第一份——
+    模块命名空间里只剩后一份，于是
+      * 被遮住的那份若是 `Test*` 类，它名下每一条用例**连收集都不发生**
+        （读代码的人看见两份共 6 格，实际在跑 3 格；`--collect-only` 只报一个 Class 节点）；
+      * 若第一份里恰好放着某个模块级常量的**唯一消费点**，那份常量从此是第二份表示——
+        改它既不报错也不生效。
+    判据**不看体是否相同**：同体也是遮蔽（"编辑哪一份才生效"本身就答不出来），
+    体只是写进报错文本供分流处置。
+
+    口径与边界（写在这里，别让下一轮重新猜）：
+      * 只看 `tree.body` 的 `FunctionDef`／`AsyncFunctionDef`／`ClassDef`；被 `if`／`try`
+        包一层的同名定义（`if TYPE_CHECKING:`、平台分支这类**合法**条件定义）不在面内；
+      * 类体内的同名方法不在面内（合法写法极多，且与本条要防的"遮蔽"不同根）；
+      * 预筛是**充分条件**：真命中必然让某个 def/class 头名在词法层重复出现；
+        行续写那一形由 `\\\n` 兜底整档放行。
+    """
+    hits: List[TopLevelNameDup] = []
+    for ref in sourceRefsUnder(root, suffix):
+        if not _lexicalHeaderDup(ref.code):
+            continue
+        try:
+            tree = ast.parse(ref.code)
+        except (SyntaxError, ValueError):
+            continue
+        byName: dict = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                byName.setdefault(node.name, []).append(node)
+        for name, nodes in byName.items():
+            if len(nodes) < 2:
+                continue
+            first = _shapeSignature(nodes[0])
+            hits.append(TopLevelNameDup(
+                _relOrAbs(ref.path), name, [n.lineno for n in nodes],
+                all(_shapeSignature(n) == first for n in nodes[1:])))
+    return sorted(hits, key=lambda h: (h.rel, h.name))
