@@ -26,6 +26,8 @@ from tests import ast_scan
 NEUROVA_ROOT = Path(vector_math.__file__).resolve().parent.parent
 SINGLE_FACE = "core/vector_math.py"
 OLD_HOST = "cognitive_layers/memory_layer/unified_vector_store.py"
+#: 旧落点的**绝对模块名**——相对形要按它比，不能按末段名猜
+OLD_HOST_MODULE = "neurova." + OLD_HOST[: -3].replace("/", ".")
 PRIMITIVES = ("vector_norm", "vector_dot", "vector_normalize", "vectorNorm", "vectorDot", "vectorNormalize")
 
 
@@ -53,22 +55,20 @@ def _primitiveDefinitions() -> list:
 def _importsFromOldHost() -> list:
     """还有谁从旧落点导这几个名字——留着就是两份出口并存，改一处另一处静默不跟。
 
-    取数走共享预算的 `importsOf`（`nodeScan` 惰性产出 + 判据筛 import 节点）：
-    文本预筛取旧落点名——连模块名都没出现的文件不可能从它导东西。
+    取数走共享入口 `namesTakenFrom`：它把每一条 `from … import …`（含 `from .x`、`from ..x`
+    这些相对形）先经 `resolveImportModule` 解析成绝对名再比对，判据自己不再猜"末段名相配"。
+    预筛仍取旧落点名——那是充分条件：连这串字样都没出现的文件不可能从它导东西。
+
+    **已知未收边界**（记在 §6-318，不在本格内偷偷放宽）：
+    `import …unified_vector_store as p` 之后 `p.vector_norm` 这种**属性取法**不在本格面内。
+    要覆盖它得换 `takenPerModule`，而那是整树全量解析、不带文本预筛——常驻格付不起这个成本，
+    付得起的写法是把属性形做成一次性取证而不是常驻判据。
     """
-    hits = []
-    for ref in ast_scan.sourceRefsUnder(NEUROVA_ROOT,
-                                        hints=ast_scan.textHints("unified_vector_store")):
-        for node in ast.walk(ast_scan._cachedParse(ref.stamp, ref.code)):
-            if not isinstance(node, ast.ImportFrom) or not node.module:
-                continue
-            if not node.module.endswith("unified_vector_store"):
-                continue
-            bad = [a.name for a in node.names if a.name in PRIMITIVES]
-            if bad:
-                hits.append("%s:%s" % (ref.path.relative_to(NEUROVA_ROOT).as_posix(),
-                                       ",".join(sorted(bad))))
-    return sorted(hits)
+    scan = ast_scan.nodeScan(NEUROVA_ROOT, ".py", ast_scan.textHints("unified_vector_store"))
+    return sorted({f"{ast_scan.relativeToRepo(path)}:{name}"
+                   for name, path, _lineno
+                   in ast_scan.namesTakenFrom(scan, OLD_HOST_MODULE)
+                   if name in PRIMITIVES})
 
 
 def testPrimitivesAreDefinedOnlyInTheSingleFace():
@@ -92,6 +92,13 @@ def testEnumerationProbesHaveTeeth():
         "from neurova.cognitive_layers.memory_layer.unified_vector_store import vector_norm, UnifiedVectorStore\n"
     ).body[0]
     assert sorted(a.name for a in imports.names if a.name in PRIMITIVES) == ["vector_norm"]
+
+    # 本格对 `from .x import` 这一形是否有输入：相对名必须解得回旧落点的绝对模块名，
+    # 否则 `_importsFromOldHost` 的等值比对就是瞎的（解名这件事由共享单点负责）
+    rel = ast.parse("from .unified_vector_store import vector_norm\n").body[0]
+    assert ast_scan.resolveImportModule(
+        "neurova/cognitive_layers/memory_layer/some_module.py", rel) == OLD_HOST_MODULE, \
+        "相对形解不回旧落点——本格看不见 `from .unified_vector_store import vector_norm`"
 
 
 def testMovedSemanticsAreValueIdentical():

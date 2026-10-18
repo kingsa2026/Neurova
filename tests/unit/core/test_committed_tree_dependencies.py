@@ -40,20 +40,24 @@ def _resolveImports(module: str, exists: Dict[str, bool]) -> Optional[str]:
 
 
 def _importsOf(relPath: str) -> List[str]:
+    """HEAD 版源码里被取用的 `neurova.*` 模块名（相对形按发起文件位置解析成绝对名）。
+
+    "把 `from .x import a` 解成绝对名"这件事在 `tests/ast_scan.resolveImportModule` 已有单点。
+    这里原先自己抄了一份层数算术（`package[: len(package) - (node.level - 1)]`）——两份实现
+    迟早对 `from . import x` 这类形状分叉，而分叉的代价是这条判据**看不见**：它只会报
+    "import 了未入库的模块"，不会报"我把相对形解错了"。
+    """
     raw = _git("show", "HEAD:" + relPath)
     try:
         tree = ast.parse(raw.decode("utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         return []
     found: List[str] = []
-    package = Path(relPath).parent.parts
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if node.level == 0 and node.module:
-                found.append(node.module)
-            elif node.level:
-                base = list(package[: len(package) - (node.level - 1)])
-                found.append(".".join(base + ([node.module] if node.module else [])))
+            module = ast_scan.resolveImportModule(relPath, node)
+            if module:
+                found.append(module)
         elif isinstance(node, ast.Import):
             found.extend(alias.name for alias in node.names)
     return [m for m in found if m.startswith("neurova.")]
