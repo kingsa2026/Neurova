@@ -6706,3 +6706,48 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **仍开**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、批 82 那条
       "4 档不走单点"、D11–D20、D19/D20 未裁部分、§6-314 记的两条窄面。
     - **本会话下一枚空号现查 §6-316**（写前必须现场重取；本笔落库时该读数为 315）。
+
+316. **批 88 · §6-314 记的两条窄面收口：导入通道口径收回一处（四种取法都认＋末段名预筛），`DefaultGuard` 那格补上属性访问形** ✅ —— 三笔：`52681727`（第一刀：共享入口＋新档四格＋三处迁移）／`9fb1599e`（第二刀：`_nameUseForm` 三形＋可证伪格）／子集 638→**639**。生产池 **+0/−0**（两刀都不动码）；测试/基建池 +203/−32、+51/−7、+3/−0。
+
+    - **两条窄面是同一族的两种坏法**（取法窄于意图，不报错只是看不见）：① `ast_scan.importsOf`
+      把 `node.module` 与全名逐字比对 ⇒ `from .performance import X`（相对形不含包前缀）与
+      `from neurova import performance`（父包取名形，`node.module` 是父包）都不在它的面内，
+      而且按**全名**做文本预筛时这两形连 parse 都轮不到；② `testDefaultGuardNameGoneFromProductionSurface`
+      认 `ClassDef`/`Name` 不认 `ast.Attribute` ⇒ 一条活守卫改成 `tool_engine.DefaultGuard` 就继续服役而格子照样绿。
+    - **命中面现量**（一次性探针，跑完即删；全仓 `neurova.*` 导入按取法分布）：
+      `from 全名 14299 ／ import 全名 546 ／ 相对形 380`，另数得**父包取名形 1782** 条
+      ⇒ 窄口径**结构上取不到**的取法共 2162 条。**诚实边界：本批未证到一条现役假零**——迁的那 5 格
+      在两口径下都报零；补的是口径缺口，不是已发生的误判。这句话必须留在账上，否则下一轮会把
+      "2162" 读成 2162 个缺陷实例。
+    - **收口形态**：枚举与判定分开（`importersOfModule` 管末段名预筛与遍历，`importFormForModule`
+      与 `_nameUseForm` 是纯函数）——纯函数才能被**合成样本**逐形喂，否则"四种取法都认"这句话
+      只能靠往仓里种临时文件来验，那会污染同树别的常驻判据。`_relOrAbs` 容下仓外路径正是为此。
+      误报面已界定并写进入口 docstring：`from a.b import c` 里 `c` 若恰是**符号名**而非子模块名会被计入，
+      两侧名字同时相等才撞，宁可计入不漏。
+    - **红自证**（把 `tests/ast_scan.py` 单独退回 HEAD 版，余下保持本批态，同一选择集复跑）：
+      `8 failed, 21 passed`，失败集恰好＝本批依赖新入口的格（新档 3 格＋dead_cache 两格＋
+      cacheAccounts 参数化 3 格），无多余项；随后 `cp` 还原、md5 复证一致。第二刀的变异
+      （`node.attr == name` → `False and node.attr == name`，等价旧口径）报
+      `1 failed, 1 passed`：新格红在 `assert set() == {'属性访问'}`，而**生产面那格在同一变异下仍绿**
+      ——这就是旧口径没牙的实证。第一刀另有七枚变异（前段会话，仓外 worktree 逐枚复证还原），
+      其中"只比 `node.module`"的两枚都让注入样本翻绿，证本刀补的是真漏检。
+    - **宽域 A/B**（基线＝仓外 worktree at HEAD，两侧同一选择集 `tests/unit/ci`＋`core`＋`execution`）：
+      本批 15 failed / 2508 passed ↔ 基线 15 failed / 2503 passed，**FAILED 集合差为空**；15 条两侧同红
+      全在常驻红小账（npc 脚本可达性 5／时钟量子门 1／ffmpeg CJK 字体探测 2／其余 7），非本批所加；
+      passed 差 5 恰＝本批新增格数。汇总报的 15 与实际抽取的 15 对账一致，捕获口径有效。
+    - **未迁的私有导入谓词档，现场复算得 6 档**（子代理曾报"约 13/18 处"，按 import 语句复算是 6）：
+      `cognitive_layers/test_memoryLayerGenerationResidue.py:63`、`context/test_secondCacheFaceRetired.py:57`、
+      `core/test_kvConfigSingleSource.py:35`、`shared_core/test_sharedCoreOrchestratorRetired.py:43`（四份
+      `_importedNames`）、`core/test_committed_tree_dependencies.py:42`（`_importsOf`）、
+      `core/test_vectorPrimitivesSingleFace.py`（用窄共享入口 `importsOf`，**正解是 `takenPerModule`**——
+      它问的是"谁取了那几个名字"而非"谁导入了那个模块"）。迁移是逐档判断不是批量替换：
+      前三档问"这个文件导入了什么"，改指宽入口要按取数意图重写一遍判据体。
+    - **登记两处仍不覆盖的形状**：`getattr(x, "DefaultGuard")` 字符串形（把 `ast.Constant` 算进取法会
+      连 docstring 与日志文案一起咬，那是放宽判据）；以及 `importersOfModule` 的符号名同形误报面（见上）。
+    - **顺带量到一条自家惯例的风险**：`tests/` 下 **350 个 `.py`** 的注释或 docstring 里写着 `§6-NNN` 格号
+      （形态集 202 那条老账在此是仓库级惯例而非个别失手）。本批只把自己新写的几处改掉，
+      全量去号＝一次跨 350 档的散文改写，收益取决于台账是否会重编号——**不立简化项**，留此读数供裁。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-314 明记的两条窄面（口径层）。
+      **仍开**：未迁的 6 档、§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
+      批 82 那条"4 档不走单点"、D11–D20、D19/D20 未裁部分。
+    - **本会话下一枚空号现查 §6-317**（写前必须现场重取；本笔落库时该读数为 316）。
