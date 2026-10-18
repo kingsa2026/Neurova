@@ -32,37 +32,22 @@ RETIRED = "neurova.core.config_manager"
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(source: str) -> list[str]:
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
-    out: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            out += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            out.append(node.module)
-    return out
+def _basenames(paths: list[str]) -> list[str]:
+    """显示名只取末段——共享入口对仓外路径给的是绝对 posix（注入探针落在 tmp 下）。"""
+    return [p.rsplit("/", 1)[-1] for p in paths]
 
 
 def _importers(root: Path) -> list[str]:
-    """子树里仍 import 已退役 KV 简单版的文件清单。
+    """子树里仍 import 已退役 KV 简单版的文件清单（四种取法都认）。
 
-    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
-    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
-    预筛词取退役模块末段 `config_manager`，是判据的**充分条件**。
+    取数走 `tests/ast_scan` 的共享入口 `importersOfModule`：它自己按**末段名**
+    （`config_manager`）预筛——那是判据的充分条件，且相对形的源码里根本没有包前缀，
+    按全名预筛会把它们在文本这一关就滤掉。此前这里是私有 `_importedNames`（只比
+    `node.module` 原文），`from neurova.core import config_manager` 这一形从它面里滑过去。
+    显示名由入口给"仓内相对路径／仓外绝对路径"，注入探针落在 tmp 下时不会把
+    `ValueError` 冒名成被测故障。
     """
-    found = []
-    for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("config_manager")):
-        if any(n == RETIRED or n.startswith(RETIRED + ".") for n in _importedNames(ref.code)):
-            try:
-                shown = ref.path.relative_to(REPO).as_posix()
-            except ValueError:
-                shown = ref.path.relative_to(root).as_posix()   # 注入探针在 tmp 下（§6-107 的坑）
-            found.append(shown)
-    return found
+    return sorted({rel for rel, _lineno, _form in ast_scan.importersOfModule(root, RETIRED)})
 
 
 def _kvConfigManagerClasses(root: Path) -> list[str]:
@@ -132,7 +117,14 @@ def test_livePlanningFacesUntouched():
 def test_scannerCatchesARevival(tmp_path):
     bad = tmp_path / "revival.py"
     bad.write_text(f"from {RETIRED} import ConfigManager\n", encoding="utf-8")
-    assert _importers(tmp_path) == ["revival.py"]
+    assert _basenames(_importers(tmp_path)) == ["revival.py"]
+
+    # 父包取名形：旧口径只比 `node.module` 原文，这一形（=真引用）从它面里滑过去
+    viaParent = tmp_path / "via_parent.py"
+    viaParent.write_text("from neurova.core import config_manager\n", encoding="utf-8")
+    assert _basenames(_importers(tmp_path)) == ["revival.py", "via_parent.py"], (
+        "父包取名形没被抓到——导入通道判据又在学旧口径只比一种取法")
+
     dup = tmp_path / "second_face.py"
     dup.write_text(
         "class ConfigManager:\n    def get(self, k, d=None):\n        return d\n"
@@ -140,6 +132,7 @@ def test_scannerCatchesARevival(tmp_path):
     assert _kvConfigManagerClasses(tmp_path), "探测器抓不到新长出的第二份 KV 实现"
 
     bad.unlink()
+    viaParent.unlink()
     dup.unlink()
     assert not _importers(tmp_path)
 

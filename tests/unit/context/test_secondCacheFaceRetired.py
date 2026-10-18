@@ -54,45 +54,23 @@ RETIRED = frozenset({"neurova.context_cache", "neurova.context_persistence"})
 pytestmark = pytest.mark.timeout(60)
 
 
-def _importedNames(source: str) -> list[str]:
-    """一份源码里 AST 可见的导入目标（含 `from X import y` 的 X 与 `import X` 的 X）。"""
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
-    names = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            names.append(node.module)
-            names += [f"{node.module}.{a.name}" for a in node.names]
-    return names
-
-
 def _retiredImports(root: Path) -> list[str]:
-    """`root` 树里仍引用已退役模块的落点。
+    """`root` 树里仍引用这两座已退役缓存的落点（四种取法都认）。
 
-    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
-    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
-    预筛词是判据的**充分条件**：连 `context_cache` / `context_persistence` 字样
-    都没出现的文件不可能 import 这两座。
+    取数走 `tests/ast_scan` 的共享入口 `importersOfModule`：它自己按**末段名**预筛
+    （`context_cache` / `context_persistence`——那是判据的充分条件），且相对形、
+    父包取名形都在面内。此前这里是私有 `_importedNames`，只认 `node.module` 原文且
+    显式跳过 `node.level`——`from neurova import context_cache` 这一形（真引用）看不见。
+    显示名：仓内给仓库相对路径，仓外（注入探针落在 tmp 下）只给文件名，
+    否则判据自己会抛 `ValueError` 冒名成被测故障。
     """
     hits = []
-    hints = tuple(sorted({r.rsplit(".", 1)[1] for r in RETIRED}))
-    for ref in ast_scan.sourceRefsUnder(root, ".py", hints):
-        for n in _importedNames(ref.code):
-            if n in RETIRED or any(n.startswith(r + ".") for r in RETIRED):
-                # 相对 REPO 只对仓内扫描有效；注入探针在 tmp 下，退到按扫描根显示，
-                # 否则判据自己会抛 ValueError（首跑就是这么崩的，不是被测代码崩）
-                try:
-                    shown = ref.path.relative_to(REPO).as_posix()
-                except ValueError:
-                    shown = ref.path.relative_to(root).as_posix()
-                hits.append(f"{shown} → {n}")
-                break
-    return hits
+    for retired in sorted(RETIRED):
+        for rel, _lineno, _form in ast_scan.importersOfModule(root, retired):
+            shown = rel if rel.startswith(("neurova/", "tests/", "scripts/", "docs/")) \
+                else Path(rel).name
+            hits.append(f"{shown} → {retired}")
+    return sorted(hits)
 
 
 def test_noProductionImportOfRetiredCaches():
@@ -145,8 +123,19 @@ def test_scannerCatchesARevival(tmp_path):
         "from neurova.context_cache import ContextCacheManager\n", encoding="utf-8")
     assert _retiredImports(tmp_path) == ["revival.py → neurova.context_cache"]
 
+    # 父包取名形：真引用，旧口径（只比 node.module 原文）看不见这一形，故单列一枚探针
+    viaParent = tmp_path / "via_parent.py"
+    viaParent.write_text("from neurova import context_persistence\n", encoding="utf-8")
+    assert _retiredImports(tmp_path) == [
+        "revival.py → neurova.context_cache",
+        "via_parent.py → neurova.context_persistence",
+    ], "父包取名形没被抓到——导入通道判据又在学旧口径只比一种取法"
+
     # 反证：现役池缓存的导入不该被误伤（谓词过宽会让下一轮直接放宽守卫）
     ok = tmp_path / "live.py"
     ok.write_text("from neurova.context_pool import ContextPool\n", encoding="utf-8")
+    okParent = tmp_path / "live_parent.py"
+    okParent.write_text("from neurova import context_pool\n", encoding="utf-8")
     probe.unlink()
+    viaParent.unlink()
     assert not _retiredImports(tmp_path), f"误伤了现役池：{_retiredImports(tmp_path)}"
