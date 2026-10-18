@@ -3370,3 +3370,6 @@ tests/unit/core/test_multiAgentManagerIslandRetired.py
 # 五格里两格是"取干净现场的子进程"跑的行为读数——在跑测进程内测会被 conftest 的注入直接沿用而恒绿；
 # 常驻这一档，为的是下一个人把 `isolatedAgentWorkspaces()` 那一句从单点里删掉时，当场红。
 tests/unit/ci/test_liveIsolationSinglePointCoversBothRoots.py
+# 批 85（D21，§6-313）：生产侧「同一逻辑被复制第二份」的跨文件重复实现只准降不准升。
+# 常驻这一档，为的是下一次再有人把一份实现抄成第二份再改两行时，CI 当场报出那一对文件名。
+tests/unit/ci/test_duplicateImplementationRatchet.py
