@@ -59,4 +59,9 @@ class TestRuntimeRootsAreNotTracked:
     def test_docsMayStillDescribeTheShape(self):
         """规格说明不受影响：本项目**描述**这些目录是合规的，塞文件才不合规。"""
         docs = list((PROJECT_ROOT / "docs").rglob("*.md"))
+        # 面自证：`assert docs` 只挡"目录不见了"，挡不住根被改窄到某个子目录——
+        # 那时这条反向控制还是绿的，却已经什么都不看。地板取现读量级之下。
+        assert len(docs) > 200, (
+            f"docs 下的 Markdown 现读 {len(docs)} 份，地板 200 被打破＝反向控制在扫一片比想象小得多的面"
+        )
         assert docs, "docs 下零 Markdown，这条反向控制成了空的"
