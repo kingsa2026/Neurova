@@ -69,8 +69,10 @@ def _liveScripts() -> list:
     枚举走 `tests/ast_scan` 的共享预算，不自己 `glob`——§6-314 的 D22 收的就是判据里
     各写一份"文件枚举＋自付解析"的形态（成本绑在文件总量上，且读盘口径各处不一）。
     """
-    return [ref for ref in ast_scan.sourceRefsUnder(MANUAL_DIR, ".py")
-            if not ref.path.name.startswith("_")]
+    refs = ast_scan.sourceRefsUnder(MANUAL_DIR, ".py")
+    surface = len(refs)
+    assert surface > 100, f"扫描面现读 {surface} 个 .py（根＝tests/manual/）——根被改窄时「零命中」不代表干净"
+    return [ref for ref in refs if not ref.path.name.startswith("_")]
 
 
 class TestEveryScriptThatPrintsForeignCharsPinsEncoding:

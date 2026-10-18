@@ -47,7 +47,10 @@ _BODY_SCHEMA_DIR = _NEUROVA / "cognitive_layers" / "memory_layer"
 
 def _bodySchemaProducers() -> list:
     producers = []
-    for py in [_NEUROVA / "mem_core.py", *_BODY_SCHEMA_DIR.rglob("*.py")]:
+    schemaFiles = sorted(_BODY_SCHEMA_DIR.rglob("*.py"))
+    surface = len(schemaFiles)
+    assert surface > 50, f"扫描面现读 {surface} 个 .py（根＝memory_layer/）——根被改窄时「零命中」不代表干净"
+    for py in [_NEUROVA / "mem_core.py", *schemaFiles]:
         if _MEMORIES_DDL in py.read_text(encoding="utf-8", errors="replace"):
             producers.append(py)
     return producers

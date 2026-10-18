@@ -170,6 +170,8 @@ class TestCategoryVocabularyIsExplicitlyTriaged:
 
     def _producerLiterals(self):
         found = {}
+        surface = len(ast_scan.filesUnder(NEUROVA))
+        assert surface > 500, f"扫描面现读 {surface} 个 .py（根＝neurova/）——根被改窄时「零命中」不代表干净"
         # 取数走 `tests/ast_scan.py` 的一次性入口 + 文本预筛：造过 `UnifiedMemoryNode(...)`
         # 的文件才会被解析（被赋值/被调用过的那个名字必然出现在源码文本里 ⇒ 预筛是充分条件）
         for path, node in ast_scan.transientNodes(NEUROVA, hints=("UnifiedMemoryNode",)):

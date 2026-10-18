@@ -223,6 +223,8 @@ class TestChatPseudoToolNameIsSingleSourced:
         assert '["chat"]' not in src, "closed_loop 里仍有裸的 [\"chat\"] 字面量"
 
     def test_theConstantIsDefinedExactlyOnce(self):
+        surface = len(ast_scan.filesUnder(NEUROVA))
+        assert surface > 500, f"扫描面现读 {surface} 个 .py（根＝neurova/）——根被改窄时「零命中」不代表干净"
         # 取数走 `tests/ast_scan.py` 的一次性入口 + 文本预筛：把这个名字赋值过，
         # 源码文本里必然出现它 ⇒ 预筛是充分条件，缩面不缩判据（口径同 §6-212）。
         homes = [ast_scan.relativeToRepo(path)[len("neurova/"):]

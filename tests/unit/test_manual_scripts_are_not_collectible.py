@@ -55,7 +55,10 @@ def test_noManualFileMatchesCollectionPattern():
     带给后面每一条用例——这条判据把"隐式安全"变成显式约束。
     """
     patterns = _pythonFilesPatterns()
-    offenders = [p.name for p in sorted(MANUAL_DIR.glob("*.py"))
+    manualFiles = sorted(MANUAL_DIR.glob("*.py"))
+    surface = len(manualFiles)
+    assert surface > 100, f"扫描面现读 {surface} 个 .py（根＝tests/manual/）——根被改窄时「零命中」不代表干净"
+    offenders = [p.name for p in manualFiles
                  if any(fnmatch(p.name, pat) for pat in patterns)]
     assert not offenders, (
         "tests/manual/ 下出现了会被 pytest 收集的文件名 %s（口径 %s）——"
