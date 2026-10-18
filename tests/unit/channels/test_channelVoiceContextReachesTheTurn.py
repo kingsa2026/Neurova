@@ -188,6 +188,10 @@ class TestKeyVocabularyIsDefinedOnce:
         文本预筛取键名本身——连这个串都没出现的文件不可能命中。
         """
         bad = []
+        surface = len(ast_scan.sourceRefsUnder(NEUROVA, ".py"))
+        assert surface > 500, (
+            f"枚举面现读 {surface} 个 .py（根＝neurova/）——这条钉的是「写侧到读侧那条链」，"
+            "两端都在生产码里；测试侧的同名键是夹具，扩进来只会把夹具读成第二份实装")
         for ref in ast_scan.sourceRefsUnder(
                 NEUROVA, hints=ast_scan.textHints(VOICE_CONTEXT_KEY)):
             rel = ref.path.relative_to(REPO).as_posix()

@@ -38,6 +38,10 @@ def _productionTrees(hints):
     文件，不会漏判。返回源码文本而非语法树，是因为两条判据要读的是不同形状——
     共用一次枚举、各跑各的走查，避免为了复用把两种口径塞进同一个函数。
     """
+    surface = len(ast_scan.sourceRefsUnder(PROJECT_ROOT / "neurova", ".py"))
+    assert surface > 500, (
+        f"枚举面现读 {surface} 个 .py（根＝neurova/）——DCL 是对**生产侧懒建单例**的要求，"
+        "测试替身不需要锁；根被改窄时「全都合规」只是没扫到没合规的那几个")
     return [(ref.path, ref.code) for ref in ast_scan.sourceRefsUnder(
         PROJECT_ROOT / "neurova", ".py", ast_scan.textHints(*hints))]
 

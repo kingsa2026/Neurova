@@ -88,9 +88,14 @@ def test_theTwoLiveNamesStillResolveThroughTheFacade():
 
 def test_skillSourceIsDefinedOnceInThePackage():
     """`SkillSource` 全仓只许有一份类定义（两份同名＝门面给出去哪份取决于书写顺序）。"""
+    # 题名写的是"全仓"，所以面也得是仓根：`tests/`／`scripts/` 里再定义一个同名 Enum，
+    # 门面转手出去的就是"看谁先被 import"的那份。扩到仓根实测仍是唯一一处。
+    surface = len(ast_scan.sourceRefsUnder(PROJECT_ROOT, ".py"))
+    assert surface > 3000, (
+        f"枚举面现读 {surface} 个 .py（根＝仓根）——根被缩回 `neurova/` 时这句「全仓一份」只量了生产侧")
     defs = [
         ast_scan.relativeToRepo(path)
-        for path, _lineno in ast_scan.classDefsIn(NEUROVA, "SkillSource")
+        for path, _lineno in ast_scan.classDefsIn(PROJECT_ROOT, "SkillSource")
     ]
     assert defs == ["neurova/skills/models.py"], (
         f"SkillSource 的定义应当只有一份且在 models.py，实得 {defs}")
