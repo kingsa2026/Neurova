@@ -60,51 +60,24 @@ PENDING = {
 pytestmark = pytest.mark.timeout(120)
 
 
-def _importedNames(source: str) -> list[str]:
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return []
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            out += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and not node.level:
-                out.append(node.module)
-                out += [f"{node.module}.{a.name}" for a in node.names]
-            elif node.level and node.module:
-                # 包内相对导入（`from . import search_mixin` 形态）也算引用
-                out.append(f"__REL__.{node.module}")
-    return out
-
-
 def _hits(root: Path, names: dict) -> list[str]:
-    """子树里仍引用这批 mixin 的文件清单。
+    """子树里仍引用这批 mixin 的落点（四种取法都认）。
 
-    取数走 `tests/ast_scan` 的共享解析预算（`sourceRefsUnder` + 文本预筛），
-    不私有 `rglob + ast.parse`——后者把判据成本绑在代码总量上
-    （`tests/unit/test_ci_ast_scan_budget_guard.py` 判红的正是这处）。
-    预筛词取**模块末段**（`search_mixin` 等），是判据的**充分条件**：无论绝对
-    还是相对 import，真引用它的文件必然含这一段字样。
+    取数走 `tests/ast_scan` 的共享入口 `importersOfModule`：它自己按**末段名**预筛
+    （`search_mixin` 等——那是判据的充分条件：无论绝对还是相对 import，真引用它的文件
+    必然含这一段字样）。此前这里是私有 `_importedNames` 加一个 `__REL__.` 前缀补丁：
+    相对形自己补上了一半，`from neurova.cognitive_layers.memory_layer import search_mixin`
+    这种**父包取名形**（`node.module` 是父包）仍看不见。
+    显示名：仓内给仓库相对路径，仓外（注入探针落在 tmp 下）只给文件名——
+    否则判据自己会抛 `ValueError` 冒名成被测故障（§6-107 那坑在入口里收了一处）。
     """
     found = []
-    hints = tuple(sorted({dotted.rsplit(".", 1)[1] for dotted in names}))
-    for ref in ast_scan.sourceRefsUnder(root, ".py", hints):
-        imported = _importedNames(ref.code)
-        for dotted in names:
-            tail = dotted.rsplit(".", 1)[1]
-            if any(n == dotted or n.startswith(dotted + ".") or n == f"__REL__.{tail}"
-                   for n in imported):
-                # 注入探针在 tmp 下：relative_to(REPO) 会抛 ValueError 冒名成被测故障
-                # （同一坑在 §6-107 刚栽过一次，这次照搬修好的形态）
-                try:
-                    shown = ref.path.relative_to(REPO).as_posix()
-                except ValueError:
-                    shown = ref.path.relative_to(root).as_posix()
-                found.append(f"{shown} → {dotted}")
-                break
-    return found
+    for dotted in sorted(names):
+        for rel, _lineno, _form in ast_scan.importersOfModule(root, dotted):
+            shown = rel if rel.startswith(("neurova/", "tests/", "scripts/", "docs/")) \
+                else Path(rel).name
+            found.append(f"{shown} → {dotted}")
+    return sorted(found)
 
 
 def test_retiredMixinsHaveNoImporter():
@@ -149,8 +122,18 @@ def test_scannerCatchesARevival(tmp_path):
     bad = tmp_path / "revival.py"
     bad.write_text(f"from {NS}.search_mixin import SearchMixin\n", encoding="utf-8")
     assert _hits(tmp_path, RETIRED) == ["revival.py → " + f"{NS}.search_mixin"]
+
+    # 父包取名形：真引用，旧那份私有谓词（含它自造的 `__REL__.` 补丁）看不见这一形
+    viaParent = tmp_path / "via_parent.py"
+    viaParent.write_text(f"from {NS} import dream_mixin\n", encoding="utf-8")
+    assert _hits(tmp_path, RETIRED) == [
+        "revival.py → " + f"{NS}.search_mixin",
+        "via_parent.py → " + f"{NS}.dream_mixin",
+    ], "父包取名形没被抓到——导入通道判据又在学旧口径只比一种取法"
+
     bad.write_text("from neurova.cognitive_layers.memory_layer.modules.relation_module import x\n",
                    encoding="utf-8")
+    viaParent.unlink()
     assert not _hits(tmp_path, RETIRED), "误伤了现役 relation_module"
 
 
