@@ -25,30 +25,45 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ISLAND = REPO_ROOT / "neurova" / "core" / "multi_agent_manager.py"
 ISLAND_MODULE = "neurova.core.multi_agent_manager"
+ISLAND_BASENAME = "multi_agent_manager"
+ISLAND_PARENT = "neurova.core"
 WORKSPACE_SINGLE_SOURCE = REPO_ROOT / "neurova" / "core" / "agent_workspaces.py"
 AGENT_ENDPOINT = REPO_ROOT / "neurova" / "api" / "endpoints" / "agent.py"
 
 
-def _importsIsland(path: pathlib.Path) -> bool:
-    """该文件是否**经导入通道**取这座岛（模块路径全名判，不按 `MultiAgentManager` 这个字样扫文本）。
+def _islandImportSites() -> list[str]:
+    """全仓里**经导入通道**取这座岛的位置，四种取法都认（相对导入也认）。
 
-    不按词扫有两个理由：`get_agent`/`NeurovaAgent` 这类名字在别处各有实装（按名扫会误伤），
+    不按词扫文本：`get_agent`/`NeurovaAgent` 这类名字在别处各有实装（按名扫会误伤），
     而本判据文件自己也要写出模块全名一次——按词扫会被自己咬（形态集 241／268 同族）。
+    预筛词取**末段名**而不是全名：`from .multi_agent_manager import X` 不含包前缀，
+    按全名预筛会把这类相对取法滤出扫描面——那正是 §6-212 记过的"读成假死"的形态。
+
+    取数走 `tests/ast_scan` 的共享预算（`transientNodes`＝一次性入口，不留常驻语法树），
+    不私有 `rglob + ast.parse`：批 81 那版正是后者，实测单跑 **23.24s**，距 pyproject 全局
+    `timeout = 30` 只差一步，且成本绑在代码总量上（`test_ci_ast_scan_budget_guard.py` 判红的就是这处）。
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError:
-        return False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "") == ISLAND_MODULE:
-            return True
-        if isinstance(node, ast.Import):
-            if any(a.name == ISLAND_MODULE for a in node.names):
-                return True
-    return False
+    sites: list[str] = []
+    for path, node in ast_scan.transientNodes(
+            ast_scan.REPO_ROOT, ".py", ast_scan.textHints(ISLAND_BASENAME)):
+        rel = ast_scan.relativeToRepo(path)
+        if isinstance(node, ast.ImportFrom):
+            resolved = ast_scan.resolveImportModule(rel, node)
+            if resolved == ISLAND_MODULE:
+                sites.append(f"{rel}:{node.lineno} [from …{node.module or '.'} import …]")
+            elif resolved == ISLAND_PARENT and any(
+                    a.name == ISLAND_BASENAME for a in node.names):
+                sites.append(f"{rel}:{node.lineno} [from {ISLAND_PARENT} import {ISLAND_BASENAME}]")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == ISLAND_MODULE:
+                    sites.append(f"{rel}:{node.lineno} [import {ISLAND_MODULE}]")
+    return sites
 
 
 def test_islandFileIsGone():
@@ -62,14 +77,7 @@ def test_noCodeAnywhereImportsTheIsland():
     改前读数会点名 `tests/integration/test_multi_agent_manager.py`——那正是"实现与专用测试必须同批退役"
     的证据，不是这格的误报。
     """
-    offenders = []
-    for path in REPO_ROOT.rglob("*.py"):
-        if ".venv" in path.parts or "__pycache__" in path.parts or "node_modules" in path.parts:
-            continue
-        if path == ISLAND:
-            continue
-        if _importsIsland(path):
-            offenders.append(path.relative_to(REPO_ROOT).as_posix())
+    offenders = _islandImportSites()
     assert not offenders, f"这些地方还在导入已退役的岛：{offenders}"
 
 
