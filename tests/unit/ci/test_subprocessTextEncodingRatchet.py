@@ -63,6 +63,10 @@ SCAN_ROOTS = ("neurova", "scripts", "tests")
 #: §6-281 摘的是 `tests/unit/tools/test_tool_parallelism_readout.py` 那 9 处：它把"每个用例
 #: 自己拼一份 argv 再 `text=True` 收"收成一个两头钉的出口，站点归零——所以这一行数字与表
 #: 必须一起改，只改表不改这行，下一次复算的人就没有对账的锚了。
+#: 批 91 摘的是 `tests/unit/test_pytest_runner_guards.py` 那 1 处：它的 `_run_pytest` 一直在
+#: 用父进程默认 codec 解嵌套 pytest 写的 UTF-8 字节，子进程 stderr 里只要有一个解不出来的字节，
+#: reader 线程整条崩掉、`stdout` 回来是 `None`，本格于是报 `TypeError: can only concatenate str`
+#: ——看着像判据自己坏了，其实是这一处没钉 encoding 把缺陷形状换成了另一种谎。
 BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
@@ -93,7 +97,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/test_adminBootstrapLanding.py": 2,
     "tests/unit/test_api_inventory_freshness_guard.py": 1,
     "tests/unit/test_pip_audit_gate.py": 1,
-    "tests/unit/test_pytest_runner_guards.py": 1,
     "tests/unit/test_session_landing_guard.py": 1,
     "tests/unit/test_start_script.py": 2,
     "tests/unit/tools/test_git_tool.py": 1,

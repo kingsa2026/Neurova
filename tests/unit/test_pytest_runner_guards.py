@@ -87,7 +87,10 @@ def _run_pytest(args, cache_dir=None):
     传 `None` 即关掉 cacheprovider——本文件的判据（fixture 解析、收集数）
     与收集缓存无关，关掉不影响任何断言，且不再往仓库根写盘。
     """
-    env = dict(os.environ)
+    # 子端写侧也要钉：只钉父端解码是「半修」——子进程仍按本机码页吐字节，非 ASCII 变 U+FFFD，
+    # 而代码看着"已修"。两头钉齐的形状由 `tests/unit/ci/test_subprocessTextEncodingRatchet.py`
+    # 的半修计数盯着（本档那条基线摘除后，这一行就是它扫得到的另一半）。
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     env.pop("PYTEST_ADDOPTS", None)
     argv = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args]
     return subprocess.run(
@@ -96,6 +99,12 @@ def _run_pytest(args, cache_dir=None):
         env=env,
         capture_output=True,
         text=True,
+        # 不钉 encoding 时，父进程按本机 locale（开发机 cp936）解子进程写的 UTF-8 字节：
+        # 嵌套 pytest 的 stderr 里只要有一个非 GBK 字节，reader 线程就整条崩掉，
+        # `subprocess.run` 回来时 stdout/stderr 是 None —— 本格于是报
+        # `TypeError: can only concatenate str`，看着像判据坏了，其实是解码没钉。
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
