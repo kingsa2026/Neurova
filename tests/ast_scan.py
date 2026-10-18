@@ -439,7 +439,8 @@ def importersOfModule(root: Path, moduleName: str, suffix: str = ".py") -> List[
 
       `import a.b.c` / `import a.b.c as p`、`from a.b.c import X`、
       相对形 `from .c import X`（按发起文件位置解析成绝对名）、
-      父包取名形 `from a.b import c`（`node.module` 是父包，取的是子模块名）。
+      父包取名形 `from a.b import c`（`node.module` 是父包，取的是子模块名）——
+      这一类含相对写法 `from . import c`（`node.module` 是 None），别当成前一类的缺席。
 
     **预筛词取末段名 `c`，不取全名 `a.b.c`**——这是"判据成本"与"判据口径"同时成立的关键：
     相对形与父包形的源码里根本不含包前缀，按全名预筛会把它们在**读文本这一关**就滤出扫描面，
@@ -447,8 +448,9 @@ def importersOfModule(root: Path, moduleName: str, suffix: str = ".py") -> List[
 
     为什么收在本模块而不是各判据自己写：`tests/` 里曾有 17 处各写一份 `_importedNames`，
     每一处都要独立决定"相对形认不认、父包形认不认、预筛取哪个词"——同一个问题十七个口径，
-    正是教义第 6 条点名的形态。误报面只有一处并已界定：`from a.b import c` 里 `c` 若恰是
-    **符号名**而非子模块名，会被算进取法；两侧名字要同时相等才撞上，故宁可计入也不漏。
+    正是教义第 6 条点名的形态。误报面只有一处并已界定：`from a.b import c`（或其相对写法
+    `from . import c`）里 `c` 若恰是**符号名**而非子模块名，会被算进取法；两侧名字要同时
+    相等才撞上，故宁可计入也不漏。
 
     返回的是 `(相对路径, 行号, 取法)`，取法只用于报错文本点名，不参与裁决。
     """
@@ -470,6 +472,12 @@ def importFormForModule(relPath: str, node: ast.AST, moduleName: str) -> str:
     发起文件的仓内相对路径算包名），而"四种形都认"这句话必须能用合成样本逐条验证——
     往仓里种临时文件会污染别的常驻判据，所以把判定与枚举分开：枚举归 `importersOfModule`，
     判定归这里。
+
+    「父包取名形」这一标签**含两种写法**，别把它们当成一种：
+      `from pkg.sub import leaf`（绝对，`node.module` 就是父包）
+      `from . import leaf`（相对，`node.module` 是 None，父包只能由发起文件位置解出）
+    两者都算取了这个子模块，故共用一个标签；拆成两个标签会让八个消费方的"四种取法都认"
+    集体过期。写法各有一例钉在 `test_detectorOwnsAllFourImportForms` 里。
     """
     parts = moduleName.split(".")
     base, parent = parts[-1], ".".join(parts[:-1])
