@@ -29,19 +29,26 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 
-#: 正文里声明的池 → 该池的归属判断（与生产/基建分池口径一致：neurova/ 算生产）
-_POOL_MARKERS = (
-    ("生产池", lambda rel: rel.startswith("neurova/")),
-    ("测试/基建池", lambda rel: not rel.startswith("neurova/")),
-    ("基建池", lambda rel: not rel.startswith("neurova/")),
-    ("测试池", lambda rel: not rel.startswith("neurova/")),
-)
+#: 正文声明的池名 → 复算时用的池键。**这一份是词汇的唯一出处**：`CLAIM_RE` 的备选、
+#: `_poolTotals` 的键、`_mismatches` 的取键都由它生成。
+#:
+#: 缺陷形态（本批实测）：同一份词汇曾散在三处——一张无人引用的「池名→归属谓词」表、
+#: 一条手写的正则备选（七个名字）、一个只备了两个池键的求和表。于是正文写「基建池 +3/−0」
+#: 时门禁抛 `KeyError: '基建池'`：正则认它，复算表里没有它。崩在自家词表上的判据等于没判据，
+#: 而报错还长得像"你的数字写错了"。
+_POOL_ALIASES = {
+    "生产池": "生产池",
+    "测试/基建池": "测试/基建池",
+    "基建池": "测试/基建池",
+    "测试池": "测试/基建池",
+}
 
 #: `本格/本笔` 声明的是这一笔的**全部**文件合计
 _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 
+#: 长名排在前面，免得备选被短名截走（`测试/基建池` 必须先于 `基建池` 试）
 CLAIM_RE = re.compile(
-    r"(?P<label>生产池|测试/基建池|基建池|测试池|本格|本笔|全笔)"
+    r"(?P<label>" + "|".join(sorted({*_POOL_ALIASES, *_TOTAL_MARKERS}, key=len, reverse=True)) + r")"
     r"\s*\**\s*\+?(?P<adds>\d+)\s*/\s*[−-]\s*(?P<dels>\d+)"
     r"(?:\s*\**\s*(?:＝|=)\s*净\s*(?P<net>[+-]\d+))?"
 )
@@ -71,8 +78,12 @@ def _claims(body: str) -> list:
 
 
 def _poolTotals(sha: str):
-    """按**那一笔自己的** numstat 逐池求和（新文件也在这里，不靠估）。"""
-    totals = {"生产池": (0, 0), "测试/基建池": (0, 0), "全部": (0, 0)}
+    """按**那一笔自己的** numstat 逐池求和（新文件也在这里，不靠估）。
+
+    键由 `_POOL_ALIASES` 的值域生成——词表加一个别名不必改这里；加错才会被
+    `testDeclaredPoolAliasesBothWaysReconcile` 当场点名。
+    """
+    totals = {key: (0, 0) for key in {*_POOL_ALIASES.values(), "全部"}}
     for line in _git("show", "--numstat", "--format=", sha).splitlines():
         parts = line.split("\t")
         if len(parts) != 3:
@@ -94,7 +105,7 @@ def _mismatches(sha: str, body: str) -> list:
     totals = _poolTotals(sha)
     bad = []
     for c in declared:
-        pool = "全部" if c["label"] in _TOTAL_MARKERS else c["label"]
+        pool = "全部" if c["label"] in _TOTAL_MARKERS else _POOL_ALIASES[c["label"]]
         a, d = totals[pool]
         if (c["adds"], c["dels"]) != (a, d):
             bad.append(f"{c['label']} 声明 +{c['adds']}/−{c['dels']}，那一笔的 numstat 实为 +{a}/−{d}")
@@ -145,6 +156,27 @@ class TestEveryClaimedNumberIsReal:
         assert _mismatches(good, _git("log", "-1", "--format=%B", good)) == [], (
             f"+{a}/−{d} 就是实量值却被判错——复算本身坏了，先修解析再谈判据")
 
+    def testDeclaredPoolAliasesBothWaysReconcile(self):
+        """词表同源：正文允许的**每一个**池名，复算都要能放行实量值、并点名改坏的值。
+
+        本批实测的坏形态：正文写「基建池 +3/−0 ＝ 净 +3」时门禁抛 `KeyError: '基建池'`——
+        正则把这个名字当合法声明收下，求和表里却没有对应的键。判据崩在自家词表上时，
+        报错看着像"我的数字写错了"，真因是同一份词汇被写成三处：一张无人引用的谓词表、
+        一条手写的正则备选、一个只备了三个键的求和表。
+        """
+        tree = _git("rev-parse", "HEAD^{tree}").strip()
+        totals = _poolTotals(tree)
+        for alias, poolKey in _POOL_ALIASES.items():
+            a, d = totals[poolKey]
+            good = _commitTree(tree, f"chore(x): 标题\n\n净 LOC：{alias} **+{a}/−{d} ＝ 净 {a - d:+d}**\n")
+            assert _mismatches(good, _git("log", "-1", "--format=%B", good)) == [], (
+                f"{alias}（→ {poolKey}）声明了实量值却被判错——这个名字的复算路径不通")
+
+            bad = _commitTree(tree, f"chore(x): 标题\n\n净 LOC：{alias} **+{a + 1}/−{d} ＝ 净 {a - d + 1:+d}**\n")
+            mismatches = _mismatches(bad, _git("log", "-1", "--format=%B", bad))
+            assert any(alias in m for m in mismatches), (
+                f"{alias} 的数字被 +1 改坏却没被点名：{mismatches}")
+
     def testParserActuallyMatchesTheHouseForms(self):
         """取数口径对账：正文里那几种写法必须**都被解析到**，漏一种＝那一类声明永不复算。
 
@@ -156,6 +188,10 @@ class TestEveryClaimedNumberIsReal:
             "测试/基建池 +435/−11（新判据档 260": [("测试/基建池", 435, 11, None)],
             "净 LOC：本格 **+20/−0**（现读": [("本格", 20, 0, None)],
             "生产池 **+55/−57 ＝ 净 -2**": [("生产池", 55, 57, -2)],
+            # 别名与"全部"标记各跑一遍：备选表现在由词表生成，名字掉了就不会红只会静默漏判
+            "测试池 **+6/−5 ＝ 净 +1**": [("测试池", 6, 5, 1)],
+            "本笔 **+3/−0**": [("本笔", 3, 0, None)],
+            "全笔 **+1/−2 ＝ 净 -1**": [("全笔", 1, 2, -1)],
         }
         for body, expected in samples.items():
             got = [(c["label"], c["adds"], c["dels"], c["net"]) for c in _claims(body)]
