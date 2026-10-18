@@ -159,6 +159,8 @@ def test_legacyWorkflowEngineModuleIsGoneAndNobodyImportsIt():
         "legacy 引擎文件还在树上"
 
     importers = []
+    surface = len(ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py"))
+    assert surface > 3000, f"扫描面现读 {surface} 个 .py（根＝仓根）——根被改窄时「零引用」不代表孤岛已退役"
     for path, node in ast_scan.transientNodes(
             ast_scan.REPO_ROOT, ".py", ast_scan.textHints("workflow_engine")):
         taken = ""

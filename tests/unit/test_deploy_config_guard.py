@@ -469,7 +469,10 @@ class TestDriftEntitiesStayFixed:
         crontab 流水线事件。此处钉住"不得为迎合描述而在仓内新建同名工具"。
         """
         hits = []
-        for path in PROJECT_ROOT.joinpath("neurova").rglob("*.py"):
+        sources = list(PROJECT_ROOT.joinpath("neurova").rglob("*.py"))
+        surface = len(sources)
+        assert surface > 500, f"扫描面现读 {surface} 个 .py（根＝neurova/）——根被改窄时「查无此名」不代表没被捏造"
+        for path in sources:
             text = path.read_text(encoding="utf-8", errors="ignore")
             for name in ("CronCreate", "CronList", "CronDelete"):
                 if name in text:
