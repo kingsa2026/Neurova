@@ -61,14 +61,19 @@ REQ = _requiredThirdPartyNames()
 
 
 def _importsOf(node, rel: str) -> list:
-    """模块级 import 的点分名；相对导入按所在包还原成绝对名。"""
+    """模块级 import 的点分名；相对导入按所在包还原成绝对名。
+
+    解名交 `tests/ast_scan.resolveImportModule` 那个单点。这档原来自己写了一份层数算术
+    （`pkg[: len(pkg) - (node.level - 1)]`）——两份实现的坏处不在今天算错，而在**算错了
+    这条判据看不见**：它只会报"这条 import 是占位兜底"，不会报"我把相对形解歪了"，
+    而解歪的结果是第三方闭包**少走一条边**（假绿方向）。
+    """
     if isinstance(node, ast.Import):
         return [a.name for a in node.names]
-    if not node.level:
-        return [node.module] if node.module else []
-    pkg = rel.split("/")[:-1]
-    base = pkg if node.level == 1 else pkg[:len(pkg) - (node.level - 1)]
-    return [".".join(base + (node.module.split(".") if node.module else []))]
+    if not isinstance(node, ast.ImportFrom):
+        return []
+    module = ast_scan.resolveImportModule(rel, node)
+    return [module] if module else []
 
 
 def _resolve(mod: str):
