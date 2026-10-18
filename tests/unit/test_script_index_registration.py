@@ -24,10 +24,11 @@ _NON_SCRIPT = {"INDEX.md", "__init__.py"}
 
 def test_every_diagnostic_script_is_indexed():
     text = INDEX.read_text(encoding="utf-8")
-    missing = sorted(
-        path.name for path in DIAGNOSTICS.glob("*.py")
-        if path.name not in _NON_SCRIPT and path.name not in text
-    )
+    scripts = sorted(path.name for path in DIAGNOSTICS.glob("*.py"))
+    surface = len(scripts)
+    assert surface > 12, f"扫描面现读 {surface} 个 .py（根＝scripts/diagnostics/）——根被改窄时「零命中」不代表干净"
+    missing = sorted(name for name in scripts
+                     if name not in _NON_SCRIPT and name not in text)
     assert missing == [], f"诊断脚本没登记进 INDEX.md（自助发现入口断了）：{missing}"
 
 

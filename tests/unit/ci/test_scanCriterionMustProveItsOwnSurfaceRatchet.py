@@ -5,9 +5,10 @@
 读数会变成**零命中**而不是红——"干净"与"没扫到"在断言里长得一模一样。本仓已有一例实证：
 模块级重名定义那条守卫自建档起就在子集里，docstring 讲的是通用形状，而它唯一真跑整树的格子
 喂的根只有 `neurova/`；`tests/` 下四处既存遮蔽（其中一处让 3 条用例连收集都不发生）
-活了三批，没有任何东西变红。事后按档量了一遍覆盖面（读数由本文件的 `_faceFindings` 现取，
-建档那轮）：**能解出仓内扫描根的判据档里，只有不到一半把自己扫到的数量当断言比过**，
-其余那批一直在赌"根没写错、也没被改窄"。
+活了三批，没有任何东西变红。事后按档量了一遍覆盖面（取数口就是本文件的 `_faceFindings`）：
+**能解出仓内扫描根的判据档里，把自己扫到的数量当断言比过的不到一半**，其余那批一直在赌
+"根没写错、也没被改窄"。这里**不抄现值**——覆盖率是随批次动的量，写死一次就等着它讲假话；
+要看今天的数，用本文件的取数口现跑，或查台账里那一批的落批读数。
 
 **判据只认代码形状，不认词**（本仓的守卫被自家 docstring 撞红过，也被自己的措辞豁免过）：
 "自证"＝本档里存在一条 `assert`，把**由这次扫描/计数得到的量**与一个数字下限比。计数名认这几种形：
@@ -15,6 +16,14 @@
 见 `shadowedTopLevelNames` 的 `stats`）／循环里 `+= 1` 累加的计数器——**每种认形都配了一格合成正检**，
 放宽不白给。以下两种**不算**：只 `assert findings == []`；有一条与扫描无关的 `assert len(rows) > 0`
 （收紧规则多抓出来的正是后一形）。
+
+**面读数怎么取（消化存量时踩出来的次序）**：优先由**被裁的那次扫描自己**给出计数——物化它的返回值
+再 `len()`，或在循环里累加；这样"面"与"判据看到的量"必然同源。那次扫描带文本预筛时（预筛命中数不随
+根的大小变，证不了面），另走一次共享枚举入口量根：`ast_scan.filesUnder(根)`。**但**如果本档别处还
+自付 `ast.parse`，`filesUnder` 与它配成对正是 `test_ci_ast_scan_budget_guard` 报的形状（本会话三档
+当场被拦：`test_manualScriptStdoutEncoding`／`test_ci_wallclock_assertion_ledger`／
+`test_tool_parallelism_readout`）——那种档改用 `ast_scan.sourceRefsUnder(根, ".py")`（共享入口，
+枚举与解析都在预算内），**不要**为了绕过门禁把私有解析留着、也不要退成弱读数。
 
 **存量不豁免、只登记**：下表是本档建档那轮（2026-10-19）的 offender 名单——新增即红，
 把某档补上自证后**必须**从表里摘掉（"降了要看得见"），与 `test_subprocessTextEncodingRatchet.py`
@@ -26,12 +35,20 @@
 解成仓内目录。**按清单逐行 `read_text` 去读、不经过这些入口的档不在面内**（本档自己就是这一形，
 `test_ci_ast_scan_budget_guard.py` 也是）——它们没有"根参数"可解，也就无从判面有没有被改窄。
 要覆盖那一形，得先给这类读法定出"根"的表示法，属另一张票。
+
+**根的形状分五态，其中两态不留存量豁免**（`test_staticRootsNeverPointOutsideOrNowhere`）：
+仓内目录／仓内文件／仓外目录／指不到东西／动态值。只有"仓内目录"要求面自证；"仓内文件"坏得响
+（入口当场抛），"动态值"不承载面的声明；**"仓外"与"指不到"一律点名，且不看它在不在下表里**。
+为什么单独钉：`test_ratchetDoesNotRise` 只比"比基线新增了什么"，一档本来就在表里、后来把根写错了，
+失败集合反而一个字节都不变——本会话把 `parents[3]` 改成 `parents[4]` 实测过这一形，两格全绿。
+"根写错"比"没自证"更重（前者让判据根本不说话，后者只是没留底单），不能由存量名单兜着。
 """
 
 from __future__ import annotations
 
 import ast
 import io
+import os
 import pathlib
 import sys
 
@@ -60,9 +77,10 @@ COUNT_CONSTRUCTORS = {"len", "sum"}
 
 pytestmark = pytest.mark.timeout(120)
 
-#: ── offender 基线（2026-10-19 现取：75 档有仓内扫描根，其中 52 档无面自证）──────────────
+#: ── offender 基线：一律由本文件的 `_faceFindings` 现取生成，不在注释里抄数 ──────────
 #: 建档口径与本文件的 `_faceFindings` 完全同源——**不要用别的规则量一遍再抄进来**，
 #: 基线与判据不同源时，"存量在降"会被读成"治理有进展"（本仓同族账）。
+#: 面读数与消化进度写在台账那一格（进账的数字背后必须有当轮跑过的命令），代码这里只留名单。
 BASELINE = {
     "tests/unit/agent/test_requestUserIdEntryConsistency.py",
     "tests/unit/agent/test_turnIdentitySingleSource.py",
@@ -78,9 +96,6 @@ BASELINE = {
     "tests/unit/ci/test_context_coverage_scope.py",
     "tests/unit/ci/test_importChannelDetectorSeesAllFourForms.py",
     "tests/unit/ci/test_knowledge_base_index_wiring.py",
-    "tests/unit/ci/test_liveIsolationSinglePointCoversBothRoots.py",
-    "tests/unit/ci/test_manualScriptStdoutEncoding.py",
-    "tests/unit/ci/test_stub_signature_single_source.py",
     "tests/unit/cognitive_layers/test_memoryBusSingleSource.py",
     "tests/unit/computer_use/test_route_vocabulary_is_single_source.py",
     "tests/unit/context/test_compression_economics.py",
@@ -96,20 +111,13 @@ BASELINE = {
     "tests/unit/llm/test_capability_cache_single_source.py",
     "tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py",
     "tests/unit/memory/test_memoryCipherFailFast.py",
-    "tests/unit/memory_ingest/test_protected_registration.py",
     "tests/unit/memory_ingest/test_seed_db_landing_relocation.py",
     "tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py",
-    "tests/unit/scripts/test_scripts_import_bootstrap.py",
     "tests/unit/security/test_installGateDocFilesAreReportOnly.py",
     "tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py",
     "tests/unit/test_ci_thin_env_guards.py",
-    "tests/unit/test_ci_wallclock_assertion_ledger.py",
     "tests/unit/test_deploy_config_guard.py",
-    "tests/unit/test_dev_path_and_runtime_dep_guards.py",
-    "tests/unit/test_manual_scripts_are_not_collectible.py",
-    "tests/unit/test_script_index_registration.py",
     "tests/unit/tools/test_npx_runtime_pinning.py",
-    "tests/unit/tools/test_tool_parallelism_readout.py",
 }
 
 
@@ -125,47 +133,92 @@ def _constTable(tree: ast.AST) -> dict:
     return out
 
 
-def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int = 0):
-    """把"根"表达式解成目录；解不出返 None（真动态值不承载面的声明，不参与裁决）。
+#: 静态根解出来的落点态，加上「动态值」共五态。**只有 DIR 参与面自证裁决**；
+#: OUTSIDE／MISSING 都是「根写错了」的形状，一律点名；FILE 与 DYNAMIC 不承载"面会被改窄"这件事，
+#: 既不点名也不免罪。把五态分开的理由：原来「解不出」与「解到别处」与「解到一个文件」都折叠成
+#: 同一个 None，于是"根少写一层"的那档会安静地掉出本闸的面——正是本闸要防的事，
+#: 被本闸的取数路自己放过去。
+#:   FILE 为什么免裁：单文件落点坏掉时 `transientTree` 一类入口当场抛 FileNotFoundError，是**响**的；
+#:   目录落点坏掉时只给出「零命中」，与干净同形，是**哑**的。本闸只管哑的那一类。
+DYNAMIC, DIR, FILE, OUTSIDE, MISSING = "dynamic", "dir", "file", "outside", "missing"
 
-    `anchor` 是该档所在仓根：合成夹具要能被同一套代码判，所以仓根常量按**给定根**解，
-    而不是写死本仓——否则正检样本永远只能往真仓里种文件（会污染其余常驻判据）。
+
+def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int = 0,
+                 selfPath: pathlib.Path = None):
+    """纯结构地把"根"表达式解成一个路径；解不出＝动态值，返 None。
+
+    这里**不判存在、不判在不在仓内**——那是 `_classifyRoot` 的活。`Path(__file__)` 一形按
+    **被档自己的路径**解（`selfPath`），因此 `parents[N]` 的含义随该档所在深度而定：
+    `tests/unit/ci/x.py` 里的 `parents[3]` 是仓根，`tests/unit/x.py` 里的 `parents[2]` 才是仓根。
+    第一版从没用过 `selfPath`，而是从仓根往上再数 N+1 层，把三档的根解成了 `E:\\`。
+    深度上限也不能小：`REPO / "a" / "b" / "c" / "d"` 这一条链本身就吃掉五层，
+    原来的 8 层上限会把这种**合法写法**降级成动态值，让那档安静地掉出本闸的面——
+    与上一条同根因，实测由 `test_memoryWriteIdentityGate.py` 那档当场抓出。
     """
-    if expr is None or depth > 8:
+    if expr is None or depth > 64:
         return None
     if isinstance(expr, ast.Name):
-        if expr.id in REPO_ROOT_NAMES:
-            return anchor
-        return _resolveRoot(consts.get(expr.id), consts, anchor, depth + 1)
+        if expr.id == "__file__":
+            return selfPath
+        if expr.id in consts:
+            return _resolveRoot(consts[expr.id], consts, anchor, depth + 1, selfPath)
+        return anchor if expr.id in REPO_ROOT_NAMES else None
     if isinstance(expr, ast.Attribute):
+        if expr.attr in {"resolve", "absolute"}:
+            return _resolveRoot(expr.value, consts, anchor, depth + 1, selfPath)
+        if expr.attr == "parent":
+            base = _resolveRoot(expr.value, consts, anchor, depth + 1, selfPath)
+            return None if base is None else base.parent
+        if ast.unparse(expr) in consts:
+            return _resolveRoot(consts[ast.unparse(expr)], consts, anchor, depth + 1, selfPath)
         if expr.attr in REPO_ROOT_NAMES:
             return anchor
-        return _resolveRoot(consts.get(ast.unparse(expr)), consts, anchor, depth + 1)
+        return None
     if isinstance(expr, ast.Call):
-        name = ast.unparse(expr.func)
+        func = expr.func
+        if isinstance(func, ast.Attribute) and func.attr in {"resolve", "absolute"}:
+            return _resolveRoot(func.value, consts, anchor, depth + 1, selfPath)
+        name = ast.unparse(func)
         if name in {"Path", "pathlib.Path"} and expr.args:
-            return _resolveRoot(expr.args[0], consts, anchor, depth + 1)
+            return _resolveRoot(expr.args[0], consts, anchor, depth + 1, selfPath)
         head = name.split(".")[0]
-        return _resolveRoot(consts.get(head), consts, anchor, depth + 1)
+        return _resolveRoot(consts.get(head), consts, anchor, depth + 1, selfPath)
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
-        left = _resolveRoot(expr.left, consts, anchor, depth + 1)
+        left = _resolveRoot(expr.left, consts, anchor, depth + 1, selfPath)
         right = expr.right
         if left is None or not (isinstance(right, ast.Constant) and isinstance(right.value, str)):
             return None
-        cand = left / pathlib.PurePosixPath(right.value)
-        return cand if cand.is_dir() else None
+        return left / pathlib.PurePosixPath(right.value)
     if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Attribute) \
             and expr.value.attr == "parents" and isinstance(expr.slice, ast.Constant) \
             and isinstance(expr.slice.value, int):
-        ups = anchor
-        for _ in range(expr.slice.value + 1):
-            ups = ups.parent
-        return ups
+        base = _resolveRoot(expr.value.value, consts, anchor, depth + 1, selfPath)
+        if base is None:
+            return None
+        try:
+            return base.parents[expr.slice.value]
+        except IndexError:
+            return pathlib.Path(base.anchor) if base.anchor else base
     return None
 
 
-def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path) -> list:
-    """这档里的扫描落点 `(入口, 解出的根或 None)`。
+def _classifyRoot(path, anchor: pathlib.Path) -> str:
+    """把解出来的路径归到五态之一。大小写与分隔符按 `os.path.normcase` 归一再比。"""
+    if path is None:
+        return DYNAMIC
+    norm = pathlib.Path(os.path.normcase(str(path)))
+    home = os.path.normcase(str(anchor))
+    inside = str(norm) == home or home in (os.path.normcase(str(p)) for p in norm.parents)
+    if norm.is_dir():
+        return DIR if inside else OUTSIDE
+    if norm.is_file():
+        return FILE if inside else OUTSIDE
+    return MISSING
+
+
+def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
+               selfPath: pathlib.Path = None) -> list:
+    """这档里每个扫描落点的 `(入口, 根的落点态)`——落点态见 `_classifyRoot` 的四态。
 
     按「接收者＋属性名」两维认，不按属性名单认：`ast.walk(tree)` 与 `os.walk(dir)`
     只差一个接收者，把前者当全仓扫描会把读数放大一个量级（本档取数路自己踩过的第一版错）。
@@ -178,12 +231,23 @@ def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path) -> list:
         recv = ast.unparse(call.func.value) if isinstance(call.func.value, ast.expr) else ""
         top = recv.split(".")[0].split("(")[0]
         if top == "ast_scan" and attr in SHARED_SCAN_ENTRIES:
-            out.append((attr, _resolveRoot(call.args[0], consts, anchor) if call.args else None))
+            root = _resolveRoot(call.args[0], consts, anchor, selfPath=selfPath) if call.args else None
+            out.append((attr, _classifyRoot(root, anchor)))
         elif attr in FILE_ENUM_ATTRS and top not in NON_PATH_RECEIVERS:
-            out.append((attr, _resolveRoot(call.func.value, consts, anchor)))
+            root = _resolveRoot(call.func.value, consts, anchor, selfPath=selfPath)
+            out.append((attr, _classifyRoot(root, anchor)))
         elif attr == "walk" and top == "os":
-            out.append(("os.walk", _resolveRoot(call.args[0], consts, anchor) if call.args else None))
+            root = _resolveRoot(call.args[0], consts, anchor, selfPath=selfPath) if call.args else None
+            out.append(("os.walk", _classifyRoot(root, anchor)))
     return out
+
+
+def _rootGap(sites: list) -> str:
+    """这档有没有「静态根解到仓外／指不到目录」的落点——有就返回那一态，没有返回空串。"""
+    for _entry, status in sites:
+        if status in (OUTSIDE, MISSING):
+            return status
+    return ""
 
 
 def _countNames(tree: ast.AST) -> set:
@@ -232,8 +296,12 @@ def _hasFaceProof(tree: ast.AST, counts: set) -> bool:
     return False
 
 
-def _faceFindings(root: pathlib.Path, manifest: list) -> list:
-    """`(档, 扫描落点数, 有面自证?)` 里挑出**有仓内扫描根而无自证**的那些档。"""
+def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None) -> list:
+    """挑出两类档：① 静态根解到仓外／指不到目录；② 有仓内扫描根却无面自证。
+
+    `gaps` 传一个字典就回填 `rel -> 落点态`，供报错文案说清红的是哪一条规则——两类都算
+    offender，但**修法相反**（①是把根写对，②是补断言），混成一句话人就不知道该动哪一处。
+    """
     offenders = []
     for rel in manifest:
         path = root / rel
@@ -244,8 +312,14 @@ def _faceFindings(root: pathlib.Path, manifest: list) -> list:
         except SyntaxError:
             continue
         consts = _constTable(tree)
-        sites = _scanSites(tree, consts, root)
-        if not any(r is not None for _e, r in sites):
+        sites = _scanSites(tree, consts, root, selfPath=path.resolve())
+        gap = _rootGap(sites)
+        if gap:
+            if gaps is not None:
+                gaps[rel] = gap
+            offenders.append(rel)
+            continue
+        if not any(st == DIR for _e, st in sites):
             continue
         if not _hasFaceProof(tree, _countNames(tree)):
             offenders.append(rel)
@@ -261,16 +335,40 @@ def _manifestOf(root: pathlib.Path) -> list:
 
 
 def test_ratchetDoesNotRise():
-    """新增"扫仓内路径而不自证面"的判据档一律拦。"""
-    now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT)))
+    """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。"""
+    gaps = {}
+    now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps))
     grew = sorted(now - set(BASELINE))
+    wrongRoot = [rel for rel in grew if gaps.get(rel)]
+    noProof = [rel for rel in grew if not gaps.get(rel)]
     assert not grew, (
-        "这些受保护子集里的判据扫了仓内源码树，却没把**这次扫到的数量**当断言比——"
-        "根被改窄或写错时它的读数是「零命中」而不是红：\n  " + "\n  ".join(grew) +
-        "\n修法（一行即可）：把该次扫描的计数留在同一次读数里并断下限，"
-        "形如 `scanned = len(...); assert scanned > 500, f\"扫描面现读 {scanned}\"`。"
-        "\n参考同档 `test_surfaceCoversAllThreeSourceFamilies`（先验面，再谈零命中）。\n"
-        "别把新档加进基线表——那等于把这条棘轮又拆回各判各的。"
+        "**根写错了**（静态根解到仓外或指不到真实目录——它的「零命中」根本不来自代码）：\n  "
+        + "\n  ".join("%s [%s]" % (rel, gaps[rel]) for rel in wrongRoot)
+        + "\n**扫了仓内源码树却没把这次扫到的数量当断言比**（根被改窄时读数是「零命中」而不是红）：\n  "
+        + "\n  ".join(noProof)
+        + "\n修法分两条码：前者把根写对（`Path(__file__).resolve().parents[N]` 的 N 要按**本档所在深度**算）；"
+        "\n后者一行即可，形如 `scanned = len(...); assert scanned > 500, f\"扫描面现读 {scanned}\"`，"
+        "\n参考同档 `test_surfaceCoversAllThreeSourceFamilies`（先验面，再谈零命中）。"
+        "\n别把新档加进基线表——那等于把这条棘轮又拆回各判各的。"
+    )
+
+
+def test_staticRootsNeverPointOutsideOrNowhere():
+    """静态根必须解得到**仓内真实目录**——这一条不留存量豁免。
+
+    为什么要单开一格：`test_ratchetDoesNotRise` 只比"比基线新增了什么"，于是**本来就在表里**的
+    一档把根写错时，它照样留在 offender 里、失败集合一个字节都没变——存量名单把「根错了」这件
+    更重的事兜掉了。本会话实测：把 `test_route_vocabulary_is_single_source.py` 的 `parents[3]`
+    改成 `parents[4]`，棘轮两格全绿。反证在册：`test_faceRulesPinDepthAndWrongRoots` 的
+    parents[3].parent／no_such_dir 两格必须交出**非空**的 gaps，否则这里的零断言只说明探测器没在跑。
+    """
+    gaps = {}
+    _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps)
+    assert not gaps, (
+        "这些受保护子集里的判据，静态根解到了仓外或指不到真实目录（它的「零命中」不来自代码）：\n  "
+        + "\n  ".join("%s [%s]" % (rel, st) for rel, st in sorted(gaps.items()))
+        + "\n`Path(__file__).resolve().parents[N]` 的 N 要按**本档所在深度**算："
+        "`tests/unit/ci/x.py` 是 3，`tests/unit/x.py` 是 2。"
     )
 
 
@@ -298,6 +396,73 @@ def test_surfaceReadingIsNotVacuous():
             parsed += 1
     assert parsed == len(manifest), (
         f"清单里有 {len(manifest) - parsed} 条指不到真实文件——offender 读数会偏小且偏干净")
+
+
+_PROOF_TAIL = (
+    "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\n"
+    "    scanned = len(hits)\n"
+    "    assert scanned > 500\n"
+    "    assert hits == []\n"
+)
+_NO_PROOF_TAIL = "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\n    assert hits == []\n"
+
+
+@pytest.mark.parametrize("rel, source, label, expectOffender, expectGap", [
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'neurova'\n\n\n"
+     "def test_shape():\n" + _NO_PROOF_TAIL,
+     "档在 ci/ 下（深度 3），parents[3] 就是仓根——这一档扫的是仓内路径，缺自证必须点名", True, ""),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3].parent\n_Target = _Repo\n\n\n"
+     "def test_shape():\n" + _PROOF_TAIL,
+     "根上溯到仓外（`parents[3].parent`＝仓根的上一层），面根本不在代码上；带了自证也照样红", True, OUTSIDE),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo.parent\n\n\n"
+     "def test_shape():\n" + _PROOF_TAIL,
+     "根解到仓外的**真实目录**（这里是仓根的上一层）：目录存在但不在仓内，带自证也照样红", True, OUTSIDE),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'neurova'\n\n\n"
+     "def test_shape():\n" + _PROOF_TAIL,
+     "控制格：深度解对、自证在场＝不点名（防把规则做成『凡 parents 写法皆红』）", False, ""),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'no_such_dir'\n\n\n"
+     "def test_shape():\n" + _NO_PROOF_TAIL,
+     "静态根指不到真实目录——与『目录被改名/删掉』同形，零命中是假的，必须点名", True, MISSING),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'one.py'\n\n\n"
+     "def test_shape():\n" + _NO_PROOF_TAIL,
+     "根指到仓内一个真实文件＝面很窄，但坏得**响**（入口当场抛 FileNotFoundError），本闸不管这一形", False, ""),
+    ("tests/sample.py",
+     "from tests import ast_scan\n\n\ndef test_shape(root):\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(root, '.py')]\n"
+     "    assert hits == []\n",
+     "运行时才定的根不承载面的声明：既不点名也不免罪，维持原设计", False, ""),
+])
+def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffender, expectGap):
+    """根的形状要按**被档自身深度**解，且「静态根解到仓外／指不到目录」必须点名。
+
+    建档那轮现扫时，两档（`test_route_vocabulary_is_single_source.py`、`test_deploy_config_guard.py`）
+    的根被解成了 `E:\\`——`Path(__file__).resolve().parents[N]` 这一形当时是**从仓根往上再数 N+1 层**，
+    与档所在深度无关。第一版只把这当成"读数不准"，但它真正的坏法是：**把根少写一层的那档会安静地
+    掉出本闸的面**（解出来的目录存在就不算动态值），于是"零命中"既可能来自干净、也可能来自
+    根根本没指到代码——正是本档要防的那件事，被本档自己的取数路放过去了。
+    """
+    (tmp_path / "neurova").mkdir()
+    (tmp_path / "one.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / rel).write_text(source, encoding="utf-8")
+
+    gaps = {}
+    offenders = _faceFindings(tmp_path, [rel], gaps)
+    assert bool(offenders) is expectOffender, f"{label} ⇒ 判错：{offenders}"
+    assert gaps.get(rel, "") == expectGap, (
+        f"{label} ⇒ 落点态判错：{gaps} 里要的是 {expectGap!r}")
 
 
 @pytest.mark.parametrize("label, source, expectOffender", [

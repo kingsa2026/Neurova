@@ -214,8 +214,11 @@ class TestNoNewHomeLandingIsAllowed:
         import ast
 
         offenders = {}
+        sources = list(ast_scan.filesUnder(NEUROVA))
+        surface = len(sources)
+        assert surface > 500, f"扫描面现读 {surface} 个 .py（根＝neurova/）——根被改窄时「零命中」不代表干净"
         # 同上一条：枚举与解析都走共享一次性入口，不在判据里自付 ast.parse
-        for py in ast_scan.filesUnder(NEUROVA):
+        for py in sources:
             try:
                 tree = ast_scan.transientTree(py)
             except SyntaxError:

@@ -37,10 +37,13 @@ def _listedTests() -> set:
 
 
 def _packageTestFiles() -> list:
-    return sorted(
+    listed = sorted(
         f"tests/unit/memory_ingest/{path.name}"
         for path in PACKAGE_TESTS.glob("test_*.py")
     )
+    surface = len(listed)
+    assert surface > 12, f"扫描面现读 {surface} 个 test_*.py（根＝tests/unit/memory_ingest/）——根被改窄时「零命中」不代表干净"
+    return listed
 
 
 def test_every_package_test_file_is_registered():

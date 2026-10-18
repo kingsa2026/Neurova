@@ -89,6 +89,8 @@ def _outsideSubsetRefs() -> List:
     扫描分代，实测整会话 gen2 从 7.4s 降到 1.4s。故收回这处 consumer 侧的规避，
     解析回到唯一入口（教义第 1、6 条：不在消费方绕开共享源）。
     """
+    surface = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))
+    assert surface > 1500, f"扫描面现读 {surface} 个 .py（根＝tests/）——根被改窄时「零命中」不代表干净"
     return ast_scan.sourceRefsUnder(
         REPO_ROOT / "tests", ".py", hints=PARSE_HINTS)
 
