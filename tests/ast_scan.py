@@ -688,7 +688,8 @@ def _shapeSignature(node: ast.AST) -> Tuple[Tuple[str, ...], str]:
     return deco, ast.dump(ast.Module(body=body, type_ignores=[]))
 
 
-def shadowedTopLevelNames(root: Path, suffix: str = ".py") -> List[TopLevelNameDup]:
+def shadowedTopLevelNames(root: Path, suffix: str = ".py",
+                          stats: dict = None) -> List[TopLevelNameDup]:
     """`root` 子树里**同一个模块级名字被定义两次以上**的落点，按 `(路径, 名字)` 排序。
 
     为什么要给它做格子（不是"下次编代码注意点"）：第二次定义会**静默遮住**第一份——
@@ -706,11 +707,18 @@ def shadowedTopLevelNames(root: Path, suffix: str = ".py") -> List[TopLevelNameD
       * 类体内的同名方法不在面内（合法写法极多，且与本条要防的"遮蔽"不同根）；
       * 预筛是**充分条件**：真命中必然让某个 def/class 头名在词法层重复出现；
         行续写那一形由 `\\\n` 兜底整档放行。
+
+    `stats` 传入一个字典即回填**这次扫描自己的面**（`filesSeen`／`parsedAfterGate`）。
+    为什么由取数口给而不是调用方另数一遍：判据要钉的是"这条格扫的面是不是整仓"，
+    而另开一条取数路去证它，等于假设两次扫的是同一棵树——面读数必须与被它裁决的那次扫描同源。
     """
     hits: List[TopLevelNameDup] = []
+    seen = gated = 0
     for ref in sourceRefsUnder(root, suffix):
+        seen += 1
         if not _lexicalHeaderDup(ref.code):
             continue
+        gated += 1
         try:
             tree = ast.parse(ref.code)
         except (SyntaxError, ValueError):
@@ -726,4 +734,6 @@ def shadowedTopLevelNames(root: Path, suffix: str = ".py") -> List[TopLevelNameD
             hits.append(TopLevelNameDup(
                 _relOrAbs(ref.path), name, [n.lineno for n in nodes],
                 all(_shapeSignature(n) == first for n in nodes[1:])))
+    if stats is not None:
+        stats.update(filesSeen=seen, parsedAfterGate=gated)
     return sorted(hits, key=lambda h: (h.rel, h.name))

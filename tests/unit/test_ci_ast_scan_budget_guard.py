@@ -136,6 +136,9 @@ ENUMERATION_NAMES = frozenset({"glob", "iglob", "listdir", "scandir"})
 SHARED_BUDGET_ENTRIES = frozenset({
     "nodeScan", "sourceRefsUnder", "parsedModules", "walkedModules",
     "callSites", "callNodes", "classDefsIn",
+    # 一次性复合入口（枚举＋解析都在预算内做完，不留常驻树）：调用方拿不到
+    # 任何"自己解析"的机会，故不计枚举也不计解析、且不下潜。
+    "shadowedTopLevelNames", "importersOfModule", "takenPerModule",
 })
 #: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
 #: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
