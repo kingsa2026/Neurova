@@ -38,6 +38,8 @@ import pathlib
 import subprocess
 import sys
 
+from tests import ast_scan
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
 SINGLE_POINT = MANUAL_DIR / "_liveVerifyIsolation.py"
@@ -146,30 +148,23 @@ def _isTheWorkspaceKey(node: ast.AST) -> bool:
     return isinstance(node, ast.Name) and node.id == "AGENT_WORKSPACES_ENV"
 
 
-def _workspaceEnvWrites(path: pathlib.Path) -> int:
-    """该文件把键**写进 env** 的次数：`os.environ[KEY] = ...` 与 `os.environ.setdefault(KEY, ...)`。
+def _workspaceEnvWriteCount(node: ast.AST) -> int:
+    """这个节点是不是"把那把键**写进** env"，返回它贡献的写入次数。
 
     按**写入形态**判，不按"这个字面量出现过几次"判。第一版就是按词数的，结果被三样东西自咬：
     单点里那句常量定义、探针为了取干净现场而 `pop` 掉这两个键、以及读回包时的 `os.environ.get(KEY)`
     ——它们都不是手抄注入（形态集 268／241 同族：按词扫源码的守卫会被自家正常用法填满）。
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError:
-        return 0
-    count = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if (isinstance(target, ast.Subscript) and _isEnvironValue(target.value)
-                        and _isTheWorkspaceKey(target.slice)):
-                    count += 1
-        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-              and node.func.attr in {"setdefault", "__setitem__"}
-              and _isEnvironValue(node.func.value) and node.args
-              and _isTheWorkspaceKey(node.args[0])):
-            count += 1
-    return count
+    if isinstance(node, ast.Assign):
+        return sum(1 for t in node.targets
+                   if isinstance(t, ast.Subscript) and _isEnvironValue(t.value)
+                   and _isTheWorkspaceKey(t.slice))
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"setdefault", "__setitem__"}
+            and _isEnvironValue(node.func.value) and node.args
+            and _isTheWorkspaceKey(node.args[0])):
+        return 1
+    return 0
 
 
 def _workspaceEnvHandCopies() -> dict:
@@ -177,12 +172,17 @@ def _workspaceEnvHandCopies() -> dict:
 
     扫描面取工作树（本仓口径：'不许新增'型守卫要当场咬住新写的档，含还没提交的）；
     这正是要的效果——本批我自己新写的那支探针一旦开始手抄这个键，也会被这里点名。
+
+    取数走 `tests/ast_scan` 的**一次性**入口 `transientNodes`（本档只扫一遍 ⇒ 不留常驻语法树），
+    不私有 `glob + ast.parse`——§6-313 的 D22 记的就是这类落点（受保护子集里已积到 10 档），
+    本批先把自己那两格收干净。
     """
     hits: dict[str, int] = {}
-    for path in sorted(MANUAL_DIR.glob("*.py")):
-        count = _workspaceEnvWrites(path)
+    for path, node in ast_scan.transientNodes(
+            MANUAL_DIR, ".py", ast_scan.textHints("environ")):
+        count = _workspaceEnvWriteCount(node)
         if count:
-            hits[path.name] = count
+            hits[path.name] = hits.get(path.name, 0) + count
     return hits
 
 
