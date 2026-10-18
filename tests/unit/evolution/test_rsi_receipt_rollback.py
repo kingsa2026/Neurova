@@ -132,7 +132,10 @@ def testNoPhantomLoggerAnywhereInRepository():
     此后任何新增的同形写法都会在这里红，而不是等到某条安全支路被短路。
     """
     repoRoot = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    sites = _phantomLoggerSites(os.path.join(repoRoot, "neurova"))
+    productionRoot = os.path.join(repoRoot, "neurova")
+    surface = len(ast_scan.filesUnder(pathlib.Path(productionRoot)))
+    assert surface > 500, f"扫描面现读 {surface} 个 .py（根＝neurova/）——根被改窄时「零命中」不代表全仓干净"
+    sites = _phantomLoggerSites(productionRoot)
     assert sites == [], "幻影 self._logger 取用点：%s" % [
         "%s:%d (%s)" % s for s in sites
     ]

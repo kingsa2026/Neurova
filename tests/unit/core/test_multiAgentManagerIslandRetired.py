@@ -49,6 +49,8 @@ def _islandImportSites() -> list[str]:
     `timeout = 30` 只差一步，且成本绑在代码总量上（`test_ci_ast_scan_budget_guard.py` 判红的就是这处）。
     """
     sites: list[str] = []
+    surface = len(ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py"))
+    assert surface > 3000, f"扫描面现读 {surface} 个 .py（根＝仓根）——根被改窄时「零命中」不代表岛没被 import"
     for path, node in ast_scan.transientNodes(
             ast_scan.REPO_ROOT, ".py", ast_scan.textHints(ISLAND_BASENAME)):
         rel = ast_scan.relativeToRepo(path)

@@ -50,9 +50,13 @@ class TestContextIsMeasured:
 
     def test_include_matches_real_files(self):
         """反向控制：每个 context 模式必须真命中文件，否则是空转配置。"""
+        scanned = 0
         for pattern in CONTEXT_PATTERNS:
             matched = list(PROJECT_ROOT.glob(pattern))
+            scanned += len(matched)
             assert matched, f"{pattern} 命中为空 —— 这条度量范围是空转的"
+        assert scanned > 20, (
+            f"两条模式合计只命中 {scanned} 个文件——模式或根被改窄时，覆盖率门禁量的是空气")
 
     def test_threshold_has_single_source(self):
         """阈值只允许一处定义：CI 命令行。

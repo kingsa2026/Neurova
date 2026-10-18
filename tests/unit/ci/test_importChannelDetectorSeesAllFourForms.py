@@ -82,6 +82,8 @@ def test_relativeParentFormIsReallyConsumedOnTheTree():
     "110 处隐形"的错读数也是这么来的——没有读数可看，只能凭叙述）。
     """
     consumers = ast_scan.importersOfModule(ast_scan.REPO_ROOT, CONSOLE_MODULE)
+    surface = len(ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT, ".py"))
+    assert surface > 3000, f"扫描面现读 {surface} 个 .py（根＝仓根）——根被改窄时「零消费者」是假的"
     atConsoleFiles = [h for h in consumers if h[0].endswith("neurova/api/endpoints/console_files.py")]
     assert atConsoleFiles, f"`from . import console` 没被认成消费者：{consumers[:5]}"
     assert {h[2] for h in atConsoleFiles} == {"父包取名形"}, \

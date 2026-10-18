@@ -94,6 +94,14 @@ class TestVocabularyIsDocumented:
 
 
 class TestNoSecondChannelVocabulary:
+    def test_contractSurfaceIsNotEmpty(self):
+        """面自证：广播面清单本身要数得出量——路径搬家时 parametrize 会退化成零格守卫。"""
+        present = [p for p in _CONTRACT_FILES if p.is_file()]
+        surface = len(present)
+        assert surface > 12, (
+            f"契约面现读 {surface} 个在位文件（清单 {len(_CONTRACT_FILES)} 项）——"
+            "路径段被改掉后这格只会比文档，不再拦第二份词表")
+
     @pytest.mark.parametrize(
         "path",
         [p for p in _CONTRACT_FILES if p.is_file()],
