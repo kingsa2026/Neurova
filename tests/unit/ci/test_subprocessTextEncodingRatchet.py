@@ -293,16 +293,6 @@ def test_knownBothPinnedFilesAreNotCountedAsHalfPinned():
         assert name not in sites, f"{name} 已两头钉却被记成半修——识别器漏形，不是存量复发"
 
 
-def test_knownBothPinnedFilesAreNotCountedAsHalfPinned():
-    """存量账里不许留着"其实已两头钉"的文件——这一格把假阳性点名钉死。
-
-    写明去向：**从 29 收到 27 不是治理改进**，是识别器第一次认得这一形。收数时把它如实写进
-    提交说明，否则下一轮会把"谓词修准"读成"有人吃掉了两处存量"。
-    """
-    sites = {f for f, _ in halfPinnedSites()}
-    for name in ("tests/unit/memory/test_regression_worker_cleanup.py",
-                 "tests/unit/test_manual_scripts_are_not_collectible.py"):
-        assert name not in sites, f"{name} 已两头钉却被记成半修——识别器漏形，不是存量复发"
 #: ── 批 51（§6-225）补的下半张：本文件原本只钉"有没有写 encoding"，不钉**写的是不是对的那一个**。
 #: 于是出现一种比原缺陷更隐蔽的形态——**半修**：父端按 utf-8 解，子端（本仓的 Python 件）没钉
 #: `PYTHONIOENCODING`，仍按本机码页（cp936）吐字节 ⇒ 非 ASCII 被换成 U+FFFD，而代码看起来"已修"。
