@@ -6621,5 +6621,50 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       **跨 kind 的拷贝（把类方法抄成模块函数）不在面内**（桶键是 (kind,name)）：放宽成按 name 会让配对量与
       假阳性一起涨，而"方法抽成函数"多数时候是有意的收敛，不该由判据替人拍板。
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：D21（§6-312 那条"命中面未量"）。
-      **仍开**：上列各项＋D22。
+      **仍开**：上列各项＋D22（**⇒ D22 已结清＝§6-314**，offender 面清零）。
     - **本会话下一枚空号现查 §6-314**（写前必须现场重取；本笔落库时该读数为 313）。
+
+314. **批 86 · D22 结清：受保护子集里 10 档私有「文件枚举＋`ast.parse`」全仓扫描全部改指 `tests/ast_scan` 共享预算，解析预算门禁恢复零 offender** ✅ —— 三笔四档群：`443179d2`（本会话批 81/82 造的 2 档）／`6bccff64`（`execution/` 3 档）／`4956162a`（余下 5 档）。生产池 **+0/−0**（不动码），测试/基建池 +52/−44、+58/−37、+48/−39。
+
+    - **为什么这条值得收**：`TestNoUnprefilteredRepoWideScan` 的登记表 `REPO_WIDE_SCAN_LEDGER` 设计现值是**空集**
+      （批 48 裁定丁清零过），零容忍就是它的语义。它带着 10 条预存红常驻，危害不是"多一条红"，是
+      **"零 offender"这个读数已经没有裁决力了**——下一次再有判据自己扫全仓，混在 10 条里没人区分得开。
+      本批把它请回零位。
+    - **成本实据**（同一仓外 worktree 两侧逐档单跑现取，不是估算）：
+      `test_noCodeAnywhereImportsTheIsland` **23.24s → 1.79s**（距全局 `timeout = 30` 只差一步的那条）、
+      `test_legacyWorkflowEngineModuleIsGoneAndNobodyImportsIt` 9.40→2.00、
+      `test_noCodeAnywhereImportsTheRetiredTransportSurface` 7.46→0.37、
+      `test_executeSkillHelperIsGoneWithItsLie` 3.05→0.14、
+      `testDefaultGuardNameGoneFromProductionSurface` 3.12→0.10、
+      `testNoSecondInterpreterOfTheMcpTagAnywhere` 3.82→0.80、
+      `testDeclarationIsInterpretedInExactlyOnePlace` 3.38→0.36、
+      `testOneDefinitionThreeCallSites` 3.18→0.07、`_workspaceEnvHandCopies` 那格 0.53→0.30、
+      manual 编码那两格 0.67→0.56。整组墙钟 30.43→22.11；`tests/unit/execution/` 整目录 27.58→7.37。
+    - **改法一律是"枚举与解析归共享预算"**：认名字的走 `nodeScan(root, hints=…)`，要整棵树的走
+      `sourceRefsUnder(…) + transientTree(…)`（只扫一遍 ⇒ 不留常驻语法树），本就吃源码文本的 helper 直接收
+      `SourceRef.code`。预筛词一律取该判据的**充分条件**，岛/引擎那两格取**末段名**而不是全名——
+      全名预筛会把 `from .workflow_engine import …` 这类相对形滤出扫描面（差分实证：预筛词换成全名＋注入相对形 ⇒ 变绿）。
+    - **一条真盲区顺带补掉**（本批唯一行为变化，两条差分各自钉住）：导入通道类判据的绝对名一律交给
+      `ast_scan.resolveImportModule`——旧写法只比 `node.module` 原文，**看不见相对形**，于是"还在导入"
+      会被读成零引用（§6-212 记过同一族）。岛那格另补一条 `from neurova.core import X` 的父包取名形通道；
+      关掉该通道后注入父包形 ⇒ 变绿，证这条也不是装饰。
+    - **自证**：注入正控 16 枚（岛 4 形、手抄 2 写入形、execution 5 形、余下五档 5 枚）全部红且报错点名探针档；
+      差分 4 枚（旧口径／关掉新通道／预筛换全名／在册期望值 1→0）全部如实翻绿或翻红；
+      合规对照 2 枚（只读用法、先 `import sys` 再钉）如实绿——**口径没被改宽**。
+      全部在仓外 worktree 做，探针零残留（`rglob` 复证），判据档 md5 复证还原。
+    - **A/B 主证据**：本批侧 106 passed / 0 failed，基线侧（纯 HEAD）1 failed / 105 passed，
+      差集恰为那条常驻红；基线侧那条单跑复证仍红 ⇒ 是本批修复使其转绿的交付证据，不是"两侧同红"（形态集 277）。
+      两侧"汇总红数 == 实际抽取数"都对上（1==1 / 0==0，形态集 280）。
+    - **一处该记的执行细节**：变异驱动脚本第一版给子进程只传了三个 env 键 ⇒ 本仓
+      `tests/temp_reclaim.py::pytest_sessionstart` 里 `getpass.getuser()` 拿不到 USER，
+      pytest 报 **INTERNALERROR**、一条用例都没跑，而驱动按"有没有 FAILED 行"判——
+      差点把 M1 读成"变异后竟然全绿"。改 `env={**os.environ, …}` 并在断言前先排 INTERNALERROR/无汇总行才作数
+      （形态集 253 补第四种"没跑成"、280 同族）。
+    - **顺带清掉**：三处因收口而失效的 `import io`（判据不再自己开文件；删前按 AST 复核该名字不再被使用）。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：D22。**仍开**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、
+      D1 甲／乙、§6-293、D9、D10、批 82 那条"4 档不走单点"的次序、D11–D20、D19/D20/D21 中未裁的部分。
+      **本批新登记的口径边界**（不当看不见，也不顺手做成判据）：① 岛那格之外的"父包取名形"通道只补在了岛与
+      execution 两档，其余按 `node.module` 比对导入通道的判据仍可能漏这一形；② `DefaultGuard` 那格认
+      `ClassDef`/`Name`，不认 `module.DefaultGuard` 这种属性访问形。两种都是**同一族**（取法窄于意图），
+      要收得先量命中面——本卷未量。
+    - **本会话下一枚空号现查 §6-315**（写前必须现场重取；本笔落库时该读数为 314）。
