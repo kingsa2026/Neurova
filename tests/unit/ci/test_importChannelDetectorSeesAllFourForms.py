@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """共享入口 `ast_scan.importersOfModule` 的判据：四种导入取法都要认，且预筛必须取末段名。
 
+「父包取名形」这一类含**两种写法**（`from a.b import c` 与相对的 `from . import c`），
+共用一个取法标签；两种写法各配一例，另有一枚真面正控 `test_relativeParentFormIsReallyConsumedOnTheTree`
+钉住"仓内真有人在用这一形"——没有那格时，这条通道只是实现碰巧对，重构一次就静默掉出面内。
+
 来历（上一批复算时明记、当时未收的窄面）：`tests/` 里曾有约 17 处各写一份"谁还在导入这个模块"的谓词，
 每一处都要独立决定认不认相对形、认不认父包取名形、预筛取哪个词——同一个问题十七个口径
 （教义第 6 条点名的形态）。已复算的例子：`ast_scan.importsOf` 只比 `node.module` 原文，
@@ -29,6 +33,8 @@ from tests import ast_scan
 MODULE = "pkg.sub.leaf"
 RETIRED = "neurova.core.multi_agent_manager"
 LIVE = "neurova.core.agent_workspaces"
+#: 真面正控的取样——仓内确实有人用 `from . import console` 取它
+CONSOLE_MODULE = "neurova.api.endpoints.console"
 
 
 def _firstImport(source: str) -> ast.AST:
@@ -38,16 +44,24 @@ def _firstImport(source: str) -> ast.AST:
 
 
 def test_detectorOwnsAllFourImportForms():
-    """四种取法逐个给判定函数，各自要报出自己的名字；两个"不是它"的形状不得误报。"""
+    """五种写法逐个给判定函数，各自要报出自己的取法名；三个"不是它"的形状不得误报。
+
+    「父包取名形」有两种写法，都归同一个标签：`from pkg.sub import leaf`（绝对）与
+    `from . import leaf`（相对，`node.module` 是 None，父包只能由发起文件位置解出）。
+    这里刻意**不**给它拆新标签——八个消费方的判据正文都写着"四种取法都认"，
+    拆标签会让那些口径集体过期，等于造一处新的名实分离。两写法各配一例即可。
+    """
     cases = {
-        "import 全名": ("import pkg.sub.leaf\n", "anywhere/x.py"),
-        "from 全名": ("from pkg.sub.leaf import Thing\n", "anywhere/x.py"),
-        "相对形": ("from .leaf import Thing\n", "pkg/sub/x.py"),
-        "父包取名形": ("from pkg.sub import leaf\n", "anywhere/x.py"),
+        "import 全名": ("import pkg.sub.leaf\n", "anywhere/x.py", "import 全名"),
+        "from 全名": ("from pkg.sub.leaf import Thing\n", "anywhere/x.py", "from 全名"),
+        "相对形": ("from .leaf import Thing\n", "pkg/sub/x.py", "相对形"),
+        "父包取名形·绝对写法": ("from pkg.sub import leaf\n", "anywhere/x.py", "父包取名形"),
+        "父包取名形·相对写法": ("from . import leaf\n", "pkg/sub/x.py", "父包取名形"),
     }
-    for form, (source, rel) in cases.items():
-        assert ast_scan.importFormForModule(rel, _firstImport(source), MODULE) == form, \
-            f"取法 {form} 没被认出来——这个入口又在学旧口径只比一种形"
+    for label, (source, rel, expected) in cases.items():
+        got = ast_scan.importFormForModule(rel, _firstImport(source), MODULE)
+        assert got == expected, \
+            f"写法 {label} 的取法判成 {got!r}（应为 {expected!r}）——这个入口又在学旧口径只比一种形"
 
     negatives = {
         "同末段名但别的包": ("from other.pack import leaf\n", "anywhere/x.py"),
@@ -57,6 +71,27 @@ def test_detectorOwnsAllFourImportForms():
     for label, (source, rel) in negatives.items():
         assert ast_scan.importFormForModule(rel, _firstImport(source), MODULE) == "", \
             f"{label} 被误判成在取 {MODULE}——放宽到不可信的程度就没有格子能红了"
+
+
+def test_relativeParentFormIsReallyConsumedOnTheTree():
+    """真面正控：这一形不是纸面形状，仓内真有人在用，两个入口都必须现读到它。
+
+    取样 `neurova.api.endpoints.console`——它被同目录的 `console_files.py` 等以
+    `from . import console` 取用。这条通道此前是**实现碰巧对**：没有任何格子钉它，
+    所以重构一次 `resolveImportModule` 就会静默掉出面内而无人报（§6-318 那句
+    "110 处隐形"的错读数也是这么来的——没有读数可看，只能凭叙述）。
+    """
+    consumers = ast_scan.importersOfModule(ast_scan.REPO_ROOT, CONSOLE_MODULE)
+    atConsoleFiles = [h for h in consumers if h[0].endswith("neurova/api/endpoints/console_files.py")]
+    assert atConsoleFiles, f"`from . import console` 没被认成消费者：{consumers[:5]}"
+    assert {h[2] for h in atConsoleFiles} == {"父包取名形"}, \
+        f"认上了但走的不是父包那条分支（判据换形状就会漏）：{atConsoleFiles}"
+
+    # `namesTakenFrom` 走的是另一条问句（谁从这个包取了哪些名），同一形也必须记到
+    scan = ast_scan.nodeScan(ast_scan.REPO_ROOT / "neurova" / "api" / "endpoints", ".py")
+    taken = {n for n, _p, _l in ast_scan.namesTakenFrom(scan, "neurova.api.endpoints")}
+    assert "console" in taken, \
+        "namesTakenFrom 没把 `from . import console` 记成从包里取的名字——门面判据的 import 图会少走边"
 
 
 def test_endToEndSeesWhatTheNarrowPredicateMisses(tmp_path):
