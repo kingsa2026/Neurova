@@ -6738,7 +6738,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       全在常驻红小账（npc 脚本可达性 5／时钟量子门 1／ffmpeg CJK 字体探测 2／其余 7），非本批所加；
       passed 差 5 恰＝本批新增格数。汇总报的 15 与实际抽取的 15 对账一致，捕获口径有效。
     - **未迁的私有导入谓词档，现场复算得 6 档**（子代理曾报"约 13/18 处"，按 import 语句复算是 6）：
-      **【至此全闭＝§6-321】**——批 89 四刀收口；且那一轮的"6 档"本身少报，按代码形态重扫真实面是 **8 档**。
+      **【至此全闭＝§6-318】**——批 89 四刀收口；且那一轮的"6 档"本身少报，按代码形态重扫真实面是 **8 档**。
+      （勘误：本行原写 §6-321，那是落笔时对号次的预测，实际收口落在 §6-318——引用预测号与引用失效号
+      同样会把读者带去一个不存在的格子。）
       `cognitive_layers/test_memoryLayerGenerationResidue.py:63`、`context/test_secondCacheFaceRetired.py:57`、
       `core/test_kvConfigSingleSource.py:35`、`shared_core/test_sharedCoreOrchestratorRetired.py:43`（四份
       `_importedNames`）、`core/test_committed_tree_dependencies.py:42`（`_importsOf`）、
@@ -6751,7 +6753,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （形态集 202 那条老账在此是仓库级惯例而非个别失手）。本批只把自己新写的几处改掉，
       全量去号＝一次跨 350 档的散文改写，收益取决于台账是否会重编号——**不立简化项**，留此读数供裁。
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-314 明记的两条窄面（口径层）。
-      **仍开**：未迁的 6 档（**至此全闭＝§6-321**，四刀收口并复算出真实面是 8 档不是 6 档）、
+      **仍开**：未迁的 6 档（**至此全闭＝§6-318**，四刀收口并复算出真实面是 8 档不是 6 档；
+      本行原写 §6-321 是未落地的号次预测，勘误随上条一并改）、
       §6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
       批 82 那条"4 档不走单点"、D11–D20、D19/D20 未裁部分。
     - **本会话下一枚空号现查 §6-317**（写前必须现场重取；本笔落库时该读数为 316）。
@@ -6865,5 +6868,49 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-318 的边界③（作废并换成会红的格子）。
       **仍开**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、
       批 82"4 档不走单点"、D11–D20、D19/D20 未裁部分、§6-318 边界①②（getattr 字符串形、
-      `import M as p` 之后 `p.X` 属性形）、上面那枚偶发红格。
+      `import M as p` 之后 `p.X` 属性形）、上面那枚偶发红格（**量完并改判＝§6-320**）。
     - **本会话下一枚空号现查 §6-320**（写前必须现场重取；本笔落库时该读数为 319）。
+
+320. **批 91 · 那枚「偶发红」量完不在这侧，同族另一档才是稳定红：嵌套 pytest 的捕获没钉 encoding** ✅🟢 —— 一笔：`6cd11d0e`
+
+    - **票面被复核实状改了**：§6-319 登记的是 `tests/unit/core/test_pytest_collection_hygiene.py`
+      那枚偶发红，指令是「单独量它复现率」。量到的第一件事是**它那一档不常红**：同一轮家族复跑里
+      `tests/unit/test_pytest_runner_guards.py` 6 次里红 6 次，hygiene 档 6 次里红 0 次。本批因此修那一档。
+    - **偶发那格的根因与三条被否的假设**（读数现取）：无 `--basetemp` 10 次里非零 1、显式私有
+      `--basetemp` 10 次里非零 3；坏读数是收集期一次 `FileNotFoundError [WinError 2]`，对象是
+      `%TEMP%\qoder-rc-history-*` 上的一次 lstat。私有 TEMP 根、`--basetemp`、剥 `QODER_*` 三个变量
+      逐个试过，复现都不变。现场反查：仓内扫临时根的唯一落点 `tests/temp_reclaim.py::sessionTempRoot()`
+      只扫 `pytest-of-<user>`，其 `lock.stat()` 已在 `except (OSError, ValueError)` 内；
+      `rc-history` 一词在 `neurova/ tests/ scripts/` 的 `.py` 里 0 命中——本仓既不产该目录也够不着它。
+      **处置＝登记为宿主侧 TOCTOU，不修、不放宽、不加豁免**；它仍留在常驻红小账，但性质从
+      「待量的候选」改成「环境侧、复现率 1/10～3/10、与宿主负载相关」。
+    - **真缺陷的形状**：`_run_pytest` 的 `subprocess.run(..., text=True, capture_output=True)` 没钉
+      `encoding`。宿主 locale 是 cp936 时父端按 GBK 解子进程写出的 UTF-8 字节，reader 线程一崩，
+      `stdout` 回来是 `None`，那格于是报 `TypeError: can only concatenate str (not "NoneType") to str`
+      ——缺陷换了副面孔，报在**判据自己**身上，看着像这条格子坏了。形态集 248 说的「同一处未钉 encoding
+      有两种坏法」，`None` 那一支此前只写在文档里，本批是它第一次在跑测面上落地成崩溃。
+    - **两头钉齐是被判据逼出来的，不是设计得漂亮**：只钉父端 `encoding` 的第一版，当场被同目录的半修
+      计数报「现读 1 / 基线 0」并点名这一档（`test_halfPinnedPythonChildSitesMatchTheCountedBaseline`）；
+      补上子端 `env=dict(os.environ, PYTHONIOENCODING="utf-8")` 才绿。
+    - **棘轮基线摘除的复算**：按该文件自己的规矩（摘除而不是留 0）删掉 `BASELINE` 里这一档那 1 行，
+      并在表头写明本次摘除的去向。摘后现读 `BASELINE` 33 档 / 47 处 ↔ 现场扫描 33 档 / 47 处，
+      「基线有档而现扫为 0」＝空、「现扫有档而基线未登记」＝空。**同时作废我自己带过来的一句**：
+      37 档 / 59 处是批 51 的建档快照，把它当现值写进结论会多算 12 处存量。
+    - **两条反证**：① 带唯一 tag 的定向 stash 撤掉本批两文件、复跑同一选择集 ⇒ 失败集恰 1 条，就是那条
+      TypeError 格（`1 failed, 43 passed, 1 skipped`，汇总红数与实抽条数对账一致）；② 单独退回父端
+      encoding ⇒ `test_ratchetDoesNotRise` 与 TypeError 格同时红，还原后 md5 逐字节相同。第②条证的正是
+      「摘掉基线那一行」没把闸拆掉：改回去它就该红。
+    - **同根因扫荡量到的东西（教义 5，本批只登记不动）**：按 AST 扫全仓已跟踪 `.py`（3499 档）找
+      **模块级重名 def**，命中 3 处——① `tests/unit/ci/test_subprocessTextEncodingRatchet.py:284/296`
+      的 `test_knownBothPinnedFilesAreNotCountedAsHalfPinned`（两份同体，收集到 16 格而 def 有 17 行；
+      今日无覆盖损失，但改任何一份都以为改了规则；来历 `1b3575f7` 引入一份、`850863c4` 又贴一遍）；
+      ② `tests/unit/core/test_runtime_landing_root.py:54/143` 的 `_isCwdRelativeLiteral`（两份同体，同形态）；
+      ③ `tests/unit/core/test_plugins_modules.py:38/63` 的 `_writePluginInto`（**两份体不同**——跑的是后一份，
+      而 `_PLUGIN_SOURCE_LINES` 的唯一消费点（57 行）正落在被遮住的那份里 ⇒ 那个模块级常量如今是第二份
+      表示，改它不报错也不生效；两份今日输出逐字节相同，所以坏的不是行为而是单源）。
+      这一族要的是「模块级重名 def＝红」的常驻判据＋三处分流处置（同体摘除、异体收单源），**另开一批**，
+      不折进本批（缺陷不与相邻收口捆绑）。
+    - **§9.1 表本批未追加**（沿 §6-302 起各笔口径）。**结清**：§6-319 那句「要单独量它复现率」（量完并改判）。
+      **仍开**：§6-312 甲／乙／丙、§6-311 甲／乙／丙、D1 甲／乙、§6-293、D9、D10、批 82「4 档不走单点」、
+      D11–D20、D19/D20 未裁部分、§6-318 边界①②、上面「模块级重名 def」那一族（3 处）。
+    - **本会话下一枚空号现查 §6-321**（写前必须现场重取；本笔落库时该读数为 320）。
