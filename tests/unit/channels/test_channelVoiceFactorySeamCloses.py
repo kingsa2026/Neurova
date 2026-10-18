@@ -181,6 +181,10 @@ class TestTheParallelAssemblyIsRetired:
         文本预筛取键名本身——连这些串都没出现的文件不可能命中。
         """
         bad = []
+        surface = len(ast_scan.sourceRefsUnder(NEUROVA, ".py"))
+        assert surface > 500, (
+            f"枚举面现读 {surface} 个 .py（根＝neurova/）——这条钉的是三条接缝收进唯一工厂路，"
+            "域是生产装配码；根被改窄时「零命中」只是没看到别人")
         for ref in ast_scan.sourceRefsUnder(NEUROVA, hints=tuple(TWILIO_CONFIG_KEYS)):
             sites = self._keySites(ref.code)
             if sites:

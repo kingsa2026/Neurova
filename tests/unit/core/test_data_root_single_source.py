@@ -63,7 +63,12 @@ class TestDataRootIsSingleSource:
         assert "parents[2]" in resolver and "_DEFAULT_DATA_DIR" in resolver, \
             "数据根本身没有按层数解析仓库根，这条判据失去基准"
         offenders = []
-        for path in NEUROVA.rglob("*.py"):
+        sources = sorted(NEUROVA.rglob("*.py"))
+        surface = len(sources)
+        assert surface > 500, (
+            f"扫描面现读 {surface} 个 .py（根＝neurova/）——本谓词按行匹配字面量，"
+            "扩到仓根会先自咬（判据自己的源码里就写着那两个字面量），故域明写在生产侧")
+        for path in sources:
             if path.name == "data_root.py":
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
