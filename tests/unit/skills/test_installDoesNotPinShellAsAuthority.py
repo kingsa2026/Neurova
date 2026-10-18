@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import io
 import json
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests import ast_scan
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
@@ -162,12 +163,12 @@ class TestRealArtifactsStillPinned:
 
 class TestPinDecisionComesFromOnePredicate:
     def _definitions(self):
+        """`PREDICATE` 在全仓 `neurova/` 的定义点——取数走共享预算（§6-314 的 D22）。"""
         out = []
-        for path in REPO.glob("neurova/**/*.py"):
-            tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == PREDICATE:
-                    out.append(f"{path.relative_to(REPO).as_posix()}:{node.lineno}")
+        for path, node in ast_scan.nodeScan(ast_scan.PRODUCTION_ROOT, ".py",
+                                            ast_scan.textHints(PREDICATE)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == PREDICATE:
+                out.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
         return out
 
     def _callSites(self, rel):

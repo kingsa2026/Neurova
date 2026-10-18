@@ -24,8 +24,9 @@ r"""活体档的 stdout 编码必须自己钉住——否则退出码 1 可以�
 from __future__ import annotations
 
 import ast
-import io
 import sys
+
+from tests import ast_scan
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -63,17 +64,23 @@ def _pinsStdoutEncoding(source: str) -> bool:
 
 
 def _liveScripts() -> list:
-    return sorted(p for p in MANUAL_DIR.glob("*.py") if not p.name.startswith("_"))
+    """manual 目录里的"真脚本"（`_` 前缀的是共享件，不是活体档）。
+
+    枚举走 `tests/ast_scan` 的共享预算，不自己 `glob`——§6-314 的 D22 收的就是判据里
+    各写一份"文件枚举＋自付解析"的形态（成本绑在文件总量上，且读盘口径各处不一）。
+    """
+    return [ref for ref in ast_scan.sourceRefsUnder(MANUAL_DIR, ".py")
+            if not ref.path.name.startswith("_")]
 
 
 class TestEveryScriptThatPrintsForeignCharsPinsEncoding:
     def testNoLiveScriptPrintsWhatThisMachineCannotEncode(self):
         """主格：含不可 cp936 字面量的活体档，必须一律自己钉 stdout 编码（零容忍，不留基线）。"""
         offenders = []
-        for path in _liveScripts():
-            src = io.open(path, encoding="utf-8").read()
+        for ref in _liveScripts():
+            src = ref.code
             if _unencodableInLiterals(src) and not _pinsStdoutEncoding(src):
-                offenders.append(path.name)
+                offenders.append(ref.path.name)
 
         assert not offenders, (
             f"{len(offenders)} 档活体脚本会打出本机编码编不出的字符又没钉 stdout 编码，"
@@ -100,11 +107,11 @@ class TestThePinnedCallIsActuallyReachable:
     def testPinSitsAtModuleTopLevelAfterSysIsBound(self):
         """钉的位置要模块顶层、且在 `import sys` 之后——函数体内的调用不会在打印前发生（形态集 247）。"""
         badlyPlaced = []
-        for path in _liveScripts():
-            src = io.open(path, encoding="utf-8").read()
+        for ref in _liveScripts():
+            src = ref.code
             if not _pinsStdoutEncoding(src):
                 continue
-            tree = ast.parse(src)
+            tree = ast_scan.transientTree(ref.path)
             sysBoundBefore = False
             for node in tree.body:                      # 只看顶层语句，按书写顺序
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -115,5 +122,5 @@ class TestThePinnedCallIsActuallyReachable:
                 for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)
                              and isinstance(n.func, ast.Attribute) and n.func.attr == "reconfigure"):
                     if not sysBoundBefore:
-                        badlyPlaced.append(f"{path.name}:{call.lineno}")
+                        badlyPlaced.append(f"{ref.path.name}:{call.lineno}")
         assert not badlyPlaced, f"钉在 `import sys` 之前（跑到那行就 NameError）：{badlyPlaced}"

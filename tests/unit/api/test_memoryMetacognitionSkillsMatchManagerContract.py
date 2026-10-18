@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import ast
 import inspect
-import io
 import pathlib
+
+from tests import ast_scan
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MEMORY_ENDPOINT_DIR = REPO_ROOT / "neurova" / "api" / "endpoints" / "memory"
@@ -92,8 +93,8 @@ def test_noEndpointPassesArgumentsTheManagerRefuses():
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
     offenders = []
-    for path in sorted(MEMORY_ENDPOINT_DIR.glob("*.py")):
-        tree = ast.parse(io.open(path, encoding="utf-8").read())
+    for ref in ast_scan.sourceRefsUnder(MEMORY_ENDPOINT_DIR, ".py"):
+        tree = ast_scan.transientTree(ref.path)
         for fn in (n for n in tree.body
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
             for call in (c for c in ast.walk(fn) if isinstance(c, ast.Call)):
@@ -103,7 +104,7 @@ def test_noEndpointPassesArgumentsTheManagerRefuses():
                     continue
                 meth = getattr(MemoryManager, f.attr, None)
                 if meth is None:
-                    offenders.append((path.name, fn.name, f.attr, "MemoryManager 上没这个方法"))
+                    offenders.append((ref.path.name, fn.name, f.attr, "MemoryManager 上没这个方法"))
                     continue
                 sig = inspect.signature(meth)
                 if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
@@ -111,7 +112,7 @@ def test_noEndpointPassesArgumentsTheManagerRefuses():
                 allowed = set(sig.parameters) - {"self"}
                 refused = {kw.arg for kw in call.keywords if kw.arg} - allowed
                 if refused:
-                    offenders.append((path.name, fn.name, f.attr, sorted(refused)))
+                    offenders.append((ref.path.name, fn.name, f.attr, sorted(refused)))
 
     assert not offenders, f"这些端点在往 manager 传它不收的参数（每一次都是 500）：{offenders}"
 
