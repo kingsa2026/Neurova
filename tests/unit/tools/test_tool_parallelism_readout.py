@@ -1011,6 +1011,8 @@ class TestShapeVocabularyHasOneSource:
         offenders, definitions = [], []
         # 两个面都扫：生产侧（写入侧落点）与 `scripts/`（读数侧落点）。
         # 只扫一边就会漏掉另一半——本片之前的形态正是"两侧各写一份"。
+        surface = len(ast_scan.sourceRefsUnder(PROJECT_ROOT / "scripts", ".py"))
+        assert surface > 40, f"扫描面现读 {surface} 个 .py（根＝scripts/）——根被改窄时「零命中」不代表干净"
         for ref in list(
             ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, hints=tuple(sorted(labels)))
         ) + list(

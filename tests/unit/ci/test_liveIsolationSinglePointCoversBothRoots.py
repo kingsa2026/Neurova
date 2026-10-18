@@ -178,6 +178,8 @@ def _workspaceEnvHandCopies() -> dict:
     本批先把自己那两格收干净。
     """
     hits: dict[str, int] = {}
+    surface = len(ast_scan.filesUnder(MANUAL_DIR))
+    assert surface > 100, f"扫描面现读 {surface} 个 .py（根＝tests/manual/）——根被改窄时「零命中」不代表干净"
     for path, node in ast_scan.transientNodes(
             MANUAL_DIR, ".py", ast_scan.textHints("environ")):
         count = _workspaceEnvWriteCount(node)

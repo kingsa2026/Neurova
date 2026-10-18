@@ -545,6 +545,8 @@ class TestProtectedGuardsUseNoExternalBinaries:
         调用，不匹配文档/注释里的文字（否则守卫自己就成了违规样本）。
         """
         offenders = []
+        surface = len(ast_scan.filesUnder(PROJECT_ROOT / "tests"))
+        assert surface > 1500, f"扫描面现读 {surface} 个 .py（根＝tests/）——根被改窄时「零命中」不代表干净"
         # 文本预筛：违规形态必然含 subprocess 调用与 "rg" 字面量，其余文件不解析；
         # 解析走 tests/ast_scan.py 的共享预算（Issue #148：全仓 ast.parse 单跑 4s，
         # 与受保护子集其余 170 个文件共享机器时撞 30s 默认墙钟）。

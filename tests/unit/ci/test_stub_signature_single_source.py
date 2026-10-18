@@ -381,6 +381,8 @@ class TestPrefilterDoesNotDropHits:
         不随仓库规模线性涨——判据不得与代码总量捆绑。
         """
         kept = {ref.path for ref in candidateRefs()}
+        surface = len(ast_scan.filesUnder(ast_scan.REPO_ROOT / "tests"))
+        assert surface > 1500, f"扫描面现读 {surface} 个 .py（根＝tests/）——根被改窄时「零命中」不代表干净"
         dropped = [
             ref for ref in ast_scan.sourceRefsUnder(ast_scan.REPO_ROOT / "tests", hints=STUB_KEYS)
             if ref.path not in kept

@@ -95,7 +95,10 @@ def _scannedScripts() -> list[Path]:
     枚举与解析各收口一处：`ast_scan.filesUnder` + `_cachedParse`，
     与其余跨文件判据复用同一份缓存。
     """
-    return ast_scan.filesUnder(SCRIPTS_ROOT, ".py")
+    sources = ast_scan.filesUnder(SCRIPTS_ROOT, ".py")
+    surface = len(sources)
+    assert surface > 40, f"扫描面现读 {surface} 个 .py（根＝scripts/）——根被改窄时「零命中」不代表干净"
+    return sources
 
 
 def _offenders() -> list[str]:
