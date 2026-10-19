@@ -428,7 +428,7 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
 #:   (b) 一次迭代（`for` 或推导式）的 iterable 污点自 (a)，**四种写法都算**：绑到清单名的名字
 #:       （`for x in manifest`）、直调清单 helper（`for x in protectedFiles()`）、当场读再迭代
 #:       （`for x in io.open(P).read().splitlines()`，本仓实测 9 处）、**类里的取数方法**
-#:       （`for x in self._rows()`——被调者要按属性形记名，只记裸名等于把这族整档放出面）；
+#:       （`for x in self._rows()`——这一形由 `_readsAList` 的**属性形方法跳**那一臂认，跳不进去就放出整族）；
 #:   (c) 迭代变量**派生成路径**之后再动手：`path = 根 / 条目`、`.joinpath(条目)`、`Path(条目)`、
 #:       f-string，或条目先过一道字符串处理再拼（`rel = line.split('#')[0].strip()` ⇒ `根 / rel`，
 #:       台账那一族全是这个形状）；派生出的名字被 `read_text`/`open`/`is_file`/`exists`/`rglob`…
@@ -579,26 +579,6 @@ def _crossModuleTargets(env: dict, call: ast.Call) -> list:
         modPath = env["modules"].get(func.value.id)
         return [(modPath, func.attr)] if modPath is not None else []
     return []
-
-
-def _calledNames(node: ast.AST) -> set:
-    """这段子树里"被调用的名字"——**属性形也算**。
-
-    只记裸名就看不见 `self._rows()` 里的 `rows`：台账那一族的取数方法挂在 `self` 上。
-    实测（批 104 变异）这条臂与 `_readsAList` 的方法跳**覆盖同一形**——单摘任一条，
-    `for x in self._rows()` 那格仍绿，两条一起摘才红；`rows = self._rows()` 那一形则只有
-    方法跳认得。留两条的理由是它们服务的问句不同（这条问"迭代器里出现了哪个名字"，
-    那条问"这段代码读不读清单"），但**不许**据此声称各自不可替代——替代性已由变异量清。
-    """
-    out = set()
-    for n in ast.walk(node):
-        if not isinstance(n, ast.Call):
-            continue
-        if isinstance(n.func, ast.Name):
-            out.add(n.func.id)
-        elif isinstance(n.func, ast.Attribute):
-            out.add(n.func.attr)
-    return out
 
 
 def _crossModuleReadsList(env: dict, call: ast.Call, anchor: pathlib.Path, depth: int) -> bool:
@@ -866,14 +846,15 @@ def _iterIsListTainted(iter_: ast.AST, universe: set, readsAList=None) -> bool:
 
     绑到清单读法的名字（`for x in manifest`）、直调清单 helper（`for x in protectedFiles()`）、
     **当场读清单**（`for x in (ROOT / "protected_tests.txt").read_text().splitlines()`）。
-    第三种是批 103 现扫补的：本仓有 9 处这种"不落变量直接迭代"的写法
+    第三种是批 103 现扫补的：本仓有 9 处这种「不落变量直接迭代」的写法，只按名字追污点
+    就等于把它们当成不存在。批 107 又**删掉一条没人独占的支路**：原先这里还有一条 `_calledNames`
+    （把被调者按名字记下来，属性形也算）——它与「Name 节点集合 ∪ 方法跳」完全重叠，整条摘掉
+    本闸 49 格全绿。留着它就是一条看着有牙、实际咬不到的假保险（形态集 321 的收口）。
     （`test_dev_path_and_runtime_dep_guards`／`test_experience_quality_gate`／
     `test_context_facade_retirement` 等），只按名字追污点就等于把它们当成不存在。
     """
     origins = {n.id for n in ast.walk(iter_) if isinstance(n, ast.Name)}
     if origins & universe:
-        return True
-    if _calledNames(iter_) & universe:
         return True
     return bool(readsAList is not None and readsAList(iter_))
 
@@ -1308,7 +1289,7 @@ _MANIFEST_SHAPES = [
      "            if not path.is_file():\n"
      "                continue\n", True),
     ("正检·取数方法绑在**赋值**上而非迭代器（`rows = self._rows()` 之后再逐条动手）——"
-     "这一形只有 `_readsAList` 的方法跳那一臂认得（`_calledNames` 管不到）",
+     "这一形只有 `_readsAList` 的方法跳那一臂认得（批 107 起，记名那条臂已删——它不独占任何形）",
      "class TestOne:\n"
      "    def _rows(self):\n"
      "        return readList()\n\n"
@@ -1357,10 +1338,14 @@ def test_manifestDetectorJudgesEachShape(tmp_path, label, body, expectNamed):
 
     这批控制格不是装饰——探测器一路补了五个洞才被正控放行：污点不跨语句
     （`path = 根 / 条目` 之后再动手）、只认名字不认当场读法、清单面能被无关数值断言兜掉、
-    属性形被调者不记名（`self._rows()`）、文件名当参数时认不出那是清单。
+    属性形取数方法不跳（`self._rows()`）、文件名当参数时认不出那是清单——批 107 复测又发现
+    记名那条臂与「Name 集合 ∪ 方法跳」重叠、无独占形状，已删（形态集 321 的收口）。
     没有它们，"零 offender"永远分不清是干净还是没在跑（本闸自己前三版的失效形态）。
     变异侧的一条实测（239 那一族）：`self._rows()` 这一形被**两条臂**各自覆盖——
-    `_calledNames` 的属性记名与 `_readsAList` 的方法跳，单摘任一条，这十四格全绿；两条一起摘才红。
+    变异侧的一条实测（239 那一族，批 107 收口）：`self._rows()` 这一形原先被**两条臂**各自覆盖，
+    单摘任一条这十四格全绿；两条一起摘才红。于是给 `rows = self._rows()` 补了一格——那一形
+    只有方法跳认得；再复测记名那条臂，发现它**没有任何独占形状**，遂整条删除（本闸 49 格全绿）。
+    结论：一条臂是否该留，不看它「能不能红」，看它「只有它能红时是哪一格」。
     于是"这条臂有用"不能只靠"摘了它有一格红"来证。新加的 `rows = self._rows()` 那一格
     只有方法跳能红，是这两条臂各自独占性的分界。
     """
