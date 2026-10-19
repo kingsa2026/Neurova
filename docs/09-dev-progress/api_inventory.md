@@ -75,7 +75,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（89 条）
+## 二、后端挂载前缀（90 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -126,6 +126,7 @@
 | `neurova/api/endpoints/logs.py` | `/api/v1/logs` |
 | `neurova/api/endpoints/logs_api.py` | `/api/v1/logs-api` |
 | `neurova/api/endpoints/marketplace.py` | `/api/v1/marketplace` |
+| `neurova/api/endpoints/mcp_server_api.py` | `/api/v1/mcp` |
 | `neurova/api/endpoints/media.py` | `/api/v1/media` |
 | `neurova/api/endpoints/memory/crud.py` | `/api/v1/memory` |
 | `neurova/api/endpoints/memory_enhancement.py` | `/api/v1/memory-enhancement` |
@@ -181,7 +182,7 @@
 
 **未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/logs`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/logs`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
