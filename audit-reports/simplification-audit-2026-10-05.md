@@ -7502,7 +7502,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       C. **技能面不过治理链**：`_call_skill` 直调 `skill.execute(arguments, None)`，而同文件的 `computer_*` 那条
          明确 `skip_governance=False` 并走 `ToolExecutor._execute_single_tool`。MCP 导出的技能调用该不该过
          governance 预检与审计，与 `docs/01-architecture/25-mcp-governance.md` 的 M3/M4 同一口径——
-         未取证是否为有意设计，先登记。
+         未取证是否为有意设计，先登记。**已裁已落（2026-10-20 点单「改走 `execute_skill_tool` 同一咽喉」）＝§6-350。**
       D. **`mcp_manager` 三态票（甲-1 的档案）**：`neurova/execution_engine/mcp_manager.py` 424 行，
          生产**零 importer**（全仓非自身引用只剩 `execution_engine/__init__.py:8` 的模块清单与
          `execution_layers/__init__.py:15` 的同名警告两处 docstring）。
@@ -7523,6 +7523,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
          三态：**删**（须同批摘棘轮基线一行 + 改 t09 那格 + 处理 manual 探针⑤）｜
          **留**（承认它是 websocket 传输的唯一实装，代价是仓内第二套 MCP 客户端继续违反教义第 6/7 条）｜
          **先只修那条假前提守卫**（最小、与删除解耦，本批推荐）。
+         **已裁已落（2026-10-20 点单「退役整档＋同批收四件耦合」）＝§6-349**——且本格那句
+         「websocket 属全仓唯一实装、删即永久失去」经实测**证伪**，退役依据见 §6-349。
       E. venv 实装 `mcp 2.3.0` ↔ 两份 lock 钉 `2.2.0` 属**本机环境**漂移，不是仓内缺陷，不入本批改动。
     - **过程与自我更正两笔**：① `14c03ab1` 首版正文把测试池写成 +126/−0，实读 numstat 是 +152/−0——
       错在誊写不在次序（把上一笔的 121 顺延了），未推送窗口内 `--amend -F` 只改正文，
@@ -8102,7 +8104,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：第④刀"按能力挑 agent 并进 neurflow"（乙的最后一格，生产者已核到
       `neurflow/models.py:296 capabilities` ＋ `storage.py` 的 `capabilities_json` 写读两侧）；**〔已改判收口＝§6-348：
       那份实现的能力表全史零生产者，"并进"无对象；能力面另开的三态票已裁甲，本体 1010 行归 B3〕**；
-      `dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；§6-334 的 B／C／D；其余等裁票照旧。
+      `dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；§6-334 的 B（C 见 §6-350、D 见 §6-349，两格已落）；其余等裁票照旧。
     - **本会话下一枚空号现查 §6-347**（写前必须现场重取；本笔落库时该读数为 346）。
 
 347. **清单可见性收口 · 让 API 清单认得 `app.mount` 形态——ASGI 挂载的外表面不再从指路文档里消失（§6-344 那件"登记不动手"的落地）** ✅🟢 —— 一笔：`c1225dd7`
@@ -8136,7 +8138,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       复跑同一选择集恢复 75 passed，说明是瞬态而非真回归。
     - **就地划闭**：§6-344「仍开」里的清单可见性那条由本笔收掉。**§6-339/§6-340/§6-344 这条换面线至此无遗留**：
       身份边界（§6-334 A 格）、运输替换本体、清单可见性三件全落。
-    - **仍开**：§6-334 的 B（同一失败两种信封）／C（技能面不过治理链）／D（`mcp_manager` 三态票）；
+    - **仍开**：§6-334 的 B（同一失败两种信封）——C 已落 §6-350、D 已落 §6-349；
       并发引入的那条在册常驻红（collaborate 退役档入子集未带面自证）；其余等裁票照旧。
       **就地勘正（批 109·第④刀）**：这句第二条**已结清**——§6-345（第②刀，`362879fa`）那格
       `test_importScannerFaceIsNotNarrowed` 就是给那档补的面自证，本会话第④刀复取棘轮 **56 passed** 时它不在红集里。
@@ -8198,5 +8200,27 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
         补路由不等于补能力）。③**不可逆点＝无**：本刀一行本体未删，1010 行原样在场。
     - **仍开**：B3（能力面唯一入口，等裁；票面须带上头②条那两件——落点归属与恢复即含鉴权）；
       本格那张三态票**已裁甲收口**，不再单列；`dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；
-      §6-334 的 B／C／D；D19 族是否还有第三例**未全仓扫**（登记为待扫面，不是已扫净）。
+      §6-334 的 B（C 见 §6-350、D 见 §6-349）；D19 族是否还有第三例**未全仓扫**（登记为待扫面，不是已扫净）。
     - **本会话下一枚空号现查 §6-349**（写前必须现场重取；本笔落库时该读数为 348）。
+349. **§6-334 的 D 票落地：`execution_engine/mcp_manager.py` 那座岛整档退役，四件耦合同批收** ✅🟢 —— 一笔：`c0aeb46e`
+    - **落的哪一格**：D 票三态里用户 2026-10-20 点单「退役整档＋同批收四件耦合」。裁前那句"全仓唯一实装＝websocket 传输"**经实测证伪**：`TransportType.WEBSOCKET` 只是枚举成员，`connect_server` 里没有对应分支，走到就落 `else` 报「不支持的传输类型」返回 False——这一形从未存在过，"删即永久失去该能力"的依据不成立，D 票由"需人裁"改判为"可退役"。
+    - **来历决定判法**：`fa335b27`(2026-08-31) 已按死码删过一回，`34b0678b`(2026-09-02) 把 420 行**整档落回且零引用**。删了又落回的岛不能只删一次就完，判据从"它得自带某类"翻成"它别再回来"。
+    - **反向守卫同批改判**（不留"实现已删、测试还引用"）：`tests/unit/tools/test_t09_selfloop_face_ruling.py` 那格原断"岛仍自带 `MCPConnection`"（本批的红灯就是它，翻完判据先跑 2 failed），改名并改判为 `test_mcpManagerIslandDoesNotComeBack`——断文件不在场，另配两条正控：schemas 那份同名类不许被顺手扫掉、`mcp_client` 一旦真引用它则待裁表必须摘行。待裁表两名的理由同步改判，并被自家"每条理由必须写票号"那条守卫拦过一次（改写理由时把票号写丢了）。
+    - **其余耦合件**：`execution_engine/__init__.py` 与 `execution_layers/__init__.py` 的模块清单/同名提醒改过去式（同名陷阱的**口径**留着，不靠文件活着）；CI 阻塞棘轮 `BASELINE` 收一行（docstring 的 4 文件/8 处随之改 3 文件/7 处——整档删除没有 offender 可"单独退回"，防再落回的红改由上面那格承担）；manual 探针 ⑤ 腿改验"岛不再在场"；现行模块设计文档 2.1.4/3.2.3 标退役并补沿革（历史那两行不抹，按仓内既有删除线写法）。
+    - **现役替代**：出向 MCP 客户端由 `tool_layers/mcp_client.py`（官方 SDK 的 stdio/sse/http 三传输＋熔断/退避/OAuth/防火墙/审计与常驻判据）承担且在服务路上，是被删那份的超集。
+    - **证据**：红 2 failed → t09 单档 15 passed、`tests/unit/{ci,execution,tools,agent}` 同跑 78 passed、`tests/unit/ci` 整卷 434 passed（5 条在册 node 环境侧 npc，数量与成因不变）、manual 活体 7 腿全 PASS（⑥ 真 app＋lifespan 起得来、工具列表 73 条 ⇒ 退役不在装配路上；⑦ 仓内 `data/` md5 未动）。宽域 A/B 基线侧走"补丁存仓外 → `checkout HEAD` 九档 → 复跑 → `git apply --index` 打回"（带暂存删除的 pathspec stash 不成立），两侧同为 58 failed＋8 errors／4034 passed，**66 个唯一红节点差集两方向皆空**。
+    - **净 LOC**：生产池 +10/−426 ＝ 净 -416（整档 424 行删除；+10 全部去向＝两处包门面 docstring 的退役沿革）；测试/基建池 +62/−52 ＝ 净 +10（判据改判与注释/文档同步，含 manual ⑤ 腿改写）。
+    - **仍开**：§6-334 的 B（同一失败两种信封）。C 那格由 §6-350 收口。
+    - **本会话下一枚空号现查 §6-350**（写前必须现场重取；本笔落库时该读数为 349）。
+350. **§6-334 的 C 票落地：MCP 面的技能腿改走 `ToolExecutor.execute_skill_tool` 咽喉，无 agent 即拒** ✅🟢 —— 代码不在自己的笔里（见末格"归属"），本会话只计这一笔登记
+    - **落的哪一格**：C 票用户 2026-10-20 点单「改走 `execute_skill_tool` 同一咽喉」。原 `_call_skill` 直调 `skill.execute(arguments, None)`，把咽喉上的四件事一起绕掉：轮级可见门（Wave H-W2）、声明式权限作用域（P0-4）、沙箱根注入、P0-1 质量漏斗记账。
+    - **改判后的口径**：`_resolve_agent()` 为 None 即 `isError` **fail-closed，不留"拿不到 agent 就退回直调"的兜底**；否则 `ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments), None)`，回体三形映射——无 `success` 键（查无此技能／不在本轮可见集／注册表未初始化／异常）走 MCP 错误信封且**不重述咽喉文案**，`success=True` 走 `result=output`，`success=False` 维持 `{"success","error"}` 原形**不锁成 isError**（那是 B 票要裁的，不在 C 里替它拍）。
+    - **判据三格**（`tests/unit/workflow/test_mcp_server_face.py`）：咽喉读到的分派逐字段等于请求（技能名与参数都不许被面改写）；无 agent 时 fail-closed；咽喉自己的拒因原样转成信封。
+    - **一条假绿当场抓出**：`test_skillLegRefusesWithoutAgent` 起初**在动生产之前就绿**——trap 文案里含 "agent" 四个字母，被 `call_tool` 外层 `except` 收进错误信封后正好撞上那句断言。把 trap 文案改成不含该串，并加一条"拒因里不得出现 `skill.execute`"的反向排除，这条才真咬在行为上。**自己写的兜底文案会替被测面作证**，这一形第三次撞上（前两形见 §6-334 的假前提守卫与 §6-316 的正控）。
+    - **活体（真 `create_app` + `TestClient` + 真 agent 注册表 + 真 `Skill` 对象，5/5）**：证据不用"返回成功"当活证据，用的是只有咽喉那条路上才会出现的生产痕迹——`registry.execute_skill` 的 `before_execute` 回调被触发、P0-1 漏斗落了 `applied=True ok=True` 的派发条目、缺席技能名的拒因是咽喉那份「不存在」而不是面那份「技能未注册」。
+    - **活体量出一条新事实（登记，不在本批改）**：清单源（`get_skill_registry()` 全局单例）与执行源（`agent._skill_registry`）是**两个不同的 `SkillRegistry` 实例**。现网读数：两份各 5 条技能、面 advertised 的 5 条咽喉全部执行得了（0 拒）⇒ 分叉目前只在对象级，不在内容级。但语义已经改：一旦某条技能只进其中一份，外部 MCP 客户端会看到"清单里有、调用判不存在"。要不要把 advertise 面也收到执行源那一份，属 B 票之后的单裁，本格只登记。
+    - **红自证**：只把生产档退回退役前那份再复跑，**恰这 3 格红、其余 4 格照常绿**；还原后 `git diff` 对该档为空。
+    - **宽域 A/B 未做，如实写明**：本批改动面已被并发提交整片吞走（末格），"退回改动面复跑"这条路已不可复现。替代证据＝MCP 全邻域 92 passed（`tests/unit/tool_layers/` 整目录＋api 那五档＋`tests/unit/workflow/` 整目录）。A/B 补做挂在 B 票那一批。
+    - **归属（一条必须写下来的失守）**：2026-10-20 05:46:03 并发会话的一颗 `Update from Neurova GitHub Push Skill` 批量提交（`c307f810`）把当时**本会话的在途工作树**整片吞进去并直接推上远端，`origin/main` 现等于该笔。那笔里属本批的只有两档（技能腿的生产模块三十二增／十三删，与那份判据档七十六增／三删）；同笔其余内容——`tests/unit/test_dev_path_and_runtime_dep_guards.py` 与根目录九个杂物（7 份 `muscle_l2.json.pre-muscle-ngram-*` 备份＋两个以中文句子命名的空文件）——**不属本批，本会话不认领**。已推送的批量笔不改写（force-push main 属禁手），故 C 票没有自己的代码笔，只有本格这条登记。失守形态记下来：共享工作树里只要有一个会话走"整片 add 再推"，其它会话的在途工作就会被它的文案吞掉——AGENTS.md §5「严禁 `git add -A`／单任务单 commit」是被别人违反的，本会话仍照办。
+    - **仍开**：§6-334 的 B（同一失败两种信封——本批刻意把咽喉的 `success=False` 留在原形，就是为了不替 B 拍板）；上面那条"清单源≠执行源"的对象级分叉。
+    - **本会话下一枚空号现查 §6-351**（写前必须现场重取；本笔落库时该读数为 350）。
