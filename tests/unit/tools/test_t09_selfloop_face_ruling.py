@@ -86,12 +86,16 @@ KEPT_IN_SCHEMAS = ("ToolType", "MCPConnection")
 #: 就必须**从这里摘掉**（否则第二问红）。每条都要写清裁它的那张票。
 SCHEMAS_KEPT_UNREAD_PENDING: dict[str, str] = {
     "ToolType": (
-        "§6-334 D 票同源待裁：除门面 re-export 外零消费者。裁「接线」还是「随 schemas.py 一起退役」"
-        "属人裁——本批只把假前提守卫改对，不动符号。"
+        "除门面 re-export 外零消费者。§6-334 的 D 票已裁「退役」并落地（那座岛整档删掉），"
+        "但这一名的去留**不在那张票的射程里**——它属 `tool_layers/schemas.py` 自己的契约面，"
+        "裁「接线」还是「随 schemas.py 一起退役」仍属人裁。"
     ),
     "MCPConnection": (
-        "§6-334 D 票：与 `mcp_manager.py:116` 自带的那份同名而不同源；门面 re-export 之外零消费者。"
-        "裁「接线／退役／留」都要先看 websocket 传输那一形（全仓唯一实装），故需人裁。"
+        "§6-334 的 D 票已裁「退役」并落地（2026-10-20）。它原先那条「与 `mcp_manager.py:116` "
+        "自带的那份同名而不同源，要看 websocket 那一形」的理由**已被证伪并作废**：那份枚举只有 "
+        "WEBSOCKET 成员，`connect_server` 里没有对应分支，走到就落 else 报「不支持的传输类型」——"
+        "所谓「全仓唯一实装的传输」从未存在。岛退役后这一名成了全仓唯一且零消费者的一份，"
+        "去留仍待人裁（`test_mcpManagerIslandDoesNotComeBack` 管的是别再落回来，不是裁这一名）。"
     ),
 }
 
@@ -287,7 +291,7 @@ class TestReverseControlsStillHold:
                 f"{symbol} 判据类退成 {judge}——自循环面的退场依据（真面已存在）不成立"
             )
 
-    def test_twoMCPConnectionClassesAreDistinctNotOneContract(self):
+    def test_mcpManagerIslandDoesNotComeBack(self):
         """同名两枚 `MCPConnection` 是**两份不同的类**，不是一条契约的两个面。
 
         本格此前写的是「`MCPConnection` 的真实消费点是 `execution_engine/mcp_manager.py`
@@ -299,31 +303,26 @@ class TestReverseControlsStillHold:
         （旧文那句「消费方是 mcp_client」同样不成立）。
 
         所以旧断言 `"MCPConnection(" in manager` 一直为真，却真在**另一份类**上——
-        典型的同名自咬（形态集 268／243）。本格改成钉住"两份独立"这件事本身：
-        谁要是把它们并成一份、或给 schemas 那份接上真消费者，这格会改变状态，
-        必须回来重判 §6-334 的 D 票（删｜接线｜留）。
+        典型的同名自咬（形态集 268／243）。
+
+        §6-334 的 D 票已裁「退役」并落地（2026-10-20），本格的靶因此换了一件事：不是
+        "别再改它"，而是"别再第三回落回来"。岛的来历正是这里要防的形状——
+        `fa335b27`(2026-08-31) 已按死码删过一回，`34b0678b`(2026-09-02) 又把 420 行
+        **整档落回且全仓零引用**。
         """
-        import ast
-
-        from tests import ast_scan
-
-        manager_path = PROJECT_ROOT / "neurova/execution_engine/mcp_manager.py"
-        managerTree = ast_scan.transientTree(manager_path)
-        assert any(isinstance(n, ast.ClassDef) and n.name == "MCPConnection"
-                   for n in ast.walk(managerTree)), (
-            "mcp_manager 不再自带 MCPConnection——两份同名类的关系变了，"
-            "本格与 §6-334 的 D 票都要重判"
+        managerPath = PROJECT_ROOT / "neurova/execution_engine/mcp_manager.py"
+        assert not managerPath.exists(), (
+            "`neurova/execution_engine/mcp_manager.py` 又出现在树里——它已被 §6-334 的 D 票裁"
+            "「退役」：424 行零生产消费者，出向 MCP 客户端能力由 "
+            "`neurova/tool_layers/mcp_client.py`（官方 SDK 的 stdio/sse/http 三传输）承担。"
+            "要复活它得先回答两件事：票面那句「websocket 传输全仓唯一实装」是假的"
+            "（枚举里有 WEBSOCKET，`connect_server` 却无对应分支，落到 else 报「不支持的传输类型」），"
+            "以及它与 mcp_client 谁做唯一实现源——两份并存撞教义第 6/7 条。"
         )
-        importedFromSchemas = [
-            node for node in ast.walk(managerTree)
-            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("tool_layers.schemas")
-            or isinstance(node, ast.ImportFrom) and any(
-                a.name == "MCPConnection" for a in node.names)
-        ]
-        assert not importedFromSchemas, (
-            f"mcp_manager 现在从别处 import MCPConnection（{[n.module for n in importedFromSchemas]}）"
-            "——两份已并成一条契约，本格前提没了：请把 §6-334 的 D 票按「接线」重判，"
-            "并把 schemas 那份从待裁表里摘掉"
+        schemasText = (PROJECT_ROOT / "neurova/tool_layers/schemas.py").read_text(encoding="utf-8")
+        assert "class MCPConnection" in schemasText, (
+            "schemas 那份 MCPConnection 先没了——待裁表要摘行，而摘行的理由（退役还是接线）"
+            "得写清楚，别让它跟着岛一起被顺手扫掉"
         )
         clientText = (PROJECT_ROOT / "neurova/tool_layers/mcp_client.py").read_text(encoding="utf-8")
         assert "MCPConnection" not in clientText, (

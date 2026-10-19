@@ -5,7 +5,12 @@ Neurova CogArch 1.0.0 - 执行引擎（手脚）
 - tool_engine: 工具引擎 - 智能工具选择与执行
 - agent_colab: 多Agent协作引擎
 - execution_monitor: 执行监控器
-- mcp_manager: MCP 协议管理器
+
+（这里原先还列着 `mcp_manager`（MCP 协议管理器）。它 424 行在生产侧零消费者，出向 MCP
+客户端能力由 `tool_layers/mcp_client.py`（官方 SDK 的 stdio/sse/http 三传输）承担；
+台账 §6-334 的 D 票据此裁「退役」（§6-349 落地）。它**曾被删过又被整档落回**
+（`fa335b27` 删 → `34b0678b` 落回且零引用），防再落回的判据在
+`tests/unit/tools/test_t09_selfloop_face_ruling.py::test_mcpManagerIslandDoesNotComeBack`。）
 
 （本门面原先还列着 `workflow_engine`（CogArch 1.0 任务型线性链）。它自己那份 docstring 早已声明
 deprecated 与"迁移完成后整体删除"，而它的唯一生产引用是 `shared_core.ExecutionEngine._init_components`

@@ -12,7 +12,10 @@ Execution Runtime Abstraction v1.0.0
 这里**没有传输层**：`TransportType`／`ExecutionTransport`／`HTTPTransport`／`WebSocketTransport`／
 `TransportFactory` 连同模块级 `execute_skill()` 一并退役（票④包 4）——生产与测试两侧现读零消费者，
 而那个 helper 的签名上挂着 `transport` 参数、函数体从头到尾没用它，属于"契约上承诺了一件不做的事"。
-注意别被同名骗了：`execution_engine/mcp_manager.py` 里那个 `TransportType` 是它自己的一份枚举。
+注意别被同名骗了：那份退役判据按**导入通道**取数而非符号名——当时
+`execution_engine/mcp_manager.py` 里还有一个**同名的另一份** `TransportType`（与本模块无关），
+按名扫会把在役符号判成「还在引用退役面」。那一份随 §6-334 的 D 票于 §6-349 整档退役，
+同名陷阱本身留在 `test_executionLayersTransportHalfRetired.py` 的取数口径里。
 """
 
 from neurova.core.logger import get_logger

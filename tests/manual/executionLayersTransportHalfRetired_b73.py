@@ -13,8 +13,9 @@
 改前实状（同一份脚本、基线树 35121a57）：② **FAIL**，读数为门面里还挂着 6 个已退役名字；
 其余 ①③④⑤⑥⑦ 六腿**两侧同绿**——① 那条尤其关键：它两侧给出同一个读数（`42` / `runtime_type=local`），
 这才是"删的是死半区、行为中性"的正面证据，而不是只证"名字没了"。
-同名陷阱另有一格（⑤）：`execution_engine/mcp_manager.py` 那份 `TransportType` 是它自己的枚举，
-按名字扫全仓去删就会把在役符号一起删掉，所以这一格必须在两侧都绿。
+同名陷阱另有一格（⑤）：当时 `execution_engine/mcp_manager.py` 里那份 `TransportType` 是它自己的
+枚举，按名字扫全仓去删就会把在役符号一起删掉，所以这一格必须在两侧都绿。那份枚举随
+§6-349 整档退役，⑤ 改为验「岛不再在场」——同名陷阱的教训留在按导入通道取数的口径里。
 """
 from __future__ import annotations
 
@@ -93,14 +94,11 @@ leg("④对照：运行时那六个在役符号照常从门面取到",
     liveOk == list(LIVE) and supported == [EL.RuntimeType.LOCAL, EL.RuntimeType.DOCKER],
     f"取到 {len(liveOk)}/{len(LIVE)}；工厂支持类型={supported}")
 
-# ⑤ 同名陷阱没被顺手删（那份是 mcp_manager 自己的枚举，与本模块无关）
-from neurova.execution_engine import mcp_manager as MM  # noqa: E402
-
-mmValues = sorted(m.value for m in MM.TransportType)
-leg("⑤同名陷阱格：mcp_manager 自己那份 TransportType 没被按名字扫掉",
-    MM.TransportType.__module__ == "neurova.execution_engine.mcp_manager"
-    and mmValues == ["http", "sse", "stdio", "websocket"],
-    f"归属模块={MM.TransportType.__module__}；值集={mmValues}")
+# ⑤ 同名陷阱：那枚同名枚举住在已退役的 mcp_manager 里（§6-334 D 票 → §6-349 落地）。
+#   岛没了以后这一格不再 import 它（那会留一条「实现已删、探针还在引用」的悬空），
+#   改为验「确实不在场」——同名陷阱的教训不靠这个文件活着来承载，靠判据按导入通道取数。
+mmGone = not (REPO / "neurova" / "execution_engine" / "mcp_manager.py").exists()
+leg("⑤同名陷阱格：mcp_manager 已退役且不再在场", mmGone, f"岛仍在场={not mmGone}")
 
 # ⑥ 退役没打断装配：真 app 起得来、工具列表面照常出条目
 from fastapi.testclient import TestClient  # noqa: E402

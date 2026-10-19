@@ -7,8 +7,8 @@
 排查者按错误率去查会一条都查不到。这种故障只有钉成红/绿才拦得住。
 
 基线口径（**本批写入前现测**，谓词见 `_scan`，扫 `neurova/` 全部 `.py`）：
-**4 个文件 / 8 处**——`computer_use/camofox_supervisor.py:176/183`、
-`execution_engine/mcp_manager.py:221`、`execution_layers/__init__.py:238/314/335/395`、
+**3 个文件 / 7 处**——`computer_use/camofox_supervisor.py:176/183`、
+`execution_layers/__init__.py:238/314/335/395`、
 `tool_executor.py:3888`。**逐文件计数**而不是全局总数：某文件站点数上升或新文件出现即红；
 下降允许但本文件会红着提示"基线该收了"（偷偷比基线好＝再也没人回去核基线）。
 
@@ -35,10 +35,12 @@ SCAN_ROOT = REPO_ROOT / "neurova"
 #: communicate()/wait()，且新增一发就该由作者自己说清为什么在协程里。
 _BLOCKING_ATTRS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
 
-#: 冻结基线（本轮 AST 实测 4 文件 / 8 处）。只准降不准升；新文件出现即红。
+#: 冻结基线（本轮 AST 实测 3 文件 / 7 处）。只准降不准升；新文件出现即红。
+#: `execution_engine/mcp_manager.py` 那一行随 §6-334 的 D 票退役收掉（整档删除 ⇒ 无 offender 可退，
+#: 「单独退回 offender」那格在这一行上不成立；防它再落回来的红在
+#: `test_t09_selfloop_face_ruling.py::test_mcpManagerIslandDoesNotComeBack`，那格红在文件存在上）。
 BASELINE: dict[str, int] = {
     "computer_use/camofox_supervisor.py": 2,
-    "execution_engine/mcp_manager.py": 1,
     "execution_layers/__init__.py": 4,
     "tool_executor.py": 1,
 }

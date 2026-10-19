@@ -3317,7 +3317,8 @@ tests/unit/api/test_toolOwnershipComesFromRegistration.py
 # 两格别当装饰删：① 交付锁 `test_runtimeHalfStillProducesAWorkingLocalRuntime` 钉"删的是死半区"——
 # 工厂造得出本地运行时、单例语义不变、**真 exec 回得来**（整包判死会误杀在役符号）；
 # ② `test_noCodeAnywhereImportsTheRetiredTransportSurface` 按**导入通道**取数而非符号名——
-# `mcp_manager.py` 里有个同名 `TransportType`，按名扫会把在役符号判成还在引用退役面。
+# `mcp_manager.py`（§6-349 已退役）里曾有一枚同名 `TransportType`，按名扫会把在役符号
+# 判成还在引用退役面——这条口径留在判据里，不随那份枚举一起消失。
 tests/unit/execution/test_executionLayersTransportHalfRetired.py
 # 批 74（§6-302 断点①后端半区）：oauth 配置写成可存、读成可得——此前只有三处读取面，写侧从未接。
 # 三格别当装饰删：① `test_emptyOauthDictMeansUnconfigured` 钉的是**本批自己引入的过度收紧**
