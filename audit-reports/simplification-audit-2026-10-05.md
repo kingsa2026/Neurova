@@ -7718,3 +7718,55 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       R5-env 待裁修法；`scripts/ab_compare.sh` 缺件；全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、
       D11–D20、§6-293、§6-334 的 B／C／D 与 mcp_manager 三态票、§6-337 的乙的运输替换本体）。
     - **本会话下一枚空号现查 §6-339**（写前必须现场重取；本笔落库时该读数为 338）。
+339. **批 108 · 只立票不实施：SDK 换面的六处客户端可见分叉已实测量清，其中两处要人裁；换面本体未动** 🔴⏸（**待裁**）—— 无代码笔（本笔只落档案）
+    - **为什么要停下来立票**：§6-337 那一刀（身份边界）落完后，乙的第二刀＝把 `/api/v1/mcp` 的**运输层**换成官方 SDK。
+      我先用三段只读探针把"换面以后对外承诺还在不在"量成读数，结果是**六处分叉、其中两处改的是外部客户端能看见的
+      协议语义**（不是内部装配），按 AGENTS.md §8 与"产品语义只给三态票"的既有节奏，这两处要人拍板才好动手；
+      其余四处是工程账，列在下面但不需要裁。
+    - **探针怎么做的**（读数都可复算，脚本即用即删）：`lowlevel.Server(name, version, on_list_tools=, on_call_tool=, on_ping=)`
+      + `StreamableHTTPSessionManager(app=…, stateless=True, json_response=True)` + `StreamableHTTPASGIApp(mgr)` 挂到
+      一个空 FastAPI 上（lifespan 里 `async with mgr.run()`），TestClient 逐发打。**第一版探针全程无输出**——
+      不是没跑，是 `| tail` 让 stdout 进了缓冲；改 `-u` + 逐发 `flush=True` 才露出真形状（形态集 261 同族）。
+    - **读数一：SDK 与现面**一致**的那几条**（换面不丢承诺）：协商回声口径**逐字相同**——请求
+      `2024-11-05`/`2025-03-26`/`2025-06-18`/`2025-11-25` 各自回声自己，`2099-01-01` 反提案 `2025-11-25`
+      （SDK 支持集现读＝`('2024-11-05','2025-03-26','2025-06-18','2025-11-25')`，最新＝`2025-11-25`）；
+      `ping` → `result={}`；坏 Accept → 406 且**文案逐字相同**（"Not Acceptable: Client must accept application/json"）；
+      通知无 id → 202 空体；未知名 tools/call 由我们自己的 handler 决定信封（`isError:true` + text）；
+      无 initialize 直接 tools/list/call 在 stateless 下**可用**（源码：`_handle_stateless_request` 把连接
+      按"born-ready"种成 `protocol_version_hint or DEFAULT_NEGOTIATED_VERSION`）。
+    - **要裁的甲乙丙（分叉 1，initialize 的 params 严格度）**：现面对 `initialize` **不校验 params 形状**，
+      只带 `{"protocolVersion": …}` 甚至 `{}` 都回 200；SDK 要求 `protocolVersion`+`capabilities`+`clientInfo`
+      三件齐，缺则 `-32602 Invalid request parameters`。**命中面实测 6 格**（全是仓内自造的极简 payload：
+      `test_mcpServerFaceNegotiation.py:50/56/60/69`、`test_mcp_server_http.py:42`、
+      `test_mcpServerFacePromisesSurviveTransport.py:102`），而**真实 MCP 客户端按 spec 一定带全**——
+      也就是说这一刀砸的是我们的测试，不是外部面。
+      甲（推荐）＝采 SDK 口径，6 格 payload 补全，并**另开一格把新语义钉成承诺**（"缺 capabilities 的 initialize
+      必须 -32602"），免得下一个人以为宽容还在；乙＝在 ASGI 包装层替客户端补默认 `capabilities`/`clientInfo`
+      维持现面宽容（代价＝仓内再留一层协议解释，与教义 6 相冲）；丙＝采 SDK 口径但**不**补那格新语义（不推荐：
+      等于把换掉的行为写成"没人负责"）。
+    - **要裁的甲乙丙（分叉 2，非法 JSON-RPC 体的状态码与错误码）**：现面对 `{"foo":1}` 这类无 `method` 的体回
+      200 + `-32600 Invalid Request`；SDK 回 **400 + `-32602`** 且 data 里是一整串 pydantic union 校验详情
+      （实测 11 条）。按 JSON-RPC 自身口径，"Invalid Request" 该是 `-32600`，SDK 这里给的是**它自己的**校验码。
+      甲＝采 SDK 现状（400/-32602，代价＝对外错误语义变一处、且把 pydantic 长文本吐给客户端）；
+      乙＝采 SDK 的 HTTP 状态但把信封收成正码（400 + `-32600`，需要在包装层做一次错误改写，一处且只读）；
+      丙＝保持现面 200+`-32600`（不推荐：与"运输交给 SDK"自相矛盾，等于两套语义并存）。
+    - **不用裁、但换面时必须一起做的工程账**（四条，各配读数）：
+      ① **GET 会挂住**：stateless+json_response 下 GET 该路径**不返回**（SSE 流不结束，实测线程 5s join 仍活着），
+      而现面是 405。多出一个挂起面＝多一条被拖住的连接，换面时必须在包装层显式拒（DELETE SDK 自己回 405，不用管）。
+      ② **`dependency_overrides` 对挂载的 ASGI app 不再生效**：三档 fixture 用它注入身份
+      （Negotiation:41／http:30／Promises:70），本批新档 `test_mcpServerFaceIsIdentityBoundary.py:64` 同形。
+      改法＝按活体探针那口径换成**真令牌**（`create_access_token`），断言一字不动——这是把测试从"覆盖依赖"
+      升到"走真依赖"，方向与教义 3 一致，不是放宽。
+      ③ **挂载需要第三种形态**：`ENDPOINT_MODULES` 表行在 `endpoints/__init__.py:317`，注册循环 `:359-364` 只认
+      `hasattr(module, "router")` → `include_router`。挂 ASGI app 要走 `app.mount`，而 mount 出来的路径
+      **不进 openapi**，与 `test_api_inventory_guard`／`test_api_inventory_freshness_guard`／
+      `test_route_mount_contract_guard`（子集 :516/:517/:578）三档常驻闸正面相遇——先量它们认什么再动。
+      ④ **关停没有现成钩子可复用**：`app.py:1297`／`:1311` 那两句日志（"MCP bootstrap 任务已取消"
+      "MCP sessions shut down"）管的是**出方向** client（`mcp_bootstrap.py:116 shutdown_mcp()` 收 `MCPToolClient`
+      注册表），与 server 面无关；`mgr.run()` 又**一次性**（源码明写 instance 不可复用），换面必须新接一段 lifespan。
+      另：`serverInfo.name` 现面是 `"neurova"`（`test_mcp_server_http.py:48` 断它），由 `Server(name=…)` 决定，
+      构造时带上即可，不算分叉。
+    - **归属提醒（不修，只防止读错）**：并发会话本笔用过的批次号也叫"批 107"（`fa0af56e` 删 `_calledNames`），
+      与本会话 §6-337 那笔同号不同批——跨会话一律按 §6 号引，这条既有纪律再证一次。
+    - **仍开**：本票两裁；§6-334 的 B／C／D 三格；全部等裁票照旧（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
+    - **下一枚空号现查 §6-340**（写前必须现场重取；本笔落库时该读数为 338）。
