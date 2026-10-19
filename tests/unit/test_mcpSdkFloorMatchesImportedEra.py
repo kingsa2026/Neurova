@@ -77,6 +77,16 @@ class TestMcpSdkFloorMatchesImportedEra:
             "别把它改成恒真：要么删掉本档，要么换成当下真正取用的世代。"
         )
 
+    def test_faceReadingIsNotVacuous(self):
+        """面自证：本档三条判据都建立在"扫过 `neurova/`"这个前提上，根被改窄时必须先在这里红。
+
+        取数走共享枚举入口 `filesUnder`（只数文件、不解析）——本档的解析量已经在
+        `sourceRefsUnder(hints=...)` 的命中面上付过一次，这里不该再付一趟（预算门禁同一条理由）。
+        阈值取现读的一半上下（本批量得 1018 个 `.py`），只保证"根写错/被改窄"这条坏法先响。
+        """
+        scanned = len(ast_scan.filesUnder(PROJECT_ROOT / "neurova", ".py"))
+        assert scanned > 700, f"扫描根 `neurova/` 现读 {scanned} 个 .py，低于下限——根写错了本族判据就不说话"
+
     def test_floor_covers_the_names_production_imports(self):
         imports = _sdkTwoImportsInProduction()
         for rel in MANIFESTS:
