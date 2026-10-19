@@ -7906,3 +7906,47 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （并发会话在途）；D1 甲／乙、§6-293、D9、D10、D11–D20、§6-334 的 B／C／D、§6-318 边界①②、§6-317、
       R5-env 其它形（拼接键名／二层别名，现读零命中）、`scripts/ab_compare.sh` 缺件、§6-339／§6-340 那条 MCP 换面本体。
     - **本会话下一枚空号现查 §6-343**（写前必须现场重取；本笔落库时该读数为 342）。
+
+343. **批 109·第①刀（§6-312 裁乙落地第一刀）：collaborate 那座死岛不再挂在每次进程启动路径上，三档死码 863 行本体退净** ✅🟢 —— 一笔：`4cf96af6`
+    - **本批只走完第①刀**（C1/C2/C3/C5）；§6-342 次序里的第②刀（C4 `FlowContext` 按符号瘦身）、
+      第③刀（core 那份 870 行 `FlowOrchestrator` ＋其 1005 行专用测试）、第④刀（"按能力挑 agent"并进 neurflow）
+      **均未动**，不许据本格"退役完成"来读——现役面与剩余欠账都在下面两节里写清。
+    - **根因在门面声明面**：`collaborate/__init__.py:8-9` 与 `workflow/__init__.py:8-9` 无条件再导出整座岛，
+      而 Python 导入子包必先执行父包 `__init__` ⇒ 端点取一次 `AgentScheduler` 就连带执行
+      `models.py`(150)＋`template.py`(373)＋`workflow/orchestrator.py`(340)＝**863 行从未接线的死码**（D19）。
+      双源那一半：现役模板在 `agent/templates/collaboration_template.py`（`agent/team.py:25` 真消费），
+      与死支 **346/350 行相同**（95.7%），活支是超集 ⇒ 取长补短无事可做，合并动作＝删除（教义 6）。
+    - **动手前重取三面**（297：档案读数不是事实源）：生产侧 import 面 3＋1＋1 处，**全在死路里**；
+      活链路只取 `workflow.models`＋`workflow.scheduler`；测试侧只有 `test_refactor_imports.py` 拿门面做
+      "能导入即绿"的形状检阅。启动拖拽现测＝只 import scheduler，`sys.modules` 里 collaborate 模块 **5 个**，其中 3 个死档。
+    - **红→绿**：新档 `tests/unit/collaboration/test_collaborateIslandRetirement.py` 先 **3 failed, 2 passed**
+      （红全落在行为：拖拽反检／档本体不在树里／生产侧零悬空引用；那 2 格绿的是前提正检与**面自证**——
+      负责证明"死档缺席"这个零由真跑起来的读数给出，不是由没跑成冒充，283/310）。改后 **5 passed**，
+      已登子集（现值 644，带 3 行说明）。邻域复跑 **586 passed** ＋另 3 档 **79 passed**；
+      常驻闸整卷 `tests/unit/ci`＝**6 failed, 433 passed**，与在册预存红逐条同号（5 npc ＋ 1 时钟量子门）⇒ 零新增红。
+    - **同批改判被退役符号钉住的形状格**（教义 3/5）：删 12 格纯形状检阅，换 1 格"现役门面六名仍可取"
+      （净 +18/−63；覆盖面从"导得到"变强成"端点用的那六个名还在"）。
+      `docs/05-reports/REFACTORING_SUMMARY.md` Phase 3/4 是当年迁移的现场记录——**不改写历史**，就地加勘误注记。
+    - **D21 双源棘轮 12→7 的收法**（300 那一族的第二次实测）：岛贡献的 5 对随删除消失，
+      `test_ratchetRecordsImprovementLoudly` 先**红着提醒**、再摘行；正控格从"起因那对"改钉仍在活路上的
+      渠道 `generate_text_to_image`，并加**反向**一格（命中面里若还留着 `collaborate/template.py`／`models.py`
+      的对＝没删净）——两个方向各钉一次才分得开"真删干净"与"探测器坏了"。基线由 `scanProduction()` 现场导出贴入，不手抄。
+    - **活体**：真 `create_app` + TestClient + 真 `create_access_token`，隔离数据根走单点——
+      `GET status`／`GET tasks`／`POST tasks`（真落盘拿到 task_id）／`POST tasks/{id}/run`（真调度链）全 200，
+      `compute_next_run(cron="0 4 * * *")` 真算出 `1792440000.0`，门面 `__all__` 只剩 6 个现役名。
+      **7 项里 1 项 FAIL 是探针自己的 filter 坏了**（按 `"/v1/scheduler" in route.path` 数路由得 0，而同一批端点
+      实际全部 200＝读数比 filter 强）——按 263 如实记下这条探针缺陷，不冒领也不掩饰，修探针不属本刀。
+    - **一处判据格式自咬**（289/294 那一族的新变体，值得留形）：本笔正文原写「生产池 **+35 / −890**」（斜杠两侧留空格），
+      求和格能解析、主格全绿，但采样反证格 `testRealBodyWithOneWrongDigitIsCaught` 是按 `+A/−B` 无空格形态做
+      字符串替换的 ⇒ 替换没命中，它报"这条格在空转"。处置＝未推送窗口内 amend 成仓内格式
+      （tree 前后同值 `9545b92e…` 复证，作废号不入账），**不是**去适配判据。
+    - **净 LOC 去向**：生产池 **+35/−890 ＝ 净 −855**；测试/基建池 **+170/−80 ＝ 净 +90**
+      （新档 +122、`test_refactor_imports` +18/−63、D21 棘轮 +19/−17、清单 +4、文档勘误 +7）。
+    - **现役面（本刀之后）**：`neurova/collaborate/` 只剩 4 档——两个门面＋`workflow/models.py`＋`workflow/scheduler.py`；
+      编排＝`collaboration/neurflow/*`，模板与角色 schema＝`agent/templates/collaboration_template.py`。
+    - **仍开**：本批第②③④刀；`FlowPhase`/`FlowEvent` 与 `FlowContext` 编排方法群（C4，改现役符号须先立判据——
+      §6-315 那七格就是它的判据）；`neurova/core/flow_orchestrator.py`(870) 与其专用测试(1005)；
+      "按能力挑 agent"并进 neurflow（**生产者已核到**：`neurflow/models.py:296 capabilities: List[str]`
+      且 storage 有 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）；
+      以及 §6-342 那两条 CI 小批（丁／⑤）、osv 甲、dev_path 那 4 处、其余等裁票。
+    - **本会话下一枚空号现查 §6-344**（写前必须现场重取；本笔落库时该读数为 343）。
