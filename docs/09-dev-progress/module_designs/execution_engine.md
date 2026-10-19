@@ -200,8 +200,14 @@ class WorkflowEngine:
         """评估条件"""
 ```
 
-#### 2.1.4 MCPManager 类（MCP协议管理器）
-**文件路径**: `neurova/execution_engine/mcp_manager.py`
+#### 2.1.4 MCPManager 类（MCP协议管理器）——**已退役（2026-10-20，台账 §6-349 落 §6-334 的 D 票）**
+**文件路径**: ~~`neurova/execution_engine/mcp_manager.py`~~（整档删除，本节保留为设计沿革）
+
+> 退役依据：424 行在生产侧零消费者；票面那句「websocket 传输全仓唯一实装」经实测**证伪**——
+> `TransportType.WEBSOCKET` 只是枚举成员，`connect_server` 没有对应分支，走到就落 `else` 报
+> 「不支持的传输类型」返回 False。出向 MCP 客户端的现役实装是 `tool_layers/mcp_client.py`
+> （官方 SDK 的 stdio/sse/http 三传输）。防再落回的判据：
+> `tests/unit/tools/test_t09_selfloop_face_ruling.py::test_mcpManagerIslandDoesNotComeBack`。
 
 ```python
 class MCPManager:
@@ -347,9 +353,9 @@ async def execute_plan(self, plan: Plan) -> PlanResult:
     )
 ```
 
-#### 3.2.3 MCP工具调用
+#### 3.2.3 MCP工具调用（已退役，代码为当时设计快照）
 ```python
-# neurova/execution_engine/mcp_manager.py
+# neurova/execution_engine/mcp_manager.py（已删除，见 2.1.4 的退役依据）
 
 async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> Any:
     """调用MCP工具"""
@@ -413,6 +419,9 @@ async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> 
 | 2026-05-12 22:00 | 完成PlanOrchestrator实现 | 设计文档要求 | `plan_orchestrator.py` |
 | 2026-05-12 22:00 | 完成MCPManager实现 | 设计文档要求 | `mcp_manager.py` |
 | 2026-05-12 22:06 | 完成任务，更新文档 | 任务完成 | `docs/` |
+| 2026-08-31 | `fa335b27` 按死码删除 mcp_manager | 零生产消费方 | `mcp_manager.py` |
+| 2026-09-02 | `34b0678b` 又整档落回（420 行，全仓零引用） | 落回时未接任何消费方 | `mcp_manager.py` |
+| 2026-10-20 | 随 §6-334 的 D 票整档退役（§6-349） | 溯源复算：零消费者＋现役替代为超集＋票面前提被否证 | `mcp_manager.py`、门面 docstring、CI 基线、t09 判据 |
 
 ---
 
@@ -429,7 +438,7 @@ async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> 
 - `neurova/execution_engine/workflow_engine.py` (已存在)
 - `neurova/execution_engine/agent_colab.py` (已存在)
 - `neurova/execution_engine/execution_monitor.py` (已存在)
-- `neurova/execution_engine/mcp_manager.py` (新建)
+- ~~`neurova/execution_engine/mcp_manager.py` (新建)~~（2026-10-20 退役，见 2.1.4）
 - ~~`neurova/cognitive/orchestrator.py`~~（2026-10-11 退役，从未被本模块 import）
 
 ---
