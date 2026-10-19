@@ -30,6 +30,10 @@ from tests import ast_scan  # noqa: E402
 from neurova.skills.market_importer import read_builtin_bundle
 from neurova.skills.skill_install_gate import reset_install_gate_scanner, scan_skill_for_install
 
+#: 本档两条腿共用的扫描根：探测器与面自证必须向**同一个表达式**要根，
+#: 否则改窄读数时报错文本还在说老那一条（读数与它声称的根分家）。
+PRODUCTION = REPO_ROOT / "neurova"
+
 DOC_WITH_CODE_SAMPLES = """# 部署说明
 
 配置里写相对路径即可，例如 assets/../../config/app.json。
@@ -284,4 +288,18 @@ def _suffixTableHosts(overrides: dict | None = None) -> set:
     return _hostsFromNodes(
         (ast_scan.relativeToRepo(path), node)
         for path, node in ast_scan.transientNodes(
-            REPO_ROOT / "neurova", hints=(".md", ".markdown", ".txt")))
+            PRODUCTION, hints=(".md", ".markdown", ".txt")))
+
+
+def test_productionSurfaceIsNotEmpty():
+    """面自证：上面那条「文档类后缀只在一路裁决」的扫描根＝`neurova/`。
+
+    `transientNodes` 带文本预筛，给出的是**命中数**——它不随根的大小变，证不了面；
+    面另由共享枚举入口量一次。根被改窄时读数是「只有咽喉一处」，与真的只有一处同形。
+    这一格独立存在：把枚举塞进探测器那条 helper，会让它的调用闭包同时具备
+    「枚举＋私有解析」两种落点，正是预算门禁点名要红的形状。
+    """
+    surface = len(ast_scan.filesUnder(PRODUCTION))
+    assert surface > 500, (
+        f"扫描面现读 {surface} 档 .py（根＝{PRODUCTION}）"
+        "——量级对不上生产源码总数＝根被改窄")

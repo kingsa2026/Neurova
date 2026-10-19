@@ -295,9 +295,12 @@ class TestNoSecondPlaceholderVocabulary:
     def _markerSites() -> list:
         hits = []
         pattern = re.compile(r"\[voice:\s*no transcription\]")
-        for path in sorted(NEUROVA.rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
+        sources = [p for p in sorted(NEUROVA.rglob("*.py")) if "__pycache__" not in p.parts]
+        # 面读数：这条「实装只有一份」的根＝生产源码（tests/ 下的替身不算实装）。
+        # 根被改窄时这份读数是「零命中」，与「真的只有一份」同形，故必须把它当断言比一次。
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
+        for path in sources:
             for lineNo, line in enumerate(
                     path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
                 if pattern.search(line):

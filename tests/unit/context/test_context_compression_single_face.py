@@ -97,7 +97,11 @@ class TestCompressionFaceHasSingleImplementation:
     def test_retired_compressor_modules_are_absent_from_production(self):
         """退场的两个压缩模块不得再被 `neurova/` 下任何生产模块导入。"""
         offenders = []
-        for path in PRODUCTION_ROOT.rglob("*.py"):
+        sources = sorted(PRODUCTION_ROOT.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{PRODUCTION_ROOT}，本判据的域＝生产源码）——"
+            "根被改窄时「退场模块零引用」只是没在看代码")
+        for path in sources:
             text = path.read_text(encoding="utf-8", errors="ignore")
             for module in RETIRED_MODULES:
                 if module in text:

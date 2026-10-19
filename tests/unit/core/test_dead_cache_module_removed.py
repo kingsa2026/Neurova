@@ -31,6 +31,8 @@ from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
+#: 测试侧那条腿的根：扫描与面自证共用同一个表达式，改窄时读数与报错不会分家。
+TESTS_ROOT = PROJECT_ROOT / "tests"
 
 # 唯一允许的 MemoryCache 实现载体
 CANONICAL_CACHE = "neurova/core/cache.py"
@@ -56,6 +58,18 @@ class TestPerformanceModuleRemoved:
             "PerformanceMonitor），不得重新加回"
         )
 
+    def test_bothScanRootsAreNotEmpty(self):
+        """面自证：本档两条腿分别扫 `neurova/` 与 `tests/`，任一根被改窄即「零引用」变假零。
+
+        `importersOfModule`／`classDefsIn` 给的是命中数，它不随根的大小变 ⇒ 证不了面。
+        """
+        production = len(ast_scan.filesUnder(NEUROVA))
+        testsFace = len(ast_scan.filesUnder(TESTS_ROOT))
+        assert production > 500, (
+            f"生产侧扫描面现读 {production} 档 .py（根＝{NEUROVA}）——量级不对＝根被改窄")
+        assert testsFace > 500, (
+            f"测试侧扫描面现读 {testsFace} 档 .py（根＝{TESTS_ROOT}）——量级不对＝根被改窄")
+
     def test_no_production_reference(self):
         """生产侧不得 import 已删模块（判据是导入通道，不是文本里提过）。
 
@@ -79,7 +93,7 @@ class TestPerformanceModuleRemoved:
         """
         offenders = [f"{rel}:{lineno} [{form}]"
                      for rel, lineno, form in ast_scan.importersOfModule(
-                         PROJECT_ROOT / "tests", REMOVED_MODULE)
+                         TESTS_ROOT, REMOVED_MODULE)
                      if rel.rsplit("/", 1)[-1] != Path(__file__).name]
         assert not offenders, f"测试仍引用已删除的 neurova.performance: {offenders}"
 

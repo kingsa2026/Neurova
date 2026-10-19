@@ -693,3 +693,18 @@ class TestEntryDoesNotOpenASecondChannel:
             f"传输面读方消失（实测 {sorted(readers)}）——协议层不再把 sender 带出信封，"
             "`sender_id` 只剩构造点，等同死字段"
         )
+
+
+def test_productionSurfaceIsNotEmpty():
+    """面自证：本档两条腿都从 `neurova/` 取数，根被改窄时读数是「零旁路」而不是红。
+
+    两条腿的扫描都带**文本预筛**（`ContextVar` / `SCAN_HINTS`），预筛命中数不随根的大小变，
+    所以面另由共享枚举入口量一次。这一格独立存在是因为把 `filesUnder` 塞进被消费的 helper 里，
+    会让该 helper 的调用闭包同时具备「枚举 + 私有解析」两条落点——正是预算门禁点名要红的形状
+    （`tests/unit/test_ci_ast_scan_budget_guard.py`），而门禁的判断在这里是对的：
+    面读数不该让判据为它多付一趟解析。
+    """
+    surface = len(ast_scan.filesUnder(PRODUCTION))
+    assert surface > 500, (
+        f"扫描面现读 {surface} 档 .py（根＝{PRODUCTION}，本判据的域＝生产源码）"
+        "——量级对不上生产源码总数＝根被改窄，下面那些「零命中」都不来自代码")

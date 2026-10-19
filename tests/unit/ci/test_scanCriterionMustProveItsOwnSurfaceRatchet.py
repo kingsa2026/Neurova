@@ -28,7 +28,13 @@
 **存量不豁免、只登记**：下表是本档建档那轮（2026-10-19）的 offender 名单——新增即红，
 把某档补上自证后**必须**从表里摘掉（"降了要看得见"），与 `test_subprocessTextEncodingRatchet.py`
 同一手法。基线**只由本文件的 `_faceFindings` 生成**：上一版我从另一把探针尺里抄过一次数，
-当场错出"2 条漏登 ＋ 5 条多登"，所以取数与基线必须同一次扫描同源。
+当场错出"2 条漏登 ＋ 5 条多登"，所以取数与基线必须同一次扫描同源。名单已随四波存量收空，
+本闸自此**零容忍**——这张空表本身就是裁决力，不是"治理结束"的墓碑。
+
+**读数落在哪一格也要选**：把 `filesUnder` 塞进一条被消费的 helper，会让该 helper 的**调用闭包**
+同时具备「枚举＋私有解析」两种落点——那正是 `test_ci_ast_scan_budget_guard` 点名要红的形状
+（本批实测把读数放进 `declIndex()`，门禁当场报出两个落点）。门禁在这里的判断是对的：
+面读数不该让判据多付一趟解析。那种档把面自证落成**独立一格**，只调枚举入口、不碰解析。
 
 **本档认不到的形状（明写边界，不当已收口）**：分类器认"扫描入口调用"——
 `ast_scan.<共享入口>`、`<路径>.rglob|glob|iterdir|listdir|scandir`、`os.walk`，并且要把根参数
@@ -81,27 +87,12 @@ pytestmark = pytest.mark.timeout(120)
 #: 建档口径与本文件的 `_faceFindings` 完全同源——**不要用别的规则量一遍再抄进来**，
 #: 基线与判据不同源时，"存量在降"会被读成"治理有进展"（本仓同族账）。
 #: 面读数与消化进度写在台账那一格（进账的数字背后必须有当轮跑过的命令），代码这里只留名单。
-BASELINE = {
-    "tests/unit/agent/test_requestUserIdEntryConsistency.py",
-    "tests/unit/agent/test_turnIdentitySingleSource.py",
-    "tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py",
-    "tests/unit/api/test_memoryMetacognitionSkillsMatchManagerContract.py",
-    "tests/unit/api/test_memoryWriteIdentityGate.py",
-    "tests/unit/channels/test_channelWecomVoiceBytesReachThePrecheck.py",
-    "tests/unit/channels/test_channelWecomVoiceInboundCarriesTranscript.py",
-    "tests/unit/context/test_compression_economics.py",
-    "tests/unit/context/test_context_compression_single_face.py",
-    "tests/unit/core/test_cacheAccountsMergedIntoOneModule.py",
-    "tests/unit/core/test_dead_cache_module_removed.py",
-    "tests/unit/llm/test_capability_cache_single_source.py",
-    "tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py",
-    "tests/unit/memory/test_memoryCipherFailFast.py",
-    "tests/unit/memory_ingest/test_seed_db_landing_relocation.py",
-    "tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py",
-    "tests/unit/security/test_installGateDocFilesAreReportOnly.py",
-    "tests/unit/test_ci_thin_env_guards.py",
-    "tests/unit/tools/test_npx_runtime_pinning.py",
-}
+#:
+#: 现值＝**空集**。四波存量（46 → 36 → 27 → 19 → 0）收干净之后，本闸是**零容忍**：
+#: 新落一条「扫仓内根却不自证面」的判据即红。空表不代表这闸失去内容——它的裁决力就是"新增即红"，
+#: 而 `test_ratchetRecordsImprovementLoudly` 继续留着，是为了让"名单与实际不同源"当场露形
+#: （包括有人把真 offender 偷偷加回这张表来换取那一格变绿）。
+BASELINE: set = set()
 
 
 # ── 取数：三样小工具，各自只解一件事，便于逐形反检 ─────────────────────────────
