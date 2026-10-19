@@ -40,6 +40,7 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 GATE = PROJECT_ROOT / "scripts" / "ci" / "deploy_config_consistency_check.py"
 CHECK_CMD = "scripts/ci/deploy_config_consistency_check.py"
 CNB = PROJECT_ROOT / ".cnb.yml"
@@ -214,8 +215,7 @@ class TestCiWiring:
 
     def test_gate_registered_in_protected_subset(self):
         """门禁自检必须进受保护子集，否则 CI 根本不跑它。"""
-        protected = io.open(PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt",
-                            encoding="utf-8").read()
+        protected = set(ast_scan.protectedSubsetEntries())
         assert "tests/unit/test_deploy_config_guard.py" in protected, (
             "本守卫未登记进 scripts/ci/protected_tests.txt —— unit-tests 流水线不会跑它"
         )

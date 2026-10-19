@@ -56,7 +56,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.ci import context_deadline_ledger as ledger  # noqa: E402
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 GUARD_REL = "tests/unit/context/test_pool_registry_session_partition_retirement.py"
 
 #: 退场的多池机制（第二套隔离设计）——拥有者级：`ContextPoolRegistry` 上不得再有。
@@ -180,11 +180,7 @@ class TestSinglePoolReadFaceSurvives:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = {
-            line.split("#", 1)[0].strip()
-            for line in PROTECTED.read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()
-        }
+        listed = set(ast_scan.protectedSubsetEntries())
         assert GUARD_REL in listed, (
             f"{GUARD_REL} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )

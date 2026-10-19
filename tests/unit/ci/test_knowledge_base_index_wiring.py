@@ -56,7 +56,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 OPTION_ALLOWLIST = PROJECT_ROOT / ".cnb" / "knowledge_options_keys.txt"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 INDEX_DOC = PROJECT_ROOT / "docs" / "0-index" / "README.md"
 GUIDE_DOC = PROJECT_ROOT / "docs" / "10-configuration" / "KNOWLEDGE_BASE.md"
 
@@ -511,9 +511,9 @@ class TestGuideIsReachable:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = io.open(PROTECTED, encoding="utf-8").read()
         rel = "tests/unit/ci/test_knowledge_base_index_wiring.py"
-        assert rel in listed, f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
+        assert rel in set(ast_scan.protectedSubsetEntries()), \
+            f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
 
 
 class TestDiscriminatingPower:

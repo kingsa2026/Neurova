@@ -143,48 +143,20 @@ MANIFEST_BASELINE: set = {
 #: **表由本文件的 `_readerCounts` 现取生成**——我第一版手抄过一份，同一棵树就错出"28 档"（还点进了
 #: 一档根本不在子集里的），正是形态集 304 那条：基线与判据不同源时，"存量在降"会被读成"治理有进展"。
 #: 纪律与前三张表一致：新增落点即红、消化必须摘行。
-#: 现值＝**34 档 / 37 处**（本批把以清单为面逐条动手的 6 档改指单点之后）。余下这些多为
-#: "只问这条在不在表里"的成员检查——那种用法坏得响，但仍是不必要的第二份读法，按批消化。
-#: 37 处按 `_manifestReadSites` 的两条支分：**解析支独占 23／两支都中 13／字面量支独占 1**
-#: （探针逐档复算，两臂并集与原函数读数逐档相等才敢这么写）——那 1 处是 `repo_path("scripts","ci",…)`
-#: 这种"路径由 helper 拼出来"的读法，所以两条支都不是装饰。
+#: 建档那轮（批 104）现值＝34 档 / 37 处，按 `_manifestReadSites` 两条支分：解析支独占 23／
+#: 两支都中 13／字面量支独占 1（那 1 处是 `repo_path("scripts","ci",…)` 这种"路径由 helper 拼出来"
+#: 的读法）。**现值＝2 档 / 5 处**（批 105 收掉 32 档 / 32 处）。
+#: `test_dev_path_and_runtime_dep_guards.py` 那 4 处本批**故意没动**：同一档里并发会话正写着
+#: `TestMcpSdkDeclaredForRuntime` 的在途格子，这一笔要是带上它，对方的半成品会被署进我的提交、
+#: 连红格子一起上 main（形态集 246）。下一刀等那档落库之后再收。
+#: 幸存那一档不是漏网：`test_ci_protected_subset_nightly.py` 的职责就是拿**原始清单**去比对夜间脚本
+#: 自己那份 `readEntries()`——用单点读法去过单点读法，就证不了它没吞行、没排序、没去重。
+#: 要连它一起收，得先决定夜间脚本的读法归谁（登记待裁，不在本表里就地豁免掉）。
 #: 一处不在表里也不在面内：`tests/integration/test_security_integration.py` 读这份清单，
 #: 可它**不在受保护子集里**——本闸的面就是那份清单，登记在这里免得下一个人以为漏了。
 READER_BASELINE: dict = {
-    "tests/unit/api/test_channel_config_landing_anchor.py": 1,
-    "tests/unit/api/test_context_budget_face_retirement.py": 1,
-    "tests/unit/api/test_context_pool_settings_face_retirement.py": 1,
     "tests/unit/ci/test_ci_protected_subset_nightly.py": 1,
-    "tests/unit/ci/test_docker_image_pipeline_wiring.py": 1,
-    "tests/unit/ci/test_issue197_judgement_registration.py": 1,
-    "tests/unit/ci/test_knowledge_base_index_wiring.py": 1,
-    "tests/unit/ci/test_npc_pipeline_time_budget.py": 1,
-    "tests/unit/ci/test_npc_runtime_budget.py": 1,
-    "tests/unit/ci/test_npc_script_interpreter_reachability.py": 1,
-    "tests/unit/ci/test_npc_turn_handoff_execution.py": 1,
-    "tests/unit/ci/test_npc_turn_handoff_predicate.py": 1,
-    "tests/unit/ci/test_stub_signature_single_source.py": 1,
-    "tests/unit/context/test_b5_scale_batch_registration.py": 1,
-    "tests/unit/context/test_batch_status_docs_coupling.py": 1,
-    "tests/unit/context/test_context_compression_single_face.py": 1,
-    "tests/unit/context/test_context_deadline_disposal.py": 1,
-    "tests/unit/context/test_context_deadline_ledger.py": 1,
-    "tests/unit/context/test_context_facade_retirement.py": 1,
-    "tests/unit/context/test_pool_registry_session_partition_retirement.py": 1,
-    "tests/unit/context/test_summarizer_degradation_bit_observable.py": 1,
-    "tests/unit/context/test_ttl_reclaim_and_session_identity.py": 1,
-    "tests/unit/context/test_turn_session_identity.py": 1,
-    "tests/unit/core/test_data_root_no_cwd_landing.py": 1,
-    "tests/unit/core/test_runtime_landing_root.py": 1,
-    "tests/unit/memory_ingest/test_protected_registration.py": 1,
-    "tests/unit/scripts/test_scripts_import_bootstrap.py": 1,
-    "tests/unit/test_deploy_config_guard.py": 1,
     "tests/unit/test_dev_path_and_runtime_dep_guards.py": 4,
-    "tests/unit/test_experience_quality_gate.py": 1,
-    "tests/unit/test_osv_audit_hardening_guard.py": 1,
-    "tests/unit/test_pytest_runner_guards.py": 1,
-    "tests/unit/test_script_index_registration.py": 1,
-    "tests/unit/tools/test_tool_batch_parallelism.py": 1,
 }
 
 
@@ -1068,7 +1040,7 @@ def test_protectedSubsetReaderIsSingleSource():
     """这份清单的读法只准有一处（`tests/ast_scan.py`）——新增即红、消化必须摘行。
 
     为什么要有这一格：收口做到一半时，"只准一处"这件事若只写在注释里，下一档需要清单的判据
-    仍会就地再抄一份 `io.open(PROTECTED)`（本仓实测 34 档各抄一份，抄本各自决定剥不剥注释、
+    仍会就地再抄一份 `io.open(PROTECTED)`（收口前实测 34 档 / 37 处各抄一份，抄本各自决定剥不剥注释、
     返回 list 还是 set——`_gitLsFiles` 那一族就是因为这个才收的）。教义第 6 条要的是"只有一处定义"，
     而"只剩一处"这件事必须有个会红的格子看着。
     """

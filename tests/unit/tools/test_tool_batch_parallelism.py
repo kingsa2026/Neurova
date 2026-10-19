@@ -781,18 +781,9 @@ class TestM3JudgementsAreRegisteredInCI:
 
     @staticmethod
     def _listed() -> set:
-        import io
-        from pathlib import Path
+        from tests import ast_scan
 
-        raw = io.open(
-            Path(__file__).resolve().parents[3] / "scripts/ci/protected_tests.txt",
-            encoding="utf-8",
-        ).read()
-        return {
-            line.split("#", 1)[0].strip()
-            for line in raw.splitlines()
-            if line.split("#", 1)[0].strip()
-        }
+        return set(ast_scan.protectedSubsetEntries())
 
     def test_batchFilesAreRegistered(self):
         listed = self._listed()

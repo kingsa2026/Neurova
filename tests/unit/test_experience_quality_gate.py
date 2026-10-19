@@ -35,6 +35,7 @@ import sqlite3
 import pytest
 
 from tests.repo_paths import repo_path
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 GATE_PATH = repo_path("scripts", "ci", "experience_quality_gate.py")
 
@@ -586,13 +587,7 @@ class TestGateExitCodes:
         清单是"跑哪些测试"，不是"跑哪些脚本"；把门禁脚本自身列进去会让它被
         pytest 当测试文件收集，空转一次还不出声。
         """
-        listed = [
-            line.strip()
-            for line in repo_path("scripts", "ci", "protected_tests.txt")
-            .read_text(encoding="utf-8")
-            .splitlines()
-            if line.strip() and not line.startswith("#")
-        ]
+        listed = set(ast_scan.protectedSubsetEntries())
         assert "scripts/ci/experience_quality_gate.py" not in listed, (
             "scripts/ci/experience_quality_gate.py 被列进了受保护测试清单"
         )

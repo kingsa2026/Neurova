@@ -16,12 +16,11 @@
 
 from __future__ import annotations
 
-import io
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 已交付批次 → 该批交付的判据文件。一个批次一条登记，同一条判据不复制扫描逻辑。
 BATCH_FILES = (
@@ -45,12 +44,7 @@ BATCH_FILES = (
 
 
 def _listed() -> set:
-    raw = io.open(PROTECTED, encoding="utf-8").read()
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    return set(ast_scan.protectedSubsetEntries())
 
 
 def test_b5_batch_files_are_registered():

@@ -33,7 +33,7 @@ import io
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 交付证据（一）：这些判据文件必须都在受保护子集里 —— CI 唯一执行面，跑得到才算交付。
 #: 登记形态与 `tests/unit/context/test_b5_scale_batch_registration.py` 的 `BATCH_FILES` 同族
@@ -113,12 +113,7 @@ STALE_CLAIMS = (
 
 def protectedEntries() -> set:
     """受保护子集的条目（`#` 注释与空行忽略，清单是 CI 唯一执行面）。"""
-    raw = io.open(PROTECTED, encoding="utf-8").read()
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    return set(ast_scan.protectedSubsetEntries())
 
 
 def deliveryGaps() -> dict:

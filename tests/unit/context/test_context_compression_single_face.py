@@ -47,7 +47,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.ci import context_deadline_ledger as ledger  # noqa: E402
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 GUARD_REL = "tests/unit/context/test_context_compression_single_face.py"
 
 PRODUCTION_ROOT = PROJECT_ROOT / "neurova"
@@ -211,12 +211,7 @@ def _symbolExistsInProduction(symbol: str) -> bool:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        raw = PROTECTED.read_text(encoding="utf-8")
-        listed = {
-            line.split("#", 1)[0].strip()
-            for line in raw.splitlines()
-            if line.split("#", 1)[0].strip()
-        }
+        listed = set(ast_scan.protectedSubsetEntries())
         assert GUARD_REL in listed, (
             f"{GUARD_REL} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行"
             "（B5 收口时正是这个形态：文件在仓、单跑全绿、清单里没有）。"

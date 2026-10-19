@@ -50,7 +50,7 @@ yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CNB = PROJECT_ROOT / ".cnb.yml"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 平台在收尾时刻注入的两个事实变量（实测读数见模块 docstring）。
 #: v2（Issue #272）：第二个是**失败 stage 名**，不是失败 stage 的最后一行输出。
@@ -258,9 +258,8 @@ class TestHandoffLandingPointRelaysToo:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = io.open(PROTECTED, encoding="utf-8").read()
         rel = "tests/unit/ci/test_npc_turn_handoff_predicate.py"
-        assert rel in listed, (
+        assert rel in set(ast_scan.protectedSubsetEntries()), (
             f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )
 
