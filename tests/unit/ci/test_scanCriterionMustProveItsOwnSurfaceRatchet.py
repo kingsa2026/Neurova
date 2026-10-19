@@ -101,17 +101,9 @@ BASELINE: set = set()
 #: 根绑在函数内的名字上，`_constTable` 解不出 ⇒ 那档连"有没有面"都不再被问。
 #: 纪律与 BASELINE 一致：新增即红、消化必须摘行；下一批把某一档的根提到模块级时，
 #: **同批要给它补上面自证**（提到模块级之后它才进入「仓内目录」那一支，那时才要求自证）。
-LOCAL_BASELINE = {
-    "tests/unit/agent/test_tool_experience_loop_offline_probe.py",
-    "tests/unit/api/test_experience_outcome_word_domain.py",
-    "tests/unit/context/test_injectorLifecycleHooksNeverRan.py",
-    "tests/unit/context/test_token_estimator_calibration.py",
-    "tests/unit/deploy/test_image_model_assets.py",
-    "tests/unit/evolution/rsi/test_rsi_proposal_activation.py",
-    "tests/unit/evolution/rsi/test_rsi_rollback_evidence.py",
-    "tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py",
-    "tests/unit/test_session_landing_guard.py",
-}
+#: 现值＝**空集**（批 100 收干净：9 档的根全部提到模块级，并按「仓内目录」那一支补上了面自证）。
+#: 空表之后这一格也是零容忍——新把根绑进函数局部，当场点名。
+LOCAL_BASELINE: set = set()
 
 
 # ── 取数：三样小工具，各自只解一件事，便于逐形反检 ─────────────────────────────

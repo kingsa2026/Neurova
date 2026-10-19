@@ -51,6 +51,8 @@ from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
 from neurova.skills.models import OUTCOME_STATES, outcomeStateFromWord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+#: 语言面根，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+LOCALES = PROJECT_ROOT / "NeurUI" / "src" / "i18n" / "locales"
 
 
 def readText(relPath: str) -> str:
@@ -172,8 +174,11 @@ class TestFrontendWordDomainMatchesTheBackendContract:
         assert 'value="unevidenced"' in text, "新建表单缺 unvidenced 选项"
 
     def test_localesCarryTheThirdWord(self):
-        localesDir = PROJECT_ROOT / "NeurUI/src/i18n/locales"
-        codes = sorted(p.stem for p in localesDir.glob("*.ts") if not p.stem.startswith("_"))
+        allLocaleFiles = sorted(LOCALES.glob("*.ts"))
+        assert len(allLocaleFiles) > 10, (
+            f"语言面现读 {len(allLocaleFiles)} 个 .ts（根＝{LOCALES}）——"
+            "根指错或目录缺席时，下面那句「11 份都有这枚键」不来自代码")
+        codes = sorted(p.stem for p in allLocaleFiles if not p.stem.startswith("_"))
         assert len(codes) == 11, f"语言包数量变了（{len(codes)}）：{codes}"
         for code in codes:
             text = readText(f"NeurUI/src/i18n/locales/{code}.ts")
