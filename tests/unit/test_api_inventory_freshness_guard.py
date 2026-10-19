@@ -58,15 +58,29 @@ _APP_PROBE = (
     "\n"
     "from neurova.api.app import create_app"
     "\n"
+    "from starlette.routing import Mount"
+    "\n"
     "app = create_app(enable_memory=False, enable_channels=False)"
     "\n"
-    "print(json.dumps(sorted(app.openapi()['paths'])))"
+    "paths = set(app.openapi()['paths'])"
+    "\n"
+    "paths |= {(getattr(r, 'path', '') or '').rstrip('/') or '/'"
+    " for r in app.router.routes if isinstance(r, Mount)}"
+    "\n"
+    "print(json.dumps(sorted(paths)))"
 )
 
 
 @functools.lru_cache(maxsize=1)
 def _runtimeRoutePaths() -> frozenset:
-    """真实链路读数：启动真应用，取它注册出来的路由表（只跑一次）。"""
+    """真实链路读数：启动真应用，取它注册出来的路由表（只跑一次）。
+
+    两个来源合一张表：`app.openapi()['paths']` 给 REST 路由，`app.router.routes` 里的
+    `Mount` 给 ASGI 挂载形态。为什么必须补后者——OpenAPI **不收录** `app.mount()`
+    出来的应用（§6-344 实测：`/api/v1/mcp` 换运输后在 openapi 里整条不存在），
+    只拿 openapi 当"运行时真表"就会把一张活着的外表面读成"不存在"，
+    于是挂载表里那条真前缀反而被判成"表在报一个不存在的挂载点"。
+    """
     proc = subprocess.run([sys.executable, "-c", _APP_PROBE], cwd=str(PROJECT_ROOT),
                           capture_output=True, text=True, timeout=900)
     assert proc.returncode == 0, f"应用创建失败：{proc.stderr[-800:]}"
@@ -150,6 +164,35 @@ class TestRouteFactsMatchTheRuntime:
                 f"生成器又出现了 {retired}()：那是静态重建路由的二套实现，"
                 "与 `create_app()` 装配结果必然逐版漂移（教义第 6 条）。"
             )
+
+    def test_asgiMountedFacesAreNotInvisibleToTheInventory(self):
+        """以 `app.mount()` 形态服务的面必须进清单——「表里没有」不能当成「没有这张面」。
+
+        成因（§6-344 实测登记）：`/api/v1/mcp` 的运输换成官方 SDK 的 ASGI 应用后，
+        它在装配结果里是一条 `Mount`，而 `mountOperations()` 只认 `include_router` 产物
+        （它读 `original_router`）⇒ 清单既不说这条前缀有路由，也不说它是挂载点，
+        指路文档就这么少了一张活着的外表面。这一格钉的正是"看不见当作没问题"。
+
+        取数两头都要真：挂载点从**装配结果**里按形状数（不抄注册表，免得第二套事实源），
+        清单侧从**已发布的文档**里读——两者不一致即红。
+        """
+        module = _generator()
+        app = module.assembledApp()
+        mounted = sorted({(getattr(route, "path", "") or "").rstrip("/") or "/"
+                          for route in app.router.routes
+                          if type(route).__name__ == "Mount"})
+        assert mounted, (
+            "装配结果里一条 `Mount` 都没有——本格的取数口失效（不是「干净」）；"
+            "Starlette 的挂载类改名或装配形态变化都会走到这里"
+        )
+        declared = set(module.declaredBackendPrefixes(_inventory_text()))
+        registered = set(module.registeredBackendPrefixes())
+        missing = [point for point in mounted if point not in declared or point not in registered]
+        assert not missing, (
+            f"以 ASGI 挂载形态服务却不在清单/生成器口径里：{missing}\n"
+            "修法：让 `asgiMountPoints()` 认这种形态并重生成清单，不要在文档里手补一行"
+            "（机器区由生成器产出，手改即红）。"
+        )
 
     def test_zero_route_mount_points_match_the_runtime(self):
         """空 router 判据必须与运行时一致：点名的挂载点在真实路由表里零命中。"""
