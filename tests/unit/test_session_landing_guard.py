@@ -49,11 +49,15 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
 
     `NEUROVA_SESSIONS_DIR` 必须从环境里摘掉再启动：父进程正跑在自己的隔离夹具里，
     那个变量会随环境继承下去，探针测到的就不是"仓库默认行为"而是父进程的注入值。
+    反过来 `PYTHONIOENCODING` 必须**显式钉上**：探针写侧与父进程读侧要同一个编码——
+    本仓跑测常带这个变量，只靠继承就等于把红绿挂在"谁怎么起的"上（父端按 cp936 解子端
+    写的 UTF-8 ⇒ reader 线程崩、`proc.stdout` 变 None ⇒ 报的是 TypeError 而不是落点缺陷）。
     """
     import copy
 
     probeEnv = copy.deepcopy(os.environ)
     probeEnv.pop("NEUROVA_SESSIONS_DIR", None)
+    probeEnv["PYTHONIOENCODING"] = "utf-8"
     probeFile = REPO_ROOT / "tests" / "unit" / fileName
     # 探针会**刻意**把落点设回"仓库真实会话库"（这正是它要证的事），
     # 子进程构造 SessionManager 时 `mkdir` 便会在仓库根建出 `data/sessions/`。
@@ -72,6 +76,8 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=180,
             env=probeEnv,
         )
