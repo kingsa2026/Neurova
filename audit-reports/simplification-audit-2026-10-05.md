@@ -7439,7 +7439,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       ＝登记不动手：它的清单面只有 1 条（`docs/INDEX.md` 阅读顺序 → `AGENTS.md`），补 `len(paths) > N`
       就是拿假数字装硬断言（形态集 307），而该档已用 `assert paths, "…"` 防住静默空转。要收这一形需要
       另一条口径——"解析出的条目数 == 那一节里全部 `.md` 引用数"，**等裁**，不用放宽规则换绿。
-    - **仍开**：上面①②③；§6-318 边界①②；§6-317 同池名两读数即红；R5-env 待裁修法；
+    - **仍开**：上面①③（②＝余 34 档自抄读法**已收＝§6-335**：32 档改指单点，余 2 档各有登记理由）；
+      §6-318 边界①②；§6-317 同池名两读数即红；R5-env 待裁修法；
       以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **本会话下一枚空号现查 §6-334**（写前必须现场重取；本笔落库时该读数为 333）。
 
@@ -7524,4 +7525,56 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       仍开，②（`_infer_transport` 内重复的 `tool_capabilities` 校验）仍开。
     - **A/B 与活体**：本批三笔均无生产行为改动（两份 requirements 的注释/范围 + 两份测试档），
       故未跑宽域 A/B 与活体——如实标注为"未做"，不当已证；乙 实施那一批必须补齐这两段。
+    - **乙 实施前的两条 SDK 2.x API 读数**（2026-10-19 现场探针量得，别一批别重探）：
+      ① `mcp.server.lowlevel.Server` 在 2.3.0 **已没有 v1 那套装饰器**——`@server.list_tools()` 直接
+         `AttributeError: 'Server' object has no attribute 'list_tools'`；handler 改为**构造参数**
+         （`Server(name, on_list_tools=…, on_call_tool=…)`，见 `lowlevel/server.py` 的
+         `on_list_tools` 形参与 `("tools/list", …, on_list_tools)` 注册表）。
+         这条决定了实现形状：**装饰器式 `MCPServer` 不适用**——它的工具表是注册式的，而本仓导出面
+         的清单是**每请求实时算出来的**（已发布工作流＋技能＋CUA 开关），lowlevel 的 handler 恰好保留实时性。
+      ② `Server` 现面自带 `streamable_http_app` / `create_initialization_options` / `get_capabilities` /
+         `middleware` / `extensions`，`StreamableHTTPSessionManager(app=…, stateless=True,
+         json_response=True)` 可构造且 `run()` 是 async context manager（需 lifespan）。
+      由此乙 还剩三件必须一起处理的工程：(a) 装载表目前是 `importlib + include_router`
+      （`endpoints/__init__.py:361`），挂 ASGI app 需要新增一种挂载形态；(b) 平台身份必须移到 ASGI 层
+      并**复用同一个 verifier**（不许造第二套），且按 2026-10-19 裁定甲，这里同时成为
+      `set_request_user_id` 的**第六个边界**——`_call_computer` 里那条恒假的 `if uid:` 会因此变活，
+      `computer_*` 开始按发送者归属，属行为变化；(c) §6-302 的 12 格协议判据与本格 6 格契约锁
+      一并当回归网，stateless 模式下"不 initialize 也能 tools/list"这一形状可否保持，需实测再定
+      （探针未跑到那一步，**不许当作已证**）。
     - **本会话下一枚空号现查 §6-335**（写前必须现场重取；本笔落库时该读数为 334）。
+
+335. **批 105 · 受保护子集清单的自抄读法 34 档 / 37 处 → 2 档 / 5 处；成员检查从「整份文本子串」改判「精确条目」——一处能被注释喂饱的检查被换成不能的** ✅🟢 —— 一笔：`6925f5ab`
+    - **这一批的真正缺陷不在"抄了 34 份"，在抄本的断言形态**：22 处写的是 `assert rel in <整份清单文本>`，
+      即子串判定。活体量出来的分歧点：把某档那一条**注释掉**（`# tests/unit/x.py`），旧形态读到 True（**绿＝没牙**），
+      精确条目读到 False；整行删除则两种形态都 False。也就是说"守卫必须进 CI"这类格子，一行注释就能骗过去
+      （241/268 那一族：按文本判的守卫被自家文档与注释自咬）。修法不是加断言，是把读法与判定一起收进单点。
+    - **收法三条**：① 有本地 helper 的（`_listed()`／`protectedFiles()`／`_protected_entries()`…）把函数体换成
+      `set(...)`／`list(ast_scan.protectedSubsetEntries())`——"抄本自己决定剥不剥注释"这件事就此不存在；
+      ② 只有 `PROTECTED = …` 常量的删常量、加 `from tests import ast_scan`，因收口而失效的 `import io` 一并删净；
+      ③ 子串断言改精确成员判定。这是**加强**不是等价替换，所以每档重新跑过一遍绿（不是"应该一样"）。
+    - **命中面现取**（取数口＝本闸 `_readerCounts`，表由探针写盘而不是手抄）：34 档 / 37 处 → **2 档 / 5 处**。
+      两条幸存各有理由，不是漏网也不是豁免：`test_ci_protected_subset_nightly.py`（1 处）的职责就是拿**原始清单**
+      比对夜间脚本自己那份 `readEntries()`——用单点读法去过单点读法证不了它没吞行／没排序／没去重，
+      要收它得先决定夜间脚本的读法归谁（**等裁**）；`test_dev_path_and_runtime_dep_guards.py`（4 处）
+      本批**故意没动**——同一档里并发会话正写着 `TestMcpSdkDeclaredForRuntime` 的在途格子，带上它就会把
+      对方含一个当下就红的格子署进我这一笔（形态集 246）。四处迁移做完又原样退回，下一刀等那档落库再收。
+    - **证据链**：活体两态（真清单、try/finally 还原、终态字节复证一致＋`git status` 复证未改）；
+      棘轮自证＝迁移做完、表未重生时失败集恰为 `{test_protectedSubsetReaderIsSingleSource}` 一条，
+      逐档报"基线 1 处 / 现 0 处"；在面复算（形态集 320 那条第二次用）＝`test_ci_ast_scan_budget_guard`
+      `[1570,540,84]`／`test_clock_caliber_ledger` `[165,150]`／本闸 `[412,1054,1527,1164]` 一字未变；
+      A/B（本批 33 档整批 tagged-stash 建 HEAD 基线、同根同环境、两侧严格串行）
+      基线 `20 failed / 722 passed / 745 collected` ↔ 本批 `20 failed / 725 passed / 748 collected`，
+      **FAILED 同集**、仅本树红 0／仅基线红 0；collected 差的 3 格按**节点 id** 逐条对出是并发会话在途新增的
+      `TestMcpSdkDeclaredForRuntime` 三格，不冒领也不推给它。还原后 34 档 md5 逐字节一致、`git stash list` 空。
+      净 LOC：测试/基建池 **+70 / −202（净 −132）**、生产池 0。`tests/unit/context` 整卷 `1002 passed`。
+    - **新登记两条并发引入的常驻红（本批不认领、也不替别人改）**：
+      ① `33a5f1c1` 把新档 `tests/unit/test_mcpSdkFloorMatchesImportedEra.py` 加进子集而未带面自证 ⇒
+         `test_ratchetDoesNotRise` 在 HEAD 态就红（基线侧同红，有回执），处方一行已写在该格报错文本里；
+      ② 同笔正文「基建池 +16/−4／测试池 +121/−0」与其 numstat（+137/−4）不符 ⇒
+         `testUnpushedCommitsClaimsAllReconcile` 红（289/225 那一族第五次露面，处置仍在未推送窗口内改正文，
+         不是放宽守卫）。两条都属并发会话可就地修的窗口，本会话只登记不动它笔的提交。
+    - **仍开**：上面①②；夜间脚本读法归谁（等裁）；dev_path 那 4 处（等并发落库）；`MANIFEST_BASELINE` 那一档的
+      收口口径（§6-333 登记，仍等裁）；§6-318 边界①②；§6-317 同池名两读数即红；R5-env 待裁修法；
+      以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293、§6-334 的 mcp_manager 三态票）。
+    - **本会话下一枚空号现查 §6-336**（写前必须现场重取；本笔落库时该读数为 335）。
