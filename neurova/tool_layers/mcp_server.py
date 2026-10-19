@@ -7,7 +7,8 @@ server 核心与传输分离
 复用既有契约，不另起炉灶：
 - 工作流工具：workflow_as_tool.build_workflow_tool_schema（P1-3，
   DAG 输入校验天然生效——MCP 面不绕过必填校验）
-- 技能工具：skill_registry 清单（skill:{name} 命名空间归一）
+- 技能工具：清单取 skill_registry（skill:{name} 命名空间归一），
+  执行一律经 ToolExecutor.execute_skill_tool 咽喉，本面不自建第二条技能通路
 """
 
 from __future__ import annotations
@@ -29,8 +30,9 @@ class NeurovaMCPServer:
 
     Args:
         storage: neurflow WorkflowStorage（工作流工具源；None=不暴露工作流）
-        skill_registry: SkillRegistry（技能工具源；None=不暴露技能）
- agent_ref: Agent
+        skill_registry: SkillRegistry（技能清单源；None=不暴露技能）
+        agent_ref / agent_provider: 执行侧的 agent（技能腿与 computer 腿都要它
+            才能过 ToolExecutor；两者都给时优先 agent_ref）
     """
 
     def __init__(self, storage=None, skill_registry=None, agent_ref=None, agent_provider=None):
@@ -208,16 +210,33 @@ class NeurovaMCPServer:
         return await executor._execute_single_tool(name, dict(arguments or {}), skip_governance=False)
 
     async def _call_skill(self, skill_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        skill = (getattr(self._skill_registry, "_skills", {}) or {}).get(skill_name)
-        if skill is None:
-            return {"isError": True, "error": f"技能未注册: {skill_name}"}
-        result = await skill.execute(dict(arguments), None)
-        success = bool(getattr(result, "success", False))
-        data = getattr(result, "data", None) if success else None
-        error = getattr(result, "error", None)
-        if success:
-            return {"success": True, "result": data}
-        return {"success": False, "error": error or "技能执行失败"}
+        """技能腿一律走 `ToolExecutor.execute_skill_tool` 那道咽喉，无 agent 即拒。
+
+        咽喉上挂着四件本面补不出的事：轮级可见门（Wave H-W2）、声明式权限作用域
+        （P0-4）、沙箱根注入、P0-1 质量漏斗记账。直调 `skill.execute` 等于把这四件
+        一起绕掉——所以这里没有"拿不到 agent 就退回直调"的兜底，只有 fail-closed。
+
+        清单源与执行源不同口径是本批有意保留的分叉：清单来自构造期注入的注册表
+        （ advertise 面），执行由咽喉按**本轮可见集**裁决（授权面）。 advertised 而
+        被拒是正确行为，不是漂移。
+        """
+        agent = self._resolve_agent()
+        if agent is None:
+            return {
+                "isError": True,
+                "error": f"技能 {skill_name} 需要 agent 才能过治理咽喉（可见门/权限作用域/沙箱根/漏斗记账），当前无 agent",
+            }
+
+        from neurova.tool_executor import ToolExecutor
+
+        outcome = await ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments or {}), None)
+        if "success" not in outcome:
+            # 咽喉的拒绝形态（查无此技能／不在本轮可见集／注册表未初始化）与异常形态
+            # 都不带 success——一律按 MCP 语义错误信封回，不重述文案。
+            return {"isError": True, "error": str(outcome.get("error", "技能调用被拒"))}
+        if outcome["success"]:
+            return {"success": True, "result": outcome.get("output")}
+        return {"success": False, "error": outcome.get("error") or "技能执行失败"}
 
     @staticmethod
     def _current_user_id() -> Optional[str]:
