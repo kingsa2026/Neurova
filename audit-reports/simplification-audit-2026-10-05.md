@@ -7950,3 +7950,64 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       且 storage 有 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）；
       以及 §6-342 那两条 CI 小批（丁／⑤）、osv 甲、dev_path 那 4 处、其余等裁票。
     - **本会话下一枚空号现查 §6-344**（写前必须现场重取；本笔落库时该读数为 343）。
+344. **换面落地 · 导出 MCP 面的运输层改由官方 SDK 的 streamable-http 承载（§6-339 乙案、§6-340 两裁实施）** ✅🟢 —— 两笔：`8718cfd6` 装配前置收口 ／ `c875bf64` 换面本体
+    - **批次号说明（防读错归属）**：本会话与前一会话在同一棵树上各自编号，"批 108／109"两边都用过；
+      跨会话一律按 §6 号引，本格就是本会话的换面批。
+    - **落的是什么**：`/api/v1/mcp` 的 JSON-RPC 信封此前是仓内手写的**第二套协议实现**（四方法 if/elif
+      分派、自造 Accept 校验、自己拼 -32601/-32600），§6-302 那次只把版本支持集收口到 SDK 单源、
+      运输本体还留着。本批把运输整体交给官方 SDK 2.3.0 的 `StreamableHTTPSessionManager(stateless=True,
+      json_response=True)` ＋ `lowlevel.Server(on_list_tools=, on_call_tool=)`，手写那份删净 117 行；
+      工具清单与调用逐字段仍取自 `NeurovaMCPServer`（改的是"怎么传"，不是"传什么"）。
+    - **两裁如何落地**：裁定甲＝initialize 的 params 三件齐否则 -32602，仓内 6 处自造的极简 payload 全部补全，
+      "空 params 也算握手"那一格改判成"缺 protocolVersion 即拒"，另开一格把新语义钉成承诺；
+      裁定乙＝非信封体走 HTTP 400（跟 SDK）但码收成 -32600、message 换标准语、data 保留。
+      **改写只截 400**：实测 params 类 -32602 全部走 200，所以它不可能误伤裁定甲那条——两格同钉才算守卫生效。
+    - **本批最贵的两条实测硬约束（都写进了现场 docstring，不只留在这里）**：
+      ① `app.mount()` 出来的子应用**不被父应用带 lifespan**——本机 Starlette 1.7.0 ＋ FastAPI 0.142.2
+        现场读数：父 app 进出 lifespan 两轮，子 app 的 enter/exit 轨迹**恒空**。
+      ② `StreamableHTTPSessionManager.run()` 一次性且内部是 anyio cancel scope，**进出必须同一 task**；
+        而 `create_app()` 返回的是缓存单例（`app.py:1368-1369`），同一 app 对象被多个 TestClient portal
+        反复进出。第一版把 manager 挂在 app 级 startup/shutdown 事件上，于是
+        "上一轮 enter、下一轮 shutdown task exit" → `RuntimeError: Attempted to exit cancel scope in a
+        different task than it was entered in`。
+    - **一条被自家 A/B 抓回来的自伤（归因链留档）**：宽域 A/B 差集里跳出一条**与本面无关**的红
+      （`test_channelWebhookAuthBeforeDispatch.py::TestFeishuMustUseTheExistingGate::testMissingVerificationTokenFailsClosed`）。
+      处置次序：本树单跑 ×3 稳定红（13.95／13.54／14.32s 三次同读数）→ 带唯一 tag 定向 stash 掉本批改动后
+      单跑 → 1 passed ⇒ 归因成立，不是环境侧也不是并发侧。修法不是在 teardown 加 try/except，
+      而是**取消 app 级长驻**：manager 与它所服务的这一发请求同生同灭（stateless 本来就是一发一条新运输）。
+      改后这条红消失，且**每发 `tools/list` 实测 1.9ms**（20 发均值，含进出 `run()`）——先量成本再决定形态，
+      别把"每发现建"当成天然昂贵。
+    - **新增的一条挂起面闸**（实测，非推测）：stateless+json_response 下 GET 该路径**不返回**
+      （SSE 流不结束，探针线程 5s join 仍活着），而现面原本 405——换面等于白送一条挂起连接，
+      故动词闸显式拒 POST/DELETE 之外的一切，并配一格钉住"不许变成挂起"。
+    - **就地补记 §6-339 那份清单漏掉的一条分叉**：SDK 的 `CallToolResult` **总是**序列化 `isError`，
+      成功时是显式 `false`，而手写面是"只在真错时补这个键"。两种写法对客户端读的是同一个真假
+      （schema 里本就带默认值 false），故 `testToolCallReachesCoreUnchanged` 的判据从"键不存在"
+      改成"显式为假"（改强不改弱：absent 读数不再放行）。
+    - **同根因一起动的四处（教义 5）**：① 四档 fixture 从 `dependency_overrides` 换成真令牌
+      （`app.mount` 的 ASGI 应用不认覆盖，留着只会得到"覆盖没生效却照样绿"）；② 鉴权复用同一对原语
+      `await security(request)` ＋ `await get_current_user_or_service(...)`，**没有**在包装层再解一次
+      Authorization（`auth.py:559-567` 那段"同求异解"旧病）；③ 挂载形态收进 `mountFace` 模块自述；
+      ④ 清单按生成器口径重生成（`/api/v1/mcp` 那行随挂载形态消失）。
+    - **登记一条不代改的静默遗留（本批不动，理由写明）**：`generate_api_inventory.py:392-427 mountOperations`
+      只认 `include_router` 产物，`app.mount` 的前缀**不进挂载表** ⇒ 面活着、指路文档看不见它。
+      修法明确（让生成器认 Mount 形态），但它要自己的一轮红灯与判据面，按"改现役符号须先立判据"另批做。
+    - **在册常驻红新账（不认领、不代改，同 §6-335 那一族第二次复现）**：
+      `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_ratchetDoesNotRise`
+      现读 offender 1 条 = `tests/unit/collaboration/test_collaborateIslandRetirement.py`
+      （并发会话 `4cf96af6` 那笔入子集未带面自证）。本会话不认领也不顺手改别人的档。
+    - **证据**：红灯＝新档 4 failed/4 passed（四把锁设计成现在就绿并各写根据）；绿灯＝该档单跑 8 passed，
+      与 MCP 面其余四档＋核心面同跑 61 passed；红自证＝带唯一 tag 定向 stash 掉生产档与清单 →
+      恰 7 failed/29 passed，红的全是本批新格与改判格；活体＝真 `create_app` 上 14 项读数全 PASS
+      （协商回声、清单含探针、身份跨边界落到执行链、第二发带自己的身份、匿名 401、裁定甲 -32602、
+      裁定乙 400+−32600、ping {}、通知 202、-32601、坏 Accept 406、GET 405 不挂起、DELETE 405、
+      仓库 `data/shared_config.json` 指纹 765cc09e06a5 未动）；宽域归属复算＝`tests/unit/{api,workflow,tool_layers}`
+      两侧各跑一遍，本树 39 failed＋8 errors（47 唯一节点，与汇总逐一对账）、基线同 47、**差集两方向皆空**；
+      三道库存与挂载契约闸 74 passed；身份两张常驻闸＋子集成员闸 49 passed。两笔合计生产侧净增七十五行（换面本体净正五十九、前置收口净正十六），测试与基建侧另有一笔更大的增量——逐笔数字以各自提交说明为准，此处引述刻意不带「池标签 ＋a/−b」的形状，免得撞本仓 LOC 守卫对整段正文的形状复算（294）。子集 644→645。
+    - **就地划闭**：§6-339（六条分叉档案）中"实施＝下一批"由本笔收掉，两裁均已按裁定落地；
+      §6-340 的三条前置读数全部兑现成现场实现与判据；§6-334 的 A 格（身份边界）§6-337 已落、
+      换面本体本笔落——**A 格至此整格闭环**。
+    - **仍开**：清单对 Mount 的可见性（上面那条登记）；§6-334 的 B（同一失败两种信封）／C（技能面不过
+      治理链）／D（`mcp_manager` 三态票）；其余等裁票照旧（§6-311／§6-312 甲乙丙、D1、D9、D10、
+      D11–D20、§6-293）。
+    - **下一枚空号现查 §6-345**（写前必须现场重取；本笔落库时该读数为 344）。
