@@ -436,7 +436,10 @@ class TestWithBinaryPreflightProvesUsableScanner:
                 return subprocess.CompletedProcess(cmd, 0, stdout="osv-scanner version: 9.9.9\n", stderr="")
             output = Path(cmd[cmd.index("--output") + 1])
             output.write_text(json.dumps({"results": []}), encoding="utf-8")
-            index = next(i for i, rel in enumerate(rels) if rel in " ".join(cmd))
+            # 命令里的分隔符按宿主走（Windows 给反斜杠），而被找的 rel 是仓根 posix 串——
+            # 拿原串直拼会在本机 StopIteration（判据向本机路径形状借形，与 allowlist 那格同族）。
+            joined = " ".join(str(part).replace("\\", "/") for part in cmd)
+            index = next(i for i, rel in enumerate(rels) if rel in joined)
             # 每次调用换一份计数输出，让「逐目标点名」这件事可核
             body = self._scannedOutput(
                 rels, {rel: counts[rel] + index for rel in rels}
@@ -1172,7 +1175,9 @@ class TestGuardIsWiredIntoCi:
 
     def test_allowlist_is_still_the_gate_input(self, auditModule):
         assert ALLOWLIST.is_file()
-        assert str(ALLOWLIST).endswith(auditModule.ALLOWLIST)
+        # 按 posix 形态比：门禁里那条是仓根相对 posix 串，而 Windows 上 str(Path) 带反斜杠，
+        # 拿 str 尾拼会把自己本机的分隔符形状当成契约（257 那一族：判据向本机借形状）。
+        assert ALLOWLIST.as_posix().endswith(auditModule.ALLOWLIST)
 
 
 
@@ -1540,8 +1545,24 @@ class TestScannerDownloadSurvivesTransientNetwork:
         assert "指纹不符" in str(excinfo.value)
 
     def test_unknown_platform_still_refuses_to_download(self, auditModule, tmp_path, monkeypatch):
-        """反向控制：未登记平台仍不许下载（这条判据不许被本次收口拆掉）。"""
+        """反向控制：平台能被认出、但登记表里没有它的指纹 ⇒ 仍不许下载。
+
+        这一格原先只清空 `_BINARY_SHA256` 而不钉 `_platform_key`，于是它实际走哪条支路
+        **由本机平台决定**：Linux/macOS 上进的是"无指纹拒绝下载"那条（消息含"指纹"），
+        而 Windows 先在 `_platform_key()` 抛"不支持的平台"——同一格两种宿主读的是两件不同的事
+        （257 那一族）。现在把平台钉成一个合法但不登记的键，两形分开各测一次。
+        """
+        calls = {"n": 0}
+
+        def countingUrlopen(url, timeout=None):
+            calls["n"] += 1
+            raise AssertionError("不该发起传输：%s" % url)
+
+        monkeypatch.setattr(auditModule, "_platform_key", lambda: "haiku_amd64")
         monkeypatch.setattr(auditModule, "_BINARY_SHA256", {})
+        monkeypatch.setattr(auditModule.urllib.request, "urlopen", countingUrlopen)
         with pytest.raises(SystemExit) as excinfo:
             auditModule._downloadScannerWithRetry(tmp_path)
-        assert "指纹" in str(excinfo.value)
+        assert "指纹" in str(excinfo.value), excinfo.value
+        assert "haiku_amd64" in str(excinfo.value), "报错没点名是哪个平台没登记"
+        assert calls["n"] == 0, "无指纹却已经发起传输"
