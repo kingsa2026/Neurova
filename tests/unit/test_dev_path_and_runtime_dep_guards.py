@@ -9,13 +9,21 @@
    这些守卫当时还不在 `scripts/ci/protected_tests.txt` 里——CI 连炸都看不见。
    本类同时钉住：路径不得写死 + 受保护子集必须收录这些守卫。
 
-2. **运行时依赖只写在 CI 清单** —— `mcp>=1.2.0` 原只在 requirements-ci.txt。
+2. **运行时依赖只写在 CI 清单** —— `mcp` 原只在 requirements-ci.txt 声明。
    生产按 requirements.txt 安装时 mcp 缺席，`mcp_client.connect_server`
    走 `_SDK_AVAILABLE=False` 分支：**不抛异常**，只把
    `last_error` 记成"mcp SDK 未安装"——真实连接失败原因被掩盖，MCP 全断
-   而 CI 全绿。本类钉住运行时安装路径（requirements.txt + 全量锁）必须声明。
+   而 CI 全绿。本类钉住运行时安装路径（requirements.txt + 全量锁）必须声明，
+   并钉住 CI 侧两份（txt + ci.lock）同样必须在——**四处齐备**才是这条的完整口径，
+   少任一处对应本类里一条会红的格子。
 
-3. **守卫依赖 CI 镜像里没有的外部二进制** —— 同一"守卫静默不跑"根因的另一形态：
+3. **声明的下界与代码真正取用的世代不符** —— 范围写得比实装宽（允许装 1.x），
+   按声明装出来的环境里 MCP 直接跑不起来，而"声明存在"这件事本身仍是绿的。
+   本类另三格钉：下界必须容得下生产模块级 import 的那个世代、两份 txt 的范围
+   逐字同值（否则就是第二个事实源）、两份 lock 的 pin 必须满足声明的下界
+   （改下界不改锁＝前面几格全绿而装出来仍是坏的那版）。
+
+4. **守卫依赖 CI 镜像里没有的外部二进制** —— 同一"守卫静默不跑"根因的另一形态：
    `tests/unit/test_tool_call_breakpoints_v3.py` 用 `subprocess.run(["rg", ...])`
    做死代码扫描，而 python:3.11/3.12 镜像里没有 ripgrep → `FileNotFoundError`
    直接炸，文件其余断言全废。扫描类守卫必须用纯 Python（`Path.rglob` +
@@ -159,6 +167,87 @@ class TestMcpSdkDeclaredForRuntime:
             "mcp 被登记为可优雅降级的可选依赖——它的缺席会让全部 MCP 服务器"
             "连接失败而 last_error 只说'SDK 未安装'，属于必须显式声明的运行时依赖。"
         )
+
+    # ---- 声明的**下界**是否覆盖代码真正取用的名字 ---------------------------------
+    # 只写在 CI 清单里那一格已由上面钉住；这里钉的是另一半：范围本身在骗人。
+    # 实证依据不靠记忆：`mcp-types` 这个顶层包**自 mcp 2.0.0 起才是 mcp 的依赖**
+    # （PyPI 元数据：1.2.0／1.9.4 无，2.0.0／2.2.0 有），而生产模块级直接 import 它。
+
+    _MANIFESTS = ("requirements.txt", "requirements-ci.txt")
+
+    def _declaredConstraintLines(self, rel):
+        text = io.open(PROJECT_ROOT / rel, encoding="utf-8").read()
+        return re.findall(r"(?m)^\s*mcp\s*([><=!~]+[0-9][0-9.a-z\-]*(?:\s*,\s*[><=!~]+\s*[0-9][0-9.a-z\-]*)*)", text)
+
+    def _importsSdkTwoEraNames(self):
+        """生产代码里是否存在只有 mcp 2.x 才提供的 import（按 AST 判，不扫注释）。
+
+        取数走共享入口：`sourceRefsUnder(hints=...)` 把解析量从"代码总量"收成
+        "命中面"，再用 `transientTree` 一次性解析（不留常驻语法树）。
+        """
+        hits = []
+        for ref in ast_scan.sourceRefsUnder(PROJECT_ROOT / "neurova", hints=("mcp_types",)):
+            for node in ast.walk(ast_scan.transientTree(ref.path)):
+                roots = set()
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    roots.add(node.module.split(".")[0])
+                elif isinstance(node, ast.Import):
+                    roots.update(alias.name.split(".")[0] for alias in node.names)
+                if "mcp_types" in roots:
+                    hits.append(f"{ref.path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+        return sorted(set(hits))
+
+    def _floorTuple(self, constraint):
+        """取下界：`>=1.2.0` / `==2.2.0` 之类里的最低版本；无下界返回 None。"""
+        bounds = []
+        for part in constraint.split(","):
+            m = re.match(r"\s*(>=|==|>)\s*([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", part)
+            if m:
+                major, minor, patch = int(m.group(2)), int(m.group(3) or 0), int(m.group(4) or 0)
+                bounds.append((major, minor, patch))
+        return min(bounds) if bounds else None
+
+    def test_floor_covers_the_names_production_imports(self):
+        """声明下界必须容得下代码真正取用的 SDK 世代——否则按声明装出来的环境是坏的。"""
+        imports = self._importsSdkTwoEraNames()
+        assert imports, "前提变了（生产不再 import mcp_types）——本格的口径需随之改判，别让它空转"
+        for rel in self._MANIFESTS:
+            lines = self._declaredConstraintLines(rel)
+            assert lines, f"{rel} 未声明 mcp 范围"
+            floor = min(filter(None, (self._floorTuple(c) for c in lines)))
+            assert floor >= (2, 0, 0), (
+                f"{rel} 声明 mcp{lines[0]}，而生产在模块级 import 只有 2.x 才有的 "
+                f"mcp_types（{', '.join(imports[:3])}）。按这份下界装出 1.x 时："
+                "客户端侧 _SDK_AVAILABLE=False 让全部 MCP 连接失败，服务端面在装载表里"
+                "因 ModuleNotFoundError 被整张跳过——声明允许的版本根本跑不起来。"
+            )
+
+    def test_both_manifests_declare_the_same_constraint(self):
+        """两份清单的 mcp 范围必须逐字同值。
+
+        守卫 `test_ci_declarations_agree` 只要求"两份都声明"；两份各写一个不同的下界
+        同样能过它——那就是第二个事实源（薄环境与生产装出来不是同一件事）。
+        """
+        per = {rel: self._declaredConstraintLines(rel) for rel in self._MANIFESTS}
+        for rel, lines in per.items():
+            assert len(lines) == 1, f"{rel} 里 mcp 声明出现 {len(lines)} 次，范围应只有一条"
+        a, b = (per[rel][0] for rel in self._MANIFESTS)
+        assert a == b, f"两份清单给了同一个依赖两个范围：requirements.txt={a!r} ↔ requirements-ci.txt={b!r}"
+
+    def test_lock_pins_satisfy_declared_floor(self):
+        """控制格（设计成现在就绿）：两份锁的 pin 必须落在声明的下界之上。
+
+        钉它的理由是「改下界而不改锁」这条路：把 floor 抬到 2.x 而锁里还是 1.x，
+        守卫前面几格全绿，实际装出来的仍是跑不起来的那版。
+        """
+        for lock in ("requirements-full.lock", "requirements-ci.lock"):
+            text = io.open(PROJECT_ROOT / lock, encoding="utf-8").read()
+            pin = re.search(r"(?m)^mcp==([0-9.]+)", text)
+            assert pin, f"{lock} 缺 mcp pin"
+            version = tuple(int(x) for x in pin.group(1).split(".")[:3])
+            for rel in self._MANIFESTS:
+                floor = self._floorTuple(self._declaredConstraintLines(rel)[0])
+                assert version >= floor, f"{lock} pin mcp=={pin.group(1)} 不满足 {rel} 声明的下界 {floor}"
 
 
 class TestProviderChatModelDepsDeclaredForRuntime:
