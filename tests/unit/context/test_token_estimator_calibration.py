@@ -21,8 +21,12 @@ JSON 按"空白分词数 × 0.25"计价，`other_char_ratio` 在该分支不参�
 """
 
 import json
+from pathlib import Path
 
 import pytest
+
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
 
 
 def _true_tokens(text: str) -> int:
@@ -199,9 +203,7 @@ class TestSingleRulerSource:
     def test_no_inline_approximation_in_context_chain(self):
         """判据链路上不允许再出现就地近似——它是第二把尺子的温床。"""
         import re
-        from pathlib import Path
 
-        root = Path(__file__).resolve().parents[3] / "neurova"
         # 只允许出现在被显式标注为"非 token 用途"的位置；此处按文件排除白名单外的全扫
         suspicious = re.compile(
             r"len\([^()]*\)\s*(?://|/)\s*4(?!\d)|len\([^()]*\)\s*\*\s*1\.5|len\([^()]*\)\s*/\s*1\.5"
@@ -210,8 +212,11 @@ class TestSingleRulerSource:
             "llm/multi_model_client.py",  # mock 流式切块步长，与 token 判据无关
         }
         offenders = []
-        for path in root.rglob("*.py"):
-            rel = path.relative_to(root).as_posix()
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
+        for path in sources:
+            rel = path.relative_to(NEUROVA).as_posix()
             if rel in allowlist:
                 continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

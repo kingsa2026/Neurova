@@ -49,6 +49,8 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = PROJECT_ROOT / "neurova"
 
 #: 生产代码里「随代码走的资产」的解析入口。资产清单的事实源是**它的调用点**，
 #: 不是本文件手抄的一张表——手抄的表会立刻过期（AGENTS.md 修复教义第 6 条）。
@@ -76,8 +78,11 @@ OPTIONAL_ASSETS = {
 
 
 def productionPythonFiles() -> list:
-    root = PROJECT_ROOT / "neurova"
-    return [p for p in root.rglob("*.py") if "__pycache__" not in p.parts]
+    paths = [p for p in NEUROVA.rglob("*.py") if "__pycache__" not in p.parts]
+    assert len(paths) > 500, (
+        f"扫描面现读 {len(paths)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄，"
+        "后面那句「镜像里的资产没有代码引用」不来自代码")
+    return paths
 
 
 def declaredRepoAssets() -> dict:
