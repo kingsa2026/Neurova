@@ -3401,3 +3401,10 @@ tests/unit/test_mcpSdkFloorMatchesImportedEra.py
 # 开关语义不许在传输层重述。变异三枚已实证各咬各格。
 # 本档是回归锁（两侧同绿设计），不描述缺陷，所以没有红→绿那一段。
 tests/unit/api/test_mcpServerFacePromisesSurviveTransport.py
+# 批 107（§6-337）：MCP 的 HTTP 入口补成请求边界后，身份必须真落到执行链。
+# 三格各有各的靶：① 工作流那条腿收到的 user_id 必须是令牌里的发送者（红时读数 None，
+# 钉的是"边界少写一次"这个根因，不是下游判空）；② 两发不同身份各读各的，钉"请求级"
+# 而不是"进程级烘一次"（跨请求泄漏那形）；③ 按 AST 认 setter 且档内不许出现 ContextVar，
+# 钉的是"不许另起第二条通道"（§6-163 甲）。红自证：摘掉端点那三行 → 恰 3 红 30 绿；
+# 活体反证：真 app 上同一处摘净后 6 项读数里红的正是身份那两项，其余四项不动。
+tests/unit/api/test_mcpServerFaceIsIdentityBoundary.py
