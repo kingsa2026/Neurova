@@ -7996,6 +7996,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_ratchetDoesNotRise`
       现读 offender 1 条 = `tests/unit/collaboration/test_collaborateIslandRetirement.py`
       （并发会话 `4cf96af6` 那笔入子集未带面自证）。本会话不认领也不顺手改别人的档。
+      **已收＝§6-345**：由该笔的作者会话自认，在同批第②刀里补上 `test_importScannerFaceIsNotNarrowed`——
+      处方取"由被裁那次扫描自己给读数"那一形（同一取数口探活模块，断它必须报 ≥2 处），不是补一句文件数阈值。
     - **证据**：红灯＝新档 4 failed/4 passed（四把锁设计成现在就绿并各写根据）；绿灯＝该档单跑 8 passed，
       与 MCP 面其余四档＋核心面同跑 61 passed；红自证＝带唯一 tag 定向 stash 掉生产档与清单 →
       恰 7 failed/29 passed，红的全是本批新格与改判格；活体＝真 `create_app` 上 14 项读数全 PASS
@@ -8011,3 +8013,39 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       治理链）／D（`mcp_manager` 三态票）；其余等裁票照旧（§6-311／§6-312 甲乙丙、D1、D9、D10、
       D11–D20、§6-293）。
     - **下一枚空号现查 §6-345**（写前必须现场重取；本笔落库时该读数为 344）。
+
+345. **批 109·第②刀（§6-312 裁乙 C4）：`FlowContext` 只剩字段袋——14 个编排方法与两个专属性位随死码退净，顺带收掉第①刀欠的那行面自证** ✅🟢 —— 一笔：`362879fa`
+    - **为什么这一刀必须单独走**：`workflow/models.py` 是那座岛唯一的**半区文件**（`ScheduledTask`／`compute_next_run`／
+      `FlowContext` 本体活在端点路上，枚举与方法群死在 orchestrator 一侧）。门面收口只解决"挂不挂在启动路径上"，
+      实现本体还赖在这里 ⇒ 教义 7 的闭环判据（该功能在仓内只剩一处实现被消费）没达成。
+      退役依据用 §6-315 那七格已经证过的行为面（唯一构造点＋handler 零读＋交付前零写），**不是 grep 零命中**。
+    - **取数与结果**：删完 `FlowContext`＝16 字段 0 方法（`ScheduledTask` 18/6、`compute_next_run` 未动）；
+      `current_phase`／`event_history` 在 collaborate 一侧的引用全部落在被删方法体内
+      （`core/flow_orchestrator.py` 那对同名者是不同物＝第③刀的对象，按符号名全仓判必误伤它）；
+      `from enum import Enum` 随枚举失效一并删净。`models.py` 338 → 183 行，**纯删除 0/−155**。
+    - **证据**：红＝三格新判据 `3 failed, 6 passed`（读数逐一点名：枚举还在／14 个方法在案／两个位还在）；
+      绿＝`tests/unit/collaboration`＋`test_refactor_imports` 同跑 **583 passed**、面自证棘轮本闸 **49 passed**；
+      红自证＝带唯一 tag 定向 stash 掉 `models.py` ⇒ 失败集恰为那 3 格；变异＝把新那格的活模块名换成不存在的模块
+      ⇒ 该格当场红（"零命中"从此分得开真干净与扫描面自坏），还原 md5 逐字节复证一致。
+    - **同批收掉第①刀欠的账**（§6-344 那条"并发会话 `4cf96af6` 入子集未带面自证"）：新格
+      `test_importScannerFaceIsNotNarrowed` 走"由被裁那次扫描自己给读数"那一形——同一个
+      `ast_scan.importersOfModule` 探一个活模块，断它必须报 ≥2 处引用（门面＋两个端点）。
+      **不补文件数阈值**：阈值只挡"根写错"，挡不住"取数口换了实现"；正控由同一把尺给出，才是那条腿能产生非零的证明。
+    - **活体连带改判一处**：`tests/manual/schedulerLiveSurfaceProbe_b87.py` 第⑨项原先读 `ctx.event_history`／
+      `ctx.current_phase`——本刀退掉的就是这两位，脚本自己成了最后一个读者（不是生产读者）。
+      改判成"交付面＝无参构造未被触碰 ＋ 那两个位确实不在对象上"，读数从 `phase=…` 换成完整字段面清单；
+      复跑 **10/10 PASS**、仓内 `data/` 指纹 `c5e1b8e589` 未动。
+    - **一次行尾形制失误（281/303 复现，写下来是因为它不报错）**：批量删块的脚本用 `read_text()` 读进来判
+      `"\r\n" in src` 恒 False（通用换日已经把 CRLF 吃掉），于是把 CRLF 文件静默写成纯 LF——
+      内容一字不差、`git diff` 也看不出，只有字节层数得出来。按 HEAD 侧实测改回 CRLF 并复证（183 行全 CRLF、零 bareLF）。
+      **How to apply**：改生产文件的脚本凡要判行尾，一律读 `read_bytes()` 再判，别拿解码后的字符串当证据。
+    - **净 LOC 去向**：生产池 **+0/−155**；测试/基建池 **+55/−2**（新判据 +52、活体脚本改判 +3/−2）。
+    - **就地划闭**：§6-344 里那条"入子集未带面自证"；§6-312 的 C4 半区（`FlowPhase`／`FlowEvent`／方法群）至此结清。
+    - **仍开**：第③刀（`neurova/core/flow_orchestrator.py` 870 行＋`tests/unit/core/test_flow_orchestrator.py` 1005 行，
+      两者同批退——档案 §6-301 已证那测试是"shim 与自己的契约测试一起入库"的自产自销）；
+      第④刀（"按能力挑 agent"并进 neurflow；生产者已核到 `neurflow/models.py:296 capabilities` 与
+      `storage.py` 的 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）；
+      osv 甲那 6 格、丁（夜间读法单点原语）、⑤（`MANIFEST_BASELINE` 转零容忍）、dev_path 那 4 处；
+      以及 §6-342 那批等裁票与 §6-339／§6-340／§6-344 那条 MCP 换面的后续（B／C／D 三格仍开）。
+    - **本会话下一枚空号现查 §6-346**（写前必须现场重取；本笔落库时该读数为 345）。
+
