@@ -53,24 +53,25 @@ inrepo = [p for p in sorted(ever - now) if (PROJECT_ROOT / p).exists()]
 
 from __future__ import annotations
 
+import sys
+
 from neurova.core.proc_text import runText
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法在 `ast_scan.protectedSubsetEntries`
+
 #: 例外台账：曾登记过、现已按依据退役的条目。行格式 `路径 | 依据`。
 LEDGER = PROJECT_ROOT / "tests" / "unit" / "ci" / "protectedSubsetRetired.txt"
 
 
 def _listedNow() -> set:
-    raw = PROTECTED.read_text(encoding="utf-8")
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    """现清单条目——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries()`（§6-234 同族收口）。"""
+    return set(ast_scan.protectedSubsetEntries())
 
 
 def _requireCompleteHistory(repo) -> None:

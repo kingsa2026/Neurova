@@ -34,8 +34,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan
-PROTECTED = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
-
 #: 取时钟的函数名（`time.perf_counter()` / `perf_counter()` / `time.time()` …）
 CLOCK_FUNCS = frozenset({"perf_counter", "monotonic", "time", "time_ns", "process_time"})
 
@@ -65,13 +63,8 @@ def _maybeContainsWallclock(text: str) -> bool:
 
 
 def protectedFiles() -> List[str]:
-    """CI 实际跑的受保护子集（唯一事实源，不另建清单）。"""
-    text = io.open(PROTECTED, encoding="utf-8").read()
-    return [
-        line.split("#", 1)[0].strip()
-        for line in text.splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    """CI 实际跑的受保护子集——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries()`（§6-234 同族收口）。"""
+    return ast_scan.protectedSubsetEntries()
 
 
 def test_listFaceIsNotEmptyAndResolvable():
