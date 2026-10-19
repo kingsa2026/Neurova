@@ -247,13 +247,35 @@ def parse_helm() -> Dict[str, Any]:
     }
 
 
-# 后端直读面（os.environ / config.get）
-BACKEND_ENV_READ = re.compile(
-    r"(?:os\.environ\.get|os\.getenv|getenv|config\.get|config\.get_int"
-    r"|config\.get_bool|config\.get_list)\(\s*[\"']([A-Z][A-Z0-9_]+)[\"']"
-)
+# 后端直读面（os.environ / config.get）。键名有两种写法：调用处直接写字符串字面量，
+# 或收成模块级常量再传进去（`ORIGINS_ENV_KEY = "NEUROVA_CORS_ORIGINS"` → `config.get(ORIGINS_ENV_KEY)`）。
+# 只认前一种会把**真被读取**的声明报成 R5-env 死配置——报的方向正好相反。
+_ENV_READ_CALL = (r"(?:os\.environ\.get|os\.getenv|getenv|config\.get|config\.get_int"
+                  r"|config\.get_bool|config\.get_list)\(")
+BACKEND_ENV_READ = re.compile(_ENV_READ_CALL + r"\s*[\"']([A-Z][A-Z0-9_]+)[\"']")
+BACKEND_ENV_ALIAS_READ = re.compile(_ENV_READ_CALL + r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]")
+ENV_KEY_ALIAS_DEF = re.compile(
+    r"^([A-Z][A-Z0-9_]+)\s*=\s*[\"']([A-Z][A-Z0-9_]+)[\"']\s*(?:#.*)?$", re.M)
 # 前端编译期注入面（Vite：import.meta.env.VITE_*）
 FRONTEND_ENV_READ = re.compile(r"import\.meta\.env\.([A-Z][A-Z0-9_]+)")
+
+
+def collectEnvKeys(texts: Iterable[str]) -> set:
+    """由后端源码文本集合算「真被读取的环境变量名」，两种键名写法都认。
+
+    别名只在**同一份取数面里查得到声明**时才放行，且声明值必须是环境变量名形态。
+    把调用处的变量名本身收进集合＝读取面无界扩张，R5-env 就从"报死配置"退化成"什么都不报"。
+    """
+    aliases: Dict[str, set] = {}
+    for text in texts:
+        for name, literal in ENV_KEY_ALIAS_DEF.findall(text):
+            aliases.setdefault(name, set()).add(literal)
+    keys = set()
+    for text in texts:
+        keys.update(BACKEND_ENV_READ.findall(text))
+        for name in BACKEND_ENV_ALIAS_READ.findall(text):
+            keys.update(aliases.get(name, ()))
+    return keys
 
 
 def parse_app_read_env_keys() -> set:
@@ -262,17 +284,18 @@ def parse_app_read_env_keys() -> set:
     只扫 neurova/ 会误报 VITE_*（它们由 NeurUI 在构建/开发服务器上读取），
     故前端源码一并纳入读取面。
     """
-    keys = set()
+    backendTexts = []
     for path in PROJECT_ROOT.joinpath("neurova").rglob("*.py"):
-        keys.update(BACKEND_ENV_READ.findall(path.read_text(encoding="utf-8", errors="ignore")))
+        backendTexts.append(path.read_text(encoding="utf-8", errors="ignore"))
     # 仓库根启动脚本（start_server.py 是生产容器入口，读 NEUROVA_LOG_LEVEL /
     # NEUROVA_HOST / NEUROVA_PORT）与 scripts/ 一并纳入扫描面
     for name in ("start_server.py", "start.py", "cli.py", "install.py"):
         target = PROJECT_ROOT / name
         if target.exists():
-            keys.update(BACKEND_ENV_READ.findall(target.read_text(encoding="utf-8", errors="ignore")))
+            backendTexts.append(target.read_text(encoding="utf-8", errors="ignore"))
     for path in PROJECT_ROOT.joinpath("scripts").rglob("*.py"):
-        keys.update(BACKEND_ENV_READ.findall(path.read_text(encoding="utf-8", errors="ignore")))
+        backendTexts.append(path.read_text(encoding="utf-8", errors="ignore"))
+    keys = collectEnvKeys(backendTexts)
     for suffix in ("*.ts", "*.js", "*.vue", "*.mjs"):
         for path in PROJECT_ROOT.joinpath("NeurUI", "src").rglob(suffix):
             keys.update(FRONTEND_ENV_READ.findall(path.read_text(encoding="utf-8", errors="ignore")))
