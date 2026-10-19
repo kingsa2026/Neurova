@@ -56,7 +56,7 @@ CAPTURE_FUNCS = ("run", "check_output", "check_call", "call", "Popen",
 #: 扫描根。刻意含 `tests/`：判据自己的空转就发生在测试侧。
 SCAN_ROOTS = ("neurova", "scripts", "tests")
 
-#: 冻结基线（**表内现量为准**：34 文件 / 48 站点，逐档单跑现复算）。只准降不准升。
+#: 冻结基线（**表内现量为准**：31 文件 / 43 站点，逐档单跑现复算）。只准降不准升。
 #: 建档那轮（批 51）写的是"37 文件 / 59 站点"——那是一批时间性快照，此后各批收掉的落点
 #: 都按本表逐格摘除（批 54 摘的是 `test_temperature_single_source.py` 那一处，它改走
 #: `ast_scan` 单点后不再自己起文本模式子进程），注释留着旧数就等于留一条没人对的账。
@@ -67,6 +67,13 @@ SCAN_ROOTS = ("neurova", "scripts", "tests")
 #: 用父进程默认 codec 解嵌套 pytest 写的 UTF-8 字节，子进程 stderr 里只要有一个解不出来的字节，
 #: reader 线程整条崩掉、`stdout` 回来是 `None`，本格于是报 `TypeError: can only concatenate str`
 #: ——看着像判据自己坏了，其实是这一处没钉 encoding 把缺陷形状换成了另一种谎。
+#: 批 101 摘的是两档共 4 处（`tests/unit/agent/test_tool_experience_loop_offline_probe.py` 3 处
+#: ＋ `tests/unit/test_session_landing_guard.py` 1 处）。两处都改成"两头钉"：出口自己写
+#: `PYTHONIOENCODING="utf-8"`，调用处再写 `encoding="utf-8", errors="replace"`。
+#: 触发点是现跑撞到的：父进程带 `PYTHONIOENCODING=utf-8` 起跑测时，这 4 处让 reader 线程按
+#: cp936 解子进程的 UTF-8 ⇒ 线程崩、`proc.stdout` 变 None ⇒ 6 格报 `TypeError: can only concatenate str`
+#: ——看着像判据自己坏了，其实是修法文案里"并让子进程写侧也钉成 UTF-8"那半没做。
+#: 钉齐后同一 env 下 8 格全绿，故这条红**不是**环境噪声，也不是"常驻红"，别再往那一栏里记。
 BASELINE: dict[str, int] = {
     "scripts/ci/npc_branch_cleanup.py": 3,
     "scripts/ci/osv_audit.py": 1,
@@ -83,7 +90,6 @@ BASELINE: dict[str, int] = {
     "tests/manual/context_persistence_baseline_90.py": 2,
     "tests/manual/context_persistence_restart_90.py": 1,
     "tests/manual/image_runtime_selfproof_330.py": 1,
-    "tests/unit/agent/test_tool_experience_loop_offline_probe.py": 3,
     "tests/unit/ci/test_issue197_judgement_registration.py": 1,
     "tests/unit/ci/test_npc_auto_continue_wiring.py": 2,
     "tests/unit/ci/test_npc_handoff_role_continuity.py": 2,
@@ -97,7 +103,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/test_adminBootstrapLanding.py": 2,
     "tests/unit/test_api_inventory_freshness_guard.py": 1,
     "tests/unit/test_pip_audit_gate.py": 1,
-    "tests/unit/test_session_landing_guard.py": 1,
     "tests/unit/test_start_script.py": 2,
     "tests/unit/tools/test_git_tool.py": 1,
     "tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py": 1,
