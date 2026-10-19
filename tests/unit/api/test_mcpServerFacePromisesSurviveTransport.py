@@ -143,12 +143,7 @@ class TestFaceDelegatesToCore:
         assert body["result"]["isError"] is False, body["result"]
 
     def testUnknownToolErrorEnvelopeSurvives(self, face):
-        """不认识的名字 → 核心那份「未知 MCP 工具」必须走 MCP 错误信封。
-
-        刻意不用 `workflow:*` 测：那条走 `execute_workflow_as_tool`，工作流不存在时
-        返回 `success=False` 的业务体而**不是** MCP isError——这是现存的语义分叉，
-        登记台账等裁，本档不把它锁成正确行为。
-        """
+        """不认识的名字 → 核心那份「未知 MCP 工具」必须走 MCP 错误信封。"""
         client, _server = face
         body = client.post(
             ENDPOINT, json=_rpc("tools/call", {"name": "totally-unknown-tool", "arguments": {}})
@@ -156,6 +151,25 @@ class TestFaceDelegatesToCore:
         result = body["result"]
         assert result["isError"] is True, "未知工具被换成协议级异常：MCP 语义要求错误走响应体"
         assert "totally-unknown-tool" in result["content"][0]["text"]
+
+    def testWorkflowFailureReachesClientAsTheSameEnvelope(self, face):
+        """§6-334 的 B 票裁甲在**运输侧**的落点：工作流那条腿的失败也必须是 isError。
+
+        这一格原先是**故意空着**的——本档那时写道"workflow:* 不存在走 `success=False`
+        业务体而不是 isError，这是现存语义分叉，登记等裁，不锁成正确行为"。裁定已下
+        （统一成 isError），所以分叉的两条腿现在都要出声：不补这一格，核心侧改对了
+        而 HTTP 面仍回旧形状也不会有人知道。
+        """
+        client, _server = face
+        body = client.post(
+            ENDPOINT,
+            json=_rpc("tools/call", {"name": "workflow:没有这条流", "arguments": {}}),
+        ).json()
+        result = body["result"]
+        assert result["isError"] is True, (
+            f"运输侧又给出了第二种失败信封：{result}"
+        )
+        assert "没有这条流" in result["content"][0]["text"], result
 
     def testCuaSwitchRefusalComesFromCore(self, face, monkeypatch):
         """导出开关的拒绝文案必须由核心给（`NEUROVA_CUA_MCP_EXPORT`），端点不重述。"""

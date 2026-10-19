@@ -13,6 +13,7 @@ server 核心与传输分离
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
@@ -23,6 +24,33 @@ _SKILL_PREFIX = "skill:"
 
 _CUA_EXPORT_ENV = "NEUROVA_CUA_MCP_EXPORT"
 _RUN_COMPUTER_TASK = "run_computer_task"
+
+#: 失败文案的取值顺序：`error` 是三条腿共同的拒因位，后三个是"没写成 error 但体里有话"
+#: 的兜底（技能 output / 工具 result / agent 回合 reply）——统一信封不许顺手把内容丢掉。
+_FAILURE_TEXT_KEYS = ("error", "output", "result", "reply")
+
+
+def _mcpEnvelope(raw: Any) -> Dict[str, Any]:
+    """把任意一条腿的返回值收成**一种**失败形状（§6-334 的 B 票裁甲）。
+
+    判"失败"只看两条：显式 `success=False`，或**根本没有 success 键却带 error**
+    （技能咽喉的拒绝体与安全钩子拦截之外的裸错误体都属这一形）。
+    成功侧逐字段原样透传——工具面"与内部执行结果等价、不加工"那条承诺由这一句守着，
+    B 票不许把它顺带削掉。
+    """
+    if not isinstance(raw, dict):
+        return {"success": True, "result": raw}
+    if raw.get("isError"):
+        return raw
+    failed = raw.get("success") is False or ("success" not in raw and raw.get("error"))
+    if not failed:
+        return raw
+    for key in _FAILURE_TEXT_KEYS:
+        value = raw.get(key)
+        if value:
+            text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+            return {"isError": True, "error": text}
+    return {"isError": True, "error": "工具执行失败"}
 
 
 class NeurovaMCPServer:
@@ -142,35 +170,43 @@ class NeurovaMCPServer:
     # ── tools/call ────────────────────────────────────────────
 
     async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """按命名空间分派调用（MCP 错误信封：isError=true 不抛异常）"""
+        """按命名空间分派调用，**出口只归一次形**（`_mcpEnvelope`）。
+
+        分派与信封解耦是这一格的根修处：三条腿各有各的失败写法（工作流回
+        `success=False` 业务体、技能咽喉回只带 `error` 的拒绝体、CUA 工具面回执行器
+        原始 dict），若在每条腿里各转一次，第四条腿加进来时必然漏转——那正是
+        §6-334 的 B 票登记的"同一失败两种信封"的成因。
+        """
         arguments = arguments or {}
         try:
-            if name.startswith("workflow:"):
-                from neurova.collaboration.neurflow.workflow_as_tool import execute_workflow_as_tool
-
-                wf_id = name[len("workflow:"):]
-                outcome = await execute_workflow_as_tool(
-                    wf_id, arguments,
-                    storage=self._storage,
-                    user_id=self._current_user_id(),
-                )
-                return outcome
-
-            if name.startswith(_SKILL_PREFIX):
-                skill_name = name[len(_SKILL_PREFIX):]
-                return await self._call_skill(skill_name, arguments)
-
-            if name.startswith("computer_") or name == _RUN_COMPUTER_TASK:
-                return await self._call_computer(name, arguments)
-
-            # 无前缀：按注册表技能名归一尝试（宽容匹配存量调用习惯）
-            if self._skill_registry is not None and name in (getattr(self._skill_registry, "_skills", {}) or {}):
-                return await self._call_skill(name, arguments)
-
-            return {"isError": True, "error": f"未知 MCP 工具: {name}"}
+            return _mcpEnvelope(await self._dispatch(name, arguments))
         except Exception as e:  # noqa: BLE001 — MCP 语义：错误也是响应
             logger.warning("MCP call_tool %s 失败: %s", name, e)
             return {"isError": True, "error": str(e)}
+
+    async def _dispatch(self, name: str, arguments: Dict[str, Any]) -> Any:
+        """命名空间分派——只管"交给谁执行"，不管"回什么形状"。"""
+        if name.startswith("workflow:"):
+            from neurova.collaboration.neurflow.workflow_as_tool import execute_workflow_as_tool
+
+            wf_id = name[len("workflow:"):]
+            return await execute_workflow_as_tool(
+                wf_id, arguments,
+                storage=self._storage,
+                user_id=self._current_user_id(),
+            )
+
+        if name.startswith(_SKILL_PREFIX):
+            return await self._call_skill(name[len(_SKILL_PREFIX):], arguments)
+
+        if name.startswith("computer_") or name == _RUN_COMPUTER_TASK:
+            return await self._call_computer(name, arguments)
+
+        # 无前缀：按注册表技能名归一尝试（宽容匹配存量调用习惯）
+        if self._skill_registry is not None and name in (getattr(self._skill_registry, "_skills", {}) or {}):
+            return await self._call_skill(name, arguments)
+
+        return {"isError": True, "error": f"未知 MCP 工具: {name}"}
 
     async def _call_computer(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """默认关时按名调用也拒（导出面与清单同源开关）
@@ -230,13 +266,11 @@ class NeurovaMCPServer:
         from neurova.tool_executor import ToolExecutor
 
         outcome = await ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments or {}), None)
-        if "success" not in outcome:
-            # 咽喉的拒绝形态（查无此技能／不在本轮可见集／注册表未初始化）与异常形态
-            # 都不带 success——一律按 MCP 语义错误信封回，不重述文案。
-            return {"isError": True, "error": str(outcome.get("error", "技能调用被拒"))}
-        if outcome["success"]:
+        # 成功侧只做一件事：把咽喉的 `output` 归到 MCP 的 `result` 位。
+        # 失败侧一律原样交给 `call_tool` 出口那一次归形——这里不再攒第二种判断。
+        if outcome.get("success") is True:
             return {"success": True, "result": outcome.get("output")}
-        return {"success": False, "error": outcome.get("error") or "技能执行失败"}
+        return outcome
 
     @staticmethod
     def _current_user_id() -> Optional[str]:

@@ -13,6 +13,9 @@ Neurova 平台自身可作为 MCP server 对外暴露能力面：
   漏斗记账都在那道上）——无 agent 时 fail-closed，不回退成直调 skill.execute
 - 未知工具 → MCP 语义错误信封（不崩）；技能工具名不带前缀的注册面
   归一为 skill:{name}
+- **失败只有一种形状**（§6-334 的 B 票裁甲）：三条腿的业务失败（工作流不存在/
+  必填校验拦下、技能跑砸、治理拦截、agent 回合失败）一律收成 isError 信封；
+  成功侧逐字段透传，不加工
 """
 
 import asyncio
@@ -187,7 +190,89 @@ class TestCallTool:
 
     @pytest.mark.asyncio
     async def test_workflow_required_validation_still_applies(self, server):
-        """MCP 面不绕过 DAG 输入校验（必填缺失拒执行）"""
+        """MCP 面不绕过 DAG 输入校验（必填缺失拒执行）——且拒的形式只有一种。
+
+        §6-334 的 B 票裁甲：这一格原断 `out["success"] is False`，与同档那条
+        「未知工具 → isError」并存在同一张面上，等于对外部客户端承认两种失败信封。
+        现在校验照旧要拦（`"q" in error` 这条**没有放宽**），信封统一成 isError。
+        """
         out = await server.call_tool("workflow:wf_call", {})
-        assert out["success"] is False
+        assert out.get("isError") is True, out
         assert "q" in (out.get("error") or "")
+
+    @pytest.mark.asyncio
+    async def test_workflowMissingUsesTheSameEnvelopeAsUnknownTool(self, server):
+        """工作流不存在与未知工具名，客户端读到的必须是同一种形状。"""
+        unknown = await server.call_tool("tool:nope", {})
+        missing = await server.call_tool("workflow:没有这条流", {})
+        assert unknown.get("isError") is True and missing.get("isError") is True, (unknown, missing)
+        assert "没有这条流" in missing["error"], missing
+
+    @pytest.mark.asyncio
+    async def test_skillBusinessFailureAlsoUsesTheSameEnvelope(self, server, monkeypatch):
+        """咽喉回 `success=False`（技能自己跑砸）也必须收成 isError，而不是留第二种体。"""
+        async def _fail(self_, skill_name, params, context=None):
+            return {"success": False, "output": None, "error": "技能内部失败"}
+
+        monkeypatch.setattr(
+            "neurova.tool_executor.ToolExecutor.execute_skill_tool", _fail
+        )
+        out = await server.call_tool("skill:oracle", {})
+        assert out.get("isError") is True, out
+        assert "技能内部失败" in out["error"], out
+
+
+@pytest.mark.asyncio
+class TestOneFailureEnvelopeAcrossThreeLegs:
+    """三条腿（工作流／技能／CUA）的失败必须同形；成功侧一律不加工。
+
+    这三格审的是 B 票裁的那句话本身——**同类错误只允许一种形状**。控制格
+    （成功透传）与另外两格同样重要：把成功也裹进错误信封就是自伤。
+    """
+
+    def _server(self, monkeypatch, executorResult, chatReply=None):
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+        from neurova.tool_executor import ToolExecutor
+
+        monkeypatch.setenv("NEUROVA_CUA_MCP_EXPORT", "1")
+
+        async def _fakeExec(self, tool_name, params, skip_governance=False):
+            return dict(executorResult)
+
+        class _Agent:
+            def __init__(self):
+                self.calls = []
+
+            async def chat(self, user_input, **kw):
+                self.calls.append(user_input)
+                return chatReply if chatReply is not None else {"success": True, "reply": "ok"}
+
+        monkeypatch.setattr(ToolExecutor, "_execute_single_tool", _fakeExec)
+        return NeurovaMCPServer(agent_ref=_Agent()), _fakeExec
+
+    async def testGovernanceRefusalIsNotASpecialShape(self, monkeypatch):
+        """安全钩子拦截＝业务失败，走同一个 isError 信封（此前它是 `success=False` 的第三种体）。"""
+        server, _ = self._server(
+            monkeypatch,
+            {"success": False, "error": "操作被安全钩子拦截: 写动词 HIGH", "hook_blocked": True},
+        )
+        out = await server.call_tool("computer_shell", {"cmd": "rm -rf /"})
+        assert out.get("isError") is True, out
+        assert "安全钩子拦截" in out["error"], out
+
+    async def testFailedAgentTurnCarriesItsOwnTextIntoTheEnvelope(self, monkeypatch):
+        """agent 面那一轮跑砸时，拒绝文案不许被丢掉，也不许留成 `{"success": false, "result": …}`。"""
+        server, _ = self._server(
+            monkeypatch, {"success": True}, chatReply={"success": False, "reply": "桌面回合失败"}
+        )
+        out = await server.call_tool("run_computer_task", {"goal": "打开记事本"})
+        assert out.get("isError") is True, out
+        assert "桌面回合失败" in out["error"], out
+
+    async def testSuccessIsPassedThroughUnchanged(self, monkeypatch):
+        """控制格：成功侧逐字段透传（工具面那条"不加工"的承诺不能被 B 顺带削掉）。"""
+        sentinel = {"success": True, "screen": {"width": 1920}, "action_result": {"effect": "confirmed"}}
+        server, _ = self._server(monkeypatch, sentinel)
+        out = await server.call_tool("computer_screenshot", {"region": "x"})
+        assert out == sentinel, out
+        assert "isError" not in out, out
