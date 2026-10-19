@@ -18,6 +18,7 @@
 | `api/endpoints/mobile_pairing.py` | WS 接入层解出后按参数交给处理器（§6-154） | 同一个变量进 `turnMetadata` |
 | `tool_executor.py` | `self._agent_identity()[0]` —— 门面读数转写过来 | 它不写载体，它读通道 |
 | `tool_layers/mcp_server.py` | `get_request_user_id()` —— 同一条通道自读自写 | 不涉及 |
+| `api/endpoints/mcp_server_api.py` | 登录用户 `current_user['user_id']`（§6-334 裁定甲：这一面此前有 401 闸却不写通道，下游 `_current_user_id()` 恒空） | 该入口不产生 metadata 载体，身份由 `mcp_server.py` 从同一通道读回透传 |
 | `channels/channel_router.py` | `resolveTurnIdentity()` 产出的**发送者**（§6-163：不再写 agent 属主） | 同一个出口产出，另带显式 `session_owner_id` |
 | `api/endpoints/computer.py` | `get_current_user()['user_id'] or 'default'`（profile 池化） | 该入口不跑对话轮 |
 
@@ -68,7 +69,10 @@ TURN_WRITER = "set_request_identity"
 #: 原名 `boundaryFeedsTurn`（§6-121 (b) 乙案）里的"喂轮身份"那半在 §6-163 之后不再成立——
 #: 管线只把 user_input/session_id 交给门面，身份不再经管线二次写入；名字跟着实状换，
 #: 免得留一个说旧话的 kind 让下一个人以为还有第二条通道。
-#: `notATurnEntry`：该入口不跑对话回合，只在边界为浏览器 profile 池设人。
+#: `notATurnEntry`：该入口自己不调 `agent.chat(...)`（是不是「跑回合的入口」由 ⑤ 的
+#: 形状探测器判，不由这里手写），只在边界为下游那条链设人——`computer.py` 为浏览器
+#: profile 池，`mcp_server_api.py` 为 MCP 触发的执行链（工作流属主 / CUA 透传）。
+#: 两种落点共用一格的根据：它们对载体的承诺同形（不写载体），检查也就同形（③ 那条）。
 KINDS = ("boundaryFeedsMetadata", "derivedFromFacadeRead",
          "sameChannelPassThrough", "notATurnEntry")
 
@@ -112,6 +116,14 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
         "carrierSource": "不涉及载体",
         "readsVia": "_current_user_id",
         "readsViaResolvesTo": "get_request_user_id",
+    },
+    "neurova/api/endpoints/mcp_server_api.py": {
+        "kind": "notATurnEntry",
+        "requestSource": "current_user['user_id']（JWT/服务令牌解出的**发送者**，与 `/v1/chat` "
+                         "同口径）——§6-334 裁定甲：这一面此前带 401 闸却不写通道，"
+                         "于是 `NeurovaMCPServer._current_user_id()` 恒空",
+        "carrierSource": "不产生 metadata 载体；身份由 `tool_layers/mcp_server.py` 从同一条"
+                         "通道读回后交给执行链（工作流属主 / CUA 透传）",
     },
     "neurova/channels/channel_router.py": {
         "kind": "boundaryFeedsMetadata",
