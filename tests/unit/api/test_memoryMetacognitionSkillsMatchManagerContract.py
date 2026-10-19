@@ -93,7 +93,11 @@ def test_noEndpointPassesArgumentsTheManagerRefuses():
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
     offenders = []
-    for ref in ast_scan.sourceRefsUnder(MEMORY_ENDPOINT_DIR, ".py"):
+    refs = list(ast_scan.sourceRefsUnder(MEMORY_ENDPOINT_DIR, ".py"))
+    assert len(refs) > 8, (
+        f"扫描面现读 {len(refs)} 档（根＝{MEMORY_ENDPOINT_DIR}，本判据的域＝记忆面端点包）——"
+        "根被改窄时「没有端点传错参数」只是没在看代码")
+    for ref in refs:
         tree = ast_scan.transientTree(ref.path)
         for fn in (n for n in tree.body
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):

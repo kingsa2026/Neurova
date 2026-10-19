@@ -181,7 +181,11 @@ def testMemoryPackageUsesOnlyDeclaredGates():
     offenders = []
     # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
     # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
-    for path, tree in ast_scan.parsedModules(MEMORY_PKG, ".py"):
+    modules = list(ast_scan.parsedModules(MEMORY_PKG, ".py"))
+    # 扫描根＝记忆面那个包，本判据的域就到它为止；这条下限让「根被改窄」露形而不是露出「零 offender」。
+    assert len(modules) > 8, (
+        f"扫描面现读 {len(modules)} 档（根＝{MEMORY_PKG}）——量级不对＝这条判据根本没在看记忆面端点")
+    for path, tree in modules:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue

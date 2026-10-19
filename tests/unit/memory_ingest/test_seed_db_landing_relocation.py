@@ -30,6 +30,8 @@ from neurova.memory.scripts import seed_db_landing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_ROOT = PROJECT_ROOT / "neurova" / "memory" / "scripts"
+#: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = PROJECT_ROOT / "neurova"
 
 SEED_SCRIPTS = (
     "init_db",
@@ -81,7 +83,11 @@ class TestSeedScriptsShareOneLanding:
     def test_legacyAnchorIsDeclaredOnce(self):
         """全仓只准一处声明旧锚点（AGENTS.md 第 6 条）。"""
         offenders = []
-        for path in (PROJECT_ROOT / "neurova").rglob("*.py"):
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+            "根被改窄时「旧锚点只有一处」只是没在看代码")
+        for path in sources:
             if path == Path(seed_db_landing.__file__):
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")

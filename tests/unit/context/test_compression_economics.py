@@ -30,6 +30,8 @@ from neurova.context.compression_economics import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+#: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = REPO_ROOT / "neurova"
 
 
 def _verdict(**overrides):
@@ -341,9 +343,13 @@ class TestWiringAndStaticGuards:
 
     def testSingleSourceForCostAcrossTickets(self):
         """静态守卫：全仓"一次动作代价"的定义处有且仅有一处。"""
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+            "根被改窄时「定义只有一处」只是没在看代码")
         hits = [
             p
-            for p in (REPO_ROOT / "neurova").rglob("*.py")
+            for p in sources
             if re.search(r"^def evaluateCompressionEconomics", p.read_text(encoding="utf-8"), re.M)
         ]
         assert [p.name for p in hits] == ["compression_economics.py"], hits
@@ -513,7 +519,7 @@ class TestBothEntryPointsShareOneGate:
         from tests import ast_scan
 
         offenders = []
-        for path, node in ast_scan.callNodes(REPO_ROOT / "neurova", "_compress_context"):
+        for path, node in ast_scan.callNodes(NEUROVA, "_compress_context"):
             receiver = ast.unparse(node.func.value)
             if receiver == "self" and path.name != "injector.py":
                 continue  # 同名不同类：不属本契约

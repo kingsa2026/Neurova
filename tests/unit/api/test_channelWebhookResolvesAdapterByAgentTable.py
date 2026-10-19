@@ -41,6 +41,9 @@ from tests import ast_scan
 from fastapi.testclient import TestClient
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
+#: 扫描根单点，且必须是**模块级**：收进函数内的局部名，面自证棘轮的取数口会把这处落点
+#: 解成动态值，于是那档静默掉出它的面——补了自证也是假的。
+NEUROVA = REPO / "neurova"
 
 from neurova.api.app import create_app  # noqa: E402
 from neurova.channels.base import ChannelConfig  # noqa: E402
@@ -113,11 +116,14 @@ def _neurovaTrees() -> list:
     成本与代码总量脱钩（本文件只扫一遍，不存在第二次命中）。
     """
     out = []
-    for path in ast_scan.filesUnder(REPO / "neurova"):
+    for path in ast_scan.filesUnder(NEUROVA):
         try:
             out.append((ast_scan.relativeToRepo(path), ast_scan.transientTree(path)))
         except SyntaxError:
             continue
+    assert len(out) > 500, (
+        f"扫描面现读 {len(out)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+        "根被改窄时这份「只有 default」的读数根本不来自代码")
     return out
 
 
