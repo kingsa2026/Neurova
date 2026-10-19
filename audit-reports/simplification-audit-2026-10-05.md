@@ -7166,8 +7166,57 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `gaps` 仍 0（没有一档的静态根解到仓外或指不到目录）——下一批要动的就是那 15 档，别再拿估数当起点；
       「根写错」那一类仍 0；子集未动、现值 **640**；落库后复取 LOC 门禁＋本闸 `25 passed`。
       净 LOC：生产池 **+0/−0**；测试/基建池 **+40/−11**（8 档 +40/−3、棘轮摘表 0/−8）。
-    - **就地划闭**：§6-325"仍开"里"余 27 档"→ 现值 19。**仍开**：余 19 档（身份通道两档、语音接线三档、
-      退役类三档、词表/枚举类数档，多数属"域＝生产码"这一流，逐档明写即可，无需扩面）；
+    - **就地划闭**：§6-325"仍开"里"余 27 档"→ 现值 19。**仍开**：余 19 档（**已由 §6-327 收口，现值 0、基线表转空**）、
       R5-env 那条待裁修法；§6-323 的自盲区（按子集清单逐行 `read_text` 的档没有根参数可解）；
+      §6-327 新登记的一格（扫描根写成**函数内局部名**＝静默掉出本闸的面，命中面已量＝12 档）；
       §6-318 边界①②；§6-317「同池名两读数即红」；以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **本会话下一枚空号现查 §6-327**（写前必须现场重取；本笔落库时该读数为 326）。
+
+327. **批 98 · 面自证存量第四波收干净（offender 19→0、基线表转空、本闸转零容忍）；本批自犯的"函数内局部根名"另立一格，命中面已量＝12 档** ✅🟢 —— 一笔：`cc8009d1`
+    - **这一波的形状与前三波不同**：19 档的扫描根**本来就是仓内真实目录**（`neurova/` 15、`neurova/api/endpoints/memory` 2、
+      `neurova`＋`tests` 混合 2，`gaps` 0），既不必扩面也不必修根，缺的只是把"这次扫到多少"当断言比那一条。
+      两条码按"读数是否与裁决同源"分：**被裁那次扫描自己物化全量**（`parsedModules`／不带预筛的 `sourceRefsUnder`／
+      私有 `rglob` 全文扫）⇒ 直接取它的返回值长度，面与判据同源、不额外付一趟枚举；**扫描带文本预筛**（命中数不随根的大小变，
+      证不了面）⇒ 另走一次共享枚举入口量根。
+    - **面读数该落在哪一格（本批被门禁当场抓到）**：把 `filesUnder` 塞进被消费的 helper 是错的落点——`declIndex()` 那一次
+      实测让 `TestNoUnprefilteredRepoWideScan` 报出两个落点（`test_theDetectorsAreNotVacuous`／`identityWrites`），因为该 helper
+      的**调用闭包**里同时具备了「枚举＋私有解析」。门禁这里的判断是对的：面读数不该让判据多付一趟解析。
+      合规落点＝**独立一格**只调枚举，或量"被裁那次扫描"自己的返回值。§6-324 立的"预筛则另走共享枚举"这条形制从此带上了落点规则。
+    - **自犯并当批改掉的一处（比收存量更要紧，因为它让"绿"变成假事实源）**：为消掉"报错里的根是把被检表达式再抄一遍"，
+      我把根收进函数内局部名 `faceRoot` —— 于是本闸的取数口 `_constTable`（只认**模块级**绑定）把这 6 档的落点解成
+      `dynamic`，它们**静默掉出本闸的面**，而 offender 读数仍是 0、`BASELINE` 摘空后两格全绿。
+      发现路径＝变异 M3 打空（改完 `faceRoot` 之后把面断言退化成恒真形状，棘轮不红）。
+      改法＝根提升成模块级常量（`NEUROVA`／`TESTS`／`PRODUCTION`），并把**同档内多处根写法一并收成同一个名字**
+      （`test_compression_economics` 的 `callNodes` 那条、`test_ci_thin_env_guards` 的 `sourceRefsUnder` 那条、
+      `test_dead_cache_module_removed` 的 `importersOfModule(tests)` 那条）——报错、扫描、面读数三者向同一个名字要根。
+      收完复算：M1 的读数从"说老根"变成"说新根"（`根＝…\neurova\api`）；面上档在中间态＝76−6＝**70**
+      （掉出的正是这 6 档，逐档现扫的落点态记在 `facecheck` 那轮），根提到模块级后回到 **76**。
+    - **红→绿原文**：红＝`1 failed, 17 passed`（`FAILED …::test_ratchetRecordsImprovementLoudly`，报错正文逐条列出 19 个档名）；
+      摘表后绿＝棘轮 `18 passed`、19 档自身 `211 passed`、21 条选择集 `297 passed in 68.97s`。
+      红自证（唯一 tag `b98-redselfproof-19files`，只 stash 那 19 档、留棘轮的空基线表复跑同一选择集）＝
+      `1 failed, 17 passed`，失败集恰为 `test_ratchetDoesNotRise` 且报错里 offender 名单 **19 条**——
+      基线表转空之后这 19 档的坏形态被当场点名，不再被旧表兜住。
+    - **四枚变异（逐枚 md5 与 CRLF 计数复证还原）**：M1 改窄模块级根 ⇒ `1 failed, 10 passed`，
+      读数 `扫描面现读 136 档（根＝…\neurova\api…）`；M2 只改窄面读数那条枚举 ⇒ `1 failed, 9 passed`，FAILED 落在独立格
+      `test_productionSurfaceIsNotEmpty`（`现读 75 档`）；M3 把面断言退化成恒真形状 ⇒ `1 failed, 17 passed`，
+      FAILED＝`test_ratchetDoesNotRise` 且该档"面自证在场=False"（形状红而非行为红）；
+      **M4 把模块级根降级成函数内局部名 ⇒ `18 passed`（预期不红）＋落点态 `['dynamic']`**——这条不红是**票面证据**，不是通过。
+    - **覆盖面（同一把尺分别量 HEAD 与工作树，不另起一把）**：面上档 **76 → 76**（没有一档因这次改动掉出面——
+      这正是 `faceRoot` 那格修好的证明）、带面自证 **57 → 76**、offender **19 → 0**。
+      A/B（定向 stash 建 HEAD 基线，同一选择集 21 条路径含 `tests/unit/ci` 整目录）＝
+      基线 `6 failed, 672 passed` ↔ 本批 `6 failed, 677 passed`，失败集**两向差皆空**；+5 passed＝本批新增的 5 个独立格；
+      两侧同红那 6 条都是登记过的常驻红（5 条 npc 解释器可达性、1 条时钟量子门），不在受保护子集，不冒领也不认领；
+      耗时 121.11s ↔ 121.98s（**+0.87s**）。子集未动、现值 **640**（本批无新档，新增的都是既有档里的格子）。
+      净 LOC：生产池 **+0/−0**；测试/基建池 **+169/−47＝净 +122**（棘轮那 −22 是摘空的 19 行基线表）。
+    - **新登记（下一批动它，命中面已现扫）**：本闸认不出"**根写成函数内局部名**"这一形——`_constTable` 只收模块级
+      `NAME = <expr>`，函数体内的静态路径绑定一律降级成动态值，而那档就此**不再被要求**面自证。
+      命中面按"把根表扩到任意作用域后新进入本闸面的档"现取＝**12 档，且 12 档全部没有面自证**：
+      `test_tool_experience_loop_offline_probe`／`test_experience_outcome_word_domain`／`test_reasoning_trace_persist_gate`／
+      `test_injectorLifecycleHooksNeverRan`／`test_token_estimator_calibration`／`test_image_model_assets`／
+      `test_rsi_proposal_activation`／`test_rsi_rollback_evidence`／`test_skill_gate_and_unified_identity_p0p1`／
+      `test_governance_flag_resolver`／`test_skillSymbolSingleCarrier`／`test_session_landing_guard`。
+      **推荐**：不要把 `_constTable` 扩到任意作用域（那要再为条件重赋值、循环变量、形参默认值补规则，"面"的定义会跟着含糊），
+      而是加**第五态**并并入不留存量豁免那一格——落点根是个**本文件内静态绑定过路径**的裸名却不在模块级表里 ⇒ 点名，
+      修法写明"把根提到模块级"（与本批那 8 档的处置同形）。代价现说：这会把存量从 0 重新开到约 12（外加摘表纪律再走一遍），
+      且必须配一格合成正检（局部名根 ⇒ 红），否则新态做成恒不命中那一档（§6-297 那族的教训）。
+    - **本会话下一枚空号现查 §6-328**（写前必须现场重取；本笔落库时该读数为 327）。
