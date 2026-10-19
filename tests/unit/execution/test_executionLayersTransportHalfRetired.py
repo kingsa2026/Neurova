@@ -6,7 +6,8 @@
   `sandbox/exec_sandbox.py:421`、`skill_system/core.py:705/743`、`tool_executor.py:5692`）；
 - **传输那半从未接线**：`TransportType`／`ExecutionTransport`／`HTTPTransport`／`WebSocketTransport`／
   `TransportFactory` 的生产档取用与测试档取用**现读全为 0**。别被同名骗了：
-  `execution_engine/mcp_manager.py:29` 那个 `TransportType` 是**它自己的一份枚举**，与这里无关。
+  `execution_engine/mcp_manager.py:29` 那个 `TransportType` 是**它自己的一份枚举**，与这里无关
+  （那份枚举随 §6-334 的 D 票于 §6-349 整档退役；同名陷阱的**口径**留着，不随文件消失）。
 - 还有一处更隐蔽的：**API 谎**。`execute_skill()` 签名里有 `transport` 参数、docstring 写着
   "传输层（可选）"，函数体从头到尾没用过它——调用方传什么都被静默丢弃。这类"接了不用的参数"
   比死代码更坏，因为它在契约上承诺了一件不做的事。
@@ -46,9 +47,9 @@ def _importsFromThisModule(tree: ast.AST, rel: str) -> set:
     """该文件**经导入通道**从本模块取走的名字（输入是一棵已解析的树＋仓内相对路径）。
 
     为什么不按符号名扫全仓（第一版就是这么写的，被自己抓红）：`TransportType` 这个名字在
-    `execution_engine/mcp_manager.py:29` 有**另一份同名枚举**，按名扫会把在役符号判成"还在引用
-    已退役面"。Python 里"消费某模块的名字"只有一条通道——从该模块导入（或 `module.Name` 属性访问），
-    判这条既无误伤也不漏。
+    `execution_engine/mcp_manager.py:29` 曾有**另一份同名枚举**（§6-349 已整档退役），按名扫会把
+    在役符号判成「还在引用已退役面」。Python 里「消费某模块的名字」只有一条通道——从该模块导入
+    （或 `module.Name` 属性访问），判这条既无误伤也不漏。
 
     枚举与解析归 `tests/ast_scan` 的共享预算（§6-314 的 D22：判据里不再自己 `glob + ast.parse`）。
     绝对名一律由 `ast_scan.resolveImportModule` 解——只按 `node.module` 原文比对看不见相对形，
