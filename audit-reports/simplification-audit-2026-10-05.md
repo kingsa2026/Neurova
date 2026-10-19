@@ -212,6 +212,8 @@
   **带鉴权的能力登记端点**，不是给现役读面补个调用。
 - 现役替代：**无**。近邻件均不同物（`agent_enhancement.py:131` 只回静态串、`growth.py:334` 是成长分、`capability_gap.py` 是缺口信号）。"按能力检索/匹配 Agent"与"任务→Agent 推荐"今日全无实现。
 - 判定：需人裁，且 **matrix 与 capability_discovery 必须同批裁**（matrix 是后者的唯一消费者：只删 matrix 留它即只写不读；只删它留 matrix 则 matrix 直接不可用）。人格/协作模板属**内容资产删除**，若退役建议先归档进 docs/。另需清 `acp_runtime.py:97-99` 那句把能力注册推给本模块的恒假条件与虚假归属注释。
+  **票面已扩容（§6-348 裁甲带来的两件，2026-10-20）**：拍这一张时必须同时裁①**落点归属**——`CapabilityDiscovery` 的注册表是进程内 dict（重启即失忆），而 neurflow `agents.capabilities_json` 是落盘的，同一个概念不许两份表示并存（教义 6）；②**恢复即含鉴权**——历史那条唯一写端点带 `_user_can_access_agent_collaboration` 的按用户权限语义，只补路由不等于补能力。
+  本会话现量补充：注册表今天**恒空**（`CapabilityDiscovery.register_agent` 全仓零调用者），且门面那一条挂载腿已由批 109·第④刀摘掉（`protocols/__init__.py` 不再无条件再导出这三名）。
 
 #### B4 技能域三件（约 1440）◑
 - `skills/security_scanner.py`（908）：**全仓唯一的 ast.NodeVisitor 危险节点判据**（`_DangerousNodeVisitor:98`）。现役 regex 规则已等价覆盖 exec/eval/os.system/subprocess/shell=True，但抗注释误报与别名绕过（`from os import system`）只有这一处。判定：需人裁（SkillSandbox 部分无价值可先删）。
@@ -6501,7 +6503,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
         保留活的 `FlowContext` 本体／`ScheduledTask`／`compute_next_run`／`scheduler.py`(426)；
         同批改判 `test_refactor_imports.py` 里被这些路径钉住的形状格（不改＝留一条恒真守卫）。
         "按能力挑 agent"随骨架一起消失，今天无人需要它。
-      - **乙｜甲 ＋ 把这项独有能力并进 neurflow（推荐）**：先立判据再动，落点候选
+      - **乙｜甲 ＋ 把这项独有能力并进 neurflow（推荐；该半区已由 §6-348 改判为不实施）**：先立判据再动，落点候选
         `neurflow/models.py:86`（字段位有，语义要分清别与 provider 选择混用）＋ 派发侧与
         `agent/team.py` 的角色→成员（经 `api/endpoints/acp_api.py:151-162` 可达）对齐。
         这是**新增能力**（净 LOC 为正），要产品侧认这条需求；不认就退到甲。
@@ -7884,6 +7886,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 342. **批 109 开工档 · 五裁落定（§6-311 乙／§6-312 乙／osv 甲／夜间读法丁／`MANIFEST_BASELINE` 甲）＋实施次序与依赖** ✅🟢 —— 本笔只记账，零改码
     - **用户 2026-10-19 点单原文口径**：
       ① **§6-311（两份 `FlowOrchestrator`）＝乙**——"甲 ＋ 把这项独有能力并进 neurflow"；
+         **〔执行终态：甲半区已落＝§6-343/345/346 三刀；"并进 neurflow"那半区经实测改判为不实施＝§6-348，
+         能力面三态票已裁甲，B3 那张需人裁票从此是唯一入口〕**
       ② **§6-312（`neurova/collaborate/` 整座岛）＝乙**——退役死的一半（`models.py`／`template.py`／`orchestrator.py`
       三档 −863 那一刀的完整版是"活的一半留下、死的一半连同门面挂载一起收"）；
       ③ **osv 那 6 条常驻红＝甲**——把假扫描器做成**跨平台可执行形**（不是登记成环境侧长期红，也不是本机塞一份真二进制）；
@@ -7924,6 +7928,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **本批只走完第①刀**（C1/C2/C3/C5）；§6-342 次序里的第②刀（C4 `FlowContext` 按符号瘦身）、
       第③刀（core 那份 870 行 `FlowOrchestrator` ＋其 1005 行专用测试）、第④刀（"按能力挑 agent"并进 neurflow）
       **均未动**，不许据本格"退役完成"来读——现役面与剩余欠账都在下面两节里写清。
+      **〔后续进度：②已落＝§6-345、③已落＝§6-346、④已改判不实施＝§6-348〕**
     - **根因在门面声明面**：`collaborate/__init__.py:8-9` 与 `workflow/__init__.py:8-9` 无条件再导出整座岛，
       而 Python 导入子包必先执行父包 `__init__` ⇒ 端点取一次 `AgentScheduler` 就连带执行
       `models.py`(150)＋`template.py`(373)＋`workflow/orchestrator.py`(340)＝**863 行从未接线的死码**（D19）。
@@ -7960,7 +7965,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：本批第②③④刀；`FlowPhase`/`FlowEvent` 与 `FlowContext` 编排方法群（C4，改现役符号须先立判据——
       §6-315 那七格就是它的判据）；`neurova/core/flow_orchestrator.py`(870) 与其专用测试(1005)；
       "按能力挑 agent"并进 neurflow（**生产者已核到**：`neurflow/models.py:296 capabilities: List[str]`
-      且 storage 有 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）；
+      且 storage 有 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）
+      **〔④已改判不实施＝§6-348〕**；
       以及 §6-342 那两条 CI 小批（丁／⑤）、osv 甲、dev_path 那 4 处、其余等裁票。
     - **本会话下一枚空号现查 §6-344**（写前必须现场重取；本笔落库时该读数为 343）。
 344. **换面落地 · 导出 MCP 面的运输层改由官方 SDK 的 streamable-http 承载（§6-339 乙案、§6-340 两裁实施）** ✅🟢 —— 两笔：`8718cfd6` 装配前置收口 ／ `c875bf64` 换面本体
@@ -8058,6 +8064,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       两者同批退——档案 §6-301 已证那测试是"shim 与自己的契约测试一起入库"的自产自销）；
       第④刀（"按能力挑 agent"并进 neurflow；生产者已核到 `neurflow/models.py:296 capabilities` 与
       `storage.py` 的 `capabilities_json` 写读两侧，比 §6-311 当时"两张表按构造恒空"的读数更可接）；
+      **〔④已改判不实施＝§6-348；此处"更可接"的读数只对了一半——落盘面确实活着，但仓内无人据能力做选择〕**；
       osv 甲那 6 格、丁（夜间读法单点原语）、⑤（`MANIFEST_BASELINE` 转零容忍）、dev_path 那 4 处；
       以及 §6-342 那批等裁票与 §6-339／§6-340／§6-344 那条 MCP 换面的后续（B／C／D 三格仍开）。
     - **本会话下一枚空号现查 §6-346**（写前必须现场重取；本笔落库时该读数为 345）。
@@ -8093,7 +8100,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `test_noSecondOrchestrationClassRemains` 常驻钉住——防的是 §6-311"事件分组"那一族再来一次
       （"完善项目结构"式批量提交把第二份编排器重新当现役）；这与 §6-313 的双源棘轮不重复取数（那把尺比的是跨文件复制的函数体）。
     - **仍开**：第④刀"按能力挑 agent 并进 neurflow"（乙的最后一格，生产者已核到
-      `neurflow/models.py:296 capabilities` ＋ `storage.py` 的 `capabilities_json` 写读两侧）；
+      `neurflow/models.py:296 capabilities` ＋ `storage.py` 的 `capabilities_json` 写读两侧）；**〔已改判收口＝§6-348：
+      那份实现的能力表全史零生产者，"并进"无对象；能力面另开的三态票已裁甲，本体 1010 行归 B3〕**；
       `dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；§6-334 的 B／C／D；其余等裁票照旧。
     - **本会话下一枚空号现查 §6-347**（写前必须现场重取；本笔落库时该读数为 346）。
 
@@ -8163,7 +8171,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       不物化 ⇒ 基线树形状差，**不认领**）；活体真 `create_app` **10/10**，反证只红在缺陷读数、
       还原 `cmp -s` 逐字节等值。净 LOC 生产池 **+16/−13 ＝ 净 +3**（正数全部去向＝门面自述新增 3 行），
       测试/基建池 **+177/−0**；子集现值 **647**。
-    - **新开三态票（能力面到底要不要，请裁；推荐甲）**：
+    - **新开三态票（能力面到底要不要，请裁；推荐甲）**：**已裁＝甲（2026-10-20 用户点单"甲"），本格这张票就地收口**
       - **甲｜结清不立项**（推荐）：门面已收干净；1010 行原样留给 B3 那张票。"按能力挑 agent"**不作为新功能立项**——
         今日无任何消费方按能力筛 agent（唯一在服的按属性筛是 `metadata.source_type`，走 `metadata` 不是 `capabilities`）。
         代价＝这项能力继续"实现存在、数据不存在"；不可逆点＝无（什么都没删）。
@@ -8179,6 +8187,16 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       - **决策影响面**：三态都不动 `neurflow` 的 54 条在服路由与 `chat` 页那条 agent 选择链；
         甲留 1010 行死码在场、乙净增生产 LOC 并造第二份表示、丙恢复一项今日线上不存在的能力（含鉴权面）。
         **推荐甲＋把"要不要这项能力"并进 B3 那次裁一起拍**——那张票裁的是同一批文件，分开拍必然互相返工。
-    - **仍开**：B3＋本格新票（能力面，等裁）；`dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；
+      - **裁定后果（甲落地后要带走的东西）**：①**能力面不作为新功能立项**——不新增 `create_agent(capabilities=…)`、
+        不新增选择器、不新增读端点；`neurflow` 的 `agents.capabilities_json` 那一位**维持现状**
+        （写侧仍有唯一生产者 `manifest_to_agent_info` 落 `["workflow"]`，读侧只有发布回执回显），
+        它由此成为"字段位活着、无人据它做决定"的**在册已知形态**，不再是待补的断点——
+        下一次复扫若把它当断点点名，引用本格即可，不必重开。②**"要不要按能力挑 agent"这个产品问题
+        从此只有一个入口＝B3 那张需人裁票**，所以 B3 的票面必须带上甲案没做的两件事：
+        落点归属（进程内 dict vs neurflow 那张 SQLite 表，**同一个概念不许两份表示并存**，教义 6）
+        与**恢复即含鉴权**（历史写端点是 `_user_can_access_agent_collaboration` 那条权限语义，
+        补路由不等于补能力）。③**不可逆点＝无**：本刀一行本体未删，1010 行原样在场。
+    - **仍开**：B3（能力面唯一入口，等裁；票面须带上头②条那两件——落点归属与恢复即含鉴权）；
+      本格那张三态票**已裁甲收口**，不再单列；`dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；
       §6-334 的 B／C／D；D19 族是否还有第三例**未全仓扫**（登记为待扫面，不是已扫净）。
     - **本会话下一枚空号现查 §6-349**（写前必须现场重取；本笔落库时该读数为 348）。
