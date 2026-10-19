@@ -54,7 +54,6 @@ CI 曾转红（PR #304，构建 `cnb-6c0-1k3iv2o5f-003`）：
 """
 
 import ast
-import io
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -64,7 +63,6 @@ import pytest
 from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 替身的三种挂载键：`side_effect` / `wraps` 是 `patch` 的实参，`new` 直接换掉对象。
 STUB_KEYS = ("side_effect", "wraps", "new")
@@ -85,11 +83,7 @@ GUARD_REL = "tests/unit/ci/test_stub_signature_single_source.py"
 
 def protectedFiles() -> list:
     """CI 实际跑的受保护子集（唯一事实源，不另建清单）。"""
-    return [
-        line.split("#", 1)[0].strip()
-        for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    return ast_scan.protectedSubsetEntries()
 
 
 def _moduleAliases(tree: ast.AST) -> dict:

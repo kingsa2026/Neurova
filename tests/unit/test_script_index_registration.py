@@ -16,7 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DIAGNOSTICS = REPO_ROOT / "scripts" / "diagnostics"
 INDEX = DIAGNOSTICS / "INDEX.md"
-PROTECTED = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 # INDEX 的说明性文件与包初始化文件不是"脚本"，不要求登记。
 _NON_SCRIPT = {"INDEX.md", "__init__.py"}
@@ -55,9 +55,6 @@ def _indexed_script_names(text: str):
 
 
 def test_protected_tests_has_no_duplicate_rows():
-    entries = [
-        line.strip() for line in PROTECTED.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    entries = list(ast_scan.protectedSubsetEntries())
     duplicates = sorted({entry for entry in entries if entries.count(entry) > 1})
     assert duplicates == [], f"受保护测试清单里有重复登记行：{duplicates}"

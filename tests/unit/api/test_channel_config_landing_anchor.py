@@ -48,6 +48,7 @@ from neurova.core import data_root
 from neurova.core.data_root import get_data_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 旧锚点（相对仓库根）—— 即换锚前的 `Path(__file__).parent.parent.parent / "data"`。
 LEGACY_PARTS = ("neurova", "data", "channel_configs.json")
@@ -217,7 +218,7 @@ class TestGuardIsProtected:
     """守卫必须真进 CI 受保护子集——"绿"要和"跑过"是同一件事。"""
 
     def test_listedInProtectedSubset(self):
-        listed = (PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt").read_text(encoding="utf-8")
+        listed = set(ast_scan.protectedSubsetEntries())
 
         assert "tests/unit/api/test_channel_config_landing_anchor.py" in listed, \
             "本守卫不在受保护子集里，CI 不会跑它"

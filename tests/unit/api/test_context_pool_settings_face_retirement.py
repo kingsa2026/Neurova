@@ -89,7 +89,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tests import ast_scan
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 GUARD_REL = "tests/unit/api/test_context_pool_settings_face_retirement.py"
 
 ENDPOINT_MODULE = (
@@ -472,11 +471,7 @@ class TestPoolSideCapabilitySurvives:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = {
-            line.split("#", 1)[0].strip()
-            for line in PROTECTED.read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()
-        }
+        listed = set(ast_scan.protectedSubsetEntries())
         assert GUARD_REL in listed, (
             f"{GUARD_REL} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行"
             "（B5 收口时正是这个形态：文件在仓、单跑全绿、清单里没有）。"

@@ -48,6 +48,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -336,13 +337,7 @@ class TestGuardIsInProtectedSubset:
     """本守卫必须在受保护子集内（否则 CI 不跑它，判据只在本地成立）。"""
 
     def test_listed_in_protected_tests(self):
-        listed = {
-            line.split("#", 1)[0].strip()
-            for line in (
-                PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
-            ).read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()
-        }
+        listed = set(ast_scan.protectedSubsetEntries())
         rel = "tests/unit/context/test_turn_session_identity.py"
         assert rel in listed, f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行"
 

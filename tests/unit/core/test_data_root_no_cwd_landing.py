@@ -584,7 +584,6 @@ class TestGuardIsProtected:
     """守卫必须真进 CI 受保护子集——"绿"要和"跑过"是同一件事。"""
 
     def test_listedInProtectedSubset(self):
-        listed = (PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt").read_text(
-            encoding="utf-8")
+        listed = set(ast_scan.protectedSubsetEntries())
         assert "tests/unit/core/test_data_root_no_cwd_landing.py" in listed, \
             "本守卫不在受保护子集里，CI 不会跑它"

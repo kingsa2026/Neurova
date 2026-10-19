@@ -65,7 +65,7 @@ yaml = pytest.importorskip("yaml")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 SCHEMA = PROJECT_ROOT / ".cnb" / "npc_schema_keys.txt"
 
 # 档位角色名单**不再在本文件枚举**（Issue #272）：全部在册角色共用同一份人设与
@@ -392,9 +392,8 @@ class TestLevelRoleEnumUnchanged:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = io.open(PROTECTED, encoding="utf-8").read()
         rel = "tests/unit/ci/test_npc_pipeline_time_budget.py"
-        assert rel in listed, (
+        assert rel in set(ast_scan.protectedSubsetEntries()), (
             f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )
 

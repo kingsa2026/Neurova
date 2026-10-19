@@ -61,7 +61,7 @@ VERDICT_OUTPUT = (
 )
 AUDIT_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "osv_audit.py"
 ALLOWLIST = PROJECT_ROOT / "scripts" / "ci" / "osv-allowlist.toml"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 # 被扫依赖树：锁文件 → (解析器, 该解析器的点数正则)。
 # osv-scanner 的 `Scanned <path> file and found N packages` 是本仓库唯一能证明
@@ -1163,9 +1163,7 @@ class TestOfflineDatabaseRemovesTheNetworkDependency:
 
 class TestGuardIsWiredIntoCi:
     def test_listed_in_protected_tests(self):
-        listed = {
-            line.split("#", 1)[0].strip() for line in PROTECTED.read_text(encoding="utf-8").splitlines()
-        }
+        listed = set(ast_scan.protectedSubsetEntries())
         rel = Path(__file__).resolve().relative_to(PROJECT_ROOT).as_posix()
         assert rel in listed, (
             f"{rel} 不在 scripts/ci/protected_tests.txt —— unit-tests 流水线不会跑它，"

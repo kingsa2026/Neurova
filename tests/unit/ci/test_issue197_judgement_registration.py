@@ -32,12 +32,11 @@
 
 from __future__ import annotations
 
-import io
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 本批（Issue #197）交付或修订的判据文件。逐条列明它守什么，避免变成无注释的
 #: 字符串堆——下一轮读到它时要知道"删掉这条等于哪一票失去 CI 覆盖"。
@@ -71,12 +70,7 @@ SELF_REL = "tests/unit/ci/test_issue197_judgement_registration.py"
 
 def _listed() -> set:
     """CI 实际跑的清单条目（唯一事实源，不另建第二份清单）。"""
-    raw = io.open(PROTECTED, encoding="utf-8").read()
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    return set(ast_scan.protectedSubsetEntries())
 
 
 def test_every_batch_judgement_is_registered():
