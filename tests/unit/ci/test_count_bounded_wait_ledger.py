@@ -61,7 +61,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests import ast_scan
 
-PROTECTED = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
 GUARD_REL = "tests/unit/ci/test_count_bounded_wait_ledger.py"
 
 #: 逐条结论台账：键 = "<受保护子集相对路径>::<函数名>"，值 = (命中数, 结论)。
@@ -72,12 +71,8 @@ COUNT_BOUNDED_WAIT_LEDGER: Dict[str, Tuple[int, str]] = {}
 
 
 def protectedFiles() -> List[str]:
-    """CI 实际跑的受保护子集（唯一事实源，不另建清单）。"""
-    return [
-        line.split("#", 1)[0].strip()
-        for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    """CI 实际跑的受保护子集——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries()`（§6-234 同族收口）。"""
+    return ast_scan.protectedSubsetEntries()
 
 
 def test_listFaceIsNotEmptyAndResolvable():

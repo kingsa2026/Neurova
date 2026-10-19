@@ -51,8 +51,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tests import ast_scan
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
-
 #: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
 #: 确需保留者必须逐条写明理由，并说明为何**两条**共享入口都不适用：
 #: 会重复扫的走保留型（`nodeScan` 一族），只扫一次的走一次性
@@ -69,10 +67,8 @@ REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
 
 
 def protectedFiles() -> list:
-    """CI 实际跑的受保护子集（唯一事实源，不另建清单）。"""
-    return [line.split("#", 1)[0].strip()
-            for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
-            if line.split("#", 1)[0].strip()]
+    """CI 实际跑的受保护子集——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries()`（§6-234 同族收口）。"""
+    return ast_scan.protectedSubsetEntries()
 
 
 def test_listFaceIsNotEmptyAndResolvable():

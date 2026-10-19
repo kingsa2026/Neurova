@@ -26,12 +26,16 @@ CPU 计时、也可能有超时面的墙钟计时，按命中数登记会随无�
 from __future__ import annotations
 
 import io
+import pathlib
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED = REPO_ROOT / "scripts" / "ci" / "protected_tests.txt"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法在这一个入口上
 
 #: 进程内计时口径的两种时钟。**刻意不含** `time.time`：它是"当前时刻"
 #: （时间戳/过期时间），本仓已有守卫按 `perf_counter` 一类函数名取证。
@@ -130,12 +134,8 @@ CLOCK_LEDGER: Dict[str, tuple] = {
 
 
 def protectedFiles() -> List[str]:
-    """CI 实际跑的受保护子集（唯一事实源，不另建清单）。"""
-    return [
-        line.split("#", 1)[0].strip()
-        for line in io.open(PROTECTED, encoding="utf-8").read().splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    """CI 实际跑的受保护子集——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries()`（§6-234 同族收口）。"""
+    return ast_scan.protectedSubsetEntries()
 
 
 def test_listFaceIsNotEmptyAndResolvable():
