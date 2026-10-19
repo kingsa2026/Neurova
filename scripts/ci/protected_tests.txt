@@ -3433,3 +3433,10 @@ tests/unit/api/test_mcpServerFaceIsIdentityBoundary.py
 # ⑥⑦⑧ 协商回声、清单与调用等于核心那份（stub 取样，钉的是来源不是条数）。
 # 面读数来源：本档只解析自己那一个受治模块（不枚举目录），HTTP 侧走真挂载入口＋真令牌。
 tests/unit/api/testMcpFaceRidesSdkTransport.py
+# 批 110（§6-350）：MCP 面的**技能腿**必须走 ToolExecutor 那道咽喉，判据落在这个核心档里。
+# 三格：① 咽喉读到的分派逐字段等于请求（技能名与参数不许被面改写）；② 无 agent 时 fail-closed，
+# **不许回退成直调 `skill.execute`**——可见门/权限作用域/沙箱根/漏斗记账都补不回来，宁可拒；
+# ③ 咽喉自己的拒因原样转成 MCP 错误信封，面不重述文案。
+# 一条踩过的坑写在这儿免得下次再踩：②起初是假绿——trap 文案含 "agent" 四个字母，被 call_tool
+# 外层 except 收进错误信封后正好撞上断言；改成不含该串＋加一条反向排除才咬得住。
+tests/unit/workflow/test_mcp_server_face.py
