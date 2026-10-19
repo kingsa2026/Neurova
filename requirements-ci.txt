@@ -55,7 +55,9 @@ feedparser>=6.0
 segno>=1.6
 
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
-mcp>=1.2.0
+# 与 requirements.txt 同一条范围，且必须逐字同值——两份各写一个下界，
+# 薄环境装出来的就不是生产那套（守卫 tests/unit/test_mcpSdkFloorMatchesImportedEra.py 逐字比）。
+mcp>=2.0.0
 
 # Testing & Lint (dev)
 #

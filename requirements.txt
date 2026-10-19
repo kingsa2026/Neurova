@@ -83,12 +83,22 @@ APScheduler>=3.10
 feedparser>=6.0
 pycryptodome>=3.20
 # MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）
-# 本节两件事实不可混谈：
-#   1) 依赖声明只此一行，requirements-ci.txt 不再重复声明（单一声明源）；
+# 本节三件事实不可混谈：
+#   1) mcp 的声明**四处都得在**，缺任一处就有一条守卫红：两份 txt（生产安装 /
+#      薄环境跑 MCP 子集）＋ 两份 lock。此前这里写着"requirements-ci.txt 不再
+#      重复声明（单一声明源）"——那句与守卫相反：
+#      tests/unit/test_dev_path_and_runtime_dep_guards.py::
+#      TestMcpSdkDeclaredForRuntime::test_ci_declarations_agree 正要求 ci 侧也在。
+#      两份 txt 的范围本身还须逐字同值，由
+#      tests/unit/test_mcpSdkFloorMatchesImportedEra.py 钉（连同下界与 pin 的同代关系）。
 #   2) 缺席语义是**功能全断**，不是"优雅降级"——连接一律返回 False 并把
 #      last_error 记成"SDK 未安装"，真实失败原因被掩盖、线上 MCP 全断而 CI 全绿
 #      （Issue #62 偏差）。删改前先读 mcp_client._SDK_AVAILABLE。
-mcp>=1.2.0
+#   3) 下界取 2.0.0 不是随手写的：生产在模块级 import 只有 2.x 才提供的顶层
+#      `mcp_types`（neurova/api/endpoints/mcp_server_api.py），而 mcp 1.x 没有这个包
+#      （PyPI 元数据实证：`mcp-types` 自 mcp 2.0.0 起才是其依赖，1.2.0／1.9.4 均无）。
+#      按旧下界装出 1.x 时，服务端面会在装载表里因 ModuleNotFoundError 被整张跳过。
+mcp>=2.0.0
 
 # 运行时功能面依赖。此前误挂在 "Testing (dev)" 标题下，逐件核实过 neurova/ 内均有
 # 真实 import（Pillow 截图与图片解析、cryptography 密钥存储、jsonschema 工具层、
