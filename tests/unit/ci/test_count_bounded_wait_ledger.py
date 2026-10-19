@@ -80,6 +80,20 @@ def protectedFiles() -> List[str]:
     ]
 
 
+def test_listFaceIsNotEmptyAndResolvable():
+    """反空转：`_scan()` 的面就是这份清单，先证清单在场，再谈"落点数为零"。
+
+    清单截短 ⇒ 少跑几圈 ⇒ `COUNT_BOUNDED_WAIT_LEDGER` 该有的条目"消失"得无声无息；
+    只比数量级又挡不住路径写错——那种形态每条都 `continue`，条目数却照样好看。
+    与面自证棘轮 `test_surfaceReadingIsNotVacuous` 同形。
+    """
+    files = protectedFiles()
+    assert len(files) > 500, f"受保护子集清单现读 {len(files)} 条，量级不对＝没读到／路径写错"
+    resolved = sum(1 for rel in files if (REPO_ROOT / rel).is_file())
+    assert resolved == len(files), (
+        f"清单里有 {len(files) - resolved} 条指不到真实文件——本档的逐条扫描会一起缩水而判据照样绿")
+
+
 #: 「外部事实」探针：由 **OS / 内核**推进、事件循环**让出再多轮也推不动**的读数。
 #: 靶心只认这些——循环内自己的状态（闭包计数器、事件对象、任务集合）由本进程
 #: 的就绪队列推进，`sleep(0)` 交回控制权时必然跑完就绪回调，与机器负载无关，
