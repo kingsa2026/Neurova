@@ -3412,3 +3412,13 @@ tests/unit/api/test_mcpServerFacePromisesSurviveTransport.py
 # 钉的是"不许另起第二条通道"（§6-163 甲）。红自证：摘掉端点那三行 → 恰 3 红 30 绿；
 # 活体反证：真 app 上同一处摘净后 6 项读数里红的正是身份那两项，其余四项不动。
 tests/unit/api/test_mcpServerFaceIsIdentityBoundary.py
+# 批 109（§6-344）：导出 MCP 面的运输层改由官方 SDK 承载后，两裁与四条旧承诺都要出声。
+# 八格里四格是换面前就红的红灯（两裁 + 运输形态两格），四格是现在就绿的锁——
+# 逐格写明根据，不留恒真：① 缺 capabilities 的 initialize 必须 -32602（裁定甲）；
+# ② 没构成信封的体必须 400 + -32600（裁定乙，与上面那条 400/200 分层互不侵犯）；
+# ③ 按 AST 认 session manager 与低层 Server 真被实例化、且 include_router 不再出现（退役即红）；
+# ④ stateless/json_response 两个开关显式写在参数上，不许靠 SDK 默认值；
+# ⑤ GET 必须 405——实测换面后它会开一条不结束的流，这条是挂起面的闸；
+# ⑥⑦⑧ 协商回声、清单与调用等于核心那份（stub 取样，钉的是来源不是条数）。
+# 面读数来源：本档只解析自己那一个受治模块（不枚举目录），HTTP 侧走真挂载入口＋真令牌。
+tests/unit/api/testMcpFaceRidesSdkTransport.py
