@@ -37,7 +37,10 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
 
-# 从未实现过的梦境报告写侧/统计侧（实现只在 flow_orchestrator 里有读侧 get_dream_reports）
+# 从未实现过的梦境报告写侧/统计侧。原注说"实现只在 flow_orchestrator 里有读侧 get_dream_reports"——
+# 那份 shim 已随 §6-311 裁乙第③刀退役（它读的是自己的内存 list，从不碰表），
+# 于是 `dream_reports` 表回到本来的状态：`memory/scripts/init_db.py` 建了表，全仓既无写侧也无读侧。
+# 本格的判据不变（正是要钉"从未实现"），改的只是这句指路的落点。
 DREAM_REPORT_METHODS = {"save_dream_report", "get_dream_report", "get_dream_report_stats"}
 FACADE = "adjust_parameters_based_on_sleep_quality"
 
