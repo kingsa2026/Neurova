@@ -7770,3 +7770,33 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       与本会话 §6-337 那笔同号不同批——跨会话一律按 §6 号引，这条既有纪律再证一次。
     - **仍开**：本票两裁；§6-334 的 B／C／D 三格；全部等裁票照旧（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **下一枚空号现查 §6-340**（写前必须现场重取；本笔落库时该读数为 338）。
+340. **批 108·第③刀前置档：§6-339 两裁落定（甲／乙）＋实施读数三条——鉴权复用只能走同一对原语、Mount 对挂载审计不可见⇒清单必须同批重生成、错误码改写只可能命中 400** 🟡⏸（**实施＝下一批，且不可切**）—— 无代码笔（本笔只落裁定与前置读数）
+    - **裁定（用户 2026-10-19 点单）**：分叉 1 采**甲**＝按 SDK 口径（initialize 的 params 必须 `protocolVersion`
+      ＋`capabilities`＋`clientInfo`，缺则 -32602），6 格自造极简 payload 补全，并**另开一格把新语义钉成承诺**，
+      免得下一个人以为宽容还在；分叉 2 采**乙**＝HTTP 状态跟随 SDK（400），但 JSON-RPC 码收口到 `-32600`、
+      message 收成标准语 "Invalid Request"，`data` 保留（JSON-RPC 明写 data 可带实现细节，不作诊断泄漏处理）。
+    - **实施读数①（鉴权怎么搬到 ASGI 层，这条最容易搬坏）**：`get_current_user_or_service(request, credentials=Depends(security))`
+      实装在 `neurova/api/auth.py:532-552`，而 `security` 就是 `HTTPBearer(auto_error=False)`（`:33`）——**它本身可调用**。
+      所以包装层只许走"同一对原语"：`credentials = await security(request)` → `await get_current_user_or_service(request, credentials=credentials)`。
+      **禁止**在包装层自己再解一次 Authorization 头：`auth.py:559-567` 那段 docstring 写的正是"同求异解"的旧病
+      （`bearer` 与 `Bearer` 把同一枚凭证分进两个租户）。`auto_error=False` 的另一后果：缺头不抛 403 而是返回 None，
+      由 `get_current_user(None)` 抛 401——与现测一致（活体读数：匿名 POST＝401）；因此包装层必须自己接住
+      `HTTPException` 并复刻 FastAPI 那个 `{"detail": ...}` 响应形状，否则同一枚匿名请求会换个信封出去。
+    - **实施读数②（清单会被换面打断，且是常驻闸）**：`scripts/generate_api_inventory.py:392-427 mountOperations`
+      只认带 `original_router` 的 `include_router` 产物；改成 `app.mount(...)` 之后这条前缀**从挂载表里消失**，
+      而 `test_api_inventory_freshness_guard.py` 的"文档声明的后端挂载前缀集合 == 注册表实际挂载点"（取数由生成器 `:260-283` 供）当场红 ⇒ **换面必须同批重生成** `docs/09-dev-progress/api_inventory.md`（生成器幂等，口径自述 `:967`）。
+      反向的好消息：`mountedRouterAudit` 的"零路由挂载"那一格看不见 `Mount`，不会因"挂了却没路由"报红——
+      这条也得各配一格钉住，免得以后有人把"看不见"读成"没问题"。
+    - **实施读数③（裁定乙的可达性被实测保住）**：params 类 -32602 **全部以 HTTP 200 返回**（实测：缺 capabilities
+      的 initialize＝200/-32602），只有信封类失败与坏 `MCP-Protocol-Version` 头才是 400。
+      ⇒ "400 → -32600"这一改写**不可能**误伤裁定甲要保的那条 -32602 语义。两格各钉一次（`200/-32602` 与
+      `400/-32600`）就是这条不变量的守卫；只钉其中一格，下一个人把改写条件从"status==400"放宽到"code==-32602"
+      就正好撞掉裁定甲那一半。
+    - **为什么这一批切不开（记下来，免得下一批又被切开）**：新判据"缺 capabilities 即 -32602"在**现面**上必红，
+      而红灯档不许进 `protected_tests.txt`（教义 3）；反过来把 core→SDK 适配先落生产而不接线，又撞 §2 断点条款
+      （写出无人读的字段／注册无消费者的模块）。⇒ 只能一个原子批：红灯 → 生产（面重写 ＋ `endpoints/__init__.py:359-364`
+      之外的第三种挂载形态 ＋ app 的 lifespan 接 `mgr.run()`，它一次性、不可复用）→ 三档 fixture 从
+      `dependency_overrides` 换成真令牌（`create_access_token`，断言一字不动）→ 清单重生成 → 三道库存闸 →
+      宽域 A/B ＋ 活体 → 提交。**开工前先复取 §6-339 那六条分叉读数**（297：台账读数不是事实源）。
+    - **仍开**：本票的实施（下一批）；§6-334 的 B／C／D 三格；其余等裁票照旧。
+    - **下一枚空号现查 §6-341**（写前必须现场重取；本笔落库时该读数为 339）。
