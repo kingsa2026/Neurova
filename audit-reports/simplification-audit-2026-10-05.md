@@ -7272,12 +7272,41 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       定性按批 67 已定的调子：**判据的成立不该依赖"谁怎么起的"**；修法＝探针自己声明编码契约
       （`probeEnv` 里显式写 `PYTHONIOENCODING=utf-8` ＋ 调用处 `encoding="utf-8", errors="replace"`，两者要成对——
       只写 `encoding` 而不钉 env，子进程在异机仍可能写 cp936）。
-      命中面现取＝全仓 `capture_output=True` 落点 **186 处**；既有棘轮 `tests/unit/ci/test_subprocessTextEncodingRatchet.py`
-      认的是"有没有声明 encoding"这一形，没覆盖到"父端自带 PYTHONIOENCODING"这一形 ⇒ 缺口性质与 §6-319 同族
-      （**不是实现看不见，是没格子钉**）。做成判据时要先按 248 的教训分两种坏法各配一枚变异：
-      摘 env（子进程改写本机默认码）与摘 `encoding`（父端解坏），二者红的位置不同。
-    - **就地划闭**：§6-328"仍开"里"`LOCAL_BASELINE` 余 9 档"→ 现值 0（本批收口）。**仍开**：上面那条子进程编码票；
+      命中面这一句**批 101 就地勘正**（原写"186 处＋既有棘轮没认这一形⇒没格子钉"，两处都不对）：
+      186 是 `capture_output=True` 的字面落点数、不是命中面；按既有棘轮 `tests/unit/ci/test_subprocessTextEncodingRatchet.py`
+      自己的口径现取＝**33 档 / 47 站点**，而这两档**一直挂在它的 `BASELINE` 里**（3 处与 1 处）。
+      所以缺口是**存量没消化**，不是"没格子钉"——那两枚变异（摘 env／摘 `encoding`）也早有格子各自咬着。
+      这正是 297 说的"『实现看不见』与『没格子钉』修法相反"，我把定性写反了一次。
+    - **就地划闭**：§6-328"仍开"里"`LOCAL_BASELINE` 余 9 档"→ 现值 0（本批收口）。**仍开**：上面那条子进程编码票（**批 101 已落地＝§6-330**）；
       §6-323／§6-328 登记的"清单读法没有根可解"（宽口径探测 72 档／41 无自证**不是**命中面——探测器太松，
       窄口径探测 0＝"清单即根"的表示法还没定出来）；R5-env 待裁修法；§6-318 边界①②；§6-317 同池名两读数；
       以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **本会话下一枚空号现查 §6-330**（写前必须现场重取；本笔落库时该读数为 329）。
+
+330. **批 101 · 子进程文本捕获"两头钉"两档收口（4 处：31 档 / 43 站点），并勘正 §6-329 那句写反的定性** ✅🟢 —— 一笔：`1609cf05`
+    - **触发形态**（现跑，不是推断）：本仓跑测惯例带 `PYTHONIOENCODING=utf-8` ⇒ 子端写 UTF-8、父端按 cp936 解
+      ⇒ reader 线程 `UnicodeDecodeError` ⇒ `proc.stdout` 是 `None` ⇒ 6 格报 `TypeError: can only concatenate str`
+      / `'NoneType' object has no attribute 'strip'`。HEAD 上复现过同样 6 红 ⇒ 不是谁的新 regression，也不是常驻红：
+      **这副长相会把"判据自己没钉契约"演成"被测对象崩了"**，别再往常驻红小账里记。
+    - **两档两条码**：probe 档那三处一模一样的 `[sys.executable, SCRIPT, ...]` 收成一个模块级出口 `runProbeScript()`
+      （教义 6——三份写法就是三份契约），出口内 `dict(os.environ, PYTHONIOENCODING="utf-8")` ＋ 调用处
+      `encoding="utf-8", errors="replace"`；session 档在 `probeEnv` 里显式钉 env 再补 `encoding`，并把
+      "摘 `NEUROVA_SESSIONS_DIR`"与"钉 `PYTHONIOENCODING`"为什么要同时做写进 docstring（一个防注入值继承、一个防编码随调用方漂）。
+    - **证据**：修前同 env `6 failed, 2 passed` → 修后合跑 `38 passed, 1 skipped`（skip 那格是既有半修行为对照，
+      父进程带该 env 时它如实 skip，不假验）。红自证（tag `b101-redselfproof-2files`，只 stash 两档修复、留收过的表）＝
+      `1 failed, 29 passed, 1 skipped`，FAILED 恰为 `test_ratchetDoesNotRise`，报错点名 `现 3 处 / 基线 0 处`、`现 1 处 / 基线 0 处`。
+      两枚变异各打一处（248）：整档退回 ⇒ 形状格红；**只摘子端 env、保留父端 `encoding`**（正是要防的半修）⇒
+      `test_halfPinnedPythonChildSitesMatchTheCountedBaseline` 红在 `现读 1 / 基线 0` 并点名 `_offline_probe.py:38`；
+      该枚前后 md5 复证、CRLF 计数 87/87 未刷（第一次用 `\n` 打 CRLF 档命中 0——290 自己又犯一次，当场改成 `\r\n`）。
+    - **基线显式收表**：摘 2 行；表头那句"34 文件 / 48 站点"是个没人再对的时间性快照，改成现读 **31 / 43**
+      并写下本批这 4 处的收法；复算 `scanViolations()` 现读 31 档 / 43 站点，与表逐档相等（"不升"与"降要看得见"两格同时绿）。
+    - **勘误（已就地改在 §6-329 那一格里）**：我上一笔把定性写成"既有棘轮没认这一形 ⇒ 缺口是没格子钉"，
+      并把 186 当命中面。两处都不成立：186 是 `capture_output=True` 的字面落点数；按棘轮自己口径命中面是 33 档 / 47 站点，
+      而这两档一直挂在它 `BASELINE` 里——缺口是**存量没消化**。教训归到 297（"实现看不见"与"没格子钉"修法相反）：
+      **登记定性之前要先读那道闸自己的表**，别拿一次 grep 的宽口径当账。
+    - **本批自纠的另一处**：改基线时我一度摘错行（把 `tests/unit/test_adminBootstrapLanding.py` 那 2 处当成待摘项删了），
+      当场 `git diff --numstat` 为空复证才继续——摘表也要逐行对准 offender 名单，不能按"看起来像"删（同 304 那族）。
+    - **就地划闭**：§6-329"仍开"里的子进程编码票 → 已落地。**仍开**：§6-323／§6-328 的"清单读法没有根可解"
+      （宽口径 72 档／41 无自证**不是**命中面，窄口径探测 0＝"清单即根"的表示法还没定出来）；R5-env 待裁修法；
+      §6-318 边界①②；§6-317 同池名两读数；以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
+    - **本会话下一枚空号现查 §6-331**（写前必须现场重取；本笔落库时该读数为 330）。
