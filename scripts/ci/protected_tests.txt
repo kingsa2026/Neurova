@@ -3387,3 +3387,9 @@ tests/unit/collaboration/test_schedulerLiveSurfaceIsPinned.py
 # 批 88（§6-316）：导入通道口径收回一处——四种取法都认（含相对形与父包取名形），预筛词取末段名不取全名。
 # 两枚差分钉住这是真漏检的修补：把解析退回只比 node.module，同一注入应变绿。
 tests/unit/ci/test_importChannelDetectorSeesAllFourForms.py
+# 批 105（§6-334）：mcp 声明的**下界**必须与代码真正取用的 SDK 世代同代。
+# 上一族守卫钉"四处声明在不在"，本档钉"范围对不对"——两条不变量不同、互不重复。
+# 三格别当装饰删：① 正控 `test_production_uses_sdk_two_only_names` 在前提消失时先红，
+# 防这档沦为恒真；② 同值格防的是"两份清单各写一个下界"（那份齐备守卫放过这一形）；
+# ③ pin 满足下界那格是控制格，钉"改下界不改锁"这条路。变异两枚已实证各咬不同形状。
+tests/unit/test_mcpSdkFloorMatchesImportedEra.py
