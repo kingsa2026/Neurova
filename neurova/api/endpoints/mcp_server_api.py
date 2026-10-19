@@ -98,6 +98,13 @@ async def _handle_tools_call(params: dict) -> dict:
 @router.post("")
 async def mcp_http_endpoint(request: Request, current_user: typing.Any = Depends(get_current_user_or_service)):
     """JSON-RPC 2.0 单请求入口（MCP streamable http 最小面）。"""
+    # §3 身份只有一条通道，且**只在请求边界写一次**：这一面此前有 401 闸却不写
+    # `neurova_request_user_id`，于是 `NeurovaMCPServer._current_user_id()` 恒空——
+    # MCP 触发的工作流落进无主桶、CUA 那条 `if uid:` 的身份透传恒假（§6-334 裁定甲）。
+    # 取值口径与 `/v1/chat` 同源（令牌的 user_id，即 sub），不新造第二条通道。
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id((current_user or {}).get("user_id") or None)
     if not _acceptsJson(request):
         return JSONResponse(
             status_code=406,
