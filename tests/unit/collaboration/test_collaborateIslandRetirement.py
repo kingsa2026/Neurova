@@ -17,6 +17,8 @@
 且与死档 350 行里 346 行相同（95.7%）——活支是死支的超集，所以"取长补短"无事可做，合并动作＝删除。
 """
 
+import dataclasses
+import inspect
 import json
 import os
 import subprocess
@@ -107,6 +109,17 @@ class TestCollaborateIslandRetirement:
         ]
         assert not stillThere, "以下死档仍在树里：%s" % ", ".join(stillThere)
 
+    def test_importScannerFaceIsNotNarrowed(self):
+        """面自证：同一个取数口对**活**模块必须报出引用——否则上面那句"零命中"不作数。
+
+        根被改窄、路径写错、`importersOfModule` 被换实现，三种坏法都只会让 offender 读数变 0，
+        看起来正是"退役干净"。这一格先证这条腿能产生非零（形态集 283：每个零都要先证它能红）。
+        """
+        live = ast_scan.importersOfModule(PROJECT_ROOT / "neurova", "neurova.collaborate.workflow.scheduler")
+        assert len(live) >= 2, (
+            "同一个取数口对现役 scheduler 只报 %d 处引用（应为 ≥2：包门面＋两个端点）——"
+            "扫描面自己坏了，此时『死档零引用』是假绿" % len(live))
+
     def test_noProductionImporterOfDeadModules(self):
         """退役后不许留悬空引用：生产侧不得再有任何一档 import 这三条路径。"""
         offenders = []
@@ -116,6 +129,45 @@ class TestCollaborateIslandRetirement:
         assert not offenders, (
             "死档已删却还有人 import 它（ImportError 会在运行时才现形）：\n  " + "\n  ".join(offenders)
         )
+
+    # ── 第②刀：C4 `workflow/models.py` 按符号切半区（§6-312 裁乙的"改现役符号"那一半） ──────
+    def test_orchestrationEnumsAreGoneFromLiveModel(self):
+        """`FlowPhase`／`FlowEvent` 随编排方法群一起退。
+
+        只按 collaborate 这条路径判：`neurova/core/flow_orchestrator.py` 里也有一对同名者，
+        那是**不同物**（第③刀的对象）——按符号名全仓判会把它误伤（同名词不同物那一类伪命中）。
+        """
+        from neurova.collaborate.workflow import models
+        leftover = [name for name in ("FlowPhase", "FlowEvent") if hasattr(models, name)]
+        assert not leftover, (
+            "`workflow/models.py` 仍导出 %s——两者的唯一读者是已退役的 orchestrator 本体"
+            % "／".join(leftover))
+
+    def test_flowContextCarriesNoOrchestrationBehaviour(self):
+        """`FlowContext` 只剩字段袋：那 13 个编排方法（add_event／set_phase／to_dict…）无人调用。
+
+        依据不是"grep 不到"而是 §6-315 那七格：handler 侧对 ctx 零读、调度器交付前零写，
+        而全仓唯一的构造点就是 `scheduler.py:260`。本格钉的是行为面（方法确实不在类上）。
+        """
+        from neurova.collaborate.workflow import FlowContext
+
+        methods = [name for name, value in inspect.getmembers(FlowContext, inspect.isfunction)
+                   if not name.startswith("__")]
+        assert not methods, (
+            "FlowContext 上仍挂着编排方法：%s——这些方法的唯一写侧（add_event 的调用者）随 "
+            "orchestrator 一起删了，留着就是「实现还在、只是没人调」" % ", ".join(sorted(methods)))
+
+    def test_fieldFaceSurvivesAndMethodOnlyFieldsAreGone(self):
+        """面自证＋下限：字段袋本身不许空掉（handler 的签名契约还在），只退"只为死方法存在"的两个位。"""
+        from neurova.collaborate.workflow import FlowContext
+
+        names = {f.name for f in dataclasses.fields(FlowContext)}
+        assert len(names) >= 10, f"字段面缩水到 {len(names)} 个，handler 契约被动过：{sorted(names)}"
+        assert "shared_data" in names and "step_outputs" in names, sorted(names)
+        leftovers = {"current_phase", "event_history"} & names
+        assert not leftovers, (
+            "这两个位只被 add_event／set_phase／to_dict 读写（全仓零外部读者），"
+            "方法群退净后它们就是第二个事实源：%s" % sorted(leftovers))
 
 
 if __name__ == "__main__":  # pragma: no cover
