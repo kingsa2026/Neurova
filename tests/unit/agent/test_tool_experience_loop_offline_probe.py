@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,15 +26,26 @@ SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "_tool_experience_loop_probe.py
 REPO_AGENTS = REPO_ROOT / "data" / "agents"
 
 
+def runProbeScript(*args: str, timeout: int = 300):
+    """起真脚本收文本读数的唯一出口——**两头都钉**，与调用方怎么起的无关。
+
+    只钉父端（`encoding="utf-8"`）是 §6-64 说的半修：子进程仍按本机码页写；只钉子端则父进程
+    按 `locale.getpreferredencoding()` 解。而本仓跑测常带 `PYTHONIOENCODING=utf-8`：那种组合下
+    reader 线程直接 UnicodeDecodeError、`proc.stdout` 变成 None，判据于是报
+    `TypeError: can only concatenate str`——看着像被测对象坏了，其实是这条契约没在自己手里。
+    """
+    childEnv = dict(os.environ, PYTHONIOENCODING="utf-8")
+    return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, env=childEnv)
+
+
 class TestOfflineProbeScript:
     def test_script_exists(self):
         assert SCRIPT.exists(), "只读取证脚本没落库，现场排障没有入口"
 
     def test_runs_standalone_and_emits_the_three_readings(self, tmp_path):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--json", "--workspace", str(tmp_path)],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = runProbeScript("--json", "--workspace", str(tmp_path))
         assert result.returncode == 0, f"脚本跑不起来：{result.stderr[-2000:]}"
         payload = json.loads(result.stdout.strip().splitlines()[-1])
         for key in ("ticket_lookup", "ticket_reason", "shape_violations", "outcome",
@@ -51,10 +63,7 @@ class TestOfflineProbeScript:
         assert len(before) > 5, (
             f"取证前仓内 agents 目录现读 {len(before)} 个条目（锚＝{REPO_AGENTS}）——"
             "锚指错或目录缺席时 before/after 都是空集，「没留下 artifacts」这句判定根本不来自代码")
-        subprocess.run(
-            [sys.executable, str(SCRIPT), "--json"],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        runProbeScript("--json")
         after = {p.name for p in REPO_AGENTS.iterdir()} if REPO_AGENTS.exists() else set()
         assert after - before == set(), (
             f"只读取证在仓库里留下了目录/文件：{sorted(after - before)}"
@@ -71,10 +80,7 @@ class TestOfflineProbeScript:
             and node.value.startswith(("data/", "/data/"))
         ]
         assert offenders == [], f"脚本里出现生产库路径字面量：{offenders}"
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--json", "--workspace", str(tmp_path)],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
-        )
+        result = runProbeScript("--json", "--workspace", str(tmp_path))
         payload = json.loads(result.stdout.strip().splitlines()[-1])
         assert str(tmp_path) in payload["evidence_db"], (
             f"取证库没落在传入的临时目录：{payload['evidence_db']}"
