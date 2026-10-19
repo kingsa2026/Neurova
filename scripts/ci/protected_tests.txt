@@ -3392,6 +3392,12 @@ tests/unit/collaboration/test_collaborateIslandRetirement.py
 # 5 格里：两份档本体都不在树里（shim 与它的测试必须同批）、三条根零悬空导入、同一取数口对现役替代必须报非零
 # （面自证）、`class FlowOrchestrator` 在生产树归零（教义 7 闭环：同一功能只剩一处实现被消费）、替代入口可导入。
 tests/unit/core/test_flowOrchestratorShimRetirement.py
+# 批 109·第④刀（改判后）：`neurova/agent/protocols/` 的门面不再把「能力发现」那座岛声明成公共面。
+# 岛本体（capability_discovery 449 ＋ agent_matrix 561）**一律未动**——它曾被接进活链路后被摘（一次整文件重写砍掉
+# 8 条端点），按死码溯源只能"恢复接线"或"显式承认放弃"，归台账 B3 那张需人裁票。7 格里：1 格现役门面符号
+# （收口不许关掉活面）、1 格子进程面自证（"岛缺席"这个零必须由真跑起来的非零读数带出）、1 格启动路径拖拽反检、
+# 1 格门面 __all__ 与属性两头、1 格**边界反检**（岛本体仍在树里＝本刀不越权替 B3 拍板）、1 格岛外零引用、1 格扫描面未自窄。
+tests/unit/agent/test_capabilityDiscoveryFacadeRetirement.py
 # 批 88（§6-316）：导入通道口径收回一处——四种取法都认（含相对形与父包取名形），预筛词取末段名不取全名。
 # 两枚差分钉住这是真漏检的修补：把解析退回只比 node.module，同一注入应变绿。
 tests/unit/ci/test_importChannelDetectorSeesAllFourForms.py
