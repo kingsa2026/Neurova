@@ -7248,3 +7248,36 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       窄口径探测给 0，说明"清单即根"的表示法还没定出来，属另一张票）；R5-env 待裁修法；§6-318 边界①②；§6-317 同池名两读数；
       以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **本会话下一枚空号现查 §6-329**（写前必须现场重取；本笔落库时该读数为 328）。
+
+329. **批 100 · LOCAL 余 9 档收干净——`LOCAL_BASELINE` 与 `BASELINE` 双双转空，本闸两表皆零容忍；顺带修掉一处「声明与面分叉」的根写错** ✅🟢 —— 一笔：`3c7acb6b`
+    - 逐档形态＝**根提到模块级常量 ＋ 同批补面自证**（只提根不补读数，那档立刻落到「仓内目录却不自证」那一支，等于换个红法）。
+      三档的读数值得记：`test_experience_outcome_word_domain` 量 `glob("*.ts")` 的**全量**（> 10）而不动原有那句
+      `len(codes) == 11`（`_` 前缀那几份本来就不进 codes，两个数是两件事）；`agent/test_tool_experience_loop_offline_probe`
+      取"取证前条目数 > 5"，因为锚指错或目录缺席时 before/after 都是空集——"没留下 artifacts"就成了不来自代码的话；
+      `test_session_landing_guard` 把清理 helper 的参数与 `dataDir = ...parent` 两处局部绑定一起去掉，
+      因为**参数名和函数内 `.parent` 别名都会被解成动态值**。
+    - **顺带修的那处根写错**（§6-328 登记的头条）：`test_rsi_rollback_evidence.py` docstring 声明扫
+      `neurova/evolution/rsi/`，代码 `parents[2]` 实扫 `tests/unit`（面上档 18 vs 2050）。
+      同一谓词打到两棵树**读数都是零** ⇒ 修根行为中性，证据就是这两次现跑；不改根只改注释＝把分叉留着让下批当漏接"修好"。
+    - **红→绿与 A/B**：红自证（tag `b100-redselfproof-9files`，只 stash 这 9 档、留空表）＝`1 failed, 22 passed`，
+      失败集恰为 LOCAL 那一格且正文逐条点名 9 档；绿＝9 档＋棘轮＋预算门禁 `6 failed, 208 passed`；
+      A/B（定向 stash 建 HEAD 基线，同一选择集 11 条路径）＝两侧 **6 failed / 208 passed、失败集两向差皆空**；
+      耗时 76.38s ↔ 70.37s。净 LOC：生产池 +0/−0；测试/基建池 +91/−45＝净 +46。子集未动 640。
+      **终态读数**：`_faceFindings` 现取 ⇒ offender 0、`BASELINE` 0、`LOCAL_BASELINE` 0、gaps 0。
+    - **新登记（本批撞上、未修，下一批动）：子进程输出编码契约不在自己手里**。
+      `test_session_landing_guard.py`（4 格）与 `agent/test_tool_experience_loop_offline_probe.py`（2 格）都用
+      `subprocess.run(capture_output=True, text=True)` 起子进程 pytest；父进程**带** `PYTHONIOENCODING=utf-8` 时
+      子进程写 UTF-8，而父进程按本机 cp936 解码 ⇒ reader 线程 `UnicodeDecodeError` ⇒ `proc.stdout` 是 `None`
+      ⇒ `proc.stdout + proc.stderr` 抛 TypeError。同两条**不带**该 env 复跑＝`2 passed`（实测各一次）。
+      定性按批 67 已定的调子：**判据的成立不该依赖"谁怎么起的"**；修法＝探针自己声明编码契约
+      （`probeEnv` 里显式写 `PYTHONIOENCODING=utf-8` ＋ 调用处 `encoding="utf-8", errors="replace"`，两者要成对——
+      只写 `encoding` 而不钉 env，子进程在异机仍可能写 cp936）。
+      命中面现取＝全仓 `capture_output=True` 落点 **186 处**；既有棘轮 `tests/unit/ci/test_subprocessTextEncodingRatchet.py`
+      认的是"有没有声明 encoding"这一形，没覆盖到"父端自带 PYTHONIOENCODING"这一形 ⇒ 缺口性质与 §6-319 同族
+      （**不是实现看不见，是没格子钉**）。做成判据时要先按 248 的教训分两种坏法各配一枚变异：
+      摘 env（子进程改写本机默认码）与摘 `encoding`（父端解坏），二者红的位置不同。
+    - **就地划闭**：§6-328"仍开"里"`LOCAL_BASELINE` 余 9 档"→ 现值 0（本批收口）。**仍开**：上面那条子进程编码票；
+      §6-323／§6-328 登记的"清单读法没有根可解"（宽口径探测 72 档／41 无自证**不是**命中面——探测器太松，
+      窄口径探测 0＝"清单即根"的表示法还没定出来）；R5-env 待裁修法；§6-318 边界①②；§6-317 同池名两读数；
+      以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
+    - **本会话下一枚空号现查 §6-330**（写前必须现场重取；本笔落库时该读数为 329）。
