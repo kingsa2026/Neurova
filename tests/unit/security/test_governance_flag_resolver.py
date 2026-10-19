@@ -22,6 +22,9 @@ from neurova.security.governance_settings import DEFAULTS, resolve_flag
 
 NEW_SWITCHES = ("crystallization_llm_gate_enabled", "skill_auto_retire_enabled")
 
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+
 
 @pytest.fixture(autouse=True)
 def _no_stale_switch_env(monkeypatch):
@@ -124,16 +127,18 @@ class TestGovernanceSwitchSurfaceIsReadableAndWritable:
         只匹配**读取形态**（docstring/注释里提及变量名不算违规，也不该被删掉）。
         扫描限定顶层 neurova/ —— src-tauri 下是构建期旧副本，会给出假命中。
         """
-        backend = Path(__file__).resolve().parents[3] / "neurova"
         read_form = re.compile(
             r"""os\s*\.\s*(?:environ\s*\[|environ\.get\(|getenv\()\s*["']"""
             r"""(NEUROVA_CRYSTALLIZATION_LLM_GATE|NEUROVA_SKILL_AUTO_RETIRE)"""
         )
         offenders = []
-        for py in backend.rglob("*.py"):
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
+        for py in sources:
             if "__pycache__" in py.parts:
                 continue
-            rel = py.relative_to(backend).as_posix()
+            rel = py.relative_to(NEUROVA).as_posix()
             if rel == "security/governance_settings.py":
                 continue
             for lineno, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):

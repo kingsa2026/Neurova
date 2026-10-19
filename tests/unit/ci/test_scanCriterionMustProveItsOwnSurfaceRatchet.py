@@ -42,12 +42,14 @@
 `test_ci_ast_scan_budget_guard.py` 也是）——它们没有"根参数"可解，也就无从判面有没有被改窄。
 要覆盖那一形，得先给这类读法定出"根"的表示法，属另一张票。
 
-**根的形状分五态，其中两态不留存量豁免**（`test_staticRootsNeverPointOutsideOrNowhere`）：
-仓内目录／仓内文件／仓外目录／指不到东西／动态值。只有"仓内目录"要求面自证；"仓内文件"坏得响
-（入口当场抛），"动态值"不承载面的声明；**"仓外"与"指不到"一律点名，且不看它在不在下表里**。
-为什么单独钉：`test_ratchetDoesNotRise` 只比"比基线新增了什么"，一档本来就在表里、后来把根写错了，
-失败集合反而一个字节都不变——本会话把 `parents[3]` 改成 `parents[4]` 实测过这一形，两格全绿。
+**根的形状分六态**：仓内目录／仓内文件／仓外目录／指不到东西／动态值／**函数内局部名**。只有"仓内目录"要求面自证；
+"仓内文件"坏得响（入口当场抛），"动态值"不承载面的声明；**"仓外"与"指不到"一律点名，且不看它在不在下表里**
+（`test_staticRootsNeverPointOutsideOrNowhere`，不留存量豁免）。为什么单独钉：`test_ratchetDoesNotRise` 只比"比基线新增了什么"，
+一档本来就在表里、后来把根写错了，失败集合反而一个字节都不变——本会话把 `parents[3]` 改成 `parents[4]` 实测过这一形，两格全绿。
 "根写错"比"没自证"更重（前者让判据根本不说话，后者只是没留底单），不能由存量名单兜着。
+第六态"函数内局部名"由 `test_scanRootsAreNeverBoundInsideAFunction` 管：它不是写错根，而是**本闸认不出根在哪**，
+性质与建档那轮的存量相同 ⇒ 带一张 `LOCAL_BASELINE`，新增即红、消化必须摘行（批 98 实测过它的坏法：
+把 8 档的根收进 `faceRoot` 之后，6 档的落点态只剩 `dynamic`，offender 仍是 0——绿在这里成了假事实源）。
 """
 
 from __future__ import annotations
@@ -94,6 +96,23 @@ pytestmark = pytest.mark.timeout(120)
 #: （包括有人把真 offender 偷偷加回这张表来换取那一格变绿）。
 BASELINE: set = set()
 
+#: ── LOCAL 存量表：同样只由本文件的 `_faceFindings(localGaps=...)` 现取生成 ──────────
+#: 建档那轮＝批 99（2026-10-19）。「面自证」那张表已收空，这张表记下的是**本闸认不出根位置**的档：
+#: 根绑在函数内的名字上，`_constTable` 解不出 ⇒ 那档连"有没有面"都不再被问。
+#: 纪律与 BASELINE 一致：新增即红、消化必须摘行；下一批把某一档的根提到模块级时，
+#: **同批要给它补上面自证**（提到模块级之后它才进入「仓内目录」那一支，那时才要求自证）。
+LOCAL_BASELINE = {
+    "tests/unit/agent/test_tool_experience_loop_offline_probe.py",
+    "tests/unit/api/test_experience_outcome_word_domain.py",
+    "tests/unit/context/test_injectorLifecycleHooksNeverRan.py",
+    "tests/unit/context/test_token_estimator_calibration.py",
+    "tests/unit/deploy/test_image_model_assets.py",
+    "tests/unit/evolution/rsi/test_rsi_proposal_activation.py",
+    "tests/unit/evolution/rsi/test_rsi_rollback_evidence.py",
+    "tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py",
+    "tests/unit/test_session_landing_guard.py",
+}
+
 
 # ── 取数：三样小工具，各自只解一件事，便于逐形反检 ─────────────────────────────
 def _constTable(tree: ast.AST) -> dict:
@@ -107,14 +126,48 @@ def _constTable(tree: ast.AST) -> dict:
     return out
 
 
-#: 静态根解出来的落点态，加上「动态值」共五态。**只有 DIR 参与面自证裁决**；
+def _scopedBindings(tree: ast.AST) -> dict:
+    """**任意作用域**的 `NAME = <expr>`（同名取首次绑定）——只用来认"根绑在函数里"这一形。
+    合规裁决不看它：认出来之后照样要求把根提到模块级，本闸不接受"函数里也算根"。
+    取首次绑定而不是最后一次：同一名字在文件里被改写过时，最后一次往往已经是运行时值，
+    那种档本来就不该被认成静态根（认成 LOCAL 反而会把修法指错）。
+    """
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            out.setdefault(node.targets[0].id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            out.setdefault(node.target.id, node.value)
+    return out
+
+
+def _rootStatus(expr, consts: dict, anchor: pathlib.Path, selfPath: pathlib.Path = None,
+                scoped: dict = None) -> str:
+    """一个根表达式的落点态。`scoped` 给了就多认一步：模块级解不出、按作用域解得出且落在
+    **仓内真实目录** ⇒ LOCAL（"根写得对、只是绑错了地方"），交给零容忍那一格点名。
+    """
+    status = _classifyRoot(_resolveRoot(expr, consts, anchor, selfPath=selfPath), anchor)
+    if status == DYNAMIC and scoped is not None and expr is not None:
+        alt = _classifyRoot(_resolveRoot(expr, scoped, anchor, selfPath=selfPath), anchor)
+        if alt == DIR:
+            return LOCAL
+    return status
+
+
+#: 静态根解出来的落点态，加上「动态值」「函数内局部名」共六态。**只有 DIR 参与面自证裁决**；
 #: OUTSIDE／MISSING 都是「根写错了」的形状，一律点名；FILE 与 DYNAMIC 不承载"面会被改窄"这件事，
-#: 既不点名也不免罪。把五态分开的理由：原来「解不出」与「解到别处」与「解到一个文件」都折叠成
+#: 既不点名也不免罪。把六态分开的理由：原来「解不出」与「解到别处」与「解到一个文件」都折叠成
 #: 同一个 None，于是"根少写一层"的那档会安静地掉出本闸的面——正是本闸要防的事，
 #: 被本闸的取数路自己放过去。
 #:   FILE 为什么免裁：单文件落点坏掉时 `transientTree` 一类入口当场抛 FileNotFoundError，是**响**的；
 #:   目录落点坏掉时只给出「零命中」，与干净同形，是**哑**的。本闸只管哑的那一类。
-DYNAMIC, DIR, FILE, OUTSIDE, MISSING = "dynamic", "dir", "file", "outside", "missing"
+#:   LOCAL（根绑在函数里的名字上）另开一格点名（`test_scanRootsAreNeverBoundInsideAFunction`）：
+#:   它不是"根写错"，而是"根本来写得对，只是绑在函数作用域里，`_constTable` 那张**模块级**表认不出"。
+#:   认不出＝那档整档掉出本闸的面。批 98 实测过这一形的价钱：把 19 档的根收进 `faceRoot` 之后，
+#:   offender 读数仍是 0、摘表两格全绿——绿在这里是假事实源。
+#:   修法只有一条：把根提到模块级，并把同档多处根写法收成同一个名字；提上去之后这档进入 DIR 那一支，
+#:   面自证的要求随即生效，所以**两处要同批改**，别只提根不补读数。
+DYNAMIC, LOCAL, DIR, FILE, OUTSIDE, MISSING = "dynamic", "local", "dir", "file", "outside", "missing"
 
 
 def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int = 0,
@@ -191,8 +244,8 @@ def _classifyRoot(path, anchor: pathlib.Path) -> str:
 
 
 def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
-               selfPath: pathlib.Path = None) -> list:
-    """这档里每个扫描落点的 `(入口, 根的落点态)`——落点态见 `_classifyRoot` 的四态。
+               selfPath: pathlib.Path = None, scoped: dict = None) -> list:
+    """这档里每个扫描落点的 `(入口, 根的落点态)`——落点态见上面六态的注释。
 
     按「接收者＋属性名」两维认，不按属性名单认：`ast.walk(tree)` 与 `os.walk(dir)`
     只差一个接收者，把前者当全仓扫描会把读数放大一个量级（本档取数路自己踩过的第一版错）。
@@ -205,14 +258,13 @@ def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
         recv = ast.unparse(call.func.value) if isinstance(call.func.value, ast.expr) else ""
         top = recv.split(".")[0].split("(")[0]
         if top == "ast_scan" and attr in SHARED_SCAN_ENTRIES:
-            root = _resolveRoot(call.args[0], consts, anchor, selfPath=selfPath) if call.args else None
-            out.append((attr, _classifyRoot(root, anchor)))
+            expr = call.args[0] if call.args else None
+            out.append((attr, _rootStatus(expr, consts, anchor, selfPath, scoped)))
         elif attr in FILE_ENUM_ATTRS and top not in NON_PATH_RECEIVERS:
-            root = _resolveRoot(call.func.value, consts, anchor, selfPath=selfPath)
-            out.append((attr, _classifyRoot(root, anchor)))
+            out.append((attr, _rootStatus(call.func.value, consts, anchor, selfPath, scoped)))
         elif attr == "walk" and top == "os":
-            root = _resolveRoot(call.args[0], consts, anchor, selfPath=selfPath) if call.args else None
-            out.append(("os.walk", _classifyRoot(root, anchor)))
+            expr = call.args[0] if call.args else None
+            out.append(("os.walk", _rootStatus(expr, consts, anchor, selfPath, scoped)))
     return out
 
 
@@ -270,11 +322,15 @@ def _hasFaceProof(tree: ast.AST, counts: set) -> bool:
     return False
 
 
-def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None) -> list:
+def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
+                  localGaps: dict = None) -> list:
     """挑出两类档：① 静态根解到仓外／指不到目录；② 有仓内扫描根却无面自证。
 
     `gaps` 传一个字典就回填 `rel -> 落点态`，供报错文案说清红的是哪一条规则——两类都算
     offender，但**修法相反**（①是把根写对，②是补断言），混成一句话人就不知道该动哪一处。
+    `localGaps` 回填第三类（根绑在函数里的名字上，`rel -> 那些入口名`）。它**不计进 offender**，
+    由 `test_scanRootsAreNeverBoundInsideAFunction` 单独零容忍：同一档报两处，人就分不清先动哪一步
+    （正确次序＝先把根提到模块级，那档随即进入 DIR 那一支，面自证的要求才落到它头上）。
     """
     offenders = []
     for rel in manifest:
@@ -286,7 +342,11 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None) -> list
         except SyntaxError:
             continue
         consts = _constTable(tree)
-        sites = _scanSites(tree, consts, root, selfPath=path.resolve())
+        sites = _scanSites(tree, consts, root, selfPath=path.resolve(), scoped=_scopedBindings(tree))
+        if localGaps is not None:
+            localEntries = sorted({entry for entry, st in sites if st == LOCAL})
+            if localEntries:
+                localGaps[rel] = localEntries
         gap = _rootGap(sites)
         if gap:
             if gaps is not None:
@@ -346,6 +406,38 @@ def test_staticRootsNeverPointOutsideOrNowhere():
     )
 
 
+def test_scanRootsAreNeverBoundInsideAFunction():
+    """扫描根不得绑在**函数内的名字**上——新增即红，存量按表登记、消化要显式摘。
+
+    为什么单独一格：这种档的根写得没错，错在绑的位置。`_constTable` 只收模块级绑定，于是
+    `faceRoot = PROJECT_ROOT / "neurova"` 这一行让整档的落点变成"动态值"——既不要求面自证，
+    也不算根写错，**安静地掉出本闸的面**。批 98 就是当场踩中的：那次为了消掉"报错里的根是把
+    被检表达式再抄一遍"，把 8 档的根收进函数局部，复算发现 6 档的落点态只剩 `dynamic`，
+    而 offender 仍是 0、摘表两格全绿。
+    为什么这一格允许带存量表（与「根写错」那格不同）：LOCAL 是本闸的**盲区**而不是写错的根，
+    建档那轮的存量与 `BASELINE` 同性质——所以纪律也同：新增即红、消化必须摘表，
+    两边的表都由本文件的 `_faceFindings` 现取，不从别处抄数。
+    反证在册：`test_localRootIsNamedNotIgnored` 必须交出**非空**的 localGaps，
+    否则这里的"零新增"只说明探测器没在跑。
+    """
+    locals_ = {}
+    _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), localGaps=locals_)
+    grew = sorted(set(locals_) - LOCAL_BASELINE)
+    assert not grew, (
+        "这些判据把扫描根绑在函数内的名字上（本闸按模块级常量解根，认不出＝那档整档不在面内）：\n  "
+        + "\n  ".join("%s ← %s" % (rel, ", ".join(entries)) for rel, entries in
+                      sorted((r, locals_[r]) for r in grew))
+        + "\n修法：把根提到**模块级**常量，并让同档所有扫描落点与报错消息都向同一个名字要根；"
+        "\n提到模块级之后这档就进入「仓内目录」那一支，面自证（`assert <扫描计数> > 数`）随即生效——"
+        "两处要同批改完，别只提根不补读数。"
+    )
+    dropped = sorted(LOCAL_BASELINE - set(locals_))
+    assert not dropped, (
+        "以下档的扫描根已经提到模块级了——把 LOCAL_BASELINE 里那几行摘掉再提交，别让它悬着：\n  "
+        + "\n  ".join(dropped)
+    )
+
+
 def test_ratchetRecordsImprovementLoudly():
     """存量被消化要**显式收表**：基线里有、现在不 offender 的档，必须从表里摘掉。"""
     now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT)))
@@ -355,6 +447,44 @@ def test_ratchetRecordsImprovementLoudly():
         "别让它悬着（悬着的后果：下一条真新增的 offender 会被旧表兜住而看不见）：\n  "
         + "\n  ".join(dropped)
     )
+
+
+@pytest.mark.parametrize("label, source, expectNamed", [
+    ("根绑在函数里的名字上（值是对的、位置不对）＝必须点名",
+     "from tests import ast_scan\nimport pathlib\n\n\n"
+     "def test_shape():\n"
+     "    faceRoot = pathlib.Path(__file__).resolve().parents[3] / 'neurova'\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(faceRoot, '.py')]\n"
+     "    assert hits == []\n", True),
+    ("控制格：根是**运行时形参**＝本来就不承载面的声明，不许误报",
+     "from tests import ast_scan\n\n\ndef test_shape(root):\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(root, '.py')]\n"
+     "    assert hits == []\n", False),
+    ("控制格：函数内的名字指向**不存在的目录**＝那是「根写错」那一支，不冒充 LOCAL",
+     "from tests import ast_scan\nimport pathlib\n\n\n"
+     "def test_shape():\n"
+     "    faceRoot = pathlib.Path(__file__).resolve().parents[3] / 'no_such_dir'\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(faceRoot, '.py')]\n"
+     "    assert hits == []\n", False),
+    ("控制格：根在模块级＝走正常那一支（DIR＋面自证），不该被 LOCAL 格误报",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Target = pathlib.Path(__file__).resolve().parents[3] / 'neurova'\n\n\n"
+     "def test_shape():\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\n"
+     "    assert hits == []\n", False),
+])
+def test_localRootIsNamedNotIgnored(tmp_path, label, source, expectNamed):
+    """第五态 LOCAL 要有牙：正检（函数内静态根）与三枚控制格（形参／指不到／模块级）各配一格。
+
+    没有这一格，`test_scanRootsAreNeverBoundInsideAFunction` 那句"零命中"就分不清是干净还是探测器
+    根本没在跑——本闸自己的三版失效（`parents[N]` 按仓根数、深度上限 8、存量表兜掉根写错）都是这一形。
+    """
+    (tmp_path / "neurova").mkdir()
+    (tmp_path / "tests" / "unit" / "ci").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "ci" / "sample.py").write_text(source, encoding="utf-8")
+    locals_ = {}
+    _faceFindings(tmp_path, ["tests/unit/ci/sample.py"], localGaps=locals_)
+    assert bool(locals_) is expectNamed, f"{label} ⇒ 判错：{locals_}"
 
 
 def test_surfaceReadingIsNotVacuous():
