@@ -64,76 +64,43 @@ class TestContextImports:
 
 
 class TestCollaborateImports:
-    """协作系统导入测试"""
+    """协作包导入测试。
+
+    批 109（§6-312 裁乙）退役了从未接线的协作模板半区，原先这里的 7 格
+    （`CollaborationTemplate`/`TemplateManager`/`TemplateType`/`AgentRole`/`TaskStep`/
+    `WorkflowDefinition`/`get_template_manager`）只是"能导入即绿"的形状检阅——
+    它们既不证活链路也不约束行为，随符号一并退。现役那份模板实现与消费链见
+    `neurova/agent/templates/collaboration_template.py` ＋ `neurova/agent/team.py`。
+    """
 
     def test_collaborate_package_import(self):
         """验证 neurova.collaborate 包可以导入"""
         import neurova.collaborate
         assert neurova.collaborate is not None
 
-    def test_collaboration_template_import(self):
-        """验证 CollaborationTemplate 可以从新路径导入"""
-        from neurova.collaborate import CollaborationTemplate
-        assert CollaborationTemplate is not None
-
-    def test_template_manager_import(self):
-        """验证 TemplateManager 可以从新路径导入"""
-        from neurova.collaborate import TemplateManager
-        assert TemplateManager is not None
-
-    def test_template_type_import(self):
-        """验证 TemplateType 可以从新路径导入"""
-        from neurova.collaborate import TemplateType
-        assert TemplateType is not None
-
-    def test_agent_role_import(self):
-        """验证 AgentRole 可以从新路径导入"""
-        from neurova.collaborate import AgentRole
-        assert AgentRole is not None
-
-    def test_task_step_import(self):
-        """验证 TaskStep 可以从新路径导入"""
-        from neurova.collaborate import TaskStep
-        assert TaskStep is not None
-
-    def test_workflow_definition_import(self):
-        """验证 WorkflowDefinition 可以从新路径导入"""
-        from neurova.collaborate import WorkflowDefinition
-        assert WorkflowDefinition is not None
-
-    def test_get_template_manager_import(self):
-        """验证 get_template_manager 可以从新路径导入"""
-        from neurova.collaborate import get_template_manager
-        assert callable(get_template_manager)
+    def test_scheduler_facade_symbols_import(self):
+        """现役调度链的六个名必须仍从门面取到（退役不许把活面一起关掉）。"""
+        from neurova.collaborate import (
+            AgentScheduler, FlowContext, ScheduledTask,
+            compute_next_run, get_scheduler, register_action_handlers,
+        )
+        assert callable(get_scheduler) and callable(compute_next_run)
+        assert callable(register_action_handlers)
+        assert AgentScheduler is not None and FlowContext is not None and ScheduledTask is not None
 
 
 class TestWorkflowImports:
-    """工作流系统导入测试"""
+    """工作流系统导入测试（现役面只有调度那一半，见 `test_collaborateIslandRetirement.py`）。"""
 
     def test_workflow_package_import(self):
         """验证 neurova.collaborate.workflow 包可以导入"""
         import neurova.collaborate.workflow
         assert neurova.collaborate.workflow is not None
 
-    def test_flow_orchestrator_import(self):
-        """验证 FlowOrchestrator 可以从新路径导入"""
-        from neurova.collaborate.workflow import FlowOrchestrator
-        assert FlowOrchestrator is not None
-
     def test_agent_scheduler_import(self):
         """验证 AgentScheduler 可以从新路径导入"""
         from neurova.collaborate.workflow import AgentScheduler
         assert AgentScheduler is not None
-
-    def test_flow_phase_import(self):
-        """验证 FlowPhase 可以从新路径导入"""
-        from neurova.collaborate.workflow import FlowPhase
-        assert FlowPhase is not None
-
-    def test_flow_event_import(self):
-        """验证 FlowEvent 可以从新路径导入"""
-        from neurova.collaborate.workflow import FlowEvent
-        assert FlowEvent is not None
 
     def test_flow_context_import(self):
         """验证 FlowContext 可以从新路径导入"""
@@ -161,15 +128,3 @@ class TestEndToEndFunctionality:
         budget = TokenBudget()
         assert budget.max_total == 16000
         assert budget.system_prompt == 1500
-
-    def test_template_type_enum_values(self):
-        """验证 TemplateType 枚举值"""
-        from neurova.collaborate import TemplateType
-        assert TemplateType.CODE_REVIEW.value == "code_review"
-        assert TemplateType.PAIR_PROGRAMMING.value == "pair_programming"
-
-    def test_flow_phase_enum_values(self):
-        """验证 FlowPhase 枚举值"""
-        from neurova.collaborate.workflow import FlowPhase
-        assert FlowPhase.IDLE.value == "idle"
-        assert FlowPhase.CONVERSATION.value == "conversation"

@@ -89,21 +89,17 @@ class Scan(NamedTuple):
     missingEnd: int
 
 
-#: 冻结基线＝本轮按上述口径实测的 12 对（值恒为 1，条目数即对数）。只准降不准升，新 key 即红。
-#: 取数分三族，逐对读过去确认过形状：
-#: - 5 对＝批 84 那座岛（`agent/templates/collaboration_template.py` ↔ `collaborate/{models,template}.py`，
-#:   全部 ratio=1.0）——§6-312 的退役批次落地后这 5 条应当一起消失；
+#: 冻结基线＝本轮按上述口径实测的 7 对（值恒为 1，条目数即对数）。只准降不准升，新 key 即红。
+#: 取数分两族，逐对读过去确认过形状：
 #: - 6 对＝`channels/{telegram,wechat}_ai_generation.py` 的六个 `generate_*`（0.90–0.97，按渠道复制的
 #:   AI 生成逻辑，两份都在活路上）；
 #: - 1 对＝`llm/providers/{openai,openrouter}_provider.py` 的 `_detect_capabilities`（0.9035）。
+#: 原第 3 族那 5 对（`agent/templates/collaboration_template.py` ↔ `collaborate/{models,template}.py`）
+#: 已随 §6-312 裁乙的退役批（批 109）消失——降基线是**本档自己红过之后**才收的（形态集 300：
+#: 摘行必须配"单独退回 offender"的形状红＋行为红双格），不是顺手调小。
 #: 本字典由 `scanProduction()` 现场导出后原样贴入，不手抄（抄错的方向永远是放行）。
 BASELINE: dict[str, int] = {
-    "class|CollaborationTemplate|neurova/agent/templates/collaboration_template.py|neurova/collaborate/template.py": 1,
-    "class|TaskStep|neurova/agent/templates/collaboration_template.py|neurova/collaborate/models.py": 1,
-    "class|TemplateManager|neurova/agent/templates/collaboration_template.py|neurova/collaborate/template.py": 1,
-    "class|WorkflowDefinition|neurova/agent/templates/collaboration_template.py|neurova/collaborate/models.py": 1,
     "method|_detect_capabilities|neurova/llm/providers/openai_provider.py|neurova/llm/providers/openrouter_provider.py": 1,
-    "method|from_dict|neurova/agent/templates/collaboration_template.py|neurova/collaborate/template.py": 1,
     "method|generate_image_to_image|neurova/channels/telegram_ai_generation.py|neurova/channels/wechat_ai_generation.py": 1,
     "method|generate_image_to_video|neurova/channels/telegram_ai_generation.py|neurova/channels/wechat_ai_generation.py": 1,
     "method|generate_keyframe_to_video|neurova/channels/telegram_ai_generation.py|neurova/channels/wechat_ai_generation.py": 1,
@@ -244,16 +240,22 @@ def test_scanFaceIsNonEmpty():
 
 
 def test_knownRealPairIsDetected():
-    """正控：D21 的起因那一对必须仍在命中面里，且拿的是**读数**不是"跑完没报错"。
+    """正控：命中面里必须仍有**真**双源，且拿的是读数不是"跑完没报错"。
 
-    少了这条，取数被改坏之后判据可以继续绿（面塌了就没有新增，永远不红）。
+    原起因那对（`agent/templates/collaboration_template.py` ↔ `collaborate/template.py`）已随
+    §6-312 裁乙的退役批消失，所以正检改钉仍在活路上的渠道 `generate_*` 双源；同时**反向**钉住
+    "退役那对确实不再被检出"——两个方向各钉一次，才分得开"真删干净"与"探测器坏了"（283/310 那一族）。
     """
     keys = {d.key for d in scanProduction().pairs}
-    needle = ("class|CollaborationTemplate|neurova/agent/templates/collaboration_template.py"
-              "|neurova/collaborate/template.py")
+    needle = ("method|generate_text_to_image|neurova/channels/telegram_ai_generation.py"
+              "|neurova/channels/wechat_ai_generation.py")
     assert needle in keys, (
-        "批 84 档案里那对 346/350 行同形的双源没被检出——是探测器失效，不是仓库变干净了。\n"
+        "两份都在活路上的渠道生成逻辑没被检出——是探测器失效，不是仓库变干净了。\n"
         f"现存 {len(keys)} 对：\n" + "\n".join(sorted(keys)))
+    leftover = [k for k in keys if "neurova/collaborate/template.py" in k or "neurova/collaborate/models.py" in k]
+    assert not leftover, (
+        "那座岛已按 §6-312 退役，命中面里却还留着它的双源对——说明实现没删净：\n  "
+        + "\n  ".join(sorted(leftover)))
 
 
 def test_noNewDuplicateImplementation():
@@ -286,10 +288,10 @@ def test_baselineMatchesMeasuredCount():
     就对不上账——而对不上账的方向永远是放行。
     """
     measured = scanProduction().pairs
-    assert len(BASELINE) == 12 and all(v == 1 for v in BASELINE.values()), (
+    assert len(BASELINE) == 7 and all(v == 1 for v in BASELINE.values()), (
         f"基线常量自身与本轮记录不符：{len(BASELINE)} 条 / 值 {sorted(set(BASELINE.values()))}")
-    assert len(measured) == 12, (
-        f"现测 {len(measured)} 对，与记录的 12 不符——要么真有人动了实现，"
+    assert len(measured) == 7, (
+        f"现测 {len(measured)} 对，与记录的 7 不符——要么真有人动了实现，"
         "要么扫描根／取数口径／阈值被改坏，两种都要当场看见")
 
 
