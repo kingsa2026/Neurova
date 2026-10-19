@@ -165,6 +165,39 @@ class TestRuleSetNotShrunk:
         assert module.memory_bytes("512Mi") == 512 * 1024**2
 
 
+class TestEnvReadFaceResolvesConstantAlias:
+    """读取面必须认「键名收进常量」那一形——不认就把活配置报成死配置。
+
+    `neurova/api/cors_policy.py` 把 CORS 键名收成单源常量 `ORIGINS_ENV_KEY`，读点是
+    `config.get(ORIGINS_ENV_KEY, "")`，而 `config.get` 内部就是 `os.environ.get`
+    （`neurova/core/config.py:457`）。门禁原先只跟字符串字面量 ⇒ helm 里这条**真被读取**
+    的声明被报成 R5-env 死配置。这就是子集内两格常驻红的实测成因
+    （§6-336 那 12 条里 `test_deploy_config_guard.py` 的 2 条）。
+    """
+
+    def test_production_aliasReadIsInFace(self):
+        keys = _load_gate_module().parse_app_read_env_keys()
+        assert "NEUROVA_CORS_ORIGINS" in keys, (
+            "经常量别名读取的键没进读取面 ⇒ R5-env 会把真配置报成死配置"
+        )
+
+    def test_aliasResolutionAcceptsOnlyDeclaredEnvShapedLiterals(self):
+        """三形各归各位：声明过的别名要算读到的、没声明的变量名不算、值不是键形态的不算。
+
+        只测第一形就等于把别名解析做成无界扩张——那样 R5-env 从"报死配置"退化成"什么都不报"。
+        """
+        gate = _load_gate_module()
+        declared = gate.collectEnvKeys([
+            'ORIGINS_KEY = "NEUROVA_ALIAS_HIT"\n',
+            'VALUE = config.get(ORIGINS_KEY, "")\n',
+        ])
+        assert declared == {"NEUROVA_ALIAS_HIT"}, declared
+        undeclared = gate.collectEnvKeys(['VALUE = os.environ.get(SOME_LOCAL_NAME, "")\n'])
+        assert undeclared == set(), "别名未声明却把变量名本身当成环境变量"
+        wrongShape = gate.collectEnvKeys(['TIMEOUT = "30"\n', 'VALUE = getenv(TIMEOUT, "")\n'])
+        assert wrongShape == set(), "常量值不是环境变量名形态却被收进读取面"
+
+
 class TestCiWiring:
     def test_cnb_push_pipeline_runs_gate(self):
         scripts = json.dumps(_cnb_main().get("push"), ensure_ascii=False)
