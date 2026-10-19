@@ -5976,7 +5976,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       需单开一批；② `mcp_config._infer_transport()` 里重复了一份 `_validate_types()` 已有的
       `tool_capabilities` 校验（同文件内两处同形，属冗余而非断言缺口）；③ `shared_config.py` 三处
       `except Exception: pass` 把加密层故障吞成静默降级（教义第 2 条形态），与本批根因不同；
-      ④ 依赖声明与实装口径不符：`requirements.txt:91` 写 `mcp>=1.2.0`，而代码取的是 2.x 才有的名字
+      ④ 依赖声明与实装口径不符：`requirements.txt` 原写 `mcp>=1.2.0` 而代码取的是 2.x 才有的名字（**已落地＝§6-334／`33a5f1c1`**：下界收到 2.0.0、注释改判为「四处齐备」，行号现为 :100）
       （`mcp_client` 的 `streamable_http_client`、本批 `mcp_server_api` 的 `mcp_types.version`），
       且两份 lock 钉 2.2.0 而 venv 实装 2.3.0——声明的下界今天不成立；
       ⑤ `docs/Neurova_Agent工具扩展计划_2026-09-12.md:180` 说 `POST /mcp-servers/{id}/test` 从未实现，
@@ -7442,3 +7442,86 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：上面①②③；§6-318 边界①②；§6-317 同池名两读数即红；R5-env 待裁修法；
       以及全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293）。
     - **本会话下一枚空号现查 §6-334**（写前必须现场重取；本笔落库时该读数为 333）。
+
+334. **批 105 · mcp 依赖声明口径收口到与实装同代，并为导出面换运输落好前置锁（✅ `33a5f1c1` 下界 2.0.0＋注释改判 / `20b412ce` 子集 640→641 / `14c03ab1` 契约锁六格）** 🟢 —— 用户 2026-10-19 点单"甲＋乙"。甲三刀里两刀落地、一刀出成三态票；乙按"改现役符号须先立判据"先落锁。
+
+    - **上一轮评估把甲-2 的方向判反了**（本格先纠自己）：重估报告写的是"ci 那行重复声明违反单一声明源，该收掉"。
+      复核实状后发现守卫 `TestMcpSdkDeclaredForRuntime::test_ci_declarations_agree` **正要求** CI 侧那份也在
+      （docstring 写明"否则薄环境里 MCP 面测试静默跳过"）⇒ 该改判的是 `requirements.txt` 里那句
+      "requirements-ci.txt 不再重复声明（单一声明源）"，删那行会让守卫红。教训同 §6-333：
+      登记项与既有判据谁先碰面，实状说话。
+    - **下界与实装不同代是这格的根**：两份清单原写 `mcp>=1.2.0`，而生产在模块级 `from mcp_types.version import …`
+      （`mcp_server_api.py`，§6-302 为不手抄版本列表取的 SDK 单源）。PyPI 元数据实证
+      `mcp-types` 自 **mcp 2.0.0** 起才是 mcp 的依赖（1.2.0／1.9.4 的 requires_dist 里没有它）。
+      按旧下界装出 1.x：客户端 `_SDK_AVAILABLE=False` 让全部 MCP 连接失败，服务端面在装载表里因
+      `ModuleNotFoundError` 被整张跳过——而"声明存在"那族守卫全绿。
+    - **判据落点被并发会话冲掉一次（形态集 260 实证第二次）**：三格最初并进
+      `test_dev_path_and_runtime_dep_guards.py::TestMcpSdkDeclaredForRuntime`，红灯也确实从那里跑出
+      （`assert (1, 2, 0) >= (2, 0, 0)`）；随后并发会话把**整档覆盖回 HEAD**，我的段落连同它自己未提交的
+      四个 hunk 一起没了。故改落独立新档 `tests/unit/test_mcpSdkFloorMatchesImportedEra.py`，并在 docstring
+      写明"为什么不并进那一类"：那类钉**四处声明齐不齐**，本档钉**范围对不对**，两条不变量、互不重复。
+      变异两枚各咬不同形状（只改一份 → 下界格＋同值格同时红；只改另一份 → 只红同值格）。
+    - **乙 的前置锁六格**（`tests/unit/api/test_mcpServerFacePromisesSurviveTransport.py`）：缺的那一层是
+      "HTTP 面到底有没有把请求交给核心"——核心侧与协议信封侧各有档，中间空着则换运输时最容易发生
+      "端点里另起一套鉴权/一套分派/一份清单，核心全绿而对外行为已换"。四格全部按**现场量得的现值**写：
+      匿名 `initialize`／`tools/list` 实测 401，并配"真平台令牌仍能过"的控制格（单向断 401 会被"谁都拒"糊过去）。
+      三枚变异各咬各格：摘鉴权依赖 → 只红匿名格且控制格仍绿；端点自拼清单 → 只红清单同源格；端点自分派 → 红三格。
+      首跑红两格，红的是我自己的断言替现契约编故事：① 端点只在真错时补 `isError`，成功响应**不带该键**；
+      ② `workflow:*` 不存在时走 `execute_workflow_as_tool` 的 `success=False` 业务体而**不是** MCP `isError` 信封。
+      ②不是测试 bug，是下面 B 格的登记根据——本档不把它锁成正确行为。
+    - **本档性质如实写明**：契约锁是**设计成两侧同绿**的回归网，没有红→绿那一段；牙齿由三枚变异证，
+      不由"它现在能过"证。
+    - **乙 的可行性读数（把代价改写了）**：SDK `StreamableHTTPSessionManager` 有 `stateless=True`
+      （"creates a completely fresh transport for each request… No session ID needed"）⇒ 换面**可以不破坏**
+      今天"不 initialize 也能 tools/list"的形状，§6-302 那 12 格协议判据能原样当回归网。
+      乙 的代价因此从"契约破坏性改造"降为"接线工程"（身份边界 + ASGI 挂载 + lifespan），
+      但下面 A 格是换面时必须一起处理的，否则是把缺陷搬进新运输。
+    - **新登记（本批量到、未动，全需人裁）**：
+      A. **导出 MCP 面不带身份**：全仓 `set_request_user_id` 只落在 `chat.py`／`computer.py`／`console.py`／
+         `mobile_pairing.py`／`channels/channel_router.py` 五处请求边界，`mcp_server_api.py` **不在其中**
+         （AGENTS.md §3 那份名单里也没有这一面）。后果可算：核心 `_current_user_id()` 取不到 ⇒
+         工作流调用带 `user_id=None`，`_call_computer` 里 `if uid:` 那条身份透传恒假。
+         处置二选一：把这一面补成第六个边界（与乙同批最自然），或明确承认它是"无身份的共享面"并写明后果。
+      B. **同一个失败两种信封**：无前缀未知名走 MCP `isError` 信封，`workflow:*` 不存在走 `success=False` 业务体；
+         外部客户端对同类错误看到两种形状。
+      C. **技能面不过治理链**：`_call_skill` 直调 `skill.execute(arguments, None)`，而同文件的 `computer_*` 那条
+         明确 `skip_governance=False` 并走 `ToolExecutor._execute_single_tool`。MCP 导出的技能调用该不该过
+         governance 预检与审计，与 `docs/01-architecture/25-mcp-governance.md` 的 M3/M4 同一口径——
+         未取证是否为有意设计，先登记。
+      D. **`mcp_manager` 三态票（甲-1 的档案）**：`neurova/execution_engine/mcp_manager.py` 424 行，
+         生产**零 importer**（全仓非自身引用只剩 `execution_engine/__init__.py:8` 的模块清单与
+         `execution_layers/__init__.py:15` 的同名警告两处 docstring）。
+         来历（`git log -S "class MCPManager"` 实证）：`fa335b27` 08-31 曾以"P2-7 删除遗留 mcp_manager
+         （零生产消费方）"删过它，`34b0678b` 09-02 又随"元认知/MCP 模块落库"回来——
+         即它已被判死一次并复活，复活动机无档可查。
+         现役替代实质比对：`mcp_client.py` 覆盖 stdio/http/sse 且带熔断/退避/OAuth/防火墙/审计与十余档常驻测试；
+         `mcp_manager` 只有手搓 JSON-RPC（`:300`／`:345`）＋ `subprocess.Popen`（`:221`，被
+         `test_asyncBlockingSubprocessRatchet.py` 冻结基线记 1 处）＋ **websocket 传输**
+         （`TransportType:29` 四值含 WEBSOCKET）——而 websocket 在役面（`mcp_config._VALID_TRANSPORTS`
+         ＝ {stdio,http,sse}）没有，属**全仓唯一实装且无替代**，按纪律一律判**需人裁**，
+         不得进可删清单（删即永久失去这一形，尽管它零调用方且非现行 spec 形态）。
+         反向守卫经查**前提是假的**：`test_t09_selfloop_face_ruling.py:207-219` 声称"MCPConnection 的真实
+         消费点是 mcp_manager（它从 tool_layers.schemas 取它构造连接记录）"，实读 `mcp_manager.py` 不 import
+         `tool_layers.schemas`，它在 `:116` **自带同名 `class MCPConnection`**；而 `schemas.py:26` 那份
+         除门面 re-export（`tool_layers/__init__.py:24/136`）与测试外**零生产消费者**。
+         ⇒ 那格绿的是"两个同名类各自存在"，不是它声称保护的那条接线（形态集 268／243 同族）。
+         三态：**删**（须同批摘棘轮基线一行 + 改 t09 那格 + 处理 manual 探针⑤）｜
+         **留**（承认它是 websocket 传输的唯一实装，代价是仓内第二套 MCP 客户端继续违反教义第 6/7 条）｜
+         **先只修那条假前提守卫**（最小、与删除解耦，本批推荐）。
+      E. venv 实装 `mcp 2.3.0` ↔ 两份 lock 钉 `2.2.0` 属**本机环境**漂移，不是仓内缺陷，不入本批改动。
+    - **过程与自我更正两笔**：① `14c03ab1` 首版正文把测试池写成 +126/−0，实读 numstat 是 +152/−0——
+      错在誊写不在次序（把上一笔的 121 顺延了），未推送窗口内 `--amend -F` 只改正文，
+      树哈希 `2c412dc4…` 前后复证一致，被作废的旧号不入账、也不落成反引号引用（形态集 211/282 同族——这句本身第一次落笔时就把那个作废号包进了反引号，被台账守卫当场抓出，正是 282 说的那形）；
+      ② 本会话在同树里看到并发会话未提交 34 个 tracked 档，故提交一律带显式路径，
+      需要改那档被多人碰过的守卫文件时改用"HEAD 内容＋只重放我的两处替换"再 `git add`，
+      全程带锚点唯一性断言（没成功——文件随后被整档覆盖，见上条）。
+    - **净 LOC 逐笔抄 numstat**：`33a5f1c1` 生产 +0/−0、基建池 +16/−4（`requirements.txt` +13/−3、
+      `requirements-ci.txt` +3/−1）、测试池 +121/−0；`20b412ce` 生产 +0/−0、测试/基建池 +6/−0
+      （子集 640→641，现读 `grep -vcE '^\s#|^\s*$'` ＝ 641）；`14c03ab1` 生产 +0/−0、测试池 +152/−0。
+      本批三笔合计生产池净 **0**（无生产代码改动）。
+    - **划闭**：§6-302 末格登记的第四刀「依赖声明与实装口径不符」由本笔 `33a5f1c1` 落地；
+      同格里的 ①（resources/prompts 未实装）与 ③（`shared_config` 三处 `except pass` 吞加密层故障）
+      仍开，②（`_infer_transport` 内重复的 `tool_capabilities` 校验）仍开。
+    - **A/B 与活体**：本批三笔均无生产行为改动（两份 requirements 的注释/范围 + 两份测试档），
+      故未跑宽域 A/B 与活体——如实标注为"未做"，不当已证；乙 实施那一批必须补齐这两段。
+    - **本会话下一枚空号现查 §6-335**（写前必须现场重取；本笔落库时该读数为 334）。
