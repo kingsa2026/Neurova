@@ -3388,6 +3388,10 @@ tests/unit/collaboration/test_schedulerLiveSurfaceIsPinned.py
 # 三档死码（models/template/workflow.orchestrator，共 863 行）本体已删。5 格里：1 格现役门面符号（收口不许关掉活面）、
 # 1 格子进程面自证（"死档缺席"这个零必须由真跑起来的读数给出）、1 格拖拽反检、1 格档本体不在树里、1 格生产侧零悬空引用。
 tests/unit/collaboration/test_collaborateIslandRetirement.py
+# 批 109（§6-311 裁乙第三刀）：core 那份 870 行 `FlowOrchestrator` 连同它自产自销的 1005 行契约测试一起退。
+# 5 格里：两份档本体都不在树里（shim 与它的测试必须同批）、三条根零悬空导入、同一取数口对现役替代必须报非零
+# （面自证）、`class FlowOrchestrator` 在生产树归零（教义 7 闭环：同一功能只剩一处实现被消费）、替代入口可导入。
+tests/unit/core/test_flowOrchestratorShimRetirement.py
 # 批 88（§6-316）：导入通道口径收回一处——四种取法都认（含相对形与父包取名形），预筛词取末段名不取全名。
 # 两枚差分钉住这是真漏检的修补：把解析退回只比 node.module，同一注入应变绿。
 tests/unit/ci/test_importChannelDetectorSeesAllFourForms.py
