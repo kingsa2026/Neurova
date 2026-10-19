@@ -359,7 +359,13 @@ def register_endpoint_routers(app) -> int:
     for module_path, prefix, description in ENDPOINT_MODULES:
         try:
             module = importlib.import_module(module_path)
-            if hasattr(module, "router"):
+            if hasattr(module, "mountFace"):
+                # 挂载形态由模块自述（见 `mcp_server_api.mountFace`）：装配层只问"挂上去"，
+                # 不问"怎么挂"——否则换运输时这里要长出第二种 if。
+                module.mountFace(app, "/api" + prefix, description)
+                registered += 1
+                logger.debug("Mounted self-describing face: %s (%s)", prefix, description)
+            elif hasattr(module, "router"):
                 app.include_router(module.router, prefix="/api" + prefix, tags=[description])
                 registered += 1
                 logger.debug("Registered router: %s (%s)", prefix, description)
