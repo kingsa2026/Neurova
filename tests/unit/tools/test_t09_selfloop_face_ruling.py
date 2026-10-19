@@ -38,8 +38,17 @@ ToolSource    sites=2  tool_layers/__init__.py:24 import ← 孤立再导出
 - `ToolSource` 是 `ToolSchema.source` 字段的类型标注——**标注不构成消费点**，
   而 `ToolSchema` 自身已在本批退场，它随之失去唯一挂靠点。
 
-故同批三条退场，`schemas.py` 只保留仍在役的 `ToolType`（枚举）与 `MCPConnection`
-（`mcp_client` 的配置契约）。**不留空壳、不留「导出但无人读」。**
+故同批三条退场，`schemas.py` 保留 `ToolType` 与 `MCPConnection` 两条。
+
+**2026-10-19 就地纠正本文件的两处假前提**（原判据把"保留"的理由写成
+「`MCPConnection` 是 `mcp_client` 的配置契约」并拿 `mcp_manager` 里那句
+`MCPConnection(` 当消费证据）。实读：`mcp_client.py` 里 `MCPConnection` 出现 0 次；
+`mcp_manager.py:116` **自带同名类**（字段 `connection_id`／`server_config`），
+它不 import `tool_layers.schemas`。而 `schemas.py:26` 那一份除门面 re-export 外
+**零生产消费者**——`ToolType` 同样零消费者。也就是说下面这句原标准
+「不留空壳、不留『导出但无人读』」当时就被自己违反了两条，只是那格绿着。
+现由 `test_schemasModuleKeepsOnlyTheLiveContract` 真咬住，并把这两条登记为
+待裁（`SCHEMAS_KEPT_UNREAD_PENDING`，裁它的票是 §6-334 的 D 票）。
 
 ## 与 `api/endpoints/tool_schema.py` 的边界（同名第二份不连坐）
 
@@ -71,6 +80,61 @@ RETIRED_BY_THIS_TREE = RETIRED_BY_THIS_BATCH
 
 #: 同批**必须保留**的符号：它们与退役面同文件但仍在役。
 KEPT_IN_SCHEMAS = ("ToolType", "MCPConnection")
+
+#: 保留但**零生产消费者**的符号——本表是"待裁"而不是"豁免"。
+#: 双向咬合：新增零消费者的留下符号必须进来（否则第一问红），而它一旦被接线或被删
+#: 就必须**从这里摘掉**（否则第二问红）。每条都要写清裁它的那张票。
+SCHEMAS_KEPT_UNREAD_PENDING: dict[str, str] = {
+    "ToolType": (
+        "§6-334 D 票同源待裁：除门面 re-export 外零消费者。裁「接线」还是「随 schemas.py 一起退役」"
+        "属人裁——本批只把假前提守卫改对，不动符号。"
+    ),
+    "MCPConnection": (
+        "§6-334 D 票：与 `mcp_manager.py:116` 自带的那份同名而不同源；门面 re-export 之外零消费者。"
+        "裁「接线／退役／留」都要先看 websocket 传输那一形（全仓唯一实装），故需人裁。"
+    ),
+}
+
+
+def _schemasFace(symbol: str):
+    """把 `symbol` 在生产面的落点分成三份：定义处 / 门面再导出 / 真消费者。
+
+    按 AST 判代码身份，不按词：门面那行的 `from .schemas import X` 与 `__all__` 里的
+    `"X"` 都是"导出"，不是"有人读"（本档上面给退役三符号用的正是这条口径——
+    「import ← 孤立再导出（无消费）」）。取数走共享入口 + 文本预筛。
+    """
+    import ast
+
+    from tests import ast_scan
+
+    defs: list[str] = []
+    facades: list[str] = []
+    consumers: list[str] = []
+    for ref in ast_scan.sourceRefsUnder(PROJECT_ROOT / "neurova", hints=(symbol,)):
+        rel = ref.path.relative_to(PROJECT_ROOT).as_posix()
+        owns_definition = False
+        mentions = set()
+        for node in ast.walk(ast_scan.transientTree(ref.path)):
+            if isinstance(node, ast.ClassDef) and node.name == symbol:
+                owns_definition = True
+            elif isinstance(node, (ast.Name, ast.Attribute)):
+                mentions.add(node.id if isinstance(node, ast.Name) else node.attr)
+            elif isinstance(node, ast.ImportFrom):
+                mentions.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+            ):
+                try:
+                    mentions.update(ast.literal_eval(node.value))
+                except (ValueError, SyntaxError):
+                    pass
+        if owns_definition:
+            defs.append(rel)
+        elif symbol in mentions and rel.endswith("__init__.py"):
+            facades.append(rel)
+        elif symbol in mentions:
+            consumers.append(rel)
+    return defs, facades, consumers
 
 
 class TestSelfLoopFaceIsRetired:
@@ -135,14 +199,33 @@ class TestSelfLoopFaceIsRetired:
     def test_schemasModuleKeepsOnlyTheLiveContract(self):
         """`schemas.py` 只留仍在役的契约——不留「导出但无人读」的空壳。
 
-        `ToolType` 是枚举（`ToolSource` 退场后仍被 `MCPConnection` 之外的代码按值用）；
-        `MCPConnection` 是 `mcp_client` 的配置契约。两者都必须仍在。
+        这一格按它自己的名字（LiveContract）咬两问：
+        ① 每个被留下的符号必须有**真生产消费者**（门面再导出不算——本档给退役三符号
+           用的正是「import ← 孤立再导出（无消费）」这条口径），否则必须出现在
+           `SCHEMAS_KEPT_UNREAD_PENDING` 里并写明裁它的票；
+        ② 那张待裁表必须**恰好等于**实测的零消费者集合：漏一个＝把新空壳静默放行，
+           多一个＝它已被接线或已删还挂着豁免。
         """
         text = (PROJECT_ROOT / "neurova/tool_layers/schemas.py").read_text(encoding="utf-8")
+        unread: set[str] = set()
         for kept in KEPT_IN_SCHEMAS:
             assert f"class {kept}" in text, (
                 f"仍在役的 {kept} 被本批连带删除——退役必须落在符号级，不是文件级"
             )
+            _defs, facades, consumers = _schemasFace(kept)
+            if not consumers:
+                unread.add(kept)
+            assert consumers or kept in SCHEMAS_KEPT_UNREAD_PENDING, (
+                f"{kept} 零生产消费者（门面再导出 {facades} 不算有人读）却没登记待裁——"
+                f"这正是本档声称「不留导出但无人读」要拦的形状。要么接线，要么进 "
+                f"SCHEMAS_KEPT_UNREAD_PENDING 并写清裁它的票。"
+            )
+        assert unread == set(SCHEMAS_KEPT_UNREAD_PENDING), (
+            f"待裁表与实测分叉：实测零消费者={sorted(unread)} 表内="
+            f"{sorted(SCHEMAS_KEPT_UNREAD_PENDING)}（多了要摘行并附依据，少了要补行）"
+        )
+        for symbol, why in SCHEMAS_KEPT_UNREAD_PENDING.items():
+            assert "§6-" in why, f"{symbol} 的待裁依据没写票号：{why!r}"
 
     def test_barrelNoLongerExportsTheRetiredThree(self):
         """barrel 的导入与 `__all__` 条目必须逐条消失。
@@ -204,16 +287,46 @@ class TestReverseControlsStillHold:
                 f"{symbol} 判据类退成 {judge}——自循环面的退场依据（真面已存在）不成立"
             )
 
-    def test_mcpConnectionWiringStaysLive(self):
-        """`MCPConnection` 的消费方（`mcp_client`）不得被本批波及。
+    def test_twoMCPConnectionClassesAreDistinctNotOneContract(self):
+        """同名两枚 `MCPConnection` 是**两份不同的类**，不是一条契约的两个面。
 
-        `MCPConnection` 未登记进取数表（它不是死线，是本批的**边界守卫**），
-        故直接读源码事实。它的真实消费点是 `execution_engine/mcp_manager.py`
-        （同名同源：`mcp_manager` 从 `tool_layers.schemas` 取它构造连接记录）。
+        本格此前写的是「`MCPConnection` 的真实消费点是 `execution_engine/mcp_manager.py`
+        （它从 `tool_layers.schemas` 取它构造连接记录）」——**那句是假的**，2026-10-19
+        实读纠正：`mcp_manager.py` 在 `:116` **自带同名 `class MCPConnection`**
+        （字段是 `connection_id`／`server_config`），它不 import `tool_layers.schemas`；
+        而 `schemas.py:26` 那一份（字段 `server_id`／`transport`）除门面 re-export 外
+        **零生产消费者**，且 `mcp_client.py` 里 `MCPConnection` 出现 **0 次**
+        （旧文那句「消费方是 mcp_client」同样不成立）。
+
+        所以旧断言 `"MCPConnection(" in manager` 一直为真，却真在**另一份类**上——
+        典型的同名自咬（形态集 268／243）。本格改成钉住"两份独立"这件事本身：
+        谁要是把它们并成一份、或给 schemas 那份接上真消费者，这格会改变状态，
+        必须回来重判 §6-334 的 D 票（删｜接线｜留）。
         """
-        schemas = (PROJECT_ROOT / "neurova/tool_layers/schemas.py").read_text(encoding="utf-8")
-        assert "class MCPConnection" in schemas, "MCPConnection 被本批连带删除"
-        manager = (PROJECT_ROOT / "neurova/execution_engine/mcp_manager.py").read_text(encoding="utf-8")
-        assert "MCPConnection(" in manager, (
-            "mcp_manager 不再构造 MCPConnection——本批把活着的配置契约连坐了"
+        import ast
+
+        from tests import ast_scan
+
+        manager_path = PROJECT_ROOT / "neurova/execution_engine/mcp_manager.py"
+        managerTree = ast_scan.transientTree(manager_path)
+        assert any(isinstance(n, ast.ClassDef) and n.name == "MCPConnection"
+                   for n in ast.walk(managerTree)), (
+            "mcp_manager 不再自带 MCPConnection——两份同名类的关系变了，"
+            "本格与 §6-334 的 D 票都要重判"
+        )
+        importedFromSchemas = [
+            node for node in ast.walk(managerTree)
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("tool_layers.schemas")
+            or isinstance(node, ast.ImportFrom) and any(
+                a.name == "MCPConnection" for a in node.names)
+        ]
+        assert not importedFromSchemas, (
+            f"mcp_manager 现在从别处 import MCPConnection（{[n.module for n in importedFromSchemas]}）"
+            "——两份已并成一条契约，本格前提没了：请把 §6-334 的 D 票按「接线」重判，"
+            "并把 schemas 那份从待裁表里摘掉"
+        )
+        clientText = (PROJECT_ROOT / "neurova/tool_layers/mcp_client.py").read_text(encoding="utf-8")
+        assert "MCPConnection" not in clientText, (
+            "mcp_client 开始引用 MCPConnection——schemas 那份有了真消费者，"
+            "SCHEMAS_KEPT_UNREAD_PENDING 必须摘行（上一格会红，那是对的）"
         )
