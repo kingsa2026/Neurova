@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +31,9 @@ from neurova.evolution.rsi.self_improvement_proposer import (
     ProposalType,
     SelfImprovementProposer,
 )
+
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = Path(__file__).resolve().parents[4] / "neurova"
 
 MANIFEST_OK = (
     "name: rsi_fix_sleep\n"
@@ -244,17 +248,19 @@ def test_proposer_requires_an_agent_id(tmp_path):
 def test_no_agents_mailbox_left_in_production_code():
     """票面净删除断言：生产源码里不再有 `.agents` 这个死信箱路径。"""
     import re
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parents[4] / "neurova"
     pattern = re.compile(r"""["']\.agents[/"']""")
+    sources = sorted(NEUROVA.rglob("*.py"))
+    assert len(sources) > 500, (
+        f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄，"
+        "「死信箱零引用」那句就不来自代码")
     offenders = [
-        str(p.relative_to(root)) for p in root.rglob("*.py")
+        str(p.relative_to(NEUROVA)) for p in sources
         if "__pycache__" not in p.parts and pattern.search(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, f"仍写/读 .agents 死信箱：{offenders}"
 
-    source = (root / "evolution" / "rsi" / "self_improvement_proposer.py").read_text(
+    source = (NEUROVA / "evolution" / "rsi" / "self_improvement_proposer.py").read_text(
         encoding="utf-8")
     for name in ("_apply_proposal_to_disk", "_remove_applied_files", "_get_apply_target_path"):
         assert name not in source, f".agents 时代的残留方法：{name}"

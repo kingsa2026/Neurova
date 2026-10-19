@@ -19,6 +19,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,11 @@ from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
 
 # 唯一真实梯度所在（ADR 0016 第 5 条：起点 0.85 / 目标 0.8）
 GRADIENT_PARAM = "muscle_memory_threshold"
+
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+#: 这里同时修掉一处**根写错**：原先函数内 `parents[2]` 实扫 `tests/unit`（2050 档），
+#: 而本档 docstring 声明的域是 RSI 那棵子树。两侧现跑同一谓词读数都是零 ⇒ 修根行为中性。
+RSI_DOMAIN = Path(__file__).resolve().parents[4] / "neurova" / "evolution" / "rsi"
 
 
 # ── 1. 真回滚必须留痕 ─────────────────────────────────────────────
@@ -369,17 +375,23 @@ def test_no_inline_second_rollback_decision(rsi_probe_factory):
     170 个受保护文件共享机器时撞 30s 默认墙钟（2026-09-22 构建 `cnb-2p6-1k347lfg1`
     实测 timeout 转红）——判据与整体代码量、与机器速度都无关，墙钟上界不成立，
     故粒度收窄到判据实际的作用域，并按受保护子集惯例显式声明用例级时限。
+
+    面自证是批 100 补的：那一版之前，根写成函数内的 `parents[2]`，实扫的是 `tests/unit`——
+    声明着 RSI 子树、看着 tests 目录，还因为根绑在函数里而整档掉出面自证棘轮的面。
     """
     import ast
-    from pathlib import Path
 
     import tests.ast_scan as ast_scan
 
-    root = Path(__file__).resolve().parents[2]
     allowed = {"rollback_manager.py"}
+    # 面读数由共享枚举入口现取：预筛命中数不随根的大小变，证不了这条判据在看那棵子树。
+    surface = len(ast_scan.filesUnder(RSI_DOMAIN))
+    assert surface > 12, (
+        f"扫描面现读 {surface} 档（根＝{RSI_DOMAIN}）——量级不对＝根指错了地方，"
+        "下面那句「回滚判据只有一处」根本不来自代码")
     offenders: list = []
     # 文本预筛：命中点必然是 `gain < 0` 那段比较，没有 `gain` 字样的文件不可能命中
-    for path, node in ast_scan.nodeScan(root, hints=("gain",)):
+    for path, node in ast_scan.nodeScan(RSI_DOMAIN, hints=("gain",)):
         if path.name in allowed:
             continue
         if not isinstance(node, ast.Compare):

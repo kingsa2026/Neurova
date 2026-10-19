@@ -22,10 +22,14 @@ P1-2 重复技能合并能力未接线
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
 from tests.unit.skills.creation_helpers import register_proven_skill
+
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
 
 STEPS = [{"tool": "file_read", "params": {"path": "report.txt"}},
          {"tool": "file_write", "params": {"path": "out.txt"}}]
@@ -551,14 +555,15 @@ class TestUnifiedNamingIsActuallyWired:
 
         这是"名不副实"的直接判据：函数存在不等于统一命名存在。
         """
-        import pathlib
-
-        root = pathlib.Path(__file__).resolve().parents[3] / "neurova"
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄，"
+            "下面那句「有生产调用方」就不来自代码")
         hits = []
-        for path in root.rglob("*.py"):
+        for path in sources:
             text = path.read_text(encoding="utf-8")
             if "canonical_skill_id" in text and path.name != "creation_governance.py":
-                hits.append(str(path.relative_to(root)))
+                hits.append(str(path.relative_to(NEUROVA)))
         assert hits, "canonical_skill_id 仍无生产调用方（统一命名未接线）"
 
     def test_three_write_arms_land_on_the_same_skill_id(self, tmp_path):

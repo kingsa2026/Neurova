@@ -21,6 +21,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "_tool_experience_loop_probe.py"
+#: 取证锚点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+REPO_AGENTS = REPO_ROOT / "data" / "agents"
 
 
 class TestOfflineProbeScript:
@@ -45,13 +47,15 @@ class TestOfflineProbeScript:
         技能库路径在生产装配点里是相对路径，脚本若不在临时目录下跑，
         一次只读取证就会往仓库里落下 `data/agents/loop-probe-cli/skills`。
         """
-        repo_agents = REPO_ROOT / "data" / "agents"
-        before = {p.name for p in repo_agents.iterdir()} if repo_agents.exists() else set()
+        before = {p.name for p in REPO_AGENTS.iterdir()} if REPO_AGENTS.exists() else set()
+        assert len(before) > 5, (
+            f"取证前仓内 agents 目录现读 {len(before)} 个条目（锚＝{REPO_AGENTS}）——"
+            "锚指错或目录缺席时 before/after 都是空集，「没留下 artifacts」这句判定根本不来自代码")
         subprocess.run(
             [sys.executable, str(SCRIPT), "--json"],
             cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
         )
-        after = {p.name for p in repo_agents.iterdir()} if repo_agents.exists() else set()
+        after = {p.name for p in REPO_AGENTS.iterdir()} if REPO_AGENTS.exists() else set()
         assert after - before == set(), (
             f"只读取证在仓库里留下了目录/文件：{sorted(after - before)}"
         )

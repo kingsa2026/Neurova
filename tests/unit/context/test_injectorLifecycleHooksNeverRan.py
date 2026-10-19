@@ -40,6 +40,8 @@ from neurova.core.base_module import BaseModule
 from neurova.core.event_bus import EventBus
 
 INJECTOR_PATH = Path(__file__).resolve().parents[3] / "neurova" / "context" / "injector.py"
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+CONTEXT_ROOT = INJECTOR_PATH.parents[1]
 LIFECYCLE_HOOKS = ("on_initialize", "on_start", "on_stop")
 
 
@@ -87,10 +89,13 @@ def testNoAsyncHookWithoutAwaitInBody():
     由调用方改造另开一批。
     """
     offenders = []
-    root = INJECTOR_PATH.parents[1]
     # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
     # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。
-    for path, tree in ast_scan.parsedModules(root, ".py"):
+    modules = list(ast_scan.parsedModules(CONTEXT_ROOT, ".py"))
+    assert len(modules) > 20, (
+        f"扫描面现读 {len(modules)} 档（根＝{CONTEXT_ROOT}，本判据的域＝neurova/context）——"
+        "根被改窄时「没有 async 却零 await 的钩子」只是没在看代码")
+    for path, tree in modules:
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             bases = {ast.unparse(b).rsplit(".", 1)[-1] for b in cls.bases}
             if not (bases & {"BaseModule", "MemoryModule"}):
@@ -101,7 +106,7 @@ def testNoAsyncHookWithoutAwaitInBody():
                         isinstance(n, ast.Await) for sub in fn.body for n in ast.walk(sub)
                     )
                     if not hasAwait:
-                        rel = path.relative_to(root.parent).as_posix()
+                        rel = path.relative_to(CONTEXT_ROOT.parent).as_posix()
                         offenders.append(f"{rel}:{fn.lineno} {cls.name}.{fn.name}")
     assert not offenders, (
         "async 声明 + 零 await 实体的生命周期钩子会被同步 initialize() 丢成协程对象，"
