@@ -555,9 +555,14 @@ class TestScanCostStaysBounded:
         )
 
     def test_emptyDefaultPrefixCoversBothQuoteStyles(self, tmp_path):
-        """空串前筛只按 `mkdir` 判定，故单/双引号两种空串写法都必须照旧命中。"""
-        for quote in ("''", '""'):
-            probe = tmp_path / ("empty_%s.py" % quote[0])
+        """空串前筛只按 `mkdir` 判定，故单/双引号两种空串写法都必须照旧命中。
+
+        档名不带引号字符：Windows 不允许文件名里有 `"`，原先把 `quote[0]` 拼进路径会让
+        第二圈直接 `OSError: [Errno 22]`——判据向本机文件系统借了形状，这条承诺在
+        Windows 上从没被验过（红的是脚本自己，不是被测对象）。
+        """
+        for quote, tag in (("''", "single"), ('""', "double")):
+            probe = tmp_path / ("empty_%s.py" % tag)
             probe.write_text(
                 "from pathlib import Path\n"
                 "class Config:\n"
