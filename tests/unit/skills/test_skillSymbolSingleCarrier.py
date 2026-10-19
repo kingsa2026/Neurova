@@ -22,6 +22,9 @@ import neurova.skill_system as facade
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = REPO_ROOT / "neurova"
+
 
 def testFacadeSkillResultIsWhatRuntimeReturns():
     """门面所发 SkillResult 必须是运行时 execute() 实际返回的那个类。"""
@@ -65,10 +68,12 @@ def testNoSourceReflectivelyLoadsSkillSystem():
     仓内 `spec_from_file_location` 另有正当用途（plugin_manager 载插件、
     skill_service 载用户脚本），判据只锁"反射加载 skill_system"这一条。
     """
-    root = REPO_ROOT / "neurova"
+    sources = sorted(NEUROVA.rglob("*.py"))
+    assert len(sources) > 500, (
+        f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
     offenders = [
-        str(p.relative_to(root))
-        for p in root.rglob("*.py")
+        str(p.relative_to(NEUROVA))
+        for p in sources
         if "spec_from_file_location" in (body := p.read_text(encoding="utf-8", errors="replace"))
         and "skill_system" in body
     ]
