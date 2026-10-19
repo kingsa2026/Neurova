@@ -7800,3 +7800,72 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       宽域 A/B ＋ 活体 → 提交。**开工前先复取 §6-339 那六条分叉读数**（297：台账读数不是事实源）。
     - **仍开**：本票的实施（下一批）；§6-334 的 B／C／D 三格；其余等裁票照旧。
     - **下一枚空号现查 §6-341**（写前必须现场重取；本笔落库时该读数为 339）。
+
+341. **批 108（本会话计数，与 §6-340 那个"批 108·第③刀前置档"同号不同事）· §6-336 欠的那 12 条两侧同红全部判清：3 档分两型——9 条里 3 条是判据向本机借形状（已修），6 条是 POSIX 假扫描器（定性立票）；另两条是门禁自己的认形缺口** ✅🟢 —— 三笔：`5f1644db`／`3f475413`／`4c5586bc`
+    - **落笔前先把号讲清（一处我自己造不出的错，按 327 处置）**：本会话三笔正文里都写了"落 §6-340"，而 §6-340 在我落笔窗口内被并发会话占去（＝他们那份 SDK 换面前置档）。
+      **不动历史**：对方那一笔 `5f5b814c` 正夹在我三笔中间（次序＝刀1→刀2→他→刀3），要改我三笔的正文就得 rebase 过他的未推送笔，
+      那是 230/211 那一族明令禁止的动作（会连带改写他的号，而他的号已写进他自己那格台账）。
+      所以本格的处置是：**正文号一律按 §6-341 认，`git log` 里那三处"§6-340"是当时取号的真实读数、不是引用**。
+      顺带记一条纪律增量：**多笔一批时，号要在每一笔落笔前现查，但正文里的号只写"最终那一格"**——否则会造出三条指向别人格子的指针。
+    - **第①刀＝`5f1644db`，根因在尺子不在 helm**：`scripts/ci/deploy_config_consistency_check.py` 的 `BACKEND_ENV_READ`
+      只跟字符串字面量那个第一参数；而 CORS 键名早收成单源常量（`neurova/api/cors_policy.py:48` `ORIGINS_ENV_KEY = "NEUROVA_CORS_ORIGINS"`，
+      读点 `config.get(ORIGINS_ENV_KEY, "")`，`config.get` 内部即 `os.environ.get`，`neurova/core/config.py:457`）。
+      于是 helm 里这条**真在生效**的声明被报成"应用源码从未读取"——**假 offender 报的方向与缺陷相反**：把活配置说成死的。
+      命中面按同一取数口现取：别名读取调用点 **45** 处、别名 **32** 个，读取面 174 键 → **195 键（+21，零失项）**；
+      今天只露 1 条红是因为 21 个里只有 CORS 那一个被部署面声明——**缺口是 21 个键的量级，不是 1 个**。
+      同根因两形已实证不需要处理：`os.environ["NAME"]` 全仓 3 处**全是写侧**（`memory_ingest/intake.py:76`、`tts/model_downloader.py:399/408`），
+      把写侧算进读取面等于宣称"自己设的键自己读过"；拼接键名与二层别名现读零命中，登记为边界。
+      新纯函数 `collectEnvKeys(texts)` 只做一层、且声明值必须是环境变量名形态。
+      证据：红＝新格一行为断言红（键不在面内）＋一行 `AttributeError`（新符号，两种红分开报）；绿＝本档 `29 passed`
+      （原两格常驻红随假 offender 消失一起转绿）；红自证＝定向 stash 掉门禁档 ⇒ `4 failed, 25 passed` 恰为{新两格＋被修好的旧两格}；
+      **变异两枚各咬一条臂**——摘别名支路 ⇒ 两格同红；把 `aliases.get(name, ())` 改成无界接受 ⇒ 只有那条负控红（防"读取面无界扩张"，
+      那会让 R5-env 从报死配置退化成什么都不报）。活体＝跑既有档 `tests/manual/corsPolicySingleSource_batch41.py` **13 项全 PASS**，
+      其中 [4] 取的是「设 env 后面板回显 == 装配进 CORSMiddleware 的实参」——读**装配实参**不是端点回显，这正是"从未读取"那句的反证；
+      真 `config/cors.json` 前后 md5 未变。门禁其余取用方同跑 `75 passed`；终态 `ok=True, errors=[]`，余 1 条既有 R7-auth warning。
+      净 LOC：测试/基建池 +65/−9，生产池 0（本刀不碰 `neurova/`）。
+    - **第②刀＝`3f475413`，那条"两种引号都要认"的承诺在本机只跑过第一圈**：`test_emptyDefaultPrefixCoversBothQuoteStyles`
+      把 `quote[0]` 拼进档名 ⇒ 第二圈要建 `empty_".py`，Windows 拒收 `"`，当场 `OSError: [Errno 22]`。
+      这条红与被测代码无关——**判据拿本机文件系统当免费前提**（257 那一族，这一枚借的是"档名字符集"）。
+      修法＝引号留在文件内容里（判据要量的本来就是内容），档名改 `empty_single.py`／`empty_double.py`。
+      绿＝整档 `12 passed`（原 1 failed）。**牙的复证先打错针**：第一枚变异改在规则一（函数签名空串默认值）上 ⇒ 那格照绿，
+      因为本格夹具走的是规则二（类属性 `storage_path: str = ""` 的 AnnAssign）；改打规则二并让它只认双引号文本后才红（239 再证一次）。
+      同根因扫荡＝按 AST 扫 `tests/**/*.py` 里"档名形态的字面量含 Windows 非法字符"：**读数 10 处，逐条看全是
+      `source=`／`medium_ref=` 这类标识串**（`import:note.txt`、`legacy:knowledge.json`），不经文件系统 ⇒ **真同根因落点 0**。
+      这把尺自己先被打过正控：合成档里 `bad<>name.py`／`pipe|char.json` 各命中、`good_name.py` 与 glob 串 `test_*.py` 不误报
+      ——第一版把 `*?` 也算非法，正控报 0 才把 glob 形态摘出去（283：每个零都要先证这条腿能产生非零）。
+      **留下的边界**：运行时拼出来的档名（本格就是）字面量扫描看不见，只有实跑会露 ⇒ 那个 0 不等于"再无档名形状雷"。
+      净 LOC：测试/基建池 +8/−3，生产池 0。
+    - **第③刀＝`4c5586bc`，那 9 条不是一种病**：开工前该档现读 `9 failed, 66 passed`。
+      **3 条＝判据借本机形状，本批修掉**：① `test_allowlist_is_still_the_gate_input` 用 `str(WindowsPath)` 尾拼门禁里那条 posix 串
+      ⇒ 改 `as_posix()`；② `test_preflight_reports_each_scanned_target_with_package_counts` 在 `subprocess.run` 替身里
+      拿 `rel in " ".join(cmd)` 找"这次扫的是哪个目标"，而 cmd 里的路径按宿主分隔符走 ⇒ 本机 `StopIteration`
+      （红指向脚本没看见，不指向门禁，263 同族）⇒ 把 cmd 归一成 posix 再找；
+      ③ `test_unknown_platform_still_refuses_to_download` 只清空 `_BINARY_SHA256` 而不钉 `_platform_key`，
+      于是它**测哪条支路由宿主决定**：Linux/macOS 进"无 {key} 的二进制指纹，拒绝下载"（消息含"指纹"），
+      Windows 先在 `_platform_key()` 抛"不支持的平台"——同一格同断言读两件不同的事。
+      改成把平台钉成合法但不登记的 `haiku_amd64`、断言点名该平台，并加"没发起传输"的正检（`urlopen` 换计数桩）——**比原格更严，不是放宽**。
+      **6 条＝假扫描器是 POSIX 可执行形**：夹具写 `#!/bin/sh` 脚本、`chmod 0o644` 造"不可执行"、或把 `_resolve_scanner` 钉成 `Path("/bin/true")`。
+      本机实读三种坏法：`WinError 193 %1 不是有效的 Win32 应用程序`（shebang 起不来）、
+      `SystemExit: [osv] 扫描器二进制不存在: E:\bin\true`（`/bin/true` 按当前盘解析）、`DID NOT RAISE`
+      （Windows 的 `os.access(X_OK)` 不跟 POSIX 权限位，`chmod 0o644` 造不出"不可执行"）。
+      改后本档 `6 failed, 69 passed`，转绿三格独立跑各 `1 passed`；**余 6 条与改前同集＝未新增 offender**。
+      牙：对第③格打一枚生产变异（摘掉"无指纹拒绝下载"那行）⇒ 该格当场红，还原 md5 逐字节复证一致（`8b0a2a61…`），生产档一字未改。
+      顺带一条**现读事实**（不是推测）：`_BINARY_SHA256` 只有 `linux_amd64`／`linux_arm64`／`darwin_amd64`／`darwin_arm64` 四键 ⇒
+      **门禁在本机无法自取件**，`OSV_SCANNER_BIN` 是唯一逃生口。
+    - **等裁（osv 那 6 条的三种修法，各自代价与不可逆点）**：
+      **甲**＝把假扫描器改成跨平台可执行形（`sys.executable` 或 `.cmd` 桩）。
+      收益＝这 6 格在 Windows 上真自证；代价＝夹具与门禁的调用形状要一起改（约一整套批），且"版本自证"那格的判据形状要重定；
+      不可逆点＝桩件一旦替代真二进制，"这版扫描器真的能跑"这件事就只剩 CI 侧在证。
+      **乙**＝按环境侧常驻红登记、不修（照 `tests/unit/ci` 那 5 条 npc 的处置：量出来、写下来、不修不放宽）。
+      收益＝零风险；代价＝子集内 6 条长期红，后来的会话分不清哪几格是新引入的（309 那条病）。
+      **丙**＝本机放一份真 `osv-scanner.exe` 并用 `OSV_SCANNER_BIN` 指过去。
+      收益＝9 条里连这 6 条一起转绿，且证的是真扫描器；代价＝引入一个仓外二进制的取用与版本漂移面，
+      且 `_BINARY_SHA256` 没有 windows 键 ⇒ 自取通道不认它，等于**给门禁加一条只有本机知道的旁路**（属需人裁的供应链动作）。
+      推荐**甲**（它把"判据能不能在这台机器上说话"这件事收回仓内），乙只在甲的成本被否时兜底，丙不建议单开。
+    - **常驻红小账（本批之后）**：`test_deploy_config_guard.py` **0 failed**（原 2）、`test_data_root_no_cwd_landing.py` **0 failed**（原 1）、
+      `test_osv_audit_hardening_guard.py` **6 failed**（原 9，全部定性）。§6-336 那句"其余 12 条的成因未逐条判定"至此结清。
+    - **仍开**：osv 那 6 条的甲／乙／丙（等裁）；dev_path 那 4 处自抄读法（并发会话仍未落库）；夜间脚本读法归谁（等裁）；
+      `MANIFEST_BASELINE` 那一档收口口径（等裁）；§6-318 边界①②；§6-317；R5-env 其它形（拼接键名／二层别名，现读零命中）；
+      `scripts/ab_compare.sh` 缺件；全部等裁票（§6-311／§6-312 甲乙丙、D1、D9、D10、D11–D20、§6-293、
+      §6-334 的 B／C／D、§6-339／§6-340 那条 MCP 换面本体）。
+    - **本会话下一枚空号现查 §6-342**（写前必须现场重取；本笔落库时该读数为 341）。
