@@ -74,6 +74,20 @@ def protectedFiles() -> List[str]:
     ]
 
 
+def test_listFaceIsNotEmptyAndResolvable():
+    """反空转：本档两处逐条扫描（`_scan()` 与预筛自证）都以这份清单为面，先证清单在场。
+
+    本档原有的两条数值断言（夹具节点数、`seen` 去重）**与这份清单无关**，兜不住它——
+    清单截短或被写错路径时，`wallclockBounds` 的读数一起缩水，而 `LEDGER` 照样对上。
+    形状照面自证棘轮的 `test_surfaceReadingIsNotVacuous`：条目数量级 ＋ 指得到真实文件。
+    """
+    files = protectedFiles()
+    assert len(files) > 500, f"受保护子集清单现读 {len(files)} 条，量级不对＝没读到／路径写错"
+    resolved = sum(1 for rel in files if (REPO_ROOT / rel).is_file())
+    assert resolved == len(files), (
+        f"清单里有 {len(files) - resolved} 条指不到真实文件——本档的逐条扫描会一起缩水而判据照样绿")
+
+
 def _outsideSubsetRefs() -> List:
     """子集外的测试文件源码引用（**枚举与文本读取**收口到共享预算）。
 

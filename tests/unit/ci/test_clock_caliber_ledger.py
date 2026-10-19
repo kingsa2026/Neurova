@@ -138,6 +138,20 @@ def protectedFiles() -> List[str]:
     ]
 
 
+def test_listFaceIsNotEmptyAndResolvable():
+    """反空转：本档以那份清单为扫描面，先证清单本身在场——两条都要，缺一条就是半张嘴。
+
+    清单被截短 ⇒ `_scan()` 少跑几圈 ⇒ `hits` 变小 ⇒「超出白名单的落点」读数照样空；
+    而只比条目数量级又挡不住**路径写错**那一形——那种情况下每条都走 `continue`，
+    数量级却仍然好看。与面自证棘轮 `test_surfaceReadingIsNotVacuous` 同形（那边是本闸自己的清单）。
+    """
+    files = protectedFiles()
+    assert len(files) > 500, f"受保护子集清单现读 {len(files)} 条，量级不对＝没读到／路径写错"
+    resolved = sum(1 for rel in files if (REPO_ROOT / rel).is_file())
+    assert resolved == len(files), (
+        f"清单里有 {len(files) - resolved} 条指不到真实文件——本档的逐条扫描会一起缩水而判据照样绿")
+
+
 def clockCalibersOf(source: str) -> frozenset:
     return frozenset(
         name for name, pattern in CLOCK_PATTERNS.items() if pattern.search(source)

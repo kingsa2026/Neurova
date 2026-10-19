@@ -75,6 +75,21 @@ def protectedFiles() -> list:
             if line.split("#", 1)[0].strip()]
 
 
+def test_listFaceIsNotEmptyAndResolvable():
+    """反空转：本档两处以子集为面的扫描（预算账与全仓扫描分布）先证这份清单在场。
+
+    本档原有的两条数值断言与清单无关——`assert len(nodes) > 1000` 量的是夹具节点数、
+    `assert len(seen) == 1` 量的是去重，都不替"逐档扫了多少"背书。清单被截短或路径写错时，
+    `REPO_WIDE_SCAN_LEDGER`（设计现值＝空集）会连同扫描面一起缩水而照样绿。
+    形状照面自证棘轮的 `test_surfaceReadingIsNotVacuous`：条目数量级 ＋ 指得到真实文件。
+    """
+    files = protectedFiles()
+    assert len(files) > 500, f"受保护子集清单现读 {len(files)} 条，量级不对＝没读到／路径写错"
+    resolved = sum(1 for rel in files if (PROJECT_ROOT / rel).is_file())
+    assert resolved == len(files), (
+        f"清单里有 {len(files) - resolved} 条指不到真实文件——本档的逐档扫描会一起缩水而判据照样绿")
+
+
 def _mayHideRepoWideScan(text: str) -> bool:
     """文本层粗判：这份源码里**有没有可能**出现「枚举 + 解析」的组合。
 

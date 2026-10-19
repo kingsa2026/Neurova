@@ -169,6 +169,21 @@ def test_ever_registered_entry_still_in_repo_stays_registered():
     )
 
 
+def test_listAndHistoryFacesAreNotEmpty():
+    """反空转：本守卫的面＝「现清单」∪「历史清单」，两样都得先在场，否则"零 offender"是假的。
+
+    现值只比"清单读到了条数"（路径写错那一形由同档的登记判据兜）；历史那一半另有一条
+    `len(ever) >= len(now)`——浅克隆时 `_listedEver()` 只剩现值，这条对上关系会立刻露形，
+    而 `_requireCompleteHistory` 只是把它翻译成一句人话，两者不许互相顶替。
+    """
+    now = _listedNow()
+    ever = _listedEver()
+    assert len(now) > 500, f"现清单现读 {len(now)} 条，量级不对＝没读到／路径写错"
+    assert len(ever) >= len(now), (
+        f"历史清单只解出 {len(ever)} 条，比现清单 {len(now)} 条还少——"
+        "「曾登记过」这一半的面已经不成立，退役署名会全部被判成「从未登记过」")
+
+
 def _offendersAmong(gap, retired) -> list:
     """从"曾登记、现已不在清单"的差集里挑出真正的缺陷项。
 
