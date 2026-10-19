@@ -330,19 +330,57 @@ def zeroRouteMountPoints() -> list:
             if not any(other.startswith(point + "/") and other != point for other in occupied)]
 
 
+def asgiMountPoints(app=None) -> list:
+    """以 `app.mount()` 形态服务的前缀 —— 运输由 ASGI 应用承载，没有 APIRouter 路由表。
+
+    为什么单开一条而不是塞进 `mountOperations()`：那张表逐条说的是"一次 include_router
+    操作"（自述前缀、路由条数、router 标识都在它语义里），`Mount` 没有这些成员，硬塞
+    会得到一张全是空值的表。但**口径必须同一份**：两者都从装配结果取数，
+    本函数只是补上 `original_router` 那条 if 看不见的那一形（§6-344 实测：
+    `/api/v1/mcp` 换运输后在清单里整个消失，面活着而文档不说）。
+
+    模块名取自 ASGI 处理器**类型的定义模块**——面类就住在它自己的模块里，
+    这比再抄一份「前缀 → 模块」登记表少一个事实源。挂着子应用（自带路由表）的
+    以及 Starlette/FastAPI 自带的那两类都不算：前者由各自的路由表说话。
+    """
+    from starlette.routing import Mount
+
+    rows = []
+    for route in (app if app is not None else assembledApp()).router.routes:
+        if not isinstance(route, Mount):
+            continue
+        inner = getattr(route, "app", None)
+        if getattr(inner, "routes", None):
+            continue
+        module = getattr(type(inner), "__module__", "") or ""
+        if not module or module.startswith(("starlette.", "fastapi.")):
+            continue
+        point = (getattr(route, "path", "") or "").rstrip("/") or "/"
+        # 与前一行同格式：交**点制模块名**，由 `moduleFile()` 统一换成文件路径。
+        # 在这里先换过一次，写表时再换一次就得到 `..._api/py.py`（本批实测踩过）。
+        rows.append((point, "", module))
+    return rows
+
+
 def backendMountPoints() -> list:
-    """（挂载前缀, router 自述前缀）逐条 —— 取**装配后**的真实 `include_router` 操作。
+    """（挂载前缀, router 自述前缀, 模块）逐条 —— 取**装配后**的真实挂载操作。
 
     为什么不静态重建：真实挂载前缀由 `include_router(prefix=...)` 与 router 自述
     `prefix` 共同决定（本仓两者并用），静态解析等于再实现一遍 FastAPI 的挂载语义——
     第二套平行体系，必然逐版漂移。既然 `app.py` 与注册表都走真装配，判据也取真装配。
 
+    两条取数合一：`include_router` 那一形走 `mountOperations()`，`app.mount` 那一形走
+    `asgiMountPoints()`，同一份装配结果、同一次调用。
+
     零路由挂载点（`zeroRouteMountPoints()`）**不入表**：挂载动作在、路由一条没有，
-    是断点而非「已注册前缀」，混进表里会让读者以为它可用。
+    是断点而非「已注册前缀」，混进表里会让读者以为它可用。ASGI 挂载不受此影响——
+    它没有"路由条数"这个概念，运行时命中由 `registeredRoutePaths()` 那条 `Mount.path` 兜住。
     """
+    app = assembledApp()
     empties = set(zeroRouteMountPoints())
     points = {(operation["挂载前缀"], operation["自述前缀"], operation["模块"])
-              for operation in mountOperations()}
+              for operation in mountOperations(app)}
+    points.update(asgiMountPoints(app))
     return sorted(row for row in points if row[0] not in empties)
 
 
