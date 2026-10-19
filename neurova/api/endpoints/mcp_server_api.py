@@ -95,6 +95,16 @@ async def _handle_tools_call(params: dict) -> dict:
     return {"content": _text_content(text)}
 
 
+def mountFace(app, prefix: str, description: str) -> None:
+    """把本面挂到 app 上——**挂载入口只有这一处**。
+
+    注册表原先按 `hasattr(module, "router")` → `include_router` 认这一面，那是把
+    "怎么挂"的事实写在装配层；换运输时（§6-339 乙案）同一处装配要长出第三种形态。
+    收口成模块自述后，装配层只问"挂上去"，运输形态归本模块。
+    """
+    app.include_router(router, prefix=prefix, tags=[description])
+
+
 @router.post("")
 async def mcp_http_endpoint(request: Request, current_user: typing.Any = Depends(get_current_user_or_service)):
     """JSON-RPC 2.0 单请求入口（MCP streamable http 最小面）。"""
