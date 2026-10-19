@@ -47,6 +47,13 @@
 - `neurova/collaborate/workflow/orchestrator.py` - 流程编排器 (FlowOrchestrator, get_orchestrator)
 - `neurova/collaborate/workflow/scheduler.py` - Agent 调度器 (AgentScheduler, get_scheduler)
 
+> **2026-10-19 勘误（批 109，§6-312 裁乙）**：上面 Phase 3/4 列出的文件是**那一次迁移的现场记录**，
+> 不是今天的现役面。`collaborate/models.py`、`collaborate/template.py`、`collaborate/workflow/orchestrator.py`
+> 自 `1832a12b` 起从未接进活链路，已随该批退役（现役模板实现在 `neurova/agent/templates/collaboration_template.py`，
+> 现役编排在 `neurova/collaboration/neurflow/*`）；`workflow/models.py` 里的 `FlowPhase`/`FlowEvent`
+> 半区同批待瘦。现役面与"门面不许把死码声明成公共面"由
+> `tests/unit/collaboration/test_collaborateIslandRetirement.py` 常驻钉住。
+
 ### Phase 5: 清理和验证 ✅
 - 所有 29 个测试全部通过
 - 向后兼容性验证完成
