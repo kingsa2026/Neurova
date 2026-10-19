@@ -201,6 +201,15 @@
 #### B3 agent 呈现面三件（约 1500）◑ —— 被同一次骨架恢复误杀
 - 原功能：`agent/matrix/agent_matrix.py`（562）是能力注册表之上的读模型与呈现层 —— 在线率/均等/分类计数（`get_matrix_summary:174`）、**按分类权重打分的 Agent 推荐**（`recommend_agents:214`）、能力雷达图与对比（`MatrixRenderer:418`）；`protocols/capability_discovery.py`（450）是进程内能力注册中心，11 类 × 5 级量化、倒排索引、模糊检索与 `match_task_requirements:316` 任务-能力加权匹配；`templates/{personality,preset}_templates.py`（79 + **实测 399 行，v1 记 478 有误**）是 5 套人格准则与 4 套开箱协作流程的内容资产。
 - 来历：**不是从未接线，而是被误杀**。`2482c042`(06-03) 时 `collaboration_api.py:140` 起有 `from neurova.agent.matrix import get_agent_matrix`，并暴露 `/capabilities`、`/recommend`、`/matrix`、`/matrix/compare`、`/templates/preset` 等端点；次日 `7835c367` 重写该文件时**端点整批删除（24 条路由 → 6 条）**。前端零残留。
+  **就地勘正（批 109·第④刀复算，此条原为 ◑）**：路由数是 **19 条 → 6 条**，不是 24 → 6。
+  现量：`git show 2482c042:neurova/api/endpoints/collaboration_api.py | grep -c '^@router\.'` ＝ 19（970 行），
+  其中 8 条属能力/矩阵面（`/capabilities` ×4、`/recommend`、`/matrix`、`/matrix/compare`、`/templates/preset`）；
+  `7835c367` 那份 154 行／6 条。HEAD 现值 19 条但无一涉矩阵（`canvas`／`templates` 系列）。
+  另补一条 B3 未量的决定性读数：**注册表今天恒空**——`CapabilityDiscovery.register_agent` 全仓零调用者
+  （`git log -S "discovery.register_agent"` 只命中 `2482c042` 引入与 `7835c367` 摘除两笔），
+  它曾经的唯一生产者就是被砍掉的那条 `POST /capabilities/register`。
+  ⇒ 判定不变（需人裁、且与 matrix 同批裁），但"接线"那一支的代价比 B3 写的更大：恢复的要是一条
+  **带鉴权的能力登记端点**，不是给现役读面补个调用。
 - 现役替代：**无**。近邻件均不同物（`agent_enhancement.py:131` 只回静态串、`growth.py:334` 是成长分、`capability_gap.py` 是缺口信号）。"按能力检索/匹配 Agent"与"任务→Agent 推荐"今日全无实现。
 - 判定：需人裁，且 **matrix 与 capability_discovery 必须同批裁**（matrix 是后者的唯一消费者：只删 matrix 留它即只写不读；只删它留 matrix 则 matrix 直接不可用）。人格/协作模板属**内容资产删除**，若退役建议先归档进 docs/。另需清 `acp_runtime.py:97-99` 那句把能力注册推给本模块的恒假条件与虚假归属注释。
 
@@ -7893,6 +7902,10 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
          判据先行——先让"删掉死的一半后，活的一半仍只在 scheduler 那条路上被消费"这一形状红得起；
          再做 `template.py` 那 346/350 行纯双源的收口（教义 7：比→取→接→退，接通与退役同批）。
          **不可逆点**：全仓唯一的那项"按能力挑 agent"能力（§6-311 甲半）若不并进 neurflow 就直接删，永久失去。
+         **就地改判（第④刀实测，详见 §6-348）**：这句的"全仓唯一"不成立，且那份实现从未有过数据源
+         （`register_agent` 零调用者 ⇒ 那张能力表恒空、选择器恒返 None）。删它没失去任何**在服**行为，
+         "并进 neurflow"也就没有东西可并；真正无替代的那份是 B3 的 `capability_discovery`＋`agent_matrix`，
+         它**曾被消费后被摘**、判需人裁，不在本票授权范围内。第④刀因此改判为"只收门面、本体不动"。
       2. **osv 甲**独立成批：它只动 `tests/unit/test_osv_audit_hardening_guard.py` 的夹具形状，不碰生产。
          注意这条与批 108 第③刀的边界——那三格已按借形修掉，本批只管剩下 6 格的"假二进制能不能被本机 exec"。
       3. **丁**与**⑤**各一小批（CI 基建，可并行）：丁＝`ast_scan` 加原语＋夜间格改用＋`READER_BASELINE` 那行摘掉
@@ -8117,4 +8130,55 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       身份边界（§6-334 A 格）、运输替换本体、清单可见性三件全落。
     - **仍开**：§6-334 的 B（同一失败两种信封）／C（技能面不过治理链）／D（`mcp_manager` 三态票）；
       并发引入的那条在册常驻红（collaborate 退役档入子集未带面自证）；其余等裁票照旧。
+      **就地勘正（批 109·第④刀）**：这句第二条**已结清**——§6-345（第②刀，`362879fa`）那格
+      `test_importScannerFaceIsNotNarrowed` 就是给那档补的面自证，本会话第④刀复取棘轮 **56 passed** 时它不在红集里。
     - **下一枚空号现查 §6-348**（写前必须现场重取；本笔落库时该读数为 347）。
+
+348. **批 109·第④刀改判：「按能力挑 agent」不并进 neurflow（前提被实测否证），只收门面；能力面另开三态票** ✅🟢 —— 两笔：代码 `bed2be78`，本格另计
+    - **票面前提为什么坏掉**（§6-342 第④刀写的是"把这项独有能力并进 neurflow"，独一性取自 §6-311）：
+      被删那份 `_find_agent_for_step` 读的 `self._agent_capabilities` **只由 `register_agent()` 填**，
+      而 `git log -S "register_agent" -- neurova/collaborate/` 全史只有两笔命中——`1832a12b`(06-03，
+      "完善项目结构"那次批量引入) 与第①刀 `4cf96af6`（删除）。**没有第三笔＝从未有过一次生产调用**
+      ⇒ 那张能力表恒空、选择器恒返 `None`。删它不损失任何在服行为，也就没有"并进"这一步的对象。
+      §6-342 那句"全仓唯一"已就地改判（见本格上游）。
+    - **另一处实现不是冗余，是被摘过**：`agent/protocols/capability_discovery.py`(449)＋唯一消费者
+      `agent/matrix/agent_matrix.py`(561) ＝ **1010 行**，台账 B3 已判**需人裁且必须同批裁**。本会话按
+      dead-code 口径复算 B3（它原为 ◑）：路由数真值是 **19 → 6**（B3 写 24 → 6，已就地勘正 B3 那一格），
+      被摘的那 8 条是 `/capabilities` ×4、`/recommend`、`/matrix`、`/matrix/compare`、`/templates/preset`；
+      注册表的历史唯一生产者 `POST /capabilities/register` 是**带按用户鉴权的写端点**。
+      取数口现量：`importersOfModule` 对前者报 2 处（`agent_matrix.py` ＋ 门面），对后者报 1 处（它自己包的门面），
+      即 **`neurova.agent.matrix` 在全仓零外部 import**。
+    - **本刀实际做的（改判后的可执行半，与第①刀同形制）**：`protocols/__init__.py` 曾无条件再导出那三名
+      并写进 `__all__`，而 `agent/team.py:23`／`api/endpoints/acp_api.py` 只取 `AgentMessage`／`ACPRuntime`——
+      导子包必先执行父包 `__init__` ⇒ 每次进程启动连带执行那 449 行死码的模块体（活体实测：修前
+      `capability_discovery` 在 `sys.modules`，修后不在）。门面只声明现役面，**岛本体一行未动**。
+      这就是 **D19 族的第二例**（同根因：门面把死岛声明成公共面并挂上启动路径）。
+    - **一条本会话自己造的洞，被自家正控当场拦住**：Edit 改门面时把 `dead_letter_queue` 那行 import
+      一起吞了（`__all__` 仍声明两名却无导入）——`test_liveFacadeSymbolsStillReachable` 立刻红。
+      这就是"收口类批次必须先有正控"的用处：**没有那格，这次就是一次静默关掉活面的假交付**。
+    - **证据摘要**（全文在 `bed2be78` 正文，此处只留可复核的读数）：红 **2 failed/5 passed** →
+      绿 **7 passed**；红自证带唯一 tag 定向 stash 生产档 → **恰 2 failed/5 passed**；
+      A/B 两侧 `collected 107` 同面、基线 4 failed ↔ 本树 107 passed、**仅本树红 0 条**（仅基线红那两条
+      棘轮格经现场核根因＝那两档把根写在 `data/…` 而 `data/` 被 `.gitignore:284` 忽略、fresh worktree
+      不物化 ⇒ 基线树形状差，**不认领**）；活体真 `create_app` **10/10**，反证只红在缺陷读数、
+      还原 `cmp -s` 逐字节等值。净 LOC 生产池 **+16/−13 ＝ 净 +3**（正数全部去向＝门面自述新增 3 行），
+      测试/基建池 **+177/−0**；子集现值 **647**。
+    - **新开三态票（能力面到底要不要，请裁；推荐甲）**：
+      - **甲｜结清不立项**（推荐）：门面已收干净；1010 行原样留给 B3 那张票。"按能力挑 agent"**不作为新功能立项**——
+        今日无任何消费方按能力筛 agent（唯一在服的按属性筛是 `metadata.source_type`，走 `metadata` 不是 `capabilities`）。
+        代价＝这项能力继续"实现存在、数据不存在"；不可逆点＝无（什么都没删）。
+      - **乙｜在 neurflow 把 capabilities 做成有牙的筛选**：`create_agent()` 补 `capabilities` 参数＋
+        `POST /agents` 认这字段＋选择器＋一条读端点。**为什么现在不推荐**：写侧今天只会落常量 `["workflow"]`
+        （唯一生产者 `workflow_agent.manifest_to_agent_info:76`），选择器实际只能挑"是不是工作流"——而那件事
+        `list_workflow_agents()` 已经在做，等于给同一件事造第二份表示（撞教义 6）；且生产池净增为正、需求未经产品确认。
+        真要做，先答"除 workflow 之外还有谁会往 capabilities 里写第二个值"。
+      - **丙｜恢复 B3 被误杀的那 8 条 HTTP 面**（把 06-04 砍掉的接回现役 `collaboration_api.py`）：这是
+        "曾被消费后被摘"的正解。**代价与不可逆点要说清**：注册表是进程内 dict（重启即失忆），
+        neurflow 那侧 `agents.capabilities_json` 是落盘的——接回即并存两份表示，必须先裁落点归属；
+        且历史写端点带鉴权（`_user_can_access_agent_collaboration`），恢复要连鉴权与权限语义一起恢复，不是补路由。
+      - **决策影响面**：三态都不动 `neurflow` 的 54 条在服路由与 `chat` 页那条 agent 选择链；
+        甲留 1010 行死码在场、乙净增生产 LOC 并造第二份表示、丙恢复一项今日线上不存在的能力（含鉴权面）。
+        **推荐甲＋把"要不要这项能力"并进 B3 那次裁一起拍**——那张票裁的是同一批文件，分开拍必然互相返工。
+    - **仍开**：B3＋本格新票（能力面，等裁）；`dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；
+      §6-334 的 B／C／D；D19 族是否还有第三例**未全仓扫**（登记为待扫面，不是已扫净）。
+    - **本会话下一枚空号现查 §6-349**（写前必须现场重取；本笔落库时该读数为 348）。
