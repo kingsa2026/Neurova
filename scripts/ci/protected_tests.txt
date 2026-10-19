@@ -3384,6 +3384,10 @@ tests/unit/ci/test_duplicateImplementationRatchet.py
 # 批 87（§6-315）：§6-312 乙案的前置判据——调度器在役面（FlowContext 只被无参构造、ScheduledTask 字段位经真落盘等值、
 # cron 的 0=周一与三条沉默语义）。真做退役之前，这些格子必须一路绿；红了就是前提变了，先改判再动刀。
 tests/unit/collaboration/test_schedulerLiveSurfaceIsPinned.py
+# 批 109（§6-312 裁乙第一刀）：`neurova/collaborate/` 的死岛不再挂在每次进程启动路径上——门面只再导出调度链六个名，
+# 三档死码（models/template/workflow.orchestrator，共 863 行）本体已删。5 格里：1 格现役门面符号（收口不许关掉活面）、
+# 1 格子进程面自证（"死档缺席"这个零必须由真跑起来的读数给出）、1 格拖拽反检、1 格档本体不在树里、1 格生产侧零悬空引用。
+tests/unit/collaboration/test_collaborateIslandRetirement.py
 # 批 88（§6-316）：导入通道口径收回一处——四种取法都认（含相对形与父包取名形），预筛词取末段名不取全名。
 # 两枚差分钉住这是真漏检的修补：把解析退回只比 node.module，同一注入应变绿。
 tests/unit/ci/test_importChannelDetectorSeesAllFourForms.py
