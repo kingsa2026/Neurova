@@ -122,8 +122,9 @@ def main() -> int:
     check("⑨ 交付面：无参构造即得一个未被触碰的上下文（与判据同一形状）",
           all(getattr(ctx, k, None) == getattr(FlowContext(), k, None)
               for k in ("template_id", "current_step_id", "error_message"))
-          and ctx.completed_steps == [] and ctx.event_history == [],
-          f"phase={ctx.current_phase}")
+          and ctx.completed_steps == [] and ctx.shared_data == {}
+          and not any(hasattr(ctx, gone) for gone in ("current_phase", "event_history")),
+          f"字段面={sorted(vars(ctx))}")
     AgentScheduler._instance = None
     return finish(dataBefore)
 
