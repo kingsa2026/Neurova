@@ -50,7 +50,7 @@ yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CNB = PROJECT_ROOT / ".cnb.yml"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 门禁脚本（解释器可达性的被依赖方）
 GATE_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
@@ -780,8 +780,7 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
 
 class TestGuardIsInProtectedSubset:
     def test_listed_in_protected_tests(self):
-        listed = io.open(PROTECTED, encoding="utf-8").read()
         rel = "tests/unit/ci/test_npc_script_interpreter_reachability.py"
-        assert rel in listed, (
+        assert rel in set(ast_scan.protectedSubsetEntries()), (
             f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )

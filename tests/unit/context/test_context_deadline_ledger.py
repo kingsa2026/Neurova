@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import io
 import sys
 from pathlib import Path
 
@@ -31,17 +30,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.ci import context_deadline_ledger as ledger  # noqa: E402
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 GUARD_REL = "tests/unit/context/test_context_deadline_ledger.py"
 
 
 def _listed() -> set:
-    raw = io.open(PROTECTED, encoding="utf-8").read()
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    return set(ast_scan.protectedSubsetEntries())
 
 
 class TestJudgeIsMachineComputed:

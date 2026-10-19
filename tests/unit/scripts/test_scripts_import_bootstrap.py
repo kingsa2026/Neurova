@@ -175,9 +175,7 @@ class TestScriptsCanBeRunByPath:
         assert _bootstrapLine_obj(syspath_other) is None
 
     def test_guardIsListedInProtectedSubset(self):
-        listed = (PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt").read_text(
-            encoding="utf-8"
-        )
+        listed = set(ast_scan.protectedSubsetEntries())
         assert "tests/unit/scripts/test_scripts_import_bootstrap.py" in listed, (
             "本守卫不在受保护子集里，CI 不会跑它"
         )

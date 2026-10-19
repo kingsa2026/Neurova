@@ -47,6 +47,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 # 最小触发集（实测穷举 7 条子集 × 全部顺序，只有这一组复现）：
 # 要点是 `Session.collect()` 在处理第二条 initial path 时，必须先经过**第一条
@@ -206,9 +207,7 @@ class TestGuardTargetsAreProtected:
     """本守卫的靶点必须在受保护子集里，否则回归无人看。"""
 
     def test_trigger_files_and_self_are_in_protected_subset(self):
-        listed = (PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt").read_text(
-            encoding="utf-8"
-        )
+        listed = set(ast_scan.protectedSubsetEntries())
         for rel in (*_TRIGGER_FILES, "tests/unit/test_pytest_runner_guards.py"):
             assert rel in listed, (
                 f"{rel} 不在受保护子集 —— 移出后本文件守的收集竞争回归无人发现。"

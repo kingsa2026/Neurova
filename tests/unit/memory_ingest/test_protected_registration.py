@@ -16,24 +16,18 @@
 
 from __future__ import annotations
 
-import io
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_TESTS = PROJECT_ROOT / "tests" / "unit" / "memory_ingest"
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 SELF_REL = "tests/unit/memory_ingest/test_protected_registration.py"
 
 
 def _listedTests() -> set:
     """CI 实际跑的清单条目（唯一事实源）。"""
-    raw = io.open(PROTECTED, encoding="utf-8").read()
-    return {
-        line.split("#", 1)[0].strip()
-        for line in raw.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    return set(ast_scan.protectedSubsetEntries())
 
 
 def _packageTestFiles() -> list:
