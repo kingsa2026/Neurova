@@ -31,6 +31,8 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+#: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = PROJECT_ROOT / "neurova"
 
 from neurova.tool_layers.npx_runtime_registry import (  # noqa: E402
     PINNED,
@@ -123,9 +125,11 @@ class TestNoBareNpxCallsRemain:
 
     def test_no_unversioned_package_specs_in_source(self):
         offenders = []
-        for py in (PROJECT_ROOT / "neurova").rglob("*.py"):
-            if "__pycache__" in py.parts:
-                continue
+        sources = [p for p in NEUROVA.rglob("*.py") if "__pycache__" not in p.parts]
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+            "根被改窄时「没有裸包名」只是没在看代码")
+        for py in sources:
             text = io.open(py, encoding="utf-8", errors="replace").read()
             for m in self._PATTERN.finditer(text):
                 spec = m.group(1)

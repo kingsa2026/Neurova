@@ -51,6 +51,9 @@ _KNOWN_VOCAB_FILES = [
 _DEF_SITE = "neurova/llm/generators/task_ledger.py"
 
 REPO = Path(__file__).resolve().parents[3]
+#: 扫描根单点，且必须是**模块级**：收进函数局部，面自证棘轮的取数口会把它解成动态值，
+#: 那档就静默掉出它的面（补了自证也是假的）。
+NEUROVA = REPO / "neurova"
 
 
 def _importsTaskLedger(rel: str) -> bool:
@@ -76,7 +79,11 @@ def _vocabFiles() -> list[str]:
     （见 tests/unit/test_ci_ast_scan_budget_guard.py）。
     """
     found = [_DEF_SITE]
-    for path, tree in ast_scan.parsedModules(REPO / "neurova", ".py"):
+    modules = list(ast_scan.parsedModules(NEUROVA, ".py"))
+    assert len(modules) > 500, (
+        f"扫描面现读 {len(modules)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+        "根被改窄时「除定义处没人另立词汇」只是没在看代码")
+    for path, tree in modules:
         rel = path.relative_to(REPO).as_posix()
         if rel == _DEF_SITE:
             continue

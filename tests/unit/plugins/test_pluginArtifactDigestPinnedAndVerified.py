@@ -27,6 +27,8 @@ from neurova.plugins.plugin_errors import PluginError
 from neurova.security import artifact_digest as AD
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+#: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = REPO_ROOT / "neurova"
 USER = {"user_id": "1", "username": "tester", "role": "admin"}
 
 #: 作者基类的最小合法实现（四个抽象方法齐备），装载真能实例化。
@@ -188,11 +190,14 @@ class TestCaliberIsSharedWithSkillChannel:
         assert "__pycache__" not in src, "排除清单被抄进第二个装载点"
 
     def test_both_load_seams_go_through_the_same_policy(self):
+        sources = [p for p in NEUROVA.rglob("*.py") if "__pycache__" not in p.parts]
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
+            "根被改窄时「只有两条装载接缝过对账」只是没在看代码")
         callers = sorted(
             p.relative_to(REPO_ROOT).as_posix()
-            for p in (REPO_ROOT / "neurova").rglob("*.py")
-            if "__pycache__" not in p.parts
-            and "artifact_digest.checkArtifact(" in p.read_text(encoding="utf-8"))
+            for p in sources
+            if "artifact_digest.checkArtifact(" in p.read_text(encoding="utf-8"))
         assert callers == ["neurova/plugins/plugin_manager.py", "neurova/skills/skill_service.py"], (
             f"装载前的完整性对账没有只发生在两条装载接缝上：{callers}")
 

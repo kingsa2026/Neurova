@@ -166,3 +166,14 @@ def _functionDefs(funcName):
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == funcName:
                 yield path, node.lineno
+
+
+def test_productionSurfaceIsNotEmpty():
+    """面自证：本档每条腿扫的根都是 `neurova/`，根被改窄时读数是「零命中」而不是红。
+
+    共享预筛入口（`importersOfModule`／`nodeScan`／`classDefsIn`）给的是**命中数**，
+    它不随根的大小变 ⇒ 证不了面，所以面另由枚举入口量一次。
+    """
+    surface = len(ast_scan.filesUnder(NEUROVA))
+    assert surface > 500, (
+        f"扫描面现读 {surface} 档 .py（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")

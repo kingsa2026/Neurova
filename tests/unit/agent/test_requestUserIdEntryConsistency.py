@@ -377,8 +377,11 @@ def ownerWritesByTurnHandler(tree: ast.AST) -> Dict[str, bool]:
 
 
 def productionSources() -> Dict[str, ast.AST]:
+    """生产面语法树。扫描根＝`neurova/`，本判据的域就是生产源码（`tests/` 不在面内）。"""
     trees = ast_scan.parsedModules(PRODUCTION)
-    assert trees, f"生产扫描面为空（{PRODUCTION}）——本文件会空转"
+    assert len(trees) > 500, (
+        f"扫描面现读 {len(trees)} 档（根＝{PRODUCTION}，量级应对得上生产源码总数）——"
+        "根被改窄时「零命中」不代表干净，只说明这条路没在看代码")
     return {ast_scan.relativeToRepo(path): tree for path, tree in trees}
 
 

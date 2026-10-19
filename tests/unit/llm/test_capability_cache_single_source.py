@@ -53,6 +53,12 @@ def _iterProductionPy():
 
 
 class TestSingleProductionSource:
+    def test_productionSurfaceIsNotEmpty(self):
+        """面自证：本档的根＝`neurova/`；`nodeScan` 给的是命中数，它不随根的大小变。"""
+        surface = len(_iterProductionPy())
+        assert surface > 500, (
+            f"扫描面现读 {surface} 档 .py（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
+
     @pytest.mark.parametrize("module", FORBIDDEN_IN_PRODUCTION)
     def test_offline_cache_not_imported_in_production(self, module):
         offenders = []

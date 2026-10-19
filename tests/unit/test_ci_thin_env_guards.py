@@ -30,6 +30,9 @@ from pathlib import Path
 from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+#: 两条腿的扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = PROJECT_ROOT / "neurova"
+TESTS = PROJECT_ROOT / "tests"
 
 # ---------- 共享解析 ----------
 
@@ -122,7 +125,7 @@ class TestAnnotationMineSweep:
         mines = []
         # 文本预筛：地雷必然含 `except ImportError`，其余文件连读都不用读
         for ref in ast_scan.sourceRefsUnder(
-                PROJECT_ROOT / "neurova", hints=("except ImportError",)):
+                NEUROVA, hints=("except ImportError",)):
             tree = ast_scan._cachedParse(ref.stamp, ref.code)
             mines += [
                 f"{ast_scan.relativeToRepo(ref.path)} -> {top}"
@@ -258,9 +261,11 @@ class TestRemovedPackagesStayRemoved:
 
     def test_no_source_references_to_removed_packages(self):
         offenders = []
-        for path in list((PROJECT_ROOT / "neurova").rglob("*.py")) + list(
-            (PROJECT_ROOT / "tests").rglob("*.py")
-        ):
+        sources = [p for root in (NEUROVA, TESTS) for p in root.rglob("*.py")]
+        assert len(sources) > 2000, (
+            f"扫描面现读 {len(sources)} 档（两根＝{[NEUROVA, TESTS]}，本判据的域到这里为止）——"
+            "根被改窄时「已摘除包零引用」只是没在看代码")
+        for path in sources:
             if "__pycache__" in path.parts:
                 continue
             if self._IMPORT_PATTERN.search(path.read_text(encoding="utf-8")):

@@ -199,6 +199,10 @@ class TestThePlaceholderVocabularyStaysSingleSource:
         文件不可能承载这份字面量，是充分条件。
         """
         found = {}
+        # 预筛命中数不随根的大小变 ⇒ 证不了面；面另由共享枚举入口量一次（根＝生产源码）。
+        surface = len(ast_scan.filesUnder(NEUROVA))
+        assert surface > 500, (
+            f"扫描面现读 {surface} 档 .py（根＝{NEUROVA}）——根被改窄时「占位串零命中」不代表干净")
         for path, node in ast_scan.transientNodes(
                 NEUROVA, hints=(INBOUND_VOICE_PLACEHOLDER,)):
             if not (isinstance(node, ast.Constant) and isinstance(node.value, str)

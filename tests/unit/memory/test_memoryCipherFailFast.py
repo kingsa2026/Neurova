@@ -24,6 +24,8 @@ import neurova.cognitive_layers.memory_layer.security as security
 from tests import ast_scan
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+#: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
+NEUROVA = REPO_ROOT / "neurova"
 
 
 def _fernetConfig(**kwargs):
@@ -86,7 +88,11 @@ def testCipherChainHasZeroCallersAndThatIsPinned():
     # 两个方法名都没出现的文件不可能有调用点（`tests/unit/test_ci_ast_scan_budget_guard.py`
     # 常驻拦「私有 rglob + ast.parse」的全仓扫描：判据成本不得随代码总量涨）。
     hints = ast_scan.textHints("encrypt_sensitive_content", "decrypt_sensitive_content")
-    for path, node in ast_scan.transientNodes(REPO_ROOT / "neurova", hints=hints):
+    surface = len(ast_scan.filesUnder(NEUROVA))
+    assert surface > 500, (
+        f"扫描面现读 {surface} 档 .py（根＝{NEUROVA}，本判据的域＝生产源码）——"
+        "预筛命中数不随根的大小变，「零调用点」得先证这条判据在看代码")
+    for path, node in ast_scan.transientNodes(NEUROVA, hints=hints):
         if path.name == "security.py":
             continue  # 定义所在文件本身
         if isinstance(node, ast.Attribute) and node.attr in {
