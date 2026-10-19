@@ -19,6 +19,9 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
+#: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
+NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
+
 
 @pytest.fixture(autouse=True)
 def _emptyGovernanceSettings(tmp_path, monkeypatch):
@@ -136,16 +139,18 @@ class TestGateTakesPowerFromGovernance:
 
     def test_noBareEnvReadIsLeftInConsumers(self):
         """消费方不得再自行读环境：留一处裸读就是第二个事实源。"""
-        backend = Path(__file__).resolve().parents[3] / "neurova"
         readForm = re.compile(
             r"""os\s*\.\s*(?:environ\s*\[|environ\.get\(|getenv\()\s*["']"""
             r"""NEUROVA_TRACE_PERSIST["']""")
         offenders = []
-        for py in sorted(backend.rglob("*.py")):
+        sources = sorted(NEUROVA.rglob("*.py"))
+        assert len(sources) > 500, (
+            f"扫描面现读 {len(sources)} 档（根＝{NEUROVA}）——量级对不上生产源码总数＝根被改窄")
+        for py in sources:
             if "__pycache__" in str(py):
                 continue
             if readForm.search(py.read_text(encoding="utf-8", errors="replace")):
-                offenders.append(py.relative_to(backend).as_posix())
+                offenders.append(py.relative_to(NEUROVA).as_posix())
         assert offenders == [], "裸 env 读点复现，治理面的值会被无声旁路：%s" % offenders
 
     def test_theKeyIsDeclaredInDefaults(self):
