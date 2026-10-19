@@ -8049,3 +8049,38 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       以及 §6-342 那批等裁票与 §6-339／§6-340／§6-344 那条 MCP 换面的后续（B／C／D 三格仍开）。
     - **本会话下一枚空号现查 §6-346**（写前必须现场重取；本笔落库时该读数为 345）。
 
+346. **批 109·第③刀（§6-311 裁乙甲半区）：core 那份 870 行 `FlowOrchestrator` 连同它自产自销的 1005 行契约测试一起退** ✅🟢 —— 一笔：`7682f8f5`
+    - **这一刀删的不是"没人用的代码"，是"互相作证的两份文件"**：`53875590` 同一笔把 shim 与它的契约测试一起入库 ⇒
+      测试断 shim 的形状、shim 拿"有测试覆盖"当保留理由，闭环自证（§6-301 的 A3 早已如此定性）。
+      动手前按现读重取三面：生产引用 **0**（三根全扫，唯一读者是它自己的测试）、
+      `class FlowOrchestrator` 在生产树两处（本档 ＋ 第①刀已删的 collaborate 那份）、
+      现役替代 `neurflow/execution_engine.py:162 WorkflowExecutor` 经 **54 条路由**在服（活体按 `app.openapi()["paths"]` 数）。
+    - **随它消失的东西逐项核过，没有一项是活的**：`MemoryCoordinator` 全内存 list、`ContextMemoryBridge` 缓存自己 deepcopy、
+      `ToolFeedbackLoop` 注册表无人填（§6-311"自嗨模型"判语，接线＝重写每个相位）。唯一要单独记的是
+      `dream_reports` **表**：`memory/scripts/init_db.py:330` 建表、全仓无写侧也无读侧；shim 那个
+      `get_dream_reports` 读的是自己的 list，从不碰表 ⇒ 这条断点**不是本刀产生**，也不随本刀消失，
+      留在"仍开"等裁（删表要走 `db_migration` 注册表，属数据动作，需人裁）。
+    - **红→绿**：新档 `tests/unit/core/test_flowOrchestratorShimRetirement.py` 先 **3 failed, 2 passed**
+      （红全在行为：两份档还在树里／引用点未清零／`class FlowOrchestrator` 仍在 658 行处点名），删完 **5 passed**。
+      面自证那一格走"由同一把尺给非零"——用同一个 `importersOfModule` 探现役替代必须报出引用，
+      否则"零悬空导入"就是探测器失效的形状（283）；**第①刀欠的那行账，这一刀起就带上**。
+    - **一条必须留下的形制读数（"两侧同选择集"为什么不可省）**：带改动跑整目录时两格红——
+      `test_theScanActuallyCoversTheTrackedProductionTree`（取数 1014／应有 1015）与
+      `test_sourceEscapeSequenceHygiene`（"在 ls-files 里却不在磁盘上"）——**看着像本批回归，实为删除尚未进索引**：
+      这类守卫的分母取 `git ls-files`（索引），磁盘取工作树，一错位就报数不符。`git add` 那两档删除后同两格立刻绿。
+      定性只能靠同选择集两侧对比（226/280）：既不许据"我改了所以它红"冒领，也不许反过来当噪声放行。
+    - **活体**：真 `create_app` ＋ 隔离数据根 ⇒ shim `ModuleNotFoundError` 如实、`WorkflowExecutor` 可导入、
+      编排路由 54 条在册、`GET /api/v1/neurflow/agents` 200 ⇒ 4/4 PASS。
+      探针第一版摸 `app.routes` 撞 `'_IncludedRouter' object has no attribute 'path'`——红指向脚本自己，
+      改取 `app.openapi()["paths"]`（214 那条的老课，第二次上账）。
+      同跑面自证棘轮＋解析预算门禁＋新档 **122 passed**（新档入子集不带新 offender）。
+    - **净 LOC 去向**：生产池 **+0/−870**；测试/基建池 **+105/−1007 ＝ 净 −902**（新判据 +97、契约测试 −1006、清单 +4、指路注释 +4/−1）。
+      子集 645（第①刀那档已在册，本刀再 +1 档；并发会话同期在动，现读为准）。
+    - **就地结清**：§6-311 票面甲半区（core 那份＋专用测试）。另注：`class FlowOrchestrator` 归零由
+      `test_noSecondOrchestrationClassRemains` 常驻钉住——防的是 §6-311"事件分组"那一族再来一次
+      （"完善项目结构"式批量提交把第二份编排器重新当现役）；这与 §6-313 的双源棘轮不重复取数（那把尺比的是跨文件复制的函数体）。
+    - **仍开**：第④刀"按能力挑 agent 并进 neurflow"（乙的最后一格，生产者已核到
+      `neurflow/models.py:296 capabilities` ＋ `storage.py` 的 `capabilities_json` 写读两侧）；
+      `dream_reports` 表的断点处置（等裁）；osv 甲、丁、⑤、dev_path 那 4 处；§6-334 的 B／C／D；其余等裁票照旧。
+    - **本会话下一枚空号现查 §6-347**（写前必须现场重取；本笔落库时该读数为 346）。
+
