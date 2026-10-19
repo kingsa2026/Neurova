@@ -63,17 +63,19 @@ def _faceFor(monkeypatch, user_id: str, workflowName: str):
 
     monkeypatch.setattr(mcp_server_api, "_get_mcp_server", lambda: _Server())
     app = FastAPI()
-    app.include_router(mcp_server_api.router, prefix=ENDPOINT)
-    app.dependency_overrides[nf_auth.get_current_user_or_service] = lambda: {
-        "user_id": user_id, "username": user_id, "role": "user", "neuser_id": user_id,
-    }
-    return TestClient(app)
+    # 走真挂载入口 + 真令牌：`dependency_overrides` 对 `app.mount()` 出来的 ASGI 应用不生效，
+    # 留着它这一档就会在换运输后"照样绿"，而那绿没有依据。
+    mcp_server_api.mountFace(app, ENDPOINT, "Neurova MCP Server Face")
+    token = nf_auth.create_access_token({"sub": user_id, "neuser_id": user_id, "role": "user"})
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
 class TestIdentityWrittenAtBoundary:
     def test_workflowLegReceivesTheSender(self, monkeypatch, spy):
-        client = _faceFor(monkeypatch, "mcp-sender-1", "workflow:demo")
-        resp = client.post(ENDPOINT, json=_rpc("tools/call", {"name": "workflow:demo", "arguments": {}}))
+        with _faceFor(monkeypatch, "mcp-sender-1", "workflow:demo") as client:
+            resp = client.post(
+                ENDPOINT, json=_rpc("tools/call", {"name": "workflow:demo", "arguments": {}})
+            )
         assert resp.status_code == 200, resp.text
         assert spy["user_id"] == "mcp-sender-1", (
             f"工作流那一条腿收到的 user_id={spy['user_id']!r}——这一面没写身份通道，"
@@ -83,11 +85,11 @@ class TestIdentityWrittenAtBoundary:
 
     def test_eachRequestCarriesItsOwnSender(self, monkeypatch, spy):
         """两发不同身份的请求各自看到自己那条——钉的是"请求级"，不是"进程级烘一次"。"""
-        first = _faceFor(monkeypatch, "sender-A", "workflow:a")
-        first.post(ENDPOINT, json=_rpc("tools/call", {"name": "workflow:a", "arguments": {}}))
+        with _faceFor(monkeypatch, "sender-A", "workflow:a") as first:
+            first.post(ENDPOINT, json=_rpc("tools/call", {"name": "workflow:a", "arguments": {}}))
         assert spy["user_id"] == "sender-A", spy
-        second = _faceFor(monkeypatch, "sender-B", "workflow:b")
-        second.post(ENDPOINT, json=_rpc("tools/call", {"name": "workflow:b", "arguments": {}}))
+        with _faceFor(monkeypatch, "sender-B", "workflow:b") as second:
+            second.post(ENDPOINT, json=_rpc("tools/call", {"name": "workflow:b", "arguments": {}}))
         assert spy["user_id"] == "sender-B", (
             f"第二发拿到 {spy['user_id']!r}——身份被烘进了长期对象（跨请求泄漏）"
         )
