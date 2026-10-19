@@ -7649,7 +7649,15 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       `Assertion failed: ncrypto::CSPRNG(nullptr, 0)（src/node.cc:1221）`＋一段 native stack，
       于是 stderr 里没有它们要找的 `ERR_UNKNOWN_FILE_EXTENSION`；第 6 条是时钟量子门那一格（既有登记）。
       这与批 91 那条"偶发红改判为环境侧 TOCTOU"同处置：**量出来、写下来、不修不放宽**。
-    - **仍开**：dev_path 那 4 处自抄读法（并发会话已落库若干笔，可收）；夜间脚本读法归谁（等裁）；
+    - **补一条批 105 漏掉的登记**（本会话自己的静默遗留，不是别人的）：那批第一次带整卷复取时量到 **12 条两侧同红**，
+      我把它写进了当时拟稿的正文，**成文时把这段漏了**——提交正文与台账两头都没有，等于没登记。
+      现按同一选择集复测一次（`18 failed / 727 passed / 3 skipped`，逐档归口）：
+      `tests/unit/test_osv_audit_hardening_guard.py` **9** 条、`tests/unit/test_deploy_config_guard.py` **2** 条、
+      `tests/unit/core/test_data_root_no_cwd_landing.py` **1** 条，加上去已在册的 6 条（5 npc＋1 时钟量子门）＝18。
+      18 条全部**两侧同红＝HEAD 自带**，本批不认领也不修；成因只量清了 npc 那 5 条（node 调用形态下崩在
+      CSPRNG 初始化），**其余 12 条的成因未逐条判定**（osv 那族像是本机缺扫描器二进制／网络，但没做实证，
+      按 305 那条不许把"像是"写成结论）。下一刀若带整卷复取，先判这 12 条是环境侧还是真回归，再决定修或登记修法。
+    - **仍开**：上面那条 12 位预存红的成因判定；夜间脚本读法归谁（等裁）；dev_path 那 4 处自抄读法（并发会话已落库若干笔，可收）；
       `_calledNames` 属性记名臂的独占性或摘除；`MANIFEST_BASELINE` 那一档的收口口径（§6-333 登记，仍等裁）；
       §6-318 边界①②；§6-317 同池名两读数即红；R5-env 待裁修法；全部等裁票（§6-311／§6-312 甲乙丙、
       D1、D9、D10、D11–D20、§6-293、§6-334 的 mcp_manager 三态票）。
