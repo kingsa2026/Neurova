@@ -1,43 +1,50 @@
-"""MCP server HTTP 面（P1-5）——JSON-RPC 2.0 端点（streamable http 最小协议面）。
+"""MCP server HTTP 面（P1-5）——运输层由官方 SDK 的 streamable-http 承载（§6-339 乙案）。
 
-NeurovaMCPServer（协议无关核心）经此挂上 HTTP：initialize / tools/list /
-tools/call / ping 四方法 + JSON-RPC 错误语义（-32601/-32600）+ 通知 202。
-鉴权走平台既有 get_current_user_or_service（JWT/服务令牌）。
+`NeurovaMCPServer`（协议无关核心）仍是工具清单与调用的**唯一实现源**；本模块只负责把它
+接到 HTTP 上：`mcp.server.lowlevel.Server` 的两个 handler ＋ `StreamableHTTPSessionManager`
+以 `stateless=True` ＋ `json_response=True` 跑"单请求单 JSON 响应"。原先手写的那份
+JSON-RPC 分派链（四方法 if/elif、自造信封、`include_router` 登记）随本批退役——
+同一功能在仓内只留一处实现（教义第 7 条）。
 
-`initialize` 做协议版本协商（支持则回声所请求版本，否则回自己支持的最新版本），
-支持集取官方 SDK 的握手期版本单源——此前把 "2025-03-26" 钉成字面量无条件回声，
-只支持较新版本的客户端按 spec 必须断开，本面对它们不可达。
+保留的对外承诺（§6-302，由 `tests/unit/api/testMcpFaceRidesSdkTransport.py` 逐条钉住）：
+协议版本协商回声/反提案、`ping` 必答、坏 Accept → 406、通知 → 202、未知方法 → -32601。
+两条**改过**的语义按 §6-340 裁定执行：`initialize` 的 params 三件齐（缺则 -32602），
+非信封体走 HTTP 400 但 JSON-RPC 码收成正码 -32600。
+
+鉴权与身份：本面仍在**请求边界**写一次 `neurova_request_user_id`（§6-334 裁定甲）。
+`app.mount()` 出来的子应用**不会**被父应用带 lifespan（本机 Starlette 1.7.0 现场读数：
+父 app 进出 lifespan 两次，子 app 的 enter/exit 轨迹恒空），所以 `mountFace` 把 manager 的
+启停挂到宿主 app 的事件上——运输形态归模块自述，装配层只问"挂上去"。
 """
 
 from __future__ import annotations
 
+import json
 import typing
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException
+from mcp.server.lowlevel import Server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS as SUPPORTED_HANDSHAKE_VERSIONS
 from mcp_types.version import LATEST_HANDSHAKE_VERSION
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.types import Message, Receive, Scope, Send
 
-from neurova.api.auth import get_current_user_or_service
+from neurova.api.auth import get_current_user_or_service, security
+from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
 
 _SERVER_NAME = "neurova"
+_SERVER_VERSION = "1.0.0"
 
-
-def _acceptsJson(request: Request) -> bool:
-    """本面只产 JSON 响应体（无 SSE 流），故要求客户端可接受 application/json。
-
-    通配按 RFC 7231 §5.3.2 处理（`*/*` 与 `application/*` 都算接受），与官方
-    服务端 JSON 响应模式的 Accept 校验同规则。
-    """
-    types = [
-        media.strip().split(";")[0].strip().lower()
-        for media in request.headers.get("accept", "").split(",")
-    ]
-    return "*/*" in types or "application/*" in types or "application/json" in types
+#: 本面只产 JSON 响应体；除这两个方法外的动词一律拒（见 `_McpFaceAsgi` 里那条 405）。
+#: GET 必须拒的理由是实测出来的：stateless + json_response 下 GET 会开一条不结束的流，
+#: 挂起面从"没有"变成"有一条"就是新缺陷。DELETE 交给 SDK 自己答 405。
+_ALLOWED_METHODS = ("POST", "DELETE")
 
 
 def _get_mcp_server():
@@ -58,8 +65,8 @@ def _get_mcp_server():
             registry = get_skill_registry()
         except Exception:  # noqa: BLE001
             registry = None
-# 惰性 provider（首次 MCP 调用时 agent 可能尚未就绪，
-# 每次现取 default agent；导出默认关，无 agent 时清单不含 computer_*）
+        # 惰性 provider（首次 MCP 调用时 agent 可能尚未就绪，
+        # 每次现取 default agent；导出默认关，无 agent 时清单不含 computer_*）
         def _agent_provider():
             try:
                 from neurova.api.endpoints import defaultAgentId, get_agent_instance
@@ -77,106 +84,158 @@ def _get_mcp_server():
 _MCP_SERVER = None
 
 
-def _text_content(text: str) -> list:
-    return [{"type": "text", "text": text}]
+async def _onListTools(_ctx, _params) -> ListToolsResult:
+    """清单逐字段交给核心——运输侧不攒第二份（教义第 6 条）。"""
+    entries = _get_mcp_server().list_tools()
+    return ListToolsResult(tools=[
+        Tool(
+            name=str(entry["name"]),
+            description=str(entry.get("description", "")),
+            inputSchema=dict(entry.get("inputSchema") or {"type": "object", "properties": {}}),
+        )
+        for entry in entries
+    ])
 
 
-async def _handle_tools_call(params: dict) -> dict:
-    name = str(params.get("name", ""))
-    arguments = params.get("arguments") or {}
-    server = _get_mcp_server()
-    outcome = await server.call_tool(name, dict(arguments))
+async def _onCallTool(_ctx, params) -> CallToolResult:
+    outcome = await _get_mcp_server().call_tool(str(params.name), dict(params.arguments or {}))
     if outcome.get("isError"):
-        return {"content": _text_content(str(outcome.get("error", "tool error"))), "isError": True}
-    import json as _json
-
+        return CallToolResult(
+            content=[TextContent(type="text", text=str(outcome.get("error", "tool error")))],
+            isError=True,
+        )
     payload = outcome.get("result") if "result" in outcome else outcome
-    text = _json.dumps(payload, ensure_ascii=False, default=str)
-    return {"content": _text_content(text)}
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, default=str))],
+        isError=False,
+    )
+
+
+def _invalidRequestCode(body: bytes) -> bytes:
+    """把 SDK 对"没构成信封"的 -32602 收成 JSON-RPC 正码 -32600（§6-340 裁定乙）。
+
+    改写只在 HTTP 400 这条路上发生：实测 params 类 -32602 全部以 200 返回，
+    所以这里**不可能**碰到裁定甲要保的那条 -32602。`data` 原样留着——JSON-RPC
+    明写 data 可携带实现细节，不作诊断泄漏处理。
+    """
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception:  # noqa: BLE001 — 读不动就原样吐回去，不替 SDK 编造响应
+        return body
+    error = parsed.get("error") if isinstance(parsed, dict) else None
+    if isinstance(error, dict) and error.get("code") == -32602:
+        error["code"] = -32600
+        error["message"] = "Invalid Request"
+        return json.dumps(parsed, ensure_ascii=False).encode("utf-8")
+    return body
+
+
+class _StatusCodeFix:
+    """ASGI `send` 包装：只截 HTTP 400 的那一条响应，其余原样透传。"""
+
+    def __init__(self, send: Send):
+        self._send = send
+        self._heldStart: Message | None = None
+        self._heldBody = b""
+
+    async def __call__(self, message: Message) -> None:
+        kind = message.get("type")
+        if self._heldStart is None:
+            if kind == "http.response.start":
+                if message.get("status") != 400:
+                    await self._send(message)
+                    return
+                self._heldStart = message
+                return
+            await self._send(message)
+            return
+        if kind == "http.disconnect":
+            await self._send(message)
+            return
+        self._heldBody += message.get("body", b"") or b""
+        if message.get("more_body"):
+            return
+        fixed = _invalidRequestCode(self._heldBody)
+        start = dict(self._heldStart)
+        start["headers"] = [
+            (k, v) for k, v in start.get("headers", []) if k.lower() != b"content-length"
+        ] + [(b"content-length", str(len(fixed)).encode("ascii"))]
+        self._heldStart = None
+        self._heldBody = b""
+        await self._send(start)
+        await self._send({"type": "http.response.body", "body": fixed})
+
+
+def _newServer() -> Server:
+    """一份低层 server：两个 handler 全部现取核心单例，运输侧不攒第二份清单。"""
+    return Server(
+        _SERVER_NAME,
+        version=_SERVER_VERSION,
+        on_list_tools=_onListTools,
+        on_call_tool=_onCallTool,
+    )
+
+
+class _McpFaceAsgi:
+    """鉴权 → 身份边界 → 动词闸 → 现建一份 manager 跑这一发（顺序即承诺）。
+
+    manager 是**每发请求新建**的，不是 app 级长驻。理由是实测出来的硬约束，不是省事：
+    `StreamableHTTPSessionManager.run()` 一次性，且它内部是 anyio cancel scope，
+    **进出必须在同一个 task**；而本仓 `create_app()` 返回的是缓存单例（`app.py:1368-1369`），
+    同一 app 对象会被多个 TestClient portal 反复进出——上一轮留下的上下文在下一轮的
+    shutdown task 里退出，当场炸 `RuntimeError: Attempted to exit cancel scope in a
+    different task than it was entered in`（本批实测打红的就是 `test_channelWebhookAuthBeforeDispatch`
+    那条飞书缺 token 的格）。stateless 模式本来就是"一发请求一条新运输"，把 manager 的
+    生命周期收到同一发请求里，才是与它同构的接法；顺带也不再需要往宿主 app 上挂启停事件。
+
+    鉴权复用平台那**同一对原语**：`security(request)` 解凭证（`HTTPBearer` 本身可调用，
+    `auto_error=False` 时缺头返回 None 而非抛 403）、`get_current_user_or_service` 定身份。
+    这里**不再解一次 Authorization**——`auth.py:559-567` 那段 docstring 写的正是
+    "同求异解"的旧病（`bearer` 与 `Bearer` 把同一枚凭证分进两个租户）。
+    """
+
+    def __init__(self, serverFactory=_newServer):
+        self._serverFactory = serverFactory
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("method") not in _ALLOWED_METHODS:
+            await JSONResponse(
+                {
+                    "jsonrpc": "2.0", "id": None,
+                    "error": {"code": -32600, "message": "Method Not Allowed"},
+                },
+                status_code=405,
+            )(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
+        try:
+            current_user: typing.Any = await get_current_user_or_service(
+                request, credentials=await security(request)
+            )
+        except HTTPException as exc:
+            # 挂载的 ASGI 应用外面没有 ExceptionMiddleware 兜这一层，
+            # 不自己翻译就会把 401 变成 500——信封也与 FastAPI 默认处理器保持一致。
+            await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+                scope, receive, send
+            )
+            return
+
+        # §3 身份只有一条通道，且只在请求边界写一次；口径与 /v1/chat 同源（令牌的 user_id）。
+        set_request_user_id((current_user or {}).get("user_id") or None)
+
+        manager = StreamableHTTPSessionManager(
+            app=self._serverFactory(), stateless=True, json_response=True
+        )
+        async with manager.run():
+            await manager.handle_request(scope, receive, _StatusCodeFix(send))
 
 
 def mountFace(app, prefix: str, description: str) -> None:
     """把本面挂到 app 上——**挂载入口只有这一处**。
 
     注册表原先按 `hasattr(module, "router")` → `include_router` 认这一面，那是把
-    "怎么挂"的事实写在装配层；换运输时（§6-339 乙案）同一处装配要长出第三种形态。
-    收口成模块自述后，装配层只问"挂上去"，运输形态归本模块。
+    "怎么挂"的事实写在装配层。运输换成 SDK 的 ASGI 应用后，形态只能由模块自述，
+    装配层只问"挂上去"；`description` 交给 Mount 命名，免得挂载点变成一条没人认识的匿名路由。
     """
-    app.include_router(router, prefix=prefix, tags=[description])
-
-
-@router.post("")
-async def mcp_http_endpoint(request: Request, current_user: typing.Any = Depends(get_current_user_or_service)):
-    """JSON-RPC 2.0 单请求入口（MCP streamable http 最小面）。"""
-    # §3 身份只有一条通道，且**只在请求边界写一次**：这一面此前有 401 闸却不写
-    # `neurova_request_user_id`，于是 `NeurovaMCPServer._current_user_id()` 恒空——
-    # MCP 触发的工作流落进无主桶、CUA 那条 `if uid:` 的身份透传恒假（§6-334 裁定甲）。
-    # 取值口径与 `/v1/chat` 同源（令牌的 user_id，即 sub），不新造第二条通道。
-    from neurova.core.identity_context import set_request_user_id
-
-    set_request_user_id((current_user or {}).get("user_id") or None)
-    if not _acceptsJson(request):
-        return JSONResponse(
-            status_code=406,
-            content={
-                "jsonrpc": "2.0", "id": None,
-                "error": {"code": -32600, "message": "Not Acceptable: Client must accept application/json"},
-            },
-        )
-    try:
-        body = await request.json()
-    except Exception:  # noqa: BLE001
-        body = None
-    if not isinstance(body, dict) or "method" not in body:
-        return {
-            "jsonrpc": "2.0", "id": None,
-            "error": {"code": -32600, "message": "Invalid Request"},
-        }
-
-    method = str(body.get("method", ""))
-    params = body.get("params") or {}
-    request_id = body.get("id")
-
-    # 通知请求（无 id）：MCP 语义 202 空响应
-    if request_id is None:
-        from fastapi import Response
-
-        return Response(status_code=202)
-
-    try:
-        if method == "initialize":
-            requested = params.get("protocolVersion")
-            result = {
-                # spec 协商规则，与官方服务端实现同形：支持所请求版本则回声它，
-                # 否则回本面支持的最新版本（不把旧字面量硬塞回去）
-                "protocolVersion": (
-                    requested
-                    if requested in SUPPORTED_HANDSHAKE_VERSIONS
-                    else LATEST_HANDSHAKE_VERSION
-                ),
-                # 能力声明只报实际实现的 tools——升版本号不等于升能力
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": _SERVER_NAME, "version": "1.0.0"},
-            }
-        elif method == "ping":
-            # spec 要求服务端必须应答 ping（健康探测）；此前落进 -32601 分支
-            result = {}
-        elif method == "tools/list":
-            result = {"tools": _get_mcp_server().list_tools()}
-        elif method == "tools/call":
-            result = await _handle_tools_call(params)
-        else:
-            return {
-                "jsonrpc": "2.0", "id": request_id,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            }
-        return {"jsonrpc": "2.0", "id": request_id, "result": result}
-    except Exception as e:  # noqa: BLE001 — 协议内错误信封，不 500
-        logger.warning("MCP http %s 失败: %s", method, e)
-        return {
-            "jsonrpc": "2.0", "id": request_id,
-            "error": {"code": -32603, "message": str(e)[:200]},
-        }
-
-
-__all__ = ["router"]
+    app.mount(prefix, _McpFaceAsgi(), name=description)

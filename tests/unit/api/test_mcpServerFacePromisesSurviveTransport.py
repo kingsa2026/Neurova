@@ -14,15 +14,36 @@
 2. tools/list 的清单必须由核心给出，端点不自己拼。
 3. tools/call 必须原样落到 `NeurovaMCPServer.call_tool`（名字与参数都不许被端点改写）。
 4. CUA 未启用时的拒绝文案必须来自核心那一份（开关语义不许在传输层重述）。
+
+§6-339 换运输后本档跟改的两处，都是把"依据"换硬而不是放宽断言：
+① 挂载改走 `mcp_server_api.mountFace`——`app.dependency_overrides` 对 `app.mount()` 出来的
+   ASGI 应用**根本不生效**，留着它只会得到"覆盖没生效却照样绿"的假事实源；三处一律改真令牌
+   （`create_access_token`），承诺 1 那句"用的就是面自己声明的那条鉴权"从此字面成立。
+② `initialize` 的 params 补成 spec 要求的三件齐（§6-340 裁定甲）；本档审的是接线，
+   不是协商，补全取样即可，语义由 `testMcpFaceRidesSdkTransport.py` 那档钉。
 """
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from neurova.api import auth as nf_auth
 from neurova.api.endpoints import mcp_server_api
 from neurova.tool_layers.mcp_server import NeurovaMCPServer
 
 ENDPOINT = "/api/v1/mcp"
+
+
+def _token(sub: str) -> dict:
+    return {"Authorization": f"Bearer {nf_auth.create_access_token({'sub': sub, 'neuser_id': sub, 'role': 'user'})}"}
+
+
+def _initializeParams(version: str) -> dict:
+    return {
+        "protocolVersion": version,
+        "capabilities": {},
+        "clientInfo": {"name": "neurova-promises-judge", "version": "1"},
+    }
 
 _CORE_TOOLS = [
     {"name": "workflow:demo", "description": "示例工作流", "inputSchema": {"type": "object", "properties": {}}},
@@ -59,49 +80,41 @@ def recordingServer(monkeypatch):
 
 
 @pytest.fixture
-def face(monkeypatch, recordingServer):
-    from fastapi import FastAPI
-
-    from neurova.api import auth as nf_auth
-
+def face(recordingServer):
     app = FastAPI()
-    app.include_router(mcp_server_api.router, prefix=ENDPOINT)
-    monkeypatch.setitem(
-        app.dependency_overrides, nf_auth.get_current_user_or_service,
-        lambda: {"user_id": "u1", "username": "u", "role": "user", "neuser_id": "1"},
-    )
-    return TestClient(app), recordingServer
+    mcp_server_api.mountFace(app, ENDPOINT, "Neurova MCP Server Face")
+    with TestClient(app) as entered:
+        entered.headers.update(_token("u1"))
+        yield entered, recordingServer
 
 
 class TestAnonymousGate:
     def test_anonymousRequestsAreRefused(self):
         """不打任何凭证时，握手与清单都必须被拒——这条是平台既有身份通道的入口。
 
-        注意这里**不设** dependency_overrides：用的就是端点自己声明的那个依赖。
+        注意这里**不设**任何覆盖：用的就是面自己声明的那条鉴权（现在那条在 ASGI 包装层里，
+        与平台共用 `security` ＋ `get_current_user_or_service` 同一对原语）。
         """
-        from fastapi import FastAPI
-
         app = FastAPI()
-        app.include_router(mcp_server_api.router, prefix=ENDPOINT)
-        client = TestClient(app)
-        for method in ("initialize", "tools/list"):
-            resp = client.post(ENDPOINT, json=_rpc(method, {"protocolVersion": "2025-11-25"}))
-            assert resp.status_code == 401, f"{method} 匿名可得 {resp.status_code}：身份闸没了"
+        mcp_server_api.mountFace(app, ENDPOINT, "Neurova MCP Server Face")
+        with TestClient(app) as client:
+            for method, params in (
+                ("initialize", _initializeParams("2025-11-25")),
+                ("tools/list", None),
+            ):
+                resp = client.post(ENDPOINT, json=_rpc(method, params))
+                assert resp.status_code == 401, f"{method} 匿名可得 {resp.status_code}：身份闸没了"
 
     def test_platformTokenStillGetsServed(self):
         """控制格：真签发的平台令牌必须能过——否则上面那条 401 只是"谁都拒"。"""
-        from fastapi import FastAPI
-
-        from neurova.api.auth import create_access_token
-
         app = FastAPI()
-        app.include_router(mcp_server_api.router, prefix=ENDPOINT)
-        token = create_access_token({"sub": "face-probe", "neuser_id": "face-probe"})
-        resp = TestClient(app).post(
-            ENDPOINT,
-            json=_rpc("initialize", {"protocolVersion": "2025-11-25"}),
-            headers={"Authorization": f"Bearer {token}"},
-        )
+        mcp_server_api.mountFace(app, ENDPOINT, "Neurova MCP Server Face")
+        with TestClient(app) as client:
+            resp = client.post(
+                ENDPOINT,
+                json=_rpc("initialize", _initializeParams("2025-11-25")),
+                headers=_token("face-probe"),
+            )
         assert resp.status_code == 200, resp.text
         assert resp.json()["result"]["protocolVersion"] == "2025-11-25"
 
@@ -123,8 +136,11 @@ class TestFaceDelegatesToCore:
         assert server.calls == [("skill:summarize", {"task": "整理论文"})], (
             f"核心收到的分派与请求不一致：{server.calls}"
         )
-        # 现契约：成功响应不带 isError 键（端点只在真错时补这个键），别把它写成 is False
-        assert "isError" not in body["result"], body["result"]
+        # 换运输后的读数：SDK 的 `CallToolResult` **总是**序列化 `isError`，成功时是显式 false，
+        # 而旧手写面是"只在真错时补这个键"。两种写法对客户端读的是同一个真假（schema 里
+        # isError 本就带默认值 false），所以本格的判据从"键不存在"改成"显式为假"——
+        # 这是 §6-339 那份清单漏记的一条分叉，随本批落台账（此处不预占号）。
+        assert body["result"]["isError"] is False, body["result"]
 
     def testUnknownToolErrorEnvelopeSurvives(self, face):
         """不认识的名字 → 核心那份「未知 MCP 工具」必须走 MCP 错误信封。
