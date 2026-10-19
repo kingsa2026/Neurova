@@ -733,11 +733,18 @@ class TestProtectedSubsetEntriesAreTracked:
             pytest.skip("非 git 工作区 / 无 git：跟踪状态无从判定")
 
     def test_every_protected_entry_exists_on_disk(self):
-        """清单指向不存在的文件 = CI 必红（pytest 退出码 4），且断言无从执行。"""
+        """清单指向不存在的文件 = CI 必红（pytest 退出码 4），且断言无从执行。
+
+        前一条量级断言不是凑数：本类的 `_protected_test_files()` 与下面的逐条检查都以这份清单为面，
+        清单被截短（或路径写错到读不到）时 missing 会一起缩水成空，"全部存在"这条反而更绿。
+        """
         if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
             pytest.skip("非 git 工作区 / 无 git")
+        entries = self._protected_entries()
+        assert len(entries) > 500, (
+            f"受保护子集清单现读 {len(entries)} 条，量级不对＝没读到／路径写错")
         missing = [
-            rel for rel in self._protected_entries()
+            rel for rel in entries
             if not (PROJECT_ROOT / rel).exists()
         ]
         assert not missing, (

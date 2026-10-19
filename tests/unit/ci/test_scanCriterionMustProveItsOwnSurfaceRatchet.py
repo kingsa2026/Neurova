@@ -44,8 +44,15 @@
 §6-331 点名的一处真缺口。
 **仍认不到的形状（明写边界，不当已收口）**：分类器认"扫描入口调用"——
 `ast_scan.<共享入口>`、`<路径>.rglob|glob|iterdir|listdir|scandir`、`os.walk`，并且要把根参数
-解成仓内目录；成员检查（只为问"这条在不在表里"）不算面，那种用法在清单改窄时**当场就红**，
-与"仓内文件"同属坏得响那一支。读的是**仓外**清单、或条目不拼成路径而只当键用的，也不在面内。
+解成仓内目录。清单那一面有三条形制确实没认：**模块链两跳以上**（取数口自己再转调第三个模块，
+`_moduleFacts` 只算同文件规则那一层）、**动态取数**（`importlib.import_module`／`__import__`——
+认它就等于猜面，猜出来的面不算面）、以及**条目先过一道普通函数再被当路径动手**
+（`d = digest(line)` 之后 `d.is_file()`——污点一旦允许顺任意 helper 蔓延，面就虚胖到不可信，
+`_isPathDerivation` 那条写了理由，控制格里也钉了同一形）。另有三种**不是缺口**，理由要写清：
+成员检查（只为问"这条在不在表里"）、条目只当键用（切字符串、比较、当 dict 键而从不进
+`read_text`/`open`/`is_file`）在清单改窄时**当场就红**，与"仓内文件"同属坏得响那一支；
+读的是**仓外**清单也照样在面内——本闸只问"条目有没有被当路径动手"，清单文件该不该在仓内是
+另一回事（旧版本这里写着"仓外不在面内"，那句是假话）。
 
 **根的形状分六态**：仓内目录／仓内文件／仓外目录／指不到东西／动态值／**函数内局部名**。只有"仓内目录"要求面自证；
 "仓内文件"坏得响（入口当场抛），"动态值"不承载面的声明；**"仓外"与"指不到"一律点名，且不看它在不在下表里**
@@ -60,7 +67,6 @@
 from __future__ import annotations
 
 import ast
-import io
 import os
 import pathlib
 import sys
@@ -71,7 +77,7 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
+from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法在 `ast_scan.protectedSubsetEntries`
 
 #: 认作"扫描落点"的共享预算入口（枚举与解析都在预算内完成）。
 SHARED_SCAN_ENTRIES = {
@@ -119,7 +125,67 @@ LOCAL_BASELINE: set = set()
 #: `test_surfaceReadingIsNotVacuous` 的形状补一条"由这份清单得到"的读数），一处方管五处 ⇒ 同批改完，
 #: 不留存量表（教义 5：命中点当场处理得了，就不该登记完事）。
 #: 空表之后这一格也是零容忍——新写一条"逐条读清单去动手"的判据而不留条目读数，当场点名。
-MANIFEST_BASELINE: set = set()
+# 现值＝**1 档**（不是"待办"，是**登记不动手**的那一类，理由写在这里）：
+# `tests/unit/test_repair_discipline_guard.py` 的清单面只有 1 条——`docs/INDEX.md` 的阅读顺序
+# 今天只指向 `AGENTS.md`（实测 `_reading_order_paths()` 返回一条）。给它补一条 `len(paths) > N`
+# 就是拿假数字装硬断言（形态集 307 那一族：合法修复把读数归零时，不许把格子做成恒真空守卫）。
+# 那一档其实**已经**防住了"静默空转"：`assert paths, "阅读顺序未解析出任何根级文档引用"`
+# 走的正是"解析结果空即红"那一形，只是本闸的读数形状不认非数值断言。
+# 要收这一形需要另一条口径（"解析出的条目数 == 那一节里全部 `.md` 引用数"），登记在 §6-333 待裁，
+# 不用放宽规则换绿——放宽一次，下一档只有一条目的清单就能骗过这道闸。
+MANIFEST_BASELINE: set = {
+    "tests/unit/test_repair_discipline_guard.py",
+}
+
+
+#: ── 清单取数口的单源表（§6-234 那一族的续集）：`rel -> 自己读那份清单的落点数` ──────
+#: 这份清单是 CI 的唯一执行面，"哪些档在子集内"只该有一处读法（`ast_scan.protectedSubsetEntries()`）。
+#: **表由本文件的 `_readerCounts` 现取生成**——我第一版手抄过一份，同一棵树就错出"28 档"（还点进了
+#: 一档根本不在子集里的），正是形态集 304 那条：基线与判据不同源时，"存量在降"会被读成"治理有进展"。
+#: 纪律与前三张表一致：新增落点即红、消化必须摘行。
+#: 现值＝**34 档 / 37 处**（本批把以清单为面逐条动手的 6 档改指单点之后）。余下这些多为
+#: "只问这条在不在表里"的成员检查——那种用法坏得响，但仍是不必要的第二份读法，按批消化。
+#: 37 处按 `_manifestReadSites` 的两条支分：**解析支独占 23／两支都中 13／字面量支独占 1**
+#: （探针逐档复算，两臂并集与原函数读数逐档相等才敢这么写）——那 1 处是 `repo_path("scripts","ci",…)`
+#: 这种"路径由 helper 拼出来"的读法，所以两条支都不是装饰。
+#: 一处不在表里也不在面内：`tests/integration/test_security_integration.py` 读这份清单，
+#: 可它**不在受保护子集里**——本闸的面就是那份清单，登记在这里免得下一个人以为漏了。
+READER_BASELINE: dict = {
+    "tests/unit/api/test_channel_config_landing_anchor.py": 1,
+    "tests/unit/api/test_context_budget_face_retirement.py": 1,
+    "tests/unit/api/test_context_pool_settings_face_retirement.py": 1,
+    "tests/unit/ci/test_ci_protected_subset_nightly.py": 1,
+    "tests/unit/ci/test_docker_image_pipeline_wiring.py": 1,
+    "tests/unit/ci/test_issue197_judgement_registration.py": 1,
+    "tests/unit/ci/test_knowledge_base_index_wiring.py": 1,
+    "tests/unit/ci/test_npc_pipeline_time_budget.py": 1,
+    "tests/unit/ci/test_npc_runtime_budget.py": 1,
+    "tests/unit/ci/test_npc_script_interpreter_reachability.py": 1,
+    "tests/unit/ci/test_npc_turn_handoff_execution.py": 1,
+    "tests/unit/ci/test_npc_turn_handoff_predicate.py": 1,
+    "tests/unit/ci/test_stub_signature_single_source.py": 1,
+    "tests/unit/context/test_b5_scale_batch_registration.py": 1,
+    "tests/unit/context/test_batch_status_docs_coupling.py": 1,
+    "tests/unit/context/test_context_compression_single_face.py": 1,
+    "tests/unit/context/test_context_deadline_disposal.py": 1,
+    "tests/unit/context/test_context_deadline_ledger.py": 1,
+    "tests/unit/context/test_context_facade_retirement.py": 1,
+    "tests/unit/context/test_pool_registry_session_partition_retirement.py": 1,
+    "tests/unit/context/test_summarizer_degradation_bit_observable.py": 1,
+    "tests/unit/context/test_ttl_reclaim_and_session_identity.py": 1,
+    "tests/unit/context/test_turn_session_identity.py": 1,
+    "tests/unit/core/test_data_root_no_cwd_landing.py": 1,
+    "tests/unit/core/test_runtime_landing_root.py": 1,
+    "tests/unit/memory_ingest/test_protected_registration.py": 1,
+    "tests/unit/scripts/test_scripts_import_bootstrap.py": 1,
+    "tests/unit/test_deploy_config_guard.py": 1,
+    "tests/unit/test_dev_path_and_runtime_dep_guards.py": 4,
+    "tests/unit/test_experience_quality_gate.py": 1,
+    "tests/unit/test_osv_audit_hardening_guard.py": 1,
+    "tests/unit/test_pytest_runner_guards.py": 1,
+    "tests/unit/test_script_index_registration.py": 1,
+    "tests/unit/tools/test_tool_batch_parallelism.py": 1,
+}
 
 
 # ── 取数：三样小工具，各自只解一件事，便于逐形反检 ─────────────────────────────
@@ -356,9 +422,10 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
             if localEntries:
                 localGaps[rel] = localEntries
         if manifestGaps is not None:
-            entrySites, universe, iterReads = _manifestFace(
+            entrySites, universe, iterReads, env = _manifestFace(
                 tree, consts, root, selfPath=path.resolve(), scoped=_allBindings(tree))
-            if entrySites and not _hasListProof(tree, universe, _countNames(tree), iterReads):
+            if entrySites and not _hasListProof(tree, universe, _countNames(tree),
+                                                iterReads, env, root):
                 manifestGaps[rel] = entrySites
         gap = _rootGap(sites)
         if gap:
@@ -383,21 +450,27 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
 #: 只读一份 `.cnb.yml` 的守卫全列成 offender（那是探测口径出错，不是存量）。
 #:
 #: 判定要三件同时成立（缺一不可，实施那轮被正控打回三次，每次都是少认一形）：
-#:   (a) 清单源＝读到一个非 `.py` 清单文件上，含 list-comp／`splitlines()`／同文件 helper 一跳；
-#:   (b) 一次迭代（`for` 或推导式）的 iterable 污点自 (a)，**三种写法都算**：绑到清单名的名字
+#:   (a) 清单源＝读到一个非 `.py` 清单文件上，含 list-comp／`splitlines()`／同文件 helper 一跳／
+#:       **文件名当参数递进取数口**（`readAny('items.txt')`——helper 体内只有 `io.open(name)`，
+#:       靠 `_literalListSuffix` 追那次调用的实参字面量才认得）；
+#:   (b) 一次迭代（`for` 或推导式）的 iterable 污点自 (a)，**四种写法都算**：绑到清单名的名字
 #:       （`for x in manifest`）、直调清单 helper（`for x in protectedFiles()`）、当场读再迭代
-#:       （`for x in io.open(P).read().splitlines()`，本仓实测 9 处）；
-#:   (c) 迭代变量派生出的名字（`path = 根 / 条目`，或条目先过一道字符串处理再拼路径，或
-#:       `.joinpath(条目)`）被 `read_text`/`open`/`is_file`/`exists`/`rglob`… 动用，
-#:       跳进同文件 helper 算一跳。
+#:       （`for x in io.open(P).read().splitlines()`，本仓实测 9 处）、**类里的取数方法**
+#:       （`for x in self._rows()`——被调者要按属性形记名，只记裸名等于把这族整档放出面）；
+#:   (c) 迭代变量**派生成路径**之后再动手：`path = 根 / 条目`、`.joinpath(条目)`、`Path(条目)`、
+#:       f-string，或条目先过一道字符串处理再拼（`rel = line.split('#')[0].strip()` ⇒ `根 / rel`，
+#:       台账那一族全是这个形状）；派生出的名字被 `read_text`/`open`/`is_file`/`exists`/`rglob`…
+#:       动用才算，跳进同文件 helper 算一跳。
 #: (c) 是这一形的要害，也是前两版漏掉的地方：第二版只认"动用在同一个 `BinOp` 子树内"，
 #: 而真实代码都是先落变量再动手（`path = root / rel` 之后一句才 `path.is_file()`）——
 #: 所以**污点要跨语句传递**，且条目在派生成路径之前常常先被切一遍字符串。
-#: 认不到的形状（实测过才写，不当已收口）：**跨模块取数口**——清单读法在别的模块里、本档只
-#: `import` 进来用（`from somewhere import readList` / 清单路径常量定义在别处）。`_helpersOf` 与
-#: `_constTable` 都只看本文件，实测这两种形状报零。现仓不有此形状：按 `protected_tests.txt` 逐条
-#: 扫描的档都在自己文件里读清单（这本身是另一族双源，不属本票）。字典/集合中转、条目取字段
-#: （`row[0]`）再拼路径这几形**都已认到**（实测四形各验一次），不在边界里。
+#: 但传递只认 `_isPathDerivation` 那几种形：上一版把"右值里提了一下条目名"的一般赋值全收，
+#: 实测多出 19 档 false positive（`hits[rel] = calibers`、`len(rows) == len(declared)` 那一类）。
+#: 面虚胖与面偏窄一样坏——它下次报"0 offender"就没人敢信（291 那一族的另一头）。
+#: 批 104 补的那跳是**跨模块**：取数口收进 `ast_scan.protectedSubsetEntries()` 之后，"读清单"
+#: 这件事根本不在本文件里，探测器若只跟同文件 helper，迁走的 6 档会在收口的**同一批**静默掉出
+#: 清单面——形态集 313「判据的面由它自己的解析能力界定」那一族的新变种，且这次是治理动作自己
+#: 造出来的。字典/集合中转、条目取字段（`row[0]`）再拼路径这几形也都认到（各配一格正检）。
 LIST_SUFFIXES = (".txt", ".json", ".md", ".yml", ".yaml", ".ini", ".cfg", ".toml")
 LIST_READS = {"read_text", "read", "readlines", "open"}
 ENTRY_USES = {"read_text", "read", "open", "is_file", "is_dir", "exists", "rglob", "glob",
@@ -408,6 +481,179 @@ def _helpersOf(tree: ast.AST) -> dict:
     """同文件的函数表——(a) 与 (c) 都要跳一跳，不跳就认不出 `_manifestOf(...)`／`_scanOne(rel)` 这类真形状。"""
     return {f.name: f for f in ast.walk(tree)
             if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+#: ── 跨模块一跳（§6-332 登记的那条形制，批 104 落地）─────────────────────────────
+#: 取数口收口到 `tests/ast_scan.py::protectedSubsetEntries()` 之后，读清单这件事就**不在本文件里了**：
+#: 档里只剩 `ast_scan.protectedSubsetEntries()` 或 `from tests.ast_scan import ...`。
+#: 探测器要是只跟同文件 helper，那 6 档会**在收口的同一批静默掉出清单面**——正是形态集 313
+#: 「判据的面由它自己的解析能力界定」那一族的新变种，而且这次是治理动作自己造出来的。
+#: 所以认形必须与收口同批到位。缓存只存**算完的函数名集合**并按 (路径, mtime, 大小) 记，
+#: 不存语法图——490 棵常驻树会把本闸变成 Issue #197 点过的那种 GC 账单（形态集 209）。
+_MODULE_LIST_NAMES: dict = {}
+
+#: 允许的 import 形态（各配一枚合成正检；不在列的形态不许猜——猜出来的面不算面）
+def _importBase(node, anchor: pathlib.Path, selfPath: pathlib.Path = None):
+    """`from a.b import c` / `from ..b import c` 里那个 `a.b`／`..b` 解成仓内目录或模块前缀。"""
+    parts = tuple(node.module.split(".")) if node.module else ()
+    if node.level:
+        base = selfPath.parent if selfPath is not None else anchor
+        for _ in range(node.level - 1):
+            base = base.parent
+        return base.joinpath(*parts) if parts else base
+    return anchor.joinpath(*parts) if parts else anchor
+
+
+def _moduleFile(base: pathlib.Path, tail: str, anchor: pathlib.Path = None):
+    """把 `<base>.<tail>` 解成仓内真实文件：模块本身、子模块、或包的 `__init__.py`。
+
+    这里**只做存在性判定**，不建全树索引：先前用 `os.walk` 建过一份 `.py` 索引来省 stat，
+    那一步把「枚举入口＋私有解析」凑进了本闸自己的调用闭包，被 `TestNoUnprefilteredRepoWideScan`
+    当场点名（形态集 312 那条：枚举入口一旦进了被消费的 helper 的闭包，账单记在整个取数口上）。
+    """
+    cands = [base.with_suffix(".py")]
+    if tail:
+        cands += [base / (tail + ".py"), base / tail / "__init__.py", base / "__init__.py"]
+    else:
+        cands.append(base / "__init__.py")
+    for cand in cands:
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _importEnv(tree: ast.AST, anchor: pathlib.Path, selfPath: pathlib.Path = None) -> dict:
+    """`modules`：`ast_scan -> <仓内模块文件>`；`funcs`：`受入名 -> [(模块文件, 本名)]`。
+
+    认三种真在用的写法：`from tests import ast_scan`（走属性调用那一支）、
+    `from tests.ast_scan import name`（直接导入函数那一支）、测试档里的相对导入
+    `from . import x`／`from ..y import z`。**不**认 `importlib.import_module`／`__import__`
+    那种动态取数——那是"猜面"，登记在边界段里而不是这里。
+    """
+    modules, funcs = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            base = _importBase(node, anchor, selfPath)
+            if base is None:
+                continue
+            own = base.with_suffix(".py")
+            pkg = base / "__init__.py"
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                for holder in (own if own.is_file() else None, pkg if pkg.is_file() else None):
+                    if holder is not None:
+                        funcs.setdefault(local, []).append((holder, alias.name))
+                sub = _moduleFile(base, alias.name, anchor)
+                if sub is not None and sub != own:
+                    modules[local] = sub
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".")[0]
+                mod = _moduleFile(anchor / pathlib.Path(*alias.name.split(".")), "", anchor)
+                if mod is not None:
+                    modules[local] = mod
+    return {"modules": modules, "funcs": funcs}
+
+
+def _moduleFacts(path: pathlib.Path, anchor: pathlib.Path) -> frozenset:
+    """那个模块里**自己读清单**的函数名集合——按 (路径, mtime, 大小) 记，只记这个名字集合。
+
+    三条约束决定了这个形状：
+    ① 缓存必须打洞（改文件即失效），不做"一次解析永久有效"——与本仓 `ast_scan._cacheKey` 同口径；
+    ② **不保留语法图**，只保留算完的函数名集合。留着 490 棵常驻树会把本闸变成 Issue #197
+       点过的那种账单（gen2 每扫一遍都走完整棵图），而判据自身的成本也是回归面（形态集 209）；
+    ③ 未先过文本预筛就解析＝白付一趟。清单后缀字面量没出现在那份源码里，就不可能有函数
+       把路径解析成清单（一跳之内路径总得在某处写成字面量），所以这一筛对本规则是**无损**的。
+    只算**同文件规则**那一层：模块链因此一跳封顶，两跳以上登记在边界段里。
+    """
+    try:
+        stamp = path.stat()
+    except OSError:
+        return frozenset()
+    key = (str(path), stamp.st_mtime_ns, stamp.st_size)
+    cached = _MODULE_LIST_NAMES.get(key)
+    if cached is not None:
+        return cached
+    try:
+        source = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        _MODULE_LIST_NAMES[key] = frozenset()
+        return _MODULE_LIST_NAMES[key]
+    if not any(suf in source for suf in LIST_SUFFIXES):
+        _MODULE_LIST_NAMES[key] = frozenset()
+        return _MODULE_LIST_NAMES[key]
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        _MODULE_LIST_NAMES[key] = frozenset()
+        return _MODULE_LIST_NAMES[key]
+    consts, helpers, scoped = _constTable(tree), _helpersOf(tree), _allBindings(tree)
+    names = frozenset(fn.name for fn in ast.walk(tree)
+                      if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and _readsAList(fn, consts, helpers, anchor, selfPath=path,
+                                      depth=1, scoped=scoped))
+    _MODULE_LIST_NAMES[key] = names
+    return names
+
+
+def _crossModuleTargets(env: dict, call: ast.Call) -> list:
+    """这次调用可能打到的 `(模块文件, 函数名)` 候选——Name 形有多个受入来源就全试，不取首个。"""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return list(env["funcs"].get(func.id, []))
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        modPath = env["modules"].get(func.value.id)
+        return [(modPath, func.attr)] if modPath is not None else []
+    return []
+
+
+def _calledNames(node: ast.AST) -> set:
+    """这段子树里"被调用的名字"——**属性形也算**。
+
+    只记裸名就看不见 `self._rows()` 里的 `rows`：台账那一族的取数方法挂在 `self` 上。
+    实测（批 104 变异）这条臂与 `_readsAList` 的方法跳**覆盖同一形**——单摘任一条，
+    `for x in self._rows()` 那格仍绿，两条一起摘才红；`rows = self._rows()` 那一形则只有
+    方法跳认得。留两条的理由是它们服务的问句不同（这条问"迭代器里出现了哪个名字"，
+    那条问"这段代码读不读清单"），但**不许**据此声称各自不可替代——替代性已由变异量清。
+    """
+    out = set()
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Call):
+            continue
+        if isinstance(n.func, ast.Name):
+            out.add(n.func.id)
+        elif isinstance(n.func, ast.Attribute):
+            out.add(n.func.attr)
+    return out
+
+
+def _crossModuleReadsList(env: dict, call: ast.Call, anchor: pathlib.Path, depth: int) -> bool:
+    """跟**模块一跳**：这次调用打到的函数，是不是在它自己的模块里读了一份清单。
+
+    只在看得到具体调用时才解析那个模块（`_moduleFacts` 按轮缓存）——早先版本把每个被 import
+    的模块都解析一遍再列"读清单的函数名"，实测把本闸的扫描从 4.7s 推到 14.7s（判据自身的成本
+    也是回归面，形态集 209 那一族）。
+    """
+    if depth > 4:
+        return False
+    return any(name in _moduleFacts(modPath, anchor)
+               for modPath, name in _crossModuleTargets(env, call))
+
+
+def _operandMentionsList(side: ast.AST, universe: set, env: dict, anchor: pathlib.Path) -> bool:
+    """断言的这一侧到底是不是"在量这份清单"——出现清单名，或出现一次打到跨模块清单取数口的调用。
+
+    后一支是给 `assert len(ast_scan.protectedSubsetEntries()) > 500` 这种不落包装名的写法留的：
+    它没有本地名字可匹配，但调用打过去就是那份清单的读法。
+    """
+    for n in ast.walk(side):
+        if isinstance(n, ast.Name) and n.id in universe:
+            return True
+        if isinstance(n, ast.Call) and _crossModuleReadsList(env, n, anchor, 0):
+            return True
+    return False
 
 
 def _allBindings(tree: ast.AST) -> dict:
@@ -443,15 +689,30 @@ def _literalListSuffix(node, scoped: dict, depth: int = 0) -> bool:
 
 
 def _readsAList(node: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path,
-                selfPath: pathlib.Path = None, depth: int = 0, scoped: dict = None) -> bool:
-    """这段子树里有没有"读一个非 .py 清单"；同文件 helper 跟一跳（两跳封顶防自旋）。"""
-    if depth > 2:
+                selfPath: pathlib.Path = None, depth: int = 0, scoped: dict = None,
+                env: dict = None, listArgAtCall: bool = False) -> bool:
+    """这段子树里有没有"读一个非 .py 清单"；同文件 helper 跟一跳，**跨模块也跟一跳**（批 104）。
+
+    跨模块那一跳是取数口收口的**前置**而不是补充：`protectedFiles()` 改成
+    `ast_scan.protectedSubsetEntries()` 之后，读清单这件事在本档源码里就看不见字面量了——
+    探测器要是不跟着走，那 6 档会在治理成功的同一批静默掉出清单面（形态集 313 那一族，
+    而这次是治理动作自己造出来的盲区）。深度上限 4 防自旋；`env` 缺席（老调用方）就只走同文件那一支。
+
+    `listArgAtCall` 是**调用点**那一侧的事实：`readAny("requirements-ci.txt")` 这种"文件名当参数
+    递进去"的取数口，helper 体内只有 `io.open(name)`，光看 helper 认不出那是清单。
+    每加一支认形就配一枚正检（310/318 那条纪律）——见 `_MANIFEST_SHAPES` 里那两枚新的。
+    """
+    if depth > 4:
         return False
     for call in ast.walk(node):
         if not isinstance(call, ast.Call):
             continue
         func = call.func
         if isinstance(func, ast.Attribute) and func.attr in LIST_READS:
+            if listArgAtCall:
+                # 清单文件名是调用点递进来的（`readAny("requirements-ci.txt")`）——helper 体内
+                # 只有 `io.open(name)`，光看 helper 认不出那份清单是谁；把调用点的字面量带下来。
+                return True
             base = func.value if func.attr != "open" else (call.args[0] if call.args else None)
             r = _resolveRoot(base, consts, anchor, selfPath=selfPath) if base is not None else None
             if r is not None and str(r).lower().endswith(LIST_SUFFIXES):
@@ -460,14 +721,26 @@ def _readsAList(node: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path
                 base = func.value
             if _literalListSuffix(base, scoped or {}, 1):
                 return True
+        hopName = None
         if isinstance(func, ast.Name) and func.id in helpers:
-            if _readsAList(helpers[func.id], consts, helpers, anchor, selfPath, depth + 1, scoped):
+            hopName = func.id
+        elif isinstance(func, ast.Attribute) and func.attr in helpers:
+            # 类里的取数方法（`for row in self._rows()`）：不认这一支就把台账那一族整族放出面
+            hopName = func.attr
+        if hopName is not None:
+            hopArg = listArgAtCall or any(
+                _literalListSuffix(a, scoped or {}, 1) for a in call.args)
+            if _readsAList(helpers[hopName], consts, helpers, anchor, selfPath, depth + 1,
+                           scoped, env, hopArg):
                 return True
+        elif env is not None and _crossModuleReadsList(env, call, anchor, depth):
+            return True
     return False
 
 
 def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path,
-                 selfPath: pathlib.Path = None, scoped: dict = None) -> set:
+                 selfPath: pathlib.Path = None, scoped: dict = None,
+                 env: dict = None) -> set:
     """绑定自"读一份清单"的名字集，外加由它派生的名字（`raw = P.read_text()` → `lines = raw.splitlines()`）。
 
     清单源常常绑在**函数内**（`manifest = _manifestOf(ROOT)`），只看模块级常量表就会把它整个漏掉——
@@ -479,13 +752,15 @@ def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Pat
     for name, val in consts.items():
         bindings.setdefault(name, [val])
     out = {n for n, exprs in bindings.items()
-           if any(_readsAList(e, consts, helpers, anchor, selfPath, scoped=scoped) for e in exprs)}
+           if any(_readsAList(e, consts, helpers, anchor, selfPath, scoped=scoped, env=env)
+                  for e in exprs)}
     # **当场读、不落变量**的那一形也要有名字可追：`raw = (ROOT / "x.txt").read_text()` 里
     # 清单路径是内联拼出来的，`_readsAList` 认这次读法，但读法所在的整个表达式才是要污点化的对象。
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name) \
-                and _readsAList(node.value, consts, helpers, anchor, selfPath, scoped=scoped):
+                and _readsAList(node.value, consts, helpers, anchor, selfPath,
+                                scoped=scoped, env=env):
             out.add(node.targets[0].id)
     grew = True
     while grew:
@@ -513,34 +788,82 @@ def _loopsOf(tree: ast.AST):
                 yield gen.target, gen.iter, parts + list(gen.ifs)
 
 
-def _actsOnEntry(node: ast.AST, tainted: set, helpers: dict, depth: int = 0) -> bool:
-    """条目（或它派生出的路径名）有没有被"动手"。
+#: 把条目**拼成路径**的那几种写法（污点沿这些形状前进）。
+PATH_MAKERS = {"joinpath", "join", "Path", "PurePath"}
+
+
+def _mentionsTainted(node, tainted: set) -> bool:
+    if node is None:
+        return False
+    nodes = node if isinstance(node, (list, tuple)) else [node]
+    return any(isinstance(n, ast.Name) and n.id in tainted
+               for x in nodes for n in ast.walk(x))
+
+
+def _isPathDerivation(sub: ast.AST, tainted: set) -> str:
+    """这个赋值是不是"把清单条目拼成路径 / 对条目做字符串处理"？是就返回该被污染的名字。
+
+    刻意**不收**"右值里提了一下条目名"这种一般赋值。上一版收得很宽（`NAME = 任何含条目名的式子`），
+    后果是多出 19 档 false positive——`hits[rel] = calibers`、`assert len(rows) == len(declared)`
+    那一类都算成了清单面。面一旦虚胖，它下次报"0 offender"就谁都不敢信（291 那一族：坏取的数
+    偏小偏干净，也一样偏大偏脏）。留下的两形各有真实例子：
+      * `path = 根 / 条目`、`根.joinpath(条目)`、`Path(条目)`、f-string 拼路径；
+      * 条目先过一道字符串处理再拼（`rel = line.split('#')[0].strip()` ⇒ `根 / rel`），
+        台账那一族全是这个形状——只认第一种就会把整族漏掉。
+    函数调用一律**不**传污点（`clockCalibersOf(source)` 那种），否则污点会顺着任意 helper 蔓延。
+    """
+    if not (isinstance(sub, ast.Assign) and len(sub.targets) == 1
+            and isinstance(sub.targets[0], ast.Name)):
+        return ""
+    rhs = sub.value
+    if isinstance(rhs, ast.BinOp) and isinstance(rhs.op, ast.Div) and _mentionsTainted(rhs, tainted):
+        return sub.targets[0].id
+    if isinstance(rhs, ast.JoinedStr) and _mentionsTainted(rhs, tainted):
+        return sub.targets[0].id
+    if isinstance(rhs, ast.Call):
+        fn = rhs.func
+        if isinstance(fn, ast.Attribute) and (
+                fn.attr in PATH_MAKERS or _mentionsTainted(fn.value, tainted)):
+            if _mentionsTainted(rhs.args, tainted) or _mentionsTainted(fn.value, tainted):
+                return sub.targets[0].id
+        elif isinstance(fn, ast.Name) and fn.id in PATH_MAKERS and _mentionsTainted(rhs.args, tainted):
+            return sub.targets[0].id
+    return ""
+
+
+def _actsOnEntry(node: ast.AST, tainted: set, helpers: dict, depth: int = 0):
+    """条目（或它派生出的路径名）有没有被"动手"——命中时返回**那次动用的原文**。
+
+    返回文本而不是布尔，是因为报错只给行号时人还得去数哪一行：`151` 既不说明是哪次读法，
+    也不说明污点从哪个名字来。把动用原样带出来，红的时候直接能判断是不是真清单面。
 
     **污点集是传进来的同一个 set，本函数会往里加派生名**——这是第三版探测器补的洞：
     真代码的形状是两条语句，`path = REPO_ROOT / rel` 然后 `path.is_file()`，若每条语句各拿一份
-    新集合，第二条就看不见 `path` 是从条目派生来的，于是 `test_ci_wallclock_assertion_ledger.py`
-    那一批"先落变量再动手"的档全部漏判（实测本档第一版只认出 3 档，收了这个洞之后认出 4 档）。
-    跳进 helper 那一支仍然传新集合：形参名不该污染调用方的名字空间。
+    新集合，第二条就看不见 `path` 是从条目派生来的（实测本档第一版只认出 3 档，收了这个洞之后才齐）。
+    派生只认 `_isPathDerivation` 那几种形；跳进 helper 那一支仍然传新集合：
+    形参名不该污染调用方的名字空间。
     """
     if depth > 2:
-        return False
+        return None
     for sub in ast.walk(node):
-        if isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Name) \
-                and any(isinstance(n, ast.Name) and n.id in tainted for n in ast.walk(sub.value)):
-            # `path = 根 / 条目` 是这一形最常见的写法（`/` 那条支是它的特例），但条目也常先过一道
-            # 字符串处理再拼路径（`rel = line.split('#')[0]` ⇒ `path = 根 / rel`）——只认 `BinOp(/`
-            # 就会把那一批漏掉，而它们的危害面一模一样。
-            tainted.add(sub.targets[0].id)
+        derived = _isPathDerivation(sub, tainted)
+        if derived:
+            tainted.add(derived)
         if isinstance(sub, ast.Call):
             func = sub.func
             if isinstance(func, ast.Attribute) and func.attr in ENTRY_USES:
                 touched = [func.value] + list(sub.args)
-                if any(isinstance(n, ast.Name) and n.id in tainted for x in touched for n in ast.walk(x)):
-                    return True
+                hits = sorted({n.id for x in touched for n in ast.walk(x)
+                               if isinstance(n, ast.Name) and n.id in tainted})
+                if hits:
+                    return "%s ← 污点名 %s" % (ast.unparse(sub)[:78].replace("\n", " "),
+                                               ", ".join(hits))
             elif isinstance(func, ast.Name) and func.id in ENTRY_USES:
-                if any(isinstance(n, ast.Name) and n.id in tainted
-                       for x in list(sub.args) + [k.value for k in sub.keywords] for n in ast.walk(x)):
-                    return True
+                hits = sorted({n.id for x in list(sub.args) + [k.value for k in sub.keywords]
+                               for n in ast.walk(x) if isinstance(n, ast.Name) and n.id in tainted})
+                if hits:
+                    return "%s ← 污点名 %s" % (ast.unparse(sub)[:78].replace("\n", " "),
+                                               ", ".join(hits))
             elif isinstance(func, ast.Name) and func.id in helpers:
                 fn = helpers[func.id]
                 params = [a.arg for a in fn.args.args]
@@ -548,21 +871,21 @@ def _actsOnEntry(node: ast.AST, tainted: set, helpers: dict, depth: int = 0) -> 
                     if i < len(params) and any(isinstance(n, ast.Name) and n.id == params[i]
                                                for n in ast.walk(fn)) \
                             and any(isinstance(n, ast.Name) and n.id in tainted for n in ast.walk(arg)):
-                        if _actsOnEntry(fn, {params[i]}, helpers, depth + 1):
-                            return True
-    return False
+                        inner = _actsOnEntry(fn, {params[i]}, helpers, depth + 1)
+                        if inner:
+                            return "%s(...) 内 %s" % (func.id, inner)
+    return None
 
 
 def _listUniverse(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path,
-                  selfPath: pathlib.Path = None, scoped: dict = None) -> set:
-    """「这份清单」在档内的全部名字：绑到清单读法上的名字 ∪ 自己读清单的 helper 名。
-
-    两族都要——真代码两条路都在用：`for x in manifest`（名字）与 `for x in protectedFiles()`（直调）。
-    第二版探测器只认前者，于是 `test_ci_ast_scan_budget_guard` 那一档整个漏出面。
+                  selfPath: pathlib.Path = None, scoped: dict = None,
+                  env: dict = None) -> set:
+    """「这份清单」在档内的全部名字：绑到清单读法上的名字 ∪ 同文件读清单的 helper ∪
+    **跨模块**读清单的取数口（批 104 随取数口收口一起加，少这一族就会让迁走的 6 档静默掉出面）。
     """
-    sources = _listSources(tree, consts, helpers, anchor, selfPath, scoped)
+    sources = _listSources(tree, consts, helpers, anchor, selfPath, scoped, env)
     listHelpers = {n for n, fn in helpers.items()
-                   if _readsAList(fn, consts, helpers, anchor, selfPath, 1, scoped)}
+                   if _readsAList(fn, consts, helpers, anchor, selfPath, 1, scoped, env)}
     return sources | listHelpers
 
 
@@ -576,14 +899,15 @@ def _iterIsListTainted(iter_: ast.AST, universe: set, readsAList=None) -> bool:
     `test_context_facade_retirement` 等），只按名字追污点就等于把它们当成不存在。
     """
     origins = {n.id for n in ast.walk(iter_) if isinstance(n, ast.Name)}
-    called = {n.func.id for n in ast.walk(iter_)
-              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    if (origins & universe) or (called & universe):
+    if origins & universe:
+        return True
+    if _calledNames(iter_) & universe:
         return True
     return bool(readsAList is not None and readsAList(iter_))
 
 
-def _hasListProof(tree: ast.AST, universe: set, counts: set, readsAList=None) -> bool:
+def _hasListProof(tree: ast.AST, universe: set, counts: set, readsAList=None,
+                  env: dict = None, anchor: pathlib.Path = None) -> bool:
     """清单面的自证必须**由这份清单得到**——档里另一条无关的数值断言不算。
 
     为什么不能沿用文件级的 `_hasFaceProof`：那条只问"本档有没有一条 `assert <计数> > 数`"，
@@ -618,7 +942,10 @@ def _hasListProof(tree: ast.AST, universe: set, counts: set, readsAList=None) ->
             if not (text.startswith(("len(", "sum(")) or text in counts
                     or text in accumulators):
                 continue
-            if any(isinstance(n, ast.Name) and n.id in tainted for n in ast.walk(side)):
+            if env is not None and anchor is not None:
+                if _operandMentionsList(side, tainted | universe, env, anchor):
+                    return True
+            elif any(isinstance(n, ast.Name) and n.id in tainted for n in ast.walk(side)):
                 return True
     return False
 
@@ -633,12 +960,14 @@ def _manifestFace(tree: ast.AST, consts: dict, anchor: pathlib.Path,
     """
     helpers = _helpersOf(tree)
     scoped = scoped or _allBindings(tree)
-    universe = _listUniverse(tree, consts, helpers, anchor, selfPath, scoped)
+    env = _importEnv(tree, anchor, selfPath)
+    universe = _listUniverse(tree, consts, helpers, anchor, selfPath, scoped, env)
 
     def iterReadsList(node: ast.AST) -> bool:
-        return _readsAList(node, consts, helpers, anchor, selfPath, scoped=scoped)
+        return _readsAList(node, consts, helpers, anchor, selfPath, scoped=scoped, env=env)
 
     out = []
+    seen = set()
     for target, iter_, body in _loopsOf(tree):
         if not isinstance(target, ast.Name):
             continue
@@ -646,29 +975,196 @@ def _manifestFace(tree: ast.AST, consts: dict, anchor: pathlib.Path,
             continue
         tainted = {target.id}
         for stmt in body:
-            if _actsOnEntry(stmt, tainted, helpers):
-                out.append(getattr(stmt, "lineno", 0))
+            act = _actsOnEntry(stmt, tainted, helpers)
+            if act:
+                line = getattr(stmt, "lineno", 0)
+                if line not in seen:
+                    seen.add(line)
+                    out.append((line, act))
                 break
-    return sorted(set(out)), universe, iterReadsList
+    return out, universe, iterReadsList, env
 
 
 def _manifestSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
                    selfPath: pathlib.Path = None, scoped: dict = None) -> list:
     """这一档里「以清单为扫描面」的落点行号（(a)(b)(c) 三件齐了才算）。
 
-    (b) 认三种 iterable：绑到清单源的名字（`for x in manifest`）、直接调清单 helper
-    （`for x in protectedFiles()`）、当场读清单再迭代（`for x in P.read_text().splitlines()`）。
-    后两种是批 103 被正控打出来才补上的——少认一种，就有整档安静掉出面。
+    (b) 认四种 iterable：绑到清单源的名字（`for x in manifest`）、直接调清单 helper
+    （`for x in protectedFiles()`）、当场读清单再迭代（`for x in P.read_text().splitlines()`）、
+    类里的取数方法（`for x in self._rows()`）。后两种分别由批 103、批 104 的正控打出来才补上——
+    少认一种，就有整档安静掉出面。
     """
     return _manifestFace(tree, consts, anchor, selfPath, scoped)[0]
 
 
 def _manifestOf(root: pathlib.Path) -> list:
-    path = root / "scripts" / "ci" / "protected_tests.txt"
-    if not path.is_file():
-        return []
-    return [ln.split("#", 1)[0].strip() for ln in io.open(path, encoding="utf-8").read().splitlines()
-            if ln.split("#", 1)[0].strip()]
+    """本闸取受保护子集清单——**读法不在这里**，取数口是 `ast_scan.protectedSubsetEntries(root)`。
+
+    这层包装只为控制格能喂临时根；`PROTECTED` 那个常量以前自己 `io.open`，现在留着它就是第二份读法。
+    """
+    return ast_scan.protectedSubsetEntries(root)
+
+
+#: ── 清单取数口的单源判据（`READER_BASELINE` 的取数口，与上面那张表同源）────────────
+MANIFEST_FILE_NAME = "protected_tests.txt"
+#: 唯一被允许自己开这份清单的文件——收口之后就剩这一处。
+#: 它自己的三条承诺（剥注释／清单缺席即响亮失败／条目数与"指得到真实文件"的等号）由
+#: `test_singleSourceReaderKeepsItsOwnContract` 钉住：把 34 档抄本收进一处，若不给那一处立契约，
+#: 只是把"各抄各的、没人验"换成"一处没验"。
+SINGLE_SOURCE = "tests/ast_scan.py"
+
+
+def _manifestReadSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
+                       selfPath: pathlib.Path = None, scoped: dict = None) -> list:
+    """这一档里"自己去读那份清单"的落点行号。
+
+    只认**代码形态**：一个读法调用（`open`/`read_text`/`read`/`readlines`），其路径要么解得到
+    `.../protected_tests.txt`，要么整个子树里出现以该文件名结尾的字符串字面量。
+    不认"注释或 docstring 里提到这个文件名"——本仓的守卫被自家文档撞红过（按词判的那一族）。
+    """
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        attr = func.attr if isinstance(func, ast.Attribute) else (
+            func.id if isinstance(func, ast.Name) else "")
+        if attr not in LIST_READS:
+            continue
+        base = node.args[0] if (attr == "open" and node.args) else (
+            func.value if isinstance(func, ast.Attribute) else None)
+        resolved = _resolveRoot(base, consts, anchor, selfPath=selfPath) if base is not None else None
+        if resolved is not None and str(resolved).endswith(MANIFEST_FILE_NAME):
+            out.append(node.lineno)
+            continue
+        if any(isinstance(k, ast.Constant) and isinstance(k.value, str)
+               and k.value.endswith(MANIFEST_FILE_NAME)
+               for sub in ([base] if base is not None else []) for k in ast.walk(sub)):
+            out.append(node.lineno)
+    return sorted(set(out))
+
+
+def _readerCounts(root: pathlib.Path, manifest: list) -> dict:
+    """`rel -> 该档自己读那份清单的落点数`（单点自身不计）。**表只能由这个函数生成**。"""
+    out = {}
+    for rel in manifest:
+        if rel == SINGLE_SOURCE:
+            continue
+        path = root / rel
+        if not rel.endswith(".py") or not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (SyntaxError, OSError):
+            continue
+        sites = _manifestReadSites(tree, _constTable(tree), root, selfPath=path.resolve(),
+                                   scoped=_allBindings(tree))
+        if sites:
+            out[rel] = len(sites)
+    return out
+
+
+def test_protectedSubsetReaderIsSingleSource():
+    """这份清单的读法只准有一处（`tests/ast_scan.py`）——新增即红、消化必须摘行。
+
+    为什么要有这一格：收口做到一半时，"只准一处"这件事若只写在注释里，下一档需要清单的判据
+    仍会就地再抄一份 `io.open(PROTECTED)`（本仓实测 34 档各抄一份，抄本各自决定剥不剥注释、
+    返回 list 还是 set——`_gitLsFiles` 那一族就是因为这个才收的）。教义第 6 条要的是"只有一处定义"，
+    而"只剩一处"这件事必须有个会红的格子看着。
+    """
+    now = _readerCounts(PROJECT_ROOT, _manifestOf(PROJECT_ROOT))
+    grew = {f: (now[f], READER_BASELINE.get(f, 0)) for f in now
+            if now[f] > READER_BASELINE.get(f, 0)}
+    assert not grew, (
+        "受保护子集清单又多出了自抄的读法（这份清单是 CI 的唯一执行面，读法只准在 "
+        f"`{SINGLE_SOURCE}` 一处）：\n  "
+        + "\n  ".join(f"  {f} 现 {n} 处 / 基线 {b} 处" for f, (n, b) in sorted(grew.items()))
+        + "\n修法：`from tests import ast_scan` 然后 `ast_scan.protectedSubsetEntries()`——"
+        "\n要集合就 `set(...)`，别再去开那份文件。"
+    )
+    dropped = {f: (READER_BASELINE[f], now.get(f, 0)) for f in READER_BASELINE
+               if now.get(f, 0) < READER_BASELINE[f]}
+    assert not dropped, (
+        "这些档的自抄读法已经改指单点了——把 READER_BASELINE 里那几行摘掉再提交，别让它悬着"
+        "（悬着的后果：下一条真新增的抄本会被旧表兜住而看不见）：\n  "
+        + "\n  ".join(f"  {f} 基线 {b} 处 / 现 {n} 处" for f, (b, n) in sorted(dropped.items()))
+    )
+
+
+@pytest.mark.parametrize("label, source, expectSites", [
+    ("正检·`io.open(PROTECTED)` 那一形必须被数到",
+     "import io\nimport pathlib\n"
+     "PROTECTED = pathlib.Path(__file__).resolve().parents[2] / 'items.txt'\n\n\n"
+     "def test_shape():\n"
+     "    return io.open(PROTECTED, encoding='utf-8').read()\n", 1),
+    ("正检·当场拼路径再 `read_text`（不落常量）也要被数到",
+     "import pathlib\n_ROOT = pathlib.Path(__file__).resolve().parents[2]\n\n\n"
+     "def test_shape():\n"
+     "    return (_ROOT / 'sub' / 'items.txt').read_text(encoding='utf-8')\n", 1),
+    ("正检·路径由 helper 拼出来（`repo_path('scripts','ci','items.txt')`）——解析支解不出，"
+     "只有字面量支认得（真仓 37 处里就有 1 处靠它，见 `test_experience_quality_gate.py`）",
+     "import pathlib\n_ROOT = pathlib.Path(__file__).resolve().parents[2]\n\n\n"
+     "def repoPath(*parts):\n    return _ROOT.joinpath(*parts)\n\n\n"
+     "def test_shape():\n"
+     "    return repoPath('scripts', 'ci', 'items.txt').read_text(encoding='utf-8')\n", 1),
+    ("反检·只在 docstring 里提这个文件名＝不算读法",
+     "import pathlib\n\n\n"
+     "def test_shape():\n"
+     "    \"\"\"这条判据与 items.txt 有关，但不读它。\"\"\"\n"
+     "    return 1\n", 0),
+    ("反检·改指单点之后不许再被数到（这一格钉的是修法的形状）",
+     "import pathlib\nimport sys\n\n"
+     "_Root = pathlib.Path(__file__).resolve().parents[2]\n"
+     "sys.path.insert(0, str(_Root))\n"
+     "from tests import ast_scan\n\n\n"
+     "def test_shape():\n"
+     "    return ast_scan.protectedSubsetEntries(_Root)\n", 0),
+])
+def test_readerPredicateJudgesEachShape(tmp_path, label, source, expectSites):
+    """单源判据的认形要有牙：三种自抄形各一枚正检，两种"不该红"各一枚反检。
+
+    三条正检分别钉住两条认形支：常量根、当场拼路径（解析支），以及**路径由 helper 拼出来**
+    （只有字面量支认得）。为什么要拆到这一层：摘掉字面量支跑同一批控制格，四格全绿——
+    说明原来的取值没落在两支的分歧点上（形态集 239），而真仓 37 处里确实有 1 处只被它咬到。
+    文件名在这里换成 `items.txt`（`MANIFEST_FILE_NAME` 临时改指它）——判据读的是"清单本体"这个
+    形状，用真清单名做控制格会让 tmp 树里没有那个文件、正检打空（本仓 316 那一族：先证这格能红）。
+    """
+    global MANIFEST_FILE_NAME
+    (tmp_path / "tests" / "unit" / "ci").mkdir(parents=True)
+    (tmp_path / "items.txt").write_text("a.py\n", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "items.txt").write_text("a.py\n", encoding="utf-8")
+    sample = tmp_path / "tests" / "unit" / "ci" / "sample.py"
+    sample.write_text(source, encoding="utf-8")
+    tree = ast.parse(source)
+    saved = MANIFEST_FILE_NAME
+    MANIFEST_FILE_NAME = "items.txt"
+    try:
+        got = _manifestReadSites(tree, _constTable(tree), tmp_path,
+                                 selfPath=sample.resolve(), scoped=_allBindings(tree))
+    finally:
+        MANIFEST_FILE_NAME = saved
+    assert len(got) == expectSites, f"{label} ⇒ 现读 {got}"
+
+
+def test_singleSourceReaderKeepsItsOwnContract():
+    """收口之后，单点自己的三条承诺得有格子钉——否则"只剩一处读法"＝"只剩一处没验过的读法"。
+
+    三条各自的坏法：
+    ① 不剥 `#` 注释与空行 ⇒ 清单里注释行比条目还多（现读 2607 行注释），整闸会把它们当成
+       待跑节点，红指向一堆根本不存在的路径，报的是**这条读法**而不是被测对象；
+    ② 清单不在时回**空列表** ⇒ "扫了个空"被读成"清单干净"（与本模块 `_gitLsFiles` 那条同形），
+       所以必须响亮失败；
+    ③ 面自证：真根下条目数下限＋"清单里的条目指得到真实文件"必须为 0——这正是本闸要求别的档
+       给清单面留的那个等号，用在自己身上（不这样，这张表的裁决力建立在一个没人量的读法上）。
+    """
+    entries = ast_scan.protectedSubsetEntries(PROJECT_ROOT)
+    assert len(entries) > 500, f"单点解出的条目数异常小：{len(entries)} 条"
+    assert not [e for e in entries if e.startswith("#") or not e.strip()], "注释行或空行没被剥掉"
+    missing = [e for e in entries if not (PROJECT_ROOT / e).is_file()]
+    assert not missing, (f"清单里指不到真实文件的条目 {len(missing)} 条，前 5 条：{missing[:5]}")
+    with pytest.raises(AssertionError):
+        ast_scan.protectedSubsetEntries(PROJECT_ROOT / "no_such_root_for_single_source")
 
 
 def test_ratchetDoesNotRise():
@@ -776,10 +1272,15 @@ _MANIFEST_HEADER = (
     "_List = pathlib.Path(__file__).resolve().parents[2] / 'items.txt'\n"
     "_Root = pathlib.Path(__file__).resolve().parents[2]\n\n\n"
     "def readList():\n"
-    "    return io.open(_List, encoding='utf-8').read().splitlines()\n\n\n")
+    "    return io.open(_List, encoding='utf-8').read().splitlines()\n\n\n"
+    "def readAny(name):\n"
+    "    return io.open(_Root / name, encoding='utf-8').read().splitlines()\n\n\n")
 
-#: 五条正检（真清单面，含本版补的三种 iterable 认形）＋三条反检（不许当清单面），
-#: 每条都对应批 103 实施时实际踩到或实际漏掉的一形。
+#: 九条正检（真清单面）＋五条反检。正检逐条钉住一个认形：两条语句才动手、同一条语句里动手、
+#: `joinpath`、当场读清单再迭代、面自证来自别处、条目先切字符串再拼路径、类里的取数方法、
+#: 取数方法绑在赋值上、文件名当参数递进取数口。每条都对应批 103／批 104 实施时实际踩到或
+#: 实际误伤的一形。跨模块取数口那两形另见 `_CROSS_MODULE_SHAPES`（批 104 新增认形，
+#: 按 310/318 那条纪律各配一格正检＋一格反检）。
 _MANIFEST_SHAPES = [
     ("正检·两条语句派生（`path = 根 / 条目` 之后才 `is_file()`）——第二版探测器漏的就是这一形",
      "def test_shape():\n"
@@ -811,6 +1312,53 @@ _MANIFEST_SHAPES = [
      "        path = _Root / line\n"
      "        if not path.is_file():\n"
      "            continue\n", True),
+    ("正检·条目先过一道字符串处理再拼路径（台账那一族：`row[0].strip()` ⇒ `根 / 那` 再 stat）",
+     "def test_shape():\n"
+     "    for row in readList():\n"
+     "        name = row.split('|')[0].strip()\n"
+     "        path = _Root / name\n"
+     "        if not path.is_file():\n"
+     "            continue\n", True),
+    ("反检·污点不许顺着普通函数调用蔓延（`f(x)` 不是拼路径）",
+     "def digest(s):\n"
+     "    return len(s)\n\n\n"
+     "def test_shape():\n"
+     "    for line in readList():\n"
+     "        d = digest(line)\n"
+     "        print(d)\n", False),
+    ("正检·类里的取数方法（`for x in self._rows()`）——台账那一族的真形状，不认这支就整族掉出面",
+     "class TestOne:\n"
+     "    def _rows(self):\n"
+     "        return readList()\n\n"
+     "    def test_shape(self):\n"
+     "        for line in self._rows():\n"
+     "            path = _Root / line\n"
+     "            if not path.is_file():\n"
+     "                continue\n", True),
+    ("正检·取数方法绑在**赋值**上而非迭代器（`rows = self._rows()` 之后再逐条动手）——"
+     "这一形只有 `_readsAList` 的方法跳那一臂认得（`_calledNames` 管不到）",
+     "class TestOne:\n"
+     "    def _rows(self):\n"
+     "        return readList()\n\n"
+     "    def test_shape(self):\n"
+     "        rows = self._rows()\n"
+     "        for line in rows:\n"
+     "            path = _Root / line\n"
+     "            if not path.is_file():\n"
+     "                continue\n", True),
+    ("正检·文件名当参数递进取数口（`readAny('items.txt')`）——helper 体内只有 `io.open(name)`",
+     "def test_shape():\n"
+     "    for line in readAny('items.txt'):\n"
+     "        path = _Root / line\n"
+     "        if not path.is_file():\n"
+     "            continue\n", True),
+    ("反检·条目先过一道普通函数再被当路径动手——本闸故意不认这一形，认它就等于让污点顺任意 helper 蔓延",
+     "def digest(s):\n"
+     "    return s\n\n\n"
+     "def test_shape():\n"
+     "    for line in readList():\n"
+     "        d = digest(line)\n"
+     "        print(d.is_file())\n", False),
     ("反检·迭代的是文件系统入口而非清单＝走「仓内目录」那一支，本格不许抢它的活",
      "def test_shape():\n"
      "    for p in _Root.rglob('*.py'):\n"
@@ -833,16 +1381,86 @@ _MANIFEST_SHAPES = [
 
 @pytest.mark.parametrize("label, body, expectNamed", _MANIFEST_SHAPES)
 def test_manifestDetectorJudgesEachShape(tmp_path, label, body, expectNamed):
-    """探测器要有牙：五条正检各自必须点名，三条反检各自必须闭嘴。
+    """探测器要有牙：九条正检各自必须点名，五条反检各自必须闭嘴。
 
-    这批控制格不是装饰——本版探测器一路补了三个洞才被正控放行：污点不跨语句
-    （`path = 根 / 条目` 之后再动手）、只认名字不认当场读法、清单面能被无关数值断言兜掉。
+    这批控制格不是装饰——探测器一路补了五个洞才被正控放行：污点不跨语句
+    （`path = 根 / 条目` 之后再动手）、只认名字不认当场读法、清单面能被无关数值断言兜掉、
+    属性形被调者不记名（`self._rows()`）、文件名当参数时认不出那是清单。
     没有它们，"零 offender"永远分不清是干净还是没在跑（本闸自己前三版的失效形态）。
+    变异侧的一条实测（239 那一族）：`self._rows()` 这一形被**两条臂**各自覆盖——
+    `_calledNames` 的属性记名与 `_readsAList` 的方法跳，单摘任一条，这十四格全绿；两条一起摘才红。
+    于是"这条臂有用"不能只靠"摘了它有一格红"来证。新加的 `rows = self._rows()` 那一格
+    只有方法跳能红，是这两条臂各自独占性的分界。
     """
     (tmp_path / "tests" / "unit" / "ci").mkdir(parents=True)
     (tmp_path / "items.txt").write_text("a.py\nb.py\n", encoding="utf-8")
     (tmp_path / "tests" / "unit" / "ci" / "sample.py").write_text(
         _MANIFEST_HEADER + body, encoding="utf-8")
+    mg = {}
+    _faceFindings(tmp_path, ["tests/unit/ci/sample.py"], manifestGaps=mg)
+    assert bool(mg) is expectNamed, f"{label} ⇒ 判错：{mg}"
+
+
+#: 跨模块取数口那一族（批 104 新增认形）：两格正检（直调别模块的取数口、经本地包装再转调单点）
+#: ＋两格反检（被引模块不读清单、`importlib` 动态取数）。`listReader.py` 在**另一个文件**里读清单，
+#: `decoyReader.py` 不读——同一条链路必须给出相反读数，否则"跟模块一跳"这句话没有证据。
+_CROSS_MODULE_HEADER = (
+    "import importlib\nimport io\nimport pathlib\n"
+    "_Root = pathlib.Path(__file__).resolve().parents[2]\n\n\n"
+    "from tests.unit.ci import listReader, decoyReader\n\n\n")
+
+_CROSS_MODULE_SHAPES = [
+    ("正检·清单读法在别的模块里（`from … import listReader` 后直调）——收口之后探测器必须还认得",
+     "def test_shape():\n"
+     "    for rel in listReader.readList():\n"
+     "        path = _Root / rel\n"
+     "        if not path.is_file():\n"
+     "            continue\n", True),
+    ("正检·经本地包装再转调单点（本仓 6 档就是这个形状）",
+     "def protectedFiles():\n"
+     "    return listReader.readList()\n\n\n"
+     "def test_shape():\n"
+     "    files = protectedFiles()\n"
+     "    for rel in files:\n"
+     "        path = _Root / rel\n"
+     "        if not path.is_file():\n"
+     "            continue\n", True),
+    ("反检·同一条链路但被引模块**不读清单**＝不许凭 import 就判成清单面",
+     "def test_shape():\n"
+     "    for rel in decoyReader.names():\n"
+     "        path = _Root / rel\n"
+     "        if not path.is_file():\n"
+     "            continue\n", False),
+    ("反检·动态取数（importlib）不认＝登记在边界里的那一条，不许猜出来的面当已覆盖",
+     "def test_shape():\n"
+     "    mod = importlib.import_module('listReader')\n"
+     "    for rel in mod.readList():\n"
+     "        path = _Root / rel\n"
+     "        if not path.is_file():\n"
+     "            continue\n", False),
+]
+
+
+@pytest.mark.parametrize("label, body, expectNamed", _CROSS_MODULE_SHAPES)
+def test_crossModuleReaderShapesAreJudgedByCodeForm(tmp_path, label, body, expectNamed):
+    """跨模块一跳的两正检两反检：认形必须与取数口收口同批到位（形态集 313 的那一课）。
+
+    这一格防的是**治理动作自己造出来的盲区**：把 6 档的读法收进单点之后，如果探测器只跟
+    同文件 helper，这 6 档会一起掉出清单面——`manifestGaps` 归零看着像"存量清了"，
+    实际是"没人被看着了"。没有这两枚正检，那一步是静默的。
+    """
+    (tmp_path / "tests" / "unit" / "ci").mkdir(parents=True)
+    (tmp_path / "items.txt").write_text("a.py\nb.py\n", encoding="utf-8")
+    ciDir = tmp_path / "tests" / "unit" / "ci"
+    (ciDir / "__init__.py").write_text("", encoding="utf-8")
+    (ciDir / "listReader.py").write_text(
+        "import io\nimport pathlib\n\n"
+        "_List = pathlib.Path(__file__).resolve().parents[3] / 'items.txt'\n\n\n"
+        "def readList():\n"
+        "    return io.open(_List, encoding='utf-8').read().splitlines()\n", encoding="utf-8")
+    (ciDir / "decoyReader.py").write_text(
+        "def names():\n    return ['a.py', 'b.py']\n", encoding="utf-8")
+    (ciDir / "sample.py").write_text(_CROSS_MODULE_HEADER + body, encoding="utf-8")
     mg = {}
     _faceFindings(tmp_path, ["tests/unit/ci/sample.py"], manifestGaps=mg)
     assert bool(mg) is expectNamed, f"{label} ⇒ 判错：{mg}"

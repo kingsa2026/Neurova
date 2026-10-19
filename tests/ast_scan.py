@@ -118,6 +118,28 @@ def untrackedNotIgnoredPaths() -> List[str]:
     return _gitLsFiles("--others", "--exclude-standard")
 
 
+#: ── 受保护子集清单的唯一读法（§6-332 登记的那条边界的正面）────────────────────────
+#: 这份清单是 CI 的**唯一执行面**，"哪些档在子集内"这个问题在仓内只该有一处读法。
+#: 收口前按 AST 现量：**29 档各自抄了一份**（`io.open` 24 处／`read_text` 8 处／`read` 6 处），
+#: 每份各自决定怎么剥 `#` 注释、要不要去空行、返回 list 还是 set；其中 6 档还把它**当扫描面**
+#: 逐条拼路径动手——那种用法下清单被截短或路径写错时，循环少跑几圈而判据照样绿（§6-332）。
+#: 与上面 `_gitLsFiles` 那一族同一条理由：读法分叉时，出错可以出现在任何一份抄本里，
+#: 而判据的读数只反映其中一份。
+#:
+#: `root` 形参只为**合成控制格**保留（面自证棘轮要在临时目录里造一份假清单验探测器咬不咬）；
+#: 生产判据一律不传，向仓根要那份清单。
+def protectedSubsetEntries(root: Path = None) -> List[str]:
+    """`scripts/ci/protected_tests.txt` 的条目（剥 `#` 注释与空行，顺序保持清单原序）。"""
+    base = Path(root) if root is not None else REPO_ROOT
+    path = base / "scripts" / "ci" / "protected_tests.txt"
+    if not path.is_file():
+        # 回空清单＝"扫了个空"读成"清单干净"，与本模块 `_gitLsFiles` 那条同形，响亮失败
+        raise AssertionError(f"受保护子集清单不存在：{path}（判据的扫描面不可信）")
+    with path.open(encoding="utf-8") as handle:
+        return [line.split("#", 1)[0].strip() for line in handle.read().splitlines()
+                if line.split("#", 1)[0].strip()]
+
+
 def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
     """`root` 子树下的源码文件清单（原地剪掉第三方/产物目录，路径排序稳定）。
 
