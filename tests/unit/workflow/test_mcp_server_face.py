@@ -5,8 +5,8 @@ Neurova 平台自身可作为 MCP server 对外暴露能力面：
 - NeurovaMCPServer：协议无关的核心（清单/调用），传输层（stdio/SSE）
   由 SDK 适配器另行包壳——核心先落，传输后接
 - list_tools()：已发布工作流（workflow_as_tool schema 复用）+ 技能
-  （skill_registry 清单）聚合为 MCP tools 形态（name/description/
-  inputSchema）
+  （**执行池那一份注册表**，§6-352 的乙）聚合为 MCP tools 形态
+  （name/description/inputSchema，schema 由 OpenAISchemaAdapter 单源给出）
 - call_tool(name, arguments)：按前缀分派 workflow:/skill:*；
   工作流经 workflow_as_tool（DAG 输入校验 + 发布态检查），技能经
   `ToolExecutor.execute_skill_tool` 咽喉（轮级可见门/权限作用域/沙箱根注入/
@@ -23,6 +23,26 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
+
+
+class _Pool:
+    """执行池替身：只暴露咽喉与本面用到的那两个口（`skills` 只读视图／`get_skill` 取键口）。"""
+
+    def __init__(self, skills):
+        self._skills = dict(skills)
+
+    @property
+    def skills(self):
+        return dict(self._skills)
+
+    def get_skill(self, name):
+        return self._skills.get(name)
+
+
+def _agentWith(skills):
+    agent = MagicMock(name="agent")
+    agent._skill_registry = _Pool(skills)
+    return agent
 
 
 class TestListTools:
@@ -50,10 +70,12 @@ class TestListTools:
         skill = MagicMock()
         skill.name = "translate"
         skill.description = "翻译技能"
-        registry = MagicMock()
-        registry._skills = {"translate": skill}
+        skill._get_parameters.return_value = {
+            "text": {"type": "string", "required": True, "description": "待译文本"}
+        }
 
-        server = NeurovaMCPServer(storage=storage, skill_registry=registry)
+        # §6-352 裁乙：清单源改读**执行池**（agent 的那一份），构造期注入的第二份池子已删。
+        server = NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"translate": skill}))
         tools = server.list_tools()
 
         names = [t["name"] for t in tools]
@@ -99,14 +121,8 @@ class TestCallTool:
             )
 
         skill.execute = _trapExec
-        registry = MagicMock()
-        registry._skills = {"oracle": skill}
-
-        # 技能腿现在需要 agent（咽喉挂在 ToolExecutor 上）；这里给的是"接线"用的壳，
-        # 业务能力由 `tests/unit/execution/` 与咽喉自己的判据档钉，本档不重述。
-        return NeurovaMCPServer(
-            storage=storage, skill_registry=registry, agent_ref=MagicMock(name="agent")
-        )
+        # 清单源与执行源同那一份：技能只放在 agent 的执行池里（§6-352 裁乙）。
+        return NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"oracle": skill}))
 
     @pytest.fixture
     def throat(self, monkeypatch):
@@ -157,9 +173,7 @@ class TestCallTool:
             raise AssertionError("技能腿又直调 skill.execute 了＝绕过治理咽喉")
 
         skill.execute = _trap
-        registry = MagicMock()
-        registry._skills = {"oracle": skill}
-        core = Core(storage=None, skill_registry=registry, agent_provider=lambda: None)
+        core = Core(storage=None, agent_provider=lambda: None)
         out = await core.call_tool("skill:oracle", {})
         assert out.get("isError") is True, out
         assert "agent" in out.get("error", "").lower(), out
@@ -220,6 +234,123 @@ class TestCallTool:
         out = await server.call_tool("skill:oracle", {})
         assert out.get("isError") is True, out
         assert "技能内部失败" in out["error"], out
+
+
+class _Skill:
+    """技能替身：`params=None` 时**不实现** `_get_parameters`——内置三技能的参数面落在
+    `builtin.schemas` 那张表上，替身要复现的就是这个形状（声明只许从单源读出来）。"""
+
+    def __init__(self, name, description="技能", params=None):
+        self.name = name
+        self.description = description
+        self.config = {}
+        if params is not None:
+            self._get_parameters = lambda: dict(params)
+
+
+@pytest.mark.asyncio
+class TestSkillFaceSingleSourceAndParameterGate:
+    """§6-352 裁乙＋附问裁加：清单与执行同那一份池，参数面同那一份声明，未声明的键当场拒。
+
+    为什么这八格一起写：乙（归一取数口）与那道闸（按声明校参数）读的是**同一件事**——
+    本面向外承诺的参数面。拆成两批做，第二批就会去抄第一批刚改过的那份 schema。
+    """
+
+    def _core(self, skills):
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        return NeurovaMCPServer(agent_ref=_agentWith(skills))
+
+    @pytest.fixture
+    def throat(self, monkeypatch):
+        seen = []
+
+        async def _fake(self_, skill_name, params, context=None):
+            seen.append((skill_name, dict(params or {})))
+            return {"success": True, "output": {"ran": skill_name}}
+
+        monkeypatch.setattr("neurova.tool_executor.ToolExecutor.execute_skill_tool", _fake)
+        return seen
+
+    async def testAdvertisedSkillsComeFromTheExecPoolOnly(self):
+        """②那一半的正解：清单只能报执行池里有的名字。"""
+        names = [tool["name"] for tool in self._core({"onlyExec": _Skill("onlyExec")}).list_tools()]
+        assert "skill:onlyExec" in names, names
+
+    async def testNoSecondPoolParameterIsLeftOnTheConstructor(self):
+        """第二份池子的**入口**必须一起没了——留着参数不读＝只写不读的断点（§2 断点条款）。"""
+        import inspect
+
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        assert "skill_registry" not in inspect.signature(NeurovaMCPServer.__init__).parameters, (
+            "构造期还留着 `skill_registry`：那就有两条清单来源，乙只做了半条"
+        )
+
+    async def testNoAgentMeansNoSkillFace(self):
+        """无 agent ⇒ 既不执行也不 advertise（与 C 票那条 fail-closed 同形，不留半边）。"""
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        core = NeurovaMCPServer(storage=None, agent_provider=lambda: None)
+        names = [tool["name"] for tool in core.list_tools()]
+        assert not any(n.startswith("skill:") for n in names), names
+
+    async def testAdvertisedSkillIsAlsoExecutable(self, throat):
+        """同一名字两个方向都要通：清单报得出的，咽喉必须收得到（③那条反方向）。"""
+        core = self._core({"bothWays": _Skill("bothWays")})
+        assert "skill:bothWays" in [t["name"] for t in core.list_tools()]
+        out = await core.call_tool("skill:bothWays", {})
+        assert throat == [("bothWays", {})], throat
+        assert out.get("isError") is not True, out
+
+    async def testSchemaComesFromTheSameDeclaration(self):
+        """advertise 的 inputSchema 必须逐字段等于 `OpenAISchemaAdapter` 那份声明，
+        且**不再含手抄的通用 `task`**——外部客户端据此才可能把参数写对。"""
+        from neurova.skill_system.compat import OpenAISchemaAdapter
+
+        skill = _Skill("file_operation", "文件操作")
+        declared = OpenAISchemaAdapter.skill_to_tool_schema(skill)["function"]["parameters"]
+        tool = next(t for t in self._core({"file_operation": skill}).list_tools()
+                    if t["name"] == "skill:file_operation")
+        assert tool["inputSchema"] == declared, (tool["inputSchema"], declared)
+        assert {"operation", "file_path", "content"} <= set(declared["properties"]), declared
+        assert "task" not in declared["properties"], "还含通用 task＝那份手抄没退干净"
+
+    async def testUnknownParameterKeyIsRefusedBeforeTheThroat(self, throat):
+        """实测到的那条：键名写错时本面不拒，而是静默落到技能的缺省分支。现在必须当场拒。"""
+        skill = _Skill("file_operation", "文件操作")
+        out = await self._core({"file_operation": skill}).call_tool(
+            "skill:file_operation", {"action": "write", "file_path": "p.txt", "content": "x"}
+        )
+        assert out.get("isError") is True, out
+        assert "action" in out["error"], out
+        assert "operation" in out["error"], out
+        assert throat == [], f"闸没拦在前面，咽喉已经收到这一发：{throat}"
+
+    async def testMissingRequiredKeyIsRefused(self, throat):
+        """必填缺失属同一根因（声明不被执行）：`operation` 是必填，缺了就不许落到缺省的 read。"""
+        skill = _Skill("file_operation", "文件操作")
+        out = await self._core({"file_operation": skill}).call_tool(
+            "skill:file_operation", {"file_path": "p.txt"}
+        )
+        assert out.get("isError") is True, out
+        assert "operation" in out["error"], out
+        assert throat == [], throat
+
+    async def testDeclaredKeysReachTheThroatUnchanged(self, throat):
+        """控制格：全键都在声明内 ⇒ 过闸，且参数一个字段都不改。"""
+        skill = _Skill("file_operation", "文件操作")
+        out = await self._core({"file_operation": skill}).call_tool(
+            "skill:file_operation", {"operation": "read", "file_path": "p.txt"}
+        )
+        assert throat == [("file_operation", {"operation": "read", "file_path": "p.txt"})], throat
+        assert out.get("isError") is not True, out
+
+    async def testSkillWithNoDeclarationIsNotGated(self, throat):
+        """没有声明面就不拒——在本面另列一张「哪些键算合法」的表＝第二个事实源（教义 第 6 条）。"""
+        core = self._core({"custom": _Skill("custom", "自述技能")})
+        await core.call_tool("skill:custom", {"whatever": 1, "args": [2]})
+        assert throat == [("custom", {"whatever": 1, "args": [2]})], throat
 
 
 @pytest.mark.asyncio

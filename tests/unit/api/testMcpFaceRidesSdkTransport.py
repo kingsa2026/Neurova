@@ -166,7 +166,7 @@ class TestPromisesSurviveTheSwap:
     def test_toolsListEqualsTheCoreSingleton(self, monkeypatch):
         """面上的清单必须**逐字段等于**核心那份——运输侧不许自己攒一份。
 
-        取值用 stub 核心而不是现役核心：现役那份的内容随 storage/skill_registry 实况变，
+        取值用 stub 核心而不是现役核心：现役那份的内容随 storage 与 agent 池子实况变，
         而本格要问的是"清单从哪来"，不是"清单里有几条"。
         """
         stub = [

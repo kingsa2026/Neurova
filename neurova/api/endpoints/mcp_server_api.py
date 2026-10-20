@@ -59,14 +59,8 @@ def _get_mcp_server():
             storage = _get_storage()
         except Exception:  # noqa: BLE001 — storage 不可用时不暴露工作流面
             storage = None
-        try:
-            from neurova.skill_system import get_skill_registry
-
-            registry = get_skill_registry()
-        except Exception:  # noqa: BLE001
-            registry = None
-        # 惰性 provider（首次 MCP 调用时 agent 可能尚未就绪，
-        # 每次现取 default agent；导出默认关，无 agent 时清单不含 computer_*）
+        # 惰性 provider（首次 MCP 调用时 agent 可能尚未就绪，每次现取 default agent；
+        # 导出默认关，无 agent 时清单既不含 computer_* 也不含 skill:*）
         def _agent_provider():
             try:
                 from neurova.api.endpoints import defaultAgentId, get_agent_instance
@@ -75,9 +69,10 @@ def _get_mcp_server():
             except Exception:  # noqa: BLE001
                 return None
 
-        _MCP_SERVER = NeurovaMCPServer(
-            storage=storage, skill_registry=registry, agent_provider=_agent_provider
-        )
+        # 技能面不再注入第二份注册表：清单源与执行源都是上面那个 provider 现取的 agent
+        # 自带的那一份（`agent._skill_registry`），构造期再给一份全局单例就是那次双源的入口
+        # （台账 §6-352 的乙，判据见 tests/unit/workflow/test_mcp_server_face.py）。
+        _MCP_SERVER = NeurovaMCPServer(storage=storage, agent_provider=_agent_provider)
     return _MCP_SERVER
 
 

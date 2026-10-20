@@ -26,7 +26,7 @@ ENDPOINT = "/api/v1/mcp"
 
 @pytest.fixture
 def client(monkeypatch):
-    server = NeurovaMCPServer(storage=None, skill_registry=None)
+    server = NeurovaMCPServer(storage=None)
     monkeypatch.setattr(mcp_server_api, "_get_mcp_server", lambda: server)
 
     app = FastAPI()

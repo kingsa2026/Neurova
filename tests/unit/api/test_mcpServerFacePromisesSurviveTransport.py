@@ -62,7 +62,7 @@ def recordingServer(monkeypatch):
 
     class _Recording(NeurovaMCPServer):
         def __init__(self):
-            super().__init__(storage=None, skill_registry=None)
+            super().__init__(storage=None)
             self.calls = []
 
         def list_tools(self):
