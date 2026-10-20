@@ -104,13 +104,7 @@ class TestToolLayerGuardsAreInProtectedSubset:
     )
 
     def test_guards_listed_in_protected_tests(self):
-        listed = set()
-        for raw in io.open(
-            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
-        ).read().splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if line:
-                listed.add(line)
+        listed = set(ast_scan.protectedSubsetEntries())
         missing = [f for f in self.REQUIRED if f not in listed]
         assert not missing, (
             "受保护子集未收录工具层守卫测试——守卫写在那里但 CI 不跑，"
@@ -487,14 +481,7 @@ class TestProtectedGuardsUseNoExternalBinaries:
         return probed
 
     def _protected_test_files(self):
-        listed = []
-        for raw in io.open(
-            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
-        ).read().splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if line:
-                listed.append(line)
-        return listed
+        return ast_scan.protectedSubsetEntries()
 
     _SUBPROCESS_ATTRS = {"run", "check_output", "Popen", "call", "check_call"}
 
@@ -746,10 +733,10 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
 
         没有这一条，任何一次"清理"都能把上面两个套件移出子集，
         守卫退化成永远通过的空壳。
+        判据取的是**精确条目**（`protectedSubsetEntries()` 的成员），不是整份文本子串——
+        后者被一行注释就能喂饱：条目被人注释掉时旧读法照样读到 True，绿在这里没有牙。
         """
-        listed = io.open(
-            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
-        ).read()
+        listed = set(ast_scan.protectedSubsetEntries())
         for rel in (
             "tests/unit/evolution/rsi/test_parameter_source_of_truth.py",
             "tests/unit/evolution/experience/test_pattern_lifecycle.py",
@@ -796,14 +783,7 @@ class TestProtectedSubsetEntriesAreTracked:
 
     @staticmethod
     def _protected_entries() -> list:
-        raw = io.open(
-            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
-        ).read()
-        return [
-            line.split("#", 1)[0].strip()
-            for line in raw.splitlines()
-            if line.split("#", 1)[0].strip()
-        ]
+        return ast_scan.protectedSubsetEntries()
 
     @staticmethod
     def _git(*args) -> subprocess.CompletedProcess:
