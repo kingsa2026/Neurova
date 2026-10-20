@@ -55,7 +55,7 @@
    - 修复: 添加类型检查和转换逻辑
 
 6. **缺失方法添加** - `EmotionAnalyzer.get_emotion_distribution()`
-   - 在 `EmotionAnalyzer`、`EmotionAnalyzerAdapter`、`EmotionHubEngine` 三层添加该方法
+   - 在 `EmotionAnalyzer`、`EmotionHubEngine` 两层添加该方法（原适配器层已退役，台账 §6-368）
 
 ### 其他模块 Bug 修复
 

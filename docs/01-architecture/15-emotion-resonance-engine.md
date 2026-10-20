@@ -6,11 +6,17 @@
 
 | 文档术语 | 实际代码类/方法 | 文件位置 |
 |---------|---------------|---------|
-| `AgentEmotionManager` / `EmotionResonanceEngine` | `EmotionAnalyzerAdapter`（情感分析适配器，代理 `emotion.py` 中的分析器） | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
-| 详细情感共鸣协议（情感同步/传递/调节） | 实际实现为简化的适配器模式，通过 `analyze()` / `batch_analyze()` 进行情感分析 | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
-| `AgentEmotionState` | `EmotionAnalyzerAdapter` 返回 `Dict` 格式结果（含 `primary_emotion`, `confidence`, `emotions`, `score`） | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
+| `AgentEmotionManager` / `EmotionResonanceEngine` | `EmotionAnalyzer`（情感分析器） | `neurova/cognitive_layers/memory_layer/emotion.py` |
+| 详细情感共鸣协议（情感同步/传递/调节） | 实际实现为简化的分析面，通过 `analyze()` / `batch_analyze()` 进行情感分析 | `neurova/cognitive_layers/memory_layer/emotion.py` |
+| `AgentEmotionState` | `EmotionAnalyzer` 返回 `Dict` 格式结果（含 `primary_emotion`, `confidence`, `emotions`, `score`） | `neurova/cognitive_layers/memory_layer/emotion.py` |
 
-文档描述的多层情感共鸣系统（Agent情感状态、情感同步、情感传递、情感调节）是理论设计。实际代码采用更简洁的适配器模式，通过 `EmotionAnalyzerAdapter` 封装情感分析功能，并支持 `use_legacy` 参数切换新旧算法。
+文档描述的多层情感共鸣系统（Agent情感状态、情感同步、情感传递、情感调节）是理论设计。实际代码采用更简洁的分析器
+形态，由 `EmotionAnalyzer` 直接提供情感分析。
+
+> **退役更正（2026-10-21，台账 §6-368）**：本文档此前把 `memory_layer/` 里一层**纯转发适配器**
+> 当作实现落点。该适配器零消费者、8 个方法全部 1:1 转发，已连同其 `use_legacy` 分支与
+> ImportError 恒返 neutral 的假成功兜底一并退役；能力全部落在 `memory_layer/emotion.py` 的
+> `EmotionAnalyzer`（api 端点与 `tool_executor` 一直直连它）。
 
 实际实现以代码为准。
 
