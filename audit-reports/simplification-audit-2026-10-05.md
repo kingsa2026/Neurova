@@ -8608,7 +8608,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       要不要各自补 `permissions` 声明？补＝非属主的 MCP 面重新拿到能力（按声明逐类放行），
       代价＝同一份声明同时改变 chat 主链上这些技能的治理预检语义（P0-4 的 fail-closed 面变宽）；
       不补＝导出面对非属主维持近乎空集。**裁定影响面**：两案都不动工作流腿与 CUA 腿，
-      不动 `chat` 的会话功能本身；不可逆点＝无（声明是数据，回退即删）。
+      不动 `chat` 的会话功能本身；不可逆点＝无（声明是数据，回退即删）。〔票面前提已勘正＝§6-363：补声明不改变导出面，chat 侧亦无行为差〕
     - **两处自己的错，记下来比记成功有用**：① `io.open(p,"wb").write(<会抛异常的表达式>)` 先截断再算参数，
       把 `tests/unit/skills/test_skill_permissions.py` 留成 0 字节——`git checkout HEAD --` 复原、27 passed 复证
       （236/290 那一族的**写入侧新形**：不是静默 no-op，是**先毁后写**）；
@@ -8841,3 +8841,38 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明＋
       本批新开三条文档口径；下一刀可自决做的：F2 路径名实同步 ＋ 第二环重扫。
     - **本会话下一枚空号现查 §6-363**（写前必须现场重取；本笔落库时该读数为 362）。
+
+363. **§6-358 末那张"内置技能补声明"票的勘正：补了也开不了窄层，chat 侧亦无行为差——票面前提经探针证伪** ✅⚪ —— 纯取证，未动代码与声明
+    - **勘的是什么**：§6-358 末"新登记"里的两句因果——(a)"补＝非属主的 MCP 面重新拿到能力（按声明逐类放行）"；
+      (b)"同一份声明同时改变 chat 主链上这些技能的治理预检语义（P0-4 的 fail-closed 面变宽）"。
+      本批现读代码＋一次性探针（仅内存注入声明、不落盘，跑完即删）量下来，**两句都不成立**。
+    - **探针读数（原文照录）**：把五个内置技能按真实能力补声明——
+      `file_operation`→`file`、`memory`→`storage`、`web_search`→`network`、
+      `kb_builder`→`network+storage`、`github_push`→`system+network`，再走真 `NeurovaMCPServer.list_tools`：
+      ①五个 `skillIsReadOnlyFace` **全为 False**；②窄层（`McpCaller("u-ordinary", mayDriveAgent=False)`）
+      清单补前补后都是 `[]`；③属主层五格俱在；④控制格——把 `web_search` 的声明改成
+      `{"file": {"read_only": true}}` 后 `readOnlyFace=True`，窄层立刻出现 `skill:web_search`。
+      ⇒ 谓词本身有效，排除掉的是五者的**真实能力面**，不是判定坏了。
+    - **根因**：`_WRITE_SIDE_FLAGS` 把 `network/file/system/node/storage` 全算写侧
+      （`neurova/skills/permissions.py:264`），窄层入口 `_skillOpenTo` 只认 `skillIsReadOnlyFace`
+      （`neurova/tool_layers/mcp_server.py:106`）。五者没有一个是声明上可称只读的；
+      `network` 因类内含 `browser_*` 被整类归写侧，连纯搜索技能也进不了窄层——这是既有保守口径，不是漏判。
+    - **chat 侧为何也无可观测差**：声明今天只有两个消费者——`ToolExecutor._governance_precheck`
+      的技能作用域仲裁（`neurova/tool_executor.py:1524`）与 `ToolSequenceSkill.execute` 的
+      逐步骤进仲裁（`neurova/skill_system/core.py:150`）。五个内置执行器都不经 `ToolExecutor`
+      调工具、也不属 tool_sequence，作用域里没有可仲裁的调用。故"无声明→有声明"不改变执行语义；
+      §6-358 里"fail-closed 面变宽"那句只在**未来**这些技能真去调工具时才成立，届时声明必须
+      逐项列全，否则原先能跑的工具会被当场拒。
+    - **修正后的票面（仍交人裁，选项已变）**：
+      甲 **不补（推荐）**——声明今日纯属元数据，零收益；按"不补"结清，窄层维持空集。
+      乙 **补**——只为清单/审计可读性，行为与可见面均不变；代价是将来接工具面时声明立即成为
+      fail-closed 依据，须一次列全。
+      丙 **若目标其实是"让非属主经 MCP 拿到读能力"**——现口径下唯一可行是新增一个声明
+      `file: {read_only: true}` 的纯读技能（控制格已证其能进窄层）；属新产品语义，需另立票。
+      丁 **把 `network` 从整类写侧改成按工具细判**（search 读 / `browser_click` 写）——会放宽
+      现有保守边界，影响面另算，不推荐顺手做。
+    - **影响面**：本笔不改任何文件的行为面；甲/乙都不动工作流腿、CUA 腿与会话功能；
+      不可逆点＝无（声明是数据，回退即删）。
+    - **净 LOC**：本笔 **+36/−1**（仅 audit 报告；生产池 0/0；探针已删，不入仓）。子集现值不变 **650**。
+    - **仍开**：等裁票照旧（§6-353 权威快照）；"内置技能要不要补声明"改按本格四选一重问。
+    - **本会话下一枚空号现查 §6-364**（写前必须现场重取；本笔落库时该读数为 363）。
