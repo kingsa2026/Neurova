@@ -8741,7 +8741,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       ②`causal_reasoning.py:318-321` 跨模块直取 `graph._graph`/`_reverse_graph` 私有字段；
       ③**权重表三份表示**（`channels/weight.py:16-23`、`neurova_recall.py:649`、
       `enhanced_memory_search_api.py:477`，撞教义第 6 条）；④`docs/specs/2026-09-21-…-audit.md:369`
-      称 `channels/processor.py:32` 为"活的"＝文档名实不符；⑤`tests/unit/memory/test_moe_routing.py`
+      称 `channels/processor.py:32` 为"活的"＝文档名实不符〔经 §6-362 复核**降级**：该档属
+      INDEX §2.5「历史留痕」层，是档案层陈旧读数，不是现役文档缺陷〕；⑤`tests/unit/memory/test_moe_routing.py`
       等用 `MagicMock` 冒充 `vector_store` 测这六个岛——测的是岛内自洽，不构成活证据（教义第 3 条）。
     - **新增一条需人裁（本批开出，产品口径）**：**MoE 通道插件化这条路线要不要继续**
       （`iteration-plan-channel-plugin-moe.md` 的 Phase2/3）。不要 ⇒ A3/A4/A5/A6 四档 ＋ §6-357
@@ -8792,3 +8793,51 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条 ＋ 收窄后的"四旋钮接不接" ＋ 「`conflict_detector_v2` 补档」 ＋
       并发会话那条「内置技能要不要各自补 `permissions` 声明」。
     - **本会话下一枚空号现查 §6-362**（写前必须现场重取；本笔落库时该读数为 361）。
+
+362. **记忆检索／MoE 设计文档漂移核对：有漂移，且落在"活跃/权威"层——权威升级档不覆盖现行脊柱、事实源里的通道路径全错、一份未入索引的档自称"生产就绪"** ✅⚪ —— 只读核对，未改一行文档
+    - **范围**：用户问"核对设计文档，看是否漂移"。本批只核"记忆检索／MoE"这一族（它刚在 §6-360/361
+      被两次改判的同一片地面），**不声称是全部 `docs/` 的结论**；分层口径取自 `docs/INDEX.md`。
+      产出落 `audit-reports/memory-design-doc-drift-2026-10-20.md`。
+    - **F1 `docs/01-architecture/02-memory-system.md`（4 处名实不符，✅ 逐处现读）**：
+      ①**不在 INDEX 里**（`grep -n "02-memory" docs/INDEX.md` → 0 命中），而 INDEX:23 把记忆系统事实源
+      指向 `docs/01-architecture/memory/` 目录——它自盖了「状态：生产就绪」却无从导航发现；
+      ②§7.2 那条"经验结晶"第一跳不成立：文档写 `process_experience → tool_weights.update_weight`，
+      现读 `experience_feedback.py:251` 只做 extract/classify/create insight/assoc、**不碰 tool_weights**，
+      真更新点在 `evolution/closed_loop.py:518/591` 与 `evolution_facade.py:97`；
+      ③§5「多通道检索引擎」列 5 个通道（向量/关键词/情感/时间/温度），实装是 6 个插件通道
+      `Temperature/Text/Category/Graph/Emotion/Voice`，全文 **0 处**"插件"/`ChannelRegistry`
+      ⇒ 活脊柱在这份"记忆系统架构设计"里缺席；④两处死物：模块表列
+      `vector_search_advanced.py`（该文件不存在）、概述称"通过 **MemoryBus** 事件总线重构"，
+      而 `MemoryBus` 全仓代码命中 **1 处**、且只是 `modules/__init__.py:2` 的 docstring，无实现无消费者。
+    - **F2 `docs/01-architecture/memory/upgrade-plan-detailed.md`（INDEX:23 声明的事实源目录）**：
+      通道清单 5 条路径全错——写的 `channels/{temperature,text,category,graph,emotion}_channel.py`
+      一条都不存在；实装是 `channels/builtin/{temperature,text,category,graph,emotion,voice}.py`
+      （多一层 `builtin/`、无 `_channel` 后缀、多一个 `voice`）。**照着这份计划去接线会找不到文件。**
+    - **F3 `docs/04-plans/memory-system-upgrade-plan-final.md`（INDEX:93 标为「[权威] 记忆升级」）**：
+      全文 289 行，`MoE`/`通道插件`/`Phase` 命中各 **0** ⇒ 记忆检索今天实际跑的那条脊柱
+      （expert MoE ＋ 通道注册表）在权威升级文档里**没有设计描述**；其唯一设计来源是一份
+      INDEX 标为「历史」的计划。这不是"某句过时"，是**权威文档与现行架构各说各的**。
+    - **F4 CogArch §8.2（既有票 D9，本批复读）**：`neurova/projects/` 包**不存在**
+      （`ls neurova/projects` → No such file or directory），§8.2 仍列 5 条 `projects/*.py` 并标
+      `✅ 已实现`/`⚠️ 雏形`；`ToolEngine` 标 `❌ 待实现` 而它在役（批 68-70 收口过）。
+      而 INDEX:84 把它标为「[权威] 认知架构」⇒ 又一处权威层说错。D9 该裁的是"这份文档是现役架构
+      还是设计沿革"——本批复核后建议按现役架构修状态列，否则它每一条状态都可能被当事实引用。
+    - **F5／F6 档案层陈旧（不改写，但不许当证据）**：`docs/11-legacy/test-results-2026-06-11.md`
+      声称"通道插件化 Phase 1-3"已测并列那四个类——今天四个类零消费者（§6-360）；
+      `docs/specs/2026-09-21-…audit.md:369` 称 `channels/processor.py:32` "活的"。
+      两者都属 INDEX §2.5「历史留痕」层，按仓规不动原文，但**不得拿它们当"有测试覆盖"或"活的"的
+      证据**——那正是幽灵证据那一形。**就地校正我自己的旧判**：§6-360 缺陷④把后者列为
+      "文档名实不符（缺陷）"是判重了，按分层规则降级为"档案层陈旧读数"（原文不回改，此处指向）。
+    - **F7 唯一没漂的那份**：`docs/04-plans/iteration-plan-channel-plugin-moe.md` 的
+      Phase 1/2/3 验收清单**全部 `- [ ]` 未勾选**（:833-852），与实状吻合（Phase 1 在服、
+      Phase 2/3 四旋钮未接）。**历史层反而比活跃层诚实**——这句本身是本批最该被记住的读数。
+    - **处置建议（本批不动文档）**：F2 是纯路径错误，可自决另批做名实同步；
+      F1（登记进 INDEX 选层／移入 legacy）、F3（哪份当权威）、F4（D9 的现役还是沿革）三件
+      属**文档口径**，需拍板；F5/F6 不修，处置死码时一律引用现读。
+    - **新增需人裁三条（文档口径）**：①`02-memory-system.md` 的层归属（现役架构 vs 历史沿革）；
+      ②记忆检索脊柱的权威设计文档是哪一份（现 `[权威]` 那份不含它）；
+      ③D9 的 CogArch 按现役修还是降为沿革（原票，本批复核后倾向按现役修）。
+    - **净 LOC**：生产池 0/0；测试/基建池 +136/−1（报告 86 行＋本格 50 行；删的 1 行是 §6-360 缺陷④的降级改写）。子集现值不变 **650**。
+    - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明＋
+      本批新开三条文档口径；下一刀可自决做的：F2 路径名实同步 ＋ 第二环重扫。
+    - **本会话下一枚空号现查 §6-363**（写前必须现场重取；本笔落库时该读数为 362）。
