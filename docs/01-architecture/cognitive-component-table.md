@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **106** 个模块 / **45375** 行。按状态：**在役 55** · **仅层内 39** · **仅测试 6** · **零读者 6**。
+共 **105** 个模块 / **45134** 行。按状态：**在役 55** · **仅层内 39** · **仅测试 6** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1259 |
-| `memory_layer` | 95 | 38731 |
+| `memory_layer` | 94 | 38490 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -92,8 +92,7 @@
 | `neurova/cognitive_layers/memory_layer/conversation_buffer.py` | 434 | 2 | 2 | 13 | 在役 |
 | `neurova/cognitive_layers/memory_layer/conversation_rule_extractor.py` | 184 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/dependency_graph.py` | 495 | 2 | 3 | 5 | 在役 |
-| `neurova/cognitive_layers/memory_layer/emotion.py` | 452 | 3 | 1 | 1 | 在役 |
-| `neurova/cognitive_layers/memory_layer/emotion_adapter.py` | 241 | 0 | 0 | 0 | 零读者 |
+| `neurova/cognitive_layers/memory_layer/emotion.py` | 452 | 3 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/experience_memory_fusion.py` | 188 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/explainability.py` | 646 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/forgetting_recovery_storage_mixin.py` | 347 | 0 | 0 | 0 | 零读者 |

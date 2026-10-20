@@ -3456,3 +3456,6 @@ tests/unit/ci/test_abBaselineDriverReadings.py
 # 聚合索引与 `ast_scan.importersOfModule` 抽样同数（防两把尺分叉）／篡改一个字符即能检出。
 # 表由 `scripts/ci/cognitive_component_table.py` 从代码生成，不手维护。
 tests/unit/ci/test_cognitiveComponentTable.py
+# `emotion_adapter` 退役守卫（§6-368）：文件不在且不再被跟踪／无任何导入通道／正控（转发目标的
+# 八个方法齐全，防删错能力）／活跃层文档不再指向它（路径形与类名形都查，历史层允许保留）。
+tests/unit/cognitive_layers/memory_layer/test_emotionAdapterRetirement.py
