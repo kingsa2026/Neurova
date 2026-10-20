@@ -9060,3 +9060,34 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁（两档被 `PENDING` 守卫钉死）；
       等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明。
     - **本会话下一枚空号现查 §6-369**（写前必须现场重取；本笔落库时该读数为 368）。
+
+369. **`conflict_detector_v2` 补档：生产读者 0、唯一消费者本身从未接到生产；独有能力与现役判据互补，判定需人裁（推荐"先并判据再退役"）** ✅⚪ —— 只读档案，未动一行代码
+    - **产出落点**：`audit-reports/conflict-detector-v2-dossier-2026-10-21.md`（五字段＋能力对照 probe＋缺陷单列＋三态影响面＋复算命令）。
+    - **当次读数**：265 行；`outsideReaders=0`／层内 1（`memory_layer/__init__.py:33` 门面）／测试 2 档 7 处；
+      聚合名消费者 0（`from neurova.cognitive_layers.memory_layer import ConflictDetector` 仅聚合门面
+      `neurova/memory/__init__.py:19` 与一格形状检查）。组件表状态＝**仅层内**。✅ 主会话跑组件表与
+      `ast_scan.importersOfModule` 单点复核，两侧同数。
+    - **来历勘正**：`2482c042`(06-03) 批量引入；全史唯一消费者 `result_processor.py`（`:17` import／`:63` 实例化／
+      `:100` 调 `detect`）在 `0c333a76^` 时**只有测试 import，`neurova/` 内零 import**（`git grep` 只命中它自己的
+      定义与 `__main__` 演示、无其他档），且 `git log -S "from …result_processor" --all -- neurova/` 零命中 ⇒ **生产侧从未接线**。
+      `0c333a76`(09-21) 删掉该消费者，退役报告记「生产 0」并把 MoE 检索面改指 `MoERetrieverAdapter`
+      （现役 `chat_pipeline.py:254`／`memory_retrieval_chain.py:158`，不使用 v2）。§6-360 那句
+      「曾被消费后被摘」对生产是过宽表述，本格收窄为「**引入即未接线**」；原文不回改，档案 §1 已标。
+    - **能力对照（当场 probe）**：v2 命中「PostgreSQL／MySQL 同属性异值」而 live `judgeClauseConflict`
+      返回 `None`；live 命中「我喜欢咖啡／我不喜欢咖啡」而 v2 因实体重叠 0 报两条独立；v2 出演进链、
+      live 无此概念；`version` 类型**从未产出**（`conflict_type` 只被赋 `contradiction`）。⇒ 现役替代
+      **部分缺**：缺同属性异值、演进链、三分区与组级读数；不构成"已有替代可删"。
+    - **判定：需人裁（三选一）**——**甲 删净**（生产池 −265，行为零变化，永久失去两条独有判据与三分区编排）；
+      **乙 先并判据再退役（推荐）**——把「同属性不同取值」并进单源 `conflict.py:122 judgeClauseConflict`，
+      补三向测试后删 v2 与 9 个测试格（能力保留、第三份实现消失；代价是观测面变宽，属产品语义）；
+      **丙 原样留**——只修假「活跃版本」标签与假三类声明，继续当第三份实现（不推荐）。
+    - **缺陷单列（不折算成简化收益）**：①docstring 声称 `version` 类型，实现零产出；②安全网测试自称
+      「活跃版本」但只断 import／初始化，且同档一格以 `or True` 结尾＝恒真；该档来历是
+      `4a3c9380`(09-04)「移除 `.gitignore` 的 /tests/ 整目录忽略」批量入库，不是评审过的保留决定；
+      ③同域三份检测器并存（`docs/specs/2026-09-21-…-audit.md:209` 已点名），撞教义第 6 条；
+      ④参考层 `cognitive-graph-one-step-design.md:62` 写「保留（独立功能）」（INDEX 标「参考」，非权威），
+      退役时须同步标注。
+    - **净 LOC**：生产池 +0/−0；测试/基建池 +141/−0（本档案 110＋台账 31）。
+    - **仍开**：本档转成等裁票（甲／乙／丙）；其余不变——Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋
+      "四旋钮接不接"＋`permissions` 声明。
+    - **本会话下一枚空号现查 §6-370**（写前必须现场重取；本笔落库时该读数为 369）。
