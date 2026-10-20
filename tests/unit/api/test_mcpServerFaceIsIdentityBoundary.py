@@ -56,7 +56,7 @@ def _faceFor(monkeypatch, user_id: str, workflowName: str):
 
     class _Server(NeurovaMCPServer):
         def __init__(self):
-            super().__init__(storage=None, skill_registry=None)
+            super().__init__(storage=None)
 
         def list_tools(self):
             return [{"name": workflowName, "description": "w", "inputSchema": {"type": "object"}}]
