@@ -39,9 +39,10 @@ class _Pool:
         return self._skills.get(name)
 
 
-def _agentWith(skills):
+def _agentWith(skills, agentId="b62agent"):
     agent = MagicMock(name="agent")
     agent._skill_registry = _Pool(skills)
+    agent.config.agent_id = agentId   # 可见集装配要按身份取视图，替身得给个稳的串
     return agent
 
 
@@ -351,6 +352,126 @@ class TestSkillFaceSingleSourceAndParameterGate:
         core = self._core({"custom": _Skill("custom", "自述技能")})
         await core.call_tool("skill:custom", {"whatever": 1, "args": [2]})
         assert throat == [("custom", {"whatever": 1, "args": [2]})], throat
+
+
+@pytest.mark.asyncio
+class TestTurnViewAssembledBeforeTheThroat:
+    """§6-352 裁甲：进咽喉之前必须挂上轮级可见集，且必须用 chat 主链那同一个构造口。
+
+    这四格审的是**接线**（有没有装、按什么入参装、出去有没有复位、装不上时拒不拒），
+    `build_turn_view` 自己那套三库合并语义由 `tests/unit/skills/` 那批判据钉，本档不重述。
+    """
+
+    def _wire(self, monkeypatch, skills, boom=False):
+        import neurova.core.turn_context as tc
+        import neurova.skills.skill_visibility as sv
+
+        seen = {"viewInThroat": [], "throatCalls": []}
+        built = object()
+
+        def _build(agent_id, user_key, registry_skills=None):
+            seen["buildArgs"] = (agent_id, user_key, registry_skills)
+            if boom:
+                raise RuntimeError("库目录读不动")
+            return built
+
+        def _resolve(user_id=None, **kw):
+            seen["uid"] = user_id
+            return None if user_id is None else f"u:{user_id}"
+
+        async def _fakeThroat(self_, skill_name, params, context=None):
+            seen["viewInThroat"].append(tc.get_turn_skill_view())
+            seen["throatCalls"].append((skill_name, dict(params or {})))
+            return {"success": True, "output": {"ran": skill_name}}
+
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        monkeypatch.setattr(sv, "build_turn_view", _build)
+        monkeypatch.setattr(sv, "resolve_user_key", _resolve)
+        monkeypatch.setattr("neurova.tool_executor.ToolExecutor.execute_skill_tool", _fakeThroat)
+        return NeurovaMCPServer(agent_ref=_agentWith(skills)), seen, built
+
+    async def testThroatSeesTheAssembledView(self, monkeypatch):
+        """咽喉读到的必须正是本面刚装上去的那个视图——不是 None，也不是上一发的残留。"""
+        from neurova.core.identity_context import set_request_user_id
+
+        core, seen, built = self._wire(monkeypatch, {"greet": _Skill("greet")})
+        set_request_user_id("alice")
+        out = await core.call_tool("skill:greet", {})
+        assert seen["viewInThroat"] == [built], seen["viewInThroat"]
+        assert out.get("isError") is not True, out
+
+    async def testBuilderGetsTheExecPoolAndRequestIdentity(self, monkeypatch):
+        """入参三件都要来自现役单点：agent 身份、请求身份、执行池那一份 skills 快照。"""
+        from neurova.core.identity_context import set_request_user_id
+
+        skills = {"greet": _Skill("greet")}
+        core, seen, _built = self._wire(monkeypatch, skills)
+        set_request_user_id("alice")
+        await core.call_tool("skill:greet", {})
+        agentId, userKey, registrySkills = seen["buildArgs"]
+        assert agentId == "b62agent", agentId
+        assert seen["uid"] == "alice" and userKey == "u:alice", (seen.get("uid"), userKey)
+        assert set(registrySkills) == set(skills), registrySkills
+
+    async def testViewIsResetAfterTheCall(self, monkeypatch):
+        """出去必须复位——视图是 ContextVar，漏复位就是把这一发的授权留给下一发。
+
+        这格同时断"里面看得见"：只断外面是 None 的写法在**根本没装视图**的实现上也是绿的
+        （本批红自证时它就这样绿过一回，被当场补牙），所以把"装上了"与"复位了"钉在同一条里。
+        """
+        import neurova.core.turn_context as tc
+        from neurova.core.identity_context import set_request_user_id
+
+        core, seen, built = self._wire(monkeypatch, {"greet": _Skill("greet")})
+        set_request_user_id("alice")
+        assert tc.get_turn_skill_view() is None
+        await core.call_tool("skill:greet", {})
+        assert seen["viewInThroat"] == [built], f"咽喉没读到视图，后面那句 None 就白断：{seen['viewInThroat']}"
+        assert tc.get_turn_skill_view() is None, "视图跨发残留＝第二个请求会读到第一个请求的授权"
+
+    async def testUnknownSkillRefusalComesFromTheThroatNotTheFace(self, monkeypatch):
+        """视图在位时，查无此技能名的拒因**必须来自咽喉**——这条区分是有内容的：
+        装配之后咽喉先按视图判`invocable`，回的是「在当前会话不可用」（活体实测同值），
+        没装配才会走到后面的「不存在」。本面不得重述出第三种说法。
+
+        这一格刻意**不 stub 咽喉**：它审的正是"视图交到咽喉手上之后发生什么"，
+        stub 掉就等于把被测的那一段换成了自己的替身。
+        """
+        import neurova.skills.skill_visibility as sv
+
+        from neurova.core.identity_context import set_request_user_id
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        class _View:
+            agent_id = "b62agent"
+
+            def invocable(self, name):
+                return False
+
+            def provenance_for(self, name):
+                return ("agent", "")
+
+        monkeypatch.setattr(sv, "build_turn_view", lambda *a, **k: _View())
+        monkeypatch.setattr(sv, "resolve_user_key", lambda *a, **k: "u:alice")
+        set_request_user_id("alice")
+
+        core = NeurovaMCPServer(agent_ref=_agentWith({}))
+        out = await core.call_tool("skill:nope", {})
+        assert out.get("isError") is True, out
+        assert "当前会话不可用" in out["error"], out
+        assert "可见集" not in out["error"], f"本面重述了一份自己的拒因：{out['error']}"
+
+    async def testAssemblyFailureRefusesInsteadOfRunningBlind(self, monkeypatch):
+        """装配失败 fail-closed（与 chat 主链的 fail-open 有意相反）：这道视图就是授权本身。"""
+        from neurova.core.identity_context import set_request_user_id
+
+        core, seen, _built = self._wire(monkeypatch, {"greet": _Skill("greet")}, boom=True)
+        set_request_user_id("alice")
+        out = await core.call_tool("skill:greet", {})
+        assert out.get("isError") is True, out
+        assert "可见" in out["error"] or "fail-closed" in out["error"], out
+        assert seen["throatCalls"] == [], f"装配没成都把调用放进了咽喉：{seen['throatCalls']}"
 
 
 @pytest.mark.asyncio
