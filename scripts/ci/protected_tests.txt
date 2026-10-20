@@ -3440,3 +3440,10 @@ tests/unit/api/testMcpFaceRidesSdkTransport.py
 # 一条踩过的坑写在这儿免得下次再踩：②起初是假绿——trap 文案含 "agent" 四个字母，被 call_tool
 # 外层 except 收进错误信封后正好撞上断言；改成不含该串＋加一条反向排除才咬得住。
 tests/unit/workflow/test_mcp_server_face.py
+# 批 118（§6-358）：MCP 面的调用方身份层级——"这一发能不能驱动这个 agent"由谁说了算。
+# 四格：普通用户令牌落窄层（本机默认 agent 无属主 ⇒ 现口径下不是驱动者）；admin 落全开层
+# （控制格，证明窄层不是一刀切）；caller 里的 userId 就是令牌的 user_id（这道门不许再解一次
+# Authorization，§3 身份单通道）；一条按 AST 认"判定确实委托 `agent_access`、本模块没自己读
+# owner_user_id"的形状格——按词扫会被 docstring 里的同名说明骗到（形态集 241/268 那一族）。
+# 本档不枚举目录：形状格只解析自己受治的那一个模块（不触发解析预算门禁）。
+tests/unit/api/testMcpFaceCallerTier.py
