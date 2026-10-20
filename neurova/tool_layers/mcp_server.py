@@ -252,9 +252,15 @@ class NeurovaMCPServer:
         （P0-4）、沙箱根注入、P0-1 质量漏斗记账。直调 `skill.execute` 等于把这四件
         一起绕掉——所以这里没有"拿不到 agent 就退回直调"的兜底，只有 fail-closed。
 
-        清单源与执行源不同口径是本批有意保留的分叉：清单来自构造期注入的注册表
-        （ advertise 面），执行由咽喉按**本轮可见集**裁决（授权面）。 advertised 而
-        被拒是正确行为，不是漂移。
+        清单源与执行源**不是同一份注册表**（这条是实测，不是推理）：清单读构造期注入的
+        那一份（生产里是 `get_skill_registry()` 全局单例），执行读 `agent._skill_registry`
+        ——后者由 `create_default_skills()` 每 agent 现造，两份从来没有同源过。于是两个
+        方向都会出现：advertised 而调用判「不存在」，以及**清单从未列出而点名仍能执行**。
+        更重的一条：这道咽喉的轮级可见门（Wave H-W2）在本面这条路上读到的视图恒为 `None`
+        ——全仓 `set_turn_skill_view` 只有一个写点（`neurova/agent/chat_pipeline.py` 的
+        回合装配段），MCP 请求边界不经过它。所以"接进咽喉"实际只带来权限作用域、沙箱根
+        注入与漏斗记账三件，可见集那一件在这条路上是空转的。
+        缺陷档案与三态票见台账 §6-352；本段不写"这是正确行为"。
         """
         agent = self._resolve_agent()
         if agent is None:
