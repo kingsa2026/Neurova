@@ -248,7 +248,7 @@ def test_intent_specific_retrieval():
 ### 4.2 详细任务
 
 #### 任务 3.1：定义通道抽象接口（2小时）
-**新建文件**：`neurova/cognitive_layers/memory_layer/channel_interface.py`
+**实装文件**：`neurova/cognitive_layers/memory_layer/channels/base.py`（原计划名 `channel_interface.py`；接口基类实装为 `BaseChannel`）
 
 **接口设计**：
 ```python
@@ -277,7 +277,7 @@ class RecallChannelInterface(ABC):
 3. 支持可选的统计信息
 
 #### 任务 3.2：实现通道注册表（4小时）
-**新建文件**：`neurova/cognitive_layers/memory_layer/channel_registry.py`
+**实装文件**：`neurova/cognitive_layers/memory_layer/channels/registry.py`（原计划名 `channel_registry.py`）
 
 **功能设计**：
 ```python
@@ -298,12 +298,13 @@ class ChannelRegistry:
 #### 任务 3.3：重构现有通道为插件（8小时）
 **新建文件**：创建独立的通道实现文件
 
-**通道实现**：
-- `neurova/cognitive_layers/memory_layer/channels/temperature_channel.py`
-- `neurova/cognitive_layers/memory_layer/channels/text_channel.py`
-- `neurova/cognitive_layers/memory_layer/channels/category_channel.py`
-- `neurova/cognitive_layers/memory_layer/channels/graph_channel.py`
-- `neurova/cognitive_layers/memory_layer/channels/emotion_channel.py`
+**通道实现（实装落点，六个）**：
+- `neurova/cognitive_layers/memory_layer/channels/builtin/temperature.py`
+- `neurova/cognitive_layers/memory_layer/channels/builtin/text.py`
+- `neurova/cognitive_layers/memory_layer/channels/builtin/category.py`
+- `neurova/cognitive_layers/memory_layer/channels/builtin/graph.py`
+- `neurova/cognitive_layers/memory_layer/channels/builtin/emotion.py`
+- `neurova/cognitive_layers/memory_layer/channels/builtin/voice.py`（计划外新增）
 
 **验收标准**：
 1. 每个现有通道都重构为独立的插件类
@@ -321,8 +322,8 @@ class NeurovaRecallEngine:
         self._register_default_channels()
     
     def _register_default_channels(self):
-        from .channels.temperature_channel import TemperatureChannel
-        from .channels.text_channel import TextChannel
+        from .channels.builtin.temperature import TemperatureChannel
+        from .channels.builtin.text import TextChannel
         # ... 注册所有默认通道
     
     def register_channel(self, channel: RecallChannelInterface):
