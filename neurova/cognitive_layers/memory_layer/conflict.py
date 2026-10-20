@@ -119,9 +119,65 @@ def _contradictionKind(left: str, right: str) -> bool:
     return False
 
 
+# 属性取值：同一属性键上的不同取值互斥（例："项目使用 PostgreSQL" vs "项目使用 MySQL"）。
+# 三组谓词取自 v2 的实装；键取谓词前的中文串（≥2 字），紧贴否定词的交给否定判据，
+# 复合词尾（认为/以为/作为…）不是属性断言。值只做字符串比较，包含关系视为同一取值。
+# 同键异值即报；同义改写（"不错/很好"）不做语义消歧——本判据供观测、不阻断。
+_ATTRIBUTE_PATTERNS = (
+    # 键必须非贪婪：贪婪的 `{2,}` 会把"使用"的"使"吃进键里、只剩"用"去配谓词，
+    # 报出的 key 变成"项目使"（本批活体第一跑就抓到）。
+    re.compile(r"([\u4e00-\u9fff]{2,}?)\s*(?:使用|采用|用)\s*([\u4e00-\u9fff\w]+)"),
+    re.compile(r"([\u4e00-\u9fff]{2,}?)\s*(?:升级到|更新到|改为)\s*([\u4e00-\u9fff\w]+)"),
+    re.compile(r"([\u4e00-\u9fff]{2,}?)\s*(?:是|为)\s*([\u4e00-\u9fff\w]+)"),
+)
+_ATTRIBUTE_KEY_STOP_TAIL = frozenset("认以作成因但只还就总而要算称视")
+_ATTRIBUTE_NEGATION_TAIL = frozenset("不没非未别")
+_SENTENCE_SPLIT = re.compile(r"[。；;！!？?\n]+")
+
+
+def _sentences(text: str) -> List[str]:
+    """按句子切（不按空白切）：属性谓词两侧允许空格，子句切法会把取值切散。"""
+    return [s.strip() for s in _SENTENCE_SPLIT.split(text or "") if s.strip()]
+
+
+def _extractAttributes(text: str) -> Dict[str, str]:
+    attrs: Dict[str, str] = {}
+    for pattern in _ATTRIBUTE_PATTERNS:
+        for match in pattern.finditer(text):
+            key = match.group(1).strip()
+            value = match.group(2).strip().lower()
+            if len(key) < 2 or key[-1] in _ATTRIBUTE_KEY_STOP_TAIL:
+                continue
+            if key[-1] in _ATTRIBUTE_NEGATION_TAIL:
+                continue
+            attrs[key] = value
+    return attrs
+
+
+def _attributeConflict(text1: str, text2: str) -> Optional[tuple]:
+    for left in _sentences(text1):
+        leftAttrs = _extractAttributes(left)
+        if not leftAttrs:
+            continue
+        for right in _sentences(text2):
+            rightAttrs = _extractAttributes(right)
+            if not rightAttrs:
+                continue
+            for key in leftAttrs.keys() & rightAttrs.keys():
+                value1, value2 = leftAttrs[key], rightAttrs[key]
+                if not value1 or not value2 or value1 == value2:
+                    continue
+                if value1 in value2 or value2 in value1:
+                    continue
+                return ("attribute_conflict", left, right,
+                        "同一属性 %r 的取值互斥：%r 与 %r" % (key, value1, value2))
+    return None
+
+
 def judgeClauseConflict(text1: str, text2: str) -> Optional[tuple]:
     """全仓唯一的记忆侧冲突判据：返回 (类型, 左子句, 右子句, 依据) 或 None。
 
+    类型为 `negation_conflict` / `semantic_contradiction` / `attribute_conflict`。
     `LegacyConflictDetector` 与 `ConflictModule` 都从这里取判据——一个根因两处实现，
     修一处等于没修（第二份实现会各自漂回"子串含否定词"的老路）。
     """
@@ -135,7 +191,7 @@ def judgeClauseConflict(text1: str, text2: str) -> Optional[tuple]:
             if _contradictionKind(left, right):
                 return ("semantic_contradiction", left, right,
                         "同一对象的取值互斥：%r 与 %r" % (left, right))
-    return None
+    return _attributeConflict(text1, text2)
 
 
 class LegacyConflictDetector:

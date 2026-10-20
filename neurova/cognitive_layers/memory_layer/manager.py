@@ -3937,9 +3937,10 @@ class MemoryManager:
             ConflictType,
         )
 
-        # 只认唯一判据产出的两种类型：来源不明的载荷不入账（宁可不记，
-        # 也不记一条自己都说不清属于哪类的账）。
-        _knownKinds = {"negation_conflict", "semantic_contradiction"}
+        # 只认唯一判据产出的类型：来源不明的载荷不入账（宁可不记，
+        # 也不记一条自己都说不清属于哪类的账）。v2 退役时并入的同属性异值判据
+        # 产出 `attribute_conflict`，必须在这里同步认领，否则检出会被静默吞成 0。
+        _knownKinds = {"negation_conflict", "semantic_contradiction", "attribute_conflict"}
         module = self._ensure_conflict_module()
         recorded = 0
         for item in conflicts or []:
