@@ -361,21 +361,59 @@ class TestDisciplineHasExactlyOneSource:
 class TestIndexEntryIsResolvable:
     """docs/INDEX.md 自称"唯一权威入口"，其阅读顺序指向的文件必须真实可达。"""
 
+    #: 一条编号项 ＋ 它的链接目标。窄到"只认反引号 `/x.md`"是这档原来的形状——
+    #: 那一节今天有三条编号项，旧写法只解析出 1 条（`docs/CONTEXT.md` 与 `INDEX.md` 都是从
+    #: markdown 链接里读出来的，反引号那条正则一条也不认）。判据的面窄于它声明要守的东西时，
+    #: 缺的那两条悬空也不会有任何红（302 那一形）。
+    _ITEM = re.compile(r"^\s*\d+\.\s+(.*)$", re.M)
+    _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+
     @staticmethod
-    def _reading_order_paths() -> list:
-        """抓取阅读顺序里以 `/` 引用的根级文档相对路径。"""
+    def _readingOrderSection() -> str:
         text = _read(INDEX)
-        section = text.split("## 0. 阅读顺序", 1)[1].split("## 1.", 1)[0]
-        return re.findall(r"`/([^`]+\.md)`", section)
+        return text.split("## 0. 阅读顺序", 1)[1].split("## 1.", 1)[0]
+
+    @classmethod
+    def _entryLinks(cls):
+        items = cls._ITEM.findall(cls._readingOrderSection())
+        mentions = [ln for ln in items if ".md" in ln]
+        targets = [cls._LINK.search(ln).group(1) for ln in mentions if cls._LINK.search(ln)]
+        unlinked = [ln[:60] for ln in mentions if not cls._LINK.search(ln)]
+        return mentions, targets, unlinked
+
+    def test_everyMdReferenceInReadingOrderCarriesALink(self):
+        """阅读顺序里每一条提到 `.md` 的条目都必须给出链接目标——否则它从没进过可达性检查。
+
+        这替代 `assert len(paths) > N` 那种假数字：拿同一次扫描里"提到 `.md` 的条目"与
+        "解析出链接目标的条目"两条独立计数互相咬合（291/304 那一族的正解）。
+        现读：本节 4 条编号项，其中 3 条提到 `.md` 且各带一个链接，第 4 条是散文（不指名文件）——
+        所以判据只看"提到 `.md`"这一条，把"4 条都得有链接"写成判据等于把散文当缺陷修掉。
+        """
+        mentions, targets, unlinked = self._entryLinks()
+        assert mentions, "阅读顺序没解析出任何提到 `.md` 的条目（索引结构已变，请同步本守卫）"
+        assert not unlinked, (
+            f"提到文档却没给链接目标的条目有 {len(unlinked)} 条，它们永远进不了可达性检查："
+            f"{unlinked}"
+        )
+        assert len(targets) == len(mentions), (
+            f"提到 `.md` 的条目 {len(mentions)} 条，链接目标却解析出 {len(targets)} 条——"
+            "有一条引用被重复计数或漏掉，本格的交叉对账失效"
+        )
 
     def test_reading_order_root_docs_exist(self):
-        paths = self._reading_order_paths()
-        assert paths, "阅读顺序未解析出任何根级文档引用（索引结构已变，请同步本守卫）"
-        missing = [
-            p for p in paths
-            if not (PROJECT_ROOT / p).is_file()
-            and not (PROJECT_ROOT / "docs" / p).is_file()
-        ]
+        """可达性覆盖**每一条**链接目标（相对 `docs/` 解，与 markdown 自己的解法一致）。
+
+        面读数为什么取 `> 2` 而不是随手一个数：本节 4 条编号项里有 3 条指名文档，
+        而旧的窄解析形（只认反引号 `/x.md`）在这里**只解析出 1 条**——两条腿都在下面：
+        数量级这条钉"面不许退回窄形"，等值那条钉"每条都要真被解出目标"。
+        只留可达性那条不算收口：链接目标写错时，条目数照样好看。
+        """
+        _, targets, unlinked = self._entryLinks()
+        assert len(targets) > 2, (
+            f"阅读顺序里进过可达性检查的链接目标只剩 {len(targets)} 条（现值应为 3）——"
+            f"解析面缩了，多出来的那种引用写法从此没人检查：{unlinked}"
+        )
+        missing = [t for t in targets if not (INDEX.parent / t).resolve().is_file()]
         assert not missing, (
             f"docs/INDEX.md 阅读顺序指向的文件不可达: {missing}\n"
             "索引自称文档体系唯一导航事实源，入口不可解析即纪律没有事实源。"
