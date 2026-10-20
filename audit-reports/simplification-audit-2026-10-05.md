@@ -8346,7 +8346,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
         **D10**（文档引用判据按 basename 兜底，看不见"目录段写错"那一形）、
         **D20**（`agent/templates/collaboration_template.py` 的 `get_template_manager()`——现读消费者只剩
         `templates/__init__.py:21/:40` 那两条门面再导出，生产侧零；退役还是接线等人拍）、
-        **D19 的第三例**（见下"待扫面"）。
+        **D19 的第三例**（见下"待扫面"；〔已扫，第三例存在＝11 档 2412 行＝§6-357〕）。
       - **已结清**：D2／D4／D6／D7／D8／D21／D22（各自落点见 §6-306／§6-307／§6-310／§6-313／§6-314 与 §6-316/318/322 一路）；
         **D3**＝§6-309 按乙退役；**D5**＝§6-311 比对＋§6-342 裁乙＋批 109 第③刀落；
         **D11–D18**＝**载体随退役消失**（本格上面那四条命令是判据）；
@@ -8494,6 +8494,79 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（等您拍板，八条）**：B3（能力面 1010 行，§6-348 已把票面扩成两条）、D20
       （`get_template_manager()` 只剩门面再导出，生产侧零）、`dream_reports` 表（无写侧无读侧，删表是数据动作）、
       §6-293（远端 schema 声明能否采信，推荐乙）、D1 甲／乙、D9、D10、
-      §6-355 末那张内置面授权票（推荐乙）；另有两条非拍板项待独立批次：D19 第三例的可达闭包扫、
-      `scripts/ab_compare.sh` 缺件。
+      §6-355 末那张内置面授权票（推荐乙）；另有两条非拍板项待独立批次：D19 第三例的可达闭包扫
+      （〔已扫净＝§6-357，第三例存在〕）、`scripts/ab_compare.sh` 缺件。
     - **本会话下一枚空号现查 §6-357**（写前必须现场重取；本笔落库时该读数为 356）。
+
+357. **D19 待扫面收口：可达闭包扫跑通，第三例确实存在——11 档 2412 行；四条是探测器自己造的假阳性，逐条当场改掉才敢说扫过** ✅⚪ —— 纯扫描，未动一行代码，探针即用即删
+    - **还的是哪一笔账**：§6-356 那条「本批这次扫法不作数」——当时用「该模块的所有 importers 都是包门面」
+      这条谓词全仓扫，读数 0，但已知第二例 `protocols/capability_discovery` 的 importers 是
+      「门面 ＋ 不在启动路径上的 `agent_matrix`」，谓词连正例都报不出 ⇒ 那个 0 是没牙的读数。
+      本格补的是它指定的那张尺：**从 `create_app()` 出发的可达闭包（含 `sys.modules` 实测）**。
+    - **三臂形制（少一条就出一类假结论，逐条都在本批现场出现过）**：
+      ①**门面声明 ∩ 真闭包**：`ast` 认每个 `__init__.py` 的 level-1 `ImportFrom`（`from .x import …` 与
+      `from . import x` 两形）声明出的**子模块全名**，只认那些文件真存在的那些；再取真起 app 后
+      `sys.modules` 里 `neurova.*` 的现量作交集。
+      ②**运行时挂载归属**：该模块 owns 至少一条已挂载 operation ⇒ 在服。取数口**不能**走
+      `app.routes` 顶层（本仓 `_IncludedRouter` 只露 5 条带 `.endpoint`，214 那条老账的第二次复现），
+      改从 app 对象图 BFS 收 `routes`：实测 `walked 1029` 条 operation 对上 `openapi paths 864`。
+      ③**符号级读者，且读者自己必须在闭包里**：门面把符号再导出后，外部消费者写的是
+      `from neurova.sandbox import ThoughtSandbox`——它指向门面包不指向岛模块，所以 import 通道那条臂
+      天生量不到；而读者自己不被加载时只是「死岛读死岛」（第二例当初就是这样被放过的）。
+      死岛常成链，故对死列**算到不动点**（本轮 12 轮内收敛，读数未变）。
+    - **正控（决定性那一步，缺它整个 0 与整个 11 都不作数）**：在**仓外副本**（`git worktree` 于
+      `E:/项目/Neurova_d19_probe`，同编码根、避开 231 那一形）把 `protocols/__init__.py` 退回
+      「还无条件 `from .capability_discovery import …`」那一形再跑同一把尺 ⇒
+      探测器把 `neurova.agent.protocols.capability_discovery` 报成启动路径上的死岛（控制读数 dead 19）；
+      主仓读数里它**不在**死列（门面已收＝§6-348 第④刀）。两侧差集恰为那一档，符合预期。
+    - **正控顺带抓出的更要紧一条：「可达」必须绑到具体入口并把它报出来。**
+      只跑 `create_app()`＋`GET /health` 的闭包里 `neurova.agent.protocols` **根本不在场**
+      （667 个模块），控制组当场判不出已知正例——不是尺没牙，是**入口没走到那条装配腿**。
+      补上 `agent.team`＋`acp_api` 两条腿后闭包 676（控制副本 677），D19 那句话里"每次进程启动路径"
+      才第一次有事实源。凡报闭包读数，必须同报是哪几个入口跑出来的。
+    - **四条我自己造的假阳性（都改在尺上，不改在仓里）**：
+      ①把**整份门面**从读者里剔掉 ⇒ 门面在**函数体里**用它的活面被读成死面。这一条形成本批最大一次
+      误判：`neurflow/templates/short_drama` 被 `templates/__init__.py:107` 的 `seed_short_drama_template`
+      真用，而那条函数由 `api/app.py:1151` 在启动装配里真调。修法＝运行时调用臂（下条）。
+      ②`logger = get_logger(...)` 这类模块级赋值被当"公共符号"计读者 ⇒ 每条岛都"有人读"，
+      `pending` 那档一度读到假活。修法＝兜底符号面收窄到 `def`/`class`，且明写常量型的岛这把尺不替人判。
+      ③目录排除用了 `str(Path(...))` 的反斜杠形态，`startswith(pkgDir + "/")` 永假 ⇒ 岛内文件全被当成
+      岛外提及（第一遍 18 档的"岛外提及"清单整片不可用）。
+      ④运行时调用臂起初把**模块体与类体的执行码**也算调用（`co_filename` 就是本文件），12 档被这样读活；
+      而更早一版是 `sys.setprofile` 回调形参序写成 `(what, frame, arg)`，`f_code` 全抛
+      `AttributeError` 被自己 `except` 吞掉 ⇒ `calledFileCount = 0`，一片 False 看着像"没人用"。
+      修法＝按 `(文件, 函数名)` 记账且函数名取自该文件 AST，另配两道硬断：钩子收到文件数 >200
+      ＋`neurova/api/app.py` 自己的函数必须在场（正控缺席即报错，不让空转读成干净）。
+    - **终读数**（入口＝lifespan 装配＋`/health`＋`agent.team`／`acp_api`）：
+      门面声明 107 处，其中在闭包里 97；「唯一启动入口是门面」30 档；两臂同向判死 **11 档／2412 行**：
+      `sandbox/thought_sandbox`(432，门面 5 行声明，**0 份测试档**)、`image_pipeline/docker_builder`(613，
+      门面 5 行)、`memory_layer/causal_reasoning`(349)、`memory_layer/question_decomposer`(311)、
+      `memory_layer/positional_encoding`(291)、`channels/processor`(107)、`agent/templates/personality_templates`(79，
+      **0 份测试档**)、`knowledge/foundation/redundancy`(69)、`channels/weight`(62)、`channels/centroid`(53)、
+      `channels/threshold`(46)。其余 19 档由②或③证明在服（含 10 档 `api/endpoints/memory/*` 各 owns
+      1–15 条 operation、6 档 `channels/builtin/*` 的 `metadata()` 启动真被调、
+      `conflict_detector_v2` 经 `memory/__init__.py:19`＋`conflict.py:260`、`skill_encapsulation` 经
+      `agent_core.py:1558`、以及上面那档 `short_drama`）。
+    - **来历（符号级 `git log -S "<决定符号>" -- neurova/`，不是按叶子文件名数的）**：
+      11 档里 **9 档只命中引入那一笔**＝引入即未接线，且集中在三次批量事件——
+      `ede49184`(06-11「更新 .gitignore…优化项目结构」，`causal_reasoning`/`centroid`/`processor`/
+      `threshold`/`weight`/`question_decomposer` 六档都出自这一次把整棵 `memory_layer` 升格为跟踪面的批量 add)、
+      `112dbb4f`(06-03「补齐项目核心文件」)、`34b080eb`(06-12 NeRF 记忆系统分析)。
+      另 2 档各 2 笔待逐档穿（`DockerBuilder` `c5937a10`＋`33b71a25`；`ThoughtSandbox` `7835c367`＋`806c7047`，
+      两笔都是"骨架恢复/145 文件大规模更新"那一族）。`RedundancyAudit` 那笔是 `5665de01`(09-20
+      工单 004「admit 内容身份归一段与**只读**冗余审计」)——它是带设计文档的一次有意引入，
+      与骨架批量同形但**根因不同**，档案里要分开写。
+      按叶子名数的旧口径一并作废：`threshold` 81 笔／`weight` 61 笔是同名不同物（前端 `.ts` 与配置字段）。
+    - **本批不下删除判定**（技能边界：只出扫描与档案前置）。两条硬边界写在脸上：
+      ①"运行时零调用"只覆盖**这里跑过的入口**，不含需要真 LLM 回合的流程——它不是"任何流程都没用到"；
+      ②11 档要进三态判定还得逐档做五字段档案（≤5 条/批），且凡"全仓唯一实装"者按需人裁办，
+      不许因为"门面摘掉就干净"把本体一并顺手删。
+    - **就地划闭/勘正**：§6-356「一条待扫面：本批这次扫法不作数」由本格接管（原文不回改）；
+      §6-353 逐条定态里那句「**D19 的第三例**（见下"待扫面"）」由"未扫"改判为
+      「已扫，第三例存在＝11 档 2412 行，见 §6-357」。
+    - **净 LOC**：**0/0**（纯扫描；探针 `.tmp_d19*` 与仓外副本全部删除，交付前 `git status` 复证无残留）。
+      子集现值不变 **648**。
+    - **仍开**：等裁八条照旧（§6-353 权威快照 ＋ §6-356 末那一行）；新增两条排期——
+      11 档死岛的逐档五字段档案（按事件切批：先 `ede49184` 那一族 6 档，再 `34b080eb`/`112dbb4f` 两档，
+      最后带鉴权/设计文档的 `redundancy` 与 `docker_builder`）；`scripts/ab_compare.sh` 缺件。
+    - **本会话下一枚空号现查 §6-358**（写前必须现场重取；本笔落库时该读数为 357）。
