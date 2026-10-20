@@ -39,6 +39,29 @@ class _Pool:
         return self._skills.get(name)
 
 
+def _ownerCaller():
+    from neurova.tool_layers.mcp_server import McpCaller
+
+    return McpCaller(userId="alice", mayDriveAgent=True)
+
+
+class _OwnerSession:
+    """把"这一发是属主级调用"钉在夹具里。
+
+    除审授权层的那几格外，别的格审的不是 tier——若让它们在 `caller` 缺席下跑，
+    读到的其实是 fail-closed 那条最窄分支，看着像通过其实没测它声称的那件事。
+    """
+
+    def __init__(self, core):
+        self._core = core
+
+    def list_tools(self):
+        return self._core.list_tools(caller=_ownerCaller())
+
+    async def call_tool(self, name, arguments=None):
+        return await self._core.call_tool(name, arguments, caller=_ownerCaller())
+
+
 def _agentWith(skills, agentId="b62agent"):
     agent = MagicMock(name="agent")
     agent._skill_registry = _Pool(skills)
@@ -76,7 +99,7 @@ class TestListTools:
         }
 
         # §6-352 裁乙：清单源改读**执行池**（agent 的那一份），构造期注入的第二份池子已删。
-        server = NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"translate": skill}))
+        server = _OwnerSession(NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"translate": skill})))
         tools = server.list_tools()
 
         names = [t["name"] for t in tools]
@@ -123,7 +146,7 @@ class TestCallTool:
 
         skill.execute = _trapExec
         # 清单源与执行源同那一份：技能只放在 agent 的执行池里（§6-352 裁乙）。
-        return NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"oracle": skill}))
+        return _OwnerSession(NeurovaMCPServer(storage=storage, agent_ref=_agentWith({"oracle": skill})))
 
     @pytest.fixture
     def throat(self, monkeypatch):
@@ -260,7 +283,7 @@ class TestSkillFaceSingleSourceAndParameterGate:
     def _core(self, skills):
         from neurova.tool_layers.mcp_server import NeurovaMCPServer
 
-        return NeurovaMCPServer(agent_ref=_agentWith(skills))
+        return _OwnerSession(NeurovaMCPServer(agent_ref=_agentWith(skills)))
 
     @pytest.fixture
     def throat(self, monkeypatch):
@@ -389,7 +412,7 @@ class TestTurnViewAssembledBeforeTheThroat:
         monkeypatch.setattr(sv, "build_turn_view", _build)
         monkeypatch.setattr(sv, "resolve_user_key", _resolve)
         monkeypatch.setattr("neurova.tool_executor.ToolExecutor.execute_skill_tool", _fakeThroat)
-        return NeurovaMCPServer(agent_ref=_agentWith(skills)), seen, built
+        return _OwnerSession(NeurovaMCPServer(agent_ref=_agentWith(skills))), seen, built
 
     async def testThroatSeesTheAssembledView(self, monkeypatch):
         """咽喉读到的必须正是本面刚装上去的那个视图——不是 None，也不是上一发的残留。"""
@@ -456,7 +479,7 @@ class TestTurnViewAssembledBeforeTheThroat:
         monkeypatch.setattr(sv, "resolve_user_key", lambda *a, **k: "u:alice")
         set_request_user_id("alice")
 
-        core = NeurovaMCPServer(agent_ref=_agentWith({}))
+        core = _OwnerSession(NeurovaMCPServer(agent_ref=_agentWith({})))
         out = await core.call_tool("skill:nope", {})
         assert out.get("isError") is True, out
         assert "当前会话不可用" in out["error"], out
@@ -472,6 +495,86 @@ class TestTurnViewAssembledBeforeTheThroat:
         assert out.get("isError") is True, out
         assert "可见" in out["error"] or "fail-closed" in out["error"], out
         assert seen["throatCalls"] == [], f"装配没成都把调用放进了咽喉：{seen['throatCalls']}"
+
+
+@pytest.mark.asyncio
+class TestCallerTierOpensOnlyDeclaredReadOnly:
+    """§6-355 末那张票裁乙：非属主／admin 之外，技能面只开**声明为只读**的那些。
+
+    这一族审的是授权层本身，所以刻意用裸核心（不经 `_OwnerSession`）：
+    夹具那层已经把 caller 钉成属主级，拿来审 tier 就是拿被试物当判据。
+    """
+
+    def _core(self, skills):
+        from neurova.tool_layers.mcp_server import NeurovaMCPServer
+
+        return NeurovaMCPServer(agent_ref=_agentWith(skills))
+
+    def _caller(self, mayDrive):
+        from neurova.tool_layers.mcp_server import McpCaller
+
+        return McpCaller(userId="someone", mayDriveAgent=mayDrive)
+
+    @pytest.fixture
+    def throat(self, monkeypatch):
+        calls = []
+
+        async def _fake(self_, skill_name, params, context=None):
+            calls.append(skill_name)
+            return {"success": True, "output": {"ran": skill_name}}
+
+        monkeypatch.setattr("neurova.tool_executor.ToolExecutor.execute_skill_tool", _fake)
+        return calls
+
+    def _readOnlySkill(self):
+        skill = _Skill("noteTaker", "只读技能")
+        skill.config = {"permissions": {"model": True}}
+        return skill
+
+    async def testNonPrincipalListShowsOnlyDeclaredReadOnly(self):
+        pool = {"noteTaker": self._readOnlySkill(), "file_operation": _Skill("file_operation", "文件操作")}
+        names = [tool["name"] for tool in self._core(pool).list_tools(caller=self._caller(False))]
+        assert names == ["skill:noteTaker"], names
+
+    async def testPrincipalListShowsBoth(self):
+        """控制格：窄层不是一刀切——属主／admin 那层维持全开。"""
+        pool = {"noteTaker": self._readOnlySkill(), "file_operation": _Skill("file_operation", "文件操作")}
+        names = [tool["name"] for tool in self._core(pool).list_tools(caller=self._caller(True))]
+        assert set(names) == {"skill:noteTaker", "skill:file_operation"}, names
+
+    async def testNonPrincipalCannotInvokeAnUndeclaredSkill(self, throat):
+        pool = {"file_operation": _Skill("file_operation", "文件操作")}
+        out = await self._core(pool).call_tool("skill:file_operation", {}, caller=self._caller(False))
+        assert out.get("isError") is True, out
+        assert "属主" in out["error"] or "admin" in out["error"], out
+        assert throat == [], f"授权层没拦在前面，咽喉已经收到这一发：{throat}"
+
+    async def testNonPrincipalCanInvokeDeclaredReadOnlySkill(self, throat):
+        pool = {"noteTaker": self._readOnlySkill()}
+        out = await self._core(pool).call_tool("skill:noteTaker", {}, caller=self._caller(False))
+        assert throat == ["noteTaker"], throat
+        assert out.get("isError") is not True, out
+
+    async def testListAndCallUseTheSamePredicate(self, throat):
+        """双向一致（§6-352 那一族的正解）：清单报得出的，调用不许被授权层拒；
+        被授权层拒的，清单里也不许出现。两个方向各跑一次，同一份 caller。"""
+        pool = {"noteTaker": self._readOnlySkill(), "file_operation": _Skill("file_operation", "文件操作")}
+        core = self._core(pool)
+        for mayDrive in (True, False):
+            caller = self._caller(mayDrive)
+            listed = {t["name"] for t in core.list_tools(caller=caller)}
+            for name in ("skill:noteTaker", "skill:file_operation"):
+                out = await core.call_tool(name, {}, caller=caller)
+                refusedByTier = "属主" in (out.get("error") or "")
+                assert (name in listed) != refusedByTier, (mayDrive, name, listed, out)
+
+    async def testAbsentCallerFailsClosed(self):
+        """caller 缺席 ⇒ 按最窄那层走：写侧技能不进清单，也不给调用。"""
+        pool = {"file_operation": _Skill("file_operation", "文件操作")}
+        names = [tool["name"] for tool in self._core(pool).list_tools()]
+        assert names == [], names
+        out = await self._core(pool).call_tool("skill:file_operation", {})
+        assert out.get("isError") is True, out
 
 
 @pytest.mark.asyncio

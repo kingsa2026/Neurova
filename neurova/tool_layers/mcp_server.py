@@ -53,6 +53,22 @@ def _mcpEnvelope(raw: Any) -> Dict[str, Any]:
     return {"isError": True, "error": "工具执行失败"}
 
 
+class McpCaller:
+    """这一发的调用方是谁、能不能驱动这个 agent——**按请求传入**的凭据对。
+
+    为什么是参数而不是 ContextVar 或单例字段：核心单例跨请求共享，把 per-request 的
+    授权态挂在它上面就是把上一发的身份漏进下一发（同一族见 §6-163 与那条 cancel scope
+    跨 task 的实测）。`mayDriveAgent` 由 API 层用**属主判定单源**算好交进来
+    （`agent_access.can_access_agent`，chat 执行门同一口径），本核心不参与口径定义。
+    """
+
+    __slots__ = ("userId", "mayDriveAgent")
+
+    def __init__(self, userId: str = "", mayDriveAgent: bool = False):
+        self.userId = userId
+        self.mayDriveAgent = mayDriveAgent
+
+
 class NeurovaMCPServer:
     """协议无关 MCP server 核心。
 
@@ -85,6 +101,23 @@ class NeurovaMCPServer:
         """技能面的唯一取池口——advertise 与执行都从这里取，两处不许各有来源。"""
         agent = self._resolve_agent()
         return getattr(agent, "_skill_registry", None) if agent is not None else None
+
+    @staticmethod
+    def _skillOpenTo(skill, caller) -> bool:
+        """这条技能对**这一发的调用方**开不开——清单与执行读的就是这一个谓词。
+
+        属主／admin（`caller.mayDriveAgent`）全开；其余只开**声明为只读**的技能
+        （`skillIsReadOnlyFace`，声明面仍是 `permissions` 那一份，本面不另立名单）。
+        `caller is None` ⇒ 按最窄那层走：无从判定就不给写侧能力，宁拒不错放。
+
+        §6-352 那次的教训就在这条里：清单与执行必须读同一个谓词，否则又会分裂成
+        「清单报了而调用被拒」与「清单没报而点名能跑」两个方向。
+        """
+        if caller is not None and caller.mayDriveAgent:
+            return True
+        from neurova.skills.permissions import skillIsReadOnlyFace
+
+        return skillIsReadOnlyFace(skill)
 
     @staticmethod
     def _skillDeclaration(skill) -> Dict[str, Any]:
@@ -150,8 +183,10 @@ class NeurovaMCPServer:
 
     # ── tools/list ────────────────────────────────────────────
 
-    def list_tools(self) -> List[Dict[str, Any]]:
-        """聚合能力清单（MCP tools 形态：name/description/inputSchema）"""
+    def list_tools(self, caller=None) -> List[Dict[str, Any]]:
+        """聚合能力清单（MCP tools 形态：name/description/inputSchema）。
+
+        `caller` 决定技能面开到哪一层（见 `_skillOpenTo`）——清单与执行读同一谓词。"""
         tools: List[Dict[str, Any]] = []
 
         if self._storage is not None:
@@ -180,6 +215,8 @@ class NeurovaMCPServer:
 
                 for name, raw in (getattr(pool, "skills", {}) or {}).items():
                     skill = unpack_skill(raw)
+                    if not self._skillOpenTo(skill, caller):
+                        continue
                     tools.append({
                         "name": f"{_SKILL_PREFIX}{name}",
                         "description": getattr(skill, "description", "") or f"技能 {name}",
@@ -218,7 +255,8 @@ class NeurovaMCPServer:
 
     # ── tools/call ────────────────────────────────────────────
 
-    async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None,
+                        caller=None) -> Dict[str, Any]:
         """按命名空间分派调用，**出口只归一次形**（`_mcpEnvelope`）。
 
         分派与信封解耦是这一格的根修处：三条腿各有各的失败写法（工作流回
@@ -228,12 +266,12 @@ class NeurovaMCPServer:
         """
         arguments = arguments or {}
         try:
-            return _mcpEnvelope(await self._dispatch(name, arguments))
+            return _mcpEnvelope(await self._dispatch(name, arguments, caller))
         except Exception as e:  # noqa: BLE001 — MCP 语义：错误也是响应
             logger.warning("MCP call_tool %s 失败: %s", name, e)
             return {"isError": True, "error": str(e)}
 
-    async def _dispatch(self, name: str, arguments: Dict[str, Any]) -> Any:
+    async def _dispatch(self, name: str, arguments: Dict[str, Any], caller=None) -> Any:
         """命名空间分派——只管"交给谁执行"，不管"回什么形状"。"""
         if name.startswith("workflow:"):
             from neurova.collaboration.neurflow.workflow_as_tool import execute_workflow_as_tool
@@ -246,7 +284,7 @@ class NeurovaMCPServer:
             )
 
         if name.startswith(_SKILL_PREFIX):
-            return await self._call_skill(name[len(_SKILL_PREFIX):], arguments)
+            return await self._call_skill(name[len(_SKILL_PREFIX):], arguments, caller)
 
         if name.startswith("computer_") or name == _RUN_COMPUTER_TASK:
             return await self._call_computer(name, arguments)
@@ -254,7 +292,7 @@ class NeurovaMCPServer:
         # 无前缀：按执行池里的技能名归一尝试（宽容匹配存量调用习惯）
         pool = self._skillPool()
         if pool is not None and name in (getattr(pool, "skills", {}) or {}):
-            return await self._call_skill(name, arguments)
+            return await self._call_skill(name, arguments, caller)
 
         return {"isError": True, "error": f"未知 MCP 工具: {name}"}
 
@@ -333,7 +371,7 @@ class NeurovaMCPServer:
                 logger.debug("MCP 技能腿库副本物化失败（视图仍在，越权面不受影响）", exc_info=True)
         return token
 
-    async def _call_skill(self, skill_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def _call_skill(self, skill_name: str, arguments: Dict[str, Any], caller=None) -> Dict[str, Any]:
         """技能腿一律走 `ToolExecutor.execute_skill_tool` 那道咽喉，无 agent 即拒。
 
         咽喉上挂着四件本面补不出的事：轮级可见门（Wave H-W2）、声明式权限作用域
@@ -359,9 +397,18 @@ class NeurovaMCPServer:
         from neurova.tool_executor import ToolExecutor
 
         pool = self._skillPool()
-        gate = self._gateSkillArguments(
-            skill_name, pool.get_skill(skill_name) if pool is not None else None, arguments
-        )
+        skill = pool.get_skill(skill_name) if pool is not None else None
+        # 查无此技能名时**不做身份层判定**：那种场合的正确答案是"不存在"，由咽喉给，
+        # 本层的话（"属写侧能力面"）会把调用方引向一个并不存在的技能上。
+        if skill is not None and not self._skillOpenTo(skill, caller):
+            return {
+                "isError": True,
+                "error": (
+                    f"技能 {skill_name} 属写侧能力面，需该 agent 的属主或 admin 身份调用"
+                    "（非属主只开放声明为只读的技能）"
+                ),
+            }
+        gate = self._gateSkillArguments(skill_name, skill, arguments)
         if gate is not None:
             return gate
 

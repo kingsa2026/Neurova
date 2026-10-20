@@ -79,30 +79,63 @@ def _get_mcp_server():
 _MCP_SERVER = None
 
 
-async def _onListTools(_ctx, _params) -> ListToolsResult:
-    """清单逐字段交给核心——运输侧不攒第二份（教义第 6 条）。"""
-    entries = _get_mcp_server().list_tools()
-    return ListToolsResult(tools=[
-        Tool(
-            name=str(entry["name"]),
-            description=str(entry.get("description", "")),
-            inputSchema=dict(entry.get("inputSchema") or {"type": "object", "properties": {}}),
-        )
-        for entry in entries
-    ])
+def _listToolsHandler(caller):
+    """清单逐字段交给核心——运输侧不攒第二份（教义第 6 条）。
+
+    `caller` 从外面递进来，不在这里现取：这一发的身份是 per-request 的，
+    挂到跨请求共享的核心单例上就是把上一发的授权漏进下一发。
+    """
+
+    async def _onListTools(_ctx, _params) -> ListToolsResult:
+        entries = _get_mcp_server().list_tools(caller=caller)
+        return ListToolsResult(tools=[
+            Tool(
+                name=str(entry["name"]),
+                description=str(entry.get("description", "")),
+                inputSchema=dict(entry.get("inputSchema") or {"type": "object", "properties": {}}),
+            )
+            for entry in entries
+        ])
+
+    return _onListTools
 
 
-async def _onCallTool(_ctx, params) -> CallToolResult:
-    outcome = await _get_mcp_server().call_tool(str(params.name), dict(params.arguments or {}))
-    if outcome.get("isError"):
+def _callToolHandler(caller):
+    async def _onCallTool(_ctx, params) -> CallToolResult:
+        outcome = await _get_mcp_server().call_tool(str(params.name), dict(params.arguments or {}), caller=caller)
+        if outcome.get("isError"):
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(outcome.get("error", "tool error")))],
+                isError=True,
+            )
+        payload = outcome.get("result") if "result" in outcome else outcome
         return CallToolResult(
-            content=[TextContent(type="text", text=str(outcome.get("error", "tool error")))],
-            isError=True,
+            content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, default=str))],
+            isError=False,
         )
-    payload = outcome.get("result") if "result" in outcome else outcome
-    return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, default=str))],
-        isError=False,
+
+    return _onCallTool
+
+
+def _callerPrincipal(current_user) -> McpCaller:
+    """把"这一发能不能驱动这个 agent"算成**一个布尔**交给核心，口径不在这文件里定义。
+
+    判定用的是平台唯一那份属主源 `agent_access`（admin 全量／owner 匹配／无主仅 admin），
+    与 `chat` 的执行门同源——两处各写一份就必然漂移（§6-355 末那张票要的就是这个）。
+    agent 身份经 `defaultAgentId()` 现取，与核心的 agent provider 同一个读点。
+    """
+    from neurova.api.agent_access import can_access_agent, resolve_agent_owner
+    # `neurova.agent` 包 __init__ 链回 tool_executor，端点模块级 import 会拉循环（AGENTS.md §3）
+    from neurova.api.endpoints import defaultAgentId
+    from neurova.tool_layers.mcp_server import McpCaller
+
+    user = current_user or {}
+    userId = str(user.get("user_id") or "")
+    role = str(user.get("role") or "user")
+    agentId = defaultAgentId()
+    return McpCaller(
+        userId=userId,
+        mayDriveAgent=can_access_agent(userId, role, resolve_agent_owner(agentId)),
     )
 
 
@@ -161,13 +194,17 @@ class _StatusCodeFix:
         await self._send({"type": "http.response.body", "body": fixed})
 
 
-def _newServer() -> Server:
-    """一份低层 server：两个 handler 全部现取核心单例，运输侧不攒第二份清单。"""
+def _newServer(caller=None) -> Server:
+    """一份低层 server：两个 handler 全部现取核心单例，运输侧不攒第二份清单。
+
+    `caller` 是 per-request 的授权凭据，随 closure 进来（不是挂到核心单例上）——
+    §6-352 实测过的形状就是"任何持平台令牌者可对默认 agent 的执行池任意点名"。
+    """
     return Server(
         _SERVER_NAME,
         version=_SERVER_VERSION,
-        on_list_tools=_onListTools,
-        on_call_tool=_onCallTool,
+        on_list_tools=_listToolsHandler(caller),
+        on_call_tool=_callToolHandler(caller),
     )
 
 
@@ -220,7 +257,8 @@ class _McpFaceAsgi:
         set_request_user_id((current_user or {}).get("user_id") or None)
 
         manager = StreamableHTTPSessionManager(
-            app=self._serverFactory(), stateless=True, json_response=True
+            app=self._serverFactory(_callerPrincipal(current_user)),
+            stateless=True, json_response=True
         )
         async with manager.run():
             await manager.handle_request(scope, receive, _StatusCodeFix(send))
