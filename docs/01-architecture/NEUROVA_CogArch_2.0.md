@@ -2,6 +2,12 @@
 
 > **设计理念**：大脑（认知核）+ 小脑（执行引擎）+ 手脚（功能壳）的完美协同！
 
+> **【沿革档案 · 2026-10-20 复核】** 本文件是 **2026-05-12 的设计快照**，`docs/INDEX.md` 已将其标为
+> **历史**。**§8.2 状态列不可作事实源**：该表 70 条 `neurova/` 路径中 **44 条在 2026-10-20 已不存在**
+> （`neurova/memory/core/*` 旧布局 36 条、`neurova/projects/*` 5 条、已退役 3 条），另有在役件被标
+> `❌ 待实现`。现役架构见 [`02-memory-system.md`](02-memory-system.md) 与
+> [`memory/retrieval-spine.md`](memory/retrieval-spine.md)；本档的问题与处置见台账 §6-362（D9）。
+
 ---
 
 ## 版本历史
@@ -3067,6 +3073,11 @@ CogArch 2.0 架构          现有 Neurova 模块
 ---
 
 ### 8.2 详细映射表
+
+> **沿革快照，勿据此判断现状**：下表保留 2026-05-12 的映射原貌（个别行已被后续批次标注退役）。
+> 2026-10-20 复算：70 条路径中 44 条不存在，`ToolEngine`／`ExecutionMonitor` 标 `❌ 待实现` 但前者在役、
+> 后者为只有读侧的空壳（D1）。现役清单见 `docs/01-architecture/02-memory-system.md` 与
+> `docs/01-architecture/memory/retrieval-spine.md`。
 
 | CogArch 2.0 位置 | 现有文件路径 | 模块名 | 状态 | 说明 |
 |----------------|------------|-------|------|------|
