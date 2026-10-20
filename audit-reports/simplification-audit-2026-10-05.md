@@ -8496,7 +8496,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       （`get_template_manager()` 只剩门面再导出，生产侧零）、`dream_reports` 表（无写侧无读侧，删表是数据动作）、
       §6-293（远端 schema 声明能否采信，推荐乙）、D1 甲／乙、D9、D10、
       §6-355 末那张内置面授权票（推荐乙）；另有两条非拍板项待独立批次：D19 第三例的可达闭包扫
-      （〔已扫净＝§6-357，第三例存在〕）、`scripts/ab_compare.sh` 缺件。
+      （〔已扫净＝§6-357，第三例存在〕）、`scripts/ab_compare.sh` 缺件（〔已落地＝§6-359，
+      形态改判为 `scripts/ci/ab_baseline.py`〕）。
     - **本会话下一枚空号现查 §6-357**（写前必须现场重取；本笔落库时该读数为 356）。
 
 357. **D19 待扫面收口：可达闭包扫跑通，第三例确实存在——11 档 2412 行；四条是探测器自己造的假阳性，逐条当场改掉才敢说扫过** ✅⚪ —— 纯扫描，未动一行代码，探针即用即删
@@ -8569,7 +8570,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       子集现值不变 **648**。
     - **仍开**：等裁八条照旧（§6-353 权威快照 ＋ §6-356 末那一行）；新增两条排期——
       11 档死岛的逐档五字段档案（按事件切批：先 `ede49184` 那一族 6 档，再 `34b080eb`/`112dbb4f` 两档，
-      最后带鉴权/设计文档的 `redundancy` 与 `docker_builder`）；`scripts/ab_compare.sh` 缺件。
+      最后带鉴权/设计文档的 `redundancy` 与 `docker_builder`）；`scripts/ab_compare.sh` 缺件
+      （〔已落地＝§6-359，形态改判为 `scripts/ci/ab_baseline.py`〕）。
     - **本会话下一枚空号现查 §6-358**（写前必须现场重取；本笔落库时该读数为 357）。
 358. **§6-355 末那张内置面授权票落地（裁乙）：技能面按调用方身份分层，非属主只开放声明为只读的技能** ✅🟢 —— 一笔：`700137e0`（代码＋判据），本格另带子集登记一行
     - **落的哪一格**：§6-355 开的那张票（"甲治不全的那一半"）用户裁**乙：按身份收口**，并裁"只读判据落在 `permissions.py` 的声明面上，不许在 MCP 面手写名单"。
@@ -8614,3 +8616,84 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       子集现值 **648→649**。
     - **仍开**：本格末那条"内置技能要不要补声明"（需人裁）；其余等裁票照旧。
     - **本会话下一枚空号现查 §6-359**（写前必须现场重取；本笔落库时该读数为 358）。
+
+359. **宽域 A/B 驱动落地（把"缺件"那条账结掉）：`scripts/ci/ab_baseline.py`，四种标记＋两道对账闸** ✅🟢 —— 一笔：代码＋判据＋子集一行
+    - **结的是哪笔账（并且先把自己的旧定性改判一遍）**：§6-353 与 §6-356 的「仍开」里那条非拍板
+      待办——`scripts/ab_compare.sh` 缺件。最早记它时写的是"Skill 把一个 A/B 脚本当既有基建引用而仓内
+      没有"（§6-240 那次：按仓根路径调用 ⇒ `No such file or directory`，命令尾接 `tail` 又把退出码
+      读成 0，于是"A/B 跑过了"是假的）。本批现读复核发现**说法要改**：脚本一直存在，只是存在
+      Skill 自己的 resources 里（`~/.qoder-cn/skills/neurova-repair-batch-pipeline/scripts/ab_compare.sh`，
+      194 行），而调用方每次都按**仓根**路径 `bash scripts/ab_compare.sh` 去起它。所以根因不是
+      "没有实现"，是**工具落点与被调用的那一侧不同源**——飘在会话资源里的基建，换一台机器、换一个
+      会话就不在场，而且它不参与仓内任何判据。形态集 220/221（"文档给的路径也要现读存在性"）在
+      这里的正确读法是：**现读也要现读到哪一侧**。形态集 226/280 那句
+      「`scripts/ab_compare.sh` 都不可用（脚本缺件）」自本笔起改判为"在会话资源里、不在仓里"，
+      并以本脚本为事实源。
+    - **于是选定事实源**：仓内这份（`scripts/ci/ab_baseline.py`）带常驻判据、进 CI 受保护子集、
+      能红能绿能被变异咬；Skill 那份自此为 **superseded**。两份并存本身就是教义第 6 条点名的形态，
+      收口方式是**改指**而不是删除——Skill 属用户资源，删它要用户点头，这里只把旧路径登记为待改：
+      其速查行与 Resources 行仍写着 `bash scripts/ab_compare.sh`（该文件 71 与 195 行两处），
+      下次授权时改指 `.venv/Scripts/python.exe scripts/ci/ab_baseline.py`。
+    - **落地形态改判（不照登记名做 `.sh`，三条实据）**：
+      ①本仓另有一个**生产符号** `ab_compare`（`neurova/evolution/service.py` 的双臂试评，台账里
+      十几处以 `ab_compare` 指它）——同一个词在一仓之内指两样东西，是教义第 6 条的命名面；
+      ②常驻判据要能在 Windows 与 CI 两种宿主上用**本仓唯一跑测解释器**跑起来，不该赌 PATH 里有 bash
+      （本仓既有入口形态就是 `scripts/ci/*.py`，如 `audit_ledger_commit_guard.py`）；
+      ③§6-332 记过 MSYS 的 `TMPDIR`/`MSYS_NO_PATHCONV` 坑：bash 侧与原生 git 侧把同一个 `/tmp/...`
+      解析成两个目录，基线树于是只剩铺进去的那两格、pytest 报"目录不存在"——那是 shell 形态自带的
+      宿主耦合。Python 侧不做路径转换，这一类坑从形制上消失。
+    - **红→绿（原文）**：红 **19 failed**（`collected 19 items`，不是收集期错误；其中
+      `TestTheScriptIsTheMissingPiece::test_scriptExistsAndIsTracked` 就是缺件那一格的行为断言
+      `A/B 驱动不在场：…\scripts\ci\ab_baseline.py`）→ 绿 **20 passed / collected 20**。
+      多出的第 20 格是写绿过程中当场补的宿主差集（见下条）。
+    - **三枚变异，一枚起初打空**：
+      A′ 把汇总行取法改回**裸锚** `^\s*\d+ (failed|passed)` ⇒ **4 格红**（含那条专门反检"锚法会 0 命中"
+      的格）；第一版 A 打空——我在变异里顺手 `lstrip('= ')`，把包裹符先吃了，锚法在夹具上照样命中，
+      于是 20 格全绿（239 那一形：**反证没红先怀疑针**），换成忠实复现台账 0 命中的写法才咬住。
+      B 摘掉两道对账闸 ⇒ **2 格红**；C 摘掉 stdout 编码钉 ⇒ 那枚 cp936 格红在
+      `UnicodeEncodeError` 上。三枚都在主树内做、`cp` 备份＋md5 逐字节复证还原（值 cca234f7f788；
+      这里**不加反引号**——反引号在本档等于可达性宣称，会被 `audit_ledger_commit_guard.py` 当 commit 号抓走）。
+    - **本批自己踩上的那枚宿主坑（写下来比写成功有用）**：驱动初版往管道里打一个 `↔`，
+      Windows 默认 cp936 ⇒ `UnicodeEncodeError`、退出码 1、stdout 空——**红指向脚本自己而不是被测行为**
+      （269 那一族的第二次复现，这次是新工具自己中招）。修法在产生侧：脚本进入即
+      `stream.reconfigure(encoding="utf-8", errors="replace")`（与 `tests/manual/*` 既有那一行同口径，
+      不另造写法），并配一格差分：`PYTHONIOENCODING=gbk` 下必须仍出 `AB_PASS` 且退出码 0。
+    - **判据 20 格（新档 `tests/unit/ci/test_abBaselineDriverReadings.py`，已入子集）**：
+      取数口两种汇总形态＋无汇总行不作绿＋NUL 字节不盲＋失败集按抽取不按条数；对账两道闸
+      （报 8 抽 0＝口径失效、报数≠抽取数即红）；判流四形（两侧同集＝PASS、仅本树红基线复跑
+      全绿＝REGRESSION、复跑皆红＝预存 PASS、基线找不到节点＝FAIL）；合成仓端到端各一枚
+      **AB_PASS／AB_REGRESSION／AB_FAIL／AB_SKIP**（真 `git worktree`＋真 pytest 子进程）；
+      外加 `--json` 机器可读读数那格。没有"两侧同红自动复跑"那维——见末条边界。
+    - **活体（拿真仓真跑一次，不是夹具）**：
+      `.venv/Scripts/python.exe scripts/ci/ab_baseline.py -k HEAD -n 2 -c tests/unit/ci/test_abBaselineDriverReadings.py -- tests/unit/ci/test_ci_protected_subset_nightly.py`
+      ⇒ `AB_PASS｜基线 {failed:0, passed:10, errors:0} ↔ 本树 {failed:0, passed:10, errors:0}｜
+      仅本树红 0 条｜其中预存 0 条（各复跑 2 次）｜仅基线红 0 条`，跑完 `git worktree list` 里
+      本批那颗已摘除、临时根随 `--tmp` 未给而自清（两侧都不许留残留，244 那一族的边界：
+      只删本会话建的路径）。
+    - **本批判据自己也被自家闸咬了两次（这就是那些闸的价值，不是噪声）**：
+      ①`test_subprocessTextEncodingRatchet::test_ratchetDoesNotRise` 与
+      `test_halfPinnedPythonChildSitesMatchTheCountedBaseline` 当场点名我的新档——三处起子进程只钉了
+      父端 `encoding=` 没钉子端 `PYTHONIOENCODING`（半修），另两处连父端都没钉（`git ls-files`
+      与合成仓里的 `git` 调用，本仓路径含中文，这两处正是会静默毁读数的形状）。
+      修法全在判据侧补钉，**不动那道棘轮、不往基线里加行**；那枚故意测 cp936 的格保留
+      `PYTHONIOENCODING=gbk`（闸问的是键在不在，不问值），所以它既合规又仍然是差分。
+      ②同一轮里 `tests/unit/ci` 整卷第一次跑出 **7 failed**：5 条是已登记的 node `ncrypto::CSPRNG`
+      环境侧常驻红，2 条就是我自己的编码落点——**先把"我的"从"环境的"里分出来再说话**（309 那一形：
+      复取要带整卷，不然别人改过的目录里的红三批都不露面，而我新造的红也会被顺手记成常驻）。
+    - **旁路与常驻守卫**：`tests/unit/test_dev_path_and_runtime_dep_guards.py`＋
+      `test_ci_protected_subset_nightly.py`＋`test_scanCriterionMustProveItsOwnSurfaceRatchet.py`
+      三档 **101 passed**；修完编码落点后新档＋编码棘轮＋扫描面单源三档 **53 passed**；
+      `tests/unit/ci/` 整卷＋dev-path 守卫＋纪律守卫的 collateral 终读数 **5 failed / 517 passed /
+      2 skipped（2:05）**——5 条全部是 `test_npc_script_interpreter_reachability.py` 那族 node
+      `ncrypto::CSPRNG` 环境侧在册常驻红（本批未新增 offender、未升任何基线），
+      本批自己引入的那 2 条已按上条修净。
+    - **没做的那一维（登记，不静默遗留）**：驱动今天只比 `FAILED`/`ERROR` **集合**并做条数对账；
+      **两侧同红**（顺序/集合效应、间歇抖动）仍按判读口径人工处置，没做成自动复跑；`-n` 复跑
+      只覆盖"仅本树红"那一支。要把它也做成机器判定，得先有一条"同红条目回基线单跑 N 次"的
+      第二次集合比对口径——那是另一批的量级。
+    - **净 LOC**：生产池 0/0；测试/基建池 +589/−2 ＝ 净 +587（逐档去向＝驱动 `ab_baseline.py` 237、
+      判据新档 262、子集登记 5、台账本格 85；删的 2 行都是 §6-356/§6-357 就地勘正那两条原文行）。
+      子集现值 **649→650**；生产池零改动，故不触任何生产路径的回归面。
+    - **就地划闭**：§6-356 与 §6-357「仍开」里那条 `scripts/ab_compare.sh` 缺件由本笔结清
+      （原文不回改，指向本格）；Skill 速查表与项目记忆里的旧路径同批改指本脚本。
+    - **本会话下一枚空号现查 §6-360**（写前必须现场重取；本笔落库时该读数为 359）。
