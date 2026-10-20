@@ -175,7 +175,7 @@ class TestPromisesSurviveTheSwap:
         ]
 
         class _Stub(NeurovaMCPServer):
-            def list_tools(self):
+            def list_tools(self, caller=None):
                 return list(stub)
 
         monkeypatch.setattr(mcp_server_api, "_get_mcp_server", lambda: _Stub())
@@ -192,7 +192,7 @@ class TestPromisesSurviveTheSwap:
         seen = {}
 
         class _Spy(NeurovaMCPServer):
-            async def call_tool(self, name, arguments=None):
+            async def call_tool(self, name, arguments=None, caller=None):
                 seen["name"] = name
                 seen["arguments"] = dict(arguments or {})
                 return {"success": True, "result": {"echo": name}}

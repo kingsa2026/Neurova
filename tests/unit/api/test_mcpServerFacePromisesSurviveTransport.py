@@ -65,14 +65,14 @@ def recordingServer(monkeypatch):
             super().__init__(storage=None)
             self.calls = []
 
-        def list_tools(self):
+        def list_tools(self, caller=None):
             return list(_CORE_TOOLS)
 
-        async def call_tool(self, name, arguments=None):
+        async def call_tool(self, name, arguments=None, caller=None):
             self.calls.append((name, dict(arguments or {})))
             if name == "skill:summarize":
                 return {"success": True, "result": "ok"}
-            return await super().call_tool(name, arguments)
+            return await super().call_tool(name, arguments, caller=caller)
 
     server = _Recording()
     monkeypatch.setattr(mcp_server_api, "_get_mcp_server", lambda: server)

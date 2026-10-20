@@ -176,3 +176,60 @@ class TestCapabilityCheck:
         assert p.allows_file_read
         assert not p.allows_file_write
         assert not p.model_enabled
+
+
+class TestReadOnlyFaceJudgment:
+    """跨类**只读**判定（`isReadOnlyFace`）——MCP 导出面对非属主调用方放行与否就判这一次。
+
+    逐类别给理由，不靠"名字看起来是读"：`network` 类里同时装着
+    `browser_navigate/browser_click/browser_type`（用公共口 `tool_categories` 复核），
+    按类别粒度判定时整类不算只读；只有 `model` 与 file 的读子集是读侧。
+    """
+
+    def test_empty_declaration_is_not_read_only(self):
+        """无声明不等于只读——外部面按 fail-closed 处理，宁拒不错放。"""
+        assert not SkillPermissions().isReadOnlyFace()
+
+    def test_model_only_declaration_is_read_only(self):
+        assert SkillPermissions.from_dict({"model": True}).isReadOnlyFace()
+
+    def test_file_read_subset_is_read_only(self):
+        p = SkillPermissions.from_dict({"file": {"read_only": True}})
+        assert p.file_read_only and not p.file
+        assert p.isReadOnlyFace()
+
+    def test_file_full_writes_are_not_read_only(self):
+        assert not SkillPermissions.from_dict({"file": {"enabled": True}}).isReadOnlyFace()
+
+    def test_network_is_not_read_only_because_the_category_carries_writes(self):
+        """这一条是本判定最容易想错的地方：`web_search` 看着是读，但它所在的
+        `network` 类含 `browser_click/type/fill`，类别粒度下不许当只读放行。"""
+        assert "network" in tool_categories("browser_click"), "前提变了要重判这一格"
+        assert not SkillPermissions.from_dict({"network": True}).isReadOnlyFace()
+
+    def test_system_and_node_and_storage_are_write_side(self):
+        for raw in ({"system": True}, {"node": True}, {"storage": {"enabled": True}}):
+            assert not SkillPermissions.from_dict(raw).isReadOnlyFace(), raw
+
+    def test_mixed_declaration_takes_the_widest_side(self):
+        """只读＋写侧同时出现 ⇒ 整体算写侧（判定不许"有一项读就算读"）。"""
+        p = SkillPermissions.from_dict({"model": True, "system": True})
+        assert p.model and not p.isReadOnlyFace()
+
+    def test_explicit_tool_allowlist_alone_is_not_read_only(self):
+        """`tools` 白名单能点到任何工具，声明里出现它就不可能被证明"只含读侧"。"""
+        p = SkillPermissions.from_dict({"tools": ["memory_search"]})
+        assert p.tools is not None and not p.isReadOnlyFace()
+
+    def test_skill_level_helper_follows_the_declaration_not_the_name(self):
+        """技能级入口只读 `config.permissions`，不看技能名字——名单不在这里造。"""
+        from neurova.skills.permissions import skillIsReadOnlyFace
+
+        class _S:
+            def __init__(self, config):
+                self.config = config
+
+        assert skillIsReadOnlyFace(_S({"permissions": {"model": True}}))
+        assert not skillIsReadOnlyFace(_S({"permissions": {"file": {"enabled": True}}}))
+        assert not skillIsReadOnlyFace(_S({})), "无声明 ⇒ 不是只读"
+        assert not skillIsReadOnlyFace(None), "查无此技能 ⇒ 不许判成只读后放给非属主"
