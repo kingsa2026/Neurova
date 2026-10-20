@@ -58,7 +58,7 @@ def _faceFor(monkeypatch, user_id: str, workflowName: str):
         def __init__(self):
             super().__init__(storage=None)
 
-        def list_tools(self):
+        def list_tools(self, caller=None):
             return [{"name": workflowName, "description": "w", "inputSchema": {"type": "object"}}]
 
     monkeypatch.setattr(mcp_server_api, "_get_mcp_server", lambda: _Server())

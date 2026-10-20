@@ -253,6 +253,33 @@ class SkillPermissions:
     def allows_file_write(self) -> bool:
         return self.file
 
+    #: 写侧能力位（跨类只读判定的唯一出处）。逐类给理由，不靠"名字看起来是读"：
+    #: - `network`：这一类里同时装着 `browser_navigate/browser_click/browser_type/
+    #:   browser_fill*`（`_CATEGORY_TOOLS` 可复核），按类别粒度判定时不许整类当只读；
+    #: - `file`：全量文件面（`file_read_only` 那条读子集另算）；
+    #: - `system`：桌面动作族＋`run_code`/`spawn_subagent`，改的是共享本机状态；
+    #: - `node`：反调工作流 agent，副作用在另一个执行体里；
+    #: - `storage`：配额即写入量声明。
+    #: 剩下 `model`（tts/asr：不改共享状态，产物属本回合）与 `file` 的读子集算读侧。
+    _WRITE_SIDE_FLAGS = ("network", "file", "system", "node", "storage")
+
+    def isReadOnlyFace(self) -> bool:
+        """这份**声明**是否只含读侧能力。
+
+        口径与 `parse_permissions` 的 None 语义咬合：**无声明不等于只读**——存量技能维持
+        旧行为是靠治理预检兜底，那是对内的兜底，不能当成"对外可放心给非属主"的凭据。
+        所以判定只认"声明里开过什么"，空声明在这里返回 False（fail-closed 给外部导出面用）。
+        """
+        if not any((self.network, self.file, self.file_read_only,
+                    self.model, self.system, self.node, self.storage,
+                    self.tools is not None)):
+            return False
+        # 显式工具白名单**能指到任何工具**（含写侧），所以它的存在本身就使"只含读侧"
+        # 无法被证明——判定不许因为"这次列的是 memory_search"就放行这一类声明。
+        if self.tools is not None:
+            return False
+        return not any(getattr(self, flag) for flag in self._WRITE_SIDE_FLAGS)
+
 
 # 别名
 SkillPermissionModel = SkillPermissions
@@ -285,6 +312,22 @@ def check_tool_permission(permissions_raw: Any, tool_name: str) -> Optional[str]
         return None
     cat = "/".join(sorted(tool_categories(tool_name))) or "platform"
     return f"工具 {tool_name} 未在技能权限声明中授权（分类={cat}）"
+
+
+def skillIsReadOnlyFace(skill: Any) -> bool:
+    """**一个技能整体**是否只含读侧能力——外部导出面对非属主调用方放行与否就判这一次。
+
+    取数走技能自己的 `config.permissions`（与治理预检、`skill_system` 注册回填同一份声明，
+    不在调用方另立名单，教义 第 6 条）。语义是三层里最窄的那层：
+    无声明 → False；声明里开过任一写侧类别 → False；只开 model 与/或 file 读子集 → True。
+    """
+    if skill is None:
+        return False
+    config = getattr(skill, "config", None)
+    if not isinstance(config, dict):
+        return False
+    perms = parse_permissions(config.get("permissions"))
+    return bool(perms and perms.isReadOnlyFace())
 
 
 # ── 调用面作用域（治理预检的声明仲裁入口） ──────────────────
