@@ -8982,3 +8982,42 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明；
       本批新增待档：零读者 6 档（2807 行）与仅测试 6 档（2067 行）。
     - **本会话下一枚空号现查 §6-367**（写前必须现场重取；本笔落库时该读数为 366）。
+
+367. **认知层"零读者"6 档五字段档案出卷：5 档需人裁、仅 1 档可径删；两档被反向守卫钉死** ✅⚪ —— 只读档案，未动一行代码
+    - **产出**：`audit-reports/cognitive-layer-zero-reader-dossier-2026-10-20.md`。6 档共 **2807 行**：
+      `explainability` 646／`proactive_question` 940／`relation_mixin` 400／
+      `forgetting_recovery_storage_mixin` 347／`emotion_adapter` 241／
+      `modules/emotion_conduction_module` 233。
+    - **判定**：**需人裁 5 档**（Z1/Z2/Z3/Z4/Z6）＋ **删 1 档**（`emotion_adapter`：8 个方法 100% 转发到
+      活实现 `memory_layer/emotion.py:101`（`api/endpoints/memory/emotion.py:157`、
+      `tool_executor.py:5381` 直连），净增能力为零，唯一"独有"的是 `_analyze_legacy` 玩具分支
+      与一个 ImportError 恒返 neutral 的假成功兜底）。
+    - **"零读者"的三条补查（静态表看不见的那一层，本批逐条做掉）**：
+      ①**mixin 有没有被动态组合**——✅ 全仓复算：`RelationMixin`／`ForgettingRecoveryStorageMixin`
+      除自身文件外只有 `tests/unit/memory/test_storage_comprehensive.py:685` 一句**注释**提到，
+      无 `type()`/`__init_subclass__`/`__mro_entries__`/字符串注册/`exec` 装配；
+      ②**`proactive_question` 的动态装载**——✅ 它在 `neurova/memory/__init__.py` 的 `_MODULE_MAP` 里经
+      `importlib.import_module` 装成 `sys.modules["neurova.memory.proactive_question"]` 别名
+      ⇒ **"静态零 import"成立、"从没 import 过"不成立**；但别名装载不产生符号读取，组件表定性不变；
+      ③**反向守卫**——✅ `test_memoryLayerGenerationResidue.py` 的 `PENDING`（:57）**专门钉住
+      `relation_mixin` 与 `forgetting_recovery_storage_mixin`**："仍在位（未裁不许删）且仍零消费者
+      （不许偷偷接线后再裁）"，该档在受保护子集 `scripts/ci/protected_tests.txt:2143`。
+      ⇒ 这两档处置**必须**走人裁，且裁后同批改该守卫与台账 §6-113（那格是"防裁决未下代码先没"的反向守卫）。
+    - **两条能力题的实质**（为什么不是"接线补调用"）：`explainability` 的写侧
+      `start_chain/add_step` 在生产零调用（`manager.py:4353` 委托的是另一个扁平模块
+      `modules/explainability_module`；`chat_pipeline` 里那几处 `add_step` 是 `reasoning_trace_manager`
+      的同名不同物）；`proactive_question` 的 `_knowledge_gaps` 无写点、`:459` 恒 0.5、`:474` 恒 `[]`；
+      `emotion_conduction_module` 的 `set_emotion/add_association` 零调用方。
+      三档若接，都是**补整条写侧**，属新能力工作。
+    - **一处子代理误判就地更正**：子代理报"`neurova/channels/builtin/emotion.py` 不存在"——
+      实读是 `cognitive_layers/memory_layer/channels/builtin/emotion.py`（2595 B）**存在且是活通道**
+      （`BUILTIN_CHANNELS` 之一），它查的是漏了包前缀的另一条路径。该误判不影响
+      "记忆间情感传导无替代"的结论（通道只做情感匹配，不做邻居扩散）。**◑ 不得整段直接进主表**，
+      这一条再次验证。
+    - **处置次序（写进档案）**：Z5（`emotion_adapter`）可先做；Z3/Z4 必须先人裁且同批改守卫；
+      Z1/Z2/Z6 先答"要不要这项能力"再谈接。**本批未动任何代码与测试。**
+    - **净 LOC**：生产池 0/0；测试/基建池 +192/−0（档案 153 行＋本格 39 行）。
+      子集现值不变 **651**。
+    - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明；
+      本批新增待裁：Z1/Z2/Z3/Z4/Z6 五档的能力去留（Z5 待点单执行）。
+    - **本会话下一枚空号现查 §6-368**（写前必须现场重取；本笔落库时该读数为 367）。
