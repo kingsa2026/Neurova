@@ -9021,3 +9021,42 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明；
       本批新增待裁：Z1/Z2/Z3/Z4/Z6 五档的能力去留（Z5 待点单执行）。
     - **本会话下一枚空号现查 §6-368**（写前必须现场重取；本笔落库时该读数为 367）。
+
+368. **Z5 落地：`emotion_adapter` 退役——241 行纯转发门面删净，能力全落在在役的 `EmotionAnalyzer`** ✅🟢 —— 一批：删码＋两处活文档＋组件表重生成＋判据＋子集
+    - **落的是哪一格**：§6-367 档案里唯一判「删」的那档（Z5）。依据：8 个方法 1:1 转发到
+      `memory_layer/emotion.py:101 EmotionAnalyzer`，后者被 `api/endpoints/memory/emotion.py:157` 与
+      `tool_executor.py:5381` 直连；适配器净增能力为零，唯一"独有"的是 `_analyze_legacy` 玩具分支与
+      ImportError 恒返 neutral 的假成功兜底（教义第 2 条点名的形态）。
+    - **动的四类面**：①删 `neurova/cognitive_layers/memory_layer/emotion_adapter.py`（241 行，真删除）；
+      ②`docs/01-architecture/15-emotion-resonance-engine.md` 的实现映射表改指 `emotion.py` ＋退役更正块；
+      ③`docs/README.md:58` 的"三层添加"改为两层（原适配器层已退役）；④组件表 `--write` 重生成：
+      **106→105 模块、45134 行、零读者 6→5**（在役 55／仅层内 39／仅测试 6 不变）。
+    - **红→绿**：新判据 4 格先 **2 failed / 2 passed**（文件仍在＋活文档仍指向它；正控格一开始就绿——
+      转发目标八方法齐全）→ 删码与改文档后 **4 passed**；连同组件表判据一次 **13 passed**。
+    - **红自证（并抓出我自己的一次半删状态）**：把适配器临时 `git checkout HEAD --` 还原后复跑，
+      **恰 1 格红**（`test_adapterFileIsGone`）——但同一个 `checkout` 把**索引**恢复成"文件在"，
+      随后的 `rm` 只删了磁盘、没删索引，于是 `trackedPaths` 仍报跟踪态、`test_adapterFileIsGone` 红在
+      "仍在 git 跟踪态"那一句上。**这正是删除类改动的老坑**：磁盘没了不等于索引没了，判据要**两态都查**；
+      重新 `git add -A <path>` 后树侧选择集 **489 passed**。
+    - **宽域 A/B（用本批新落地的 `scripts/ci/ab_baseline.py`，第一次实战）**：
+      `-k HEAD -n 2 -c tests/unit/cognitive_layers/memory_layer/test_emotionAdapterRetirement.py
+      -- tests/unit/cognitive_layers/memory_layer/` ⇒
+      **`AB_PASS`｜基线 `2 failed + 1 error`（487 passed）↔ 本树 `0 failed / 0 error`（489 passed）｜
+      仅本树红 0 条**。仅基线红 3 条：前两条是本批两格（交付证据），第三条
+      `test_lock_coverage_m060709::test_recall_builds_base_inside_lock` 在本树绿、基线红——
+      按"顺序/环境效应"处置，**不认领、不进交付证据**；基线侧另 1 条 ERROR 本树没有，同样不认领。
+      （第一次 A/B 跑在"半删"状态下，读数是 tree 1 failed；**没有拿那一轮写正文**。）
+    - **活体（真 `create_app`＋真 token）**：`GET /api/v1/memory/emotion/types` 200（`data` 2 项）、
+      `POST /api/v1/memory/emotion/analyze` 200 → `{score: 1.0, tags: ['joy']}`；仓内 `data/` 内容指纹
+      前后同为 `8bd2fc6f7d62`。**反证说明**：这条活体路径从不经适配器（端点一直直连 `emotion.py`），
+      所以"删后仍绿"本身就是该档零消费者的行为面证据；语义反证由上面那条还原即红承担。
+    - **旁路与复取**：子集 **651→652**（新判据档登记）；落库前 `dev-path／子集跟踪／组件表／文档四守卫`
+      一次 **85 passed**（唯一一次红是"新判据未入跟踪态"，`git add` 后转绿——与上条同形），
+      跟踪守卫单跑 **42 passed**。
+    - **`emotion_adapter` 的两条历史引用保留不动**：`test_voice_engine_api_integration.py:222` 的注释
+      是"§6-18 假成功同族"的**历史举例**，`docs/04-plans/DOCS_ALIGNMENT_PLAN.md` 与
+      `docs/11-legacy/源码图谱.md` 属历史层——判据只查活跃层两份。
+    - **净 LOC**：生产池 **+0/−241**；测试/基建池 **+126/−9**（判据 70、台账 39、共振档 10/−4、组件表 3/−4、README 1/−1、子集 3）。
+    - **仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁（两档被 `PENDING` 守卫钉死）；
+      等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明。
+    - **本会话下一枚空号现查 §6-369**（写前必须现场重取；本笔落库时该读数为 368）。
