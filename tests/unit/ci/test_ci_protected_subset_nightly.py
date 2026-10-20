@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests import ast_scan  # 清单取数的共享入口：本档用 `rawManifestLines()`（原始行那一条）
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CNB = REPO_ROOT / ".cnb.yml"
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "protected_subset_nightly.py"
@@ -96,14 +98,40 @@ def test_jobActuallyRunsTheScript():
 
 def test_readerKeepsTheListVerbatim():
     """清单读数逐条同序：不去重、不排序、不把注释行当条目。"""
-    raw = [ln.strip() for ln in LIST_FILE.read_text(encoding="utf-8").splitlines()
-           if ln.strip() and not ln.strip().startswith("#")]
+    raw = ast_scan.rawManifestLines(LIST_FILE)
     assert nightlyModule().readEntries(LIST_FILE) == raw, (
         "脚本眼里的条目与清单原始读数不一致——被去重/排序/吞行之后，"
         "夜间跑的就不是准入时那份清单了")
     assert len(raw) > 100, f"清单只剩 {len(raw)} 条？被「顺手整理」过就要在这里暴露"
     assert len(raw) == len(set(raw)), (
         "同一文件被登记两次：夜间会重复跑它，而重复登记本身就是漂移的信号")
+
+
+def test_rawReaderIsNotTheNormalizedOne(tmp_path):
+    """两条读法必须**不同源**，否则上面那格是自证。
+
+    期望值不向真清单借形状（现读那份清单今天恰好没有行内注释条目——按"清单里应该有"
+    写断言就会造出一枚假红，267 那一形）：这里用合成清单把分歧点当场造出来。
+    归一化那条把行内 `#` 剥成纯路径；原始行那条必须原样留着，且两者不许哪天"顺手合并"。
+    """
+    listing = tmp_path / "scripts" / "ci" / "protected_tests.txt"
+    listing.parent.mkdir(parents=True)
+    listing.write_text(
+        "# 整行注释：不该被当条目\n"
+        "tests/a.py  # 这条守什么\n"
+        "\n"
+        "tests/b.py\n"
+        "tests/a.py\n",
+        encoding="utf-8",
+    )
+    raw = ast_scan.rawManifestLines(listing)
+    normalized = ast_scan.protectedSubsetEntries(tmp_path)
+    assert raw == ["tests/a.py  # 这条守什么", "tests/b.py", "tests/a.py"], raw
+    assert normalized == ["tests/a.py", "tests/b.py", "tests/a.py"], normalized
+    assert any("#" in line for line in raw), "原始行读数把行内注释也剥了＝偷偷归一化"
+    assert not any("#" in entry for entry in normalized), "条目读法应当剥掉行内注释，它坏了"
+    assert raw != normalized, (
+        "两条读法给出同一个结果＝被合成一条了，`test_readerKeepsTheListVerbatim` 随即失去意义")
 
 
 class TestComparatorsAreNotVacuous:

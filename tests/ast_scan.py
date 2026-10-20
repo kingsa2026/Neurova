@@ -140,6 +140,21 @@ def protectedSubsetEntries(root: Path = None) -> List[str]:
                 if line.split("#", 1)[0].strip()]
 
 
+def rawManifestLines(path: Path) -> List[str]:
+    """清单的**原始行**读数：只丢空行与整行注释，行内 `#` 与其后文字一律保留，不去重、不排序。
+
+    为什么已经有 `protectedSubsetEntries()` 还要这一条：夜间档那一格比的正是
+    "脚本自己那份 reader 有没有去重／排序／吞行"，**如果对照尺和被量的尺是同一条归一化读法，
+    它归一化了什么就永远看不见**（同形即自证，251/252 那一族）。所以这条刻意不同源。
+
+    但它仍只此一处——各档再各自手抄一遍 `read_text().splitlines()` 就是 §6-332 收掉的那个病。
+    与 `protectedSubsetEntries(root)` 的区别只有一处：那个把行内注释也剥掉，这个不剥。
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    return [line.strip() for line in text.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
 def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
     """`root` 子树下的源码文件清单（原地剪掉第三方/产物目录，路径排序稳定）。
 
