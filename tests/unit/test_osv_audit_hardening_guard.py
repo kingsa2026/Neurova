@@ -41,6 +41,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -103,22 +104,44 @@ def _paths(home: Path, rels) -> dict:
     return out
 
 
-def _scannerStub(home: Path, tool: str = "echo", body: str = "") -> Path:
-    """写一个假扫描器：能在 `--with-binary` 预检里自证契约（真跑、出 JSON、退出 0）。"""
-    stub = home / f"osv-scanner-stub-{tool}"
-    stub.write_text(
-        "#!/bin/sh\n"
-        'out=""\n'
-        'while [ $# -gt 0 ]; do\n'
-        '  if [ "$1" = "--output" ]; then out="$2"; shift 2; continue; fi\n'
-        "  shift\n"
-        "done\n"
-        + body
-        + 'printf \'{"results": [], "fake_format": "%s"}\' "$tool" > "$out"\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    stub.chmod(0o755)
+def _realBinaryPath() -> Path:
+    """当前宿主上**真的存在、真的可 exec** 的绝对路径，用来占位"扫描器在场"。
+
+    以前各处写 `Path("/bin/true")`：在 Windows 上它按当前盘解析成 `E:\\bin\\true`，
+    于是"存在"这个前提直接不成立——拼命令的格子红在 `[osv] 扫描器二进制不存在` 上，
+    红指向夹具自己而不是被测的拼装契约（形态集 243/257 那一族：判据向本机借形状）。
+    `sys.executable` 在两类宿主上都是一个绝对、存在、可 exec 的路径，且不带盘符假设。
+    """
+    return Path(sys.executable)
+
+
+def _execStub(directory: Path, *, name: str = "osv-scanner", emit=(),
+              exit_code: int = 0, executable: bool = True) -> Path:
+    """写出一个**当前宿主认的**假扫描器，返回可直接交给生产侧的路径。
+
+    为什么不能沿用 POSIX 那一形（实测，不是推的）：这台 Windows 上无扩展名文件走
+    `CreateProcess` 直接 `OSError [WinError 193] %1 不是有效的 Win32 应用程序`，
+    而 `os.access(p, os.X_OK)` 对**任何存在文件**都返真——"用权限位表达不可执行"
+    在这个宿主上根本不存在。所以按宿主给形，而不是给格子加 skipif（加 skipif 等于
+    承认这六条只在半边宿主有用，而门禁今天两边都要跑）。
+
+    - POSIX：`name` 本身，`#!/bin/sh` 脚本；`executable=False` 用 `chmod 0o644` 造"在而不可执行"。
+    - Windows：`executable` 给 `.cmd`（`@echo off` + `exit /b`，实测 rc 与 stdout 都对），
+      非可执行形给 `.txt`——它过得了 `os.access(X_OK)`，但 exec 必抛 `WinError 193`，
+      于是同一条不变量（调用侧故障单独归因）换一条路暴露。
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        stub = directory / (name + (".cmd" if executable else ".txt"))
+        lines = ["@echo off"] + ["echo %s" % line for line in emit]
+        lines.append("exit /b %d" % exit_code)
+        stub.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+        return stub
+    stub = directory / name
+    body = "#!/bin/sh\n" + "".join("echo '%s'\n" % line for line in emit)
+    body += "exit %d\n" % exit_code
+    stub.write_text(body, encoding="utf-8")
+    stub.chmod(0o755 if executable else 0o644)
     return stub
 
 
@@ -408,11 +431,7 @@ class TestWithBinaryPreflightProvesUsableScanner:
     @staticmethod
     def _stubScanner(home: Path) -> Path:
         """可执行的假扫描器：`--version` 自证能过，扫描调用由 fakeRun 接管。"""
-        home.mkdir(parents=True, exist_ok=True)
-        stub = home / "osv-scanner-stub"
-        stub.write_text("#!/bin/sh\necho 'osv-scanner version: 9.9.9'\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
-        return stub
+        return _execStub(home, name="osv-scanner-stub", emit=("osv-scanner version: 9.9.9",))
 
     @staticmethod
     def _scannedOutput(targets, counts) -> str:
@@ -499,7 +518,7 @@ class TestMainExitAccounting:
     def _runWithPreflight(self, auditModule, tmp_path, monkeypatch, problems):
         targets = _paths(tmp_path / "home", ["NeurUI/src-tauri/Cargo.lock"])
         monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
-        monkeypatch.setattr(auditModule, "_resolve_scanner", lambda: Path("/bin/true"))
+        monkeypatch.setattr(auditModule, "_resolve_scanner", lambda: _realBinaryPath())
         def fakePreflight(*a, **k):
             raise SystemExit("\n".join(problems))
         monkeypatch.setattr(auditModule, "runPreflight", fakePreflight)
@@ -572,15 +591,16 @@ class TestScanCommandHasSingleRecipe:
     def test_builder_places_targets_and_output_from_contract(self, auditModule, tmp_path):
         contract = auditModule._commandContract()
         out = tmp_path / "o.json"
+        binary = _realBinaryPath()
         cmd = auditModule.buildScanCommand(
-            Path("/bin/true"),
+            binary,
             ["/w/a.lock", "/w/b.lock"],
             PROJECT_ROOT / "scripts/ci/osv-allowlist.toml",
             out,
         )
         # 二进制一律归一到绝对路径（相对路径在 cwd/PATH 变化时表现为 127，
         # 会把「找不到文件」伪装成「扫描器故障」）
-        assert cmd[0] == str(Path("/bin/true").resolve())
+        assert cmd[0] == str(binary.resolve())
         assert cmd[1 : 1 + len(contract["subcommand"])] == contract["subcommand"]
         assert cmd[cmd.index(contract["output"]) + 1] == str(out)
         locks = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == contract["lockfile_flag"]]
@@ -593,11 +613,9 @@ class TestBinaryPathIsAbsolute:
     def test_relative_binary_is_normalized_to_absolute(self, auditModule, tmp_path, monkeypatch):
         home = tmp_path / "home"
         home.mkdir()
-        binary = home / "osv-scanner"
-        binary.write_text("#!/bin/sh\necho 'osv-scanner version: 9.9.9'\nexit 0\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(home, emit=("osv-scanner version: 9.9.9",))
         monkeypatch.setattr(auditModule.Path, "cwd", classmethod(lambda cls: home))
-        resolved = auditModule.resolveBinaryPath(Path("osv-scanner"))
+        resolved = auditModule.resolveBinaryPath(Path(binary.name))
         assert resolved.is_absolute(), "相对路径没被归一到绝对路径——127 会伪装成命令不成形"
         assert resolved == binary.resolve()
 
@@ -608,31 +626,36 @@ class TestBinaryPathIsAbsolute:
         assert "不存在" in str(exc.value)
 
     def test_non_executable_binary_is_named(self, auditModule, tmp_path):
-        """回退路径：文件在但不可执行（chmod 没生效）→ 点名「不可执行」，不报 127。"""
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        binary.chmod(0o644)
-        with pytest.raises(SystemExit) as exc:
-            auditModule.resolveBinaryPath(binary)
-        assert "不可执行" in str(exc.value), (
-            "文件在但权限位不对时报的还是 127 一类的含糊话——缺件与故障分不开"
+        """回退路径：文件在而宿主执行不了 → 点名调用侧，不报 127，也不许伪装成扫描器裁决。
+
+        两宿主的表达**天然不同**，这不是给 Windows 开后门，是实测出来的两条路：
+        POSIX 有权限位，`os.access(X_OK)` 当场读到假，`resolveBinaryPath` 在起子进程**之前**就拦下；
+        Windows 的 `os.access(X_OK)` 对任何存在文件都返真（实测），同一形只能由 exec 那一步
+        抛 `WinError 193` 暴露，于是拦点在**之中**、由 `_runScannerProcess` 单独归因。
+        两支钉的是同一条不变量：故障归因到调用点，且报错里带得上具体路径供直接复核。
+        """
+        binary = _execStub(tmp_path, executable=False)
+        if os.name == "nt":
+            with pytest.raises(auditModule.ScannerInvocationError) as exc:
+                auditModule.assertScannerExecutable(binary)
+        else:
+            with pytest.raises(SystemExit) as exc:
+                auditModule.resolveBinaryPath(binary)
+        message = str(exc.value)
+        assert str(binary) in message, "没点名是哪个二进制执行不了——日志里无从复核"
+        assert "不可执行" in message or "无法执行" in message, (
+            "文件在而宿主执行不了时，报的还是 127 一类的含糊话——缺件与故障分不开"
         )
 
     def test_assert_scanner_executable_returns_version_line(self, auditModule, tmp_path):
-        binary = tmp_path / "osv-scanner"
-        binary.write_text(
-            "#!/bin/sh\necho 'osv-scanner version: 2.6.0'\necho 'osv-scalibr version: 0.5.2'\nexit 0\n",
-            encoding="utf-8",
-        )
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path, emit=("osv-scanner version: 2.6.0",
+                                           "osv-scalibr version: 0.5.2"))
         line = auditModule.assertScannerExecutable(binary)
         assert "2.6.0" in line, "自证没回报扫描器版本——日志里无从判断用的是哪个二进制"
 
     def test_assert_scanner_executable_fails_on_nonzero_version(self, auditModule, tmp_path):
         """回退路径：`--version` 非 0（架构不符 / 动态库缺失）→ 报红并点名退出码。"""
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path, exit_code=127)
         with pytest.raises(SystemExit) as exc:
             auditModule.assertScannerExecutable(binary)
         message = str(exc.value)
@@ -707,9 +730,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
         self, auditModule, tmp_path, monkeypatch
     ):
         """`FileNotFoundError`/`PermissionError` 必须转成可点名的调用故障，不许裸抛。"""
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path)
 
         def boom(cmd, **kwargs):
             raise FileNotFoundError(2, "No such file or directory")
@@ -739,9 +760,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
             "调用故障不能复用 SystemExit——复用后调用方无从分辨"
             "「扫描器说不能用」与「我根本没跑起来扫描器」"
         )
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path)
 
         def boom(cmd, **kwargs):
             raise OSError(13, "Permission denied")
@@ -762,7 +781,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
 
         monkeypatch.setattr(auditModule, "runPreflight", boom)
         monkeypatch.setattr(auditModule, "verify_local_patches", lambda: [])
-        monkeypatch.setattr(auditModule, "_resolve_scanner", lambda: Path("/bin/true"))
+        monkeypatch.setattr(auditModule, "_resolve_scanner", lambda: _realBinaryPath())
         argv = ["osv_audit.py", "--targets", str(list(targets.values())[0])]
         monkeypatch.setattr(auditModule.sys, "argv", argv)
         assert auditModule.main() == 2, (
@@ -774,12 +793,8 @@ class TestSubprocessFailureIsNotScannerVerdict:
         self, auditModule, tmp_path, monkeypatch
     ):
         """拿到非契约码（127 等）时必须先探测调用点，把「缺件」与「拼法不符」拆开。"""
-        binary = tmp_path / "osv-scanner"
         # 探测只看「起得来 + 有输出」：真扫描器回的是 `osv-scanner version: X`
-        binary.write_text(
-            "#!/bin/sh\nprintf 'osv-scanner version: 9.9.9\\n'\n", encoding="utf-8"
-        )
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path, emit=("osv-scanner version: 9.9.9",))
         problems = auditModule._invocationProbe(binary)
         assert problems == [], "能调起来的二进制被误判为调用点不可用"
 
@@ -798,9 +813,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
             home, ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
         )
         monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
-        stub = home / "osv-scanner-stub"
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+        stub = _execStub(home, name="osv-scanner-stub")
         calls = []
 
         def fakeRun(cmd, **kwargs):
@@ -836,9 +849,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
         PR #121 的红全部发生在「预检成功、下一次调用 127」之后——那一次调用是否
         真的起得来，只能由调用侧异常回答，不能靠读码。
         """
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nprintf 'osv-scanner version: 9.9.9\\n'\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path, emit=("osv-scanner version: 9.9.9",))
         calls = []
 
         def flaky(cmd, **kwargs):
@@ -947,9 +958,7 @@ class TestUnreachableVulnDbIsNotAnAllClear:
             home, ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
         )
         monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
-        stub = home / "osv-scanner-stub"
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+        stub = _execStub(home, name="osv-scanner-stub")
 
         def fakeRun(cmd, **kwargs):
             if cmd[1] == "--version":
@@ -1097,9 +1106,7 @@ class TestOfflineDatabaseRemovesTheNetworkDependency:
 
     def test_offline_scan_command_carries_the_flags(self, auditModule, tmp_path):
         """拼出来的命令必须真带上离线 flag（否则「优先离线」只是句注释）。"""
-        binary = tmp_path / "osv-scanner"
-        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        binary.chmod(0o755)
+        binary = _execStub(tmp_path)
         cmd = auditModule.buildScanCommand(
             binary, [str(tmp_path / "a.lock")], tmp_path / "allow.toml", tmp_path / "o.json",
             offline=True,
@@ -1219,14 +1226,15 @@ class TestOfflineSourceIsTheDefaultVerdictPath:
 
     def test_build_command_omits_offline_flags_when_not_required(self, auditModule):
         """不带 offline 时必须一条都不挂——否则「直连通路」是假动作。"""
+        binary = _realBinaryPath()
         cmd = auditModule.buildScanCommand(
-            Path("/bin/true"), ["/w/a.lock"],
+            binary, ["/w/a.lock"],
             PROJECT_ROOT / "scripts/ci/osv-allowlist.toml", Path("/tmp/o.json"),
             offline=False,
         )
         assert "--offline" not in cmd and "--offline-vulnerabilities" not in cmd
         on = auditModule.buildScanCommand(
-            Path("/bin/true"), ["/w/a.lock"],
+            binary, ["/w/a.lock"],
             PROJECT_ROOT / "scripts/ci/osv-allowlist.toml", Path("/tmp/o.json"),
             offline=True,
         )
