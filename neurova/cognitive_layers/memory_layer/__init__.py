@@ -30,11 +30,6 @@ except ImportError as _e:
     _mem_layer_logger.debug("models 未可用: %s", _e)
 
 try:
-    from .conflict_detector_v2 import ConflictDetector
-except ImportError as _e:
-    _mem_layer_logger.debug("conflict_detector_v2 未可用: %s", _e)
-
-try:
     from .temperature import TemperatureEngine
 except ImportError as _e:
     _mem_layer_logger.debug("temperature 未可用: %s", _e)
@@ -119,7 +114,6 @@ __all__ = [
     "MemoryCategory",
     "MemoryType",
     "LifecycleStage",
-    "ConflictDetector",
     # 认知图谱模块
     "CognitiveStorageEngine",
     "UnifiedMemoryNode",

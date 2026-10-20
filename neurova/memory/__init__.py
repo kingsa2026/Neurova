@@ -16,8 +16,6 @@ logger = get_logger(__name__)
 # 坏指路：聚合模块 `memory_layer` 并不导出 GraphTraversal / SleepConsolidation，名字其实在
 # `.graph_traversal` / `.sleep` 里。旧形态下 `from neurova.memory import GraphTraversal` 拿到的是
 # None 且不报错；改指真出处之后才拿得到真类（探针实证，见台账 §6-201）。
-from neurova.cognitive_layers.memory_layer import ConflictDetector
-
 from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer as ConversationMemoryBuffer
 
 from neurova.cognitive_layers.memory_layer.graph_traversal import GraphTraversal
@@ -124,7 +122,6 @@ __all__ = [
     "AgentSelfManager",
     "ConversationBuffer",
     "MemoryStream",
-    "ConflictDetector",
     "GraphTraversal",
     "UnifiedVectorStore",
     "MemorySecurity",

@@ -59,7 +59,7 @@ neurova/cognitive_layers/memory_layer/
 ├── tool_memory_integration.py    # 删除（直接用 CognitiveStorageEngine）
 ├── cache.py                      # 删除（不需要）
 ├── working_memory.py             # 删除（不需要）
-└── conflict_detector_v2.py       # 保留（独立功能）
+└── conflict_detector_v2.py       # 已于 2026-10-21 退役（§6-370，判据并入 conflict.py）
 ```
 
 ---
