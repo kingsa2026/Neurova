@@ -157,10 +157,38 @@
 
 ## 5. 处置路线（等拍板后走，本批不动码）
 
-1. 先裁**要不要 MoE 通道插件化这条产品路线**（`iteration-plan-channel-plugin-moe.md` 的 Phase2/3）：
-   不要 ⇒ A3/A4/A5/A6 ＋ `channels/` 内同族死面一次退净（含 §4.2 那两档下游）；
-   要 ⇒ 那是一批"补集成项 2.5/3.5"的接线工作，A4/A5/A6 三档的表结构可以留下复用。
-2. `causal_reasoning` 与 `question_decomposer` 各自独立：前者是"要不要多跳因果推理"这项能力
-   （接线要补反向关系的生产写侧），后者按 §1·A2 的替代面裁"要不要 PROCEDURAL 定式拆解"。
-3. 任何删除都同批退役其专用测试与门面再导出行，并先修 §3 那三条指路/名实缺陷——
-   顺序反了就会留下"文档说有、代码没有"的更大坏形（§6-115 的教训）。
+**先纠正一条被问错的路线问题**（2026-10-20 用户质疑后现读复核，台账记于 §6-361）：本档案初版把待裁项
+写成"MoE 通道插件化这条路线要不要继续"——**那是伪问题**。现读：
+
+- 通道插件化**已经是记忆检索的现行设计且在服**：`neurova_recall.py:615-626` 在 `use_plugins` 下把
+  `BUILTIN_CHANNELS` 自动注册进 `channels/registry.py` 的 `ChannelRegistry`，`:955` 按
+  `ch.metadata.name ∈ enabled_names` 取启用通道并并发跑 `retrieve()`。
+  ⇒ `base.py`/`registry.py`/`builtin/*` 是活脊柱（与 §6-357 运行时 profile 读到 `metadata()` 被调一致）。
+- MoE（expert 域）同样在服：`mem_core.py:824` 构造 `MoEMemoryRouter`、`:925` 挂到 agent，
+  `chat_pipeline.py:252-254` 经 `retriever_adapters.MoERetrieverAdapter` 用在检索路上；
+  `memory_layer/moe_router.py:350` 是 `unified_vector_store.initialize_centroids` 的唯一生产者。
+- 顺带排掉一条双源误报：`neurova/channels/plugin_channels.py` 的 `PluginChannelRegistry` 是
+  **消息渠道**插件面（`api/endpoints/channel_config.py:482/1114` 在服），与
+  `memory_layer/channels/registry.py` 的 `ChannelRegistry` 同名不同物，**不是**第二份注册表。
+
+**所以真正要裁的问题收窄成一句：这条已在服的脊柱上，四个没接的旋钮要不要接。**
+
+| 旋钮 | 文件 | 今天缺的那半边 |
+|---|---|---|
+| per-channel 阈值覆盖 | `channels/threshold.py` | 只有一个全局 `threshold.default`（`settings_config.py:105`→`mem_core.py:818`）且只作用于 expert 门控 |
+| 反馈驱动的通道权重 | `channels/weight.py` | 权重被手抄成两份静态表（`neurova_recall.py:649`、`enhanced_memory_search_api.py:477`），无人写回 |
+| 插件通道质心自动生成 | `channels/centroid.py` | 质心只按 Expert 定义表建（`memory_layer/moe_router.py:350`），不覆盖插件通道 |
+| 统一结果管道 | `channels/processor.py` | live 召回链里没有"内联语义冲突检测"那一步，且 `activations` 乘子**在仓内没有生产者** |
+
+- **接** ⇒ 是一批"补 MoE 计划集成项 2.5/3.5"的接线工作，上面这四档的表结构本就是为这条路准备的，
+  可直接复用；真正要新增的是**写侧**：反馈事件从哪个咽喉来、per-channel 阈值在哪配、
+  插件通道要不要落盘质心——这三件都是产品口径，不由代码审计代拍。
+- **不接** ⇒ 这四档 ＋ 同族下游（`channels/temporal.py`、`channels/conflict.py`，以及通道域那份
+  `channels/moe_router.py`——它与在服的 `memory_layer/moe_router.py` 是两份东西，读者面待另档复核）
+  一次退净，净 LOC 为负。
+- 无论哪一路，**`causal_reasoning` 与 `question_decomposer` 另裁**（它们不在这条脊柱上）：
+  前者是"要不要多跳因果推理"这项能力（接线要补反向关系的生产写侧），
+  后者按 §1·A2 的替代面裁"要不要 PROCEDURAL 定式拆解"。
+
+任何删除都同批退役其专用测试与门面再导出行，并先修 §3 那三条指路/名实缺陷——
+顺序反了就会留下"文档说有、代码没有"的更大坏形（§6-115 的教训）。
