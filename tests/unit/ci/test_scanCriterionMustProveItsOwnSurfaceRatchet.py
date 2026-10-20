@@ -145,19 +145,17 @@ MANIFEST_BASELINE: set = {
 #: 纪律与前三张表一致：新增落点即红、消化必须摘行。
 #: 建档那轮（批 104）现值＝34 档 / 37 处，按 `_manifestReadSites` 两条支分：解析支独占 23／
 #: 两支都中 13／字面量支独占 1（那 1 处是 `repo_path("scripts","ci",…)` 这种"路径由 helper 拼出来"
-#: 的读法）。**现值＝2 档 / 5 处**（批 105 收掉 32 档 / 32 处）。
-#: `test_dev_path_and_runtime_dep_guards.py` 那 4 处本批**故意没动**：同一档里并发会话正写着
-#: `TestMcpSdkDeclaredForRuntime` 的在途格子，这一笔要是带上它，对方的半成品会被署进我的提交、
-#: 连红格子一起上 main（形态集 246）。下一刀等那档落库之后再收。
-#: 幸存那一档不是漏网：`test_ci_protected_subset_nightly.py` 的职责就是拿**原始清单**去比对夜间脚本
-#: 自己那份 `readEntries()`——用单点读法去过单点读法，就证不了它没吞行、没排序、没去重。
-#: 要连它一起收，得先决定夜间脚本的读法归谁（登记待裁，不在本表里就地豁免掉）。
+#: 的读法）。**现值＝空表，本闸零容忍**（批 114 收掉最后 2 档 / 5 处：夜间那 1 处改指
+#: `ast_scan.rawManifestLines()`，`test_dev_path_and_runtime_dep_guards.py` 那 4 处改指
+#: `ast_scan.protectedSubsetEntries()`）。
+#: 夜间那一档当初"幸存"的理由是：它的职责就是拿**原始清单**去比对夜间脚本自己那份
+#: `readEntries()`——用归一化那条去过归一化那条，就证不了它没吞行、没排序、没去重。
+#: 结法不是豁免，是**再开一条同样只此一处的原始行读法**（`rawManifestLines`），
+#: 两条刻意不同源（一条剥行内注释、一条不剥），并由合成样本格 `test_rawReaderIsNotTheNormalizedOne`
+#: 当场把分歧造出来钉住——表归零不等于这条腿没牙（251 那一形）。
 #: 一处不在表里也不在面内：`tests/integration/test_security_integration.py` 读这份清单，
 #: 可它**不在受保护子集里**——本闸的面就是那份清单，登记在这里免得下一个人以为漏了。
-READER_BASELINE: dict = {
-    "tests/unit/ci/test_ci_protected_subset_nightly.py": 1,
-    "tests/unit/test_dev_path_and_runtime_dep_guards.py": 4,
-}
+READER_BASELINE: dict = {}
 
 
 # ── 取数：三样小工具，各自只解一件事，便于逐形反检 ─────────────────────────────
