@@ -295,15 +295,52 @@ class NeurovaMCPServer:
         executor = ToolExecutor(agent)
         return await executor._execute_single_tool(name, dict(arguments or {}), skip_governance=False)
 
+    def _assembleTurnView(self, agent):
+        """把这一发装成「有可见集的回合」——用的就是 chat 主链那**同一个构造口**。
+
+        Wave H-W2 那道门的判据是"视图在场时，视图外执行体拒绝执行"；视图只由
+        `neurova/agent/chat_pipeline.py` 的回合装配段挂过，MCP 的请求边界不经过它，
+        所以本面此前接进咽喉也拿不到那层授权（台账 §6-352 的甲）。这里补的是**接线**，
+        不新造第二套合并逻辑（教义 第 6 条）：身份键走 `resolve_user_key`，三库合并走
+        `build_turn_view`，并把用户库/公共库的副本物化成可执行体——否则"看得见不能调"
+        就是半装配（与 chat 主链同批动作）。
+
+        **装配失败一律 fail-closed**（与 chat 主链的 fail-open 相反，这是有意的分叉）：
+        那边是"装配失败不许拖垮对话"，这边这道视图**就是授权本身**，静默回退成无视图
+        等于把刚补上的门再拆一次。拒执行是可算的代价，放行不是。
+        """
+        from neurova.core import turn_context
+        from neurova.skills.skill_visibility import build_turn_view, resolve_user_key
+
+        pool = self._skillPool()
+        userKey = resolve_user_key(user_id=self._current_user_id())
+        try:
+            view = build_turn_view(
+                str(getattr(getattr(agent, "config", None), "agent_id", "") or ""),
+                userKey,
+                registry_skills=dict(pool.skills) if pool is not None else None,
+            )
+        except Exception as e:  # noqa: BLE001 — 授权装配失败不许退成"没有授权"
+            logger.warning("MCP 技能腿可见集装配失败，按 fail-closed 拒执行: %s", e)
+            return None
+        token = turn_context.set_turn_skill_view(view)
+        if pool is not None:
+            try:
+                from neurova.skills.market_registry import restore_library_skills_for_turn
+
+                restore_library_skills_for_turn(pool, view)
+            except Exception:  # noqa: BLE001 — 物化失败不放大为整发失败，视图本身已成立
+                logger.debug("MCP 技能腿库副本物化失败（视图仍在，越权面不受影响）", exc_info=True)
+        return token
+
     async def _call_skill(self, skill_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """技能腿一律走 `ToolExecutor.execute_skill_tool` 那道咽喉，无 agent 即拒。
 
         咽喉上挂着四件本面补不出的事：轮级可见门（Wave H-W2）、声明式权限作用域
         （P0-4）、沙箱根注入、P0-1 质量漏斗记账。直调 `skill.execute` 等于把这四件
         一起绕掉——所以这里没有"拿不到 agent 就退回直调"的兜底，只有 fail-closed。
-        （可见门那一件要**请求边界**先装好视图才生效，装配点在
-        `neurova/api/endpoints/mcp_server_api.py` 的那道边界上，不在本核心里——
-        本核心只负责"取那一份池、按那一份声明校参数"。）
+        （可见门要视图在场才判得动，所以本腿在进咽喉之前先调 `_assembleTurnView`
+        挂上本轮视图，出去再复位——装配走的是 chat 主链那同一个构造口。）
 
         沿革（台账 §6-352 的乙）：这里曾长期**两份池子并存**——清单读构造期注入的
         `get_skill_registry()` 全局单例，执行读 `agent._skill_registry`（由
@@ -318,6 +355,7 @@ class NeurovaMCPServer:
                 "error": f"技能 {skill_name} 需要 agent 才能过治理咽喉（可见门/权限作用域/沙箱根/漏斗记账），当前无 agent",
             }
 
+        from neurova.core import turn_context
         from neurova.tool_executor import ToolExecutor
 
         pool = self._skillPool()
@@ -327,7 +365,16 @@ class NeurovaMCPServer:
         if gate is not None:
             return gate
 
-        outcome = await ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments or {}), None)
+        token = self._assembleTurnView(agent)
+        if token is None:
+            return {
+                "isError": True,
+                "error": f"技能 {skill_name} 的轮级可见集未能装配，本面按 fail-closed 拒执行",
+            }
+        try:
+            outcome = await ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments or {}), None)
+        finally:
+            turn_context.reset_turn_skill_view(token)
         # 成功侧只做一件事：把咽喉的 `output` 归到 MCP 的 `result` 位。
         # 失败侧一律原样交给 `call_tool` 出口那一次归形——这里不再攒第二种判断。
         if outcome.get("success") is True:
