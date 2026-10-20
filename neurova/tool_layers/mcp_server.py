@@ -7,7 +7,7 @@ server 核心与传输分离
 复用既有契约，不另起炉灶：
 - 工作流工具：workflow_as_tool.build_workflow_tool_schema（P1-3，
   DAG 输入校验天然生效——MCP 面不绕过必填校验）
-- 技能工具：清单取 skill_registry（skill:{name} 命名空间归一），
+- 技能工具：清单源与执行源**同一份**（agent 自带的注册表，skill:{name} 命名空间归一），
   执行一律经 ToolExecutor.execute_skill_tool 咽喉，本面不自建第二条技能通路
 """
 
@@ -58,14 +58,14 @@ class NeurovaMCPServer:
 
     Args:
         storage: neurflow WorkflowStorage（工作流工具源；None=不暴露工作流）
-        skill_registry: SkillRegistry（技能清单源；None=不暴露技能）
-        agent_ref / agent_provider: 执行侧的 agent（技能腿与 computer 腿都要它
-            才能过 ToolExecutor；两者都给时优先 agent_ref）
+        agent_ref / agent_provider: 执行侧的 agent。技能面的**清单源与执行源就是它
+            自带的那一份注册表**（§6-334 的 B/C 之后是 §6-352 的乙）；无 agent ⇒ 技能面
+            整条不 advertise 也不执行，不留半边。构造期不再有第二个 `skill_registry`
+            入口——第二份池子就是那次双源的入口本身。
     """
 
-    def __init__(self, storage=None, skill_registry=None, agent_ref=None, agent_provider=None):
+    def __init__(self, storage=None, agent_ref=None, agent_provider=None):
         self._storage = storage
-        self._skill_registry = skill_registry
         self._agent_ref = agent_ref
         self._agent_provider = agent_provider
 
@@ -79,6 +79,55 @@ class NeurovaMCPServer:
                 return self._agent_provider()
             except Exception:  # noqa: BLE001
                 return None
+        return None
+
+    def _skillPool(self):
+        """技能面的唯一取池口——advertise 与执行都从这里取，两处不许各有来源。"""
+        agent = self._resolve_agent()
+        return getattr(agent, "_skill_registry", None) if agent is not None else None
+
+    @staticmethod
+    def _skillDeclaration(skill) -> Dict[str, Any]:
+        """技能参数面的唯一取数口，与 LLM 工具面读的是同一个适配器。
+
+        返回 `{"type","properties","required"}`；技能没声明时返回 {}——**此时本面不校参数**，
+        因为在本面另列一张"哪些键算合法"的表就是第二个事实源（教义 第 6 条）。
+        """
+        if skill is None:
+            return {}
+        from neurova.skill_system.compat import OpenAISchemaAdapter
+
+        try:
+            return OpenAISchemaAdapter.skill_to_tool_schema(skill)["function"]["parameters"] or {}
+        except Exception:  # noqa: BLE001 — 适配器坏掉时退成"不校"，不许退成"全拒"
+            return {}
+
+    def _gateSkillArguments(self, skill_name: str, skill, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """按**声明**校参数：未声明的键与缺失的必填都在进咽喉之前拒掉。
+
+        这一格是被实测出来的（台账 §6-352 附问）：键名写错时本面原先不拒，调用静默落到
+        该技能的缺省分支上——`{"action": "write"}` 打到 `file_operation` 上执行的是"读"。
+        拒绝而不兜底，是把错误留在调用方那侧（教义 第 2 条的诚实形态）。
+        """
+        declared = self._skillDeclaration(skill)
+        properties = declared.get("properties") or {}
+        if not properties:
+            return None
+        unknown = sorted(set(arguments or {}) - set(properties))
+        if unknown:
+            return {
+                "isError": True,
+                "error": (
+                    f"技能 {skill_name} 收到未声明的参数键 {unknown}；"
+                    f"本面声明的可接受键={sorted(properties)}"
+                ),
+            }
+        missing = sorted(k for k in (declared.get("required") or []) if k not in (arguments or {}))
+        if missing:
+            return {
+                "isError": True,
+                "error": f"技能 {skill_name} 缺必填参数 {missing}；声明位={sorted(properties)}",
+            }
         return None
 
 
@@ -124,19 +173,19 @@ class NeurovaMCPServer:
             except Exception as e:  # noqa: BLE001 — 单源失败不拖垮清单
                 logger.warning("MCP server: 工作流清单失败: %s", e)
 
-        if self._skill_registry is not None:
+        pool = self._skillPool()
+        if pool is not None:
             try:
-                skills = getattr(self._skill_registry, "_skills", {}) or {}
-                for name, skill in skills.items():
+                from neurova.skill_system.compat import unpack_skill
+
+                for name, raw in (getattr(pool, "skills", {}) or {}).items():
+                    skill = unpack_skill(raw)
                     tools.append({
                         "name": f"{_SKILL_PREFIX}{name}",
                         "description": getattr(skill, "description", "") or f"技能 {name}",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task": {"type": "string", "description": "交给技能的任务/输入"},
-                            },
-                        },
+                        # 与咽喉那侧同一个适配器、同一次取数：报出去的参数面就是执行的参数面
+                        "inputSchema": self._skillDeclaration(skill)
+                        or {"type": "object", "properties": {}},
                     })
             except Exception as e:  # noqa: BLE001
                 logger.warning("MCP server: 技能清单失败: %s", e)
@@ -202,8 +251,9 @@ class NeurovaMCPServer:
         if name.startswith("computer_") or name == _RUN_COMPUTER_TASK:
             return await self._call_computer(name, arguments)
 
-        # 无前缀：按注册表技能名归一尝试（宽容匹配存量调用习惯）
-        if self._skill_registry is not None and name in (getattr(self._skill_registry, "_skills", {}) or {}):
+        # 无前缀：按执行池里的技能名归一尝试（宽容匹配存量调用习惯）
+        pool = self._skillPool()
+        if pool is not None and name in (getattr(pool, "skills", {}) or {}):
             return await self._call_skill(name, arguments)
 
         return {"isError": True, "error": f"未知 MCP 工具: {name}"}
@@ -251,16 +301,15 @@ class NeurovaMCPServer:
         咽喉上挂着四件本面补不出的事：轮级可见门（Wave H-W2）、声明式权限作用域
         （P0-4）、沙箱根注入、P0-1 质量漏斗记账。直调 `skill.execute` 等于把这四件
         一起绕掉——所以这里没有"拿不到 agent 就退回直调"的兜底，只有 fail-closed。
+        （可见门那一件要**请求边界**先装好视图才生效，装配点在
+        `neurova/api/endpoints/mcp_server_api.py` 的那道边界上，不在本核心里——
+        本核心只负责"取那一份池、按那一份声明校参数"。）
 
-        清单源与执行源**不是同一份注册表**（这条是实测，不是推理）：清单读构造期注入的
-        那一份（生产里是 `get_skill_registry()` 全局单例），执行读 `agent._skill_registry`
-        ——后者由 `create_default_skills()` 每 agent 现造，两份从来没有同源过。于是两个
-        方向都会出现：advertised 而调用判「不存在」，以及**清单从未列出而点名仍能执行**。
-        更重的一条：这道咽喉的轮级可见门（Wave H-W2）在本面这条路上读到的视图恒为 `None`
-        ——全仓 `set_turn_skill_view` 只有一个写点（`neurova/agent/chat_pipeline.py` 的
-        回合装配段），MCP 请求边界不经过它。所以"接进咽喉"实际只带来权限作用域、沙箱根
-        注入与漏斗记账三件，可见集那一件在这条路上是空转的。
-        缺陷档案与三态票见台账 §6-352；本段不写"这是正确行为"。
+        沿革（台账 §6-352 的乙）：这里曾长期**两份池子并存**——清单读构造期注入的
+        `get_skill_registry()` 全局单例，执行读 `agent._skill_registry`（由
+        `create_default_skills()` 每 agent 现造）。实测到的后果是双向的：清单报了而咽喉判
+        「不存在」，以及清单从未列出而点名**照样执行**（还连带把未知参数静默落到技能的缺省
+        分支上）。现在两边的源都是执行池那一份，`__init__` 上第二个池子入口一并删掉。
         """
         agent = self._resolve_agent()
         if agent is None:
@@ -270,6 +319,13 @@ class NeurovaMCPServer:
             }
 
         from neurova.tool_executor import ToolExecutor
+
+        pool = self._skillPool()
+        gate = self._gateSkillArguments(
+            skill_name, pool.get_skill(skill_name) if pool is not None else None, arguments
+        )
+        if gate is not None:
+            return gate
 
         outcome = await ToolExecutor(agent).execute_skill_tool(skill_name, dict(arguments or {}), None)
         # 成功侧只做一件事：把咽喉的 `output` 归到 MCP 的 `result` 位。
