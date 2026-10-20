@@ -3459,3 +3459,10 @@ tests/unit/ci/test_cognitiveComponentTable.py
 # `emotion_adapter` 退役守卫（§6-368）：文件不在且不再被跟踪／无任何导入通道／正控（转发目标的
 # 八个方法齐全，防删错能力）／活跃层文档不再指向它（路径形与类名形都查，历史层允许保留）。
 tests/unit/cognitive_layers/memory_layer/test_emotionAdapterRetirement.py
+# 同属性异值判据并入单源（§6-370）：Postgres/MySQL 必报 attribute_conflict／同值·不同键·版本演进·
+# 复合词里的「为」不得误报／否定命题保持原类型／真 LegacyConflictDetector 与真冲突账同链
+# （防 `record_conflicts` 的类型白名单把新类型静默吞成 0）。
+tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py
+# `conflict_detector_v2` 退役守卫（§6-370）：文件不在且不在跟踪态／无导入通道／两处门面不再导出
+# ConflictDetector／正控（合并后的判据仍在单源里报 attribute_conflict）。
+tests/unit/cognitive_layers/memory_layer/test_conflictDetectorV2Retirement.py

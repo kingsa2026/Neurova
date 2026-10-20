@@ -9088,6 +9088,37 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       ④参考层 `cognitive-graph-one-step-design.md:62` 写「保留（独立功能）」（INDEX 标「参考」，非权威），
       退役时须同步标注。
     - **净 LOC**：生产池 +0/−0；测试/基建池 +141/−0（本档案 110＋台账 31）。
-    - **仍开**：本档转成等裁票（甲／乙／丙）；其余不变——Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋
+    - **仍开**：本档转成等裁票（甲／乙／丙；**用户 2026-10-21 已裁乙并落地＝§6-370**）；其余不变——Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋
       "四旋钮接不接"＋`permissions` 声明。
     - **本会话下一枚空号现查 §6-370**（写前必须现场重取；本笔落库时该读数为 369）。
+
+370. **裁定乙落地：同属性异值判据并入 `judgeClauseConflict`，`conflict_detector_v2` 与门面再导出同批退役** ✅ —— 用户 2026-10-21 拍板
+    - **落地**：`conflict.py:judgeClauseConflict` 新增第三类信号 `attribute_conflict`（同一属性键、值不同且非包含；
+      三组谓词取自 v2 的实装：`使用/采用/用`、`升级到/更新到/改为`、`是/为`；键用非贪婪 + 复合词尾/否定尾排除）。
+      `manager.record_conflicts` 的类型白名单同步加 `attribute_conflict`——这是第二个吞点：只改判据不改白名单，
+      步骤会报"检出 1、入账 0"（本批端到端格当场抓到）。
+    - **删除**：`conflict_detector_v2.py` 265 行（磁盘 + 索引）、`memory_layer/__init__.py` 的再导出行与 `__all__` 项、
+      `neurova/memory/__init__.py` 的聚合导入与 `__all__` 项；退役 9 个测试格（安全网 6：v2 import/init/ConflictGroup/
+      假"活跃版本"链 + 恒真格；moe_router 3：v2 三分区直测）。
+    - **红→绿**：新判据首跑 **3 failed / 7 passed**（属性命中、speaker 前缀、真 detector 三格红）→ 实现后 10 passed；
+      补"真 detector → 真冲突账"格先红在"检出 1、入账 0"（白名单）→ 加类型后 11 passed。
+      退役守卫红自证：把 v2 从 HEAD 临时放回磁盘，恰 1 格红（`test_moduleFileIsGone`），其余 3 格绿；删回后 4 passed。
+    - **活体**：真 `create_app()`＋`/health` 200；真 `PostChatPipeline` 两步（save→conflict_detection）＋真
+      `LegacyConflictDetector`／`MemoryManager`：`conflicts_count=1`、`conflicts_recorded=1`、`ledger_total=1`、
+      basis＝`同一属性 '项目' 的取值互斥：'mysql' 与 'postgresql'`；仓内 `data/` 指纹 `2d997d5ec1bb`（3034 档）前后同。
+      反证：把属性支改成 `return None` 后同一脚本 `0/0/0、basis=null`；还原 md5 同值。
+      **未取证**：真 LLM 回合未跑，活体走的是真步骤＋真依赖注入。
+    - **宽域 A/B**：`AB_PASS`｜基线 12 failed+1 error（1798 passed）↔ 本树 4 failed/0 error（1797 passed）｜
+      仅本树红 0｜预存 0（各复跑 2 次）。仅基线红 9 条：本批 8 条新/退役格（交付证据）＋
+      `test_lock_coverage_m060709::test_recall_builds_base_inside_lock`（已知顺序/环境效应，本树绿，**不认领**）；
+      基线侧那 1 条 error 同样不认领。本树 4 条为 HEAD 既有红（`MemoryManager.bus` 3 条＋moe 状态目录 1 条，
+      已在 HEAD worktree 复现同集），不属本批。
+    - **文档**：设计参考档的「保留（独立功能）」改为「已退役」；组件表重生成
+      **104 模块／44926 行**（在役 55／仅层内 38／仅测试 6／零读者 5）；悬空引用台账重生成无差异。
+    - **缺陷/边界单列**：贪婪键（首跑报出 `'项目使'`）与白名单吞新类型都是本批当场抓住的真缺陷，已修并各有格；
+      **已知边界**：同键异值即报，不识别同义改写（"不错/很好"若带「是」会被报），且 `升级到/更新到/改为`
+      按 v2 原样并入——时间演进仍可能被报成矛盾；本链保持 `blocking=False`。
+    - **净 LOC**：生产池 +61/−278；测试/基建池 +262/−176。
+    - **子集** 652→654（两份新判据档）；**仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋"四旋钮接不接"＋
+      `permissions` 声明；§6-369 那张三选一票已由本笔结清。
+    - **本会话下一枚空号现查 §6-371**（写前必须现场重取；本笔落库时该读数为 370）。
