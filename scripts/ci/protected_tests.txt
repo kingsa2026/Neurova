@@ -3452,3 +3452,7 @@ tests/unit/api/testMcpFaceCallerTier.py
 # 四格合成仓走真 git worktree＋真 pytest 子进程（AB_PASS/AB_REGRESSION/AB_FAIL/AB_SKIP 各一枚），
 # 另配 cp936 管道那枚宿主差集。本档不枚举目录，只跑被治脚本自己。
 tests/unit/ci/test_abBaselineDriverReadings.py
+# 认知层现役组件表（§6-366）：文档机读区与生成器逐字比对／每行路径可达／四态分区对账／
+# 聚合索引与 `ast_scan.importersOfModule` 抽样同数（防两把尺分叉）／篡改一个字符即能检出。
+# 表由 `scripts/ci/cognitive_component_table.py` 从代码生成，不手维护。
+tests/unit/ci/test_cognitiveComponentTable.py

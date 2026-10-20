@@ -21,7 +21,7 @@
 | 架构决策(ADR) | `docs/01-architecture/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | [`docs/02-api/`](02-api/) + [`API_REFERENCE.md`](02-api/API_REFERENCE.md) | 接口事实源 |
 | 记忆系统 | [`docs/01-architecture/02-memory-system.md`](01-architecture/02-memory-system.md)（架构）＋ [`docs/01-architecture/memory/retrieval-spine.md`](01-architecture/memory/retrieval-spine.md)（检索脊柱）＋ `docs/01-architecture/memory/`（专题与计划） | 记忆层事实源；两份 [权威] 各管一层，计划文档不是架构事实源 |
-| 认知架构 | `NEUROVA_CogArch_2.0.md` | **2026-05-12 设计快照（沿革）**；§8.2 状态列不可作事实源（D9，台账 §6-362） |
+| 认知架构 | `NEUROVA_CogArch_2.0.md` | **2026-05-12 设计快照（沿革）**；§8.2 状态列不可作事实源（D9，台账 §6-362）；**现行组件状态见 [`cognitive-component-table.md`](01-architecture/cognitive-component-table.md)（机器生成）** |
 | 开发进度 | `docs/09-dev-progress/` | 迭代记录（历史） |
 | Bug 修复史 | 根目录 `bugfix-*.md` 集群 | 变更日志（历史，归档用） |
 | 配置 | `docs/10-configuration/` | 部署/配置事实源 |
@@ -82,6 +82,7 @@
 | 文档 | 状态 | 归类 |
 |------|------|------|
 | `NEUROVA_CogArch_2.0.md` | **历史（2026-05-12 设计快照；§8.2 状态列不可作事实源，D9／§6-362）** | 认知层 |
+| `docs/01-architecture/cognitive-component-table.md` | **[权威] 认知层现役组件表**（机器生成，逐格与生成器比对） | 认知层 |
 | `docs/architecture/`（42 篇） | 参考 | 子系统设计集 |
 | `认知_graph_storage_architecture.md` / `cognitive-graph-storage-architecture.md` | ⚠ 疑似重复，合并为 1 篇 | 知识图谱 |
 | `cognitive-graph-one-step-design.md` | 参考 | 知识图谱 |
