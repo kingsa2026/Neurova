@@ -1,14 +1,21 @@
 # 记忆系统架构设计
 
-> **版本**: v1.0.0-beta1 (CogArch 2.0)  
-> **最后更新**: 2026-06-07  
-> **状态**: 生产就绪
+> **版本**: v1.0.0-beta1 (CogArch 2.0)
+> **最后更新**: 2026-10-20（名实复核：§1.1 结构描述、§5 检索通道与流程、§7.2 权重更新点、模块表）
+> **状态**: **[权威] 记忆架构**（`docs/INDEX.md` 记忆层）；检索脊柱的逐环节证据见
+> [`memory/retrieval-spine.md`](memory/retrieval-spine.md)
 
 ## 1. 概述
 
 ### 1.1 设计目标
 
-记忆系统是 Neurova 的核心组件，采用 CogArch 2.0 架构，通过 MemoryBus 事件总线将 1814 行 God Object 重构为 ~500 行 Facade + 12 个独立模块。
+记忆系统是 Neurova 的核心组件，采用 CogArch 2.0 架构。记忆层由 `manager.py` 的 `MemoryManager`
+门面与 `memory_layer/` 下的一批子模块组成；**检索**走插件化通道（`channels/`）与 expert MoE
+（`memory_layer/moe_router.py`），逐环节证据见 [`memory/retrieval-spine.md`](memory/retrieval-spine.md)。
+
+> 口径更正（2026-10-20）：本节此前写"通过 MemoryBus 事件总线将 1814 行 God Object 重构为 Facade + 12 模块"
+> ——`MemoryBus` 在代码里没有实现（全仓仅 `memory_layer/modules/__init__.py` 的 docstring 提到一次，
+> 且该文件是 6 行注册桩、无任何导出）。事件总线不是现行结构，已按实装改写（台账 §6-362 F1）。
 
 ### 1.2 记忆分类体系
 
@@ -169,15 +176,23 @@ class IsolationContext:
 
 ## 5. 多通道检索引擎
 
-### 5.1 检索通道
+### 5.1 检索通道（插件化）
 
-| 通道 | 方法 | 权重 |
+检索通道是**插件**：`channels/builtin/__init__.py` 的 `BUILTIN_CHANNELS` 在
+`neurova_recall.py:615-626` 被注册进 `channels/registry.py` 的 `ChannelRegistry`；
+检索时按 `metadata.name` 选启用项并发跑 `retrieve()`（`:954-955`）。内置六个：
+
+| 通道类 | 文件 | 职责 |
 |------|------|------|
-| 向量检索 | TF-IDF / FAISS / ChromaDB | 主要 |
-| 关键词检索 | FTS5 全文搜索 | 辅助 |
-| 情感检索 | 情感类型匹配 | 专用 |
-| 时间检索 | 时间范围过滤 | 辅助 |
-| 温度排序 | 活跃度加权 | 排序 |
+| `TemperatureChannel` | `channels/builtin/temperature.py` | 温度/活跃度加权 |
+| `TextChannel` | `channels/builtin/text.py` | 文本与向量检索 |
+| `CategoryChannel` | `channels/builtin/category.py` | 分类匹配 |
+| `GraphChannel` | `channels/builtin/graph.py` | 图关系检索 |
+| `EmotionChannel` | `channels/builtin/emotion.py` | 情感匹配 |
+| `VoiceChannel` | `channels/builtin/voice.py` | 语音记忆 |
+
+向量后端另有 `vector_search.py`（`VectorSearch`）与 `unified_vector_store.py`
+（`UnifiedVectorStore`，含质心初始化），不经通道注册表。
 
 ### 5.2 向量搜索后端
 
@@ -190,8 +205,13 @@ search = create_vector_search(mode="auto")
 ### 5.3 检索流程
 
 ```
-查询 → 同义词扩展 → 向量化 → 多通道检索 → 合并去重 → 温度加权 → 情感匹配 → 结果排序
+查询 → 意图检测（QueryIntentDetector / IntentAwareRecallStrategy）→ 多通道检索（插件通道并发）
+     → 合并去重（_deduplicate_results）→ 融合打分（_fusion_score，含通道权重与时间/温度因子）→ 结果排序
 ```
+
+> 口径更正（2026-10-20）：此前写"同义词扩展 → 向量化 → … → 情感匹配"这条链。现读引擎里没有
+> "同义词扩展"这一步，且"情感匹配"是 `EmotionChannel` 这条通道的职责、不是独立阶段。上面按实装重画
+> （台账 §6-362 F1）。
 
 ## 6. 温度管理机制
 
@@ -228,14 +248,19 @@ search = create_vector_search(mode="auto")
 
 ```
 对话完成 → on_experience_recorded
-  → ExperienceFeedback.process_experience (提取工具洞察)
-  → tool_weights.update_weight (自适应权重)
+  → ExperienceFeedback.process_experience (提取工具洞察/归类/关联)
+  → tool_weights.update_weight (自适应权重；真调用点在 evolution/closed_loop.py:518/591
+    与 evolution_facade.py:97，不在 process_experience 内)
   → pattern_miner.add_sequence (频繁模式挖掘)
   → crystallizer.observe (观察工具使用模式)
   → 模式积累 (≥3次 + 成功率>60%)
   → PatternCrystallizer._try_crystallize
   → CognitiveStorageEngine.store (PATTERN 类型)
 ```
+
+> 口径更正（2026-10-20）：原第 2、3 步写成"process_experience 直接调 update_weight"。
+> 现读 `experience_feedback.py:251 process_experience` 只做提取/归类/关联，**不碰 `tool_weights`**
+> （台账 §6-362 F1）。
 
 ### 7.3 梦境回放
 
@@ -272,7 +297,9 @@ result = sleep_consolidation.dream_replay()
 | `cognitive_layers/memory_layer/isolation.py` | 三层隔离上下文 |
 | `cognitive_layers/memory_layer/muscle_memory.py` | 肌肉记忆 (工具模式) |
 | `cognitive_layers/memory_layer/cognitive_storage_engine.py` | LSM-Tree 存储引擎 |
-| `cognitive_layers/memory_layer/vector_search_advanced.py` | 高级向量搜索 |
+| `cognitive_layers/memory_layer/vector_search.py` | 向量检索后端（`VectorSearch`） |
+| `cognitive_layers/memory_layer/unified_vector_store.py` | 统一向量库（索引与质心初始化） |
+| `cognitive_layers/memory_layer/channels/` | 检索通道插件与注册表 |
 | `cognitive_layers/memory_layer/temporal_knowledge_graph.py` | 时序知识图谱 |
 | `cognitive_layers/memory_layer/security.py` | 安全模块 |
 | `cognitive_layers/memory_layer/bayesian_eki/cognitive_optimizer.py` | 贝叶斯认知优化器 |

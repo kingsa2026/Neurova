@@ -20,8 +20,8 @@
 | **架构模型（可视化）** | `docs/architecture-model/` | **证据接地的 C4/DOT 文本源与风险图，`CONTEXT.md` 的图文配套层**；图中每条结论带 `文件:行号`，与 CONTEXT.md 冲突时以本目录的实测证据提 issue 回修 CONTEXT.md |
 | 架构决策(ADR) | `docs/01-architecture/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | [`docs/02-api/`](02-api/) + [`API_REFERENCE.md`](02-api/API_REFERENCE.md) | 接口事实源 |
-| 记忆系统 | `docs/01-architecture/memory/` | 记忆层事实源 |
-| 认知架构 | `NEUROVA_CogArch_2.0.md` | 认知层演进总纲 |
+| 记忆系统 | [`docs/01-architecture/02-memory-system.md`](01-architecture/02-memory-system.md)（架构）＋ [`docs/01-architecture/memory/retrieval-spine.md`](01-architecture/memory/retrieval-spine.md)（检索脊柱）＋ `docs/01-architecture/memory/`（专题与计划） | 记忆层事实源；两份 [权威] 各管一层，计划文档不是架构事实源 |
+| 认知架构 | `NEUROVA_CogArch_2.0.md` | **2026-05-12 设计快照（沿革）**；§8.2 状态列不可作事实源（D9，台账 §6-362） |
 | 开发进度 | `docs/09-dev-progress/` | 迭代记录（历史） |
 | Bug 修复史 | 根目录 `bugfix-*.md` 集群 | 变更日志（历史，归档用） |
 | 配置 | `docs/10-configuration/` | 部署/配置事实源 |
@@ -81,7 +81,7 @@
 
 | 文档 | 状态 | 归类 |
 |------|------|------|
-| `NEUROVA_CogArch_2.0.md` | **[权威] 认知架构** | 认知层 |
+| `NEUROVA_CogArch_2.0.md` | **历史（2026-05-12 设计快照；§8.2 状态列不可作事实源，D9／§6-362）** | 认知层 |
 | `docs/architecture/`（42 篇） | 参考 | 子系统设计集 |
 | `认知_graph_storage_architecture.md` / `cognitive-graph-storage-architecture.md` | ⚠ 疑似重复，合并为 1 篇 | 知识图谱 |
 | `cognitive-graph-one-step-design.md` | 参考 | 知识图谱 |
@@ -90,7 +90,9 @@
 | `living_context_pool_design.md` | 参考 | 上下文池 |
 | `cross-channel-session-sync-design.md` | 参考 | 会话同步 |
 | `session-sync-integration-complete.md` | 历史 | 会话同步 |
-| `memory-system-upgrade-plan-final.md` | **[权威] 记忆升级** | 记忆 |
+| `docs/01-architecture/02-memory-system.md` | **[权威] 记忆架构** | 记忆 |
+| `docs/01-architecture/memory/retrieval-spine.md` | **[权威] 检索脊柱**（在服链路，逐环节 `file:line`） | 记忆 |
+| `memory-system-upgrade-plan-final.md` | **[权威] 记忆升级计划**（计划口径，非架构事实源） | 记忆 |
 | `memory-system-upgrade-summary.md` | 历史 | 记忆 |
 | `neurova-memory-system-upgrade-technical.md` | 参考 | 记忆 |
 | `memory-nerf-upgrade-plan.md` | 参考 | 记忆 |
