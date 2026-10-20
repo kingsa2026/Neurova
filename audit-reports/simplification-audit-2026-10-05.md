@@ -8540,14 +8540,16 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       修法＝按 `(文件, 函数名)` 记账且函数名取自该文件 AST，另配两道硬断：钩子收到文件数 >200
       ＋`neurova/api/app.py` 自己的函数必须在场（正控缺席即报错，不让空转读成干净）。
     - **终读数**（入口＝lifespan 装配＋`/health`＋`agent.team`／`acp_api`）：
-      门面声明 107 处，其中在闭包里 97；「唯一启动入口是门面」30 档；两臂同向判死 **11 档／2412 行**：
+      门面声明 107 处，其中在闭包里 97；「唯一启动入口是门面」30 档；两臂同向判死 **11 档／2412 行**
+      （〔这是**已扫出的下限**不是全量：候选谓词把"被死岛读"的下游模块挡在面外，见 §6-360 自纠②〕）：
       `sandbox/thought_sandbox`(432，门面 5 行声明，**0 份测试档**)、`image_pipeline/docker_builder`(613，
       门面 5 行)、`memory_layer/causal_reasoning`(349)、`memory_layer/question_decomposer`(311)、
       `memory_layer/positional_encoding`(291)、`channels/processor`(107)、`agent/templates/personality_templates`(79，
       **0 份测试档**)、`knowledge/foundation/redundancy`(69)、`channels/weight`(62)、`channels/centroid`(53)、
       `channels/threshold`(46)。其余 19 档由②或③证明在服（含 10 档 `api/endpoints/memory/*` 各 owns
       1–15 条 operation、6 档 `channels/builtin/*` 的 `metadata()` 启动真被调、
-      `conflict_detector_v2` 经 `memory/__init__.py:19`＋`conflict.py:260`、`skill_encapsulation` 经
+      `conflict_detector_v2` 经 `memory/__init__.py:19`＋`conflict.py:260`〔这两条判活证据经复算均为
+      伪命中（前者是门面再导出、后者是同名别名定义行），该档判活作废＝§6-360〕、`skill_encapsulation` 经
       `agent_core.py:1558`、以及上面那档 `short_drama`）。
     - **来历（符号级 `git log -S "<决定符号>" -- neurova/`，不是按叶子文件名数的）**：
       11 档里 **9 档只命中引入那一笔**＝引入即未接线，且集中在三次批量事件——
@@ -8697,3 +8699,60 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **就地划闭**：§6-356 与 §6-357「仍开」里那条 `scripts/ab_compare.sh` 缺件由本笔结清
       （原文不回改，指向本格）；Skill 速查表与项目记忆里的旧路径同批改指本脚本。
     - **本会话下一枚空号现查 §6-360**（写前必须现场重取；本笔落库时该读数为 359）。
+
+360. **D19 第一族逐档档案出卷（`ede49184` 那 6 档）：五份需人裁＋一份推荐删；顺带自纠两条——`conflict_detector_v2` 的判活证据是伪命中、11 档只是下限** ✅⚪ —— 只读档案，未动一行代码
+    - **产出落点**：`audit-reports/d19-islands-dossier-2026-10-20.md`（五字段逐档 + ◑/✅ 置信度分栏 +
+      事件分组 + 缺陷单列 + 处置路线）。本格只登**判定汇总与两条自纠**，细节以档案为准。
+    - **判定汇总**（6 档 1178 行：349＋311＋107＋53＋46＋62）：**需人裁 5 档**
+      （`causal_reasoning` 多跳因果推理与环检测全仓唯一、且反向关系 `caused_by/enabled_by/prevented_by`
+      在生产写侧**无来源**——接线的真代价是补写侧不是补调用；`channels/processor` 的
+      "管道内联冲突检测"与"activation 乘子"零替代且乘子**无生产者**；`centroid`/`threshold`/`weight`
+      三档都是"expert 域有活腿、插件通道域零替代"的部分缺）；**推荐删 1 档**
+      （`question_decomposer`：分类与拆解主干有活替代——`neurova_recall.py:108-116/119-175` 的
+      `QueryIntent(Detector)`、`chat_pipeline.py:1878→1939` 的 LLM 拆解，✅ 主会话复算，
+      且同文件内 `_determine_order():282-299` 算完 `type_priority` 原序返回＝恒返同值、
+      `llm_client` 存而不用、`SubQuestion` 定义后不使用）——但"删"仍要拍：**部分缺**的三项
+      （`PROCEDURAL` 分类、定式化三段模板、`diversity/serendipity` 两个旋钮）零替代，放弃它们属产品口径。
+    - **来历合流成一次事件**：6 档全出 `ede49184`(06-11「更新 .gitignore…优化项目结构」把整棵
+      `memory_layer` 升格为跟踪面那次)，规格来自 `upgrade-plan-detailed.md` 任务 1.2/1.3 与
+      `iteration-plan-channel-plugin-moe.md` Phase2/3（2.2/2.3/3.1/3.4）；
+      **计划里的集成项 2.5、3.5 从未落地** ⇒ 这不是渐进腐烂，是"按规格引入了实现、计划后半段没执行"。
+      符号级 `git log -S "<决定符号>" -- neurova/` 6 档各 **1 笔**（引入），✅ 主会话与子代理各算一遍同数。
+    - **自纠①：`conflict_detector_v2` 从"活"回到"待档"**。§6-357 判它活的两条证据复算都是伪命中：
+      `memory_layer/conflict.py:260` 是**同名别名的定义行**（`ConflictDetector = LegacyConflictDetector`，
+      `e30f81c9` 09-02「三冲突检测器正名」留的兼容别名），不是取用 v2；`neurova/memory/__init__.py:19`
+      ＋`__all__:127` 是**聚合门面再导出**，而 `from neurova.memory import ConflictDetector`
+      全仓**零消费者**（✅）。门面再导出 ≠ 消费者这一条早就写在死码口径的伪命中表里，
+      我上一批自己踩了。**待档原因**：本档 A10（line 102）早已取证——它的唯一消费者
+      `result_processor.py` 被 `0c333a76`(09-21)「清退 5 组死码」删掉，属**"曾被消费后被摘"**
+      而非"引入即未接线"，按死码口径只能"恢复接线"或"显式承认放弃该能力"；§9 事件表（line 308）
+      当时就把它列为"只删了消费方、留下被孤立的实现＝教义第 5 条未扫荡"。另批补档案，
+      不并进本批那 6 档的结论里。
+    - **自纠②：11 档是"已扫出的下限"，不是"扫净了"**。候选谓词写的是"闭包内的 importers 全是门面"，
+      于是**被死岛读**的下游模块连被审的资格都没有：`channels/temporal.py` 与 `channels/conflict.py`
+      的读者＝门面 ＋ 已判死的 `processor.py`（✅ import 面复算）。正确形制是把"读者是否活"
+      **递归进候选面的构造**（不动点算在候选集上，不是只算在死列上）——这条改判本身要落进
+      §6-357 那把尺的下一版，登记于此不当已了结。同族 `memory_layer/moe_router.py`
+      （由 `memory_layer/__init__.py:18` 门面再导出）与 `channels/moe_router.py` 的分工未查。
+    - **审计中发现的缺陷（单列，不折算成简化收益）**：①**悬空指路**——
+      `test_temperature_single_source.py:235` 把"因果推理入口"指到 `causal_reasoning`，
+      而该格只验"退役文件不存在＋无人 import"（`:274-286`），不验指路目标活不活 ⇒ 指到孤岛，
+      同句复述于 `docs/05-reports/memory-temperature-convergence-2026-09-21.md:84`；
+      ②`causal_reasoning.py:318-321` 跨模块直取 `graph._graph`/`_reverse_graph` 私有字段；
+      ③**权重表三份表示**（`channels/weight.py:16-23`、`neurova_recall.py:649`、
+      `enhanced_memory_search_api.py:477`，撞教义第 6 条）；④`docs/specs/2026-09-21-…-audit.md:369`
+      称 `channels/processor.py:32` 为"活的"＝文档名实不符；⑤`tests/unit/memory/test_moe_routing.py`
+      等用 `MagicMock` 冒充 `vector_store` 测这六个岛——测的是岛内自洽，不构成活证据（教义第 3 条）。
+    - **新增一条需人裁（本批开出，产品口径）**：**MoE 通道插件化这条路线要不要继续**
+      （`iteration-plan-channel-plugin-moe.md` 的 Phase2/3）。不要 ⇒ A3/A4/A5/A6 四档 ＋ §6-357
+      那两档同族下游一次退净（净 LOC 为负、不留互相作证的半成品）；要 ⇒ 这是一批"补集成项 2.5/3.5"
+      的**接线**工作，三张表结构（阈值/权重/质心）留着复用。**决策影响面**：只影响
+      `memory_layer/channels/` 与 `memory_layer/` 检索面，不动 `neurova_recall` 的 live 融合链；
+      不可逆点＝删掉 per-channel 阈值/权重/插件通道质心这三件"今天无人在用、但一删就要重写"的实装。
+    - **就地勘正**：§6-357 里「其余 19 档由②或③证明在服」那条对 `conflict_detector_v2` 的举证据本格作废
+      （原文不回改，两处已加指向本格的标记）；「11 档 2412 行」按**下限**读。
+    - **净 LOC**：生产池 0/0；本批只新增一份档案文件（`d19-islands-dossier-2026-10-20.md`）。
+      子集现值不变 **650**。**未取证项**：档案里 6 档的"活替代是否真在服"依赖 §6-357 那条 profile
+      运行时读数（只覆盖 lifespan＋/health＋两条装配腿），真 LLM 回合未跑。
+    - **仍开**：等裁七条不变；本批新开出「MoE 通道插件化要不要继续」与「`conflict_detector_v2` 补档」两项。
+    - **本会话下一枚空号现查 §6-361**（写前必须现场重取；本笔落库时该读数为 360）。
