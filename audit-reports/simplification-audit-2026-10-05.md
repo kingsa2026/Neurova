@@ -8943,3 +8943,42 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明；
       **本批新开一条**：CogArch 沿革化后，认知层是否需要一份"现役组件表"（若需要，应做成由代码生成/校验的）。
     - **本会话下一枚空号现查 §6-366**（写前必须现场重取；本笔落库时该读数为 365）。
+
+366. **认知层"现役组件表"落地（用户裁定"需要"）：从代码生成、逐格比对，表一出来就抓到 6 档零读者** ✅🟢 —— 一批：生成器＋判据＋文档＋子集一行
+    - **为什么做**：§6-365 把 CogArch 降为沿革档后，记忆/认知侧缺一份"今天有什么、谁在读"的现役表。
+      用户明确要"认知层需要一份现役组件表"；本批按上一格承诺的形制——**由代码生成/校验，不再手维护**。
+    - **落点**：生成器 `scripts/ci/cognitive_component_table.py`（聚合索引：单趟建边，AST 复用
+      `tests/ast_scan` 的解析缓存与相对导入解析）；文档 `docs/01-architecture/cognitive-component-table.md`
+      （两个机读区：摘要＋逐模块表）；判据 `tests/unit/ci/test_cognitiveComponentTable.py`（9 格）。
+    - **口径（写进文档，防第二套解释）**：组件＝`neurova/cognitive_layers/` 下跟踪态 `.py`（不含 `__init__`）；
+      读者按**文件**去重，分**层外**（`neurova/` 内但在本层之外）／**层内**（同层、自身之外）／**测试**；
+      状态四态：`在役`（层外读者≥1）／`仅层内`／`仅测试`／`零读者`。**把"层外"单列**是因为
+      "被同层读"只证明内部接线，不证明在服（§6-359/360 的教训）。生成器是**聚合索引**，
+      单目标判定仍走 `ast_scan.importersOfModule`——两把尺由判据的抽样格钉在一起。
+    - **首读（2026-10-20）**：**106 个模块 / 45375 行**；`在役 55` · `仅层内 39` · `仅测试 6` · `零读者 6`。
+      子层：memory_layer 95／38731、emotion_context_layer 4／2300、meta_cognition_layer 5／2272、
+      knowledge_graph 1／1259、growth_layer 1／813。
+      **零读者 6 档（2807 行）**：`explainability.py` 646、`proactive_question.py` 940、
+      `relation_mixin.py` 400、`forgetting_recovery_storage_mixin.py` 347、`emotion_adapter.py` 241、
+      `modules/emotion_conduction_module.py` 233——**这只是读数，不是死亡判定**（mixin/注册表类可能
+      走动态装配），下批按五字段档案逐条取证（其中 `emotion_adapter` 在旧卷 A10 已判"向后兼容门面、
+      从无人迁入"，`explainability` 是第一次露面）。
+      **仅测试 6 档（2067 行）**：`channels/moe_router` 178、`memory_index` 277、`memory_record_store` 196、
+      `pollution_purge` 349、`temporal_reasoner` 636、`vector_index_manager` 431——与 §6-353 里
+      "只被测试引用者待裁"那段接得上，现读给了准确名单与行数。
+    - **红→绿**：红 9 failed（生成器/文档不在场；其余格在同一次里都是行为断言，`collected 9` 非收集期错误）
+      → 绿 **9 passed**。
+    - **两枚变异，都咬住**：①文档里把一行状态改错 ⇒ `test_tableBlockMatches` 红（8 passed/1 failed），
+      还原 md5 逐字节一致；②把生成器的"层外读者"退化成"全部读者" ⇒ **4 格红**，其中
+      `test_sampleRowsAgreeWithImportersOfModule`（与单点取数口的抽样交叉验证）与
+      `test_statusesPartitionTheRows` 正命；还原 md5 一致（ad22f37aec68）。
+    - **旁路与常驻守卫**：dev-path／面自证棘轮／子进程编码棘轮／扫描面单源／夜间档／四档文档守卫
+      一次 **207 passed / 1 skipped**（跳过的是未推送窗口无对象那格）。
+    - **INDEX**：新增「[权威] 认知层现役组件表（机器生成，逐格与生成器比对）」一行；
+      第 1 节「认知架构」一栏指向它作为现行状态入口（CogArch 保持沿革）。
+    - **边界（写在文档里）**：表只回答"哪有模块、谁在读"，不含运行时是否被调用、不含动态装配；
+      与 D19 那套闭包/剖面证据是互补的两把尺，不可互相替代。
+    - **净 LOC**：生产池 0/0；测试/基建池 +533/−1 ＝ 净 +532（生成器 183、判据 125、文档 180、INDEX 2/−1、子集 4、本格 39）。子集现值 **650→651**（新判据档登记）。
+    - **仍开**：等裁七条＋"四旋钮接不接"＋`conflict_detector_v2` 补档＋`permissions` 声明；
+      本批新增待档：零读者 6 档（2807 行）与仅测试 6 档（2067 行）。
+    - **本会话下一枚空号现查 §6-367**（写前必须现场重取；本笔落库时该读数为 366）。
