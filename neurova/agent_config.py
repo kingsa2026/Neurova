@@ -37,11 +37,7 @@ class AgentConfigManager:
 
         # 配置文件路径
         self._agents_file = self._config_dir / "agents.json"
-        self._souls_dir = self._config_dir / "souls"
         self._models_file = self._config_dir / "models.json"
-
-        # 确保目录存在
-        self._souls_dir.mkdir(parents=True, exist_ok=True)
 
         # 初始化文件
         self._init_files()
@@ -223,10 +219,6 @@ class AgentConfigManager:
             self._agents[agent_id] = agent_config
             self._save_agents_list(self._agents)
 
-            # 创建灵魂文件目录
-            soul_dir = self._souls_dir / agent_id
-            soul_dir.mkdir(parents=True, exist_ok=True)
-
             logger.info("创建 Agent: %s - %s", agent_id, name)
             return True
 
@@ -275,13 +267,6 @@ class AgentConfigManager:
             del self._agents[agent_id]
             self._save_agents_list(self._agents)
 
-            # 删除灵魂文件目录
-            soul_dir = self._souls_dir / agent_id
-            if soul_dir.exists():
-                import shutil
-
-                shutil.rmtree(soul_dir)
-
             logger.info("删除 Agent: %s", agent_id)
             return True
 
@@ -296,7 +281,9 @@ class AgentConfigManager:
             灵魂配置，不存在返回 None
         """
         with self._lock:
-            soul_file = self._souls_dir / agent_id / "soul.json"
+            from neurova.core.agent_workspaces import get_agent_soul_path
+
+            soul_file = get_agent_soul_path(agent_id)
 
             if not soul_file.exists():
                 return None
@@ -320,7 +307,9 @@ class AgentConfigManager:
             是否保存成功
         """
         with self._lock:
-            soul_file = self._souls_dir / agent_id / "soul.json"
+            from neurova.core.agent_workspaces import get_agent_soul_path
+
+            soul_file = get_agent_soul_path(agent_id)
 
             try:
                 # 确保目录存在

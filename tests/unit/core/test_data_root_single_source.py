@@ -49,6 +49,7 @@ class TestDataRootIsSingleSource:
     def test_agentDataDirJoinsAgentId(self, monkeypatch, tmp_path):
         from neurova.core.data_root import get_agent_data_dir
 
+        monkeypatch.delenv("NEUROVA_AGENT_WORKSPACES_DIR", raising=False)
         monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
         assert get_agent_data_dir("kai") == tmp_path / "kai"
         assert get_agent_data_dir("") == tmp_path / "default"
@@ -184,10 +185,8 @@ class TestMemoryBodyLandingIsOneDerivation:
         assert "get_agent_data_dir" not in engineSrc, "引擎仍在自己拼 data/{agent_id}"
 
     def testDeleteEndpointStillSharesTheResolver(self):
-        from neurova.core.data_root import get_agent_data_dir
-
         consumer = (NEUROVA / "api" / "endpoints" / "agent.py").read_text(encoding="utf-8")
-        assert get_agent_data_dir.__name__ in consumer, (
+        assert "get_agent_root_dir" in consumer, (
             "删除端点仍按 Path('data')/agent_id 推导——与写入端不是一处，"
             "CWD 一变就删不掉"
         )

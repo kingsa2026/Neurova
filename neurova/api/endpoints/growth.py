@@ -57,7 +57,6 @@ from neurova.api.endpoints.constitution_persistence import (  # noqa: E402,F401
     save_constitution_rules as _save_constitution_rules,
 )
 from neurova.api.endpoints.personality_persistence import (  # noqa: E402,F401
-    PERSONALITY_DIR as _PERSONALITY_DIR,
     PersonalityUpdate,
     load_personality_data as _load_personality_data,
     save_personality_data as _save_personality_data,

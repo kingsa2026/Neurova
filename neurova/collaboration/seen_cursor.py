@@ -6,6 +6,7 @@ import json
 import hashlib
 import threading
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 
@@ -96,7 +97,8 @@ class SeenCursorManager:
         if self._initialized:
             return
 
-        self.data_dir = callerPath(data_dir, "seen-cursors")
+        self._explicit_dir = bool(data_dir)
+        self.data_dir = callerPath(data_dir, "seen-cursors") if data_dir else None
 
         # Thread safety
         self._lock = threading.RLock()
@@ -121,7 +123,9 @@ class SeenCursorManager:
         self._load_cursors()
 
     def _init_dirs(self) -> None:
-        """初始化目录结构"""
+        """初始化目录结构（默认布局由各 agent 根目录按需创建）。"""
+        if not self._explicit_dir:
+            return
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             (self.data_dir / "agents").mkdir(exist_ok=True)
@@ -131,14 +135,29 @@ class SeenCursorManager:
         except Exception as e:
             logger.error(f"Failed to initialize directories: {e}")
 
+    def _cursor_file(self, agent_id: str) -> Path:
+        if self._explicit_dir:
+            return self.data_dir / "agents" / f"{agent_id}.json"
+        from neurova.core.agent_workspaces import get_agent_cursors_path
+
+        return get_agent_cursors_path(agent_id)
+
+    def _iter_cursor_files(self):
+        if self._explicit_dir:
+            agents_dir = self.data_dir / "agents"
+            return agents_dir.glob("*.json") if agents_dir.exists() else ()
+        from neurova.core.agent_workspaces import discover_agent_ids, get_agent_cursors_path
+
+        return (
+            path
+            for path in (get_agent_cursors_path(aid) for aid in discover_agent_ids())
+            if path.is_file()
+        )
+
     def _load_cursors(self) -> None:
         """加载所有 Seen Cursors"""
         try:
-            agents_dir = self.data_dir / "agents"
-            if not agents_dir.exists():
-                return
-
-            for agent_file in agents_dir.glob("*.json"):
+            for agent_file in self._iter_cursor_files():
                 try:
                     with open(agent_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
@@ -167,8 +186,8 @@ class SeenCursorManager:
     def _save_agent_cursors(self, agent_id: str) -> bool:
         """保存 agent 的所有 cursors"""
         try:
-            agents_dir = self.data_dir / "agents"
-            agent_file = agents_dir / f"{agent_id}.json"
+            agent_file = self._cursor_file(agent_id)
+            agent_file.parent.mkdir(parents=True, exist_ok=True)
 
             data = {
                 "agent_id": agent_id,

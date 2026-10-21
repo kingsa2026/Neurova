@@ -2,7 +2,7 @@
 """三库路由（Wave H-W1，三层技能库存储地基）
 
 词汇沿用退役孤岛 SkillPoolType（吸收清单见 docs §7.5）：
-- ``agent``：agent 私库 = ``data/agents/{agent_id}/skills``（现状，零迁移）；
+- ``agent``：agent 私库 = ``data/{agent_id}/skills``；
 - ``user``：用户私库 = ``data/users/{ukey}/skills``；
 - ``public``：公共库 = ``data/public/skills``。
 
@@ -100,7 +100,9 @@ def resolve_library_dir(pool: str, owner_key: str = "") -> Path:
     token = str(owner_key or "").strip()
     if not token or not re.match(r"^[A-Za-z0-9_\-]+$", token):
         raise ValueError(f"非法 agent id（agent 库路由）: {owner_key!r}")
-    return _BASE_DIR / "agents" / token / "skills"
+    from neurova.core.agent_workspaces import get_agent_skills_dir
+
+    return get_agent_skills_dir(token)
 
 
 def get_library(pool: str, owner_key: str = ""):

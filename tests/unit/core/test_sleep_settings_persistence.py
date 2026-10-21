@@ -25,7 +25,7 @@ def consolidation(tmp_path):
 
 
 def _store(tmp_path, agent_id="agent_a") -> SleepSettingsStore:
-    return SleepSettingsStore(agent_id, base_dir=str(tmp_path))
+    return SleepSettingsStore(agent_id)
 
 
 def _record(rid: str, content: str, **kwargs) -> MemoryRecord:
@@ -64,7 +64,7 @@ class TestSettingsPersistence:
         """agent_id 白名单: 目录穿越/特殊字符被拒绝"""
         for bad in ["../evil", "a/b", "a b", ".hidden", "", "a" * 65]:
             with pytest.raises(ValueError):
-                SleepSettingsStore(bad, base_dir=str(tmp_path))
+                SleepSettingsStore(bad)
 
     def test_no_store_no_persistence(self, consolidation):
         consolidation.update_settings({"auto_sleep_enabled": False})

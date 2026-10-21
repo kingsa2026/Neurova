@@ -17,6 +17,7 @@ from unittest import mock
 
 from neurova.api.endpoints import artifacts_api
 from neurova.api.endpoints.artifacts_api import _extract_artifacts
+from neurova.core.agent_workspaces import get_agent_workspace_dir
 
 
 class TestExtractArtifacts(unittest.TestCase):
@@ -29,7 +30,7 @@ class TestExtractArtifacts(unittest.TestCase):
         )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
-        self.ws = Path(self.tmp) / "ag1"
+        self.ws = get_agent_workspace_dir("ag1")
         self.ws.mkdir(parents=True)
         self.md = self.ws / "report.md"
         self.md.write_text("# report", encoding="utf-8")
@@ -101,7 +102,7 @@ class TestReadResultsAreNotArtifacts(unittest.TestCase):
         )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
-        self.ws = Path(self.tmp) / "ag1"
+        self.ws = get_agent_workspace_dir("ag1")
         self.ws.mkdir(parents=True)
         self.md = self.ws / "note.md"
         self.md.write_text("# note", encoding="utf-8")

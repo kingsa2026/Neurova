@@ -1192,11 +1192,11 @@ _AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _LEGACY_LAYOUT_FILES = ("nodes.json", "edges.json", "merges.json")
 
 
-def _agent_graph_root() -> str:
-    """per-agent 图谱根目录（agent 工作区根，与 memory.db 同源）。"""
-    from neurova.core.agent_workspaces import get_agent_workspaces_root
+def _agent_graph_dir(agent_id: str) -> Path:
+    """per-agent 图谱目录（agent 工作区下的 knowledge_graph/）。"""
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
 
-    return str(get_agent_workspaces_root())
+    return get_agent_workspace_dir(agent_id) / "knowledge_graph"
 
 
 def _migrate_legacy_graph_layout(legacy_dir: str, target_dir: Path) -> bool:
@@ -1238,7 +1238,7 @@ def get_agent_knowledge_graph_manager(
         if manager is not None:
             return manager
 
-        storage_dir = Path(_agent_graph_root()) / agent_id / "knowledge_graph"
+        storage_dir = _agent_graph_dir(agent_id)
 
         # 旧全局布局只有 default 的历史数据，一次性认领迁移
         if agent_id == "default":

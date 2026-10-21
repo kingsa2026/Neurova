@@ -386,8 +386,13 @@ class SelfImprovementProposer:
         self._agent_id = str(agent_id)
 
         if proposals_dir is None:
-            root = callerPath(os.environ.get("NEUROVA_PROPOSALS_ROOT"), "agents")
-            proposals_dir = root / self._agent_id / "proposals"
+            env_root = os.environ.get("NEUROVA_PROPOSALS_ROOT")
+            if env_root:
+                proposals_dir = Path(env_root) / self._agent_id / "proposals"
+            else:
+                from neurova.core.agent_workspaces import get_agent_proposals_dir
+
+                proposals_dir = get_agent_proposals_dir(self._agent_id)
         self._proposals_dir = Path(proposals_dir)
         self._proposals_dir.mkdir(parents=True, exist_ok=True)
 

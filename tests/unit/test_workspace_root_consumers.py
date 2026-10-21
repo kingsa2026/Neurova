@@ -42,7 +42,7 @@ def test_import_kai_target_falls_back_to_given_root(tmp_path, monkeypatch):
 
     target = script.resolve_agent_memory_dir(tmp_path / "install", "kai")
 
-    assert target == tmp_path / "install" / "agent_workspaces" / "kai" / "memory"
+    assert target == tmp_path / "install" / "data" / "kai" / "memory"
 
 
 def test_bundled_layout_name_matches_resolver_default(tmp_path, monkeypatch):
@@ -50,9 +50,11 @@ def test_bundled_layout_name_matches_resolver_default(tmp_path, monkeypatch):
     stage = tmp_path / "stage"
     stage.mkdir()
     monkeypatch.delenv("NEUROVA_AGENT_WORKSPACES_DIR", raising=False)
+    monkeypatch.delenv("NEUROVA_DATA_DIR", raising=False)
 
     from neurova.core.agent_workspaces import get_agent_workspaces_root
 
     bundle.ensure_runtime_dirs(stage)
 
-    assert (stage / get_agent_workspaces_root().name / "default").is_dir()
+    assert get_agent_workspaces_root().name == "data"
+    assert (stage / "data" / "default" / "workspaces").is_dir()

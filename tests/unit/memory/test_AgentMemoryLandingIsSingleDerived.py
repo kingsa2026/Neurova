@@ -92,7 +92,7 @@ def testAgentCoreTakesTheSharedDerivation():
     tree = ast.parse(src.read_text(encoding="utf-8"))
     called = {n.func.id for n in ast.walk(tree)
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    assert "agentMemoryDbPathUnder" in called, (
+    assert "get_agent_memory_db_path" in called, (
         "agent_core 没走单源推导（现有调用名=%s）" % sorted(c for c in called if "emory" in c)
     )
 
@@ -105,8 +105,7 @@ def testDefaultDbPathStillPointsWhereItDid():
     from neurova.cognitive_layers.memory_layer.manager import _default_db_path_for
 
     derived = _default_db_path_for("probe-agent")
-    expected = agent_workspaces.agentMemoryDbPathUnder(
-        agent_workspaces.get_agent_workspace_dir("probe-agent"))
+    expected = agent_workspaces.get_agent_memory_db_path("probe-agent")
     assert Path(derived) == expected, (
         "默认落点与单源推导不一致（实得 %s ↔ 期望 %s）" % (derived, expected)
     )

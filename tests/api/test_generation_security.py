@@ -63,10 +63,12 @@ async def test_persist_media_rejects_private_outbound(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def ref_roots(tmp_path, monkeypatch):
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
     monkeypatch.setattr(gen, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(gen, "GENERATION_OUTPUT_DIR", tmp_path / "data" / "generations")
     monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces"))
-    (tmp_path / "agent_workspaces" / "a1").mkdir(parents=True)
+    get_agent_workspace_dir("a1").mkdir(parents=True)
     (tmp_path / "data" / "generations").mkdir(parents=True)
     return tmp_path
 
@@ -87,7 +89,9 @@ def test_ref_images_rejects_relative(ref_roots):
 
 
 def test_ref_images_accepts_url_and_whitelisted_file(ref_roots):
-    inside = ref_roots / "agent_workspaces" / "a1" / "ref.png"
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    inside = get_agent_workspace_dir("a1") / "ref.png"
     inside.write_bytes(b"x")
     gen._validate_ref_images(["https://example.com/a.png", "data:image/png;base64,AA", str(inside)])
 

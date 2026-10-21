@@ -32,7 +32,9 @@ def ws_env(tmp_path, monkeypatch):
 
 
 def _make_workspace(root, agent_id="w1"):
-    agent_dir = root / agent_id
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    agent_dir = get_agent_workspace_dir(agent_id)
     (agent_dir / "sub").mkdir(parents=True)
     (agent_dir / "a.txt").write_text("hello", encoding="utf-8")
     (agent_dir / "sub" / "b.bin").write_bytes(b"\x00\x01\x02")

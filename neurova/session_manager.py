@@ -7,7 +7,6 @@ import json
 import hashlib
 import re
 from collections import OrderedDict
-from neurova.core.data_root import dataLanding
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
 import threading
@@ -188,24 +187,26 @@ class SessionManager(SessionRepository):
     )
     _sidecar_cache: "OrderedDict" = OrderedDict()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, sessions_dir: Optional[str] = None):
+    def __init__(self, sessions_dir: Optional[str] = None, *, exact_agent_dir: bool = False):
         if not hasattr(self, "_initialized"):
             self._initialized = True
             # NEUROVA_SESSIONS_DIR 环境变量供测试隔离（单例 __new__ 下
             # 构造参数只在首次生效，env 是唯一可靠覆盖通道）
             # 会话存档落点：显式入参 > NEUROVA_SESSIONS_DIR > 数据根下的 sessions/。
-            # 原兜底是裸相对名 `"sessions"`——换个启动目录就读到另一份会话库。
+            # 显式入参/env 默认是扁平覆盖（<root>/<agent_id>/）；exact_agent_dir=True
+            # 时入参就是该 agent 的会话目录本身（CLI 导入器等已知精确落点的调用方）。
             explicit = sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR")
-            self._sessions_dir = (Path(explicit) if explicit
-                                  else dataLanding("sessions"))
-            self._sessions_dir.mkdir(parents=True, exist_ok=True)
+            self._exact_agent_dir = bool(exact_agent_dir)
+            self._sessions_dir = Path(explicit) if explicit else None
+            if self._sessions_dir is not None:
+                self._sessions_dir.mkdir(parents=True, exist_ok=True)
             # 2026-09-07 根因修复（audit SUB-P0-6）：文件锁改 RLock——
             # _quarantine_broken_file 在 add_message 等持锁路径内被调用且
             # 自行再次取锁，非重入 Lock 会同线程永久死锁
@@ -245,9 +246,36 @@ class SessionManager(SessionRepository):
         文件（会被 list_sessions 漏扫），统一归入 default/。
         """
         effective_agent_id = agent_id or "default"
-        agent_dir = self._sessions_dir / effective_agent_id
-        agent_dir.mkdir(exist_ok=True)
+        if self._sessions_dir is not None:
+            agent_dir = self._sessions_dir if getattr(self, "_exact_agent_dir", False) else self._sessions_dir / effective_agent_id
+        else:
+            from neurova.core.agent_workspaces import get_agent_sessions_dir
+
+            agent_dir = get_agent_sessions_dir(effective_agent_id)
+        agent_dir.mkdir(parents=True, exist_ok=True)
         return agent_dir
+
+    def _all_session_dirs(self) -> List[Path]:
+        """全部 agent 的会话目录（发现式，不创建缺失目录）。"""
+        if self._sessions_dir is not None:
+            if getattr(self, "_exact_agent_dir", False):
+                return [self._sessions_dir] if self._sessions_dir.is_dir() else []
+            if not self._sessions_dir.is_dir():
+                return []
+            return [d for d in self._sessions_dir.iterdir() if d.is_dir()]
+        from neurova.core.agent_workspaces import discover_agent_ids, get_agent_sessions_dir
+
+        return [
+            path
+            for path in (get_agent_sessions_dir(aid) for aid in discover_agent_ids())
+            if path.is_dir()
+        ]
+
+    def _agent_id_for_session_dir(self, agent_dir: Path) -> str:
+        """会话目录反解 agent_id（v2 为 `<root>/<id>/sessions`，扁平覆盖为 `<root>/<id>`）。"""
+        if self._sessions_dir is not None and not getattr(self, "_exact_agent_dir", False):
+            return agent_dir.name
+        return agent_dir.parent.name
 
     def _get_session_file(self, agent_id: str, session_id: str, date: str = None) -> Path:
         """获取session文件路径（外部 id 先归一，老库源名兜底）。
@@ -1426,9 +1454,7 @@ class SessionManager(SessionRepository):
         if not session_id:
             return None
         try:
-            for agent_dir in self._sessions_dir.iterdir():
-                if not agent_dir.is_dir():
-                    continue
+            for agent_dir in self._all_session_dirs():
                 matches = self._find_session_files(agent_dir, session_id)
                 if not matches:
                     continue
@@ -1440,7 +1466,8 @@ class SessionManager(SessionRepository):
                 return {
                     "session_id": sid or session_id,
                     "id": sid or session_id,
-                    "agent_id": data.get("agent_id", "") or agent_dir.name,
+                    "agent_id": data.get("agent_id", "")
+                    or self._agent_id_for_session_dir(agent_dir),
                     "title": data.get("title", "新对话"),
                     "user_id": data.get("user_id", ""),
                     "created_at": data.get("created_at", ""),
@@ -1464,7 +1491,7 @@ class SessionManager(SessionRepository):
         if agent_id:
             agent_dirs = [self._get_session_dir(agent_id)]
         else:
-            agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
+            agent_dirs = self._all_session_dirs()
 
         fast = self._summaries_via_sidecar(agent_dirs, user_id)
         if fast is not None:
@@ -1482,8 +1509,8 @@ class SessionManager(SessionRepository):
         else:
             archived_dirs = [
                 d / "archived"
-                for d in self._sessions_dir.iterdir()
-                if d.is_dir() and (d / "archived").is_dir()
+                for d in self._all_session_dirs()
+                if (d / "archived").is_dir()
             ]
 
         fast = self._summaries_via_sidecar(archived_dirs, user_id)
@@ -1518,9 +1545,7 @@ class SessionManager(SessionRepository):
         if agent_id:
             agent_dirs = [self._get_session_dir(agent_id)]
         else:
-            if not self._sessions_dir.is_dir():
-                return 0
-            agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
+            agent_dirs = self._all_session_dirs()
 
         seen: set = set()
         for agent_dir in agent_dirs:

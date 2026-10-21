@@ -86,14 +86,15 @@ def _count_persist_rows(db_path: str) -> int:
 
 
 def _GLOB_AGENT_WORKSPACES() -> list:
-    """标准布局兜底：agent_workspaces/*/memory/neurova_memories_persist.db。"""
+    """标准布局：data/<agent_id>/memory/neurova_memories_persist.db。"""
     try:
-        import glob
+        from neurova.core.agent_workspaces import discover_agent_ids, get_agent_memory_dir
 
-        from neurova.core.agent_workspaces import get_agent_workspaces_root
-
-        base_dir = get_agent_workspaces_root()
-        return glob.glob(str(base_dir / "*" / "memory" / "neurova_memories_persist.db"))
+        return [
+            str(get_agent_memory_dir(agent_id) / "neurova_memories_persist.db")
+            for agent_id in discover_agent_ids()
+            if (get_agent_memory_dir(agent_id) / "neurova_memories_persist.db").is_file()
+        ]
     except Exception:
         return []
 

@@ -421,8 +421,13 @@ class SkillEvolutionService:
 
     def __init__(self, agent_id: str, base_dir: Optional[Path] = None):
         self.agent_id = agent_id
-        # 显式 base_dir 就是进化目录本身；缺省才按数据根推出 agents/<id>/evolution
-        self._dir = Path(base_dir) if base_dir else get_data_root() / "agents" / str(agent_id) / "evolution"
+        # 显式 base_dir 就是进化目录本身；缺省落在 <agent_root>/evolution
+        if base_dir:
+            self._dir = Path(base_dir)
+        else:
+            from neurova.core.agent_workspaces import get_agent_evolution_dir
+
+            self._dir = get_agent_evolution_dir(agent_id)
         self._proposals_file = self._dir / "proposals.json"
         self._history_ledger = None  # P1-4：懒创建
         self._skill_journal = None  # P2-11：懒创建

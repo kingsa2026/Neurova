@@ -33,13 +33,11 @@ services:
       # 多副本/多实例场景必须由宿主提供（缺省时空值 → 自动生成，写容器内文件，
       # 重启即失效）。单机默认留空即可。
       - NEUROVA_JWT_SECRET=${NEUROVA_JWT_SECRET:-}
-      # 会话存档落点。应用侧默认落数据根（/app/data/sessions），本行显式指回
-      # 既有卷，老部署的会话档案不因落点收口而失联（SessionManager 真读这个键）。
-      - NEUROVA_SESSIONS_DIR=/app/sessions
+      # v2 统一布局：会话/工作区/记忆/配置均落在数据根 `/app/data/<agent_id>/` 下。
+      # 旧的 neurova-workspaces / neurova-sessions 卷不再挂载；升级前先跑
+      # `python scripts/agent_layout_migration.py --apply` 把旧卷内容迁进数据根。
     volumes:
       - neurova-data:/app/data
-      - neurova-workspaces:/app/agent_workspaces
-      - neurova-sessions:/app/sessions
       - neurova-logs:/app/logs
       - ./config:/app/config:ro
     healthcheck:
@@ -89,10 +87,6 @@ services:
 
 volumes:
   neurova-data:
-    driver: local
-  neurova-workspaces:
-    driver: local
-  neurova-sessions:
     driver: local
   neurova-logs:
     driver: local

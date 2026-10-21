@@ -66,15 +66,15 @@ def require_data_path(value, what: str = "数据路径") -> Path:
 
 
 def get_agent_data_dir(agent_id: str = "") -> Path:
-    """单个 agent 的数据目录（agent_id 空值回落 default）。
+    """单个 agent 的根目录（agent_id 空值回落 default）。
 
-    认知图谱等**按 agent 分目录**的数据面走这里，与 `agent_workspaces` 的
-    `<root>/<agent>/` 形状对齐；写它的地方与删它的地方必须都取这个函数，
-    否则 CWD 一变删除端就删不掉。
+    v2 统一布局后，agent 的会话/工作区/记忆/配置/技能等私有面全部收在
+    `data/<agent_id>/` 下；本函数是那条根的兼容入口，实际推导由
+    `core.agent_workspaces.get_agent_root_dir` 单点持有。
     """
-    from neurova.core.agent_workspaces import _DEFAULT_AGENT_ID
+    from neurova.core.agent_workspaces import get_agent_root_dir
 
-    return get_data_root() / (agent_id or _DEFAULT_AGENT_ID)
+    return get_agent_root_dir(agent_id)
 
 
 def ensure_agent_data_dir(agent_id: str = "") -> Path:
