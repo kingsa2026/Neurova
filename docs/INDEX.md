@@ -148,6 +148,7 @@
 [`08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md`](08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md)（外部图谱工具链 Semantica 与 Neurova 知识库/知识图谱代码级对比：22.4 万行的「账面功能 vs 已接线」逐层清点、本仓五条自有断点 N1–N6 与候选 K1–K8，研究参考）
 [`08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)（ModularRSI 论文与 Neurova harness 层自改进对照：可演化面覆盖面 M-A、联合轮归因 M-B、跨基座迁移 M-C、难度维只写不读 M-D、环节归因 M-E，只记两篇 RSI 前作未覆盖的增量，研究参考）
 [`08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md`](08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md)（google-research/harness2 与 Neurova 递归 harness 优化代码级对比：十维加权（权重 100% 归一）当前评估 7.8 vs 8.1、生产就绪度单列、本仓断点 N1–N8 与候选 C1–C8，N1–N8 已落地/部分落地、闭环 A–D 与 N6/C6/N8、完整工具 trace、跨域 UI、产物二进制证据与独立采纳流已落，研究参考）
+[`08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md`](08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md)（T-Mem 论文与 Neurova 记忆系统代码级对比：无表面重合联想召回的可达性上界、写入侧预演成本复算、本仓断点 D1–D7 与候选 TM-1..TM-6、不照搬清单，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
