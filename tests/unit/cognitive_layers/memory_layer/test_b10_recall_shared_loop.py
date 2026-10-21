@@ -55,15 +55,22 @@ class TestB10SharedRecallLoop:
             return "ok"
 
         assert NeurovaRecallEngine._run_coroutine_in_thread(fast(), join_timeout=5.0) == "ok"
-        baseline_threads = threading.active_count()
 
         async def hang():
             await asyncio.sleep(3600)
 
+        namesBefore = sorted(t.name for t in threading.enumerate())
         result = NeurovaRecallEngine._run_coroutine_in_thread(hang(), join_timeout=0.2)
         assert result is None, "超时必须返回 None（调用方以空结果继续）"
-        assert threading.active_count() == baseline_threads, (
+        namesAfter = sorted(t.name for t in threading.enumerate())
+        # 契约是「不增长」：无关线程池（如 mem-dep 空闲线程）退出会让总数下降，
+        # 等值断言会把正常萎缩误判成回归；同时钉住共享 loop 仍恰好一条。
+        assert len(namesAfter) <= len(namesBefore), (
             "超时后线程数不得增长（旧实现弃置线程 → 渐进堆积）"
+            f" before={namesBefore} after={namesAfter}"
+        )
+        assert _recall_loop_thread_count() == 1, (
+            f"共享召回 loop 应恰好一条，实为 {namesAfter}"
         )
 
     def test_multiple_calls_share_one_loop_no_per_call_thread(self):

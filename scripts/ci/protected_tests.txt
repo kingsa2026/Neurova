@@ -3469,3 +3469,6 @@ tests/unit/cognitive_layers/memory_layer/test_conflictDetectorV2Retirement.py
 # D19 重做第 2 组退役（§6-376）：memory_index／vector_index_manager／vector_search 三档
 # 导入均 ModuleNotFoundError；隔离 tags 已并进 MemoryStorage.list_by_tags（由 storage 测试守）。
 tests/unit/memory/test_d19SecondRoundRetirements.py
+# 反馈自适应通道权重（§6-377）：like/dislike 调意图权重并落盘／召回带 session 记归属／
+# 插件通道首次召回补激活（注册≠可用）／适配器透传 session／真 HTTP 端点接线。
+tests/unit/cognitive_layers/memory_layer/test_channelFeedbackAdaptiveWeights.py
