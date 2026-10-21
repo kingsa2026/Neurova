@@ -175,16 +175,21 @@ class GlanceYieldChecker:
         model_name: str,
         proposed_operations: List[str],
         conversation_id: Optional[str] = None,
+        adoptModelSwitch: bool = False,
     ) -> YieldDecision:
         """
         Main entry point: Check all yield rules
+
+        `adoptModelSwitch` 只由**客户端显式选型**的入口传 True（控制台、
+        `/v1/chat*`）：那里的模型变化是用户的决定，不是 agent 漂移。渠道/自动
+        入口保持 False——它们未来若开始传显式模型，仍按漂移判。
 
         Returns decision on whether agent should proceed or yield
         """
         # Update stats
         self._stats['total_checks'] += 1
         # Layer 1: Model pin validation
-        decision = self._check_model_pin(agent_id, model_name)
+        decision = self._check_model_pin(agent_id, model_name, adoptModelSwitch)
         if decision.should_yield:
             return decision
 
@@ -224,8 +229,15 @@ class GlanceYieldChecker:
         self._stats['proceeds'] += 1
         return YieldDecision(should_yield=False)
 
-    def _check_model_pin(self, agent_id: str, model_name: str) -> YieldDecision:
-        """Layer 1: Validate model pin"""
+    def _check_model_pin(
+        self, agent_id: str, model_name: str, adoptModelSwitch: bool = False
+    ) -> YieldDecision:
+        """Layer 1: Validate model pin
+
+        `adoptModelSwitch=True` 时，模型变化＝用户改选，重设 pin 后放行；否则
+        维持"等也不会自愈"的漂移判定。这个开关只能由入口层按 `entry` 派生，
+        不能让闸自己猜——闸分不清"用户换模型"和"agent 私自漂移"。
+        """
         if not (model_name or "").strip():
             # 未归因的回合**不建立 pin，也不判漂移**。默认路径就这样：前端没选
             # 模型时不传 model（`ChatPage.vue` 的 `selectedModel.value || undefined`），
@@ -240,6 +252,17 @@ class GlanceYieldChecker:
 
         pinned_model = self._agent_pins[agent_id].model_name
         if model_name != pinned_model:
+            if adoptModelSwitch:
+                # 客户端选型入口：用户改选就是新事实。不重设 pin 的话，下一轮
+                # 同一模型仍会撞旧 pin；而 pin 同时是并发槽的归因键，跟着改才
+                # 能占对桶（完成侧按本回合模型释放，见 record_operation_complete）。
+                logger.info(
+                    "Model pin adopted (client-selected): agent=%s, %s -> %s",
+                    agent_id, pinned_model, model_name,
+                )
+                self.register_agent(agent_id, model_name)
+                return YieldDecision(should_yield=False)
+
             logger.warning(
                 f"Model pin violation: agent={agent_id}, "
                 f"pinned={pinned_model}, requested={model_name}"
@@ -435,9 +458,15 @@ class GlanceYieldChecker:
         agent_id: str,
         operation_hash: str,
         success: bool,
+        modelName: Optional[str] = None,
     ) -> None:
-        """Record operation completion and update pacing stats"""
-        model_name = self._occupiedModel(agent_id)
+        """Record operation completion and update pacing stats
+
+        `modelName` 是**本回合实际使用的模型**（闸的结论自带）。换 pin 之后不能再按
+        `_occupiedModel()` 读当前 pin：同一 agent 两个标签页各用一个模型时，后开工的
+        回合会把前一个模型的槽释放错，旧槽要等 600s 租约才回收。
+        """
+        model_name = modelName or self._occupiedModel(agent_id)
         if model_name in self._activeOps:
             self._activeOps[model_name].pop(agent_id, None)
             if not self._activeOps[model_name]:

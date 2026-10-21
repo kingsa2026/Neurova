@@ -23,7 +23,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "_tool_experience_loop_probe.py"
 #: 取证锚点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-REPO_AGENTS = REPO_ROOT / "data" / "agents"
+#: v2 布局下 agent 私有面在 `data/<id>/`，旧 `data/agents/<id>/` 只剩登记索引。
+REPO_PROBE_AGENT_ROOTS = (
+    REPO_ROOT / "data" / "loop-probe-cli",
+    REPO_ROOT / "data" / "agents" / "loop-probe-cli",
+)
 
 
 def runProbeScript(*args: str, timeout: int = 300):
@@ -54,20 +58,12 @@ class TestOfflineProbeScript:
         assert payload["evidence_rows"] >= 1, "离线替身一轮之后证据库没有行"
 
     def test_probe_leaves_no_artifacts_in_the_repo(self, tmp_path):
-        """取证不得在仓库里长出 `data/agents/<id>/skills`。
-
-        技能库路径在生产装配点里是相对路径，脚本若不在临时目录下跑，
-        一次只读取证就会往仓库里落下 `data/agents/loop-probe-cli/skills`。
-        """
-        before = {p.name for p in REPO_AGENTS.iterdir()} if REPO_AGENTS.exists() else set()
-        assert len(before) > 5, (
-            f"取证前仓内 agents 目录现读 {len(before)} 个条目（锚＝{REPO_AGENTS}）——"
-            "锚指错或目录缺席时 before/after 都是空集，「没留下 artifacts」这句判定根本不来自代码")
+        """取证不得在仓库里长出探针 agent 的私有面（新旧布局都查）。"""
+        existing = [str(p) for p in REPO_PROBE_AGENT_ROOTS if p.exists()]
+        assert existing == [], f"取证前仓库里已有探针 artifact：{existing}"
         runProbeScript("--json")
-        after = {p.name for p in REPO_AGENTS.iterdir()} if REPO_AGENTS.exists() else set()
-        assert after - before == set(), (
-            f"只读取证在仓库里留下了目录/文件：{sorted(after - before)}"
-        )
+        left = [str(p) for p in REPO_PROBE_AGENT_ROOTS if p.exists()]
+        assert left == [], f"只读取证在仓库里留下了目录/文件：{left}"
 
     def test_probe_never_points_at_the_production_db(self, tmp_path):
         """脚本必须把库落进临时目录，禁止把生产库路径写进代码。"""

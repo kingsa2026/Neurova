@@ -384,9 +384,12 @@
                     <span v-if="m.is_active" class="nr-mm-active-dot" title="Active"></span>
                   </div>
                   <span class="nr-mm-item-id">{{ m.id }}</span>
-                  <div v-if="coreCapabilityLabels(m).length > 0 || m.context_window" class="nr-mm-item-caps">
+                  <div v-if="coreCapabilityLabels(m).length > 0 || m.context_window || m.max_output_tokens" class="nr-mm-item-caps">
                     <span v-for="cap in coreCapabilityLabels(m)" :key="cap.key" class="nr-mm-cap" :class="'nr-mm-cap-' + cap.key">{{ cap.label }}</span>
                     <span v-if="m.context_window" class="nr-mm-cap nr-mm-cap-limit">{{ modelLimitLabel(m) }}</span>
+                    <span v-if="m.max_output_tokens" class="nr-mm-cap nr-mm-cap-limit" :title="t('model.probeOutputLimitTip')">
+                      {{ t('model.probeOutputValue', { value: m.max_output_tokens }) }}
+                    </span>
                   </div>
                 </div>
                 <div class="nr-mm-item-tags">
@@ -401,6 +404,9 @@
                   </button>
                   <button class="nr-mm-icon-btn" :title="t('model.probeMultimodalTip')" :disabled="probingModelId === m.id" @click="probeModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                  </button>
+                  <button class="nr-mm-icon-btn" :title="t('model.probeOutputLimitTip')" :disabled="probingOutputModelId === m.id" @click="probeOutputLimitForModel(m)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M6 16 18 4"/><path d="m14 4 6 6"/></svg>
                   </button>
                   <button class="nr-mm-icon-btn" :title="t('model.editModel')" @click="startEditModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
@@ -486,7 +492,7 @@ import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, mergeDiscoveredModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
 import type { FilteredProviderModel } from '@/api/modules/providers'
-import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities, checkModelConnection, probeModelMultimodal } from '@/api/modules/models'
+import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities, checkModelConnection, probeModelMultimodal, probeOutputLimit as apiProbeOutputLimit } from '@/api/modules/models'
 import type { ModelConnectionResult } from '@/api/modules/models'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
@@ -521,6 +527,9 @@ function mapModel(m: any, fallbackProvider = ''): ModelItem {
     is_active: m.is_active === true,
     context_window: m.context_window,
     max_tokens: m.max_tokens,
+    max_output_tokens: m.max_output_tokens,
+    max_output_tokens_source: m.max_output_tokens_source,
+    max_output_tokens_probed_at: m.max_output_tokens_probed_at,
     pricing: m.pricing,
     owned_by: m.owned_by,
   }
@@ -1105,6 +1114,7 @@ const detectingCaps = ref(false)
 // ---------------------------------------------------------------------------
 const testingModelId = ref<string | null>(null)
 const probingModelId = ref<string | null>(null)
+const probingOutputModelId = ref<string | null>(null)
 // 模型连接测试结果容器（2026-09-14）：结果就地显示在对应模型行下方，
 // 缺 API Key / 余额不足等失败原因不再一闪而过的 toast。
 const modelTestResults = ref<Record<string, { type: 'success' | 'warning' | 'error'; text: string }>>({})
@@ -1163,6 +1173,33 @@ async function probeModel(m: ModelItem) {
     message.error(t('model.probeFailed'))
   } finally {
     probingModelId.value = null
+  }
+}
+
+/** 输出上限探测：一次最小请求，结果持久化到 providers.json，运行时直接读取。 */
+async function probeOutputLimitForModel(m: ModelItem) {
+  probingOutputModelId.value = m.id
+  try {
+    const res: any = await apiProbeOutputLimit({
+      provider_id: m.provider_id,
+      model_id: m.id,
+    }) as any
+    const result = res?.data ?? res ?? {}
+    if (result.supported === false) {
+      message.warning(result.detail || t('model.probeOutputUnsupported'))
+      return
+    }
+    const limit = Number(result.limit || 0)
+    if (limit > 0) {
+      message.success(t('model.probeOutputDone', { model: m.id, value: limit }))
+      await fetchModels()
+    } else {
+      message.warning(t('model.probeOutputInconclusive'))
+    }
+  } catch {
+    message.error(t('model.probeOutputFailed'))
+  } finally {
+    probingOutputModelId.value = null
   }
 }
 

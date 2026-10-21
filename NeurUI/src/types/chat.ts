@@ -77,6 +77,9 @@ export interface ChatMessage {
     reason: string
     attempts?: number
     waitedSeconds?: number
+    /** 模型漂移挂起时的冲突双方（由后端 parked 事件/读面带出） */
+    pinnedModel?: string
+    requestedModel?: string
   }
 }
 

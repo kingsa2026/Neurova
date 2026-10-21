@@ -71,6 +71,11 @@ class ModelInfo(BaseModel):
     capabilities: List[ProviderCapability] = Field(default_factory=list)
     max_tokens: int = 4096
     context_window: int = 4096
+    # 模型管理里一次性「输出上限探测」的持久化结果（providers.json model_metadata）。
+    # max_tokens 仍是目录/预埋值；本字段只承载本机已验证可接受的上限。
+    max_output_tokens: Optional[int] = None
+    max_output_tokens_source: str = ""
+    max_output_tokens_probed_at: str = ""
     pricing: Dict[str, float] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     # 归属服务商 id(_get_all_models 聚合视图用;model.py 端点按此映射 provider)

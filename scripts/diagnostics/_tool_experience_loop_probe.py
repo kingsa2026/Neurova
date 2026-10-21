@@ -100,10 +100,12 @@ def run_probe(workspace: Path, tool_name: str, arguments: str) -> Dict[str, Any]
 
     db_path = workspace / "experience_knowledge.db"
     os.environ["NEUROVA_EKB_DB"] = str(db_path)
-    # 技能库路径在生产装配点里是**相对路径**（`SkillService` 的
-    # `data/agents/<id>/skills`），因此取证期间把 cwd 切到临时目录：否则一次
-    # 只读取证就会在仓库里长出 `data/agents/loop-probe-cli/skills`。
-    # 仓库根已在 sys.path 上，模块导入不受影响（探针无 cwd 相对读取）。
+    # 2026-10-21：v2 布局下 agent 私有面走 `data/<agent_id>/` 的**绝对路径**
+    # （由 core/agent_workspaces 从数据根解析），单靠 chdir 已挡不住 —— 实测会
+    # 在仓库里长出 `data/loop-probe-cli/checkpoints.git`。把 agent 根父目录注入到
+    # 临时 workspace，技能/记忆/检查点随之一并隔离。
+    os.environ["NEUROVA_AGENT_WORKSPACES_DIR"] = str(workspace / "agents")
+    (workspace / "agents").mkdir(parents=True, exist_ok=True)
     previous_cwd = os.getcwd()
     os.chdir(workspace)
 

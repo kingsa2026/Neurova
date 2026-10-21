@@ -4,7 +4,8 @@
 每个模型的实际输出 token 上限。用于自动适配 max_tokens 参数，
 避免因超出限制导致 400 错误。
 
-来源: 各服务商官方文档 (2025 Q2)
+来源: 各服务商官方文档 (2025 Q2)。本机实测的输出上限走 providers.json 的
+`model_metadata[model].max_output_tokens`（模型管理一次性探测写入），不在此表重复。
 """
 
 from neurova.core.logger import get_logger
@@ -69,6 +70,35 @@ logger = get_logger(__name__)
 # 已告警过 clamp 的模型（按模型去重，避免每次请求刷 warning，L-18）
 _clamp_warned_models: set[str] = set()
 
+# ── 持久化输出上限（provider:model）──────────────────────────────────
+# 来源是 providers.json 的 model_metadata[model].max_output_tokens（由模型管理的
+# 一次性探测写入）。进程内镜像只为了让请求路径不再读盘；启动时由 provider_manager
+# 同步，探测成功后再同步一次。键带 provider_id：同名模型在不同服务商的上限不同。
+_persisted_output_limits: "dict[tuple[str, str], int]" = {}
+
+
+def set_persisted_output_limit(provider_id: str, model_id: str, value: "int | None") -> None:
+    """登记/清除一个持久化的模型输出上限（供 provider_manager 启动同步与探测写回）。"""
+    key = (str(provider_id or ""), str(model_id or ""))
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        parsed = 0
+    if parsed > 0:
+        _persisted_output_limits[key] = parsed
+    else:
+        _persisted_output_limits.pop(key, None)
+
+
+def get_persisted_output_limit(provider_id: str, model_id: str) -> "int | None":
+    """取该 (provider, model) 的持久化探测上限；未登记返回 None。"""
+    return _persisted_output_limits.get((str(provider_id or ""), str(model_id or "")))
+
+
+def clear_persisted_output_limits() -> None:
+    """清空进程内镜像（测试用；生产由 provider_manager 逐条覆盖）。"""
+    _persisted_output_limits.clear()
+
 
 # 模型 ID → 上下文窗口（输入+输出总 token 容量）
 # 来源: 各服务商官方文档 (2025 Q3)；未知模型返回 None（不设输入预算闸门，fail-open）
@@ -130,6 +160,28 @@ def get_model_context_window(model_id: str) -> "int | None":
     return None
 
 
+def get_known_model_max_tokens(model_id: str) -> "int | None":
+    """目录收录的模型输出上限；未收录返回 None（诚实未知，不编造 4096）。"""
+    if not model_id:
+        return None
+
+    if model_id in MODEL_MAX_TOKENS:
+        return MODEL_MAX_TOKENS[model_id]
+
+    # 前缀匹配: 尝试去掉日期后缀
+    # "gpt-4o-2024-05-13" → 先试 "gpt-4o-2024-05-13" (已试)
+    #                       再试 "gpt-4o-2024-05" → "gpt-4o-2024"
+    #                       再试 "gpt-4o"
+    parts = model_id.rsplit("-", 1)
+    while len(parts) > 1:
+        candidate = parts[0]
+        if candidate in MODEL_MAX_TOKENS:
+            return MODEL_MAX_TOKENS[candidate]
+        parts = candidate.rsplit("-", 1)
+
+    return None
+
+
 def get_model_max_tokens(model_id: str) -> int:
     """
     获取模型的 max_tokens 上限。
@@ -145,45 +197,33 @@ def get_model_max_tokens(model_id: str) -> int:
     Returns:
         该模型的推荐 max_tokens 值
     """
-    if not model_id:
-        return DEFAULT_MAX_TOKENS
-
-    # 精确匹配
-    if model_id in MODEL_MAX_TOKENS:
-        return MODEL_MAX_TOKENS[model_id]
-
-    # 前缀匹配: 尝试去掉日期后缀
-    # "gpt-4o-2024-05-13" → 先试 "gpt-4o-2024-05-13" (已试)
-    #                       再试 "gpt-4o-2024-05" → "gpt-4o-2024"
-    #                       再试 "gpt-4o"
-    parts = model_id.rsplit("-", 1)
-    while len(parts) > 1:
-        candidate = parts[0]
-        if candidate in MODEL_MAX_TOKENS:
-            return MODEL_MAX_TOKENS[candidate]
-        parts = candidate.rsplit("-", 1)
-
-    return DEFAULT_MAX_TOKENS
+    return get_known_model_max_tokens(model_id) or DEFAULT_MAX_TOKENS
 
 
-def clamp_max_tokens(max_tokens: "int | None", model_id: str = "") -> int:
+def clamp_max_tokens(
+    max_tokens: "int | None", model_id: str = "", provider_id: str = ""
+) -> int:
     """
     将 max_tokens 限制在合理范围内。
 
     max_tokens 为 None（未配置）时回落 DEFAULT_MAX_TOKENS，不再抛
     TypeError（L-18：调用方 llm_client 直接透传 config.max_tokens）。
 
-    Args:
-        max_tokens: 请求的 max_tokens（None 表示未配置）
-        model_id: 模型 ID (用于获取上限)
-
-    Returns:
-        夹紧后的 max_tokens
+    优先级（2026-10-21 收口）：持久化探测值（模型管理里一次性探测并写入
+    providers.json）> 目录收录上限 > DEFAULT_MAX_TOKENS。未收录且无探测值的
+    模型不拿 DEFAULT_MAX_TOKENS 当上限——它是「没配置时用什么」，不是「未知
+    模型最多能输出多少」；显式值只受全局安全上限 MAX_MAX_TOKENS 约束。
     """
+    persisted = get_persisted_output_limit(provider_id, model_id)
     if max_tokens is None:
+        # 未配置 → 保守默认（不是该模型的上限）；持久化探测值只当上限用
         max_tokens = DEFAULT_MAX_TOKENS
-    model_limit = get_model_max_tokens(model_id)
-    clamped = max(MIN_MAX_TOKENS, min(max_tokens, model_limit, MAX_MAX_TOKENS))
+    known_limit = get_known_model_max_tokens(model_id)
+    # 探测值优先于静态目录：它是本机对服务商的实际验证结果，目录可能是占位值
+    limit = persisted if persisted is not None else (
+        known_limit if known_limit is not None else MAX_MAX_TOKENS
+    )
+    clamped = max(MIN_MAX_TOKENS, min(max_tokens, limit, MAX_MAX_TOKENS))
     if clamped != max_tokens and model_id not in _clamp_warned_models:
         # 截断发生时告警（按模型去重，不刷屏）：静默 4096 上限会让长输出配置悄悄失效
         logger.warning(
@@ -191,7 +231,7 @@ def clamp_max_tokens(max_tokens: "int | None", model_id: str = "") -> int:
             max_tokens,
             clamped,
             model_id,
-            model_limit,
+            limit,
         )
         _clamp_warned_models.add(model_id)
     return clamped

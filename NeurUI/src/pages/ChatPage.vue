@@ -102,6 +102,12 @@
             <!-- P2-8：让位闸等不到额度 → 本轮挂起，run_id 是唯一续跑凭据 -->
             <div v-if="msg.parkedNotice" class="nr-parked-notice">
               <span class="nr-parked-notice-label">{{ t('chat.turnParked') }}</span>
+              <span v-if="msg.parkedNotice.pinnedModel" class="nr-parked-detail">
+                {{ t('chat.parkedPinnedModel', {
+                  pinned: msg.parkedNotice.pinnedModel,
+                  requested: msg.parkedNotice.requestedModel || '—',
+                }) }}
+              </span>
               <button
                 class="nr-parked-resume"
                 type="button"
@@ -308,6 +314,12 @@
           <div class="nr-msg-body">
             <div class="nr-parked-notice">
               <span class="nr-parked-notice-label">{{ t('chat.turnParked') }}</span>
+              <span v-if="run.pinnedModel" class="nr-parked-detail">
+                {{ t('chat.parkedPinnedModel', {
+                  pinned: run.pinnedModel,
+                  requested: run.requestedModel || '—',
+                }) }}
+              </span>
               <button
                 class="nr-parked-resume"
                 type="button"
@@ -1729,6 +1741,9 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         reason: String(event.reason || ''),
         attempts: Number(event.attempts || 0),
         waitedSeconds: Number(event.waited_seconds || 0),
+        // 模型漂移：光有 reason 一个词，用户不知道钉住的是谁、请求的是谁
+        pinnedModel: String(event.pinned_model || ''),
+        requestedModel: String(event.requested_model || ''),
       }
       break
     }
@@ -1790,7 +1805,12 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // 不把原始 429 JSON 拼进气泡；其余错误仍追加错误文本
       clearRetryNotice(msg)
       const errMsg = String(event.message || event.error || 'Unknown error')
-      if (handleRateLimit({ message: errMsg })) break
+      if (handleRateLimit({ message: errMsg })) {
+        // 横幅只说明"可以换模型"，气泡若一个字都没有，用户会以为这轮没反应。
+        // 留一句本地化短句，原始 429 JSON 仍不进气泡。
+        msg.content += `\n\n**Error:** ${t('chat.rateLimitedNotice')}`
+        break
+      }
       msg.content += `\n\n**Error:** ${errMsg}`
       break
     }
@@ -1816,6 +1836,9 @@ function stopStreaming() {
 interface ParkedRun {
   runId: string
   reason: string
+  /** 模型漂移挂起时的冲突双方（刷新后由读面 park_details 还原） */
+  pinnedModel?: string
+  requestedModel?: string
 }
 const parkedRuns = ref<ParkedRun[]>([])
 
@@ -1843,6 +1866,8 @@ async function loadParkedRuns(sid: string): Promise<void> {
       .map((r) => ({
         runId: String(r.run_id),
         reason: String(r.park_reason ?? ''),
+        pinnedModel: String(r.park_details?.pinned_model ?? ''),
+        requestedModel: String(r.park_details?.requested_model ?? ''),
       }))
   } catch (err: any) {
     // 台账关闭(503)/归属失败(403)都是"没有续跑入口"的正当理由，但要留痕，
@@ -1862,7 +1887,12 @@ async function resumeParkedRun(run: ParkedRun): Promise<void> {
     content: '',
     steps: [],
     toolCalls: [],
-    parkedNotice: { runId: run.runId, reason: run.reason },
+    parkedNotice: {
+      runId: run.runId,
+      reason: run.reason,
+      pinnedModel: run.pinnedModel,
+      requestedModel: run.requestedModel,
+    },
   })
   await resumeParkedTurn(msg)
 }
@@ -3176,6 +3206,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--nr-warning);
   white-space: nowrap;
+}
+
+.nr-parked-detail {
+  font-size: 12px;
+  color: var(--nr-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nr-parked-resume {

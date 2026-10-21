@@ -25,7 +25,7 @@ import threading
 import time
 import typing
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, FrozenSet, List, Optional
 
 from neurova.agent.turn_coordinator import (
     YieldGateOutcome,
@@ -40,6 +40,18 @@ ENTRY_CONSOLE = "console"
 ENTRY_V1CHAT = "v1chat"
 ENTRY_V1CHAT_STREAM = "v1chat_stream"
 ENTRY_CHANNEL = "channel"
+
+#: 客户端显式选型入口：这里的模型变化是用户的决定，不是 agent 漂移。
+#: 渠道/自动入口不在名单里——它们未来若开始传显式模型，仍按漂移判。
+CLIENT_SELECTED_ENTRIES: FrozenSet[str] = frozenset(
+    {ENTRY_CONSOLE, ENTRY_V1CHAT, ENTRY_V1CHAT_STREAM}
+)
+
+
+def adoptsModelSwitchForEntry(entry: str) -> bool:
+    """入口 → 是否采纳客户端模型改选（策略单源，四个入口共用）。"""
+    return str(entry or "") in CLIENT_SELECTED_ENTRIES
+
 
 #: 每次真正入睡前的通知口（续租与进度播报都属调用方，闸不认识它们）
 WaitObserver = Callable[..., Awaitable[None]]
@@ -238,12 +250,17 @@ async def requestTurnAdmission(
     四个入口都走这里——**闸口只此一处调用**（判据
     `test_v1ChatRunLedger.TestLedgerImplementationIsSingleSource` 钉住），否则下一轮
     改 park 语义时只会改到一处，其余入口静默留着旧形态。
+
+    模型改选的策略也从这里派生：`payload.entry` 是客户端显式选型入口时，换模型
+    是用户的决定，闸应重设 pin 并放行（见 `adoptsModelSwitchForEntry`）。
     """
+    entry = str(payload.get("entry") or "")
     outcome: YieldGateOutcome = await requestYieldGate(
         agentId=agentId,
         modelName=modelName or "",
         sessionId=sessionId,
         userInput=userInput,
+        adoptModelSwitch=adoptsModelSwitchForEntry(entry),
         onWait=onWait,
     )
     if outcome.proceeded:
@@ -255,7 +272,12 @@ async def requestTurnAdmission(
             outcome=outcome,
         )
 
-    parked = await ledger.parkTurn(outcome.parkReason, payload)
+    # 挂起原因里的冲突双方（pinned/requested）随载荷落库：SSE 是一次性的，
+    # 刷新后 `GET /chat/runs` 只能从库里把"为什么挂"读回来。只并入一份新 dict，
+    # 不改调用方传进来的载荷。
+    parkPayload = dict(payload)
+    parkPayload["park_details"] = dict(outcome.details or {})
+    parked = await ledger.parkTurn(outcome.parkReason, parkPayload)
     return TurnAdmission(
         allowed=False,
         parkReason=outcome.parkReason,

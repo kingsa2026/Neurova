@@ -144,3 +144,52 @@ describe('刷新后恢复挂起回合入口（P3-14）', () => {
     expect(resumeEntry).not.toContain('getReader()')
   })
 })
+
+/**
+ * 2026-10-21 事故的可见性修复（C）：空白的助手气泡与只写一个原因词的挂起条。
+ *
+ * - 429 被 `handleRateLimit` 接走后直接 `break`，气泡里一个字都没有；
+ * - `parked` 只带 `reason=model_pin_violation`，用户看不到"钉住的是谁、请求的是谁"；
+ * - 刷新后 `GET /chat/runs` 的读面也读不出冲突双方。
+ */
+describe('挂起与限流的可读性（2026-10-21）', () => {
+  const parkedCase = blockAfter("case 'parked': {")
+  const errorCase = blockAfter("case 'error': {")
+  const load = blockAfter('async function loadParkedRuns(')
+
+  it('parked 事件把钉住/请求模型写进 parkedNotice', () => {
+    expect(parkedCase).toContain('pinnedModel')
+    expect(parkedCase).toContain('requestedModel')
+    expect(parkedCase).toContain('event.pinned_model')
+    expect(parkedCase).toContain('event.requested_model')
+  })
+
+  it('气泡与刷新后的会话级入口都渲染出冲突双方', () => {
+    expect(source).toContain('msg.parkedNotice.pinnedModel')
+    expect(source).toContain('run.pinnedModel')
+  })
+
+  it('刷新后从 park_details 还原冲突双方', () => {
+    expect(load).toContain('park_details')
+    expect(load).toContain('pinned_model')
+    expect(load).toContain('requested_model')
+  })
+
+  it('429 命中限流横幅时气泡仍留一句可见错误，不再整条空白', () => {
+    expect(errorCase).toContain('handleRateLimit')
+    expect(errorCase).toMatch(/handleRateLimit[\s\S]{0,240}rateLimitedNotice/)
+  })
+
+  const keys = ['parkedPinnedModel', 'rateLimitedNotice']
+  for (const key of keys) {
+    it(`zh-CN 与 en-US 都定义了 chat.${key}`, () => {
+      for (const locale of ['zh-CN', 'en-US']) {
+        const text = readFileSync(
+          resolve(process.cwd(), `src/i18n/locales/${locale}.ts`),
+          'utf-8',
+        )
+        expect(new RegExp(`^\\s+${key}:`, 'm').test(text)).toBe(true)
+      }
+    })
+  }
+})

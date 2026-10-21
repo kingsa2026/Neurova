@@ -15,6 +15,10 @@ export interface ModelItem {
   connectable?: boolean
   context_window?: number
   max_tokens?: number
+  /** 模型管理里一次性探测并持久化的已验证输出上限（providers.json model_metadata） */
+  max_output_tokens?: number
+  max_output_tokens_source?: string
+  max_output_tokens_probed_at?: string
   pricing?: { input: number; output: number }
   owned_by?: string
 }
@@ -66,6 +70,9 @@ export function normalizeModel(item: Record<string, any>): ModelItem {
     connectable: item.connectable ?? false,
     context_window: item.context_window,
     max_tokens: item.max_tokens,
+    max_output_tokens: item.max_output_tokens,
+    max_output_tokens_source: item.max_output_tokens_source,
+    max_output_tokens_probed_at: item.max_output_tokens_probed_at,
     pricing: item.pricing,
     owned_by: item.owned_by ?? provider,
   }

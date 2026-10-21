@@ -4,6 +4,9 @@
 TypeError（调用方 llm_client.py 直接透传 config.max_tokens=None）；
 未知模型 4096 上限静默截断。断言：None 回落 DEFAULT_MAX_TOKENS 语义、
 截断发生时告警且按模型去重、未截断不告警。
+
+2026-10-21 政策收口：DEFAULT_MAX_TOKENS 是「没配置时用什么」，不是「未知模型
+最多能输出多少」；未知模型的显式值只受全局 MAX_MAX_TOKENS 约束。
 """
 
 import pytest
@@ -14,8 +17,10 @@ import neurova.llm.model_limits as ml
 @pytest.fixture(autouse=True)
 def _reset_warned(monkeypatch):
     ml._clamp_warned_models.clear()
+    ml.clear_persisted_output_limits()
     yield
     ml._clamp_warned_models.clear()
+    ml.clear_persisted_output_limits()
 
 
 class _WarningRecorder:
@@ -57,9 +62,11 @@ class TestL18NoneTolerant:
 
 class TestL18ClampWarning:
     def test_clamp_logs_warning_once_per_model(self, recorder):
-        r1 = ml.clamp_max_tokens(100000, "some-unknown-model-x")
-        r2 = ml.clamp_max_tokens(100000, "some-unknown-model-x")
-        assert r1 == r2 == ml.DEFAULT_MAX_TOKENS
+        # 2026-10-21：DEFAULT_MAX_TOKENS 不再是未知模型的上限；只有超过全局
+        # 安全上限 MAX_MAX_TOKENS 才截断并告警。
+        r1 = ml.clamp_max_tokens(300000, "some-unknown-model-x")
+        r2 = ml.clamp_max_tokens(300000, "some-unknown-model-x")
+        assert r1 == r2 == ml.MAX_MAX_TOKENS
         assert len(recorder.msgs) == 1, "L-18: 截断告警须按模型去重，不刷屏"
         assert "some-unknown-model-x" in recorder.msgs[0]
 
@@ -71,3 +78,22 @@ class TestL18ClampWarning:
     def test_no_warning_when_no_clamp(self, recorder):
         assert ml.clamp_max_tokens(1000, "gpt-4o") == 1000
         assert recorder.msgs == []
+
+
+class TestProbedCapsAndExplicitValues:
+    """2026-10-21：AMD 实测上限 + 显式值优先（DEFAULT 是默认，不是未知模型的上限）。"""
+
+    def test_probed_amd_models_keep_explicit_65536(self):
+        """探针实测值走 providers.json 持久化（不再写死在静态目录）。"""
+        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
+        ml.set_persisted_output_limit("amd", "DeepSeek-V4-Flash-Vision-Exp", 65536)
+        assert ml.clamp_max_tokens(65536, "GLM-5.3-Flash", "amd") == 65536
+        assert ml.clamp_max_tokens(65536, "DeepSeek-V4-Flash-Vision-Exp", "amd") == 65536
+
+    def test_unknown_model_explicit_value_not_silently_capped_to_default(self):
+        """未收录模型不能拿 DEFAULT=4096 当上限；显式值只受全局安全上限约束。"""
+        assert ml.clamp_max_tokens(65536, "some-new-model") == 65536
+
+    def test_unknown_model_above_global_max_is_capped_and_warns(self, recorder):
+        assert ml.clamp_max_tokens(300000, "some-new-model") == ml.MAX_MAX_TOKENS
+        assert len(recorder.msgs) == 1, "超过全局安全上限必须留痕"
