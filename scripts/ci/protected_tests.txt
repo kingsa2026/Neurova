@@ -3472,3 +3472,7 @@ tests/unit/memory/test_d19SecondRoundRetirements.py
 # 反馈自适应通道权重（§6-377）：like/dislike 调意图权重并落盘／召回带 session 记归属／
 # 插件通道首次召回补激活（注册≠可用）／适配器透传 session／真 HTTP 端点接线。
 tests/unit/cognitive_layers/memory_layer/test_channelFeedbackAdaptiveWeights.py
+# 通道权重读面单源（§6-378）：/channel-weights 读 live intent_strategy；无引擎时读同一份类默认表。
+tests/unit/api/test_channelWeightsReadLiveSource.py
+# D19 剩余组退役（§6-378）：六档未接旋钮文件/导入面/门面导出全清零；正控活实现仍在。
+tests/unit/memory/test_d19ThirdGroupRetirements.py
