@@ -258,6 +258,7 @@
 - [semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md](../08-research/semantica_vs_neurova_knowledge_graph_comparison_2026-10-09.md) — 与外部图谱工具链 Semantica（MIT / 22.4 万行）的知识库与知识图谱代码级对比，含本仓自有断点 N1–N6 与候选 K1–K8（竞品/外部对标，研究参考）
 - [modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md](../08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md) — 与 ModularRSI 论文（arXiv:2609.14857）的 harness 递归自我改进对照，只记 RSIAgent／Designer-RSI 两篇前作未覆盖的增量项 M-A..M-E（竞品/外部对标，研究参考）
 - [harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md](../08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md) — 与 google-research/harness2 的递归 harness 优化代码级对比：十维加权（权重 100% 归一）当前评估 7.8 vs 8.1、生产就绪度单列读数、本仓断点 N1–N8 与候选 C1–C8（N1–N8 已落地/部分落地，闭环 A–D、N6/C6/N8、完整工具 trace、跨域 UI、产物二进制证据与独立采纳流已落，竞品/外部对标，研究参考）
+- [tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md](../08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md) — 与 T-Mem 论文（arXiv:2606.15405，EMNLP 2026，MIT，commit `dd9e152`）的记忆系统代码级对比：无表面重合「联想召回」可达性议题、写入侧预演的 800–900 次调用/构建成本复算、消融读数指向前瞻族独大、用户所述八步流程的四处更正、本仓自有断点 D1–D7 与候选 TM-1..TM-6（含不照搬清单与未验证项，竞品/外部对标，研究参考）
 
 ### 09-dev-progress 开发进展
 
