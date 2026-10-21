@@ -21,10 +21,9 @@ from fastapi.testclient import TestClient
 
 
 def _workspace_config_path(env, agent_id: str) -> Path:
-    from neurova.api.endpoints import get_app_state
+    from neurova.core.agent_workspaces import get_agent_config_path
 
-    agent = get_app_state()["agents"][agent_id]
-    return Path(agent.config.workspace_path) / "agent_config.json"
+    return get_agent_config_path(agent_id)
 
 
 @pytest.fixture()

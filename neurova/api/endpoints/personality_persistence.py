@@ -1,4 +1,4 @@
-"""人格特质独立持久源（data/personality/{agent_id}.json）。
+"""人格特质独立持久源（`data/<agent_id>/personality.json`）。
 
 2026-09-12 空数据页面修复引入：Agent.personality 实为 personality.md 身份文本
 字符串，此前端点要求 isinstance(agent.personality, dict)（永假）→ traits 恒空、
@@ -15,15 +15,12 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
-from neurova.core.data_root import dataPath
-
-
-PERSONALITY_DIR = dataPath("personality")
 
 
 def personality_path(agent_id: str) -> pathlib.Path:
-    safe = str(agent_id).replace("/", "_").replace("\\", "_")
-    return pathlib.Path(PERSONALITY_DIR) / f"{safe}.json"
+    from neurova.core.agent_workspaces import get_agent_personality_path
+
+    return get_agent_personality_path(agent_id)
 
 
 def load_personality_data(agent_id: str) -> Dict[str, Any]:

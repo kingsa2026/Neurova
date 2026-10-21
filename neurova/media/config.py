@@ -335,11 +335,10 @@ class MediaStorageConfigManager:
         Args:
             config_dir: 配置目录路径
         """
-        # 媒体配置落点：显式入参 > 数据根下的 `media_config/`。
-        # 原兜底 `Path("config/media")` 是 CWD 相对，且与"随代码走的 config/ 资产"
-        # 同名——一个随部署漂移、一个是镜像内固定资产，混在一处必分不清。
+        # 显式入参保留旧目录形状（测试/多实例注入）；缺省按 agent 根目录解析。
         from neurova.core.data_root import callerPath, dataLanding
 
+        self._explicit_dir = bool(config_dir)
         self.config_dir = callerPath(config_dir, "media_config") if config_dir \
             else dataLanding("media_config")
 
@@ -464,9 +463,17 @@ class MediaStorageConfigManager:
         """
         configs = []
 
-        for config_file in self.config_dir.glob("*.json"):
-            agent_id = config_file.stem
-            configs.append(agent_id)
+        if self._explicit_dir:
+            for config_file in self.config_dir.glob("*.json"):
+                configs.append(config_file.stem)
+        else:
+            from neurova.core.agent_workspaces import discover_agent_ids, get_agent_media_config_path
+
+            configs = [
+                agent_id
+                for agent_id in discover_agent_ids()
+                if get_agent_media_config_path(agent_id).is_file()
+            ]
 
         return configs
 
@@ -489,7 +496,11 @@ class MediaStorageConfigManager:
 
     def _get_config_path(self, agent_id: str) -> Path:
         """获取配置文件路径"""
-        return self.config_dir / f"{agent_id}.json"
+        if self._explicit_dir:
+            return self.config_dir / f"{agent_id}.json"
+        from neurova.core.agent_workspaces import get_agent_media_config_path
+
+        return get_agent_media_config_path(agent_id)
 
 
 # 全局实例

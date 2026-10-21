@@ -2,7 +2,7 @@
 
 设计（吸收 SkillPoolManager 孤岛词汇，见对比文档 §7.5）：
 - pool 词汇沿用 SkillPoolType：agent / user(private) / public；
-- 目录布局：agent=data/agents/{aid}/skills、user=data/users/{ukey}/skills、
+- 目录布局：agent=data/{aid}/skills、user=data/users/{ukey}/skills、
   public=data/public/skills——三库同为 SkillService 实例（存储引擎单源，
   原子写/RLock/漏斗/trust 全复用），library_service 只做"路由 + 同进程单例"；
 - 用户键命名空间 `u:{jwt_sub}` / `ch:{channel}:{sender_id}`（隔离侦查教训：
@@ -49,7 +49,9 @@ def lib_base(tmp_path, monkeypatch):
 
 
 def test_resolve_library_dirs(lib_base):
-    assert lib.resolve_library_dir("agent", "a1") == lib_base / "agents" / "a1" / "skills"
+    from neurova.core.agent_workspaces import get_agent_skills_dir
+
+    assert lib.resolve_library_dir("agent", "a1") == get_agent_skills_dir("a1")
     # 目录 token=%3A 编码（: 在 Windows 文件名非法；键白名单不含 % → 可逆）
     assert lib.resolve_library_dir("user", "u:7") == lib_base / "users" / "u%3A7" / "skills"
     assert lib.resolve_library_dir("public") == lib_base / "public" / "skills"

@@ -22,7 +22,6 @@ from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import get_agent_instance, get_app_state
-from neurova.core.agent_workspaces import get_agent_workspaces_root
 from neurova.core.logger import get_logger
 # 批次0（三栈收敛）：凭据解析/产物落盘/路径常量单源在 llm.generators.runtime，
 # 端点保留同名薄包装（tests/api/test_generation_security.py 的模块全局 patch 面不变）
@@ -57,9 +56,14 @@ def _validate_ref_images(refs: list) -> None:
     攻击者自建端点即可外泄任意本地文件。允许根：生成产物目录 + agent 工作区
     + 用户上传目录（批次3：/files/upload 落盘于此，上传→参考图引用闭环）。
     """
+    from neurova.core.agent_workspaces import discover_agent_ids, get_agent_workspace_dir
+
     allowed_roots = (
         GENERATION_OUTPUT_DIR.resolve(),
-        get_agent_workspaces_root().resolve(),
+        *(
+            get_agent_workspace_dir(agent_id).resolve()
+            for agent_id in discover_agent_ids()
+        ),
         (PROJECT_ROOT / "storage").resolve(),
     )
     for ref in refs or []:

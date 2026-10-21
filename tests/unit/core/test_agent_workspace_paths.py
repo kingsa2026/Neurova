@@ -24,15 +24,17 @@ def test_root_honors_injected_env(tmp_path: Path, monkeypatch):
     assert get_agent_workspaces_root() == tmp_path / "agentWs"
 
 
-def test_root_defaults_to_repo_agent_workspaces(monkeypatch):
+def test_root_defaults_to_data_root(monkeypatch):
+    from neurova.core.data_root import get_data_root
+
     monkeypatch.delenv(AGENT_WORKSPACES_ENV, raising=False)
-    assert get_agent_workspaces_root() == REPO_AGENT_WORKSPACES
+    assert get_agent_workspaces_root() == get_data_root()
 
 
 def test_agent_workspace_dir_joins_agent_id(tmp_path: Path, monkeypatch):
     monkeypatch.setenv(AGENT_WORKSPACES_ENV, str(tmp_path))
-    assert get_agent_workspace_dir("kai") == tmp_path / "kai"
-    assert get_agent_workspace_dir("") == tmp_path / "default"
+    assert get_agent_workspace_dir("kai") == tmp_path / "kai" / "workspaces"
+    assert get_agent_workspace_dir("") == tmp_path / "default" / "workspaces"
 
 
 def test_root_pinned_out_of_repo_during_tests(tmp_path: Path):

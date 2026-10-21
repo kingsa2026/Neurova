@@ -51,48 +51,36 @@ DATA_ROOT_ENV = "NEUROVA_DATA_DIR"
 
 
 def isolatedDataRoot(prefix: str = "neurovaLive") -> Path:
-    """把**数据根与 agent 工作区根一起**指到临时目录，返回数据根。
+    """把数据根（agent 会话/工作区/记忆/配置全在其下）指到临时目录，返回数据根。
 
-    为什么是"两根一起"：记忆正文落在工作区那一根下（`<workspace>/<agent>/memory/`），
-    它**不在数据根管辖内**。此前只隔数据根的活体会把记忆写进仓内真 `agent_workspaces/`
-    （实测：`POST /api/v1/agents` 那一路在仓根新建了两个 workspace 目录，台账 §6-308 的 D8）。
-    同一件事散在 145 个调用点上"各人记得调第二个函数"就是第二个事实源的形态（教义 第 6 条），
-    所以这条保证收进单点：调用方一行不改就两根都隔。
-    只想要显式数据根落点（跨进程按规模分目录）时用 `useDataRoot()`——它**只**动数据根，
-    那种场合若还要隔工作区根，显式调 `isolatedAgentWorkspaces()`。
+    v2 统一布局后 agent 私有面全部收在 `data/<agent_id>/` 下，**不再有第二根**：
+    隔离数据根即隔离 agent 工作区与记忆正文。`isolatedAgentWorkspaces()` 保留为
+    兼容别名，供尚未改写的旧脚本调用，但它也只保证这一根。
 
-    幂等：任一env 已注入过就沿用，不覆盖 —— 跨进程断言
+    幂等：env 已注入过就沿用，不覆盖 —— 跨进程断言
     （如「重启后同库能否召回」）依赖父子进程指向**同一个**落点（env 由父进程传给子进程）。
     """
-    isolatedAgentWorkspaces(prefix=prefix)
     injected = (os.environ.get(DATA_ROOT_ENV) or "").strip()
     if injected:
         return Path(injected)
     return useDataRoot(tempfile.mkdtemp(prefix=f"{prefix}-"))
 
 
-#: agent 工作区根的注入口（与 `neurova/core/agent_workspaces.py` 的 `AGENT_WORKSPACES_ENV` 同值）。
-#: 记忆正文落在这**另一根**下（`<workspace>/<agent>/memory/`），不在数据根管辖内——
-#: 所以 `isolatedDataRoot()` 把它一起隔掉（此前"只隔数据根就把记忆写进仓内真 `agent_workspaces/`"
-#: 是本仓实测踩过的坑，台账 §6-308 的 D8）。
+#: 旧工作区注入口名（仅保留读取兼容；v2 生产布局不再需要第二根）。
 AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
 
 
 def isolatedAgentWorkspaces(prefix: str = "neurovaLive") -> Path:
-    """把 agent 工作区根指到临时目录并返回它。
+    """兼容别名：返回隔离后的 agent 根父目录（即数据根）。
 
-    走 `isolatedDataRoot()` 的活体**不必再调这一条**——那里已把两根一起隔了（D8 收口）。
-    这一条留给两种场合：只显式钉数据根落点（`useDataRoot()`）却仍要隔工作区根的活体，
-    以及单独复核这一根的判据（`tests/unit/ci/test_liveIsolationSinglePointCoversBothRoots.py`）。
-    幂等同 `isolatedDataRoot`：已注入就沿用，父子进程共读同一份落点
-    才断言得动（如「重启后同库能否召回」）。
+    旧脚本调用它来隔工作区根；v2 统一布局下工作区已随数据根走，本函数不再写
+    `NEUROVA_AGENT_WORKSPACES_DIR` —— 写了反而会把 agent 数据引到数据根之外。
+    已显式注入旧 env 的部署仍原样尊重（返回该值），不静默改写。
     """
     injected = (os.environ.get(AGENT_WORKSPACES_ENV) or "").strip()
     if injected:
         return Path(injected)
-    target = Path(tempfile.mkdtemp(prefix=f"{prefix}-ws-"))
-    os.environ[AGENT_WORKSPACES_ENV] = str(target)
-    return target
+    return isolatedDataRoot(prefix=prefix)
 
 
 def useDataRoot(path: str | os.PathLike[str]) -> Path:

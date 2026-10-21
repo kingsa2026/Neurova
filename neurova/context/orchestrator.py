@@ -400,10 +400,11 @@ class ContextOrchestrator:
         record["attempts"] += 1
         try:
             from neurova.context.eviction_ledger_db import EvictionLedgerDB
+            from neurova.core.agent_workspaces import get_agent_context_ledger_path
 
             agentId = getattr(agent_ref, "agent_id", "default")
             db = EvictionLedgerDB(
-                db_path=dataPath("context_ledger", f"{agentId}.db"),
+                db_path=str(get_agent_context_ledger_path(agentId)),
                 user_id=getattr(agent_ref, "user_id", "default"),
                 agent_id=agentId,
             )
@@ -3315,6 +3316,7 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
                 try:
                     from pathlib import Path as _P
 
+                    from neurova.core.agent_workspaces import get_agent_skills_dir
                     from neurova.skills.skill_semantics import (
                         SkillVectorCache,
                         semantic_scores_for,
@@ -3323,7 +3325,7 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
                     _cache = _VECTOR_CACHES.get(_agent_id)
                     if _cache is None:
                         _cache = SkillVectorCache(
-                            cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
+                            cache_file=_P(get_agent_skills_dir(str(_agent_id)) / "embeddings.json")
                         )
                         _VECTOR_CACHES[_agent_id] = _cache
                     _semantic = semantic_scores_for(_cache, _turn_input, dict(_items))

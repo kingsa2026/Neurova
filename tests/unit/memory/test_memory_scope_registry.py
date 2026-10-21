@@ -31,9 +31,9 @@ def test_default_db_path_points_to_agent_workspace(monkeypatch):
     锚点用解析器本身而非字面仓库路径：工作区根已可注入（测试期在 tmp），
     写死 agent_workspaces/default 会随注入点失效。
     """
-    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.core.agent_workspaces import get_agent_memory_db_path
 
-    expected = get_agent_workspace_dir("default") / "memory" / "memory.db"
+    expected = get_agent_memory_db_path("default")
     mgr = _call_factory()
     p = Path(mgr._db_path)
     assert p == expected, p

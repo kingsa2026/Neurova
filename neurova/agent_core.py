@@ -278,18 +278,18 @@ class AgentConfig:
         # 构造时消解 .. 语义；真实越界仍由各消费方校验器拒绝。
         self.workspace_path = Path(workspace_path).resolve()
 
-        # 标准路径：workspace/memory/memory.db（布局那一段走单源，见 agent_workspaces）
-        from neurova.core.agent_workspaces import agentMemoryDbPathUnder, agentMemoryDirUnder
+        # 标准路径：记忆库与工作区分离，统一落 agent 根下的 memory/
+        from neurova.core.agent_workspaces import get_agent_memory_db_path, get_agent_memory_dir
 
         if db_path:
             self.db_path = db_path
         else:
-            agent_memory_db = agentMemoryDbPathUnder(self.workspace_path)
+            agent_memory_db = get_agent_memory_db_path(self.agent_id)
             agent_memory_db.parent.mkdir(parents=True, exist_ok=True)
             self.db_path = str(agent_memory_db)
 
-        # 附件存储路径 - 标准路径：workspace/memory/attachments/
-        self.attachment_dir = str(agentMemoryDirUnder(self.workspace_path) / "attachments")
+        # 附件存储路径 - 标准路径：<agent_root>/memory/attachments/
+        self.attachment_dir = str(get_agent_memory_dir(self.agent_id) / "attachments")
 
         # LLM 服务商 ID（用于路由到指定服务商）
         self.llm_provider = llm_provider
@@ -582,10 +582,11 @@ class SubSystemContainer:
             try:
                 from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
                 from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
+                from neurova.core.agent_workspaces import get_agent_memory_dir
 
                 muscle_memory = MuscleMemory(
                     agent_id=c.agent_id,
-                    storage_dir=str(c.workspace_path / "memory" / "muscle_memory"),
+                    storage_dir=str(get_agent_memory_dir(c.agent_id) / "muscle_memory"),
                 )
                 a.tool_memory = ToolMemoryIntegration(
                     memory_layer=a.memory_manager,
@@ -751,13 +752,14 @@ class SubSystemContainer:
         if c.enable_cognitive_capabilities and a.memory_manager:
             try:
                 from neurova.cognitive_layers.growth_layer.analyzer import GrowthAnalyzer
+                from neurova.core.agent_workspaces import get_agent_memory_dir
 
                 # 根因修复: 此前传 GrowthAnalyzer 不接受的 storage_path → TypeError
                 # 被吞 → growth_analyzer 恒为 None。现签名对齐（workspace_path 为
                 # 持久化目录，成长数据写入 <dir>/growth.json 并跨重启恢复）。
                 a.growth_analyzer = GrowthAnalyzer(
                     agent_id=str(c.agent_id),
-                    workspace_path=str(c.workspace_path / "memory" / "growth"),
+                    workspace_path=str(get_agent_memory_dir(c.agent_id) / "growth"),
                 )
             except Exception as e:
                 logger.warning("认知能力初始化失败: %s", e)
@@ -1324,16 +1326,17 @@ class Agent:
         return skill
 
     def _load_identity(self):
-        """加载 Agent 身份和性格
+        """加载 Agent 身份和性格。
 
-        P2-8 修复: 身份文件位于 workspace_path/memory/（与 memory.db、attachments
-        同目录，见 __init__ 标准路径约定）。原实现多拼了一层 "workspace"，
-        去 workspace_path/workspace/memory/ 寻找，自定义 soul.md/personality.md 永不加载。
+        身份文件属于 agent 配置，统一落 agent 根目录（`<agent_root>/soul.md`、
+        `<agent_root>/personality.md`），不再藏在工作区或记忆目录里。
         """
-        workspace = self.config.workspace_path / "memory"
+        from neurova.core.agent_workspaces import get_agent_root_dir
+
+        agent_root = get_agent_root_dir(self.config.agent_id)
 
         # 加载 soul.md
-        soul_path = workspace / "soul.md"
+        soul_path = agent_root / "soul.md"
         if soul_path.exists():
             self.soul = soul_path.read_text(encoding="utf-8")
             logger.info("已加载身份文件: %s", soul_path)
@@ -1342,7 +1345,7 @@ class Agent:
             logger.warning(f"未找到身份文件，使用默认身份")
 
         # 加载 personality.md
-        personality_path = workspace / "personality.md"
+        personality_path = agent_root / "personality.md"
         if personality_path.exists():
             self.personality = personality_path.read_text(encoding="utf-8")
             logger.info("已加载性格文件: %s", personality_path)

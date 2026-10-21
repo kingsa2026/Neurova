@@ -58,20 +58,31 @@ def assertNotUnderProductionStorage(path: Union[str, Path], what: str) -> None:
 
 
 def productionMemoryDir() -> Path:
-    """生产记忆目录：**仓库自带的** `agent_workspaces/`。
+    """生产数据目录：仓库自带的 `data/`（v2 统一布局）与旧 `agent_workspaces/`。
 
     刻意不走 `get_agent_workspaces_root()`：那个函数读 `NEUROVA_AGENT_WORKSPACES_DIR`，
     而测试期注入的就是它——拿注入值当生产定义，围栏在测试里会拦下全部隔离目录
     （等于把每条用例都判红），而在真正的生产上又拦不住任何东西。
     生产目录是磁盘上那个事实，不是当前进程的配置。
     """
-    return Path(__file__).resolve().parents[3] / "agent_workspaces"
+    from neurova.core.data_root import repoRoot
+
+    return repoRoot() / "data"
+
+
+def _productionMemoryDirs() -> tuple:
+    from neurova.core.data_root import repoRoot
+
+    repo = repoRoot()
+    return (productionMemoryDir(), repo / "agent_workspaces")
 
 
 def underProductionMemory(path: Union[str, Path]) -> bool:
     target = Path(str(path)).resolve()
-    prod = productionMemoryDir()
-    return target == prod or prod in target.parents
+    for prod in _productionMemoryDirs():
+        if target == prod or prod in target.parents:
+            return True
+    return False
 
 
 def assertNotUnderProductionMemory(path: Union[str, Path], what: str) -> None:

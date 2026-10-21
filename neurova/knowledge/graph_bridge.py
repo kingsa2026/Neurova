@@ -616,20 +616,18 @@ def driftFindingsForAllAgents(store: Any) -> List[Dict[str, Any]]:
     from neurova.cognitive_layers.knowledge_graph.manager import (
         get_agent_knowledge_graph_manager,
     )
-    from neurova.core.agent_workspaces import get_agent_workspaces_root
+    from neurova.core.agent_workspaces import discover_agent_ids, get_agent_workspace_dir
 
-    root = get_agent_workspaces_root()
     findings: List[Dict[str, Any]] = []
-    if not root.exists():
-        return findings
-    for child in sorted(root.iterdir()):
-        if not (child / "knowledge_graph").is_dir():
+    for agent_id in discover_agent_ids():
+        graph_dir = get_agent_workspace_dir(agent_id) / "knowledge_graph"
+        if not graph_dir.is_dir():
             continue
         try:
-            graph = get_agent_knowledge_graph_manager(child.name)
-            drift = projectionDrift(child.name, graph, store)
+            graph = get_agent_knowledge_graph_manager(agent_id)
+            drift = projectionDrift(agent_id, graph, store)
         except Exception as e:  # noqa: BLE001 - 一个 agent 读不动不许带停启动
-            logger.warning("投影一致性读数跳过 agent %s: %s", child.name, e)
+            logger.warning("投影一致性读数跳过 agent %s: %s", agent_id, e)
             continue
         if (drift["missing_relations"] or drift["orphan_relations"]
                 or drift["unbacked_nodes"]):

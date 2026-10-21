@@ -49,16 +49,20 @@ class PlanDocStore:
     """计划文档存储（按 agent 隔离；RLock 保护；文件系统即真相源）。"""
 
     def __init__(self, base_dir: Optional[str] = None):
+        self._explicit_base = bool(base_dir)
         self.base_dir = Path(base_dir) if base_dir else _workspace_base()
         self._lock = threading.RLock()
 
-    def _agent_plan_dir(self, agent_id: str) -> Path:
-        safe_agent = re.sub(r"[^\w\-]", "_", agent_id or _DEFAULT_AGENT) or _DEFAULT_AGENT
-        return self.base_dir / safe_agent / "docs" / "plan"
-
     def _agent_dir(self, agent_id: str) -> Path:
-        safe_agent = re.sub(r"[^\w\-]", "_", agent_id or _DEFAULT_AGENT) or _DEFAULT_AGENT
-        return self.base_dir / safe_agent
+        if self._explicit_base:
+            safe_agent = re.sub(r"[^\w\-]", "_", agent_id or _DEFAULT_AGENT) or _DEFAULT_AGENT
+            return self.base_dir / safe_agent
+        from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+        return get_agent_workspace_dir(agent_id or _DEFAULT_AGENT)
+
+    def _agent_plan_dir(self, agent_id: str) -> Path:
+        return self._agent_dir(agent_id) / "docs" / "plan"
 
     def save(self, agent_id: str, title: str, content: str) -> Dict[str, Any]:
         """落盘一份计划文档，返回 {name, rel_path, size, modified}。

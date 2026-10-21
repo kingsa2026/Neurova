@@ -47,10 +47,8 @@ SINGLE_POINT = MANUAL_DIR / "_liveVerifyIsolation.py"
 DATA_ROOT_ENV = "NEUROVA_DATA_DIR"
 AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
 
-#: ④ 手抄面的唯一合法持有者：单点自身（它必须把这个键写进 env，那是它的职责）。
-#: 按"文件名 → 期望**写入**次数"钉死，不写目录级豁免——豁免一开口，
-#: 每个"看着像单点"的落点都会来要一条（与 `test_manualScriptsEnvMutationRatchet` 同口径）。
-WORKSPACE_ENV_HANDCOPY_ALLOWED = {"_liveVerifyIsolation.py": 1}
+#: ④ 手抄面的唯一合法持有者：v2 单根后不再有任何脚本需要写工作区 env。
+WORKSPACE_ENV_HANDCOPY_ALLOWED: dict = {}
 
 
 def _runInCleanProcess(source: str) -> dict:
@@ -109,13 +107,13 @@ def test_positiveControlWithoutSinglePointLandsInsideRepo():
         "from neurova.core.agent_workspaces import get_agent_workspaces_root\n"
         "print(json.dumps({'ws': str(get_agent_workspaces_root())}))"
     )
-    assert pathlib.Path(reading["ws"]).resolve() == (REPO_ROOT / "agent_workspaces").resolve(), (
+    assert pathlib.Path(reading["ws"]).resolve() == (REPO_ROOT / "data").resolve(), (
         f"正控落点不是仓内默认：{reading['ws']}——探测器取数口径坏了，①那条红/绿都不可信"
     )
 
 
 def test_singlePointGuardsWorkspaceRootThroughItsOwnEntry():
-    """③形状格：单点里对工作区根的隔离必须经它自己的注入口，不许在这儿再拼一份路径。"""
+    """③形状格：v2 单根后 `isolatedDataRoot()` 不得再隔第二根。"""
     tree = ast.parse(SINGLE_POINT.read_text(encoding="utf-8"))
     fn = next(
         (n for n in tree.body
@@ -128,10 +126,11 @@ def test_singlePointGuardsWorkspaceRootThroughItsOwnEntry():
         for n in ast.walk(fn)
         if isinstance(n, ast.Call)
     }
-    assert "isolatedAgentWorkspaces" in taken, (
-        f"isolatedDataRoot() 没有经 isolatedAgentWorkspaces() 那唯一注入口隔工作区根"
-        f"（体内调用={sorted(t for t in taken if t)}）——第二份拼法就是双源的开始"
+    assert "isolatedAgentWorkspaces" not in taken, (
+        f"isolatedDataRoot() 仍在隔第二根（体内调用={sorted(t for t in taken if t)}）——"
+        "v2 布局下工作区已随数据根走，再写工作区 env 会把 agent 数据引到数据根之外"
     )
+    assert "useDataRoot" in taken, "isolatedDataRoot() 没经 useDataRoot() 这一唯一注入口"
 
 
 def _isEnvironValue(node: ast.AST) -> bool:

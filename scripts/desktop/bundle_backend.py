@@ -83,7 +83,7 @@ def ensure_runtime_dirs(stage: Path) -> None:
     """
     if not stage.is_dir():
         raise RuntimeError(f"暂存区不存在: {stage}")
-    workspaces = stage / "agent_workspaces" / "default"
+    workspaces = stage / "data" / "default" / "workspaces"
     workspaces.mkdir(parents=True, exist_ok=True)
     log(f"运行时数据目录就绪: {workspaces}")
 

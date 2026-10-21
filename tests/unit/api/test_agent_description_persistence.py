@@ -25,15 +25,10 @@ from fastapi.testclient import TestClient
 
 
 def _workspace_config_path(env, agent_id: str) -> Path:
-    """从运行时 agent 自报的 workspace_path 定位 agent_config.json。
+    """agent 配置统一落 agent 根目录（v2 布局）。"""
+    from neurova.core.agent_workspaces import get_agent_config_path
 
-    create 端点的 workspace 是 __file__ 推导的仓库绝对路径（不吃 CWD
-    chdir）——断言必须走 agent 自报路径，测试不留仓库污染。
-    """
-    from neurova.api.endpoints import get_app_state
-
-    agent = get_app_state()["agents"][agent_id]
-    return Path(agent.config.workspace_path) / "agent_config.json"
+    return get_agent_config_path(agent_id)
 
 
 @pytest.fixture()

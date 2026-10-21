@@ -34,13 +34,16 @@ class CheckpointService:
     ):
         self.agent_id = agent_id
         self.debounce_seconds = max(0.0, float(debounce_seconds))
-        # 缺省落点经数据根推导。**不能写成 `base_dir: str = ""` 再裸 `Path(base_dir)`**：
-        # 空串解析出来就是进程 CWD，`<agent_id>.git` 会建在任意工作目录下
-        # （实测跑一轮单测就在仓库根留下三个 .git）。原默认 `"data/checkpoints"`
-        # 虽然也是相对路径，但至少锚在仓库根——"改成空串"是更坏的一步。
-        base = callerPath(base_dir, "checkpoints")
-        base.mkdir(parents=True, exist_ok=True)
-        self.repo = CheckpointRepository(str(base / f"{agent_id}.git"))
+        # 缺省落点：`data/<agent_id>/checkpoints.git`。显式 base_dir 仍按
+        # `<base_dir>/<agent_id>.git` 解释（测试与多实例部署注入用）。
+        if base_dir:
+            repo_path = callerPath(base_dir) / f"{agent_id}.git"
+        else:
+            from neurova.core.agent_workspaces import get_agent_checkpoints_dir
+
+            repo_path = get_agent_checkpoints_dir(agent_id)
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        self.repo = CheckpointRepository(str(repo_path))
         self._last_auto_at: Dict[str, float] = {}
 
     # ── 快照 ──

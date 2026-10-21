@@ -62,7 +62,7 @@ def dataRoot() -> Path:
 
 
 def workspaceRoot() -> Path:
-    """agent 工作区根：与写入端同源（`NEUROVA_AGENT_WORKSPACES_DIR` 可注入）。
+    """agent 根目录的父目录（v2 布局下即数据根；`NEUROVA_AGENT_WORKSPACES_DIR` 可注入）。
 
     **刻意不走 `storage_fence.productionMemoryDir()`**：两者回答的是不同问题。
 
@@ -77,8 +77,14 @@ def workspaceRoot() -> Path:
 
 
 def legalRoots() -> List[Path]:
-    """合法根的穷举：真实数据只会落在这两处之下，其余位置的文件都是散落物。"""
-    return [workspaceRoot().resolve(), dataRoot().resolve()]
+    """合法根的穷举：v2 统一布局在数据根下；旧扁平工作区根仍算合法（迁移前数据）。"""
+    from neurova.core.data_root import repoRoot
+
+    roots = [workspaceRoot().resolve(), dataRoot().resolve()]
+    legacy_ws = (repoRoot() / "agent_workspaces").resolve()
+    if legacy_ws.is_dir():
+        roots.append(legacy_ws)
+    return roots
 
 
 def isTestAgentId(agentId: str) -> bool:

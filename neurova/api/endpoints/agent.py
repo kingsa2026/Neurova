@@ -33,7 +33,12 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user
 # Wave H-W0 属主治理：访问/管理判定单源（与 chat 执行门同源，见 agent_access）
 from neurova.api.agent_access import can_access_agent, resolve_agent_owner
-from neurova.core.agent_workspaces import get_agent_workspace_dir
+from neurova.core.agent_workspaces import (
+    RESERVED_AGENT_ROOT_NAMES,
+    get_agent_config_path,
+    get_agent_root_dir,
+    get_agent_workspace_dir,
+)
 
 logger = get_logger(__name__)
 
@@ -44,9 +49,6 @@ AGENT_DELETE_SHUTDOWN_TIMEOUT = float(os.getenv("NEUROVA_AGENT_SHUTDOWN_TIMEOUT"
 
 # agent_id 白名单：文件清理只对安全 ID 生效，防止路径片段（如 ".."）借道删除上级目录
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-# data/ 下由其他子系统共享、绝不随 agent 删除的目录名（data/agents 是 AgentConfigManager 的持久化根）
-_RESERVED_DATA_DIR_NAMES = frozenset({"agents"})
 
 
 def _remove_tree_with_retry(path: Path, retries: int = 3, delay: float = 0.25) -> bool:
@@ -66,6 +68,23 @@ def _remove_tree_with_retry(path: Path, retries: int = 3, delay: float = 0.25) -
                 logger.error("删除目录彻底失败 %s: %s", path, e)
                 return False
             logger.warning("删除目录失败(第 %s 次) %s: %s，将重试", attempt, path, e)
+            time.sleep(delay)
+    return False
+
+
+def _remove_path_with_retry(path: Path, retries: int = 3, delay: float = 0.25) -> bool:
+    """删除文件或目录（旧布局里的单文件面用），返回是否成功。"""
+    if path.is_dir():
+        return _remove_tree_with_retry(path, retries=retries, delay=delay)
+    for attempt in range(1, retries + 1):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except OSError as e:
+            if attempt == retries:
+                logger.error("删除文件彻底失败 %s: %s", path, e)
+                return False
+            logger.warning("删除文件失败(第 %s 次) %s: %s，将重试", attempt, path, e)
             time.sleep(delay)
     return False
 
@@ -105,8 +124,12 @@ def _save_agent_config(agent) -> None:
         "tts_speed": float(getattr(cfg, "tts_speed", 1.0) or 1.0),
         "tts_pitch": float(getattr(cfg, "tts_pitch", 1.0) or 1.0),
     }
-    config_path = os.path.join(workspace, "agent_config.json")
-    os.makedirs(workspace, exist_ok=True)
+    agent_id = str(getattr(cfg, "agent_id", "") or "").strip()
+    if not agent_id:
+        logger.warning("agent config 缺少 agent_id，跳过持久化（避免误写 default）")
+        return
+    config_path = str(get_agent_config_path(agent_id))
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         _json.dump(config_data, f, ensure_ascii=False, indent=2)
     logger.debug("Saved agent config to %s", config_path)
@@ -396,6 +419,11 @@ async def create_agent(
         import re
         if not re.match(r'^[a-zA-Z0-9_-]+$', agent_id):
             raise HTTPException(status_code=400, detail=f"Invalid agent_id: '{agent_id}'. Only letters, numbers, hyphens, and underscores are allowed.")
+        if agent_id in RESERVED_AGENT_ROOT_NAMES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"agent_id '{agent_id}' 与数据根下的全局目录同名，不能作为 agent 根目录",
+            )
         # 检查是否已存在
         existing = get_agent_from_state(agent_id)
         if existing:
@@ -606,42 +634,72 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     except Exception as e:
         logger.warning("AgentConfigManager.delete_agent 失败: %s", e)
 
-    # 清理持久化文件（工作目录 + 认知图谱数据目录）。
-    # 残留会让 _load_saved_agents 在重启时自动重建 agent_config.json，幽灵 agent 复活。
-    cleanup_report = {"workspace_removed": True, "agent_data_removed": True}
+    # 清理持久化文件：v2 布局下 agent 的全部私有面都在 `data/<id>/` 一个根里。
+    # 旧布局的分散面一并清理，避免重启后幽灵 agent 复活。
+    cleanup_report = {
+        "workspace_removed": True,
+        "agent_data_removed": True,
+        "agent_root_removed": True,
+        "legacy_removed": True,
+    }
 
-    if _SAFE_AGENT_ID_RE.fullmatch(agent_id):
-        # 1) 工作目录：优先 agent 实例自报的 workspace_path（创建/加载时的真实路径），
-        #    再兜底当前代码约定计算的路径，覆盖旧版本把 workspace 建到别处的情况
-        workspace_candidates = []
+    if _SAFE_AGENT_ID_RE.fullmatch(agent_id) and agent_id not in RESERVED_AGENT_ROOT_NAMES:
+        from neurova.core.data_root import get_data_root, repoRoot
+
+        agent_root = get_agent_root_dir(agent_id)
+        candidates = [agent_root]
         workspace_attr = getattr(getattr(agent, "config", None), "workspace_path", "") or ""
         if workspace_attr:
-            workspace_candidates.append(Path(workspace_attr))
-        workspace_candidates.append(get_agent_workspace_dir(agent_id))
-        for workspace in workspace_candidates:
-            if not workspace.is_dir():
+            custom_workspace = Path(workspace_attr)
+            try:
+                custom_workspace.resolve().relative_to(agent_root.resolve())
+            except (ValueError, OSError):
+                candidates.append(custom_workspace)
+
+        data_root = get_data_root()
+        legacy_candidates = [
+            repoRoot() / "agent_workspaces" / agent_id,
+            data_root / agent_id,
+            data_root / "sessions" / agent_id,
+            data_root / "agents" / agent_id,
+            data_root / "agents" / "souls" / agent_id,
+            data_root / "checkpoints" / f"{agent_id}.git",
+            data_root / "context_ledger" / f"{agent_id}.db",
+            data_root / "personality" / f"{agent_id}.json",
+            data_root / "sleep_settings" / f"{agent_id}.json",
+            data_root / "media_config" / f"{agent_id}.json",
+            data_root / "seen-cursors" / "agents" / f"{agent_id}.json",
+            data_root / "evolution" / "evidence" / agent_id,
+        ]
+        legacy_candidates.extend(
+            user_dir / agent_id
+            for user_dir in (data_root / "trajectories").glob("*")
+            if user_dir.is_dir()
+        )
+
+        for candidate in candidates:
+            if not candidate.exists():
                 continue
-            # P2-7: rmtree + time.sleep 重试删大工作区可达秒级~十秒级，
-            # 必须丢线程池执行，不得阻塞事件循环
-            if await asyncio.to_thread(_remove_tree_with_retry, workspace):
-                logger.info("Removed workspace for %s: %s", agent_id, workspace)
+            if await asyncio.to_thread(_remove_path_with_retry, candidate):
+                logger.info("Removed agent root for %s: %s", agent_id, candidate)
             else:
+                cleanup_report["agent_root_removed"] = False
                 cleanup_report["workspace_removed"] = False
-
-        # 2) 认知图谱数据目录（agent_core._init_cognitive_graph 创建）：
-        #    与写入端同取 `get_agent_data_dir`——两处各拼一次路径，迟早各拼出不同地方。
-        if agent_id not in _RESERVED_DATA_DIR_NAMES:
-            from neurova.core.data_root import get_agent_data_dir
-
-            agent_data_dir = get_agent_data_dir(agent_id)
-            if agent_data_dir.is_dir() and not await asyncio.to_thread(
-                _remove_tree_with_retry, agent_data_dir
-            ):
                 cleanup_report["agent_data_removed"] = False
-    else:
-        logger.warning("Agent id '%s' 含不安全字符，跳过文件系统清理", agent_id)
 
-    if not (cleanup_report["workspace_removed"] and cleanup_report["agent_data_removed"]):
+        for legacy in legacy_candidates:
+            if not legacy.exists():
+                continue
+            if await asyncio.to_thread(_remove_path_with_retry, legacy):
+                logger.info("Removed legacy agent face for %s: %s", agent_id, legacy)
+            else:
+                cleanup_report["legacy_removed"] = False
+    else:
+        logger.warning(
+            "Agent id '%s' 含不安全字符或与全局目录同名，跳过文件系统清理", agent_id
+        )
+
+    if not all(cleanup_report.values()):
         logger.error("Agent '%s' 删除后仍有文件残留: %s", agent_id, cleanup_report)
 
     return {

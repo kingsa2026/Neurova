@@ -35,8 +35,12 @@ def _clean_registry():
 
 @pytest.fixture
 def ws_root(tmp_path, monkeypatch):
-    """把 agent_workspaces 根指到临时目录，避免污染真实工作区。"""
-    monkeypatch.setattr(kg_mod, "_agent_graph_root", lambda: tmp_path)
+    """把 agent 图谱落点指到临时目录，避免污染真实工作区。"""
+    monkeypatch.setattr(
+        kg_mod,
+        "_agent_graph_dir",
+        lambda agent_id: tmp_path / str(agent_id) / "knowledge_graph",
+    )
     return tmp_path
 
 
@@ -135,7 +139,7 @@ def test_import_extraction_writes_agent_scoped_graph(ws_root, monkeypatch, tmp_p
     from neurova.api import endpoints as api_endpoints
     from neurova.api.endpoints import knowledge as kb
 
-    monkeypatch.setattr(kg_mod, "_agent_graph_root", lambda: ws_root)
+    monkeypatch.setattr(kg_mod, "_agent_graph_dir", lambda agent_id: ws_root / str(agent_id) / "knowledge_graph")
 
     client = MagicMock()
     client.chat = AsyncMock(
