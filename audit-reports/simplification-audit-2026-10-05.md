@@ -2970,6 +2970,13 @@
       **整节按实况重写＝另一刀，待点单**；③ `docs/02-api/API_REFERENCE.md` 附录「无需认证」整表
       仍未逐模块复核（§6-158 那笔账一寸没变），本批只改了自己动过的 `/api/v1/settings` 那一行
       并按实测写（401/401/404）；④ 覆盖层编辑 UI 与插件 P4 前端仍未起（§6-160/§6-159 留案不变）。
+    - **两处档名勘误（不改写已提交正文，只往前指）**：本批那两档判据落库后被并会话按 `test_`
+      口径改名（`d3eec9cb` 收存量两条＋`0eb7893e` 删旧路径半区，2026-10-21）。本格上文写的
+      `tests/language/testOutOfBoxDefaultLayer.py` 与 `tests/unit/api/testRetiredGlobalLanguageDefault.py`
+      **现读** `tests/language/test_OutOfBoxDefaultLayer.py` 与 `tests/unit/api/test_RetiredGlobalLanguageDefault.py`；
+      子集条目已同步改过（`scripts/ci/protected_tests.txt` 第 2509/2523 行现值），旧名在
+      `tests/unit/ci/protectedSubsetRetired.txt:27-28` 带「改名迁移署名（**不是撤判据**）」留痕——
+      这一族形态＝判据档改名要在退役清单里署名，否则读清单的人会以为那两格判据被撤了。
 
 168. **渠道双向语音立项后的第一段：出站音频接上（缺口②），顺带根修飞书那层从没跑过的上传（✅ 缺陷 `9b547ea2`、能力 `8f1688fe`、子集 `0e65fb39`）** 🟢
     - **立项背景**：任务 #27 的三项缺口由 §6-108 记档（当时判"新能力，需用户立项"）。本批按"开始做渠道双向语音"起手，先做**出站**这一段——理由是复算后它的根因最干净：`tests`/`neurova` 里传输层早就支持类型化回发（`manager.send_message(message_type=...)` 在 `manager.py:217-263`，全部适配器签名齐备且有契约测试 `test_b4_gen1_send_signature.py` 钉着），而回合的 TTS 产物**已经生成好了被丢掉**：`post_chat_pipeline._step_generate_tts:1245` 落盘 WAV → `chat_pipeline.py:2933` 放进 `resp["audio_path"]` → `channel_router` 只取 `resp["text"]`，回发也不传类型。所以这不是"再造一套出站机制"，是把断掉的两处调用点接上。

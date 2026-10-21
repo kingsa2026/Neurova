@@ -17,7 +17,7 @@
 这几份里唯一**不可替代**的东西是第一份的那个语义：**管理员可以替「还没表达过偏好的人」
 定一个起点**。按教义第 7 条不能一删了事，也不能两边都留着再加个同步脚本，所以本批把它
 **取进选定单点**（同一份存储的一个可选 `default` 键 ＋ 一条仅管理员的写面），
-其余三份同批退役（退役面见 `tests/unit/api/testRetiredGlobalLanguageDefault.py`）。
+其余三份同批退役（退役面见 `tests/unit/api/test_RetiredGlobalLanguageDefault.py`）。
 
 ## 三条不放宽的口径
 
