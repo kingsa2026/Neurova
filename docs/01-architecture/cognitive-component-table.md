@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **102** 个模块 / **44696** 行。按状态：**在役 55** · **仅层内 37** · **仅测试 5** · **零读者 5**。
+共 **99** 个模块 / **43269** 行。按状态：**在役 54** · **仅层内 37** · **仅测试 3** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1259 |
-| `memory_layer` | 91 | 38052 |
+| `memory_layer` | 88 | 36625 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -95,10 +95,9 @@
 | `neurova/cognitive_layers/memory_layer/explainability.py` | 646 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/forgetting_recovery_storage_mixin.py` | 347 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/graph_traversal.py` | 587 | 1 | 2 | 6 | 在役 |
-| `neurova/cognitive_layers/memory_layer/isolation.py` | 204 | 0 | 4 | 9 | 仅层内 |
+| `neurova/cognitive_layers/memory_layer/isolation.py` | 204 | 0 | 3 | 7 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/manager.py` | 4623 | 14 | 0 | 91 | 在役 |
 | `neurova/cognitive_layers/memory_layer/memory_exporter.py` | 271 | 1 | 0 | 1 | 在役 |
-| `neurova/cognitive_layers/memory_layer/memory_index.py` | 277 | 0 | 0 | 2 | 仅测试 |
 | `neurova/cognitive_layers/memory_layer/memory_stream.py` | 235 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/meta_cognition.py` | 633 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/models.py` | 522 | 6 | 10 | 39 | 在役 |
@@ -141,15 +140,13 @@
 | `neurova/cognitive_layers/memory_layer/share_group.py` | 314 | 1 | 1 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/sleep.py` | 1137 | 6 | 0 | 39 | 在役 |
 | `neurova/cognitive_layers/memory_layer/sleep_writeback.py` | 121 | 2 | 1 | 10 | 在役 |
-| `neurova/cognitive_layers/memory_layer/storage.py` | 721 | 1 | 2 | 18 | 在役 |
+| `neurova/cognitive_layers/memory_layer/storage.py` | 728 | 1 | 1 | 16 | 在役 |
 | `neurova/cognitive_layers/memory_layer/temperature.py` | 564 | 3 | 4 | 12 | 在役 |
 | `neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py` | 449 | 1 | 0 | 4 | 在役 |
 | `neurova/cognitive_layers/memory_layer/temporal_reasoner.py` | 636 | 0 | 0 | 1 | 仅测试 |
 | `neurova/cognitive_layers/memory_layer/tool_memory_integration.py` | 536 | 2 | 0 | 13 | 在役 |
 | `neurova/cognitive_layers/memory_layer/unified_retriever.py` | 161 | 1 | 1 | 3 | 在役 |
 | `neurova/cognitive_layers/memory_layer/unified_vector_store.py` | 941 | 3 | 4 | 17 | 在役 |
-| `neurova/cognitive_layers/memory_layer/vector_index_manager.py` | 431 | 0 | 0 | 1 | 仅测试 |
-| `neurova/cognitive_layers/memory_layer/vector_search.py` | 726 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/version_control.py` | 618 | 1 | 0 | 0 | 在役 |
 | `neurova/cognitive_layers/memory_layer/volume_renderer.py` | 282 | 0 | 2 | 2 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/working_memory.py` | 115 | 2 | 0 | 2 | 在役 |

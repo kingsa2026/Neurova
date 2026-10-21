@@ -91,3 +91,19 @@
 3. `vector_search` 若重建可接受，显式放弃持久化并退休；否则先并 `saveIndex/loadIndex`。
 4. `vector_index_manager` 无延迟证据前不并异步，按显式放弃处理。
 5. 任何一档在没有完成"并/接/测"之前，**不许删**；删除时同批退役其专用测试与门面导出行。
+
+## 5. 实施记录（2026-10-21，§6-376）
+
+- **测量**（隔离数据根、只读真实库）：真实库 19 条（default 15＋kai 4）；
+  `UnifiedVectorStore(backend="auto")` 索引 p50 3.4ms、冷启动 615.9ms；
+  合成 5000 条 TF-IDF p95 292.4ms。⇒ 持久化索引的收益不足以抵第二份状态，
+  `vector_search` 按"显式放弃持久化"处理。
+- **`memory_index`**：隔离过滤抽成 `MemoryStorage._passesIsolation`（`query`/`list_by_tags`
+  共用）；`list_by_tags` 新增 `isolation_context` 并测（摘掉过滤即跨 agent 泄漏＝红，
+  恢复＝绿）；随后退役，`search_by_text`/`get_by_ids`/隔离统计显式放弃。
+- **`vector_index_manager`**：显式放弃异步（无调用方；同步索引 p95 可接受）；
+  退役模块与 M-24 测试；`knowledge/vector_index.py` 的"闲置"注释改指本次放弃。
+- **`vector_search`**：显式放弃持久化索引；退役模块、专用测试与
+  `neurova/memory` 再导出；活实现 `UnifiedVectorStore` 承担。
+- 口径：`memory_index` 的隔离 tags 是**并入**；`vector_search`/`vector_index_manager`
+  是**用户显式放弃**，不写成"取长补短后退役"。

@@ -41,8 +41,6 @@ from neurova.cognitive_layers.memory_layer.models import SelfModel, UserProfile
 
 from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
 
-from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
-
 # `ProactiveQuestion` / `VersionControl` 这两个名字在仓内**没有实装**（真身分别是
 # `proactive_question.Question`+`QuestionQueueManager` 与 `version_control.MemoryVersionControl`，
 # 名字不同）。此前门面用 try/except 把它们降级成 None，谁都没发现；本批把坏指路摘掉而不是
@@ -92,7 +90,6 @@ _MODULE_MAP = {
     "temperature": "neurova.cognitive_layers.memory_layer.temperature",
     "sleep": "neurova.cognitive_layers.memory_layer.sleep",
     "compression": "neurova.cognitive_layers.memory_layer.compression",
-    "vector_search": "neurova.cognitive_layers.memory_layer.vector_search",
     "proactive_question": "neurova.cognitive_layers.memory_layer.proactive_question",
     "agent_self": "neurova.cognitive_layers.memory_layer.agent_self",
     "conversation_buffer": "neurova.cognitive_layers.memory_layer.conversation_buffer",
@@ -118,7 +115,6 @@ __all__ = [
     "TemperatureEngine",
     "SleepConsolidation",
     "MemoryCompressor",
-    "VectorSearch",
     "AgentSelfManager",
     "ConversationBuffer",
     "MemoryStream",
