@@ -317,3 +317,92 @@ def testParkedRunsAreReadableButPayloadStaysInside(makeClient, runStore, yieldCh
     assert makeClient(_RecordingAgent(), STRANGER).get(
         "/api/v1/console/chat/runs", params={"session_id": "g-read"}
     ).status_code == 403
+
+
+def testClientModelSwitchAdoptsInsteadOfParking(makeClient, runStore, yieldChecker):
+    """2026-10-21 事故正脸：pin=gpt-old，客户端选新模型重发——必须采纳并真跑。
+
+    事故链：第一轮 429 失败时闸已建 pin；换模型重发被判 `model_pin_violation`；
+    续跑复用原载荷，7 次全撞同一 pin。客户端选型入口的模型变化不是漂移。
+    """
+    yieldChecker.register_agent(AGENT_ID, "gpt-old")
+
+    resp, agent = _postChat(makeClient, "g-switch", "switch-model")
+
+    assert resp.status_code == 200
+    assert "parked" not in _types(resp.text), (
+        f"换模型被落成挂起：{_types(resp.text)}"
+    )
+    assert agent.calls, "换模型后这一轮没跑——pin 把客户端选型挡死了"
+    assert yieldChecker._agent_pins[AGENT_ID].model_name == MODEL, (
+        "放行了却没把 pin 改成新模型，下一轮还会撞旧 pin"
+    )
+    row = runStore.list_runs("g-switch")[0]
+    assert row["status"] != ars.PARKED_STATUS
+
+
+def testParkedDriftDetailIsReadableOnSseAndAfterRefresh(
+    makeClient, runStore, yieldChecker, monkeypatch
+):
+    """C：挂起原因要在 SSE 与刷新后的读面都看得到，且读面不泄用户原文。
+
+    策略按 `entry` 派生（渠道=严格）已由
+    `tests/unit/collaboration/test_yieldGateModelAdoption.py` 钉住；这里把策略
+    临时压成严格，只验证"原因写得出、读得回、原文不外泄"这条链路。
+    """
+    import neurova.core.agent_run_ledger as ledgerMod
+
+    monkeypatch.setattr(ledgerMod, "adoptsModelSwitchForEntry", lambda entry: False)
+    yieldChecker.register_agent(AGENT_ID, "gpt-old")
+
+    resp, agent = _postChat(makeClient, "g-drift", "drift-me")
+    parked = [e for e in _sseEvents(resp.text) if e.get("type") == "parked"]
+    assert parked, f"模型漂移没有落成 parked：{_types(resp.text)}"
+    assert parked[0].get("pinned_model") == "gpt-old"
+    assert parked[0].get("requested_model") == MODEL
+    assert agent.calls == [], "挂起却仍然跑了这一轮"
+
+    row = runStore.list_runs("g-drift")[0]
+    payload = json.loads(row["resume_payload"])
+    assert payload["park_details"] == {
+        "pinned_model": "gpt-old",
+        "requested_model": MODEL,
+    }, "落库的续跑载荷没带冲突双方，刷新后只能看到一个 model_pin_violation"
+
+    body = makeClient(_RecordingAgent(), OWNER).get(
+        "/api/v1/console/chat/runs", params={"session_id": "g-drift"}
+    ).json()
+    run = next(r for r in body["data"]["runs"] if r["run_id"] == row["run_id"])
+    assert run["park_details"]["pinned_model"] == "gpt-old"
+    assert run["park_details"]["requested_model"] == MODEL
+    assert "drift-me" not in json.dumps(body), "读面把用户原文投出来了"
+
+
+def testResumeOfModelDriftParkAdoptsTheRequestedModel(
+    makeClient, runStore, yieldChecker, monkeypatch
+):
+    """事故原样：模型漂移挂起后点续跑，必须采纳载荷模型并跑完，不能再次挂起。
+
+    第一段把策略压成严格以造出 `model_pin_violation` 的 parked 行（等价于旧版本
+    留下的行）；第二段恢复客户端选型策略再续跑——这正是用户点下"续跑"时的形态。
+    """
+    import neurova.core.agent_run_ledger as ledgerMod
+
+    monkeypatch.setattr(ledgerMod, "adoptsModelSwitchForEntry", lambda entry: False)
+    yieldChecker.register_agent(AGENT_ID, "gpt-old")
+    first, firstAgent = _postChat(makeClient, "g-resume-drift", "drift-me")
+    assert "parked" in _types(first.text)
+    assert firstAgent.calls == []
+    row = runStore.list_runs("g-resume-drift")[0]
+    assert row["park_reason"] == "model_pin_violation"
+
+    monkeypatch.setattr(ledgerMod, "adoptsModelSwitchForEntry", lambda entry: True)
+    resumed = _RecordingAgent()
+    resp = makeClient(resumed, OWNER).post(
+        f"/api/v1/console/chat/resume?run_id={row['run_id']}"
+    )
+
+    assert resp.status_code == 200
+    assert resumed.calls, "续跑仍然被旧 pin 挡住——换模型后这一轮永远跑不起来"
+    assert runStore.get(row["run_id"])["status"] == "completed"
+    assert yieldChecker._agent_pins[AGENT_ID].model_name == MODEL

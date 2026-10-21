@@ -832,6 +832,9 @@ async def post_console_chat(
                             "park_reason": admission.parkReason,
                             "park_attempts": admission.attempts,
                             "park_waited_seconds": round(admission.waitedSeconds, 2),
+                            "park_details": dict(
+                                admission.outcome.details if admission.outcome else {}
+                            ),
                         }
                     response = await agent.chat(
                         body.message,
@@ -1064,6 +1067,7 @@ async def post_console_chat(
 
                 # P2-8：让位闸等不到额度的显式挂起事件。带 run_id——那是唯一续跑凭据。
                 if result.get("parked"):
+                    _parkDetails = result.get("park_details") or {}
                     parked_event = {
                         "type": "parked",
                         "session_id": session_id,
@@ -1071,6 +1075,9 @@ async def post_console_chat(
                         "reason": str(result.get("park_reason", "")),
                         "attempts": int(result.get("park_attempts", 0)),
                         "waited_seconds": float(result.get("park_waited_seconds", 0.0)),
+                        # 模型漂移的冲突双方：只给 reason 一个词，用户不知道钉住的是谁
+                        "pinned_model": str(_parkDetails.get("pinned_model") or ""),
+                        "requested_model": str(_parkDetails.get("requested_model") or ""),
                     }
                     flush_events.append(parked_event)
                     yield f"data: {json.dumps(parked_event, ensure_ascii=False)}\n\n"
@@ -1271,6 +1278,28 @@ async def post_console_chat_resume(
     )
 
 
+def _parkDetailsForRow(row: Dict[str, Any]) -> Dict[str, str]:
+    """parked 行 → 冲突双方的模型名（只投这两个键，用户原文仍不外泄）。
+
+    载荷里的 `park_details` 由准入实现写入（`core/agent_run_ledger`）；这里只做
+    读取与裁剪，不另造第二份挂起原因。
+    """
+    if row.get("status") != "parked":
+        return {}
+    try:
+        payload = json.loads(row.get("resume_payload") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    details = payload.get("park_details") if isinstance(payload, dict) else None
+    if not isinstance(details, dict):
+        return {}
+    return {
+        key: str(details.get(key) or "")
+        for key in ("pinned_model", "requested_model")
+        if str(details.get(key) or "")
+    }
+
+
 @router.get("/chat/runs")
 async def get_console_chat_runs(
     session_id: str,
@@ -1322,6 +1351,8 @@ async def get_console_chat_runs(
                     "run_id": r.get("run_id"),
                     "status": r.get("status"),
                     "park_reason": r.get("park_reason") or "",
+                    # 刷新后仍要能看见"钉住了谁、请求的是谁"；只投模型名，不投原文
+                    "park_details": _parkDetailsForRow(r),
                     "error_type": r.get("error_type") or "",
                     "subagent_id": r.get("subagent_id") or "",
                     "agent_id": r.get("agent_id") or "",

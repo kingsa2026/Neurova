@@ -161,3 +161,70 @@ class TestStreamErrorPropagation:
             assert "No client available" in str(e)
         else:
             raise AssertionError("chat_stream 的 error 字典必须抛出 RuntimeError，不能静默返回空回复")
+
+
+class TestStreamUsageCountedOncePerCall:
+    """一次 LLM 流式调用的 usage 只能计一次。
+
+    事故（2026-10-21 19:34）：网关在一条流里回 2 个 usage chunk（同一个累计值），
+    环内逐 chunk 累加 → 真实 51,529 tokens 被算成约 103,058，TokenBudgetGate 在
+    100,000 处提前终止。usage 是"本次调用的全量"，不是增量。
+    """
+
+    def test_duplicate_usage_chunks_are_not_summed(self):
+        loop = make_loop()
+        # 生产路径由 predict_step 每请求重置；这里直调 _predict_stream，显式给真 dict
+        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage = SimpleNamespace(prompt_tokens=8, completion_tokens=2, total_tokens=10)
+        llm = ChunkLLM(
+            [
+                [
+                    LLMResponse(content="好", usage=usage),
+                    LLMResponse(content="", usage=usage, finish_reason="stop"),
+                ]
+            ]
+        )
+        loop.llm_client = llm
+        loop.agent.llm_client = llm
+
+        asyncio.run(
+            collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
+        )
+
+        assert loop.agent._round_usage["total_tokens"] == 10, (
+            f"同一调用的两个 usage chunk 被累加成 {loop.agent._round_usage['total_tokens']}；"
+            "预算门会在真实用量一半处提前开火"
+        )
+
+    def test_two_calls_still_accumulate_across_tool_rounds(self):
+        """同一请求的两个工具轮：每轮 usage 计一次，跨轮仍累加（10+10=20）。"""
+        loop = make_loop()
+        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage = SimpleNamespace(prompt_tokens=8, completion_tokens=2, total_tokens=10)
+        round1 = [
+            LLMResponse(
+                tool_calls=[
+                    {"index": 0, "id": "call_1", "type": "function",
+                     "function": {"name": "web_search", "arguments": "{}"}}
+                ],
+                usage=usage,
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="", usage=usage),
+        ]
+        round2 = [
+            LLMResponse(content="完成", usage=usage),
+            LLMResponse(content="", usage=usage, finish_reason="stop"),
+        ]
+        llm = ChunkLLM([round1, round2])
+        loop.llm_client = llm
+        loop.agent.llm_client = llm
+
+        asyncio.run(
+            collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
+        )
+
+        assert loop.agent._round_usage["total_tokens"] == 20, (
+            f"两个工具轮、每轮两个 usage chunk，应计 20，实得 "
+            f"{loop.agent._round_usage['total_tokens']}"
+        )

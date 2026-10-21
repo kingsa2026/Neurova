@@ -52,6 +52,25 @@ export function probeModelMultimodal(data: { model_id: string; force?: boolean }
   )
 }
 
+/** 输出上限探测：一次最小请求，结果持久化到 providers.json 的 model_metadata。 */
+export interface ProbeOutputLimitResult {
+  supported: boolean
+  provider_id?: string
+  model_id?: string
+  candidate?: number
+  accepted?: boolean
+  limit?: number | null
+  source?: string
+  detail?: string
+}
+
+export function probeOutputLimit(data: { provider_id: string; model_id: string; candidate?: number }) {
+  return api.post<{ code: number; message: string; data: ProbeOutputLimitResult }>(
+    `${BASE}/probe-output-limit`,
+    data,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // 模型能力自动检测与按能力查询（2026-09-03）
 // 六类核心能力: text/reasoning/vision/video/image_generation/video_generation

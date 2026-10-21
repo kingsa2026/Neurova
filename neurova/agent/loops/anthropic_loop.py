@@ -175,6 +175,9 @@ class AnthropicLoop(BaseAgentLoop):
             reasoning_parts: List[str] = []
             pending_tool_calls: List[Dict] = []
             finish_reason = None
+            # 同一次流式调用可能回多个 usage chunk（同一累计值）；只取最后一个，
+            # 流结束后累加一次。逐 chunk 累加会把 TokenBudgetGate 抬到真实值的一倍。
+            pending_usage = None
 
             request_params = await self._build_request(
                 drive["tools"], drive["computer_handler"], messages
@@ -196,11 +199,16 @@ class AnthropicLoop(BaseAgentLoop):
                 if rtext:
                     reasoning_parts.append(rtext)
                     yield {"type": "reasoning", "data": rtext}
-                self._accumulateRoundUsage(getattr(chunk, "usage", None) or {})
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    pending_usage = usage
                 for tc_delta in getattr(chunk, "tool_calls", None) or []:
                     self._merge_tool_call_delta(pending_tool_calls, tc_delta)
                 if getattr(chunk, "finish_reason", None):
                     finish_reason = chunk.finish_reason
+
+            if pending_usage is not None:
+                self._accumulateRoundUsage(pending_usage)
 
             round_reply = "".join(reply_parts)
 
