@@ -112,22 +112,6 @@ class TestToolMemoryFlow:
         # 权重应减少
         assert w_after_negative < w_after_positive
 
-    def test_conflict_detection_loop(self):
-        """冲突检测闭环：矛盾→检测→标记"""
-        from neurova.cognitive_layers.memory_layer.channels.conflict import ConflictDetector
-        from neurova.cognitive_layers.memory_layer.channels.base import ChannelResult
-
-        cd = ConflictDetector()
-        results = [
-            ChannelResult("a", "Python is not a static typed language", 0.8, "text"),
-            ChannelResult("b", "Python is a static typed language", 0.8, "text"),
-        ]
-        conflicts = cd.detect(results)
-        assert len(conflicts) > 0
-        # 冲突被正确标记
-        assert conflicts[0].reason != ""
-
-
 # ═══════════════════════════════════════════════════════
 # 3. 通道插件→MoE路由→结果处理 闭环
 # ═══════════════════════════════════════════════════════

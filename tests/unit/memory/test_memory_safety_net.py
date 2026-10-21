@@ -15,23 +15,6 @@ class TestMemorySystemSafetyNet:
 
     # ═══ channels 子系统 conflict ═══
 
-    def test_conflict_channels_importable(self):
-        """测试 channels 子系统的 conflict 模块可导入"""
-        from neurova.cognitive_layers.memory_layer.channels.conflict import (
-            ConflictDetector as ChannelsConflictDetector,
-            ConflictPair,
-        )
-        assert ChannelsConflictDetector is not None
-        assert ConflictPair is not None
-
-    def test_channels_conflict_detector_init(self):
-        """测试 channels 子系统的 ConflictDetector 初始化"""
-        from neurova.cognitive_layers.memory_layer.channels.conflict import (
-            ConflictDetector,
-        )
-        detector = ConflictDetector()
-        assert detector is not None
-
     # ═══ 向量搜索系统 ═══
 
     def test_unified_vector_store_importable(self):

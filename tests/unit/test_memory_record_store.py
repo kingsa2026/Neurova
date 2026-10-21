@@ -43,7 +43,13 @@ class TestMemoryRecordStore:
         assert record is not None
         assert record["content"] == content
         assert record["memory_type"] == memory_type
-    
+
+    def test_exists(self, store):
+        """MemoryStorage.exists：存在为真、缺失为假（从 MemoryRecordStore 并入的唯一方法）。"""
+        memory_id = store.save(content="存在性检查", memory_type="episodic")
+        assert store.exists(memory_id) is True
+        assert store.exists("nonexistent_id") is False
+
     def test_save_with_isolation_context(self, store):
         """测试带隔离上下文的保存"""
         # Given: 隔离上下文

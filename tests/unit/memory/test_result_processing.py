@@ -10,7 +10,6 @@ from typing import List
 
 from neurova.cognitive_layers.memory_layer.channels.base import ChannelResult
 from neurova.cognitive_layers.memory_layer.channels.processor import UnifiedResultProcessor
-from neurova.cognitive_layers.memory_layer.channels.conflict import ConflictDetector
 from neurova.cognitive_layers.memory_layer.channels.temporal import TemporalDecay
 from neurova.cognitive_layers.memory_layer.channels.weight import WeightAdjuster
 
@@ -100,38 +99,61 @@ class TestProcessOutput:
         assert hasattr(output, "conflicts")
 
 
-# ────── ConflictDetector Tests ──────
+# ────── 冲突检测走记忆侧单源 ──────
 
-class TestConflictDetector:
-    """冲突检测器测试"""
+class TestConflictDetectionUsesSingleSource:
+    """渠道结果对的冲突检测必须调 `judgeClauseConflict`，不得自带第二套判据。
 
-    def test_detect_no_conflict(self):
-        cd = ConflictDetector()
+    旧 `channels/conflict.py` 按空格分词，中文整句恒不触发；这里用中文否定对做行为格，
+    旧实装会红，接上单源后绿。
+    """
+
+    def test_processorDetectsNegationViaLiveCriterion(self):
+        proc = UnifiedResultProcessor()
         results = [
-            _make_result("m1", "Python is a programming language"),
-            _make_result("m2", "Java is also a programming language"),
+            _make_result("m1", "我喜欢咖啡"),
+            _make_result("m2", "我不喜欢咖啡"),
         ]
-        conflicts = cd.detect(results)
-        assert len(conflicts) == 0
+        output = proc.process(results, {})
 
-    def test_detect_contradiction(self):
-        cd = ConflictDetector()
+        assert len(output.conflicts) == 1
+        assert "否证" in output.conflicts[0].reason
+
+    def test_processorDetectsEnglishNegationViaLiveCriterion(self):
+        """英文整句的否定词差异是旧渠道检测器的独有部分，并进单源后仍要命中。"""
+        proc = UnifiedResultProcessor()
         results = [
-            _make_result("m1", "Python是静态类型语言"),
-            _make_result("m2", "Python是动态类型语言"),
+            _make_result("a", "Python is a static typed language"),
+            _make_result("b", "Python is not a static typed language"),
         ]
-        conflicts = cd.detect(results)
-        # 应该检测到冲突（都有"Python是...类型语言"但结论不同）
-        assert isinstance(conflicts, list)
+        output = proc.process(results, {})
+        assert len(output.conflicts) == 1
 
-    def test_detect_empty(self):
-        cd = ConflictDetector()
-        assert cd.detect([]) == []
+    def test_unrelatedResultsAreNotConflicts(self):
+        proc = UnifiedResultProcessor()
+        results = [
+            _make_result("m1", "今天和张三讨论了文件下载方案"),
+            _make_result("m2", "用户反馈界面很好用"),
+        ]
+        output = proc.process(results, {})
+        assert output.conflicts == []
 
-    def test_detect_single_result(self):
-        cd = ConflictDetector()
-        results = [_make_result("m1", "only one")]
-        assert cd.detect(results) == []
+    def test_emptyAndSingleResult(self):
+        proc = UnifiedResultProcessor()
+        assert proc.process([], {}).conflicts == []
+        assert proc.process([_make_result("m1", "only one")], {}).conflicts == []
+
+
+class TestRetiredDuplicates:
+    def test_channelConflictModuleIsGone(self):
+        import importlib.util
+        assert importlib.util.find_spec(
+            "neurova.cognitive_layers.memory_layer.channels.conflict") is None
+
+    def test_memoryRecordStoreModuleIsGone(self):
+        import importlib.util
+        assert importlib.util.find_spec(
+            "neurova.cognitive_layers.memory_layer.memory_record_store") is None
 
 
 # ────── TemporalDecay Tests ──────

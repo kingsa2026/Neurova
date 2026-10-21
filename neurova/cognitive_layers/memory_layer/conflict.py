@@ -119,6 +119,38 @@ def _contradictionKind(left: str, right: str) -> bool:
     return False
 
 
+# 英文整句的否定词差异：子句切法按空白切会把英文句子切成单词，`not` 与命题的对应关系
+# 在子句级对不上；这里按词级补一条，要求两侧去掉否定词后仍有足够共享实词。
+_ENGLISH_NEGATIONS = frozenset({
+    "not", "no", "never", "neither", "nor", "without", "cannot",
+    "can't", "don't", "doesn't", "didn't", "won't", "wouldn't", "shouldn't",
+    "isn't", "aren't", "wasn't", "weren't", "hasn't", "haven't", "hadn't",
+    "nobody", "none", "nothing", "nowhere",
+})
+_ENGLISH_WORD = re.compile(r"[a-z']+")
+
+
+def _englishNegationConflict(text1: str, text2: str) -> Optional[tuple]:
+    tokens1 = _ENGLISH_WORD.findall((text1 or "").lower())
+    tokens2 = _ENGLISH_WORD.findall((text2 or "").lower())
+    if not tokens1 or not tokens2:
+        return None
+    negated1 = bool(set(tokens1) & _ENGLISH_NEGATIONS)
+    negated2 = bool(set(tokens2) & _ENGLISH_NEGATIONS)
+    if negated1 == negated2:
+        return None
+    content1 = [t for t in tokens1 if t not in _ENGLISH_NEGATIONS]
+    content2 = [t for t in tokens2 if t not in _ENGLISH_NEGATIONS]
+    if not content1 or not content2:
+        return None
+    shared = set(content1) & set(content2)
+    smaller = min(len(set(content1)), len(set(content2)))
+    if smaller < 2 or len(shared) < max(2, int(smaller * 0.6)):
+        return None
+    return ("negation_conflict", text1, text2,
+            "同一命题的否证（英文词级）：%r 与 %r（一方带否定词）" % (text1, text2))
+
+
 # 属性取值：同一属性键上的不同取值互斥（例："项目使用 PostgreSQL" vs "项目使用 MySQL"）。
 # 三组谓词取自 v2 的实装；键取谓词前的中文串（≥2 字），紧贴否定词的交给否定判据，
 # 复合词尾（认为/以为/作为…）不是属性断言。值只做字符串比较，包含关系视为同一取值。
@@ -177,7 +209,8 @@ def _attributeConflict(text1: str, text2: str) -> Optional[tuple]:
 def judgeClauseConflict(text1: str, text2: str) -> Optional[tuple]:
     """全仓唯一的记忆侧冲突判据：返回 (类型, 左子句, 右子句, 依据) 或 None。
 
-    类型为 `negation_conflict` / `semantic_contradiction` / `attribute_conflict`。
+    类型为 `negation_conflict` / `semantic_contradiction` / `attribute_conflict`；
+    英文整句的否定词差异在子句循环之后由 `_englishNegationConflict` 词级补判。
     `LegacyConflictDetector` 与 `ConflictModule` 都从这里取判据——一个根因两处实现，
     修一处等于没修（第二份实现会各自漂回"子串含否定词"的老路）。
     """
@@ -191,6 +224,9 @@ def judgeClauseConflict(text1: str, text2: str) -> Optional[tuple]:
             if _contradictionKind(left, right):
                 return ("semantic_contradiction", left, right,
                         "同一对象的取值互斥：%r 与 %r" % (left, right))
+    englishHit = _englishNegationConflict(text1, text2)
+    if englishHit is not None:
+        return englishHit
     return _attributeConflict(text1, text2)
 
 
