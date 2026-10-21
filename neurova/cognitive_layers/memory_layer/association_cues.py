@@ -290,6 +290,56 @@ class AssociationCueStore:
             for row in rows
         ]
 
+    def memoryIdsWithSource(self, cueSource: str) -> set:
+        """已写过某类线索的记忆 id（agent 级）。"""
+        with self._lock:
+            conn = self._connGetter()
+            rows = conn.execute(
+                "SELECT DISTINCT memory_id FROM memory_cues WHERE agent_id = ? AND cue_source = ?",
+                (self._agent_id, cueSource),
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def attemptedMemoryIds(self) -> set:
+        """已经问过模型的记忆 id（v5 尝试账）。生成侧「一轮做完」的判据落在这里，
+        而不是「有没有写进线索」——否则被模型正当拒答的行会被每个窗口重问。"""
+        with self._lock:
+            conn = self._connGetter()
+            rows = conn.execute(
+                "SELECT memory_id FROM memory_cue_attempts WHERE agent_id = ?",
+                (self._agent_id,),
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def recordAttempt(self, memoryId: str, cuesWritten: int, outcome: str, at: str) -> None:
+        """记一次生成尝试。只在**调用成功**（含模型拒答）时调用；
+        失败/超时/坏输出不留账，让该行留在下一轮。"""
+        if not memoryId:
+            return
+        with self._lock:
+            conn = self._connGetter()
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_cue_attempts"
+                " (memory_id, agent_id, attempted_at, cues_written, outcome)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (memoryId, self._agent_id, at, int(cuesWritten), outcome),
+            )
+            conn.commit()
+
+    def attemptsOverview(self) -> Dict[str, int]:
+        with self._lock:
+            conn = self._connGetter()
+            total = conn.execute(
+                "SELECT COUNT(*) FROM memory_cue_attempts WHERE agent_id = ?",
+                (self._agent_id,),
+            ).fetchone()[0]
+            withCues = conn.execute(
+                "SELECT COUNT(*) FROM memory_cue_attempts"
+                " WHERE agent_id = ? AND cues_written > 0",
+                (self._agent_id,),
+            ).fetchone()[0]
+        return {"attempted": int(total), "attemptedWithCues": int(withCues)}
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             conn = self._connGetter()

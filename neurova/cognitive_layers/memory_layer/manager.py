@@ -294,6 +294,34 @@ def _migrateBodyAssociationCues(conn) -> None:
 register_migration(4, _migrateBodyAssociationCues, domain=MEMORY_BODY_DOMAIN)
 
 
+def _migrateBodyCueAttempts(conn) -> None:
+    """memory 域 v5：联想线索**生成尝试账** `memory_cue_attempts`（批 C-2）。
+
+    为什么必须有这张表：用户裁丙＝生成侧不设调用上限，那么「一轮做完」的判据
+    不能是「写没写进线索」——模型合法地判断某行不值得给线索时（提示词第 5 条明令
+    不要凑数），那一行若不算处理过，就会被每个空闲窗口重新捞出来重问，
+    于是不设上限真的变成无界烧钱。记一次尝试即封账；只有**调用失败/坏输出/超时**
+    的行才留队重来。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_cue_attempts (
+            memory_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL DEFAULT 'default',
+            attempted_at TEXT NOT NULL,
+            cues_written INTEGER NOT NULL DEFAULT 0,
+            outcome TEXT NOT NULL DEFAULT 'empty'
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cue_attempt_agent ON memory_cue_attempts(agent_id)"
+    )
+
+
+register_migration(5, _migrateBodyCueAttempts, domain=MEMORY_BODY_DOMAIN)
+
+
 
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
@@ -1821,6 +1849,112 @@ class MemoryManager:
             inferredCategories=inferred,
             emotion=emotion,
         )
+
+    async def generateModelAssociationCues(
+        self,
+        client: Any = None,
+        batchRows: Optional[int] = None,
+        timeoutSeconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """丙档生成器入口：把「问过但还没线索」的记忆整轮过一遍模型。
+
+        - 待处理面 = agent 全量行 − 已记尝试 − 已有 model 线索。
+          用**内存里的行**组 pending（行 id 已由 `_row_to_memory` 剥过作用域前缀），
+          不在这里重读 `memories` 表——那是第二份 id 语义，M-25 那套前缀规则会在这层踩坑。
+        - `client is None` / 关断 / 无库：各自一个可读数，不抛错、不写库。
+        - 只加分不重排：新线索落库后作废向量通道索引并把词面并进倒排，
+          消费口仍是批 A/C-1 那两条，不新增第三处。
+        """
+        from neurova.cognitive_layers.memory_layer import association_cue_generation as cueGen
+
+        readout: Dict[str, Any] = {
+            "scanned": 0,
+            "calls": 0,
+            "written": 0,
+            "droppedGeneric": 0,
+            "failed": 0,
+            "timedOut": 0,
+            "errors": [],
+            "skippedNoClient": 0,
+            "skippedOff": 0,
+            "skippedNoStore": 0,
+        }
+        if client is None:
+            readout["skippedNoClient"] = 1
+            return readout
+        if not cueGen.modelGenerationEnabled():
+            readout["skippedOff"] = 1
+            return readout
+        store = self._associationCues
+        if store is None:
+            readout["skippedNoStore"] = 1
+            return readout
+
+        with self._lock:
+            attempted = store.attemptedMemoryIds()
+            covered = store.memoryIdsWithSource("model")
+            pending = [
+                mem
+                for mem in self._agent_memories()
+                if mem.id not in attempted and mem.id not in covered
+            ]
+            pendingRows = [
+                {
+                    "index": index,
+                    "memory_id": mem.id,
+                    "content": mem.content,
+                    "scope": (mem.neuser_id, mem.user_id),
+                    "created_at": mem.created_at,
+                }
+                for index, mem in enumerate(pending)
+            ]
+            byMemoryId = {row["memory_id"]: row for row in pendingRows}
+
+        if not pendingRows:
+            return readout
+
+        writtenIds: List[str] = []
+
+        def _write(memoryId: str, cues: List[Dict[str, Any]]) -> int:
+            row = byMemoryId.get(memoryId)
+            if row is None:  # 模型回指了不存在的序号——不认领，交由过滤层计数
+                return 0
+            inserted = store.replaceForMemory(
+                memoryId, cues, scope=row["scope"], createdAt=row["created_at"]
+            )
+            if inserted:
+                writtenIds.append(memoryId)
+            return inserted
+
+        def _recordAttempt(memoryId: str, cuesWritten: int) -> None:
+            # 时间戳与 `memories.created_at` 同口径（UTC ISO）；本模块顶层是
+            # `import datetime`，所以这里走 `datetime.datetime.*`，不另起本地时间。
+            store.recordAttempt(
+                memoryId,
+                cuesWritten,
+                "cued" if cuesWritten else "empty",
+                at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            )
+
+        result = await cueGen.runGeneration(
+            pendingRows,
+            client,
+            _write,
+            _recordAttempt,
+            batchRows=batchRows or cueGen.BATCH_ROWS,
+            timeoutSeconds=timeoutSeconds or cueGen.TIMEOUT_SECONDS,
+        )
+        result.update(
+            {key: readout[key] for key in ("skippedNoClient", "skippedOff", "skippedNoStore")}
+        )
+
+        # 词面并进既有倒排（与批 A 同一消费口）+ 作废向量通道整片索引
+        for memoryId in writtenIds:
+            mem = self._memories.get(memoryId)
+            if mem is not None:
+                self._indexMemoryWithCues(mem)
+        self.invalidateAssociationCueIndex()
+        return result
 
     def get_associationCues(self, memory_id: str) -> List[Dict[str, Any]]:
         """按当前生效作用域取一条记忆的联想线索（跨作用域取不到——是门不是排序）。"""
