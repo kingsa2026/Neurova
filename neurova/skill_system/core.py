@@ -9,7 +9,9 @@ D1 任务重构版本：
 """
 
 from neurova.core.logger import get_logger
+from neurova.core.tool_trace import beginToolTrace, endToolTrace
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -685,17 +687,26 @@ class SkillRegistry:
         # 触发前置事件
         self._emit_event("before_execute", skill_name, params)
 
+        trace_token, trace = beginToolTrace()
         try:
             result = await skill.execute(params, context)
 
-            # 触发后置事件
-            self._emit_event("after_execute", skill_name, result)
+            # 触发后置事件（带执行入参/上下文/工具 trace，供进化侧落证据）
+            self._emit_event(
+                "after_execute", skill_name, result, params=params, context=context,
+                trace=trace,
+            )
 
             return result
         except Exception as e:
             # 触发错误事件
-            self._emit_event("error", skill_name, {"error": str(e)})
+            self._emit_event(
+                "error", skill_name, {"error": str(e)}, params=params, context=context,
+                trace=trace,
+            )
             return SkillResult(success=False, error=str(e))
+        finally:
+            endToolTrace(trace_token)
 
     @property
     def runtime_manager(self):
@@ -807,8 +818,14 @@ class SkillRegistry:
         """
         self._event_callbacks.setdefault(event_type, []).append(handler)
 
-    def _emit_event(self, event_type: str, skill_name: str, data: Any = None):
-        """触发事件"""
+    def _emit_event(
+        self, event_type: str, skill_name: str, data: Any = None, **meta: Any
+    ):
+        """触发事件。
+
+        `meta` 只发给声明了 **kwargs 的类型化回调，旧的 (skill, data) 两参
+        回调保持原签名——带证据不能以破坏既有契约为代价。
+        """
         event = SkillEvent(event_type, skill_name, data)
         for handler in self._event_handlers:
             try:
@@ -819,9 +836,21 @@ class SkillRegistry:
         skill = self._lookup(skill_name)
         for handler in self._event_callbacks.get(event_type, []):
             try:
-                handler(skill, data)
+                if meta and _accepts_event_meta(handler):
+                    handler(skill, data, **meta)
+                else:
+                    handler(skill, data)
             except Exception as e:
                 get_logger(__name__).error(f"事件回调处理失败: {e}")
+
+
+def _accepts_event_meta(handler: Callable) -> bool:
+    """回调是否显式接收事件元数据（**kwargs）；签名不可读时按旧契约处理。"""
+    try:
+        parameters = inspect.signature(handler).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
 
 
 def create_default_skills(memory_manager=None) -> SkillRegistry:

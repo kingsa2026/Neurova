@@ -241,15 +241,36 @@ async def run_skill_evolution_pass(
     skill_service,
     skill_text_loader,
     reflection_type,
+    agent_id: str = "",
 ):
-    """技能进化一轮：提案（含反射式文本改进）→ 应用回写 → 反思日志沉淀。
+    """技能进化一轮：字典提案回写 + 单一 service 文本进化。
 
     从 _step_rsi_iteration 抽出（P1-4 队列化改造）：队列关闭时 post_chat 直调，
     队列开启时作为作业 handler 的 body——两条路径共用同一实现，无第二套。
-    返回已处理提案数。
+    返回已处理的字典提案数。
+
+    LLM 文本进化只有 `SkillEvolutionService` 一条路径：有 golden 数据集才跑，
+    过门才产提案；`auto_apply_skill_evolution` 为真时过门即应用，否则留 pending。
     """
-    proposals = await improver.propose_pending_improvements_async(skill_text_loader)
+    service = None
+    if agent_id:
+        try:
+            from neurova.evolution.eval.service import SkillEvolutionService
+
+            service = SkillEvolutionService(agent_id)
+        except Exception as svc_err:  # noqa: BLE001 - service 不可用不阻断字典提案
+            logger.debug("技能文本进化 service 不可用: %s", svc_err)
+    proposals = await improver.propose_pending_improvements_async()
     handled = 0
+    pending_skill_ids: set[str] = set()
+    if service is not None:
+        try:
+            pending_skill_ids = {
+                str(p.get("skill_id") or "") for p in service.list_proposals("pending")
+            }
+        except Exception as pending_err:  # noqa: BLE001
+            logger.debug("待审提案读取失败: %s", pending_err)
+    evolved = 0
     for proposal in proposals[:3]:
         applied = False
         if skill_registry is not None:
@@ -257,21 +278,115 @@ async def run_skill_evolution_pass(
                 proposal, skill_registry, skill_service=skill_service
             )
         if applied:
-            logger.info("🔧 技能改进已应用: %s (%s)", proposal.skill_id, proposal.description or "")
+            logger.info(
+                "🔧 技能改进已应用: %s (%s)",
+                proposal.skill_id,
+                proposal.description or "",
+            )
             handled += 1
+        else:
+            logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
+            if growth_log_manager:
+                try:
+                    await growth_log_manager.generate_log(
+                        type=reflection_type.IMPROVEMENT,
+                        title=f"技能改进提案: {proposal.skill_id}",
+                        content=proposal.description or proposal.reason,
+                        insights=[proposal.reason] if proposal.reason else [],
+                        confidence=min(1.0, max(0.0, float(proposal.expected_impact or 0.5))),
+                    )
+                except Exception as pe:
+                    logger.debug("改进提案写入反思日志失败: %s", pe)
+
+        if service is None or skill_registry is None or evolved >= 1:
             continue
-        logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
-        if growth_log_manager:
-            try:
-                await growth_log_manager.generate_log(
-                    type=reflection_type.IMPROVEMENT,
-                    title=f"技能改进提案: {proposal.skill_id}",
-                    content=proposal.description or proposal.reason,
-                    insights=[proposal.reason] if proposal.reason else [],
-                    confidence=min(1.0, max(0.0, float(proposal.expected_impact or 0.5))),
-                )
-            except Exception as pe:
-                logger.debug("改进提案写入反思日志失败: %s", pe)
+        try:
+            from neurova.evolution.eval.config import text_evolution_enabled
+
+            if not text_evolution_enabled():
+                continue
+        except Exception:  # noqa: BLE001 - 开关不可读按关闭处理
+            continue
+        skill_id = str(getattr(proposal, "skill_id", "") or "")
+        if not skill_id or skill_id in pending_skill_ids:
+            continue
+        baseline = skill_text_loader(skill_id) if skill_text_loader else None
+        if not baseline:
+            continue
+        try:
+            dataset = await service.build_dataset(skill_id, baseline, source="golden")
+        except Exception as ds_err:  # noqa: BLE001
+            logger.debug("技能 golden 数据集读取失败 %s: %s", skill_id, ds_err)
+            continue
+        if dataset is None:
+            logger.debug("技能无 golden 数据集，跳过文本进化: %s", skill_id)
+            continue
+        extra_failures: list = []
+        try:
+            from neurova.evolution.skill_evidence import failureJudgeFailures
+
+            extra_failures = failureJudgeFailures(
+                improver.get_usage_history(skill_id), limit=5
+            )
+        except Exception as evidence_err:  # noqa: BLE001 - 证据装载失败不阻断进化
+            logger.debug("失败证据装载失败 %s: %s", skill_id, evidence_err)
+        domain_harnesses: list = []
+        try:
+            from neurova.skills.library_service import agentLibrary
+
+            library = agentLibrary(agent_id)
+            domain_harnesses = library.listDomainHarnesses(
+                library.skillDomain(skill_id), limit=5, exclude_skill_id=skill_id
+            )
+        except Exception as library_err:  # noqa: BLE001 - 域库不可读不阻断进化
+            logger.debug("同域 harness 读取失败 %s: %s", skill_id, library_err)
+        try:
+            result, evo_proposal = await service.evolve(
+                skill_id=skill_id,
+                skill_text=baseline,
+                dataset=dataset,
+                iterations=1,
+                artifact_type="skill",
+                extra_failures=extra_failures,
+                domain_harnesses=domain_harnesses,
+            )
+        except Exception as evo_err:  # noqa: BLE001 - 单技能失败不拖垮本轮
+            logger.warning("技能文本进化失败 %s: %s", skill_id, evo_err)
+            continue
+        evolved += 1
+        if evo_proposal is None:
+            logger.info(
+                "技能文本进化未过门: %s (%s)",
+                skill_id,
+                getattr(result, "reject_reason", ""),
+            )
+            continue
+        try:
+            from neurova.evolution.evolution_settings import (
+                auto_apply_skill_evolution_enabled,
+            )
+
+            auto_apply = auto_apply_skill_evolution_enabled()
+        except Exception:  # noqa: BLE001 - 开关不可读按关闭处理
+            auto_apply = False
+        if auto_apply and getattr(evo_proposal, "requires_manual_review", False):
+            logger.info(
+                "技能文本进化提案需人工复核（judge 回退），不自动应用: %s",
+                evo_proposal.proposal_id,
+            )
+            auto_apply = False
+        if auto_apply:
+            ok = service.decide(
+                evo_proposal.proposal_id,
+                approve=True,
+                registry=skill_registry,
+                approver="auto:evolution",
+            )
+            logger.info("技能文本进化自动应用: %s (%s)", skill_id, "ok" if ok else "failed")
+        else:
+            logger.info(
+                "技能文本进化提案待审批: %s (%s)", skill_id, evo_proposal.proposal_id
+            )
     return handled
 
 
@@ -2852,14 +2967,21 @@ class PostChatPipeline:
                     skill_service=skill_service,
                     skill_text_loader=skill_text_loader,
                     reflection_type=_RealReflectionType,
+                    agent_id=agent_id,
                 )
             else:
                 from neurova.core.turn_context import get_turn_count, get_turn_session_id
                 from neurova.evolution.job_queue import get_evolution_job_queue
 
                 queue = get_evolution_job_queue()
+                from neurova.evolution.evolution_settings import evolutionPassIdentity
+
                 _idem = f"sev:{agent_id}:{get_turn_session_id() or 'anon'}#{get_turn_count()}"
-                queue.enqueue("skill_evolution_pass", {"agent_id": agent_id}, idempotency_key=_idem)
+                queue.enqueue(
+                    "skill_evolution_pass",
+                    {"agent_id": agent_id, "identity": evolutionPassIdentity(agent_id)},
+                    idempotency_key=_idem,
+                )
                 processed = 0
                 _tried: list = []
                 queue.recover_stale()
@@ -2869,6 +2991,15 @@ class PostChatPipeline:
                         break
                     _tried.append(job["id"])
                     processed += 1
+                    payload = job.get("payload") or {}
+                    from neurova.evolution.evolution_settings import (
+                        evolutionJobIdentityRejected,
+                    )
+
+                    if evolutionJobIdentityRejected(payload, agent_id):
+                        queue.complete(job["id"], {"rejected": "identity_changed"})
+                        logger.info("技能进化作业身份已变化，拒绝旧作业: %s", job["id"])
+                        continue
                     try:
                         await run_skill_evolution_pass(
                             improver=improver,
@@ -2877,6 +3008,7 @@ class PostChatPipeline:
                             skill_service=skill_service,
                             skill_text_loader=skill_text_loader,
                             reflection_type=_RealReflectionType,
+                            agent_id=agent_id,
                         )
                         queue.complete(job["id"])
                     except Exception as job_err:  # noqa: BLE001 - 单作业失败可重试

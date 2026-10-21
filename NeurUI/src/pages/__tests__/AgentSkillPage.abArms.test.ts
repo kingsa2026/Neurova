@@ -16,6 +16,7 @@ const { apiMock } = vi.hoisted(() => {
   const m: Record<string, any> = {
     getAgentSkills: vi.fn().mockResolvedValue([]),
     listConsolidationPlans: vi.fn().mockResolvedValue({ code: 0, data: [] }),
+    searchAgentDomainHarnesses: vi.fn().mockResolvedValue({ data: [] }),
   }
   return { apiMock: m }
 })
@@ -91,6 +92,7 @@ const messages = {
     argsPlaceholder: 'JSON', executeSuccess: '成功', executeError: '失败', install: '安装',
     enabledSuccess: 'ok', disabledSuccess: 'ok', toggleError: '失败', pushToMine: '推送',
     pushSubmitted: '已推送', pushError: '失败', marketSearchPlaceholder: '搜索',
+    domainHarnesses: '域级已采纳 harness', domainHarnessesHint: '跨域搜索已采纳 harness...',
   },
   skillEvo: {
     proposals: '待审提案', settings: '进化设置', runSweep: '扫描', pinned: '已钉住',
@@ -169,9 +171,25 @@ describe('AgentSkillPage — 双臂核验两栏', () => {
     vi.clearAllMocks()
     apiMock.getAgentSkills.mockResolvedValue([])
     apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [] })
+    apiMock.searchAgentDomainHarnesses.mockResolvedValue({ data: [] })
     evolutionMock.getLifecycleUsage.mockResolvedValue({ data: { counts: {}, skills: [] } })
     evolutionMock.getEvolutionSettings.mockResolvedValue({ data: {} })
     evolutionMock.listProposals.mockResolvedValue({ data: [] })
+  })
+
+  it('域级 harness 面板展示跨域检索结果', async () => {
+    apiMock.searchAgentDomainHarnesses.mockResolvedValue({
+      data: [{
+        skill_id: 'peer', name: 'Peer Harness', domain: 'legal',
+        version: '1.2.0', description: 'adopted harness', adopted: true,
+      }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(apiMock.searchAgentDomainHarnesses).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Peer Harness')
+    expect(wrapper.text()).toContain('legal')
   })
 
   it('提案详情渲染出核验区与两个入口', async () => {

@@ -119,11 +119,16 @@ class TestProposalEndpoints:
     def test_list_and_detail(self, client, tmp_path, monkeypatch):
         target = tmp_path / "evo"
         target.mkdir()
-        _pending_proposal(target)
+        _pending_proposal(target, extra={
+            "requires_manual_review": True, "judge_fallback": "deterministic",
+        })
         _pointServiceAt(monkeypatch, target)
         lst = client.get(f"{BASE}/skills/a1/proposals", params={"status": "pending"}).json()["data"]
         assert len(lst) == 1
         assert "baseline_text" not in lst[0]  # 列表不夹带正文
+        # judge 回退提案的人工复核标记必须随列表出街（技能页据此挂标签）。
+        assert lst[0]["requires_manual_review"] is True
+        assert lst[0]["judge_fallback"] == "deterministic"
         detail = client.get(f"{BASE}/skills/a1/proposals/evo_x1").json()["data"]
         assert detail["improved_text"] == "I"
 

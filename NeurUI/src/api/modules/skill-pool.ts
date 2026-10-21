@@ -216,6 +216,30 @@ export function getAgentSkills(agentId: string) {
   return api.get<ApiResponse<Skill[]>>(`${BASE}/agent/${agentId}/skills`)
 }
 
+/** 已采纳 harness 的跨域/域内检索（只读；复用既有技能库）。 */
+export interface DomainHarness {
+  skill_id: string
+  name?: string
+  description?: string
+  version: string
+  domain: string
+  adopted: boolean
+  revision_count?: number
+  last_applied_at?: string
+  context_template?: string
+  score?: number
+}
+
+export function searchAgentDomainHarnesses(
+  agentId: string,
+  params?: { query?: string; domain?: string; limit?: number },
+) {
+  return api.get<ApiResponse<DomainHarness[]>>(
+    `${BASE}/agent/${agentId}/domain-harnesses`,
+    { params },
+  )
+}
+
 /** Enable or disable a private skill（V5：agent 定库 + enabled 行级真通道。
  *  旧实现 config.enabled 从不触发行级 enabled 且缺 agent_id 落 default 库）。 */
 export function enableSkill(skillId: string, enabled: boolean, agentId = 'default') {

@@ -847,6 +847,27 @@ async def get_agent_skills(agent_id: str):
         return []
 
 
+@router.get("/agent/{agent_id}/domain-harnesses")
+async def get_agent_domain_harnesses(
+    agent_id: str,
+    query: str = Query(default="", description="跨域检索关键词"),
+    domain: str = Query(default="", description="限定域；空=跨域"),
+    limit: int = Query(default=5, ge=1, le=20),
+):
+    """已采纳 harness 的跨域/域内检索（只读；复用既有技能库，不新建存储）。"""
+    try:
+        service = _pool_service(agent_id)
+        return {
+            "code": 0,
+            "data": service.searchDomainHarnesses(
+                query, domain=domain, limit=limit
+            ),
+        }
+    except Exception as e:
+        logger.exception("get_agent_domain_harnesses failed: %s", e)
+        raise HTTPException(status_code=500, detail="domain harness search failed")
+
+
 @router.post("/install-from-url")
 async def install_from_url(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """从 URL 安装技能。V 轮落库路由：target=agent（默认，现状 default 库）/

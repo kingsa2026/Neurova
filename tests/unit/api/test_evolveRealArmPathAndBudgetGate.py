@@ -104,11 +104,16 @@ def _postEvolve(client, agent_id, payload):
 
 
 class TestEvolveArmSwitch:
-    def testDefaultRequestStaysSimulatedAndSafetyProbeStaysFalse(self, env, offline, monkeypatch):
-        """裁定面：本批只加"能开真臂"，**不动默认**——RSI 自动晋升的第四条否决必须仍是 False。"""
+    def testDefaultRequestPrefersRealArmAndFallsBackWhenAgentOffline(
+        self, env, offline, monkeypatch
+    ):
+        """默认 auto：在线走真臂；离线回落模拟面，但必须显式标注回落原因。"""
+        import neurova.api.endpoints as endpoints
         import neurova.evolution.eval.service as service
         from neurova.evolution.rsi.automation_prerequisites import probeRealTrajectoryExecutor
 
+        monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": None,
+                            raising=False)
         _skillInfo(monkeypatch)
         monkeypatch.setattr(service.SimulatedAgent, "declaresRealAgentTrajectory",
                             lambda self: True, raising=False)
@@ -117,11 +122,49 @@ class TestEvolveArmSwitch:
         assert r.status_code == 200, r.text
         data = r.json()["data"]
         assert data["executor_kind"] == "simulated", data
+        assert data["executor_requested"] == "auto", data
+        assert data["real_trajectory_fallback"] == "agent_offline", data
         assert data["agent_turns_used"] is None, data
         assert data["planned_agent_turns"] is None, data
         # 上面那行 monkeypatch 是反证：给模拟臂硬塞一个"真回合"声明也不许翻旗标
         # （能力由结构推导：没有 agent_ref 就不是真臂）
         assert probeRealTrajectoryExecutor() is False
+
+    def testDefaultRequestUsesRealArmWhenAgentOnline(self, env, offline, monkeypatch):
+        import neurova.api.endpoints as endpoints
+        from neurova.evolution.rsi.automation_prerequisites import probeRealTrajectoryExecutor
+
+        agent = _AgentStub()
+        monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
+                            raising=False)
+        _skillInfo(monkeypatch)
+        client = _client()
+        r = _postEvolve(client, "a1", {"skill_id": SKILL_ID, "iterations": 1})
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["executor_kind"] == "real_agent", data
+        assert data["executor_requested"] == "auto", data
+        assert data.get("real_trajectory_fallback", "") == "", data
+        assert agent.calls, "默认 auto 在 agent 在线时必须跑真回合"
+        # 默认 auto 只改请求面；RSI 自动晋升的第四条前置仍按生产装配点推导，不因本端点翻真。
+        assert probeRealTrajectoryExecutor() is False
+
+    def testDefaultAutoFallsBackWhenBudgetExceeded(self, env, offline, monkeypatch):
+        """auto 档遇预算不足：不花回合，回落到模拟面并标注 budget_exceeded。"""
+        import neurova.api.endpoints as endpoints
+
+        agent = _AgentStub()
+        monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
+                            raising=False)
+        _skillInfo(monkeypatch)
+        client = _client()
+        r = _postEvolve(client, "a1", {"skill_id": SKILL_ID, "iterations": 10})
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["executor_kind"] == "simulated", data
+        assert data["executor_requested"] == "auto", data
+        assert data["real_trajectory_fallback"] == "budget_exceeded", data
+        assert agent.calls == [], "回退也必须发生在第一个回合之前"
 
     def testRealArmFlagReachesTheAgentAndReportsTurns(self, env, offline, monkeypatch):
         import neurova.api.endpoints as endpoints
@@ -199,10 +242,12 @@ class TestBudgetGateBeforeSpending:
         update_settings(real_arm_max_agent_turns=1)
         _skillInfo(monkeypatch)
         client = _client()
-        r = _postEvolve(client, "a1", {"skill_id": SKILL_ID, "iterations": 2})
+        r = _postEvolve(client, "a1",
+                        {"skill_id": SKILL_ID, "iterations": 2, "real_trajectory": False})
         assert r.status_code == 200, r.text
         data = r.json()["data"]
         assert data["executor_kind"] == "simulated", data
+        assert data["executor_requested"] == "simulated", data
         assert data["planned_agent_turns"] is None, data
 
     def testAbPathSharesTheSameGate(self, env, offline, monkeypatch):

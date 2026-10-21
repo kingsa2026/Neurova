@@ -1578,40 +1578,9 @@ class Agent:
         根因修复: AutoSkillImprover 此前零调用——成败都记录使用数据，
         供失败模式分析与改进提案（进化闭环的数据采集端）。
         """
-        try:
-            from neurova.evolution.skill_improver import get_skill_improver
+        from neurova.evolution.skill_recording import recordSkillUsage
 
-            # Wave G-2：身份三跳链收敛进 skill_contract 单源解析器
-            from neurova.skills.skill_contract import resolve_skill_identity
-
-            skill_id = resolve_skill_identity(skill)
-            if skill_id:
-                get_skill_improver().record_usage(
-                    skill_id=skill_id,
-                    success=bool(result and result.success),
-                    duration=float(getattr(result, "execution_time", 0.0) or 0.0),
-                    error_message=str(getattr(result, "error", "") or ""),
-                    metadata={"agent_id": self.config.agent_id},
-                )
-
-                # C11 使用计数（第三遍审计重接：并行重写本 handler 时此调用被
-                # 覆盖丢失——use_count/last_used_at_ms 是 collection-review 与
-                # 改进提案的消费面。成败都记，ledger 语义与上方 record_usage 一致）
-                from neurova.skills.library_service import agentLibrary
-
-                agentLibrary(self.config.agent_id).record_skill_usage(
-                    skill_id, success=bool(result and result.success)
-                )
-
-                # usage_stats 累积：技能级淘汰的
-                # 数据依据（times_used/positive/negative），与上方两条记账同源
-                from neurova.evolution.skill_experience import get_skill_experience_store
-
-                get_skill_experience_store().record_usage(
-                    skill_id, success=bool(result and result.success)
-                )
-        except Exception as e:
-            logger.debug("技能使用记录失败: %s", e)
+        recordSkillUsage(self, skill, result, **kwargs)
 
         # 断点 #1 修复（Skill 递归进化审计）：genetic_engine.record_reuse 零调用方，
         # 进化技能被复用时 reuse_count 恒 0、fitness 的复用项恒 0——"越用越强"的

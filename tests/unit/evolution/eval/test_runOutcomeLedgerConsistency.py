@@ -132,7 +132,7 @@ class TestNoFabricatedLedgerOutcome:
                 raise RuntimeError("probe: 判分器不可用")
 
         broken = SkillEvolutionRunner(
-            EvolutionConfig(), judge=_BrokenJudge(), agent=_EchoAgent(),
+            EvolutionConfig(judge_fallback="off"), judge=_BrokenJudge(), agent=_EchoAgent(),
             mutate=_markerMutate, ledger=ledger)
         result = await broken.run(
             baseline_text=BASELINE, dataset=_dataset(["a"]),

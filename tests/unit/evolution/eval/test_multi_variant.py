@@ -102,6 +102,71 @@ class TestMultiVariant:
         assert result.deployed_text == "候选甲"
 
     @pytest.mark.asyncio
+    async def test_extra_failure_evidence_reaches_mutator(self):
+        """失败全量证据必须进入变异器失败集（不能只落盘不消费）。"""
+        from neurova.evolution.eval.mutator import JudgeFailure
+
+        captured: list[str] = []
+
+        async def mutate(*, artifact_text, artifact_type, failures):
+            captured.extend(f.task_input for f in failures)
+            return artifact_text + "\nIMPROVED"
+
+        async def judge(*, skill_text, **kw):
+            c = 0.9 if "IMPROVED" in skill_text else 0.2
+            return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
+
+        runner = SkillEvolutionRunner(EvolutionConfig(), judge=judge, mutate=mutate)
+        await runner.run(
+            baseline_text=BASELINE,
+            artifact_type="skill",
+            dataset=_ds(),
+            iterations=1,
+            extra_failures=[JudgeFailure(task_input="prod-fail", output="o", feedback="e", score=0.0)],
+        )
+        assert "prod-fail" in captured
+
+    @pytest.mark.asyncio
+    async def test_near_tie_blind_tiebreak_overrides_first_argmax(self):
+        """近平分时匿名 A/B 可推翻先到 argmax；读数进结果面。"""
+        produced = iter(["候选甲", "候选乙"])
+
+        async def mutate(*, artifact_text, artifact_type, failures):
+            return next(produced)
+
+        class _BlindJudge:
+            async def score(self, *, skill_text, **kwargs):
+                value = 0.5 if skill_text == BASELINE else 0.7
+                return FitnessScore(
+                    correctness=value, procedure_following=value,
+                    conciseness=value, feedback=""
+                )
+
+            async def _call_llm(self, messages, model):
+                prompt = messages[-1]["content"]
+                a_block = prompt.split("【A】", 1)[1].split("【B】", 1)[0]
+                return {
+                    "success": True,
+                    "response": '{"choice":"A"}' if "候选乙" in a_block else '{"choice":"B"}',
+                }
+
+        class _Agent:
+            async def run(self, *, skill_text, task_input):
+                return f"{skill_text}::{task_input}"
+
+        cfg = EvolutionConfig(variants_per_round=2)
+        runner = SkillEvolutionRunner(
+            cfg, judge=_BlindJudge(), mutate=mutate, agent=_Agent()
+        )
+        result = await runner.run(
+            baseline_text=BASELINE, artifact_type="skill", dataset=_ds(), iterations=1
+        )
+
+        assert result.deployed_text == "候选乙"
+        assert result.blind_tiebreak["state"] == "measured"
+        assert result.blind_tiebreak["preferred"] == "candidate"
+
+    @pytest.mark.asyncio
     async def test_all_gated_round_keeps_baseline(self):
         """m 个候选全被约束闸拒绝 → 无候选评测，基线保持。"""
         async def judge(*, task_input, expected_behavior, output, skill_text, **kw):

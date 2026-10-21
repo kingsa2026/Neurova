@@ -79,6 +79,47 @@ def dataset_fingerprint(examples: Sequence) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
+def experiment_fingerprint(
+    *,
+    skill_id: str,
+    baseline_text: str,
+    model_under_test: str,
+    artifact_type: str,
+    examples: Sequence,
+    config: object,
+) -> str:
+    """一次评测的完整身份指纹（N5）。
+
+    缓存/续跑只认它：技能正文、模型、数据集、seed 或影响判据的配置任一变化，
+    指纹即变，旧噪声带/旧读数不得复用。与 `dataset_fingerprint` 同源取其
+    数据集格，不另造第二套用例序列化。
+    """
+    payload = {
+        "v": 2,
+        "skill_id": str(skill_id or ""),
+        "baseline_sha256": hashlib.sha256(
+            str(baseline_text or "").encode("utf-8")
+        ).hexdigest(),
+        "model_under_test": str(model_under_test or ""),
+        "artifact_type": str(artifact_type or ""),
+        "dataset": dataset_fingerprint(examples),
+        "seed": int(getattr(config, "seed", 42) or 42),
+        "judge_model": str(getattr(config, "judge_model", "") or ""),
+        "optimizer_model": str(getattr(config, "optimizer_model", "") or ""),
+        "min_improvement": float(getattr(config, "min_improvement", 0.01) or 0.0),
+        "judge_fallback": str(getattr(config, "judge_fallback", "") or ""),
+        "case_regression_allowance": int(
+            getattr(config, "case_regression_allowance", 0) or 0
+        ),
+        "noise_band_delta": float(getattr(config, "noise_band_delta", 0.0) or 0.0),
+        "heldout_ratio": float(getattr(config, "heldout_ratio", 0.0) or 0.0),
+        "variants_per_round": int(getattr(config, "variants_per_round", 1) or 1),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+
+
 def load_cached_band(cache_path: Path, fingerprint: str) -> Optional[NoiseBand]:
     try:
         data = json.loads(Path(cache_path).read_text(encoding="utf-8"))

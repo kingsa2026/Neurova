@@ -42,6 +42,109 @@ def _incomingStagingName(skill_id: str) -> str:
 
     return f".incoming_{_time.time_ns()}"
 
+# ── 域级 harness 视图（扩展既有技能库，不新建存储）──
+
+
+def skillDomainOf(info: Optional[Dict[str, Any]]) -> str:
+    """技能所属域：config/domain → config/category → tags[0] → general。"""
+    if not isinstance(info, dict):
+        return "general"
+    manifest = info.get("manifest") if isinstance(info.get("manifest"), dict) else {}
+    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    for value in (
+        config.get("domain"),
+        config.get("category"),
+        manifest.get("domain"),
+        manifest.get("category"),
+    ):
+        if value:
+            return str(value)
+    tags = manifest.get("tags") or info.get("tags") or []
+    if isinstance(tags, list) and tags:
+        return str(tags[0])
+    return "general"
+
+
+def domainHarnessesFrom(
+    infos: List[tuple[str, Dict[str, Any]]],
+    domain: str,
+    *,
+    limit: int = 5,
+    exclude_skill_id: str = "",
+) -> List[Dict[str, Any]]:
+    """从既有技能条目里筛出同域、已采纳的 harness（版本>1 或有修订链）。"""
+    out: List[Dict[str, Any]] = []
+    for skill_id, info in infos:
+        if skill_id == exclude_skill_id or not isinstance(info, dict):
+            continue
+        entry_domain = skillDomainOf(info)
+        if domain and entry_domain != str(domain):
+            continue
+        manifest = info.get("manifest") if isinstance(info.get("manifest"), dict) else {}
+        config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+        context_template = str(config.get("context_template") or "")
+        version = str(info.get("version") or config.get("version") or "1.0.0")
+        revisions = config.get("revisions") if isinstance(config.get("revisions"), list) else []
+        adopted = bool(revisions) or version != "1.0.0" or bool(info.get("version_history"))
+        if not context_template or not adopted:
+            continue
+        out.append(
+            {
+                "skill_id": skill_id,
+                "name": str(info.get("name") or skill_id),
+                "description": str(info.get("description") or ""),
+                "version": version,
+                "domain": entry_domain,
+                "adopted": True,
+                "revision_count": len(revisions),
+                "last_applied_at": (
+                    str(revisions[-1].get("applied_at") or "") if revisions else ""
+                ),
+                "context_template": context_template,
+            }
+        )
+        if len(out) >= max(1, int(limit)):
+            break
+    return out
+
+
+def searchDomainHarnessesFrom(
+    infos: List[tuple[str, Dict[str, Any]]],
+    query: str,
+    *,
+    domain: str = "",
+    limit: int = 5,
+    exclude_skill_id: str = "",
+) -> List[Dict[str, Any]]:
+    """跨域/harness 检索：关键词命中排序；不新建索引，复用既有条目。"""
+    candidates = domainHarnessesFrom(
+        infos, domain, limit=10_000, exclude_skill_id=exclude_skill_id
+    )
+    text_query = str(query or "").strip().lower()
+    if not text_query:
+        return candidates[: max(1, int(limit))]
+    tokens = [t for t in re.findall(r"[\w\u4e00-\u9fff]+", text_query) if t]
+    scored = []
+    for item in candidates:
+        text = " ".join(
+            [
+                str(item.get("name") or ""),
+                str(item.get("description") or ""),
+                str(item.get("domain") or ""),
+                str(item.get("context_template") or "")[:4000],
+            ]
+        ).lower()
+        hits = sum(1 for token in tokens if token in text)
+        if not hits:
+            continue
+        score = hits / max(1, len(tokens))
+        if domain and item.get("domain") == domain:
+            score += 0.05
+        scored.append({**item, "score": round(score, 4)})
+    scored.sort(key=lambda item: (-float(item.get("score") or 0), item["skill_id"]))
+    return scored[: max(1, int(limit))]
+
+
 # ── 技能质量漏斗归因──
 
 def compute_skill_funnel_update(
@@ -1024,6 +1127,42 @@ class SkillService:
                 if skill_id == self._ALIASES_KEY or not isinstance(info, dict):
                     continue
                 yield skill_id, info
+
+    def skillDomain(self, skill_id: str) -> str:
+        """技能所属域（N8 域级复用的分组键）。"""
+        return skillDomainOf(self.get_skill_info(skill_id))
+
+    def listDomainHarnesses(
+        self,
+        domain: str,
+        *,
+        limit: int = 5,
+        exclude_skill_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """同域已采纳 harness 的只读视图（复用既有技能库，不另建存储）。"""
+        return domainHarnessesFrom(
+            list(self.iter_skills()),
+            domain,
+            limit=limit,
+            exclude_skill_id=exclude_skill_id,
+        )
+
+    def searchDomainHarnesses(
+        self,
+        query: str,
+        *,
+        domain: str = "",
+        limit: int = 5,
+        exclude_skill_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """跨域检索已采纳 harness（关键词排序；domain 非空时只在该域内搜）。"""
+        return searchDomainHarnessesFrom(
+            list(self.iter_skills()),
+            query,
+            domain=domain,
+            limit=limit,
+            exclude_skill_id=exclude_skill_id,
+        )
 
     def set_skill_lifecycle_state(self, skill_id: str, state: str) -> bool:
         """更新生命周期状态(active/stale)并落盘。归档走 archive_skill。"""
