@@ -4,7 +4,8 @@
 判据档（`tests/unit/plugins/test_pluginStateSurvivesRestart.py`）在同一个进程里换实例模拟重启；
 这一支要证的是另一件事：**换一个操作系统进程、同一份隔离数据根**，面板读到的
 "装过什么、启没启用"还在，而"装载/挂载"确实不在——后者是这条裁定的安全边界
-（P3 的来源白名单与构件完整性没做之前，开机自启第三方代码不是便利而是风险）。
+（边界成立的依据到 §6-176 之后换了形状：构件摘要已落、装载前会对账，但它**不证来源**，
+插件远程取回也仍未实装；所以在装上"根外信任锚"之前，开机自启第三方代码不是便利而是风险）。
 
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) python tests/manual/pluginStateRestart_batch16b.py`
 """
