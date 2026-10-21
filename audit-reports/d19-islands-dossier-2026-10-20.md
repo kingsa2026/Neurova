@@ -45,6 +45,12 @@
   接线即"给反向关系补生产写侧"（改关系枚举 + 建表白名单），属新能力工作。
   **决策影响面**：影响 `memory_layer/` 检索解释面与任何"为什么这条记忆被召回"的产品承诺；
   不接线留下一个 349 行的、每次进程启动都被执行的孤岛。
+  > **2026-10-21（§6-379）**：已接线。`MemoryManager.analyze_causal` 复用
+  > `_ensure_graph_traversal()`（与 `traverse_relations` 同源）；现有
+  > `GET /memory/relations/{id}/traverse?method=causal` 暴露效应/根因/链/解释/可选环检测。
+  > 同批补认 live `RelationType.CAUSE` 的单数形 `cause`，并在关系写口失效图缓存
+  > （此前新增关系后遍历永远读首次快照）。反向 `caused_by/enabled_by/prevented_by`
+  > 仍无生产写侧，根因由 `cause` 入边提供；这三类要补需另立产品工作。
 
 ### A2 `memory_layer/question_decomposer.py`（311 行）◑ 取证，✅ 关键替代点主会话复算
 - **原功能**：①七类问题关键词计分分类 `:48-55`、`:88-114`；②因果/比较/程序/通用四套正则定式拆解
@@ -68,6 +74,10 @@
   删＝显式承认放弃"程序类问题的定式化拆解"与那两个权重旋钮，这是产品口径，不由代码审计代拍。
   若裁删：同批连带 `tests/unit/cognitive/test_graph_enhancement.py:203-259` 与门面
   `memory_layer/__init__.py:76/136-138` 三行再导出（不留"实现已删、测试还在引用"）。
+  > **2026-10-21（§6-379）**：已退役。用户指令完成余下组；主干替代在役
+  > （`QueryIntentDetector`／`chat_pipeline._decompose_query`／`IntentAwareRecallStrategy.get_channel_weights`）。
+  > **显式放弃**：`PROCEDURAL` 分类、定式化三段模板、`diversity/serendipity` 两个旋钮。
+  > 专用测试档与门面再导出同批退役。
 
 ### A3 `memory_layer/channels/processor.py`（107 行）◑ 取证
 - **原功能**：①按 `memory_id` 保高分去重 `:43-52`；②原地乘 `score × channel_weight × activation`

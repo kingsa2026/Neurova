@@ -9352,3 +9352,34 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       重建成本分别见 D19 档案 A3–A6。
     - **仍开**：组二 A1/A2、组三 security/temporal_reasoner/agent_self/memory_stream；等裁七条等。
     - **本会话下一枚空号现查 §6-379**（写前必须现场重取；本笔落库时该读数为 378）。
+
+379. **余下组二：A1 因果推理接进 live 图与 HTTP、A2 question_decomposer 退役** ✅🟢 —— 一笔：一档接线、一档显式放弃
+    - **A1 接线（不是删）**：`causal_reasoning` 是全仓唯一多跳因果实现。`MemoryManager.analyze_causal`
+      复用 `_ensure_graph_traversal()`（与 `traverse_relations` 同源），返回效应/根因/摘要/可选环；
+      现有 `GET /memory/relations/{id}/traverse` 增加 `method=causal`、`target_id`、`include_loops`。
+      取长补短两处：①live 关系枚举只产 `RelationType.CAUSE`（单数 `cause`），引擎原先只认
+      `causes` 等复数形 ⇒ 同批补认 `cause`（含解释译名）；②`add_relation`/`delete_relation`
+      写口原先不失效 `_graph_traversal`，遍历永远读首次快照 ⇒ 同批置空重建。
+      反向 `caused_by/enabled_by/prevented_by` 仍无生产写侧，根因由 `cause` 入边提供；
+      补这三类属另一批产品工作，不在本批假装完成。
+    - **A2 退役**：主干替代在役（`QueryIntentDetector`／`chat_pipeline._decompose_query`／
+      `IntentAwareRecallStrategy.get_channel_weights`）；显式放弃 `PROCEDURAL` 分类、定式化三段模板、
+      `diversity/serendipity` 两个旋钮。删 311 行模块、门面三行再导出、专用测试类；
+      守卫钉文件/导入面/门面导出为零，正控钉 live 替代仍在。
+    - **红→绿**：A1 新判据首跑环检测红——根因是图缓存不失效（真缺陷），修写口后 4 绿；
+      A2 守卫在 A/B 基线红（模块仍在）→ 本树绿。
+    - **宽域 A/B**：`AB_PASS`｜基线 8 failed+1 error（44 passed）↔ 本树 0 failed（49 passed）｜
+      仅本树红 0；仅基线红 9＝本批 7 条新判据＋组件表＋`test_dry_run_does_not_mutate`
+      （顺序/环境格，不认领）。
+    - **活体（真 app + 真 HTTP）**：真记忆管理器写 3 条记忆与 `cause` 关系；无环时
+      效应 `{b,c}`、c 的根因 `{a,b}`、链 `[[a,b,c]]`、解释含「导致」；加 c→a 后
+      `include_loops=true` 检出 `[a,b,c,a]`。反证：把端点 causal 分支临时关掉，同探针
+      在效应/根因/链/解释/环五读数全红；还原后 LIVE-PASS。`question_decomposer` `find_spec` 为 None；
+      仓内 `data/` 指纹前后同。
+    - **文档/子集**：D19 A1/A2 加处置标记；组件表 **93→92 模块／42893→42623 行**
+      （在役 54／仅层内 31／仅测试 2／零读者 5），下限 93→92；**子集 658→660**。
+    - **净 LOC**：生产池 **+58/−326**（A2 退役 −311；A1 接线 +58/−15）；测试/基建池 **+150/−61**；
+      文档/台账池 **+46/−6**。
+    - **未取证**：真 LLM 回合未跑；反向三类因果关系的写侧仍未补。
+    - **仍开**：组三 security/temporal_reasoner/agent_self/memory_stream；等裁七条等。
+    - **本会话下一枚空号现查 §6-380**（写前必须现场重取；本笔落库时该读数为 379）。

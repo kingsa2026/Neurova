@@ -30,13 +30,13 @@ class CausalReasoningEngine:
             graph: 图遍历引擎实例
         """
         self.graph = graph
-        self._causal_types = {"causes", "caused_by", "enables", "enabled_by", "prevents", "prevented_by", "requires"}
+        self._causal_types = {"cause", "causes", "caused_by", "enables", "enabled_by", "prevents", "prevented_by", "requires"}
         # 前向因果关系（从因到果的边）：这些关系的 target 是 effect
-        self._effect_types = {"causes", "enables", "prevents", "requires"}
+        self._effect_types = {"cause", "causes", "enables", "prevents", "requires"}
         # 反向因果关系（搜索根本原因时，入边中的因果关系类型）：
         #   "caused_by" 入边 → source 是原因
         #   "causes" 入边 → source 也是原因（B causes C → B 是 C 的原因）
-        self._cause_types = {"caused_by", "enabled_by", "prevented_by", "requires", "causes", "enables", "prevents"}
+        self._cause_types = {"cause", "caused_by", "enabled_by", "prevented_by", "requires", "causes", "enables", "prevents"}
 
         logger.debug("CausalReasoningEngine 初始化完成")
 
@@ -214,6 +214,7 @@ class CausalReasoningEngine:
 
             # 翻译关系类型
             relation_translations = {
+                "cause": "导致",
                 "causes": "导致",
                 "caused_by": "由...引起",
                 "enables": "使能",

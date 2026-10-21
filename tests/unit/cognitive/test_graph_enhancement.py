@@ -3,12 +3,10 @@
 
 测试任务1.1：扩展关系类型
 测试任务1.2：因果推理引擎
-测试任务1.3：问题分解器
 测试任务1.4：增强图遍历算法
 """
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 from typing import List, Dict, Any
 
 # 导入被测试模块
@@ -198,63 +196,6 @@ class TestCausalReasoningEngine:
         assert "A" in explanation
         assert "C" in explanation
         assert "causes" in explanation.lower() or "导致" in explanation
-
-
-class TestQuestionDecomposer:
-    """测试任务1.3：问题分解器"""
-
-    @pytest.fixture
-    def decomposer(self):
-        """创建问题分解器实例"""
-        from neurova.cognitive_layers.memory_layer.question_decomposer import QuestionDecomposer
-        
-        # 创建模拟的LLM客户端
-        mock_llm = MagicMock()
-        mock_llm.generate = AsyncMock(return_value="模拟的LLM响应")
-        
-        return QuestionDecomposer(mock_llm)
-
-    def test_decompose_complex_question(self, decomposer):
-        """测试分解复杂问题"""
-        question = "为什么用户流失率上升，如何解决？"
-        sub_questions = decomposer.decompose(question)
-        
-        # 应该分解为至少2个子问题
-        assert len(sub_questions) >= 2
-        
-        # 验证子问题包含原问题的关键元素
-        all_text = " ".join(sub_questions).lower()
-        assert "用户流失" in all_text or "流失率" in all_text
-        assert "解决" in all_text or "如何" in all_text
-
-    def test_detect_question_type(self, decomposer):
-        """测试检测问题类型"""
-        from neurova.cognitive_layers.memory_layer.question_decomposer import QuestionType
-        
-        # 测试因果问题
-        causal_type = decomposer.detect_question_type("为什么天空是蓝色的？")
-        assert causal_type in [QuestionType.CAUSAL, QuestionType.UNKNOWN]
-        
-        # 测试比较问题
-        compare_type = decomposer.detect_question_type("Python 和 Java 哪个更好？")
-        assert compare_type in [QuestionType.COMPARATIVE, QuestionType.UNKNOWN]
-        
-        # 测试探索问题
-        explore_type = decomposer.detect_question_type("告诉我关于机器学习的知识")
-        assert explore_type in [QuestionType.EXPLORATORY, QuestionType.UNKNOWN]
-
-    def test_plan_retrieval_strategy(self, decomposer):
-        """测试为子问题规划检索策略"""
-        sub_questions = [
-            "用户流失的主要原因是什么？",
-            "有哪些方法可以降低流失率？"
-        ]
-        
-        strategy = decomposer.plan_retrieval_strategy(sub_questions)
-        
-        # 验证策略包含必要的信息
-        assert "strategies" in strategy or "plan" in strategy
-        assert len(strategy.get("strategies", strategy.get("plan", []))) >= 2
 
 
 class TestEnhancedGraphTraversal:
