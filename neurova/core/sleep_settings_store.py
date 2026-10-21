@@ -1,6 +1,6 @@
 """睡眠设置持久化存储
 
-固定目录 data/sleep_settings/{agent_id}.json。
+固定落点：`data/<agent_id>/sleep_settings.json`。
 不可信输入只有 agent_id —— 用白名单正则净化, 文件名由净化后的 id 派生,
 路径不接收任何外部拼接输入（防目录穿越）。
 """
@@ -11,7 +11,6 @@ import json
 from typing import Any, Dict
 
 from neurova.core.logger import get_logger
-from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -22,13 +21,15 @@ _AGENT_ID_RE = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
 class SleepSettingsStore:
     """按 agent 持久化睡眠设置（JSON）"""
 
-    def __init__(self, agent_id: str, base_dir: str = ""):
+    def __init__(self, agent_id: str):
         import re
 
         if not re.fullmatch(_AGENT_ID_RE, agent_id or ""):
             raise ValueError(f"Invalid agent_id for sleep settings: {agent_id!r}")
-        self._dir = callerPath(base_dir) / "sleep_settings"
-        self._file = self._dir / f"{agent_id}.json"
+        from neurova.core.agent_workspaces import get_agent_sleep_settings_path
+
+        self._file = get_agent_sleep_settings_path(agent_id)
+        self._dir = self._file.parent
 
     def load(self) -> Dict[str, Any]:
         """读取设置; 文件不存在返回空 dict, 损坏文件由调用方兜底"""

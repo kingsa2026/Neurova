@@ -35,7 +35,7 @@ spec:
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.backend.securityContext | nindent 12 }}
-          command: ["sh", "-c", "mkdir -p /mnt/data/agent_workspaces /mnt/data/sessions"]
+          command: ["sh", "-c", "mkdir -p /mnt/data"]
           volumeMounts:
             - name: data
               mountPath: /mnt/data
@@ -100,17 +100,8 @@ spec:
             {{- if .Values.database.persistence.enabled }}
             - name: data
               mountPath: /app/data
-            # agent 工作区（记忆库/身份文件/技能经验的落盘基座：
-            # agent_workspaces/<agent_id>/memory/*.db，见
-            # neurova/cognitive_layers/memory_layer/manager.py::_default_db_path_for）
-            # 与 sessions（会话存档）同为"用户资产"：共用同一持久卷的不同子路径，
-            # 不挂持久卷时 Pod 重建即整体丢失（此前即如此）。
-            - name: data
-              mountPath: /app/agent_workspaces
-              subPath: agent_workspaces
-            - name: data
-              mountPath: /app/sessions
-              subPath: sessions
+            # v2 统一布局：会话/工作区/记忆/配置全部在 /app/data/<agent_id>/ 下，
+            # 不再单独挂 agent_workspaces 或 sessions 子路径。
             {{- end }}
             - name: logs
               mountPath: /app/logs

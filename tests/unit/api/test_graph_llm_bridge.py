@@ -17,6 +17,7 @@
 """
 
 import pytest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -158,8 +159,8 @@ def test_get_kg_manager_falls_back_to_agent_scoped_registry(monkeypatch):
         lambda *a, **k: sentinel,
     )
     monkeypatch.setattr(
-        "neurova.cognitive_layers.knowledge_graph.manager._agent_graph_root",
-        lambda: "/tmp/kg-isolation-test-root",
+        "neurova.cognitive_layers.knowledge_graph.manager._agent_graph_dir",
+        lambda agent_id: Path("/tmp/kg-isolation-test-root") / agent_id / "knowledge_graph",
     )
 
     mgr = kg._get_kg_manager("a1")

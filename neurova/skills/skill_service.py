@@ -256,7 +256,9 @@ class SkillService:
             # 相对串会让状态文件跟着进程 CWD 跑，构造期的 mkdir 还会直接在 CWD 建目录。
             self.skills_dir = require_data_path(skills_dir, "SkillService(skills_dir=…)")
         else:
-            self.skills_dir = get_data_root() / "agents" / str(agent_id) / "skills"
+            from neurova.core.agent_workspaces import get_agent_skills_dir
+
+            self.skills_dir = get_agent_skills_dir(agent_id)
         self.manifest_path = self.skills_dir / "manifest.json"
         self._skills: Dict[str, Dict[str, Any]] = {}
         self._logger = get_logger(__name__)

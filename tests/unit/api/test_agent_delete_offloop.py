@@ -79,6 +79,9 @@ def test_delete_agent_offloads_tree_removal_from_event_loop(isolated_env, monkey
         "rmtree+time.sleep 重试仍跑在事件循环线程上（P2-7 未修复），删大工作区卡全站"
     )
     assert resp["code"] == 0
-    assert resp["data"] == {"workspace_removed": True, "agent_data_removed": True}
+    data = resp["data"]
+    assert data["workspace_removed"] is True
+    assert data["agent_data_removed"] is True
+    assert data["agent_root_removed"] is True
     assert not workspace.exists(), "删除结果契约破坏：工作区未删除"
     assert not data_dir.exists(), "删除结果契约破坏：data/{agent_id} 未删除"

@@ -172,14 +172,16 @@ _ledgers: Dict[str, MotivationLedger] = {}
 _ledgers_lock = threading.RLock()
 
 
-def get_motivation_ledger(agent_id: str, workspace_path: str) -> MotivationLedger:
-    """按 agent 返回动机账本单例，持久文件 <workspace>/memory/motivation.json。"""
+def get_motivation_ledger(agent_id: str) -> MotivationLedger:
+    """按 agent 返回动机账本单例，持久文件 `<agent_root>/memory/motivation.json`。"""
+    from neurova.core.agent_workspaces import get_agent_memory_dir
+
     with _ledgers_lock:
         key = str(agent_id)
         if key not in _ledgers:
             _ledgers[key] = MotivationLedger(
                 agent_id=key,
-                persistence_path=os.path.join(workspace_path, "memory", "motivation.json"),
+                persistence_path=str(get_agent_memory_dir(key) / "motivation.json"),
             )
         return _ledgers[key]
 

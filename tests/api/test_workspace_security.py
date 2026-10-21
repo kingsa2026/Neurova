@@ -39,9 +39,13 @@ def _identity(uid: str, role: str = "user"):
 
 
 def _owned_agent(ws_root, agent_id: str, owner: str):
-    d = ws_root / agent_id
+    from neurova.core.agent_workspaces import get_agent_config_path, get_agent_workspace_dir
+
+    d = get_agent_workspace_dir(agent_id)
     d.mkdir(parents=True, exist_ok=True)
-    (d / "agent_config.json").write_text(
+    config_path = get_agent_config_path(agent_id)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
         json.dumps({"agent_id": agent_id, "owner_user_id": owner}), encoding="utf-8"
     )
     (d / "note.txt").write_text("hello", encoding="utf-8")
@@ -80,8 +84,10 @@ def test_ownerless_workspace_shared_access(ws_root, client):
 
 
 def test_hidden_dir_components_rejected(ws_root, client):
-    d = ws_root / "agtd"
-    d.mkdir()
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    d = get_agent_workspace_dir("agtd")
+    d.mkdir(parents=True)
     (d / ".git").mkdir()
     (d / ".git" / "config").write_text("[core]", encoding="utf-8")
     client.app.dependency_overrides[get_current_user] = lambda: _identity("alice")
@@ -93,10 +99,12 @@ def test_hidden_dir_components_rejected(ws_root, client):
 
 def test_zip_filename_sanitized(ws_root, client):
     """header 注入面：sanitizer 单元断言 + 端到端 Content-Disposition 干净。"""
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
     assert wf._ZIP_NAME_RE.sub("_", 'a"b\rc\nd') == "a_b_c_d"
 
-    d = ws_root / "agte"
-    d.mkdir()
+    d = get_agent_workspace_dir("agte")
+    d.mkdir(parents=True)
     weird = "weird dir"
     (d / weird).mkdir()
     client.app.dependency_overrides[get_current_user] = lambda: _identity("alice")

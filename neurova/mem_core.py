@@ -674,12 +674,14 @@ class MemCore:
                 from neurova.cognitive_layers.meta_cognition_layer.proactive_behavior import ProactiveBehaviorEngine
                 from neurova.core.motivation_ledger import get_motivation_ledger
 
+                from neurova.core.agent_workspaces import get_agent_memory_dir
+
                 self._agent.proactive_behavior_engine = ProactiveBehaviorEngine(
                     agent_id=str(self.config.agent_id),
-                    persistence_path=str(Path(self.config.workspace_path) / "memory" / "proactive_actions.json"),
+                    persistence_path=str(get_agent_memory_dir(self.config.agent_id) / "proactive_actions.json"),
                 )
                 self._agent.intrinsic_motivation = get_motivation_ledger(
-                    str(self.config.agent_id), str(self.config.workspace_path)
+                    str(self.config.agent_id)
                 )
                 logger.info("Agent %s: ProactiveBehaviorEngine + MotivationLedger 已启用", self.config.name)
             except Exception as e:

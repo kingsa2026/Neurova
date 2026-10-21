@@ -181,8 +181,12 @@ def _isolate_skill_service_storage(tmp_path, monkeypatch):
     original = SkillService.__init__
 
     def isolated(self, agent_id, skills_dir=None):
-        directory = skills_dir if skills_dir is not None else str(
-            tmp_path / "agents" / str(agent_id) / "skills")
+        if skills_dir is not None:
+            directory = skills_dir
+        else:
+            from neurova.core.agent_workspaces import get_agent_skills_dir
+
+            directory = str(get_agent_skills_dir(agent_id))
         return original(self, agent_id, directory)
 
     monkeypatch.setattr(SkillService, "__init__", isolated)

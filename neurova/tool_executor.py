@@ -2854,8 +2854,10 @@ class ToolExecutor:
             if cache is None:
                 from pathlib import Path as _P
 
+                from neurova.core.agent_workspaces import get_agent_skills_dir
+
                 cache = SkillVectorCache(
-                    cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
+                    cache_file=_P(get_agent_skills_dir(str(_agent_id)) / "embeddings.json")
                 )
                 _VECTOR_CACHES[_agent_id] = cache
             qvec = cache.encode_query(query)

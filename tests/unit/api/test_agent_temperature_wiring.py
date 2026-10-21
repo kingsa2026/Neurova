@@ -31,6 +31,7 @@ class TestAgentConfigPersistence:
 
         agent = SimpleNamespace(
             config=SimpleNamespace(
+                agent_id="t_temp",
                 name="t",
                 description="",
                 llm_provider="",
@@ -46,7 +47,8 @@ class TestAgentConfigPersistence:
         )
         _save_agent_config(agent)
         import json
-        data = json.load(open(tmp_path / "agent_config.json", encoding="utf-8"))
+        from neurova.core.agent_workspaces import get_agent_config_path
+        data = json.load(open(get_agent_config_path("t_temp"), encoding="utf-8"))
         assert data["temperature"] == pytest.approx(1.1)
 
     def test_save_without_temperature_omits_key(self, tmp_path):
@@ -55,6 +57,7 @@ class TestAgentConfigPersistence:
 
         agent = SimpleNamespace(
             config=SimpleNamespace(
+                agent_id="t_temp2",
                 name="t",
                 description="",
                 llm_provider="",
@@ -70,7 +73,8 @@ class TestAgentConfigPersistence:
         )
         _save_agent_config(agent)
         import json
-        data = json.load(open(tmp_path / "agent_config.json", encoding="utf-8"))
+        from neurova.core.agent_workspaces import get_agent_config_path
+        data = json.load(open(get_agent_config_path("t_temp2"), encoding="utf-8"))
         assert "temperature" not in data
 
     def test_config_from_saved_reads_back(self, tmp_path):

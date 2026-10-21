@@ -193,9 +193,9 @@ def _artifact_kind(name: str) -> str:
 
 
 def _allowed_roots() -> List[Path]:
-    from neurova.core.agent_workspaces import get_agent_workspaces_root
+    from neurova.core.agent_workspaces import discover_agent_ids, get_agent_workspace_dir
 
-    roots = [get_agent_workspaces_root().resolve()]
+    roots = [get_agent_workspace_dir(agent_id).resolve() for agent_id in discover_agent_ids()]
     tts_dir = Path(tempfile.gettempdir()) / _TTS_TEMP_DIRNAME
     try:
         roots.append(tts_dir.resolve())

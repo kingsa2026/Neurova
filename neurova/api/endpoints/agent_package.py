@@ -25,9 +25,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
-from neurova.core.agent_workspaces import get_agent_workspace_dir
+from neurova.core.agent_workspaces import (
+    get_agent_config_path,
+    get_agent_root_dir,
+    get_agent_workspace_dir,
+)
 from neurova.core.logger import get_logger
-from neurova.core.data_root import get_agent_data_dir
 
 logger = get_logger(__name__)
 
@@ -171,14 +174,12 @@ def _agent_face(agent, agent_id: str = "") -> Dict[str, Any]:
         llm_model = str(getattr(cfg.llm_config, "model", "") or "")
     llm_provider = str(getattr(cfg, "llm_provider", "") or "") if cfg is not None else ""
     workspace_cfg = {}
-    ws = str(getattr(cfg, "workspace_path", "") or "") if cfg is not None else ""
-    if ws:
-        try:
-            raw = (Path(ws) / "agent_config.json")
-            if raw.exists():
-                workspace_cfg = json.loads(raw.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001 - 工作区配置读不到则降级运行时面
-            logger.debug("读取 agent_config.json 失败: %s", e)
+    try:
+        raw = get_agent_config_path(agent_id)
+        if raw.exists():
+            workspace_cfg = json.loads(raw.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 - 配置读不到则降级运行时面
+        logger.debug("读取 agent_config.json 失败: %s", e)
     # description 只持久化在中枢登记面（AgentConfig 无该属性，workspace
     # 文件恒空串）——导出面必须回查登记面，否则跨机迁移丢描述
     registry_cfg = {}
@@ -202,16 +203,8 @@ def _agent_face(agent, agent_id: str = "") -> Dict[str, Any]:
     }
 
 
-@router.get("/{agent_id}/export-package")
-async def export_agent_package(
-    request: Request,
-    agent_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """导出 agent 应用包（manifest v1）。"""
-    agent = _resolve_agent_or_404(agent_id)
-    _check_owner(agent, current_user)
-
+def buildAgentManifest(agent, agent_id: str) -> Dict[str, Any]:
+    """构建 agent 应用清单（v1）：配置面 + 技能 + cron + MCP 引用。"""
     # 技能面：实时读真实安装
     skills: List[Dict[str, Any]] = []
     try:
@@ -268,6 +261,18 @@ async def export_agent_package(
     }
 
 
+@router.get("/{agent_id}/export-package")
+async def export_agent_package(
+    request: Request,
+    agent_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """导出 agent 应用包（manifest v1）。"""
+    agent = _resolve_agent_or_404(agent_id)
+    _check_owner(agent, current_user)
+    return buildAgentManifest(agent, agent_id)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 导入
 # ═══════════════════════════════════════════════════════════════
@@ -295,6 +300,38 @@ def _validate_manifest(manifest: Dict[str, Any]) -> None:
     agent_face = manifest.get("agent")
     if not isinstance(agent_face, dict) or not str(agent_face.get("name") or "").strip():
         raise HTTPException(status_code=422, detail="manifest.agent.name 缺失")
+
+
+def applyManifestFaces(
+    agent_id: str,
+    manifest: Dict[str, Any],
+    *,
+    import_skills: bool,
+    import_cron: bool,
+    import_mcp: bool,
+    created_cron_tasks: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """按开关把清单面落到目标 agent；异常原样抛出，由调用方决定回滚。"""
+    imported: Dict[str, Any] = {"skills": [], "cron": 0, "mcp": 0}
+    if import_skills:
+        imported["skills"] = _import_skills(agent_id, manifest.get("skills") or [])
+    if import_cron:
+        for task in manifest.get("cron") or []:
+            created = _schedule_cron_task(
+                name=str(task.get("name") or ""),
+                action=str(task.get("action") or "send_message"),
+                agent_id=agent_id,
+                scheduled_at=task.get("scheduled_at"),
+                interval_seconds=task.get("interval_seconds"),
+                parameters=task.get("parameters") or {},
+                cron_expression=task.get("cron_expression"),
+            )
+            if created_cron_tasks is not None:
+                created_cron_tasks.append(created)
+            imported["cron"] += 1
+    if import_mcp:
+        imported["mcp"] = _import_mcp_references(manifest.get("mcp") or [])
+    return imported
 
 
 async def _rollback_imported_agent(agent_id: str, agent: Any = None) -> None:
@@ -342,8 +379,7 @@ async def _rollback_imported_agent(agent_id: str, agent: Any = None) -> None:
     import shutil
     import time as _time
 
-    for candidate in (get_agent_workspace_dir(agent_id),
-                      get_agent_data_dir(agent_id)):
+    for candidate in (get_agent_root_dir(agent_id),):
         for attempt in range(3):
             if not candidate.is_dir():
                 break
@@ -436,24 +472,13 @@ async def import_agent_package(
 
     # 2) 按开关导入各面；任何一步失败 → 全量回滚
     try:
-        if body.import_skills:
-            imported["skills"] = _import_skills(
-                agent_id, body.manifest.get("skills") or []
-            )
-        if body.import_cron:
-            for task in body.manifest.get("cron") or []:
-                _schedule_cron_task(
-                    name=str(task.get("name") or ""),
-                    action=str(task.get("action") or "send_message"),
-                    agent_id=agent_id,
-                    scheduled_at=task.get("scheduled_at"),
-                    interval_seconds=task.get("interval_seconds"),
-                    parameters=task.get("parameters") or {},
-                    cron_expression=task.get("cron_expression"),
-                )
-                imported["cron"] += 1
-        if body.import_mcp:
-            imported["mcp"] = _import_mcp_references(body.manifest.get("mcp") or [])
+        imported = applyManifestFaces(
+            agent_id,
+            body.manifest,
+            import_skills=body.import_skills,
+            import_cron=body.import_cron,
+            import_mcp=body.import_mcp,
+        )
     except HTTPException:
         await _rollback_imported_agent(agent_id, agent=created_agent)
         raise

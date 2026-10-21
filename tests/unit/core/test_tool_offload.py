@@ -113,7 +113,9 @@ def test_no_workspace_falls_back_data_dir(tmp_path, monkeypatch):
     # 回退根：data/tool_offload/ 下可读回（文件名内容寻址 tool-sha16，不含 call）
     from pathlib import Path
 
-    d = Path("data") / "outputs" / "tool_offload"
+    from neurova.core.data_root import get_data_root
+
+    d = get_data_root() / "outputs" / "tool_offload"
     found = list(d.glob("*.txt"))
     assert found and found[0].read_text(encoding="utf-8") == big
     assert out.offload_path.replace("\\", "/").endswith(".txt")

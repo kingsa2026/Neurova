@@ -36,7 +36,9 @@ from neurova.api.endpoints import artifacts_api
 
 
 def _make_workspace_file(root: Path, name: str = "shot.png") -> Path:
-    agent_dir = root / "media-agent"
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    agent_dir = get_agent_workspace_dir("media-agent")
     agent_dir.mkdir(parents=True, exist_ok=True)
     path = agent_dir / name
     path.write_bytes(b"PNG")

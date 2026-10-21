@@ -243,31 +243,30 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
 
 
 def _load_saved_agents(app_state: AppState) -> None:
-    """从 workspace 目录加载已持久化的 agent 配置"""
+    """从 agent 根目录加载已持久化的 agent 配置（`data/<id>/agent_config.json`）。"""
     import json as _json
 
-    from neurova.core.agent_workspaces import get_agent_workspaces_root
+    from neurova.core.agent_workspaces import (
+        discover_agent_ids,
+        get_agent_config_path,
+        get_agent_memory_dir,
+        get_agent_workspace_dir,
+    )
 
-    workspaces_dir = str(get_agent_workspaces_root())  # 根由单源解析器给，不反推 default 的父目录
-    # 全新安装（打包版）该数据目录天然不存在；加载路径不得因缺目录崩溃，
-    # 补建空目录以对齐"安装即有默认工作区"的不变量（bundle 同步预创建）。
-    try:
-        os.makedirs(workspaces_dir, exist_ok=True)
-    except OSError as e:
-        logger.warning("agent_workspaces 目录不可创建，跳过已持久化 agent 加载: %s", e)
-        return
     loaded = 0
-    for agent_id in os.listdir(workspaces_dir):
-        if agent_id in ("default", "test") or not os.path.isdir(os.path.join(workspaces_dir, agent_id)):
+    for agent_id in discover_agent_ids():
+        if agent_id in ("default", "test"):
             continue
-        config_path = os.path.join(workspaces_dir, agent_id, "agent_config.json")
-        if not os.path.exists(config_path):
-            workspace = os.path.join(workspaces_dir, agent_id)
-            has_data = os.path.isdir(os.path.join(workspace, "memory"))
+        config_path = get_agent_config_path(agent_id)
+        if not config_path.exists():
+            has_data = (
+                get_agent_memory_dir(agent_id).is_dir()
+                or get_agent_workspace_dir(agent_id).is_dir()
+            )
             if has_data:
-                # 自动重建 agent_config.json，恢复有记忆数据的 agent
+                # 自动重建 agent_config.json，恢复有记忆/工作区数据的 agent
                 logger.info(
-                    "Agent '%s' 存在记忆数据但缺少配置，自动重建 agent_config.json", agent_id
+                    "Agent '%s' 存在数据但缺少配置，自动重建 agent_config.json", agent_id
                 )
                 provider, model = _get_default_llm()
                 restored_cfg = {
@@ -278,6 +277,7 @@ def _load_saved_agents(app_state: AppState) -> None:
                     "enable_memory": True,
                 }
                 try:
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(config_path, "w", encoding="utf-8") as f:
                         _json.dump(restored_cfg, f, ensure_ascii=False, indent=2)
                     logger.info("已自动为 agent '%s' 重建配置文件", agent_id)
@@ -295,7 +295,7 @@ def _load_saved_agents(app_state: AppState) -> None:
 
             from neurova.agent_core import Agent, AgentConfig
 
-            workspace = os.path.join(workspaces_dir, agent_id)
+            workspace = str(get_agent_workspace_dir(agent_id))
             model = cfg.get("model", "gpt-4")
             provider = cfg.get("provider", "")
 
@@ -310,7 +310,7 @@ def _load_saved_agents(app_state: AppState) -> None:
             )
 
     if loaded:
-        logger.info("Loaded %d saved agents from workspaces", loaded)
+        logger.info("Loaded %d saved agents from agent roots", loaded)
 
 
 def _resolve_tts_lazy_release(env_value: str, config_value) -> bool:
@@ -396,8 +396,28 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
+    # 旧扁平落点 → data/<agent_id>/ 统一布局（启动期一次性、幂等）。
+    # 必须在任何 agent 加载/默认 agent 初始化之前执行，否则旧数据读不到。
+    try:
+        from neurova.core.agent_layout_migration import auto_migrate_legacy_agent_layout
+
+        migration = auto_migrate_legacy_agent_layout()
+        if migration.get("moved_count") or migration.get("conflict_count") or migration.get("error_count"):
+            logger.info(
+                "agent 布局迁移：moved=%s conflicts=%s errors=%s report=%s",
+                migration.get("moved_count"),
+                migration.get("conflict_count"),
+                migration.get("error_count"),
+                migration.get("report_path", ""),
+            )
+    except Exception as e:  # noqa: BLE001 - 迁移失败不得阻断服务启动
+        logger.error("agent 布局迁移失败：%s", e, exc_info=True)
+
     # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
-    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.core.agent_workspaces import (
+        get_agent_config_path,
+        get_agent_workspace_dir,
+    )
 
     # 默认 agent 的身份字面量单源在 endpoints 包（解析侧与登记侧共用同一个串，
     # 否则"未指名解析"找不到刚登记上去的那一位）
@@ -411,14 +431,14 @@ def _initialize_components(app_state: AppState) -> None:
 
         os.makedirs(default_workspace, exist_ok=True)
 
-        # 优先读工作区已保存的 agent_config.json（含用户在聊天页切模型的结果
+        # 优先读 agent 根目录已保存的 agent_config.json（含用户在聊天页切模型的结果
         # —— 切模型=编辑 agent 默认模型，持久化于顶层 model/provider 键）。
         # 根因修复 2026-09-07：此前每次启动都用 _get_default_llm()（全局默认
         # 服务商的 default_model），用户保存的商汤模型被无视，重启后回落到
         # modelscope 已下架的 Kimi-K2.6 → 对话 400 "has no provider supported"。
         import json as _json
 
-        _saved_cfg_path = os.path.join(default_workspace, "agent_config.json")
+        _saved_cfg_path = str(get_agent_config_path(DEFAULT_AGENT_ID))
         _saved_cfg: dict = {}
         if os.path.exists(_saved_cfg_path):
             try:

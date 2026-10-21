@@ -19,7 +19,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from neurova.api.deps import require_admin
-from neurova.core.agent_workspaces import get_agent_workspaces_root
 from neurova.core.logger import get_logger
 from neurova.core.data_root import dataPath
 
@@ -32,6 +31,16 @@ _orchestrator: Optional[Any] = None
 _orch_lock = threading.RLock()
 
 
+def _defaultBackupSources() -> Dict[str, str]:
+    """按 v2 统一布局逐 agent 备份 `data/<agent_id>/` 根。"""
+    from neurova.core.agent_workspaces import discover_agent_ids, get_agent_root_dir
+
+    return {
+        f"agents/{agent_id}": str(get_agent_root_dir(agent_id))
+        for agent_id in discover_agent_ids()
+    }
+
+
 def get_backup_orchestrator():
     """惰性单例（DCL，对齐仓库 singleton 收敛规约）。"""
     global _orchestrator
@@ -41,18 +50,11 @@ def get_backup_orchestrator():
                 from neurova.backup.orchestrator import BackupOrchestrator
                 from neurova.backup.trust import SigningKey
 
-                sources = json.loads(
-                    os.environ.get(
-                        "NEUROVA_BACKUP_SOURCES",
-                        json.dumps(
-                            {
-                                "sessions": "sessions",
-                                # 工作区根绝对取自单源解析器：字面相对路径只在
-                                # CWD==仓库根时成立，换根部署会静默漏备整个工作区
-                                "agent_workspaces": str(get_agent_workspaces_root()),
-                            }
-                        ),
-                    )
+                override = os.environ.get("NEUROVA_BACKUP_SOURCES")
+                sources = (
+                    json.loads(override)
+                    if override
+                    else _defaultBackupSources()
                 )
                 _orchestrator = BackupOrchestrator(
                     key=SigningKey(
@@ -81,9 +83,15 @@ def _safe_write_back(payload: Dict[str, Any]) -> Dict[str, int]:
     written = 0
     skipped = 0
     sources: Dict[str, str] = getattr(get_backup_orchestrator(), "default_sources", {})
+    prefixes = sorted(sources, key=len, reverse=True)
     for name, content in payload.get("files", {}).items():
-        prefix, _, rel = name.partition("/")
-        base = sources.get(prefix)
+        base = ""
+        rel = ""
+        for prefix in prefixes:
+            if name.startswith(prefix + "/"):
+                base = sources[prefix]
+                rel = name[len(prefix) + 1:]
+                break
         if not base or not rel:
             skipped += 1
             continue

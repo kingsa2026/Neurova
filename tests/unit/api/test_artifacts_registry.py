@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from neurova.api.endpoints import artifacts_api
+from neurova.core.agent_workspaces import get_agent_workspace_dir
 
 
 class TestArtifactKindMapping(unittest.TestCase):
@@ -42,7 +43,7 @@ class TestRegisterArtifact(unittest.TestCase):
         )
         self._root_patch.start()
         self.addCleanup(self._root_patch.stop)
-        self.ws = Path(self.tmp) / "ag1"
+        self.ws = get_agent_workspace_dir("ag1")
         self.ws.mkdir(parents=True, exist_ok=True)
         self.md_path = self.ws / "report.md"
         self.md_path.write_text("# hello", encoding="utf-8")

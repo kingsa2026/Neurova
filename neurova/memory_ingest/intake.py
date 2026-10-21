@@ -64,11 +64,14 @@ class IngestReport:
         return sessions.ingested_run_owners(self.agent_id, self.run_id)
 
 
-def session_manager_for(sessions_dir: Optional[str] = None):
+def session_manager_for(sessions_dir: Optional[str] = None, *, exact_agent_dir: bool = False):
     """把会话库根目录定到 `sessions_dir` 后返回 SessionManager。
 
     会话根目录必须在构造之前定（类级单例只认首次构造），所以这里显式设环境变量并
     复位单例——CLI 与老脚本共用这一处装配口径，两边各写一遍就会从第二处开始漂移。
+
+    `exact_agent_dir=True` 时 `sessions_dir` 就是该 agent 的会话目录本身
+    （v2 布局 `data/<id>/sessions`），不再向下追加 agent_id。
     """
     import os
 
@@ -77,7 +80,7 @@ def session_manager_for(sessions_dir: Optional[str] = None):
     from neurova.session_manager import SessionManager
 
     SessionManager._instance = None
-    return SessionManager()
+    return SessionManager(exact_agent_dir=exact_agent_dir)
 
 
 def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int]:

@@ -49,7 +49,9 @@ def _ensure_workspace_owner(root: Path, agent_id: str, current_user: Dict[str, A
     """
     if not isinstance(current_user, dict) or not current_user.get("user_id"):
         raise HTTPException(status_code=401, detail="Not authenticated")
-    config_path = root / "agent_config.json"
+    from neurova.core.agent_workspaces import get_agent_config_path
+
+    config_path = get_agent_config_path(agent_id)
     owner = ""
     if config_path.is_file():
         try:

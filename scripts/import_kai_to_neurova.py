@@ -518,8 +518,8 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
     """
     kai_root = Path(kai_root)
     sessions_dir = Path(sessions_dir)
-    # 会话库根目录必须在构造之前定：类级单例只认首次构造
-    session_manager_for(sessions_dir)
+    # 会话目录就是 v2 布局的 data/<id>/sessions，不再向下追加 agent_id
+    session_manager_for(sessions_dir, exact_agent_dir=True)
     writer = _ChatStoreWriter(agent_id)
 
     total = 0
@@ -547,18 +547,18 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 # ══════════════════════════════════════════════════════════════════
 
 
-def import_identity(kai_root: Path, workspace: Path) -> Dict[str, int]:
-    """SOUL.md → memory/soul.md；PROFILE.md → memory/personality.md + 根留档；
-    MEMORY.md → 根留档。全部覆盖式同步（源即真相）。"""
+def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
+    """SOUL.md → <agent_root>/soul.md；PROFILE.md → personality.md + workspace 留档；
+    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。"""
     kai_root = Path(kai_root)
-    workspace = Path(workspace)
-    mem_dir = workspace / "memory"
-    mem_dir.mkdir(parents=True, exist_ok=True)
+    agent_root = Path(agent_root)
+    workspace = agent_root / "workspaces"
+    workspace.mkdir(parents=True, exist_ok=True)
     files = 0
 
     mapping = [
-        (kai_root / "SOUL.md", mem_dir / "soul.md"),
-        (kai_root / "PROFILE.md", mem_dir / "personality.md"),
+        (kai_root / "SOUL.md", agent_root / "soul.md"),
+        (kai_root / "PROFILE.md", agent_root / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
     ]
@@ -574,16 +574,20 @@ def import_identity(kai_root: Path, workspace: Path) -> Dict[str, int]:
 # ══════════════════════════════════════════════════════════════════
 
 
-def resolve_agent_memory_dir(neurova_root: Path, agent_id: str) -> Path:
-    """目标 agent 的 memory 目录。
+def resolve_agent_root(neurova_root: Path, agent_id: str) -> Path:
+    """目标 agent 根目录（v2 统一布局 `data/<agent_id>/`）。
 
     注入根（NEUROVA_AGENT_WORKSPACES_DIR，与后端同一个单源解析器）优先——桌面版
-    把数据放用户目录时，按 --neurova-root 拼出来的目录运行时根本不读；未注入时
-    回落到该安装的默认布局 <neurova_root>/agent_workspaces/<agent_id>/memory。
+    把数据放用户目录时，按 --neurova-root 拼出来的目录运行时根本不读。
     """
     injected = os.environ.get(AGENT_WORKSPACES_ENV)
-    workspaces_root = Path(injected) if injected else neurova_root / "agent_workspaces"
-    return workspaces_root / agent_id / "memory"
+    root = Path(injected) if injected else neurova_root / "data"
+    return root / agent_id
+
+
+def resolve_agent_memory_dir(neurova_root: Path, agent_id: str) -> Path:
+    """目标 agent 的记忆目录 `<agent_root>/memory`。"""
+    return resolve_agent_root(neurova_root, agent_id) / "memory"
 
 
 def main() -> int:
@@ -599,9 +603,10 @@ def main() -> int:
 
     kai_root = Path(args.kai_root)
     nv_root = Path(args.neurova_root)
-    mem_dir = resolve_agent_memory_dir(nv_root, args.agent_id)
+    agent_root = resolve_agent_root(nv_root, args.agent_id)
+    mem_dir = agent_root / "memory"
     persist_db = mem_dir / "neurova_memories_persist.db"
-    sessions_dir = nv_root / "sessions"
+    sessions_dir = agent_root / "sessions"
 
     print(f"Kai 源: {kai_root}")
     print(f"Neurova 目标: agent={args.agent_id} persist={persist_db}")
@@ -627,7 +632,7 @@ def main() -> int:
         print(f"[聊天] {chats}")
 
     if not args.skip_identity:
-        ident = import_identity(kai_root, nv_root / "agent_workspaces" / args.agent_id)
+        ident = import_identity(kai_root, agent_root)
         print(f"[身份] {ident}")
 
     if args.dry_run:

@@ -40,10 +40,9 @@ def eval_corpus_path(agent_id: Any) -> Path:
     injected = (os.environ.get(CORPUS_ENV) or "").strip()
     if injected:
         return Path(injected)
-    from neurova.core.data_root import get_data_root
+    from neurova.core.agent_workspaces import get_agent_evolution_dir
 
-    return (get_data_root() / "agents" / str(agent_id or "default")
-            / "evolution" / "eval_corpus.json")
+    return get_agent_evolution_dir(agent_id or "default") / "eval_corpus.json"
 
 
 def update_eval_corpus(agent_id: Any, dataset: Any) -> bool:

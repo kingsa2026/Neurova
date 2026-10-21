@@ -20,6 +20,7 @@ from neurova.api.endpoints.agent import _save_agent_config
 def _fake_agent(workspace):
     return SimpleNamespace(
         config=SimpleNamespace(
+            agent_id="agent1",
             name="A",
             description="d",
             workspace_path=str(workspace),
@@ -32,22 +33,28 @@ def _fake_agent(workspace):
     )
 
 
+def _config_path() -> "object":
+    from neurova.core.agent_workspaces import get_agent_config_path
+
+    return get_agent_config_path("agent1")
+
+
 class TestSaveOwnerUserId:
     def test_save_persists_owner(self, tmp_path):
         _save_agent_config(_fake_agent(tmp_path))
-        data = json.loads((tmp_path / "agent_config.json").read_text(encoding="utf-8"))
+        data = json.loads(_config_path().read_text(encoding="utf-8"))
         assert data["owner_user_id"] == "42"
 
     def test_save_without_owner_writes_empty(self, tmp_path):
         agent = _fake_agent(tmp_path)
         agent.config.owner_user_id = None
         _save_agent_config(agent)
-        data = json.loads((tmp_path / "agent_config.json").read_text(encoding="utf-8"))
+        data = json.loads(_config_path().read_text(encoding="utf-8"))
         assert data["owner_user_id"] == ""
 
     def test_other_fields_still_saved(self, tmp_path):
         _save_agent_config(_fake_agent(tmp_path))
-        data = json.loads((tmp_path / "agent_config.json").read_text(encoding="utf-8"))
+        data = json.loads(_config_path().read_text(encoding="utf-8"))
         assert data["name"] == "A"
         assert data["model"] == "m1"
         assert data["provider"] == "openai"

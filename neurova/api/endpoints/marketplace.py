@@ -618,39 +618,54 @@ def _broadcast_public_upgrade(skill_id: str, version: str, name: str) -> int:
 
         base = _lib._BASE_DIR
         targets = []  # (pool, owner_dir_token, confirm_owner, entry)
-        for pool, sub, resolver in (
-            (_lib.POOL_USER, "users", _lib.from_dir_token),
-            (_lib.POOL_AGENT, "agents", None),
-        ):
-            root = base / sub
-            if not root.exists():
+        scan_specs = []
+        user_root = base / "users"
+        if user_root.exists():
+            for d in user_root.iterdir():
+                if d.is_dir():
+                    scan_specs.append(
+                        (_lib.POOL_USER, _lib.from_dir_token(d.name), d / "skills" / "manifest.json", None)
+                    )
+
+        from neurova.core.agent_workspaces import (
+            discover_agent_ids,
+            get_agent_config_path,
+            get_agent_skills_dir,
+        )
+
+        for agent_id in discover_agent_ids():
+            scan_specs.append(
+                (
+                    _lib.POOL_AGENT,
+                    agent_id,
+                    get_agent_skills_dir(agent_id) / "manifest.json",
+                    get_agent_config_path(agent_id),
+                )
+            )
+
+        for pool, owner_key, mf, acfg in scan_specs:
+            if not mf.exists():
                 continue
-            for d in root.iterdir():
-                mf = d / "skills" / "manifest.json"
-                if not d.is_dir() or not mf.exists():
-                    continue
+            try:
+                entries = _json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            row = entries.get(skill_id) if isinstance(entries, dict) else None
+            if not row:
+                continue
+            tf = ((row.get("manifest") or {}).get("config") or {}).get("transferred_from") or {}
+            if tf.get("pool") != _lib.POOL_PUBLIC or str(tf.get("skill_id") or "") != skill_id:
+                continue
+            if pool == "user":
+                confirm = owner_key  # u:7
+            else:
+                acct = ""
                 try:
-                    entries = _json.loads(mf.read_text(encoding="utf-8"))
+                    if acfg is not None and acfg.exists():
+                        acct = str(_json.loads(acfg.read_text(encoding="utf-8")).get("owner_user_id") or "")
                 except Exception:
-                    continue
-                row = entries.get(skill_id) if isinstance(entries, dict) else None
-                if not row:
-                    continue
-                tf = ((row.get("manifest") or {}).get("config") or {}).get("transferred_from") or {}
-                if tf.get("pool") != _lib.POOL_PUBLIC or str(tf.get("skill_id") or "") != skill_id:
-                    continue
-                owner_key = resolver(d.name) if resolver else d.name
-                if pool == "user":
-                    confirm = owner_key  # u:7
-                else:
-                    acfg = d / "agent_config.json"
                     acct = ""
-                    try:
-                        if acfg.exists():
-                            acct = str(_json.loads(acfg.read_text(encoding="utf-8")).get("owner_user_id") or "")
-                    except Exception:
-                        acct = ""
-                    confirm = f"u:{acct}" if acct else "admin"
+                confirm = f"u:{acct}" if acct else "admin"
                 targets.append((pool, owner_key, confirm, row))
 
         store = get_skill_transfer_store()
