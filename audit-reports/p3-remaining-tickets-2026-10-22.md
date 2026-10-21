@@ -132,3 +132,30 @@
   两句不冲突但边界要一次讲清，别让下一个人以为是两件事。
 - 摘要对符号链接按目标字符串计入、不跟随（`artifact_digest.iterDigestedMembers`）这条口径，
   在生产目录里从未被真实行使过（判据里有合成样本，生产没有）。
+
+---
+
+## 补证（同日，代码级追踪；**未跑活体，边界写在最后一条**）
+
+- **票三的第一条"未证到"被代码级追踪收窄**：`skill_service._skills` 只从 `manifest.json` 装载
+  （`skill_service.py:290-296`），两处钉都写在这本账上（`:748-749` 本地/zip 咽喉、`:822-823` hub 注册），
+  验在 `:2014-2039` 且读的是 `skill_info`（也就是这本账里的条目）。而市场那条链
+  （`market_importer.import_skill`:211 → 落 `skills_dir/{skill_id}` → 每技能写 `skill.json`:335、
+  读回 :130）**一个字都不碰这本账**；`skill_service.install_skill` 的生产调用方只有
+  `api/endpoints/skill_pool_api.py:883/938`（加 hub 那条经 `:804`）。
+  ⇒ 代码级结论：**市场安装的包既没被钉，也进不了 `call_skill` 的验摘要读路**——
+  §6-176 说的"只被装载前 TOFU 首钉兜住"这一句，在市场这条路上**连 TOFU 都兜不到**，
+  因为它根本不经过那道门。
+- **边界（不许越过去写）**：上面只证到"读路上看不到"。没证到"运行期是否有人从别的目录
+  把这批字节 load 进去执行"。要定这句需要真 `create_app()` 活体：市场装一个内置 bundle 条目
+  （离线，`read_builtin_bundle`，不出网）→ 触发执行 → 数 `checkArtifact` 被调几次。
+  **这一步跑完之前，"敞口已量清"这句话不许写**。
+- **§6-177 丙案的两处说法按现读修正**：① `AgentSkillManager` **不是**零调用者——
+  `agent_core.py:1550` 构造它；零调用者的只是它的 `acquire_skill`（`agent_skill_manager.py:230`，
+  调用方只有 `tests/unit/skills/test_agent_skill_manager.py`）。"按名字推断可行性"那族的老形状，
+  这次是**方法零调用 ≠ 类零调用**。② `agent_skill_manager.py:308` 的
+  `logger.info("Skill %s acquired successfully")` 在 `:297` importer 报失败之后仍无条件记成功，
+  属"日志与状态分家"（§6-126/§6-161 同族）。**但它在没有生产调用者的那条方法里**，
+  所以只记在案、不在本档顺手修——修它要先决定丙怎么做（接进来还是退役），
+  否则就是给一条死路补形状（形态集既有条目点名过这一形）。
+
