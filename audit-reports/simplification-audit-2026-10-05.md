@@ -9317,3 +9317,38 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：四旋钮其余三件、A1/A2、security/temporal_reasoner/agent_self/memory_stream；
       等裁七条＋`permissions` 声明＋Z1–Z4/Z6。
     - **本会话下一枚空号现查 §6-378**（写前必须现场重取；本笔落库时该读数为 377）。
+
+378. **余下组一：通道插件未接旋钮按「不接」分支退净；权重读面收第三份硬编码回到 live 单源** ✅🟢 —— 六档 + 同族下游，一笔
+    - **读者复算（主会话现跑）**：`threshold`/`centroid`/`weight`/`processor` 的层外/层内生产读者
+      只有 `channels/__init__.py` 门面；`temporal` 另被 `processor` 读；`channels/moe_router`
+      连门面都没有（仅 3 档测试引用）。`ast_scan.importersOfModule` 复算同数。
+    - **取长补短**：`weight` 的动态能力已由 §6-377 的 `IntentAwareRecallStrategy.applyFeedback`
+      接管（±0.05、夹紧、归一化、落盘）；`processor` 的内联冲突判据已并入
+      `judgeClauseConflict`（§6-374）；去重/加权/时间衰减由 live 的
+      `_deduplicate_results`/`_fusion_score`/`_recency_score` 承担。
+    - **显式放弃**：per-channel 阈值覆盖（保留全局 `threshold.default`）；插件通道质心自动生成
+      （保留 expert 质心）；`processor` 的 `activations` 乘子与三段管道编排；`temporal` 的可配置
+      衰减曲线（live 固定指数衰减）；`channels/moe_router` 的按查询通道门控（expert MoE 仍在）。
+    - **双源收口（顺带缺陷）**：`/enhanced-memory-search/channel-weights` 原自带第三份意图权重
+      硬编码表，反馈写回后与召回实际权重对不上。新增 `_weightsForIntent`：有 live 引擎读
+      `intent_strategy.get_channel_weights`，无引擎读同一份类默认表；端点加 `Request` 参数。
+      红：helper 两格 `AttributeError` → 绿；端点格改前后都绿（原表恰好等于默认值），
+      但 helper 证明它不再走硬编码。
+    - **红→绿**：退役守卫删前 3 红（文件在/**导入面在**/门面仍导出）→ 删后 4 绿
+      （含正控 live 实现仍在；首跑正控因测试自身 import 路径写错而红，修正后绿，不认领为交付证据）。
+    - **宽域 A/B**：`AB_PASS`｜基线 16 failed+1 error（1756 passed）↔ 本树 8 failed（1713 passed）｜
+      仅本树红 0；仅基线红 8＝本批 7 条新判据＋`test_decay_cycle_bounded`（顺序/环境格，不认领）。
+      本树 8 红在基线同红（4 条 Manager/bus＋2 条 `test_recall_with_plugins` 的 Mock 缺
+      `get_top_memories_by_temperature`＋2 条数据根/env 格），按预存处置。
+    - **活体（真 app + 真 HTTP）**：`/channel-weights?intent=factual` 200，返回 live 引擎权重；
+      把引擎权重统一改为 0.5 再 `applyFeedback(text,+1)` 后，端点回 **0.180328** 与引擎逐值同；
+      六档 `find_spec` 全 `None`；仓内 `data/` 指纹前后同。
+    - **文档/子集**：脊柱 §5 改为“已处置的旋钮”表；D19 档案加 A3–A6“不接”标记；
+      组件表 **99→93 模块／43269→42893 行**（在役 54／仅层内 32／仅测试 2／零读者 5），
+      下限 99→93；**子集 656→658**（新增 API 单源格与退役守卫）。
+    - **净 LOC**：生产池 **+34/−581**（六档退役 −514，门面/API 改写 +34/−67）；
+      测试/基建池 **+156/−1230**；文档/台账池 **+61/−30**。
+    - **未取证**：未跑真 LLM 回合；六档的“显式放弃”是产品口径（用户 2026-10-21 指令完成余下组），
+      重建成本分别见 D19 档案 A3–A6。
+    - **仍开**：组二 A1/A2、组三 security/temporal_reasoner/agent_self/memory_stream；等裁七条等。
+    - **本会话下一枚空号现查 §6-379**（写前必须现场重取；本笔落库时该读数为 378）。

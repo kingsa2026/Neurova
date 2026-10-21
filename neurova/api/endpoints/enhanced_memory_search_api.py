@@ -473,42 +473,45 @@ async def reset_nerf_settings(request: Request, admin: dict = Depends(require_ad
     }
 
 
+def _weightsForIntent(intent: str, engines: typing.List) -> dict:
+    """该意图的通道权重——live 引擎的 `intent_strategy` 是唯一事实源。
+
+    无引擎时用同一份类默认表；不再在端点里手抄第三份。
+    """
+    from neurova.cognitive_layers.memory_layer.neurova_recall import (
+        IntentAwareRecallStrategy,
+        QueryIntent,
+    )
+
+    try:
+        queryIntent = QueryIntent(intent)
+    except ValueError:
+        queryIntent = QueryIntent.EXPLORATORY
+
+    for engine in engines or []:
+        strategy = getattr(engine, "intent_strategy", None)
+        if strategy is not None:
+            return {
+                channel.value: round(float(weight), 6)
+                for channel, weight in strategy.get_channel_weights(queryIntent).items()
+            }
+
+    defaults = IntentAwareRecallStrategy.INTENT_CHANNEL_WEIGHTS
+    weights = defaults.get(queryIntent, defaults[QueryIntent.UNKNOWN])
+    return {channel.value: round(float(weight), 6) for channel, weight in weights.items()}
+
+
 @router.get("/channel-weights")
 async def get_channel_weights(
+    request: Request,
     intent: str = Query(default="exploratory"),
     current_user: dict = Depends(get_current_user),
 ):
-    """获取指定意图的通道权重（用于前端可视化）— 登录用户可读"""
-    # 意图 → 通道权重映射
-    intent_weights = {
-        "factual": {"text": 0.40, "temperature": 0.20, "category": 0.20, "graph": 0.10, "emotion": 0.05, "voice": 0.05},
-        "temporal": {
-            "temperature": 0.50,
-            "text": 0.15,
-            "category": 0.10,
-            "graph": 0.10,
-            "emotion": 0.10,
-            "voice": 0.05,
-        },
-        "causal": {"graph": 0.50, "text": 0.15, "category": 0.10, "temperature": 0.10, "emotion": 0.10, "voice": 0.05},
-        "comparative": {
-            "category": 0.35,
-            "text": 0.25,
-            "graph": 0.15,
-            "temperature": 0.10,
-            "emotion": 0.10,
-            "voice": 0.05,
-        },
-        "exploratory": {
-            "text": 0.25,
-            "temperature": 0.20,
-            "graph": 0.20,
-            "category": 0.15,
-            "emotion": 0.10,
-            "voice": 0.10,
-        },
-    }
-    weights = intent_weights.get(intent, intent_weights["exploratory"])
+    """获取指定意图的通道权重（用于前端可视化）— 登录用户可读。
+
+    读 live 引擎的 `intent_strategy`（反馈自适应写回后的真实权重）；无引擎时读类默认表。
+    """
+    weights = _weightsForIntent(intent, _get_all_recall_engines(request))
     return {"code": 0, "message": "success", "data": {"intent": intent, "weights": weights}}
 
 
