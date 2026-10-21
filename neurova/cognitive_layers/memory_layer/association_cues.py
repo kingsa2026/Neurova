@@ -262,6 +262,34 @@ class AssociationCueStore:
             grouped.setdefault(memoryId, []).append(cueText)
         return grouped
 
+    def cueRowsForIndex(self, scope: Tuple[str, str], maxEntries: int) -> List[Dict[str, Any]]:
+        """按新近取用于向量通道的线索行（`created_at DESC`，上限 `maxEntries`）。
+
+        上限是**冷启动公平性**边界：全库线索一次编码完会吃掉整轮固化窗口。
+        取新近的代价是老线索暂时不参与联想——由生成侧持续补齐，不做二次索引体系。
+        """
+        neuserId, userId = scope
+        with self._lock:
+            conn = self._connGetter()
+            rows = conn.execute(
+                "SELECT cue_id, memory_id, cue_text, cue_kind, cue_source, confidence"
+                " FROM memory_cues"
+                " WHERE agent_id = ? AND neuser_id = ? AND user_id = ?"
+                " ORDER BY created_at DESC, cue_id LIMIT ?",
+                (self._agent_id, neuserId, userId, int(maxEntries)),
+            ).fetchall()
+        return [
+            {
+                "cue_id": row[0],
+                "memory_id": row[1],
+                "cue_text": row[2],
+                "cue_kind": row[3],
+                "cue_source": row[4],
+                "confidence": row[5],
+            }
+            for row in rows
+        ]
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             conn = self._connGetter()
