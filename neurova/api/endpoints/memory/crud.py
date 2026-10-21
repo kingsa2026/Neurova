@@ -286,15 +286,25 @@ async def compress_low_value_memories(
 @router.get("/relations/{memory_id}/traverse", summary="遍历记忆关系图")
 async def traverse_relations(
     memory_id: str,
-    method: str = Query(default="bfs", pattern="^(bfs|dfs)$"),
+    method: str = Query(default="bfs", pattern="^(bfs|dfs|causal)$"),
     max_depth: int = Query(default=3, ge=1, le=10),
+    target_id: Optional[str] = Query(default=None, description="causal 模式的终点记忆"),
+    include_loops: bool = Query(default=False, description="causal 模式是否做全图环检测"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
     user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """从指定记忆出发遍历关系图（graph.min_strength 过滤弱关系）"""
+    """从指定记忆出发遍历关系图（graph.min_strength 过滤弱关系）。
+
+    `method=causal` 走 `MemoryManager.analyze_causal`：多跳效应、根因、因果链、
+    解释与可选的因果环检测；其余方法保持原 BFS/DFS 遍历。
+    """
     try:
         manager = get_memory_manager(agent_id, user)
-        result = manager.traverse_relations(memory_id, method=method, max_depth=max_depth)
+        if method == "causal":
+            result = manager.analyze_causal(
+                memory_id, target_id=target_id, includeLoops=include_loops)
+        else:
+            result = manager.traverse_relations(memory_id, method=method, max_depth=max_depth)
         return success_response(
             data=result,
             message="遍历完成",
