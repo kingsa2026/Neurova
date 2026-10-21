@@ -85,6 +85,16 @@ class TestSummaryReaderKeepsBothShapes:
         assert _loadDriver().extractFailures(WRAPPED_LOG) == {
             "tests/unit/x/test_a.py::test_one", "tests/unit/x/test_c.py::test_three"}
 
+    def test_appLogErrorLineIsNotATestNode(self):
+        """应用日志的 `ERROR logger:module.py:line` 不是 pytest 短汇总行。
+
+        实测（§6-371）：cognitive 组预存红会在输出里打 `ERROR neurova.agent.chat_pipeline:...`，
+        旧抽取口的 `\\S+` 把它当成一条测试节点——汇总 16 条红被抽成 18 条，对账闸判 AB_FAIL。
+        """
+        log = WRAPPED_LOG + "ERROR neurova.agent.chat_pipeline:chat_pipeline.py:304 - boom\n"
+        assert _loadDriver().extractFailures(log) == {
+            "tests/unit/x/test_a.py::test_one", "tests/unit/x/test_c.py::test_three"}
+
     def test_nulBytesDoNotBlindTheReader(self):
         #: 重定向落盘带 NUL 时，按"二进制文件"处理的外层取数会只回一句 Binary file matches，
         #: 于是抽取 0 条而汇总明明报着红——抽取口必须按文本读。

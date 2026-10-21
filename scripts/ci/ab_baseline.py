@@ -38,7 +38,11 @@ _SUMMARY = re.compile(
     r"(\d+) failed.*?(\d+) passed.*?(\d+) error|"
     r"(\d+) failed.*?(\d+) passed(?!\S* error)|"
     r"(?<!\d)(\d+) error[s]?(?!.*\d passed)")
-_FAILURE_LINE = re.compile(r"^(FAILED|ERROR)\s+(\S+)", re.M)
+#: 只认 pytest 短汇总的节点形状（`path.py` 或 `path.py::node` + ` - `／行尾）。
+#: 不能退回 `\S+`：应用日志会打 `ERROR logger:module.py:line - ...`，那会被当成一条测试节点
+#: （§6-371 实测：汇总 16 条红被抽成 18 条，对账闸当场判 AB_FAIL）。
+_FAILURE_LINE = re.compile(
+    r"^(FAILED|ERROR)\s+([^\s:]+\.py(?:::\S+)?)(?:\s+-|$)", re.M)
 
 
 def parseSummary(text: str):

@@ -9122,3 +9122,43 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **子集** 652→654（两份新判据档）；**仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋"四旋钮接不接"＋
       `permissions` 声明；§6-369 那张三选一票已由本笔结清。
     - **本会话下一枚空号现查 §6-371**（写前必须现场重取；本笔落库时该读数为 370）。
+
+371. **用户对四旋钮、A1、A2 均裁甲：九档一次退净，活脊柱与单源判据不动；顺带修好 A/B 抽取口把应用日志 `ERROR` 当测试节点的缺陷** ✅🟢 —— 一笔：删除类，生产池 −1274 行本体
+    - **裁定**：2026-10-21 用户对三组各选甲——四旋钮（A3–A6）＋同族下游、A1 `causal_reasoning`、
+      A2 `question_decomposer` 一次退净。依据＝D19 档案的逐档证据：九档生产读者全 0；
+      A1 的反向关系写侧从未有生产者；A2 主干已有 `QueryIntentDetector`＋`chat_pipeline._decompose_query`
+      顶替，独有子能力属产品口径。
+    - **删除**：生产九档 `causal_reasoning.py`(349)、`question_decomposer.py`(311)、
+      `channels/{threshold(46),weight(62),centroid(53),processor(107),temporal(68),conflict(100),moe_router(178)}.py`
+      ＝**1274 行本体**（磁盘＋索引）；两处门面再导出与 `__all__` 项；旧测试三档
+      `test_result_processing.py`、`test_moe_routing.py`、`test_closed_loop.py`，
+      并从 `test_graph_enhancement.py` 摘 A1/A2 两类、从 `test_data_flow_closed_loop.py` 摘 7 格、
+      从 `test_memory_safety_net.py` 摘渠道冲突两格。
+    - **新守卫**：`test_d19IslandRetirement.py` 六格（九档不在位/不在跟踪态、无导入通道、
+      两处门面不再导出、活脊柱正控、脊柱权威档不再列为待接线、扫描面自证）；红跑
+      **4 failed / 1 passed**，删后 **6 passed**。面自证同时补进两条既有退役档
+      （`test_emotionAdapterRetirement.py`、`test_conflictDetectorV2Retirement.py`）——
+      它们此前被 `test_scanCriterionMustProveItsOwnSurfaceRatchet` 点名，本批转绿。
+    - **顺带修的 A/B 缺陷（单列，不折算成简化收益）**：抽取口 `_FAILURE_LINE` 用 `\S+` 取节点，
+      把应用日志 `ERROR neurova.agent.chat_pipeline:chat_pipeline.py:304` 当成一条测试节点
+      ⇒ 汇总 16 红被抽成 18，对账闸判 `AB_FAIL`。改成只认 `path.py`／`path.py::node` 形状，
+      配一格 `test_appLogErrorLineIsNotATestNode`；驱动测试 21 passed。
+    - **宽域 A/B**：`AB_PASS`｜基线 23 failed+1 error（2290 passed）↔ 本树 16 failed/0 error（2243 passed）｜
+      仅本树红 0。仅基线红 8 条：本批 4 条 D19 守卫格＋2 条 ratchet 格（交付证据）；
+      `test_cognitiveComponentTable::test_tableBlockMatches` 与 `test_lock_coverage…` 在基线单跑皆绿，
+      按顺序/环境效应处置，**不认领**。
+    - **本树 16 条红全是预存**：4 条 `MemoryManager.bus`/moe 状态目录（§6-215 已登记）、
+      1 条 `test_data_flow_closed_loop::test_agent_delegates_to_subsystems`（本批在 HEAD worktree 复现同红，
+      登记于此：`ToolExecutor.execute_from_memory` 不存在）、10 条 cognitive 图/结晶器红（HEAD worktree 同集）；
+      `tests/unit/ci` 的 5 条 npc 环境侧红不变。
+    - **活体**：真 `create_app()`＋`/health` 200；`BUILTIN_CHANNELS` 6、`ChannelRegistry`／
+      `NeurovaRecallEngine`／`MoEMemoryRouter` 均可导入；真 `MemoryManager` remember→recall
+      命中 1 条 PostgreSQL；单源冲突判据仍报 `negation_conflict`；退役模块导入抛 `ModuleNotFoundError`；
+      仓内 `data/` 指纹 `2d997d5ec1bb`（3034 档）前后同。**未取证**：真 LLM 回合未跑。
+    - **文档**：组件表 **104→95 模块／44926→43652 行**（在役 55／仅层内 30／仅测试 5／零读者 5）；
+      检索脊柱权威档 §5 改为退役记录；悬空引用台账重生成（3/3 行，`test_closed_loop.py` 的裁定目标
+      改指仍存的 `tests/test_memory` 副本）；组件表判据下限 100→95 并注明本批现值。
+    - **净 LOC**：生产池 +1/−1304；测试/基建池 +223/−1269。
+    - **子集** 654→655；**仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋`permissions` 声明；
+      §6-361 的四旋钮票与 D19 A1/A2 两票本笔结清。
+    - **本会话下一枚空号现查 §6-372**（写前必须现场重取；本笔落库时该读数为 371）。

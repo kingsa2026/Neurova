@@ -49,3 +49,9 @@ def test_liveCriterionStillCoversTheMergedCapability():
     hit = judgeClauseConflict("项目使用 PostgreSQL 数据库", "项目使用 MySQL 数据库")
     assert hit is not None, "同属性异值判据消失了——先确认是删错了能力"
     assert hit[0] == "attribute_conflict"
+
+
+def test_scanFaceIsNotVacuous():
+    """面自证：退役判据的扫描面要能看到整个认知层（根被改窄会变成"零命中"）。"""
+    files = ast_scan.filesUnder(REPO_ROOT / "neurova" / "cognitive_layers")
+    assert len(files) > 50, f"扫描面只看到 {len(files)} 个文件，判据的根可能被改窄了"

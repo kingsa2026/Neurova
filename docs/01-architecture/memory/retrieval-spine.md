@@ -43,18 +43,15 @@
 - **门控阈值**：全局 `threshold.default`（`memory_layer/settings_config.py:105`）经
   `mem_core.py:818` 喂进 expert 门控。
 
-## 5. 未接线的旋钮（**不是**脊柱的一部分）
+## 5. 已退役的四旋钮（历史，**不是**脊柱的一部分）
 
-这四件在同一包内、结构完整，但**没有插进上面那条链**（§6-360 逐档档案）：
+2026-10-21 用户裁甲：四旋钮（per-channel 阈值覆盖、反馈驱动的通道权重、插件通道质心自动生成、
+统一结果管道）连同同族下游的时序衰减、通道冲突检测、通道侧 MoE 路由三件已**退净**。
+退役前它们的生产读者就是 0（§6-360 逐档档案；§6-371 落地记录）；live 脊柱不受影响——
+`ChannelRegistry`、`builtin/*` 与 expert 域的 MoE 路由仍是上面第 2–4 节那条链。
 
-| 旋钮 | 文件 | 今天缺的那半边 |
-|---|---|---|
-| per-channel 阈值覆盖 | `channels/threshold.py` | 只有全局 `threshold.default`，且只作用于 expert 门控 |
-| 反馈驱动的通道权重 | `channels/weight.py` | 权重是两份手抄静态表；无人写回 |
-| 插件通道质心自动生成 | `channels/centroid.py` | 质心只按 Expert 定义表建 |
-| 统一结果管道 | `channels/processor.py` | 内联语义冲突检测未进 live 链；`activations` 乘子无生产者 |
-
-它们的去留见台账 §6-361 的"四旋钮接不接"（等裁）。
+四旋钮"缺的那半边"的原始读数留在 `audit-reports/d19-islands-dossier-2026-10-20.md` §5 与台账 §6-361；
+本档不再把它们列为"待接线"。
 
 ## 6. 一处同名不同物（别当双源）
 

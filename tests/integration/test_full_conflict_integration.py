@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 import pytest
 
 pytest.skip(
-    "引用不存在的模块 neurova.core.闭环_manager（非法模块名），且 conflict_detector 已改名为 conflict_detector_v2。"
+    "引用不存在的模块 neurova.core.闭环_manager（非法模块名）；conflict_detector_v2 已于 §6-370 退役、判据并入 conflict.py。"
     "已整体 skip，待确认闭环/冲突检测的对齐方案；详见 docs/test-debt-skip-list.md",
     allow_module_level=True,
 )
