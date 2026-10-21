@@ -9162,3 +9162,25 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **子集** 654→655；**仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁、等裁七条＋`permissions` 声明；
       §6-361 的四旋钮票与 D19 A1/A2 两票本笔结清。
     - **本会话下一枚空号现查 §6-372**（写前必须现场重取；本笔落库时该读数为 371）。
+
+372. **D19 第二环重扫（候选集不动点）：84 节点→15 死/7198 行；8 档新候选/3834 行，6 建议删、2 需人裁；另排掉 1 档活模块与 1 档测试工具** ✅⚪ —— 只读，未动一行代码
+    - **产出落点**：`audit-reports/d19-second-ring-2026-10-21.md`（方法、15 档明细、逐档初核、处置建议、复算命令）。
+    - **方法**：节点＝`memory_layer/` 84 个非门面 `.py`；import 图取 `ast_scan.parsedModules`＋
+      `resolveImportModule`；种子＝无生产读者（零读者＋仅测试）；迭代＝无层外活读者且层内读者全死；
+      **只由 `__init__.py` 读到的模块不算活**（门面不构成消费者）。模块级取数，不证符号级/动态装载。
+    - **读数**：死集 **15 档／7198 行**。已知零读者 5 档（Z1–Z4、Z6）沿用既有档案；
+      `pollution_purge` 349 是测试/运维工具（默认预报、先归档再删），**不按死码删**；
+      `temporal_knowledge_graph` 449 经 `tkg_retriever_adapter` 接在 `chat_pipeline.py:300` 检索链上，
+      **在役**，排除。⇒ **新候选 8 档／3834 行**。
+    - **新候选与初核**：`security` 809（`MemorySecurity` 仅门面；敏感检测/加密/遗忘权无现役等价，
+      需人裁，倾向删）、`vector_search` 726（TF-IDF；在役 `UnifiedVectorStore`，建议删）、
+      `agent_self` 524（全仓无消费者/测试，建议删）、`memory_stream` 235（无生产读者，建议删）、
+      `temporal_reasoner` 636（五类时序推理，TKG 是事实存储不是等价推理，需人裁）、
+      `vector_index_manager` 431（`knowledge/vector_index.py` 自述其闲置，建议删）、
+      `memory_index` 277（`storage.py:161` 已有同名 `MemoryIndex`，双源，建议删）、
+      `memory_record_store` 196（CRUD 与 storage/manager 重叠，建议删）。
+    - **处置**：本批不动码。裁删的 6 档要先逐档补五字段档案并确认 `storage.py` 那份覆盖同一语义；
+      `security`/`temporal_reasoner` 是产品口径；`pollution_purge` 若归位另批移到 `tests/`/`scripts/`。
+    - **净 LOC**：生产池 +0/−0；测试/基建池 +116/−0（报告 93＋本格 22＋D19 档案 1）。
+    - **仍开**：Z1／Z2／Z3／Z4／Z6 五档等裁、第二环 8 档（6 删候选／2 需人裁）、等裁七条＋`permissions` 声明。
+    - **本会话下一枚空号现查 §6-373**（写前必须现场重取；本笔落库时该读数为 372）。
