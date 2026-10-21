@@ -3466,3 +3466,7 @@ tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py
 # `conflict_detector_v2` 退役守卫（§6-370）：文件不在且不在跟踪态／无导入通道／两处门面不再导出
 # ConflictDetector／正控（合并后的判据仍在单源里报 attribute_conflict）。
 tests/unit/cognitive_layers/memory_layer/test_conflictDetectorV2Retirement.py
+# D19 死岛退役（§6-371）：四旋钮＋A1/A2 共九档不再在位／不再被导入／两处门面不再导出；
+# 正控活脊柱（ChannelRegistry／builtin channels／expert MoE router／单源冲突判据）仍在；
+# 检索脊柱权威档不再把它们列为待接线；另配扫描面自证。
+tests/unit/cognitive_layers/memory_layer/test_d19IslandRetirement.py

@@ -4,7 +4,7 @@
 逐模块验证核心数据流是否闭环：
 1. 记忆存储→检索→温度衰减
 2. 工具记忆→肌肉记忆→经验闭环
-3. 通道插件→MoE路由→结果处理
+3. 通道注册→检索→注销（通道插件基础）
 4. Agent初始化→子系统→生命周期
 5. 情感分析→记忆关联
 6. 认知图谱→模式挖掘→经验结晶
@@ -46,41 +46,6 @@ class TestMemoryFlow:
         assert len(results) == 1
         assert results[0].memory_id == "m1"
 
-    def test_temperature_decay_cycle(self):
-        """温度衰减闭环：高温→时间流逝→低温"""
-        from neurova.cognitive_layers.memory_layer.channels.temporal import TemporalDecay
-
-        td = TemporalDecay(curve="exponential", half_life_days=7)
-        now = datetime.now(timezone.utc).isoformat()
-        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-
-        # 新记忆温度高
-        score_new = td.compute(now)
-        assert score_new > 0.9
-
-        # 旧记忆温度低
-        score_old = td.compute(old)
-        assert score_old < 0.5
-
-        # 闭环：衰减后可以重新升温（通过访问）
-        assert score_new > score_old
-
-    def test_memory_dedup_cycle(self):
-        """去重闭环：重复存储→去重→唯一结果"""
-        from neurova.cognitive_layers.memory_layer.channels.processor import UnifiedResultProcessor
-        from neurova.cognitive_layers.memory_layer.channels.base import ChannelResult
-
-        proc = UnifiedResultProcessor()
-        results = [
-            ChannelResult("m1", "content A", 0.9, "text"),
-            ChannelResult("m1", "content A dup", 0.5, "temperature"),
-            ChannelResult("m2", "content B", 0.7, "text"),
-        ]
-        deduped = proc.deduplicate(results)
-        assert len(deduped) == 2
-        # 保留分数更高的
-        assert deduped[0].score >= 0.7
-
 
 # ═══════════════════════════════════════════════════════
 # 2. 工具记忆→肌肉记忆→经验闭环
@@ -89,47 +54,9 @@ class TestMemoryFlow:
 class TestToolMemoryFlow:
     """工具记忆数据流闭环"""
 
-    def test_weight_adjustment_feedback_loop(self):
-        """权重调整反馈闭环：正反馈→权重增加→负反馈→权重减少"""
-        from neurova.cognitive_layers.memory_layer.channels.weight import WeightAdjuster
-
-        wa = WeightAdjuster()
-        w_before = wa.get_weights()["text"]
-
-        # 正反馈
-        for _ in range(10):
-            wa.adjust("text", positive=True)
-        w_after_positive = wa.get_weights()["text"]
-
-        # 权重应增加（归一化后相对其他通道）
-        assert w_after_positive > 0  # 至少不为0
-
-        # 负反馈
-        for _ in range(10):
-            wa.adjust("text", positive=False)
-        w_after_negative = wa.get_weights()["text"]
-
-        # 权重应减少
-        assert w_after_negative < w_after_positive
-
-    def test_conflict_detection_loop(self):
-        """冲突检测闭环：矛盾→检测→标记"""
-        from neurova.cognitive_layers.memory_layer.channels.conflict import ConflictDetector
-        from neurova.cognitive_layers.memory_layer.channels.base import ChannelResult
-
-        cd = ConflictDetector()
-        results = [
-            ChannelResult("a", "Python is not a static typed language", 0.8, "text"),
-            ChannelResult("b", "Python is a static typed language", 0.8, "text"),
-        ]
-        conflicts = cd.detect(results)
-        assert len(conflicts) > 0
-        # 冲突被正确标记
-        assert conflicts[0].reason != ""
-
 
 # ═══════════════════════════════════════════════════════
-# 3. 通道插件→MoE路由→结果处理 闭环
+# 3. 通道注册→检索→注销 闭环
 # ═══════════════════════════════════════════════════════
 
 class TestChannelPluginFlow:
@@ -172,64 +99,6 @@ class TestChannelPluginFlow:
         # 注销
         reg.unregister("test_ch")
         assert reg.get("test_ch") is None
-
-    @pytest.mark.asyncio
-    async def test_moe_to_processor_pipeline(self):
-        """MoE路由→通道检索→结果处理 完整管道"""
-        from neurova.cognitive_layers.memory_layer.channels.base import (
-            BaseChannel, ChannelMetadata, ChannelResult, ChannelState
-        )
-        from neurova.cognitive_layers.memory_layer.channels.registry import ChannelRegistry
-        from neurova.cognitive_layers.memory_layer.channels.moe_router import ChannelMoERouter
-        from neurova.cognitive_layers.memory_layer.channels.processor import UnifiedResultProcessor
-        from neurova.cognitive_layers.memory_layer.channels.weight import WeightAdjuster
-
-        reg = ChannelRegistry()
-        reg._channels.clear()
-        reg._metadata.clear()
-
-        class ChA(BaseChannel):
-            @property
-            def metadata(self):
-                return ChannelMetadata(name="ch_a", display_name="A", description="Channel A")
-            async def retrieve(self, query, limit=10, weight=1.0, **kwargs):
-                return [ChannelResult("a1", "Result A", 0.9 * weight, "ch_a",
-                       timestamp=datetime.now(timezone.utc).isoformat())]
-
-        class ChB(BaseChannel):
-            @property
-            def metadata(self):
-                return ChannelMetadata(name="ch_b", display_name="B", description="Channel B")
-            async def retrieve(self, query, limit=10, weight=1.0, **kwargs):
-                return [ChannelResult("b1", "Result B", 0.5 * weight, "ch_b",
-                       timestamp=datetime.now(timezone.utc).isoformat())]
-
-        for ChCls in [ChA, ChB]:
-            ch = ChCls()
-            ch._state = ChannelState.ACTIVE
-            reg.register(ch)
-
-        # MoE 路由
-        vs = MagicMock()
-        vs.encode.return_value = [0.1, 0.2]
-        vs.get_expert_centroids.return_value = {}
-
-        router = ChannelMoERouter(registry=reg, vector_store=vs, top_k=2,
-                                   activation_threshold=0.1, fallback_to_all=True)
-        with patch.object(router.gating, 'route', new_callable=AsyncMock) as mock_route:
-            mock_route.return_value = {"ch_a": 0.9, "ch_b": 0.5}
-            moe_results = await router.retrieve("query", limit=10)
-            assert len(moe_results) > 0
-
-        # 结果处理
-        proc = UnifiedResultProcessor()
-        wa = WeightAdjuster()
-        output = proc.process(moe_results, wa.get_weights())
-        assert output.total_count > 0
-        assert len(output.results) > 0
-        # 分数降序
-        scores = [r.score for r in output.results]
-        assert scores == sorted(scores, reverse=True)
 
 
 # ═══════════════════════════════════════════════════════
@@ -359,82 +228,3 @@ class TestConfigFlow:
             # 路径已创建
             assert os.path.exists(cfg.workspace_path)
 
-    def test_threshold_config_lifecycle(self):
-        """阈值配置→应用→调整 闭环"""
-        from neurova.cognitive_layers.memory_layer.channels.threshold import ThresholdConfig
-
-        tc = ThresholdConfig(default_threshold=0.3)
-        tc.set_threshold("text", 0.5)
-        assert tc.get_threshold("text") == 0.5
-        assert tc.get_threshold("unknown") == 0.3
-
-        # 导出→导入
-        d = tc.to_dict()
-        tc2 = ThresholdConfig.from_dict(d)
-        assert tc2.get_threshold("text") == 0.5
-        assert tc2.get_threshold("unknown") == 0.3
-
-
-# ═══════════════════════════════════════════════════════
-# 7. 端到端完整管道
-# ═══════════════════════════════════════════════════════
-
-class TestEndToEndPipeline:
-    """端到端完整管道闭环"""
-
-    @pytest.mark.asyncio
-    async def test_full_data_flow(self):
-        """用户输入→通道选择→检索→处理→输出"""
-        from neurova.cognitive_layers.memory_layer.channels.base import (
-            BaseChannel, ChannelMetadata, ChannelResult, ChannelState
-        )
-        from neurova.cognitive_layers.memory_layer.channels.registry import ChannelRegistry
-        from neurova.cognitive_layers.memory_layer.channels.processor import UnifiedResultProcessor
-        from neurova.cognitive_layers.memory_layer.channels.weight import WeightAdjuster
-        from neurova.cognitive_layers.memory_layer.channels.temporal import TemporalDecay
-
-        # 1. 注册通道
-        reg = ChannelRegistry()
-        reg._channels.clear()
-        reg._metadata.clear()
-
-        class SearchChannel(BaseChannel):
-            @property
-            def metadata(self):
-                return ChannelMetadata(name="search", display_name="Search",
-                    description="Search channel", capabilities=["text"])
-            async def retrieve(self, query, limit=10, weight=1.0, **kwargs):
-                return [
-                    ChannelResult("s1", f"Found: {query}", 0.9 * weight, "search",
-                        timestamp=datetime.now(timezone.utc).isoformat()),
-                ]
-
-        ch = SearchChannel()
-        ch._state = ChannelState.ACTIVE
-        reg.register(ch)
-
-        # 2. 权重配置
-        wa = WeightAdjuster()
-        weights = wa.get_weights()
-
-        # 3. 检索
-        results = await ch.retrieve("test query", limit=5, weight=0.8)
-        assert len(results) == 1
-
-        # 4. 结果处理
-        proc = UnifiedResultProcessor(
-            temporal_decay=TemporalDecay(curve="exponential")
-        )
-        output = proc.process(results, weights)
-
-        # 5. 验证输出
-        assert output.total_count == 1
-        assert output.deduped_count == 1
-        assert len(output.results) == 1
-        assert output.results[0].score > 0
-        assert output.results[0].memory_id == "s1"
-
-        # 6. 反馈调整
-        wa.adjust("search", positive=True)
-        new_weights = wa.get_weights()
-        assert sum(new_weights.values()) == pytest.approx(1.0, abs=0.05)
