@@ -1233,7 +1233,12 @@ class NeurovaRecallEngine:
             # 构建关键词索引
             memory_dicts = [m.to_dict() if hasattr(m, 'to_dict') else m for m in all_memories]
             if not search._keyword_index:
-                search.build_keyword_index(memory_dicts)
+                # 全量重建必须带联想线索图（TM-2a）：不带就是「增量认线索、全量丢线索」
+                # 的第二条陈旧路径。取不到（非本仓 manager 形态）时退空图，不改排序口径。
+                search.build_keyword_index(
+                    memory_dicts,
+                    getattr(self.memory_manager, "associationCueTexts", lambda: {})(),
+                )
             
             # 搜索
             matching_ids = search.search_by_keywords(query, limit=limit)

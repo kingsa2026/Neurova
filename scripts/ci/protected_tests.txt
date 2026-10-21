@@ -112,6 +112,10 @@ tests/performance/test_perf_gate_contract.py
 # `xfail(strict=True)` 目标值**（今天够不到，语义＝「将来要绿」）——TM-2/TM-3 一旦把它做到，
 # 这里会以 XPASS 变红，那是**要求摘标记并回写台账**的信号，不是子集坏掉。
 tests/performance/memory/test_associativeRecallGate.py
+# §6-381 续（TM-2a 批 A）：规则联想线索的写侧/索引侧/作用域门/渲染面沉默四条。
+# 该文件另含一条 `xfail(strict=True)`（规则线索抬不动情境型零词面查询，归批 C 转正）——
+# 达成时以 XPASS 变红，是要求摘标记的信号，不是子集坏掉。
+tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py
 # §6-96：上一行的烧 CPU 自旋格必须按**实测线程时钟粒度**整格跳过（不得按平台名、
 # 不得改成永久 skip），否则本机整场子集被超时打断、而 CI 侧覆盖被静默作废。
 tests/unit/ci/test_subQuantumSpinClockGate.py
