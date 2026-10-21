@@ -404,6 +404,10 @@ class MemoryStorage:
             rec = self._records.get(memory_id)
             return rec.to_dict() if rec else None
 
+    def exists(self, memory_id: str) -> bool:
+        with self._lock:
+            return memory_id in self._records
+
     def delete(self, memory_id: str) -> bool:
         with self._lock:
             rec = self._records.pop(memory_id, None)

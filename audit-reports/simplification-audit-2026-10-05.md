@@ -9203,3 +9203,29 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **净 LOC**：生产池 +1304/−1；测试/基建池 +1294/−156。
     - **仍开**：四旋钮／A1／A2 与第二环 8 档的重做；等裁七条＋`permissions` 声明＋Z1–Z4/Z6。
     - **本会话下一枚空号现查 §6-374**（写前必须现场重取；本笔落库时该读数为 373）。
+
+374. **重做第 1 组：`channels/conflict.py` 与 `memory_record_store` 按「取长补短后退役」落地** ✅🟢 —— 一笔：两个同功能重复实装
+    - **`channels/conflict.py`（100 行）**：先在对比里抓出旧检测器唯一强于单源的部分——英文整句的
+      词级否定差异（`not` 在空白切分后与命题对不上，单源的子句循环漏判）；把这条并进
+      `judgeClauseConflict` 的 `_englishNegationConflict`（要求去否定词后仍有足够共享实词），
+      再把 `channels/processor.py` 的冲突段改调单源（薄适配器 `ChannelConflictDetector` 只做取数与 DTO），
+      最后退役 `channels/conflict.py` 与渠道冲突专用测试格。
+    - **`memory_record_store.py`（196 行）**：逐方法比对后，唯一没被 `MemoryStorage` 覆盖的是 `exists`；
+      把 `exists` 并入 `MemoryStorage`（带测试），CRUD/批量由 storage/manager 承担，随后退役门面
+      与其专用测试 `test_memory_record_store_v2.py`。
+    - **红→绿**：processor 中文否定格在旧渠道检测器下 **0 冲突**（红）→ 接单源后绿；`MemoryStorage.exists`
+      先 `AttributeError` → 并入后绿；渠道闭环英文否定格在接单源后红 → 补英文词级分支后绿。
+      `test_result_processing` / `test_memory_record_store` / 安全网 / data-flow 专用格同批更新。
+    - **宽域 A/B**：`AB_PASS`｜基线 9 failed+1 error（1319 passed）↔ 本树 5 failed（1320 passed）｜
+      仅本树红 0。仅基线红 5：本批 4 条新判据（中文否定、两档退役、`exists`）＋
+      `test_decay_cycle_bounded::test_no_max_processes_all`（基线单跑也时红的顺序/环境格，本树绿，不认领）。
+      本树 5 条为 HEAD 既有（4 条 Manager/moe＋1 条 data-flow）。
+    - **活体**：真 app `/health` 200；`UnifiedResultProcessor` 中文/英文否定各检出 1 条；
+      `MemoryStorage.exists` 真/假分别为 true/false；真 `MemoryManager` recall 命中 PostgreSQL；
+      两个退役模块导入均抛 `ModuleNotFoundError`；仓内 `data/` 指纹前后同。
+    - **文档**：组件表 **104→102 模块／44926→44696 行**（在役 55／仅层内 37／仅测试 5／零读者 5）；
+      检索脊柱 §5 与 D19 A3 加注；悬空引用台账重生成。**子集 654 不变**。
+    - **净 LOC**：生产池 +68/−301；测试/基建池 +100/−297。
+    - **仍开**：第 2 组三份并入施工单（`vector_search`／`vector_index_manager`／`memory_index`）；
+      四旋钮其余、A1/A2、security/temporal_reasoner/agent_self/memory_stream 等重做。
+    - **本会话下一枚空号现查 §6-375**（写前必须现场重取；本笔落库时该读数为 374）。
