@@ -68,3 +68,9 @@ def test_activeDocsNoLongerClaimTheAdapter():
     assert not offenders, (
         f"活跃层文档仍在指向已退役的适配器：{offenders}——改成 EmotionAnalyzer 的落点，"
         "历史引用留在 04-plans／11-legacy")
+
+
+def test_scanFaceIsNotVacuous():
+    """面自证：退役判据的扫描面要能看到整个认知层（根被改窄会变成"零命中"）。"""
+    files = ast_scan.filesUnder(REPO_ROOT / "neurova" / "cognitive_layers")
+    assert len(files) > 50, f"扫描面只看到 {len(files)} 个文件，判据的根可能被改窄了"

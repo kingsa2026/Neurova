@@ -63,16 +63,6 @@ except ImportError as _e:
     _mem_layer_logger.debug("reasoning_trace_manager 未可用: %s", _e)
 
 try:
-    from .causal_reasoning import CausalReasoningEngine, get_causal_reasoning_engine
-except ImportError as _e:
-    _mem_layer_logger.debug("causal_reasoning 未可用: %s", _e)
-
-try:
-    from .question_decomposer import QuestionDecomposer, QuestionType, get_question_decomposer
-except ImportError as _e:
-    _mem_layer_logger.debug("question_decomposer 未可用: %s", _e)
-
-try:
     from .neurova_recall import IntentAwareRecallStrategy, QueryIntent, QueryIntentDetector
 except ImportError as _e:
     _mem_layer_logger.debug("neurova_recall intent classes 未可用: %s", _e)
@@ -124,12 +114,6 @@ __all__ = [
     "ReasoningTraceManager",
     "ReasoningStep",
     "ReasoningTrace",
-    # 图能力增强模块
-    "CausalReasoningEngine",
-    "get_causal_reasoning_engine",
-    "QuestionDecomposer",
-    "QuestionType",
-    "get_question_decomposer",
     # 意图感知检索模块
     "QueryIntent",
     "QueryIntentDetector",

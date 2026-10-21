@@ -232,7 +232,8 @@ RETIRED_DEAD_MODULES = {
         "零消费者。检索唯一入口是 neurova_recall.NeurovaRecallEngine。",
     "neurova/cognitive_layers/memory_layer/unified_reasoning_engine.py":
         "零生产消费者（仅 ad-hoc 脚本与自身单测）。推理入口在"
-        "cognitive_layers 的 causal_reasoning / temporal_reasoner。",
+        "neurova_recall 的意图通道加权与 temporal_reasoner；"
+        "causal_reasoning 已于 §6-371 退役。",
     "neurova/cognitive_layers/memory_layer/proactive_recall.py":
         "零生产消费者。主动行为入口是 proactive_question.py。",
     "neurova/cognitive_layers/memory_layer/deletion_state_manager.py":

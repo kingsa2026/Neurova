@@ -2,8 +2,6 @@
 图能力增强测试套件
 
 测试任务1.1：扩展关系类型
-测试任务1.2：因果推理引擎
-测试任务1.3：问题分解器
 测试任务1.4：增强图遍历算法
 """
 
@@ -134,127 +132,6 @@ class TestRelationTypesExtended:
         
         relations = graph.get_relations("word_1")
         assert len(relations) == 1
-
-
-class TestCausalReasoningEngine:
-    """测试任务1.2：因果推理引擎"""
-
-    @pytest.fixture
-    def causal_engine(self):
-        """创建因果推理引擎实例"""
-        from neurova.cognitive_layers.memory_layer.causal_reasoning import CausalReasoningEngine
-        
-        graph = GraphTraversal()
-        
-        # 创建测试记忆和因果关系
-        # A -> B -> C (因果链)
-        graph.add_relation(MemoryRelation("A", "B", "causes", 0.9))
-        graph.add_relation(MemoryRelation("B", "C", "causes", 0.8))
-        
-        # A -> D -> C (另一条因果链)
-        graph.add_relation(MemoryRelation("A", "D", "enables", 0.7))
-        graph.add_relation(MemoryRelation("D", "C", "causes", 0.6))
-        
-        # X -> Y (独立因果链)
-        graph.add_relation(MemoryRelation("X", "Y", "causes", 0.5))
-        
-        return CausalReasoningEngine(graph)
-
-    def test_find_causal_chain(self, causal_engine):
-        """测试查找因果链"""
-        chains = causal_engine.find_causal_chain("A", "C")
-        
-        # 应该找到两条链：A->B->C 和 A->D->C
-        assert len(chains) >= 2
-        
-        # 验证链的正确性
-        chain_nodes = [set(chain) for chain in chains]
-        assert {"A", "B", "C"} in chain_nodes
-        assert {"A", "D", "C"} in chain_nodes
-
-    def test_predict_effects(self, causal_engine):
-        """测试预测原因的可能结果"""
-        effects = causal_engine.predict_effects("A")
-        
-        # A 应该能预测到 B, C, D, Y
-        effect_ids = [effect_id for effect_id, _ in effects]
-        assert "B" in effect_ids
-        assert "C" in effect_ids
-        assert "D" in effect_ids
-
-    def test_find_root_causes(self, causal_engine):
-        """测试找到结果的根本原因"""
-        root_causes = causal_engine.find_root_causes("C")
-        
-        # C 的根本原因应该是 A
-        cause_ids = [cause_id for cause_id, _ in root_causes]
-        assert "A" in cause_ids
-
-    def test_explain_causality(self, causal_engine):
-        """测试生成因果关系的自然语言解释"""
-        explanation = causal_engine.explain_causality("A", "C")
-        
-        # 验证解释包含关键信息
-        assert "A" in explanation
-        assert "C" in explanation
-        assert "causes" in explanation.lower() or "导致" in explanation
-
-
-class TestQuestionDecomposer:
-    """测试任务1.3：问题分解器"""
-
-    @pytest.fixture
-    def decomposer(self):
-        """创建问题分解器实例"""
-        from neurova.cognitive_layers.memory_layer.question_decomposer import QuestionDecomposer
-        
-        # 创建模拟的LLM客户端
-        mock_llm = MagicMock()
-        mock_llm.generate = AsyncMock(return_value="模拟的LLM响应")
-        
-        return QuestionDecomposer(mock_llm)
-
-    def test_decompose_complex_question(self, decomposer):
-        """测试分解复杂问题"""
-        question = "为什么用户流失率上升，如何解决？"
-        sub_questions = decomposer.decompose(question)
-        
-        # 应该分解为至少2个子问题
-        assert len(sub_questions) >= 2
-        
-        # 验证子问题包含原问题的关键元素
-        all_text = " ".join(sub_questions).lower()
-        assert "用户流失" in all_text or "流失率" in all_text
-        assert "解决" in all_text or "如何" in all_text
-
-    def test_detect_question_type(self, decomposer):
-        """测试检测问题类型"""
-        from neurova.cognitive_layers.memory_layer.question_decomposer import QuestionType
-        
-        # 测试因果问题
-        causal_type = decomposer.detect_question_type("为什么天空是蓝色的？")
-        assert causal_type in [QuestionType.CAUSAL, QuestionType.UNKNOWN]
-        
-        # 测试比较问题
-        compare_type = decomposer.detect_question_type("Python 和 Java 哪个更好？")
-        assert compare_type in [QuestionType.COMPARATIVE, QuestionType.UNKNOWN]
-        
-        # 测试探索问题
-        explore_type = decomposer.detect_question_type("告诉我关于机器学习的知识")
-        assert explore_type in [QuestionType.EXPLORATORY, QuestionType.UNKNOWN]
-
-    def test_plan_retrieval_strategy(self, decomposer):
-        """测试为子问题规划检索策略"""
-        sub_questions = [
-            "用户流失的主要原因是什么？",
-            "有哪些方法可以降低流失率？"
-        ]
-        
-        strategy = decomposer.plan_retrieval_strategy(sub_questions)
-        
-        # 验证策略包含必要的信息
-        assert "strategies" in strategy or "plan" in strategy
-        assert len(strategy.get("strategies", strategy.get("plan", []))) >= 2
 
 
 class TestEnhancedGraphTraversal:

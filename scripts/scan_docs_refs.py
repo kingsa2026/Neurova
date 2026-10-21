@@ -405,7 +405,8 @@ CODE_REFERENCE_RULINGS = {
     ("docs/11-legacy/源码图谱.md", "1588"):
         ("", "知识层节点列举的 `neurova/knowledge/integration/` 全史未入库"),
     ("docs/11-legacy/源码图谱.md", "1598"):
-        ("tests/integration/test_closed_loop.py", "33-测试层节点指端到端闭环测试"),
+        ("tests/test_memory/test_closed_loop.py",
+         "33-测试层节点指端到端闭环测试（integration 副本随 §6-371 退役，改指仍存的 test_memory 副本）"),
 }
 
 RULING_SETTLED = "已裁定"
