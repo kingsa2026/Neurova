@@ -2822,6 +2822,21 @@
       （`06-plugin-cli-system.md` §3.1 后补落盘边界一节）。
     - **仍留在案上**：P4 插件前端与覆盖层编辑 UI 未起——这条状态面今天只有 HTTP 读者；P3 未做正是
       `loaded` 不落盘的因；`AuditLogger` 默认落点仍在数据根之外（§6-155 ②，另一刀）。
+    - **就地更正（2026-10-21，按 §6-176／§6-177／§6-188 的落地实态）**：本格上文两处写的
+      「P3（来源白名单＋构件完整性校验）**未做**」已过期。`neurova/security/artifact_digest.py`
+      已落且**两条通道共用一处口径**（§6-176：技能侧钉进 `manifest.json`、插件侧钉进
+      `state.json` 的 `artifactDigest`，装载前重算对账、不符拒成 409——现读
+      `plugin_manager.py:417` 钉、`:518-536` 验）；市场那条第二套解压已收进
+      `security/safe_archive` 咽喉（§6-177）；SkillsMP 那格 `return True` 的空装也改成如实拒
+      （§6-188）。**但 `loaded` 不落盘这条结论一寸没松，只是依据换了形状**：摘要只证
+      「取回来的那份＝跑起来的那份」，**不证来源**——账本与被保护构件同根同权限，
+      §6-176 自己就把这条边界写在模块头（能整体改写磁盘的人也能改写摘要）；而插件的远程
+      取回至今 `remote_source` 响亮 501（市场侧的域名白名单在 `market_sources.py:220-237`，
+      插件侧没有对应物）。所以要开自动装载缺的是**根外信任锚**，不是再多算一次哈希。
+      四处旧表述已按此改写并随本笔提交：`plugin_manager.py:196-201/270`、
+      `plugin_route_mount.py` 的 `startupMountPass` docstring、
+      `docs/01-architecture/06-plugin-cli-system.md` §8.3 第 1 条、
+      `tests/manual/pluginStateRestart_batch16b.py` 头部。
 
 165. **裁定「退役 shim，旧集成档另批分流」落地：`neurova/skill/` 整包删除，那条 import 改指生产在用的单点（✅ `3158a9e3`，8 格新判据入子集，生产池净 −45）**
     - **复算三读数（落笔前重取，不抄 §6-162 那句结论）**：① 生产消费者 **0 处**（`neurova/` 里按这个
