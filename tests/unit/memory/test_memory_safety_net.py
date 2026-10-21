@@ -34,26 +34,17 @@ class TestMemorySystemSafetyNet:
         from neurova.cognitive_layers.memory_layer import UnifiedVectorStore
         assert UnifiedVectorStore is not None
 
-    def test_vector_search_importable(self):
-        """测试 vector_search 可导入（兼容层使用）"""
-        from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
-        assert VectorSearch is not None
-
     # ═══ 兼容层导出 ═══
 
     def test_memory_compat_layer_exports(self):
         """测试 neurova.memory 兼容层导出正常"""
-        from neurova.memory import (
-            UnifiedVectorStore,
-            VectorSearch,
-        )
+        from neurova.memory import UnifiedVectorStore
         assert UnifiedVectorStore is not None
-        assert VectorSearch is not None
 
     def test_memory_compat_layer_exportsAreBound(self):
         """测试兼容层导出的名字确实绑在模块上"""
         import neurova.memory as memory_mod
-        for attr_name in ["UnifiedVectorStore", "VectorSearch"]:
+        for attr_name in ["UnifiedVectorStore"]:
             attr = getattr(memory_mod, attr_name, "MISSING")
             assert attr != "MISSING", f"{attr_name} 应该存在"
 

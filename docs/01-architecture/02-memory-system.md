@@ -191,15 +191,15 @@ class IsolationContext:
 | `EmotionChannel` | `channels/builtin/emotion.py` | 情感匹配 |
 | `VoiceChannel` | `channels/builtin/voice.py` | 语音记忆 |
 
-向量后端另有 `vector_search.py`（`VectorSearch`）与 `unified_vector_store.py`
-（`UnifiedVectorStore`，含质心初始化），不经通道注册表。
+向量后端是 `unified_vector_store.py`（`UnifiedVectorStore`，ONNX/TF-IDF 双后端、含质心初始化），
+不经通道注册表。原 `vector_search.py` 的 TF-IDF 持久化实现已按 §6-376 显式放弃并退役。
 
 ### 5.2 向量搜索后端
 
 ```python
-# 自动选择最佳后端
-search = create_vector_search(mode="auto")
-# 可选: TF-IDFBackend, FaissBackend, ChromaDBBackend
+from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
+
+store = UnifiedVectorStore(backend="auto")  # onnx / tfidf / hash
 ```
 
 ### 5.3 检索流程
@@ -297,7 +297,6 @@ result = sleep_consolidation.dream_replay()
 | `cognitive_layers/memory_layer/isolation.py` | 三层隔离上下文 |
 | `cognitive_layers/memory_layer/muscle_memory.py` | 肌肉记忆 (工具模式) |
 | `cognitive_layers/memory_layer/cognitive_storage_engine.py` | LSM-Tree 存储引擎 |
-| `cognitive_layers/memory_layer/vector_search.py` | 向量检索后端（`VectorSearch`） |
 | `cognitive_layers/memory_layer/unified_vector_store.py` | 统一向量库（索引与质心初始化） |
 | `cognitive_layers/memory_layer/channels/` | 检索通道插件与注册表 |
 | `cognitive_layers/memory_layer/temporal_knowledge_graph.py` | 时序知识图谱 |

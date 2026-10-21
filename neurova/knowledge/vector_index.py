@@ -1,5 +1,5 @@
 """
-知识库持久化向量索引（遗留修复 ②：向量索引无持久化 / VectorIndexManager 闲置）
+知识库持久化向量索引（遗留修复 ②：向量索引无持久化；原异步 VectorIndexManager 已按 §6-376 显式放弃）
 
 设计：
 - 每用户一个索引文件（knowledge_vectors_{user_id}.json）：可见性由文件边界保证，
