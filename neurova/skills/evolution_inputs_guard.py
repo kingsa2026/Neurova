@@ -21,7 +21,7 @@ _EVOLUTION_INPUT_BUDGET = 2000  # 单字段字符预算
 
 _KV_RE = re.compile(
     r"(?i)(api[_\- ]?key|token|authorization|cookie|secret|password|credential|access[_\- ]?key)"
-    r"(\s*[:=]\s*)([\"']?)([^\s\"',;]{6,})"
+    r"([\"']?\s*[:=]\s*)([\"']?)([^\s\"',;]{6,})"
 )
 _BEARER_RE = re.compile(r"(?i)(bearer\s+)([A-Za-z0-9._\-]{10,})")
 _OPENAI_RE = re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}")

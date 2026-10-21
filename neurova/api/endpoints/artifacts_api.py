@@ -360,6 +360,47 @@ def _iter_candidate_paths(result_text: str) -> List[str]:
     return paths
 
 
+def artifact_refs_from_result(
+    tool_name: str,
+    result_text: str,
+    *,
+    max_refs: int = 8,
+    max_bytes: int = 5_000_000,
+) -> List[Dict[str, Any]]:
+    """只读提取产物引用（不注册、不写库），供进化证据的 tool_trace 使用。"""
+    import json as _json
+
+    if not result_text or not isinstance(result_text, str):
+        return []
+    if tool_name == "file_operation":
+        try:
+            parsed = _json.loads(result_text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict) and "content" in parsed:
+            return []
+    refs: List[Dict[str, Any]] = []
+    for cand in _iter_candidate_paths(result_text):
+        try:
+            resolved = _resolve_if_allowed(Path(cand))
+            stat = resolved.stat()
+        except (ValueError, OSError):
+            continue
+        if not resolved.is_file() or stat.st_size > max_bytes:
+            continue
+        refs.append(
+            {
+                "path": str(resolved),
+                "name": resolved.name,
+                "kind": _artifact_kind(resolved.name),
+                "size": stat.st_size,
+            }
+        )
+        if len(refs) >= max_refs:
+            break
+    return refs
+
+
 def extract_tool_artifacts(tool_name: str, result_text: str, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
     """带工具名判读的产物提取（SSE 出口统一入口）。
 

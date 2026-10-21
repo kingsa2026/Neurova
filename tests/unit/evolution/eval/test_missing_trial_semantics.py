@@ -116,7 +116,8 @@ class TestMissingTrialSemantics:
             async def score(self, **kw):
                 raise RuntimeError("judge infra down")
 
-        runner = SkillEvolutionRunner(EvolutionConfig(), judge=_BrokenJudge(),
+        runner = SkillEvolutionRunner(EvolutionConfig(judge_fallback="off"),
+                                      judge=_BrokenJudge(),
                                       mutate=_mutate_appends_improved)
         result = await runner.run(baseline_text=BASELINE, artifact_type="skill",
                                   dataset=_ds(), iterations=1)

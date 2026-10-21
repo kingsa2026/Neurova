@@ -18,9 +18,57 @@ handler 末段本就有 `if not self.tool_memory: return` 自行分流，外层�
 """
 
 from neurova.core.logger import get_logger
+from neurova.evolution.skill_evidence import recordExecutionEvidence, summarizeSkillIO
 from neurova.skill_system import SkillEvent
 
 logger = get_logger(__name__)
+
+
+def recordSkillUsage(agent, skill, result, **kwargs) -> None:
+    """把一次技能执行写入进化侧的三本账（失败不影响主流程）。"""
+    try:
+        from neurova.evolution.skill_experience import get_skill_experience_store
+        from neurova.evolution.skill_improver import get_skill_improver
+        from neurova.skills.library_service import agentLibrary
+        from neurova.skills.skill_contract import resolve_skill_identity
+
+        skill_id = resolve_skill_identity(skill)
+        if not skill_id:
+            return
+        agent_id = agent.config.agent_id
+        evidence = recordExecutionEvidence(
+            agent_id,
+            skill_id,
+            user_input=getattr(agent, "_current_user_input", "") or "",
+            params=kwargs.get("params"),
+            result=result,
+            context=kwargs.get("context"),
+            trace=kwargs.get("trace"),
+        )
+        metadata = {
+            "agent_id": agent_id,
+            "evidence_kind": evidence["evidence_kind"],
+            "tool_trace_count": evidence.get("tool_trace_count", 0),
+        }
+        if evidence.get("evidence_ref"):
+            metadata["evidence_ref"] = evidence["evidence_ref"]
+        get_skill_improver().record_usage(
+            skill_id=skill_id,
+            success=bool(result and result.success),
+            duration=float(getattr(result, "execution_time", 0.0) or 0.0),
+            error_message=str(getattr(result, "error", "") or ""),
+            input_summary=evidence["input_summary"],
+            output_summary=evidence["output_summary"],
+            metadata=metadata,
+        )
+        agentLibrary(agent_id).record_skill_usage(
+            skill_id, success=bool(result and result.success)
+        )
+        get_skill_experience_store().record_usage(
+            skill_id, success=bool(result and result.success)
+        )
+    except Exception as e:  # noqa: BLE001 - 记账失败不阻断技能执行
+        logger.debug("技能使用记录失败: %s", e)
 
 
 def wire_skill_evolution_recording(agent) -> bool:

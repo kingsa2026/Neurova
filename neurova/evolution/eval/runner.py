@@ -70,6 +70,9 @@ class EvolutionRunResult:
     constraint_failures: list[str] = field(default_factory=list)
     # P0：判分可用性（judge 全线失败/输出不可解析 → 任何"增益"都不可信）
     judge_available: bool = True
+    # judge 不可用时的回退判据（空串 = 未启用）。回退运行只产人工复核提案。
+    judge_fallback: str = ""
+    judge_fallback_reason: str = ""
     # benchmark 门本轮是否真的咬合（False 且 reason 非空 = 中性放行）。
     # 没有这两个字段时，bench_gain=0.0 在"真咬合且零增益"与"门没量出来"
     # 两种情形下对外完全同形——门内的诚实标注必须外露到结果面。
@@ -89,6 +92,13 @@ class EvolutionRunResult:
     cost_change: float = 0.0
     # P1-7a 多变体：本轮配置与实际被评测的候选总数（审计面）。
     variants_per_round: int = 1
+    # N7：近平分盲选 tie-break 的读数（not_applicable / unavailable / measured）。
+    blind_tiebreak: dict = field(default_factory=dict)
+    # N4 结构恒等式：生成（去重后）− 预检拒绝 = 实际评测。三个数必须对得上，
+    # 否则就是"账上有的候选、磁盘上没发生过"。
+    candidates_generated: int = 0
+    candidates_rejected_pre_eval: int = 0
+    duplicates_skipped: int = 0
     candidates_evaluated: int = 0
     # P2-9 missing 记 0：本轮单用例评测异常数（0 分占满分母，运行不中断）。
     # 与 judge_unavailable（判分基础设施不可用）诚实分开。
@@ -105,6 +115,8 @@ class EvolutionRunResult:
     caseRegressions: list[str] = field(default_factory=list)
     unevidencedCases: list[str] = field(default_factory=list)
     caseAllowance: int = 0
+    # N5：本轮实验身份（技能正文+模型+数据集+seed+判据配置）。缓存/续跑只认它。
+    experiment_fingerprint: str = ""
     # ── 臂来源与真臂花费（P1-C 线）──
     # 「这批分数是谁跑出来的」必须是结果的一部分：环节证据为空时，要能分得开
     # "压根没跑环"（模拟臂）与"跑环没卡"（真臂），否则读数会被读成两种不同的事实。
@@ -126,6 +138,23 @@ class EvolutionRunResult:
     @property
     def changed(self) -> bool:
         return self.deployed_text != self.baseline_text
+
+    def assertCandidateIdentity(self) -> None:
+        """候选账实恒等式：生成 − 预检拒绝 = 评估，且评估 = 轮次。"""
+        expected = self.candidates_generated - self.candidates_rejected_pre_eval
+        if expected != self.candidates_evaluated:
+            raise AssertionError(
+                "候选账实不符："
+                f"generated={self.candidates_generated}, "
+                f"rejected_pre_eval={self.candidates_rejected_pre_eval}, "
+                f"expected_evaluated={expected}, actual_evaluated={self.candidates_evaluated}"
+            )
+        if self.iterations_run != self.candidates_evaluated:
+            raise AssertionError(
+                "轮次账实不符："
+                f"iterations_run={self.iterations_run}, "
+                f"candidates_evaluated={self.candidates_evaluated}"
+            )
 
     def caseGateReadout(self) -> dict:
         """例级不退化门的读数格（唯一构造点：审计面与提案面都取这里）。
@@ -152,6 +181,7 @@ class EvolutionRunResult:
             "train_before": round(self.train_before, 4),
             "train_best": round(self.train_best, 4),
             "iterations_run": self.iterations_run,
+            "experiment_fingerprint": self.experiment_fingerprint,
             "bench_gain": round(self.bench_gain, 4),
             "bench_neutral": self.bench_neutral,
             "bench_neutral_reason": self.bench_neutral_reason,
@@ -164,6 +194,10 @@ class EvolutionRunResult:
             "cost_candidate": self.cost_candidate,
             "cost_change": round(self.cost_change, 4),
             "variants_per_round": self.variants_per_round,
+            "blind_tiebreak": dict(self.blind_tiebreak),
+            "candidates_generated": self.candidates_generated,
+            "candidates_rejected_pre_eval": self.candidates_rejected_pre_eval,
+            "duplicates_skipped": self.duplicates_skipped,
             "candidates_evaluated": self.candidates_evaluated,
             "eval_errors": self.eval_errors,
             "anchor_best": round(self.anchor_best, 6),
@@ -171,6 +205,8 @@ class EvolutionRunResult:
             "anchor_floor": round(self.anchor_floor, 6),
             "anchor_evaluated": self.anchor_evaluated,
             "judge_available": self.judge_available,
+            "judge_fallback": self.judge_fallback,
+            "judge_fallback_reason": self.judge_fallback_reason,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
             "executor_kind": self.executorKind,
@@ -250,14 +286,21 @@ class SkillEvolutionRunner:
 
     async def _mutate(self, artifact_text: str, artifact_type: str,
                       failures: list[JudgeFailure],
-                      history: Optional[list[dict]] = None) -> str:
+                      history: Optional[list[dict]] = None,
+                      domain_harnesses: Optional[list[dict]] = None) -> str:
         if self._mutate_fn is not None:
-            # 旧签名注入的 mutate（不收 history）不传新 kwarg——装配契约不漂移
+            # 旧签名注入的 mutate 不传新 kwarg——装配契约不漂移
             kwargs: dict[str, Any] = {}
             if history:
                 try:
                     if "history" in inspect.signature(self._mutate_fn).parameters:
                         kwargs["history"] = history
+                except (TypeError, ValueError):
+                    pass
+            if domain_harnesses:
+                try:
+                    if "domain_harnesses" in inspect.signature(self._mutate_fn).parameters:
+                        kwargs["domain_harnesses"] = domain_harnesses
                 except (TypeError, ValueError):
                     pass
             return await self._mutate_fn(
@@ -268,7 +311,7 @@ class SkillEvolutionRunner:
 
         return await ReflectiveMutator(self.config).mutate(
             artifact_text=artifact_text, artifact_type=artifact_type, failures=failures,
-            history=history,
+            history=history, domain_harnesses=domain_harnesses,
         )
 
     def _ledger_append(self, ledger_key: str, artifact_type: str,
@@ -298,6 +341,7 @@ class SkillEvolutionRunner:
                 "accepted": accepted,
                 "reject_reason": reject_reason,
                 "constraint_failures": list(constraint_failures or []),
+                "experiment_fingerprint": getattr(self, "_experimentFingerprint", ""),
             })
         except OSError as e:
             logger.debug("编辑历史台账写入失败: %s", e)
@@ -421,7 +465,8 @@ class SkillEvolutionRunner:
         self, *, best_text: str, best_score: float, baseline_text: str,
         dataset: EvalDataset, tune: list[EvalExample], artifact_type: str,
         ledger_key: str, leak_markers: Optional[frozenset], result: EvolutionRunResult,
-        base_scores: Optional[dict] = None,
+        base_scores: Optional[dict] = None, extra_failures: Optional[list] = None,
+        domain_harnesses: Optional[list[dict]] = None,
     ) -> Optional[tuple[str, float, Optional[int]]]:
         """P1-7a：一轮多变体并行搜索。
 
@@ -432,28 +477,41 @@ class SkillEvolutionRunner:
         """
         m = result.variants_per_round
         failures_all = await self._collect_failures_sorted(best_text, dataset.val or tune, artifact_type)
+        # 失败全量证据每条变体都看到（历史失败不能被分片切掉）
+        extra = list(extra_failures or [])
+        failures_all = extra + failures_all
         # 轮转分片：严重度打散到各候选；空分片回退全量（无失败时的清晰化变异）
         shards = [failures_all[v::m] if failures_all[v::m] else failures_all
                   for v in range(m)]
+        if extra:
+            shards = [extra + shard for shard in shards]
 
         history = None
         if self._ledger is not None and ledger_key:
             history = self._ledger.recent(ledger_key)
         mutated = await asyncio.gather(*[
-            self._mutate(best_text, artifact_type, shard, history=history)
+            self._mutate(
+                best_text, artifact_type, shard,
+                history=history, domain_harnesses=domain_harnesses,
+            )
             for shard in shards
         ])
 
         survivors: list[tuple[str, list[JudgeFailure]]] = []
         seen = {best_text}
         for shard, cand in zip(shards, mutated):
-            if not cand or cand in seen:
+            if not cand:
+                continue
+            if cand in seen:
+                result.duplicates_skipped += 1
                 continue
             seen.add(cand)
+            result.candidates_generated += 1
             if self._constraints is not None:
                 checks = self._constraints.validate(cand, artifact_type, baseline_text=baseline_text)
                 failed = [c.name for c in checks if not c.passed]
                 if failed:
+                    result.candidates_rejected_pre_eval += 1
                     result.constraint_failures.extend(failed)
                     logger.debug("多变体候选被约束闸拒绝: %s", failed)
                     self._ledger_append(ledger_key, artifact_type, shard,
@@ -465,6 +523,7 @@ class SkillEvolutionRunner:
                 verdict = await self._leak_critic.review(
                     candidate_text=cand, baseline_text=baseline_text, markers=leak_markers)
                 if verdict.leaked:
+                    result.candidates_rejected_pre_eval += 1
                     result.constraint_failures.append(f"leak:{verdict.category}")
                     self._ledger_append(ledger_key, artifact_type, shard,
                                         accepted=False,
@@ -486,6 +545,35 @@ class SkillEvolutionRunner:
             for ((cand, shard), (avg, details)) in zip(survivors, evaluated)
         ]
 
+        # N7：top 两候选近平分时，匿名比例只读产物，优先于先到 argmax。
+        blind_tiebreak: dict = {"state": "not_applicable"}
+        blind_winner_idx: Optional[int] = None
+        if getattr(self.config, "blind_tiebreak_enabled", True) and len(survivors_scores) >= 2:
+            ranked = sorted(
+                enumerate(survivors_scores), key=lambda item: item[1][1], reverse=True
+            )
+            first_idx, (_first_key, first_score, first_details) = ranked[0]
+            second_idx, (_second_key, second_score, second_details) = ranked[1]
+            band = max(float(self.config.min_improvement), 0.02)
+            if abs(first_score - second_score) <= band:
+                from neurova.evolution.eval.blind_selection import blind_ab
+
+                blind_tiebreak = await blind_ab(
+                    judge=self.judge,
+                    examples=[row[0] for row in first_details],
+                    baseline_outputs=[row[2] for row in first_details],
+                    candidate_outputs=[row[2] for row in second_details],
+                    seed=int(getattr(self.config, "seed", 42) or 42),
+                )
+                blind_tiebreak["near_tie_band"] = round(band, 6)
+                preferred = blind_tiebreak.get("preferred")
+                if blind_tiebreak.get("state") == "measured":
+                    if preferred == "candidate":
+                        blind_winner_idx = second_idx
+                    elif preferred == "baseline":
+                        blind_winner_idx = first_idx
+        result.blind_tiebreak = blind_tiebreak
+
         # 先定 argmax 胜者（严格大于才替换——平分保持先到，确定性），
         # 再逐候选入账：只有最终胜者记 accepted=True（超越本轮基线才算）
         winner_idx: Optional[int] = None
@@ -494,6 +582,8 @@ class SkillEvolutionRunner:
             if score > best_score + _EPS and (
                     winner_idx is None or score > survivors_scores[winner_idx][1] + _EPS):
                 winner_idx = idx
+        if blind_winner_idx is not None and survivors_scores[blind_winner_idx][1] > best_score + _EPS:
+            winner_idx = blind_winner_idx
         winner: Optional[tuple[str, float, Optional[int]]] = None
         for idx, ((cand, shard), score, cand_details) in enumerate(survivors_scores):
             is_winner = winner_idx == idx
@@ -529,9 +619,13 @@ class SkillEvolutionRunner:
         noise_band: Optional[NoiseBand] = None,
         ledger_key: str = "",
         anchor_best: Optional[float] = None,
+        extra_failures: Optional[list] = None,
+        experiment_fingerprint: str = "",
+        domain_harnesses: Optional[list[dict]] = None,
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
         self._run_eval_errors = 0  # P2-9：本轮清零（探针路径有独立语义，不计入）
+        self._experimentFingerprint = str(experiment_fingerprint or "")
 
         if not dataset or not dataset.all_examples:
             result.rejected = True
@@ -556,12 +650,23 @@ class SkillEvolutionRunner:
         result.noise_band = band.to_dict() if band is not None else {}
 
         # P0 判分可用性前置：judge 全线不可用时，"before/after 都是中性 0.5"
-        # 曾被当成"零增益通过"。先探针，不可用直接判 judge_unavailable。
+        # 曾被当成"零增益通过"。先探针；不可用时按判分回退档处理。
         if not await self._judge_available(baseline_text, holdout, artifact_type):
             result.judge_available = False
-            result.rejected = True
-            result.reject_reason = "judge_unavailable"
-            return result
+            fallback = str(getattr(self.config, "judge_fallback", "") or "").strip().lower()
+            if fallback == "deterministic":
+                from neurova.evolution.eval.deterministic_judge import DeterministicJudge
+
+                self.judge = DeterministicJudge(self.config)
+                result.judge_fallback = "deterministic"
+                result.judge_fallback_reason = "judge_unavailable"
+                logger.warning(
+                    "judge 不可用，改用确定性可用性回退门；本轮提案只能人工复核"
+                )
+            else:
+                result.rejected = True
+                result.reject_reason = "judge_unavailable"
+                return result
 
         holdoutBeforeAvg, holdoutBeforeDetails = await self._evaluate(
             baseline_text, holdout, artifact_type)
@@ -591,25 +696,33 @@ class SkillEvolutionRunner:
                     baseline_text=baseline_text, dataset=dataset, tune=tune,
                     artifact_type=artifact_type, ledger_key=ledger_key,
                     leak_markers=leak_markers, result=result,
-                    base_scores=base_scores,
+                    base_scores=base_scores, extra_failures=extra_failures,
+                    domain_harnesses=domain_harnesses,
                 )
                 if won is not None:
                     best_text, best_score, best_seq = won
                 continue
 
-            failures = await self._collect_failures(best_text, dataset.val or tune, artifact_type)
+            failures = list(extra_failures or []) + await self._collect_failures(
+                best_text, dataset.val or tune, artifact_type
+            )
             # P1-4：最近编辑历史回喂变异器（已证伪假设禁止重画）
             history = None
             if self._ledger is not None and ledger_key:
                 history = self._ledger.recent(ledger_key)
-            candidate = await self._mutate(best_text, artifact_type, failures, history=history)
+            candidate = await self._mutate(
+                best_text, artifact_type, failures,
+                history=history, domain_harnesses=domain_harnesses,
+            )
             if not candidate or candidate == best_text:
                 continue
+            result.candidates_generated += 1
 
             if self._constraints is not None:
                 checks = self._constraints.validate(candidate, artifact_type, baseline_text=baseline_text)
                 failed = [c.name for c in checks if not c.passed]
                 if failed:
+                    result.candidates_rejected_pre_eval += 1
                     result.constraint_failures.extend(failed)
                     logger.debug("候选被约束闸拒绝: %s", failed)
                     self._ledger_append(ledger_key, artifact_type, failures,
@@ -624,6 +737,7 @@ class SkillEvolutionRunner:
                     candidate_text=candidate, baseline_text=baseline_text,
                     markers=leak_markers)
                 if verdict.leaked:
+                    result.candidates_rejected_pre_eval += 1
                     result.constraint_failures.append(f"leak:{verdict.category}")
                     logger.debug("候选被泄漏闸拒绝(%s): %s",
                                  verdict.category, verdict.evidence[:100])
@@ -695,6 +809,7 @@ class SkillEvolutionRunner:
                 except OSError as e:
                     logger.debug("运行终态回写台账失败: %s", e)
             await self._attach_heldout_evidence(result, dataset, artifact_type)
+            result.assertCandidateIdentity()
             return result
 
         # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
@@ -769,6 +884,7 @@ class SkillEvolutionRunner:
                 return await rejectRun("bench_regression")
 
         await self._attach_heldout_evidence(result, dataset, artifact_type)
+        result.assertCandidateIdentity()
         return result
 
     async def _attach_heldout_evidence(self, result: EvolutionRunResult,

@@ -44,6 +44,43 @@
       </div>
     </GlassPanel>
 
+    <!-- Domain Harnesses: adopted harnesses across domains (read-only) -->
+    <GlassPanel class="domain-harness-panel">
+      <div class="domain-harness-title">{{ t('skill.domainHarnesses') }}</div>
+      <div class="toolbar-row">
+        <a-input-search
+          v-model:value="harnessQuery"
+          :placeholder="t('skill.domainHarnessesHint')"
+          allow-clear
+          style="max-width: 360px"
+          @search="loadDomainHarnesses"
+        />
+      </div>
+      <a-spin :spinning="harnessLoading">
+        <div v-if="domainHarnesses.length" class="domain-harness-list">
+          <div v-for="item in domainHarnesses" :key="item.skill_id" class="domain-harness-item">
+            <div class="domain-harness-head">
+              <strong>{{ item.name || item.skill_id }}</strong>
+              <a-tag color="green">{{ item.domain }}</a-tag>
+              <span class="domain-harness-version">v{{ item.version }}</span>
+              <a-select
+                v-model:value="adoptTargetId"
+                size="small"
+                style="width: 150px"
+                :options="skillOptions"
+                :placeholder="t('skillEvo.adoptTarget')"
+              />
+              <GlassButton variant="secondary" size="sm" @click="adoptHarness(item)">
+                {{ t('skillEvo.adopt') }}
+              </GlassButton>
+            </div>
+            <div class="domain-harness-desc">{{ item.description }}</div>
+          </div>
+        </div>
+        <div v-else class="domain-harness-empty">{{ t('skill.noSkills') }}</div>
+      </a-spin>
+    </GlassPanel>
+
     <!-- Skills Grid -->
     <a-spin :spinning="loading">
       <div v-if="filteredSkills.length" class="skill-grid">
@@ -251,7 +288,12 @@
         <div v-if="proposals.length" class="proposal-list">
           <div v-for="p in proposals" :key="p.proposal_id" class="proposal-row">
             <div>
-              <div class="proposal-skill">{{ p.skill_id }}</div>
+              <div class="proposal-skill">
+                {{ p.skill_id }}
+                <a-tag v-if="p.requires_manual_review" color="orange">
+                  {{ t('skillEvo.manualReviewRequired') }}
+                </a-tag>
+              </div>
               <div class="proposal-metric">
                 {{ t('skillEvo.holdout') }}: {{ p.holdout_before }} → {{ p.holdout_after }}
                 · {{ p.iterations_run }} {{ t('skillEvo.iterationsUnit') }}
@@ -518,6 +560,45 @@ const { t } = useI18n()
 const skills = ref<Skill[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
+const harnessQuery = ref('')
+const domainHarnesses = ref<skillPoolApi.DomainHarness[]>([])
+const harnessLoading = ref(false)
+const adoptTargetId = ref('')
+const skillOptions = computed(() =>
+  skills.value.map((s) => ({ value: s.id, label: s.name })),
+)
+
+async function adoptHarness(item: skillPoolApi.DomainHarness) {
+  if (!adoptTargetId.value) {
+    message.warning(t('skillEvo.adoptTarget'))
+    return
+  }
+  try {
+    await evolutionApi.adoptDomainHarness(
+      props.agentId, item.skill_id, adoptTargetId.value,
+    )
+    message.success(t('skillEvo.adoptSuccess'))
+    openProposals()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || err?.message || t('skillEvo.adoptError'))
+  }
+}
+
+async function loadDomainHarnesses() {
+  harnessLoading.value = true
+  try {
+    const res = await skillPoolApi.searchAgentDomainHarnesses(props.agentId, {
+      query: harnessQuery.value,
+      limit: 5,
+    })
+    const data: any = (res as any)?.data ?? res
+    domainHarnesses.value = Array.isArray(data) ? data : data?.items ?? []
+  } catch {
+    domainHarnesses.value = []
+  } finally {
+    harnessLoading.value = false
+  }
+}
 
 // Execute modal state
 const executeVisible = ref(false)
@@ -570,6 +651,9 @@ async function refreshSkills() {
         _pinning: false,
       }
     })
+    if (!adoptTargetId.value && skills.value.length) {
+      adoptTargetId.value = skills.value[0].id
+    }
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skill.loadError')
     message.error(msg)
@@ -834,6 +918,14 @@ async function runEvolve() {
     } else {
       evolveResult.value = t('skillEvo.noChange')
     }
+    if (data.real_trajectory_fallback) {
+      message.warning(t('skillEvo.realTrajectoryFallback', {
+        reason: data.real_trajectory_fallback,
+      }))
+    }
+    if (data.proposal?.requires_manual_review) {
+      message.info(t('skillEvo.manualReviewRequired'))
+    }
   } catch (err: any) {
     const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillEvo.evolveError')
     message.error(msg)
@@ -1064,7 +1156,10 @@ function currentOperator(): string {
   return 'operator'
 }
 
-onMounted(refreshSkills)
+onMounted(() => {
+  refreshSkills()
+  loadDomainHarnesses()
+})
 
 async function openMarketImportModal() {
   marketImportVisible.value = true
@@ -1128,6 +1223,45 @@ async function installFromMarket(skill: MarketSkill) {
 .toolbar-actions {
   display: flex;
   gap: 8px;
+}
+
+.domain-harness-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.domain-harness-title {
+  font-weight: 600;
+}
+
+.domain-harness-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.domain-harness-item {
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.domain-harness-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.domain-harness-version,
+.domain-harness-desc,
+.domain-harness-empty {
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+}
+
+.domain-harness-desc {
+  margin-top: 4px;
 }
 
 .skill-grid {

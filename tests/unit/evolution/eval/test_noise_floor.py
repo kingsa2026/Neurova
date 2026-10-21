@@ -248,7 +248,7 @@ class TestServiceWiring:
 
         monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
         svc = SkillEvolutionService("agent-z", base_dir=tmp_path / "evo")
-        cfg = EvolutionConfig(noise_repeats=2)
+        cfg = EvolutionConfig(noise_repeats=2, judge_fallback="off")
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds(),
             agent=offlineAgent, judge=_BrokenJudge(), mutate=_mutate_appends_improved, config=cfg,

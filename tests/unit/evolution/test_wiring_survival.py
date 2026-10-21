@@ -33,8 +33,12 @@ WIRING_CHECKS = {
     "neurova/agent_core.py": [
         "record_reuse",                     # Skill 断点#1 传动轴
         "a.evolution.tool_lifecycle",       # C3 生命周期单例
-        "record_skill_usage",               # C11 使用计数（曾遭覆盖丢失）
+        "recordSkillUsage",                 # C11 使用计数（采集体已迁到 skill_recording）
         "crystallizer_state.json",          # C9 状态持久化接线
+    ],
+    "neurova/evolution/skill_recording.py": [
+        "record_skill_usage",               # C11 使用计数（曾遭覆盖丢失）
+        "evidence_ref",                      # B 决策：失败全量证据引用
     ],
     "neurova/evolution/genetic_engine.py": [
         "skill_service",                    # 断点#2 持久化

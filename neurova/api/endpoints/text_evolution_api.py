@@ -22,7 +22,7 @@ from neurova.skills.library_service import agentLibrary
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user, require_admin
@@ -38,6 +38,7 @@ _admin_dep = require_admin()
 
 class SettingsPatch(BaseModel):
     text_evolution: Optional[bool] = None
+    auto_apply_skill_evolution: Optional[bool] = None
     lifecycle_sweep: Optional[bool] = None
     lifecycle_interval_hours: Optional[int] = Field(default=None, ge=1, le=24 * 30)
     judge_model: Optional[str] = None
@@ -152,12 +153,10 @@ class EvolveRequest(BaseModel):
     skill_id: str
     iterations: Optional[int] = Field(default=None, ge=1, le=50)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
-    # 执行面开关，与双臂侧同形：默认 False=模拟面（单轮 chat，零工具零上下文）。
-    # 真臂会把每份候选正文经轮级覆盖槽送进一次真实 agent 回合，一次整轮进化按默认
-    # 配置要 231 个回合 ⇒ 必须显式开，且要过 `real_arm_max_agent_turns` 这道预算闸。
-    # 默认留模拟面还有一层意义：RSI 自动晋升档的第四条前置（判据执行面与线上同域）
-    # 因此照旧不满足——本端点加能力不等于替安全档开门。
-    real_trajectory: bool = False
+    # 执行面三态：None=auto（agent 在线且预算允许时走真臂，否则回落并在响应里
+    # 标注 real_trajectory_fallback）；True=必须真臂（离线 409、超预算 422）；
+    # False=强制模拟面。auto 是默认值：真实行为探测优先，但绝不静默降级。
+    real_trajectory: Optional[bool] = None
 
 
 @router.post("/skills/{agent_id}/evolve", dependencies=[Depends(_admin_dep)])
@@ -200,24 +199,56 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
             detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
         )
 
-    executor = _textArmExecutor(agent_id, info, skill_id=body.skill_id,
-                                realTrajectory=body.real_trajectory)
+    executor, fallback_reason = _textArmExecutor(
+        agent_id, info, skill_id=body.skill_id,
+        realTrajectory=body.real_trajectory,
+    )
+    requested = _executorRequested(body.real_trajectory)
     if executor is not None:
         # 预算闸排在调用 service 之前：拒绝必须发生在第一个回合之前，而不是账单之后。
         # 计划与 service 内部那次重算取的是同一个纯函数、同一批入参，不另立口径。
         from neurova.evolution.eval.service import planRealArmTurns
 
-        _refuseIfOverBudget(planRealArmTurns(dataset, config, iterations=body.iterations))
+        verdict = _realArmBudgetVerdict(
+            planRealArmTurns(dataset, config, iterations=body.iterations)
+        )
+        if not verdict.allowed:
+            if body.real_trajectory is True:
+                raise HTTPException(status_code=422, detail=verdict.reason)
+            executor = None
+            fallback_reason = "budget_exceeded"
+    extra_failures = []
+    try:
+        from neurova.evolution.skill_evidence import failureJudgeFailures
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        extra_failures = failureJudgeFailures(
+            get_skill_improver().get_usage_history(body.skill_id), limit=5
+        )
+    except Exception as evidence_err:  # noqa: BLE001 - 证据装载失败不阻断进化
+        logger.debug("失败证据装载失败: %s", evidence_err)
+    domain_harnesses = []
+    try:
+        domain_harnesses = svc.listDomainHarnesses(
+            svc.skillDomain(body.skill_id),
+            limit=5,
+            exclude_skill_id=body.skill_id,
+        )
+    except Exception as library_err:  # noqa: BLE001 - 域库不可读不阻断进化
+        logger.debug("同域 harness 读取失败: %s", library_err)
     result, proposal = await service.evolve(
         skill_id=body.skill_id, skill_text=skill_text,
         dataset=dataset, iterations=body.iterations, config=config,
-        agent=executor,
+        agent=executor, extra_failures=extra_failures,
+        domain_harnesses=domain_harnesses,
     )
     return {
         "code": 0,
         "data": {
             **result.to_dict(),
             "proposal": proposal.to_dict() if proposal else None,
+            "executor_requested": requested,
+            "real_trajectory_fallback": fallback_reason,
         },
     }
 
@@ -226,9 +257,8 @@ class ABRequest(BaseModel):
     skill_id: str
     candidate_text: str = Field(min_length=1)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
-    # 执行面开关：默认 False=模拟面（单轮 chat，零工具零上下文）。真轨迹臂会把候选正文
-    # 经轮级覆盖槽送进一次真实 agent 回合，成本约 2 臂×任务数 个回合，且必须显式开。
-    real_trajectory: bool = False
+    # 执行面三态：None=auto（同 EvolveRequest）。双臂默认也优先真实轨迹。
+    real_trajectory: Optional[bool] = None
 
 
 @router.post("/skills/{agent_id}/ab", dependencies=[Depends(_admin_dep)])
@@ -278,62 +308,101 @@ async def ab_compare_texts(body: ABRequest, agent_id: str,
             detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
         )
 
-    executor = _textArmExecutor(agent_id, info, skill_id=body.skill_id,
-                                realTrajectory=body.real_trajectory)
+    executor, fallback_reason = _textArmExecutor(
+        agent_id, info, skill_id=body.skill_id,
+        realTrajectory=body.real_trajectory,
+    )
+    requested = _executorRequested(body.real_trajectory)
     if executor is not None:
         from neurova.evolution.eval.service import planAbArmTurns
 
-        _refuseIfOverBudget(planAbArmTurns(dataset))
+        verdict = _realArmBudgetVerdict(planAbArmTurns(dataset))
+        if not verdict.allowed:
+            if body.real_trajectory is True:
+                raise HTTPException(status_code=422, detail=verdict.reason)
+            executor = None
+            fallback_reason = "budget_exceeded"
     report = await service.ab_compare(
         baseline_text=skill_text, candidate_text=body.candidate_text,
         dataset=dataset, config=config, agent=executor,
     )
     # 来源标注不在这里重算：service 已按"真正拿去执行的那个对象"定好。端点自己
     # 再推一遍就会分叉（实测：注入真臂后被这里改标成 simulated，标注反而成了谎）。
+    report["executor_requested"] = requested
+    report["real_trajectory_fallback"] = fallback_reason
     return {"code": 0, "data": report}
 
 
+@router.get("/skills/{agent_id}/evidence/{skill_id}",
+            dependencies=[Depends(_admin_dep)])
+async def list_execution_evidence(
+    agent_id: str,
+    skill_id: str,
+    kind: str = Query(default="success", pattern="^(success|failure|all)$"),
+    limit: int = Query(default=5, ge=1, le=50),
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """技能执行证据审计面：成功轨迹与失败轨迹都从 evidence_ref 读全量。"""
+    from neurova.evolution.skill_evidence import executionEvidenceFor
+    from neurova.evolution.skill_improver import get_skill_improver
+
+    records = get_skill_improver().get_usage_history(skill_id)
+    return {
+        "code": 0,
+        "data": {
+            "items": executionEvidenceFor(
+                records, kind=kind, limit=limit, agent_id=agent_id
+            )
+        },
+    }
+
+
+def _executorRequested(realTrajectory: Optional[bool]) -> str:
+    if realTrajectory is True:
+        return "real_agent"
+    if realTrajectory is False:
+        return "simulated"
+    return "auto"
+
+
 def _textArmExecutor(agent_id: str, info: Dict[str, Any], *, skill_id: str,
-                     realTrajectory: bool):
+                     realTrajectory: Optional[bool]) -> tuple[Any, str]:
     """把"以指定正文跑真 agent 回合"这条装配接缝收在一处（双臂与进化共用）。
 
-    三条口径：
-    · 拿不到 agent ⇒ 409 点名原因并给出回退项，绝不静默降级成模拟面（教义第 2 条）；
-    · 技能名组不出 `$mention` ⇒ 422——那种情况下两臂会拿到同一份仓内正文，
-      比出一个看起来正常的假 0 差；
-    · `realTrajectory=false` ⇒ 返回 None，由 service 的装配接缝回落模拟面，
-      并在报告里如实标注来源（`executor_kind`）。
+    三态口径：
+    · False ⇒ (None, "")，强制模拟面；
+    · None（auto）⇒ agent 在线就返回真臂；离线或技能名不可 mention 时返回
+      (None, 原因)，由 service 回落模拟面，原因随响应出街；
+    · True ⇒ 必须真臂：离线 409、技能名不可 mention 422，绝不静默降级。
     """
-    if not realTrajectory:
-        return None
+    if realTrajectory is False:
+        return None, ""
 
     from neurova.api.endpoints import get_agent_instance
     from neurova.evolution.eval.ab_library import TextArmAgentExecutor
 
     agent = get_agent_instance(agent_id)
     if agent is None:
-        raise HTTPException(
-            status_code=409,
-            detail=(f"agent「{agent_id}」不在线，无法跑真轨迹；"
-                    "如需继续请用 real_trajectory=false 走模拟面（报告会标注来源）"),
-        )
+        if realTrajectory is True:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"agent「{agent_id}」不在线，无法跑真轨迹；"
+                        "如需继续请用 real_trajectory=false 走模拟面（报告会标注来源）"),
+            )
+        return None, "agent_offline"
     try:
-        return TextArmAgentExecutor(agent, skill_name=str(info.get("name") or skill_id))
+        return TextArmAgentExecutor(agent, skill_name=str(info.get("name") or skill_id)), ""
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        if realTrajectory is True:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        return None, "skill_name_unmentionable"
 
 
-def _refuseIfOverBudget(plan: dict) -> None:
-    """真臂预算闸：**在第一个回合之前**问，不过就 422。
-
-    顺序就是这条判据的全部意义：闸若放在运行之后，超支已经发生，422 只是在念账单。
-    模拟面不进这道闸（它不花 agent 回合），也不因超预算被降级成真臂或反之。
-    """
+def _realArmBudgetVerdict(plan: dict):
+    """真臂预算判据：**在第一个回合之前**问。"""
     from neurova.evolution.eval.service import checkRealArmBudget
 
-    verdict = checkRealArmBudget(plan, _load_settings_safe().real_arm_max_agent_turns)
-    if not verdict.allowed:
-        raise HTTPException(status_code=422, detail=verdict.reason)
+    return checkRealArmBudget(plan, _load_settings_safe().real_arm_max_agent_turns)
 
 
 def _load_settings_safe():
@@ -365,6 +434,9 @@ async def list_evolution_proposals(
             "decided_at": p.get("decided_at"),
             # M-C 读数：这条验收证据跑在哪个基座上（空串 = 未记，含本批之前落盘的全部旧记录）
             "model_under_test": p.get("model_under_test") or "",
+            # judge 回退提案：只能人工复核，列表页也要能看见。
+            "judge_fallback": p.get("judge_fallback") or "",
+            "requires_manual_review": bool(p.get("requires_manual_review")),
             # B 批读数：这批证据的用例来源构成。整键缺席（改动前的旧记录）或空 ⇒ 在覆盖
             # 读数里归"未记"，不因为 `EvalExample.source` 有默认值就读成合成用例。
             "source_mix": p.get("source_mix") or {},
@@ -407,6 +479,42 @@ async def get_evolution_proposal_detail(agent_id: str, proposal_id: str,
                 "evolution_run_status": runState,
             }}
     raise HTTPException(status_code=404, detail=f"提案不存在: {proposal_id}")
+
+
+class AdoptDomainHarnessRequest(BaseModel):
+    target_skill_id: str = Field(..., min_length=1)
+
+
+@router.post("/skills/{agent_id}/domain-harnesses/{peer_id}/adopt", dependencies=[Depends(_admin_dep)])
+async def adopt_domain_harness(
+    agent_id: str,
+    peer_id: str,
+    body: AdoptDomainHarnessRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """把同域已采纳 harness 生成为目标技能的 pending 提案（不自动应用）。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    library = agentLibrary(agent_id)
+    peer = library.get_skill_info(peer_id)
+    target = library.get_skill_info(body.target_skill_id)
+    if peer is None:
+        raise HTTPException(status_code=404, detail=f"peer harness not found: {peer_id}")
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"target skill not found: {body.target_skill_id}")
+
+    peer_config = ((peer.get("manifest") or {}).get("config") or {})
+    target_config = ((target.get("manifest") or {}).get("config") or {})
+    try:
+        proposal = SkillEvolutionService(agent_id).proposeAdoption(
+            target_skill_id=body.target_skill_id,
+            baseline_text=str(target_config.get("context_template") or ""),
+            peer_skill_id=peer_id,
+            improved_text=str(peer_config.get("context_template") or ""),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"code": 0, "data": proposal.to_dict()}
 
 
 @router.post("/skills/{agent_id}/proposals/{proposal_id}/approve", dependencies=[Depends(_admin_dep)])

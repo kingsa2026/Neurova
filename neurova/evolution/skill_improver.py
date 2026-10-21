@@ -438,70 +438,20 @@ class AutoSkillImprover(PersistedStateMixin):
                 logger.debug("技能 %s 改进提案失败: %s", skill_id, e)
         return proposals
 
-    async def propose_pending_improvements_async(
-        self, skill_text_loader: Optional[Callable[[str], Optional[str]]] = None
-    ) -> List[SkillImprovement]:
-        """异步版：在字典建议之上做**反射式文本改进**。
+    async def propose_pending_improvements_async(self) -> List[SkillImprovement]:
+        """异步兼容入口：只产字典提案。
 
-        判据升级(2026-09-13): _suggest_fix 的字典查表把 "timeout" 永远映射
-        到 "增加超时时间",从不看真实失败内容。本方法在 NEUROVA_TEXT_EVOLUTION
-        开启且能取到技能正文时,把真实失败记录(input/output/error)喂给
-        ReflectiveMutator,产出定向改写后的技能文本放进 changes["improved_text"]
-        ——改进建议从"查表"升级为"读失败原因"。
-
-        开关关闭 / 无 loader / 变异失败 → 原样返回字典提案(保守回退,零破坏)。
+        LLM 文本进化已统一到 `SkillEvolutionService`（单一实现）；本方法不再
+        生成 `improved_text`，避免与 service 的提议/探测/合成形成第二套。
         """
-        proposals = self.propose_pending_improvements()
-        if not proposals or not skill_text_loader:
-            return proposals
-        from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
+        return self.propose_pending_improvements()
 
-        if not text_evolution_enabled():
-            return proposals
-        from neurova.evolution.eval.mutator import JudgeFailure, ReflectiveMutator
-
-        mutator = ReflectiveMutator(EvolutionConfig())
-        with self._lock:
-            records_by_skill = {
-                sid: [r for r in recs if not r.success][-5:]
-                for sid, recs in self._usage_records.items()
-            }
-        for proposal in proposals:
-            try:
-                skill_text = skill_text_loader(proposal.skill_id)
-                if not skill_text:
-                    continue
-                failures = [
-                    JudgeFailure(
-                        task_input=r.input_summary or "(未记录输入)",
-                        output=r.output_summary or "(无输出)",
-                        feedback=r.error_message or proposal.reason,
-                        score=0.0,
-                    )
-                    for r in records_by_skill.get(proposal.skill_id, [])
-                ]
-                # P1-4：该技能的编辑历史回喂——已实测无效的假设禁止重画
-                history = None
-                try:
-                    from neurova.core.data_root import get_data_root
-                    from neurova.evolution.eval.history_ledger import EvolutionLedger
-
-                    history = EvolutionLedger(
-                        get_data_root() / "evolution" / "history"
-                    ).recent(proposal.skill_id)
-                except Exception as ledger_err:  # noqa: BLE001 - 台账不可读不阻断提案
-                    logger.debug("编辑历史读取失败 %s: %s", proposal.skill_id, ledger_err)
-                improved = await mutator.mutate(
-                    artifact_text=skill_text, artifact_type="skill", failures=failures,
-                    history=history,
-                )
-                if improved and improved != skill_text:
-                    proposal.changes = {**proposal.changes, "improved_text": improved}
-            except Exception as e:  # noqa: BLE001 - 单个提案富化失败不拖垮其余
-                logger.debug("技能 %s 反射式改进失败,保留字典提案: %s", proposal.skill_id, e)
-        return proposals
-
-    def apply_improvement(self, improvement: SkillImprovement, registry, skill_service=None) -> bool:
+    def apply_improvement(
+        self,
+        improvement: SkillImprovement,
+        registry,
+        skill_service=None,
+    ) -> bool:
         """把改进提案应用到 skill 本体（断点 #3 修复：提案不再只进反思日志）。
 
         应用语义（保守、可审计）：

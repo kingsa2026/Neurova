@@ -28,12 +28,19 @@ class EvolutionConfig:
     # 子集分片，过闸后并行评测、tune 分 argmax（平分保持先到）。
     # 默认 1 = 单线 lineage，行为与旧版逐字节一致。
     variants_per_round: int = 1
+    # 主 runner 近平分盲选 tie-break（N7 决策）：top 两候选分差在噪声带内时，
+    # 用匿名 A/B 选择器替代先到 argmax；无选择器时诚实回退。
+    blind_tiebreak_enabled: bool = True
     # 留出集提升低于该值视为"无真实增益",保留基线。
     # P0 堵漏（2026-09-17）：原默认 0.0 + 判据 `after <= before + min + eps`，
     # judge 不可用时前后同为中性 0.5 → 浮点相等使 `<=` 为假 → **零增益被放行**。
     # 现在默认 0.01（要求可测量的真实提升），且"判分不可用"单独判拒绝
     # （judge_unavailable），不再依赖 0.0/0.5 这种边界相等。
     min_improvement: float = 0.01
+
+    # 判分不可用时的回退判据：deterministic = 只用确定性可用性检查（非空/无异常），
+    # 产出的提案强制人工复核；off = 保持 judge_unavailable 整轮拒绝。
+    judge_fallback: str = "deterministic"
 
     # ── 例级不退化门（§8 前置 1，对照 Designer-RSI 的 matched replay gate）──
     # 留出集均值涨了不算过关：一条用例被改坏，可以被另一条的涨幅抵掉。

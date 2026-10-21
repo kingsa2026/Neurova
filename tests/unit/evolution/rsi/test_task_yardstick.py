@@ -135,7 +135,8 @@ class TestOrchestratorWiring:
         orch = probe.orchestrator
         orch._eval_harness = measured_eval_harness([0.5])
         orch.generate_optimizations = lambda signals: [
-            {"system": "tool_memory", "param": "success_bonus", "value": 0.11}]
+            {"system": "tool_memory", "parameter": "tool_memory.success_bonus",
+             "new_value": 0.11}]
         orch.apply_optimizations = lambda optimizations: [
             {"applied": False, "reason": "stub"}]
 
