@@ -6,6 +6,9 @@
         <p class="page-subtitle">{{ t('agent.description') }}</p>
       </div>
       <div class="header-actions">
+        <GlassButton variant="ghost" :loading="migrationImporting" @click="triggerMigrationImport">
+          {{ t('agent.migrationImport') }}
+        </GlassButton>
         <GlassButton variant="ghost" @click="triggerPackageImport">
           {{ t('agent.packageImport') }}
         </GlassButton>
@@ -21,6 +24,13 @@
       accept=".json"
       style="display: none"
       @change="handlePackageFileChange"
+    />
+    <input
+      ref="migrationFileInput"
+      type="file"
+      accept=".zip,application/zip"
+      style="display: none"
+      @change="handleMigrationFileChange"
     />
 
     <GlassCard>
@@ -77,6 +87,9 @@
               <GlassButton size="sm" variant="ghost" @click="handleExport(agent.id)">
                 {{ t('agent.packageExport') }}
               </GlassButton>
+              <GlassButton size="sm" variant="ghost" @click="handleMigrationExport(agent.id)">
+                {{ t('agent.migrationExport') }}
+              </GlassButton>
               <GlassButton size="sm" variant="secondary" @click="$router.push(`/agent/${agent.id}/chat`)">
                 {{ t('nav.chat') }}
               </GlassButton>
@@ -121,6 +134,9 @@
                 <GlassButton size="sm" variant="ghost" @click="handleExport(record.id)">
                   {{ t('agent.packageExport') }}
                 </GlassButton>
+                <GlassButton size="sm" variant="ghost" @click="handleMigrationExport(record.id)">
+                  {{ t('agent.migrationExport') }}
+                </GlassButton>
                 <GlassButton size="sm" variant="secondary" @click="$router.push(`/agent/${record.id}/chat`)">
                   {{ t('nav.chat') }}
                 </GlassButton>
@@ -140,6 +156,39 @@
         </a-table>
       </GlassCard>
     </a-spin>
+
+    <a-modal
+      v-model:open="migrationModalOpen"
+      :title="t('agent.migrationImport')"
+      :confirm-loading="migrationImporting"
+      width="520px"
+      @ok="handleMigrationImport"
+    >
+      <div class="migration-form">
+        <p class="migration-file">{{ migrationFile?.name }}</p>
+        <a-input
+          v-model:value="migrationTargetId"
+          :placeholder="t('agent.migrationTargetIdPlaceholder')"
+          addon-before="ID"
+        />
+        <a-checkbox v-model:checked="migrationOverwrite">
+          {{ t('agent.migrationOverwrite') }}
+        </a-checkbox>
+        <p class="migration-hint">{{ t('agent.migrationOverwriteHint') }}</p>
+        <p class="migration-hint">{{ t('agent.migrationOwnerNote') }}</p>
+        <a-space direction="vertical" size="small">
+          <a-checkbox v-model:checked="migrationSkills">
+            {{ t('agent.migrationImportSkills') }}
+          </a-checkbox>
+          <a-checkbox v-model:checked="migrationCron">
+            {{ t('agent.migrationImportCron') }}
+          </a-checkbox>
+          <a-checkbox v-model:checked="migrationMcp">
+            {{ t('agent.migrationImportMcp') }}
+          </a-checkbox>
+        </a-space>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -157,6 +206,12 @@ import {
   downloadManifest,
   type AgentPackageManifest,
 } from '@/api/modules/agent-package'
+import {
+  exportAgentMigration,
+  importAgentMigration,
+  downloadMigrationZip,
+  type AgentMigrationImportResult,
+} from '@/api/modules/agent-migration'
 
 const { t } = useI18n()
 const agentStore = useAgentStore()
@@ -238,6 +293,107 @@ const handlePackageFileChange = async (event: Event) => {
   }
 }
 
+// ── Agent 完整迁移包（zip） ──
+const migrationFileInput = ref<HTMLInputElement | null>(null)
+const migrationModalOpen = ref(false)
+const migrationFile = ref<File | null>(null)
+const migrationTargetId = ref('')
+const migrationOverwrite = ref(false)
+const migrationSkills = ref(true)
+const migrationCron = ref(true)
+const migrationMcp = ref(false)
+const migrationImporting = ref(false)
+
+const triggerMigrationImport = () => {
+  migrationFileInput.value?.click()
+}
+
+const _blobErrorDetail = async (err: any): Promise<string> => {
+  const data = err?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text())
+      return typeof parsed?.detail === 'string' ? parsed.detail : ''
+    } catch {
+      return ''
+    }
+  }
+  return typeof data?.detail === 'string' ? data.detail : ''
+}
+
+const handleMigrationExport = async (agentId: string) => {
+  try {
+    const blob = await exportAgentMigration(agentId)
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      message.error(t('agent.migrationExportFailed'))
+      return
+    }
+    downloadMigrationZip(blob, agentId)
+    message.success(t('agent.migrationExportOk'))
+  } catch (err: any) {
+    console.error('[AgentListPage] migration export failed:', err)
+    message.error((await _blobErrorDetail(err)) || t('agent.migrationExportFailed'))
+  }
+}
+
+const handleMigrationFileChange = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    message.error(t('agent.migrationInvalidFile'))
+    return
+  }
+  migrationFile.value = file
+  migrationTargetId.value = ''
+  migrationOverwrite.value = false
+  migrationSkills.value = true
+  migrationCron.value = true
+  migrationMcp.value = false
+  migrationModalOpen.value = true
+}
+
+const handleMigrationImport = async () => {
+  const file = migrationFile.value
+  if (!file) return
+  migrationImporting.value = true
+  const targetId = migrationTargetId.value.trim()
+  try {
+    const res: any = await importAgentMigration(file, {
+      agent_id: targetId,
+      overwrite: migrationOverwrite.value,
+      import_skills: migrationSkills.value,
+      import_cron: migrationCron.value,
+      import_mcp: migrationMcp.value,
+    })
+    const data = (res?.data ?? res) as AgentMigrationImportResult
+    if (!data?.success) {
+      message.error(t('agent.migrationImportFailed'))
+      return
+    }
+    message.success(t('agent.migrationImportOk', { id: data.agent_id }))
+    migrationModalOpen.value = false
+    migrationFile.value = null
+    await agentStore.loadAgents()
+  } catch (err: any) {
+    console.error('[AgentListPage] migration import failed:', err)
+    const status = err?.response?.status
+    const detail = await _blobErrorDetail(err)
+    if (status === 409) {
+      message.error(t('agent.migrationConflict', { id: targetId || '?' }))
+    } else if (status === 403) {
+      message.error(detail || t('agent.migrationImportFailed'))
+    } else if (status === 413) {
+      message.error(detail || t('agent.migrationImportFailed'))
+    } else {
+      message.error(detail || t('agent.migrationImportFailed'))
+    }
+  } finally {
+    migrationImporting.value = false
+  }
+}
+
 const viewOptions = computed(() => [
   { label: t('common.viewCard'), value: 'card' },
   { label: t('common.viewTable'), value: 'table' },
@@ -248,7 +404,7 @@ const tableColumns = computed(() => [
   { title: t('agent.model'), key: 'model', dataIndex: 'model' },
   { title: t('agent.provider'), key: 'provider', dataIndex: 'provider' },
   { title: t('common.status'), key: 'status' },
-  { title: t('common.actions'), key: 'actions', width: 300 },
+  { title: t('common.actions'), key: 'actions', width: 420 },
 ])
 
 const filteredAgents = computed(() => {
@@ -372,6 +528,7 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .table-desc {
@@ -383,5 +540,27 @@ onMounted(() => {
 .table-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.migration-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.migration-file {
+  margin: 0;
+  font-family: var(--nr-font-mono, monospace);
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+  word-break: break-all;
+}
+
+.migration-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--nr-text-tertiary);
 }
 </style>
