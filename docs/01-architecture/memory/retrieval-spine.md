@@ -46,22 +46,20 @@
 - **门控阈值**：全局 `threshold.default`（`memory_layer/settings_config.py:105`）经
   `mem_core.py:818` 喂进 expert 门控。
 
-## 5. 未接线的旋钮（**不是**脊柱的一部分）
+## 5. 已处置的旋钮（不再列在脊柱上）
 
-下列三件在同一包内、结构完整，但**没有插进上面那条链**（§6-360 逐档档案）：
+四件曾未接线的旋钮已有结论：
 
-| 旋钮 | 文件 | 今天缺的那半边 |
+| 旋钮 | 结论 | 现役承担者 / 放弃点 |
 |---|---|---|
-| per-channel 阈值覆盖 | `channels/threshold.py` | 只有全局 `threshold.default`，且只作用于 expert 门控 |
-| 插件通道质心自动生成 | `channels/centroid.py` | 质心只按 Expert 定义表建 |
-| 统一结果管道 | `channels/processor.py` | 内联语义冲突检测未进 live 链；`activations` 乘子无生产者 |
+| 反馈驱动的通道权重 | **已接线**（§6-377） | `IntentAwareRecallStrategy.applyFeedback` 写回意图权重并落盘；读侧仍是 `get_channel_weights` |
+| per-channel 阈值覆盖 | **显式放弃**（§6-378） | 保留全局 `threshold.default`（expert 门控）；per-channel 表无消费者 |
+| 插件通道质心自动生成 | **显式放弃**（§6-378） | expert 质心仍由 `unified_vector_store.initialize_centroids` 生成；通道描述质心无消费者 |
+| 统一结果管道 | **显式放弃**（§6-378） | 去重/加权/时间衰减已由 live 的 `_deduplicate_results`/`_fusion_score`/`_recency_score` 承担；内联冲突判据已并入 `judgeClauseConflict`（§6-374），`activations` 乘子无生产者 |
 
-其余三件的去留见台账 §6-361 的"四旋钮接不接"（等裁）。
-> **2026-10-21（§6-377）**：反馈驱动的通道权重已接线，不再列在本表——写侧
-> `IntentAwareRecallStrategy.applyFeedback`（like/dislike ±0.05，归一化，按 agent namespace 落盘），
-> 读侧仍是召回路用的 `get_channel_weights`（不造第二套权重表）；召回按 `session_id` 记录
-> 本轮意图与贡献通道，无归属不猜。`channels/weight.py` 仍是另一份静态表（§6-360 缺陷③的
-> 三份表示之一），待其余旋钮收口时按教义 6 归一。
+> `channels/weight.py` 的动态能力由 §6-377 的写侧接管；`channels/temporal.py` 的可配置曲线
+> 与 `channels/moe_router.py` 的按查询门控随同族一并显式放弃——它们从未有生产消费者。
+> 端点 `/channel-weights` 的第三份硬编码表已改读 live `intent_strategy`（§6-378）。
 > **2026-10-21（§6-373）**：§6-371 的退役已撤回，四旋钮恢复在位；去留按教义 7 重做
 > （先取长补短再退役），本表重新生效。
 > **2026-10-21（§6-374）**：`channels/conflict.py` 的否定检测已并入单源
