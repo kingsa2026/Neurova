@@ -80,6 +80,8 @@
   `memory_layer/result_processor.py` 已于 `0c333a76`(09-21) 退役，不是替代。
 - **判定**：**需人裁**——④⑤两处子能力全仓唯一，且 activation 反馈回路从未接线；
   删即永久失去"检索管道内联冲突检测"与"通道权重反馈乘子"。
+  > 2026-10-21（§6-374）：processor 的冲突段已改调单源 `judgeClauseConflict`（含英文词级否定）；
+  > `channels/conflict.py` 已并入单源后退净；activation 乘子那半边仍等裁。
   另记一条口径债：`docs/specs/2026-09-21-memory-knowledge-foundation-audit.md:369` 把它写成
   "活的 `channels/processor.py:32`"——**文档名实不符**，任何处置前先改判这句。
 

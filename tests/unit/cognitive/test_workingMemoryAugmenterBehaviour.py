@@ -259,8 +259,9 @@ class TestTheShellsClaimIsNowBacked:
     def test_classUnderTestIsTheOneMemCoreInstantiates(self):
         """生产装配点（`mem_core.py:635` 那句 import）取的必须是本档测的**同一个模块对象**。
 
-        本仓有同名遮蔽族（`memory_layer/conflict.py` 与 `memory_layer/channels/conflict.py`
-        是两个不同体），测错一份会全绿而生产那条没被守——所以这格不是形式主义。
+        本仓有同名遮蔽族（`memory_layer/moe_router.py` 与
+        `memory_layer/channels/moe_router.py` 是两个不同体），测错一份会全绿而生产那条没被守——
+        所以这格不是形式主义。
         """
         import importlib
         import inspect

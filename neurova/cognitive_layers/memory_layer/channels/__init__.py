@@ -2,7 +2,6 @@
 
 from .base import BaseChannel, ChannelMetadata, ChannelResult, ChannelState
 from .centroid import CentroidInitializer
-from .conflict import ConflictDetector, ConflictPair
 from .processor import UnifiedResultProcessor
 from .registry import ChannelRegistry, get_channel_registry
 from .temporal import TemporalDecay
@@ -19,8 +18,6 @@ __all__ = [
     "CentroidInitializer",
     "ThresholdConfig",
     "UnifiedResultProcessor",
-    "ConflictDetector",
-    "ConflictPair",
     "TemporalDecay",
     "WeightAdjuster",
 ]

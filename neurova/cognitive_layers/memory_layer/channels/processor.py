@@ -13,10 +13,36 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .base import ChannelResult
-from .conflict import ConflictDetector as ChannelConflictDetector
 from .temporal import TemporalDecay
+from ..conflict import judgeClauseConflict
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class ConflictPair:
+    """冲突对"""
+
+    result_a: ChannelResult
+    result_b: ChannelResult
+    reason: str = ""
+
+
+class ChannelConflictDetector:
+    """渠道结果对 → 记忆侧单源判据的薄适配器。
+
+    只做 `ChannelResult.content` 的取数与 DTO 包装；判据本身是
+    `memory_layer.conflict.judgeClauseConflict`，不在这里另造第二套。
+    """
+
+    def detect(self, results: List[ChannelResult]) -> List[ConflictPair]:
+        conflicts: List[ConflictPair] = []
+        for i, result_a in enumerate(results):
+            for result_b in results[i + 1:]:
+                hit = judgeClauseConflict(result_a.content, result_b.content)
+                if hit is not None:
+                    conflicts.append(ConflictPair(result_a, result_b, hit[3]))
+        return conflicts
 
 
 @dataclass
