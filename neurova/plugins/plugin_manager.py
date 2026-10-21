@@ -193,8 +193,13 @@ class PluginManager:
                 logger.warning("跳过目录已不存在的插件记录：%r（path=%s）——不留幽灵行",
                                record.name, record.path)
                 continue
-            # **装载是运行期状态**：`loaded` 从盘上复活＝开机自动 exec 第三方代码，
-            # 而 P3（来源白名单 + 构件完整性）未做。这里无论文件里写了什么都清掉。
+            # **装载是运行期状态**：`loaded` 从盘上复活＝开机自动 exec 第三方代码。
+            # 这句依据的形状到 §6-176 之后变了，但结论不变：构件摘要**已经落**
+            # （`security/artifact_digest.py`；本模块 :411 钉、:508-534 验，不符拒成 409），
+            # 它证的只是「取回来的那份＝跑起来的那份」，**不证来源**——账本与被保护构件
+            # 同根同权限，能整体改写磁盘的人也能改写摘要（§6-176 自己把这条边界写在模块头）。
+            # 加上插件的远程取回至今未实装（:265 `remote_source`），所以这里无论文件里写了
+            # 什么都清掉；要改成"开机自动装载"，缺的是**根外信任锚**，不是再多算一次哈希。
             record.loaded = False
             record.load_time = 0.0
             records[record.name] = record
@@ -262,7 +267,8 @@ class PluginManager:
             raise PluginError("empty_source", "装载源为空")
         if text.startswith(("http://", "https://", "ftp://", "git+")):
             raise PluginError(
-                "remote_source", "远程下载安装未实装（P3 带供应链校验后才开，本批不静默成功）")
+                "remote_source", "远程下载安装未实装（构件摘要已落 §6-176，缺的是来源侧的"
+                                 "信任锚与白名单，不是哈希；本批不静默成功）")
 
         root = Path(self._plugin_dir).resolve()
         candidate = Path(text).resolve()
