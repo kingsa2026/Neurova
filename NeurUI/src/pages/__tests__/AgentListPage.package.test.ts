@@ -15,11 +15,20 @@ import { createPinia, setActivePinia } from 'pinia'
 const exportAgentPackage = vi.fn()
 const importAgentPackage = vi.fn()
 const downloadManifest = vi.fn()
+const exportAgentMigration = vi.fn()
+const importAgentMigration = vi.fn()
+const downloadMigrationZip = vi.fn()
 
 vi.mock('@/api/modules/agent-package', () => ({
   exportAgentPackage: (...args: unknown[]) => exportAgentPackage(...args),
   importAgentPackage: (...args: unknown[]) => importAgentPackage(...args),
   downloadManifest: (...args: unknown[]) => downloadManifest(...args),
+}))
+
+vi.mock('@/api/modules/agent-migration', () => ({
+  exportAgentMigration: (...args: unknown[]) => exportAgentMigration(...args),
+  importAgentMigration: (...args: unknown[]) => importAgentMigration(...args),
+  downloadMigrationZip: (...args: unknown[]) => downloadMigrationZip(...args),
 }))
 
 vi.mock('@/api/modules/providers', () => ({ listProviders: vi.fn().mockResolvedValue([]) }))
@@ -160,6 +169,21 @@ describe('AgentListPage agent package (P2-16)', () => {
     )
     expect(message.success).toHaveBeenCalled()
     expect(loadSpy).toHaveBeenCalled()
+  })
+
+  it('导出迁移包：调迁移 API 且触发 zip 下载', async () => {
+    exportAgentMigration.mockResolvedValue(new Blob(['zip-bytes']))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出迁移包'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(exportAgentMigration).toHaveBeenCalledWith('default')
+    expect(downloadMigrationZip).toHaveBeenCalled()
+    expect(message.success).toHaveBeenCalled()
   })
 
   it('导入冲突（already exists）→ packageConflict 提示', async () => {
