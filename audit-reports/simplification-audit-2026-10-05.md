@@ -9777,3 +9777,54 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       在多步链路的路由面上一天会犯一次——取数要按**接缝**（谁把字节交给执行），
       不按文件名；同一族在本格上面刚记过一次（把「方法零调用」读成「类零调用」）。
       本会话因此连改两处：**结论比证据跑得快时，先让证据追上再写**（活体一份，读数 15 条）。
+385. **TM-2b 批 C-2 落地：模型联想线索生成器（丙档，含一张冷启动新票）** ✅🟢 —— 一笔记账、一笔工具行为登记
+    - **落点**：`association_cue_generation.py`（新，提示词/解析/过滤/整轮编排）＋迁移 v5
+      `memory_cue_attempts`（生成尝试账）＋`association_cues.py` 三个读账口＋`manager.py`
+      `generateModelAssociationCues()`＋`post_chat_pipeline.py` 固化窗口后台派发＋判据
+      `test_cueGenerationBatchC2.py`（13 条）。生成侧总闸走 env `NEUROVA_MEMORY_CUE_MODEL`，
+      与检索侧 `NEUROVA_MEMORY_CUE_CHANNEL` 分两把（可停生成而继续用已有线索）。
+    - **为什么必须有尝试账（丙档的护栏，不是可选项）**：丙＝不设每轮调用上限，而提示词第 5 条
+      明令「写不出就不要凑数」。若把「问过但没给线索」当作没处理，那些行会被**每个空闲窗口
+      重新捞出重问**，「无上限」当场变成无界烧钱。故调用成功即封账（含拒答），只有失败/坏 JSON/
+      超时不封账、留队下轮。该语义由判据 `test_模型正当拒答的行不会被每轮重问` 钉住，
+      活体复证：首轮 scanned=3/calls=1，二轮 scanned=0 且 calls 不增。
+      ⇒ 这一格是**测试设计逼出来的**：先写了「一轮做完不留半截」的判据，才发现旧设计会重问。
+    - **两条从 C-1 实测长出来的过滤（落成代码，不留在注释）**：① 复述型线索（词面⊆正文词集，
+      或归一后是正文子串）直接挡并计 `droppedGeneric`——它对检索零增益；② 同一次生成里跨条目
+      复用同词只留第一份——C-1 标定证明误注入的主因就是「别的记忆的线索更像」。
+    - **消费口不新增第三处**：写入后复用批 A 的 `_indexMemoryWithCues`（词面进同一倒排）
+      ＋作废批 C-1 的整片通道索引重建；pending 面取**内存里的行**（id 已由 `_row_to_memory`
+      剥过 M-25 作用域前缀），不在生成侧重读 `memories` 表——那是第二份 id 语义，会踩前缀坑。
+    - **活体（真装配、假客户端从生产入口递进、真 ONNX 检索；探针即用即删）**：
+      `READOUT_1 scanned=3 calls=1 written=3 droppedGeneric=1`；`VERSION 5`；
+      `CUE_ROWS 3`；`ATTEMPTS [(mem_000001,1,cued),…]`；
+      **`ASSOC_RECALL_hit_target True`**——零中文字面重合的「团队聚餐选餐厅时要注意什么」
+      在本仓生产链路上召回了虾过敏那条（TM-1 基线里它 rank=99）；
+      `RESTATED_CUE_PRESENT False`（复述线索确实没进库）。
+    - **A/B 与一笔工具行为登记（重要，别下次再被它绕进去）**：受控选择集
+      （tests/unit/cognitive_layers ＋ tests/performance/memory ＋
+      tests/integration/test_memory_auto_analyze_emotion_switch.py）报 `AB_REGRESSION 1 条` =
+      `test_memoryBusSingleSource.py::testOnlyOneEventBusImplementationRemains`。
+      **自建仓外 HEAD worktree 单跑该节点为 1 passed**，而本树红文是「3 份 class EventBus」
+      （多出两份 = `NeurUI/src-tauri/resources/backend/**` 与 `.../target/release/backend/**`，
+      2026-10-08 01:46 落盘，被 .gitignore 忽略）⇒ 确系**产物不对称**，非代码差（同 §6-382 登记）。
+      但 `ab_compare.sh` 的「逐条回基线单跑」把该节点报成「基线 0/3 有绿」却又判回归——
+      说明**那一步的复跑没有落在基线树**，此形态会在任何「本机独有产物」引起的常驻红上重复误报。
+      处置：不采信脚本分类，按自建 worktree 的实跑定论；登记该工具行为待另批核。
+      同一轮里 `comm: input is not in sorted order` 与「Binary file (standard input) matches」
+      是 NUL 捕获伪条目（教义第 5 段点过的那形），因此第一次宽选择集跑的 `AB_FAIL` 不作结论。
+    - **另一条不认领的红**：`tests/integration/collaboration/test_coordination_layer.py::
+      TestCleanup::test_cleanup_old_cursors` 在本树**单跑三次 1 过 2 红**，本批 diff 未触碰
+      collaboration/coordination 任何文件；工作树里另有并发会话未提交的
+      `glance_yield_rules.py`/`turn_coordinator.py` 在途改动，归因不在本批，记录不认领。
+    - **新一张待拍票（丙档的冷启动量级）**：首轮清扫会把该 agent 全部历史一次过完——
+      按 15 行/次批量，1 千行≈67 次、1 万行≈667 次、10 万行≈6,700 次模型调用（此后不再重问）。
+      三态：甲 维持现状／乙 只给冷启动加每窗口行数预算（稳态仍无上限）／丙 首轮只覆盖近 N 天。
+      **推荐乙**。本批严格照用户所裁的丙实现（不擅自加隐式上限），票面落工单 §4.1。
+    - **净 LOC（逐文件 numstat 现量）**：生产池 **+446/−0**（generation 231／manager 134／
+      association_cues 50／post_chat_pipeline 31）；测试/基建池 **+266/−0**
+      （判据 262 ＋ 子集 4）；文档/台账池：工单 §4.1 +27、本笔。子集 **664→665**。
+    - **未闭环**：① 冷启动票待人裁（本笔新出）；② C-1b 融合第二轮标定（通道单排 10/10 而融合
+      7/10，约 3 格收益被权重吃掉）；③ 批 B（`recall_with_associations` 别名与 `schema.py`
+      死 DDL 收口）仍未动；④ `longmeval_simple.py` 三态票等人；⑤ 绝对验收线与跑序根因（§6-384 登记）。
+    - **本会话下一枚空号现查 §6-386**（写前必须现场重取；本笔落库时该读数为 385）。
