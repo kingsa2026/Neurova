@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **92** 个模块 / **42623** 行。按状态：**在役 54** · **仅层内 31** · **仅测试 2** · **零读者 5**。
+共 **90** 个模块 / **41864** 行。按状态：**在役 52** · **仅层内 31** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1259 |
-| `memory_layer` | 81 | 35979 |
+| `memory_layer` | 79 | 35220 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -63,7 +63,6 @@
 | 模块 | 行数 | 层外读者 | 层内读者 | 测试读者 | 状态 |
 |---|---|---|---|---|---|
 | `neurova/cognitive_layers/memory_layer/absence_reasoner.py` | 145 | 1 | 1 | 5 | 在役 |
-| `neurova/cognitive_layers/memory_layer/agent_self.py` | 524 | 1 | 0 | 0 | 在役 |
 | `neurova/cognitive_layers/memory_layer/attachment_manager.py` | 978 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/auto_classifier.py` | 596 | 0 | 2 | 1 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/bayesian_eki/cognitive_optimizer.py` | 479 | 0 | 1 | 1 | 仅层内 |
@@ -90,9 +89,8 @@
 | `neurova/cognitive_layers/memory_layer/forgetting_recovery_storage_mixin.py` | 347 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/graph_traversal.py` | 587 | 1 | 2 | 6 | 在役 |
 | `neurova/cognitive_layers/memory_layer/isolation.py` | 204 | 0 | 3 | 7 | 仅层内 |
-| `neurova/cognitive_layers/memory_layer/manager.py` | 4663 | 14 | 0 | 92 | 在役 |
+| `neurova/cognitive_layers/memory_layer/manager.py` | 4663 | 14 | 0 | 93 | 在役 |
 | `neurova/cognitive_layers/memory_layer/memory_exporter.py` | 271 | 1 | 0 | 1 | 在役 |
-| `neurova/cognitive_layers/memory_layer/memory_stream.py` | 235 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/meta_cognition.py` | 633 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/models.py` | 522 | 6 | 10 | 39 | 在役 |
 | `neurova/cognitive_layers/memory_layer/modules/auto_context_module.py` | 255 | 0 | 1 | 0 | 仅层内 |
