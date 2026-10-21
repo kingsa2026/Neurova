@@ -210,6 +210,12 @@ def _hasColumn(conn, table: str, column: str) -> bool:
     return any(row[1] == column for row in conn.execute('PRAGMA table_info("%s")' % table))
 
 
+def _labelValue(value: Any) -> str:
+    """枚举/字符串统一取其值（`MemoryType`/`MemoryCategory`/`EmotionType` 都是 str 枚举，
+    而行上可能是其中任一种形态，也可能是裸字符串——线索词表只认字符串键）。"""
+    return str(getattr(value, "value", value) or "")
+
+
 def _migrateBodyEmbedding(conn) -> None:
     """memory 域 v2：正文库补 embedding 列。
 
@@ -248,6 +254,45 @@ def _migrateBodyFulltext(conn) -> None:
 
 register_migration(2, _migrateBodyEmbedding, domain=MEMORY_BODY_DOMAIN)
 register_migration(3, _migrateBodyFulltext, domain=MEMORY_BODY_DOMAIN)
+
+
+def _migrateBodyAssociationCues(conn) -> None:
+    """memory 域 v4：联想线索表 `memory_cues`（TM-2a，批 A）。
+
+    与 `memories` 同库（persist 伴生库），不另起第六个存储；经 `register_migration`
+    入册而非只写 `IF NOT EXISTS`（AGENTS.md §3 SQLite 条）——本域的迁移**确实在跑**：
+    `_initPersistDb` 里 `applyMigrations(conn, MEMORY_BODY_DOMAIN)` 是唯一咽喉（实测新库
+    user_version 由 0 升到 3，`memories_fts` 随之长出），v4 走同一条路。
+
+    两条索引各有消费方：按 `memory_id` 取一条记忆的线索；按作用域三元组整片装载
+    （重启重建倒排）。线索的**写入键** `(memory_id, norm_key)` 由存储层幂等保证，
+    不靠 DB 唯一约束——同键重复派生必须无声收敛，而不是报错阻断记忆写入。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_cues (
+            cue_id TEXT PRIMARY KEY,
+            memory_id TEXT NOT NULL,
+            cue_text TEXT NOT NULL,
+            cue_kind TEXT NOT NULL DEFAULT 'hypernym',
+            cue_source TEXT NOT NULL DEFAULT 'rule',
+            confidence REAL NOT NULL DEFAULT 0.0,
+            norm_key TEXT NOT NULL,
+            agent_id TEXT NOT NULL DEFAULT 'default',
+            neuser_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'default',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cue_memory ON memory_cues(memory_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cue_scope ON memory_cues(agent_id, neuser_id, user_id)"
+    )
+
+
+register_migration(4, _migrateBodyAssociationCues, domain=MEMORY_BODY_DOMAIN)
+
 
 
 class MemoryManager:
@@ -290,6 +335,11 @@ class MemoryManager:
         self._lock = threading.RLock()
         self._last_decay_at: Optional[float] = None   # 节流：上次 run_decay_cycle 的 monotonic 时间戳
         self._decay_cursor: int = 0                   # 轮询：有界衰减的游标
+        # 联想线索（TM-2a）：存储只在 persist 库初始化成功后装配（见 _initPersistDb），
+        # 这里先落 None，保证 remember / 统计面在库缺失时也不会撞 AttributeError。
+        self._associationCues = None
+        # 重启重建倒排用的整片映射 `memory_id → [线索文本]`，装载一次即释放
+        self._cueTextsByMemory: Dict[str, List[str]] = {}
 
         # 子模块引用（延迟初始化）
         self._storage = None
@@ -484,6 +534,17 @@ class MemoryManager:
             )
             applyMigrations(conn, MEMORY_BODY_DOMAIN)
             conn.commit()
+            # 联想线索存储与 `memories` 共用这一条常驻连接（同库同锁；
+            # persist 库初始化失败时整条线索面随之不启用，不另开第二只连接）
+            from neurova.cognitive_layers.memory_layer.association_cues import (
+                AssociationCueStore,
+            )
+
+            self._associationCues = AssociationCueStore(
+                connGetter=lambda: self._persist_conn,
+                lock=self._persist_db_lock,
+                agentId=self._agent_id,
+            )
             logger.debug("Persistence DB initialized: %s", self._persist_db_path)
         except Exception as e:
             logger.warning("Persistence DB init failed: %s", e)
@@ -896,6 +957,8 @@ class MemoryManager:
 
                 release_short_connection(conn)
 
+        # 线索整片装载必须在逐条并索引**之前**——否则重启后线索不在倒排里
+        self._loadAssociationCueIndex()
         for mem in loaded:
             self._index_reloaded_memory(mem)
         for mem in reaped:
@@ -925,17 +988,37 @@ class MemoryManager:
             if key is not None:
                 self._content_index.setdefault(key, mem.id)
 
-    @staticmethod
-    def _index_reloaded_memory(mem: "Memory") -> None:
-        """把并入的行喂给召回面（关键词倒排逐条增量；索引维护失败不阻断并入）。"""
+    def _index_reloaded_memory(self, mem: "Memory") -> None:
+        """把并入的行喂给召回面（关键词倒排逐条增量；索引维护失败不阻断并入）。
+
+        线索必须一起并回来——否则重启后「写侧长了线索、读侧没有线索」，
+        第二批起的所有读数都会假性回落。整片映射由 `_loadAssociationCueIndex` 一次取好，
+        不在这里逐条查库（装载是 N 行，逐条查就是 N 次 SQL）。
+        """
         try:
             from neurova.cognitive_layers.memory_layer.semantic_search import (
                 get_semantic_search,
             )
 
-            get_semantic_search().upsert_memory_index(mem.to_dict())
+            get_semantic_search().upsert_memory_index(
+                mem.to_dict(), cues=self._cueTextsByMemory.get(mem.id, [])
+            )
         except Exception:  # noqa: BLE001 - 与 remember 同口径：索引失败不阻断可见性
             logger.debug("关键词索引增量并入失败: %s", mem.id, exc_info=True)
+
+    def _loadAssociationCueIndex(self) -> None:
+        """装载本作用域的 `memory_id → [线索文本]`，供重启重建倒排一次批量取。"""
+        store = self._associationCues
+        if store is None:
+            self._cueTextsByMemory = {}
+            return
+        try:
+            self._cueTextsByMemory = store.cueTextsByMemory(
+                scope=(self._eff_neuser_id(), self._eff_user_id())
+            )
+        except Exception as e:  # noqa: BLE001 - 缺线索只是回到改造前的可达性，不是故障
+            logger.debug("联想线索整片装载失败: %s", e)
+            self._cueTextsByMemory = {}
 
     # M-25: id 为全表主键, 原 INSERT OR REPLACE 按 id 覆盖 —— A 作用域自定义 id
     # 会被 B 作用域同 id 的写入直接覆盖（重启丢数据）。改为作用域三元组匹配的
@@ -1619,6 +1702,10 @@ class MemoryManager:
                     # BUG-9 修复: 原代码静默吞掉情感分析异常, 改为 warning 记录
                     logger.warning("自动情感标注失败（记忆 %s）: %s", mem_id, e)
 
+            # 联想线索（TM-2a，批 A）：由行上已有的结构化标签派生，零模型调用。
+            # 情感标注在上方已完成，这里才拿得到 mem.emotion——顺序有依赖，别上提。
+            self._attachRuleAssociationCues(mem)
+
             # 发射事件
             self._publishMemoryEvent(
                 MemoryEventName.MEMORY_CREATED,
@@ -1629,6 +1716,134 @@ class MemoryManager:
             self._extract_dependency_async(mem_id, content, metadata)
 
             return mem_id
+
+    def _attachRuleAssociationCues(self, mem: "Memory") -> int:
+        """为一条已入库的记忆派生并落**规则**联想线索，随后把它并进关键词倒排。
+
+        三道 fail-soft（库缺失 / 派生异常 / 索引异常）一律不阻断记忆写入——与
+        `P1-D6` 关键词索引维护同一口径。返回落库条数（0 表示没长线索，不是写失败）。
+        """
+        store = self._associationCues
+        if store is None:
+            return 0
+        try:
+            cues = self.deriveRuleAssociationCues(
+                mem.content,
+                memoryType=_labelValue(mem.memory_type),
+                category=_labelValue(mem.category),
+                emotion=_labelValue(mem.emotion),
+            )
+            if not cues:
+                return 0
+            for cue in cues:
+                cue["cue_source"] = "rule"
+            inserted = store.replaceForMemory(
+                mem.id,
+                cues,
+                scope=(mem.neuser_id, mem.user_id),
+                createdAt=mem.created_at,
+            )
+        except Exception as e:  # noqa: BLE001 - 派生失败不得拖垮记忆写入
+            logger.warning("规则联想线索派生失败（记忆 %s）: %s", mem.id, e)
+            return 0
+        if inserted:
+            self._indexMemoryWithCues(mem)
+        return inserted
+
+    def _indexMemoryWithCues(self, mem: "Memory") -> None:
+        """把「正文词面 + 线索词面」一并写进同一份关键词倒排的**同一个 memory_id 桶**。
+
+        刻意不新建第二份索引、不改排序公式：线索的作用只是让同一条记忆多几个可被查询
+        命中的词，命中之后仍由既有 RRF（向量 0.7 / 关键词 0.3）与 origin 信任决定位次。
+        """
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import (
+                get_semantic_search,
+            )
+
+            cueTexts = [cue["cue_text"] for cue in self.get_associationCues(mem.id)]
+            get_semantic_search().upsert_memory_index(mem.to_dict(), cues=cueTexts)
+        except Exception:  # noqa: BLE001 - 索引维护失败不阻断记忆可见性
+            logger.debug("线索并入关键词索引失败: %s", mem.id, exc_info=True)
+
+    def deriveRuleAssociationCues(
+        self,
+        content: str,
+        memoryType: Optional[str] = None,
+        category: Optional[str] = None,
+        emotion: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """零模型线索派生的唯一入口（确定性：同输入两次结果逐条相等）。
+
+        `inferredCategories` 取自 `MemoryAutoClassifier.classify_category_multi_label`
+        ——那是该多标签实装的**第一个真实消费者**（此前它只被分类器内部自用，
+        对外入口 `remember(auto_classify=...)` 在 chat 主路恒关，见 §6-381 与研究档 D4）。
+        """
+        from neurova.cognitive_layers.memory_layer import association_cues
+
+        inferred: List[str] = []
+        try:
+            classifier = self._auto_classifier
+            if classifier is None:
+                from neurova.cognitive_layers.memory_layer.auto_classifier import (
+                    MemoryAutoClassifier,
+                )
+
+                classifier = MemoryAutoClassifier()
+            inferred = [
+                _labelValue(label)
+                for label, _score in classifier.classify_category_multi_label(content)
+            ]
+        except Exception as e:  # noqa: BLE001 - 分类器缺席时仍有类型/情感两层可用
+            logger.debug("多标签推断缺席（线索派生降级）: %s", e)
+
+        return association_cues.deriveRuleAssociationCues(
+            content,
+            memoryType=memoryType,
+            category=category,
+            inferredCategories=inferred,
+            emotion=emotion,
+        )
+
+    def get_associationCues(self, memory_id: str) -> List[Dict[str, Any]]:
+        """按当前生效作用域取一条记忆的联想线索（跨作用域取不到——是门不是排序）。"""
+        store = self._associationCues
+        if store is None:
+            return []
+        try:
+            return store.listForMemory(
+                memory_id, scope=(self._eff_neuser_id(), self._eff_user_id())
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("读取联想线索失败（记忆 %s）: %s", memory_id, e)
+            return []
+
+    def refresh_associationCues(self, memory_id: str) -> int:
+        """重派生一条记忆的线索（幂等：同 norm_key 不二次入库）。"""
+        mem = self._memories.get(memory_id)
+        if mem is None:
+            return 0
+        return self._attachRuleAssociationCues(mem)
+
+    def associationCueTexts(self) -> Dict[str, List[str]]:
+        """整作用域的 `memory_id → [线索文本]`，供关键词索引全量重建取用。
+
+        图还没装载过时现取一次（重启后、或本进程第一次走到重建分支）——
+        取空不报错：没有线索只是回到改造前的可达性。
+        """
+        if not self._cueTextsByMemory and self._associationCues is not None:
+            self._loadAssociationCueIndex()
+        return self._cueTextsByMemory
+
+    def associationCueStats(self) -> Dict[str, int]:
+        store = self._associationCues
+        if store is None:
+            return {"cues": 0, "distinctNormKeys": 0, "memoriesWithCues": 0}
+        try:
+            return store.stats()
+        except Exception as e:  # noqa: BLE001 - 统计面不得拖垮主统计
+            logger.debug("联想线索统计读取失败: %s", e)
+            return {"cues": 0, "distinctNormKeys": 0, "memoriesWithCues": 0}
 
     def _extract_dependency_async(
         self, memory_id: str, content: str, metadata: Optional[Dict[str, Any]]
@@ -2084,7 +2299,7 @@ class MemoryManager:
             # 审计 P1-D6：不再每查询 clear+全量重建（O(N)@锁内）。首次建
             # 全量；此后增量由 remember/delete 钩子 upsert/remove 维护。
             if not search._keyword_index:
-                search.build_keyword_index(memory_dicts)
+                search.build_keyword_index(memory_dicts, self.associationCueTexts())
             # search_by_keywords 返回 List[str]（memory id 列表），非元组
             _kw_ids = search.search_by_keywords(query, limit=limit * 2)
             keyword_hits = list(enumerate(_kw_ids))  # (rank, memory_id)
@@ -2449,6 +2664,10 @@ class MemoryManager:
                 "recall_count": self._stats["recall_count"],
                 "bus_events": self._memoryEventsPublished,
                 "bus_handlers": self._memoryBusHandlerCount(),
+                # 联想线索读数（TM-2a）：写入侧长了多少条、覆盖多少行、归一键去重后剩多少。
+                # 该面已被 `GET /v1/memory/stats` 读（api/endpoints/memory/crud.py:118-125），
+                # 不是只写不读的指标。批 C 的模型生成计数也挂在这里分账。
+                "association_cues": self.associationCueStats(),
                 # 分类闭环读数（0 是正常态；auto_classified_count 为 0 表示
                 # 自动分类没有被任何写入路径使用）
                 "by_category": by_category,

@@ -189,8 +189,14 @@ class SemanticSearch:
         
         return embedding
     
-    def build_keyword_index(self, memories: List[Dict[str, Any]]):
-        """构建关键词索引"""
+    def build_keyword_index(self, memories: List[Dict[str, Any]], cuesByMemory: Optional[Dict[str, List[str]]] = None):
+        """构建关键词索引。
+
+        `cuesByMemory`（TM-2a）：整片 `memory_id → [联想线索文本]`。**全量重建必须带它**——
+        不带就是「增量认线索、全量丢线索」的第二条陈旧路径（`upsert_memory_index` 逐条
+        维护时线索在，一次 clear+重建就静默没了）。两处重建调用点都由判据
+        `test_ruleAssociationCues.py::test_全量重建必须带线索图` 钉住。
+        """
         with self._index_lock:
             self._keyword_index.clear()
             
@@ -198,21 +204,28 @@ class SemanticSearch:
                 content = mem.get("content", "")
                 memory_id = mem.get("id", "")
                 
-                keywords = self._extract_keywords(content)
-                for kw in keywords:
-                    if kw not in self._keyword_index:
-                        self._keyword_index[kw] = []
-                    self._keyword_index[kw].append(memory_id)
+                texts = [content] + [str(cue) for cue in (cuesByMemory or {}).get(memory_id, []) if cue]
+                for text in texts:
+                    for kw in self._extract_keywords(text):
+                        if kw not in self._keyword_index:
+                            self._keyword_index[kw] = []
+                        if memory_id not in self._keyword_index[kw]:
+                            self._keyword_index[kw].append(memory_id)
             
             logger.info("构建关键词索引: %d 个关键词", len(self._keyword_index))
     
-    def upsert_memory_index(self, mem: Dict[str, Any]) -> None:
+    def upsert_memory_index(self, mem: Dict[str, Any], cues: List[str] = ()) -> None:
         """增量维护单条记忆的关键词倒排（审计 P1-D6）。
 
         原契约只有 build_keyword_index（clear+全量重建）——manager 每次
         recall 全量重建（O(N)@锁内），neurova_recall 又"只建一次永不更新"，
         两者共享单例互相踩踏：要么索引陈旧要么每查询重建。现提供增量入口，
         记忆增删时逐条 upsert/remove，检索路径零重建。
+
+        `cues`（TM-2a）：联想线索文本。线索词面**并进同一个 memory_id 桶**，
+        不另起第二份索引、不改排序口径——它只是让同一条记忆多几个可被查询命中的词。
+        抽取必须走同一把 `_extract_keywords` 刀：写侧按一套词切、读侧按另一套词查，
+        就是第二条「建了却检索不到」的断链。
         """
         memory_id = mem.get("id", "")
         if not memory_id:
@@ -221,11 +234,12 @@ class SemanticSearch:
         # remove_memory_index 内部同样取 RLock（可重入）不会自死锁
         with self._index_lock:
             self.remove_memory_index(memory_id)
-            keywords = self._extract_keywords(mem.get("content", ""))
-            for kw in keywords:
-                bucket = self._keyword_index.setdefault(kw, [])
-                if memory_id not in bucket:
-                    bucket.append(memory_id)
+            texts = [mem.get("content", "")] + [str(cue) for cue in (cues or []) if cue]
+            for text in texts:
+                for kw in self._extract_keywords(text):
+                    bucket = self._keyword_index.setdefault(kw, [])
+                    if memory_id not in bucket:
+                        bucket.append(memory_id)
 
     def remove_memory_index(self, memory_id: str) -> None:
         """从倒排索引摘除一条记忆（增量删除）。"""
