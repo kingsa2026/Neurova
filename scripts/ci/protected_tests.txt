@@ -116,6 +116,10 @@ tests/performance/memory/test_associativeRecallGate.py
 # 该文件另含一条 `xfail(strict=True)`（规则线索抬不动情境型零词面查询，归批 C 转正）——
 # 达成时以 XPASS 变红，是要求摘标记的信号，不是子集坏掉。
 tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py
+# §6-383（批 C-1）：联想线索**向量通道**的净增益与安全性——配对断言（同 fixture 内开/关做差），
+# 不用绝对线：绝对读数受跑序影响（本文件单跑与同目录合跑 hit@5 差 2），根因待查已登记 §6-383。
+# 门限 0.45 是 bge-small-zh-v1.5 上的实测最优点，**不是**抄外部的 0.85（抄来即 droppedByGate 全吃）。
+tests/unit/cognitive_layers/memory_layer/test_cueVectorChannel.py
 # §6-96：上一行的烧 CPU 自旋格必须按**实测线程时钟粒度**整格跳过（不得按平台名、
 # 不得改成永久 skip），否则本机整场子集被超时打断、而 CI 侧覆盖被静默作废。
 tests/unit/ci/test_subQuantumSpinClockGate.py

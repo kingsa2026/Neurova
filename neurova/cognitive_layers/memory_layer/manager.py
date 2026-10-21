@@ -338,6 +338,8 @@ class MemoryManager:
         # 联想线索（TM-2a）：存储只在 persist 库初始化成功后装配（见 _initPersistDb），
         # 这里先落 None，保证 remember / 统计面在库缺失时也不会撞 AttributeError。
         self._associationCues = None
+        # 联想线索的向量通道（批 C-1）：与存储同时装配，缺库即整条通道不点火
+        self._cueChannel = None
         # 重启重建倒排用的整片映射 `memory_id → [线索文本]`，装载一次即释放
         self._cueTextsByMemory: Dict[str, List[str]] = {}
 
@@ -544,6 +546,19 @@ class MemoryManager:
                 connGetter=lambda: self._persist_conn,
                 lock=self._persist_db_lock,
                 agentId=self._agent_id,
+            )
+            # 向量通道的两条依赖都取**既有单点**：取行走 AssociationCueStore，
+            # 编码走 `_embeddingForNewRow` 那一个入口（它自带引擎缺席 fail-soft 与
+            # 「只警告一次」），不在这里再造第二条编码路。
+            from neurova.cognitive_layers.memory_layer.association_cue_index import (
+                CueVectorChannel,
+            )
+
+            self._cueChannel = CueVectorChannel(
+                cueRowsGetter=lambda maxEntries: self._associationCues.cueRowsForIndex(
+                    scope=(self._eff_neuser_id(), self._eff_user_id()), maxEntries=maxEntries
+                ),
+                encodeOne=self._embeddingForNewRow,
             )
             logger.debug("Persistence DB initialized: %s", self._persist_db_path)
         except Exception as e:
@@ -1748,6 +1763,8 @@ class MemoryManager:
             return 0
         if inserted:
             self._indexMemoryWithCues(mem)
+            # 词法面已增量更新；向量通道是整片索引，只能作废重建
+            self.invalidateAssociationCueIndex()
         return inserted
 
     def _indexMemoryWithCues(self, mem: "Memory") -> None:
@@ -1844,6 +1861,35 @@ class MemoryManager:
         except Exception as e:  # noqa: BLE001 - 统计面不得拖垮主统计
             logger.debug("联想线索统计读取失败: %s", e)
             return {"cues": 0, "distinctNormKeys": 0, "memoriesWithCues": 0}
+
+    def invalidateAssociationCueIndex(self) -> None:
+        """线索变更后作废向量通道索引（下次查询按当前作用域重建）。"""
+        if self._cueChannel is not None:
+            self._cueChannel.invalidate()
+
+    def associationCueChannelStats(self) -> Dict[str, int]:
+        if self._cueChannel is None:
+            return {"fired": 0, "injected": 0, "indexed": 0, "skippedOff": 0}
+        return self._cueChannel.stats()
+
+    def associationCueChannelCandidates(self) -> List[str]:
+        """当前作用域下通道索引里出现过的记忆 id——作用域门的可视化出口。"""
+        if self._cueChannel is None:
+            return []
+        try:
+            return self._cueChannel.candidateMemoryIds()
+        except Exception as e:  # noqa: BLE001 - 通道建不起来只影响联想加分，不影响既有召回
+            logger.debug("联想通道候选读取失败: %s", e)
+            return []
+
+    def associationCueIndexCapacity(self) -> int:
+        from neurova.cognitive_layers.memory_layer.association_cue_index import (
+            CUE_INDEX_MAX_ENTRIES,
+        )
+
+        if self._cueChannel is None:
+            return CUE_INDEX_MAX_ENTRIES
+        return self._cueChannel.capacity()
 
     def _extract_dependency_async(
         self, memory_id: str, content: str, metadata: Optional[Dict[str, Any]]
@@ -2324,6 +2370,24 @@ class MemoryManager:
             fused[mid] = fused.get(mid, 0.0) + 0.7 / (60 + rank + 1)
         for rank, mid in keyword_hits:
             fused[mid] = fused.get(mid, 0.0) + 0.3 / (60 + rank + 1)
+
+        # 3b) 联想线索的向量通道（批 C-1）：**只加分不重排**，也不自己出结果。
+        #     命中 id 必须先落在生效作用域的基集里——这是跨用户串味道的第二道门
+        #     （取行已按三元组筛过，这里再对齐基集，防通道索引陈旧于作用域切换）。
+        if self._cueChannel is not None:
+            try:
+                from neurova.cognitive_layers.memory_layer.association_cue_index import (
+                    cueScoreContribution,
+                )
+
+                for memoryId, cueRank, _cosine in self._cueChannel.recall(
+                    self._embeddingForNewRow(query), limit=max(limit, 10)
+                ):
+                    if memoryId in id_to_memory:
+                        fused[memoryId] = fused.get(memoryId, 0.0) + cueScoreContribution(cueRank)
+            except Exception as e:  # noqa: BLE001 - 通道点火失败退化为原有两路，不吞主链路
+                logger.debug("联想线索通道点火失败（退化为原有两路）: %s", e)
+
         for mid in fused:
             mem_obj = id_to_memory.get(mid)
             if mem_obj is not None:
@@ -2668,6 +2732,9 @@ class MemoryManager:
                 # 该面已被 `GET /v1/memory/stats` 读（api/endpoints/memory/crud.py:118-125），
                 # 不是只写不读的指标。批 C 的模型生成计数也挂在这里分账。
                 "association_cues": self.associationCueStats(),
+                # 通道点火读数（批 C-1）：fired/injected/droppedByGate/skipped* 全部要有出口，
+                # 否则「加了线索但没人用它」与「线索没生效」两种形态在观测上同形。
+                "cue_channel": self.associationCueChannelStats(),
                 # 分类闭环读数（0 是正常态；auto_classified_count 为 0 表示
                 # 自动分类没有被任何写入路径使用）
                 "by_category": by_category,
