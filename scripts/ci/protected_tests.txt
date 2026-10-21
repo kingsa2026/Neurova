@@ -120,6 +120,11 @@ tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py
 # 不用绝对线：绝对读数受跑序影响（本文件单跑与同目录合跑 hit@5 差 2），根因待查已登记 §6-383。
 # 门限 0.45 是 bge-small-zh-v1.5 上的实测最优点，**不是**抄外部的 0.85（抄来即 droppedByGate 全吃）。
 tests/unit/cognitive_layers/memory_layer/test_cueVectorChannel.py
+# §6-385（批 C-2）：模型联想线索生成器——批量、封账、失败留队、超时、复述过滤、
+# 丙档护栏（「问过就封账」，否则无上限＝无界烧钱），以及一条反孤岛守卫
+# （生成必须由 post_chat 经 `_get_dependency("llm_client")` + `_spawn_background` 派发，
+# 不许长成「测试里自洽、生产上没人递客户端」的形态）。测试不打真模型。
+tests/unit/cognitive_layers/memory_layer/test_cueGenerationBatchC2.py
 # §6-96：上一行的烧 CPU 自旋格必须按**实测线程时钟粒度**整格跳过（不得按平台名、
 # 不得改成永久 skip），否则本机整场子集被超时打断、而 CI 侧覆盖被静默作废。
 tests/unit/ci/test_subQuantumSpinClockGate.py

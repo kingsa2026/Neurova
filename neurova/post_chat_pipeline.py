@@ -3258,6 +3258,37 @@ class PostChatPipeline:
                         "完成" if consolidation_result else "依赖缺失",
                     )
 
+            # 联想线索生成（批 C-2，用户裁丙：段落级批量、不设每轮调用上限）。
+            # 两条硬约束：① 必须走后台派发——一次模型调用是十秒级，压在用户关键路径
+            # 上就等于把记忆改造做成了延迟回归；② 模型客户端只经 `_get_dependency`
+            # 这个单点取，缺依赖就整步跳过并留读数，不在这里自己 new 一条（那是第二份
+            # 口径，且会成长「测试里自洽、生产上没人递客户端」的孤岛——§6-381 里
+            # proactive_question_manager 恒 None 那条就是这个形态）。
+            if turn_count > 0 and turn_count % 10 == 0 and memory_manager is not None:
+                _cueClient = self._get_dependency("llm_client")
+                if _cueClient and hasattr(memory_manager, "generateModelAssociationCues"):
+
+                    async def _generateAssociationCues():
+                        readout = await memory_manager.generateModelAssociationCues(
+                            client=_cueClient
+                        )
+                        if readout.get("scanned"):
+                            logger.info(
+                                "🧠 联想线索生成: 扫描=%s 调用=%s 写入=%s 泛词挡下=%s "
+                                "失败=%s 超时=%s",
+                                readout.get("scanned"),
+                                readout.get("calls"),
+                                readout.get("written"),
+                                readout.get("droppedGeneric"),
+                                readout.get("failed"),
+                                readout.get("timedOut"),
+                            )
+                        return readout
+
+                    self._spawn_background(
+                        "association_cue_generation", _generateAssociationCues()
+                    )
+
             # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
             if turn_count > 0 and turn_count % 10 == 0:
                 try:
