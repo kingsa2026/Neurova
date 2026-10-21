@@ -35,8 +35,6 @@ from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import Tempo
 
 from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
 
-from neurova.cognitive_layers.memory_layer.agent_self import AgentSelfManager
-
 from neurova.cognitive_layers.memory_layer.models import SelfModel, UserProfile
 
 from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
@@ -45,8 +43,6 @@ from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
 # `proactive_question.Question`+`QuestionQueueManager` 与 `version_control.MemoryVersionControl`，
 # 名字不同）。此前门面用 try/except 把它们降级成 None，谁都没发现；本批把坏指路摘掉而不是
 # 猜一个别名顶上去——要不要以真名再导出＝另一次裁定（台账 §6-201）。
-
-from neurova.cognitive_layers.memory_layer.memory_stream import MemoryStream
 
 # `MemoryCache` 的再导出随批 43 摘掉：`from neurova.memory import MemoryCache` 全仓零消费者
 # （AST 数 ImportFrom(neurova.memory) 的绑定名，命中 0），而这条 import 与缓存模块之间是
@@ -115,9 +111,7 @@ __all__ = [
     "TemperatureEngine",
     "SleepConsolidation",
     "MemoryCompressor",
-    "AgentSelfManager",
     "ConversationBuffer",
-    "MemoryStream",
     "GraphTraversal",
     "UnifiedVectorStore",
     "MemorySecurity",
