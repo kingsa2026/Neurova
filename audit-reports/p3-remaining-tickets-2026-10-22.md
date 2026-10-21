@@ -83,79 +83,47 @@
 
 ---
 
-## 票三｜§6-177 那张甲/乙/丙票的复核：甲案**没落地**
+## 票三｜§6-177 那张甲/乙/丙票的复核：甲案已半落地，缺口换了形状（本格含一次自我作废）
 
-**复算结论（逐条实据）**：
+**先记账上的错**：本节初稿写的是「`market_importer.import_skill` 全程不 import 摘要 ⇒ 市场安装的包没有『门当时的底』，只被装载前 TOFU 首钉兜住」。**那句作废**——它只看了 `market_importer` 一个文件，漏了端点在 importer 之后还有一步 `link_market_skill_to_agent`（`marketplace.py:405-413`），而那一步经 `_writeAgentManifestOutcome`（`market_registry.py:227-245`）走的就是 `install_skill` 那个咽喉。**只查一半就写结论**，是"把审过的面当成全貌"那一族的复发。
 
-1. `skills/market_importer.py:211` 的 `import_skill(...)` 全程**不 import** `artifact_digest`
-   （全档 grep 只命中这一个函数定义行，无任何摘要读写）；它的账本是**每技能一份** `skill.json`
-   （`market_importer.py:130` 按 `skills_dir/*/skill.json` glob 读回）。
-2. 摘要的读者只认 `<技能库>/manifest.json` 这一本账（钉：`skill_service.py:748-749`、`:822-823`；
-   验：`:2014-2039`）。⇒ **市场安装的包没有"门当时的底"**：落地件只被装载前 TOFU 首钉兜住
-   （首钉即采信，等于把第一次装载看到的那份当真相），这正是 §6-176 ① 留的那句"接不接进咽喉
-   是另一次裁定"。
-3. §6-177 那张票的**丙**已被后续批收掉一半（SkillsMP 空装 → 如实拒，§6-188），
-   剩下的是 `market_adapters` 其余 `install` 与 `agent_skill_manager.acquire_skill` 的零调用者处置；
-   §6-177 的**自伤**（往 `skill.json` 钉摘要）已被 `49842ef9` 撤回，理由写得很清楚：那一钉没有读者。
+**活体复算**（`tests/manual/marketTicketThreeDigestPath.py`，真 `create_app()` ＋ 真 JWT，15 读数全 PASS）：
 
-**三态（沿用 §6-177 的口径，加上本批复算后的差异）**：
+- 装 `builtin--multi-search-engine`（内置 bundle 那条**离线**支，不出网）→ 200；账本里**有这一条**、**钉了构件摘要**，且**钉值与运行时目录现算值同源**（读回 `sha256:51124c32…` == 现算 `sha256:51124c32…`）——所以 §6-183 那枚「钉的是影子目录」的形态在市场这条路上**不成立**，安装侧是干净的。
+- **缺口在执行侧的第二条腿**：把运行时目录里的 `SKILL.md` 改一个字节之后——① 注册表那条腿（`market_registry._build_executable_skill(...).execute`，也就是 LLM 真正会走的那条）把**被篡改的指令体照原样交给模型**，且这一趟 `artifact_digest.checkArtifact` **被调 0 次**：不是"检查后放行"，是**根本没检查**；② 账本那条腿（`skill_service.call_skill`）对同一份篡改回 `artifact_digest_mismatch`（带 `expected_digest`/`actual_digest`）拒下来，`checkArtifact` 确实被调并读出 `mismatch`；③ 还原字节后重新一致；④ 校准格：不存在的技能回 `Skill not found`（不是摘要拒），证明 ② 的拒因不是"逢调用都拒"。
+- 另两格否证了自己的推测：`call_skill` 的映射那条腿要求 `_entry()` 在册且执行体由**仓内代码**构造（`buildMappedExecutable`），它不读盘上字节，**不是**第二条敞口；`_register_metadata`（`skill_service.py:1329`）写的条目 `path` 恒为空串，自动/合成技能本就没有外部字节，它不是第三个钉点。
 
-- **甲｜把市场安装接进 `skill_service` 账本咽喉**：装完即经登记落进 `manifest.json`，
-  摘要、权限声明、`enabled` 三件一起才有读者；"装时钉"自动成立，TOFU 不再需要兜第一枪。
-  影响面：`market_importer.import_skill` 的落盘段（`dest = self._skills_dir / skill_id` 之后）、
-  `marketplace.py:426` 的回执语义（现在报的是 importer 自己的 `ImportTask` 状态）、
-  `UI 的「安装完成」文案`——甲改完"完成"才名副其实。代价：动现役安装链，要红灯＋活体真 zip 复算。
-- **乙｜承认它只落文件**：把 `skill.json` 两个写侧退役——**现读** `hub_client.py:556-561`
-  （`_persist_declared_permissions`，它自己的注释就写着「只是留底，全仓零读者」，见 `:510`）与
-  `market_importer.py:320-335`（装完补写安装元数据）。§6-177 原文引的是
-  `hub_client.py:526-535`／`market_importer.py:296-317`，**那两组行号已被后续批挪走**
-  （本票按现读改写；这也说明"台账里的行号"不能当长期引用，引用面要按符号找）。
-  之后市场安装降级为"取包器"，UI 随之如实改文案。
-  代价：现存按 `skill.json` 读回的逻辑（`market_importer.py:130`）一起改；收益：不留第二本账。
-- **丙｜死面另批处置**：`market_adapters` 其余 `install` 与 `agent_skill_manager.acquire_skill`
-  零调用者——按教义第 7 条退役或接线（§6-188 已收 SkillsMP 那一格）。
+**所以票三要拍的不再是"接不接进咽喉"（那半已经做了），而是同一本账的两条腿要不要共用同一道闸**。三态：
 
-**推荐**：**甲**。理由是它让已落地的摘要口径产生读者，而不是再造一本账；
-但甲与乙**不能都做**（两本账并存就是 §6-176 那条"第二份读法"的复发）。拍甲我就按
-红灯先行接咽喉，拍乙我就按退役清单收写侧。
+- **甲｜注册表那条腿也过同一道闸**：`_build_executable_skill` 造出来的执行体在 `execute` 之前对账（口径仍取 `artifact_digest` 那一处，不新建第二份），不符就如实拒。代价：`execute` 有两支形状（映射腿刻意在锁外 await，见 `_callMappedSkill` 那段死锁说明），加对账要给两条腿同一个取径、同一个拒因；收益：**把"扫过的那份字节"与"交给模型的那份字节"真正绑住**——这正是 §6-176 立摘要时的原意。
+- **乙｜把注册表那条腿收进账本腿**：工具面一律经 `call_skill`，不让注册表直接持有执行体。收益是一条腿一个闸、不用两处各写；代价最大——它改的是每次对话都走的面（`ExecutorBackedSkill` 的锁语义、`method` 契约、`registry.register` 的鸭子类型），回归面覆盖整轮回合。
+- **丙｜只在文档与账本上把边界写明**（"完整性只保护账本那条腿"），不改代码。代价：篡改在现实那条腿上仍静默通过，而摘要的存在会让人**以为**已经管住了——这是把名实不符留在原地。
 
----
+**推荐**：甲。乙更彻底但动的是每回合都走的面，应单独一批、先立判据再动；丙等于把"有能力"写成"有能力但请相信它不管那条腿"。不可逆点：甲一落地，"装完之后才被改"的存量技能会立刻从静默通过变成响亮拒——要同时决定这些条目是重钉一次还是先出清单给人看（回填＝一次全库写，与票一同族）。
 
-## 未证到的（刻意不糊，动码前必须补）
+仍然成立、只是不再是本节主角的三笔账：`market_importer` 那本**每技能一份** `skill.json`（`:130` 读回、`:335` 写）与 agent 账本并存，这才是 §6-177 乙案的对象（现读 `hub_client.py:556-561`，其注释自陈「只是留底，全仓零读者」见 `:510`；以及 `market_importer.py:320-335`）；§6-177 的**自伤**（往 `skill.json` 钉摘要）已被 `49842ef9` 撤回，理由写得很清楚——那一钉没有读者；丙案里 `AgentSkillManager` **本体不是**零调用者（`agent_core.py:1550` 构造它），零调用者的只是方法 `acquire_skill`（`:230`，只有测试在调）＝**方法零调用 ≠ 类零调用**。
 
-- 市场安装的包**是否真的**出现在 `skill_service` 的装载/验摘要读路里（即"TOFU 兜住"这句本身成立吗）——
-  要真 `create_app()` 活体：市场装一个包 → 触发 `call_skill` → 看 `checkArtifact` 走的是 `unpinned` 还是
-  根本没被调。本票只读了源码与台账，**没跑这一步**。
-- `market_registry.py:104/117` 的 `_default_market_skills_dir` 与 `market_importer._skills_dir` 是否同一目录
-  （若不同，票三的"没有读者"结论要按两个目录分别复算）。
-- §6-183 的"影子目录"那条更正与票三的关系：它说的是钉在影子目录上，本票说的是**压根没钉**——
-  两句不冲突但边界要一次讲清，别让下一个人以为是两件事。
-- 摘要对符号链接按目标字符串计入、不跟随（`artifact_digest.iterDigestedMembers`）这条口径，
-  在生产目录里从未被真实行使过（判据里有合成样本，生产没有）。
+## 未证到的（刻意不糊；本批复算后已销两条、改两条）
 
----
+- ~~市场安装的包是否真的出现在验摘要的读路里~~ **已证**（`tests/manual/marketTicketThreeDigestPath.py`）：
+  账本那条腿在、**注册表那条腿不在**——见票三。留一条小的没证：`_build_executable_skill`
+  造出的 `SkillDocSkill` 是否还有**别的**调用方（本票只数了注册表注入那一条路）。
+- ~~`market_registry.py:104/117` 的目录与 `market_importer._skills_dir` 是否同一目录~~ **已证**：
+  安装期来源是市场缓存目录，而运行时取径是账本 `path`（实测指向
+  `<数据根>/default/skills/<id>`，与缓存根不同目录）；两处之间由 `install_skill` 的 staging
+  搬一次字节，钉的就是搬完之后那份。
+- ~~§6-183「钉在影子目录」与本票的关系~~ **已证**：市场这条路上钉值与运行时现算值**同源**
+  （活体读数 `sha256:51124c32…` 两边逐字相等），§6-183 那枚影子目录形态在这条路上不成立；
+  它讲的是另一条腿，两件事别混。
+- **仍未证**：符号链接按目标字符串计入、不跟随（`artifact_digest.iterDigestedMembers`）这条口径，
+  在生产目录里从未被真实行使——本票也只改了普通文件字节。要证的是"往构件目录里放一个
+  指向目录外的链接"会不会被现算摘要放过（判据里有合成样本，生产形状没有）。
+- **仍未证**：本票测的是**篡改已装条目**；"换一个**没被扫过**的目录接进账本"（即绕过
+  `install_skill` 直接把 `path` 指到别处）这条路今天有没有生产写口，没查。它是甲案落地后
+  自然的下一个问题，先记在这里，免得甲做完把它当新问题。
 
-## 补证（同日，代码级追踪；**未跑活体，边界写在最后一条**）
+## 补证的去向（一次自我作废的记录）
 
-- **票三的第一条"未证到"被代码级追踪收窄**：`skill_service._skills` 只从 `manifest.json` 装载
-  （`skill_service.py:290-296`），两处钉都写在这本账上（`:748-749` 本地/zip 咽喉、`:822-823` hub 注册），
-  验在 `:2014-2039` 且读的是 `skill_info`（也就是这本账里的条目）。而市场那条链
-  （`market_importer.import_skill`:211 → 落 `skills_dir/{skill_id}` → 每技能写 `skill.json`:335、
-  读回 :130）**一个字都不碰这本账**；`skill_service.install_skill` 的生产调用方只有
-  `api/endpoints/skill_pool_api.py:883/938`（加 hub 那条经 `:804`）。
-  ⇒ 代码级结论：**市场安装的包既没被钉，也进不了 `call_skill` 的验摘要读路**——
-  §6-176 说的"只被装载前 TOFU 首钉兜住"这一句，在市场这条路上**连 TOFU 都兜不到**，
-  因为它根本不经过那道门。
-- **边界（不许越过去写）**：上面只证到"读路上看不到"。没证到"运行期是否有人从别的目录
-  把这批字节 load 进去执行"。要定这句需要真 `create_app()` 活体：市场装一个内置 bundle 条目
-  （离线，`read_builtin_bundle`，不出网）→ 触发执行 → 数 `checkArtifact` 被调几次。
-  **这一步跑完之前，"敞口已量清"这句话不许写**。
-- **§6-177 丙案的两处说法按现读修正**：① `AgentSkillManager` **不是**零调用者——
-  `agent_core.py:1550` 构造它；零调用者的只是它的 `acquire_skill`（`agent_skill_manager.py:230`，
-  调用方只有 `tests/unit/skills/test_agent_skill_manager.py`）。"按名字推断可行性"那族的老形状，
-  这次是**方法零调用 ≠ 类零调用**。② `agent_skill_manager.py:308` 的
-  `logger.info("Skill %s acquired successfully")` 在 `:297` importer 报失败之后仍无条件记成功，
-  属"日志与状态分家"（§6-126/§6-161 同族）。**但它在没有生产调用者的那条方法里**，
-  所以只记在案、不在本档顺手修——修它要先决定丙怎么做（接进来还是退役），
-  否则就是给一条死路补形状（形态集既有条目点名过这一形）。
+本节初稿在此写过一段"代码级追踪"，断言市场那条路"既不钉摘要、也进不了验摘要的读路"，并把"没证到执行侧"那条留在未证到清单里。**追踪方向对、结论错**：它只覆盖 `market_importer`，没覆盖端点在 importer 之后的 `link_market_skill_to_agent` 那一步。改判过程与证据都在上方「票三」一节（`tests/manual/marketTicketThreeDigestPath.py`，15 读数全 PASS），此处不再重复，只留下这条**为什么错**的记录：
 
+按"某个文件里 grep 不到某符号"推"这件事没做"，在多步链路的路由面上一天就会犯一次——**要按接缝取数**（谁把字节交给执行），**不是按文件名取数**。同一族还有本档上面那处：把"方法零调用"读成"类零调用"。
