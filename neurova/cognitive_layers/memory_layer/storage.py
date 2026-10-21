@@ -445,6 +445,28 @@ class MemoryStorage:
             self._save()
             return True
 
+    def _passesIsolation(
+        self, rec: MemoryRecord, isolation_context: Optional["IsolationContext"]
+    ) -> bool:
+        """三层隔离过滤的唯一实现；`query` 与 `list_by_tags` 共用。"""
+        if isolation_context is None:
+            return True
+        if not isolation_context.shared and not rec.shared:
+            if rec.agent_id != isolation_context.agent_id:
+                if not self._in_same_share_group(isolation_context, rec):
+                    return False
+        elif rec.shared:
+            pass
+        else:
+            if rec.agent_id != isolation_context.agent_id:
+                if not self._in_same_share_group(isolation_context, rec):
+                    return False
+        if isolation_context.neuser_id != "default" and rec.neuser_id != isolation_context.neuser_id:
+            return False
+        if isolation_context.user_id != "default" and rec.user_id != isolation_context.user_id:
+            return False
+        return True
+
     def query(
         self,
         memory_type: Optional[str] = None,
@@ -459,28 +481,8 @@ class MemoryStorage:
             results: List[MemoryRecord] = []
             for rec in self._records.values():
                 # 三层隔离过滤
-                if isolation_context is not None:
-                    # agent_id 隔离：共享记忆跳过 agent 检查
-                    if not isolation_context.shared and not rec.shared:
-                        if rec.agent_id != isolation_context.agent_id:
-                            # 检查共享组：如果请求者和记忆在同一共享组，允许访问
-                            if not self._in_same_share_group(isolation_context, rec):
-                                continue
-                    elif rec.shared:
-                        # 共享记忆可以被任何 agent 访问
-                        pass
-                    else:
-                        # isolation_context.shared=True，但记忆不共享，仍检查 agent_id
-                        if rec.agent_id != isolation_context.agent_id:
-                            # 检查共享组
-                            if not self._in_same_share_group(isolation_context, rec):
-                                continue
-
-                    # neuser_id 和 user_id 始终检查
-                    if isolation_context.neuser_id != "default" and rec.neuser_id != isolation_context.neuser_id:
-                        continue
-                    if isolation_context.user_id != "default" and rec.user_id != isolation_context.user_id:
-                        continue
+                if not self._passesIsolation(rec, isolation_context):
+                    continue
 
                 if memory_type is not None and rec.memory_type != memory_type:
                     continue
@@ -517,16 +519,21 @@ class MemoryStorage:
                 results = results[:limit]
             return [r.to_dict() for r in results]
 
-    def list_by_tags(self, tags: List[str], match_all: bool = False) -> List[Dict[str, Any]]:
+    def list_by_tags(
+        self,
+        tags: List[str],
+        match_all: bool = False,
+        isolation_context: Optional["IsolationContext"] = None,
+    ) -> List[Dict[str, Any]]:
         with self._lock:
             if not tags:
                 return []
-            if match_all:
-                wanted = set(tags)
-                candidates = [r for r in self._records.values() if wanted.issubset(set(r.tags))]
-            else:
-                wanted = set(tags)
-                candidates = [r for r in self._records.values() if wanted.intersection(r.tags)]
+            wanted = set(tags)
+            candidates = [
+                r for r in self._records.values()
+                if (wanted.issubset(set(r.tags)) if match_all else bool(wanted.intersection(r.tags)))
+                and self._passesIsolation(r, isolation_context)
+            ]
             candidates.sort(key=lambda r: r.created_at)
             return [r.to_dict() for r in candidates]
 

@@ -9245,3 +9245,29 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：三档的"并/弃"决定与实施（本批不动码）；第 2 组未退役任何一档。
     - **净 LOC**：生产池 +0/−0；测试/基建池 +109/−0（施工单 93＋本格 16）。
     - **本会话下一枚空号现查 §6-376**（写前必须现场重取；本笔落库时该读数为 375）。
+
+376. **重做第 2 组落地：`memory_index` 隔离 tags 并入后退役、`vector_index_manager` 显式放弃异步、`vector_search` 显式放弃持久化** ✅🟢 —— 一笔：一档取长补短＋两档显式放弃
+    - **测量（先量后裁）**：真实库 19 条（default 15＋kai 4）；`UnifiedVectorStore(backend="auto")`
+      索引 p50 **3.4ms**、冷启动 **615.9ms**；合成 5000 条 TF-IDF p95 **292.4ms**。
+      ⇒ `vector_search` 的持久化索引收益不足以抵"索引文件与 DB 两份状态"，按显式放弃处理。
+    - **`memory_index`（277 行）**：把隔离过滤抽成 `MemoryStorage._passesIsolation`，`query` 与
+      `list_by_tags` 共用；`list_by_tags` 新增 `isolation_context` 并加测试（**红自证**：暂时摘掉
+      过滤 → 跨 agent 泄漏；恢复 → 只回本 agent）。`search_by_text`/`get_by_ids`/隔离统计
+      **显式放弃**；随后退役模块与两档专用测试。
+    - **`vector_index_manager`（431 行）**：显式放弃异步（无调用方；同步索引 p95 可接受），
+      退役模块与 M-24 专用测试；`knowledge/vector_index.py` 的"闲置"注释改指本次放弃。
+    - **`vector_search`（726 行）**：显式放弃 pickle 持久化索引；退役模块、`test_vector_search.py`、
+      安全网里的 `VectorSearch` 格与 `neurova/memory` 的导入/`__all__`/别名；活实现
+      `UnifiedVectorStore` 承担；`02-memory-system.md` 同步改指。
+    - **红→绿**：`list_by_tags` 隔离格摘过滤红→恢复绿；三个 `find_spec` 退役格删前红→删后绿；
+      组件表下限 100→99（本批现值 99）。**A/B**：`AB_PASS`｜基线 9 failed+1 error（1332 passed）↔
+      本树 5 failed（1299 passed）｜仅本树红 0；仅基线红 5＝本批 4 条新判据＋decay 顺序/环境格（不认领）。
+    - **活体**：真 app `/health` 200；`MemoryStorage.list_by_tags` 只回本 agent 的 "A"；
+      `UnifiedVectorStore` 对 PostgreSQL 查询首命中 v1；真 recall 命中 PostgreSQL；
+      三档导入均 `ModuleNotFoundError`；`neurova.memory` 不再有 `VectorSearch`；`data/` 指纹前后同。
+    - **文档**：组件表 **102→99 模块／44696→43269 行**（在役 54／仅层内 37／仅测试 3／零读者 5）；
+      `02-memory-system.md` 的向量后端改指 `UnifiedVectorStore`；施工单补实施记录。**子集 654→655**。
+    - **净 LOC**：生产池 +37/−1468；测试/基建池 +98/−571。
+    - **仍开**：第 3 组（四旋钮其余、A1/A2、security/temporal_reasoner/agent_self/memory_stream）；
+      等裁七条＋`permissions` 声明＋Z1–Z4/Z6。
+    - **本会话下一枚空号现查 §6-377**（写前必须现场重取；本笔落库时该读数为 376）。

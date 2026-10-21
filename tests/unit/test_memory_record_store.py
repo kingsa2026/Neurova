@@ -50,6 +50,18 @@ class TestMemoryRecordStore:
         assert store.exists(memory_id) is True
         assert store.exists("nonexistent_id") is False
 
+    def test_list_by_tags_respects_isolation(self, store):
+        """list_by_tags 与 query 共用同一隔离过滤（从 MemoryIndex 并入的独有部分）。"""
+        from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
+        ctx_a = IsolationContext(agent_id="agent_a", neuser_id="neu", user_id="u1")
+        ctx_b = IsolationContext(agent_id="agent_b", neuser_id="neu", user_id="u1")
+        store.save(content="A", memory_type="episodic", tags=["t"], isolation_context=ctx_a)
+        store.save(content="B", memory_type="episodic", tags=["t"], isolation_context=ctx_b)
+
+        rows = store.list_by_tags(["t"], match_all=True, isolation_context=ctx_a)
+
+        assert [r["content"] for r in rows] == ["A"]
+
     def test_save_with_isolation_context(self, store):
         """测试带隔离上下文的保存"""
         # Given: 隔离上下文
