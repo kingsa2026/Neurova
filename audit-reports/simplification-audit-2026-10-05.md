@@ -9588,3 +9588,53 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       摘除。③ `temporal_reasoner` 依 §6-380 裁定保持不动，TM-3 若要用它须另批按该票三态走。
       ④ 外部对比档里 TM-1..TM-6 的其余项均未开工（用户已授权整序，按序自取）。
     - **本会话下一枚空号现查 §6-382**（写前必须现场重取；本笔落库时该读数为 381）。
+
+382. **TM-2a 批 A 落地：规则联想线索并进词法倒排（机制到位，读数不动是本笔最贵的结论）** ✅🟢 —— 一笔记账、一笔登记
+    - **落点**：`1665fcfd`（新模块 `memory_layer/association_cues.py` 271 行、`manager.py` 迁移
+      v4 + 写侧派生 + 消费 + 读数、`semantic_search.py` 两个入口加线索形参、`neurova_recall.py`
+      重建调用点、判据 `tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py` 310 行、
+      子集 +1 条）。上游：研究档 `00ff036f`、判据集 `8d372ca2`（§6-381）、工单 `adc4c4b2`。
+    - **为什么先做机制**：研究档实测复算出外部那条链的写入成本是 ≈2.1 次模型调用/轮，且它无增量
+      写入路径；本仓写侧显式 $0。故本批只落「线索存储 + 同刀并索引 + 作用域门 + 渲染面沉默 +
+      全量重建带线索图」，内容留给你已裁的丙档（模型生成）。
+    - **本笔最重要的读数（不主张能力提升）**：TM-1 判据集在批 A 落地后**一字未动**——
+      hit@1=2/10、hit@5=6/10、MRR=0.35、ranks 与基线逐位相同，故**棘轮基线不上抬**（抬了就是抄一个
+      没发生的改进）。原因量出来了：26 条规则线索只含 **2 个不同归一键**（episodic 行一律派生
+      「发生过的事 / 经历」），10 条联想查询无一含这两个词。根因是仓内结构化词汇的键全为英文
+      （`MemoryCategory` 等），而词法倒排吃中文 2–4 字串（`semantic_search.py:113-119`），
+      英文标签对中文查询不可达 ⇒ **内容才是瓶颈，机制已就位**，丙档是抬读数的唯一路径。
+    - **迁移面复核（不沿用旧文档口径）**：`_initPersistDb` 里 `applyMigrations(conn,
+      MEMORY_BODY_DOMAIN)` 是本域唯一咽喉，实测新库 `PRAGMA user_version` 由 0 升到 3
+      （`memories_fts` 随之长出），v4 走同一条路——此前一处 grep 误判「注册表零调用者」，
+      原因是调用被别名为 `applyMigrations`；判「在不在生产路上」按别名后的真名核，形态入下条。
+    - **三个当场抓到并留了判据的假绿/静默形态**：① INSERT 绑定参数少一个（11 占位符配 10 值），
+      被 `remember` 的 fail-soft 吞成一行 warning——记忆照写、线索恒空、测试全绿；新增判据同时盯
+      「有线索」与「无线索告警」。② 机制判据第一版「查一次看它在不在结果里」是恒真的（13 行语料
+      配 limit=12 等于把全库交回来），**活体反证**（摘线索必须捞不到）把它抓了出来，遂改差分判据。
+      ③ 探针一度用本模块自带的分词器选词、而索引用的是生产 `_extract_keywords`——两把刀切法不同，
+      判据红在「写侧一套词、读侧另一套词」这个本批正要防的形态上；改为查询取线索原文、两侧同刀。
+    - **活体**：`CUE_BATCH_A_LIVE_OK version=4 cues=26 probe=发生过的事`；
+      `KEYWORD_REACHABLE cues_on=True` ↔ `REVERSE_PROBE cues_off=False`（差分咬得住，非白给）；
+      `RELOAD_PROBE cues=2`（关库重开，线索随倒排一并回来）；统计面 `association_cues` 读数非零，
+      且该面被 `GET /v1/memory/stats` 真读（`api/endpoints/memory/crud.py:118-125`）。探针即用即删。
+    - **A/B 与一笔登记（不认领也不放过）**：`ab_compare.sh -k HEAD` 报 AB_REGRESSION 1 条 =
+      `test_memoryBusSingleSource.py::testOnlyOneEventBusImplementationRemains`。逐条甄别后不归本批：
+      该守卫按仓根枚举 `class EventBus`，本树读到 3 份，多出的两份在
+      `NeurUI/src-tauri/resources/backend/**` 与 `.../target/release/backend/**`，落盘
+      2026-10-08 01:46（早于本会话 13 天），且被 `.gitignore:367` 与 `NeurUI/src-tauri/.gitignore:3`
+      忽略——仓外 worktree 基线里没有这些文件，于是基线读 1 份、本树读 3 份，**集合差是环境差不是
+      代码差**。但它暴露该守卫枚举面的真缺陷：应按「是不是 gitignored 打包副本」排除，口径与
+      §6-380「NeurUI 下 Tauri 打包副本被 .gitignore 忽略，不是源码」一致。**另批修枚举面，
+      不在本批加豁免名单**（本条即登记，防静默遗留）。基线独有的 10 failed+1 error（含
+      `test_lock_coverage_m060709` 的 ERROR）在本树绿，同属环境差异，不认领为修复交付。
+    - **净 LOC（逐文件 numstat 复算）**：生产池 **+509/−19**（association_cues +271／manager
+      +224−5／semantic_search +27−13／neurova_recall +6−1）——为正的去向已在提交说明逐条列明；
+      测试/基建池 **+314/−0**；文档/台账池 +本笔。子集 **662→663**。
+    - **未闭环（明确不冒充完成）**：① 批 C（丙档：空闲窗口段落级模型生成，`wait_for` + 每轮计数 +
+      一键关断）未开工，`test_零词面情境查询经线索命中` 仍以 strict xfail 挂着，达成时 XPASS 变红
+      逼摘标记；② 批 B（`recall_with_associations` 别名与 `schema.py` 死 DDL 收口）未开工，
+      线索命名已刻意避开 `trigger_chains`，但那份死 DDL 仍在册；③ §6-381 未闭环①的
+      `longmeval_simple.py` 三态票仍等人裁；④ `temporal_reasoner` 依 §6-380 保持不动。
+    - **本笔是 §6-381 之外欠的那格**：并发会话已把它的台账段落落库（工作树收敛），故按
+      「等对方落库后再提自己那格」补写，不与他人抢同一文件。
+    - **本会话下一枚空号现查 §6-383**（写前必须现场重取；本笔落库时该读数为 382）。
