@@ -2878,6 +2878,99 @@
     - **净 LOC（提交内 `git show --numstat` 复算，与正文逐字一致）**：生产池 **+5/−2242（净 −2237）**；判据池 **+305/−1338（净 −1033）**；文档池 **+37/−24**；基建池 **+8/−0**（7 行说明 + 1 条路径，按整档 CRLF 落）。工作树同时有别会话在途件（`turn_context.py`、`plugins/*`、`chat.py`、媒体回收站一批、11 locale），两笔均逐路径 `--only`，未用 `git add -A`。
     - **仍留在案上（不在本批顺手做）**：`core/multi_agent_manager.py`(453)——它是唯一会调 `decompose_intent/execute_plan` 的地方（`:221-223`），但走的是鸭子类型注入、不 import 那三只，故本批退役没留下悬空 import；它自身生产零消费者，且那条 `else` 分支在没人注入时直接回 `{"success": True}`（又一次"没执行却报成功"），另案待裁——**此案已取证＝§6-308**（整座岛零 import，三态票推荐乙）**⇒ 已按乙落批＝§6-309**（`82746965`，整座岛连同两座专用测试 1212 行一并退役）。`api_router` 整模块零生产 import（§6-135）与 `media/config.py`、`language/` 那几格需人裁仍未裁。
 
+167. **裁定「先取长补短再退役」落地：仓内四份「某人默认看什么语言」收口到语言层一处（✅ `1b8c2965`，两档新判据 32 格同笔入子集，前端 2087 passed / vue-tsc 退出码 0）**
+    - **这一格是 §6-160 留的那笔**：「全局默认与按人偏好是否收成一层＝另一次裁定」。
+      复算后不是两层而是**四份定义**（逐条 file:line 现取）：(A) `core/app_settings.py:27`
+      `GENERAL_DEFAULTS["language"]="zh-CN"`、(A′) `api/endpoints/settings.py:37` 同一面的**第二个同名键**
+      （一次 `GET /settings` 顶层一份、general 一份）、(C) `core/settings_manager.py:42/89-120`
+      `get/set_user_language` 那套按人第二词汇（把 `f"user_{uid}_language"` 塞进自己的 JSON，
+      不归一语言码、无 HTTP 面）、(D) `core/user_workspace.py:100` 工作区默认那格——
+      **(A)(A′)(C)(D) 的生产读者全部 0 处**（(C)(D) 只被自己的测试喂），唯一有真读者的是
+      (B) `language/manager.py`＋`language_api.py`（§6-160 落的按人偏好层：前端 `setLocale`／
+      `syncLocaleFromServer` 在消费，语言码有单点归一、写面有属主门与 400 点名）⇒ (B) 当选定单点。
+    - **四份里唯一不可替代的东西是 (A) 的那个语义**：管理员可以替「还没表达过偏好的人」
+      定一个起点。(B) 里没有这一格，所以按教义第 7 条**不能一删了事**，也不能两边都留着
+      再加个同步脚本（教义第 6 条）。比完的处置是混合形态：**取那一个语义，退那四份词汇**。
+    - **取**：起点进 (B) 的**同一份存储**——`language_preferences.json` 顶层新增一个**可选 `default` 键**。
+      两处刻意不做的动作各有理由：① **不抬 `PREFERENCES_STORE_VERSION`**——抬版本会让今天已落盘的
+      每条按人偏好被自己的版本隔离逻辑改名隔离，那不是兼容是凭空丢真数据；② **不占
+      `preferences` 表里的用户行**（用一个保留属主名 `__defaults__` 只活在内存那条读数上）——
+      占了就会混进「多少人设过偏好」的计数，而 `configured` 会把一个替所有人做的决定
+      报成本人做过的决定。判据 `testTheDefaultIsNotStoredAsAUserRow` 钉这条边界。
+    - **接**：解析链三格 `本人偏好 → 开箱默认 → 枚举级 last resort`（`resolvePreference`），
+      **并把来源一起交出去**：`EFFECTIVE_SOURCES = ("user","out_of_box","builtin")` 是全仓唯一定义处，
+      HTTP 面与 UI 都取它——不点名来源，「管理员定的起点到底生效了没」在生产里就不可观测，
+      而这条链在收口之前**正是靠不可观测活着的**（四份默认值谁都没读过它）。新面
+      `GET /preferences/default`（登录可读）／`PUT /preferences/default`（**仅管理员**，与覆盖层写面
+      同一档：任意登录用户可写＝任意人替所有人定界面语言）；`GET /preferences/mine` 改走这条链，
+      读数把 `configured`（他自己做过决定没）与 `source`（这条读数谁给的）**分开给**。前端三处：
+      `stores/app.ts` 的 `syncLocaleFromServer` 让起点**真的作用到人身上但不回写成偏好**（回写就把它
+      冻住，以后管理员再改也不再作用于他，实测格 [10]）；`SettingPage.vue` 那格 general 语言下拉
+      改指新面并自带保存按钮，`saveSection('general')` 的提交体不再带 `language`，那次顺带
+      `setLocale(..., persist=false)` 的副作用一并删（管理员替所有人选 ≠ 替他自己选）；
+      11 份 locale 各加两格（`settings.outOfBoxLanguage`／`…Hint`），按 i18n 对齐纪律一次加齐。
+    - **退（摘默认值不够，必须连写口一起拒——本批新记的第一枚形态）**：`PUT /settings` 的 body
+      是 `Dict[str, Any]` 且**没有闭集校验**（实测旧调用方写 `"zh_CN"` 这种下划线码也回 200），
+      所以只删默认表的话旧调用方仍能把 `general.language` 原样写回盘上、再被 `GET` 原样回显——
+      得到一根**只写不读**的新断链，**比退役前更糟**（原先它至少还有个默认值陪着）。按教义第 2 条
+      改成显式 400 并给出去处，且**三处写口逐一拒**（整表 general 段／整表平铺键／单键 PUT，
+      漏一处旧键就从那里活回来，教义第 5 条）；整表那次还**先整批校验再落盘**——边校验边写会
+      得到「第 2 项被拒、第 1 项已经写进去了」那种没人打算要过的中间态（活体 [26] 按字节比对，
+      判据 `testNothingWasPersistedForTheRejectedWrites` 先做一次合法写入再比，免得文件不存在时空转）。
+      读数侧另钉一条边界：盘上残留的旧键**不回显**，但一次 GET **不改写**那个文件——把读操作
+      变成一次不可逆的「清理别人的盘」是另一类错。同根因的第二、三套实现（(C) 两条方法整段删净
+      含两处 key 白名单与默认字典那格，净 −30；(D) 默认配置摘键）逐格验真消失，其配套测试同批改指
+      仍活着的键（`timezone`/`workspace`）而不是连覆盖一起删——那 10 个用例测的是持久化／按用户
+      隔离／重置／损坏回落，**不是**语言。
+    - **判据（后端两档 32 格入子集 ＋ 前端 15 格）**：问的不是「有没有新端点」，而是四件事一起成立：
+      ① 解析链给来源；② `configured` 与 `source` 分家；③ 落盘是可选顶层键、版本不抬、不占用户行、
+      写失败双向回滚；④ 来源词汇只有一处定义（按 AST 只认字符串常量、带双侧对照：合成样本两形
+      必点名、三个真近邻不得误报）。退役面另加形状扫描一格，口径**收在那四张默认表所在文件**上——
+      `language` 这个键名在生产码里还服务于编程语言／播报语种（neurflow 模板），全仓一刀切会把
+      无关命中算进来或逼出一份会过期的豁免名单；同档配一格变异对照证明它抓得住「把键加回去」。
+    - **红→绿→红自证→反证→A/B→活体**：32 格先打在未改的生产码上 **29 failed / 3 passed**，红句落在
+      行为断言（「没选过的人拿不到起点」「写失败没回滚」「拒收没给去处」），不是 import／collection
+      墙；那 3 格红侧**空转**且逐条点名（两枚是变异对照，本就该两侧绿；第三枚「一次 GET 不改写文件」
+      是边界格，旧码同样不改写，它只防未来）——登记在此，免得日后当成「一直在守着」。红自证＝路径级
+      stash 掉那六件生产面复跑 ⇒ 恰 29 格翻红，pop 后 numstat 逐条回到 103/−3、50/−2。反证一枚：
+      把 `_merged_settings` 的 `return _dropRetiredLanguageKeys(settings)` 摘成 `return settings` ⇒
+      `testMergedReadoutCarriesNoLanguageEvenWhenPlantedOnDisk` 单条翻红，还原后按字节 MD5 一致。
+      活体 `tests/manual/languageFace_outOfBox_batch167.py`（真 `create_app()`＋**真 JWT**＋
+      `isolatedDataRoot()` 单点，不调 LLM）**36 读数全 PASS／exit 0**：`pt-BR` 归一成 `pt`→顶层 `default`
+      键落盘而 `preferences` 里没有哨兵行→没选过的人 `source=out_of_box` 而 `configured` 仍 false 且
+      没被写成偏好行→有人自己选过则压过起点→**换一个进程**读回同一条起点与同一个人的偏好→管理员
+      再改起点只作用于还没选过的人→三面拒收后盘上字节不变而合法邻座键照样写得进且真落盘→
+      (C)(D) 在活进程里确实不存在→本批动过的那个面的门实测 **401/401/404**（带一格 404 校准，
+      免得把「逢路径都拒」当成门）→仓库 `data/` 指纹逐字节相同、最近 5 分钟零改写。
+      A/B：本树四族 `tests/unit/api`＋`tests/language`＋`tests/test_api`＋`tests/unit/core`
+      **4444 passed / 25 failed / 8 errors**；把 14 份带红的现役档在 HEAD 仓外 worktree 同选型复跑
+      ⇒ 基线 **25 failed / 8 errors**，两侧失败 ID **集合差为空**（仅基线红 0、仅本树红 0）
+      ⇒ 那 33 条全属预存，本批一条没添。前端两道实跑门：`npx vitest run` **259 files／2087 passed／
+      exit 0**（§6-160 时 2072，+15 为本批新格）、`npx vue-tsc --noEmit` **exit 0**。
+    - **本批新记的第二枚形态（顺带闭一笔自己欠的账，不是别人的）**：批 16 落的
+      `tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py`（`266eb9d5`）里那只
+      `time.monotonic()` 轮询护栏**从未登记进时钟口径台账**，`tests/unit/ci/test_clock_caliber_ledger.py`
+      因此自那笔起**常驻红**。同时纠一句自己写错的话：批 16 的提交说明写「本机 5 格 node 红属环境」，
+      那次 `tests/unit/ci` 实为 **6 failed**——第 6 条就是这一条，当时按条数没逐条对号，
+      把一条自产的常驻红混进了环境红里。形态：**「已知环境红」的计数必须逐条对号到测试 ID**，
+      否则环境红会替自产的常驻红打掩护（与 §6-149 那条「预存失败要逐行比对」同族的新出口）。
+      另一枚小的：同名函数台账被一个**不必要的 helper 名**推高——新判据里那只 fs 遍历器起初叫
+      `walk`，与 `i18n/__tests__` 里那只同名 ⇒ 「含测试·跨文件同名」从 125 涨到 126；按 §6-160
+      那次的处置**改自己的名字**（`collectVocabularyHits`）而不是接受新读数——同名不都是错，
+      但为省一个名字造一次同名是。
+    - **净 LOC**：生产池 **+424/−85（净 +339，逐条去向见提交说明）**；判据池 **+1229/−58**
+      （后端两新档 548 行 32 格＋活体 263 行 36 读数＋五处现役档改判；前端新档 202 行 8 格＋
+      两处现役档补 11 格）；基建池 **+30/−0**（两档入子集，入册前逐文件单跑两次同读数
+      17 passed 6.27s/5.63s、15 passed 2.01s/2.00s）；文档池 **+13/−5**。
+    - **留在案上（登记不静默）**：① 盘上已存的 `general.language`／顶层 `language` **不主动改写**
+      （那是别人的数据，且一次 GET 顺手「清理」是不可逆写）——退役形态是「不回显＋不收新写」，
+      迁移入口＝管理员在新面上重设一次；② `docs/09-dev-progress/architecture/frontend_architecture_guide.md`
+      §4 整节写的是 i18next＋`LanguageContext.tsx`＋`src/locales/*.json` 这套**本仓不存在**的形态
+      （第五份词汇的风险源，那节连默认值都写着 `"en"`），本批只在节首加了名实标注并指向实况，
+      **整节按实况重写＝另一刀，待点单**；③ `docs/02-api/API_REFERENCE.md` 附录「无需认证」整表
+      仍未逐模块复核（§6-158 那笔账一寸没变），本批只改了自己动过的 `/api/v1/settings` 那一行
+      并按实测写（401/401/404）；④ 覆盖层编辑 UI 与插件 P4 前端仍未起（§6-160/§6-159 留案不变）。
+
 168. **渠道双向语音立项后的第一段：出站音频接上（缺口②），顺带根修飞书那层从没跑过的上传（✅ 缺陷 `9b547ea2`、能力 `8f1688fe`、子集 `0e65fb39`）** 🟢
     - **立项背景**：任务 #27 的三项缺口由 §6-108 记档（当时判"新能力，需用户立项"）。本批按"开始做渠道双向语音"起手，先做**出站**这一段——理由是复算后它的根因最干净：`tests`/`neurova` 里传输层早就支持类型化回发（`manager.send_message(message_type=...)` 在 `manager.py:217-263`，全部适配器签名齐备且有契约测试 `test_b4_gen1_send_signature.py` 钉着），而回合的 TTS 产物**已经生成好了被丢掉**：`post_chat_pipeline._step_generate_tts:1245` 落盘 WAV → `chat_pipeline.py:2933` 放进 `resp["audio_path"]` → `channel_router` 只取 `resp["text"]`，回发也不传类型。所以这不是"再造一套出站机制"，是把断掉的两处调用点接上。
     - **契约与两道闸（`neurova/channels/voice_egress.py`，唯一定义处）**：出站形态三值 `none`/`audio_file`/`voice_bubble`；默认 `none` 是安全侧。闸一（回合侧）只认"文件真在位且非空"；闸二（渠道侧）认适配器能力。**分成两道的原因**：丢弃这件事必须发生在有适配器实例、能写清渠道名的地方，在回合侧丢就只能静默。为什么要有这个模块而不是各适配器自判：那是第二份词汇表（P2 给插件造出与 `skills/permissions.py` 并列的第二份权限词汇，同族教训）。
@@ -4674,6 +4767,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 | `3a203d30` | 裁定「落盘状态 + 只发现不装载」落地：插件登记状态与 `enabled` 跨重启、`loaded` 刻意不落。生产池 **+149/−4**（`plugin_manager.py` 133/0 状态读写＋四动作落盘＋删除先写盘＋坏文件隔离＋版本不映射｜`plugin_route_mount.py` 6/3 全在 docstring，把"新进程通常无事可做"改到"逐条如实拒挂 `entry_not_loaded`"｜`endpoints/plugin.py` 10/1 两档读数＋三档 500）；判据池 **+488/−0**（14 格 308 行 + 活体 180 行）；基建池 **+14/−0**（入册前单跑两次同读数 14 passed 1.98s/2.22s）；文档池 **+14/−0**。红＝打在未落盘的生产码上 **12f/2p**（红句在行为断言；其中删除格与幽灵记录格红侧**空转**，转绿后才有牙——如实登记）；活体真 `create_app()` **15 读数全 PASS**（含第二个进程读回 `enabled` 在而 `loaded` 不在、拒挂后状态不被失败回放抹掉、坏文件改名隔离、仓库 `data/` 零改写）；反证一枚 `_persistState()`→`pass` ⇒ 活体 5/8/11b 翻红、还原 MD5 一致；A/B 基线 **210p/30f/3e**（集合 36）↔ 本树 **226p/14f/3e**（集合 20）**仅本树红 0 条 ⇒ AB_PASS**，宽口径那 1 条"本树独有"归因别会话 §6-163 在途件、不认领。留案：P4 UI 未起（状态面今天只有 HTTP 读者）、`AuditLogger` 落点仍在数据根外 | §6-164 |
 | `3158a9e3` | 裁定「退役 shim，旧集成档另批分流」落地：`neurova/skill/` 整包删除、`test_full_chain.py:227` 改指 `neurova.skills`。生产池 **0/−45（净 −45）**；判据池 **+145/−1**（8 格 143 行 + 那一行改指）；基建池 **+14/−0**（入册前单跑两次同读数 8 passed 10.93s/11.31s）。取证三条：生产消费者 0／唯一测试消费者要 `create_default_skills` 而 shim 映射表里根本没这符号（实测 `ImportError`，**它替一条必失败的路径背书**）／两个别名在选定单点 `neurova.skills.models` 仍在。按教义第 7 条比-取-接-退四步逐条走完。**新记一枚形态**：只删 `__init__.py` 会留下**隐式命名空间包**，`import neurova.skill` 照样成功 ⇒ 判据必须断**目录**不存在并把 AST 探测做双侧对照（合成样本两形必点名、三个真近邻不得误报）。红＝shim 取回＋import 未改指 **4f/4p**，只取回 shim **3f/5p**（少的那格红在消费方而非本体，两形都实测）；A/B 同上一笔那一轮，本批 4 格在"仅基线红"逐条对号、仅本树红 0。**另批待做已登记**：`test_full_chain.py` 预存 14f/2p/3e 的病根是 `route()` 异步化而用例仍同步调（改指后那格红句换成 `'coroutine' object has no attribute 'success'`），本批不顺手宣称修好。台账号 165 的现查过程见本格正文（163/164/166 各已被在途件或提交占用） | §6-165 |
 | `9563eb78` | 裁定甲落地：身份通道合并成一条——`neurova_turn_user_id` 与 `get_turn_user_id()` 退役、三处门面签名去 `user_id`、`channel_router` 改写发送者、会话属主改由 `meta["session_owner_id"]` 显式传（取法单点 `post_chat_pipeline.resolveSessionOwner`）、`MemCore.save_to_session` 不再从环境猜。生产池 **+116/−55（净 +61）**；判据池 **+963/−211**（新档 15 格 + 22 档改判 + 活体 11 读数）；基建池 **+3/−0**。两处语义变更按裁定落成「渠道 usage／按日配额改按发送者计、camofox profile 池按发送者各开一只」，H-W0 那条「渠道会话在属主控制台可见」由显式参数保住（判据两格 + 活体四读数）。红＝HEAD worktree 铺入本批判据 **22f/52p**（红句在行为与形状断言上）⇒ 绿；A/B 同选择集 基线 **61f/3873p/8e** ↔ 本树 **32f/3902p/8e**，**仅本树红 0 条 ⇒ AB_PASS**，34 条仅基线红逐条对号（29 条应有红 + 5 条 `grep ^ERROR` 把捕获日志算进错误集）；相邻两批的活体脚本复跑仍全过。**两枚形态记档**：桩件替旧契约背书第二次出现（处置＝让测试复用生产那个取法函数，不是给测试补参数）；本批自伤的 `owner` 先读后赋值被渠道判据族当场抓出（＝改了哪个模块必跑那个模块的判据族）。留案三条：运行台账的属主键与额度键从此两个人、`list_sessions` 两条读路的 `session_id` 字形不一致（非本批引入，已登记）、渠道 UI 未浏览器实跑 | §6-163 |
+| `1b8c2965` | 裁定「先取长补短再退役」落地：仓内四份「某人默认看什么语言」收口到语言层一处。**比**（逐条 file:line：`app_settings.py:27` 与 `settings.py:37` 两份全局默认＋`settings_manager.py:89-120` 那套按人第二词汇＋`user_workspace.py:100` 那格，四份生产读者全 0 处；唯一有真读者的是 §6-160 那层）→**取**（起点进同一份存储的可选顶层 `default` 键：**不抬版本、不占用户行**，各有硬理由——抬版本会让已落盘的按人偏好被自己的隔离逻辑改名隔离＝丢真数据）→**接**（`resolvePreference` 三格链并把来源交出：`EFFECTIVE_SOURCES=(user|out_of_box|builtin)` 唯一定义处；`GET/PUT /preferences/default`，写面仅管理员；`mine` 的 `configured` 与 `source` 分开给；前端 `syncLocaleFromServer` 让起点作用到人但**不回写成偏好**、`SettingPage` 那格改指新面且 general 提交体去掉 `language`、删那次副作用；11 locale 各加两格）→**退**（两份默认表摘键＋`settings_manager` 两条方法删净含两处白名单、`user_workspace` 摘键；**摘默认值不够**：`PUT /settings` 无闭集校验，旧键能被写回再被回显＝只写不读的新断链，故三处写口逐一 400 并给去处、且整批先校验再落盘；读数不回显残留但**不改写**那个文件）。生产池 **+424/−85（净 +339，逐条去向在提交说明）**；判据池 **+1229/−58**（两新档 32 格＋活体 36 读数＋五处现役档改指仍活着的键；前端 15 格）；基建池 **+30/−0**（入册前单跑两次同读数 17p 6.27s/5.63s、15p 2.01s/2.00s）；文档池 **+13/−5**。红 **29f/3p**（3 格空转逐条点名：两枚变异对照本就该两侧绿、一枚边界格）⇒ 红自证退六件生产面恰 29 格红 ⇒ 反证 `_dropRetiredLanguageKeys` 摘掉⇒那条回显格单条翻红、还原 MD5 一致 ⇒ 活体真 JWT **36 读数全 PASS×exit 0**（含换进程读回、拒收后盘上字节不变、settings 面门实测 401/401/404 带一格 404 校准）；A/B 四族本树 **4444p/25f/8e**，14 份带红档在 HEAD worktree 同选型复跑⇒基线同 25f/8e、**集合差为空**；前端 **259 files/2087 passed/exit 0**＋`vue-tsc` **exit 0**。**闭一笔自己的账**：批 16 那档（`266eb9d5`）的 `time.monotonic()` 轮询护栏从未登记进时钟口径台账⇒该守卫自那笔常驻红，本批补记并**纠正**「5 格环境红」那句（那次 `tests/unit/ci` 实为 6 failed，第 6 条即此条，按条数没逐条对号＝环境红替自产常驻红打了掩护）。留案四条：盘上残留不主动改写（迁移＝人重设一次）、`frontend_architecture_guide.md` §4 整节是本仓不存在的形态（只加名实标注，重写＝另一刀）、`API_REFERENCE` 附录「无需认证」整表仍未逐模块复核、覆盖层/插件 P4 UI 未起 | §6-167 |
 | `9b547ea2` | 顺带发现的缺陷单列修完：飞书媒体上传**从未发得出**——`upload_file`（现 `:88`）/`upload_image`（现 `:34`）把 `files=` 传给不收该参、且恒带 `Content-Type: application/json` 的 `_feishu_request`，一调必 `TypeError` 再被外层 `except Exception` 吞成"记 ERROR、返回 None"。为什么没人撞上：这个 Mixin 是**孤儿**（`FeishuAdapter` 只继承 `AuthMixin`，类文档自陈两者"均为孤儿"；两处上传生产调用为 0）⇒ 不是"看着能用"，是从没被调用过（§6-157 那形的又一例）。根修＝新增 `AuthMixin._feishu_multipart`（只带 Authorization，boundary 交给 requests），**两处同根一次修完**并按 §6-93/§6-99 那族先例下沉 `asyncio.to_thread`（提交正文当时把出处写成"P1-6"，那是记忆段 token 换算那一笔，引错了——历史不改，此格记正）。判据 5 格用**本地回环真 HTTP 桩**验发出去的字节形状（multipart 还是 JSON）、文件内容真到对岸、"文件不在位则一跳都不发也不返回假 key"，另两格按 AST 查 `to_thread` 并配反向对照。红 3f/2p（读数就是那条 `TypeError` 与非 multipart 头）→ 绿 5 passed；红自证＝还原两个生产档 ⇒ 恰 3 格翻红；同族 597 passed 无回归。生产池 +41/−8、判据池 +163/−0 | §6-168 |
 | `8f1688fe` | 出站音频接上（缺口②）：**TTS 不是没做，是做完被扔**——`_step_generate_tts` 已落盘 WAV、`chat_pipeline.py:2933` 已放进 `resp["audio_path"]`，而 `channel_router` 只取 `resp["text"]`、`manager._dispatch_message` 回发不传类型；传输层其实早就支持类型化回发（`manager.py:217-263` ＋ 全适配器签名 ＋ 契约测试 `test_b4_gen1_send_signature.py`），所以本批只接两个调用点、不另造出站机制。契约单点 `voice_egress.py`（形态三值、默认 `none` 安全侧、**两道闸分开**：回合侧只认文件真在位、渠道侧认能力——分开是因为"丢弃"必须发生在有适配器实例能写清渠道名的地方）；`manager` 新增 `_sendReplyItems`/`_sendVoiceReply`（不支持则**点名不发**，并把手处理器链与单处理器回退两处重复发送循环合并成一条，−19＝那两段，§6-153"改一处漏一处"同族）；`feishu` 声明 `audio_file` 并实现两跳（挂上孤儿 `MediaMixin`，配合上一笔修好的上传）——**刻意不声明 `voice_bubble`**：那要 opus 且本仓无转码链路，写进去就是假事实。判据 12 格含"声明了能力必须真调用上传面"的 AST 反查与"契约项不得继承 str"。红 6 failed → 绿 12 passed；红自证两步（还原 router/manager/base ⇒ 3 格翻红且无 AttributeError；飞书用变异验牙 ⇒ 两跳顺序与 AST 格同翻红）；A/B 基线 6f/755p ↔ 本树 761p、本树独有 0；活体真链路四段（真 mock TTS 出 32044 字节 RIFF、真 router、真 manager、真 FeishuAdapter 到 127.0.0.1 桩，agent 本体用替身以免花 LLM 额度）。**三枚形态记档**：判据在"改前"会走到另一条分支而**真发出一次外网 token 请求**（根修＝`api_base` 与 `open_base` 都钉本地桩，判据不许有任何通向外部的出口，包括它本不该走到的那条）；基线只拷判据不拷新契约模块 ⇒ collection error 的红不算红；直调本批新 helper 会让"改前"红退化成 AttributeError，改走真入口 `_dispatch_message` 才算行为红。另自纠一处：能力唯一来源那格第一版按值扫字符串，`"none"` 咬掉 `websocket.py` 三处无关字面量（本卷"文本包含两头失真"复发），改成按赋值形状判。生产池 +212/−20、判据池 +639/−0 | §6-168 |
 | `0e65fb39` | 上述两档入受保护子集（基建池 **+11/−0**＝9 行说明 + 2 条路径，按整档 CRLF 落；入册前逐文件单跑两次同读数 12 passed / 5 passed；登记前后 `test_dev_path_and_runtime_dep_guards.py` 39 passed）。还掉的质量债是实质的：`tests/unit/voice/` 15 档多为 mock/hasattr 而**子集里此前零条渠道语音判据**——"语音闭环"这句话从来没有判据真验过；这两档是这条链第一批常驻证据，尤其要钉住"上传的字节形状"，否则一旦有人只接 `message_type` 不验字节，渠道永远收不到音频而测试全绿 | §6-168 的常驻面 |
