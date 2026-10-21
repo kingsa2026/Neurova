@@ -73,6 +73,10 @@ class ModelInfo(BaseModel):
     capabilities: List[str] = []
     context_window: Optional[int] = None
     max_tokens: Optional[int] = None
+    # 模型管理里一次性探测并持久化的已验证输出上限（providers.json model_metadata）
+    max_output_tokens: Optional[int] = None
+    max_output_tokens_source: str = ""
+    max_output_tokens_probed_at: str = ""
     is_active: bool = False
     status: str = "unknown"
     # 服务商级连通判定（provider enabled+key配置/本地/keyless+非unhealthy）：
@@ -93,6 +97,14 @@ class ProbeRequest(BaseModel):
     model_id: str = Field(..., description="模型 ID")
     probe_type: str = Field(default="multimodal", description="探测类型")
     force: bool = Field(default=False, description="元数据已有标记时是否强制真实探测")
+
+
+class ProbeOutputLimitRequest(BaseModel):
+    """输出上限探测请求（一次最小请求，结果持久化到 providers.json）"""
+
+    provider_id: str = Field(..., description="服务商 ID")
+    model_id: str = Field(..., description="模型 ID")
+    candidate: Optional[int] = Field(default=None, description="候选 max_tokens；缺省用已存值或 65536")
 
 
 
@@ -184,6 +196,13 @@ async def list_models(
                             # 限额透传(预埋兜底已在 get_all_models 完成;4096 占位不外发)
                             context_window=_clean_limit(getattr(model, "context_window", None)),
                             max_tokens=_clean_limit(getattr(model, "max_tokens", None)),
+                            max_output_tokens=_clean_limit(getattr(model, "max_output_tokens", None)),
+                            max_output_tokens_source=str(
+                                getattr(model, "max_output_tokens_source", "") or ""
+                            ),
+                            max_output_tokens_probed_at=str(
+                                getattr(model, "max_output_tokens_probed_at", "") or ""
+                            ),
                             is_active=getattr(model, "is_active", False),
                             status=getattr(model, "status", "available"),
                             connectable=bool((getattr(model, "metadata", None) or {}).get("connectable", False)),
@@ -286,6 +305,15 @@ async def list_models_by_capability(
                         name=getattr(model, "name", "Unknown"),
                         provider=getattr(model, "owned_by", ""),
                         capabilities=caps,
+                        context_window=_clean_limit(getattr(model, "context_window", None)),
+                        max_tokens=_clean_limit(getattr(model, "max_tokens", None)),
+                        max_output_tokens=_clean_limit(getattr(model, "max_output_tokens", None)),
+                        max_output_tokens_source=str(
+                            getattr(model, "max_output_tokens_source", "") or ""
+                        ),
+                        max_output_tokens_probed_at=str(
+                            getattr(model, "max_output_tokens_probed_at", "") or ""
+                        ),
                         is_active=getattr(model, "is_active", False),
                         status=getattr(model, "status", "available"),
                     )
@@ -491,6 +519,40 @@ async def probe_multimodal(
         }
     except Exception as e:
         logger.error(f"Probe multimodal error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
+
+
+@router.post("/probe-output-limit")
+async def probe_output_limit(
+    request: Request,
+    body: ProbeOutputLimitRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """探测模型输出上限并持久化。
+
+    语义：200 只证明候选值被服务商接受（不证明模型真能生成这么多）；400 才可能
+    带出真实上限。结果写 `providers.json` 的 `model_metadata[model].max_output_tokens`，
+    运行时 `clamp_max_tokens` 直接读它，不再每次请求探测。
+    """
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+    if hasattr(provider_manager, "get_provider") and provider_manager.get_provider(body.provider_id) is None:
+        raise HTTPException(status_code=404, detail=f"Provider '{body.provider_id}' not found")
+    if not hasattr(provider_manager, "probe_model_output_limit"):
+        raise HTTPException(status_code=501, detail="Provider manager does not support output-limit probing")
+
+    try:
+        result = await provider_manager.probe_model_output_limit(
+            body.provider_id, body.model_id, candidate=body.candidate
+        )
+        return {"code": 0, "message": "ok", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Probe output limit error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
 
 

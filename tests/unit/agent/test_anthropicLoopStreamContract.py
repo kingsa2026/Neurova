@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -273,4 +274,32 @@ class TestProductionConsumerDoesNotFallBack:
         assert "读完了。" in (reply or ""), f"回复文本未从流式事件里拼出：{reply!r}"
         assert any(etype == "tool_result" for etype, _ in seen), (
             f"工具事件没转发到 SSE 出口：{[e for e, _ in seen]}"
+        )
+
+
+class TestAnthropicStreamUsageCountedOnce:
+    """同一根因的 Anthropic 命中点：usage 是本次调用的累计值，不是逐 chunk 增量。"""
+
+    def test_duplicate_usage_chunks_are_not_summed(self):
+        usage = SimpleNamespace(prompt_tokens=8, completion_tokens=2, total_tokens=10)
+        client = StreamClient(
+            [
+                [
+                    LLMResponse(content="好", usage=usage),
+                    LLMResponse(content="", usage=usage, finish_reason="stop"),
+                ]
+            ]
+        )
+        loop = makeLoop(client)
+        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        messages = [{"role": "user", "content": "你好"}]
+
+        async def go():
+            gen = await loop.predict_step(messages, tools=None, stream=True)
+            return [e async for e in gen]
+
+        asyncio.run(go())
+        assert loop.agent._round_usage["total_tokens"] == 10, (
+            f"Anthropic 环把同一调用的两个 usage chunk 累加成 "
+            f"{loop.agent._round_usage['total_tokens']}"
         )

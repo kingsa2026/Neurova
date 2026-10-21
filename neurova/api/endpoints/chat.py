@@ -196,7 +196,15 @@ async def _finishV1Turn(*, ledger: AgentRunLedger, admission, error: Optional[st
         await reportAdmissionOutcome(admission, success=not error)
 
 
-def _parkedResponse(runId: str, reason: str, *, agentId: str, sessionId: str, requestId: str) -> Dict[str, Any]:
+def _parkedResponse(
+    runId: str,
+    reason: str,
+    *,
+    agentId: str,
+    sessionId: str,
+    requestId: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """挂起按它本来的样子回：`message` 不是 success，但请求确实被受理并留了凭据。"""
     return {
         "code": 0,
@@ -205,6 +213,7 @@ def _parkedResponse(runId: str, reason: str, *, agentId: str, sessionId: str, re
             "status": "parked",
             "run_id": runId,
             "reason": reason,
+            "park_details": dict(details or {}),
             "agent_id": agentId,
             "session_id": sessionId,
             "resume_via": f"/api/v1/console/chat/resume?run_id={runId}",
@@ -314,6 +323,7 @@ async def chat(
                 return _parkedResponse(
                     admission.runId, admission.parkReason,
                     agentId=body.agent_id, sessionId=sessionId, requestId=request_id,
+                    details=admission.outcome.details if admission.outcome else None,
                 )
             turnError = (
                 "让位闸判定挂起（原因 %s），但无法落库成可续跑的挂起行（请求缺 session_id"
@@ -493,6 +503,9 @@ async def chat_stream(
                             "run_id": admission.runId,
                             "attempts": admission.attempts,
                             "waited_seconds": round(admission.waitedSeconds, 2),
+                            "park_details": dict(
+                                admission.outcome.details if admission.outcome else {}
+                            ),
                         }
                     return {
                         "error": (

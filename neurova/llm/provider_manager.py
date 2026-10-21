@@ -67,7 +67,7 @@ import shutil
 import threading
 import time
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -470,6 +470,7 @@ class LLMProviderManager(Module):
             logger.info("No config file found, loading built-in providers")
             self._load_builtin_providers()
             self._save_config()
+            self._sync_persisted_output_limits()
             return
 
         try:
@@ -509,6 +510,24 @@ class LLMProviderManager(Module):
             logger.error("Failed to load config: %s", e)
             self._load_builtin_providers()
             self._save_config()
+        self._sync_persisted_output_limits()
+
+    def _sync_persisted_output_limits(self) -> None:
+        """把 providers.json 里的探测上限同步进 model_limits 的进程内镜像。
+
+        不 clear：scope 化的 provider manager 可能先后加载同一份配置；逐条覆盖
+        足以保持一致，清空会把别的 scope 刚写入的值抹掉。
+        """
+        from neurova.llm.model_limits import set_persisted_output_limit
+
+        for provider in self._providers.values():
+            for model_id, meta in (provider.model_metadata or {}).items():
+                try:
+                    value = int((meta or {}).get("max_output_tokens") or 0)
+                except (TypeError, ValueError):
+                    value = 0
+                if value > 0:
+                    set_persisted_output_limit(provider.id, model_id, value)
 
     def _make_backup(self, reason: str = "backup") -> None:
         """创建配置备份"""
@@ -1214,6 +1233,14 @@ class LLMProviderManager(Module):
             capabilities=capabilities,
             max_tokens=int(meta.get("max_tokens", 4096) or 4096),
             context_window=int(meta.get("context_window", 4096) or 4096),
+            # 模型管理里一次性探测并持久化的已验证输出上限；未探测为 None
+            max_output_tokens=(
+                int(meta["max_output_tokens"])
+                if str(meta.get("max_output_tokens") or "").strip().isdigit()
+                else None
+            ),
+            max_output_tokens_source=str(meta.get("max_output_tokens_source") or ""),
+            max_output_tokens_probed_at=str(meta.get("max_output_tokens_probed_at") or ""),
             pricing=dict(meta.get("pricing") or {}),
             # 连通判定随模型透出（聊天模型切换器绿/灰点数据源）：
             # 服务商启用 + (已配置 key 或 本地/免 key 类型) + 健康检查未失败
@@ -1486,6 +1513,155 @@ class LLMProviderManager(Module):
     # ------------------------------------------------------------------
     # 模型能力自动检测与持久化(2026-09-03)
     # ------------------------------------------------------------------
+    def set_model_output_limit(
+        self,
+        provider_id: str,
+        model_id: str,
+        value: int,
+        *,
+        source: str = "probed",
+        probed_at: str = "",
+    ) -> bool:
+        """把一次探测得到的输出上限写入 providers.json 并同步进程镜像。
+
+        与 `set_model_capabilities` 同一持久化面（`model_metadata` + `_save_config`）；
+        不覆盖 `max_tokens`（目录/预埋值），只写 `max_output_tokens` 三元组。
+        """
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            logger.warning("set_model_output_limit: provider %s not found", provider_id)
+            return False
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return False
+        if parsed <= 0:
+            return False
+
+        with self._config_lock:
+            metadata = dict(provider.model_metadata or {})
+            entry = dict(metadata.get(model_id, {}) or {})
+            entry["max_output_tokens"] = parsed
+            entry["max_output_tokens_source"] = str(source or "probed")
+            entry["max_output_tokens_probed_at"] = str(
+                probed_at or datetime.now(timezone.utc).isoformat()
+            )
+            metadata[model_id] = entry
+            provider.model_metadata = metadata
+            self._save_config()
+
+        from neurova.llm.model_limits import set_persisted_output_limit
+
+        set_persisted_output_limit(provider_id, model_id, parsed)
+        return True
+
+    def get_model_output_limit(self, provider_id: str, model_id: str) -> Optional[int]:
+        """读取 providers.json 里的持久化探测上限；未探测返回 None。"""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return None
+        meta = (provider.model_metadata or {}).get(model_id, {}) or {}
+        try:
+            value = int(meta.get("max_output_tokens") or 0)
+        except (TypeError, ValueError):
+            return None
+        return value or None
+
+    @staticmethod
+    def _parseOutputLimitFromError(text: str) -> Optional[int]:
+        """从 400 错误文本里解析服务商点名的上限（拿不到就诚实返回 None）。"""
+        patterns = (
+            r"max_model_len\s*=\s*(?:max_total_tokens\s*=\s*)?(\d+)",
+            r"maximum context length is\s+(\d+)\s+tokens",
+            r"cannot be greater than[^0-9]*(\d+)",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text or "", re.IGNORECASE)
+            if match:
+                try:
+                    return int(match.group(1))
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    async def probe_model_output_limit(
+        self,
+        provider_id: str,
+        model_id: str,
+        candidate: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """用最小 prompt 探测某模型的输出上限，并把结果持久化到 providers.json。
+
+        语义边界：**200 只证明该候选值被服务商接受**（不证明模型真能生成这么多，
+        很多网关会静默截断）；400 才可能带出真实上限。值按「已验证可接受」记录，
+        界面文案不得写成「最大」。
+        """
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"supported": False, "detail": f"Provider {provider_id!r} not found"}
+        provider_kind = str(provider.provider or "").lower()
+        if provider_kind in ("anthropic", "google", "gemini", "google-vertex", "google-cn"):
+            return {
+                "supported": False,
+                "detail": "原生协议服务商暂不支持输出上限探测（仅 OpenAI 兼容）",
+            }
+        if not provider.api_key:
+            return {"supported": False, "detail": "Provider has no API key"}
+
+        try:
+            candidate_int = int(candidate or self.get_model_output_limit(provider_id, model_id) or 65536)
+        except (TypeError, ValueError):
+            candidate_int = 65536
+        candidate_int = max(1, min(candidate_int, 1_000_000))
+
+        from neurova.llm_client import LLMClient, LLMConfig
+
+        client = None
+        try:
+            config = LLMConfig(
+                api_key=provider.api_key,
+                base_url=provider.base_url,
+                model=model_id,
+                max_tokens=candidate_int,
+            )
+            client = LLMClient(config, provider_id=provider.id)
+            response = await asyncio.to_thread(
+                client.client.chat.completions.create,
+                model=model_id,
+                messages=[{"role": "user", "content": "Reply with: ok"}],
+                max_tokens=candidate_int,
+                temperature=0,
+            )
+            accepted, limit, detail = True, candidate_int, "accepted"
+        except Exception as exc:  # noqa: BLE001 - 探测失败要如实回给界面
+            accepted = False
+            response_obj = getattr(exc, "response", None)
+            text = (getattr(response_obj, "text", "") or "") if response_obj is not None else ""
+            if not text:
+                text = str(exc)
+            limit = self._parseOutputLimitFromError(text)
+            detail = text[:600]
+        finally:
+            if client is not None:
+                try:
+                    client.client.close()
+                except Exception:  # noqa: BLE001 - 关连接失败不影响探测结论
+                    pass
+
+        source = "probed_accepted" if accepted else ("probed_rejected" if limit else "probe_error")
+        if limit:
+            self.set_model_output_limit(provider_id, model_id, limit, source=source)
+        return {
+            "supported": True,
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "candidate": candidate_int,
+            "accepted": accepted,
+            "limit": limit,
+            "source": source,
+            "detail": detail,
+        }
+
     def set_model_capabilities(
         self,
         provider_id: str,

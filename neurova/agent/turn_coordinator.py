@@ -8,6 +8,9 @@
 1. Layer 1 的 `_check_model_pin` 自己会在首次见某 agent 时建 pin，并对"换了模型"直接判
    `MODEL_PIN_VIOLATION`。所以闸**不能**每次都 `register_agent`——那会把 pin 反复覆写掉，
    模型漂移这一格判据当场变哑（被摘链的那份装饰器与旧 coordinator 都犯了这一条）。
+   **唯一的例外是客户端显式选型入口**（控制台、`/v1/chat*`）：那里的模型变化是用户的
+   决定，不是 agent 漂移。入口层按 `payload.entry` 派生 `adoptModelSwitch` 传进来，
+   闸自己不分入口、也不猜。
 2. `MODEL_PIN_VIOLATION` 一类原因**等多久都不会自愈**（不是冷却，是身份不符）。等待只对
    可自愈的原因（并发、间距、限速冷却、碰撞）有意义，所以这里把它单列成不可重试：一次判定
    就挂起，而不是白等 200 秒再挂起。
@@ -26,8 +29,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from dataclasses import dataclass
-from typing import Awaitable, Callable, FrozenSet, Optional
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Dict, FrozenSet, Optional
 
 from neurova.collaboration.glance_yield_rules import YieldReason, get_glance_yield_checker
 from neurova.core.logger import get_logger
@@ -127,6 +130,10 @@ class YieldGateOutcome:
     parkReason: str = ""
     agentId: str = ""
     sessionId: str = ""
+    #: 本回合实际请求的模型：完成回调按它释放并发槽，不按"当前 pin"
+    modelName: str = ""
+    #: 裁决器给出的成因细节（如 pinned_model/requested_model），随挂起事件透出
+    details: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def shouldPark(self) -> bool:
@@ -139,6 +146,7 @@ async def requestYieldGate(
     modelName: str,
     sessionId: str = "",
     userInput: str = "",
+    adoptModelSwitch: bool = False,
     policy: Optional[YieldWaitPolicy] = None,
     onWait: Optional[WaitObserver] = None,
 ) -> YieldGateOutcome:
@@ -157,6 +165,9 @@ async def requestYieldGate(
     而非假设：租约扫描已接进 app 的 lifespan 周期跑（间隔 = 租约/3，见
     `core/agent_run_store.staleSweepIntervalSeconds`），不续租就真会被收敛掉。
 
+    `adoptModelSwitch` 由入口层按 `payload.entry` 派生（客户端显式选型 → True）：
+    这类入口的模型变化是用户决定，闸应重设 pin 并放行，而不是判漂移挂起。
+
     Raises:
         任何来自裁决器的异常都原样向上抛（闸不吞异常；降级与否由调用方决定并留痕）。
     """
@@ -174,6 +185,7 @@ async def requestYieldGate(
             model_name=modelName,
             proposed_operations=[operation],
             conversation_id=sessionId or None,
+            adoptModelSwitch=adoptModelSwitch,
         )
 
         if not decision.should_yield:
@@ -185,6 +197,7 @@ async def requestYieldGate(
                 operation=operation,
                 agentId=agentId,
                 sessionId=sessionId,
+                modelName=modelName,
             )
 
         reason = str(decision.reason.value) if decision.reason else "unspecified"
@@ -201,6 +214,8 @@ async def requestYieldGate(
                 parkReason=reason,
                 agentId=agentId,
                 sessionId=sessionId,
+                modelName=modelName,
+                details=dict(decision.details or {}),
             )
 
         if attempts > resolved.maxAttempts:
@@ -216,6 +231,8 @@ async def requestYieldGate(
                 parkReason=reason,
                 agentId=agentId,
                 sessionId=sessionId,
+                modelName=modelName,
+                details=dict(decision.details or {}),
             )
 
         waitSeconds = min(
@@ -238,4 +255,9 @@ async def reportTurnOutcome(*, outcome: YieldGateOutcome, success: bool) -> None
     if not outcome.proceeded or not outcome.operation:
         return
     checker = await get_glance_yield_checker()
-    checker.record_operation_complete(outcome.agentId, outcome.operation, success=success)
+    checker.record_operation_complete(
+        outcome.agentId,
+        outcome.operation,
+        success=success,
+        modelName=outcome.modelName or None,
+    )

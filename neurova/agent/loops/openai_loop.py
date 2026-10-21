@@ -764,6 +764,10 @@ class OpenAILoop(BaseAgentLoop):
         finish_reason = ""
         # P2-4d：流式 usage 的**存在性**记录（聚合本体在基类 `_accumulateRoundUsage`）
         round_usage = None
+        # 本次 LLM 调用的最后一个非空 usage：网关可能在同一流里回多个 usage chunk
+        # （同一累计值），逐 chunk 累加会把预算门抬到真实值的一倍（2026-10-21 实测：
+        # 51,529 tokens 被算成约 103,058，TokenBudgetGate 在 100k 处提前终止）。
+        pending_usage = None
 
         # 内部控制标志不透传 LLM 链路（_build_request_params 虽忽略未知键，
         # 但泄漏进 provider 兼容层属于未定义行为）
@@ -799,10 +803,11 @@ class OpenAILoop(BaseAgentLoop):
                 # → TokenBudgetGate 恒死门；从流式 usage 聚合写入。形状归一与累加都只在
                 # 基类 `_accumulateRoundUsage` 那一份里做（§6-77）——环内再拼一遍就是
                 # 第二份实现，两份迟早漂移成"某条环的预算闸恒不触发"。
+                # 2026-10-21：usage 是**本次调用的全量**，不是增量；同一流可能回多个
+                # usage chunk。这里只记最后一个，流结束后累加一次（见下方）。
                 # `round_usage` 只是**存在性旗标 + 读数转引**：网关没回用量时 done 事件
                 # 交 None（"没读数"），与"读数为 0"是两件事，既有判据钉的就是这个区别。
-                self._accumulateRoundUsage(chunk.usage)
-                round_usage = getattr(self.agent, "_round_usage", None) or {}
+                pending_usage = chunk.usage
             rtext = getattr(chunk, "reasoning_content", None)
             if rtext:
                 reasoning_parts.append(rtext)
@@ -811,6 +816,11 @@ class OpenAILoop(BaseAgentLoop):
                 self._merge_tool_call_delta(pending_tool_calls, tc_delta)
             if getattr(chunk, "finish_reason", None):
                 finish_reason = chunk.finish_reason
+
+        # 本次调用只累加一次：usage 是累计值，重复 chunk 不是增量
+        if pending_usage is not None:
+            self._accumulateRoundUsage(pending_usage)
+            round_usage = getattr(self.agent, "_round_usage", None) or {}
 
         # 保存思考过程到 agent（供 post-chat 持久化/前端展示）
         if reasoning_parts:

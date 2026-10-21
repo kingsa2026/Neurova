@@ -242,6 +242,7 @@ class LLMClient:
             "max_tokens": clamp_max_tokens(
                 kwargs.get("max_tokens", self.config.max_tokens),
                 self.config.model,
+                provider_id=getattr(self, "provider_id", ""),
             ),
             "top_p": kwargs.get("top_p", self.config.top_p),
             "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
@@ -998,7 +999,11 @@ class LLMClient:
         context_window = get_model_context_window(self.config.model or "")
         if not context_window:
             return None
-        output_reserve = clamp_max_tokens(self.config.max_tokens, self.config.model)
+        output_reserve = clamp_max_tokens(
+            self.config.max_tokens,
+            self.config.model,
+            provider_id=getattr(self, "provider_id", ""),
+        )
         # 输入预算 = 窗口 - 输出预留，最低保留 4096 输入空间防止预算归零
         return max(context_window - output_reserve, 4096)
 
