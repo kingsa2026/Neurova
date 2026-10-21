@@ -2,7 +2,7 @@
 """退役面：全局语言默认从 settings 里退净，写面拒收并给出去处（台账 §6-167）。
 
 用户 2026-10-12 裁「先取长补短再退役」。取的那一半在
-`tests/language/testOutOfBoxDefaultLayer.py`（开箱默认接进语言层），本档管**退干净**：
+`tests/language/test_OutOfBoxDefaultLayer.py`（开箱默认接进语言层），本档管**退干净**：
 
 - `core/app_settings.py` 的 `GENERAL_DEFAULTS["language"]` —— 键摘掉（`app_name` 那格不动）；
 - `api/endpoints/settings.py` 的 `_default_settings["language"]` —— 同一个面的**第二个**同名键；

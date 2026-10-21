@@ -5,7 +5,7 @@
 **语言那一格不在本档的范围内了**（§6-167，用户 2026-10-12 裁「先取长补短再退役」）：
 `get_user_language`/`set_user_language` 连同两处 key 白名单里的 `language` 一起退役，
 因为它们是「某个用户默认看什么语言」的第二套词汇而生产消费者 0 处。退役面与防再生的
-判据在 `tests/unit/api/testRetiredGlobalLanguageDefault.py`，本档只留**仍然活着**的那些
+判据在 `tests/unit/api/test_RetiredGlobalLanguageDefault.py`，本档只留**仍然活着**的那些
 契约——原先有 10 个用例把 `set_user_language(...)` 当"给某个用户塞点自有值"的顺手写法，
 它们测的是持久化、按用户隔离、重置、损坏回落这些**别的东西**，所以逐格改指
 `timezone`/`workspace` 两键，而不是连覆盖一起删掉。
