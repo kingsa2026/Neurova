@@ -65,6 +65,28 @@ def _carries_no_evidence(signals: Dict[str, Any]) -> bool:
     return isinstance(verdict, dict) and verdict.get("state") == GateVerdict.STATE_UNEVIDENCED
 
 
+def assertRsiOptimizationIdentity(optimizations: List[Dict[str, Any]]) -> None:
+    """参数轮账实前置：每条优化必须有唯一参数名。"""
+    parameters = [str(item.get("parameter") or "") for item in optimizations]
+    missing = [index for index, name in enumerate(parameters) if not name]
+    if missing:
+        raise AssertionError(f"RSI 优化项缺参数名，位置={missing}")
+    duplicates = sorted({name for name in parameters if parameters.count(name) > 1})
+    if duplicates:
+        raise AssertionError(f"RSI 同一参数出现多条优化，参数={duplicates}")
+
+
+def assertRsiRoundIdentity(
+    optimizations: List[Dict[str, Any]], applied_results: List[Dict[str, Any]]
+) -> None:
+    """参数轮账实后置：一参数一结果的条数必须相等。"""
+    if len(applied_results) != len(optimizations):
+        raise AssertionError(
+            "RSI 参数账实不符："
+            f"optimizations={len(optimizations)}, applied_results={len(applied_results)}"
+        )
+
+
 def _e2e_gain_from_evals(eval_before: Any, eval_after: Any) -> Optional[float]:
     """P1-2:e2e 标尺的并列增益读数。
 
@@ -486,7 +508,9 @@ class RSIOrchestrator:
             eval_before = self._last_eval_outcome
             snapshot = self._snapshot_optimizable()
 
+            assertRsiOptimizationIdentity(optimizations)
             applied_results = self.apply_optimizations(optimizations)
+            assertRsiRoundIdentity(optimizations, applied_results)
             applied_count = sum(1 for r in applied_results if r.get("applied"))
 
             if applied_count:

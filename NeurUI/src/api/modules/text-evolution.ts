@@ -49,6 +49,11 @@ export interface EvolutionRunData {
   changed: boolean
   constraint_failures: string[]
   proposal: EvolutionProposal | null
+  // 执行面读数：默认 auto 时可能回落模拟面，原因必须可见。
+  executor_kind?: string
+  executor_requested?: 'auto' | 'real_agent' | 'simulated' | string
+  real_trajectory_fallback?: string
+  judge_fallback?: string
 }
 
 /** 一次进化的审计运行：`runs/*.json` 的内容（§6-95 后半给它接上的读者就是提案详情面）。 */
@@ -89,6 +94,9 @@ export interface EvolutionProposal {
   decided_at: string
   baseline_text?: string
   improved_text?: string
+  // judge 不可用时的确定性回退提案：自动审批必须拒绝，只能人工复核。
+  judge_fallback?: string
+  requires_manual_review?: boolean
   // 详情面独有：列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
   evolution_run?: EvolutionRunAudit | null
   evolution_run_status?: AuditRunState
@@ -155,6 +163,17 @@ export function listProposals(agentId: string, status?: string) {
 export function getProposal(agentId: string, proposalId: string) {
   return api.get<ApiResponse<EvolutionProposal>>(
     `${BASE}/skills/${agentId}/proposals/${proposalId}`,
+  )
+}
+
+export function adoptDomainHarness(
+  agentId: string,
+  peerId: string,
+  targetSkillId: string,
+) {
+  return api.post<ApiResponse<EvolutionProposal>>(
+    `${BASE}/skills/${agentId}/domain-harnesses/${peerId}/adopt`,
+    { target_skill_id: targetSkillId },
   )
 }
 

@@ -46,6 +46,8 @@ class EvolutionSettings:
 
     # 文本级进化总开关(GEPA 式闭环)
     text_evolution: bool = False
+    # 过门后是否自动应用技能正文（默认关：先产 pending，显式开启才自动闭环）
+    auto_apply_skill_evolution: bool = False
     # 技能生命周期定期扫描(确定性、零 LLM,默认开)
     lifecycle_sweep: bool = True
     # 生命周期扫描最小间隔(小时)
@@ -109,6 +111,41 @@ def _coerce_rsi_knobs(data: Dict[str, Any], defaults: Dict[str, Any]) -> None:
         parsed[:8] if parsed else list(defaults["rsi_ratchet_candidates"]))
 
 
+def auto_apply_skill_evolution_enabled() -> bool:
+    """过门自动应用开关：env 显式值 > 设置文件 > 默认关。"""
+    raw = os.environ.get("NEUROVA_AUTO_APPLY_SKILL_EVOLUTION", "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    try:
+        return bool(load_settings().auto_apply_skill_evolution)
+    except Exception:  # noqa: BLE001 - 设置故障退回关闭（保守）
+        return False
+
+
+def evolutionPassIdentity(agent_id: str) -> str:
+    """一次技能进化作业的身份（模型/开关变化即变，用于拒绝混配置续跑）。"""
+    import hashlib
+
+    settings = load_settings()
+    payload = {
+        "agent_id": str(agent_id or ""),
+        "judge_model": str(settings.judge_model or ""),
+        "optimizer_model": str(settings.optimizer_model or ""),
+        "text_evolution": bool(settings.text_evolution),
+        "auto_apply": bool(settings.auto_apply_skill_evolution),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def evolutionJobIdentityRejected(payload: Dict[str, Any], agent_id: str) -> bool:
+    """作业身份与当前设置不一致 → 拒绝复用（缺身份也拒绝，旧作业自然重排）。"""
+    return (payload or {}).get("identity") != evolutionPassIdentity(agent_id)
+
+
 def _defaults() -> Dict[str, Any]:
     return asdict(EvolutionSettings())
 
@@ -165,7 +202,7 @@ def update_settings(**patch: Any) -> EvolutionSettings:
                 data[k] = v
         # 类型收敛:布尔字段拒绝字符串误传,数值字段坏值回默认
         defaults = _defaults()
-        for k in ("text_evolution", "lifecycle_sweep"):
+        for k in ("text_evolution", "auto_apply_skill_evolution", "lifecycle_sweep"):
             data[k] = bool(data[k])
         try:
             data["lifecycle_interval_hours"] = max(1, int(data["lifecycle_interval_hours"]))

@@ -47,14 +47,21 @@ STATUS_APPLIED = ProposalStatus.APPLIED.value
 STATUS_REJECTED = ProposalStatus.REJECTED.value
 
 
-def best_anchor_from_ledger(entries: Optional[list[dict]]) -> Optional[float]:
+def best_anchor_from_ledger(
+    entries: Optional[list[dict]], *, fingerprint: str = ""
+) -> Optional[float]:
     """历史最优留出分（P2-4 锚定地板）：台账里各次运行的绝对 holdout_after 最大值。
 
-    台账自 2026-10-07 起记录绝对留出分（runner 端 patch）；旧条目无此键、
-    参与不了锚——锚随台账自然预热，不另造第二份历史账本。
+    给了 `fingerprint` 时只认同实验身份的条目（D 决策：混配置续跑/锚点拒绝）；
+    旧条目没有指纹，不参与锚——宁可重新预热，不拿另一套配置的分数当锚。
     """
-    values = [e.get("holdout_after") for e in (entries or [])
-              if isinstance(e, dict) and isinstance(e.get("holdout_after"), (int, float))]
+    values = [
+        e.get("holdout_after")
+        for e in (entries or [])
+        if isinstance(e, dict)
+        and isinstance(e.get("holdout_after"), (int, float))
+        and (not fingerprint or e.get("experiment_fingerprint") == fingerprint)
+    ]
     return max(values) if values else None
 
 class SimulatedAgent:
@@ -380,6 +387,8 @@ class EvolutionProposal:
     # 只作读数与分组证据，不参与 accept/reject；旧记录没这一键 ⇒ 空串 = 未记，
     # 在覆盖读数里自成一组，不折进任何型号。
     model_under_test: str = ""
+    # N5：本轮实验身份（正文+模型+数据集+seed+判据配置），供缓存/续跑拒绝混配置。
+    experiment_fingerprint: str = ""
     # B 批（用户裁"接线"）：这批验收证据的用例来源构成（golden/history/synthetic…），
     # 取数面＝`sourceMixOfEvidence`（只算判据集）。写它的理由：分数相同不代表证据同级——
     # 3 条手工 golden 与 3 条合成用例上的 0.9 是两个可信度。审批人在提案列表面就该看见，
@@ -398,6 +407,9 @@ class EvolutionProposal:
     # 看见"均值涨了而这条用例被改坏了"。形状只由 runner 侧 caseGateReadout()
     # 定义一处，此处只搬运不另算。
     case_gate: dict = field(default_factory=dict)
+    # judge 回退门产出的提案：只能人工复核，自动审批路径必须拒绝。
+    judge_fallback: str = ""
+    requires_manual_review: bool = False
     created_at: str = ""
     decided_at: str = ""
 
@@ -440,6 +452,10 @@ class SkillEvolutionService:
         path = dataset_dir_for(skill_id)
         ds = EvalDataset.load(path)
         return ds if ds.all_examples else None
+
+    def hasGoldenDataset(self, skill_id: str) -> bool:
+        """该技能是否有可用的 golden 评测集（反射式改写的探针前置）。"""
+        return self._golden_dataset(skill_id) is not None
 
     async def build_dataset(
         self,
@@ -510,6 +526,8 @@ class SkillEvolutionService:
         judge: Any = None,
         mutate: Any = None,
         bench_gate: Any = None,
+        extra_failures: Optional[list] = None,
+        domain_harnesses: Optional[list] = None,
     ) -> tuple[EvolutionRunResult, Optional[EvolutionProposal]]:
         """跑一次进化;通过闸 → 产出 pending 提案(不落库技能,等人批准)。
 
@@ -556,20 +574,37 @@ class SkillEvolutionService:
         # P0-1 噪声地板：noise_repeats>1 时对同一基线自动校准 δ（按数据集
         # 指纹缓存，同一批用例不重复花评测预算）；校准失败诚实降级为无带
         # （判据回退 min_improvement），不阻断进化本身。
+        from neurova.evolution.eval.calibration import experiment_fingerprint
+        from neurova.evolution.eval.dataset import evaluation_split
+
+        experimentFp = experiment_fingerprint(
+            skill_id=skill_id,
+            baseline_text=skill_text,
+            model_under_test=modelUnderTest,
+            artifact_type=artifact_type,
+            examples=evaluation_split(dataset),
+            config=cfg,
+        )
         noise_band = None
         if cfg.noise_repeats > 1:
-            noise_band = await self._noise_band_for(cfg, runner, dataset, artifact_type,
-                                                    baseline_text=skill_text)
+            noise_band = await self._noise_band_for(
+                cfg, runner, dataset, artifact_type,
+                baseline_text=skill_text, fingerprint=experimentFp,
+            )
 
         # P2-4 历史最优锚：台账里本技能各次运行的绝对留出分最大值
         # （锚随台账预热；无记录 = None = 本轮只有无技能锚参与）
         anchor_best = best_anchor_from_ledger(
-            self.ledger.recent(skill_id)) if cfg.anchor_floor_enabled else None
+            self.ledger.recent(skill_id), fingerprint=experimentFp
+        ) if cfg.anchor_floor_enabled else None
 
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
             dataset=dataset, iterations=iterations, noise_band=noise_band,
             ledger_key=skill_id, anchor_best=anchor_best,
+            extra_failures=extra_failures,
+            experiment_fingerprint=experimentFp,
+            domain_harnesses=domain_harnesses,
         )
         # 臂来源与花费外露到结果面：端点不再猜"这次是不是真臂"，台账读数也不再只有
         # 分数没有来历（同一份推导见 `executorKind`）。计划在此**重算**而不是由调用方
@@ -577,6 +612,7 @@ class SkillEvolutionService:
         kind = executorKind(executor)
         plan = (planRealArmTurns(dataset, cfg, iterations=iterations)
                 if kind == EXECUTOR_KIND_REAL else None)
+        result.experiment_fingerprint = experimentFp
         result.executorKind = kind
         result.plannedAgentTurns = None if plan is None else plan["planned"]
         result.agentTurnsUsed = realArmTurnsUsed(executor, kind)
@@ -594,6 +630,7 @@ class SkillEvolutionService:
                 artifact_type=artifact_type,
                 run_id=run_id,
                 model_under_test=modelUnderTest,
+                experiment_fingerprint=experimentFp,
                 # 证据的来源构成在此现算（不是调用方传入）：传进来就等于允许别人替
                 # 这批证据编一个出处。
                 source_mix=sourceMixOfEvidence(dataset),
@@ -606,6 +643,8 @@ class SkillEvolutionService:
                 heldout_improvement=round(result.heldout_improvement, 4),
                 iterations_run=result.iterations_run,
                 case_gate=result.caseGateReadout(),
+                judge_fallback=result.judge_fallback,
+                requires_manual_review=bool(result.judge_fallback),
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
@@ -619,21 +658,21 @@ class SkillEvolutionService:
 
     async def _noise_band_for(self, cfg: EvolutionConfig, runner: Any,
                               dataset: EvalDataset, artifact_type: str,
-                              *, baseline_text: str):
-        """按数据集指纹缓存校准噪声带；评测集选取与 runner 终审同源
-        （evaluation_split 单一事实源）。"""
+                              *, baseline_text: str, fingerprint: str):
+        """按实验身份指纹缓存校准噪声带（N5：模型/正文/配置变化即换键）。
+
+        评测集选取与 runner 终审同源（evaluation_split 单一事实源）。
+        """
         from neurova.evolution.eval.calibration import (
             calibrate_noise_band,
-            dataset_fingerprint,
             load_cached_band,
             save_cached_band,
         )
         from neurova.evolution.eval.dataset import evaluation_split
 
         split = evaluation_split(dataset)
-        if not split:
+        if not split or not fingerprint:
             return None
-        fingerprint = dataset_fingerprint(split)
         cache_path = self._dir / "calibration.json"
         cached = load_cached_band(cache_path, fingerprint)
         if cached is not None:
@@ -689,7 +728,7 @@ class SkillEvolutionService:
             return {"task_split": "none", "n": 0, "baseline_avg": 0.0,
                     "candidate_avg": 0.0, "delta": 0.0, "per_task": [],
                     "executor_kind": kind, "model_under_test": modelUnderTest,
-                    **armReadout}
+                    "blind": {"state": "not_applicable"}, **armReadout}
         if judge is None:
             from neurova.evolution.eval.fitness import LLMJudge
 
@@ -711,21 +750,73 @@ class SkillEvolutionService:
             in zip(baseline_details, candidate_details)
         ]
         turnsUsed = realArmTurnsUsed(executor, kind)
+        delta = float(candidate_avg - baseline_avg)
+        near_tie_band = max(float(config.min_improvement), 0.02)
+        blind = {"state": "not_applicable"}
+        if abs(delta) <= near_tie_band:
+            from neurova.evolution.eval.blind_selection import blind_ab
+
+            blind = await blind_ab(
+                judge=judge,
+                examples=[row[0] for row in baseline_details],
+                baseline_outputs=[row[2] for row in baseline_details],
+                candidate_outputs=[row[2] for row in candidate_details],
+                seed=int(getattr(config, "seed", 42) or 42),
+            )
+            blind["near_tie_band"] = round(near_tie_band, 6)
         return {
             "task_split": "heldout" if dataset.heldout else "selection",
             "n": len(split),
             "baseline_avg": round(float(baseline_avg), 4),
             "candidate_avg": round(float(candidate_avg), 4),
-            "delta": round(float(candidate_avg - baseline_avg), 4),
+            "delta": round(delta, 4),
             "per_task": per_task,
             "executor_kind": kind,
             "model_under_test": modelUnderTest,
+            "blind": blind,
             "planned_agent_turns": armReadout["planned_agent_turns"],
             "agent_turns_used": turnsUsed,
             "budget_plan_exceeded": (
                 None if turnsUsed is None or armReadout["planned_agent_turns"] is None
                 else turnsUsed > armReadout["planned_agent_turns"]),
         }
+
+    def proposeAdoption(
+        self,
+        *,
+        target_skill_id: str,
+        baseline_text: str,
+        peer_skill_id: str,
+        improved_text: str,
+        artifact_type: str = "skill",
+    ) -> EvolutionProposal:
+        """把同域已采纳 harness 作为 pending 提案挂到目标技能（人工批准后生效）。"""
+        baseline = str(baseline_text or "")
+        improved = str(improved_text or "")
+        if not target_skill_id or not peer_skill_id:
+            raise ValueError("target_skill_id and peer_skill_id are required")
+        if not improved.strip():
+            raise ValueError("peer harness has no context_template")
+        if improved == baseline:
+            raise ValueError("peer harness is identical to the target baseline")
+        proposal = EvolutionProposal(
+            proposal_id=f"adopt_{uuid.uuid4().hex[:12]}",
+            agent_id=self.agent_id,
+            skill_id=str(target_skill_id),
+            artifact_type=str(artifact_type),
+            baseline_text=baseline,
+            improved_text=improved,
+            model_under_test="",
+            experiment_fingerprint=f"adoption:{peer_skill_id}",
+            source_mix={"adoption": 1},
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        self._append_proposal(proposal)
+        logger.info(
+            "采纳提案已入待审: target=%s peer=%s proposal=%s",
+            target_skill_id, peer_skill_id, proposal.proposal_id,
+        )
+        return proposal
 
     # ── 提案审批(人工闭环终点)──
 
@@ -764,6 +855,21 @@ class SkillEvolutionService:
             except ProposalTransitionError:
                 return False
             if approve:
+                if (approver.strip().lower().startswith("auto:")
+                        and bool(target.get("requires_manual_review"))):
+                    logger.warning(
+                        "提案 %s 来自 judge 回退门，自动审批被拒绝；需人工复核",
+                        proposal_id,
+                    )
+                    return False
+                # D 决策：技能正文在提案产出后变了 → 旧基线失效，拒绝应用并重跑。
+                if self._baselineChanged(target, registry):
+                    target["status"] = STATUS_REJECTED
+                    target["status_reason"] = "baseline_changed"
+                    target["decided_at"] = datetime.now(UTC).isoformat()
+                    self._write_proposals(items)
+                    logger.warning("提案 %s 基线已变化，拒绝应用", proposal_id)
+                    return False
                 approver = require_approver(approver, action="批准提案")
                 ok = self._apply_to_skill(target, registry)
                 if not ok:
@@ -795,6 +901,21 @@ class SkillEvolutionService:
             )
         except Exception as e:  # noqa: BLE001 - 日志仓故障不阻断审批主链
             logger.debug("技能日志仓写入失败: %s", e)
+
+    @staticmethod
+    def _baselineChanged(proposal: dict, registry: Any) -> bool:
+        """提案基线是否已与当前技能正文不同（注册表不可读时不误拒）。"""
+        baseline = str(proposal.get("baseline_text") or "")
+        if not baseline or registry is None:
+            return False
+        try:
+            skill = registry.get_skill(str(proposal.get("skill_id") or ""))
+        except Exception:  # noqa: BLE001 - 读取失败不把提案判死
+            return False
+        if skill is None:
+            return False
+        current = str((getattr(skill, "config", None) or {}).get("context_template") or "")
+        return current != baseline
 
     def _apply_to_skill(self, proposal: dict, registry: Any) -> bool:
         try:

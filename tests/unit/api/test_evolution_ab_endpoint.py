@@ -41,8 +41,11 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(env, monkeypatch):
+    import neurova.api.endpoints as endpoints
     import neurova.skills.skill_service as ss
 
+    monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": None,
+                        raising=False)
     monkeypatch.setattr(
         ss.SkillService, "get_skill_info",
         lambda self, sid: {
@@ -81,6 +84,9 @@ class TestAbEndpoint:
         assert len(data["per_task"]) == 2
         assert set(data["per_task"][0]) == {"task_input", "baseline", "candidate"}
         assert data["per_task"][0]["task_input"].startswith("HELD")
+        # 默认 auto：agent 不在线时回落模拟面，但回落原因必须随报告出街。
+        assert data["executor_requested"] == "auto", data
+        assert data["real_trajectory_fallback"] == "agent_offline", data
 
     def test_falls_back_to_selection_split(self, client, env):
         from neurova.evolution.eval.dataset import dataset_dir_for

@@ -35,6 +35,7 @@ class JudgeFailure:
     feedback: str
     score: float = 0.0
     environments: List[str] = field(default_factory=list)
+    tool_trace: List[dict] = field(default_factory=list)
 
 
 _MUTATOR_SYSTEM = (
@@ -84,6 +85,7 @@ class ReflectiveMutator:
         artifact_type: str,
         failures: list[JudgeFailure],
         history: Optional[list[dict]] = None,
+        domain_harnesses: Optional[list[dict]] = None,
     ) -> str:
         """基于失败反馈生成定向改进后的文本;失败时返回原文。
 
@@ -94,13 +96,26 @@ class ReflectiveMutator:
         budget = self._size_budget(artifact_type)
 
         if failures:
-            failure_block = "\n\n".join(
-                f"【失败用例 {i + 1}】(得分 {f.score:.2f})\n"
-                f"任务:{f.task_input}\n"
-                f"实际输出:{f.output}\n"
-                f"评审反馈:{f.feedback}"
-                for i, f in enumerate(failures)
-            )
+            failure_parts = []
+            for i, f in enumerate(failures):
+                part = (
+                    f"【失败用例 {i + 1}】(得分 {f.score:.2f})\n"
+                    f"任务:{f.task_input}\n"
+                    f"实际输出:{f.output}\n"
+                    f"评审反馈:{f.feedback}"
+                )
+                trace = list(getattr(f, "tool_trace", None) or [])[:20]
+                if trace:
+                    trace_lines = "\n".join(
+                        f"  {idx + 1}. {item.get('tool')} "
+                        f"[{'OK' if item.get('success') else 'FAIL'}] "
+                        f"{str(item.get('error') or '')[:120]} "
+                        f"({item.get('duration_ms', 0)}ms)"
+                        for idx, item in enumerate(trace)
+                    )
+                    part += f"\n工具轨迹:\n{trace_lines}"
+                failure_parts.append(part)
+            failure_block = "\n\n".join(failure_parts)
             instruction = (
                 f"以下是一个 {artifact_type} 的当前正文,以及它在评测中失败的原因。\n"
                 f"请针对失败原因改进它。\n\n"
@@ -119,6 +134,20 @@ class ReflectiveMutator:
             history_block = EvolutionLedger.render_for_prompt(history)
             if history_block:
                 instruction += f"\n\n{history_block}"
+
+        if domain_harnesses:
+            rows = []
+            for item in list(domain_harnesses)[:5]:
+                body = str(item.get("context_template") or "")[:800]
+                rows.append(
+                    f"【{item.get('skill_id')} / v{item.get('version')}】"
+                    f"{item.get('description') or ''}\n{body}"
+                )
+            if rows:
+                instruction += (
+                    "\n\n【同域已采纳 harness（参考，不可照抄；先核对是否适用）】\n"
+                    + "\n\n".join(rows)
+                )
 
         instruction += f"\n\n【长度预算】修改后的正文不得超过 {budget} 个字符。"
 

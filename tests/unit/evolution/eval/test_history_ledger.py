@@ -279,38 +279,15 @@ class TestServiceAndImproverWiring:
         assert not result.rejected
 
     @pytest.mark.asyncio
-    async def test_improver_feeds_falsified_history(self, tmp_path, monkeypatch):
-        """skill_improver 反射式改进把已证伪假设喂给变异器。"""
-        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
-        monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
-        from neurova.evolution.eval import mutator as mutator_mod
+    async def test_ledger_render_feeds_falsified_history(self, tmp_path):
+        """已证伪假设必须进变异器提示段（文本进化统一到 service 后仍保留）。"""
         from neurova.evolution.eval.history_ledger import EvolutionLedger
-        from neurova.evolution.skill_improver import get_skill_improver, reset_skill_improver
 
-        # 预写一条已证伪假设
         ledger = EvolutionLedger(tmp_path / "data" / "evolution" / "history")
         ledger.append("sk-hist", {"ts": "T1", "hypothesis": "加浏览器重试三次",
                                   "accepted": False, "reject_reason": "no_improvement"})
 
-        reset_skill_improver()
-        improver = get_skill_improver(min_records_for_analysis=2, failure_threshold=0.3)
-        for i in range(3):
-            improver.record_usage(skill_id="sk-hist", success=False,
-                                  error_message=f"timeout upstream-{i}",
-                                  input_summary=f"任务{i}", output_summary="")
-        captured: dict[str, str] = {}
+        rendered = EvolutionLedger.render_for_prompt(ledger.recent("sk-hist"))
 
-        async def fake_call(self, messages, model):
-            captured["user"] = messages[-1]["content"]
-            return {"success": True, "response": "改进正文 v2"}
-
-        monkeypatch.setattr(mutator_mod.ReflectiveMutator, "_call_llm", fake_call)
-        try:
-            proposals = await improver.propose_pending_improvements_async(
-                skill_text_loader=lambda sid: "原始技能正文")
-        finally:
-            reset_skill_improver()
-        assert captured["user"]  # 反射路径确实走到了
-        assert "已实测无效" in captured["user"]
-        assert "加浏览器重试三次" in captured["user"]
-        assert proposals and "improved_text" in proposals[0].changes
+        assert "已实测无效" in rendered
+        assert "加浏览器重试三次" in rendered

@@ -118,6 +118,13 @@ describe('skill-pool API — 新增函数', () => {
     expect(mockGet).toHaveBeenCalledWith('/skill-pool/agent/agent-1/skills')
   })
 
+  it('searchAgentDomainHarnesses calls GET /skill-pool/agent/{agentId}/domain-harnesses', async () => {
+    await skillPool.searchAgentDomainHarnesses('agent-1', { query: '合同', domain: 'legal', limit: 5 })
+    expect(mockGet).toHaveBeenCalledWith('/skill-pool/agent/agent-1/domain-harnesses', {
+      params: { query: '合同', domain: 'legal', limit: 5 },
+    })
+  })
+
   // --- enableSkill（V5 行级真通道 + agent 定库）---
   it('enableSkill calls PUT /skill-pool/private/{skillId} with agent_id + enabled 行级字段', async () => {
     await skillPool.enableSkill('skill-1', true, 'agent-1')

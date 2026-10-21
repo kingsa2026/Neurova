@@ -25,6 +25,7 @@ from neurova.collaboration.canvas_ops import (
 )
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.core.logger import get_logger
+from neurova.core.tool_trace import recordToolTrace
 from neurova.document_model import DocSettings
 from neurova.document_pdf import RenderUnavailable, render_document
 from neurova.document_sources import parse_html, parse_markdown
@@ -1151,6 +1152,11 @@ class ToolExecutor:
                     logger.warning(
                         "PreToolUse hook 拦截 %s: %s", tool_name, outcome.get("reason")
                     )
+                    recordToolTrace(
+                        tool_name, params, success=False,
+                        error=f"PreToolUse blocked: {outcome.get('reason') or '未说明原因'}",
+                        layer="executor",
+                    )
                     return {
                         "success": False,
                         "error": f"操作被安全钩子拦截: {outcome.get('reason') or '未说明原因'}",
@@ -1159,7 +1165,23 @@ class ToolExecutor:
         except Exception:  # noqa: BLE001
             logger.debug("PreToolUse hook 链失败(忽略)", exc_info=True)
 
-        result = await self._execute_single_tool_inner(tool_name, params, skip_governance)
+        started = time.monotonic()
+        try:
+            result = await self._execute_single_tool_inner(tool_name, params, skip_governance)
+        except Exception as exc:
+            recordToolTrace(
+                tool_name, params, success=False,
+                error=f"{type(exc).__name__}: {exc}",
+                duration_ms=(time.monotonic() - started) * 1000,
+                layer="executor",
+            )
+            raise
+        recordToolTrace(
+            tool_name, params, success=self._result_is_success(result),
+            error=(result.get("error") if isinstance(result, dict) else "") or "",
+            duration_ms=(time.monotonic() - started) * 1000,
+            layer="executor", result=result,
+        )
 
         try:
             from neurova.core.hooks_engine import get_hook_engine

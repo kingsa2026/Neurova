@@ -161,9 +161,10 @@ def test_no_identity_chains_outside_contract():
 
 def test_consumers_use_resolver():
     """关键消费面接线检查（记账/漏斗/API 三处经 resolve_skill_identity）。"""
-    from neurova import agent_core, tool_executor
+    from neurova import tool_executor
     from neurova.api.endpoints import skill as skill_ep
+    from neurova.evolution import skill_recording
 
-    for mod in (agent_core, tool_executor, skill_ep):
+    for mod in (skill_recording, tool_executor, skill_ep):
         src = inspect.getsource(mod)
         assert "resolve_skill_identity" in src, f"{mod.__name__} 应改用单源解析器"

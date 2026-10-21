@@ -334,7 +334,8 @@ class TestZeroGainPassThrough:
             holdout=[EvalExample(task_input=f"h{i}", expected_behavior="r") for i in range(2)],
         )
         runner = SkillEvolutionRunner(
-            EvolutionConfig(iterations=1), judge=_DeadJudge(), mutate=mutate, agent=_Agent(),
+            EvolutionConfig(iterations=1, judge_fallback="off"),
+            judge=_DeadJudge(), mutate=mutate, agent=_Agent(),
         )
         result = await runner.run(baseline_text="BASE", artifact_type="skill", dataset=ds)
         assert result.rejected

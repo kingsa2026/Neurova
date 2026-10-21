@@ -11,7 +11,9 @@ Tool Router v1.0.0 — 统一工具路由器
 
 import asyncio
 import datetime
+import time
 from neurova.core.logger import get_logger
+from neurova.core.tool_trace import recordToolTrace
 import typing
 from dataclasses import dataclass, field
 
@@ -390,6 +392,7 @@ class ToolRouter:
             if user_id:
                 params["_user_id"] = user_id
 
+        started = time.monotonic()
         try:
             # 根据工具类型选择执行方式
             # 根因修复: 严格 `is True` 判断。Mock/AsyncMock 的自动属性是 truthy Mock，
@@ -409,16 +412,26 @@ class ToolRouter:
             # 于是单步真失败的自动技能照样产出成功票（审计 L-02）。此处不另写
             # 内容判据，只把总判据搬过来用。
             success = self._result_is_success(result)
+            error_text = None if success else str(
+                result.get("error") if isinstance(result, dict) else None
+            ) or f"工具执行失败: {tool_name}"
+            recordToolTrace(
+                tool_name, params, success=success, error=error_text or "",
+                duration_ms=(time.monotonic() - started) * 1000, layer="router",
+                result=result,
+            )
             return ToolResult(
                 success=success,
                 result=result,
-                error=None if success else str(
-                    result.get("error") if isinstance(result, dict) else None
-                ) or f"工具执行失败: {tool_name}",
+                error=error_text,
                 metadata={"tool_name": tool_name, "source": source, "agent_id": agent_id, "user_id": user_id},
             )
         except KeyError as e:
             logger.error("Tool not found during execution: %s", tool_name)
+            recordToolTrace(
+                tool_name, params, success=False, error=f"Tool not found: {tool_name}",
+                duration_ms=(time.monotonic() - started) * 1000, layer="router",
+            )
             return ToolResult(
                 success=False,
                 error=f"Tool not found: {tool_name}",
@@ -426,6 +439,11 @@ class ToolRouter:
             )
         except Exception as e:
             logger.error("Tool execution failed: %s, %s", tool_name, e)
+            recordToolTrace(
+                tool_name, params, success=False,
+                error=f"{type(e).__name__}: {e}",
+                duration_ms=(time.monotonic() - started) * 1000, layer="router",
+            )
             return ToolResult(
                 success=False,
                 error=str(e),

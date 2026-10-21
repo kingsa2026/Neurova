@@ -119,7 +119,7 @@ class TestRsiStepPassesSkillService:
 
         captured = {}
 
-        def fake_apply(prop, registry, skill_service=None):
+        def fake_apply(prop, registry, skill_service=None, **kwargs):
             captured["skill_service"] = skill_service
             return True
 
