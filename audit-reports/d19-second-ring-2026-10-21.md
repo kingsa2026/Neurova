@@ -7,10 +7,10 @@
 > 「取长补短后退役」重做；本档保留为**候选地图**，不是删除清单。
 > **2026-10-21 组三处置（§6-380）**：`agent_self` / `memory_stream` 已退役——生产读者 0，
 > 显式放弃可持久化核心指令/心跳任务表与独立记忆事件流（live 事件面是 `core.event_bus`）。
-> `security` / `temporal_reasoner` **保留待裁**：前者是全仓唯一 Fernet 记忆加密、永久遗忘与
-> 记忆审计（`test_memoryCipherFailFast.py` 有守卫）；后者被
+> `security` / `temporal_reasoner` **保留（用户 2026-10-21 裁定丙：暂留）**：前者是全仓唯一
+> Fernet 记忆加密、永久遗忘与记忆审计（`test_memoryCipherFailFast.py` 有守卫）；后者被
 > `tests/unit/knowledge/test_conflict_single_implementation.py` 明写为“时序关系级唯一实现、
-> 不在 017 删”。三态票与影响面见台账 §6-380。
+> 不在 017 删”。保留期间不改 live 行为；三态影响面见台账 §6-380。
 
 ## 1. 方法（与上一把尺的差别）
 
