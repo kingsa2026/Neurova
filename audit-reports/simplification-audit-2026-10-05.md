@@ -9423,3 +9423,52 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       组三按“2 退 2 留”闭环，两档不再等裁。保留期间不改 live 行为；未来若要接/删，按上面三态
       影响面另批走。〕
     - **本会话下一枚空号现查 §6-381**（写前必须现场重取；本笔落库时该读数为 380）。
+
+381. **TM-1 记忆联想召回常驻判据集（只新增判据，不改 live）** ✅🟢 —— 先造尺子，再谈改造
+    - **触发**：用户提出按 T-Mem（arXiv:2606.15405 / `Sherlockwz/T-Mem`，MIT，commit `dd9e152`）
+      改造记忆系统；研究档 `00ff036f` 建档后，用户点单「整序推进到前瞻线索」，并把写侧 LLM 预算
+      留到「等 TM-1 读数再裁」。本笔就是那把尺子。
+    - **实状复算（现场重取）**：`tests/performance/longmeval_simple.py` 实测
+      `pytest --collect-only` 报 **`collected 0 items`**——`pyproject.toml:102-103` 的
+      `python_files=["test_*.py"]` 与 `python_classes=["Test*"]` 同时不匹配其文件名与类名
+      （类是 `SimpleLongMemEval`，方法名倒是 `test_*`）。⇒ 此前**全仓没有任何被收集的记忆检索
+      质量判据**，`benchmark/rag_eval.py` 与 `knowledge/evaluation/retrieval_benchmark.py` 只覆盖
+      知识库面。没有红可咬 ⇒ 按教义第 3 条任何检索改动都不许开工。
+    - **落点**：`tests/performance/memory/test_associativeRecallGate.py`（+ 同目录 `__init__.py`）。
+      四道判据各司其职：① 数据集自反证（联想子集与目标记忆中文字面重合 ≤30%、且 ≥3 条为 0%；
+      描述性对照组 ≥90%）——有人把语料改弱凑绿，先红这里；② 描述性地板 hit@1 全中；
+      ③ 联想棘轮（只降不升，基线取本轮实测）；④ 目标值两条挂 `xfail(strict=True)`——语义即
+      「将来要绿」，一旦 TM-2/TM-3 做到即 XPASS 变红，逼摘标记＋回写本台账，不留静默达成口子。
+    - **基线读数（生产同款稠密+词法双路；本机 ONNX `bge-small-zh-v1.5` 真跑，独立复跑两次数值与
+      ranks 逐位一致）**：n=10、**hit@1=2/10、hit@5=6/10、MRR=0.35**，
+      ranks=[99,99,1,2,6,1,3,99,4,4]；描述性对照组 hit@1=10/10、MRR=1.000。招牌形态：与记忆
+      **零中文字面重合**的「团队聚餐选餐厅时要注意什么」↔「我在吃虾之后起了荨麻疹，医生确认是对虾
+      过敏」**连前 10 都进不了**（rank=99）——外部论文点名的失效形态在本仓真实复现。
+    - **另一档（强制令嵌入工厂返回 None ⇒ 仅词法路）**：hit@1=1/10、hit@5=6/10、MRR=0.303。
+      该档**不作棘轮基线**：词法档下的命中含回退排序成分，不代表能力。两档共同点是零字面重合那条
+      都进不了前 10 ⇒ 缺口在「写侧无任何预演产物」这一层，不在嵌入质量。
+    - **给裁定的直接输入（用户留到下一步的那一拍）**：稠密档 hit@5 已 6/10、MRR 0.35，说明本地
+      bge-small-zh 已能跨过一部分词面鸿沟；写侧引入 LLM 预演的边际收益集中在「零字面重合 +
+      周/月级后果」这一子类（本档零重合 3 条里 2 条完全打不中）。故先做 TM-2（零 LLM 的条目级
+      抽象线索）看能推多少，再决定是否为 TM-3 开写侧模型调用预算。
+    - **判据咬得住（反证两形）**：① 把 `manager.recall` 强制成返回空表复跑，两条行为判据当场红——
+      「词面重合查询未能全部 top-1：[99×10]」、「联想 hit@5 由 6 掉到 0（棘轮只降不升）」；
+      演示件即用即删未入库。② 本批判据在一次**真实的数据集收紧**中自发红过一轮：把联想查询改写至
+      与目标零字面重合后 hit@5 由 7→6，逼基线重取为本轮实测值（不抄旧数，防假绿形态②）。
+    - **红自证（第 4 段形态差异，如实写明）**：本批**无生产改动**，无 pathset 可 stash，故该步以
+      上述两种注入实证代劳，不冒充做过 stash 复跑。
+    - **A/B**：`ab_compare.sh -k HEAD -c <新判据> -c <__init__.py> -- tests/performance
+      tests/unit/embedding tests/unit/core/test_singleton_convergence.py
+      tests/unit/agent/test_memory_retrieval_chain.py` → 基线 1 failed/97 passed/2 xfailed/4 skipped
+      ↔ 本树同 → **仅本树红 0 条，`AB_PASS`**。两侧共有那条红是 `tests/performance/
+      test_context_pool_load.py::TestRecyclingContractGuard::test_resident_limit_bounds_memory_and_keeps_recallable`
+      ——**HEAD 自带常驻红**，与本批无关，本笔不认领不处置（另有人管）。跑测期间仓内 `data/`
+      未被写入（数据根走 conftest 会话隔离）。
+    - **净 LOC**：生产池 **+0/−0**（`neurova/` 一字未动）。测试/基建池 **+298/−0**
+      （`test_associativeRecallGate.py` 286 ＋ `memory/__init__.py` 12）。文档/台账池 +本档。
+    - **未闭环（明确不冒充完成）**：① `longmeval_simple.py` 仍是从不运行的测量件，且与本判据
+      **不同形**（6 维合成自检 vs 可达性上界），按 §7 先比后合需人裁三态——甲 改名+改类收进收集面
+      并作多维扩展、乙 退役、丙 原样留；本批不顺手改。② 两条 strict xfail 待 TM-2/TM-3 转正后才能
+      摘除。③ `temporal_reasoner` 依 §6-380 裁定保持不动，TM-3 若要用它须另批按该票三态走。
+      ④ 外部对比档里 TM-1..TM-6 的其余项均未开工（用户已授权整序，按序自取）。
+    - **本会话下一枚空号现查 §6-382**（写前必须现场重取；本笔落库时该读数为 381）。
