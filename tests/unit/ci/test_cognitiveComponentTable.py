@@ -70,8 +70,8 @@ class TestMachineBlocksMatchGenerator:
 class TestTableIsNotVacuous:
     def test_rowsCoverTheWholeLayer(self):
         rows = _loadGenerator().componentRows()
-        # §6-379 退役 question_decomposer 后现值 92；下限随批次更新，不许无声塌缩。
-        assert len(rows) >= 92, f"组件表只 {len(rows)} 行？认知层的模块远不止这些"
+        # §6-380 退役 agent_self/memory_stream 后现值 90；下限随批次更新，不许无声塌缩。
+        assert len(rows) >= 90, f"组件表只 {len(rows)} 行？认知层的模块远不止这些"
         sublayers = {r["sublayer"] for r in rows}
         assert len(sublayers) >= 4, f"只扫到 {len(sublayers)} 个子层：{sorted(sublayers)}"
 

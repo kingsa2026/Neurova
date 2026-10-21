@@ -9383,3 +9383,40 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **未取证**：真 LLM 回合未跑；反向三类因果关系的写侧仍未补。
     - **仍开**：组三 security/temporal_reasoner/agent_self/memory_stream；等裁七条等。
     - **本会话下一枚空号现查 §6-380**（写前必须现场重取；本笔落库时该读数为 379）。
+
+380. **余下组三：`agent_self`/`memory_stream` 退役；`security`/`temporal_reasoner` 因唯一能力与现役判据保留待裁** ✅🟢 —— 两档退、两档出票
+    - **读者复算（主会话现跑）**：`AgentSelfManager` / `MemoryStream` 生产读者 0；`security.py`
+      只在 `neurova/memory/__init__.py` 门面再导出；`temporal_reasoner.py` 自身文件外零生产命中。
+    - **退役两档**：`agent_self`（524）——核心指令表/心跳任务表从无实例化，Agent 生命周期与
+      主动行为另有实装；`memory_stream`（235）——独立事件流/订阅从无生产读者，进程内事件面是
+      `core.event_bus`。**显式放弃**：可持久化核心指令/心跳表、独立记忆事件流与导出格式。
+      门面再导出行、专用 `test_memory_stream.py` 同批退役；守卫钉文件/跟踪源导入面/门面导出，
+      面收窄到 `neurova/`＋`tests/`（NeurUI 下 Tauri 打包副本被 .gitignore 忽略，不是源码）。
+    - **保留待裁 1：`security.py`（809）**。它是全仓唯一 **Fernet 记忆加密存储 + 永久遗忘 +
+      记忆审计/敏感模式导入导出**；`neurova/security/` 有 PII 检测/脱敏（`SensitiveInfoDetector`、
+      `DataMasking`）与 `MemorySecurityGuard`，但**不含** at-rest 加密、永久删除、记忆审计。
+      live `MemoryManager.forget` 只做软删（`lifecycle_stage=forgotten`）。另有
+      `test_memoryCipherFailFast.py` 守卫其加密失败必须抛出。**三态票**：
+      甲 接线——把敏感检测/审计接进记忆写读面，加密与密钥迁移另议（影响 storage/recall/forget，
+      需迁移既有明文行，代价最大）；乙 删——显式放弃 at-rest 加密/永久遗忘/记忆审计，
+      live 行为零变化（当前本就没有这些能力）；丙 原样留——继续是 809 行孤岛。
+      **推荐丙（暂留）**：安全口径不由代码审计代拍；若产品确认不要 at-rest 加密，再走乙。
+    - **保留待裁 2：`temporal_reasoner.py`（636）**。五类时序推理（关系推断/传递闭包/约束/矛盾/
+      排序）零生产读者；TKG 是事实存储（current/at_time/history），不做推理。
+      `tests/unit/knowledge/test_conflict_single_implementation.py` 明写它是“时序关系级唯一实现、
+      不在 017 删”——删它要同批改这条判据。**三态票**：甲 接线——把关系推断/矛盾检查接进
+      TKG 查询或新端点（新功能，需映射 TKG 事实）；乙 删——显式放弃时序关系级冲突轴并改判据；
+      丙 原样留。**推荐丙（暂留）**：无消费者且 017 已把它排除在删除票外。
+    - **A/B**：`AB_PASS`｜基线 10 failed+1 error（1237 passed）↔ 本树 6 failed（1241 passed）｜
+      仅本树红 0；仅基线红 5＝本批 3 条新判据＋组件表＋`test_decay_cycle_bounded`
+      （顺序/环境格，不认领）。本树 6 红在基线同红，按预存处置。
+    - **活体**：`agent_self`/`memory_stream` `find_spec` 均 None；EventBus 真订阅/发布命中
+      `{ok: true}`；真 `MemoryManager.remember/get_memory` 成功；保留的 `TemporalReasoner`
+      由 A→B、B→C 推出 **A before C**；`MemorySecurity` 仍可导入；仓内 `data/` 指纹前后同。
+    - **文档/子集**：第二环档案加组三处置标记；组件表 **92→90 模块／42623→41864 行**
+      （在役 52／仅层内 31／仅测试 2／零读者 5），下限 92→90；**子集 660→661**。
+    - **净 LOC**：生产池 **+0/−765**（agent_self 524＋memory_stream 235＋门面 6）；
+      测试/基建池 **+62/−140**；文档/台账池 **+46/−5**。
+    - **未闭环（明确不冒充完成）**：组三 4 档里 2 档退役、2 档等裁；security/temporal_reasoner
+      的去留需用户拍板（甲接/乙删/丙留）。等裁七条＋`permissions` 声明＋Z1–Z4/Z6 仍未动。
+    - **本会话下一枚空号现查 §6-381**（写前必须现场重取；本笔落库时该读数为 380）。

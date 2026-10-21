@@ -3480,3 +3480,5 @@ tests/unit/memory/test_d19ThirdGroupRetirements.py
 tests/unit/memory/test_causalReasoningWired.py
 # A2 question_decomposer 退役（§6-379）：文件/导入面/门面导出全清零；正控 live 替代仍在。
 tests/unit/memory/test_questionDecomposerRetirement.py
+# 第二环 agent_self/memory_stream 退役（§6-380）：跟踪源无导入、门面不导出；正控 EventBus/MemoryManager 仍在。
+tests/unit/memory/test_agentSelfAndMemoryStreamRetirements.py
