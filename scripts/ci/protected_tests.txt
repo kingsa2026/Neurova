@@ -3476,3 +3476,7 @@ tests/unit/cognitive_layers/memory_layer/test_channelFeedbackAdaptiveWeights.py
 tests/unit/api/test_channelWeightsReadLiveSource.py
 # D19 剩余组退役（§6-378）：六档未接旋钮文件/导入面/门面导出全清零；正控活实现仍在。
 tests/unit/memory/test_d19ThirdGroupRetirements.py
+# A1 因果推理接线（§6-379）：真 MemoryManager 图上效应/根因/链/解释/环 + 端点 causal 分支。
+tests/unit/memory/test_causalReasoningWired.py
+# A2 question_decomposer 退役（§6-379）：文件/导入面/门面导出全清零；正控 live 替代仍在。
+tests/unit/memory/test_questionDecomposerRetirement.py

@@ -4008,6 +4008,8 @@ class MemoryManager:
             strength=kwargs.get("strength", 0.5),
             metadata=kwargs.get("metadata"),
         )
+        # 关系写入口必须让懒建图失效：否则 traverse/analyze 永远读首次快照。
+        self._graph_traversal = None
         return True
 
     def get_relations(self, **kwargs) -> List[Dict[str, Any]]:
@@ -4021,7 +4023,10 @@ class MemoryManager:
         """删除关系（委托到 RelationModule.remove_relation）"""
         module = self._ensure_relation_module()
         relation_id = kwargs.get("relation_id", "")
-        return module.remove_relation(relation_id)
+        removed = module.remove_relation(relation_id)
+        if removed:
+            self._graph_traversal = None
+        return removed
 
     def get_memory_graph(self, **kwargs) -> Dict[str, Any]:
         """获取记忆图谱（委托到 RelationModule.get_stats）"""
@@ -4210,6 +4215,41 @@ class MemoryManager:
             ],
             "path_count": len(result.paths or []),
         }
+
+    def analyze_causal(
+        self, memory_id: str, target_id: Optional[str] = None, includeLoops: bool = False
+    ) -> Dict[str, Any]:
+        """在记忆关联图上做因果分析（多跳链/效应传播/根因/解释/环检测）。
+
+        读侧沿用 `_ensure_graph_traversal()`（与 `traverse_relations` 同源）；live 关系
+        枚举产出的是 `cause`（单数），`CausalReasoningEngine` 同批补认该类型。
+        """
+        from neurova.cognitive_layers.memory_layer.causal_reasoning import (
+            CausalReasoningEngine,
+        )
+
+        engine = CausalReasoningEngine(self._ensure_graph_traversal())
+
+        def _pairs(rows):
+            return [
+                {"memory_id": mid, "confidence": round(float(confidence), 6)}
+                for mid, confidence in rows
+            ]
+
+        result: Dict[str, Any] = {
+            "source": memory_id,
+            "effects": _pairs(engine.predict_effects(memory_id)),
+            "root_causes": _pairs(engine.find_root_causes(memory_id)),
+            "summary": engine.get_causal_graph_summary(memory_id),
+            "causal_loops": engine.detect_causal_loops() if includeLoops else [],
+        }
+        if target_id:
+            chains = engine.find_causal_chain(memory_id, target_id)
+            result["chains"] = chains
+            result["explanation"] = (
+                engine.explain_causality(memory_id, target_id) if chains else ""
+            )
+        return result
 
     def search_similar_memories(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return self.recall(query=query, limit=limit)
