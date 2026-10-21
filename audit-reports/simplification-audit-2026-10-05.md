@@ -9229,3 +9229,19 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：第 2 组三份并入施工单（`vector_search`／`vector_index_manager`／`memory_index`）；
       四旋钮其余、A1/A2、security/temporal_reasoner/agent_self/memory_stream 等重做。
     - **本会话下一枚空号现查 §6-375**（写前必须现场重取；本笔落库时该读数为 374）。
+
+375. **D19 重做第 2 组三份并入施工单：`vector_search`／`vector_index_manager`／`memory_index` 的活替代、唯一部分、并入目标与测试** ✅⚪ —— 只读，未动一行代码
+    - **产出落点**：`audit-reports/d19-rework-workorders-2026-10-21.md`（逐档对比表、并入目标、接通点、红绿测试、决策点）。
+    - **`vector_search`**：TF-IDF 编码、增量 IDF、索引/删除已被在役 `UnifiedVectorStore` 覆盖；
+      **唯一**是 pickle 持久化索引（活实现启动从 DB 重建＋嵌入缓存）。先量真实库 `index_memories`
+      重建 p95：可接受则**显式放弃**持久化；不可接受才并入 `saveIndex/loadIndex`，且文件头必须带
+      DB 指纹，防"搜到已删记忆"的第二份状态。
+    - **`vector_index_manager`**：**唯一**是异步队列／in-flight 等待（M-24）／状态重启恢复；
+      活实现是同步 `index_memories(incremental=True)`。无延迟证据前默认**显式放弃**；
+      若产品要异步，并入 `UnifiedVectorStore` 的单一索引入口，不另养第二套索引状态。
+    - **`memory_index`**：`query` 是 `storage.query` 直通（无独特）；`search_by_tags` 缺隔离过滤、
+      `search_by_text` 子串、`get_by_ids` 按序、隔离统计是独有。先把隔离 tags 并进
+      `storage.list_by_tags`（与 `query` 同源），`text`/`ids` 按产品口径决定并入或放弃。
+    - **仍开**：三档的"并/弃"决定与实施（本批不动码）；第 2 组未退役任何一档。
+    - **净 LOC**：生产池 +0/−0；测试/基建池 +109/−0（施工单 93＋本格 16）。
+    - **本会话下一枚空号现查 §6-376**（写前必须现场重取；本笔落库时该读数为 375）。
