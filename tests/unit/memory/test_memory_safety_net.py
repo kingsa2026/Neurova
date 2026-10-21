@@ -2,8 +2,9 @@
 记忆系统安全网测试
 
 验证 memory_layer/ 去重前后的关键行为不变：
-1. 向量搜索系统正常工作
-2. 兼容层导出正常
+1. channels 子系统的冲突检测器可导入、可初始化
+2. 向量搜索系统正常工作
+3. 兼容层导出正常
 """
 
 import pytest
@@ -11,6 +12,25 @@ import pytest
 
 class TestMemorySystemSafetyNet:
     """记忆系统安全网测试"""
+
+    # ═══ channels 子系统 conflict ═══
+
+    def test_conflict_channels_importable(self):
+        """测试 channels 子系统的 conflict 模块可导入"""
+        from neurova.cognitive_layers.memory_layer.channels.conflict import (
+            ConflictDetector as ChannelsConflictDetector,
+            ConflictPair,
+        )
+        assert ChannelsConflictDetector is not None
+        assert ConflictPair is not None
+
+    def test_channels_conflict_detector_init(self):
+        """测试 channels 子系统的 ConflictDetector 初始化"""
+        from neurova.cognitive_layers.memory_layer.channels.conflict import (
+            ConflictDetector,
+        )
+        detector = ConflictDetector()
+        assert detector is not None
 
     # ═══ 向量搜索系统 ═══
 
