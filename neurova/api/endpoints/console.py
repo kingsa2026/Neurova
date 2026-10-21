@@ -1781,6 +1781,32 @@ def _apply_feedback_to_memory(
         logger.warning("反馈记忆温度更新失败 (session=%s): %s", session_id, e)
 
 
+def _apply_feedback_to_channels(
+    agent_id: str, session_id: str, feedback: str
+) -> None:
+    """反馈自适应通道写侧：按该会话最近一轮的意图/贡献通道调权重（best-effort）。"""
+    try:
+        agent = get_agent_instance(agent_id=agent_id or "")
+    except Exception as e:
+        logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
+        return
+    if agent is None:
+        return
+    memory_agent = getattr(agent, "memory_agent", None)
+    if memory_agent is None or not hasattr(memory_agent, "apply_feedback_to_channel_weights"):
+        return
+    try:
+        adjusted = memory_agent.apply_feedback_to_channel_weights(
+            session_id=session_id, feedback=feedback)
+        if adjusted:
+            logger.info(
+                "反馈已作用于通道权重: session=%s, feedback=%s, 通道数=%s",
+                session_id, feedback, adjusted,
+            )
+    except Exception as e:
+        logger.warning("反馈通道权重更新失败 (session=%s): %s", session_id, e)
+
+
 def _apply_feedback_to_crystallizer(
     repo, agent_id: str, session_id: str, timestamp: str, feedback: str
 ) -> int:
@@ -1911,6 +1937,8 @@ async def post_chat_feedback(
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
         _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
+        # 反馈自适应通道：按该会话最近一轮的意图/贡献通道调权重（写侧）。
+        _apply_feedback_to_channels(agent_id, body.session_id, body.feedback)
         # §6-209 第四面扇出：把该轮回执补进结晶器证据面（只补工具条目，寒暄轮不补）。
         _apply_feedback_to_crystallizer(
             repo, agent_id, body.session_id, body.timestamp, body.feedback)

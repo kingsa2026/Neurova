@@ -8793,6 +8793,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：等裁七条 ＋ 收窄后的"四旋钮接不接" ＋ 「`conflict_detector_v2` 补档」 ＋
       并发会话那条「内置技能要不要各自补 `permissions` 声明」。
     - **本会话下一枚空号现查 §6-362**（写前必须现场重取；本笔落库时该读数为 361）。
+    - 〔**§6-377 勘正**：本条"通道插件化在服"只证了注册与取用代码，未证通道**被激活**。
+      真 app 活体读数：`get_active()` 恒空、带 session 召回 0 条；全仓无 `initialize_all()` 调用方。
+      已在引擎首次召回时补幂等激活并根修。本条按"注册/取用在，激活从未接通"读。〕
 
 362. **记忆检索／MoE 设计文档漂移核对：有漂移，且落在"活跃/权威"层——权威升级档不覆盖现行脊柱、事实源里的通道路径全错、一份未入索引的档自称"生产就绪"** ✅⚪ —— 只读核对，未改一行文档
     - **范围**：用户问"核对设计文档，看是否漂移"。本批只核"记忆检索／MoE"这一族（它刚在 §6-360/361
@@ -9271,3 +9274,46 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：第 3 组（四旋钮其余、A1/A2、security/temporal_reasoner/agent_self/memory_stream）；
       等裁七条＋`permissions` 声明＋Z1–Z4/Z6。
     - **本会话下一枚空号现查 §6-377**（写前必须现场重取；本笔落库时该读数为 376）。
+
+377. **反馈自适应通道权重接线：写侧 like/dislike→意图权重落盘，读侧仍取单源；活体反证发现插件通道从未激活并根修** ✅🟢 —— 一笔：先补写侧、再接召回
+    - **先量断点（活体，主会话现跑）**：真 `create_app()` + 真 agent 的 `recall_engine`，种 1 条记忆后
+      `get_active()` 为 **0**、带 session 的 `recall_flat` 返回 **0 条**；全仓 `ChannelRegistry.initialize_all()`
+      只有定义、无调用方（`register()` 只入表，`BaseChannel.__init__` 置 INACTIVE）。§6-361 的"在服"按此勘正。
+    - **写侧**：`IntentAwareRecallStrategy.applyFeedback` 只调本轮**真贡献过结果**的通道（±0.05，夹
+      `[0.02, 0.6]` 后归一化）；按 agent namespace 落 `data/channel_weights/<namespace>.json`
+      （tmp + `os.replace` 原子写），构造时读回；`update_channel_weights` 同批持久化（原为纯内存态）。
+    - **归属**：`recall()/recall_flat(session_id=...)` 记 `session_id → {intent, 实际结果通道}`
+      （只留最近 64 个会话）；无归属/无结果通道 ⇒ 不猜，返回空。`UnifiedRetriever` 与
+      `UnifiedRetrieverAdapter` 透传 `RetrievalContext.session_id`（chat_pipeline 三处构造点本就有值）；
+      `MemCore.apply_feedback_to_channel_weights` 与 `console.post_chat_feedback` 指向**同一个**
+      引擎实例（`MemCore.recall_engine` 与检索链共用构造时那一份）。
+    - **读侧**：仍是 `recall_flat`/`recall` 取的 `IntentAwareRecallStrategy.get_channel_weights`
+      （现 `neurova_recall.py:824/896`），不新建第二套权重表；`channels/weight.py` 仍是另一份静态表，
+      留待其余旋钮收口（脊柱文档 §5 已标）。
+    - **根修插件通道激活**：`_ensurePluginChannelsReady()` 在首次插件召回前调一次 `initialize_all()`
+      （幂等；超时/失败如实 warning，不伪装空结果）。活体同一条召回从 0→1 条（text）。
+    - **红→绿**：生产面整体 stash（唯一 tag `red-selfproof-channel-feedback-377-full`）⇒ 新判据
+      **10 failed**；恢复 ⇒ **10 passed**。
+    - **宽域 A/B**：`AB_PASS`｜基线 10 failed+1 error（520 passed）↔ 本树 0 failed（530 passed）｜
+      仅本树红 0。仅基线红 11＝本批 10 条新判据＋`test_lock_coverage_m060709.py::…test_recall_builds_base_inside_lock`
+      （基线 9 格红在同进程的连带 error；本树单跑与整组均绿）。
+    - **判据面修正（缺陷，单列）**：`test_b10_recall_shared_loop.py::test_timeout_returns_none_and_no_thread_growth`
+      原用全进程 `threading.active_count()` **等值**断言；无关 `mem-dep_0` 线程池空闲退出使总数 6→5，
+      被误判为回归（A/B 第一次报 `AB_REGRESSION`，复算 3/3 稳定红）。诊断抓到前后线程名后改为
+      `<=`＋`_recall_loop_thread_count()==1`，仍咬住旧实现"超时弃置线程"的 +1 增长。
+    - **活体（真 app + 真 HTTP）**：隔离数据根 `…\neurovaChannelFeedback-*`；召回 1 条 text、归属
+      `{factual,[text]}`；`POST /api/v1/console/chat/feedback` like 200 ⇒ text **0.4→0.428571**，
+      落盘 `default.json`、新实例读回同值；dislike 200 ⇒ **0.398496**。反证两格：关掉
+      `_ensurePluginChannelsReady()` ⇒ 召回 0、归属空；关掉端点 `_apply_feedback_to_channels(...)`
+      ⇒ 权重不动、无落盘文件。仓内 `data/channel_weights` 不存在，`data/` 前后同。
+    - **文档/子集**：脊柱 §2 补激活行、§5 旋钮表四→三并写接线口径；§6-361 加勘正标记。
+      **子集 655→656**；组件表不变（无模块增删）。
+    - **净 LOC**：生产池 **+219/−11**（`neurova_recall` +165/−9、`console` +28、`mem_core` +21、
+      `unified_retriever` +4/−2、`retriever_adapters` +1）；测试/基建池 **+230/−2**；
+      文档/台账池 **+56/−3**。生产净增去向：写侧持久化/归属记录/插件通道激活三块，
+      无删减额度可抵（本批是补断点，不是简化批）。
+    - **未取证**：真 LLM 回合未跑（召回与端点均由真装配直调，未走 chat 模型的检索步骤）；
+      `channels/weight.py` 未在本批归一。
+    - **仍开**：四旋钮其余三件、A1/A2、security/temporal_reasoner/agent_self/memory_stream；
+      等裁七条＋`permissions` 声明＋Z1–Z4/Z6。
+    - **本会话下一枚空号现查 §6-378**（写前必须现场重取；本笔落库时该读数为 377）。

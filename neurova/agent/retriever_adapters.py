@@ -47,6 +47,7 @@ class UnifiedRetrieverAdapter:
             result = self._retriever.retrieve(
                 query=context.query,
                 limit=context.limit,
+                session_id=getattr(context, "session_id", None),
             )
             if asyncio.iscoroutine(result):
                 memories = await result

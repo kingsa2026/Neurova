@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode
 
@@ -59,6 +59,7 @@ class UnifiedRetriever:
         query: str,
         limit: int = 10,
         include_patterns: bool = True,
+        session_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         统一检索入口
@@ -89,7 +90,8 @@ class UnifiedRetriever:
 
         if self._recall:
             try:
-                recall_results = self._recall.recall_flat(query, limit=limit)
+                recall_results = self._recall.recall_flat(
+                    query, limit=limit, session_id=session_id)
                 # RecalledMemory 对象需要转换为字典格式
                 for rm in recall_results:
                     if hasattr(rm, "to_dict"):

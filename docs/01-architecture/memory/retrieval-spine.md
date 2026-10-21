@@ -24,6 +24,9 @@
   `GraphChannel` / `EmotionChannel` / `VoiceChannel`（`channels/builtin/`）。
 - **取用**：`neurova_recall.py:954-955` 按 `ch.metadata.name ∈ enabled_names` 选出启用通道，
   并发跑各自的 `retrieve()`。
+- **激活**：`NeurovaRecallEngine._ensurePluginChannelsReady()`——生产没有启动钩子调用
+  `ChannelRegistry.initialize_all()`，注册后的通道长期 INACTIVE、`get_active()` 恒空
+  ⇒ 插件召回恒空。首次召回时补一次幂等初始化（§6-377 活体取证并根修）。
 
 ## 3. 合并、打分、排序（live）
 
@@ -45,16 +48,20 @@
 
 ## 5. 未接线的旋钮（**不是**脊柱的一部分）
 
-这四件在同一包内、结构完整，但**没有插进上面那条链**（§6-360 逐档档案）：
+下列三件在同一包内、结构完整，但**没有插进上面那条链**（§6-360 逐档档案）：
 
 | 旋钮 | 文件 | 今天缺的那半边 |
 |---|---|---|
 | per-channel 阈值覆盖 | `channels/threshold.py` | 只有全局 `threshold.default`，且只作用于 expert 门控 |
-| 反馈驱动的通道权重 | `channels/weight.py` | 权重是两份手抄静态表；无人写回 |
 | 插件通道质心自动生成 | `channels/centroid.py` | 质心只按 Expert 定义表建 |
 | 统一结果管道 | `channels/processor.py` | 内联语义冲突检测未进 live 链；`activations` 乘子无生产者 |
 
-它们的去留见台账 §6-361 的"四旋钮接不接"（等裁）。
+其余三件的去留见台账 §6-361 的"四旋钮接不接"（等裁）。
+> **2026-10-21（§6-377）**：反馈驱动的通道权重已接线，不再列在本表——写侧
+> `IntentAwareRecallStrategy.applyFeedback`（like/dislike ±0.05，归一化，按 agent namespace 落盘），
+> 读侧仍是召回路用的 `get_channel_weights`（不造第二套权重表）；召回按 `session_id` 记录
+> 本轮意图与贡献通道，无归属不猜。`channels/weight.py` 仍是另一份静态表（§6-360 缺陷③的
+> 三份表示之一），待其余旋钮收口时按教义 6 归一。
 > **2026-10-21（§6-373）**：§6-371 的退役已撤回，四旋钮恢复在位；去留按教义 7 重做
 > （先取长补短再退役），本表重新生效。
 > **2026-10-21（§6-374）**：`channels/conflict.py` 的否定检测已并入单源

@@ -12,10 +12,12 @@ Neurova 统一记忆检索引擎 — 多维融合 + 意图钻取
 
 import asyncio
 import datetime
-from neurova.core.logger import get_logger
+import json
 import math
+import os
 import threading
 import time
+from neurova.core.logger import get_logger
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
@@ -458,9 +460,56 @@ class IntentAwareRecallStrategy:
         },
     }
 
-    def __init__(self):
-        # 运行时可覆盖的权重（深拷贝默认值）
+    def __init__(self, namespace: str = "default"):
+        # 运行时可覆盖的权重（深拷贝默认值）；namespace＝agent 域，反馈落盘按域隔离。
         self._overrides: Dict[QueryIntent, Dict[RecallChannel, float]] = {}
+        self._namespace = namespace or "default"
+        self._lock = threading.RLock()
+        self._loadOverrides()
+
+    def _overridesFile(self):
+        from pathlib import Path
+        from neurova.core.data_root import get_data_root
+        safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in self._namespace)[:80]
+        return Path(get_data_root()) / "channel_weights" / f"{safe or 'default'}.json"
+
+    def _loadOverrides(self) -> None:
+        path = self._overridesFile()
+        if not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            logger.warning("通道权重覆盖文件读取失败 %s: %s", path, e)
+            return
+        for intent_name, weights in (data or {}).items():
+            try:
+                intent = QueryIntent(intent_name)
+            except ValueError:
+                continue
+            mapped: Dict[RecallChannel, float] = {}
+            for channel_name, weight in (weights or {}).items():
+                try:
+                    mapped[RecallChannel(channel_name)] = float(weight)
+                except (ValueError, TypeError):
+                    continue
+            if mapped:
+                self._overrides[intent] = mapped
+
+    def _saveOverrides(self) -> None:
+        path = self._overridesFile()
+        payload = {
+            intent.value: {channel.value: round(float(weight), 6)
+                           for channel, weight in weights.items()}
+            for intent, weights in self._overrides.items()
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as e:
+            logger.warning("通道权重覆盖文件写入失败 %s: %s", path, e)
 
     def get_channel_weights(self, intent: QueryIntent) -> Dict[RecallChannel, float]:
         """获取意图对应的通道权重
@@ -471,9 +520,39 @@ class IntentAwareRecallStrategy:
         Returns:
             Dict[RecallChannel, float]: 通道权重映射
         """
-        if intent in self._overrides:
-            return self._overrides[intent]
-        return dict(self.INTENT_CHANNEL_WEIGHTS.get(intent, self.INTENT_CHANNEL_WEIGHTS[QueryIntent.UNKNOWN]))
+        with self._lock:
+            if intent in self._overrides:
+                return dict(self._overrides[intent])
+            return dict(self.INTENT_CHANNEL_WEIGHTS.get(
+                intent, self.INTENT_CHANNEL_WEIGHTS[QueryIntent.UNKNOWN]))
+
+    def applyFeedback(
+        self, intent: QueryIntent, channels: List[str], positive: bool
+    ) -> Dict[RecallChannel, float]:
+        """按一轮反馈调整该意图的通道权重（写入侧）。
+
+        只调整本轮**实际贡献过结果的通道**；+/-0.05 后夹到 [0.02, 0.6] 并归一化。
+        落盘按 `namespace` 隔离，重启后由同一策略实例读回。
+        """
+        targets: List[RecallChannel] = []
+        for channel in channels or []:
+            try:
+                targets.append(channel if isinstance(channel, RecallChannel) else RecallChannel(channel))
+            except ValueError:
+                continue
+        with self._lock:
+            weights = dict(self.get_channel_weights(intent))
+            if not targets:
+                return weights
+            delta = 0.05 if positive else -0.05
+            for channel in targets:
+                weights[channel] = max(0.02, min(0.6, weights.get(channel, 0.1) + delta))
+            total = sum(weights.values())
+            if total > 0:
+                weights = {channel: value / total for channel, value in weights.items()}
+            self._overrides[intent] = weights
+            self._saveOverrides()
+            return dict(weights)
 
     def get_retrieval_params(self, intent: QueryIntent) -> Dict[str, Any]:
         """获取意图对应的检索参数
@@ -493,7 +572,9 @@ class IntentAwareRecallStrategy:
             intent: 查询意图
             weights: 新的通道权重映射
         """
-        self._overrides[intent] = dict(weights)
+        with self._lock:
+            self._overrides[intent] = dict(weights)
+            self._saveOverrides()
         logger.debug("更新意图 %s 的通道权重: %s", intent.value, weights)
 
 
@@ -609,7 +690,16 @@ class NeurovaRecallEngine:
 
         # 意图感知组件
         self.intent_detector = intent_detector or QueryIntentDetector()
-        self.intent_strategy = intent_strategy or IntentAwareRecallStrategy()
+        namespace = getattr(memory_manager, "agent_id", None) or getattr(
+            memory_manager, "_agent_id", "default")
+        self.intent_strategy = intent_strategy or IntentAwareRecallStrategy(
+            namespace=str(namespace or "default"))
+
+        # 反馈写侧的回合归属：session_id → 本轮意图/贡献通道（只留最近若干会话）
+        self._recallAttribution: Dict[str, Dict[str, Any]] = {}
+        self._attributionLock = threading.RLock()
+        # 插件通道激活：注册 ≠ 可用（生产没有启动钩子调用 initialize_all）
+        self._channelInitLock = threading.RLock()
 
         # 插件化通道注册表
         self._registry = registry
@@ -707,6 +797,7 @@ class NeurovaRecallEngine:
         limit: int = 20,
         channels: Optional[List[RecallChannel]] = None,
         query_intent: Optional[QueryIntent] = None,
+        session_id: Optional[str] = None,
     ) -> RecallResult:
         """
         检索记忆（两阶段 + 意图感知）
@@ -756,6 +847,7 @@ class NeurovaRecallEngine:
 
         # 计算总分
         total_score = sum(m.score for m in phase2_results)
+        self._recordRecallAttribution(session_id, query_intent, phase2_results)
 
         return RecallResult(
             query=query,
@@ -780,6 +872,7 @@ class NeurovaRecallEngine:
         limit: int = 20,
         channels: Optional[List[RecallChannel]] = None,
         query_intent: Optional[QueryIntent] = None,
+        session_id: Optional[str] = None,
     ) -> List[RecalledMemory]:
         """
         平坦检索（不进行意图钻取）
@@ -808,8 +901,45 @@ class NeurovaRecallEngine:
 
         # 按分数排序
         results.sort(key=lambda m: m.score, reverse=True)
+        selected = results[:effective_limit]
+        self._recordRecallAttribution(session_id, query_intent, selected)
+        return selected
 
-        return results[:effective_limit]
+    def _recordRecallAttribution(
+        self, session_id: Optional[str], intent: QueryIntent, results: List[Any]
+    ) -> None:
+        """记录本轮归属：哪个意图、哪些通道真贡献了结果（反馈写侧读它）。"""
+        if not session_id:
+            return
+        channels = sorted({
+            getattr(getattr(m, "channel", None), "value", None)
+            or str(getattr(m, "channel", "") or "")
+            for m in results
+            if getattr(m, "channel", None)
+        })
+        with self._attributionLock:
+            self._recallAttribution[str(session_id)] = {
+                "intent": intent.value, "channels": channels,
+            }
+            while len(self._recallAttribution) > 64:
+                self._recallAttribution.pop(next(iter(self._recallAttribution)))
+
+    def getRecallAttribution(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._attributionLock:
+            attribution = self._recallAttribution.get(str(session_id))
+            return dict(attribution) if attribution else None
+
+    def applyChannelFeedback(self, session_id: str, positive: bool) -> Dict[RecallChannel, float]:
+        """把一轮 like/dislike 作用于该会话最近一轮的意图/贡献通道。"""
+        attribution = self.getRecallAttribution(session_id)
+        if not attribution or not attribution.get("channels"):
+            return {}
+        try:
+            intent = QueryIntent(attribution["intent"])
+        except ValueError:
+            return {}
+        return self.intent_strategy.applyFeedback(
+            intent, attribution["channels"], bool(positive))
 
     def _run_with_timeout(self, func, *args, **kwargs) -> Any:
         """带超时执行"""
@@ -931,6 +1061,27 @@ class NeurovaRecallEngine:
 
         return deduplicated
 
+    def _ensurePluginChannelsReady(self) -> None:
+        """首次召回前激活已注册通道；初始化异常/超时如实记录，不伪装成空结果。
+
+        幂等：已有 ACTIVE 通道时不重复初始化（测试/外部注入的注册表自行激活即可）。
+        """
+        if not self._registry or self._registry.get_active():
+            return
+        with self._channelInitLock:
+            if self._registry.get_active():
+                return
+            results = self._run_coroutine_in_thread(
+                self._registry.initialize_all(),
+                join_timeout=self.timeout_seconds + _PLUGIN_RECALL_JOIN_GRACE_SECONDS,
+            )
+            if results is None:
+                logger.warning("插件通道初始化超时，本轮按已激活通道继续")
+                return
+            failed = sorted(name for name, ok in results.items() if not ok)
+            if failed:
+                logger.warning("插件通道初始化失败（本轮不启用）: %s", failed)
+
     def _phase1_plugin_recall(
         self,
         query: str,
@@ -949,6 +1100,11 @@ class NeurovaRecallEngine:
         # 之前: `channel_weights if self._channel_weights else {}` — self._channel_weights 永远 truthy
         # 导致 channel_weights=None 时 weights=None, 后续 weights.get() 抛 AttributeError
         weights = channel_weights if channel_weights else {}
+
+        # 注册不等于可用：`register()` 只入表，`get_active()` 只认 ACTIVE；生产没有启动钩子
+        # 调用 `initialize_all()`，于是插件通道长期 INACTIVE、召回恒空。首次用到时补一次
+        # （`BaseChannel.initialize()` 幂等，只置 ACTIVE）。
+        self._ensurePluginChannelsReady()
 
         # 获取启用的插件通道
         enabled_names = {rc.value for rc in channels}
