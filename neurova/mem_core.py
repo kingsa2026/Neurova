@@ -1274,6 +1274,27 @@ class MemCore:
             )
         return affected
 
+    def apply_feedback_to_channel_weights(self, session_id: str, feedback: str) -> int:
+        """把 like/dislike 作用于该会话最近一轮的通道权重（反馈自适应写侧）。
+
+        归属由 `NeurovaRecallEngine.recall_flat` 在带 session_id 召回时记录；
+        没有归属（未走检索/进程重启后）→ 不猜，返回 0。
+        """
+        engine = self.recall_engine
+        if not engine or not session_id or feedback not in ("like", "dislike"):
+            return 0
+        try:
+            weights = engine.applyChannelFeedback(session_id, feedback == "like")
+        except Exception as e:  # noqa: BLE001 - best-effort，不阻断反馈持久化
+            logger.warning("通道权重反馈更新失败 session=%s: %s", session_id, e)
+            return 0
+        if weights:
+            logger.info(
+                "通道权重已按反馈调整: session=%s, feedback=%s, 通道数=%s",
+                session_id, feedback, len(weights),
+            )
+        return len(weights)
+
     # ══════════════════════════════════════════════════════════════
     # 对话历史更新
     # ══════════════════════════════════════════════════════════════
