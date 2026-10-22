@@ -3609,3 +3609,18 @@ tests/unit/agent/test_gateTerminationReasonReachesReply.py
 # 逐文件单跑两次同读数：test_manager 39 passed（5.03s／4.96s）、test_sleep_phase_cycle 29 passed（3.47s／3.44s）。
 tests/unit/memory/core/test_manager.py
 tests/unit/memory/test_sleep_phase_cycle.py
+# §6-400 公开面机器段（裁定 A）与它的抽样复核（裁定 C）。
+# 生成器 `scripts/generate_api_auth_surface.py` 是唯一写者；本档只做「重算 + 比对 + 负向控制」，
+# 与 `test_api_inventory_freshness_guard.py` 同机制。
+# 判据 7 格：
+# ① 写回幂等：`applyBlock(当前文档) == 当前文档`（重跑 --write 无 diff）；
+# ② 负向控制：往机器段塞一行陈旧路由 ⇒ 必须被拉回真值；
+# ③ 标记恰好一对（缺/重都会静默追加第二段）；
+# ④ 读数自洽：需认证 + 公开 == 总数，公开清单条数 == 公开数；另有下界（总数 >500、公开 >0）
+#    防"两侧都空也自洽"的空转；
+# ⑤ 口径 caveat 在段内：handler 体内自验那一类**未覆盖**、404/405 不算门、清单是**候选集**
+#    而不是"无凭证可打"（C 抽样已证 2 条在此类）；
+# ⑥ C 的抽样结论挂在段后（2 条 handler 内自验被点名），读者知道清单不是证明；
+# ⑦ B 的止血不许回潮：手写「无需认证」名单行不得再出现。
+# 入册前逐文件单跑两次同读数 7 passed（10.62s / 10.98s）。
+tests/unit/api/test_authSurfaceFreshness.py
