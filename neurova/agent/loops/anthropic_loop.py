@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
+from neurova.agent.loops.reasoning_degeneracy import ReasoningStreamGuard, stripDegeneracy
 from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.llm_client import LLMResponse
 
@@ -127,7 +128,8 @@ class AnthropicLoop(BaseAgentLoop):
             # 执行即回放——连同声明这些调用的 assistant 消息：
             # provider 层要按 assistant.tool_calls 产 tool_use 块，缺声明时
             # tool_result 没有前置配对，协议判非法（与 OpenAI 侧同一根因）
-            _round_reasoning = getattr(response, "reasoning_content", None) or ""
+            # 非流式整块思考同样剥退化段（与流式同一份判据，不另拼正则）
+            _round_reasoning = stripDegeneracy(getattr(response, "reasoning_content", None) or "")[0]
             messages.extend(
                 self.buildToolRoundMessages(
                     response.tool_calls,
@@ -172,7 +174,7 @@ class AnthropicLoop(BaseAgentLoop):
         while True:
             state.assertRoundInvariant()
             reply_parts: List[str] = []
-            reasoning_parts: List[str] = []
+            reasoningGuard = ReasoningStreamGuard()
             pending_tool_calls: List[Dict] = []
             finish_reason = None
             # 同一次流式调用可能回多个 usage chunk（同一累计值）；只取最后一个，
@@ -197,8 +199,11 @@ class AnthropicLoop(BaseAgentLoop):
                     yield {"type": "content", "data": text}
                 rtext = getattr(chunk, "reasoning_content", None)
                 if rtext:
-                    reasoning_parts.append(rtext)
-                    yield {"type": "reasoning", "data": rtext}
+                    for out_text in reasoningGuard.consume(rtext):
+                        yield {"type": "reasoning", "data": out_text}
+                    if reasoningGuard.aborted:
+                        # 判定退化即终止这一次调用（与 OpenAI 环同一份判据与节拍）
+                        break
                 usage = getattr(chunk, "usage", None)
                 if usage:
                     pending_usage = usage
@@ -206,6 +211,19 @@ class AnthropicLoop(BaseAgentLoop):
                     self._merge_tool_call_delta(pending_tool_calls, tc_delta)
                 if getattr(chunk, "finish_reason", None):
                     finish_reason = chunk.finish_reason
+
+            if reasoningGuard.aborted:
+                found = reasoningGuard.found
+                logger.warning(
+                    "[REASONING_DEGENERACY] 思考流退化截断：「%s」连发 %s 次（尾部 %s 字符），"
+                    "本轮按输出预算耗尽交出成因",
+                    found.unit,
+                    found.repeats,
+                    found.chars,
+                )
+                # 截断点之后的 tool_calls 分片是半截 JSON，不执行一个没声明完的调用
+                pending_tool_calls.clear()
+                finish_reason = finish_reason or "length"
 
             if pending_usage is not None:
                 self._accumulateRoundUsage(pending_usage)
@@ -253,7 +271,7 @@ class AnthropicLoop(BaseAgentLoop):
                 yield {"type": "tool_result", "data": tm}
 
             # 执行即回放：其后的判定只决定要不要开下一轮（与 OpenAI 环同一规则）
-            _round_reasoning = "".join(reasoning_parts)
+            _round_reasoning = reasoningGuard.cleanText
             messages.extend(
                 self.buildToolRoundMessages(
                     pending_tool_calls,
