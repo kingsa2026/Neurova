@@ -353,154 +353,73 @@ const ChatPage: React.FC = () => {
 
 ## 4. 国际化（i18n）
 
-> **本节是通用范式草图，与本仓实装不同源**（2026-10-12 复核，台账 §6-167 登记）：仓内**没有** `src/contexts/LanguageContext.tsx`，也没有 `src/locales/*.json`；真正那条链是 `NeurUI/src/i18n/index.ts`（11 份 locale、`readStoredLocaleCode`、`uiCodeForLanguageTag`）＋ `NeurUI/src/stores/app.ts` 的 `setLocale`（改语言的唯一一处）。
-> 尤其**不要**照下面的 `localStorage.getItem('language')` 再建第五份「默认语言」——仓内那四份已按 §6-167 收口到语言层一处（`LanguageManager` 的按人偏好＋开箱默认），而 UI 侧那个键名是 `locale` 不是 `language`（唯一读者在 `i18n/index.ts`）。整节按实况重写＝另一刀，已登记待做，不在本批顺手改画架构图。
+**本仓是 Vue 3 + vue-i18n，没有 i18next、没有 `LanguageContext.tsx`、也没有 `src/locales/*.json`。**
+本节按实况写；历史版本那段 React/i18next 的"通用范式"已整节撤下——它描述的不是本仓（§6-167
+把它登记为"第五份词汇的风险源"，本批按实况重写）。
 
-### 4.1 i18n配置位置
+### 4.1 唯一入口与单点
 
-**主配置**: `src/contexts/LanguageContext.tsx`
+| 关注点 | 唯一落点 |
+|--------|----------|
+| 语言包（11 份 `.ts`） | `NeurUI/src/i18n/locales/*.ts`，`zh-CN` 为基准 |
+| 语言清单 / 默认值 / 本地缓存键 | `NeurUI/src/i18n/index.ts`：`supportedLocales`、`DEFAULT_LOCALE = 'zh-CN'`、`LOCALE_STORAGE_KEY = 'locale'` |
+| 本地缓存读法（唯一读者） | `i18n/index.ts` 的 `readStoredLocaleCode()`（`secureStorage.get('locale')` + 合法性回落） |
+| 后端语言码 → UI 区域码 | `i18n/index.ts` 的 `uiCodeForLanguageTag()`（认不出返回 `null`，调用方必须保留本地选择，不许就近落） |
+| 覆盖层合并 | `i18n/index.ts` 的 `overlayTreeFromEntries()` → `mergeLocaleMessage()` |
+| 改语言的唯一入口 | `stores/app.ts` 的 `setLocale(code, persist)`：i18n 实例 + 文本方向 + 覆盖层 + 本地缓存 + （可选）服务端偏好 |
+| 语言默认的归属 | 语言层：`GET/PUT /api/v1/language/preferences/{mine,default}`（§6-167） |
 
-**翻译文件目录**: `src/locales/`
+> **`settings.general.language` 已退役**（§6-167）：两个写口都回 400 并指路语言层。
+> 新代码不要去 settings 面找"默认语言"。
 
-### 4.2 支持的语言
+### 4.2 支持的语言（11）
 
-| 语言代码 | 语言名称 | 文件名 |
-|---------|---------|--------|
-| zh-CN | 简体中文 | zh-CN.json |
-| en-US | English | en-US.json |
-| ja-JP | 日本語 | ja-JP.json |
-| ko-KR | 한국어 | ko-KR.json |
-| fr-FR | Français | fr-FR.json |
-| de-DE | Deutsch | de-DE.json |
-| es-ES | Español | es-ES.json |
-| ru-RU | Русский | ru-RU.json |
-| pt-PT | Português | pt-PT.json |
-| it-IT | Italiano | it-IT.json |
-| th-TH | ไทย | th-TH.json |
+| 语言码 | 名称 |
+|--------|------|
+| `zh-CN` | 简体中文（基准） |
+| `en-US` | English |
+| `ru-RU` | Русский |
+| `ja-JP` | 日本語 |
+| `fr-FR` | Français |
+| `ar-SA` | العربية（RTL） |
+| `ko-KR` | 한국어 |
+| `es-ES` | Español |
+| `de-DE` | Deutsch |
+| `hi-IN` | हिन्दी |
+| `it-IT` | Italiano |
 
-### 4.3 i18n初始化
+RTL 方向由 `stores/app.ts` 的 `RTL_LOCALES` 决定（`document.dir`），**不是**由语言包自己声明。
 
-**文件**: `src/contexts/LanguageContext.tsx`
+### 4.3 启动与切换的时序（哪里读、哪里写）
 
-```typescript
-import i18n from 'i18next';
-import { useTranslation, initReactI18next } from 'react-i18next';
+**启动**：`readStoredLocaleCode()` 先给本地兜底 → `syncLocaleFromServer()` 拉
+`GET /api/v1/language/preferences/mine`，按三格解析链取"这个人实际该看的语言"：
+`user`（本人显式选过）→ `out_of_box`（管理员替没选过的人定的起点）→ `builtin`（枚举级兜底）。
+只有 `via=out_of_box` 时才 `setLocale(code, false)`：**起点生效但不回写成偏好**——回写会把它
+冻住，管理员以后再改也不再作用于这个人。认不出的码（如 `pt`）保持本地选择并报 `unmapped`。
 
-// 导入语言资源
-import zhCN from '@/locales/zh-CN.json';
-import enUS from '@/locales/en-US.json';
-// ... 其他语言
+**用户切换**：右上角语言下拉 → `appStore.setLocale(code)` → 同一次调用里落 i18n、方向、
+覆盖层、`locale` 本地缓存，并 `PUT /api/v1/language/preferences/mine`（属主只从登录态取）。
 
-const resources = {
-  'zh-CN': { translation: zhCN },
-  'en-US': { translation: enUS },
-  // ... 其他语言
-};
+**管理员设起点**：设置页「开箱默认语言」→ `PUT /api/v1/language/preferences/default`（仅管理员）。
 
-// 初始化i18next
-i18n.use(initReactI18next).init({
-  resources,
-  lng: localStorage.getItem('language') || 'zh-CN',
-  fallbackLng: 'en-US',
-  interpolation: {
-    escapeValue: false,
-  },
-});
-```
+### 4.4 覆盖层（运营/用户补的文案）
 
-### 4.4 在组件中使用i18n
+`GET /api/v1/language/overlay?language=<tag>&namespace=ui-overlay` 返回该门语言的覆盖条目，
+**逐条带 `approved` / `translator`**：未审的不会被伪造为已审。内置读路
+`get_translation()` 仍只认 `is_approved=True` 的条目——覆盖层是另一条如实的读面，不是审批。
 
-**方法1: 使用 useTranslation Hook (推荐)**
+拉不到覆盖层时**安静地用站内文案**：不换语言、不弹错（用户要的就是这门语言）。
 
-```typescript
-import { useTranslation } from 'react-i18next';
+### 4.5 新增/修改文案的纪律
 
-const MyComponent: React.FC = () => {
-  const { t } = useTranslation();
-  
-  return (
-    <div>
-      <h1>{t('common.welcome')}</h1>
-      <button>{t('common.save')}</button>
-    </div>
-  );
-};
-```
-
-**方法2: 使用 LanguageContext**
-
-```typescript
-import { useLanguage } from '../../contexts/LanguageContext';
-
-const MyComponent: React.FC = () => {
-  const { t, language, setLanguage } = useLanguage();
-  
-  return (
-    <div>
-      <h1>{t('common.welcome')}</h1>
-      <span>当前语言: {language}</span>
-      <button onClick={() => setLanguage('en-US')}>
-        切换到英文
-      </button>
-    </div>
-  );
-};
-```
-
-### 4.5 翻译文件格式
-
-**文件**: `src/locales/zh-CN.json`
-
-```json
-{
-  "common": {
-    "welcome": "欢迎",
-    "save": "保存",
-    "cancel": "取消",
-    "delete": "删除",
-    "edit": "编辑"
-  },
-  "chat": {
-    "title": "Neurova Chat",
-    "inputPlaceholder": "输入消息...",
-    "sendButton": "发送",
-    "newConversation": "新建会话"
-  }
-}
-```
-
-### 4.6 添加新翻译
-
-**步骤**:
-
-1. 在 `src/locales/` 的所有JSON文件中添加对应的翻译键值
-2. 在组件中使用 `t('key.path')` 引用翻译
-
-**示例**:
-
-```json
-// zh-CN.json
-{
-  "chat": {
-    "newFeature": "新功能"
-  }
-}
-
-// en-US.json
-{
-  "chat": {
-    "newFeature": "New Feature"
-  }
-}
-```
-
-```typescript
-// 在组件中使用
-const { t } = useTranslation();
-return <div>{t('chat.newFeature')}</div>;
-```
-
----
+- **11 份键集严格同级**：`NeurUI/src/i18n/__tests__/locale-consistency.test.ts` 逐键对齐
+  `zh-CN`，且禁空值；键名 camelCase 两级（同一守卫）。
+- **新增一门语言**要同时动四处：locale 文件、`supportedLocales`、`App.vue` 的 antd
+  `ConfigProvider` 映射（11 项）、后端语言枚举与"11 码"守卫（`test_experience_outcome_word_domain`
+  等）。少一处就是"面板能选、界面没包"或反之。
+- **不许在组件里硬编码中文文案**：一律 `t('...')`；颜色同理走 `styles/variables.css` 令牌。
+- 实跑门：`npm run test`（vitest，含上面两条守卫）与 `npx vue-tsc --noEmit`。
 
 ## 5. 主题切换
 
