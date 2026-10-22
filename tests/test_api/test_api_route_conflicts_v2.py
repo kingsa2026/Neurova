@@ -1,74 +1,76 @@
-"""测试API路由冲突问题 - 实际路由注册验证"""
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+"""装配后路由表的冲突与死壳判据（本仓唯一取数口径：`tests/route_table.py`）。
+
+2026-10-22 整改（§6-401 批 J）。这个档原来有 5 格，其中三格**只 print 不断言**：
+
+- `test_channel_route_registration` 用 `for r in app.routes: if hasattr(r, "path")`
+  取数——现行 FastAPI 把 `include_router` 落成惰性包装 `_IncludedRouter`，那一形在装配后的
+  app 上实测只取到 **7** 条（同一份结果经口径单源取到 877 条），所以它取到的"路由列表"
+  根本不含叶子路径；两个布尔只 print，从不 assert。它自己的注释还写着冲突主体
+  （`endpoints.channel`，`/v1/channels` 假桥）已于 2026-09-13 删除——**冲突不复存在，
+  而判据也从没咬过**。现改为咬两件事：那只死壳不得复活 ＋ 现存挂载点必须真在表上。
+- `test_actual_registration_simulation` 同样只 print。它想证的性质（挂载前缀与模块
+  自述前缀叠加出重复段）其实**今天真有两条命中**：`/api/v1/tasks/tasks/{task_id}`
+  与 `/api/v1/tasks/tasks/{task_id}/move`（`endpoints/tasks_api.py:10-11` 自己就这么
+  文档化的）。改成只降不升的棘轮把它们点名列册：新增一条双前缀落点即红。
+  为什么不一并修 `tasks/tasks`：那是对外地址，改了要连前端调用一起动，属另一张票。
+- `test_frontend_api_coverage_analysis` 拿硬编码的 `backend_count = 75` 去除以前端模块数
+  算"覆盖率"并 print（现算挂载路径是 877 条，那个 75 是凭空的），`return coverage`
+  无人接收——**没有断言的读数不计入门禁意义**，比 skip 更会骗人（通过数里混着空转）。
+  本格删除；要做"前端调用是否都打得到后端"这条真判据，得另批按调用面逐条对表，
+  不在这里用两个臆造数字占位。
+
+保留的两格（原本就咬得住）：`test_context_route_registration` 与
+`test_deprecated_market_shells_are_gone`。
+"""
+
 import importlib
 import importlib.util
 
+import pytest
+from fastapi import FastAPI
+
+from tests.route_table import registeredPaths
+
 
 def create_test_app():
-    """创建测试用FastAPI应用"""
-    app = FastAPI()
-    return app
+    return FastAPI()
 
 
-def test_channel_route_registration():
-    """测试channel和channels模块的实际路由注册"""
+def _mountedPaths(app) -> set:
+    return set(registeredPaths(app))
+
+
+def test_channelDeadShellStaysGone_and_channelsMountsWhereTheTableSays():
+    """冲突主体（`endpoints.channel` 假桥）不得复活；现存 channels 面按表内前缀挂。
+
+    原格断的是 `/api/v1/channels` 与 `/api/v1/channels/channels` 相冲——那两个地址今天
+    都不存在（表里给 `endpoints.channels` 的前缀是 `/v1/channel-adapters`），
+    而它用朴素口径连一条叶子路径都没取到，只 print 了两个布尔。
+    """
+    assert importlib.util.find_spec("neurova.api.endpoints.channel") is None, (
+        "`neurova.api.endpoints.channel` 又出现了：2026-09-13 死壳清理把它当假桥删了，"
+        "复活即重新造出与 channels 相撞的前缀"
+    )
+    from neurova.api.endpoints import channels
+
     app = create_test_app()
-    
-    # 2026-09-13 死壳清理：endpoints.channel(/v1/channels 假桥)已删除，冲突主体不复存在
-    
-    # 注册channels模块
-    try:
-        from neurova.api.endpoints import channels
-        app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
-    except ImportError:
-        pytest.skip("channels模块导入失败")
-    
-    # 获取所有路由
-    routes = []
-    for route in app.routes:
-        if hasattr(route, "path"):
-            routes.append(route.path)
-    
-    print(f"注册的路由: {routes}")
-    
-    # 检查是否有重复的路由
-    # 注意：FastAPI允许重复路由，但后注册的会覆盖前一个
-    # 我们需要检查是否有冲突
-    
-    # 检查是否包含预期的路由
-    has_channel_get = any("/api/v1/channels" in route for route in routes)
-    has_channels_channels = any("/api/v1/channels/channels" in route for route in routes)
-    
-    print(f"是否有 /api/v1/channels 路由: {has_channel_get}")
-    print(f"是否有 /api/v1/channels/channels 路由: {has_channels_channels}")
-    
-    # 验证冲突：channels模块的router有前缀/channels，所以会注册到/api/v1/channels/channels
-    # 这与channel模块的/api/v1/channels冲突
+    app.include_router(channels.router, prefix="/api/v1/channel-adapters", tags=["Channel Adapters"])
+    paths = _mountedPaths(app)
+    assert paths, "channels 模块挂上去却一条路径都没有——那才是真断点"
+    assert not any(p.startswith("/api/v1/channels/channels") for p in paths), (
+        f"双前缀落点又出现：{[p for p in paths if p.startswith('/api/v1/channels/channels')]}——"
+        "挂载前缀与模块自述前缀叠加是这条链当年的事故形态"
+    )
 
 
 def test_context_route_registration():
-    """context / context_pool_settings 的实际路由注册（后者已下架，改锁防复活）。
-
-    2026-09-26（Issue #90 §10 第 2b 项）：`context_pool_settings` 判定为假设置面
-    整面下架，故本用例不再把它挂进测试 app —— 全仓唯一挂载点由主装配路由表覆盖，
-    判据单源在 `tests/unit/api/test_context_pool_settings_face_retirement.py`。
-    """
-    assert importlib.util.find_spec("neurova.api.endpoints.context_pool_settings") is None, (
-        "context_pool_settings 已判定下架却又出现。"
-    )
-
+    """context 面必须真挂在 `/api/v1/context` 下（取数走口径单源）。"""
     app = create_test_app()
     from neurova.api.endpoints import context
 
     app.include_router(context.router, prefix="/api/v1/context", tags=["context"])
-    # 装配后的路由表取数走本仓唯一口径（现行 FastAPI 的 `include_router` 不再把
-    # 子路由就地摊平，直接 `for r in app.routes: r.path` 会静默取空集）。
-    from tests.route_table import registeredPaths
-
-    routes = registeredPaths(app)
-    assert any("/api/v1/context" in route for route in routes), routes
+    paths = _mountedPaths(app)
+    assert any("/api/v1/context" in p for p in paths), paths
 
 
 def test_deprecated_market_shells_are_gone():
@@ -78,84 +80,33 @@ def test_deprecated_market_shells_are_gone():
             importlib.import_module(name)
 
 
-def test_actual_registration_simulation():
-    """模拟实际的register_endpoint_routers函数注册"""
-    app = create_test_app()
-    
-    # 模拟注册列表中的前几个模块
-    endpoint_modules = [
-        ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channels API"),
-        ("neurova.api.endpoints.context", "/v1/context", "Context API"),
-    ]
-    
-    registered_routes = []
-    
-    for module_path, prefix, description in endpoint_modules:
-        try:
-            module = importlib.import_module(module_path)
-            if hasattr(module, "router"):
-                # 获取router的原始前缀
-                original_prefix = module.router.prefix
-                final_prefix = "/api" + prefix
-                
-                print(f"模块: {module_path}")
-                print(f"  原始router前缀: {original_prefix}")
-                print(f"  注册前缀: {final_prefix}")
-                print(f"  最终路径: {final_prefix}{original_prefix}")
-                
-                app.include_router(module.router, prefix=final_prefix, tags=[description])
-                registered_routes.append((module_path, final_prefix, original_prefix))
-                
-        except ImportError as e:
-            print(f"跳过 {module_path}: {e}")
-        except Exception as e:
-            print(f"注册失败 {module_path}: {e}")
-    
-    print(f"\n注册的路由: {len(registered_routes)}")
-    for route_info in registered_routes:
-        print(f"  {route_info[0]} -> {route_info[1]}{route_info[2]}")
+#: 双前缀落点的**已知存量**（2026-10-22 现算，两条都来自 tasks_api 自述的
+#: `/v1/tasks` 表内前缀 × 模块 router 自带 `/tasks`；改它们是对外地址变更，另票）。
+_KNOWN_DOUBLE_SEGMENT_PATHS = {
+    "/api/v1/tasks/tasks/{task_id}",
+    "/api/v1/tasks/tasks/{task_id}/move",
+}
 
 
-def test_frontend_api_coverage_analysis():
-    """分析前端API覆盖率"""
-    # 后端API数量
-    backend_count = 75
-    
-    # 前端API模块
-    frontend_modules = [
-        "agents.ts", "chat.ts", "auth.ts", "memory.ts", "models.ts",
-        "providers.ts", "skill.ts", "settings.ts", "stats.ts", "scheduler.ts",
-        "trace.ts", "marketplace.ts", "channel_config.ts",
-        "notifications.ts", "audit.ts", "firewall.ts", "collaboration.ts",
-        "workflows.ts", "tasks.ts", "files_api.ts", "benchmark.ts",
-        "sleep.ts", "knowledge_api.ts", "emotion.ts", "webhooks.ts",
-        "enhanced-users.ts", "mobile-pairing.ts", "synonym.ts", "channel_sharing.ts",
-        "dashboard.ts", "home.ts", "system.ts", "stats.ts"
-    ]
-    
-    frontend_count = len(frontend_modules)
-    coverage = frontend_count / backend_count * 100
-    
-    print(f"后端API数量: {backend_count}")
-    print(f"前端API模块: {frontend_count}")
-    print(f"覆盖率: {coverage:.1f}%")
-    
-    # 列出缺失的前端模块
-    missing_high_priority = [
-        "generation.ts",
-        "context.ts", 
-        "metacognition.ts",
-        "experience.ts",
-        "knowledge-graph.ts",
-        "growth.ts"
-    ]
-    
-    print(f"\n高优先级缺失的前端模块:")
-    for module in missing_high_priority:
-        print(f"  - {module}")
-    
-    return coverage
+def test_doubleSegmentMountsAreExactlyTheRegisteredOnes():
+    """全仓挂载表里的"重复段"路径必须只多不少地等于在册名单。
+
+    这条取代原来的 `test_actual_registration_simulation`（它只 print 注册组合，从不 assert，
+    而且用朴素口径）。判据要的性质是真的：**挂载前缀与模块自述前缀叠加出不必要的重复段**，
+    今天确实有两条命中。新增一条即红；把 `tasks/tasks` 收掉时把在册名单一起改小。
+    """
+    from neurova.api.app import create_app
+
+    paths = _mountedPaths(create_app(enable_memory=False, enable_channels=False))
+    doubled = {
+        p for p in paths
+        if any(seg and seg == nxt for seg, nxt in zip(p.split("/")[2:], p.split("/")[3:]))
+    }
+    assert doubled == _KNOWN_DOUBLE_SEGMENT_PATHS, (
+        f"双前缀落点与在册名单不符——新增 {sorted(doubled - _KNOWN_DOUBLE_SEGMENT_PATHS)}、"
+        f"消失 {sorted(_KNOWN_DOUBLE_SEGMENT_PATHS - doubled)}"
+    )
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+    raise SystemExit(pytest.main([__file__, "-v"]))
