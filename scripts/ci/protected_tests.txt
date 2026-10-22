@@ -3499,3 +3499,19 @@ tests/unit/memory/test_causalReasoningWired.py
 tests/unit/memory/test_questionDecomposerRetirement.py
 # 第二环 agent_self/memory_stream 退役（§6-380）：跟踪源无导入、门面不导出；正控 EventBus/MemoryManager 仍在。
 tests/unit/memory/test_agentSelfAndMemoryStreamRetirements.py
+# §6-387 注册表执行腿的构件闸（§6-383 票三甲，用户 2026-10-22 拍）。
+# 活体已证：同一本账两条执行腿，`call_skill` 过闸、注册表那条（`SkillDocSkill.execute`，
+# LLM 实际走的那条）改一个字节照原样交模型、`checkArtifact` 调 0 次。本档钉的是把同一道闸
+# 接到这条腿上，且拒因/口径不在执行腿重抄：
+# ① 钉过且相符 ⇒ 照常回指令体；不符 / 目录没了 ⇒ 如实拒（`artifact_digest.refusalReason`
+#   那一处），并且**指令体一个字节都不许进回执**；
+# ② 没钉过 ⇒ 与 `call_skill` 同口径的 TOFU：有落账回调就现算现钉并放行一次（本实例随即
+#   以那枚值为口径），没有回调就拒 `artifact_digest_unpinned`——不许"没账可写所以放行"；
+# ③ 每次 execute **恰查一次**（不是"检查后放行"也不是"根本没查"）；
+# ④ `pinnedDigest=None` 是刻意的非生产口径（直接构造做实验），生产构造点必须传字符串；
+#   守卫按 AST 扫**整个 `neurova/`** 的所有 `_build_executable_skill` 调用点，漏传即红，
+#   并配一格变异对照证明探测器抓得住"没传"；映射型执行体不读盘上字节，不得被这道闸扫到。
+# 另有一格钉首钉的写口：`SkillService.pinArtifactDigest` 原子落账、不在册拒造条目、落盘失败回滚。
+# 入册前逐文件单跑两次同读数 12 passed（8.77s / 8.61s）；红自证＝只退三件生产面 ⇒ 9f/3p
+#（3 格是对照与 `None` 口径，本就该两侧绿）。
+tests/unit/skills/test_marketDocSkillDigestGate.py

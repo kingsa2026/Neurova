@@ -15,6 +15,11 @@
    ② 账本那条腿（`skill_service.call_skill`），数 `checkArtifact` 各被调几次；
 5. 还原后重新一致 + 一格"不存在的路径"校准 + 仓库 `data/` 指纹与最近 5 分钟零改写。
 
+**票三甲落地（用户 2026-10-22 裁）之后，读数 9-12 从"缺口证据"翻成"闸已接到两条腿上"的回归面**：
+篡改后注册表那条腿必须**同样拒**、且 `checkArtifact` **恰被调 1 次**（不再是 0），两条腿的拒因
+必须同一个标识。5-6 两格继续钉安装侧"钉值与运行时同源"。改动这块时先跑本脚本再看单元档，
+否则很容易把"闸接上了"误读成"行为变了"。
+
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) python tests/manual/marketTicketThreeDigestPath.py`
 """
 
@@ -130,7 +135,10 @@ def main():
                   True, "同源=%s pinned=%s now=%s" % (sameSource, pinned[:22], nowAtRuntime[:22]))
 
             executable = market_registry._build_executable_skill(
-                skillId, str(entry.get("description") or ""), str(runtimeDir))
+                skillId, str(entry.get("description") or ""), str(runtimeDir),
+                # 与生产 link 点同一形状：账本钉值必须递给执行腿，否则落进 `None` 旁路
+                pinnedDigest=str(entry.get(artifact_digest.DIGEST_FIELD) or ""),
+                onPin=lambda digest: service.pinArtifactDigest(skillId, digest))
             check("7 注册表那条腿造得出执行体（造不出则篡改无从执行，得先接线）",
                   executable is not None, type(executable).__name__)
             if executable is None:
@@ -156,23 +164,31 @@ def main():
                 throatRefused = artifact_digest.REASON_MISMATCH in throatText
                 throatCalls = list(checkArtifactCalls)
 
-                check("9 注册表那条腿：改一个字节后，被篡改的指令体照样交给模型（这条腿没有闸）",
-                      registrySawTamper and registryCalls == 0,
-                      "回执含篡改标记=%s，checkArtifact 次数=%d" % (registrySawTamper, registryCalls))
-                check("10 账本那条腿（call_skill）把同一份篡改拒了下来——两腿差的就是这道闸",
+                check("9 注册表那条腿：改一个字节后同样被拒，且被篡改的指令体不外泄",
+                      (not getattr(viaRegistry, "success", False))
+                      and getattr(viaRegistry, "error", "") == artifact_digest.REASON_MISMATCH
+                      and not registrySawTamper,
+                      "error=%s，回执含篡改标记=%s" % (
+                          getattr(viaRegistry, "error", None), registrySawTamper))
+                check("10 且它这一次调用**检查了**构件摘要（恰 1 次）",
+                      registryCalls == 1, str(checkArtifactCalls))
+                check("11 账本那条腿（call_skill）对同一份篡改同样拒——两条腿现在共用一道闸",
                       throatRefused, throatText[:150])
-                check("11 而它确实调了 checkArtifact 并读出 mismatch（不是恰好报个错）",
-                      any(artifact_digest.STATUS_MISMATCH in c for c in throatCalls),
-                      str(throatCalls))
+                check("12 两条腿的拒因是同一个标识（不各写一套文案）",
+                      getattr(viaRegistry, "error", "") == artifact_digest.REASON_MISMATCH
+                      and artifact_digest.REASON_MISMATCH in throatText,
+                      "registry=%s ledger=%s" % (
+                          getattr(viaRegistry, "error", ""),
+                          "mismatch" if throatRefused else "other"))
             finally:
                 docFile.write_bytes(original)
 
             restored = artifact_digest.digestDir(runtimeDir)
-            check("12 还原后与账本钉值重新一致（证明上三格是字节级、不是噪声）",
+            check("13 还原后与账本钉值重新一致（证明上三格是字节级、不是噪声）",
                   artifact_digest.digestMatches(pinned, restored), restored[:22])
 
             calibrated = asyncio.run(service.call_skill("no-such-skill-zzz", "main", task="probe"))
-            check("13 校准格：真不存在的技能走账本腿回的是「没找到」而不是摘要拒",
+            check("14 校准格：真不存在的技能走账本腿回的是「没找到」而不是摘要拒",
                   "not found" in json.dumps(calibrated, ensure_ascii=False, default=str).lower()
                   and artifact_digest.REASON_MISMATCH not in json.dumps(calibrated),
                   str(calibrated)[:120])
@@ -180,11 +196,11 @@ def main():
             artifact_digest.checkArtifact = realCheck
             checkArtifactCalls.clear()
 
-        check("14 仓库 data/ 未被本轮写入（内容指纹逐字节相同）", _dataDirFingerprint() == before)
+        check("15 仓库 data/ 未被本轮写入（内容指纹逐字节相同）", _dataDirFingerprint() == before)
         dataRoot = Path(__file__).resolve().parents[2] / "data"
         recent = [p for p in dataRoot.rglob("*") if p.is_file()
                   and p.stat().st_mtime > time.time() - 300] if dataRoot.exists() else []
-        check("15 仓库 data/ 最近 5 分钟零改写", recent == [], str([str(x) for x in recent[:3]]))
+        check("16 仓库 data/ 最近 5 分钟零改写", recent == [], str([str(x) for x in recent[:3]]))
     finally:
         artifact_digest.checkArtifact = realCheck
 
