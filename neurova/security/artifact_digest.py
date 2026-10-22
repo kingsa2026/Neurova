@@ -50,6 +50,9 @@ REASON_MISMATCH = "artifact_digest_mismatch"
 #: 目录整个不见了：不是"不符"，是"没得比"——两者必须在读数上分开，
 #: 否则"删掉再放回来"与"原地改一个字节"会被混成同一种失败。
 REASON_MISSING = "artifact_missing"
+#: 账本里没有摘要、且当前这条腿**没有落账口**可以现钉：此时放行等于把"没钉"
+#: 洗成"钉过且相符"（§6-383 票三甲案）。只在执行侧出现，装载侧走 TOFU 首钉。
+REASON_UNPINNED = "artifact_digest_unpinned"
 
 #: 系统自己写的记账件：钉完摘要之后还可能被改写（`hub_client._persist_declared_permissions`
 #: 就在校验链里重写 `skill.json`，`market_importer` 在解压**之后**才写它），
@@ -176,7 +179,9 @@ def checkArtifact(root, pinnedValue) -> Tuple[str, str]:
 
 
 def refusalReason(status: str) -> str:
-    """状态 → 结构化拒因标识（两条通道用同一套词，调用方按它分支而非按文案）。"""
+    """状态 → 结构化拒因标识（两条通道、两条腿用同一套词，调用方按它分支而非按文案）。"""
     if status == STATUS_MISSING:
         return REASON_MISSING
+    if status == STATUS_UNPINNED:
+        return REASON_UNPINNED
     return REASON_MISMATCH

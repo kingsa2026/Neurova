@@ -27,8 +27,26 @@ from typing import Any, Callable, Dict, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import get_data_root
+from neurova.security import artifact_digest
 
 logger = get_logger(__name__)
+
+
+def _pinThroughService(service: Any, skill_id: str, digestHex: str) -> None:
+    """执行腿首钉时把值写回账本（唯一写口是 `SkillService.pinArtifactDigest`）。
+
+    写失败**不吞**：执行腿会在本实例上继续用这枚值，但下一次冷启动拿不到它，
+    等于这枚钉只活在内存里——留一条 error 级日志点名，不假装已落账。
+    """
+    pinner = getattr(service, "pinArtifactDigest", None)
+    if not callable(pinner):
+        logger.error("技能 %s 首钉未落账：service 没有 pinArtifactDigest 这个写口", skill_id)
+        return
+    try:
+        if not pinner(skill_id, digestHex):
+            logger.error("技能 %s 首钉未落账（pinArtifactDigest 回 False）", skill_id)
+    except Exception as e:  # noqa: BLE001 —— 落账失败不阻断本次执行，但要出声
+        logger.error("技能 %s 首钉落账抛错：%s", skill_id, e)
 
 #: 映射表里存的是一只**执行体工厂**（零参可调用），不是类名。
 #: 旧形态在这里存 `"WebSearchSkillExecutor"` 字符串，构造处另写了一张 `{类名: 类}` 的内联查表——
@@ -125,13 +143,21 @@ def _marketSourceDir(skill_id: str, market_skills_dir: Any = None) -> Optional[P
         return None
 
 
-def _build_executable_skill(skill_id: str, description: str, installed_dir: Any = None) -> Optional[Any]:
+def _build_executable_skill(skill_id: str, description: str, installed_dir: Any = None,
+                            pinnedDigest: Optional[str] = None,
+                            onPin: Optional[Callable[[str], None]] = None) -> Optional[Any]:
     """按优先级构造可执行 Skill：市场映射执行体 → SKILL.md 指令型 → None。
 
     1. MARKET_EXECUTORS 映射（如 web-search）：ExecutorBackedSkill 真实执行体；
     2. 账本 `path` 指的目录含 SKILL.md（远端市场技能）：SkillDocSkill 指令型——
        execute 返回 SKILL.md 指令体（Agent Skills 标准语义），不自动执行下载脚本。
        这里只认传入的那一份目录，不再回看市场缓存：门扫过、摘要钉过的就是它。
+
+    `pinnedDigest`/`onPin`（§6-383 票三甲）：把同一本账的闸也接到这条腿——
+    指令型的 `execute` 在**读 SKILL.md 之前**对账。`None`＝该实例不由闸管（仅直接
+    构造做单元实验的口径，生产两个构造点必须传字符串，另有一格按 AST 钉住）；
+    `""`＝账本没钉过：有 `onPin` 就现算现钉并放行一次（与 `call_skill` 的 TOFU 同口径），
+    没有就如实拒 `artifact_digest_unpinned`。
 
     执行体统一经 skills.executor.ExecutorBackedSkill 桥接为 SkillRegistry
     可注册的异步 Skill（线程池执行同步 executor, 参数直通）。
@@ -151,7 +177,7 @@ def _build_executable_skill(skill_id: str, description: str, installed_dir: Any 
         if (skill_dir / "SKILL.md").exists():
             from neurova.skills.builtin.skill_doc_executor import SkillMarkdownExecutor
 
-            skill = SkillDocSkill(skill_id, skill_dir)
+            skill = SkillDocSkill(skill_id, skill_dir, pinnedDigest=pinnedDigest, onPin=onPin)
             skill.name = skill_id
             skill.description = description or skill.description
             return skill
@@ -168,14 +194,47 @@ class SkillDocSkill:
     execute 经 SkillMarkdownExecutor 返回指令体。
     """
 
-    def __init__(self, skill_id: str, skill_dir: Any, description: str = ""):
+    def __init__(self, skill_id: str, skill_dir: Any, description: str = "",
+                 pinnedDigest: Optional[str] = None,
+                 onPin: Optional[Callable[[str], None]] = None):
         from neurova.skills.builtin.skill_doc_executor import SkillMarkdownExecutor
         from neurova.skills.executor import ExecutorBackedSkill
 
+        self._skillDir = Path(skill_dir)
+        #: `None`＝不由闸管（仅直接构造做单元实验的口径）；字符串（含空串）＝按账本口径对账
+        self._pinnedDigest = pinnedDigest
+        self._onPin = onPin
         self._bridged = ExecutorBackedSkill(SkillMarkdownExecutor(skill_id, skill_dir, description=description))
         self.name = skill_id
         self.description = description or self._bridged.description
         self.status = "active"
+
+    def _digestRefusal(self, reason: str, detail: str = ""):
+        """拒因与读数同形：`SkillResult.error` 带结构化标识，调用方按标识分支而不是读文案。"""
+        from neurova.skills.executor import SkillResult
+
+        self.status = "refused"
+        if detail:
+            logger.error("技能 %s 构件对账未过（%s）：%s", self.name, reason, detail)
+        return SkillResult(success=False, error=reason,
+                           metadata={"skill_id": self.name, "reason": reason})
+
+    def _checkArtifactBeforeUse(self):
+        """读 SKILL.md **之前**对账（§6-383 票三甲）。返回拒因标识或 None。"""
+        if self._pinnedDigest is None:
+            return None
+        status, actual = artifact_digest.checkArtifact(self._skillDir, self._pinnedDigest)
+        if status == artifact_digest.STATUS_UNPINNED:
+            if self._onPin is None:
+                # 没有落账口就不许放行：那会把"没钉"洗成"钉过且相符"
+                return artifact_digest.REASON_UNPINNED
+            self._onPin(actual)
+            # 首钉即成为**本实例**此后对账的口径（不靠调用方回填）
+            self._pinnedDigest = actual
+            return None
+        if status != artifact_digest.STATUS_MATCH:
+            return artifact_digest.refusalReason(status)
+        return None
 
     def add_event_handler(self, handler) -> None:
         self._bridged.add_event_handler(handler)
@@ -194,6 +253,9 @@ class SkillDocSkill:
         }
 
     async def execute(self, params: Any = None, context: Any = None):
+        refusal = self._checkArtifactBeforeUse()
+        if refusal is not None:
+            return self._digestRefusal(refusal)
         return await self._bridged.execute(params, context)
 
 
@@ -342,7 +404,10 @@ def link_market_skill_to_agent(
     for reg in target_registries:
         if reg is None:
             continue
-        executable = _build_executable_skill(skill_id, description, installedDir)
+        executable = _build_executable_skill(
+            skill_id, description, installedDir,
+            pinnedDigest=str(info.get(artifact_digest.DIGEST_FIELD) or ""),
+            onPin=lambda digest, _sid=skill_id: _pinThroughService(service, _sid, digest))
         if executable is not None:
             try:
                 # 与 create_default_skills 的内置技能一致: registry.register 直接
@@ -429,7 +494,9 @@ def restore_market_skills_from_service(service: Any, registry: Any) -> int:
                     registry.register_skill(m)
                 else:
                     executable = _build_executable_skill(
-                        skill_id, entry.get("description", ""), info.get("path") or "")
+                        skill_id, entry.get("description", ""), info.get("path") or "",
+                        pinnedDigest=str(entry.get(artifact_digest.DIGEST_FIELD) or ""),
+                        onPin=lambda digest, _sid=skill_id: _pinThroughService(service, _sid, digest))
                     if executable is not None:
                         registry.register(executable)
                     else:

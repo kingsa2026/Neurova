@@ -372,6 +372,33 @@ class SkillService:
             )
         return claimed
 
+    def pinArtifactDigest(self, skill_id: str, digestHex: str) -> bool:
+        """把执行腿首钉的摘要写回账本（§6-383 票三甲的唯一写口）。
+
+        为什么写口在这而不是在执行腿里：账本是 `manifest.json`，它的写者只该有一个
+        （本方法复用 `_save_manifest` 的原子替换）。执行腿（`market_registry.SkillDocSkill`）
+        只**调**这里，不自己拼盘。
+
+        Returns:
+            是否真的落账——技能不在册 / 落盘失败都回 False，调用方据此出声，
+            不许把"内存里设过了"当成已落账。
+        """
+        with self._lock:
+            entry = self._skills.get(skill_id)
+            if not isinstance(entry, dict):
+                self._logger.warning("pinArtifactDigest: 技能 %s 不在册，拒绝为它造条目", skill_id)
+                return False
+            previous = entry.get(artifact_digest.DIGEST_FIELD)
+            entry[artifact_digest.DIGEST_FIELD] = str(digestHex)
+            if self._save_manifest():
+                return True
+            # 落盘失败回滚内存，与 §6-145 那条"内存改了、告诉用户已保存"同族
+            if previous is None:
+                entry.pop(artifact_digest.DIGEST_FIELD, None)
+            else:
+                entry[artifact_digest.DIGEST_FIELD] = previous
+            return False
+
     def _save_manifest(self) -> bool:
         """
         保存技能清单
