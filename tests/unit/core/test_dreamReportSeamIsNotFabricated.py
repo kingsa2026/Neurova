@@ -44,23 +44,25 @@ ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
 DREAM_REPORT_METHODS = {"save_dream_report", "get_dream_report", "get_dream_report_stats"}
 FACADE = "adjust_parameters_based_on_sleep_quality"
 
-# 同一形态的**已知存量**（2026-10-22 批 E 现算：4 处调用、2 个文件，全在测试与脚本侧，生产代码零命中）。
-# 这些调用对 `memory_layer.storage.MemoryStorage(storage_dir)` 传 `db_path=`（个中还传 `neuser_id=`
-# 这种不存在的键），运行即 TypeError——本批只修睡眠那一档，其余留作下一批，故用只降不升的棘轮
-# 把它们钉在案上：新增落点即红，修掉一处就把计数改小。
-# 已收口三处：`tests/performance/longmeval_simple.py`（§6-393 裁定甲改名收进收集面，
-# 见 `tests/performance/memory/test_longTermMemoryBaselineGate.py`）、
-# `scripts/demo_optimization.py::demo_vector_index_manager`（§6-393 整段退役，其演示的四个
-# 方法全仓零定义）、`tests/unit/memory/test_storage_comprehensive.py`（§6-394 退役：整档
-# `pytest.mark.skip` 收了不跑＝零覆盖，其 CRUD 契约由
-# `tests/cognitive_layers/memory_layer/test_storage.py` 18 格守、隔离由
-# `tests/unit/memory/test_isolation_unified.py` 守；不许复活见
-# `tests/unit/memory/test_storageComprehensiveRetired.py`）。
-_KNOWN_FABRICATED_SITES = {
-    "tests/integration/test_full_conflict_integration.py",
-    "scripts/demo_closed_loop.py",
-}
-_KNOWN_FABRICATED_COUNT = 4
+# 同一形态的**已知存量已归零**（2026-10-22 三刀收完，最后一刀现算＝0 处／0 档）：
+# 这些调用对 `memory_layer.storage.MemoryStorage(storage_dir)` 传 `db_path=`
+# （个中还传 `neuser_id=`／`enable_cache=`／`enable_async_index=` 这种不存在的键），
+# 运行即 TypeError。起点 17 处／5 档（§6-363 那次登记，用只降不升的棘轮钉在案上），
+# 收口路径：
+# - §6-393：`tests/performance/longmeval_simple.py`（裁定甲改名收进收集面，见
+#   `tests/performance/memory/test_longTermMemoryBaselineGate.py`）＋
+#   `scripts/demo_optimization.py::demo_vector_index_manager`（整段退役，其演示的四个
+#   方法全仓零定义）；
+# - §6-394：`tests/unit/memory/test_storage_comprehensive.py`（整档 `pytest.mark.skip`
+#   收了不跑＝零覆盖；CRUD 契约由 `tests/cognitive_layers/memory_layer/test_storage.py`
+#   18 格守、隔离由 `tests/unit/memory/test_isolation_unified.py` 守；不许复活见
+#   `tests/unit/memory/test_storageComprehensiveRetired.py`）；
+# - §6-395：`tests/integration/test_full_conflict_integration.py` ＋
+#   `scripts/demo_closed_loop.py`（同一条 `neurova.core.闭环_manager` 死链上的测试与脚本，
+#   链上四个名字在 `neurova/` 零定义；不许复活见
+#   `tests/unit/core/test_closedLoopChainRetired.py`）。
+# 归零之后**不再保留例外名单**：留一张空名单就是给下一枚留后门（教义第 7 条的判据
+# ——该形态在仓内零落点，任何一枚即红）。
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -189,12 +191,12 @@ def test_memoryStorageIsConstructedByRealSignature():
                     and any(k.arg == "db_path" for k in node.keywords)):
                 offenders.append(f"{p.relative_to(REPO).as_posix()}:{node.lineno}")
 
-    newOnes = [o for o in offenders if o.split(":")[0] not in _KNOWN_FABRICATED_SITES]
-    assert not newOnes, (
-        f"新的『按想象传构造参数』落点（该类只收 storage_dir）：{newOnes}")
-    assert len(offenders) <= _KNOWN_FABRICATED_COUNT, (
-        f"已知落点从 {_KNOWN_FABRICATED_COUNT} 涨到 {len(offenders)}——只降不升的棘轮被顶开：\n  "
-        + "\n  ".join(sorted(offenders)))
+    assert not offenders, (
+        "『按想象传构造参数』又长出来了（该类只收 storage_dir）：\n  "
+        + "\n  ".join(sorted(offenders))
+        + "\n—— 本仓该形态存量已于 2026-10-22 归零（§6-393／§6-394／§6-395 三刀收完"
+        " 17 处／5 档），例外名单已撤，任何一枚即红。"
+    )
 
 
 def test_scannerReallyBites(tmp_path):

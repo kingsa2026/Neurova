@@ -60,11 +60,23 @@ SCAN_ROOTS = ("neurova", "tests", "scripts")
 pytestmark = pytest.mark.timeout(60)
 
 
+def _isPointerLine(line: str) -> bool:
+    """注释行一律算路标；docstring/代码行要带「退役」或台账号才认（§6-395 与那族守卫同规则）。
+
+    放宽只到注释是安全的：真把退役档捞回来的一定是代码行；而多行 bullet 里
+    「退役」二字未必落在带路径那一行，按关键词逐行判会误报自家账目——
+    `test_dreamReportSeamIsNotFabricated.py` 的收口注释就被本档咬过一次。
+    """
+    if line.lstrip().startswith("#"):
+        return True
+    return "退役" in line or "§6-" in line
+
+
 def _referenceLines(source: str) -> list:
-    """指向旧档的行；带「退役」的指针行与本守卫档自身不算（本档由调用方排除）。"""
+    """指向旧档的行；路标行与本守卫档自身不算（本档由调用方排除）。"""
     bad = []
     for number, line in enumerate(source.splitlines(), start=1):
-        if OLD_NAME in line and "退役" not in line:
+        if OLD_NAME in line and not _isPointerLine(line):
             bad.append(number)
     return bad
 
@@ -150,10 +162,12 @@ def test_扫描器真会咬():
     """反向控制：指针行不误报、裸引用必点名、死方法复活必点名。"""
     sample = "\n".join([
         f"from tests.unit.memory import {OLD_NAME} as m",              # 裸引用 → 该咬
-        f"# 见 {OLD_NAME}.py 的退役说明",                                # 指针行 → 不该咬
+        f"# 见 {OLD_NAME}.py 的退役说明",                                # 注释指针 → 不该咬
+        f"# 曾按路径引用 {OLD_NAME}.py（无关键词的一行注释）",             # 注释 → 仍不该咬
+        f'    """旧档 {OLD_NAME}.py 的 L-3 说明"""',                     # docstring 无关键词 → 该咬
     ])
     hits = _referenceLines(sample)
-    assert hits == [1], f"引用扫描器分类错了：{hits}（应只点名第 1 行）"
+    assert hits == [1, 4], f"引用扫描器分类错了：{hits}（应只点名第 1、4 行）"
 
     fake = (
         "class MemoryStorage:\n"
