@@ -91,8 +91,18 @@ def set_persisted_output_limit(provider_id: str, model_id: str, value: "int | No
 
 
 def get_persisted_output_limit(provider_id: str, model_id: str) -> "int | None":
-    """取该 (provider, model) 的持久化探测上限；未登记返回 None。"""
-    return _persisted_output_limits.get((str(provider_id or ""), str(model_id or "")))
+    """取该 (provider, model) 的持久化探测上限；未登记返回 None。
+
+    `provider_id` 为空 = 调用点拿不到服务商（模型 schema 面就是这种）。此时按模型名
+    收敛：**只有一个探测值才认**，两个服务商给出不同值即返回 None——不猜，任选一份
+    就是第二个事实源。
+    """
+    if not model_id:
+        return None
+    if provider_id:
+        return _persisted_output_limits.get((str(provider_id), str(model_id)))
+    values = {v for (_pid, mid), v in _persisted_output_limits.items() if mid == model_id}
+    return values.pop() if len(values) == 1 else None
 
 
 def clear_persisted_output_limits() -> None:
@@ -182,21 +192,19 @@ def get_known_model_max_tokens(model_id: str) -> "int | None":
     return None
 
 
-def get_model_max_tokens(model_id: str) -> int:
+def get_model_max_tokens(model_id: str, provider_id: str = "") -> int:
+    """该模型**本次请求应带**的输出预算（思考与正文共享的就是这一个数）。
+
+    优先级与 `clamp_max_tokens` 同一份事实源：持久化探测值 > 静态目录 > DEFAULT。
+
+    原来只查静态目录，未收录模型一律回落 `DEFAULT_MAX_TOKENS = 4096`。探测值当时候
+    只进了 clamp 的**上限**口径，抬不动请求值——2026-10-22 事故读数即思考连发
+    16384 字符（= 4096 token × 4 字符）吃满整份预算、正文 0 字。目录里那批 4096
+    多为同步来的占位值，不能继续当请求值用。
     """
-    获取模型的 max_tokens 上限。
-
-    按优先级查找:
-    1. 精确匹配 MODEL_MAX_TOKENS
-    2. 前缀匹配 (如 "gpt-4o-2024-11-20" → "gpt-4o")
-    3. 返回 DEFAULT_MAX_TOKENS
-
-    Args:
-        model_id: 模型 ID (如 "gpt-4o", "sensenova-6.7-flash-lite")
-
-    Returns:
-        该模型的推荐 max_tokens 值
-    """
+    persisted = get_persisted_output_limit(provider_id, model_id)
+    if persisted is not None:
+        return min(persisted, MAX_MAX_TOKENS)
     return get_known_model_max_tokens(model_id) or DEFAULT_MAX_TOKENS
 
 

@@ -3584,3 +3584,15 @@ tests/unit/core/test_closedLoopChainRetired.py
 # `turnScopeContext()`；本档钉「全仓不得再有单参调用形态」＋扫描器反向控制。
 # 入册前逐文件单跑两次同读数（14.26s／14.40s，2 passed）。
 tests/unit/agent/test_retrieveMemoriesScopeArgContract.py
+# §6-397（批 H · B）：思考流退化守卫。事故读数＝一次调用内 reasoning 连发 16384 字符
+# （单个 `lock` 吃满 4096 token）、正文 0 字，垃圾原样流 3 分 58 秒进前端；四道门拦不到
+# （门控在轮末求值，退化在一次调用内部）。判据分两档：环侧行为（转发即停、截断可见、
+# 不再读这一次调用、交出 length 接既有单次恢复、存储面剥前缀、等长不周期不许误杀）
+# 与单源检测器规格。入册前逐文件单跑全绿（9 passed／9 passed）。
+tests/unit/agent/test_reasoningDegeneracyGuard.py
+tests/unit/agent/test_reasoningDegeneracyDetector.py
+# §6-397（批 H · A）：请求侧输出预算认持久化探测值。探测值当时候只进了 clamp 的「上限」
+# 口径，请求值仍走静态目录（未收录即 DEFAULT 4096）——思考模型的思考与正文共享这一个
+# 预算，于是「探测到 65536」与「本次只带 4096」并存。判据含真装配点读数
+# （`_create_model_client` 建出的 `config.max_tokens`）。入册前逐文件单跑全绿（7 passed）。
+tests/unit/llm/test_requestMaxTokensUsesProbedLimit.py
