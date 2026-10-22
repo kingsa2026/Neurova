@@ -3638,3 +3638,10 @@ tests/unit/api/test_routeTableIsTheOnlyMountedRead.py
 tests/unit/core/test_steer_queue.py
 tests/unit/api/test_channel_qrcode_generic_endpoints.py
 tests/test_api/test_api_route_conflicts_v2.py
+# §6-402（批 K）：幻影旋钮判据的成本形状收口。原实现「每广告参数 × 全仓每文件 × 4 正则」各自读盘，
+# 单跑实测 28.60s–37.11s（同一台机器两次差 8.5s），撞 `timeout=30 method=thread` 时 pytest-timeout
+# 打断不了正在跑的栈，直接终止整场跑测（`pytest tests/unit` 实测在 14% 处消失、无汇总行、exit=1）。
+# 改后走 `tests/ast_scan` 共享读盘＋扫法倒置（4 条读法各做一次全量 alternation），0.76s；
+# 并加一格**与用例顺序无关**的成本判据（数读盘次数不数秒：第二遍零新 miss、hits 必须涨满语料 1010 个文件），
+# 旧形状回放时被它抓住（gainedHits=0 < corpus=1010 当场红）。逐文件单跑两次同读数 5.89s／5.85s，5 passed。
+tests/unit/computer_use/test_computer_param_no_phantom_knobs.py
