@@ -11,24 +11,11 @@ AttributeError——守卫因此会**失明**（红不了也绿不了，只在�
 import pytest
 from fastapi import FastAPI
 
-
-def registeredPathMethods(app) -> list:
-    """装配后应用的路由 `(路径, 方法集合)`——递归下钻嵌套 router。"""
-    found = []
-
-    def walk(items, prefix=""):
-        for route in items:
-            inner = getattr(route, "original_router", None)
-            if inner is not None:
-                context = getattr(route, "include_context", None)
-                walk(getattr(inner, "routes", []), prefix + (context.prefix if context else ""))
-                continue
-            path = getattr(route, "path", None)
-            if path is not None:
-                found.append((prefix + path, frozenset(getattr(route, "methods", None) or ())))
-
-    walk(app.routes)
-    return found
+# 取数口径走本仓唯一实现（`tests/route_table.py` 的 docstring 就写着「遍历只写这一份」）。
+# 本档此前自带一份同名的 `registeredPathMethods()` 私有实现——两条遍历同义不同源，
+# 属教义第 7 条点名的"两处承担同一功能"。先比后合：同一份装配结果两实现现算输出
+# **逐条相等**（各 1043 条，差集为空），故私有那份直接删掉、消费点不改名。
+from tests.route_table import registeredPathMethods
 
 
 class TestNeuronAPIRegistration:
@@ -41,12 +28,20 @@ class TestNeuronAPIRegistration:
         assert neuron.router.prefix == "/neuron"
 
     def test_neuron_in_endpoint_modules(self):
-        """neuron 端点在 endpoint_modules 注册列表中"""
-        import inspect
-        from neurova.api.endpoints import register_endpoint_routers
+        """neuron 端点在 endpoint 注册表里。
 
-        source = inspect.getsource(register_endpoint_routers)
-        assert "neurova.api.endpoints.neuron" in source
+        原格读的是 `inspect.getsource(register_endpoint_routers)` 里有没有那串模块名——
+        而注册表是**模块级常量** `ENDPOINT_MODULES`（`__init__.py:233`，neuron 在 :323），
+        函数体里只有循环，从不出现这个字面量 ⇒ 本格必红且红得没有意义
+        （判据问错了对象，与本批"从装配后 app 顶层取 `.routes`"是同一种失明：读的不是事实源）。
+        现按数据本身取数；要验"真的挂上去了"由 `test_neuron_routes_registered_to_app` 承重。
+        """
+        from neurova.api.endpoints import ENDPOINT_MODULES
+
+        mounted = [entry for entry in ENDPOINT_MODULES if entry[0].endswith(".neuron")]
+        assert mounted, "neuron 不在挂载表里：/api/neuron/* 整体不可达"
+        prefix = mounted[0][1]
+        assert prefix == "", f"neuron 的表内前缀变成 {prefix!r}——它会挂到 /api{prefix}/neuron/*"
 
     def test_neuron_routes_registered_to_app(self):
         """注册后所有 NEURON 路由出现在 FastAPI app 的 routes 中"""

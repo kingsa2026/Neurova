@@ -3624,3 +3624,10 @@ tests/unit/memory/test_sleep_phase_cycle.py
 # ⑦ B 的止血不许回潮：手写「无需认证」名单行不得再出现。
 # 入册前逐文件单跑两次同读数 7 passed（10.62s / 10.98s）。
 tests/unit/api/test_authSurfaceFreshness.py
+# §6-401（批 J）：装配后路由表的取数口径只许一份。朴素 `for r in app.routes: r.path` 在现行 FastAPI 下对 include 进来的路由完全失明（变异实测：把 /channel-configs/wechat/ilink/qrcode 经 include_router 挂回去，单源取到它、朴素口径只吐 5 条顶层项且那条不在内）。
+# 三格：禁令＋口径差的读数（也是禁令的过期探针）＋扫描器反向控制（`router.routes` 不误报）。
+# 逐文件单跑两次同读数：本档 3 passed（14.55s／14.97s）；被收口的三档 7/6/4 passed 各两次。
+tests/unit/api/test_routeTableIsTheOnlyMountedRead.py
+tests/unit/core/test_steer_queue.py
+tests/unit/api/test_channel_qrcode_generic_endpoints.py
+tests/test_api/test_api_route_conflicts_v2.py
