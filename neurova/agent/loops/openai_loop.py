@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
 from neurova.agent.gates import StopDecision as _StopDecision
+from neurova.agent.gates import STAGNATION_GATE, STAGNATION_REASON, appendTerminationNotice
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
@@ -499,6 +500,8 @@ class OpenAILoop(BaseAgentLoop):
             ))
             if _gd is not None and _gd.action == _SA.TERMINATE:
                 logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
+                # 非流式没有事件通道，原因直接并进正文（与流式经管道并入同一份文案单源）
+                appendTerminationNotice(response, _gd.gate_name, _gd.reason)
                 return _TurnOutcome.finished(response)
             if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
                 # RC-3：软干预与流式路径同一行为（原实现直接丢弃 INTERRUPT，
@@ -549,6 +552,7 @@ class OpenAILoop(BaseAgentLoop):
             return _TurnOutcome.running()
         if decision.action != "done":
             logger.warning("主出口门控 %s 终止: %s", decision.gate_name, decision.reason)
+            appendTerminationNotice(response, decision.gate_name, decision.reason)
         return _TurnOutcome.finished(response)
 
     async def _predict_stream(self, request_params: Dict, state: TurnRunState = None) -> Any:
@@ -928,6 +932,15 @@ class OpenAILoop(BaseAgentLoop):
                     "reason": gate_decision.reason,
                     "gate": gate_decision.gate_name,
                 }
+                # 终止也要交出 done：整条流"恰好一个 done"是管道侧全部收尾判据的落点
+                # （`execution_completed` 判定、空 done 兜底、正文并入终止交代）。
+                # 改前这条 `return` 让这条路一个 done 都没有 ⇒ 正文停在半截无人收口。
+                yield {
+                    "type": "done",
+                    "reply": "".join(reply_parts),
+                    "finish_reason": finish_reason,
+                    "usage": round_usage,
+                }
                 return
             if gate_decision.action.value == "interrupt_and_continue":
                 # 注入提示进消息序列后继续
@@ -944,9 +957,19 @@ class OpenAILoop(BaseAgentLoop):
                     logger.warning(
                         "连续 %s 轮停滞（重复响应/调用），终止工具循环", state.stagnationCount
                     )
+                    # 与门控终止同一条通道：成因交 `gate_terminate` 由管道并入正文，
+                    # 再补一个 done。改前这里只发一条 reasoning 就 `return`——管道不读
+                    # reasoning 里的成因，落库正文没有任何交代（活体实测抓到的第五个命中点）
                     yield {
-                        "type": "reasoning",
-                        "data": "检测到连续重复的响应，已停止工具循环，避免无效重试。",
+                        "type": "gate_terminate",
+                        "reason": STAGNATION_REASON,
+                        "gate": STAGNATION_GATE,
+                    }
+                    yield {
+                        "type": "done",
+                        "reply": round_reply,
+                        "finish_reason": finish_reason,
+                        "usage": round_usage,
                     }
                     return
                 # 仍在预算内再试一次：换策略的意见随本轮结果一起交给模型
@@ -986,17 +1009,14 @@ class OpenAILoop(BaseAgentLoop):
             yield _STREAM_END
             return
         if _exitDecision.action != LOOP_DONE:
-            # 有理由地终止，且**不得静默**：reasoning 是前端会显示的既有通道
-            # （与停滞终止同一范式），gate_terminate 供管道侧消费；
-            # 正文照常随 done 交出——只发理由不发正文 = 用户看到空气泡。
+            # 有理由地终止，且**不得静默**：`gate_terminate` 由管道接住并把原因并入
+            # 正文（落库那一份）。原来这里还另发一条 `reasoning: 已停止继续尝试：…`，
+            # 与正文那份是同一事实的两个可见面（教义第 6 条），且思考面板那份是瞬时的、
+            # 关页即失——收口到正文这一条通道。
             yield {
                 "type": "gate_terminate",
                 "reason": _exitDecision.reason,
                 "gate": _exitDecision.gate_name,
-            }
-            yield {
-                "type": "reasoning",
-                "data": f"已停止继续尝试：{_exitDecision.reason}",
             }
 
         # 单轮收口（整条流到此结束，`_predict_stream` 不再开下一轮）

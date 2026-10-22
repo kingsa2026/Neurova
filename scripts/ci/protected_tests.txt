@@ -3596,6 +3596,11 @@ tests/unit/agent/test_reasoningDegeneracyDetector.py
 # 预算，于是「探测到 65536」与「本次只带 4096」并存。判据含真装配点读数
 # （`_create_model_client` 建出的 `config.max_tokens`）。入册前逐文件单跑全绿（7 passed）。
 tests/unit/llm/test_requestMaxTokensUsesProbedLimit.py
+# §6-397（批 H · D）：门控/停滞终止的成因必须进正文。事故读数＝落库正文以
+# 「…我改用单条命令重试：」结尾，成因只进 logger 与一份瞬时 reasoning；而
+# `gate_terminate` 在全仓零消费者（管道没有那一支），工具轮终止那条 return 连 done 都不发。
+# 本档钉五个命中点＋反向格（正常收口不得被追加说明）。入册前逐文件单跑全绿（13 passed）。
+tests/unit/agent/test_gateTerminationReasonReachesReply.py
 # §6-398（批 I）：`MemoryManager` 事件接缝的三格预存红清零——原格读的是 §6-12 就退净的
 # 私有总线出口（`mgr.bus`／`mgr._bus.health_report()`），现改为「订共享单例、真发一次、
 # 订阅方必须收到」的行为判据＋「私有出口不得回来」的反向钉。变异自检：把生产投递口换成

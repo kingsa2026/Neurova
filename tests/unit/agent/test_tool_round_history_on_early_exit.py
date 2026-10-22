@@ -226,10 +226,12 @@ class TestStreamReplaysBeforeTerminating:
 
         events = asyncio.run(driveStream(loop, messages))
 
+        # 停滞成因的可见通道已收口到正文（§6-397 批 D）：环侧改交 `gate_terminate`，
+        # 不再另发一份 reasoning 文案 ⇒ 前提判据跟着改指选定那条通道
         stagnantExit = any(
             isinstance(e, dict)
-            and e.get("type") == "reasoning"
-            and "已停止工具循环" in str(e.get("data") or "")
+            and e.get("type") == "gate_terminate"
+            and e.get("gate") == "stagnation"
             for e in events
         )
         assert stagnantExit, "本用例要钉的是停滞出口，停滞未开火则前提不成立"
