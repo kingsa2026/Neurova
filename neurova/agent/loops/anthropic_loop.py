@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
+from neurova.agent.gates import STAGNATION_GATE, STAGNATION_REASON, appendTerminationNotice
 from neurova.agent.loops.reasoning_degeneracy import ReasoningStreamGuard, stripDegeneracy
 from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.llm_client import LLMResponse
@@ -116,6 +117,7 @@ class AnthropicLoop(BaseAgentLoop):
                     logger.warning(
                         "Anthropic 主出口门控 %s 终止: %s", decision.gate_name, decision.reason
                     )
+                    appendTerminationNotice(response, decision.gate_name, decision.reason)
                 return response
 
             state.toolRounds += 1
@@ -153,6 +155,7 @@ class AnthropicLoop(BaseAgentLoop):
                     logger.warning(
                         "门控 %s 终止 Anthropic 非流式循环: %s", _gd.gate_name, _gd.reason
                     )
+                    appendTerminationNotice(response, _gd.gate_name, _gd.reason)
                     return response
                 if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
                     messages.append({"role": "user", "content": _gd.continuation_prompt})
@@ -243,13 +246,14 @@ class AnthropicLoop(BaseAgentLoop):
                     yield {"type": "reasoning", "data": decision.continuation_prompt}
                     continue
                 if decision.action != LOOP_DONE:
-                    # 不静默：reasoning 是前端会显示的既有通道，正文照常随 done 交出
+                    # 不静默：`gate_terminate` 由管道接住并把原因并入正文（落库那一份）。
+                    # 原来另发的那条 `reasoning: 已停止继续尝试：…` 与正文同实、两份可见面，
+                    # 收口到正文一条通道（教义第 6 条）。
                     yield {
                         "type": "gate_terminate",
                         "reason": decision.reason,
                         "gate": decision.gate_name,
                     }
-                    yield {"type": "reasoning", "data": f"已停止继续尝试：{decision.reason}"}
                 yield {
                     "type": "done",
                     "reply": round_reply,
@@ -303,6 +307,14 @@ class AnthropicLoop(BaseAgentLoop):
                 if _gd is not None and _gd.action == _SA.TERMINATE:
                     logger.warning("门控 %s 终止 Anthropic 流式循环: %s", _gd.gate_name, _gd.reason)
                     yield {"type": "gate_terminate", "reason": _gd.reason, "gate": _gd.gate_name}
+                    # 终止也要交出 done（与 OpenAI 环同律）：管道侧的收尾判据全部
+                    # 挂在 done 上，缺它这条路上正文停在半截无人收口
+                    yield {
+                        "type": "done",
+                        "reply": round_reply,
+                        "finish_reason": finish_reason,
+                        "usage": getattr(self.agent, "_round_usage", None) or {},
+                    }
                     return
                 if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
                     messages.append({"role": "user", "content": _gd.continuation_prompt})
@@ -314,9 +326,18 @@ class AnthropicLoop(BaseAgentLoop):
                     logger.warning(
                         "连续 %s 轮停滞（重复响应/调用），终止工具循环", state.stagnationCount
                     )
+                    # 与 OpenAI 环同一条通道：成因交 `gate_terminate`（管道并入正文）
+                    # 并补一个 done；改前只发 reasoning 就 return，落库没有交代
                     yield {
-                        "type": "reasoning",
-                        "data": "检测到连续重复的响应，已停止工具循环，避免无效重试。",
+                        "type": "gate_terminate",
+                        "reason": STAGNATION_REASON,
+                        "gate": STAGNATION_GATE,
+                    }
+                    yield {
+                        "type": "done",
+                        "reply": round_reply,
+                        "finish_reason": finish_reason,
+                        "usage": getattr(self.agent, "_round_usage", None) or {},
                     }
                     return
                 messages.append({

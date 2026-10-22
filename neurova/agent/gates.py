@@ -46,6 +46,34 @@ class StopDecision:
         return cls(action=StopAction.BYPASS)
 
 
+def terminationNotice(gate_name: str, reason: str) -> str:
+    """循环被提前终止时给用户的交代文本（**正文是唯一可见通道**，也是落库那一份）。
+
+    为什么必须有：这条原因此前只进 `logger.warning`，加上一份瞬时的 reasoning 文案；
+    落库正文停在半截（事故读数：以「…我改用单条命令重试：」结尾），用户看到的是
+    「模型自己说了一半」，而不是「被哪道判定掐了、为什么掐」。
+    """
+    return f"\n\n⚠️ 本轮已提前终止（{gate_name}）：{reason}"
+
+
+#: 停滞判定（连续重复响应/调用）的成因——文案单源在此，两条环各写一份就是第二份定义
+STAGNATION_GATE = "stagnation"
+STAGNATION_REASON = "检测到连续重复的响应/调用，已停止工具循环，避免无效重试。"
+
+
+def appendTerminationNotice(response: Any, gate_name: str, reason: str) -> None:
+    """非流式路径就地并进 `response.content`——那条路没有事件通道可走。
+
+    幂等：原因已在正文里就不再追加（同一份事实不得出现两遍）。
+    """
+    if not reason:
+        return
+    content = getattr(response, "content", "") or ""
+    if reason in content:
+        return
+    response.content = content + terminationNotice(gate_name, reason)
+
+
 class StopGate(ABC):
     """循环停止门控基类。"""
 

@@ -32,6 +32,7 @@ from neurova.agent.retriever_adapters import (
     UnifiedRetrieverAdapter,
 )
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
+from neurova.agent.gates import terminationNotice
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
@@ -2420,6 +2421,7 @@ class ChatPipeline:
         （不入回复文本）不变。
         """
         reply_parts = []
+        gateTerminations: list[tuple[str, str]] = []  # (原因, 并入正文的交代)
         # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
@@ -2483,6 +2485,15 @@ class ChatPipeline:
                         emitter("retry", _retry_data)
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 retry 失败: %s", e)
+            elif etype == "gate_terminate":
+                # 门控终止的**唯一消费点**：记下原因，收尾时并入正文。
+                # 改前这个事件在全仓零读者——环侧写了、管道不认，于是"恰好一个 done"
+                # 在工具轮终止那条路上也不成立，正文停在半截且无人交代为什么停。
+                _reason = (event.get("reason") or "").strip()
+                if _reason:
+                    gateTerminations.append((_reason, terminationNotice(
+                        event.get("gate") or "", _reason
+                    )))
             elif etype in ("tool_call", "tool_result"):
                 # 工具事件的取证记录由执行链自己落（`loops/base.py` 的
                 # `handle_tool_calls` 经 `append_tool_messages` 写入扁平记录）。
@@ -2515,7 +2526,17 @@ class ChatPipeline:
                     emitter("content", _tail)
             except Exception:  # noqa: BLE001
                 logger.debug("citation 缓冲结清失败", exc_info=True)
-        return "".join(reply_parts)
+        body = "".join(reply_parts)
+        for _reason, _notice in gateTerminations:
+            if _reason in body:
+                continue  # 幂等：原因已在正文里就不写第二遍
+            body += _notice
+            if emitter is not None:
+                try:
+                    emitter("content", _notice)
+                except Exception:  # noqa: BLE001 - 交代发不出去也不该打断收尾
+                    logger.debug("门控终止说明转发失败", exc_info=True)
+        return body
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """非流式调用 Agent Loop（含自动续写）"""
