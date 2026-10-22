@@ -3579,3 +3579,8 @@ tests/cognitive_layers/memory_layer/test_storage.py
 # 注释放宽只到注释行，docstring/代码行的引用仍必点名——该规则是落笔时被自家账目注释误咬之后收窄的。
 # 入册前逐文件单跑两次同读数（5.11s／5.32s，5 passed）。
 tests/unit/core/test_closedLoopChainRetired.py
+# §6-396（批 G）：`ChatPipeline._retrieve_memories` 的 scopeCtx 入参契约守卫——
+# 一条签名变更留下的 16 处单参调用（4 个测试档、17 格常驻红）已收口成走生产单点
+# `turnScopeContext()`；本档钉「全仓不得再有单参调用形态」＋扫描器反向控制。
+# 入册前逐文件单跑两次同读数（14.26s／14.40s，2 passed）。
+tests/unit/agent/test_retrieveMemoriesScopeArgContract.py

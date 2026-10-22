@@ -6,6 +6,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import asyncio
 from unittest.mock import Mock, AsyncMock, MagicMock
+from neurova.collaboration.memory_scope import turnScopeContext
+import pytest
 
 # 模拟 Agent 类
 class MockAgent:
@@ -42,6 +44,7 @@ class MockAgent:
             {"content": "fallback memory 1", "score": 0.5},
         ])
 
+@pytest.mark.asyncio
 async def test_memory_retrieval_chain_integration():
     """测试 MemoryRetrievalChain 集成"""
     from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
@@ -77,7 +80,7 @@ async def test_memory_retrieval_chain_integration():
     )
     
     # 测试检索功能
-    await pipeline._retrieve_memories(ctx)
+    await pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
     
     # 验证检索结果
     assert ctx.relevant_memories is not None
@@ -93,7 +96,7 @@ async def test_memory_retrieval_chain_integration():
         session_id="test_session_2",
     )
     
-    await pipeline._retrieve_memories(ctx2)
+    await pipeline._retrieve_memories(ctx2, turnScopeContext(ctx2.metadata, ctx2.session_id))
     
     # 应该降级到其他检索器
     assert ctx2.relevant_memories is not None

@@ -11,6 +11,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from neurova.collaboration.memory_scope import turnScopeContext
 
 
 class TestC2RetrieveMemoriesUserIdFromMetadata:
@@ -58,7 +59,7 @@ class TestC2RetrieveMemoriesUserIdFromMetadata:
         # trace_manager 是 property，通过 mock_agent 设置
         mock_agent.trace_manager = None
 
-        await pipeline._retrieve_memories(ctx)
+        await pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
 
         # 验证 RetrievalContext.user_id
         assert len(captured_contexts) == 1, "应调用 retrieve 一次"
@@ -96,7 +97,7 @@ class TestC2RetrieveMemoriesUserIdFromMetadata:
         pipeline._memory_retrieval_chain.retrieve = mock_retrieve
         mock_agent.trace_manager = None
 
-        await pipeline._retrieve_memories(ctx)
+        await pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
 
         actual_user_id = captured_contexts[0].user_id
         # 不应是 None（应有默认值），也不应抛异常
