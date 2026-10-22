@@ -148,17 +148,32 @@ class TestGeneratedCuesAreUsable:
         )
 
     def test_复述原文的线索被挡并计数(self, manager):
-        """与正文词面同集的线索零增益（C-1 实测），必须挡下来且**读数可见**。"""
-        restatement = ROWS[0][3:]  # 直接抄正文
-        client = FakeCueClient(
-            responder=lambda _p: json.dumps({"cues": [{"key": 0, "text": restatement}]}, ensure_ascii=False)
-        )
+        """与正文词面同集的线索零增益（C-1 实测），必须挡下来且**读数可见**。
+
+        写法刻意**与 pending 顺序无关**：从提示里把 `[序号] 正文` 解析出来，逐序号回抄该正文。
+        早期版本硬写 `{"key": 0, ...}`，而冷启动预算上线后 pending 改成按温度排序，
+        序号 0 不再对应那一条记忆——用例就从"测过滤"悄悄变成"测运气"。
+        """
+        import re
+
+        def _restateEveryRow(prompt: str) -> str:
+            rows = dict(
+                (int(idx), body) for idx, body in re.findall(r"^\[(\d+)\] (.+)$", prompt, re.M)
+            )
+            assert rows, "提示里没有 `[序号] 正文` 行——解析口径与本用例的假设不符"
+            return json.dumps(
+                {"cues": [{"key": int(idx), "text": body[3:]} for idx, body in rows.items()]},
+                ensure_ascii=False,
+            )
+
+        client = FakeCueClient(responder=_restateEveryRow)
         readout = asyncio.run(manager.generateModelAssociationCues(client=client))
         assert readout["droppedGeneric"] >= 1, f"复述型线索没被挡：{readout}"
-        cues = manager.get_associationCues(
-            next(m.id for m in manager._memories.values() if m.content == ROWS[0])
-        )
-        assert all(c["cue_text"] != restatement for c in cues), "复述线索仍写进了库"
+        assert readout["written"] == 0, f"复述线索仍写进了库：{readout}"
+        for mem in list(manager._memories.values()):
+            assert all("起了荨麻疹" not in c["cue_text"] for c in manager.get_associationCues(mem.id)), (
+                "复述原文的线索落库了"
+            )
 
 
 class TestFailureModesAreHonest:
@@ -228,6 +243,76 @@ class TestCostGuardrailUnderOpenBudget:
             }
         assert version >= 5, f"memory 域版本 {version}，v5 迁移没跑"
         assert "memory_cue_attempts" in names, f"尝试账表缺失：{sorted(names)}"
+
+
+class TestColdStartWindowBudgetUnderOpenBudget:
+    """用户裁：**只给冷启动加每窗口行数预算，稳态仍无上限**（票一·乙＋温度优先）。
+
+    关键是别把它做成一个隐式上限——那等于把丙档收回去了。三条界线都钉住：
+    ① 超预算才截断，且**截断了要看得见**（`deferred` 读数，不许静默丢）；
+    ② 截断时按 `temperature DESC`（次键 `created_at DESC`）取舍，不是按插入序；
+    ③ 稳态（待处理面远小于预算）**必须全处理**，预算不得伸进稳态。
+    """
+
+    def test_稳态不受预算影响(self, manager):
+        """每轮落 2 行、10 轮一触发 ⇒ 稳态待处理面约 20 行，远小于预算，必须一次做完。"""
+        for i in range(18):
+            manager.remember(content=f"用户: 稳态新增第{i}条安排，涉及不同的场所与人员{i}",
+                             memory_type="episodic", metadata={"chat_scope": "direct"})
+        client = FakeCueClient()
+        readout = asyncio.run(manager.generateModelAssociationCues(client=client, windowRows=500))
+        assert readout["scanned"] == 18 + len(ROWS), f"稳态被预算截了：{readout}"
+        assert readout["deferred"] == 0, f"稳态不该有顺延：{readout}"
+
+    def test_超预算只截冷启动且顺延可见(self, manager):
+        for i in range(9):
+            manager.remember(content=f"用户: 冷启动历史第{i}条，各涉不同事项编号{i}",
+                             memory_type="episodic", metadata={"chat_scope": "direct"})
+        client = FakeCueClient()
+        first = asyncio.run(manager.generateModelAssociationCues(client=client, windowRows=4))
+        assert first["scanned"] == 4, f"窗口没生效：{first}"
+        assert first["deferred"] == 9 + len(ROWS) - 4, f"顺延数没记账：{first}"
+
+        # 顺延不能丢也不能重：逐轮跑到清空，累计处理数必须正好等于总行数
+        total = first["scanned"]
+        deferred = first["deferred"]
+        rounds = 1
+        while deferred:
+            nxt = asyncio.run(
+                manager.generateModelAssociationCues(client=FakeCueClient(), windowRows=4)
+            )
+            assert nxt["scanned"] == min(deferred, 4), f"这轮没接住顺延：{nxt}"
+            assert nxt["deferred"] == deferred - nxt["scanned"], f"顺延记账不连续：{nxt}"
+            total += nxt["scanned"]
+            deferred = nxt["deferred"]
+            rounds += 1
+        assert total == 9 + len(ROWS), f"跨轮累计处理 {total}，应等于总行数"
+        assert rounds == 3, f"轮数异常（每窗口 4 行、12 行应 3 轮）：{rounds}"
+        tail = asyncio.run(manager.generateModelAssociationCues(client=FakeCueClient(), windowRows=4))
+        assert tail["scanned"] == 0 and tail["deferred"] == 0, f"清空后仍有活：{tail}"
+
+    def test_截断时按温度优先不是插入序(self, manager):
+        """温度低的行被留下、高的先做——否则冷启动预算会把最不该忘的先推走。"""
+        ids = {}
+        for i in range(6):
+            content = f"用户: 温度试验第{i}条往事，涉及不同场所与人员{i}"
+            memId = manager.remember(content=content, memory_type="episodic",
+                                     metadata={"chat_scope": "direct"}, importance=0.5)
+            ids[i] = (memId, content)
+        # 人为造温度差：后三条高、前三条低
+        for rank, i in enumerate((3, 4, 5)):
+            manager._memories[ids[i][0]].temperature = 90.0 + rank
+        for i in (0, 1, 2):
+            manager._memories[ids[i][0]].temperature = 10.0 + i
+
+        asyncio.run(manager.generateModelAssociationCues(client=FakeCueClient(), windowRows=3))
+
+        processed = {memId for memId, _ in ids.values()
+                     if manager.associationCueAttemptedFor(memId)}
+        highOnly = {ids[i][0] for i in (3, 4, 5)}
+        assert processed and processed <= highOnly, (
+            f"窗口取了低温度行：处理={processed}，高温度集={highOnly}"
+        )
 
 
 class TestProductionWiringIsOnThePath:
