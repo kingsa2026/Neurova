@@ -11,6 +11,7 @@ from pathlib import Path
 from neurova.agent_core import Agent, AgentConfig
 from neurova.llm_client import LLMConfig
 from neurova.router import Message
+from neurova.collaboration.memory_scope import turnScopeContext
 
 
 class TestAgentConfig:
@@ -317,7 +318,7 @@ class TestAgentRetrieveMemories:
         )
         agent.memory_manager.remember(content="用户喜欢苹果")
         ctx = ChatContext(user_input="苹果")
-        await agent.chat_pipeline._retrieve_memories(ctx)
+        await agent.chat_pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
         assert len(ctx.relevant_memories) >= 1
 
     @pytest.mark.asyncio
@@ -328,7 +329,7 @@ class TestAgentRetrieveMemories:
         agent.memory_manager = None
         # 无 memory_manager 时, 检索链返回空 (FallbackRetriever 返回 [])
         ctx = ChatContext(user_input="测试")
-        await agent.chat_pipeline._retrieve_memories(ctx)
+        await agent.chat_pipeline._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id))
         assert ctx.relevant_memories == []
 
 
