@@ -44,21 +44,23 @@ ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
 DREAM_REPORT_METHODS = {"save_dream_report", "get_dream_report", "get_dream_report_stats"}
 FACADE = "adjust_parameters_based_on_sleep_quality"
 
-# 同一形态的**已知存量**（2026-10-22 复算：15 处调用、4 个文件，全在测试与脚本侧，生产代码零命中）。
+# 同一形态的**已知存量**（2026-10-22 批 E 现算：4 处调用、2 个文件，全在测试与脚本侧，生产代码零命中）。
 # 这些调用对 `memory_layer.storage.MemoryStorage(storage_dir)` 传 `db_path=`（个中还传 `neuser_id=`
 # 这种不存在的键），运行即 TypeError——本批只修睡眠那一档，其余留作下一批，故用只降不升的棘轮
 # 把它们钉在案上：新增落点即红，修掉一处就把计数改小。
-# 已收口两处（§6-391 批 D）：`tests/performance/longmeval_simple.py`（改名收进收集面，
-# 见 `tests/performance/memory/test_longTermMemoryBaselineGate.py`）与
-# `scripts/demo_optimization.py::demo_vector_index_manager`（整段演示的
-# `wait_for_index_completion`/`get_index_manager_state`/`vector_search`/`list_memories`/
-# `check_vector_index_integrity` 全仓零定义，无从修起，故退役）。
+# 已收口三处：`tests/performance/longmeval_simple.py`（§6-393 裁定甲改名收进收集面，
+# 见 `tests/performance/memory/test_longTermMemoryBaselineGate.py`）、
+# `scripts/demo_optimization.py::demo_vector_index_manager`（§6-393 整段退役，其演示的四个
+# 方法全仓零定义）、`tests/unit/memory/test_storage_comprehensive.py`（§6-394 退役：整档
+# `pytest.mark.skip` 收了不跑＝零覆盖，其 CRUD 契约由
+# `tests/cognitive_layers/memory_layer/test_storage.py` 18 格守、隔离由
+# `tests/unit/memory/test_isolation_unified.py` 守；不许复活见
+# `tests/unit/memory/test_storageComprehensiveRetired.py`）。
 _KNOWN_FABRICATED_SITES = {
     "tests/integration/test_full_conflict_integration.py",
-    "tests/unit/memory/test_storage_comprehensive.py",
     "scripts/demo_closed_loop.py",
 }
-_KNOWN_FABRICATED_COUNT = 15
+_KNOWN_FABRICATED_COUNT = 4
 
 pytestmark = pytest.mark.timeout(60)
 
