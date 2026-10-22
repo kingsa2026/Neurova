@@ -9,7 +9,7 @@
 | `unit/` | 单元测试（无外部依赖） | ✅ 是（`test_*.py`） | ✅ |
 | `integration/` | 集成测试（跨模块/真实 IO/DB） | ✅ 是 | ✅ |
 | `e2e/` | 端到端（后端启动、全链路） | ✅ 是 | ✅ |
-| `performance/` | 性能与基准（含 LongMemEval 评测脚本） | ✅ 是（同 `test_*.py` 规则） | ✅ |
+| `performance/` | 性能与基准 | ✅ **仅** `test_*.py`（目录里不匹配该名的文件一律不收集） | ✅ |
 | `manual/` | **手工验证脚本**（需活后端 / 打印断言 / 硬编码路径） | ❌ 否 | ✅ |
 | `runners/` | 测试运行器（`run_*.py`、`comprehensive_test_runner.py`） | ❌ 否 | 部分（见下） |
 | `archive/` | 退役件（保留历史，不参与套件） | ❌ 否 | ✅ |
@@ -17,6 +17,14 @@
 
 **收集规则**（`pyproject.toml`）：`python_files = ["test_*.py"]`，`--import-mode=importlib`。
 根目录只保留 `__init__.py` 与 `conftest.py`（后者提供跨目录共享 fixture）。
+
+> **"放在 `performance/` 里"不等于"会被跑"**（2026-10-22 实测入账，台账 §6-391）：
+> 原 `tests/performance/longmeval_simple.py` 文件名与其类 `SimpleLongMemEval` 双双不匹配
+> 收集规则，`--collect-only` 报 `collected 0 items`——一份看着在、实际从不运行的测量件，
+> 且它按已不存在的 `MemoryStorage(db_path=…)/search()/list_memories()/close()` 写，直跑即 TypeError。
+> 现由 `tests/performance/memory/test_longTermMemoryBaselineGate.py` 取代（收进收集面）。
+> `tests/performance/` 下新增文件必须以 `test_` 开头，否则常驻守卫
+> `TestUncollectedMeasurementFileIsRetired::test_performance_目录下不得有不被收集的文件` 即红。
 
 ## 为何 `runners/` 不叫 `scripts/`
 
