@@ -307,12 +307,24 @@
 
 ### 认证需求总结
 
+> **本表已停用（2026-10-22，§6-399）**：原先按"模块"给出「无需认证」名单，实测**系统性错误**。
+> 复算口径：真 `create_app()`，按 `include_context` 展开（顶层 `_IncludedRouter.path` 为空，
+> 直接读它会得到"零路由"的假读数），逐路由读依赖图里的身份/角色门；**不请求任何端点**。
+> 读数：附录列的 60 个模块中 56 个能在 `/api/v1/<module>` 找到路由，其中**只有 `health` 是
+> 全公开**、**55 个至少有一条路由需认证**；这些前缀共 972 条路由，**542 条需认证、45 条公开**。
+> 同一份文件里 `settings` 仍留在「无需认证」行，而它的模块节已写「需认证」并抄了实测 401——
+> 手写汇总与模块节自相矛盾，这就是停用的原因。
+>
+> **以各模块节的标题为准。**「哪些端点公开」将由生成器按路由依赖图产出（下一批，含
+> freshness 守卫），不再手写；生成器落地前，要确认某个面就看该模块节，或无凭证打一条
+> **已存在**的路由（401/403＝有门；404/405 不算门，别把"路径写错"读成"没门"）。
+
+仍有据可查的两条归类（来自模块节，不由本表推导）：
+
 | 认证类型 | 模块 |
 |----------|------|
-| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
-| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups, language（写面另加管理员门） |
-| **API Key** | agent-communication |
-| **HTTPBearer** | mobile |
+| **API Key** | `agent-communication` |
+| **HTTPBearer** | `mobile` |
 
 > 脚注（§6-158）：`media` 原先挂在"无需认证"那一行，与实况不符——`media.py:40` 是
 > `APIRouter(dependencies=[Depends(get_current_user)])`，无凭证请求实测回 **401**
@@ -332,9 +344,11 @@
 | POST端点 | ~250 |
 | PUT端点 | ~50 |
 | DELETE端点 | ~50 |
-| 需认证端点 | ~100 |
-| 公开端点 | ~525 |
+| 需认证端点 | 未复核（旧读数「~100」已不可采信，见上方停用说明） |
+| 公开端点 | 未复核（旧读数「~525」与实测相反：同口径下公开仅 45） |
 | 前端覆盖 | 94.7% (71/75) |
+
+> 除注明外，本表为 2026-09 的旧统计，未经生成器复核；认证两行已停用（§6-399）。
 
 ---
 
