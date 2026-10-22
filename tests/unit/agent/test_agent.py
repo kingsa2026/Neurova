@@ -3,6 +3,8 @@ Agent核心测试 - Agent 完整测试覆盖
 注意: Agent使用real LLMClient with mock mode (empty api_key),
 所以不需要patch，直接使用即可。
 """
+import asyncio
+
 import pytest
 import tempfile
 from pathlib import Path
@@ -483,5 +485,6 @@ class TestAgentRouterIntegration:
             enable_memory=True,
         )
         agent.init_router()
-        result = agent.router.route(Message(content="/memory"))
+        # route() 早已 async：即使这一格仍 skip，也不留"同步取协程"的旧形状
+        result = asyncio.run(agent.router.route(Message(content="/memory")))
         assert result.success is True
