@@ -19,6 +19,7 @@ from neurova.agent.gates import StopDecision as _StopDecision
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
+from neurova.agent.loops.reasoning_degeneracy import ReasoningStreamGuard, stripDegeneracy
 from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.core import turn_context
 from neurova.llm_client import LLMResponse
@@ -366,9 +367,20 @@ class OpenAILoop(BaseAgentLoop):
         # 记录思考过程（用于前端展示）
         reasoning_content = getattr(response, "reasoning_content", None)
         if reasoning_content:
-            # 将思考过程存储到 agent 上，供 chat() 方法读取
-            self.agent.set_current_reasoning(reasoning_content)
-            logger.info("🧠 捕获思考过程: %s 字符", len(reasoning_content))
+            # 非流式一次拿整块，退化段照样剥——判据与两条流式环同一份，不另拼正则
+            cleanReasoning, degeneracy = stripDegeneracy(reasoning_content)
+            if degeneracy is not None:
+                logger.warning(
+                    "[REASONING_DEGENERACY] 非流式思考含退化段：「%s」连发 %s 次（尾部 %s 字符），已剥离",
+                    degeneracy.unit,
+                    degeneracy.repeats,
+                    degeneracy.chars,
+                )
+            if cleanReasoning:
+                # 将思考过程存储到 agent 上，供 chat() 方法读取
+                self.agent.set_current_reasoning(cleanReasoning)
+                logger.info("🧠 捕获思考过程: %s 字符", len(cleanReasoning))
+            reasoning_content = cleanReasoning
 
         # 处理 tool_calls（部分 provider 响应无 tool_calls 字段，需容错）
         tool_calls = getattr(response, "tool_calls", None)
@@ -759,7 +771,7 @@ class OpenAILoop(BaseAgentLoop):
         if state is None:
             state = self._startTurnState(request_params.get("messages") or [])
         reply_parts: List[str] = []
-        reasoning_parts: List[str] = []
+        reasoningGuard = ReasoningStreamGuard()
         pending_tool_calls: List[Dict] = []
         finish_reason = ""
         # P2-4d：流式 usage 的**存在性**记录（聚合本体在基类 `_accumulateRoundUsage`）
@@ -787,7 +799,7 @@ class OpenAILoop(BaseAgentLoop):
                     payload = chunk["retry_status"]
                     if payload.get("reset"):
                         reply_parts.clear()
-                        reasoning_parts.clear()
+                        reasoningGuard.reset()
                         pending_tool_calls.clear()
                     yield {"type": "retry_status", "data": payload}
                     continue
@@ -810,12 +822,33 @@ class OpenAILoop(BaseAgentLoop):
                 pending_usage = chunk.usage
             rtext = getattr(chunk, "reasoning_content", None)
             if rtext:
-                reasoning_parts.append(rtext)
-                yield {"type": "reasoning", "data": rtext}
+                for out_text in reasoningGuard.consume(rtext):
+                    yield {"type": "reasoning", "data": out_text}
+                if reasoningGuard.aborted:
+                    # 判定退化即终止这一次调用：留着继续读，网关仍按秒产出 token，
+                    # 时间与配额照样烧（事故那次读了近 4 分钟）
+                    break
             for tc_delta in getattr(chunk, "tool_calls", None) or []:
                 self._merge_tool_call_delta(pending_tool_calls, tc_delta)
             if getattr(chunk, "finish_reason", None):
                 finish_reason = chunk.finish_reason
+
+        if reasoningGuard.aborted:
+            found = reasoningGuard.found
+            logger.warning(
+                "[REASONING_DEGENERACY] 思考流退化截断：「%s」连发 %s 次（尾部 %s 字符），"
+                "本轮按输出预算耗尽交出成因",
+                found.unit,
+                found.repeats,
+                found.chars,
+            )
+            # 截断点之后的 tool_calls 分片是半截 JSON：执行它等于执行一个模型
+            # 没声明完的调用，宁可让恢复轮重新声明
+            pending_tool_calls.clear()
+            # 成因按 length 交出 ⇒ 正文为空时接上既有的"思考吃满预算"单次恢复，
+            # 不新造第二套恢复。代价：这一次调用没读到 usage 片，本环少计约一个
+            # 阈值窗口的思考 token（截断本来就是为了让它少烧）。
+            finish_reason = finish_reason or "length"
 
         # 本次调用只累加一次：usage 是累计值，重复 chunk 不是增量
         if pending_usage is not None:
@@ -823,8 +856,8 @@ class OpenAILoop(BaseAgentLoop):
             round_usage = getattr(self.agent, "_round_usage", None) or {}
 
         # 保存思考过程到 agent（供 post-chat 持久化/前端展示）
-        if reasoning_parts:
-            reasoning_text = "".join(reasoning_parts)
+        reasoning_text = reasoningGuard.cleanText
+        if reasoning_text:
             self.agent.set_current_reasoning(reasoning_text)
             logger.info("🧠 捕获流式思考过程: %s 字符", len(reasoning_text))
 
@@ -856,7 +889,7 @@ class OpenAILoop(BaseAgentLoop):
             # P2-6：流式路径同批回放推理链——但 reasoning_content 与被禁止它的
             # provider 分档，assistant.tool_calls 声明本身是无条件协议要求
             # （缺声明 → 严格网关把续写判 400，见 base.buildToolRoundMessages）
-            _round_reasoning = "".join(reasoning_parts)
+            _round_reasoning = reasoningGuard.cleanText
             _replayReasoning = self._shouldReplayReasoning(_round_reasoning)
             request_params["messages"].extend(
                 self.buildToolRoundMessages(
