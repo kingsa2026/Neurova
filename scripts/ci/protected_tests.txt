@@ -3531,3 +3531,19 @@ tests/unit/skills/test_marketDocSkillDigestGate.py
 #   `test_pluginArtifactDigestPinnedAndVerified` 那条接缝判据里按全仓扫描钉住）。
 # 入册前逐文件单跑两次同读数 11 passed（3.37s / 3.30s）；红自证＝只退四件生产面 ⇒ 3 failed / 8 errors。
 tests/unit/security/test_artifactAnchor.py
+# §6-390 插件远程源的注册表、取回咽喉与安装接线（票二乙，用户 2026-10-22 拍「开，复用市场链」）。
+# 判据问的不是"能不能下载"，而是四件事一起成立：
+# ① **白名单在取回之前**：未注册 host、非 http(s)、重定向到别的 host 一律在发出/接受字节之前拒
+#   （拒因是闭集标识）；测试把 `urlopen` 换成"被调就炸"的桩，证明未注册时**一个请求都没发**；
+# ② **预算在解包那一步**：单包上限与条目上限只在 `plugin_sources` 一处，透传给
+#   `safe_extract_zip`；超限在读阶段就中止，zip-slip/坏 zip 按 `plugin_archive_unsafe` 拒；
+# ③ **取回即暂存、失败即清**：解到 `.incoming_<hex>`，核对 manifest 名字后才整体挪进插件根；
+#   名字不符 / 已存在 / 权限门拒 / 状态落盘失败，一律把网络得来的字节撤回，不留半个包；
+# ④ **远程包与本地包同链**：装时钉摘要、落根外锚、`state.json` 留 `install_source`，
+#   装载闸不因来源放行——改一个字节后 `load_plugin` 按 `artifact_digest_mismatch` 拒（活体第 10 格）。
+# 另三格钉 HTTP 语义：四条取回拒因各有状态码（403/502/413/400），
+# `already_installed`→409、`name_mismatch`→400；拒因集合的扫描器把 `plugin_sources` 的
+# `REASON_*` 常量收进来（与 artifact_digest 同机制，只在包内真引用时才算）。
+# 入册前逐文件单跑两次同读数 17 passed（4.42s / 4.28s）；红自证＝退三件生产面 ⇒ 整档 collection error
+#（新模块不在，行为红由活体承担：接线前该路径回 501）。
+tests/unit/plugins/test_pluginRemoteSources.py

@@ -36,7 +36,7 @@ from pydantic import BaseModel
 from neurova.api.auth import get_current_user
 from neurova.api.deps import require_admin
 from neurova.core.logger import get_logger
-from neurova.plugins import plugin_permissions, plugin_route_mount
+from neurova.plugins import plugin_permissions, plugin_route_mount, plugin_sources
 from neurova.plugins.plugin_manager import PluginError, get_plugin_manager
 from neurova.plugins.plugin_permissions import (
     FRAMEWORK_SURFACE_MODEL,
@@ -73,6 +73,13 @@ _REASON_TO_STATUS = {
     # §6-388：执行侧「账本里没钉过且无落账口」——正常装载面走 TOFU 不会冒到这里，
     # 真冒出来按"状态未建立"回 409，别让 500 把契约问题画成运行时故障。
     "artifact_digest_unpinned": 409,
+    # ── §6-390 票二乙：插件远程取回（白名单/预算/解包）──
+    "plugin_source_not_allowed": 403,  # 未注册 host / 非 http(s) / 重定向出白名单
+    "plugin_fetch_failed": 502,        # 上游取不回来（网络/HTTP 状态）
+    "plugin_fetch_too_large": 413,     # 超过单包上限
+    "plugin_archive_unsafe": 400,      # zip-slip / 坏 zip / 条目超限
+    "already_installed": 409,          # 远程包名字已存在（不覆盖、不静默换键）
+    "name_mismatch": 400,              # 包里 manifest 名字与路径里的 plugin_id 不一致
     "artifact_missing": 409,
     "not_installed": 404,
     "not_enabled": 409,            # 未启用就装载：约束在 manager，端点不替它兜底
@@ -206,6 +213,46 @@ async def list_plugins(
                      "discovered_not_installed": manager.unregisteredPluginDirs()}}
 
 
+class RemoteSourceUpsert(BaseModel):
+    baseUrl: str
+
+
+@router.get("/remote-sources")
+async def list_remote_sources(current_user: typing.Dict = Depends(get_current_user)):
+    """已注册的插件远程源（只读：登录即可看，便于确认"为什么这个地址被拒"）。"""
+    manager = get_plugin_manager()
+    return {"code": 0, "message": "success",
+            "data": {"sources": plugin_sources.loadSources(manager.plugin_dir)}}
+
+
+@router.put("/remote-sources/{host}")
+async def put_remote_source(host: str, body: RemoteSourceUpsert,
+                            admin: typing.Dict = Depends(require_admin())):
+    """登记/更新一个插件源（**仅管理员**）：白名单就是这张表，写它等于开一个口。"""
+    manager = get_plugin_manager()
+    try:
+        ok = plugin_sources.registerSource(manager.plugin_dir, host, body.baseUrl)
+    except plugin_sources.PluginSourceError as e:
+        raise HTTPException(status_code=_statusFor(PluginError(e.reason, e.detail)),
+                            detail=e.detail or e.reason)
+    if not ok:
+        raise HTTPException(status_code=500, detail="插件源表未能落盘（内存未改）")
+    logger.info("Plugin remote source registered: %s -> %s by %s",
+                host, body.baseUrl, admin.get("user_id"))
+    return {"code": 0, "message": "success",
+            "data": {"host": host.lower(), "baseUrl": body.baseUrl}}
+
+
+@router.delete("/remote-sources/{host}")
+async def delete_remote_source(host: str, admin: typing.Dict = Depends(require_admin())):
+    """撤掉一个插件源（仅管理员）：撤掉之后该 host 的包立刻不可再取回。"""
+    manager = get_plugin_manager()
+    if not plugin_sources.removeSource(manager.plugin_dir, host):
+        raise HTTPException(status_code=500, detail="插件源表未能落盘（内存未改）")
+    logger.info("Plugin remote source removed: %s by %s", host, admin.get("user_id"))
+    return {"code": 0, "message": "success", "data": {"host": host.lower()}}
+
+
 @router.get("/status")
 async def get_plugin_status():
     """获取插件管理器状态"""
@@ -291,6 +338,15 @@ async def install_plugin(plugin_id: str, body: InstallPluginRequest):
     try:
         source = manager.resolveInstallSource(body.source)
     except PluginError as e:
+        if e.reason == "remote_source":
+            # 远程包要先取回才知道 manifest 名字：交给咽喉，名字核对与清理都在里面
+            try:
+                record = manager.install_remote_plugin(body.source, expectedName=plugin_id)
+            except PluginError as remoteError:
+                raise HTTPException(status_code=_statusFor(remoteError),
+                                    detail=str(remoteError))
+            logger.info("Remote plugin installed: %s from %s", record.name, body.source)
+            return {"code": 0, "message": "Plugin installed", "data": _pluginView(plugin_id)}
         raise HTTPException(status_code=_statusFor(e), detail=str(e))
 
     name = _manifestName(manager, source)
