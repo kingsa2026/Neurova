@@ -68,18 +68,60 @@ class TestMemoryManager(unittest.TestCase):
             MemoryManager(db_path="")
 
     def test_init_with_minimal_args(self):
-        mgr = self._create_manager()
-        self.assertIsNotNone(mgr)
-        self.assertEqual(mgr.agent_id, "test_agent")
-        self.assertEqual(mgr.neuser_id, "test_neuser")
-        self.assertEqual(mgr.user_id, "test_user")
-        self.assertIsNotNone(mgr.bus)
-        mgr.close()
+        """构造成功的另一面是「事件接缝在共享单例上」，不是「手上攥着一条私有总线」。
 
-    def test_bus_property(self):
+        §6-12 的原病：每个 manager 在构造期各自 new 一条 EventBus，五处投递全发在
+        外部拿不到的对象上，其出口就是当时那个 `bus` 属性（零调用方）。所以本格
+        反向钉住那个出口不得回来——把它加回去只是让旧断言重新变绿，病却跟着回来。
+        """
         mgr = self._create_manager()
-        self.assertIsNotNone(mgr.bus)
-        mgr.close()
+        try:
+            self.assertIsNotNone(mgr)
+            self.assertEqual(mgr.agent_id, "test_agent")
+            self.assertEqual(mgr.neuser_id, "test_neuser")
+            self.assertEqual(mgr.user_id, "test_user")
+            self.assertFalse(hasattr(mgr, "bus"),
+                             "私有总线出口 `bus` 被复活：§6-12 的『只发不订』就是它养出来的")
+            self.assertFalse(hasattr(mgr, "_bus"),
+                             "私有总线字段 `_bus` 被复活：投递必须走 `get_event_bus()` 单例")
+        finally:
+            mgr.close()
+
+    def test_events_reach_the_shared_bus_singleton(self):
+        """原 `test_bus_property`（只 assertIsNotNone(mgr.bus)）换成正面的行为判据。
+
+        「总线对象不是 None」证明不了任何投递能到——当年私有总线恰恰每个 manager
+        都拿得到一个非 None 的对象，而订阅方一个都订不到。本格按 §6-12 的诊断形态
+        反过来写：在共享单例上订 `memory_created`，真发一次 `remember`，
+        订阅方必须收到，且统计面同步计数。
+
+        变异自检过（本批实测）：把生产的投递口换成一条私有 `EventBus`，这一支的
+        `received` 是 **0** 件 ⇒ 判据红；恢复共享单例收到 1 件 ⇒ 绿。顺带看清一件事：
+        `bus_events` 计的是"发过几回"，私有总线形态下它照样涨（实测 1→2），
+        **所以光有计数抓不到这一族病**，必须由"订阅方收到"那一半承重。
+        """
+        from neurova.core.event_bus import get_event_bus, reset_event_bus
+        from neurova.cognitive_layers.memory_layer.bus_event import MemoryEventName
+
+        reset_event_bus()
+        received = []
+        get_event_bus().subscribe(
+            MemoryEventName.MEMORY_CREATED, lambda event: received.append(event)
+        )
+        mgr = self._create_manager()
+        try:
+            self._remember(mgr, "用户: 事件接缝要能让订阅方收到")
+            self.assertGreaterEqual(
+                len(received), 1,
+                "共享总线上订了 `memory_created` 却收不到 `remember()` 的投递——"
+                "这正是 §6-12 那条『只发不订』的机器形态",
+            )
+            stats = mgr.get_stats()
+            self.assertGreaterEqual(stats["bus_events"], 1)
+            self.assertGreaterEqual(stats["bus_handlers"], 1)
+        finally:
+            mgr.close()
+            reset_event_bus()
 
     # ── 核心 CRUD ──
 
@@ -158,12 +200,23 @@ class TestMemoryManager(unittest.TestCase):
         mgr.close()
 
     def test_get_full_stats_bus(self):
+        """统计面必须带事件投递与订阅读数（原格读的是私有总线的 `health_report()`）。
+
+        `bus_events`／`bus_handlers` 是这条接缝唯一的可观测出口（`GET /v1/memory/stats`
+        也在读它们）。没有出口时，「加了投递但不计数」与「根本没接上总线」在观测上同形
+        ——§6-383 给线索通道立读数用的是同一条理由。
+        """
         mgr = self._create_manager()
-        report = mgr._bus.health_report()
-        self.assertIsInstance(report, dict)
-        self.assertIn("storage", report)
-        self.assertEqual(report["storage"], "healthy")
-        mgr.close()
+        try:
+            report = mgr.get_full_stats()
+            self.assertIsInstance(report, dict)
+            for key in ("bus_events", "bus_handlers"):
+                self.assertIn(key, report, f"统计面缺 {key}：事件接缝失去可观测出口")
+                self.assertIsInstance(report[key], int)
+            self.assertFalse(hasattr(mgr, "_bus"),
+                             "私有总线字段 `_bus` 被复活：`health_report()` 那套随 §6-12 一起退净")
+        finally:
+            mgr.close()
 
     def test_get_memories(self):
         mgr = self._create_manager()
