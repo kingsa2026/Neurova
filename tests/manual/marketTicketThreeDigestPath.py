@@ -29,6 +29,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -43,10 +44,16 @@ from fastapi.testclient import TestClient  # noqa: E402
 from neurova.api.app import create_app  # noqa: E402
 from neurova.api.auth import create_access_token  # noqa: E402
 from neurova.security import artifact_digest  # noqa: E402
+from neurova.core.data_root import get_data_root  # noqa: E402
 from neurova.skills import library_service, market_registry, market_store  # noqa: E402
 from neurova.skills.market_importer import BUILTIN_BUNDLE_DIR  # noqa: E402
 
 SKILL_POOL = "/api/v1/skill-pool"
+
+# 生产的根外锚在 `~/.neurova/`（数据根之外）；探针把落点改到隔离区**之外**的同级目录，
+# 既不写真实主目录，又保住「锚不在数据根里」这条形状。
+ANCHOR_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchorsTicket3-"))
+artifact_digest.anchorPath = lambda: ANCHOR_DIR / "artifact_anchors.json"
 failures: list = []
 checkArtifactCalls: list = []
 
@@ -92,11 +99,18 @@ def _runMaybeCoroutine(value):
 
 
 def main():
+    # 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 —— 老环境不支持就算了，读数不该被它打断
+            pass
+    startedAt = time.time()
     before = _dataDirFingerprint()
     realCheck = artifact_digest.checkArtifact
 
-    def countingCheck(root, pinnedValue):
-        status, actual = realCheck(root, pinnedValue)
+    def countingCheck(root, pinnedValue, **kwargs):
+        status, actual = realCheck(root, pinnedValue, **kwargs)
         checkArtifactCalls.append("%s|%s" % (Path(root).name, status))
         return status, actual
 
@@ -193,14 +207,59 @@ def main():
                   and artifact_digest.REASON_MISMATCH not in json.dumps(calibrated),
                   str(calibrated)[:120])
 
+            # ── 根外锚（§6-388 票一甲①）：同权限者"改构件 + 重钉账本"要被锚抓住 ──
+            anchorFile = artifact_digest.anchorPath()
+            anchorPayload = json.loads(anchorFile.read_text(encoding="utf-8"))
+            anchorKey = artifact_digest.artifactKey("skill", skillId)
+            check("15 安装后根外锚里有一条，且与账本同值",
+                  str((anchorPayload.get("anchors") or {}).get(anchorKey) or "") == pinned,
+                  "%s -> %s" % (anchorKey, (anchorPayload.get("anchors") or {}).get(anchorKey)))
+            check("16 锚落在数据根之外（否则整库回滚会把锚一起滚回去）",
+                  Path(get_data_root()).resolve() not in anchorFile.resolve().parents,
+                  str(anchorFile))
+
+            from neurova.skills.skill_service import SkillService as _SkillService
+
+            (runtimeDoc := runtimeDir / "SKILL.md").write_bytes(
+                original + b"\n<!-- repin-probe -->\n")
+            newDigest = artifact_digest.digestDir(runtimeDir)
+            manifestData = json.loads(Path(service.manifest_path).read_text(encoding="utf-8"))
+            manifestData[skillId][artifact_digest.DIGEST_FIELD] = newDigest
+            Path(service.manifest_path).write_text(
+                json.dumps(manifestData, ensure_ascii=False, indent=2), encoding="utf-8")
+            fresh = _SkillService(agent_id="default", skills_dir=str(service.skills_dir))
+            repinned = asyncio.run(fresh.call_skill(skillId, "main", task="probe"))
+            check("17 改构件＋重钉账本（同权限者能做）⇒ 锚不符，账本腿仍拒",
+                  artifact_digest.REASON_MISMATCH in json.dumps(
+                      repinned, ensure_ascii=False, default=str),
+                  str(repinned)[:150])
+            runtimeDoc.write_bytes(original)
+            manifestData[skillId][artifact_digest.DIGEST_FIELD] = pinned
+            Path(service.manifest_path).write_text(
+                json.dumps(manifestData, ensure_ascii=False, indent=2), encoding="utf-8")
+            healed = asyncio.run(_SkillService(
+                agent_id="default", skills_dir=str(service.skills_dir)
+            ).call_skill(skillId, "main", task="probe"))
+            # 说明：`SkillDocSkill` 是**指令型**，本来就没有 `skill.py` 入口，`call_skill` 在摘要相符
+            # 之后会走到"无入口"那一支——所以这一格证"闸不再挡"，用 checkArtifact 的直接读数，
+            # 不拿"能不能执行"冒充"摘要是否相符"（那一格测的就不是同一件事）。
+            healedStatus, _ = artifact_digest.checkArtifact(
+                runtimeDir, pinned, anchorKey=anchorKey)
+            check("18 还原构件与账本后，账本腿与锚都重新相符（上一格的拒不是永久坏账）",
+                  healedStatus == artifact_digest.STATUS_MATCH
+                  and artifact_digest.REASON_MISMATCH not in json.dumps(
+                      healed, ensure_ascii=False, default=str),
+                  "status=%s 调用回执=%s" % (healedStatus, str(healed)[:80]))
+
+
             artifact_digest.checkArtifact = realCheck
             checkArtifactCalls.clear()
 
-        check("15 仓库 data/ 未被本轮写入（内容指纹逐字节相同）", _dataDirFingerprint() == before)
+        check("19 仓库 data/ 未被本轮写入（内容指纹逐字节相同）", _dataDirFingerprint() == before)
         dataRoot = Path(__file__).resolve().parents[2] / "data"
         recent = [p for p in dataRoot.rglob("*") if p.is_file()
-                  and p.stat().st_mtime > time.time() - 300] if dataRoot.exists() else []
-        check("16 仓库 data/ 最近 5 分钟零改写", recent == [], str([str(x) for x in recent[:3]]))
+                  and p.stat().st_mtime > startedAt] if dataRoot.exists() else []
+        check("20 仓库 data/ 最近 5 分钟零改写", recent == [], str([str(x) for x in recent[:3]]))
     finally:
         artifact_digest.checkArtifact = realCheck
 
