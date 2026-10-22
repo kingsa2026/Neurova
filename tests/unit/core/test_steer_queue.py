@@ -82,11 +82,24 @@ class TestLoopDrainIntegration:
 
 class TestSteerEndpoint:
     def test_steer_endpoint_registered(self):
+        """steer 端点必须挂在装配后的路由表上（前端 `ChatPage.vue:646` 在调它）。
+
+        取数走口径单源 `tests/route_table.registeredPaths`。此前这格写的是
+        `{getattr(r, "path", "") for r in app.routes}`——现行 FastAPI 把 include 落成
+        惰性包装 `_IncludedRouter`（既无 `.path` 也无数组语义），那一形实测只取到
+        **7** 条而真实挂载面是 877 条，于是"端点存在"被读成"端点不存在"：
+        常驻假红，而且同一口径若用在缺席断言上会恒真（见
+        `tests/unit/api/test_routeTableIsTheOnlyMountedRead.py`，§6-401）。
+        """
         from neurova.api.app import create_app
+        from tests.route_table import registeredPaths
 
         app = create_app(enable_memory=False, enable_channels=False)
-        paths = {getattr(r, "path", "") for r in app.routes}
-        assert "/api/v1/console/chat/steer" in paths
+        paths = set(registeredPaths(app))
+        assert "/api/v1/console/chat/steer" in paths, (
+            f"steer 端点不在挂载表上（现算 {len(paths)} 条路径）——"
+            "前端那条 /console/chat/steer 会 404"
+        )
 
 
 if __name__ == "__main__":
