@@ -297,7 +297,7 @@ class MultiModelLLMClient:
                 api_key=provider.api_key,
                 base_url=provider.base_url,
                 model=model,
-                max_tokens=get_model_max_tokens(model),
+                max_tokens=get_model_max_tokens(model, provider.id),
                 compat=resolve_compat(
                     provider_id=provider.id,
                     base_url=provider.base_url,
