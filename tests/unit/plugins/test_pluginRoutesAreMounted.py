@@ -541,6 +541,7 @@ class TestEveryRefusalHasHttpSemantics:
 
         found = set()
         computedRaise = False
+        usesSourceVocabulary = False
         for ref in _astScan.sourceRefsUnder(
                 PROJECT_ROOT / "neurova" / "plugins", hints=("PluginError",)):
             tree = _astScan._cachedParse(ref.stamp, ref.code)
@@ -549,6 +550,10 @@ class TestEveryRefusalHasHttpSemantics:
                     continue
                 func = node.func
                 name = getattr(func, "id", None) or getattr(func, "attr", None)
+                if (isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "plugin_sources"):
+                    usesSourceVocabulary = True
                 if name == "refusalReason":
                     computedRaise = True
                 if name != "PluginError" or not node.args:
@@ -556,10 +561,16 @@ class TestEveryRefusalHasHttpSemantics:
                 first = node.args[0]
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     found.add(first.value)
+        computedSources = []
         if computedRaise:
-            digest = PROJECT_ROOT / "neurova" / "security" / "artifact_digest.py"
-            for node in ast.walk(ast.parse(digest.read_text(encoding="utf-8"),
-                                           filename=str(digest))):
+            computedSources.append(PROJECT_ROOT / "neurova" / "security" / "artifact_digest.py")
+        if usesSourceVocabulary:
+            # 远程取回那套拒因的词汇单点在 plugin_sources（§6-390）；抛点用常量转发，
+            # 字面量扫不到——与 artifact_digest 同机制：包内**真引用**这份词汇才算。
+            computedSources.append(PROJECT_ROOT / "neurova" / "plugins" / "plugin_sources.py")
+        for sourceFile in computedSources:
+            for node in ast.walk(ast.parse(sourceFile.read_text(encoding="utf-8"),
+                                           filename=str(sourceFile))):
                 if not isinstance(node, ast.Assign):
                     continue
                 for target in node.targets:

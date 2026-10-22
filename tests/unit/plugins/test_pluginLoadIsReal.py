@@ -105,14 +105,19 @@ class TestOnlyThePluginRootMayBeLoaded:
         assert resp.status_code == 400, "路径穿越没先 resolve 就判边界：%s" % resp.text
         assert not client.manager.has_plugin("evil2")
 
-    def test_remoteUrlSourceIsNamedNotSupported(self, client):
-        """「含下载与安装面」是后续批次（要带供应链校验）；今天必须响亮地回 501。"""
+    def test_remoteUrlSourceIsRefusedUntilItsHostIsRegistered(self, client):
+        """§6-390 之后远程口开了，但**未登记 host 在取回之前就拒**（403，不是 501）。
+
+        501 是「能力不存在」；今天的实态是「能力在、这道 URL 不在白名单里」——两者混用
+        会让人以为功能没做。登记之后的成功路径在 `test_pluginRemoteSources.py` 与活体脚本里。
+        """
         resp = client.post("/api/v1/plugins/remote/install",
                            json={"source": "https://example.test/x.zip"})
 
-        assert resp.status_code == 501, (
-            "远程源既没实现也不该静默成功（501＝诚实的 not_supported）：%s %s"
+        assert resp.status_code == 403, (
+            "未登记 host 的远程源必须按白名单拒（403），不是 not_supported：%s %s"
             % (resp.status_code, resp.text))
+        assert "plugin_source_not_allowed" in resp.text
         assert not client.manager.has_plugin("remote")
 
 

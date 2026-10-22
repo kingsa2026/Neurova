@@ -17,6 +17,9 @@ import importlib
 import importlib.util
 import inspect
 import json
+import shutil
+import uuid
+import zipfile
 from neurova.core.logger import get_logger
 import sys
 import time
@@ -29,7 +32,9 @@ from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
 from neurova.core.data_root import dataPath
 from neurova.skills.skill_install_gate import validate_permissions_for_install
 from neurova.security import artifact_digest
+from neurova.security.safe_archive import UnsafeArchiveError, safe_extract_zip
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.plugins import plugin_sources
 from neurova.plugins.plugin_errors import PluginError  # noqa: F401  (既有 import 面继续可用)
 
 logger = get_logger(__name__)
@@ -64,6 +69,9 @@ class PluginRecord:
     #: 而**落盘键**与技能账本共用 `artifact_digest` 同一个字符串（口径在 `artifact_digest` 模块）——
     #: 两条通道各起一个键名，读法就会分叉。默认空＝存量记录没有钉，装载时 TOFU 首钉。
     artifactDigest: str = ""
+    #: 远程安装的来源 URL（本地安装为空串）。可选键：存量 state.json 没有它照样能读，
+    #: 所以**不升** STATE_STORE_VERSION（升版会把整店读成空态）。
+    installSource: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -81,6 +89,7 @@ class PluginRecord:
             "install_time": self.install_time,
             "load_time": self.load_time,
             artifact_digest.DIGEST_FIELD: self.artifactDigest,
+            "install_source": self.installSource,
         }
 
     @classmethod
@@ -103,6 +112,7 @@ class PluginRecord:
             # 所以**不需要**升 STATE_STORE_VERSION（升版会让整店记录撞版本守卫，
             # 读成"这台机器没装过插件"那种看着自洽的空态）。
             artifactDigest=str(data.get(artifact_digest.DIGEST_FIELD) or ""),
+            installSource=str(data.get("install_source") or ""),
         )
 
 
@@ -267,8 +277,8 @@ class PluginManager:
             raise PluginError("empty_source", "装载源为空")
         if text.startswith(("http://", "https://", "ftp://", "git+")):
             raise PluginError(
-                "remote_source", "远程下载安装未实装（构件摘要已落 §6-176，缺的是来源侧的"
-                                 "信任锚与白名单，不是哈希；本批不静默成功）")
+                "remote_source", "远程源必须经 install_remote_plugin 的取回咽喉"
+                                 "（白名单/预算/装时钉三件一起）；resolveInstallSource 只接受本地目录")
 
         root = Path(self._plugin_dir).resolve()
         candidate = Path(text).resolve()
@@ -278,6 +288,78 @@ class PluginManager:
             raise PluginError(
                 "outside_root", "装载源必须在插件根 %s 内，收到的是 %s" % (root, candidate))
         return candidate
+
+    def _findExtractedPluginRoot(self, staging: Path) -> Path:
+        """解包后的插件根：`manifest.json` 在根上，或只在唯一的子目录里（带一层壳的包）。"""
+        if (staging / "manifest.json").is_file():
+            return staging
+        candidates = [child for child in staging.iterdir() if child.is_dir()]
+        withManifest = [d for d in candidates if (d / "manifest.json").is_file()]
+        if len(withManifest) == 1:
+            return withManifest[0]
+        raise PluginError(
+            "no_manifest", "解包后找不到唯一的插件根（含 manifest.json 的目录数=%d）：%s"
+            % (len(withManifest), staging))
+
+    def install_remote_plugin(self, url: str, expectedName: Optional[str] = None) -> PluginRecord:
+        """从**已注册源**取回一个插件包并安装（§6-390 票二乙）。
+
+        顺序是契约：白名单在取回前（`plugin_sources.fetchArchive`）→ 解包受
+        `safe_extract_zip` 的字节/条目/zip-slip 三件牙 → 核对 manifest 名字 →
+        整体挪进插件根 → 走**同一条** `install_plugin` 登记链（权限门、装时钉、根外锚、
+        状态落盘一个都不跳）。任何一步失败都清掉暂存，不在插件根留下半个包。
+        """
+        try:
+            fetched = plugin_sources.fetchArchive(self._plugin_dir, url)
+        except plugin_sources.PluginSourceError as e:
+            raise PluginError(e.reason, e.detail or str(e))
+
+        root = Path(self._plugin_dir)
+        staging = root / (".incoming_" + uuid.uuid4().hex)
+        moved = False
+        try:
+            try:
+                staging.mkdir(parents=True)
+                safe_extract_zip(
+                    fetched["bytes"], staging,
+                    maxPayloadBytes=plugin_sources.MAX_PLUGIN_ZIP_BYTES,
+                    maxEntries=plugin_sources.MAX_PLUGIN_ZIP_ENTRIES)
+            except UnsafeArchiveError as e:
+                raise PluginError(plugin_sources.REASON_ARCHIVE_UNSAFE, str(e))
+            except zipfile.BadZipFile as e:
+                raise PluginError(plugin_sources.REASON_ARCHIVE_UNSAFE, "不是合法的 zip：%s" % e)
+
+            pluginRootDir = self._findExtractedPluginRoot(staging)
+            manifest = self._load_manifest(pluginRootDir)
+            if not manifest:
+                raise PluginError("no_manifest", "远程包解出后没有可解析的 manifest")
+            name = str(manifest.get("name") or pluginRootDir.name)
+            if expectedName and name != expectedName:
+                raise PluginError(
+                    "name_mismatch",
+                    "远程包 manifest 名字 %r 与请求里的 %r 不一致——静默改名会让后续"
+                    " load/uninstall 打在另一个键上" % (name, expectedName))
+            final = root / name
+            if final.exists():
+                raise PluginError("already_installed", "插件 %r 已存在：%s" % (name, final))
+            # 解包可能多套一层：把**真正的插件根**挪到位，而不是把壳挪过去
+            shutil.move(str(pluginRootDir), str(final))
+            if pluginRootDir != staging:
+                shutil.rmtree(str(staging), ignore_errors=True)
+            moved = True
+        finally:
+            if not moved:
+                shutil.rmtree(str(staging), ignore_errors=True)
+
+        try:
+            record = self.install_plugin(final, installSource=str(url))
+        except Exception:
+            # 远程包被安装门/依赖检查/状态落盘拒掉时，**不留网络得来的字节在插件根里**：
+            # 本地目录是用户的东西（拒了也不删），远程包是我们刚搬进来的，必须撤回。
+            shutil.rmtree(str(final), ignore_errors=True)
+            raise
+        logger.info("Installed remote plugin %s from %s", record.name, url)
+        return record
 
     def discover_plugins(self) -> List[PluginRecord]:
         """
@@ -359,7 +441,7 @@ class PluginManager:
 
         return None
 
-    def install_plugin(self, plugin_source: Any) -> PluginRecord:
+    def install_plugin(self, plugin_source: Any, installSource: str = "") -> PluginRecord:
         """把插件根内的一个目录登记为已安装插件，返回它的记录。
 
         - 源必须落在插件根内（`resolveInstallSource`），远程源直接拒——
@@ -389,6 +471,7 @@ class PluginManager:
         name = manifest.get("name", plugin_path.name)
         record = PluginRecord(
             name=name,
+            installSource=str(installSource or ""),
             version=str(manifest.get("version", "1.0.0")),
             description=manifest.get("description", ""),
             author=manifest.get("author", ""),
