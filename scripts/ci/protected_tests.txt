@@ -3569,3 +3569,7 @@ tests/unit/plugins/test_pluginRemoteSources.py
 #   await 不误报、asyncio.run 包住不误报——MoE 的 `route(query_vec)` 是另一条真 async 接口）。
 # 入册前逐文件单跑两次同读数 6 passed（4.36s / 4.22s）。
 tests/integration/test_fullChainRetired.py
+# §6-394（批 E）：整档 pytest.mark.skip 的存储旧档退役（46 格收了不跑＝零覆盖），本档钉四件「不许复活」——文件与包路径、裸引用面、MemoryStorage 构造口只收 storage_dir 且死方法不得回退、替代覆盖档在场；末格是扫描器反向控制。入册前逐文件单跑两次同读数（4.75s／4.80s，5 passed）。
+tests/unit/memory/test_storageComprehensiveRetired.py
+# §6-394：旧档退役的前提是「性质仍有人守」。这份才是真 JSON 存储契约的存活档（save 回 id／get 缺失返 None／update 合并／query 三类过滤／batch／跨实例持久化／工厂单例），但它此前不在子集里——逐文件单跑两次同读数 18 passed（3.56s／3.23s），补入。
+tests/cognitive_layers/memory_layer/test_storage.py
