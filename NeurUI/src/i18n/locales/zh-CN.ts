@@ -595,6 +595,7 @@ export default {
     retrySwitched: '模型多次限流，已切换到 {model} 继续推理（第 {count}/{total} 个）',
     retryExhausted: '已自动重试并切换 {count} 个模型仍未成功',
     retryYieldWait: '并发额度让位中，{seconds} 秒后重试（第 {retry}/{max} 次）',
+    upstreamSilence: '上游已静默 {seconds} 秒，仍在等待…',
     turnParked: '本轮已挂起，等待人工续跑',
     parkedPinnedModel: '模型钉住 {pinned}，本次请求 {requested}',
     rateLimitedNotice: '模型触发限流（429），已在输入框上方提供切换建议',

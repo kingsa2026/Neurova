@@ -589,6 +589,7 @@ export default {
     retrySwitched: '한도 초과 반복으로 {model} 모델로 전환하여 계속합니다({count}/{total}번째)',
     retryExhausted: '{count}개 모델에서 자동 재시도했지만 실패했습니다',
     retryYieldWait: '동시 실행 한도로 양보 중 - {seconds}초 후 재시도({retry}/{max})',
+    upstreamSilence: '업스트림이 {seconds}초 무응답입니다. 계속 대기 중…',
     turnParked: '이 응답이 보류되었습니다. 수동 재개가 필요합니다',
     parkedPinnedModel: '고정 모델 {pinned}, 이번 요청 {requested}',
     rateLimitedNotice: '모델이 속도 제한(429)에 걸렸습니다. 입력창 위에 전환 제안을 표시했습니다',

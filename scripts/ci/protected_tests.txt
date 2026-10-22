@@ -3601,6 +3601,13 @@ tests/unit/llm/test_requestMaxTokensUsesProbedLimit.py
 # `gate_terminate` 在全仓零消费者（管道没有那一支），工具轮终止那条 return 连 done 都不发。
 # 本档钉五个命中点＋反向格（正常收口不得被追加说明）。入册前逐文件单跑全绿（13 passed）。
 tests/unit/agent/test_gateTerminationReasonReachesReply.py
+# §6-397（批 H · C）：流内静默的可见链。事故读数＝日志里 60/120/180/240s 全留过痕，
+# 前端只有转圈。判定并入 `chat_stream` 读取循环（独立看门狗只写得日志、让不出事件，
+# 两份判定并存即第二份定义），竞时只能用「不取消的 wait」——`wait_for(__anext__())`
+# 会撕裂上游流。两档分别钉客户端层与转发链（环→管道→SSE 帧映射，含 legacy 路径）。
+# 入册前逐文件单跑全绿（7 passed／7 passed）。
+tests/unit/llm/test_streamSilenceIsVisible.py
+tests/unit/agent/test_streamSilenceEventReachesEmitter.py
 # §6-398（批 I）：`MemoryManager` 事件接缝的三格预存红清零——原格读的是 §6-12 就退净的
 # 私有总线出口（`mgr.bus`／`mgr._bus.health_report()`），现改为「订共享单例、真发一次、
 # 订阅方必须收到」的行为判据＋「私有出口不得回来」的反向钉。变异自检：把生产投递口换成

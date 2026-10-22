@@ -577,6 +577,14 @@ async def chat_stream(
                     _retry = data if isinstance(data, dict) else {}
                     if _retry:
                         yield f"event: retry\ndata: {json.dumps({'type': 'retry', **_retry})}\n\n"
+                elif kind == "upstream_status":
+                    # 上游静默：结构化透传，前端按 i18n 组装（与 retry 同一族控制事件）
+                    _st = data if isinstance(data, dict) else {}
+                    if _st:
+                        yield (
+                            "event: upstream_status\n"
+                            f"data: {json.dumps({'type': 'upstream_status', **_st})}\n\n"
+                        )
 
             # 整轮结束后取 chat() 返回值：TTS audio 产物 + 兜底文本
             response = await task

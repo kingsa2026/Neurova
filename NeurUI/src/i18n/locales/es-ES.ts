@@ -589,6 +589,7 @@ export default {
     retrySwitched: 'Límites repetidos — cambiado a {model} para continuar (modelo {count}/{total})',
     retryExhausted: 'Reintentos automáticos en {count} modelos sin éxito',
     retryYieldWait: 'Cediendo por cuota de concurrencia - reintento en {seconds} s (intento {retry}/{max})',
+    upstreamSilence: 'Sin datos del upstream durante {seconds}s, se sigue esperando…',
     turnParked: 'Este turno está en pausa - se requiere reanudación manual',
     parkedPinnedModel: 'Modelo fijado {pinned}; esta solicitud {requested}',
     rateLimitedNotice: 'Modelo limitado (429); hay una sugerencia de cambio sobre el cuadro de entrada',

@@ -807,6 +807,11 @@ class OpenAILoop(BaseAgentLoop):
                         pending_tool_calls.clear()
                     yield {"type": "retry_status", "data": payload}
                     continue
+                if chunk.get("stream_status"):
+                    # 上游静默事件：环只转 typed 事件，要不要透传给前端由管道的
+                    # `emit_status_events` 门决定（与 retry_status 同律）
+                    yield {"type": "stream_status", "data": chunk["stream_status"]}
+                    continue
                 if chunk.get("error"):
                     raise self._raise_for_error_dict(chunk)
                 continue

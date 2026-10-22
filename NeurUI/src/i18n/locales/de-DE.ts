@@ -589,6 +589,7 @@ export default {
     retrySwitched: 'Wiederholte Ratelimits — umgeschaltet auf {model} zum Fortfahren (Modell {count}/{total})',
     retryExhausted: 'Automatische Wiederholungen über {count} Modelle ohne Erfolg',
     retryYieldWait: 'Ausweichen wegen Kontingent - erneuter Versuch in {seconds} s (Versuch {retry}/{max})',
+    upstreamSilence: 'Keine Daten vom Upstream seit {seconds}s – es wird weiterhin gewartet…',
     turnParked: 'Diese Antwort ist geparkt - manuelle Fortsetzung erforderlich',
     parkedPinnedModel: 'Gepinntes Modell {pinned}; diese Anfrage {requested}',
     rateLimitedNotice: 'Modell ratenbegrenzt (429); oben im Eingabebereich wird ein Wechsel vorgeschlagen',

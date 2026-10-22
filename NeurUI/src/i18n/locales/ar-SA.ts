@@ -589,6 +589,7 @@ export default {
     retrySwitched: 'تكرار تجاوز الحد — تم التحويل إلى {model} للمتابعة (النموذج {count}/{total})',
     retryExhausted: 'أُعيدت المحاولة تلقائيًا عبر {count} نماذج دون نجاح',
     retryYieldWait: 'تنزيل بسبب حيص التنفيذ المتوازي - إعادة المحاولة بعد {seconds} ثانية (المحاولة {retry}/{max})',
+    upstreamSilence: 'لا بيانات من المصدر منذ {seconds} ثانية، ما زلنا ننتظر…',
     turnParked: 'هذا الدور متوقف - يلزم استئناف يدوي',
     parkedPinnedModel: 'النموذج المثبت {pinned}؛ هذا الطلب {requested}',
     rateLimitedNotice: 'تم تقييد النموذج (429)؛ يظهر اقتراح التبديل أعلى حقل الإدخال',

@@ -195,6 +195,9 @@ class AnthropicLoop(BaseAgentLoop):
                     # "Loop 实现错误"回退 legacy，再撞同一个坏模型（时有时无的形态）
                     if chunk.get("error"):
                         raise self._raise_for_error_dict(chunk)
+                    if chunk.get("stream_status"):
+                        # 上游静默事件与 OpenAI 环同一形态转出（管道决定是否透传）
+                        yield {"type": "stream_status", "data": chunk["stream_status"]}
                     continue
                 text = getattr(chunk, "content", "") or ""
                 if text:
