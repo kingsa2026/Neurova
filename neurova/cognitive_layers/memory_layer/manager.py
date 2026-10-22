@@ -1855,6 +1855,7 @@ class MemoryManager:
         client: Any = None,
         batchRows: Optional[int] = None,
         timeoutSeconds: Optional[float] = None,
+        windowRows: Optional[int] = None,
     ) -> Dict[str, Any]:
         """丙档生成器入口：把「问过但还没线索」的记忆整轮过一遍模型。
 
@@ -1862,6 +1863,10 @@ class MemoryManager:
           用**内存里的行**组 pending（行 id 已由 `_row_to_memory` 剥过作用域前缀），
           不在这里重读 `memories` 表——那是第二份 id 语义，M-25 那套前缀规则会在这层踩坑。
         - `client is None` / 关断 / 无库：各自一个可读数，不抛错、不写库。
+        - 冷启动预算（票一·乙）：待处理面按 `temperature DESC, created_at DESC` 取舍，
+          每窗口最多 `windowRows` 行（默认 `COLD_START_WINDOW_ROWS`＝500）。稳态待处理面
+          ≈ 每轮 2 行 × 10 轮触发间隔＝20 行，永远够不到该预算 ⇒ **它不是把丙档收回去的
+          隐式上限**，只对历史首次清扫生效；被截断的行数进 `deferred` 读数，不静默。
         - 只加分不重排：新线索落库后作废向量通道索引并把词面并进倒排，
           消费口仍是批 A/C-1 那两条，不新增第三处。
         """
@@ -1878,6 +1883,7 @@ class MemoryManager:
             "skippedNoClient": 0,
             "skippedOff": 0,
             "skippedNoStore": 0,
+            "deferred": 0,
         }
         if client is None:
             readout["skippedNoClient"] = 1
@@ -1898,6 +1904,16 @@ class MemoryManager:
                 for mem in self._agent_memories()
                 if mem.id not in attempted and mem.id not in covered
             ]
+            # 冷启动预算（票一·乙）：**先按温度、再按新近取舍**，不是按插入序——
+            # 预算一旦生效，被推后的应当是最不该被记住的那批。
+            # 次键必须显式：同温度的行若只按温度排，Python 稳定排序会退回插入序，
+            # 「按新近优先」就成了注释里的愿望。
+            window = int(windowRows or cueGen.COLD_START_WINDOW_ROWS)
+            pending.sort(key=lambda m: (float(m.temperature), str(m.created_at or ""), m.id),
+                         reverse=True)
+            deferred = max(0, len(pending) - window)
+            pending = pending[:window]
+            readout["deferred"] = deferred
             pendingRows = [
                 {
                     "index": index,
@@ -1947,6 +1963,10 @@ class MemoryManager:
         result.update(
             {key: readout[key] for key in ("skippedNoClient", "skippedOff", "skippedNoStore")}
         )
+        # 返回的是 runGeneration 那份字典——`deferred` 只写在 `readout` 里就等于没交出去
+        # （预算生效了但外部看不见，正是「顺延静默」的实现形态）。
+        result["deferred"] = deferred
+        readout["deferred"] = deferred
 
         # 词面并进既有倒排（与批 A 同一消费口）+ 作废向量通道整片索引
         for memoryId in writtenIds:
@@ -1985,6 +2005,18 @@ class MemoryManager:
         if not self._cueTextsByMemory and self._associationCues is not None:
             self._loadAssociationCueIndex()
         return self._cueTextsByMemory
+
+    def associationCueAttemptedFor(self, memory_id: str) -> bool:
+        """这一行是否已被问过模型（读 v5 尝试账）。
+
+        「问过」包含模型正当拒答（`cues_written=0`）——运维排查「这行为什么没线索」时，
+        `attempted 且 cues_written=0` 与 `从未 attempted` 是两种完全不同的形状，
+        混为一谈就会把「被截断推后」误读成「生成器坏了」。
+        """
+        store = self._associationCues
+        if store is None or not memory_id:
+            return False
+        return memory_id in store.attemptedMemoryIds()
 
     def associationCueStats(self) -> Dict[str, int]:
         store = self._associationCues
