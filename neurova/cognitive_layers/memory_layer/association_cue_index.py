@@ -61,6 +61,14 @@ def cueChannelEnabled() -> bool:
     return value not in ("off", "0", "false", "disabled")
 
 
+#: 一条线索（`norm_key`）最多允许挂多少条记忆还留在通道里。**门槛由检索预算推出，不是拍的**：
+#: 通道一次最多注入 `limit` 条候选（chat 路 limit=10），扇出超过它的同一条线索
+#: 已经不可能提供任何区分度——它只能把一堆并列同分的候选一起灌满，
+#: 而 C-1 标定实测到的正是这种形态（目标线索余弦 0.465–0.612，他记忆线索可达 0.687）。
+#: 注意这是**由预算推出的上界**，不是按真机线索分布标定出的最优值：被挡条数计入
+#: `droppedByFanout`，等接上真模型跑出分布后再回来重定（与门限 0.85→0.45 同一处置法）。
+CUE_FANOUT_CAP = 10
+
 class CueVectorChannel:
     """按作用域装载的线索向量索引 + 每次查询的门限匹配与计数。
 
@@ -89,6 +97,9 @@ class CueVectorChannel:
             "skippedNoEngine": 0,
             "skippedEmpty": 0,
             "indexed": 0,
+            # 扇出门的挡下条数（C-3）。初值必须在这里给，不能等 `_build` 才出现——
+            # 「读数只在事后存在」会让运维看不出「没建索引」与「建了但全被挡」的区别。
+            "droppedByFanout": 0,
         }
 
     def invalidate(self) -> None:
@@ -105,9 +116,24 @@ class CueVectorChannel:
         import numpy as np
 
         rows = self._cueRowsGetter(self._maxEntries)
+        # 扇出门：同一条线索挂住的记忆数超过一次检索能区分的上限 ⇒ 整条不参与通道。
+        # 这是 C-3 从写入侧搬过来的那一刀——旧实现用「批内去重」近似它，于是
+        # 去重窗口＝批大小（同一条线索整批留 1 条、逐行留 N 条），N 兼任了质量参数。
+        # 计数取自被 `maxEntries` 截断后的集合，故大库下只会**低估**扇出（门更松），
+        # 不会误伤：宁可少挡，不可挡错正当共享。
+        fanout: Dict[str, set] = {}
+        for row in rows:
+            key = row.get("norm_key") or row.get("cue_text", "")
+            fanout.setdefault(key, set()).add(row.get("memory_id", ""))
+
         vectors: List[Any] = []
         memoryIds: List[str] = []
+        blocked = 0
         for row in rows:
+            key = row.get("norm_key") or row.get("cue_text", "")
+            if len(fanout.get(key, ())) > CUE_FANOUT_CAP:
+                blocked += 1
+                continue
             vector = self._encodeOne(row.get("cue_text", ""))
             if not vector:
                 continue
@@ -120,6 +146,7 @@ class CueVectorChannel:
         self._memoryIds = memoryIds
         self._built = True
         self._stats["indexed"] = len(memoryIds)
+        self._stats["droppedByFanout"] = blocked
 
     def candidateMemoryIds(self) -> List[str]:
         """当前索引里出现过的记忆 id（去重、按索引顺序）——作用域门的可观测出口。"""
