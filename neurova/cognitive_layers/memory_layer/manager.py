@@ -1432,6 +1432,9 @@ class MemoryManager:
         旧键由调用方在改动**前**取好（O(1) 归一化），避免为找旧键扫全索引——
         睡眠整合会成批改写内容。只做跟随不做合并：把某行改成与另一行同键时，
         不得顺手删掉任何一行（那是把"改一条记忆"放大成"丢一条记忆"）。
+
+        本方法只管**去重门**。live 行的内容变更一律走 `_applyContentChange()`，
+        它才是三条读路（关键词倒排 / 召回向量库 / 持久层 embedding）的跟随点。
         """
         self._ensure_content_index()
         if old_key is not None and self._content_index.get(old_key) == mem.id:
@@ -1439,6 +1442,58 @@ class MemoryManager:
         key = self._content_gate_key(mem)
         if key is not None:
             self._content_index[key] = mem.id
+
+    def _applyContentChange(self, mem: Memory, newContent: str) -> None:
+        """live 记忆内容变更的唯一入口：改行 + 重算向量 + 跟随全部检索面。
+
+        根因（本批抓到，判据见
+        `tests/performance/memory/test_longTermMemoryBaselineGate.py`）：
+        `update_memory` 与语义压缩写回此前各写各的 `mem.content`，两处都只落行与
+        持久层，检索面一根都不跟——
+        1. 关键词倒排停在旧词面：`semantic_search.upsert_memory_index()` 的 docstring
+           明写着为"content 变更场景"设计（先 remove 再 insert），但全仓没有任何内容
+           变更路径调用它，于是旧问法照样命中、新问法只靠"整句查询子串"兜底；
+        2. 召回向量库永久留旧向量：`_semantic_recall` 每查询调
+           `store.index_memories(..., incremental=True)`，而该方法按 id 去重跳过既有
+           id（`register_runtime_vector_store` 的 docstring 自己写着这条限制），
+           所以必须先把该 id 从库里摘掉，下一次查询才会按新内容重编；
+        3. 持久层 `embedding` 列不重算：睡眠固化按旧向量合簇，读数上是"有向量、
+           只是不相似"，缺陷从此不可见（教义第 2 条）；
+        4. 线索表里该记忆的**规则线索与模型线索**都是旧内容的产物，留着就是拿
+           旧文本的抽象替新文本作召回依据；连同"已问过模型"的封条一起撤掉，
+           让该行重新进待生成池。
+
+        新向量算不出时 `mem.embedding` 置空而非沿用旧值：留旧向量是第二个
+        "看上去有、其实是错的"状态；置空后合簇侧按「任一侧无嵌入不合」自然跳过它。
+        """
+        mem.content = newContent
+        mem.embedding = self._embeddingForNewRow(newContent)
+        self._persist_memory(mem)
+
+        store = self._associationCues
+        if store is not None:
+            store.purgeForMemory(mem.id)
+            store.dropAttempt(mem.id)
+        self.invalidateAssociationCueIndex()
+        self._attachRuleAssociationCues(mem)
+        # 线索为 0 时上一步不 upsert 倒排，这里无条件跟一次（内部先 remove 再 insert）
+        self._indexMemoryWithCues(mem)
+
+        self._dropFromRecallVectorStores(mem.id)
+        self._sync_runtime_vector_store(memory_id=mem.id)
+        self._sync_runtime_vector_store(mem)
+
+    def _dropFromRecallVectorStores(self, memoryId: str) -> None:
+        """从按隔离键缓存的召回向量库里摘掉该条，令下一次查询按新内容重编。
+
+        遍历全部已缓存作用域：`agent_wide=True` 是管理页口径，可以改到他人
+        neuser/user 的行，只按调用现场三元组摘一个库会漏掉真正持有它的那个。
+        """
+        for store in getattr(self, "_vector_stores", {}).values():
+            try:
+                store.remove_documents(lambda indexed_id: indexed_id == memoryId)
+            except Exception:  # noqa: BLE001 - 摘除失败由下一次全量重建收敛
+                logger.debug("召回向量库摘除失败: %s", memoryId, exc_info=True)
 
     def _embeddingForNewRow(self, content: str) -> Optional[List[float]]:
         """新行的向量在建行这一处算出来——该列的生产者从此不止一次性回填脚本一个。
@@ -2623,7 +2678,8 @@ class MemoryManager:
 
                 mem = deepcopy(mem)
             if "content" in kwargs:
-                mem.content = kwargs["content"]
+                # 内容变更走唯一入口：行 + 持久层 + 倒排 + 召回向量库 + 线索一起跟
+                self._applyContentChange(mem, str(kwargs["content"] or ""))
             if "temperature" in kwargs:
                 mem.temperature = kwargs["temperature"]
             if "importance" in kwargs:
@@ -4571,8 +4627,7 @@ class MemoryManager:
                     continue
                 merged_content = g.get("merged_content") or g.get("keep_content")
                 if merged_content:
-                    keep.content = str(merged_content)
-                    self._persist_memory(keep)
+                    self._applyContentChange(keep, str(merged_content))
                 for mid in g.get("member_ids", []):
                     if mid != keep_id and mid in self._memories:
                         self.forget(mid)
