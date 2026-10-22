@@ -58,7 +58,7 @@ export interface ChatMessage {
    * reset 时半截回复已清空。流式恢复（content/reasoning/done/error）即清除。
    */
   retryNotice?: {
-    phase: 'waiting' | 'switched' | 'exhausted' | 'yield_wait'
+    phase: 'waiting' | 'switched' | 'exhausted' | 'yield_wait' | 'silence'
     retry?: number
     maxRetries?: number
     /** waiting 时的总等待秒数（前端按 receivedAt 本地倒数） */
@@ -67,6 +67,8 @@ export interface ChatMessage {
     failCount?: number
     maxSwitches?: number
     model?: string
+    /** silence 时上游已静默的秒数（由后端报告，前端不自推） */
+    silentSeconds?: number
   }
   /**
    * 让位闸等不到额度、本轮已挂起等人工续跑（P2-8）。SSE `parked` 事件写入；

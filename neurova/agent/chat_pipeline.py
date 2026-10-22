@@ -2485,6 +2485,18 @@ class ChatPipeline:
                         emitter("retry", _retry_data)
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 retry 失败: %s", e)
+            elif etype == "stream_status":
+                # 上游静默事件（网关长时间零字节）：同一道 emit_status_events 门。
+                # 不可见就是事故的体感——日志里 60/120/180/240s 全留过痕，前端只有转圈。
+                if (
+                    emitter is not None
+                    and isinstance(ctx.metadata, dict)
+                    and ctx.metadata.get("emit_status_events")
+                ):
+                    try:
+                        emitter("upstream_status", event.get("data") or {})
+                    except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
+                        logger.debug("event_emitter 转发 upstream_status 失败: %s", e)
             elif etype == "gate_terminate":
                 # 门控终止的**唯一消费点**：记下原因，收尾时并入正文。
                 # 改前这个事件在全仓零读者——环侧写了、管道不认，于是"恰好一个 done"
@@ -2772,6 +2784,18 @@ class ChatPipeline:
                     continue
                 if chunk.get("error"):
                     raise self._raise_for_llm_error_dict(chunk)
+                if chunk.get("stream_status"):
+                    # 静默可见性不分路径：legacy 是 claude/弱模型的实际主路，
+                    # 只在这条路上哑掉就等于"换模型的人永远看不到上游静默"
+                    if (
+                        emitter is not None
+                        and isinstance(ctx.metadata, dict)
+                        and ctx.metadata.get("emit_status_events")
+                    ):
+                        try:
+                            emitter("upstream_status", chunk["stream_status"])
+                        except Exception as e:  # noqa: BLE001 - 转发失败不影响主流程
+                            logger.debug("legacy 转发 upstream_status 失败: %s", e)
                 continue
             content = getattr(chunk, "content", "") or ""
             if content:

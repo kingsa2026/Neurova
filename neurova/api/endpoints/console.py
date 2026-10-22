@@ -349,6 +349,10 @@ def _sse_events_from_emitter_item(
             # 前端 i18n 组装文案
             payload = data if isinstance(data, dict) else {}
             return [{"type": "retry", **payload}] if payload else []
+        if kind == "upstream_status":
+            # 上游静默（网关长时间零字节）：同族控制事件，直接透传结构化 payload
+            payload = data if isinstance(data, dict) else {}
+            return [{"type": "upstream_status", **payload}] if payload else []
         if kind == "usage":
             # P2-6：run_chat 同任务内读取的本调用真实 usage，直接透传
             payload = data if isinstance(data, dict) else {}

@@ -1052,11 +1052,60 @@ class MultiModelLLMClient:
                     "content_chars": 0,
                     "read_timeout": getattr(getattr(client.client, "config", None), "timeout", "?"),
                 }
-                _silence_task = asyncio.create_task(
-                    _warn_stream_silence(client.provider.id, client.model, _stream_state)
-                )
+                # 流内静默判定**并入读取循环**（原独立看门狗 `_warn_stream_silence` 只会
+                # 写日志、让不出事件 ⇒ 用户侧只剩转圈；两份判定迟早漂移成"某条路径的
+                # 静默不可见"，教义第 7 条）。竞时用「不取消的 wait」：`wait_for(__anext__())`
+                # 超时会取消那次读取、撕裂 httpx 流——健康长思考会被系统性打断。
+                _source = client.client.chat_stream_async(messages, **kwargs)
+                _iterator = _source.__aiter__()
+                _pending = None
                 try:
-                    async for chunk in client.client.chat_stream_async(messages, **kwargs):
+                    while True:
+                        if _pending is None:
+                            _pending = asyncio.ensure_future(_iterator.__anext__())
+                        _remaining = _STREAM_SILENCE_WARN_SECONDS - (
+                            time.time() - _stream_state["last_chunk_at"]
+                        )
+                        _done, _ = await asyncio.wait(
+                            {_pending},
+                            timeout=_STREAM_SILENCE_WARN_SECONDS if _remaining <= 0 else _remaining,
+                        )
+                        if not _done:
+                            _silentFor = time.time() - _stream_state["last_chunk_at"]
+                            if (
+                                _silentFor - _stream_state["warned_at"]
+                                >= _STREAM_SILENCE_WARN_SECONDS
+                            ):
+                                _stream_state["warned_at"] = _silentFor
+                                logger.warning(
+                                    "[STREAM_SILENCE] %s/%s 流内已静默 %.0fs（已收 reasoning %s 字 / "
+                                    "content %s 字，读超时 %ss）——思考模型长静默或上游停滞",
+                                    client.provider.id,
+                                    client.model,
+                                    _silentFor,
+                                    _stream_state["reasoning_chars"],
+                                    _stream_state["content_chars"],
+                                    _stream_state["read_timeout"],
+                                )
+                                # 同一份事实的用户可见面：与 retry_status 同族形状，
+                                # 由环转 typed 事件、管道按 emit_status_events 转发
+                                yield {
+                                    "stream_status": {
+                                        "phase": "silence",
+                                        "provider": client.provider.id,
+                                        "model": client.model,
+                                        "silent_seconds": round(_silentFor, 1),
+                                        "reasoning_chars": _stream_state["reasoning_chars"],
+                                        "content_chars": _stream_state["content_chars"],
+                                        "read_timeout": _stream_state["read_timeout"],
+                                    }
+                                }
+                            continue
+                        try:
+                            chunk = _pending.result()
+                        except StopAsyncIteration:
+                            break
+                        _pending = None
                         _stream_state["last_chunk_at"] = time.time()
                         _stream_state["warned_at"] = 0.0
                         if first_token_ms == 0:
@@ -1089,11 +1138,21 @@ class MultiModelLLMClient:
                         yielded_any = True
                         yield chunk
                 finally:
-                    _silence_task.cancel()
-                    try:
-                        await _silence_task
-                    except BaseException:  # noqa: BLE001 — 取消收尾，遥测异常不外泄
-                        pass
+                    # 收尾三件，缺一件就会把 open 的上游流与 pending task 留给后面的
+                    # 用例——合进程跑测时表现为"别档 teardown ERROR"，归因极难。
+                    # `async for` 时代靠引用计数隐式做到，换成显式迭代器后必须自己写。
+                    if _pending is not None and not _pending.done():
+                        _pending.cancel()
+                        try:
+                            await _pending
+                        except BaseException:  # noqa: BLE001 — 取消收尾，异常不外泄
+                            pass
+                    _aclose = getattr(_source, "aclose", None)
+                    if _aclose is not None:
+                        try:
+                            await _aclose()
+                        except Exception:  # noqa: BLE001 - 关闭失败不掩盖主异常
+                            logger.debug("上游流关闭失败（收尾）", exc_info=True)
                     # RES-P0-1 根修：并发槽位随流式段收尾归一释放。本 finally 覆盖
                     # 成功/异常/消费方中断（GeneratorExit）/取消全部退出路径；
                     # except 分支的兜底 release 由 acquired 守卫防双释放。
@@ -1505,42 +1564,10 @@ def _instream_error_dict(error: Exception) -> Dict[str, Any]:
     }
 
 
-# 流内静默看门狗阈值（秒）：静默跨过阈值即留 WARNING，此后每再静默一个阈值再报
+# 流内静默阈值（秒）：判定已并入 `chat_stream` 的读取循环（那里既能留 WARNING，
+# 也能让出 `stream_status` 事件供前端可见）。独立看门狗协程只写得日志、让不出事件，
+# 两份判定并存迟早漂移成"某条路径的静默不可见"（教义第 7 条）。
 _STREAM_SILENCE_WARN_SECONDS = 60
-_STREAM_SILENCE_POLL_SECONDS = 10
-
-
-async def _warn_stream_silence(provider_id: str, model: str, state: Dict[str, Any]) -> None:
-    """流内静默看门狗（2026-09-10 流中断事故遥测）。
-
-    ReadTimeout 只知"窗口内零字节"，无法区分"思考模型经缓冲型网关的健康
-    长静默"与"上游停滞死流"——看门狗按阈值为周期留痕（provider/模型/
-    静默时长/已收 reasoning 与 content 字数/读超时窗口），事故判读与
-    读超时调参都有据可依。遥测职责，绝不抛异常干扰主流程。
-    """
-    try:
-        while True:
-            await asyncio.sleep(_STREAM_SILENCE_POLL_SECONDS)
-            silent = time.time() - state["last_chunk_at"]
-            if silent < _STREAM_SILENCE_WARN_SECONDS:
-                continue
-            if silent - state.get("warned_at", 0.0) < _STREAM_SILENCE_WARN_SECONDS:
-                continue
-            state["warned_at"] = silent
-            logger.warning(
-                "[STREAM_SILENCE] %s/%s 流内已静默 %.0fs（已收 reasoning %s 字 / content %s 字，读超时 %ss）"
-                "——思考模型长静默或上游停滞",
-                provider_id,
-                model,
-                silent,
-                state["reasoning_chars"],
-                state["content_chars"],
-                state["read_timeout"],
-            )
-    except asyncio.CancelledError:
-        return
-    except Exception:  # noqa: BLE001 — 遥测绝不干扰主流程
-        logger.debug("流内静默看门狗退出", exc_info=True)
 
 
 def _mock_enabled() -> bool:
