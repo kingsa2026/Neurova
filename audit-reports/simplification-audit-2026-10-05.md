@@ -9858,3 +9858,43 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **未闭环**：① C-3 未开工；② N 的真值等 ③（要真端点）；③ 冷启动票（§6-385 那张）仍等人裁；
       ④ 批 B、C-1b、绝对验收线与跑序根因照旧。
     - **本会话下一枚空号现查 §6-387**（写前必须现场重取；本笔落库时该读数为 386）。
+
+387. **票三甲落地：构件闸接到注册表那条执行腿上——市场装的技能被改一个字节就得拒（✅ `04dbe9b9`，12 格入子集）** 🟢 —— §6-383 的三票里最先收的一张（用户 2026-10-22 拍甲）。
+    - **缺口形状来自活体、不是推测**：同一本账两条执行腿，`call_skill` 过闸、注册表那条
+      （`SkillDocSkill.execute`，LLM 真正会走的那条）把被篡改的 `SKILL.md` 指令体照原样交给模型、
+      `artifact_digest.checkArtifact` **被调 0 次**（`d56a90a0` 的 15 读数，其中 [9][10] 就是这一枚）。
+    - **落点**：`SkillDocSkill` 收 `pinnedDigest`/`onPin`，`execute` 在**读 SKILL.md 之前**对账；
+      不符/目录没了 ⇒ `SkillResult(success=False)`，`error` 取 `artifact_digest.refusalReason(status)`
+      的标识（不在执行腿拼第二套文案），**指令体一个字节都不进回执**；没钉过 ⇒ 与 `call_skill`
+      同口径 TOFU：有 `onPin` 现算现钉、本实例随即以那枚值为口径，无回调则拒新常量
+      `artifact_digest_unpinned`。写口只开一个：`SkillService.pinArtifactDigest`
+      （原子落 `manifest.json`、不在册拒造条目、落盘失败回滚内存）。
+    - **`None` 那个默认值不是旁路，是被守卫按形状钉住的**：`pinnedDigest=None` 只留给"直接构造做
+      单元实验"的口径；生产构造点（link 与冷启动 restore）必须传字符串，判据按 AST 扫**整个
+      `neurova/`** 的所有 `_build_executable_skill` 调用点，漏传即红，并配一格变异对照证明探测器
+      抓得住"没传"。映射型执行体不读盘上字节，另有一格钉它不被这道闸扫到。
+    - **判据 12 格（入子集）**：clean 照常回指令体／篡改拒且不外泄／缺目录报 `artifact_missing`／
+      每次 execute **恰查一次**／首钉经回调且首钉后同实例即受闸／无回调拒 `unpinned`／
+      `None` 口径明写保留／映射型不扫／全仓构造点都传 pin（含对照）／落账可跨实例读回、
+      不认识的技能拒造条目。入册前单跑两次同读数 12 passed（8.77s／8.61s）。
+    - **红→绿（如实分两类）**：12 格先打在未接闸的生产码上 **9 failed / 3 passed**；其中多数是
+      "新参/新常量/新方法尚不存在"的**形状红**（新增能力批的正常形态），**真正的行为红由活体承担**
+      （修复前 0 次检查 + 篡改外泄）；3 格是两枚对照与 `None` 口径，本就该两侧绿。红自证＝只退
+      三件生产面 ⇒ 恰那 9 格翻红，pop 后 numstat 逐条回到 6/1、72/5、27/0。
+    - **活体翻成回归面**：`tests/manual/marketTicketThreeDigestPath.py` 的 [9]-[12] 从"缺口证据"改成
+      "闸已接上"（篡改后注册表腿必须同样拒、`checkArtifact` **恰 1 次**、两条腿拒因同一标识），
+      **16 读数全 PASS／exit 0**；[5][6] 继续钉"安装侧钉值与运行时目录同源"。
+    - **净 LOC**：生产池 **+105/−6**；判据池 **+247/−12**；基建池 **+16/−0**。
+    - **两笔过程账（都是本会话自己的）**：① **号被占**——原拟 §6-386，落笔前现查发现已被并会话的
+      「批量 N 扫描」占走 ⇒ 改 **387**（`protected_tests.txt` 注释同步改）；同一天第三次撞这形态。
+      ② **整档换行尾**——改那行注释时用 `Path.write_text` 落回，把 `protected_tests.txt` 从 CRLF
+      整档转成裸 LF（3517 行），当场按 CRLF 复原并核计数（3517 CRLF／裸 LF 0）。形态集 365 的
+      二次踩，教训照旧：这类档一律 `write_bytes`／`newline=''`。
+    - **仍开两条（写明不糊）**：① **存量清单没出**——哪些已装条目在账本里没有摘要（会被首钉一次），
+      要看各 agent 的 `manifest.json` 逐条数，本批没做；② `pinnedDigest=None` 的"不由闸管"口径
+      仍在，靠 AST 守卫兜住而不是靠自觉——将来若有人为了"兼容"把生产构造点改回默认值，那一格会红，
+      但红的是守卫，不是运行时行为。
+    - **同族不认领的两笔红**（`tests/unit/skills` 全族 1210 passed 之外）：`test_skillsFacadeAndSourceEnumAreSingleSourced`
+      命中 `NeurUI/src-tauri/{resources,target/release}/backend/neurova/skills/models.py` 两份**未跟踪的
+      本地构建副本**（tauri 产物，`git log` 对它们 0 笔）；`test_ekb_content_gate` 那格整族跑以 ERROR
+      出现、**单跑通过**（顺序/夹具相关，预存）。两条都不含本笔路径。
