@@ -372,6 +372,17 @@ class SkillService:
             )
         return claimed
 
+    def _recordArtifactAnchor(self, skillId: str, digestHex: str) -> None:
+        """把同一枚摘要另存到根外锚（§6-388）。写不成只出声，不回滚账本——
+
+        账本那份仍然是权威；锚缺只意味着"数据根整体回滚"这一形态对它不生效，
+        不能因为锚写失败就把一条已经落了账的技能判成未安装。
+        """
+        key = artifact_digest.artifactKey("skill", skillId)
+        if not artifact_digest.recordAnchor(key, digestHex):
+            self._logger.error(
+                "技能 %s 的根外锚没写成（账本已钉、锚缺）：整库回滚检测对它不成立", skillId)
+
     def pinArtifactDigest(self, skill_id: str, digestHex: str) -> bool:
         """把执行腿首钉的摘要写回账本（§6-383 票三甲的唯一写口）。
 
@@ -391,6 +402,7 @@ class SkillService:
             previous = entry.get(artifact_digest.DIGEST_FIELD)
             entry[artifact_digest.DIGEST_FIELD] = str(digestHex)
             if self._save_manifest():
+                self._recordArtifactAnchor(skill_id, str(digestHex))
                 return True
             # 落盘失败回滚内存，与 §6-145 那条"内存改了、告诉用户已保存"同族
             if previous is None:
@@ -772,8 +784,9 @@ class SkillService:
                     # 那份摘要不代表任何构件，却会把日后补进同一目录的真字节判成篡改——修 call 侧只是
                     # 止血，装侧才是生产那种非法账本的地方。
                     if self._hasArtifactBytes(target_dir):
-                        self._skills[skill_id][artifact_digest.DIGEST_FIELD] = \
-                            artifact_digest.digestDir(target_dir)
+                        _digest = artifact_digest.digestDir(target_dir)
+                        self._skills[skill_id][artifact_digest.DIGEST_FIELD] = _digest
+                        self._recordArtifactAnchor(skill_id, _digest)
                     for _keep in ("usage", "identity", "version_history"):
                         if _keep in _prev:
                             self._skills[skill_id][_keep] = _prev[_keep]
@@ -846,8 +859,9 @@ class SkillService:
                     # 到本账本的正是那份字节，钉在这里而不是 hub_client 里（hub 侧没有账本，摘要落到
                     # 账本唯一写侧才不留第二份读法）。与本地安装口共用同一条判据：**没有构件就不钉**。
                     if self._hasArtifactBytes(hub_client._installed_dir / name):
-                        self._skills[name][artifact_digest.DIGEST_FIELD] = \
-                            artifact_digest.digestDir(hub_client._installed_dir / name)
+                        _digest = artifact_digest.digestDir(hub_client._installed_dir / name)
+                        self._skills[name][artifact_digest.DIGEST_FIELD] = _digest
+                        self._recordArtifactAnchor(name, _digest)
                     self._save_manifest()
                 self._logger.info("Installed skill from URL: %s (skill_id=%s)", url, name)
                 return {"success": True, "skill_id": name}
@@ -2039,7 +2053,8 @@ class SkillService:
                 # 确有可执行构件时**——见下面空壳那一支；钉过却不符 ⇒ 结构化拒因，绝不"照样跑"。
                 entry_file = self._resolveEntryPoint(skill_path)
                 digestStatus, digestNow = artifact_digest.checkArtifact(
-                    skill_path, skill_info.get(artifact_digest.DIGEST_FIELD))
+                    skill_path, skill_info.get(artifact_digest.DIGEST_FIELD),
+                    anchorKey=artifact_digest.artifactKey("skill", skill_id))
                 if digestStatus == artifact_digest.STATUS_UNPINNED:
                     if entry_file is None:
                         # 空壳不首钉、也不落账：把"眼前这份什么都没有"钉成权威，日后真把字节补进

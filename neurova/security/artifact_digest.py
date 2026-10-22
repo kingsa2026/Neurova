@@ -35,9 +35,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
-from typing import Iterator, Tuple
+from typing import Callable, Dict, Iterator, Optional, Tuple
+
+from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 #: 摘要算法的**唯一**声明处；前缀由它派生，比较时也核对前缀（换算法不会静默通过）。
 DIGEST_ALGORITHM = "sha256"
@@ -163,19 +169,104 @@ STATUS_MISMATCH = "mismatch"
 STATUS_MISSING = "missing"
 
 
-def checkArtifact(root, pinnedValue) -> Tuple[str, str]:
+def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[str, str]:
     """构件现状与账本钉值的一致性读数：返回 (状态, 本次摘要)。
 
     状态四值里 `unpinned`（没钉过）与 `mismatch`（钉过却不符）**必须分开**：
     前者走 TOFU 首钉，后者是拒绝。把它们混成一格，要么存量全被挡在门外，
     要么换包永远看不见。
+
+    `anchorKey`（§6-388，票一甲①）：账本相符之后再看根外锚。锚**不是**防同权限攻击的
+    （攻击者若同时改锚就失效），它防的是**整库替换/回滚**与"改完构件再把账本重钉一次"
+    ——后者是本模块同根同权限那条边界的直接后果。锚里没有这个键 ⇒ 维持只读账本的旧读数
+    （`unpinned` 的 TOFU 语义不变），是否要补锚由调用方决定，这里不悄悄写。
     """
     if not Path(root).exists():
         return STATUS_MISSING, ""
     actual = digestDir(root)
     if not isPinned(pinnedValue):
         return STATUS_UNPINNED, actual
-    return (STATUS_MATCH if digestMatches(pinnedValue, actual) else STATUS_MISMATCH), actual
+    if not digestMatches(pinnedValue, actual):
+        return STATUS_MISMATCH, actual
+    if anchorKey:
+        anchorStatus = checkAnchor(anchorKey, actual)
+        if anchorStatus == STATUS_MISMATCH:
+            logger.error("构件 %s 与根外锚不符（账本相符、锚不符）——按篡改处置", anchorKey)
+            return STATUS_MISMATCH, actual
+    return STATUS_MATCH, actual
+
+
+# ── 根外锚（§6-388，用户 2026-10-22 拍「甲①＋乙」）────────────────────────────
+#: 锚文件落点：**数据根之外**（`~/.neurova/`）。这是本仓第一处**新写**在数据根之外的状态，
+#: 理由只有一个：它要对"整个数据根被替换/回滚"敏感，所以不能跟数据根同生共死
+#: （审计库当年是反方向——从 `~/.neurova/audit.db` 收养**进**数据根，别把两件事读混）。
+#: 它**不**防同权限攻击：能改构件与账本的人通常也能改这里；能挡住的是"只改了数据根"的那些
+#: 操作（整库恢复、快照回滚、只重钉账本的重装）。边界必须与能力一起写，不许只吹能力。
+ANCHOR_FILE_NAME = "artifact_anchors.json"
+ANCHOR_STORE_VERSION = 1
+#: 通道词汇唯一闭集：账本里两条通道（技能/插件）共用锚文件，键必须带通道前缀，
+#: 否则同名条目会互相覆盖（"两份存放、一个键名"是这一族最省事的坑）。
+ANCHOR_CHANNELS = ("skill", "plugin")
+
+
+def artifactKey(channel: str, artifactId: str) -> str:
+    """锚键的唯一拼法：`<channel>:<id>`。"""
+    if channel not in ANCHOR_CHANNELS:
+        raise ValueError("未知构件通道：%r（合法值 %s）" % (channel, ANCHOR_CHANNELS))
+    if not str(artifactId or "").strip():
+        raise ValueError("构件 id 为空，拒绝为一个匿名构件落锚")
+    return "%s:%s" % (channel, artifactId)
+
+
+def anchorPath() -> Path:
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
+    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+
+
+def readAnchors() -> Dict[str, str]:
+    """读锚文件；坏文件改名隔离并**响亮**报（不把"读不懂"读成"没钉过"）。"""
+    path = anchorPath()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        quarantined = quarantine_corrupt_file(path)
+        logger.error("根外锚文件无法解析，已隔离现场 %s：%s（本轮按空锚起，不覆盖原文件）",
+                     quarantined, e)
+        return {}
+    if not isinstance(data, dict) or data.get("version") != ANCHOR_STORE_VERSION:
+        quarantined = quarantine_corrupt_file(path)
+        logger.error("根外锚文件版本不认识（现值 %r，期望 %r），已隔离 %s——不做自动映射",
+                     data.get("version") if isinstance(data, dict) else "<非映射>",
+                     ANCHOR_STORE_VERSION, quarantined)
+        return {}
+    anchors = data.get("anchors")
+    if not isinstance(anchors, dict):
+        return {}
+    return {str(k): str(v) for k, v in anchors.items()}
+
+
+def recordAnchor(anchorKeyValue: str, digestValue: str) -> bool:
+    """把一枚摘要写进根外锚；失败回 False（调用方必须出声，不许当成已落锚）。"""
+    anchors = readAnchors()
+    anchors[anchorKeyValue] = str(digestValue)
+    payload = {"version": ANCHOR_STORE_VERSION, "anchors": anchors}
+    try:
+        anchorPath().parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(anchorPath(), json.dumps(payload, ensure_ascii=False, indent=2))
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error("根外锚写入失败（%s）：%s", anchorKeyValue, e)
+        return False
+
+
+def checkAnchor(anchorKeyValue: str, actual: str) -> str:
+    """锚侧读数：match / unpinned（锚里没有这条）/ mismatch。"""
+    pinned = readAnchors().get(anchorKeyValue)
+    if not isPinned(pinned):
+        return STATUS_UNPINNED
+    return STATUS_MATCH if digestMatches(pinned, actual) else STATUS_MISMATCH
 
 
 def refusalReason(status: str) -> str:

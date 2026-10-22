@@ -415,6 +415,12 @@ class PluginManager:
         # 构件完整性钉（§6-172 批 31）：过了能力门的这份字节留一次底。
         # 门证明的是"当时声明合法"，装载前比对证明的才是"跑的还是那份"。
         record.artifactDigest = artifact_digest.digestDir(plugin_path)
+        # 根外锚（§6-388）：同一枚值另存一份到数据根之外，用于发现"整库回滚/只重钉账本"
+        # 那一类改动；写不成只出声，不回滚登记（账本那份仍是权威）。
+        if not artifact_digest.recordAnchor(
+                artifact_digest.artifactKey("plugin", record.name), record.artifactDigest):
+            logger.error("插件 %s 的根外锚没写成（账本已钉、锚缺）：整库回滚检测对它不成立",
+                         record.name)
 
         self._plugins[name] = record
         self._manifests[name] = manifest
@@ -516,7 +522,8 @@ class PluginManager:
         # `except Exception: return None` 会把这条 raise 折成 `entry_not_loaded`，
         # 即"内层正确的拒绝被外层兜底吞成另一种成因"（本卷记过那形）。
         digestStatus, digestNow = artifact_digest.checkArtifact(
-            record.path, record.artifactDigest)
+            record.path, record.artifactDigest,
+            anchorKey=artifact_digest.artifactKey("plugin", record.name))
         if digestStatus == artifact_digest.STATUS_UNPINNED:
             if not (Path(record.path) / record.entry_point).exists():
                 # 空壳不首钉、不落账：登记里没摘要、盘上又连入口都没有，把这份状态钉成权威，

@@ -223,7 +223,9 @@ class SkillDocSkill:
         """读 SKILL.md **之前**对账（§6-383 票三甲）。返回拒因标识或 None。"""
         if self._pinnedDigest is None:
             return None
-        status, actual = artifact_digest.checkArtifact(self._skillDir, self._pinnedDigest)
+        status, actual = artifact_digest.checkArtifact(
+            self._skillDir, self._pinnedDigest,
+            anchorKey=artifact_digest.artifactKey("skill", self.name))
         if status == artifact_digest.STATUS_UNPINNED:
             if self._onPin is None:
                 # 没有落账口就不许放行：那会把"没钉"洗成"钉过且相符"
