@@ -101,9 +101,9 @@ class TestTheGateIsOnTheRegistryLeg:
         calls = []
         real = artifact_digest.checkArtifact
 
-        def counting(root, pinnedValue):
+        def counting(root, pinnedValue, **kwargs):
             calls.append(str(root))
-            return real(root, pinnedValue)
+            return real(root, pinnedValue, **kwargs)
 
         monkeypatch.setattr(artifact_digest, "checkArtifact", counting)
 
