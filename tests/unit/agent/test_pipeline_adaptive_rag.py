@@ -21,6 +21,7 @@ from neurova.agent.memory_retrieval_chain import (
     RetrievalResult,
     should_need_more_context,
 )
+from neurova.collaboration.memory_scope import turnScopeContext
 
 
 def _result(memories, quality, level, source="chain"):
@@ -119,7 +120,7 @@ class TestPipelineAdaptiveRetrieval:
         p = _pipeline(chain)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert chain.queries == ["Q3 销售为什么下降", "青海湖旅行 机票预算"]
         contents = {m["content"] for m in ctx.relevant_memories}
@@ -130,7 +131,7 @@ class TestPipelineAdaptiveRetrieval:
         p = _pipeline(chain)
         ctx = _ctx(enabled=False)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 1
         assert ctx.relevant_memories == []
@@ -140,7 +141,7 @@ class TestPipelineAdaptiveRetrieval:
         p = _pipeline(chain)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 1
         assert ctx.relevant_memories[0]["memory_id"] == "m1"
@@ -153,7 +154,7 @@ class TestPipelineAdaptiveRetrieval:
         p._agent = SimpleNamespace(llm_client=llm, _current_user_id="1", config=None)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 1
         assert ctx.relevant_memories == []
@@ -163,7 +164,7 @@ class TestPipelineAdaptiveRetrieval:
         p = _pipeline(chain)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 2
         assert ctx.relevant_memories == []
@@ -175,7 +176,7 @@ class TestPipelineAdaptiveRetrieval:
         # 首查虽空，但二查结果与既有无重复——构造首查含 dup 的场景验证去重
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
         assert len(ctx.relevant_memories) == 1
 
 
@@ -199,7 +200,7 @@ class TestQueryPlanning:
         p._agent = SimpleNamespace(llm_client=llm, _current_user_id="1", config=None)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 3
         assert chain.queries[1:] == ["青海湖 住宿推荐", "青海湖 交通方式"]
@@ -214,7 +215,7 @@ class TestQueryPlanning:
         p._agent = SimpleNamespace(llm_client=llm, _current_user_id="1", config=None)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         # 原查询 + 最多 3 个子问题
         assert len(chain.queries) == 4
@@ -227,7 +228,7 @@ class TestQueryPlanning:
         p._agent = SimpleNamespace(llm_client=llm, _current_user_id="1", config=None)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 2
 
@@ -239,7 +240,7 @@ class TestQueryPlanning:
         p._agent = SimpleNamespace(llm_client=llm, _current_user_id="1", config=None)
         ctx = _ctx(enabled=True)
 
-        asyncio.run(p._retrieve_memories(ctx))
+        asyncio.run(p._retrieve_memories(ctx, turnScopeContext(ctx.metadata, ctx.session_id)))
 
         assert len(chain.queries) == 1
         assert ctx.relevant_memories == []
