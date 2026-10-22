@@ -326,6 +326,220 @@
 | **API Key** | `agent-communication` |
 | **HTTPBearer** | `mobile` |
 
+### 公开面清单（机器段）
+
+<!-- auth-surface:begin -->
+> 本段由 `scripts/generate_api_auth_surface.py`（`--write`）生成，**不要手改**：
+> 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
+> 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
+
+**汇总**：路由 955 条（含方法展开）——需认证 **848**、公开 **107**。
+
+| 模块前缀 | 路由 | 需认证 | 公开 |
+|----------|------|--------|------|
+| `agent-communication` | 12 | 12 | 0 |
+| `agent-enhancement` | 4 | 4 | 0 |
+| `agents` | 15 | 12 | 3 |
+| `analytics` | 4 | 4 | 0 |
+| `api` | 32 | 15 | 17 |
+| `artifacts` | 2 | 2 | 0 |
+| `audio` | 7 | 2 | 5 |
+| `audit` | 4 | 4 | 0 |
+| `auth` | 10 | 0 | 10 |
+| `backups` | 3 | 3 | 0 |
+| `benchmark` | 14 | 14 | 0 |
+| `budgets` | 7 | 0 | 7 |
+| `builder` | 5 | 5 | 0 |
+| `channel-adapters` | 10 | 8 | 2 |
+| `channel-configs` | 16 | 16 | 0 |
+| `channel-sharing` | 7 | 7 | 0 |
+| `chat` | 6 | 6 | 0 |
+| `collaboration` | 23 | 15 | 8 |
+| `computer` | 25 | 25 | 0 |
+| `computers` | 11 | 8 | 3 |
+| `console` | 26 | 26 | 0 |
+| `context` | 10 | 4 | 6 |
+| `cost-rollup` | 8 | 0 | 8 |
+| `enhanced-memory-search` | 11 | 6 | 5 |
+| `enhanced-users` | 8 | 8 | 0 |
+| `evolution` | 13 | 13 | 0 |
+| `experience` | 7 | 7 | 0 |
+| `files` | 12 | 12 | 0 |
+| `firewall` | 6 | 6 | 0 |
+| `generation` | 10 | 10 | 0 |
+| `governance` | 26 | 26 | 0 |
+| `groups` | 8 | 8 | 0 |
+| `growth` | 13 | 13 | 0 |
+| `health` | 6 | 0 | 6 |
+| `home` | 2 | 2 | 0 |
+| `image` | 5 | 5 | 0 |
+| `knowledge` | 2 | 2 | 0 |
+| `knowledge-graph` | 9 | 6 | 3 |
+| `knowledge-integration` | 10 | 10 | 0 |
+| `language` | 6 | 6 | 0 |
+| `logs` | 4 | 4 | 0 |
+| `logs-api` | 6 | 6 | 0 |
+| `marketplace` | 12 | 12 | 0 |
+| `media` | 15 | 15 | 0 |
+| `memory` | 65 | 65 | 0 |
+| `memory-enhancement` | 6 | 6 | 0 |
+| `memory-settings` | 7 | 7 | 0 |
+| `memory-share-groups` | 11 | 11 | 0 |
+| `memory-timeline` | 4 | 4 | 0 |
+| `metacognition` | 7 | 7 | 0 |
+| `mobile` | 6 | 5 | 1 |
+| `models` | 15 | 14 | 1 |
+| `monitor` | 5 | 5 | 0 |
+| `negative-screen` | 4 | 4 | 0 |
+| `neurflow` | 47 | 31 | 16 |
+| `notifications` | 9 | 9 | 0 |
+| `openplatform` | 8 | 8 | 0 |
+| `phase3` | 15 | 15 | 0 |
+| `plans` | 6 | 6 | 0 |
+| `plugins` | 24 | 24 | 0 |
+| `projects` | 15 | 15 | 0 |
+| `providers` | 13 | 13 | 0 |
+| `rules` | 8 | 8 | 0 |
+| `runtime` | 4 | 4 | 0 |
+| `sandbox` | 8 | 8 | 0 |
+| `scheduler` | 7 | 7 | 0 |
+| `semantic-search` | 5 | 4 | 1 |
+| `settings` | 13 | 13 | 0 |
+| `shared-config` | 14 | 14 | 0 |
+| `skill-pool` | 37 | 37 | 0 |
+| `skill-versions` | 8 | 8 | 0 |
+| `skills` | 8 | 8 | 0 |
+| `sleep` | 14 | 14 | 0 |
+| `stats` | 9 | 5 | 4 |
+| `studio` | 21 | 21 | 0 |
+| `sync` | 8 | 7 | 1 |
+| `synonyms` | 12 | 12 | 0 |
+| `tasks` | 8 | 8 | 0 |
+| `teams` | 10 | 10 | 0 |
+| `tool-layers` | 13 | 13 | 0 |
+| `tools` | 7 | 7 | 0 |
+| `trace` | 5 | 5 | 0 |
+| `user-groups` | 5 | 5 | 0 |
+| `webhooks` | 7 | 7 | 0 |
+| `workspace` | 5 | 5 | 0 |
+
+**依赖图里未见身份门的路由（候选集，不等于「无凭证可打」）**：
+
+- `POST /api/coordination/ab-tests/assign`
+- `POST /api/coordination/ab-tests/end/{experiment_name}`
+- `GET /api/coordination/ab-tests/list`
+- `POST /api/coordination/ab-tests/record-metric`
+- `POST /api/coordination/ab-tests/reset`
+- `GET /api/coordination/ab-tests/results/{experiment_name}`
+- `POST /api/coordination/ab-tests/start`
+- `GET /api/coordination/summary`
+- `POST /api/coordination/triage/check`
+- `POST /api/coordination/triage/clear-cache`
+- `POST /api/coordination/triage/reset`
+- `GET /api/coordination/triage/stats`
+- `POST /api/coordination/yield-checker/check`
+- `POST /api/coordination/yield-checker/register-agent`
+- `POST /api/coordination/yield-checker/reset`
+- `GET /api/coordination/yield-checker/stats`
+- `POST /api/coordination/yield-checker/unregister-agent`
+- `GET /api/v1/agents/{agent_id}/constitution`
+- `POST /api/v1/agents/{agent_id}/decision`
+- `GET /api/v1/agents/{agent_id}/stats`
+- `GET /api/v1/audio/engines`
+- `GET /api/v1/audio/status`
+- `POST /api/v1/audio/synthesize`
+- `POST /api/v1/audio/synthesize-stream`
+- `POST /api/v1/audio/transcribe`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+- `POST /api/v1/auth/recover-password`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/register/invite`
+- `POST /api/v1/auth/register/send-code`
+- `POST /api/v1/auth/register/verify-code`
+- `GET /api/v1/auth/setup-status`
+- `GET /api/v1/budgets/alerts`
+- `POST /api/v1/budgets/alerts/config/update`
+- `GET /api/v1/budgets/health`
+- `POST /api/v1/budgets/record`
+- `GET /api/v1/budgets/status/all`
+- `GET /api/v1/budgets/status/{agent_id}`
+- `GET /api/v1/budgets/{scope}/{identifier}/status`
+- `GET /api/v1/channel-adapters/health/all`
+- `POST /api/v1/channel-adapters/{channel_type}/webhook`
+- `GET /api/v1/collaboration/history`
+- `GET /api/v1/collaboration/sessions`
+- `GET /api/v1/collaboration/stats`
+- `GET /api/v1/collaboration/templates`
+- `POST /api/v1/collaboration/templates`
+- `DELETE /api/v1/collaboration/templates/{template_id}`
+- `GET /api/v1/collaboration/templates/{template_id}`
+- `PUT /api/v1/collaboration/templates/{template_id}`
+- `POST /api/v1/computers/cleanup-offline`
+- `GET /api/v1/computers/cloud`
+- `POST /api/v1/computers/{computer_id}/heartbeat`
+- `GET /api/v1/context/inject/hot`
+- `GET /api/v1/context/inject/memories`
+- `GET /api/v1/context/inject/reflection`
+- `GET /api/v1/context/stats`
+- `POST /api/v1/context/{context_id}/compress`
+- `GET /api/v1/context/{context_id}/preview`
+- `GET /api/v1/cost-rollup/agent/{agent_id}/cost`
+- `GET /api/v1/cost-rollup/dashboard/metrics`
+- `GET /api/v1/cost-rollup/history/daily`
+- `GET /api/v1/cost-rollup/history/hourly`
+- `GET /api/v1/cost-rollup/queries/{query_name}`
+- `POST /api/v1/cost-rollup/rollup/now`
+- `POST /api/v1/cost-rollup/rollup/range`
+- `GET /api/v1/cost-rollup/rollup/status`
+- `GET /api/v1/enhanced-memory-search/activation/{memory_id}`
+- `POST /api/v1/enhanced-memory-search/analyze`
+- `POST /api/v1/enhanced-memory-search/decay`
+- `POST /api/v1/enhanced-memory-search/search`
+- `GET /api/v1/enhanced-memory-search/stats`
+- `GET /api/v1/health`
+- `GET /api/v1/health/checks`
+- `GET /api/v1/health/checks/{name}`
+- `POST /api/v1/health/checks/{name}/run`
+- `POST /api/v1/health/recover`
+- `GET /api/v1/health/report`
+- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph`
+- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph/nodes/{node_id}`
+- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph/search`
+- `POST /api/v1/mobile/pairing/confirm`
+- `GET /api/v1/models/active`
+- `GET /api/v1/neurflow/agents`
+- `POST /api/v1/neurflow/agents`
+- `POST /api/v1/neurflow/agents/{agent_id}/archive`
+- `POST /api/v1/neurflow/agents/{agent_id}/restore`
+- `POST /api/v1/neurflow/comfyui/execute`
+- `GET /api/v1/neurflow/comfyui/status`
+- `GET /api/v1/neurflow/executions`
+- `GET /api/v1/neurflow/executions/{execution_id}`
+- `POST /api/v1/neurflow/executions/{execution_id}/cancel`
+- `GET /api/v1/neurflow/nodes`
+- `GET /api/v1/neurflow/nodes/search/{query}`
+- `GET /api/v1/neurflow/nodes/stats`
+- `POST /api/v1/neurflow/nodes/sync`
+- `GET /api/v1/neurflow/nodes/{node_type:path}`
+- `GET /api/v1/neurflow/otel/status`
+- `GET /api/v1/neurflow/stats`
+- `POST /api/v1/semantic-search/analyze`
+- `GET /api/v1/stats`
+- `GET /api/v1/stats/performance`
+- `GET /api/v1/stats/token-usage`
+- `GET /api/v1/stats/usage`
+- `GET /api/v1/sync/statistics`
+<!-- auth-surface:end -->
+
+> **抽样复核（裁定 C，2026-10-22）**：对机器段里 49 条安全的 GET 逐条以无凭证真打（隔离数据根）
+> ——校准格 `GET /api/v1/settings` 回 401；49 条中 **2 条回 401**：`GET /api/v1/auth/me`、
+> `GET /api/v1/computers/cloud`。它们正是「handler 体内自验」那一类（依赖图里看不到门），
+> 所以上面的清单是**候选集**、不是「无凭证可打」的证明；判定某个面请以真打为准。
+> 复跑：`tests/manual/authSurfacePublicProbe_batch.py`。
+
 > 脚注（§6-158）：`media` 原先挂在"无需认证"那一行，与实况不符——`media.py:40` 是
 > `APIRouter(dependencies=[Depends(get_current_user)])`，无凭证请求实测回 **401**
 > （活体第 [8] 项）。这张表**没有逐模块复核过**，其余条目同样可能是旧的：本批只按实测改了
