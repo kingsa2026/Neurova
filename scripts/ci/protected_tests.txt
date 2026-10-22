@@ -3515,3 +3515,19 @@ tests/unit/memory/test_agentSelfAndMemoryStreamRetirements.py
 # 入册前逐文件单跑两次同读数 12 passed（8.77s / 8.61s）；红自证＝只退三件生产面 ⇒ 9f/3p
 #（3 格是对照与 `None` 口径，本就该两侧绿）。
 tests/unit/skills/test_marketDocSkillDigestGate.py
+# §6-388 根外锚：数据根之外的摘要副本（票一甲①＋乙，用户 2026-10-22 拍）。
+# 边界先写在判据里，免得被读成"防篡改"：锚**不**防同权限攻击（能改构件与账本的人通常也能改锚）；
+# 它防的是**只动了数据根**的那类操作——整库恢复/快照回滚，以及"改完构件再把账本重钉一次"
+# （后者正是 §6-176 那条「账本与被保护构件同根同权限」的直接后果）。
+# ① 键的拼法只有一处（`artifactKey(channel, id)`，通道闭集 skill/plugin），两份账本共用一个锚文件，
+#   同名条目不许互相覆盖；
+# ② 锚落点在生产是 `~/.neurova/artifact_anchors.json`（**数据根之外**，判据按生产原件断言，
+#   不认跑测期改指的临时目录）；坏文件/版本不认识一律改名隔离并响亮报，不把"读不懂"读成"没钉过"；
+# ③ `checkArtifact` 在账本相符之后再看锚：锚不符 ⇒ 按 `mismatch` 拒（拒因仍取那一处）；
+#   锚里没有这条 ⇒ 维持只读账本的旧读数（TOFU 语义不变），不悄悄补写；
+# ④ 接线：技能的两处安装钉与重钉写口（`pinArtifactDigest`）、插件的钉写口都要同时落锚；
+#   锚写失败只出声、**不回滚账本**（账本那份仍是权威，锚缺只意味着整库回滚检测对它不成立）。
+# ⑤ 同一条政策还有第二半：所有 `checkArtifact` 调用点都必须带 `anchorKey`（在
+#   `test_pluginArtifactDigestPinnedAndVerified` 那条接缝判据里按全仓扫描钉住）。
+# 入册前逐文件单跑两次同读数 11 passed（3.37s / 3.30s）；红自证＝只退四件生产面 ⇒ 3 failed / 8 errors。
+tests/unit/security/test_artifactAnchor.py

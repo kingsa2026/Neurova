@@ -70,6 +70,9 @@ _REASON_TO_STATUS = {
     # 盘上字节 ≠ 登记时钉下的那份（P3 构件完整性，§6-172 批 31）：与"依赖不满足"同类，
     # 都是"资源状态不允许这个动作"，人要从登记面重装或还原文件，不是改请求参数。
     "artifact_digest_mismatch": 409,
+    # §6-388：执行侧「账本里没钉过且无落账口」——正常装载面走 TOFU 不会冒到这里，
+    # 真冒出来按"状态未建立"回 409，别让 500 把契约问题画成运行时故障。
+    "artifact_digest_unpinned": 409,
     "artifact_missing": 409,
     "not_installed": 404,
     "not_enabled": 409,            # 未启用就装载：约束在 manager，端点不替它兜底

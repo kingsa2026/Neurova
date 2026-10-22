@@ -198,8 +198,18 @@ class TestCaliberIsSharedWithSkillChannel:
             p.relative_to(REPO_ROOT).as_posix()
             for p in sources
             if "artifact_digest.checkArtifact(" in p.read_text(encoding="utf-8"))
-        assert callers == ["neurova/plugins/plugin_manager.py", "neurova/skills/skill_service.py"], (
-            f"装载前的完整性对账没有只发生在两条装载接缝上：{callers}")
+        assert callers == [
+            "neurova/plugins/plugin_manager.py",
+            "neurova/skills/market_registry.py",
+            "neurova/skills/skill_service.py",
+        ], (
+            f"装载前的完整性对账没有只发生在已登记的装载接缝上：{callers}")
+        # §6-388 起同一条政策还有第二半：每条腿都要带根外锚键——只在一条腿上装锚，
+        # 等于让别的腿继续只认"可以跟构件一起被改"的那本账。
+        missingAnchor = [
+            rel for rel in callers if "anchorKey=" not in (REPO_ROOT / rel).read_text(encoding="utf-8")
+        ]
+        assert missingAnchor == [], f"这些接缝的 checkArtifact 没带 anchorKey：{missingAnchor}"
 
     def test_detector_hits_a_revived_local_digest(self):
         """反空转：探测器认不出旧形态，上面两格就是恒真的空守卫。"""

@@ -906,3 +906,19 @@ def _closeWeightEgressDuringTests(request, monkeypatch):
     for moduleName, attr in _WEIGHT_EGRESS_SITES:
         site = importlib.import_module(moduleName)
         monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))
+
+# ── 根外锚的测试隔离（§6-388）──────────────────────────────────────────────
+# 生产的锚落点是 `~/.neurova/artifact_anchors.json`（**数据根之外**，理由见
+# `artifact_digest.anchorPath` 的注释）。跑测时任何一次"钉摘要/装技能/装插件"都会
+# 去写那儿——所以按与数据根同形的思路在跑测期改指临时目录，且**仍在数据根之外**
+# （否则"锚在数据根里"这条会自己消失，判据就测不到实态）。
+ANCHOR_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchors-"))
+
+
+@pytest.fixture(autouse=True)
+def _isolateArtifactAnchors(monkeypatch):
+    """按调用期改指（`anchorPath()` 是函数，不是模块级常量，所以 per-test 来得及）。"""
+    from neurova.security import artifact_digest
+
+    monkeypatch.setattr(artifact_digest, "anchorPath",
+                        lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
