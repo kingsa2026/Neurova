@@ -125,6 +125,9 @@ tests/unit/cognitive_layers/memory_layer/test_cueVectorChannel.py
 # （生成必须由 post_chat 经 `_get_dependency("llm_client")` + `_spawn_background` 派发，
 # 不许长成「测试里自洽、生产上没人递客户端」的形态）。测试不打真模型。
 tests/unit/cognitive_layers/memory_layer/test_cueGenerationBatchC2.py
+# §6-388（批 C-3）：联想线索的去重与批量 N 解耦——跨记忆复用同词不再按批丢弃（那是正当共享），
+# 改由检索侧按 norm_key 全局扇出裁；判据含「切批方式不得改变落库集合」与「扇出门挡超限、不误伤共享」。
+tests/unit/cognitive_layers/memory_layer/test_cueFanoutDecoupledFromBatchC3.py
 # §6-96：上一行的烧 CPU 自旋格必须按**实测线程时钟粒度**整格跳过（不得按平台名、
 # 不得改成永久 skip），否则本机整场子集被超时打断、而 CI 侧覆盖被静默作废。
 tests/unit/ci/test_subQuantumSpinClockGate.py

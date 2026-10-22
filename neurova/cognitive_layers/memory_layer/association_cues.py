@@ -272,7 +272,7 @@ class AssociationCueStore:
         with self._lock:
             conn = self._connGetter()
             rows = conn.execute(
-                "SELECT cue_id, memory_id, cue_text, cue_kind, cue_source, confidence"
+                "SELECT cue_id, memory_id, cue_text, cue_kind, cue_source, confidence, norm_key"
                 " FROM memory_cues"
                 " WHERE agent_id = ? AND neuser_id = ? AND user_id = ?"
                 " ORDER BY created_at DESC, cue_id LIMIT ?",
@@ -286,6 +286,9 @@ class AssociationCueStore:
                 "cue_kind": row[3],
                 "cue_source": row[4],
                 "confidence": row[5],
+                # 扇出门按这一列计数（C-3）；缺了就退化成按文本计，
+                # 同义词形不同大小写/标点时会把一条线索当成两条，门永远不咬
+                "norm_key": row[6],
             }
             for row in rows
         ]
