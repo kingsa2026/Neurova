@@ -310,7 +310,7 @@ class AgentConfig:
         # max_tokens=0 表示自动适配
         if not max_tokens:
             from neurova.llm.model_limits import get_model_max_tokens
-            max_tokens = get_model_max_tokens(llm_model)
+            max_tokens = get_model_max_tokens(llm_model, llm_provider)
 
         self.llm_config = LLMConfig(
             api_key=llm_api_key,
