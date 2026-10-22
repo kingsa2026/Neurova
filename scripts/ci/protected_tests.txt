@@ -3596,3 +3596,11 @@ tests/unit/agent/test_reasoningDegeneracyDetector.py
 # 预算，于是「探测到 65536」与「本次只带 4096」并存。判据含真装配点读数
 # （`_create_model_client` 建出的 `config.max_tokens`）。入册前逐文件单跑全绿（7 passed）。
 tests/unit/llm/test_requestMaxTokensUsesProbedLimit.py
+# §6-397（批 H）：`MemoryManager` 事件接缝的三格预存红清零——原格读的是 §6-12 就退净的
+# 私有总线出口（`mgr.bus`／`mgr._bus.health_report()`），现改为「订共享单例、真发一次、
+# 订阅方必须收到」的行为判据＋「私有出口不得回来」的反向钉。变异自检：把生产投递口换成
+# 一条私有 EventBus 时，共享单例上的订阅收到 0 件（判据必红）；恢复单例收到 1 件。
+# 同批清掉 `SleepSettingsStore(base_dir=)`（落点走生产注入口 NEUROVA_AGENT_WORKSPACES_DIR）。
+# 逐文件单跑两次同读数：test_manager 39 passed（5.03s／4.96s）、test_sleep_phase_cycle 29 passed（3.47s／3.44s）。
+tests/unit/memory/core/test_manager.py
+tests/unit/memory/test_sleep_phase_cycle.py

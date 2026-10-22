@@ -198,16 +198,42 @@ class PhaseMaxSettingsTest(unittest.TestCase):
         self.assertEqual(s["phase_max_minutes_hibernate"], 120)
 
     def test_update_roundtrip_persists(self):
-        import tempfile
+        """落点隔离走生产注入口，不给存储类另开一个 `base_dir=`。
+
+        `SleepSettingsStore(agent_id)` 的路径单点是 `get_agent_sleep_settings_path()`
+        → `get_agent_root()`：`NEUROVA_AGENT_WORKSPACES_DIR` 优先，否则回落数据根。
+        此前这格给它传 `base_dir=d`（该类从来没收过这个参数）⇒ `TypeError` 常驻红。
+        把参数加回类上才是错的：那等于给 agent 落点开第二个口子，而 §6-215／§6-224
+        那批"主目录五处收数据根"正是要把它关掉（教义第 6 条：落点只允许一处定义）。
+        """
         import os
+        import tempfile
+        from neurova.core.agent_workspaces import (
+            AGENT_WORKSPACES_ENV,
+            get_agent_sleep_settings_path,
+        )
         from neurova.core.sleep_settings_store import SleepSettingsStore
 
         with tempfile.TemporaryDirectory() as d:
-            store = SleepSettingsStore("default", base_dir=d)
-            sc, mm = _make_consolidation(settings_store=store)
-            sc.update_settings({"phase_max_minutes_light_sleep": 5})
-            sc2, _ = _make_consolidation(settings_store=store)
-            self.assertEqual(sc2.get_settings()["phase_max_minutes_light_sleep"], 5)
+            original = os.environ.get(AGENT_WORKSPACES_ENV)
+            os.environ[AGENT_WORKSPACES_ENV] = d
+            try:
+                # 先证明注入口真的改了落点——否则这一格会静默写进仓内 data/，
+                # 读数绿而盘上留了脏（本仓形态：隔离没盖住比断言失败更糟）。
+                self.assertEqual(
+                    str(get_agent_sleep_settings_path("default")),
+                    os.path.join(d, "default", "sleep_settings.json"),
+                )
+                store = SleepSettingsStore("default")
+                sc, mm = _make_consolidation(settings_store=store)
+                sc.update_settings({"phase_max_minutes_light_sleep": 5})
+                sc2, _ = _make_consolidation(settings_store=store)
+                self.assertEqual(sc2.get_settings()["phase_max_minutes_light_sleep"], 5)
+            finally:
+                if original is None:
+                    os.environ.pop(AGENT_WORKSPACES_ENV, None)
+                else:
+                    os.environ[AGENT_WORKSPACES_ENV] = original
 
 
 class DwellProgressionTest(unittest.TestCase):
