@@ -8,7 +8,9 @@
 两条硬规则直接来自 C-1 的标定读数，落成代码里的过滤与计数，不留在注释里当愿望：
 - **不复述原文**：与正文词面同集的线索零增益（词法刀切不出跨句重合，向量也一样）⇒ 挡掉；
 - **泛词即串味**：误注入的主因是「别的记忆的线索更像」（目标线索余弦 0.465–0.612，
-  其它记忆线索可达 0.687）⇒ 同一次生成里跨条目重复的线索只留第一份。
+  其它记忆线索可达 0.687）⇒ 泛词要控。控法在 C-3 换过位置：不在生成侧按批去重
+  （那等于让 N 兼任质量参数），改到检索侧按 `norm_key` 全局扇出裁——见
+  `association_cue_index.CUE_FANOUT_CAP`。
 
 失败形态一律**留队**（不写库、不认领、下一轮重来）并在读数里可见——
 「跑过了但什么都没发生」是本仓反复点名的静默形态。
@@ -139,7 +141,6 @@ def filterModelCues(
     }
 
     keptByIndex: Dict[int, List[Dict[str, Any]]] = {}
-    usedNormKeys: set = set()
     dropped = 0
     for item in parsed:
         index = item["index"]
@@ -151,19 +152,23 @@ def filterModelCues(
             dropped += 1
             continue
         normKey = association_cues.cueNormKey(cueText)
-        if normKey in usedNormKeys:
-            # 规则 3：跨条目复用同词——留第一份，其余挡掉
-            dropped += 1
-            continue
         cueTokenSet = set(association_cues.cueTokens(cueText))
         if cueTokenSet and cueTokenSet <= contentTokens[index]:
             # 规则 1：词面全在原文里，检索上零增益
             dropped += 1
             continue
         if association_cues.normalizeCueText(cueText) in contentNormalized[index]:
+            # 规则 1 的另一形：归一后是正文子串（词集切片规则漏不到的那部分）
             dropped += 1
             continue
-        usedNormKeys.add(normKey)
+        if association_cues.cueNormKey(cueText) in {c["norm_key"] for c in keptByIndex.get(index, [])}:
+            # 同一条记忆内的重复（模型同一行回了两遍同词）——留一份；
+            # 注意这**只按记忆去重**，跨记忆复用同词不再在此挡：
+            # 上位名本就可能同时指向多条记忆，那是正当共享，按批切边界丢哪条纯看运气
+            # （旧实现在此放了一个 `usedNormKeys`，把去重窗口做成了批大小，
+            #  同一条线索整批留 1 条、逐行留 N 条——C-3 拆的就是它，判据见 §C-3 判据集）。
+            dropped += 1
+            continue
         bucket = keptByIndex.setdefault(index, [])
         if len(bucket) >= CUES_PER_MEMORY:
             continue
