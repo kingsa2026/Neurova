@@ -3550,3 +3550,18 @@ tests/unit/security/test_artifactAnchor.py
 # 入册前逐文件单跑两次同读数 17 passed（4.42s / 4.28s）；红自证＝退三件生产面 ⇒ 整档 collection error
 #（新模块不在，行为红由活体承担：接线前该路径回 501）。
 tests/unit/plugins/test_pluginRemoteSources.py
+# §6-391 旧集成档 `tests/integration/test_full_chain.py` 的分流退役守卫（裁定「旧集成档另批分流」）。
+# 分流口径（§6-133）：该档是 2026-08 的配方，今天 import 的 `ContextBuilder`/`LLMClient` 已不在
+# `neurova.agent`、`Message(sender=)` 字段已删、`router.route()` 早已 async、fixture
+# `sample_memory_manager` 不存在，两格还会无凭据真连 OpenAI。逐类给存活守卫指针（见文件头表），
+# 然后整档退役——不给一条已不存在的链路补形状。
+# 判据钉三件"不许复活"：
+# ① 文件不存在；按**路径/模块**引用旧档的**行**不存在（带「退役」二字的指针行除外——
+#   本仓惯例就是原地留路标；配反向控制：裸引用必须点名、指针不得误报）；
+# ② `neurova.agent.ContextBuilder`/`LLMClient` 仍不存在（为复活旧档挂回去即红）；
+# ③ 全仓 `tests/`＋`scripts/` 不得再有"同步把 `Message(...)` 喂给 `.route(...)`"的落点；
+#   AST 口径：属性名 route + 第一参 Message 形态 + 非 async 上下文 + 未被
+#   `asyncio.run(...)`/`loop.run_until_complete(...)` 包住；配三格对照（同步必点名、
+#   await 不误报、asyncio.run 包住不误报——MoE 的 `route(query_vec)` 是另一条真 async 接口）。
+# 入册前逐文件单跑两次同读数 6 passed（4.36s / 4.22s）。
+tests/integration/test_fullChainRetired.py

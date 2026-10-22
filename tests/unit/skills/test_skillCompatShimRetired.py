@@ -13,7 +13,7 @@
   （口径同时收 `from neurova.skill import …` 与 `import neurova.skill`，
   并剔掉 `neurova.skills` / `neurova.skill_system` 两个真包——这三兄弟并存本身就是
   ADR 0011 记过的"同名包遮蔽同名文件"病灶的余波）；
-- **测试消费者 1 处**：`tests/integration/test_full_chain.py:227` 要的是
+- **测试消费者 1 处**：旧集成档 `tests/integration/test_full_chain.py:227` 要的是（该档已于 §6-391 整体退役）
   `create_default_skills`，而 shim 的懒映射表里**根本没有这个符号** ⇒
   实测 `ImportError: cannot import name 'create_default_skills' from 'neurova.skill'`。
   也就是说：它不是"还在替谁兼容"，它是**在给一条必失败的路径背书**；
@@ -24,7 +24,7 @@
 唯一实现在 `neurova.skills`（生产用的就是这条，`agent_core.py:862/1258/1517`）⇒
 把那条测试 import 改指它（接线）⇒ 整包删净（退役清理，同批）。
 
-**旧集成档不在本批**：`test_full_chain.py` 在 HEAD 侧就是 14 failed / 2 passed / 3 errors
+**旧集成档已于 §6-391 另行退役**（本批不动它）：它当时在 HEAD 侧就是 14 failed / 2 passed / 3 errors
 （仓外 worktree 复算同读数），病根是 `router.route()` 早改成异步而那批用例还同步调——
 与本 shim 无关，已另批分流登记。本批只负责"不再多给它一条死路"。
 """
@@ -135,9 +135,9 @@ class TestTheCapabilityStillHasItsHome:
         assert callable(skills.create_default_skills)
 
     def testTheRepointedConsumerImportsWhatItActuallyNeeds(self):
-        """把 `test_full_chain.py` 那行按新契约写一遍，必须拿得到东西。
+        """旧集成档 `test_full_chain.py` 那行按新契约写一遍，必须拿得到东西（该档已于 §6-391 退役）。
 
-        它今天仍因异步契约而红（另批），所以这里**只验取用面**，不假装那格绿了。
+        旧集成档已于 §6-391 退役；这里仍只验**取用面**，不假装那条链今天有覆盖。
         """
         from neurova.skills import create_default_skills
 
