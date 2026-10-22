@@ -12,9 +12,11 @@
 - 长度不等的另两种处置：`semantic_emotion`／`similarity_fusion` 抛 `ValueError`。
 - 值域两份用 `(cos+1)/2` 映射，注释却写"相似度分数 (0-1)"。
 
-按定义域划界（不是按名字）：`memory_layer/vector_search.py::_cosine_similarity` 吃
-`Dict[str, float]` 稀疏向量、按键集并集算，**不属于本族**，本批判据里它必须仍在原位——
-被"顺手一起并了"就是把稀疏语义洗成稠密。`similarity_fusion.cosine` 的"维度不齐就抛"是
+按定义域划界（不是按名字）：当年 `memory_layer/vector_search.py::_cosine_similarity` 吃
+`Dict[str, float]` 稀疏向量、按键集并集算，**不属于本族**——被"顺手一起并了"就是把稀疏语义
+洗成稠密。（那份实现连同模块已在 §6-376 退净；本档对这条界线仍留两半判据：形状正检
+`_isSparseSignature` ＋ `testSparseCosineRetiredWithItsModuleAndMustNotBeReintroducedAsDense`。）
+`similarity_fusion.cosine` 的"维度不齐就抛"是
 **调用方边界上的前置条件**（那条路的坏数据要喊人），收口后仍归它自己持有，不算第二份实现。
 
 跑法：`PYTHONPATH=$(git rev-parse --show-toplevel) .venv/Scripts/python.exe -m pytest \
@@ -57,10 +59,6 @@ SITE_MODULES = [
     "evolution/eval/constraints.py",
     "cognitive_layers/memory_layer/volume_renderer.py",
 ]
-
-
-def _parse(rel: str) -> ast.Module:
-    return ast.parse((NEUROVA_ROOT / rel).read_text(encoding="utf-8"))
 
 
 def _isSparseSignature(node: ast.FunctionDef) -> bool:
@@ -238,14 +236,36 @@ def testCosineMathProbeHasTeeth():
     assert _isSparseSignature(sparse), "按定义域划界：稀疏那份不该被算进本族"
 
 
-def testSparseCosineStaysWhereItsSemanticsLive():
-    """稀疏那份不是重复实现：它必须还在原文件里，否则就是被"顺手并了"洗掉了稀疏语义。"""
-    tree = _parse("cognitive_layers/memory_layer/vector_search.py")
-    names = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
-    assert "_cosine_similarity" in names
-    node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-                and n.name == "_cosine_similarity")
-    assert _isSparseSignature(node)
+def testSparseCosineRetiredWithItsModuleAndMustNotBeReintroducedAsDense():
+    """稀疏那份随 `vector_search.py` 一起于 §6-376 退净（726 行模块与其测试同批退役）。
+
+    本格原形是「稀疏实现必须还在原文件里」，那条断言在 §6-376 之后失去指涉对象，
+    变成常驻 `FileNotFoundError`——**判据自己引用已删路径**，属判据侧债
+    （§6-396 分流表里那一格就是它；形态 363 的同族：前提塌了，断言不再指向任何对象）。
+
+    性质本身没变：本族收口不得把稀疏语义洗成稠密。现在由两半守住——
+    ① `testJudgeSeparatesSparseFromDense` 仍用 `_isSparseSignature` 对合成稀疏样本**正检**
+      （形状判据仍在，不依赖那个文件存在）；
+    ② 本格钉住 `vector_search.py` 不得复活，且**单源里不许长出稀疏余弦**：
+      将来真要引入稀疏余弦，它必须仍是 `Dict[str, float]` 定义域、按键集并集算，
+      而不是改指 `vector_math.cosineSimilarity`——那是把"键集并集"洗成"等长稠密"，
+      正是本批当初划界要防的事。
+    """
+    retired = NEUROVA_ROOT / "cognitive_layers" / "memory_layer" / "vector_search.py"
+    assert not retired.exists(), (
+        f"{retired.relative_to(NEUROVA_ROOT).as_posix()} 被复活：它在 §6-376 随 "
+        "memory_index 退净，恢复它要么给出完整稀疏消费者，要么就是第二条并行向量面"
+    )
+    singleSource = (NEUROVA_ROOT / SINGLE_FACE).read_text(encoding="utf-8")
+    tree = ast.parse(singleSource)
+    sparseInFace = [
+        n.name for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _isSparseSignature(n)
+    ]
+    assert not sparseInFace, (
+        f"稠密单源里长出了稀疏实现 {sparseInFace}——两种定义域混在一处，"
+        "就是当初『把稀疏顺手并了』那件事的反向形态"
+    )
 
 
 def testEveryKnownSiteNowCallsTheSingleFace():

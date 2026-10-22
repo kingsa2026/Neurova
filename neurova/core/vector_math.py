@@ -15,9 +15,12 @@
 `ZERO_NORM_EPSILON`（零范数阈值）。两者的"不可比/零向量"一律 0.0，而**正交**在 `cosineScore`
 里是 0.5、在 `cosineSimilarity` 里是 0.0——这三个数各指各的事，合成一个就是把口径抹平。
 
-不并进来的一份（按**定义域**划界而不是按名字，教义第 7 条要求先比再合）：
-`memory_layer/vector_search.py::_cosine_similarity` 吃 `Dict[str, float]` 稀疏向量，
+当年按**定义域**划界排除在外的一份（不是按名字，教义第 7 条要求先比再合）：
+`memory_layer/vector_search.py::_cosine_similarity` 吃 `Dict[str, float]` 稀疏向量、
 按键集并集算，与稠密实现不是同一件事，并过来会把它的稀疏语义洗掉。
+该模块连同那份实现已于 §6-376 随 `memory_index` 退净；这条界线本身仍是判据
+（见 `tests/unit/core/test_denseCosineSingleSource.py`——将来若再引入稀疏余弦，
+必须仍是稀疏定义域，不得改指本模块的稠密口）。
 """
 
 from __future__ import annotations
