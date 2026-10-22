@@ -95,7 +95,8 @@ class TestStreamSilenceTelemetry:
         # 共享限流器隔离：其他测试文件可能对同名 model key 留下 429 暂停
         reset_shared_limiter()
         monkeypatch.setattr(mmc, "_STREAM_SILENCE_WARN_SECONDS", 0.1)
-        monkeypatch.setattr(mmc, "_STREAM_SILENCE_POLL_SECONDS", 0.02)
+        # 轮询常量随独立看门狗一起退役（§6-397 批 C）：判定并入读取循环后，
+        # 节奏只由阈值一个数决定，"每跨一个阈值报一次"的语义不变
         logs: list[str] = []
 
         class _Cap:
@@ -148,7 +149,10 @@ class TestStreamSilenceTelemetry:
             return [c async for c in manager.chat_stream([{"role": "user", "content": "hi"}])]
 
         chunks = asyncio.run(_collect())
-        assert len(chunks) == 2, "静默恢复后流必须正常走完"
+        # 控制字典（§6-397 批 C 起的 `stream_status`，与既有 `retry_status` 同族）
+        # 不数进"真实 chunk"——本格钉的是静默之后上游照常把内容发完
+        realChunks = [c for c in chunks if not isinstance(c, dict)]
+        assert len(realChunks) == 2, f"静默恢复后流必须正常走完：{chunks!r}"
         assert any("STREAM_SILENCE" in m and "test-provider" in m for m in logs), (
             f"静默跨阈值必须留 WARNING（含 provider），got {logs!r}"
         )

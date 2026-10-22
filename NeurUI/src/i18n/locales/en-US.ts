@@ -590,6 +590,7 @@ export default {
     retrySwitched: 'Repeated rate limiting — switched to {model} to continue (model {count}/{total})',
     retryExhausted: 'Auto-retried across {count} models without success',
     retryYieldWait: 'Yielding for concurrency quota - retrying in {seconds}s (attempt {retry}/{max})',
+    upstreamSilence: 'No data from upstream for {seconds}s, still waiting…',
     turnParked: 'This turn is parked - waiting for a manual resume',
     parkedPinnedModel: 'Pinned model {pinned}; this request used {requested}',
     rateLimitedNotice: 'Model rate-limited (429); a switch suggestion is shown above the composer',

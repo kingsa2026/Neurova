@@ -859,10 +859,14 @@ async function* sseJsonEvents(response: Response): AsyncGenerator<Record<string,
   }
 }
 
-/** 提示条文案：等待倒计时 / 已切换模型 / 全部耗尽，i18n 组装。 */
+/** 提示条文案：等待倒计时 / 已切换模型 / 上游静默 / 全部耗尽，i18n 组装。 */
 function retryNoticeText(msg: ChatMessage): string {
   const n = msg.retryNotice
   if (!n) return ''
+  if (n.phase === 'silence') {
+    // 上游静默：秒数由后端报告（它才知道最后一次收到字节是何时），前端不自推
+    return t('chat.upstreamSilence', { seconds: n.silentSeconds ?? 0 })
+  }
   if (n.phase === 'waiting') {
     const elapsed = n.receivedAt ? Math.floor((retryTickNow.value - n.receivedAt) / 1000) : 0
     const remain = Math.max(0, Math.round((n.remainingSeconds ?? 0) - elapsed))
@@ -1767,6 +1771,17 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         model: event.model,
       }
       startRetryTicker()
+      break
+    }
+
+    case 'upstream_status': {
+      // 上游静默（网关长时间零字节）：复用同一条提示条，phase 区分数义。
+      // 不启本地倒数——恢复出字时 content/reasoning 分支会 clearRetryNotice。
+      msg.retryNotice = {
+        phase: 'silence',
+        silentSeconds: Number(event.silent_seconds || 0),
+        receivedAt: Date.now(),
+      }
       break
     }
 

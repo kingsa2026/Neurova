@@ -589,6 +589,7 @@ export default {
     retrySwitched: 'बार-बार दर-सीमा — जारी रखने के लिए {model} पर स्विच किया (मॉडल {count}/{total})',
     retryExhausted: '{count} मॉडलों पर स्वतः पुनः प्रयास असफल रहे',
     retryYieldWait: 'समानांतर कोटा के कारण रुके हैं - {seconds} सेकंड में पुनःप्रयास ({retry}/{max})',
+    upstreamSilence: 'अपस्ट्रीम {seconds} सेकंड से मौन, प्रतीक्षा जारी है…',
     turnParked: 'यह टर्न रुका हुआ है - मैनुअल पुनःआरंभ आवश्यक',
     parkedPinnedModel: 'पिन किया गया मॉडल {pinned}; यह अनुरोध {requested}',
     rateLimitedNotice: 'मॉडल दर-सीमित (429) है; इनपुट बॉक्स के ऊपर बदलने का सुझाव दिखाया गया है',
