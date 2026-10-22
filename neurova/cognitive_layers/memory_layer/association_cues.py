@@ -329,6 +329,23 @@ class AssociationCueStore:
             )
             conn.commit()
 
+    def dropAttempt(self, memoryId: str) -> None:
+        """撤销「已问过模型」的封条。
+
+        只在记忆内容变更时调用（`manager._applyContentChange()`）：旧内容问过
+        不等于新内容问过。封条留着，该行就永远出不了待生成池——「不做每轮上限」
+        的丙案靠的正是这张账，它必须随事实源一起失效。
+        """
+        if not memoryId:
+            return
+        with self._lock:
+            conn = self._connGetter()
+            conn.execute(
+                "DELETE FROM memory_cue_attempts WHERE memory_id = ? AND agent_id = ?",
+                (memoryId, self._agent_id),
+            )
+            conn.commit()
+
     def attemptsOverview(self) -> Dict[str, int]:
         with self._lock:
             conn = self._connGetter()

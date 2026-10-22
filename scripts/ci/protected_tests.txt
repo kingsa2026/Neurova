@@ -128,6 +128,10 @@ tests/unit/cognitive_layers/memory_layer/test_cueGenerationBatchC2.py
 # §6-388（批 C-3）：联想线索的去重与批量 N 解耦——跨记忆复用同词不再按批丢弃（那是正当共享），
 # 改由检索侧按 norm_key 全局扇出裁；判据含「切批方式不得改变落库集合」与「扇出门挡超限、不误伤共享」。
 tests/unit/cognitive_layers/memory_layer/test_cueFanoutDecoupledFromBatchC3.py
+# §6-393（批 D）：长期记忆六维常驻门禁（裁定甲：把从不被收集的测量件收进收集面）。
+# 其中「改内容后检索面必须跟随」七格在 HEAD 干净树里单放本文件复跑即 9 failed，
+# 带上 `_applyContentChange()` 根修后 18 passed；两次逐文件单跑同读数（16.07s / 15.82s）。
+tests/performance/memory/test_longTermMemoryBaselineGate.py
 # §6-96：上一行的烧 CPU 自旋格必须按**实测线程时钟粒度**整格跳过（不得按平台名、
 # 不得改成永久 skip），否则本机整场子集被超时打断、而 CI 侧覆盖被静默作废。
 tests/unit/ci/test_subQuantumSpinClockGate.py
