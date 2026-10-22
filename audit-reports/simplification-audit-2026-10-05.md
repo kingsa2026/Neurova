@@ -9976,3 +9976,14 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       今天同样跑不起来。⇒ 甲不是改名那么简单，要按今天的 API 重写并只断言"应当一直成立的防线"，
       否则收进收集面即常驻红。另批做。
     - **本会话下一枚空号现查 §6-388**（写前必须现场重取；本笔落库时该读数为 387）。
+
+390. **票二乙落地：插件远程取回打开——白名单先于取回、safe_archive 解包、装时钉摘要（✅ `a71d6d6f`，17 格入子集）** 🟢 —— §6-383 三票里的最后一张（用户 2026-10-22 拍「乙：开，复用市场链」）。
+    - **顺序就是契约**：白名单在**发出请求之前**（`plugin_sources.fetchArchive`）；读完再**复查重定向后的 host**（urllib 默认跟随，不复查的话白名单 host 可以 302 到任意地方）；预算在**解包那一步**（字节/条目/zip-slip 三件牙由 `security/safe_archive` 执行，上限常量只在 `plugin_sources` 一处）；钉摘要在**字节落位之后**。
+    - **落点**：`neurova/plugins/plugin_sources.py`（源表 `<插件根>/sources.json`：原子写、坏文件改名隔离并响亮报、版本不认识不映射；`isAllowedSource` 先判协议与 host；`fetchArchive` 超限在读阶段中止）；`PluginManager.install_remote_plugin(url, expectedName)`：取回 → 解包 → 找唯一插件根 → 核对 manifest 名字 → 整体挪进插件根 → 走**同一条** `install_plugin`（权限门、装时钉、根外锚、状态落盘一个都不跳）；`.incoming_<hex>` 暂存任何一步失败都清掉，被门拒的网络字节**撤回**（本地目录是用户的东西不删，远程包必须删）。
+    - **来源留痕**：`state.json` 记录新增可选键 `install_source`（不升版本，存量缺它照样读）；端点新增 `GET/PUT/DELETE /v1/plugins/remote-sources[/{host}]`（写面仅管理员）。
+    - **拒因进闭集**：`plugin_source_not_allowed→403`、`plugin_fetch_failed→502`、`plugin_fetch_too_large→413`、`plugin_archive_unsafe→400`、`already_installed→409`、`name_mismatch→400`。成因扫描器把 `plugin_sources` 的 `REASON_*` 收进来（与 `artifact_digest` 同机制、只在包内真引用时才算，否则出幽灵成因）。
+    - **两处现役判据按新契约改判（不是放宽）**：① 「远程一律 501」那格改成「未登记 host 一律 403+点名」——501 是"能力不存在"，今天是"能力在、URL 不在白名单"，混用会让人以为功能没做（登记后的成功路径另有判据与活体）；② 成因扫描器纳入 `plugin_sources` 词汇（同 §6-176 那次的机制）。
+    - **判据 17 格（入子集）＋活体 17 读数全 PASS／exit 0**（真 `create_app`＋真 JWT＋**本机回环 http.server**，不出网）：未登记 403 且**一次请求都没发**（桩一被调就炸）→ 登记 200 → 列表可见 → 远程安装 200 → 装到插件根非暂存 → 装时钉 → `install_source` 留痕 → 根外锚同值 → 暂存清零 → 启用后改一个字节 `load_plugin` 按 `artifact_digest_mismatch` 拒 → 撤源 200 → 同 host 立刻 403 → 被拒包不在插件根 → 仓库 `data/` 指纹逐字节相同。
+    - **红→绿如实**：判据先写在接线之前，**6 格行为红**（方法不存在/拒因未映射/被门拒后残留目录），接线后 17 passed；红自证＝只退三件生产面 ⇒ 整档 collection error（新模块不在），本批行为红以"接线前该路径回 501/未取回"为准，已在那条改判里写明。
+    - **净 LOC**：生产池 **+361/−4**；判据池 **+349/−7**；活体 **+209/−0**；基建池 **+16/−0**。回归 `tests/unit/plugins` **118 passed**。
+    - **边界如实（不吹能力）**：白名单默认**空**——开箱仍不可远程安装，要管理员显式登记；没有 TLS 证书固定、也没有签名，那属于票一 甲③ 的信任模型，不在乙的授权里；远程包的"来源"仍只到 host 一级，不证发布者。
