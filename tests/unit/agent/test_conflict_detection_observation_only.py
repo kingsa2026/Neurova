@@ -29,7 +29,11 @@ class RecordingConflictDetector:
     """冲突检测器替身：只承担 `detect_conflict(new_memory, existing_memories)` 契约。
 
     被测判据是"本步是否阻断"，不是检测算法；检测算法自身由
-    tests/integration/test_full_conflict_integration.py 锁定。
+    `conflict.judgeClauseConflict` 的判据档锁定
+    （`tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py`
+    与 `test_conflict_signal_scope.py`，§6-370 并把 v2 的「同属性异值」并进了这一份单源）。
+    此处旧指针写的 `tests/integration/test_full_conflict_integration.py` 已于 §6-395 退役——
+    它整档 `pytest.mark.skip`，从不运行，从来没锁过任何算法。
 
     载荷成员取自**入参两条记忆**：Issue #72 第四轮起，账上成员必须能在库里定位
     （检测链会按"说不清是谁"拦下合成 id），替身也必须照真实契约给成员 id。

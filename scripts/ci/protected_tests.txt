@@ -3573,3 +3573,9 @@ tests/integration/test_fullChainRetired.py
 tests/unit/memory/test_storageComprehensiveRetired.py
 # §6-394：旧档退役的前提是「性质仍有人守」。这份才是真 JSON 存储契约的存活档（save 回 id／get 缺失返 None／update 合并／query 三类过滤／batch／跨实例持久化／工厂单例），但它此前不在子集里——逐文件单跑两次同读数 18 passed（3.56s／3.23s），补入。
 tests/cognitive_layers/memory_layer/test_storage.py
+# §6-395（批 F）：闭环链两档退役的守卫——两个文件与其包路径不在场、链上四个死名字在代码行里清零、
+# 替代判据档在场（否则旧档会以“恢复覆盖”捞回来）、扫描器反向控制，另附一格专治形态 373：
+# REPO_ROOT 必须真指向含 neurova/ 的仓库根（本档三层深，parents[3]）。
+# 注释放宽只到注释行，docstring/代码行的引用仍必点名——该规则是落笔时被自家账目注释误咬之后收窄的。
+# 入册前逐文件单跑两次同读数（5.11s／5.32s，5 passed）。
+tests/unit/core/test_closedLoopChainRetired.py

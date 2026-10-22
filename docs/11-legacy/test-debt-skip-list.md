@@ -11,6 +11,30 @@
 - ✅ FIXED：已重写对齐真实 API
 - 🗑️ REMOVED：确认废弃后删除
 
+> **2026-10-22 四笔退役（§6-393／§6-394／§6-395）**——本清单此前只登记"引用不存在模块"的
+> 测试档，没登记**整档 skip 却顶着"全覆盖"标题**那一族，也没跟着退役动作更新，等于一张
+> 会说谎的债表。现补上并逐条给"谁在守"的指针：
+>
+> - `tests/performance/longmeval_simple.py` → 🗑️ REMOVED（§6-393，裁定甲改名收进收集面）。
+>   它文件名与类名都不匹配 `pyproject.toml` 的收集规则，实测 `collected 0 items`，
+>   且按已不存在的 `MemoryStorage(db_path=)/search()/list_memories()/close()` 写。
+>   六维现由 `tests/performance/memory/test_longTermMemoryBaselineGate.py` 在守。
+> - `scripts/demo_optimization.py::demo_vector_index_manager` → 🗑️ 该函数整段退役（§6-393）：
+>   其演示的 `wait_for_index_completion`／`get_index_manager_state`／
+>   `check_vector_index_integrity`／`list_memories` 在 `neurova/` 零定义。脚本其余两节保留。
+> - `tests/unit/memory/test_storage_comprehensive.py` → 🗑️ REMOVED（§6-394）：
+>   1 080 行、自 2026-07-03 起整档 `pytest.mark.skip`，46 格收了不跑＝零覆盖。
+>   CRUD 契约见 `tests/cognitive_layers/memory_layer/test_storage.py`（18 格），
+>   三层隔离门见 `tests/unit/memory/test_isolation_unified.py`；
+>   守卫 `tests/unit/memory/test_storageComprehensiveRetired.py`。
+> - `tests/integration/test_full_conflict_integration.py` ＋ `scripts/demo_closed_loop.py`
+>   → 🗑️ REMOVED（§6-395）：同一条 `neurova.core.闭环_manager` 死链上的测试与脚本，
+>   链上四个名字全仓零定义；守卫 `tests/unit/core/test_closedLoopChainRetired.py`。
+>
+> **文首那条基线读数（1628 failed／397 errors／7518 passed，9610 collected，2026-08-28）已过期**：
+> 今天单测收集量现算为 **23586 tests collected**（`pytest tests --collect-only -q`），
+> 失败/错误面未在本轮整批复算，不拿旧数当现状——要按这份清单决策前请先复跑整批。
+
 ## 一、引用了"完全不存在的模块"的测试（整体 skip）
 
 | 测试文件 | 缺失模块/名称 | 相近存在物 | 状态 | 备注 |
@@ -18,14 +42,14 @@
 | `tests/core/test_multi_agent_sleep_manager.py` | `neurova.core.multi_agent_sleep_manager`（`MultiAgentSleepManager` / `IdleTracker`） | `neurova.core.multi_agent_manager` | ⏸️ SKIPPED | 睡眠/空闲管理，疑似拆分或改名 |
 | `tests/unit/core/test_define_action.py` | `neurova.core.define_action`（`defineAction` / `ActionRegistry`） | `neurova.core.file_utils`（仅拼写相近） | ⏸️ SKIPPED | 动作注册装饰器，未实现 |
 | `tests/integration/test_evolution_unified.py` | `neurova.evolution.experience_caller`；`ToolWeightEntry` from `neurova.evolution` | `experience_feedback`；`AdaptiveToolWeights` | ⏸️ SKIPPED | 进化统一测试，部分名称已改 |
-| `tests/integration/test_full_conflict_integration.py` | `neurova.core.闭环_manager`（非法模块名） | 无 | ⏸️ SKIPPED | 含明显错误的中文模块名；另引用已改名的 `conflict_detector`（现为 `conflict_detector_v2`） |
+| `tests/integration/test_full_conflict_integration.py` | `neurova.core.闭环_manager`（非法模块名） | 无 | 🗑️ REMOVED（§6-395） | 含明显错误的中文模块名；另引用零定义的 `MemoryConflictDetector`／`ConflictLevel`。链上四个死名字的"不许复活"见 `tests/unit/core/test_closedLoopChainRetired.py`；冲突检测性质由 `tests/unit/agent/test_conflict_detection_observation_only.py`、`test_conflict_ledger_member_identity.py`、`test_memory_guards_wiring.py` 与 `tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py` 在守 |
 
 ## 二、引用了"已改名/可修复"名称的测试（重写时修正 import，不算死测试）
 
 | 测试文件 | 错误引用 | 真实存在物 | 处理 |
 |---|---|---|---|
 | `tests/execution_engine/test_tool_closed_loop.py` | `neurova.agent.tool_executor` | `neurova.tool_executor`（顶层） | 重写时改 import 路径 |
-| `tests/integration/test_full_chain.py` | `create_default_skills` from `neurova.skill` | 待定位（`neurova.skills` 门面） | 重写时改 import |
+| `tests/integration/test_full_chain.py` | `create_default_skills` from `neurova.skill` | 待定位（`neurova.skills` 门面） | 🗑️ REMOVED（§6-391，`b5484380`）——四代前的形状，逐格修＝给不存在的链补形状；分流指针与本档「不许复活」四格见 `tests/integration/test_fullChainRetired.py` |
 | `tests/integration/test_memory_system.py` | `Memory` from `neurova.mem_core` | `MemCore`（类） | 重写时对齐类名 |
 | `tests/unit/test_coverage_fast.py` / `test_coverage_simple.py` / `test_plugin_api.py` | `UPLOAD_DIR` from `...console` | `_CONSOLE_UPLOAD_DIR`（私有） | 重写时对齐或改测公共接口 |
 
