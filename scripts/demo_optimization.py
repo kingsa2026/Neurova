@@ -5,8 +5,6 @@ Neurova 优化功能演示脚本
 演示以下功能：
 1. 定时任务管理
 2. 系统监控与告警
-3. 向量索引管理（增量同步、异步更新）
-4. 记忆存储自动同步
 """
 
 import time
@@ -182,102 +180,6 @@ def demo_system_monitoring():
     print("\n✅ 系统监控演示完成")
 
 
-def demo_vector_index_manager():
-    """演示向量索引管理"""
-    print("\n" + "="*60)
-    print("3. 向量索引管理演示")
-    print("="*60)
-    
-    try:
-        from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
-    except ImportError as e:
-        print(f"⚠️  模块导入失败: {e}")
-        return
-    
-    print("\n📦 初始化记忆存储...")
-    storage = MemoryStorage(
-        db_path="data/demo/memory.db",
-        neuser_id="demo",
-        user_id="demo_user",
-        enable_async_index=True,
-        enable_incremental_sync=True
-    )
-    
-    # 添加测试记忆
-    print("\n📝 添加测试记忆...")
-    test_memories = [
-        {
-            "content": "Neurova 是一个智能代理框架",
-            "memory_type": "knowledge",
-            "importance": 0.8
-        },
-        {
-            "content": "记忆系统支持增量同步和异步更新",
-            "memory_type": "knowledge",
-            "importance": 0.7
-        },
-        {
-            "content": "LongMemEval 基准测试包含24个测试用例",
-            "memory_type": "knowledge",
-            "importance": 0.6
-        }
-    ]
-    
-    for i, mem_data in enumerate(test_memories):
-        memory = storage.save(**mem_data)
-        print(f"   ✅ 添加记忆 {i+1}: {memory.id}")
-    
-    # 等待索引更新
-    if storage._index_manager:
-        print(f"\n⏳ 等待索引更新...")
-        storage.wait_for_index_completion(timeout=2)
-        
-        index_stats = storage.get_index_manager_state()
-        if index_stats:
-            print(f"\n📊 索引状态:")
-            print(f"   待处理操作: {index_stats.get('pending_operations', 0)}")
-            print(f"   同步状态: {index_stats.get('sync_status', 'unknown')}")
-    
-    # 搜索测试
-    print("\n🔍 测试向量搜索...")
-    search_results = storage.vector_search.search("Neurova 记忆系统", top_k=3)
-    print(f"   找到 {len(search_results)} 个相关结果:")
-    for result in search_results:
-        score = result.get('score', 0)
-        text_preview = result.get('text', '')[:50]
-        print(f"      [{score:.3f}] {text_preview}...")
-    
-    # 更新记忆
-    print("\n✏️ 更新记忆...")
-    if storage.list_memories():
-        mem_id = storage.list_memories()[0].id
-        storage.update_memory(
-            memory_id=mem_id,
-            content="Neurova 是一个强大的智能代理框架，支持记忆管理"
-        )
-        print(f"   ✅ 更新记忆: {mem_id}")
-    
-    # 删除记忆
-    print("\n🗑️ 删除一个记忆...")
-    if storage.list_memories():
-        mem_to_delete = storage.list_memories()[0]
-        storage.delete(mem_to_delete.id)
-        print(f"   ✅ 删除记忆: {mem_to_delete.id}")
-    
-    # 完整性检查
-    print("\n🔍 索引完整性检查...")
-    check_result = storage.check_vector_index_integrity()
-    print(f"   数据库记忆数: {check_result['db_count']}")
-    print(f"   索引向量数: {check_result['index_count']}")
-    print(f"   检查通过: {'✅' if check_result['ok'] else '⚠️'}")
-    
-    # 显示统计
-    mem_list = storage.list_memories()
-    print(f"\n📈 总体统计:")
-    print(f"   记忆总数: {len(mem_list)}")
-    
-    storage.close()
-    print("\n✅ 向量索引管理演示完成")
 
 
 def main():
@@ -289,7 +191,6 @@ def main():
 ║  功能列表:                                                    ║
 ║    1. 定时任务管理 (TaskScheduler)                            ║
 ║    2. 系统监控与告警 (SystemMonitor)                          ║
-║    3. 向量索引管理 (增量同步、异步更新)                       ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
     
@@ -299,7 +200,6 @@ def main():
     # 演示各功能
     demo_task_scheduler()
     demo_system_monitoring()
-    demo_vector_index_manager()
     
     # 总结
     print("\n" + "="*60)
@@ -308,13 +208,9 @@ def main():
     print("\n📊 生成的文件位置:")
     print("   定时任务数据: data/demo/scheduler/")
     print("   监控数据: data/demo/monitoring/")
-    print("   记忆数据库: data/demo/memory.db")
-    print("   向量索引: data/demo/vector_index*.pkl")
     print("\n💡 使用说明:")
     print("   1. 在实际应用中，通过 get_task_scheduler() 获取调度器")
     print("   2. 通过 get_system_monitor() 获取监控器")
-    print("   3. 定期调用 sync_incremental() 进行增量同步")
-    print("   4. 定期调用 check_vector_index_integrity() 进行完整性检查")
     print("\n" + "="*60)
 
 
