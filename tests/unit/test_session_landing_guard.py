@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+#: 本档在 `tests/unit/` 下（比 `tests/unit/ci/` 少一层）——N 必须是 2，写成 3 会解到仓外，
+#: 那时「仓根没有新增条目」读的是空目录，判据看着绿、其实一句话都没说。
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
 #: 回收上限：`<repo>/data`。**先写这一条**，`SESSIONS_DIR` 由它派生——反过来的话
@@ -42,14 +44,16 @@ def _cleanupProbeRealLanding():
     常量 `DATA_DIR` 取的同一条路径——不再就地拼 `<repo>/data`，面自证棘轮才不会把
     「可能尚不存在的中间目录」解成 `missing`。
     """
+    def emptyDir(directory):
+        # 先 `is_dir()` 再枚举：目录不在时"没读到"不等于"空了"；枚举本身只能对着
+        # 模块级常量发起——把落点转进参数的写法，面自证棘轮解不出根、这一档会整档掉出它的面。
+        return directory.is_dir() and not any(directory.iterdir())
+
     try:
-        # 空判只枚举**一层**（`<repo>/data`）：`<repo>/data/sessions` 是探针造出来的目录，
-        # 拿它当枚举根会被面自证棘轮解成 `missing`（跑之前它就不存在）。
-        if DATA_DIR.is_dir() and not list(DATA_DIR.iterdir()):
-            DATA_DIR.rmdir()
-        elif DATA_DIR.is_dir() and [p.name for p in DATA_DIR.iterdir()] == ["sessions"] \
-                and not list(DATA_DIR.glob("sessions/*")):
+        if emptyDir(SESSIONS_DIR):
             SESSIONS_DIR.rmdir()
+        # 再回收 `data/`：它**只在确实空了**时删（非空说明有别的真实数据，留着让人看见）。
+        if emptyDir(DATA_DIR):
             DATA_DIR.rmdir()
     except OSError:
         pass

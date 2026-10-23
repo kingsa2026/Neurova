@@ -129,18 +129,18 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
+        # 枚举与解析都走共享一次性入口（`tests/ast_scan.sourceRefsUnder` 只读一遍盘、
+        # 文本预筛一并做完），不留常驻语法树；文本预筛取 `.route(`——连它都没出现的
+        # 文件不可能出现同步 route 调用。`filesUnder` 只归枚举、解析仍自付，
+        # 判据成本会随 `tests/`＋`scripts/` 的文件总量涨（本档要防的正是这一形）。
         for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            # 枚举与解析都归 `tests/ast_scan`（本档不自付全仓 rglob + ast.parse）
-            for path in ast_scan.filesUnder(root):
-                source = path.read_text(encoding="utf-8", errors="ignore")
-                if ".route(" not in source:
-                    continue
+            for ref in ast_scan.sourceRefsUnder(root, hints=(".route(",)):
                 try:
-                    lines = _syncRouteCallsIn(ast_scan.transientTree(path))
+                    lines = _syncRouteCallsIn(ast_scan.transientTree(ref.path))
                 except SyntaxError:
                     continue
                 if lines:
-                    offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+                    offenders.append("%s:%s" % (ref.path.relative_to(REPO_ROOT), lines))
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])
