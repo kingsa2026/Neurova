@@ -74,6 +74,10 @@ class TurnRunState:
     #: 记录创建者后，交叉使用在开发期即由 `assertSameTurnAs` 点名报出。
     turnId: str = ""
     agentId: str = ""
+    #: 本轮思考流是否被退化守卫截断（`reasoning_degeneracy`）。恢复路径靠它区分
+    #: "思考太长被预算饿死"（放宽预算有用）与"思考在退化"（放宽预算只是给连发更多
+    #: 空间）——后者在关不掉思考的网关上重试必然再撞一次，故不重试。
+    degeneratedRound: bool = False
 
     @classmethod
     def forTurn(cls, *, agentId: str, roundUserKey: Optional[str] = None, **kw: Any) -> "TurnRunState":

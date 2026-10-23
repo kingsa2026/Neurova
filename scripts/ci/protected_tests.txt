@@ -3664,3 +3664,8 @@ tests/unit/ci/test_nestedPytestBudgetWallsAreOrdered.py
 # （最早一个是 2026-10-22 18:11 留下的）。修后现查会话目录 10→3（回到 pytest 自身 keep=3 的健康态）、警告归零。
 # 负对照同批建：锁主还活着的只读目录一律不碰，连只读位也不许顺手清。逐文件单跑两次同读数 21 passed（7.57s／7.07s）。
 tests/unit/core/test_temp_reclaim.py
+# §6-397（批 H · E）：思考退化而"关思考"这条旋钮发不出去的网关上，恢复轮不再原地重试。
+# 实测读数＝真 AMD 网关同一轮里两次连发各 2048 字符、多花 6 分钟仍无正文；判据钉"模型边界
+# 被调几次"（改前 2、改后 1）＋三条反向格（未退化的 length 空正文照旧重试、旋钮真能到的
+# 网关照旧重试）＋ compat 单源三态。入册前逐文件单跑全绿（9 passed）。
+tests/unit/agent/test_futileThinkingRetryIsSkipped.py
