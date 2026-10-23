@@ -3694,3 +3694,10 @@ tests/unit/agent/test_futileRetryGateReadsRealAssembly.py
 # 重写后的 `test_event_workflow.py` 与承接档逐文件单跑：6 passed（4.01s）／38 passed（3.87s）；
 # 新补的门面转发格做过变异探针（把 `check_memory_safety` 改成 `return None`）⇒ 只有它红，探针已还原。
 tests/unit/ci/test_imaginedApiSuitesRetired.py
+# §6-405（批 N 第二档）：legacy 流式回落那条路也接退化守卫——同一条判定（`ReasoningStreamGuard`），
+# 另一种处置（这条路没有恢复轮 ⇒ 停止消费 + 非空交代）。原语是"它不转发思考所以不刷屏"，
+# 但那正好让空回复**更安静**：连发吃满预算、一个字正文没有、也没人交代为什么（§6-397 事故形状）。
+# 判据打在真异步生成器上，用 `GeneratorExit` 记录"是否被提前关闭"——不这么写就没有读数可取。
+# 活体侧走真 `create_app()` + 真 `/api/v1/chat/stream`（按生产分支条件摘掉 `agent.loop`），
+# 反证＝把进料那一行退回旧形态，退化臂当场读回 300 片全消费＋正文空。逐文件单跑 6 passed。
+tests/unit/agent/test_legacyStreamCutsDegenerateThinking.py
