@@ -10,6 +10,7 @@ import logging
 import typing
 from abc import ABC, abstractmethod
 
+from neurova.core.base_module import StateValuesStore
 from neurova.core.logger import LogLevel
 from neurova.plugins import plugin_permissions
 from neurova.plugins.plugin_manifest import (
@@ -77,10 +78,12 @@ class APIEndpoint:
         return f"APIEndpoint({self.method} {self.path})"
 
 
-class BasePlugin(ABC):
+class BasePlugin(StateValuesStore, ABC):
     """
     所有后端插件的基础抽象类
 
+    与 `BaseModule` 同族但**不共享构造链**（一个是进程内模块、一个是第三方装载物）；
+    共用的是同一份键值状态袋实装 `StateValuesStore`（`set_state_value`/`get_state_value`）。
     扩展了 BaseModule，增加了:
     - API 端点注册能力
     - 前后端资源声明
@@ -106,7 +109,9 @@ class BasePlugin(ABC):
         self._running = False
         self._logger = logging.getLogger(f"plugin.{manifest.plugin_id}")
         self._event_bus = None
-        self._state_manager = None
+        # 键值状态袋的字段名与 `BaseModule` 同一口径（唯一实装在
+        # `core/base_module.StateValuesStore`）；这里只建容器，不再另写一份读写。
+        self._state_values: typing.Dict[str, typing.Any] = {}
 
     @property
     def plugin_id(self) -> str:
@@ -152,16 +157,6 @@ class BasePlugin(ABC):
     def event_bus(self, value):
         """设置事件总线"""
         self._event_bus = value
-
-    @property
-    def state_manager(self):
-        """状态管理器"""
-        return self._state_manager
-
-    @state_manager.setter
-    def state_manager(self, value):
-        """设置状态管理器"""
-        self._state_manager = value
 
     async def initialize(self) -> None:
         """初始化插件"""
@@ -285,30 +280,6 @@ class BasePlugin(ABC):
     def log_error(self, message: str, **kwargs) -> None:
         """记录错误日志"""
         self.log(LogLevel.ERROR, message, **kwargs)
-
-    def get_state(self, key: str, default: typing.Any = None) -> typing.Any:
-        """获取状态
-
-        Args:
-            key: 状态键
-            default: 默认值
-
-        Returns:
-            状态值
-        """
-        if self._state_manager:
-            return self._state_manager.get_state(self.plugin_id, key, default)
-        return default
-
-    def set_state(self, key: str, value: typing.Any) -> None:
-        """设置状态
-
-        Args:
-            key: 状态键
-            value: 状态值
-        """
-        if self._state_manager:
-            self._state_manager.set_state(self.plugin_id, key, value)
 
     def _register_api_endpoint(self, endpoint: APIEndpoint) -> None:
         """注册 API 端点 (由子类实现)
