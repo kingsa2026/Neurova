@@ -123,6 +123,25 @@ DISTRACTORS = [
 
 PROBE_LIMIT = 10
 
+def engineBackend() -> str:
+    """本次读数由哪一档嵌入后端给出（`onnx` / `sentence_transformers` / `lexical` …）。
+
+    基线是**按档**量的：同一份语料在稠密档与词法档下的 MRR 本来就不同
+    （实测词法档 0.303、稠密档 0.35）。不点名档位，换档会读成回归。
+    """
+    from neurova.embedding import get_embedding_engine
+
+    engine = get_embedding_engine()
+    # `None` 是引擎**从未初始化**（懒加载工厂只是建了对象）——此时读数来自检索链
+    # 的命中兜底，而不是任何一档稠密/词法引擎。把它与"词法档"分开点名。
+    backend = getattr(engine, "backend_type", None) if engine is not None else None
+    return str(backend) if backend else "uninitialized"
+
+
+#: 基线取自哪一档（`onnx`）。另有 `sentence_transformers` 一档，它同样是稠密档，
+#: 读数与基线可比——只点名 `onnx` 会把"用 ST 档跑"误判成换档。
+_DENSE_BACKENDS = ("onnx", "sentence_transformers")
+
 # 棘轮基线：2026-10-21 本机实测（台账 §6-381 同值）。只许升，不许降。
 _ASSOCIATIVE_BASELINE = {"hit5": 6, "mrr": 0.35}
 # 目标值：TM-2（条目级抽象线索）/ TM-3（前瞻线索）的验收线，今天够不到。
@@ -223,13 +242,23 @@ class TestAssociativeRecallBaseline:
 
     def test_联想召回基线只降不升(self, recallCorpus):
         reading = _measure(recallCorpus, lambda _text, foreshadow: foreshadow)
-        print(f"[TM-1 联想读数] {reading}  基线={_ASSOCIATIVE_BASELINE}")
+        backend = engineBackend()
+        print(f"[TM-1 联想读数] {reading}  基线={_ASSOCIATIVE_BASELINE} 档={backend}")
+        # 先判「档在不在」，再判「读数掉没掉」：CI 薄锁装不了 numpy/onnxruntime/
+        # sentence-transformers（`requirements-ci.txt` 刻意排除），词法兜底档本征更低
+        # （实测 MRR 0.303）。不先判档，「换了档」会被读成「检索退化了」。
+        assert backend in _DENSE_BACKENDS, (
+            f"本次读数由 {backend} 档给出，而基线取自稠密档 {_DENSE_BACKENDS}——"
+            "两档读数不可比：这是环境缺件，不是检索回归。"
+            "补齐 numpy + onnxruntime（或 sentence-transformers）后重跑，别改基线"
+        )
         assert reading["hit5"] >= _ASSOCIATIVE_BASELINE["hit5"], (
             f"联想 hit@5 由 {_ASSOCIATIVE_BASELINE['hit5']} 掉到 {reading['hit5']}（棘轮只降不升）"
         )
         assert not (reading["mrr"] + 1e-9 < _ASSOCIATIVE_BASELINE["mrr"]), (
             f"联想 MRR 由 {_ASSOCIATIVE_BASELINE['mrr']} 掉到 {reading['mrr']}（棘轮只降不升）"
         )
+
 
 
 class TestMetricInstrumentIsSharp:
