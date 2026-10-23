@@ -3669,7 +3669,17 @@ tests/unit/core/test_temp_reclaim.py
 # 被调几次"（改前 2、改后 1）＋三条反向格（未退化的 length 空正文照旧重试、旋钮真能到的
 # 网关照旧重试）＋ compat 单源三态。入册前逐文件单跑全绿（9 passed）。
 tests/unit/agent/test_futileThinkingRetryIsSkipped.py
-# §6-403（CI 修复 · 静态门禁）：未定义名闸门改问「本文件有没有 import 过这个名字」，注解专用
+# §6-403（批 L 第一档）：「这台网关收不收关思考的键」必须由知道本轮打到谁的路由边界回答。
+# 前一格（§6-397 批 H · E）的判据读的是路由门面 `AgentLLMClient.config.compat`，而门面那份
+# 是 `AgentConfig` 造 `LLMConfig` 时留下的 dataclass 默认值（构造点从不传 compat，全仓无
+# `config.compat =` 赋值）⇒ 恒答"收不到"。amd 恰好同结果所以活体看不出来，声明
+# `supports_thinking_toggle=True` 的网关却被反向误判、白丢一次真能自救的重试。
+# 本档把判据打在真 `AgentLLMClient`＋真 `MultiModelLLMClient`＋真 `LLMProviderManager` 上
+# （只有网络出口打桩），四态齐：amd 形状房 False／声明 toggle 的房 True／钉死静默房不被
+# 池里别的房救回／路由答不出即 fail-open。入册前逐文件单跑全绿（9 passed／4 passed）。
+tests/unit/llm/test_thinkingKnobResolvesAtRoutingBoundary.py
+tests/unit/agent/test_futileRetryGateReadsRealAssembly.py
+# §6-404（CI 修复 · 静态门禁）：未定义名闸门改问「本文件有没有 import 过这个名字」，注解专用
 # 形状（TYPE_CHECKING / 局部导入 / PEP 563 前向引用）不再判红，真拼错的形参照旧红；另一档钉
 # tool_executor 沙箱阻断日志真的点名被拦的路径键值（改前是幻影变量，运行期 NameError）。
 # 入册前逐文件单跑全绿（7 passed / 4 passed）。
