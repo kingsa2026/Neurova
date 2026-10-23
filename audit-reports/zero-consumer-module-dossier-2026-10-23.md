@@ -78,6 +78,24 @@
   要么按 `806c7047` 的旧通道重建 ws_url 来源——**且必须先撤掉 `test_computer_use_browser_integration.py:124`
   那条反挂接守卫**，否则接线即红。两条路都不是改测试。
 
+#### M1 已裁记录（2026-10-24，§6-410 批 O-4）
+
+用户裁：**接线对话框应答**。走的是上面第一条路（挂进真后端的事件流＋留档可读），落地见 §6-410。
+
+- 已接：`PlaywrightBackend` 在 `initialize()` 建 context 处注册 `dialog` 监听（context 级，覆盖全部 tab），
+  `BrowserManager` 把自己那份 handler 交下去（`be._dialog_handler is mgr._dialog_handler` 有判据钉），
+  并新增具名读口 `BrowserManager.dialogLog()` ⇒ 写→读成环。
+- **本档案当时那句"必须先撤掉反挂接守卫"是不准确的，在此更正**：`test_computer_use_browser_integration.py:124`
+  钉的是 `not hasattr(BrowserManager, "_supervisor")`——对象是 `BrowserSupervisor`（需要 CDP ws_url 的那个死类），
+  与 `DialogHandler`／`_dialog_handler` 不是同一个东西。按"挂进真后端事件流"这条路接线**碰不到那条裁决**，
+  复跑该档 579 passed 仍绿即为证。⇒ 反挂接守卫原样保留。
+- **仍未接的是另一半**：`BrowserSupervisor` 握着的「任意 CDP JSON-RPC 方法调用」本批没动也不该顺手动——
+  那要先重建 `ws_url` 来源（`806c7047` 的旧通道已被 `b1dfb744` 随 `CamofoxAdapter` 摘除）。
+  所以 M1 从"两项唯一实装都悬空"变成"**对话框应答已落地；CDP 直连这一项仍无人裁**"。
+- 另记一条本批核实到的事实，供日后判 CDP 那半时用：仓内第二处用 playwright 的是
+  `web_reach/browser_read.py:120`，它自己 `browser.new_page()`、**不经过** `BrowserManager`，
+  靠 Playwright 无监听时的默认行为（`alert` dismiss／`confirm`·`prompt` 取消）读完不挂住。
+
 ### M2 `security/cognitive_security.py`（整文件 663 行）
 
 - **原功能**：一套输入／输出／记忆三面的分级安全判定——`PromptInjectionDetector:109`（英文／中文
@@ -189,11 +207,9 @@
 **未做**（写档案那一拍的状态，2026-10-23）：M1/M2/M3 的任何生产改动、任何接线、任何删除——那三张票等人拍。
 
 **三票其后的下落**（2026-10-24 现查，逐票按上面的"已裁记录"同一口径补记）：
-用户已对三票都拍了方向，落地进度不同——**M3** 裁"先修错位接缝，再定去留"，接缝已随 §6-409
-（批 O-3，`da32c4d7`）收口，模块去留仍待裁；**M2** 裁"先收口单源，暂不进回合链"，排在 §6-409 之后
-（批 O-5，四份规则现查只有 `security/privacy_gate.py` 在役且只按**键名**脱敏，另外三份内容级规则表
-全部零生产消费者）；**M1** 裁"接线对话框应答"，排在批 O-4（唯一有 dialog 事件源的现役后端是
-`PlaywrightBackend`，`initialize()` 里 `new_context()` 那一处；camofox/remote 是 `action()` RPC 面、
-`ScraplingBackend` 走 fetcher，都拿不到该事件——本档案"`send()` 的 id/future 关联全仓仅此一处"那句
-仍然成立，接线只解决对话框、不解决任意 CDP 调用）。三票都**没有**做删除动作。
+用户已对三票都拍了方向，落地进度不同——**M1** 裁"接线对话框应答"，**已落地**（§6-410 批 O-4），
+本档案那句"必须先撤反挂接守卫"随批更正；剩下的只有 CDP 直连那半（见上"已裁记录"）；
+**M3** 裁"先修错位接缝，再定去留"，接缝已随 §6-409（批 O-3，`da32c4d7`）收口，模块去留仍待裁；
+**M2** 裁"先收口单源，暂不进回合链"，排在批 O-5（四份规则现查只有 `security/privacy_gate.py` 在役且只按
+**键名**脱敏，另外三份内容级规则表全部零生产消费者）。三票都**没有**做删除动作。
 

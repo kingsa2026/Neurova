@@ -3748,3 +3748,21 @@ tests/unit/neurflow/test_approval_reply_mechanism.py
 # 12 failed，12 条与批 O-2 那场的同 12 条逐名相同（并会话在途改动所致，见 §6-405/§6-406）；
 # 另把本批 4 个生产档临时换回 HEAD 态复跑 `tests/unit/ci` 那三档红（13 条）⇒ 与本批无关，预存性成立。
 tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
+# §6-410（批 O-4）：JS 对话框应答链接通——`DialogHandler` 从"被实例化后全仓零读者"变成有事件源也有读口。
+# 两头原本都是断的：`BrowserManager.__init__:1596` 建 handler 而无人读；`neurova/computer_use/` 里
+# 零处 `.on(` ⇒ 页面弹 alert/confirm 时 Playwright 按默认行为处理，`handle_dialog` 一次也不会被叫到。
+# 接线只落在唯一拿得到该事件的后端（`PlaywrightBackend.initialize()` 建 context 那处，context 级一处
+# 覆盖全部 tab）；`ScraplingBackend`（fetcher）与 camofox／remote（REST／action RPC 面）没有这个事件源，
+# 判据里专门一格钉住"别给它们顺手加监听"。`web_reach/browser_read.py` 也核实过：它没用 DialogHandler、
+# 靠默认 dismiss，接上去改的是**读取语义**（confirm 从此被 accept）⇒ 本批不动，理由写在判据头部。
+# 九格含三条变异探针实证：①不给后端交 manager 那份 handler ⇒ 仅两格闭环格红（防"接了第二个空口袋"）；
+# ②注册口空转不 `target.on` ⇒ 四格红；③应答只留档不 `accept()` ⇒ 仅那一格红。
+# 另两格是控制：拿**已安装的** `playwright.async_api.Dialog` 比对我们会调的四个成员（不想象 API）；
+# 读口必须给快照不是内部列表（防外部伪造应答记录）。
+# 活体：本机没下载 Chromium（`ms-playwright/chromium-1243` 不存在）⇒ 真页面弹不出来，改由
+# playwright 自己用的事件派发器 `pyee.asyncio.AsyncIOEventEmitter` 驱动真生产代码：注册到 1 条监听、
+# 两个对话框都 `accept`、`dialogLog()` 读出 2 条（type/message/accepted/timestamp 齐）、clear 后归零。
+# 逐文件单跑两次同读数 9 passed（3.39s／3.36s）；`tests/unit/computer_use`＋两份浏览器集成档＋
+# 想象 API 守卫合跑 579 passed／2 skipped，无回归（§6-404 那条"不许挂 `_supervisor`"的反挂接裁决
+# 与本题不是同一对象，原样保留且仍绿）。
+tests/unit/computer_use/test_dialogResponseIsWired.py
