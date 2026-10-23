@@ -26,6 +26,9 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：零导入也可能是「根写窄了扫了个空」，先把扫描面本身钉住。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 2000, f"仓内 .py 扫描面现读 {scanned}，低于下限＝根写错了本格恒绿"
     assert not ast_scan.importersOfModule(REPO_ROOT, MODULE)
 
 

@@ -25,7 +25,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
+#:
+#: 但**不下钻**到 `data/sessions`：`data/` 是跑测产物目录（`.gitignore` 的 `^/data/`），
+#: 干净检出时不存在，而面自证棘轮按「根解出来的路径是不是仓内真实目录」判——下钻一层的常量
+#: 因此会被判成"根写错了"，本档整档掉出它的面。这一档需要的只是**一个仓内真实根**用于面读数，
+#: 会话落点由探针里的 `NEUROVA_SESSIONS_DIR` 现算。
+DATA_ROOT = REPO_ROOT / "data"
 
 
 def _cleanupProbeRealLanding():
@@ -37,11 +42,11 @@ def _cleanupProbeRealLanding():
     路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
     """
     try:
-        if SESSIONS_DIR.is_dir() and not any(SESSIONS_DIR.iterdir()):
-            SESSIONS_DIR.rmdir()
-        if (SESSIONS_DIR.parent == REPO_ROOT / "data" and SESSIONS_DIR.parent.is_dir()
-                and not any(SESSIONS_DIR.parent.iterdir())):
-            SESSIONS_DIR.parent.rmdir()
+        sessions = DATA_ROOT / "sessions"
+        if sessions.is_dir() and not any(sessions.iterdir()):
+            sessions.rmdir()
+        if DATA_ROOT.is_dir() and not any(DATA_ROOT.iterdir()):
+            DATA_ROOT.rmdir()
     except OSError:
         pass
 
@@ -73,7 +78,7 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     # 面读数：本档的清理路径以仓根为锚——锚指错了，「探针没在仓库里留下会话目录」这句就落在不存在的路径上。
     repoEntries = [p for p in REPO_ROOT.iterdir()]
     assert len(repoEntries) > 20, (
-        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，会话落点＝{SESSIONS_DIR}）——"
+        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，数据根＝{DATA_ROOT}）——"
         "量级不对＝锚指错，清理与判定都不来自代码")
     try:
         probeFile.write_text(textwrap.dedent(body), encoding="utf-8")
