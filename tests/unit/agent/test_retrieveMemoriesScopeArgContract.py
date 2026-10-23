@@ -37,16 +37,21 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_ROOTS = ("neurova", "tests")
 
 pytestmark = [pytest.mark.timeout(60)]
 
 
-def _singleArgCallsIn(source: str) -> list:
-    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。"""
+def _singleArgCallsIn(tree) -> list:
+    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。
+
+    收的是**已解析的树**而不是源码：枚举与解析归 `tests/ast_scan`，本档不自付 `ast.parse`。
+    """
     bad = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if node.func.attr != "_retrieve_memories":
@@ -59,10 +64,8 @@ def _singleArgCallsIn(source: str) -> list:
 def test_全仓不得再有单参调用形态():
     offenders = []
     for root in SCAN_ROOTS:
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            lines = _singleArgCallsIn(path.read_text(encoding="utf-8"))
+        for path in ast_scan.filesUnder(REPO_ROOT / root):
+            lines = _singleArgCallsIn(ast_scan.transientTree(path))
             if lines:
                 offenders.append(
                     f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
@@ -76,7 +79,7 @@ def test_全仓不得再有单参调用形态():
 
 
 def test_扫描器真会咬():
-    # `await` 只能出现在 async 函数体内，样本得带宿主——否则 ast.parse 抛 SyntaxError，
+    # `await` 只能出现在 async 函数体内，样本得带宿主——否则解析即 SyntaxError，
     # 反向控制格本身先炸（本档落笔时踩过一次）。
     stale = "async def _probe(pipeline, ctx):\n    await pipeline._retrieve_memories(ctx)\n"
     fixed = (
@@ -85,12 +88,12 @@ def test_扫描器真会咬():
         "        ctx, turnScopeContext(ctx.metadata, ctx.session_id)\n"
         "    )\n"
     )
-    assert _singleArgCallsIn(stale) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
-    assert _singleArgCallsIn(fixed) == [], "正确形被误报"
-    assert _singleArgCallsIn("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n") == [], (
+    assert _singleArgCallsIn(ast.parse(stale)) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
+    assert _singleArgCallsIn(ast.parse(fixed)) == [], "正确形被误报"
+    assert _singleArgCallsIn(ast.parse("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n")) == [], (
         "方法定义被当成调用误报——守卫会咬住生产代码，口径不对"
     )
     # 合成样本自己得能过 ast.parse：带缩进的 def 顶格写会 IndentationError，
     # 于是反向控制格自身先炸（本档落笔时踩过两次，都在这一格）。
     with pytest.raises(SyntaxError):
-        _singleArgCallsIn("    def _retrieve_memories(self):\n        ...\n")
+        _singleArgCallsIn(ast.parse("    def _retrieve_memories(self):\n        ...\n"))
