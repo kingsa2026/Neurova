@@ -1429,6 +1429,50 @@ class MultiModelLLMClient:
             logger.info("Lazily initialized client for %s/%s", provider_id, model)
         return client
 
+    def requestCompatCandidates(
+        self,
+        model: Optional[str] = None,
+        provider_id: Optional[str] = None,
+    ) -> List[Any]:
+        """本轮请求真正会打到的 provider 声明链（与 `_get_client_for_request` 同口径）。
+
+        存在的理由：门面上层（`AgentLLMClient`）那份 `LLMConfig` 构造时从不传 compat，
+        所以「这台网关收不收某个键」在门面层问永远只能拿到 dataclass 默认值——默认值
+        长得就像"已声明为否"（§6-397 批 H 的 E 笔复核抓到）。声明只写在 provider 行上，
+        于是复算也必须在行上做：逐行走发送侧同一个 `resolve_compat()`（教义第 6 条）。
+
+        挑选口径照抄 `_get_client_for_request`：钉死且可用（enabled＋有 key）⇒ 只有它；
+        否则按模型名跨服务商找；再否则就是路由会兜底给的任何可用房。
+        **答不出唯一归属时宁可多给**：调用方据此判"旋钮到不到得了网关"，
+        少给一次＝白丢一次真能自救的重试。
+        """
+        from neurova.llm.provider_compat import resolve_compat
+
+        usable = [
+            p for p in self._provider_manager.list_providers(enabled_only=True)
+            if p.api_key
+        ]
+
+        rows: List[Any] = []
+        if provider_id:
+            pinned = self._provider_manager.get_provider(provider_id)
+            if pinned is not None and pinned.enabled and pinned.api_key:
+                rows = [pinned]
+        if not rows and model:
+            rows = [p for p in usable if model in (p.models or [])]
+        if not rows:
+            rows = usable
+
+        return [
+            resolve_compat(
+                provider_id=p.id,
+                base_url=p.base_url,
+                compat_dict=getattr(p, "compat_dict", None),
+                protocol=str(p.provider),
+            )
+            for p in rows
+        ]
+
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         total_requests = sum(c.request_count for c in list(self._clients.values()))

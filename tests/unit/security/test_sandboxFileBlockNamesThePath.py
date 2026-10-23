@@ -39,14 +39,22 @@ def _render(record: logging.LogRecord) -> str:
 
 
 class _Verdict:
-    """沙箱裁决的最小真实形状：decision=SANDBOX、severity、to_dict()。"""
+    """沙箱裁决的最小真实形状：decision=SANDBOX、severity、`path_values`、to_dict()。
+
+    `path_values` 不是一个可选装饰：裁决面逐个值裁决，结果面就得逐值交回；消费侧
+    （本档钉的那条拒绝语与审计日志）从它取名被拦的路径，而不是去 `reasons` 里抠散文。
+    """
 
     decision = governance.GovernanceDecision.SANDBOX
     severity = SandboxSeverity.READ_ONLY
     reasons = ["中风险,启用沙箱: 检测到系统路径访问"]
 
+    def __init__(self, pathValues=()):
+        self.path_values = list(pathValues)
+
     def to_dict(self) -> dict:
-        return {"decision": "sandbox", "severity": "medium", "reasons": list(self.reasons)}
+        return {"decision": "sandbox", "severity": "medium", "reasons": list(self.reasons),
+                "path_values": [list(pair) for pair in self.path_values]}
 
 
 def _executorWithSandboxVerdict():
@@ -61,7 +69,8 @@ def _executorWithSandboxVerdict():
 
     class _Governance:
         def evaluate_tool_call(self, tool_name, params, user_id=None, scan_all=False):
-            return _Verdict()
+            # 真实治理返回的 `path_values` 就是取数口那一份清单；替身照此形状给，不另造口径。
+            return _Verdict(governance.extract_adjudicable_params(tool_name, params, scan_all=False)[1])
 
     # 被测那一行的取数点在 `neurova.security.governance`：它在函数体内被 import，
     # 所以替身必须钉在**源模块**上（钉 tool_executor 的属性无效——那里从来没有这个名字）。
