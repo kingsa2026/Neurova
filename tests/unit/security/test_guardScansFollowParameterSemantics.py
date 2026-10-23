@@ -54,6 +54,15 @@ SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 SAFE_PATH = "/tmp/users\\xccoo/neurova_scan_probe/safe_read.txt"
 
 
+def _safeSamples() -> list:
+    samples = [str(pathlib.Path(tempfile.mkdtemp()) / "xcc" / "\\xcc9f.txt")]
+    homeProbe = str(pathlib.Path.home() / "x.txt")
+    if not any(f.rule_id == "protected_path"
+               for f in _findings("file_read", {"file_path": homeProbe})):
+        samples.append(SAFE_PATH)
+    return samples
+
+
 def _findings(toolName: str, params: dict) -> list:
     return ToolGuardEngine().guard(toolName, params).findings
 
