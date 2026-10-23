@@ -37,6 +37,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 from tests import ast_scan
 
@@ -95,8 +96,13 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    assert ws.resolve().is_relative_to(pathlib.Path(os.environ.get("TEMP", "")).resolve()) or "Temp" in str(ws), (
-        f"工作区根没有落在临时目录：{ws}"
+    # 临时目录的**口径**取 `tempfile.gettempdir()`，不取 `os.environ["TEMP"]`：
+    # 后者是 Windows 的变量名，Linux 上直接是空串 —— 空路径 `resolve()` 得到 CWD
+    # （本仓根），于是这条判据在 Linux runner 上恒红，而红的原因是尺子拿错了。
+    # 生产侧就是这么取的（`artifacts_api` / `tool_executor` 的 tts 落点同一处口径）。
+    tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
+    assert ws.resolve().is_relative_to(tempRoot) or "Temp" in str(ws), (
+        f"工作区根没有落在临时目录（{tempRoot}）：{ws}"
     )
 
 

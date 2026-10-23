@@ -105,7 +105,12 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    # 解释器名**不写死 `python`**：本仓的跑测环境只在 `.venv/Scripts/python.exe` 或
+    # `python3` 上装了解释器（Linux runner 上 `python` 这条命令根本不存在，
+    # 那样红出来的是"环境缺件"，不是本档要验的运行时活路）。
+    import sys
+
+    result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 

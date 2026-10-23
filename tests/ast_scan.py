@@ -54,6 +54,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_ROOT = REPO_ROOT / "neurova"
 
 
+#: 判据要回答"仓里有哪些文件"时的**唯一枚举出口名**（本模块的 `filesUnder`）。
+#:
+#: 它省的是目录遍历那一段（`rglob` 先进目录再筛），解析仍由调用方自付——故它与
+#: 私有 `ast.parse` 配套时，成本照样随代码总量涨。这条边界由
+#: `tests/unit/test_ci_ast_scan_budget_guard.py` 的 `SHARED_ENUM_ENTRIES` 按名字持有，
+#: **不在这里判**（那个门禁按 AST 认调用点，本模块只提供被调的那个名字）。
+#: 写在常量里的理由是让两边同源可查，不是第二份判据。
+FILES_UNDER_ENTRY = "filesUnder"
+
+
 #: 剪枝目录名：第三方安装产物与构建/缓存目录。判据扫的是**本仓代码**，把这些算进
 #: 扫描面不仅烧时间，还让"绿灯"取决于本机装了什么（实测本仓根下 `.venv`/`node_modules`
 #: 贡献 32711 个 .py，全量读文本 49.68s，越过 pyproject 全局 `timeout = 30`，

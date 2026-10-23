@@ -98,13 +98,14 @@ def _runMaybeCoroutine(value):
     return value
 
 
+# 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛。
+# 必须在**模块顶层**、且在 `import sys` 之后：函数体内的调用要等到 main() 才生效，
+# 而模块级读数就可能先打印（判据 `test_manualScriptStdoutEncoding` 同钉这一条）。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main():
-    # 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:  # noqa: BLE001 —— 老环境不支持就算了，读数不该被它打断
-            pass
     startedAt = time.time()
     before = _dataDirFingerprint()
     realCheck = artifact_digest.checkArtifact
