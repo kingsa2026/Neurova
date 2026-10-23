@@ -20,7 +20,12 @@ from neurova.agent.gates import STAGNATION_GATE, STAGNATION_REASON, appendTermin
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
-from neurova.agent.loops.reasoning_degeneracy import ReasoningStreamGuard, stripDegeneracy
+from neurova.agent.loops.reasoning_degeneracy import (
+    FUTILE_THINKING_RETRY_NOTICE,
+    ReasoningStreamGuard,
+    stripDegeneracy,
+)
+from neurova.llm.provider_compat import thinkingKnobReachesGateway
 from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.core import turn_context
 from neurova.llm_client import LLMResponse
@@ -614,10 +619,17 @@ class OpenAILoop(BaseAgentLoop):
                 # 本轮的空 done 不让出（无正文可看），只让出提示；重试仍空由
                 # `retriedStillEmpty` 分支补可见提示并改写 done.reply（杜绝空气泡）。
                 resumed, notice = self._resumeAfterLengthEmpty(
-                    request_params, compact_messages_for_overflow
+                    request_params, compact_messages_for_overflow, state.degeneratedRound
                 )
                 if resumed is None:
-                    # 无可动旋钮 / 无可折叠 → 原样交出该 done（不二次重试，防循环）
+                    # 不重试的两类原因都走这里：交代替式提示（若有）+ 原样交出该 done。
+                    # 有 notice 时必须并进 reply——只发提示不发正文＝空气泡（既有禁令）。
+                    if notice is not None and produced is not None:
+                        yield notice
+                        produced = {
+                            **produced,
+                            "reply": (produced.get("reply") or "") + notice["data"],
+                        }
                     if produced is not None:
                         yield produced
                     return
@@ -670,15 +682,28 @@ class OpenAILoop(BaseAgentLoop):
         self._rollupFoldedDigest(info)
         return {**request_params, "messages": compact, "_overflowRetried": True}
 
-    def _resumeAfterLengthEmpty(self, request_params: Dict, compactMessages):
+    def _resumeAfterLengthEmpty(
+        self, request_params: Dict, compactMessages, degenerated: bool = False
+    ):
         """输出预算耗尽恢复：返回（下一轮的 request_params, 首轮提示事件）。
 
         `request_params is None` 表示无旋钮可动、不重试。病根在输出侧
         （思考吃满 max_tokens），重试必须同步放宽输出预算 + 思考降级；
         只压缩输入会原样撞同一堵墙。
+
+        `degenerated` 为真时多一道闸：本轮思考是**退化**（同一片段连发）而非"太长"，
+        而"关思考/降档"在这台网关上又发不出去 ⇒ 重试只剩放宽预算，而多给的预算正好
+        被第二段连发吃掉——实测（真 AMD 网关）6 分钟后在同处又截断一次、整轮仍无正文。
+        此时不重试，改为交回一句可见交代（返回值第二项），空气泡禁令不破。
         """
         if request_params.get("_length_empty_retried"):
             return None, None
+        if degenerated and not thinkingKnobReachesGateway(self.llm_client, request_params):
+            logger.warning(
+                "[CTX_RECOVERY] 思考退化且该网关收不到关思考的键（compat 门与档位映射两侧都空），"
+                "跳过原地重试"
+            )
+            return None, {"type": "content", "data": FUTILE_THINKING_RETRY_NOTICE}
         compact, info = compactMessages(request_params.get("messages") or [])
         budgetKnobs = "max_tokens" in request_params or any(
             k in request_params
@@ -842,6 +867,8 @@ class OpenAILoop(BaseAgentLoop):
             if getattr(chunk, "finish_reason", None):
                 finish_reason = chunk.finish_reason
 
+        # 本轮是否因思考退化而截断——恢复路径要靠它分清"思考太长"与"思考在退化"
+        state.degeneratedRound = reasoningGuard.aborted
         if reasoningGuard.aborted:
             found = reasoningGuard.found
             logger.warning(
