@@ -99,8 +99,8 @@ def _runMaybeCoroutine(value):
 
 
 # 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛。
-# 必须在**模块顶层**、且在 `import sys` 之后：函数体内的调用要等到 main() 才生效，
-# 而模块级读数就可能先打印（判据 `test_manualScriptStdoutEncoding` 同钉这一条）。
+# 钉在模块级而不是 `main()` 里：判据认的是**模块顶层**那一次调用，写在 `main()` 内
+# 只覆盖被 main 包住的那一半输出（`__main__` 之外先跑的路由、异常收尾都漏在外面）。
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 

@@ -92,7 +92,11 @@ def trackedFiles() -> list:
     if proc.returncode != 0:
         detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
         raise RuntimeError(f"git ls-files 取不到入库清单（rc={proc.returncode}）：{detail}")
-    return [p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if p.strip()]
+    # 只交**工作树里真在**的：索引与工作树的差是在途改名/刚删的中间态（改名那一笔提交里，
+    # 索引先记新名、旧名的删除要等提交才落），把索引原样交出去，消费方读到一条指不到文件的
+    # 路径就是 `FileNotFoundError`——扫描面成了"跑的时刻撞不撞上在途改动"的运气。
+    return [p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+            if p.strip() and (PROJECT_ROOT / p).is_file()]
 
 
 def indexByBasename(files: list) -> dict:
@@ -405,9 +409,9 @@ CODE_REFERENCE_RULINGS = {
     ("docs/11-legacy/源码图谱.md", "1588"):
         ("", "知识层节点列举的 `neurova/knowledge/integration/` 全史未入库"),
     ("docs/11-legacy/源码图谱.md", "1598"):
-        ("", "33-测试层节点列举的是当时的集成闭环用例；`tests/integration/test_closed_loop.py` "
-             "全史未入库（`c2031c4c` 退役那批同批清理），闭环用例现存于 "
-             "`tests/test_memory/test_closed_loop.py`"),
+        ("tests/test_memory/test_closed_loop.py",
+         "33-测试层节点列举的是「测试层」节点，唯一现存候选在 tests/test_memory/；"
+         "原名 `tests/integration/test_closed_loop.py` 全史未入库，判「已裁定」到现存那份"),
 }
 
 RULING_SETTLED = "已裁定"

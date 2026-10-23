@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+import tests.ast_scan as ast_scan
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
