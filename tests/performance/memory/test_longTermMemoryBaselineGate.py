@@ -29,29 +29,21 @@
 
 import datetime
 import os
-import sys
 import time
 from pathlib import Path
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
 
-#: 全仓判据的仓根与扫描面：提到模块级常量，面自证棘轮才认得出这一档的根
-#: （绑在函数内的名字上会被判成 dynamic，整档安静地掉出闸的面）。
-REPO_ROOT = PROJECT_ROOT
-REPO_WIDE_SCAN_ROOTS = ("neurova", "tests", "scripts")
-#: 本档所在目录（`tests/performance/`）：收集面自查的扫描根，同样是模块级常量。
+#: 本档两处全仓判据的根：``tests/performance/`` 与仓根。必须写在模块级——
+#: 绑在函数里的名字，面自证棘轮（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）
+#: 认不出根位置，整档会静默掉出它的面。
 PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
@@ -554,11 +546,19 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
+        from pathlib import Path
+
+        from tests import ast_scan
+
+        # 枚举归 `tests/ast_scan`（本档不自付 rglob）；根用模块级常量 PERFORMANCE_ROOT
+        collected = ast_scan.filesUnder(PERFORMANCE_ROOT)
+        assert len(collected) > 2, (
+            f"扫描面现读 {len(collected)} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根被改窄时「零游离件」不代表干净")
         strays = [
             p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
-            for p in PERFORMANCE_ROOT.rglob("*.py")
-            if "__pycache__" not in p.parts and p.name != "__init__.py"
-            and not p.name.startswith("test_")
+            for p in collected
+            if p.name != "__init__.py" and not p.name.startswith("test_")
         ]
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
@@ -568,30 +568,34 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
+        from pathlib import Path
 
-        assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
+        from tests import ast_scan
+
+        repo = REPO_ROOT
+        assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts, unparsed, scanned = [], [], 0
-        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
-        # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
-        for root in REPO_WIDE_SCAN_ROOTS:
-            for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("SimpleLongMemEval",)):
+        ghosts, unparsed = [], []
+        scanned = 0
+        for sourceFamily in ("neurova", "tests", "scripts"):
+            # 枚举与解析都归 `tests/ast_scan`（判据成本不再随代码总量涨）
+            for path in ast_scan.filesUnder(repo / sourceFamily):
                 scanned += 1
                 try:
-                    tree = ast_scan.transientTree(ref.path)
-                except SyntaxError:
-                    unparsed.append(ref.path.relative_to(REPO_ROOT).as_posix())
+                    tree = ast_scan.transientTree(path)
+                except (SyntaxError, UnicodeDecodeError):
+                    unparsed.append(path.relative_to(repo).as_posix())
                     continue
                 if any(
                     isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
                     for n in ast.walk(tree)
                 ):
-                    ghosts.append(ref.path.relative_to(REPO_ROOT).as_posix())
-        # 面自证：先证这次真扫到了语料，再谈「没有复活」——根指错时零命中与干净同形。
-        assert scanned > 0, (
-            "扫描面现读 0 个文件（根＝REPO_WIDE_SCAN_ROOTS）——根指错时『没复活』不代表干净")
+                    ghosts.append(path.relative_to(repo).as_posix())
+        assert scanned > 500, (
+            f"扫描面现读 {scanned} 个 .py（根＝neurova/ tests/ scripts/）——"
+            "根被改窄时「零复活」不代表干净")
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"
