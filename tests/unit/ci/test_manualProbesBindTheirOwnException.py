@@ -24,16 +24,28 @@ from __future__ import annotations
 
 import ast
 import builtins
+import pathlib
 import sys
-from pathlib import Path
 
-from tests import ast_scan
+import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = pathlib.Path(__file__).resolve().parents[3]
+# `tests.ast_scan` 是仓内共享取数口，而 `tests` 未必在 sys.path 上（按 rootdir 决定）。
+# 故**先**修路径再导入——顺序反过来时 import 先抛 ModuleNotFoundError，路径那两行
+# 就成了从不执行的装饰（本档初版正是这么写的，实测单跑即红）。
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tests import ast_scan
+
 MANUAL_DIR = REPO / "tests" / "manual"
+
+#: 本档要扫 `tests/manual/` 下 185 个活体脚本，解析与遍历的成本跟脚本数走。
+#: 受保护子集在 CI 上是**带覆盖率**跑的，而 tracing 会让这类纯 CPU 的解析档慢 2–4 倍
+#: （实测同一场：无 ── 17m11s；有 --cov ── 30m45s，全仓扫描型用例 18.7s → 70.3s）。
+#: 沿用全局 30s 会让"机器慢/带覆盖率"直接判成缺陷——判据成本不是回归面。
+#: 这里按本档自己的实测成本给余量（口径与 test_moduleTopLevelShadowing.py 同）。
+pytestmark = pytest.mark.timeout(120)
 
 
 def _lambdaEscapesHandler(tree: ast.AST) -> list:
