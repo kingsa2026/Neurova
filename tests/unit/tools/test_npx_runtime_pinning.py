@@ -212,12 +212,23 @@ class TestUndiciDecompressCarrierIsAtTheCveFloor:
     decompress 把解压后的数据经 zlib 流回调交给下游，下游按设计抛出（例：dump 拦截器
     响应超过 maxSize）时异常从回调里**异步**逃逸，成为未捕获异常并终止 Node 进程。
 
-    故判据两件事：① 锁里的版本在修复下界之上；② 引入方的声明区间仍然允许它——
-    后者防的是「锁被手改成高版、而声明区间其实已经变窄」这种拼出来的绿。
+    判据取**受影响区间**而不是"到了某个下界"：7.x 线唯一的补丁版就是 7.30.1
+    （registry 的 `seven` 标签自 2026-10-15 未动），而它本身就落在
+    `7.15.0–7.30.1` / `8.0.0–8.12.1` 这两个区间之内（公告正文写 `–7.30.0`，同一条
+    公告的 `fixed` 字段给的却是 **7.30.1**，即修法落在 7.30.1 里）。把">= 7.30.1"
+    当判据，等于锁一旦退回 7.29.1 就不再拦——而降级恰恰是这一条最该拦的形态。
+
+    故判据两件事：① 锁里的版本必须**离开**受影响区间，上界两个都取公告的 `fixed`
+    （7.30.1 / 8.12.1）：取 7.30.0 会把 7.30.1 判成受影响，而 7.x 线没有更高的补丁版，
+    那条红没人能修；② 引入方声明的主版本必须与锁同线、且够得到锁里那一版。
     """
 
-    #: OSV 公告给出的首个修复版；7.x 线之上还有 8.x 线，本仓只走 7.x。
-    _FIXED_FLOOR = "7.30.1"
+    #: 受影响区间的下沿（OSV 公告里的 `introduced`）；再往下是更老的版本，
+    #: 不含这段 decompress 实现，不落在本 CVE 面内。
+    _AFFECTED_FLOOR = "7.15.0"
+    #: 两条线各自的修复版（公告 `fixed` 字段）。
+    _FIXED_7X = "7.30.1"
+    _FIXED_IN_8X = "8.12.1"
 
     def _releaseTuple(self, version: str) -> tuple:
         """与 `TestNoKnownVulnerableRuntimePackages._release_tuple` 同口径的版本比较。"""
@@ -232,17 +243,27 @@ class TestUndiciDecompressCarrierIsAtTheCveFloor:
             pytest.skip("undici 已不在这棵依赖树里——压缩面不适用")
         return entry
 
-    def test_locked_undici_is_at_or_above_the_cve_floor(self):
+    def test_locked_undici_left_the_cve_affected_range(self):
+        """锁里的版本必须离开受影响区间——降级与「停在最后一个受影响的补丁版」都算红。"""
         version = self._undiciEntry()["version"]
-        assert self._releaseTuple(version) >= self._releaseTuple(self._FIXED_FLOOR), (
-            f"undici@{version} 低于 CVE-2026-87029 的修复下界 {self._FIXED_FLOOR}——"
+        locked = self._releaseTuple(version)
+        belowFloor = locked < self._releaseTuple(self._AFFECTED_FLOOR)
+        in7xLine = 7 == locked[0] and locked < self._releaseTuple(self._FIXED_7X)
+        in8xLine = 8 == locked[0] and locked < self._releaseTuple(self._FIXED_IN_8X)
+        assert belowFloor or not (in7xLine or in8xLine), (
+            f"undici@{version} 落在 CVE-2026-87029 的受影响区间"
+            f"（{self._AFFECTED_FLOOR}–{self._FIXED_7X} 之前 / 8.0.0–{self._FIXED_IN_8X} 之前）——"
             "decompress 拦截器里异步逃逸的未捕获异常会终止 Node 进程。\n"
             "   引入链: node_modules/@upstash/context7-mcp → undici ^7.0.0\n"
             "   处置：在 tools/npx-runtime 重生成锁把它抬到修复版，不接受降级。"
         )
 
-    def test_context7_declared_range_still_admits_the_fix(self):
-        """抬版不得靠越界：引入方声明的区间必须允许修复版（否则锁是拼出来的）。"""
+    def test_context7_declared_range_is_consistent_with_the_lock(self):
+        """引入方声明的区间必须真的够到锁里那一版——否则锁是拼出来的。
+
+        原写法判「声明下界 <= 修复版」，锁停在 7.29.1 时下界 7.0.0 也 <= 7.30.1，
+        等于没拦。改成两端夹：主版本同线 ＋ 锁里那一版不低于声明下界。
+        """
         lock = _read_json("tools/npx-runtime/package-lock.json")
         declared = ((lock.get("packages") or {})
                     .get("node_modules/@upstash/context7-mcp", {})
@@ -252,13 +273,22 @@ class TestUndiciDecompressCarrierIsAtTheCveFloor:
             "@upstash/context7-mcp 不再声明 undici——本判据的引入链前提没了，"
             "请先复核 undici 是否仍在这棵审计树里，再决定删判据还是改链。"
         )
-        # 只认 `^7.0.0` / `~7.0.0` / 精确版这类单区间声明；取区间下界判定即可
-        # （`^7.0.0` 的下界 7.0.0 只要不高于修复版，修复版就在区间内）。
-        lower = declared.lstrip("^~>=< ").strip()
-        assert self._releaseTuple(lower) <= self._releaseTuple(self._FIXED_FLOOR), (
-            f"引入方声明 {declared!r} 的下界已高于修复版 {self._FIXED_FLOOR}——"
-            "锁里的版本与声明区间不自洽。"
+        lockedVersion = self._undiciEntry()["version"]
+        locked = self._releaseTuple(lockedVersion)
+        declaredMajor = re.search(r"\d+", declared)
+        assert declaredMajor and int(declaredMajor.group()) == locked[0], (
+            f"引入方声明 {declared!r} 与锁里 {lockedVersion} "
+            "不在同一条主版本线上——锁是拼出来的（下界判据在降级时拦不住这一形）。"
         )
+        declaredFloor = self._releaseTuple(declared.lstrip("^~>=< ").strip())
+        assert locked >= declaredFloor, (
+            f"锁里 {lockedVersion} 低于引入方声明的下界 {declared!r}——"
+            "下一次解析会把锁打回声明值，这份绿不可复现。"
+        )
+        if declared.startswith("^"):
+            assert locked < (locked[0] + 1, 0, 0, 0)
+        elif declared.startswith("~"):
+            assert locked[:2] == declaredFloor[:2]
 
 
 class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
