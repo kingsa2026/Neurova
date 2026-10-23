@@ -558,6 +558,8 @@ class TestUncollectedMeasurementFileIsRetired:
         import ast
         from pathlib import Path
 
+        from tests import ast_scan
+
         repo = Path(__file__).resolve().parents[3]
         assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
@@ -565,12 +567,12 @@ class TestUncollectedMeasurementFileIsRetired:
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
         ghosts, unparsed = [], []
+        # 枚举走共享预算（filesUnder）：一次性全仓判据用私有 rglob 会把
+        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
         for root in ("neurova", "tests", "scripts"):
-            for path in (repo / root).rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
+            for path in ast_scan.filesUnder(repo / root):
                 try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                    tree = ast_scan.transientTree(path)
                 except (SyntaxError, UnicodeDecodeError):
                     unparsed.append(path.relative_to(repo).as_posix())
                     continue

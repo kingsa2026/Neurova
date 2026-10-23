@@ -151,9 +151,13 @@ SHARED_BUDGET_ENTRIES = frozenset({
     # 任何"自己解析"的机会，故不计枚举也不计解析、且不下潜。
     "shadowedTopLevelNames", "importersOfModule", "takenPerModule",
 })
-#: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
-#: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
-SHARED_ENUM_ENTRIES = frozenset({"filesUnder"})
+#: 共享预算的**只枚举**入口：枚举归共享、解析由调用方自付，**配私有解析仍须报出**。
+#: `filesUnder` 是当前唯一一条：它省的是目录遍历那一段，解析的成本照样随代码总量涨。
+#: 实测把它当免检通道时，受保护子集里 4 个落点（`test_fullChainRetired` /
+#: `test_longTermMemoryBaselineGate` / `test_retrieveMemoriesScopeArgContract` /
+#: `test_marketDocSkillDigestGate`）改走它之后**仍是**「枚举 + 私有解析」的组合而判据
+#: 全绿 —— 那正是本门禁要抓的形态，不是它该放行的形态。
+SHARED_ENUM_ENTRIES = frozenset({ast_scan.FILES_UNDER_ENTRY})
 
 #: 「解析」落点：**模块别名 → 该模块上属于解析原语的属性名**。
 #: 靶点是「成本随代码总量涨」，故凡把源码编译成语法树/字节码的入口都算：
