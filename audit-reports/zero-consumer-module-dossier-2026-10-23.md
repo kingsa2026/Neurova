@@ -148,6 +148,26 @@
   若裁定保留，正确动作是：先给"预期消费方"定契约（`base_plugin` 那两个不存在的方法要么改名要么删接缝），
   再决定事件语义（改名 `_emit_state_event` 还是真发事件），最后才谈接线——顺序反了就是拿测试补想象。
 
+#### M3 已裁记录（2026-10-24，§6-409 批 O-3）
+
+用户裁：**先修错位接缝，再定去留**。接缝那一半已落地，**模块去留仍待裁**，本档案继续留着：
+
+- 已修（`da32c4d7`）：按上面那句"要么改名要么删接缝"选了**删接缝**——`BasePlugin.get_state/set_state`、
+  `state_manager` 属性对、`_state_manager` 字段整体退役，插件族改挂仓内既有的那份键值状态袋实装
+  （新建 `core/base_module.StateValuesStore`，把原来散在三处的同功能实装收成一处；
+  现查这一对方法全仓零调用方、`tests/unit/test_base_plugin.py` 也从未测过它们 ⇒ 删它不带走任何覆盖）。
+  同根一起清的还有 `base_module.py:53-55` 那三个**全仓零读者**的字段
+  （`_state_manager`/`_log_manager`/`_error_handler`）与 `idle_tracker` 构造函数上三个收下即丢的注入位。
+  **没有**给 `StateManager` 补出那两个方法——那正是"拿测试补想象"的反面教材。
+- 裁后读数（这是留给"定去留"那一拍的关键变化）：`StateManager` 的生产消费者**仍是 0**
+  （`get_state_manager()` 只在 `state_manager.py:387` 自己出现、`StateManager(` 只被自己的工厂调用），
+  原先那三处"看起来要用它"的接缝（`base_module.py:53`／`base_plugin.py:109/164`／`idle_tracker` 形参）
+  本批全部消失 ⇒ **删它不再有任何名义上的消费方需要一并处置**，"接线不是低成本选项"这句
+  在接缝退役后已无对象可接。名实不符那条（`_emit_state_event:220` 不发事件）原样留着，
+  哨兵格 `test_setDoesNotPublishOnEventBus` 仍在。
+- 档案内的行号已随批次漂移（`idle_tracker.py:90`→`:116`、`agent_core.py:679`→`:663`、
+  `base_plugin.py:109/164/300/311` 随本批消失）；复核请按**符号**定位，勿按本档案的行号。
+
 ## 3. 附带两件（都不是票，是记录）
 
 1. **幻影模块 `ProjectManager`**：`neurova.projects` 包不存在、`class ProjectManager` 全仓零命中，
@@ -166,4 +186,14 @@
 `tests/integration/test_event_workflow.py` 重写为总线契约＋状态监听器真实接缝（6 passed）；
 拆掉另外 4 档的"整档静默 skip"形状（57 passed，零 skip）；新增常驻守卫
 `tests/unit/ci/test_imaginedApiSuitesRetired.py`（含静默 skip 判据）。
-**未做**：M1/M2/M3 的任何生产改动、任何接线、任何删除——那三张票等人拍。
+**未做**（写档案那一拍的状态，2026-10-23）：M1/M2/M3 的任何生产改动、任何接线、任何删除——那三张票等人拍。
+
+**三票其后的下落**（2026-10-24 现查，逐票按上面的"已裁记录"同一口径补记）：
+用户已对三票都拍了方向，落地进度不同——**M3** 裁"先修错位接缝，再定去留"，接缝已随 §6-409
+（批 O-3，`da32c4d7`）收口，模块去留仍待裁；**M2** 裁"先收口单源，暂不进回合链"，排在 §6-409 之后
+（批 O-5，四份规则现查只有 `security/privacy_gate.py` 在役且只按**键名**脱敏，另外三份内容级规则表
+全部零生产消费者）；**M1** 裁"接线对话框应答"，排在批 O-4（唯一有 dialog 事件源的现役后端是
+`PlaywrightBackend`，`initialize()` 里 `new_context()` 那一处；camofox/remote 是 `action()` RPC 面、
+`ScraplingBackend` 走 fetcher，都拿不到该事件——本档案"`send()` 的 id/future 关联全仓仅此一处"那句
+仍然成立，接线只解决对话框、不解决任意 CDP 调用）。三票都**没有**做删除动作。
+
