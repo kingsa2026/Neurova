@@ -183,6 +183,26 @@ class TestNoKnownVulnerableRuntimePackages:
             "GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
             "fast-uri 四条（scheme 注入 / scheme 伪造 / host 混淆 / 路径等价）",
         ),
+        # 2026-10-24 实扫命中的另一组（undici 三条修复版同日同一处：7.30.1）：
+        # EventSource 解析器无界内存 DoS、非小写算法 token 绕过 SRI、
+        # 过量 content-encoding 未捕获异常 DoS。载体是 context7-mcp 声明
+        # `undici ^7.0.0` 解析到的 7.29.1；^7 区间顶得到 7.30.1，故按 7.x 线钉。
+        "undici": (
+            "7.30.1",
+            ("node_modules/@upstash/context7-mcp",),
+            "GHSA-4qv8-2p9j-2685 / GHSA-f72v-6w45-q472 / GHSA-xjj6-f33q-929c",
+            "undici 三条（EventSource DoS / SRI 绕过 / content-encoding DoS）",
+        ),
+        # @azure/msal-node 6.0.1：授权码流把参数泄露给攻击者可控端点。
+        # 修复版 7.1.0（6.x 线无修复——上游只发 7.x），故钉 7.1.1。
+        # 载体是 @azure/identity 4.13.3 声明 `@azure/msal-node ^6.0.0`，
+        # ^6 顶不到 7.x，只能由 overrides 顶替。
+        "@azure/msal-node": (
+            "7.1.0",
+            ("node_modules/@azure/identity",),
+            "GHSA-xcx6-jx8p-x3h5",
+            "msal-node 授权码流参数泄露（6.x 线无修复版，须顶到 7.x）",
+        ),
     }
 
     #: 每条包的**全部载体条目**：同名包在树里可能以嵌套形态并存（`<父>/node_modules/<包>`），
