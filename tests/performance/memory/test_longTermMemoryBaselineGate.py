@@ -30,13 +30,28 @@
 import datetime
 import os
 import time
+from pathlib import Path
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
+
+#: 仓根 / 生产源码树 / 性能测试树——**模块级常量**。本档几处结构守卫都要扫仓内树，
+#: 根绑在函数里时面自证棘轮认不出（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`），
+#: 整档会静默掉出它的面：那时「零命中」既可能来自代码干净、也可能来自根写错。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PRODUCTION_ROOT = REPO_ROOT / "neurova"
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+#: 结构守卫要逐文件扫的三片源码树。写成模块级**路径元组**而不是目录名字符串：
+#: 扫描根必须是模块级常量（面自证棘轮按模块级解根），`REPO_ROOT / 名字` 那样的拼法
+#: 要再走一层循环变量，棘轮认不出它 = 整档掉出面。
+SOURCE_TREES = tuple(REPO_ROOT / name for name in ("neurova", "tests", "scripts"))
+#: 扫描面下限：三片树现读约 3500 个 `.py`、生产树约 1000 个，写错一层就落到个位数。
+SCAN_FLOOR = 700
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
@@ -416,16 +431,15 @@ class TestContentUpdateFollowsRecallIndexes:
         任何新的 `x.content = ...` 落在这个方法之外，就是又一处「改了行、没跟索引」。
         """
         import ast
-        from pathlib import Path
 
-        src = (
-            Path(__file__).resolve().parents[3]
-            / "neurova"
-            / "cognitive_layers"
-            / "memory_layer"
-            / "manager.py"
-        )
+        src = PRODUCTION_ROOT / "cognitive_layers" / "memory_layer" / "manager.py"
         tree = ast.parse(src.read_text(encoding="utf-8"))
+        # 面自证：根写错时 `read_text` 未必响，而「扫到 0 处赋值」永远读起来像干净。
+        # 下限按**本档**的「根解到仓内真实目录」来给：`SCAN_FLOOR` 是跨三片树的总量口径，
+        # 拿来量单个模块就变成常量错配（实测一个文件 49 个顶层节点）。
+        assert len(tree.body) > 20, (
+            f"`manager.py` 顶层节点只有 {len(tree.body)} 个（下限 20）——根写错了"
+        )
         offenders = []
         for func in ast.walk(tree):
             if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -539,15 +553,17 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
-        strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
-            if "__pycache__" not in p.parts and p.name != "__init__.py"
-            and not p.name.startswith("test_")
-        ]
+        scanned = 0
+        strays = []
+        for path in ast_scan.filesUnder(PERFORMANCE_ROOT, ".py"):
+            scanned += 1
+            if path.name == "__init__.py" or path.name.startswith("test_"):
+                continue
+            strays.append(path.relative_to(REPO_ROOT).as_posix())
+        # 面自证：枚举入口给的是递归全集，但根写窄时它同样安静地给出空清单。
+        assert scanned >= 4, (
+            f"`tests/performance/` 现读 {scanned} 个 .py（下限 4）——根写错了，「零散件」恒绿"
+        )
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
@@ -555,31 +571,21 @@ class TestUncollectedMeasurementFileIsRetired:
         )
 
     def test_旧件与其符号不得复活(self):
-        import ast
-        from pathlib import Path
-
-        from tests import ast_scan
-
-        repo = Path(__file__).resolve().parents[3]
-        assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
+        assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts, unparsed = [], []
-        # 枚举走共享预算（filesUnder）：一次性全仓判据用私有 rglob 会把
-        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
-        for root in ("neurova", "tests", "scripts"):
-            for path in ast_scan.filesUnder(repo / root):
-                try:
-                    tree = ast_scan.transientTree(path)
-                except (SyntaxError, UnicodeDecodeError):
-                    unparsed.append(path.relative_to(repo).as_posix())
-                    continue
-                if any(
-                    isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
-                    for n in ast.walk(tree)
-                ):
-                    ghosts.append(path.relative_to(repo).as_posix())
-        assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
+        # 枚举与解析走共享入口（`filesUnder` + `classDefsIn`）：自己的 `rglob + ast.parse`
+        # 会把「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
+        ghosts = []
+        scanned = 0
+        for tree in SOURCE_TREES:
+            scanned += len(ast_scan.filesUnder(tree, ".py"))
+            ghosts.extend(path.relative_to(REPO_ROOT).as_posix()
+                          for path, _line in ast_scan.classDefsIn(tree, "SimpleLongMemEval"))
+        # 面自证：`SCAN_TREES` 写窄时上面那格会读成「干净」，先把扫描面钉住。
+        assert scanned > SCAN_FLOOR, (
+            f"三片源码树只扫到 {scanned} 个 .py（下限 {SCAN_FLOOR}）——根写错了本格恒绿"
+        )
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

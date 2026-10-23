@@ -113,6 +113,9 @@ class TestPhantomKnobSweep:
         """幻影旋钮删干净：schema、放行表、执行体三处都不该再有它。"""
         assert "max_marks" not in str(_BUILTIN_SCHEMAS)
         assert "max_marks" not in str(_COMPUTER_TOOL_PARAM_KEYS)
+        # 面自证：本格断的是「零残留」，而零残留既可能是「真删干净」也可能是「根写窄了扫了个空」。
+        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert scanned > 700, f"生产树扫描面现读 {scanned} 个 .py，低于下限＝PROD_ROOT 写错本格恒绿"
         # hints 预筛是充分条件：连 "max_marks" 这七个字节都没出现的文件不可能命中
         leftovers = [
             ref.path.relative_to(REPO).as_posix()
