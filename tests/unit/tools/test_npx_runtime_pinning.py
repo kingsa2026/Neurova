@@ -326,15 +326,54 @@ class TestNestedCarrierSubtreeIsKeptWhole:
         )
 
     def test_overrides_pin_each_line_by_its_parent(self):
-        """按父包分段钉版的 overrides 必须在清单里，否则 1.x 线按 semver 顶不到修复版。"""
+        """body-parser 两条声明线各按自己的父包钉，**顶层不得有平铺条目**。
+
+        为什么顶层那条必须缺位：它一旦存在，npm 按名字先命中它，`@bytebase/dbhub`
+        那条分段条目就被遮住——嵌套那份随之从树里消失（复审见下一条断言）。
+        两条线各自的钉法：根上 express 5 的 `^2.2.1` → 2.4.0；
+        dbhub 的 express 4 `~1.20.5` 按 semver 顶不到 1.20.9，只能按父包顶替。
+        """
         pkg = _read_json("tools/npx-runtime/package.json")
         overrides = pkg.get("overrides") or {}
-        assert "body-parser" in overrides, (
-            "overrides 缺顶层 body-parser 钉版——express 5 那条线会重新解析到 2.3.0"
+        assert "body-parser" not in overrides, (
+            "overrides 出现了顶层 flat `body-parser` 钉版——它会遮住按父包的分段条目，"
+            "把 dbhub 的 express 4 子树并到顶层（本类下一条断言即报红）"
+        )
+        express = overrides.get("express")
+        assert isinstance(express, dict) and express.get("body-parser"), (
+            "overrides 缺 `express → body-parser` 分段钉版——根上 express 5 那条线会重新解析到 2.3.0"
         )
         dbhub = overrides.get("@bytebase/dbhub")
         assert isinstance(dbhub, dict) and dbhub.get("body-parser"), (
             "overrides 缺 `@bytebase/dbhub → body-parser` 分段钉版——\n"
             "  express@4.22.3 声明 `body-parser ~1.20.5`，按 semver 顶不到 1.20.9，\n"
             "  只有按父包钉才能保住子树并把那一份抬到修复版。"
+        )
+
+    def test_overrides_never_merge_the_nested_subtree_away(self):
+        """平铺 overrides 一旦**真的**把嵌套那份并掉，本类前两条就会空转——故在这里拦。
+
+        背景（PR #369）：修 GHSA-27r3-jxmh-p828 时，清单里同时出现过顶层
+        `"body-parser": ...` 与按父包分段的 `{"@bytebase/dbhub": {"body-parser": ...}}`。
+        重生成锁之后 `node_modules/@bytebase/dbhub/node_modules/body-parser`
+        整条从树里消失：**分段那条被平铺那条遮住**，子树被并到顶层只剩一份 2.x。
+        OSV 仍是绿的（2.4.0 已修），本类前两条的载体却全部落空——"绿了，判据却空了"。
+
+        故判据落在 overrides 的形状上，而不是锁上：同名包被分段钉过，
+        就不得再有指向它的平铺条目。
+        """
+        pkg = _read_json("tools/npx-runtime/package.json")
+        overrides = pkg.get("overrides") or {}
+        segmented = {
+            name
+            for value in overrides.values()
+            if isinstance(value, dict)
+            for name in value
+        }
+        flattened = sorted(segmented & {key for key in overrides if isinstance(overrides[key], str)})
+        assert not flattened, (
+            f"overrides 里 `{', '.join(flattened)}` 同时存在平铺条目与按父包分段条目——\n"
+            "  npm 会按名字先命中平铺那条，分段条目被遮住，嵌套子树随之被并到顶层。\n"
+            "  本仓要的是「子树保留、各自抬到修复版」，故只留分段那一条，"
+            "并把父包的声明线写进本文件的分段下界。"
         )
