@@ -183,6 +183,13 @@ class TestNoKnownVulnerableRuntimePackages:
         ),
     }
 
+    #: 载体键 → 该载体所在声明线的修复下界。只有分段修复的包需要它：
+    #: 拿 1.20.9 去卡 2.x 那份等于把「已修」判成「未修」，两条声明线各有自己的下界。
+    #: 未登记的载体一律按 `_KNOWN_FLOORS` 的取值卡。
+    _FLOOR_BY_CARRIER = {
+        "node_modules/body-parser": "2.4.0",
+    }
+
     def _release_tuple(self, version: str) -> tuple:
         """把版本串归一成可比元组：`2.0.0-1` 是"2.0.0 之后的第一个预发布"。"""
         core, _, tail = version.partition("-")
@@ -197,14 +204,17 @@ class TestNoKnownVulnerableRuntimePackages:
             carriers = self._KNOWN_FLOOR_CARRIERS.get(name, (f"node_modules/{name}",))
             present = [key for key in carriers if key in packages]
             if not present:
-                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+                # 只有**全部**载体都消失才算「承载者被整体摘除」（合格形态，不报红）；
+                # 少一份而另一份还在，就是本类要拦的形态——缺失的落点由
+                # `test_everyRegisteredCarrierSurvives` 报红，这里不重复。
                 continue
             for key in present:
                 version = packages[key].get("version")
-                if self._release_tuple(version) >= self._release_tuple(floor):
+                carrier_floor = self._FLOOR_BY_CARRIER.get(key, floor)
+                if self._release_tuple(version) >= self._release_tuple(carrier_floor):
                     continue
                 problems.append(
-                    f"{key}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
+                    f"{key}@{version} 低于 {cve} 的修复下界 {carrier_floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"
                     "    处置：不要手改锁文件里的版本号（父包用的是精确版本声明，"
                     "真实解析仍是旧版），改为在 tools/npx-runtime 重跑 "
@@ -221,4 +231,79 @@ class TestNoKnownVulnerableRuntimePackages:
         assert self._release_tuple(entry["version"]) >= self._release_tuple("2.8.3"), (
             f"yaml@{entry['version']} 相对修复版本 2.8.3 属降级——"
             "本仓只接受抬升到修复版或整体摘除，不接受回退到有漏洞的版本。"
+        )
+
+
+class TestNestedCarrierSubtreeIsKeptWhole:
+    """body-parser 的两条声明线各落一份，抬版**不许**把嵌套子树并掉。
+
+    背景（PR #369 构建 `cnb-p98-1k5la1aci#008` 的红）：GHSA-27r3-jxmh-p828 的两份载体
+    `node_modules/body-parser`（express 5.2.1 → `^2.2.1`）与
+    `node_modules/@bytebase/dbhub/node_modules/body-parser`（dbhub → express 4.22.3 →
+    `~1.20.5`）各自要走自己的声明线。
+
+    把嵌套落点并到顶层、只留一份的写法（`overrides: {"body-parser": "2.4.0"}` 这种
+    平铺覆盖）能让 OSV 变绿，代价是**审计面不再与真实解析同形**：
+    `@bytebase/dbhub/node_modules/express@4.22.3` 仍声明 `body-parser ~1.20.5`，
+    而 2.x 是 ESM + 命名导出，两者并不通用。故本仓的处置按父包分段钉：
+    `{"@bytebase/dbhub": {"body-parser": "1.20.9"}}`——子树保留、版本升到修复版。
+
+    三类断言合起来才有意义：下界（上一类）、**在场**（本类）、**销账与清单咬合**
+    （本类的最后一条）。少任何一类，「审计面绿了、判据却空了」都能通过。
+    """
+
+    #: 本类钉住的包 → 它在本树里的**全部**落点（缺一即报红）。
+    _CARRIERS = {
+        "body-parser": (
+            "node_modules/body-parser",
+            "node_modules/@bytebase/dbhub/node_modules/body-parser",
+        ),
+    }
+
+    def test_everyRegisteredCarrierSurvives(self):
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        packages = lock.get("packages") or {}
+        missing = [
+            f"{name} → {key}"
+            for name, keys in self._CARRIERS.items()
+            for key in keys
+            if key not in packages
+        ]
+        assert not missing, (
+            "登记的载体落点消失了:\n  " + "\n  ".join(missing) + "\n"
+            "  上一类此时会静默退化为空转（看着绿、其实那一份没人查）。\n"
+            "  确属上游换掉了承载者，须同步改 _KNOWN_FLOOR_CARRIERS 与 _CARRIERS 并写明理由；\n"
+            "  只想让它变绿而把落点从登记里删掉，正是本判据要拦的形态。"
+        )
+
+    def test_nested_carrier_sits_under_its_own_parent(self):
+        """嵌套那份必须仍落在 dbhub 子树下——落在顶层就说明子树被并掉了。"""
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        packages = lock.get("packages") or {}
+        nested = "node_modules/@bytebase/dbhub/node_modules/body-parser"
+        express = "node_modules/@bytebase/dbhub/node_modules/express"
+        assert nested in packages, f"{nested} 不在锁里——dbhub 的 express 4 子树被并掉了"
+        declared = (packages[express].get("dependencies") or {}).get("body-parser")
+        assert declared, (
+            f"{express} 不再声明 body-parser——引入链变了，本类的分段下界需重核"
+        )
+        root_version = (packages.get("node_modules/body-parser") or {}).get("version", "")
+        nested_version = packages[nested].get("version", "")
+        assert root_version.split(".")[0] != nested_version.split(".")[0], (
+            f"两条声明线解析到同一个大版本（{root_version} / {nested_version}）——"
+            "子树已被并成一份，审计树不再与真实解析同形"
+        )
+
+    def test_overrides_pin_each_line_by_its_parent(self):
+        """按父包分段钉版的 overrides 必须在清单里，否则 1.x 线按 semver 顶不到修复版。"""
+        pkg = _read_json("tools/npx-runtime/package.json")
+        overrides = pkg.get("overrides") or {}
+        assert "body-parser" in overrides, (
+            "overrides 缺顶层 body-parser 钉版——express 5 那条线会重新解析到 2.3.0"
+        )
+        dbhub = overrides.get("@bytebase/dbhub")
+        assert isinstance(dbhub, dict) and dbhub.get("body-parser"), (
+            "overrides 缺 `@bytebase/dbhub → body-parser` 分段钉版——\n"
+            "  express@4.22.3 声明 `body-parser ~1.20.5`，按 semver 顶不到 1.20.9，\n"
+            "  只有按父包钉才能保住子树并把那一份抬到修复版。"
         )
