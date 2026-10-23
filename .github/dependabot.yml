@@ -90,6 +90,11 @@ updates:
       # 「改 overrides → 重生成锁 → osv 实扫」，见 overridesNote 与
       # docs/05-reports/dependency-cve-ledger.md 的 CVE-2026-33532 一节。
       - dependency-name: "yaml"
+      # 同形同源：context7-mcp 声明 `undici ^7.0.0`，本仓 overrides 钉 7.30.1
+      # 收口 CVE-2026-109383（证书验证绕过）。Dependabot 直接改传递依赖会与
+      # overrides 打架；升级路径同样是「改 overrides → 重生成锁 → osv 实扫」。
+      - dependency-name: "undici"
+        update-types: ["version-update:semver-major"]
   # ── Rust：Tauri 桌面壳（NeurUI/src-tauri/Cargo.lock）────────────────────
   # Issue #56 残留边界：该依赖树此前从不被任何工具看过（pip-audit 与
   # npm audit 都覆盖不到 Rust）。Cargo 更新由 dependabot 每周提单。
