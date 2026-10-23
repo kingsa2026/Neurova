@@ -3731,3 +3731,20 @@ tests/unit/computer_use/test_environment_setup.py
 # 变异探针（`_APPROVAL_WAIT_S` 改 90）⇒ 仅主判据红，且整档计时同步涨到 190.50s（同一次探针
 # 既读出"形状被抓住"也读出"这确实是墙外成本"）；恢复后 10 passed（13.30s／12.51s 两次）。
 tests/unit/neurflow/test_approval_reply_mechanism.py
+# §6-409（批 O-3）：对象内键值状态袋收口成**一处**实装，三族共用；`BasePlugin` 那份错位接缝退役。
+# 收口前三份并存：`BaseModule`（在役，IdleTimeTracker 写 6 键＋一格读回）、`SleepConsolidation`
+# （同功能第二拷贝，读的是自己那个 `_state` dict）、`BasePlugin.get_state/set_state`（坏的：
+# 转发到 `StateManager` 从未存在的 `get_state(plugin_id,…)`，且 `_state_manager` 从不被注入、
+# 这一对方法全仓零调用方）。判据不数定义行就完事——它比**函数本体的同一性**
+# （`getattr(cls, name) is StateValuesStore.set_state_value`），各抄一份"长得像"的会当场红。
+# 反面控制两条：状态机那一对同名不同职的 `BaseModule.get_state()/set_state(ModuleState)` 必须
+# 仍在且仍不收 key（否则本批就成了顺手抹掉一半契约）；`BaseModule` 的具名注入位不得被一起削掉。
+# 红→绿读数：实现前 5 failed／4 passed（红在行为与形状断言上——`AttributeError` 级别的
+# "插件族没有这两条方法"、定义面报出的两处并存、广告了转不出去的构造参），实现后 9 passed
+# （3.22s／3.27s 两次同读数）。活体（真 tracker＋真 consolidation＋真 BasePlugin 实例，
+# 隔离数据根，脚本即用即删）：启动后 `running=True`／`initialized=True`／`started=True`，
+# 停止后 `running=False`／`stopped=True`，插件写读与默认值通路，`_state_manager` 已从实例字段消失。
+# A/B 归零验证：`tests/unit/core`＋`plugins`＋`memory`＋`test_base_plugin` 共 3373 passed／
+# 12 failed，12 条与批 O-2 那场的同 12 条逐名相同（并会话在途改动所致，见 §6-405/§6-406）；
+# 另把本批 4 个生产档临时换回 HEAD 态复跑 `tests/unit/ci` 那三档红（13 条）⇒ 与本批无关，预存性成立。
+tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
