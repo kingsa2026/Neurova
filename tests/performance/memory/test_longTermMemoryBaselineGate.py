@@ -30,11 +30,18 @@
 import datetime
 import os
 import time
+from pathlib import Path
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
+
+#: 扫描根一律写在**模块级常量**上：「面自证」棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 只按模块级绑定解根，绑进函数局部的名字认不出 ⇒ 那档整档掉出它的面，零命中与根写窄都不再被问。
+#: 本档深度 `tests/performance/memory/x.py` ⇒ 仓根是 `parents[3]`，`tests/performance` 是 `parents[1]`。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = [pytest.mark.timeout(180)]
 
@@ -416,10 +423,9 @@ class TestContentUpdateFollowsRecallIndexes:
         任何新的 `x.content = ...` 落在这个方法之外，就是又一处「改了行、没跟索引」。
         """
         import ast
-        from pathlib import Path
 
         src = (
-            Path(__file__).resolve().parents[3]
+            REPO_ROOT
             / "neurova"
             / "cognitive_layers"
             / "memory_layer"
@@ -539,15 +545,16 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in PERFORMANCE_ROOT.rglob("*.py")
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
+        scanned = len(list(PERFORMANCE_ROOT.rglob("*.py")))
+        assert scanned > 4, (
+            f"扫描面现读 {scanned} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根若被改窄，「零散件」这句就是空转")
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
@@ -556,17 +563,18 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
-        from pathlib import Path
 
-        repo = Path(__file__).resolve().parents[3]
+        repo = REPO_ROOT
         assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
         ghosts, unparsed = [], []
+        scanned = 0
         for root in ("neurova", "tests", "scripts"):
             for path in (repo / root).rglob("*.py"):
+                scanned += 1
                 if "__pycache__" in path.parts:
                     continue
                 try:
@@ -579,5 +587,6 @@ class TestUncollectedMeasurementFileIsRetired:
                     for n in ast.walk(tree)
                 ):
                     ghosts.append(path.relative_to(repo).as_posix())
+        assert scanned > 500, f"扫描面现读 {scanned} 个 .py——量级不对＝根被改窄，复活判据就只剩空转"
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"
