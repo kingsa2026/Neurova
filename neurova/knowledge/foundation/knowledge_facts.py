@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 
