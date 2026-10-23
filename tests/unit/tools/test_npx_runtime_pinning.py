@@ -162,6 +162,25 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # PR #369 构建 cnb-p98-1k5la1aci#008 实扫命中（osv_audit.py 退出 1）：
+        # 一个压缩帧 + 尾随字节即可让进程未捕获异常退出（HIGH，7.5），无鉴权、无路由要求。
+        # 树里有两份载体：express@5.2.1 → ^2.2.1 解析到 2.3.0；
+        # @bytebase/dbhub → express@4.22.3 → ~1.20.5 解析到 1.20.8。两条都要抬。
+        "body-parser": (
+            "1.20.9",
+            ("node_modules/express", "node_modules/@bytebase/dbhub/node_modules/express"),
+            "GHSA-27r3-jxmh-p828",
+            "两条声明线各有修复版：2.x 线 2.4.0，1.x 线 1.20.9",
+        ),
+    }
+
+    #: 每条包的**全部载体条目**：同名包在树里可能以嵌套形态并存（`<父>/node_modules/<包>`），
+    #: 只核根条目等于给嵌套那份放行。键为包名，值为承载条目的 lock 键元组。
+    _KNOWN_FLOOR_CARRIERS = {
+        "body-parser": (
+            "node_modules/body-parser",
+            "node_modules/@bytebase/dbhub/node_modules/body-parser",
+        ),
     }
 
     def _release_tuple(self, version: str) -> tuple:
@@ -175,14 +194,17 @@ class TestNoKnownVulnerableRuntimePackages:
         packages = lock.get("packages") or {}
         problems = []
         for name, (floor, chains, cve, note) in self._KNOWN_FLOORS.items():
-            entry = packages.get(f"node_modules/{name}")
-            if entry is None:
+            carriers = self._KNOWN_FLOOR_CARRIERS.get(name, (f"node_modules/{name}",))
+            present = [key for key in carriers if key in packages]
+            if not present:
                 # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
                 continue
-            version = entry.get("version")
-            if self._release_tuple(version) < self._release_tuple(floor):
+            for key in present:
+                version = packages[key].get("version")
+                if self._release_tuple(version) >= self._release_tuple(floor):
+                    continue
                 problems.append(
-                    f"{name}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
+                    f"{key}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"
                     "    处置：不要手改锁文件里的版本号（父包用的是精确版本声明，"
                     "真实解析仍是旧版），改为在 tools/npx-runtime 重跑 "
