@@ -307,7 +307,9 @@ class MQTTAdapter(ChannelAdapter):
         )
         base.metadata = dict(base.metadata or {})
         base.metadata.update({
-            "agent_id": str(data.get("agent_id") or ""),
+            "agent_id": str(
+                data.get("agent_id") or getattr(self, "agent_id", "") or ""
+            ),
             "takeover_reason": str(data.get("reason") or data.get("takeover_reason") or ""),
         })
         base.sender_id = operator

@@ -184,7 +184,7 @@
 `jianying_comfyui_cli_integration.md`、`stub-cleanup-plan.md`、
 `token-estimation-inconsistency-analysis.md`、`_git_automation.py`（脚本，非文档）
 
-`specs/2026-10-23-knowledge-governance-remaining-design.md`（知识治理四项剩余缺口：人工接管／一般拒答／token 归因／大语料索引；设计与实施状态，剩余 producer/1M 项）
+`specs/2026-10-23-knowledge-governance-remaining-design.md`（知识治理四项缺口：人工接管／一般拒答／token 归因／大语料索引；设计、拍板与实施终态，含飞书服务台/微信客服/MQTT producer 与 ANN 1M 实测）
 
 ## 3. 已识别的重复/待合并项（下一步清理）
 

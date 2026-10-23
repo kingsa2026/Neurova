@@ -206,13 +206,19 @@ async def send_message(
 # ============================================================
 
 
-def _feishuCallbackToken(data: dict) -> str:
-    """飞书回调令牌的取法只此一份：v2 在 `header`.token，v1 在顶层 token。
+def _feishuEnvelope(data: dict) -> tuple:
+    """飞书回调信封的唯一取法：返回 (token, event_type)。
 
-    "取哪个位置"由端点负责（它读信封），"比不比、怎么比"只在适配器那一份
-    （`FeishuAdapter.verify_event_token`）——选实例与投递因此过的是同一道门。
+    v2 在 `header`，v1 在顶层；令牌比不比、怎么比只在适配器那一份。
+    事件类型也在这里取，避免 handler 再写一遍 header 读法。
     """
-    return (data.get("header") or {}).get("token") or data.get("token") or ""
+    header = data.get("header") or {}
+    token = header.get("token") or data.get("token") or ""
+    return token, str(header.get("event_type") or "")
+
+
+def _feishuCallbackToken(data: dict) -> str:
+    return _feishuEnvelope(data)[0]
 
 
 def _wecomEncryptOf(xmlText: str) -> str:
@@ -268,6 +274,23 @@ def inboundCredentialPredicate(channelType: str, body: bytes, queryParams, heade
 
         return _dingtalkOk
 
+    if channelType == "wechat":
+        msgSignature = queryParams.get("msg_signature", "") if queryParams is not None else ""
+        timestamp = queryParams.get("timestamp", "") if queryParams is not None else ""
+        nonce = queryParams.get("nonce", "") if queryParams is not None else ""
+        encrypt = _wecomEncryptOf(body.decode("utf-8", errors="replace"))
+        if not encrypt:
+            return None
+
+        def _wechatOk(adapter) -> bool:
+            try:
+                adapter.verifyKfSignature(msgSignature, timestamp, nonce, encrypt)
+            except (ValueError, AttributeError):
+                return False
+            return True
+
+        return _wechatOk
+
     if channelType == "wecom":
         msgSignature = queryParams.get("msg_signature", "") if queryParams is not None else ""
         if not msgSignature:
@@ -321,6 +344,8 @@ async def handle_webhook(channel_type: str, request: Request):
                 adapter, body, request.query_params, request.headers)
         elif channel_type == "wecom":
             return await _handle_wecom_webhook(adapter, body, request.query_params, request)
+        elif channel_type == "wechat":
+            return await _handle_wechat_webhook(adapter, body, request.query_params)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported webhook for {channel_type}")
     except HTTPException:
@@ -362,6 +387,16 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
         return adapter.verify_url_challenge(data["challenge"], token)
 
     adapter.verify_event_token(token)
+
+    # 服务台工单更新是事件，不是消息：走适配器的阶段判定，命中才 emit 接管事件。
+    # 不能交给 buildInboundMessage（它读 message 字段，工单事件没有）。
+    if _feishuEnvelope(data)[1] == "helpdesk.ticket.updated_v1":
+        takeover = adapter.handle_helpdesk_ticket_event(data.get("event") or {})
+        if takeover is not None:
+            from neurova.channels.base import ChannelEventType
+
+            await adapter._emit_event(*takeover)
+        return {"code": 0}
 
     # 内容口径不在这里：事件体 → 统一消息 只有 `FeishuAdapter.buildInboundMessage` 一份（§6-185）。
     # 此前这一支自己写了一份"只认 text"的解析，于是同一平台两种形状——语音进回合是空串、
@@ -418,6 +453,33 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
     from neurova.channels.base import ChannelEventType
 
     await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
+    return {"errcode": 0}
+
+
+async def _emitChannelMessage(adapter, event_type, channel_msg: ChannelMessage) -> None:
+    """EventDoor 形状守卫的显式入口：只接 `ChannelMessage`，不接任意对象。"""
+    await adapter._emit_event(event_type, channel_msg)
+
+
+async def _handle_wechat_webhook(adapter, body: bytes, query_params) -> dict:
+    """微信客服回调：URL 验证解密 echostr；事件回调走 sync_msg 后逐条投递。"""
+    if not getattr(adapter, "kf_mode", False):
+        raise ValueError("WeChat webhook only supports kf_mode")
+    msg_signature = query_params.get("msg_signature", "")
+    timestamp = query_params.get("timestamp", "")
+    nonce = query_params.get("nonce", "")
+    echostr = query_params.get("echostr", "")
+    if echostr:
+        return Response(
+            content=adapter.verify_kf_url(msg_signature, timestamp, nonce, echostr),
+            media_type="text/plain",
+        )
+    events = await asyncio.to_thread(
+        adapter.handle_kf_callback,
+        msg_signature, timestamp, nonce, body.decode("utf-8"),
+    )
+    for event_type, message in events:
+        await _emitChannelMessage(adapter, event_type, message)
     return {"errcode": 0}
 
 

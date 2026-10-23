@@ -38,6 +38,48 @@ def test_capability_defaults_to_unsupported():
         manager.unregister_adapter("probe")
 
 
+def test_feishu_helpdesk_stage_transition_emits_takeover():
+    """飞书服务台原生事件：stage 1→2 开始，人工阶段关闭结束。"""
+    from neurova.channels.feishu import FeishuAdapter
+
+    adapter = FeishuAdapter(ChannelConfig(channel_type="feishu"))
+    assert adapter.humanTakeoverEvents is True
+
+    started = adapter.handle_helpdesk_ticket_event({
+        "object": {
+            "ticket_id": "t-1", "helpdesk_id": "h-1", "chat_id": "chat-1",
+            "stage": 2, "status": 2, "updated_at": 1700000000,
+            "agents": [{"id": {"user_id": "op-1"}, "name": "Operator"}],
+        },
+        "old_object": {"stage": 1, "status": 1},
+    })
+    assert started is not None
+    event_type, message = started
+    assert event_type == ChannelEventType.HUMAN_TAKEOVER_STARTED
+    assert message.chat_id == "chat-1"
+    assert message.sender_id == "op-1"
+    assert message.metadata["takeover_reason"] == "helpdesk_stage_human"
+
+    ended = adapter.handle_helpdesk_ticket_event({
+        "object": {
+            "ticket_id": "t-1", "helpdesk_id": "h-1", "chat_id": "chat-1",
+            "stage": 2, "status": 50, "updated_at": 1700000100,
+            "closed_by": {"id": {"user_id": "op-2"}, "name": "Closer"},
+        },
+        "old_object": {"stage": 2, "status": 2},
+    })
+    assert ended is not None
+    event_type, message = ended
+    assert event_type == ChannelEventType.HUMAN_TAKEOVER_ENDED
+    assert message.sender_id == "op-2"
+    assert message.metadata["takeover_reason"] == "helpdesk_ticket_closed"
+
+    assert adapter.handle_helpdesk_ticket_event({
+        "object": {"ticket_id": "t-1", "chat_id": "chat-1", "stage": 2, "status": 2},
+        "old_object": {"stage": 2, "status": 2},
+    }) is None
+
+
 def test_mqtt_declares_and_parses_explicit_takeover_event():
     """MQTT 是已接线的通用渠道：协议显式事件 → 渠道事件，不从文本推断。"""
     from types import SimpleNamespace
