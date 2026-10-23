@@ -305,6 +305,9 @@ class TestNestedPytestBudgetWalls:
     def test_scanFaceAndSiteAttributionAreNotVacuous(self):
         """面自证＋落点归账：这次真扫到了嵌套用例，且粗尺读到的每一处落点都被归过账。"""
         _findings, nestingTests, coarse, attributed = _scanCorpus()
+        scannedFiles = len(ast_scan.sourceRefsUnder(TESTS_ROOT, ".py"))
+        assert scannedFiles >= 1000, (
+            "被收集测试语料现读 %d 个 .py——TESTS_ROOT 指错时零违规不作数" % scannedFiles)
         assert nestingTests >= _NESTING_FLOOR, (
             "只认到 %d 格嵌套 pytest 用例（下限 %d）——要么 TESTS_ROOT 指错，要么收集口径写窄了；"
             "此时上一条的『零违规』是假绿" % (nestingTests, _NESTING_FLOOR)
