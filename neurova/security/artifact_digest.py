@@ -40,8 +40,8 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional, Tuple
 
+from neurova.core import data_root
 from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
-from neurova.core.data_root import repoRoot
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -219,20 +219,15 @@ def artifactKey(channel: str, artifactId: str) -> str:
     return "%s:%s" % (channel, artifactId)
 
 
-#: 锚目录名。装配成 `".neurova"` 而不是在落点上写裸字面量：那条字面量同时被
-#: `test_homeLandingMovedIntoDataRoot` 的「家目录落点族」计数盯着，同名常量会被读成
-#: "又开了一处家目录落点"。锚要的是**根外、且不落数据根**的那一址。
-_ANCHOR_DIR_NAME = "." + "neurova"
-
-
 def anchorPath() -> Path:
     """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
 
-    落点由 `repoRoot()` 推导：裸相对字面量会让位置随进程 CWD 漂（换个启动目录就在
-    别处新起一份锚）。也**不落数据根**——整库回滚会把构件、账本、锚一起回滚，
-    等于没有锚（§6-388 的用户裁定）。
+    主目录的拼法不在这里手写：`~/.neurova` 是**收养端**的旧落点语义，取法只有
+    `data_root.legacyHomeLanding()` 一处（本仓「家目录 = 一个锚点」的判据，见
+    `tests/unit/core/test_homeLandingMovedIntoDataRoot.py`）。本函数只是一处**新写**，
+    读的是同一个取法而不是另拼一份 `.neurova`。
     """
-    return repoRoot().joinpath(_ANCHOR_DIR_NAME, ANCHOR_FILE_NAME)
+    return Path(data_root.legacyHomeLanding(ANCHOR_FILE_NAME))
 
 
 def readAnchors() -> Dict[str, str]:

@@ -2,9 +2,13 @@
 #
 # 说明：
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
-#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（numpy、onnxruntime、
+#   - 刻意排除体积大 / 需本地模型 / 需显示的器重依赖（onnxruntime、
 #     sentence-transformers、transformers、tokenizers、soundfile、huggingface_hub、
 #     sentencepiece、edge-tts、pillow、pyautogui、playwright）。
+#     **numpy 已于 2026-10-23 移出该名单并显式声明在下文**：受保护子集里有判据走真实
+#     向量原语与真实分词（`neurova/knowledge/vector_ann`、`neurova/core/vector_math`，
+#     `constraints.semantic_similarity` 的 jieba 分词），它们被刻意排除时那几档是
+#     "环境缺失"而不是"代码坏了"——CI 里两者同形，红得说不清是谁的问题。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -53,6 +57,15 @@ tiktoken>=0.5.0
 APScheduler>=3.10
 feedparser>=6.0
 segno>=1.6
+
+# 稠密向量原语（2026-10-23 起 CI 显式声明）：`core/vector_math` 与 `knowledge/vector_ann`
+# 的判据走真实 ndarray 运算，缺席即 ModuleNotFoundError——那是环境缺件，不是被测代码的结论。
+# 只装 numpy，不拉 onnxruntime/sentence-transformers：CI 需要的是"向量原语可用"，
+# 不是"本地模型可用"（真权重那一路仍按各档自己的 real_model 标记跳过）。
+numpy>=1.24.0
+# 中文分词（同上）：`evolution.eval.constraints.semantic_similarity` 的 Jaccard 回退
+# 依赖 jieba 切词，缺席时中文整段成单 token，漂移闸会给出与生产不同的读数。
+jieba>=0.42.1
 
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
 # 与 requirements.txt 同一条范围，且必须逐字同值——两份各写一个下界，
