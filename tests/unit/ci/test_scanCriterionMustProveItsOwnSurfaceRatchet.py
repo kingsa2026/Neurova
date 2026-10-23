@@ -111,17 +111,16 @@ BASELINE: set = set()
 #:
 #: 与「根写错」必须分开：根写错是 `parents[N]` 数错层，修法是把 N 改对；本表记的是像
 #: `data/sessions` 这种**运行态才被建出来**的目录——干净 checkout 上它天然缺席。
-#:   `tests/unit/test_session_landing_guard.py`：落点锚在 `data/sessions`（仓内数据根的子目录），
-#:   只在跑起会话/起真 app 之后才存在；本闸在 CI 的干净 checkout 上解它 ⇒ `missing`。
-#:   它守的恰恰是「别的用例别把真会话库指过去」，要求它先建出那个目录才准跑，是自足条件的反面。
+#:   （历史例：`tests/unit/test_session_landing_guard.py` 曾把落点直接锚在 `data/sessions`，
+#:   而那只在跑起会话后才存在 ⇒ 干净 checkout 上解成 `missing`。该档的枚举根后来改指模块级
+#:   `DATA_DIR`（`<repo>/data`，跑测时一定存在），署名因此销账——本表现值为空集。）
 #: 仓外（`outside`）**不做**这类豁免：那种根指的不是本仓代码，没有任何正当理由。
 #: 纪律与其余表一致：新增即红、消化必须摘行；`test_ratchetRecordsImprovementLoudly` 继续咬
 #: 「表与实况不同源」——真 offender 被偷偷塞回来换绿会当场露形。
-#: 现值＝**空集**。原先登记的 `tests/unit/test_session_landing_guard.py` 已销账：
-#: 它的模块级锚已从 `<仓根>/data/sessions`（只有探针跑过才存在 ⇒ 永远解成 `missing`）
-#: 改成 `<仓根>/data`（恒存在），会话落点由锚往下拼——**根不再指向不存在的目录**，
-#: 于是这一档回到 DIR 那一支，"面被改窄也没人知道"这件事重新由面读数覆盖。
-#: 留着旧行会红成"表与实况不同源"，这正是本表要求的纪律：修好了必须同批摘名。
+#: 现值＝**空集**。原先那一行（`test_session_landing_guard.py`，理由是"锚定仓内锥
+#: `data/sessions`，干净 checkout 上不存在"）已按该表自述的纪律**摘掉**：那档的枚举根
+#: 改指模块级 `DATA_DIR`（`<repo>/data`，跑测时一定存在），空判只枚举这一层，不再有
+#: 「解出 missing」的落点——留行就是替不存在的事背书，与上一条 stale 判据同源。
 MISSING_BASELINE: dict = {}
 
 

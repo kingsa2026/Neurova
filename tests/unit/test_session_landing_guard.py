@@ -25,9 +25,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
-#: 回收上限：`<repo>/data`，与 `SESSIONS_DIR` 同源推导（清理时不得就地再拼一遍）。
-DATA_DIR = SESSIONS_DIR.parent
+#: 回收上限：`<repo>/data`。**先写这一条**，`SESSIONS_DIR` 由它派生——反过来的话
+#: `DATA_DIR = SESSIONS_DIR.parent` 是纯派生表达式，面自证棘轮解不出静态落点（`dynamic`），
+#: 而 `<repo>/data/sessions` 在探针造出它之前并不存在（解成 `missing`），两条都会被点名。
+DATA_DIR = REPO_ROOT / "data"
+SESSIONS_DIR = DATA_DIR / "sessions"
 
 
 def _cleanupProbeRealLanding():
@@ -41,9 +43,14 @@ def _cleanupProbeRealLanding():
     「可能尚不存在的中间目录」解成 `missing`。
     """
     try:
-        for candidate in (SESSIONS_DIR, DATA_DIR):
-            if candidate.is_dir() and not any(candidate.glob("*")):
-                candidate.rmdir()
+        # 空判只枚举**一层**（`<repo>/data`）：`<repo>/data/sessions` 是探针造出来的目录，
+        # 拿它当枚举根会被面自证棘轮解成 `missing`（跑之前它就不存在）。
+        if DATA_DIR.is_dir() and not list(DATA_DIR.iterdir()):
+            DATA_DIR.rmdir()
+        elif DATA_DIR.is_dir() and [p.name for p in DATA_DIR.iterdir()] == ["sessions"] \
+                and not list(DATA_DIR.glob("sessions/*")):
+            SESSIONS_DIR.rmdir()
+            DATA_DIR.rmdir()
     except OSError:
         pass
 
