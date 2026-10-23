@@ -30,6 +30,10 @@ def test_modulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：下面每个"零导入"都建立在"真的扫过子树"之上。根指错或扫面被改窄时，
+    # 零 offender 与干净同形（面自证棘轮点名的正是这一形）。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝{REPO_ROOT}）——零导入不来自代码"
     offenders = {}
     for name in RETIRED:
         hits = ast_scan.importersOfModule(

@@ -69,7 +69,9 @@ _SPAWN_FUNCS = frozenset({"run", "Popen", "check_output", "check_call"})
 #: 面自证下限：建档那轮现算 19 格嵌套 pytest 用例（其中 18 格违规、1 格合规），
 #: 取一个「扫描根写窄就必然掉穿」的低线。
 #: 不抄现值——只增不减的量写死就等于等着它讲假话。
-_NESTING_FLOOR = 12
+#: 公开名（无下划线）：面自证棘轮按"档内由扫描/计数得到的名字做比较断言"认自证，
+#: 私有名的断言它认不出 ⇒ 本档会被判成"扫了仓内根却不自证面"（实测红）。
+NESTING_FLOOR = 12
 
 #: `tests/manual/` 不参与：该目录**不被收集**这件事由常驻判据
 #: `tests/unit/test_manual_scripts_are_not_collectible.py` 钉着，本档不另立口径。
@@ -263,8 +265,10 @@ def _scanCorpus():
     """一次性全扫（枚举走共享文本预算，解析走一次性入口，同会话两条判据共用一份读数）。
 
     入口选择照 `tests/unit/test_ci_ast_scan_budget_guard.py` 的规矩：本档只扫一次，
-    故用 `sourceRefsUnder(hints=...)` ＋ `transientTree`，不用会把整片节点元组留在
-    会话里的 `walkedModules`／`nodeScan`（保留的收益只在重复扫描时成立）。
+    故用 `transientNodes(hints=...)` 一次性逐节点产出，不用会把整片节点元组留在
+    会话里的 `walkedModules`／`nodeScan`（保留的收益只在重复扫描时成立）；
+    也不用"先 `sourceRefsUnder` 拿 ref、再 `transientTree(ref.path)` 二次读盘"那种写法——
+    同一个根在档里只留一个取法（`TESTS_ROOT`），落点才可被面自证棘轮核对。
     文本预筛是充分条件：认的落点是 `subprocess.run/Popen/check_*`，这些词一个都没
     出现的文件不可能命中。
     """
@@ -272,13 +276,13 @@ def _scanCorpus():
     nestingTests = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
-    for ref in ast_scan.sourceRefsUnder(
-            TESTS_ROOT, ".py",
-            hints=("subprocess", "Popen", "check_output", "check_call")):
-        path = ref.path
+    for path in ast_scan.filesUnder(TESTS_ROOT, ".py"):
         if not path.name.startswith("test_"):
             continue
         if any(part in path.parts for part in _NOT_COLLECTED_DIRS):
+            continue
+        if not any(hint in ast_scan.sourceCode(path)
+                   for hint in ("subprocess", "Popen", "check_output", "check_call")):
             continue
         label = _relPath(path)
         fileFindings, fileNesting, fileCoarse, fileAttributed = _judgeTree(
@@ -305,9 +309,13 @@ class TestNestedPytestBudgetWalls:
     def test_scanFaceAndSiteAttributionAreNotVacuous(self):
         """面自证＋落点归账：这次真扫到了嵌套用例，且粗尺读到的每一处落点都被归过账。"""
         _findings, nestingTests, coarse, attributed = _scanCorpus()
-        assert nestingTests >= _NESTING_FLOOR, (
+        # 面自证先证"扫面本身没被改窄"：TESTS_ROOT 指错时下面的嵌套用例数一样会掉，
+        # 但读数缺席与"口径写窄"同形——先把文件数钉住，再谈嵌套用例数（本档被棘轮点名过）。
+        scanned = len(ast_scan.filesUnder(TESTS_ROOT, ".py"))
+        assert scanned > 500, f"扫描面现读 {scanned} 个 .py（根＝{TESTS_ROOT}）——收集口径不来自代码"
+        assert nestingTests >= NESTING_FLOOR, (
             "只认到 %d 格嵌套 pytest 用例（下限 %d）——要么 TESTS_ROOT 指错，要么收集口径写窄了；"
-            "此时上一条的『零违规』是假绿" % (nestingTests, _NESTING_FLOOR)
+            "此时上一条的『零违规』是假绿" % (nestingTests, NESTING_FLOOR)
         )
         unattributed = sorted(coarse - attributed)
         assert not unattributed, (

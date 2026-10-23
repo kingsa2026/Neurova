@@ -26,6 +26,9 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：零引用只有在"真的扫过子树"时才说明退役落干净了（根指错时这格恒绿）。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝{REPO_ROOT}）——零引用不来自代码"
     assert not ast_scan.importersOfModule(REPO_ROOT, MODULE)
 
 
