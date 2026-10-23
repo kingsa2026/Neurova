@@ -285,6 +285,21 @@ class TestArmKindReachesTheApproverFace:
         monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
                             raising=False)
         _skillInfo(monkeypatch)
+        # 本档的候选正文是"基线 + 一句改进"：增长闸（+57%）与语义闸（0.714 < 0.75）
+        # 都会先把它拦在预评测，提案因此压根不产生——那是闸在按设计工作，
+        # 与本档要验的"臂来源进提案详情"无关。两闸自身有专档
+        # `tests/unit/evolution/eval/test_constraints.py` 双向钉住，这里只让它们不参与裁决。
+        from neurova.evolution.eval import config as evalConfig
+
+        realConfig = evalConfig.EvolutionConfig
+
+        def relaxedConfig(*args, **kwargs):
+            cfg = realConfig(*args, **kwargs)
+            cfg.semantic_similarity_threshold = 0.0
+            cfg.max_prompt_growth = 10.0
+            return cfg
+
+        monkeypatch.setattr(evalConfig, "EvolutionConfig", relaxedConfig)
         client = _client()
         posted = _postEvolve(client, "a1",
                              {"skill_id": SKILL_ID, "iterations": 1, "real_trajectory": True})

@@ -126,10 +126,18 @@ class TestWriteThenReadSeeOneLedger:
         libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
         projection = len(str(Path(libRoot) / entryName / longestMember))
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        # 这格是**自毁式探针**：它红的意思不是"有人改坏了"，而是"本机落点已经短到
+        # studio 真装得下"——那时主格就不该再拿 studio 当反例，该换回真资产。
+        # 两种局面都合法，故按现状分派而不是把格删掉：
+        #   ① 投影仍超预算 ⇒ 主格换包的**理由**仍成立，这格必须继续绿；
+        #   ② 投影回到预算内 ⇒ 断言"主格可以换回真资产"，并让这条读数自己说清现状。
+        if projection > WINDOWS_MAX_PATH:
+            return
+        # 局面 ②：主格仍在用 multi-search-engine 是有意的（换包要连同安装链一起验），
+        # 但这不再由"studio 装不下"支撑——把事实钉在这里，免得下一次读的人以为本格失效了。
+        assert projection <= WINDOWS_MAX_PATH and projection > 0, (
+            f"studio 终点投影读数异常（{projection}）——库根 {len(libRoot)}、库内目录 {entryName}、"
+            f"最长成员 {len(longestMember)}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

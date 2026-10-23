@@ -48,10 +48,45 @@ def buildZip(members: dict) -> bytes:
 
 
 def deepRoot(tmp: Path, skill_id: str) -> Path:
-    """复刻 pytest 那种"用例名即目录名"的深根：实测这条链合计 273 字符。"""
-    base = (tmp / "pytest-of-operator" / "pytest-9999"
+    """复刻 pytest 那种"用例名即目录名"的深根。
+
+    根长只是**前提的一半**：超不超预算由"根 + 最长成员"一起决定，故长度不再按
+    写死的目录名赌（CI 的临时根比开发机短，写死会让「必被拒」那格悄悄变成「装成了」）。
+    调用方按 `overBudgetRoot(payload, ...)` 取根，那一处同时钉住"确实超了"。
+    """
+    return (tmp / "pytest-of-operator" / "pytest-9999"
             / "test_import_builtin_offline[presentation-studio]0" / "skills" / skill_id)
-    return base
+
+
+def overBudgetRoot(payload: bytes, tmp: Path, skill_id: str) -> Path:
+    """取一个"**本机真的写不下去**、且投影越过 Windows 预算"的落点。
+
+    判据要的是「落点写不下去 ⇒ 解包抛 OSError ⇒ 原因点名三个数」，不是「某个固定目录名
+    恰好 273 字符」。写死目录名会让反例随临时根长短漂移：pytest 的
+    `/tmp/pytest-of-root/pytest-65/...` 比开发机短一截，于是「必被拒」那一格在 CI 上悄悄
+    变成「装成了」——红出来的原因与判据无关，读的人只能重跑。
+
+    **超预算不等于本机写不下去**（实测）：Linux 的 `PATH_MAX` 是 4096，`/tmp` 下 383 字符
+    的投影照样写得进去——那条 `OSError` 只在 Windows 未开长路径时出现。故本函数按
+    "真跑一次解包、确认它抛 OSError"来配：根逐级加长，一步不成就换更长的根；
+    配不出来就**响亮失败**，不返回一个"看起来超了其实能装"的落点。
+    """
+    dest = deepRoot(tmp, skill_id)
+    for extra in (0, 240, 480, 960, 1920, 3000):
+        candidate = dest if not extra else dest / ("a" * extra)
+        projected = len(str(candidate)) + 1 + len(
+            max(zipfile.ZipFile(io.BytesIO(payload)).namelist(), key=len))
+        if projected <= market_sources.WINDOWS_MAX_PATH:
+            continue
+        try:
+            safe_archive.safe_extract_zip(payload, candidate)
+        except OSError:
+            return candidate
+        except safe_archive.UnsafeArchiveError:   # 名越界这类拒绝与本判据无关
+            continue
+    raise AssertionError(
+        "配不出「本机写不下去」的落点——这台机器的路径上限与本档假设不符，"
+        "原因面按长度判事这一格失去反例")
 
 
 @pytest.fixture()
@@ -63,7 +98,7 @@ def builtinPayload() -> bytes:
 
 def test_longRootFailureNamesPathTooLong(builtinPayload, tmp_path):
     """① 主红：长根下的失败必须点名"路径过长"，并给可行动的三个数字。"""
-    dest = deepRoot(tmp_path, "adaptive-presentation-studio")
+    dest = overBudgetRoot(builtinPayload, tmp_path, "adaptive-presentation-studio")
 
     reason = refusalOf(builtinPayload, dest)
     assert reason, "这个组合在这台机器上装成了——原因面不该返回空串，去复测而不是删格"
@@ -84,9 +119,8 @@ def test_threeFailureFamiliesStayDistinguishable(tmp_path):
     ioFault = refusalOf(buildZip({"short.txt": "x"}), blocker / "sub")
     unsafe = refusalOf(buildZip({"../escape.txt": "x"}), tmp_path / "a")
     broken = refusalOf(b"definitely-not-a-zip", tmp_path / "b")
-    longPath = refusalOf(
-        buildZip({"a" * 120 + "/" + "b" * 120 + "/deep.txt": "x"}),
-        deepRoot(tmp_path, "c"))
+    longPayload = buildZip({"a" * 120 + "/" + "b" * 120 + "/deep.txt": "x"})
+    longPath = refusalOf(longPayload, overBudgetRoot(longPayload, tmp_path, "c"))
 
     reasons = {"安全拒": unsafe, "包坏了": broken, "路径过长": longPath, "IO故障(长度没问题)": ioFault}
     for label, reason in reasons.items():
@@ -134,7 +168,7 @@ def test_importerCarriesTheReasonIntoTheReceipt(builtinPayload, tmp_path):
 def test_boolFaceAndReasonFaceAreOneImplementation(builtinPayload, tmp_path):
     """④' bool 老调用面与原因面必须同判：薄包装不是第二套口径（教义第 6 条）。"""
     short = tmp_path / "s" / "adaptive-presentation-studio"
-    long = deepRoot(tmp_path, "l") / "adaptive-presentation-studio"
+    long = overBudgetRoot(builtinPayload, tmp_path, "l")
 
     assert market_sources.extract_remote_skill_zip("p", builtinPayload, short) is True
     assert refusalOf(builtinPayload, short) == ""

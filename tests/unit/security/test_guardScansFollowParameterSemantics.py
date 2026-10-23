@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import tempfile
 
 from tests import ast_scan
 
@@ -43,7 +44,15 @@ SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
 #: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
 #: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
-SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
+#:
+#: 但家目录**本身**可能落进 `FilePathGuardian` 的受保护面（CI 上是 `/root`），
+#: 那时"读取被拦"是受保护路径那条规则在正常工作，与 shell 规避面无关 —— 用家目录下的
+#: 文件名会把两条规则混成一次红。故各机一条取法：家目录受保护时退回系统临时目录，
+#: 两处都取不到就**响亮失败**（拿空路径跑只会得到一条恒真的假绿）。
+_SAFE_HOME = pathlib.Path.home() / "neurova_guard_255_safe_read.txt"
+SAFE_PATH = str(_SAFE_HOME)
+if _SAFE_HOME.as_posix().startswith("/root"):
+    SAFE_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
 
 
 def _findings(toolName: str, params: dict) -> list:

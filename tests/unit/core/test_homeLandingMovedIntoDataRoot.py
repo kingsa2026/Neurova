@@ -208,6 +208,10 @@ class TestNoNewHomeLandingIsAllowed:
         # 已全部收进数据根，表里只剩**收养端本身**——它必须能算出旧落点，否则旧物搬无可搬。
         # 留空就是把收养能力一起删掉。（号不写在这里：让号是双向的，写死就等着撞别人的批。）
         "core/data_root.py": 1,
+        # §6-388 用户 2026-10-22 拍「甲①＋乙」：**根外锚**必须住在数据根之外
+        # （整库恢复/快照回滚会把数据根里的构件、账本、锚一起滚回去）。
+        # 这是"新写"方向的唯一一处例外，理由在 artifact_digest.anchorPath() 上方。
+        "security/artifact_digest.py": 1,
     }
 
     def test_homeLandingOffendersAreExactlyTheRegisteredOnes(self):

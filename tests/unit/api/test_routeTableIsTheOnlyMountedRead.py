@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
@@ -61,18 +63,21 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 
 def test_取数口径只有一份():
+    # 枚举与解析都走共享预算（tests/ast_scan.py）：本判据是一次性全仓扫描，
+    # 私有 rglob + ast.parse 会把「代码总量」编码成墙钟上界
+    # （tests/unit/test_ci_ast_scan_budget_guard.py 的根因，Issue #148）。
     offenders = []
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts or path == ROUTE_TABLE:
+        for path in ast_scan.filesUnder(root):
+            if path == ROUTE_TABLE:
                 continue
             source = path.read_text(encoding="utf-8", errors="ignore")
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(ast.parse(source))
+            hits = _readsMountedAppRoutes(ast_scan.transientTree(path))
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     assert not offenders, (

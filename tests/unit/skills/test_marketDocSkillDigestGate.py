@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
@@ -159,9 +161,8 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, source: str):
+    def _builderCalls(self, tree):
         """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
-        tree = ast.parse(source)
         found = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -177,11 +178,13 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for path in sorted(package.rglob("*.py")):
+        # 枚举走共享预算（filesUnder）：一次性全仓判据用私有 rglob 会把
+        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
+        for path in ast_scan.filesUnder(package):
             source = path.read_text(encoding="utf-8", errors="ignore")
             if "_build_executable_skill" not in source:
                 continue
-            flags = self._builderCalls(source)
+            flags = self._builderCalls(ast_scan.transientTree(path))
             checked += len(flags)
             if any(flag is False for flag in flags):
                 offenders.append(str(path.relative_to(package)))
@@ -194,8 +197,8 @@ class TestProductionBuildersCarryThePin:
         good = "x = _build_executable_skill('a', 'b', c, pinnedDigest=p)"
         bad = "x = _build_executable_skill('a', 'b', c)"
 
-        assert self._builderCalls(good) == [True]
-        assert self._builderCalls(bad) == [False]
+        assert self._builderCalls(ast.parse(good)) == [True]
+        assert self._builderCalls(ast.parse(bad)) == [False]
 
 
 class TestThePinCanBePersistedAtTheService:
