@@ -13,6 +13,7 @@ import getpass
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import warnings
@@ -116,6 +117,25 @@ def sessionTempRoot() -> Path:
     return Path(tempfile.gettempdir()) / "pytest-of-{}".format(getpass.getuser())
 
 
+def _clearReadOnlyTree(root: Path) -> None:
+    """清掉子树里的只读位——Windows 上 git 给 `objects/**` 加 0444，`rmtree` 即撞
+    `[WinError 5] 拒绝访问`。
+
+    为什么这不算放宽判据：授权来源始终是调用方已经确证过的 `holderIsDead`，
+    这里解开的只是**文件属性**造成的"删不动"，而不是"不该删"。误删并发会话目录的风险
+    由 `holderIsDead` 那道门负责，本函数不改变任何判定，也不碰判活结论为"还活着"的目录
+    （那条分支根本不会走到这里）。单个条目清不动就跳过——剩下的由下一轮再试。
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in list(dirnames) + list(filenames):
+            target = Path(dirpath) / name
+            try:
+                if not os.access(target, os.W_OK):
+                    os.chmod(target, stat.S_IWRITE)
+            except OSError:
+                continue
+
+
 def reclaimDeadLockedDirs(tempRoot: Path, *, holderIsDead: Callable[[int, float], bool],
                           remove: Callable[[Path], Any] = shutil.rmtree) -> list:
     """回收 tempRoot 下锁主确证已死的 pytest 会话目录，返回被删目录列表。
@@ -140,6 +160,19 @@ def reclaimDeadLockedDirs(tempRoot: Path, *, holderIsDead: Callable[[int, float]
             continue
         try:
             remove(entry)
+        except PermissionError:
+            # 「删不动」有两种：一种是锁主还活着（上面已挡掉），一种只是 Windows 的只读位。
+            # 后者不清掉就永久留存——实测本机 TEMP 下 10 个会话目录里 8 个因此躲过每一轮回收，
+            # 每轮跑测都从本函数打出一条同样的警告。清完重试一次，仍失败才认输。
+            _clearReadOnlyTree(entry)
+            try:
+                remove(entry)
+            except OSError as retryExc:
+                warnings.warn("回收 pytest 残留会话目录 {} 失败（已清只读位仍删不动），本轮跳过：{}"
+                              .format(entry.name, retryExc), stacklevel=2)
+                continue
+            removed.append(entry)
+            continue
         except OSError as exc:
             warnings.warn("回收 pytest 残留会话目录 {} 失败，本轮跳过：{}".format(entry.name, exc),
                           stacklevel=2)
