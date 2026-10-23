@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -28,6 +29,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CHECK_DIRS = ("neurova", "scripts")
 
 
+#: 端到端钉住子进程的写侧码页（§6-64）：只钉父端 `encoding` 是"半修"——子端仍按
+#: `locale.getpreferredencoding()` 写字节，父端按 UTF-8 解，读数就会被静默改写。
+#: 由 tests/unit/ci/test_subprocessTextEncodingRatchet.py 的半修计数常驻核对。
+def _utf8ChildEnv() -> dict:
+    return {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+
 def undefinedNameReadings() -> list[str]:
     """跑一遍 pyflakes，逐行交回 `undefined name` 读数。"""
     proc = subprocess.run(
@@ -37,6 +45,7 @@ def undefinedNameReadings() -> list[str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=_utf8ChildEnv(),
     )
     return [line for line in (proc.stdout or "").splitlines() if "undefined name" in line]
 

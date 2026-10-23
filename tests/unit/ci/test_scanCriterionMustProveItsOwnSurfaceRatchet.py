@@ -1119,12 +1119,18 @@ def test_singleSourceReaderKeepsItsOwnContract():
 
 
 def test_ratchetDoesNotRise():
-    """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。"""
+    """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。
+
+    报错文案按**全量现读**分组，不按 `now - BASELINE`：`BASELINE` 已是空表（四波存量收完），
+    两者当天同值；但只要有人把 offender 加回表里换这一格变绿，按差集取数就会印出**空的**
+    「根写错了」那一栏——红着，却一个字都没说清是哪一档，而同一棵树里的
+    `test_staticRootsNeverPointOutsideOrNowhere` 会把那档点名（判据与文案分家，形态集 304 同族）。
+    """
     gaps = {}
     now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps))
     grew = sorted(now - set(BASELINE))
-    wrongRoot = [rel for rel in grew if gaps.get(rel)]
-    noProof = [rel for rel in grew if not gaps.get(rel)]
+    wrongRoot = [rel for rel in sorted(now) if gaps.get(rel)]
+    noProof = [rel for rel in sorted(now) if not gaps.get(rel)]
     assert not grew, (
         "**根写错了**（静态根解到仓外或指不到真实目录——它的「零命中」根本不来自代码）：\n  "
         + "\n  ".join("%s [%s]" % (rel, gaps[rel]) for rel in wrongRoot)
@@ -1530,6 +1536,18 @@ _NO_PROOF_TAIL = "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\
      "    hits = [p for p, _n in ast_scan.nodeScan(root, '.py')]\n"
      "    assert hits == []\n",
      "运行时才定的根不承载面的声明：既不点名也不免罪，维持原设计", False, ""),
+    ("tests/unit/sample.py",
+     "import pathlib\n_Repo = pathlib.Path(__file__).resolve().parents[2]\n"
+     "_Data = _Repo / 'data'\n\n\n"
+     "def test_shape():\n"
+     "    if _Data.is_dir() and not any(_Data.iterdir()):\n"
+     "        _Data.rmdir()\n"
+     "    assert _Data.parent.is_dir()\n",
+     "正检·接收者是「仓根 ＋ 末级目录」的合成常量：`data/` 在仓内存在、`data/sessions` 不在"
+     "（跑测期更可能被收干净），读数会落 missing ⇒ 点名。这一格钉的是取数口径本身（判据按目录"
+     "**存不存在**归态，归不到「这一级本来就该缺席」），修法只能是把末级目录拼在调用处"
+     "（`test_session_landing_guard.py` 把常量收成 `SESSIONS_PARENT` 就是为了让接收者落在真实目录上）",
+     True, MISSING),
 ])
 def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffender, expectGap):
     """根的形状要按**被档自身深度**解，且「静态根解到仓外／指不到目录」必须点名。
