@@ -1605,7 +1605,7 @@ class ToolExecutor:
                 }
             from neurova.security.governance import extract_adjudicable_params
 
-            command, _pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
+            command, pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
@@ -1642,8 +1642,13 @@ class ToolExecutor:
                                 }
                             )
                 return sandbox_result
-            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
-            logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
+            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因。
+            # 审计面要点名**哪一条路径**被拦：`pathValues` 是治理预检同一份取数口交出来的
+            # `(键名, 值)` 清单（教义第 6 条），多值时逐条带上键名，无值时不写占位。
+            logger.warning(
+                "文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s",
+                "; ".join(f"{key}={value}" for key, value in pathValues) or "(无路径参数)",
+            )
             return {
                 "success": False,
                 "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),

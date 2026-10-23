@@ -22,12 +22,17 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import io
+import re
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+
+import pyflakes.api
+import pyflakes.reporter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -111,6 +116,78 @@ def check_syntax() -> bool:
     return False
 
 
+def _importedNamesIn(tree) -> set:
+    """本文件里以任何方式被 import 过的名字（含函数体内的局部导入）。"""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    names.add(alias.asname)
+                else:
+                    names.add(alias.name.split(".")[0])
+    return names
+
+
+def collectUndefinedNames(source: str, filename: str) -> list:
+    """pyflakes 的 `undefined name` 读数，剔除「注解专用」形状，返回 `[(行, 列, 名字)]`。
+
+    判据仍是 pyflakes 自己的：本函数不另写 AST 名解析，只做**复核**（教义第 6 条）。
+    被剔除的只有一种：该名字在**本文件**里被 import 过（模块级、`TYPE_CHECKING` 块内、
+    或函数体内的局部导入），因而「按解析器可读、按求值未绑定」。
+
+    为什么这是修在闸门侧而不是修在被报的代码：`from __future__ import annotations`
+    下注解不求值（PEP 563）；而局部导入的存在理由就是断循环导入（AGENTS.md §3）。
+    把这类导入提到模块级会改坏生产，删掉注解会丢掉解析器能读的事实——两条都是把报错
+    挪走（教义第 1、2 条）。闸门问错的问句，改闸门。真·未定义（拼错的名字、写错的形参）
+    不在此列：那些名字在本文件里从来没有被 import 过，一条都跑不掉。
+    """
+    reporter_out, reporter_err = io.StringIO(), io.StringIO()
+    pyflakes.api.check(source, filename, pyflakes.reporter.Reporter(reporter_out, reporter_err))
+    text = (reporter_out.getvalue() or "") + (reporter_err.getvalue() or "")
+    if not text.strip():
+        return []
+
+    try:
+        imported = _importedNamesIn(ast.parse(source, filename=filename))
+    except SyntaxError:
+        imported = set()
+
+    readings = []
+    for line in text.splitlines():
+        match = _PYFLAKES_LINE.match(line)
+        if not match:
+            continue
+        name = match.group("detail").split(" ", 2)[2].strip("'\"")
+        if name in imported:
+            continue
+        readings.append((int(match.group("row")), int(match.group("col")), name))
+    return readings
+
+
+#: pyflakes Reporter 输出的一行：`<file>:<行>:<列>: <消息>`。只取 `undefined name 'x'`
+#: 那一族——语法错、重复定义等不归本闸门管（`reject_duplicate*` 那几类没有这个前缀）。
+_PYFLAKES_LINE = re.compile(
+    r"^(?P<file>.+?):(?P<row>\d+):(?P<col>\d+): (?P<detail>undefined name '.+'|undefined name \".+\")$"
+)
+
+
+def scanUndefinedNamesUnder(path: str) -> list:
+    """遍历目录取未定义名读数，返回便于人读的行（`文件:行:列: undefined name 'x'`）。"""
+    readings = []
+    for py_file in sorted(Path(path).rglob("*.py")):
+        try:
+            source = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for row, col, name in collectUndefinedNames(source, str(py_file)):
+            readings.append(f"{py_file}:{row}:{col}: undefined name '{name}'")
+    return readings
+
+
 def check_pyflakes() -> bool:
     """检查 2：未定义名称（pyflakes 'undefined name'）。返回 True 表示通过。"""
     _hr("✅ 检查 2/3：未定义名称检查（pyflakes）")
@@ -120,15 +197,7 @@ def check_pyflakes() -> bool:
         print("❌ 未安装 pyflakes，请先执行：pip install pyflakes")
         return False
 
-    target = str(PROJECT_ROOT / "neurova")
-    cmd = [sys.executable, "-m", "pyflakes", target]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                   env=_utf8ChildEnv())
-    undefined = [
-        line
-        for line in (result.stdout or "").splitlines()
-        if "undefined name" in line
-    ]
+    undefined = scanUndefinedNamesUnder(str(PROJECT_ROOT / "neurova"))
     if not undefined:
         print("通过：neurova/ 无 'undefined name'")
         return True

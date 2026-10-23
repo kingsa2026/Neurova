@@ -29,6 +29,8 @@ import re
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
+from neurova.channels.base import ChannelMessage
+
 from neurova.api.deps import get_current_user
 from neurova.api.agent_access import requireAgentOwner
 from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response

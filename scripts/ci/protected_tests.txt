@@ -3669,3 +3669,9 @@ tests/unit/core/test_temp_reclaim.py
 # 被调几次"（改前 2、改后 1）＋三条反向格（未退化的 length 空正文照旧重试、旋钮真能到的
 # 网关照旧重试）＋ compat 单源三态。入册前逐文件单跑全绿（9 passed）。
 tests/unit/agent/test_futileThinkingRetryIsSkipped.py
+# §6-403（CI 修复 · 静态门禁）：未定义名闸门改问「本文件有没有 import 过这个名字」，注解专用
+# 形状（TYPE_CHECKING / 局部导入 / PEP 563 前向引用）不再判红，真拼错的形参照旧红；另一档钉
+# tool_executor 沙箱阻断日志真的点名被拦的路径键值（改前是幻影变量，运行期 NameError）。
+# 入册前逐文件单跑全绿（7 passed / 4 passed）。
+tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
+tests/unit/security/test_sandboxFileBlockNamesThePath.py
