@@ -15,6 +15,7 @@
     "swagger-jsdoc": {
       "yaml": "2.8.3"
     },
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/server": "2.3.0"
   }
 }
