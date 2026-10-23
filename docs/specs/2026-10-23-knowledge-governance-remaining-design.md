@@ -540,7 +540,7 @@ P0 turn_id/schema/decisions
   组合式/i18n/分析页 34 项与 `vue-tsc --noEmit` 通过；live 探针实测接管写入→状态恢复→
   显式 outcome→指标、飞书服务台与微信客服 webhook、索引健康（hnswlib enabled）、
   双 lifespan 事件账持久化全 PASS；ANN 探针 10k/100k/1M 与精确召回对照见上。
-  本批收尾改动待提交；最终提交账见审计报告 13.5。
+  本批收尾改动已提交推送 `92da4050`；最终提交账见审计报告 13.5。
 
 ---
 
