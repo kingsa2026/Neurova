@@ -35,6 +35,7 @@ from starlette.types import Message, Receive, Scope, Send
 from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
+from neurova.tool_layers.mcp_server import McpCaller
 
 logger = get_logger(__name__)
 
