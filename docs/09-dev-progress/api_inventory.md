@@ -9,12 +9,13 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（59 个）
+## 一、前端 API 模块（61 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
 | `NeurUI/src/api/modules/agent-communication.ts` | `/agent-communication` | 是 | 1 |
 | `NeurUI/src/api/modules/agent-enhancement.ts` | `/agent-enhancement` | 是 | 1 |
+| `NeurUI/src/api/modules/agent-migration.ts` | `/agents` | **否** | 2 |
 | `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 是 | 1 |
 | `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 3 |
 | `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
@@ -53,6 +54,7 @@
 | `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 是 | 0 |
 | `NeurUI/src/api/modules/projects.ts` | `/projects` | 是 | 5 |
 | `NeurUI/src/api/modules/providers.ts` | `/providers` | 是 | 11 |
+| `NeurUI/src/api/modules/quality.ts` | `/quality` | **否** | 5 |
 | `NeurUI/src/api/modules/rsiGovernance.ts` | `/governance` | **否** | 2 |
 | `NeurUI/src/api/modules/rules.ts` | `/rules` | 是 | 1 |
 | `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 是 | 1 |
@@ -75,7 +77,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（90 条）
+## 二、后端挂载前缀（92 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -86,6 +88,7 @@
 | `neurova/api/endpoints/agent_communication_api.py` | `/api/v1/agent-communication` |
 | `neurova/api/endpoints/agent_enhancement.py` | `/api/v1/agent-enhancement` |
 | `neurova/api/endpoints/agent.py` | `/api/v1/agents` |
+| `neurova/api/endpoints/agent_migration.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/agent_package.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/analytics.py` | `/api/v1/analytics` |
 | `neurova/api/endpoints/artifacts_api.py` | `/api/v1/artifacts` |
@@ -146,6 +149,7 @@
 | `neurova/api/endpoints/plugin.py` | `/api/v1/plugins` |
 | `neurova/api/endpoints/projects_api.py` | `/api/v1/projects` |
 | `neurova/api/endpoints/provider.py` | `/api/v1/providers` |
+| `neurova/api/endpoints/quality.py` | `/api/v1/quality` |
 | `neurova/api/endpoints/rules_api.py` | `/api/v1/rules` |
 | `neurova/api/endpoints/runtime.py` | `/api/v1/runtime` |
 | `neurova/api/endpoints/sandbox.py` | `/api/v1/sandbox` |
@@ -172,7 +176,7 @@
 
 ## 三、差集（断点以显式名单暴露，不用「大致一致」带过）
 
-**barrel 未导出的模块**：`NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
+**barrel 未导出的模块**：`NeurUI/src/api/modules/agent-migration.ts`, `NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/quality.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
 
 **前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：无
 

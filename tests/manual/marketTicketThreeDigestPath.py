@@ -34,6 +34,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# 同上：字面里的不可编码字符不许由「打印成败」来决定本档退出码。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 

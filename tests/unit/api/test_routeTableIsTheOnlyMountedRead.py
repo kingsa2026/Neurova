@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
@@ -66,13 +68,18 @@ def test_取数口径只有一份():
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts or path == ROUTE_TABLE:
+        # 枚举与解析都归 `tests/ast_scan`（本档不自付全仓 `rglob` + `ast.parse`）
+        for path in ast_scan.filesUnder(root):
+            if path == ROUTE_TABLE:
                 continue
             source = path.read_text(encoding="utf-8", errors="ignore")
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(ast.parse(source))
+            try:
+                tree = ast_scan.transientTree(path)
+            except SyntaxError:
+                continue
+            hits = _readsMountedAppRoutes(tree)
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     assert not offenders, (

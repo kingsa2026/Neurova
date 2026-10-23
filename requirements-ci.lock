@@ -104,7 +104,7 @@ httpx2==2.13.0
     #   langsmith
     #   mcp
     #   openai
-httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
 idna==3.20
     # via
@@ -115,6 +115,8 @@ idna==3.20
     #   yarl
 iniconfig==2.3.0
     # via pytest
+jieba==0.42.1
+    # via -r requirements-ci.txt
 jiter==0.17.0
     # via
     #   anthropic
@@ -157,6 +159,10 @@ multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
+numpy==2.4.6 ; python_full_version < '3.12'
+    # via -r requirements-ci.txt
+numpy==2.5.4 ; python_full_version >= '3.12'
+    # via -r requirements-ci.txt
 ollama==0.6.3
     # via langchain-ollama
 openai==3.14.1
@@ -296,6 +302,8 @@ tiktoken==0.14.0
     # via
     #   -r requirements-ci.txt
     #   langchain-openai
+tomli==2.5.0 ; python_full_version <= '3.11'
+    # via coverage
 truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
