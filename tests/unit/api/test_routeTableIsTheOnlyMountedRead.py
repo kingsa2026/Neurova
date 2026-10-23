@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
@@ -62,19 +64,30 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 def test_取数口径只有一份():
     offenders = []
+    scanned = 0
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts or path == ROUTE_TABLE:
+        # 枚举走共享预算；`.routes` 的字面串是判据谓词的必要条件，作预筛充分。
+        for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
+            path = ref.path
+            if path == ROUTE_TABLE:
                 continue
-            source = path.read_text(encoding="utf-8", errors="ignore")
+            scanned += 1
+            source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
             hits = _readsMountedAppRoutes(ast.parse(source))
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
+    corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))
+    assert corpusFiles >= 1000, (
+        "测试语料现读 %d 个 .py——REPO_ROOT 指错时本闸的『零命中』与『没扫到』长得一样" % corpusFiles)
+    # 候选面读数＝预筛后含 `routes` 字样的档（现算 71）。比全量小两个数量级是预筛的本意，
+    # 但它掉到 0 只会有一种解释：预筛词或 SCAN_DIRS 被改坏，而不是"没人再读 app.routes"。
+    assert scanned >= 40, (
+        "候选面现读 %d 个文件——SCAN_DIRS 被改窄或预筛写坏，此时『只有一份口径』是假绿（面自证）" % scanned)
     assert not offenders, (
         "这些判据直接从装配后的 app 上取 `.routes`，读到的是挂载包装而非叶子路径——"
         "「存在」型断言会假红、「不存在」型断言会恒真，请改走 `from tests.route_table "
