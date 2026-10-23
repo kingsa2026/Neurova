@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
@@ -66,15 +68,17 @@ def test_取数口径只有一份():
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts or path == ROUTE_TABLE:
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：本判据只扫一次，
+        # 自付 `rglob + ast.parse` 等于把成本绑成「代码总量」。
+        # 文本预筛取 `.routes`——连它的文件不可能命中下面的谓词。
+        for ref in ast_scan.sourceRefsUnder(root, hints=(".routes",)):
+            if ref.path == ROUTE_TABLE:
                 continue
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if SINGLE_SOURCE_IMPORT in source:
+            if SINGLE_SOURCE_IMPORT in ref.code:
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(ast.parse(source))
+            hits = _readsMountedAppRoutes(ast_scan.transientTree(ref.path))
             if hits:
-                offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
+                offenders.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     assert not offenders, (
         "这些判据直接从装配后的 app 上取 `.routes`，读到的是挂载包装而非叶子路径——"
         "「存在」型断言会假红、「不存在」型断言会恒真，请改走 `from tests.route_table "

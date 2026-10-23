@@ -34,6 +34,7 @@ import time
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
@@ -565,19 +566,15 @@ class TestUncollectedMeasurementFileIsRetired:
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
         ghosts, unparsed = [], []
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
+        # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
         for root in ("neurova", "tests", "scripts"):
-            for path in (repo / root).rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
-                try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
-                except (SyntaxError, UnicodeDecodeError):
-                    unparsed.append(path.relative_to(repo).as_posix())
-                    continue
+            for ref in ast_scan.sourceRefsUnder(repo / root, hints=("SimpleLongMemEval",)):
+                tree = ast_scan.transientTree(ref.path)
                 if any(
                     isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
                     for n in ast.walk(tree)
                 ):
-                    ghosts.append(path.relative_to(repo).as_posix())
+                    ghosts.append(ref.path.relative_to(repo).as_posix())
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"
