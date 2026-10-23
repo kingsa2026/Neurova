@@ -10,6 +10,7 @@
 
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -48,6 +49,34 @@ class WakeCondition:
     min_temperature: float = 0.3
     min_activity_count: int = 3
     activity_window: float = 60.0
+
+
+#: 本进程内“监控线程仍在跑”的实例登记（弱引用，不延长任何实例的寿命）。
+#
+# 为什么要这层登记：`bind_and_start_sleep_loop`（agent_shutdown.py:16）为每个 Agent 起一条
+# 监控线程，而关闭口 `shutdown_agent` 原本**不停它**——全仓唯一调用 `shutdown_agent` 的地方是
+# `agent_core.py:2087` 的 `Agent.shutdown()`，于是凡没被显式关闭的 Agent（测试里建完就丢，
+# 生产里异常中途退出那条路）都永久留着一条线程。没有登记就没有人能把它们收回来：
+# 2026-10-23 实测整场 `pytest tests/unit` 在 92% 处 `STATUS_STACK_OVERFLOW` 崩机，
+# faulthandler dump 里数十条线程同名 `idle-tracker-monitor`（台账 §6-402 登记该读数）。
+# 累积不在测试侧：测试起线程的落点现数 10 处，逐处都配了 `_stop_monitoring()`／`on_stop()`
+# （夹具 `yield` 后或 `finally` 里），漏的是生产那对不成单的 start/stop——本批补的就是那一对。
+_LIVE_TRACKERS = weakref.WeakSet()
+
+
+def stopAllIdleMonitors() -> int:
+    """停掉仍在本进程里活跃的监控线程，返回回收条数（测试按格回收与诊断共用这一处实现）。
+
+    走 `_stop_monitoring` 而不是只拨标志：那条路才有 `join(timeout=5)`，否则线程还在跑
+    下一轮 `check_and_update_phase`，“回收”就是假的。
+    """
+    stopped = 0
+    for tracker in list(_LIVE_TRACKERS):
+        if getattr(tracker, "_monitor_running", False):
+            tracker._stop_monitoring()
+            stopped += 1
+    _LIVE_TRACKERS.clear()
+    return stopped
 
 
 class IdleTimeTracker(BaseModule):
@@ -153,6 +182,7 @@ class IdleTimeTracker(BaseModule):
         self._monitor_running = True
         self._monitor_thread = threading.Thread(target=self._monitor_phase, daemon=True, name="idle-tracker-monitor")
         self._monitor_thread.start()
+        _LIVE_TRACKERS.add(self)
         self.log_info(f"Started monitoring with interval {self._monitor_interval}s")
 
     def _stop_monitoring(self) -> None:
@@ -161,6 +191,7 @@ class IdleTimeTracker(BaseModule):
             return
 
         self._monitor_running = False
+        _LIVE_TRACKERS.discard(self)
         if self._monitor_thread and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=5.0)
             if self._monitor_thread.is_alive():
