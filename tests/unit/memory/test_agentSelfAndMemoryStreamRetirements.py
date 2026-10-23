@@ -30,6 +30,11 @@ def test_modulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证（形态 404）：这条判据的"零 importer"要与"没扫到"可区分——枚举面先量一次。
+    # 现算全仓 5660 个 .py；根少指一层会掉到 tests 2483／neurova 1024，都低于这条线。
+    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert enumerated >= 3000, (
+        "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % enumerated)
     offenders = {}
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
