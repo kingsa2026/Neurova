@@ -200,3 +200,62 @@ class TestNoKnownVulnerableRuntimePackages:
             f"yaml@{entry['version']} 相对修复版本 2.8.3 属降级——"
             "本仓只接受抬升到修复版或整体摘除，不接受回退到有漏洞的版本。"
         )
+
+
+class TestUndiciDecompressCarrierIsAtTheCveFloor:
+    """`undici` decompress 拦截器的版本下界门禁（CVE-2026-87029）。
+
+    为什么单列一类、不并进上面的 `_KNOWN_FLOORS`：这里要钉的不只是「不比某版低」。
+    `undici` 是 **`PINNED` 之外的传递依赖**（`@upstash/context7-mcp` → `undici ^7.0.0`），
+    它的版本由上游声明区间 + 锁文件共同决定，谁都不在 `PINNED` 里看着它。而这条 CVE
+    的载体恰好是「运行起来才生效」的压缩面：7.15.0–7.30.0 / 8.0.0–8.12.1 的
+    decompress 把解压后的数据经 zlib 流回调交给下游，下游按设计抛出（例：dump 拦截器
+    响应超过 maxSize）时异常从回调里**异步**逃逸，成为未捕获异常并终止 Node 进程。
+
+    故判据两件事：① 锁里的版本在修复下界之上；② 引入方的声明区间仍然允许它——
+    后者防的是「锁被手改成高版、而声明区间其实已经变窄」这种拼出来的绿。
+    """
+
+    #: OSV 公告给出的首个修复版；7.x 线之上还有 8.x 线，本仓只走 7.x。
+    _FIXED_FLOOR = "7.30.1"
+
+    def _releaseTuple(self, version: str) -> tuple:
+        """与 `TestNoKnownVulnerableRuntimePackages._release_tuple` 同口径的版本比较。"""
+        core, _, tail = version.partition("-")
+        nums = tuple(int(p) for p in core.split(".")[:3])
+        return nums + (0 if not tail else 1,)
+
+    def _undiciEntry(self) -> dict:
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        entry = (lock.get("packages") or {}).get("node_modules/undici")
+        if entry is None:
+            pytest.skip("undici 已不在这棵依赖树里——压缩面不适用")
+        return entry
+
+    def test_locked_undici_is_at_or_above_the_cve_floor(self):
+        version = self._undiciEntry()["version"]
+        assert self._releaseTuple(version) >= self._releaseTuple(self._FIXED_FLOOR), (
+            f"undici@{version} 低于 CVE-2026-87029 的修复下界 {self._FIXED_FLOOR}——"
+            "decompress 拦截器里异步逃逸的未捕获异常会终止 Node 进程。\n"
+            "   引入链: node_modules/@upstash/context7-mcp → undici ^7.0.0\n"
+            "   处置：在 tools/npx-runtime 重生成锁把它抬到修复版，不接受降级。"
+        )
+
+    def test_context7_declared_range_still_admits_the_fix(self):
+        """抬版不得靠越界：引入方声明的区间必须允许修复版（否则锁是拼出来的）。"""
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("undici"))
+        assert declared, (
+            "@upstash/context7-mcp 不再声明 undici——本判据的引入链前提没了，"
+            "请先复核 undici 是否仍在这棵审计树里，再决定删判据还是改链。"
+        )
+        # 只认 `^7.0.0` / `~7.0.0` / 精确版这类单区间声明；取区间下界判定即可
+        # （`^7.0.0` 的下界 7.0.0 只要不高于修复版，修复版就在区间内）。
+        lower = declared.lstrip("^~>=< ").strip()
+        assert self._releaseTuple(lower) <= self._releaseTuple(self._FIXED_FLOOR), (
+            f"引入方声明 {declared!r} 的下界已高于修复版 {self._FIXED_FLOOR}——"
+            "锁里的版本与声明区间不自洽。"
+        )
