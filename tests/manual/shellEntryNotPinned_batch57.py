@@ -162,8 +162,10 @@ startFp = dataFingerprint()
 
 try:
     LEDGER_PATH, ENTRY_DIR = seedIsolated(ROOT)
-except Exception as exc:  # noqa: BLE001
-    read("[0] 隔离根取真账本副本", lambda: (False, repr(exc)))
+except Exception as error:  # noqa: BLE001
+    # 同上：repr 先算好，别指望 lambda 延时求值时 `except ... as exc` 还活着（PEP 3110）。
+    _seedFailure = repr(error)
+    read("[0] 隔离根取真账本副本", lambda: (False, _seedFailure))
     LEDGER_PATH = ENTRY_DIR = None
 
 if LEDGER_PATH:
