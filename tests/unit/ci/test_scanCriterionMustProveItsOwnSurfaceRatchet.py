@@ -115,8 +115,10 @@ BASELINE: set = set()
 #:   只在跑起会话/起真 app 之后才存在；本闸在 CI 的干净 checkout 上解它 ⇒ `missing`。
 #:   它守的恰恰是「别的用例别把真会话库指过去」，要求它先建出那个目录才准跑，是自足条件的反面。
 #: 仓外（`outside`）**不做**这类豁免：那种根指的不是本仓代码，没有任何正当理由。
-#: 纪律与其余表一致：新增即红、消化必须摘行；`test_ratchetRecordsImprovementLoudly` 继续咬
-#: 「表与实况不同源」——真 offender 被偷偷塞回来换绿会当场露形。
+#: 同一档换个写法后落点变成"解不出"（`dynamic`，如把目录名收进循环变量）时，本表同样不误报——
+#: 那种形态由 `LOCAL_BASELINE` 那一格管，性质不同，不能混成"表过期"。
+#: 纪律与其余表一致：新增即红、消化必须摘行；署名还在、档却已不再解到缺席时当场红
+#: （表--实况咬合）——真 offender 被偷偷塞回来换绿也会露形。
 MISSING_BASELINE: dict = {
     "tests/unit/test_session_landing_guard.py":
         "锚定仓内锥 data/sessions：干净 checkout 上不存在，只在跑起会话后才建出",
@@ -130,12 +132,16 @@ def _dropSignedOffMissing(gaps: dict) -> dict:
     摘法分头写就会长成两条口径（教义第 6 条）。`outside` 一律不放行。
     """
     signedOff = set(MISSING_BASELINE)
-    stale = {rel: gaps.get(rel) for rel in signedOff if gaps.get(rel) != MISSING}
+    # 「署名还在、档也不再解到缺席」＝表过期，必须同批摘行（与 `BASELINE` 的表--实况咬合同形）。
+    # 档里出现 `None` 值不算过期：那是本闸对"某落点**解不出**"的记账，它出现在**别的题**上，
+    # 与"这个根此刻指不到目录"是两件事——按值齐比会把它误判成实况变化。
+    stale = [rel for rel in signedOff if rel in gaps and gaps[rel] != MISSING]
     assert not stale, (
-        "MISSING_BASELINE 里的条目，实际落点态不是 `missing`（表与实况不同源，必须同批改表）："
-        + repr(stale)
+        "MISSING_BASELINE 里的条目，实际落点态已不是 `missing`（表与实况不同源，必须同批改表）："
+        + repr({rel: gaps[rel] for rel in stale})
     )
-    return {rel: st for rel, st in gaps.items() if not (st == MISSING and rel in signedOff)}
+    return {rel: st for rel, st in gaps.items()
+            if not (st in (MISSING, None) and rel in signedOff)}
 
 
 #: ── LOCAL 存量表：同样只由本文件的 `_faceFindings(localGaps=...)` 现取生成 ──────────
