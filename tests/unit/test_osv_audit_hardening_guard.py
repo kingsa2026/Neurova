@@ -1574,3 +1574,80 @@ class TestScannerDownloadSurvivesTransientNetwork:
         assert "指纹" in str(excinfo.value), excinfo.value
         assert "haiku_amd64" in str(excinfo.value), "报错没点名是哪个平台没登记"
         assert calls["n"] == 0, "无指纹却已经发起传输"
+
+class TestUnallowedFindingsAreNamed:
+    """红的时候必须点名「是哪一个」——否则处置第 (a)/(b) 条无从下手。
+
+    实测形态（PR #369 构建 `cnb-p98-1k5la1aci-008`）：这一步只印结论三行
+
+        [osv] ❌ 发现未允许的漏洞。处置二选一：…
+        OSV_GATE_SUMMARY {"gate": "osv", "exit": 1, "targets": 2}
+
+    名单只落在函数内部的临时 JSON 里，构建日志拿不到 id、包名与版本——读者只能
+    重跑或去翻临时目录（还未必还在）。证据里没有名单，就等于没有裁决。
+    """
+
+    PAYLOAD = {
+        "results": [
+            {
+                "source": {"path": "tools/npx-runtime/package-lock.json", "type": "lockfile"},
+                "packages": [{
+                    "package": {"name": "hono", "version": "4.13.8"},
+                    # 扫描器把分组挂在**包**这一层（实测 v2.6.0 输出形状）。
+                    "groups": [
+                        {"ids": ["GHSA-5r4p-p66f-jhc7"], "max_severity": "7.5"},
+                        {"ids": ["GHSA-aaaa-bbbb-cccc"], "max_severity": "5.0"},
+                    ],
+                }],
+            },
+            {
+                "source": {"path": "NeurUI/src-tauri/Cargo.lock", "type": "lockfile"},
+                "packages": [{
+                    "package": {"name": "rustls", "version": "0.23.45"},
+                    "groups": [{"ids": ["RUSTSEC-2026-0346"]}],
+                }],
+            },
+        ]
+    }
+
+    def _module(self):
+        import importlib.util
+
+        script = PROJECT_ROOT / "scripts" / "ci" / "osv_audit.py"
+        spec = importlib.util.spec_from_file_location("osv_audit_findings_probe", script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_every_group_id_is_named_with_package_and_source(self):
+        findings = self._module().unallowedFindings(self.PAYLOAD)
+        joined = "\n".join(findings)
+        for token in ("GHSA-5r4p-p66f-jhc7", "GHSA-aaaa-bbbb-cccc", "RUSTSEC-2026-0346"):
+            assert token in joined, f"未点名的裁决 id: {token}（读数: {joined}）"
+        assert "hono 4.13.8" in joined and "rustls 0.23.45" in joined
+        assert "tools/npx-runtime/package-lock.json" in joined
+
+    def test_truncationIsSaidOutLoud(self):
+        """名额用尽必须显式说明还剩多少条——静默截断会把「剩余」读成「只有这些」。"""
+        module = self._module()
+        payload = {
+            "results": [{
+                "source": {"path": "x.lock"},
+                "packages": [{
+                    "package": {"name": "p", "version": "1.0"},
+                    "groups": [
+                        {"ids": [f"GHSA-{i:04d}"]}
+                        for i in range(module.UNALLOWED_FINDINGS_LIMIT + 3)
+                    ],
+                }],
+            }]
+        }
+        findings = module.unallowedFindings(payload)
+        assert len(findings) == module.UNALLOWED_FINDINGS_LIMIT + 1
+        assert "另有 3 条" in findings[-1]
+
+    def test_emptyPayloadYieldsNothing(self):
+        module = self._module()
+        assert module.unallowedFindings(None) == []
+        assert module.unallowedFindings({"results": []}) == []
+
