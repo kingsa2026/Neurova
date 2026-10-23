@@ -330,7 +330,7 @@ paramiko==5.0.0
     # via -r requirements.txt
 passlib==1.7.4
     # via -r requirements.txt
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements.txt
     #   python-pptx
@@ -400,7 +400,7 @@ pyobjc-framework-cocoa==12.2.2 ; sys_platform == 'darwin'
     # via pyobjc-framework-quartz
 pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin'
     # via pyautogui
-pypdf==6.19.0
+pypdf==6.21.2
     # via -r requirements.txt
 pyperclip==1.11.0
     # via mouseinfo
