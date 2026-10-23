@@ -373,15 +373,15 @@ class SkillService:
         return claimed
 
     def _recordArtifactAnchor(self, skillId: str, digestHex: str) -> None:
-        """把同一枚摘要另存到根外锚（§6-388）。写不成只出声，不回滚账本——
+        """把同一枚摘要另存到锚文件（§6-388）。写不成只出声，不回滚账本——
 
-        账本那份仍然是权威；锚缺只意味着"数据根整体回滚"这一形态对它不生效，
+        账本那份仍然是权威；锚缺只意味着"账本被单独重钉"这一形态对它不生效，
         不能因为锚写失败就把一条已经落了账的技能判成未安装。
         """
         key = artifact_digest.artifactKey("skill", skillId)
         if not artifact_digest.recordAnchor(key, digestHex):
             self._logger.error(
-                "技能 %s 的根外锚没写成（账本已钉、锚缺）：整库回滚检测对它不成立", skillId)
+                "技能 %s 的锚没写成（账本已钉、锚缺）：单独重钉账本这一形态检测不到", skillId)
 
     def pinArtifactDigest(self, skill_id: str, digestHex: str) -> bool:
         """把执行腿首钉的摘要写回账本（§6-383 票三甲的唯一写口）。

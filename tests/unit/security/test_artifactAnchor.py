@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-"""根外锚：数据根之外的摘要副本（§6-388，票一甲①，用户 2026-10-22 拍）。
+"""锚文件：账本之外的第二份摘要记录（§6-388，票一甲①，用户 2026-10-22 拍）。
 
 边界必须先写在判据里，免得这条能力被读成"防篡改"：
 
 - 锚**不**防同权限攻击——能改构件与账本的人通常也能改锚；
-- 它防的是**只动了数据根**的那类操作：整库恢复/快照回滚、以及"改完构件再把账本
-  重钉一次"（后者正是 §6-176 那条「账本与被保护构件同根同权限」的直接后果）；
+- 它防的是"改完构件再把账本重钉一次"这一形（§6-176 那条「账本与被保护构件同根同权限」
+  的直接后果）：锚里那份旧值仍是原值，比对就显露出来；
 - 锚里没有这条 ⇒ 维持只读账本的旧读数（TOFU 语义不变），**不悄悄补写**；
 - 锚坏了（解析失败/版本不认识）⇒ 改名隔离并响亮报，不把"读不懂"读成"没钉过"。
+- 落点必须由数据根推导（`get_data_root()`），**不许**是 CWD 相对字面量、也不许落仓库根：
+  前者让锚随启动目录漂，后者是把可写状态写进只读的镜像资产。
 
 本档另钉两处接线：技能的钉写口（`SkillService.pinArtifactDigest` 与两处安装钉）要同时落锚；
-锚写失败只出声、不回滚账本（账本那份仍是权威，锚缺只是整库回滚检测对它不成立）。
+锚写失败只出声、不回滚账本（账本那份仍是权威，锚缺只是那条检测对它不成立）。
 """
 
 from __future__ import annotations
@@ -25,7 +27,8 @@ from neurova.core import data_root
 from neurova.security import artifact_digest
 
 #: 导入期取一份**生产**的落点函数：`tests/conftest.py` 的 autouse 夹具会把
-#: `anchorPath` 改指临时目录（避免跑测写真实主目录），所以断言生产形状要用这份原件。
+#: `anchorPath` 改指临时目录（避免跑测落进某个用例自己的隔离根），
+#: 所以断言生产形状要用这份原件。
 _PRODUCTION_ANCHOR_PATH = artifact_digest.anchorPath
 
 
@@ -56,13 +59,27 @@ class TestTheAnchorIsASeparateLanding:
         assert artifact_digest.ANCHOR_CHANNELS == ("skill", "plugin"), (
             "加第三个通道要同时改两条账本的钉/验点与台账，不能只加一个字符串")
 
-    def testAnchorPathSitsOutsideTheDataRoot(self):
-        landing = _PRODUCTION_ANCHOR_PATH()
-        dataRoot = Path(data_root.get_data_root()).resolve()
+    def testAnchorPathIsDerivedFromTheSingleHomeLandingEntry(self, tmp_path, monkeypatch):
+        """落点由家目录落点的**唯一取法**推导——不手拼、不随启动目录漂。
 
-        assert ".neurova" in landing.parts, landing
-        assert dataRoot not in landing.resolve().parents, (
-            "锚落进了数据根：那样整库回滚会把构件、账本、锚一起回滚，等于没有锚")
+        这里钉的是本档曾踩过的两条反面：
+        ① 裸相对字面量（`Path(".neurova")`）会让锚的位置取决于进程 CWD；
+        ② 各模块自己拼 `Path.home() / ".neurova"` 会开出第二份家目录落点，
+           与「家目录 = 一个锚点」那条守卫（`test_homeLandingMovedIntoDataRoot`）打架。
+        故取法收口到 `data_root.legacyHomeLanding()`，本格按"同一次推导"核对：
+        把家目录指到临时目录，落点必须随之移动且文件名不变。
+        """
+        fakeHome = tmp_path / "fakeHome"
+        fakeHome.mkdir()
+        monkeypatch.setattr("pathlib.Path.home", lambda: fakeHome)
+        try:
+            landing = _PRODUCTION_ANCHOR_PATH()
+            assert fakeHome in landing.parents, (
+                f"锚落点没跟着家目录走：{landing}（家目录＝{fakeHome}）——"
+                "说明它没经 `data_root.legacyHomeLanding()` 推导")
+            assert landing.name == artifact_digest.ANCHOR_FILE_NAME
+        finally:
+            monkeypatch.undo()
 
 
 class TestRoundTripAndFailureShapes:

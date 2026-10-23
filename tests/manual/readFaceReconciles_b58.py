@@ -109,15 +109,12 @@ svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
     # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
-    # 取法按**能力**探测（有没有这个公开符号），不按"同一个 import 失败就造个同名桩"：
-    # 后者是本仓判据禁的「同名桩冒充真身」那一形，而且对照腿读的私有表未必在。
-    from neurova.skills import market_registry as _registry
+    # 判定只认生产那一个出口 `market_registry.hasExecutorMapping`：探针要对账的是生产读数，
+    # 不是"我自己也能算出来"。早先这里挂过一条「拿不到就自己查私有表」的兜底（`or lambda`），
+    # 那等于在同址另开一份判定——生产侧真改了口径，探针会拿自己那份算，还照样报同向。
+    from neurova.skills import market_registry
 
-    def hasExecutorMapping(sid):
-        public = getattr(_registry, "hasExecutorMapping", None)
-        if callable(public):
-            return bool(public(sid))
-        return str(sid or "") in getattr(_registry, "_MARKET_EXECUTORS", {})
+    hasExecutorMapping = market_registry.hasExecutorMapping
 
     sid = entry["id"]
     d = SKILLS_DIR / sid

@@ -54,7 +54,9 @@ pytestmark = [pytest.mark.timeout(60)]
 def _singleArgCallsIn(tree) -> list:
     """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。
 
-    收的是**已解析的树**而不是源码：枚举与解析归 `tests/ast_scan`，本档不自付 `ast.parse`。
+    入参是**语法树**而不是源码：文件枚举与解析归 `tests/ast_scan.sourceRefsUnder`
+    ＋ 一次性入口 `transientTree`，本档不再自付"自己枚举一整棵根树再逐个 parse"
+    ——判据成本随代码总量涨正是本仓那条墙钟红的根因。
     """
     bad = []
     for node in ast.walk(tree):
@@ -72,11 +74,11 @@ def test_全仓不得再有单参调用形态():
     # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
     # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for root in SCAN_ROOTS:
-        for path in ast_scan.filesUnder(REPO_ROOT / root):
-            lines = _singleArgCallsIn(ast_scan.transientTree(path))
+        for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("_retrieve_memories",)):
+            lines = _singleArgCallsIn(ast_scan.transientTree(ref.path))
             if lines:
                 offenders.append(
-                    f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
+                    f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}"
                 )
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
