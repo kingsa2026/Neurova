@@ -172,6 +172,17 @@ class TestNoKnownVulnerableRuntimePackages:
             "GHSA-27r3-jxmh-p828",
             "两条声明线各有修复版：2.x 线 2.4.0，1.x 线 1.20.9",
         ),
+        # 2026-10-23 一组四条（low/low/medium/medium，上游同日发布）：scheme 注入、
+        # 百分号编码的 scheme 伪造、WHATWG host 归一化导致的 host 混淆、相对引用
+        # 路径等价。开的是区间，不是单条 id——只销一条等于换个 id 重报。
+        # 载体是 ajv 8.20.0 声明 `fast-uri ^3.0.1` 解析到的 3.1.8，修复版 3.1.9。
+        "fast-uri": (
+            "3.1.9",
+            ("node_modules/ajv",),
+            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / "
+            "GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
+            "fast-uri 四条（scheme 注入 / scheme 伪造 / host 混淆 / 路径等价）",
+        ),
     }
 
     #: 每条包的**全部载体条目**：同名包在树里可能以嵌套形态并存（`<父>/node_modules/<包>`），
