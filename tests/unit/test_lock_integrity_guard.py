@@ -222,6 +222,71 @@ class TestKnownDriftsStayFixed:
             assert not leaked, f"{name} 仍声明 litellm: {leaked}（应已由 openai 原生通道替代）"
 
 
+class TestAuditBatchFloors:
+    """2026-10 公告批的修复下界——锁不许回退到有公告的版本。
+
+    为什么要单列一类：上面 `test_openai_lock_satisfies_declared_floor` 只核
+    "锁 ≥ txt 自述下界"，而下界本身可能是旧的（`aiohttp>=3.9.0` 从 2023 年起
+    没动过，锁停在 3.14.3 仍是"合规"）。公告晚于下界落地时，这条链就失效：
+    dependency-audit 红一次、人改一次锁、下次漂移再红一次。故把**实际修掉的
+    那批公告**逐条登记成机器可验的下界，与
+    `tests/unit/tools/test_npx_runtime_pinning.py::TestNoKnownVulnerableRuntimePackages`
+    同一口径（OSV 实扫发现 → 在此追加一条 → 回退即红）。
+
+    下界来源（api.osv.dev 逐版本实查，2026-10-23）：
+      aiohttp 3.14.3 → 8 条公告（GHSA-2g87-pp6c-29x5 等），3.14.4 起清零，落 3.14.5
+      certifi 2026.7.22 → GHSA-6q48-6c7w-9gw2（emSign 中间 CA），2026.10.19 起清零，落 2026.10.23
+      opentelemetry-api 1.44.0 → GHSA-xcq7-p3pf-p88h（tracestate 无界解析），1.45.1 起清零
+      pillow 12.3.0 → 39 条（含 libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v），13.0.0 起清零
+      pypdf 6.19.0 → 8 条（GHSA-39mj-jf6j-2qj3 等），6.21.1 起清零，落 6.21.2
+    """
+
+    _FLOORS = {
+        "aiohttp": "3.14.4",
+        "certifi": "2026.10.19",
+        "opentelemetry-api": "1.45.1",
+        "pillow": "13.0.0",
+        "pypdf": "6.21.1",
+    }
+
+    @staticmethod
+    def _version_key(version: str) -> tuple:
+        """版本比较键：按 `.` 与 `-` 切段，数字段恒排在非数字段之前。"""
+        return tuple(
+            (0, int(part), "") if part.isdigit() else (1, 0, part)
+            for part in version.replace("-", ".").split(".")
+        )
+
+    @pytest.mark.parametrize("lock", ["requirements-ci.lock", "requirements-full.lock"])
+    def test_locked_versions_meet_audit_floors(self, lock):
+        entries = parse_lock(lock)
+        problems = []
+        for name, floor in self._FLOORS.items():
+            entry = entries.get(name)
+            if entry is None:
+                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+                continue
+            if self._version_key(entry["version"]) < self._version_key(floor):
+                problems.append(f"{name}: 锁 {entry['version']} < 已修公告的修复下界 {floor}")
+        assert not problems, (
+            f"{lock} 里出现已修公告的未修版本（会直接红 dependency-audit）:\n  "
+            + "\n  ".join(problems)
+            + "\n修复：在对应 txt 抬下界后重编锁（uv pip compile --universal <txt> -o <lock>）。"
+        )
+
+    def test_ci_lock_declares_pillow_itself(self):
+        """Pillow 必须自有声明行，不能只靠 reportlab 传递进来。
+
+        传递依赖的版本由父包下界决定（`reportlab>=4.0` → `pillow>=9.0.0`），
+        锁解析停在哪个版本全凭上游惯性；本仓在 2026-10 那批公告里付出的代价就是
+        "编辑不了下界、只能改锁"——声明面缺失使这次修复无法被 `uv pip compile` 复算。
+        """
+        assert "Pillow" in _read("requirements-ci.txt"), (
+            "requirements-ci.txt 未声明 Pillow——CI 锁里的 pillow 将重新退化为"
+            "reportlab 的传递依赖，修复下界失去声明面（无法用重编锁复现）。"
+        )
+
+
 class TestFullRuntimeLockExists:
     """#56 覆盖面缺口：生产全量依赖必须有锁且被审计（否则永远无人扫）。"""
 
