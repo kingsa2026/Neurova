@@ -23,10 +23,41 @@ class ModuleState(Enum):
     ERROR = "error"
 
 
-class BaseModule(ABC):
+class StateValuesStore:
+    """「一个对象自己的键值状态袋」——全仓**唯一**实装（§6-409 批 O-3 收口）。
+
+    为什么收成一份、收成哪一份：同一功能原先有三处——这里（存 `_state_values`，**在役**：
+    `IdleTimeTracker` 写 6 个键、`tests/unit/memory/test_sleep_loop_wiring.py:111` 读回）、
+    `memory_layer/sleep.py` 的同名两行（存 `self._state`，该 dict 全仓只被那三行用到）、
+    以及 `plugins/base_plugin.py` 那份**坏的**转发（调 `StateManager.get_state(plugin_id,…)`，
+    而 `core/state_manager.py` 的真 API 是 `get(key,default)`/`set(key,value)`，那两个方法从未存在；
+    `_state_manager` 也从不被注入）。按教义第 7 条比完取长补短后只剩一处实现被三族共用。
+
+    名字为什么不叫 `get_state`/`set_state`：那一对在本仓属于**状态机**——
+    `BaseModule.get_state()` 返回 `ModuleState`、`set_state(ModuleState)` 还会发
+    `module.state_changed` 事件。键值袋与状态机共用一个名字，正是 `BasePlugin` 那份错位接缝
+    能被写下却没被看见的土壤。
+
+    字段由宿主类的 `__init__` 建（`self._state_values = {}`）——`BaseModule` 一直这么做，
+    两个混入方各把自己那行留着（`SleepConsolidation` 原来那份叫 `self._state`，全仓只被
+    那三行用到，随本批一起改名收口）。不做惰性创建：那等于把"记得初始化"换成
+    "记得每次读都兜一层"，仍然是一种要靠自觉的口径。
+    """
+
+    def set_state_value(self, key: str, value: Any) -> None:
+        """写入本对象的一个状态值（写了就必须读得回来——见判据的闭环要求）。"""
+        self._state_values[key] = value
+
+    def get_state_value(self, key: str, default: Any = None) -> Any:
+        """读本对象的一个状态值；缺失返回 `default`，不抛。"""
+        return self._state_values.get(key, default)
+
+
+class BaseModule(StateValuesStore, ABC):
     """基础模块基类
 
     所有模块的抽象基类，定义了标准的生命周期方法。
+    键值状态袋（`set_state_value`/`get_state_value`）由 `StateValuesStore` 提供，不在这里另写一份。
     """
 
     MODULE_ID: str = "base_module"
@@ -50,9 +81,6 @@ class BaseModule(ABC):
         # 对着一条没人读的总线发事件——正是本文件过去恒走 None 分支的形态。
         self._event_bus = event_bus
         self._state = ModuleState.UNINITIALIZED
-        self._state_manager = None
-        self._log_manager = None
-        self._error_handler = None
 
         # 允许通过参数覆盖类属性
         if module_id:
@@ -64,16 +92,8 @@ class BaseModule(ABC):
 
         self._logger = logging.getLogger(f"{self.MODULE_ID}")
 
-        # 状态值存储
+        # 状态值存储（读写都在 `StateValuesStore` 那一份实现里）
         self._state_values: Dict[str, Any] = {}
-
-    def set_state_value(self, key: str, value: Any) -> None:
-        """设置状态值"""
-        self._state_values[key] = value
-
-    def get_state_value(self, key: str, default: Any = None) -> Any:
-        """获取状态值"""
-        return self._state_values.get(key, default)
 
     def set_state(self, new_state: ModuleState) -> None:
         """设置模块状态"""

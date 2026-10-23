@@ -116,7 +116,10 @@ class IdleTimeTracker(BaseModule):
         "hibernate": "idle_hibernate",
     }
 
-    def __init__(self, event_bus=None, state_manager=None, log_manager=None, error_handler=None):
+    def __init__(self, event_bus=None):
+        # 只收真转得出去的注入位。原签名还广告 `state_manager=`／`log_manager=`／`error_handler=`
+        # 三个位置，构造体一个都不转发（`BaseModule` 连这三个形参名都没有，靠 `**kwargs` 静默
+        # 吞掉）⇒ 全仓 grep 无人传、也无任何读者，是"看起来可注入"的幻影旋钮（§6-409 批 O-3）。
         super().__init__(config={}, event_bus=event_bus)
         self._last_activity_time = time.time()
         self._current_idle_time = 0.0
