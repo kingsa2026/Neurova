@@ -80,7 +80,8 @@ def test_取数口径只有一份():
         for path in ast_scan.filesUnder(root):
             if path == ROUTE_TABLE:
                 continue
-            source = path.read_text(encoding="utf-8", errors="ignore")
+            scanned += 1
+            source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
             try:
@@ -90,6 +91,13 @@ def test_取数口径只有一份():
             hits = _readsMountedAppRoutes(tree)
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
+    corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))
+    assert corpusFiles >= 1000, (
+        "测试语料现读 %d 个 .py——REPO_ROOT 指错时本闸的『零命中』与『没扫到』长得一样" % corpusFiles)
+    # 候选面读数＝预筛后含 `routes` 字样的档（现算 71）。比全量小两个数量级是预筛的本意，
+    # 但它掉到 0 只会有一种解释：预筛词或 SCAN_DIRS 被改坏，而不是"没人再读 app.routes"。
+    assert scanned >= 40, (
+        "候选面现读 %d 个文件——SCAN_DIRS 被改窄或预筛写坏，此时『只有一份口径』是假绿（面自证）" % scanned)
     assert not offenders, (
         "这些判据直接从装配后的 app 上取 `.routes`，读到的是挂载包装而非叶子路径——"
         "「存在」型断言会假红、「不存在」型断言会恒真，请改走 `from tests.route_table "

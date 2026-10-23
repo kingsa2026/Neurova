@@ -6,8 +6,9 @@
 §6-397 批 H 的 E 笔把恢复轮的空转掐掉了，判据 `thinkingKnobReachesGateway()` 读的是
 `client.config.compat`。生产里那个 `client` 是**路由门面** `AgentLLMClient`
 （`agent_core.py:121`），它的 `.config` 来自 `agent_core.py:315` 那次 `LLMConfig(...)`
-——构造时从不传 compat，全仓也没有任何 `config.compat =` 赋值点 ⇒ 门面那份永远是
-dataclass 默认值。真的 provider 声明只挂在 `multi_model_client.py:296-301` 的
+——构造时从不传 compat ⇒ 门面那份永远是 dataclass 默认值（收尾那一笔把它**显式清空**，
+见 `TestFacadePresentsNoFakeDeclaration`：留着默认值就是留着"没人声明"与"声明为否"的撞脸）。
+真的 provider 声明只挂在 `multi_model_client.py:296-301` 的
 **内层 per-provider 客户端**上，门面拿不到。
 
 于是对 amd 恰好同结果（`resolve_compat("amd")` 也是 False），活体与在册判据都测不出来；
@@ -128,8 +129,8 @@ class TestFacadeVerdictFollowsTheCandidate:
         routing, _, _ = pool
         facade = AgentLLMClient(model=TOGGLE_MODEL)
 
-        assert facade.config.compat.supports_thinking_toggle is False, (
-            "门面这份仍是 dataclass 默认值——本判据要证明的是结论不再来自它"
+        assert facade.config.compat is None, (
+            "门面不持提供方事实（§6-403）——本判据要证明的是结论来自候选行，不是来自它"
         )
         assert thinkingKnobReachesGateway(facade, {"thinking_effort": "deep"}) is True, (
             "候选行声明了 enable_thinking 却答『发不出去』＝白丢一次真能自救的重试"
@@ -177,6 +178,30 @@ class TestEmptyPoolFailsOpen:
             assert thinkingKnobReachesGateway(facade, {"thinking_effort": "deep"}) is True
         finally:
             MultiModelLLMClient._instances.pop(scope, None)
+
+
+class TestFacadePresentsNoFakeDeclaration:
+    """门面那份 config 不许拿 dataclass 默认值冒充"这台网关已声明为否"。
+
+    §6-403 把取数移到路由边界之后，门面里的 `compat` 已经没有读者，但它**还在**——
+    而"还在的默认值"与"声明为否"在 `getattr(config, "compat")` 这种写法下一模一样。
+    留着一个没人声明却长得像声明的对象，就是给下一个同类缺陷备好床位（§8 断点条款）。
+    """
+
+    def testFacadeCompatIsExplicitlyUnset(self, pool):
+        routing, _, _ = pool
+
+        facade = AgentLLMClient(model=TOGGLE_MODEL)
+
+        assert facade.config.compat is None, (
+            "门面仍自带一份 dataclass 默认 compat：新代码把『没人声明』读成『声明为否』"
+        )
+
+    def testSenderSideConfigStillCarriesRealCompat(self):
+        """反向：清空只针对路由门面，发送侧内层客户端的 compat 不许被一起清掉。"""
+        from neurova.llm_client import LLMConfig
+
+        assert LLMConfig(model="x").compat.supports_tools is True
 
 
 class TestLegacyClientShapeIsHonoured:

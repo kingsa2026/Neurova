@@ -1052,6 +1052,10 @@ export default {
     sandboxRequired: 'Bac à sable requis',
   },
   skillEvo: {
+    adopt: 'Adopter',
+    adoptTarget: 'Compétence cible',
+    adoptSuccess: 'Proposition en attente créée',
+    adoptError: "Échec de l'adoption",
     abVerify: 'Contrôle à deux bras (véritable holdout)',
     abHint: 'Même jeu de tâches et même juge : texte de base contre texte candidat ; lecture seule, aucune proposition produite.',
     abRunSimulated: 'Lancer le bras simulé',

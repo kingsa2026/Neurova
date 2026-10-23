@@ -42,6 +42,7 @@ class WeChatAuthMixin:
         a.agentid = config.get("agentid", "")
         a.kf_mode = config.get("kf_mode", "false").lower() == "true"
         a.humanTakeoverEvents = bool(a.kf_mode)
+        a.humanTakeoverReason = "" if a.kf_mode else "unsupported:wechat_not_kf_mode"
         a.open_kfid = config.get("open_kfid", "")
         a.callback_token = config.get("token", "")
         a.encoding_aes_key = config.get("encoding_aes_key", "")

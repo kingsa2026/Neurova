@@ -1053,6 +1053,10 @@ export default {
     sandboxRequired: 'Sandbox required',
   },
   skillEvo: {
+    adopt: 'Adopt',
+    adoptTarget: 'Target skill',
+    adoptSuccess: 'Pending proposal created',
+    adoptError: 'Adoption failed',
     abVerify: 'Dual-arm check (true holdout)',
     abHint: 'Same task set and same judge, baseline body vs candidate body; read-only, produces no proposal.',
     abRunSimulated: 'Run simulated arm',
