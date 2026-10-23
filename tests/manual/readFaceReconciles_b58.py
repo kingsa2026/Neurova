@@ -108,16 +108,16 @@ except Exception as error:  # noqa: BLE001
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    # 同一判定在两侧的取法不同：本树有 `hasExecutorMapping`；对照腿（本批修复之前的那棵树）
-    # 只有私有表。两种取法都落在**同一趟导入**里，靠 `getattr` 分派——不写成
-    # 「except ImportError 里再定义同名函数」：那是同名桩形态，一旦真触发就把"判定"
-    # 换成一份并行实现，而读代码的人看见的是"有兜底"（`test_noFirstPartyImportPlaceholder`
-    # 的零容忍政策正是冲这个形状定的）。比的从来不是这个取法，是四面的读数是否同向。
-    from neurova.skills import market_registry
+    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+    # 取法按**能力**探测（有没有这个公开符号），不按"同一个 import 失败就造个同名桩"：
+    # 后者是本仓判据禁的「同名桩冒充真身」那一形，而且对照腿读的私有表未必在。
+    from neurova.skills import market_registry as _registry
 
-    hasExecutorMapping = getattr(market_registry, "hasExecutorMapping", None) or (
-        lambda sid: str(sid or "") in market_registry._MARKET_EXECUTORS)
+    def hasExecutorMapping(sid):
+        public = getattr(_registry, "hasExecutorMapping", None)
+        if callable(public):
+            return bool(public(sid))
+        return str(sid or "") in getattr(_registry, "_MARKET_EXECUTORS", {})
 
     sid = entry["id"]
     d = SKILLS_DIR / sid

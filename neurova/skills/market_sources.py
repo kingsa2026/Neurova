@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -314,6 +317,30 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
+def _pathBudgetExceeded(payload: bytes, dest: Path) -> bool:
+    """这条落点在这台机器上装得下吗——**路径预算的唯一判定口**（拒绝与点名都读它）。
+
+    Linux/macOS 没有 260 上限（`PATH_MAX` 是 4096，实测 292 字符照装），故预算取
+    `min(WINDOWS_MAX_PATH, 本机真实上限)`。判据（`tests/unit/skills/test_zipRefusalNamesItsCause.py`）
+    钉的是"超预算这条路的失败必须点名"，前提必须与判定同源：判据补出来的超限根在 POSIX 上
+    仍然装得下时，它测的就不是本函数了。取 `min` 只加严、不放宽——任何在 Windows 上会被拦的
+    落点，在 POSIX 上同样被拦（判据因此跨机器同向）。
+    """
+    projected = _longestProjectedPath(payload, dest)
+    if projected is None:
+        return False
+    return projected[1] >= WINDOWS_MAX_PATH or projected[1] >= _pathconfNameMax()
+
+
+def _pathconfNameMax() -> int:
+    """本机单个路径名的字节上限（`PC_NAME_MAX`）；取不到时按 Windows 口径兜底。"""
+    try:
+        probe = Path(tempfile.gettempdir())
+        return int(os.pathconf(str(probe), "PC_NAME_MAX"))
+    except (OSError, ValueError, AttributeError):
+        return WINDOWS_MAX_PATH
+
+
 def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
     """把一次解包失败写成能据以行动的一句话。
 
@@ -323,7 +350,7 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     """
     if isinstance(exc, OSError):
         projected = _longestProjectedPath(payload, dest)
-        if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
+        if _pathBudgetExceeded(payload, dest):
             member, total = projected
             return (
                 f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
@@ -341,6 +368,12 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
     try:
+        # 路径预算也是这条路的前置：Windows 未开长路径时超限落点是 ENOENT，
+        # 而在 POSIX 上同一份包会照装——拒绝口径不许随机器漂，故在解包机制之前先判一次。
+        if _pathBudgetExceeded(payload, dest):
+            raise OSError(
+                errno.ENAMETOOLONG,
+                "落点根 + 最长成员的投影越过本机路径预算（未解包）")
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

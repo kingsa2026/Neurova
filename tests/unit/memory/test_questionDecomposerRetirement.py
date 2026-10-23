@@ -26,9 +26,11 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
-    # 面自证：先证这次真扫到了源码树，再谈"零导入"——根被改窄时零命中与干净同形。
-    scanned = ast_scan.trackedPyPaths()
-    assert len(scanned) > 500, f"扫描面现读 {len(scanned)} 个 .py——根指错时『零导入』不代表干净"
+    # 面自证：`REPO_ROOT` 指错时"零导入"与真干净同形（根＝`ast_scan` 的生产根，
+    # 与 `importersOfModule` 同一取法，不另拼 `<repo>/neurova`）
+    scanned = sum(1 for _ in ast_scan.filesUnder(ast_scan.PRODUCTION_ROOT))
+    assert scanned > 500, (
+        f"扫描面现读 {scanned} 个 .py（根＝{ast_scan.PRODUCTION_ROOT}）——根写错时零导入不代表干净")
     assert not ast_scan.importersOfModule(REPO_ROOT, MODULE)
 
 

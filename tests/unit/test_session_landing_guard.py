@@ -25,26 +25,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-#: 落点目录本身**不预置**（`data/sessions/` 在干净检出里不存在，预置它就等于替探针把"仓库里没有
-#: 会话目录"这件事抹掉了），故判据只碰**存在时**的父目录 `data/`——那一层按设计在位。
 SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
-DATA_DIR = REPO_ROOT / "data"
-
-
-def toolLeftovers():
-    """探针在 `<repo>/data` 里留下的、除 `sessions/` 之外的目录项。
-
-    只对**存在的**那一层取数：探针建的 `data/sessions/` 在干净检出里本来就不存在，
-    拿它当落点去取数，判据会读出一个"根指不到真实目录"的落点——红的是判据不是落点。
-    """
-    return [entry.name for entry in DATA_DIR.iterdir() if entry.name != "sessions"]
-
-
-def probeLayerIsEmpty() -> bool:
-    """探针建的那一层是否为空（不存在也算空——它本就不该存在）。"""
-    if not SESSIONS_DIR.is_dir():
-        return True
-    return not os.listdir(SESSIONS_DIR)
+#: 回收上限：`<repo>/data`，与 `SESSIONS_DIR` 同源推导（清理时不得就地再拼一遍）。
+DATA_DIR = SESSIONS_DIR.parent
 
 
 def _cleanupProbeRealLanding():
@@ -53,20 +36,14 @@ def _cleanupProbeRealLanding():
     只在目录为空（探针没往里写过会话）时删；非空说明有真实数据，
     宁可留着让人看见也不静默删（这里不吞异常的另一面）。
     回收上限是 `<repo>/data`：再往上不是本探针建的，不碰。
-    路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
-    每次都按**一次取数**判空（`[e for e in <dir>.iterdir() …]`），不用 `any(<dir>.iterdir())`：
-    后者与前者混用会让判据在 `data/sessions/` 上留一个"根指不到真实目录"的落点，
-    而该目录在干净检出里本就不存在——红的会是判据，不是落点。
+    空判定只看**一个**目录（`SESSIONS_DIR`）：它删空之后祖先才可能空，而祖先是从模块级
+    常量 `DATA_DIR` 取的同一条路径——不再就地拼 `<repo>/data`，面自证棘轮才不会把
+    「可能尚不存在的中间目录」解成 `missing`。
     """
-    # 只对 `<repo>/data` 这一层（它在任何检出里都在位）取数判空；探针建的那层
-    # `data/sessions/` 由它自己的 `rmdir` 顺手回收。落点必须是**存在的**目录：
-    # 对 `SESSIONS_DIR` 取数会让判据在这一档上读出一个"根指不到真实目录"的落点，
-    # 而该目录在干净检出里本来就不存在——红的是判据，不是落点。
     try:
-        if probeLayerIsEmpty():
-            SESSIONS_DIR.rmdir()
-        if not toolLeftovers():
-            DATA_DIR.rmdir()
+        for candidate in (SESSIONS_DIR, DATA_DIR):
+            if candidate.is_dir() and not any(candidate.glob("*")):
+                candidate.rmdir()
     except OSError:
         pass
 

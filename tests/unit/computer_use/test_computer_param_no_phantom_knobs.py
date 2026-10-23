@@ -95,7 +95,11 @@ def _sweepReadCounts() -> dict:
         for shape in _READ_SHAPES
     ]
     counts: dict = dict.fromkeys(_advertisedNames(), 0)
-    for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py"):
+    refs = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
+    # 面自证：`PROD_ROOT` 被改窄时下面每一格都会读成"零幻影旋钮"（与真干净同形）
+    assert len(refs) > 100, (
+        f"扫描面现读 {len(refs)} 个 .py（根＝{PROD_ROOT}）——根写错时零命中不代表干净")
+    for ref in refs:
         if ref.path.name == "builtin_tools.py":
             continue
         text = ref.code

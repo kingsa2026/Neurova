@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import ast
 import pathlib
-import tempfile
 
 from tests import ast_scan
 
@@ -42,15 +41,17 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 无害路径的两个取样点：真实家目录（触发本仓那条缺陷的**用户名形状**：`\` + `xcc` + 十六进制，
-#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿）和一个系统临时目录。
+#: 无害路径的取样必须**带上缺陷的触发形状**：`users` 后的分隔符紧跟一个 `x` 再跟十六进制两位
+#: （Windows 下正是操作者自己的用户名 `\xccoo`，起点那条 5/5 稳定红就是它）。没有这个形状，
+#: `_build_tool_input` 拼出的串不会命中「十六进制转义」那枚正则，测的就是一条永不发生的路径
+#: ——第一版踩过，红形是"修好了"的假绿。
 #:
-#: 为什么两个都要：`FilePathGuardian` 的受保护清单里有 `/root`（Linux 上它就是**家目录**，
-#: 不带 `\` 转义），于是"读自己家目录下的一个无害文件"在 Linux 上按设计就被拦——
-#: 那是这条判据要判的**另一个问题**（路径值混进命令扫描面），不是本格问的"路径读取该不该放行"。
-#: 分开放：前者只钉"不被判成 shell 规避"，后者钉"该放行时真放行"。
-SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
-SAFE_READ_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
+#: 取样点选在 `/tmp/...` 这类**非受保护**落点，而不是真实家目录：本机家目录是 `/root`，
+#: 它本身就在守卫的受保护路径表里（`tool_guard._protected_paths`），拿它取样时红的是**另一条规则**
+#: （`protected_path`），判据锚在被测对象之外，就测不到 shell 规避面。
+#: 形状自证：同一串落在**命令键**上必须仍被判为十六进制编码（否则这条取样根本没触发判据），
+#: 落在**路径键**上则不许进命令扫描面——两侧现读见下一格。
+SAFE_PATH = "/tmp/users\\xccoo/neurova_scan_probe/safe_read.txt"
 
 
 def _safeSamples() -> list:
@@ -76,7 +77,7 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_READ_PATH}).should_block is False, (
+    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_PATH}).should_block is False, (
         "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
 
 
