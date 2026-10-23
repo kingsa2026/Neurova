@@ -30,6 +30,7 @@
 import datetime
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -62,6 +63,28 @@ def _newManager(tmp_path, agentId: str) -> MemoryManager:
         agent_id=agentId,
         enable_buffer=False,
     )
+
+
+def _requireEmbeddingEngine():
+    """前置：本档的向量面要**真的**算得出向量——缺档即显式失败，不做 skip。
+
+    这些格子在读数上是同一个形状：引擎回零向量 ⇒ 全仓写不进 embedding、召回库空、
+    余弦恒 0。不先证前置，红会落在「断言 0.0 > 0.0」上，看上去像判据写错，
+    而真正要说的是「这台机器上根本不成立」（`requirements-ci.txt` 刻意不含
+    onnxruntime / tokenizers / sentencepiece，CI 上确实不成立）。
+    """
+    from neurova.embedding import get_embedding_engine
+
+    engine = get_embedding_engine()
+    if engine is None:
+        pytest.fail("嵌入引擎不可用（onnxruntime/sentencepiece/tokenizers 或本地模型档缺失）："
+                    "本档的向量面前提不成立，先按 requirements.txt 装齐或补齐模型档")
+    try:
+        vector = [float(x) for x in engine.encode("前提自证：这句话必须算得出非零向量")]
+    except Exception as exc:  # noqa: BLE001 - 引擎任何不可用原因都是同一件前提
+        pytest.fail(f"嵌入引擎 encode 不可用：{exc}")
+    if not vector or not any(abs(x) > 0.0 for x in vector):
+        pytest.fail("嵌入引擎回了零向量（模型档缺失或初始化失败）：本档的向量面前提不成立")
 
 
 @pytest.fixture
@@ -323,6 +346,7 @@ class TestContentUpdateFollowsRecallIndexes:
 
         from neurova.embedding import get_embedding_engine
 
+        _requireEmbeddingEngine()
         manager = _newManager(tmp_path, "lme_update_store")
         try:
             mid = manager.remember(
@@ -354,6 +378,7 @@ class TestContentUpdateFollowsRecallIndexes:
             manager.close()
 
     def test_持久层向量随内容刷新(self, tmp_path, semanticSearchIsolated):
+        _requireEmbeddingEngine()
         manager = _newManager(tmp_path, "lme_update_embedding")
         try:
             mid = manager.remember(
@@ -536,19 +561,29 @@ class TestTemporalAwareness:
             manager.close()
 
 
+#: 扫描根提模块级：`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`
+#: 按模块级常量解根，绑在函数内即「那档整档不在面内」。深度按**本档所在位置**算：
+#: 本档在 `tests/performance/memory/` 里，`parents[2]` 是 `tests/performance/`、
+#: `parents[3]` 才是仓根。
+PERFORMANCE_TESTS_ROOT = Path(__file__).resolve().parents[3] / "tests" / "performance"
+
+
 class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
-        strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
-            if "__pycache__" not in p.parts and p.name != "__init__.py"
-            and not p.name.startswith("test_")
-        ]
+        surface = 0
+        strays = []
+        # 枚举走共享预算入口（不私有 `rglob`：那会把判据成本绑成代码总量），
+        # 且**先证面**再谈命中——根被改窄时读数会缩成「零命中」而不是红。
+        for ref in ast_scan.sourceRefsUnder(PERFORMANCE_TESTS_ROOT, ".py"):
+            surface += 1
+            rel = ref.path.relative_to(PERFORMANCE_TESTS_ROOT.parent).as_posix()
+            if ref.path.name != "__init__.py" and not ref.path.name.startswith("test_"):
+                strays.append(rel)
+        assert surface > 5, (
+            f"tests/performance/ 现读 {surface} 个 .py（根＝{PERFORMANCE_TESTS_ROOT}）——面量级不对＝根指错，"
+            "「零命中」不来自代码")
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
