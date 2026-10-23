@@ -199,6 +199,28 @@ def resolve_compat(
     return compat.merged(compat_dict)
 
 
+def resolveCallCompatCandidates(
+    routing: Any,
+    model: Optional[str] = None,
+    provider_id: Optional[str] = None,
+) -> list:
+    """向路由层要"本轮请求会打到的 provider 声明链"；答不出就交回空表。
+
+    路由层才是知道本轮归属的那一层：它按与 `_get_client_for_request` 同源的口径挑出
+    provider 行，逐行走发送侧同一个 `resolve_compat()`（教义第 6 条——声明的解析
+    只许一处）。没有这个方法（替身/未装配）或它抛错 ⇒ 空表，由调用方按"到得了"处理：
+    判据只能掐掉**确证**的空转，不能掐掉一次本可以自救的重试。
+    """
+    resolve = getattr(routing, "requestCompatCandidates", None)
+    if not callable(resolve):
+        return []
+    try:
+        return list(resolve(model=model, provider_id=provider_id) or [])
+    except Exception as e:  # noqa: BLE001 - 答不出就交回调用方 fail-open
+        logger.warning("not_supported: 路由 compat 候选取数失败（%s）——按旋钮到得了处理", e)
+        return []
+
+
 def thinkingKnobReachesGateway(client: Any, request_params: Optional[dict] = None) -> bool:
     """问一问：对**这一轮真正会打到的网关**，"关思考/降档"发得出去吗（两处恢复路径共用）。
 
