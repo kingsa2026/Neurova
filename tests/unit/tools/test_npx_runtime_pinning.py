@@ -169,6 +169,18 @@ class TestNoKnownVulnerableRuntimePackages:
         # 引入链：@upstash/context7-mcp 声明 `undici ^7.0.0`，7.x 线解析到 7.29.1。
         "undici": ("7.30.1", ("node_modules/@upstash/context7-mcp",), "CVE-2026-109383",
                    "证书验证绕过：tls 选项经 JSON 深克隆转发时检查函数被丢弃"),
+        # static 中间件二次解码路径：`serveStatic` 把请求路径再解一次，静态路径上的
+        # 中间件因此可被绕过。引入链有三条（@modelcontextprotocol/sdk、
+        # @modelcontextprotocol/node、@hono/node-server），都声明 `^4`。注意 `^4` 只是
+        # **可解析到**修复版，重跑 npm install 实测锁逐字节不变（同 undici / yaml 的事实），
+        # 故真正抬升靠 tools/npx-runtime/package.json 的 overrides。
+        "hono": ("4.13.11", ("node_modules/@modelcontextprotocol/sdk",), "GHSA-5r4p-p66f-jhc7",
+                 "serveStatic 二次解码路径 → 静态路径中间件可被绕过"),
+        # 地址解析在长度上限之前二次匹配 zone identifier：一个长串即可把进程拖住。
+        # 引入链 express-rate-limit（^8.2.1 → ip-address ^10.2.0），同样是区间声明，
+        # 同样由 overrides 顶替才真抬升。
+        "ip-address": ("10.7.4", ("node_modules/express-rate-limit",), "GHSA-rxp7-6hxx-x8q5",
+                       "Address6 在长度上限之前二次匹配 zone identifier，长串可拖停进程"),
     }
 
     def _release_tuple(self, version: str) -> tuple:
