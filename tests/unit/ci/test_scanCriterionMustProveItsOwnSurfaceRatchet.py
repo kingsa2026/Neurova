@@ -118,8 +118,10 @@ BASELINE: set = set()
 #: 纪律与其余表一致：新增即红、消化必须摘行；`test_ratchetRecordsImprovementLoudly` 继续咬
 #: 「表与实况不同源」——真 offender 被偷偷塞回来换绿会当场露形。
 MISSING_BASELINE: dict = {
-    "tests/unit/test_session_landing_guard.py":
-        "锚定仓内锥 data/sessions：干净 checkout 上不存在，只在跑起会话后才建出",
+    # 现值＝**空集**。原先那一行（`test_session_landing_guard.py`，理由是"锚定仓内锥
+    # `data/sessions`，干净 checkout 上不存在"）已按该表自述的纪律**摘掉**：那档的枚举根
+    # 改指模块级 `DATA_DIR`（`<repo>/data`，跑测时一定存在），空判只枚举这一层，不再有
+    # 「解出 missing」的落点——留行就是替不存在的事背书，与上一条 stale 判据同源。
 }
 
 
