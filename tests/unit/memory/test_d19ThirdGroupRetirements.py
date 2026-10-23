@@ -46,6 +46,11 @@ def test_noImporterRemains():
     from tests import ast_scan
 
     offenders = {}
+    # 面自证：语料按根量一次，根被改窄时下面会读成「零导入」而不是红。
+    corpus = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert corpus > 500, (
+        f"语料现读 {corpus} 个文件（根＝{REPO_ROOT}）——面量级不对＝根指错，"
+        "「零导入」不来自代码")
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.channels.{name}")

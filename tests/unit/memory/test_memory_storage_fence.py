@@ -59,10 +59,14 @@ class TestDefaultPathIsNotCwdRelative:
 
 class TestFenceCoversMemorySurfaces:
     def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
-        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
+        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
+
+        v2 统一布局（`4bf9b733`）之后生产根是仓库自带 `data/`，旧 `agent_workspaces/` 同时
+        仍在围栏内（`_productionMemoryDirs()` 两条都收），故这里判的是**围栏口径**而不是旧名字。
+        """
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        assert productionMemoryDir().name == "data"
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
 
