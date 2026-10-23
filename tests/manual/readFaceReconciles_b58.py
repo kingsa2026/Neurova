@@ -105,17 +105,15 @@ except Exception as exc:  # noqa: BLE001
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
+#: 映射执行体型的判法：`hasExecutorMapping` 是本仓对"这只 id 有没有代码侧执行体"的唯一出口
+#: （`market_registry` 的 docstring 明写"外面要问的是这一句，不是自己去读私有表"）。
+#: 早先这里有一段 `except ImportError` 里抬同名 def 的对照腿——那条腿的前提（这个 API 会缺席）
+#: 已不成立，留着它既误导读者，又让「同名桩豁免表」里多一条空账。
+from neurova.skills.market_registry import hasExecutorMapping  # noqa: E402
+
+
 def classify(entry):
     # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    try:
-        from neurova.skills.market_registry import hasExecutorMapping
-    except ImportError:  # 对照腿（无本批修复的那棵树）退回读私有表——
-        # 只为让同一份脚本在两侧都跑得起来；比的从来不是这个 import，是四面的读数是否同向。
-        from neurova.skills.market_registry import _MARKET_EXECUTORS
-
-        def hasExecutorMapping(sid):
-            return str(sid or "") in _MARKET_EXECUTORS
-
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))
