@@ -66,7 +66,11 @@ class TestGovernanceIntegration(unittest.TestCase):
         if self._original_tool_engine_prop is not None:
             ToolExecutor.tool_engine = self._original_tool_engine_prop  # type: ignore[assignment]
         elif "tool_engine" in ToolExecutor.__dict__:
-            del ToolExecutor.__dict__["tool_engine"]
+            # 类上的属性由 `setattr` 装的（本夹具 setUp 那行就是），就由 `delattr` 摘：
+            # `ToolExecutor.__dict__` 是 **mappingproxy**，只读视图，`del ...__dict__["x"]`
+            # 在 py3 上恒抛 `TypeError: 'mappingproxy' object does not support item deletion`
+            # ——那条路径从来没成功过，只是平时走的是上面"还原类属性"那一支。
+            delattr(ToolExecutor, "tool_engine")
 
     # ── DENY: 反弹 shell 在执行前被拦截 ────────────────────────
 

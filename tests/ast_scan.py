@@ -114,9 +114,17 @@ def trackedPaths(*pathspecs: str) -> List[str]:
 
 
 def trackedPyPaths(*pathspecs: str) -> List[str]:
-    """已跟踪的 `.py` 清单；不传 pathspec 时按全仓 `*.py` 取。"""
+    """已跟踪的 `.py` 清单；不传 pathspec 时按全仓 `*.py` 取。
+
+    只交**工作树里真在**的那些：索引与工作树的差是**在途改名/刚删**的中间态（本仓一次改名
+    提交里，索引先记新名、旧名那条 `D` 要等提交才落），把索引原样交出去，消费方读到一条
+    指不到文件的路径就是 `FileNotFoundError`——那会把"扫描面"变成"运行时刻的运气"。
+    过滤后口径仍是"已跟踪"，只是把"已经被删掉的"从证据面里剔掉（`untrackedNotIgnoredPaths`
+    另有一条互补的取数，两者合起来才是完整证据面）。
+    """
     specs = pathspecs or ("*.py",)
-    return sorted(p for p in _gitLsFiles(*specs) if p.endswith(".py"))
+    return sorted(p for p in _gitLsFiles(*specs)
+                  if p.endswith(".py") and (REPO_ROOT / p).is_file())
 
 
 def untrackedNotIgnoredPaths() -> List[str]:

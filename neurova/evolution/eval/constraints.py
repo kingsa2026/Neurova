@@ -159,7 +159,12 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        if engine is None or not engine.is_initialized():
+        # `is_initialized` 是**属性**（`onnx_embedding.ONNXEmbeddingEngine` 上的 property），
+        # 早前这里按方法调用 ⇒ `TypeError: 'bool' object is not callable`，被下面那条
+        # `except Exception` 吞成"引擎不可用"，于是嵌入那条腿**从来没走过**：每台机器都静默
+        # 退回 token_jaccard。本批按真形状取，缺模型资产的宿主仍会因 encode 失败而回退，
+        # 但那是**响亮**的回退（有资产就走嵌入）。
+        if engine is None or not engine.is_initialized:
             return None
         va, vb = engine.encode(a), engine.encode(b)
         if not va or not vb:

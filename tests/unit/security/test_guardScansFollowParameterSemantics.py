@@ -54,6 +54,14 @@ SAFE_PATH = str(_SAFE_HOME)
 if _SAFE_HOME.as_posix().startswith("/root"):
     SAFE_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
 
+#: 判据问的是**扫描面归属**（命令面会不会把路径值再扫一遍），不是"这一发该放行"。
+#: 故主红只排除与命令扫描面相关的那两类 finding：受保护路径（`HOME=/root` 的容器里家目录
+#: 碰巧被 `_protected_paths` 覆盖，那是另一条按值的裁决，跟本档无关）。若把整条 `should_block`
+#: 当断言，判据就绑在了"跑测用户的家目录在不在受保护名单里"，本机绿、CI 红两头都不说明问题。
+#: 受保护路径那条（`protected_path`）是按值的裁决，与命令扫描面无关，故单独排除。
+_COMMAND_SURFACE_RULES = ("protected_path",)
+_EVASION_FAMILIES = (GuardThreatCategory.SHELL_EVASION, GuardThreatCategory.PATH_TRAVERSAL)
+
 
 def _findings(toolName: str, params: dict) -> list:
     return ToolGuardEngine().guard(toolName, params).findings
@@ -69,8 +77,13 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_PATH}).should_block is False, (
-        "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
+    # 命令面同族的两类都不许被这条路径值触发（`protected_path` 属按值的裁决，不在此列）。
+    onCommandSurface = [f for f in _findings("file_read", {"file_path": SAFE_PATH})
+                        if f.category in _EVASION_FAMILIES
+                        and f.rule_id not in _COMMAND_SURFACE_RULES]
+    assert not onCommandSurface, (
+        "路径读取被命令扫描面拦下（finding=%s）⇒ 非交互链路（渠道/NPC/mobile/定时）"
+        "的每一次文件工具调用都会被卡住" % onCommandSurface[:2])
 
 
 def test_realEvasionInCommandStillCaught():
