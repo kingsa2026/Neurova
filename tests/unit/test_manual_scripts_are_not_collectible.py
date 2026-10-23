@@ -22,12 +22,19 @@ import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MANUAL_DIR = PROJECT_ROOT / "tests" / "manual"
 
 
-def _runPytest(*args: str, cwd: Path = None, timeout: int = 180):
+#: 子进程 pytest 的等待上界。消费它的用例各带 `CHILD_PYTEST_WALL_S + 60` 的父墙——
+#: 父墙 ≤ 子墙时先到点的是全局 30s，Windows 侧即整场终止（§6-402 批 K）。
+CHILD_PYTEST_WALL_S = 180
+
+
+def _runPytest(*args: str, cwd: Path = None, timeout: int = CHILD_PYTEST_WALL_S):
     """子进程跑 pytest，并把输出通道钉成 UTF-8。
 
     Windows 上子进程的 stderr 默认走控制台编码（cp936），中文判据消息会被解成乱码，
@@ -66,6 +73,7 @@ def test_noManualFileMatchesCollectionPattern():
     )
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_explicitManualPathIsRefusedBeforeImport(tmp_path):
     """显式点名也要拒在收集之前：探针脚本写下的环境标记绝不能出现在同进程后续用例里。"""
     probeName = "test_tmpManualProbeEnvLeak.py"
@@ -101,6 +109,7 @@ def test_explicitManualPathIsRefusedBeforeImport(tmp_path):
         os.environ.pop(marker, None)
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_manualDirectoryInvocationIsRefused():
     """整目录交给 pytest 同样拒——否则一次 `pytest tests/manual/` 就带进 21 个脚本。"""
     proc = _runPytest("tests/manual/")

@@ -201,6 +201,12 @@ def test_sessionTempRootFollowsPytestConvention():
     assert root.name.startswith("pytest-of-")
 
 
+#: 子进程那一趟 pytest 的等待上界。父墙必须由它导出且**严格高于**它：本仓
+#: `pyproject.toml` 只声明 `timeout = 30`，Windows 侧 pytest-timeout 自动走 thread 法，
+#: 超时不是「这一格红」而是终止整个进程——2026-10-23 早 `pytest tests/unit` 正是在
+#: 44% 处消失在本格（§6-402 批 K）。
+CHILD_PYTEST_WALL_S = 300
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_pytestInvokesTheHookWithoutAHandCall(tmp_path):
     """回收必须发生在 pytest **自己的**会话启动里，而不是只在单测里被手调一次。
 
@@ -229,7 +235,8 @@ def test_pytestInvokesTheHookWithoutAHandCall(tmp_path):
         [sys.executable, "-m", "pytest", __file__,
          "-k", "reportsHolderDeadWhenProcessDoesNotExist",
          "-q", "-p", "no:cacheprovider", "--no-header"],
-        cwd=str(repoRoot), env=env, capture_output=True, text=True, timeout=300,
+        cwd=str(repoRoot), env=env, capture_output=True, text=True,
+        timeout=CHILD_PYTEST_WALL_S,
         encoding="utf-8", errors="replace",
     )
 
