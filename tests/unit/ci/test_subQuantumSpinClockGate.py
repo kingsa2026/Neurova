@@ -262,11 +262,18 @@ def loadContract():
     return module
 
 
+#: 子进程那一趟 pytest 的等待上界（父墙由它导出，见类内那格的装饰器）。
+NESTED_PYTEST_WALL_S = 240
+
+
 class TestSpinCellsSkipRatherThanBurn:
     """行为面：本机跑这些格必须是「跳过或跑完」，不得是「跑到超时」。"""
 
     #: 本格要在子进程里把那几格真跑一遍（细粒度机器上真烧 CPU），默认 30s 不够。
-    @pytest.mark.timeout(240)
+    #: 父墙＝子进程等待上界 ＋ 60s。两墙相等就是掷骰子，而 Windows 侧 thread 法
+    #: 超时＝终止整个进程（§6-402 批 K；不变量常驻在
+    #: `tests/unit/ci/test_nestedPytestBudgetWallsAreOrdered.py`）。
+    @pytest.mark.timeout(NESTED_PYTEST_WALL_S + 60)
     def test_theSpinScaleCellsAreSkippedOrPassedWithinBudget(self):
         required = sorted(spinReachingCells(_source()) - SLEEP_ONLY_CELLS)
         assert required, (
@@ -281,7 +288,7 @@ class TestSpinCellsSkipRatherThanBurn:
             text=True, encoding="utf-8", errors="replace",
             cwd=str(REPO_ROOT),
             env=dict(os.environ, PYTHONIOENCODING="utf-8"),
-            timeout=240,
+            timeout=NESTED_PYTEST_WALL_S,
         )
         output = proc.stdout + proc.stderr
         assert "Timeout" not in output, (

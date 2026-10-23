@@ -46,6 +46,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
@@ -79,6 +81,11 @@ _PARENT_FIXTURES = (
 )
 
 
+#: 子进程 pytest 的等待上界（多条路径的收集确实慢）。消费它的用例必须带**高于**它
+#: 的父墙，否则先到点的是全局 30s——Windows 侧 thread 法超时＝终止整个进程（§6-402）。
+CHILD_PYTEST_WALL_S = 600
+
+
 def _run_pytest(args, cache_dir=None):
     """在子进程里跑 pytest（不污染当前会话的 collection cache / tmpdir）。
 
@@ -106,13 +113,14 @@ def _run_pytest(args, cache_dir=None):
         # `TypeError: can only concatenate str`，看着像判据坏了，其实是解码没钉。
         encoding="utf-8",
         errors="replace",
-        timeout=600,
+        timeout=CHILD_PYTEST_WALL_S,
     )
 
 
 class TestConftestFixturesResolveInMultiPathCollection:
     """最小触发集下，父包 conftest 的 fixture 必须能被解析（收集竞争回归）。"""
 
+    @pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
     def test_fixture_consumers_pass_when_given_as_multiple_paths(self):
         """三条路径按最小触发序给：必须全绿，且不得出现 `fixture ... not found`。
 
@@ -132,6 +140,7 @@ class TestConftestFixturesResolveInMultiPathCollection:
             "--- pytest 输出 ---\n" + out[-4000:]
         )
 
+    @pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
     def test_collection_count_equals_sum_of_single_paths(self):
         """三条路径一起收集到的用例数，必须等于各自单跑之和。
 

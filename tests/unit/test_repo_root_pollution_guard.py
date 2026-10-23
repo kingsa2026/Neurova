@@ -148,6 +148,7 @@ def probeRoot():
         _releaseProbeRoot(staging, root)
 
 
+@pytest.mark.timeout(_PROBE_PYTEST_TIMEOUT_S + 60)   # 父墙须高于子墙，见 §6-402 批 K
 def test_guardIsARegisteredFixture(probeRoot):
     """夹具必须真注册（能按名请求到），否则守卫只是文件里的一段文字。"""
     out = _runPytestProbe(
@@ -176,6 +177,7 @@ def test_mockShapedEntriesAreNotSittingInTheRepoRoot():
     assert offenders == [], f"仓库根存在 mock 形态的污染目录：{offenders}——它们被 .gitignore 隐着，git status 看不见"
 
 
+@pytest.mark.timeout(_PROBE_PYTEST_TIMEOUT_S + 60)
 def test_guardFiresPerTestAndNamesTheOffender(probeRoot, tmp_path):
     """端到端三条一起证：autouse 生效、作用域是逐用例、报错点名条目与肇事用例。
 
@@ -206,6 +208,7 @@ def test_guardFiresPerTestAndNamesTheOffender(probeRoot, tmp_path):
     assert "test_polluteRepoRoot" in out, f"报错没点名肇事用例（作用域不是逐用例）：{out[-500:]}"
 
 
+@pytest.mark.timeout(_PROBE_PYTEST_TIMEOUT_S + 60)
 def test_cleanTestDoesNotTripTheGuard(probeRoot):
     """反证另一半：不落根目录的用例必须照常绿——守卫不能靠误伤逼人摘掉它。"""
     _runPytestProbe(
@@ -219,6 +222,7 @@ def test_cleanTestDoesNotTripTheGuard(probeRoot):
     )
 
 
+@pytest.mark.timeout(_PROBE_PYTEST_TIMEOUT_S + 60)
 def test_probeWritesStayOutOfTheSharedWorkingTree(probeRoot):
     """探针的落点必须是它自己独占的仓库根，不是全机共享的那棵工作树。
 

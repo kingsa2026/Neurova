@@ -48,6 +48,13 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATE = PROJECT_ROOT / "scripts" / "ci" / "perf_gate.py"
 
+#: 子进程那一趟 pytest 的等待上界（整文件 26 条判据，实测容器内 ~16s，这里留一个量级余量）。
+#: **父墙必须由它导出且严格高于它**：本仓 `pyproject.toml` 只声明 `timeout = 30`，
+#: Windows 侧 pytest-timeout 自动走 thread 法，超时不是「这一格红」而是**终止整个进程**——
+#: 子进程那条诚实的 `TimeoutExpired` 永远轮不到说话。不变量与对照见常驻判据
+#: `tests/unit/ci/test_nestedPytestBudgetWallsAreOrdered.py`（§6-402 批 K）。
+NESTED_PYTEST_WALL_S = 120
+
 #: 有界注入：注入的等待**墙钟总量**不变，而系统调用数降 `INJECT_EVERY` 倍。
 #: 逐次小睡会把 N 次 `sleep` 铺进被测链路，而 `time.thread_time()` 读
 #: `CLOCK_THREAD_CPUTIME_ID`（**含内核态时间**），调度拥挤时每次 `sleep` 的
@@ -430,6 +437,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
     抛 `ModuleNotFoundError`（与"真的没装"同形）。
     """
 
+    @pytest.mark.timeout(NESTED_PYTEST_WALL_S + 60)
     def test_missingHeavyDepYieldsFileLevelSkipNotError(self, tmp_path):
         import os
         import subprocess
@@ -446,7 +454,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
             text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=env,
-            timeout=120,
+            timeout=NESTED_PYTEST_WALL_S,
         )
         output = proc.stdout + proc.stderr
         # 退出码语义：0 = 有用例跑完（正常），5 = 一条都没收集到但**没有错误**
@@ -460,6 +468,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
             f"读者无从判断这次跑是不是什么都没验：\n{output[-1200:]}"
         )
 
+    @pytest.mark.timeout(NESTED_PYTEST_WALL_S + 60)
     def test_theGuardItselfBitesWhenTheDeclarationsAreRemoved(self, tmp_path):
         """反向控制：把模块级依赖声明摘掉后，同一场景必须真的红（判据不空转）。
 
@@ -486,7 +495,7 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
             text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=env,
-            timeout=120,
+            timeout=NESTED_PYTEST_WALL_S,
         )
         output = proc.stdout + proc.stderr
         assert proc.returncode != 0, (

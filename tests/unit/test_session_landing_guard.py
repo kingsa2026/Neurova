@@ -21,6 +21,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
 SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
@@ -42,6 +44,11 @@ def _cleanupProbeRealLanding():
             SESSIONS_DIR.parent.rmdir()
     except OSError:
         pass
+
+
+#: 子进程 pytest 的等待上界；消费它的四格各带 +60s 的父墙（父墙 ≤ 子墙时先到点的是
+#: 全局 30s，Windows 侧 thread 法超时＝终止整个进程，§6-402 批 K）。
+CHILD_PYTEST_WALL_S = 180
 
 
 def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
@@ -78,7 +85,7 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=180,
+            timeout=CHILD_PYTEST_WALL_S,
             env=probeEnv,
         )
         out = proc.stdout + proc.stderr
@@ -92,6 +99,7 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
         _cleanupProbeRealLanding()
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_bareSessionManagerIsIsolatedByDefault():
     """默认隔离本身：什么都不设的 `SessionManager()` 也必须落在本用例 tmp 里。
 
@@ -116,6 +124,7 @@ def test_bareSessionManagerIsIsolatedByDefault():
     )
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_explicitRealLandingTripsGuard():
     """显式把落点改回仓库真实库 → 收尾守卫必须当场红并点名。
 
@@ -140,6 +149,7 @@ def test_explicitRealLandingTripsGuard():
     assert "本条用例让 SessionManager 单例落在仓库真实会话库" in out, out[-800:]
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_envIsolatedSessionManagerStaysGreen():
     """走 `NEUROVA_SESSIONS_DIR` 指到临时目录的正确形态 → 不得误伤。"""
     _runProbe(
@@ -158,6 +168,7 @@ def test_envIsolatedSessionManagerStaysGreen():
     )
 
 
+@pytest.mark.timeout(CHILD_PYTEST_WALL_S + 60)
 def test_probeTouchingNoSessionManagerStaysGreen():
     """没碰过该模块的用例不得被拖进判据（无单例即无从归因）。"""
     _runProbe(

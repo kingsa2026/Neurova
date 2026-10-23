@@ -59,7 +59,10 @@ def _collect(targets: list):
     return proc.returncode, proc.stdout + proc.stderr
 
 
-@pytest.mark.timeout(120)
+#: 本格与下面那格都走 `_collect`（子墙 `COLLECT_TIMEOUT`）：父墙低于子墙时先到点的
+#: 是父墙，Windows 侧即整场终止。同档另两格早已按 `COLLECT_TIMEOUT + 60` 声明，
+#: 这里补齐剩下的两格（§6-402 批 K）。
+@pytest.mark.timeout(COLLECT_TIMEOUT + 60)
 def test_collectDecodesChildOutputExplicitly():
     """守卫必须真在跑：子进程输出含非 ASCII 时，捕获结果不许被静默换成 None。
 
@@ -116,7 +119,7 @@ def test_wholeRepoCollectionCountIsReal(wholeRepoCollection):
     assert count >= COLLECTED_FLOOR, f"收集条数异常低（{count} < {COLLECTED_FLOOR}）：{line!r}"
 
 
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(COLLECT_TIMEOUT + 60)
 def test_reverseProofDetectsADeadModuleImport():
     """守卫非空转：模块顶层死导入必须被收集期点名到文件。"""
     probe = PROJECT_ROOT / "tests" / "unit" / "test_deadImportProbe.py"
