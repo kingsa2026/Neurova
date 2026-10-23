@@ -2,7 +2,7 @@
 #    uv pip compile --universal requirements.txt -o requirements-full.lock --no-upgrade
 aiohappyeyeballs==2.7.1
     # via aiohttp
-aiohttp==3.14.3
+aiohttp==3.14.4
     # via
     #   -r requirements.txt
     #   dingtalk-stream
@@ -45,7 +45,7 @@ bcrypt==5.0.0
     # via
     #   paramiko
     #   passlib
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   curl-cffi
     #   edge-tts
@@ -314,7 +314,7 @@ openai==3.14.1
     #   langchain-openai
 openpyxl==3.1.5
     # via -r requirements.txt
-opentelemetry-api==1.44.0
+opentelemetry-api==1.45.1
     # via mcp
 orjson==3.13.0 ; platform_python_implementation != 'PyPy'
     # via langsmith
@@ -330,7 +330,7 @@ paramiko==5.0.0
     # via -r requirements.txt
 passlib==1.7.4
     # via -r requirements.txt
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements.txt
     #   python-pptx
@@ -400,7 +400,7 @@ pyobjc-framework-cocoa==12.2.2 ; sys_platform == 'darwin'
     # via pyobjc-framework-quartz
 pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin'
     # via pyautogui
-pypdf==6.19.0
+pypdf==6.21.1
     # via -r requirements.txt
 pyperclip==1.11.0
     # via mouseinfo
