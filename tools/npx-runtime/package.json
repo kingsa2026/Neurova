@@ -16,9 +16,14 @@
       "yaml": "2.8.3"
     },
     "@modelcontextprotocol/sdk": "^1.32.0",
-    "@modelcontextprotocol/server": "2.3.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "hono": "4.13.11",
     "ip-address": "10.7.4",
-    "zod": "4.6.6"
+    "zod": "4.6.6",
+    "body-parser": "2.4.0",
+    "@bytebase/dbhub": {
+      "body-parser": "1.20.9",
+      "express": "4.22.3"
+    }
   }
 }
