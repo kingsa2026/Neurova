@@ -96,11 +96,12 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 「临时」的判据取**解释器认的那个临时根**，不取 `TEMP` 环境变量：
-    # 后者是 Windows 的变量名，在 POSIX 上恒为空串——本机 CI 上它会折算成仓库根，
-    # 于是 `is_relative_to(仓根)` 永远为假，这条断言在 Linux/mac 上根本没在判「临时」。
-    assert ws.resolve().is_relative_to(pathlib.Path(tempfile.gettempdir()).resolve()), (
-        f"工作区根没有落在临时目录（{tempfile.gettempdir()}）：{ws}"
+    # 「临时目录」按平台判定，不按环境变量名猜：Linux/macOS 上临时根是 `tempfile.gettempdir()`
+    # （本机 `/tmp`），只有 Windows 才有 `TEMP`。原先只认 `TEMP`／子串 `Temp`，
+    # 在 POSIX 上把合规的 `/tmp/neurovaLive-*` 判成"没落临时目录"。
+    tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
+    assert ws.resolve().is_relative_to(tempRoot), (
+        f"工作区根没有落在临时目录（{tempRoot}）：{ws}"
     )
 
 

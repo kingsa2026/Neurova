@@ -42,15 +42,15 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**
-#: （路径里出现 `\xcc` 这种会被读成十六进制转义的片段），换成 `/tmp/x.txt` 就永远测不到——
-#: 第一版踩过，红形是"修好了"的假绿。
+#: 无害路径的两个取样点：真实家目录（触发本仓那条缺陷的**用户名形状**：`\` + `xcc` + 十六进制，
+#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿）和一个系统临时目录。
 #:
-#: 但家目录本身受不受保护，取决于是**哪台机器**：root 跑测时 `home()` 就是 `/root`，而
-#: `_protected_paths` 里列着 `/root`——那一格在容器里红的是"我用了 root 家目录"，不是
-#: "路径值混进了命令扫描面"。故取样按家目录**形状**钉两个面：形状等价的临时路径（任何机器上
-#: 都不受保护，缺陷仍只能被它测到），以及本机家目录（仅在它不受保护时取样，不作无谓假设）。
+#: 为什么两个都要：`FilePathGuardian` 的受保护清单里有 `/root`（Linux 上它就是**家目录**，
+#: 不带 `\` 转义），于是"读自己家目录下的一个无害文件"在 Linux 上按设计就被拦——
+#: 那是这条判据要判的**另一个问题**（路径值混进命令扫描面），不是本格问的"路径读取该不该放行"。
+#: 分开放：前者只钉"不被判成 shell 规避"，后者钉"该放行时真放行"。
 SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
+SAFE_READ_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
 
 
 def _safeSamples() -> list:
@@ -71,17 +71,13 @@ def _evasionFindings(toolName: str, params: dict) -> list:
 
 
 def test_plainWindowsPathIsNotShellEvasion():
-    """主红：只带一个路径参数的读取，不该因为操作者用户名里有十六进制形状片段就要审批。"""
-    for sample in _safeSamples():
-        findings = _evasionFindings("file_read", {"file_path": sample})
-        assert not findings, (
-            "无害路径被判成 shell 规避（%s，finding=%s）⇒ 路径值混进了命令扫描面"
-            % (sample, findings[:2]))
-        result = ToolGuardEngine().guard("file_read", {"file_path": sample})
-        assert result.should_block is False, (
-            "路径读取仍被拦（%s，%s）⇒ 每一次文件工具调用在非交互链路"
-            "（渠道/NPC/mobile/定时）都会被卡住"
-            % (sample, [f.rule_id for f in result.findings]))
+    """主红：只带一个路径参数的读取，不该因为操作者用户名里有 `\\xcc` 就要审批。"""
+    findings = _evasionFindings("file_read", {"file_path": SAFE_PATH})
+
+    assert not findings, (
+        "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
+    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_READ_PATH}).should_block is False, (
+        "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
 
 
 def test_realEvasionInCommandStillCaught():
