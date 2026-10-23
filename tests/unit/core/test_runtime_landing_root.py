@@ -325,11 +325,23 @@ def _scannedFiles() -> list:
 class TestNoCwdRelativeRuntimeLanding:
     """生产代码内不得再有"CWD 相对字面量当落点"。"""
 
+    #: 已裁定的例外：**根外锚**落点（§6-388，用户 2026-10-22 拍「甲①＋乙」）。
+    #: 它按主目录推（`Path.home()/.neurova/artifact_anchors.json`），不按 CWD 推——
+    #: 判据命中的是「绝对路径从哪来」这件事的另一面，不是"换个启动目录就换个位置"。
+    #: 能力边界与理由写在 `neurova/security/artifact_digest.py` 的 `anchorPath()` 上方，
+    #: 家目录落点面那一格（`test_homeLandingMovedIntoDataRoot`）持有同一事实的另一半。
+    _SETTLED_ABSOLUTE_LANDINGS = {
+        "neurova/security/artifact_digest.py": "根外锚 §6-388：整库回滚检测要求它不在数据根树下",
+    }
+
     def test_productionTreeHasNoCwdLanding(self):
         offenders = []
         for path in _scannedFiles():
+            rel = path.relative_to(PROJECT_ROOT).as_posix()
+            if rel in self._SETTLED_ABSOLUTE_LANDINGS:
+                continue
             for lineno, reason in _cwdLandingsIn(path):
-                offenders.append("%s:%d: %s" % (path.relative_to(PROJECT_ROOT).as_posix(), lineno, reason))
+                offenders.append("%s:%d: %s" % (rel, lineno, reason))
         assert offenders == [], (
             "仍有 %d 处落点按进程 CWD 拼（换个启动目录就换个位置）：\n  %s\n"
             "修复：数据落点走 `neurova/core/data_root.py`（get_data_root / resolveDataPath / "
