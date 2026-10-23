@@ -22,7 +22,14 @@ def _make_orchestrator(monkeypatch, tmp_path, llm_response="摘要文本"):
     mock_agent = MagicMock()
     mock_agent.config = MagicMock()
     mock_agent.config.name = "t-agent"
+    mock_agent.config.agent_id = "t-agent"
     mock_agent.config.llm_model = "test-model"
+    # 身份只在**真串**上成立（`orchestrator._realIdentityString`）：`MagicMock()` 的
+    # 自动属性 `agent_id` / `user_id` 不是标量，取不到身份就不建驱逐台账——
+    # 夹具要把这两处显式钉成真值，否则它测的是"替身造不造得出合法 id"，
+    # 而不是"台账有没有被接上"。
+    mock_agent.agent_id = "t-agent"
+    mock_agent.user_id = "u-test"
     mock_agent.conversation_history = []
     mock_agent.llm_client = SimpleNamespace()
 

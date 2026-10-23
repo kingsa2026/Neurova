@@ -394,6 +394,15 @@ class ContextOrchestrator:
 
         return dict(EMPTY_REPORT)
 
+    @staticmethod
+    def _realIdentityString(value) -> str:
+        """身份取真串：非 `str` 一律视为"没取到"（替身的自动属性不是身份）。
+
+        只认 `str` 而不是 `str(value)`：后者会把 MagicMock 的名字变成一串看着像 id 的
+        文本，把"取不到身份"这件事藏进日志里（`<MagicMock name='mock.agent_id' ...>`）。
+        """
+        return value.strip() if isinstance(value, str) else ""
+
     def _buildLedgerDb(self, agent_ref):
         """装配驱逐台账持久层（失败如实登记，不静默、不粘死）。"""
         record = self._context_health["ledger"]
@@ -402,10 +411,19 @@ class ContextOrchestrator:
             from neurova.context.eviction_ledger_db import EvictionLedgerDB
             from neurova.core.agent_workspaces import get_agent_context_ledger_path
 
-            agentId = getattr(agent_ref, "agent_id", "default")
+            # 身份只取**真串**：此前是 `getattr(agent_ref, "agent_id", "default")`，
+            # 那个默认值兜不住替身——桩件上 `agent_id` 是一个自动生成的 MagicMock，
+            # 取到的不是标量却被当身份直接拼成目录路径（`str()` 一包连类型都没得判），
+            # 于是整座台账装配失败、池子照建而 `_ledger_db` 恒 None。
+            # 不是"替身不合法"，是这里没做身份归一：与 `_build_metacog_lessons` 同一口径
+            # （取不到真串就不建那条连接）。id 的合法形态仍归 `agent_workspaces` 单源。
+            agentId = self._realIdentityString(getattr(agent_ref, "agent_id", None))
+            userId = self._realIdentityString(getattr(agent_ref, "user_id", None))
+            if not agentId:
+                raise ValueError("agent 身份不可用（未取到真实 agent_id），本轮不建驱逐台账")
             db = EvictionLedgerDB(
                 db_path=str(get_agent_context_ledger_path(agentId)),
-                user_id=getattr(agent_ref, "user_id", "default"),
+                user_id=userId or "default",
                 agent_id=agentId,
             )
         except Exception as e:  # noqa: BLE001 - 装配失败不阻断池构造，但必须可见
