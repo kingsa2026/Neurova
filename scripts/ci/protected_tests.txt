@@ -3701,3 +3701,33 @@ tests/unit/ci/test_imaginedApiSuitesRetired.py
 # 活体侧走真 `create_app()` + 真 `/api/v1/chat/stream`（按生产分支条件摘掉 `agent.loop`），
 # 反证＝把进料那一行退回旧形态，退化臂当场读回 300 片全消费＋正文空。逐文件单跑 6 passed。
 tests/unit/agent/test_legacyStreamCutsDegenerateThinking.py
+# §6-407（批 O-2）：空闲监控线程的 start/stop 成对——生产关闭口停线程、测试侧按格统一回收。
+# 判据钉的是**那条线程对象**不再存活 ＋ 状态机到 STOPPED，不是全局线程计数（后者会被别档残留
+# 污染，红绿都不说明问题）；回收口自己也有格（起点 0 → 起两条 → 报 2 → 两条真死 → 再报 0），
+# 否则 conftest 里那句每格后的 `stopAllIdleMonitors()` 可以是个空函数而全仓不红。
+# 活体读数：起 20 个 Agent 的睡眠链 ⇒ 监控线程 20 条；逐个 `shutdown_agent` ⇒ 残留 0 条；
+# 随后回收口返回 0 ⇒ 收干净的是生产那对手。A/B（把三档换回提交前逐字节还原）在
+# `tests/unit/memory`＋`tests/unit/core` 全量上：无修复态 14 failed／3233 passed ↔
+# 有修复态 12 failed／3235 passed，总数同为 3247、差集恰是本批那两格，无新增红；
+# 两态耗时 254.74s ↔ 258.94s ⇒ 按格回收的成本在噪声内。逐文件单跑两次同读数 7 passed（6.31s／8.24s）。
+tests/unit/memory/test_sleep_loop_wiring.py
+# §6-408 其一（批 O-2b）：体检探针的子进程预算收成单源常量，用例父墙由它导出。
+# 2026-10-24 整场 `pytest tests/unit` 在 33% 处消失，MainThread 停在 `check_dependencies` 的
+# `subprocess.run → communicate`——子墙 120s、全局墙 30s，Windows 侧 thread 法超时即终止整个进程。
+# 常驻判据咬形状不咬秒数：常量定义行在场＋`inspect.getsource(check_dependencies)` 引用它且不得
+# 再出现 `timeout=<数字>`＋本档父墙由该常量导出且严格大于它。变异探针（改回 `timeout=120`）
+# ⇒ 仅该格红、其余 11 格绿（红的确实是形状而不是行为）；恢复后 12 passed（12.03s／10.77s 两次）。
+tests/unit/computer_use/test_environment_setup.py
+# §6-408 其二（批 O-2c）：审批节点不在测试里空等满窗口——同一根"合法超墙即整场打死"的第三条链。
+# 单格隔离计时 1 passed in 63.45s（`exec_approval` 会等满 `config["timeout"]`，而处理器是在它
+# 返回之后才被调的 ⇒ 60 就是 60 秒空等）；整档 7 passed in 130.03s。两处孤儿 60 收到本仓同族档
+# 既有口径 1s。新常驻判据三格：凡提到 `exec_approval` 的被收集测试里 `"timeout"` 字典项不得超 10s
+# ＋三面分开自证（枚举面 ≥1000／预筛候选面 ≥5（现数 7 档）／扫到的等待预算数 ≥12（现数 23 处））
+# ＋合成样本双向对照（60 要被抓、1 不得被抓、值挂模块常量上也要算得出来）。
+# 面为什么拆三条：合成一条就分辨不出失败形态——枚举面掉穿＝扫描根指错，候选面为空＝预筛写窄，
+# 只有站点数为零而前两面正常才是真绿。治理闸 `test_ratchetDoesNotRise` 当场把我第一版判成
+# offender：`assert len(sites) >= _SITE_FLOOR` 右边是个名字而非常数，闸只认"与常数比"那一形
+# ⇒ 形态 405 的现形复算：加行的同时跑闸，闸说的是加行者的问题，不是闸的问题。
+# 变异探针（`_APPROVAL_WAIT_S` 改 90）⇒ 仅主判据红，且整档计时同步涨到 190.50s（同一次探针
+# 既读出"形状被抓住"也读出"这确实是墙外成本"）；恢复后 10 passed（13.30s／12.51s 两次）。
+tests/unit/neurflow/test_approval_reply_mechanism.py
