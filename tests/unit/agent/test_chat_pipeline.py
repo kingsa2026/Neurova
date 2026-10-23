@@ -7,6 +7,7 @@ Tests for ChatPipeline — 对话流程管线
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+from neurova.agent.continuation_hint import build_continue_hint
 from neurova.collaboration.memory_scope import turnScopeContext
 
 
@@ -287,28 +288,16 @@ class TestRetrieval:
 
 
 class TestContinueHint:
-    """续写提示测试"""
+    """续写提示测试（提示本体已抽到 continuation_hint，调用点仍在这一处）"""
 
     def test_chinese_hint(self, pipeline):
         """中文输入应生成中文提示"""
-        hint = pipeline._build_continue_hint("你好世界", "你好，")
+        hint = build_continue_hint("你好世界", "你好，")
         assert "截断" in hint
         assert "接续" in hint
 
     def test_english_hint(self, pipeline):
         """英文输入应生成英文提示"""
-        hint = pipeline._build_continue_hint("Hello world", "Hello,")
+        hint = build_continue_hint("Hello world", "Hello,")
         assert "truncated" in hint
         assert "continue" in hint
-
-
-class TestAPIConfigError:
-    """API 配置错误检测测试"""
-
-    def test_generic_exception(self):
-        """普通异常不是 API 配置错误"""
-        assert ChatPipeline._is_api_config_error(Exception("test")) is False
-
-    def test_value_error(self):
-        """ValueError 不是 API 配置错误"""
-        assert ChatPipeline._is_api_config_error(ValueError("test")) is False
