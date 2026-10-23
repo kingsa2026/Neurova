@@ -24,6 +24,7 @@
 | `muscle_memory_rearchive.py` | 肌肉记忆脏条目作废重攒：原文件归档到仓内 `docs/05-reports/muscle-memory-ledger/` 后清空待重攒（**不删除**，可回退） | `python scripts/diagnostics/muscle_memory_rearchive.py [文件 ...]` | 改写 `agent_workspaces/*/memory/muscle_memory/muscle_l*.json` |
 | `skill_name_collisions.py` | 同名技能覆盖复算（默认）与**名字域迁移**（`--apply`）：同 name 不同身份的条目派生携带身份的名字（ADR 0021） | `python scripts/diagnostics/skill_name_collisions.py [--apply] [manifest.json ...]` | 默认只读；`--apply` 改写目标 manifest 的 `name` 字段（原子替换，幂等） |
 | `muscle_memory_threshold_attainability.py` | 肌肉记忆阈值可达性重算：0.85（装配起点）与 0.8（RSI setpoint）在新指纹分布下的触发率与梯度带规模 | `python scripts/diagnostics/muscle_memory_threshold_attainability.py [--json]` | 只读（临时目录建库） |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件四态（`pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir`）与根外锚三态（`match` / `anchor-missing` / `anchor-mismatch`），即 §6-383 留的「存量未钉」待办读数 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写数据根、不补锚） |
 | `_live_verify_growth_split.py` | 知识增长分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_growth_split.py` | 只读 / 临时库 |
 | `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
 | `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |

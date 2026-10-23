@@ -292,6 +292,15 @@ def _scanCorpus():
 
 class TestNestedPytestBudgetWalls:
 
+    def test_scanRootIsTheRealTestsTree(self):
+        """面自证：`TESTS_ROOT` 写错时下面每一格的「零违规」都是假绿。
+
+        本档的扫描面是 `TESTS_ROOT`（`REPO_ROOT / "tests"`）。根一旦写窄（少一层、指到
+        不存在的目录），`sourceRefsUnder` 会安静地交出空集——读起来与「真干净」一模一样。
+        """
+        scanned = len(ast_scan.filesUnder(TESTS_ROOT, ".py"))
+        assert scanned > 1500, f"`tests/` 扫描面现读 {scanned} 个 .py，低于下限＝TESTS_ROOT 写错了"
+
     def test_noCollectedNestingTestIsLeftToTheGlobalWall(self):
         """父墙必须严格高于子墙；无父墙的嵌套 pytest 用例一律点名。"""
         findings, nestingTests, _coarse, _attributed = _scanCorpus()
