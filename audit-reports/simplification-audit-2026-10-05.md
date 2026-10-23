@@ -10268,3 +10268,16 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **⚠ 本批新发现、不归本批的常驻红（两格，已复现预存性）**：`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`（批 M `ceea8ab5` 落库）在 HEAD 态即红——①指 `tests/unit/test_session_landing_guard.py` 的静态根 `[missing]`（该文件存在、用例也跑得绿，是**根深度按错目录算**那条形态 373 的现形）；②指三档 memory 退役档"扫了源码仓却没把扫描数量当断言比"。**复现预存性的做法**：把本批那条加行整体摘掉再跑同一道闸 ⇒ 同读数 2 failed ⇒ 不是加行带来的。登记在此，归批 M 后续处置（不顺手修，避免与并会话撞同一档）。
     - **仍开（本批不冒充完成）**：①§6-397 的"静默要不要掐"三态票原样待裁；②`/v1/models/probe-output-limit` 无管理员闸（走 `SECURITY.md`）；③default 的 provider×model 错配回落不可见；④上述批 M 常驻红两格；⑤同预算的 `high↔none` 对照补测（若要给①钉死）。
     - **下一枚空号现查**：跨 `audit-reports/*.md`＋`docs/04-plans/*.md`＋`docs/02-api/*.md`＋`docs/0-index/*.md`＋`docs/11-legacy/*.md`＋`scripts/ci/protected_tests.txt` 按 **HEAD 文档面**现算最大＝**§6-404**（批 M 三笔刚占走 404）；`git grep -c "§6-405" HEAD -- audit-reports docs scripts` 命中文件数 **0**——405 在 HEAD 里只出现在**本批自己那两笔提交信息**中（先取号、后落账，两处互相引用）⇒ 本批取 **§6-405**。形态新增 406（活体脚本自己的帧解析把正文读成空＝伪读数），同档另记。
+
+406. **批 O-1 落地：§6-405 登记的"批 M 常驻红两格"收掉，两道治理闸首次全绿；并修了闸自己把"清理落点"当"扫描根"的误判（✅ `9844aaff`；受保护子集真条目现算 696）** 🟢 —— 这是 §6-404 那条硬步骤（"入册同时跑治理闸"）的续账：上一格我只清了自己点名的部分，闸里还留着 5 处存量＋一处误判。
+    - **✅ 先更正一处相邻批次的成因判断（证据在实装里，不在措辞里）**：§6-405 把那格常驻红记成"形态 373 的现形——根深度按错目录算"。读实装：`tests/unit/test_session_landing_guard.py:26` 的 `parents[2]` 对该文件所在深度（`tests/unit/x.py`）**是对的**，该档 4 格也全绿；红的真因是 `:40` 那一行——
+      `if SESSIONS_DIR.is_dir() and not any(SESSIONS_DIR.iterdir()):` 后接 `rmdir()`。闸按"接收者＋属性名"认扫描落点，于是把这个**清理动作**当成了判据的扫描面；而 `SESSIONS_DIR` 本来就是"探针建完即清"的落点锚，静止态不存在是设计如此。
+      ⇒ 成因不同，修法就不同：改深度没有任何作用（改了还会红），要改的是闸的判别口径。
+    - **✅ 窄豁免＋两条控制格**：同一个接收者被同一个 `if` 条件用 `is_dir()`／`exists()` 守住时，该迭代不算扫描面；**换个名字的守卫不认**。控制表新增两形——"清理落点不该点名"（期望不点名）与"守的是另一个名字必须仍点名"（期望 MISSING）——原五态反证与"根写错必被抓"那格一并复跑，豁免不外溢。为什么不给"凡 is_dir 皆免"：那等于任何迭代都能被一句无关的存在性检查后门放行，与本闸存在的理由相反。
+    - **✅ 存量清零**：两处「`rglob` ＋私有解析」收进 `ast_scan.sourceRefsUnder(根, ".py", hints=(谓词字面串,))`（`test_fullChainRetired.py` 的 `.route(`、`test_marketDocSkillDigestGate.py` 的 `_build_executable_skill`——都是各自判据谓词的**充分条件**，口径仍是全量清单）；这五档各补**由本次扫描自己得到**的枚举面读数与数字下限之比（`test_agentSelfAndMemoryStreamRetirements`／`test_d19ThirdGroupRetirements`／`test_questionDecomposerRetirement` 此前都是 `assert not importersOfModule(...)` 一句了事——零 importer 与"根指错所以什么都没扫到"在断言里同形）。
+    - **✅ 读数**：`test_ci_ast_scan_budget_guard.py` **68 passed**（13.50s）、`test_scanCriterionMustProveItsOwnSurfaceRatchet.py` **51 passed**（35.09s）；被改各档合跑 34 passed（35.17s），含一行未动的 `test_session_landing_guard.py` 4 passed。§6-405 仍开列表里的"④上述批 M 常驻红两格"由本格销账。
+    - **⚠ 本批自己的两处落笔错（按口径不改写已入库提交，在此留案）**：
+      a) **形态 404 的当场复现**：我第一版把 `sourceRefsUnder(hints=...)` 的返回数当"枚举面"写成 `>=1000`，红的正是我自己那条断言——那 12 个是**预筛后的候选数**。补完立即回检批 M 的六处读数：那六处枚举面用的都是**不带预筛**的 `sourceRefsUnder(根, ".py")`，同形没复发（逐处核过，不是推断）。
+      b) **号与批次字母都抢跑了**：`9844aaff` 主题行写"§6-405 批 N-1"，而 §6-405 已被并会话的批 N 占用 ⇒ 本批改记 **§6-406 批 O**；同一提交正文写"未新增子集条目（现算仍 695）"也是旧数，真值 **696**（其祖先 `019099ae` 已入册一条）——form 17 净 LOC/计数 slip 的**第十遭**，且这次是"数在两个提交之间被别人改动了却没重算"。
+    - **仍开（本批不冒充完成）**：用户已裁的三件按批排队，均不在本格——O-2 `IdleTimeTracker` 线程累积根修（关闭路径接 `on_stop` ＋测试侧统一回收，92% 崩机主嫌）、O-3 `base_plugin` 与 `StateManager` 的错位接缝、O-4 `DialogHandler` 接线到真能收 dialog 事件的现役后端（要先撤 `test_computer_use_browser_integration.py:124` 那条反挂接裁决）、O-5 内容级 PII/密钥检测四份规则收口成单源（暂不进回合链）。§6-398 的四张人裁票与 §6-404 的 M1/M2/M3 三张票里，M1/M2/M3 已由用户裁定方向、待各批落地时把档案改成"已裁记录"。
+
