@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
@@ -177,14 +179,14 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for path in sorted(package.rglob("*.py")):
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if "_build_executable_skill" not in source:
-                continue
-            flags = self._builderCalls(source)
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：本判据只扫一次，
+        # 自付 `rglob + ast.parse` 会把成本绑成"代码总量"。文本预筛取构造点名字——
+        # 连它都没出现的文件不可能命中下面的谓词。
+        for ref in ast_scan.sourceRefsUnder(package, hints=("_build_executable_skill",)):
+            flags = self._builderCalls(ref.code)
             checked += len(flags)
             if any(flag is False for flag in flags):
-                offenders.append(str(path.relative_to(package)))
+                offenders.append(str(ref.path.relative_to(package)))
         assert checked >= 2, ("构造点数比预期少（%d）：规则可能与代码脱节" % checked)
         assert offenders == [], (
             "这些文件的构造点没传 pinnedDigest ⇒ 执行腿的闸对它们形同虚设：%s" % offenders)

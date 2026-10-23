@@ -29,6 +29,11 @@ import asyncio
 import hashlib
 import json
 import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 本机编码编不出的字符不许把退出码变成 1
+
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import tempfile
 import time
 from pathlib import Path
