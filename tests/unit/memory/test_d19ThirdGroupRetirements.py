@@ -45,6 +45,11 @@ def test_retiredModulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：扫描面先在场，再谈"零导入"（根被改窄时零命中与干净同形）。
+    scanned = ast_scan.trackedPyPaths()
+    assert len(scanned) > 500, (
+        f"扫描面现读 {len(scanned)} 个 .py——根指错时『零导入』不代表干净"
+    )
     offenders = {}
     # 面自证：语料按根量一次，根被改窄时下面会读成「零导入」而不是红。
     corpus = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
@@ -56,6 +61,8 @@ def test_noImporterRemains():
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.channels.{name}")
         if hits:
             offenders[name] = hits[:3]
+    # 面自证：退役名清单被清空时下面那句"零导入"与真干净同形
+    assert len(RETIRED) >= 1, f"退役名清单现读 {len(RETIRED)} 条——面被清空时零导入不代表干净"
     assert not offenders, f"退役后仍有人导入：{offenders}"
 
 

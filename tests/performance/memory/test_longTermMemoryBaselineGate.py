@@ -42,6 +42,12 @@ pytestmark = [pytest.mark.timeout(180)]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
+#: 本档两处全仓判据的根：`tests/performance/` 与仓根。必须写在模块级——
+#: 绑在函数里的名字，面自证棘轮（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）
+#: 认不出根位置，整档会静默掉出它的面。深度按本档位置算（本档在 `tests/performance/memory/`）。
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+#: 仓根：退役守卫按它拼三条扫描根。
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 OLD_WORDING = "用户: 我有一只青瓷茶壶是外婆留下的"
 NEW_WORDING = "用户: 我把阳台浇花的活改成了每周三定时自动滴灌"
@@ -52,39 +58,29 @@ NEW_QUERY = "自动滴灌"
 def _newManager(tmp_path, agentId: str) -> MemoryManager:
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
+    # 前提要证"引擎真的出非零向量"，不能只证"对象不是 None"：`get_embedding_engine()`
+    # 从未返回 None——模型档在、但分词器/运行时装不上时它照样给一个对象，随后
+    # `initialize()` 失败并**兜底零向量**（日志里只有一行 ERROR）。只判非 None 等于恒真，
+    # 于是"向量分量"整条腿在这类环境里静默失效，红出来的是"写入时就没有向量"这种错位报错。
+    # 这里先做一次真编码：零向量即前提不成立，显式失败、不 skip。
+    engine = get_embedding_engine()
+    assert engine is not None, (
         "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
         "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
         "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
         "不以 skip 蒙过。"
+    )
+    probe = engine.encode("嵌入引擎自检")
+    assert any(probe), (
+        "嵌入引擎给出的是零向量：模型档在，但分词器/ONNX 运行时没装上"
+        "（`transformers` / `tokenizers` / `onnxruntime` 缺席时引擎走零向量兜底）。"
+        "本门禁的向量分量与生产同链路，零向量下读数无意义——装上完整 requirements.txt 再跑。"
     )
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),
         agent_id=agentId,
         enable_buffer=False,
     )
-
-
-def _requireEmbeddingEngine():
-    """前置：本档的向量面要**真的**算得出向量——缺档即显式失败，不做 skip。
-
-    这些格子在读数上是同一个形状：引擎回零向量 ⇒ 全仓写不进 embedding、召回库空、
-    余弦恒 0。不先证前置，红会落在「断言 0.0 > 0.0」上，看上去像判据写错，
-    而真正要说的是「这台机器上根本不成立」（`requirements-ci.txt` 刻意不含
-    onnxruntime / tokenizers / sentencepiece，CI 上确实不成立）。
-    """
-    from neurova.embedding import get_embedding_engine
-
-    engine = get_embedding_engine()
-    if engine is None:
-        pytest.fail("嵌入引擎不可用（onnxruntime/sentencepiece/tokenizers 或本地模型档缺失）："
-                    "本档的向量面前提不成立，先按 requirements.txt 装齐或补齐模型档")
-    try:
-        vector = [float(x) for x in engine.encode("前提自证：这句话必须算得出非零向量")]
-    except Exception as exc:  # noqa: BLE001 - 引擎任何不可用原因都是同一件前提
-        pytest.fail(f"嵌入引擎 encode 不可用：{exc}")
-    if not vector or not any(abs(x) > 0.0 for x in vector):
-        pytest.fail("嵌入引擎回了零向量（模型档缺失或初始化失败）：本档的向量面前提不成立")
 
 
 @pytest.fixture
@@ -346,7 +342,6 @@ class TestContentUpdateFollowsRecallIndexes:
 
         from neurova.embedding import get_embedding_engine
 
-        _requireEmbeddingEngine()
         manager = _newManager(tmp_path, "lme_update_store")
         try:
             mid = manager.remember(
@@ -378,7 +373,6 @@ class TestContentUpdateFollowsRecallIndexes:
             manager.close()
 
     def test_持久层向量随内容刷新(self, tmp_path, semanticSearchIsolated):
-        _requireEmbeddingEngine()
         manager = _newManager(tmp_path, "lme_update_embedding")
         try:
             mid = manager.remember(
@@ -561,29 +555,22 @@ class TestTemporalAwareness:
             manager.close()
 
 
-#: 扫描根提模块级：`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`
-#: 按模块级常量解根，绑在函数内即「那档整档不在面内」。深度按**本档所在位置**算：
-#: 本档在 `tests/performance/memory/` 里，`parents[2]` 是 `tests/performance/`、
-#: `parents[3]` 才是仓根。
-PERFORMANCE_TESTS_ROOT = Path(__file__).resolve().parents[3] / "tests" / "performance"
-
-
 class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        surface = 0
-        strays = []
-        # 枚举走共享预算入口（不私有 `rglob`：那会把判据成本绑成代码总量），
-        # 且**先证面**再谈命中——根被改窄时读数会缩成「零命中」而不是红。
-        for ref in ast_scan.sourceRefsUnder(PERFORMANCE_TESTS_ROOT, ".py"):
-            surface += 1
-            rel = ref.path.relative_to(PERFORMANCE_TESTS_ROOT.parent).as_posix()
-            if ref.path.name != "__init__.py" and not ref.path.name.startswith("test_"):
-                strays.append(rel)
-        assert surface > 5, (
-            f"tests/performance/ 现读 {surface} 个 .py（根＝{PERFORMANCE_TESTS_ROOT}）——面量级不对＝根指错，"
-            "「零命中」不来自代码")
+        root = PERFORMANCE_ROOT
+        # 枚举走共享入口（`tests/ast_scan.filesUnder`）并**物化后自证面**：根被改窄或
+        # 写错一层时，读数会退化成"零散件"——那时这条断言看起来与"干净"一模一样。
+        # 两种坏法都只有把扫到的数量当断言比才咬得住。
+        files = ast_scan.filesUnder(PERFORMANCE_ROOT)
+        assert len(files) > 5, f"扫描面现读 {len(files)} 个 .py（根＝tests/performance/）——根被改窄了"
+        strays = [
+            p.relative_to(root.parent).as_posix()
+            for p in files
+            if "__pycache__" not in p.parts and p.name != "__init__.py"
+            and not p.name.startswith("test_")
+        ]
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
@@ -592,9 +579,8 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
-        from pathlib import Path
 
-        repo = Path(__file__).resolve().parents[3]
+        repo = REPO_ROOT
         assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
@@ -604,6 +590,9 @@ class TestUncollectedMeasurementFileIsRetired:
         # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
         # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
         for root in ("neurova", "tests", "scripts"):
+            # 枚举与解析都走共享预算（`sourceRefsUnder` 只读一遍盘、文本预筛一并做完，
+            # `transientTree` 不留常驻语法树）：判据成本不随代码总量涨，
+            # 也不是"自己枚举一整棵根树再逐个解析"那一形。
             for ref in ast_scan.sourceRefsUnder(repo / root, hints=("SimpleLongMemEval",)):
                 tree = ast_scan.transientTree(ref.path)
                 if any(
@@ -611,5 +600,12 @@ class TestUncollectedMeasurementFileIsRetired:
                     for n in ast.walk(tree)
                 ):
                     ghosts.append(ref.path.relative_to(repo).as_posix())
+        # 面自证：零复活只有在"真的扫过这三棵根"时才说明退役落干净了（根指错时这格恒绿）。
+        scanned = sum(
+            len(ast_scan.filesUnder(repo / root)) for root in ("neurova", "tests", "scripts")
+        )
+        assert scanned > 500, (
+            f"扫描面现读 {scanned} 个 .py（根＝neurova/ tests/ scripts/）——"
+            "根被改窄时「零复活」不代表干净")
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

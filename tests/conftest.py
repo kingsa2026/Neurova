@@ -907,11 +907,11 @@ def _closeWeightEgressDuringTests(request, monkeypatch):
         site = importlib.import_module(moduleName)
         monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))
 
-# ── 根外锚的测试隔离（§6-388）──────────────────────────────────────────────
-# 生产的锚落点是 `~/.neurova/artifact_anchors.json`（**数据根之外**，理由见
+# ── 锚文件的测试隔离（§6-388）──────────────────────────────────────────────
+# 生产的锚落点是 `<数据根>/artifacts/artifact_anchors.json`（取法见
 # `artifact_digest.anchorPath` 的注释）。跑测时任何一次"钉摘要/装技能/装插件"都会
-# 去写那儿——所以按与数据根同形的思路在跑测期改指临时目录，且**仍在数据根之外**
-# （否则"锚在数据根里"这条会自己消失，判据就测不到实态）。
+# 去写那儿——默认按与数据根同形的思路改指临时目录，免得落进某个用例自己的隔离根。
+# 注意这条夹具**不改变**落点语义：锚仍与账本同根（整库回滚的检测边界见台账）。
 ANCHOR_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchors-"))
 
 

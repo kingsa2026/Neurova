@@ -107,6 +107,40 @@ pytestmark = pytest.mark.timeout(120)
 #: （包括有人把真 offender 偷偷加回这张表来换取那一格变绿）。
 BASELINE: set = set()
 
+#: 落点**缺席**的存量表：「根推导本身无误，但那个目录此刻不在工作树里」。
+#:
+#: 与「根写错」必须分开：根写错是 `parents[N]` 数错层，修法是把 N 改对；本表记的是像
+#: `data/sessions` 这种**运行态才被建出来**的目录——干净 checkout 上它天然缺席。
+#:   （历史例：`tests/unit/test_session_landing_guard.py` 曾把落点直接锚在 `data/sessions`，
+#:   而那只在跑起会话后才存在 ⇒ 干净 checkout 上解成 `missing`。该档的枚举根后来改指模块级
+#:   `DATA_DIR`（`<repo>/data`，跑测时一定存在），署名因此销账——本表现值为空集。）
+#: 仓外（`outside`）**不做**这类豁免：那种根指的不是本仓代码，没有任何正当理由。
+#: 同一档换个写法后落点变成"解不出"（`dynamic`，如把目录名收进循环变量）时，本表同样不误报——
+#: 那种形态由 `LOCAL_BASELINE` 那一格管，性质不同，不能混成"表过期"。
+#: 纪律与其余表一致：新增即红、消化必须摘行；署名还在、档却已不再解到缺席时当场红
+#: （表--实况咬合）——真 offender 被偷偷塞回来换绿也会露形。
+MISSING_BASELINE: dict = {}
+
+
+def _dropSignedOffMissing(gaps: dict) -> dict:
+    """把 `MISSING_BASELINE` 里署过名的「缺席」从 offender 里摘掉；署名与实况不符当场红。
+
+    做成函数而不是在两个格子里各写一遍：两格（棘轮／静态根）看的是同一份取数结果，
+    摘法分头写就会长成两条口径（教义第 6 条）。`outside` 一律不放行。
+    """
+    signedOff = set(MISSING_BASELINE)
+    # 「署名还在、档也不再解到缺席」＝表过期，必须同批摘行（与 `BASELINE` 的表--实况咬合同形）。
+    # 档里出现 `None` 值不算过期：那是本闸对"某落点**解不出**"的记账，它出现在**别的题**上，
+    # 与"这个根此刻指不到目录"是两件事——按值齐比会把它误判成实况变化。
+    stale = [rel for rel in signedOff if rel in gaps and gaps[rel] != MISSING]
+    assert not stale, (
+        "MISSING_BASELINE 里的条目，实际落点态已不是 `missing`（表与实况不同源，必须同批改表）："
+        + repr({rel: gaps[rel] for rel in stale})
+    )
+    return {rel: st for rel, st in gaps.items()
+            if not (st in (MISSING, None) and rel in signedOff)}
+
+
 #: ── LOCAL 存量表：同样只由本文件的 `_faceFindings(localGaps=...)` 现取生成 ──────────
 #: 建档那轮＝批 99（2026-10-19）。「面自证」那张表已收空，这张表记下的是**本闸认不出根位置**的档：
 #: 根绑在函数内的名字上，`_constTable` 解不出 ⇒ 那档连"有没有面"都不再被问。
@@ -1123,6 +1157,8 @@ def test_ratchetDoesNotRise():
     gaps = {}
     now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps))
     grew = sorted(now - set(BASELINE))
+    gaps = _dropSignedOffMissing(gaps)
+    grew = [rel for rel in grew if rel not in set(MISSING_BASELINE) or gaps.get(rel)]
     wrongRoot = [rel for rel in grew if gaps.get(rel)]
     noProof = [rel for rel in grew if not gaps.get(rel)]
     assert not grew, (
@@ -1145,9 +1181,13 @@ def test_staticRootsNeverPointOutsideOrNowhere():
     更重的事兜掉了。本会话实测：把 `test_route_vocabulary_is_single_source.py` 的 `parents[3]`
     改成 `parents[4]`，棘轮两格全绿。反证在册：`test_faceRulesPinDepthAndWrongRoots` 的
     parents[3].parent／no_such_dir 两格必须交出**非空**的 gaps，否则这里的零断言只说明探测器没在跑。
+
+    仓外（`outside`）零容忍；**缺席（`missing`）**才走 `MISSING_BASELINE` 署名——两种都叫"解不到"，
+    但修法相反（前者改 N，后者是"那个目录由运行态才建出来"），混成一句会把人引去改本来对的根。
     """
     gaps = {}
     _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps)
+    gaps = _dropSignedOffMissing(gaps)
     assert not gaps, (
         "这些受保护子集里的判据，静态根解到了仓外或指不到真实目录（它的「零命中」不来自代码）：\n  "
         + "\n  ".join("%s [%s]" % (rel, st) for rel, st in sorted(gaps.items()))
