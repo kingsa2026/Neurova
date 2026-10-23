@@ -770,6 +770,50 @@ def _verdictProblems(returncode: int, scanner_output: str, payload, targets) -> 
     return problems
 
 
+#: 命中名单一行一条的上限：既要点名到能处置，也不许把整份 JSON 灌进构建日志。
+UNALLOWED_FINDINGS_LIMIT = 40
+
+
+def unallowedFindings(payload, scanner_output: str = "") -> list:
+    """从扫描器落盘的 JSON 里摊出**未允许**的命中，一行一条可处置的读数。
+
+    为什么必须摊开：`[osv] ❌ 发现未允许的漏洞` 这句只给结论不给名单，处置方
+    （升依赖 / 登记 allowlist）需要的恰好是被点名的 id 与包名+版本，而落盘 JSON
+    的路径只活在函数局部。构建日志就是这条裁决唯一的证据面，证据里没有名单，
+    读者只能重跑或去翻临时目录。
+
+    口径：`id` 一律取自结果的 `groups[].ids`（扫描器的分组 id 才是裁决单位）；
+    allowlist 命中的那些组在扫描器侧已被静默并落到 `experimental_config`，
+    故这里不必再跟 allowlist 对账一遍（对账只有一处，不新造第二份）。
+    名额用尽时显式说明还剩多少条——静默截断会让「只剩最后一类」读成「只有这类」。
+    """
+    findings = []
+    results = payload.get("results") if isinstance(payload, dict) else None
+    for entry in results or []:
+        if not isinstance(entry, dict):
+            continue
+        source = entry.get("source") or {}
+        where = source.get("path") or entry.get("source_path") or "?"
+        # 扫描器的结果段是「一个清单 → 若干命中包 → 若干分组」三层：
+        # `packages[]` 每项自带 `groups[]`，包名与版本也在那一层（实测 v2.6.0）。
+        # 只在段级找包名会印出 `? ?`——点名点了个问号，等于没点。
+        for package in entry.get("packages") or []:
+            if not isinstance(package, dict):
+                continue
+            pkg = package.get("package") or {}
+            label = f"{pkg.get('name') or '?'} {pkg.get('version') or '?'}"
+            for group in package.get("groups") or []:
+                if not isinstance(group, dict):
+                    continue
+                ids = [str(x) for x in (group.get("ids") or []) if x]
+                if ids:
+                    findings.append(f"{label}（{where}）：{'/'.join(ids)}")
+    if len(findings) > UNALLOWED_FINDINGS_LIMIT:
+        rest = len(findings) - UNALLOWED_FINDINGS_LIMIT
+        findings = findings[:UNALLOWED_FINDINGS_LIMIT] + [f"…另有 {rest} 条未列出"]
+    return findings
+
+
 def _missingVerdictProblem(returncode: int) -> str:
     """读数缺失时的问题描述——把非契约退出码的来源摊开，读日志的人不必再猜。"""
     return (
@@ -1334,6 +1378,12 @@ def main() -> int:
             "  注：清单条目过期后本条会重新报红——这是刻意设计，防永久静音。",
             file=sys.stderr,
         )
+        # 命中名单：本句只说「有漏洞」，不说「是哪一个」⇒ 处置第 (a)/(b) 条时
+        # 还得去翻落盘 JSON，而那份路径只在函数内部存在。CI 构建日志实测就是
+        # 这一形态：只印上面三行，读者拿不到可据以升级或登记的 id。点名是
+        # 裁决的一部分，不是友好性（同 `_verdictProblems` 反对「用一句话代替证据」）。
+        for item in unallowedFindings(payload, merged_output):
+            print(f"      - {item}", file=sys.stderr)
         return 1
     print(
         f"[osv] 扫描器以契约码 {proc.returncode} 退出——命令与扫描器版本不符，"
