@@ -516,12 +516,23 @@ P0 turn_id/schema/decisions
   `success=False` 不整轮判失败。`POST /turn-outcomes` 写 `explicit_api` 来源，
   指标按 `turn_id` 去重且显式来源优先（后写不会被自动分类的幂等吞掉）。
 - **D7 handoff**：维持乙案——接管事件单列，不改写任何轮的 `turn_outcome`。
+- **反馈重排（P0-1 收口）**：采纳三态作为**轻量先验**进入检索重排，
+  权重单一来源 `neurova/knowledge/feedback_prior.py`：success 1.10、failure 0.60、
+  unevidenced/无值 1.0；RRF 分 × 先验后在最终 top-k 截断前重排，候选窗按 3 倍
+  （上限 100）扩窗补位。只作用于能映射事实 lineage 的命中；文档命中中性。
+  注入计数与 `lineage_ids` 只取最终注入的条目，候选窗不计。
+  无 fact lineage 的**文档条目**走 entry 级采纳/注入账（repository 条目字段）：
+  `/chat/feedback` 按服务端 `knowledge_entry_ids` 写三态，重排同样消费；
+  v18 `knowledge_entry_usage` 分表记文档检索/生成 token，轮总量加
+  `entry_attributed_tokens`，不再把文档成本塞进未归因桶。
 - **D3 token（D8 甲 / D9 乙）**：检索结果的 `lineage_id` 作为结构化 `fact_id`；
   回答中的 citation 经既有 registry 抽成 `knowledge_citation_ids` 随 assistant metadata 落盘，
   生成侧归因按“引用优先→加权→均分”分摊。检索 token 使用当轮运行模型的 `tiktoken` 编码器；
   无官方编码的非 OpenAI 模型回退 `cl100k_base` 并标 estimated，tiktoken 缺席再回退 jieba；
   检索阶段模型名随 `knowledge_retrieval_tokens_model` 落账，不与生成阶段模型混用；
-  无 fact lineage 的文档命中成本进 v17 `retrieval_unattributed_tokens`，不摊到任何 fact。
+  无 fact lineage 的文档命中成本进 v18 `knowledge_entry_usage`（检索/生成分表），
+  轮总量用 `entry_attributed_tokens` 汇总；只有连 entry id 都缺的 token 才进
+  v17 `retrieval_unattributed_tokens`。
 - **D4 规模（D10 乙 / 部署拍板）**：FTS5 持久倒排已落；ANN 优先 hnswlib、
   其次 faiss，按用户建索引，低于 `NEUROVA_KB_ANN_MIN_RECORDS` 不建，
   构建/查询失败均回退 JSON 全量余弦。**hnswlib 已收进基础 `requirements.txt`**，
@@ -534,13 +545,18 @@ P0 turn_id/schema/decisions
 - **闭环复核**：写入→读取→反馈的逐链状态见审计报告 §13.4。主链已闭；
   飞书服务台、微信客服、MQTT 三条原生接管 producer 已接，质量 metrics 已进管理员
   分析页，ANN 已实测（含 1M 与精确召回对照）并进基础部署依赖，文档命中的检索 token
-  已进未归因桶。仍开项只剩：钉钉/Telegram/Discord 等平台没有可接的原生接管事件
-  （能力位 False）；未装 hnswlib 的环境自动回退 JSON。
-- **验证**：知识/质量/渠道/API 子集 996 项 + 渠道全量 695 项全绿；前端质量契约/
-  组合式/i18n/分析页 34 项与 `vue-tsc --noEmit` 通过；live 探针实测接管写入→状态恢复→
-  显式 outcome→指标、飞书服务台与微信客服 webhook、索引健康（hnswlib enabled）、
-  双 lifespan 事件账持久化全 PASS；ANN 探针 10k/100k/1M 与精确召回对照见上。
-  本批收尾改动已提交推送 `92da4050`；最终提交账见审计报告 13.5。
+  已进未归因桶；**事实级与文档 entry 级采纳都已回流到下一次检索重排**，
+  文档 token 也已进 entry 分表。缺 `knowledge_id` 的旧条目在装载时用内容指纹补
+  `legacy-*` 稳定 id，不再永久无法反馈/归因。仍开项只剩：钉钉/Telegram/Discord 等
+  平台确实没有可接的原生接管事件，能力位 False 并明确报
+  `unsupported:no_native_event`（控制台/API 仍可标记）；未装 hnswlib 的环境自动回退 JSON。
+- **验证**：知识全量 **843 passed**（另 1 条 teardown 守卫 error 来自并发会话遗留临时文件，非本改动）；
+  知识/质量/渠道/API 子集 996 项 + 渠道全量 695 项
+  全绿；entry 反馈/重排/token 合并判据 62 passed，红自证（权重改中性）2 条行为红；
+  前端全量 **2165 passed、0 failed**（2 skipped），`vue-tsc --noEmit` 通过；live 探针实测接管写入→状态恢复→显式 outcome→指标、
+  飞书服务台与微信客服 webhook、索引健康（hnswlib enabled）、双 lifespan 事件账持久化
+  全 PASS；ANN 探针 10k/100k/1M 与精确召回对照见上。渠道/ANN 收尾已推 `92da4050`；
+  采纳重排为本轮新增待提交；最终提交账见审计报告 13.5。
 
 ---
 

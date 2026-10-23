@@ -1959,19 +1959,44 @@ class ChatPipeline:
 
     @staticmethod
     def _recordKnowledgeLineage(ctx: Any, result: Any) -> None:
-        """把本轮知识血缘 id 带进 ctx.metadata，供 post-chat 落进 assistant_metadata。
+        """把本轮**最终注入**的知识血缘/文档 entry id 带进 ctx.metadata。
 
-        只认服务端检索结果里的 lineage_ids；不读用户可写的 fact_ids，避免伪造归因。
+        从 `ctx.relevant_memories`（已过作用域过滤）反推，而不是直接信适配器
+        返回的候选 metadata；否则被 scope 过滤掉的条目仍会被记为注入。
         """
-        lineage_ids = [
-            str(x) for x in ((getattr(result, "metadata", None) or {}).get("lineage_ids") or [])
-            if x
+        memories = [
+            memory for memory in (getattr(ctx, "relevant_memories", None) or [])
+            if isinstance(memory, dict) and memory.get("knowledge_id")
         ]
-        if not lineage_ids:
-            return
+        lineage_ids = [
+            str(memory["lineage_id"]) for memory in memories if memory.get("lineage_id")
+        ]
+        entry_ids = [
+            str(memory["knowledge_id"]) for memory in memories
+            if not memory.get("lineage_id") and memory.get("knowledge_id")
+        ]
+        resultMeta = getattr(result, "metadata", None) or {}
+        if not memories:
+            # 兼容直接注入 result.metadata 的装配/测试路径；真实检索仍优先用
+            # 已过 scope 过滤的 ctx.relevant_memories。
+            lineage_ids = [
+                str(x) for x in (resultMeta.get("lineage_ids") or []) if x
+            ]
+            entry_ids = [
+                str(x) for x in (resultMeta.get("knowledge_entry_ids") or []) if x
+            ]
         metadata = getattr(ctx, "metadata", None)
-        if isinstance(metadata, dict):
+        if not isinstance(metadata, dict):
+            return
+        if lineage_ids:
             metadata["knowledge_lineage_ids"] = list(dict.fromkeys(lineage_ids))
+        if entry_ids:
+            metadata["knowledge_entry_ids"] = list(dict.fromkeys(entry_ids))
+            metadata["knowledge_entry_scores"] = {
+                str(memory["knowledge_id"]): float(memory.get("score", 0.0) or 0.0)
+                for memory in memories
+                if not memory.get("lineage_id") and memory.get("knowledge_id")
+            }
 
     @staticmethod
     def _recordExplicitToolOutcome(ctx: Any, toolMessages: Any) -> None:
@@ -2002,13 +2027,28 @@ class ChatPipeline:
         try:
             from neurova.memory.citation import extract_citations
 
+            knowledgeIds = {
+                str(memory.get("knowledge_id"))
+                for memory in (getattr(ctx, "relevant_memories", None) or [])
+                if isinstance(memory, dict) and memory.get("knowledge_id")
+            }
+            citations = extract_citations(reply, registry)
             cited = [
                 str(entry.get("fact_id"))
-                for entry in extract_citations(reply, registry)
+                for entry in citations
                 if entry.get("fact_id")
+            ]
+            citedEntries = [
+                str(entry.get("memory_id"))
+                for entry in citations
+                if entry.get("memory_id") in knowledgeIds
             ]
             if cited:
                 metadata["knowledge_citation_ids"] = list(dict.fromkeys(cited))
+            if citedEntries:
+                metadata["knowledge_entry_citation_ids"] = list(
+                    dict.fromkeys(citedEntries)
+                )
         except Exception as exc:  # noqa: BLE001 - 引用抽取失败不阻断回复
             logger.debug("知识 citation 抽取跳过: %s", exc)
 
@@ -2019,6 +2059,7 @@ class ChatPipeline:
             return
         scores: Dict[str, float] = {}
         tokens: Dict[str, int] = {}
+        entryTokens: Dict[str, int] = {}
         total_tokens = 0
         exact_all = True
         model = str(
@@ -2049,7 +2090,10 @@ class ChatPipeline:
             exact_all = exact_all and exact
             lineage_id = memory.get("lineage_id")
             if not lineage_id:
-                continue  # 文档命中没有 fact 可摊，只进 total（由未归因桶承接）
+                entryId = str(memory.get("knowledge_id") or "")
+                if entryId:
+                    entryTokens[entryId] = count
+                continue
             key = str(lineage_id)
             try:
                 scores[key] = float(memory.get("score", 0.0) or 0.0)
@@ -2060,6 +2104,8 @@ class ChatPipeline:
             metadata["knowledge_lineage_scores"] = scores
         if tokens:
             metadata["knowledge_retrieval_tokens"] = tokens
+        if entryTokens:
+            metadata["knowledge_entry_retrieval_tokens"] = entryTokens
         if total_tokens:
             metadata["knowledge_retrieval_tokens_total"] = total_tokens
             metadata["knowledge_retrieval_tokens_estimated"] = not exact_all

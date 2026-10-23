@@ -128,6 +128,10 @@ async def get_quality_metrics(
                 key for key, info in adapters.items()
                 if not info.get("human_takeover_events")
             ),
+            "reasons": {
+                key: str(info.get("human_takeover_reason") or "")
+                for key, info in adapters.items()
+            },
         }
     except Exception as exc:  # noqa: BLE001 — 渠道状态读不到不阻断质量读数，但要点名
         data["takeover_channel_capability_missing_reason"] = str(exc)

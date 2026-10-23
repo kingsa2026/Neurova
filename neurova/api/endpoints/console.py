@@ -1809,6 +1809,32 @@ def _apply_feedback_to_facts(
     return {"recorded": recorded, "errors": errors, "outcome": outcome}
 
 
+def _apply_feedback_to_entries(
+    repo, agent_id: str, entry_ids, feedback: str,
+    corrected_answer: typing.Optional[str],
+) -> typing.Dict[str, typing.Any]:
+    """把回执写回**无 fact lineage 的文档条目**；entry id 同样只来自服务端注入。"""
+    ids = [str(x) for x in (entry_ids or []) if x]
+    if not ids or not feedback:
+        return {"recorded": 0, "errors": [], "outcome": None}
+    outcome = "success" if feedback == "like" else "failure"
+    if (corrected_answer or "").strip():
+        outcome = "failure"
+    recorded = 0
+    errors = []
+    writer = getattr(repo, "recordEntryAdoption", None)
+    for entry_id in ids:
+        try:
+            if not callable(writer) or not writer(agent_id or "default", entry_id, outcome):
+                raise LookupError("entry not found")
+            recorded += 1
+        except (LookupError, ValueError, TypeError) as exc:
+            errors.append({"entry_id": entry_id, "error": str(exc)})
+    if errors:
+        logger.warning("知识条目采纳回写部分失败: %s", errors[:5])
+    return {"recorded": recorded, "errors": errors, "outcome": outcome}
+
+
 def _apply_feedback_to_memory(
     repo, agent_id: str, session_id: str, timestamp: str, feedback: str
 ) -> None:
@@ -2000,6 +2026,7 @@ async def post_chat_feedback(
         raise HTTPException(status_code=404, detail="Message not found")
 
     fact_result = {"recorded": 0, "errors": [], "outcome": None}
+    entry_result = {"recorded": 0, "errors": [], "outcome": None}
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
         try:
@@ -2009,6 +2036,12 @@ async def post_chat_feedback(
             _assistant_meta = ((_round or {}).get("assistant") or {}).get("metadata") or {}
             fact_result = _apply_feedback_to_facts(
                 _assistant_meta.get("knowledge_lineage_ids"),
+                body.feedback,
+                body.corrected_answer,
+            )
+            entry_result = _apply_feedback_to_entries(
+                repo, agent_id,
+                _assistant_meta.get("knowledge_entry_ids"),
                 body.feedback,
                 body.corrected_answer,
             )
@@ -2065,11 +2098,17 @@ async def post_chat_feedback(
                 logger.warning("标注闭环处理失败: %s", e)
 
     response = {"code": 0, "message": "Feedback saved"}
-    if fact_result.get("recorded") or fact_result.get("errors"):
+    if (
+        fact_result.get("recorded") or fact_result.get("errors")
+        or entry_result.get("recorded") or entry_result.get("errors")
+    ):
         response["data"] = {
             "facts_recorded": fact_result.get("recorded", 0),
             "fact_errors": fact_result.get("errors", []),
             "fact_outcome": fact_result.get("outcome"),
+            "entries_recorded": entry_result.get("recorded", 0),
+            "entry_errors": entry_result.get("errors", []),
+            "entry_outcome": entry_result.get("outcome"),
         }
     return response
 
