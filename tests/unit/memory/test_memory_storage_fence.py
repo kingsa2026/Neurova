@@ -62,7 +62,10 @@ class TestFenceCoversMemorySurfaces:
         """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        # 生产目录在 v2 统一布局之后是仓内 `data/`（旧扁平 `agent_workspaces/` 仍算生产，
+        # 由 `_productionMemoryDirs()` 那一支兜着）：这条断言按**现布局**取名，别再钉旧名
+        # ——那会让本格恒红，而它想说的「围栏按磁盘事实判、不随进程配置漂」一个字都没错。
+        assert productionMemoryDir().name == "data", productionMemoryDir()
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
 

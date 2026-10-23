@@ -39,6 +39,7 @@
 | `check_users_db.py` | 检查 `data/users.db` 表结构、用户列表与 admin 记录 | 项目根运行 |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
+| `artifactDigestStockInventory.py` | 只读盘点存量构件摘要：已装技能/插件的 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态 + 根外锚的 `match` / `anchor-missing` / `anchor-mismatch`（不写盘） | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]`；退出码 2＝数据根都读不出 |
 
 ## 三、一次性修复 / 补丁脚本（one-off，已完成使命）
 

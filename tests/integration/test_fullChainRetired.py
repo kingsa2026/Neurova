@@ -31,7 +31,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests import ast_scan
+import tests.ast_scan as ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
@@ -49,7 +49,7 @@ def _isAwaitWrapped(node, parentMap) -> bool:
     return False
 
 
-def _syncRouteCallsIn(tree) -> list:
+def _syncRouteCallsIn(tree: ast.AST) -> list:
     """挑出"同步地把 Message 喂给 `.route(`"的行号。
 
     只认三件同时成立：非 async 上下文、属性名 route、**第一参是 `Message(...)` 形态**；
@@ -101,11 +101,12 @@ class TestTheOldIntegrationFileIsRetired:
         """
         hits = []
         for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in root.rglob("*.py"):
+            # 枚举走共享预算入口（判据与文件总量脱钩，见 tests/ast_scan.py）
+            for path in ast_scan.filesUnder(root):
                 if "__pycache__" in path.parts or path.name == Path(__file__).name:
                     continue
                 for lineno, line in enumerate(
-                        path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+                        ast_scan.sourceCode(path).splitlines(), 1):
                     refers = ("test_full_chain.py" in line
                               or "integration.test_full_chain" in line
                               or "from tests.integration import test_full_chain" in line)
@@ -131,10 +132,13 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
         for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
             for path in ast_scan.filesUnder(root):
-                source = path.read_text(encoding="utf-8", errors="ignore")
+                if "__pycache__" in path.parts:
+                    continue
+                source = ast_scan.sourceCode(path)
                 if ".route(" not in source:
                     continue
                 try:
+                    # 解析走共享预算的一次性入口（不留常驻语法树；本判据只扫一次）。
                     lines = _syncRouteCallsIn(ast_scan.transientTree(path))
                 except SyntaxError:
                     continue

@@ -85,8 +85,11 @@ def _trackedScanFace(scanRoots: tuple[str, ...]) -> list[Path]:
         cwd=str(PROJECT_ROOT), capture_output=True, text=True, encoding="utf-8",
     )
     assert listed.returncode == 0, f"git ls-files 失败：{listed.stderr}"
+    # 只留工作树里真在的：索引与工作树的差是在途改名/刚删的中间态，读到一条指不到文件的
+    # 路径就是 FileNotFoundError——扫描面成了"跑的时刻撞不撞上在途改动"的运气
+    # （同一取数口径见 `tests/ast_scan.trackedPyPaths`）。
     return [PROJECT_ROOT / rel for rel in sorted(listed.stdout.split("\0"))
-            if rel.endswith(".py")]
+            if rel.endswith(".py") and (PROJECT_ROOT / rel).is_file()]
 
 
 class TestEvalExampleUnusedLabelFieldsRetired:

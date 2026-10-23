@@ -38,7 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from tests import ast_scan
+import tests.ast_scan as ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
@@ -71,10 +71,13 @@ def test_取数口径只有一份():
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in ast_scan.filesUnder(root):
-            if path == ROUTE_TABLE:
+        # 枚举与解析都走共享预算入口（判据与文件总量脱钩，见 tests/ast_scan.py）：
+        # 文本预筛只留含 `.routes` 的档（判据只认那个属性名，连它都不出现的文件不可能命中）。
+        for ref in ast_scan.sourceRefsUnder(root, hints=ast_scan.textHints(".routes")):
+            path = ref.path
+            if "__pycache__" in path.parts or path == ROUTE_TABLE:
                 continue
-            source = path.read_text(encoding="utf-8", errors="ignore")
+            source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
             hits = _readsMountedAppRoutes(ast_scan.transientTree(path))

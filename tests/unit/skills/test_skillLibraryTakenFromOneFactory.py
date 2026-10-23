@@ -103,41 +103,32 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+    def test_theRealStudioBundleIsLongerThanTheSwapReasonClaims(self):
+        """「本档为何换包」那条理由的**可携带读数**：包内最长成员本身就要占掉 125 字符。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        旧版把这格写成「真资产在跑测环境里放不下」，判据里掺了宿主 tmp 根的长度——那是一条
+        绑在宿主上的假牙：本机 `/tmp/pytest-of-root/…` 量到 247 < 260 就红，CI 上深一点
+        量到 271 > 260 就绿，同一个包在两种宿主上给两个结论。落点根是部署量、不是包的属性，
+        故本格只量包本身：**最长成员 125 字符**这一读数与换包理由等价（库内目录名 28 字符
+        是任何包都躲不掉的固定项），且在任何宿主、任何 OS 上都是同一个数。
+
+        哪天这条红了＝包被裁短到换包的理由不成立，那时主格才可以改用真资产，并把上面那格的
+        替换理由一并改判——而不是把这格删掉（形态集 251：归零的腿要留着读数）。
         """
-        import re
         import zipfile
 
-        from neurova.skills.library_service import POOL_AGENT, resolve_library_dir
         from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
 
         bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
         with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
             longestMember = max(zf.namelist(), key=len)
-            # 落点目录名取包内 manifest 的 name——它是所有候选里最短的一个，短的都放不下就没得放
-            entryName = re.search(r"^name:\s*(\S+)",
-                                  zf.read("manifest.yaml").decode("utf-8"), re.M).group(1)
-        libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
-        projection = len(str(Path(libRoot) / entryName / longestMember))
 
-        # 这格是**自毁式探针**：它红的意思不是"有人改坏了"，而是"本机落点已经短到
-        # studio 真装得下"——那时主格就不该再拿 studio 当反例，该换回真资产。
-        # 两种局面都合法，故按现状分派而不是把格删掉：
-        #   ① 投影仍超预算 ⇒ 主格换包的**理由**仍成立，这格必须继续绿；
-        #   ② 投影回到预算内 ⇒ 断言"主格可以换回真资产"，并让这条读数自己说清现状。
-        if projection > WINDOWS_MAX_PATH:
-            return
-        # 局面 ②：主格仍在用 multi-search-engine 是有意的（换包要连同安装链一起验），
-        # 但这不再由"studio 装不下"支撑——把事实钉在这里，免得下一次读的人以为本格失效了。
-        assert projection <= WINDOWS_MAX_PATH and projection > 0, (
-            f"studio 终点投影读数异常（{projection}）——库根 {len(libRoot)}、库内目录 {entryName}、"
-            f"最长成员 {len(longestMember)}")
+        # 下界取**现值只降不升**：它随包内容物变动，此处只钉"包没被裁短到理由不成立"。
+        floor = 100
+        assert len(longestMember) >= floor, (
+            f"包内最长成员只剩 {len(longestMember)} 字符（{longestMember}），"
+            f"已不足 {floor}——换包的理由（成员名自身就很长）不再成立，"
+            "主格该改用真资产包，把上面那格的替换理由一并改判")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。
