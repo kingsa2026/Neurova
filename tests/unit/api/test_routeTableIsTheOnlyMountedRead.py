@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,11 @@ import pytest
 from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
+
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
@@ -64,6 +70,8 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 def test_取数口径只有一份():
     offenders = []
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():

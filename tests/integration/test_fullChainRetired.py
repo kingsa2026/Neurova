@@ -29,6 +29,7 @@ fixture `sample_memory_manager`，最后两格还会在无凭据时**真去连 O
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 from tests import ast_scan

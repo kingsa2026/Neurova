@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
