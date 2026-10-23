@@ -270,12 +270,14 @@ def _scanCorpus():
     """
     findings: List[str] = []
     nestingTests = 0
+    scannedFiles = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
     for ref in ast_scan.sourceRefsUnder(
             TESTS_ROOT, ".py",
             hints=("subprocess", "Popen", "check_output", "check_call")):
         path = ref.path
+        scannedFiles += 1
         if not path.name.startswith("test_"):
             continue
         if any(part in path.parts for part in _NOT_COLLECTED_DIRS):
@@ -287,14 +289,15 @@ def _scanCorpus():
         nestingTests += fileNesting
         coarseAll |= fileCoarse
         attributedAll |= fileAttributed
-    return (tuple(findings), nestingTests, frozenset(coarseAll), frozenset(attributedAll))
+    return (tuple(findings), nestingTests, scannedFiles,
+            frozenset(coarseAll), frozenset(attributedAll))
 
 
 class TestNestedPytestBudgetWalls:
 
     def test_noCollectedNestingTestIsLeftToTheGlobalWall(self):
         """父墙必须严格高于子墙；无父墙的嵌套 pytest 用例一律点名。"""
-        findings, nestingTests, _coarse, _attributed = _scanCorpus()
+        findings, nestingTests, _scanned, _coarse, _attributed = _scanCorpus()
         assert not findings, (
             "这些用例在子进程里再跑一遍 pytest，自己的预算却没声明（或声明得比子进程还低）。"
             "Windows 侧 pytest-timeout 走 thread 法，超时即终止进程——一格超墙＝整场跑测没了：\n"
@@ -304,7 +307,15 @@ class TestNestedPytestBudgetWalls:
 
     def test_scanFaceAndSiteAttributionAreNotVacuous(self):
         """面自证＋落点归账：这次真扫到了嵌套用例，且粗尺读到的每一处落点都被归过账。"""
-        _findings, nestingTests, coarse, attributed = _scanCorpus()
+        _findings, nestingTests, scannedFiles, coarse, attributed = _scanCorpus()
+        # 下限写成字面量而不是模块常量：面自证棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+        # 只认 `assert <扫描计数> >= <字面量>` 这一形，取阈值的写法它读不到——本档会当场以
+        # 「扫了仓内源码树却没把这次扫到的数量当断言比」被点名（2026-10-23 实测）。
+        assert scannedFiles >= 120, (
+            "扫描面现读 %d 个 .py（下限 120，根＝%s）——根或文本预筛被改窄时，"
+            "下面两条的『零违规』与『全归账』都会变成空转"
+            % (scannedFiles, TESTS_ROOT)
+        )
         assert nestingTests >= _NESTING_FLOOR, (
             "只认到 %d 格嵌套 pytest 用例（下限 %d）——要么 TESTS_ROOT 指错，要么收集口径写窄了；"
             "此时上一条的『零违规』是假绿" % (nestingTests, _NESTING_FLOOR)

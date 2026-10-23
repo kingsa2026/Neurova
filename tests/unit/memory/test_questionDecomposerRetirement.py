@@ -26,6 +26,10 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：`importersOfModule` 扫的是仓内源码树，先立住语料量级——根被改窄时它回空表，
+    # 「退役后无人导入」就变成"没人看"而不是"没人导入"。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 500, f"扫描面现读 {scanned} 个 .py（根＝{REPO_ROOT}）——量级不对＝根指错"
     assert not ast_scan.importersOfModule(REPO_ROOT, MODULE)
 
 
