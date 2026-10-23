@@ -162,8 +162,10 @@ startFp = dataFingerprint()
 
 try:
     LEDGER_PATH, ENTRY_DIR = seedIsolated(ROOT)
-except Exception as exc:  # noqa: BLE001
-    read("[0] 隔离根取真账本副本", lambda: (False, repr(exc)))
+except Exception as failure:  # noqa: BLE001
+    # 先取值再传给 lambda：`except ... as exc` 的 exc 在块结束时**解绑**，
+    # 迟到的 lambda 里再读它只会 NameError（比原本要报的那个故障更没用）。
+    read("[0] 隔离根取真账本副本", lambda failure=failure: (False, repr(failure)))
     LEDGER_PATH = ENTRY_DIR = None
 
 if LEDGER_PATH:
