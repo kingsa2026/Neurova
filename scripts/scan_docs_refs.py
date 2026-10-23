@@ -405,7 +405,9 @@ CODE_REFERENCE_RULINGS = {
     ("docs/11-legacy/源码图谱.md", "1588"):
         ("", "知识层节点列举的 `neurova/knowledge/integration/` 全史未入库"),
     ("docs/11-legacy/源码图谱.md", "1598"):
-        ("tests/integration/test_closed_loop.py", "33-测试层节点指端到端闭环测试"),
+        ("", "33-测试层节点列举的 `test_closed_loop.py`／`test_closed_loop_v2.py` 是脚本"
+            "（模块级 `print`、零用例），且该类闭环用例没有单元级对应件——"
+            "闭环性质现由 `tests/unit/memory/test_closed_loop_feedback.py` 在守"),
 }
 
 RULING_SETTLED = "已裁定"

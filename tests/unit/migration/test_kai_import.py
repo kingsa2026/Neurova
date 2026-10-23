@@ -588,19 +588,24 @@ class TestRemeNotes:
 # ---------------------------------------------------------------------------
 
 
+from scripts.import_kai_to_neurova import resolve_agent_root  # noqa: E402  v2 布局单源
+
+
 class TestIdentityFiles:
     def test_soul_lands_in_memory_dir(self, kai_src):
         from scripts.import_kai_to_neurova import import_identity
 
         kai, nv = kai_src
-        workspace = nv / "agent_workspaces" / "kai"
+        # v2 统一布局：`resolve_agent_root()` 给的是 `<neurova_root>/data/<agent_id>/`
+        # （`4bf9b733` 收口前的 `agent_workspaces/<id>` 已退役，本档按现行单源取根）。
+        workspace = resolve_agent_root(nv, "kai")
         stats = import_identity(kai, workspace)
-        soul = workspace / "memory" / "soul.md"
+        soul = workspace / "soul.md"
         assert soul.exists()
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（_load_identity 第二加载位）
-        assert "凯的档案" in (workspace / "memory" / "personality.md").read_text(encoding="utf-8")
-        # PROFILE/MEMORY 在 workspace 根留档
-        assert (workspace / "PROFILE.md").exists()
-        assert (workspace / "MEMORY.md").exists()
+        # PROFILE → personality.md（`_load_identity` 第二加载位，agent 根下那层）
+        assert "凯的档案" in (workspace / "personality.md").read_text(encoding="utf-8")
+        # PROFILE/MEMORY 在 workspace 根留档（`import_identity` 的落点是 `<agent_root>/workspaces/`）
+        assert (workspace / "workspaces" / "PROFILE.md").exists()
+        assert (workspace / "workspaces" / "MEMORY.md").exists()
         assert stats["files"] >= 4

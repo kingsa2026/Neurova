@@ -272,9 +272,17 @@ def _scanCorpus():
     nestingTests = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
-    for ref in ast_scan.sourceRefsUnder(
-            TESTS_ROOT, ".py",
-            hints=("subprocess", "Popen", "check_output", "check_call")):
+    scanned = 0
+    refs = ast_scan.sourceRefsUnder(
+        TESTS_ROOT, ".py",
+        hints=("subprocess", "Popen", "check_output", "check_call"))
+    scanned = len(refs)
+    # 面自证：预筛后的语料不得缩水成个位数——根被改窄时读数会变成「零发现」而不是红
+    # （该形态本次由 `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 点名）。
+    assert scanned > 20, (
+        f"本档语料现读 {scanned} 个文件（根＝{TESTS_ROOT}）——面量级不对＝根指错，"
+        "「零发现」不来自代码")
+    for ref in refs:
         path = ref.path
         if not path.name.startswith("test_"):
             continue
