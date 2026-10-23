@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,11 @@ import pytest
 from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
+
 SCAN_ROOTS = ("neurova", "tests")
 
 pytestmark = [pytest.mark.timeout(60)]
@@ -63,6 +69,8 @@ def _singleArgCallsIn(tree) -> list:
 
 def test_全仓不得再有单参调用形态():
     offenders = []
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for root in SCAN_ROOTS:
         for path in ast_scan.filesUnder(REPO_ROOT / root):
             lines = _singleArgCallsIn(ast_scan.transientTree(path))

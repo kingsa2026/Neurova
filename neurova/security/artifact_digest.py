@@ -226,6 +226,9 @@ def anchorPath() -> Path:
     `data_root.legacyHomeLanding()` 一处（本仓「家目录 = 一个锚点」的判据，见
     `tests/unit/core/test_homeLandingMovedIntoDataRoot.py`）。本函数只是一处**新写**，
     读的是同一个取法而不是另拼一份 `.neurova`。
+
+    **不落数据根**：锚要对"整个数据根被替换/回滚"敏感，跟数据根同生共死就等于没有锚
+    （§6-388 的用户裁定）。
     """
     return Path(data_root.legacyHomeLanding(ANCHOR_FILE_NAME))
 
