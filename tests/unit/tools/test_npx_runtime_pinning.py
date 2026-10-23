@@ -162,6 +162,13 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # 证书验证绕过：Agent 把 tls 选项做 JSON 深克隆转发给各源池，而 JSON 表示不了
+        # 函数，自定义 checkServerIdentity 因此在到达 TLS 层前被静默丢弃；对端证书只要
+        # 过了 Node 默认的 hostname + 证书链检查就被接受。Agent 是 request / fetch /
+        # setGlobalDispatcher 背后的默认调度器，故受影响面就是默认路径。
+        # 引入链：@upstash/context7-mcp 声明 `undici ^7.0.0`，7.x 线解析到 7.29.1。
+        "undici": ("7.30.1", ("node_modules/@upstash/context7-mcp",), "CVE-2026-109383",
+                   "证书验证绕过：tls 选项经 JSON 深克隆转发时检查函数被丢弃"),
     }
 
     def _release_tuple(self, version: str) -> tuple:
