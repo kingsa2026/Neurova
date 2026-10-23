@@ -15,6 +15,7 @@ from __future__ import annotations
 import getpass
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -246,6 +247,55 @@ def test_pytestInvokesTheHookWithoutAHandCall(tmp_path):
         "说明 pytest_sessionstart 从未被 pytest 调用（钩子未注册）"
     )
     assert liveDir.exists(), "子会话不得把还活着的持有者目录一并删掉"
+
+
+def test_reclaimClearsReadOnlyObjectsAndStillRemovesTheDeadDir(tmp_path):
+    """**只读位挡住的死目录必须照删**——Windows 上这正是唯一会长期留存的残留形态。
+
+    实测（2026-10-23 批 K 的分块跑测）：被强杀的会话在
+    `pytest-<N>/…/.git/objects/…` 下留下**只读**文件（git 给 object 文件加 0444），
+    `shutil.rmtree` 当场 `PermissionError [WinError 5] 拒绝访问`，回收侧只 warn 一句就
+    **永久跳过**它。后果不是"难看"：本模块的全部意义是"把强杀残留从三天窗口压成下一轮"，
+    而这一类残留一轮都收不掉——每开一轮跑测就从 `temp_reclaim.py:156` 打出一批同样的警告，
+    警告里点名的目录数只增不减。
+    清只读位**不是**放宽判据：授权来源始终是 `holderIsDead` 确证已死，只是把"删不动"
+    与"不该删"这两种形态分开——后者由下一格负对照钉住。
+
+    现查读数（2026-10-23，本机 TEMP 会话根）：10 个 `pytest-<N>` 目录里 **8 个含只读文件**，
+    最早的一个是 2026-10-22 18:11 留下的——它们全都躲过了每一轮回收。
+    """
+    dead = _makeSessionDir(tmp_path, number=9199, pid=0xFFFFFFFF)
+    objectDir = dead / "subject.git" / "objects" / "77"
+    objectDir.mkdir(parents=True)
+    blob = objectDir / "3cdb61c256951982bf071faf1e9ff277ab97e4"
+    blob.write_bytes(b"payload")
+    blob.chmod(stat.S_IREAD)
+    assert not (blob.stat().st_mode & stat.S_IWRITE), (
+        "前置没做成：这台机器上只读位没设上，本格会因『根本没有障碍』而假绿"
+    )
+
+    removed = reclaimDeadLockedDirs(tmp_path, holderIsDead=lambda pid, lockMtime: True)
+
+    assert removed == [dead], (
+        "只读文件让 rmtree 抛 PermissionError，回收侧 warn 完就跳过——死目录永久留存，"
+        "每一轮跑测的日志都被它污染一次"
+    )
+    assert not dead.exists()
+
+
+def test_doesNotTouchReadOnlyDirWhoseHolderIsStillLive(tmp_path):
+    """负对照：清只读位不等于获得删除权——锁主还活着的只读目录一律不碰。"""
+    live = _makeSessionDir(tmp_path, number=9200, pid=os.getpid())
+    objectDir = live / "subject.git" / "objects" / "11"
+    objectDir.mkdir(parents=True)
+    blob = objectDir / "deadbeefdeadbeef"
+    blob.write_bytes(b"x")
+    blob.chmod(stat.S_IREAD)
+
+    removed = reclaimDeadLockedDirs(tmp_path, holderIsDead=lambda pid, lockMtime: False)
+
+    assert removed == [] and live.exists(), "锁主活着却把只读子树清了/删了＝误删并发会话的在写目录"
+    assert not (blob.stat().st_mode & stat.S_IWRITE), "负对照不该顺手清只读位"
 
 
 
