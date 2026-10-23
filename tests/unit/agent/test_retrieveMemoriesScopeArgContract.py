@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_ROOTS = ("neurova", "tests")
 
@@ -57,16 +59,16 @@ def _singleArgCallsIn(source: str) -> list:
 
 
 def test_全仓不得再有单参调用形态():
+    # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己 `rglob + ast.parse`
+    # 会把"解析量"绑成"代码总量"，与其余受保护档共享 30s 墙钟时必偶发红。
+    # 文本预筛取调用的**属性名**——连 `_retrieve_memories` 字样都没有的文件
+    # 不可能出现这种调用形态（充分条件，不是放宽）。
     offenders = []
     for root in SCAN_ROOTS:
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            lines = _singleArgCallsIn(path.read_text(encoding="utf-8"))
+        for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("_retrieve_memories",)):
+            lines = _singleArgCallsIn(ref.code)
             if lines:
-                offenders.append(
-                    f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
-                )
+                offenders.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}")
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
         + "; ".join(offenders)
