@@ -161,6 +161,10 @@ class TestPhantomKnobSweep:
           （自己 `read_text` 的话，缓存计数一动不动，只看第一条就漏放行）。
         """
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        # 面自证：语料为零时下面那条 `gainedHits >= corpus` 是 0 >= 0 的恒真句——
+        # 根指错/被改窄时必须在这儿响，而不是让"缓存生效"的结论建在一个空面上
+        # （本档被面自证棘轮点名过：扫了仓内根却只在正文里说"扫到了"）。
+        assert corpus > 100, f"扫描面现读 {corpus} 个 .py（根＝{PROD_ROOT}）——根指错时本格恒真"
         cache = ast_scan._cachedCode
         if not hasattr(cache, "cache_info"):
             pytest.fail("ast_scan._cachedCode 不再是带 cache_info 的缓存入口——"

@@ -29,6 +29,7 @@
 
 import datetime
 import os
+import pathlib
 import time
 
 import pytest
@@ -38,6 +39,10 @@ from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
+
+#: 本档自己的目录（模块级）：面自证棘轮按模块级常量解根，绑在函数里的名字它认不出，
+#: 那档会安静地掉出它的面（档内所有扫描落点都向这一个名字要根）。
+PERF_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
@@ -51,11 +56,23 @@ NEW_QUERY = "自动滴灌"
 def _newManager(tmp_path, agentId: str) -> MemoryManager:
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
+    # 前提要证"引擎真的出非零向量"，不能只证"对象不是 None"：`get_embedding_engine()`
+    # 从未返回 None——模型档在、但分词器/运行时装不上时它照样给一个对象，随后
+    # `initialize()` 失败并**兜底零向量**（日志里只有一行 ERROR）。只判非 None 等于恒真，
+    # 于是"向量分量"整条腿在这类环境里静默失效，红出来的是"写入时就没有向量"这种错位报错。
+    # 这里先做一次真编码：零向量即前提不成立，显式失败、不 skip。
+    engine = get_embedding_engine()
+    assert engine is not None, (
         "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
         "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
         "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
         "不以 skip 蒙过。"
+    )
+    probe = engine.encode("嵌入引擎自检")
+    assert any(probe), (
+        "嵌入引擎给出的是零向量：模型档在，但分词器/ONNX 运行时没装上"
+        "（`transformers` / `tokenizers` / `onnxruntime` 缺席时引擎走零向量兜底）。"
+        "本门禁的向量分量与生产同链路，零向量下读数无意义——装上完整 requirements.txt 再跑。"
     )
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),
@@ -540,12 +557,14 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
+        scanned = len(list(PERF_DIR.rglob("*.py")))
+        assert scanned > 5, (
+            f"扫描面现读 {scanned} 个 .py（根＝{PERF_DIR}）——根指错时下面的"
+            "『零散件』与真干净同形，必须先证面"
+        )
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
+            p.relative_to(PERF_DIR.parent).as_posix()
+            for p in PERF_DIR.rglob("*.py")
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
