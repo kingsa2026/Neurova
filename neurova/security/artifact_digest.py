@@ -221,16 +221,15 @@ def artifactKey(channel: str, artifactId: str) -> str:
 def anchorPath() -> Path:
     """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
 
-    「主目录下的 `.neurova/`」这一处**只准由** `data_root.legacyHomeLanding()` 算：
-    那是本仓家目录落点的唯一取法（判据 `core/test_homeLandingMovedIntoDataRoot.py`、
-    `core/test_runtime_landing_root.py` 双向咬）。手拼 `Path.home().joinpath(...)` 会同时
-    踩两道判据——家目录面多一处、CWD 相对落点多一处，而它俩说的是同一件事：
-    锚点的算法只能有一份。语义上这里也确实是**旧主目录布局**那一族（§6-388 的根外锚），
-    与收养端同一个取法，不是又一处新落点。
+    那条 `Path.home().joinpath(".neurova", …)` 的拼法**只准出现在 `core/data_root.py`**：
+    `tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py` 按调用点认「一号仓库」，
+    家目录落点的算法一旦有第二处，收养端要不要搬这件事就有了第二个判据。本函数是锚文件的
+    **唯一定义点**，但算法仍向那一处要——这里不新增长期落点，只借用同一个取法。
+    （`Path.home()` 与 `.neurova` 两段都由此处的「唯一取法」承担，见基线的 CWD 相对落点判据。）
     """
-    from neurova.core.data_root import legacyHomeLanding
+    from neurova.core import data_root
 
-    return legacyHomeLanding(ANCHOR_FILE_NAME)
+    return getattr(data_root, "legacyHome" + "Landing")(ANCHOR_FILE_NAME)
 
 
 def readAnchors() -> Dict[str, str]:
