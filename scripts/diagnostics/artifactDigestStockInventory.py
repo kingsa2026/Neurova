@@ -8,7 +8,7 @@
   记录给出四态：`pinned-ok` / `pinned-mismatch` / `unpinned`（从未钉过，首次调用会 TOFU 首钉）/
   `missing-dir`（目录没了）；`path` 为空的自动/合成技能不在本清单（没有盘上字节）。
 - 插件：读 `<数据根>/plugins/state.json`，同一套四态。
-- 根外锚：读 `~/.neurova/artifact_anchors.json`，给出每个键是 `match` / `anchor-missing` /
+- 锚文件：读 `artifact_digest.anchorPath()` 那一址（数据根下的 `artifacts/`），给出每个键是 `match` / `anchor-missing` /
   `anchor-mismatch`（不写、不补）。
 
 用法：`PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]`

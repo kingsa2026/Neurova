@@ -96,9 +96,10 @@ def _sweepReadCounts() -> dict:
     ]
     counts: dict = dict.fromkeys(_advertisedNames(), 0)
     refs = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
-    # 面自证：`PROD_ROOT` 被改窄时下面每一格都会读成"零幻影旋钮"（与真干净同形）
+    # 面自证（面读数与裁决同源取数）：`PROD_ROOT` 改窄时每只旋钮的读数都会变成 0，
+    # 而 0 恰好是"生产侧没人读它"这个**合法结论**的形状——两条必须分得开。
     assert len(refs) > 100, (
-        f"扫描面现读 {len(refs)} 个 .py（根＝{PROD_ROOT}）——根写错时零命中不代表干净")
+        f"扫描面现读 {len(refs)} 个 .py（根＝{PROD_ROOT}）——根被改窄或指错了，读数不来自代码")
     for ref in refs:
         if ref.path.name == "builtin_tools.py":
             continue

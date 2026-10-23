@@ -278,7 +278,13 @@ def _scanCorpus():
     scanned = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
-    for path in ast_scan.filesUnder(TESTS_ROOT, ".py"):
+    # 面自证落**枚举**那一趟，不落预筛结果：预筛命中的文件数随判据词表变，量不出"根被改窄"。
+    # 根是 `TESTS_ROOT`（模块级常量），`filesUnder` 只枚举不解析，成本与文件数线性。
+    enumerated = ast_scan.filesUnder(TESTS_ROOT, ".py")
+    assert len(enumerated) > 50, (
+        f"扫描面现读 {len(enumerated)} 个 .py（根＝{TESTS_ROOT}）——根被改窄或指错了，"
+        "『没有嵌套用例漏给自己的预算』这句话不来自代码")
+    for path in enumerated:
         scanned += 1
         if not path.name.startswith("test_"):
             continue
