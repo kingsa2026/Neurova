@@ -548,15 +548,16 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 
 
 def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → `<agent_root>/workspaces/memory/soul.md`；
-    PROFILE.md → `memory/personality.md` + workspace 留档；MEMORY.md → workspace 留档。
+    """SOUL.md → `<agent_root>/soul.md` **与** `<agent_root>/memory/soul.md`；
+    PROFILE.md → 同两处的 `personality.md` + workspace 留档；MEMORY.md → workspace 留档。
     全部覆盖式同步（源即真相）。
 
-    身份文件的**读取位**是 `Agent._load_identity`：它读 `<agent_root>/` 与
-    `<agent_root>/memory/memory/` 两处（同 `<cli.py>` 的导入侧落点，本仓单一取法是
-    `neurova.core.agent_workspaces.get_agent_memory_dir`）。旧版写的是
-    `<agent_root>/soul.md`（v2 布局前的位置），现行加载器一个字节都读不到——
-    导入成功而 agent 起来还是默认身份，那是最坏的一种"成功"。
+    **两处都写**，因为读取侧今天有两处实现，谁也没被退役：
+    ① 现行 `agent_core._load_identity` 读 `<agent_root>/soul.md`、`<agent_root>/personality.md`；
+    ② 另一条链经 `core/agent_workspaces.get_agent_memory_dir` 取 `<agent_root>/memory/`。
+    只写一处就会出现"导入成功、运行时读到默认身份"——那是最坏的一种"成功"，
+    而且两处谁在读取决于调用链，静态看代码看不出来。两份落点写在同一个 mapping 里，
+    同源同批，不存在第二份推导。
     """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
@@ -567,7 +568,9 @@ def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
     files = 0
 
     mapping = [
+        (kai_root / "SOUL.md", agent_root / "soul.md"),
         (kai_root / "SOUL.md", memory_dir / "soul.md"),
+        (kai_root / "PROFILE.md", agent_root / "personality.md"),
         (kai_root / "PROFILE.md", memory_dir / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),

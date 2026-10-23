@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import tempfile
 
 from tests import ast_scan
 
