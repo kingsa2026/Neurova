@@ -31,8 +31,24 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
+
+
+def _pySourcesUnderTheScanFace(hints: tuple = ()):
+    """本档扫描面（`tests/` ＋ `scripts/`）的源码引用清单——走 `tests/ast_scan` 的唯一取数口。
+
+    此前两处各写一遍 `rglob("*.py")` ＋ 裸 `read_text`：那是受保护子集里
+    「枚举 + 解析」组合（`test_ci_ast_scan_budget_guard.py` 逐条点名要销账的形状），
+    判据成本因此与仓内 `.py` 总量捆绑，同一台机器上与其余近五百档共享 30s 墙钟。
+    预筛按 `hints` 给：连那个词都没出现的文件不可能命中，这不是放宽判据。
+    """
+    refs = []
+    for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
+        refs.extend(ast_scan.sourceRefsUnder(root, hints=hints))
+    return refs
 
 
 def _isAwaitWrapped(node, parentMap) -> bool:
@@ -99,17 +115,15 @@ class TestTheOldIntegrationFileIsRetired:
         不是把人引回去的活引用。判据按**行**判，不对整档豁免。
         """
         hits = []
-        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in root.rglob("*.py"):
-                if "__pycache__" in path.parts or path.name == Path(__file__).name:
-                    continue
-                for lineno, line in enumerate(
-                        path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
-                    refers = ("test_full_chain.py" in line
-                              or "integration.test_full_chain" in line
-                              or "from tests.integration import test_full_chain" in line)
-                    if refers and "退役" not in line:
-                        hits.append("%s:%d" % (path.relative_to(REPO_ROOT), lineno))
+        for ref in _pySourcesUnderTheScanFace():
+            if ref.path.name == Path(__file__).name:
+                continue
+            for lineno, line in enumerate(ref.code.splitlines(), 1):
+                refers = ("test_full_chain.py" in line
+                          or "integration.test_full_chain" in line
+                          or "from tests.integration import test_full_chain" in line)
+                if refers and "退役" not in line:
+                    hits.append("%s:%d" % (ref.path.relative_to(REPO_ROOT), lineno))
         assert hits == [], (
             "还有活引用指向旧集成档（会把人引回死文件）；确实要提就带上「退役」二字：%s" % hits[:5])
 
@@ -126,19 +140,15 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
-        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in root.rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
-                source = path.read_text(encoding="utf-8", errors="ignore")
-                if ".route(" not in source:
-                    continue
-                try:
-                    lines = _syncRouteCallsIn(source)
-                except SyntaxError:
-                    continue
-                if lines:
-                    offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        for ref in _pySourcesUnderTheScanFace(hints=(".route(",)):
+            if ref.path.name == Path(__file__).name:
+                continue
+            try:
+                lines = _syncRouteCallsIn(ref.code)
+            except SyntaxError:
+                continue
+            if lines:
+                offenders.append("%s:%s" % (ref.path.relative_to(REPO_ROOT), lines))
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])
