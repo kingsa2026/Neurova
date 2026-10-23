@@ -44,9 +44,12 @@ CHECK_DIRS = ["neurova", "scripts"]
 # 与 neurova/cognitive_layers/memory_layer/__init__.py 的 try/except 降级保持一致。
 # 这些依赖在代码中均为"函数内/try 包裹"的惰性导入，或用 try/except 降级，
 # 因此在精简 CI 环境（requirements-ci.txt）中缺席时，导入巡检记为 OPTIONAL-SKIP。
+#
+# `numpy` 已移出本表（2026-10-23）：它进了 requirements-ci.txt，环境里必须有。
+# 留在表里意味着"向量原语/分词判据因缺件而红"会被记成 OPTIONAL-SKIP 静默放行——
+# 那正是本表唯一会做错的事（把环境缺件与代码缺陷混成同一读数）。
 KNOWN_OPTIONAL_DEPS = {
     # 科学计算 / 向量 / NeRF
-    "numpy",
     "torch",
     "onnxruntime",
     "faiss",

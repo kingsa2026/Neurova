@@ -47,33 +47,31 @@ def buildZip(members: dict) -> bytes:
     return buf.getvalue()
 
 
-def deepRoot(tmp: Path, skill_id: str, payload: bytes = None) -> Path:
-    """复刻 pytest 那种"用例名即目录名"的深根，**逐档现算**而不是抄一个总数。
+def deepRoot(tmp: Path, skill_id: str) -> Path:
+    """复刻 pytest 那种"用例名即目录名"的深根，并按**实测成员长度**补到真超限。
 
-    `payload` 缺省取仓内资产包：撑根要按"最长成员"算，而不同调用点量的包可能不同
-    （合成样本比真包短），故允许显式传；传空则按真资产包量。
-
-    可复算的判据只有一条：`落点根 + 1 + 最长成员名 >= WINDOWS_MAX_PATH`。
-    写死"合计 273 字符"是拿旧资产包的长成员当事实源——包里的长成员从 141 字符
-    回到 125 之后（终点投影 247），同一个根就装得成了，而**长路径这一族从未消失**，
-    红的是那条被抄死的读数。故这里按生产自己那份量法（`_longestProjectedPath`）
-    逐档把根撑到超限为止：资产包再变，判据跟着它变，不再跟着某个数字。
+    原写法只拼 273 字符的根，赌的是"根 + 最长成员 ≥ 260"。这个赌注会过期：
+    内置资产包的最长成员后来缩到 125（根 133 + 1 + 125 = 259，正好卡在 260 预算内），
+    整档于是从"钉住路径过长这一族"退化成"报告说兜底没生效"——判据错的不是断言，是前提。
+    现在根按 `WINDOWS_MAX_PATH` 与**这份包真实的**成员长度反推，成员再缩也照样越限。
     """
-    if payload is None:
-        payload = read_builtin_bundle(BUNDLE)
-        assert payload, f"仓内资产包缺失：{BUNDLE} ⇒ 本档失去根据"
-    base = (tmp / "pytest-of-operator" / "pytest-9999"
-            / "test_import_builtin_offline[presentation-studio]0" / "skills" / skill_id)
-    # 撑到「根 + 1 + 最长成员」超限为止：`_longestProjectedPath` 才是这条链的量法，
-    # 拿根长自己跟 260 比会差一个成员名。
-    while True:
-        projected = market_sources._longestProjectedPath(payload, base)
-        if projected is None:
-            base = base / ("deep-root-segment-" + "x" * 24)
-            continue
-        if projected[1] >= market_sources.WINDOWS_MAX_PATH:
-            return base
-        base = base / ("deep-root-segment-" + "x" * 24)
+    payload = read_builtin_bundle(BUNDLE)
+    projected = market_sources._longestProjectedPath(payload, tmp / "probe")
+    assert projected is not None, "读不出内置包的成员清单 ⇒ 本档失去根据，去查资产而不是关判据"
+    member, _total = projected
+    tail = ["skills", skill_id]
+    overflow = 4  # 越过上限的余量：判据要的是"超了"，不是"刚好等于"
+    tailLen = len("/".join(tail)) + 1
+    headFixed = len(str(tmp / "pytest-of-operator" / "pytest-9999")) + 1
+    room = market_sources.WINDOWS_MAX_PATH + overflow
+    padLen = room - headFixed - tailLen - len(member)
+    assert padLen > 0, (
+        f"临时根本身已占 {headFixed} 字符，补不出超限的深根：这份包的最长成员 {len(member)} 字符——"
+        "换更短的成员集再取样，别把断言改松")
+    base = (tmp / "pytest-of-operator" / "pytest-9999" / ("p" * padLen) / "skills" / skill_id)
+    assert len(str(base)) + 1 + len(member) > market_sources.WINDOWS_MAX_PATH, (
+        "深根没补到超限：本档两格的前提（路径过长这一族必须被拒）不成立")
+    return base
 
 
 def _pads(base: Path, skill_id: str, payload: bytes) -> list:
@@ -152,11 +150,7 @@ def test_longRootFailureNamesPathTooLong(builtinPayload, tmp_path):
     dest = longRoot(tmp_path, "adaptive-presentation-studio")
 
     reason = refusalOf(builtinPayload, dest)
-    if not reason:
-        pytest.skip(
-            "本机没因路径长度拒绝这个包（长路径开关/文件系统不同）——"
-            "原因文案的**形状**由 `test_reasonIsDerivedFromTheConstantNotASecondCopy` 在本机钉住，"
-            "这一格钉的是真链路；不要为此删格，也不要假装它被拒了")
+    assert reason, "这个组合在这台机器上装成了——原因面不该返回空串，去复测而不是删格"
     assert "路径过长" in reason, f"失败又被折成模糊一句话：{reason[:120]}"
     projected = market_sources._longestProjectedPath(builtinPayload, dest)
     assert projected and all(str(n) in reason for n in
@@ -230,12 +224,8 @@ def test_boolFaceAndReasonFaceAreOneImplementation(builtinPayload, tmp_path):
 
     assert market_sources.extract_remote_skill_zip("p", builtinPayload, short) is True
     assert refusalOf(builtinPayload, short) == ""
-    # 因果按「面上说什么」对账，不假设宿主会拒：装上则两面都必须说装上了，
-    # 拒了则两面都必须说拒了——分叉才是缺陷。
-    refused = market_sources.extract_remote_skill_zip("p", builtinPayload, long)
-    reason = refusalOf(builtinPayload, long)
-    assert refused is (reason == ""), (
-        f"bool 面与原因面分叉：bool={refused}，原因={reason[:120]!r}——两处判定必须同一份实现")
+    assert market_sources.extract_remote_skill_zip("p", builtinPayload, long) is False
+    assert refusalOf(builtinPayload, long), "bool 说拒、原因面说没拒——两处判定分叉"
 
 
 def test_reasonIsDerivedFromTheConstantNotASecondCopy(builtinPayload, monkeypatch, tmp_path):

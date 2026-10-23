@@ -18,8 +18,8 @@
 from __future__ import annotations
 
 import ast
-import pathlib
 import sys
+import pathlib
 
 from tests import ast_scan
 
@@ -106,10 +106,9 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    # 解释器名按**跑测的这一个**取，不写字面 `python`：容器/发行版里常常只有
-    # `python3`（本仓 CI 镜像即是），写死会红成"运行时坏了"，而坏的是这条取法。
-    result = asyncio.run(runtime.exec(
-        command=sys.executable, args=["-c", "print(1)"], timeout=30))
+    # 解释器按**本进程那个**取：POSIX 上只有 `python3`，写死 `python` 时红的是探针
+    # （`FileNotFoundError: 'python'`），不是"运行时半区删错了"。
+    result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 
