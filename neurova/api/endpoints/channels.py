@@ -34,6 +34,7 @@ from neurova.api.agent_access import requireAgentOwner
 from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.manager import get_channel_manager
 
 logger = get_logger(__name__)
@@ -393,8 +394,6 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
     if _feishuEnvelope(data)[1] == "helpdesk.ticket.updated_v1":
         takeover = adapter.handle_helpdesk_ticket_event(data.get("event") or {})
         if takeover is not None:
-            from neurova.channels.base import ChannelEventType
-
             await adapter._emit_event(*takeover)
         return {"code": 0}
 
@@ -404,8 +403,6 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
     # 走线程池的原因：audio 分支含同步 HTTP 下载，一次 15 秒的下载会把整个进程的入站一起拖住。
     channel_msg = await asyncio.to_thread(
         adapter.buildInboundMessage, data.get("event") or {}, data)
-
-    from neurova.channels.base import ChannelEventType
 
     await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
     return {"code": 0}
@@ -449,8 +446,6 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
         message_type=msg_type,
         raw_event=data,
     )
-
-    from neurova.channels.base import ChannelEventType
 
     await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
     return {"errcode": 0}
