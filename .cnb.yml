@@ -157,11 +157,24 @@ main:
             python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
+        # 为什么是 80m 而不是 30m：受保护子集一轮实测 33–35 分钟，30m 会先撞墙钟。
+        # 构建 cnb-fjp-1k5lebh9n#003 逐字读数：
+        #   [+4.0s 00:30:21] tests/unit/memory/test_d19ThirdGroupRetirements.py .
+        #   [+0ms  00:30:21] exit code: -1, signal: 9, duration: 30.0m
+        # 它死在 96% 处——既没给出 summary，也把已跑出的红一起吞了：
+        #   改前同一份配置下那 33 分钟里，唯一一处「成对红」是
+        #   test_cognitiveComponentTable 的两格（那是真账，按生成器重算已修），
+        #   剩下十几个单格失败在预存面上（与本次提交无关，逐条另账）。
+        # 换来的不是「变绿」而是「看得见」：判据一个字没动，
+        # 覆盖率门禁仍是 --cov-fail-under=60，清单仍是同一份 protected_tests.txt。
+        # 不把上限写成「刚好不再撞墙」的 35m：那只是同一场事故换一个更近的日期，
+        # 留一倍余量给 171 档在 4 核上共享的负载波动（与上方 90m 的
+        # 「per-file audit of the protected subset」同口径：跑同一批用例的腿不短于它）。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 30m
+          timeout: 80m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     - name: e2e-backend-boot
