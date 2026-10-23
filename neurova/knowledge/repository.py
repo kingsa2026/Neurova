@@ -19,6 +19,7 @@ tags/source/confidence/created_at/updated_at），重启保留。
 import contextlib
 import datetime
 import difflib
+import hashlib
 import json
 import os
 import threading
@@ -28,7 +29,10 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.foundation.entry_ledger import EntryLedger
-from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+from neurova.knowledge.foundation.knowledge_facts import (
+    ADOPTION_OUTCOMES,
+    KnowledgeFactStore,
+)
 from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
 from neurova.knowledge.foundation.storage_fence import (
     PRODUCTION_STORAGE_DIR,
@@ -608,6 +612,16 @@ class KnowledgeRepository:
     @staticmethod
     def _migrate_entry(item: Dict[str, Any]) -> Dict[str, Any]:
         """存量条目补齐隔离字段：private + 虚拟 default 属主（保守策略）。"""
+        if not str(item.get("knowledge_id") or "").strip():
+            # 缺 id 的旧条目永远进不了反馈/token/引用账：用内容指纹补一个
+            # 稳定 id（不随机，重启后仍是同一条），后续 _save 自然固化。
+            seed = "%s\n%s\n%s" % (
+                item.get("title", ""), item.get("content", ""),
+                item.get("created_at", ""),
+            )
+            item["knowledge_id"] = "legacy-" + hashlib.sha256(
+                seed.encode("utf-8")
+            ).hexdigest()[:32]
         if not isinstance(item.get("visibility"), str):
             item["visibility"] = VISIBILITY_PRIVATE
         if not isinstance(item.get("owner_user_id"), str):
@@ -624,6 +638,15 @@ class KnowledgeRepository:
             item["lifecycle_reason"] = ""
         if item.get("lifecycle_changed_at") is None:
             item["lifecycle_changed_at"] = None
+        # 文档条目的采纳/注入回写（无 fact lineage 时的 entry 级反馈账）
+        if item.get("adoption_outcome") not in ADOPTION_OUTCOMES:
+            item["adoption_outcome"] = None
+        if item.get("adoption_updated_at") is None:
+            item["adoption_updated_at"] = None
+        if not isinstance(item.get("injected_count"), int):
+            item["injected_count"] = 0
+        if item.get("last_injected_at") is None:
+            item["last_injected_at"] = None
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -730,6 +753,10 @@ class KnowledgeRepository:
             "lifecycle_status": status,
             "lifecycle_reason": "",
             "lifecycle_changed_at": None,
+            "adoption_outcome": None,
+            "adoption_updated_at": None,
+            "injected_count": 0,
+            "last_injected_at": None,
             # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
             "chunks": chunks,
             # P1#6 父子分块：chunks 存子块（进索引），parents 存父块（LLM 上下文）；
@@ -1224,6 +1251,84 @@ class KnowledgeRepository:
                         self._record_index_op("reindex", knowledge_id)
                     return True
         return False
+
+    # ── entry 级反馈（文档条目无 fact lineage 时的采纳/注入账）──────
+
+    def recordEntryAdoption(
+        self, agent_id: str, knowledge_id: str, outcome: str
+    ) -> bool:
+        """写文档条目的采纳三态；只改反馈字段，不碰 updated_at/正文。"""
+        if outcome not in ADOPTION_OUTCOMES:
+            raise ValueError("未知 adoption_outcome: %r" % (outcome,))
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") == knowledge_id:
+                    item["adoption_outcome"] = outcome
+                    item["adoption_updated_at"] = stamp
+                    self._save()
+                    return True
+        return False
+
+    def recordEntryInjections(
+        self, agent_id: str, knowledge_ids: List[str]
+    ) -> int:
+        """对最终注入的文档条目累计 injected_count；不改 updated_at。"""
+        wanted = {str(kid) for kid in (knowledge_ids or []) if kid}
+        if not wanted:
+            return 0
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        written = 0
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") in wanted:
+                    item["injected_count"] = int(item.get("injected_count") or 0) + 1
+                    item["last_injected_at"] = stamp
+                    written += 1
+            if written:
+                self._save()
+        return written
+
+    def entryFeedbackMap(self, knowledge_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """按 id 取条目反馈；跨 agent 查找（knowledge_id 全局唯一）。"""
+        wanted = {str(kid) for kid in (knowledge_ids or []) if kid}
+        if not wanted:
+            return {}
+        result: Dict[str, Dict[str, Any]] = {}
+        with self._lock:
+            for items in self._items.values():
+                for item in items:
+                    kid = str(item.get("knowledge_id") or "")
+                    if kid in wanted:
+                        result[kid] = {
+                            "adoption_outcome": item.get("adoption_outcome"),
+                            "adoption_updated_at": item.get("adoption_updated_at"),
+                            "injected_count": int(item.get("injected_count") or 0),
+                            "last_injected_at": item.get("last_injected_at"),
+                        }
+        return result
+
+    def entryFeedbackMetrics(self) -> Dict[str, Any]:
+        """条目反馈读数：三态分布 + 注入覆盖率；静默缺失按未回写计。"""
+        with self._lock:
+            items = [item for group in self._items.values() for item in group]
+        counts = {"success": 0, "failure": 0, "unevidenced": 0, "never_written": 0}
+        injected = 0
+        for item in items:
+            outcome = item.get("adoption_outcome")
+            if outcome in counts:
+                counts[outcome] += 1
+            else:
+                counts["never_written"] += 1
+            if int(item.get("injected_count") or 0) > 0:
+                injected += 1
+        total = len(items)
+        return {
+            "total": total,
+            "outcomes": counts,
+            "injected_entries": injected,
+            "injection_coverage": round(injected / total, 6) if total else None,
+        }
 
     def delete_knowledge(
         self, agent_id: str, knowledge_id: str, deleted_by: str = ""

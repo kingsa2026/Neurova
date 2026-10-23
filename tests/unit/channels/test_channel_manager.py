@@ -5,12 +5,8 @@ ChannelManager 单元测试
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-try:
-    from neurova.channels.manager import ChannelManager
-    from neurova.channels.base import ChannelAdapter, ChannelConfig, MessageChannel
-    HAS_CHANNEL_MANAGER = True
-except ImportError:
-    HAS_CHANNEL_MANAGER = False
+from neurova.channels.manager import ChannelManager
+from neurova.channels.base import ChannelAdapter, ChannelConfig, MessageChannel
 
 
 class MockAdapter(ChannelAdapter):
@@ -32,7 +28,6 @@ class MockAdapter(ChannelAdapter):
         return f"msg_{self.channel_type}"
 
 
-@unittest.skipIf(not HAS_CHANNEL_MANAGER, "ChannelManager not available")
 class TestChannelManager(unittest.TestCase):
     """ChannelManager 测试类"""
 

@@ -174,15 +174,17 @@ class TestMigrationVersions:
                 'ontology_rule_fires', 'knowledge_lineage_heads'} <= names
         # v13（批次 K2）：断言表加 `erased_at`——擦除的落点是"正文置空 + 打标记"，
         # 而标记必须落在这一张表的列上，不能靠别处的第二份状态推断。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 17
-        # v14-v17（token 归因精度）：事实用量表 + 轮级用量表 + 检索未归因列。
-        assert {'knowledge_fact_usage', 'knowledge_turn_usage'} <= names
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 18
+        # v14-v18（token 归因精度）：事实/轮级/entry 用量表 + 未归因列。
+        assert {'knowledge_fact_usage', 'knowledge_turn_usage',
+                'knowledge_entry_usage'} <= names
         turn_columns = {
             r[1] for r in store._conn.execute(
                 "PRAGMA table_info(knowledge_turn_usage)"
             ).fetchall()
         }
         assert "retrieval_unattributed_tokens" in turn_columns
+        assert "entry_attributed_tokens" in turn_columns
         erased = [r[1] for r in store._conn.execute(
             "PRAGMA table_info(knowledge_assertions)").fetchall()]
         assert "erased_at" in erased, "v13 没重放到本库，擦除会退化成硬删断言行"

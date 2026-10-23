@@ -1062,6 +1062,10 @@ export default {
     sandboxRequired: '需沙箱',
   },
   skillEvo: {
+    adopt: '采纳',
+    adoptTarget: '目标技能',
+    adoptSuccess: '已生成待审提案',
+    adoptError: '采纳失败',
     abVerify: '双臂核验（真留出集）',
     abHint: '同一任务集、同一判分器，对照基线正文与候选正文；只读评测，不产提案。',
     abRunSimulated: '跑模拟面',

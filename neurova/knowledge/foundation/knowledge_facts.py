@@ -216,6 +216,29 @@ _SCHEMA_V17 = """
 ALTER TABLE knowledge_turn_usage ADD COLUMN retrieval_unattributed_tokens INTEGER NOT NULL DEFAULT 0;
 """
 
+# v18：无 fact lineage 的文档条目 token 账；entry 级与 fact 级分开记，
+# 但轮总量新增 entry_attributed_tokens，避免文档生成 token 被当成未归因。
+_SCHEMA_V18 = """
+CREATE TABLE IF NOT EXISTS knowledge_entry_usage (
+    usage_id TEXT PRIMARY KEY,
+    entry_id TEXT NOT NULL,
+    source_turn_id TEXT NOT NULL DEFAULT '',
+    turn_id TEXT NOT NULL DEFAULT '',
+    phase TEXT NOT NULL DEFAULT 'generation',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    attribution TEXT NOT NULL DEFAULT 'even_split',
+    model TEXT NOT NULL DEFAULT '',
+    estimated INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_entry_usage_turn_phase
+    ON knowledge_entry_usage(turn_id, entry_id, phase) WHERE turn_id <> '';
+CREATE INDEX IF NOT EXISTS idx_entry_usage_phase ON knowledge_entry_usage(phase, recorded_at);
+ALTER TABLE knowledge_turn_usage ADD COLUMN entry_attributed_tokens INTEGER NOT NULL DEFAULT 0;
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -730,6 +753,114 @@ class KnowledgeFactStore:
             )
         return count
 
+    def recordEntryTokenUsage(
+        self,
+        entryIds: List[str],
+        promptTokens: int = 0,
+        completionTokens: int = 0,
+        sourceTurnId: str = "",
+        turnId: str = "",
+        phase: str = "generation",
+        model: str = "",
+        estimated: bool = False,
+    ) -> int:
+        """文档条目的均分 token 账；与 fact 表分表，轮级幂等键相同。"""
+        ids = list(dict.fromkeys(str(e) for e in (entryIds or []) if e))
+        prompt = max(0, int(promptTokens or 0))
+        completion = max(0, int(completionTokens or 0))
+        if not ids or (prompt == 0 and completion == 0):
+            return 0
+        with self._lock, self._conn:
+            if turnId:
+                for entryId in ids:
+                    exists = self._conn.execute(
+                        "SELECT 1 FROM knowledge_entry_usage"
+                        " WHERE turn_id = ? AND entry_id = ? AND phase = ? LIMIT 1",
+                        (str(turnId), entryId, str(phase)),
+                    ).fetchone()
+                    if exists:
+                        return 0
+            n = len(ids)
+            pBase, pRem = divmod(prompt, n)
+            cBase, cRem = divmod(completion, n)
+            stamp = _now()
+            for index, entryId in enumerate(ids):
+                p = pBase + (1 if index < pRem else 0)
+                c = cBase + (1 if index < cRem else 0)
+                self._conn.execute(
+                    "INSERT INTO knowledge_entry_usage (usage_id, entry_id, source_turn_id,"
+                    " turn_id, phase, prompt_tokens, completion_tokens, total_tokens,"
+                    " attribution, model, estimated, recorded_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("kes_%s" % uuid.uuid4().hex[:12], entryId, str(sourceTurnId),
+                     str(turnId), str(phase), p, c, p + c, "even_split",
+                     str(model), int(bool(estimated)), stamp),
+                )
+        return len(ids)
+
+    def _recordEntryTurnAttribution(
+        self, turnId: str, sessionId: str, model: str, attributed: int
+    ) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO knowledge_turn_usage"
+            " (turn_id, session_id, model, recorded_at) VALUES (?,?,?,?)",
+            (str(turnId), str(sessionId), str(model), _now()),
+        )
+        self._conn.execute(
+            "UPDATE knowledge_turn_usage SET entry_attributed_tokens = ?"
+            " WHERE turn_id = ?",
+            (max(0, int(attributed)), str(turnId)),
+        )
+
+    def recordEntryTokenUsageAllocations(
+        self,
+        turnId: str,
+        allocations: Dict[str, Tuple[int, int]],
+        *,
+        promptTokens: int,
+        completionTokens: int,
+        sourceTurnId: str = "",
+        model: str = "",
+        estimated: bool = False,
+        attribution: str = "even_split",
+    ) -> int:
+        """文档条目的生成 token 分摊；差额由调用方的轮总量统一收口。"""
+        if not turnId:
+            return 0
+        prompt = max(0, int(promptTokens or 0))
+        completion = max(0, int(completionTokens or 0))
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM knowledge_entry_usage"
+                " WHERE turn_id = ? AND phase = 'generation' LIMIT 1",
+                (str(turnId),),
+            ).fetchone()
+            if exists:
+                return 0
+            valid: Dict[str, Tuple[int, int]] = {
+                str(entryId): (max(0, int(p or 0)), max(0, int(c or 0)))
+                for entryId, (p, c) in (allocations or {}).items()
+                if str(entryId)
+            }
+            stamp = _now()
+            attributed = 0
+            for entryId, (p, c) in valid.items():
+                self._conn.execute(
+                    "INSERT INTO knowledge_entry_usage (usage_id, entry_id, source_turn_id,"
+                    " turn_id, phase, prompt_tokens, completion_tokens, total_tokens,"
+                    " attribution, model, estimated, recorded_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("kes_%s" % uuid.uuid4().hex[:12], entryId, str(sourceTurnId),
+                     str(turnId), "generation", p, c, p + c, str(attribution),
+                     str(model), int(bool(estimated)), stamp),
+                )
+                attributed += p + c
+            if attributed:
+                self._recordEntryTurnAttribution(
+                    turnId, sourceTurnId, model, attributed
+                )
+        return len(valid)
+
     def recordTokenUsageAllocations(
         self,
         turnId: str,
@@ -741,6 +872,7 @@ class KnowledgeFactStore:
         model: str = "",
         estimated: bool = False,
         attribution: str = "even_split",
+        additionalAttributed: int = 0,
     ) -> int:
         """按给定 fact→(prompt, completion) 分摊写账；差额进 unattributed。
 
@@ -780,7 +912,9 @@ class KnowledgeFactStore:
             total = prompt + completion
             self._recordTurnUsage(
                 turnId, sourceTurnId, model, prompt, completion,
-                attributed, max(0, total - attributed), attribution,
+                attributed,
+                max(0, total - attributed - max(0, int(additionalAttributed or 0))),
+                attribution,
             )
         return len(valid)
 
@@ -815,6 +949,7 @@ class KnowledgeFactStore:
                 " COALESCE(SUM(completion_tokens), 0) AS completion_tokens,"
                 " COALESCE(SUM(attributed_tokens), 0) AS attributed_tokens,"
                 " COALESCE(SUM(unattributed_tokens), 0) AS unattributed_tokens,"
+                " COALESCE(SUM(entry_attributed_tokens), 0) AS entry_attributed_tokens,"
                 " COALESCE(SUM(retrieval_unattributed_tokens), 0)"
                 " AS retrieval_unattributed_tokens"
                 " FROM knowledge_turn_usage"
@@ -823,6 +958,28 @@ class KnowledgeFactStore:
                 "SELECT COALESCE(SUM(total_tokens), 0) AS total FROM knowledge_fact_usage"
                 " WHERE phase = 'retrieval'"
             ).fetchone()["total"] or 0)
+            entry_retrieval_attributed = int(self._conn.execute(
+                "SELECT COALESCE(SUM(total_tokens), 0) AS total FROM knowledge_entry_usage"
+                " WHERE phase = 'retrieval'"
+            ).fetchone()["total"] or 0)
+            entry_row = self._conn.execute(
+                "SELECT COUNT(*) AS events,"
+                " COUNT(DISTINCT COALESCE(NULLIF(turn_id, ''), source_turn_id)) AS turns,"
+                " COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,"
+                " COALESCE(SUM(completion_tokens), 0) AS completion_tokens,"
+                " COALESCE(SUM(total_tokens), 0) AS total_tokens"
+                " FROM knowledge_entry_usage"
+            ).fetchone()
+            entry_phases = self._conn.execute(
+                "SELECT phase, SUM(total_tokens) AS total_tokens, COUNT(*) AS events"
+                " FROM knowledge_entry_usage GROUP BY phase ORDER BY phase"
+            ).fetchall()
+            entry_top = self._conn.execute(
+                "SELECT entry_id, SUM(total_tokens) AS total_tokens, COUNT(*) AS events"
+                " FROM knowledge_entry_usage GROUP BY entry_id"
+                " ORDER BY total_tokens DESC, entry_id LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
             estimated = self._conn.execute(
                 "SELECT COALESCE(SUM(CASE WHEN estimated = 1 THEN total_tokens ELSE 0 END), 0)"
                 " AS estimated_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens"
@@ -850,6 +1007,7 @@ class KnowledgeFactStore:
                 "completion_tokens": int(turn["completion_tokens"] or 0),
                 "attributed_tokens": int(turn["attributed_tokens"] or 0),
                 "unattributed_tokens": int(turn["unattributed_tokens"] or 0),
+                "entry_attributed_tokens": int(turn["entry_attributed_tokens"] or 0),
                 "unattributed_share": (
                     round(int(turn["unattributed_tokens"] or 0) / turn_total, 6)
                     if turn_total else None
@@ -860,12 +1018,23 @@ class KnowledgeFactStore:
                 "retrieval_unattributed_share": (
                     round(
                         int(turn["retrieval_unattributed_tokens"] or 0)
-                        / (retrieval_attributed + int(turn["retrieval_unattributed_tokens"] or 0)),
+                        / (retrieval_attributed + entry_retrieval_attributed
+                           + int(turn["retrieval_unattributed_tokens"] or 0)),
                         6,
                     )
-                    if (retrieval_attributed + int(turn["retrieval_unattributed_tokens"] or 0))
+                    if (retrieval_attributed + entry_retrieval_attributed
+                        + int(turn["retrieval_unattributed_tokens"] or 0))
                     else None
                 ),
+            },
+            "entry_usage": {
+                "events": int(entry_row["events"] or 0),
+                "turns": int(entry_row["turns"] or 0),
+                "prompt_tokens": int(entry_row["prompt_tokens"] or 0),
+                "completion_tokens": int(entry_row["completion_tokens"] or 0),
+                "total_tokens": int(entry_row["total_tokens"] or 0),
+                "by_entry": [dict(r) for r in entry_top],
+                "by_phase": [dict(r) for r in entry_phases],
             },
             "estimated_token_share": (
                 round(int(estimated["estimated_tokens"] or 0) / fact_total, 6)

@@ -8,14 +8,9 @@ import json
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-try:
-    from neurova.security.rbac import RBACManager, Role, Permission
-    HAS_RBAC = True
-except ImportError:
-    HAS_RBAC = False
+from neurova.security.rbac import RBACManager, Role, Permission
 
 
-@unittest.skipIf(not HAS_RBAC, "RBACManager not available")
 class TestRBACManager(unittest.TestCase):
     """RBACManager 测试类 — 使用 mock 数据库避免真实文件 I/O"""
 

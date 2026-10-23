@@ -80,6 +80,13 @@ def test_全仓不得再有单参调用形态():
                 offenders.append(
                     f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}"
                 )
+    corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
+    assert corpusFiles >= 800, (
+        "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条判据根本不说话" % corpusFiles)
+    # 候选面按**预筛后**读数定线：现算 13 个文件里含 `_retrieve_memories` 字样。
+    # 掉到 0 ＝ 预筛词或根写坏（命中被滤空），而不是"调用方都改好了"。
+    assert scanned >= 5, (
+        "候选面现读 %d 个文件——预筛把命中滤空或根被改窄，此时『零 offender』不作数（面自证）" % scanned)
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
         + "; ".join(offenders)

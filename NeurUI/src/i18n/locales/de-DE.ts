@@ -1052,6 +1052,10 @@ export default {
     sandboxRequired: 'Sandbox erforderlich',
   },
   skillEvo: {
+    adopt: 'Übernehmen',
+    adoptTarget: 'Zielskill',
+    adoptSuccess: 'Ausstehender Vorschlag erstellt',
+    adoptError: 'Übernahme fehlgeschlagen',
     abVerify: 'Dual-Arm-Prüfung (echter Holdout)',
     abHint: 'Gleicher Tasksatz, gleicher Bewerter: Basis- gegen Kandidatentext; schreibgeschützt, erzeugt keinen Vorschlag.',
     abRunSimulated: 'Simulierten Arm laufen',

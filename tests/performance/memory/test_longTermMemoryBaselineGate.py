@@ -34,6 +34,13 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
+#: 扫描根绑在模块级：绑在函数里的名字，面自证棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 认不出，整档会安静地掉出它的面（§6-404 批 M 补这一处）。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = REPO_ROOT / "tests" / "performance"
+
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
