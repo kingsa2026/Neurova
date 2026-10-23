@@ -98,8 +98,11 @@ def seed():
 
 try:
     SKILLS_DIR, LEDGER = seed()
-except Exception as exc:  # noqa: BLE001
-    read("[0] 复制真账本到隔离根", lambda: (False, repr(exc)))
+except Exception as error:  # noqa: BLE001
+    # 先把 repr 算出来再交给 read()：lambda 是延迟求值，而 `except ... as exc` 的名字
+    # 在块结束时就出栈（PEP 3110），闭包届时取不到，探针会以 UnboundLocalError 收场。
+    _seedFailure = repr(error)
+    read("[0] 复制真账本到隔离根", lambda: (False, _seedFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
