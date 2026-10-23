@@ -25,7 +25,7 @@ Neurova 现状（散落的分支，本模块收编）：
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from neurova.core.logger import get_logger
