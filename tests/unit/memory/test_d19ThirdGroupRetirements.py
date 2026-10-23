@@ -45,6 +45,10 @@ def test_retiredModulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：本格断的是「零导入」，而零导入既可能是「真没人导入」也可能是「根写窄了扫了个空」。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 2000, f"仓内 .py 扫描面现读 {scanned}，低于下限＝根写错了本格恒绿"
+
     offenders = {}
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
