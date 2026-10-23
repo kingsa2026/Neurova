@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import tempfile
 
 from tests import ast_scan
 
@@ -41,9 +42,15 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
-#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
+#: 无害路径的两个取样点：真实家目录（触发本仓那条缺陷的**用户名形状**：`\` + `xcc` + 十六进制，
+#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿）和一个系统临时目录。
+#:
+#: 为什么两个都要：`FilePathGuardian` 的受保护清单里有 `/root`（Linux 上它就是**家目录**，
+#: 不带 `\` 转义），于是"读自己家目录下的一个无害文件"在 Linux 上按设计就被拦——
+#: 那是这条判据要判的**另一个问题**（路径值混进命令扫描面），不是本格问的"路径读取该不该放行"。
+#: 分开放：前者只钉"不被判成 shell 规避"，后者钉"该放行时真放行"。
 SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
+SAFE_READ_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
 
 
 def _findings(toolName: str, params: dict) -> list:
@@ -60,7 +67,7 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_PATH}).should_block is False, (
+    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_READ_PATH}).should_block is False, (
         "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
 
 
