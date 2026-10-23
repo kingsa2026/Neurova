@@ -9,12 +9,15 @@
     "@askjo/camofox-browser": "1.16.0",
     "@bytebase/dbhub": "1.2.5",
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
-    "@upstash/context7-mcp": "4.1.1"
+    "@upstash/context7-mcp": "4.4.4"
   },
   "overrides": {
     "swagger-jsdoc": {
       "yaml": "2.8.3"
     },
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/server": "2.3.1",
+    "hono": "^4.13.11",
+    "ip-address": "^10.7.4"
   }
 }
