@@ -1649,9 +1649,12 @@ class ToolExecutor:
                 "文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s",
                 "; ".join(f"{key}={value}" for key, value in pathValues) or "(无路径参数)",
             )
+            # 拒绝语得点名**被拦的那条路径**：裁决结果自己带出来的 `path_values`，
+            # 不去 reasons 里抠散文（抠法一换工具就哑，§6-284 的出口断点）。
             return {
                 "success": False,
-                "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
+                "error": "该文件位置受保护，已阻止访问: " + "; ".join(
+                    [value for _name, value in verdict.path_values] or verdict.reasons),
                 "governance": verdict.to_dict(),
             }
 
