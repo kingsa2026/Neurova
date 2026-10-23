@@ -157,6 +157,24 @@ main:
             python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
+        - name: regenerate shipped artifacts (drift gate)
+          # 生成物（API 清单 / 公开面机器段 / 认知层组件表）与代码树脱节时，受保护子集里
+          # 那几档守卫会红。它们的红只在 pytest 摘要里剩一行 `AssertionError`，
+          # 真正要跑的那条命令被埋在回溯里——读日志的人得先自己把生成器跑一遍才知道红在哪。
+          #
+          # 本步排在子集之前：先把漂移**修平**，并把差异打到日志顶部。它**不裁决**
+          # （生成器本身返回 0 就是幂等），裁决仍归下面的守卫——守卫若在漂移修平后仍红，
+          # 说明缺的不是重生成，而那才是要人看的东西。
+          script: |
+            for gen in \
+              "python scripts/generate_api_inventory.py --write" \
+              "python scripts/generate_api_auth_surface.py --write" \
+              "python scripts/ci/cognitive_component_table.py --write"; do
+              echo "── $gen"
+              $gen >/dev/null || echo "（生成器返回非 0，交由下面那档判据裁决）"
+            done
+            git --no-pager diff --stat -- docs/ | sed 's/^/[drift] /' || true
+          timeout: 10m
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
