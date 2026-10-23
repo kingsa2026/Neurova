@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
@@ -47,6 +48,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
+#: `tests/performance/` 的扫描根（模块级：扫描型判据的根必须是常量，闸才解得出它在扫哪儿）
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+#: 仓根：退役守卫按它拼三条扫描根
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 OLD_WORDING = "用户: 我有一只青瓷茶壶是外婆留下的"
 NEW_WORDING = "用户: 我把阳台浇花的活改成了每周三定时自动滴灌"
@@ -558,17 +563,17 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from tests import ast_scan
-
-        # 枚举归 `tests/ast_scan`（本档不自付 rglob）；根用模块级常量 PERFORMANCE_ROOT
-        collected = ast_scan.filesUnder(PERFORMANCE_ROOT)
-        assert len(collected) > 2, (
-            f"扫描面现读 {len(collected)} 个 .py（根＝{PERFORMANCE_ROOT}）——"
-            "根被改窄时「零游离件」不代表干净")
+        root = PERFORMANCE_ROOT
+        # 枚举走共享入口（`tests/ast_scan.filesUnder`）并**物化后自证面**：根被改窄或
+        # 写错一层时，读数会退化成"零散件"——那时这条断言看起来与"干净"一模一样。
+        # 两种坏法都只有把扫到的数量当断言比才咬得住。
+        files = ast_scan.filesUnder(PERFORMANCE_ROOT)
+        assert len(files) > 5, f"扫描面现读 {len(files)} 个 .py（根＝tests/performance/）——根被改窄了"
         strays = [
-            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
-            for p in collected
-            if p.name != "__init__.py" and not p.name.startswith("test_")
+            p.relative_to(root.parent).as_posix()
+            for p in files
+            if "__pycache__" not in p.parts and p.name != "__init__.py"
+            and not p.name.startswith("test_")
         ]
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
@@ -578,9 +583,6 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
-        from pathlib import Path
-
-        from tests import ast_scan
 
         repo = REPO_ROOT
         assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
@@ -589,21 +591,23 @@ class TestUncollectedMeasurementFileIsRetired:
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
         ghosts, unparsed = [], []
-        scanned = 0
-        for sourceFamily in ("neurova", "tests", "scripts"):
-            # 枚举与解析都归 `tests/ast_scan`（判据成本不再随代码总量涨）
-            for path in ast_scan.filesUnder(repo / sourceFamily):
-                scanned += 1
-                try:
-                    tree = ast_scan.transientTree(path)
-                except (SyntaxError, UnicodeDecodeError):
-                    unparsed.append(path.relative_to(repo).as_posix())
-                    continue
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
+        # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
+        for root in ("neurova", "tests", "scripts"):
+            # 枚举与解析都走共享预算（`sourceRefsUnder` 只读一遍盘、文本预筛一并做完，
+            # `transientTree` 不留常驻语法树）：判据成本不随代码总量涨，
+            # 也不是"自己枚举一整棵根树再逐个解析"那一形。
+            for ref in ast_scan.sourceRefsUnder(repo / root, hints=("SimpleLongMemEval",)):
+                tree = ast_scan.transientTree(ref.path)
                 if any(
                     isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
                     for n in ast.walk(tree)
                 ):
-                    ghosts.append(path.relative_to(repo).as_posix())
+                    ghosts.append(ref.path.relative_to(repo).as_posix())
+        # 面自证：零复活只有在"真的扫过这三棵根"时才说明退役落干净了（根指错时这格恒绿）。
+        scanned = sum(
+            len(ast_scan.filesUnder(repo / root)) for root in ("neurova", "tests", "scripts")
+        )
         assert scanned > 500, (
             f"扫描面现读 {scanned} 个 .py（根＝neurova/ tests/ scripts/）——"
             "根被改窄时「零复活」不代表干净")

@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import sys
 import pathlib
+import sys
 
 from tests import ast_scan
 
