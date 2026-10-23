@@ -45,6 +45,9 @@ def test_retiredModulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：同 `test_agentSelfAndMemoryStreamRetirements.py`——零 offender 必须是"真扫过"的结论。
+    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝{REPO_ROOT}）——零导入不来自代码"
     offenders = {}
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
