@@ -103,13 +103,14 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+    def test_studioPackageFitsTheProjectedLandingUnderTheTestRoot(self, app_client):
+        """主格选用真资产包了：studio 的终点投影必须落在 Windows 260 预算**之内**。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        原先这一格判的是"放不下"，主格因此换成 `multi-search-engine`。那条前提自己过期了两次：
+        包被瘦身（最长成员降到 125 字符），而 `4bf9b733` 把 agent 私库落点从
+        `data/agents/<id>/skills` 收成 `data/<id>/skills`（短了 7 字符），投影到 247。
+        判据跟着反向钉：**放得下**才允许主格用真资产；哪天它又超预算了，这格当场红，
+        主格与夹具的替换理由要一起改判。
         """
         import re
         import zipfile
@@ -126,10 +127,10 @@ class TestWriteThenReadSeeOneLedger:
         libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
         projection = len(str(Path(libRoot) / entryName / longestMember))
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        assert projection <= WINDOWS_MAX_PATH, (
+            f"studio 终点投影 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
+            f"最长成员 {len(longestMember)}）又顶过 Windows {WINDOWS_MAX_PATH} 预算"
+            "——主格得换回短包，把上面那格的选用理由一并改判")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。
