@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
@@ -173,18 +174,20 @@ class TestProductionBuildersCarryThePin:
         return found
 
     def testEveryProductionCallSitePassesThePin(self):
-        """扫**整个 `neurova/`**：任何构造点不传 pin，都会落进 `None` 的静默旁路。"""
+        """扫**整个 `neurova/`**：任何构造点不传 pin，都会落进 `None` 的静默旁路。
+
+        取数走 `tests/ast_scan` 的唯一入口（`hints` 做文本预筛）：此前自己
+        `rglob("*.py")` ＋ 逐档裸读，"枚举 + 解析"两半都在本档里，判据成本随
+        `neurova/` 的 `.py` 总量涨（`test_ci_ast_scan_budget_guard.py` 点名的形状）。
+        """
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for path in sorted(package.rglob("*.py")):
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if "_build_executable_skill" not in source:
-                continue
-            flags = self._builderCalls(source)
+        for ref in ast_scan.sourceRefsUnder(package, hints=("_build_executable_skill",)):
+            flags = self._builderCalls(ref.code)
             checked += len(flags)
             if any(flag is False for flag in flags):
-                offenders.append(str(path.relative_to(package)))
+                offenders.append(str(ref.path.relative_to(package)))
         assert checked >= 2, ("构造点数比预期少（%d）：规则可能与代码脱节" % checked)
         assert offenders == [], (
             "这些文件的构造点没传 pinnedDigest ⇒ 执行腿的闸对它们形同虚设：%s" % offenders)
