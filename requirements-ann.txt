@@ -1,6 +1,0 @@
-# 可选依赖（不在 requirements.txt / pyproject 基础依赖里）：
-# 知识库向量检索的 ANN 后端。二选一即可；两个都装时优先 hnswlib。
-# 未安装时自动回退 JSON 全量余弦（功能不减，只是大语料更慢）。
-# 安装：pip install -r requirements-ann.txt
-hnswlib>=0.8.0
-# faiss-cpu>=1.8.0

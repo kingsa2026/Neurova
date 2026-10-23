@@ -494,8 +494,8 @@ P0 turn_id/schema/decisions
 ### 10.3 设计边界
 
 - 本文不把“模型回答看起来像拒答”当拒答；不把“没有接管事件”当 0。
-- FTS5 是 SQLite 内置，不引入依赖；ANN 以 `requirements-ann.txt` 提供**可选**依赖，
-  未安装时保持 JSON 全量余弦，基础依赖与部署形态不变。
+- FTS5 是 SQLite 内置；ANN 的 hnswlib 已按拍板收进基础 `requirements.txt`
+  （部署镜像内置），代码仍保留 faiss 探测与未安装时的 JSON 全量余弦回退。
 - 所有表/事件/API 都需按 `AGENTS.md` 的单一事实源与先红后绿纪律落地；本文只是目标态与决策依据。
 
 ---
@@ -507,7 +507,9 @@ P0 turn_id/schema/decisions
   （`console_mark`，刷新按后端最近事件恢复）；`ChannelAdapter.humanTakeoverEvents`
   是渠道能力位，管理端渠道状态原样报出，**没有平台原生事件的渠道标 False，不伪造**。
   渠道侧 `human_takeover_started/ended` 经 `ChannelManager` 统一入账（`channel_event`）；
-  MQTT 已按协议约定识别该 JSON 事件（能力位 True），其余平台适配器无原生事件保持 False；
+  三条原生 producer 已接：MQTT 协议事件、飞书服务台工单 `stage 1→2`/关闭态、
+  微信客服 `session_status_change`（回调解密 + sync_msg，change_type 1/4 开始、2 转接、3 结束）。
+  钉钉/Telegram/Discord 等没有可接的原生事件，能力位保持 False；
   质量 metrics 与管理员分析页都读这份能力读数。
 - **D2 拒答与 tool_failure（D6 丙）**：分类仍只吃硬信号；执行链自身崩溃的工具记录显式带
   `turn_outcome: "tool_failure"`，由管线转成 `turn_outcome_override`；普通工具
@@ -520,24 +522,25 @@ P0 turn_id/schema/decisions
   无官方编码的非 OpenAI 模型回退 `cl100k_base` 并标 estimated，tiktoken 缺席再回退 jieba；
   检索阶段模型名随 `knowledge_retrieval_tokens_model` 落账，不与生成阶段模型混用；
   无 fact lineage 的文档命中成本进 v17 `retrieval_unattributed_tokens`，不摊到任何 fact。
-- **D4 规模（D10 乙）**：FTS5 持久倒排已落；ANN 为**可选**后端
-  （`requirements-ann.txt`，优先 hnswlib、其次 faiss，按用户建索引，低于
-  `NEUROVA_KB_ANN_MIN_RECORDS` 不建，构建/查询失败均回退 JSON 全量余弦）。
+- **D4 规模（D10 乙 / 部署拍板）**：FTS5 持久倒排已落；ANN 优先 hnswlib、
+  其次 faiss，按用户建索引，低于 `NEUROVA_KB_ANN_MIN_RECORDS` 不建，
+  构建/查询失败均回退 JSON 全量余弦。**hnswlib 已收进基础 `requirements.txt`**，
+  部署镜像内置；代码仍兼容未装环境。
   开发环境已装 hnswlib 0.8.0：`tests/manual/knowledgeAnnScaleProbe.py`
   10k/100k/1M 构建 125ms/1.93s/52.5s、查询 0.14/0.24/0.41ms、精确内积 top-10
   召回 1.0；live 索引健康报 `enabled=true backend=hnswlib`。1M FTS 构建
   **58.4s**、查询 **577.6ms**；100k 为 5.7s/58ms。部署侧未装 ANN 依赖时自动回退
   JSON 路径，功能不减。
 - **闭环复核**：写入→读取→反馈的逐链状态见审计报告 §13.4。主链已闭；
-  MQTT 已接协议级接管事件、质量 metrics 已进管理员分析页、ANN 已实测（含 1M 与
-  精确召回对照）、文档命中的检索 token 已进未归因桶。仍开项只剩：除 MQTT 外的
-  平台适配器没有原生接管事件（能力位 False）、部署侧 ANN 依赖是否安装由
-  `requirements-ann.txt` 决定（未装自动回退）。
-- **验证**：知识/质量/渠道/API 子集（996 项）全绿；前端质量契约/组合式/i18n/分析页 34 项
-  与 `vue-tsc --noEmit` 通过；live 探针实测接管写入→状态恢复→显式 outcome→指标、
-  索引健康（hnswlib enabled）、双 lifespan 事件账持久化全 PASS；
-  ANN 探针 10k/100k/1M 与精确召回对照见上。最终提交账与差分口径见审计报告 13.3/13.5；
-  D11 提交仍未拍板。
+  飞书服务台、微信客服、MQTT 三条原生接管 producer 已接，质量 metrics 已进管理员
+  分析页，ANN 已实测（含 1M 与精确召回对照）并进基础部署依赖，文档命中的检索 token
+  已进未归因桶。仍开项只剩：钉钉/Telegram/Discord 等平台没有可接的原生接管事件
+  （能力位 False）；未装 hnswlib 的环境自动回退 JSON。
+- **验证**：知识/质量/渠道/API 子集 996 项 + 渠道全量 695 项全绿；前端质量契约/
+  组合式/i18n/分析页 34 项与 `vue-tsc --noEmit` 通过；live 探针实测接管写入→状态恢复→
+  显式 outcome→指标、飞书服务台与微信客服 webhook、索引健康（hnswlib enabled）、
+  双 lifespan 事件账持久化全 PASS；ANN 探针 10k/100k/1M 与精确召回对照见上。
+  本批收尾改动待提交；最终提交账见审计报告 13.5。
 
 ---
 

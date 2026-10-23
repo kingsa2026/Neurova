@@ -59,6 +59,14 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
     # 没有转码链路——与其把"能发语音气泡"写成假事实，不如以文件形式真送出去。
     voiceOutMode: str = VOICE_OUT_AUDIO_FILE
 
+    # 飞书服务台原生事件：ticket.stage 1(机器人)→2(人工) 即人工接管开始；
+    # stage=2 且 status 进入关闭态（50/51/52）即结束。无 Helpdesk 订阅时不产生事件。
+    humanTakeoverEvents = True
+
+    _HELPDESK_STAGE_ROBOT = 1
+    _HELPDESK_STAGE_HUMAN = 2
+    _HELPDESK_CLOSED_STATUSES = frozenset({50, 51, 52})
+
     def __init__(self, config: ChannelConfig):
         super().__init__(config)
         self.config.channel_type = "feishu"
@@ -156,6 +164,12 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
                             self._handle_bot_removed_event)
                     except (AttributeError, Exception) as e:  # noqa: BLE001 - 老 SDK 无此注册器则跳过
                         logger.debug("飞书未支持 bot_deleted 事件注册: %s", e)
+                    # 服务台工单阶段变化 → 人工接管事件（需订阅 helpdesk 事件）
+                    try:
+                        self._event_handler.register_p2_helpdesk_ticket_updated_v1(
+                            self._handle_helpdesk_ticket_updated_event)
+                    except (AttributeError, Exception) as e:  # noqa: BLE001
+                        logger.debug("飞书未支持 helpdesk ticket updated 事件注册: %s", e)
                     # 创建长连接客户端（domain 随 feishu/lark 切换——官方多站点要求）
                     self._ws_client = lark.ws.Client(
                         self.config.app_id,
@@ -378,6 +392,118 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
 
         except Exception as e:
             logger.exception("Feishu message handler error: %s", e)
+
+    @staticmethod
+    def _ticketField(node: Any, key: str, default: Any = None) -> Any:
+        if node is None:
+            return default
+        if isinstance(node, dict):
+            return node.get(key, default)
+        return getattr(node, key, default)
+
+    @classmethod
+    def _ticketActor(cls, ticket: Any) -> tuple:
+        agents = cls._ticketField(ticket, "agents") or []
+        if not agents:
+            return "", ""
+        agent = agents[0]
+        ident = cls._ticketField(agent, "id")
+        user_id = (
+            cls._ticketField(ident, "user_id")
+            or cls._ticketField(ident, "open_id")
+            or cls._ticketField(ident, "union_id")
+            or ""
+        )
+        return str(user_id), str(cls._ticketField(agent, "name") or "")
+
+    @classmethod
+    def _closedByActor(cls, ticket: Any) -> tuple:
+        closed_by = cls._ticketField(ticket, "closed_by")
+        ident = cls._ticketField(closed_by, "id")
+        user_id = (
+            cls._ticketField(ident, "user_id")
+            or cls._ticketField(ident, "open_id")
+            or cls._ticketField(ident, "union_id")
+            or ""
+        )
+        return str(user_id), str(cls._ticketField(closed_by, "name") or "")
+
+    def handle_helpdesk_ticket_event(self, eventBody: Dict[str, Any]):
+        """服务台工单更新 → (ChannelEventType, ChannelMessage)；非接管迁移返回 None。
+
+        只认 **机器人阶段→人工阶段**（stage 1→2）与 **人工阶段关闭**
+        （stage=2 且 status 50/51/52），不从正文/工单标题推断。
+        """
+        ticket = (eventBody or {}).get("object") or {}
+        old = (eventBody or {}).get("old_object") or {}
+        old_stage = self._ticketField(old, "stage")
+        new_stage = self._ticketField(ticket, "stage")
+        old_status = self._ticketField(old, "status")
+        new_status = self._ticketField(ticket, "status")
+        if old_stage == self._HELPDESK_STAGE_ROBOT and new_stage == self._HELPDESK_STAGE_HUMAN:
+            event_type = ChannelEventType.HUMAN_TAKEOVER_STARTED
+            reason = "helpdesk_stage_human"
+            actor_id, actor_name = self._ticketActor(ticket)
+        elif (
+            new_stage == self._HELPDESK_STAGE_HUMAN
+            and new_status in self._HELPDESK_CLOSED_STATUSES
+            and old_status not in self._HELPDESK_CLOSED_STATUSES
+        ):
+            event_type = ChannelEventType.HUMAN_TAKEOVER_ENDED
+            reason = "helpdesk_ticket_closed"
+            actor_id, actor_name = self._closedByActor(ticket)
+        else:
+            return None
+
+        ticket_id = str(self._ticketField(ticket, "ticket_id") or "")
+        helpdesk_id = str(self._ticketField(ticket, "helpdesk_id") or "")
+        updated_at = str(self._ticketField(ticket, "updated_at") or "")
+        chat_id = str(self._ticketField(ticket, "chat_id") or "") or ticket_id
+        if not ticket_id or not chat_id:
+            return None
+        message = self._make_message(
+            message_id="helpdesk:%s:%s:%s:%s" % (
+                ticket_id, updated_at, new_stage, new_status,
+            ),
+            sender_id=actor_id,
+            sender_name=actor_name or actor_id,
+            content="",
+            chat_id=chat_id,
+            chat_type="p2p",
+            message_type="event",
+            raw_event={"event": eventBody},
+            metadata={
+                "ticket_id": ticket_id,
+                "helpdesk_id": helpdesk_id,
+                "takeover_reason": reason,
+                "agent_id": str(
+                    (self.config.extra or {}).get("agent_id")
+                    or getattr(self, "agent_id", "")
+                    or ""
+                ),
+            },
+        )
+        return event_type, message
+
+    def _handle_helpdesk_ticket_updated_event(self, event):
+        """Stream 模式：SDK 工单更新事件 → 人工接管渠道事件。"""
+        try:
+            envelope = getattr(event, "event", None)
+            event_body = {
+                "object": getattr(envelope, "object", None),
+                "old_object": getattr(envelope, "old_object", None),
+            }
+            takeover = self.handle_helpdesk_ticket_event(event_body)
+            if takeover is None:
+                return
+            if self._main_loop and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_event(*takeover), self._main_loop,
+                )
+            else:
+                logger.warning("Feishu helpdesk 主事件循环未运行，丢弃接管事件")
+        except Exception as e:  # noqa: BLE001 - 旁路事件失败不影响消息主链路
+            logger.warning("飞书服务台接管事件处理异常: %s", e)
 
     def _handle_bot_removed_event(self, event):
         """机器人被移出群 → 发 CHAT_BOT_REMOVED（manager/ChannelRouter 据此归档会话）。"""

@@ -656,8 +656,12 @@ baseline: recall_at_k=0.971296, mrr=0.916667, unhit_rate=0.0, top_k=5
   前端质量契约 + 组合式 + i18n + 管理员分析页 34 passed，`vue-tsc --noEmit` 通过；
   全量前端 2161 passed、3 条已知既有红（duplicate-function 台账 ×2、skillEvo i18n ×1，非本批引入）。
 - **A/B 全部 `AB_PASS`**：batch1 5→0；检索 5→0；生命周期 5→0；评估/采纳/指标 6→0；身份 2→0；TTL/自动反馈/指标/索引健康 12→0；主源+补充源 lineage merge 1→0；周期维护/全量重算/辅助路上限 5→0；token 归因/content_filter 拒答 3→0；turn_id/检索阶段/引用归因 4→0；FTS5 4→0。
-- **最终 live-verify**：TTL archiving、自动反馈、reindex、索引健康、指标、token 表均 PASS；仓内 `knowledge_facts.db` md5 前后一致；v14 迁移在真实 `create_app` 中可应用。
+- **渠道全量：695 passed**（含飞书服务台/微信客服接管、MQTT 事件、回调选实例与 EventDoor 形状守卫）。
+- **最终 live-verify**：TTL archiving、自动反馈、reindex、索引健康、指标、token 表均 PASS；
+  飞书服务台 webhook 与微信客服 webhook 各真打一次，`takeover_events=1 source=channel_event`；
+  仓内 `knowledge_facts.db` md5 前后一致；v14 迁移在真实 `create_app` 中可应用。
 - **规模读数**：aux cap 合成探针 1k/10k/100k→526.6/463.8/1,021.5ms；FTS5 手工探针 1k/10k/100k/1M 构建 477.6/585.7/5,717.4/58,416.8ms、查询 0.8/4.8/58.3/577.6ms；
+- **ANN 部署**：hnswlib 已进基础 `requirements.txt` 与 `requirements-full.lock`（Docker builder 带 build-essential）；代码仍保留 faiss 探测与未装回退。
   ANN（hnswlib 0.8.0，dim=32）手工探针 10k/100k/1M 构建 125.2/1,929.0/52,481.5ms、查询 0.14/0.24/0.41ms、与精确内积 top-10 召回 1.0。
 - **清理**：`.tmp_kb*` 探针与隔离数据根已删；永久规模探针保留。
 
@@ -667,9 +671,11 @@ baseline: recall_at_k=0.971296, mrr=0.916667, unhit_rate=0.0, top_k=5
   （`console_mark`，刷新后从 `GET /v1/quality/sessions/{id}/takeover` 恢复状态）；
   渠道侧 `ChannelAdapter.humanTakeoverEvents` 能力位随渠道状态读数报出，
   有原生事件的适配器经 `ChannelManager` 统一写 `channel_event`，无能力的渠道标 False，
-  不伪造事件。MQTT 已按协议约定识别 `human_takeover_started/ended` JSON 事件并 emit；
-  其余平台适配器没有原生事件，保持 False。质量 metrics 与管理员分析页都读这份读数。
-  率仍按会话去重，来源覆盖单列；未覆盖不等于 0。
+  不伪造事件。三条原生 producer 已接：MQTT 协议事件、飞书服务台
+  `ticket.stage 1→2`（关闭态结束）、微信客服 `session_status_change`
+  （change_type 1/4 开始、2 转接、3 结束；回调解密 + sync_msg）；
+  钉钉/Telegram/Discord 等没有原生事件，保持 False。质量 metrics 与管理员分析页
+  都读这份读数。率仍按会话去重，来源覆盖单列；未覆盖不等于 0。
 - **一般拒答率（D6 丙）**：`TurnOutcome` 六态分类不变；`tool_failure` 只接受显式
   `turn_outcome` 声明（执行链崩溃的工具记录），普通 `success=False` 不整轮判失败；
   `POST /turn-outcomes` 以 `explicit_api` 来源写事件，指标按 turn 去重且显式优先。
@@ -682,43 +688,43 @@ baseline: recall_at_k=0.971296, mrr=0.916667, unhit_rate=0.0, top_k=5
   文档命中不再“消失”：检索总量减去已归因部分进 v17 `retrieval_unattributed_tokens`。
   逐条检索成本仍是估计，不冒充 provider 真值。
 - **更大规模（D10 乙）**：FTS5 持久倒排之外，ANN 作为可选依赖落地
-  （`requirements-ann.txt`；hnswlib/faiss 特性探测、按用户内存索引、最低条数阈值、
+  （hnswlib 已进基础 `requirements.txt`，faiss 仍可探测；按用户内存索引、最低条数阈值、
   构建/查询失败回退 JSON 全量余弦）。开发环境已装 hnswlib 0.8.0 并实测：
   `tests/manual/knowledgeAnnScaleProbe.py` 10k/100k/1M 构建 125ms/1.93s/52.5s、
   查询 0.14/0.24/0.41ms、与精确内积 top-10 召回 1.0；live 索引健康报
-  `enabled=true backend=hnswlib`。基础依赖仍不含 ANN，部署按
-  `requirements-ann.txt` 可选安装；外部搜索服务不采用。
+  `enabled=true backend=hnswlib`。部署镜像经基础 `requirements.txt` 内置 hnswlib；
+  外部搜索服务不采用。
 
 ### 13.4 闭环复核（写入 → 读取 → 反馈 → 再写入）
 
 | 链路 | 写 | 读 | 反馈/再写 | 状态 |
 |---|---|---|---|---|
-| 人工接管 | 控制台 `console_mark` / MQTT 渠道 `channel_event` / API | 会话状态 GET、质量 metrics、渠道能力位、管理员分析页 | 按钮刷新恢复；metrics 按会话去重 | **闭**（MQTT 协议事件已接；其余平台无原生事件时标 unsupported） |
+| 人工接管 | 控制台 `console_mark` / MQTT 协议事件 / 飞书服务台工单 / 微信客服 `session_status_change` / API | 会话状态 GET、质量 metrics、渠道能力位、管理员分析页 | 按钮刷新恢复；metrics 按会话去重 | **闭**（三条原生渠道已接；无原生事件的平台标 unsupported） |
 | tool_failure | 执行链崩溃的显式 `turn_outcome`；显式 API | quality metrics、assistant metadata | 显式 API 原地改判并优先于自动分类 | **闭**（普通 `success=False` 不猜） |
 | 引用归因 | `<memory_citation>` 句柄 → `fact_id` | 生成 token 归因 | 归因写回 fact usage | **闭**（无 citation 的轮次走加权/均分） |
 | 检索 token | 运行模型 tokenizer → 检索阶段 usage + 未归因桶（v17） | `/v1/quality/metrics` 的 token_usage | 有 lineage 的摊 fact；文档命中进 `retrieval_unattributed_tokens` | **闭** |
-| 可选 ANN | 安装依赖后按用户建索引 | `vector.search` / `/audit/index-health` | 构建失败回退 JSON 并报 `failed_users` | **闭**（开发环境实测；部署侧未装依赖时自动回退） |
+| 可选 ANN | 基础部署依赖内置 hnswlib + 按用户建索引 | `vector.search` / `/audit/index-health` | 构建失败回退 JSON 并报 `failed_users` | **闭**（1M 实测；未装环境自动回退） |
 | 周期维护/事件账 | 启动周期任务 + 质量事件连接 | 索引 health / 质量 metrics | 关停取消任务、关闭事件账 | **闭**（本轮补：`kb_index_task` 句柄与 `reset_quality_store`） |
 
 **剩余留口（不伪装成已闭）**：
 
-- 除 MQTT 外的平台适配器（飞书/钉钉/企微/Telegram 等）没有原生接管事件，
+- 钉钉/Telegram/Discord/QQ/SIP 等适配器没有可接的平台原生接管事件，
   `human_takeover_events` 为 False；这些渠道仍靠控制台/API 标记，设计上按能力接。
-- ANN 已实测，但部署环境是否安装取决于 `requirements-ann.txt`；未装时走 JSON 全量余弦（功能不减，大语料变慢）。
+- ANN 已实测并进基础部署依赖；未安装 hnswlib 的环境仍走 JSON 全量余弦（功能不减，大语料变慢）。
 - 前端 3 条既有红（duplicate-function 台账 ×2、`skillEvo.adopt*` i18n ×1）不属于本批。
 
 ### 13.5 提交账
 
 - 生产：**17 改＋9 新**；测试：**7 改＋12 新**；fixtures **2 新**；手工规模探针 **2 新**；审计/设计文档 **2 新**（以上为 D5–D10 前口径）。
 - D5–D10 追加：`neurova/quality/*`、`neurova/api/endpoints/quality.py`、`neurova/knowledge/vector_ann.py`、
-  `neurova/knowledge/token_count.py`、`requirements-ann.txt`、前端 quality API/组合式/接管按钮与文案、
-  管理员分析页质量读数、MQTT 接管协议事件、v17 `retrieval_unattributed_tokens`、
-  常驻探针 `tests/manual/knowledgeAnnScaleProbe.py`；另补生命周期/能力位/MQTT/ANN/未归因判据。
-  提交前以 `git status` 与 hunk 归属重新点数。
+  `neurova/knowledge/token_count.py`、基础 `requirements.txt` 的 hnswlib、前端 quality API/组合式/接管按钮与文案、
+  管理员分析页质量读数、MQTT/飞书服务台/微信客服三条接管 producer、微信客服回调解密与
+  `sync_msg`、v17 `retrieval_unattributed_tokens`、常驻探针 `tests/manual/knowledgeAnnScaleProbe.py`；
+  另补生命周期/能力位/MQTT/飞书/微信客服/ANN/未归因判据。提交前以 `git status` 与 hunk 归属重新点数。
 - 建议 8–9 笔：检索三票、生命周期/TTL、采纳/自动反馈、评估/指标、token/拒答、周期维护/规模、质量事件、FTS5、审计/设计文档；共享文件（`chat_pipeline.py`、`post_chat_pipeline.py`、`app.py`、`console.py`、`api/endpoints/__init__.py`）提交前按 hunk 核对归属。
 - 工作树仍含并发会话在途改动；本批只对上述知识域/血缘/质量链路负责。
 - **D5–D10 追加落点**：`neurova/quality/*`、`neurova/api/endpoints/quality.py`、
   `neurova/knowledge/vector_ann.py`、`neurova/knowledge/token_count.py`、
-  `requirements-ann.txt`；前端 `NeurUI/src/api/modules/quality.ts`、
+  基础 `requirements.txt` 的 hnswlib；前端 `NeurUI/src/api/modules/quality.ts`、
   `NeurUI/src/composables/useHumanTakeover.ts`、`ChatPage.vue` 接管按钮与 11 语言文案；
   渠道能力位 `ChannelAdapter.humanTakeoverEvents`。提交归属仍需按 hunk 与并发改动分开核对。
