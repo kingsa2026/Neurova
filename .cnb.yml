@@ -175,11 +175,17 @@ main:
             done
             git --no-pager diff --stat -- docs/ | sed 's/^/[drift] /' || true
           timeout: 10m
+        # 墙钟这个数**不绑判据**，只防跑挂：它覆盖的是本 stage 整段脚本，而"装依赖"与
+        # "重生成生成物"已经分别由上面两步各自的 timeout 约束，这里剩下的就是跑测本身。
+        # 历史读数（`cnb-d4f-1k5kltgvo`）：30m 到点杀在 **94%**，而同一提交本机同清单
+        # 17.5 分钟 ⇒ 差的不是用例而是机器，30m 这个数当初是照开发机定的。
+        # 故抬到 45m：既是实测最慢一次（22:45，`75 failed` 那轮）的 2 倍余量，
+        # 也仍能在"真的挂死"时于一小时内给出结论。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 30m
+          timeout: 45m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     - name: e2e-backend-boot
