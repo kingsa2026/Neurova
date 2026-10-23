@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests import ast_scan
-
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
@@ -161,9 +161,11 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, source: str):
-        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
-        tree = ast.parse(source)
+    def _builderCalls(self, tree):
+        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。
+
+        收的是**已解析的树**：枚举与解析归 `tests/ast_scan`，本档不自付 `ast.parse`。
+        """
         found = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -179,14 +181,18 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：本判据只扫一次，
-        # 自付 `rglob + ast.parse` 会把成本绑成"代码总量"。文本预筛取构造点名字——
-        # 连它都没出现的文件不可能命中下面的谓词。
-        for ref in ast_scan.sourceRefsUnder(package, hints=("_build_executable_skill",)):
-            flags = self._builderCalls(ref.code)
+        for path in ast_scan.filesUnder(package):
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            if "_build_executable_skill" not in source:
+                continue
+            try:
+                tree = ast_scan.transientTree(path)
+            except SyntaxError:
+                continue
+            flags = self._builderCalls(tree)
             checked += len(flags)
             if any(flag is False for flag in flags):
-                offenders.append(str(ref.path.relative_to(package)))
+                offenders.append(str(path.relative_to(package)))
         assert checked >= 2, ("构造点数比预期少（%d）：规则可能与代码脱节" % checked)
         assert offenders == [], (
             "这些文件的构造点没传 pinnedDigest ⇒ 执行腿的闸对它们形同虚设：%s" % offenders)
@@ -196,8 +202,8 @@ class TestProductionBuildersCarryThePin:
         good = "x = _build_executable_skill('a', 'b', c, pinnedDigest=p)"
         bad = "x = _build_executable_skill('a', 'b', c)"
 
-        assert self._builderCalls(good) == [True]
-        assert self._builderCalls(bad) == [False]
+        assert self._builderCalls(ast.parse(good)) == [True]
+        assert self._builderCalls(ast.parse(bad)) == [False]
 
 
 class TestThePinCanBePersistedAtTheService:

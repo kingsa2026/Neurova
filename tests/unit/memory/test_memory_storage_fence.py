@@ -66,9 +66,15 @@ class TestFenceCoversMemorySurfaces:
         """
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "data"
+        from neurova.core.data_root import repoRoot
+
+        assert productionMemoryDir() == repoRoot() / "data", (
+            "生产记忆落点不是仓内数据根——围栏会与真实装配点各说一套")
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
+        assert underProductionMemory(repoRoot() / "agent_workspaces" / "default"
+                                     / "memory" / "neurova_memories_persist.db"), (
+            "旧布局目录被移出围栏了：磁盘上仍有存量记忆，围栏必须同时守住两处")
 
     def test_isolatedDirectoryIsNotProduction(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "ws"))

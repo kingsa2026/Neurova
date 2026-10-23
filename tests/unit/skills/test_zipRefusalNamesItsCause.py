@@ -48,9 +48,29 @@ def buildZip(members: dict) -> bytes:
 
 
 def deepRoot(tmp: Path, skill_id: str) -> Path:
-    """复刻 pytest 那种"用例名即目录名"的深根：实测这条链合计 273 字符。"""
-    base = (tmp / "pytest-of-operator" / "pytest-9999"
-            / "test_import_builtin_offline[presentation-studio]0" / "skills" / skill_id)
+    """复刻 pytest 那种"用例名即目录名"的深根，并按**实测成员长度**补到真超限。
+
+    原写法只拼 273 字符的根，赌的是"根 + 最长成员 ≥ 260"。这个赌注会过期：
+    内置资产包的最长成员后来缩到 125（根 133 + 1 + 125 = 259，正好卡在 260 预算内），
+    整档于是从"钉住路径过长这一族"退化成"报告说兜底没生效"——判据错的不是断言，是前提。
+    现在根按 `WINDOWS_MAX_PATH` 与**这份包真实的**成员长度反推，成员再缩也照样越限。
+    """
+    payload = read_builtin_bundle(BUNDLE)
+    projected = market_sources._longestProjectedPath(payload, tmp / "probe")
+    assert projected is not None, "读不出内置包的成员清单 ⇒ 本档失去根据，去查资产而不是关判据"
+    member, _total = projected
+    tail = ["skills", skill_id]
+    overflow = 4  # 越过上限的余量：判据要的是"超了"，不是"刚好等于"
+    tailLen = len("/".join(tail)) + 1
+    headFixed = len(str(tmp / "pytest-of-operator" / "pytest-9999")) + 1
+    room = market_sources.WINDOWS_MAX_PATH + overflow
+    padLen = room - headFixed - tailLen - len(member)
+    assert padLen > 0, (
+        f"临时根本身已占 {headFixed} 字符，补不出超限的深根：这份包的最长成员 {len(member)} 字符——"
+        "换更短的成员集再取样，别把断言改松")
+    base = (tmp / "pytest-of-operator" / "pytest-9999" / ("p" * padLen) / "skills" / skill_id)
+    assert len(str(base)) + 1 + len(member) > market_sources.WINDOWS_MAX_PATH, (
+        "深根没补到超限：本档两格的前提（路径过长这一族必须被拒）不成立")
     return base
 
 

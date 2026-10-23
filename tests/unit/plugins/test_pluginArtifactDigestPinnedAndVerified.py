@@ -204,7 +204,7 @@ class TestCaliberIsSharedWithSkillChannel:
             "neurova/skills/skill_service.py",
         ], (
             f"装载前的完整性对账没有只发生在已登记的装载接缝上：{callers}")
-        # §6-388 起同一条政策还有第二半：每条腿都要带根外锚键——只在一条腿上装锚，
+        # §6-388 起同一条政策还有第二半：每条腿都要带锚键——只在一条腿上装锚，
         # 等于让别的腿继续只认"可以跟构件一起被改"的那本账。
         missingAnchor = [
             rel for rel in callers if "anchorKey=" not in (REPO_ROOT / rel).read_text(encoding="utf-8")

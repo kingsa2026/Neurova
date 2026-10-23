@@ -98,11 +98,15 @@ leg("③仓内 data/ 与 agent_workspaces/ 内容指纹全程不变",
     BEFORE == AFTER,
     f"data {BEFORE[0][:12]}->{AFTER[0][:12]}  agent_workspaces {BEFORE[1][:12]}->{AFTER[1][:12]}")
 
+# v2 统一布局后工作区根随数据根走，单点也不再写旧键 `NEUROVA_AGENT_WORKSPACES_DIR`
+# （写了反而把 agent 数据引到数据根之外）。故④只能核对**数据根**这条活通道：
+# 解析器给的 agent 根必须就是本次注入的数据根。继续核旧键＝拿一个已退役的注入口当事实源，
+# 那条腿在修好的代码上恒红（本探针自己的实测：`env_ws` 恒 `<未注入>`）——形态集 283。
 leg("④正控：探针读的根＝生产用的根（同一单源解析器，不是另拼的第二份）",
-    str(Path(os.environ.get("NEUROVA_AGENT_WORKSPACES_DIR", "")).resolve()) == str(wsRoot.resolve())
+    wsRoot.resolve() == DATA_ROOT.resolve()
     and str(Path(os.environ.get("NEUROVA_DATA_DIR", "")).resolve()) == str(DATA_ROOT.resolve()),
-    json.dumps({"env_ws": os.environ.get("NEUROVA_AGENT_WORKSPACES_DIR", "<未注入>"),
-                "resolver_ws": str(wsRoot), "env_data": os.environ.get("NEUROVA_DATA_DIR", "<未注入>")},
+    json.dumps({"env_data": os.environ.get("NEUROVA_DATA_DIR", "<未注入>"),
+                "resolver_ws": str(wsRoot), "single_point_root": str(DATA_ROOT)},
                ensure_ascii=False))
 
 print("全部 PASS" if not FAILURES else f"存在 FAIL: {FAILURES}")
