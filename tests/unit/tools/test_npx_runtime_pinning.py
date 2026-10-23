@@ -259,3 +259,127 @@ class TestUndiciDecompressCarrierIsAtTheCveFloor:
             f"引入方声明 {declared!r} 的下界已高于修复版 {self._FIXED_FLOOR}——"
             "锁里的版本与声明区间不自洽。"
         )
+
+
+class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
+    """非 pip 两片审计树的版本下界门禁（Rust 桌面壳 + npx 运行时树）。
+
+    为什么单列一类：`TestNoKnownVulnerableRuntimePackages` 只登记**子依赖被父包精确
+    声明卡住**的那一类载体（yaml），`TestUndiciDecompressCarrierIsAtTheCveFloor` 只钉
+    undici 一支。两片树里其余的包没有任何"抬版不许回退"的判据——本类补上。
+
+    判据刻意只钉**修复下界**，不钉具体版本：公告入库后 `scripts/ci/osv_audit.py` 会
+    先报红发现，发现者在此登记一条下界；此后谁把锁改回有漏洞的版本就立刻红。
+    这与 `docs/05-reports/dependency-cve-ledger.md` 的 allowlist 纪律同形：
+    能升级修掉的一律升级，不登记豁免。
+    """
+
+    #: 包名 → (修复下界, 公告 id 串, 载体说明)
+    npm_floors = {
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP server SDK：单请求内存耗尽、跨客户端串话、bearer 未校验受众",
+        ),
+        "hono": (
+            "4.13.11",
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 二次解码绕过路由中间件",
+        ),
+        "ip-address": (
+            "10.7.4",
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区段标识二次扫描（O(N²)）",
+        ),
+    }
+
+    #: crate 名 → 同上
+    cargo_floors = {
+        "rustls": (
+            "0.23.46",
+            "RUSTSEC-2026-0346/0347/0348/0349",
+            "会话密钥经 Debug 泄漏、ECH 拒后外发缓冲数据、Brotli 证书 1 GiB 预分配、未认证降级",
+        ),
+        "rustls-webpki": (
+            "0.103.16",
+            "RUSTSEC-2026-0382",
+            "接受含被吊销 emSign 中间人的证书路径",
+        ),
+        # 0.26.x 是"兼容包"：不含独立信任库，只 re-export 1.x 的根，故判据落在 1.x 线上
+        # （两条都钉会把 0.26.11 这条 re-export 当成漏洞载体）。
+        "webpki-roots 1": (
+            "1.0.10",
+            "RUSTSEC-2026-0381",
+            "内置根证书集含被吊销的 emSign 根",
+        ),
+    }
+
+    def _parseVersion(self, version: str) -> tuple:
+        core, _, tail = version.partition("-")
+        parts = tuple(int(p) for p in core.split(".")[:3])
+        return parts + (0 if not tail else 1,)
+
+    def test_lockedNpmPackagesAreAtOrAboveTheAdvisoryFloors(self):
+        packages = _read_json("tools/npx-runtime/package-lock.json").get("packages") or {}
+        problems = []
+        for name, (floor, advisories, note) in self.npm_floors.items():
+            entry = packages.get(f"node_modules/{name}")
+            if entry is None:
+                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+                continue
+            version = entry.get("version")
+            if self._parseVersion(version) < self._parseVersion(floor):
+                problems.append(
+                    f"{name}@{version} 低于 {advisories} 的修复下界 {floor}——{note}。\n"
+                    "    处置：抬协议方包（PINNED）或重生成锁，不要手改版本号后不回写声明。"
+                )
+        assert not problems, "\n  ".join(["运行时审计树里出现已登记公告的未修版本:"] + problems)
+
+    def test_lockedCratesAreAtOrAboveTheAdvisoryFloors(self):
+        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        problems = []
+        for name, (floor, advisories, note) in self.cargo_floors.items():
+            # 键可带版本线后缀（`webpki-roots 1` → crate `webpki-roots`，只认 1.x 线）。
+            crate, _, line = name.partition(" ")
+            found = re.findall(
+                r'\[\[package\]\]\nname = "%s"\nversion = "([^"]+)"' % re.escape(crate), text
+            )
+            if line:
+                found = [v for v in found if v.split(".")[0] == line]
+            if not found:
+                continue
+            for version in found:
+                if self._parseVersion(version) < self._parseVersion(floor):
+                    problems.append(
+                        f"{name}@{version} 低于 {advisories} 的修复下界 {floor}——{note}。"
+                    )
+        assert not problems, "\n  ".join(["桌面壳 crate 树里出现已登记公告的未修版本:"] + problems)
+
+    def test_cargoLockChecksumsMatchTheRegistry(self):
+        """锁里手改的 version 必须与 checksum 同源——否则 `cargo build` 直接校验失败。"""
+        #: crate → (版本, crates.io 公布的 sha256)。版本被抬而 checksum 没跟着改，
+        #: 就是"锁看着修了、实际装不上"的形态；这条钉住两者同源。
+        expected = {
+            "rustls": ("0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
+            "rustls-webpki": ("0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
+            "webpki-roots": ("1.0.10", "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"),
+        }
+        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        problems = []
+        for name, (version, checksum) in expected.items():
+            # 精确到版本：同名的 0.26.x 兼容包不算本判据的载体（它 re-export 1.x 的根）。
+            pattern = (
+                r'\[\[package\]\]\nname = "%s"\nversion = "%s"\nsource = "[^"]+"\n'
+                r'checksum = "([^"]+)"' % (re.escape(name), re.escape(version))
+            )
+            match = re.search(pattern, text)
+            if match is None:
+                problems.append(f"{name}@{version} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
+                continue
+            lockedSum = match.group(1)
+            if lockedSum != checksum:
+                problems.append(
+                    f"{name}@{version} 的 checksum 与 registry 公布值不一致（{lockedSum[:16]}… != "
+                    f"{checksum[:16]}…）——版本抬了、校验和没跟着改，构建会直接失败"
+                )
+        assert not problems, "\n  ".join(["Cargo.lock 与 registry 不同源:"] + problems)
