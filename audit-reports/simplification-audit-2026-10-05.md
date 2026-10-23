@@ -10091,6 +10091,97 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不冒充完成）**：① 预存 22 格（分流表在上，逐族都可独立成批；其中 `MemoryManager.bus` 三格与 `SleepSettingsStore(base_dir=)` 一格属「测试对齐真实 API」的直接修法，`vector_search.py` 那格属判据侧债，应最先收）；② `tests/test_memory/` 目录 10 格预存红（含 async 标记族 3 格）——本批只把它纳入测量，未改；②b 全仓「函数级缺 asyncio 标记」的 async 用例现算 101 处，但**不能直接立成判据**：实测 `test_agent_llm_error_logging.py` 那 5 处由**类级**标记兜住（5 passed），我的扫描没解析类级/模块级装饰器 ⇒ 口径不精确就登记成待查，别把恒红的假清单立成门禁（形态 363 同族：断言指向错对象）；③ §6-395 那件「`judgeClauseConflict` 与 `LegacyConflictDetector` 是否收拢单源」仍待人裁；④ §6-394 的损坏 JSON 记录跳过那格仍无人守；⑤ §6-393 三件（`created_at` 次级排序键、`forget(soft=True)` 后 `get_memory` 语义、C-1b 融合掉的 ~3 格与两处门限真机重定）仍开；⑥ 工单里批量 N 的终值仍等真端点。
     - **下一枚空号现查**：主台账尾号＝395，跨 `audit-reports/*.md`＋`docs/04-plans/*.md`＋`docs/11-legacy/*.md` 现算最大亦为 395 ⇒ 本批取 **§6-396**（提交 `7ae708ff` 已按此号引用）。
 
+397. **批 H 落地（本批五笔，输出预算与思考退化）：default 会话 27 分 17 秒那轮的三因收口——守卫、请求值、终止与静默的可见性（✅ `1720ff6e`／`f5a1a400`／`1cc04b73`／`3d23a401`／`21d70a8a`；子集真条目现算 692，本批 +7 档）** ✅🟢 —— 共同的病是**同一事实有两个源头，而读的那一半没接**
+
+> 本格号取 **§6-397**：本会话先在 `protected_tests.txt:3587`／`:3594` 的在册注释里用了它，
+> `§6-398`（批 I）写作时先取 397、发现占用后让号并在其格末记因由。**取号规矩补一条**：
+> 除了查主台账与他档，还要 `grep -n "§6-<候选号>" scripts/ci/protected_tests.txt`——
+> 并会话最先落笔的地方常常是在册注释，只 grep 台账会撞号。
+
+- **✅ 事故现场（读数先复核，不沿用口述）**：会话 `kai-dialog-20260509`（agent `default`、
+  amd/GLM-5.3-Flash、`thinking_effort=deep`）一轮 **27 分 17 秒**、只走 4 个模型轮，落库正文
+  以「…我改用单条命令重试：」结尾。取数处 `logs/server.log:4921-4937`／`5024-5073` 与
+  `data/default/sessions/_timeline/kai-dialog-20260509.jsonl`。三因叠加，缺一不可：① **网关病理**
+  429 `concurrency limit (16)` ＋ 60/120/180/240s 首字静默撞 300s 读超时后**静默重试**；
+  ② **思考通道退化**——一次调用内 `lock` 连发 **16557 字符**（88 片），正文 0 字、
+  `finish_reason=length`，垃圾流了 3 分 58 秒；③ **预算口径双源**（本批拆掉的那一半）。
+  非显然的产品事实值得常驻：**思考模型的"思考"与"正文"共享同一个 `max_tokens`**。
+- **✅ 根因三（`f5a1a400`，A）**：探测到的 65536 只进了 `clamp_max_tokens` 的**上限**口径，
+  请求值另走 `get_model_max_tokens`——只查 29 条静态目录，未收录即回落
+  `DEFAULT_MAX_TOKENS = 4096`。于是「探测到 65536」与「本次只带 4096」同时成立，而
+  16557 ≈ 4096 token × 4 字符正是这条链的终态。收成与 clamp **同一份优先级**
+  （探测值 > 目录 > DEFAULT），`get_persisted_output_limit` 补 provider 未知的收敛语义
+  （全仓唯一探测值才认，冲突即回落目录——不猜就是第二个事实源）。这是上一批
+  「取长补短→接通」没做完的尾：写了不读。
+- **✅ 根因二（`1720ff6e`，B）**：四道停止门都拦不到一次调用**内部**的 token 流退化
+  （`DoomLoopGate` 只看工具签名，门控到轮末才求值）。新增单源判据
+  `reasoning_degeneracy`：尾部由 ≤32 字符单元连发 ≥2048 字符即判退化，取**最小周期**
+  （报 `lock` 不报 `locklock`，否则点名内容是假事实）。三处消费同一份：两条环流式
+  （判定即停止转发＋终止这一次读取＋丢掉截断点半截的 tool_call 分片＋按 `length`
+  交出空正文接既有单次恢复）＋非流式存储面（展示/回放只取退化前的前缀）。
+  阈值取 2048 的理由钉在档里：显著大于正常思考里的合理复述，又远小于事故那次。
+- **✅ 根因一（`1cc04b73` 终止可见 ＋ `3d23a401` 静默可见，D/C）**：两件都是**只写不读**。
+  D 侧：`gate_terminate` 在全仓**零消费者**（`openai_loop.py:907` 的注释写着「由 chat_pipeline
+  终止循环」，那一支不存在——文档承诺与实测相反），且两条环的工具轮 TERMINATE 连
+  `done` 都不发，非流式两环更是只进 `logger.warning`。**命中点从四个变五个**：静态按
+  "门控 TERMINATE" 扫漏了**停滞判定**那条 `return`（它不是 StopGate），是活体真跑抓到的。
+  收口＝终止原因的**唯一可见通道是正文**（正文即落库面），撤掉两条环 `已停止继续尝试`
+  与 `已停止工具循环` 两份瞬时文案（同一事实不留两份可见面）。C 侧：静默判定并入
+  `chat_stream` 读取循环、独立看门狗协程退役（两份判定并存必漂成"某条路径不可见"），
+  跨阈值既留原 WARNING 又让出 `stream_status` 控制字典 → 两环转 typed 事件 → 管道在
+  `emit_status_events` 门下 emit `upstream_status`（**含 legacy 那条路**）→ 两端点出帧 →
+  ChatPage 复用同一条提示条 ＋ 11 语言 `chat.upstreamSilence`。硬约束记进代码：**竞时只能
+  用不取消的 `asyncio.wait`**，`wait_for(__anext__())` 超时会撕裂上游流。
+- **✅ E（`21d70a8a`）·真网关挖出来的空转**：恢复轮动的两个键**都发不出去**——
+  `thinking_enabled` 被 `compat.supports_thinking_toggle` 门丢掉（`"amd"` 只声明
+  `supports_reasoning_effort`），而档位 `light` 在映射表里就是 `None`＝不表态。实测：
+  守卫 23:25:30 截一次 → `[CTX_RECOVERY]` 重试 → **23:31:28 在同处再截一次**
+  （两段各 512 连发／2048 字符），多花 6 分钟、整轮仍无正文。新增单源
+  `ProviderCompat.thinkingReducible(request_params)`（读的就是发送侧那几个键）＋
+  「本轮退化截断」标志经 `TurnRunState.degeneratedRound` 传（不挂 loop 实例态——切片 A
+  消灭过的形态），两件事同时成立即**不重试**，改交可见交代。刻意不注入未经验证的
+  `reasoning_effort` 取值（"low"/"minimal" 收不收要探测，不猜）。
+- **✅ 真网关实测（改后自证，不是只跑离线判据）**：同一 prompt 第三次单发命中同形退化——
+  守卫两次开火各截 2048 字符（事故那次 16557 字整条外泄）、整轮 ≈8 分钟（事故 27 分 17 秒）、
+  正文以「⚠️ 未能生成回复…建议切换非思考模型」收尾（不再停在冒号）；`upstream_status`
+  帧 3 条（60/120/180s）**夹在 `: ping` 之间实时到达**，即用户当场看得见，不是收尾才吐。
+- **⚠ 归属披露（并发会话把本批的在途 hunk 带走了）**：E 的非流式那处 18 行
+  （`chat_pipeline.py:2712-2729`）已随并会话 `d21bd42d`（knowledge 收口）入库——
+  `git commit --only` 按**工作树内容**提交给定路径，提交时该 hunk 仍未提交。
+  复核口径：`git show HEAD:neurova/agent/chat_pipeline.py | grep -c thinkingKnobReachesGateway`＝2
+  且该文件 `git status` 干净。故 `21d70a8a` 的净 LOC 不含那 18 行，**它的判据与文案单源在该笔里**。
+- **⚠ 两条定性为"非本批"、都不认领**：① `test_no_parallel_vendor_capability_surface` 的
+  **teardown ERROR**（污染守卫报仓库根新增 `test_data`）——同配置再跑 0 error 未复现，
+  制造者是 `tests/unit/collaboration/test_computer_manager.py:14` 用**相对路径**建 data_dir
+  （还自带 rmtree 清理），该目录根本不在选择集里，属跨档清理窗口漂移，该修的是那档改用锚点。
+  ② `test_vision_capability_routing` 3 格：HEAD 态 `test_llm_read_timeout_split + vision` 成对跑
+  同样 3 failed ⇒ 既有跨档污染；**但本批新档抄了同一份夹具，所以现在也是污染源之一**，
+  该在本侧收掉（不建真 client 或跑完复位），挂着。
+- **⚠ 本批自己的落笔/探针违规，逐条入账**：在册注释第一次落笔走 `python -c "…"`
+  双引号，反引号被 shell 执行掉 ⇒ `gate_terminate` 一词从注释里**静默消失**且不报错（第二次
+  改用 heredoc/`Edit` 才补回）；"资源是否真被关闭"的判据第一版放在 `asyncio.run` 之外，被
+  `shutdown_asyncgens()` 代做 ⇒ **恒真判据**（挪进循环内才红）；活体第一版按"payload 有没有
+  `content` 键"分正文，而 reasoning 帧也带该键 ⇒ 把思考算进正文、误报产品 FAIL（改探针不改产品）；
+  反证分母取自"被截断后的消耗量"而不是事故全量 ⇒ 一度把已通过读成 FAIL；A/B 差集第一轮把
+  7 条候选当噪声险些放行，靠「摘本批生产面复跑同一选择集」查出**真缺陷**（显式迭代器
+  漏写 pending+`aclose()` 收尾，泄漏推成别档 teardown ERROR）。以上均已入项目记忆形态集
+  384-398 号，其中 393／394／395／396／397／398 是本批新增。
+- **仍开（不冒充完成）**：① `_call_legacy_stream` **仍未接退化守卫**（它只转 content、
+  UI 不刷屏，但退化照样吃满预算——同根命中点，本批只接了它的静默转发）；
+  ② 乙案「静默超阈值要不要主动断开/走 fallback」出三态票未决，现只做到可见；
+  ③ amd 线真档位（探测 `reasoning_effort` 可接受取值，或补 `supports_thinking_toggle`
+  的真实发法）等网关稳再做；④ `/probe-output-limit` 仍挂 `get_optional_user`，无管理员闸
+  （按 `SECURITY.md` 流程处理，不公开 issue）；⑤ default 的 provider×model 错配（配
+  `上海人工智能实验室` 配 GLM-5.3-Flash → 404 后静默回落到 amd 模型）；
+  ⑥ `test_tool_loop_iteration_slice_b.py:115` 用了**不存在的** `StopDecision.terminate`，
+  被 `GateRunner` 故障隔离吞成 BYPASS ⇒ 那档"断点门"恒不开火而档位仍全绿（本批探针同坑，
+  已改用实装构造形态）；⑦ 前端 3 道既有红（`skillEvo.adopt*` 四键、生成物台账两格）
+  已定性不属本批。A（请求值 65536）在真流上**还没被"正用"过一次**——现有证据停在
+  装配点读数 65536／去掉探测值即回 4096 这一层，得等一条不 429、不 `terminated` 的
+  长思考真回合才算端到端闭环。
+- **下一枚空号现查**：本批取 **§6-397**（`grep -an "^397\." 主台账` 空、`§6-398` 已写明让号）。
+  并会话已用至 **§6-402** ⇒ 后来者取号请从 **403** 起，并按本格局部规矩连 `protected_tests.txt` 一起查。
+
 398. **批 I 落地（原记 §6-397，撞号让号，见本格末）：§6-396 分流表里最直的三族清零（5 格），预存红 22→17、新增 0（✅ `d6c8f061`；子集真条目 678→680）** ✅🟢 —— 三族的共同病是「断言不再指向任何对象」
     - **✅ 前置定性（逐族现算，不照抄分流表）**：分流表那三行写的是症状（`bus` 属性缺、`base_dir` 不收、`FileNotFoundError`），落笔前先各自查清**该断言的对象今天到底存不存在**：`bus`/`_bus` 出口随 §6-12 退净（现役接缝 `_publishMemoryEvent` → `get_event_bus()` 单例，读数出口 `get_stats()` 的 `bus_events`／`bus_handlers`）；`SleepSettingsStore` 从来只收 `agent_id`，落点单点 `get_agent_sleep_settings_path()` → `get_agent_root()`（`NEUROVA_AGENT_WORKSPACES_DIR` 优先）；`vector_search.py` 连同 `_cosine_similarity` 已在 §6-376 随 `memory_index` 退净（删除笔 `62c47809`）。⇒ 三族**都该修测试/修判据，不该改生产签名**。
     - **✅ 族一（3 格，`tests/unit/memory/core/test_manager.py`）**：原 `test_bus_property` 只 `assertIsNotNone(mgr.bus)`——这本身是枚弱判据：**私有总线年代它也绿**（每个 manager 都攥得到一个非 None 对象，而订阅方一个都订不到）。改为 `test_events_reach_the_shared_bus_singleton`：在共享单例上订 `memory_created`、真发一次 `remember`、断言订阅方收到；另把两个已退净的出口钉成 `hasattr(...)==False` 的反向钉（形态 362）。牙齿**实测变异验过**：把生产投递口换成一条私有 `EventBus`，共享单例上的订阅收到 **0 件**（判据必红）；恢复单例收到 1 件（绿）。同一支里留了一条诚实记录：`bus_events` 计的是「发过几回」，私有形态下它照样涨（1→2）——**光有计数抓不到这一族病**，承重的是「订阅方收到」那一半。
