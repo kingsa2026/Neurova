@@ -3658,3 +3658,9 @@ tests/unit/computer_use/test_computer_param_no_phantom_knobs.py
 # 当场红 1 failed／3 passed，探针已还原。被改的 8 档逐档单跑：19/3/5/5/4 passed，perf 24 passed+4 skipped，
 # whole_repo 4 passed（49.95s，含对本新档的整仓收集自证）；subQuantum 那 1 条红经 HEAD 态 A/B 复算为预存红。
 tests/unit/ci/test_nestedPytestBudgetWallsAreOrdered.py
+# §6-402（批 K 第三档）：Windows 只读位让「锁主已死」的回收器永久失效——两条新格（正检＋负对照）钉住
+# 「删不动 ≠ 不该删」。实测本机 TEMP 会话根下 10 个 `pytest-<N>` 目录里 **8 个含 git 只读对象文件**，
+# `shutil.rmtree` 撞 `[WinError 5] 拒绝访问` 后回收侧只 warn 就跳过 ⇒ 每轮跑测重复打同一批警告、残留只增不减
+# （最早一个是 2026-10-22 18:11 留下的）。修后现查会话目录 10→3（回到 pytest 自身 keep=3 的健康态）、警告归零。
+# 负对照同批建：锁主还活着的只读目录一律不碰，连只读位也不许顺手清。逐文件单跑两次同读数 21 passed（7.57s／7.07s）。
+tests/unit/core/test_temp_reclaim.py
