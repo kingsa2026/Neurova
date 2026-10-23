@@ -871,6 +871,9 @@ class BaseAgentLoop(ABC):
                 "tool_call_id": callId,
                 "result": errorText,
                 "success": False,
+                # 显式声明：只有执行链自身崩溃才整轮判 tool_failure；
+                # 普通工具返回 success=False 不在此列（不让一次工具失败改写回答语义）。
+                "turn_outcome": "tool_failure",
                 "timestamp": datetime.now().isoformat(),
             }
         ]

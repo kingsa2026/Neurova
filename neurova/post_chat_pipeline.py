@@ -43,6 +43,7 @@ import collections
 import contextvars
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -1123,6 +1124,29 @@ class PostChatPipeline:
             _injected = get_turn_injected_reflections()
             if _injected:
                 assistant_meta["injected_reflections"] = list(_injected)
+            # 本轮知识血缘随 assistant metadata 落盘：/chat/feedback 赞踩时
+            # 按这些服务端检索出来的 fact id 写 adoption，不接受客户端自报。
+            _lineage = (metadata or {}).get("knowledge_lineage_ids")
+            if _lineage:
+                assistant_meta["knowledge_lineage_ids"] = list(_lineage)
+            _citations = (metadata or {}).get("knowledge_citation_ids")
+            if _citations:
+                assistant_meta["knowledge_citation_ids"] = list(_citations)
+            turn_id = str(
+                (metadata or {}).get("trace_id")
+                or (metadata or {}).get("turn_id")
+                or uuid.uuid4().hex
+            )
+            from neurova.quality.outcomes import classifyTurnOutcome
+
+            turn_outcome = classifyTurnOutcome(
+                (metadata or {}).get("finish_reason"),
+                (metadata or {}).get("retrieval_hits"),
+                (metadata or {}).get("retrieval_quality"),
+                (metadata or {}).get("turn_outcome_override"),
+            )
+            assistant_meta["turn_id"] = turn_id
+            assistant_meta["turn_outcome"] = turn_outcome
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
 
@@ -1153,6 +1177,11 @@ class PostChatPipeline:
                     )
                 )
                 return result_session_id
+            agent_id = str(getattr(getattr(self._agt, "config", None), "agent_id", "") or "")
+            self._recordTurnOutcome(
+                metadata, turn_id, result_session_id, agent_id, turn_outcome
+            )
+            self._recordKnowledgeTokenUsage(metadata, result_session_id, turn_id)
             self._step_results.append(
                 StepResult(
                     step_name=step_name,
@@ -1178,6 +1207,104 @@ class PostChatPipeline:
             )
 
         return result_session_id
+
+    @staticmethod
+    def _recordTurnOutcome(metadata, turn_id: str, session_id: str,
+                           agent_id: str, outcome: str) -> None:
+        """把本轮完成态写进质量事件账；失败只降级观测，不阻断保存。"""
+        try:
+            from neurova.quality import get_quality_store
+
+            get_quality_store().recordTurnOutcome(
+                turn_id, session_id,
+                agentId=agent_id,
+                channel=str((metadata or {}).get("channel") or ""),
+                outcome=outcome,
+                metadata={
+                    "finish_reason": (metadata or {}).get("finish_reason", ""),
+                    "retrieval_hits": (metadata or {}).get("retrieval_hits"),
+                    "retrieval_quality": (metadata or {}).get("retrieval_quality"),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - 质量账失败不阻断保存
+            logger.debug("质量完成态写入跳过: %s", exc)
+
+    @staticmethod
+    def _recordKnowledgeTokenUsage(
+        metadata: Dict[str, Any], session_id: str, turn_id: str = ""
+    ) -> int:
+        """把本轮 token 按服务端知识 lineage 摊到 fact，差额记未归因。
+
+        turn_id 是轮级幂等键：同一会话第二轮不会被 source_turn_id 的旧幂等跳过。
+        生成侧要有 lineage 才有分摊对象；检索侧文档命中没有 fact，差额统一进
+        `retrieval_unattributed_tokens`（成本总数不丢，也不摊到某条事实头上）。
+        失败只降级观测，不阻断会话保存。
+        """
+        lineage = list((metadata or {}).get("knowledge_lineage_ids") or [])
+        retrieval_tokens = (metadata or {}).get("knowledge_retrieval_tokens") or {}
+        retrieval_total = int(
+            (metadata or {}).get("knowledge_retrieval_tokens_total") or 0
+        )
+        if not retrieval_total:
+            retrieval_total = sum(int(value or 0) for value in retrieval_tokens.values())
+        if not lineage and retrieval_total <= 0:
+            return 0
+        try:
+            from neurova.core.usage_accounting import get_usage_accounting
+            from neurova.knowledge.foundation import get_knowledge_fact_store
+
+            store = get_knowledge_fact_store()
+            written = 0
+            last = get_usage_accounting().last_call() or {}
+            prompt = int(last.get("prompt_tokens") or 0)
+            completion = int(last.get("completion_tokens") or 0)
+            model = str(last.get("model") or "")
+            estimated = bool(last.get("estimated"))
+            retrieval_estimated = bool(
+                (metadata or {}).get("knowledge_retrieval_tokens_estimated", True)
+            )
+            retrieval_model = str(
+                (metadata or {}).get("knowledge_retrieval_tokens_model") or model
+            )
+            if lineage and (prompt > 0 or completion > 0):
+                from neurova.knowledge.usage_attribution import allocateGenerationTokens
+
+                allocations, _unattributed, attribution = allocateGenerationTokens(
+                    lineage, prompt, completion,
+                    citationIds=(metadata or {}).get("knowledge_citation_ids"),
+                    weights=(metadata or {}).get("knowledge_lineage_scores"),
+                )
+                written += store.recordTokenUsageAllocations(
+                    turn_id, allocations,
+                    promptTokens=prompt, completionTokens=completion,
+                    sourceTurnId=session_id, model=model, estimated=estimated,
+                    attribution=attribution,
+                )
+            attributed_retrieval = 0
+            for fact_id, tokens in retrieval_tokens.items():
+                try:
+                    count = int(tokens or 0)
+                    wrote = store.recordTokenUsage(
+                        [str(fact_id)], count, 0,
+                        sourceTurnId=session_id, turnId=turn_id,
+                        phase="retrieval", model=retrieval_model,
+                        estimated=retrieval_estimated,
+                    )
+                    written += wrote
+                    if wrote:
+                        attributed_retrieval += count
+                except Exception:  # noqa: BLE001 - 单条检索归因失败不阻断其它
+                    continue
+            unattributed_retrieval = max(0, retrieval_total - attributed_retrieval)
+            if unattributed_retrieval > 0:
+                written += store.recordRetrievalUnattributed(
+                    turn_id, unattributed_retrieval,
+                    sessionId=session_id, model=retrieval_model,
+                )
+            return written
+        except Exception as exc:  # noqa: BLE001 - 归因失败不阻断保存
+            logger.debug("知识 token 归因跳过: %s", exc)
+            return 0
 
     def _collect_round_artifacts(self, tool_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """从本轮 tool_result 列表提取产物（落盘到 assistant_metadata.artifacts）。

@@ -40,6 +40,9 @@ class ChannelEventType(str, Enum):
     # 群成员变更（各渠道"机器人被移出群/入群"事件归一，供会话归档等）
     CHAT_BOT_ADDED = "chat_bot_added"
     CHAT_BOT_REMOVED = "chat_bot_removed"
+    # 人工接管（有该原生事件的渠道适配器 emit；无事件的渠道不伪造）
+    HUMAN_TAKEOVER_STARTED = "human_takeover_started"
+    HUMAN_TAKEOVER_ENDED = "human_takeover_ended"
 
 
 class MessageChannel(str, Enum):
@@ -140,6 +143,11 @@ class ChannelAdapter(ABC):
     # tests/unit/channels/test_channelVoiceEgress.py 按 AST 反查"声明即已实现"。
     voiceOutMode: str = VOICE_OUT_NONE
 
+    # 平台是否提供原生的“人工接管开始/结束”事件。默认 False＝不支持，
+    # 能力位只由真能解析该平台事件、并在适配器内 `_emit_event` 的适配器置 True；
+    # 没有原生事件的渠道不伪造（质量账里缺事件＝未观测，不是“无人接管”）。
+    humanTakeoverEvents: bool = False
+
     def __init__(self, config: ChannelConfig):
         self.config = config
         self._connected = False
@@ -205,6 +213,7 @@ class ChannelAdapter(ABC):
             "channel_type": self.channel_type,
             "connected": self._connected,
             "enabled": self.config.enabled,
+            "human_takeover_events": self.humanTakeoverEvents,
         }
 
     async def _emit_event(self, event_type: ChannelEventType, message: ChannelMessage):

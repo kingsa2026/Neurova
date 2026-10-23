@@ -67,20 +67,29 @@ class KnowledgeRetrieverAdapter:
         排序仍由那把冻结的尺子说了算，底座只补充置信/证据态/血缘内键。
         关闸即原样返回、零回流副作用。
         """
-        surface = self._surface()
-        if surface is None or not knowledge_items:
+        if not knowledge_items:
             return knowledge_items, []
+        surface = self._surface()
         from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
         from neurova.knowledge.foundation.read_surface import (
             attachGovernance,
             recordHitsAsInjection,
         )
 
-        store = get_knowledge_fact_store()
-        hits, lineageIds = attachGovernance(store, knowledge_items)
-        if lineageIds:
-            recordHitsAsInjection(store, hits)
-        return hits, lineageIds
+        # 血缘映射与 FactSurface 的置信富化是两件事：即使富化关着，也要把
+        # 条目映射到事实行，否则 /chat/feedback 无法把采纳结果写回正确事实。
+        # 事实库不可用（测试夹具/围栏/临时故障）只丢血缘，不打死检索。
+        try:
+            store = get_knowledge_fact_store()
+            hits, lineageIds = attachGovernance(
+                store, knowledge_items, enrich=surface is not None
+            )
+            if surface is not None and lineageIds:
+                recordHitsAsInjection(store, hits)
+            return hits, lineageIds
+        except Exception as exc:  # noqa: BLE001 - 增强面失败不得影响主检索
+            logger.debug("知识血缘富化失败（检索继续，无采纳回写）: %s", exc)
+            return knowledge_items, []
 
     async def retrieve(self, context) -> Any:
         """执行知识库检索（走用户可见性过滤）"""
@@ -100,6 +109,22 @@ class KnowledgeRetrieverAdapter:
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")
 
+            # 元数据过滤只在调用方显式给出时生效；filter 必须进候选集，
+            # 不能检索完再在结果上筛（否则 top-k 已被标签外内容占满）。
+            filters: Dict[str, Any] = {}
+            category = metadata.get("category")
+            if isinstance(category, str) and category:
+                filters["category"] = category
+            tags = metadata.get("tags")
+            if isinstance(tags, (list, tuple)) and tags:
+                filters["tags"] = [str(t) for t in tags]
+            source = metadata.get("source")
+            if isinstance(source, str) and source:
+                filters["source"] = source
+            updated_after = metadata.get("updated_after")
+            if isinstance(updated_after, (int, float)):
+                filters["updated_after"] = float(updated_after)
+
             # P0#4：双索引器合一——chat 路走 hybrid 四路（tfidf/bm25/fts/vector）。
             # 向量引擎不可用时辅助路各自降级，主路 tfidf 异常上抛给责任链决定
             # fallback（错误方向是"整级检索失败可被感知"，不是"静默返回空"）。
@@ -112,6 +137,7 @@ class KnowledgeRetrieverAdapter:
                 limit=context.limit,
                 scope="all",
                 agent_id=agent_id,
+                **filters,
             )
 
             knowledge_items, lineageIds = self._enrich(knowledge_items)
@@ -228,5 +254,8 @@ class KnowledgeRetrieverAdapter:
             "confidence": item.get("confidence", 0.5),
             "visibility": item.get("visibility", "private"),
             "knowledge_id": item.get("knowledge_id"),
+            "lineage_id": item.get("lineage_id"),
+            "fact_id": item.get("lineage_id"),
+            "score": float(item.get("score", 0.0) or 0.0),
             "origin": cls._map_origin(item.get("source", "")),
         }

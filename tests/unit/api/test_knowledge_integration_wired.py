@@ -58,12 +58,54 @@ class TestSyncPersistence:
 
 
 class TestRagRetrieveReal:
+    def test_knowledge_path_uses_hybrid(self, monkeypatch):
+        """知识路必须与 chat 主路同源：走 hybrid，而不是第二条 TF-IDF 质量线。"""
+        calls = {}
+
+        def fake_hybrid(repo, user, query, limit=10, scope="all", **kwargs):
+            calls["called"] = True
+            return [{"knowledge_id": "k1", "title": "T", "content": "正文", "score": 0.7}]
+
+        monkeypatch.setattr(
+            "neurova.knowledge.hybrid.hybrid_search_knowledge", fake_hybrid
+        )
+        dummy = MagicMock()
+        dummy.search_visible_items.return_value = []
+        monkeypatch.setattr(
+            "neurova.knowledge.repository.get_knowledge_repository", lambda *a, **k: dummy
+        )
+
+        resp = ki._retrieve_once("q", 3, False, True, _req())
+
+        assert calls.get("called") is True, "知识路仍在走 search_visible_items 旧路"
+        knowledge = [r for r in resp["results"] if r["source"] == "knowledge"][0]
+        assert knowledge["retrieval_method"] == "hybrid"
+        assert knowledge["items"][0]["id"] == "k1"
+
+    def test_knowledge_path_uses_authenticated_identity_not_request_state(self, monkeypatch):
+        """真实 JWT 装配下 request.state.user_id 可能为空；必须用端点注入的身份。"""
+        seen = {}
+
+        def fake_hits(query, user, top_k):
+            seen["user"] = user
+            return [{"knowledge_id": "k1", "title": "T", "content": "c"}]
+
+        monkeypatch.setattr(ki, "_knowledge_hits", fake_hits)
+        body = ki.RAGRetrieveRequest(query="q", include_memory=False, include_knowledge=True)
+
+        asyncio.run(ki.rag_retrieve(
+            body, _req(user_id=""), current_user={"user_id": "auth-user", "role": "admin"},
+        ))
+
+        assert seen["user"]["user_id"] == "auth-user"
+
     def test_returns_real_hits_not_empty_stub(self, monkeypatch):
-        repo = MagicMock()
-        repo.search_visible_items.return_value = [
-            {"knowledge_id": "k1", "title": "T", "content": "正文", "score": 0.42},
-        ]
-        monkeypatch.setattr("neurova.knowledge.repository.get_knowledge_repository", lambda *a, **k: repo)
+        monkeypatch.setattr(
+            ki, "_knowledge_hits",
+            lambda query, user, top_k: [
+                {"knowledge_id": "k1", "title": "T", "content": "正文", "score": 0.42},
+            ],
+        )
         mgr = MagicMock()
         mgr.recall.return_value = [{"id": "m1", "content": "记忆体", "temperature": 0.5}]
         monkeypatch.setattr(
@@ -71,7 +113,9 @@ class TestRagRetrieveReal:
             lambda req: mgr,
         )
         body = ki.RAGRetrieveRequest(query="q", top_k=3, include_memory=True, include_knowledge=True)
-        resp = asyncio.run(ki.rag_retrieve(body, _req()))
+        resp = asyncio.run(ki.rag_retrieve(
+            body, _req(), current_user={"user_id": "u1", "role": "admin"}
+        ))
         data = resp["data"]
         assert data["total"] == 2
         by_src = {r["source"]: r for r in data["results"]}
@@ -79,25 +123,36 @@ class TestRagRetrieveReal:
         assert by_src["memory"]["items"][0]["id"] == "m1"
 
     def test_include_flags_respected(self, monkeypatch):
-        repo = MagicMock()
-        repo.search_visible_items.return_value = [{"knowledge_id": "k1", "title": "", "content": "c"}]
-        monkeypatch.setattr("neurova.knowledge.repository.get_knowledge_repository", lambda *a, **k: repo)
+        monkeypatch.setattr(
+            ki, "_knowledge_hits",
+            lambda query, user, top_k: [
+                {"knowledge_id": "k1", "title": "", "content": "c"},
+            ],
+        )
         monkeypatch.setattr(
             "neurova.api.endpoints.knowledge_integration._memory_manager_for",
             lambda req: MagicMock(recall=lambda *a, **k: []),
         )
         body = ki.RAGRetrieveRequest(query="q", include_memory=False, include_knowledge=True)
-        resp = asyncio.run(ki.rag_retrieve(body, _req()))
+        resp = asyncio.run(ki.rag_retrieve(
+            body, _req(), current_user={"user_id": "u1", "role": "admin"}
+        ))
         assert [r["source"] for r in resp["data"]["results"]] == ["knowledge"]
 
     def test_batch_real_retrieval(self, monkeypatch):
-        repo = MagicMock()
-        repo.search_visible_items.return_value = [{"knowledge_id": "kx", "title": "", "content": "c"}]
-        monkeypatch.setattr("neurova.knowledge.repository.get_knowledge_repository", lambda *a, **k: repo)
+        monkeypatch.setattr(
+            ki, "_knowledge_hits",
+            lambda query, user, top_k: [
+                {"knowledge_id": "kx", "title": "", "content": "c"},
+            ],
+        )
         monkeypatch.setattr(
             "neurova.api.endpoints.knowledge_integration._memory_manager_for",
             lambda req: MagicMock(recall=lambda *a, **k: []),
         )
-        resp = asyncio.run(ki.batch_rag_retrieve({"queries": ["a", "b"]}, _req()))
+        resp = asyncio.run(ki.batch_rag_retrieve(
+            {"queries": ["a", "b"]}, _req(),
+            current_user={"user_id": "u1", "role": "admin"},
+        ))
         assert len(resp["data"]["results"]) == 2
         assert resp["data"]["results"][0]["total"] >= 1

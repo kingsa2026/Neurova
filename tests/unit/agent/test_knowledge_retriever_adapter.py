@@ -149,6 +149,41 @@ class TestKnowledgeRetrieverAdapter:
             await adapter.retrieve(RetrievalContext(query="x", user_id="u1"))
 
     @pytest.mark.asyncio
+    async def test_metadata_category_and_tags_reach_hybrid(self, tmp_path):
+        """检索上下文里的 category/tags 必须透传到 hybrid，而不是只按 scope/agent。
+
+        两篇正文都命中 query；不把过滤条件带下去，返回的就是两篇。
+        """
+        if KnowledgeRetrieverAdapter is None:
+            pytest.skip("适配器未实现（红测阶段）")
+        from neurova.knowledge.repository import KnowledgeRepository
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+        repo.create_knowledge(
+            "default", title="alpha-doc", content="shared alpha body",
+            category="cat-a", tags=["alpha"], source="manual",
+            visibility="public", owner_user_id="u1",
+        )
+        repo.create_knowledge(
+            "default", title="beta-doc", content="shared beta body",
+            category="cat-b", tags=["beta"], source="manual",
+            visibility="public", owner_user_id="u1",
+        )
+        adapter = KnowledgeRetrieverAdapter(repo=repo)
+
+        by_category = await adapter.retrieve(RetrievalContext(
+            query="shared", limit=5, user_id="u1",
+            metadata={"agent_id": "default", "category": "cat-a"},
+        ))
+        assert [m["title"] for m in by_category.memories] == ["alpha-doc"]
+
+        by_tags = await adapter.retrieve(RetrievalContext(
+            query="shared", limit=5, user_id="u1",
+            metadata={"agent_id": "default", "tags": ["beta"]},
+        ))
+        assert [m["title"] for m in by_tags.memories] == ["beta-doc"]
+
+    @pytest.mark.asyncio
     async def test_get_quality_score(self):
         """质量评分：空结果 0，命中按数量+关键词"""
         if KnowledgeRetrieverAdapter is None:

@@ -35,6 +35,18 @@
         </div>
         <div class="nr-chat-header-actions">
           <button
+            v-if="currentSessionId && isAdmin && !takeoverStateError"
+            class="nr-chat-toggle-btn"
+            :class="{ 'cu-active': takeoverActive }"
+            :disabled="takeoverUpdating"
+            :title="takeoverActive ? t('chat.endHumanTakeover') : t('chat.humanTakeover')"
+            :aria-label="takeoverActive ? t('chat.endHumanTakeover') : t('chat.humanTakeover')"
+            :aria-pressed="takeoverActive"
+            @click="toggleHumanTakeover"
+          >
+            <UiIcon name="user" :size="15" />
+          </button>
+          <button
             class="nr-chat-toggle-btn"
             :title="t('chat.crossSearchTitle')"
             @click="crossSearchOpen = true"
@@ -416,6 +428,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { useAgentStore } from '@/stores/agents'
+import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import {
@@ -434,6 +447,7 @@ import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import { reorderConsoleSessions } from '@/api/modules/console'
+import { useHumanTakeover } from '@/composables/useHumanTakeover'
 import type { ChatMessage, Session } from '@/types/chat'
 import { api } from '@/api'
 import { extractUploadedFileId } from '@/api/modules/files'
@@ -506,6 +520,8 @@ import { normalizeModel } from '@/types/model'
 const { t } = useI18n()
 const appStore = useAppStore()
 const agentStore = useAgentStore()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 const { agentId, currentAgent } = useAgentPage()
 
 const props = defineProps<{
@@ -624,6 +640,25 @@ function onSlashPlan(seed: string): void {
 function onSlashCompact(): void {
   chatStore.setInputText('/compact')
   void sendMessage()
+}
+
+// ── 人工接管标记（D5 甲：控制台 producer，source=console_mark）──────
+const {
+  active: takeoverActive,
+  updating: takeoverUpdating,
+  stateError: takeoverStateError,
+  toggle: toggleTakeover,
+} = useHumanTakeover(
+  () => (isAdmin.value ? currentSessionId.value : null),
+  () => agentId.value,
+)
+
+async function toggleHumanTakeover(): Promise<void> {
+  try {
+    await toggleTakeover()
+  } catch {
+    uiMessage.error(t('chat.takeoverFailed'))
+  }
 }
 
 /** 「↑ 立即」排队项（ChatComposerArea emit 上抛）：走 drain force 入口 */

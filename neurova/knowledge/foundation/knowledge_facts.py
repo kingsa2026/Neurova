@@ -165,6 +165,57 @@ ALTER TABLE knowledge_assertions ADD COLUMN erased_at TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_assertion_erased ON knowledge_assertions(erased_at, fact_id);
 """
 
+# 按知识命中的 token 归因（批次：反馈/评估剩余缺口）。一次回答命中多条事实时
+# 按命中数均分；attribution 列把“均分估计”写成可读事实，不冒充逐条真实成本。
+_SCHEMA_V14 = """
+CREATE TABLE IF NOT EXISTS knowledge_fact_usage (
+    usage_id TEXT PRIMARY KEY,
+    fact_id TEXT NOT NULL,
+    source_turn_id TEXT NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    attribution TEXT NOT NULL DEFAULT 'even_split',
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fact_usage_fact ON knowledge_fact_usage(fact_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_fact_usage_turn ON knowledge_fact_usage(source_turn_id);
+"""
+
+# v15：每轮唯一 turn_id + 成本阶段。v14 的 source_turn_id 是会话级，
+# 同会话第二轮会被幂等跳过；turn_id 与 (turn_id, fact_id, phase) 取代它做轮级键。
+_SCHEMA_V15 = """
+ALTER TABLE knowledge_fact_usage ADD COLUMN turn_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE knowledge_fact_usage ADD COLUMN phase TEXT NOT NULL DEFAULT 'generation';
+ALTER TABLE knowledge_fact_usage ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE knowledge_fact_usage ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_usage_turn_phase
+    ON knowledge_fact_usage(turn_id, fact_id, phase) WHERE turn_id <> '';
+CREATE INDEX IF NOT EXISTS idx_fact_usage_phase ON knowledge_fact_usage(phase, recorded_at);
+"""
+
+# v16：每轮总量/已归因/未归因摘要。fact 行回答“分给谁”，这张表回答“这轮有多少没分出去”。
+_SCHEMA_V16 = """
+CREATE TABLE IF NOT EXISTS knowledge_turn_usage (
+    turn_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    attributed_tokens INTEGER NOT NULL DEFAULT 0,
+    unattributed_tokens INTEGER NOT NULL DEFAULT 0,
+    attribution TEXT NOT NULL DEFAULT 'even_split',
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turn_usage_time ON knowledge_turn_usage(recorded_at);
+"""
+
+# v17：检索侧未归因 token。检索命中里能映射到 fact 的行走 knowledge_fact_usage；
+# 映射不到的文档命中不能摊到任何 fact，但成本总数不能丢，落这一列。
+_SCHEMA_V17 = """
+ALTER TABLE knowledge_turn_usage ADD COLUMN retrieval_unattributed_tokens INTEGER NOT NULL DEFAULT 0;
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -554,6 +605,274 @@ class KnowledgeFactStore:
                 (outcome, outcome, factId),
             )
 
+    def recordTokenUsage(
+        self,
+        factIds: List[str],
+        promptTokens: int = 0,
+        completionTokens: int = 0,
+        sourceTurnId: str = "",
+        turnId: str = "",
+        phase: str = "generation",
+        model: str = "",
+        estimated: bool = False,
+    ) -> int:
+        """按命中事实均分一次回答的 token。
+
+        轮级幂等优先用 `turnId`（同会话第二轮不会因 source_turn_id 相同被跳过）；
+        没有 turnId 的旧调用仍按 sourceTurnId 幂等。均分是明确估计
+        （attribution='even_split'），不冒充逐条真实成本。
+        """
+        ids = list(dict.fromkeys(str(f) for f in (factIds or []) if f))
+        prompt = max(0, int(promptTokens or 0))
+        completion = max(0, int(completionTokens or 0))
+        if not ids or (prompt == 0 and completion == 0):
+            return 0
+        with self._lock, self._conn:
+            if turnId:
+                for factId in ids:
+                    exists = self._conn.execute(
+                        "SELECT 1 FROM knowledge_fact_usage"
+                        " WHERE turn_id = ? AND fact_id = ? AND phase = ? LIMIT 1",
+                        (str(turnId), factId, str(phase)),
+                    ).fetchone()
+                    if exists:
+                        return 0
+            elif sourceTurnId:
+                exists = self._conn.execute(
+                    "SELECT 1 FROM knowledge_fact_usage"
+                    " WHERE source_turn_id = ? AND phase = ? LIMIT 1",
+                    (str(sourceTurnId), str(phase)),
+                ).fetchone()
+                if exists:
+                    return 0
+            valid: List[str] = []
+            for factId in ids:
+                try:
+                    self._requireFact(factId)
+                    valid.append(factId)
+                except LookupError:
+                    continue
+            if not valid:
+                return 0
+            n = len(valid)
+            pBase, pRem = divmod(prompt, n)
+            cBase, cRem = divmod(completion, n)
+            stamp = _now()
+            for index, factId in enumerate(valid):
+                p = pBase + (1 if index < pRem else 0)
+                c = cBase + (1 if index < cRem else 0)
+                self._conn.execute(
+                    "INSERT INTO knowledge_fact_usage (usage_id, fact_id, source_turn_id,"
+                    " prompt_tokens, completion_tokens, total_tokens, attribution, recorded_at,"
+                    " turn_id, phase, model, estimated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("kus_%s" % uuid.uuid4().hex[:12], factId, str(sourceTurnId),
+                     p, c, p + c, "even_split", stamp,
+                     str(turnId), str(phase), str(model), int(bool(estimated))),
+                )
+            if turnId and phase == "generation":
+                self._recordTurnUsage(
+                    turnId, sourceTurnId, model, prompt, completion,
+                    prompt + completion, 0, "even_split",
+                )
+        return len(valid)
+
+    def _recordTurnUsage(
+        self, turnId: str, sessionId: str, model: str,
+        prompt: int, completion: int, attributed: int,
+        unattributed: int, attribution: str,
+        retrievalUnattributed: int = 0,
+    ) -> None:
+        if not turnId:
+            return
+        self._conn.execute(
+            "INSERT INTO knowledge_turn_usage"
+            " (turn_id, session_id, model, prompt_tokens, completion_tokens,"
+            " attributed_tokens, unattributed_tokens, attribution,"
+            " retrieval_unattributed_tokens, recorded_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(turn_id) DO UPDATE SET"
+            " session_id = excluded.session_id, model = excluded.model,"
+            " prompt_tokens = excluded.prompt_tokens,"
+            " completion_tokens = excluded.completion_tokens,"
+            " attributed_tokens = excluded.attributed_tokens,"
+            " unattributed_tokens = excluded.unattributed_tokens,"
+            " attribution = excluded.attribution",
+            (str(turnId), str(sessionId), str(model), int(prompt), int(completion),
+             int(attributed), int(unattributed), str(attribution),
+             max(0, int(retrievalUnattributed)), _now()),
+        )
+
+    def recordRetrievalUnattributed(
+        self,
+        turnId: str,
+        tokens: int,
+        *,
+        sessionId: str = "",
+        model: str = "",
+    ) -> int:
+        """记检索侧未归因 token（无生成行时也立行）；返回写入的 token 数。"""
+        count = max(0, int(tokens or 0))
+        if not turnId or count <= 0:
+            return 0
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO knowledge_turn_usage"
+                " (turn_id, session_id, model, recorded_at, retrieval_unattributed_tokens)"
+                " VALUES (?,?,?,?,?)",
+                (str(turnId), str(sessionId), str(model), _now(), count),
+            )
+            self._conn.execute(
+                "UPDATE knowledge_turn_usage SET retrieval_unattributed_tokens = ?,"
+                " session_id = CASE WHEN session_id = '' THEN ? ELSE session_id END,"
+                " model = CASE WHEN model = '' THEN ? ELSE model END"
+                " WHERE turn_id = ?",
+                (count, str(sessionId), str(model), str(turnId)),
+            )
+        return count
+
+    def recordTokenUsageAllocations(
+        self,
+        turnId: str,
+        allocations: Dict[str, Tuple[int, int]],
+        *,
+        promptTokens: int,
+        completionTokens: int,
+        sourceTurnId: str = "",
+        model: str = "",
+        estimated: bool = False,
+        attribution: str = "even_split",
+    ) -> int:
+        """按给定 fact→(prompt, completion) 分摊写账；差额进 unattributed。
+
+        与 recordTokenUsage 的均分路径互斥：同一 (turn_id, phase=generation)
+        已有行即幂等返回；不把未归因部分硬塞给某条事实。
+        """
+        if not turnId:
+            return 0
+        prompt = max(0, int(promptTokens or 0))
+        completion = max(0, int(completionTokens or 0))
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM knowledge_turn_usage WHERE turn_id = ? LIMIT 1",
+                (str(turnId),),
+            ).fetchone()
+            if exists:
+                return 0
+            valid: Dict[str, Tuple[int, int]] = {}
+            for factId, (p, c) in (allocations or {}).items():
+                try:
+                    self._requireFact(str(factId))
+                except LookupError:
+                    continue
+                valid[str(factId)] = (max(0, int(p or 0)), max(0, int(c or 0)))
+            stamp = _now()
+            attributed = 0
+            for factId, (p, c) in valid.items():
+                self._conn.execute(
+                    "INSERT INTO knowledge_fact_usage (usage_id, fact_id, source_turn_id,"
+                    " prompt_tokens, completion_tokens, total_tokens, attribution, recorded_at,"
+                    " turn_id, phase, model, estimated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("kus_%s" % uuid.uuid4().hex[:12], factId, str(sourceTurnId),
+                     p, c, p + c, str(attribution), stamp,
+                     str(turnId), "generation", str(model), int(bool(estimated))),
+                )
+                attributed += p + c
+            total = prompt + completion
+            self._recordTurnUsage(
+                turnId, sourceTurnId, model, prompt, completion,
+                attributed, max(0, total - attributed), attribution,
+            )
+        return len(valid)
+
+    def tokenUsageMetrics(self, limit: int = 20) -> Dict[str, Any]:
+        """按事实聚合的归因 token；均分口径随读数一起返回。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS events,"
+                " COUNT(DISTINCT COALESCE(NULLIF(turn_id, ''), source_turn_id)) AS turns,"
+                " COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,"
+                " COALESCE(SUM(completion_tokens), 0) AS completion_tokens,"
+                " COALESCE(SUM(total_tokens), 0) AS total_tokens"
+                " FROM knowledge_fact_usage"
+            ).fetchone()
+            top = self._conn.execute(
+                "SELECT fact_id, SUM(total_tokens) AS total_tokens, COUNT(*) AS events"
+                " FROM knowledge_fact_usage GROUP BY fact_id"
+                " ORDER BY total_tokens DESC, fact_id LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+            phases = self._conn.execute(
+                "SELECT phase, SUM(total_tokens) AS total_tokens, COUNT(*) AS events"
+                " FROM knowledge_fact_usage GROUP BY phase ORDER BY phase"
+            ).fetchall()
+            attrs = self._conn.execute(
+                "SELECT attribution, COUNT(*) AS events, SUM(total_tokens) AS total_tokens"
+                " FROM knowledge_fact_usage GROUP BY attribution ORDER BY attribution"
+            ).fetchall()
+            turn = self._conn.execute(
+                "SELECT COUNT(*) AS turns,"
+                " COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,"
+                " COALESCE(SUM(completion_tokens), 0) AS completion_tokens,"
+                " COALESCE(SUM(attributed_tokens), 0) AS attributed_tokens,"
+                " COALESCE(SUM(unattributed_tokens), 0) AS unattributed_tokens,"
+                " COALESCE(SUM(retrieval_unattributed_tokens), 0)"
+                " AS retrieval_unattributed_tokens"
+                " FROM knowledge_turn_usage"
+            ).fetchone()
+            retrieval_attributed = int(self._conn.execute(
+                "SELECT COALESCE(SUM(total_tokens), 0) AS total FROM knowledge_fact_usage"
+                " WHERE phase = 'retrieval'"
+            ).fetchone()["total"] or 0)
+            estimated = self._conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN estimated = 1 THEN total_tokens ELSE 0 END), 0)"
+                " AS estimated_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens"
+                " FROM knowledge_fact_usage"
+            ).fetchone()
+        attributions = [r["attribution"] for r in attrs]
+        turn_total = int(turn["prompt_tokens"] or 0) + int(turn["completion_tokens"] or 0)
+        fact_total = int(estimated["total_tokens"] or 0)
+        return {
+            "events": int(row["events"] or 0),
+            "turns": int(row["turns"] or 0),
+            "prompt_tokens": int(row["prompt_tokens"] or 0),
+            "completion_tokens": int(row["completion_tokens"] or 0),
+            "attributed_total_tokens": int(row["total_tokens"] or 0),
+            "attribution": (
+                attributions[0] if len(attributions) == 1
+                else ("mixed" if attributions else None)
+            ),
+            "by_fact": [dict(r) for r in top],
+            "by_phase": [dict(r) for r in phases],
+            "attribution_breakdown": [dict(r) for r in attrs],
+            "turn_totals": {
+                "turns": int(turn["turns"] or 0),
+                "prompt_tokens": int(turn["prompt_tokens"] or 0),
+                "completion_tokens": int(turn["completion_tokens"] or 0),
+                "attributed_tokens": int(turn["attributed_tokens"] or 0),
+                "unattributed_tokens": int(turn["unattributed_tokens"] or 0),
+                "unattributed_share": (
+                    round(int(turn["unattributed_tokens"] or 0) / turn_total, 6)
+                    if turn_total else None
+                ),
+                "retrieval_unattributed_tokens": int(
+                    turn["retrieval_unattributed_tokens"] or 0
+                ),
+                "retrieval_unattributed_share": (
+                    round(
+                        int(turn["retrieval_unattributed_tokens"] or 0)
+                        / (retrieval_attributed + int(turn["retrieval_unattributed_tokens"] or 0)),
+                        6,
+                    )
+                    if (retrieval_attributed + int(turn["retrieval_unattributed_tokens"] or 0))
+                    else None
+                ),
+            },
+            "estimated_token_share": (
+                round(int(estimated["estimated_tokens"] or 0) / fact_total, 6)
+                if fact_total else None
+            ),
+        }
+
     def usageMetrics(self) -> Dict[str, Any]:
         """零使用占比 / 回写盲区 / 三态分布——治理面的读数，不是排序依据。"""
         with self._lock:
@@ -584,15 +903,15 @@ class KnowledgeFactStore:
             "outcome_success": int(row["ok"] or 0),
             "outcome_failure": int(row["bad"] or 0),
             "outcome_unevidenced": int(row["blind"] or 0),
-            # 一条回执都没有时，读数必须自带成因，不能只留一个 0：
-            # `recordAdoption` 目前在全仓没有生产调用点（AST 复算，台账 §6-124），
-            # 于是这个 0 的两种可能成因里，"没人写过"是当前的实情，"没人采纳"无从判断。
-            # 把账面缺失摆成产品结论，正是 §6-109 那族"算完不告诉人哪里没成"的形态。
+            # 一条回执都没有时，读数必须自带成因，不能只留一个 0。
+            # 写入面现已接两条：/chat/feedback（服务端 lineage）与
+            # /knowledge/facts/{id}/adoption（显式管理端）。因此 0 的含义是
+            # “尚未发生回写”，不是“写面未接线”，更不是“没人采纳”。
             **({
                 "missing_reason": (
-                    "outcome_written=0：全库没有一条采纳回执。两种成因——写面未接线"
-                    "（`recordAdoption` 目前无生产调用点，见台账 §6-124）或底座尚无采纳事件；"
-                    "在接线之前，这个 0 不可读成「没人采纳」。"
+                    "outcome_written=0：全库没有一条采纳回执。写入面已接"
+                    "（/chat/feedback 按服务端 lineage、/knowledge/facts/{id}/adoption 显式）；"
+                    "这个 0 表示尚未发生回写，不等于「没人采纳」。"
                 )
             } if int(row["never_written"] or 0) == total else {}),
         }

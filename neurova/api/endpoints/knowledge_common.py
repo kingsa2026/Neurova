@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
@@ -39,6 +39,10 @@ class KnowledgeItem(BaseModel):
     shared_with: List[str] = []
     submission: Optional[Dict[str, Any]] = None
     graph_node_ids: List[str] = []
+    valid_until: Optional[str] = None
+    lifecycle_status: str = "active"
+    lifecycle_reason: str = ""
+    lifecycle_changed_at: Optional[str] = None
     # P0-2 分块契约：块数 + 检索命中的块级溯源（[{chunk_index, content, score}]）
     chunk_count: int = 1
     chunk_hits: List[Dict[str, Any]] = []
@@ -54,6 +58,8 @@ class KnowledgeCreate(BaseModel):
     source: str = Field(default="", description="来源")
     confidence: float = Field(default=0.5, ge=0, le=1, description="置信度")
     visibility: str = Field(default="private", description="可见性：private（默认）/ public（仅管理员）")
+    valid_until: Optional[str] = Field(default=None, description="有效期截止（ISO8601，空=不过期）")
+    lifecycle_status: Literal["active", "archived"] = Field(default="active", description="生命周期状态")
 
 
 class KnowledgeUpdate(BaseModel):
@@ -64,6 +70,8 @@ class KnowledgeUpdate(BaseModel):
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     confidence: Optional[float] = None
+    valid_until: Optional[str] = None
+    lifecycle_status: Optional[Literal["active", "archived"]] = None
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -135,6 +143,10 @@ def item_response(item: Dict[str, Any]) -> KnowledgeItem:
         shared_with=item.get("shared_with") or [],
         submission=item.get("submission"),
         graph_node_ids=item.get("graph_node_ids") or [],
+        valid_until=item.get("valid_until"),
+        lifecycle_status=item.get("lifecycle_status", "active"),
+        lifecycle_reason=item.get("lifecycle_reason", ""),
+        lifecycle_changed_at=item.get("lifecycle_changed_at"),
         chunk_count=len(item.get("chunks") or []) or 1,
         chunk_hits=item.get("chunk_hits") or [],
     )

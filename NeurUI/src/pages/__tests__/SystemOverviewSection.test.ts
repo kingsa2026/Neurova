@@ -33,10 +33,14 @@ vi.mock('@/api/modules/analytics', () => ({
   getBehaviorAnalytics: vi.fn(),
   getErrorAnalytics: vi.fn(),
 }))
+vi.mock('@/api/modules/quality', () => ({
+  getQualityMetrics: vi.fn(),
+}))
 
 import SystemOverviewSection from '@/pages/analytics/SystemOverviewSection.vue'
 import { statsApi } from '@/api/modules'
 import { getPerformanceAnalytics, getBehaviorAnalytics, getErrorAnalytics } from '@/api/modules/analytics'
+import { getQualityMetrics } from '@/api/modules/quality'
 
 const messages = {
   common: {
@@ -58,6 +62,14 @@ const messages = {
   },
   system: { overview: '概览', performance: '性能', behavior: '行为', errors: '错误' },
   agent: { stats: '智能体统计' },
+  chat: {
+    sessionQualityTitle: '会话质量（近 7 天）',
+    sessionQualityTakeoverRate: '人工接管率',
+    sessionQualitySafetyRefusalRate: '安全拒答率',
+    sessionQualityToolFailureRate: '工具失败率',
+    sessionQualityUnknownRate: '未知完成态占比',
+    sessionQualityWindowHint: '无分母的率显示 --，不默认按 0 计',
+  },
   analytics: {
     day: '日', week: '周', month: '月',
     avgResponse: '平均响应', p95Latency: 'P95 延迟', throughput: '吞吐量', errorRate: '错误率',
@@ -114,6 +126,29 @@ describe('SystemOverviewSection', () => {
     vi.mocked(getPerformanceAnalytics).mockResolvedValue({ period: 'week', by_endpoint: [] } as never)
     vi.mocked(getBehaviorAnalytics).mockResolvedValue({ period: 'week', top_tools: [], conversation_patterns: [] } as never)
     vi.mocked(getErrorAnalytics).mockResolvedValue({ period: 'week', by_type: [] } as never)
+    vi.mocked(getQualityMetrics).mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: {
+        measure_state: 'measured',
+        human_takeover_rate: 0.5,
+        safety_refusal_rate: null,
+        tool_failure_rate: 1,
+        unknown_outcome_rate: 0.25,
+      },
+    } as never)
+  })
+
+  it('renders session quality rates and keeps missing denominators as --', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('会话质量（近 7 天）')
+    const values = wrapper.findAll('.stat-value').map((w) => w.text())
+    expect(values).toContain('50.0%')
+    expect(values).toContain('--')
+    expect(values).toContain('100.0%')
+    expect(values).toContain('25.0%')
   })
 
   it('admin renders real overview KPI cards and agent stats table', async () => {
