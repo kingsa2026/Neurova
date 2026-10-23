@@ -1605,7 +1605,7 @@ class ToolExecutor:
                 }
             from neurova.security.governance import extract_adjudicable_params
 
-            command, _pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
+            command, pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
@@ -1642,8 +1642,13 @@ class ToolExecutor:
                                 }
                             )
                 return sandbox_result
-            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
-            logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
+            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因。
+            # 点名用的是裁决面**真的**过过的路径（`pathValuesForTool`，§6-284 丁的多值口），
+            # 不再写一个上文不存在的 `file_path`：那既让日志恒读空，也只报第一条。
+            logger.warning(
+                "文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s",
+                "; ".join(f"{name}={value}" for name, value in pathValues),
+            )
             return {
                 "success": False,
                 "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
