@@ -14,17 +14,31 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-import numpy as np
+# numpy 是**可选**依赖（requirements-ci.txt 刻意排除，requirements.txt 装）：
+# 缺席时本模块仍须可导入——否则 `from neurova.embedding import get_embedding_engine`
+# 在薄环境里抛 ModuleNotFoundError，把每一个「引擎缺席即降级关键词档」的调用方
+# 从降级路径推到异常路径（AGENTS.md §3 可选依赖：惰性 + fail-soft）。
+# 缺 numpy 时 _normalize 走纯 Python 实现，`np` 为 None 即是「这一档不可用」的
+# 唯一判据——不新造第二个开关。
+try:  # pragma: no cover - 取决于运行环境的可选依赖
+    import numpy as np
+except ImportError:  # pragma: no cover
+    np = None
 
 logger = get_logger(__name__)
 
 
-def _normalize(vec: np.ndarray) -> np.ndarray:
-    """L2 归一化"""
-    norm = np.linalg.norm(vec)
+def _normalize(vec: Any) -> Any:
+    """L2 归一化（numpy 档与纯 Python 档逐值同语义）。"""
+    if np is not None:
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            return vec / norm
+        return vec
+    norm = sum(float(x) * float(x) for x in vec) ** 0.5
     if norm > 0:
-        return vec / norm
-    return vec
+        return [float(x) / norm for x in vec]
+    return list(vec)
 
 
 class EmbeddingResult:
@@ -179,6 +193,12 @@ class ONNXEmbeddingEngine:
 
     def _try_load_onnx(self) -> bool:
         """尝试加载 ONNX Runtime 后端"""
+        if np is None:
+            # 前处理与后处理全是 ndarray 运算：缺 numpy 时这一档整体不可用。
+            # 让位给 sentence-transformers 档（它不需要 numpy），而不是先加载
+            # session 再在 encode 时崩。
+            logger.debug("numpy 未安装，跳过 ONNX Runtime 后端")
+            return False
         try:
             import onnxruntime as ort
         except ImportError:
@@ -319,6 +339,19 @@ class ONNXEmbeddingEngine:
                 )
 
         start_time = time.time()
+
+        # 缺 numpy 时 ONNX 这一档整段不可用（前处理/后处理都是 ndarray 运算）：
+        # 在此点名并返回零向量兜底（与下方既有的「初始化失败」兜底同一形态），
+        # 而不是让 `np.array` 抛 AttributeError——后者会把「可选依赖缺席」
+        # 伪装成「代码缺陷」。运行时按 backend_type 判定，不按代码位置假设。
+        if np is None and self._backend_type != "sentence_transformers":
+            logger.error("numpy 缺席，ONNX 推理档不可用，返回零向量兜底")
+            return EmbeddingResult(
+                vectors=[[0.0] * 512] * len(texts),
+                model_name=self._model_name,
+                dimension=512,
+                inference_ms=0,
+            )
 
         try:
             # sentence-transformers 后端
