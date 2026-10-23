@@ -299,6 +299,10 @@ class TestNestedPytestBudgetWalls:
     def test_noCollectedNestingTestIsLeftToTheGlobalWall(self):
         """父墙必须严格高于子墙；无父墙的嵌套 pytest 用例一律点名。"""
         findings, nestingTests, _coarse, _attributed = _scanCorpus()
+        # 面自证：`TESTS_ROOT` 被改窄时"零违规"与真干净同形（面自证棘轮要求同档有这条读数）
+        scanned = sum(1 for _ in ast_scan.filesUnder(TESTS_ROOT))
+        assert scanned > 500, (
+            f"扫描面现读 {scanned} 个 .py（根＝{TESTS_ROOT}）——根写错时下面的『零违规』不代表干净")
         assert not findings, (
             "这些用例在子进程里再跑一遍 pytest，自己的预算却没声明（或声明得比子进程还低）。"
             "Windows 侧 pytest-timeout 走 thread 法，超时即终止进程——一格超墙＝整场跑测没了：\n"

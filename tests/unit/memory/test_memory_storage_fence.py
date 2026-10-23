@@ -58,13 +58,24 @@ class TestDefaultPathIsNotCwdRelative:
 
 
 class TestFenceCoversMemorySurfaces:
-    def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
-        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
+    def test_productionMemoryDirIsTheRepoDataRoot(self):
+        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
+
+        现读是 `data/`：`4bf9b733` 把 agent 私有数据落点统一到 `data/<agent_id>/` 之后，
+        `productionMemoryDir()` 跟着改成数据根（`storage_fence.py` 的同笔注释写明理由）；
+        本格原来钉的是旧布局 `agent_workspaces/`，于是它红在"布局换了、判据没跟"上。
+        围栏**同时**仍盖旧目录（`_productionMemoryDirs()` 两处并列），这一条不跟着撤。
+        """
+        from neurova.core.data_root import repoRoot
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        assert productionMemoryDir() == repoRoot() / "data", (
+            "生产记忆落点不是仓内数据根——围栏会与真实装配点各说一套")
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
+        assert underProductionMemory(repoRoot() / "agent_workspaces" / "default"
+                                     / "memory" / "neurova_memories_persist.db"), (
+            "旧布局目录被移出围栏了：磁盘上仍有存量记忆，围栏必须同时守住两处")
 
     def test_isolatedDirectoryIsNotProduction(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "ws"))

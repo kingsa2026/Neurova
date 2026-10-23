@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 import pathlib
 
 from tests import ast_scan
@@ -105,7 +106,9 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    # 解释器按**本进程那个**取：POSIX 上只有 `python3`，写死 `python` 时红的是探针
+    # （`FileNotFoundError: 'python'`），不是"运行时半区删错了"。
+    result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 
