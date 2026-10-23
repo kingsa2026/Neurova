@@ -106,10 +106,10 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    # 解释器名按**跑测的这个进程**取：Linux/mac 上常常只有 `python3`，
-    # 写死 `python` 时这条活体腿红的是宿主没装别名，不是本地运行时坏了。
-    result = asyncio.run(
-        runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
+    # 解释器名按**跑测的这一个**取，不写字面 `python`：容器/发行版里常常只有
+    # `python3`（本仓 CI 镜像即是），写死会红成"运行时坏了"，而坏的是这条取法。
+    result = asyncio.run(runtime.exec(
+        command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 

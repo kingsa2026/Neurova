@@ -109,9 +109,15 @@ svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
     # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    # 直连：`market_registry` 是仓内模块，`ImportError` 在这里只可能是装坏了，
-    # 不是受支持的降级面——包一层同名桩等于造一个"探针读自己那张表"的假对照。
-    from neurova.skills.market_registry import hasExecutorMapping
+    # 同一判定在两侧的取法不同：本树有 `hasExecutorMapping`；对照腿（本批修复之前的那棵树）
+    # 只有私有表。两种取法都落在**同一趟导入**里，靠 `getattr` 分派——不写成
+    # 「except ImportError 里再定义同名函数」：那是同名桩形态，一旦真触发就把"判定"
+    # 换成一份并行实现，而读代码的人看见的是"有兜底"（`test_noFirstPartyImportPlaceholder`
+    # 的零容忍政策正是冲这个形状定的）。比的从来不是这个取法，是四面的读数是否同向。
+    from neurova.skills import market_registry
+
+    hasExecutorMapping = getattr(market_registry, "hasExecutorMapping", None) or (
+        lambda sid: str(sid or "") in market_registry._MARKET_EXECUTORS)
 
     sid = entry["id"]
     d = SKILLS_DIR / sid

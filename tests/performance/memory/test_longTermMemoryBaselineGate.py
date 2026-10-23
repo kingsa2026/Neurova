@@ -36,13 +36,13 @@ from pathlib import Path
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan
+from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
 
@@ -574,16 +574,24 @@ class TestUncollectedMeasurementFileIsRetired:
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts = []
-        scanned = 0
-        # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
-        # 不留常驻语法树、不与代码总量和机器速度捆绑。
+        ghosts, unparsed, scanned = [], [], 0
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
+        # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
         for root in REPO_WIDE_SCAN_ROOTS:
-            for path, node in ast_scan.transientNodes(
-                    REPO_ROOT / root, hints=("class SimpleLongMemEval",)):
+            for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("SimpleLongMemEval",)):
                 scanned += 1
-                if isinstance(node, ast.ClassDef) and node.name == "SimpleLongMemEval":
-                    ghosts.append(path.relative_to(REPO_ROOT).as_posix())
+                try:
+                    tree = ast_scan.transientTree(ref.path)
+                except SyntaxError:
+                    unparsed.append(ref.path.relative_to(REPO_ROOT).as_posix())
+                    continue
+                if any(
+                    isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
+                    for n in ast.walk(tree)
+                ):
+                    ghosts.append(ref.path.relative_to(REPO_ROOT).as_posix())
+        # 面自证：先证这次真扫到了语料，再谈「没有复活」——根指错时零命中与干净同形。
         assert scanned > 0, (
-            "扫描面现读 0 个节点（根＝REPO_WIDE_SCAN_ROOTS）——根写错时「零命中」不代表干净")
+            "扫描面现读 0 个文件（根＝REPO_WIDE_SCAN_ROOTS）——根指错时『没复活』不代表干净")
+        assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"
