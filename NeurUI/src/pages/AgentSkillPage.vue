@@ -580,7 +580,8 @@ async function adoptHarness(item: skillPoolApi.DomainHarness) {
     message.success(t('skillEvo.adoptSuccess'))
     openProposals()
   } catch (err: any) {
-    message.error(err?.response?.data?.detail || err?.message || t('skillEvo.adoptError'))
+    const detail = err?.response?.data?.detail || err?.message
+    message.error(detail || t('skillEvo.adoptError'))
   }
 }
 
