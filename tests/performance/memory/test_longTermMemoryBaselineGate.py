@@ -30,8 +30,16 @@
 import datetime
 import os
 import time
+from pathlib import Path
 
 import pytest
+
+from tests import ast_scan
+
+#: 扫描根绑在模块级：绑在函数里的名字，面自证棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 认不出，整档会安静地掉出它的面（§6-404 批 M 补这一处）。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = REPO_ROOT / "tests" / "performance"
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
@@ -539,12 +547,14 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
+        scanned = len(ast_scan.sourceRefsUnder(PERFORMANCE_ROOT, ".py"))
+        assert scanned >= 3, (
+            "该目录现读 %d 个 .py——PERFORMANCE_ROOT 指错时『没有散件』是假绿（面自证）" % scanned)
+        # 落点直接向模块级常量要根：函数内的 `root = PERFORMANCE_ROOT` 重绑会让
+        # 面自证棘轮的解根器认不出（它只收模块级绑定）。
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in PERFORMANCE_ROOT.rglob("*.py")
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
@@ -556,28 +566,40 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
-        from pathlib import Path
 
-        repo = Path(__file__).resolve().parents[3]
-        assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
+        # 落点与报错都直接向模块级常量要根：函数内的 `repo =` 重绑会让解根器认不出。
+        assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts, unparsed = [], []
-        for root in ("neurova", "tests", "scripts"):
-            for path in (repo / root).rglob("*.py"):
-                if "__pycache__" in path.parts:
+        # 枚举与读盘走 `tests/ast_scan` 的共享预算；预筛词就是这个类名——`class X` 这一行
+        # 必须出现它，是这条谓词的**充分条件**，口径仍是三棵树全量。
+        ghosts, unparsed, scanned = [], [], 0
+        for rootName in ("neurova", "tests", "scripts"):
+            for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
+                                                hints=("SimpleLongMemEval",)):
+                if "__pycache__" in ref.path.parts:
                     continue
+                scanned += 1
+                path = ref.path
                 try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                    tree = ast.parse(ref.code)
                 except (SyntaxError, UnicodeDecodeError):
-                    unparsed.append(path.relative_to(repo).as_posix())
+                    unparsed.append(path.relative_to(REPO_ROOT).as_posix())
                     continue
                 if any(
                     isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
                     for n in ast.walk(tree)
                 ):
-                    ghosts.append(path.relative_to(repo).as_posix())
+                    ghosts.append(path.relative_to(REPO_ROOT).as_posix())
+        corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
+        assert corpusFiles >= 800, (
+            "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条守卫根本不说话" % corpusFiles)
+        # 退役完成后，`SimpleLongMemEval` 这个字面串只剩本档自己的记录（现算 1 个文件）。
+        # 所以这里的线是 **≥1**：掉到 0 的唯一解释是预筛词写坏或根被换窄——
+        # 那正是"零命中"与"没扫到"长得一样的那一形。
+        assert scanned >= 1, (
+            "带类名的候选现读 %d 个文件——预筛或根写坏，此时『零幽灵』不作数（面自证）" % scanned)
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"
