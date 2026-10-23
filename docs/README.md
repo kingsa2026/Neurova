@@ -89,7 +89,7 @@ tests/                          # Neutesting 根目录
 │   │   ├── test_data_masking.py
 │   │   └── test_rbac.py
 │   ├── projects/           # 项目管理测试
-│   │   ├── test_project_manager.py
+│   │   ├── test_collaboration_isolation.py
 │   │   └── test_teams.py
 │   ├── skills/             # 技能系统测试
 │   │   └── test_skill_registry.py
@@ -118,7 +118,6 @@ tests/                          # Neutesting 根目录
 ├── integration/            # Neutesting 集成测试层
 │   ├── __init__.py
 │   ├── conftest.py         # 集成测试配置和fixtures
-│   ├── test_project_management.py
 │   ├── test_event_workflow.py
 │   ├── test_module_system_integration.py
 │   └── test_security_integration.py

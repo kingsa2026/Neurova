@@ -3679,3 +3679,18 @@ tests/unit/agent/test_futileThinkingRetryIsSkipped.py
 # 池里别的房救回／路由答不出即 fail-open。入册前逐文件单跑全绿（9 passed／4 passed）。
 tests/unit/llm/test_thinkingKnobResolvesAtRoutingBoundary.py
 tests/unit/agent/test_futileRetryGateReadsRealAssembly.py
+# §6-404（批 M）：「按想象的 API」测试与「整档静默 skip」两形的退役守卫。
+# 预存红里那族「构造签名漂移 15 格」逐格读实装后的实况：被测形状在生产侧从未存在过——想象枚举
+# （`SafetyLevel.SAFE`，真成员 LOW/MEDIUM/HIGH/CRITICAL）、想象构造参（`cognitive_orchestrator`、
+# `StateManager(event_bus=)`）、想象属性（`dialog_handler/event_queue/page_snapshots`）、
+# 想象返回（`OutputFilter.filter` 解 3 元组，实为 2 元组）、想象接缝（`set` 后经总线发 `state.changed`，
+# 实为遍历本地 `_any_listeners`）。另两支：`BrowserSupervisor` 与 `neurova.projects.ProjectManager`
+# 都零生产消费者（后者连包都不存在，`projects_api.py:19-21` 已裁定该兜底删除），而 7 档用
+# `try/except ImportError → 档位级 skipIf` 把"模块没了"降级成一排 skip。
+# 处置：退役 4 档想象／空壳测试；`test_event_workflow.py` 6 格重写为总线契约＋状态监听器真实接缝；
+# 另 4 档拆掉静默 skip（57 passed、零 skip）；唯一真缺口补进真实档并变异探针验牙。
+# 三符号的存废是**人裁票**（档案见 audit-reports/zero-consumer-module-dossier-2026-10-23.md），本闸只管不许复活。
+# 读数：红 3 failed／4 passed（4.90s：点名 4 档在场＋18 处形状＋7 档静默 skip）→ 绿 7 passed（4.98s／5.04s 两次）。
+# 重写后的 `test_event_workflow.py` 与承接档逐文件单跑：6 passed（4.01s）／38 passed（3.87s）；
+# 新补的门面转发格做过变异探针（把 `check_memory_safety` 改成 `return None`）⇒ 只有它红，探针已还原。
+tests/unit/ci/test_imaginedApiSuitesRetired.py
