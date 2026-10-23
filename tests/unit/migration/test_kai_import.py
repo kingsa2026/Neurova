@@ -600,7 +600,9 @@ class TestIdentityFiles:
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
         # PROFILE → personality.md（_load_identity 第二加载位）
         assert "凯的档案" in (workspace / "memory" / "personality.md").read_text(encoding="utf-8")
-        # PROFILE/MEMORY 在 workspace 根留档
-        assert (workspace / "PROFILE.md").exists()
-        assert (workspace / "MEMORY.md").exists()
+        # PROFILE/MEMORY 在 workspace 留档（`<agent_root>/workspaces/`，与
+        # `get_agent_workspace_dir()` 同一落点；导入产物必须落在读取侧会看的位置）
+        workspacesDir = workspace / "workspaces"
+        assert (workspacesDir / "PROFILE.md").exists(), sorted(p.name for p in workspace.iterdir())
+        assert (workspacesDir / "MEMORY.md").exists()
         assert stats["files"] >= 4

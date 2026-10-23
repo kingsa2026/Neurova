@@ -26,6 +26,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
 SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
+#: 回收上限：`<repo>/data`，与 `SESSIONS_DIR` 同源推导（清理时不得就地再拼一遍）。
+DATA_DIR = SESSIONS_DIR.parent
 
 
 def _cleanupProbeRealLanding():
@@ -34,14 +36,14 @@ def _cleanupProbeRealLanding():
     只在目录为空（探针没往里写过会话）时删；非空说明有真实数据，
     宁可留着让人看见也不静默删（这里不吞异常的另一面）。
     回收上限是 `<repo>/data`：再往上不是本探针建的，不碰。
-    路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
+    空判定只看**一个**目录（`SESSIONS_DIR`）：它删空之后祖先才可能空，而祖先是从模块级
+    常量 `DATA_DIR` 取的同一条路径——不再就地拼 `<repo>/data`，面自证棘轮才不会把
+    「可能尚不存在的中间目录」解成 `missing`。
     """
     try:
-        if SESSIONS_DIR.is_dir() and not any(SESSIONS_DIR.iterdir()):
-            SESSIONS_DIR.rmdir()
-        if (SESSIONS_DIR.parent == REPO_ROOT / "data" and SESSIONS_DIR.parent.is_dir()
-                and not any(SESSIONS_DIR.parent.iterdir())):
-            SESSIONS_DIR.parent.rmdir()
+        for candidate in (SESSIONS_DIR, DATA_DIR):
+            if candidate.is_dir() and not any(candidate.glob("*")):
+                candidate.rmdir()
     except OSError:
         pass
 

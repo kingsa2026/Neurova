@@ -548,17 +548,27 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 
 
 def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → <agent_root>/soul.md；PROFILE.md → personality.md + workspace 留档；
-    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。"""
+    """SOUL.md → `<agent_root>/workspaces/memory/soul.md`；
+    PROFILE.md → `memory/personality.md` + workspace 留档；MEMORY.md → workspace 留档。
+    全部覆盖式同步（源即真相）。
+
+    身份文件的**读取位**是 `Agent._load_identity`：它读 `<agent_root>/` 与
+    `<agent_root>/memory/memory/` 两处（同 `<cli.py>` 的导入侧落点，本仓单一取法是
+    `neurova.core.agent_workspaces.get_agent_memory_dir`）。旧版写的是
+    `<agent_root>/soul.md`（v2 布局前的位置），现行加载器一个字节都读不到——
+    导入成功而 agent 起来还是默认身份，那是最坏的一种"成功"。
+    """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
     workspace = agent_root / "workspaces"
-    workspace.mkdir(parents=True, exist_ok=True)
+    memory_dir = agent_root / "memory"
+    for target in (workspace, memory_dir):
+        target.mkdir(parents=True, exist_ok=True)
     files = 0
 
     mapping = [
-        (kai_root / "SOUL.md", agent_root / "soul.md"),
-        (kai_root / "PROFILE.md", agent_root / "personality.md"),
+        (kai_root / "SOUL.md", memory_dir / "soul.md"),
+        (kai_root / "PROFILE.md", memory_dir / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
     ]
