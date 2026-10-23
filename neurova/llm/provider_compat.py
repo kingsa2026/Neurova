@@ -79,6 +79,24 @@ class ProviderCompat:
             return None
         return self._REASONING_EFFORT_MAP.get((thinking_effort or "").strip().lower())
 
+    def thinkingReducible(self, request_params: Optional[dict] = None) -> bool:
+        """"把思考关掉/降到最低"这条动作，对这台网关 + 这份请求**会不会真的改变发出去的字节**。
+
+        三条通道任一可用即为真，读的都是发送侧真正消费的那几个键（`llm_client`
+        的 `_build_request_params`）——判据与发送侧分叉，就会出现"以为降了思考、其实
+        什么都没发"的空转重试（2026-10-22 实测：恢复轮 6 分钟后撞出第二段同样的连发）：
+
+        - `supports_thinking_toggle` → `enable_thinking` 发得出去；
+        - 请求里已带显式 `reasoning_effort` 且网关声明消费它 → 降档发得出去；
+        - 最低档在本网关的映射表里有实值（`light` 映射成 None 就是"不表态"）。
+        """
+        params = request_params or {}
+        if self.supports_thinking_toggle:
+            return True
+        if self.supports_reasoning_effort and params.get("reasoning_effort"):
+            return True
+        return self.map_reasoning_effort("light") is not None
+
     def merged(self, overrides: Optional[dict]) -> "ProviderCompat":
         """显式声明覆盖静态表（字段级合并）。
 
@@ -179,6 +197,18 @@ def resolve_compat(
     for layer in layers:
         compat = compat.merged({f: getattr(layer, f) for f in layer.__dataclass_fields__})
     return compat.merged(compat_dict)
+
+
+def thinkingKnobReachesGateway(client: Any, request_params: Optional[dict] = None) -> bool:
+    """问一问：对**这个客户端**，"关思考/降档"发得出去吗（三处恢复路径共用）。
+
+    拿不到 compat（替身/未装配）时按"发得出"处理——没有声明就没有资格判它到不了，
+    判错一次就白丢一次真正能自救的重试。
+    """
+    compat = getattr(getattr(client, "config", None), "compat", None)
+    if compat is None:
+        return True
+    return bool(compat.thinkingReducible(request_params))
 
 
 # ── 声明面校验单源 ────────────────────────────────────────────────────────
