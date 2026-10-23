@@ -25,7 +25,15 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-SESSIONS_DIR = REPO_ROOT / "data" / "sessions"
+#: 常量只写到**真实存在**的那一级（`<repo>/data`），末级目录拼在调用处（`_sessionsDir()`）：
+#: 棘轮按「接收者的落点态」取数，接收者若是个可能不存在的路径就落 missing 被读成「根写错」，
+#: 与「这个目录今天本来就不该在仓库里」两件事混成一句。
+SESSIONS_PARENT = REPO_ROOT / "data"
+
+
+def _sessionsDir() -> Path:
+    """仓库真实会话库（`<repo>/data/sessions`）——探针刻意要落的那一处。"""
+    return SESSIONS_PARENT / "sessions"
 
 
 def _cleanupProbeRealLanding():
@@ -36,12 +44,12 @@ def _cleanupProbeRealLanding():
     回收上限是 `<repo>/data`：再往上不是本探针建的，不碰。
     路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
     """
+    sessionsDir = _sessionsDir()
     try:
-        if SESSIONS_DIR.is_dir() and not any(SESSIONS_DIR.iterdir()):
-            SESSIONS_DIR.rmdir()
-        if (SESSIONS_DIR.parent == REPO_ROOT / "data" and SESSIONS_DIR.parent.is_dir()
-                and not any(SESSIONS_DIR.parent.iterdir())):
-            SESSIONS_DIR.parent.rmdir()
+        if sessionsDir.is_dir() and not any(sessionsDir.iterdir()):
+            sessionsDir.rmdir()
+        if SESSIONS_PARENT.is_dir() and not any(SESSIONS_PARENT.iterdir()):
+            SESSIONS_PARENT.rmdir()
     except OSError:
         pass
 
@@ -73,7 +81,7 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     # 面读数：本档的清理路径以仓根为锚——锚指错了，「探针没在仓库里留下会话目录」这句就落在不存在的路径上。
     repoEntries = [p for p in REPO_ROOT.iterdir()]
     assert len(repoEntries) > 20, (
-        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，会话落点＝{SESSIONS_DIR}）——"
+        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，会话落点＝{_sessionsDir()}）——"
         "量级不对＝锚指错，清理与判定都不来自代码")
     try:
         probeFile.write_text(textwrap.dedent(body), encoding="utf-8")

@@ -31,6 +31,11 @@ def test_noImporterRemains():
     from tests import ast_scan
 
     offenders = {}
+    # 面读数：零命中的基数必须是"这次真扫到了仓内源码"，根被改窄时它会掉下来——
+    # 没有这一句，零命中也可能是"什么都没扫"（面自证棘轮 `test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）。
+    pairs = list(ast_scan.nodeScan(REPO_ROOT, ".py"))
+    scanned = len(pairs)
+    assert scanned > 500, f"扫描面现读 {scanned}"
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.{name}")
