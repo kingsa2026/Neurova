@@ -58,6 +58,17 @@ async def shutdown_agent(agent) -> None:
         except Exception as e:
             logger.warning("后处理后台步骤收尾等待失败: %s", e)
 
+    # 停掉由本模块 `bind_and_start_sleep_loop` 起的空闲监控线程：同一个模块起的手，得由
+    # 同一个模块关。此前这里关语音桥/TTS/ASR/对话缓冲，唯独不关它 ⇒ 每建一个 Agent 就
+    # 永久多一条 `idle-tracker-monitor` 线程（§6-407 批 O-2 根修）。先停再整理：不让监控
+    # 线程与关机整理同时改阶段、同时写回。
+    idle_tracker = getattr(agent, "idle_tracker", None)
+    if idle_tracker is not None:
+        try:
+            idle_tracker.stop()   # BaseModule 状态机 → on_stop → _stop_monitoring(join)
+        except Exception as e:  # noqa: BLE001 - 关闭链不因单个旁路中断
+            logger.warning("空闲监控线程停止失败: %s", e)
+
     # Phase 10: 触发睡眠整理（结果必须写回——此前只打日志，等于无效计算）
     sleep_consolidation = getattr(agent, "sleep_consolidation", None)
     memory_manager = getattr(agent, "memory_manager", None)
