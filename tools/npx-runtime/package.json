@@ -15,6 +15,10 @@
     "swagger-jsdoc": {
       "yaml": "2.8.3"
     },
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@modelcontextprotocol/server": "2.3.0",
+    "hono": "4.13.11",
+    "ip-address": "10.7.4",
+    "zod": "4.6.6"
   }
 }
