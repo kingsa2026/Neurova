@@ -85,7 +85,7 @@ def main() -> int:
     sizes = [int(value) for value in sys.argv[1:]] or [10_000, 100_000, 1_000_000]
     backend, reason = resolveAnnBackend()
     if backend is None:
-        print("[FAIL] ANN 后端不可用：%s（装 requirements-ann.txt 后重跑）" % reason)
+        print("[FAIL] ANN 后端不可用：%s（基础 requirements.txt 已含 hnswlib，重装后重跑）" % reason)
         return 1
     print("后端：%s；阈值内维度：%d" % (backend.name, DIM))
     for size in sizes:

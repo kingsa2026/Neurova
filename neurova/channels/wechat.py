@@ -22,8 +22,13 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-from neurova.channels.base import ChannelAdapter, ChannelConfig, MessageChannel
+from neurova.channels.base import (
+    ChannelAdapter,
+    ChannelConfig,
+    MessageChannel,
+)
 from neurova.channels.models import ContentType, UnifiedMessage
+from neurova.channels.wechat_kf import WeChatKfEventsMixin
 
 from neurova.channels.wechat_auth import WeChatAuthMixin
 from neurova.channels.wechat_parsing import WeChatParsingMixin
@@ -43,6 +48,7 @@ class WeChatAdapter(
     WeChatMediaMixin,
     WeChatAIGenerationMixin,
     WeChatAIHandlerMixin,
+    WeChatKfEventsMixin,
 ):
     """
     微信消息渠道适配器
@@ -70,6 +76,9 @@ class WeChatAdapter(
 
     # iLink 协议 API (假设的端点，实际根据具体实现)
     ILINK_API_BASE = "https://ilink.wechat.bot"
+
+    # 微信客服（kf_mode）有原生 session_status_change 事件；其他模式保持 False。
+    humanTakeoverEvents = False
 
     @property
     def channel(self) -> MessageChannel:
@@ -185,6 +194,9 @@ class WeChatAdapter(
 
         # 消息回复计数器 (iLink 限制)
         self._reply_counts: Dict[str, int] = {}
+        # 微信客服 sync_msg 游标（按 open_kfid）；重启后为空只会导致重复拉取，
+        # 质量事件按 msgid 幂等，不产生重复事实。
+        self._kf_cursors: Dict[str, str] = {}
 
         # 初始化所有 Mixin 实例
         WeChatAuthMixin.__init__(self, self)
