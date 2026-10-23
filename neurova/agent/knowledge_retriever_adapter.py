@@ -4,6 +4,8 @@ P0#4：chat 路从裸 TF-IDF 分片切到 knowledge.hybrid
 四路 RRF（tfidf 分片 + bm25 + fts + ONNX 向量持久化索引）——双索引器合一，
 语义路首次进入对话管线；向量引擎不可用时各辅助路自动降级，主路（tfidf）
 异常仍上抛由责任链决定 fallback。用户隔离与质量评分契约不变。
+RRF 之后应用轻量采纳先验（success 升、failure 降、unevidenced 中性），
+在最终 top-k 截断前重排；候选窗扩到 3 倍以给降权项腾出的位置留替补。
 """
 
 from __future__ import annotations
@@ -13,8 +15,13 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.feedback_prior import rerankByAdoption
 
 logger = get_logger(__name__)
+
+#: 采纳重排需要比最终 top-k 更宽的候选窗，否则被降权项腾出的位置没有替补。
+ADOPTION_CANDIDATE_FACTOR = 3
+ADOPTION_CANDIDATE_MAX = 100
 
 
 class KnowledgeRetrieverAdapter:
@@ -60,36 +67,52 @@ class KnowledgeRetrieverAdapter:
         return self._priority
 
     def _enrich(self, knowledge_items):
-        """把治理字段挂到已排好序的命中上，并回写注入计数。
+        """把治理字段挂到已排好序的命中上；注入计数交给最终选中的命中。
 
         011 试过"两池按秩交织"并被真数据否证（同一份内容在两池各算一票，
         短事实凭 BM25 优势顶掉强叙述命中）。所以接入底座的方式改成富化：
-        排序仍由那把冻结的尺子说了算，底座只补充置信/证据态/血缘内键。
-        关闸即原样返回、零回流副作用。
+        排序仍由 RRF 打底，底座只补充置信/证据态/采纳三态/血缘内键。
+        返回 `(hits, lineageIds, store, recordInjection)`：是否回写注入计数
+        由 FactSurface 闸决定，但计数只能对最终注入的命中做，不能算候选窗。
         """
         if not knowledge_items:
-            return knowledge_items, []
+            return knowledge_items, [], None, False
         surface = self._surface()
         from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
-        from neurova.knowledge.foundation.read_surface import (
-            attachGovernance,
-            recordHitsAsInjection,
-        )
+        from neurova.knowledge.foundation.read_surface import attachGovernance
 
         # 血缘映射与 FactSurface 的置信富化是两件事：即使富化关着，也要把
         # 条目映射到事实行，否则 /chat/feedback 无法把采纳结果写回正确事实。
         # 事实库不可用（测试夹具/围栏/临时故障）只丢血缘，不打死检索。
+        hits = knowledge_items
+        lineageIds: List[str] = []
+        store = None
         try:
             store = get_knowledge_fact_store()
             hits, lineageIds = attachGovernance(
                 store, knowledge_items, enrich=surface is not None
             )
-            if surface is not None and lineageIds:
-                recordHitsAsInjection(store, hits)
-            return hits, lineageIds
         except Exception as exc:  # noqa: BLE001 - 增强面失败不得影响主检索
             logger.debug("知识血缘富化失败（检索继续，无采纳回写）: %s", exc)
-            return knowledge_items, []
+        # 无 fact lineage 的文档条目走 entry 级反馈；有 fact 的以 fact 三态为准。
+        entryIds = [
+            str(hit["knowledge_id"])
+            for hit in hits
+            if hit.get("knowledge_id") and not hit.get("lineage_id")
+        ]
+        lookup = getattr(self._repo, "entryFeedbackMap", None)
+        if entryIds and callable(lookup):
+            try:
+                feedback = lookup(entryIds) or {}
+                for hit in hits:
+                    if hit.get("lineage_id"):
+                        continue
+                    row = feedback.get(str(hit.get("knowledge_id") or "")) or {}
+                    hit["adoption_outcome"] = row.get("adoption_outcome")
+                    hit["injected_count"] = row.get("injected_count", 0)
+            except Exception as exc:  # noqa: BLE001 - 反馈读失败只丢先验
+                logger.debug("知识条目反馈读取失败（保持中性）: %s", exc)
+        return hits, lineageIds, store, surface is not None
 
     async def retrieve(self, context) -> Any:
         """执行知识库检索（走用户可见性过滤）"""
@@ -130,17 +153,54 @@ class KnowledgeRetrieverAdapter:
             # fallback（错误方向是"整级检索失败可被感知"，不是"静默返回空"）。
             from neurova.knowledge import hybrid as _kb_hybrid
 
+            requested = max(1, int(getattr(context, "limit", 10) or 10))
+            candidateLimit = min(requested * ADOPTION_CANDIDATE_FACTOR, ADOPTION_CANDIDATE_MAX)
+            if candidateLimit < requested:
+                candidateLimit = requested
             knowledge_items = _kb_hybrid.hybrid_search_knowledge(
                 self._repo,
                 user=user,
                 query=context.query,
-                limit=context.limit,
+                limit=candidateLimit,
                 scope="all",
                 agent_id=agent_id,
                 **filters,
             )
 
-            knowledge_items, lineageIds = self._enrich(knowledge_items)
+            (
+                knowledge_items,
+                _candidateLineage,
+                factStore,
+                recordInjection,
+            ) = self._enrich(knowledge_items)
+            # 采纳先验在最终截断前生效；候选窗由上面的 oversample 提供替补位。
+            knowledge_items = rerankByAdoption(knowledge_items)[:requested]
+            selectedLineage = list(dict.fromkeys(
+                str(item["lineage_id"])
+                for item in knowledge_items
+                if item.get("lineage_id")
+            ))
+            selectedEntries = list(dict.fromkeys(
+                str(item["knowledge_id"])
+                for item in knowledge_items
+                if item.get("knowledge_id") and not item.get("lineage_id")
+            ))
+            if recordInjection and factStore is not None and knowledge_items:
+                try:
+                    from neurova.knowledge.foundation.read_surface import (
+                        recordHitsAsInjection,
+                    )
+
+                    recordHitsAsInjection(factStore, knowledge_items)
+                except Exception as exc:  # noqa: BLE001 - 注入计数失败不阻断检索
+                    logger.debug("知识注入计数跳过: %s", exc)
+            if selectedEntries:
+                recordEntryInjections = getattr(self._repo, "recordEntryInjections", None)
+                if callable(recordEntryInjections):
+                    try:
+                        recordEntryInjections(agent_id or "default", selectedEntries)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("知识条目注入计数跳过: %s", exc)
 
             elapsed = time.monotonic() - start_time
 
@@ -169,7 +229,17 @@ class KnowledgeRetrieverAdapter:
                 metadata={
                     "retriever_type": "knowledge",
                     "hits": len(memories),
-                    "lineage_ids": lineageIds,
+                    "lineage_ids": selectedLineage,
+                    "knowledge_entry_ids": selectedEntries,
+                    "knowledge_entry_scores": {
+                        str(item["knowledge_id"]): float(item.get("score", 0.0) or 0.0)
+                        for item in knowledge_items
+                        if item.get("knowledge_id") and not item.get("lineage_id")
+                    },
+                    "adoption_rerank": {
+                        "requested": requested,
+                        "candidate_limit": candidateLimit,
+                    },
                 },
             )
 
@@ -256,6 +326,11 @@ class KnowledgeRetrieverAdapter:
             "knowledge_id": item.get("knowledge_id"),
             "lineage_id": item.get("lineage_id"),
             "fact_id": item.get("lineage_id"),
+            "adoption_outcome": item.get("adoption_outcome"),
+            "adoption_prior": float(item.get("adoption_prior", 1.0) or 1.0),
+            "base_score": float(
+                item.get("base_score", item.get("score", 0.0)) or 0.0
+            ),
             "score": float(item.get("score", 0.0) or 0.0),
             "origin": cls._map_origin(item.get("source", "")),
         }

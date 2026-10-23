@@ -25,6 +25,7 @@ from .knowledge_facts import (
     _SCHEMA_V15,
     _SCHEMA_V16,
     _SCHEMA_V17,
+    _SCHEMA_V18,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -56,6 +57,8 @@ _STEPS: List[tuple] = [
     (16, _SCHEMA_V16),
     # v17：检索侧未归因 token（文档命中不能摊到 fact，但成本总数不丢）
     (17, _SCHEMA_V17),
+    # v18：entry 级 token 账（文档条目与 fact 分表；轮总量加 entry_attributed_tokens）
+    (18, _SCHEMA_V18),
 ]
 
 _registered = False

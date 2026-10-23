@@ -1052,6 +1052,10 @@ export default {
     sandboxRequired: 'サンドボックス必須',
   },
   skillEvo: {
+    adopt: '採用',
+    adoptTarget: '対象スキル',
+    adoptSuccess: '承認待ち提案を作成しました',
+    adoptError: '採用に失敗しました',
     abVerify: '双腕検証（真のホールドアウト）',
     abHint: '同一タスク集合・同一判定器で基準本文と候補本文を比較。読み取り専用で提案は生成しません。',
     abRunSimulated: '模擬腕を実行',

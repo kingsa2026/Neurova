@@ -147,6 +147,8 @@ class ChannelAdapter(ABC):
     # 能力位只由真能解析该平台事件、并在适配器内 `_emit_event` 的适配器置 True；
     # 没有原生事件的渠道不伪造（质量账里缺事件＝未观测，不是“无人接管”）。
     humanTakeoverEvents: bool = False
+    #: False 时的原因，随渠道状态读数原样报出；支持时为空串。
+    humanTakeoverReason: str = "unsupported:no_native_event"
 
     def __init__(self, config: ChannelConfig):
         self.config = config
@@ -214,6 +216,7 @@ class ChannelAdapter(ABC):
             "connected": self._connected,
             "enabled": self.config.enabled,
             "human_takeover_events": self.humanTakeoverEvents,
+            "human_takeover_reason": self.humanTakeoverReason,
         }
 
     async def _emit_event(self, event_type: ChannelEventType, message: ChannelMessage):

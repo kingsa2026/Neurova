@@ -71,8 +71,8 @@ class RetrievalMetrics:
                 "route_hits": dict(sorted(self._routes.items())),
                 "outcomes": dict(self._outcomes),
                 "uninstrumented": {
-                    "refusal_rate": "仅统计 finish_reason=content_filter 的模型拒绝；无答案/其他拒答未归档",
-                    "human_takeover_rate": "渠道人工接管事件未进入检索域",
+                    "refusal_rate": "本进程只统计 finish_reason=content_filter；safety_refusal/tool_failure 等完成态见 /v1/quality/metrics",
+                    "human_takeover_rate": "接管事件按 /v1/quality/metrics 的 channel_event/console_mark/api 分账，不在检索进程指标内",
                 },
                 "note": "进程内自启动以来累计；重启清零。缺的指标在 uninstrumented 里点名，不伪造 0。",
             }
