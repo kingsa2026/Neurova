@@ -174,7 +174,7 @@ packaging==26.3
     #   pytest
 passlib==1.7.4
     # via -r requirements-ci.txt
-pillow==12.3.0
+pillow==13.0.0
     # via reportlab
 pluggy==1.6.0
     # via
@@ -222,7 +222,7 @@ pyjwt==2.15.0
     # via
     #   -r requirements-ci.txt
     #   mcp
-pypdf==6.19.0
+pypdf==6.21.2
     # via -r requirements-ci.txt
 pytest==9.0.3
     # via
