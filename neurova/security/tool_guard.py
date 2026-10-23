@@ -630,6 +630,38 @@ class FilePathGuardian(BaseGuardian):
                 return f"敏感凭据文件 {stem}"
         return None
 
+
+    @staticmethod
+    def _isUnderProtected(path: str, protected: str) -> bool:
+        r"""`path` 是否就在 `protected` 之下（含它本身）——按**路径段**边界判，不按字符前缀。
+
+        为什么不按字符前缀（本仓踩过的两次形态，都是同一个根因）：
+
+        * 保护项 `/root` 一旦按 `startswith` 匹配，`/rootfs/x`、`/rooted/app/x` 这些
+          **同名前缀的另一处**就一并被拦；更要紧的是**容器里 `HOME` 就是 `/root`**，
+          于是 `/root/agent_workspaces/...` 这台机器上每一条正常文件读写都被判成
+          「访问受保护路径」并阻断（实测：`file_read {"file_path": "/root/…"}` ⇒
+          `protected_path` HIGH、`should_block=True`）。阻断面比它想保护的面还大，
+          读的人只会在别处找原因。
+        * 路径值这一侧此前连段边界都没有（命令文本那一侧 `_scan_protected_paths_in_text`
+          早就在用 `(?<![\w./\\-])…(?![\w.\-])`），两处对同一份清单给出了两套判据——
+          单一事实源被劈成两份，必然一版对一版错。
+
+        判据：去尾斜杠后逐段相等，或后接 `/`。大小写按平台口径统一（Windows 不敏感）。
+        """
+        if not path or not protected:
+            return False
+        sep = "/"
+        normPath = path.replace("\\", sep).rstrip(sep) or sep
+        normProtected = protected.replace("\\", sep).rstrip(sep)
+        if os.name == "nt":
+            normPath = normPath.lower()
+            normProtected = normProtected.lower()
+        if normPath == normProtected:
+            return True
+        prefix = normProtected if normProtected.endswith(sep) else normProtected + sep
+        return normPath.startswith(prefix)
+
     def _scan_protected_paths_in_text(self, text: str) -> List["GuardFinding"]:
         """在命令文本中扫描受保护路径（路径段边界匹配，防 /usr/root 类误报）。"""
         findings: List[GuardFinding] = []
@@ -715,7 +747,9 @@ class FilePathGuardian(BaseGuardian):
             if norm in self._safe_paths:
                 continue
             for protected in self._protected_paths:
-                if norm.startswith(protected) or candidate.startswith(protected):
+                if self._isUnderProtected(norm, protected) or self._isUnderProtected(
+                    candidate, protected
+                ):
                     hit_protected = protected
                     break
             if hit_protected:
