@@ -30,6 +30,7 @@
 import datetime
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,12 @@ from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
 pytestmark = [pytest.mark.timeout(180)]
+
+#: 本档两处全仓判据的根：``tests/performance/`` 与仓根。必须写在模块级——
+#: 绑在函数里的名字，面自证棘轮（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）
+#: 认不出根位置，整档会静默掉出它的面。
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
@@ -541,12 +548,17 @@ class TestUncollectedMeasurementFileIsRetired:
     def test_performance_目录下不得有不被收集的文件(self):
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[1]
+        from tests import ast_scan
+
+        # 枚举归 `tests/ast_scan`（本档不自付 rglob）；根用模块级常量 PERFORMANCE_ROOT
+        collected = ast_scan.filesUnder(PERFORMANCE_ROOT)
+        assert len(collected) > 2, (
+            f"扫描面现读 {len(collected)} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根被改窄时「零游离件」不代表干净")
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
-            if "__pycache__" not in p.parts and p.name != "__init__.py"
-            and not p.name.startswith("test_")
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in collected
+            if p.name != "__init__.py" and not p.name.startswith("test_")
         ]
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
@@ -558,19 +570,22 @@ class TestUncollectedMeasurementFileIsRetired:
         import ast
         from pathlib import Path
 
-        repo = Path(__file__).resolve().parents[3]
+        from tests import ast_scan
+
+        repo = REPO_ROOT
         assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
         ghosts, unparsed = [], []
-        for root in ("neurova", "tests", "scripts"):
-            for path in (repo / root).rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
+        scanned = 0
+        for sourceFamily in ("neurova", "tests", "scripts"):
+            # 枚举与解析都归 `tests/ast_scan`（判据成本不再随代码总量涨）
+            for path in ast_scan.filesUnder(repo / sourceFamily):
+                scanned += 1
                 try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                    tree = ast_scan.transientTree(path)
                 except (SyntaxError, UnicodeDecodeError):
                     unparsed.append(path.relative_to(repo).as_posix())
                     continue
@@ -579,5 +594,8 @@ class TestUncollectedMeasurementFileIsRetired:
                     for n in ast.walk(tree)
                 ):
                     ghosts.append(path.relative_to(repo).as_posix())
+        assert scanned > 500, (
+            f"扫描面现读 {scanned} 个 .py（根＝neurova/ tests/ scripts/）——"
+            "根被改窄时「零复活」不代表干净")
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

@@ -37,6 +37,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 from tests import ast_scan
 
@@ -95,8 +96,11 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    assert ws.resolve().is_relative_to(pathlib.Path(os.environ.get("TEMP", "")).resolve()) or "Temp" in str(ws), (
-        f"工作区根没有落在临时目录：{ws}"
+    # 「临时目录」的判据用**生成它的那个入口**：单点是 `tempfile.mkdtemp(prefix="neurovaLive-")`，
+    # 而在 POSIX 上它是 `/tmp/neurovaLive-xxxx`（没有 `Temp` 这一段，`TEMP` 也未设）。
+    # 原写法把 Windows 的叫法当唯一形态，在 Linux 上红的是路径写法，不是"第二根没被隔离"。
+    assert ws.resolve().is_relative_to(pathlib.Path(tempfile.gettempdir()).resolve()) or "Temp" in str(ws), (
+        f"工作区根没有落在临时目录：{ws}（临时根＝{tempfile.gettempdir()}）"
     )
 
 

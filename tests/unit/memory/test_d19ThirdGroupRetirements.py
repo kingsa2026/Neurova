@@ -51,6 +51,8 @@ def test_noImporterRemains():
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.channels.{name}")
         if hits:
             offenders[name] = hits[:3]
+    # 面自证：退役名清单被清空时下面那句"零导入"与真干净同形
+    assert len(RETIRED) >= 1, f"退役名清单现读 {len(RETIRED)} 条——面被清空时零导入不代表干净"
     assert not offenders, f"退役后仍有人导入：{offenders}"
 
 

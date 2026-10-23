@@ -108,15 +108,16 @@ except Exception as error:  # noqa: BLE001
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    try:
-        from neurova.skills.market_registry import hasExecutorMapping
-    except ImportError:  # 对照腿（无本批修复的那棵树）退回读私有表——
-        # 只为让同一份脚本在两侧都跑得起来；比的从来不是这个 import，是四面的读数是否同向。
-        from neurova.skills.market_registry import _MARKET_EXECUTORS
+    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+    # 取法按**能力**探测（有没有这个公开符号），不按"同一个 import 失败就造个同名桩"：
+    # 后者是本仓判据禁的「同名桩冒充真身」那一形，而且对照腿读的私有表未必在。
+    from neurova.skills import market_registry as _registry
 
-        def hasExecutorMapping(sid):
-            return str(sid or "") in _MARKET_EXECUTORS
+    def hasExecutorMapping(sid):
+        public = getattr(_registry, "hasExecutorMapping", None)
+        if callable(public):
+            return bool(public(sid))
+        return str(sid or "") in getattr(_registry, "_MARKET_EXECUTORS", {})
 
     sid = entry["id"]
     d = SKILLS_DIR / sid
