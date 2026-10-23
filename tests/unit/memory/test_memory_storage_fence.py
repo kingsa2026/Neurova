@@ -58,11 +58,19 @@ class TestDefaultPathIsNotCwdRelative:
 
 
 class TestFenceCoversMemorySurfaces:
-    def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
-        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
+    def test_productionMemoryDirIsTheRepoDataRoot(self):
+        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
+
+        v2 统一布局之后 agent 根就是数据根 `data/`（`get_agent_root()` 缺省返回
+        `get_data_root()`，旧扁平 `agent_workspaces/` 只作为围栏的第二片历史面保留）。
+        本格原先钉的是 `productionMemoryDir().name == "agent_workspaces"`——那条读数是
+        布局 v1 的，布局改了而它没改，红的是判据本身，不是落点。
+        """
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        assert productionMemoryDir().name == "data", (
+            "生产数据根不再是 `data/`——布局又变了就把这里与围栏的第二片历史面一起复核"
+        )
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
 

@@ -208,6 +208,11 @@ class TestNoNewHomeLandingIsAllowed:
         # 已全部收进数据根，表里只剩**收养端本身**——它必须能算出旧落点，否则旧物搬无可搬。
         # 留空就是把收养能力一起删掉。（号不写在这里：让号是双向的，写死就等着撞别人的批。）
         "core/data_root.py": 1,
+        # `security/artifact_digest.py` 那一处是 §6-388 用户裁定的**根外锚**：
+        # 锚文件要落在数据根**之外**（要对"整个数据根被替换/回滚"敏感），
+        # 与上面那族的"收养旧落点"不是一回事。边界与能力写在模块顶那段注释里，
+        # 不防同权限攻击、只防"只改了数据根"的那些操作。
+        "security/artifact_digest.py": 1,
     }
 
     def test_homeLandingOffendersAreExactlyTheRegisteredOnes(self):

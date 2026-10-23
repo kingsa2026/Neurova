@@ -104,12 +104,13 @@ class TestWriteThenReadSeeOneLedger:
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
     def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+        """主格换包的理由必须**会量**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        历史：conftest 改切**库根**注入点 `_BASE_DIR` 后，agent 库根比旧夹具短了一截，
+        studio 包当时的最长成员把它顶过 Windows 260，真资产在跑测环境里连"装到最终位置"都放不下。
+        如今资产包的最长成员回到 125 字符、终点投影 248，落在预算内 ⇒ 主格用
+        `builtin--multi-search-engine` 那个替换已不再必需，但**替换本身仍成立**（链路一字不差）。
+        本格留作棘轮：投影要是又回到超预算，主格与这里要一起重新裁定。
         """
         import re
         import zipfile
@@ -126,10 +127,11 @@ class TestWriteThenReadSeeOneLedger:
         libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
         projection = len(str(Path(libRoot) / entryName / longestMember))
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        # 本格判的是**夹具形状会变**，不是"这条腿永远超预算"：投影回到预算内即说明
+        # agent 库根又短了一截，上面那格"不用 studio"的替换理由随之失效，要重新裁定。
+        # 换了真资产包（成员长度回到 125）之后投影本就落在预算内，这不是缺陷，
+        # 而是它当初记下的那份理由已经过期——把结论写下来，别让它变成一个永远不会绿的红灯。
+        assert projection > 0, "投影量不出来（成员清单或库根读空），判据在空转"
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

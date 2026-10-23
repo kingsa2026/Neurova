@@ -130,6 +130,10 @@ class TestPhantomKnobSweep:
 
     def test_noAdvertisedParamIsUnread(self):
         """治理面每个工具的每个广告参数，都必须有读取点。"""
+        # 面自证：先证这次真扫到了生产树，再谈"每个参数都有读取点"——
+        # 根被改窄/改空时，计数全零会被下一条的"幻影旋钮"读成满盘红或缺席，两种都不是事实。
+        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝PROD_ROOT）——根指错时判据不来自代码"
         counts = _sweepReadCounts()
         unread = []
         for tool in sorted(COMPUTER_USE_TOOLS):
