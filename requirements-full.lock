@@ -485,7 +485,7 @@ sentence-transformers==6.0.1
     # via -r requirements.txt
 sentencepiece==0.2.2
     # via -r requirements.txt
-setuptools==84.0.0
+setuptools==84.1.0
     # via
     #   modelscope
     #   torch
