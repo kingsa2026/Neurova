@@ -29,14 +29,29 @@
 
 import datetime
 import os
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
+
 pytestmark = [pytest.mark.timeout(180)]
+
+#: 全仓判据的仓根与扫描面：提到模块级常量，面自证棘轮才认得出这一档的根
+#: （绑在函数内的名字上会被判成 dynamic，整档安静地掉出闸的面）。
+REPO_ROOT = PROJECT_ROOT
+REPO_WIDE_SCAN_ROOTS = ("neurova", "tests", "scripts")
+#: 本档所在目录（`tests/performance/`）：收集面自查的扫描根，同样是模块级常量。
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
 
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
@@ -539,12 +554,9 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[1]
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in root.rglob("*.py")
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in PERFORMANCE_ROOT.rglob("*.py")
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
@@ -556,28 +568,22 @@ class TestUncollectedMeasurementFileIsRetired:
 
     def test_旧件与其符号不得复活(self):
         import ast
-        from pathlib import Path
 
-        repo = Path(__file__).resolve().parents[3]
-        assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
+        assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts, unparsed = [], []
-        for root in ("neurova", "tests", "scripts"):
-            for path in (repo / root).rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
-                try:
-                    tree = ast.parse(path.read_text(encoding="utf-8"))
-                except (SyntaxError, UnicodeDecodeError):
-                    unparsed.append(path.relative_to(repo).as_posix())
-                    continue
-                if any(
-                    isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
-                    for n in ast.walk(tree)
-                ):
-                    ghosts.append(path.relative_to(repo).as_posix())
-        assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
+        ghosts = []
+        scanned = 0
+        # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+        # 不留常驻语法树、不与代码总量和机器速度捆绑。
+        for root in REPO_WIDE_SCAN_ROOTS:
+            for path, node in ast_scan.transientNodes(
+                    REPO_ROOT / root, hints=("class SimpleLongMemEval",)):
+                scanned += 1
+                if isinstance(node, ast.ClassDef) and node.name == "SimpleLongMemEval":
+                    ghosts.append(path.relative_to(REPO_ROOT).as_posix())
+        assert scanned > 0, (
+            "扫描面现读 0 个节点（根＝REPO_WIDE_SCAN_ROOTS）——根写错时「零命中」不代表干净")
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

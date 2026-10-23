@@ -668,7 +668,9 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    "tests/unit/memory/test_moe_routing.py": 2,
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：`c2031c4c`
+    # （§6-378）把 `channels/moe_router` 这类从未接线的模块整族退净，该档随之删除；
+    # MoE 路由的在位由 live 的 expert MoE 与 `test_d19ThirdGroupRetirements.py` 在守。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,

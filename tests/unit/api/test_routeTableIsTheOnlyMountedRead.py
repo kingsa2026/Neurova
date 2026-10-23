@@ -34,11 +34,17 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
+
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
@@ -62,17 +68,19 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 def test_取数口径只有一份():
     offenders = []
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts or path == ROUTE_TABLE:
+        for ref in ast_scan.sourceRefsUnder(root, hints=(".routes",)):
+            path, tree = ref.path, ast_scan.transientTree(ref.path)
+            if path == ROUTE_TABLE:
                 continue
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if SINGLE_SOURCE_IMPORT in source:
+            if SINGLE_SOURCE_IMPORT in ast.unparse(tree):
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(ast.parse(source))
+            hits = _readsMountedAppRoutes(tree)
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     assert not offenders, (

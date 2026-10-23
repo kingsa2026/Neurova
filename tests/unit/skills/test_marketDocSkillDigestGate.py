@@ -19,9 +19,16 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
 
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
@@ -177,11 +184,10 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for path in sorted(package.rglob("*.py")):
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if "_build_executable_skill" not in source:
-                continue
-            flags = self._builderCalls(source)
+        # 取数走共享解析预算（Issue #148）：一次性全仓扫描，不留常驻语法树。
+        for ref in ast_scan.sourceRefsUnder(package, hints=("_build_executable_skill",)):
+            path = ref.path
+            flags = self._builderCalls(ref.code)
             checked += len(flags)
             if any(flag is False for flag in flags):
                 offenders.append(str(path.relative_to(package)))

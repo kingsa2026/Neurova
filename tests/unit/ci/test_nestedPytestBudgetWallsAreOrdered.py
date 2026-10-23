@@ -220,6 +220,7 @@ def _judgeTree(tree: ast.AST, label: str):
 
     findings: List[str] = []
     nestingTests = 0
+    scanned = 0
     attributed: Set[Tuple[str, int]] = set()
     for name, fn in sorted(funcs.items()):
         if not _isCollectedTestName(name):
@@ -270,12 +271,14 @@ def _scanCorpus():
     """
     findings: List[str] = []
     nestingTests = 0
+    scanned = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
     for ref in ast_scan.sourceRefsUnder(
             TESTS_ROOT, ".py",
             hints=("subprocess", "Popen", "check_output", "check_call")):
         path = ref.path
+        scanned += 1
         if not path.name.startswith("test_"):
             continue
         if any(part in path.parts for part in _NOT_COLLECTED_DIRS):
@@ -287,6 +290,9 @@ def _scanCorpus():
         nestingTests += fileNesting
         coarseAll |= fileCoarse
         attributedAll |= fileAttributed
+    # 面自证：先证这次真扫到了语料，再谈「零违规」——根指错时零命中与干净同形。
+    assert scanned > 50, (
+        f"扫描面现读 {scanned} 个 .py（根＝TESTS_ROOT）——根指错时『零违规』不代表干净")
     return (tuple(findings), nestingTests, frozenset(coarseAll), frozenset(attributedAll))
 
 

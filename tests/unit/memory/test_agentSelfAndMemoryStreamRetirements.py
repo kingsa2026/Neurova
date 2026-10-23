@@ -30,6 +30,9 @@ def test_modulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
+    # 面自证：扫描面先在场，再谈"零导入"（根被改窄时零命中与干净同形）。
+    scanned = ast_scan.trackedPyPaths()
+    assert len(scanned) > 500, f"扫描面现读 {len(scanned)} 个 .py——根指错时『零导入』不代表干净"
     offenders = {}
     for name in RETIRED:
         hits = ast_scan.importersOfModule(

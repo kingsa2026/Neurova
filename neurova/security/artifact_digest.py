@@ -219,8 +219,12 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
-    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
+
+    `Path.home()` 在这里就是锚点本身：锚按设计要活在**数据根之外**（模块顶那条边界），
+    它锚的是「谁的行囊」而不是「哪个进程从哪儿启动」，故不接数据根推导器。
+    """
+    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)  # cwd-anchor: home 即锚点
 
 
 def readAnchors() -> Dict[str, str]:
