@@ -41,9 +41,14 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
+#: 无害路径。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
 #: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
-SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
+#:
+#: **不再取 `Path.home()`**（2026-10-24 实测）：CI 容器与 root 跑测环境下 `HOME=/root`，
+#: 而 `/root` 在受保护清单里 ⇒ 这条用例在**任何**容器里都恒红，且红的原因与它要判的
+#: 「路径值混进命令扫描面」毫无关系（它测的其实是"家目录不在保护清单里"）。
+#: 用户名形状那一半由 `test_windowsUserNameShapeIsNotShellEvasion` 单判，两条判据互不夹带。
+SAFE_PATH = str(pathlib.Path(pathlib.Path.cwd().anchor, "tmp", "neurova_guard_255_safe_read.txt"))
 
 
 def _findings(toolName: str, params: dict) -> list:
@@ -52,6 +57,19 @@ def _findings(toolName: str, params: dict) -> list:
 
 def _evasionFindings(toolName: str, params: dict) -> list:
     return [f for f in _findings(toolName, params) if f.category == EVASION]
+
+
+def test_windowsUserNameShapeIsNotShellEvasion():
+    r"""用户名形状那一半：`C:\Users\xcc1b\...` 里的 `\xcc` 不是十六进制转义（见本篇顶栏）。
+
+    与上一条分开判，是因为上一条的载体曾取 `Path.home()`——容器里 `HOME=/root` 时它会
+    因为「家目录在保护清单里」而红，与"用户名形状被判成 shell 规避"毫无关系。
+    """
+    path = "C:\\Users\\xcc1b\\neurova_safe_read.txt"
+    findings = _evasionFindings("file_read", {"file_path": path})
+    assert not findings, (
+        f"Windows 用户名的转义形状被判成 shell 规避（finding={findings[:2]}）⇒ "
+        "路径值混进了命令扫描面")
 
 
 def test_plainWindowsPathIsNotShellEvasion():
