@@ -112,7 +112,7 @@ feedparser==6.0.14
     # via -r requirements.txt
 feedparser-sgmllib==2.1.0
     # via feedparser
-filelock==4.0.0
+filelock==4.2.1
     # via
     #   huggingface-hub
     #   modelscope
