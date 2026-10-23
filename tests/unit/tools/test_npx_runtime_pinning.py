@@ -162,7 +162,38 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
+        # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
+        # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
+        # 两者父包都用精确版本声明，故由 tools/npx-runtime/package.json 的 overrides 抬升。
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            ("node_modules/@modelcontextprotocol/server-filesystem",),
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP TS server SDK 三条（内存耗尽 / 传输实例串味 / bearer 令牌跨服务接受）",
+        ),
+        "ip-address": (
+            "10.7.4",
+            ("node_modules/@modelcontextprotocol/sdk",),
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区号标识符二次复杂度匹配（DoS）",
+        ),
     }
+
+    def _compare_tuple(self, version: str) -> tuple:
+        """版本比较元组：按 `-` 切预发布尾，再按 `.` 切点分；非数字段逐位按字符串比。
+
+        为什么不用 `_release_tuple`：`ip-address` 这类包会把 `beta` 之类的非数字段放进
+        版本串，逐个 `int()` 会直接抛 ValueError。这里把所有段归一成可比的
+        `(0, 整数)` / `(1, 字符串)` 对，数字段恒排在非数字段之前（预发布低于正式版）。
+        """
+        pairs = []
+        for part in version.replace("-", ".").split("."):
+            pairs.append((0, int(part), "") if part.isdigit() else (1, 0, part))
+        return tuple(pairs)
+
+    def _floor_is_met(self, version: str, floor: str) -> bool:
+        return self._compare_tuple(version) >= self._compare_tuple(floor)
 
     def _release_tuple(self, version: str) -> tuple:
         """把版本串归一成可比元组：`2.0.0-1` 是"2.0.0 之后的第一个预发布"。"""
@@ -180,7 +211,7 @@ class TestNoKnownVulnerableRuntimePackages:
                 # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
                 continue
             version = entry.get("version")
-            if self._release_tuple(version) < self._release_tuple(floor):
+            if not self._floor_is_met(version, floor):
                 problems.append(
                     f"{name}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"
