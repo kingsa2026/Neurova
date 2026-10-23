@@ -117,10 +117,12 @@ BASELINE: set = set()
 #: 仓外（`outside`）**不做**这类豁免：那种根指的不是本仓代码，没有任何正当理由。
 #: 纪律与其余表一致：新增即红、消化必须摘行；`test_ratchetRecordsImprovementLoudly` 继续咬
 #: 「表与实况不同源」——真 offender 被偷偷塞回来换绿会当场露形。
-MISSING_BASELINE: dict = {
-    "tests/unit/test_session_landing_guard.py":
-        "锚定仓内锥 data/sessions：干净 checkout 上不存在，只在跑起会话后才建出",
-}
+#: 现值＝**空集**。原先登记的 `tests/unit/test_session_landing_guard.py` 已销账：
+#: 它的模块级锚已从 `<仓根>/data/sessions`（只有探针跑过才存在 ⇒ 永远解成 `missing`）
+#: 改成 `<仓根>/data`（恒存在），会话落点由锚往下拼——**根不再指向不存在的目录**，
+#: 于是这一档回到 DIR 那一支，"面被改窄也没人知道"这件事重新由面读数覆盖。
+#: 留着旧行会红成"表与实况不同源"，这正是本表要求的纪律：修好了必须同批摘名。
+MISSING_BASELINE: dict = {}
 
 
 def _dropSignedOffMissing(gaps: dict) -> dict:
