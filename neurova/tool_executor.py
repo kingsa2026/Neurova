@@ -1605,7 +1605,9 @@ class ToolExecutor:
                 }
             from neurova.security.governance import extract_adjudicable_params
 
-            command, _pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
+            # 文件类没有沙箱后端——上一行那句报错由本行取到的路径值说清楚，
+            # 不靠一个只在此处占位的变量名（它曾被改名 `_pathValues` 后漏改下游，pyflakes 红）。
+            command, pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
@@ -1643,7 +1645,10 @@ class ToolExecutor:
                             )
                 return sandbox_result
             # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
-            logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
+            logger.warning(
+                "文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s",
+                "; ".join(f"{key}={value}" for key, value in pathValues) or "（无路径值）",
+            )
             return {
                 "success": False,
                 "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
