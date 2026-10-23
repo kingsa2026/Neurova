@@ -163,25 +163,23 @@ def _adoptionCallSites(root):
     return sites
 
 
-class TestAdoptionWriteSurfaceIsStillUnwired:
-    """采纳回执这一维：**写面全仓零调用点**，所以 `usageMetrics.outcome_written` 恒 0。
+class TestAdoptionWriteSurfaceIsWired:
+    """采纳回执写面：只允许两条已声明喉——聊天反馈与服务端血缘、显式管理端。
 
-    与注入账不同——注入的接缝活在 `graph_retriever_adapter:47`（另有两条在默认关的
-    `NEUROVA_KB_FACT_SURFACE` 闸后），2026-10-10 已在真库拷贝上活体证过（§6-124）。
-    本格守的是"这件事没人悄悄改掉"：要么接线（得先定"拿哪个用户信号当采纳"，属新能力），
-    要么把这一维读数如实标成未接线。**两条都要先改这一格**，不许留着一个恒 0 的读数
-    让治理面把它当成"没人采纳"来读（AGENTS.md §2 断点条款、§7 影响面条款）。
+    2026-10-23 新能力落地，原先的"零调用点"前提结束；这里改成正向判据，
+    防止随手长出的第三条写路绕过"服务端血缘"或"显式 fact_id"的语义。
     """
 
-    def testNoProductionCallerWritesAdoptionOutcome(self):
+    def testProductionCallersAreTheTwoDocumentedThroats(self):
         from pathlib import Path
 
         repoRoot = Path(__file__).resolve().parents[3]
         sites = _adoptionCallSites(repoRoot / 'neurova')
-        assert sites == [], (
-            'recordAdoption 出现了生产调用点 %s —— 那本格的前提就结束了：'
-            '把本类改成"回执必须落账"的正向判据，并在台账 §6-124 记下是谁、按哪个信号接的'
-            % sites)
+        files = {site.split(':', 1)[0] for site in sites}
+        assert files == {
+            'api/endpoints/console.py',
+            'api/endpoints/knowledge_core.py',
+        }, '采纳写面出现未声明的调用点: %s' % sites
 
     def testDetectorReallyCountsCallSites(self):
         """反空转：探测器必须抓得住一处人造调用点，也不把定义与 docstring 数成调用。"""
@@ -207,33 +205,29 @@ class TestAdoptionWriteSurfaceIsStillUnwired:
 
 
 class TestAdoptionZeroIsNamedNotSilent:
-    """采纳回执为零时，读数必须自己说清成因（用户 2026-10-10 裁定：如实标「写面未接线」）。
+    """采纳回执为零时，读数必须自己说清成因。
 
-    `outcome_written=0` 有两种成因：底座刚建（还没人用）与**写面从未接线**——
-    后者是实况（AST 复算 `recordAdoption` 生产调用点 = 0，台账 §6-124）。
-    只把 0 摆出来，读的人就会把它当产品结论（"没人采纳这些知识"），
-    而那是拿账面缺失冒充测量结果，与 §6-109 那族"算完不告诉人哪里没成"同形。
+    `outcome_written=0` 的当前含义是“尚未发生回写”；写面已接两条喉，
+    不能把 0 读成“写面未接线”，更不能读成“没人采纳”。
     """
 
-    def test_zeroAdoptionOutcomeNamesTheUnwiredWriter(self, store, facts):
+    def test_zeroAdoptionOutcomeNamesTheWriteThroats(self, store, facts):
         metrics = store.usageMetrics()
 
         assert metrics["outcome_written"] == 0
         reason = str(metrics.get("missing_reason") or "")
-        assert '未接线' in reason, (
+        assert '尚未发生回写' in reason, (
             '一条回执都没有，读数却没点名成因——只剩一个 0 会被读成「没人采纳」：%r' % metrics)
-        assert 'recordAdoption' in reason, (
-            '要点名到写面本体（哪个方法没有调用点），只写「暂无数据」等于没说：%r' % reason)
+        assert '/chat/feedback' in reason and '/knowledge/facts/' in reason, (
+            '要写明已接的两条写入喉，否则读者无法判断 0 是“没发生”还是“没接线”：%r' % reason)
+        assert '未接线' not in reason
 
     def test_aSingleWrittenOutcomeRetiresTheReason(self, store, facts):
-        """反向对照：一旦真有人写了回执，就不该再挂「未接线」的说明。
-
-        少了这一格，"未接线"会被写成永久文案——那正是把一次性诊断变成假陈述的路。
-        """
+        """反向对照：一旦真有人写了回执，就不该再挂缺失说明。"""
         store.recordInjection([facts[0]])
         store.recordAdoption(facts[0], 'success')
 
         metrics = store.usageMetrics()
         assert metrics["outcome_written"] == 1
-        assert '未接线' not in str(metrics.get("missing_reason") or ''), (
-            '已经有回执了还标未接线：读数会把人引向错误方向：%r' % metrics)
+        assert '尚未发生回写' not in str(metrics.get("missing_reason") or ''), (
+            '已经有回执了还挂缺失说明：读数会把人引向错误方向：%r' % metrics)

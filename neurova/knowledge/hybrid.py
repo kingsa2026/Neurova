@@ -19,9 +19,13 @@ ONNX 向量索引只挂在 semantic-search 端点——两套索引互不相认�
 from __future__ import annotations
 
 import math
+import os
+import time
+from functools import wraps
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.retrieval_metrics import get_retrieval_metrics
 from neurova.knowledge.search import full_text_search
 from neurova.knowledge.splitter import build_index_content
 
@@ -30,6 +34,12 @@ logger = get_logger(__name__)
 # 四路缺省权重：词法两路（tfidf 字粒度分片 + bm25 词粒度）为主，# 语义 vector 次之，fts 覆盖式评分提供第三视角
 DEFAULT_ROUTE_WEIGHTS = {"tfidf": 0.30, "bm25": 0.30, "vector": 0.25, "fts": 0.15}
 RRF_K = 60
+# 大语料时辅助词法路的候选上限：主索引仍是全量；BM25/FTS 只在主索引
+# 返回的候选上重排，避免 100k 语料每轮全量 tokenize。小语料不受影响。
+DEFAULT_AUX_SCAN_LIMIT = 10_000
+AUX_SCAN_LIMIT_ENV = "NEUROVA_KB_AUX_SCAN_LIMIT"
+FTS_INDEX_ENV = "NEUROVA_KB_FTS_INDEX"
+_FTS_OFF_VALUES = ("0", "false", "off", "no")
 
 # vector_index 参数哨兵：_AUTO=取进程单例；None=显式关闭向量路
 _AUTO = object()
@@ -101,6 +111,36 @@ def bm25_rank(
     return raw_scores[:top_k]
 
 
+def _recordRetrieval(func):
+    """记录成功/失败的检索读数；装饰器不改变返回值和异常传播。"""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        started = time.monotonic()
+        try:
+            out = func(*args, **kwargs)
+        except Exception:
+            get_retrieval_metrics().record(
+                hits=0, elapsedMs=(time.monotonic() - started) * 1000, error=True
+            )
+            raise
+        route_counts: Dict[str, int] = {}
+        for row in out or []:
+            breakdown = (row or {}).get("confidence_breakdown") or {}
+            for route in ("tfidf", "bm25", "fts", "vector"):
+                if float(breakdown.get(route, 0.0) or 0.0) > 0.0:
+                    route_counts[route] = route_counts.get(route, 0) + 1
+        get_retrieval_metrics().record(
+            hits=len(out or []),
+            elapsedMs=(time.monotonic() - started) * 1000,
+            routeCounts=route_counts,
+        )
+        return out
+
+    return wrapper
+
+
+@_recordRetrieval
 def hybrid_search_knowledge(
     repo: Any,
     user: Optional[Dict[str, Any]],
@@ -111,6 +151,10 @@ def hybrid_search_knowledge(
     vector_index: Any = _AUTO,
     weights: Optional[Dict[str, float]] = None,
     k: int = RRF_K,
+    category: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    source: Optional[str] = None,
+    updated_after: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """四路 RRF 知识混合检索。
 
@@ -129,25 +173,14 @@ def hybrid_search_knowledge(
 
     route_scores: Dict[str, Dict[str, float]] = {"tfidf": {}, "bm25": {}, "fts": {}, "vector": {}}
 
-    # ── 主路：tfidf 分片索引（异常上抛，全链故障必须暴露）────────────
-    lexical = repo.search_visible_items(
-        user=user, query=query, scope=scope, agent_id=agent_id, limit=max(limit * 2, 10)
-    )
-    if lexical is None:
-        lexical = []
-    lexical_map: Dict[str, Dict[str, Any]] = {}
-    for it in lexical:
-        kid = str(it.get("knowledge_id", ""))
-        if not kid:
-            continue
-        lexical_map[kid] = dict(it)
-        route_scores["tfidf"][kid] = float(it.get("score", 0.0))
-
     # ── 可见语料（辅助路；构建失败该路置空，不影响主路）─────────────
     visible_map: Dict[str, Dict[str, Any]] = {}
     corpus: List[Dict[str, str]] = []
     try:
-        for it in repo.visible_items(user, scope=scope, category=None, agent_id=agent_id):
+        for it in repo.visible_items(
+            user, scope=scope, category=category, agent_id=agent_id,
+            tags=tags, source=source, updated_after=updated_after,
+        ):
             kid = str(it.get("knowledge_id", ""))
             if not kid or not isinstance(it, dict):
                 continue
@@ -163,8 +196,66 @@ def hybrid_search_knowledge(
     except Exception as e:  # noqa: BLE001
         logger.debug("知识 hybrid：可见语料构建失败（bm25/fts 路降级）: %s", e)
 
-    if corpus:
-        # 融合路只收正分命中：bm25_rank/full_text_search 保留零分文档是        # API 对比视图的契约，但 RRF 按秩计分——零分"命中"给秩权重是纯噪声
+    # ── 主路：tfidf 分片索引（异常上抛，全链故障必须暴露）────────────
+    # 大语料时把同一次检索的候选上限抬到 aux_cap，供 BM25/FTS 作为有界
+    # 候选池；主路输出仍只取前 limit*2，保持既有 RRF 行为。
+    try:
+        aux_cap = max(int(os.environ.get(AUX_SCAN_LIMIT_ENV, DEFAULT_AUX_SCAN_LIMIT)), 1)
+    except (TypeError, ValueError):
+        aux_cap = DEFAULT_AUX_SCAN_LIMIT
+    large_corpus = bool(corpus) and len(corpus) > aux_cap
+    lexical_limit = max(limit * 2, 10)
+    if large_corpus:
+        lexical_limit = min(len(corpus), aux_cap)
+    lexical_all = repo.search_visible_items(
+        user=user, query=query, scope=scope, agent_id=agent_id,
+        limit=lexical_limit, category=category, tags=tags,
+        source=source, updated_after=updated_after,
+    )
+    if lexical_all is None:
+        lexical_all = []
+    lexical = lexical_all[: max(limit * 2, 10)]
+    lexical_map: Dict[str, Dict[str, Any]] = {}
+    for it in lexical:
+        kid = str(it.get("knowledge_id", ""))
+        if not kid:
+            continue
+        lexical_map[kid] = dict(it)
+        route_scores["tfidf"][kid] = float(it.get("score", 0.0))
+
+    if large_corpus:
+        keep = {str(it.get("knowledge_id", "")) for it in lexical_all}
+        before = len(corpus)
+        corpus = [c for c in corpus if c["id"] in keep]
+        logger.debug(
+            "知识 hybrid：辅助路候选上限 %d，语料 %d→%d（主索引仍全量）",
+            aux_cap, before, len(corpus),
+        )
+
+    used_fts = False
+    if large_corpus and (
+        os.environ.get(FTS_INDEX_ENV) or "on"
+    ).strip().lower() not in _FTS_OFF_VALUES and hasattr(repo, "ftsSearch"):
+        try:
+            fts_hits = repo.ftsSearch(
+                query, user, scope=scope, agent_id=agent_id, category=category,
+                tags=tags, source=source, updated_after=updated_after,
+                limit=max(limit * 2, 10),
+            )
+            for hit in fts_hits or []:
+                kid = str(hit.get("id") or hit.get("knowledge_id") or "")
+                if kid and kid in visible_map:
+                    route_scores["bm25"][kid] = max(
+                        float(hit.get("score", 0.0) or 0.0), 0.0
+                    )
+            used_fts = True
+            logger.debug("知识 hybrid：大语料走 FTS5 倒排（%d 命中）", len(fts_hits or []))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("知识 hybrid：FTS5 索引失败（回退内存词法路）: %s", e)
+
+    if corpus and not used_fts:
+        # 融合路只收正分命中：bm25_rank/full_text_search 保留零分文档是
+        # API 对比视图的契约，但 RRF 按秩计分——零分"命中"给秩权重是纯噪声
         try:
             for doc_id, s in bm25_rank(query, corpus, top_k=max(limit * 2, 10)):
                 if s > 0:

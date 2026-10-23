@@ -15,7 +15,7 @@ import typing
 
 from neurova.core.logger import get_logger
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from neurova.api.auth import get_current_user_or_service, Depends
 from pydantic import BaseModel, Field
 
@@ -72,9 +72,24 @@ def _memory_manager_for(request: Request):
     return get_memory_manager()
 
 
+def _knowledge_hits(query: str, user: dict, top_k: int) -> list:
+    """知识路唯一取数口：与 chat 主路共用 hybrid（四路 RRF + 末端重排）。"""
+    from neurova.knowledge.hybrid import hybrid_search_knowledge
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    return hybrid_search_knowledge(
+        get_knowledge_repository(), user=user, query=query, limit=top_k, scope="all"
+    )
+
+
 def _retrieve_once(query: str, top_k: int, include_memory: bool, include_knowledge: bool,
-                   request: Request) -> dict:
-    """真实检索一次：记忆 recall + 知识 hybrid/词法检索，各带分数。"""
+                   request: Request, user: typing.Optional[typing.Dict[str, typing.Any]] = None) -> dict:
+    """真实检索一次：记忆 recall + 知识 hybrid，各带分数。
+
+    user 必须取端点注入的认证身份；`request.state.user_id` 在真实 JWT 装配下
+    可能为空，拿它查私有知识会把本人条目当成不可见。
+    """
+    user = user or _user_of(request)
     results = []
     if include_memory:
         items = []
@@ -97,12 +112,7 @@ def _retrieve_once(query: str, top_k: int, include_memory: bool, include_knowled
     if include_knowledge:
         items = []
         try:
-            from neurova.knowledge.repository import get_knowledge_repository
-
-            hits = get_knowledge_repository().search_visible_items(
-                _user_of(request), query, scope="all", limit=top_k
-            )
-            for it in hits or []:
+            for it in _knowledge_hits(query, user, top_k) or []:
                 items.append(
                     {
                         "id": str(it.get("knowledge_id") or ""),
@@ -114,7 +124,9 @@ def _retrieve_once(query: str, top_k: int, include_memory: bool, include_knowled
         except Exception as e:  # noqa: BLE001
             logger.warning("rag/retrieve 知识路失败: %s", e)
         results.append(
-            {"source": "knowledge", "items": items, "score": items[0]["score"] if items else 0.0}
+            {"source": "knowledge", "items": items,
+             "score": items[0]["score"] if items else 0.0,
+             "retrieval_method": "hybrid"}
         )
     total = sum(len(r["items"]) for r in results)
     return {"query": query, "results": results, "total": total}
@@ -174,21 +186,30 @@ async def get_memory_knowledge_links(request: Request, page: int = 1, size: int 
 
 
 @router.post("/rag/retrieve")
-async def rag_retrieve(body: RAGRetrieveRequest, request: Request):
+async def rag_retrieve(
+    body: RAGRetrieveRequest,
+    request: Request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user_or_service),
+):
     """RAG 增强检索——记忆 + 知识真实两路（收口前恒空假成功）。"""
     return {"code": 0, "message": "success", "data": _retrieve_once(
-        body.query, body.top_k, body.include_memory, body.include_knowledge, request
+        body.query, body.top_k, body.include_memory, body.include_knowledge,
+        request, user=current_user,
     )}
 
 
 @router.post("/rag/batch")
-async def batch_rag_retrieve(body: dict, request: Request):
+async def batch_rag_retrieve(
+    body: dict,
+    request: Request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user_or_service),
+):
     """批量 RAG 检索（每 query 真实两路；上限 10 防放大）。"""
     queries = (body or {}).get("queries", []) or []
     top_k = int((body or {}).get("top_k", 5) or 5)
     results = [
         {"query": q, **{k: v for k, v in _retrieve_once(
-            str(q), top_k, True, True, request
+            str(q), top_k, True, True, request, user=current_user,
         ).items() if k != "query"}}
         for q in queries[:10]
     ]

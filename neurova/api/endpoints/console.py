@@ -1779,6 +1779,36 @@ class FeedbackRequest(BaseModel):
     corrected_answer: typing.Optional[str] = None
 
 
+def _apply_feedback_to_facts(
+    lineage_ids, feedback: str, corrected_answer: typing.Optional[str]
+) -> typing.Dict[str, typing.Any]:
+    """把用户回执写回本轮知识事实（服务端血缘 id，不接受客户端自报）。
+
+    三态口径：like→success；dislike→failure；有 corrected_answer→failure（答错了）。
+    单条事实不存在只记错误，不阻断其余回写，也不阻断反馈主链路。
+    """
+    ids = [str(x) for x in (lineage_ids or []) if x]
+    if not ids or not feedback:
+        return {"recorded": 0, "errors": [], "outcome": None}
+    outcome = "success" if feedback == "like" else "failure"
+    if (corrected_answer or "").strip():
+        outcome = "failure"
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    recorded = 0
+    errors = []
+    for fact_id in ids:
+        try:
+            store.recordAdoption(fact_id, outcome)
+            recorded += 1
+        except (LookupError, ValueError, TypeError) as exc:
+            errors.append({"fact_id": fact_id, "error": str(exc)})
+    if errors:
+        logger.warning("知识采纳回写部分失败: %s", errors[:5])
+    return {"recorded": recorded, "errors": errors, "outcome": outcome}
+
+
 def _apply_feedback_to_memory(
     repo, agent_id: str, session_id: str, timestamp: str, feedback: str
 ) -> None:
@@ -1969,8 +1999,21 @@ async def post_chat_feedback(
     if not ok:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    fact_result = {"recorded": 0, "errors": [], "outcome": None}
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
+        try:
+            _round = repo.get_round(
+                agent_id=agent_id, session_id=body.session_id, timestamp=body.timestamp
+            )
+            _assistant_meta = ((_round or {}).get("assistant") or {}).get("metadata") or {}
+            fact_result = _apply_feedback_to_facts(
+                _assistant_meta.get("knowledge_lineage_ids"),
+                body.feedback,
+                body.corrected_answer,
+            )
+        except Exception as e:  # noqa: BLE001 — 采纳回写失败不阻断既有反馈链
+            logger.warning("知识采纳回写失败: %s", e)
         _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
         # 反馈自适应通道：按该会话最近一轮的意图/贡献通道调权重（写侧）。
         _apply_feedback_to_channels(agent_id, body.session_id, body.feedback)
@@ -2021,7 +2064,14 @@ async def post_chat_feedback(
             except Exception as e:  # noqa: BLE001
                 logger.warning("标注闭环处理失败: %s", e)
 
-    return {"code": 0, "message": "Feedback saved"}
+    response = {"code": 0, "message": "Feedback saved"}
+    if fact_result.get("recorded") or fact_result.get("errors"):
+        response["data"] = {
+            "facts_recorded": fact_result.get("recorded", 0),
+            "fact_errors": fact_result.get("errors", []),
+            "fact_outcome": fact_result.get("outcome"),
+        }
+    return response
 
 
 class ForkSessionRequest(BaseModel):

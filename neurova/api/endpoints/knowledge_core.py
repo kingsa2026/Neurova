@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -54,6 +54,24 @@ class ChunkUpdate(BaseModel):
 
     content: str
     expected_revision: Optional[int] = None
+
+
+class FactAdoptionRequest(BaseModel):
+    """事实采纳结果显式写回；不接受“猜测的”默认值。"""
+
+    outcome: Literal["success", "failure", "unevidenced"]
+
+
+class KnowledgeExpiryRequest(BaseModel):
+    """到期条目归档开关；默认 dry-run，不让审计动作顺手改数据。"""
+
+    apply: bool = False
+
+
+class KnowledgeReindexRequest(BaseModel):
+    """索引维护开关；force=true 才做向量全量重算。"""
+
+    force: bool = False
 
 
 # 注意：根路由 GET ""/POST "" 由聚合器 add_api_route 注册（FastAPI 禁止嵌套
@@ -117,6 +135,7 @@ async def search_knowledge(
         category=body.category,
         agent_id=agent_id,
         limit=body.limit,
+        tags=body.tags,
     )
     return [item_response(i) for i in results]
 
@@ -199,6 +218,8 @@ async def create_knowledge(
         confidence=body.confidence,
         visibility=visibility,
         owner_user_id=str(current_user.get("user_id", "")),
+        valid_until=body.valid_until,
+        lifecycle_status=body.lifecycle_status,
     )
     return item_response(item)
 
@@ -246,6 +267,161 @@ async def get_foundation_usage(
     from neurova.knowledge.foundation import get_knowledge_fact_store
 
     return get_knowledge_fact_store().usageMetrics()
+
+
+@router.get("/audit/redundancy")
+async def get_redundancy_audit(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """重复内容审计（只读，管理员）。
+
+    只报重复组与冗余行，不删除、不改条目。删除仍走 tombstone／purge 的显式通道；
+    报告命中条目的 title/knowledge_id，足够人工复核，不在响应里回显正文。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="冗余审计是整库只读报告，仅管理员可查看")
+
+    from neurova.knowledge.foundation.redundancy import RedundancyAudit
+
+    report = RedundancyAudit.auditRepository(get_repository())
+    return {"code": 0, "message": "ok", "data": report}
+
+
+@router.post("/facts/{fact_id}/adoption")
+async def record_fact_adoption(
+    request: Request,
+    fact_id: str = Path(..., description="事实 ID"),
+    body: FactAdoptionRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """显式写回某条事实的采纳结果（管理员／服务身份）。
+
+    只接受 fact_id + outcome，不从聊天 like/dislike 或引用关系猜测归因；
+    自动归因需要产品语义拍板（见审计报告 P0-1 三态票）。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="采纳结果写回是治理动作，仅管理员可执行")
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    try:
+        get_knowledge_fact_store().recordAdoption(fact_id, body.outcome)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {"fact_id": fact_id, "outcome": body.outcome},
+    }
+
+
+@router.get("/audit/retrieval-metrics")
+async def get_retrieval_metrics_snapshot(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """检索在线快照（管理员）：只报已接的读数，未接指标不伪造。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="检索指标是整库读数，仅管理员可查看")
+
+    from neurova.knowledge.retrieval_metrics import get_retrieval_metrics
+
+    repo = get_repository()
+    data: Dict[str, Any] = {
+        "retrieval": get_retrieval_metrics().snapshot(),
+        "lifecycle": repo.lifecycleReport()["counts"],
+        "pending_conflicts": None,
+        "token_usage": None,
+    }
+    try:
+        from neurova.core.usage_accounting import get_usage_accounting
+
+        data["token_usage"] = get_usage_accounting().snapshot()
+    except Exception as exc:  # noqa: BLE001 — 指标读取失败不阻断端点，但必须点名
+        data["token_usage_missing_reason"] = str(exc)
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        store = get_knowledge_fact_store()
+        data["pending_conflicts"] = (
+            len(repo.list_conflicts("pending")) + len(store.conflicts("pending"))
+        )
+        data["knowledge_token_usage"] = store.tokenUsageMetrics()
+    except Exception as exc:  # noqa: BLE001 — 指标读取失败不阻断端点，但必须点名缺哪项
+        data["missing_reason"] = "pending_conflicts unavailable: %s" % exc
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/audit/reindex")
+async def run_knowledge_reindex(
+    request: Request,
+    body: KnowledgeReindexRequest = KnowledgeReindexRequest(),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """索引维护（管理员）：默认增量自愈；force=true 做向量全量重算。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="索引维护是整库动作，仅管理员可执行")
+
+    import asyncio
+
+    from neurova.knowledge.maintenance import maintainKnowledgeIndexes
+
+    result = await asyncio.to_thread(maintainKnowledgeIndexes, body.force)
+    return {"code": 0, "message": "ok", "data": result}
+
+
+@router.get("/audit/index-health")
+async def get_knowledge_index_health(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """知识向量索引健康度（管理员只读）：文件/向量/引擎分布/坏分片。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="索引健康度是整库读数，仅管理员可查看")
+    from neurova.knowledge.vector_index import get_knowledge_vector_index
+
+    data = {
+        "vector": get_knowledge_vector_index().health(),
+        "lifecycle": get_repository().lifecycleReport()["counts"],
+    }
+    try:
+        data["fts"] = get_repository().ftsHealth()
+    except Exception as exc:  # noqa: BLE001 — FTS 不可用不顶住健康读数，但要点名
+        data["fts_missing_reason"] = str(exc)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/audit/expiry")
+async def run_knowledge_expiry(
+    request: Request,
+    body: KnowledgeExpiryRequest = KnowledgeExpiryRequest(),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """到期条目自动归档（管理员）。默认 dry-run；apply=True 才把 active→archived。
+
+    不删除正文；归档后仍可 PUT 恢复 active。启动路径也调用同一方法（apply=True）。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="到期归档是整库动作，仅管理员可执行")
+    return {"code": 0, "message": "ok",
+            "data": get_repository().expireDueEntries(apply=body.apply)}
+
+
+@router.get("/audit/lifecycle")
+async def get_lifecycle_audit(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """生命周期只读报告（管理员）：active/archived/expired 计数与不可检索清单。
+
+    只读；变更走条目的 PUT（lifecycle_status/valid_until），物理删除仍走 purge。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="生命周期审计是整库只读报告，仅管理员可查看")
+    return {"code": 0, "message": "ok", "data": get_repository().lifecycleReport()}
 
 
 @router.get("/foundation/integrity")

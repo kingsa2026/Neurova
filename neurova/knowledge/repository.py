@@ -34,6 +34,13 @@ from neurova.knowledge.foundation.storage_fence import (
     PRODUCTION_STORAGE_DIR,
     assertNotUnderProductionStorage,
 )
+from neurova.knowledge.lifecycle import (
+    ACTIVE,
+    ARCHIVED,
+    isExpired,
+    isRetrievable,
+    normalizeLifecycleStatus,
+)
 
 logger = get_logger(__name__)
 
@@ -51,7 +58,10 @@ _SUBMISSION_REJECTED = "rejected"
 
 # P0-2 revision 链：这些字段被覆盖前，旧值快照进条目 revisions 账本。
 # graph_node_ids 等引擎簿记字段不在列——graph_bridge 回写不该刷屏账本。
-_REVISION_FIELDS = ("title", "content", "category", "tags", "confidence", "source")
+_REVISION_FIELDS = (
+    "title", "content", "category", "tags", "confidence", "source",
+    "valid_until", "lifecycle_status",
+)
 
 # 增量操作数达到该阈值退回全量重建——删除不回退 df/词表，
 # 陈旧 IDF 由本阈值有界收敛（同时约束 TF-IDF 词表漂移导致的向量维度不齐）
@@ -216,6 +226,9 @@ class KnowledgeRepository:
         # P0#1 增量操作队列：[("reindex"|"remove", knowledge_id)]，检索前按序应用；
         # 达 _INCREMENTAL_OPS_LIMIT 或异常退回全量重建
         self._pending_ops: List[Tuple[str, str]] = []
+        # FTS5 持久倒排按需创建；写路径只置脏，首次检索时 reconcile。
+        self._fts: Any = None
+        self._ftsDirty = True
         self._load()
 
     # ── TF-IDF 分片索引（复用 UnifiedVectorStore tfidf 后端）─────────────────
@@ -391,6 +404,58 @@ class KnowledgeRepository:
             if store is not None and docs:
                 store.index_memories(docs, incremental=True)
 
+    def _ensureFts(self) -> Any:
+        with self._lock:
+            if self._fts is None:
+                from neurova.knowledge.fts_index import KnowledgeFtsIndex
+
+                self._fts = KnowledgeFtsIndex(str(self._dir / "knowledge_fts.db"))
+            if not self._ftsDirty:
+                return self._fts
+            snapshot = {
+                aid: [dict(item) for item in items]
+                for aid, items in self._items.items()
+            }
+            self._ftsDirty = False
+        self._fts.reconcile(snapshot)
+        return self._fts
+
+    def ftsSearch(
+        self,
+        query: str,
+        user: Optional[Dict[str, Any]] = None,
+        *,
+        scope: str = "all",
+        agent_id: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        source: Optional[str] = None,
+        updated_after: Optional[float] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """FTS5 倒排检索；索引按需 reconcile，失败交给调用方降级。"""
+        return self._ensureFts().search(
+            query, user, scope=scope, agent_id=agent_id, category=category,
+            tags=tags, source=source, updated_after=updated_after, limit=limit,
+        )
+
+    def ftsHealth(self) -> Dict[str, Any]:
+        return self._ensureFts().health()
+
+    def maintainIndexes(self, force: bool = False) -> Dict[str, Any]:
+        """周期维护：增量应用 pending；force=True 时全量重建全部分片。"""
+        with self._lock:
+            if force:
+                self._rebuild_indexes("")
+            else:
+                self._ensure_indexes("default")
+            return {
+                "force": bool(force),
+                "dirty": bool(self._index_dirty),
+                "pending_ops": len(self._pending_ops),
+                "indexes": sum(1 for store in self._indexes.values() if store is not None),
+            }
+
     def _ensure_indexes(self, agent_id: str) -> None:
         """检索前维护索引（幂等）：dirty→全量重建；有增量操作→按序应用；
         操作数达阈值/应用异常→退回全量重建（陈旧 IDF 有界收敛）。"""
@@ -551,6 +616,14 @@ class KnowledgeRepository:
             item["shared_with"] = []
         if not isinstance(item.get("graph_node_ids"), list):
             item["graph_node_ids"] = []
+        if not isinstance(item.get("valid_until"), str):
+            item["valid_until"] = None
+        if not isinstance(item.get("lifecycle_status"), str):
+            item["lifecycle_status"] = ACTIVE
+        if not isinstance(item.get("lifecycle_reason"), str):
+            item["lifecycle_reason"] = ""
+        if item.get("lifecycle_changed_at") is None:
+            item["lifecycle_changed_at"] = None
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -564,6 +637,7 @@ class KnowledgeRepository:
 
     def _save(self) -> None:
         self._assertNotWritingProductionUnderPytest()
+        self._ftsDirty = True
         if self._narratives is not None:
             # 闸内不吞异常：写失败若只留一条日志，内存与库就分叉了，
             # 下一次成功写入会把分叉期间的编辑抹平。
@@ -632,7 +706,10 @@ class KnowledgeRepository:
         chunks: Optional[List[Dict[str, Any]]] = None,
         parents: Optional[List[Dict[str, Any]]] = None,
         detect_conflict: bool = True,
+        valid_until: Optional[str] = None,
+        lifecycle_status: str = ACTIVE,
     ) -> Dict[str, Any]:
+        status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         item: Dict[str, Any] = {
             "knowledge_id": knowledge_id or str(uuid.uuid4()),
@@ -649,6 +726,10 @@ class KnowledgeRepository:
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
+            "valid_until": valid_until,
+            "lifecycle_status": status,
+            "lifecycle_reason": "",
+            "lifecycle_changed_at": None,
             # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
             "chunks": chunks,
             # P1#6 父子分块：chunks 存子块（进索引），parents 存父块（LLM 上下文）；
@@ -722,8 +803,17 @@ class KnowledgeRepository:
         scope: str = "all",
         category: Optional[str] = None,
         agent_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        source: Optional[str] = None,
+        updated_after: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """按当前用户可见性返回条目视图（scope: all/public/private/shared）。"""
+        """按当前用户可见性返回条目视图（scope: all/public/private/shared）。
+
+        tags 是 AND 口径：请求的每个标签都必须出现在条目的 tags 里。
+        source/updated_after 同样是“先筛后检”的候选集约束——过滤必须发生在
+        索引检索之前，否则候选集已经带着不该出现的条目，下游再截断就会把
+        标签/来源/时间窗外的内容挤进 top-k。
+        """
         uid = self._user_id(user)
         with self._lock:
             groups = self._items.items() if not agent_id else [(agent_id, self._items.get(agent_id, []))]
@@ -732,6 +822,8 @@ class KnowledgeRepository:
         for aid, items in snapshot:
             for item in items:
                 if agent_id and aid != agent_id:
+                    continue
+                if not isRetrievable(item):
                     continue
                 if scope == "public" and item.get("visibility") != VISIBILITY_PUBLIC:
                     continue
@@ -749,6 +841,17 @@ class KnowledgeRepository:
                     continue
                 if category and item.get("category") != category:
                     continue
+                if tags and not all(tag in (item.get("tags") or []) for tag in tags):
+                    continue
+                if source and str(item.get("source") or "") != str(source):
+                    continue
+                if updated_after is not None:
+                    try:
+                        if float(item.get("updated_at") or 0) < float(updated_after):
+                            continue
+                    except (TypeError, ValueError):
+                        # 时间戳坏了不隐藏条目：错误方向是“多检一条”，不是“知识消失”
+                        pass
                 results.append(item)
         return results
 
@@ -908,6 +1011,8 @@ class KnowledgeRepository:
             items = list(self._items.get(agent_id, []))
         results = []
         for item in items:
+            if not isRetrievable(item):
+                continue
             if category and item.get("category") != category:
                 continue
             if tags and not all(t in (item.get("tags") or []) for t in tags):
@@ -927,6 +1032,9 @@ class KnowledgeRepository:
         category: Optional[str] = None,
         agent_id: Optional[str] = None,
         limit: int = 20,
+        tags: Optional[List[str]] = None,
+        source: Optional[str] = None,
+        updated_after: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """在当前用户可见视图内检索知识。
 
@@ -935,8 +1043,11 @@ class KnowledgeRepository:
         """
         q = (query or "").lower()
 
-        # 可见性过滤（隔离优先，索引只做相似度排序）
-        visible = self.visible_items(user, scope=scope, category=category, agent_id=agent_id)
+        # 可见性过滤（隔离优先，索引只做相似度排序）；元数据同一时点过滤
+        visible = self.visible_items(
+            user, scope=scope, category=category, agent_id=agent_id, tags=tags,
+            source=source, updated_after=updated_after,
+        )
         if not visible:
             return []
 
@@ -1051,6 +1162,10 @@ class KnowledgeRepository:
         return results[:limit]
 
     def update_knowledge(self, agent_id: str, knowledge_id: str, fields: Dict[str, Any]) -> bool:
+        lifecycle_change = "lifecycle_status" in fields
+        if lifecycle_change:
+            fields = dict(fields)
+            fields["lifecycle_status"] = normalizeLifecycleStatus(fields["lifecycle_status"])
         with self._lock:
             for item in self._items.get(agent_id, []):
                 if item.get("knowledge_id") == knowledge_id:
@@ -1072,7 +1187,10 @@ class KnowledgeRepository:
                     for k, v in fields.items():
                         # 注意：visibility/shared_with/submission 不在白名单内——
                         # 公开与共享只能走专用方法（share/submit/review），防提权
-                        if k in ("title", "content", "category", "tags", "confidence", "source", "graph_node_ids"):
+                        if k in (
+                            "title", "content", "category", "tags", "confidence",
+                            "source", "graph_node_ids", "valid_until", "lifecycle_status",
+                        ):
                             item[k] = v
                     # P0#1：content 变更时同步重切 chunks——旧块正文/偏移会同时
                     # 污染索引与 chunk_hits（读到已删除的旧文本）
@@ -1090,6 +1208,13 @@ class KnowledgeRepository:
                                 item["chunks"] = split_with_meta(new_content)
                         except Exception as e:  # noqa: BLE001
                             logger.warning("知识条目内容更新重切分块失败（保留旧块）: %s", e)
+                    if lifecycle_change:
+                        item["lifecycle_reason"] = (
+                            "" if fields["lifecycle_status"] == ACTIVE else "manual"
+                        )
+                        item["lifecycle_changed_at"] = (
+                            datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        )
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     self._syncEntryGovernance()
                     self._save()
@@ -1304,6 +1429,74 @@ class KnowledgeRepository:
         """墓碑清单（admin 审计消费）。记录含 item 快照 + 删除元数据。"""
         with self._lock:
             return [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
+
+    def expireDueEntries(self, now: Optional[datetime.datetime] = None,
+                         apply: bool = False) -> Dict[str, Any]:
+        """到期条目自动归档：dry-run 只报数；apply 把 active→archived。
+
+        不删除、不改正文；归档后仍可 PUT 回 active（保留 valid_until）。
+        启动路径与管理员端点共用本方法，不另写第二份判定。
+        """
+        due: List[tuple] = []
+        with self._lock:
+            for agent_id, items in self._items.items():
+                for item in items:
+                    try:
+                        status = normalizeLifecycleStatus(item.get("lifecycle_status"))
+                    except ValueError:
+                        status = ARCHIVED
+                    if status == ACTIVE and isExpired(item, now):
+                        due.append((agent_id, item))
+            if apply and due:
+                stamp = datetime.datetime.now(datetime.timezone.utc)
+                for _agent_id, item in due:
+                    item["lifecycle_status"] = ARCHIVED
+                    item["lifecycle_reason"] = "expired"
+                    item["lifecycle_changed_at"] = stamp.isoformat()
+                    item["updated_at"] = stamp.timestamp()
+                    self._record_index_op("remove", item["knowledge_id"])
+                self._syncEntryGovernance()
+                self._save()
+        return {"due": len(due), "archived": len(due) if apply else 0, "applied": bool(apply)}
+
+    def lifecycleReport(self, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+        """生命周期只读报告：active/archived/expired 计数 + 不可检索条目清单。"""
+        counts = {ACTIVE: 0, ARCHIVED: 0, "expired": 0}
+        rows: List[Dict[str, Any]] = []
+        with self._lock:
+            snapshot = [
+                (aid, [dict(item) for item in items])
+                for aid, items in self._items.items()
+            ]
+        for agent_id, items in snapshot:
+            for item in items:
+                try:
+                    status = normalizeLifecycleStatus(item.get("lifecycle_status"))
+                except ValueError:
+                    status = ARCHIVED
+                if status == ARCHIVED:
+                    state = ARCHIVED
+                elif isExpired(item, now):
+                    state = "expired"
+                else:
+                    state = ACTIVE
+                counts[state] += 1
+                if state != ACTIVE:
+                    rows.append({
+                        "agent_id": agent_id,
+                        "knowledge_id": item.get("knowledge_id"),
+                        "title": item.get("title", ""),
+                        "lifecycle_status": status,
+                        "lifecycle_reason": item.get("lifecycle_reason", ""),
+                        "lifecycle_changed_at": item.get("lifecycle_changed_at"),
+                        "valid_until": item.get("valid_until"),
+                        "state": state,
+                    })
+        return {
+            "total": sum(counts.values()),
+            "counts": counts,
+            "non_retrievable": rows,
+        }
 
     def list_revisions(self, knowledge_id: str) -> List[Dict[str, Any]]:
         """条目 revision 账本（最新在前）。条目不存在返回 []。"""

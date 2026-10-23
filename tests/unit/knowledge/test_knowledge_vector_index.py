@@ -49,6 +49,14 @@ class RealContractEngine(StubEngine):
         )
 
 
+class NamedEngine(StubEngine):
+    """同一引擎类、不同模型名：用于验证索引指纹必须识别模型身份。"""
+
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.dimension = len(self.VOCAB)
+
+
 @pytest.fixture()
 def repo(tmp_path):
     r = KnowledgeRepository(str(tmp_path / "kb"))
@@ -121,6 +129,48 @@ class TestSearch:
         assert stats["entry_count"] == 2
         hits = idx.search("quantum computing basics", ALICE, top_k=3)
         assert hits and hits[0]["title"] == "Quantum Guide"
+
+
+class TestEngineIdentity:
+    def test_same_engine_class_with_new_model_rebuilds(self, repo, tmp_path):
+        """同一引擎类换 model_name 必须重建；只按类名做指纹会复用旧向量空间。"""
+        idx_a = KnowledgeVectorIndex(
+            str(tmp_path / "vec"), engine=NamedEngine("bge-model-a")
+        )
+        first = idx_a.ensure_indexed(repo, ALICE)
+        assert first["computed"] == 2
+
+        idx_b = KnowledgeVectorIndex(
+            str(tmp_path / "vec"), engine=NamedEngine("bge-model-b")
+        )
+        second = idx_b.ensure_indexed(repo, ALICE)
+        assert second["computed"] == 2, "换模型后必须重建索引，不能沿用旧模型的向量"
+
+    def test_same_model_does_not_rebuild(self, repo, tmp_path):
+        """模型名相同的重启/新实例仍应复用磁盘向量，不能退化成每次全量重算。"""
+        idx_a = KnowledgeVectorIndex(
+            str(tmp_path / "vec"), engine=NamedEngine("bge-model-a")
+        )
+        assert idx_a.ensure_indexed(repo, ALICE)["computed"] == 2
+
+        idx_b = KnowledgeVectorIndex(
+            str(tmp_path / "vec"), engine=NamedEngine("bge-model-a")
+        )
+        assert idx_b.ensure_indexed(repo, ALICE)["computed"] == 0
+
+    def test_health_reports_files_records_and_engine(self, repo, tmp_path):
+        idx = KnowledgeVectorIndex(
+            str(tmp_path / "vec"), engine=NamedEngine("bge-model-a")
+        )
+        idx.ensure_indexed(repo, ALICE)
+
+        health = idx.health()
+
+        assert health["files"] == 1
+        assert health["records"] == 2
+        assert health["cached_users"] == 1
+        assert "NamedEngine|bge-model-a" in health["engines"]
+        assert health["errors"] == []
 
 
 class TestHybridIntegration:

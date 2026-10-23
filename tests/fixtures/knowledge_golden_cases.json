@@ -1,0 +1,21 @@
+{
+  "schema": "neurova.knowledge.golden/v1",
+  "labeling": "manual",
+  "cases": [
+    {
+      "query": "量子计算",
+      "expected_ids": ["g-common"],
+      "domain": "common"
+    },
+    {
+      "query": "项目代号",
+      "expected_ids": ["g-conflict-old", "g-conflict-new"],
+      "domain": "conflict"
+    },
+    {
+      "query": "过期政策",
+      "expected_ids": ["g-active-policy"],
+      "domain": "expired"
+    }
+  ]
+}

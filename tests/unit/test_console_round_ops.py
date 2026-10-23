@@ -370,6 +370,34 @@ def test_feedback_applies_memory_temperature(monkeypatch):
     ]
 
 
+def test_feedback_writes_knowledge_adoption_from_server_lineage(monkeypatch):
+    """反馈只消费 assistant metadata 里的服务端 lineage，不读客户端 fact_ids。"""
+    repo = FakeRepo()
+    repo.round_data = {
+        "assistant": {"role": "assistant", "content": "A1",
+                      "metadata": {"knowledge_lineage_ids": ["f1", "f2"]}},
+    }
+    agent = FakeAgent()
+    seen = {}
+
+    def fake_adoption(ids, feedback, corrected):
+        seen.update(ids=list(ids), feedback=feedback, corrected=corrected)
+        return {"recorded": len(ids), "errors": [], "outcome": "success"}
+
+    monkeypatch.setattr(console_module, "_apply_feedback_to_facts", fake_adoption)
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
+    monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
+    monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": agent)
+
+    body = console_module.FeedbackRequest(
+        session_id="s1", timestamp="2026-08-29T10:00:00", feedback="like"
+    )
+    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request()))
+
+    assert seen == {"ids": ["f1", "f2"], "feedback": "like", "corrected": None}
+    assert resp["data"]["facts_recorded"] == 2
+
+
 def test_feedback_cancel_does_not_touch_memory(monkeypatch):
     """取消反馈（feedback=None）只清 metadata，不做温度操作。"""
     repo = FakeRepo()

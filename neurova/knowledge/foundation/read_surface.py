@@ -147,7 +147,9 @@ def mergeIntoLegacy(legacy: List[Dict[str, Any]], facts: List[Dict[str, Any]], l
 
 
 def attachGovernance(store: KnowledgeFactStore,
-                     hits: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+                     hits: List[Dict[str, Any]],
+                     *,
+                     enrich: bool = True) -> Tuple[List[Dict[str, Any]], List[str]]:
     """把治理行挂到**已排好序**的命中上，顺序一字不动。
 
     为什么不交织：011 已经用真数据否证过两池按秩合并——同一份内容在两个池子里各算一票，
@@ -168,11 +170,12 @@ def attachGovernance(store: KnowledgeFactStore,
             enriched.append(row)
             continue
         row["lineage_id"] = fact["fact_id"]
-        row["evidence_state"] = fact.get("evidence_state")
-        # 派生值取代条目里那个数（G11）：查不到治理行时才保留原值，不编造
-        row["confidence"] = fact.get("confidence")
-        row["adoption_outcome"] = fact.get("latest_adoption_outcome") or fact.get("adoption_outcome")
-        row["recorded_at"] = fact.get("recorded_at")
+        if enrich:
+            row["evidence_state"] = fact.get("evidence_state")
+            # 派生值取代条目里那个数（G11）：查不到治理行时才保留原值，不编造
+            row["confidence"] = fact.get("confidence")
+            row["adoption_outcome"] = fact.get("latest_adoption_outcome") or fact.get("adoption_outcome")
+            row["recorded_at"] = fact.get("recorded_at")
         lineage.append(fact["fact_id"])
         enriched.append(row)
     return enriched, lineage

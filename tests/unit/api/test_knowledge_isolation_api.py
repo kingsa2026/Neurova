@@ -142,6 +142,28 @@ class TestVisibilityView:
         assert len(resp.json()) == 1
 
 
+class TestSearchMetadataFilters:
+    def test_search_filters_by_tags(self, api):
+        """tags 是请求契约的一部分，不能被静默忽略。
+
+        两篇正文都能命中 query，只有 alpha 带 tags=["alpha"]；
+        过滤必须发生在检索前，否则结果集与未过滤完全相同。
+        """
+        client, _holder, _app = api
+        _create(client, "alpha-doc", content="shared haystack", tags=["alpha"])
+        _create(client, "beta-doc", content="shared haystack", tags=["beta"])
+
+        resp = client.post(PREFIX + "/search", json={"query": "shared", "tags": ["alpha"]})
+        assert resp.status_code == 200
+        assert [i["title"] for i in resp.json()] == ["alpha-doc"]
+
+        both = client.post(
+            PREFIX + "/search", json={"query": "shared", "tags": ["alpha", "beta"]}
+        )
+        assert both.status_code == 200
+        assert both.json() == []
+
+
 # ================================================================
 # 修改守卫
 # ================================================================

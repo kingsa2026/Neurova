@@ -99,6 +99,24 @@ def _is_length_truncated(finish_reason: Any) -> bool:
     return str(finish_reason or "").strip().lower() in _TRUNCATED_FINISH_REASONS
 
 
+def _recordFinishReason(ctx: Any, finish_reason: Any) -> None:
+    metadata = getattr(ctx, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata["finish_reason"] = str(finish_reason or "")
+
+
+def _recordFinishOutcome(finish_reason: Any) -> None:
+    """把模型 content_filter 完成态记成可核的拒答事件；其他完成态不猜。"""
+    if str(finish_reason or "").strip().lower() != "content_filter":
+        return
+    try:
+        from neurova.knowledge.retrieval_metrics import get_retrieval_metrics
+
+        get_retrieval_metrics().recordOutcome("model_refusal")
+    except Exception as exc:  # noqa: BLE001 - 观测副路径失败不影响回复
+        logger.debug("拒答完成态记录跳过: %s", exc)
+
+
 def _adaptive_retrieval_enabled(agent: Any, ctx: "ChatContext") -> bool:
     """Adaptive Retrieval 开关（批次 4）：默认关闭。
 
@@ -1786,6 +1804,11 @@ class ChatPipeline:
         from neurova.collaboration.memory_scope import filter_memories_by_scope
 
         ctx.relevant_memories = filter_memories_by_scope(result.memories, **scopeCtx)
+        if isinstance(ctx.metadata, dict):
+            ctx.metadata["retrieval_hits"] = len(ctx.relevant_memories)
+            ctx.metadata["retrieval_quality"] = float(result.quality or 0.0)
+        self._recordKnowledgeLineage(ctx, result)
+        self._recordKnowledgeCostInputs(ctx)
 
         # 记录检索统计
         logger.info(
@@ -1929,6 +1952,114 @@ class ChatPipeline:
         except Exception as exc:  # noqa: BLE001 - 自适应失败不阻断主流程
             logger.warning("[ADAPTIVE_RAG] 二次检索失败，保留首查结果: %s", exc)
             return first_result
+
+    @staticmethod
+    def _recordKnowledgeLineage(ctx: Any, result: Any) -> None:
+        """把本轮知识血缘 id 带进 ctx.metadata，供 post-chat 落进 assistant_metadata。
+
+        只认服务端检索结果里的 lineage_ids；不读用户可写的 fact_ids，避免伪造归因。
+        """
+        lineage_ids = [
+            str(x) for x in ((getattr(result, "metadata", None) or {}).get("lineage_ids") or [])
+            if x
+        ]
+        if not lineage_ids:
+            return
+        metadata = getattr(ctx, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata["knowledge_lineage_ids"] = list(dict.fromkeys(lineage_ids))
+
+    @staticmethod
+    def _recordExplicitToolOutcome(ctx: Any, toolMessages: Any) -> None:
+        """只认工具记录里显式声明的 turn_outcome；不看 success，更不看文本。"""
+        metadata = getattr(ctx, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("turn_outcome_override"):
+            return
+        try:
+            from neurova.quality.outcomes import TURN_OUTCOMES
+        except Exception:  # noqa: BLE001 - 质量模块缺席不阻断回复
+            return
+        for record in toolMessages or []:
+            if not isinstance(record, dict):
+                continue
+            outcome = str(record.get("turn_outcome") or "").strip().lower()
+            if outcome in TURN_OUTCOMES:
+                metadata["turn_outcome_override"] = outcome
+                return
+
+    @staticmethod
+    def _recordKnowledgeCitations(ctx: Any) -> None:
+        """从回答的 citation 标记抽取被引用的知识事实 id（结构化，不做文本猜测）。"""
+        registry = getattr(ctx, "citation_registry", None)
+        reply = getattr(ctx, "reply", "")
+        metadata = getattr(ctx, "metadata", None)
+        if registry is None or not reply or not isinstance(metadata, dict):
+            return
+        try:
+            from neurova.memory.citation import extract_citations
+
+            cited = [
+                str(entry.get("fact_id"))
+                for entry in extract_citations(reply, registry)
+                if entry.get("fact_id")
+            ]
+            if cited:
+                metadata["knowledge_citation_ids"] = list(dict.fromkeys(cited))
+        except Exception as exc:  # noqa: BLE001 - 引用抽取失败不阻断回复
+            logger.debug("知识 citation 抽取跳过: %s", exc)
+
+    def _recordKnowledgeCostInputs(self, ctx: Any) -> None:
+        """记录检索侧成本输入：命中分数与上下文 token（模型 tokenizer 优先）。"""
+        metadata = getattr(ctx, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        scores: Dict[str, float] = {}
+        tokens: Dict[str, int] = {}
+        total_tokens = 0
+        exact_all = True
+        model = str(
+            metadata.get("model")
+            or metadata.get("provider_model")
+            or self._current_model_name()
+            or ""
+        )
+        try:
+            from neurova.knowledge.token_count import countModelTokens
+        except Exception:  # noqa: BLE001 - 分词器缺席不阻断检索
+            return
+        for memory in getattr(ctx, "relevant_memories", None) or []:
+            if not isinstance(memory, dict):
+                continue
+            # 只算知识命中：普通记忆也在这张表里，把它们计进知识成本会把
+            # 记忆上下文摊进未归因桶，读数就假了。
+            if not memory.get("knowledge_id"):
+                continue
+            try:
+                count, exact, _source = countModelTokens(
+                    str(memory.get("content") or ""), model=model
+                )
+            except Exception:  # noqa: BLE001 - 单条分词失败不顶住整轮
+                exact_all = False
+                continue
+            total_tokens += count
+            exact_all = exact_all and exact
+            lineage_id = memory.get("lineage_id")
+            if not lineage_id:
+                continue  # 文档命中没有 fact 可摊，只进 total（由未归因桶承接）
+            key = str(lineage_id)
+            try:
+                scores[key] = float(memory.get("score", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                scores[key] = 0.0
+            tokens[key] = count
+        if scores:
+            metadata["knowledge_lineage_scores"] = scores
+        if tokens:
+            metadata["knowledge_retrieval_tokens"] = tokens
+        if total_tokens:
+            metadata["knowledge_retrieval_tokens_total"] = total_tokens
+            metadata["knowledge_retrieval_tokens_estimated"] = not exact_all
+            metadata["knowledge_retrieval_tokens_model"] = model
 
     @staticmethod
     def _memory_key(m: Any) -> str:
@@ -2325,12 +2456,14 @@ class ChatPipeline:
             if ctx.citation_registry is not None and ctx.reply:
                 from neurova.memory.citation import decode_citation_handles
 
+                self._recordKnowledgeCitations(ctx)
                 ctx.reply = decode_citation_handles(ctx.reply, ctx.citation_registry)
         except Exception:  # noqa: BLE001 - 解码故障不阻断回复
             logger.debug("citation 句柄解码跳过", exc_info=True)
 
         # 广播工具调用结果
         tool_messages = self._collect_tool_messages()
+        self._recordExplicitToolOutcome(ctx, tool_messages)
         if tool_messages:
             try:
                 from neurova.sync.session_sync_manager import EventType
@@ -2456,6 +2589,8 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 回调失败: %s", e)
             elif etype == "done":
+                _recordFinishOutcome(event.get("finish_reason"))
+                _recordFinishReason(ctx, event.get("finish_reason"))
                 ctx.execution_completed = event.get("finish_reason") in {"stop", "end_turn"}
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
@@ -2574,6 +2709,24 @@ class ChatPipeline:
             and not (reply or "").strip()
             and not getattr(response, "tool_calls", None)
         ):
+            # 与环侧共用同一份判据与文案（教义第 6 条）：本轮思考是**退化**而非"太长"，
+            # 而"关思考/降档"在这台网关上发不出去 ⇒ 重试与自动续写都只是再等一次连发
+            # （实测：非流式同形重试在 6 分钟后撞出第二段同样的连发，整轮仍无正文）。
+            from neurova.agent.loops.reasoning_degeneracy import (
+                FUTILE_THINKING_RETRY_NOTICE,
+                stripDegeneracy,
+            )
+            from neurova.llm.provider_compat import thinkingKnobReachesGateway
+
+            _degenerated = stripDegeneracy(
+                getattr(response, "reasoning_content", None) or ""
+            )[1] is not None
+            if _degenerated and not thinkingKnobReachesGateway(self.llm_client, {}):
+                logger.warning(
+                    "[CTX_RECOVERY] 非流式思考退化且该网关收不到关思考的键，"
+                    "跳过原地重试与自动续写（这一轮没有可续的正文）"
+                )
+                return FUTILE_THINKING_RETRY_NOTICE
             try:
                 from neurova.agent.loops.openai_loop import _raised_output_budget
                 cur_budget = getattr(self.llm_client.config, "max_tokens", None)
@@ -2699,6 +2852,8 @@ class ChatPipeline:
 
             reply += new_content
 
+        _recordFinishOutcome(getattr(response, "finish_reason", None))
+        _recordFinishReason(ctx, getattr(response, "finish_reason", None))
         ctx.execution_completed = getattr(response, "finish_reason", None) in {"stop", "end_turn"}
         return reply
 

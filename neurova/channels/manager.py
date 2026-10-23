@@ -231,6 +231,9 @@ class ChannelManager:
                 "agent_id": agent_id,
                 "connected": adapter.is_connected,
                 "enabled": adapter.config.enabled,
+                "human_takeover_events": bool(
+                    getattr(adapter, "humanTakeoverEvents", False)
+                ),
             }
         # 兼容：仅存在于 _adapters 而无复合键的实例（理论不发生，兜底）
         for channel_type, adapter in self._adapters.items():
@@ -240,6 +243,9 @@ class ChannelManager:
                     "agent_id": "default",
                     "connected": adapter.is_connected,
                     "enabled": adapter.config.enabled,
+                    "human_takeover_events": bool(
+                        getattr(adapter, "humanTakeoverEvents", False)
+                    ),
                 }
         return result
 
@@ -399,6 +405,32 @@ class ChannelManager:
     async def _on_channel_event(self, event_type: ChannelEventType, message: ChannelMessage):
         """处理渠道事件"""
         logger.info("Channel event: %s from %s " f"sender=%s", event_type.value, message.channel_type, message.sender_name)
+
+        if event_type in (
+            ChannelEventType.HUMAN_TAKEOVER_STARTED,
+            ChannelEventType.HUMAN_TAKEOVER_ENDED,
+        ):
+            try:
+                from neurova.quality import get_quality_store
+
+                session_id = self.resolve_session_scope_id(message)
+                occurred = getattr(message, "timestamp", None)
+                get_quality_store().recordEvent(
+                    event_type.value, session_id,
+                    agentId=str(message.metadata.get("agent_id") or ""),
+                    channel=str(message.channel_type or ""),
+                    source="channel_event",
+                    sourceEventId="%s:%s:%s" % (
+                        message.channel_type, message.message_id, event_type.value,
+                    ),
+                    actorId=str(message.sender_id or ""),
+                    reasonCode=str(message.metadata.get("takeover_reason") or ""),
+                    occurredAt=occurred.isoformat() if hasattr(occurred, "isoformat") else None,
+                    metadata={"chat_id": message.chat_id},
+                )
+            except Exception as exc:  # noqa: BLE001 - 质量账失败不影响渠道主链
+                logger.warning("渠道人工接管事件记录失败: %s", exc)
+            return
 
         # 广播到 SessionSyncManager
         await self._sync_to_session_sync(event_type, message)

@@ -428,6 +428,10 @@ class MemoryRetrievalChain:
                 metadata={
                     ** (primary_result.metadata or {}),
                     "knowledge_supplement": len(supplement_result.memories),
+                    "lineage_ids": list(dict.fromkeys(
+                        list((primary_result.metadata or {}).get("lineage_ids") or [])
+                        + list((supplement_result.metadata or {}).get("lineage_ids") or [])
+                    )),
                 },
             )
 
