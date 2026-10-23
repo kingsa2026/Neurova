@@ -20,7 +20,7 @@
    ASGI 应用**根本不生效**，留着它只会得到"覆盖没生效却照样绿"的假事实源；三处一律改真令牌
    （`create_access_token`），承诺 1 那句"用的就是面自己声明的那条鉴权"从此字面成立。
 ② `initialize` 的 params 补成 spec 要求的三件齐（§6-340 裁定甲）；本档审的是接线，
-   不是协商，补全取样即可，语义由 `testMcpFaceRidesSdkTransport.py` 那档钉。
+   不是协商，补全取样即可，语义由 `test_McpFaceRidesSdkTransport.py` 那档钉。
 """
 
 import pytest

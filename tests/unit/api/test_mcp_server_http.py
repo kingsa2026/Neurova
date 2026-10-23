@@ -84,7 +84,7 @@ class TestMcpHttpFace:
     def test_envelopeWithoutMethodIs400InvalidRequest(self, client):
         """裁定乙的另一条形：有 jsonrpc/id 却没有 `method`。
 
-        与 `testMcpFaceRidesSdkTransport.py` 那条不是重复取样——那条打的是
+        与 `test_McpFaceRidesSdkTransport.py` 那条不是重复取样——那条打的是
         `{"foo": 1}`（连 jsonrpc 字段都没有），这一条打的是"像信封却缺方法"，
         两形同码才算把这条收口钉住。
         """

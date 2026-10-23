@@ -73,7 +73,7 @@ class TestProtocolVersionNegotiation:
         """§6-340 裁定甲的落点之一：连 `protocolVersion` 都没有 → 不是"反提案"，是拒。
 
         原判据把"什么都不带"读成"没请求版本 ⇒ 反提案最新"，那是现面不校验 params 的
-        副作用；换面后这条语义归 -32602（`testMcpFaceRidesSdkTransport.py` 另有正检格）。
+        副作用；换面后这条语义归 -32602（`test_McpFaceRidesSdkTransport.py` 另有正检格）。
         """
         resp = client.post(ENDPOINT, json=_rpc("initialize", {}))
         assert resp.json()["error"]["code"] == -32602, resp.json()

@@ -33,11 +33,17 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
+
 SCAN_ROOTS = ("neurova", "tests")
 
 pytestmark = [pytest.mark.timeout(60)]
@@ -58,15 +64,17 @@ def _singleArgCallsIn(source: str) -> list:
 
 def test_全仓不得再有单参调用形态():
     offenders = []
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for root in SCAN_ROOTS:
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            lines = _singleArgCallsIn(path.read_text(encoding="utf-8"))
-            if lines:
-                offenders.append(
-                    f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
-                )
+        for path, node in ast_scan.transientNodes(
+                REPO_ROOT / root, hints=("_retrieve_memories(",)):
+            if node.__class__ is ast.Module:
+                lines = _singleArgCallsIn(ast.unparse(node))
+                if lines:
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
+                    )
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
         + "; ".join(offenders)

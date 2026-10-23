@@ -29,7 +29,14 @@ fixture `sample_memory_manager`，最后两格还会在无凭据时**真去连 O
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
@@ -126,19 +133,27 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
-        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in root.rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
-                source = path.read_text(encoding="utf-8", errors="ignore")
-                if ".route(" not in source:
-                    continue
-                try:
-                    lines = _syncRouteCallsIn(source)
-                except SyntaxError:
-                    continue
-                if lines:
-                    offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        scanned = 0
+        # 取数走共享解析预算（Issue #148）：本判据是**一次性全仓扫描**，
+        # 走 `transientNodes` 不留常驻语法树，也不与代码总量、机器速度捆绑。
+        for path, node in ast_scan.transientNodes(
+                REPO_ROOT / "tests", hints=(".route(",)):
+            if node.__class__ is not ast.Module:
+                continue
+            scanned += 1
+            lines = _syncRouteCallsIn(ast.unparse(node))
+            if lines:
+                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        for path, node in ast_scan.transientNodes(
+                REPO_ROOT / "scripts", hints=(".route(",)):
+            if node.__class__ is not ast.Module:
+                continue
+            scanned += 1
+            lines = _syncRouteCallsIn(ast.unparse(node))
+            if lines:
+                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        assert scanned > 0, (
+            "扫描面现读 0 个模块（根＝REPO_ROOT/tests 与 /scripts）——根指错时『零违规』不代表干净")
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])
