@@ -111,18 +111,17 @@ BASELINE: set = set()
 #:
 #: 与「根写错」必须分开：根写错是 `parents[N]` 数错层，修法是把 N 改对；本表记的是像
 #: `data/sessions` 这种**运行态才被建出来**的目录——干净 checkout 上它天然缺席。
-#:   `tests/unit/test_session_landing_guard.py`：落点锚在 `data/sessions`（仓内数据根的子目录），
-#:   只在跑起会话/起真 app 之后才存在；本闸在 CI 的干净 checkout 上解它 ⇒ `missing`。
+#:   历史例：`tests/unit/test_session_landing_guard.py` 曾把落点直接锚在 `data/sessions`
+#:   （仓内数据根的子目录，只在跑起会话后才存在）⇒ 干净 checkout 上解成 `missing`；
 #:   它守的恰恰是「别的用例别把真会话库指过去」，要求它先建出那个目录才准跑，是自足条件的反面。
 #: 仓外（`outside`）**不做**这类豁免：那种根指的不是本仓代码，没有任何正当理由。
 #: 同一档换个写法后落点变成"解不出"（`dynamic`，如把目录名收进循环变量）时，本表同样不误报——
 #: 那种形态由 `LOCAL_BASELINE` 那一格管，性质不同，不能混成"表过期"。
 #: 纪律与其余表一致：新增即红、消化必须摘行；署名还在、档却已不再解到缺席时当场红
 #: （表--实况咬合）——真 offender 被偷偷塞回来换绿也会露形。
-MISSING_BASELINE: dict = {
-    "tests/unit/test_session_landing_guard.py":
-        "锚定仓内锥 data/sessions：干净 checkout 上不存在，只在跑起会话后才建出",
-}
+#: 现值＝**空集**：`test_session_landing_guard.py` 的枚举根已改指模块级 `DATA_DIR`
+#: （`<repo>/data`，跑测时一定存在），不再有"解出 missing"的落点，署名随之销账。
+MISSING_BASELINE: dict = {}
 
 
 def _dropSignedOffMissing(gaps: dict) -> dict:
