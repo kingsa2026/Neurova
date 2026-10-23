@@ -1,0 +1,11 @@
+{
+  "schema": "neurova.knowledge.golden/v1",
+  "labeling": "manual",
+  "cases": [
+    {
+      "query": "预算",
+      "expected_ids": ["g-public-budget"],
+      "domain": "permission"
+    }
+  ]
+}

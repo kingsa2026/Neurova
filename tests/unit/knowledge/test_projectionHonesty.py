@@ -171,7 +171,9 @@ class TestStartupReportsWithoutTouchingData:
                             lambda *a, **kw: isolated)
         monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "ws"))
-        graphDir = tmp_path / "ws" / "default" / "knowledge_graph"
+        # v2 布局：知识图谱随 agent 工作区落在 data/<id>/workspaces/ 下
+        # （4bf9b733 统一私有落点；旧路径的迁移由 agent_layout_migration 负责）。
+        graphDir = tmp_path / "ws" / "default" / "workspaces" / "knowledge_graph"
         graphDir.mkdir(parents=True, exist_ok=True)
         (graphDir / "nodes.json").write_text(json.dumps(
             [{"node_id": "n1", "label": "无据节点", "node_type": "concept",

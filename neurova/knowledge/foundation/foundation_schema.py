@@ -21,6 +21,10 @@ from .knowledge_facts import (
     _SCHEMA_V3,
     _SCHEMA_V5,
     _SCHEMA_V13,
+    _SCHEMA_V14,
+    _SCHEMA_V15,
+    _SCHEMA_V16,
+    _SCHEMA_V17,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -44,6 +48,14 @@ _STEPS: List[tuple] = [
     (12, _SCHEMA_V12),
     # v13：条目擦除的落点（批次 K2）——断言行留在链上，正文置空并打 `erased_at` 标记
     (13, _SCHEMA_V13),
+    # v14：按知识命中的 token 归因（均分，attribution 注明）
+    (14, _SCHEMA_V14),
+    # v15：每轮唯一 turn_id + 成本阶段（修复同会话第二轮被 v14 幂等跳过）
+    (15, _SCHEMA_V15),
+    # v16：每轮总量/已归因/未归因摘要（引用/加权/均分之外的部分不丢）
+    (16, _SCHEMA_V16),
+    # v17：检索侧未归因 token（文档命中不能摊到 fact，但成本总数不丢）
+    (17, _SCHEMA_V17),
 ]
 
 _registered = False

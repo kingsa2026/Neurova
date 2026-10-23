@@ -21,6 +21,7 @@ from neurova.core.logger import get_logger
 
 from .admission import AdmissionRequest, productionAdmissionGate
 from .reconcile import _assertionFor
+from ..lifecycle import isRetrievable
 
 logger = get_logger(__name__)
 
@@ -53,6 +54,9 @@ class EntryLedger:
                 kid, key = _identity(item)
                 if not kid or not key:
                     continue  # 无内容身份的条目不参与去重与取代（004 口径）
+                if not isRetrievable(item):
+                    # 归档/过期条目不再主张事实；未被认领的旧行由收尾统一 retract。
+                    continue
                 held = self._store.activeNarrativeFact(agentId, kid, key)
                 if held:
                     claims.add(held["fact_id"])
@@ -67,6 +71,7 @@ class EntryLedger:
                         assertions=[_assertionFor(agentId, item,
                                                   mediumFallback="entry:%s" % kid)],
                         sourceTurnId="entry:%s" % kid,
+                        validUntil=str(item.get("valid_until") or "") or None,
                         activityKind="import",
                         activityBasis="EntryLedger.syncFromEntries（条目投影）",
                     ),

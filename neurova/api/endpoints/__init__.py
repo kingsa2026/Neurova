@@ -252,6 +252,7 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.image", "/v1/image", "Image API"),
     ("neurova.api.endpoints.media", "/v1/media", "Media API"),
     ("neurova.api.endpoints.knowledge", "/v1/knowledge", "Knowledge API"),
+    ("neurova.api.endpoints.quality", "/v1/quality", "Quality API"),
     ("neurova.api.endpoints.growth", "/v1/growth", "Growth API"),
     ("neurova.api.endpoints.sleep", "/v1/sleep", "Sleep API"),
     ("neurova.api.endpoints.runtime", "/v1/runtime", "Runtime API"),

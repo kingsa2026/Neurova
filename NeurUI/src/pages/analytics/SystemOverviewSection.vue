@@ -19,6 +19,19 @@
         </div>
       </a-spin>
 
+      <!-- 会话质量（质量事件账的运营读面：接管/拒答/工具失败/未知完成态） -->
+      <GlassCard :title="t('chat.sessionQualityTitle')" style="margin-top: 20px">
+        <div class="stats-grid">
+          <GlassStatCard :label="t('chat.sessionQualityTakeoverRate')" :value="formatRate(quality.human_takeover_rate)" />
+          <GlassStatCard :label="t('chat.sessionQualitySafetyRefusalRate')" :value="formatRate(quality.safety_refusal_rate)" />
+          <GlassStatCard :label="t('chat.sessionQualityToolFailureRate')" :value="formatRate(quality.tool_failure_rate)" />
+          <GlassStatCard :label="t('chat.sessionQualityUnknownRate')" :value="formatRate(quality.unknown_outcome_rate)" />
+        </div>
+        <p class="nr-quality-hint">
+          {{ quality.missing_reason || t('chat.sessionQualityWindowHint') }}
+        </p>
+      </GlassCard>
+
       <!-- Per-agent stats table -->
       <GlassCard :title="t('agent.stats')" style="margin-top: 20px">
         <a-table
@@ -64,6 +77,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { statsApi } from '@/api/modules'
+import { getQualityMetrics } from '@/api/modules/quality'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -81,6 +95,13 @@ const exporting = ref(false)
 const overview = ref<Record<string, any>>({})
 const agentStats = ref<statsApi.AgentStats[]>([])
 const trends = ref<statsApi.TrendPoint[]>([])
+const quality = ref<Record<string, any>>({})
+
+function formatRate(value: unknown): string {
+  if (value === null || value === undefined) return '--'
+  const rate = Number(value)
+  return Number.isFinite(rate) ? `${(rate * 100).toFixed(1)}%` : '--'
+}
 
 const maxTrend = computed(() => Math.max(...trends.value.map((p) => p.value || 0), 1))
 
@@ -108,6 +129,16 @@ async function fetchData() {
     // silent
   } finally {
     loading.value = false
+  }
+  void fetchQuality()
+}
+
+async function fetchQuality(): Promise<void> {
+  try {
+    const res: any = await getQualityMetrics(7 * 86400)
+    quality.value = res?.data ?? res ?? {}
+  } catch {
+    quality.value = {}
   }
 }
 
@@ -146,4 +177,5 @@ onMounted(fetchData)
 .chart-bar-wrapper { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
 .chart-bar { width: 100%; max-width: 36px; background: linear-gradient(180deg, #6366f1, #8b5cf6); border-radius: 4px 4px 0 0; transition: height 0.3s; }
 .chart-label { font-size: 10px; color: var(--nr-text-muted); }
+.nr-quality-hint { margin: 12px 0 0; font-size: 12px; color: var(--nr-text-muted); }
 </style>

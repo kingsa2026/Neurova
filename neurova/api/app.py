@@ -63,6 +63,9 @@ class AppState:
         # MCP bootstrap 后台任务的句柄：关停时要靠它把任务收敛掉，否则在关停之后
         # 才建出的会话已经没有关的窗口（只写不读的属性即断点，见教义 §2）
         self.mcp_bootstrap_task = None
+        # 知识索引周期维护任务：与 MCP 同一条纪律——启停成对，不然关停时
+        # 只留下一个没人等待的常驻 task。
+        self.kb_index_task = None
         self.start_time: float = time.time()
         self.config: Dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -916,6 +919,19 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _expiry_err:  # noqa: BLE001 - 收敛故障不阻断启动，但必须点名
         logger.warning("知识底座到期收敛失败（到期行暂由读侧时钟闸兜住）: %s", _expiry_err)
 
+    # 知识条目的 valid_until 到点后自动归档（不删正文；管理员可恢复 active）。
+    # 与 /knowledge/audit/expiry 共用同一条 expireDueEntries 判定，启动只做一次。
+    try:
+        from neurova.knowledge.repository import get_knowledge_repository
+
+        _archived = await asyncio.to_thread(
+            lambda: get_knowledge_repository().expireDueEntries(apply=True)["archived"]
+        )
+        logger.info("知识条目到期归档：%d 条 active→archived（正文保留）", _archived)
+    except Exception as _kb_expiry_err:  # noqa: BLE001 - 归档故障不阻断启动，但必须点名
+        logger.warning("知识条目到期归档失败（到期项仍被检索读侧时钟闸挡住）: %s",
+                       _kb_expiry_err)
+
     # 知识投影↔权威一致性读数（风险 3：用户 2026-10-09 裁定"接启动、只报不修"）。
     # 只读投影 JSON 与底座库，不写任何文件——修仍走 projection/rebuild，把"报出"与
     # "顺手修掉"混成一件事，读的人就再也看不到曾经分叉过。走 to_thread 与上面的
@@ -938,6 +954,22 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _drift_err:  # noqa: BLE001 - 读数故障不阻断启动，但必须点名
         logger.warning("知识投影一致性读数失败（本轮没有巡检读数，不是没有分叉）: %s",
                        _drift_err)
+
+    # 知识索引周期维护（默认每 3600s；NEUROVA_KB_INDEX_MAINTENANCE=off 停用）。
+    # 周期态只做增量自愈；全量重算走 /knowledge/audit/reindex {"force": true}。
+    if (os.environ.get("NEUROVA_KB_INDEX_MAINTENANCE") or "on").strip().lower() != "off":
+        try:
+            from neurova.knowledge.maintenance import run_knowledge_index_maintenance_loop
+
+            app_state.kb_index_task = asyncio.create_task(
+                run_knowledge_index_maintenance_loop()
+            )
+            app_state.kb_index_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("知识索引周期维护循环已启动")
+        except Exception as _kbIndexErr:  # noqa: BLE001
+            logger.warning("知识索引周期维护启动失败（忽略）: %s", _kbIndexErr)
 
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
@@ -1320,6 +1352,22 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:  # noqa: BLE001 - 任务内部已 fail-soft，此处只收结果
             logger.debug("MCP bootstrap 任务收尾异常: %s", e)
 
+    # 收敛知识索引周期维护任务：与 MCP bootstrap 同一启停纪律。
+    kbIndexTask = app_state.kb_index_task
+    if kbIndexTask is not None and not kbIndexTask.done():
+        kbIndexTask.cancel()
+        try:
+            await asyncio.wait_for(kbIndexTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("知识索引周期维护任务已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "知识索引周期维护任务取消超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT
+            )
+        except Exception as e:  # noqa: BLE001 - 任务内部已 fail-soft，此处只收结果
+            logger.debug("知识索引周期维护任务收尾异常: %s", e)
+    app_state.kb_index_task = None
+
     # 关停 MCP 会话（stdio 子进程 + AsyncExitStack）。此前生产侧**零调用方**：
     # 会话只能靠 anyio 在 portal 退出时取消，而 stdio reader 阻塞在子进程管道上、
     # 取消不收敛，于是承载 app 的线程永不结束——TestClient 反复进出 lifespan 时
@@ -1348,6 +1396,15 @@ async def _on_shutdown(app_state: AppState) -> None:
         )
     except Exception as e:
         logger.warning("CamofoxSupervisor stop error: %s", e)
+
+    # 会话质量事件账是进程级 SQLite 句柄：关停时显式关闭，
+    # 否则反复进出 lifespan 会留下未释放的连接。
+    try:
+        from neurova.quality import reset_quality_store
+
+        reset_quality_store()
+    except Exception as e:  # noqa: BLE001 - 关闭失败不阻断关停，但要点名
+        logger.warning("会话质量事件账关闭失败: %s", e)
 
     logger.info("Neurova API Server shut down complete")
 

@@ -47,7 +47,22 @@ class MQTTAdapter(ChannelAdapter):
     - QoS 0/1/2 消息质量
     - 主题订阅和发布
     - 认证和 TLS 加密
+    - 人工接管事件（协议约定）：订阅主题收到 JSON
+      `{"event_type": "human_takeover_started"|"human_takeover_ended",
+        "chat_id": "...", "operator_id": "...", "reason": "..."}`
+      即 emit 对应渠道事件；这是 MQTT 传输层的显式事件，不从消息文本推断。
     """
+
+    # MQTT 是用户可控的通用传输：接管事件是协议约定，不是平台特性探测。
+    humanTakeoverEvents = True
+
+    #: 入站 JSON 的 event_type / event 取值 → 渠道事件（只认显式名字）
+    _TAKEOVER_EVENTS = {
+        "human_takeover_started": ChannelEventType.HUMAN_TAKEOVER_STARTED,
+        "takeover_started": ChannelEventType.HUMAN_TAKEOVER_STARTED,
+        "human_takeover_ended": ChannelEventType.HUMAN_TAKEOVER_ENDED,
+        "takeover_ended": ChannelEventType.HUMAN_TAKEOVER_ENDED,
+    }
 
     @property
     def channel(self) -> MessageChannel:
@@ -252,6 +267,14 @@ class MQTTAdapter(ChannelAdapter):
             payload = msg.payload.decode("utf-8", errors="replace")
             logging.debug("MQTT 收到消息 [%s]: %s", msg.topic, payload[:100])
 
+            # 显式接管事件优先：协议约定字段，命中即分发渠道事件，
+            # 不再当普通消息走 LLM（否则接管标记会被答成一句聊天）。
+            takeover = self._parse_takeover_event(msg, payload)
+            if takeover is not None:
+                event_type, event_msg = takeover
+                self._schedule_emit_event(event_type, event_msg)
+                return
+
             # 解析消息
             channel_msg = self._parse_mqtt_message(msg, payload)
             if channel_msg:
@@ -261,8 +284,44 @@ class MQTTAdapter(ChannelAdapter):
         except Exception as e:
             logging.error("MQTT 消息处理异常: %s", e)
 
+    def _parse_takeover_event(self, msg, payload: str):
+        """JSON 显式接管事件 → (ChannelEventType, ChannelMessage)；不是事件返回 None。"""
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        event_name = str(
+            data.get("event_type") or data.get("event") or ""
+        ).strip().lower()
+        event_type = self._TAKEOVER_EVENTS.get(event_name)
+        if event_type is None:
+            return None
+
+        base = self._parse_mqtt_message(msg, payload)
+        if base is None:
+            return None
+        operator = str(
+            data.get("operator_id") or data.get("user_id") or base.sender_id or ""
+        )
+        base.metadata = dict(base.metadata or {})
+        base.metadata.update({
+            "agent_id": str(data.get("agent_id") or ""),
+            "takeover_reason": str(data.get("reason") or data.get("takeover_reason") or ""),
+        })
+        base.sender_id = operator
+        base.sender_name = str(data.get("operator_name") or operator)
+        return event_type, base
+
     def _schedule_emit(self, message: ChannelMessage) -> None:
-        """P1-7: paho 网络线程回调 → 主事件循环统一分发（feishu P0-4 同型）。
+        """P1-7: paho 网络线程回调 → 主事件循环统一分发（feishu P0-4 同型）。"""
+        self._schedule_emit_event(ChannelEventType.MESSAGE_RECEIVED, message)
+
+    def _schedule_emit_event(
+        self, event_type: ChannelEventType, message: ChannelMessage
+    ) -> None:
+        """paho 网络线程回调 → 主事件循环统一分发（消息与接管事件共用）。
 
         载荷必须是 `ChannelMessage`：装配闭包读 `message.metadata`（manager.py:138）、
         `_on_channel_event` 首行读 `channel_type`/`sender_name`（manager.py:351）。此前这里交的是
@@ -271,10 +330,10 @@ class MQTTAdapter(ChannelAdapter):
         无可用运行中循环时丢弃并告警——死队列删除后不允许退回无界堆积。
         """
         if self._main_loop is None or not self._main_loop.is_running():
-            logging.warning("MQTT 无可用事件循环，丢弃入站消息（P1-7）")
+            logging.warning("MQTT 无可用事件循环，丢弃入站事件（P1-7）")
             return
         asyncio.run_coroutine_threadsafe(
-            self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message),
+            self._emit_event(event_type, message),
             self._main_loop,
         )
 

@@ -27,6 +27,11 @@ from neurova.knowledge.foundation.storage_fence import (
     PRODUCTION_STORAGE_DIR,
     assertNotUnderProductionStorage,
 )
+from neurova.knowledge.vector_ann import (
+    annMinRecords,
+    prepareVectors,
+    resolveAnnBackend,
+)
 
 logger = get_logger(__name__)
 
@@ -47,7 +52,24 @@ def _default_engine():
 
 
 def _engine_id(engine) -> str:
-    return type(engine).__name__ if engine is not None else "disabled"
+    """索引身份：类名 + 模型身份（若引擎暴露）。
+
+    只取类名会让“同一个 ONNXEmbeddingEngine 换 model_name”看起来没变，
+    旧向量空间被继续复用。模型名/版本在构造时就稳定，纳入身份；
+    dimension 不纳入——它要等首个 encode 后才初始化，放进来会让同一引擎
+    在首次使用前后得到两个身份，触发不必要的全量重建。
+    """
+    if engine is None:
+        return "disabled"
+    parts = [type(engine).__name__]
+    identity: List[str] = []
+    for attr in ("model_name", "_model_name", "model_id", "_model_id",
+                 "model_version", "_model_version"):
+        value = getattr(engine, attr, None)
+        if value and str(value) not in identity:
+            identity.append(str(value))
+    parts.extend(identity)
+    return "|".join(parts)
 
 
 
@@ -58,7 +80,13 @@ def _fingerprint(entry: Dict[str, Any]) -> str:
 class KnowledgeVectorIndex:
     """按用户分文件的持久化向量索引（visible_items 视图镜像）。"""
 
-    def __init__(self, storage_dir: str, engine: Any = _SENTINEL_DEFAULT) -> None:
+    def __init__(
+        self,
+        storage_dir: str,
+        engine: Any = _SENTINEL_DEFAULT,
+        annBackend: Any = _SENTINEL_DEFAULT,
+        annMinRecordCount: Optional[int] = None,
+    ) -> None:
         assertNotUnderProductionStorage(storage_dir, "知识向量缓存")
         self.storage_dir = str(storage_dir)
         self._dir = Path(storage_dir)
@@ -68,6 +96,18 @@ class KnowledgeVectorIndex:
         self._cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # uid -> kid -> 记录
         self._computed = 0  # 实例累计新算向量数（测试观测）
         self._last_uid: Optional[str] = None
+        # ANN 是可选加速：哨兵=按环境探测；None=显式禁用；其他=注入后端。
+        self._annBackend = annBackend
+        self._annResolved = annBackend is not _SENTINEL_DEFAULT
+        self._annReason = "disabled" if annBackend is None else ""
+        self._annMinRecords = annMinRecords(annMinRecordCount)
+        self._annIndexes: Dict[str, Any] = {}
+        self._annVersions: Dict[str, int] = {}
+        self._annFailures: Dict[str, int] = {}
+        self._annLastError = ""
+        # 记录版本只在写路径递增：ANN 缓存命中判断 O(1)，不再每次检索
+        # 扫全量记录做指纹（大语料下那会把 ANN 的收益吃掉）。
+        self._recordVersions: Dict[str, int] = {}
 
     # ── 引擎 ─────────────────────────────────────────────────
 
@@ -78,6 +118,75 @@ class KnowledgeVectorIndex:
                 return None  # 保持哨兵，下次调用重试
             self._engine = eng
         return self._engine
+
+    def _getAnn(self):
+        if self._annResolved:
+            return self._annBackend
+        with self._lock:
+            if not self._annResolved:
+                backend, reason = resolveAnnBackend()
+                self._annBackend = backend
+                self._annReason = reason
+                self._annResolved = True
+        return self._annBackend
+
+    def _searchAnn(
+        self,
+        uid: str,
+        records: Dict[str, Dict[str, Any]],
+        queryVector: List[float],
+        topK: int,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """ANN 命中列表；None＝本路不可用/失败，调用方回退全量余弦。"""
+        backend = self._getAnn()
+        if backend is None or len(records) < self._annMinRecords:
+            return None
+        version = self._recordVersions.get(uid, 0)
+        handle = None
+        with self._lock:
+            if self._annFailures.get(uid) == version:
+                return None
+            if self._annVersions.get(uid) == version:
+                handle = self._annIndexes.get(uid)
+        if handle is None:
+            vectors = prepareVectors(records)
+            if vectors is None:
+                return None
+            try:
+                handle = backend.build(vectors)
+            except Exception as exc:  # noqa: BLE001 - ANN 构建失败只降级，不打断检索
+                self._annFailures[uid] = version
+                self._annLastError = "build:%s" % exc
+                logger.warning("知识向量 ANN 构建失败，回退全量余弦: %s", exc)
+                return None
+            with self._lock:
+                self._annIndexes[uid] = handle
+                self._annVersions[uid] = version
+                self._annFailures.pop(uid, None)
+        try:
+            rawHits = backend.search(handle, queryVector, max(1, int(topK)))
+        except Exception as exc:  # noqa: BLE001 - 查询失败同上
+            self._annFailures[uid] = version
+            self._annLastError = "search:%s" % exc
+            logger.warning("知识向量 ANN 查询失败，回退全量余弦: %s", exc)
+            return None
+
+        with self._lock:
+            self._annFailures.pop(uid, None)
+            self._annLastError = ""
+        hits: List[Dict[str, Any]] = []
+        for kid, score in rawHits:
+            record = records.get(str(kid))
+            if record is None or float(score) <= 0.0:
+                continue
+            hits.append({
+                "id": str(kid),
+                "title": record.get("title", ""),
+                "content": record.get("content", ""),
+                "score": round(float(score), 4),
+            })
+        hits.sort(key=lambda item: item["score"], reverse=True)
+        return hits[: max(1, int(topK))]
 
     # ── 持久化 ────────────────────────────────────────────────
 
@@ -141,7 +250,8 @@ class KnowledgeVectorIndex:
                 except Exception:  # noqa: BLE001
                     file_engine = ""
             current_engine_id = _engine_id(engine)
-            if file_engine and file_engine != current_engine_id:
+            engine_reset = bool(file_engine and file_engine != current_engine_id)
+            if engine_reset:
                 records = {}  # 模型变更 → 重建
 
             desired: Dict[str, Dict[str, Any]] = {
@@ -155,9 +265,11 @@ class KnowledgeVectorIndex:
                 if rec is None or rec.get("fingerprint") != fp:
                     to_compute.append((kid, entry))
             # 剔除已删除条目（当前可见集合之外的既有记录）
+            removed_count = 0
             for kid in list(records.keys()):
                 if kid not in desired:
                     del records[kid]
+                    removed_count += 1
 
             if to_compute:
                 texts = []
@@ -189,8 +301,10 @@ class KnowledgeVectorIndex:
                     }
                 self._computed += len(to_compute)
 
-            self._save_user(user, records, current_engine_id)
             uid = str((user or {}).get("user_id") or "default")
+            if to_compute or removed_count or engine_reset:
+                self._recordVersions[uid] = self._recordVersions.get(uid, 0) + 1
+            self._save_user(user, records, current_engine_id)
             self._cache[uid] = records
             self._last_uid = uid
             return {"computed": len(to_compute), "entry_count": len(records)}
@@ -219,6 +333,10 @@ class KnowledgeVectorIndex:
                     continue
                 records.pop(knowledgeId, None)
                 self._cache[uid] = records
+                self._recordVersions[uid] = self._recordVersions.get(uid, 0) + 1
+                self._annIndexes.pop(uid, None)
+                self._annVersions.pop(uid, None)
+                self._annFailures.pop(uid, None)
                 self._save_user({"user_id": uid}, records, str(data.get("engine", "")))
                 files += 1
                 removed += 1
@@ -247,8 +365,17 @@ class KnowledgeVectorIndex:
         except Exception as e:  # noqa: BLE001
             logger.warning("向量索引：query 编码失败: %s", e)
             return []
-        if not qv:
+        if not qv or vector_math.vectorNorm(qv) <= vector_math.ZERO_NORM_EPSILON:
             return []
+
+        annHits = self._searchAnn(
+            str((user or {}).get("user_id") or "default"),
+            dict(items),
+            qv,
+            top_k,
+        )
+        if annHits is not None:
+            return annHits
 
         scored: List[Tuple[str, float, Dict[str, Any]]] = []
         for kid, rec in items:
@@ -272,6 +399,79 @@ class KnowledgeVectorIndex:
         with self._lock:
             records = self._cache.get(self._last_uid, {}) if self._last_uid else {}
         return {"entry_count": len(records), "computed": self._computed}
+
+    def indexedUserIds(self) -> List[str]:
+        """已有向量分片的用户 id（从磁盘文件反推，不靠内存缓存）。"""
+        with self._lock:
+            uids = []
+            for path in sorted(self._dir.glob("knowledge_vectors_*.json")):
+                uid = path.stem[len("knowledge_vectors_"):]
+                if uid:
+                    uids.append(uid)
+            return sorted(set(uids))
+
+    def maintainAll(self, repo: Any, force: bool = False) -> Dict[str, Any]:
+        """对所有已有分片的用户做增量自愈；force=True 时先清分片再重算。"""
+        users = self.indexedUserIds()
+        computed = entries = 0
+        errors: List[Dict[str, str]] = []
+        for uid in users:
+            try:
+                if force and self._get_engine() is not None:
+                    with self._lock:
+                        self._cache.pop(uid, None)
+                        self._recordVersions[uid] = self._recordVersions.get(uid, 0) + 1
+                        self._annIndexes.pop(uid, None)
+                        self._annVersions.pop(uid, None)
+                        self._annFailures.pop(uid, None)
+                    self._file_for({"user_id": uid}).unlink(missing_ok=True)
+                stats = self.ensure_indexed(repo, {"user_id": uid})
+                computed += int(stats.get("computed", 0))
+                entries += int(stats.get("entry_count", 0))
+            except Exception as exc:  # noqa: BLE001 - 单用户坏分片不顶住整轮维护
+                errors.append({"user_id": uid, "error": str(exc)})
+        return {
+            "force": bool(force),
+            "users": len(users),
+            "computed": computed,
+            "entries": entries,
+            "errors": errors,
+        }
+
+    def health(self) -> Dict[str, Any]:
+        """只读索引健康度：分片文件数、向量总数、引擎分布、坏文件。"""
+        with self._lock:
+            files = sorted(self._dir.glob("knowledge_vectors_*.json"))
+            records = 0
+            engines: Dict[str, int] = {}
+            errors: List[Dict[str, str]] = []
+            for path in files:
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    vectors = data.get("vectors") if isinstance(data, dict) else {}
+                    records += len(vectors) if isinstance(vectors, dict) else 0
+                    engine = str(data.get("engine", "") or "unknown") if isinstance(data, dict) else "unknown"
+                    engines[engine] = engines.get(engine, 0) + 1
+                except Exception as exc:  # noqa: BLE001 - 坏分片要报，不顶住健康读数
+                    errors.append({"file": path.name, "error": str(exc)})
+            annBackend = self._getAnn()
+            return {
+                "files": len(files),
+                "records": records,
+                "engines": engines,
+                "cached_users": len(self._cache),
+                "computed": self._computed,
+                "errors": errors,
+                "ann": {
+                    "enabled": annBackend is not None,
+                    "backend": getattr(annBackend, "name", None) if annBackend else None,
+                    "reason": self._annReason or None,
+                    "min_records": self._annMinRecords,
+                    "indexed_users": len(self._annIndexes),
+                    "failed_users": len(self._annFailures),
+                    "last_error": self._annLastError or None,
+                },
+            }
 
 
 _singleton: Optional[KnowledgeVectorIndex] = None
