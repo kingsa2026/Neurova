@@ -39,6 +39,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -74,15 +76,17 @@ def test_取数口径只有一份():
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
+        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：本判据只扫一次，
+        # 自付 `rglob + ast.parse` 等于把成本绑成「代码总量」。
+        # 文本预筛取 `.routes`——连它的文件不可能命中下面的谓词。
         for ref in ast_scan.sourceRefsUnder(root, hints=(".routes",)):
-            path, tree = ref.path, ast_scan.transientTree(ref.path)
-            if path == ROUTE_TABLE:
+            if ref.path == ROUTE_TABLE:
                 continue
-            if SINGLE_SOURCE_IMPORT in ast.unparse(tree):
+            if SINGLE_SOURCE_IMPORT in ref.code:
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(tree)
+            hits = _readsMountedAppRoutes(ast_scan.transientTree(ref.path))
             if hits:
-                offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
+                offenders.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     assert not offenders, (
         "这些判据直接从装配后的 app 上取 `.routes`，读到的是挂载包装而非叶子路径——"
         "「存在」型断言会假红、「不存在」型断言会恒真，请改走 `from tests.route_table "

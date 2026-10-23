@@ -32,10 +32,6 @@ import ast
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +51,11 @@ def _isAwaitWrapped(node, parentMap) -> bool:
 
 
 def _syncRouteCallsIn(source: str) -> list:
+    """（文本形态，供反向控制格用）见 `_syncRouteCallsInTree`。"""
+    return _syncRouteCallsInTree(ast.parse(source))
+
+
+def _syncRouteCallsInTree(tree: ast.AST) -> list:
     """挑出"同步地把 Message 喂给 `.route(`"的行号。
 
     只认三件同时成立：非 async 上下文、属性名 route、**第一参是 `Message(...)` 形态**；
@@ -62,7 +63,6 @@ def _syncRouteCallsIn(source: str) -> list:
     MoE 网络那只 `route(query_vec)` 是另一条真 async 接口，把它算进来会让本档退化成
     "见 route 就红"的假守卫（判据问错对象那一族）。
     """
-    tree = ast.parse(source)
     parentMap = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -106,9 +106,11 @@ class TestTheOldIntegrationFileIsRetired:
         不是把人引回去的活引用。判据按**行**判，不对整档豁免。
         """
         hits = []
+        # 枚举走共享入口（`tests/ast_scan.filesUnder`）：判据自己的 `rglob` 会把
+        # 成本绑成「代码总量」，与其余受保护档共享墙钟时必偶发红。
         for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in root.rglob("*.py"):
-                if "__pycache__" in path.parts or path.name == Path(__file__).name:
+            for path in ast_scan.filesUnder(root):
+                if path.name == Path(__file__).name:
                     continue
                 for lineno, line in enumerate(
                         path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
@@ -133,27 +135,19 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
-        scanned = 0
-        # 取数走共享解析预算（Issue #148）：本判据是**一次性全仓扫描**，
-        # 走 `transientNodes` 不留常驻语法树，也不与代码总量、机器速度捆绑。
-        for path, node in ast_scan.transientNodes(
-                REPO_ROOT / "tests", hints=(".route(",)):
-            if node.__class__ is not ast.Module:
-                continue
-            scanned += 1
-            lines = _syncRouteCallsIn(ast.unparse(node))
-            if lines:
-                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
-        for path, node in ast_scan.transientNodes(
-                REPO_ROOT / "scripts", hints=(".route(",)):
-            if node.__class__ is not ast.Module:
-                continue
-            scanned += 1
-            lines = _syncRouteCallsIn(ast.unparse(node))
-            if lines:
-                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
-        assert scanned > 0, (
-            "扫描面现读 0 个模块（根＝REPO_ROOT/tests 与 /scripts）——根指错时『零违规』不代表干净")
+        # 枚举走共享入口（`tests/ast_scan.filesUnder`），文本预筛取 `.route(`——
+        # 连它都没出现的文件不可能出现同步 route 调用。
+        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
+            for path in ast_scan.filesUnder(root):
+                source = path.read_text(encoding="utf-8", errors="ignore")
+                if ".route(" not in source:
+                    continue
+                try:
+                    lines = _syncRouteCallsInTree(ast_scan.transientTree(path))
+                except SyntaxError:
+                    continue
+                if lines:
+                    offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])
