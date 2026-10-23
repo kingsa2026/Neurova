@@ -383,3 +383,81 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
                     f"{checksum[:16]}…）——版本抬了、校验和没跟着改，构建会直接失败"
                 )
         assert not problems, "\n  ".join(["Cargo.lock 与 registry 不同源:"] + problems)
+
+
+class TestMcpServerCarrierIsAtTheAdvisoryFloor:
+    """`@modelcontextprotocol/server` 三条公告的下界门禁（GHSA-46jr-4wx8-v453 一族）。
+
+    为什么单列一类、且判据落在**锁**上而不是 `PINNED` 上：`server` 是 `PINNED`
+    之外的传递依赖，被三个引入方同时钉住 —— `@upstash/context7-mcp`（曾是**精确
+    声明** 2.0.0）、`@bytebase/dbhub` 与 `@modelcontextprotocol/node`（`^2.0.0`）。
+    精确声明不因顶层 override 重解析，于是它一直停在 2.0.0；三条公告
+    ——请求体校验耗尽内存、共享 transport 串消息、bearer 令牌跨服务接受——
+    的修复下界都是 **2.3.0**。引入方抬到 4.4.4 之后它自己就精确声明在 2.3.1。
+    """
+
+    #: OSV 公告给出的首个修复版；引入方（4.4.4）自己精确声明在 2.3.1。
+    _FIXED_FLOOR = "2.3.0"
+    #: 同一批公告里的三个 id，红的时候要能一眼看出是三条而不是三条判据。
+    _ADVISORIES = (
+        "GHSA-46jr-4wx8-v453",
+        "GHSA-jm63-cq47-j5jp",
+        "GHSA-rvq5-wwqv-78pq",
+    )
+
+    def _releaseTuple(self, version: str) -> tuple:
+        core, _, tail = version.partition("-")
+        nums = tuple(int(p) for p in core.split(".")[:3])
+        return nums + (0 if not tail else 1,)
+
+    def _serverEntry(self) -> dict:
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        entry = (lock.get("packages") or {}).get("node_modules/@modelcontextprotocol/server")
+        if entry is None:
+            pytest.skip("server 已不在这棵依赖树里——下界不适用")
+        return entry
+
+    def test_locked_server_is_at_or_above_the_advisory_floor(self):
+        version = self._serverEntry()["version"]
+        assert self._releaseTuple(version) >= self._releaseTuple(self._FIXED_FLOOR), (
+            f"@modelcontextprotocol/server@{version} 低于 "
+            f"{' / '.join(self._ADVISORIES)} 的修复下界 {self._FIXED_FLOOR}。\n"
+            "   引入链: @upstash/context7-mcp（精确声明）/ @bytebase/dbhub ^2.0.0 / "
+            "@modelcontextprotocol/node ^2.0.0\n"
+            "   处置：抬引入方（精确声明只能由引入方自己抬），不是手改锁条目。"
+        )
+
+    def test_context7_still_carries_server(self):
+        """引入链前提必须仍在：context7 不再带 server 时本判据就该复核而不是静默绿。"""
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("@modelcontextprotocol/server"))
+        assert declared, (
+            "@upstash/context7-mcp 不再声明 @modelcontextprotocol/server——"
+            "本判据的引入链前提没了，请先复核 server 是否仍在这棵审计树里。"
+        )
+
+    def test_lock_entry_matches_the_exact_declaration_of_its_carrier(self):
+        """锁里 server 必须与引入方的精确声明逐字相同（手改条目的指纹会在这里现行）。
+
+        为什么单列：`_FIXED_FLOOR` 是公告给的**最低**可接受版，而 `context7-mcp`
+        用的是精确声明。两者一分开，就出现「锁 2.3.0 / 声明 2.3.1」这种既过下界、
+        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹，下一次
+        `npm install --package-lock-only` 会把锁打回声明值。判据取「逐字相等」即可咬住。
+        """
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("@modelcontextprotocol/server"))
+        if not declared:
+            pytest.skip("@upstash/context7-mcp 不再声明 server——判据前提不成立")
+        if not re.fullmatch(r"\d+\.\d+\.\d+[\w.\-+]*", declared):
+            pytest.skip(f"引入方对 server 的声明是区间 {declared!r}，逐字相等不适用")
+        assert self._serverEntry()["version"] == declared, (
+            f"锁里 server 是 {self._serverEntry()['version']}，而引入方精确声明的是 {declared}——"
+            "锁与声明分叉（手改过锁条目、没抬引入方）。\n"
+            "   处置：抬 @upstash/context7-mcp，再让 npm 重新生成锁。"
+        )
