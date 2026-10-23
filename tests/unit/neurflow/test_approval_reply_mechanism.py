@@ -25,11 +25,6 @@ _APPROVAL_WAIT_S = 1
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _TESTS_ROOT = REPO_ROOT / "tests"
 
-#: 面自证下限：建档那轮现数——本文件 5 处、`test_approval_reply_mechanism_fixed.py` 5 处、
-#: `test_approval_cross_event_loop_fixed.py` 5 处、`test_approval_integration.py` 5 处、
-#: `test_builtin.py` 1 处，取一个"扫描根或预筛写窄就必然掉穿"的低线，不抄现值。
-_SITE_FLOOR = 8
-
 
 def _intOf(node, table):
     """把 `60`／`_APPROVAL_WAIT_S` 这类字典值算成秒数；算不出给 None（不静默当 0）。"""
@@ -261,11 +256,26 @@ class TestApprovalWaitBudgetStaysUnderTheWall:
         )
 
     def test_waitSiteScanIsNotVacuous(self):
-        """面自证：这一轮真扫到了足够多的等待预算，否则上一条的"零违规"与"没扫到"同形。"""
+        """面自证：三个读数分开比——枚举面、预筛候选面、真扫到的等待预算数。
+
+        合成一条就分辨不出失败形态：枚举面掉穿＝扫描根指错；候选面为空＝预筛词写窄；
+        只有站点数为零而前两面正常＝这个域里真的没有超墙预算（那才是绿）。
+        """
+        from tests import ast_scan
+
+        enumerated = len(ast_scan.sourceRefsUnder(_TESTS_ROOT, ".py"))
+        assert enumerated >= 1000, (
+            "被收集测试语料现读 %d 个 .py——`_TESTS_ROOT` 指错时下面两条会一起假绿" % enumerated
+        )
+        candidates = len(ast_scan.sourceRefsUnder(_TESTS_ROOT, ".py", hints=("exec_approval",)))
+        assert candidates >= 5, (
+            "提到 `exec_approval` 的测试文件只剩 %d 个（建档那轮现数 7）——预筛词或收集口径写窄了"
+            % candidates
+        )
         sites = self._waitSites()
-        assert len(sites) >= _SITE_FLOOR, (
-            "只读到 %d 处 `\"timeout\"` 字典项（下限 %d）——扫描根或 `exec_approval` 预筛写窄了，"
-            "此时上一条的绿不作数" % (len(sites), _SITE_FLOOR)
+        assert len(sites) >= 12, (
+            "只读到 %d 处带 `\"timeout\"` 的审批配置字典（建档那轮现数 23）——此时上一条的"
+            "『零违规』与『没扫到』长得一模一样" % len(sites)
         )
 
     def test_detectorBitesAnOverWideWindowAndSparesTheConvention(self):
