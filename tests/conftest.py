@@ -318,10 +318,10 @@ def _guardRepoRootAgainstPollution():
 def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
     """用例结束时，`SessionManager` 单例不得指向仓库真实会话库。
 
-    成因（§6-29）：`session_manager.py:205-207` 的落点第三档是 `dataLanding("sessions")`
+    成因（§6-29）：`session_manager.py:205-207` 的落点第三档是数据根下的会话目录
     ——与进程 CWD 无关（`c2cb809c` 2026-09-22 收的口径）。于是历史上靠
     `monkeypatch.chdir(tmp_path)` 隔离会话目录的用例前提当场失效：它们读写的是仓库
-    `data/sessions/`。`test_session_round_ops` 因此读到真实累计消息（6 passed/7 failed），
+    数据根下的会话目录。`test_session_round_ops` 因此读到真实累计消息（6 passed/7 failed），
     `agent/test_p3_p4_refactor` 更是在全绿中往真实库建会话。
 
     为什么钉**装配点**而不是钉目录内容：目录内容判据要么每条用例取全树指纹（实测 99 文件
@@ -345,8 +345,10 @@ def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
     manager = getattr(module.SessionManager, "_instance", None)
     if manager is None:
         return
+    from neurova.core.agent_workspaces import get_agent_sessions_dir
+
     landing = Path(str(manager._sessions_dir)).resolve()
-    if landing == (REPO_ROOT / "data" / "sessions").resolve():
+    if landing == Path(get_agent_sessions_dir("")).resolve():
         raise AssertionError(
             "本条用例让 SessionManager 单例落在仓库真实会话库 %s——读会把真实累计数据当用例数据，"
             "写会写用户数据根。隔离只有一条通道：monkeypatch.setenv("
