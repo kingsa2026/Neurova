@@ -424,6 +424,17 @@ async def get_lifecycle_audit(
     return {"code": 0, "message": "ok", "data": get_repository().lifecycleReport()}
 
 
+@router.get("/audit/entry-feedback")
+async def get_entry_feedback_audit(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """文档条目采纳/注入覆盖率；三态缺失按 never_written 报，不伪造 0。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="条目反馈审计是整库读数，仅管理员可查看")
+    return {"code": 0, "message": "ok", "data": get_repository().entryFeedbackMetrics()}
+
+
 @router.get("/foundation/integrity")
 async def get_foundation_integrity(
     request: Request,

@@ -88,6 +88,7 @@ def test_metrics_report_channel_takeover_capability(api, monkeypatch):
     assert data["takeover_channel_capability"] == {
         "supported": ["native-helpdesk"],
         "unsupported": ["feishu"],
+        "reasons": {"feishu": "", "native-helpdesk": ""},
     }
 
 

@@ -234,6 +234,9 @@ class ChannelManager:
                 "human_takeover_events": bool(
                     getattr(adapter, "humanTakeoverEvents", False)
                 ),
+                "human_takeover_reason": str(
+                    getattr(adapter, "humanTakeoverReason", "") or ""
+                ),
             }
         # 兼容：仅存在于 _adapters 而无复合键的实例（理论不发生，兜底）
         for channel_type, adapter in self._adapters.items():
@@ -245,6 +248,9 @@ class ChannelManager:
                     "enabled": adapter.config.enabled,
                     "human_takeover_events": bool(
                         getattr(adapter, "humanTakeoverEvents", False)
+                    ),
+                    "human_takeover_reason": str(
+                        getattr(adapter, "humanTakeoverReason", "") or ""
                     ),
                 }
         return result

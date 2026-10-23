@@ -158,6 +158,9 @@ def attachGovernance(store: KnowledgeFactStore,
 
     查不到治理行的命中**原样放行**：条目先于治理层存在是正常状态（未开闸、或历史遗留），
     把它当异常或干脆丢掉，等于让观测手段反过来改数据可见性。
+
+    `enrich=False` 只跳过置信/证据态/时间等 FactSurface 派生值；`adoption_outcome`
+    是反馈事实，始终随命中返回，供检索重排使用。
     """
     enriched: List[Dict[str, Any]] = []
     lineage: List[str] = []
@@ -170,11 +173,15 @@ def attachGovernance(store: KnowledgeFactStore,
             enriched.append(row)
             continue
         row["lineage_id"] = fact["fact_id"]
+        # 采纳三态是反馈事实，不是 FactSurface 的排序派生值：即使读面关闸，
+        # 也要随命中带给重排器，否则点赞/纠正永远影响不了下一次检索。
+        row["adoption_outcome"] = (
+            fact.get("latest_adoption_outcome") or fact.get("adoption_outcome")
+        )
         if enrich:
             row["evidence_state"] = fact.get("evidence_state")
             # 派生值取代条目里那个数（G11）：查不到治理行时才保留原值，不编造
             row["confidence"] = fact.get("confidence")
-            row["adoption_outcome"] = fact.get("latest_adoption_outcome") or fact.get("adoption_outcome")
             row["recorded_at"] = fact.get("recorded_at")
         lineage.append(fact["fact_id"])
         enriched.append(row)
