@@ -175,8 +175,13 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
+        # `-c commit.gpgsign=false` 是**必须**的：宿主的 `~/.gitconfig` 一旦开了
+        # `commit.gpgsign = true`（开发者签名策略），合成仓里那条 `t@t` 身份就没有可用密钥，
+        # `git commit` 直接 128「gpg failed to sign the data」——判据红在宿主配置上，
+        # 与它要验的 A/B 读数一点关系都没有。合成仓是**一次性夹具**，签不签名不构成任何证据。
         for args in (["init", "-q"], ["add", "."],
-                     ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True)
         return repo

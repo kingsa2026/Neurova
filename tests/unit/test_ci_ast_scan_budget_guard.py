@@ -63,6 +63,15 @@ REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
     # **不留常驻语法树**的一次性入口（保留的收益只在重复扫描时成立，成本却每次
     # 扫描都付：本机 2985 个 `.py` 空进程 gen2 1.0ms / 保留全部语法树 2243ms）。
     # 该判据是典型的一次性全仓扫描，改走一次性入口后既进 CI 也不再与代码总量捆绑。
+    #
+    # 本批（§6-403 收尾）另有五档同类命中，也**不留**任何登记：它们的枚举改成
+    # `ast_scan.filesUnder` / `sourceRefsUnder`，解析改走一次性入口
+    # `ast_scan.transientTree`（`test_longTermMemoryBaselineGate` 的类定义扫直接走
+    # `classDefsIn`）。逐文件的小谓词（`_syncRouteCallsIn` / `_singleArgCallsIn` /
+    # `_readsMountedAppRoutes` / `_builderCalls`）现在一律**吃语法树**而不是源码，
+    # 判据自己不再解析——反向控制格传 `ast.parse(样本)` 照样能证伪探测器。
+    # 即：能走共享入口就走，台账仍是空集（这条判据要防的是"成本随代码总量涨"，
+    # 不是"有没有登记"；登记是最后的出路，不是省事的出路）。
 }
 
 

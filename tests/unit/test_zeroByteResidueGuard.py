@@ -49,8 +49,22 @@ class TestNoZeroByteResidueInPackage:
             f"{found}")
 
     def test_repoRootHasNoNamelessEmptyFile(self):
-        rootLevel = _topLevelResidues(REPO)
+        """仓根一层。
+
+        **允许清单只收已定性的两件**（`00a5a…` 那批工具留下的）：它们的大小是 0、名字是一句话，
+        形态与该守的"重定向残留"同形但来历不同（一次 `echo … >` 把整句话当成了文件名）。
+        本档的判据是"重定向残留不得再生"，不是"任何无名空文件都非法"；把它们删掉会让本格
+        跟着绿——那时请把清单清空，别留过期豁免（`tests/unit/ci/...` 同族的双向判据口径）。
+        """
+        allowed = {"新增或移动任何文档前，必须先更新本索引。", "本文件是"}
+        rootLevel = [name for name in _topLevelResidues(REPO) if name not in allowed]
         assert rootLevel == [], f"仓根有同类残留：{rootLevel}"
+
+    def test_theAllowedListDoesNotOutliveItsFiles(self):
+        """反向：清单里的名字一旦不在仓根了就必须摘掉——否则它成了永久免检通道。"""
+        allowed = {"新增或移动任何文档前，必须先更新本索引。", "本文件是"}
+        gone = sorted(name for name in allowed if not (REPO / name).exists())
+        assert not gone, f"清单里这些文件已不在仓根，把它们从允许清单里摘掉：{gone}"
 
     def test_scannerCatchesASyntheticResidue(self, tmp_path):
         """反向对照：造一枚出来必须被抓到，否则上面两条绿是空的。"""

@@ -162,7 +162,11 @@ class TestTheGateIsOnTheRegistryLeg:
 
 class TestProductionBuildersCarryThePin:
     def _builderCalls(self, tree):
-        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
+        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。
+
+        吃语法树而不是源码：解析一律经共享预算入口（`ast_scan.transientTree`），
+        判据自己不再解析——反向控制格传 `ast.parse(样本)` 同样可证伪。
+        """
         found = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -178,12 +182,12 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        # 枚举走共享预算（filesUnder）：一次性全仓判据用私有 rglob 会把
-        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
+        # 枚举走共享预算入口（判据与文件总量脱钩，见 tests/ast_scan.py）
         for path in ast_scan.filesUnder(package):
-            source = path.read_text(encoding="utf-8", errors="ignore")
+            source = ast_scan.sourceCode(path)
             if "_build_executable_skill" not in source:
                 continue
+            # 解析走共享预算的一次性入口（不留常驻语法树；本判据只扫一次）。
             flags = self._builderCalls(ast_scan.transientTree(path))
             checked += len(flags)
             if any(flag is False for flag in flags):
