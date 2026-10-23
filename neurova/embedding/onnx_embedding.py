@@ -12,7 +12,7 @@ from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # numpy 是**可选**依赖（requirements-ci.txt 刻意排除，requirements.txt 装）：
 # 缺席时本模块仍须可导入——否则 `from neurova.embedding import get_embedding_engine`
@@ -114,6 +114,17 @@ class ONNXEmbeddingEngine:
     @property
     def dimension(self) -> int:
         return self._dimension
+
+    @property
+    def backend_type(self) -> Optional[str]:
+        """本次实例实际走的是哪一档（`onnx` / `sentence_transformers` / `None`）。
+
+        只读公开面：`_backend_type` 此前只在**模块内部**被读写，调用方要判档只能摸私有
+        属性。而"哪一档在服务"是可观测契约——同一份语料在两档下的检索读数本征不同
+        （实测词法兜底 MRR 0.303、稠密档 0.35），判据与日志都必须能指名档位，
+        否则「换了档」会读成「检索退化了」。
+        """
+        return self._backend_type
 
     @property
     def stats(self) -> Dict[str, Any]:
