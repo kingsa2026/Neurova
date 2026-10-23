@@ -175,13 +175,13 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # 合成仓的每次 git 调用都要把宿主的提交签名配置摘掉：宿主若开了
-        # `commit.gpgsign`（本仓 runner 上就有），`commit` 会以 "gpg failed to sign
-        # the data" 退出 128——红在宿主配置上，与被测驱动无关。判据只问驱动的读数形态，
-        # 故这里显式钉住本仓自己那套身份与"不签名"，不继承宿主的。
-        pinned = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
-        for args in (["init", "-q"], ["add", "."], pinned + ["commit", "-q", "-m", "base"]):
-            subprocess.run(["git"] + pinned + args, cwd=str(repo), capture_output=True, text=True,
+        # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
+        # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
+        # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动（形态集 303 同族）。
+        for args in (["init", "-q"], ["add", "."],
+                     ["-c", "commit.gpgsign=false",
+                      "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+            subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True)
         return repo
 

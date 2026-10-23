@@ -668,10 +668,9 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：
-    # `c2031c4c`（批 138）把 MoE 路由里的墙钟上界随该档一并退役，文件已不在仓里，
-    # 键随之消失——这不是"沉默地少登记一条"：任何新增的、能被检出器认出的墙钟上界
-    # 都会让本表的分布比对重新判红。
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：`c2031c4c`（§6-378）
+    # 把 `channels/moe_router` 这一档按"不接"分支退净，连同它那 337 行专用判据一起删——
+    # 靶点不在仓里了，本表留行就是给不存在的靶点作保。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,

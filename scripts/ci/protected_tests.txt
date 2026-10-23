@@ -3679,3 +3679,12 @@ tests/unit/agent/test_futileThinkingRetryIsSkipped.py
 # 池里别的房救回／路由答不出即 fail-open。入册前逐文件单跑全绿（9 passed／4 passed）。
 tests/unit/llm/test_thinkingKnobResolvesAtRoutingBoundary.py
 tests/unit/agent/test_futileRetryGateReadsRealAssembly.py
+# §6-404（本单新增）：本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
+# 病灶是一对生命周期错配：令牌按**轮**持有、杀灭回调按**进程**注册。上一发命令结束后回调仍
+# 留在令牌上（实测残留 1 条），本轮任何一次取消都会去杀一个早已结束的 pid；更直接的坏法在
+# 第二发：它 `Popen` 出来注册回调时令牌**已置位**，注册口按"迟到的回调立即兑现"当场把它杀掉
+# ——实测第一发 `print(1)` 成功、本轮 `cancel("user")` 之后下一发立即 `exit_code=-9`。
+# 两格打行为不打形状：① 执行完令牌零残留；② 取消之后新起的命令照常跑完。红→绿实测：
+#   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
+# 入册前逐文件单跑全绿（2 passed）。
+tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py

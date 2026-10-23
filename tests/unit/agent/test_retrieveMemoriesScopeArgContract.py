@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,15 +41,25 @@ import pytest
 from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests import ast_scan
+
 SCAN_ROOTS = ("neurova", "tests")
 
 pytestmark = [pytest.mark.timeout(60)]
 
 
-def _singleArgCallsIn(source: str) -> list:
-    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。"""
+def _singleArgCallsIn(tree) -> list:
+    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。
+
+    入参是**语法树**而不是源码：文件枚举与解析归 `tests/ast_scan.sourceRefsUnder`
+    ＋ 一次性入口 `transientTree`，本档不再自付"自己枚举一整棵根树再逐个 parse"
+    ——判据成本随代码总量涨正是本仓那条墙钟红的根因。
+    """
     bad = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if node.func.attr != "_retrieve_memories":
@@ -59,16 +70,16 @@ def _singleArgCallsIn(source: str) -> list:
 
 
 def test_全仓不得再有单参调用形态():
-    # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己 `rglob + ast.parse`
-    # 会把"解析量"绑成"代码总量"，与其余受保护档共享 30s 墙钟时必偶发红。
-    # 文本预筛取调用的**属性名**——连 `_retrieve_memories` 字样都没有的文件
-    # 不可能出现这种调用形态（充分条件，不是放宽）。
     offenders = []
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 不留常驻语法树、不与代码总量和机器速度捆绑。
     for root in SCAN_ROOTS:
         for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("_retrieve_memories",)):
-            lines = _singleArgCallsIn(ref.code)
+            lines = _singleArgCallsIn(ast_scan.transientTree(ref.path))
             if lines:
-                offenders.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}")
+                offenders.append(
+                    f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}"
+                )
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
         + "; ".join(offenders)
@@ -78,7 +89,7 @@ def test_全仓不得再有单参调用形态():
 
 
 def test_扫描器真会咬():
-    # `await` 只能出现在 async 函数体内，样本得带宿主——否则 ast.parse 抛 SyntaxError，
+    # `await` 只能出现在 async 函数体内，样本得带宿主——否则解析即 SyntaxError，
     # 反向控制格本身先炸（本档落笔时踩过一次）。
     stale = "async def _probe(pipeline, ctx):\n    await pipeline._retrieve_memories(ctx)\n"
     fixed = (
@@ -87,12 +98,12 @@ def test_扫描器真会咬():
         "        ctx, turnScopeContext(ctx.metadata, ctx.session_id)\n"
         "    )\n"
     )
-    assert _singleArgCallsIn(stale) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
-    assert _singleArgCallsIn(fixed) == [], "正确形被误报"
-    assert _singleArgCallsIn("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n") == [], (
+    assert _singleArgCallsIn(ast.parse(stale)) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
+    assert _singleArgCallsIn(ast.parse(fixed)) == [], "正确形被误报"
+    assert _singleArgCallsIn(ast.parse("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n")) == [], (
         "方法定义被当成调用误报——守卫会咬住生产代码，口径不对"
     )
     # 合成样本自己得能过 ast.parse：带缩进的 def 顶格写会 IndentationError，
     # 于是反向控制格自身先炸（本档落笔时踩过两次，都在这一格）。
     with pytest.raises(SyntaxError):
-        _singleArgCallsIn("    def _retrieve_memories(self):\n        ...\n")
+        _singleArgCallsIn(ast.parse("    def _retrieve_memories(self):\n        ...\n"))

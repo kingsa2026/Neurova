@@ -588,24 +588,32 @@ class TestRemeNotes:
 # ---------------------------------------------------------------------------
 
 
-from scripts.import_kai_to_neurova import resolve_agent_root  # noqa: E402  v2 布局单源
-
-
 class TestIdentityFiles:
-    def test_soul_lands_in_memory_dir(self, kai_src):
+    def test_identityFilesLandWhereTheLoaderReadsThem(self, kai_src):
+        """身份文件落点＝`<agent_root>/memory/soul.md`（与 `agentRoot/soul.md` **同批都写**）。
+
+        这一格钉的是"导入成功 ≠ agent 起来能读到"。落点以读取侧为准，而读取侧有两处实现：
+        现行 `agent_core._load_identity`（`agentRoot/soul.md`、`agentRoot/personality.md`）
+        与会读 `memory/` 的那条链（`core/agent_workspaces.get_agent_memory_dir`）。
+        导入侧因此**两处都写**（`scripts/import_kai_to_neurova.import_identity`），
+        本格把两处都验一遍——只验一处，另一处悄悄断掉时没人会知道。
+        """
         from scripts.import_kai_to_neurova import import_identity
 
         kai, nv = kai_src
-        # v2 统一布局：`resolve_agent_root()` 给的是 `<neurova_root>/data/<agent_id>/`
-        # （`4bf9b733` 收口前的 `agent_workspaces/<id>` 已退役，本档按现行单源取根）。
-        workspace = resolve_agent_root(nv, "kai")
-        stats = import_identity(kai, workspace)
-        soul = workspace / "soul.md"
-        assert soul.exists()
-        assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（`_load_identity` 第二加载位，agent 根下那层）
-        assert "凯的档案" in (workspace / "personality.md").read_text(encoding="utf-8")
-        # PROFILE/MEMORY 在 workspace 根留档（`import_identity` 的落点是 `<agent_root>/workspaces/`）
-        assert (workspace / "workspaces" / "PROFILE.md").exists()
-        assert (workspace / "workspaces" / "MEMORY.md").exists()
+        agentRoot = nv / "agent_workspaces" / "kai"
+        stats = import_identity(kai, agentRoot)
+        memoryDir = agentRoot / "memory"
+        for soul in (memoryDir / "soul.md", agentRoot / "soul.md"):
+            assert soul.exists(), f"身份文件没落在读取侧会看的位置：{soul}"
+            assert "凯的灵魂" in soul.read_text(encoding="utf-8")
+        # PROFILE → personality.md：**同一落点**（`<agent_root>/personality.md`），
+        # 与 `_load_identity` 读的那一处逐字对齐（本格上方已把 soul.md 一并钉住）。
+        for personality in (memoryDir / "personality.md", agentRoot / "personality.md"):
+            assert "凯的档案" in personality.read_text(encoding="utf-8"), personality
+        # PROFILE/MEMORY 在工作区留档（`<agent_root>/workspaces/`，与
+        # `get_agent_workspace_dir()` 同一落点；导入产物必须落在读取侧会看的位置）
+        workspacesDir = agentRoot / "workspaces"
+        assert (workspacesDir / "PROFILE.md").exists(), sorted(p.name for p in agentRoot.iterdir())
+        assert (workspacesDir / "MEMORY.md").exists()
         assert stats["files"] >= 4
