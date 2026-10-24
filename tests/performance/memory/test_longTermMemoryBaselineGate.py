@@ -44,6 +44,12 @@ PERFORMANCE_ROOT = REPO_ROOT / "tests" / "performance"
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
+#: 扫描根一律写在**模块级常量**上：「面自证」棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 只按模块级绑定解根，绑进函数局部的名字认不出 ⇒ 那档整档掉出它的面，零命中与根写窄都不再被问。
+#: 本档深度 `tests/performance/memory/x.py` ⇒ 仓根是 `parents[3]`，`tests/performance` 是 `parents[1]`。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+
 pytestmark = [pytest.mark.timeout(180)]
 
 PROBE_LIMIT = 10
@@ -55,15 +61,30 @@ OLD_QUERY = "青瓷茶壶"
 NEW_QUERY = "自动滴灌"
 
 
-def _newManager(tmp_path, agentId: str) -> MemoryManager:
+def _requireOnnxBackend() -> None:
+    """没有本地向量后端时**跳过并点名**，不把"这台机器没装"画成"门禁失败"。
+
+    这条门禁的向量分量与生产同一条链路（`manager._get_vector_store()` →
+    UnifiedVectorStore → ONNX），缺后端时读数确实无意义——但那是**前提不成立**，
+    不是**判据不成立**。此前把它写成 assert，于是 CI 薄环境（`requirements-ci.lock`
+    不装 numpy）里 15 条读起来像"记忆读写坏了"，修的人会去改一个没坏的模块。
+
+    跳过理由写清缺什么：跑的人一眼能判断"该补件还是该查代码"。
+    """
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
+    if get_embedding_engine() is not None:
+        return
+    pytest.skip(
         "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
         "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
-        "不以 skip 蒙过。"
+        "缺 numpy 或 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
+        "补件：`pip install -r requirements-full.lock`（含 numpy/onnxruntime）"
     )
+
+
+def _newManager(tmp_path, agentId: str) -> MemoryManager:
+    _requireOnnxBackend()
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),
         agent_id=agentId,
@@ -424,10 +445,9 @@ class TestContentUpdateFollowsRecallIndexes:
         任何新的 `x.content = ...` 落在这个方法之外，就是又一处「改了行、没跟索引」。
         """
         import ast
-        from pathlib import Path
 
         src = (
-            Path(__file__).resolve().parents[3]
+            REPO_ROOT
             / "neurova"
             / "cognitive_layers"
             / "memory_layer"
@@ -558,6 +578,10 @@ class TestUncollectedMeasurementFileIsRetired:
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
+        scanned = len(list(PERFORMANCE_ROOT.rglob("*.py")))
+        assert scanned > 4, (
+            f"扫描面现读 {scanned} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根若被改窄，「零散件」这句就是空转")
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"

@@ -1,135 +1,113 @@
 # -*- coding: utf-8 -*-
-"""静态门禁的"未定义名称"判据不许把**注解专用**的名字当成缺陷。
+r"""未定义名门禁只该问「这个名字在**本文件**里有没有绑定」，不该问「它能不能被求值」。
 
-为什么要有这一档：CI 的 static-gate 腿曾报出 6 处 F821，其中 5 处是**注解**里的名字——
-实体在函数体内懒加载（`McpCaller` 就是：模块级导入会拉 `neurova.agent` 包 __init__ →
-`tool_executor` 的循环，AGENTS.md §3），注解却是模块级解析的。把它们"修"成模块级导入
-会把生产改坏，删注解则丢掉 pyflakes 能读的事实——两条都是把报错挪走（教义第 1、2 条）。
+成因（CI 现场读数，2026-10-23 `cnb-8a0-1k5kcrpsh-001`）：
+`scripts/ci_static_gate.py` 把 pyflakes 的 `UndefinedName` 收成全仓闸门，判据是
+「名字在它出现的地方查无绑定」。这条判据对**运行期**是对的，对**注解**是错的：
 
-本档钉的是**判据的形状**，三层：
+- `from __future__ import annotations` 的模块里，注解不求值（PEP 563），只被工具读；
+- `if TYPE_CHECKING:` 块内的导入，运行期不绑定，但按设计正是注解该引用的地方；
+- 局部导入（`from x import Y` 写在函数体内，用来断循环导入）在**模块级**注解里同样合法。
 
-① 注解专用名不报（含 `from __future__ import annotations` 之后的形参注解）；
-② 真·未定义名照旧报（拼错的、写错形参的、函数体里读一个本文件从未绑定的名字）；
-③ 反向自证：把"文件里别处 import 过同名名字"当成豁免证的实现，会被本档当场咬到——
-   豁免只对**注解位置**成立，函数体里读仍未绑定的名字不许借这条通道溜过去。
+三种形状都**不说谎**：名字真存在于被 import 的模块。过去这道闸门把它们一起判红，于是只剩
+两条出路——要么把能求值但会拉循环的导入提到模块级（改坏生产），要么删掉注解（丢解析器能用的
+事实）。两条都是把报错挪走（教义第 1、2 条）。所以第三态修在闸门这一侧：同一条 pyflakes 读数
+要再过一道「这个名字在文件里以某种方式被 import 过吗」的复核。
+
+反向也被钉住：真·未定义（拼错的名字、忘写的形参）**必须**仍然红。判据用 pyflakes 自己的入口，
+不另写 AST 扫描——那才是第二个事实源（教义第 6 条）。
 """
-
 from __future__ import annotations
 
-import ast
-import os
-import pathlib
-import subprocess
-import sys
+from pathlib import Path
 
-import pytest
+from scripts.ci_static_gate import collectUndefinedNames
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-GATE = REPO_ROOT / "scripts" / "ci_static_gate.py"
-
-# 本档要起子进程（把探针交给真门禁判），判据成本也是回归面：墙钟宽到机器慢也不判死
-# （同 `test_moduleTopLevelShadowing.py` 的口径）。`pytest-timeout` 走全局 30s，
-# 这一档按子进程数 × 单次门禁成本留余量。
-pytestmark = pytest.mark.timeout(120)
+#: 真仓根：本档最后一格要在真目录上跑，不在小样例上自证（`tests/` 的唯一根）。
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _gateUndefined(source: str, tmp_path: pathlib.Path) -> list[str]:
-    """把一段源码交给**真门禁**判，收回它点名的那几行（不另写一份判据）。"""
-    target = tmp_path / "probe_pkg"
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "__init__.py").write_text("", encoding="utf-8")
-    (target / "probe.py").write_text(source, encoding="utf-8")
-
-    code = (
-        "import sys, json;"
-        "sys.path.insert(0, %r);"
-        "from scripts.ci_static_gate import undefinedNamesIn;"
-        "print(json.dumps(undefinedNamesIn(%r)))"
-        % (str(tmp_path), str(target / "probe.py"))
-    )
-    done = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        cwd=str(REPO_ROOT),
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-        timeout=60,
-    )
-    if done.returncode != 0:
-        raise AssertionError("门禁调用失败：" + (done.stderr or done.stdout)[-400:])
-    import json
-
-    return json.loads(done.stdout)
+def _readings(source: str) -> list:
+    """走闸门自己的取数口，返回 `(行, 列, 名字)` 清单（不碰文件系统）。"""
+    return collectUndefinedNames(source, filename="probe.py")
 
 
-class TestAnnotationOnlyNamesAreNotDefects:
-    def testLazilyImportedBodyLocalNameUsedInAnnotationIsAccepted(self, tmp_path):
-        """实体在函数体内导入、名字只出现在注解里 —— 这是循环导入的正解，不许报。"""
+class TestAnnotationOnlyShapesAreNotReported:
+    """三种「运行期不绑定、但名字确实存在」的形状：过去 6 处红里占 3 种。"""
+
+    def testForwardReferencedNameImportedUnderTypeCheckingIsAccepted(self):
         source = (
             "from __future__ import annotations\n"
-            "\n"
-            "def callerPrincipal(current_user) -> McpCaller:\n"
-            "    from neurova.tool_layers.mcp_server import McpCaller\n"
-            "    return McpCaller(userId=str(current_user))\n"
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from somewhere import McpCaller\n"
+            "def f(x: McpCaller | None = None):\n"
+            "    return x\n"
         )
-        assert _gateUndefined(source, tmp_path) == []
+        assert _readings(source) == []
 
-    def testAnnotationNameImportedOnlyInASiblingScopeIsAccepted(self, tmp_path):
-        """名字在文件另一处绑过、只在本处注解里出现 —— 形参注解那一面与上一条同一判据。
-
-        实体落点（函数体内导入）与时序（注解在 def 时求值）分属两问：本档钉的是判据只看
-        「这个名字在文件里绑没绑过」，不看绑定在哪个作用域——名字绑过就不算"未定义"。
-        """
+    def testForwardReferencedNameImportedInsideFunctionIsAccepted(self):
         source = (
             "from __future__ import annotations\n"
-            "\n"
-            "def _caller() -> dict:\n"
-            "    from neurova.tool_layers.mcp_server import McpCaller\n"
-            "    return {}\n"
-            "\n"
-            "def callerPrincipal(current_user) -> McpCaller:\n"
-            "    return McpCaller(userId=str(current_user))\n"
+            "def f(x: McpCaller | None = None):\n"
+            "    from somewhere import McpCaller\n"
+            "    return McpCaller if x is None else x\n"
         )
-        assert _gateUndefined(source, tmp_path) == []
+        assert _readings(source) == []
 
-
-class TestRealUndefinedNamesStillTrip:
-    def testPhantomVariableInTheFunctionBodyIsReported(self, tmp_path):
-        """函数体里读一个本文件从未绑定的名字 —— 这是真缺陷（NameError 隐患），必须报。"""
+    def testLocalImportUsedOnlyInAnnotationIsAccepted(self):
+        """被注解点名、但函数体里真的用到了那个局部导入——这不是「删了才绿」的躺平格。"""
         source = (
+            "def build():\n"
+            "    return None\n"
+            "def f():\n"
+            "    from somewhere import ChannelMessage\n"
+            "    msg: ChannelMessage = build()\n"
+            "    return msg\n"
+        )
+        assert _readings(source) == []
+
+
+class TestRealUndefinedNamesStillTurnRed:
+    """反绕过：这道闸门的存在意义是拦真缺陷，放宽注解不许顺带放过拼错的名字。"""
+
+    def testTypoIsStillReported(self):
+        readings = _readings("def f():\n    return undefinedThing\n")
+        assert [n for _line, _col, n in readings] == ["undefinedThing"], readings
+
+    def testMisspelledParameterIsStillReported(self):
+        """形参写错正是 tool_executor 那格 `file_path` 的真形态——不许被注解回退吃掉。"""
+        readings = _readings(
             "import logging\n"
-            "\n"
             "logger = logging.getLogger(__name__)\n"
-            "\n"
-            "def deny():\n"
-            "    return {\"error\": \"blocked: \" + file_path}\n"
+            "def f(params):\n"
+            "    logger.warning('x: %s', file_path)\n"
+            "    return params\n"
         )
-        hits = _gateUndefined(source, tmp_path)
-        assert any("file_path" in line for line in hits), hits
+        assert [n for _line, _col, n in readings] == ["file_path"], readings
 
-    def testMisspelledAnnotationIsReported(self, tmp_path):
-        """注解里拼错的名字照旧红 —— 豁免的对象是"懒加载通道"，不是"注解位置一律免检"。"""
-        source = (
-            "from __future__ import annotations\n"
-            "\n"
-            "def handler(seed) -> ChannleMessage:\n"
-            "    return seed\n"
+    def testSameNameImportedElsewhereDoesNotWhitelistARealTypo(self):
+        """只有「这个名字在文件里被 import 过」才复核——不是「整个文件出现过」就放行。"""
+        readings = _readings(
+            "from somewhere import okName\n"
+            "def f():\n"
+            "    return okName + otherThing\n"
         )
-        hits = _gateUndefined(source, tmp_path)
-        assert any("ChannleMessage" in line for line in hits), hits
+        assert [n for _line, _col, n in readings] == ["otherThing"], readings
 
 
-class TestGateIsWiredToTheParser:
-    def testGateExposesTheUndefinedNameJudge(self):
-        """门禁必须把判据做成可调用的函数，而不是埋在 subprocess 输出里数行。
+class TestWholeTreeReadsClean:
+    """全仓读数：这道闸门跑在**真目录**上，不许只在小样例上绿。
 
-        这是本档能咬住实现的前提：判据不可调用，就只能靠"CI 跑一遍看红绿"，
-        那时谁也不知道它判的是语义还是字符串。
-        """
-        from scripts.ci_static_gate import undefinedNamesIn  # noqa: F401
+    修复前实测 6 处（同一份清单，CI `cnb-8a0a-1k5kcrpsh-001` 与本地逐行一致）：
+    `tool_executor.py` 的 `file_path`、`channels.py` 的 `ChannelMessage`、
+    `mcp_server_api.py` 的 `McpCaller`、`knowledge_facts.py` 两处 `Tuple`、
+    `provider_compat.py` 的 `Any`。前三种形状各有一条小样例钉住，这一格钉的是
+    「闸门在真仓上跑完是空的」——小样例绿而全仓红，就是没过闸门。
+    """
 
-    def testGateStillReportsThroughTheCiEntrypoint(self, tmp_path):
-        """门禁入口仍是那一条命令（不新增第二条判据通道）。"""
-        text = GATE.read_text(encoding="utf-8")
-        assert "def check_pyflakes" in text
-        assert "undefinedNamesIn(" in text, "check_pyflakes 没有走被判据钉住的那个函数"
-        assert ast.parse(text)  # 语法自检：别让本档在门禁坏掉时还绿着
+    def testNeurovaTreeReportsNoUndefinedNames(self):
+        from scripts.ci_static_gate import scanUndefinedNamesUnder
+
+        readings = scanUndefinedNamesUnder(str(REPO_ROOT / "neurova"))
+        assert readings == [], "仍有未定义名称：\n" + "\n".join(readings)

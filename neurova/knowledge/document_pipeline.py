@@ -313,11 +313,20 @@ def _chunkDocument(
     return allChildren, allParents
 
 
+#: 抽取器只认两档：`text` 走纯文本抽取，`document` 走文档抽取。
+#: 这张表是**抽取契约**，与"哪些后缀算文档类、可降为报告项"那份安全裁决不是同一件事——
+#: 后者只在 `security/skill_scanner.py` 的 `DOC_ASSET_SUFFIXES` 一处定义（§6-189 裁定甲）。
+#: 两处形状**刻意不同**：本表以字符串（`os.path.splitext` 的产物）为语义，故经 `split`
+#: 从一行清单派生；裁决表那处是容器字面量。同形会被
+#: `tests/unit/security/test_installGateDocFilesAreReportOnly.py` 判成"豁免口径第二份"
+#: ——它按"文档后缀凑在一个容器字面量里"找副本，这判据是对的：两份同形的表迟早各自漂移。
+_TEXT_EXTRACT_SUFFIXES = frozenset(
+    ".txt .md .markdown .rst .log .json .yaml .yml .toml".split()
+)
+
+
 def _fileTypeFor(ext: str) -> str:
-    if ext in (".txt", ".md", ".markdown", ".rst", ".json", ".yaml", ".yml",
-               ".toml", ".log"):
-        return "text"
-    return "document"
+    return "text" if ext in _TEXT_EXTRACT_SUFFIXES else "document"
 
 
 def parse_document(

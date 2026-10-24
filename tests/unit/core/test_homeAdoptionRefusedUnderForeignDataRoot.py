@@ -220,13 +220,39 @@ class TestHomeAdoptionHasExactlyOneGate:
                     func.attr if isinstance(func, ast.Attribute) else "")
                 if name == "legacyHomeLanding":
                     callers.add(py.relative_to(NEUROVA).as_posix())
-        # `security/artifact_digest.py` 在册：它的落点**故意**在数据根之外（防整库回滚），
-        # 锚文件对"数据根被替换"敏感，故它是 `legacyHomeLanding()` 的取法消费方，
-        # 而不是"绕过闸自己拼一份 home"——自己拼会写 `Path.home().joinpath(...)`，
-        # 那才是本格要拦的形态（`legacyHomeLanding` 这个名字出现不了）。
-        assert callers == {"core/data_root.py", "security/artifact_digest.py"}, (
+        assert callers == {"core/data_root.py"}, (
             "home 旧落点的取法出了一号仓库（各算一遍就是各判一次要不要搬）：\n%s"
             % sorted(callers)
+        )
+
+    def test_rootOutsideAnchorDoesNotBorrowTheAdoptionDerivation(self):
+        """数据根之外的**新写**落点，不许经收养那一支取。
+
+        §6-388 的构件摘要根外锚（`security/artifact_digest.anchorPath`）与收养是相反方向：
+        收养那支的落点是"等着被搬进数据根"的旧物，根外锚的落点是"永远不许被搬进数据根"的
+        防回滚锚。取法混用不会当场报错——它会安静地让下一个读代码的人以为那东西是旧物，
+        所以这里正面钉一次：两个方向各走各自的出口，`data_root` 之外谁也不许直接取收养支。
+        """
+        import ast
+
+        borrowed = set()
+        for py in ast_scan.filesUnder(NEUROVA):
+            try:
+                tree = ast_scan.transientTree(py)
+            except SyntaxError:
+                continue
+            rel = py.relative_to(NEUROVA).as_posix()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else (
+                    func.attr if isinstance(func, ast.Attribute) else "")
+                if name == "legacyHomeLanding":
+                    borrowed.add(rel)
+        assert borrowed == {"core/data_root.py"}, (
+            "这些生产档在用收养那一支给根外新写取落点——方向反了（根外锚一旦被当成旧物搬走，"
+            "它就失去防回滚的能力）：\n%s" % sorted(borrowed)
         )
 
     def test_eachFaceGoesThroughTheGatedAdoption(self):

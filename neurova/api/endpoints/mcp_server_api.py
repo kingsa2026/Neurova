@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import typing
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from mcp.server.lowlevel import Server
@@ -35,6 +36,9 @@ from starlette.types import Message, Receive, Scope, Send
 from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
+
+if TYPE_CHECKING:  # 仅类型检查期绑定：运行期入口仍在 `_callerPrincipal` 函数体内（断循环导入，AGENTS.md §3）
+    from neurova.tool_layers.mcp_server import McpCaller
 
 logger = get_logger(__name__)
 
