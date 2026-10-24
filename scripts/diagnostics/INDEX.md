@@ -36,6 +36,7 @@
 |------|------|----------|
 | `check_databases.py` | 列出主要 SQLite 库（`neurova_memory.db`/`neurflow.db`/`data/neurova_memory.db`）及表名 | 项目根运行 |
 | `check_users_db.py` | 检查 `data/users.db` 表结构、用户列表与 admin 记录 | 项目根运行 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（§6-383「存量未钉」待办的可复跑读数）：技能与插件各自给 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态，根外锚给 `match` / `anchor-missing` / `anchor-mismatch`；退出码 0＝清单已产出（含空清单）、2＝连数据根都读不出 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写一个字节；不连后端） |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
 
