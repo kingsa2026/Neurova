@@ -47,7 +47,18 @@ class TKGRetrieverAdapter:
         try:
             # query_tkg_for_context：关键词抽取 + 时效窗口 + 置信度排序，
             # 直接返回 dict 列表（query_current 只按 S/P/O 精确匹配，不适合文本查询）
-            result = self._tkg.query_tkg_for_context(context.query, max_facts=context.limit)
+            tenantId = str(
+                (getattr(context, "metadata", None) or {}).get("tenant_id")
+                or "default"
+            )
+            if hasattr(self._tkg, "forQuery"):
+                result = self._tkg.forQuery(
+                    context.query, maxFacts=context.limit, tenantId=tenantId
+                )
+            else:
+                result = self._tkg.query_tkg_for_context(
+                    context.query, max_facts=context.limit
+                )
             if asyncio.iscoroutine(result):
                 facts = await result
             else:
