@@ -112,7 +112,7 @@ feedparser==6.0.14
     # via -r requirements.txt
 feedparser-sgmllib==2.1.0
     # via feedparser
-filelock==4.2.1
+filelock==4.2.4
     # via
     #   huggingface-hub
     #   modelscope
@@ -165,7 +165,7 @@ httpx2==2.13.0
     #   langsmith
     #   mcp
     #   openai
-httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
 huggingface-hub==1.32.0
     # via
@@ -512,7 +512,7 @@ sentence-transformers==6.0.1
     # via -r requirements.txt
 sentencepiece==0.2.2
     # via -r requirements.txt
-setuptools==84.1.0
+setuptools==84.2.1
     # via
     #   modelscope
     #   torch

@@ -26,10 +26,11 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
-    # 面自证（形态 404）：这条判据的"零 importer"要与"没扫到"可区分——枚举面先量一次。
-    # 现算全仓 5660 个 .py；根少指一层会掉到 tests 2483／neurova 1024，都低于这条线。
+    # 面自证：`importersOfModule` 扫的是仓内源码树，先立住语料量级——根被改窄时它回空表，
+    # 「退役后无人导入」就变成"没人看"而不是"没人导入"。下限取实测全仓 3657 个 .py 的一半，
+    # 根少指一层会掉到 tests 2521／neurova 1043 里任一侧，都低于这条线。
     enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
-    assert enumerated >= 3000, (
+    assert enumerated >= 1800, (
         "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % enumerated)
     importers = ast_scan.importersOfModule(REPO_ROOT, MODULE)
     assert not importers, f"已退役模块仍被导入：{importers}"

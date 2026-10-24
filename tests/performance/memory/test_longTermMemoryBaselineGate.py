@@ -44,6 +44,12 @@ PERFORMANCE_ROOT = REPO_ROOT / "tests" / "performance"
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
 
+#: 扫描根一律写在**模块级常量**上：「面自证」棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 只按模块级绑定解根，绑进函数局部的名字认不出 ⇒ 那档整档掉出它的面，零命中与根写窄都不再被问。
+#: 本档深度 `tests/performance/memory/x.py` ⇒ 仓根是 `parents[3]`，`tests/performance` 是 `parents[1]`。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+
 pytestmark = [pytest.mark.timeout(180)]
 
 PROBE_LIMIT = 10
@@ -424,10 +430,9 @@ class TestContentUpdateFollowsRecallIndexes:
         任何新的 `x.content = ...` 落在这个方法之外，就是又一处「改了行、没跟索引」。
         """
         import ast
-        from pathlib import Path
 
         src = (
-            Path(__file__).resolve().parents[3]
+            REPO_ROOT
             / "neurova"
             / "cognitive_layers"
             / "memory_layer"
@@ -558,6 +563,10 @@ class TestUncollectedMeasurementFileIsRetired:
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
+        scanned = len(list(PERFORMANCE_ROOT.rglob("*.py")))
+        assert scanned > 4, (
+            f"扫描面现读 {scanned} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根若被改窄，「零散件」这句就是空转")
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
