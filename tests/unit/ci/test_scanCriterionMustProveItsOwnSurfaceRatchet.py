@@ -830,6 +830,25 @@ def _isListReadCall(call: ast.Call, consts: dict, helpers: dict, anchor: pathlib
     return _literalListSuffix(base, scoped or {}, 1)
 
 
+_LIST_MARKS = tuple(LIST_READS) + tuple(LIST_SUFFIXES)
+
+
+def _mayReadList(value: ast.AST) -> bool:
+    """这个右值**可能**是一次清单读法吗——文本级的充分条件，供 `_listSources` 预筛。
+
+    判据：源码里出现 `LIST_READS` 的某个属名（`open`/`read`/`read_text`/`readlines`，
+    `read` 这个子串本身就被 `read_text`/`readlines` 覆盖）或以 `LIST_SUFFIXES` 结尾的字符串
+    字面量。`_readsAList` 的每一支都要先见到其中之一才可能为真，故「两样都没有」的右值
+    跳过不改变结论。用 `ast.unparse` 取文本（AST 面，不看注释与 docstring），
+    这正是本档判据"按代码形态判、不按词判"的同一条纪律。
+    """
+    try:
+        text = ast.unparse(value)
+    except (ValueError, RecursionError):     # 极深表达式解不出源码：保守放行，交给 AST 判
+        return True
+    return any(mark in text for mark in _LIST_MARKS)
+
+
 def _callsIn(node: ast.AST, selfOnly: bool = False) -> list:
     """`node` 子树里的全部调用——`selfOnly` 时只取 `node.body` 里的**顶层**调用，不下潜。
 
@@ -852,11 +871,19 @@ def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Pat
     这就是第二版探测器报零的真因，两档正控里的那一档正是这一形。
 
     """
+    # 绑定面先过一趟**文本预筛**：判据问的是"这个右值读不读一份清单"，而清单读法里必然出现
+    # `LIST_READS` 的某个属名、或一个以 `LIST_SUFFIXES` 结尾的字符串字面量。连这两样都没有的
+    # 右值不可能命中（`_readsAList` 的每一支都要先见到其中之一才可能返回真），跳过它不改变结论。
+    # 成本帐（本档实测 `_faceReadings` 60.6s 里 `_readsAList` 31.5s / `ast.walk` 44.0s）：
+    # 709 档 3 万余条绑定逐条整树 walk 是超线性的，而真正可能命中的只是其中一小撮。
     bindings: dict = {}
-    for name, val in (scoped or consts).items():
-        bindings[name] = val if isinstance(val, list) else [val]
     for name, val in consts.items():
         bindings.setdefault(name, [val])
+    for name, val in (scoped or {}).items():
+        bindings[name] = val if isinstance(val, list) else [val]
+    bindings = {n: [v for v in vals if _mayReadList(v)]
+                for n, vals in bindings.items()}
+    bindings = {n: vals for n, vals in bindings.items() if vals}
     subExprs, stmts = [], []
     for name, exprs in bindings.items():
         subExprs += [(name, e) for e in exprs]
