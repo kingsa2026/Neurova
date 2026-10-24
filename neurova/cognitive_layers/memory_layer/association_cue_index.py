@@ -86,7 +86,7 @@ class CueVectorChannel:
         self._encodeOne = encodeOne
         self._maxEntries = maxEntries
         self._lock = threading.RLock()
-        self._vectors: Optional["Any"] = None
+        self._vectors: Optional[List[List[float]]] = None
         self._memoryIds: List[str] = []
         self._built = False
         self._stats: Dict[str, int] = {
@@ -113,18 +113,6 @@ class CueVectorChannel:
         return self._maxEntries
 
     def _build(self) -> None:
-        try:
-            import numpy as np
-        except ImportError:
-            # numpy 是**可选**依赖（`requirements-ci.txt` 刻意排除，与 `neurova/embedding` 同一处置）：
-            # 缺席时这一档不建索引、读数落 `skippedNoEngine`，而不是抛 ModuleNotFoundError
-            # 让调用方的 fail-soft 把它吞成一句"零读数"。通道只做加分，缺席＝没有线索时的可达性。
-            self._built = True
-            self._vectors = None
-            self._memoryIds = []
-            self._stats["skippedNoEngine"] += 1
-            return
-
         rows = self._cueRowsGetter(self._maxEntries)
         # 扇出门：同一条线索挂住的记忆数超过一次检索能区分的上限 ⇒ 整条不参与通道。
         # 这是 C-3 从写入侧搬过来的那一刀——旧实现用「批内去重」近似它，于是
@@ -152,7 +140,10 @@ class CueVectorChannel:
                 continue
             vectors.append(normalized)
             memoryIds.append(row.get("memory_id", ""))
-        self._vectors = np.vstack(vectors) if vectors else None
+        # 索引就是一批**已归一化**的行向量，不装进任何矩阵库：`np.vstack` 在这里只做了
+        # "装成一堆"这一件事，却让整个通道在导入期与调用期都依赖 numpy——而
+        # `requirements-ci.txt` 刻意不装它，于是"引擎缺席即降级"这句承诺到了这一行成空话。
+        self._vectors = vectors
         self._memoryIds = memoryIds
         self._built = True
         self._stats["indexed"] = len(memoryIds)
@@ -186,12 +177,6 @@ class CueVectorChannel:
             self._stats["skippedNoEngine"] += 1
             return []
 
-        try:
-            import numpy as np
-        except ImportError:  # 与 `_build` 同一条判据：没有 numpy 就没有这一档
-            self._stats["skippedNoEngine"] += 1
-            return []
-
         with self._lock:
             if not self._built:
                 self._build()
@@ -202,7 +187,11 @@ class CueVectorChannel:
             if not query:
                 self._stats["skippedNoEngine"] += 1
                 return []
-            scores = self._vectors @ np.asarray(query, dtype=np.float32)
+            # 余弦逐行算在 `core.vector_math` 那唯一一出处（教义第 6 条）：这里曾经是
+            # `self._vectors @ np.asarray(query, dtype=np.float32)`——公式与阈值都是第二份，
+            # 改一处余弦口径就得记得这里还有一份；而且那一行让"没有 numpy 就没有这一档"
+            # 从一句注释变成了运行期事实（判据实测：薄装环境下 indexed/injected 全零）。
+            scores = [vector_math.cosineSimilarity(row, query) for row in self._vectors]
             bestPerMemory: Dict[str, float] = {}
             for index, score in enumerate(scores):
                 memoryId = self._memoryIds[index]
