@@ -41,20 +41,26 @@ class TestBug5MemoryManagerLockProtection:
     若方法不获取锁，子线程会立即完成（测试失败）。
     """
 
-    def _make_manager(self, agent_id="test_bug5"):
-        """创建隔离的 MemoryManager"""
+    def _make_manager(self, tmp_path, agent_id="test_bug5"):
+        """创建隔离的 MemoryManager。
+
+        落点必须由 `tmp_path` 给：`db_path=":memory:"` 时 `manager._init_storage` 取
+        `os.path.dirname(db_path) or "."` 当侧面库根，退化成**进程 CWD**，把
+        `<仓根>/memory_storage/` 建出来（同 `test_lock_coverage_m060709` 那一族，
+        全量顺序里由 `_guardRepoRootAgainstPollution` 点名）。
+        """
         import uuid
 
         unique_id = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-        return MemoryManager(db_path=":memory:", agent_id=unique_id)
+        return MemoryManager(db_path=str(tmp_path / "bug5.db"), agent_id=unique_id)
 
-    def test_forget_acquires_lock(self):
+    def test_forget_acquires_lock(self, tmp_path):
         """forget 应获取 self._lock
 
         根因：forget 直接读写 self._memories，无 `with self._lock:` 保护。
         修复：用 `with self._lock:` 包裹 forget 全临界区。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="锁测试", temperature=50.0)
 
         # 主线程持有锁
@@ -92,13 +98,13 @@ class TestBug5MemoryManagerLockProtection:
 
         t.join(timeout=1.0)
 
-    def test_update_memory_acquires_lock(self):
+    def test_update_memory_acquires_lock(self, tmp_path):
         """update_memory 应获取 self._lock
 
         根因：update_memory 直接读写 self._memories 和 _persist_memory，无锁保护。
         修复：用 `with self._lock:` 包裹 update_memory 全临界区。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="锁测试", temperature=50.0)
 
         manager._lock.acquire()
@@ -130,13 +136,13 @@ class TestBug5MemoryManagerLockProtection:
 
         t.join(timeout=1.0)
 
-    def test_lock_is_reentrant(self):
+    def test_lock_is_reentrant(self, tmp_path):
         """RLock 应可重入（update_memory 内部调用 _persist_memory 不应死锁）
 
         这是防御性测试：确保修复使用 RLock 而非 Lock，
         允许同一线程在持锁状态下调用其他持锁方法。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="重入测试", temperature=50.0)
 
         # 同一线程持锁后调用 update_memory（应不死锁）

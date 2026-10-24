@@ -25,9 +25,19 @@ from neurova.cognitive_layers.memory_layer.semantic_search import SemanticSearch
 from tests.cognitive_body_store import cognitiveEngine
 
 
-def _make_manager(agent_id="m060709"):
+def _make_manager(agent_id="m060709", dbPath=None):
+    """建一份真 `MemoryManager`。
+
+    `db_path` 曾经是字面量 `":memory:"`——SQLite 认它，但**同一份字符串还要被当目录用**：
+    `manager._init_storage` 取 `os.path.dirname(db_path) or "."` 当侧面库根，于是在
+    `":memory:"` 上退化成**进程 CWD**，`<仓根>/memory_storage/` 就这么建出来（CI 里由
+    `_guardRepoRootAgainstPollution` 当场点名本条用例）。传 tmp 落点的档从来撞不到这一格，
+    所以它一直只在全量顺序里红——单跑恒绿。
+
+    改法：落点由调用方按 `tmp_path` 给（与其它档同一条口径），`":memory:"` 不再兼任目录名。
+    """
     uid = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-    return MemoryManager(db_path=":memory:", agent_id=uid)
+    return MemoryManager(db_path=dbPath or ":memory:", agent_id=uid)
 
 
 class TestM06ManagerScopedMemoriesInsideLock:
@@ -75,16 +85,16 @@ class TestM06ManagerScopedMemoriesInsideLock:
             "M-06 未修复：基集构造在锁外执行（应为锁内）"
         )
 
-    def test_recall_builds_base_inside_lock(self):
-        mgr = _make_manager()
+    def test_recall_builds_base_inside_lock(self, tmp_path):
+        mgr = _make_manager(dbPath=str(tmp_path / "m060709.db"))
         self._assert_base_built_inside_lock(mgr, lambda: mgr.recall(query="x"))
 
-    def test_get_memories_builds_base_inside_lock(self):
-        mgr = _make_manager()
+    def test_get_memories_builds_base_inside_lock(self, tmp_path):
+        mgr = _make_manager(dbPath=str(tmp_path / "m060709.db"))
         self._assert_base_built_inside_lock(mgr, lambda: mgr.get_memories())
 
-    def test_get_stats_builds_base_inside_lock(self):
-        mgr = _make_manager()
+    def test_get_stats_builds_base_inside_lock(self, tmp_path):
+        mgr = _make_manager(dbPath=str(tmp_path / "m060709.db"))
         self._assert_base_built_inside_lock(mgr, lambda: mgr.get_stats())
 
 
