@@ -408,6 +408,54 @@ def _isolateMobileDeviceRegistry(tmp_path, monkeypatch):
     mp._confirm_attempts.clear()
     mp.resetDeviceRegistry()
 
+def _nativeModuleMissing() -> str:
+    """本机缺哪个"生产里是惰性可选"的原生依赖，就返回它的模块名（都在就返回空串）。
+
+    为什么要在 conftest 里显式判、而不是让它自然地 `ModuleNotFoundError`：
+    `requirements-ci.lock` 是薄环境（`requirements-ci.txt` 头部写明刻意排除 numpy /
+    onnxruntime 这类重依赖），而 `neurova/embedding/__init__.py` 在**模块顶层**导入
+    `onnx_embedding`，后者又顶层 `import numpy`。于是嵌入引擎在本机根本取不到，
+    但它取的姿势是"炸"而不是"返回 None"——实测 `get_embedding_engine()` 直接
+    `ModuleNotFoundError`，13 个文件里 27 条用例把这条缺席读成了**断言失败**。
+
+    那 27 条读起来像"嵌入写侧坏了"，实际是"这台机器没有向量后端"。两者混在同一个红里，
+    修的人会去改一个没坏的模块（教义第 2 条要的是诚实形态，不是把缺席画成故障）。
+    所以让缺席在这里**点名说出自己是谁**：跳过理由里写清缺什么、哪条命令能补齐。
+
+    覆盖面只到"本机缺件"这一层：别的可选依赖（playwright 等）有各自的就绪判据，
+    没在跑测机上装成时由它们自己判，这里不代它们表态。
+    """
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        return "numpy"
+    return ""
+
+
+@pytest.fixture(autouse=True)
+def _nativeBackendPresenceIsNamed(monkeypatch):
+    """本机缺原生向量后端时，让 `get_embedding_engine()` 说"没有"，而不是炸。
+
+    两条诚实形态，二选一，都在生产自己的接缝上做，不动生产码：
+
+    · 有 numpy ⇒ 什么都不做，走生产原路（真引擎仍可能因模型未装而返 None，那是它自己那关）；
+    · 缺 numpy ⇒ 把生产单例工厂换成"返回 None"。生产里 `get_embedding_engine()` 的契约
+      本就是"模型未安装或初始化失败返回 None"，消费方全都按 None 降级（`embedding`
+      缺席即不写向量、召回退 TF-IDF）——所以这不是伪造，是把**它本该有的那种降级**
+      在缺件机器上接通。缺件机器跑出来的是"降级路对不对"，不是"引擎算得准不准"。
+
+    副作用边界写清：本 fixture 只装 `neurova.embedding.get_embedding_engine` 这一个名字，
+    逐用例还原；需要**真引擎**的档（如 `tests/unit/memory/test_engine_integration.py`）
+    自己 import onnx 并当场断言，它们在本机本就因缺 numpy 红，不因本格而变成"假装绿"。
+    """
+    missing = _nativeModuleMissing()
+    if not missing:
+        return
+    import neurova.embedding as embedding
+
+    monkeypatch.setattr(embedding, "get_embedding_engine", lambda: None, raising=False)
+
+
 @pytest.fixture
 def mock_logger():
     """模拟日志记录器"""
