@@ -75,11 +75,17 @@ class TestEdgeTTS:
         with patch.dict('sys.modules', {'edge_tts': MagicMock()}):
             await tts.initialize()
 
-            # 模拟 Communicate 类
+            # 模拟 Communicate 类：`stream` 是**异步生成器**，不是返回迭代器的协程。
+            # 写成 `AsyncMock(return_value=iter([...]))` 时，产品里的
+            # `async for chunk in communicate.stream():` 拿到的是 coroutine 对象，
+            # 抛 `TypeError: 'async for' requires an object with __aiter__` 被产品吞成空字节；
+            # 更糟的是那枚 coroutine 从头到尾没被 await，于是在**整批跑**时由别的用例
+            # 的 GC 报 `never awaited`，红落在不相干的地方。
+            async def _stream():
+                yield {"type": "audio", "data": b"audio data"}
+
             mock_communicate = MagicMock()
-            mock_communicate.stream = AsyncMock(return_value=iter([
-                {"type": "audio", "data": b"audio data"},
-            ]))
+            mock_communicate.stream = _stream
             
             with patch("edge_tts.Communicate", return_value=mock_communicate):
                 audio = await tts.synthesize("测试文本")
