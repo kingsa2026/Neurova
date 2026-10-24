@@ -223,3 +223,21 @@ class TestBaselineCategory:
         ids = store.baseline(created["baseline_id"])["snapshot"]["fact_ids"]
         assert ids == [budget]
         assert policy not in ids
+
+
+class TestHistoryRetention:
+    def testHistoryIsNotTruncatedAtTwoHundred(self, store):
+        factId = _fact(store)
+        for index in range(205):
+            if index % 2 == 0:
+                store.retract(factId, reason="loop-%d" % index)
+            else:
+                store.reviveRetracted(factId, reason="loop-%d" % index)
+
+        versions = store.history(factId)
+
+        assert len(versions) == 206
+        assert store.historyCount(factId) == 206
+        assert versions[-1]["change_type"] == "create"
+        assert len(store.history(factId, limit=10)) == 10
+        assert len(store.history(factId, limit=10, offset=200)) == 6

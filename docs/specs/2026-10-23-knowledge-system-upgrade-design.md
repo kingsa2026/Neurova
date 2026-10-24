@@ -410,6 +410,8 @@ class OcrEngine(Protocol):
 - 业务基线：`knowledge_baselines`（baseline_id, scope, snapshot_ref, created_by, created_at），
   支持按 agent/category/时间窗冻结；不复制正文，只存引用。
 - 验收：任一事实可查历史并回滚；回滚写操作人/依据/版本号；历史与当前一致。
+- **溯源保留**：事实版本只追加、不压缩、不自动清理；`GET /facts/{id}/history`
+  默认返回全量（`limit=0`），显式 `limit/offset` 才分页，避免默认分页截断溯源。
 
 ### 6.6 存储与规模（P1-D）
 
@@ -615,8 +617,8 @@ class OcrEngine(Protocol):
   进程内 ACP 路径不受影响；`NEUROVA_AGENT_BUS=mqtt` 时读 `NEUROVA_MQTT_*` 配置；
 - NER 保持规则/词表（按 U7），模型实体识别列为后续可选；
 - 渠道租户来自适配器 `extra.tenant_id`，未配置时落 `default`；
-- 事实回滚语义已拍板为**只恢复目标事实**：派生事实与推导账本不自动复活，
-  历史保留/压缩策略未做自动清理（保留全量历史）；
+- 事实回滚语义已拍板为**只恢复目标事实**：派生事实与推导账本不自动复活；
+  历史按产品要求**全量保留、无压缩/清理入口**，history 接口默认全量返回；
 - Docker 镜像未在本机构建（无 Docker），镜像内 LibreOffice/OCR 库真跑未验；
 - 文档核心属性已从 DOCX/PDF 读取（标题/作者/创建/修改）；扫描型 PDF 的元数据
   依赖渲染器返回，缺失时为空；
