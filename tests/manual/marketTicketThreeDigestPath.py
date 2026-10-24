@@ -35,6 +35,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+# stdout 编码由本档自己钉死：`print` 抛 UnicodeEncodeError 会把退出码变成 1，
+# 而 `tests/manual/*` 的全部证据就是「退出码 + 那几行 PASS/FAIL 读数」——
+# 等于让打印来决定判定（判据见 tests/unit/ci/test_manualScriptStdoutEncoding.py）。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaTicket3")

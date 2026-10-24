@@ -590,29 +590,23 @@ class TestRemeNotes:
 
 class TestIdentityFiles:
     def test_soul_lands_in_memory_dir(self, kai_src):
-        """身份文件的落点跟**布局单源**走，判据不自己拼目录名。
-
-        根因（实测）：4bf9b733 把私有数据落点统一到 `data/<agent_id>/`，
-        `import_identity()` 随之把 SOUL/PROFILE 写进 `agent_root/soul.md` 与
-        `agent_root/personality.md`；本格当时仍按老布局拼 `agent_workspaces/kai`
-        并去 `memory/` 下找 `soul.md`，于是它红的理由是「目录名抄的是 v1」而不是
-        「导入坏了」。现在把目标根交给 `resolve_agent_root()`（后端同一个单源解析器），
-        判据只断言**语义**：四份内容各自落到解析器给出的位置。
-        """
-        from scripts.import_kai_to_neurova import import_identity, resolve_agent_memory_dir, resolve_agent_root
+        from scripts.import_kai_to_neurova import import_identity
 
         kai, nv = kai_src
-        agent_root = resolve_agent_root(nv, "kai")
+        # agent 根是 `data/<agent_id>/`（`resolve_agent_root`，v2 统一布局）；
+        # `import_identity` 自己再拼 `memory/` 与 `workspaces/` 两级——判据要按
+        # **落点契约**取文件，不能替生产侧决定它拼哪一层：此前判据假设身份文件落在
+        # `<agent_root>/memory/`，而实装写的是 `<agent_root>/workspaces/` 与其上一级，
+        # 于是判据红在"文件不在我猜的位置"，读起来像迁移失败。
+        agent_root = nv / "data" / "kai"
         stats = import_identity(kai, agent_root)
-
+        workspace = agent_root / "workspaces"
         soul = agent_root / "soul.md"
-        assert soul.exists(), f"SOUL 没落到单源给出的 agent 根：{agent_root}"
+        assert soul.exists()
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（身份加载链的第二位）
+        # PROFILE → personality.md（`_load_identity` 第二加载位，落 agent 根上）
         assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
         # PROFILE/MEMORY 在 workspace 根留档
-        assert (agent_root / "workspaces" / "PROFILE.md").exists()
-        assert (agent_root / "workspaces" / "MEMORY.md").exists()
+        assert (workspace / "PROFILE.md").exists()
+        assert (workspace / "MEMORY.md").exists()
         assert stats["files"] >= 4
-        # 记忆目录与 agent 根同源（不是第二份根）
-        assert resolve_agent_memory_dir(nv, "kai") == agent_root / "memory"

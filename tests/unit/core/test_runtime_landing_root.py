@@ -40,6 +40,10 @@ ANCHORS = (
     "ensure_agent_data_dir", "get_agent_workspaces_root", "repoRoot", "repoAsset",
     "PROJECT_ROOT", "REPO_ROOT", "_REPO_ROOT", "_PROJECT_ROOT", "__file__", "parents[",
     "getcwd",
+    # 家目录也是**绝对**锚：`Path.home().joinpath(".neurova", ...)` 换个启动目录就是同一个
+    # 位置，与"按进程 CWD 拼"相反。少了这一条，构件摘要的根外锚（§6-388，刻意落在数据根
+    # 之外）会被读成 CWD 落点——那正是这道门要它**别**去的地方。
+    "Path.home", "Path.home()",
 )
 
 _REL_LITERAL = re.compile(r"^[A-Za-z0-9_.\-][A-Za-z0-9_./\-]*$")

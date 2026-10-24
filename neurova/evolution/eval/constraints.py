@@ -152,16 +152,27 @@ def semantic_similarity(a: str, b: str) -> float:
 def _embedding_similarity(a: str, b: str) -> Optional[float]:
     """尝试用项目 embedding 引擎算余弦;任何不可用原因都返回 None(不抛)。
 
-    只消费**已初始化**的引擎(启动期 ONNX 懒加载策略,见 09-09 启动性能
-    修复):进化闸不触发模型加载,未就绪即 Jaccard 回退——离线可跑。
+    引擎**未就绪就自己把它叫起来**（`encode_batch` 的既有懒初始化自救，
+    `onnx_embedding.py:340` 那一段就是为这类消费方写的）：此前这里只认"已经就绪"，
+    而进化链路上没有任何一处会初始化引擎，于是稠密档在也**一律**退回词法档——
+    约束闸按 token Jaccard 判"语义漂移"，它的 docstring 却写着"优先 embedding 余弦"。
+    实测同一对文本：稠密档 0.94 / 词法档 0.714（阈值 0.75）⇒ 候选被恒定拒、提案一条不出。
+    真正的"离线可跑"由 try/except 保证（模型档缺失 / 依赖缺席照样返回 None），
+    不需要靠"不初始化"来保证。
     """
     try:
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        if engine is None or not engine.is_initialized():
+        if engine is None:
             return None
+        # 就绪判定要**在编码之后**取：`is_initialized` 是**属性**（不是方法，写成
+        # `is_initialized()` 会抛 TypeError 并被下面的 `except` 吞成"退回词法档"），
+        # 而裸实例的就绪是被 `encode_batch` 的懒初始化自救点亮的——先判 `not
+        # is_initialized` 等于把自救挡在门外（实测：稠密档在也恒走 Jaccard）。
         va, vb = engine.encode(a), engine.encode(b)
+        if not engine.is_initialized:
+            return None
         if not va or not vb:
             return None
         raw = vector_math.tryCosineSimilarity(va, vb)
