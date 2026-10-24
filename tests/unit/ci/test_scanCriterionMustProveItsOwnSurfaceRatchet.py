@@ -483,6 +483,28 @@ def _helpersOf(tree: ast.AST) -> dict:
 #: 不存语法图——490 棵常驻树会把本闸变成 Issue #197 点过的那种 GC 账单（形态集 209）。
 _MODULE_LIST_NAMES: dict = {}
 
+#: 「那个目录下有没有以清单后缀结尾的文件」——按目录记，答案只有是与否。
+#: 为什么必须记：`_moduleFile` 每条候选路径都要 `is_file()`，而它按**每次调用**被问一遍。
+#: 708 条清单 × 每条里的每次跨模块调用 ⇒ 同一批目录被 stat 上百万次，本闸从 4.7s 涨到 87s。
+#: 判据自身的成本也是回归面（形态集 209 那一族），且这一层只缓存"目录里有没有"，
+#: 不缓存语法图、不枚举入口——`TestNoUnprefilteredRepoWideScan` 那条纪律不受影响。
+_LIST_SUFFIX_DIRS: dict = {}
+
+
+def _dirHasListFile(directory: pathlib.Path) -> bool:
+    """`directory` 里有没有非 `.py` 清单（按后缀判，只读一次目录项并记忆）。"""
+    key = str(directory)
+    hit = _LIST_SUFFIX_DIRS.get(key)
+    if hit is not None:
+        return hit
+    try:
+        hit = any(entry.name.lower().endswith(LIST_SUFFIXES)
+                  for entry in directory.iterdir() if entry.is_file())
+    except OSError:
+        hit = False
+    _LIST_SUFFIX_DIRS[key] = hit
+    return hit
+
 #: 允许的 import 形态（各配一枚合成正检；不在列的形态不许猜——猜出来的面不算面）
 def _importBase(node, anchor: pathlib.Path, selfPath: pathlib.Path = None):
     """`from a.b import c` / `from ..b import c` 里那个 `a.b`／`..b` 解成仓内目录或模块前缀。"""
@@ -495,12 +517,20 @@ def _importBase(node, anchor: pathlib.Path, selfPath: pathlib.Path = None):
     return anchor.joinpath(*parts) if parts else anchor
 
 
+#: 「这条候选路径存在吗」——按路径记。`_moduleFile` 每条候选都要 `is_file()`，
+#: 而它按**每次跨模块调用**被问一遍（708 条清单 × 每条里的每次调用），同一批候选路径
+#: 被 stat 上百万次：本闸实测从 87.9s 压到 19.1s 靠的就是这一层。只记布尔，不存语法图、
+#: 不枚举入口——`TestNoUnprefilteredRepoWideScan` 那条纪律不受影响。
+_MODULE_FILE_EXISTS: dict = {}
+
+
 def _moduleFile(base: pathlib.Path, tail: str, anchor: pathlib.Path = None):
     """把 `<base>.<tail>` 解成仓内真实文件：模块本身、子模块、或包的 `__init__.py`。
 
     这里**只做存在性判定**，不建全树索引：先前用 `os.walk` 建过一份 `.py` 索引来省 stat，
     那一步把「枚举入口＋私有解析」凑进了本闸自己的调用闭包，被 `TestNoUnprefilteredRepoWideScan`
     当场点名（形态集 312 那条：枚举入口一旦进了被消费的 helper 的闭包，账单记在整个取数口上）。
+    故只按路径记忆 `is_file()`，不预先列出目录内容。
     """
     cands = [base.with_suffix(".py")]
     if tail:
@@ -508,7 +538,11 @@ def _moduleFile(base: pathlib.Path, tail: str, anchor: pathlib.Path = None):
     else:
         cands.append(base / "__init__.py")
     for cand in cands:
-        if cand.is_file():
+        key = str(cand)
+        hit = _MODULE_FILE_EXISTS.get(key)
+        if hit is None:
+            hit = _MODULE_FILE_EXISTS[key] = cand.is_file()
+        if hit:
             return cand
     return None
 
