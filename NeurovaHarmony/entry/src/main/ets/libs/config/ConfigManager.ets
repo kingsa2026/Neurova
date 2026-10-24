@@ -16,8 +16,13 @@ const PREFERENCES_NAME = 'neurova_config';
 
 /** 默认配置项 */
 const DEFAULT_CONFIG: Record<string, Object> = {
-  api_base_url: 'http://192.168.10.132:9527/api/v1',
-  ws_base_url: 'ws://192.168.10.132:9527/v1/mobile/ws',
+  // 服务器地址**不在编译期写死**（原值是一台开发机的局域网 IP，换网络即全体失联，
+  // 且打包后改不了）。默认留空 = 尚未配对过任何服务器；地址只来自两条真路：
+  //   1) 扫码后 resolve 换回来的那一条（PairingPage 写入并持久化）
+  //   2) 用户在「连接」页自己填的服务器档案
+  // 空值在这里是**信息**，不是兜底：读它的人会明确报"还没有服务器可连"，不会蒙着连。
+  api_base_url: '',
+  ws_base_url: '',
   request_timeout: 30000,
   ws_reconnect_interval: 5000,
   ws_heartbeat_interval: 30000,
@@ -35,6 +40,23 @@ export class ConfigManager {
 
   private constructor() {
     // 私有构造，强制单例
+  }
+
+  /**
+   * 把当前配置落到真装配点：HTTP 的 baseUrl ＋ 持久化。
+   *
+   * `HttpClient.setBaseUrl()` 与 `saveToPreferences()` 都早已实装，但**生产代码里无人调用**
+   * ——于是换过地址后重开 App 又回落到默认值（AGENTS §2 的"写了没人读"断点）。
+   * 这一条就是那个缺失的调用者：配对成功、切换服务器档案、启动恢复，三处都走它。
+   */
+  async applyServerProfile(apiBaseUrl: string, context: Context): Promise<void> {
+    this.set<string>('api_base_url', apiBaseUrl);
+    // ws_base_url 不在这里猜：它由配对流程 resolve 回来后写进 AuthStore——服务器地址会漂，
+    // 存成一份配置就会陈旧（正是本案要摆脱的那个形状）。这里只落 HTTP 侧那条稳定前缀。
+    if (!this.prefs) {
+      this.prefs = await preferences.getPreferences(context, PREFERENCES_NAME);
+    }
+    await this.saveToPreferences();
   }
 
   /** 获取单例实例 */
