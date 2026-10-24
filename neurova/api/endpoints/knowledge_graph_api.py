@@ -453,3 +453,103 @@ async def get_knowledge_graph_studio(
             "is_demo": False,
         },
     }
+
+
+def _subgraphPayload(manager, focus: str, hops: int, types: set, limit: int) -> dict:
+    """以 focus 为中心的 BFS 子图：3D 画布的渲染预算由服务端先兜住。
+
+    类型过滤只作用于**结果集**，遍历穿过全部节点——中间类型的节点挡路的话，
+    两跳外的同型节点永远到不了。裁剪边界上的边一律不外带。
+    """
+    nodes = getattr(manager, "_nodes", {}) or {}
+    if focus not in nodes:
+        raise LookupError("节点不存在: %s" % focus)
+
+    adjacency: dict = {}
+    edges = []
+    for edge in (getattr(manager, "_edges", {}) or {}).values():
+        edges.append(edge)
+        adjacency.setdefault(edge.source_id, []).append(edge.target_id)
+        adjacency.setdefault(edge.target_id, []).append(edge.source_id)
+
+    def _kindOf(nodeId: str) -> str:
+        node = nodes.get(nodeId)
+        return str(getattr(getattr(node, "node_type", None),
+                           "value", getattr(node, "node_type", "")) or "")
+
+    kept = {focus}
+    visited = {focus}
+    droppedByLimit = False
+    frontier = [focus]
+    for _ in range(max(int(hops), 0)):
+        nextFrontier = []
+        for nodeId in frontier:
+            for neighbour in adjacency.get(nodeId, ()):
+                if neighbour in visited:
+                    continue
+                visited.add(neighbour)
+                nextFrontier.append(neighbour)
+                if types and _kindOf(neighbour) not in types:
+                    continue
+                if len(kept) < limit:
+                    kept.add(neighbour)
+                else:
+                    droppedByLimit = True
+        frontier = nextFrontier
+
+    outNodes = [_node_to_dict(nodes[nodeId]) for nodeId in kept if nodeId in nodes]
+    outEdges = [
+        _edge_to_dict(e) for e in edges
+        if e.source_id in kept and e.target_id in kept
+    ]
+    return {"nodes": outNodes, "edges": outEdges,
+            "dropped_by_limit": droppedByLimit}
+
+
+@router.get("/{agent_id}/subgraph")
+async def get_knowledge_graph_subgraph(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    focus: str = Query(..., description="中心节点 id"),
+    hops: int = Query(2, ge=0, le=6),
+    limit: int = Query(200, ge=1, le=2000),
+    types: str = Query("", description="逗号分隔的节点类型过滤，空=不过滤"),
+):
+    """3D/2D 探索的按需子图（S4）：focus + 跳数 + 类型 + 上限，服务端裁剪。
+
+    全量图在大语料下不可整幅渲染；探索器只拉以焦点为中心的邻域，
+    扩展（换焦点/加跳数）是下一次请求，不是客户端养一张大图。
+    """
+    tenant = _tenant_of(current_user)
+    manager = _get_kg_manager(agent_id, tenant)
+    typeSet = {t.strip() for t in str(types or "").split(",") if t.strip()}
+    try:
+        data = _subgraphPayload(manager, focus, hops, typeSet, limit) if manager else {}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("读取子图失败，返回空子图: %s", e)
+        manager, data = None, {}
+
+    nodes = data.get("nodes") or []
+    edges = data.get("edges") or []
+    # truncated 指本次请求参数内的截断（limit 打断），不是"子图小于全图"——
+    # 子图本来就是按 focus/hops 裁的，那不叫截断。
+    truncated = bool(data.get("dropped_by_limit"))
+    stats = _statsOf(manager)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "agent_id": agent_id,
+            "focus": focus,
+            "hops": hops,
+            "nodes": nodes,
+            "edges": edges,
+            "total_nodes": int(stats["node_count"]),
+            "total_edges": int(stats["edge_count"]),
+            "truncated": truncated,
+            "stats": stats,
+        },
+    }
