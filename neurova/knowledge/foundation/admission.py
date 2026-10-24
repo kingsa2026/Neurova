@@ -92,6 +92,8 @@ class AdmissionRequest:
     relationKind: str = "literal"
     # 租户分区键：缺省 default（存量调用方语义不变；新调用方按请求身份传入）
     tenantId: str = "default"
+    # 条目分类：业务基线按 category 冻结时使用；未知/非条目事实留空
+    category: str = ""
     qualifier: Dict[str, Any] = field(default_factory=dict)
     sourceTurnId: str = ""
     aliases: List[str] = field(default_factory=list)
@@ -364,6 +366,7 @@ class KnowledgeAdmissionGate:
             validFrom=request.validFrom,
             validUntil=request.validUntil,
             tenantId=request.tenantId,
+            category=request.category,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         activityId = ""
