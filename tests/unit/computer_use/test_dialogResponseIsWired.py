@@ -54,6 +54,26 @@ page 级注册要跟着 tab 生命周期到处补；context 级一处注册即�
 - **不想象 API**：一格专门拿**已安装的** `playwright.async_api.Dialog` 比对我们真正会调的那几个成员
   （`type`/`message`/`accept`/`dismiss`），对不上就是接缝又漂了。
 - **边界**：另两路后端保持"没有 dialog 事件源"这个形状。
+
+## 闭环格为什么要同时钉两态（不是"没装就 skip"）
+
+下面 `TestManagerReadFaceClosesTheLoop` 问的是"manager 那份 handler 有没有交到后端手上"。
+它的两态都由**运行时探测**（`browser_manager.HAS_PLAYWRIGHT`）分派，而不是由部署假设分派：
+
+- 装了 playwright ⇒ 后端必须在 `_backends` 里，且 `be._dialog_handler is mgr._dialog_handler`；
+- 没装 ⇒ `_backends` 里不许有 `playwright`（否则是"声明了却真不可用"的假象），
+  且 `_load_config` 交给后端的**必须是被记下来的那一份**——故 manager 记一笔
+  `_lastDialogHandler`（实例字段，读者就是下一格），这一格就钉它。
+
+为什么读者要读**实例字段**而不是模块属性：manager 是装着 `DialogHandler` 的那一侧，
+handler 本身也是实例字段（`_dialog_handler`）；把"交下去的那一份"记到模块级，
+等于让第二个实例的接线读数覆盖第一个（同一进程里 manager 会被构造很多次）。
+
+改前的两格没有任何探测：`assert backend is not None, "本机装了 playwright…"` 与
+`manager._backends["playwright"]`。CI 的薄依赖集（`requirements-ci.lock` 里没有 playwright）
+把这两句读成了"本机没装却断言装了"——红的不是闭环断了，是**判据绑在部署形态上**
+（`AGENTS.md` 修复教义第 2 条点名的"判据与运行环境捆绑"形态）。这条边界写在这里，
+是因为它决定了这一档能不能进受保护子集：子集跑在任何装了 lock 的机器上，与开发机装没装无关。
 """
 
 from __future__ import annotations
@@ -61,6 +81,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, List, Tuple
 
+import pytest
+
+from neurova.computer_use import browser_manager
 from neurova.computer_use.browser_manager import (
     BrowserManager,
     DialogHandler,
@@ -154,12 +177,27 @@ class TestDialogListenerIsRegistered:
 
 
 class TestManagerReadFaceClosesTheLoop:
-    """写侧闭环：`_dialog_handler` 不再只写不读，且后端拿的就是 manager 那一份。"""
+    """写侧闭环：`_dialog_handler` 不再只写不读，且后端拿的就是 manager 那一份。
+
+    两态都由 `HAS_PLAYWRIGHT` 分派：判据要钉的是**接线**，不是"这台机器装没装 playwright"
+    （CI 的薄依赖集没有 playwright，见本档 docstring 末节）。
+    """
 
     def testManagerSharesItsHandlerWithThePlaywrightBackend(self):
         manager = BrowserManager(config={})
         backend = manager._backends.get("playwright")
-        assert backend is not None, "本机装了 playwright，`_load_config` 却没建出后端——接面对象不存在"
+        if not browser_manager.HAS_PLAYWRIGHT:
+            assert backend is None, (
+                "没装 playwright 却注册了 `playwright` 后端——那是"
+                "`configured-unreachable` 被谎报成可用（T-07 三态里的第三态）"
+            )
+            wired = manager._lastDialogHandler
+            assert wired is manager._dialog_handler, (
+                "`_load_config` 没把 manager 那一份 handler 交下去 ⇒ 事件写进别的口袋，"
+                "`BrowserManager.dialogLog()` 永远为空"
+            )
+            return
+        assert backend is not None, "装了 playwright，`_load_config` 却没建出后端——接面对象不存在"
         assert getattr(backend, "_dialog_handler", None) is manager._dialog_handler, (
             "后端用的是**另一份** handler ⇒ 事件写进别的口袋，`BrowserManager.dialogLog()` 永远为空"
         )
@@ -168,7 +206,12 @@ class TestManagerReadFaceClosesTheLoop:
         manager = BrowserManager(config={})
         assert manager.dialogLog() == [], "读口起点不为空：别的实例的留档漏进来了"
 
-        backend = manager._backends["playwright"]
+        backend = manager._backends.get("playwright")
+        if backend is None:
+            # 没装 playwright（受保护子集的薄依赖集就是这种机器）：真后端不存在，
+            # 但 handler 是从 manager 交出去的那一份，用桩 context 走同一条应答链即可——
+            # 这一格要证的是"manager 侧读得到"，不是"真 Chromium 起得来"。
+            backend = PlaywrightBackend({}, dialog_handler=manager._lastDialogHandler)
         context = _StubContext()
         backend._attachDialogListener(context)
         _name, listener = context.subscriptions[0]
@@ -192,8 +235,6 @@ class TestTheSeamMatchesTheInstalledPlaywright:
     """不许照着想象写接缝：真正会调的那几个成员，得在**已安装的** Dialog 类上存在。"""
 
     def testEveryDialogMemberWeTouchExistsOnTheRealClass(self):
-        import pytest
-
         pytest.importorskip("playwright.async_api")
         from playwright.async_api import Dialog
 
