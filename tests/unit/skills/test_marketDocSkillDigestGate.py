@@ -183,7 +183,13 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for ref in ast_scan.sourceRefsUnder(package, hints=("_build_executable_skill",)):
+        # 枚举面与候选面分开量（形态 404）；枚举与读盘一律走 `tests/ast_scan` 的共享入口，
+        # 预筛词 `_build_executable_skill` 是本判据谓词的充分条件。
+        enumerated = len(ast_scan.sourceRefsUnder(package, ".py"))
+        assert enumerated >= 900, (
+            "枚举面现读 %d 个 .py（neurova/ 现算 1024）——package 指错时『都传了 pin』是假绿" % enumerated)
+        for ref in ast_scan.sourceRefsUnder(
+                package, ".py", hints=("_build_executable_skill",)):
             flags = self._builderCalls(ref.code)
             checked += len(flags)
             if any(flag is False for flag in flags):

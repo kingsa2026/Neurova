@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import sqlite3
 import threading
 import uuid
@@ -65,6 +66,17 @@ CREATE TABLE IF NOT EXISTS evaluation_findings (
 CREATE INDEX IF NOT EXISTS idx_eval_findings_run ON evaluation_findings(run_id);
 """
 register_migration(1, _SCHEMA, domain="knowledge_evaluation")
+
+# v2：NDCG@k、精排变体与增益。旧 run 的这些列为 NULL，不是 0——没测过就是没测过。
+_SCHEMA_V2 = """
+ALTER TABLE evaluation_runs ADD COLUMN ndcg_at_k REAL;
+ALTER TABLE evaluation_runs ADD COLUMN rerank_ndcg_at_k REAL;
+ALTER TABLE evaluation_runs ADD COLUMN rerank_gain REAL;
+ALTER TABLE evaluation_runs ADD COLUMN variant TEXT NOT NULL DEFAULT '';
+ALTER TABLE evaluation_findings ADD COLUMN ndcg_at_k REAL NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_findings ADD COLUMN rerank_ndcg_at_k REAL;
+"""
+register_migration(2, _SCHEMA_V2, domain="knowledge_evaluation")
 
 
 def _now() -> str:
@@ -267,28 +279,44 @@ class RetrievalBenchmark:
         topK: int = 5,
         note: str = "",
         searchFn: Optional[Any] = None,
+        domain: str = "",
+        rerank: Optional[Any] = None,
+        variant: str = "",
     ) -> Dict[str, Any]:
         started = _now()
         run_id = "evr_%s" % uuid.uuid4().hex[:12]
-        cases = self.cases()
+        cases = [
+            case for case in self.cases()
+            if not domain or str(case.get("domain") or "") == str(domain)
+        ]
         # 身份必须随读数落库：生产条目多为 private 且各有 owner，
         # 换一个 user 就是在测另一份语料，不记下来读数不可复现。
         context = {
             "user": user or {},
             "agent_id": agentId,
             "scope": "all",
+            "domain": domain,
+            "variant": variant,
+            "rerank": bool(rerank),
         }
 
         if not cases:
+            reason = (
+                "该域没有任何评测案例，读数无依据（不是检索差，是没测）" if domain
+                else "没有任何评测案例，读数无依据（不是检索差，是没测）"
+            )
             report = self._writeRun(
                 run_id, started, _now(), 0, topK, "unevidenced",
-                "没有任何评测案例，读数无依据（不是检索差，是没测）", None, note, context,
+                reason, None, note, context,
             )
+            report["variant"] = variant
             return report
 
         recalls: List[float] = []
         rrs: List[float] = []
         unhits: List[float] = []
+        ndcgs: List[float] = []
+        rerankNdcgs: List[float] = []
         with self._lock, self._conn:
             for case in cases:
                 expected = set(json.loads(case["expected_ids"] or "[]"))
@@ -301,26 +329,53 @@ class RetrievalBenchmark:
                         break
                 recall = (len(expected & set(hitIds)) / len(expected)) if expected else 0.0
                 unhit = 0.0 if rr > 0 else 1.0
+                ndcg = self._ndcg(hitIds, expected, topK)
+                rerankNdcg = None
+                if rerank is not None:
+                    reranked = rerank(case["query"], hits) or []
+                    rerankIds = [str(h.get("knowledge_id", "")) for h in reranked][:topK]
+                    rerankNdcg = self._ndcg(rerankIds, expected, topK)
+                    rerankNdcgs.append(rerankNdcg)
                 recalls.append(recall)
                 rrs.append(rr)
                 unhits.append(unhit)
+                ndcgs.append(ndcg)
                 self._conn.execute(
                     "INSERT INTO evaluation_findings (run_id, case_id, query, hit_ids,"
-                    " reciprocal_rank, recall_at_k, unhit) VALUES (?,?,?,?,?,?,?)",
+                    " reciprocal_rank, recall_at_k, unhit, ndcg_at_k, rerank_ndcg_at_k)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
                     (run_id, case["case_id"], case["query"],
-                     json.dumps(hitIds, ensure_ascii=False), rr, recall, int(unhit)),
+                     json.dumps(hitIds, ensure_ascii=False), rr, recall, int(unhit),
+                     ndcg, rerankNdcg),
                 )
 
-        return self._writeRun(
+        metrics = {
+            "recall_at_k": round(sum(recalls) / len(recalls), 6),
+            "mrr": round(sum(rrs) / len(rrs), 6),
+            "unhit_rate": round(sum(unhits) / len(unhits), 6),
+            "ndcg_at_k": round(sum(ndcgs) / len(ndcgs), 6),
+        }
+        if rerankNdcgs:
+            metrics["rerank_ndcg_at_k"] = round(sum(rerankNdcgs) / len(rerankNdcgs), 6)
+            metrics["rerank_gain"] = round(
+                metrics["rerank_ndcg_at_k"] - metrics["ndcg_at_k"], 6
+            )
+        report = self._writeRun(
             run_id, started, _now(), len(cases), topK, "measured", "",
-            {
-                "recall_at_k": round(sum(recalls) / len(recalls), 6),
-                "mrr": round(sum(rrs) / len(rrs), 6),
-                "unhit_rate": round(sum(unhits) / len(unhits), 6),
-            },
-            note,
-            context,
+            metrics, note, context,
         )
+        report["variant"] = variant
+        return report
+
+    @staticmethod
+    def _ndcg(hitIds: List[str], expected: set, k: int) -> float:
+        """二值相关度 NDCG@k；没有期望集合时返回 0（无依据不猜）。"""
+        if not expected:
+            return 0.0
+        gains = [1.0 if hid in expected else 0.0 for hid in hitIds[:k]]
+        dcg = sum(gain / math.log2(index + 2) for index, gain in enumerate(gains))
+        ideal = sum(1.0 / math.log2(index + 2) for index in range(min(len(expected), k)))
+        return dcg / ideal if ideal else 0.0
 
     def _writeRun(
         self, runId: str, started: str, finished: str, caseCount: int, topK: int,
@@ -333,10 +388,14 @@ class RetrievalBenchmark:
             self._conn.execute(
                 "INSERT INTO evaluation_runs (run_id, started_at, finished_at, case_count,"
                 " top_k, measure_state, missing_reason, context_json, recall_at_k, mrr,"
-                " unhit_rate, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " unhit_rate, ndcg_at_k, rerank_ndcg_at_k, rerank_gain, variant, note)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (runId, started, finished, caseCount, topK, measureState, missingReason,
                  contextJson,
-                 metrics.get("recall_at_k"), metrics.get("mrr"), metrics.get("unhit_rate"), note),
+                 metrics.get("recall_at_k"), metrics.get("mrr"), metrics.get("unhit_rate"),
+                 metrics.get("ndcg_at_k"), metrics.get("rerank_ndcg_at_k"),
+                 metrics.get("rerank_gain"), str(context.get("variant") or "") if context else "",
+                 note),
             )
         return {
             "run_id": runId,
@@ -348,6 +407,10 @@ class RetrievalBenchmark:
             "recall_at_k": metrics.get("recall_at_k"),
             "mrr": metrics.get("mrr"),
             "unhit_rate": metrics.get("unhit_rate"),
+            "ndcg_at_k": metrics.get("ndcg_at_k"),
+            "rerank_ndcg_at_k": metrics.get("rerank_ndcg_at_k"),
+            "rerank_gain": metrics.get("rerank_gain"),
+            "variant": (context or {}).get("variant", ""),
             "started_at": started,
         }
 
@@ -383,6 +446,78 @@ class RetrievalBenchmark:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM evaluation_runs").fetchone()[0])
 
+    def runById(self, runId: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM evaluation_runs WHERE run_id = ?", (runId,)
+            ).fetchone()
+        if row is None:
+            return None
+        run = dict(row)
+        run["context"] = json.loads(run.get("context_json") or "{}")
+        run["by_domain"] = self.byDomain(runId)
+        return run
+
+    def compareVariants(
+        self, runA: Dict[str, Any], runB: Dict[str, Any], minCases: int = 30,
+        tolerance: float = 0.01,
+    ) -> Dict[str, Any]:
+        """两个变体 run 的离线 A/B 对照：样本不足先报不足，不按均值判胜负。
+
+        runA=control、runB=treatment；只看 recall@k / MRR / NDCG / 未命中率。
+        """
+        countA = int(runA.get("case_count") or 0)
+        countB = int(runB.get("case_count") or 0)
+        if min(countA, countB) < max(1, int(minCases)):
+            return {
+                "verdict": "insufficient_sample",
+                "min_cases": int(minCases),
+                "case_count_a": countA,
+                "case_count_b": countB,
+            }
+        deltas: Dict[str, float] = {}
+        for key in ("recall_at_k", "mrr", "ndcg_at_k", "unhit_rate"):
+            if runA.get(key) is None or runB.get(key) is None:
+                continue
+            deltas[key] = round(float(runB[key]) - float(runA[key]), 6)
+        improved = deltas.get("recall_at_k", 0.0) > tolerance or (
+            deltas.get("ndcg_at_k", 0.0) > tolerance
+            and deltas.get("unhit_rate", 0.0) <= 0.0
+        )
+        regressed = deltas.get("recall_at_k", 0.0) < -tolerance or (
+            deltas.get("ndcg_at_k", 0.0) < -tolerance
+        )
+        verdict = "improved" if improved else ("regressed" if regressed else "inconclusive")
+        return {
+            "verdict": verdict,
+            "min_cases": int(minCases),
+            "tolerance": float(tolerance),
+            "case_count_a": countA,
+            "case_count_b": countB,
+            "variant_a": runA.get("variant", ""),
+            "variant_b": runB.get("variant", ""),
+            "deltas": deltas,
+        }
+
+    def gateNoRegression(
+        self, runA: Dict[str, Any], runB: Dict[str, Any], minCases: int = 30,
+        tolerance: float = 0.01,
+    ) -> Dict[str, Any]:
+        """CI 回归门：样本不足或判定 regressed 直接失败，不放行。
+
+        `inconclusive` 不算失败（没有证据变差），但会原样返回供人工看。
+        """
+        verdict = self.compareVariants(runA, runB, minCases=minCases,
+                                       tolerance=tolerance)
+        if verdict["verdict"] == "insufficient_sample":
+            raise AssertionError(
+                "评测样本不足（%d/%d < %d），不能放行"
+                % (verdict["case_count_a"], verdict["case_count_b"], minCases)
+            )
+        if verdict["verdict"] == "regressed":
+            raise AssertionError("检索变体回归: %s" % verdict.get("deltas", {}))
+        return verdict
+
     def compareAgainstBaseline(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """把这次 run 与已冻结基线逐案对账——台架此前只有"冻"与"看"，没有"退步了没有"。
 
@@ -413,6 +548,10 @@ class RetrievalBenchmark:
             key: round(float(report.get(key) or 0.0) - float(baseline.get(key) or 0.0), 6)
             for key in ("recall_at_k", "mrr", "unhit_rate")
         }
+        if report.get("ndcg_at_k") is not None and baseline.get("ndcg_at_k") is not None:
+            deltas["ndcg_at_k"] = round(
+                float(report["ndcg_at_k"]) - float(baseline["ndcg_at_k"]), 6
+            )
         verdict = "regress" if (newlyUnhit or missingCases) else "pass"
         return {
             "verdict": verdict,
@@ -425,6 +564,34 @@ class RetrievalBenchmark:
             "recovered_cases": recovered,
             "missing_cases": missingCases,
         }
+
+    def byDomain(self, runId: str) -> List[Dict[str, Any]]:
+        """按案例 domain 切片读数；没有 domain 的案例单独归到空串组。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT c.domain AS domain, COUNT(*) AS case_count,"
+                " AVG(f.recall_at_k) AS recall_at_k, AVG(f.reciprocal_rank) AS mrr,"
+                " AVG(f.unhit) AS unhit_rate, AVG(f.ndcg_at_k) AS ndcg_at_k,"
+                " AVG(f.rerank_ndcg_at_k) AS rerank_ndcg_at_k"
+                " FROM evaluation_findings f JOIN evaluation_cases c ON c.case_id = f.case_id"
+                " WHERE f.run_id = ? GROUP BY c.domain ORDER BY c.domain",
+                (runId,),
+            ).fetchall()
+        return [
+            {
+                "domain": row["domain"],
+                "case_count": int(row["case_count"]),
+                "recall_at_k": round(float(row["recall_at_k"] or 0.0), 6),
+                "mrr": round(float(row["mrr"] or 0.0), 6),
+                "unhit_rate": round(float(row["unhit_rate"] or 0.0), 6),
+                "ndcg_at_k": round(float(row["ndcg_at_k"] or 0.0), 6),
+                "rerank_ndcg_at_k": (
+                    round(float(row["rerank_ndcg_at_k"]), 6)
+                    if row["rerank_ndcg_at_k"] is not None else None
+                ),
+            }
+            for row in rows
+        ]
 
     def findings(self, runId: str) -> List[Dict[str, Any]]:
         with self._lock:

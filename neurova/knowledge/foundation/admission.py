@@ -90,6 +90,8 @@ class AdmissionRequest:
     content: str = ""
     recordKind: str = "triple"
     relationKind: str = "literal"
+    # 租户分区键：缺省 default（存量调用方语义不变；新调用方按请求身份传入）
+    tenantId: str = "default"
     qualifier: Dict[str, Any] = field(default_factory=dict)
     sourceTurnId: str = ""
     aliases: List[str] = field(default_factory=list)
@@ -361,6 +363,7 @@ class KnowledgeAdmissionGate:
             # 时效窗口是调用方声明的，咽喉原样落到两列上——收了不落库等于断点
             validFrom=request.validFrom,
             validUntil=request.validUntil,
+            tenantId=request.tenantId,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         activityId = ""
@@ -431,7 +434,7 @@ class KnowledgeAdmissionGate:
         judge = self._collaborators.get("conflict_judgement")
         if judge is None:
             return []
-        judge.record(request.subjectLabel, request.predicateTermId)
+        judge.record(request.subjectLabel, request.predicateTermId, request.tenantId)
         return ["conflict_judgement"]
 
     def _attachLineage(self, lineage, factId: str, request: AdmissionRequest,
@@ -459,12 +462,14 @@ class KnowledgeAdmissionGate:
             kind,
             inputs={
                 "agent_id": request.agentId,
+                "tenant_id": request.tenantId,
                 "subject_label": request.subjectLabel,
                 "predicate_term_id": request.predicateTermId,
                 "object_term": request.objectTerm,
                 "source_turn_id": request.sourceTurnId,
             },
             basis=basis,
+            tenantId=request.tenantId,
         )
         lineage.attach(factId, request.assertions, activityId=activityId)
         lineage.closeActivity(activityId, outputs={"fact_id": factId, "content_deduped": deduped})
@@ -484,14 +489,16 @@ class KnowledgeAdmissionGate:
         if resolver is None:
             return (self._store.upsertSubject(
                 request.agentId, request.subjectLabel, aliases=request.aliases,
+                tenantId=request.tenantId,
             ), False, ["identity_resolution(base exact/alias)"])
         outcome = resolver.resolve(
             request.subjectLabel,
-            self._store.listSubjects(request.agentId),
+            self._store.listSubjects(request.agentId, tenantId=request.tenantId),
             aliases=request.aliases,
         )
         subjectKey = outcome.subjectKey or self._store.upsertSubject(
             request.agentId, request.subjectLabel, aliases=request.aliases,
+            tenantId=request.tenantId,
         )
         return (subjectKey, outcome.needsHumanReview, ["identity_resolution"])
 

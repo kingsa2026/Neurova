@@ -565,13 +565,44 @@ class BrowserBackend(ABC):
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, dialog_handler=None):
         super().__init__(config)
         self._browser = None
         self._context = None
         self._tabs: Dict[str, Dict[str, Any]] = {}
         self._active_target_id: Optional[str] = None
         self._headless = config.get("headless", True) if config else True
+        # JS 对话框的应答与留档都交给 manager 那一份 `DialogHandler`（不是自己新建一份，
+        # 否则事件写进第二个口袋，`BrowserManager.dialogLog()` 永远读不到）。
+        # 只有本后端拿得到这个事件：`ScraplingBackend` 走 fetcher 没有实时页面，
+        # camofox／remote 是 REST／action RPC 面，词汇里没有 dialog。
+        self._dialog_handler = dialog_handler
+
+    def _attachDialogListener(self, target) -> None:
+        """把对话框应答挂到 context（或 page）的 `dialog` 事件上。
+
+        没有这一步，页面弹 `alert/confirm/prompt` 时 Playwright 默认**自动忽略**——
+        `DialogHandler` 被实例化后一次也不会被叫到，那正是 §6-404 档案里"只写不读"的
+        那只手（`_dialog_handler:1596` 全仓零读者）。
+        挂在 context 级而不是 page 级：一处注册覆盖该 context 内全部页面，含 `open_target()`
+        新开的 tab；page 级注册要跟着 tab 生命周期到处补。
+
+        失败必须出声：asyncio 派发里的异常会化成 "Task exception was never retrieved"，
+        等于把"对话框没答上"改写成看不见（教义第 2 条），所以这里就地记一条点名原因的 warning。
+        """
+        handler = self._dialog_handler
+        if handler is None:
+            return
+
+        async def _answerDialog(dialog) -> None:
+            try:
+                await handler.handle_dialog(dialog)
+            except Exception as e:  # noqa: BLE001 - 旁路应答失败不得打断页面主链，但必须留痕
+                logger.warning(
+                    "对话框应答失败(type=%s): %s", getattr(dialog, "type", "unknown"), e
+                )
+
+        target.on("dialog", _answerDialog)
 
     @property
     def capabilities(self) -> Dict[str, bool]:
@@ -928,6 +959,8 @@ class PlaywrightBackend(BrowserBackend):
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=self._headless)
             self._context = await self._browser.new_context()
+            # 对话框应答链的事件侧：context 一建好就注册，覆盖此后该 context 内所有页面。
+            self._attachDialogListener(self._context)
             page = await self._context.new_page()
             self._register_tab(page)
             self._initialized = True
@@ -1627,11 +1660,26 @@ class BrowserManager:
         """配置文件读不通时的具名原因（正常加载则 None）。"""
         return getattr(self, "_configLoadError", None)
 
+    def dialogLog(self) -> List[Dict[str, Any]]:
+        """已应答过的 JS 对话框留档（快照，不是内部列表）。
+
+        这一只是 `_dialog_handler` 的**读路**：改前它被实例化后全仓零读者（§6-404 档案 M1
+        记的那条"只写不读"断点），事件侧也没人注册监听，于是"对话框自动应答"这项能力
+        在实装里存在、在运行时从不发生。现在 `PlaywrightBackend` 在 `initialize()` 建
+        context 时注册监听、`DialogHandler` 应答并留档、这里读回——写→读→反馈成环。
+        调用方（工具面／UI）目前还没消费它：那是另一拍的产品决定，不在本批顺手加面。
+        """
+        return self._dialog_handler.get_dialogs()
+
     def _load_config(self) -> None:
         """加载配置"""
         # 自动检测可用后端
         if HAS_PLAYWRIGHT:
-            self._backends["playwright"] = PlaywrightBackend(self._config)
+            # 把 manager 那份 handler 交下去——事件源只有 playwright 一路（见
+            # `PlaywrightBackend._attachDialogListener`），另两路拿不到 dialog 事件。
+            self._backends["playwright"] = PlaywrightBackend(
+                self._config, dialog_handler=self._dialog_handler
+            )
         if HAS_SCRAPLING:
             self._backends["scrapling"] = ScraplingBackend(self._config)
         # camofox-browser 反检测后端:三层隔离——按 userId 池化,延迟到首次 get 时创建。

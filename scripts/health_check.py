@@ -370,6 +370,15 @@ _PROBE_SCRIPT = (
 # 多处调用 check_all_services/print_dependencies_status 只付一次全量 import 成本）
 _deps_cache = {}
 
+#: 依赖探测子进程的等待预算（秒）——**这条预算的唯一出处**。
+#:
+#: 为什么要有名字：六个依赖里 `sentence_transformers` 会连带 import torch，冷盘＋满载时
+#: 整轮探测实测可超过 30s（2026-10-24 整场 `pytest tests/unit` 就死在这条上：
+#: 跑测的全局墙是 30s，Windows 侧 pytest-timeout 走 thread 法，超时即终止整个进程 ⇒
+#: 一格超墙＝整场没汇总）。调用方（测试）要给自己声明父墙时，必须从这里取数再往上加，
+#: 而不是抄一个字面量——两处数字一漂移，先到点的就是错的那一层。
+PROBE_TIMEOUT_SECONDS = 120
+
 
 def _probe_python() -> str:
     """依赖探测应跑在哪个解释器：venv 优先，缺失时回退当前解释器。
@@ -407,7 +416,7 @@ def check_dependencies() -> dict:
         # 不拼源码、不走 shell：依赖名作为 argv 传入，无注入面
         proc = subprocess.run(
             argv, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=120,
+            encoding="utf-8", errors="replace", timeout=PROBE_TIMEOUT_SECONDS,
         )
     except Exception:
         # 解释器缺失/超时/子进程起不来 → 全部记不可用，仍不抛出

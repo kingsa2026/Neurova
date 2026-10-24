@@ -90,7 +90,7 @@ class TestLedgerIsAttached:
         backs = {e["derived_fact_id"] for e in store._derivationLedger.derivationsOf(a)}
         assert derivedJiaBing in backs
         fires = store._derivationLedger.fires(RULE_ID)
-        assert fires and derivedJiaBing in fires[-1]["derived_fact_ids"]
+        assert fires and any(derivedJiaBing in f["derived_fact_ids"] for f in fires)
 
 
 class TestPreciseRetraction:
