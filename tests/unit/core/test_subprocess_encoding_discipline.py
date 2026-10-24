@@ -60,10 +60,21 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 # 再往下调时请在提交说明里点名修掉了哪些落点。
 _BASELINE_MAX_SITES = 73
 
+# 剪枝按**名字**，不按写死的目录名——「本仓只有 `.venv` 一个虚拟环境目录」从来不是事实：
+# 开发机与应用镜像上是 `.venv/`，本仓自己的 CI 跑在 `python:3.12` 镜像里直接进 system
+# site-packages，而我复算这次超时时用的是 `.venv-ci/`。写死名单的后果是**判据的成本取决于
+# 跑它的人怎么建环境**：带 `.venv-ci` 的树上扫描面 11399 个文件里 7060 个是第三方包
+# （38MB / 54MB 的候选文本），同一函数 13s vs 无虚拟环境时的 3s。
+_PRUNE_DIRS = {
+    ".git", ".hg", ".svn", "__pycache__", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache", ".tox", "node_modules", "build", "dist", "htmlcov", "coverage",
+    "site-packages", "dist-packages",
+}
+# 虚拟环境的特征是目录里有 `pyvenv.cfg`（建环境时由解释器写入），按这个判而不是按目录名：
+# 改名、加后缀、同时装几个（`.venv-ci` / `.venv-test`）都不再漏判。
+_VENV_MARKER = "pyvenv.cfg"
 _SKIP_PREFIX = (".venv/", "NeurUI/node_modules/", "build/", "dist/")
 _SKIP_PARTS = ("/__pycache__/", "src-tauri", "/target/")
-# 遍历必须剪枝：整仓 rglob 会把 node_modules / .git 全走一遍，本判据在 30s 门禁下直接超时
-_PRUNE_DIRS = {".git", ".venv", "node_modules", "__pycache__", "target", "build", "dist", ".mypy_cache", ".pytest_cache"}
 _CHILD_CALLS = {"run", "check_output", "Popen", "communicate"}
 
 
@@ -71,7 +82,10 @@ def pythonFiles(root: pathlib.Path) -> list:
     """root 下的待判 py 文件（自顶向下遍历，命中剪枝目录就不再进去）。"""
     out = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _PRUNE_DIRS and not (pathlib.Path(dirpath) / d / _VENV_MARKER).exists()
+        ]
         for fn in filenames:
             if fn.endswith(".py"):
                 out.append(pathlib.Path(dirpath) / fn)
@@ -83,6 +97,17 @@ def sitesWithoutEncoding(root: pathlib.Path) -> list:
 
     按 AST 判而非子串：注释与 docstring 里提到 `text=True` 不算落点
     （本轮在别处就栽过子串扫描的误判）。
+
+    **文本预筛先于解析**：谓词是「一次 `run/check_output/Popen/communicate` 调用
+    既带 `text`/`universal_newlines` 又缺 `encoding`/`errors`」，连这几个关键字
+    都不出现的文件不可能命中，于是不必为它建语法树。这不是放宽判据——判据仍是
+    全量 AST（预筛只是充分条件），但成本从**代码总量**变成**候选面**：本机实测
+    全仓 11399 个 `.py` 里含任一候选关键字的只有 3032 个，解析 15.3s → 4.0s。
+
+    为什么必须卡在这一层（构建 `cnb-mn9-1k5n4fcl5-003` 实测）：单域
+    `sitesWithoutEncoding(PROJECT_ROOT)` 本机 **21–58s**（同一函数三次复算
+    22.0/22.0/22.5s），30s 逐用例墙钟下随机红；CI 首跑 23.9s「差点超」，代码一涨
+    就必红。这与本文件开头点名 T-15 的形态同源：判据把代码总量编码成了时间上界。
     """
     hits = []
     for path in pythonFiles(root):
@@ -90,6 +115,12 @@ def sitesWithoutEncoding(root: pathlib.Path) -> list:
         if rel.startswith(_SKIP_PREFIX) or any(part in rel for part in _SKIP_PARTS):
             continue
         if rel == _selfPath():
+            continue
+        try:
+            code = ast_scan.sourceCode(path)
+        except OSError:
+            continue
+        if not any(hint in code for hint in _CHILD_CALLS):
             continue
         try:
             # 一次性解析入口（同仓共享源）：本判据只扫一遍，不留常驻语法树。

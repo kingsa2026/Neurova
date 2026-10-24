@@ -161,8 +161,10 @@ class TestPhantomKnobSweep:
           （自己 `read_text` 的话，缓存计数一动不动，只看第一条就漏放行）。
         """
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        # 面自证：语料量级先立住，下面两条"命中涨满语料"才有对象可比。根被改窄时 corpus 会
+        # 跟着变小，两条旧断言反而更容易通过——那正是"零缺陷"的假绿。
         assert corpus >= 800, (
-            "生产语料现读 %d 个 .py——PROD_ROOT 指错时『没多读盘』会假绿（面自证）" % corpus)
+            f"语料现读 {corpus} 个 .py（根＝{PROD_ROOT}）——量级不对＝根指错，缓存判据失去对象")
         cache = ast_scan._cachedCode
         if not hasattr(cache, "cache_info"):
             pytest.fail("ast_scan._cachedCode 不再是带 cache_info 的缓存入口——"
