@@ -3456,7 +3456,7 @@ tests/unit/api/test_mcpServerFaceIsIdentityBoundary.py
 # ⑤ GET 必须 405——实测换面后它会开一条不结束的流，这条是挂起面的闸；
 # ⑥⑦⑧ 协商回声、清单与调用等于核心那份（stub 取样，钉的是来源不是条数）。
 # 面读数来源：本档只解析自己那一个受治模块（不枚举目录），HTTP 侧走真挂载入口＋真令牌。
-tests/unit/api/testMcpFaceRidesSdkTransport.py
+tests/unit/api/test_mcpFaceRidesSdkTransport.py
 # 批 110（§6-350）：MCP 面的**技能腿**必须走 ToolExecutor 那道咽喉，判据落在这个核心档里。
 # 三格：① 咽喉读到的分派逐字段等于请求（技能名与参数不许被面改写）；② 无 agent 时 fail-closed，
 # **不许回退成直调 `skill.execute`**——可见门/权限作用域/沙箱根/漏斗记账都补不回来，宁可拒；
@@ -3470,7 +3470,7 @@ tests/unit/workflow/test_mcp_server_face.py
 # Authorization，§3 身份单通道）；一条按 AST 认"判定确实委托 `agent_access`、本模块没自己读
 # owner_user_id"的形状格——按词扫会被 docstring 里的同名说明骗到（形态集 241/268 那一族）。
 # 本档不枚举目录：形状格只解析自己受治的那一个模块（不触发解析预算门禁）。
-tests/unit/api/testMcpFaceCallerTier.py
+tests/unit/api/test_mcpFaceCallerTier.py
 # 宽域 A/B 驱动的读数契约（§6-359）：汇总行两种形态都要读得到、抽取条数必须与汇总报数对账、
 # 没产出汇总行即 AB_FAIL、仅本树红那格在基线树跑不出亦 AB_FAIL、非本仓形态显式 AB_SKIP。
 # 四格合成仓走真 git worktree＋真 pytest 子进程（AB_PASS/AB_REGRESSION/AB_FAIL/AB_SKIP 各一枚），
@@ -3850,18 +3850,19 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
-# 静态门禁的"未定义名称"判据只许报**真·未定义**，不许把注解专用名算成缺陷。
+# 静态门禁的「未定义名称」判据只许报**真·未定义**，不许把注解专用名算成缺陷。
 # 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
 # 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
-# 判据曾埋在 subprocess 输出里数字符串，于是"判的是语义还是行格式"没人能反证；
-# 现在收成可调用口 `scripts.ci_static_gate.undefinedNamesIn`，本档按三层钉它：
-# 注解专用名不报、真拼错名照旧报（拼错的注解名与幻影变量各一格）、门禁入口仍走这唯一判据口。
+# 判据过去埋在 subprocess 输出里数字符串，没人能反证它判的是语义还是行格式；
+# 现收成可调用口 `scripts.ci_static_gate.collectUndefinedNames`，判形两问都要过：
+# 名字只出现在注解位置、且本文件以某种方式导入过它。真拼错的形参照旧红，
+# `test_sandboxFileBlockNamesThePath.py` 那侧的幻影变量同样照旧红。
 tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
-# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方。改前 `verdict.to_dict()` 的键里
-# 一格路径都没有，"被拦的是哪条路径"在结果面就丢了；`tool_executor` 的文件保护支路
-# 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
-# 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
-# `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+tests/unit/security/test_sandboxFileBlockNamesThePath.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方：`verdict.to_dict()` 过去一格路径都没有，
+# 拒绝语只能报半句散文；`tool_executor` 的文件保护支路因此去读一个作用域里从未绑定的
+# 名字打日志——静态门禁报未定义名，运行时被外层吞成 warning，「拦了哪条路径」整个消失。
+# 本档钉三层：结果面带出路径值且 `to_dict()` 一并带出、与取数口同源、消费侧真日志点到路径。
 tests/unit/security/test_governancePathValuesReachCallers.py
 # §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
 # 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，

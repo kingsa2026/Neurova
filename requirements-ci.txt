@@ -19,6 +19,8 @@ pydantic>=2.5.0
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
+# 下界 3.14.5：3.14.3 那一版在 2026-10 公告批里有 8 条（请求走私 GHSA-pqxq-w44r-73xw、
+# 分片请求耗尽 fd、cookie Secure 属性未强制等），修复版自 3.14.4 起。
 aiohttp>=3.14.5
 
 # Database
@@ -94,10 +96,15 @@ prometheus_client>=0.20
 # 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
+# 下界 6.21.2：6.19.0 在 2026-10 公告批里有 11 条，修复版散落 6.21.1/6.21.2，
+# 取能覆盖全部的 6.21.2；与 requirements.txt 同一口径。
 pypdf>=6.21.2
-# 同一根因的第三件：Pillow 在 CI 清单里没有声明行，只是 reportlab 的传递依赖，
-# 于是重编锁时下界由父包给（`pillow>=9.0.0`）——公告的修复版全部只落在 13.0.0，
-# 旧下界永远合规、锁永远漂回 12.x。此处显式顶层声明，与生产清单同一口径。
+# Pillow 此前只以 reportlab 的传递依赖身份进入本锁（`# via reportlab`），下界因此在
+# 传递解析里漂到 12.3.0——而 12.x 线全版（含 12.3.0）都在 2026-10 那批公告里（39 条，
+# libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v 等），修复版只出现在 13.0.0。
+# 故由传递依赖改为**顶层声明**并钉同一修复下界：与 requirements.txt 的
+# `Pillow>=13.0.0` 同源（生产镜像按 Python 3.12 装，cp312 轮子齐备），
+# 让 CI 与生产跑同一个 Pillow 主版本，也让"锁里停在哪一版"有可追的声明面。
 Pillow>=13.0.0
 
 # CLI 呈现层（`cli.py` 模块级 `from rich import box`）——受保护子集里

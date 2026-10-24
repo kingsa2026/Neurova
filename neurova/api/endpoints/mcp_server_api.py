@@ -6,7 +6,7 @@
 JSON-RPC 分派链（四方法 if/elif、自造信封、`include_router` 登记）随本批退役——
 同一功能在仓内只留一处实现（教义第 7 条）。
 
-保留的对外承诺（§6-302，由 `tests/unit/api/testMcpFaceRidesSdkTransport.py` 逐条钉住）：
+保留的对外承诺（§6-302，由 `tests/unit/api/test_mcpFaceRidesSdkTransport.py` 逐条钉住）：
 协议版本协商回声/反提案、`ping` 必答、坏 Accept → 406、通知 → 202、未知方法 → -32601。
 两条**改过**的语义按 §6-340 裁定执行：`initialize` 的 params 三件齐（缺则 -32602），
 非信封体走 HTTP 400 但 JSON-RPC 码收成正码 -32600。
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import typing
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from mcp.server.lowlevel import Server
@@ -35,6 +36,9 @@ from starlette.types import Message, Receive, Scope, Send
 from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
+
+if TYPE_CHECKING:  # 仅类型检查期绑定：运行期入口仍在 `_callerPrincipal` 函数体内（断循环导入，AGENTS.md §3）
+    from neurova.tool_layers.mcp_server import McpCaller
 
 logger = get_logger(__name__)
 

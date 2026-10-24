@@ -15,6 +15,7 @@
 | `_agent_probe.py` | 拉起后端(9527)并探测 agents 路由 | `python scripts/diagnostics/_agent_probe.py` | 启动临时 uvicorn 线程 |
 | `_trace_stack.py` | 最小 Agent 初始化 + 一次 chat，用于堆栈定位 | `python scripts/diagnostics/_trace_stack.py` | 创建 `./_smoke_workspace` |
 | `_run_backend.py` | 仅启动本地后端(9527)，供手工调试单独拉起服务 | `python scripts/diagnostics/_run_backend.py` | 占用 9527 端口 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能／插件谁没钉、钉了不符、锚缺，四态逐条列出；不写一个字节 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读数据根与 `~/.neurova/artifact_anchors.json` |
 | `_tool_experience_loop_probe.py` | 工具↔经验↔再调用环路只读取证：一轮之后输出三读数 + 票据 `lookup`/`ticket_reason` 的 JSON（不触网，库落临时目录） | `python scripts/diagnostics/_tool_experience_loop_probe.py [--json] [--workspace DIR]` | 在临时目录建 EKB 库与 agent 工作区 |
 
 ### 数据迁移 / 复算（one-off + 可重复读数）
