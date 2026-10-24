@@ -163,6 +163,26 @@ def _isolate_execution_engine_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_turn_cancel_token():
+    """每个用例换一只**未置位**的取消令牌（轮级 ContextVar 的跑测隔离）。
+
+    令牌按轮持有（`core/turn_context.reset_turn_tool_messages` 轮首换新对象），
+    而 pytest 进程里没有"轮到点了"这件事：任何一档在进程内调过 `token.cancel()`
+    （取消语义的用例都是这么演的），令牌就留在 ContextVar 上。下一条**真的去起进程**
+    的用例于是撞上 `CancelToken.onCancel` 的"已置位则立即兑现"分支——本轮第一个
+    子进程当场被 SIGKILL，报出来是 `ExecutionResult(success=False, exit_code=-9)`
+    或一个空 build，读的人只会去查那个工具，查不到"是上一条用例的取消漏过来了"。
+
+    这里只做一件事：置 None（＝本轮没有令牌），不是替用例造一个"看起来正常"的令牌——
+    没有令牌正是生产上非轮内执行的常态，`registerKillAction` 对它返回 False。
+    """
+    from neurova.core import cancel_token
+
+    cancel_token.setTurnCancelToken(None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_skill_service_storage(tmp_path, monkeypatch):
     """Keep default skill-library writes out of user data during regressions.
 
