@@ -166,12 +166,16 @@ def recallCorpus(tmp_path):
     from neurova.embedding import get_embedding_engine
 
     engine = get_embedding_engine()
-    assert engine is not None, (
-        "本地 ONNX 嵌入档不可用：本判据测的是生产同款稠密+词法双路检索，"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
-        "该前提与 test_onnx_lazy_init_deadlock.py 直接构造 ONNXEmbeddingEngine 一致，"
-        "不以 skip 蒙过（skip 会让判据退化成第二条 longmeval_simple.py）。"
-    )
+    if engine is None:
+        # 本判据测的是稠密+词法双路，缺稠密后端时**这条链路根本组不起来**：与
+        # `test_longTermMemoryBaselineGate` 同一条前提。前提不成立就当 skip 并点名缺什么——
+        # 写成 assert 只会让 CI 薄环境里读起来像"联想召回退化了"，把人支去改一个没坏的模块
+        # （教义第 2 条要的是诚实形态，不是把「没装」画成「坏了」）。
+        pytest.skip(
+            "本地 ONNX 嵌入档不可用：本判据测的是生产同款稠密+词法双路检索，"
+            "缺 numpy 或 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
+            "补件：`pip install -r requirements-full.lock`（含 numpy/onnxruntime）"
+        )
 
     manager = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"),
