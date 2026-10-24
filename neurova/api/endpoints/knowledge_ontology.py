@@ -37,6 +37,25 @@ def _schemaVersion() -> int:
     return latest_version(NARRATIVE_DOMAIN)
 
 
+def ontologySchemaData() -> Dict[str, Any]:
+    """本体类型系统的读面数据（schema 端点与图谱 studio 共用的单一出处）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+    store = get_knowledge_fact_store()
+    registry = OntologyTermRegistry(store)
+    engine = ForwardChainingEngine(store)
+    return {
+        "terms": _termsView(registry),
+        "rules": engine.rules(),
+        "schema_version": _schemaVersion(),
+        # 租户级本体是已拍板、尚未落地的迁移（term_id 目前全表唯一，加一列
+        # tenant 并不能让两个租户各用同一个 id）。如实报出，不由前端过滤冒充隔离。
+        "tenant_scoped": False,
+    }
+
+
 def _termsView(registry: Any) -> List[Dict[str, Any]]:
     terms: List[Dict[str, Any]] = []
     for term in registry.terms():
@@ -55,25 +74,10 @@ async def get_ontology_schema(
     """读取本体类型系统（术语 + 规则 + 版本）。只读；无写入口。"""
 
     # 与生产装配同款：类型判据的权威是注册表，拿不到就没有"这个类型合法吗"可答。
-    from neurova.knowledge.foundation import get_knowledge_fact_store
-    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
-    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
-
-    store = get_knowledge_fact_store()
-    registry = OntologyTermRegistry(store)
-    engine = ForwardChainingEngine(store)
-
     return {
         "code": 0,
         "message": "success",
-        "data": {
-            "terms": _termsView(registry),
-            "rules": engine.rules(),
-            "schema_version": _schemaVersion(),
-            # 租户级本体是已拍板、尚未落地的迁移（term_id 目前全表唯一，加一列
-            # tenant 并不能让两个租户各用同一个 id）。如实报出，不由前端过滤冒充隔离。
-            "tenant_scoped": False,
-        },
+        "data": ontologySchemaData(),
     }
 
 
@@ -348,3 +352,106 @@ async def get_ontology_impact(
         raise HTTPException(status_code=404, detail="术语未登记: %s" % termId)
     impact = _fullImpact(registry, ForwardChainingEngine(store), termId)
     return {"code": 0, "message": "success", "data": impact}
+
+
+# ── S3 实例编辑写面 ──────────────────────────────────────────
+
+
+class InstanceWriteRequest(BaseModel):
+    agent_id: str
+    subject_label: str
+    predicate_term_id: str
+    object_term: str
+    content: str = ""
+    entry_id: str = ""
+    evidence_text: str = ""
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    basis: str = ""
+
+
+@router.post("/graph/instances")
+async def create_graph_instance(
+    body: InstanceWriteRequest, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """2D 新建实例关系（S3）：经唯一咽喉落底座事实，返回 fact_id/activity_id。
+
+    工作台不自己写图、更不写 JSON 投影——投影由事实派生，直接改会被 rebuild
+    静默覆盖。逐字可核闸照常生效：断言里的精确标识符必须在声明依据里逐字存在。
+    """
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.admission import (
+        AdmissionError,
+        AdmissionRequest,
+        productionAdmissionGate,
+    )
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+    agentId = str(body.agent_id or "").strip()
+    subject = str(body.subject_label or "").strip()
+    objTerm = str(body.object_term or "").strip()
+    predicate = str(body.predicate_term_id or "").strip()
+    if not agentId:
+        raise HTTPException(status_code=400, detail="agent_id 不能为空")
+    if not subject or not objTerm:
+        raise HTTPException(status_code=400, detail="主体与客体都不能为空")
+    # 底座对管线的未登记谓词"免检"（validation 的 unregistered 不是 violation），
+    # 那是抽取宽容；人工治理面没有这个宽容——类型系统外的边进底座就是
+    # 读不出来源的无义事实，先登记谓词再建边。
+    store = get_knowledge_fact_store()
+    if not OntologyTermRegistry(store).term(predicate):
+        raise HTTPException(
+            status_code=400,
+            detail="谓词未登记: %s（先在 /ontology/terms 登记关系类型再建边）" % predicate)
+    statement = str(body.content or "").strip() or "%s %s %s" % (subject, predicate, objTerm)
+    evidence = str(body.evidence_text or "").strip()
+    # 咽喉的逐字核闸"没声明就不查"——那是给管线写入的宽容；2D 人工建边没有
+    # 依据就是不可审计的边，写入口必须先拒，不能借咽喉的宽容溜进去。
+    if not evidence:
+        raise HTTPException(
+            status_code=400,
+            detail="工作台建边必须声明依据（evidence_text）：无依据的边不可审计")
+    entryId = str(body.entry_id or "").strip()
+
+    store = get_knowledge_fact_store()
+    gate = productionAdmissionGate(store, toolVersion="ontology-studio")
+    assertion = {
+        "actorType": "user",
+        "actorId": str(current_user.get("user_id") or ""),
+        "mediumRef": "entry:%s" % entryId if entryId else "",
+        "statementText": statement,
+    }
+    try:
+        receipt = gate.admit(AdmissionRequest(
+            agentId=agentId,
+            tenantId=str(current_user.get("tenant_id") or "default"),
+            subjectLabel=subject,
+            predicateTermId=predicate,
+            objectTerm=objTerm,
+            content=statement,
+            relationKind="entity",
+            assertions=[assertion],
+            sourceTurnId="entry:%s" % entryId if entryId else "",
+            evidenceText=evidence,
+            validFrom=body.valid_from,
+            validUntil=body.valid_until,
+            activityKind="admit",
+            activityBasis=str(body.basis or "") or "2D 工作台实例编辑",
+        ))
+    except AdmissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "fact_id": receipt.factId,
+            "subject_key": receipt.subjectKey,
+            "activity_id": receipt.activityId,
+            "pending_segments": receipt.pendingSegments,
+            "deduped_by_content": receipt.dedupedByContent,
+        },
+    }

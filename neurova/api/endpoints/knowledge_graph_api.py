@@ -408,3 +408,48 @@ async def rebuild_graph_projection(
                     "message": "投影已按权威重铺但落盘失败：内存与磁盘当前不一致"},
         )
     return {"code": 0, "message": "success", "data": outcome}
+
+
+@router.get("/{agent_id}/studio")
+async def get_knowledge_graph_studio(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    """工作台首屏聚合读面（S0/S1）：子图 + schema + 统计一次拿齐。
+
+    子图与统计同图谱读面口径（manager 单源，limit 裁剪与真总量分开报）；
+    schema 是本体类型系统的同一份投影（`ontologySchemaData` 单源），不在此处
+    重抄一份类型清单。写操作不在此面——实例编辑走 /knowledge/graph/instances。
+    """
+    from neurova.api.endpoints.knowledge_ontology import ontologySchemaData
+
+    tenant = _tenant_of(current_user)
+    manager = _get_kg_manager(agent_id, tenant)
+    try:
+        data = _graph_payload(manager, limit) if manager else {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("读取工作台子图失败，返回空图谱: %s", e)
+        manager, data = None, {}
+
+    nodes = data.get("nodes") or []
+    edges = data.get("edges") or []
+    stats = _statsOf(manager)
+    truncated = len(nodes) < int(stats["node_count"]) or len(edges) < int(stats["edge_count"])
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "agent_id": agent_id,
+            "nodes": nodes,
+            "edges": edges,
+            "total_nodes": int(stats["node_count"]),
+            "total_edges": int(stats["edge_count"]),
+            "truncated": truncated,
+            "stats": stats,
+            "schema": ontologySchemaData(),
+            "is_demo": False,
+        },
+    }
