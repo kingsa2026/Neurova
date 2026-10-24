@@ -172,7 +172,11 @@ main:
         # 「per-file audit of the protected subset」同口径：跑同一批用例的腿不短于它）。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
-            TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+            # 清单的读法必须与 `tests/ast_scan.protectedSubsetEntries()` 同口径：行内 `#` 之后
+            # 是注释、不是路径。原来的 `grep -v '^#'` 只丢整行注释，于是那批「路径在前、说明在后」
+            # 的条目按**整行**塞给 pytest，收集期 `ERROR: file or directory not found`、
+            # 整腿退出 4——与「某条判据真红了」同形。现读数：唯一读法 696 条，旧读法 838 条。
+            TESTS=$(sed -e 's/#.*//' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
           timeout: 80m
 
