@@ -590,17 +590,29 @@ class TestRemeNotes:
 
 class TestIdentityFiles:
     def test_soul_lands_in_memory_dir(self, kai_src):
-        from scripts.import_kai_to_neurova import import_identity
+        """身份文件的落点跟**布局单源**走，判据不自己拼目录名。
+
+        根因（实测）：4bf9b733 把私有数据落点统一到 `data/<agent_id>/`，
+        `import_identity()` 随之把 SOUL/PROFILE 写进 `agent_root/soul.md` 与
+        `agent_root/personality.md`；本格当时仍按老布局拼 `agent_workspaces/kai`
+        并去 `memory/` 下找 `soul.md`，于是它红的理由是「目录名抄的是 v1」而不是
+        「导入坏了」。现在把目标根交给 `resolve_agent_root()`（后端同一个单源解析器），
+        判据只断言**语义**：四份内容各自落到解析器给出的位置。
+        """
+        from scripts.import_kai_to_neurova import import_identity, resolve_agent_memory_dir, resolve_agent_root
 
         kai, nv = kai_src
-        workspace = nv / "agent_workspaces" / "kai"
-        stats = import_identity(kai, workspace)
-        soul = workspace / "memory" / "soul.md"
-        assert soul.exists()
+        agent_root = resolve_agent_root(nv, "kai")
+        stats = import_identity(kai, agent_root)
+
+        soul = agent_root / "soul.md"
+        assert soul.exists(), f"SOUL 没落到单源给出的 agent 根：{agent_root}"
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（_load_identity 第二加载位）
-        assert "凯的档案" in (workspace / "memory" / "personality.md").read_text(encoding="utf-8")
+        # PROFILE → personality.md（身份加载链的第二位）
+        assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
         # PROFILE/MEMORY 在 workspace 根留档
-        assert (workspace / "PROFILE.md").exists()
-        assert (workspace / "MEMORY.md").exists()
+        assert (agent_root / "workspaces" / "PROFILE.md").exists()
+        assert (agent_root / "workspaces" / "MEMORY.md").exists()
         assert stats["files"] >= 4
+        # 记忆目录与 agent 根同源（不是第二份根）
+        assert resolve_agent_memory_dir(nv, "kai") == agent_root / "memory"
