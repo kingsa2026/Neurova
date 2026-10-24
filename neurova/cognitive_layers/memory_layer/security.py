@@ -449,8 +449,7 @@ class MemorySecurity:
                 # 保留长度的匿名化那一档语义也收进同一个引擎（形状不同，实现不再分家）
                 return maskPreservingFormat(content, rules=self._patterns)
             return sanitizeSensitive(content, rules=self._patterns)
-
-        return result
+        # 两个分支都在锁内 return，这里是不可达的旧尾巴（曾带一句读 `result` 的死返回）
 
     def forget_memory(self, memory_id: str, permanent: bool = False) -> Dict[str, Any]:
         """

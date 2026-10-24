@@ -99,7 +99,9 @@ def seed():
 try:
     SKILLS_DIR, LEDGER = seed()
 except Exception as exc:  # noqa: BLE001
-    read("[0] 复制真账本到隔离根", lambda: (False, repr(exc)))
+    # `as` 的绑定名出块即解绑（PEP 3110），进 lambda 懒求值就是 NameError——先取值再进
+    seedFailure = repr(exc)
+    read("[0] 复制真账本到隔离根", lambda: (False, seedFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
