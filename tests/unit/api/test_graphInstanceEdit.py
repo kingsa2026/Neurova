@@ -47,10 +47,10 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "neurova.knowledge.foundation.get_knowledge_fact_store", lambda: store)
     registry = OntologyTermRegistry(store)
-    registry.register("document", "concept", label="文档")
-    registry.register("report", "concept", label="报告", parentTermId="document")
+    registry.register("document", "concept", label="文档", tenantId="t1")
+    registry.register("report", "concept", label="报告", parentTermId="document", tenantId="t1")
     registry.register("mentions", "relation", label="提及",
-                      domain=["document"], rangeTerms=["report"])
+                      domain=["document"], rangeTerms=["report"], tenantId="t1")
     engine = ForwardChainingEngine(store)
 
     app = FastAPI()

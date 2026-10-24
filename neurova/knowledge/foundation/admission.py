@@ -286,6 +286,17 @@ class KnowledgeAdmissionGate:
         已经齐全（见 `SEGMENT_STATUS`），四个生产调用点一律不带它。"""
         self._validate(request)
 
+        # 本体按租户分区（v25）：非 default 租户的种子谓词/种子规则在写入首跳
+        # 幂等补齐——装配点只知道 default，别的租户不能等到查询时空表才被发现。
+        tenant = str(getattr(request, "tenantId", "") or "default")
+        if tenant != "default":
+            ontology = self._collaborators.get("ontology_adjudication")
+            if ontology is not None:
+                ontology.ensureTenantSeeds(tenant)
+            reasoning = self._collaborators.get("forward_chaining")
+            if reasoning is not None:
+                reasoning.ensureRuleSeeds(tenant)
+
         pending = self.pendingSegments()
         planned = self.plannedSegments()
         delegated = self.delegatedSegments()
