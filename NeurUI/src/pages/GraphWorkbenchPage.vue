@@ -32,6 +32,24 @@
     <div class="workbench-layout">
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
+          <div class="canvas-toolbar">
+            <a-input-search
+              v-model:value="nodeFilter"
+              size="sm"
+              allow-clear
+              :placeholder="t('knowledge.workbenchNodeSearch')"
+              style="max-width: 220px"
+            />
+            <GlassButton
+              size="sm"
+              variant="secondary"
+              :disabled="!filteredNodes.length"
+              @click="focusFirstMatch"
+            >
+              {{ t('knowledge.workbenchFocusNode') }}
+            </GlassButton>
+            <span class="canvas-count">{{ filteredNodes.length }}/{{ studio?.nodes?.length ?? 0 }}</span>
+          </div>
           <div class="canvas-wrap">
             <GraphExplorer3D
               v-if="viewMode === '3d'"
@@ -41,7 +59,7 @@
               @select="onNodeSelected"
             />
             <VueFlow
-              v-else-if="studio?.nodes?.length"
+              v-else-if="filteredNodes.length"
               :nodes="flowNodes"
               :edges="flowEdges"
               :fit-view-on-init="true"
@@ -82,7 +100,7 @@
             </div>
 
             <div v-if="isAdmin && termFormVisible" class="term-form">
-              <a-input v-model:value="termForm.term_id" size="sm"
+              <a-input v-model:value="termForm.term_id" size="sm" :disabled="!!editingTermId"
                        :placeholder="t('knowledge.workbenchTermId')" />
               <a-select v-model:value="termForm.kind" size="sm"
                         :placeholder="t('knowledge.workbenchTermKind')">
@@ -94,9 +112,14 @@
                        :placeholder="t('knowledge.workbenchTermLabel')" />
               <a-input v-model:value="termForm.basis" size="sm"
                        :placeholder="t('knowledge.workbenchBasis')" />
-              <GlassButton size="sm" :loading="termSaving" @click="createTerm">
-                {{ t('common.confirm') }}
-              </GlassButton>
+              <div class="term-form-actions">
+                <GlassButton size="sm" :loading="termSaving" @click="saveTerm">
+                  {{ editingTermId ? t('knowledge.workbenchUpdate') : t('common.confirm') }}
+                </GlassButton>
+                <GlassButton v-if="editingTermId" size="sm" variant="secondary" @click="cancelEditTerm">
+                  {{ t('common.cancel') }}
+                </GlassButton>
+              </div>
             </div>
 
             <div class="term-list">
@@ -104,6 +127,10 @@
                 <a-tag :color="kindColor(term.kind)" class="kind-tag">{{ term.kind }}</a-tag>
                 <span class="term-id" :title="term.label">{{ term.term_id }}</span>
                 <span class="term-version">v·{{ term.version }}</span>
+                <a-button v-if="isAdmin" type="text" size="sm" class="term-edit"
+                          @click="startEditTerm(term)">
+                  ✎
+                </a-button>
                 <a-popconfirm
                   v-if="isAdmin"
                   :title="t('knowledge.workbenchConfirmDeleteTerm')"
@@ -114,6 +141,56 @@
               </div>
               <a-empty v-if="!filteredTerms.length && !loading"
                        :description="t('knowledge.workbenchEmptyTerms')" />
+            </div>
+
+            <!-- S2 规则面：列表 + 新建/删除（与术语同一写面纪律） -->
+            <div class="rules-section">
+              <div class="panel-toolbar">
+                <h4 class="rules-title">{{ t('knowledge.workbenchRules') }}</h4>
+                <GlassButton v-if="isAdmin" size="sm" @click="ruleFormVisible = !ruleFormVisible">
+                  {{ t('knowledge.workbenchNewRule') }}
+                </GlassButton>
+              </div>
+              <div v-if="isAdmin && ruleFormVisible" class="term-form">
+                <a-input v-model:value="ruleForm.rule_id" size="sm" :disabled="!!editingRuleId"
+                         :placeholder="t('knowledge.workbenchRuleId')" />
+                <a-input v-model:value="ruleForm.head_predicate" size="sm"
+                         :placeholder="t('knowledge.workbenchHeadPredicate')" />
+                <a-textarea v-model:value="ruleForm.body" :rows="3" size="sm"
+                            :placeholder="t('knowledge.workbenchBodyJson')" />
+                <a-input v-model:value="ruleForm.basis" size="sm"
+                         :placeholder="t('knowledge.workbenchBasis')" />
+                <div class="term-form-actions">
+                  <GlassButton size="sm" :loading="ruleSaving" @click="saveRule">
+                    {{ editingRuleId ? t('knowledge.workbenchUpdate') : t('common.confirm') }}
+                  </GlassButton>
+                  <GlassButton v-if="editingRuleId" size="sm" variant="secondary" @click="cancelEditRule">
+                    {{ t('common.cancel') }}
+                  </GlassButton>
+                </div>
+              </div>
+              <div class="term-list">
+                <div v-for="rule in schemaRules" :key="rule.rule_id" class="term-row">
+                  <a-tag color="orange" class="kind-tag">rule</a-tag>
+                  <span class="term-id" :title="rule.head_predicate">
+                    {{ rule.rule_id }} → {{ rule.head_predicate }}
+                  </span>
+                  <span class="term-version">v·{{ rule.version }}</span>
+                  <a-tag v-if="rule.enabled === false" color="default" class="kind-tag">off</a-tag>
+                  <a-button v-if="isAdmin" type="text" size="sm" class="term-edit"
+                            @click="startEditRule(rule)">
+                    ✎
+                  </a-button>
+                  <a-popconfirm
+                    v-if="isAdmin"
+                    :title="t('knowledge.workbenchConfirmDeleteRule')"
+                    @confirm="deleteRule(rule)"
+                  >
+                    <a-button type="text" size="sm" danger>✕</a-button>
+                  </a-popconfirm>
+                </div>
+                <a-empty v-if="!schemaRules.length" :description="t('knowledge.workbenchEmptyRules')" />
+              </div>
             </div>
 
             <div class="schema-footer">
@@ -192,13 +269,21 @@ const authStore = useAuthStore()
 interface StudioNode { id: string; label: string; type: string }
 interface StudioEdge { source: string; target: string; relation: string }
 interface OntologyTerm { term_id: string; kind: string; label: string; version: string }
+interface OntologyRule {
+  rule_id: string
+  head_predicate: string
+  head_subject_var?: string
+  body?: Array<Record<string, unknown>>
+  version: string
+  enabled?: boolean
+}
 interface StudioData {
   nodes?: StudioNode[]
   edges?: StudioEdge[]
   total_nodes?: number
   truncated?: boolean
   tenant_scoped?: boolean
-  schema?: { terms?: OntologyTerm[]; schema_version?: number }
+  schema?: { terms?: OntologyTerm[]; rules?: OntologyRule[]; schema_version?: number }
 }
 
 const loading = ref(false)
@@ -207,20 +292,26 @@ const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
 const viewMode = ref<'2d' | '3d'>('2d')
 const selectedNodeId = ref('')
 const termFilter = ref('')
+const nodeFilter = ref('')
 const termFormVisible = ref(false)
 const termSaving = ref(false)
 const edgeSaving = ref(false)
+const ruleFormVisible = ref(false)
+const ruleSaving = ref(false)
+const editingTermId = ref('')
+const editingRuleId = ref('')
 
 const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
 
 const termForm = reactive({ term_id: '', kind: 'concept', label: '', basis: '' })
+const ruleForm = reactive({ rule_id: '', head_predicate: '', body: '', basis: '' })
 const instanceForm = reactive({
   subject_label: '', predicate_term_id: '', object_term: '',
   entry_id: '', evidence_text: '', basis: '',
 })
 
 const flowNodes = computed(() =>
-  (studio.value?.nodes ?? []).map((n) => ({
+  filteredNodes.value.map((n) => ({
     id: n.id,
     label: n.label,
     position: { x: 0, y: 0 },
@@ -239,6 +330,18 @@ const flowEdges = computed(() =>
 
 const relationTerms = computed(() =>
   (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
+const schemaRules = computed(() => studio.value?.schema?.rules ?? [])
+const filteredNodes = computed(() => {
+  const needle = nodeFilter.value.trim().toLowerCase()
+  const nodes = studio.value?.nodes ?? []
+  if (!needle) return nodes
+  return nodes.filter((n) =>
+    n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
+})
+const focusFirstMatch = () => {
+  const hit = filteredNodes.value[0]
+  if (hit) selectedNodeId.value = hit.id
+}
 const filteredTerms = computed(() => {
   const needle = termFilter.value.trim().toLowerCase()
   const terms = studio.value?.schema?.terms ?? []
@@ -281,6 +384,132 @@ const createTerm = async () => {
     message.error(e?.response?.data?.detail || e?.message || t('common.error'))
   } finally {
     termSaving.value = false
+  }
+}
+
+const saveTerm = async () => {
+  if (!termForm.term_id.trim()) {
+    message.warning(t('knowledge.workbenchTermIdRequired'))
+    return
+  }
+  termSaving.value = true
+  try {
+    if (editingTermId.value) {
+      // PUT 部分更新：未填字段（label 空串、version 缺省）由后端保留现值。
+      await request.put(
+        `/knowledge/ontology/terms/${encodeURIComponent(editingTermId.value)}`,
+        { kind: termForm.kind, label: termForm.label, basis: termForm.basis })
+      message.success(t('knowledge.workbenchTermUpdated'))
+    } else {
+      await request.post('/knowledge/ontology/terms', { ...termForm })
+      message.success(t('knowledge.workbenchTermCreated'))
+    }
+    termForm.term_id = ''
+    termForm.label = ''
+    termForm.basis = ''
+    termFormVisible.value = false
+    editingTermId.value = ''
+    await fetchStudio()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    termSaving.value = false
+  }
+}
+
+const startEditTerm = (term: OntologyTerm) => {
+  editingTermId.value = term.term_id
+  termForm.term_id = term.term_id
+  termForm.kind = term.kind
+  termForm.label = term.label || ''
+  termForm.basis = ''
+  termFormVisible.value = true
+}
+
+const cancelEditTerm = () => {
+  editingTermId.value = ''
+  termForm.term_id = ''
+  termForm.label = ''
+  termForm.basis = ''
+  termFormVisible.value = false
+}
+
+const parseRuleBody = (): Array<Record<string, unknown>> | null => {
+  try {
+    const parsed = JSON.parse(ruleForm.body)
+    if (!Array.isArray(parsed) || !parsed.length) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const saveRule = async () => {
+  const body = parseRuleBody()
+  if (!editingRuleId.value && !ruleForm.rule_id.trim()) {
+    message.warning(t('knowledge.workbenchRuleIdRequired'))
+    return
+  }
+  if (!body) {
+    message.warning(t('knowledge.workbenchBodyJsonInvalid'))
+    return
+  }
+  ruleSaving.value = true
+  try {
+    const payload = {
+      head_predicate: ruleForm.head_predicate,
+      body,
+      basis: ruleForm.basis,
+    }
+    if (editingRuleId.value) {
+      await request.put(
+        `/knowledge/ontology/rules/${encodeURIComponent(editingRuleId.value)}`, payload)
+      message.success(t('knowledge.workbenchRuleUpdated'))
+    } else {
+      await request.post('/knowledge/ontology/rules', { rule_id: ruleForm.rule_id, ...payload })
+      message.success(t('knowledge.workbenchRuleCreated'))
+    }
+    ruleForm.rule_id = ''
+    ruleForm.head_predicate = ''
+    ruleForm.body = ''
+    ruleForm.basis = ''
+    ruleFormVisible.value = false
+    editingRuleId.value = ''
+    await fetchStudio()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    ruleSaving.value = false
+  }
+}
+
+const startEditRule = (rule: OntologyRule) => {
+  editingRuleId.value = rule.rule_id
+  ruleForm.rule_id = rule.rule_id
+  ruleForm.head_predicate = rule.head_predicate
+  ruleForm.body = JSON.stringify(rule.body ?? [], null, 0)
+  ruleForm.basis = ''
+  ruleFormVisible.value = true
+}
+
+const cancelEditRule = () => {
+  editingRuleId.value = ''
+  ruleForm.rule_id = ''
+  ruleForm.head_predicate = ''
+  ruleForm.body = ''
+  ruleForm.basis = ''
+  ruleFormVisible.value = false
+}
+
+const deleteRule = async (rule: OntologyRule) => {
+  try {
+    await request.delete(
+      `/knowledge/ontology/rules/${encodeURIComponent(rule.rule_id)}`,
+      { params: { basis: t('knowledge.workbenchDeleteRuleBasis') } })
+    message.success(t('knowledge.workbenchRuleDeleted'))
+    await fetchStudio()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
   }
 }
 
@@ -499,5 +728,37 @@ onMounted(() => {
   .workbench-layout {
     grid-template-columns: 1fr;
   }
+}
+
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm);
+  margin-bottom: var(--nr-space-sm);
+}
+
+.canvas-count {
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.term-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--nr-space-sm);
+}
+
+.term-edit {
+  flex: none;
+}
+
+.rules-section {
+  margin-top: var(--nr-space-md);
+}
+
+.rules-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--nr-text-primary, inherit);
 }
 </style>
