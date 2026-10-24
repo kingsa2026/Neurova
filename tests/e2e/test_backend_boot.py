@@ -27,6 +27,14 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_PORT = 9527
 
+#: 后端就绪等待与关停收尸的预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。
+#: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` **看不见这一处**——它的词汇只有
+#: subprocess，而这里的阻塞是 HTTP 轮询（`Popen` 起进程本身不阻塞）。同一条机制照样成立：
+#: 模块级 fixture 等满 90s 时，先到点的是缺省 30s 的全局父墙，Windows 侧 thread 法超时
+#: 即终止整个跑测进程。故把两处等待收成常量，并给消费该 fixture 的那组用例声明父墙。
+BACKEND_READY_WALL_S = 90
+BACKEND_REAP_WALL_S = 15
+
 
 def _port_open(port: int, timeout: float = 1.0) -> bool:
     try:
@@ -42,7 +50,7 @@ def _http_get(url: str, timeout: float = 5.0):
         return resp.status, resp.read()
 
 
-def _wait_health(port: int, seconds: float = 90.0) -> bool:
+def _wait_health(port: int, seconds: float = BACKEND_READY_WALL_S) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
         try:
@@ -71,7 +79,8 @@ def backend_port():
         creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     )
     try:
-        assert _wait_health(BACKEND_PORT, seconds=90), "后端 90s 内未就绪"
+        assert _wait_health(BACKEND_PORT, seconds=BACKEND_READY_WALL_S), \
+            f"后端 {BACKEND_READY_WALL_S}s 内未就绪"
         yield BACKEND_PORT
     finally:
         if proc.poll() is None:
@@ -80,13 +89,19 @@ def backend_port():
             else:
                 proc.terminate()
             try:
-                proc.wait(timeout=15)
+                proc.wait(timeout=BACKEND_REAP_WALL_S)
             except subprocess.TimeoutExpired:
                 proc.kill()
 
 
 class TestBackendBoot:
-    """真实进程 boot 冒烟（subprocess 拉起或复用常驻实例）"""
+    """真实进程 boot 冒烟（subprocess 拉起或复用常驻实例）
+
+    父墙按 §6-402 批 K 口径由就绪等待常量导出（＋30s 余量）：模块级 fixture 在第一格
+    _setup 里最长等 `BACKEND_READY_WALL_S`，那段时间记在这格头上。
+    """
+
+    pytestmark = pytest.mark.timeout(BACKEND_READY_WALL_S + 30)
 
     def test_health_endpoint(self, backend_port):
         status, _ = _http_get(f"http://127.0.0.1:{backend_port}/health")
