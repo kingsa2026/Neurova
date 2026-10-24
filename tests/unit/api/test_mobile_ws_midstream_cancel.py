@@ -39,6 +39,10 @@ class FakeWS:
 
     def __init__(self, script: List[Any]):
         self.query_params = {"token": "tok"}
+        # S1b 起凭证优先走 header（§4.2：URL 会进中继日志）。这格审的是消息循环，
+        # 替身就得把握手面补齐，不然本批的改动会以 AttributeError 的形式"挂在这格上"，
+        # 看着像行为坏了，其实只是替身缺了一件东西。
+        self.headers = {}
         self._script = list(script)
         self.sent: List[dict] = []
 
@@ -104,15 +108,24 @@ def _clean_mp_state():
     yield
     mp._ws_connections.clear()
     mp._cancelled_sessions.clear()
-    mp._paired_devices.clear()
     mp._chat_tasks.clear()
     mp.MobileConnectionManager._instance = None
 
 
 def _install_auth(monkeypatch):
+    """桩掉凭证校验，但**保持真 `_verify_ws_token` 的返回形状**（含 `token_epoch`）。
+
+    形状漂了，被测函数就会在自己读不到的键上炸——然后整档以"等待超时"的形态红，
+    看不出红的是桩而不是行为（本卷形态 386 同族：门控替身调不存在的工厂）。
+    放行还要求设备在册（§4.8），所以这里同步把它登记进 tmp 库。
+    """
     monkeypatch.setattr(
-        mp, "_verify_ws_token", lambda token: {"user_id": "u1", "pairing_id": "p1"}
+        mp, "_verify_ws_token",
+        lambda token: {"user_id": "u1", "pairing_id": "p1", "token_epoch": "0"},
     )
+    registry = mp.getDeviceRegistry()
+    if registry.get("p1") is None:
+        registry.register(pairingId="p1", userId="u1", deviceName="midstream-phone")
 
 
 def _install_agent(monkeypatch, agent):
