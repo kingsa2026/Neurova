@@ -11,6 +11,11 @@ import pytest
 
 from neurova.evolution.eval.skill_journal import SkillJournal
 
+#: `git config --list` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局
+#: 30s 的 20s：先到点的应当是子进程那条诚实的 TimeoutExpired——缺省那堵墙在 Windows 侧走
+#: thread 法，它先到就是整场跑测没了（§6-402 批 K 口径）。
+GIT_WALL_S = 20
+
 
 def _pending(tmp_path, pid="evo_x1", skill_id="s1"):
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -77,7 +82,8 @@ class TestJournalUnit:
                        proposal_id="evo_a", evidence={})
         cfg = subprocess.run(
             ["git", "--git-dir", str(tmp_path / "journal.git"), "config", "--local", "--list"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=GIT_WALL_S)
         assert "bare=true" in cfg.stdout.replace(" ", "")
         assert "remote." not in cfg.stdout
 

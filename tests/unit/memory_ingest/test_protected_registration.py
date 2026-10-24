@@ -20,6 +20,10 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: `git ls-files` 的预算唯一出处（毫秒级）。取低于全局 30s 的 20s——原 60s 子墙配缺省 30s
+#: 父墙时先到点的是父墙，Windows thread 法直接终止进程（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 PACKAGE_TESTS = PROJECT_ROOT / "tests" / "unit" / "memory_ingest"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 SELF_REL = "tests/unit/memory_ingest/test_protected_registration.py"
@@ -57,7 +61,7 @@ def test_registered_package_files_are_tracked_by_git():
     files = _packageTestFiles()
     result = subprocess.run(
         ["git", "ls-files", *files],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=GIT_WALL_S,
     )
     tracked = {line.strip() for line in result.stdout.splitlines() if line.strip()}
     assert tracked == set(files), (

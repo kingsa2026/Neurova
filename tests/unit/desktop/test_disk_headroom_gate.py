@@ -32,6 +32,11 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[3]
 _GATE = _REPO / "scripts" / "desktop" / "disk_headroom.py"
+
+#: 闸脚本子进程的预算唯一出处（§6-402 批 K 口径）。实测这条只读盘一次、毫秒级——120s 是把
+#: 安全感写进代码，而 120s 子墙配缺省 30s 父墙时先到点的是父墙：Windows 侧 thread 法超时
+#: 即终止整个进程。收成**低于全局墙**的 20s，整档因此不必抬父墙。
+GATE_WALL_S = 20
 _TAURI_CONF = _REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 _INSTALLER = _REPO / "scripts" / "desktop" / "package_installer_zip.py"
 
@@ -48,7 +53,8 @@ def _runGate(args, cwd=None):
     # 被调的闸脚本是本仓 Python 件 ⇒ 两头钉死（子端 PYTHONIOENCODING=utf-8、父端按 utf-8 解）。
     # 闸的读数里带仓库路径（含「项目」二字），只补父端 encoding 会把那条路径读成 U+FFFD。
     return subprocess.run([sys.executable, str(_GATE), *[str(a) for a in args]],
-                          capture_output=True, text=True, cwd=str(cwd or _REPO), timeout=120,
+                          capture_output=True, text=True, cwd=str(cwd or _REPO),
+                          timeout=GATE_WALL_S,
                           env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                           encoding="utf-8", errors="replace")
 

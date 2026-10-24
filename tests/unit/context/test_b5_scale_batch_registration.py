@@ -20,6 +20,10 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: `git ls-files` 的预算唯一出处（毫秒级）。取**低于全局 30s** 的 20s：先到点的应当是
+#: 子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙把整场跑测带走（§6-402 批 K）。
+GIT_WALL_S = 20
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 已交付批次 → 该批交付的判据文件。一个批次一条登记，同一条判据不复制扫描逻辑。
@@ -63,7 +67,7 @@ def test_registered_files_are_tracked_by_git():
         return
     result = subprocess.run(
         ["git", "ls-files", *BATCH_FILES],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=GIT_WALL_S,
     )
     tracked = {
         line.strip() for line in result.stdout.splitlines() if line.strip()
