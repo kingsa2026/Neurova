@@ -21,6 +21,11 @@ if str(REPO_ROOT) not in sys.path:
 
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "cognitive_component_table.py"
 
+#: 认知层目录（`_layerStamp` 的扫描根，模块级——局部变量会让面自证闸认不出这一档）。
+LAYER_ROOT = REPO_ROOT / "neurova" / "cognitive_layers"
+#: 这份扫描面的数量下限。根被改窄时读数是「零命中」而不是红，所以先比条数。
+_LAYER_SURFACE_FLOOR = 50
+
 #: `git ls-files` 的预算唯一出处（毫秒级；取**低于全局 30s** 的这一形，让子进程先到点报
 #: 诚实的 TimeoutExpired，而不是全局那道 thread 法的墙把整场跑测打死——§6-402 批 K 口径）。
 GIT_WALL_S = 20
@@ -42,10 +47,13 @@ _ROWS_CACHE: dict = {}
 
 
 def _layerStamp() -> tuple:
-    """认知层里每个 .py 的 (相对路径, 大小, mtime)——表的内容只由这些文件决定。"""
-    layer = REPO_ROOT / "neurova" / "cognitive_layers"
+    """认知层里每个 .py 的 (相对路径, 大小, mtime)——表的内容只由这些文件决定。
+
+    扫描根是模块级常量 `LAYER_ROOT`：根绑在函数局部时，面自证那道闸认不出它扫的是哪一目录
+    （判据整档会安静掉出面）。`_LAYER_SURFACE_FLOOR` 是"根被改窄"的反空转读数。
+    """
     stamp = []
-    for path in sorted(layer.rglob("*.py")):
+    for path in sorted(LAYER_ROOT.rglob("*.py")):
         info = path.stat()
         stamp.append((str(path.relative_to(REPO_ROOT)), info.st_size, info.st_mtime_ns))
     return tuple(stamp)
@@ -53,7 +61,10 @@ def _layerStamp() -> tuple:
 
 def _componentRows(gen):
     """整档共享的一份组件表读数（生成器模块与认知层都没变就复用）。"""
-    key = (_scriptStamp(), _layerStamp())
+    stamp = _layerStamp()
+    assert len(stamp) > _LAYER_SURFACE_FLOOR, (
+        f"认知层只扫到 {len(stamp)} 个 .py——扫描根被改窄时缓存读数是「零变化」而不是红")
+    key = (_scriptStamp(), stamp)
     if key not in _ROWS_CACHE:
         _ROWS_CACHE[key] = gen.componentRows()
     return _ROWS_CACHE[key]
