@@ -18,8 +18,6 @@
 
 import asyncio
 import contextlib
-from typing import AsyncIterator
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -168,7 +166,7 @@ async def test_ttl_release_skipped_for_light_engines(heavy_manager):
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(now_monotonic=superIdleClock())
     assert released is False
     assert mgr._engine_name == "edge-tts"
 
@@ -192,7 +190,7 @@ async def test_pinned_engine_never_released():
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(now_monotonic=superIdleClock())
     assert released is False
     assert heavy.released is False
     assert mgr._engine_name == "moss-nano"

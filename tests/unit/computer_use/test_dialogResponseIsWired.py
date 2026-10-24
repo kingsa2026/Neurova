@@ -61,6 +61,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, List, Tuple
 
+import pytest
+
 from neurova.computer_use.browser_manager import (
     BrowserManager,
     DialogHandler,
@@ -157,6 +159,10 @@ class TestManagerReadFaceClosesTheLoop:
     """写侧闭环：`_dialog_handler` 不再只写不读，且后端拿的就是 manager 那一份。"""
 
     def testManagerSharesItsHandlerWithThePlaywrightBackend(self):
+        pytest.importorskip(
+            "playwright",
+            reason="本档的前置就是这条可选依赖：没装 playwright 时 `_load_config` 按设计不建后端，"
+                   "那不是缺陷——把缺依赖判成红，等于让'这条链通不通'取决于跑测机装了什么")
         manager = BrowserManager(config={})
         backend = manager._backends.get("playwright")
         assert backend is not None, "本机装了 playwright，`_load_config` 却没建出后端——接面对象不存在"
@@ -165,6 +171,7 @@ class TestManagerReadFaceClosesTheLoop:
         )
 
     def testManagerExposesTheDialogLogAsANamedReadFace(self):
+        pytest.importorskip("playwright", reason="同上：本档走的是 playwright 那一路的接面")
         manager = BrowserManager(config={})
         assert manager.dialogLog() == [], "读口起点不为空：别的实例的留档漏进来了"
 
