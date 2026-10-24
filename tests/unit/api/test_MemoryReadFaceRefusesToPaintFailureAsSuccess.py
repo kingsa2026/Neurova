@@ -41,14 +41,15 @@ def unreadyClient():
 
     故把产生态显式摆出来：复用实例时先摘掉 Agent 注册，用例结束原样放回
     （同一字典对象，不换壳——`endpoints` 侧的 `_app_state["agents"]` 指的就是它）。
+    这一处也顺带解释了 CI 上「实得 200」的另一半成因：端点请求期读的是运行时注册表
+    里那份 **`agents` 引用**，不是 `AppState.agents`；只摘 `AppState` 一侧看不见效果。
     """
     from fastapi.testclient import TestClient
 
+    from neurova.api import endpoints as endpointsModule
     from neurova.api.app import create_app
 
     app = create_app()
-
-    from neurova.api import endpoints as endpointsModule
 
     agents = endpointsModule.get_app_state().get("agents")
     saved = dict(agents)
