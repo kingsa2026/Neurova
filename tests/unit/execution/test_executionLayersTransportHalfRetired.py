@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 import pathlib
 
 from tests import ast_scan
@@ -105,7 +106,9 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    # 用**当前解释器**而不是字面量 `python`：有的镜像/发行版只装 `python3`，
+    # 那条字面量在那种环境下测的是"PATH 里有没有那个别名"，与本地运行时能不能执行无关。
+    result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 

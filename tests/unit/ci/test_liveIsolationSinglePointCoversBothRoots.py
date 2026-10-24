@@ -35,9 +35,9 @@ import ast
 import json
 import os
 import pathlib
+import tempfile
 import subprocess
 import sys
-import tempfile
 
 from tests import ast_scan
 
@@ -96,17 +96,13 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 「临时目录」按**平台**取：POSIX 上是 `tempfile.gettempdir()`（`/tmp`），
-    # Windows 上才是 `TEMP`。此前只认 `TEMP` 且退化成字面量 `"Temp" in str(ws)`，
-    # 于是 Linux/CI 上 `tempfile.mkdtemp()` 造出的 `/tmp/...` 一律判红——
-    # 它红的原因是判据只认一个平台的环境变量，与「单点有没有把根搬出去」无关。
-    tempRoots = {pathlib.Path(tempfile.gettempdir()).resolve()}
-    for name in ("TEMP", "TMPDIR"):
-        value = (os.environ.get(name) or "").strip()
-        if value:
-            tempRoots.add(pathlib.Path(value).resolve())
-    assert any(ws.resolve().is_relative_to(root) for root in tempRoots), (
-        f"工作区根没有落在临时目录：{ws}（临时目录口径：{sorted(map(str, tempRoots))}）"
+    # 临时目录只有一个来源：`tempfile` 自己算出的那个（Windows 下是 `%TEMP%`、
+    # Linux 下是 `/tmp`）。判据此前手抄 `os.environ["TEMP"]`，在 Linux CI 上那个变量
+    # 根本不存在 ⇒ `.resolve()` 变成进程 CWD，任何合法临时落点都判成"在仓内"；
+    # 补一条 `"Temp" in str(ws)` 也只在 Windows 上成立。两半都只在一种平台上对。
+    tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
+    assert ws.resolve().is_relative_to(tempRoot), (
+        f"工作区根没有落在临时目录（临时根＝{tempRoot}）：{ws}"
     )
 
 
