@@ -472,6 +472,7 @@ class OcrEngine(Protocol):
 | `knowledge_baselines` | 新表 | 业务场景基线引用 |
 | `knowledge_ingest_jobs` | 新表 | 企微入站持久作业（dedupe/attempts/lease/dead/result） |
 | `knowledge_subjects.tenant_id` | 新列（v23） | 主体消解字典按租户分词；图谱按 `agent+tenant` 分目录 |
+| `knowledge_facts.category` | 新列（v24） | 业务基线按 category 冻结；未分类事实留空 |
 | `tenant_id` | 后续迁移 | 先读隔离，后写隔离 |
 
 ### 7.2 API
@@ -601,11 +602,11 @@ class OcrEngine(Protocol):
 - 入站队列为 SQLite 单机语义；常驻消费者已接，跨进程传输已提供可选 MQTT
   （`NEUROVA_KB_INGEST_TRANSPORT=mqtt`），但真实 broker 端到端未在本机验证；
 - `/audit/reindex` 是派生索引整库维护，未按租户切分（不写业务内容）；
-- 冲突详情端点、基线时间窗已补；基线 category 维度因事实行没有 category 列未做；
-- 旧数据批量回填已提供 dry-run/apply 脚本（`--source-root` 解析相对 source_path），
-  但未在生产语料上执行；
-- MQTT 入站已用本地 amqtt broker 验证生产→订阅→队列→落知识；TLS/鉴权与
-  真实生产 broker 未验证；paho 未装时生产者/订阅端显式报依赖缺失；
+- 冲突详情端点、基线时间窗/category 已补（v24 事实分类列）；
+- 旧数据回填 dry-run 已跑：36 个候选全部因 `source_path` 无原文件报 missing_source，
+  因此没有可执行的 apply 对象；
+- MQTT 入站已用本地 amqtt broker 验证生产→订阅→队列→落知识；TLS 配置已接
+  `NEUROVA_MQTT_TLS_*`，生产 broker 鉴权/TLS 仍未验证；paho 未装时显式报依赖缺失；
 - `gateNoRegression` 已提供并为 CI 回归门（单测覆盖）；真实黄金集门禁需接评测账本；
 - 向量路 hnswlib 已实测（100 万 p95 0.67 ms / 1.6 GB）；FTS 4 进程并发已实测
   （100 万 p95 398.87 ms / 9.97 qps）；重建时间未单列；

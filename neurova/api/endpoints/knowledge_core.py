@@ -113,6 +113,7 @@ class BaselineCreateRequest(BaseModel):
     reason: str = ""
     time_from: Optional[str] = None
     time_to: Optional[str] = None
+    category: str = ""
 
 
 class KnowledgeExpiryRequest(BaseModel):
@@ -531,6 +532,7 @@ async def create_fact_baseline(
             tenantId=str(current_user.get("tenant_id") or "default"),
             timeFrom=body.time_from,
             timeTo=body.time_to,
+            category=body.category,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail="基线参数非法: %s" % exc)
