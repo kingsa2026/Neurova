@@ -820,6 +820,24 @@ def _reset_memory_request_scope():
     clear_memory_request_scope()
 
 
+@pytest.fixture(autouse=True)
+def _reclaimIdleMonitors():
+    """每格结束回收本轮仍活跃的空闲监控线程（`idle-tracker-monitor`）。
+
+    为什么按格而不是按会话：整场 `pytest tests/unit` 曾在 92% 处
+    `STATUS_STACK_OVERFLOW` 崩机，dump 里数十条线程同名——`agent_core.py:1406` 逐 Agent
+    起监控线程，而全仓**只有一个**地方会关它（`Agent.shutdown()` → `agent_core.py:2087`
+    → `shutdown_agent`）⇒ 没被显式关闭的 Agent 一律留一条线程。生产那对手本批已配平
+    （`agent_shutdown.py`），但"建完就丢"这件事本身只有测试侧收得掉（§6-407 批 O-2）。
+    """
+    yield
+    try:
+        from neurova.core.idle_tracker import stopAllIdleMonitors
+    except Exception:  # pragma: cover - 模块未就绪时不拦跑测
+        return
+    stopAllIdleMonitors()
+
+
 # ---------------------------------------------------------------------------
 # 跑测层「真权重出网」门（§6-201 登记的跑测环境缺陷家族，批 44 立）
 # ---------------------------------------------------------------------------

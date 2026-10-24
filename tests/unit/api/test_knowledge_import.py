@@ -129,8 +129,11 @@ class TestImportFile:
         result = await kb.import_knowledge_file(
             FakeUpload(), request=None, current_user={"user_id": "u1"}, agent_id="default"
         )
+        from neurova.knowledge.document_pipeline import legacyOfficeAvailable
+
         assert result["code"] == 1
-        assert result["data"]["status"] == "unsupported_format"
+        expected = "legacy_convert_failed" if legacyOfficeAvailable() else "legacy_office_unavailable"
+        assert result["data"]["status"] == expected
         assert result["data"]["items"] == []
 
     @pytest.mark.asyncio

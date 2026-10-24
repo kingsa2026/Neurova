@@ -31,8 +31,13 @@ FROM python:3.12-slim as production
 WORKDIR /app
 
 # 安装运行时依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgomp1 \
+    libgl1 \
+    libglib2.0-0 \
+    libreoffice \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户

@@ -14,6 +14,12 @@ from __future__ import annotations
 
 import datetime
 from neurova.core.logger import get_logger
+from neurova.security.sensitive_info import (
+    SENSITIVE_RULES,
+    SensitivityLevel,
+    detectSensitive,
+    sanitizeSensitive,
+)
 import re
 import time
 from dataclasses import dataclass, field
@@ -200,90 +206,44 @@ class PromptInjectionDetector:
 
 
 class SensitiveInfoDetector:
-    """敏感信息检测器"""
+    """敏感信息检测器——规则表与脱敏引擎都在 `security/sensitive_info.py`，这里只做
+    **本模块报告词汇的投影**（`SafetyLevel` 比共享尺度多一档 `SAFE`，是结果分级不是规则定义）。
 
-    # 敏感信息模式
-    SENSITIVE_PATTERNS = {
-        "phone": (r"1[3-9]\d{9}", SafetyLevel.MEDIUM),
-        "email": (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", SafetyLevel.LOW),
-        "id_card": (r"\d{17}[\dXx]", SafetyLevel.HIGH),
-        "bank_card": (r"\d{16,19}", SafetyLevel.HIGH),
-        "password": (r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+", SafetyLevel.HIGH),
-        "api_key": (r"(?i)(api[_\s-]?key|apikey|secret[_\s-]?key)\s*[=:]\s*\S+", SafetyLevel.CRITICAL),
-        "token": (r"(?i)(token|access[_\s-]?token|bearer)\s*[=:]\s*\S+", SafetyLevel.HIGH),
-        "ip_address": (r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", SafetyLevel.LOW),
+    收口前它自带 8 条 `SENSITIVE_PATTERNS`，且 `sanitize()` 用
+    `m.group().split("=")[0] + "=***"` 打码 ⇒ 冒号形（`password: abc`）等号不在匹配串里，
+    split 拿到的就是整串，输出变成 `password: abc=***`——**值一个字符没少，还多缀了垃圾**。
+    现在打码走单源引擎的 keyValue 策略，键名与分隔符原样保留、只打码值。
+    """
+
+    #: 共享尺度 → 本模块报告词汇。缺这一档就报 CRITICAL（保守方向，宁高不低）。
+    _SEVERITY_TO_SAFETY = {
+        SensitivityLevel.LOW: SafetyLevel.LOW,
+        SensitivityLevel.MEDIUM: SafetyLevel.MEDIUM,
+        SensitivityLevel.HIGH: SafetyLevel.HIGH,
+        SensitivityLevel.CRITICAL: SafetyLevel.CRITICAL,
     }
 
-    def __init__(self, custom_patterns: Optional[Dict[str, tuple]] = None):
-        self._patterns: Dict[str, tuple] = {}
-
-        # 加载默认模式
-        for name, (pattern, severity) in self.SENSITIVE_PATTERNS.items():
-            try:
-                self._patterns[name] = (re.compile(pattern, re.IGNORECASE), severity)
-            except re.error:
-                logger.warning("编译正则失败: %s", pattern)
-
-        # 加载自定义模式
-        if custom_patterns:
-            for name, (pattern, severity) in custom_patterns.items():
-                try:
-                    self._patterns[name] = (re.compile(pattern, re.IGNORECASE), severity)
-                except re.error:
-                    logger.warning("编译自定义正则失败: %s", pattern)
-
     def detect(self, text: str) -> List[ThreatFinding]:
-        """检测敏感信息"""
+        """按单源规则表识别内容级敏感信息。"""
         if not text:
             return []
-
         findings = []
-
-        for info_type, (pattern, severity) in self._patterns.items():
-            matches = pattern.finditer(text)
-            for match in matches:
-                # 掩码显示
-                matched_text = match.group()
-                if len(matched_text) > 6:
-                    masked = matched_text[:3] + "***" + matched_text[-3:]
-                else:
-                    masked = "***"
-
-                findings.append(
-                    ThreatFinding(
-                        threat_type=ThreatType.SENSITIVE_INFO_LEAK,
-                        severity=severity,
-                        description=f"检测到敏感信息: {info_type}",
-                        evidence=masked,
-                        location=f"位置 {match.start()}-{match.end()}",
-                        confidence=0.9,
-                    )
+        for hit in detectSensitive(text):
+            findings.append(
+                ThreatFinding(
+                    threat_type=ThreatType.SENSITIVE_INFO_LEAK,
+                    severity=self._SEVERITY_TO_SAFETY.get(hit.severity, SafetyLevel.CRITICAL),
+                    description="检测到敏感信息: %s" % hit.rule.name,
+                    evidence=hit.evidence,          # 引擎给的已经是打码后的形状
+                    location="位置 %d-%d" % (hit.start, hit.end),
+                    confidence=0.9,
                 )
-
+            )
         return findings
 
     def sanitize(self, text: str) -> str:
-        """清理敏感信息"""
-        if not text:
-            return text
-
-        result = text
-
-        for info_type, (pattern, _) in self._patterns.items():
-            if info_type == "phone":
-                result = pattern.sub(lambda m: m.group()[:3] + "****" + m.group()[-4:], result)
-            elif info_type == "email":
-                result = pattern.sub(lambda m: "***@***.***", result)
-            elif info_type == "id_card":
-                result = pattern.sub(lambda m: m.group()[:3] + "***********" + m.group()[-4:], result)
-            elif info_type == "bank_card":
-                result = pattern.sub(lambda m: "****" + m.group()[-4:], result)
-            elif info_type in ("password", "api_key", "token"):
-                result = pattern.sub(lambda m: m.group().split("=")[0] + "=***", result)
-            else:
-                result = pattern.sub("***", result)
-
-        return result
+        """脱敏——直接走单源引擎，不在这里再写一遍循环。"""
+        return sanitizeSensitive(text)
 
 
 class OutputFilter:

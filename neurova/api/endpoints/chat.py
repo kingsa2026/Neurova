@@ -308,6 +308,7 @@ async def chat(
         set_request_user_id(user_id)
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
+        call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
 
         # P2-8 §6-46：这条公开 API 与网页面共用同一份模型额度，也就必须问同一道闸
         admission = await requestTurnAdmission(
@@ -464,6 +465,7 @@ async def chat_stream(
         # 的控制台都能看见别人的流式会话标题**。写在 `event_generator` 内、`create_task` 之前：
         # task 在创建时复制当前上下文，放在端点顶部反而不保证被 `run_chat` 那条 task 看到。
         call_metadata["user_id"] = user_id
+        call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
         from neurova.core.identity_context import set_request_user_id
 
         set_request_user_id(user_id)
