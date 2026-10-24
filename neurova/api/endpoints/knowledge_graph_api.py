@@ -95,6 +95,18 @@ def _graph_payload(manager, limit: int) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+def _statsOf(manager) -> dict:
+    """统计口径的唯一出处是 manager.get_stats()（未合并入统计的节点在那里已经扣掉）。
+
+    端点不自己数一遍：两处各数一次就是两份口径，`limit` 裁剪与真总量迟早对不上。
+    """
+    if manager is None:
+        from neurova.cognitive_layers.knowledge_graph.manager import GraphStats
+
+        return GraphStats().to_dict()
+    return manager.get_stats().to_dict()
+
+
 @router.get("/{agent_id}/knowledge-graph")
 async def get_knowledge_graph(
     agent_id: str, request: Request, limit: int = Query(100, ge=1, le=500),
@@ -107,10 +119,14 @@ async def get_knowledge_graph(
         data = _graph_payload(manager, limit) if manager else {}
     except Exception as e:  # noqa: BLE001
         logger.warning("读取知识图谱失败，返回空图谱: %s", e)
-        data = {}
+        manager, data = None, {}
 
     nodes = data.get("nodes") or []
     edges = data.get("edges") or []
+    stats = _statsOf(manager)
+    # 给出的是裁剪后的子图，真总量另说——`limit` 切过之后，"图就这么大"和"还有没给的"
+    # 在读面上必须分得开，否则空图提示与大图提示只能靠猜。
+    truncated = len(nodes) < int(stats["node_count"]) or len(edges) < int(stats["edge_count"])
 
     return {
         "code": 0,
@@ -118,8 +134,10 @@ async def get_knowledge_graph(
         "data": {
             "nodes": nodes,
             "edges": edges,
-            "total_nodes": len(nodes),
-            "total_edges": len(edges),
+            "total_nodes": int(stats["node_count"]),
+            "total_edges": int(stats["edge_count"]),
+            "truncated": truncated,
+            "stats": stats,
             "is_demo": False,
             "hint": "" if nodes else "图谱为空：导入知识或通过知识条目抽取生成图谱节点（见 graph_bridge）",
         },
