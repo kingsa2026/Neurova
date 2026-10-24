@@ -5,9 +5,14 @@
         <h2 class="page-title">{{ t('knowledge.graph') }}</h2>
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
       </div>
-      <GlassButton variant="secondary" :loading="loading" @click="fetchGraph">
-        {{ t('common.refresh') }}
-      </GlassButton>
+      <div class="header-actions">
+        <GlassButton variant="secondary" :loading="loading" @click="fetchGraph">
+          {{ t('common.refresh') }}
+        </GlassButton>
+        <GlassButton variant="primary" @click="goWorkbench">
+          {{ t('knowledge.workbench.title') }}
+        </GlassButton>
+      </div>
     </div>
 
     <!-- Stats cards -->
@@ -101,6 +106,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -118,6 +124,9 @@ import {
 } from '@/pages/knowledge-graph/chartOptions'
 
 const { t } = useI18n()
+const router = useRouter()
+
+const goWorkbench = () => router.push({ name: 'AgentGraphWorkbench', params: { agentId: agentId.value } })
 const { agentId, currentAgent } = useAgentPage({
   onAgentChange: () => {
     fetchGraph()
