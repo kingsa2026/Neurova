@@ -33,6 +33,9 @@ def killProcessTree(proc: subprocess.Popen) -> None:
     - POSIX: 进程组 SIGKILL（调用方须以 `start_new_session=True` 起进程，
       否则 `getpgid` 返回的是宿主进程组，杀它会连带杀掉宿主自身）；
       进程已退出时 `getpgid` 抛 `ProcessLookupError`，退回直接 kill。
+      **已退出（`poll() is not None`）时不发任何信号**：此时 PID 可能已被系统复用，
+      按组杀会命中一个恰好抢到同一进程组号的无辜进程组（实测形态：`run_code` 在
+      测试里跑完正常退出，取消令牌的迟到回调按组 SIGKILL，`returncode` 从 0 变 -9）。
     - Windows: `taskkill /T /F`（`TerminateProcess` 只杀单个进程，
       `taskkill /T` 遍历子树）；taskkill 缺失/失败时退回 `proc.kill()`。
 
@@ -54,6 +57,8 @@ def killProcessTree(proc: subprocess.Popen) -> None:
             except Exception:  # noqa: BLE001 - taskkill 失败退回单杀
                 pass
         proc.kill()
+        return
+    if proc.poll() is not None:      # 已退出：见 docstring，不发信号
         return
     import signal
 

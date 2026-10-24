@@ -49,8 +49,17 @@ class TestChineseFingerprint:
             f"近似问法没有任何共享 token，指纹等于整串相等：{tokens_first} vs {tokens_second}"
         )
 
-    def test_entity_swap_confidence_reaches_hit_threshold(self):
-        """换实体（今天→明天）的 confidence 必须 ≥ 0.85 且命中候选（票面判据）。"""
+    def test_entity_swap_confidence_reaches_hit_threshold(self, monkeypatch):
+        """换实体（今天→明天）的 confidence 必须 ≥ 0.85 且命中候选（票面判据）。
+
+        T4 语义档显式关掉：本格的判据是**指纹口径**（"旧实现整串相等、近似问法断层"），
+        票面那组读数（0.85）也是在语义档缺席时量的。语义档一开，权重口径就换成了
+        F1 多集包含 + 字符覆盖度（0.5875），它有自己的判定面
+        （`tests/unit/memory/test_muscle_memory_semantic.py`，那里喂假引擎钉余弦分档）。
+        实测：引擎在而模型权重不在的机器上，语义档会给每个向量分量打 0 分，
+        于是"指纹对了"这一格被语义面压低——判据因此随宿主形状漂移，不是随代码。
+        """
+        monkeypatch.setenv("NEUROVA_MUSCLE_SEMANTIC", "0")
         memory = MuscleMemory()
         memory.record_usage(
             tool_name="weather", query="许昌今天天气怎么样",

@@ -31,6 +31,41 @@ def test_normal_command_still_returns_contract():
     assert result["sandbox"] == "process"
 
 
+@pytest.mark.skipif(WINDOWS, reason="POSIX 进程组用例")
+def test_posix_alreadyExitedProcessIsNotGroupKilled():
+    """已退出的进程不许再发按组 SIGKILL——PID 复用会把无辜进程组杀掉。
+
+    实测形态（构建 `cnb-fjc-1k5nkdigv`）：`run_code` 起的进程正常跑完（`rc=0`），随后
+    取消令牌上那个**迟到**回调被兑现，`getpgid(pid)` 拿到的是一个刚被复用的进程组号，
+    整组 SIGKILL 落下，读出来是 `exit_code=-9`——看起来像"执行体把成功当失败"。
+
+    判据两侧：已退出的进程杀一遍 `returncode` 必须还是 0；仍在跑的照旧被杀（否则这道闸
+    就成了"什么都不做"）。
+    """
+    from neurova.sandbox.exec_sandbox import killProcessTree, spawnKwargsForKill
+
+    exited = subprocess.Popen(
+        [sys.executable, "-c", "print(1)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **spawnKwargsForKill())
+    # 收尸等待走具名超时常量：裸 `communicate()` 是无界等待，收尸没兑现时它不报红，
+    # 只把整场挂在那里（本档的父墙闸按这一形态点名）。
+    exited.communicate(timeout=SYSTEM_TOOL_WALL_S)
+    assert exited.returncode == 0, "前置不成立：这条进程本身就没有正常退出"
+    killProcessTree(exited)
+    assert exited.returncode == 0, (
+        f"已退出的进程被再杀了一遍（rc={exited.returncode}）——PID 复用时会误杀无辜进程组")
+
+    running = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], **spawnKwargsForKill())
+    time.sleep(0.2)
+    killProcessTree(running)
+    # 等待走**具名超时常量**的真事件（`wait(timeout=…)`），不用裸 `wait()`：
+    # 裸等在这道闸里是无界等待——收尸没兑现时它不报红，只是把整场挂在那里。
+    running.wait(timeout=SYSTEM_TOOL_WALL_S)
+    assert running.returncode == -9, (
+        f"仍在运行的进程没被杀（rc={running.returncode}）——这道闸退化成什么都不做")
+
+
 @pytest.mark.skipif(not WINDOWS, reason="Windows 平台进程树用例")
 def test_windows_timeout_kills_grandchild():
     # 预清理：确保起点无 ping 残留
