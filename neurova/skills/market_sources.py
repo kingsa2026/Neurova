@@ -336,6 +336,24 @@ def _pathTooLongReason(member: str, dest: Path, total: int) -> str:
         f"——这是落点问题，不是包的问题：换短根或开启长路径")
 
 
+def _projectedPathVerdict(payload: bytes, dest: Path) -> str:
+    """落点根太长的**判定**：先于解包算，不靠"解包失败了"这一征兆。
+
+    为什么要在解包前判：同一份包在长根下的结局**取决于跑在哪个内核上**——
+    Linux 的 NAME_MAX 是单个成员的字符数（与整条路径长度无关），整条路径的上界也
+    只对路径分量生效，于是 `根(135) + 成员(125) = 261` 在 Windows 上是硬失败、在 Linux 上
+    照装不误；解包成功 ⇒ `except OSError` 那一支根本不会跑，原因面读到的是空串。
+    而 `extractall` 非事务，撞到中途才发现会留下半棵树。
+
+    这就是"判据依赖某台机器的 OS 开关"的第二副面孔：**失败征兆不可跨平台移植，判定条件可以**。
+    `_longestProjectedPath` 本来就算得出这个数，现在它也是判定的依据。
+    """
+    longest = _longestProjectedPath(payload, dest)
+    if longest is None or longest[1] < WINDOWS_MAX_PATH:
+        return ""
+    return _pathTooLongReason(longest[0], dest, longest[1])
+
+
 def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:
     """解包这个 zip：成功返回空串，失败返回**点名的原因**。判定与文案都只这一处实现。
 
@@ -343,14 +361,15 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     越出目标目录的判定与解包机制在 `neurova/security/safe_archive.py`——本函数此前自己
     写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
+
+    落点预算在**解包之前**判（`_projectedPathVerdict`）：跨平台的拒因不该由"这台机器的
+    文件系统有没有拦下它"决定。
     """
+    tooLong = _projectedPathVerdict(payload, dest)
+    if tooLong:
+        logger.warning("skill %s zip refused: %s", skill_id, tooLong)
+        return tooLong
     try:
-        # 预算在这里判、在解包**之前**判：判定是这条路的策略（与上面两条上限同一层），
-        # 不能等磁盘把 ENAMETOOLONG 撞出来——那宿主机若开着长路径就一句错也不报，
-        # 装成与否随机器变；而 `extractall` 又非事务，撞到中途才发现会留下半棵树。
-        longest = _longestProjectedPath(payload, dest)
-        if longest is not None and longest[1] >= WINDOWS_MAX_PATH:
-            return _pathTooLongReason(longest[0], dest, longest[1])
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

@@ -17,8 +17,8 @@ import re
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
-from neurova.core.logger import get_logger
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.core.logger import get_logger
 from neurova.knowledge.document_pipeline import DocumentParseError, parse_document
 from neurova.knowledge.ingest_bus import (
     KB_INGEST_RESULT_TOPIC,
