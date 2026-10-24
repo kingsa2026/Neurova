@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, List, Optional, Pattern, Tuple
+from typing import Any, Iterable, List, Optional, Pattern, Tuple
 
 __all__ = [
     "SensitivityLevel",
@@ -327,7 +327,7 @@ def _keyShapePatterns(rules: Iterable[SensitiveRule]) -> List[Pattern]:
 _KEY_SHAPE_PATTERNS: Tuple[Pattern, ...] = tuple(_keyShapePatterns(SENSITIVE_RULES))
 
 
-def isCredentialKey(name: Any, rules: Optional[Iterable[SensitiveRule]] = None) -> bool:
+def isCredentialKey(name: object, rules: Optional[Iterable[SensitiveRule]] = None) -> bool:
     r"""一个**结构里的键名**是不是凭据键（`{"api_key": …}` 那一形）。
 
     为什么需要它：内容形状的正则要吃"键名＋赋值符＋值"连成一串的文本，而证据／工具载荷
