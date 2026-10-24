@@ -3787,3 +3787,25 @@ tests/unit/computer_use/test_dialogResponseIsWired.py
 # 其中 2 条红（`document_pipeline.py` 长出第二张后缀表、install-gate 那条）经 `git status` 现查
 # 是**并会话未跟踪的在途文件**所致，与本批无关，不记成回归。
 tests/unit/security/test_sensitiveInfoRulesAreSingleSourced.py
+# §6-412（批 P-4）：插件事件面过了权限门之后必须真落到总线上——`resolveEventBus` 全仓一个形状。
+# 现查根因：`BasePlugin.subscribe/unsubscribe/publish_event` 三条通道都是 `if self._event_bus:`，
+# 而生产侧**从没人给它赋值**（`plugin_manager.py` 里连 `event_bus` 这个词都不出现，全仓赋值点
+# 只有 `tests/unit/test_base_plugin.py:255/283/304`）⇒ 已逐项确认 `emit:events` 的插件调
+# `publish_event()`，效果＝打一条 warning 然后什么都没发生（`unsubscribe` 连 warning 都没有）。
+# 与 `core/base_module.py:115` 记的是同一条根因（注入位从不被填 ⇒ 恒走 None 分支），那边早已
+# "调用时现取单例"收口，插件族当时漏扫——本票即第 5 条补齐。
+# 门不动：`_requirePermission(read:events / emit:events)` 仍在最前，未授予抛
+# `permission_not_granted`（既有格子钉的顺序判据本批复跑仍绿）。能力面词汇仍单点在
+# `skills/permissions.py:KNOWN_CAPABILITY_KEYS`，本批不新增。
+# 判据 8 格＝三条行为正检（无注入时发布在真总线计数上可见／订阅收得到／退订不再收到）＋
+# 两条门控制（未授予必抛且一次都不落总线；显式注入优先于现取，防第二条口径）＋
+# 两条形状控制（两族无注入时解析到**同一个** bus 对象；`if self._event_bus:` 在插件族不得再现）。
+# 边界按实测收窄：`shared_core/infrastructure.py` 同形状是合法的（该类 `:130` 真会 `EventBus()`），
+# 故判据只点名插件族——全仓禁这个语法等于改坏正确的代码。
+# 红→绿 5 failed／3 passed（两条门控制今天就绿）→ 8 passed。同批清掉批 O-5 的两处半成品：
+# 本地同名 dataclass 把 `SensitiveRule as SensitivePattern` 的 import 盖掉（常驻守卫
+# `test_packageInitBindsNoUnusedGenericNames` 点名"import 从未生效"），以及"编译模式缓存"4 行被
+# 错接进 `set_memory_manager()`（未设记忆管理器的实例 import 即 AttributeError）。
+# 活体（真授权文件＋真全局总线，无 mock）：`_event_bus=None` 下发布使计数 0→1 且订阅侧收到；
+# 空授权表下仍先抛 `permission_not_granted` 且计数不动。
+tests/unit/plugins/test_pluginEventSurfaceResolvesTheBus.py
