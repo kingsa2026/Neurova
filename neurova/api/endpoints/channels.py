@@ -393,8 +393,6 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
     if _feishuEnvelope(data)[1] == "helpdesk.ticket.updated_v1":
         takeover = adapter.handle_helpdesk_ticket_event(data.get("event") or {})
         if takeover is not None:
-            from neurova.channels.base import ChannelEventType
-
             await adapter._emit_event(*takeover)
         return {"code": 0}
 
@@ -456,8 +454,13 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
     return {"errcode": 0}
 
 
-async def _emitChannelMessage(adapter, event_type, channel_msg: ChannelMessage) -> None:
-    """EventDoor 形状守卫的显式入口：只接 `ChannelMessage`，不接任意对象。"""
+async def _emitChannelMessage(adapter, event_type, channel_msg) -> None:
+    """EventDoor 形状守卫的显式入口：只接单个消息对象，不接任意对象。
+
+    注解里不写 `ChannelMessage`：那类在 `neurova.channels.base`（重型渠道包），
+    本端点模块不为一个注解把它提到顶层（§3 可选依赖惰性 import），而字符串前向引用
+    在静态闸眼里就是未定义名（F821）。形状由本函数只转一次的调用面保证。
+    """
     await adapter._emit_event(event_type, channel_msg)
 
 
