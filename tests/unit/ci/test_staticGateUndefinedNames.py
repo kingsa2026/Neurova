@@ -46,11 +46,16 @@ def undefinedNameReadings() -> list[str]:
         encoding="utf-8",
         errors="replace",
         env=_utf8ChildEnv(),
+        timeout=30,
     )
     return [line for line in (proc.stdout or "").splitlines() if "undefined name" in line]
 
 
 class TestStaticGateUndefinedNamesIsClean:
+    #: pyflakes 跑的是整棵树（`neurova` + `scripts`），全仓一次静态巡检的墙钟比全局 30s 长；
+    #: 子进程那 30s 是"这一趟读不动"，本格必须比它更晚到点，否则先到点是全局那道、
+    #: 报出来的是整场跑测没了而不是这条读数为红（见 `test_nestedPytestBudgetWallsAreOrdered`）。
+    @pytest.mark.timeout(120)
     def test_noUndefinedNameAnywhere(self):
         """整个门禁面零未定义名——这条就是 CI static-gate 那一格的本地镜像。"""
         try:

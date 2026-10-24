@@ -1774,7 +1774,7 @@ def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffe
         (tmp_path / ".gitignore").write_text("/data/\n", encoding="utf-8")
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=False,
                        capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", timeout=30)
 
     gaps = {}
     offenders = _faceFindings(tmp_path, [rel], gaps)
