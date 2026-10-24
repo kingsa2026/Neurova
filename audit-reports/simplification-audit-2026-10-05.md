@@ -10459,3 +10459,35 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **✅ 同批扫掉 ruff 那 3 条存量（主干 `21d70a8a` 现场就有，不是本批引入）**：静态门禁绿了之后露出来的是同一条流水线的 ruff 阶段。逐条看是两类真缺陷，都不是「加 noqa」能了事的：①`tests/manual/readFaceReconciles_b58.py:102`／`shellEntryNotPinned_batch57.py:166` 的 `exc`——PEP 3110 规定 `except ... as exc` 的绑定名**出块即解绑**，而它被关进 `lambda` 里懒求值，于是那两行的失败读数一旦真被执行就是 `NameError`（脚本静默崩在诊断路径上）；改成出块前先取值。②`tests/manual/declaredSurface_batch49.py` 的 `PROBE`——`runProbe` 是 `readImplicit` 的上一代实现，全文件无人调用、`PROBE` 从未定义，按教义第 7 条**删**（不补一份 PROBE，那是留两处同功能实现）。另修 `tests/unit/neurflow/test_workflow_ownership_v2.py:151` 的 `# noqa: 仅记录`——不是码列表的 noqa 是空转指令，该行本就无违规，直接去掉。改后 `python -m ruff check neurova tests --no-cache` → `All checks passed!`
     - **⚠ 本批新登记的断点（不静默遗留）**：①`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_staticRootsNeverPointOutsideOrNowhere` 报 `tests/unit/test_session_landing_guard.py: missing`——**该文件真实存在且在 `protected_tests.txt:1636` 在册**，说明这条「根指不到真实目录」的静态根解析在 Linux 上误判，与本次改动无关，单独开票；②`tests/unit/tools/test_governance_mcp.py` 等 12 格在裸环境里报 `async def functions are not natively supported`（缺 `pytest-asyncio` 的 asyncio_mode 声明），CI 精简锁里有、本地没有，属环境差异不属回归。
     - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记 **§6-417**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
+
+419. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
+    - **✅ 起点（CI 现场读数，非本地臆测）**：`cnb build get-build-status --sn cnb-nmd-1k5no13f9` 读回
+      `stages: error,116717,Prepare / skipped,0,install uv… / skipped,0,protected subset…`，
+      日志末行 `任务超过最大执行时间而被强制关闭：1m0s`。同一构建里八条邻居流水线的 Prepare 是
+      `3719ms`～`63827ms`——同一份提交、同一时刻，所以不是「机器慢」，是这一格自己越了平台的 1m。
+    - **✅ 两次对照实验否掉了「墙钟需要抬」这个直觉方向**：以 `api_trigger_probe` 事件在 main 上单起三条
+      探针流水线（不跑任何用例），Prepare 读数 `18232ms` / `3719ms` / `4677ms`。空跑都在 1m 内，
+      说明期限本身够用；变的是**这一格要塞进去的固定成本**，不是平台的表。
+    - **✅ 根因落在声明处**：`dependency-audit` 的 Prepare 要 `docker pull` 镜像、拷两份缓存卷、装
+      `pip-audit`，再把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`——而它与其余八条同规格
+      `cpus: 2`。按修复教义第 1 条，故障在声明处生产、在 Prepare 处被报出来；改 stage 脚本是把报错挪走。
+    - **✅ 判据按阶段结构认，不按流水线名认**：`tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py`
+      扫 `runner` + `docker.volumes` + `stages[].script`（含 YAML 锚点复用），凡「挂 `/root/.cache/osv*` 卷
+      **且** stage 里有 `--prefetch-offline-databases`」的流水线，`cpus` 必须 ≥ 4。改名、搬位置都不影响判据；
+      受治面自证下限 `MIN_HEAVY_PREPARE_PIPELINES = 1`，只报「零违规」不报扫描量即红。
+    - **⚠ 本批自己的三次落笔错（都在当场改掉，记录形态供下次省一轮）**：a) 首版取「`memory == cpus×2`」——
+      实测 23 处 `runner.cpus` 声明里**没有一处写 `memory`**，受治面是空的，绿得毫无意义；b) 第二版取
+      「`docker.volumes` ≥ 2 则 `cpus` ≥ 4」，把 `dependency-audit` 抓了出来，但 `unit-tests` 也在受治面内、
+      它已经合规——这一版恰好会让人以为「修完 `unit-tests` 就没事」，而真红在另一条；c) 第三版取「装两棵树
+      （Python + npm/cargo）」在活配置上扫到 **0 条**（`.cnb.yml` 里两棵树分别落在不同流水线）。三次都是
+      「受治面自证」那一格先红才发现的——这道自证不是装饰。
+    - **✅ 灯（红→绿逐条实测）**：`pytest tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py -q`
+      → 改前 `1 failed`（`'dependency-audit': cpus=2，挂 2 个缓存卷`，且受治面 2 条），改后 `2 passed`；
+      把 `cpus` 改回 `2` 再跑 → 当场回红，恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 `495 passed, 2 skipped`；受保护子集登记历史
+      （`test_protected_subset_registration_history` 8 点）、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard` 共 33 点全绿；`python scripts/ci_static_gate.py --skip-import` 全通过；
+      `ruff check neurova tests` All checks passed；`.cnb.yml` 现场 `yaml.safe_load` 通过。
+    - **⚠ 诚实边界**：本批只改 `dependency-audit` 这一格的 `cpus`，`unit-tests` 的 `cpus` 本来就是 4，
+      **没有**动任何 stage 的 `timeout`、没有动受保护子集清单的覆盖面。`cpus: 4 → 8` 未采用：本仓现有读数
+      不支持「这一格是核数瓶颈」的结论，先按最小可证的一步走。
