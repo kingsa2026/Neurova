@@ -487,6 +487,21 @@ class ChatPipeline:
             return result
         finally:
             finish_task(self._agent, ctx.user_input, completed=completed)
+            self._release_turn_scope()
+
+    @staticmethod
+    def _release_turn_scope() -> None:
+        """轮末解绑本轮取消令牌（这里是唯一的收尾点，异常与取消也过）。
+
+        轮首换新（`reset_turn_tool_messages`）只解决"上一轮置位的那个对象不再被用"，
+        不解决"它**还在**"：不换新的调用方（同进程里下一个无轮次上下文的执行体）
+        取到的仍是那只已置位的令牌，于是刚起的进程被上一轮的理由杀掉
+        （`LocalExecutor.exec` 的 `exit_code -9`）。解绑后它们拿到 `None`，
+        按"无令牌"处置：能跑，只是不可被轮次取消。
+        """
+        from neurova.core.cancel_token import clearTurnCancelToken
+
+        clearTurnCancelToken()
 
     async def _execute_steps(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整的对话管线

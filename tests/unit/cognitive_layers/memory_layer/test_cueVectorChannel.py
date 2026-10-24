@@ -70,12 +70,11 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
 
 @pytest.fixture
 def corpus(tmp_path):
-    from neurova.embedding import get_embedding_engine
+    from tests.conftest import requireVectorPath
 
-    assert get_embedding_engine() is not None, (
-        "本判据测的是生产同款稠密检索，缺本地 ONNX 档时读数无意义"
-        "（前提与 test_onnx_lazy_init_deadlock.py 一致，不以 skip 蒙过）"
-    )
+    # 前提是「稠密检索真的在跑」，不是「引擎对象不是 None」——薄环境里后者恒真、
+    # 每次都返回零向量，余弦恒 0，读数无意义。判据单一源在 conftest。
+    requireVectorPath()
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，
     # 「关掉通道读数不降」这条差分因此测的是残留状态而不是通道（本轮就这么翻过车）。

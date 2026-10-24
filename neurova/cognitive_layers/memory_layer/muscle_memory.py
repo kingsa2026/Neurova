@@ -71,8 +71,20 @@ def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
     return overlap / min(sum(item_all.values()), sum(query_all.values()))
 
 
+def _isZeroVector(vec: Optional[List[float]]) -> bool:
+    """零向量 = 嵌入路径降级（不是"语义不相似"）。
+
+    薄环境的 `encode()` 是 `[0.0] * 512` 的兜底；两条零向量的余弦是 0，与"真的无关"
+    长得一模一样，于是下游无法区分"这条路径没跑起来"和"这两个东西不沾边"。
+    判"降级"必须问模长，不能问相似度。
+    """
+    if not vec:
+        return False        # 缺失 ≠ 零向量：缺失的含义由各调用方自己定
+    return not any(vec)
+
+
 def _semantic_vector(text: str) -> Optional[List[float]]:
-    """计算语义向量；失败/关闭返回 None（调用方回落 MD5 分支）。"""
+    """计算语义向量；失败/关闭/降级返回 None（调用方回落词法分支）。"""
     if not text or not _semantic_enabled():
         return None
     engine = _get_engine()
@@ -81,6 +93,10 @@ def _semantic_vector(text: str) -> Optional[List[float]]:
     try:
         vec = engine.encode(text)
     except Exception:  # noqa: BLE001
+        return None
+    if _isZeroVector(vec):
+        # 引擎在位但给零向量：模型/分词器/推理后端三者有缺席，这条路径没有信息量，
+        # 按"缺席"处理才让下游退回词法面（否则零余弦把词法分一起吃掉）。
         return None
     # 存储瘦身：4 位小数足够分档，落盘体积减半以上
     return [round(float(x), 4) for x in vec]
@@ -384,6 +400,9 @@ class MuscleMemory:
         # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
+        if _isZeroVector(item_emb):
+            # 历史条目可能就存着降级期落下的零向量：那不是"语义不相似"，是"当时没有向量"。
+            item_emb = None
         if query_emb and item_emb:
             sim = vector_math.cosineSimilarity(query_emb, item_emb)
             if sim > 0.75:
