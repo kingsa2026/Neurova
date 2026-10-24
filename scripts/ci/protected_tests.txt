@@ -3766,3 +3766,24 @@ tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
 # 想象 API 守卫合跑 579 passed／2 skipped，无回归（§6-404 那条"不许挂 `_supervisor`"的反挂接裁决
 # 与本题不是同一对象，原样保留且仍绿）。
 tests/unit/computer_use/test_dialogResponseIsWired.py
+# §6-411（批 O-5）：内容级敏感信息的规则表与脱敏引擎各只留一份（用户裁"先收口单源，暂不进回合链"）。
+# 比之前仓内有**七份**：cognitive 的 8 条键值表（sanitize 用 `split("=")[0]+"=***"` ⇒ 冒号形
+# `password: abc` 输出 `password: abc=***`，值一个没少还缀垃圾）、memory 的 8 条（中文键名＋校验型
+# 身份证＋带分隔卡号是它的长处，但 `bank_card`/`credit_card` 是同一条正则登记两次，且 `replacement`
+# 死模板表达不出"留首3末4"）、firewall 的 6 条**裸词**（打码的是关键词本身）＋它在 `:147` 先编译、
+# `:150` 才 `_load()` ⇒ 配置改规则永不生效；另三处**在役**的自有小抄（summarizing_compressor／
+# error_mapping／evolution_inputs_guard）本批先合表不接线 ⇒ 另立一票。
+# 合并尺度取三份里**较高**的一档（身份证 HIGH→CRITICAL、手机号 MEDIUM→HIGH、邮箱 LOW→MEDIUM），
+# 后果明写：`MemorySecurityGuard.should_remember("…手机号…")` 从此 False；这三条链今天零生产消费者。
+# 顺带修掉一个真错读数：`get_sensitivity_level` 原来是 `max(levels, key=lambda x: x.value)`——
+# 按**字符串**比大小，"medium" 赢过 "critical"，"最高敏感度"是错的；序现在由共享尺度一处给。
+# 判据核心是"同表同引擎"：同一串文本从 detector／MemorySecurity／firewall 三扇 door 读回必须
+# **逐字相等**（有人另起一张表或再写一遍循环就红），另含裸词反例、配置生效正检（这条今天该红）、
+# 枚举别名、重复正则、面自证与合成样本对照。13 passed（3.23s／4.02s 两次同读数）。
+# 活体（隔离数据根、生产函数无替身）：12 条规则 × 9 组文本，四扇 door 输出与单源引擎逐字一致，
+# `password: hunter2`→`password: ***`、`API_KEY=sk_test_1234567890`→`API_KEY=***`、
+# 手机号→`138****5678`、正常中文原样返回 ⇒ LIVE_PASS。
+# 回归：`tests/unit/security`＋`test_firewall`＋记忆安全两档合跑 **1209 passed／3 skipped**；
+# 其中 2 条红（`document_pipeline.py` 长出第二张后缀表、install-gate 那条）经 `git status` 现查
+# 是**并会话未跟踪的在途文件**所致，与本批无关，不记成回归。
+tests/unit/security/test_sensitiveInfoRulesAreSingleSourced.py
