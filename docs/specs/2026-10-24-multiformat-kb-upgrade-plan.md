@@ -337,15 +337,35 @@ A0（租户隔离）→ A1（去重）→ A3（过滤）→ A4（图谱影子）
   影响面（事实/主体类型/子术语/引用规则四路读数，被引用即 409 不许强删）；写变更落
   activity 留痕（操作人/动作/依据）；删规则由派生账撤回其全部推导结论
   （`retractAllFromRule`）。
+- **S3 实例编辑**：`POST /knowledge/graph/instances` 经唯一咽喉落底座事实
+  （evidence_text 必填、未登记谓词在写入口先拒、同三元组幂等）；
+  `GET /knowledge-graph/{agent}/studio` 一次给齐子图+schema+统计+截断读数。
+- **A2 OCR provider**：`OcrEngine` 契约入 `ocr_engines` 单源；Paddle/Tesseract
+  惰性 provider；`NEUROVA_KB_OCR_ENGINE=rapidocr|paddle|tesseract|auto`，
+  缺省 rapidocr 行为不变，不下载模型。
+- **A6 GIS**：条目可选 `geo`（lat/lon 归一）；`geo_radius`/`geo_bbox` 过滤贯通
+  visible/search/hybrid/搜索请求；无坐标不参与，过滤先于检索，不越租户；
+  不引入空间库（MapLibre 视图待前端空间批次）。
+- **A7 格式/框架**：`.xls` 直读（xlrd 可选，产出与 xlsx 同形，缺席回落
+  LibreOffice）；Kreuzberg 影子对比（`NEUROVA_KB_PARSER=kreuzberg_shadow`
+  挂 `metadata.parser_shadow` 读数，主路逐字不变）——影子读数稳定后另批切换。
+- **v25 按租户本体**（拍板项）：两表重建为 `(tenant_id, id)` 复合主键（存量归
+  default）；注册表/规则引擎全方法带 `tenantId`（缺省 default 语义不变）；
+  分层/影响面/撤回只在同租户内计算；种子谓词与种子规则在咽喉写入首跳按租户
+  幂等补种；schema/CRUD/impact/studio 按操作者租户过滤，`tenant_scoped` 翻真。
+- **S0–S3 前端工作台**：`GraphWorkbenchPage`（Vue Flow 2D 画布 + 本体面板
+  CRUD/影响面提示 + 实例编辑表单）；旧 `KnowledgeGraphPage` 保留并加入口；
+  i18n 11 语言同步；vue-tsc/vitest/locale 守卫全绿。3D 探索器（S4）与旧页
+  退役（S5）待后续批次。
 
-尚未落地（依赖后续迁移/前端批次）：
+尚未落地（依赖后续批次）：
 
-- **按租户本体**：`ontology_terms/rules` 目前以全局 `term_id` 为主键，直接加 tenant
-  列无法允许两个租户使用同一 term_id；需要 v25 改主键/引入 tenant 复合键或租户
-  独立 schema，属于数据迁移，不能在本批偷偷改。
-- **2D/3D 工作台**：后端读/写面已具备（S1 schema / S2 CRUD+影响面 / 图谱真总量）；
-  前端仍是只读 ECharts——Vue Flow 2D 画布、3D WebGL、S3 实例编辑（经 admission +
-  projection rebuild）、MapLibre 空间视图均待 S0–S5 前端批次。
-- **Kreuzberg 迁移**：已安装并验证可抽取 docx/pdf（页标记可用），但尚未替换
-  `document_pipeline` 主路；需先做影子对比（页码/标题/OCR/召回）再切。
-- **GIS**：geo 字段、空间过滤、MapLibre 视图未落代码。
+- **S4 3D 探索器**：需引入 `3d-force-graph`/Three 懒加载依赖（bundle 与 WebGL
+  兼容评估后另批），服务端子图裁剪/LOD 未做。
+- **S5 旧页退役**：旧 `KnowledgeGraphPage` 仍在（S0 语义保留可回退），功能对齐
+  验证后另批替换路由并退役旧图配置。
+- **MapLibre 空间视图**：A6 后端过滤已具备，前端地图视图未落。
+- **Kreuzberg 切换**：影子对比读数已可采（`parser_shadow`），切换主路待影子
+  数据积累后另批执行。
+- **A8 规模与交付**：10M 迁移/分片、Docker 远程构建、生产 MQTT TLS 按已登记
+  解封条件执行（独立项目）。
