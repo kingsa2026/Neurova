@@ -314,6 +314,25 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
+def _refuseOverlongLanding(payload: bytes, dest: Path) -> None:
+    """落点 + 最长成员的投影超 Windows 上限时，**在落盘之前**拒。
+
+    为什么必须在解包前判：260 是 Windows 口径，而落盘那一步的失败**取决于跑它的机器**。
+    Linux 内核的路径上限是 4096，同一条 259 字符的落点在 Linux 上照常建得出来——
+    于是"落点根太长"这一族在 Linux 上永远捕获不到 `OSError`，原因面就返回空串（读作"装成了"）。
+    §6-276 立这一族判据时按 Windows 的症状写实现，判据却在 Linux 上跑，两边从没对上过。
+
+    取 `UnsafeArchiveError` 是"这个包在本落点落不下去，拒绝解包"的既有词汇
+    （越界、超字节、超成员数都归它），不另造异常类型；它随后经
+    `_describeExtractionFailure` 的同一条支路被点名成"路径过长 + 三个数"。
+    """
+    projected = _longestProjectedPath(payload, dest)
+    if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
+        member, total = projected
+        raise safe_archive.UnsafeArchiveError(
+            f"落点根过长：最长成员 {member!r} 合计 {total} 字符 ≥ Windows 上限 {WINDOWS_MAX_PATH}")
+
+
 def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
     """把一次解包失败写成能据以行动的一句话。
 
@@ -321,7 +340,7 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     **处置方向完全不同**：前者该拒、中者该退回上游、后者该改部署——读的人拿不到区分，
     就会去改一个没坏的包（§6-259 那条 "zip refused" 的真实成因正是第三种，被折了 17 天）。
     """
-    if isinstance(exc, OSError):
+    if isinstance(exc, (OSError, safe_archive.UnsafeArchiveError)):
         projected = _longestProjectedPath(payload, dest)
         if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
             member, total = projected
@@ -341,6 +360,7 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
     try:
+        _refuseOverlongLanding(payload, dest)
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

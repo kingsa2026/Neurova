@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional, Tuple
 
 from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
+from neurova.core.data_root import legacyHomeLanding
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -219,8 +220,12 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
-    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
+
+    `~/.neurova` 这一段的取法不在这里拼第二份：家目录旧落点是数据根收养的判定对象，
+    各拼一遍就是各判一次要不要搬（AGENTS.md 教义第 6 条），取 `core/data_root.legacyHomeLanding`。
+    """
+    return legacyHomeLanding(ANCHOR_FILE_NAME)
 
 
 def readAnchors() -> Dict[str, str]:

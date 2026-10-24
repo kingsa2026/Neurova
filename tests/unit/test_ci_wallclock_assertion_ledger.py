@@ -668,7 +668,8 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    "tests/unit/memory/test_moe_routing.py": 2,
+    # `c2031c4c`（批 138 · §6-378 通道插件未接旋钮退净）删掉了该文件，那 2 处随文件退场；
+    # 键从本表消失是销账，不是沉默地少登记一条。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,
