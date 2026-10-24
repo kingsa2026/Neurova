@@ -208,6 +208,17 @@ def legacyHomeLanding(*parts: str) -> Path:
     return Path.home().joinpath(".neurova", *parts)
 
 
+def anchorLanding(*parts: str) -> Path:
+    """**故意**留在主目录下的状态落点（`~/.neurova/...`）：§6-388 的根外锚问的那一位。
+
+    它与 `legacyHomeLanding` 同形但不同义，所以是**单独一个取法**：
+    那一族是"收进数据根前的旧位"，本函数是"必须留在数据根之外的现位"——
+    锚要察觉整个数据根被替换/回滚，跟数据根同生共死就失效了。把两者混成一个函数，
+    等于让"该收的没收、该外的却跟着搬"，谁读都分不清。
+    """
+    return Path.home().joinpath(".neurova", *parts)
+
+
 def adoptLandingFrom(target: Path, legacy: Path) -> bool:
     """收养的**唯一实现**：把 `legacy` 处的东西搬到 `target`（空缺时才动）。
 

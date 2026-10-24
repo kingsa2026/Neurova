@@ -207,7 +207,10 @@ class TestNoNewHomeLandingIsAllowed:
         # 家目录那族五处（benchmark/image_pipeline 的裸相对、rbac、wecom_media、knowledge 配置）
         # 已全部收进数据根，表里只剩**收养端本身**——它必须能算出旧落点，否则旧物搬无可搬。
         # 留空就是把收养能力一起删掉。（号不写在这里：让号是双向的，写死就等着撞别人的批。）
-        "core/data_root.py": 1,
+        # 2 条：旧位取法 `legacyHomeLanding`（收养端）与**故意**留在主目录的现位取法
+        # `anchorLanding`（§6-388 根外锚）。两者同形不同义——把锚当成"旧位"收进数据根，
+        # 它就再也察觉不到整库回滚；反过来把旧位留在外面，该收的永远收不进来。
+        "core/data_root.py": 2,
     }
 
     def test_homeLandingOffendersAreExactlyTheRegisteredOnes(self):
