@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchShowIsolated: '孤立ノードを表示',
     workbenchFilterTypes: '種別で絞り込み',
     workbenchFullGraph: '全グラフへ戻る',
     duplicateMerged: '内容が既存です：一致したエントリに今回のソースを統合しました',

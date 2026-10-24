@@ -24,8 +24,9 @@ export interface LayoutPoint {
   y: number
 }
 
-/** 环间距：够放默认节点卡片，父子边的径向长度一致可读。 */
-export const DEFAULT_RING_GAP = 220
+/** 总半径归一：最大深度映射到固定半径，整图占地恒定 ~2800px——
+ * fit 后 zoom 不随图深塌到不可辨认（曾实测节点缩到 30x8 『看起来空』）。 */
+export const DEFAULT_TOTAL_RADIUS = 1400
 
 interface TreeNode {
   parent: string | null
@@ -68,12 +69,14 @@ function layoutComponent(
   centerRadius: number,
   angleStart: number,
   angleEnd: number,
-  ringGap: number,
+  maxDepth: number,
+  totalRadius: number,
   positions: Map<string, LayoutPoint>,
 ): void {
   const assign = (u: string, a0: number, a1: number): void => {
     const depth = tree.get(u)!.depth
-    const radius = centerRadius + depth * ringGap
+    // 半径按层深比例归一到总半径：深图不爆占地，浅图不挤成一团。
+    const radius = centerRadius + (maxDepth > 0 ? (depth / maxDepth) * totalRadius : 0)
     const mid = (a0 + a1) / 2
     positions.set(u, { x: radius * Math.cos(mid), y: radius * Math.sin(mid) })
     const total = leafCount(tree, u)
@@ -91,7 +94,6 @@ export function radialLayout(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
   rootId?: string,
-  ringGap: number = DEFAULT_RING_GAP,
 ): Map<string, LayoutPoint> {
   const positions = new Map<string, LayoutPoint>()
   if (!nodes.length) return positions
@@ -145,16 +147,24 @@ export function radialLayout(
     return b.leaves - a.leaves
   })
 
+  let maxDepth = 0
+  for (const comp of components) {
+    for (const node of comp.tree.values()) {
+      if (node.depth > maxDepth) maxDepth = node.depth
+    }
+  }
+
   const totalLeaves = components.reduce((sum, c) => sum + c.leaves, 0)
   let cursor = 0
   let componentIndex = 0
   for (const comp of components) {
     const span = (comp.leaves / totalLeaves) * Math.PI * 2
-    // 非主分量的根半径错开（否则多个分量根都叠在圆心）。
-    const centerRadius = componentIndex === 0 ? 0 : componentIndex * ringGap
+    // 非主分量的根统一放外环（半径封顶）：孤立分量可能多达几十个，
+    // 根半径随序号线性增长会把包围盒撑到数万像素（实测 38710px）。
+    const centerRadius = componentIndex === 0 ? 0 : DEFAULT_TOTAL_RADIUS * 1.25
     layoutComponent(
       comp.root, comp.tree, centerRadius,
-      cursor, cursor + span, ringGap, positions)
+      cursor, cursor + span, maxDepth, DEFAULT_TOTAL_RADIUS, positions)
     cursor += span
     componentIndex++
   }
