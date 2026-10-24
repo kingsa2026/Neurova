@@ -14,6 +14,7 @@ import base64
 import datetime
 import json
 import re
+import threading
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -355,12 +356,17 @@ async def runIngestWorker(
 
 
 _bridge: Optional[KnowledgeIngestBridge] = None
+#: DCL 的门（AGENTS.md §3）：无锁的那一版在并发下每个线程都会穿过 `if _bridge is None`
+#: 各建一份，先建的那份带着已注册的入站总线订阅被静默丢掉——消费者与生产者从此看不见彼此。
+_bridgeLock = threading.RLock()
 
 
 def get_ingest_bridge() -> KnowledgeIngestBridge:
     global _bridge
     if _bridge is None:
-        _bridge = KnowledgeIngestBridge()
+        with _bridgeLock:
+            if _bridge is None:
+                _bridge = KnowledgeIngestBridge()
     return _bridge
 
 
