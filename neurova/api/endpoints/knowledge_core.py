@@ -717,6 +717,55 @@ async def get_retrieval_metrics_snapshot(
     return {"code": 0, "message": "ok", "data": data}
 
 
+@router.get("/geo")
+async def list_knowledge_geo(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤"),
+    scope: str = Query(default="all", description="范围：all/public/private/shared"),
+    lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    radius_km: Optional[float] = Query(default=None, gt=0),
+    min_lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    min_lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    max_lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    max_lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    """可见 geo 条目清单（MapLibre 空间视图数据面，升级计划 A6 前置）。
+
+    复用 visible_items 的可见性边界与 A6 空间过滤；无坐标条目天然不出现。
+    radius 与 bbox 同时给时取交集（两道过滤都过才算命中）。
+    """
+    repo = get_repository()
+    geoRadius = (
+        {"lat": lat, "lon": lon, "radius_km": radius_km}
+        if lat is not None and lon is not None and radius_km is not None else None)
+    geoBbox = (
+        {"min_lat": min_lat, "min_lon": min_lon, "max_lat": max_lat, "max_lon": max_lon}
+        if None not in (min_lat, min_lon, max_lat, max_lon) else None)
+    items = repo.visible_items(
+        current_user, scope=scope, agent_id=agent_id,
+        geo_radius=geoRadius, geo_bbox=geoBbox,
+    )[:limit]
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "items": [
+                {
+                    "knowledge_id": it.get("knowledge_id"),
+                    "title": it.get("title"),
+                    "category": it.get("category"),
+                    "geo": it.get("geo"),
+                    "updated_at": it.get("updated_at"),
+                }
+                for it in items if it.get("geo")
+            ],
+        },
+    }
+
+
 @router.post("/audit/reindex")
 async def run_knowledge_reindex(
     request: Request,
