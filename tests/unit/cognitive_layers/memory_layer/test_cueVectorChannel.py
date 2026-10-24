@@ -80,13 +80,18 @@ def _denseTierIsUsable() -> bool:
     from neurova.embedding import get_embedding_engine
 
     engine = get_embedding_engine()
-    if engine is None or not getattr(engine, "backend_type", None):
+    if engine is None:
         return False
+    # 顺序是这条判据的要害：`get_embedding_engine()` 拿到的是**未加载模型**的裸实例，
+    # `backend_type` 在第一次 `encode` 之前恒为 None（懒初始化自救就发生在 `encode_batch` 里）。
+    # 先判档再编码，等于永远判成"没有这一档"——判据在此前实跑里就退成了整文件 skip。
     try:
         vector = engine.encode("探针")
     except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
         return False
-    return bool(vector) and any(float(x) != 0.0 for x in vector)
+    if not (vector and any(float(x) != 0.0 for x in vector)):
+        return False
+    return bool(getattr(engine, "backend_type", None))
 
 
 @pytest.fixture
