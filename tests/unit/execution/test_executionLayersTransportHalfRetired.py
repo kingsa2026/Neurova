@@ -98,6 +98,16 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     """
     import asyncio
 
+    # 上一轮留下的取消令牌不得挟持本轮起的进程：`registerKillAction` 挂的是
+    # **当前轮**的令牌，而 `exec` 里那行 `registerKillAction(...)` 是该进程唯一的
+    # 回收入口。受保护子集里先跑过取消/超时档之后，ContextVar 里那个已置位的令牌
+    # 会让回调**立即兑现**——进程刚 `Popen` 出来就被整组 SIGKILL，实测瞬时退出码
+    # `-9`、`duration_ms≈2`、`error=None`（2026-10-24 整份受保护子集复现；本档单跑
+    # 4 passed）。生产侧的轮首换绑在 `core/cancel_token`，测试侧照同一入口取新令牌。
+    from neurova.core.cancel_token import resetTurnCancelToken
+
+    resetTurnCancelToken()
+
     from neurova.execution_layers import (
         LocalExecutor, RuntimeFactory, RuntimeManager, RuntimeType, get_runtime_manager)
 
