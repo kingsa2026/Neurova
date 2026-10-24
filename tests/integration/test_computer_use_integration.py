@@ -34,6 +34,11 @@ from neurova.computer_use import ComputerUseManager, get_computer_use_manager
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: `git grep` 的预算唯一出处（§6-402 批 K 口径）。这一枚扫的是 `neurova` ＋ `NeurUI/src`
+#: 全树，实测秒级；此前没有 `timeout=`＝无界等待，而缺省 30s 的全局墙在 Windows 侧走 thread
+#: 法——它先到就是整场跑测连报告一起没了。取低于全局墙的 20s（十倍余量）。
+GIT_GREP_WALL_S = 20
+
 
 def test_doctorReportIsTheRealReadSideAndCarriesTheTriState():
     """facade 的读侧是 `doctor_report()`；能力面必须带 T-07 的三态读数。
@@ -85,7 +90,8 @@ def test_retiredVisualParseCannotComeBack():
     hits = subprocess.run(
         ["git", "-c", "core.quotepath=false", "grep", "-lE",
          "visual_parse|visualParse|VisualParse", "--", "neurova", "NeurUI/src"],
-        cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=GIT_GREP_WALL_S)
     assert hits.returncode in (0, 1), hits.stderr
     real = [line for line in (hits.stdout or "").splitlines()
             if line.strip() and ".mimosa" not in line]

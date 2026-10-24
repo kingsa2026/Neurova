@@ -70,6 +70,7 @@ def _requestsFromRepository(repo: Any, *, activityKind: str, activityBasis: str,
             knowledgeId = str(item.get("knowledge_id", ""))
             requests.append(AdmissionRequest(
                 agentId=agentId,
+                category=str(item.get("category") or ""),
                 subjectLabel=str(item.get("title", "")).strip() or ("untitled-" + knowledgeId),
                 recordKind="narrative",
                 objectTerm=knowledgeId,

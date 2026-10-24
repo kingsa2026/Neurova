@@ -177,3 +177,34 @@ class TestBulkImportNoConflict:
         repo.create_knowledge("default", title="交互条目", content="a")
         repo.create_knowledge("default", title="交互条目", content="b")
         assert len(repo.list_conflicts()) == 1
+
+
+def test_conflict_publishes_declared_notify_topic(repo):
+    """冲突成立时发 kb/conflict/notify；通知是观测面，失败不影响账本。"""
+    from neurova.knowledge.ingest_bus import KB_CONFLICT_NOTIFY_TOPIC, get_ingest_bus
+
+    events = []
+    get_ingest_bus().subscribe(KB_CONFLICT_NOTIFY_TOPIC, events.append)
+    repo.create_knowledge("default", title="同一口径", content="交付时间每周五",
+                          owner_user_id="u1", tenant_id="t1", visibility="public")
+    new = repo.create_knowledge("default", title="同一口径", content="交付时间每周三",
+                                owner_user_id="u1", tenant_id="t1", visibility="public")
+
+    assert len(events) == 1
+    assert events[0]["new_id"] == new["knowledge_id"]
+    assert events[0]["tenant_id"] == "t1"
+    assert events[0]["decision"] in ("conflict", "manual", "similar", "different")
+
+
+def test_conflict_detail_is_tenant_scoped(repo):
+    repo.create_knowledge("default", title="同标题", content="旧", tenant_id="t1",
+                          visibility="public")
+    new = repo.create_knowledge("default", title="同标题", content="新", tenant_id="t1",
+                                visibility="public")
+    conflictId = next(iter(repo._conflicts))
+
+    detail = repo.getConflict(conflictId, tenantId="t1")
+
+    assert detail["new_id"] == new["knowledge_id"]
+    assert detail["features"]["numbers_conflict"] is False
+    assert repo.getConflict(conflictId, tenantId="t2") is None

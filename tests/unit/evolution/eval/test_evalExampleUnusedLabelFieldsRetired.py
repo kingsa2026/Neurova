@@ -33,6 +33,11 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+#: `git ls-files` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s 的
+#: 20s：先到点的应当是子进程那条诚实的 TimeoutExpired——全局那道墙在 Windows 侧走 thread 法，
+#: 它先到就是整场跑测没了（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 EVAL_PKG = PROJECT_ROOT / "neurova" / "evolution" / "eval"
 DATASET_PY = EVAL_PKG / "dataset.py"
 SYNTHETIC_PY = EVAL_PKG / "synthetic.py"
@@ -83,6 +88,7 @@ def _trackedScanFace(scanRoots: tuple[str, ...]) -> list[Path]:
     listed = subprocess.run(
         ["git", "ls-files", "-z", "--", *scanRoots],
         cwd=str(PROJECT_ROOT), capture_output=True, text=True, encoding="utf-8",
+        timeout=GIT_WALL_S,
     )
     assert listed.returncode == 0, f"git ls-files 失败：{listed.stderr}"
     # 只留工作树里真在的：索引与工作树的差是在途改名/刚删的中间态，读到一条指不到文件的

@@ -42,6 +42,12 @@ import tempfile
 from tests import ast_scan
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+#: 子进程预算唯一出处。探针子进程只 import `neurova.core.agent_workspaces` 取一个路径，
+#: 实测单格 0.11s——此前挂着的 300s 是"给足安全感"而非实测需求，而 300s 子墙配全局 30s
+#: 父墙时，先到点的是后者＝整场跑测被打死（§6-402 批 K 口径）。收成低于全局墙的 20s，
+#: 既留住诚实的 TimeoutExpired，也不用给整档抬父墙。
+PROBE_WALL_S = 20
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
 SINGLE_POINT = MANUAL_DIR / "_liveVerifyIsolation.py"
 
@@ -71,7 +77,7 @@ def _runInCleanProcess(source: str) -> dict:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=300,
+        timeout=PROBE_WALL_S,
     )
     assert proc.returncode == 0, f"子进程没跑成（rc={proc.returncode}）：\n{proc.stdout}\n{proc.stderr}"
     last = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""

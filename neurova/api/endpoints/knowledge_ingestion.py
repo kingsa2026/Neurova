@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -109,12 +110,12 @@ def _default_llm_call(request: Optional[Request], prefer_agent_id: Optional[str]
 
 
 def _try_extract_to_graph(
-    items: List[Dict[str, Any]], request: Request, agent_id: Optional[str] = None
+    items: List[Dict[str, Any]], request: Request, agent_id: Optional[str] = None,
+    tenant_id: str = "default",
 ) -> None:
     """导入后触发"知识条目→图谱节点"抽取（批次 3）。失败逐条吞掉，不阻断导入。"""
     from neurova.cognitive_layers.knowledge_graph.manager import (
         get_agent_knowledge_graph_manager,
-        get_knowledge_graph_manager,
     )
     from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
@@ -128,14 +129,11 @@ def _try_extract_to_graph(
     # 权威落点必须显式接入：不传底座时抽取只落 JSON 投影，而答题读的是底座三元组，
     # 那就是 Issue #72 的"两张图"（审计 §5.3 / B-09）。
     authority = get_knowledge_fact_store()
-    # per-agent 隔离：写入所属 agent 的图谱（agent_id 缺失时退全局，仅测试路径）
-    if agent_id:
-        try:
-            graph = get_agent_knowledge_graph_manager(agent_id)
-        except ValueError:
-            graph = get_knowledge_graph_manager()
-    else:
-        graph = get_knowledge_graph_manager()
+    # per-agent + per-tenant 隔离：写入所属 agent/租户的图谱；agent_id 缺失时
+    # 落 default 域（测试路径），不退回跨租户共享的全局图。
+    graph = get_agent_knowledge_graph_manager(
+        agent_id or "default", tenant_id=str(tenant_id or "default")
+    )
     for entry in items:
         try:
             # agentId 必须传：抽取产物要落进被检索的那张图，落错域等于把条目的事实
@@ -155,6 +153,9 @@ async def import_knowledge_file(
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: str = Query(default="default", description="Agent ID"),
     sync: bool = Query(default=True, description="true=同步导入（现行为）；false=入队后台处理，返回 task_id（P1-#9）"),
+    ocr: str = Query(default="auto", description="auto=仅对无文字层页面 OCR；on=强制 OCR；off=禁用"),
+    engine: str = Query(default="", pattern="^(structured|legacy)?$",
+                        description="structured=页码/标题/OCR 流水线；legacy=旧单段抽取（回退）；空=读 NEUROVA_KB_DOC_PIPELINE"),
 ):
     """导入知识文件（txt/md/docx/xlsx/pptx/pdf/html/csv）。
 
@@ -173,7 +174,10 @@ async def import_knowledge_file(
             user_id=str(current_user.get("user_id") or ""),
         )
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
-    items, extract_status = _import_file_data(data, filename, agent_id, current_user)
+    items, extract_status = _import_file_data(
+        data, filename, agent_id, current_user, ocr_mode=ocr,
+        engine_mode=engine,
+    )
     if not items:
         # 2026-09-06 修复：抽取失败显式化——此前以成功语义静默返回空列表，
         # 前端一律提示"导入成功"，用户无从知晓 .ppt 旧格式/超 2MB/纯图片页
@@ -183,57 +187,65 @@ async def import_knowledge_file(
             "message": f"extract_failed:{extract_status}",
             "data": {"items": [], "status": extract_status},
         }
-    _try_extract_to_graph(items, request, agent_id=agent_id)
+    _try_extract_to_graph(
+        items, request, agent_id=agent_id,
+        tenant_id=str(current_user.get("tenant_id") or "default"),
+    )
     return {"code": 0, "message": "Import completed", "data": {"items": items}}
 
 
 def _import_file_data(
-    data: bytes, filename: str, agent_id: str, user: Dict[str, Any]
+    data: bytes, filename: str, agent_id: str, user: Dict[str, Any],
+    ocr_mode: str = "auto", engine_mode: str = "",
 ) -> Tuple[List[Dict[str, Any]], str]:
-    from neurova.attachment_parser import extract_attachment_text
-    from neurova.knowledge.splitter import split_with_meta  # noqa: F401 - 分块单源引用保持
+    engine_mode = engine_mode or os.environ.get(
+        "NEUROVA_KB_DOC_PIPELINE", "structured"
+    )
+    from neurova.knowledge.document_pipeline import DocumentParseError, parse_document
 
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    file_type = _guess_type(ext)
-    text, status = extract_attachment_text(data, filename, file_type)
-    if not text:
-        logger.info("[知识导入] %s 未抽取文本 (%s)", filename, status)
-        return [], status
+    try:
+        parsed = parse_document(
+            data, filename, source_path=filename, ocr_mode=ocr_mode,
+            engine_mode=engine_mode,
+        )
+    except DocumentParseError as exc:
+        logger.info("[知识导入] %s 未抽取文本 (%s)", filename, exc.reason)
+        return [], exc.reason
+    except Exception as exc:  # noqa: BLE001 - 解析失败按抽取失败上报
+        logger.warning("[知识导入] %s 解析异常: %s", filename, exc)
+        return [], "parse_failed:%s" % type(exc).__name__
 
     repo = get_repository()
-    title = _title_from_filename(filename)
-    # P0-2 分块：摄取即分块（段落→句→硬切降级），检索命中可溯源到块。
-    # P1#6：子块进索引细命中，父块作 LLM 上下文回传
-    from neurova.knowledge.splitter import build_entry_chunks
-
-    _children, _parents = build_entry_chunks(text)
+    title = str(parsed.metadata.get("title") or _title_from_filename(filename))
     item = repo.create_knowledge(
         agent_id=agent_id,
         title=title,
-        content=text,
+        content=parsed.content,
         category="import",
         tags=[],
         source="import:" + filename,
         confidence=0.7,
         visibility="private",
         owner_user_id=str((user or {}).get("user_id", "") or "default"),
-        chunks=_children,
-        parents=_parents,
+        tenant_id=str((user or {}).get("tenant_id") or "default"),
+        chunks=parsed.chunks,
+        parents=parsed.parents,
         # P0-3 闭环审查修 D：批量导入不进同值冲突队列——同名文件批量导入
         # （课件/周报）会瞬间产生 N-1 条 pending 刷屏待审；导入条目已有
         # source 字段独立溯源，冲突检测留给交互式单条创建路径
         detect_conflict=False,
+        source_type=parsed.source_type,
+        source_path=parsed.source_path,
+        ingest_time=parsed.ingest_time,
+        author=str(parsed.metadata.get("author") or ""),
+        page_count=parsed.metadata.get("page_count"),
+        ocr_used=bool(parsed.metadata.get("ocr_used")),
+        ocr_engine=str(parsed.metadata.get("ocr_engine") or ""),
+        ocr_confidence_avg=parsed.metadata.get("ocr_confidence_avg"),
+        document_id=parsed.doc_id,
+        dedupe=True,
     )
-    return [_build_item_dict(item)], status
-
-
-def _guess_type(ext: str) -> str:
-    if ext in ("txt", "md", "rst", "json", "yaml", "yml", "toml", "log"):
-        return "text"
-    if ext in ("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "html", "htm",
-               "rtf", "odt", "ods", "odp", "xml"):
-        return "document"
-    return "file"
+    return [_build_item_dict(item)], parsed.source_type
 
 
 def _title_from_filename(filename: str) -> str:
@@ -346,5 +358,8 @@ async def import_knowledge_url(
             "message": f"extract_failed:{extract_status}",
             "data": {"items": [], "status": extract_status},
         }
-    _try_extract_to_graph(items, request, agent_id=agent_id)
+    _try_extract_to_graph(
+        items, request, agent_id=agent_id,
+        tenant_id=str(current_user.get("tenant_id") or "default"),
+    )
     return {"code": 0, "message": "URL import completed", "data": {"items": items}}

@@ -18,6 +18,11 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+
+#: `git ls-files` 的预算唯一出处（毫秒级）。这枚落点此前没有 `timeout=`＝无界等待，
+#: 而 thread 法的全局 30s 比无界的等待更先到——报出来的不是这一格红，是整场跑测没了
+#: （§6-402 批 K 口径）。取低于全局墙的 20s，不给整档抬父墙。
+GIT_WALL_S = 20
 pytestmark = pytest.mark.timeout(60)
 
 
@@ -82,5 +87,6 @@ class TestNoZeroByteResidueInPackage:
         """`git rm` 之后索引里不能再有它——工作树删了但索引留着等于没退役。"""
         tracked = subprocess.run(
             ["git", "ls-files", "--", "neurova/expected", "missing"],
-            cwd=REPO, capture_output=True, text=True, encoding="utf-8").stdout.split()
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            timeout=GIT_WALL_S).stdout.split()
         assert tracked == [], f"仍在 git 索引里：{tracked}"

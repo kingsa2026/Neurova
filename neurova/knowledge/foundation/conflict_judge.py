@@ -30,7 +30,8 @@ class KnowledgeConflictJudge:
 
     # ── 分类 ──────────────────────────────────────────────────
 
-    def detect(self, subjectLabel: str, predicateTermId: str) -> List[Dict[str, Any]]:
+    def detect(self, subjectLabel: str, predicateTermId: str,
+               tenantId: str = "default") -> List[Dict[str, Any]]:
         """在同一 (主体, 谓词) 上找分歧；叙述记录（条目正文）另按条目划范围。
 
         分歧的前提是"两条说法在说同一件事"。三元组里"同一件事"就是消解后的主体；
@@ -41,7 +42,7 @@ class KnowledgeConflictJudge:
         同一条目改了正文仍走这里——新说法取代旧说法，账上留痕（019b-2 判据）。
         """
         groups: Dict[Any, List[Dict[str, Any]]] = {}
-        for fact in self._store.candidateFactsForConflict(subjectLabel, predicateTermId):
+        for fact in self._store.candidateFactsForConflict(subjectLabel, predicateTermId, tenantId):
             if _derivedBy(fact):
                 # 推导结论不是"同一 slot 的竞争主张"，而是同一条规则对同一主体给出的
                 # 多条后件实例。让它们互相取代，传递闭包会自己裁掉自己：甲→丁 顶掉
@@ -137,10 +138,11 @@ class KnowledgeConflictJudge:
         return {"policy": "manual", "winner": None,
                 "basis": "新近、置信、断言支持三项均无差异，无区分依据可依"}
 
-    def record(self, subjectLabel: str, predicateTermId: str) -> List[Dict[str, Any]]:
+    def record(self, subjectLabel: str, predicateTermId: str,
+               tenantId: str = "default") -> List[Dict[str, Any]]:
         """检测并成账；可自动裁决的顺手取代败方。重复检测同一组成员不再开新账。"""
         recorded: List[Dict[str, Any]] = []
-        for conflict in self.detect(subjectLabel, predicateTermId):
+        for conflict in self.detect(subjectLabel, predicateTermId, tenantId):
             members = self._store.factsByIds(conflict["member_fact_ids"])
             decision = self.decide(members)
             status = "auto_resolved" if decision["winner"] else "pending"
@@ -154,6 +156,7 @@ class KnowledgeConflictJudge:
                 policyBasis=decision["basis"],
                 status=status,
                 winnerFactId=decision["winner"],
+                tenantId=tenantId,
             )
             if conflictId is None:
                 continue

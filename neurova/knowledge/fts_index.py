@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS knowledge_fts_docs (
     agent_id TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'private',
     owner_user_id TEXT NOT NULL DEFAULT '',
+    tenant_id TEXT NOT NULL DEFAULT 'default',
     shared_with_json TEXT NOT NULL DEFAULT '[]',
     category TEXT NOT NULL DEFAULT '',
     tags_json TEXT NOT NULL DEFAULT '[]',
@@ -59,6 +60,15 @@ class KnowledgeFtsIndex:
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
+            # 旧库补列：executescript 的 CREATE IF NOT EXISTS 不会给已存在的表加列
+            columns = {
+                row[1]
+                for row in self._conn.execute("PRAGMA table_info(knowledge_fts_docs)").fetchall()
+            }
+            if "tenant_id" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE knowledge_fts_docs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
 
     def close(self) -> None:
         with self._lock:
@@ -66,11 +76,12 @@ class KnowledgeFtsIndex:
 
     @staticmethod
     def _fingerprint(item: Dict[str, Any]) -> str:
-        return "%s:%d:%s:%s" % (
+        return "%s:%d:%s:%s:%s" % (
             item.get("updated_at", 0),
             len(str(item.get("content") or "")),
             item.get("lifecycle_status", "active"),
             item.get("valid_until") or "",
+            item.get("tenant_id") or "default",
         )
 
     def _deleteDoc(self, docId: str) -> None:
@@ -94,6 +105,7 @@ class KnowledgeFtsIndex:
         if row is not None and row["fingerprint"] == fingerprint:
             return False
         visibility = str(item.get("visibility") or "private")
+        tenant = str(item.get("tenant_id") or "default")
         shared = json.dumps(item.get("shared_with") or [], ensure_ascii=False)
         tags = json.dumps(item.get("tags") or [], ensure_ascii=False)
         tokens = _tokens(build_index_content(
@@ -104,21 +116,22 @@ class KnowledgeFtsIndex:
             self._conn.execute("DELETE FROM knowledge_fts WHERE rowid = ?", (rowid,))
             self._conn.execute(
                 "UPDATE knowledge_fts_docs SET knowledge_id=?, agent_id=?, visibility=?,"
-                " owner_user_id=?, shared_with_json=?, category=?, tags_json=?, source=?,"
-                " updated_at=?, lifecycle_status=?, valid_until=?, fingerprint=? WHERE rowid=?",
-                (kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), shared,
-                 str(item.get("category") or ""), tags, str(item.get("source") or ""),
+                " owner_user_id=?, tenant_id=?, shared_with_json=?, category=?, tags_json=?,"
+                " source=?, updated_at=?, lifecycle_status=?, valid_until=?, fingerprint=?"
+                " WHERE rowid=?",
+                (kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), tenant,
+                 shared, str(item.get("category") or ""), tags, str(item.get("source") or ""),
                  float(item.get("updated_at") or 0), str(item.get("lifecycle_status") or "active"),
                  str(item.get("valid_until") or ""), fingerprint, rowid),
             )
         else:
             cur = self._conn.execute(
                 "INSERT INTO knowledge_fts_docs (doc_id, knowledge_id, agent_id, visibility,"
-                " owner_user_id, shared_with_json, category, tags_json, source, updated_at,"
-                " lifecycle_status, valid_until, fingerprint)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (kid, kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), shared,
-                 str(item.get("category") or ""), tags, str(item.get("source") or ""),
+                " owner_user_id, tenant_id, shared_with_json, category, tags_json, source,"
+                " updated_at, lifecycle_status, valid_until, fingerprint)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (kid, kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), tenant,
+                 shared, str(item.get("category") or ""), tags, str(item.get("source") or ""),
                  float(item.get("updated_at") or 0), str(item.get("lifecycle_status") or "active"),
                  str(item.get("valid_until") or ""), fingerprint),
             )
@@ -179,6 +192,9 @@ class KnowledgeFtsIndex:
         params: List[Any] = [match, _nowIso()]
         user = user or {}
         uid = str(user.get("user_id") or "")
+        tenant = str(user.get("tenant_id") or "default")
+        clauses.append("d.tenant_id = ?")
+        params.append(tenant)
         admin = str(user.get("role") or "") == "admin"
         if not admin:
             if scope == "public":

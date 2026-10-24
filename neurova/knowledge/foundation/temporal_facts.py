@@ -26,7 +26,8 @@ _MIN_LABEL_CHARS = 2
 
 
 def subjectsMentionedIn(store: Any, query: str,
-                        agentId: Optional[str] = None) -> List[str]:
+                        agentId: Optional[str] = None,
+                        tenantId: Optional[str] = None) -> List[str]:
     """"这条查询在问谁"的唯一判据：主体名或别名被查询文本包含。
 
     时效读面与多跳走查共用它——两条分支对"问的是谁"给出不同答案，
@@ -41,6 +42,9 @@ def subjectsMentionedIn(store: Any, query: str,
     if agentId:
         where.append("agent_id = ?")
         params.append(agentId)
+    if tenantId is not None:
+        where.append("tenant_id = ?")
+        params.append(str(tenantId or "default"))
     with store._lock:
         rows = store._conn.execute(
             "SELECT subject_key, canonical_label, aliases_json FROM knowledge_subjects"
@@ -75,22 +79,24 @@ class TemporalFactReader:
         return self.forQuery(query, maxFacts=max_facts, windowDays=time_window_days)
 
     def forQuery(self, query: str, maxFacts: int = 10, windowDays: int = 30,
-                 now: Optional[datetime.datetime] = None) -> List[Dict[str, Any]]:
+                 now: Optional[datetime.datetime] = None,
+                 tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
         text = (query or "").strip()
         if not text or maxFacts <= 0:
             return []
         moment = (now or datetime.datetime.now(_UTC)).astimezone(_UTC)
         windowStart = moment - datetime.timedelta(days=max(int(windowDays or 0), 0))
-        keys = subjectsMentionedIn(self._store, text, self._agentId)
+        keys = subjectsMentionedIn(self._store, text, self._agentId, tenantId)
         if not keys:
             return []
-        rows = self._effectiveFacts(keys, windowStart, moment, maxFacts)
+        rows = self._effectiveFacts(keys, windowStart, moment, maxFacts, tenantId)
         return [self._asFactDict(row) for row in rows]
 
     # ── 内部 ──────────────────────────────────────────────────
 
     def _effectiveFacts(self, keys: List[str], windowStart: datetime.datetime,
-                        now: datetime.datetime, limit: int) -> List[Any]:
+                        now: datetime.datetime, limit: int,
+                        tenantId: Optional[str] = None) -> List[Any]:
         placeholders = ",".join("?" * len(keys))
         # 生效时刻既要有下界也要有上界：只判"不早于窗口起点"的话，一条还没到生效
         # 时刻的说法照样此刻进上下文——`valid_from` 此前恒 NULL 所以这条上界一直空转，
@@ -109,6 +115,9 @@ class TemporalFactReader:
         if self._agentId:
             clauses.insert(0, "agent_id = ?")
             params = [self._agentId] + params
+        if tenantId is not None:
+            clauses.insert(0, "tenant_id = ?")
+            params = [str(tenantId or "default")] + params
         with self._store._lock:
             return self._store._conn.execute(
                 "SELECT * FROM knowledge_facts WHERE %s"
@@ -128,6 +137,7 @@ class TemporalFactReader:
             "confidence": fact["confidence"],
             "valid_from": str(fact.get("valid_from") or fact.get("recorded_at") or ""),
             "source": self._mediumOf(fact["fact_id"]),
+            "tenant_id": str(fact.get("tenant_id") or "default"),
         }
 
     def _mediumOf(self, factId: str) -> str:

@@ -44,6 +44,11 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: `python <gate> --help` 的预算唯一出处（此前无 `timeout=`＝无界等待）。取低于全局 30s 的
+#: 20s：先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙——后者会把
+#: 整场跑测连报告一起带走（§6-402 批 K 口径）。
+PROBE_WALL_S = 20
 GATE = PROJECT_ROOT / "scripts" / "ci" / "pip_audit_gate.py"
 CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -132,6 +137,7 @@ class TestCommandContract:
         proc = subprocess.run(
             [sys.executable, str(GATE), "--help"],
             capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+            timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
         match = re.search(r"--timeout[^\n]*默认 (\d+)", proc.stdout)

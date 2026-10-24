@@ -62,6 +62,7 @@ class FeishuAdapter(AuthMixin, MediaMixin, ChannelAdapter):
     # 飞书服务台原生事件：ticket.stage 1(机器人)→2(人工) 即人工接管开始；
     # stage=2 且 status 进入关闭态（50/51/52）即结束。无 Helpdesk 订阅时不产生事件。
     humanTakeoverEvents = True
+    humanTakeoverReason = ""
 
     _HELPDESK_STAGE_ROBOT = 1
     _HELPDESK_STAGE_HUMAN = 2

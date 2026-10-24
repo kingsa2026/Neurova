@@ -63,6 +63,13 @@ _PROBE = (
     "      if m.startswith('neurova.agent.protocols') or m.startswith('neurova.agent.matrix'))))\n"
 )
 
+#: 子进程预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出，两处不许各写一个数）。
+#: 120s 是给**失败那一路**留的：判据要防的正是"门面把整座岛重新拖上启动路径"，那种时候
+#: 子进程真会去 import 协议族＋矩阵一大片模块；而 120s 子墙配缺省 30s 父墙时，先到点的
+#: 是父墙——Windows 侧 thread 法终止整个进程，得到的是一条"整场跑测没了"而不是这条断言。
+ISLAND_PROBE_WALL_S = 120
+pytestmark = pytest.mark.timeout(ISLAND_PROBE_WALL_S + 60)
+
 
 def _loadedProtocolModules():
     """在**干净子进程**里只 import 活的 `acp_runtime`，交出落进 `sys.modules` 的协议族模块名。
@@ -73,7 +80,7 @@ def _loadedProtocolModules():
     proc = subprocess.run(
         [sys.executable, "-c", _PROBE, str(PROJECT_ROOT)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        cwd=str(PROJECT_ROOT), timeout=120,
+        cwd=str(PROJECT_ROOT), timeout=ISLAND_PROBE_WALL_S,
         env=dict(os.environ, PYTHONIOENCODING="utf-8"),
     )
     tail = (proc.stdout or "").strip().splitlines()

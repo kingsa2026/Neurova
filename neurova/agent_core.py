@@ -136,6 +136,10 @@ class AgentLLMClient:
             # 向后兼容：没有传入 llm_config 时使用默认值
             from neurova.llm_client import LLMConfig
             self.config = LLMConfig(model=model)
+        # 门面不持提供方事实：声明按 provider 存、按本轮请求解析（`requestCompatCandidates`）。
+        # 留着 dataclass 默认值，"没人声明"就跟"这台网关声明为否"长得一模一样（§6-403 抓的
+        # 就是这个形状）。清空后新读法只能拿到 None，而 None 在判据两侧都是"没资格判死"那一支。
+        self.config.compat = None
 
     def _get_client(self):
         from neurova.llm.multi_model_client import get_multi_model_client
@@ -162,6 +166,14 @@ class AgentLLMClient:
             return override[1], None
 
         return (self.model if self.model != "auto" else None), self.provider_id or None
+
+    def requestCompatCandidates(self, model=None, provider_id=None) -> list:
+        """本轮请求会打到的 provider 声明链——门面不持声明，只把"本轮是谁"传下去。"""
+        from neurova.llm.provider_compat import resolveCallCompatCandidates
+
+        if model is None and provider_id is None:
+            model, provider_id = self._resolve_call_model({})
+        return resolveCallCompatCandidates(self._get_client(), model, provider_id)
 
     async def chat(self, messages, **kwargs):
         call_model, call_provider = self._resolve_call_model(kwargs)

@@ -23,6 +23,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+#: `git check-ignore` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s
+#: 的 20s——先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙
+#: 把整场跑测一起打死（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "muscle_memory_rearchive.py"
 
 
@@ -94,6 +99,7 @@ class TestLedgerIsNotIgnored:
         result = subprocess.run(
             ["git", "check-ignore", "-q", ledger_rel],
             cwd=REPO_ROOT, capture_output=True,
+            timeout=GIT_WALL_S,
         )
         assert result.returncode != 0, f"留底路径被 .gitignore 忽略：{ledger_rel}"
 

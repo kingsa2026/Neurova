@@ -154,3 +154,39 @@ class TestExtractToGraph:
                                          graph_manager=graph, factStore=store)
         assert ids == []
         assert graph._nodes == {}
+
+
+class TestTenantProjectionBoundary:
+    def test_non_default_tenant_admits_facts_but_skips_shared_projection(
+        self, repo, graph, registry, store
+    ):
+        """投影没有 tenant 维时不得把租户内容铺进同 agent 的共享图。"""
+        item = repo.create_knowledge(
+            "agent-a", title="租户图谱", content="RAG 依赖 BM25 与向量检索",
+            owner_user_id="1", tenant_id="t1",
+        )
+
+        ids = _extract(item, repo, graph, registry, store)
+
+        assert ids == []
+        assert not graph._nodes and not graph._edges
+        assert store.searchableFacts(agentId="agent-a", tenantId="t1")
+        assert store.searchableFacts(agentId="agent-a", tenantId="default") == []
+
+
+def test_tenant_graph_manager_receives_projection(repo, registry, store):
+    from neurova.cognitive_layers.knowledge_graph.manager import (
+        get_agent_knowledge_graph_manager,
+    )
+
+    item = repo.create_knowledge(
+        "agent-a", title="租户图谱", content="RAG 依赖 BM25 与向量检索",
+        owner_user_id="1", tenant_id="t1",
+    )
+    tenantGraph = get_agent_knowledge_graph_manager("agent-a", tenant_id="t1")
+    defaultGraph = get_agent_knowledge_graph_manager("agent-a")
+
+    ids = _extract(item, repo, tenantGraph, registry, store)
+
+    assert ids and tenantGraph._nodes
+    assert not defaultGraph._nodes

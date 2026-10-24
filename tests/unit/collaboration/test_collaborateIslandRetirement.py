@@ -49,6 +49,13 @@ _PROBE = (
     "print(json.dumps(sorted(m for m in sys.modules if m.startswith('neurova.collaborate'))))\n"
 )
 
+#: 子进程预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。120s 留给**失败那一路**——
+#: 本判据防的就是"退役岛被重新拖上启动路径"，那时子进程真会 import 整座 `neurova.collaborate`；
+#: 而 120s 子墙配缺省 30s 父墙时先到点的是父墙，Windows thread 法终止整个进程，
+#: 得到的是"整场跑测没了"而不是这条断言。
+ISLAND_PROBE_WALL_S = 120
+pytestmark = pytest.mark.timeout(ISLAND_PROBE_WALL_S + 60)
+
 
 def _loadedCollaborateModules():
     """在**干净子进程**里只 import scheduler，交出落进 `sys.modules` 的 collaborate 模块名。
@@ -59,7 +66,7 @@ def _loadedCollaborateModules():
     proc = subprocess.run(
         [sys.executable, "-c", _PROBE, str(PROJECT_ROOT)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        cwd=str(PROJECT_ROOT), timeout=120,
+        cwd=str(PROJECT_ROOT), timeout=ISLAND_PROBE_WALL_S,
         env=dict(os.environ, PYTHONIOENCODING="utf-8"),
     )
     tail = (proc.stdout or "").strip().splitlines()

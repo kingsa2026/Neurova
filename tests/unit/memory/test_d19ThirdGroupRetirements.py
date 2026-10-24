@@ -45,14 +45,12 @@ def test_retiredModulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
-    # 面自证：本格断的是「零导入」，而零导入既可能是「真没人导入」也可能是「根写窄了扫了个空」。
-    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
-    assert scanned > 2000, f"仓内 .py 扫描面现读 {scanned}，低于下限＝根写错了本格恒绿"
-
+    # 面自证（形态 404）：这条判据的"零 importer"要与"没扫到"可区分——枚举面先量一次。
+    # 现算全仓 5660 个 .py；根少指一层会掉到 tests 2483／neurova 1024，都低于这条线。
+    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert enumerated >= 3000, (
+        "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % enumerated)
     offenders = {}
-    scanned = len(ast_scan.filesUnder(REPO_ROOT))
-    # 面自证：先证扫描面非空，再谈「零导入」（根被改窄时零命中与干净同形）。
-    assert scanned > 500, f"扫描面现读 {scanned} 个文件——REPO_ROOT 指错时本判据恒绿"
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.channels.{name}")
