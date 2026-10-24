@@ -1665,15 +1665,23 @@ class KnowledgeFactStore:
         )
         return versionNo
 
-    def history(self, factId: str, limit: int = 200) -> List[Dict[str, Any]]:
-        """事实版本历史，最新在前。事实不存在时抛 LookupError（空历史不等于没事实）。"""
+    def history(
+        self, factId: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """事实版本历史，最新在前。
+
+        **默认返回全量**：历史是溯源事实源，不靠默认分页截断。调用方要分页时
+        显式给 limit/offset；事实不存在时抛 LookupError（空历史不等于没事实）。
+        """
+        params: List[Any] = [factId]
+        sql = ("SELECT * FROM knowledge_fact_versions WHERE fact_id = ?"
+               " ORDER BY version_no DESC")
+        if limit is not None and int(limit) > 0:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), max(0, int(offset))])
         with self._lock:
             self._requireFact(factId)
-            rows = self._conn.execute(
-                "SELECT * FROM knowledge_fact_versions WHERE fact_id = ?"
-                " ORDER BY version_no DESC LIMIT ?",
-                (factId, max(1, int(limit))),
-            ).fetchall()
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
         out = []
         for row in rows:
             entry = dict(row)
@@ -1684,6 +1692,14 @@ class KnowledgeFactStore:
                 entry["snapshot"] = {}
             out.append(entry)
         return out
+
+    def historyCount(self, factId: str) -> int:
+        with self._lock:
+            self._requireFact(factId)
+            return int(self._conn.execute(
+                "SELECT COUNT(*) FROM knowledge_fact_versions WHERE fact_id = ?",
+                (factId,),
+            ).fetchone()[0])
 
     def rollback(
         self, factId: str, versionNo: int, *, operator: str, reason: str
