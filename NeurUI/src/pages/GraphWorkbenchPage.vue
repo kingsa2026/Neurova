@@ -384,7 +384,9 @@ const flowEdges = computed(() =>
     source: e.source,
     target: e.target,
     label: e.relation,
-    animated: false,
+    // 流光动效：animated 开启 VueFlow 的流动虚线，视觉层由样式定制
+    // （底层半透明实线 + 上层亮色短划线循环流动，见 .workbench-flow 样式）。
+    animated: true,
   })))
 
 const relationTerms = computed(() =>
@@ -701,6 +703,36 @@ onMounted(() => {
 
 .workbench-flow :deep(.wb-node-selected) {
   box-shadow: 0 0 0 3px var(--nr-primary);
+}
+
+/* 连接线：底层半透明实线表存在，流光层循环流动——科技感不抢节点主体。 */
+.workbench-flow :deep(.vue-flow__edge .vue-flow__edge-path) {
+  stroke: rgba(129, 140, 248, 0.35);
+  stroke-width: 1.5;
+}
+
+.workbench-flow :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
+  stroke: #a5b4fc;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 3 15;
+  stroke-dashoffset: 0;
+  animation: wb-flow-line 1.1s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(129, 140, 248, 0.9));
+}
+
+/* 位移一个完整 dash 周期（3+15=18），循环无缝。 */
+@keyframes wb-flow-line {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-flow :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
+    animation: none;
+    stroke: rgba(165, 180, 252, 0.6);
+  }
 }
 
 .explorer3d-embed {
