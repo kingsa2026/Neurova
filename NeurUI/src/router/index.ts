@@ -108,6 +108,12 @@ const routes: RouteRecordRaw[] = [
         props: true,
       },
       {
+        path: 'agent/:agentId/graph-workbench',
+        name: 'AgentGraphWorkbench',
+        component: () => import('@/pages/GraphWorkbenchPage.vue'),
+        props: true,
+      },
+      {
         path: 'agent/:agentId/metacognition',
         name: 'AgentMetacognition',
         component: () => import('@/pages/MetacognitionPage.vue'),
