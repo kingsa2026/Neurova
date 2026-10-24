@@ -26,6 +26,10 @@ import typing
 
 from neurova.core.logger import get_logger
 
+# 错误文案脱敏改接内容级敏感信息单源（§6-413 批 P-5）：只投值形状（`ERROR_TEXT_RULES`），
+# 引擎与规则子集都只有一份。
+from neurova.security.sensitive_info import ERROR_TEXT_RULES, sanitizeSensitive
+
 logger = get_logger(__name__)
 
 
@@ -169,9 +173,6 @@ _MESSAGE_PATTERNS: list = [
     (re.compile(r"\b(40[024]\b|bad.?request|not.?found|invalid.?model|invalid.?request|unsupported)", re.I), ErrorCategory.BAD_REQUEST),
 ]
 
-# 鉴权类消息中的 key 片段脱敏（sk- 前缀等典型形态）
-_KEY_PATTERN = re.compile(r"\b(sk-[A-Za-z0-9_-]{8,}|nvk_[A-Za-z0-9_-]{8,}|Bearer\s+\S+)")
-
 
 def _classify_by_status(status_code: typing.Optional[int]) -> typing.Optional[ErrorCategory]:
     if not isinstance(status_code, int):
@@ -197,7 +198,13 @@ def _classify_by_message(message: str) -> typing.Optional[ErrorCategory]:
 
 
 def _mask_secrets(text: str) -> str:
-    return _KEY_PATTERN.sub("[REDACTED]", text or "")
+    """错误文案脱敏：只投值形状（`ERROR_TEXT_RULES`），不投手机号/IP 那类 PII。
+
+    运维文案里出现手机号/IP 是正常信息，整表糊上去会把可诊断性一起脱掉——投影只挑这条链上
+    该看的凭据形状（`sk-…`／`nvk_…`／`Bearer …`／`ghp_…`）。引擎与规则子集都在单源
+    （`neurova/security/sensitive_info.py`），出口词汇仍是 `[REDACTED]`。
+    """
+    return sanitizeSensitive(text or "", ERROR_TEXT_RULES, "[REDACTED]")
 
 
 def normalize_provider_error(exc: BaseException) -> ProviderError:
