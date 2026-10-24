@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'تصفية',
+    workbenchFocus: 'معرف العقدة البؤرية',
+    workbenchHops: 'عدد القفزات',
+    workbenchLat: 'خط العرض',
+    workbenchLon: 'خط الطول',
+    workbenchNoGeoItems: 'لا توجد إدخالات بإحداثيات في النطاق المرئي',
+    workbenchRadius: 'نصف القطر كم',
+    workbenchSpatial: 'المكاني',
+    workbenchView2d: 'عرض ثنائي الأبعاد',
+    workbenchView3d: 'عرض ثلاثي الأبعاد',
     workbenchTitle: 'منصة الرسم البياني',
     workbenchTenantScoped: 'أنطولوجيا المستأجر',
     workbenchTruncatedHint: 'تم اقتطاع الجزء؛ الإجمالي {total} عقدة',

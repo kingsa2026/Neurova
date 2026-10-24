@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'फ़िल्टर',
+    workbenchFocus: 'फोकस नोड आईडी',
+    workbenchHops: 'हॉप्स',
+    workbenchLat: 'अक्षांश',
+    workbenchLon: 'देशांतर',
+    workbenchNoGeoItems: 'दृश्य क्षेत्र में कोई जियो-टैग प्रविष्टि नहीं',
+    workbenchRadius: 'त्रिज्या किमी',
+    workbenchSpatial: 'स्थानिक',
+    workbenchView2d: '2D दृश्य',
+    workbenchView3d: '3D दृश्य',
     workbenchTitle: 'ग्राफ़ वर्कबेंच',
     workbenchTenantScoped: 'टेनेंट ऑन्टोलॉजी',
     workbenchTruncatedHint: 'सबग्राफ़ कटा; कुल {total} नोड',

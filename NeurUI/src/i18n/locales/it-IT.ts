@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'Filtra',
+    workbenchFocus: 'ID del nodo focale',
+    workbenchHops: 'Salti',
+    workbenchLat: 'Latitudine',
+    workbenchLon: 'Longitudine',
+    workbenchNoGeoItems: 'Nessuna voce geolocalizzata nell\'ambito visibile',
+    workbenchRadius: 'Raggio km',
+    workbenchSpatial: 'Spaziale',
+    workbenchView2d: 'Vista 2D',
+    workbenchView3d: 'Vista 3D',
     workbenchTitle: 'Banco di lavoro grafo',
     workbenchTenantScoped: 'ontologia del tenant',
     workbenchTruncatedHint: 'Sottografo troncato; totale reale {total} nodi',

@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: '필터',
+    workbenchFocus: '포커스 노드 ID',
+    workbenchHops: '홉 수',
+    workbenchLat: '위도',
+    workbenchLon: '경도',
+    workbenchNoGeoItems: '보이는 범위에 좌표가 있는 항목이 없습니다',
+    workbenchRadius: '반경 km',
+    workbenchSpatial: '공간',
+    workbenchView2d: '2D 보기',
+    workbenchView3d: '3D 보기',
     workbenchTitle: '그래프 워크벤치',
     workbenchTenantScoped: '테넌트 온톨로지',
     workbenchTruncatedHint: '부분 그래프가 잘렸습니다. 실제 총 {total} 노드',

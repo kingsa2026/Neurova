@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'Filtrer',
+    workbenchFocus: 'ID du nœud focal',
+    workbenchHops: 'Sauts',
+    workbenchLat: 'Latitude',
+    workbenchLon: 'Longitude',
+    workbenchNoGeoItems: 'Aucune entrée géolocalisée dans le périmètre visible',
+    workbenchRadius: 'Rayon km',
+    workbenchSpatial: 'Spatial',
+    workbenchView2d: 'Vue 2D',
+    workbenchView3d: 'Vue 3D',
     workbenchTitle: 'Atelier de graphe',
     workbenchTenantScoped: 'ontologie de tenant',
     workbenchTruncatedHint: 'Sous-graphe tronqué ; total réel {total} nœuds',
