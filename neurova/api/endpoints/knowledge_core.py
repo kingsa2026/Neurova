@@ -196,6 +196,8 @@ async def search_knowledge(
         ocr_used=body.ocr_used,
         page_min=body.page_min,
         updated_after=body.updated_after,
+        geo_radius=body.geo_radius,
+        geo_bbox=body.geo_bbox,
     )
     return [item_response(i) for i in results]
 
